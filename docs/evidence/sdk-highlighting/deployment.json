@@ -1,0 +1,8 @@
+{
+  "url": "http://localhost:18380/data",
+  "health": {
+    "status": "ok"
+  },
+  "matching_assets": 22,
+  "latest_frontend_matches_build": true
+}

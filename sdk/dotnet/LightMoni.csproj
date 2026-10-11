@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <PackageId>LightMoni.Sdk</PackageId><Version>0.1.0</Version>
+    <Description>Bounded OTLP/HTTP telemetry for LightMoni</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup><None Include="README.md" Pack="true" PackagePath="/" /></ItemGroup>
+</Project>

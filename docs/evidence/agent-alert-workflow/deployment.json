@@ -1,0 +1,8 @@
+{
+  "base_url": "http://127.0.0.1:18380",
+  "health": {
+    "status": "ok"
+  },
+  "verified_assets": 22,
+  "latest_frontend_matches_build": true
+}

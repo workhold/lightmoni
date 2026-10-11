@@ -1,0 +1,22 @@
+[Unit]
+Description=LightMoni telemetry Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lightmoni-agent
+Group=lightmoni-agent
+ExecStart=/usr/local/bin/lightmoni-agent run --config /etc/lightmoni-agent/config.json
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/var/lib/lightmoni-agent
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

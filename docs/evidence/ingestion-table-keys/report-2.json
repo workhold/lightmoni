@@ -1,0 +1,16 @@
+{
+  "run": "2",
+  "checks": [
+    "SDK 和 Agent 独立 Tab，切换后只显示所选接入方式",
+    "创建必填 table，拒绝通配符，返回白名单且列表不泄露明文",
+    "真实上报入口允许 web，logs/metrics/traces 越权 host 均返回 403",
+    "保存失败保留输入，重试保存和刷新回读成功；权限修改拒绝已确认 web 批次",
+    "启用/禁用保留 table 白名单，禁用后上报返回 401",
+    "全表 Key 无需白名单，可写未来 table；启停和刷新保留全表权限，切回白名单立即拒绝其他 table",
+    "Agent 接入也可显式创建允许所有 table 的 Key",
+    "Agent Key 默认 host/probe，可添加业务 table；下载私有配置，切换 Tab 清除明文",
+    "1440/750/390 视口无页面横向溢出，无浏览器运行时异常"
+  ],
+  "errors": [],
+  "backend": "真实 Auth/SQLite/Ingest；ClickHouse 写入替身"
+}

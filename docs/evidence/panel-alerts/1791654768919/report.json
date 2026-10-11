@@ -1,0 +1,46 @@
+{
+  "dashboard_id": "df552960-2c54-401d-9b43-f95dfcf7ee03",
+  "rule_ids": [
+    "a28e28f6ee6e05bba6ba328c1e98600e",
+    "349ca9609399a84a4cb27cbb2cbf7cbc",
+    "c57b53d1f5cc9a662a4e11227537e16a"
+  ],
+  "checks": [
+    "直接菜单打开图表告警，无关联规则选择器",
+    "当前曲线高于/低于/没有打点直接配置",
+    "SQL 实查 SDK 数据，最新值和点数正确",
+    "直接告警组覆盖数据表默认组，真实发送仅到本地测试接收器",
+    "保存/刷新/重新打开保持所有条件",
+    "修改图表查询后告警查询同步更新",
+    "保存失败保留输入且阻止丢失草稿",
+    "实际断点触发与恢复事件",
+    "390px 设置抽屉可配置告警组"
+  ],
+  "page_errors": [],
+  "loopback_receipts": [
+    {
+      "path": "/chart",
+      "kind": "firing"
+    },
+    {
+      "path": "/chart",
+      "kind": "firing"
+    },
+    {
+      "path": "/chart",
+      "kind": "firing"
+    },
+    {
+      "path": "/chart",
+      "kind": "firing"
+    },
+    {
+      "path": "/chart",
+      "kind": "firing"
+    },
+    {
+      "path": "/chart",
+      "kind": "resolved"
+    }
+  ]
+}

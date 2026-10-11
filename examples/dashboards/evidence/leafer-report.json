@@ -1,0 +1,93 @@
+{
+  "dashboard_id": "ed5ce351-be0b-48fc-abb6-16d258c9313c",
+  "checked_at": "2026-10-10T02:43:50.893Z",
+  "real_panels": 8,
+  "saved_grid": {
+    "x": 6,
+    "y": 2,
+    "w": 4,
+    "h": 8
+  },
+  "metrics": [
+    {
+      "label": "desktop-drag-held",
+      "charts_same": true,
+      "panels_same": true,
+      "removed": 0,
+      "commits": 0,
+      "frames": 68,
+      "median_ms": 16.699999999999818,
+      "p95_ms": 16.799999999999727,
+      "gesture": "move",
+      "preview": "6 × 6 · 599 × 290 px · 4 个面板下移",
+      "queries": 0
+    },
+    {
+      "label": "desktop-drag-drop",
+      "charts_same": true,
+      "panels_same": true,
+      "removed": 0,
+      "commits": 1,
+      "frames": 74,
+      "median_ms": 16.699999999999818,
+      "p95_ms": 16.799999999999727,
+      "gesture": "idle",
+      "preview": "6 × 6 · 599 × 290 px · 4 个面板下移",
+      "queries": 0
+    },
+    {
+      "label": "desktop-resize-held",
+      "charts_same": true,
+      "panels_same": true,
+      "removed": 0,
+      "commits": 0,
+      "frames": 52,
+      "median_ms": 16.699999999999818,
+      "p95_ms": 16.799999999999727,
+      "gesture": "resize",
+      "preview": "4 × 8 · 398 × 390 px · 4 个面板下移",
+      "queries": 0
+    },
+    {
+      "label": "escape-held",
+      "charts_same": true,
+      "panels_same": true,
+      "removed": 0,
+      "commits": 0,
+      "frames": 50,
+      "median_ms": 16.699999999999818,
+      "p95_ms": 16.700000000000045,
+      "gesture": "move",
+      "preview": "4 × 8 · 396 × 390 px · 7 个面板下移",
+      "queries": 0
+    },
+    {
+      "label": "751-drag-held",
+      "charts_same": true,
+      "panels_same": true,
+      "removed": 0,
+      "commits": 0,
+      "frames": 50,
+      "median_ms": 16.699999999999818,
+      "p95_ms": 16.700000000000273,
+      "gesture": "move",
+      "preview": "4 × 8 · 218 × 390 px · 7 个面板下移",
+      "queries": 0
+    },
+    {
+      "label": "751-drag-drop",
+      "charts_same": true,
+      "panels_same": true,
+      "removed": 0,
+      "commits": 1,
+      "frames": 52,
+      "median_ms": 16.699999999999818,
+      "p95_ms": 16.700000000000273,
+      "gesture": "idle",
+      "preview": "4 × 8 · 218 × 390 px · 7 个面板下移",
+      "queries": 0
+    }
+  ],
+  "page_errors": [],
+  "native_dialogs": 0
+}

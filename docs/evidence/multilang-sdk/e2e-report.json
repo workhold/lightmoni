@@ -1,0 +1,56 @@
+{
+  "languages": [
+    "go",
+    "node",
+    "python",
+    "java",
+    "dotnet",
+    "php",
+    "ruby",
+    "rust"
+  ],
+  "path": "SDK -> Agent SQLite -> service -> ClickHouse",
+  "results": {
+    "counts": {
+      "conformance-rust": "20",
+      "conformance-php": "20",
+      "conformance-ruby": "20",
+      "conformance-node": "20",
+      "conformance-python": "20",
+      "conformance-dotnet": "20",
+      "conformance-java": "20",
+      "conformance-go": "20"
+    },
+    "links": {
+      "conformance-rust": "20",
+      "conformance-php": "20",
+      "conformance-ruby": "20",
+      "conformance-node": "20",
+      "conformance-python": "20",
+      "conformance-dotnet": "20",
+      "conformance-java": "20",
+      "conformance-go": "20"
+    },
+    "histogram": {
+      "conformance-rust": "20",
+      "conformance-php": "20",
+      "conformance-ruby": "20",
+      "conformance-node": "20",
+      "conformance-python": "20",
+      "conformance-dotnet": "20",
+      "conformance-java": "20",
+      "conformance-go": "20"
+    },
+    "gauge": {
+      "conformance-rust": "3",
+      "conformance-php": "3",
+      "conformance-ruby": "3",
+      "conformance-node": "3",
+      "conformance-python": "3",
+      "conformance-dotnet": "3",
+      "conformance-java": "3",
+      "conformance-go": "3"
+    }
+  },
+  "packages": 8
+}

@@ -1,0 +1,13 @@
+[
+  {
+    "file": "page-@2x.png",
+    "state": null,
+    "size": "1440x960",
+    "zoom": 2,
+    "issues": [
+      "加载错误：Failed to load resource: the server responded with a status of 404 (Not Found) http://localhost:15174/favicon.ico",
+      "加载错误：Failed to load resource: the server responded with a status of 401 (Unauthorized) http://localhost:15174/api/v1/auth/me",
+      "加载错误：Failed to load resource: the server responded with a status of 401 (Unauthorized) http://localhost:15174/api/v1/auth/me"
+    ]
+  }
+]

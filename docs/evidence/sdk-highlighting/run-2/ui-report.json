@@ -1,0 +1,25 @@
+{
+  "languages": [
+    "typescript",
+    "go",
+    "python",
+    "java",
+    "dotnet",
+    "php",
+    "ruby",
+    "rust"
+  ],
+  "widths": [
+    1280,
+    750,
+    390
+  ],
+  "downloads": 8,
+  "highlighted_languages": 8,
+  "clipboard_samples": 8,
+  "themes": [
+    "dark",
+    "light"
+  ],
+  "errors": []
+}

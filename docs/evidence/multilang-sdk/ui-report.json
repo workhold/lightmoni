@@ -1,0 +1,19 @@
+{
+  "languages": [
+    "typescript",
+    "go",
+    "python",
+    "java",
+    "dotnet",
+    "php",
+    "ruby",
+    "rust"
+  ],
+  "widths": [
+    1280,
+    750,
+    390
+  ],
+  "downloads": 8,
+  "errors": []
+}

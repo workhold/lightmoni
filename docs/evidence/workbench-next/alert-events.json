@@ -1,0 +1,538 @@
+{
+  "events": [
+    {
+      "id": "77809b73292e21c72a0ba2cd0d249d47",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 1,
+      "kind": "firing",
+      "episode": "89f5bf6c884ee3be673b69bce6f1c743",
+      "created_at": "2026-10-10T17:25:12.482481125Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "firing",
+        "health": "ok",
+        "value": "0.19612722985830988",
+        "since": "2026-10-10T17:25:12.482481125Z",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:25:12.482481125Z",
+        "last_success": "2026-10-10T17:25:12.482481125Z",
+        "last_notify": "2026-10-10T17:25:12.482481125Z",
+        "episode": "89f5bf6c884ee3be673b69bce6f1c743",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · firing\n数值 0.19612722985830988 · 阈值 gt 0.1\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:20:12.482481125Z, 2026-10-10T17:25:12.482481125Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:20:12.482481125Z",
+        "to": "2026-10-10T17:25:12.482481125Z"
+      }
+    },
+    {
+      "id": "06e910dea6bd056491c522180b642beb",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "firing",
+      "episode": "24457edab4b5f56352dc257a93201870",
+      "created_at": "2026-10-10T17:29:07.483782554Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "firing",
+        "health": "ok",
+        "value": "0.2043155605796018",
+        "since": "2026-10-10T17:29:07.483782554Z",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:29:07.483782554Z",
+        "last_success": "2026-10-10T17:29:07.483782554Z",
+        "last_notify": "2026-10-10T17:29:07.483782554Z",
+        "episode": "24457edab4b5f56352dc257a93201870",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · firing\n数值 0.2043155605796018 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:28:37.483782554Z, 2026-10-10T17:29:07.483782554Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:28:37.483782554Z",
+        "to": "2026-10-10T17:29:07.483782554Z"
+      }
+    },
+    {
+      "id": "f03193d30a3e0752954ca940660331ae",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "resolved",
+      "episode": "24457edab4b5f56352dc257a93201870",
+      "created_at": "2026-10-10T17:31:35.483826845Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "normal",
+        "health": "ok",
+        "value": "0.19682909463197493",
+        "since": "",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:31:35.483826845Z",
+        "last_success": "2026-10-10T17:31:35.483826845Z",
+        "last_notify": "2026-10-10T17:29:07.483782554Z",
+        "episode": "24457edab4b5f56352dc257a93201870",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · resolved\n数值 0.19682909463197493 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:31:05.483826845Z, 2026-10-10T17:31:35.483826845Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:31:05.483826845Z",
+        "to": "2026-10-10T17:31:35.483826845Z"
+      }
+    },
+    {
+      "id": "2ae07bda8afdca4b2c7c29d6a28d5542",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "firing",
+      "episode": "9441b73bd9442e4ab338c610fe0596a1",
+      "created_at": "2026-10-10T17:38:41.351502125Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "firing",
+        "health": "ok",
+        "value": "0.2541236760968917",
+        "since": "2026-10-10T17:38:41.351502125Z",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:38:41.351502125Z",
+        "last_success": "2026-10-10T17:38:41.351502125Z",
+        "last_notify": "2026-10-10T17:38:41.351502125Z",
+        "episode": "9441b73bd9442e4ab338c610fe0596a1",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · firing\n数值 0.2541236760968917 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:38:11.351502125Z, 2026-10-10T17:38:41.351502125Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:38:11.351502125Z",
+        "to": "2026-10-10T17:38:41.351502125Z"
+      }
+    },
+    {
+      "id": "c0d47b7612a95d5d7d6858328ee01054",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "resolved",
+      "episode": "9441b73bd9442e4ab338c610fe0596a1",
+      "created_at": "2026-10-10T17:39:22.353249505Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "normal",
+        "health": "ok",
+        "value": "0.1644125454682771",
+        "since": "",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:39:22.353249505Z",
+        "last_success": "2026-10-10T17:39:22.353249505Z",
+        "last_notify": "2026-10-10T17:38:41.351502125Z",
+        "episode": "9441b73bd9442e4ab338c610fe0596a1",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · resolved\n数值 0.1644125454682771 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:38:52.353249505Z, 2026-10-10T17:39:22.353249505Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:38:52.353249505Z",
+        "to": "2026-10-10T17:39:22.353249505Z"
+      }
+    },
+    {
+      "id": "f06c008e1affbc14adb874626eedab11",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "firing",
+      "episode": "f6a6913d88b0e3d4c9fdb99e8f53edf8",
+      "created_at": "2026-10-10T17:41:09.351633513Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "firing",
+        "health": "ok",
+        "value": "0.24110739355865038",
+        "since": "2026-10-10T17:41:09.351633513Z",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:41:09.351633513Z",
+        "last_success": "2026-10-10T17:41:09.351633513Z",
+        "last_notify": "2026-10-10T17:41:09.351633513Z",
+        "episode": "f6a6913d88b0e3d4c9fdb99e8f53edf8",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · firing\n数值 0.24110739355865038 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:40:39.351633513Z, 2026-10-10T17:41:09.351633513Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:40:39.351633513Z",
+        "to": "2026-10-10T17:41:09.351633513Z"
+      }
+    },
+    {
+      "id": "6725b65ef6ae2a77bd4db0791085d780",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "resolved",
+      "episode": "f6a6913d88b0e3d4c9fdb99e8f53edf8",
+      "created_at": "2026-10-10T17:43:28.351489383Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "normal",
+        "health": "ok",
+        "value": "0.1697518358126747",
+        "since": "",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:43:28.351489383Z",
+        "last_success": "2026-10-10T17:43:28.351489383Z",
+        "last_notify": "2026-10-10T17:41:09.351633513Z",
+        "episode": "f6a6913d88b0e3d4c9fdb99e8f53edf8",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · resolved\n数值 0.1697518358126747 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:42:58.351489383Z, 2026-10-10T17:43:28.351489383Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:42:58.351489383Z",
+        "to": "2026-10-10T17:43:28.351489383Z"
+      }
+    },
+    {
+      "id": "4388e0227d88488f1cda58d15b730e17",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "firing",
+      "episode": "c5b70e0c222a14257d7749f4684ed7c0",
+      "created_at": "2026-10-10T17:45:04.350986344Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "firing",
+        "health": "ok",
+        "value": "0.20168066997620812",
+        "since": "2026-10-10T17:45:04.350986344Z",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:45:04.350986344Z",
+        "last_success": "2026-10-10T17:45:04.350986344Z",
+        "last_notify": "2026-10-10T17:45:04.350986344Z",
+        "episode": "c5b70e0c222a14257d7749f4684ed7c0",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · firing\n数值 0.20168066997620812 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:44:34.350986344Z, 2026-10-10T17:45:04.350986344Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:44:34.350986344Z",
+        "to": "2026-10-10T17:45:04.350986344Z"
+      }
+    },
+    {
+      "id": "699e8f1c9fbb1a4c36a01d05001b39ea",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "resolved",
+      "episode": "c5b70e0c222a14257d7749f4684ed7c0",
+      "created_at": "2026-10-10T17:45:14.352053709Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "normal",
+        "health": "ok",
+        "value": "0.16433854046869922",
+        "since": "",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:45:14.352053709Z",
+        "last_success": "2026-10-10T17:45:14.352053709Z",
+        "last_notify": "2026-10-10T17:45:04.350986344Z",
+        "episode": "c5b70e0c222a14257d7749f4684ed7c0",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · resolved\n数值 0.16433854046869922 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:44:44.352053709Z, 2026-10-10T17:45:14.352053709Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:44:44.352053709Z",
+        "to": "2026-10-10T17:45:14.352053709Z"
+      }
+    },
+    {
+      "id": "067dd41ecbbfa1018da4e674a81f6fc1",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "firing",
+      "episode": "3fe86275e98478fd11d24007cc57ff7a",
+      "created_at": "2026-10-10T17:45:36.352158553Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "firing",
+        "health": "ok",
+        "value": "0.22459524399906372",
+        "since": "2026-10-10T17:45:36.352158553Z",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:45:36.352158553Z",
+        "last_success": "2026-10-10T17:45:36.352158553Z",
+        "last_notify": "2026-10-10T17:45:36.352158553Z",
+        "episode": "3fe86275e98478fd11d24007cc57ff7a",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · firing\n数值 0.22459524399906372 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:45:06.352158553Z, 2026-10-10T17:45:36.352158553Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:45:06.352158553Z",
+        "to": "2026-10-10T17:45:36.352158553Z"
+      }
+    },
+    {
+      "id": "62f25ac35469950c8f80227ec46d7fb8",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "resolved",
+      "episode": "3fe86275e98478fd11d24007cc57ff7a",
+      "created_at": "2026-10-10T17:46:29.351713717Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "normal",
+        "health": "ok",
+        "value": "0.1912421904095661",
+        "since": "",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:46:29.351713717Z",
+        "last_success": "2026-10-10T17:46:29.351713717Z",
+        "last_notify": "2026-10-10T17:45:36.352158553Z",
+        "episode": "3fe86275e98478fd11d24007cc57ff7a",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · resolved\n数值 0.1912421904095661 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:45:59.351713717Z, 2026-10-10T17:46:29.351713717Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:45:59.351713717Z",
+        "to": "2026-10-10T17:46:29.351713717Z"
+      }
+    },
+    {
+      "id": "13d977de946b28cebb91c93d46fd850c",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "firing",
+      "episode": "fe295152f905daf7f87c8d7b2fb0bb30",
+      "created_at": "2026-10-10T17:48:05.355127928Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "firing",
+        "health": "ok",
+        "value": "0.2184275414021454",
+        "since": "2026-10-10T17:48:05.355127928Z",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:48:05.355127928Z",
+        "last_success": "2026-10-10T17:48:05.355127928Z",
+        "last_notify": "2026-10-10T17:48:05.355127928Z",
+        "episode": "fe295152f905daf7f87c8d7b2fb0bb30",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · firing\n数值 0.2184275414021454 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:47:35.355127928Z, 2026-10-10T17:48:05.355127928Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:47:35.355127928Z",
+        "to": "2026-10-10T17:48:05.355127928Z"
+      }
+    },
+    {
+      "id": "468f7056c83e77745e8d8f1df2b71bd7",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "resolved",
+      "episode": "fe295152f905daf7f87c8d7b2fb0bb30",
+      "created_at": "2026-10-10T17:48:26.353003715Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "normal",
+        "health": "ok",
+        "value": "0.18368285713905858",
+        "since": "",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:48:26.353003715Z",
+        "last_success": "2026-10-10T17:48:26.353003715Z",
+        "last_notify": "2026-10-10T17:48:05.355127928Z",
+        "episode": "fe295152f905daf7f87c8d7b2fb0bb30",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · resolved\n数值 0.18368285713905858 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:47:56.353003715Z, 2026-10-10T17:48:26.353003715Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:47:56.353003715Z",
+        "to": "2026-10-10T17:48:26.353003715Z"
+      }
+    },
+    {
+      "id": "11b8240349d6f216b8eb24ea072f2759",
+      "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+      "rule_name": "本机 CPU · 告警标记验收",
+      "rule_revision": 3,
+      "kind": "firing",
+      "episode": "10c7a0c4c6c9af222269c5d08ce1c79d",
+      "created_at": "2026-10-10T17:48:58.350901258Z",
+      "state": {
+        "rule_id": "46d4af60f62a2f963f0d71736bd158c1",
+        "fingerprint": "9a8d0aa33959824773a14b5d7655d63d41c0b26ea7e811fed50ec10018441d1d",
+        "labels": {
+          "series": "23e0e816-cfb6-4402-a9c7-0d5bf91eef5d"
+        },
+        "status": "firing",
+        "health": "ok",
+        "value": "0.22545472109817297",
+        "since": "2026-10-10T17:48:58.350901258Z",
+        "health_since": "",
+        "last_eval": "2026-10-10T17:48:58.350901258Z",
+        "last_success": "2026-10-10T17:48:58.350901258Z",
+        "last_notify": "2026-10-10T17:48:58.350901258Z",
+        "episode": "10c7a0c4c6c9af222269c5d08ce1c79d",
+        "health_episode": "",
+        "silenced": false
+      },
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "group_ids": null,
+      "message": "本机 CPU · 告警标记验收 · firing\n数值 0.22545472109817297 · 阈值 gt 0.2\n{\"series\":\"23e0e816-cfb6-4402-a9c7-0d5bf91eef5d\"}\n窗口 [2026-10-10T17:48:28.350901258Z, 2026-10-10T17:48:58.350901258Z)\nmetric_host_gauge: 未配置有效告警组/目标",
+      "range": {
+        "from": "2026-10-10T17:48:28.350901258Z",
+        "to": "2026-10-10T17:48:58.350901258Z"
+      }
+    }
+  ],
+  "rules": [
+    {
+      "kind": "metric",
+      "id": "46d4af60f62a2f963f0d71736bd158c1",
+      "name": "本机 CPU · 告警标记验收",
+      "enabled": true,
+      "revision": 3,
+      "sql": "SELECT\n  `series`,\n  avg(`value`) AS value\nFROM (\nSELECT $__timeInterval(event_time) AS time, host_id AS series, avg(value) AS value FROM metric_host_gauge WHERE $__timeFilter(event_time) AND name='host.cpu.utilization' GROUP BY time,series ORDER BY time\n)\nGROUP BY `series`",
+      "source_table_ids": [
+        "metric_host_gauge"
+      ],
+      "services": [],
+      "value_field": "value",
+      "label_fields": [
+        "series"
+      ],
+      "operator": "gt",
+      "threshold": "0.2",
+      "interval_seconds": 10,
+      "window_seconds": 30,
+      "delay_seconds": 0,
+      "for_seconds": 0,
+      "recovery_seconds": 0,
+      "repeat_seconds": 0,
+      "health_for_seconds": 60,
+      "notify_health": false,
+      "severity": "warning"
+    }
+  ],
+  "truncated": false
+}

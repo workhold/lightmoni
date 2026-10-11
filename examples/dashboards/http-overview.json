@@ -1,0 +1,25 @@
+{
+  "title": "HTTP 与应用日志总览",
+  "description": "运行 Go / Node SDK demo 后，按 service 观察请求数量与日志趋势。",
+  "range": {"from": "now-1h", "to": "now"},
+  "refresh": 15,
+  "variables": [{"name": "services", "label": "服务", "type": "query", "sql": "SELECT DISTINCT service FROM metric_http_sum WHERE $__timeFilter(event_time) ORDER BY service", "multi": true, "all": true, "value": ["__all__"]}],
+  "panels": [
+    {
+      "id": "requests",
+      "title": "请求计数 · Delta",
+      "type": "line",
+      "queries": [{"refId": "A", "sql": "SELECT $__timeInterval(event_time) AS time, concat(service, ' / ', name) AS series, sum(toDecimal256(value_int, 0)) AS value FROM metric_http_sum WHERE $__timeFilter(event_time) AND temporality='DELTA' AND service IN {services:Array(String)} GROUP BY time, series ORDER BY time"}],
+      "options": {"x": "time", "y": "value", "series": "series", "decimals": 0},
+      "grid": {"x": 0, "y": 0, "w": 6, "h": 6}
+    },
+    {
+      "id": "logs",
+      "title": "日志级别分布",
+      "type": "bar",
+      "queries": [{"refId": "A", "sql": "SELECT severity AS category, service AS series, count() AS value FROM log_app WHERE $__timeFilter(event_time) AND service IN {services:Array(String)} GROUP BY category, series ORDER BY category"}],
+      "options": {"x": "category", "y": "value", "series": "series", "stacked": true, "decimals": 0},
+      "grid": {"x": 6, "y": 0, "w": 6, "h": 6}
+    }
+  ]
+}

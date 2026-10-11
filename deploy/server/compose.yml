@@ -1,0 +1,37 @@
+services:
+  lightmoni:
+    image: ${LIGHTMONI_IMAGE:-lightmoni:local}
+    build:
+      context: ../..
+      dockerfile: deploy/server/Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    ports: ["${LIGHTMONI_PORT:-8080}:8080"]
+    environment:
+      LIGHTMONI_ADDR: ":8080"
+      LIGHTMONI_DATA: /data/state
+      LIGHTMONI_CH_URL: http://clickhouse:8123
+      LIGHTMONI_CH_USER: lightmoni
+      LIGHTMONI_CH_PASSWORD: ${CLICKHOUSE_PASSWORD:?Set CLICKHOUSE_PASSWORD in .env}
+      LIGHTMONI_EXTERNAL_URL: ${LIGHTMONI_EXTERNAL_URL:-http://localhost:8080}
+    volumes: ["lightmoni-state:/data"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8
+    environment:
+      CLICKHOUSE_USER: lightmoni
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?Set CLICKHOUSE_PASSWORD in .env}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes: ["lightmoni-telemetry:/var/lib/clickhouse"]
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user lightmoni --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+volumes:
+  lightmoni-state:
+  lightmoni-telemetry:

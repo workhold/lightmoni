@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lightmoni-sdk"
+version = "0.1.0"
+description = "Bounded OTLP/HTTP telemetry for LightMoni"
+requires-python = ">=3.9"
+readme = "README.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lightmoni*"]

@@ -1,0 +1,153 @@
+{
+  "checked_at": "2026-10-11T01:17:06.142Z",
+  "checks": [
+    "实际 G2 单轴 / 双轴 / 面积 / 正负堆叠 / 全零 / 常量 / 阈值 / 对数 / 直方图范围，自动峰值 85%",
+    "单轴范围切换、手动上下限、保存失败保留草稿、重试和刷新回读",
+    "清空手动上下限后恢复自动范围",
+    "390px 设置抽屉可操作、无横向溢出"
+  ],
+  "scales": [
+    [
+      {
+        "key": "lightmoni-left-y",
+        "type": "linear",
+        "domain": [
+          70,
+          110
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      }
+    ],
+    [
+      {
+        "key": "lightmoni-left-y",
+        "type": "linear",
+        "domain": [
+          75.71428571428571,
+          104.28571428571429
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      }
+    ],
+    [
+      {
+        "key": "lightmoni-left-y",
+        "type": "linear",
+        "domain": [
+          75.71428571428571,
+          104.28571428571429
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      },
+      {
+        "key": "lightmoni-right-y",
+        "type": "linear",
+        "domain": [
+          0,
+          4818.823529411765
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      }
+    ],
+    [
+      {
+        "key": "lightmoni-left-y",
+        "type": "linear",
+        "domain": [
+          -80.71428571428572,
+          190.71428571428572
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      }
+    ],
+    [
+      {
+        "key": "lightmoni-left-y",
+        "type": "linear",
+        "domain": [
+          0,
+          1.1764705882352942
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      }
+    ],
+    [
+      {
+        "key": "lightmoni-left-y",
+        "type": "linear",
+        "domain": [
+          74.28571428571429,
+          85.71428571428571
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      }
+    ],
+    [
+      {
+        "key": "lightmoni-left-y",
+        "type": "linear",
+        "domain": [
+          75.71428571428571,
+          104.28571428571429
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      }
+    ],
+    [
+      {
+        "key": "lightmoni-left-y",
+        "type": "linear",
+        "domain": [
+          0,
+          141.1764705882353
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      }
+    ],
+    [
+      {
+        "key": "lightmoni-left-y",
+        "type": "log",
+        "domain": [
+          3.727593720314941,
+          2682.695795279725
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      }
+    ],
+    [
+      {
+        "key": "lightmoni-left-y",
+        "type": "linear",
+        "domain": [
+          0,
+          3.5294117647058822
+        ],
+        "nice": false,
+        "zero": false,
+        "tickCount": 5
+      }
+    ]
+  ],
+  "page_errors": []
+}

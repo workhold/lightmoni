@@ -1,0 +1,178 @@
+[
+  {
+    "round": 1,
+    "revision": "v2",
+    "before": [
+      {
+        "height": "340px",
+        "title": "CPU利用率 · 趋势",
+        "transform": "translate3d(603px, 0px, 0px)",
+        "width": "593px"
+      },
+      {
+        "height": "290px",
+        "title": "内存使用",
+        "transform": "translate3d(603px, 350px, 0px)",
+        "width": "593px"
+      },
+      {
+        "height": "290px",
+        "title": "CPU 当前值",
+        "transform": "translate3d(0px, 300px, 0px)",
+        "width": "392px"
+      },
+      {
+        "height": "290px",
+        "title": "业务请求量 · 多服务",
+        "transform": "translate3d(402px, 650px, 0px)",
+        "width": "794px"
+      }
+    ],
+    "after": [
+      {
+        "height": "340px",
+        "title": "CPU利用率 · 趋势",
+        "transform": "translate3d(603px, 0px, 0px)",
+        "width": "593px"
+      },
+      {
+        "height": "290px",
+        "title": "内存使用",
+        "transform": "translate3d(603px, 350px, 0px)",
+        "width": "593px"
+      },
+      {
+        "height": "290px",
+        "title": "CPU 当前值",
+        "transform": "translate3d(0px, 300px, 0px)",
+        "width": "392px"
+      },
+      {
+        "height": "290px",
+        "title": "业务请求量 · 多服务",
+        "transform": "translate3d(402px, 650px, 0px)",
+        "width": "794px"
+      }
+    ],
+    "saveHidden": true
+  },
+  {
+    "round": 2,
+    "revision": "v3",
+    "before": [
+      {
+        "height": "290px",
+        "title": "CPU利用率 · 趋势",
+        "transform": "translate3d(0px, 0px, 0px)",
+        "width": "593px"
+      },
+      {
+        "height": "290px",
+        "title": "内存使用",
+        "transform": "translate3d(603px, 350px, 0px)",
+        "width": "593px"
+      },
+      {
+        "height": "290px",
+        "title": "CPU 当前值",
+        "transform": "translate3d(0px, 350px, 0px)",
+        "width": "392px"
+      },
+      {
+        "height": "290px",
+        "title": "业务请求量 · 多服务",
+        "transform": "translate3d(402px, 650px, 0px)",
+        "width": "794px"
+      }
+    ],
+    "after": [
+      {
+        "height": "290px",
+        "title": "CPU利用率 · 趋势",
+        "transform": "translate3d(0px, 0px, 0px)",
+        "width": "593px"
+      },
+      {
+        "height": "290px",
+        "title": "内存使用",
+        "transform": "translate3d(603px, 350px, 0px)",
+        "width": "593px"
+      },
+      {
+        "height": "290px",
+        "title": "CPU 当前值",
+        "transform": "translate3d(0px, 350px, 0px)",
+        "width": "392px"
+      },
+      {
+        "height": "290px",
+        "title": "业务请求量 · 多服务",
+        "transform": "translate3d(402px, 650px, 0px)",
+        "width": "794px"
+      }
+    ],
+    "saveHidden": true
+  },
+  {
+    "round": 3,
+    "revision": "v6",
+    "before": [
+      {
+        "height": "290px",
+        "title": "CPU利用率 · 趋势",
+        "transform": "translate3d(0px, 0px, 0px)",
+        "width": "693.5px"
+      },
+      {
+        "height": "290px",
+        "title": "内存使用",
+        "transform": "translate3d(603px, 350px, 0px)",
+        "width": "593px"
+      },
+      {
+        "height": "290px",
+        "title": "CPU 当前值",
+        "transform": "translate3d(0px, 350px, 0px)",
+        "width": "392px"
+      },
+      {
+        "height": "290px",
+        "title": "业务请求量 · 多服务",
+        "transform": "translate3d(402px, 650px, 0px)",
+        "width": "794px"
+      }
+    ],
+    "after": [
+      {
+        "height": "290px",
+        "title": "CPU利用率 · 趋势",
+        "transform": "translate3d(0px, 0px, 0px)",
+        "width": "693.5px"
+      },
+      {
+        "height": "290px",
+        "title": "内存使用",
+        "transform": "translate3d(603px, 350px, 0px)",
+        "width": "593px"
+      },
+      {
+        "height": "290px",
+        "title": "CPU 当前值",
+        "transform": "translate3d(0px, 350px, 0px)",
+        "width": "392px"
+      },
+      {
+        "height": "290px",
+        "title": "业务请求量 · 多服务",
+        "transform": "translate3d(402px, 650px, 0px)",
+        "width": "794px"
+      }
+    ],
+    "saveHidden": true,
+    "conflicts": [
+      4,
+      5
+    ],
+    "overwroteRevision": 5
+  }
+]

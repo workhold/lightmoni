@@ -1,0 +1,30 @@
+{
+  "revision": 9,
+  "panel": {
+    "id": "5e47e741-c569-4d37-9e98-531884b5e7bd",
+    "title": "跨表 SQL · 验收",
+    "type": "stat",
+    "queries": [
+      {
+        "refId": "A",
+        "sql": "SELECT count() AS value\nFROM metric_host_gauge\nWHERE $__timeFilter(event_time)"
+      },
+      {
+        "refId": "B",
+        "sql": "SELECT count() AS value\nFROM metric_agent_gauge\nWHERE $__timeFilter(event_time)"
+      }
+    ],
+    "options": {
+      "right_axis_refs": [],
+      "show_points": false,
+      "x": "value",
+      "y": "value"
+    },
+    "grid": {
+      "x": 0,
+      "y": 12,
+      "w": 6,
+      "h": 6
+    }
+  }
+}

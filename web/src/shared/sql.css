@@ -1,0 +1,7 @@
+.lm-sql-editor{border:1px solid var(--lm-border);border-radius:4px;overflow:hidden;background:var(--lm-surface);min-width:0}
+.lm-sql-editor-bar{height:30px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid var(--lm-border);background:var(--lm-surface);font-size:11px;color:var(--lm-muted)}
+.lm-sql-language{font-weight:650;color:#425674;letter-spacing:.4px}
+.lm-sql-editor-actions{display:flex;align-items:center;gap:8px;margin-left:auto;white-space:nowrap}.lm-sql-editor-actions .ant-btn{font-size:11px;height:23px;padding:0 6px;color:var(--lm-muted)}
+.lm-sql-editor .monaco-editor .suggest-widget{box-shadow:0 6px 18px #2130471f}
+@media(max-width:600px){.lm-sql-editor-actions>span{display:none}}
+.lm-sql-editor.is-dark{background:#181b1f;border-color:#343940}.lm-sql-editor.is-dark .lm-sql-editor-bar{background:#22252b;border-color:#343940;color:#a6adba}.lm-sql-editor.is-dark .lm-sql-language{color:#d8d9da}.lm-sql-editor.is-dark .lm-sql-editor-actions .ant-btn{color:#a6adba}

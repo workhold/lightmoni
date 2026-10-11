@@ -1,0 +1,35 @@
+{
+  "name": "lightmoni-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.1.0",
+    "@ant-design/x-markdown": "^2.9.0",
+    "@antv/g2": "5.4.8",
+    "@grafana/data": "13.2.3",
+    "@monaco-editor/react": "4.7.0",
+    "antd": "6.6.5",
+    "dayjs": "1.11.23",
+    "highlight.js": "11.12.0",
+    "leafer-ui": "2.3.1",
+    "monaco-editor": "^0.57.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-grid-layout": "^2.2.0",
+    "react-router-dom": "^7.13.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vite": "8.3.4"
+  }
+}

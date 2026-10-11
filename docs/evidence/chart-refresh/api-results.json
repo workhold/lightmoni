@@ -1,0 +1,101 @@
+{
+  "range": {
+    "from": "2026-10-10T01:10:16.222271+00:00",
+    "to": "2026-10-11T01:10:16.222271+00:00"
+  },
+  "panels": [
+    {
+      "panel": "CPU利用率 · 趋势",
+      "queries": [
+        {
+          "ref": "A",
+          "status": "success",
+          "complete": true,
+          "rows": 599
+        }
+      ]
+    },
+    {
+      "panel": "内存使用",
+      "queries": [
+        {
+          "ref": "A",
+          "status": "success",
+          "complete": true,
+          "rows": 599
+        }
+      ]
+    },
+    {
+      "panel": "CPU 当前值",
+      "queries": [
+        {
+          "ref": "A",
+          "status": "success",
+          "complete": true,
+          "rows": 599
+        }
+      ]
+    },
+    {
+      "panel": "业务请求量 · 多服务",
+      "queries": [
+        {
+          "ref": "A",
+          "status": "success",
+          "complete": true,
+          "rows": 81
+        }
+      ]
+    }
+  ],
+  "after_deployment": {
+    "dashboard_revision": 17,
+    "panels": [
+      {
+        "panel": "CPU利用率 · 趋势",
+        "queries": [
+          {
+            "ref": "A",
+            "status": "success",
+            "complete": true,
+            "rows": 599
+          }
+        ]
+      },
+      {
+        "panel": "内存使用",
+        "queries": [
+          {
+            "ref": "A",
+            "status": "success",
+            "complete": true,
+            "rows": 599
+          }
+        ]
+      },
+      {
+        "panel": "CPU 当前值",
+        "queries": [
+          {
+            "ref": "A",
+            "status": "success",
+            "complete": true,
+            "rows": 599
+          }
+        ]
+      },
+      {
+        "panel": "业务请求量 · 多服务",
+        "queries": [
+          {
+            "ref": "A",
+            "status": "success",
+            "complete": true,
+            "rows": 81
+          }
+        ]
+      }
+    ]
+  }
+}

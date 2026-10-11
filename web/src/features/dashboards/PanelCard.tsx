@@ -1,0 +1,54 @@
+import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import {DownOutlined,DragOutlined,EditOutlined,MoreOutlined} from '@ant-design/icons';
+import {api,post} from '../../shared/api';
+import {Alert,Button,Drawer,Dropdown,Empty,Space,Spin,Table,Tabs,Tag} from '../../shared/ui';
+import type {QueryResponse,QueryRequest,TimeRange} from '../../shared/types';
+import ChartView from './ChartView';
+import {chartDataSignature} from './panel-refresh';
+import type {AlertRule,AlertEvent} from '../alerts/types';
+import {bindQueries,intervalFor,printable,hasTimeBuckets,type Panel,type Variable,type Values} from './model';
+
+export default function PanelCard({panel,variables,values,choices,range,tick,editing,onEdit,onCopy,onDelete,onBrush,onLogs,onMove,onAlert,bare=false,onResult,onOptionsChange}:{panel:Panel;variables:Variable[];values:Values;choices:Record<string,string[]>;range:TimeRange;tick:number;editing:boolean;onEdit?:()=>void;onCopy?:()=>void;onDelete?:()=>void;onMove?:(direction:string)=>void;onBrush:(from:number,to:number)=>void;onLogs?:()=>void;onAlert?:()=>void;bare?:boolean;onResult?:(response:QueryResponse)=>void;onOptionsChange?:(options:Record<string,unknown>)=>void}){
+ const [displayed,setDisplayed]=useState<{response:QueryResponse;range:TimeRange;intervalMS:number;bucketedRefs:string[]}>(),[loading,setLoading]=useState(false),[error,setError]=useState(''),[inspecting,setInspecting]=useState(false),[full,setFull]=useState(false),[retry,setRetry]=useState(0),[updated,setUpdated]=useState('');
+ const response=displayed?.response;
+ const [annotations,setAnnotations]=useState<{rules:AlertRule[];events:AlertEvent[];truncated:boolean}>({rules:[],events:[],truncated:false}),[annotationError,setAnnotationError]=useState('');
+ const ruleIDs=JSON.stringify(Array.isArray(panel.options.alert_rule_ids)?panel.options.alert_rule_ids:[]);
+ useEffect(()=>{const ids=JSON.parse(ruleIDs) as string[],controller=new AbortController(),params=new URLSearchParams({from:range.from,to:range.to,panel_id:panel.id});ids.forEach(id=>params.append('rule_id',id));void api<typeof annotations>(`/alerts/annotations?${params}`,{signal:controller.signal}).then(result=>{setAnnotations(previous=>JSON.stringify(previous)===JSON.stringify(result)?previous:result);setAnnotationError('');}).catch(e=>{if(!controller.signal.aborted)setAnnotationError((e as Error).message);});return()=>controller.abort();},[panel.id,ruleIDs,panel.options.alert_revision,range.from,range.to,tick,retry]);
+ const [request,setRequest]=useState<QueryRequest>(),sequence=useRef(0);
+ const resultCallback=useRef(onResult);useEffect(()=>{resultCallback.current=onResult},[onResult]);
+ const inputs=JSON.stringify({queries:panel.queries,variables,values,choices,range,tick,retry});
+ useEffect(()=>{const controller=new AbortController(),generation=++sequence.current;setLoading(true);let query:QueryRequest;
+  try {query={request_id:crypto.randomUUID(),range,interval_ms:intervalFor(range),queries:bindQueries(panel.queries,variables,values,choices),source:'dashboard'};setRequest(query);if(!query.queries.length){setDisplayed(undefined);setLoading(false);return;}}
+  catch(err){setError((err as Error).message);setLoading(false);return;}
+  void post<QueryResponse>('/query',query,controller.signal).then(result=>{if(generation!==sequence.current)return;setDisplayed({response:result,range:query.range,intervalMS:query.interval_ms??0,bucketedRefs:query.queries.filter(item=>hasTimeBuckets(item.sql)).map(item=>item.refId)});setError('');resultCallback.current?.(result);setUpdated(new Date().toLocaleTimeString());}).catch(err=>{if(!controller.signal.aborted&&generation===sequence.current)setError((err as Error).message);}).finally(()=>{if(generation===sequence.current)setLoading(false);});
+  return()=>{controller.abort();};
+ // All query-affecting state is represented by inputs. Display options do not rerun SQL.
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[inputs]);
+ const callbacks=useRef({onBrush,onOptionsChange,options:panel.options});callbacks.current={onBrush,onOptionsChange,options:panel.options};
+ const stableBrush=useCallback((from:number,to:number)=>callbacks.current.onBrush(from,to),[]);
+ const changeColor=useCallback((name:string,color:string)=>{const current=callbacks.current;current.onOptionsChange?.({...current.options,series_colors:{...(current.options.series_colors as Record<string,string>??{}),[name]:color}});},[]);
+ const results=response?.results??[],failed=results.filter(r=>r.status==='error'||r.status==='cancelled'),truncated=results.some(r=>r.truncated||!r.complete);
+ // Layout commits keep the same response. Do not manufacture a new result array
+ // that would rebuild G2's prepared data and destroy an unchanged chart.
+ const chartSignature=useMemo(()=>chartDataSignature(response?.results??[]),[response]);
+ // Metadata-only replies retain the plotted rows; timing still updates in the inspector.
+ // eslint-disable-next-line react-hooks/exhaustive-deps
+ const chartResults=useMemo(()=>response?.results.filter(result=>result.status!=='error')??[],[chartSignature]);
+ const menu=useMemo(()=>[{key:'view',label:'查看图表'},...(onEdit?[{key:'edit',label:'编辑图表'}]:[]),{key:'inspect',label:'检查数据与查询'},{key:'retry',label:'重新查询'},...(onAlert?[{key:'alert',label:'设置图表告警'}]:[]),...(onLogs?[{key:'logs',label:'查看相关日志'}]:[]),...(editing?[{key:'copy',label:'复制面板'},{key:'up',label:'向上移动'},{key:'down',label:'向下移动'},{key:'delete',label:'删除面板',danger:true}]:[])],[editing,onLogs,onAlert]);
+ function menuAction(key:string){if(key==='inspect')setInspecting(true);if(key==='view')setFull(true);if(key==='retry')setRetry(v=>v+1);if(key==='edit')onEdit?.();if(key==='copy')onCopy?.();if(key==='delete')onDelete?.();if(key==='logs')onLogs?.();if(key==='alert')onAlert?.();if(key==='up'||key==='down')onMove?.(key);}
+ const content=<div className="lm-panel-body">{error&&<Alert type="error" showIcon title={error} description={response?'正在展示上次结果，数据已过期':undefined} action={<Button size="small" onClick={()=>setRetry(v=>v+1)}>重试</Button>}/>} {failed.map(r=><Alert key={r.refId} type="error" title={`查询 ${r.refId}：${r.error??r.status}`} showIcon/>)}{truncated&&<Alert type="warning" showIcon title="查询结果不完整或被截断，请查看检查器并缩小范围"/>}{loading&&!response&&<div className="lm-panel-loading"><Spin size="small"/> 正在查询</div>}{annotationError&&<span className="lm-panel-annotation-note" title={annotationError}>告警标记加载失败</span>}{annotations.truncated&&<span className="lm-panel-annotation-note">告警标记超过 500 条，请缩小时间范围</span>}{response?<ChartView panel={panel} results={chartResults} alertRules={annotations.rules} alertEvents={annotations.events} onBrush={stableBrush} range={displayed!.range} intervalMS={displayed!.intervalMS} bucketedRefs={displayed!.bucketedRefs} onColorChange={onOptionsChange?changeColor:undefined}/>:!loading&&!error?<Empty description="查询已停用" image={Empty.PRESENTED_IMAGE_SIMPLE}/>:null}</div>;
+ function exportData(format:'json'|'csv'){
+  const frame=results.flatMap(r=>r.frames)[0];if(!frame)return;const escape=(v:unknown)=>{let s=printable(v);if(/^[=+@\-]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};
+  const text=format==='json'?JSON.stringify(response,null,2):[frame.columns.map(c=>escape(c.name)).join(','),...frame.rows.map(row=>row.map(escape).join(','))].join('\r\n');const url=URL.createObjectURL(new Blob([text],{type:format==='json'?'application/json':'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=`panel-${panel.id}.${format}`;a.click();URL.revokeObjectURL(url);
+ }
+ if(bare)return content;
+ return <><div className="lm-dashboard-panel"><header><div className={`lm-panel-title ${editing?'lm-panel-drag':''}`} title={editing?'拖动此处移动面板':panel.title} onDoubleClick={()=>{if(editing)onEdit?.();}}>{editing?<><DragOutlined className="lm-panel-grip"/><span>{panel.title}</span></>:<Dropdown trigger={['click']} menu={{items:menu,onClick:({key})=>menuAction(key)}}><button type="button" className="lm-panel-title-trigger" aria-label={`${panel.title} 图表菜单`}><span>{panel.title}</span><DownOutlined aria-hidden/></button></Dropdown>}</div><Space size={4}>{updated&&!editing&&<small title="最后成功查询时间">{updated}</small>}{editing&&<Button size="small" type="text" icon={<EditOutlined aria-hidden/>} aria-label={`编辑 ${panel.title}`} onClick={onEdit}>编辑</Button>}<Dropdown menu={{items:menu,onClick:({key})=>menuAction(key)}} trigger={['click']}><Button size="small" type="text" aria-label={`${panel.title} 面板操作`} icon={<MoreOutlined aria-hidden/>}/></Dropdown></Space></header>{content}</div>
+ <Drawer open={full} onClose={()=>setFull(false)} title={`查看图表 · ${panel.title}`} size="100vw" rootClassName="lm-panel-viewer" extra={<Space>{onEdit&&<Button icon={<EditOutlined aria-hidden/>} onClick={()=>{setFull(false);onEdit();}}>编辑图表</Button>}<Button onClick={()=>setFull(false)}>返回大盘</Button></Space>} destroyOnHidden><div className="lm-panel-view-range" aria-label="当前时间范围">{[range.from,range.to].map(value=>new Date(value).toLocaleString(undefined,{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false})).join(" — ")}</div>{content}</Drawer>
+ <Drawer open={inspecting} onClose={()=>setInspecting(false)} title={`检查面板 · ${panel.title}`} size="85vw"><Space style={{marginBottom:16}}><Button onClick={()=>exportData('json')} disabled={!response}>下载 JSON</Button><Button onClick={()=>exportData('csv')} disabled={!results.some(r=>r.frames.length)}>下载 CSV（首个结果）</Button><Button onClick={()=>setRetry(v=>v+1)} loading={loading}>重新执行</Button></Space><Tabs items={[
+  {key:'data',label:'原始数据',children:<>{results.map(r=><div key={r.refId}><Space><Tag>查询 {r.refId}</Tag><Tag color={r.status==='error'?'error':'blue'}>{r.status}</Tag>{r.truncated&&<Tag color="warning">已截断</Tag>}</Space>{r.frames.map((frame,i)=><Table key={i} size="small" dataSource={frame.rows} rowKey={(_,i)=>String(i)} pagination={{pageSize:10,showSizeChanger:true}} scroll={{x:true}} columns={frame.columns.map((c,index)=>({key:c.name,title:<span>{c.name}<small style={{display:'block',fontWeight:400}}>{c.type}</small></span>,render:(_:unknown,row:unknown[])=>printable(row[index])}))}/>)}</div>)}</>},
+  {key:'query',label:'查询与参数',children:<pre className="lm-code">{JSON.stringify(request,null,2)}</pre>},
+  {key:'stats',label:'性能与状态',children:<Table rowKey="refId" pagination={false} dataSource={results} columns={[{title:'查询',dataIndex:'refId'},{title:'状态',dataIndex:'status'},{title:'耗时 ms',dataIndex:'elapsed_ms'},{title:'行数',render:(_,r)=>r.frames.reduce((n,f)=>n+f.rows.length,0)},{title:'完整',render:(_,r)=>r.complete&&!r.truncated?'是':'否'},{title:'错误',dataIndex:'error'}]}/>},
+  {key:'json',label:'面板配置',children:<pre className="lm-code">{JSON.stringify(panel,null,2)}</pre>}
+ ]}/></Drawer></>;
+}

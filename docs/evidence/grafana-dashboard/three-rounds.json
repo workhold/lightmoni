@@ -1,0 +1,48 @@
+{
+  "dashboard_id": "fd94d11f-17c7-4bf2-ad30-66e25269b5e8",
+  "checked_at": "2026-10-10T15:42:19.909Z",
+  "rounds": [
+    {
+      "round": 1,
+      "range": "最近 1 小时",
+      "visualization": "折线 时间趋势",
+      "save_current_time": true,
+      "saved_layout": {
+        "height": 440,
+        "width": 673,
+        "x": 683,
+        "y": 0
+      },
+      "default_range": "最近 1 小时",
+      "passed": true
+    },
+    {
+      "round": 2,
+      "range": "最近 6 小时",
+      "visualization": "面积 趋势与累计",
+      "save_current_time": false,
+      "saved_layout": {
+        "height": 490,
+        "width": 673,
+        "x": 0,
+        "y": 0
+      },
+      "default_range": "最近 1 小时",
+      "passed": true
+    },
+    {
+      "round": 3,
+      "range": "最近 15 分钟",
+      "visualization": "柱状 数量与对比",
+      "save_current_time": true,
+      "saved_layout": {
+        "height": 540,
+        "width": 673,
+        "x": 683,
+        "y": 0
+      },
+      "default_range": "最近 15 分钟",
+      "passed": true
+    }
+  ]
+}

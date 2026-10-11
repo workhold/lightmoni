@@ -1,0 +1,17 @@
+{
+  "dashboard_id": "9fff9d7d-8509-4c84-9085-992c18a4718a",
+  "checked_at": "2026-10-10T02:44:17.424Z",
+  "geometry": {
+    "height": 198,
+    "scrollHeight": 198,
+    "canvas": 182
+  },
+  "saved_grid": {
+    "x": 0,
+    "y": 0,
+    "w": 6,
+    "h": 5
+  },
+  "reduced_motion_modal_exited": true,
+  "page_errors": []
+}

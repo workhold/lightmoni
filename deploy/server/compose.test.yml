@@ -1,0 +1,19 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8
+    environment:
+      CLICKHOUSE_USER: lightmoni
+      CLICKHOUSE_PASSWORD: lightmoni_test_password
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "127.0.0.1:18123:8123"
+    volumes:
+      - lightmoni-test-ch:/var/lib/clickhouse
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "lightmoni", "--password", "lightmoni_test_password", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+volumes:
+  lightmoni-test-ch:

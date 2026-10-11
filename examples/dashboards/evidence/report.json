@@ -1,0 +1,17 @@
+{
+  "checked_at": "2026-10-09T18:16:48.636Z",
+  "base": "http://127.0.0.1:5173",
+  "dashboard_id": "da1cf2cb-96af-4cab-a42d-61523c806ab0",
+  "checks": [
+    "真实 Agent CPU、UI阈值编辑、紫色序列、G2红色阈值线及保存回读",
+    "真实 ClickHouse SQL、UI值映射、指标卡颜色、表格0与null区分",
+    "刷新后读取已保存映射",
+    "真实 ClickHouse执行line/area/time-bar/pie/stat/table/gauge/time-heatmap，time scale无getBandWidth错误"
+  ],
+  "pixels": {
+    "red": 148,
+    "purple": 3321
+  },
+  "page_errors": [],
+  "native_dialogs": 0
+}
