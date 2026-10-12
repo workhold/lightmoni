@@ -57,10 +57,13 @@ final class State {
     public ?string $failure=null;
     public int $sequence=0;
     private array $resource;
+    public bool $selfEnabled=true; public string $selfTable="";
+    private float $selfLast=-INF; private bool $selfStarted=false; private array $selfPrevious=[];
     public function __construct(string $service,string $endpoint,string $key,array $limits) {
         $url=parse_url($endpoint);
         if (PHP_INT_SIZE!==8 || $service==='' || strlen($service)>128 || !$url || !in_array($url['scheme']??'', ['http','https'], true) || empty($url['host']) || isset($url['user']) || isset($url['query']) || isset($url['fragment'])) throw new \InvalidArgumentException('64-bit PHP, valid service and HTTP(S) endpoint required');
         $this->endpoint=rtrim($endpoint,'/'); $this->key=$key;
+        $this->selfEnabled=$limits['self_telemetry']??true;unset($limits['self_telemetry']);
         $defaults=['queue_bytes'=>8<<20,'queue_batches'=>256,'buffer_bytes'=>8<<20,'max_batch_bytes'=>1<<20,'cardinality_limit'=>2000,'max_instruments'=>256];
         if (array_diff_key($limits,$defaults)) throw new \InvalidArgumentException('unknown SDK limit');
         $this->limits=array_replace($defaults,$limits);
@@ -129,6 +132,25 @@ final class State {
             if ($group) $this->enqueue($table,$signal,$group,$created);
         }
         $this->records=[]; $this->stats['buffer_bytes']=0;
+        $this->collectSelf();
+    }
+    private function enqueueSelf(string $signal,array $rows,string $at): bool {
+        $size=strlen($this->payload($signal,$rows));
+        if ($size>$this->limits['max_batch_bytes'] || count($this->queue)>=$this->limits['queue_batches'] || $this->stats['pending_bytes']+$size>$this->limits['queue_bytes']) return false;
+        $this->enqueue($this->selfTable,$signal,$rows,$at);return true;
+    }
+    private function collectSelf(): void {
+        $clock=hrtime(true)/1e9;if (!$this->selfEnabled || $clock-$this->selfLast<30) return;
+        $this->selfLast=$clock;$at=gmdate('Y-m-d\TH:i:s').'.'.substr(Protocol::nano(),-9).'Z';$time=Protocol::nano();
+        $attributes=Protocol::attrs(['lightmoni.component'=>'sdk','sdk.language'=>'php','sdk.version'=>'0.1.0']);
+        $values=['heartbeat'=>1];foreach (['pending_batches','pending_bytes','retried_batches','dropped_records','rejected_records','invalid_records','overflow_records'] as $name) $values[$name]=$this->stats[$name];
+        $rows=[];foreach ($values as $name=>$value) $rows[]=['name'=>'lightmoni.sdk.'.$name,'gauge'=>['dataPoints'=>[['timeUnixNano'=>$time,'asDouble'=>$value,'attributes'=>$attributes]]]];
+        $this->enqueueSelf('metrics',$rows,$at);
+        $changed=false;foreach (['retried_batches','dropped_records','rejected_records','invalid_records','overflow_records'] as $name) if ($this->stats[$name]>($this->selfPrevious[$name]??0)) $changed=true;
+        if (!$this->selfStarted || $changed) {
+            $row=['timeUnixNano'=>$time,'severityText'=>$changed?'WARN':'INFO','severityNumber'=>$changed?13:9,'body'=>['stringValue'=>$changed?'LightMoni SDK delivery, buffer or input diagnostics changed':'LightMoni SDK started'],'attributes'=>array_merge($attributes,Protocol::attrs(['event'=>$this->selfStarted?'diagnostics_changed':'started']))];
+            if ($this->enqueueSelf('logs',[$row],$at)) {$this->selfStarted=true;$this->selfPrevious=$this->stats;}
+        }
     }
     private function enqueue(string $table,string $signal,array $rows,string $created): void {
         $raw=$this->payload($signal,$rows); $this->sequence++;
@@ -188,7 +210,7 @@ final class Span {
 final class Client {
     private State $s;
     private string $table;
-    public function __construct(string $service,string $table,string $endpoint='http://127.0.0.1:4318',string $key='',array $limits=[]) { $this->table=Protocol::table($table);$this->s=new State($service,$endpoint,$key,$limits); }
+    public function __construct(string $service,string $table,string $endpoint='http://127.0.0.1:4318',string $key='',array $limits=[]) { $this->table=Protocol::table($table);$this->s=new State($service,$endpoint,$key,$limits);$this->s->selfTable=$this->table; }
     public function withTable(string $table): self { $child=clone $this; $child->table=Protocol::table($table); return $child; }
     public function counter(string $name,string $unit=''): Metric { return $this->instrument($name,'counter',$unit,[]); }
     public function gauge(string $name,string $unit=''): Metric { return $this->instrument($name,'gauge',$unit,[]); }

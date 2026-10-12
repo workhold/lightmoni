@@ -1,0 +1,12 @@
+.lm-sdk-setup{margin-top:24px;border-top:1px solid var(--lm-border);padding-top:4px;min-width:0}
+.lm-sdk-setup h3{font-size:14px;margin:20px 0 12px}
+.lm-sdk-setup p{line-height:1.7}
+.lm-sdk-mode-description{color:var(--lm-muted);margin:12px 0 18px}
+.lm-sdk-endpoint{display:flex;flex-direction:column;gap:8px;max-width:760px;margin-bottom:16px}
+.lm-sdk-endpoint label{font-weight:500;font-size:13px}
+.lm-sdk-endpoint>.ant-typography{font-size:12px;line-height:1.6}
+.lm-sdk-container-note{margin-bottom:16px}
+.lm-sdk-key-help{margin-bottom:4px;font-size:13px;line-height:1.7}
+.lm-sdk-example-heading{display:flex;align-items:center;gap:10px;margin-top:24px}
+.lm-sdk-example-heading h3{margin:0 0 12px}
+.lm-sdk-example-heading .ant-tag{margin-bottom:12px}

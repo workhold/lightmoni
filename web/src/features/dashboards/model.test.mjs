@@ -7,7 +7,7 @@ test('one now is shared by both range bounds; empty/reversed ranges reject',()=>
  const range=resolveRange({from:'now-1h',to:'now'},Date.UTC(2026,9,10,12));
  assert.deepEqual(range,{from:'2026-10-10T11:00:00.000Z',to:'2026-10-10T12:00:00.000Z'});
  assert.throws(()=>resolveRange({from:'now',to:'now'}));assert.throws(()=>resolveRange({from:'not-a-date',to:'now'}));
- assert.equal(intervalFor(range,600),6000);
+ assert.equal(intervalFor(range,600),5000);
 });
 test('multi-dimensional values remain typed; quotes and commas are never SQL-interpolated',()=>{
  const queries=[{refId:'A',sql:'SELECT count() FROM log_app WHERE service IN {service:Array(String)}',params:{fixed:{type:'UInt64',value:'18446744073709551615'}}},{refId:'B',sql:'SELECT 2',enabled:false}];

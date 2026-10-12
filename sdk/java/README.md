@@ -32,3 +32,7 @@ mon.shutdown(java.time.Duration.ofSeconds(5))
 ~~~
 
 withTable 共享生命周期；Counter 接受 long，Gauge / Histogram 接受 double，histogram(name,List<Double>) 自定义桶。metric 可设置单位。Client.TraceContext.extract / context.inject 支持 W3C header，异步请求显式传 context。四参数构造函数配置 endpoint/key，五参数增加 Client.Limits。flush(Duration) 同步，应用自行调度；updateKey 和 stats 支持诊断。不包括 Android/Kotlin Multiplatform。样例 examples/sdk/java/Main.java；完整边界见 [SDK 契约](../README.md)。
+
+## SDK 自监控
+
+默认每 30 秒上报实例心跳和内部诊断，空闲进程也会发送；原生运行时的后台线程同时 Flush 当前业务窗口。中心自动归入系统 SDK 表，使用原业务 table 的权限；WithTable 共享生命周期。可通过 `Limits.selfTelemetry=false` 关闭。退出前仍需 Shutdown；完整语义见 [SDK 契约](../README.md#内部监控)。

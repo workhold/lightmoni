@@ -48,7 +48,7 @@ try{
  const filterResponse=waitSearch();await modal.getByRole('button',{name:'应用过滤'}).click();expect((await filterResponse).status()).toBe(200);await expect(page.getByText('48 条已载入',{exact:true})).toBeVisible();
  await expect(page.locator('.lm-log-chips')).toContainText('status');
  await page.getByRole('textbox',{name:'搜索字段',exact:true}).fill('retryable');await page.getByRole('button',{name:'添加列 attr:retryable',exact:true}).click();await expect(page.locator('.lm-log-column-title').filter({hasText:'retryable'})).toBeVisible();
- await page.getByRole('button',{name:/列$/}).click();await expect(page.getByRole('dialog',{name:'显示列与固定列'})).toBeVisible();await page.getByRole('button',{name:/完\s*成$/}).click();
+ await page.getByRole('button',{name:/列$/}).click();await expect(page.getByRole('dialog',{name:'显示列与顺序'})).toBeVisible();await page.getByRole('button',{name:/完\s*成$/}).click();
  const handle=page.getByRole('separator',{name:'调整 body 列宽'});await handle.focus();await handle.press('ArrowRight');await expect(handle).toBeFocused();
  await page.locator('.lm-log-message').first().click();const detail=page.getByRole('dialog',{name:/日志详情/});await expect(detail).toBeVisible();await expect(detail.locator('.lm-log-body')).toContainText('PaymentError');
  await detail.getByRole('tab',{name:/JSON$/}).click();await expect(detail.locator('.lm-log-json-node').first()).toContainText('retryable');

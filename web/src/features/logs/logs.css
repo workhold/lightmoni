@@ -61,7 +61,22 @@
   flex-shrink: 0;
 }
 .lm-log-table-picker {
-  width: 160px;
+  width: 260px;
+}
+.lm-log-table-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lm-log-table-options {
+  max-width: calc(100vw - 24px);
+}
+.lm-log-table-option {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 .lm-log-mode-picker {
   width: 115px;
@@ -264,6 +279,17 @@
   min-width: 22px;
   color: var(--log-accent);
 }
+.lm-log-field-order {
+  display: flex;
+  flex-shrink: 0;
+}
+.lm-log-field-order .ant-btn {
+  width: 20px;
+  height: 24px;
+  padding: 0;
+  font-size: 10px;
+  color: var(--log-muted);
+}
 .lm-log-field-note {
   display: block;
   border-top: 1px solid var(--log-border);
@@ -364,6 +390,16 @@
   min-width: 0;
   overflow: hidden;
 }
+.lm-log-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-color: var(--log-muted) var(--lm-surface);
+}
+.lm-log-table-scroll:focus-visible {
+  outline: 2px solid var(--log-accent);
+  outline-offset: -2px;
+}
 .lm-log-results-toolbar {
   display: flex;
   align-items: center;
@@ -418,6 +454,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+}
+.lm-log-column-title > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .lm-log-resize {
   height: 18px;
@@ -789,7 +831,7 @@
     width: 140px;
   }
   .lm-log-table-picker {
-    width: 145px;
+    width: 240px;
   }
 }
 @media (max-width: 900px) {
@@ -927,15 +969,4 @@
   .lm-log-search-line > .lm-log-time-picker {
     flex: 1 1 0;
   }
-}
-
-.lm-log-time-narrow > span {
-  display: block;
-  font-size: 10px;
-  color: var(--log-muted);
-  margin-bottom: 2px;
-}
-.lm-log-time-narrow > time {
-  display: block;
-  font-size: 11px;
 }

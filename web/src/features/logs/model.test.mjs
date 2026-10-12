@@ -1,12 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {attributes,attributeType,sortRows,boundBuffer,csv,normalizeSpec} from './model.ts';
+import {attributes,attributeType,sortRows,boundBuffer,csv,normalizeSpec,logFieldMetadata} from './model.ts';
 
 test('large integer attributes retain every digit and original numeric type',()=>{
  const row={event_id:'one',attributes_json:'{"seq":18446744073709551615,"string":"18446744073709551615","quote":"x\\\"42","fraction":0.25}'};
  assert.equal(attributes(row).seq,'18446744073709551615');
  assert.equal(attributeType(row,'seq'),'number');assert.equal(attributeType(row,'string'),'string');
  assert.equal(attributes(row).quote,'x"42');assert.equal(attributes(row).fraction,0.25);
+});
+test('cached attributes invalidate when payload or malformed-JSON fallback changes',()=>{
+ const row={event_id:'cached',attributes_json:'{"seq":18446744073709551615}'};
+ assert.equal(attributes(row).seq,'18446744073709551615');assert.equal(attributeType(row,'seq'),'number');
+ row.attributes_json='{"seq":"updated","ok":true}';
+ assert.equal(attributes(row).seq,'updated');assert.equal(attributeType(row,'seq'),'string');assert.equal(attributeType(row,'ok'),'boolean');
+ row.attributes_json='{broken';row.attributes={seq:42};
+ assert.equal(attributes(row).seq,42);assert.equal(attributeType(row,'seq'),'number');
+ row.attributes={seq:'fallback'};assert.equal(attributes(row).seq,'fallback');assert.equal(attributeType(row,'seq'),'string');
+});
+test('field metadata retains discovery order and the first available scalar type',()=>{
+ const rows=[{event_id:'a',attributes_json:'{"status":200,"seq":18446744073709551615,"string":"123"}'},
+  {event_id:'b',attributes_json:'{"status":"later","late":true}'},
+  {event_id:'c',attributes_json:'{"later":0.25}'}];
+ const meta=logFieldMetadata([{name:'event_time',type:'DateTime64'},{name:'attributes',type:'Map(String,String)'}],rows);
+ assert.deepEqual(meta.names,['event_time','attributes','attr:status','attr:seq','attr:string','attr:late','attr:later']);
+ assert.equal(meta.kinds.get('event_time'),'时间');assert.equal(meta.kinds.get('attributes'),'对象');
+ assert.equal(meta.kinds.get('attr:status'),'数字');assert.equal(meta.kinds.get('attr:seq'),'数字');
+ assert.equal(meta.kinds.get('attr:string'),'文本');assert.equal(meta.kinds.get('attr:late'),'布尔');
+ const next=logFieldMetadata([],rows.slice(1));assert.equal(next.kinds.get('attr:status'),'文本');
+ const fallback=logFieldMetadata([],[{event_id:'undefined',attributes_json:'broken',attributes:{optional:undefined}},
+  {event_id:'defined',attributes_json:'{"optional":true}'}]);assert.equal(fallback.kinds.get('attr:optional'),'布尔');
 });
 test('live ordering retains nanoseconds, id tie-breaks and RFC3339 offset equivalence',()=>{
  const rows=[{event_id:'b',event_time:'2026-10-10T00:00:00.123456789Z'},{event_id:'a',event_time:'2026-10-10T08:00:00.123456789+08:00'},{event_id:'c',event_time:'2026-10-10T00:00:00.123456788Z'}];

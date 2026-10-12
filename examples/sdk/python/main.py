@@ -5,9 +5,13 @@ from lightmoni import Client, TraceContext
 endpoint = os.getenv("LIGHTMONI_ENDPOINT", "http://127.0.0.1:4318")
 mode = os.getenv("LIGHTMONI_TEST_MODE", "demo")
 limits = {"cardinality_limit": 2} if mode == "overflow" else {"queue_bytes": 1024, "max_batch_bytes": 1024, "buffer_bytes": 64} if mode == "capacity" else {}
-mon = Client(os.getenv("LIGHTMONI_SERVICE", "example-python-api"), "http", endpoint, os.getenv("LIGHTMONI_KEY", ""), **limits)
+mon = Client(os.getenv("LIGHTMONI_SERVICE", "example-python-api"), "http", endpoint, os.getenv("LIGHTMONI_KEY", ""), self_telemetry=mode in ("demo", "selfmonitor"), **limits)
 counter = mon.counter("http.requests")
-if mode == "fixture":
+if mode == "selfmonitor":
+    counter.add(-1)
+    __import__("time").sleep(35)
+    mon.shutdown(timeout=5)
+elif mode == "fixture":
     dims = {"route": "/payments", "method": "POST", "status": 200}
     counter.add(1, dims)
     dims["status"] = 999

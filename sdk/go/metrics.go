@@ -134,6 +134,10 @@ func (m *instrument) record(value float64, integer int64, attrs Attributes) {
 		return
 	}
 	point := m.series[key]
+	if s.reportingDisabled {
+		s.stats.DisabledRecords++
+		return
+	}
 	if point == nil && len(m.series) >= s.cfg.CardinalityLimit {
 		key = "\x00overflow"
 		encoded = []*commonpb.KeyValue{{Key: "otel.metric.overflow", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_BoolValue{BoolValue: true}}}}

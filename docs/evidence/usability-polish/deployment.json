@@ -1,0 +1,29 @@
+{
+  "time": "2026-10-11T08:29:25.374660+00:00",
+  "url": "http://localhost:18380",
+  "health": true,
+  "frontend_files_match": [
+    "assets/AlertsPage-BCqZGyr5.css",
+    "assets/AlertsPage-ClXjL3_f.js",
+    "assets/AssistantPage-CNZrxTnE.js",
+    "assets/AssistantPage-V_WhX8N_.css",
+    "assets/DashboardPage-B6_Wu39e.js",
+    "assets/DashboardPage-_xstxkII.css",
+    "assets/LogExplorePage-CHWMepUK.css",
+    "assets/LogExplorePage-Cz4ItIqp.js",
+    "assets/SQLInput-C8dHW4rr.css",
+    "assets/SQLInput-CmV8K2DI.js",
+    "assets/SettingOutlined--91dthFE.js",
+    "assets/api-Du_QO1qL.js",
+    "assets/codicon-DF1abBS2.ttf",
+    "assets/editor.worker-BmdWdrHZ.js",
+    "assets/esm-BJB8PuCe.js",
+    "assets/index-CEtkm5Fo.css",
+    "assets/index-Dq7RmaT5.js",
+    "assets/rolldown-runtime-C0FnF6B9.js",
+    "assets/tabs-BwdH-0Ix.js",
+    "assets/types-ADGwdxIq.js",
+    "index.html"
+  ],
+  "image": "lightmoni:usability-polish-20261011"
+}

@@ -16,7 +16,7 @@ test('large multibyte SQL and selected logs are bounded by UTF-8 byte size and m
 });
 
 test('oversized parameter keys fall back to an already reduced page snapshot',()=>{
- const input={page:{path:'/query?sql='+'中'.repeat(40000),title:'SQL 工作台'},query:{sql:'SELECT 1',params:{['巨大参数名'.repeat(10000)]:{type:'String',value:'x'}}},table:'log_app'};
+ const input={page:{path:'/logs?keyword='+'中'.repeat(40000),title:'日志探索'},query:{sql:'SELECT 1',params:{['巨大参数名'.repeat(10000)]:{type:'String',value:'x'}}},table:'log_app'};
  const output=boundedMonitoringContext(input);
  assert.ok(size(output)<=28000);assert.equal(output.context_truncated,true);assert.equal(output.table,'log_app');assert.equal(output.query,undefined);
 });

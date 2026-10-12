@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -103,9 +104,47 @@ func (c *Client) Log(ctx context.Context, level, body string, attrs Attributes) 
 		s.stats.LastError = "log after shutdown"
 		return
 	}
+	if s.reportingDisabled {
+		s.stats.DisabledRecords++
+		return
+	}
 	// Source metadata is SDK-owned and is frozen with the record. Sequence gaps
 	// are possible if a bounded buffer drops a log, and must remain visible.
 	s.sourceSequence++
+	policy, configured := s.remoteSampling[c.table]
+	if !configured {
+		policy, configured = s.localSampling[c.table]
+	}
+	if configured && !systemSamplingTable(c.table) {
+		trace, _ := TraceContextFromContext(ctx)
+		resource := Attributes{"service.name": s.cfg.Service, "service.instance.id": s.instance}
+		for _, a := range s.resource.Attributes {
+			resource[a.Key] = samplingAttribute(a.Value)
+		}
+		keep, rate, reason := policy.decide(c.table, Attributes{"service": s.cfg.Service, "instance_id": s.instance, "sdk.language": "go", "severity": strings.ToUpper(level), "trace_id": trace.TraceID, "event_id": s.instance + ":" + strconv.FormatInt(s.sourceSequence, 10)}, attrs, resource)
+		if !keep {
+			if reason == "unmatched" {
+				s.stats.UnmatchedLogs++
+			} else if reason == "excluded" {
+				s.stats.ExcludedLogs++
+			} else {
+				s.stats.SampledOutLogs++
+			}
+			return
+		}
+		filtered := record.Attributes[:0]
+		for _, a := range record.Attributes {
+			if a.Key != "lightmoni.sampling.rate" && a.Key != "lightmoni.sampling.weight" && a.Key != "lightmoni.sampling.rule" {
+				filtered = append(filtered, a)
+			}
+		}
+		metadata := []*commonpb.KeyValue{
+			{Key: "lightmoni.sampling.rate", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_DoubleValue{DoubleValue: rate}}},
+			{Key: "lightmoni.sampling.weight", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_DoubleValue{DoubleValue: 1 / rate}}},
+			kv("lightmoni.sampling.rule", reason),
+		}
+		record.Attributes = append(filtered, metadata...)
+	}
 	filtered := record.Attributes[:0]
 	for _, a := range record.Attributes {
 		if a.Key != "lightmoni.source_id" && a.Key != "lightmoni.source_seq" {
@@ -122,12 +161,28 @@ func (c *Client) Log(ctx context.Context, level, body string, attrs Attributes) 
 	s.logs[c.table] = append(s.logs[c.table], record)
 }
 
+func samplingAttribute(v *commonpb.AnyValue) any {
+	switch x := v.GetValue().(type) {
+	case *commonpb.AnyValue_StringValue:
+		return x.StringValue
+	case *commonpb.AnyValue_BoolValue:
+		return x.BoolValue
+	case *commonpb.AnyValue_IntValue:
+		return x.IntValue
+	case *commonpb.AnyValue_DoubleValue:
+		return x.DoubleValue
+	}
+	return nil
+}
+
 type Span struct {
-	mu      sync.Mutex
-	client  *Client
-	context TraceContext
-	data    *tracepb.Span
-	ended   bool
+	mu                  sync.Mutex
+	client              *Client
+	context             TraceContext
+	data                *tracepb.Span
+	ended               bool
+	suppressed          bool
+	reportingGeneration uint64
 }
 
 func (c *Client) Tracer() *Client { return c }
@@ -156,7 +211,9 @@ func (c *Client) StartSpan(ctx context.Context, name string, attrs ...Attributes
 			c.s.invalid(err.Error())
 		}
 	}
-	span := &Span{client: c, context: t, data: data}
+	c.s.mu.Lock()
+	span := &Span{client: c, context: t, data: data, suppressed: c.s.reportingDisabled, reportingGeneration: c.s.reportingGeneration}
+	c.s.mu.Unlock()
 	return ContextWithTrace(ctx, t), span
 }
 func (s *Span) Context() TraceContext { return s.context }
@@ -200,6 +257,10 @@ func (s *Span) End() {
 	if state.closing || s.client.table == "" {
 		state.stats.InvalidRecords++
 		state.stats.LastError = "span ended after shutdown or invalid table"
+		return
+	}
+	if state.reportingDisabled || s.suppressed || state.reportingGeneration != s.reportingGeneration {
+		state.stats.DisabledRecords++
 		return
 	}
 	if len(data.Name) == 0 || len(data.Name) > 255 {

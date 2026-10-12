@@ -54,6 +54,9 @@ func (c *Client) UpdateKey(key string) error {
 		return errors.New("configured exporter does not support updating a Key")
 	}
 	e.UpdateKey(key)
+	c.s.mu.Lock()
+	c.s.configKey = key
+	c.s.mu.Unlock()
 	select {
 	case c.s.retryNow <- struct{}{}:
 	default:

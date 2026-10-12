@@ -54,7 +54,7 @@ module LightMoni
     end
   end
   class State
-    attr_accessor :key, :closed, :failure, :sequence
+    attr_accessor :key, :closed, :failure, :sequence, :self_enabled, :self_table, :heartbeat_stop
     attr_reader :gate, :delivery, :limits, :metrics, :records, :queue, :stats, :endpoint
     def initialize(service, endpoint, key, limits)
       @endpoint = URI(endpoint)
@@ -68,6 +68,7 @@ module LightMoni
       @metrics, @records, @queue = {}, {}, []
       @stats = %w[pending_batches pending_bytes buffer_bytes delivered_batches retried_batches invalid_records overflow_records dropped_records rejected_records].to_h { |n| [n, 0] }
       @stats['last_error'] = ''
+      @self_enabled, @self_table, @self_last, @self_started, @self_previous = true, '', -Float::INFINITY, false, {}
       @resource = { 'attributes' => LightMoni.attrs('service.name' => service, 'service.instance.id' => SecureRandom.uuid) }
     end
     def invalid(message); @stats['invalid_records'] += 1; @stats['last_error'] = message; end
@@ -131,6 +132,28 @@ module LightMoni
         enqueue(table, signal, group, at) unless group.empty?
       end
       @records.clear; @stats['buffer_bytes'] = 0
+      collect_self
+    end
+    def enqueue_self(signal, rows, at)
+      size = payload(signal, rows).bytesize
+      return false if size > @limits[:max_batch_bytes] || @queue.size >= @limits[:queue_batches] || @stats['pending_bytes'] + size > @limits[:queue_bytes]
+      enqueue(@self_table, signal, rows, at); true
+    end
+    def collect_self
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      return if !@self_enabled || now - @self_last < 30
+      @self_last = now
+      at, time = Time.now.utc.iso8601(9), LightMoni.nano.to_s
+      attributes = LightMoni.attrs('lightmoni.component' => 'sdk', 'sdk.language' => 'ruby', 'sdk.version' => '0.1.0')
+      values = { 'heartbeat' => 1 }.merge(@stats.select { |name,_| %w[pending_batches pending_bytes retried_batches dropped_records rejected_records invalid_records overflow_records].include?(name) })
+      rows = values.map { |name,value| { 'name' => 'lightmoni.sdk.' + name, 'gauge' => { 'dataPoints' => [{ 'timeUnixNano' => time, 'asDouble' => value, 'attributes' => attributes }] } } }
+      enqueue_self('metrics', rows, at)
+      changed = %w[retried_batches dropped_records rejected_records invalid_records overflow_records].any? { |name| @stats[name] > @self_previous.fetch(name,0) }
+      if !@self_started || changed
+        event = @self_started ? 'diagnostics_changed' : 'started'
+        row = { 'timeUnixNano' => time, 'severityText' => changed ? 'WARN' : 'INFO', 'severityNumber' => changed ? 13 : 9, 'body' => { 'stringValue' => changed ? 'LightMoni SDK delivery, buffer or input diagnostics changed' : 'LightMoni SDK started' }, 'attributes' => attributes + LightMoni.attrs('event' => event) }
+        if enqueue_self('logs', [row], at); @self_started = true; @self_previous = @stats.dup; end
+      end
     end
     def enqueue(table, signal, rows, at)
       raw = payload(signal, rows).freeze; @sequence += 1
@@ -203,8 +226,22 @@ module LightMoni
   end
   class Client
     attr_reader :state, :table
-    def initialize(service:, table:, endpoint: 'http://127.0.0.1:4318', key: '', **limits)
+    def initialize(service:, table:, endpoint: 'http://127.0.0.1:4318', key: '', self_telemetry: true, **limits)
       @table, @state = LightMoni.table(table).dup.freeze, State.new(service, endpoint, key, limits)
+      @state.self_enabled, @state.self_table = self_telemetry, @table
+      @state.heartbeat_stop = Queue.new
+      if self_telemetry
+        root, stop = self, @state.heartbeat_stop
+        Thread.new do
+          loop do
+            begin
+              Timeout.timeout(30) { stop.pop }; break
+            rescue Timeout::Error
+              begin; root.flush(timeout: 5); rescue StandardError; end
+            end
+          end
+        end
+      end
     end
     def with_table(table)
       child = self.class.allocate
@@ -311,6 +348,7 @@ module LightMoni
       end
     end
     def shutdown(timeout: 10)
+      @state.heartbeat_stop << true if @state.heartbeat_stop
       flush(timeout: timeout)
     ensure
       @state.gate.synchronize { @state.closed = true }

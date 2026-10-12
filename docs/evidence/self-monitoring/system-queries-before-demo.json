@@ -1,0 +1,236 @@
+{
+  "dashboards": [
+    {
+      "id": "system-center",
+      "title": "系统监控 · 上报中心",
+      "panels": [
+        {
+          "title": "上报接口 QPS（最近一分钟）",
+          "status": "success",
+          "frames": [
+            {
+              "columns": [
+                {
+                  "name": "value",
+                  "type": "Float64"
+                }
+              ],
+              "rows": [
+                [
+                  0
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "title": "最近一分钟接收记录数",
+          "status": "success",
+          "frames": [
+            {
+              "columns": [
+                {
+                  "name": "value",
+                  "type": "Float64"
+                }
+              ],
+              "rows": [
+                [
+                  0
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "title": "接口 QPS · 按响应状态",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "接收记录数 · 每分钟",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "接收字节数 · 每分钟",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "上报请求平均耗时（毫秒）",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "在线中心实例数",
+          "status": "success",
+          "frames": [
+            {
+              "columns": [
+                {
+                  "name": "value",
+                  "type": "UInt64"
+                }
+              ],
+              "rows": [
+                [
+                  "1"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "title": "上报失败数（最近一分钟）",
+          "status": "success",
+          "frames": [
+            {
+              "columns": [
+                {
+                  "name": "value",
+                  "type": "Float64"
+                }
+              ],
+              "rows": [
+                [
+                  0
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "title": "中心运行状态",
+          "status": "success",
+          "frames": 1
+        },
+        {
+          "title": "堆内存（字节）",
+          "status": "success",
+          "frames": 1
+        },
+        {
+          "title": "运行协程数",
+          "status": "success",
+          "frames": 1
+        },
+        {
+          "title": "中心运行日志",
+          "status": "success",
+          "frames": 1
+        }
+      ]
+    },
+    {
+      "id": "system-agent",
+      "title": "系统监控 · Agent",
+      "panels": [
+        {
+          "title": "在线 Agent 数",
+          "status": "success",
+          "frames": [
+            {
+              "columns": [
+                {
+                  "name": "value",
+                  "type": "UInt64"
+                }
+              ],
+              "rows": [
+                [
+                  "0"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "title": "在线 Agent · 按分组",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "待发送批次",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "队列最老批次年龄（秒）",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "异常采集项与隔离批次",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "Agent 执行日志",
+          "status": "empty",
+          "frames": 1
+        }
+      ]
+    },
+    {
+      "id": "system-sdk",
+      "title": "系统监控 · SDK",
+      "panels": [
+        {
+          "title": "在线 SDK 实例数",
+          "status": "success",
+          "frames": [
+            {
+              "columns": [
+                {
+                  "name": "value",
+                  "type": "UInt64"
+                }
+              ],
+              "rows": [
+                [
+                  "0"
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "title": "在线 SDK · 按服务",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "待发送批次",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "累计重试批次",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "累计丢弃、拒绝、无效与溢出记录",
+          "status": "empty",
+          "frames": 1
+        },
+        {
+          "title": "SDK 内部诊断日志",
+          "status": "empty",
+          "frames": 1
+        }
+      ]
+    }
+  ],
+  "tables": [
+    "log_lightmoni_agent",
+    "log_lightmoni_center",
+    "log_lightmoni_sdk",
+    "metric_lightmoni_agent_gauge",
+    "metric_lightmoni_center_gauge",
+    "metric_lightmoni_center_histogram",
+    "metric_lightmoni_center_sum",
+    "metric_lightmoni_sdk_gauge"
+  ]
+}

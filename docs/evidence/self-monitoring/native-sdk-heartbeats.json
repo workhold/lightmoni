@@ -1,0 +1,50 @@
+[
+  {
+    "language": "python",
+    "passed": true,
+    "heartbeats": 1,
+    "internal_logs": 1,
+    "idle_periodic": true,
+    "pending_batches": 0
+  },
+  {
+    "language": "ruby",
+    "passed": true,
+    "heartbeats": 1,
+    "internal_logs": 1,
+    "idle_periodic": true,
+    "pending_batches": 0
+  },
+  {
+    "language": "java",
+    "passed": true,
+    "heartbeats": 1,
+    "internal_logs": 1,
+    "idle_periodic": true,
+    "pending_batches": 0
+  },
+  {
+    "language": "dotnet",
+    "passed": true,
+    "heartbeats": 1,
+    "internal_logs": 1,
+    "idle_periodic": true,
+    "pending_batches": 0
+  },
+  {
+    "language": "php",
+    "passed": true,
+    "heartbeats": 2,
+    "internal_logs": 1,
+    "idle_periodic": false,
+    "pending_batches": 0
+  },
+  {
+    "language": "rust",
+    "passed": true,
+    "heartbeats": 1,
+    "internal_logs": 1,
+    "idle_periodic": true,
+    "pending_batches": 0
+  }
+]

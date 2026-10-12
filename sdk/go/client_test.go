@@ -34,6 +34,7 @@ func (r *recorder) snapshot() []FrozenBatch {
 }
 func testClient(t *testing.T, cfg Config) *Client {
 	t.Helper()
+	cfg.DisableSelfTelemetry = true
 	cfg.Service = "test-service"
 	cfg.Table = "http"
 	if cfg.Interval == 0 {

@@ -1,0 +1,9 @@
+{
+  "fault": "missing local log directory",
+  "internal_log": [
+    "2026-10-11T15:44:16.396715Z",
+    "WARN",
+    "file_logs: /Users/zhangsiwen/dev/lightmoni/lightmoni/.lightmoni/mac-self-monitor/missing-log-directory: lstat /Users/zhangsiwen/dev/lightmoni/lightmoni/.lightmoni/mac-self-monitor/missing-log-directory: no such file or directory",
+    "collector_failed"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "time": "2026-10-11T07:23:01.633208+00:00",
+  "url": "http://127.0.0.1:18380",
+  "health": true,
+  "frontend_files_match": [
+    "assets/AlertsPage-BCqZGyr5.css",
+    "assets/AlertsPage-OqDZoFIw.js",
+    "assets/AssistantPage-B0peF_7E.js",
+    "assets/AssistantPage-V_WhX8N_.css",
+    "assets/DashboardPage-BxMK30de.js",
+    "assets/DashboardPage-C3vHwRgo.css",
+    "assets/LogExplorePage-CHWMepUK.css",
+    "assets/LogExplorePage-uF7s26ds.js",
+    "assets/SQLInput-C8dHW4rr.css",
+    "assets/SQLInput-CmV8K2DI.js",
+    "assets/SettingOutlined--91dthFE.js",
+    "assets/api-Du_QO1qL.js",
+    "assets/codicon-DF1abBS2.ttf",
+    "assets/editor.worker-BmdWdrHZ.js",
+    "assets/esm-BJB8PuCe.js",
+    "assets/index-D1UilMvv.css",
+    "assets/index-SZsmoGgr.js",
+    "assets/rolldown-runtime-C0FnF6B9.js",
+    "assets/tabs-BwdH-0Ix.js",
+    "assets/types-ADGwdxIq.js",
+    "index.html"
+  ],
+  "sdk_packages_match": 8,
+  "packaged_dual_route_docs": true,
+  "sdk_endpoint": "http://localhost:18380"
+}

@@ -7,9 +7,12 @@ function env(string $n,string $fallback): string { return getenv($n)===false?$fa
 function check(bool $v): void { if (!$v) throw new RuntimeException('SDK conformance assertion'); }
 $mode=env('LIGHTMONI_TEST_MODE','demo');
 $limits=$mode==='overflow'?['cardinality_limit'=>2]:($mode==='capacity'?['queue_bytes'=>1024,'max_batch_bytes'=>1024,'buffer_bytes'=>64]:[]);
+$limits['self_telemetry']=in_array($mode,['demo','selfmonitor'],true);
 $mon=new Client(env('LIGHTMONI_SERVICE','example-php-api'),'http',env('LIGHTMONI_ENDPOINT','http://127.0.0.1:4318'),env('LIGHTMONI_KEY',''),$limits);
 $counter=$mon->counter('http.requests');
 switch ($mode) {
+case 'selfmonitor':
+    $counter->add(-1);$mon->flush(5);sleep(32);$mon->shutdown(5);break;
 case 'fixture':
     $dims=['route'=>'/payments','method'=>'POST','status'=>200];
     $counter->add(1,$dims);$dims['status']=999;

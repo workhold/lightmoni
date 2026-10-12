@@ -69,6 +69,9 @@ func normalizeAllowedTables(tables []string) ([]string, error) {
 		if !shared.ValidLogicalTable(table) {
 			return nil, fmt.Errorf("无效的逻辑 table: %q；使用小写字母开头的字母、数字或下划线，最长 48 位，不带 log_/metric_/trace_ 前缀", table)
 		}
+		if shared.SystemLogicalTable(table) {
+			return nil, errors.New("系统内置表自动接收内部监控数据，无需配置写入权限")
+		}
 		if !unique[table] {
 			result = append(result, table)
 			unique[table] = true

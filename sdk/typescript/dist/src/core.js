@@ -1,3 +1,4 @@
+import { copyLogSampling, copyExclusions, matches, sampleLog } from './sampling.js';
 export class DeliveryError extends Error {
     retryable;
     retryAfterMs;
@@ -47,9 +48,16 @@ class State {
     logs = new Map();
     spans = new Map();
     queue = [];
-    stats = { pendingBatches: 0, pendingBytes: 0, bufferBytes: 0, deliveredBatches: 0, retriedBatches: 0, droppedRecords: 0, rejectedRecords: 0, invalidRecords: 0, overflowRecords: 0 };
+    stats = { pendingBatches: 0, pendingBytes: 0, bufferBytes: 0, deliveredBatches: 0, retriedBatches: 0, droppedRecords: 0, rejectedRecords: 0, invalidRecords: 0, overflowRecords: 0, sampledOutLogs: 0, unmatchedLogs: 0, excludedLogs: 0, disabledRecords: 0, reportingDisabled: false };
     changed = new Set();
     exporter;
+    localSampling = {};
+    remoteSampling = {};
+    remoteDisabled = false;
+    reportingGeneration = 0;
+    configInterval;
+    configRequest;
+    configLoading;
     sequence = 0;
     sourceSequence = 0n;
     failureSequence = 0;
@@ -60,10 +68,19 @@ class State {
     retryNow;
     request;
     interval;
+    selfInterval;
+    selfLast = -Infinity;
+    selfStarted = false;
+    selfPrevious;
     constructor(options) {
         this.options = options;
+        options.resource = { ...options.resource };
         if (!options.service || encoder.encode(options.service).length > 128 || !validTable(options.table))
             throw new Error("valid service and logical table are required");
+        this.updateLogSampling(options.logSampling ?? {});
+        Object.assign(this.stats, { sampledOutLogs: 0, unmatchedLogs: 0, excludedLogs: 0, disabledRecords: 0, reportingDisabled: options.disabled ?? false });
+        if (options.configIntervalMs !== undefined && (!Number.isSafeInteger(options.configIntervalMs) || options.configIntervalMs < 1000))
+            throw new Error('configuration interval must be at least one second');
         this.settings = {
             intervalMs: options.intervalMs ?? 10_000, requestTimeoutMs: options.requestTimeoutMs ?? 10_000,
             retryMinMs: options.retryMinMs ?? 200, retryMaxMs: options.retryMaxMs ?? 30_000,
@@ -95,7 +112,121 @@ class State {
         // A library timer should not prevent an otherwise finished Node process exiting.
         const timer = this.interval;
         timer.unref?.();
+        this.selfInterval = setInterval(() => { if (!this.closing) {
+            this.collectSelf();
+            this.kick();
+        } }, 30_000);
+        this.selfInterval.unref?.();
+        if (options.remoteConfig !== false && (options.configEndpoint || options.endpoint)) {
+            this.configInterval = setInterval(() => { if (!this.closing)
+                void this.refreshConfig().catch(error => { this.stats.configError = error instanceof Error ? error.message : String(error); }); }, options.configIntervalMs ?? 30_000);
+            this.configInterval.unref?.();
+        }
     }
+    updateLogSampling(policies) {
+        const snapshot = {};
+        for (const [table, p] of Object.entries(policies)) {
+            if (!validTable(table) || ['lightmoni_center', 'lightmoni_agent', 'lightmoni_sdk'].includes(table))
+                throw new Error('invalid log policy table');
+            snapshot[table] = copyLogSampling(p);
+        }
+        this.localSampling = snapshot;
+    }
+    setReportingDisabled(disabled) {
+        if (this.stats.reportingDisabled === disabled)
+            return;
+        this.stats.reportingDisabled = disabled;
+        if (disabled) {
+            this.reportingGeneration++;
+            this.request?.abort();
+            this.retryNow?.();
+            this.stats.disabledRecords += this.queue.reduce((n, q) => n + q.records, 0) + [...this.logs.values(), ...this.spans.values()].reduce((n, rows) => n + rows.length, 0);
+            for (const m of this.instruments.values()) {
+                this.stats.disabledRecords += m.series.size;
+                m.series.clear();
+                m.start = nowNano();
+            }
+            this.queue.length = 0;
+            this.logs.clear();
+            this.spans.clear();
+            this.stats.pendingBytes = 0;
+            this.stats.pendingBatches = 0;
+            this.stats.bufferBytes = 0;
+        }
+        else {
+            this.selfLast = -Infinity;
+            for (const m of this.instruments.values())
+                m.start = nowNano();
+        }
+        this.notify();
+    }
+    refreshConfig() {
+        if (this.configLoading)
+            return this.configLoading;
+        this.configLoading = this.fetchConfig().finally(() => { this.configLoading = undefined; });
+        return this.configLoading;
+    }
+    async fetchConfig() {
+        const endpoint = this.options.configEndpoint ?? this.options.endpoint;
+        if (!endpoint || this.closing)
+            throw new Error('remote configuration is disabled or SDK closed');
+        const request = new AbortController();
+        this.configRequest = request;
+        const timer = setTimeout(() => request.abort(), 5000);
+        try {
+            const response = await fetch(endpoint.replace(/\/$/, '') + '/v1/sdk-config', { headers: this.options.key ? { Authorization: `Bearer ${this.options.key}` } : {}, signal: request.signal, redirect: 'error' });
+            if (response.status !== 200) {
+                void response.body?.cancel();
+                throw new Error(`SDK configuration HTTP ${response.status}`);
+            }
+            if (!response.body)
+                throw new Error('missing SDK configuration');
+            const reader = response.body.getReader(), parts = [];
+            let length = 0;
+            while (true) {
+                const chunk = await reader.read();
+                if (chunk.done)
+                    break;
+                length += chunk.value.length;
+                if (length > 1024 * 1024) {
+                    await reader.cancel();
+                    throw new Error('SDK configuration exceeds 1 MiB');
+                }
+                parts.push(chunk.value);
+            }
+            const raw = new Uint8Array(length);
+            let offset = 0;
+            for (const part of parts) {
+                raw.set(part, offset);
+                offset += part.length;
+            }
+            const config = JSON.parse(new TextDecoder().decode(raw));
+            if (!config || typeof config.revision !== 'string' || !config.revision || config.revision.length > 128 || !config.log_sampling || Array.isArray(config.log_sampling) || typeof config.log_sampling !== 'object' || Object.keys(config.log_sampling).length > 200 || Object.keys(config).some(k => !['revision', 'log_sampling', 'disable_rules'].includes(k)))
+                throw new Error('invalid SDK configuration');
+            const policies = {};
+            for (const [table, p] of Object.entries(config.log_sampling)) {
+                if (!validTable(table) || ['lightmoni_center', 'lightmoni_agent', 'lightmoni_sdk'].includes(table))
+                    throw new Error('invalid log policy table');
+                policies[table] = copyLogSampling(p);
+            }
+            const disable = copyExclusions(config.disable_rules ?? [], true);
+            if (this.closing)
+                return;
+            this.remoteSampling = policies;
+            this.remoteDisabled = disable.some(rule => matches(rule.conditions, this.samplingRecord()));
+            this.setReportingDisabled(!!this.options.disabled || this.remoteDisabled);
+            this.stats.configRevision = config.revision;
+            this.stats.configError = undefined;
+        }
+        catch (error) {
+            throw new Error(error instanceof Error && error.message.startsWith('SDK configuration') ? error.message : 'SDK configuration unavailable or invalid');
+        }
+        finally {
+            clearTimeout(timer);
+            this.configRequest = undefined;
+        }
+    }
+    samplingRecord(attrs = {}, level = '', context) { return { record: { service: this.options.service, instance_id: this.instanceId, 'sdk.language': 'typescript', severity: level.toUpperCase(), trace_id: context?.traceId, event_id: `${this.instanceId}:${this.sourceSequence}` }, attributes: attrs, resource: { ...this.options.resource, 'service.name': this.options.service, 'service.instance.id': this.instanceId } }; }
     attributes(attrs) {
         const keys = Object.keys(attrs).sort();
         if (keys.length > this.settings.maxAttributes)
@@ -116,6 +247,10 @@ class State {
     store(map, table, record) {
         if (this.closing) {
             this.invalid("record after shutdown");
+            return;
+        }
+        if (this.stats.reportingDisabled) {
+            this.stats.disabledRecords++;
             return;
         }
         const size = encoder.encode(JSON.stringify(record)).length + 64;
@@ -150,6 +285,10 @@ class State {
     record(metric, value, attrs) {
         if (this.closing) {
             this.invalid("metric after shutdown");
+            return;
+        }
+        if (this.stats.reportingDisabled) {
+            this.stats.disabledRecords++;
             return;
         }
         let attributes;
@@ -221,6 +360,8 @@ class State {
         point.observed = nowNano();
     }
     collect() {
+        if (this.stats.reportingDisabled)
+            return;
         const at = new Date().toISOString(), end = nowNano();
         const tables = new Set([...this.logs.keys(), ...this.spans.keys(), ...Array.from(this.instruments.values(), i => i.table)]);
         for (const table of [...tables].sort()) {
@@ -255,6 +396,33 @@ class State {
         this.logs.clear();
         this.spans.clear();
         this.stats.bufferBytes = 0;
+        this.collectSelf();
+    }
+    collectSelf() {
+        const clock = performance.now();
+        if (this.stats.reportingDisabled || this.options.selfTelemetry === false || clock - this.selfLast < 30_000)
+            return;
+        this.selfLast = clock;
+        const at = new Date().toISOString(), time = nano(nowNano());
+        const attributes = [{ key: 'lightmoni.component', value: { stringValue: 'sdk' } }, { key: 'sdk.language', value: { stringValue: 'typescript' } }, { key: 'sdk.version', value: { stringValue: '0.1.0' } }];
+        const values = { heartbeat: 1, pending_batches: this.stats.pendingBatches, pending_bytes: this.stats.pendingBytes, retried_batches: this.stats.retriedBatches, dropped_records: this.stats.droppedRecords, rejected_records: this.stats.rejectedRecords, invalid_records: this.stats.invalidRecords, overflow_records: this.stats.overflowRecords };
+        this.enqueueSelf('metrics', Object.entries(values).map(([name, value]) => ({ name: `lightmoni.sdk.${name}`, gauge: { dataPoints: [{ timeUnixNano: time, attributes, asDouble: value }] } })), at);
+        const changed = this.selfPrevious && ['retriedBatches', 'droppedRecords', 'rejectedRecords', 'invalidRecords', 'overflowRecords'].some(key => this.stats[key] > this.selfPrevious[key]);
+        if (!this.selfStarted || changed) {
+            const event = this.selfStarted ? 'diagnostics_changed' : 'started';
+            const row = { timeUnixNano: time, severityText: changed ? 'WARN' : 'INFO', severityNumber: changed ? 13 : 9, body: { stringValue: changed ? 'LightMoni SDK delivery, buffer or input diagnostics changed' : 'LightMoni SDK started' }, attributes: [...attributes, ...this.attributes({ event })] };
+            if (this.enqueueSelf('logs', [row], at)) {
+                this.selfStarted = true;
+                this.selfPrevious = { ...this.stats };
+            }
+        }
+    }
+    enqueueSelf(signal, rows, at) {
+        const bytes = this.payload(signal, rows).length;
+        if (bytes > this.settings.maxBatchBytes || this.queue.length >= this.settings.queueBatches || this.stats.pendingBytes + bytes > this.settings.queueBytes)
+            return false;
+        this.enqueue(signal, this.options.table, rows, at);
+        return true;
     }
     payload(signal, records) {
         const scope = { name: "lightmoni/sdk/typescript" };
@@ -333,6 +501,10 @@ class State {
                 }
                 if (this.stopped)
                     break;
+                if (this.queue[0] !== item) {
+                    backoff = this.settings.retryMinMs;
+                    continue;
+                }
                 if (!failure) {
                     this.queue.shift();
                     this.stats.pendingBatches--;
@@ -423,7 +595,19 @@ export class LightMoni {
     histogram(name, options = {}) { return new Histogram(this.state, this.state.instrument(this.table, name, "histogram", options)); }
     stats() { return { ...this.state.stats }; }
     updateKey(key) { this.state.options.key = key; this.state.retryNow?.(); }
+    updateLogSampling(policies) { if (this.state.closing)
+        throw new Error('SDK closed'); this.state.updateLogSampling(policies); }
+    setReportingEnabled(enabled) { this.state.options.disabled = !enabled; this.state.setReportingDisabled(!enabled || this.state.remoteDisabled); }
+    async refreshConfig() { await this.state.refreshConfig(); }
     log(level, body, attrs = {}, context = this.state.options.contextProvider?.()) {
+        if (this.state.closing) {
+            this.state.invalid('record after shutdown');
+            return;
+        }
+        if (this.state.stats.reportingDisabled) {
+            this.state.stats.disabledRecords++;
+            return;
+        }
         if (encoder.encode(body).length > 64 * 1024) {
             this.state.invalid("log body exceeded 64 KiB");
             return;
@@ -437,6 +621,21 @@ export class LightMoni {
             return;
         }
         this.state.sourceSequence++;
+        const policy = this.state.remoteSampling[this.table] ?? this.state.localSampling[this.table];
+        if (policy) {
+            const decision = sampleLog(policy, this.table, this.state.samplingRecord(attrs, level, context));
+            if (!decision.keep) {
+                if (decision.reason === 'excluded')
+                    this.state.stats.excludedLogs++;
+                else if (decision.reason === 'unmatched')
+                    this.state.stats.unmatchedLogs++;
+                else
+                    this.state.stats.sampledOutLogs++;
+                return;
+            }
+            attributes = attributes.filter(a => !['lightmoni.sampling.rate', 'lightmoni.sampling.weight', 'lightmoni.sampling.rule'].includes(a.key));
+            attributes.push({ key: 'lightmoni.sampling.rate', value: { doubleValue: decision.rate } }, { key: 'lightmoni.sampling.weight', value: { doubleValue: 1 / decision.rate } }, { key: 'lightmoni.sampling.rule', value: { stringValue: decision.reason } });
+        }
         attributes = attributes.filter(a => a.key !== "lightmoni.source_id" && a.key !== "lightmoni.source_seq");
         attributes.push({ key: "lightmoni.source_id", value: { stringValue: this.state.instanceId } }, { key: "lightmoni.source_seq", value: { intValue: this.state.sourceSequence.toString() } });
         const time = nano(nowNano()), severity = { trace: 1, debug: 5, info: 9, warn: 13, warning: 13, error: 17, fatal: 21 }[level.toLowerCase()] ?? 9;
@@ -456,6 +655,9 @@ export class LightMoni {
         }
         this.state.closing = true;
         clearInterval(this.state.interval);
+        clearInterval(this.state.selfInterval);
+        clearInterval(this.state.configInterval);
+        this.state.configRequest?.abort();
         try {
             await this.flush({ timeoutMs });
         }
@@ -474,9 +676,13 @@ export class Span {
     context;
     data;
     ended = false;
+    reportingGeneration;
+    suppressed;
     constructor(state, table, name, attrs, parent) {
         this.state = state;
         this.table = table;
+        this.reportingGeneration = state.reportingGeneration;
+        this.suppressed = state.stats.reportingDisabled;
         if (!validTrace(parent))
             parent = undefined;
         this.context = { traceId: parent?.traceId ?? uuid().replaceAll("-", ""), spanId: uuid().replaceAll("-", "").slice(0, 16), flags: parent?.flags ?? 1, traceState: parent?.traceState };
@@ -499,7 +705,10 @@ export class Span {
     setKind(kind) { if (!this.ended)
         this.data.kind = kind; }
     end() { if (this.ended)
-        return; this.ended = true; const time = nowNano(), start = BigInt(String(this.data.startTimeUnixNano)); this.data.endTimeUnixNano = nano(time < start ? start : time); const name = String(this.data.name); if (!name || encoder.encode(name).length > 255) {
+        return; this.ended = true; if (this.suppressed || this.reportingGeneration !== this.state.reportingGeneration) {
+        this.state.stats.disabledRecords++;
+        return;
+    } const time = nowNano(), start = BigInt(String(this.data.startTimeUnixNano)); this.data.endTimeUnixNano = nano(time < start ? start : time); const name = String(this.data.name); if (!name || encoder.encode(name).length > 255) {
         this.state.invalid("invalid span name");
         return;
     } this.state.store(this.state.spans, this.table, this.data); }

@@ -22,11 +22,12 @@ import {
   LeftOutlined,
   RightOutlined,
   CloseOutlined,
+  UpOutlined,
+  DownOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
   Button,
-  Checkbox,
   Descriptions,
   Drawer,
   Dropdown,
@@ -49,6 +50,7 @@ import SQLInput from "../../shared/SQLInput";
 import { usePublishMonitoringContext } from "../../shared/monitoring-context";
 import { AssistantPanel } from "../assistant/AssistantPage";
 import Histogram from "./Histogram";
+import LogResultsTable, { severityColor } from "./LogResultsTable";
 import SearchBox from "./SearchBox";
 import FieldAggregate, { TopValues, useFieldAggregate } from "./FieldAggregate";
 import { parseExpression } from "./expression";
@@ -58,10 +60,10 @@ import {
   attributes,
   attributeType,
   boundBuffer,
-  cell,
   csv,
   fieldType,
   initialSpec,
+  logFieldMetadata,
   initialView,
   logURL,
   readLogURL,
@@ -79,24 +81,6 @@ import {
 } from "./model";
 import "./logs.css";
 
-const formatTime = (value: unknown) => {
-  const text = String(value);
-  const date = new Date(text);
-  return Number.isNaN(date.getTime())
-    ? text
-    : date.toLocaleString() +
-        "." +
-        (text.match(/\.(\d+)/)?.[1] ?? "0").slice(0, 3).padEnd(3, "0");
-};
-const severityColor = (level: unknown) =>
-  ({
-    ERROR: "error",
-    FATAL: "magenta",
-    WARN: "warning",
-    INFO: "success",
-    DEBUG: "default",
-    TRACE: "default",
-  })[String(level)] ?? "default";
 const inverse: Record<string, string> = {
   eq: "ne",
   ne: "eq",
@@ -202,7 +186,7 @@ export default function LogExplorePage() {
   const refreshSeconds = view.refresh_seconds ?? 0;
   const table = tables.find((t) => t.id === spec.table_id),
     activeTable = tables.find((t) => t.id === activeSpec.table_id);
-  const selectedForAI =
+  const selectedForAI = useMemo(() =>
     selected &&
     new TextEncoder().encode(JSON.stringify(selected)).byteLength > 16000
       ? {
@@ -214,7 +198,7 @@ export default function LogExplorePage() {
           body: String(selected.body ?? "").slice(0, 2000),
           context_truncated: true,
         }
-      : selected;
+      : selected, [selected]);
   usePublishMonitoringContext({
     table: activeSpec.table_id,
     services: activeSpec.services,
@@ -287,10 +271,8 @@ export default function LogExplorePage() {
           tableRef.current?.scrollTo({ key: readAnchor.current });
         } else if (!restore) {
           tableRef.current?.scrollTo({ top: 0 });
-          // Empty-state focus and previous horizontal browsing can otherwise
-          // leave the new result's first non-pinned column behind the time column.
           tableRef.current?.nativeElement
-            .querySelector<HTMLElement>(".ant-table-header")
+            .closest<HTMLElement>(".lm-log-table-scroll")
             ?.scrollTo({ left: 0 });
         }
       });
@@ -589,7 +571,9 @@ export default function LogExplorePage() {
         limit: 200,
       });
       if (seq === generation.current) {
-        setResult(data);
+        setResult((previous) => previous?.session_id === data.session_id
+          ? { ...data, histogram: previous.histogram, range: previous.range }
+          : data);
         setRows((old) => mergeRows(old, asRows(data.frame)));
       }
     } catch (err) {
@@ -677,15 +661,11 @@ export default function LogExplorePage() {
       clearInterval(timer);
     };
   }, [live, view.lookback]);
-  const available = useMemo(() => {
-    const names = [...(table?.columns.map((c) => c.name) ?? [])];
-    for (const row of rows)
-      for (const key of Object.keys(attributes(row))) {
-        const name = "attr:" + key;
-        if (!names.includes(name)) names.push(name);
-      }
-    return names;
-  }, [table, rows]);
+  const fieldMetadata = useMemo(
+    () => logFieldMetadata(table?.columns ?? [], rows),
+    [table, rows],
+  );
+  const available = fieldMetadata.names;
   const filteredFields = available.filter((name) =>
     name.toLowerCase().includes(fieldSearch.toLowerCase()),
   );
@@ -706,9 +686,6 @@ export default function LogExplorePage() {
         "trace_id",
       ].includes(name),
   );
-  const displayColumns = narrow
-    ? view.columns.filter((name) => ["event_time", "body"].includes(name))
-    : view.columns;
   function openFilter(
     index: number | null = null,
     name?: string,
@@ -804,159 +781,25 @@ export default function LogExplorePage() {
       return { ...v, columns };
     });
   }
-  function resize(name: string, width: number) {
-    setView((v) => ({
+  const resize = useCallback((name: string, width: number) => {
+    const next = Math.max(80, Math.min(1200, width));
+    setView((v) => v.widths[name] === next ? v : {
       ...v,
-      widths: { ...v.widths, [name]: Math.max(80, Math.min(1200, width)) },
-    }));
+      widths: { ...v.widths, [name]: next },
+    });
+  }, []);
+  // Keep handlers current without invalidating the table for query drafts or drawers.
+  function expandTableRange() {
+    commit(
+      { ...activeSpec, range: timeRange(1440), interval_ms: 0 },
+      false,
+      { ...view, lookback: 1440 },
+    );
   }
-  function startResize(event: React.MouseEvent, name: string) {
-    event.preventDefault();
-    const start = event.clientX,
-      width = view.widths[name] ?? 180;
-    const move = (e: MouseEvent) => resize(name, width + e.clientX - start);
-    const end = () => {
-      document.removeEventListener("mousemove", move);
-      document.removeEventListener("mouseup", end);
-    };
-    document.addEventListener("mousemove", move);
-    document.addEventListener("mouseup", end);
-  }
-  const columns = displayColumns.map((name) => ({
-    key: name,
-    title: (
-      <span className="lm-log-column-title">
-        <span>{name.replace(/^attr:/, "")}</span>
-        <span
-          role="separator"
-          tabIndex={0}
-          aria-label={`调整 ${name} 列宽`}
-          aria-orientation="vertical"
-          className="lm-log-resize"
-          onMouseDown={(e) => startResize(e, name)}
-          onKeyDown={(e) => {
-            if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-              e.preventDefault();
-              resize(
-                name,
-                (view.widths[name] ?? 180) +
-                  (e.key === "ArrowRight" ? 20 : -20),
-              );
-            }
-          }}
-        />
-      </span>
-    ),
-    width: narrow
-      ? name === "event_time"
-        ? 140
-        : 420
-      : (view.widths[name] ?? 180),
-    fixed:
-      !narrow && view.pinned.includes(name) ? ("left" as const) : undefined,
-    render: (_: unknown, row: LogRow) =>
-      name === "body" ? (
-        <div className="lm-log-document">
-          {narrow && (
-            <small>
-              <button
-                onClick={() =>
-                  quickFilter({
-                    scope: "column",
-                    field: "service",
-                    type: "string",
-                    op: "eq",
-                    value: row.service,
-                  })
-                }
-              >
-                {String(row.service)}
-              </button>
-              <Tag color={severityColor(row.severity)}>
-                {String(row.severity)}
-              </Tag>
-            </small>
-          )}
-          <button
-            className={`lm-log-message ${(view.row_lines ?? 1) !== 1 ? "is-wrapped" : ""}`}
-            style={
-              (view.row_lines ?? 1) > 1
-                ? { WebkitLineClamp: view.row_lines }
-                : undefined
-            }
-            onClick={() => {
-              selectEvent(row);
-            }}
-            title={printable(row.body)}
-          >
-            {printable(row.body)}
-          </button>
-        </div>
-      ) : name === "severity" ? (
-        <button
-          className="lm-log-inline-filter"
-          title="按级别筛选"
-          onClick={() =>
-            quickFilter({
-              scope: "column",
-              field: "severity",
-              type: "string",
-              op: "eq",
-              value: row.severity,
-            })
-          }
-        >
-          <Tag color={severityColor(row.severity)}>
-            {printable(row.severity)}
-          </Tag>
-        </button>
-      ) : name === "service" ? (
-        <button
-          className="lm-log-inline-filter"
-          title="按服务筛选"
-          onClick={() =>
-            quickFilter({
-              scope: "column",
-              field: "service",
-              type: "string",
-              op: "eq",
-              value: row.service,
-            })
-          }
-        >
-          {printable(row.service)}
-        </button>
-      ) : (
-        <span className="lm-log-cell" title={printable(cell(row, name))}>
-          {name === "event_time" ? (
-            narrow ? (
-              <span className="lm-log-time-narrow">
-                <span>
-                  {new Date(String(row.event_time)).toLocaleDateString(
-                    undefined,
-                    { month: "2-digit", day: "2-digit" },
-                  )}
-                </span>
-                <time dateTime={String(row.event_time)}>
-                  {new Date(String(row.event_time)).toLocaleTimeString(
-                    undefined,
-                    { hourCycle: "h23" },
-                  )}
-                  .
-                  {(String(row.event_time).match(/\.(\d+)/)?.[1] ?? "0")
-                    .slice(0, 3)
-                    .padEnd(3, "0")}
-                </time>
-              </span>
-            ) : (
-              formatTime(row.event_time)
-            )
-          ) : (
-            printable(cell(row, name))
-          )}
-        </span>
-      ),
-  }));
+  const tableActions = useRef({ filter: quickFilter, expand: expandTableRange });
+  tableActions.current = { filter: quickFilter, expand: expandTableRange };
+  const filterFromTable = useCallback((filter: Filter) => tableActions.current.filter(filter), []);
+  const expandFromTable = useCallback(() => tableActions.current.expand(), []);
 
   async function showContext(limit = contextLimit) {
     if (!selected) return;
@@ -1102,35 +945,18 @@ export default function LogExplorePage() {
   const selectedIndex = selected
     ? rows.findIndex((row) => row.event_id === selected.event_id)
     : -1;
-  function selectEvent(row: LogRow) {
+  const selectEvent = useCallback((row: LogRow) => {
     setSelected(row);
     setContext(undefined);
     setContextError("");
     setContextLimit(25);
-  }
+  }, []);
   function fieldKind(name: string) {
-    const type =
-      table?.columns.find((c) => c.name === name)?.type ??
-      (name.startsWith("attr:")
-        ? attributeType(
-            rows.find(
-              (row) => attributes(row)[name.slice(5)] !== undefined,
-            ) ?? { event_id: "" },
-            name.slice(5),
-          )
-        : "String");
-    return /DateTime/.test(type)
-      ? "时间"
-      : /Int|Float|Decimal|number/.test(type)
-        ? "数字"
-        : /Bool|boolean/.test(type)
-          ? "布尔"
-          : /Map|Array|JSON/.test(type)
-            ? "对象"
-            : "文本";
+    return fieldMetadata.kinds.get(name) ?? "文本";
   }
   function renderField(name: string) {
     const kind = fieldKind(name);
+    const index = view.columns.indexOf(name);
     return (
       <div
         className={`lm-log-field ${fieldOpen === name ? "selected" : ""}`}
@@ -1154,6 +980,28 @@ export default function LogExplorePage() {
           </span>
           <span>{name.replace(/^attr:/, "")}</span>
         </button>
+        {index !== -1 && (
+          <span className="lm-log-field-order">
+            <Button
+              size="small"
+              type="text"
+              title={`上移 ${name}`}
+              aria-label={`上移列 ${name}`}
+              disabled={index === 0}
+              icon={<UpOutlined />}
+              onClick={() => moveColumn(index, -1)}
+            />
+            <Button
+              size="small"
+              type="text"
+              title={`下移 ${name}`}
+              aria-label={`下移列 ${name}`}
+              disabled={index === view.columns.length - 1}
+              icon={<DownOutlined />}
+              onClick={() => moveColumn(index, 1)}
+            />
+          </span>
+        )}
         <Button
           size="small"
           type="text"
@@ -1165,12 +1013,12 @@ export default function LogExplorePage() {
       </div>
     );
   }
-  const normalizedSelected = selected
+  const normalizedSelected = useMemo(() => selected
     ? { ...selected, attributes: attributes(selected) }
-    : {};
-  const selectedAttributes = selected
+    : {}, [selected]);
+  const selectedAttributes = useMemo(() => selected
     ? Object.entries(attributes(selected))
-    : [];
+    : [], [selected]);
   const fieldSidebar = (
     <>
       <header>
@@ -1230,7 +1078,7 @@ export default function LogExplorePage() {
       )}
       <div className="lm-log-field-list">
         <div className="lm-log-field-group">
-          <b>已选字段</b>
+          <b title="使用字段右侧的箭头调整列顺序">已选字段</b>
           <small>{view.columns.length}</small>
         </div>
         {view.columns
@@ -1325,26 +1173,37 @@ export default function LogExplorePage() {
       </header>
       <section className="lm-log-query">
         <div className="lm-log-search-line">
-          <Select
-            showSearch
-            optionFilterProp="label"
-            aria-label="日志表"
-            placeholder="选择日志表"
-            value={spec.table_id || undefined}
-            className="lm-log-table-picker"
-            options={tables.map((t) => ({ value: t.id, label: t.name }))}
-            onChange={(id) => {
-              setSpec({
-                ...spec,
-                table_id: id,
-                services: [],
-                filters: [],
-                sql: `SELECT * FROM ${tables.find((t) => t.id === id)?.name ?? id}`,
-              });
-              setFieldOpen(undefined);
-              setSaved(undefined);
-            }}
-          />
+          <Tooltip title={table?.name ?? spec.table_id}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              aria-label="日志表"
+              placeholder="选择日志表"
+              value={spec.table_id || undefined}
+              className="lm-log-table-picker"
+              popupMatchSelectWidth={520}
+              virtual={false}
+              classNames={{ popup: { root: "lm-log-table-options" } }}
+              labelRender={({ label }) => (
+                <span className="lm-log-table-name">{label}</span>
+              )}
+              optionRender={({ label }) => (
+                <span className="lm-log-table-option">{label}</span>
+              )}
+              options={tables.map((t) => ({ value: t.id, label: t.name, title: t.name }))}
+              onChange={(id) => {
+                setSpec({
+                  ...spec,
+                  table_id: id,
+                  services: [],
+                  filters: [],
+                  sql: `SELECT * FROM ${tables.find((t) => t.id === id)?.name ?? id}`,
+                });
+                setFieldOpen(undefined);
+                setSaved(undefined);
+              }}
+            />
+          </Tooltip>
           <Select
             aria-label="检索模式"
             value={
@@ -1936,87 +1795,18 @@ export default function LogExplorePage() {
                     aria-label="原始日志结果"
                     id="lm-log-document-results"
                   >
-                    <Table<LogRow>
-                      ref={tableRef}
-                      size="small"
-                      virtual
-                      rowKey="event_id"
-                      dataSource={rows}
-                      columns={[
-                        {
-                          key: "detail",
-                          title: "",
-                          width: 34,
-                          fixed: "left",
-                          render: (_: unknown, row: LogRow) => (
-                            <Tooltip title="查看日志详情">
-                              <Button
-                                type="text"
-                                size="small"
-                                className="lm-log-open-detail"
-                                aria-label={`查看日志详情 ${row.event_id}`}
-                                icon={<RightOutlined />}
-                                onClick={() => selectEvent(row)}
-                              />
-                            </Tooltip>
-                          ),
-                        },
-                        ...columns,
-                      ]}
-                      pagination={false}
-                      scroll={{
-                        x:
-                          34 +
-                          displayColumns.reduce(
-                            (sum, name) =>
-                              sum +
-                              (narrow
-                                ? name === "event_time"
-                                  ? 140
-                                  : 420
-                                : (view.widths[name] ?? 180)),
-                            0,
-                          ),
-                        y: 480,
-                      }}
-                      rowClassName={(row) =>
-                        row.event_id === selected?.event_id
-                          ? "lm-log-active-row"
-                          : ""
-                      }
-                      locale={{
-                        emptyText: (
-                          <Empty
-                            image={Empty.PRESENTED_IMAGE_SIMPLE}
-                            description={
-                              loading ? (
-                                "正在查询日志"
-                              ) : (
-                                <span>
-                                  没有匹配日志{" "}
-                                  <Button
-                                    size="small"
-                                    type="link"
-                                    onClick={() =>
-                                      commit(
-                                        {
-                                          ...activeSpec,
-                                          range: timeRange(1440),
-                                          interval_ms: 0,
-                                        },
-                                        false,
-                                        { ...view, lookback: 1440 },
-                                      )
-                                    }
-                                  >
-                                    扩大到最近 24 小时
-                                  </Button>
-                                </span>
-                              )
-                            }
-                          />
-                        ),
-                      }}
+                    <LogResultsTable
+                      tableRef={tableRef}
+                      rows={rows}
+                      selectedColumns={view.columns}
+                      widths={view.widths}
+                      rowLines={view.row_lines ?? 1}
+                      selectedID={selected?.event_id}
+                      loading={loading}
+                      onSelect={selectEvent}
+                      onFilter={filterFromTable}
+                      onResize={resize}
+                      onExpandRange={expandFromTable}
                     />
                   </div>
                 )}
@@ -2190,7 +1980,7 @@ export default function LogExplorePage() {
         </div>
       </Modal>
       <Modal
-        title="显示列与固定列"
+        title="显示列与顺序"
         open={columnsOpen}
         onCancel={() => setColumnsOpen(false)}
         footer={
@@ -2223,19 +2013,6 @@ export default function LogExplorePage() {
               }}
             >
               <b>{name}</b>
-              <Checkbox
-                checked={view.pinned.includes(name)}
-                onChange={(e) =>
-                  setView((v) => ({
-                    ...v,
-                    pinned: e.target.checked
-                      ? [...v.pinned, name]
-                      : v.pinned.filter((n) => n !== name),
-                  }))
-                }
-              >
-                固定
-              </Checkbox>
               <Button
                 size="small"
                 disabled={i === 0}
@@ -2533,7 +2310,7 @@ export default function LogExplorePage() {
           />
         </label>
         <p>
-          保存当前已执行的查询、时间模式、显示列和固定列。实时状态和会话数据不会保存。
+          保存当前已执行的查询、时间模式、显示列和列顺序。实时状态和会话数据不会保存。
         </p>
         {saved && (
           <Button
@@ -2633,22 +2410,6 @@ export default function LogExplorePage() {
       >
         <Space>
           <Button onClick={() => void copy(result?.sql ?? "")}>复制 SQL</Button>
-          <Button
-            onClick={() => {
-              setSQLOpen(false);
-              navigate("/query?sql=" + encodeURIComponent(result?.sql ?? ""), {
-                state: {
-                  query: {
-                    sql: result?.sql,
-                    params: result?.params,
-                    range: activeSpec.range,
-                  },
-                },
-              });
-            }}
-          >
-            在 SQL 工作台打开
-          </Button>
         </Space>
         <SQLInput readOnly value={result?.sql ?? ""} height={300} />
         <h3>参数（独立绑定，未插值）</h3>

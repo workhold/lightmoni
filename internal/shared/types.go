@@ -52,6 +52,7 @@ type QueryResponse struct {
 	Results   []QueryResult `json:"results"`
 }
 type Table struct {
+	System                 bool     `json:"system"`
 	ID                     string   `json:"id"`
 	Name                   string   `json:"name"`
 	LogicalName            string   `json:"logical_name"`

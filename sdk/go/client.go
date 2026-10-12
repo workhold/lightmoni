@@ -32,6 +32,13 @@ type Attributes map[string]any
 
 // Config has no required private Key when using the local Agent.
 type Config struct {
+	// DisableSelfTelemetry is for embedded collectors and protocol fixtures.
+	DisableSelfTelemetry                                               bool
+	DisableRemoteConfig                                                bool
+	Disabled                                                           bool
+	ConfigEndpoint, ConfigKey                                          string
+	ConfigInterval                                                     time.Duration
+	LogSampling                                                        map[string]LogSamplingPolicy
 	Service, Table, Endpoint, Key                                      string
 	InstanceID                                                         string
 	Resource                                                           Attributes
@@ -67,6 +74,10 @@ type Stats struct {
 	PendingBatches, PendingBytes, BufferBytes                                                          int
 	DeliveredBatches, RetriedBatches, DroppedRecords, RejectedRecords, InvalidRecords, OverflowRecords uint64
 	LastError                                                                                          string
+	SampledOutLogs, UnmatchedLogs                                                                      uint64
+	ConfigRevision, ConfigError                                                                        string
+	ReportingDisabled                                                                                  bool
+	ExcludedLogs, DisabledRecords                                                                      uint64
 }
 
 type queuedBatch struct {
@@ -75,28 +86,39 @@ type queuedBatch struct {
 	records  int
 }
 type state struct {
-	mu             sync.Mutex
-	cfg            Config
-	resource       *resourcepb.Resource
-	instance       string
-	metrics        map[string]*instrument
-	logs           map[string][]*logpb.LogRecord
-	spans          map[string][]*tracepb.Span
-	queue          []queuedBatch
-	sequence       uint64
-	sourceSequence int64
-	lastFailure    uint64
-	failure        error
-	bufferBytes    int
-	stats          Stats
-	changed        chan struct{}
-	wake           chan struct{}
-	retryNow       chan struct{}
-	ctx            context.Context
-	cancel         context.CancelFunc
-	done           chan struct{}
-	closing        bool
-	closed         bool
+	mu                                sync.Mutex
+	cfg                               Config
+	resource                          *resourcepb.Resource
+	instance                          string
+	metrics                           map[string]*instrument
+	logs                              map[string][]*logpb.LogRecord
+	spans                             map[string][]*tracepb.Span
+	queue                             []queuedBatch
+	sequence                          uint64
+	sourceSequence                    int64
+	lastFailure                       uint64
+	failure                           error
+	bufferBytes                       int
+	stats                             Stats
+	changed                           chan struct{}
+	wake                              chan struct{}
+	retryNow                          chan struct{}
+	ctx                               context.Context
+	cancel                            context.CancelFunc
+	done                              chan struct{}
+	closing                           bool
+	closed                            bool
+	selfLast                          time.Time
+	selfPrevious                      Stats
+	selfStarted                       bool
+	localSampling, remoteSampling     map[string]LogSamplingPolicy
+	configDone                        chan struct{}
+	configMu                          sync.Mutex
+	reportingDisabled, remoteDisabled bool
+	localDisabled                     bool
+	reportingGeneration               uint64
+	configKey                         string
+	deliveryCancel                    context.CancelFunc
 }
 
 type Client struct {
@@ -125,6 +147,21 @@ func New(cfg Config) (*Client, error) {
 	}
 	if cfg.Interval == 0 {
 		cfg.Interval = 10 * time.Second
+	}
+	if cfg.ConfigInterval == 0 {
+		cfg.ConfigInterval = 30 * time.Second
+	}
+	if cfg.ConfigInterval < time.Second {
+		return nil, errors.New("configuration interval must be at least one second")
+	}
+	if cfg.ConfigEndpoint == "" && cfg.Exporter == nil {
+		cfg.ConfigEndpoint = cfg.Endpoint
+	}
+	if cfg.ConfigEndpoint != "" {
+		u, err := url.Parse(cfg.ConfigEndpoint)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return nil, errors.New("config endpoint must use HTTP or HTTPS")
+		}
 	}
 	if cfg.RequestTimeout == 0 {
 		cfg.RequestTimeout = 10 * time.Second
@@ -182,12 +219,19 @@ func New(cfg Config) (*Client, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &state{cfg: cfg, resource: &resourcepb.Resource{Attributes: attrs}, instance: instance,
 		metrics: map[string]*instrument{}, logs: map[string][]*logpb.LogRecord{}, spans: map[string][]*tracepb.Span{},
-		changed: make(chan struct{}), wake: make(chan struct{}, 1), retryNow: make(chan struct{}, 1), ctx: ctx, cancel: cancel, done: make(chan struct{})}
+		changed: make(chan struct{}), wake: make(chan struct{}, 1), retryNow: make(chan struct{}, 1), ctx: ctx, cancel: cancel, done: make(chan struct{}), configDone: make(chan struct{})}
 	if cfg.Exporter == nil {
 		s.cfg.Exporter = NewHTTPExporter(cfg.Endpoint, cfg.Key, nil)
 	}
+	s.configKey = cfg.Key
 	c := &Client{s: s, table: cfg.Table}
+	if err := c.UpdateLogSampling(cfg.LogSampling); err != nil {
+		cancel()
+		return nil, err
+	}
+	c.SetReportingEnabled(!cfg.Disabled)
 	go s.run()
+	go s.configLoop()
 	return c, nil
 }
 
@@ -276,6 +320,7 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	err := s.wait(ctx, target)
 	s.cancel()
 	<-s.done
+	<-s.configDone
 	s.mu.Lock()
 	s.closed = true
 	s.notifyLocked()
@@ -286,6 +331,8 @@ func (c *Client) Shutdown(ctx context.Context) error {
 func (s *state) run() {
 	defer close(s.done)
 	ticker := time.NewTicker(s.cfg.Interval)
+	selfTicker := time.NewTicker(30 * time.Second)
+	defer selfTicker.Stop()
 	defer ticker.Stop()
 	// Collection runs independently of a blocked network request or backoff.
 	collectorDone := make(chan struct{})
@@ -293,6 +340,13 @@ func (s *state) run() {
 		defer close(collectorDone)
 		for {
 			select {
+			case <-selfTicker.C:
+				s.mu.Lock()
+				if !s.closing {
+					s.collectSelfLocked(time.Now())
+					s.notifyLocked()
+				}
+				s.mu.Unlock()
 			case <-ticker.C:
 				s.mu.Lock()
 				if !s.closing {
@@ -319,14 +373,21 @@ func (s *state) run() {
 			continue
 		}
 		item := s.queue[0]
-		s.mu.Unlock()
 		ctx, cancel := context.WithTimeout(s.ctx, s.cfg.RequestTimeout)
+		s.deliveryCancel = cancel
+		s.mu.Unlock()
 		err := s.cfg.Exporter.Deliver(ctx, item.batch.Clone())
 		cancel()
 		if s.ctx.Err() != nil {
 			return
 		}
 		s.mu.Lock()
+		s.deliveryCancel = nil
+		if len(s.queue) == 0 || s.queue[0].sequence != item.sequence {
+			s.mu.Unlock()
+			backoff = s.cfg.RetryMin
+			continue
+		}
 		if err == nil {
 			s.queue = s.queue[1:]
 			s.stats.PendingBatches--
@@ -400,6 +461,9 @@ func (s *state) enqueueLocked(signal, table string, message proto.Message, recor
 }
 
 func (s *state) collectLocked(now time.Time) {
+	if s.reportingDisabled {
+		return
+	}
 	// Split by metric point to keep even high-cardinality exports bounded while
 	// retaining one Metric per name within each OTLP request.
 	tables := map[string]bool{}
@@ -490,6 +554,7 @@ func (s *state) collectLocked(now time.Time) {
 	s.logs = map[string][]*logpb.LogRecord{}
 	s.spans = map[string][]*tracepb.Span{}
 	s.bufferBytes = 0
+	s.collectSelfLocked(now)
 }
 
 func encodeAttributes(attrs Attributes, cfg Config) ([]*commonpb.KeyValue, string, error) {

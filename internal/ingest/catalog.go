@@ -29,6 +29,9 @@ func NewCatalog(db *sql.DB, ch, reader *storage.ClickHouse) (*Catalog, error) {
 	if e == nil {
 		e = c.initRetention()
 	}
+	if e == nil {
+		e = c.initSampling()
+	}
 	return c, e
 }
 func (c *Catalog) Ensure(ctx context.Context, kind, name, metricType, service string) (string, error) {
@@ -52,7 +55,7 @@ func (c *Catalog) Ensure(ctx context.Context, kind, name, metricType, service st
 				exists = true
 			}
 		}
-		if !exists {
+		if !exists && service != "" {
 			services = append(services, service)
 			raw, _ := json.Marshal(services)
 			_, err = c.DB.Exec("UPDATE catalog SET services_json=? WHERE name=?", string(raw), public)
@@ -114,7 +117,11 @@ func (c *Catalog) Ensure(ctx context.Context, kind, name, metricType, service st
 		cols = append(cols, shared.Column{Name: fmt.Sprint(row["name"]), Type: fmt.Sprint(row["type"])})
 	}
 	raw, _ := json.Marshal(cols)
-	services, _ := json.Marshal([]string{service})
+	initialServices := []string{}
+	if service != "" {
+		initialServices = append(initialServices, service)
+	}
+	services, _ := json.Marshal(initialServices)
 	_, err = c.DB.Exec("INSERT INTO catalog(id,name,logical_name,kind,metric_type,columns_json,services_json) VALUES(?,?,?,?,?,?,?)", public, public, name, kind, metricType, string(raw), string(services))
 	return public, err
 }
@@ -133,6 +140,7 @@ func (c *Catalog) List(ctx context.Context) ([]shared.Table, error) {
 		}
 		_ = json.Unmarshal([]byte(cols), &t.Columns)
 		_ = json.Unmarshal([]byte(services), &t.Services)
+		t.System = shared.SystemLogicalTable(t.LogicalName)
 		list = append(list, t)
 	}
 	return list, rows.Err()

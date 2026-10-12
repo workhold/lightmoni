@@ -1,0 +1,158 @@
+{
+  "phase": "baseline",
+  "passed": true,
+  "rows": 2000,
+  "bytes": 2477041,
+  "fixture": "Controlled 2,000-row response, 40 late attributes, no stored log/catalog mutation",
+  "measurements": {
+    "loadMs": 4292,
+    "loaded": {
+      "parses": 330352,
+      "cellTimes": 496,
+      "longTasks": [
+        {
+          "start": 244.70000000298023,
+          "duration": 104
+        },
+        {
+          "start": 597.3000000044703,
+          "duration": 67
+        },
+        {
+          "start": 718.8000000044703,
+          "duration": 64
+        },
+        {
+          "start": 789.4000000059605,
+          "duration": 246
+        },
+        {
+          "start": 1062.7000000029802,
+          "duration": 285
+        },
+        {
+          "start": 1404,
+          "duration": 83
+        },
+        {
+          "start": 1512.7000000029802,
+          "duration": 71
+        },
+        {
+          "start": 1619.9000000059605,
+          "duration": 68
+        },
+        {
+          "start": 1693.5,
+          "duration": 69
+        },
+        {
+          "start": 2151.8000000044703,
+          "duration": 195
+        },
+        {
+          "start": 2352.7000000029802,
+          "duration": 75
+        },
+        {
+          "start": 2501,
+          "duration": 66
+        },
+        {
+          "start": 2574.2000000029802,
+          "duration": 69
+        },
+        {
+          "start": 2685.10000000149,
+          "duration": 66
+        },
+        {
+          "start": 2756.4000000059605,
+          "duration": 67
+        },
+        {
+          "start": 2869.2000000029802,
+          "duration": 65
+        },
+        {
+          "start": 2938.8000000044703,
+          "duration": 71
+        },
+        {
+          "start": 3052,
+          "duration": 194
+        },
+        {
+          "start": 3251.2000000029802,
+          "duration": 76
+        },
+        {
+          "start": 3402.10000000149,
+          "duration": 65
+        },
+        {
+          "start": 3471.7000000029802,
+          "duration": 72
+        },
+        {
+          "start": 3585.3000000044703,
+          "duration": 67
+        },
+        {
+          "start": 3657.2000000029802,
+          "duration": 626
+        }
+      ],
+      "at": 4291
+    },
+    "keyword": {
+      "ms": 3206.2999999970198,
+      "attributeParses": 1383696,
+      "timeCellRenders": 117,
+      "longTasks": [
+        {
+          "start": 4301.30000000447,
+          "duration": 387
+        },
+        {
+          "start": 4689.4000000059605,
+          "duration": 354
+        },
+        {
+          "start": 5047,
+          "duration": 311
+        },
+        {
+          "start": 5360.9000000059605,
+          "duration": 385
+        },
+        {
+          "start": 5749.10000000149,
+          "duration": 359
+        },
+        {
+          "start": 6111.4000000059605,
+          "duration": 312
+        },
+        {
+          "start": 6425.80000000447,
+          "duration": 391
+        },
+        {
+          "start": 6819,
+          "duration": 358
+        },
+        {
+          "start": 7185,
+          "duration": 308
+        }
+      ]
+    },
+    "fields": {
+      "ms": 376.29999999701977,
+      "attributeParses": 153720,
+      "timeCellRenders": 13
+    }
+  },
+  "errors": []
+}

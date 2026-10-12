@@ -31,7 +31,7 @@ node examples/logs/discover.mjs
 
 主服务测试账号默认为根 smoke 工作流的 `local-admin` / `local-demo-password`；可用 `LIGHTMONI_TEST_USER` / `LIGHTMONI_TEST_PASSWORD` 指定现有隔离测试用户。未初始化的主服务由 smoke 创建测试管理员。请对隔离测试实例运行。ClickHouse 集成测试仅创建、删除自己生成的唯一测试表，SQLite 使用临时库。
 
-`smoke.mjs` 产生新的运行标记，运行 Go/Node 各 240 条，确认 480 条准确结果，操作 200/400/480 分页、service 与数字属性过滤、字段、列宽键盘、详情/JSON/同源上下文、保存和分享重载、SQL 参数跳转与返回、CSV，最后再通过 Go SDK 新增 5 条验证实时待处理提示、去重和暂停恢复。成功写入 `results/run.json` 与截图；第二个脚本使用同一真实数据继续执行过滤 chips、保存更新/复制/删除、固定列/列顺序/鼠标调整、长日志、刷新锚点、详情重载、751px 字段 Drawer 和真实错误恢复。
+`smoke.mjs` 产生新的运行标记，运行 Go/Node 各 240 条，确认 480 条准确结果，操作 200/400/480 分页、service 与数字属性过滤、字段、列宽键盘、详情/JSON/同源上下文、保存和分享重载、SQL 参数跳转与返回、CSV，最后再通过 Go SDK 新增 5 条验证实时待处理提示、去重和暂停恢复。成功写入 `results/run.json` 与截图；第二个脚本使用同一真实数据继续执行过滤 chips、保存更新/复制/删除、列顺序/无固定列横向滚动/鼠标调整、长日志、刷新锚点、详情重载、751px 字段 Drawer 和真实错误恢复。
 
 `chart.mjs` 使用同一批 SDK 日志，核对完整时间图聚合计数，实际鼠标触发 tooltip、拖选缩小范围、返回恢复，以及通过分布数据表按 Enter 下钻。
 

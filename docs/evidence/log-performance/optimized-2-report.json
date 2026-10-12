@@ -1,0 +1,69 @@
+{
+  "phase": "optimized-2",
+  "passed": true,
+  "rows": 2000,
+  "bytes": 2477041,
+  "fixture": "Controlled 2,000-row response, 40 late attributes, no stored log/catalog mutation",
+  "measurements": {
+    "loadMs": 2665,
+    "loaded": {
+      "parses": 2041,
+      "cellTimes": 14,
+      "longTasks": [
+        {
+          "start": 168.39999999850988,
+          "duration": 85
+        },
+        {
+          "start": 498.79999999701977,
+          "duration": 73
+        },
+        {
+          "start": 625.7000000029802,
+          "duration": 64
+        },
+        {
+          "start": 695.8999999985099,
+          "duration": 219
+        },
+        {
+          "start": 925.3999999985099,
+          "duration": 63
+        },
+        {
+          "start": 1135.6000000014901,
+          "duration": 144
+        },
+        {
+          "start": 1305.5,
+          "duration": 109
+        },
+        {
+          "start": 1984.6000000014901,
+          "duration": 83
+        },
+        {
+          "start": 2074.2000000029802,
+          "duration": 176
+        },
+        {
+          "start": 2599.2999999970198,
+          "duration": 56
+        }
+      ],
+      "at": 2663.7000000029802
+    },
+    "keyword": {
+      "ms": 173.90000000596046,
+      "attributeParses": 0,
+      "timeCellRenders": 0,
+      "longTasks": []
+    },
+    "fields": {
+      "ms": 23.200000002980232,
+      "attributeParses": 0,
+      "timeCellRenders": 0
+    }
+  },
+  "errors": []
+}

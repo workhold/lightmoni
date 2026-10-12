@@ -1,0 +1,37 @@
+{
+  "passed": true,
+  "table": "sdk_rules_7d297ab1",
+  "expected_sampled_logs": 97,
+  "actual_sampled_logs": 97,
+  "metric_total": 1008,
+  "trace_total": 1,
+  "browser_metric_total": 2,
+  "other_instance_unaffected": true,
+  "resume_without_backfill": true,
+  "save_failure_keeps_input": true,
+  "mobile": {
+    "viewport": 390,
+    "document": 390,
+    "modal": {
+      "x": 8,
+      "y": 40,
+      "width": 374,
+      "height": 772,
+      "top": 40,
+      "right": 382,
+      "bottom": 812,
+      "left": 8
+    },
+    "footer": {
+      "x": 32,
+      "y": 758,
+      "width": 326,
+      "height": 34,
+      "top": 758,
+      "right": 358,
+      "bottom": 792,
+      "left": 32
+    }
+  },
+  "errors": []
+}

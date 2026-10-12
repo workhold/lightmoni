@@ -49,3 +49,8 @@ export const logicalTableRules = [{required:true,message:'请填写上报表名'
   validator:(_:unknown,value?:string) => /^[a-z][a-z0-9_]{0,47}$/.test(value ?? '') && !/^(log|metric|trace)_/.test(value ?? '')
     ? Promise.resolve() : Promise.reject(new Error('使用小写字母开头的逻辑表名，不带 metric_ 等前缀，最长 48 位')),
 }];
+
+export const agentIsOnline=(agent:AgentItem,now=Date.now()):boolean=>{
+ const interval=Number(agent.heartbeat.control_interval_seconds??30),timeout=Math.max(90,Number.isFinite(interval)&&interval>0?interval*3:90);
+ return Number.isFinite(Date.parse(agent.last_seen))&&now-Date.parse(agent.last_seen)<=timeout*1000;
+};

@@ -1,3 +1,5 @@
+import { type LogSamplingPolicy } from './sampling.js';
+export type { LogSamplingPolicy, LogRule, LogCondition, LogExcludeRule, SDKConfig } from './sampling.js';
 export type Attributes = Record<string, string | boolean | number | bigint>;
 export type Signal = "metrics" | "logs" | "traces";
 export interface FrozenBatch {
@@ -23,6 +25,12 @@ export interface Options {
     table: string;
     endpoint?: string;
     key?: string;
+    selfTelemetry?: boolean;
+    logSampling?: Record<string, LogSamplingPolicy>;
+    disabled?: boolean;
+    remoteConfig?: boolean;
+    configEndpoint?: string;
+    configIntervalMs?: number;
     instanceId?: string;
     resource?: Attributes;
     exporter?: Exporter;
@@ -56,6 +64,13 @@ export interface Stats {
     invalidRecords: number;
     overflowRecords: number;
     lastError?: string;
+    sampledOutLogs: number;
+    unmatchedLogs: number;
+    excludedLogs: number;
+    disabledRecords: number;
+    reportingDisabled: boolean;
+    configRevision?: string;
+    configError?: string;
 }
 export declare class DeliveryError extends Error {
     readonly retryable: boolean;
@@ -115,6 +130,13 @@ declare class State {
     readonly stats: Stats;
     readonly changed: Set<() => void>;
     readonly exporter: Exporter;
+    localSampling: Record<string, LogSamplingPolicy>;
+    remoteSampling: Record<string, LogSamplingPolicy>;
+    remoteDisabled: boolean;
+    reportingGeneration: number;
+    configInterval?: ReturnType<typeof setInterval>;
+    configRequest?: AbortController;
+    configLoading?: Promise<void>;
     sequence: number;
     sourceSequence: bigint;
     failureSequence: number;
@@ -125,7 +147,30 @@ declare class State {
     retryNow?: () => void;
     request?: AbortController;
     interval: ReturnType<typeof setInterval>;
+    selfInterval: ReturnType<typeof setInterval>;
+    selfLast: number;
+    selfStarted: boolean;
+    selfPrevious?: Stats;
     constructor(options: Options);
+    updateLogSampling(policies: Record<string, LogSamplingPolicy>): void;
+    setReportingDisabled(disabled: boolean): void;
+    refreshConfig(): Promise<void>;
+    private fetchConfig;
+    samplingRecord(attrs?: Attributes, level?: string, context?: TraceContext): {
+        record: {
+            service: string;
+            instance_id: string;
+            'sdk.language': string;
+            severity: string;
+            trace_id: string | undefined;
+            event_id: string;
+        };
+        attributes: Attributes;
+        resource: {
+            'service.name': string;
+            'service.instance.id': string;
+        };
+    };
     attributes(attrs: Attributes): Attribute[];
     invalid(error: unknown): void;
     lost(records: number, message: string): void;
@@ -133,6 +178,8 @@ declare class State {
     instrument(table: string, name: string, kind: Instrument["kind"], options: MetricOptions): Instrument;
     record(metric: Instrument, value: number | bigint, attrs: Attributes): void;
     collect(): void;
+    collectSelf(): void;
+    enqueueSelf(signal: Signal, rows: RecordValue[], at: string): boolean;
     payload(signal: Signal, records: RecordValue[]): Uint8Array;
     pack(signal: Signal, table: string, records: RecordValue[], at: string): void;
     enqueue(signal: Signal, table: string, records: RecordValue[], at: string): void;
@@ -172,6 +219,9 @@ export declare class LightMoni {
     histogram(name: string, options?: MetricOptions): Histogram;
     stats(): Stats;
     updateKey(key: string): void;
+    updateLogSampling(policies: Record<string, LogSamplingPolicy>): void;
+    setReportingEnabled(enabled: boolean): void;
+    refreshConfig(): Promise<void>;
     log(level: string, body: string, attrs?: Attributes, context?: TraceContext | undefined): void;
     startSpan(name: string, attrs?: Attributes, parent?: TraceContext | undefined): Span;
     flush({ timeoutMs }?: {
@@ -188,6 +238,8 @@ export declare class Span {
     readonly context: TraceContext;
     private readonly data;
     private ended;
+    private readonly reportingGeneration;
+    private readonly suppressed;
     constructor(state: State, table: string, name: string, attrs: Attributes, parent?: TraceContext);
     setError(error: unknown): void;
     setKind(kind: 1 | 2 | 3 | 4 | 5): void;
@@ -201,4 +253,3 @@ export declare class HTTPExporter implements Exporter {
     constructor(endpoint: string, key?: () => string | undefined);
     deliver(batch: FrozenBatch, signal: AbortSignal): Promise<void>;
 }
-export {};

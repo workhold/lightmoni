@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 namespace LightMoni;
 
 public sealed record Limits(long QueueBytes = 8 << 20, int QueueBatches = 256, long BufferBytes = 8 << 20,
-    int MaxBatchBytes = 1 << 20, int CardinalityLimit = 2000, int MaxInstruments = 256);
+    int MaxBatchBytes = 1 << 20, int CardinalityLimit = 2000, int MaxInstruments = 256, bool SelfTelemetry = true);
 
 public sealed record TraceContext(string TraceId, string SpanId, byte Flags = 1, string TraceState = "")
 {
@@ -80,6 +80,9 @@ public sealed class Client
         internal string? Failure;
         internal bool Closed;
         internal long Sequence;
+        internal string SelfTable=""; internal long SelfLast=long.MinValue; internal bool SelfStarted;
+        internal readonly Dictionary<string,long> SelfPrevious=new();
+        internal readonly CancellationTokenSource HeartbeatStop=new();
         internal State(string service, string endpoint, string key, Limits limits)
         {
             var uri = new Uri(endpoint);
@@ -176,6 +179,29 @@ public sealed class Client
                 if (group.Count > 0) Enqueue(pair.Table, pair.Signal, group, created);
             }
             Records.Clear(); Stats["buffer_bytes"] = 0;
+            CollectSelf();
+        }
+        bool EnqueueSelf(string signal,List<object> rows,string at)
+        {
+            int size=Payload(signal,rows).Length;
+            if(size>Limits.MaxBatchBytes || Queue.Count>=Limits.QueueBatches || Stats["pending_bytes"]+size>Limits.QueueBytes)return false;
+            Enqueue(SelfTable,signal,rows,at);return true;
+        }
+        void CollectSelf()
+        {
+            long clock=Stopwatch.GetTimestamp();
+            if(!Limits.SelfTelemetry || (SelfLast!=long.MinValue && Stopwatch.GetElapsedTime(SelfLast,clock).TotalSeconds<30))return;
+            SelfLast=clock;string time=Nano(),at=DateTimeOffset.UtcNow.ToString("O");
+            var attributes=Attrs(new Dictionary<string,object>{["lightmoni.component"]="sdk",["sdk.language"]="dotnet",["sdk.version"]="0.1.0"});
+            var values=new Dictionary<string,long>{{"heartbeat",1}};
+            foreach(string name in new[]{"pending_batches","pending_bytes","retried_batches","dropped_records","rejected_records","invalid_records","overflow_records"})values[name]=Stats[name];
+            EnqueueSelf("metrics",values.Select(p=>(object)Obj("name","lightmoni.sdk."+p.Key,"gauge",Obj("dataPoints",new[]{Obj("timeUnixNano",time,"asDouble",p.Value,"attributes",attributes)}))).ToList(),at);
+            bool changed=new[]{"retried_batches","dropped_records","rejected_records","invalid_records","overflow_records"}.Any(n=>Stats[n]>SelfPrevious.GetValueOrDefault(n));
+            if(!SelfStarted || changed) {
+                var logAttrs=new List<object>(attributes);logAttrs.AddRange(Attrs(new Dictionary<string,object>{{"event",SelfStarted?"diagnostics_changed":"started"}}));
+                var row=Obj("timeUnixNano",time,"severityText",changed?"WARN":"INFO","severityNumber",changed?13:9,"body",Obj("stringValue",changed?"LightMoni SDK delivery, buffer or input diagnostics changed":"LightMoni SDK started"),"attributes",logAttrs);
+                if(EnqueueSelf("logs",new List<object>{row},at)){SelfStarted=true;foreach(var p in Stats)SelfPrevious[p.Key]=p.Value;}
+            }
         }
         void Enqueue(string table, string signal, List<object> rows, string created)
         {
@@ -188,7 +214,15 @@ public sealed class Client
     readonly State state;
     readonly string table;
     static string ValidTable(string value) => Regex.IsMatch(value, "^[a-z][a-z0-9_]{0,47}$") && !Regex.IsMatch(value, "^(log|metric|trace)_") ? value : throw new ArgumentException("invalid logical table");
-    public Client(string service, string table, string endpoint = "http://127.0.0.1:4318", string key = "", Limits? limits = null) { this.table = ValidTable(table); state = new(service, endpoint, key, limits ?? new()); }
+    public Client(string service, string table, string endpoint = "http://127.0.0.1:4318", string key = "", Limits? limits = null) { this.table = ValidTable(table); state = new(service, endpoint, key, limits ?? new()); state.SelfTable=this.table;
+        if(state.Limits.SelfTelemetry) _ = Task.Run(async () => {
+            try { using var timer=new PeriodicTimer(TimeSpan.FromSeconds(30));
+                while(await timer.WaitForNextTickAsync(state.HeartbeatStop.Token)) {
+                    try { await FlushAsync(TimeSpan.FromSeconds(5),state.HeartbeatStop.Token); } catch(Exception e) when(e is IOException or InvalidOperationException or OperationCanceledException or TimeoutException) { }
+                }
+            } catch(OperationCanceledException) { }
+        });
+    }
     Client(State state, string table) { this.state = state; this.table = ValidTable(table); }
     public Client WithTable(string table) => new(state, table);
     public Metric Counter(string name, string unit = "") => Instrument(name, "counter", unit, Array.Empty<double>());
@@ -293,6 +327,7 @@ public sealed class Client
     }
     public async Task ShutdownAsync(TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
+        state.HeartbeatStop.Cancel();
         try { await FlushAsync(timeout, cancellationToken); } finally { lock (state.Gate) state.Closed = true; }
     }
 }

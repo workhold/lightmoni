@@ -27,6 +27,7 @@ type Agent struct {
 	queue           *Queue
 	http            *http.Client
 	mu              sync.RWMutex
+	sdkConfigMu     sync.Mutex
 	lastError       string
 	lastSuccess     time.Time
 	collectors      map[string]string
@@ -39,6 +40,9 @@ type Agent struct {
 	tasksReadyOnce  sync.Once
 	hostname        string
 	moni            *moni.Client
+	runtimeEvents   []RuntimeEvent
+	runtimeSequence uint64
+	runtimeInstance string
 }
 
 func New(cfg Config) (*Agent, error) {
@@ -58,7 +62,9 @@ func New(cfg Config) (*Agent, error) {
 	a.tasks = NormalizeRemoteConfig(RemoteConfig{CollectIntervalSeconds: cfg.CollectIntervalSeconds, Probes: cfg.Probes, ProcessNames: cfg.ProcessNames})
 	a.tasksChanged = make(chan struct{}, 1)
 	a.tasksReady = make(chan struct{})
-	a.moni, err = moni.New(moni.Config{Service: "lightmoni-agent", Table: "host", InstanceID: id.AgentID, Exporter: a, Interval: time.Duration(cfg.CollectIntervalSeconds) * time.Second, MaxBatchBytes: int(cfg.MaxBatchBytes / 2)})
+	a.runtimeInstance = strconv.FormatInt(time.Now().UnixNano(), 10)
+	a.runtimeEvent("INFO", "started", "Agent started")
+	a.moni, err = moni.New(moni.Config{Service: "lightmoni-agent", Table: "host", InstanceID: id.AgentID, Exporter: a, ConfigEndpoint: cfg.Endpoint, ConfigKey: cfg.Key, Interval: time.Duration(cfg.CollectIntervalSeconds) * time.Second, MaxBatchBytes: int(cfg.MaxBatchBytes / 2), DisableSelfTelemetry: true})
 	if err != nil {
 		queue.Close()
 		return nil, err
@@ -75,17 +81,26 @@ func (a *Agent) Close() error {
 func (a *Agent) ID() string { return a.identity.AgentID }
 func (a *Agent) setError(message string) {
 	a.mu.Lock()
+	changed := a.lastError != message
 	a.lastError = message
 	a.mu.Unlock()
+	if changed {
+		a.runtimeEvent("WARN", "execution_failed", a.safeRuntimeMessage(message))
+	}
 	slog.Warn("agent", "error", message)
 }
 func (a *Agent) collectorStatus(name, status string) {
 	a.mu.Lock()
+	previous := a.collectors[name]
 	a.collectors[name] = status
 	a.mu.Unlock()
+	if previous != status && status != "ok" && status != "disabled" {
+		a.runtimeEvent("WARN", "collector_failed", name+": "+a.safeRuntimeMessage(status))
+	}
 }
 func (a *Agent) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/sdk-config", a.sdkConfigHandler)
 	for _, s := range []string{"logs", "metrics", "traces"} {
 		mux.HandleFunc("POST /v1/"+s, a.receiver(s))
 	}
@@ -156,7 +171,7 @@ func (a *Agent) Status(ctx context.Context) (map[string]any, error) {
 	for k, v := range a.collectors {
 		collectors[k] = v
 	}
-	return map[string]any{"agent_id": a.identity.AgentID, "group_id": a.cfg.GroupID, "host_id": a.identity.HostID, "hostname": a.hostname, "version": Version, "platform": runtime.GOOS, "arch": runtime.GOARCH, "config_revision": a.revision, "queue_bytes": s.Bytes, "queue_batches": s.Batches, "quarantine_batches": s.Quarantine, "receipts": s.Receipts, "oldest_age_seconds": s.OldestAgeSeconds, "last_error": a.lastError, "last_success_at": a.lastSuccess, "collectors_status": collectors, "sdk": a.moni.Stats()}, nil
+	return map[string]any{"agent_id": a.identity.AgentID, "group_id": a.cfg.GroupID, "host_id": a.identity.HostID, "hostname": a.hostname, "version": Version, "platform": runtime.GOOS, "arch": runtime.GOARCH, "config_revision": a.revision, "queue_bytes": s.Bytes, "queue_batches": s.Batches, "quarantine_batches": s.Quarantine, "receipts": s.Receipts, "oldest_age_seconds": s.OldestAgeSeconds, "last_error": a.lastError, "last_success_at": a.lastSuccess, "collectors_status": collectors, "sdk": a.moni.Stats(), "runtime_events": append([]RuntimeEvent{}, a.runtimeEvents...), "control_interval_seconds": a.cfg.ControlIntervalSeconds}, nil
 }
 
 type sendResult struct {

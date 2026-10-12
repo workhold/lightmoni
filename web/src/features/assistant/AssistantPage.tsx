@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { ArrowUpOutlined, CheckOutlined, CopyOutlined, HistoryOutlined, MessageOutlined, PlusOutlined, SettingOutlined, StopOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import XMarkdown, { type ComponentProps } from '@ant-design/x-markdown';
 import '@ant-design/x-markdown/themes/light.css';
@@ -185,4 +184,4 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   </div>;
 }
 
-export default function AssistantPage() { const navigate = useNavigate(); return <AssistantPanel onSQL={sql => navigate('/query?sql=' + encodeURIComponent(sql))} />; }
+export default function AssistantPage() { return <AssistantPanel />; }

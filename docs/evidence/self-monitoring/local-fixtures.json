@@ -1,0 +1,17 @@
+{
+  "business_dashboard_id": "105a0cd1-c2d5-46ed-8ac1-b22adba7420f",
+  "rules": [
+    {
+      "id": "13230c57101197a67fe9ded72dd6a5f2",
+      "dashboard_id": "system-agent",
+      "panel_id": "system-agent-a",
+      "name": "Agent 在线数低于 1 · 本机验证"
+    },
+    {
+      "id": "3bd9cdad6ccadcf022f37d42f27cd803",
+      "dashboard_id": "system-sdk",
+      "panel_id": "system-sdk-a",
+      "name": "SDK 在线数低于 1 · 本机验证"
+    }
+  ]
+}

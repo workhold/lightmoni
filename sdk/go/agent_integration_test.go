@@ -51,7 +51,7 @@ func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 			_ = a.Close()
 		}
 	})
-	client, err := moni.New(moni.Config{Service: "example-go-api", Table: "http", Endpoint: server.URL})
+	client, err := moni.New(moni.Config{DisableSelfTelemetry: true, Service: "example-go-api", Table: "http", Endpoint: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 			cmd.Env = append(cmd.Env, value)
 		}
 	}
-	cmd.Env = append(cmd.Env, "LIGHTMONI_ENDPOINT="+server.URL, "LIGHTMONI_SERVICE=example-node-api", "LIGHTMONI_COUNT=3")
+	cmd.Env = append(cmd.Env, "LIGHTMONI_ENDPOINT="+server.URL, "LIGHTMONI_SERVICE=example-node-api", "LIGHTMONI_COUNT=3", "LIGHTMONI_SELF_TELEMETRY=false")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Node demo: %v\n%s", err, output)
 	}

@@ -41,7 +41,7 @@ func (s *Server) registerAgentInstall(externalURL string) {
 	})
 	s.API.HandleFunc("GET /api/v1/sdk-install", func(w http.ResponseWriter, r *http.Request) {
 		base := strings.TrimRight(externalURL, "/")
-		shared.JSON(w, 200, map[string]any{"version": sdkVersion, "node_url": base + "/downloads/sdk/lightmoni-sdk-" + sdkVersion + ".tgz", "go_url": base + "/downloads/sdk/lightmoni-go-sdk_" + sdkVersion + ".tar.gz", "packages": sdkPackages(base), "checksums_url": base + "/downloads/sdk/SDK_SHA256SUMS"})
+		shared.JSON(w, 200, map[string]any{"version": sdkVersion, "endpoint": base, "node_url": base + "/downloads/sdk/lightmoni-sdk-" + sdkVersion + ".tgz", "go_url": base + "/downloads/sdk/lightmoni-go-sdk_" + sdkVersion + ".tar.gz", "packages": sdkPackages(base), "checksums_url": base + "/downloads/sdk/SDK_SHA256SUMS"})
 	})
 	s.API.HandleFunc("GET /api/v1/agent-install", func(w http.ResponseWriter, r *http.Request) {
 		entries, _ := fs.ReadDir(assets, "agent-dist")

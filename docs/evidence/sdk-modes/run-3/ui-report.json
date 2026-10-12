@@ -1,0 +1,39 @@
+{
+  "routes": [
+    "typescript:agent",
+    "typescript:direct",
+    "go:agent",
+    "go:direct",
+    "python:agent",
+    "python:direct",
+    "java:agent",
+    "java:direct",
+    "dotnet:agent",
+    "dotnet:direct",
+    "php:agent",
+    "php:direct",
+    "ruby:agent",
+    "ruby:direct",
+    "rust:agent",
+    "rust:direct"
+  ],
+  "widths": [
+    1280,
+    750,
+    390
+  ],
+  "downloads": 8,
+  "highlighted_samples": 16,
+  "clipboard_samples": 16,
+  "clipboard_environments": 16,
+  "themes": [
+    "dark",
+    "light"
+  ],
+  "url_validation": true,
+  "mode_endpoint_preserved": true,
+  "key_navigation_preserves_setup": true,
+  "workbench_removed": true,
+  "query_api_preserved": true,
+  "errors": []
+}

@@ -25,3 +25,7 @@ mon.shutdown(Duration::from_secs(5))?;
 with_table 返回共享状态的 Client；Attributes 保留 string/bool/i64/f64 类型。Counter 接受 i64，Gauge / Histogram 接受 f64；histogram 自定义桶，instrument 设置单位。TraceContext::extract / context.inject 处理 W3C header；Drop / end 幂等结束 span，不隐式发送网络请求。
 
 flush(Duration) 同步阻塞，Tokio 内使用 spawn_blocking，由应用定时调度。with_limits 调整容量，update_key / stats 支持诊断。完整边界见 [SDK 契约](../README.md)。运行 cargo run --locked --manifest-path sdk/rust/Cargo.toml --example demo。
+
+## SDK 自监控
+
+默认每 30 秒上报实例心跳和内部诊断，空闲进程也会发送；原生运行时的后台线程同时 Flush 当前业务窗口。中心自动归入系统 SDK 表，使用原业务 table 的权限；WithTable 共享生命周期。可通过 `Limits { self_telemetry:false, ..Limits::default() }` 关闭。退出前仍需 Shutdown；完整语义见 [SDK 契约](../README.md#内部监控)。

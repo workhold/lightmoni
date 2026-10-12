@@ -40,9 +40,10 @@ fn table(v:&str)->Result<String> {
 pub struct Limits {
     pub queue_bytes:usize, pub queue_batches:usize, pub buffer_bytes:usize,
     pub max_batch_bytes:usize, pub cardinality_limit:usize, pub max_instruments:usize,
+    pub self_telemetry:bool,
 }
 impl Default for Limits {
-    fn default()->Self { Self {queue_bytes:8<<20,queue_batches:256,buffer_bytes:8<<20,max_batch_bytes:1<<20,cardinality_limit:2000,max_instruments:256} }
+    fn default()->Self { Self {queue_bytes:8<<20,queue_batches:256,buffer_bytes:8<<20,max_batch_bytes:1<<20,cardinality_limit:2000,max_instruments:256,self_telemetry:true} }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct TraceContext { pub trace_id:String, pub span_id:String, pub flags:u8, pub trace_state:String }
@@ -72,6 +73,7 @@ struct State {
     endpoint:String,key:String,limits:Limits,resource:Value,http:reqwest::blocking::Client,
     metrics:BTreeMap<String,Instrument>,records:BTreeMap<(String,String),Vec<Value>>,queue:VecDeque<Batch>,
     stats:BTreeMap<String,u64>,last_error:String,failure:Option<String>,seq:u64,closed:bool,
+    self_table:String,self_last:Option<Instant>,self_started:bool,self_previous:BTreeMap<String,u64>,
 }
 impl State {
     fn invalid(&mut self,message:String){*self.stats.get_mut("invalid_records").unwrap()+=1;self.last_error=message;}
@@ -131,6 +133,27 @@ impl State {
             if !group.is_empty(){self.enqueue(&table,&signal,&group,&created);}
         }
         self.stats.insert("buffer_bytes".into(),0);
+        self.collect_self();
+    }
+    fn enqueue_self(&mut self,signal:&str,rows:&[Value],at:&str)->bool {
+        let size=self.payload(signal,rows).len();
+        if size>self.limits.max_batch_bytes || self.queue.len()>=self.limits.queue_batches || self.stats["pending_bytes"]+size as u64>self.limits.queue_bytes as u64{return false;}
+        let table=self.self_table.clone();self.enqueue(&table,signal,rows,at);true
+    }
+    fn collect_self(&mut self) {
+        if !self.limits.self_telemetry || self.self_last.is_some_and(|at|at.elapsed()<Duration::from_secs(30)){return;}
+        self.self_last=Some(Instant::now());let at=format_rfc3339(nano());let time=nano().to_string();
+        let attributes=json!([{"key":"lightmoni.component","value":{"stringValue":"sdk"}},{"key":"sdk.language","value":{"stringValue":"rust"}},{"key":"sdk.version","value":{"stringValue":"0.1.0"}}]);
+        let mut values=BTreeMap::from([("heartbeat",1)]);
+        for name in ["pending_batches","pending_bytes","retried_batches","dropped_records","rejected_records","invalid_records","overflow_records"]{values.insert(name,self.stats[name]);}
+        let rows:Vec<_>=values.iter().map(|(name,value)|json!({"name":format!("lightmoni.sdk.{name}"),"gauge":{"dataPoints":[{"timeUnixNano":time,"asDouble":value,"attributes":attributes}]}})).collect();
+        self.enqueue_self("metrics",&rows,&at);
+        let changed=["retried_batches","dropped_records","rejected_records","invalid_records","overflow_records"].iter().any(|n|self.stats[*n]>*self.self_previous.get(*n).unwrap_or(&0));
+        if !self.self_started || changed {
+            let mut logattrs=attributes.as_array().unwrap().clone();logattrs.push(json!({"key":"event","value":{"stringValue":if self.self_started{"diagnostics_changed"}else{"started"}}}));
+            let row=json!({"timeUnixNano":time,"severityText":if changed{"WARN"}else{"INFO"},"severityNumber":if changed{13}else{9},"body":{"stringValue":if changed{"LightMoni SDK delivery, buffer or input diagnostics changed"}else{"LightMoni SDK started"}},"attributes":logattrs});
+            if self.enqueue_self("logs",&[row],&at){self.self_started=true;self.self_previous=self.stats.clone();}
+        }
     }
     fn enqueue(&mut self,table:&str,signal:&str,rows:&[Value],created:&str) {
         let raw=self.payload(signal,rows);self.seq+=1;
@@ -157,8 +180,19 @@ impl Client {
         let http=reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"cannot initialize HTTP transport")?;
         let stats=["pending_batches","pending_bytes","buffer_bytes","delivered_batches","retried_batches","invalid_records","overflow_records","dropped_records","rejected_records"].iter().map(|n|(n.to_string(),0)).collect();
         let resource=json!({"attributes":attrs(&BTreeMap::from([("service.name".into(),service.into()),("service.instance.id".into(),Uuid::new_v4().to_string().into())]))?});
-        let s=State{endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false};
-        Ok(Self{state:Arc::new(Mutex::new(s)),delivery:Arc::new(Mutex::new(())),table})
+        let s=State{endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:table.clone(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
+        let enabled=s.limits.self_telemetry;
+        let client=Self{state:Arc::new(Mutex::new(s)),delivery:Arc::new(Mutex::new(())),table};
+        if enabled {
+            let state=Arc::downgrade(&client.state);let delivery=Arc::downgrade(&client.delivery);let table=client.table.clone();
+            std::thread::Builder::new().name("lightmoni-heartbeat".into()).spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(30));
+                let (Some(state),Some(delivery))=(state.upgrade(),delivery.upgrade()) else {break;};
+                if state.lock().unwrap().closed{break;}
+                let root=Client{state,delivery,table:table.clone()};let _=root.flush(Duration::from_secs(5));
+            }).map_err(|_|"cannot start SDK heartbeat worker")?;
+        }
+        Ok(client)
     }
     pub fn with_table(&self,name:&str)->Result<Self>{Ok(Self{table:table(name)?,..self.clone()})}
     pub fn counter(&self,name:&str)->Result<Metric>{self.instrument(name,"counter","",&[])}

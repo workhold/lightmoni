@@ -5,7 +5,7 @@ import {Alert,App,Button,Descriptions,Empty,Modal,Select,Space,Table,Tabs,Tag,Ty
 import {api} from '../shared/api';
 import type {User} from '../shared/types';
 import AgentTaskEditor from './AgentTaskEditor';
-import {defaultTasks,hostCollectors,normalizeTasks,type AgentGroup,type AgentItem} from './agent-model';
+import {defaultTasks,hostCollectors,normalizeTasks,agentIsOnline,type AgentGroup,type AgentItem} from './agent-model';
 import './agents.css';
 
 export default function AgentsPage({user}:{user:User}) {
@@ -47,7 +47,7 @@ export default function AgentsPage({user}:{user:User}) {
    ]}/>}} columns={[
     {title:'机器',dataIndex:'hostname'},
     {title:'系统',render:(_:unknown,agent:AgentItem)=>`${agent.platform} / ${agent.arch}`},
-    {title:'状态',render:(_:unknown,agent:AgentItem)=><Tag color={Date.now()-Date.parse(agent.last_seen)<60000?'success':'warning'}>{Date.now()-Date.parse(agent.last_seen)<60000?'在线':'心跳超时'}</Tag>},
+    {title:'状态',render:(_:unknown,agent:AgentItem)=><Tag color={agentIsOnline(agent)?'success':'warning'}>{agentIsOnline(agent)?'在线':'心跳超时'}</Tag>},
     {title:'所属分组',dataIndex:'group_name'},
     {title:'配置状态',render:(_:unknown,agent:AgentItem)=><Tag color={agent.heartbeat.config_revision===agent.config?.revision?'success':'processing'}>{agent.heartbeat.config_revision===agent.config?.revision?'已生效':'等待同步'}</Tag>},
     {title:'最近心跳',dataIndex:'last_seen',render:(value:string)=>new Date(value).toLocaleString()},

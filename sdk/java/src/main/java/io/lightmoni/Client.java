@@ -23,10 +23,11 @@ public final class Client implements AutoCloseable {
     private static final List<Double> BOUNDS = List.of(5d, 10d, 25d, 50d, 100d, 250d, 500d, 1000d);
     public static final class Limits {
         public long queueBytes = 8 << 20, bufferBytes = 8 << 20;
+        public boolean selfTelemetry = true;
         public int queueBatches = 256, maxBatchBytes = 1 << 20, cardinalityLimit = 2000, maxInstruments = 256;
         private Limits copy() {
             Limits n = new Limits(); n.queueBytes=queueBytes; n.bufferBytes=bufferBytes; n.queueBatches=queueBatches;
-            n.maxBatchBytes=maxBatchBytes; n.cardinalityLimit=cardinalityLimit; n.maxInstruments=maxInstruments;
+            n.selfTelemetry=selfTelemetry; n.maxBatchBytes=maxBatchBytes; n.cardinalityLimit=cardinalityLimit; n.maxInstruments=maxInstruments;
             if (queueBytes<=0 || bufferBytes<=0 || queueBatches<=0 || maxBatchBytes<=0 || maxBatchBytes>queueBytes || cardinalityLimit<=0 || maxInstruments<=0)
                 throw new IllegalArgumentException("invalid SDK limits");
             return n;
@@ -64,6 +65,9 @@ public final class Client implements AutoCloseable {
         String key, failure;
         boolean closed;
         long sequence;
+        String selfTable; long selfLast = Long.MIN_VALUE; boolean selfStarted;
+        final Map<String,Long> selfPrevious=new HashMap<>();
+        java.util.concurrent.ScheduledExecutorService heartbeat;
         State(String service,String endpoint,String key,Limits limits) {
             URI url=URI.create(endpoint);
             if (service==null || service.isEmpty() || bytes(service).length>128 || !List.of("http","https").contains(url.getScheme())
@@ -144,6 +148,27 @@ public final class Client implements AutoCloseable {
                 if (!group.isEmpty()) enqueue(table,signal,group,created);
             }
             records.clear();stats.put("buffer_bytes",0L);
+            collectSelf();
+        }
+        boolean enqueueSelf(String signal,List<Object> rows,String at) {
+            int size=payload(signal,rows).length;
+            if(size>limits.maxBatchBytes || queue.size()>=limits.queueBatches || number("pending_bytes")+size>limits.queueBytes)return false;
+            enqueue(selfTable,signal,rows,at);return true;
+        }
+        void collectSelf() {
+            long clock=System.nanoTime();
+            if(!limits.selfTelemetry || (selfLast!=Long.MIN_VALUE && clock-selfLast<30_000_000_000L))return;
+            selfLast=clock;String at=Instant.now().toString(),time=Long.toString(nano());
+            List<Object> attributes=attrs(Map.of("lightmoni.component","sdk","sdk.language","java","sdk.version","0.1.0"));
+            List<Object> metrics=new ArrayList<>();metrics.add(Map.of("name","lightmoni.sdk.heartbeat","gauge",Map.of("dataPoints",List.of(Map.of("timeUnixNano",time,"asDouble",1,"attributes",attributes)))));
+            for(String name:List.of("pending_batches","pending_bytes","retried_batches","dropped_records","rejected_records","invalid_records","overflow_records"))metrics.add(Map.of("name","lightmoni.sdk."+name,"gauge",Map.of("dataPoints",List.of(Map.of("timeUnixNano",time,"asDouble",number(name),"attributes",attributes)))));
+            enqueueSelf("metrics",metrics,at);
+            boolean changed=List.of("retried_batches","dropped_records","rejected_records","invalid_records","overflow_records").stream().anyMatch(n->number(n)>selfPrevious.getOrDefault(n,0L));
+            if(!selfStarted || changed) {
+                List<Object> logAttrs=new ArrayList<>(attributes);logAttrs.addAll(attrs(Map.of("event",selfStarted?"diagnostics_changed":"started")));
+                Object row=Map.of("timeUnixNano",time,"severityText",changed?"WARN":"INFO","severityNumber",changed?13:9,"body",Map.of("stringValue",changed?"LightMoni SDK delivery, buffer or input diagnostics changed":"LightMoni SDK started"),"attributes",logAttrs);
+                if(enqueueSelf("logs",List.of(row),at)){selfStarted=true;for(String n:List.of("retried_batches","dropped_records","rejected_records","invalid_records","overflow_records"))selfPrevious.put(n,number(n));}
+            }
         }
         void enqueue(String table,String signal,List<Object> records,String created) {
             byte[] raw=payload(signal,records);sequence++;
@@ -209,7 +234,12 @@ public final class Client implements AutoCloseable {
     private final String table;
     public Client(String service,String table) { this(service,table,"http://127.0.0.1:4318","",new Limits()); }
     public Client(String service,String table,String endpoint,String key) { this(service,table,endpoint,key,new Limits()); }
-    public Client(String service,String table,String endpoint,String key,Limits limits) { this.table=validTable(table);this.s=new State(service,endpoint,key,limits); }
+    public Client(String service,String table,String endpoint,String key,Limits limits) { this.table=validTable(table);this.s=new State(service,endpoint,key,limits); s.selfTable=this.table;
+        if(s.limits.selfTelemetry) {
+            s.heartbeat=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"lightmoni-heartbeat");t.setDaemon(true);return t;});
+            s.heartbeat.scheduleWithFixedDelay(()->{try{flush(Duration.ofSeconds(5));}catch(IOException | InterruptedException | RuntimeException e){if(e instanceof InterruptedException)Thread.currentThread().interrupt();}},30,30,TimeUnit.SECONDS);
+        }
+    }
     private Client(State s,String table) { this.s=s;this.table=validTable(table); }
     public Client withTable(String table) { return new Client(s,table); }
     public Metric counter(String name) { return metric(name,"counter","",List.of()); }
@@ -298,7 +328,7 @@ public final class Client implements AutoCloseable {
             }
         } finally { s.delivery.unlock(); }
     }
-    public void shutdown(Duration timeout) throws IOException,InterruptedException { try { flush(timeout); } finally { synchronized(s) { s.closed=true; } } }
+    public void shutdown(Duration timeout) throws IOException,InterruptedException { if(s.heartbeat!=null)s.heartbeat.shutdownNow();try { flush(timeout); } finally { synchronized(s) { s.closed=true; } } }
     @Override public void close() throws IOException { try { shutdown(Duration.ofSeconds(10)); } catch(InterruptedException e) { Thread.currentThread().interrupt();throw new IOException("shutdown interrupted"); } }
     private static String validTable(String t) { if(t==null || !t.matches("[a-z][a-z0-9_]{0,47}") || t.matches("^(log|metric|trace)_.*"))throw new IllegalArgumentException("invalid logical table");return t; }
     private static final class AckSubscriber implements HttpResponse.BodySubscriber<byte[]> {

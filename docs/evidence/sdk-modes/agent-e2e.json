@@ -1,0 +1,56 @@
+{
+  "languages": [
+    "go",
+    "node",
+    "python",
+    "java",
+    "dotnet",
+    "php",
+    "ruby",
+    "rust"
+  ],
+  "path": "SDK -> Agent SQLite -> service -> ClickHouse",
+  "results": {
+    "counts": {
+      "sdk-agent-node-4c1cb5a4": "20",
+      "sdk-agent-rust-4c1cb5a4": "20",
+      "sdk-agent-dotnet-4c1cb5a4": "20",
+      "sdk-agent-php-4c1cb5a4": "20",
+      "sdk-agent-python-4c1cb5a4": "20",
+      "sdk-agent-go-4c1cb5a4": "20",
+      "sdk-agent-java-4c1cb5a4": "20",
+      "sdk-agent-ruby-4c1cb5a4": "20"
+    },
+    "links": {
+      "sdk-agent-node-4c1cb5a4": "20",
+      "sdk-agent-rust-4c1cb5a4": "20",
+      "sdk-agent-dotnet-4c1cb5a4": "20",
+      "sdk-agent-php-4c1cb5a4": "20",
+      "sdk-agent-python-4c1cb5a4": "20",
+      "sdk-agent-go-4c1cb5a4": "20",
+      "sdk-agent-java-4c1cb5a4": "20",
+      "sdk-agent-ruby-4c1cb5a4": "20"
+    },
+    "histogram": {
+      "sdk-agent-node-4c1cb5a4": "20",
+      "sdk-agent-rust-4c1cb5a4": "20",
+      "sdk-agent-dotnet-4c1cb5a4": "20",
+      "sdk-agent-php-4c1cb5a4": "20",
+      "sdk-agent-python-4c1cb5a4": "20",
+      "sdk-agent-go-4c1cb5a4": "20",
+      "sdk-agent-java-4c1cb5a4": "20",
+      "sdk-agent-ruby-4c1cb5a4": "20"
+    },
+    "gauge": {
+      "sdk-agent-node-4c1cb5a4": "3",
+      "sdk-agent-rust-4c1cb5a4": "3",
+      "sdk-agent-dotnet-4c1cb5a4": "3",
+      "sdk-agent-php-4c1cb5a4": "3",
+      "sdk-agent-python-4c1cb5a4": "3",
+      "sdk-agent-go-4c1cb5a4": "3",
+      "sdk-agent-java-4c1cb5a4": "3",
+      "sdk-agent-ruby-4c1cb5a4": "3"
+    }
+  },
+  "packages": 8
+}

@@ -21,6 +21,7 @@ export interface Spec {
 }
 export interface View {
   columns: string[];
+  // Retained for compatibility with saved searches; all columns scroll together.
   pinned: string[];
   widths: Record<string, number>;
   lookback: number;
@@ -61,8 +62,8 @@ export interface Saved {
 export type LogRow = Record<string, unknown> & { event_id: string };
 export const initialView: View = {
   columns: ["event_time", "severity", "service", "body"],
-  pinned: ["event_time"],
-  widths: { event_time: 210, severity: 95, service: 160, body: 520 },
+  pinned: [],
+  widths: { event_time: 240, severity: 110, service: 180, body: 360 },
   lookback: 60,
   query_syntax: "literal",
   row_lines: 1,
@@ -102,7 +103,19 @@ export function asRows(frame: QueryFrame): LogRow[] {
       ) as LogRow,
   );
 }
-export function attributes(row: LogRow): Record<string, unknown> {
+interface AttributeCache {
+  source: unknown;
+  fallback: unknown;
+  values: Record<string, unknown>;
+  original?: Record<string, unknown>;
+}
+// Weak keys allow discarded result rows and their parsed payloads to be collected.
+const attributeCache = new WeakMap<LogRow, AttributeCache>();
+function parsedAttributes(row: LogRow): AttributeCache {
+  const cached = attributeCache.get(row);
+  if (cached && cached.source === row.attributes_json && cached.fallback === row.attributes)
+    return cached;
+  let values = (row.attributes && typeof row.attributes === "object" ? row.attributes : {}) as Record<string, unknown>;
   try {
     const raw = String(row.attributes_json ?? "{}");
     const exact = raw.replace(
@@ -115,14 +128,16 @@ export function attributes(row: LogRow): Record<string, unknown> {
           : token,
     );
     const parsed = JSON.parse(exact);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
-      return parsed;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) values = parsed;
   } catch {
     /* use normalized string attributes */
   }
-  return (
-    row.attributes && typeof row.attributes === "object" ? row.attributes : {}
-  ) as Record<string, unknown>;
+  const entry = { source: row.attributes_json, fallback: row.attributes, values };
+  attributeCache.set(row, entry);
+  return entry;
+}
+export function attributes(row: LogRow): Record<string, unknown> {
+  return parsedAttributes(row).values;
 }
 export function cell(row: LogRow, name: string): unknown {
   return name.startsWith("attr:") ? attributes(row)[name.slice(5)] : row[name];
@@ -295,11 +310,37 @@ export function boundBuffer(
 }
 
 export function attributeType(row: LogRow, key: string): Filter["type"] {
-  try {
-    return fieldType(JSON.parse(String(row.attributes_json ?? "{}"))[key]);
-  } catch {
-    return fieldType(attributes(row)[key]);
+  const cached = parsedAttributes(row);
+  if (!cached.original) {
+    try {
+      const original = JSON.parse(String(row.attributes_json ?? "{}"));
+      cached.original = original && typeof original === "object" ? original : cached.values;
+    } catch {
+      cached.original = cached.values;
+    }
   }
+  return fieldType(cached.original![key]);
+}
+
+export function logFieldMetadata(columns: ReadonlyArray<{ name: string; type: string }>, rows: readonly LogRow[]) {
+  const names = new Set<string>();
+  const kinds = new Map<string, string>();
+  const kind = (type: string) => /DateTime/.test(type) ? "时间" : /Int|Float|Decimal|number/.test(type) ? "数字" :
+    /Bool|boolean/.test(type) ? "布尔" : /Map|Array|JSON/.test(type) ? "对象" : "文本";
+  for (const column of columns) {
+    names.add(column.name);
+    kinds.set(column.name, kind(column.type));
+  }
+  for (const row of rows) {
+    const values = attributes(row);
+    for (const key of Object.keys(values)) {
+      const name = "attr:" + key;
+      names.add(name);
+      // Match the first defined value, without scanning the rows for every field.
+      if (!kinds.has(name) && values[key] !== undefined) kinds.set(name, kind(attributeType(row, key)));
+    }
+  }
+  return { names: [...names], kinds };
 }
 
 export function normalizeSpec(spec: Partial<Spec>): Spec {

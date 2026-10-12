@@ -1,0 +1,32 @@
+{
+  "passed": true,
+  "dashboards": [
+    {
+      "id": "system-center",
+      "title": "系统监控 · 上报中心",
+      "panels": 12
+    },
+    {
+      "id": "system-agent",
+      "title": "系统监控 · Agent",
+      "panels": 6
+    },
+    {
+      "id": "system-sdk",
+      "title": "系统监控 · SDK",
+      "panels": 6
+    },
+    {
+      "id": "105a0cd1-c2d5-46ed-8ac1-b22adba7420f",
+      "title": "Mac 本机 · SDK 封装 demo",
+      "panels": 6
+    }
+  ],
+  "system_tables": 8,
+  "mobile": {
+    "viewport": 390,
+    "page": 390
+  },
+  "errors": [],
+  "query_errors": []
+}

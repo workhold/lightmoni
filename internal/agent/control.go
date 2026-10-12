@@ -141,6 +141,7 @@ func (a *Agent) applyRemote(c RemoteConfig, persist bool) error {
 	a.tasks = c
 	a.collectors = map[string]string{}
 	a.mu.Unlock()
+	a.runtimeEvent("INFO", "configuration_applied", "Agent task configuration applied")
 	if a.tasksReady != nil {
 		a.tasksReadyOnce.Do(func() { close(a.tasksReady) })
 	}
@@ -161,6 +162,9 @@ func ValidateRemoteConfig(c RemoteConfig) error {
 	}
 	if !shared.ValidLogicalTable(c.HostTable) || !shared.ValidLogicalTable(c.ProbeTable) || !shared.ValidLogicalTable(c.LogTable) {
 		return fmt.Errorf("上报表名必须是合法的逻辑 table，不带 log_/metric_/trace_ 前缀")
+	}
+	if shared.SystemLogicalTable(c.HostTable) || shared.SystemLogicalTable(c.ProbeTable) || shared.SystemLogicalTable(c.LogTable) {
+		return fmt.Errorf("系统内置表由内部监控链路写入，请使用业务 table")
 	}
 	if *c.HostEnabled && len(c.HostCollectors) == 0 {
 		return fmt.Errorf("开启机器指标后至少选择一项采集数据")
@@ -236,9 +240,15 @@ func (a *Agent) controlLoop(ctx context.Context) {
 		if err == nil && !registered {
 			_, err = a.controlRequest(ctx, http.MethodPost, "/api/v1/agents/register", status)
 			registered = err == nil
+			if err == nil {
+				a.acknowledgeRuntime(status)
+			}
 		}
 		if err == nil && registered {
 			_, err = a.controlRequest(ctx, http.MethodPost, "/api/v1/agents/"+a.ID()+"/heartbeat", status)
+			if err == nil {
+				a.acknowledgeRuntime(status)
+			}
 			if err == nil {
 				var data []byte
 				data, err = a.controlRequest(ctx, http.MethodGet, "/api/v1/agents/"+a.ID()+"/config", nil)

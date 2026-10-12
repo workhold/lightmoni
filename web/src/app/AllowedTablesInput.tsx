@@ -3,6 +3,7 @@ import type {CatalogTable} from '../shared/types';
 
 export const allowedTableRules = [{
   validator: (_: unknown, value?: string[]) => {
+    if(value?.some(table=>['lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(table))) return Promise.reject(new Error('系统内置表自动接收内部监控数据，无需配置写入权限'));
     if (!value?.length || value.length > 200) return Promise.reject(new Error('请选择 1–200 个允许写入的逻辑 table'));
     const invalid = value.find(table => !/^[a-z][a-z0-9_]{0,47}$/.test(table) || /^(log|metric|trace)_/.test(table));
     return invalid ? Promise.reject(new Error(`无效的逻辑 table：${invalid}；最长 48 位，小写字母开头，不带 log_/metric_/trace_ 前缀`)) : Promise.resolve();
@@ -29,7 +30,7 @@ export function KeyTablePermissions({tables,disabled,help}: {
 export default function AllowedTablesInput({tables,value,onChange,disabled}: {
   tables: CatalogTable[]; value?: string[]; onChange?: (value: string[]) => void; disabled?: boolean;
 }) {
-  const names = [...new Set(tables.map(table => table.logical_name))].sort();
+  const names = [...new Set(tables.filter(table=>!table.system).map(table => table.logical_name))].sort();
   return <Select
     aria-label="允许写入的 Table"
     mode="tags"

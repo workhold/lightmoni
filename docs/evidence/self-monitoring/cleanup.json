@@ -1,0 +1,190 @@
+{
+  "retired_dashboards": [
+    {
+      "id": "fd94d11f-17c7-4bf2-ad30-66e25269b5e8",
+      "title": "大盘操作验收 · 深色工作台"
+    },
+    {
+      "id": "4bba4fe1-37c0-4791-ac5b-2bb254c7558c",
+      "title": "交互与告警 · 验收副本"
+    },
+    {
+      "id": "80a186bd-6b01-41b3-95c5-15ee556e735d",
+      "title": "本机监控 · Docker 验收"
+    },
+    {
+      "id": "ed5ce351-be0b-48fc-abb6-16d258c9313c",
+      "title": "Leafer 布局交互验收 1791600219619"
+    },
+    {
+      "id": "9fff9d7d-8509-4c84-9085-992c18a4718a",
+      "title": "最小仪表与减少动画验收 1791600255702"
+    },
+    {
+      "id": "1bcb2a1a-e9e0-42d3-8fc7-a124f213079a",
+      "title": "Grafana 工作流验收 1791600036537"
+    },
+    {
+      "id": "25357948-4b3e-4d70-a596-ef8fce4c42da",
+      "title": "Leafer 布局交互验收 1791599970794"
+    },
+    {
+      "id": "d64a3ecb-2893-4a0b-a9f2-00dd753a6a8f",
+      "title": "Leafer 布局交互验收 1791599822395"
+    },
+    {
+      "id": "2d9b7c96-5a82-4034-b829-d783f0cde841",
+      "title": "Leafer 布局交互验收 1791599608032"
+    },
+    {
+      "id": "0f860a7f-7055-4a38-aa31-25d97786af59",
+      "title": "Grafana 工作流验收 1791596633999"
+    },
+    {
+      "id": "d1aa01b1-28d9-4074-b81d-5b3048ca461b",
+      "title": "最小仪表与减少动画验收 1791596592736"
+    },
+    {
+      "id": "2e888a3e-bebe-46b1-bdc2-a095b8fe4e8b",
+      "title": "SDK 业务流量"
+    },
+    {
+      "id": "83f01244-b54c-404e-b544-6ee981b4cd46",
+      "title": "review · 交互检查 · 20261010"
+    },
+    {
+      "id": "f22c99f3-c26a-49b5-bd50-a7fe88a8c838",
+      "title": "业务计数趋势"
+    },
+    {
+      "id": "9dbcef10-5933-43b1-aa7d-4aa3dd93e768",
+      "title": "AI 协议验收草稿"
+    }
+  ],
+  "removed_agents": [
+    "102fc40e-58bc-4148-8aec-97b88f3f050a",
+    "0015e285-4a5d-4473-94a4-3ace0616b0ee"
+  ],
+  "removed_alert_rules": [
+    "46d4af60f62a2f963f0d71736bd158c1",
+    "aeba65fcd2094742e676127dc2b7c6d7",
+    "d8df866e92f633315cdc13869f17eb61"
+  ],
+  "tables": [
+    {
+      "name": "log_acceptance",
+      "rows_cleared": 485,
+      "system": false
+    },
+    {
+      "name": "log_app",
+      "rows_cleared": 13144,
+      "system": false
+    },
+    {
+      "name": "log_lightmoni_agent",
+      "rows_cleared": 0,
+      "system": true
+    },
+    {
+      "name": "log_lightmoni_center",
+      "rows_cleared": 1,
+      "system": true
+    },
+    {
+      "name": "log_lightmoni_sdk",
+      "rows_cleared": 8,
+      "system": true
+    },
+    {
+      "name": "metric_agent_gauge",
+      "rows_cleared": 93172,
+      "system": false
+    },
+    {
+      "name": "metric_host_gauge",
+      "rows_cleared": 938839,
+      "system": false
+    },
+    {
+      "name": "metric_host_sum",
+      "rows_cleared": 1287114,
+      "system": false
+    },
+    {
+      "name": "metric_http_gauge",
+      "rows_cleared": 9554,
+      "system": false
+    },
+    {
+      "name": "metric_http_histogram",
+      "rows_cleared": 10722,
+      "system": false
+    },
+    {
+      "name": "metric_http_sum",
+      "rows_cleared": 10722,
+      "system": false
+    },
+    {
+      "name": "metric_lightmoni_agent_gauge",
+      "rows_cleared": 12,
+      "system": true
+    },
+    {
+      "name": "metric_lightmoni_center_gauge",
+      "rows_cleared": 145,
+      "system": true
+    },
+    {
+      "name": "metric_lightmoni_center_histogram",
+      "rows_cleared": 5,
+      "system": true
+    },
+    {
+      "name": "metric_lightmoni_center_sum",
+      "rows_cleared": 15,
+      "system": true
+    },
+    {
+      "name": "metric_lightmoni_sdk_gauge",
+      "rows_cleared": 64,
+      "system": true
+    },
+    {
+      "name": "metric_precision_gauge",
+      "rows_cleared": 2,
+      "system": false
+    },
+    {
+      "name": "metric_precision_sum",
+      "rows_cleared": 1,
+      "system": false
+    },
+    {
+      "name": "metric_probe_gauge",
+      "rows_cleared": 45485,
+      "system": false
+    },
+    {
+      "name": "metric_probe_histogram",
+      "rows_cleared": 45485,
+      "system": false
+    },
+    {
+      "name": "metric_probe_sum",
+      "rows_cleared": 45529,
+      "system": false
+    },
+    {
+      "name": "trace_acceptance",
+      "rows_cleared": 485,
+      "system": false
+    },
+    {
+      "name": "trace_app",
+      "rows_cleared": 13144,
+      "system": false
+    }
+  ]
+}

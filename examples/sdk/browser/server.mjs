@@ -15,6 +15,11 @@ let minute=0,requests=0;
 http.createServer(async(req,res)=>{
  try{
   const path=new URL(req.url,'http://localhost').pathname;
+  if(req.method==='GET'&&path==='/v1/sdk-config'){
+   const origin=req.headers.origin;if(origin&&origin!==`http://${req.headers.host}`){res.writeHead(403).end('Invalid origin');return;}
+   const response=await fetch(endpoint.replace(/\/$/,'')+path,{headers:{Authorization:`Bearer ${key}`},signal:AbortSignal.timeout(5000),redirect:'error'});
+   res.writeHead(response.status,{'Content-Type':'application/json','Cache-Control':'no-store'}).end(Buffer.from(await response.arrayBuffer()));return;
+  }
   if(req.method==='POST'&&signals.has(path)){
    const current=Math.floor(Date.now()/60000);if(current!==minute){minute=current;requests=0;}
    if(++requests>120){res.writeHead(429,{'Retry-After':'5'}).end();return;}

@@ -27,9 +27,10 @@ import (
 )
 
 type Ingest struct {
-	Catalog *Catalog
-	Auth    *auth.Auth
-	mu      sync.Mutex
+	Catalog  *Catalog
+	Auth     *auth.Auth
+	Accepted func(signal string, records int, bytes int)
+	mu       sync.Mutex
 }
 type normalized struct {
 	Kind, Subtype string
@@ -340,6 +341,10 @@ func (s *Ingest) receive(w http.ResponseWriter, r *http.Request, signal string) 
 		shared.Error(w, 400, "X-Lightmoni-Table requires a logical business name")
 		return
 	}
+	if SystemTable(table) {
+		shared.Error(w, 403, "系统内置表由内部监控链路写入")
+		return
+	}
 	if e := s.Auth.AuthorizeTable(key, table); e != nil {
 		if errors.Is(e, auth.ErrTableNotAllowed) {
 			s.Auth.RecordKey(key, "", "rejected", "table not allowed: "+table)
@@ -423,11 +428,15 @@ func (s *Ingest) receive(w http.ResponseWriter, r *http.Request, signal string) 
 	resolved := map[string]string{}
 	for i, n := range rows {
 		service = fmt.Sprint(n.Row["service"])
-		lookup := n.Kind + "\x00" + n.Subtype + "\x00" + service
+		route := table
+		if sdkRuntime(n, table) {
+			route = "lightmoni_sdk"
+		}
+		lookup := route + "\x00" + n.Kind + "\x00" + n.Subtype + "\x00" + service
 		public, exists := resolved[lookup]
 		var e error
 		if !exists {
-			public, e = s.Catalog.Ensure(r.Context(), n.Kind, table, n.Subtype, service)
+			public, e = s.Catalog.Ensure(r.Context(), n.Kind, route, n.Subtype, service)
 			resolved[lookup] = public
 		}
 		if e != nil {
@@ -452,6 +461,9 @@ func (s *Ingest) receive(w http.ResponseWriter, r *http.Request, signal string) 
 	}
 	_, _ = s.Catalog.DB.Exec("DELETE FROM ingest_batches WHERE first_received_at<?", time.Now().Add(-48*time.Hour).UTC().Format("2006-01-02 15:04:05.000000000"))
 	s.Auth.RecordKey(key, service, "accepted", fmt.Sprintf("%d records", len(rows)))
+	if s.Accepted != nil {
+		s.Accepted(signal, len(rows), len(raw))
+	}
 	s.success(w, r, signal)
 }
 func (s *Ingest) success(w http.ResponseWriter, r *http.Request, signal string) {

@@ -28,12 +28,13 @@ LIGHTMONI_PORT=18880 LIGHTMONI_EXTERNAL_URL=http://your-server:18880 sh deploy/s
 
 目录日志填写绝对目录、文件匹配规则（默认 `*.log*`）、是否包含子目录和首次从头读取。默认只采集现有文件后续新增的行，之后新建文件完整采集；读取进度与队列批次一起提交，支持重启续读、重命名轮转和截断检测。要求服务用户可读目录，采集 UTF-8 文本行，跳过压缩文件和符号链接；单行超过 64 KiB 分片，未结束的短行等待换行。事件时间使用采集时间，保留文件路径和字节位置。每个 Agent 最多同时打开 256 个日志文件，每个目录单次扫描最多 10,000 个条目，超限会显示采集错误。源文件在采集前已删除或覆盖的内容无法恢复。
 
-SDK 默认连本机 Agent `http://127.0.0.1:4318`，多个服务共用 Agent，不必分别申请 Key。直连主服务时传入允许写入目标 table 的有效 Key。SDK 通过 Agent 上报时，也受 Agent Key 的 table 白名单约束。
+“SDK 接入”可选择“通过 Agent”或“直连中心”，八种语言均提供对应的代码高亮示例、环境变量和复制按钮。通过 Agent 默认连 `http://127.0.0.1:4318`，中心 Key 由 Agent 保存。直连中心无需 Agent，传入中心地址和允许目标 table 的 Key，适用于容器、Serverless 等部署。示例读取 `LIGHTMONI_ENDPOINT` / `LIGHTMONI_KEY`；容器通过 environment / Secret 注入，中心地址应使用容器可访问的域名或服务地址。同一 Docker 网络可用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可用 `host.docker.internal`。SDK 通过 Agent 上报时，也受 Agent Key 的 table 白名单约束。
 
 ```ts
 const moni = createLightMoni({
   service: 'order-api', table: 'business',
-  endpoint: 'http://127.0.0.1:4318'
+  endpoint: process.env.LIGHTMONI_ENDPOINT ?? 'http://127.0.0.1:4318',
+  key: process.env.LIGHTMONI_KEY
 });
 const orders = moni.counter('orders_created');
 orders.add(1, {region: 'cn', payment: 'wechat'});
@@ -113,3 +114,9 @@ npm --prefix web run build
 只读 SQL 通过 AST 校验和独立查询账号；禁止私有表、跨库、外部表函数和自行设置资源限额。默认每次最多 8 个查询、10 秒执行、10,000 行展示。时间范围为 `[from,to)`，`UInt64` / `Int64` / Decimal 结果保留字符串。指标 `value_float` 保存原始浮点，`value_int` 保存精确整数，公开 `value` 为浮点；整数汇总使用 `sum(toDecimal256(value_int,0))`；图表超出安全精度时要求明确选择近似展示。日志/链路默认保留 7 天，指标 30 天。
 
 详细方案：[docs/architecture.md](docs/architecture.md)、[docs/contracts.md](docs/contracts.md)。验收证据和未验收项：[docs/acceptance.md](docs/acceptance.md)。没有真实账号凭证的第三方登录、通知和 AI 供应商只能标注协议测试，不能视为真实供应商验收。Grafana / Kibana 核心交互以任务矩阵逐项验证；不作未经对比测试的性能或完整功能等同承诺。
+
+### 系统自监控
+
+初始化会建立 `lightmoni_center`、`lightmoni_agent`、`lightmoni_sdk` 三类内置逻辑表，并创建「系统监控 · 上报中心 / Agent / SDK」大盘。系统表通过标准查询、日志浏览和图表告警使用；首次初始化之后不会覆盖大盘编辑，也不会在重启时重新创建用户主动删除的大盘。
+
+中心记录上报接口 QPS / 响应状态 / 耗时、首次成功确认的记录数与 OTLP 字节数、内存和自监控队列；重复批次只增加接口请求次数，不重复计算接收量。Agent 控制心跳转换成在线状态、队列和采集诊断；启动、配置变更与执行失败日志在中心 SQLite 暂存，写入 ClickHouse 成功后清除。SDK 自监控在原有业务权限验证后自动分流到系统 SDK 表。见 [SDK 内部监控](sdk/README.md#内部监控) 和 [本机封装 SDK 示例](examples/self-monitoring/README.md)。

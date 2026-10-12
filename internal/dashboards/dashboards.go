@@ -253,6 +253,9 @@ func normalize(d *Dashboard) error {
 		if p.Options == nil {
 			p.Options = map[string]any{}
 		}
+		if err := validateQueryOptions(p.Options); err != nil {
+			return err
+		}
 		if len(p.Queries) == 0 || len(p.Queries) > 8 {
 			return errors.New("每个面板必须包含 1–8 条查询")
 		}

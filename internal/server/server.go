@@ -31,6 +31,7 @@ type Server struct {
 	Executor    *query.Executor
 	API, Public *http.ServeMux
 	deps        shared.Dependencies
+	Runtime     *RuntimeMonitor
 }
 
 func New(ctx context.Context, cfg Config) (*Server, error) {
@@ -73,9 +74,13 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 	q := query.New(reader, catalog.List)
 	s := &Server{DB: db, Auth: a, Catalog: catalog, Executor: q, API: http.NewServeMux(), Public: http.NewServeMux()}
 	s.deps = shared.Dependencies{DB: db, Query: q.Execute, ReferencedTables: q.ReferencedTables, Catalog: catalog.List, ExternalURL: cfg.ExternalURL, Encrypt: a.Encrypt, Decrypt: a.Decrypt}
+	if e = s.initRuntime(ctx); e != nil {
+		db.Close()
+		return nil, e
+	}
 	a.RegisterPublic(s.Public)
 	a.Register(s.API)
-	(&ingest.Ingest{Catalog: catalog, Auth: a}).Register(s.Public)
+	(&ingest.Ingest{Catalog: catalog, Auth: a, Accepted: s.Runtime.accepted}).Register(s.Public)
 	if e = s.registerCore(); e != nil {
 		db.Close()
 		return nil, e
@@ -89,7 +94,7 @@ func (s *Server) Handler() http.Handler {
 	protected := s.Auth.Middleware(s.API)
 	sub, _ := fs.Sub(assets, "dist")
 	files := http.FileServer(http.FS(sub))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, pattern := s.Public.Handler(r); pattern != "" {
 			s.Public.ServeHTTP(w, r)
 			return
@@ -107,13 +112,21 @@ func (s *Server) Handler() http.Handler {
 		}
 		files.ServeHTTP(w, r)
 	})
+	if s.Runtime != nil {
+		return s.Runtime.middleware(handler)
+	}
+	return handler
 }
 func (s *Server) registerCore() error {
 	s.registerRetention()
+	s.registerLogSampling()
 	if _, e := s.DB.Exec("CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY,host_id TEXT NOT NULL,hostname TEXT NOT NULL,version TEXT NOT NULL,platform TEXT NOT NULL,arch TEXT NOT NULL,last_seen TEXT NOT NULL,heartbeat TEXT NOT NULL,group_id TEXT NOT NULL DEFAULT 'default');"); e != nil {
 		return e
 	}
 	if e := s.initAgentTasks(); e != nil {
+		return e
+	}
+	if _, e := s.DB.Exec("CREATE TABLE IF NOT EXISTS agent_runtime_events(agent_id TEXT NOT NULL,event_id TEXT NOT NULL,key_id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(agent_id,event_id))"); e != nil {
 		return e
 	}
 	s.Public.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { shared.JSON(w, 200, map[string]string{"status": "ok"}) })
@@ -184,7 +197,8 @@ func (s *Server) registerCore() error {
 	})
 	for _, path := range []string{"POST /api/v1/agents/register", "POST /api/v1/agents/{id}/heartbeat"} {
 		s.Public.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
-			if _, e := s.Auth.ValidateKey(r); e != nil {
+			key, e := s.Auth.ValidateKey(r)
+			if e != nil {
 				shared.Error(w, 401, "invalid write key")
 				return
 			}
@@ -223,6 +237,12 @@ func (s *Server) registerCore() error {
 				shared.Error(w, 400, "Agent 分组不存在，请重新选择分组生成安装命令")
 				return
 			}
+			if e = s.storeAgentEvents(r.Context(), id, key, v); e != nil {
+				shared.Error(w, 503, e.Error())
+				return
+			}
+			v["runtime_key_id"] = key
+			delete(v, "runtime_events")
 			raw, _ := json.Marshal(v)
 			result, e := s.DB.Exec("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat,group_id) SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM agent_groups WHERE id=?) ON CONFLICT(id) DO UPDATE SET hostname=excluded.hostname,version=excluded.version,platform=excluded.platform,arch=excluded.arch,last_seen=excluded.last_seen,heartbeat=excluded.heartbeat", id, text("host_id"), text("hostname"), text("version"), text("platform"), text("arch"), time.Now().UTC().Format(time.RFC3339Nano), string(raw), groupID, groupID)
 			if e != nil {

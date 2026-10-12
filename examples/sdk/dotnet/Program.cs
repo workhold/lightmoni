@@ -5,10 +5,13 @@ static Dictionary<string, object> A(params object[] pairs) { var a = new Diction
 static void Require(bool v) { if (!v) throw new Exception("SDK conformance assertion"); }
 string mode = Env("LIGHTMONI_TEST_MODE", "demo");
 var limits = mode == "overflow" ? new Limits(CardinalityLimit: 2) : mode == "capacity" ? new Limits(QueueBytes: 1024, MaxBatchBytes: 1024, BufferBytes: 64) : new Limits();
+limits=limits with { SelfTelemetry=mode is "demo" or "selfmonitor" };
 var mon = new Client(Env("LIGHTMONI_SERVICE", "example-dotnet-api"), "http", Env("LIGHTMONI_ENDPOINT", "http://127.0.0.1:4318"), Env("LIGHTMONI_KEY", ""), limits);
 var counter = mon.Counter("http.requests");
 switch (mode)
 {
+    case "selfmonitor":
+        counter.Add(-1); await Task.Delay(35000); await mon.ShutdownAsync(TimeSpan.FromSeconds(5)); break;
     case "fixture":
         var dims = A("route", "/payments", "method", "POST", "status", 200);
         counter.Add(1, dims); dims["status"] = 999;

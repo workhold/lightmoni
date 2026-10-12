@@ -1,4 +1,5 @@
 import type {Parameter, SQLQuery, TimeRange, QueryFrame, QueryResult} from '../../shared/types';
+import {rangeUtil} from '@grafana/data';
 export interface Grid {x:number;y:number;w:number;h:number}
 export interface DashboardQuery extends SQLQuery {enabled?:boolean}
 export interface Panel {id:string;title:string;type:string;queries:DashboardQuery[];options:Record<string,unknown>;grid:Grid}
@@ -148,4 +149,4 @@ export function numeric(value:unknown,approximate=false):number|null{
 }
 export const printable=(v:unknown)=>v===null?'null':v===undefined?'':typeof v==='object'?JSON.stringify(v):String(v);
 export function resultFrames(results:QueryResult[]):{refId:string;frame:QueryFrame}[]{return results.flatMap(r=>r.frames.map(frame=>({refId:r.refId,frame})));}
-export function intervalFor(range:TimeRange,width=600):number{return Math.max(1000,Math.ceil((Date.parse(range.to)-Date.parse(range.from))/Math.max(100,Math.min(1000,width)) /1000)*1000);}
+export function intervalFor(range:TimeRange,width=600):number{return rangeUtil.roundInterval((Date.parse(range.to)-Date.parse(range.from))/Math.max(1,Math.min(10000,Math.floor(width)||600)));}

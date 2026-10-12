@@ -11,9 +11,8 @@ const LogExplorePage=lazy(()=>import('../features/logs/LogExplorePage'));
 const AlertsPage=lazy(()=>import('../features/alerts/AlertsPage'));
 const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
 const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
-const QueryPage=lazy(()=>import('./Workbench').then(module=>({default:module.QueryPage})));
 
-const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/query','SQL 工作台',DatabaseOutlined],['/alerts','告警中心',BellOutlined],['/agents','Agent',ApiOutlined],['/data','数据接入',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','设置',SettingOutlined]] as const;
+const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','Agent',ApiOutlined],['/data','数据接入',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','设置',SettingOutlined]] as const;
 
 export default function Root(){
  const location=useLocation(),navigate=useNavigate();
@@ -40,15 +39,14 @@ export default function Root(){
     <Route path="/data" element={<DataPage user={user}/>}/>
     <Route path="/agents" element={<AgentsPage user={user}/>}/>
     <Route path="/settings" element={<SettingsPage user={user}/>}/>
-    <Route path="/query" element={<QueryPage/>}/>
     <Route path="/assistant" element={<AssistantPage/>}/>
     <Route path="/dashboards" element={<DashboardPage/>}/>
     <Route path="/dashboards/:id" element={<DashboardPage/>}/>
     <Route path="/logs/*" element={<LogExplorePage/>}/>
     <Route path="/alerts/*" element={<AlertsPage/>}/>
     <Route path="/login" element={<Navigate to="/"/>}/>
-    <Route path="*" element={<Navigate to="/"/>}/>
+    <Route path="*" element={<Navigate to="/" replace/>}/>
    </Routes></Suspense></main>
   {location.pathname!=='/assistant'&&<Tooltip title="AI 助手 · 分析当前页面" placement="left"><Button className="lm-assistant-launcher" type="primary" shape="circle" size="large" icon={<MessageOutlined/>} aria-label="打开 AI 助手" aria-expanded={assistant} onClick={()=>setAssistant(true)}/></Tooltip>}
-  <Drawer title="AI 助手" size="large" open={assistant} onClose={()=>setAssistant(false)} destroyOnHidden><Suspense fallback={<Spin/>}><AssistantPanel compact initialContext={currentContext} onSQL={sql=>{setAssistant(false);navigate('/query?sql='+encodeURIComponent(sql))}}/></Suspense></Drawer></div></MonitoringScope.Provider>;
+  <Drawer title="AI 助手" size="large" open={assistant} onClose={()=>setAssistant(false)} destroyOnHidden><Suspense fallback={<Spin/>}><AssistantPanel compact initialContext={currentContext}/></Suspense></Drawer></div></MonitoringScope.Provider>;
 }

@@ -9,11 +9,13 @@ public class Main {
     public static void main(String[] args) throws Exception {
         String mode=env("LIGHTMONI_TEST_MODE","demo");
         Client.Limits limits=new Client.Limits();
+        limits.selfTelemetry=mode.equals("demo") || mode.equals("selfmonitor");
         if(mode.equals("overflow"))limits.cardinalityLimit=2;
         if(mode.equals("capacity")){limits.queueBytes=1024;limits.maxBatchBytes=1024;limits.bufferBytes=64;}
         Client mon=new Client(env("LIGHTMONI_SERVICE","example-java-api"),"http",env("LIGHTMONI_ENDPOINT","http://127.0.0.1:4318"),env("LIGHTMONI_KEY",""),limits);
         var counter=mon.counter("http.requests");
         switch(mode) {
+            case "selfmonitor" -> {counter.add(-1);Thread.sleep(35000);mon.shutdown(Duration.ofSeconds(5));}
             case "fixture" -> {
                 Map<String,Object> dims=new HashMap<>(Map.of("route","/payments","method","POST","status",200));
                 counter.add(1,dims);dims.put("status",999);

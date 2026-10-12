@@ -8,6 +8,7 @@ import (
 	"github.com/lightmoni/lightmoni/internal/logs"
 	"github.com/lightmoni/lightmoni/internal/server"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -29,6 +30,7 @@ func main() {
 		log.Fatal(e)
 	}
 	defer s.DB.Close()
+	slog.SetDefault(slog.New(&server.RuntimeLogHandler{Console: slog.NewTextHandler(os.Stderr, nil), Monitor: s.Runtime, Secrets: []string{env("LIGHTMONI_CH_PASSWORD", "lightmoni_test_password")}}))
 	ai, e := assistant.New(s.Dependencies())
 	if e != nil {
 		log.Fatal(e)
@@ -39,6 +41,9 @@ func main() {
 		log.Fatal(e)
 	}
 	dash.Register(s.API)
+	if e = dash.SeedSystemDashboards(ctx); e != nil {
+		log.Fatal(e)
+	}
 	logsModule, e := logs.New(s.Dependencies())
 	if e != nil {
 		log.Fatal(e)
@@ -50,6 +55,8 @@ func main() {
 	}
 	alertsModule.Register(s.API)
 	go alertsModule.Run(ctx)
+	go s.RunAgentTelemetry(ctx)
+	go s.RunRuntime(ctx)
 	httpServer := &http.Server{Addr: env("LIGHTMONI_ADDR", "127.0.0.1:8080"), Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()

@@ -2,12 +2,13 @@ use lightmoni::{Attributes,Client,Limits,TraceContext};
 use std::{collections::BTreeMap,env,time::Duration};
 fn var(n:&str,fallback:&str)->String{env::var(n).unwrap_or_else(|_|fallback.into())}
 fn run()->lightmoni::Result<()> {
-    let mode=var("LIGHTMONI_TEST_MODE","demo");let mut limits=Limits::default();
+    let mode=var("LIGHTMONI_TEST_MODE","demo");let mut limits=Limits::default();limits.self_telemetry=mode=="demo" || mode=="selfmonitor";
     if mode=="overflow"{limits.cardinality_limit=2;}
     if mode=="capacity"{limits.queue_bytes=1024;limits.max_batch_bytes=1024;limits.buffer_bytes=64;}
     let mon=Client::with_limits(&var("LIGHTMONI_SERVICE","example-rust-api"),"http",&var("LIGHTMONI_ENDPOINT","http://127.0.0.1:4318"),&var("LIGHTMONI_KEY",""),limits)?;
     let counter=mon.counter("http.requests")?;
     match mode.as_str() {
+        "selfmonitor"=>{counter.add(-1,&Attributes::new());std::thread::sleep(Duration::from_secs(35));mon.shutdown(Duration::from_secs(5))?;}
         "fixture"=>{
             let mut dims=Attributes::from([("route".into(),"/payments".into()),("method".into(),"POST".into()),("status".into(),200i64.into())]);
             counter.add(1,&dims);dims.insert("status".into(),999i64.into());

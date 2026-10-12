@@ -13,6 +13,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import weakref
 from dataclasses import dataclass
 
 _context = contextvars.ContextVar("lightmoni_trace", default=None)
@@ -112,6 +113,9 @@ class _State:
                           retried_batches=0, invalid_records=0, overflow_records=0,
                           dropped_records=0, rejected_records=0, last_error="")
         self.opener = urllib.request.build_opener(_NoRedirect())
+        self.self_enabled, self.self_table, self.self_last, self.self_started = True, "", float("-inf"), False
+        self.self_previous = {}
+        self.stop = threading.Event()
 
     def invalid(self, message):
         self.stats["invalid_records"] += 1
@@ -188,6 +192,7 @@ class _State:
                 self.enqueue(table, signal, group, at)
         self.records.clear()
         self.stats["buffer_bytes"] = 0
+        self.collect_self()
 
     def enqueue(self, table, signal, records, at):
         payload = self.payload(signal, records)
@@ -199,6 +204,30 @@ class _State:
         self.queue.append((self.sequence, str(uuid.uuid4()), at, table, signal, payload, len(records)))
         self.stats["pending_bytes"] += len(payload)
         self.stats["pending_batches"] += 1
+
+    def enqueue_self(self, signal, rows, at):
+        size = len(self.payload(signal, rows))
+        if size > self.limits['max_batch_bytes'] or len(self.queue) >= self.limits['queue_batches'] or self.stats['pending_bytes'] + size > self.limits['queue_bytes']:
+            return False
+        self.enqueue(self.self_table, signal, rows, at)
+        return True
+
+    def collect_self(self):
+        if not self.self_enabled or time.monotonic() - self.self_last < 30:
+            return
+        self.self_last = time.monotonic()
+        at = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+        now = str(time.time_ns())
+        attributes = _attrs({'lightmoni.component': 'sdk', 'sdk.language': 'python', 'sdk.version': '0.1.0'})
+        values = dict(heartbeat=1, **{n: self.stats[n] for n in ('pending_batches','pending_bytes','retried_batches','dropped_records','rejected_records','invalid_records','overflow_records')})
+        self.enqueue_self('metrics', [dict(name='lightmoni.sdk.' + name, gauge={'dataPoints': [dict(timeUnixNano=now, asDouble=value, attributes=attributes)]}) for name,value in values.items()], at)
+        changed = any(self.stats[n] > self.self_previous.get(n, 0) for n in ('retried_batches','dropped_records','rejected_records','invalid_records','overflow_records'))
+        if not self.self_started or changed:
+            event = 'diagnostics_changed' if self.self_started else 'started'
+            row = dict(timeUnixNano=now, severityText='WARN' if changed else 'INFO', severityNumber=13 if changed else 9, body={'stringValue': 'LightMoni SDK delivery, buffer or input diagnostics changed' if changed else 'LightMoni SDK started'}, attributes=attributes + _attrs({'event': event}))
+            if self.enqueue_self('logs', [row], at):
+                self.self_started, self.self_previous = True, dict(self.stats)
+
 
 
 class Metric:
@@ -289,8 +318,24 @@ class Span:
 
 
 class Client:
-    def __init__(self, service, table, endpoint="http://127.0.0.1:4318", key="", **limits):
+    def __init__(self, service, table, endpoint="http://127.0.0.1:4318", key="", self_telemetry=True, **limits):
         self.table, self._state = _table(table), _State(service, endpoint, key, limits)
+        self._state.self_enabled, self._state.self_table = bool(self_telemetry), self.table
+        if self_telemetry:
+            reference, stop, table = weakref.ref(self._state), self._state.stop, self.table
+            def heartbeat():
+                while not stop.wait(30):
+                    state = reference()
+                    if state is None or state.closed:
+                        return
+                    client = object.__new__(Client)
+                    client._state, client.table = state, table
+                    try:
+                        client.flush(timeout=5)
+                    except (OSError, ValueError, RuntimeError):
+                        pass
+                    del client, state
+            threading.Thread(target=heartbeat, name="lightmoni-heartbeat", daemon=True).start()
 
     def with_table(self, table):
         child = object.__new__(Client)
@@ -434,6 +479,7 @@ class Client:
             s.delivery.release()
 
     def shutdown(self, timeout=10):
+        self._state.stop.set()
         try:
             self.flush(timeout)
         finally:

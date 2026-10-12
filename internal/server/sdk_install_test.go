@@ -16,6 +16,7 @@ func TestSDKCatalogAndDownloadRoutes(t *testing.T) {
 	r := httptest.NewRecorder()
 	s.API.ServeHTTP(r, httptest.NewRequest("GET", "/api/v1/sdk-install", nil))
 	var metadata struct {
+		Endpoint string       `json:"endpoint"`
 		Version  string       `json:"version"`
 		Packages []sdkPackage `json:"packages"`
 		NodeURL  string       `json:"node_url"`
@@ -24,7 +25,7 @@ func TestSDKCatalogAndDownloadRoutes(t *testing.T) {
 	if err := json.Unmarshal(r.Body.Bytes(), &metadata); err != nil {
 		t.Fatal(err)
 	}
-	if r.Code != 200 || len(metadata.Packages) != 8 || metadata.Version != sdkVersion || metadata.NodeURL == "" || metadata.GoURL == "" {
+	if r.Code != 200 || len(metadata.Packages) != 8 || metadata.Version != sdkVersion || metadata.Endpoint != "https://monitor.example/base" || metadata.NodeURL == "" || metadata.GoURL == "" {
 		t.Fatalf("invalid SDK install metadata: %s", r.Body.String())
 	}
 	for _, p := range metadata.Packages {

@@ -188,7 +188,7 @@ func TestTwoServicesShareGlobalKeyAndRotationKeepsPayload(t *testing.T) {
 	a := newTestAgent(t, cfg)
 	ctx := context.Background()
 	for _, service := range []string{"order-api", "worker"} {
-		client, err := moni.New(moni.Config{Service: service, Table: "business", Exporter: a, Interval: time.Hour})
+		client, err := moni.New(moni.Config{DisableSelfTelemetry: true, Service: service, Table: "business", Exporter: a, Interval: time.Hour})
 		if err != nil {
 			t.Fatal(err)
 		}

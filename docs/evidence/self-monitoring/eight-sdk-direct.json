@@ -1,0 +1,76 @@
+{
+  "languages": [
+    "go",
+    "node",
+    "python",
+    "java",
+    "dotnet",
+    "php",
+    "ruby",
+    "rust"
+  ],
+  "path": "SDK -> service -> ClickHouse",
+  "results": {
+    "counts": {
+      "sdk-direct-rust-f8bfd635": "20",
+      "sdk-direct-java-f8bfd635": "20",
+      "sdk-direct-python-f8bfd635": "20",
+      "sdk-direct-dotnet-f8bfd635": "20",
+      "sdk-direct-go-f8bfd635": "20",
+      "sdk-direct-php-f8bfd635": "20",
+      "sdk-direct-node-f8bfd635": "20",
+      "sdk-direct-ruby-f8bfd635": "20"
+    },
+    "links": {
+      "sdk-direct-ruby-f8bfd635": "20",
+      "sdk-direct-node-f8bfd635": "20",
+      "sdk-direct-python-f8bfd635": "20",
+      "sdk-direct-go-f8bfd635": "20",
+      "sdk-direct-php-f8bfd635": "20",
+      "sdk-direct-rust-f8bfd635": "20",
+      "sdk-direct-dotnet-f8bfd635": "20",
+      "sdk-direct-java-f8bfd635": "20"
+    },
+    "histogram": {
+      "sdk-direct-ruby-f8bfd635": "20",
+      "sdk-direct-node-f8bfd635": "20",
+      "sdk-direct-python-f8bfd635": "20",
+      "sdk-direct-go-f8bfd635": "20",
+      "sdk-direct-php-f8bfd635": "20",
+      "sdk-direct-rust-f8bfd635": "20",
+      "sdk-direct-dotnet-f8bfd635": "20",
+      "sdk-direct-java-f8bfd635": "20"
+    },
+    "gauge": {
+      "sdk-direct-dotnet-f8bfd635": "3",
+      "sdk-direct-node-f8bfd635": "3",
+      "sdk-direct-python-f8bfd635": "3",
+      "sdk-direct-go-f8bfd635": "3",
+      "sdk-direct-php-f8bfd635": "3",
+      "sdk-direct-rust-f8bfd635": "3",
+      "sdk-direct-java-f8bfd635": "3",
+      "sdk-direct-ruby-f8bfd635": "3"
+    },
+    "self_heartbeat": {
+      "sdk-direct-ruby-f8bfd635": "1",
+      "sdk-direct-node-f8bfd635": "1",
+      "sdk-direct-python-f8bfd635": "1",
+      "sdk-direct-go-f8bfd635": "1",
+      "sdk-direct-php-f8bfd635": "1",
+      "sdk-direct-rust-f8bfd635": "1",
+      "sdk-direct-dotnet-f8bfd635": "1",
+      "sdk-direct-java-f8bfd635": "1"
+    },
+    "self_logs": {
+      "sdk-direct-ruby-f8bfd635": "1",
+      "sdk-direct-node-f8bfd635": "1",
+      "sdk-direct-python-f8bfd635": "1",
+      "sdk-direct-go-f8bfd635": "1",
+      "sdk-direct-php-f8bfd635": "1",
+      "sdk-direct-rust-f8bfd635": "1",
+      "sdk-direct-dotnet-f8bfd635": "1",
+      "sdk-direct-java-f8bfd635": "1"
+    }
+  },
+  "packages": 8
+}
