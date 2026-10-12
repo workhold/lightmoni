@@ -3,6 +3,8 @@ WORKDIR /work/web
 COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
+# The reporting settings UI shares the SDK sampling model.
+COPY sdk/typescript/src/ /work/sdk/typescript/src/
 RUN npm run build
 WORKDIR /work/sdk/typescript
 COPY sdk/typescript/package*.json ./
@@ -22,6 +24,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 FROM alpine:3.23
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 lightmoni && mkdir -p /data && chown lightmoni:lightmoni /data
 COPY --from=go /lightmoni /usr/local/bin/lightmoni
+ENV LIGHTMONI_ADDR=:8080 LIGHTMONI_DATA=/data/state
 USER lightmoni
 WORKDIR /data
 EXPOSE 8080

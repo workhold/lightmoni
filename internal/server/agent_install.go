@@ -8,7 +8,10 @@ import (
 	"strings"
 )
 
-func (s *Server) registerAgentInstall(externalURL string) {
+func (s *Server) registerAgentInstall(externalURL string) error {
+	if err := s.registerReportingSettings(externalURL); err != nil {
+		return err
+	}
 	s.Public.HandleFunc("GET /downloads/agent/{file}", func(w http.ResponseWriter, r *http.Request) {
 		file := r.PathValue("file")
 		if file != "install.sh" && file != "uninstall.sh" && file != "SHA256SUMS" && !regexp.MustCompile(`^lightmoni-agent_[0-9A-Za-z._-]+_linux_(amd64|arm64)\.tar\.gz$`).MatchString(file) {
@@ -40,7 +43,12 @@ func (s *Server) registerAgentInstall(externalURL string) {
 		_, _ = w.Write(raw)
 	})
 	s.API.HandleFunc("GET /api/v1/sdk-install", func(w http.ResponseWriter, r *http.Request) {
-		base := strings.TrimRight(externalURL, "/")
+		settings, err := s.reportingSettings(r.Context(), externalURL)
+		if err != nil {
+			shared.Error(w, 500, "读取默认上报地址失败")
+			return
+		}
+		base := settings.EffectiveEndpoint
 		shared.JSON(w, 200, map[string]any{"version": sdkVersion, "endpoint": base, "node_url": base + "/downloads/sdk/lightmoni-sdk-" + sdkVersion + ".tgz", "go_url": base + "/downloads/sdk/lightmoni-go-sdk_" + sdkVersion + ".tar.gz", "packages": sdkPackages(base), "checksums_url": base + "/downloads/sdk/SDK_SHA256SUMS"})
 	})
 	s.API.HandleFunc("GET /api/v1/agent-install", func(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +59,13 @@ func (s *Server) registerAgentInstall(externalURL string) {
 				bundles = append(bundles, entry.Name())
 			}
 		}
-		base := strings.TrimRight(externalURL, "/")
+		settings, err := s.reportingSettings(r.Context(), externalURL)
+		if err != nil {
+			shared.Error(w, 500, "读取默认上报地址失败")
+			return
+		}
+		base := settings.EffectiveEndpoint
 		shared.JSON(w, 200, map[string]any{"version": "0.1.0", "endpoint": base, "release_url": base + "/downloads/agent", "install_url": base + "/downloads/agent/install.sh", "bundles": bundles})
 	})
+	return nil
 }

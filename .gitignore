@@ -5,6 +5,8 @@ bin/
 .lightmoni/
 data/
 .env
+.env.*
+!.env.example
 *.db
 *.db-shm
 *.db-wal

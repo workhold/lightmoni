@@ -6,7 +6,7 @@
 
 让个人和小团队在一台机器上启动主服务，安装 Agent，接入 SDK，即可看机器、业务指标、日志、拨测和告警。配置入口围绕 service、table、Agent、大盘和通知渠道，不要求先创建项目。
 
-推荐 **React + TypeScript 前端，Go 主服务与 Agent，SQLite 管理数据，ClickHouse 监控数据**。UI 按 oil-ui 的设计流程统一，图表采用 AntV。前端构建文件嵌入主服务，中心端运行两个容器。Go SDK 和 Agent 复用指标与导出实现；首批同时提供 Node.js TypeScript SDK。
+推荐 **React + TypeScript 前端，Go 主服务与 Agent，SQLite 管理数据，ClickHouse 监控数据**。UI 按 oil-ui 的设计流程统一，图表采用 AntV。前端构建文件嵌入主服务；默认 Compose 只运行主服务并连接外部 ClickHouse，独立的随附数据库配置运行主服务与 ClickHouse 两个容器。Go SDK 和 Agent 复用指标与导出实现；首批同时提供 Node.js TypeScript SDK。
 
 | 选择 | 对本项目的影响 | 建议 |
 | --- | --- | --- |

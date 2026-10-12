@@ -62,7 +62,7 @@ export default function AgentTaskEditor({tasks,endpoint,groupName,onSave,onCance
       </>},
       {key:'logs',label:'目录日志',forceRender:true,children:<AgentLogSources saving={saving}/>},
       {key:'report',label:'上报配置',forceRender:true,children:<>
-        <Form.Item label="上报地址" extra="安装时设置当前工作台地址和上报 Key，所有任务共用这份连接配置。"><Input aria-label="上报地址" readOnly value={endpoint}/></Form.Item>
+        <Form.Item label="默认上报地址" extra="生成安装命令时默认使用此地址；每台 Agent 可填写自己的公网或内网地址，分组任务共用该 Agent 的连接配置。"><Input aria-label="默认上报地址" readOnly value={endpoint}/></Form.Item>
         <Form.Item name="host_table" label="机器指标上报表" rules={logicalTableRules}><Input aria-label="机器指标上报表" placeholder="host"/></Form.Item>
         <Form.Item name="probe_table" label="拨测结果上报表" rules={logicalTableRules} extra="填写逻辑表名，系统自动生成对应的指标表。"><Input aria-label="拨测结果上报表" placeholder="probe"/></Form.Item>
         <Form.Item name="log_table" label="目录日志上报表" rules={logicalTableRules} extra="填写逻辑表名，系统自动生成对应的日志表。"><Input aria-label="目录日志上报表" placeholder="files"/></Form.Item>

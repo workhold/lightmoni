@@ -4,21 +4,48 @@
 
 没有项目或租户概念。每份 Key 可配置逻辑 table 白名单，或显式允许所有 table，不绑定 service；服务通过 `service` 标识，业务通过逻辑 `table` 选择数据流。服务自动生成 `log_*`、`metric_*_sum/gauge/histogram`、`trace_*`，在记录中写入实际认证的 `key_id`。
 
-## 一键部署
+## Docker Compose 部署
 
-需要 Docker Compose 和 OpenSSL。在仓库根目录运行：
+根目录的 [compose.yaml](compose.yaml) 默认只启动 LightMoni，连接已有 ClickHouse。主服务镜像内置网页、两种 Linux 架构的 Agent 安装包和八种语言的 SDK，无需单独部署前端。
 
-```sh
-sh deploy/server/start.sh
-```
-
-脚本首次生成权限为 0600 的 `.env` 和随机数据库密码，随后构建并启动主服务、ClickHouse 两个容器。打开 `http://localhost:8080` 创建管理员。更换端口及公开服务地址可在首次运行前设置：
+在仓库根目录准备配置：
 
 ```sh
-LIGHTMONI_PORT=18880 LIGHTMONI_EXTERNAL_URL=http://your-server:18880 sh deploy/server/start.sh
+cp .env.example .env
+chmod 600 .env
 ```
 
-已有部署修改 `.env` 后重新运行。SQLite、加密主密钥与 ClickHouse 使用独立持久卷。ClickHouse 不向宿主机公开端口。主服务反向代理时，将 `LIGHTMONI_EXTERNAL_URL` 设为用户和 Agent 均可访问的完整地址；第三方登录回调使用该地址。
+编辑 `.env`，填写 `LIGHTMONI_CH_URL`、`LIGHTMONI_CH_USER` 和 `LIGHTMONI_CH_PASSWORD`。数据库地址使用 ClickHouse 的 HTTP(S) 接口；宿主机上的数据库可以使用 `http://host.docker.internal:8123`，远程数据库使用其域名或 IP，数据库监听地址应允许容器访问。该账号需支持建库、建表、创建视图、读写、创建只读查询用户和授权；服务启动时会初始化 `lightmoni` 数据库和 `lightmoni_reader` 查询账号。
+
+配置 `LIGHTMONI_PORT` 和 `LIGHTMONI_EXTERNAL_URL` 后构建并启动：
+
+```sh
+docker compose config --quiet
+docker compose up -d --build --wait
+```
+
+打开默认的 `http://localhost:8080` 创建管理员。使用 Nginx 时，把 `LIGHTMONI_EXTERNAL_URL` 设为浏览器访问的 HTTPS 域名；如只允许宿主机反向代理访问，设置 `LIGHTMONI_BIND_ADDRESS=127.0.0.1`。SDK / Agent 的默认中心上报地址初始使用该工作台地址，也可在“设置 → 接入地址”单独保存公网或内网入口。兼容启动脚本 `sh deploy/server/start.sh` 使用同一套根目录配置。
+
+如果需要同时启动 ClickHouse，使用独立目录 [deploy/with-clickhouse](deploy/with-clickhouse/README.md) 中的 Compose 和 `.env.example`：
+
+```sh
+cd deploy/with-clickhouse
+cp .env.example .env
+chmod 600 .env
+# 编辑 .env，填写 LIGHTMONI_CH_PASSWORD，并按部署环境修改端口和域名。
+docker compose up -d --build --wait
+```
+
+该版本等待 ClickHouse 就绪后启动主服务，数据库端口只在 Compose 网络内开放。根目录和该目录的 `.env` 各自使用，选择对应目录执行命令。
+
+两种配置默认构建 `lightmoni:0.1.0`。使用已发布镜像时，将对应 `.env` 中的 `LIGHTMONI_IMAGE` 改为仓库地址与固定版本，再在对应目录运行：
+
+```sh
+docker compose pull lightmoni
+docker compose up -d --no-build --wait
+```
+
+更新源码版本后重新运行 `docker compose up -d --build --wait`；查看日志使用 `docker compose logs -f --tail=100`，停止服务使用 `docker compose down`。SQLite、加密主密钥和队列保存在 `lightmoni-state` 卷，随附数据库使用独立的 `lightmoni-telemetry` 卷。备份和恢复时配套保存状态卷、ClickHouse 数据和 `.env`；普通更新保留数据卷。容器提供健康检查、退出宽限时间和日志轮转。
 
 ## Agent 与 SDK
 
@@ -29,6 +56,8 @@ LIGHTMONI_PORT=18880 LIGHTMONI_EXTERNAL_URL=http://your-server:18880 sh deploy/s
 目录日志填写绝对目录、文件匹配规则（默认 `*.log*`）、是否包含子目录和首次从头读取。默认只采集现有文件后续新增的行，之后新建文件完整采集；读取进度与队列批次一起提交，支持重启续读、重命名轮转和截断检测。要求服务用户可读目录，采集 UTF-8 文本行，跳过压缩文件和符号链接；单行超过 64 KiB 分片，未结束的短行等待换行。事件时间使用采集时间，保留文件路径和字节位置。每个 Agent 最多同时打开 256 个日志文件，每个目录单次扫描最多 10,000 个条目，超限会显示采集错误。源文件在采集前已删除或覆盖的内容无法恢复。
 
 “SDK 接入”可选择“通过 Agent”或“直连中心”，八种语言均提供对应的代码高亮示例、环境变量和复制按钮。通过 Agent 默认连 `http://127.0.0.1:4318`，中心 Key 由 Agent 保存。直连中心无需 Agent，传入中心地址和允许目标 table 的 Key，适用于容器、Serverless 等部署。示例读取 `LIGHTMONI_ENDPOINT` / `LIGHTMONI_KEY`；容器通过 environment / Secret 注入，中心地址应使用容器可访问的域名或服务地址。同一 Docker 网络可用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可用 `host.docker.internal`。SDK 通过 Agent 上报时，也受 Agent Key 的 table 白名单约束。
+
+管理员可在“设置 → 接入地址”保存默认中心上报地址，例如 Nginx 对外的 `https://monitor.example.com`。留空时使用部署变量 `LIGHTMONI_EXTERNAL_URL`；默认地址持久保存，重启后保留，生成 SDK 直连配置、Agent 命令和安装包链接时立即生效。接入页可单独覆盖地址：公网服务使用 A 域名，内网服务器使用 B 地址，二者指向同一实例即可；生成的 Agent 命令从所填地址下载安装脚本和安装包，并将其保存为上报地址。SDK 通过 Agent 时仍默认使用本机 Agent 地址。更改系统默认值不修改已运行客户端的配置；已部署的 SDK 修改 `LIGHTMONI_ENDPOINT` 后重启，Agent 可重新生成安装命令更新地址并保留身份和磁盘队列。此设置独立于 `LIGHTMONI_EXTERNAL_URL` 用于登录回调和告警链接的工作台地址。
 
 ```ts
 const moni = createLightMoni({
@@ -99,7 +128,7 @@ npm --prefix web run typecheck
 npm --prefix web run build
 ```
 
-开发模式测试 ClickHouse 只绑定 `127.0.0.1:18123`，使用固定测试密码；生产启动脚本使用随机密码。数据目录 `.lightmoni`、`.env` 和构建产物不纳入源码。
+开发模式测试 ClickHouse 只绑定 `127.0.0.1:18123`，使用固定测试密码；发版配置需要在 `.env` 中明确填写数据库密码。数据目录 `.lightmoni`、各目录的 `.env` 和构建产物不纳入源码。
 
 ## Key 的 table 权限
 

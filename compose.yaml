@@ -1,0 +1,37 @@
+services:
+  lightmoni:
+    image: ${LIGHTMONI_IMAGE:-lightmoni:0.1.0}
+    build:
+      context: .
+      dockerfile: deploy/server/Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    ports:
+      - "${LIGHTMONI_BIND_ADDRESS:-0.0.0.0}:${LIGHTMONI_PORT:-8080}:8080"
+    environment:
+      LIGHTMONI_ADDR: ":8080"
+      LIGHTMONI_DATA: /data/state
+      LIGHTMONI_EXTERNAL_URL: ${LIGHTMONI_EXTERNAL_URL:-http://localhost:8080}
+      LIGHTMONI_CH_URL: ${LIGHTMONI_CH_URL:?Set LIGHTMONI_CH_URL in .env}
+      LIGHTMONI_CH_USER: ${LIGHTMONI_CH_USER:-lightmoni}
+      LIGHTMONI_CH_PASSWORD: ${LIGHTMONI_CH_PASSWORD:?Set LIGHTMONI_CH_PASSWORD in .env}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - lightmoni-state:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    stop_grace_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  lightmoni-state:

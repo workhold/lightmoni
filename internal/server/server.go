@@ -86,7 +86,10 @@ func New(ctx context.Context, cfg Config) (*Server, error) {
 		return nil, e
 	}
 	s.registerTemplates()
-	s.registerAgentInstall(cfg.ExternalURL)
+	if e = s.registerAgentInstall(cfg.ExternalURL); e != nil {
+		db.Close()
+		return nil, e
+	}
 	return s, nil
 }
 func (s *Server) Dependencies() shared.Dependencies { return s.deps }

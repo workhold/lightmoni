@@ -1,0 +1,23 @@
+[
+  {
+    "mode": "external",
+    "services": [
+      "lightmoni"
+    ],
+    "sdk_packages": 8,
+    "agent_architectures": 2,
+    "ingestion_and_query": true,
+    "state_and_data_survive_recreation": true
+  },
+  {
+    "mode": "bundled",
+    "services": [
+      "clickhouse",
+      "lightmoni"
+    ],
+    "sdk_packages": 8,
+    "agent_architectures": 2,
+    "ingestion_and_query": true,
+    "state_and_data_survive_recreation": true
+  }
+]

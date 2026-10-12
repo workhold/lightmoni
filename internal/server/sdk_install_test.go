@@ -6,13 +6,23 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lightmoni/lightmoni/internal/storage"
 )
 
 func TestSDKCatalogAndDownloadRoutes(t *testing.T) {
-	s := &Server{API: http.NewServeMux(), Public: http.NewServeMux()}
-	s.registerAgentInstall("https://monitor.example/base/")
+	db, err := storage.Open(filepath.Join(t.TempDir(), "install.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	s := &Server{DB: db, API: http.NewServeMux(), Public: http.NewServeMux()}
+	if err := s.registerAgentInstall("https://monitor.example/base/"); err != nil {
+		t.Fatal(err)
+	}
 	r := httptest.NewRecorder()
 	s.API.ServeHTTP(r, httptest.NewRequest("GET", "/api/v1/sdk-install", nil))
 	var metadata struct {

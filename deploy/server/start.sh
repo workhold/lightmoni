@@ -4,10 +4,8 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root_dir=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 cd "$root_dir"
 if [ ! -f .env ]; then
-  umask 077
-  password=$(openssl rand -hex 24)
-  server_port=${LIGHTMONI_PORT:-8080}
-  external_url=${LIGHTMONI_EXTERNAL_URL:-http://localhost:$server_port}
-  { printf 'CLICKHOUSE_PASSWORD=%s\n' "$password"; printf 'LIGHTMONI_PORT=%s\n' "$server_port"; printf 'LIGHTMONI_EXTERNAL_URL=%s\n' "$external_url"; } > .env
+  echo 'Copy .env.example to .env and configure the external ClickHouse connection first.' >&2
+  echo 'For a bundled ClickHouse, use deploy/with-clickhouse/compose.yaml and its .env.example.' >&2
+  exit 1
 fi
-docker compose --env-file .env -p lightmoni -f deploy/server/compose.yml up -d --build
+exec docker compose --env-file .env -f compose.yaml up -d --build --wait "$@"

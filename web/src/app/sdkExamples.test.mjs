@@ -29,7 +29,7 @@ test('environment setup preserves endpoints safely and separates Agent tokens fr
 
 test('SDK URLs accept public and container routes and reject incompatible configuration',()=>{
  for(const endpoint of ['https://monitor.example/base/','http://lightmoni:8080','http://agent:4318','http://[::1]:18380'])assert.equal(sdkEndpointError(endpoint),'');
- for(const endpoint of ['','ftp://center','http://user:secret@center','http://center/?key=secret','http://center/#frag'])assert.notEqual(sdkEndpointError(endpoint),'');
+ for(const endpoint of ['','ftp://center','http://user:secret@center','http://center/?key=secret','http://center/#frag','http://center/?','http://center/#','http:/center','http://center\\path','http://center/a b'])assert.notEqual(sdkEndpointError(endpoint),'');
  for(const endpoint of ['http://localhost:18380','http://127.0.0.1:18380','http://[::1]:18380'])assert.equal(sdkEndpointIsLoopback(endpoint),true);
  assert.equal(sdkEndpointIsLoopback('http://lightmoni:8080'),false);
 });

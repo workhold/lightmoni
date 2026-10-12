@@ -109,7 +109,9 @@ moni.shutdown(Duration::from_secs(5))?;`,
 
 export function sdkEndpointError(endpoint:string):string {
   try {
-    const url=new URL(endpoint.trim());
+    const value=endpoint.trim();
+    if(!/^https?:\/\//i.test(value)||/[?#\\\s]/.test(value))throw new Error();
+    const url=new URL(value);
     if(!['http:','https:'].includes(url.protocol)||!url.hostname||url.username||url.password||url.search||url.hash)throw new Error();
     return '';
   } catch { return '请输入完整的 HTTP(S) 地址，不包含用户名、密码、查询参数或片段'; }
