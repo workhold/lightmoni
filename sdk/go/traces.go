@@ -23,11 +23,35 @@ type TraceContext struct {
 type traceContextKey struct{}
 
 func TraceContextFromContext(ctx context.Context) (TraceContext, bool) {
+	if ctx == nil {
+		return TraceContext{}, false
+	}
 	t, ok := ctx.Value(traceContextKey{}).(TraceContext)
-	return t, ok && validHex(t.TraceID, 32) && validHex(t.SpanID, 16)
+	if !ok || !validHex(t.TraceID, 32) || !validHex(t.SpanID, 16) || len(t.TraceState) > 512 {
+		return TraceContext{}, false
+	}
+	return t, true
 }
 func ContextWithTrace(ctx context.Context, t TraceContext) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return context.WithValue(ctx, traceContextKey{}, t)
+}
+
+func (c *Client) traceContext(ctx context.Context) (TraceContext, bool) {
+	if t, ok := TraceContextFromContext(ctx); ok {
+		return t, true
+	}
+	if provider := c.s.cfg.TraceContextProvider; provider != nil {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if t, ok := provider(ctx); ok && validHex(t.TraceID, 32) && validHex(t.SpanID, 16) && len(t.TraceState) <= 512 {
+			return t, true
+		}
+	}
+	return TraceContext{}, false
 }
 func validHex(s string, n int) bool {
 	if len(s) != n || s == strings.Repeat("0", n) {
@@ -59,6 +83,8 @@ func InjectHTTP(ctx context.Context, h http.Header) {
 	h.Set("traceparent", "00-"+t.TraceID+"-"+t.SpanID+"-"+hex.EncodeToString([]byte{t.Flags}))
 	if t.TraceState != "" {
 		h.Set("tracestate", t.TraceState)
+	} else {
+		h.Del("tracestate")
 	}
 }
 
@@ -95,7 +121,9 @@ func (c *Client) Log(ctx context.Context, level, body string, attrs Attributes) 
 	}
 	now := uint64(time.Now().UnixNano())
 	record := &logpb.LogRecord{TimeUnixNano: now, ObservedTimeUnixNano: now, SeverityNumber: severity, SeverityText: strings.ToUpper(level), Body: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: body}}, Attributes: attributes}
-	if t, ok := TraceContextFromContext(ctx); ok {
+	trace, hasTrace := c.traceContext(ctx)
+	if hasTrace {
+		t := trace
 		record.TraceId, _ = hex.DecodeString(t.TraceID)
 		record.SpanId, _ = hex.DecodeString(t.SpanID)
 		record.Flags = uint32(t.Flags)
@@ -119,7 +147,6 @@ func (c *Client) Log(ctx context.Context, level, body string, attrs Attributes) 
 		policy, configured = s.localSampling[c.table]
 	}
 	if configured && !systemSamplingTable(c.table) {
-		trace, _ := TraceContextFromContext(ctx)
 		resource := Attributes{"service.name": s.cfg.Service, "service.instance.id": s.instance}
 		for _, a := range s.resource.Attributes {
 			resource[a.Key] = samplingAttribute(a.Value)
@@ -193,7 +220,7 @@ func (c *Client) Start(ctx context.Context, name string, attrs ...Attributes) (c
 	return c.StartSpan(ctx, name, attrs...)
 }
 func (c *Client) StartSpan(ctx context.Context, name string, attrs ...Attributes) (context.Context, *Span) {
-	parent, hasParent := TraceContextFromContext(ctx)
+	parent, hasParent := c.traceContext(ctx)
 	t := TraceContext{TraceID: newID(), SpanID: newID()[:16], Flags: 1}
 	if hasParent {
 		t.TraceID = parent.TraceID

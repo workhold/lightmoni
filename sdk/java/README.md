@@ -14,8 +14,8 @@ import java.time.Duration;
 import java.util.Map;
 var mon = new Client("order-api", "business");
 mon.counter("orders_created").add(1, Map.of("region", "cn"));
-try (var span = mon.startSpan("create_order")) {
-    mon.log("info", "order created", Map.of("order_id", "123"), span.context);
+try (var span = mon.startSpan("create_order"); var scope = span.makeCurrent()) {
+    mon.log("info", "order created", Map.of("order_id", "123"));
 }
 mon.shutdown(Duration.ofSeconds(5));
 ~~~
@@ -26,12 +26,16 @@ Kotlin/JVM 直接使用同一 API：
 val mon = io.lightmoni.Client("order-api", "business")
 mon.counter("orders_created").add(1L, mapOf("region" to "cn"))
 mon.startSpan("create_order").use { span ->
-    mon.log("info", "order created", emptyMap<String, Any>(), span.context)
+    span.makeCurrent().use {
+        mon.log("info", "order created", emptyMap<String, Any>())
+    }
 }
 mon.shutdown(java.time.Duration.ofSeconds(5))
 ~~~
 
-withTable 共享生命周期；Counter 接受 long，Gauge / Histogram 接受 double，histogram(name,List<Double>) 自定义桶。metric 可设置单位。Client.TraceContext.extract / context.inject 支持 W3C header，异步请求显式传 context。四参数构造函数配置 endpoint/key，五参数增加 Client.Limits。flush(Duration) 同步，应用自行调度；updateKey 和 stats 支持诊断。不包括 Android/Kotlin Multiplatform。样例 examples/sdk/java/Main.java；完整边界见 [SDK 契约](../README.md)。
+withTable 共享生命周期；Counter 接受 long，Gauge / Histogram 接受 double，histogram(name,List<Double>) 自定义桶。metric 可设置单位。Client.TraceContext.extract / context.inject 支持 W3C header，跨线程任务在目标入口激活捕获的 context。四参数构造函数配置 endpoint/key，五参数增加 Client.Limits。flush(Duration) 同步，应用自行调度；updateKey 和 stats 支持诊断。不包括 Android/Kotlin Multiplatform。样例 examples/sdk/java/Main.java；完整边界见 [SDK 契约](../README.md)。
+
+`withSpan(name, action)` 也可创建并激活作用域，自动结束 span；嵌套和异常后恢复外层。HTTP/消息入口用 `TraceContext.extract(headers)` 的结果作为 parent，出站用 `TraceContext.injectCurrent()` 导出当前 W3C header。`TraceContext.current()` / `context.activate()` 可捕获/激活已有上下文。作用域在线程内生效；线程池、CompletableFuture、协程切换线程时，需捕获上下文并在目标执行入口激活，作用域按反向顺序在所属线程关闭。
 
 ## SDK 自监控
 

@@ -1,6 +1,6 @@
 import json
 import os
-from lightmoni import Client, TraceContext
+from lightmoni import Client, TraceContext, with_trace
 
 endpoint = os.getenv("LIGHTMONI_ENDPOINT", "http://127.0.0.1:4318")
 mode = os.getenv("LIGHTMONI_TEST_MODE", "demo")
@@ -37,6 +37,32 @@ elif mode == "fixture":
     app.log("info", "after trace")
     mon.flush()
     counter.add(2, {"window": "next"})
+    mon.flush()
+elif mode == "trace_scope":
+    app = mon.with_table("app")
+    parent = TraceContext("a" * 32, "b" * 16, 0, "vendor=scope")
+    app.log("info", "without trace")
+    with app.start_span("request", parent=parent):
+        app.log("info", "scope root")
+        assert TraceContext.extract(TraceContext.inject_current()) == TraceContext.current()
+        try:
+            with app.start_span("child"):
+                app.log("info", "scope child")
+                raise RuntimeError("scope failure")
+        except RuntimeError:
+            pass
+        app.log("info", "scope restored")
+        app.log("info", "scope explicit", context=TraceContext("c" * 32, "d" * 16))
+    import asyncio
+    async def concurrent(value):
+        with with_trace(TraceContext(str(value) * 32, str(value) * 16)):
+            await asyncio.sleep(.001)
+            app.log("info", "scope concurrent " + str(value))
+    async def together():
+        await asyncio.gather(concurrent(1), concurrent(2))
+    asyncio.run(together())
+    assert TraceContext.current() is None
+    app.log("info", "after trace")
     mon.flush()
 elif mode == "overflow":
     for n in range(4):

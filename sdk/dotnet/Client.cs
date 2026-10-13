@@ -12,6 +12,25 @@ public sealed record Limits(long QueueBytes = 8 << 20, int QueueBatches = 256, l
 
 public sealed record TraceContext(string TraceId, string SpanId, byte Flags = 1, string TraceState = "")
 {
+    static readonly AsyncLocal<TraceContext?> Ambient = new();
+    public static TraceContext? Current => Ambient.Value;
+    public static Dictionary<string, string> InjectCurrent() => Current?.Inject() ?? new();
+    public IDisposable Activate()
+    {
+        if (!IsValid) throw new ArgumentException("invalid trace context");
+        return new Scope(this);
+    }
+    sealed class Scope : IDisposable
+    {
+        readonly TraceContext context; readonly TraceContext? previous; bool disposed;
+        internal Scope(TraceContext context) { this.context = context; previous = Ambient.Value; Ambient.Value = context; }
+        public void Dispose()
+        {
+            if (disposed) return;
+            if (!ReferenceEquals(Ambient.Value, context)) throw new InvalidOperationException("trace scopes must close in reverse order");
+            Ambient.Value = previous; disposed = true;
+        }
+    }
     public bool IsValid => Regex.IsMatch(TraceId, "^[0-9a-f]{32}$") && TraceId != new string('0', 32)
         && Regex.IsMatch(SpanId, "^[0-9a-f]{16}$") && SpanId != new string('0', 16) && TraceState.Length <= 512;
     public Dictionary<string, string> Inject()
@@ -244,6 +263,7 @@ public sealed class Client
     }
     public void Log(string severity, string body, IDictionary<string, object>? attributes = null, TraceContext? context = null)
     {
+        context ??= TraceContext.Current;
         lock (state.Gate)
         {
             try
@@ -259,7 +279,14 @@ public sealed class Client
     }
     public Span StartSpan(string name, IDictionary<string, object>? attributes = null, TraceContext? parent = null)
     {
-        lock (state.Gate) { if (state.Closed) throw new InvalidOperationException("SDK is closed"); return new(state, table, name, attributes, parent); }
+        lock (state.Gate) { if (state.Closed) throw new InvalidOperationException("SDK is closed"); return new(state, table, name, attributes, parent ?? TraceContext.Current); }
+    }
+    public async Task<T> WithSpanAsync<T>(string name, Func<Span, Task<T>> action, IDictionary<string, object>? attributes = null, TraceContext? parent = null)
+    {
+        using var span = StartSpan(name, attributes, parent);
+        using var scope = span.MakeCurrent();
+        try { return await action(span); }
+        catch (Exception e) { span.SetError(e.Message); throw; }
     }
     public Dictionary<string, object> Stats() { lock (state.Gate) { var result = state.Stats.ToDictionary(p => p.Key, p => (object)p.Value); result["last_error"] = state.LastError; return result; } }
     public void UpdateKey(string key) { lock (state.Gate) state.Key = key; }
@@ -374,6 +401,7 @@ public sealed class Span : IDisposable
 {
     readonly Client.State state; readonly string table; readonly Dictionary<string, object> data; bool ended;
     public TraceContext Context { get; }
+    public IDisposable MakeCurrent() => Context.Activate();
     internal Span(Client.State state, string table, string name, IDictionary<string, object>? attrs, TraceContext? parent)
     {
         if (string.IsNullOrEmpty(name) || Encoding.UTF8.GetByteCount(name) > 255 || parent is { IsValid: false }) throw new ArgumentException("invalid span name/context");
@@ -385,4 +413,20 @@ public sealed class Span : IDisposable
     public void SetError(string message) { lock (state.Gate) if (!ended) data["status"] = Client.Obj("code", 2, "message", message[..Math.Min(message.Length, 4096)]); }
     public void End() { lock (state.Gate) { if (ended) return; ended = true; data["endTimeUnixNano"] = Math.Max(long.Parse(Client.Nano()), long.Parse((string)data["startTimeUnixNano"])).ToString(); state.Store(table, "traces", data); } }
     public void Dispose() => End();
+}
+
+/// <summary>Propagates current W3C context to downstream services.</summary>
+public sealed class TraceHttpHandler : DelegatingHandler
+{
+    public TraceHttpHandler(HttpMessageHandler? inner = null) : base(inner ?? new HttpClientHandler()) { }
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var context = TraceContext.Current;
+        if (context != null)
+        {
+            request.Headers.Remove("traceparent"); request.Headers.Remove("tracestate");
+            foreach (var header in context.Inject()) request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+        return base.SendAsync(request, cancellationToken);
+    }
 }

@@ -10,7 +10,7 @@ if err != nil { return err }
 requests, err := client.Counter("http.requests", moni.MetricOptions{Unit: "{request}"})
 if err != nil { return err }
 requests.Add(ctx, 1, moni.Attributes{"route": "/payments", "method": "POST", "status": 200})
-client.WithTable("app").Log(ctx, "info", "completed", nil)
+client.Logger(ctx).WithTable("app").Log("info", "completed", nil)
 return client.Shutdown(shutdownCtx) // shutdownCtx 必须有 deadline。
 ```
 
@@ -36,6 +36,27 @@ go test -race ./sdk/go
 ```
 
 直连主服务时用 `LIGHTMONI_KEY` 设置允许写入业务 table 的凭证，并将 endpoint 改为主服务地址。样例输出统计，不输出 Key。
+
+## 自动关联与 HTTP 传播
+
+HTTP 入口包一层 `client.TraceHandler(handler)`，自动继承上游 trace 或创建请求根 span。业务用 `client.Logger(r.Context())` 绑定一次，随后 `logger.Log(level,body,attrs)` 自动关联；嵌套操作使用 `StartSpan` 返回的 context 创建子 logger。
+
+```go
+httpClient := &http.Client{Transport: moni.TraceTransport{}, Timeout: 5*time.Second}
+handler := client.TraceHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+    logger := client.Logger(r.Context()).WithTable("app")
+    logger.Log("info", "request started", nil)
+    request, err := http.NewRequestWithContext(r.Context(), "GET", "http://order-service/orders", nil)
+    if err != nil { http.Error(w, err.Error(), 500); return }
+    response, err := httpClient.Do(request) // 自动发送 traceparent / tracestate。
+    if err != nil { http.Error(w, err.Error(), 502); return }
+    defer response.Body.Close()
+    logger.Log("info", "downstream completed", nil)
+}))
+// 将 handler 注册到业务 HTTP server，退出时仍需 Shutdown。
+```
+
+`TraceTransport.Base` 可包已有 RoundTripper；传播时复制请求/header，不改调用方对象。请求必须带当前 context，才能串起跨服务链路。`Config.TraceContextProvider` 可从业务 context / 已有 OpenTelemetry 返回 LightMoni TraceContext；已有有效 LightMoni context 优先，provider 在日志记录时读取一次。无 trace 的普通日志保持字段为空。完整语义见 [SDK 约定](../README.md#自动关联与跨服务传播)。
 
 ## SDK 自监控
 

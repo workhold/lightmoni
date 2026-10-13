@@ -35,7 +35,7 @@ export LIGHTMONI_KEY='替换为允许 business 表的上报 Key'
 
 这里的“封装”是 LightMoni 的原生 OTLP 客户端，不是对各语言官方 OpenTelemetry SDK 的再导出。使用标准数据模型、OTLP 编码和 W3C traceparent；指标由各语言内的有界聚合器生成。官方 OpenTelemetry 的普通 exporter 也能上报，但没有稳定批次 ID 的路径只提供至少一次交付。协议依据：[OTLP](https://opentelemetry.io/docs/specs/otlp/)。
 
-原生 API 覆盖非负 Int64 Counter（monotonic Delta）、最后观测 Gauge、显式边界 Histogram、结构化属性日志、基础 span、显式父上下文及 W3C header。Python 另提供 contextvars 和 span context manager；其余新语言显式传递 span context。Java SDK 可在 Kotlin/JVM 中使用，不包括 Android/Kotlin Multiplatform。没有自动框架埋点、C/C++、Swift、Dart/Flutter 专用封装。
+原生 API 覆盖非负 Int64 Counter（monotonic Delta）、最后观测 Gauge、显式边界 Histogram、结构化属性日志、基础 span、请求/任务作用域、显式父上下文及 W3C header。作用域内日志自动关联 trace；Go / Node 提供 HTTP 入口与出站传播接口，其他语言通过作用域和 header 接口接入框架。Java SDK 可在 Kotlin/JVM 中使用，不包括 Android/Kotlin Multiplatform。没有全套框架自动埋点、C/C++、Swift、Dart/Flutter 专用封装。
 
 ## 日志 trace 字段预留
 
@@ -51,22 +51,30 @@ trace 元数据在调用日志 API 时从上下文复制，与记录一起冻结
 
 | SDK | 当前可选上下文入口 |
 | --- | --- |
-| Go | `Log(ctx, ...)` 读取 `ContextWithTrace` / `StartSpan` 返回的 context；只记日志可用 `context.Background()` |
-| Node.js | `log(..., context?)`，省略时读取 `withTrace` 的 AsyncLocalStorage 或自定义 `contextProvider` |
-| 浏览器 | `log(..., context?)` 或 `contextProvider`；省略且无 provider 时正常记无 trace 日志 |
-| Python | `log(..., context=None)`，省略时读取 span context manager 的 contextvars |
-| Java/Kotlin、.NET、PHP、Ruby、Rust | 沿用可空 / 可选 TraceContext 参数；省略或传 null / nil / None 即无 trace 日志（Java 两参数重载省略 context） |
+| Go | `TraceHandler` 绑定请求 context；`Logger(ctx).Log(...)` 绑定一次后无需逐条传 context；`Config.TraceContextProvider` 可桥接外部上下文 |
+| Node.js | `withSpan(name, action)` / `withTrace(context, action)` 使用 AsyncLocalStorage；作用域内普通 `log(...)` 自动关联；`contextProvider` 可桥接外部上下文 |
+| 浏览器 | `withSpan` 回调收到绑定客户端，使用该客户端记录日志；`withTrace(context)` 返回不可变绑定客户端；跨 await 不共享全局上下文 |
+| Python | `with start_span(...)` 与 `with_trace(context)` 使用 contextvars；普通 `log(...)` 自动关联 |
+| Java/Kotlin | `withSpan` 或 `span.makeCurrent()` / `TraceContext.activate()` 使用线程作用域；普通 `log(...)` 自动关联 |
+| .NET | `WithSpanAsync` 或 `span.MakeCurrent()` / `TraceContext.Activate()` 使用 AsyncLocal，支持 await 与并发 Task |
+| Ruby | `with_span` / `LightMoni.with_trace` 使用 Fiber 局部作用域；普通 `log(...)` 自动关联 |
+| PHP | `withSpan` / `context->run` 使用独立的主请求与 Fiber 上下文；普通 `log(...)` 自动关联 |
+| Rust | 同步 `with_span` 回调收到绑定客户端，或 `with_trace(&context)` 创建不可变绑定客户端；`log(..., None)` 自动读取绑定；异步任务持有 span 与绑定客户端直到完成 |
 
-### 后续全链路自动注入方案
+### 自动关联与跨服务传播
 
-自动注入作为后续可选适配层，继续使用上述字段和日志接口：
+显式传入的上下文优先。子 span 默认继承当前 trace，生成新的 span ID；正常结束或异常退出后恢复外层作用域。无作用域的普通日志继续不带 trace，只有请求/任务入口创建根 span。`WithTable` / `withTable` 子客户端保留关联与根生命周期。Java 线程池、Ruby/PHP 新 Fiber 需要在调度时捕获当前上下文并在新执行入口激活；Rust/浏览器将绑定客户端传入异步任务。SDK 不用进程全局的“最后一个 trace”关联日志。
 
-1. 在 HTTP 请求、任务或消息消费入口提取上游 W3C 上下文；入口缺失有效上下文时，按配置创建一次根 trace / span。同一次业务处理共享 trace ID，每个操作使用自己的 span ID。
-2. 在请求作用域内绑定当前上下文，由日志入口统一读取。先复用 Go context、Node AsyncLocalStorage、Python contextvars；其他语言再增加请求作用域 provider / 适配器。接入已有 OpenTelemetry 时从其当前上下文桥接，避免同一请求产生两套 trace。
-3. HTTP 出站和消息生产适配器传播 `traceparent` / `tracestate`，下游入口继续同一 trace。并发、异步回调和嵌套调用必须隔离上下文，作用域退出或异常后恢复；后台独立任务由自己的入口决定 trace。
-4. 常用日志框架通过 handler / appender / hook 在记录发生时补齐元数据；显式传入的有效上下文优先。Agent 和中心负责保留字段，无法仅凭后收到的无上下文日志推断业务链路。
+跨服务使用 W3C `traceparent`（`00-<32位trace_id>-<16位当前span_id>-<2位flags>`）和可选 `tracestate`：
 
-交付自动适配层前需验证跨服务同 trace、并发不串链、嵌套及异常恢复、异步/消息传播、无 trace 日志和冻结重试。当前尚未交付自动框架埋点。
+1. 发送业务 HTTP 请求或消息时，从当前作用域导出 header；保留业务原有 header。Go 使用 `http.Client{Transport: moni.TraceTransport{}}` 和带 `r.Context()` 的请求；Node/浏览器使用 SDK 的 `client.fetch`；.NET 使用 `new HttpClient(new TraceHttpHandler())`。
+2. 下游提取 header，作为请求/消费 span 的 parent：沿用同一 trace ID，生成自己的 span ID，并保留 flags / tracestate。Go 的 `TraceHandler`、Node 的 `traceHandler` 自动处理 HTTP 入口；没有或非法 traceparent 时在入口创建一次新 trace。
+3. 其余语言可用已有 `extract` / `inject` 及当前上下文导出入口：Python `TraceContext.inject_current()`，Java/.NET/PHP `TraceContext.injectCurrent()` / `InjectCurrent()`，Ruby `LightMoni.trace_headers`，Rust `client.trace_headers()`。消费入口用提取结果创建作用域，不需逐条修改日志代码。
+4. 服务 A → B → C 的日志保持同一 `trace_id`，各服务的 span 指向上游发送时的 span。已有 OpenTelemetry 可通过 Go / Node provider 或各语言作用域桥接；Key、service、table 与 trace 身份独立。Agent/中心保留日志 payload 的关联字段，上报请求本身不替代业务上下文。
+
+代理需转发这两个 header；浏览器跨域业务接口需在 CORS 中允许 `traceparent` / `tracestate`。消息中间件可将同一组字符串写入消息 metadata，再在消费者恢复；具体消息框架、第三方日志 appender 和完整 HTTP client span 埋点尚未提供。Go `TraceTransport`、SDK `fetch` 和 .NET handler 当前负责传播已有作用域，不自动记录额外的 HTTP client span。
+
+验证入口：`LIGHTMONI_TRACE_TEST=1 go test -race ./sdk/go`（先 build TypeScript），包含 Go → Node → Go 真实 HTTP 多跳；`npm --prefix sdk/typescript test` 包含并发请求/浏览器任务、异常恢复与双服务 HTTP；`python3 scripts/test-sdks.py --docker` 包含六种原生语言的嵌套/并发作用域和自动关联业务示例。
 
 ## 生命周期与边界
 

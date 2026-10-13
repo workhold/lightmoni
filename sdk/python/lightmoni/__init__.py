@@ -1,6 +1,7 @@
 """LightMoni native Python SDK. Recording never performs network I/O."""
 import bisect
 import contextvars
+from contextlib import contextmanager
 import datetime
 import email.utils
 import json
@@ -62,6 +63,15 @@ class TraceContext:
     flags: int = 1
     trace_state: str = ""
 
+    @staticmethod
+    def current():
+        return _context.get()
+
+    @staticmethod
+    def inject_current():
+        context = _context.get()
+        return context.inject() if context else {}
+
     def __post_init__(self):
         if (not re.fullmatch(r"[0-9a-f]{32}", self.trace_id) or int(self.trace_id, 16) == 0
                 or not re.fullmatch(r"[0-9a-f]{16}", self.span_id) or int(self.span_id, 16) == 0
@@ -84,6 +94,18 @@ class TraceContext:
             return cls(match[1], match[2], int(match[3], 16), headers.get("tracestate", ""))
         except ValueError:
             return None
+
+
+@contextmanager
+def with_trace(context):
+    """Bind incoming/captured context; contextvars isolates async tasks."""
+    if not isinstance(context, TraceContext):
+        raise ValueError("invalid trace context")
+    token = _context.set(context)
+    try:
+        yield context
+    finally:
+        _context.reset(token)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

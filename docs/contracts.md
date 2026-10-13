@@ -28,7 +28,7 @@ SDK 直连主服务使用 `Authorization: Bearer <key>`；SDK 到本机 Agent �
 
 固定共用字段：`event_id String`、`event_time DateTime64(9,'UTC')`、`ingested_at DateTime64(9,'UTC')`、`service`、`instance_id`、`host_id`、`agent_id`、`key_id`、`resource_json`、`attributes Map(String,String)`、`attributes_json String`。attributes 供方便文本 SQL，attributes_json 保留 bool/int/double/string/null/结构的原类型，目录/日志过滤使用带类型访问，不把数字与字符串混淆。整数 JSON 无损编码；不能按每个新属性 ALTER TABLE。
 
-- log：`severity String`、`severity_number UInt8`、`body String`、`body_json String`、`trace_id String`、`span_id String`、`source_id`、`source_seq Nullable(UInt64)`。trace/span 是独立的可选关联字段；SDK 业务代码可不传 trace 上下文，OTLP 可省略对应字段，入库仍保留固定列并写空字符串，不能为单条日志生成 trace 或从同名自定义属性推断。关联在日志调用时捕获，冻结重试保持原值；后续自动上下文注入沿用这组字段，详见 [SDK 约定与方案](../sdk/README.md#日志-trace-字段预留)。OTLP缺事件时间时明确使用 observed_time 并标记时间来源，不伪造原始发生时间。
+- log：`severity String`、`severity_number UInt8`、`body String`、`body_json String`、`trace_id String`、`span_id String`、`source_id`、`source_seq Nullable(UInt64)`。trace/span 是独立的可选关联字段；SDK 请求/任务作用域内自动关联，业务可不逐条传 trace 上下文。无上下文时 OTLP 可省略字段，入库固定列写空字符串，不能为单条日志生成 trace 或从同名自定义属性推断。关联在日志调用时捕获，冻结重试保持原值；跨服务传播 W3C traceparent/tracestate，下游保持同一 trace ID 并创建自己的 span ID，详见 [SDK 约定](../sdk/README.md#日志-trace-字段预留)。OTLP缺事件时间时明确使用 observed_time 并标记时间来源，不伪造原始发生时间。
 - sum：`name`、`unit`、`start_time`、`event_time` 为窗口结束、`value`（保留int/double类型）、`temporality`、`monotonic`。自有 Counter 为 monotonic Delta，查询 sum(value)；累计输入保留 temporality，不能直接当 Delta 相加。
 - gauge：name/unit/value、点时间；点时间可能是 collection 时间，最新观测时间另有明确语义，不强称等于业务最后 record。
 - histogram：name/unit/start_time/event_time、`bounds Array(Float64)`、`bucket_counts Array(UInt64)`、`count UInt64`、sum/min/max。边界严格递增、桶长=边界长+1、桶和=count。同边界分布才可合并。

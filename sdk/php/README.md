@@ -6,15 +6,17 @@
 require '/path/to/sdk/php/src/Client.php';
 $mon = new \LightMoni\Client('order-api', 'business');
 $mon->counter('orders_created')->add(1, ['region'=>'cn']);
-$span = $mon->startSpan('create_order');
-$mon->log('info', 'order created', ['order_id'=>'123'], $span->context);
-$span->end();
+$mon->withSpan('create_order', function() use ($mon) {
+    $mon->log('info', 'order created', ['order_id'=>'123']);
+});
 $mon->shutdown(5);
 ~~~
 
 Composer 可配置本地 path repository 指向 sdk/php，再执行 composer require lightmoni/sdk:0.1.0。样例 php examples/sdk/php/main.php。
 
 withTable 共享状态；Counter 接受 int，Gauge / Histogram 接受 int/float；histogram(name,[5,10,50]) 自定义桶。TraceContext::extract / context->inject 处理 W3C header；显式 end span。构造函数第三/四参数为 endpoint/key，第五参数为 snake_case 限制数组。flush / shutdown 的 timeout 为秒，阻塞且有截止时间，适用请求结束或 worker 批量边界，不能跨线程共享。updateKey / stats 支持诊断。完整边界见 [SDK 契约](../README.md)。
+
+`withSpan(name, action, attributes, parent)` 自动激活/结束 span，普通日志自动关联，嵌套/异常后恢复外层。`TraceContext::current()` / `context->run(action)` 捕获和激活已有上下文，主执行流与每个 Fiber 的上下文隔离。新 Fiber 需在入口激活捕获的 context。HTTP/消息入口把 `TraceContext::extract(headers)` 结果作为 parent；出站将 `TraceContext::injectCurrent()` 合并到业务 header / 消息 metadata。
 
 ## SDK 自监控
 

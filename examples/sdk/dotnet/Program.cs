@@ -28,6 +28,25 @@ switch (mode)
         using (var span = app.StartSpan("fixture", parent: parent)) app.Log("info", "中文 fixture", A("exact", 9007199254740993L, "ok", true, "fraction", .125), span.Context);
         app.Log("info", "after trace");
         await mon.FlushAsync(); counter.Add(2, A("window", "next")); await mon.FlushAsync(); break;
+    case "trace_scope":
+        var scoped = mon.WithTable("app"); var upstream = new TraceContext(new string('a',32),new string('b',16),0,"vendor=scope");
+        scoped.Log("info","without trace");
+        await scoped.WithSpanAsync("request",async span=>{
+            await Task.Yield();scoped.Log("info","scope root");Require(TraceContext.Extract(TraceContext.InjectCurrent())==TraceContext.Current);
+            using var http=new HttpClient(new TraceHttpHandler());
+            using var outgoing=new HttpRequestMessage(HttpMethod.Get,Env("LIGHTMONI_ENDPOINT", "")+"/trace-context");
+            outgoing.Headers.Add("x-business","preserved");outgoing.Headers.Add("tracestate","stale=value");
+            using var reply=await http.SendAsync(outgoing);
+            var transmitted=JsonSerializer.Deserialize<Dictionary<string,string>>(await reply.Content.ReadAsStringAsync())!;
+            Require(transmitted["traceparent"]==TraceContext.InjectCurrent()["traceparent"] && transmitted["tracestate"]=="vendor=scope" && transmitted["x-business"]=="preserved");
+            try{await scoped.WithSpanAsync<int>("child",async child=>{await Task.Yield();scoped.Log("info","scope child");throw new InvalidOperationException("scope failure");});}catch(InvalidOperationException){}
+            scoped.Log("info","scope restored");scoped.Log("info","scope explicit",context:new TraceContext(new string('c',32),new string('d',16)));return 1;
+        },parent:upstream);
+        await Task.WhenAll(new[]{1,2}.Select(async i=>{
+            using var scope=new TraceContext(new string((char)('0'+i),32),new string((char)('0'+i),16)).Activate();
+            await Task.Yield();scoped.Log("info","scope concurrent "+i);
+        }));
+        Require(TraceContext.Current==null);scoped.Log("info","after trace");await mon.FlushAsync();break;
     case "overflow":
         for (int i = 0; i < 4; i++) counter.Add(1, A("dimension", i));
         await mon.FlushAsync(); break;
@@ -49,9 +68,10 @@ switch (mode)
         {
             int status = i % 5 == 0 ? 500 : 200;
             using var span = business.StartSpan("POST /payments");
+            using var scope = span.MakeCurrent();
             var a = A("route", "/payments", "method", "POST", "status", status);
             counter.Add(1, a); duration.Record(5 + i * 2, a); active.Record(i % 4);
-            business.Log(status == 500 ? "error" : "info", "sample payment completed", A("sample_id", i, "status", status), span.Context);
+            business.Log(status == 500 ? "error" : "info", "sample payment completed", A("sample_id", i, "status", status));
             if (status == 500) span.SetError("sample payment failed");
         }
         await mon.ShutdownAsync(TimeSpan.FromSeconds(15)); break;

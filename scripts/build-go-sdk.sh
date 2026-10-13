@@ -11,7 +11,9 @@ for file in sdk/go/*.go; do
   case "$file" in *_integration_test.go) continue ;; esac
   cp "$file" "$sdk_tmp/lightmoni-go-sdk/sdk/go/"
 done
-cp sdk/go/README.md "$sdk_tmp/lightmoni-go-sdk/README.md"
+cp sdk/README.md "$sdk_tmp/lightmoni-go-sdk/sdk/README.md"
+cp sdk/go/README.md "$sdk_tmp/lightmoni-go-sdk/sdk/go/README.md"
+sed 's|(../README.md|(sdk/README.md|g' sdk/go/README.md > "$sdk_tmp/lightmoni-go-sdk/README.md"
 cp examples/sdk/go/main.go "$sdk_tmp/lightmoni-go-sdk/examples/sdk/go/"
 cat > "$sdk_tmp/lightmoni-go-sdk/go.mod" <<'EOF'
 module github.com/lightmoni/lightmoni

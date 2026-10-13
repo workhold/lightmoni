@@ -34,6 +34,10 @@ public final class Client implements AutoCloseable {
         }
     }
     public record TraceContext(String traceId, String spanId, int flags, String traceState) {
+        private static final ThreadLocal<TraceScope> CURRENT = new ThreadLocal<>();
+        public static TraceContext current() { TraceScope scope=CURRENT.get();return scope==null?null:scope.context; }
+        public TraceScope activate() { return new TraceScope(this); }
+        public static Map<String,String> injectCurrent() { TraceContext context=current();return context==null?Map.of():context.inject(); }
         public TraceContext {
             if (traceId == null || !traceId.matches("[0-9a-f]{32}") || traceId.equals("0".repeat(32))
                 || spanId == null || !spanId.matches("[0-9a-f]{16}") || spanId.equals("0".repeat(16))
@@ -49,6 +53,19 @@ public final class Client implements AutoCloseable {
             if (!p.matches("00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}")) return null;
             try { return new TraceContext(p.substring(3,35),p.substring(36,52),Integer.parseInt(p.substring(53),16),h.getOrDefault("tracestate","")); }
             catch (IllegalArgumentException e) { return null; }
+        }
+    }
+    /** Lexical thread scope. Capture current() explicitly when dispatching to another thread. */
+    public static final class TraceScope implements AutoCloseable {
+        private final TraceContext context;
+        private final TraceScope previous;
+        private final Thread owner=Thread.currentThread();
+        private boolean closed;
+        private TraceScope(TraceContext context) { this.context=context;previous=TraceContext.CURRENT.get();TraceContext.CURRENT.set(this); }
+        @Override public void close() {
+            if(closed)return;
+            if(Thread.currentThread()!=owner || TraceContext.CURRENT.get()!=this)throw new IllegalStateException("trace scopes must close on their owner thread in reverse order");
+            closed=true;if(previous==null)TraceContext.CURRENT.remove();else TraceContext.CURRENT.set(previous);
         }
     }
     private record Batch(long sequence, String id, String created, String table, String signal, byte[] payload, int count) {}
@@ -225,6 +242,7 @@ public final class Client implements AutoCloseable {
             if (parent!=null) { data.put("parentSpanId",parent.spanId());if (!parent.traceState().isEmpty()) data.put("traceState",parent.traceState()); }
         }
         public synchronized void setError(String message) { if(!ended)data.put("status",Map.of("code",2,"message",message.substring(0,Math.min(message.length(),4096)))); }
+        public TraceScope makeCurrent() { return context.activate(); }
         public synchronized void end() {
             if(ended)return;ended=true;data.put("endTimeUnixNano",Long.toString(Math.max(nano(),Long.parseLong((String)data.get("startTimeUnixNano")))));s.store(table,"traces",data);
         }
@@ -259,6 +277,7 @@ public final class Client implements AutoCloseable {
         }
     }
     public void log(String severity,String body,Map<String,?> attributes,TraceContext context) {
+        if(context==null)context=TraceContext.current();
         synchronized(s) {
             try {
                 String level=severity.toLowerCase(Locale.ROOT);int index=List.of("trace","debug","info","warn","error","fatal").indexOf(level);
@@ -271,8 +290,16 @@ public final class Client implements AutoCloseable {
         }
     }
     public void log(String severity,String body) { log(severity,body,Map.of(),null); }
-    public Span startSpan(String name,Map<String,?> attrs,TraceContext parent) { synchronized(s) { if(s.closed)throw new IllegalStateException("SDK is closed");return new Span(name,attrs,parent); } }
+    public void log(String severity,String body,Map<String,?> attributes) { log(severity,body,attributes,null); }
+    public Span startSpan(String name,Map<String,?> attrs,TraceContext parent) { synchronized(s) { if(s.closed)throw new IllegalStateException("SDK is closed");return new Span(name,attrs,parent==null?TraceContext.current():parent); } }
     public Span startSpan(String name) { return startSpan(name,Map.of(),null); }
+    public <T> T withSpan(String name,Map<String,?> attributes,TraceContext parent,java.util.function.Function<Span,T> action) {
+        try(Span span=startSpan(name,attributes,parent);TraceScope scope=span.makeCurrent()) {
+            try { return action.apply(span); }
+            catch(RuntimeException | Error e) { span.setError(String.valueOf(e.getMessage()));throw e; }
+        }
+    }
+    public <T> T withSpan(String name,java.util.function.Function<Span,T> action) { return withSpan(name,Map.of(),null,action); }
     public Map<String,Object> stats() { synchronized(s) { return Map.copyOf(s.stats); } }
     public void updateKey(String key) { synchronized(s) { s.key=key; } }
     public void flush(Duration timeout) throws IOException,InterruptedException {

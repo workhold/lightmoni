@@ -27,7 +27,7 @@ for language in python java dotnet php ruby rust; do
   fi
   cp sdk/"$language"/README.md "$root/sdk/$language/"
   cp sdk/README.md "$root/sdk/README.md"
-  sed 's|(../README.md)|(sdk/README.md)|g' sdk/"$language"/README.md > "$root/README.md"
+  sed 's|(../README.md|(sdk/README.md|g' sdk/"$language"/README.md > "$root/README.md"
   tar -czf "$release_dir/lightmoni-$language-sdk_$version.tar.gz" -C "$sdk_tmp" "lightmoni-$language-sdk"
 done
 if command -v sha256sum >/dev/null 2>&1; then

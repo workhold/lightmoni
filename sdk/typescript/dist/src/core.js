@@ -18,7 +18,7 @@ function nowNano() { return BigInt(Date.now()) * 1000000n; }
 function uuid() { return globalThis.crypto.randomUUID(); }
 function validTable(table) { return /^[a-z][a-z0-9_]{0,47}$/.test(table) && !/^(log|metric|trace)_/.test(table); }
 function finite(value) { return Number.isFinite(value); }
-function validTrace(value) { return !!value && /^[0-9a-f]{32}$/.test(value.traceId) && !/^0+$/.test(value.traceId) && /^[0-9a-f]{16}$/.test(value.spanId) && !/^0+$/.test(value.spanId) && Number.isInteger(value.flags) && value.flags >= 0 && value.flags <= 255; }
+function validTrace(value) { return !!value && /^[0-9a-f]{32}$/.test(value.traceId) && !/^0+$/.test(value.traceId) && /^[0-9a-f]{16}$/.test(value.spanId) && !/^0+$/.test(value.spanId) && Number.isInteger(value.flags) && value.flags >= 0 && value.flags <= 255 && (value.traceState === undefined || (typeof value.traceState === "string" && value.traceState.length <= 512)); }
 function nano(value) { return value.toString(); }
 function otlpValue(value) {
     if (typeof value === "string")
@@ -581,15 +581,64 @@ export class Histogram {
 export class LightMoni {
     state;
     table;
-    constructor(state, table) {
+    boundTrace;
+    constructor(state, table, boundTrace) {
         this.state = state;
         this.table = table;
+        this.boundTrace = boundTrace;
     }
     static create(options) { return new LightMoni(new State({ ...options }), options.table); }
     get meter() { return this; }
     get instanceId() { return this.state.instanceId; }
     withTable(table) { if (!validTable(table))
-        throw new Error("invalid logical table"); return new LightMoni(this.state, table); }
+        throw new Error("invalid logical table"); return new LightMoni(this.state, table, this.boundTrace); }
+    currentTrace() {
+        const value = this.boundTrace ?? this.state.options.contextProvider?.();
+        return validTrace(value) ? { ...value } : undefined;
+    }
+    /** Immutable binding, safe across concurrent browser tasks and table clients. */
+    withTrace(context) {
+        if (!validTrace(context))
+            throw new Error("invalid trace context");
+        return new LightMoni(this.state, this.table, Object.freeze({ ...context }));
+    }
+    withSpan(name, action, attrs = {}, parent = this.currentTrace()) {
+        const span = this.startSpan(name, attrs, parent), client = this.withTrace(span.context);
+        const run = () => {
+            try {
+                const result = action(client, span);
+                if (result != null && typeof result.then === "function") {
+                    return Promise.resolve(result).then(value => { span.end(); return value; }, error => { span.setError(error); span.end(); throw error; });
+                }
+                span.end();
+                return result;
+            }
+            catch (error) {
+                span.setError(error);
+                span.end();
+                throw error;
+            }
+        };
+        try {
+            return this.state.options.contextRunner ? this.state.options.contextRunner(span.context, run) : run();
+        }
+        catch (error) {
+            span.setError(error);
+            span.end();
+            throw error;
+        }
+    }
+    /** Use within a request/task scope to propagate its W3C context downstream. */
+    fetch(input, init) {
+        const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+        const trace = this.currentTrace();
+        if (trace) {
+            headers.delete("tracestate");
+            for (const [key, value] of Object.entries(injectTrace(trace)))
+                headers.set(key, value);
+        }
+        return globalThis.fetch(input, { ...init, headers });
+    }
     counter(name, options = {}) { return new Counter(this.state, this.state.instrument(this.table, name, "counter", options)); }
     gauge(name, options = {}) { return new Gauge(this.state, this.state.instrument(this.table, name, "gauge", options)); }
     histogram(name, options = {}) { return new Histogram(this.state, this.state.instrument(this.table, name, "histogram", options)); }
@@ -600,7 +649,7 @@ export class LightMoni {
     setReportingEnabled(enabled) { this.state.options.disabled = !enabled; this.state.setReportingDisabled(!enabled || this.state.remoteDisabled); }
     async refreshConfig() { await this.state.refreshConfig(); }
     /** Trace metadata is optional and separate from attrs; no context creates no trace. */
-    log(level, body, attrs = {}, context = this.state.options.contextProvider?.()) {
+    log(level, body, attrs = {}, context = this.currentTrace()) {
         if (this.state.closing) {
             this.state.invalid('record after shutdown');
             return;
@@ -622,6 +671,8 @@ export class LightMoni {
             return;
         }
         this.state.sourceSequence++;
+        if (!validTrace(context))
+            context = undefined;
         const policy = this.state.remoteSampling[this.table] ?? this.state.localSampling[this.table];
         if (policy) {
             const decision = sampleLog(policy, this.table, this.state.samplingRecord(attrs, level, context));
@@ -645,7 +696,7 @@ export class LightMoni {
             Object.assign(record, { traceId: context.traceId, spanId: context.spanId, flags: context.flags });
         this.state.store(this.state.logs, this.table, record);
     }
-    startSpan(name, attrs = {}, parent = this.state.options.contextProvider?.()) { return new Span(this.state, this.table, name, attrs, parent); }
+    startSpan(name, attrs = {}, parent = this.currentTrace()) { return new Span(this.state, this.table, name, attrs, parent ?? undefined); }
     async flush({ timeoutMs = 10_000 } = {}) { if (this.state.stopped)
         throw new Error("SDK is closed"); this.state.collect(); const target = this.state.sequence; this.state.kick(); await this.state.wait(target, timeoutMs); }
     async shutdown({ timeoutMs = 10_000 } = {}) {
@@ -715,14 +766,16 @@ export class Span {
     } this.state.store(this.state.spans, this.table, this.data); }
 }
 export function extractTrace(headers) {
-    const parent = headers instanceof Headers ? headers.get("traceparent") : headers.traceparent;
+    const normalized = headers instanceof Headers ? headers : Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]));
+    const parent = normalized instanceof Headers ? normalized.get("traceparent") : normalized.traceparent;
     const match = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/.exec(parent ?? "");
     if (!match || /^0+$/.test(match[1]) || /^0+$/.test(match[2]))
         return undefined;
-    const traceState = headers instanceof Headers ? headers.get("tracestate") : headers.tracestate;
+    const traceState = normalized instanceof Headers ? normalized.get("tracestate") : normalized.tracestate;
     return { traceId: match[1], spanId: match[2], flags: Number.parseInt(match[3], 16), traceState: traceState && traceState.length <= 512 ? traceState : undefined };
 }
-export function injectTrace(context) { return { traceparent: `00-${context.traceId}-${context.spanId}-${context.flags.toString(16).padStart(2, "0")}`, ...(context.traceState ? { tracestate: context.traceState } : {}) }; }
+export function injectTrace(context) { if (!validTrace(context))
+    throw new Error("invalid trace context"); return { traceparent: `00-${context.traceId}-${context.spanId}-${context.flags.toString(16).padStart(2, "0")}`, ...(context.traceState ? { tracestate: context.traceState } : {}) }; }
 export class HTTPExporter {
     endpoint;
     key;

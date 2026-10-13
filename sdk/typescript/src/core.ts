@@ -19,6 +19,8 @@ export interface Options {
   cardinalityLimit?: number; maxInstruments?: number; maxAttributes?: number; maxAttributeBytes?: number;
   /** Optional current-context hook for log/span correlation; read when recording. */
   contextProvider?: () => TraceContext | undefined;
+  /** Runs a scoped action; Node installs AsyncLocalStorage automatically. */
+  contextRunner?: <T>(context: TraceContext, action: () => T) => T;
 }
 export interface MetricOptions { unit?: string; description?: string; boundaries?: number[] }
 export interface Stats {
@@ -46,7 +48,7 @@ function nowNano(): bigint { return BigInt(Date.now()) * 1_000_000n; }
 function uuid(): string { return globalThis.crypto.randomUUID(); }
 function validTable(table: string): boolean { return /^[a-z][a-z0-9_]{0,47}$/.test(table) && !/^(log|metric|trace)_/.test(table); }
 function finite(value: number): boolean { return Number.isFinite(value); }
-function validTrace(value: TraceContext | undefined): value is TraceContext { return !!value && /^[0-9a-f]{32}$/.test(value.traceId) && !/^0+$/.test(value.traceId) && /^[0-9a-f]{16}$/.test(value.spanId) && !/^0+$/.test(value.spanId) && Number.isInteger(value.flags) && value.flags >= 0 && value.flags <= 255; }
+function validTrace(value: TraceContext | undefined | null): value is TraceContext { return !!value && /^[0-9a-f]{32}$/.test(value.traceId) && !/^0+$/.test(value.traceId) && /^[0-9a-f]{16}$/.test(value.spanId) && !/^0+$/.test(value.spanId) && Number.isInteger(value.flags) && value.flags >= 0 && value.flags <= 255 && (value.traceState === undefined || (typeof value.traceState === "string" && value.traceState.length <= 512)); }
 function nano(value: bigint): string { return value.toString(); }
 function otlpValue(value: Attributes[string]): AnyValue {
   if (typeof value === "string") return { stringValue: value };
@@ -327,11 +329,44 @@ export class Counter { constructor(private readonly state: State, private readon
 export class Gauge { constructor(private readonly state: State, private readonly metric: Instrument) {} record(value: number, attrs: Attributes = {}): void { this.state.record(this.metric, value, attrs); } }
 export class Histogram { constructor(private readonly state: State, private readonly metric: Instrument) {} record(value: number, attrs: Attributes = {}): void { this.state.record(this.metric, value, attrs); } }
 export class LightMoni {
-  private constructor(private readonly state: State, readonly table: string) {}
+  private constructor(private readonly state: State, readonly table: string, private readonly boundTrace?: TraceContext) {}
   static create(options: Options): LightMoni { return new LightMoni(new State({ ...options }), options.table); }
   get meter(): LightMoni { return this; }
   get instanceId(): string { return this.state.instanceId; }
-  withTable(table: string): LightMoni { if (!validTable(table)) throw new Error("invalid logical table"); return new LightMoni(this.state, table); }
+  withTable(table: string): LightMoni { if (!validTable(table)) throw new Error("invalid logical table"); return new LightMoni(this.state, table, this.boundTrace); }
+  currentTrace(): TraceContext | undefined {
+    const value = this.boundTrace ?? this.state.options.contextProvider?.();
+    return validTrace(value) ? { ...value } : undefined;
+  }
+  /** Immutable binding, safe across concurrent browser tasks and table clients. */
+  withTrace(context: TraceContext): LightMoni {
+    if (!validTrace(context)) throw new Error("invalid trace context");
+    return new LightMoni(this.state, this.table, Object.freeze({ ...context }));
+  }
+  withSpan<T>(name: string, action: (client: LightMoni, span: Span) => T, attrs: Attributes = {}, parent: TraceContext | null | undefined = this.currentTrace()): T {
+    const span = this.startSpan(name, attrs, parent), client = this.withTrace(span.context);
+    const run = () => {
+      try {
+        const result = action(client, span);
+        if (result != null && typeof (result as { then?: unknown }).then === "function") {
+          return Promise.resolve(result).then(value => { span.end(); return value; }, error => { span.setError(error); span.end(); throw error; }) as T;
+        }
+        span.end(); return result;
+      } catch (error) { span.setError(error); span.end(); throw error; }
+    };
+    try { return this.state.options.contextRunner ? this.state.options.contextRunner(span.context, run) : run(); }
+    catch (error) { span.setError(error); span.end(); throw error; }
+  }
+  /** Use within a request/task scope to propagate its W3C context downstream. */
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    const trace = this.currentTrace();
+    if (trace) {
+      headers.delete("tracestate");
+      for (const [key, value] of Object.entries(injectTrace(trace))) headers.set(key, value);
+    }
+    return globalThis.fetch(input, { ...init, headers });
+  }
   counter(name: string, options: MetricOptions = {}): Counter { return new Counter(this.state, this.state.instrument(this.table, name, "counter", options)); }
   gauge(name: string, options: MetricOptions = {}): Gauge { return new Gauge(this.state, this.state.instrument(this.table, name, "gauge", options)); }
   histogram(name: string, options: MetricOptions = {}): Histogram { return new Histogram(this.state, this.state.instrument(this.table, name, "histogram", options)); }
@@ -341,11 +376,12 @@ export class LightMoni {
   setReportingEnabled(enabled:boolean):void{this.state.options.disabled=!enabled;this.state.setReportingDisabled(!enabled||this.state.remoteDisabled);}
   async refreshConfig():Promise<void>{await this.state.refreshConfig();}
   /** Trace metadata is optional and separate from attrs; no context creates no trace. */
-  log(level: string, body: string, attrs: Attributes = {}, context = this.state.options.contextProvider?.()): void {
+  log(level: string, body: string, attrs: Attributes = {}, context = this.currentTrace()): void {
     if(this.state.closing){this.state.invalid('record after shutdown');return;}if(this.state.stats.reportingDisabled){this.state.stats.disabledRecords++;return;}
     if (encoder.encode(body).length > 64 * 1024) { this.state.invalid("log body exceeded 64 KiB"); return; }
     let attributes: Attribute[]; try { attributes = this.state.attributes(attrs); } catch (e) { this.state.invalid(e); return; }
     this.state.sourceSequence++;
+    if (!validTrace(context)) context = undefined;
     const policy=this.state.remoteSampling[this.table]??this.state.localSampling[this.table];
     if(policy){const decision=sampleLog(policy,this.table,this.state.samplingRecord(attrs,level,context));
       if(!decision.keep){if(decision.reason==='excluded')this.state.stats.excludedLogs++;else if(decision.reason==='unmatched')this.state.stats.unmatchedLogs++;else this.state.stats.sampledOutLogs++;return;}
@@ -358,7 +394,7 @@ export class LightMoni {
     if (validTrace(context)) Object.assign(record, { traceId: context.traceId, spanId: context.spanId, flags: context.flags });
     this.state.store(this.state.logs, this.table, record);
   }
-  startSpan(name: string, attrs: Attributes = {}, parent = this.state.options.contextProvider?.()): Span { return new Span(this.state, this.table, name, attrs, parent); }
+  startSpan(name: string, attrs: Attributes = {}, parent: TraceContext | null | undefined = this.currentTrace()): Span { return new Span(this.state, this.table, name, attrs, parent ?? undefined); }
   async flush({ timeoutMs = 10_000 }: { timeoutMs?: number } = {}): Promise<void> { if (this.state.stopped) throw new Error("SDK is closed"); this.state.collect(); const target = this.state.sequence; this.state.kick(); await this.state.wait(target, timeoutMs); }
   async shutdown({ timeoutMs = 10_000 }: { timeoutMs?: number } = {}): Promise<void> {
     if (this.state.stopped) { if (this.state.failure) throw this.state.failure; return; }
@@ -388,13 +424,14 @@ export class Span {
 }
 
 export function extractTrace(headers: Headers | Record<string, string | undefined>): TraceContext | undefined {
-  const parent = headers instanceof Headers ? headers.get("traceparent") : headers.traceparent;
+  const normalized = headers instanceof Headers ? headers : Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]));
+  const parent = normalized instanceof Headers ? normalized.get("traceparent") : normalized.traceparent;
   const match = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/.exec(parent ?? "");
   if (!match || /^0+$/.test(match[1]) || /^0+$/.test(match[2])) return undefined;
-  const traceState = headers instanceof Headers ? headers.get("tracestate") : headers.tracestate;
+  const traceState = normalized instanceof Headers ? normalized.get("tracestate") : normalized.tracestate;
   return { traceId: match[1], spanId: match[2], flags: Number.parseInt(match[3], 16), traceState: traceState && traceState.length <= 512 ? traceState : undefined };
 }
-export function injectTrace(context: TraceContext): Record<string, string> { return { traceparent: `00-${context.traceId}-${context.spanId}-${context.flags.toString(16).padStart(2, "0")}`, ...(context.traceState ? { tracestate: context.traceState } : {}) }; }
+export function injectTrace(context: TraceContext): Record<string, string> { if (!validTrace(context)) throw new Error("invalid trace context"); return { traceparent: `00-${context.traceId}-${context.spanId}-${context.flags.toString(16).padStart(2, "0")}`, ...(context.traceState ? { tracestate: context.traceState } : {}) }; }
 
 export class HTTPExporter implements Exporter {
   constructor(private readonly endpoint: string, private readonly key: () => string | undefined = () => undefined) {}

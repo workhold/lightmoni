@@ -35,6 +35,23 @@ final class Protocol {
     }
 }
 final class TraceContext {
+    private static ?self $main=null;
+    private static ?\WeakMap $fibers=null;
+    public static function current(): ?self {
+        $fiber=\Fiber::getCurrent();
+        return $fiber ? (self::$fibers[$fiber]??null) : self::$main;
+    }
+    private static function setCurrent(?self $context): void {
+        $fiber=\Fiber::getCurrent();
+        if (!$fiber) { self::$main=$context; return; }
+        self::$fibers??=new \WeakMap();
+        if ($context) self::$fibers[$fiber]=$context; else unset(self::$fibers[$fiber]);
+    }
+    public function run(callable $action): mixed {
+        $previous=self::current();self::setCurrent($this);
+        try { return $action(); } finally { self::setCurrent($previous); }
+    }
+    public static function injectCurrent(): array { return self::current()?->inject()??[]; }
     public function __construct(public readonly string $traceId, public readonly string $spanId, public readonly int $flags=1, public readonly string $traceState='') {
         if (!preg_match('/^[0-9a-f]{32}$/D',$traceId) || $traceId===str_repeat('0',32) || !preg_match('/^[0-9a-f]{16}$/D',$spanId) || $spanId===str_repeat('0',16) || $flags<0 || $flags>255 || strlen($traceState)>512) throw new \InvalidArgumentException('invalid trace context');
     }
@@ -231,6 +248,7 @@ final class Client {
         return $this->s->metrics[$id]=new Metric($this->s,$this->table,$name,$kind,$unit,$bounds);
     }
     public function log(string $severity,string $body,array $attributes=[],?TraceContext $context=null): void {
+        $context??=TraceContext::current();
         try {
             $level=strtolower($severity);$i=array_search($level,['trace','debug','info','warn','error','fatal'],true);
             if ($i===false || strlen($body)>65536) throw new \InvalidArgumentException('invalid log severity/body');
@@ -239,7 +257,13 @@ final class Client {
             $this->s->store($this->table,'logs',$row);
         } catch (\InvalidArgumentException|\JsonException $e) { $this->s->invalid($e->getMessage()); }
     }
-    public function startSpan(string $name,array $attributes=[],?TraceContext $parent=null): Span { if ($this->s->closed) throw new \RuntimeException('SDK is closed');return new Span($this->s,$this->table,$name,$attributes,$parent); }
+    public function startSpan(string $name,array $attributes=[],?TraceContext $parent=null): Span { if ($this->s->closed) throw new \RuntimeException('SDK is closed');return new Span($this->s,$this->table,$name,$attributes,$parent??TraceContext::current()); }
+    public function withSpan(string $name,callable $action,array $attributes=[],?TraceContext $parent=null): mixed {
+        $span=$this->startSpan($name,$attributes,$parent);
+        try { return $span->context->run(fn()=>$action($span)); }
+        catch (\Throwable $error) { $span->setError($error->getMessage());throw $error; }
+        finally { $span->end(); }
+    }
     public function stats(): array { return $this->s->stats; }
     public function updateKey(string $key): void { $this->s->key=$key; }
     public function flush(float $timeout=10): void {

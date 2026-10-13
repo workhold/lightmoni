@@ -33,6 +33,24 @@ public class Main {
                 app.log("info","after trace");
                 mon.flush(Duration.ofSeconds(10));counter.add(2,Map.of("window","next"));mon.flush(Duration.ofSeconds(10));
             }
+            case "trace_scope" -> {
+                var app=mon.withTable("app");var parent=new Client.TraceContext("a".repeat(32),"b".repeat(16),0,"vendor=scope");
+                app.log("info","without trace");
+                app.withSpan("request",Map.of(),parent,span->{
+                    app.log("info","scope root");require(Client.TraceContext.extract(Client.TraceContext.injectCurrent()).equals(Client.TraceContext.current()));
+                    try{app.withSpan("child",child->{app.log("info","scope child");throw new IllegalStateException("scope failure");});}catch(IllegalStateException e){}
+                    app.log("info","scope restored");app.log("info","scope explicit",Map.of(),new Client.TraceContext("c".repeat(32),"d".repeat(16),1,""));return null;
+                });
+                var ready=new java.util.concurrent.CountDownLatch(2);var threads=new ArrayList<Thread>();
+                for(int i=1;i<=2;i++){final int value=i;threads.add(new Thread(()->{
+                    try(var scope=new Client.TraceContext(Integer.toString(value).repeat(32),Integer.toString(value).repeat(16),1,"").activate()){
+                        ready.countDown();try{ready.await();}catch(InterruptedException e){throw new RuntimeException(e);}
+                        app.log("info","scope concurrent "+value);
+                    }
+                }));}
+                threads.forEach(Thread::start);for(Thread thread:threads)thread.join();
+                require(Client.TraceContext.current()==null);app.log("info","after trace");mon.flush(Duration.ofSeconds(10));
+            }
             case "overflow" -> {for(int i=0;i<4;i++)counter.add(1,Map.of("dimension",i));mon.flush(Duration.ofSeconds(10));}
             case "retry","auth" -> {
                 counter.add(1,Map.of("window","first"));
@@ -48,7 +66,7 @@ public class Main {
                 var app=mon.withTable("app");var duration=mon.histogram("http.duration",List.of(5d,10d,25d,50d,100d,250d));var active=mon.gauge("http.active");
                 for(int i=0;i<Integer.parseInt(env("LIGHTMONI_COUNT","20"));i++){
                     int status=i%5==0?500:200;var dims=Map.of("route","/payments","method","POST","status",status);
-                    try(var span=app.startSpan("POST /payments")){counter.add(1,dims);duration.record(5+i*2,dims);active.record(i%4);app.log(status==500?"error":"info","sample payment completed",Map.of("sample_id",i,"status",status),span.context);if(status==500)span.setError("sample payment failed");}
+                    try(var span=app.startSpan("POST /payments");var scope=span.makeCurrent()){counter.add(1,dims);duration.record(5+i*2,dims);active.record(i%4);app.log(status==500?"error":"info","sample payment completed",Map.of("sample_id",i,"status",status));if(status==500)span.setError("sample payment failed");}
                 }
                 mon.shutdown(Duration.ofSeconds(15));
             }

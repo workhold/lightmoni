@@ -8,6 +8,8 @@
 
 ## 目标与范围
 
+2026-10-13 扩展：八种 SDK 已提供请求/任务作用域或不可变绑定客户端，作用域内日志自动关联 trace；Go / Node HTTP 入口与出站、.NET 出站支持 W3C 传播。Go → Node → Go 多跳 HTTP、并发隔离、嵌套/异常恢复及原生示例已验证。完整第三方框架、消息和日志 appender 适配继续按需扩展。
+
 让 Go、JavaScript/TypeScript、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust 业务只配置 `service`、`table`、上报地址，就能记录多维指标、结构化日志和基础 trace。默认连接本机 Agent；需要直接上报主服务时增加实例级写入 Key。一个业务进程可以使用多个 table，一台机器的多个服务不需要分别申请 Key。
 
 实现复用 OpenTelemetry 的数据模型、OTLP 编码与 W3C 上下文协议，聚合由 LightMoni 的有界聚合器完成，未引入完整 OTel 自动埋点 SDK。LightMoni 封装初始化、table 路由、冻结批次、可靠重试和简单 API。依赖版本通过实际 build / 测试后锁定，不假定不同语言的日志、指标 API 具有相同成熟度。本轮覆盖 SDK 总览列出的服务端主流语言，不实现 PromQL、浏览器会话回放或浏览器磁盘离线队列。
@@ -82,7 +84,7 @@ await mon.flush({ timeoutMs: 5000 });
 await mon.shutdown({ timeoutMs: 5000 });
 ```
 
-样例是可运行工程；HTTP 请求可使用 `ExtractHTTP` / `InjectHTTP`（Go）及 `extractTrace` / `injectTrace`（TypeScript）。日志预留独立的可选 `trace_id`、`span_id`，业务代码可以不传 trace 上下文；没有有效上下文时日志正常上报，存储字段为空，不能为每条日志凭空创建 trace。Node 使用 `withTrace` 的 AsyncLocalStorage 传播上下文，Python 使用 contextvars；其余语言支持显式上下文。关联在日志调用时捕获并随批次冻结。后续通过请求/消息入口、上下文作用域、出站传播和日志框架适配器自动注入，方案见 [SDK 日志 trace 约定](../../sdk/README.md#日志-trace-字段预留)。自动框架埋点尚未交付，应作为可选入口，不能强制手工指标使用者引入全部框架适配器。
+样例是可运行工程。日志预留独立的可选 `trace_id`、`span_id`，请求/任务作用域内自动注入，业务无需逐条传 ID；无有效上下文时日志正常上报，字段为空。Go `TraceHandler`、Node `traceHandler` 创建或继承 HTTP 请求 trace；Go `TraceTransport`、SDK `fetch` 和 .NET `TraceHttpHandler` 传播 W3C header。所有语言支持作用域或绑定客户端，嵌套/异常恢复与并发隔离已纳入验收；关联在日志调用时捕获并随批次冻结。用法与跨服务边界见 [SDK 日志 trace 约定](../../sdk/README.md#日志-trace-字段预留)。具体消息框架、第三方日志 appender 与完整自动埋点矩阵仍作为可选适配层扩展。
 
 ## 指标语义
 
@@ -162,6 +164,7 @@ HTTP 处理遵循 [OTLP 规范](https://opentelemetry.io/docs/specs/otlp/)：网
 | 嵌入 Agent | 主机 collector 使用相同 SDK API，exporter 直接提交队列；无需启动本机 HTTP；不会递归产生遥测 |
 | 跨语言协议 | Go 与 Node 夹具经过同一解码/存储路径，类型、时间、trace 字段与维度语义一致；失败案例一致 |
 | 日志 trace 预留 | 八种 SDK 不传 trace 仍正常上报，固定 trace/span 列留空；有效上下文与正文/属性分离，无上下文日志不自动生成 trace，作用域退出不串链；冻结发送保留记录时上下文 |
+| 自动关联与跨服务 | 作用域内不逐条传 context 仍关联；并发任务隔离，嵌套/异常后恢复；Go → Node → Go 多跳 HTTP 同 trace、不同 span、父子关系和 flags/tracestate 保留 |
 | 浏览器 | 私有 Key 不进入包；CORS、公开权限、批次限制、公开凭证失效、页面关闭尽力发送行为有真实验证 |
 
 为上述数据正确性、故障边界和跨语言行为编写有效测试；不要只断言封装调用了某个 mock 方法。基准结果应报告环境、输入、队列上限、吞吐/延迟和内存，不能把期望数字写成已经验证的性能承诺。

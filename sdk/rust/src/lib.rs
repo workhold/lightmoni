@@ -170,7 +170,7 @@ fn format_rfc3339(n:u128)->String {
     format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:09}Z",(seconds/3600)%24,(seconds/60)%60,seconds%60,n%1_000_000_000)
 }
 #[derive(Clone)]
-pub struct Client { state:Arc<Mutex<State>>,delivery:Arc<Mutex<()>>,table:String }
+pub struct Client { state:Arc<Mutex<State>>,delivery:Arc<Mutex<()>>,table:String,context:Option<TraceContext> }
 impl Client {
     pub fn new(service:&str,table_name:&str,endpoint:&str,key:&str)->Result<Self>{Self::with_limits(service,table_name,endpoint,key,Limits::default())}
     pub fn with_limits(service:&str,table_name:&str,endpoint:&str,key:&str,limits:Limits)->Result<Self> {
@@ -182,19 +182,31 @@ impl Client {
         let resource=json!({"attributes":attrs(&BTreeMap::from([("service.name".into(),service.into()),("service.instance.id".into(),Uuid::new_v4().to_string().into())]))?});
         let s=State{endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:table.clone(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
         let enabled=s.limits.self_telemetry;
-        let client=Self{state:Arc::new(Mutex::new(s)),delivery:Arc::new(Mutex::new(())),table};
+        let client=Self{state:Arc::new(Mutex::new(s)),delivery:Arc::new(Mutex::new(())),table,context:None};
         if enabled {
             let state=Arc::downgrade(&client.state);let delivery=Arc::downgrade(&client.delivery);let table=client.table.clone();
             std::thread::Builder::new().name("lightmoni-heartbeat".into()).spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(30));
                 let (Some(state),Some(delivery))=(state.upgrade(),delivery.upgrade()) else {break;};
                 if state.lock().unwrap().closed{break;}
-                let root=Client{state,delivery,table:table.clone()};let _=root.flush(Duration::from_secs(5));
+                let root=Client{state,delivery,table:table.clone(),context:None};let _=root.flush(Duration::from_secs(5));
             }).map_err(|_|"cannot start SDK heartbeat worker")?;
         }
         Ok(client)
     }
     pub fn with_table(&self,name:&str)->Result<Self>{Ok(Self{table:table(name)?,..self.clone()})}
+    /// Immutable task binding; safe when an async task moves between threads.
+    pub fn with_trace(&self,context:&TraceContext)->Result<Self>{
+        if !context.valid(){return Err("invalid trace context".into());}
+        Ok(Self{context:Some(context.clone()),..self.clone()})
+    }
+    pub fn current_trace(&self)->Option<&TraceContext>{self.context.as_ref()}
+    pub fn trace_headers(&self)->Result<BTreeMap<String,String>>{match &self.context{Some(context)=>context.inject(),None=>Ok(BTreeMap::new())}}
+    pub fn with_span<T>(&self,name:&str,attributes:&Attributes,parent:Option<&TraceContext>,action:impl FnOnce(&Client,&mut Span)->T)->Result<T>{
+        let mut span=self.start_span(name,attributes,parent)?;
+        let client=self.with_trace(&span.context)?;
+        let result=action(&client,&mut span);span.end();Ok(result)
+    }
     pub fn counter(&self,name:&str)->Result<Metric>{self.instrument(name,"counter","",&[])}
     pub fn gauge(&self,name:&str)->Result<Metric>{self.instrument(name,"gauge","",&[])}
     pub fn histogram(&self,name:&str,bounds:&[f64])->Result<Metric>{self.instrument(name,"histogram","",bounds)}
@@ -207,6 +219,7 @@ impl Client {
         Ok(Metric{state:self.state.clone(),id,kind:kind.into()})
     }
     pub fn log(&self,severity:&str,body:&str,attributes:&Attributes,context:Option<&TraceContext>) {
+        let context=context.or(self.context.as_ref());
         let result=(||{
             let level=severity.to_lowercase();let i=["trace","debug","info","warn","error","fatal"].iter().position(|n|*n==level).ok_or("invalid log severity")?;
             if body.len()>65536 || context.is_some_and(|c|!c.valid()){return Err("invalid log body/context".into());}
@@ -217,6 +230,7 @@ impl Client {
         let mut s=self.state.lock().unwrap();match result{Ok(row)=>s.store(&self.table,"logs",row),Err(e)=>s.invalid(e)}
     }
     pub fn start_span(&self,name:&str,attributes:&Attributes,parent:Option<&TraceContext>)->Result<Span> {
+        let parent=parent.or(self.context.as_ref());
         if self.state.lock().unwrap().closed{return Err("SDK is closed".into());}
         if name.is_empty() || name.len()>255 || parent.is_some_and(|p|!p.valid()){return Err("invalid span name/context".into());}
         let context=TraceContext{trace_id:parent.map(|p|p.trace_id.clone()).unwrap_or_else(||Uuid::new_v4().simple().to_string()),span_id:Uuid::new_v4().simple().to_string()[..16].into(),flags:parent.map(|p|p.flags).unwrap_or(1),trace_state:parent.map(|p|p.trace_state.clone()).unwrap_or_default()};
@@ -306,4 +320,4 @@ impl Span {
     pub fn set_error(&mut self,message:&str){if !self.ended{self.data["status"]=json!({"code":2,"message":message.chars().take(4096).collect::<String>()});}}
     pub fn end(&mut self){if self.ended{return;}self.ended=true;let start=self.data["startTimeUnixNano"].as_str().unwrap().parse::<u128>().unwrap();self.data["endTimeUnixNano"]=json!(nano().max(start).to_string());self.client.state.lock().unwrap().store(&self.client.table,"traces",self.data.clone());}
 }
-impl Drop for Span {fn drop(&mut self){self.end();}}
+impl Drop for Span {fn drop(&mut self){if !self.ended && std::thread::panicking(){self.set_error("span scope panicked");}self.end();}}

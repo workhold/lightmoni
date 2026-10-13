@@ -24,6 +24,29 @@ when 'fixture'
   app.log('info', '中文 fixture', { 'exact' => 9007199254740993, 'ok' => true, 'fraction' => 0.125 }, context: span.context); span.finish
   app.log('info', 'after trace')
   mon.flush; counter.add(2, 'window' => 'next'); mon.flush
+when 'trace_scope'
+  app = mon.with_table('app'); parent = LightMoni::TraceContext.new('a' * 32, 'b' * 16, 0, 'vendor=scope')
+  app.log('info', 'without trace')
+  app.with_span('request', parent: parent) do
+    app.log('info', 'scope root')
+    raise 'context headers' unless LightMoni::TraceContext.extract(LightMoni.trace_headers).inject == LightMoni.current_trace.inject
+    begin
+      app.with_span('child') { app.log('info', 'scope child'); raise 'scope failure' }
+    rescue RuntimeError
+    end
+    app.log('info', 'scope restored')
+    app.log('info', 'scope explicit', {}, context: LightMoni::TraceContext.new('c' * 32, 'd' * 16))
+  end
+  fibers = [1, 2].map do |i|
+    Fiber.new do
+      LightMoni.with_trace(LightMoni::TraceContext.new(i.to_s * 32, i.to_s * 16)) do
+        Fiber.yield; app.log('info', 'scope concurrent ' + i.to_s)
+      end
+    end
+  end
+  fibers.each(&:resume); fibers.each(&:resume)
+  raise 'scope leak' unless LightMoni.current_trace.nil?
+  app.log('info', 'after trace'); mon.flush
 when 'overflow'
   4.times { |i| counter.add(1, 'dimension' => i) }; mon.flush
 when 'retry', 'auth'
@@ -46,12 +69,12 @@ else
   app = mon.with_table('app'); duration = mon.histogram('http.duration', boundaries: [5, 10, 25, 50, 100, 250]); active = mon.gauge('http.active')
   ENV.fetch('LIGHTMONI_COUNT', '20').to_i.times do |i|
     status = i % 5 == 0 ? 500 : 200
-    span = app.start_span('POST /payments')
-    dims = { 'route' => '/payments', 'method' => 'POST', 'status' => status }
-    counter.add(1, dims); duration.record(5 + i * 2, dims); active.record(i % 4)
-    app.log(status == 500 ? 'error' : 'info', 'sample payment completed', { 'sample_id' => i, 'status' => status }, context: span.context)
-    span.set_error('sample payment failed') if status == 500
-    span.finish
+    app.with_span('POST /payments') do |span|
+      dims = { 'route' => '/payments', 'method' => 'POST', 'status' => status }
+      counter.add(1, dims); duration.record(5 + i * 2, dims); active.record(i % 4)
+      app.log(status == 500 ? 'error' : 'info', 'sample payment completed', { 'sample_id' => i, 'status' => status })
+      span.set_error('sample payment failed') if status == 500
+    end
   end
   mon.shutdown(timeout: 15)
 end

@@ -33,16 +33,19 @@ type Attributes map[string]any
 // Config has no required private Key when using the local Agent.
 type Config struct {
 	// DisableSelfTelemetry is for embedded collectors and protocol fixtures.
-	DisableSelfTelemetry                                               bool
-	DisableRemoteConfig                                                bool
-	Disabled                                                           bool
-	ConfigEndpoint, ConfigKey                                          string
-	ConfigInterval                                                     time.Duration
-	LogSampling                                                        map[string]LogSamplingPolicy
-	Service, Table, Endpoint, Key                                      string
-	InstanceID                                                         string
-	Resource                                                           Attributes
-	Exporter                                                           Exporter
+	DisableSelfTelemetry          bool
+	DisableRemoteConfig           bool
+	Disabled                      bool
+	ConfigEndpoint, ConfigKey     string
+	ConfigInterval                time.Duration
+	LogSampling                   map[string]LogSamplingPolicy
+	Service, Table, Endpoint, Key string
+	InstanceID                    string
+	Resource                      Attributes
+	Exporter                      Exporter
+	// TraceContextProvider bridges an existing request/OTel context when no
+	// LightMoni trace is present. It must be safe for concurrent calls.
+	TraceContextProvider                                               func(context.Context) (TraceContext, bool)
 	Interval, RequestTimeout, RetryMin, RetryMax                       time.Duration
 	QueueBytes, QueueBatches, BufferBytes, MaxBatchBytes               int
 	CardinalityLimit, MaxInstruments, MaxAttributes, MaxAttributeBytes int

@@ -3,19 +3,41 @@
 Node.js 20+，业务 API 使用标准 OTLP JSON；没有运行时 npm 依赖。浏览器入口不导入 Node 的 AsyncLocalStorage。
 
 ```typescript
-import { createLightMoni, withTrace } from "@lightmoni/sdk";
+import { createLightMoni } from "@lightmoni/sdk";
 const mon = createLightMoni({ service: "payment-api", table: "http", endpoint: "http://127.0.0.1:4318" });
 const count = mon.counter("http.requests");
 count.add(1, { route: "/payments", method: "POST", status: 200 });
-const span = mon.withTable("app").startSpan("payment.create");
-await withTrace(span.context, async () => { mon.withTable("app").log("info", "completed"); });
-span.end();
+await mon.withTable("app").withSpan("payment.create", async () => {
+  await Promise.resolve();
+  mon.withTable("app").log("info", "completed");
+});
 await mon.shutdown({ timeoutMs: 5000 });
 ```
 
 Counter 支持非负安全整数或 bigint，输出 Int64 Delta；Gauge 最后值和 Histogram 接受有限 number。数值属性中的整数保留 Int64，超出 JS 安全整数时使用 bigint；int64/时间/count 在 OTLP JSON 中是十进制字符串。traceId/spanId 是 OTLP JSON 的十六进制字符串。属性键排序，类型保留，记录时复制维度，因此随后修改调用方对象不会篡改数据。
 
-`mon.meter` 也可访问 counter/gauge/histogram；`withTable` 共享生命周期，根 flush/shutdown 覆盖全部。`extractTrace`/`injectTrace` 支持 W3C header；`withTrace` 使用 AsyncLocalStorage 传播 Node 请求上下文。自动框架埋点尚未交付；样例展示手工业务和请求上下文接入。
+`mon.meter` 也可访问 counter/gauge/histogram；`withTable` 共享生命周期，根 flush/shutdown 覆盖全部。`withSpan` 自动创建/继承 span、通过 AsyncLocalStorage 绑定上下文，并在同步返回、异步完成或异常时结束；普通 `log(...)` 自动关联，嵌套后恢复外层。`withTrace(context, action)` 可绑定已有上下文。`contextProvider` 可桥接外部上下文，当前 SDK 作用域优先。无上下文普通日志不生成 trace。
+
+HTTP 入口使用 `traceHandler`，出站使用 `mon.fetch`；下游服务继续同一个 trace ID 并创建自己的 span。这里的 `mon` 为已初始化客户端：
+
+```typescript
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { traceHandler } from "@lightmoni/sdk";
+const handle = traceHandler(mon, "orders HTTP", async (req: IncomingMessage, res: ServerResponse) => {
+  mon.log("info", "request started");
+  const response = await mon.fetch("http://order-service/orders");
+  mon.log("info", "downstream completed");
+  res.end(String(response.status));
+}, req => new Headers({
+  traceparent: String(req.headers.traceparent ?? ""),
+  tracestate: String(req.headers.tracestate ?? ""),
+}));
+createServer((req, res) => {
+  void handle(req, res).catch(() => { res.statusCode = 500; res.end(); });
+}).listen(8080);
+```
+
+`extractTrace` / `injectTrace` 处理 W3C header，`currentTrace()` 返回当前快照。浏览器用 `withSpan` 回调的绑定客户端：`await mon.withSpan('click', async scoped => { await scoped.fetch(url); scoped.log('info','done'); })`；或 `mon.withTrace(context)` 创建绑定客户端。浏览器异步任务不修改全局当前 trace，`withTable` 保留绑定。完整第三方框架/日志 appender 埋点尚未提供。
 
 配置与可靠性默认值同 Go SDK：10 秒 collection、有界 8 MiB 活跃缓冲和 8 MiB 待发送队列、256 批、1 MiB 单批、2000 维度、256 instruments；可按 options 调整。超限与非法输入看 `stats()`。快照冻结后重试 ID/创建时间/正文不变，读者前进 Delta 不丢掉原待发送窗口；队列丢失或永久拒绝会让该实例 flush/shutdown 持续返回错误。SDK 未获 Agent ACK 前崩溃会丢内存；持久化和服务端去重由 Agent/主服务完成。自定义 exporter 必须响应 AbortSignal，并在 durable commit 后成功返回。
 

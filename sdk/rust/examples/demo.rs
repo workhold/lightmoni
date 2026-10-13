@@ -28,6 +28,26 @@ fn run()->lightmoni::Result<()> {
             app.log("info","after trace",&Attributes::new(),None);
             mon.flush(Duration::from_secs(10))?;counter.add(2,&Attributes::from([("window".into(),"next".into())]));mon.flush(Duration::from_secs(10))?;
         }
+        "trace_scope"=>{
+            let app=mon.with_table("app")?;let parent=TraceContext{trace_id:"a".repeat(32),span_id:"b".repeat(16),flags:0,trace_state:"vendor=scope".into()};
+            app.log("info","without trace",&Attributes::new(),None);
+            app.with_span("request",&Attributes::new(),Some(&parent),|scoped,_|{
+                scoped.log("info","scope root",&Attributes::new(),None);
+                assert_eq!(TraceContext::extract(&scoped.trace_headers().unwrap()).as_ref(),scoped.current_trace());
+                let failed=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||{
+                    let _=scoped.with_span("child",&Attributes::new(),None,|nested,_|{nested.log("info","scope child",&Attributes::new(),None);panic!("scope failure");});
+                }));assert!(failed.is_err());
+                scoped.log("info","scope restored",&Attributes::new(),None);
+                scoped.log("info","scope explicit",&Attributes::new(),Some(&TraceContext{trace_id:"c".repeat(32),span_id:"d".repeat(16),flags:1,trace_state:String::new()}));
+            })?;
+            let barrier=std::sync::Arc::new(std::sync::Barrier::new(2));let mut tasks=Vec::new();
+            for i in 1..=2{
+                let client=app.with_trace(&TraceContext{trace_id:i.to_string().repeat(32),span_id:i.to_string().repeat(16),flags:1,trace_state:String::new()})?;let barrier=barrier.clone();
+                tasks.push(std::thread::spawn(move||{barrier.wait();client.log("info",&format!("scope concurrent {i}"),&Attributes::new(),None);}));
+            }
+            for task in tasks{task.join().unwrap();}
+            assert!(app.current_trace().is_none());app.log("info","after trace",&Attributes::new(),None);mon.flush(Duration::from_secs(10))?;
+        }
         "overflow"=>{for n in 0..4{counter.add(1,&Attributes::from([("dimension".into(),(n as i64).into())]));}mon.flush(Duration::from_secs(10))?;}
         "retry"|"auth"=>{
             counter.add(1,&Attributes::from([("window".into(),"first".into())]));
@@ -40,11 +60,13 @@ fn run()->lightmoni::Result<()> {
         _=>{
             let app=mon.with_table("app")?;let duration=mon.histogram("http.duration",&[5.0,10.0,25.0,50.0,100.0,250.0])?;let active=mon.gauge("http.active")?;
             for i in 0..var("LIGHTMONI_COUNT","20").parse::<i64>().unwrap(){
-                let status=if i%5==0{500}else{200};let mut span=app.start_span("POST /payments",&Attributes::new(),None)?;
+                let status=if i%5==0{500}else{200};
                 let attrs=Attributes::from([("route".into(),"/payments".into()),("method".into(),"POST".into()),("status".into(),status.into())]);
                 counter.add(1,&attrs);duration.record((5+i*2) as f64,&attrs);active.record((i%4) as f64,&Attributes::new());
-                app.log(if status==500{"error"}else{"info"},"sample payment completed",&Attributes::from([("sample_id".into(),i.into()),("status".into(),status.into())]),Some(&span.context));
-                if status==500{span.set_error("sample payment failed");}span.end();
+                app.with_span("POST /payments",&Attributes::new(),None,|scoped,span|{
+                    scoped.log(if status==500{"error"}else{"info"},"sample payment completed",&Attributes::from([("sample_id".into(),i.into()),("status".into(),status.into())]),None);
+                    if status==500{span.set_error("sample payment failed");}
+                })?;
             }
             mon.shutdown(Duration::from_secs(15))?;
         }

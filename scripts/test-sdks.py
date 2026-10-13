@@ -74,6 +74,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
+    def do_GET(self):
+        data = json.dumps({name: self.headers.get(name, "") for name in ("traceparent", "tracestate", "x-business")}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_POST(self):
         raw = self.rfile.read(int(self.headers["Content-Length"]))
         body = json.loads(raw)
@@ -167,6 +175,35 @@ def validate(fault, attempts, stats):
         assert {b["table"] for b in attempts} == {"http", "app"}
         assert stats["invalid_records"] == 1
         assert stats["pending_batches"] == stats["pending_bytes"] == 0
+    elif fault == "demo":
+        logs = [log for log in records(attempts, "logs") if log["body"]["stringValue"] == "sample payment completed"]
+        spans = records(attempts, "traces")
+        assert len(logs) == len(spans) == 20
+        identities = {(span["traceId"], span["spanId"]) for span in spans}
+        assert len(identities) == 20 and all((log["traceId"], log["spanId"]) in identities for log in logs)
+        metrics = records(attempts, "metrics")
+        assert sum(int(p["asInt"]) for m in metrics if m["name"] == "http.requests" for p in m["sum"]["dataPoints"]) == 20
+        assert stats["invalid_records"] == stats["pending_batches"] == 0
+    elif fault == "trace_scope":
+        logs, spans = records(attempts, "logs"), records(attempts, "traces")
+        assert len(logs) == 8 and len(spans) == 2
+        by_body = {log["body"]["stringValue"]: log for log in logs}
+        by_name = {span["name"]: span for span in spans}
+        root, child = by_name["request"], by_name["child"]
+        assert root["traceId"] == child["traceId"] == "a" * 32
+        assert root["parentSpanId"] == "b" * 16 and child["parentSpanId"] == root["spanId"]
+        assert root["spanId"] != child["spanId"] and child["status"]["code"] == 2
+        assert root["flags"] == child["flags"] == 0 and root["traceState"] == child["traceState"] == "vendor=scope"
+        for body, span in (("scope root", root), ("scope child", child), ("scope restored", root)):
+            log = by_body[body]
+            assert log["traceId"] == span["traceId"] and log["spanId"] == span["spanId"] and log["flags"] == 0
+        assert by_body["scope explicit"]["traceId"] == "c" * 32 and by_body["scope explicit"]["spanId"] == "d" * 16
+        for value in (1, 2):
+            log = by_body["scope concurrent " + str(value)]
+            assert log["traceId"] == str(value) * 32 and log["spanId"] == str(value) * 16
+        for body in ("without trace", "after trace"):
+            assert not by_body[body].get("traceId") and not by_body[body].get("spanId")
+        assert stats["invalid_records"] == stats["pending_batches"] == 0
     elif fault == "overflow":
         points = [p for m in records(attempts, "metrics") for p in m["sum"]["dataPoints"]]
         assert len(points) == 3 and sum(int(p["asInt"]) for p in points) == 4
@@ -196,6 +233,7 @@ def main():
     parser.add_argument("--languages", default="python,ruby,java,dotnet,php,rust")
     parser.add_argument("--docker", action="store_true", help="Java/.NET/PHP/Rust in isolated runtime containers")
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--cases", default="fixture,trace_scope,demo,overflow,retry,rate,auth,invalid_ack,ack_loss,permanent,partial,capacity")
     parser.add_argument("--agent-url", help="run business demos against an actual Agent instead of fault fixtures")
     args = parser.parse_args()
     languages = args.languages.split(",")
@@ -212,7 +250,7 @@ def main():
     threading.Thread(target=receiver.serve_forever, daemon=True).start()
     try:
         for language in languages:
-            for fault in ("fixture", "overflow", "retry", "rate", "auth", "invalid_ack", "ack_loss", "permanent", "partial", "capacity"):
+            for fault in args.cases.split(","):
                 with receiver.lock:
                     receiver.fault, receiver.attempts = fault, []
                 host = "host.docker.internal" if args.docker and language in IMAGES else "127.0.0.1"

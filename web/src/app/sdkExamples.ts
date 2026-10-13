@@ -11,8 +11,10 @@ const moni = createLightMoni({
   endpoint: process.env.LIGHTMONI_ENDPOINT ?? ${fallback},
   key: process.env.LIGHTMONI_KEY
 });
-moni.counter('orders_created').add(1, {region:'cn'});
-moni.log('info', 'order created', {order_id:'123'});
+await moni.withSpan('create_order', async () => {
+  moni.counter('orders_created').add(1, {region:'cn'});
+  moni.log('info', 'order created', {order_id:'123'});
+});
 await moni.shutdown({timeoutMs:5000});`,
     go:`import (
   "context"
@@ -29,7 +31,10 @@ ${mode==='agent'?`if endpoint == "" { endpoint = ${fallback} }\n`:''}client, err
 if err != nil { panic(err) }
 orders, err := client.Counter("orders_created", moni.MetricOptions{})
 if err != nil { panic(err) }
-orders.Add(context.Background(), 1, moni.Attributes{"region":"cn"})
+requestCtx, span := client.StartSpan(context.Background(), "create_order")
+orders.Add(requestCtx, 1, moni.Attributes{"region":"cn"})
+client.Logger(requestCtx).Log("info", "order created", nil)
+span.End()
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 if err := client.Shutdown(ctx); err != nil { panic(err) }`,
@@ -53,9 +58,10 @@ var moni = new Client("order-api", "business",
     System.getenv().getOrDefault("LIGHTMONI_ENDPOINT", ${fallback}),
     System.getenv().getOrDefault("LIGHTMONI_KEY", ""));
 moni.counter("orders_created").add(1, Map.of("region","cn"));
-try (var span = moni.startSpan("create_order")) {
-  moni.log("info", "order created", Map.of(), span.context);
-}
+moni.withSpan("create_order", span -> {
+  moni.log("info", "order created", Map.of("order_id","123"));
+  return null;
+});
 moni.shutdown(Duration.ofSeconds(5));`,
     dotnet:`using System;
 using System.Collections.Generic;
@@ -67,7 +73,8 @@ var moni = new Client("order-api", "business",
 moni.Counter("orders_created").Add(1,
   new Dictionary<string,object> {["region"]="cn"});
 using (var span = moni.StartSpan("create_order"))
-  moni.Log("info", "order created", context:span.Context);
+using (var scope = span.MakeCurrent())
+  moni.Log("info", "order created");
 await moni.ShutdownAsync(TimeSpan.FromSeconds(5));`,
     php:`require './lightmoni-php-sdk/sdk/php/src/Client.php';
 
@@ -75,9 +82,9 @@ $moni = new \\LightMoni\\Client('order-api', 'business',
     getenv('LIGHTMONI_ENDPOINT') ?: ${fallback},
     getenv('LIGHTMONI_KEY') ?: '');
 $moni->counter('orders_created')->add(1, ['region'=>'cn']);
-$span = $moni->startSpan('create_order');
-$moni->log('info', 'order created', [], $span->context);
-$span->end();
+$moni->withSpan('create_order', function() use ($moni) {
+  $moni->log('info', 'order created', ['order_id'=>'123']);
+});
 $moni->shutdown(5);`,
     ruby:`require 'lightmoni'
 
@@ -87,9 +94,9 @@ moni = LightMoni::Client.new(
   key:ENV.fetch('LIGHTMONI_KEY'${mode==='agent'?", ''":''})
 )
 moni.counter('orders_created').add(1, 'region'=>'cn')
-span = moni.start_span('create_order')
-moni.log('info', 'order created', {}, context:span.context)
-span.finish
+moni.with_span('create_order') do
+  moni.log('info', 'order created', 'order_id'=>'123')
+end
 moni.shutdown(timeout:5)`,
     rust:`use lightmoni::{Client, Attributes};
 use std::{env, time::Duration};
@@ -99,9 +106,9 @@ let key = env::var("LIGHTMONI_KEY")${mode==='agent'?'.unwrap_or_default()':'?'};
 let moni = Client::new("order-api", "business", &endpoint, &key)?;
 moni.counter("orders_created")?.add(1,
   &Attributes::from([("region".into(), "cn".into())]));
-let mut span = moni.start_span("create_order", &Attributes::new(), None)?;
-moni.log("info", "order created", &Attributes::new(), Some(&span.context));
-span.end();
+moni.with_span("create_order", &Attributes::new(), None, |scoped, _| {
+  scoped.log("info", "order created", &Attributes::new(), None);
+})?;
 moni.shutdown(Duration::from_secs(5))?;`,
   };
   return examples[language]??examples.typescript;

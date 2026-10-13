@@ -8,6 +8,15 @@ require 'timeout'
 module LightMoni
   MAX_INT = (1 << 63) - 1
   def self.nano; Process.clock_gettime(Process::CLOCK_REALTIME, :nanosecond); end
+  # Thread#[] is fiber-local, so concurrent fibers never share a request trace.
+  def self.current_trace; Thread.current[:lightmoni_trace]; end
+  def self.with_trace(context)
+    raise ArgumentError, 'invalid trace context' unless context.is_a?(TraceContext)
+    previous = current_trace
+    Thread.current[:lightmoni_trace] = context
+    begin; yield; ensure; Thread.current[:lightmoni_trace] = previous; end
+  end
+  def self.trace_headers; current_trace ? current_trace.inject : {}; end
   def self.json(value); JSON.generate(value); end
   def self.table(value)
     raise ArgumentError, 'invalid logical table' unless value.is_a?(String) && /\A[a-z][a-z0-9_]{0,47}\z/.match?(value) && !/\A(log|metric|trace)_/.match?(value)
@@ -263,6 +272,7 @@ module LightMoni
       end
     end
     def log(severity, body, attributes = {}, context: nil)
+      context ||= LightMoni.current_trace
       @state.gate.synchronize do
         begin
           level = severity.downcase; i = %w[trace debug info warn error fatal].index(level)
@@ -277,7 +287,17 @@ module LightMoni
       end
     end
     def start_span(name, attributes = {}, parent: nil)
-      @state.gate.synchronize { raise 'SDK is closed' if @state.closed; Span.new(self, name, attributes, parent) }
+      @state.gate.synchronize { raise 'SDK is closed' if @state.closed; Span.new(self, name, attributes, parent || LightMoni.current_trace) }
+    end
+    def with_span(name, attributes = {}, parent: nil)
+      span = start_span(name, attributes, parent: parent)
+      begin
+        LightMoni.with_trace(span.context) { yield span }
+      rescue StandardError => e
+        span.set_error(e.message); raise
+      ensure
+        span.finish
+      end
     end
     def stats; @state.gate.synchronize { @state.stats.dup }; end
     def update_key(key); @state.gate.synchronize { @state.key = key.dup }; end

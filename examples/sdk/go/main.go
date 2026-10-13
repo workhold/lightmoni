@@ -46,7 +46,7 @@ func main() {
 			level = "error"
 			span.SetError(fmt.Errorf("sample payment failed"))
 		}
-		client.WithTable("app").Log(ctx, level, "sample payment completed", moni.Attributes{"sample_id": i, "status": status})
+		client.Logger(ctx).WithTable("app").Log(level, "sample payment completed", moni.Attributes{"sample_id": i, "status": status})
 		span.End()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

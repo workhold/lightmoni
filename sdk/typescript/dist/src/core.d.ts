@@ -48,6 +48,8 @@ export interface Options {
     maxAttributeBytes?: number;
     /** Optional current-context hook for log/span correlation; read when recording. */
     contextProvider?: () => TraceContext | undefined;
+    /** Runs a scoped action; Node installs AsyncLocalStorage automatically. */
+    contextRunner?: <T>(context: TraceContext, action: () => T) => T;
 }
 export interface MetricOptions {
     unit?: string;
@@ -210,11 +212,18 @@ export declare class Histogram {
 export declare class LightMoni {
     private readonly state;
     readonly table: string;
+    private readonly boundTrace?;
     private constructor();
     static create(options: Options): LightMoni;
     get meter(): LightMoni;
     get instanceId(): string;
     withTable(table: string): LightMoni;
+    currentTrace(): TraceContext | undefined;
+    /** Immutable binding, safe across concurrent browser tasks and table clients. */
+    withTrace(context: TraceContext): LightMoni;
+    withSpan<T>(name: string, action: (client: LightMoni, span: Span) => T, attrs?: Attributes, parent?: TraceContext | null | undefined): T;
+    /** Use within a request/task scope to propagate its W3C context downstream. */
+    fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
     counter(name: string, options?: MetricOptions): Counter;
     gauge(name: string, options?: MetricOptions): Gauge;
     histogram(name: string, options?: MetricOptions): Histogram;
@@ -225,7 +234,7 @@ export declare class LightMoni {
     refreshConfig(): Promise<void>;
     /** Trace metadata is optional and separate from attrs; no context creates no trace. */
     log(level: string, body: string, attrs?: Attributes, context?: TraceContext | undefined): void;
-    startSpan(name: string, attrs?: Attributes, parent?: TraceContext | undefined): Span;
+    startSpan(name: string, attrs?: Attributes, parent?: TraceContext | null | undefined): Span;
     flush({ timeoutMs }?: {
         timeoutMs?: number;
     }): Promise<void>;
