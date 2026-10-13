@@ -21,8 +21,11 @@ fn run()->lightmoni::Result<()> {
             let parent=TraceContext::extract(&BTreeMap::from([("traceparent".into(),format!("00-{}-{}-01","a".repeat(32),"b".repeat(16))),("tracestate".into(),"foo=bar".into())])).unwrap();
             assert!(TraceContext::extract(&BTreeMap::from([("traceparent".into(),format!("00-{}-{}-01","0".repeat(32),"b".repeat(16)))])).is_none());
             assert_eq!(TraceContext::extract(&parent.inject()?),Some(parent.clone()));
-            let app=mon.with_table("app")?;let mut span=app.start_span("fixture",&Attributes::new(),Some(&parent))?;
+            let app=mon.with_table("app")?;
+            app.log("info","without trace",&Attributes::from([("trace_id".into(),"attribute-only".into())]),None);
+            let mut span=app.start_span("fixture",&Attributes::new(),Some(&parent))?;
             app.log("info","中文 fixture",&Attributes::from([("exact".into(),9007199254740993i64.into()),("ok".into(),true.into()),("fraction".into(),0.125f64.into())]),Some(&span.context));span.end();
+            app.log("info","after trace",&Attributes::new(),None);
             mon.flush(Duration::from_secs(10))?;counter.add(2,&Attributes::from([("window".into(),"next".into())]));mon.flush(Duration::from_secs(10))?;
         }
         "overflow"=>{for n in 0..4{counter.add(1,&Attributes::from([("dimension".into(),(n as i64).into())]));}mon.flush(Duration::from_secs(10))?;}

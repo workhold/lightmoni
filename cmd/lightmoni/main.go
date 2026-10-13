@@ -54,6 +54,7 @@ func main() {
 		log.Fatal(e)
 	}
 	alertsModule.Register(s.API)
+	alertsModule.RegisterPublic(s.Public)
 	go alertsModule.Run(ctx)
 	go s.RunAgentTelemetry(ctx)
 	go s.RunRuntime(ctx)

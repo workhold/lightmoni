@@ -258,6 +258,10 @@ func transition(old, in State, r Rule, now time.Time) (State, []string) {
 	return s, events
 }
 func (m *Module) Evaluate(ctx context.Context, r Rule, now time.Time) error {
+	responseGroups, err := m.ruleResponseGroups(ctx, r)
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, e := m.inspect(ctx, r, now)
@@ -345,6 +349,11 @@ func (m *Module) Evaluate(ctx context.Context, r Rule, now time.Time) error {
 				episode = state.HealthEpisode
 			}
 			event := Event{ID: id(), RuleID: r.ID, RuleName: r.Name, RuleRevision: r.Revision, Range: p.Range, Kind: kind, Episode: episode, CreatedAt: stamp(now), State: state, SourceTableIDs: r.SourceTableIDs}
+			for _, g := range responseGroups {
+				if !includes(event.GroupIDs, g.ID) {
+					event.GroupIDs = append(event.GroupIDs, g.ID)
+				}
+			}
 			event.Message = fmt.Sprintf("%s · %s\n数值 %s · 阈值 %s %s\n%s\n窗口 [%s, %s)", r.Name, kind, state.Value, r.Operator, r.Threshold, encode(state.Labels), p.Range.From, p.Range.To)
 			if in.missing && r.NoDataPolicy != "" && r.NoDataPolicy != "keep_state" {
 				description := map[string]string{"zero": "按 0 计算", "value": "按指定值计算", "alerting": "视为告警", "normal": "视为正常"}[r.NoDataPolicy]
@@ -373,7 +382,13 @@ func (m *Module) Evaluate(ctx context.Context, r Rule, now time.Time) error {
 			if _, e = tx.Exec("INSERT INTO alert_events(id,rule_id,created_at,body) VALUES(?,?,?,?)", event.ID, r.ID, event.CreatedAt, encode(event)); e != nil {
 				return e
 			}
+			if e = m.syncResponsesTx(tx, event, r, responseGroups); e != nil {
+				return e
+			}
 			for _, route := range p.Routes {
+				if m.managedRoute(route, responseGroups) {
+					continue
+				}
 				status := "queued"
 				if parse(current.SilenceUntil).After(now) {
 					status = "suppressed"
@@ -421,6 +436,20 @@ func (m *Module) Run(ctx context.Context) {
 		_, _ = m.deps.DB.ExecContext(ctx, "UPDATE alert_states SET body=? WHERE rule_id=? AND fingerprint=?", encode(s), s.RuleID, s.Fingerprint)
 	}
 	workerDone := make(chan struct{})
+	directoryDone := make(chan struct{})
+	go func() {
+		defer close(directoryDone)
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = m.SyncDueDirectories(ctx)
+			}
+		}
+	}()
 	go func() {
 		defer close(workerDone)
 		ticker := time.NewTicker(time.Second)
@@ -430,6 +459,10 @@ func (m *Module) Run(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				_ = m.ProcessVoiceReceipts(ctx)
+				_ = m.CollectPendingEvidence(ctx)
+				_ = m.TickResponses(ctx)
+				_ = m.NotifyResolved(ctx)
 				_ = m.SendPending(ctx)
 			}
 		}
@@ -440,6 +473,7 @@ func (m *Module) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			<-workerDone
+			<-directoryDone
 			return
 		case <-ticker.C:
 			rules, e := m.rules(ctx)

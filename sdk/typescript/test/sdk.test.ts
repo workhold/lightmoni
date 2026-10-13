@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { createLightMoni, withTrace, type FrozenBatch, type Exporter } from "../src/index.js";
-import { extractTrace, injectTrace } from "../src/core.js";
+import { extractTrace, injectTrace, type TraceContext } from "../src/core.js";
+import { createLightMoni as createBrowserClient } from "../src/browser.js";
 
 const decode = (batch: FrozenBatch) => JSON.parse(new TextDecoder().decode(batch.payload));
 function captured() {
@@ -27,6 +28,60 @@ test("complete dimensions, attribute types, Gauge, Histogram and trace context",
     const histogram = metrics.find(m => m.name === "duration").histogram.dataPoints[0]; assert.deepEqual(histogram.bucketCounts, ["2", "1", "1"]); assert.equal(histogram.count, "4"); assert.equal(histogram.sum, 4.5);
     const log = decode(batches.find(b => b.signal === "logs")!).resourceLogs[0].scopeLogs[0].logRecords[0]; assert.equal(log.traceId, span.context.traceId); assert.equal(log.spanId, span.context.spanId);
     assert.equal(batches.filter(b => b.signal === "traces").length, 1);
+  } finally { await mon.shutdown(); }
+});
+
+test("optional log trace metadata follows scoped context and explicit overrides", async () => {
+  const { batches, exporter } = captured();
+  const mon = createLightMoni({ selfTelemetry: false, service: "test", table: "http", exporter, intervalMs: 60_000 });
+  const trace: TraceContext = { traceId: "a".repeat(32), spanId: "b".repeat(16), flags: 0 };
+  const explicit: TraceContext = { traceId: "c".repeat(32), spanId: "d".repeat(16), flags: 1 };
+  try {
+    const app = mon.withTable("app");
+    app.log("info", "without trace", { trace_id: "attribute-only" });
+    await withTrace(trace, async () => {
+      await Promise.resolve();
+      app.log("info", "with trace");
+      app.log("info", "explicit trace", {}, explicit);
+    });
+    app.log("info", "after trace");
+    await mon.flush();
+    assert.ok(batches.every(b => b.signal === "logs" && b.table === "app"));
+    const logs = batches.flatMap(b => decode(b).resourceLogs[0].scopeLogs[0].logRecords);
+    assert.equal(logs.length, 4);
+    const byBody = new Map(logs.map(log => [log.body.stringValue, log]));
+    for (const body of ["without trace", "after trace"]) {
+      const log = byBody.get(body)!;
+      assert.equal(log.traceId, undefined); assert.equal(log.spanId, undefined); assert.equal(log.flags, undefined);
+    }
+    assert.deepEqual(byBody.get("without trace")!.attributes.find((a: { key: string }) => a.key === "trace_id"), { key: "trace_id", value: { stringValue: "attribute-only" } });
+    for (const [body, expected] of [["with trace", trace], ["explicit trace", explicit]] as const) {
+      const log = byBody.get(body)!;
+      assert.equal(log.traceId, expected.traceId); assert.equal(log.spanId, expected.spanId); assert.equal(log.flags, expected.flags);
+    }
+    assert.equal(mon.stats().invalidRecords, 0);
+  } finally { await mon.shutdown(); }
+});
+
+test("browser contextProvider captures optional trace metadata before export", async () => {
+  const { batches, exporter } = captured();
+  let current: TraceContext | undefined;
+  const mon = createBrowserClient({ selfTelemetry: false, service: "web", table: "web", exporter, intervalMs: 60_000, contextProvider: () => current });
+  const trace: TraceContext = { traceId: "a".repeat(32), spanId: "b".repeat(16), flags: 1 };
+  try {
+    mon.log("info", "without trace");
+    current = trace;
+    mon.withTable("app").log("info", "with trace");
+    current = undefined;
+    mon.withTable("app").log("info", "after trace");
+    await mon.flush();
+    const logs = batches.flatMap(b => decode(b).resourceLogs[0].scopeLogs[0].logRecords);
+    assert.equal(logs.length, 3);
+    for (const log of logs) {
+      assert.equal(log.traceId, log.body.stringValue === "with trace" ? trace.traceId : undefined);
+      assert.equal(log.spanId, log.body.stringValue === "with trace" ? trace.spanId : undefined);
+    }
+    assert.ok(batches.every(b => b.signal === "logs"));
   } finally { await mon.shutdown(); }
 });
 

@@ -599,6 +599,7 @@ export class LightMoni {
         throw new Error('SDK closed'); this.state.updateLogSampling(policies); }
     setReportingEnabled(enabled) { this.state.options.disabled = !enabled; this.state.setReportingDisabled(!enabled || this.state.remoteDisabled); }
     async refreshConfig() { await this.state.refreshConfig(); }
+    /** Trace metadata is optional and separate from attrs; no context creates no trace. */
     log(level, body, attrs = {}, context = this.state.options.contextProvider?.()) {
         if (this.state.closing) {
             this.state.invalid('record after shutdown');

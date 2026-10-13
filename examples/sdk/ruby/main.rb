@@ -18,8 +18,11 @@ when 'fixture'
   parent = LightMoni::TraceContext.extract('traceparent' => '00-' + 'a' * 32 + '-' + 'b' * 16 + '-01', 'tracestate' => 'foo=bar')
   raise 'invalid parent accepted' if LightMoni::TraceContext.extract('traceparent' => '00-' + '0' * 32 + '-' + 'b' * 16 + '-01')
   raise 'context roundtrip' unless LightMoni::TraceContext.extract(parent.inject).inject == parent.inject
-  app = mon.with_table('app'); span = app.start_span('fixture', parent: parent)
+  app = mon.with_table('app')
+  app.log('info', 'without trace', { 'trace_id' => 'attribute-only' })
+  span = app.start_span('fixture', parent: parent)
   app.log('info', '中文 fixture', { 'exact' => 9007199254740993, 'ok' => true, 'fraction' => 0.125 }, context: span.context); span.finish
+  app.log('info', 'after trace')
   mon.flush; counter.add(2, 'window' => 'next'); mon.flush
 when 'overflow'
   4.times { |i| counter.add(1, 'dimension' => i) }; mon.flush

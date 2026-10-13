@@ -1,6 +1,6 @@
 import {MonitoringScope,type PublishedScope} from '../shared/monitoring-context';
 import {lazy,Suspense,useEffect,useMemo,useState} from 'react';
-import {Link,Navigate,Route,Routes,useLocation,useNavigate} from 'react-router-dom';
+import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
 import {ApiOutlined,AppstoreOutlined,BellOutlined,DatabaseOutlined,DashboardOutlined,LogoutOutlined,MessageOutlined,SearchOutlined,SettingOutlined,MenuFoldOutlined,MenuUnfoldOutlined} from '@ant-design/icons';
 import {Button,Drawer,Spin,Tooltip} from '../shared/ui';
 import {api} from '../shared/api';
@@ -9,10 +9,13 @@ import {LoginPage,OverviewPage,DataPage,AgentsPage,SettingsPage} from './CorePag
 const DashboardPage=lazy(()=>import('../features/dashboards/DashboardPage'));
 const LogExplorePage=lazy(()=>import('../features/logs/LogExplorePage'));
 const AlertsPage=lazy(()=>import('../features/alerts/AlertsPage'));
+const TracePage=lazy(()=>import('../features/alerts/TracePage'));
 const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
 const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
 
 const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','Agent',ApiOutlined],['/data','数据接入',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','设置',SettingOutlined]] as const;
+
+function ClaimLanding(){const {token}=useParams();return <Navigate to={'/alerts?claim='+encodeURIComponent(token??'')} replace/>}
 
 export default function Root(){
  const location=useLocation(),navigate=useNavigate();
@@ -26,7 +29,7 @@ export default function Root(){
  function toggleNavigation(){setNavCollapsed(value=>{try{localStorage.setItem('lightmoni.nav.collapsed',String(!value))}catch{}return !value})}
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
  if(loading)return <div className="lm-loading"><Spin size="large"/></div>;
- if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate('/')}}/>;
+ if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/'))?location.pathname+location.search:'/')}}/>;
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'}`}>
   <aside className="lm-sidebar">
    <Link to="/" className="lm-brand"><span className="lm-brand-mark">L</span><span>LightMoni<small>监控工作台</small></span></Link>
@@ -43,6 +46,8 @@ export default function Root(){
     <Route path="/dashboards" element={<DashboardPage/>}/>
     <Route path="/dashboards/:id" element={<DashboardPage/>}/>
     <Route path="/logs/*" element={<LogExplorePage/>}/>
+    <Route path="/a/:token" element={<ClaimLanding/>}/>
+    <Route path="/traces/:trace_id" element={<TracePage/>}/>
     <Route path="/alerts/*" element={<AlertsPage/>}/>
     <Route path="/login" element={<Navigate to="/"/>}/>
     <Route path="*" element={<Navigate to="/" replace/>}/>

@@ -37,6 +37,37 @@ export LIGHTMONI_KEY='替换为允许 business 表的上报 Key'
 
 原生 API 覆盖非负 Int64 Counter（monotonic Delta）、最后观测 Gauge、显式边界 Histogram、结构化属性日志、基础 span、显式父上下文及 W3C header。Python 另提供 contextvars 和 span context manager；其余新语言显式传递 span context。Java SDK 可在 Kotlin/JVM 中使用，不包括 Android/Kotlin Multiplatform。没有自动框架埋点、C/C++、Swift、Dart/Flutter 专用封装。
 
+## 日志 trace 字段预留
+
+日志始终支持独立的可选 `trace_id` / `span_id`，业务代码可以只传级别、正文和属性。沿用现有接口，不要求先创建 span；没有有效 trace 上下文时，日志正常记录和上报。字段约定如下：
+
+| 位置 | trace 字段 | 无上下文时 |
+| --- | --- | --- |
+| OTLP LogRecord | `traceId`、`spanId`、`flags`（Go Protobuf 为对应原生字段） | JSON 可省略，Protobuf 为默认空值 |
+| 日志存储与查询 | `trace_id String`、`span_id String` | 固定列保留，值为空字符串 |
+| 业务正文与 attributes | 业务自定义内容 | 不承担 trace 关联；同名属性不自动提升为 trace 字段 |
+
+trace 元数据在调用日志 API 时从上下文复制，与记录一起冻结。批量发送、Agent 转发和失败重试沿用原值，不能在发送时读取另一请求的上下文，也不能为每条无上下文日志生成随机 trace。trace 的 sampled 标记不决定日志是否可关联，日志保留仍遵循其自身上报规则。trace ID 不默认加入指标维度。
+
+| SDK | 当前可选上下文入口 |
+| --- | --- |
+| Go | `Log(ctx, ...)` 读取 `ContextWithTrace` / `StartSpan` 返回的 context；只记日志可用 `context.Background()` |
+| Node.js | `log(..., context?)`，省略时读取 `withTrace` 的 AsyncLocalStorage 或自定义 `contextProvider` |
+| 浏览器 | `log(..., context?)` 或 `contextProvider`；省略且无 provider 时正常记无 trace 日志 |
+| Python | `log(..., context=None)`，省略时读取 span context manager 的 contextvars |
+| Java/Kotlin、.NET、PHP、Ruby、Rust | 沿用可空 / 可选 TraceContext 参数；省略或传 null / nil / None 即无 trace 日志（Java 两参数重载省略 context） |
+
+### 后续全链路自动注入方案
+
+自动注入作为后续可选适配层，继续使用上述字段和日志接口：
+
+1. 在 HTTP 请求、任务或消息消费入口提取上游 W3C 上下文；入口缺失有效上下文时，按配置创建一次根 trace / span。同一次业务处理共享 trace ID，每个操作使用自己的 span ID。
+2. 在请求作用域内绑定当前上下文，由日志入口统一读取。先复用 Go context、Node AsyncLocalStorage、Python contextvars；其他语言再增加请求作用域 provider / 适配器。接入已有 OpenTelemetry 时从其当前上下文桥接，避免同一请求产生两套 trace。
+3. HTTP 出站和消息生产适配器传播 `traceparent` / `tracestate`，下游入口继续同一 trace。并发、异步回调和嵌套调用必须隔离上下文，作用域退出或异常后恢复；后台独立任务由自己的入口决定 trace。
+4. 常用日志框架通过 handler / appender / hook 在记录发生时补齐元数据；显式传入的有效上下文优先。Agent 和中心负责保留字段，无法仅凭后收到的无上下文日志推断业务链路。
+
+交付自动适配层前需验证跨服务同 trace、并发不串链、嵌套及异常恢复、异步/消息传播、无 trace 日志和冻结重试。当前尚未交付自动框架埋点。
+
 ## 生命周期与边界
 
 Go / TypeScript 保留现有周期 collection 和后台 exporter。六个新 SDK 使用**显式 flush**：记录 API 只修改内存，在应用自己的定时任务、请求结束或退出时调用 flush（.NET 为 FlushAsync），不自动创建后台线程。PHP 限单请求/单 worker，不能跨线程共享。其他语言发送期间不持有记录锁；Rust 的 blocking exporter 应放在异步 runtime 的 blocking worker。

@@ -118,6 +118,24 @@ func TestOTLPJSONHexAndInvalidData(t *testing.T) {
 	}
 }
 
+func TestLogsReserveEmptyTraceColumnsWithoutContext(t *testing.T) {
+	for _, metadata := range []string{"", `"traceId":"","spanId":"",`} {
+		raw := []byte(`{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"test"}}]},"scopeLogs":[{"logRecords":[{` + metadata + `"body":{"stringValue":"without trace"},"attributes":[{"key":"trace_id","value":{"stringValue":"attribute-only"}}]}]}]}]}`)
+		rows, err := normalize("logs", raw, "application/json", "2026-10-12 00:00:00.000000000", "key")
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("log without trace was rejected: rows=%+v err=%v", rows, err)
+		}
+		for _, field := range []string{"trace_id", "span_id"} {
+			if value, exists := rows[0].Row[field]; !exists || value != "" {
+				t.Fatalf("reserved %s column should be empty: %+v", field, rows[0].Row)
+			}
+		}
+		if !strings.Contains(rows[0].Row["attributes_json"].(string), `"trace_id":"attribute-only"`) {
+			t.Fatal("ordinary trace_id attribute was lost")
+		}
+	}
+}
+
 func TestTableScopesEnforcedBeforeIngestion(t *testing.T) {
 	dir := t.TempDir()
 	db, err := storage.Open(filepath.Join(dir, "scopes.db"))

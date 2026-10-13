@@ -62,6 +62,9 @@ func InjectHTTP(ctx context.Context, h http.Header) {
 	}
 }
 
+// Log records a structured log. Trace and span IDs are optional OTLP fields,
+// copied from ctx at recording time. A context without trace metadata (such as
+// context.Background()) leaves them unset and does not create a trace.
 func (c *Client) Log(ctx context.Context, level, body string, attrs Attributes) {
 	s := c.s
 	if c.table == "" {

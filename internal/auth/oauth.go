@@ -14,20 +14,25 @@ import (
 )
 
 type Provider struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Kind         string `json:"kind"`
-	Enabled      bool   `json:"enabled"`
-	ClientID     string `json:"client_id"`
-	Secret       string `json:"client_secret,omitempty"`
-	AuthorizeURL string `json:"authorize_url"`
-	TokenURL     string `json:"token_url"`
-	UserInfoURL  string `json:"userinfo_url"`
-	SubjectField string `json:"subject_field"`
-	NameField    string `json:"name_field"`
-	Scopes       string `json:"scopes"`
-	PKCE         bool   `json:"pkce"`
-	AutoApprove  bool   `json:"auto_approve"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Kind            string `json:"kind"`
+	Enabled         bool   `json:"enabled"`
+	ClientID        string `json:"client_id"`
+	Secret          string `json:"client_secret,omitempty"`
+	AuthorizeURL    string `json:"authorize_url"`
+	TokenURL        string `json:"token_url"`
+	UserInfoURL     string `json:"userinfo_url"`
+	SubjectField    string `json:"subject_field"`
+	NameField       string `json:"name_field"`
+	Scopes          string `json:"scopes"`
+	PKCE            bool   `json:"pkce"`
+	AutoApprove     bool   `json:"auto_approve"`
+	EmailField      string `json:"email_field,omitempty"`
+	PhoneField      string `json:"phone_field,omitempty"`
+	FeishuIDField   string `json:"feishu_id_field,omitempty"`
+	DingtalkIDField string `json:"dingtalk_id_field,omitempty"`
+	WecomIDField    string `json:"wecom_id_field,omitempty"`
 }
 
 func defaults(p Provider) Provider {
@@ -222,6 +227,12 @@ func (a *Auth) registerOAuthPublic(m *http.ServeMux) {
 			shared.Error(w, 500, e.Error())
 			return
 		}
+		if target := r.URL.Query().Get("return_to"); safeReturnTarget(target) {
+			if _, e = a.DB.Exec("INSERT INTO oauth_return_targets(state,return_to) VALUES(?,?)", state, target); e != nil {
+				shared.Error(w, 500, "无法保存登录跳转")
+				return
+			}
+		}
 		_, _ = a.DB.Exec("DELETE FROM oauth_states WHERE created_at<?", time.Now().Add(-10*time.Minute).Unix())
 		http.SetCookie(w, &http.Cookie{Name: "lm_oauth_state", Value: state, Path: "/api/v1/auth/oauth", HttpOnly: true, Secure: strings.HasPrefix(a.ExternalURL, "https:"), SameSite: http.SameSiteLaxMode, MaxAge: 600})
 		u, _ := url.Parse(p.AuthorizeURL)
@@ -257,6 +268,7 @@ func (a *Auth) registerOAuthPublic(m *http.ServeMux) {
 			return
 		}
 		var providerID, verifier, userID string
+		var returnTo string
 		var created int64
 		tx, e := a.DB.Begin()
 		if e != nil {
@@ -264,6 +276,10 @@ func (a *Auth) registerOAuthPublic(m *http.ServeMux) {
 			return
 		}
 		e = tx.QueryRow("SELECT provider_id,verifier,created_at,user_id FROM oauth_states WHERE state=?", state).Scan(&providerID, &verifier, &created, &userID)
+		if e == nil {
+			_ = tx.QueryRow("SELECT return_to FROM oauth_return_targets WHERE state=?", state).Scan(&returnTo)
+			_, e = tx.Exec("DELETE FROM oauth_return_targets WHERE state=?", state)
+		}
 		if e == nil {
 			_, e = tx.Exec("DELETE FROM oauth_states WHERE state=?", state)
 		}
@@ -347,8 +363,23 @@ func (a *Auth) registerOAuthPublic(m *http.ServeMux) {
 			fail("创建登录会话失败")
 			return
 		}
-		http.Redirect(w, r, "/", 302)
+		if e = a.syncNotificationProfile(id, p, identity); e != nil {
+			fail("通知资料映射无效，请管理员检查映射：" + e.Error())
+			return
+		}
+		if !safeReturnTarget(returnTo) {
+			returnTo = "/"
+		}
+		http.Redirect(w, r, returnTo, 302)
 	})
+}
+
+func safeReturnTarget(target string) bool {
+	if len(target) == 0 || len(target) > 8192 || strings.HasPrefix(target, "//") || strings.ContainsAny(target, "\\\r\n") {
+		return false
+	}
+	u, e := url.Parse(target)
+	return e == nil && u.Host == "" && u.Scheme == "" && (u.Path == "/" || u.Path == "/alerts" || strings.HasPrefix(u.Path, "/traces/") || strings.HasPrefix(u.Path, "/a/"))
 }
 func field(value map[string]any, path string) string {
 	var v any = value

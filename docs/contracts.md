@@ -28,7 +28,7 @@ SDK 直连主服务使用 `Authorization: Bearer <key>`；SDK 到本机 Agent �
 
 固定共用字段：`event_id String`、`event_time DateTime64(9,'UTC')`、`ingested_at DateTime64(9,'UTC')`、`service`、`instance_id`、`host_id`、`agent_id`、`key_id`、`resource_json`、`attributes Map(String,String)`、`attributes_json String`。attributes 供方便文本 SQL，attributes_json 保留 bool/int/double/string/null/结构的原类型，目录/日志过滤使用带类型访问，不把数字与字符串混淆。整数 JSON 无损编码；不能按每个新属性 ALTER TABLE。
 
-- log：`severity String`、`severity_number UInt8`、`body String`、`body_json String`、`trace_id`、`span_id`、`source_id`、`source_seq Nullable(UInt64)`。OTLP缺事件时间时明确使用 observed_time 并标记时间来源，不伪造原始发生时间。
+- log：`severity String`、`severity_number UInt8`、`body String`、`body_json String`、`trace_id String`、`span_id String`、`source_id`、`source_seq Nullable(UInt64)`。trace/span 是独立的可选关联字段；SDK 业务代码可不传 trace 上下文，OTLP 可省略对应字段，入库仍保留固定列并写空字符串，不能为单条日志生成 trace 或从同名自定义属性推断。关联在日志调用时捕获，冻结重试保持原值；后续自动上下文注入沿用这组字段，详见 [SDK 约定与方案](../sdk/README.md#日志-trace-字段预留)。OTLP缺事件时间时明确使用 observed_time 并标记时间来源，不伪造原始发生时间。
 - sum：`name`、`unit`、`start_time`、`event_time` 为窗口结束、`value`（保留int/double类型）、`temporality`、`monotonic`。自有 Counter 为 monotonic Delta，查询 sum(value)；累计输入保留 temporality，不能直接当 Delta 相加。
 - gauge：name/unit/value、点时间；点时间可能是 collection 时间，最新观测时间另有明确语义，不强称等于业务最后 record。
 - histogram：name/unit/start_time/event_time、`bounds Array(Float64)`、`bucket_counts Array(UInt64)`、`count UInt64`、sum/min/max。边界严格递增、桶长=边界长+1、桶和=count。同边界分布才可合并。
@@ -58,9 +58,13 @@ QueryResponse.results 每个 refId 独立 success/empty/error/cancelled，含 fr
 
 ## 告警组、表配置与查询列表
 
-AlertGroup{id,name,targets,revision}，target 为 channel_id + 类型化 recipient；机器人默认群、SMTP地址、短信手机号、pushplus接收绑定均显式表示。目录表绑定一个可空默认alert_group_id；规则声明source_table_ids，AST实际表集合必须相符。普通规则继承表组，跨表规则合并全部来源组目标按规范化(channel_id,recipient)去重。没有组或组无目标显示未路由，不能假装发送成功。采集时无需配置组才能上报。
+AlertGroup包含id/name/enabled/revision、用户members、primary/backup/fallback、timezone、channel_ids、schedule和P0～P3 policies。schedule支持fixed/daily/weekly/custom和临时overrides。系统渠道保存供应商秘密；NotificationProfile保存邮箱、E.164手机号、feishu_id/dingtalk_id/wecom_id与来源。组策略解析当前主备，生成不可改投的接收人快照。
 
-组/规则/事件/outbox由告警模块维护；表绑定通过主干目录仓储写入。每次评估与outbox记录路由快照，组改目标不把历史队列发到新接收者；删除在用组需展示引用并先解绑。提供告警配置总览：表、service筛选、组、规则、启用状态及事件/发送记录；无规则的已绑定表也可见。规则自身保存窗口/固定变量，查询错误/无数据不能误发业务恢复。
+目录表绑定一个可空默认alert_group_id；规则声明source_table_ids，AST实际表集合必须相符。显式group_ids优先，否则继承来源表组；每个episode+group_id只建立一个响应，多组分别接手。unclaimed/acknowledged/resolved/cancelled与业务条件状态分开。接手原子保存owner、来源、时间及期限，取消待发送任务；周期提醒不重建响应。规则暂停/恢复保留episode，判断变化取消旧响应，表路由变更无需提醒即可重建责任关系。
+
+系统渠道type包括webhook/feishu/feishu_app/dingtalk/wecom/pushplus/smtp/aliyun_sms/tencent_sms/huawei_sms/aliyun_voice/tencent_voice。普通群机器人、短信、邮件使用专门接手链接，登录到达告警页后POST；GET不接手。飞书应用卡片经操作者身份校验回调接手，电话接听即接手。受理、投递、接听、接手各自记录。接口、静默、有效时钟、现场限制、统计定义和Hook JSON见[告警响应](alert-response.md)；接入配置见[通知渠道](notification-channels.md)。
+
+组/规则/事件/响应/outbox由告警模块维护；表绑定由目录仓储写入。静默和窗口外暂停通知及无人响应计时，P2按P1通知仍检查P1窗口。组策略保存快照，开放事件显式replan应用当前配置；删除在用组先解绑。联系方式/成员/接入变更发送前再次校验，不改投历史队列。SQL查询错误、无数据不能误发业务恢复。
 
 ## 用户、第三方登录与 AI
 

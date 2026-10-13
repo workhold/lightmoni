@@ -40,6 +40,12 @@ func New(db *sql.DB, dir, externalURL string) (*Auth, error) {
 	if e := migrateKeyTables(db); e != nil {
 		return nil, e
 	}
+	if _, e := db.Exec("CREATE TABLE IF NOT EXISTS user_notification_profiles(user_id TEXT PRIMARY KEY,body TEXT NOT NULL)"); e != nil {
+		return nil, e
+	}
+	if _, e := db.Exec("CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to TEXT NOT NULL)"); e != nil {
+		return nil, e
+	}
 	path := filepath.Join(dir, "master.key")
 	key, e := os.ReadFile(path)
 	if os.IsNotExist(e) {
@@ -269,6 +275,7 @@ func (a *Auth) RegisterPublic(mux *http.ServeMux) {
 	a.registerOAuthPublic(mux)
 }
 func (a *Auth) Register(mux *http.ServeMux) {
+	a.registerNotificationProfiles(mux)
 	mux.HandleFunc("GET /api/v1/auth/me", func(w http.ResponseWriter, r *http.Request) { shared.JSON(w, 200, shared.CurrentUser(r)) })
 	mux.HandleFunc("GET /api/v1/users", func(w http.ResponseWriter, r *http.Request) {
 		if !admin(w, r) {

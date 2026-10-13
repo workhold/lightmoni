@@ -17,6 +17,7 @@ export interface Options {
   intervalMs?: number; requestTimeoutMs?: number; retryMinMs?: number; retryMaxMs?: number;
   queueBytes?: number; queueBatches?: number; bufferBytes?: number; maxBatchBytes?: number;
   cardinalityLimit?: number; maxInstruments?: number; maxAttributes?: number; maxAttributeBytes?: number;
+  /** Optional current-context hook for log/span correlation; read when recording. */
   contextProvider?: () => TraceContext | undefined;
 }
 export interface MetricOptions { unit?: string; description?: string; boundaries?: number[] }
@@ -339,6 +340,7 @@ export class LightMoni {
   updateLogSampling(policies:Record<string,LogSamplingPolicy>):void{if(this.state.closing)throw new Error('SDK closed');this.state.updateLogSampling(policies);}
   setReportingEnabled(enabled:boolean):void{this.state.options.disabled=!enabled;this.state.setReportingDisabled(!enabled||this.state.remoteDisabled);}
   async refreshConfig():Promise<void>{await this.state.refreshConfig();}
+  /** Trace metadata is optional and separate from attrs; no context creates no trace. */
   log(level: string, body: string, attrs: Attributes = {}, context = this.state.options.contextProvider?.()): void {
     if(this.state.closing){this.state.invalid('record after shutdown');return;}if(this.state.stats.reportingDisabled){this.state.stats.disabledRecords++;return;}
     if (encoder.encode(body).length > 64 * 1024) { this.state.invalid("log body exceeded 64 KiB"); return; }

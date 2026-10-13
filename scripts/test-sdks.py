@@ -151,11 +151,18 @@ def validate(fault, attempts, stats):
         hist = [m for m in metrics if m["name"] == "duration"][0]["histogram"]["dataPoints"][0]
         assert hist["bucketCounts"] == ["2", "2", "1"] and hist["count"] == "5" and hist["sum"] == 31
         logs, spans = records(attempts, "logs"), records(attempts, "traces")
-        assert len(logs) == len(spans) == 1
-        assert logs[0]["traceId"] == spans[0]["traceId"] == "a" * 32
-        assert logs[0]["spanId"] == spans[0]["spanId"]
+        assert len(logs) == 3 and len(spans) == 1
+        by_body = {log["body"]["stringValue"]: log for log in logs}
+        for body in ("without trace", "after trace"):
+            assert not by_body[body].get("traceId") and not by_body[body].get("spanId")
+            assert not by_body[body].get("flags")
+        plain_attrs = {a["key"]: a["value"] for a in by_body["without trace"]["attributes"]}
+        assert plain_attrs == {"trace_id": {"stringValue": "attribute-only"}}
+        traced = by_body["中文 fixture"]
+        assert traced["traceId"] == spans[0]["traceId"] == "a" * 32
+        assert traced["spanId"] == spans[0]["spanId"] and traced["flags"] == 1
         assert spans[0]["parentSpanId"] == "b" * 16 and spans[0]["traceState"] == "foo=bar"
-        values = {a["key"]: a["value"] for a in logs[0]["attributes"]}
+        values = {a["key"]: a["value"] for a in traced["attributes"]}
         assert values == {"exact": {"intValue": "9007199254740993"}, "ok": {"boolValue": True}, "fraction": {"doubleValue": .125}}
         assert {b["table"] for b in attempts} == {"http", "app"}
         assert stats["invalid_records"] == 1

@@ -28,7 +28,9 @@ public class Main {
                 require(Client.TraceContext.extract(Map.of("traceparent","00-"+"0".repeat(32)+"-"+"b".repeat(16)+"-01"))==null);
                 require(Client.TraceContext.extract(parent.inject()).equals(parent));
                 var app=mon.withTable("app");
+                app.log("info","without trace",Map.of("trace_id","attribute-only"),null);
                 try(var span=app.startSpan("fixture",Map.of(),parent)){app.log("info","中文 fixture",Map.of("exact",9007199254740993L,"ok",true,"fraction",.125),span.context);}
+                app.log("info","after trace");
                 mon.flush(Duration.ofSeconds(10));counter.add(2,Map.of("window","next"));mon.flush(Duration.ofSeconds(10));
             }
             case "overflow" -> {for(int i=0;i<4;i++)counter.add(1,Map.of("dimension",i));mon.flush(Duration.ofSeconds(10));}

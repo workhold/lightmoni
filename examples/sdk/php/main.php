@@ -24,8 +24,11 @@ case 'fixture':
     $parent=TraceContext::extract(['traceparent'=>'00-'.str_repeat('a',32).'-'.str_repeat('b',16).'-01','tracestate'=>'foo=bar']);
     check(TraceContext::extract(['traceparent'=>'00-'.str_repeat('0',32).'-'.str_repeat('b',16).'-01'])===null);
     check(TraceContext::extract($parent->inject())==$parent);
-    $app=$mon->withTable('app');$span=$app->startSpan('fixture',[],$parent);
+    $app=$mon->withTable('app');
+    $app->log('info','without trace',['trace_id'=>'attribute-only']);
+    $span=$app->startSpan('fixture',[],$parent);
     $app->log('info','中文 fixture',['exact'=>9007199254740993,'ok'=>true,'fraction'=>.125],$span->context);$span->end();
+    $app->log('info','after trace');
     $mon->flush();$counter->add(2,['window'=>'next']);$mon->flush();break;
 case 'overflow':
     for ($i=0;$i<4;$i++) $counter->add(1,['dimension'=>$i]);$mon->flush();break;

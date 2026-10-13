@@ -31,8 +31,10 @@ elif mode == "fixture":
     assert TraceContext.extract({"traceparent": "00-" + "0" * 32 + "-" + "b" * 16 + "-01"}) is None
     assert TraceContext.extract(parent.inject()) == parent
     app = mon.with_table("app")
+    app.log("info", "without trace", {"trace_id": "attribute-only"})
     with app.start_span("fixture", parent=parent) as span:
-        app.log("info", "中文 fixture", {"exact": 9007199254740993, "ok": True, "fraction": .125}, span.context)
+        app.log("info", "中文 fixture", {"exact": 9007199254740993, "ok": True, "fraction": .125})
+    app.log("info", "after trace")
     mon.flush()
     counter.add(2, {"window": "next"})
     mon.flush()

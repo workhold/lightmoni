@@ -12,11 +12,13 @@ import (
 	"net/mail"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
 func (m *Module) Register(mux *http.ServeMux) {
+	m.registerResponseAPI(mux)
 	mux.HandleFunc("GET /api/v1/alerts/groups", func(w http.ResponseWriter, r *http.Request) { v, e := m.groups(r.Context()); respond(w, v, e) })
 	mux.HandleFunc("POST /api/v1/alerts/groups", m.saveGroup)
 	mux.HandleFunc("PUT /api/v1/alerts/groups/{id}", m.saveGroup)
@@ -127,6 +129,10 @@ func (m *Module) saveGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g.Name = strings.TrimSpace(g.Name)
+	if e := m.validateGroupResponse(r.Context(), &g); e != nil {
+		shared.Error(w, 400, e.Error())
+		return
+	}
 	if g.Name == "" {
 		shared.Error(w, 400, "告警组名称不能为空")
 		return
@@ -174,6 +180,10 @@ func validateRecipient(typ string, p *Recipient) error {
 	p.Value = strings.TrimSpace(p.Value)
 	sort.Strings(p.Mentions)
 	switch typ {
+	case "feishu_app":
+		if p.Kind != "feishu_user" || p.Value == "" {
+			return errors.New("飞书企业应用目标需要用户open_id")
+		}
 	case "smtp":
 		if p.Kind != "email" {
 			return errors.New("SMTP目标必须是邮箱")
@@ -183,9 +193,9 @@ func validateRecipient(typ string, p *Recipient) error {
 			return errors.New("invalid email")
 		}
 		p.Value = a.Address
-	case "aliyun_sms":
+	case "aliyun_sms", "aliyun_voice", "tencent_sms", "tencent_voice", "huawei_sms":
 		if p.Kind != "phone" || len(p.Value) < 8 || strings.ContainsAny(p.Value, " ,\r\n") {
-			return errors.New("短信目标必须是单个手机号")
+			return errors.New("短信/电话目标必须是单个号码")
 		}
 		for i, c := range p.Value {
 			if c < '0' || c > '9' {
@@ -193,6 +203,18 @@ func validateRecipient(typ string, p *Recipient) error {
 					return errors.New("invalid phone")
 				}
 			}
+		}
+		if len(strings.TrimPrefix(p.Value, "+")) > 15 {
+			return errors.New("号码不能超过15位")
+		}
+		if typ == "tencent_sms" || typ == "tencent_voice" || typ == "huawei_sms" {
+			phone, e := internationalPhone(p.Value)
+			if e != nil {
+				return e
+			}
+			p.Value = phone
+		} else if strings.HasPrefix(p.Value, "+86") && len(p.Value) == 14 {
+			p.Value = strings.TrimPrefix(p.Value, "+86")
 		}
 	case "pushplus":
 		if p.Kind != "self" && p.Kind != "topic" && p.Kind != "friend" {
@@ -238,8 +260,8 @@ func (m *Module) deleteGroup(w http.ResponseWriter, r *http.Request) {
 	respond(w, map[string]bool{"ok": true}, e)
 }
 
-var secretFields = map[string]bool{"url": true, "secret": true, "token": true, "password": true, "access_key": true, "access_key_id": true, "access_key_secret": true, "headers": true}
-var channelTypes = map[string]bool{"webhook": true, "feishu": true, "dingtalk": true, "wecom": true, "pushplus": true, "smtp": true, "aliyun_sms": true}
+var secretFields = map[string]bool{"url": true, "secret": true, "token": true, "password": true, "access_key": true, "access_key_id": true, "access_key_secret": true, "headers": true, "secret_id": true, "secret_key": true, "app_key": true, "app_secret": true, "callback_token": true, "verification_token": true, "encrypt_key": true}
+var channelTypes = map[string]bool{"webhook": true, "feishu": true, "feishu_app": true, "dingtalk": true, "wecom": true, "pushplus": true, "smtp": true, "aliyun_sms": true, "aliyun_voice": true, "tencent_sms": true, "tencent_voice": true, "huawei_sms": true}
 
 func (m *Module) saveChannel(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
@@ -267,7 +289,7 @@ func (m *Module) saveChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	sec := map[string]string{}
 	for k, v := range old.Config {
-		if secretFields[k] {
+		if old.Type == c.Type && secretFields[k] {
 			sec[k] = v
 		}
 	}
@@ -285,6 +307,10 @@ func (m *Module) saveChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	for k, v := range sec {
 		combined[k] = v
+	}
+	if (c.Type == "aliyun_voice" || c.Type == "tencent_voice" || c.Type == "feishu_app") && sec["callback_token"] == "" {
+		sec["callback_token"] = id() + id()
+		combined["callback_token"] = sec["callback_token"]
 	}
 	if e := validateChannel(c.Type, combined); e != nil {
 		shared.Error(w, 400, e.Error())
@@ -304,7 +330,7 @@ func (m *Module) saveChannel(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	_, e = tx.Exec("INSERT INTO alert_channels(id,name,body,secret) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,body=excluded.body,secret=excluded.secret", c.ID, c.Name, encode(c), cipher)
 	changedDestination := old.ID != "" && old.Type != c.Type
-	for _, key := range []string{"url", "endpoint", "token", "push_channel", "host", "username", "from"} {
+	for _, key := range []string{"url", "endpoint", "token", "push_channel", "host", "port", "tls", "username", "from", "access_key_id", "access_key_secret", "secret_id", "secret_key", "app_key", "app_secret", "sdk_app_id", "region", "sign_name", "template_code", "template_id", "template_params", "called_show_number", "sender", "signature", "play_times"} {
 		changedDestination = changedDestination || old.ID != "" && old.Config[key] != combined[key]
 	}
 	if e == nil && (changedDestination || !c.Enabled) {
@@ -319,6 +345,21 @@ func (m *Module) saveChannel(w http.ResponseWriter, r *http.Request) {
 	respond(w, c, e)
 }
 func validateChannel(typ string, c map[string]string) error {
+	if value := c["rate_per_minute"]; value != "" {
+		rate, e := strconv.Atoi(value)
+		if e != nil || rate < 1 || rate >= 600 {
+			return errors.New("每分钟发送上限必须在1到599之间")
+		}
+	}
+	if endpoint := c["endpoint"]; endpoint != "" {
+		u, e := url.Parse(endpoint)
+		if e != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
+			return errors.New("接口地址必须是有效的HTTP(S)地址")
+		}
+		if (typ == "tencent_sms" || typ == "tencent_voice") && ((u.Path != "" && u.Path != "/") || u.RawQuery != "") {
+			return errors.New("腾讯云接口地址必须使用根路径且不含查询参数")
+		}
+	}
 	switch typ {
 	case "smtp":
 		if c["host"] == "" || c["from"] == "" {
@@ -330,12 +371,31 @@ func validateChannel(typ string, c map[string]string) error {
 		if c["tls"] != "starttls" && c["tls"] != "tls" && c["tls"] != "none" {
 			return errors.New("SMTP TLS mode is starttls/tls/none")
 		}
+		if c["port"] != "" {
+			port, e := strconv.Atoi(c["port"])
+			if e != nil || port < 1 || port > 65535 {
+				return errors.New("SMTP端口必须在1到65535之间")
+			}
+		}
 	case "aliyun_sms":
 		for _, k := range []string{"access_key_id", "access_key_secret", "sign_name", "template_code"} {
 			if c[k] == "" {
 				return fmt.Errorf("SMS requires %s", k)
 			}
 		}
+		return validateTemplateParams(c["template_params"], false)
+	case "feishu_app":
+		if c["app_id"] == "" || c["app_secret"] == "" || c["verification_token"] == "" {
+			return errors.New("飞书企业应用需要App ID、App Secret和Verification Token")
+		}
+		if base := c["api_base"]; base != "" {
+			u, e := url.Parse(base)
+			if e != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+				return errors.New("无效的飞书API地址")
+			}
+		}
+	case "aliyun_voice", "tencent_sms", "tencent_voice", "huawei_sms":
+		return validatePhoneChannel(typ, c)
 	case "pushplus":
 		if c["token"] == "" {
 			return errors.New("pushplus token required")
@@ -361,6 +421,10 @@ func (m *Module) deleteChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, g := range gs {
+		if includes(g.ChannelIDs, r.PathValue("id")) {
+			shared.Error(w, 409, "请先解除告警组中的通知接入引用")
+			return
+		}
 		for _, t := range g.Targets {
 			if t.ChannelID == r.PathValue("id") {
 				shared.Error(w, 409, "请先移除告警组中的渠道目标")
@@ -372,6 +436,16 @@ func (m *Module) deleteChannel(w http.ResponseWriter, r *http.Request) {
 	respond(w, map[string]bool{"ok": true}, e)
 }
 func (m *Module) validateRule(ctx context.Context, v *Rule) error {
+	if v.EvidenceProfile == nil {
+		m.autoEvidenceProfile(ctx, v)
+	}
+	if v.Severity != "" && !includes([]string{"P0", "P1", "P2", "P3", "warning", "critical"}, v.Severity) {
+		return errors.New("告警级别必须为P0至P3")
+	}
+	v.Severity = priority(v.Severity)
+	if e := m.validateEvidenceProfile(ctx, v.EvidenceProfile); e != nil {
+		return e
+	}
 	if v.Kind != "metric" && v.Kind != "sql" && v.Kind != "log" {
 		return errors.New("invalid alert kind")
 	}
@@ -519,6 +593,13 @@ func (m *Module) saveRule(w http.ResponseWriter, r *http.Request) {
 		_, e = tx.Exec("UPDATE alert_states SET body=? WHERE rule_id=? AND fingerprint=?", encode(s), v.ID, s.Fingerprint)
 	}
 	if e == nil && (measurementChanged || !v.Enabled) {
+		reason := "规则判断已变更"
+		if !v.Enabled {
+			reason = "规则已禁用"
+		}
+		e = m.cancelRuleResponsesTx(tx, v.ID, reason)
+	}
+	if e == nil && (measurementChanged || !v.Enabled) {
 		_, e = tx.Exec("UPDATE alert_outbox SET status='cancelled' WHERE status IN ('queued','retry') AND event_id IN (SELECT id FROM alert_events WHERE rule_id=?)", v.ID)
 	}
 	if e == nil {
@@ -535,6 +616,7 @@ func ruleMeasurement(r Rule) string {
 	r.Unit = ""
 	r.RepeatSeconds = 0
 	r.SilenceUntil = ""
+	r.EvidenceProfile = nil
 	return encode(r)
 }
 func (m *Module) deleteRule(w http.ResponseWriter, r *http.Request) {
@@ -547,6 +629,9 @@ func (m *Module) deleteRule(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	_, e = tx.Exec("DELETE FROM alert_rules WHERE id=?", r.PathValue("id"))
+	if e == nil {
+		e = m.cancelRuleResponsesTx(tx, r.PathValue("id"), "规则已删除")
+	}
 	if e == nil {
 		_, e = tx.Exec("DELETE FROM alert_states WHERE rule_id=?", r.PathValue("id"))
 	}

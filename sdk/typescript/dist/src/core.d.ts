@@ -46,6 +46,7 @@ export interface Options {
     maxInstruments?: number;
     maxAttributes?: number;
     maxAttributeBytes?: number;
+    /** Optional current-context hook for log/span correlation; read when recording. */
     contextProvider?: () => TraceContext | undefined;
 }
 export interface MetricOptions {
@@ -222,6 +223,7 @@ export declare class LightMoni {
     updateLogSampling(policies: Record<string, LogSamplingPolicy>): void;
     setReportingEnabled(enabled: boolean): void;
     refreshConfig(): Promise<void>;
+    /** Trace metadata is optional and separate from attrs; no context creates no trace. */
     log(level: string, body: string, attrs?: Attributes, context?: TraceContext | undefined): void;
     startSpan(name: string, attrs?: Attributes, parent?: TraceContext | undefined): Span;
     flush({ timeoutMs }?: {

@@ -20,11 +20,19 @@ type Target struct {
 	Recipient Recipient `json:"recipient"`
 }
 type Group struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Enabled  bool     `json:"enabled"`
-	Targets  []Target `json:"targets"`
-	Revision int      `json:"revision"`
+	ID         string                    `json:"id"`
+	Name       string                    `json:"name"`
+	Enabled    bool                      `json:"enabled"`
+	Targets    []Target                  `json:"targets"`
+	Revision   int                       `json:"revision"`
+	Members    []string                  `json:"members"`
+	Primary    []string                  `json:"primary"`
+	Backup     []string                  `json:"backup"`
+	Fallback   []string                  `json:"fallback"`
+	Timezone   string                    `json:"timezone"`
+	ChannelIDs []string                  `json:"channel_ids"`
+	Schedule   OnCallSchedule            `json:"schedule"`
+	Policies   map[string]PriorityPolicy `json:"policies"`
 }
 type Channel struct {
 	ID        string            `json:"id"`
@@ -64,6 +72,7 @@ type Rule struct {
 	NotifyHealth     bool                        `json:"notify_health"`
 	Severity         string                      `json:"severity"`
 	SilenceUntil     string                      `json:"silence_until,omitempty"`
+	EvidenceProfile  *EvidenceProfile            `json:"evidence_profile,omitempty"`
 }
 
 // PanelCondition keeps the chart selection editable without exposing generated SQL.
@@ -107,26 +116,35 @@ type Event struct {
 	Range          shared.Range `json:"range"`
 }
 type Delivery struct {
-	ID          string    `json:"id"`
-	EventID     string    `json:"event_id"`
-	RuleID      string    `json:"rule_id"`
-	GroupIDs    []string  `json:"group_ids"`
-	TableIDs    []string  `json:"table_ids"`
-	ChannelID   string    `json:"channel_id"`
-	Recipient   Recipient `json:"recipient"`
-	Status      string    `json:"status"`
-	Attempts    int       `json:"attempts"`
-	NextAttempt string    `json:"next_attempt"`
-	CreatedAt   string    `json:"created_at"`
-	UpdatedAt   string    `json:"updated_at"`
-	SentAt      string    `json:"sent_at,omitempty"`
-	Error       string    `json:"error"`
-	ProviderID  string    `json:"provider_id"`
-	Payload     Event     `json:"payload"`
+	ID             string    `json:"id"`
+	EventID        string    `json:"event_id"`
+	RuleID         string    `json:"rule_id"`
+	GroupIDs       []string  `json:"group_ids"`
+	TableIDs       []string  `json:"table_ids"`
+	ChannelID      string    `json:"channel_id"`
+	Recipient      Recipient `json:"recipient"`
+	Status         string    `json:"status"`
+	Attempts       int       `json:"attempts"`
+	NextAttempt    string    `json:"next_attempt"`
+	CreatedAt      string    `json:"created_at"`
+	UpdatedAt      string    `json:"updated_at"`
+	SentAt         string    `json:"sent_at,omitempty"`
+	Error          string    `json:"error"`
+	ProviderID     string    `json:"provider_id"`
+	Payload        Event     `json:"payload"`
+	ResponseID     string    `json:"response_id,omitempty"`
+	Stage          string    `json:"stage,omitempty"`
+	UserID         string    `json:"user_id,omitempty"`
+	UserIDs        []string  `json:"user_ids,omitempty"`
+	Priority       string    `json:"priority,omitempty"`
+	AckURL         string    `json:"ack_url,omitempty"`
+	Generation     int       `json:"generation,omitempty"`
+	DeliveryStatus string    `json:"delivery_status,omitempty"`
 }
 type Route struct {
 	Target   Target   `json:"target"`
 	GroupIDs []string `json:"group_ids"`
+	UserID   string   `json:"user_id,omitempty"`
 }
 type Preview struct {
 	States   []State              `json:"states"`

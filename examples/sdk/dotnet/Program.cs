@@ -24,7 +24,9 @@ switch (mode)
         Require(TraceContext.Extract(new Dictionary<string, string> { ["traceparent"] = "00-" + new string('0', 32) + "-" + new string('b', 16) + "-01" }) == null);
         Require(TraceContext.Extract(parent.Inject()) == parent);
         var app = mon.WithTable("app");
+        app.Log("info", "without trace", A("trace_id", "attribute-only"));
         using (var span = app.StartSpan("fixture", parent: parent)) app.Log("info", "中文 fixture", A("exact", 9007199254740993L, "ok", true, "fraction", .125), span.Context);
+        app.Log("info", "after trace");
         await mon.FlushAsync(); counter.Add(2, A("window", "next")); await mon.FlushAsync(); break;
     case "overflow":
         for (int i = 0; i < 4; i++) counter.Add(1, A("dimension", i));

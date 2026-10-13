@@ -35,7 +35,11 @@ func New(deps shared.Dependencies) (*Module, error) {
 	if err = normalizeQueueTimes(deps.DB); err != nil {
 		return nil, err
 	}
-	return &Module{deps: deps, client: &http.Client{Timeout: 10 * time.Second}, now: time.Now}, nil
+	m := &Module{deps: deps, client: &http.Client{Timeout: 10 * time.Second}, now: time.Now}
+	if err = m.initResponses(); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 func listBodies[T any](ctx context.Context, db *sql.DB, query string, args ...any) ([]T, error) {
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -125,8 +129,20 @@ func (m *Module) route(ctx context.Context, r Rule) ([]Route, []string, error) {
 	}
 	for _, gid := range groupIDs {
 		g, ok := gm[gid]
-		if !ok || !g.Enabled || len(g.Targets) == 0 {
+		if !ok || !g.Enabled || (len(g.Targets) == 0 && len(g.Members) == 0) {
 			warnings = append(warnings, gid+": 未配置有效告警组/目标")
+			continue
+		}
+		if len(g.Members) > 0 {
+			users := m.activeMembers(ctx, g.onCall(m.now()).Primary)
+			targets, notes, e := m.responseTargets(ctx, g, priority(r.Severity), users)
+			if e != nil {
+				return nil, nil, e
+			}
+			warnings = append(warnings, notes...)
+			for _, t := range targets {
+				routes = append(routes, Route{Target: t.Target, GroupIDs: []string{g.ID}, UserID: t.UserID})
+			}
 			continue
 		}
 		for _, target := range g.Targets {
@@ -159,13 +175,20 @@ func (m *Module) route(ctx context.Context, r Rule) ([]Route, []string, error) {
 				}
 			} else {
 				index[key] = len(routes)
-				routes = append(routes, Route{target, []string{g.ID}})
+				routes = append(routes, Route{Target: target, GroupIDs: []string{g.ID}})
 			}
 		}
 	}
 	return routes, warnings, nil
 }
 func (m *Module) updateDelivery(ctx context.Context, d Delivery) error {
-	_, e := m.deps.DB.ExecContext(ctx, "UPDATE alert_outbox SET status=?,next_attempt=?,body=? WHERE id=?", d.Status, d.NextAttempt, encode(d), d.ID)
+	// A native phone callback can complete while the sending HTTP request is still
+	// running. Preserve that monotonic fact when the request later saves its result.
+	_, e := m.deps.DB.ExecContext(ctx, `UPDATE alert_outbox SET
+	status=CASE WHEN json_extract(body,'$.delivery_status')='answered' THEN 'confirmed' ELSE ? END,
+	next_attempt=CASE WHEN json_extract(body,'$.delivery_status')='answered' THEN '' ELSE ? END,
+	body=CASE WHEN json_extract(body,'$.delivery_status')='answered' THEN
+	 json_set(?,'$.status','confirmed','$.next_attempt','','$.delivery_status','answered','$.provider_id',json_extract(body,'$.provider_id'))
+	 ELSE ? END WHERE id=?`, d.Status, d.NextAttempt, encode(d), encode(d), d.ID)
 	return e
 }

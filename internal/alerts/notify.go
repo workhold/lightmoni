@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/mail"
 	"net/smtp"
 	"net/textproto"
 	"net/url"
@@ -36,7 +37,7 @@ type sendResult struct {
 }
 
 func rateKey(c Channel) string {
-	credential := c.Config["token"] + c.Config["access_key_id"] + c.Config["username"]
+	credential := c.Config["token"] + c.Config["access_key_id"] + c.Config["username"] + c.Config["secret_id"] + c.Config["app_key"]
 	if credential == "" {
 		credential = c.Config["url"]
 	}
@@ -86,7 +87,7 @@ func (m *Module) SendPending(ctx context.Context) (resultErr error) {
 	}()
 	// Terminal accepted records and not-yet-due retries must not occupy the worker batch.
 	nowTick := m.now()
-	ds, e := listBodies[Delivery](ctx, m.deps.DB, "SELECT body FROM alert_outbox WHERE status IN ('queued','retry','accepted') AND next_attempt<>'' AND next_attempt<=? ORDER BY created_at,rowid LIMIT 100", stamp(nowTick))
+	ds, e := listBodies[Delivery](ctx, m.deps.DB, "SELECT body FROM alert_outbox WHERE status IN ('queued','retry','accepted') AND next_attempt<>'' AND next_attempt<=? ORDER BY CASE json_extract(body,'$.priority') WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 WHEN 'P3' THEN 3 ELSE 4 END,created_at,rowid LIMIT 100", stamp(nowTick))
 	if e != nil {
 		return e
 	}
@@ -126,7 +127,7 @@ func (m *Module) SendPending(ctx context.Context) (resultErr error) {
 			continue
 		}
 		if d.Status == "accepted" {
-			if c.Type != "aliyun_sms" && (c.Type != "pushplus" || c.Config["access_key"] == "") {
+			if c.Type != "aliyun_sms" && c.Type != "aliyun_voice" && (c.Type != "pushplus" || c.Config["access_key"] == "") {
 				d.NextAttempt = ""
 				if e = m.updateDelivery(ctx, d); e != nil {
 					return e
@@ -140,6 +141,16 @@ func (m *Module) SendPending(ctx context.Context) (resultErr error) {
 			accountSent[key] = true
 			if e = launch(func() error {
 				result := m.receipt(ctx, c, d)
+				if result.Status == "answered" {
+					d.DeliveryStatus = "answered"
+					d.Status = "confirmed"
+					d.NextAttempt = ""
+					if e := m.updateDelivery(ctx, d); e != nil {
+						return e
+					}
+					m.claimAnsweredDelivery(ctx, c, d, m.now())
+					return nil
+				}
 				if result.Status != "" {
 					d.Status = result.Status
 					d.Error = result.Error
@@ -152,7 +163,20 @@ func (m *Module) SendPending(ctx context.Context) (resultErr error) {
 			}
 			continue
 		}
-		if d.RuleID != "" {
+		if d.ResponseID != "" {
+			valid, reason, e := m.deliveryAllowed(ctx, d)
+			if e != nil {
+				return e
+			}
+			if !valid {
+				d.Status = "cancelled"
+				d.Error = reason
+				if e = m.updateDelivery(ctx, d); e != nil {
+					return e
+				}
+				continue
+			}
+		} else if d.RuleID != "" {
 			rules, e := m.rules(ctx)
 			if e != nil {
 				return e
@@ -255,7 +279,7 @@ func (m *Module) sendDelivery(ctx context.Context, c Channel, d Delivery, key st
 	d.UpdatedAt = stamp(m.now())
 	if d.Status == "accepted" {
 		d.NextAttempt = ""
-		if c.Type == "aliyun_sms" || c.Type == "pushplus" && c.Config["access_key"] != "" {
+		if c.Type == "aliyun_sms" || c.Type == "aliyun_voice" || c.Type == "pushplus" && c.Config["access_key"] != "" {
 			d.NextAttempt = stamp(now.Add(time.Minute))
 		}
 	}
@@ -271,33 +295,41 @@ func (m *Module) sendDelivery(ctx context.Context, c Channel, d Delivery, key st
 			d.NextAttempt = stamp(now.Add(wait))
 		}
 	}
-	return m.updateDelivery(ctx, d)
+	if e := m.updateDelivery(ctx, d); e != nil {
+		return e
+	}
+	return m.recordNotified(ctx, d, m.now())
 }
 func (m *Module) send(ctx context.Context, c Channel, d Delivery) sendResult {
+	switch c.Type {
+	case "aliyun_voice":
+		return m.sendAliyunVoice(ctx, c, d)
+	case "tencent_sms", "tencent_voice":
+		return m.sendTencent(ctx, c, d)
+	case "huawei_sms":
+		return m.sendHuaweiSMS(ctx, c, d)
+	}
 	if c.Type == "smtp" {
+		d.Payload.Message += m.evidenceText(ctx, d)
+		if d.AckURL != "" {
+			d.Payload.Message += "\n开始处理：" + d.AckURL
+		}
 		return m.sendSMTP(ctx, c, d)
+	}
+	if c.Type == "feishu_app" {
+		return m.sendFeishuApp(ctx, c, d)
 	}
 	if c.Type == "aliyun_sms" {
 		params := map[string]string{"PhoneNumbers": d.Recipient.Value, "SignName": c.Config["sign_name"], "TemplateCode": c.Config["template_code"]}
-		vars := map[string]string{"rule": d.Payload.RuleName, "status": d.Payload.Kind, "value": d.Payload.State.Value}
-		if mapping := c.Config["template_params"]; mapping != "" {
-			custom := map[string]string{}
-			if json.Unmarshal([]byte(mapping), &custom) != nil {
-				return sendResult{Status: "failed", Error: "invalid SMS template_params JSON"}
-			}
-			for k, v := range custom {
-				v = strings.ReplaceAll(v, "{{rule}}", vars["rule"])
-				v = strings.ReplaceAll(v, "{{status}}", vars["status"])
-				v = strings.ReplaceAll(v, "{{value}}", vars["value"])
-				custom[k] = v
-			}
-			vars = custom
+		vars, e := objectTemplateParams(c.Config["template_params"], d)
+		if e != nil {
+			return sendResult{Status: "failed", Error: e.Error()}
 		}
 		params["TemplateParam"] = encode(vars)
 		return m.smsRequest(ctx, c, "SendSms", params)
 	}
 	endpoint := c.Config["url"]
-	text := d.Payload.Message
+	text := d.Payload.Message + m.evidenceText(ctx, d)
 	if m.deps.ExternalURL != "" {
 		text += "\n" + strings.TrimRight(m.deps.ExternalURL, "/") + "/alerts"
 	}
@@ -309,6 +341,9 @@ func (m *Module) send(ctx context.Context, c Channel, d Delivery) sendResult {
 			text += "\n<at user_id=\"" + html.EscapeString(mention) + "\"></at>"
 		}
 		body = map[string]any{"msg_type": "text", "content": map[string]string{"text": text}}
+		if d.AckURL != "" {
+			body = map[string]any{"msg_type": "interactive", "card": responseCard(d, text, false)}
+		}
 		if c.Config["secret"] != "" {
 			ts := strconv.FormatInt(now.Unix(), 10)
 			body["timestamp"] = ts
@@ -318,13 +353,16 @@ func (m *Module) send(ctx context.Context, c Channel, d Delivery) sendResult {
 		mobiles := []string{}
 		users := []string{}
 		for _, v := range d.Recipient.Mentions {
-			if _, e := strconv.ParseUint(v, 10, 64); e == nil {
+			if _, e := strconv.ParseUint(v, 10, 64); e == nil && len(v) == 11 && strings.HasPrefix(v, "1") {
 				mobiles = append(mobiles, v)
 			} else {
 				users = append(users, v)
 			}
 		}
 		body = map[string]any{"msgtype": "text", "text": map[string]string{"content": text}, "at": map[string]any{"atMobiles": mobiles, "atUserIds": users}}
+		if d.AckURL != "" {
+			body = map[string]any{"msgtype": "actionCard", "actionCard": map[string]any{"title": d.Payload.RuleName, "text": text, "singleTitle": "开始处理", "singleURL": d.AckURL}, "at": map[string]any{"atMobiles": mobiles, "atUserIds": users}}
+		}
 		if c.Config["secret"] != "" {
 			u, e := url.Parse(endpoint)
 			if e != nil {
@@ -339,6 +377,12 @@ func (m *Module) send(ctx context.Context, c Channel, d Delivery) sendResult {
 		}
 	case "wecom":
 		body = map[string]any{"msgtype": "text", "text": map[string]any{"content": text, "mentioned_list": d.Recipient.Mentions}}
+		if d.AckURL != "" {
+			for _, mention := range d.Recipient.Mentions {
+				text += "\n<@" + html.EscapeString(mention) + ">"
+			}
+			body = map[string]any{"msgtype": "markdown", "markdown": map[string]string{"content": text + "\n[开始处理](" + d.AckURL + ")"}}
+		}
 	case "pushplus":
 		endpoint = c.Config["endpoint"]
 		if endpoint == "" {
@@ -351,7 +395,7 @@ func (m *Module) send(ctx context.Context, c Channel, d Delivery) sendResult {
 			body["to"] = d.Recipient.Value
 		}
 	default:
-		body = map[string]any{"event_id": d.EventID, "notification_id": d.ID, "event": d.Payload, "recipient": d.Recipient}
+		body = map[string]any{"event_id": d.EventID, "notification_id": d.ID, "event": d.Payload, "recipient": d.Recipient, "response_id": d.ResponseID, "ack_url": d.AckURL, "priority": d.Priority}
 	}
 	raw := []byte(encode(body))
 	req, e := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
@@ -431,6 +475,9 @@ func (m *Module) send(ctx context.Context, c Channel, d Delivery) sendResult {
 	return sendResult{Status: "accepted", ProviderID: providerID}
 }
 func (m *Module) receipt(ctx context.Context, c Channel, d Delivery) sendResult {
+	if c.Type == "aliyun_voice" && d.ProviderID != "" {
+		return m.aliyunVoiceReceipt(ctx, c, d)
+	}
 	if c.Type == "aliyun_sms" && d.ProviderID != "" {
 		return m.smsRequest(ctx, c, "QuerySendDetails", map[string]string{"PhoneNumber": d.Recipient.Value, "BizId": d.ProviderID, "SendDate": parse(d.CreatedAt).UTC().Format("20060102"), "PageSize": "10", "CurrentPage": "1"})
 	}
@@ -587,11 +634,21 @@ func (m *Module) sendSMTP(ctx context.Context, c Channel, d Delivery) sendResult
 		}
 	}
 	if user := c.Config["username"]; user != "" {
-		if e = client.Auth(smtp.PlainAuth("", user, c.Config["password"], host)); e != nil {
+		var auth smtp.Auth = smtp.PlainAuth("", user, c.Config["password"], host)
+		_, methods := client.Extension("AUTH")
+		methods = " " + strings.ToUpper(methods) + " "
+		if !strings.Contains(methods, " PLAIN ") && strings.Contains(methods, " LOGIN ") {
+			auth = &smtpLoginAuth{username: user, password: c.Config["password"], host: host}
+		}
+		if e = client.Auth(auth); e != nil {
 			return sendResult{Status: "failed", Error: "SMTP认证失败"}
 		}
 	}
-	if e = client.Mail(c.Config["from"]); e == nil {
+	sender, e := mail.ParseAddress(c.Config["from"])
+	if e != nil {
+		return sendResult{Status: "failed", Error: "无效的发件邮箱"}
+	}
+	if e = client.Mail(sender.Address); e == nil {
 		e = client.Rcpt(d.Recipient.Value)
 	}
 	if e != nil {
@@ -613,4 +670,34 @@ func (m *Module) sendSMTP(ctx context.Context, c Channel, d Delivery) sendResult
 	}
 	_ = client.Quit()
 	return sendResult{Status: "accepted"}
+}
+
+// Several domestic mailbox providers only advertise AUTH LOGIN.
+type smtpLoginAuth struct {
+	username, password, host string
+	step                     int
+}
+
+func (a *smtpLoginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if server.Name != a.host || !server.TLS && server.Name != "localhost" && server.Name != "127.0.0.1" && server.Name != "::1" {
+		return "", nil, errors.New("SMTP LOGIN requires TLS and the configured host")
+	}
+	a.step = 0
+	return "LOGIN", nil, nil
+}
+
+func (a *smtpLoginAuth) Next(challenge []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+	prompt := strings.ToLower(strings.TrimSpace(string(challenge)))
+	if a.step == 0 && (prompt == "username:" || prompt == "user name:") {
+		a.step++
+		return []byte(a.username), nil
+	}
+	if a.step == 1 && prompt == "password:" {
+		a.step++
+		return []byte(a.password), nil
+	}
+	return nil, errors.New("unexpected SMTP LOGIN challenge")
 }

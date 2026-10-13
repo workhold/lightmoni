@@ -82,7 +82,7 @@ await mon.flush({ timeoutMs: 5000 });
 await mon.shutdown({ timeoutMs: 5000 });
 ```
 
-样例是可运行工程；HTTP 请求可使用 `ExtractHTTP` / `InjectHTTP`（Go）及 `extractTrace` / `injectTrace`（TypeScript）。日志的 `trace_id`、`span_id` 从当前上下文读取，字段与日志正文分开。没有活动 span 时这些字段为空，不能为每条日志凭空创建 trace。Node 使用 `withTrace` 的 AsyncLocalStorage 传播上下文。自动框架埋点尚未交付，应作为可选入口，不能强制手工指标使用者引入全部框架适配器。
+样例是可运行工程；HTTP 请求可使用 `ExtractHTTP` / `InjectHTTP`（Go）及 `extractTrace` / `injectTrace`（TypeScript）。日志预留独立的可选 `trace_id`、`span_id`，业务代码可以不传 trace 上下文；没有有效上下文时日志正常上报，存储字段为空，不能为每条日志凭空创建 trace。Node 使用 `withTrace` 的 AsyncLocalStorage 传播上下文，Python 使用 contextvars；其余语言支持显式上下文。关联在日志调用时捕获并随批次冻结。后续通过请求/消息入口、上下文作用域、出站传播和日志框架适配器自动注入，方案见 [SDK 日志 trace 约定](../../sdk/README.md#日志-trace-字段预留)。自动框架埋点尚未交付，应作为可选入口，不能强制手工指标使用者引入全部框架适配器。
 
 ## 指标语义
 
@@ -161,6 +161,7 @@ HTTP 处理遵循 [OTLP 规范](https://opentelemetry.io/docs/specs/otlp/)：网
 | 永久拒绝与部分成功 | `400/401/413` 等按契约停止同批重试，诊断可见；标准 partial_success 不重发已经接受的整批 |
 | 嵌入 Agent | 主机 collector 使用相同 SDK API，exporter 直接提交队列；无需启动本机 HTTP；不会递归产生遥测 |
 | 跨语言协议 | Go 与 Node 夹具经过同一解码/存储路径，类型、时间、trace 字段与维度语义一致；失败案例一致 |
+| 日志 trace 预留 | 八种 SDK 不传 trace 仍正常上报，固定 trace/span 列留空；有效上下文与正文/属性分离，无上下文日志不自动生成 trace，作用域退出不串链；冻结发送保留记录时上下文 |
 | 浏览器 | 私有 Key 不进入包；CORS、公开权限、批次限制、公开凭证失效、页面关闭尽力发送行为有真实验证 |
 
 为上述数据正确性、故障边界和跨语言行为编写有效测试；不要只断言封装调用了某个 mock 方法。基准结果应报告环境、输入、队列上限、吞吐/延迟和内存，不能把期望数字写成已经验证的性能承诺。
