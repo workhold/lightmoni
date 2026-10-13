@@ -6,7 +6,7 @@ import timezone from 'dayjs/plugin/timezone';
 import {ConfigProvider,Alert,App,Button,Card,DatePicker,Form,Input,InputNumber,Modal,Select,Space,Switch,Table,Tabs,Tag,TimePicker} from '../../shared/ui';
 import {api,post} from '../../shared/api';
 import {channelLabels,type Channel} from './channels';
-import {groupDefaults,methods,priorities,weekdays,type PriorityPolicy,type Responder,type ResponseGroup} from './response-model';
+import {normalizeResponseGroup,methods,priorities,weekdays,type PriorityPolicy,type Responder,type ResponseGroup} from './response-model';
 dayjs.extend(utc);dayjs.extend(timezone);
 
 export default function ResponseGroups({groups,channels,onSaved}:{groups:ResponseGroup[];channels:Channel[];onSaved:()=>void}) {
@@ -15,7 +15,7 @@ export default function ResponseGroups({groups,channels,onSaved}:{groups:Respons
  const names=(ids?:string[])=>ids?.map(id=>people.find(p=>p.id===id)?.name??id).join('、')||'未配置';
  const allOptions=people.filter(p=>p.active).map(p=>({value:p.id,label:p.name+(!p.has_phone?' · 无手机号':'')}));
  const memberOptions=allOptions.filter(p=>edit?.members.includes(p.value));
- function open(group?:ResponseGroup){const value={...groupDefaults(defaults),...group};value.schedule={...groupDefaults(defaults).schedule,...group?.schedule};value.policies={...structuredClone(defaults),...group?.policies};setEdit(value);setPreview([]);setError('')}
+ function open(group?:ResponseGroup){setEdit(normalizeResponseGroup(group,defaults));setPreview([]);setError('')}
  async function save(){if(!edit)return;if(!edit.members.length){setError('请选择组成员');return};setBusy(true);setError('');try{await api('/alerts/groups'+(edit.id?'/'+edit.id:''),{method:edit.id?'PUT':'POST',body:JSON.stringify({...edit,targets:[],schedule:{...edit.schedule,timezone:edit.timezone}})});setEdit(undefined);void message.success('告警组、排班和响应策略已保存');onSaved()}catch(e){setError(String(e))}finally{setBusy(false)}}
  function policy(key:string,field:keyof PriorityPolicy,value:unknown){if(edit)setEdit({...edit,policies:{...edit.policies,[key]:{...edit.policies[key],[field]:value}}})}
  const primaryBackup=(primary:string[],backup:string[],set:(a:string[],b:string[])=>void)=><div className="lm-rule-grid"><Form.Item label="主班（同时通知，可多人）"><Select aria-label="主班人员" mode="multiple" value={primary} options={memberOptions} onChange={v=>set(v,backup)}/></Form.Item><Form.Item label="备班（超时后通知，可多人）"><Select aria-label="备班人员" mode="multiple" value={backup} options={memberOptions} onChange={v=>set(primary,v)}/></Form.Item></div>;

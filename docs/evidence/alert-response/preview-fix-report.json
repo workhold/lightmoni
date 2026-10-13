@@ -1,0 +1,27 @@
+{
+  "passed": true,
+  "checked_at": "2026-10-13T01:31:15Z",
+  "urls": [
+    "http://localhost:18380/alerts",
+    "http://localhost:18380/dashboards/system-agent?panel=system-agent-a&tab=alerts"
+  ],
+  "checks": [
+    "规则为第一列且为sticky；大盘告警设置为第二列；告警等级为第三列且不固定",
+    "规则编辑执行预览打开可见弹窗，显示查询值、触发判断与通知目标提示",
+    "大盘告警配置可选择P0至P3；选择P1后预览弹窗显示P1",
+    "在线Agent数的单值聚合查询无时间字段也可预览，查询值0，满足低于1的触发条件",
+    "用户当前大盘页面已刷新，等级配置与预览入口可见",
+    "预览没有保存告警或修改大盘配置"
+  ],
+  "regression_tests": "16 passed",
+  "frontend_build": "passed",
+  "linux_arm64_build": "passed",
+  "healthz": "ok",
+  "new_console_errors": 0,
+  "screenshots": [
+    "rules-column-order.jpg",
+    "rule-preview-fixed.jpg",
+    "dashboard-priority-fixed.jpg",
+    "dashboard-preview-fixed.jpg"
+  ]
+}

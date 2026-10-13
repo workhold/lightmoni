@@ -42,8 +42,9 @@ export function alertLines(panel:Panel,results:QueryResult[]):AlertLine[]{
 
 export function chartAlertSQL(panel:Panel,rule:AlertRule,source:{sql:string;params?:Record<string,Parameter>},results:QueryResult[]){
  const selection=rule.panel_condition;if(!selection)throw new Error('请选择当前图表的线');
- const quote=(name:string)=>'`'+name.replaceAll('`','``')+'`',field=(name:string)=>'panel_alert_source.'+quote(name),value=field(String(panel.options.y??'value')),series=String(panel.options.series??''),time=String(panel.options.x??'time');
- const columns=results.filter(result=>result.refId===selection.query_ref).flatMap(result=>result.frames.flatMap(frame=>frame.columns));
+ const quote=(name:string)=>'`'+name.replaceAll('`','``')+'`',field=(name:string)=>'panel_alert_source.'+quote(name),value=field(String(panel.options.y??'value')),series=String(panel.options.series??'');
+ let time=String(panel.options.x??'time');
+ const frames=results.filter(result=>result.refId===selection.query_ref).flatMap(result=>result.frames),columns=frames.flatMap(frame=>frame.columns);
  if(columns.length&&!columns.some(column=>column.name===String(panel.options.y??'value')&&/Int|Float|Decimal/.test(column.type)))throw new Error('当前查询没有图表使用的数值字段，请检查字段映射');
  const noData=rule.operator==='no_data',params={...source.params},where:string[]=[];
  if(!reducerOptions.some(option=>option.value===selection.reducer))throw new Error('请选择有效的取值方式');
@@ -53,13 +54,22 @@ export function chartAlertSQL(panel:Panel,rule:AlertRule,source:{sql:string;para
   else{let parameter='panel_alert_series';while(parameter in params)parameter+='x';params[parameter]=selection.series;where.push(`${field(series)} = {${parameter}:${selection.series.type}}`);}
  }
  if(!noData)where.push(`isNotNull(${value})`);
- let expression=`countIf(isNotNull(${value}))`;
+ const grouped=!!series&&!selection.series;
+ let directScalar=false,expression=`countIf(isNotNull(${value}))`;
  if(!noData){
   if(selection.reducer==='last'){
-   if(columns.length&&!columns.some(column=>column.name===time&&/^Date(?:Time|32)?/.test(column.type.replace(/^Nullable\((.*)\)$/,'$1'))))throw new Error('最新值需要时间字段，请运行查询或选择其他取值方式');
-   expression=`argMaxOrNull(${value}, ${field(time)})`;
+   const timestamps=[...new Map(columns.filter(column=>/^Date(?:Time|32)?/.test(column.type.replace(/^Nullable\((.*)\)$/,'$1'))).map(column=>[column.name,column])).values()];
+   if(columns.length&&!timestamps.some(column=>column.name===time)){
+    if(['stat','gauge'].includes(panel.type)&&!grouped){
+     if(timestamps.length===1)time=timestamps[0].name;
+     else if(timestamps.length===0&&frames.reduce((n,frame)=>n+frame.rows.length,0)<=1)directScalar=true;
+     else throw new Error('最新值需要时间字段，请运行查询或选择其他取值方式');
+    }else throw new Error('最新值需要时间字段，请运行查询或选择其他取值方式');
+   }
+   // A scalar card may return an already aggregated single value without time.
+   // Keep it lossless; LIMIT 2 lets the evaluator reject future ambiguous rows.
+   expression=directScalar?value:`argMaxOrNull(${value}, ${field(time)})`;
   }else expression=`${selection.reducer}OrNull(${value})`;
  }
- const grouped=series&&!selection.series;
- return {sql:`SELECT\n  ${grouped?field(series)+' AS '+quote(series)+',\n  ':''}${expression} AS value\nFROM (\n${source.sql.trim().replace(/;\s*$/,'')}\n) AS panel_alert_source${where.length?'\nWHERE '+where.join(' AND '):''}${grouped?'\nGROUP BY '+field(series):''}`,params,label_fields:grouped?[series]:[]};
+ return {sql:`SELECT\n  ${grouped?field(series)+' AS '+quote(series)+',\n  ':''}${expression} AS value\nFROM (\n${source.sql.trim().replace(/;\s*$/,'')}\n) AS panel_alert_source${where.length?'\nWHERE '+where.join(' AND '):''}${grouped?'\nGROUP BY '+field(series):directScalar?'\nLIMIT 2':''}`,params,label_fields:grouped?[series]:[]};
 }

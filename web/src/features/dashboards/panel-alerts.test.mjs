@@ -39,6 +39,20 @@ test('a latest-point condition rejects absent time fields and invalid value mapp
  assert.throws(()=>chartAlertSQL({...panel,options:{...panel.options,x:'missing'}},rule,{sql:'SELECT 1'},results),/时间字段/);
  assert.throws(()=>chartAlertSQL({...panel,options:{...panel.options,y:'service'}},rule,{sql:'SELECT 1'},results),/数值字段/);
 });
+test('a single aggregate card can preview latest value without requiring a time column',()=>{
+ const card={...panel,type:'stat',options:{x:'time',y:'value'}};
+ const scalar=[{refId:'A',status:'success',frames:[{columns:[{name:'value',type:'UInt64'}],rows:[['18446744073709551615']]}]}];
+ const generated=chartAlertSQL(card,rule,{sql:'SELECT uniqExact(agent_id) AS value FROM metric_host_gauge'},scalar);
+ assert.match(generated.sql,/panel_alert_source\.`value` AS value/);assert.match(generated.sql,/LIMIT 2$/);
+ assert.doesNotMatch(generated.sql,/argMax|Float|sum|any/);assert.deepEqual(generated.label_fields,[]);
+ assert.throws(()=>chartAlertSQL(card,rule,{sql:'SELECT value FROM metric_host_gauge'},[{...scalar[0],frames:[{...scalar[0].frames[0],rows:[['1'],['2']]}]}]),/时间字段/);
+});
+test('cards infer a unique returned timestamp, while time-series mappings remain explicit',()=>{
+ const observed=[{refId:'A',status:'success',frames:[{columns:[{name:'observed_at',type:'DateTime64(9)'},{name:'value',type:'Float64'}],rows:[[1,2],[2,3]]}]}];
+ const generated=chartAlertSQL({...panel,type:'gauge',options:{x:'unused',y:'value'}},rule,{sql:'SELECT observed_at,value FROM metric_host_gauge'},observed);
+ assert.match(generated.sql,/argMaxOrNull\(panel_alert_source\.`value`, panel_alert_source\.`observed_at`\)/);
+ assert.throws(()=>chartAlertSQL({...panel,options:{x:'unused',y:'value'}},rule,{sql:'SELECT observed_at,value FROM metric_host_gauge'},observed),/时间字段/);
+});
 test('delayed windows show both bounds relative to evaluation time',()=>{
  assert.equal(alertWindowLabel(600,120),'now-12min ~ now-2min');
  assert.equal(alertWindowLabel(300,0),'now-5min ~ now');

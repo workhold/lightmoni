@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "url": "http://localhost:18380/alerts",
+  "checked_at": "2026-10-13T01:08:43.558Z",
+  "checks": [
+    "真实页面默认打开告警规则，告警组位于第二个页签",
+    "规则列表等级为首列，编辑器等级配置位于顶部",
+    "现有空成员组打开值班排班，切换按周轮换并新增第二周班次，没有崩溃",
+    "退出排班与规则编辑草稿后保留现有配置"
+  ],
+  "regression_tests": "3 passed",
+  "frontend_build": "passed",
+  "new_console_errors": 0,
+  "screenshots": [
+    "rules-priority-fixed.jpg",
+    "schedule-null-group-fixed.jpg"
+  ]
+}

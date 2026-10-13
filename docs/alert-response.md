@@ -2,6 +2,8 @@
 
 本次将告警组改为人员责任组。系统通知接入保存供应商配置，用户资料保存个人联系方式，组内排班决定当时联系谁，P0～P3 策略决定使用什么渠道、何时提醒和升级。全部能力运行在现有 Go 主服务和 SQLite 中。
 
+告警中心默认打开“告警规则”，随后为“告警组”，再展示响应、统计、静默等入口；通知接手链接仍直接打开告警响应。规则名称固定在最左列，等级放在第三列，优先显示高等级规则；创建/编辑时在顶部设置等级。大盘的每个告警条件也可设置P0～P3，并通过“预览告警”弹窗检查固定窗口、条件判断和通知目标。规则编辑器的“执行预览”使用相同弹窗，预览不会保存规则或发送通知。未配置成员或班次的组也可打开排班编辑，不会因空字段崩溃。
+
 ## 配置顺序
 
 1. 管理员在“设置 → 通知接入”配置飞书、钉钉、企业微信、邮件、短信、电话或 Webhook。
@@ -143,6 +145,7 @@ SQLite保存`user_notification_profiles`、`alert_responses`、`alert_response_e
 
 - `go test -race ./...`：规则状态、并发接手、静默/跨夜时钟、主备和提级、回执竞态、目录保留、证据与Trace等；本地真实HTTP/SMTP和隔离SQLite。
 - `npm run build`（`web`目录）：TypeScript和生产打包。
+- `node --test web/src/features/alerts/response-model.test.mjs web/src/features/alerts/alert-preview.test.mjs web/src/features/dashboards/panel-alerts.test.mjs`：空成员/空班次数组、等级别名、预览响应空字段、人员组通知目标、数值卡与时序图取值的回归测试。排班验证见[evidence/alert-response/ui-fix-report.json](evidence/alert-response/ui-fix-report.json)，最新列顺序、大盘等级和两处预览验证见[evidence/alert-response/preview-fix-report.json](evidence/alert-response/preview-fix-report.json)。
 - `node web/src/features/alerts/verify-response.mjs`：先启动Vite，默认5187，可用`LIGHTMONI_UI_URL`覆盖。受控API验证短链接接手、统计、周排班、静默、三种群机器人与飞书企业应用配置、资料保存、Trace和390px布局。
 
 截图和报告见[evidence/alert-response/report.json](evidence/alert-response/report.json)。真实飞书/钉钉/企业微信账号、云短信/电话模板和SMTP账号尚未配置，因此真实供应商发送和回执仍需用相应账号完成验收；本地验证没有产生付费通知。
