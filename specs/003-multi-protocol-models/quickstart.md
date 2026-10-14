@@ -1,0 +1,5 @@
+# Validation
+Build/typecheck/test ai-runtime first, then go test -race ./internal/assistant including native fixtures; frontend helper tests/typecheck; serialize web production build before go build (embedded assets), then fullGo race checks and restart8080.
+Each concrete protocol fixture must verify native paths/auth, text streaming, tool response continuation, usage and missing usage, summary generation, errors and cancellation. Legacy Chat config still works.
+Directory fixtures: manual4/auth/schema, auto native and shared OpenAI ambiguity, truncation, no token-in-query, source hints/endpoint normalization, bounded retries, saved-key exact base and root fallback refusal, unknown protocol before network.
+Browser fresh tab: protocol selector + visible fetch button, local fixtures, ambiguity prompt/manual selection, failed401 actionable Chinese, old model retained, no actual config persisted for UI tests. Existing old user tab5 stays open with unsaved values. Huayan no-key probe only (401), no live model calls.

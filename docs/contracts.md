@@ -82,3 +82,15 @@ Agent 的任务以分组为单位，组内共用版本和任务。登录后 `GET
 组配置包含 `host_enabled`、`host_collectors`、`collect_interval_seconds`、`process_names`、`host_table`，HTTP/TCP `probes` 与 `probe_table`，`logs_enabled`、`log_sources` 与 `log_table`。目录源指定绝对路径 `directory`、文件名规则 `pattern`、子目录开关 `recursive`、首次历史开关 `from_beginning`。平台用表单编辑，API 的 JSON 是传输协议，不要求用户编辑配置文件。Agent 通过原配置轮询接口读取所属组任务，先缓存再应用；首次取得有效任务前暂停内部采集，离线重启可用已缓存任务。
 
 目录日志按换行增量读取，文件 device/inode 与 host 标识定位持久进度；读取位置、截断代次、文件头指纹和冻结批次在同一 SQLite 事务提交，背压不推进位置。文件重命名仍沿用进度，截断或文件头变化增加代次；copytruncate 在文件快速长回且前 64 字节完全相同的情况下无法可靠识别，建议使用重命名轮转。以 observed_time 表示采集时间，并标记 `event_time_source=observed`；`file_path`、`file_name` 保留来源，`lightmoni.source_id` 结合主机、文件与代次，`lightmoni.source_seq` 为行/分片的起始字节位置。未换行的短行等待续写，超长行按最多 64 KiB 分片并标记 `log_fragment=true`。已进队列的数据继续按其原表补传，改组不改写历史批次。
+
+### Mastra AI runtime (2026-10-14)
+
+生产 Agent loop 使用 Mastra Node worker，由 Go 通过私有管道启动和取消。Go 保持 Actor、配置密钥、Store、Catalog/Query 和草稿的唯一权威。来源与许可参考详见 specs/001-mastra-assistant/research.md。会话增加 summary/summary_through；原始 Messages 保留，模型输入为摘要和未压缩后缀。旧会话和配置可直接读取。配置新增 max_input_tokens/max_output_tokens/max_steps，缺省 32000/4096/8。输入预算是保守字节估计，并检查每次模型调用的 prompt 和 tool schemas；历史按完整轮次整理，单轮过大明确失败。事件增加 context.compacting/context.compacted 和 turn.usage；usage 仅记录供应商 raw usage 中实际提供的字段，phase 区分 compact/execute。文本 SSE 实时发送；SQLite 写入以 250ms 批处理且合并相邻历史 delta，边界和终态立即持久化。工具仍只读或 draft，后台恢复及自动修改不属于本次契约。
+
+### AI model discovery (2026-10-14)
+
+管理员通过 `POST /api/v1/assistant/models` 使用未保存的 `base_url`、`api_key`、`protocol` 和明确的 `use_saved_key` 查询目录。已保存密钥只能在完整规范 API 基地址匹配时复用；配置 PUT 同样禁止跨地址自动保留旧密钥。同地址切换协议可复用。协议支持 `openai-chat-completions`、`openai-responses`、`anthropic-messages`、`google-generative-ai`；配置必须保存具体协议，旧配置缺省 Chat。目录输入缺省 `auto`，响应返回建议、候选协议、依据及是否须确认，始终 `capabilities_verified:false`。未知 OpenAI 兼容目录须人工区分 Chat/Responses；不按模型名称推断协议。
+
+目录使用 Bearer、Anthropic `x-api-key` 或 Gemini `x-goog-api-key`，密钥不进入 URL。最多 6 个同源 GET，总超时 8 秒、禁止重定向、每个响应最大 1 MiB，返回排序去重的最多 500 个模型。根地址目录不存在且使用新填写的 Key 或无需 Key 时，全过程最多回退一次到 `/v1` 或 Google `/v1beta`；复用已保存 Key 不回退。分页仅标记截断，不跟随下一页。查询不持久化、不调用生成、错误不包含远端正文。设置页提供自动查询、独立获取按钮及手动模型输入，地址/Key/协议变更或关闭窗口会取消旧查询。规格、接口和验证见 specs/003-multi-protocol-models。
+
+四种协议通过实际原生 SDK 执行文本流、工具调用、摘要和取消。Responses 使用 `store:false`；供应商原始 usage 按协议解释，缺少字段保持未知。多轮延续仅持久化白名单内的签名、item ID 和加密推理内容，隐藏推理明文不保存；私有 worker 检查点校验大小和字段，服务端会话回读删除这些元数据后才返回浏览器。元数据计入上下文预算，不能静默丢弃超限状态。

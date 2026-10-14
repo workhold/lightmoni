@@ -26,17 +26,26 @@ type Principal struct {
 }
 
 type Config struct {
-	BaseURL string `json:"base_url"`
-	Model   string `json:"model"`
-	APIKey  string `json:"api_key,omitempty"`
-	Enabled bool   `json:"enabled"`
+	BaseURL         string `json:"base_url"`
+	Protocol        string `json:"protocol,omitempty"`
+	Model           string `json:"model"`
+	APIKey          string `json:"api_key,omitempty"`
+	Enabled         bool   `json:"enabled"`
+	MaxInputTokens  int    `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
+	MaxSteps        int    `json:"max_steps,omitempty"`
 }
 
 type ConfigView struct {
-	BaseURL string `json:"base_url"`
-	Model   string `json:"model"`
-	HasKey  bool   `json:"has_key"`
-	Enabled bool   `json:"enabled"`
+	Runtime         string `json:"runtime"`
+	Protocol        string `json:"protocol"`
+	BaseURL         string `json:"base_url"`
+	Model           string `json:"model"`
+	HasKey          bool   `json:"has_key"`
+	Enabled         bool   `json:"enabled"`
+	MaxInputTokens  int    `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
+	MaxSteps        int    `json:"max_steps,omitempty"`
 }
 
 type Event struct {
@@ -49,9 +58,20 @@ type Event struct {
 }
 
 type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
-	Function FunctionCall `json:"function"`
+	ID              string          `json:"id"`
+	Type            string          `json:"type"`
+	Function        FunctionCall    `json:"function"`
+	ProviderOptions ProviderOptions `json:"provider_options,omitempty"`
+}
+
+// ProviderOptions carries only opaque native continuation data. Public HTTP
+// responses omit it; private worker input and durable host state preserve it.
+type ProviderOptions map[string]map[string]string
+
+type ProviderState struct {
+	Type            string          `json:"type"`
+	Text            string          `json:"text,omitempty"`
+	ProviderOptions ProviderOptions `json:"provider_options"`
 }
 
 type FunctionCall struct {
@@ -60,20 +80,23 @@ type FunctionCall struct {
 }
 
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Role          string          `json:"role"`
+	Content       string          `json:"content"`
+	ToolCalls     []ToolCall      `json:"tool_calls,omitempty"`
+	ToolCallID    string          `json:"tool_call_id,omitempty"`
+	ProviderState []ProviderState `json:"provider_state,omitempty"`
 }
 
 type Session struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Title     string    `json:"title"`
-	CreatedAt string    `json:"created_at"`
-	UpdatedAt string    `json:"updated_at"`
-	Messages  []Message `json:"messages"`
-	Events    []Event   `json:"events"`
+	ID             string    `json:"id"`
+	UserID         string    `json:"user_id"`
+	Title          string    `json:"title"`
+	CreatedAt      string    `json:"created_at"`
+	UpdatedAt      string    `json:"updated_at"`
+	Summary        string    `json:"summary,omitempty"`
+	SummaryThrough int       `json:"summary_through,omitempty"`
+	Messages       []Message `json:"messages"`
+	Events         []Event   `json:"events"`
 }
 
 // Tools are registered by the composition root, never selected from arbitrary
@@ -87,13 +110,15 @@ type Tool struct {
 }
 
 type Options struct {
-	Store       Store
-	Actor       func(*http.Request) (Principal, error)
-	Tools       []Tool
-	HTTPClient  *http.Client
-	TurnTimeout time.Duration
-	MaxSteps    int
-	System      string
+	MaxConcurrentTurns int
+	Runtime            TurnRuntime
+	Store              Store
+	Actor              func(*http.Request) (Principal, error)
+	Tools              []Tool
+	HTTPClient         *http.Client
+	TurnTimeout        time.Duration
+	MaxSteps           int
+	System             string
 }
 
 type TurnRequest struct {

@@ -61,3 +61,11 @@
 - AI按Doca骨架会话/SSE/中止/工具时间线，读取目录、生成并运行SQL、分析日志、预览大盘草稿与确认保存；日志内提示不能扩大权限，SQL走统一限额；真实provider未配置不能报AI效果已验收。
 - UI无原生select/alert/confirm/prompt，键盘/焦点/200%缩放/空数据/权限错误/断网有明确行为；oil-ui三处动效留实际证据。
 - 构建、单元/必要集成测试、浏览器完整操作；中心两容器部署、Agent安装/升级/重装/卸载、备份恢复、资源实测和可执行文档。最终输出通过项、未通过项、证据路径，不用笼统“全部完成”。
+
+## Mastra 助手迁移（2026-10-14）
+
+按 GitHub Spec Kit SDD 建立 specs/001-mastra-assistant 的 spec/plan/research/data-model/contracts/tasks。生产模型执行迁移为 Mastra；Go 仍执行工具和保存会话。验收证据和运行命令见该目录 verification.md。真实 SDK + 隔离模型 fixture 验证回执历史、多轮重载、摘要成功/失败、供应商错误、步数/输出限制、取消与用量。历史协议 parser 仅保留在 *_test.go。真实供应商效果与 Docker 镜像构建需分别验证，不以 fixture 替代。当前本地 Doca 为 AGPL-3.0-only，仅参考架构；原先 MIT 移植声明不作为新代码复制授权。
+
+## AI 多协议连接与模型发现（2026-10-14）
+
+按 specs/003-multi-protocol-models 的 SDD 规格完成四种真实 Mastra 原生适配器：OpenAI Chat Completions、Responses、Anthropic Messages、Google Gemini。设置提供独立获取按钮、自动目录发现/协议建议和具体协议选择；模糊 OpenAI 目录必须明确选择。28项运行时、25项前端测试和全Go race通过，原生签名/密文的跨worker延续、服务端私有保留、公开响应剔除及转义Key回显保护均有回归证据。生产构建和8080健康检查通过；浏览器实测见该规格目录 verification.md。Huayan未带Key目录查询返回401，未使用真实Key、未调用外部模型；真实供应商兼容性与模型效果仍须配置凭证后验收。

@@ -39,9 +39,21 @@ export function assistantTimeline(events: AssistantEvent[]): TurnView[] {
       const trace = turn.tools.find(tool => tool.callId === data.call_id);
       if (trace) { trace.result = data.value; trace.status = data.status === 'success' ? 'success' : 'error'; }
     }
+    if (event.type === 'context.compacting') turn.compacting = true;
+    if (event.type === 'context.compacted') { turn.compacting = false; turn.compacted = true; }
+    if (event.type === 'turn.usage') {
+      const key = data.phase === 'compact' ? 'compactionUsage' : 'usage';
+      const usage = turn[key] ?? {};
+      for (const field of ['input_tokens', 'output_tokens', 'total_tokens'] as const) {
+        const value = data[field];
+        if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) usage[field] = (usage[field] ?? 0) + value;
+      }
+      turn[key] = usage;
+    }
     if (event.type === 'turn.completed') turn.status = 'completed';
     if (event.type === 'turn.cancelled' || event.type === 'turn.failed') {
       turn.status = event.type === 'turn.cancelled' ? 'cancelled' : 'failed';
+      turn.compacting = false;
       turn.error = String(data.error ?? '请求失败');
       for (const tool of turn.tools) if (tool.status === 'running') { tool.status = 'error'; tool.result = { error: turn.error }; }
     }

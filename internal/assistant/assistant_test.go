@@ -45,6 +45,7 @@ func fixtureService(t *testing.T, tools []Tool) (*Service, *httptest.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.options.Runtime = referenceRuntime{s: s}
 	mux := http.NewServeMux()
 	s.Register(mux)
 	server := httptest.NewServer(mux)

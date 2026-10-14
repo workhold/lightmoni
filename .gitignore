@@ -28,3 +28,7 @@ __pycache__/
 /examples/sdk/dotnet/obj/
 /sdk/java/target/
 /sdk/ruby/*.gem
+
+ai-runtime/dist/
+.local-dev/
+*.log
