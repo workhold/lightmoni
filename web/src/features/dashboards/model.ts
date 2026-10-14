@@ -3,6 +3,7 @@ import {rangeUtil} from '@grafana/data';
 export interface Grid {x:number;y:number;w:number;h:number}
 export interface DashboardQuery extends SQLQuery {enabled?:boolean}
 export interface Panel {id:string;title:string;type:string;queries:DashboardQuery[];options:Record<string,unknown>;grid:Grid}
+export const defaultQueryInterval='1m';
 export interface Variable {name:string;label?:string;type:'custom'|'query'|'text'|'constant';options?:string[];sql?:string;multi?:boolean;all?:boolean;value?:unknown}
 export interface Dashboard {id:string;title:string;description:string;panels:Panel[];variables:Variable[];range:TimeRange;refresh:number;revision:number;updated_at?:string}
 export interface Template {id:string;title:string;description:string;type:string;table_id:string;sql:string;options:Record<string,unknown>}
@@ -138,7 +139,7 @@ export function bindQueries(queries:DashboardQuery[],variables:Variable[],values
   params[name]={type,value};
  };return {refId:q.refId,sql:q.sql,params};});
 }
-export function newPanel(template?:Template,index=0):Panel {return {id:crypto.randomUUID(),title:template?.title??'新面板',type:template?.type??'line',queries:[{refId:'A',sql:template?.sql??'',params:{}}],options:{x:'time',y:'value',show_points:false,...template?.options},grid:{x:(index%2)*6,y:Math.floor(index/2)*6,w:6,h:6}};}
+export function newPanel(template?:Template,index=0):Panel {return {id:crypto.randomUUID(),title:template?.title??'新面板',type:template?.type??'line',queries:[{refId:'A',sql:template?.sql??'',params:{}}],options:{x:'time',y:'value',show_points:false,query_interval:defaultQueryInterval,...template?.options},grid:{x:(index%2)*6,y:Math.floor(index/2)*6,w:6,h:6}};}
 export function numeric(value:unknown,approximate=false):number|null{
  if(value===null||value===undefined)return null;if(typeof value==='number')return Number.isFinite(value)?value:null;
  if(typeof value==='string'&&/^[-+]?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(value)){

@@ -188,6 +188,13 @@ function ChartView({panel,results,onBrush,intervalMS=0,bucketedRefs=[],range,onC
    }
    if(layers.length){if(finalOptions.type==='view')finalOptions.children=[...(finalOptions.children as Record<string,unknown>[]),...layers];else finalOptions={type:'view',data:rows,scale:options.scale,axis:options.axis,legend:false,animate:false,interaction:options.interaction,children:[options,...layers]};}
   }
+  // Bucket starts may precede range.from; clip marks to the plot, preserving
+  // boundary interpolation and the original rows used by tooltips/statistics.
+  // G2 5.4.8 drops root mark.clip when chart.options wraps it in a view.
+  if(isTime&&!['pie','gauge'].includes(type)){
+   if(finalOptions.type!=='view')finalOptions={type:'view',legend:false,animate:false,interaction:finalOptions.interaction,children:[finalOptions]};
+   finalOptions.clip=true;
+  }
   finalOptions.theme={type:dark?'dark':'light',axis:{labelFill:dark?'#a6adba':'#64738a',labelOpacity:1,gridStroke:dark?'#434a56':'#dfe3e9',gridStrokeOpacity:.65,gridLineWidth:.7,gridLineDash:[]}};
   finalOptions.key=`panel-${panel.id}`;
   if(onBrush&&isTime&&['line','area','timeseries','bar','heatmap'].includes(panel.type))finalOptions.interaction={...(finalOptions.interaction as Record<string,unknown>),brushXFilter:true};
