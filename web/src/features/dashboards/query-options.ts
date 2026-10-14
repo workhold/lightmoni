@@ -1,5 +1,5 @@
 import type {TimeRange} from '../../shared/types';
-import {intervalFor,visibleSQL} from './model';
+import {defaultQueryInterval,intervalFor,visibleSQL} from './model';
 
 export const intervalChoices=[{value:'auto',label:'自动'},{value:'10s',label:'10s'},{value:'30s',label:'30s'},{value:'1m',label:'1min'},{value:'5m',label:'5min'},{value:'15m',label:'15min'},{value:'1h',label:'1h'},{value:'1d',label:'1d'}];
 export const aggregationChoices=[{value:'avg',label:'avg · 平均值'},{value:'max',label:'max · 最大值'},{value:'min',label:'min · 最小值'},{value:'sum',label:'sum · 求和'},{value:'count',label:'count · 样本数'},{value:'p50',label:'p50 · 中位数'},{value:'p90',label:'p90'},{value:'p95',label:'p95'},{value:'p99',label:'p99'}];
@@ -22,7 +22,8 @@ export function panelIntervalFor(range:TimeRange,options:Record<string,unknown>,
  validateQueryOptions(options);
  const duration=Date.parse(range.to)-Date.parse(range.from);
  if(!Number.isFinite(duration)||duration<=0)throw new Error('开始时间必须早于结束时间');
- if(options.query_interval!==undefined&&options.query_interval!=='auto')return durationMS(options.query_interval);
+ const interval=options.query_interval??defaultQueryInterval;
+ if(interval!=='auto')return durationMS(interval);
  const resolution=typeof options.query_max_points==='number'?options.query_max_points:Math.max(1,Math.min(10000,Math.floor(width)||600));
  const minimum=options.query_min_interval?durationMS(options.query_min_interval):1000;
  return Math.max(minimum,intervalFor(range,resolution));

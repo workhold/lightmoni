@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {loadSource} from './test-module.mjs';
 const {durationMS,panelIntervalFor,queryOptions,sqlAggregation,changeSQLAggregation}=loadSource(new URL('./query-options.ts',import.meta.url));
+const {newPanel}=loadSource(new URL('./model.ts',import.meta.url));
 const range={from:'2026-10-11T00:00:00Z',to:'2026-10-11T01:00:00Z'};
 
 test('fixed bucket width is independent of reporting cadence, viewport and point target',()=>{
@@ -12,12 +13,21 @@ test('fixed bucket width is independent of reporting cadence, viewport and point
  assert.equal(durationMS('30s'),30000);assert.equal(durationMS(' 1min '),60000);
 });
 test('Grafana auto rounding responds to range and pixel width, respects the minimum and fixed resolution',()=>{
- assert.equal(panelIntervalFor(range,{},600),5000);
- assert.equal(panelIntervalFor(range,{},120),30000);
- assert.equal(panelIntervalFor(range,{query_min_interval:'30s'},1400),30000);
- assert.equal(panelIntervalFor(range,{query_max_points:12},200),300000);
- assert.equal(panelIntervalFor(range,{query_max_points:12},1400),300000);
- assert.equal(panelIntervalFor({...range,to:'2026-10-12T00:00:00Z'},{},600),120000);
+ assert.equal(panelIntervalFor(range,{query_interval:'auto'},600),5000);
+ assert.equal(panelIntervalFor(range,{query_interval:'auto'},120),30000);
+ assert.equal(panelIntervalFor(range,{query_interval:'auto',query_min_interval:'30s'},1400),30000);
+ assert.equal(panelIntervalFor(range,{query_interval:'auto',query_max_points:12},200),300000);
+ assert.equal(panelIntervalFor(range,{query_interval:'auto',query_max_points:12},1400),300000);
+ assert.equal(panelIntervalFor({...range,to:'2026-10-12T00:00:00Z'},{query_interval:'auto'},600),120000);
+});
+test('unspecified aggregation defaults to a fixed minute across widths and time ranges',()=>{
+ for(const width of [120,600,1400]){
+  assert.equal(panelIntervalFor(range,{},width),60000);
+  assert.equal(panelIntervalFor({...range,to:'2026-10-12T00:00:00Z'},{},width),60000);
+  assert.equal(panelIntervalFor(range,{query_min_interval:'5m',query_max_points:12},width),60000);
+ }
+ assert.equal(newPanel().options.query_interval,'1m');
+ for(const query_interval of ['auto','1h'])assert.equal(newPanel({options:{query_interval}}).options.query_interval,query_interval);
 });
 test('invalid query options reject before execution; unrelated visual settings do not affect resolution',()=>{
  for(const query_interval of ['0s','-1m','1','1.5m','1M','auto;SELECT 1','366d'])assert.throws(()=>panelIntervalFor(range,{query_interval}));
