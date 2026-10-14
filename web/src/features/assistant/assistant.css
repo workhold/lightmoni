@@ -17,3 +17,5 @@
 .lm-assistant-page-context{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 18px;color:var(--lm-muted);font-size:12px;background:var(--lm-raised)}.lm-assistant-page-context strong{color:var(--lm-text);font-weight:500}.lm-assistant-page-context .ant-tag{margin:0}
 
 .lm-assistant-feed{min-height:0;padding-top:20px;padding-bottom:20px}.lm-assistant-composer{flex-shrink:0}.lm-assistant-welcome{margin:12px auto 18px}
+
+.lm-assistant-run-meta{font-size:12px;line-height:1.7;color:var(--text-secondary,#697586);margin:8px 0}

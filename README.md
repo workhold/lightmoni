@@ -90,7 +90,7 @@ node examples/sdk/traffic/index.mjs
 - 图表按当前曲线设置阈值或没有打点告警，绑定人员责任组；支持固定/天/周排班、多主多备、P0～P3、接手与升级、静默窗口、日志现场、Trace树及接手率/时长统计。规则可继承数据表责任组，详见[告警响应与值班](docs/alert-response.md)。
 - Webhook、飞书群/企业应用机器人、钉钉、企业微信、Pushplus 公众号推送；阿里云、腾讯云、华为云短信；阿里云、腾讯云电话语音；SMTP 邮件（QQ、163、126、腾讯企业邮、阿里企业邮预设及自定义服务器）。各渠道需填入自己的供应商配置，详见[通知渠道配置](docs/notification-channels.md)。
 - 本地用户管理，以及微信网站登录、QQ 互联、GitHub、通用 OAuth2；提供 state、PKCE、稳定身份绑定、首次用户审核。
-- Doca 骨架的 AI 会话、流式消息、工具时间线和中止；读取目录、生成 SQL、分析日志，预览并确认保存大盘。管理员在 AI 设置中配置兼容 Chat Completions 的模型供应商。
+- Mastra 驱动的 AI 助手：流式回答、工具时间线和中止；读取目录、生成 SQL、分析日志，预览并确认保存大盘。较早对话按完整轮次整理摘要，显示模型报告的用量；管理员可自动获取模型目录，配置 OpenAI Chat Completions、Responses、Anthropic Messages 或 Gemini 协议及输入、输出和执行步数限制。
 
 应用控件使用 React 组件，不调用浏览器原生选择框、确认框或输入对话框。所有成员共享实例数据；管理员管理用户、凭证和供应商密钥。
 
@@ -101,12 +101,14 @@ Go 1.26+、Node 24+、Docker Compose。在仓库根运行：
 ```sh
 docker compose -p lightmoni-test -f deploy/server/compose.test.yml up -d
 npm --prefix web ci
+npm --prefix ai-runtime ci
+npm --prefix ai-runtime run build
 npm --prefix sdk/typescript ci
 npm --prefix sdk/typescript run build
 npm --prefix web run build
 sh deploy/agent/release.sh 0.1.0 internal/server/agent-dist
 sh scripts/build-sdk-release.sh 0.1.0 internal/server/agent-dist
-LIGHTMONI_ADDR=127.0.0.1:18880 LIGHTMONI_EXTERNAL_URL=http://localhost:18880 go run ./cmd/lightmoni
+LIGHTMONI_ADDR=127.0.0.1:18880 LIGHTMONI_EXTERNAL_URL=http://127.0.0.1:18880 go run ./cmd/lightmoni
 ```
 
 另一个终端运行开发界面：
@@ -129,6 +131,22 @@ npm --prefix web run build
 ```
 
 开发模式测试 ClickHouse 只绑定 `127.0.0.1:18123`，使用固定测试密码；发版配置需要在 `.env` 中明确填写数据库密码。数据目录 `.lightmoni`、各目录的 `.env` 和构建产物不纳入源码。
+
+## AI 助手运行时
+
+Go 主服务为每轮对话启动一个 Mastra Node worker，使用私有 stdin/stdout 管道通信，无需额外端口。模型调用与多步决策由 Mastra 执行，表目录、SQL 和草稿工具仍由 Go 在当前登录用户上下文中执行。会话、事件、摘要和模型配置使用主服务 SQLite；API Key 加密保存，仅通过私有管道传入 worker，不进入浏览器响应或进程参数。Compose 镜像内包含 Node、锁定依赖和编译好的 worker。
+
+本地从仓库根启动，先执行 `npm --prefix ai-runtime ci && npm --prefix ai-runtime run build`。默认通过 PATH 中的 `node` 运行 `ai-runtime/dist/runner.js`；可用 `LIGHTMONI_AI_NODE` 指定 Node 可执行文件，用 `LIGHTMONI_AI_RUNNER` 指定编译后的入口绝对路径。缺少运行时会在对话中明确报错，其他监控服务保持可用。
+
+在 AI 助手的模型连接设置中填写服务地址和 Key，系统会自动获取可选模型，也可点击「获取模型」重试或手动填写模型名称。支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Google Gemini 四种协议，分别使用原生 SDK 接入 Mastra；旧配置缺少协议时默认 Chat Completions。「自动识别」依据官方地址、完整接口路径和目录格式给出建议；第三方 OpenAI 兼容目录不能区分 Chat 与 Responses 时，须选择具体协议再保存。模型名称不能用于推断协议，获取列表也不能证明生成、工具调用能力或上下文容量。
+
+支持 API 基地址、根地址，以及完整 `/chat/completions`、`/responses`、`/messages` 或 Gemini 生成接口地址。根地址仅在目录不存在、且使用新填写的 Key 或无需 Key 时，最多回退一次到 `/v1` 或 Gemini `/v1beta`；自定义路径保留。已保存 Key 只可在原规范 API 基地址复用，改地址须重新填写或明确清除；同地址切换协议可保留 Key。目录查询不会保存配置或发起生成请求，401 表示供应商未接受凭证。
+
+默认输入预算 32,000、单次模型输出上限 4,096、每轮 8 步（最多 12 步），整轮仍限制 2 分钟，每个实例最多并行执行 4 轮，达到上限时明确提示稍后重试。输入预算使用保守的 UTF-8 字节估算并在每次模型调用前检查；它不是精确的 tokenizer 计数，应设在模型实际上下文容量以内并预留输出空间。历史整理会产生额外的模型请求和用量，只有供应商实际返回的计数才展示，不估算费用。Responses 使用 `store:false`；多轮所需的加密推理状态和 Gemini 签名仅在服务端有界保存、通过私有管道重放，不返回浏览器，也不保存隐藏推理明文。
+
+摘要保留历史事实、用户要求和工具证据，原始记录仍保留。无法在预算内整理的单个历史轮次或超大的当前上下文会返回明确错误，需缩小查询或增大预算；源历史不被删除。停止、浏览器断开和超时会取消当前 worker 与 Go 工具。完成的检查点可重载，但进程中断后不会自动恢复执行。本轮不包含后台定时排查、自动修复或额外审阅模型。
+
+SDD 规格和验收入口：[Mastra 助手](specs/001-mastra-assistant/spec.md)、[模型发现](specs/002-model-discovery/spec.md)、[多协议连接](specs/003-multi-protocol-models/spec.md)。使用仓库内 Spec Kit 技能继续维护规格、计划与任务。检查运行时使用 `npm --prefix ai-runtime test`、`npm --prefix ai-runtime run typecheck` 和 `go test -race ./internal/assistant`；构建 worker 后，Go 测试会通过真实 Mastra SDK 连接隔离模型 fixture。fixture 不代表真实供应商分析效果验收。
 
 ## Key 的 table 权限
 

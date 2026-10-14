@@ -50,3 +50,19 @@ test('multiple drafts in one turn keep their own preceding query ranges', () => 
   const turn = { tools: [{ name: 'run_query', callId: 'query-1', status: 'success', result: { range: first } }, { name: 'draft_dashboard', callId: 'draft-1', status: 'success' }, { name: 'run_query', callId: 'query-2', status: 'success', result: { range: second } }, { name: 'draft_dashboard', callId: 'draft-2', status: 'success' }] };
   assert.deepEqual(queryRangeFromTurn(turn, 'draft-1'), first); assert.deepEqual(queryRangeFromTurn(turn, 'draft-2'), second);
 });
+
+
+test('reported usage accumulates by phase and replay does not double count', () => {
+ const events = [event(0,'user.message',{text:'继续'}), event(1,'context.compacting'), event(2,'turn.usage',{phase:'compact',input_tokens:100,total_tokens:120}), event(3,'context.compacted'), event(4,'turn.usage',{phase:'execute',input_tokens:40,output_tokens:8,total_tokens:48}), event(5,'turn.usage',{phase:'execute',input_tokens:20,output_tokens:4,total_tokens:24}), event(6,'turn.completed')];
+ const [turn] = assistantTimeline([...events,events[4]]);
+ assert.deepEqual(turn.usage,{input_tokens:60,output_tokens:12,total_tokens:72});
+ assert.deepEqual(turn.compactionUsage,{input_tokens:100,total_tokens:120});
+ assert.equal(turn.compacted,true);assert.equal(turn.compacting,false);
+ const [cancelled] = assistantTimeline([event(0,'context.compacting'),event(1,'turn.cancelled',{error:'cancelled'})]);
+ assert.equal(cancelled.compacting,false);
+});
+
+test('missing token counts remain unavailable', () => {
+ const [turn] = assistantTimeline([event(0,'turn.usage',{phase:'execute',output_tokens:8,total_tokens:'unknown'}),event(1,'turn.completed')]);
+ assert.deepEqual(turn.usage,{output_tokens:8});
+});

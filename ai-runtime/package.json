@@ -1,0 +1,27 @@
+{
+  "name": "lightmoni-ai-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.53",
+    "@ai-sdk/google": "4.0.69",
+    "@ai-sdk/openai": "4.0.66",
+    "@ai-sdk/openai-compatible": "3.0.48",
+    "@mastra/core": "1.66.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  }
+}
