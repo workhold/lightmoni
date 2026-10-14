@@ -69,3 +69,7 @@
 ## AI 多协议连接与模型发现（2026-10-14）
 
 按 specs/003-multi-protocol-models 的 SDD 规格完成四种真实 Mastra 原生适配器：OpenAI Chat Completions、Responses、Anthropic Messages、Google Gemini。设置提供独立获取按钮、自动目录发现/协议建议和具体协议选择；模糊 OpenAI 目录必须明确选择。28项运行时、25项前端测试和全Go race通过，原生签名/密文的跨worker延续、服务端私有保留、公开响应剔除及转义Key回显保护均有回归证据。生产构建和8080健康检查通过；浏览器实测见该规格目录 verification.md。Huayan未带Key目录查询返回401，未使用真实Key、未调用外部模型；真实供应商兼容性与模型效果仍须配置凭证后验收。
+
+## Python SDK 上报控制（2026-10-14）
+
+按 [SDD 004](../specs/004-python-sdk-reporting/spec.md) 接入平台远程停报、UID 排除与稳定日志采样，配置轮询独立于自监控；指标/链路不受日志规则影响。配置验证失败保留旧快照，停报取消请求并丢弃未确认数据，旧 Span/回包不会在恢复后补交。真实 HTTP、隔离 SQLite 中心和 Agent 转发/持久化接收已验证，详见 [验证记录](../specs/004-python-sdk-reporting/verification.md)。直连接收端为受控 OTLP fixture，本次未新增真实 ClickHouse 全链路或生产环境验收。

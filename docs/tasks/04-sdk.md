@@ -8,6 +8,8 @@
 
 ## 目标与范围
 
+2026-10-14 Python 上报规则扩展：按 specs/004-python-sdk-reporting 的 SDD 规格新增远程停报、UID 排除、QA/VIP/普通日志稳定采样、独立配置轮询、本地覆盖 API 与资源/实例输入。规则仅影响业务日志，整体停报覆盖所有信号；generation 和可取消 HTTP 防止恢复后旧回包/Span 补交。验证命令与实际边界见该规格 verification.md。其他五种原生语言尚未接入此规则协议。
+
 2026-10-13 扩展：八种 SDK 已提供请求/任务作用域或不可变绑定客户端，作用域内日志自动关联 trace；Go / Node HTTP 入口与出站、.NET 出站支持 W3C 传播。Go → Node → Go 多跳 HTTP、并发隔离、嵌套/异常恢复及原生示例已验证。完整第三方框架、消息和日志 appender 适配继续按需扩展。
 
 让 Go、JavaScript/TypeScript、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust 业务只配置 `service`、`table`、上报地址，就能记录多维指标、结构化日志和基础 trace。默认连接本机 Agent；需要直接上报主服务时增加实例级写入 Key。一个业务进程可以使用多个 table，一台机器的多个服务不需要分别申请 Key。

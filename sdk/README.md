@@ -78,7 +78,7 @@ trace 元数据在调用日志 API 时从上下文复制，与记录一起冻结
 
 ## 生命周期与边界
 
-Go / TypeScript 保留现有周期 collection 和后台 exporter。六个新 SDK 使用**显式 flush**：记录 API 只修改内存，在应用自己的定时任务、请求结束或退出时调用 flush（.NET 为 FlushAsync），不自动创建后台线程。PHP 限单请求/单 worker，不能跨线程共享。其他语言发送期间不持有记录锁；Rust 的 blocking exporter 应放在异步 runtime 的 blocking worker。
+Go / TypeScript 保留现有周期 collection 和后台 exporter。其他原生 SDK 的记录 API 只修改内存，提供显式 flush（.NET 为 FlushAsync）；默认自监控启用时，Python / Java / .NET / Ruby / Rust 的后台线程每 30 秒同时 Flush 当前业务窗口。关闭自监控后由应用调度 flush。Python 的配置轮询是独立线程，不受自监控或停报开关影响。PHP 限单请求/单 worker，不能跨线程共享。其他语言发送期间不持有记录锁；Rust 的 blocking exporter 应放在异步 runtime 的 blocking worker。
 
 flush 冻结当前窗口，等待调用边界内所有批次得到 ACK，后续记录属于下一窗口。网络失败、429/502/503/504 使用有抖动的指数退避，尊重 Retry-After；401/403 保留队列等待修复 Key。超时保留未确认批次，下次 flush 使用相同 UUID、创建时间和正文。updateKey / update_key 不改冻结正文，正在进行的退避不会主动唤醒。
 
@@ -114,7 +114,7 @@ Go / Node.js 有独立的心跳定时器；Python / Java / .NET / Ruby / Rust �
 
 ## SDK 停报与日志上报规则
 
-Go、JavaScript / TypeScript（Node 和浏览器）支持以下动态配置。Python、Java、.NET、PHP、Ruby、Rust 当前仍按既有方式全量记录，尚未接入这一规则协议。
+Go、JavaScript / TypeScript（Node 和浏览器）、Python 支持以下动态配置。Java、.NET、PHP、Ruby、Rust 当前仍按既有方式全量记录，尚未接入这一规则协议。
 
 - **SDK 整体停报**：在“数据接入 → SDK 接入 → SDK 停报规则”按 service、instance_id、sdk.language 或 resource:资源属性选择实例。命中任一规则后停止该根 SDK 与所有 WithTable 子客户端的日志、指标、链路和自监控，清空未发送数据。配置拉取继续运行，删除规则后自动恢复，不补传停报期间的数据。已经得到 Agent 持久化 ACK 或已经在网络上提交的数据不能撤回。
 - **部分 UID 日志不上报**：在“数据接入 → 数据表 → 业务日志表 → 上报规则”的排除规则中配置 attr:user_id 等实际字段。命中任一排除规则即忽略日志，优先于 QA、VIP 和普通上报规则。metric 和 trace 不受日志排除或降采样影响。
@@ -129,6 +129,8 @@ Go、JavaScript / TypeScript（Node 和浏览器）支持以下动态配置。Py
 HTTP SDK 默认每 30 秒拉取一次，配置经过完整验证后原子替换；失败或非法配置保留上一份有效策略。SDK 刚启动、首次配置尚未到达时沿用本地配置（未配置则全量），需要从第一条日志就执行远程 UID 排除/停报规则时，务必在业务生产前显式等待 RefreshConfig / refreshConfig 成功。自定义 Exporter 可另设配置地址。配置变更只影响后续 Log；已缓冲/冻结的日志与重试正文不重筛。整体停报是单独的强开关，会取消正在发送的请求并清空 SDK 的缓冲与队列。
 
 Go 支持 Config.LogSampling、Config.Disabled、Config.ConfigEndpoint / ConfigKey、Config.ConfigInterval（默认 30 秒）、Config.DisableRemoteConfig；运行中可调用 UpdateLogSampling、SetReportingEnabled、RefreshConfig(ctx)。TypeScript 支持 options.logSampling、disabled、configEndpoint、configIntervalMs（默认 30000）、remoteConfig:false；运行中可调用 updateLogSampling、setReportingEnabled、await refreshConfig()。远程表策略优先于本地表策略；本地 disabled 开关与远程停报规则同时生效。
+
+Python 支持 Client 的 log_sampling、disabled、remote_config、config_endpoint、config_key、config_interval（秒，默认 30，最小 1），以及 resource / instance_id 选择器输入；运行中可调用 update_log_sampling、set_reporting_enabled、refresh_config(timeout=5)。配置请求禁止重定向，最大 1 MiB，采用最多五秒超时预算（阻塞的系统 DNS 解析可能超出预算）；失败保留旧配置，stats 展示 config_revision/config_error 和 excluded_logs/unmatched_logs/sampled_out_logs/disabled_records/reporting_disabled。远程表规则优先，本地停报不能被远程恢复覆盖。停报前或期间创建的 Span 不会在恢复后补交；已在网络中提交的数据无法撤回。Python 的完整示例与生命周期见 [Python SDK](python/README.md)。
 
 ~~~typescript
 const mon = createLightMoni({service:'web-api', table:'web', endpoint, key,
@@ -147,3 +149,5 @@ mon.log('info','checkout clicked',{user_id:'qa-1',event:'click'});
 后台配置接口：GET/PUT `/api/v1/settings/sdk-reporting`（disable_rules），GET/PUT `/api/v1/catalog/tables/{id}/log-sampling`（key/rules/exclude）。保存仅管理员可用；系统日志表与 metric/trace 表禁止配置日志采样。每表最多 32 条上报和 32 条排除规则，每规则最多 8 个条件，每 in 最多 256 个标量值。非零保留比例最低 0.000001。
 
 验证入口：`go test -race ./sdk/go ./internal/agent ./internal/ingest ./internal/server`、`npm --prefix sdk/typescript test`。真实 UI/SQLite/ClickHouse/Node/浏览器回归见 `node examples/sdk/reporting.mjs`（对隔离测试实例运行），证据见 [SDK 上报规则验收](../docs/evidence/sdk-reporting/README.md)。
+
+Python 新增规则、取消和配置回退验证：`PYTHONPATH=sdk/python python3 -m unittest discover -s sdk/python/tests -v`；中心/Agent 隔离集成与证据见 [SDD 004](../specs/004-python-sdk-reporting/verification.md)。
