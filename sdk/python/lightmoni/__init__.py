@@ -4,18 +4,19 @@ import contextvars
 from contextlib import contextmanager
 import datetime
 import email.utils
+import http.client
 import json
 import math
 import random
 import re
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 import uuid
 import weakref
 from dataclasses import dataclass
+from .sampling import SYSTEM_TABLES, copy_policies, decode_config, matches, sample_log
+from .transport import Request, ResponseTooLarge
 
 _context = contextvars.ContextVar("lightmoni_trace", default=None)
 _MAX_INT = (1 << 63) - 1
@@ -108,17 +109,20 @@ def with_trace(context):
         _context.reset(token)
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        return None
+def _endpoint(value):
+    url = urllib.parse.urlsplit(value)
+    if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password or url.query or url.fragment:
+        raise ValueError("valid HTTP(S) endpoint required")
+    # Validate the port before any background work.
+    url.port
+    return value.rstrip("/")
 
 
 class _State:
-    def __init__(self, service, endpoint, key, limits):
-        url = urllib.parse.urlsplit(endpoint)
-        if not service or len(service.encode()) > 128 or url.scheme not in ("http", "https") or not url.hostname or url.username or url.query or url.fragment:
+    def __init__(self, service, endpoint, key, limits, resource=None, instance_id=None):
+        if not isinstance(service, str) or not service or len(service.encode()) > 128:
             raise ValueError("valid service and HTTP(S) endpoint required")
-        self.endpoint, self.key = endpoint.rstrip("/"), key
+        self.endpoint, self.key, self.service = _endpoint(endpoint), key, service
         self.limits = dict(queue_bytes=8 << 20, queue_batches=256, buffer_bytes=8 << 20,
                            max_batch_bytes=1 << 20, cardinality_limit=2000, max_instruments=256)
         if limits.keys() - self.limits.keys():
@@ -127,17 +131,63 @@ class _State:
         if any(type(n) is not int or n <= 0 for n in self.limits.values()) or self.limits["max_batch_bytes"] > self.limits["queue_bytes"]:
             raise ValueError("invalid SDK limits")
         self.lock, self.delivery = threading.RLock(), threading.Lock()
-        self.closed, self.failure, self.sequence = False, None, 0
-        self.instance = str(uuid.uuid4())
-        self.resource = {"attributes": _attrs({"service.name": service, "service.instance.id": self.instance})}
+        self.closed, self.closing, self.failure, self.sequence = False, False, None, 0
+        if instance_id is not None and (not isinstance(instance_id, str) or not instance_id or len(instance_id.encode()) > 128):
+            raise ValueError("invalid instance ID")
+        self.instance = instance_id if instance_id is not None else str(uuid.uuid4())
+        resource = dict(resource or {})
+        if "service.name" in resource or "service.instance.id" in resource:
+            raise ValueError("configure service identity separately")
+        custom = _attrs(resource)
+        self.resource_values = dict(resource, **{"service.name": service, "service.instance.id": self.instance})
+        self.resource = {"attributes": custom + _attrs({"service.name": service, "service.instance.id": self.instance})}
         self.metrics, self.records, self.queue = {}, {}, []
         self.stats = dict(pending_batches=0, pending_bytes=0, buffer_bytes=0, delivered_batches=0,
                           retried_batches=0, invalid_records=0, overflow_records=0,
-                          dropped_records=0, rejected_records=0, last_error="")
-        self.opener = urllib.request.build_opener(_NoRedirect())
+                          dropped_records=0, rejected_records=0, last_error="", sampled_out_logs=0,
+                          unmatched_logs=0, excluded_logs=0, disabled_records=0, reporting_disabled=False,
+                          config_revision="", config_error="")
+        self.local_sampling, self.remote_sampling = {}, {}
+        self.local_disabled, self.remote_disabled, self.reporting_disabled = False, False, False
+        self.reporting_generation, self.source_sequence = 0, 0
+        self.delivery_abort = threading.Event()
+        self.active_request, self.config_request = None, None
+        self.config_lock = threading.Lock()
+        self.config_worker, self.heartbeat_worker = None, None
+        self.shutdown_done, self.shutdown_failure = threading.Event(), None
         self.self_enabled, self.self_table, self.self_last, self.self_started = True, "", float("-inf"), False
         self.self_previous = {}
         self.stop = threading.Event()
+
+    def set_disabled(self, disabled):
+        """Under the state lock; return the HTTP handle to cancel outside it."""
+        if self.reporting_disabled == disabled:
+            return None
+        self.reporting_disabled = self.stats["reporting_disabled"] = disabled
+        active = None
+        if disabled:
+            self.reporting_generation += 1
+            self.delivery_abort.set()
+            active = self.active_request
+            self.stats["disabled_records"] += sum(len(rows) for rows in self.records.values()) + sum(item[6] for item in self.queue)
+            for metric in self.metrics.values():
+                self.stats["disabled_records"] += len(metric.series)
+                metric.series.clear()
+                metric.start = time.time_ns()
+            self.records.clear()
+            self.queue.clear()
+            self.stats["buffer_bytes"] = self.stats["pending_bytes"] = self.stats["pending_batches"] = 0
+        else:
+            self.delivery_abort = threading.Event()
+            self.self_last = float("-inf")
+            for metric in self.metrics.values():
+                metric.start = time.time_ns()
+        return active
+
+    def sampling_record(self, severity="", context=None):
+        return {"service": self.service, "instance_id": self.instance, "sdk.language": "python",
+                "severity": severity.upper(), "trace_id": context.trace_id if context else None,
+                "event_id": self.instance + ":" + str(self.source_sequence)}
 
     def invalid(self, message):
         self.stats["invalid_records"] += 1
@@ -157,8 +207,10 @@ class _State:
 
     def store(self, table, signal, record):
         with self.lock:
-            if self.closed:
+            if self.closed or self.closing:
                 self.invalid("record after shutdown")
+            elif self.reporting_disabled:
+                self.stats["disabled_records"] += 1
             elif self.reserve(len(_json(record)) + 64):
                 self.records.setdefault((table, signal), []).append(record)
 
@@ -179,6 +231,8 @@ class _State:
             "scope": {"name": "lightmoni/sdk/python", "version": "0.1.0"}, field: records}]}]})
 
     def collect(self):
+        if self.reporting_disabled:
+            return
         now = time.time_ns()
         for metric in self.metrics.values():
             end = max(now, metric.start)
@@ -235,7 +289,7 @@ class _State:
         return True
 
     def collect_self(self):
-        if not self.self_enabled or time.monotonic() - self.self_last < 30:
+        if self.reporting_disabled or not self.self_enabled or time.monotonic() - self.self_last < 30:
             return
         self.self_last = time.monotonic()
         at = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -266,8 +320,11 @@ class Metric:
         s = self.state
         with s.lock:
             try:
-                if s.closed:
+                if s.closed or s.closing:
                     raise ValueError("metric after shutdown")
+                if s.reporting_disabled:
+                    s.stats["disabled_records"] += 1
+                    return
                 if self.kind == "counter":
                     if type(value) is not int or not 0 <= value <= _MAX_INT:
                         raise ValueError("counter requires nonnegative Int64")
@@ -307,6 +364,8 @@ class Span:
         if not name or len(name.encode()) > 255:
             raise ValueError("invalid span name")
         self.client, self.ended = client, False
+        self.reporting_generation = client._state.reporting_generation
+        self.suppressed = client._state.reporting_disabled
         self.context = TraceContext(parent.trace_id if parent else uuid.uuid4().hex, uuid.uuid4().hex[:16],
                                     parent.flags if parent else 1, parent.trace_state if parent else "")
         self.data = dict(name=name, kind=1, traceId=self.context.trace_id, spanId=self.context.span_id,
@@ -325,6 +384,9 @@ class Span:
         with self.client._state.lock:
             if not self.ended:
                 self.ended = True
+                if self.suppressed or self.reporting_generation != self.client._state.reporting_generation:
+                    self.client._state.stats["disabled_records"] += 1
+                    return
                 self.data["endTimeUnixNano"] = str(max(time.time_ns(), int(self.data["startTimeUnixNano"])))
                 self.client._state.store(self.client.table, "traces", self.data)
 
@@ -340,15 +402,28 @@ class Span:
 
 
 class Client:
-    def __init__(self, service, table, endpoint="http://127.0.0.1:4318", key="", self_telemetry=True, **limits):
-        self.table, self._state = _table(table), _State(service, endpoint, key, limits)
+    def __init__(self, service, table, endpoint="http://127.0.0.1:4318", key="", self_telemetry=True, *,
+                 log_sampling=None, disabled=False, remote_config=True, config_endpoint=None, config_key=None,
+                 config_interval=30, resource=None, instance_id=None, **limits):
+        if type(disabled) is not bool or type(remote_config) is not bool:
+            raise ValueError("reporting switches require booleans")
+        if type(config_interval) not in (int, float) or not math.isfinite(config_interval) or config_interval < 1:
+            raise ValueError("configuration interval must be at least one second")
+        policies = copy_policies({} if log_sampling is None else log_sampling)
+        config_url = _endpoint(config_endpoint if config_endpoint is not None else endpoint)
+        self.table, self._state = _table(table), _State(service, endpoint, key, limits, resource, instance_id)
+        self._state.local_sampling = policies
+        self._state.local_disabled = disabled
+        self._state.set_disabled(disabled)
+        self._state.remote_config, self._state.config_endpoint = remote_config, config_url
+        self._state.config_key, self._state.config_interval = config_key, config_interval
         self._state.self_enabled, self._state.self_table = bool(self_telemetry), self.table
         if self_telemetry:
             reference, stop, table = weakref.ref(self._state), self._state.stop, self.table
             def heartbeat():
                 while not stop.wait(30):
                     state = reference()
-                    if state is None or state.closed:
+                    if state is None or state.closed or state.closing:
                         return
                     client = object.__new__(Client)
                     client._state, client.table = state, table
@@ -357,7 +432,24 @@ class Client:
                     except (OSError, ValueError, RuntimeError):
                         pass
                     del client, state
-            threading.Thread(target=heartbeat, name="lightmoni-heartbeat", daemon=True).start()
+            self._state.heartbeat_worker = threading.Thread(target=heartbeat, name="lightmoni-heartbeat", daemon=True)
+            self._state.heartbeat_worker.start()
+        if remote_config:
+            reference, stop, table = weakref.ref(self._state), self._state.stop, self.table
+            def configuration():
+                while not stop.wait(config_interval):
+                    state = reference()
+                    if state is None or state.closed or state.closing:
+                        return
+                    client = object.__new__(Client)
+                    client._state, client.table = state, table
+                    try:
+                        client.refresh_config()
+                    except (OSError, ValueError, RuntimeError):
+                        pass
+                    del client, state
+            self._state.config_worker = threading.Thread(target=configuration, name="lightmoni-config", daemon=True)
+            self._state.config_worker.start()
 
     def with_table(self, table):
         child = object.__new__(Client)
@@ -370,7 +462,7 @@ class Client:
         if not name or len(name.encode()) > 255 or len(unit.encode()) > 64 or len(bounds) > 128 or any(not math.isfinite(n) or (i and bounds[i-1] >= n) for i, n in enumerate(bounds)):
             raise ValueError("invalid metric name/unit/boundaries")
         with s.lock:
-            if s.closed:
+            if s.closed or s.closing:
                 raise RuntimeError("SDK is closed")
             identity = (self.table, name)
             if identity in s.metrics:
@@ -400,22 +492,43 @@ class Client:
             if level not in ("trace", "debug", "info", "warn", "error", "fatal") or not isinstance(body, str) or len(body.encode()) > 65536:
                 raise ValueError("invalid log severity/body")
             context = context or _context.get()
+            values = dict(attributes or {})
+            encoded = _attrs(values)
             now = str(time.time_ns())
             row = dict(timeUnixNano=now, observedTimeUnixNano=now, severityText=level,
                        severityNumber={"trace": 1, "debug": 5, "info": 9, "warn": 13, "error": 17, "fatal": 21}[level],
-                       body={"stringValue": body}, attributes=_attrs(attributes or {}))
+                       body={"stringValue": body}, attributes=encoded)
             if context:
                 row.update(traceId=context.trace_id, spanId=context.span_id, flags=context.flags)
-            s.store(self.table, "logs", row)
+            with s.lock:
+                if s.closed or s.closing:
+                    s.invalid("log after shutdown")
+                    return
+                if s.reporting_disabled:
+                    s.stats["disabled_records"] += 1
+                    return
+                s.source_sequence += 1
+                policy = s.remote_sampling.get(self.table, s.local_sampling.get(self.table))
+                if policy is not None and self.table not in SYSTEM_TABLES:
+                    keep, rate, reason = sample_log(policy, self.table, s.sampling_record(level, context), values, s.resource_values)
+                    if not keep:
+                        counter = "excluded_logs" if reason == "excluded" else "unmatched_logs" if reason == "unmatched" else "sampled_out_logs"
+                        s.stats[counter] += 1
+                        return
+                    metadata = {"lightmoni.sampling.rate": float(rate), "lightmoni.sampling.weight": 1 / rate,
+                                "lightmoni.sampling.rule": reason, "lightmoni.source_id": s.instance,
+                                "lightmoni.source_seq": s.source_sequence}
+                    row["attributes"] = [a for a in encoded if a["key"] not in metadata] + _attrs(metadata)
+                s.store(self.table, "logs", row)
         except (ValueError, TypeError) as error:
             with s.lock:
                 s.invalid(error)
 
     def start_span(self, name, attributes=None, parent=None):
         with self._state.lock:
-            if self._state.closed:
+            if self._state.closed or self._state.closing:
                 raise RuntimeError("SDK is closed")
-        return Span(self, name, attributes or {}, parent or _context.get())
+            return Span(self, name, attributes or {}, parent or _context.get())
 
     def stats(self):
         with self._state.lock:
@@ -425,7 +538,75 @@ class Client:
         with self._state.lock:
             self._state.key = key
 
+    def update_log_sampling(self, policies):
+        snapshot = copy_policies(policies)
+        with self._state.lock:
+            if self._state.closed or self._state.closing:
+                raise RuntimeError("SDK is closed")
+            self._state.local_sampling = snapshot
+
+    def set_reporting_enabled(self, enabled):
+        if type(enabled) is not bool:
+            raise ValueError("reporting switch requires a boolean")
+        s = self._state
+        with s.lock:
+            if s.closed or s.closing:
+                raise RuntimeError("SDK is closed")
+            s.local_disabled = not enabled
+            active = s.set_disabled(s.local_disabled or s.remote_disabled)
+        if active is not None:
+            active.cancel()
+
+    def refresh_config(self, timeout=5):
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout must be positive")
+        s, deadline = self._state, time.monotonic() + min(timeout, 5)
+        acquired, request = False, None
+        try:
+            acquired = s.config_lock.acquire(timeout=max(0, deadline - time.monotonic()))
+            if not acquired:
+                raise TimeoutError("SDK configuration deadline exceeded")
+            with s.lock:
+                if not s.remote_config or s.closed or s.closing:
+                    raise RuntimeError("SDK configuration disabled or closed")
+                key = s.key if s.config_key is None else s.config_key
+                request = Request(s.config_endpoint + "/v1/sdk-config", deadline)
+                s.config_request = request
+            headers = {"Authorization": "Bearer " + key} if key else {}
+            status, _headers, raw = request.exchange("GET", headers=headers, maximum=1 << 20)
+            if status != 200:
+                raise RuntimeError("SDK configuration HTTP " + str(status))
+            snapshot = decode_config(raw)
+            if time.monotonic() >= deadline:
+                raise TimeoutError("SDK configuration deadline exceeded")
+            with s.lock:
+                if s.closed or s.closing:
+                    raise RuntimeError("SDK configuration disabled or closed")
+                s.remote_sampling = snapshot["log_sampling"]
+                s.remote_disabled = any(matches(rule["conditions"], s.sampling_record(), {}, s.resource_values)
+                                        for rule in snapshot["disable_rules"])
+                active = s.set_disabled(s.local_disabled or s.remote_disabled)
+                s.stats["config_revision"], s.stats["config_error"] = snapshot["revision"], ""
+            if active is not None:
+                active.cancel()
+        except (OSError, ValueError, RuntimeError, OverflowError, RecursionError, http.client.HTTPException) as error:
+            message = str(error) if isinstance(error, RuntimeError) and str(error).startswith("SDK configuration") else "SDK configuration unavailable or invalid"
+            with s.lock:
+                if not s.closing and not s.closed:
+                    s.stats["config_error"] = message
+            raise RuntimeError(message) from None
+        finally:
+            if request is not None:
+                with s.lock:
+                    if s.config_request is request:
+                        s.config_request = None
+            if acquired:
+                s.config_lock.release()
+
     def flush(self, timeout=10):
+        return self._flush(timeout)
+
+    def _flush(self, timeout, allow_closing=False):
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("timeout must be positive")
         s, deadline = self._state, time.monotonic() + timeout
@@ -433,13 +614,18 @@ class Client:
             raise TimeoutError("flush deadline exceeded")
         try:
             with s.lock:
-                if s.closed:
+                if s.closed or s.closing and not allow_closing:
                     raise RuntimeError("SDK is closed")
+                if s.reporting_disabled:
+                    return
+                generation, abort = s.reporting_generation, s.delivery_abort
                 s.collect()
                 target = s.sequence
             backoff = .2
             while True:
                 with s.lock:
+                    if generation != s.reporting_generation or abort.is_set():
+                        return
                     if not s.queue or s.queue[0][0] > target:
                         if s.failure:
                             raise RuntimeError(s.failure)
@@ -454,32 +640,42 @@ class Client:
                 if key:
                     headers["Authorization"] = "Bearer " + key
                 status, retry_after, rejected, acknowledged = 0, 0, 0, False
+                request = Request(s.endpoint + "/v1/" + signal, min(deadline, time.monotonic() + 10))
+                with s.lock:
+                    if generation != s.reporting_generation or abort.is_set():
+                        return
+                    s.active_request = request
                 try:
-                    request = urllib.request.Request(s.endpoint + "/v1/" + signal, payload, headers)
-                    with s.opener.open(request, timeout=min(remaining, 10)) as response:
-                        body = response.read(65537)
-                        if len(body) > 65536:
-                            status = 413
-                        else:
-                            result = json.loads(body or b"{}")
-                            if not isinstance(result, dict):
-                                raise ValueError("invalid acknowledgment")
-                            partial = result.get("partialSuccess") or {}
-                            if not isinstance(partial, dict):
-                                raise ValueError("invalid partial success")
-                            rejected = int(partial.get({"logs": "rejectedLogRecords", "metrics": "rejectedDataPoints", "traces": "rejectedSpans"}[signal], 0))
-                            acknowledged = True
-                except urllib.error.HTTPError as error:
-                    status = error.code
-                    raw = error.headers.get("Retry-After", "")
+                    response_status, response_headers, body = request.exchange("POST", payload, headers)
+                    if 200 <= response_status < 300:
+                        result = json.loads(body or b"{}")
+                        if not isinstance(result, dict):
+                            raise ValueError("invalid acknowledgment")
+                        partial = result.get("partialSuccess") or {}
+                        if not isinstance(partial, dict):
+                            raise ValueError("invalid partial success")
+                        rejected = int(partial.get({"logs": "rejectedLogRecords", "metrics": "rejectedDataPoints", "traces": "rejectedSpans"}[signal], 0))
+                        acknowledged = True
+                    else:
+                        status = response_status
+                    raw = response_headers.get("Retry-After", "")
                     try:
                         retry_after = max(0, float(raw)) if raw.isdigit() else max(0, email.utils.parsedate_to_datetime(raw).timestamp() - time.time())
                     except (ValueError, TypeError, OverflowError):
                         pass
-                    error.close()
-                except (OSError, ValueError, urllib.error.URLError):
+                except ResponseTooLarge:
+                    status = 413
+                except (OSError, ValueError, http.client.HTTPException):
                     pass
+                finally:
+                    with s.lock:
+                        if s.active_request is request:
+                            s.active_request = None
                 with s.lock:
+                    if generation != s.reporting_generation or abort.is_set():
+                        return
+                    if not s.queue or s.queue[0] is not item:
+                        raise RuntimeError("SDK queue changed during delivery")
                     if acknowledged or status not in (0, 401, 403, 429, 502, 503, 504):
                         s.queue.pop(0)
                         s.stats["pending_batches"] -= 1
@@ -495,15 +691,44 @@ class Client:
                     s.stats["retried_batches"] += 1
                     s.stats["last_error"] = f"telemetry delivery failed (HTTP {status})"
                 delay = max(retry_after, 30 if status in (401, 403) else backoff * random.uniform(.8, 1.2))
-                time.sleep(min(delay, max(0, deadline - time.monotonic())))
+                abort.wait(min(delay, max(0, deadline - time.monotonic())))
                 backoff = min(30, backoff * 2)
         finally:
             s.delivery.release()
 
     def shutdown(self, timeout=10):
-        self._state.stop.set()
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("timeout must be positive")
+        s, deadline = self._state, time.monotonic() + timeout
+        with s.lock:
+            waiting = s.closing or s.closed
+            if not waiting:
+                s.closing = True
+                s.stop.set()
+                s.delivery_abort.set()
+                s.delivery_abort = threading.Event()
+                requests = (s.active_request, s.config_request)
+        if waiting:
+            if not s.shutdown_done.wait(max(0, deadline - time.monotonic())):
+                raise TimeoutError("SDK shutdown deadline exceeded")
+            with s.lock:
+                failure = s.shutdown_failure
+            if failure is not None:
+                raise RuntimeError("SDK shutdown failed: " + str(failure)) from None
+            return
+        for request in requests:
+            if request is not None:
+                request.cancel()
+        failure = None
         try:
-            self.flush(timeout)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("SDK shutdown deadline exceeded")
+            self._flush(remaining, allow_closing=True)
+        except BaseException as error:
+            failure = error
+            raise
         finally:
-            with self._state.lock:
-                self._state.closed = True
+            with s.lock:
+                s.closed, s.shutdown_failure = True, failure
+                s.shutdown_done.set()
