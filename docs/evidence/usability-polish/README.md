@@ -1,5 +1,7 @@
 # 使用体验检查与完善
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/usability-polish/`](../../../artifacts/screenshots/docs/evidence/usability-polish/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 检查了大盘、日志、告警、Agent 和 SDK 接入页，沿用现有界面、颜色、组件和交互。本轮集中修复大盘的加载、保存、复制、删除和窄屏布局，没有重新设计页面。
 
 ## 问题与修复
@@ -26,8 +28,8 @@
 检查覆盖列表加载、目录失败、列表刷新失败、搜索、750 / 390px 布局、详情重试、离开未保存大盘时的提示、已应用面板修改的刷新恢复、保存失败保留输入、保存期间锁定表单、保存后刷新读回、告警深链接复制、删除版本冲突、数据接入模板、浅色主题、两倍缩放及旧链接历史返回。
 
 - [第一轮](1-report.json)、[第二轮](2-report.json)、[第三轮](3-report.json)
-- [基线问题](baseline/issues.json)、[桌面](3-list-desktop.png)、[390px 首屏](3-list-390-viewport.png)、[数据接入模板](3-data-templates-390.png)
-- [第一轮交互录像](1-interactions.webm)：沿用按钮按下反馈、页面进入和弹窗/加载状态过渡，没有新增装饰动画。
+- [基线问题](baseline/issues.json)、[桌面](../../../artifacts/screenshots/docs/evidence/usability-polish/3-list-desktop.png)、[390px 首屏](../../../artifacts/screenshots/docs/evidence/usability-polish/3-list-390-viewport.png)、[数据接入模板](../../../artifacts/screenshots/docs/evidence/usability-polish/3-data-templates-390.png)
+- [第一轮交互录像](../../../artifacts/screenshots/docs/evidence/usability-polish/1-interactions.webm)：沿用按钮按下反馈、页面进入和弹窗/加载状态过渡，没有新增装饰动画。
 
 局部修复由主 Agent 看图自检，未做独立视觉评审，也未给视觉评分。删减了模板空状态里重复的安装说明，保留接入方式和后续可见结果。
 

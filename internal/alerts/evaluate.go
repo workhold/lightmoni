@@ -192,6 +192,7 @@ func transition(old, in State, r Rule, now time.Time) (State, []string) {
 	}
 	gap := old.Health != "ok" || (!parse(old.LastEval).IsZero() && now.Sub(parse(old.LastEval)) > time.Duration(r.IntervalSeconds*2)*time.Second)
 	if in.Health != "ok" {
+		s.ConsecutiveFailures = 0
 		if old.Health != in.Health {
 			s.HealthSince = stamp(now)
 		}
@@ -221,6 +222,13 @@ func transition(old, in State, r Rule, now time.Time) (State, []string) {
 		s.LastSuccess = stamp(now)
 	}
 	if in.Status == "firing" {
+		if gap || old.Status == "normal" || old.Status == "recovering" {
+			s.ConsecutiveFailures = 0
+		}
+		if parse(old.LastEval).IsZero() || now.After(parse(old.LastEval)) {
+			s.ConsecutiveFailures++
+		}
+		countReady := s.ConsecutiveFailures >= max(1, r.ForCount)
 		if s.Status != "firing" {
 			if s.Status != "pending" || gap {
 				s.Since = stamp(now)
@@ -228,7 +236,7 @@ func transition(old, in State, r Rule, now time.Time) (State, []string) {
 			s.Status = "pending"
 			if s.Episode != "" {
 				s.Status = "firing"
-			} else if elapsed(now, s.Since, r.ForSeconds) {
+			} else if countReady && elapsed(now, s.Since, r.ForSeconds) {
 				s.Status = "firing"
 				s.Episode = id()
 				events = append(events, "firing")
@@ -239,6 +247,7 @@ func transition(old, in State, r Rule, now time.Time) (State, []string) {
 			s.LastNotify = stamp(now)
 		}
 	} else {
+		s.ConsecutiveFailures = 0
 		if s.Episode != "" {
 			if s.Status != "recovering" || gap {
 				s.Since = stamp(now)
@@ -402,6 +411,11 @@ func (m *Module) Evaluate(ctx context.Context, r Rule, now time.Time) error {
 		if includes(kinds, "resolved") {
 			state.Episode = ""
 		}
+		if in.Status != "firing" || in.Health != "ok" || !parse(old.LastEval).IsZero() && now.Sub(parse(old.LastEval)) > time.Duration(2*r.IntervalSeconds)*time.Second {
+			if e = resetNightProgressTx(tx, state.Episode); e != nil {
+				return e
+			}
+		}
 		if len(r.LabelFields) > 0 && len(in.Labels) == 0 && hasGroupedData && state.Status == "normal" {
 			if _, e = tx.Exec("DELETE FROM alert_states WHERE rule_id=? AND fingerprint=?", r.ID, fp); e != nil {
 				return e
@@ -425,6 +439,7 @@ func (m *Module) Run(ctx context.Context) {
 		if s.Status == "pending" {
 			s.Status = "normal"
 			s.Since = ""
+			s.ConsecutiveFailures = 0
 		}
 		if s.Status == "recovering" {
 			s.Status = "firing"

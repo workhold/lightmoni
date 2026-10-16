@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -5,8 +6,9 @@ import {resolve} from 'node:path';
 const base=process.env.LIGHTMONI_UI_URL??'http://localhost:5178',run=process.env.LIGHTMONI_QA_RUN??'1';
 const output=resolve(import.meta.dirname,'../../../../docs/evidence/usability-polish');
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 let browser;try{browser=await chromium.launch({headless:true});}catch{browser=await chromium.launch({headless:true,channel:'chrome'});}
-const context=await browser.newContext({viewport:{width:1440,height:1000},recordVideo:run==='1'?{dir:output,size:{width:1440,height:1000}}:undefined});
+const context=await browser.newContext({viewport:{width:1440,height:1000},recordVideo:run==='1'?{dir:mediaOutput,size:{width:1440,height:1000}}:undefined});
 await context.addInitScript(()=>{localStorage.setItem('lightmoni.nav.collapsed','false');if(!localStorage.getItem('lightmoni.appearance'))localStorage.setItem('lightmoni.appearance','dark');});
 const page=await context.newPage(),errors=[],checks=[],owned=new Set(),cleanup=[];
 page.on('pageerror',e=>errors.push(e.message));
@@ -16,7 +18,7 @@ page.on('dialog',async dialog=>{errors.push('unexpected native dialog: '+dialog.
 const center=process.env.LIGHTMONI_QA_CENTER_URL??'http://localhost:18380';
 await page.route('**/api/v1/**',async route=>{if(new URL(base).origin===new URL(center).origin||['GET','HEAD','OPTIONS'].includes(route.request().method()))return route.continue();const url=new URL(route.request().url()),response=await route.fetch({url:center+url.pathname+url.search,headers:{...route.request().headers(),origin:new URL(center).origin}});await route.fulfill({response});});
 async function json(path,options){const response=await context.request.fetch(base+'/api/v1'+path,options);if(!response.ok())throw new Error(path+': '+response.status()+' '+await response.text());return response.json();}
-async function shot(name,fullPage=true){await page.screenshot({path:resolve(output,`${run}-${name}.png`),fullPage,animations:'disabled'});}
+async function shot(name,fullPage=true){await page.screenshot({path:resolve(mediaOutput,`${run}-${name}.png`),fullPage,animations:'disabled'});}
 async function noOverflow(){expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);}
 const unique=run+'-'+Date.now(),originalTitle='操作体验 QA '+unique,savedTitle='保存体验 QA '+unique,copyTitle='副本体验 QA '+unique;
 let releaseList,releaseSave;
@@ -56,5 +58,5 @@ try{
 finally{
  releaseList?.();releaseSave?.();
  for(const id of owned){try{const d=await json('/dashboards/'+id);const removed=await json(`/dashboards/${id}?revision=${d.revision}`,{method:'DELETE'});if(!removed.deleted)throw new Error('cleanup did not delete fixture');cleanup.push(id);}catch(error){console.error('QA fixture cleanup failed:',id,String(error));process.exitCode=1;}}
- await writeFile(resolve(output,`${run}-cleanup.json`),JSON.stringify({deleted:cleanup},null,2));await context.close();if(run==='1'&&page.video())await page.video().saveAs(resolve(output,'1-interactions.webm'));await browser.close();
+ await writeFile(resolve(output,`${run}-cleanup.json`),JSON.stringify({deleted:cleanup},null,2));await context.close();if(run==='1'&&page.video())await page.video().saveAs(resolve(mediaOutput,'1-interactions.webm'));await browser.close();
 }

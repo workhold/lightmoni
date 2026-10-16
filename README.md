@@ -24,7 +24,7 @@ docker compose config --quiet
 docker compose up -d --build --wait
 ```
 
-打开默认的 `http://localhost:8080` 创建管理员。使用 Nginx 时，把 `LIGHTMONI_EXTERNAL_URL` 设为浏览器访问的 HTTPS 域名；如只允许宿主机反向代理访问，设置 `LIGHTMONI_BIND_ADDRESS=127.0.0.1`。SDK / Agent 的默认中心上报地址初始使用该工作台地址，也可在“设置 → 接入地址”单独保存公网或内网入口。兼容启动脚本 `sh deploy/server/start.sh` 使用同一套根目录配置。
+打开默认的 `http://localhost:8080` 创建管理员。使用 Nginx 时，把 `LIGHTMONI_EXTERNAL_URL` 设为浏览器访问的 HTTPS 域名；如只允许宿主机反向代理访问，设置 `LIGHTMONI_BIND_ADDRESS=127.0.0.1`。SDK / Agent 的默认中心上报地址初始使用该工作台地址，也可在“管理后台 → 接入配置”保存多个内网、公网入口。兼容启动脚本 `sh deploy/server/start.sh` 使用同一套根目录配置。
 
 如果需要同时启动 ClickHouse，使用独立目录 [deploy/with-clickhouse](deploy/with-clickhouse/README.md) 中的 Compose 和 `.env.example`：
 
@@ -49,7 +49,7 @@ docker compose up -d --no-build --wait
 
 ## Agent 与 SDK
 
-“数据接入”提供独立的“SDK 接入”和“Agent 接入”Tab。在“Agent 接入”选择 Agent 分组、填写上报地址和 Key，复制生成的命令到 Linux 服务器执行，在隐藏输入提示中粘贴 Key（页面支持单独复制 Key）。安装程序自动保存连接配置，无需编辑 JSON。创建 Key 时默认授权所选组的机器指标、拨测和目录日志表，也可授权所有 table；业务 SDK 使用的 table 需另行授权。安装包支持 amd64 / arm64，验证 SHA256，安装 systemd 服务；升级、重装保留身份和磁盘队列。
+“数据接入”提供独立的“SDK 接入”和“Agent 接入”Tab。在“Agent 接入”选择 Agent 分组、上报地址并填写 Key，复制生成的完整命令到 Linux 服务器执行。命令自带所填 Key，用于安装脚本、Agent 包及校验文件的下载鉴权，并自动写入上报配置。安装程序自动保存连接配置，无需编辑 JSON。创建 Key 时默认授权所选组的机器指标、拨测和目录日志表，也可授权所有 table；业务 SDK 使用的 table 需另行授权。安装包支持 amd64 / arm64，验证 SHA256，安装 systemd 服务；升级、重装保留身份和磁盘队列。
 
 在“Agent → 配置分组任务”通过四个 Tab 设置机器指标、HTTP/TCP 拨测、目录日志和上报表。同组所有 Agent 使用同一份任务，平台支持更改机器所属分组；已有机器重连时保留平台分配。机器指标可关闭，也可勾选 CPU、内存、文件系统、磁盘 I/O、网络、负载或指定进程，并设置采集间隔。
 
@@ -57,7 +57,7 @@ docker compose up -d --no-build --wait
 
 “SDK 接入”可选择“通过 Agent”或“直连中心”，八种语言均提供对应的代码高亮示例、环境变量和复制按钮。通过 Agent 默认连 `http://127.0.0.1:4318`，中心 Key 由 Agent 保存。直连中心无需 Agent，传入中心地址和允许目标 table 的 Key，适用于容器、Serverless 等部署。示例读取 `LIGHTMONI_ENDPOINT` / `LIGHTMONI_KEY`；容器通过 environment / Secret 注入，中心地址应使用容器可访问的域名或服务地址。同一 Docker 网络可用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可用 `host.docker.internal`。SDK 通过 Agent 上报时，也受 Agent Key 的 table 白名单约束。
 
-管理员可在“设置 → 接入地址”保存默认中心上报地址，例如 Nginx 对外的 `https://monitor.example.com`。留空时使用部署变量 `LIGHTMONI_EXTERNAL_URL`；默认地址持久保存，重启后保留，生成 SDK 直连配置、Agent 命令和安装包链接时立即生效。接入页可单独覆盖地址：公网服务使用 A 域名，内网服务器使用 B 地址，二者指向同一实例即可；生成的 Agent 命令从所填地址下载安装脚本和安装包，并将其保存为上报地址。SDK 通过 Agent 时仍默认使用本机 Agent 地址。更改系统默认值不修改已运行客户端的配置；已部署的 SDK 修改 `LIGHTMONI_ENDPOINT` 后重启，Agent 可重新生成安装命令更新地址并保留身份和磁盘队列。此设置独立于 `LIGHTMONI_EXTERNAL_URL` 用于登录回调和告警链接的工作台地址。
+管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址，并选择默认项，例如“公网”和“内网”。SDK 直连与 Agent 接入均可从列表选择，也支持临时填写其他可访问地址；所选地址会进入复制的 SDK 示例、环境变量或 Agent 安装命令。旧的单地址配置自动兼容；未配置列表时使用部署变量 `LIGHTMONI_EXTERNAL_URL`。这些地址应转发到同一个 LightMoni 实例。Agent 安装脚本、amd64 / arm64 包和 SHA256 校验文件由当前项目内置的 `/downloads/agent/` 提供，全部要求 `Authorization: Bearer <上报 Key>`，无密钥、错误或禁用 Key 均不能下载。SDK 通过 Agent 时默认使用本机 Agent 地址。修改地址列表不改变已运行客户端的连接配置；重新生成安装命令可更新 Agent 地址并保留身份和磁盘队列。此配置独立于登录回调和告警链接使用的工作台地址。
 
 ```ts
 const moni = createLightMoni({

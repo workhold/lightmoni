@@ -258,7 +258,7 @@
 
 `node src/features/dashboards/verify-ui.mjs` 使用5173/18880隔离开发环境、Docker ClickHouse、本机Agent CPU及受控SQL fixture，走实际UI配置、执行、保存和重载。最终代码连续3次通过（2026-10-10），各轮无pageerror、无原生select/dialog和无横向溢出。核心line/area/time-bar/pie/stat/table/gauge/time-heatmap均实际渲染；CPU来自Agent，其余受控SQL用于稳定验证值映射和绘图边界，不替代主干的Go/Node SDK完整接入验收。
 
-截图已查看：`examples/dashboards/evidence/thresholds-and-series.png`、`value-mapping-and-null.png`、`core-chart-gallery.png`；最后一轮记录见`report.json`。保留最终QA副本`da1cf2cb-96af-4cab-a42d-61523c806ab0`以便复查，其余本任务创建的5份QA副本已清理，原CPU验收大盘保持不变。共享AI上下文已显式发布dashboard_id、绝对range及单值service，不从SQL反推table。
+截图已查看，现归档在本机 `artifacts/screenshots/examples/dashboards/evidence/`：`thresholds-and-series.png`、`value-mapping-and-null.png`、`core-chart-gallery.png`；最后一轮记录见`report.json`。保留最终QA副本`da1cf2cb-96af-4cab-a42d-61523c806ab0`以便复查，其余本任务创建的5份QA副本已清理，原CPU验收大盘保持不变。共享AI上下文已显式发布dashboard_id、绝对range及单值service，不从SQL反推table。
 
 完整B01–B18的故障链路和跨模块联合验收仍由主干逐项记录；任意字段覆盖/变换流水线与逐序列多于两轴的配置暂不在当前实现中，不能将已通过的绘图检查描述成完整Grafana格式与所有插件兼容。
 

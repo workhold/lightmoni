@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-16",
+  "backend_test_runs": 3,
+  "backend_tests": "TestAgentInstaller|TestReporting|TestMultipleReporting|TestEmbeddedAgent|TestSDKCatalog",
+  "node_tests_passed": 8,
+  "typecheck": true,
+  "production_build": true,
+  "ui_checks": [
+    "新增地址并保存后刷新读回",
+    "切换默认地址并持久保存",
+    "移除其他地址后默认项仍对应正确地址",
+    "Agent 列表选择公网线路后，复制命令含所选地址和 Key",
+    "SDK 复制示例含所选地址，移除旧默认地址",
+    "390px 设置页无页面横向溢出"
+  ],
+  "download_checks": [
+    "缺失、错误、禁用 Key 返回401",
+    "带有效 Key 下载项目安装器、校验文件和 Agent 包",
+    "归档与校验文件哈希匹配内置资源",
+    "当前5173开发入口无Key下载返回401"
+  ],
+  "local_service_updated": true,
+  "screenshots": "artifacts/screenshots/reporting-routes"
+}

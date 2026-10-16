@@ -1,5 +1,7 @@
 # 图表直接告警验收
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/panel-alerts/`](../../../artifacts/screenshots/docs/evidence/panel-alerts/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 沿用现有深色图表编辑器。主流程为选择当前图表的查询或具体曲线，配置高于、低于或没有打点条件，直接选择接收通知的告警组。删除了关联已有规则、从查询跳转到通用规则编辑器和手选水位线轴的流程。
 
 支持多个独立条件、最新点/平均值/最大值/最小值、检查与持续时间、暂停与移除。保存前实查查询并校验通知目标；失败保留输入。修改图表查询或字段后应用面板时同步更新告警。阈值线跟随曲线所在轴，断点条件只显示触发和恢复时间标记。直接组覆盖数据表默认组，共享目标继续去重。图表补零不影响原始点数判断。
@@ -18,9 +20,9 @@
 
 主 Agent 已查看普通尺寸、200% 局部和窄屏截图；本次为局部流程修改，未进行独立视觉评审。复用现有 Select、Collapse 和保存反馈，不另加动效系统。
 
-- [当前图表告警](1791654808044/threshold.png)
-- [200% 局部](1791654808044/threshold-200.png)
-- [保存后的多个条件](1791654808044/saved-conditions.png)
-- [390px 设置抽屉](1791654808044/narrow.png)
+- [当前图表告警](../../../artifacts/screenshots/docs/evidence/panel-alerts/1791654808044/threshold.png)
+- [200% 局部](../../../artifacts/screenshots/docs/evidence/panel-alerts/1791654808044/threshold-200.png)
+- [保存后的多个条件](../../../artifacts/screenshots/docs/evidence/panel-alerts/1791654808044/saved-conditions.png)
+- [390px 设置抽屉](../../../artifacts/screenshots/docs/evidence/panel-alerts/1791654808044/narrow.png)
 
 验证脚本：[verify-panel-alerts.mjs](../../../web/src/features/dashboards/verify-panel-alerts.mjs)。脚本使用上述隔离测试账号和运行中的测试服务，创建自己专用的 SDK 数据、告警组、大盘及本地 Webhook。

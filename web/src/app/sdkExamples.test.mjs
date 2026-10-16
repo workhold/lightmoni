@@ -33,3 +33,16 @@ test('SDK URLs accept public and container routes and reject incompatible config
  for(const endpoint of ['http://localhost:18380','http://127.0.0.1:18380','http://[::1]:18380'])assert.equal(sdkEndpointIsLoopback(endpoint),true);
  assert.equal(sdkEndpointIsLoopback('http://lightmoni:8080'),false);
 });
+
+test('all SDK demos carry the selected public or private route without changing key injection',()=>{
+ for(const endpoint of ['https://public.example/monitor','http://10.0.0.8:8080/base']){
+  for(const language of Object.keys(sdkExamples)){
+   const sample=sdkSampleFor(language,'direct',endpoint+'/');
+   assert.ok(sample.includes(endpoint),language);
+   assert.match(sample,/LIGHTMONI_KEY/);
+   assert.doesNotMatch(sample,/127\.0\.0\.1:4318/);
+  }
+ }
+ assert.match(sdkSampleFor('php','direct',"https://center/a'$value"),/https:\/\/center\/a\\'\$value'/);
+ assert.match(sdkSampleFor('ruby','direct',"https://center/a'path"),/https:\/\/center\/a\\'path'/);
+});

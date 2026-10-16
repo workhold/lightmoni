@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "checks": [
+    "短接手入口跳转告警页并且只认领一次，显示实际接手人和方式",
+    "人员接手率、平均/P95时长、同组接手及不同接手方式显示正确",
+    "用户组、并行主备、两周循环、排班预览和分级响应策略可以保存",
+    "静默窗口创建后可回读",
+    "系统设置覆盖飞书/钉钉/企业微信并支持企业应用配置",
+    "本人通知资料可以保存",
+    "固定时间与表范围的Trace树、瀑布与错误状态正确展示",
+    "390px联系方式和排班对话框没有横向溢出"
+  ],
+  "page_errors": [],
+  "scope": "Controlled browser fixtures; Go tests use real local HTTP and SQLite. No paid notifications sent."
+}

@@ -1,5 +1,7 @@
 # 2026-10-11 工作台验收
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/workbench-next/`](../../../artifacts/screenshots/docs/evidence/workbench-next/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 运行环境：真实本机 Agent → localhost:18380 Go 服务 → Docker ClickHouse。localhost:5174 是同后端的浏览器验收前端。没有使用随机曲线或伪造告警事件。
 
 | 范围 | 结果与证据 |

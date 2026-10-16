@@ -1,5 +1,6 @@
 // Discover regressions against the actual SDK → Agent → ClickHouse fixture.
 // Run smoke.mjs first. No responses are mocked; each pass uses fresh tabs.
+import { mediaDirectory } from '../../scripts/qa-artifacts.mjs';
 import {createRequire} from 'node:module';
 import {readFileSync,existsSync,mkdirSync,writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
@@ -10,6 +11,7 @@ const {chromium,request}=require('playwright'),{expect}=require('@playwright/tes
 const fixture=JSON.parse(readFileSync(path.join(root,'examples/logs/results/run.json'),'utf8'));
 const base=process.env.LIGHTMONI_TEST_URL??fixture.base,ui=process.env.LIGHTMONI_UI_URL??fixture.ui;
 const evidence=path.join(root,'docs/evidence/logs-discover/regression');mkdirSync(evidence,{recursive:true});
+const mediaOutput=mediaDirectory(evidence);
 const api=await request.newContext({baseURL:base});
 async function send(url,data,method='POST'){
  const response=await api.fetch('/api/v1'+url,{method,data});
@@ -24,7 +26,7 @@ const browser=await chromium.launch({headless:true,...(existsSync(chrome)?{execu
 const report=[];
 try{
  for(let round=1;round<=3;round++){
-  const context=await browser.newContext({viewport:{width:1440,height:960},storageState:await api.storageState(),permissions:['clipboard-read','clipboard-write'],...(round===1?{recordVideo:{dir:path.join(evidence,'motion'),size:{width:1440,height:960}}}:{})});
+  const context=await browser.newContext({viewport:{width:1440,height:960},storageState:await api.storageState(),permissions:['clipboard-read','clipboard-write'],...(round===1?{recordVideo:{dir:path.join(mediaOutput,'motion'),size:{width:1440,height:960}}}:{})});
   const page=await context.newPage();page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',err=>errors.push(err.message));let savedID;
   const query=async(action)=>{const pending=page.waitForResponse(r=>r.url().endsWith('/logs/search')&&r.request().method()==='POST');await action();const response=await pending;expect(response.status()).toBe(200);return response.json()};
   const select=async(label,text)=>{await page.getByRole('combobox',{name:label,exact:true}).click();await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText(text,{exact:true}).click()};
@@ -77,8 +79,8 @@ try{
    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
    await page.getByRole('button',{name:'更多日志操作'}).click();await expect(page.getByRole('menuitem',{name:'查看执行 SQL'})).toBeVisible();await page.keyboard.press('Escape');
    expect(errors).toEqual([]);report.push({round,status:'passed',matched:expected.total_loaded});
-   if(round===1){await page.setViewportSize({width:1440,height:960});await page.screenshot({path:path.join(evidence,'verified-desktop.png'),fullPage:true});}
-  }catch(error){await page.screenshot({path:path.join(evidence,`failure-${round}.png`),fullPage:true});throw error}
+   if(round===1){await page.setViewportSize({width:1440,height:960});await page.screenshot({path:path.join(mediaOutput,'verified-desktop.png'),fullPage:true});}
+  }catch(error){await page.screenshot({path:path.join(mediaOutput,`failure-${round}.png`),fullPage:true});throw error}
   finally{if(savedID)await api.delete('/api/v1/logs/saved-searches/'+savedID);await context.close()}
   console.log(`PASS Discover round ${round}: literal punctuation, expression/autocomplete, chips, columns/wrap, detail navigation, new-tab share/reload, saved SQLite view, statistics, time reset, narrow fields/menu.`);
  }

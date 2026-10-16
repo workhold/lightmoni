@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import {useNavigate} from 'react-router-dom';
 import { ArrowUpOutlined, CheckOutlined, CopyOutlined, HistoryOutlined, MessageOutlined, PlusOutlined, SettingOutlined, StopOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import XMarkdown, { type ComponentProps } from '@ant-design/x-markdown';
 import '@ant-design/x-markdown/themes/light.css';
@@ -11,7 +12,6 @@ import type { CatalogTable, QueryResponse, TimeRange, User } from '../../shared/
 import { streamTurn } from './client';
 import { assistantTimeline, queryRangeFromTurn } from './timeline';
 import type { AssistantConfig, AssistantContext, AssistantEvent, AssistantSession, DashboardDraft, DraftPanel, TurnView } from './types';
-import { ModelSettings } from './ModelSettings';
 import './assistant.css';
 
 export interface AssistantPanelProps {
@@ -68,6 +68,7 @@ function ToolProgress({ turn, onDraft }: { turn: TurnView; onDraft: (draft: Dash
 }
 
 export function AssistantPanel({ compact = false, initialContext, initialPrompt, onDashboardDraft, onSQL }: AssistantPanelProps) {
+  const navigate=useNavigate();
   const [config, setConfig] = useState<AssistantConfig>();
   const [user, setUser] = useState<User>();
   const [tables, setTables] = useState<CatalogTable[]>([]);
@@ -82,7 +83,6 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [draft, setDraft] = useState<DashboardDraft | null>(null);
   const [draftError, setDraftError] = useState('');
   const [draftSaving, setDraftSaving] = useState(false);
@@ -147,7 +147,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     catch (problem) { setError(errorText(problem)); controller.current?.abort(); }
   }
 
-  function openSettings() { setSettingsOpen(true); }
+  function openSettings() { navigate('/admin?tab=models'); }
 
   function openDraft(value: DashboardDraft, analysisRange?: TimeRange) { const copy = JSON.parse(JSON.stringify(value)) as DashboardDraft; setDraft({ ...copy, range: copy.range ?? analysisRange ?? context.range ?? rangeFor(context.query?.lookback_hours ?? lookback) }); setDraftError(''); setPreview({});  }
   function updatePanel(index: number, update: Partial<DraftPanel>) { setDraft(previous => previous ? { ...previous, panels: previous.panels.map((panel, panelIndex) => panelIndex === index ? { ...panel, ...update } : panel) } : previous); setPreview({}); }
@@ -180,7 +180,6 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       <div className="lm-assistant-composer"><Input.TextArea aria-label="给 AI 助手的问题" placeholder="询问日志中的异常，或描述你想创建的大盘…" value={text} onChange={event => setText(event.target.value)} autoSize={{ minRows: 2, maxRows: 7 }} maxLength={16000} disabled={busy} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} /><div className="lm-assistant-composer-actions"><small>Enter 发送 · Shift + Enter 换行</small>{busy ? <Button danger icon={<StopOutlined />} onClick={() => void cancel()}>停止</Button> : <Button type="primary" aria-label="发送" icon={<ArrowUpOutlined />} disabled={!text.trim() || !config?.enabled || loading} onClick={() => void send()}>发送</Button>}</div></div>
     </main>
     <Drawer title="对话历史" open={historyOpen} onClose={() => setHistoryOpen(false)} size="default" destroyOnHidden>{historyContent()}</Drawer>
-    <ModelSettings open={settingsOpen} config={config} onClose={() => setSettingsOpen(false)} onSaved={setConfig} />
     <Modal open={!!draft} title="审阅大盘草稿" width={880} onCancel={() => { if (!draftSaving) { previewController.current?.abort(); setDraft(null); } }} footer={<Space><Button onClick={() => void previewDraft()} loading={previewing} disabled={draftSaving}>运行查询预览</Button><Button onClick={() => { previewController.current?.abort(); setDraft(null); }} disabled={draftSaving}>取消</Button><Button type="primary" onClick={() => void saveDraft()} loading={draftSaving} disabled={previewing || !draft?.title.trim()}>确认保存大盘</Button></Space>} destroyOnHidden>{draft && <div className="lm-assistant-draft"><Alert type="info" title="检查查询和面板配置，确认后保存" showIcon />{draft.range && <p className="lm-assistant-draft-range">分析时间（UTC）：{draft.range.from} → {draft.range.to}</p>}<label>大盘名称<Input value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>{draft.panels.map((panel, index) => <div className="lm-assistant-draft-panel" key={panel.id ?? index}><div className="lm-assistant-draft-panel-title"><Input value={panel.title} onChange={event => updatePanel(index, { title: event.target.value })} /><Select value={panel.type} options={['timeseries', 'bar', 'pie', 'stat', 'table', 'heatmap', 'gauge'].map(type => ({ value: type, label: type }))} onChange={type => updatePanel(index, { type })} /></div>{panel.queries.map((query, queryIndex) => <div className="lm-assistant-draft-query" key={query.refId}><span>查询 {query.refId}</span><Input.TextArea value={query.sql} rows={4} onChange={event => updatePanel(index, { queries: panel.queries.map((item, itemIndex) => itemIndex === queryIndex ? { ...item, sql: event.target.value } : item) })} /></div>)}{preview[index]?.results.map(result => <div key={result.refId}><Space><Tag color={result.status === 'error' ? 'error' : 'success'}>{result.refId} · {result.status}</Tag><small>{result.elapsed_ms} ms</small>{result.truncated && <Tag color="warning">结果已截断</Tag>}</Space>{result.error && <Alert type="error" title={result.error} />}{result.frames.map((frame, frameIndex) => <Table key={frameIndex} size="small" scroll={{ x: true }} pagination={{ pageSize: 5, size: 'small' }} columns={frame.columns.map((column, columnIndex) => ({ title: column.name, key: column.name, render: (_: unknown, row: unknown[]) => readable(row[columnIndex]) }))} dataSource={frame.rows} rowKey={(_, rowIndex) => String(rowIndex)} />)}</div>)}</div>)}{draftError && <Alert type="error" title={draftError} showIcon />}</div>}</Modal>
   </div>;
 }

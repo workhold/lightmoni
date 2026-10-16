@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -7,6 +8,7 @@ const base = process.env.LIGHTMONI_UI_URL ?? 'http://127.0.0.1:5178';
 const output = resolve(import.meta.dirname,'../../../docs/evidence/ingestion-table-keys');
 const run = process.env.LIGHTMONI_QA_RUN ?? '1';
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 let browser;
 try { browser = await chromium.launch({headless:true}); }
 catch { browser = await chromium.launch({headless:true,channel:'chrome'}); }
@@ -36,7 +38,7 @@ try {
   await expect(page.getByRole('tab',{name:'SDK 接入',exact:true})).toBeVisible();
   await expect(page.getByRole('heading',{name:'SDK 接入',exact:true})).toBeVisible();
   await expect(page.getByRole('heading',{name:'接入 Agent'})).toHaveCount(0);
-  await page.screenshot({path:resolve(output,`sdk-${run}.png`),fullPage:true,animations:'disabled'});
+  await page.screenshot({path:resolve(mediaOutput,`sdk-${run}.png`),fullPage:true,animations:'disabled'});
   await page.getByRole('tab',{name:'Agent 接入',exact:true}).click();
   await expect(page.getByRole('heading',{name:'接入 Agent'})).toBeVisible();
   await expect(page.getByRole('heading',{name:'SDK 接入',exact:true})).toHaveCount(0);
@@ -62,7 +64,7 @@ try {
   await expect(dialog.getByText(/无效的逻辑 table/)).toBeHidden();
   await dialog.getByRole('textbox',{name:'Key 名称',exact:true}).click();
   await expect(page.locator('.ant-select-dropdown:visible')).toHaveCount(0);
-  await page.screenshot({path:resolve(output,`key-create-${run}.png`),fullPage:true,animations:'disabled'});
+  await page.screenshot({path:resolve(mediaOutput,`key-create-${run}.png`),fullPage:true,animations:'disabled'});
   await dialog.getByRole('button',{name:/创\s*建/}).click();
   const created = page.getByRole('dialog',{name:'Key 已创建，仅显示这一次'});
   await expect(created).toBeVisible();
@@ -117,7 +119,7 @@ try {
   expect(list.find(key => key.id === item.id).allowed_tables).toEqual(['mobile']);
   checks.push('启用/禁用保留 table 白名单，禁用后上报返回 401');
   await noOverflow();
-  await page.screenshot({path:resolve(output,`keys-${run}.png`),fullPage:true,animations:'disabled'});
+  await page.screenshot({path:resolve(mediaOutput,`keys-${run}.png`),fullPage:true,animations:'disabled'});
 
   await page.getByRole('button',{name:/创建 Key$/}).click();
   const allEditor = page.getByRole('dialog',{name:'创建上报 Key',exact:true});
@@ -126,7 +128,7 @@ try {
   await expect(allEditor.getByRole('radio',{name:'指定 table',exact:true})).toBeChecked();
   await allEditor.getByRole('radio',{name:'所有 table',exact:true}).check();
   await expect(allEditor.getByRole('combobox',{name:'允许写入的 Table'})).toHaveCount(0);
-  await page.screenshot({path:resolve(output,`key-create-all-${run}.png`),fullPage:true,animations:'disabled'});
+  await page.screenshot({path:resolve(mediaOutput,`key-create-all-${run}.png`),fullPage:true,animations:'disabled'});
   await allEditor.getByRole('button',{name:/创\s*建/}).click();
   await expect(created).toBeVisible();
   const allKey = (await created.locator('code').innerText()).trim();
@@ -193,17 +195,17 @@ try {
     if (await page.locator('.lm-shell.is-nav-expanded').count()) await page.locator('.lm-nav-collapse').click();
     await page.getByRole('tab',{name:'SDK 接入',exact:true}).click();
     await noOverflow();
-    await page.screenshot({path:resolve(output,`sdk-${width}-${run}.png`),fullPage:true,animations:'disabled'});
+    await page.screenshot({path:resolve(mediaOutput,`sdk-${width}-${run}.png`),fullPage:true,animations:'disabled'});
     await page.getByRole('tab',{name:'Agent 接入',exact:true}).click();
     await noOverflow();
-    await page.screenshot({path:resolve(output,`agent-${width}-${run}.png`),fullPage:true,animations:'disabled'});
+    await page.screenshot({path:resolve(mediaOutput,`agent-${width}-${run}.png`),fullPage:true,animations:'disabled'});
   }
   expect(errors).toEqual([]);
   checks.push('1440/750/390 视口无页面横向溢出，无浏览器运行时异常');
   await writeFile(resolve(output,`report-${run}.json`),JSON.stringify({run,checks,errors,backend:'真实 Auth/SQLite/Ingest；ClickHouse 写入替身'},null,2));
   console.log(JSON.stringify({run,status:'PASS',checks}));
 } catch (error) {
-  await page.screenshot({path:resolve(output,`failure-${run}.png`),fullPage:true,animations:'disabled'});
+  await page.screenshot({path:resolve(mediaOutput,`failure-${run}.png`),fullPage:true,animations:'disabled'});
   console.log(JSON.stringify({buttons:await page.getByRole('button').allTextContents(),errors}));
   throw error;
 } finally { await browser.close(); }

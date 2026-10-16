@@ -1,0 +1,24 @@
+=== RUN   TestSQLiteCreateReadConflictCopyAndRestart
+--- PASS: TestSQLiteCreateReadConflictCopyAndRestart (0.01s)
+=== RUN   TestInvalidDefinitionsRejected
+--- PASS: TestInvalidDefinitionsRejected (0.00s)
+=== RUN   TestOverwriteIsFencedAndKeepsVersionHistory
+--- PASS: TestOverwriteIsFencedAndKeepsVersionHistory (0.00s)
+=== RUN   TestVariablePlanningRejectsCyclesAndIgnoresSQLText
+--- PASS: TestVariablePlanningRejectsCyclesAndIgnoresSQLText (0.00s)
+=== RUN   TestAlertDraftUsesPublicASTAndPreservesParameters
+--- PASS: TestAlertDraftUsesPublicASTAndPreservesParameters (0.00s)
+=== RUN   TestDashboardRowsSettingsPersistAndCopy
+--- PASS: TestDashboardRowsSettingsPersistAndCopy (0.00s)
+=== RUN   TestDashboardRowsRejectDanglingAndDuplicateReferences
+--- PASS: TestDashboardRowsRejectDanglingAndDuplicateReferences (0.00s)
+=== RUN   TestDashboardEpochRangeCanBeSaved
+--- PASS: TestDashboardEpochRangeCanBeSaved (0.00s)
+=== RUN   TestQueryOptionsPersistAcrossSaveCopyAndRestart
+--- PASS: TestQueryOptionsPersistAcrossSaveCopyAndRestart (0.00s)
+=== RUN   TestInvalidQueryOptionsCannotBeSaved
+--- PASS: TestInvalidQueryOptionsCannotBeSaved (0.00s)
+=== RUN   TestSystemDashboardsSeedOnceAndRespectEditsAndDeletion
+--- PASS: TestSystemDashboardsSeedOnceAndRespectEditsAndDeletion (0.00s)
+PASS
+ok  	github.com/lightmoni/lightmoni/internal/dashboards	2.889s

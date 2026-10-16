@@ -1,5 +1,7 @@
 # Agent 分组、表单任务与目录日志验收
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/agent-groups/`](../../../artifacts/screenshots/docs/evidence/agent-groups/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 2026-10-11。本次以既有监控工作台的 Ant Design 组件、主题和间距为基线，将 Agent 的任务调整为分组统一下发，用四个 Tab 编辑机器指标、拨测任务、目录日志与上报配置。分组概览显示当前任务及同步状态，机器支持平台改组，接入入口带入所选分组生成安装命令。没有新增设计系统，也没有 JSON 编辑入口。
 
 ## 已实现
@@ -28,9 +30,9 @@ Linux amd64/arm64 安装包已重新生成，并在隔离的 Linux 容器中验�
 
 ## 视觉与交互证据
 
-沿用 Tab 指示条、Modal 展开/关闭、保存加载与结果反馈三处基础动效。[交互录像](interaction-1.webm) 和 [录像接触表](motion-contact.png) 保留实际操作及过渡。主 Agent 自检，未安排独立视觉评审；没有编造评分。
+沿用 Tab 指示条、Modal 展开/关闭、保存加载与结果反馈三处基础动效。[交互录像](../../../artifacts/screenshots/docs/evidence/agent-groups/interaction-1.webm) 和 [录像接触表](../../../artifacts/screenshots/docs/evidence/agent-groups/motion-contact.png) 保留实际操作及过渡。主 Agent 自检，未安排独立视觉评审；没有编造评分。
 
-最终桌面截图：`host-form-3.png`、`probe-form-3.png`、`log-form-3.png`、`saving-3.png`、`groups-3.png`、`install-3.png`。窄屏：`form-390-3.png`、`form-750-3.png`、`install-390-3.png`、`install-750-3.png`。已查看桌面、手机长页及目录表单的 [200% 局部](log-form-200.png)，检查中文换行、表单层级、目标表和主动作。
+最终桌面截图：`host-form-3.png`、`probe-form-3.png`、`log-form-3.png`、`saving-3.png`、`groups-3.png`、`install-3.png`。窄屏：`form-390-3.png`、`form-750-3.png`、`install-390-3.png`、`install-750-3.png`。已查看桌面、手机长页及目录表单的 [200% 局部](../../../artifacts/screenshots/docs/evidence/agent-groups/log-form-200.png)，检查中文换行、表单层级、目标表和主动作。
 
 减法处理：移除原远程 JSON 输入和私有配置下载，将手动 revision、毫秒等细节转换为保存版本和秒；列表诊断改成可读状态，分组规则只在摘要与改组操作附近提示，没有额外装饰图像或重复说明。
 

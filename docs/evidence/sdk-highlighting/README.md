@@ -1,5 +1,7 @@
 # SDK 示例代码高亮
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/sdk-highlighting/`](../../../artifacts/screenshots/docs/evidence/sdk-highlighting/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 SDK 接入页的业务示例按 TypeScript、Go、Python、Java、C#、PHP、Ruby、Rust 的语法着色，安装命令按 Bash 语法显示。使用 highlight.js 11.12.0，仅注册这九种语言，代码与样式随应用打包。配色沿用现有 SQL 编辑器的深色/浅色色系。
 
 保持原有代码块尺寸、换行和复制动作。业务示例的文字及复制结果与原始样例逐字一致；C# 使用 csharp 语法，未识别的语言退回纯文本。主 Agent 自检，局部低风险修改，未安排独立评审。

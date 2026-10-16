@@ -1,0 +1,74 @@
+{
+  "date": "2026-10-16",
+  "passed": true,
+  "consecutive_browser_rounds": 3,
+  "deep_parity": [
+    {
+      "run": 1,
+      "passed": true,
+      "check_groups": 15,
+      "query_requests": 75
+    },
+    {
+      "run": 2,
+      "passed": true,
+      "check_groups": 15,
+      "query_requests": 75
+    },
+    {
+      "run": 3,
+      "passed": true,
+      "check_groups": 15,
+      "query_requests": 75
+    }
+  ],
+  "interaction_regression": [
+    {
+      "run": 1,
+      "passed": true,
+      "check_groups": 12,
+      "hover_frame_intervals_ms": {
+        "samples": 83,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8
+      }
+    },
+    {
+      "run": 2,
+      "passed": true,
+      "check_groups": 12,
+      "hover_frame_intervals_ms": {
+        "samples": 83,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8
+      }
+    },
+    {
+      "run": 3,
+      "passed": true,
+      "check_groups": 12,
+      "hover_frame_intervals_ms": {
+        "samples": 83,
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8
+      }
+    }
+  ],
+  "frontend_tests": {
+    "passed": 57
+  },
+  "backend_tests": {
+    "passed": 11
+  },
+  "typecheck": "passed",
+  "diff_check": "passed",
+  "limitations": [
+    "Hover rAF frame intervals are not end-to-end input latency or a guarantee for every device.",
+    "Browser fixtures use real SQLite/ClickHouse and generated signals; 503/delay cases are controlled.",
+    "Production build and full test suite were not run.",
+    "Advanced Grafana differences are listed in README.md."
+  ]
+}

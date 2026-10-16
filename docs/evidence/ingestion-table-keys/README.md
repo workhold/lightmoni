@@ -1,5 +1,7 @@
 # 接入页面与 table 权限验收
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/ingestion-table-keys/`](../../../artifacts/screenshots/docs/evidence/ingestion-table-keys/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 2026-10-11。SDK 与 Agent 拆为独立接入 Tab；创建、编辑上报 Key 时配置逻辑 table 白名单，或显式允许所有 table，沿用现有 Ant Design 组件和深色主题。核心操作是选择接入方式、设置白名单、下载 Agent 私有配置。默认使用指定 table；所有 table 模式通过独立的 allow_all_tables 标记保存，覆盖现有及未来新表，不使用白名单通配符。Agent 创建 Key 时也可选择这两种模式。旧 Key 显示待配置并拒绝数据写入。
 
 服务端在上报正文读取、自动建表、批次重试和 ClickHouse 写入之前检查权限。Key 编辑不替换秘密；启用/禁用不覆盖上报范围。切回指定 table 后，后续上报和已确认批次的重试重新按白名单校验。键盘 Tab 仅移动焦点，避免选择组件自动添加高亮 table。新交互复用 Tabs 指示条、表单反馈、Modal 过渡及按钮加载状态，没有额外装饰动效；局部修改由主 Agent 自检，未安排独立视觉评审。

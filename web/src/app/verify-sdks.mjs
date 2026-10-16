@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -6,6 +7,7 @@ import {SDK_AGENT_ENDPOINT,sdkEnvironment,sdkExamples,sdkSampleFor} from './sdkE
 const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:19381';
 const output=process.env.LIGHTMONI_QA_OUTPUT?resolve(process.env.LIGHTMONI_QA_OUTPUT):resolve(import.meta.dirname,'../../../docs/evidence/multilang-sdk');
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 let browser;
 try{browser=await chromium.launch({headless:true});}
 catch{browser=await chromium.launch({headless:true,channel:'chrome'});}
@@ -45,17 +47,17 @@ try{
  }
  await choose('Python');await page.getByRole('button',{name:'管理上报 Key',exact:true}).click();await expect(page.getByRole('tab',{name:'上报 Key',exact:true})).toHaveAttribute('aria-selected','true');
  await page.getByRole('tab',{name:'SDK 接入',exact:true}).click();await expect(page.getByRole('radio',{name:'直连中心',exact:true})).toBeChecked();await expect(endpoint).toHaveValue(center);await expect(code).toHaveText(sdkSampleFor('python','direct'));
- await page.mouse.move(10,890);await expect(page.locator('.ant-message-notice')).toHaveCount(0,{timeout:8000});await page.screenshot({path:resolve(output,'sdk-desktop.png'),fullPage:true,animations:'disabled'});
+ await page.mouse.move(10,890);await expect(page.locator('.ant-message-notice')).toHaveCount(0,{timeout:8000});await page.screenshot({path:resolve(mediaOutput,'sdk-desktop.png'),fullPage:true,animations:'disabled'});
  const darkColor=await code.locator('.hljs-keyword').first().evaluate(node=>getComputedStyle(node).color);
  // Reload resets the form but preserves the appearance preference.
  await page.evaluate(()=>localStorage.setItem('lightmoni.appearance','light'));await page.reload();await expect(page.locator('html')).toHaveAttribute('data-theme','light');
  await choose('Python');await mode('direct');await endpoint.fill(center);await expect(code.locator('.hljs-keyword').first()).toBeVisible();expect(await code.locator('.hljs-keyword').first().evaluate(node=>getComputedStyle(node).color)).not.toBe(darkColor);
- await page.screenshot({path:resolve(output,'sdk-light.png'),fullPage:true,animations:'disabled'});
+ await page.screenshot({path:resolve(mediaOutput,'sdk-light.png'),fullPage:true,animations:'disabled'});
  await page.evaluate(()=>localStorage.setItem('lightmoni.appearance','dark'));await page.reload();await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
  await choose('Python');await mode('direct');await endpoint.fill(center);await page.getByRole('button',{name:'收起导航',exact:true}).click();
  for(const width of [750,390]){
   await page.setViewportSize({width,height:900});await expect(endpoint).toBeVisible();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:resolve(output,'sdk-'+width+'.png'),fullPage:true,animations:'disabled'});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:resolve(mediaOutput,'sdk-'+width+'.png'),fullPage:true,animations:'disabled'});
  }
  await page.setViewportSize({width:1280,height:900});await page.getByRole('tab',{name:'图表模板',exact:true}).click();await expect(page.getByRole('button',{name:'运行 SQL',exact:true})).toHaveCount(0);
  await page.getByRole('tab',{name:'数据表',exact:true}).click();await expect(page.getByRole('button',{name:'查询数据',exact:true})).toHaveCount(0);
@@ -65,5 +67,5 @@ try{
  expect(errors).toEqual([]);
  await writeFile(resolve(output,'ui-report.json'),JSON.stringify({routes:checked,widths:[1280,750,390],downloads:8,highlighted_samples:16,clipboard_samples:16,clipboard_environments:16,themes:['dark','light'],url_validation:true,mode_endpoint_preserved:true,key_navigation_preserves_setup:true,workbench_removed:true,query_api_preserved:true,errors},null,2)+'\n');
  console.log('PASS eight SDK languages in both modes: highlighted code, exact clipboard, downloads, address validation, retained setup, themes/layout; SQL Workbench removed, query API works');
-}catch(error){await page.screenshot({path:resolve(output,'failure.png'),fullPage:true}).catch(()=>{});throw error;}
+}catch(error){await page.screenshot({path:resolve(mediaOutput,'failure.png'),fullPage:true}).catch(()=>{});throw error;}
 finally{await context.close();await browser.close();}

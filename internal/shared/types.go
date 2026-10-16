@@ -74,9 +74,11 @@ type Dependencies struct {
 	Decrypt          func(string) (string, error)
 }
 type User struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Role string `json:"role"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	Nickname  string `json:"nickname,omitempty"`
+	AvatarURL string `json:"avatar_url,omitempty"`
 }
 type userContextKey struct{}
 

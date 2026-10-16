@@ -1,0 +1,94 @@
+{
+  "date": "2026-10-16",
+  "browser_rounds": [
+    {
+      "round": 1,
+      "passed": true,
+      "menuIcons": 8,
+      "sortedColumns": [
+        "名称",
+        "Last *",
+        "Avg",
+        "Max"
+      ],
+      "sortDirections": [
+        "ascending",
+        "descending",
+        "none"
+      ],
+      "keyboard": true,
+      "colorsRetained": true,
+      "chartInstanceRetained": true,
+      "noPlotCommits": true,
+      "editURL": "http://127.0.0.1:5173/dashboards/system-center?from=now-1h&to=now&refresh=off&check=sort-url&edit=true",
+      "viewURL": "http://127.0.0.1:5173/dashboards/system-center?from=now-1h&to=now&refresh=off&check=sort-url&viewPanel=system-center-i",
+      "panelEditURL": "http://127.0.0.1:5173/dashboards/system-center?from=now-1h&to=now&refresh=off&check=sort-url&viewPanel=system-center-i&editPanel=system-center-i&edit=true",
+      "reload": true,
+      "history": true,
+      "queryParamsRetained": true,
+      "legacyPanelEditLink": true
+    },
+    {
+      "round": 2,
+      "passed": true,
+      "menuIcons": 8,
+      "sortedColumns": [
+        "名称",
+        "Last *",
+        "Avg",
+        "Max"
+      ],
+      "sortDirections": [
+        "ascending",
+        "descending",
+        "none"
+      ],
+      "keyboard": true,
+      "colorsRetained": true,
+      "chartInstanceRetained": true,
+      "noPlotCommits": true,
+      "editURL": "http://127.0.0.1:5173/dashboards/system-center?from=now-1h&to=now&refresh=off&check=sort-url&edit=true",
+      "viewURL": "http://127.0.0.1:5173/dashboards/system-center?from=now-1h&to=now&refresh=off&check=sort-url&viewPanel=system-center-i",
+      "panelEditURL": "http://127.0.0.1:5173/dashboards/system-center?from=now-1h&to=now&refresh=off&check=sort-url&viewPanel=system-center-i&editPanel=system-center-i&edit=true",
+      "reload": true,
+      "history": true,
+      "queryParamsRetained": true,
+      "legacyPanelEditLink": true
+    },
+    {
+      "round": 3,
+      "passed": true,
+      "menuIcons": 8,
+      "sortedColumns": [
+        "名称",
+        "Last *",
+        "Avg",
+        "Max"
+      ],
+      "sortDirections": [
+        "ascending",
+        "descending",
+        "none"
+      ],
+      "keyboard": true,
+      "colorsRetained": true,
+      "chartInstanceRetained": true,
+      "noPlotCommits": true,
+      "editURL": "http://127.0.0.1:5173/dashboards/system-center?from=now-1h&to=now&refresh=off&check=sort-url&edit=true",
+      "viewURL": "http://127.0.0.1:5173/dashboards/system-center?from=now-1h&to=now&refresh=off&check=sort-url&viewPanel=system-center-i",
+      "panelEditURL": "http://127.0.0.1:5173/dashboards/system-center?from=now-1h&to=now&refresh=off&check=sort-url&viewPanel=system-center-i&editPanel=system-center-i&edit=true",
+      "reload": true,
+      "history": true,
+      "queryParamsRetained": true,
+      "legacyPanelEditLink": true
+    }
+  ],
+  "consecutive_passes": 3,
+  "frontend_tests": {
+    "passed": 10,
+    "failed": 0
+  },
+  "typecheck": "passed",
+  "diff_check": "passed",
+  "refresh_preserves_sort": true
+}

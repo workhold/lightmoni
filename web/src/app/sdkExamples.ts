@@ -1,8 +1,11 @@
+import type {ReportingAddress} from './reporting-addresses';
 export type SDKConnectionMode='agent'|'direct';
 export const SDK_AGENT_ENDPOINT='http://127.0.0.1:4318';
 
-export function sdkSampleFor(language:string,mode:SDKConnectionMode='agent'):string {
-  const fallback=JSON.stringify(mode==='agent'?SDK_AGENT_ENDPOINT:'');
+export function sdkSampleFor(language:string,mode:SDKConnectionMode='agent',endpoint?:string):string {
+  const address=endpoint?.trim().replace(/\/+$/,'')||(mode==='agent'?SDK_AGENT_ENDPOINT:'');
+  const fallback=JSON.stringify(address),hasFallback=!!address;
+  const singleQuoted="'"+address.replaceAll("\\","\\\\").replaceAll("'","\\'")+"'";
   const examples:Record<string,string>={
     typescript:`import {createLightMoni} from '@lightmoni/sdk';
 
@@ -24,7 +27,7 @@ await moni.shutdown({timeoutMs:5000});`,
 )
 
 endpoint := os.Getenv("LIGHTMONI_ENDPOINT")
-${mode==='agent'?`if endpoint == "" { endpoint = ${fallback} }\n`:''}client, err := moni.New(moni.Config{
+${hasFallback?`if endpoint == "" { endpoint = ${fallback} }\n`:''}client, err := moni.New(moni.Config{
   Service:"order-api", Table:"business",
   Endpoint:endpoint, Key:os.Getenv("LIGHTMONI_KEY"),
 })
@@ -79,7 +82,7 @@ await moni.ShutdownAsync(TimeSpan.FromSeconds(5));`,
     php:`require './lightmoni-php-sdk/sdk/php/src/Client.php';
 
 $moni = new \\LightMoni\\Client('order-api', 'business',
-    getenv('LIGHTMONI_ENDPOINT') ?: ${fallback},
+    getenv('LIGHTMONI_ENDPOINT') ?: ${singleQuoted},
     getenv('LIGHTMONI_KEY') ?: '');
 $moni->counter('orders_created')->add(1, ['region'=>'cn']);
 $moni->withSpan('create_order', function() use ($moni) {
@@ -90,7 +93,7 @@ $moni->shutdown(5);`,
 
 moni = LightMoni::Client.new(
   service:'order-api', table:'business',
-  endpoint:ENV.fetch('LIGHTMONI_ENDPOINT'${mode==='agent'?`, ${fallback}`:''}),
+  endpoint:ENV.fetch('LIGHTMONI_ENDPOINT'${hasFallback?`, ${singleQuoted}`:''}),
   key:ENV.fetch('LIGHTMONI_KEY'${mode==='agent'?", ''":''})
 )
 moni.counter('orders_created').add(1, 'region'=>'cn')
@@ -101,7 +104,7 @@ moni.shutdown(timeout:5)`,
     rust:`use lightmoni::{Client, Attributes};
 use std::{env, time::Duration};
 
-let endpoint = env::var("LIGHTMONI_ENDPOINT")${mode==='agent'?`.unwrap_or_else(|_| ${fallback}.into())`:'?'};
+let endpoint = env::var("LIGHTMONI_ENDPOINT")${hasFallback?`.unwrap_or_else(|_| ${fallback}.into())`:'?'};
 let key = env::var("LIGHTMONI_KEY")${mode==='agent'?'.unwrap_or_default()':'?'};
 let moni = Client::new("order-api", "business", &endpoint, &key)?;
 moni.counter("orders_created")?.add(1,
@@ -133,7 +136,7 @@ export function sdkEnvironment(mode:SDKConnectionMode,endpoint:string):string {
 }
 
 export interface SDKPackage {id:string;language:string;runtime:string;file:string;url:string;available:boolean}
-export interface SDKInstall {endpoint?:string;version:string;node_url:string;go_url:string;packages:SDKPackage[];checksums_url:string}
+export interface SDKInstall {endpoint?:string;endpoints?:ReportingAddress[];default_endpoint_id?:string;version:string;node_url:string;go_url:string;packages:SDKPackage[];checksums_url:string}
 export const sdkExamples:Record<string,{language:string;install:string;sample:string}> = {
   typescript:{
     language:'typescript',

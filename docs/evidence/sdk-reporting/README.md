@@ -1,5 +1,7 @@
 # SDK 停报与日志上报规则验收
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/sdk-reporting/`](../../../artifacts/screenshots/docs/evidence/sdk-reporting/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 2026-10-12：规则在 SDK 记录日志、聚合指标和发送批次之前执行。中心只保存和下发配置，Agent 透传配置与原始冻结批次。业务日志先匹配排除规则，再匹配上报规则，多条上报规则命中取最高保留比例；没有命中就忽略。SDK 整体停报清空未发送数据并取消正在发送的请求，配置轮询继续，以便动态恢复。
 
 当前覆盖 Go、Node / TypeScript 与浏览器 SDK；六种新增语言暂未接入该配置协议。用户、会话采样不等于严格按事件数保留配额。初次启动的 SDK 沿用本地配置，要求从第一条日志执行远程策略时，应在开始业务生产前等待 RefreshConfig / refreshConfig 成功。
@@ -25,11 +27,11 @@
 
 沿用现有 Ant Design 主题，SDK 停报入口在“数据接入 → SDK 接入”；日志规则入口在“数据接入 → 数据表”的业务日志表。采用表单和独立条件，保留匹配范围、比例与当前规则名称；未引入另一套视觉风格。删除了百分比无意义的尾随零，窄屏规则名称与匹配字段单独成行，Modal 内容滚动、页脚操作保留在视口内。视觉由主 Agent 自检，没有独立评分。
 
-- [桌面日志规则](log-rules-desktop.png)
-- [390px 日志规则](log-rules-390.png)
-- [SDK 停报规则](sdk-stop-desktop.png)
-- [真实保存失败](save-failure.png)
+- [桌面日志规则](../../../artifacts/screenshots/docs/evidence/sdk-reporting/log-rules-desktop.png)
+- [390px 日志规则](../../../artifacts/screenshots/docs/evidence/sdk-reporting/log-rules-390.png)
+- [SDK 停报规则](../../../artifacts/screenshots/docs/evidence/sdk-reporting/sdk-stop-desktop.png)
+- [真实保存失败](../../../artifacts/screenshots/docs/evidence/sdk-reporting/save-failure.png)
 - [最后一轮结果](report.json)
-- [操作录屏](ui-flow.webm)：复用 Modal 入场、Tabs 指示器切换与共享按钮按压反馈，记录真实操作流程。
+- [操作录屏](../../../artifacts/screenshots/docs/evidence/sdk-reporting/ui-flow.webm)：复用 Modal 入场、Tabs 指示器切换与共享按钮按压反馈，记录真实操作流程。
 
 测试环境为临时中心 `18882`、前端 `15175`、隔离 ClickHouse `18124`；浏览器业务代理 `18420`。未部署既有运行实例，验收后关闭这些临时进程和容器。复跑时启动隔离 ClickHouse，并通过环境变量 LIGHTMONI_TEST_URL、LIGHTMONI_UI_URL、LIGHTMONI_CH_URL 指向隔离实例；默认测试管理员 rules-admin / rules-demo-password，浏览器代理测试占用 18420。运行前编译 TypeScript SDK。

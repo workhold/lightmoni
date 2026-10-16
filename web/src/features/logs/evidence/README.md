@@ -1,5 +1,7 @@
 # Discover 工作台改造与实际验收
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/web/src/features/logs/evidence/`](../../../../../artifacts/screenshots/web/src/features/logs/evidence/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 2026-10-10，使用当前 Docker 主服务 `http://localhost:18380`，本机 Agent `14318`，真实 HTTP → Node SDK → Agent → ClickHouse 业务流量。开发页 `5173` 仍代理旧实例，不能用该入口判断新主服务的结果。
 
 参考 [Elastic Discover 的字段探索、筛选和文档下钻](https://www.elastic.co/docs/explore-analyze/discover/discover-get-started) 与 [字段统计](https://www.elastic.co/docs/explore-analyze/discover/show-field-statistics)。沿用项目的密集白底工作台与共享 AntD 控件，未新增全局样式或另做风格卡片。选定流程是查询 → 时间/维度聚合 → 点击值筛选 → 原始日志 → 保存重读。

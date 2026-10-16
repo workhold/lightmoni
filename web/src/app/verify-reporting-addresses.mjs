@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -6,6 +7,7 @@ import {resolve} from 'node:path';
 const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:19481';
 const output=resolve(process.env.LIGHTMONI_QA_OUTPUT??'/tmp/lightmoni-reporting-evidence');
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 let browser;
 try{browser=await chromium.launch({headless:true});}
 catch{browser=await chromium.launch({headless:true,channel:'chrome'});}
@@ -37,7 +39,7 @@ try{
  await settingsInput.fill(publicAddress+'///');await save();await expect(settingsInput).toHaveValue(publicAddress);
  expect((await request('/settings/reporting')).effective_endpoint).toBe(publicAddress);
  await page.reload();await expect(settingsInput).toHaveValue(publicAddress);
- await page.screenshot({path:resolve(output,'settings-desktop.png'),fullPage:true});
+ await page.screenshot({path:resolve(mediaOutput,'settings-desktop.png'),fullPage:true});
 
  await settingsInput.fill(internalAddress);
  await page.route('**/api/v1/settings/reporting',route=>route.request().method()==='PUT'?route.fulfill({status:503,json:{error:'QA 保存失败，请重试'}}):route.continue());
@@ -57,7 +59,7 @@ try{
  await page.getByText('通过 Agent',{exact:true}).click();await expect(sdkInput).toHaveValue('http://127.0.0.1:4318');
  await page.getByText('直连中心',{exact:true}).click();await expect(sdkInput).toHaveValue(internalAddress);
  await page.getByRole('button',{name:'恢复默认地址',exact:true}).click();await expect(sdkInput).toHaveValue(publicAddress);
- await sdkInput.fill(internalAddress);await page.screenshot({path:resolve(output,'sdk-override-desktop.png'),fullPage:true});
+ await sdkInput.fill(internalAddress);await page.screenshot({path:resolve(mediaOutput,'sdk-override-desktop.png'),fullPage:true});
 
  await page.getByRole('tab',{name:'Agent 接入',exact:true}).click();await expect(agentInput).toHaveValue(publicAddress);
  await agentInput.fill(internalAddress+'///');
@@ -71,7 +73,7 @@ try{
  await expect.poll(()=>page.evaluate(()=>navigator.clipboard.readText())).toBe(await command.textContent());
  await expect(command).not.toContainText('local-qa-write-key');
  await agentInput.fill('http://center/?key=value');await expect(page.getByRole('button',{name:'复制安装命令',exact:true})).toBeDisabled();
- await agentInput.fill(internalAddress);await page.screenshot({path:resolve(output,'agent-override-desktop.png'),fullPage:true});
+ await agentInput.fill(internalAddress);await page.screenshot({path:resolve(mediaOutput,'agent-override-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'恢复默认地址',exact:true}).click();await expect(agentInput).toHaveValue(publicAddress);
  expect((await request('/settings/reporting')).effective_endpoint).toBe(publicAddress);
 
@@ -85,9 +87,9 @@ try{
  }finally{await memberContext.close();}
 
  await page.setViewportSize({width:390,height:900});await noOverflow();
- await page.screenshot({path:resolve(output,'agent-390.png'),fullPage:true});
+ await page.screenshot({path:resolve(mediaOutput,'agent-390.png'),fullPage:true});
  await page.goto(base+'/settings?tab=reporting');await expect(settingsInput).toHaveValue(publicAddress);await noOverflow();
- await page.screenshot({path:resolve(output,'settings-390.png'),fullPage:true});
+ await page.screenshot({path:resolve(mediaOutput,'settings-390.png'),fullPage:true});
  await settingsInput.fill('');await save();
  await expect.poll(async()=>(await request('/settings/reporting')).effective_endpoint).toBe(deployed);
  for(const path of ['/sdk-install','/agent-install'])expect((await request(path)).endpoint).toBe(deployed);
@@ -96,5 +98,5 @@ try{
  expect(errors).toEqual([]);
  await writeFile(resolve(output,'report.json'),JSON.stringify({saved_and_reloaded:true,save_failure_preserves_input:true,network_overrides:true,agent_downloads_follow_override:true,restore_default:true,member_permissions:true,widths:[1280,390],errors},null,2)+'\n');
  console.log('PASS persistent reporting defaults, SDK/Agent A/B overrides, installer downloads, reset, failed save, member permissions and mobile layout');
-}catch(error){await page.screenshot({path:resolve(output,'failure.png'),fullPage:true}).catch(()=>{});throw error;}
+}catch(error){await page.screenshot({path:resolve(mediaOutput,'failure.png'),fullPage:true}).catch(()=>{});throw error;}
 finally{await context.close();await browser.close();}

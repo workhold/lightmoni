@@ -1,5 +1,7 @@
 # Agent 分组标签页、阈值线与告警跳转
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/agent-alert-workflow/`](../../../artifacts/screenshots/docs/evidence/agent-alert-workflow/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 沿用现有监控后台的颜色、控件和密度，把分组、图表与告警配置的对应关系直接显示出来。没有重新设计其他页面。
 
 - 每个 Agent 分组是一个 Tab，默认分组排在首位。分组任务和 Agent 列表属于同一标签页，切换后刷新仍保留当前分组。

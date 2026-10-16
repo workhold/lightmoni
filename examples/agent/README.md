@@ -1,6 +1,6 @@
 # Agent 接入与断网恢复
 
-平台接入：在“数据接入 → Agent 接入”选择分组、填写上报地址和 Key，复制安装命令。分组任务在“Agent”页以机器指标、拨测任务、目录日志、上报配置四个 Tab 编辑，同组统一下发，无需编辑 JSON。
+平台接入：在“数据接入 → Agent 接入”选择分组、从内网/公网地址列表选择上报入口并填写 Key，复制完整安装命令。命令已携带下载鉴权和上报 Key，无需再次手工粘贴。分组任务在“Agent”页以机器指标、拨测任务、目录日志、上报配置四个 Tab 编辑，同组统一下发，无需编辑 JSON。
 
 开发运行也可以让 CLI 自动保存连接配置（仅连接信息保存在本机）：
 
@@ -34,12 +34,11 @@ go run ./cmd/lightmoni-agent quarantine --config ./agent-config.json --action di
 ```sh
 sh deploy/agent/release.sh 0.1.0 dist/agent
 sudo sh deploy/agent/install.sh --release-dir dist/agent --config /path/private-agent-config.json
-# 或下载同一可信发布目录中的安装器、SHA256SUMS 与固定版本包：
-sudo sh deploy/agent/install.sh --release-url https://YOUR_RELEASE_HOST/agent --version 0.1.0 --config /path/private-agent-config.json
+# 在线安装使用平台生成的完整命令，由当前项目提供鉴权下载。
 sudo sh deploy/agent/uninstall.sh
 ```
 
-默认重装/卸载保留配置、机器身份及 spool；卸载无需访问主服务。`--purge` 明确删除缓存，可能丢失已经由 Agent 接收但未送达的数据。发布包需要自行构建并在可信地址提供，示例地址不是已经上线的下载服务。
+默认重装/卸载保留配置、机器身份及 spool；卸载无需访问主服务。`--purge` 明确删除缓存，可能丢失已经由 Agent 接收但未送达的数据。正式镜像内置安装脚本、amd64 / arm64 Agent 包与 SHA256 校验文件，通过当前项目的 `/downloads/agent/` 下载接口提供，并以有效上报 Key 鉴权。本地开发或自定义版本可运行上述发布脚本生成内置包。
 
 
 目录日志在分组中填写例如 `/var/log/nginx`、`*.log*`，根据需要开启子目录。默认跳过首次发现的现有内容，只读新增行；首次从头开关可导入已有日志。读取进度与日志队列原子保存，重启不会重复读取已入队内容。轮转建议重命名，避免快速 copytruncate 保持相同文件头导致无法识别。目录与文件需允许 `lightmoni-agent` 服务用户读取；检查平台机器详情的“采集状态”定位路径、权限或数量限制问题。日志是 UTF-8 逐行文本，压缩文件、符号链接不采集，超长行分片。事件时间为采集时间，原始业务时间不会自动解析。

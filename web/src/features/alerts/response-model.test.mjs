@@ -33,3 +33,18 @@ test('displayed rule levels match backend aliases and retain every explicit leve
  for(const p of ['P0','P1','P2','P3'])assert.equal(rulePriority(p),p);
  assert.equal(rulePriority('critical'),'P0');assert.equal(rulePriority('warning'),'P2');assert.equal(rulePriority(''),'P2');
 });
+
+test('opening a saved legacy policy never opts it into new nighttime calls',()=>{
+ const templates={P1:{...policy,methods:['voice','sms'],night_mode:'after_count',night_after_count:3,night_methods:['voice']}};
+ const legacy=normalizeResponseGroup({policies:{P1:{...policy,methods:['sms']}}},templates);
+ assert.equal(legacy.policies.P1.night_mode,'silent');
+ assert.equal(legacy.policies.P1.night_after_count,0);
+ assert.deepEqual(legacy.policies.P1.night_methods,[]);
+ const missing=normalizeResponseGroup({policies:null},templates);
+ assert.equal(missing.policies.P1.night_mode,'silent');
+ const fresh=normalizeResponseGroup(undefined,templates);
+ assert.equal(fresh.policies.P1.night_mode,'after_count');
+ assert.equal(fresh.policies.P1.night_after_count,3);
+ fresh.policies.P1.night_methods.push('sms');
+ assert.deepEqual(templates.P1.night_methods,['voice']);
+});

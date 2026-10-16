@@ -1,0 +1,42 @@
+{
+  "passed": true,
+  "hoverChecks": [
+    {
+      "borders": [
+        "0px",
+        "0px",
+        "0px",
+        "0px"
+      ],
+      "opacity": "0.45",
+      "transform": "matrix(1, 0, 0, 1, 115, 0)",
+      "width": "1px"
+    },
+    {
+      "borders": [
+        "0px",
+        "0px",
+        "0px",
+        "0px"
+      ],
+      "opacity": "0.45",
+      "transform": "matrix(1, 0, 0, 1, 265, 0)",
+      "width": "1px"
+    },
+    {
+      "borders": [
+        "0px",
+        "0px",
+        "0px",
+        "0px"
+      ],
+      "opacity": "0.45",
+      "transform": "matrix(1, 0, 0, 1, 365, 0)",
+      "width": "1px"
+    }
+  ],
+  "tooltipHidesOnLeave": true,
+  "chartInstanceRetained": true,
+  "noPlotCommits": true,
+  "urlRetained": true
+}

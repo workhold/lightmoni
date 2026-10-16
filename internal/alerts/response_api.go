@@ -297,6 +297,7 @@ func (m *Module) replanResponse(w http.ResponseWriter, r *http.Request) {
 	v.Stage, v.Round, v.StageRound = "primary", 0, 0
 	v.SuccessfulRounds, v.CountedRound = 0, 0
 	v.LevelActiveSeconds, v.SinceRoundSeconds = 0, 0
+	v.NightPeriod, v.NightCount, v.NightLastRoundAt, v.NightEligibleAt = "", 0, "", ""
 	v.Exhausted, v.DeferredReason = false, ""
 	v.LastTick = stamp(m.now())
 	tx, e := m.deps.DB.BeginTx(r.Context(), nil)

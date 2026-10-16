@@ -40,6 +40,9 @@ func New(db *sql.DB, dir, externalURL string) (*Auth, error) {
 	if e := migrateKeyTables(db); e != nil {
 		return nil, e
 	}
+	if _, e := db.Exec("CREATE TABLE IF NOT EXISTS user_profiles(user_id TEXT PRIMARY KEY,nickname TEXT NOT NULL DEFAULT '',avatar_url TEXT NOT NULL DEFAULT '')"); e != nil {
+		return nil, e
+	}
 	if _, e := db.Exec("CREATE TABLE IF NOT EXISTS user_notification_profiles(user_id TEXT PRIMARY KEY,body TEXT NOT NULL)"); e != nil {
 		return nil, e
 	}
@@ -119,7 +122,7 @@ func (a *Auth) User(r *http.Request) (shared.User, error) {
 		return shared.User{}, e
 	}
 	var u shared.User
-	e = a.DB.QueryRow("SELECT u.id,u.name,u.role FROM sessions s JOIN users u ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1", hash(cookie.Value), time.Now().Unix()).Scan(&u.ID, &u.Name, &u.Role)
+	e = a.DB.QueryRow("SELECT u.id,u.name,u.role,COALESCE(p.nickname,''),COALESCE(p.avatar_url,'') FROM sessions s JOIN users u ON s.user_id=u.id LEFT JOIN user_profiles p ON p.user_id=u.id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1", hash(cookie.Value), time.Now().Unix()).Scan(&u.ID, &u.Name, &u.Role, &u.Nickname, &u.AvatarURL)
 	return u, e
 }
 func (a *Auth) Middleware(next http.Handler) http.Handler {
@@ -251,7 +254,7 @@ func (a *Auth) RegisterPublic(mux *http.ServeMux) {
 		}
 		var u shared.User
 		var h string
-		e := a.DB.QueryRow("SELECT id,name,role,password_hash FROM users WHERE name=? AND active=1", v.Name).Scan(&u.ID, &u.Name, &u.Role, &h)
+		e := a.DB.QueryRow("SELECT u.id,u.name,u.role,u.password_hash,COALESCE(p.nickname,''),COALESCE(p.avatar_url,'') FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.name=? AND u.active=1", v.Name).Scan(&u.ID, &u.Name, &u.Role, &h, &u.Nickname, &u.AvatarURL)
 		if e != nil || bcrypt.CompareHashAndPassword([]byte(h), []byte(v.Password)) != nil {
 			shared.Error(w, 401, "用户名或密码错误")
 			return
@@ -276,12 +279,13 @@ func (a *Auth) RegisterPublic(mux *http.ServeMux) {
 }
 func (a *Auth) Register(mux *http.ServeMux) {
 	a.registerNotificationProfiles(mux)
+	a.registerProfile(mux)
 	mux.HandleFunc("GET /api/v1/auth/me", func(w http.ResponseWriter, r *http.Request) { shared.JSON(w, 200, shared.CurrentUser(r)) })
 	mux.HandleFunc("GET /api/v1/users", func(w http.ResponseWriter, r *http.Request) {
 		if !admin(w, r) {
 			return
 		}
-		rows, e := a.DB.Query("SELECT id,name,role,active,created_at FROM users ORDER BY created_at")
+		rows, e := a.DB.Query("SELECT u.id,u.name,u.role,u.active,u.created_at,COALESCE(p.nickname,''),COALESCE(p.avatar_url,'') FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id ORDER BY u.created_at")
 		if e != nil {
 			shared.Error(w, 500, e.Error())
 			return
@@ -289,10 +293,13 @@ func (a *Auth) Register(mux *http.ServeMux) {
 		defer rows.Close()
 		data := []any{}
 		for rows.Next() {
-			var id, name, role, created string
+			var id, name, role, created, nickname, avatarURL string
 			var active bool
-			_ = rows.Scan(&id, &name, &role, &active, &created)
-			data = append(data, map[string]any{"id": id, "name": name, "role": role, "active": active, "created_at": created})
+			if e = rows.Scan(&id, &name, &role, &active, &created, &nickname, &avatarURL); e != nil {
+				shared.Error(w, 500, e.Error())
+				return
+			}
+			data = append(data, map[string]any{"id": id, "name": name, "role": role, "active": active, "created_at": created, "nickname": nickname, "avatar_url": avatarURL})
 		}
 		shared.JSON(w, 200, data)
 	})
@@ -304,6 +311,7 @@ func (a *Auth) Register(mux *http.ServeMux) {
 			Name     string `json:"name"`
 			Password string `json:"password"`
 			Role     string `json:"role"`
+			Active   *bool  `json:"active"`
 		}
 		if shared.Decode(r, &v) != nil || v.Name == "" || !validPassword(v.Password) || (v.Role != "member" && v.Role != "admin") {
 			shared.Error(w, 400, "用户名、角色及8个字符到72字节密码必填")
@@ -315,7 +323,8 @@ func (a *Auth) Register(mux *http.ServeMux) {
 			return
 		}
 		id := ID()
-		_, e := a.DB.Exec("INSERT INTO users(id,name,password_hash,role,active,created_at) VALUES(?,?,?,?,1,?)", id, v.Name, string(h), v.Role, time.Now().UTC().Format(time.RFC3339Nano))
+		active := v.Active == nil || *v.Active
+		_, e := a.DB.Exec("INSERT INTO users(id,name,password_hash,role,active,created_at) VALUES(?,?,?,?,?,?)", id, v.Name, string(h), v.Role, active, time.Now().UTC().Format(time.RFC3339Nano))
 		if e != nil {
 			shared.Error(w, 409, "用户名已存在")
 			return

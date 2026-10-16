@@ -129,6 +129,9 @@ func (m *Module) saveGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g.Name = strings.TrimSpace(g.Name)
+	if r.Method == http.MethodPost && len(g.Members) > 0 && len(g.Policies) == 0 {
+		g.Policies = defaultPolicies()
+	}
 	if e := m.validateGroupResponse(r.Context(), &g); e != nil {
 		shared.Error(w, 400, e.Error())
 		return
@@ -461,6 +464,12 @@ func (m *Module) validateRule(ctx context.Context, v *Rule) error {
 	if v.IntervalSeconds < 1 || v.IntervalSeconds > 86400 || v.WindowSeconds < 1 || v.WindowSeconds > 604800 || v.ForSeconds < 0 || v.RecoverySeconds < 0 || v.DelaySeconds < 0 || v.HealthForSeconds < 0 || v.RepeatSeconds < 0 {
 		return errors.New("invalid evaluation/window duration")
 	}
+	if v.ForCount < 0 || v.ForCount > 1000 {
+		return errors.New("连续异常检测次数必须为1到1000")
+	}
+	if v.ForCount == 0 { // Existing rules omitted this field.
+		v.ForCount = 1
+	}
 	switch v.NoDataPolicy {
 	case "", "keep_state", "zero", "alerting", "normal":
 	case "value":
@@ -587,6 +596,7 @@ func (m *Module) saveRule(w http.ResponseWriter, r *http.Request) {
 		}
 		s.Since = ""
 		s.LastEval = ""
+		s.ConsecutiveFailures = 0
 		if s.Health != "ok" {
 			s.HealthSince = stamp(m.now())
 		}
@@ -608,6 +618,7 @@ func (m *Module) saveRule(w http.ResponseWriter, r *http.Request) {
 	respond(w, v, e)
 }
 func ruleMeasurement(r Rule) string {
+	r.ForCount = max(1, r.ForCount)
 	r.ID = ""
 	r.Revision = 0
 	r.Name = ""

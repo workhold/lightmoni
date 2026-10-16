@@ -1,5 +1,7 @@
 # AI 入口、数据保留时长与悬浮反馈验收
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/retention-context/`](../../../artifacts/screenshots/docs/evidence/retention-context/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 2026-10-11（Asia/Shanghai）。沿用现有深色监控工作台，减少顶部重复导航，让当前页面内容直接从顶部开始。
 
 ## 实现
@@ -34,9 +36,9 @@
 
 删除的重复内容：顶部产品/当前位置导航和顶部“询问 AI”；操作成功横幅改为悬浮消息。保留表名、当前时长、继承状态和主操作。
 
-三处动效：AI 图标悬停上移和阴影反馈；抽屉展开/收起过渡；悬浮消息出现及自动消失。沿用减少动画偏好。完整交互录像：[interactions.mp4](interactions.mp4)。
+三处动效：AI 图标悬停上移和阴影反馈；抽屉展开/收起过渡；悬浮消息出现及自动消失。沿用减少动画偏好。完整交互录像：[interactions.mp4](../../../artifacts/screenshots/docs/evidence/retention-context/interactions.mp4)。
 
-- 用户原始参考：[顶部栏](before-header.png)、[告警反馈](before-alert-feedback.png)。
-- 代表性截图：[大盘](1-dashboard.png)、[大盘 AI](1-dashboard-ai.png)、[日志 AI](1-logs-ai.png)、[默认时长与悬浮提示](1-global-toast.png)、[单表设置](1-table-retention.png)、[告警悬浮提示](1-alerts-toast.png)、[窄屏](1-narrow.png)、[200%](1-zoom-200.png)。
+- 用户原始参考：[顶部栏](../../../artifacts/screenshots/docs/evidence/retention-context/before-header.png)、[告警反馈](../../../artifacts/screenshots/docs/evidence/retention-context/before-alert-feedback.png)。
+- 代表性截图：[大盘](../../../artifacts/screenshots/docs/evidence/retention-context/1-dashboard.png)、[大盘 AI](../../../artifacts/screenshots/docs/evidence/retention-context/1-dashboard-ai.png)、[日志 AI](../../../artifacts/screenshots/docs/evidence/retention-context/1-logs-ai.png)、[默认时长与悬浮提示](../../../artifacts/screenshots/docs/evidence/retention-context/1-global-toast.png)、[单表设置](../../../artifacts/screenshots/docs/evidence/retention-context/1-table-retention.png)、[告警悬浮提示](../../../artifacts/screenshots/docs/evidence/retention-context/1-alerts-toast.png)、[窄屏](../../../artifacts/screenshots/docs/evidence/retention-context/1-narrow.png)、[200%](../../../artifacts/screenshots/docs/evidence/retention-context/1-zoom-200.png)。
 
 复验时使用独立 QA 实例，并通过 `LIGHTMONI_UI_URL`、`LIGHTMONI_QA_CH_URL`、`LIGHTMONI_QA_RUN` 指定测试地址及轮次。运行中的旧后端需要重新加载本次 Go 代码，才能提供新接口和执行元数据迁移。

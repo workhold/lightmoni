@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,rename,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -9,8 +10,9 @@ const chBase=process.env.LIGHTMONI_QA_CH_URL??'http://127.0.0.1:18124';
 const run=process.env.LIGHTMONI_QA_RUN??'1';
 const output=resolve(import.meta.dirname,'../../../docs/evidence/retention-context');
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 let browser;try{browser=await chromium.launch({headless:true});}catch{browser=await chromium.launch({headless:true,channel:'chrome'});}
-const context=await browser.newContext({viewport:{width:1440,height:1000},recordVideo:run==='1'?{dir:output,size:{width:1440,height:1000}}:undefined}),page=await context.newPage();
+const context=await browser.newContext({viewport:{width:1440,height:1000},recordVideo:run==='1'?{dir:mediaOutput,size:{width:1440,height:1000}}:undefined}),page=await context.newPage();
 context.setDefaultTimeout(15000);
 await context.addInitScript(()=>{localStorage.setItem('lightmoni.nav.collapsed','false');localStorage.setItem('lightmoni.appearance','dark');});
 const errors=[],checks=[],snapshots=[];
@@ -18,7 +20,7 @@ page.on('pageerror',error=>errors.push(error.message));
 async function json(path,options){const response=await context.request.fetch(`${base}/api/v1${path}`,options);if(!response.ok())throw new Error(`${path}: ${response.status()} ${await response.text()}`);return response.json();}
 async function choose(label,text){await page.getByRole('combobox',{name:label,exact:true}).click();await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({hasText:text}).click();}
 async function ttl(name){const response=await context.request.post(chBase+'/?query='+encodeURIComponent(`SHOW CREATE TABLE lightmoni._lm_${name} FORMAT TabSeparatedRaw`),{headers:{Authorization:'Basic '+Buffer.from('lightmoni:lightmoni_test_password').toString('base64')}});expect(response.ok()).toBe(true);return response.text();}
-async function shot(name){await page.screenshot({path:resolve(output,`${run}-${name}.png`),fullPage:true,animations:'disabled'});}
+async function shot(name){await page.screenshot({path:resolve(mediaOutput,`${run}-${name}.png`),fullPage:true,animations:'disabled'});}
 async function openAI(expected){await page.getByRole('button',{name:'打开 AI 助手',exact:true}).click();await expect(page.locator('.lm-assistant-page-context')).toContainText(expected);await expect(page.getByRole('textbox',{name:'给 AI 助手的问题'})).toBeEnabled();await page.getByRole('textbox',{name:'给 AI 助手的问题'}).fill('分析当前页面');const before=snapshots.length;await page.getByRole('button',{name:'发送',exact:true}).click();await expect.poll(()=>snapshots.length).toBe(before+1);return snapshots.at(-1);}
 async function closeAI(){await page.locator('.ant-drawer:visible').filter({has:page.locator('.lm-assistant')}).locator('.ant-drawer-close').click();await expect(page.locator('.lm-assistant.is-compact')).toHaveCount(0);}
 async function mode(value){await choose('单表保留方式',value);}
@@ -64,4 +66,4 @@ try{
  await page.setViewportSize({width:1440,height:1000});await page.goto(base+'/settings?tab=retention');await page.locator('html').evaluate(element=>{element.style.zoom='2';});await expect(page.getByRole('button',{name:'保存默认时长'})).toBeVisible();await shot('zoom-200');checks.push('窄屏导航折叠/展开与 AI 入口可用，200% 关键区域检查');
  if(errors.length)throw new Error(errors.join('\n'));
  await writeFile(resolve(output,`${run}-report.json`),JSON.stringify({run,checks,page_errors:errors,contexts:snapshots},null,2));console.log(JSON.stringify({run,checks,page_errors:errors}));
-}catch(error){await shot('failure').catch(()=>{});console.error(String(error).slice(0,1800));process.exitCode=1;}finally{await json('/settings/retention',{method:'PUT',data:{default_days:7}}).catch(()=>{});await context.close();if(run==='1'&&page.video())await rename(await page.video().path(),resolve(output,'1-interactions.webm'));await browser.close();}
+}catch(error){await shot('failure').catch(()=>{});console.error(String(error).slice(0,1800));process.exitCode=1;}finally{await json('/settings/retention',{method:'PUT',data:{default_days:7}}).catch(()=>{});await context.close();if(run==='1'&&page.video())await rename(await page.video().path(),resolve(mediaOutput,'1-interactions.webm'));await browser.close();}
