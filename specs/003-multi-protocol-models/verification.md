@@ -1,6 +1,6 @@
 # Verification: 主流模型协议与可见模型发现
 
-Date: 2026-10-14
+Date: 2026-10-16
 
 ## Automated checks
 - PASS `npm --prefix ai-runtime run typecheck`, `npm --prefix ai-runtime run build`, `npm --prefix ai-runtime test` (28/28).
@@ -37,4 +37,11 @@ Fresh authenticated tab8, final compiled production bundle at http://127.0.0.1:8
 - Browser console warnings/errors empty. Temporary fixture server stopped; final tab marked deliverable and shown. Screenshots: .local-dev/multi-protocol-models.png (all protocol choices), .local-dev/multi-protocol-models-ready.png (supplied address and visible fetch button).
 
 ## SDD completion
-All T001–T013 complete. Spec/checklist/plan/research/data-model/contracts/tasks preceded implementation; native continuation requirement was documented before its cross-layer edits. Independent review drove credential-error precedence and escaped-key echo regressions. No SQLite migration; source user data/config preserved. Rebuilt server remains on127.0.0.1:8080, PID73502 at verification time; worker uses the freshly built runtime.
+All T001–T013 complete. Spec/checklist/plan/research/data-model/contracts/tasks preceded implementation; native continuation requirement was documented before its cross-layer edits. Independent review drove credential-error precedence and escaped-key echo regressions. No SQLite migration; source user data/config preserved.
+
+## Phase 6 address repair and explicit connection verification
+- PASS fresh-key root discovery probes `/models` then the same-origin `/v1/models` candidate, returns the successful canonical Base URL, and preserves 401/403 as credential errors when all candidates fail.
+- PASS automatic discovery keeps profile candidates separate so Google can use `/v1beta/models`; manual protocol mode probes only the selected profile; saved-key mode never crosses the exact canonical Base URL.
+- PASS admin-only `POST /api/v1/assistant/test-connection` validates concrete protocol/model input, exercises all four protocol configurations through the Mastra runtime fixture, maps timeout/provider failures to safe statuses, and does not persist a config or session.
+- PASS `npm --prefix ai-runtime run typecheck`, `npm --prefix ai-runtime test` (28/28), `node --experimental-strip-types --test web/src/features/assistant/model-discovery.test.mjs web/src/features/assistant/model-protocol.test.mjs web/src/features/assistant/assistant.test.mjs web/src/shared/assistant-context.test.mjs` (25/25), `npm --prefix web run typecheck`, `npm --prefix web run build`, `.local-dev/go/bin/go test ./...`, `.local-dev/go/bin/go test -race ./...`, `.local-dev/go/bin/go build -o .local-dev/bin/lightmoni ./cmd/lightmoni`, and `git diff --check`.
+- Directory refresh remains read-only; the UI keeps manual model entry available and only the explicit test action can create a provider generation request. No production provider key or generation request was used during verification.

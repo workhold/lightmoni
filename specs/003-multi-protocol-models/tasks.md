@@ -28,6 +28,14 @@
 - [x] T012 Update README.md/docs/contracts.md with supported protocols and honest discovery boundaries
 - [x] T013 Run runtime/native/backend/frontend checks; serialized builds and restart; record evidence in specs/003-multi-protocol-models/verification.md
 
+## Phase6 Address repair and explicit verification (P1)
+**Independent test**: auto and manual discovery follow the matrix, canonicalize a successful base, preserve manual fallback, and a concrete test request succeeds or fails with a sanitized status without persistence.
+- [x] T014 Update the discovery contract and tests for auto/manual candidate matrices, canonical base adoption, fresh-key path repair and saved-key isolation.
+- [x] T015 Implement bounded candidate probing for standard base/version paths without arbitrary vendor scanning or secret leakage.
+- [x] T016 Add admin-only `POST /api/v1/assistant/test-connection` backed by the existing Mastra runtime; cover input validation, four protocol requests, timeout/error sanitization and no persistence.
+- [x] T017 Add the UI test-connection action and copy; enable it only after a concrete protocol and model are present, and keep manual model fallback visible.
+- [x] T018 Run Go, runtime and frontend verification after remote-main merge; record root-without-version, manual-protocol, and test-connection evidence.
+
 ## Dependencies/Parallel execution
 T001-T003 before app edits. Backend owns internal/assistant/{types,provider,service,discovery,discovery_test}.go; runtime owns ai-runtime and optionally native runtime fixture file; UI owns web assistant settings/types/helpers/tests. Each writes meaningful tests before implementation; cross-side interfaces from contract frozen. Root handles docs, reviews and serialized final builds. Runtime package build before backend full native integration tests. Web build must not overlap Go compilation. US1/US2 ship together; US3 cannot imply generation verification.
 

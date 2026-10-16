@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -152,6 +153,7 @@ func TestModelProtocolsAutomaticRecommendations(t *testing.T) {
 		confirm                      bool
 	}{
 		{"shared-openai", `{"data":[{"id":"claude-is-just-a-name"}]}`, "Authorization", "openai-chat-completions", 1, true},
+		{"shared-google-shaped", `{"models":[{"name":"models/claude-is-just-a-name"}]}`, "Authorization", "openai-chat-completions", 1, true},
 		{"native-anthropic", `{"data":[{"id":"native-model","type":"model"}],"has_more":false}`, "X-Api-Key", "anthropic-messages", 2, false},
 		{"native-google", `{"models":[{"name":"models/native-model","supportedGenerationMethods":["generateContent"]}]}`, "X-Goog-Api-Key", "google-generative-ai", 3, false},
 	} {
@@ -180,6 +182,36 @@ func TestModelProtocolsAutomaticRecommendations(t *testing.T) {
 				t.Fatalf("shared catalog lacks alternatives: %s", b)
 			}
 		})
+	}
+}
+
+func TestModelProtocolsAutomaticRootUsesProfileVersionFallback(t *testing.T) {
+	var paths []string
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.EscapedPath())
+		if r.URL.EscapedPath() == "/v1beta/models" {
+			if r.Header.Get("X-Goog-Api-Key") != "root-secret" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			fmt.Fprint(w, `{"models":[{"name":"models/gemini-root","supportedGenerationMethods":["generateContent"]}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer provider.Close()
+	_, server := fixtureService(t, nil)
+	status, body := modelProtocolRequest(t, server, provider.URL, "root-secret", false, "auto")
+	if status != http.StatusOK {
+		t.Fatalf("root auto discovery: %d %s", status, body)
+	}
+	result := decodeModels(t, body)
+	if result.Protocol != ProtocolGoogle || result.ProtocolSource != "catalog" || result.RequiresConfirmation || len(result.Models) != 1 || result.Models[0].ID != "gemini-root" {
+		t.Fatalf("unexpected root fallback result: %s", body)
+	}
+	want := []string{"/models", "/v1/models", "/models", "/v1/models", "/models", "/v1beta/models"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("profile-specific fallback paths: got %v want %v", paths, want)
 	}
 }
 
@@ -503,11 +535,43 @@ func TestModelDiscoveryRootFallbackAndEmptyDirectory(t *testing.T) {
 	}
 }
 
+func TestModelDiscoveryFreshKeyRootAuthFallback(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(fmt.Sprintf("status-%d", status), func(t *testing.T) {
+			var calls atomic.Int32
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.URL.Path == "/models" {
+					w.WriteHeader(status)
+					return
+				}
+				if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer fresh-secret" {
+					t.Errorf("unexpected repaired request: %s %s", r.Method, r.URL.RequestURI())
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				fmt.Fprint(w, `{"data":[{"id":"repaired-model"}]}`)
+			}))
+			defer provider.Close()
+			_, server := fixtureService(t, nil)
+			statusCode, body := modelRequest(t, server, provider.URL, "fresh-secret", false)
+			if statusCode != http.StatusOK {
+				t.Fatalf("auth fallback: %d %s", statusCode, body)
+			}
+			result := decodeModels(t, body)
+			if result.BaseURL != provider.URL+"/v1" || len(result.Models) != 1 || result.Models[0].ID != "repaired-model" || calls.Load() != 2 {
+				t.Fatalf("unexpected auth fallback: %s (calls %d)", body, calls.Load())
+			}
+		})
+	}
+}
+
 func TestModelDiscoveryDoesNotRetryOtherFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, path     string
 		providerStatus int
-	}{{"authentication", "", 401}, {"forbidden", "", 403}, {"rate-limit", "", 429}, {"server", "", 500}, {"custom-path", "/tenant/v2", 404}} {
+		expectedCalls  int32
+	}{{"authentication", "", 401, 2}, {"forbidden", "", 403, 2}, {"rate-limit", "", 429, 1}, {"server", "", 500, 1}, {"custom-path", "/tenant/v2", 404, 1}} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -518,7 +582,7 @@ func TestModelDiscoveryDoesNotRetryOtherFailures(t *testing.T) {
 			defer provider.Close()
 			_, server := fixtureService(t, nil)
 			status, b := modelRequest(t, server, provider.URL+tc.path, "", false)
-			if status != 502 || calls.Load() != 1 || bytes.Contains(b, []byte("provider-secret-response")) {
+			if status != 502 || calls.Load() != tc.expectedCalls || bytes.Contains(b, []byte("provider-secret-response")) {
 				t.Fatalf("unsafe provider failure: %d %s calls=%d", status, b, calls.Load())
 			}
 			if (tc.providerStatus == 401 || tc.providerStatus == 403) && !strings.Contains(string(b), "credential") {

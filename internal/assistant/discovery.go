@@ -136,46 +136,57 @@ func (s *Service) fetchModels(parent context.Context, base, key string, usedSave
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return errors.New("provider redirects are not allowed")
 	}
-	actualBase, fallbackUsed, requests := base, false, 0
+	// Keep candidates tied to each protocol profile. A root URL may expose
+	// OpenAI/Anthropic under /v1 but Gemini under /v1beta; carrying one profile's
+	// fallback into another would make the native Gemini catalog unreachable.
+	root, rootErr := url.Parse(base)
+	rootBase := rootErr == nil && root.Path == ""
+	requests := 0
 	var outcome directoryOutcome
 	var authenticationFailure directoryOutcome
+	stop := false
 	for _, profile := range profiles {
-		if requests >= maxDiscoveryGETs {
+		if stop || requests >= maxDiscoveryGETs {
 			break
 		}
-		models, result := s.fetchDirectory(ctx, &client, actualBase, key, profile)
-		requests++
-		if result.success {
-			return models, actualBase, result
-		}
-		root, parseErr := url.Parse(actualBase)
-		if !usedSavedKey && !fallbackUsed && parseErr == nil && root.Path == "" && result.fallback && requests < maxDiscoveryGETs {
-			// The sole version fallback becomes the fixed base for later profiles.
-			// Saved credentials never participate in this address change.
-			fallbackUsed = true
+		candidates := []string{base}
+		if !usedSavedKey && rootBase {
 			version := "v1"
 			if profile == ProtocolGoogle {
 				version = "v1beta"
 			}
-			actualBase = appendAPIPath(actualBase, version)
-			models, result = s.fetchDirectory(ctx, &client, actualBase, key, profile)
+			candidates = append(candidates, appendAPIPath(base, version))
+		}
+		for index, candidate := range candidates {
+			if requests >= maxDiscoveryGETs {
+				stop = true
+				break
+			}
+			models, result := s.fetchDirectory(ctx, &client, candidate, key, profile)
 			requests++
 			if result.success {
-				return models, actualBase, result
+				return models, candidate, result
 			}
-		}
-		outcome = result
-		if result.code == "credentials_rejected" {
-			authenticationFailure = result
-		}
-		if !result.retryProtocol {
+			outcome = result
+			if result.code == "credentials_rejected" {
+				authenticationFailure = result
+			}
+			// A second candidate is only a bounded repair for an unsupported or
+			// authentication response at a fresh-key root. Never move a saved
+			// credential to another canonical base.
+			if index+1 < len(candidates) && result.fallback {
+				continue
+			}
+			if !result.retryProtocol {
+				stop = true
+			}
 			break
 		}
 	}
-	if outcome.code == "directory_unsupported" && authenticationFailure.code != "" {
+	if (outcome.code == "directory_unsupported" || outcome.code == "provider_unavailable") && authenticationFailure.code != "" {
 		outcome = authenticationFailure
 	}
-	return nil, actualBase, outcome
+	return nil, base, outcome
 }
 
 func (s *Service) fetchDirectory(ctx context.Context, client *http.Client, base, key, profile string) ([]discoveryModel, directoryOutcome) {
@@ -220,7 +231,11 @@ func (s *Service) fetchDirectory(ctx context.Context, client *http.Client, base,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, directoryFailure("credentials_rejected", "model directory rejected credentials; enter a valid API key and check permissions", false, true)
+		// Keep this eligible for a same-origin version candidate when the
+		// caller supplied a fresh key. fetchModels gates the fallback on root
+		// URL and saved-key state; the error remains authentication-specific if
+		// every candidate fails.
+		return nil, directoryFailure("credentials_rejected", "model directory rejected credentials; enter a valid API key and check permissions", true, true)
 	}
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
@@ -242,10 +257,10 @@ func (s *Service) fetchDirectory(ctx context.Context, client *http.Client, base,
 	if len(body) > maxDiscoveryBody {
 		return nil, directoryFailure("provider_unavailable", "model directory response exceeds its size limit", false, false)
 	}
-	return parseDirectory(body, key)
+	return parseDirectory(body, key, profile)
 }
 
-func parseDirectory(body []byte, key string) ([]discoveryModel, directoryOutcome) {
+func parseDirectory(body []byte, key, profile string) ([]discoveryModel, directoryOutcome) {
 	var directory struct {
 		Data          json.RawMessage `json:"data"`
 		Models        json.RawMessage `json:"models"`
@@ -256,12 +271,32 @@ func parseDirectory(body []byte, key string) ([]discoveryModel, directoryOutcome
 	if json.Unmarshal(body, &directory) != nil {
 		return nil, unsupported
 	}
-	items, protocol, truncated := directory.Data, ProtocolOpenAIChat, false
-	if directory.HasMore != nil {
-		protocol, truncated = ProtocolAnthropic, *directory.HasMore
+	// The response envelope is only a directory shape. Gateways frequently
+	// expose a Gemini-shaped `models` list from an OpenAI-compatible endpoint,
+	// so the profile that successfully authenticated and served the directory
+	// is the protocol recommendation. The envelope still determines how IDs
+	// and pagination are read.
+	protocol := profile
+	if protocol == "" || protocol == "auto" {
+		protocol = ProtocolOpenAIChat
+		if directory.HasMore != nil {
+			protocol = ProtocolAnthropic
+		} else if directory.Models != nil {
+			protocol = ProtocolGoogle
+		}
 	}
-	if directory.Models != nil {
-		items, protocol, truncated = directory.Models, ProtocolGoogle, directory.NextPageToken != ""
+	items := directory.Data
+	if profile == ProtocolGoogle || items == nil || string(items) == "null" {
+		if directory.Models != nil {
+			items = directory.Models
+		}
+	}
+	truncated := false
+	if directory.HasMore != nil {
+		truncated = *directory.HasMore
+	}
+	if directory.NextPageToken != "" {
+		truncated = true
 	}
 	if items == nil || string(items) == "null" {
 		return nil, unsupported
@@ -282,9 +317,9 @@ func parseDirectory(body []byte, key string) ([]discoveryModel, directoryOutcome
 			continue
 		}
 		id := item.ID
-		if protocol == ProtocolGoogle {
+		if directory.Models != nil && (profile == ProtocolGoogle || directory.Data == nil || string(directory.Data) == "null") {
 			id = strings.TrimPrefix(item.Name, "models/")
-			if len(item.Methods) > 0 {
+			if profile == ProtocolGoogle && len(item.Methods) > 0 {
 				generates := false
 				for _, method := range item.Methods {
 					if method == "generateContent" || method == "streamGenerateContent" {
@@ -296,8 +331,10 @@ func parseDirectory(body []byte, key string) ([]discoveryModel, directoryOutcome
 					continue
 				}
 			}
-		} else if item.Type == "model" {
-			protocol = ProtocolAnthropic
+		} else if id == "" && item.Name != "" {
+			// Some OpenAI-compatible gateways use the Google `models` envelope
+			// while still returning IDs under `name`.
+			id = strings.TrimPrefix(item.Name, "models/")
 		}
 		if strings.TrimSpace(id) == "" || len(id) > maxDiscoveryIDBytes || containsControl(id) || (key != "" && strings.Contains(id, key)) {
 			continue

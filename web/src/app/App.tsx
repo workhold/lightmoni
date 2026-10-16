@@ -30,6 +30,7 @@ export default function Root(){
  const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:currentPage}}),[publishedScope,location.pathname,location.search,currentPage]);
  const[navCollapsed,setNavCollapsed]=useState(()=>{try{const saved=localStorage.getItem('lightmoni.nav.collapsed');return saved===null?window.innerWidth<1100:saved==='true'}catch{return window.innerWidth<1100}});
  function toggleNavigation(){setNavCollapsed(value=>{try{localStorage.setItem('lightmoni.nav.collapsed',String(!value))}catch{}return !value})}
+ useEffect(()=>{if(location.pathname==='/settings')setAssistant(false)},[location.pathname]);
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
  if(loading)return <div className="lm-loading"><Spin size="large"/></div>;
  if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/settings'))?location.pathname+location.search:'/')}}/>;

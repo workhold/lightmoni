@@ -2,7 +2,7 @@
 **Date**: 2026-10-14 | **Branch**: Existing working branch | **Spec**: [spec.md](spec.md)
 
 ## Summary
-Expose visible discovery action and protocol selector, keep automatic query, add real native AI SDK adapters to existing Mastra loop. Go owns config/discovery and encrypted secrets. Preserve user old tab; open fresh delivered UI.
+Expose visible discovery action and protocol selector, keep automatic query, add bounded base-path repair and an explicit real-connection verification action to the existing Mastra loop. Go owns config/discovery and encrypted secrets. Preserve user old tab; open fresh delivered UI.
 
 ## Technical Context
 **Language/Version**: Go 1.27.2, TypeScript/React, Node22, Mastra1.66.0
@@ -10,7 +10,7 @@ Expose visible discovery action and protocol selector, keep automatic query, add
 **Storage**: Config JSON adds concrete protocol; legacy blank -> Chat. SQLite schema unchanged.
 **Testing**: Native SDK fixture integration, Go race/contract, frontend lifecycle checks/typecheck/build/browser.
 **Platform/Type**: Existing Go web host and private Node worker.
-**Constraints**: Same-origin catalog requests≤6, total8s, body1MiB, 500 model IDs; saved key no version path fallback; no generated probe or personal key reuse from old DOM.
+**Constraints**: Same-origin catalog requests≤6, total8s, body1MiB, 500 model IDs; saved key no version path fallback; generated probe only after explicit test action; no personal key reuse from old DOM.
 **Performance**: 700ms debounce; same existing execution limits.
 
 ## Constitution Check

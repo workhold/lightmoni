@@ -96,6 +96,7 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/assistant/config", s.config)
 	mux.HandleFunc("PUT /api/v1/assistant/config", s.config)
 	mux.HandleFunc("POST /api/v1/assistant/models", s.models)
+	mux.HandleFunc("POST /api/v1/assistant/test-connection", s.testConnection)
 	mux.HandleFunc("GET /api/v1/assistant/sessions", s.sessions)
 	mux.HandleFunc("POST /api/v1/assistant/sessions", s.sessions)
 	mux.HandleFunc("GET /api/v1/assistant/sessions/{id}", s.session)
