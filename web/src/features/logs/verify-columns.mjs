@@ -30,7 +30,7 @@ try {
   const table = tables.find(t => t.id === 'log_demo_app') ?? tables.find(t => t.kind === 'log');
   if (!table) throw new Error('A real log table is required');
   const spec = { table_id: table.id, range: {
-    from: new Date(Date.now() - 86400000).toISOString(), to: new Date().toISOString(),
+    from: new Date(Date.now() - 7 * 86400000).toISOString(), to: new Date().toISOString(),
   }, services: [], keyword: '', filters: [], sort: 'desc', mode: 'filters', sql: '' };
   const data = await json('/logs/search', { method: 'POST', data: { spec, limit: 200 } });
   expect(data.frame.rows.length).toBeGreaterThan(0);
@@ -57,7 +57,7 @@ try {
   await page.getByRole('button', { name: '下移列 event_time', exact: true }).click();
   let order = ['severity', 'event_time', 'body', 'service', 'event_id', 'host_id', 'agent_id', 'key_id'];
   await expect.poll(() => headers.allTextContents()).toEqual(order);
-  await page.getByRole('button', { name: /列$/ }).click();
+  await page.getByRole('button', { name: '配置显示列', exact: true }).click();
   const columns = page.getByRole('dialog', { name: '显示列与顺序' });
   await columns.locator('.lm-log-columns-config > div').filter({ hasText: 'key_id' })
     .getByRole('button', { name: /上\s*移$/, exact: true }).click();
@@ -106,6 +106,7 @@ try {
   const body = await page.locator('.lm-log-message').first().innerText();
   await page.locator('.lm-log-message').first().click();
   const detail = page.getByRole('dialog', { name: /日志详情/ });
+  await detail.getByRole('tab', { name: '原文 / 堆栈', exact: true }).click();
   await expect(detail.locator('.lm-log-body')).toContainText(body);
   await detail.locator('.ant-drawer-close').click();
   const query = page.waitForResponse(response => response.url().endsWith('/logs/search'));

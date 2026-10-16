@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-16",
+  "typecheck": "passed",
+  "diff_check": "passed",
+  "static_review": "passed; no score; no independent interaction or motion review",
+  "runs": [
+    {
+      "run": 1,
+      "discover": {
+        "passed": true,
+        "report": "docs/evidence/log-discover/1-report.json"
+      },
+      "columns": {
+        "passed": true,
+        "report": "docs/evidence/log-columns/1-report.json"
+      },
+      "performance": {
+        "passed": true,
+        "report": "docs/evidence/log-performance/discover-1-report.json",
+        "keyword_attribute_parses": 0,
+        "keyword_time_cell_renders": 0
+      }
+    },
+    {
+      "run": 2,
+      "discover": {
+        "passed": true,
+        "report": "docs/evidence/log-discover/2-report.json"
+      },
+      "columns": {
+        "passed": true,
+        "report": "docs/evidence/log-columns/2-report.json"
+      },
+      "performance": {
+        "passed": true,
+        "report": "docs/evidence/log-performance/discover-2-report.json",
+        "keyword_attribute_parses": 0,
+        "keyword_time_cell_renders": 0
+      }
+    },
+    {
+      "run": 3,
+      "discover": {
+        "passed": true,
+        "report": "docs/evidence/log-discover/3-report.json"
+      },
+      "columns": {
+        "passed": true,
+        "report": "docs/evidence/log-columns/3-report.json"
+      },
+      "performance": {
+        "passed": true,
+        "report": "docs/evidence/log-performance/discover-3-report.json",
+        "keyword_attribute_parses": 0,
+        "keyword_time_cell_renders": 0
+      }
+    }
+  ],
+  "motion": {
+    "entry": "artifacts/screenshots/docs/evidence/log-discover/entry.mp4",
+    "query_feedback": "artifacts/screenshots/docs/evidence/log-discover/query-feedback.mp4",
+    "panel_switch": "artifacts/screenshots/docs/evidence/log-discover/panel-switch.mp4",
+    "source": "artifacts/screenshots/docs/evidence/log-discover/1-interactions.webm",
+    "review": "Main agent inspected four-frame contact sheets; full recordings are retained."
+  }
+}
