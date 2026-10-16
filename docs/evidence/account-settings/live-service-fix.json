@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-16",
+  "target": "http://127.0.0.1:5173/settings?tab=profile",
+  "cause": "Vite front end was using the old backend container without /auth/profile routes.",
+  "action": "Built current web assets and Linux arm64 backend; updated the running local backend image and recreated its container using the existing runtime configuration.",
+  "checks": {
+    "same_environment": true,
+    "same_data_volumes": true,
+    "same_port_bindings": true,
+    "same_networks": true,
+    "running": true
+  },
+  "browser_checks": [
+    "Original Chrome page now loads personal profile",
+    "Save current profile values shows success",
+    "Reload reads back profile without HTTP 404",
+    "Existing administrator session remains valid"
+  ],
+  "backup_directory": ".local-dev/account-settings-deploy",
+  "rollback_image": "lightmoni:account-settings-base-20261016"
+}

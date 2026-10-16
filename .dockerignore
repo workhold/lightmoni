@@ -28,6 +28,7 @@ internal/server/agent-dist/SHA256SUMS
 internal/server/agent-dist/SDK_SHA256SUMS
 
 .local-dev
+artifacts/screenshots
 .agents
 .specify
 specs

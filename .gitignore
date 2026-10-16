@@ -32,3 +32,6 @@ __pycache__/
 ai-runtime/dist/
 .local-dev/
 *.log
+
+# Local QA screenshots, reference images and recordings (mirrors source paths).
+/artifacts/screenshots/

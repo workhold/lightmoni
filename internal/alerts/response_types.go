@@ -30,6 +30,9 @@ type PriorityPolicy struct {
 	Start                string   `json:"start"`
 	End                  string   `json:"end"`
 	Weekdays             []int    `json:"weekdays"`
+	NightMode            string   `json:"night_mode,omitempty"`
+	NightMethods         []string `json:"night_methods,omitempty"`
+	NightAfterCount      int      `json:"night_after_count,omitempty"`
 	RepeatSeconds        int      `json:"repeat_seconds"`
 	BackupAfterSeconds   int      `json:"backup_after_seconds"`
 	FallbackAfterSeconds int      `json:"fallback_after_seconds"`
@@ -107,6 +110,10 @@ type IncidentResponse struct {
 	Event              Event    `json:"event"`
 	Evidence           Evidence `json:"evidence"`
 	ResolutionNotified bool     `json:"resolution_notified"`
+	NightPeriod        string   `json:"night_period,omitempty"`
+	NightCount         int      `json:"night_count,omitempty"`
+	NightLastRoundAt   string   `json:"night_last_round_at,omitempty"`
+	NightEligibleAt    string   `json:"night_eligible_at,omitempty"`
 }
 type ResponseAudit struct {
 	ID         string `json:"id"`
@@ -142,9 +149,9 @@ func priorityRank(v string) int {
 }
 func defaultPolicies() map[string]PriorityPolicy {
 	return map[string]PriorityPolicy{
-		"P0": {Methods: []string{"voice", "sms", "chat"}, RepeatSeconds: 120, BackupAfterSeconds: 300, FallbackAfterSeconds: 600, MaxRounds: 6, HandlingSeconds: 1800},
-		"P1": {Methods: []string{"sms", "chat"}, Start: "09:00", End: "22:00", RepeatSeconds: 300, BackupAfterSeconds: 600, FallbackAfterSeconds: 1200, MaxRounds: 6, HandlingSeconds: 3600},
-		"P2": {Methods: []string{"email", "webhook", "chat"}, Start: "09:00", End: "22:00", RepeatSeconds: 1800, EscalateAfterRounds: 3, EscalateTo: "P1", MaxRounds: 6, HandlingSeconds: 7200},
+		"P0": {Methods: []string{"voice", "sms"}, RepeatSeconds: 120, BackupAfterSeconds: 300, FallbackAfterSeconds: 600, MaxRounds: 6, HandlingSeconds: 1800},
+		"P1": {Methods: []string{"voice", "sms"}, Start: "09:00", End: "22:00", NightMode: "after_count", NightMethods: []string{"voice"}, NightAfterCount: 3, RepeatSeconds: 300, BackupAfterSeconds: 600, FallbackAfterSeconds: 1200, MaxRounds: 6, HandlingSeconds: 3600},
+		"P2": {Methods: []string{"sms"}, Start: "09:00", End: "22:00", RepeatSeconds: 1800, MaxRounds: 6, HandlingSeconds: 7200},
 		"P3": {Methods: []string{"email", "webhook"}, Start: "09:00", End: "18:00", Weekdays: []int{1, 2, 3, 4, 5}, RepeatSeconds: 3600, MaxRounds: 1},
 	}
 }
@@ -152,7 +159,31 @@ func (g Group) policy(p string) PriorityPolicy {
 	if v, ok := g.Policies[p]; ok {
 		return v
 	}
-	return defaultPolicies()[priority(p)]
+	return legacyPolicies()[priority(p)]
+}
+
+// Missing policies in previously saved groups retain their original defaults.
+// Only new groups and explicit template selection opt into the new defaults.
+func legacyPolicies() map[string]PriorityPolicy {
+	p := defaultPolicies()
+	p["P0"] = PriorityPolicy{Methods: []string{"voice", "sms", "chat"}, RepeatSeconds: 120, BackupAfterSeconds: 300, FallbackAfterSeconds: 600, MaxRounds: 6, HandlingSeconds: 1800}
+	p["P1"] = PriorityPolicy{Methods: []string{"sms", "chat"}, Start: "09:00", End: "22:00", RepeatSeconds: 300, BackupAfterSeconds: 600, FallbackAfterSeconds: 1200, MaxRounds: 6, HandlingSeconds: 3600}
+	p["P2"] = PriorityPolicy{Methods: []string{"email", "webhook", "chat"}, Start: "09:00", End: "22:00", RepeatSeconds: 1800, EscalateAfterRounds: 3, EscalateTo: "P1", MaxRounds: 6, HandlingSeconds: 7200}
+	return p
+}
+
+func (g *Group) fillLegacyPolicies() {
+	if len(g.Members) == 0 {
+		return
+	}
+	if g.Policies == nil {
+		g.Policies = map[string]PriorityPolicy{}
+	}
+	for key, p := range legacyPolicies() {
+		if _, ok := g.Policies[key]; !ok {
+			g.Policies[key] = p
+		}
+	}
 }
 func uniqueUsers(v []string) []string {
 	out := []string{}
@@ -314,6 +345,21 @@ func allowedResponse(r IncidentResponse, now time.Time, silences []Silence, rule
 	}
 	p := r.Group.policy(r.Priority)
 	if !windowAllowed(now, r.Group.Timezone, p.Start, p.End, p.Weekdays) {
+		if r.nightPeriod(now) != "" {
+			switch p.NightMode {
+			case "immediate":
+				return ""
+			case "after_count":
+				if r.NightPeriod == r.nightPeriod(now) && r.NightCount >= p.NightAfterCount && r.NightEligibleAt != "" && !now.Before(parse(r.NightEligibleAt)) {
+					return ""
+				}
+				count := 0
+				if r.NightPeriod == r.nightPeriod(now) {
+					count = r.NightCount
+				}
+				return fmt.Sprintf("夜间仅记录：持续告警 %d/%d 轮", count, p.NightAfterCount)
+			}
+		}
 		return "通知窗口外"
 	}
 	return ""
@@ -326,6 +372,9 @@ func responseActiveSeconds(r IncidentResponse, from, to time.Time, silences []Si
 		return 0
 	}
 	boundaries := []time.Time{from, to}
+	if n := parse(r.NightEligibleAt); n.After(from) && n.Before(to) {
+		boundaries = append(boundaries, n)
+	}
 	for n := from.Truncate(time.Minute).Add(time.Minute); n.Before(to); n = n.Add(time.Minute) {
 		boundaries = append(boundaries, n)
 	}

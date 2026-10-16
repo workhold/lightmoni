@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -7,6 +8,7 @@ import {createLightMoni} from '../../../../sdk/typescript/dist/src/index.js';
 const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:5176',apiBase=process.env.LIGHTMONI_ALERT_QA_API??'http://127.0.0.1:18883';
 const run=Date.now().toString(),output=resolve(import.meta.dirname,'../../../../docs/evidence/panel-alert-window',run);
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 const receiver=createServer((req,res)=>{req.resume();res.writeHead(202).end();});
 await new Promise(resolve=>receiver.listen(0,'127.0.0.1',resolve));
 let browser;try{browser=await chromium.launch({headless:true});}catch{browser=await chromium.launch({headless:true,channel:'chrome'});}
@@ -70,13 +72,13 @@ ORDER BY time`;
  await page.reload();await edit();
  await expect(page.getByRole('spinbutton',{name:'告警回看窗口 1',exact:true})).toHaveValue('600');await expect(page.getByRole('spinbutton',{name:'告警窗口结束延迟 1',exact:true})).toHaveValue('120');await expect(page.getByRole('textbox',{name:'告警无数据替代值 1',exact:true})).toHaveValue('18446744073709551615');
  await expect(page.getByRole('combobox',{name:'告警无数据处理 1',exact:true}).locator('..')).toContainText('按指定值计算');
- await page.locator('.lm-workbench-sidebar').screenshot({path:resolve(output,'desktop.png')});
+ await page.locator('.lm-workbench-sidebar').screenshot({path:resolve(mediaOutput,'desktop.png')});
  await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'图表与设置',exact:true}).click();await page.locator('.lm-workbench-settings').getByRole('tab',{name:'告警',exact:true}).click();
- await expect(page.getByRole('spinbutton',{name:'告警窗口结束延迟 1',exact:true})).toBeVisible();await page.locator('.lm-workbench-settings').screenshot({path:resolve(output,'narrow.png')});
+ await expect(page.getByRole('spinbutton',{name:'告警窗口结束延迟 1',exact:true})).toBeVisible();await page.locator('.lm-workbench-settings').screenshot({path:resolve(mediaOutput,'narrow.png')});
  if(errors.length)throw new Error(errors.join('\n'));
  const report={checks:['实际查询窗口为 now-12min ~ now-2min','延迟窗口排除过新和过旧的点','六种取值方式通过真实 ClickHouse 计算','五种无数据策略预览与保存一致','UInt64 替代值无精度损失','失败保存保留输入和原规则','刷新读回窗口、延迟和无数据配置','390px 设置可操作'],range:p.range,page_errors:errors};
  await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({output,...report}));
-}catch(error){await page.screenshot({path:resolve(output,'failure.png'),fullPage:true}).catch(()=>{});console.error(error);process.exitCode=1;}finally{
+}catch(error){await page.screenshot({path:resolve(mediaOutput,'failure.png'),fullPage:true}).catch(()=>{});console.error(error);process.exitCode=1;}finally{
  for(const id of ruleIDs)await json('/alerts/rules/'+id,{method:'DELETE'}).catch(()=>{});
  if(dashboard)await json('/dashboards/'+dashboard.id,{method:'DELETE'}).catch(()=>{});
  if(group)await json('/alerts/groups/'+group.id,{method:'DELETE'}).catch(()=>{});

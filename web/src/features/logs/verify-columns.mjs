@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../../scripts/qa-artifacts.mjs';
 import { chromium, expect, request } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -7,6 +8,7 @@ const center = process.env.LIGHTMONI_QA_CENTER_URL ?? 'http://localhost:18380';
 const run = process.env.LIGHTMONI_QA_RUN ?? '1';
 const output = resolve(import.meta.dirname, '../../../../docs/evidence/log-columns');
 await mkdir(output, { recursive: true });
+const mediaOutput=mediaDirectory(output);
 const api = await request.newContext({ baseURL: center });
 async function json(path, options) {
   const response = await api.fetch('/api/v1' + path, options);
@@ -18,7 +20,7 @@ try { browser = await chromium.launch({ headless: true }); }
 catch { browser = await chromium.launch({ headless: true, channel: 'chrome' }); }
 let context, page;
 const checks = [], errors = [];
-const shot = name => page.screenshot({ path: resolve(output, `${run}-${name}.png`), fullPage: true, animations: 'disabled' });
+const shot = name => page.screenshot({ path: resolve(mediaOutput, `${run}-${name}.png`), fullPage: true, animations: 'disabled' });
 try {
   await json('/auth/login', { method: 'POST', data: {
     name: process.env.LIGHTMONI_TEST_USER ?? 'local-admin',
@@ -151,7 +153,7 @@ try {
   await writeFile(resolve(output, `${run}-report.json`), JSON.stringify({ run, passed: true, checks, errors }, null, 2));
   console.log(JSON.stringify({ run, passed: true, checks }));
 } catch (error) {
-  await page?.screenshot({ path: resolve(output, `${run}-failure.png`), fullPage: true }).catch(() => {});
+  await page?.screenshot({ path: resolve(mediaOutput, `${run}-failure.png`), fullPage: true }).catch(() => {});
   await writeFile(resolve(output, `${run}-report.json`), JSON.stringify({ run, passed: false, checks, errors, error: String(error) }, null, 2));
   console.error(error);
   process.exitCode = 1;

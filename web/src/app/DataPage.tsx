@@ -76,7 +76,7 @@ export default function DataPage({user}:{user:User}) {
         </Space>
         {sdkPackage && !sdkPackage.available && <Alert type="warning" style={{marginBottom:14}} title="当前服务尚未打包此 SDK，请先构建 SDK 安装包。"/>}
         <CodeBlock code={sdkExample.install} language="bash" ariaLabel="SDK 安装命令"/>
-        <SDKSetup language={sdkLanguage} mode={sdkMode} endpoint={sdkMode==='agent'?agentEndpoint:centerEndpoint??sdk?.endpoint??window.location.origin} defaultEndpoint={sdk?.endpoint??window.location.origin} onModeChange={setSDKMode} onEndpointChange={sdkMode==='agent'?setAgentEndpoint:setCenterEndpoint} onResetEndpoint={()=>setCenterEndpoint(undefined)} onManageKeys={user.role==='admin'?()=>setTab('keys'):undefined}/>
+        <SDKSetup language={sdkLanguage} mode={sdkMode} endpoint={sdkMode==='agent'?agentEndpoint:centerEndpoint??sdk?.endpoint??window.location.origin} defaultEndpoint={sdk?.endpoint??window.location.origin} reportingAddresses={sdk?.endpoints} defaultEndpointID={sdk?.default_endpoint_id} onModeChange={setSDKMode} onEndpointChange={sdkMode==='agent'?setAgentEndpoint:setCenterEndpoint} onResetEndpoint={()=>setCenterEndpoint(undefined)} onManageKeys={user.role==='admin'?()=>setTab('keys'):undefined}/>
         <p>所有 SDK 支持 Counter、Gauge、Histogram、日志和基础链路。SDK 默认报告实例心跳与内部诊断；Go、Node.js、Python、Java、.NET、Ruby、Rust 每 30 秒报告，PHP 在请求结束或定时 flush 时报告。退出前停止生产，再调用有截止时间的 shutdown。</p>
         <p>浏览器通过业务后端转发，后端保管仅允许目标 table 的 Key，页面无需保存私有 Key。Java 包适用于 Kotlin/JVM 服务端。</p>
       </div>},
@@ -103,7 +103,7 @@ export default function DataPage({user}:{user:User}) {
           </Space>},
         ]}/>
       </div> : <Alert type="info" title="由管理员创建和管理 Key"/>},
-      {key:'tables',label:'数据表',children:<div className="lm-surface"><div className="lm-toolbar"><span>单表设置优先于全局默认。</span>{user.role==='admin'&&<Link to="/settings?tab=retention">管理全局默认时长</Link>}</div><Table rowKey="id" dataSource={tables} scroll={{x:1100}} columns={[
+      {key:'tables',label:'数据表',children:<div className="lm-surface"><div className="lm-toolbar"><span>单表设置优先于全局默认。</span>{user.role==='admin'&&<Link to="/admin?tab=retention">管理全局默认时长</Link>}</div><Table rowKey="id" dataSource={tables} scroll={{x:1100}} columns={[
         {title:'SQL 名称',dataIndex:'name',width:260,render:(name:string,table:CatalogTable)=><Space><Typography.Text code>{name}</Typography.Text>{table.system&&<Tag color="blue">系统内置</Tag>}</Space>},{title:'逻辑表',dataIndex:'logical_name',width:160},{title:'类型',dataIndex:'kind',width:90},
         {title:'服务',dataIndex:'services',width:180,render:(value:string[]) => value.join(' · ')},
         {title:'保留时长',width:240,render:(_:unknown,table:CatalogTable)=><Space wrap><span>{retentionLabel(table.effective_retention_days)}</span>{table.retention_days==null&&<Tag>跟随全局</Tag>}{user.role==='admin'&&<Button size="small" onClick={()=>setRetentionTable(table)}>设置时长</Button>}</Space>},

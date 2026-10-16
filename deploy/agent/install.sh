@@ -8,9 +8,10 @@ config_source=""
 endpoint=""
 group_id=""
 key_stdin=""
+reporting_key=""
 
 usage() {
-  echo 'Usage: install.sh --release-url URL | --release-dir DIR [--version VERSION] [--config FILE | --endpoint URL --key-stdin] [--group-id GROUP]'
+  echo 'Usage: install.sh (--release-url URL --key-stdin | --release-dir DIR) [--version VERSION] [--config FILE | --endpoint URL --key-stdin] [--group-id GROUP]'
   echo 'The reporting configuration is generated automatically. Existing identity and cached data are preserved.'
 }
 
@@ -46,14 +47,22 @@ if [ -n "$config_source" ]; then [ -f "$config_source" ] || { echo 'Configuratio
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+if [ "$key_stdin" = "yes" ]; then
+  IFS= read -r reporting_key || :
+  [ -n "$reporting_key" ] || { echo 'A reporting key is required.' >&2; exit 1; }
+fi
+if [ -z "$release_dir" ] && [ -z "$reporting_key" ]; then
+  echo 'Online installation requires --key-stdin to authenticate Agent downloads.' >&2
+  exit 1
+fi
 artifact="lightmoni-agent_${version}_linux_${arch}.tar.gz"
 if [ -n "$release_dir" ]; then
   cp "$release_dir/$artifact" "$tmp_dir/$artifact"
   cp "$release_dir/SHA256SUMS" "$tmp_dir/SHA256SUMS"
 else
   command -v curl >/dev/null || { echo 'curl is required for online installation.' >&2; exit 1; }
-  curl --fail --silent --show-error --location "$release_url/$artifact" --output "$tmp_dir/$artifact"
-  curl --fail --silent --show-error --location "$release_url/SHA256SUMS" --output "$tmp_dir/SHA256SUMS"
+  curl --fail --silent --show-error --location --header "Authorization: Bearer $reporting_key" "$release_url/$artifact" --output "$tmp_dir/$artifact"
+  curl --fail --silent --show-error --location --header "Authorization: Bearer $reporting_key" "$release_url/SHA256SUMS" --output "$tmp_dir/SHA256SUMS"
 fi
 expected="$(awk -v artifact="$artifact" '$2 == artifact { print $1 }' "$tmp_dir/SHA256SUMS")"
 [ "${#expected}" = "64" ] || { echo 'Release checksum missing or ambiguous.' >&2; exit 1; }
@@ -70,7 +79,7 @@ fi
 install -d -m 0700 -o lightmoni-agent -g lightmoni-agent /etc/lightmoni-agent /var/lib/lightmoni-agent
 if [ ! -f "$config_path" ] && [ -n "$config_source" ]; then install -m 0600 -o lightmoni-agent -g lightmoni-agent "$config_source" "$config_path"; fi
 if [ -n "$endpoint" ]; then
-  "$tmp_dir/unpacked/lightmoni-agent" configure --config "$config_path" --endpoint "$endpoint" --group-id "$group_id" --key-stdin --require-data-dir /var/lib/lightmoni-agent
+  printf '%s\n' "$reporting_key" | "$tmp_dir/unpacked/lightmoni-agent" configure --config "$config_path" --endpoint "$endpoint" --group-id "$group_id" --key-stdin --require-data-dir /var/lib/lightmoni-agent
   chown lightmoni-agent:lightmoni-agent "$config_path"
 elif [ -n "$group_id" ]; then
   "$tmp_dir/unpacked/lightmoni-agent" configure --config "$config_path" --group-id "$group_id" --require-data-dir /var/lib/lightmoni-agent

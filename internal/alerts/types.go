@@ -66,6 +66,7 @@ type Rule struct {
 	NoDataPolicy     string                      `json:"no_data_policy,omitempty"`
 	NoDataValue      string                      `json:"no_data_value,omitempty"`
 	ForSeconds       int                         `json:"for_seconds"`
+	ForCount         int                         `json:"for_count"`
 	RecoverySeconds  int                         `json:"recovery_seconds"`
 	RepeatSeconds    int                         `json:"repeat_seconds"`
 	HealthForSeconds int                         `json:"health_for_seconds"`
@@ -84,22 +85,23 @@ type PanelCondition struct {
 }
 type State struct {
 	// Only used during evaluation to distinguish a substitute from real data.
-	missing       bool
-	RuleID        string            `json:"rule_id"`
-	Fingerprint   string            `json:"fingerprint"`
-	Labels        map[string]string `json:"labels"`
-	Status        string            `json:"status"`
-	Health        string            `json:"health"`
-	Value         string            `json:"value"`
-	Since         string            `json:"since"`
-	HealthSince   string            `json:"health_since"`
-	LastEval      string            `json:"last_eval"`
-	LastSuccess   string            `json:"last_success"`
-	LastNotify    string            `json:"last_notify"`
-	Episode       string            `json:"episode"`
-	HealthEpisode string            `json:"health_episode"`
-	Error         string            `json:"error,omitempty"`
-	Silenced      bool              `json:"silenced"`
+	missing             bool
+	RuleID              string            `json:"rule_id"`
+	Fingerprint         string            `json:"fingerprint"`
+	Labels              map[string]string `json:"labels"`
+	Status              string            `json:"status"`
+	Health              string            `json:"health"`
+	Value               string            `json:"value"`
+	Since               string            `json:"since"`
+	HealthSince         string            `json:"health_since"`
+	LastEval            string            `json:"last_eval"`
+	LastSuccess         string            `json:"last_success"`
+	LastNotify          string            `json:"last_notify"`
+	Episode             string            `json:"episode"`
+	HealthEpisode       string            `json:"health_episode"`
+	Error               string            `json:"error,omitempty"`
+	Silenced            bool              `json:"silenced"`
+	ConsecutiveFailures int               `json:"consecutive_failures,omitempty"`
 }
 type Event struct {
 	ID             string       `json:"id"`

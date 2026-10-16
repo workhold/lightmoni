@@ -59,6 +59,7 @@ func (m *Module) group(ctx context.Context, gid string) (Group, error) {
 	if e == nil {
 		e = json.Unmarshal([]byte(raw), &g)
 	}
+	g.fillLegacyPolicies()
 	return g, e
 }
 func (m *Module) member(ctx context.Context, userID string) (string, shared.NotificationProfile, bool) {
@@ -107,6 +108,9 @@ type responseTarget struct {
 }
 
 func (m *Module) responseTargets(ctx context.Context, g Group, p string, users []string) ([]responseTarget, []string, error) {
+	return m.responseTargetsForMethods(ctx, g, g.policy(p).Methods, users)
+}
+func (m *Module) responseTargetsForMethods(ctx context.Context, g Group, methods []string, users []string) ([]responseTarget, []string, error) {
 	channels, e := listBodies[Channel](ctx, m.deps.DB, "SELECT body FROM alert_channels ORDER BY name,id")
 	if e != nil {
 		return nil, nil, e
@@ -114,7 +118,6 @@ func (m *Module) responseTargets(ctx context.Context, g Group, p string, users [
 	out := []responseTarget{}
 	warnings := []string{}
 	auto := map[string]bool{}
-	methods := g.policy(p).Methods
 	for _, c := range channels {
 		kind := channelMethod(c.Type)
 		if !c.Enabled || !includes(methods, kind) || (len(g.ChannelIDs) > 0 && !includes(g.ChannelIDs, c.ID)) {
@@ -199,6 +202,7 @@ func (m *Module) startResponseTx(tx *sql.Tx, event Event, rule Rule, g Group) er
 			return nil
 		}
 		r.State, r.ResolvedAt, r.Generation = "resolved", event.CreatedAt, r.Generation+1
+		r.DeferredReason = "已恢复，停止后续通知"
 		r.Event = event
 		if e := saveResponse(tx, r); e != nil {
 			return e
@@ -242,7 +246,7 @@ func (m *Module) enqueueRound(ctx context.Context, r *IncidentResponse, now time
 			users = r.Group.Fallback
 		}
 		users = m.activeMembers(ctx, users)
-		targets, warnings, e = m.responseTargets(ctx, r.Group, r.Priority, users)
+		targets, warnings, e = m.responseTargetsForMethods(ctx, r.Group, r.notificationMethods(now), users)
 		if e != nil {
 			return e
 		}
@@ -367,6 +371,9 @@ func (m *Module) TickResponses(ctx context.Context) error {
 		if !rule.Enabled {
 			continue
 		}
+		if e = m.advanceNightRound(ctx, &r, rule, now, silences); e != nil {
+			return e
+		}
 		reason := allowedResponse(r, now, silences, rule.SilenceUntil)
 		delta := 0.0
 		if r.State == "unclaimed" {
@@ -429,7 +436,7 @@ func (m *Module) TickResponses(ctx context.Context) error {
 			}
 			continue
 		}
-		if strings.HasPrefix(oldReason, "静默") || oldReason == "通知窗口外" || oldReason == "规则静默" {
+		if strings.HasPrefix(oldReason, "静默") || strings.HasPrefix(oldReason, "夜间仅记录") || oldReason == "通知窗口外" || oldReason == "规则静默" {
 			r.SinceRoundSeconds = float64(r.Group.policy(r.Priority).RepeatSeconds)
 			r.DeferredReason = ""
 		}
@@ -693,6 +700,15 @@ func (m *Module) deliveryAllowed(ctx context.Context, d Delivery) (bool, string,
 	if reason := allowedResponse(r, m.now(), silences, rule.SilenceUntil); reason != "" {
 		return false, reason, nil
 	}
+	if !isRecovery {
+		c, e := m.channel(ctx, d.ChannelID, false)
+		if e != nil {
+			return false, "渠道不存在", e
+		}
+		if !includes(r.notificationMethods(m.now()), channelMethod(c.Type)) {
+			return false, "当前时段不使用此通知方式", nil
+		}
+	}
 	return true, "", nil
 }
 
@@ -785,6 +801,25 @@ func (m *Module) validateGroupResponse(ctx context.Context, g *Group) error {
 		for _, method := range p.Methods {
 			if !includes([]string{"email", "sms", "voice", "chat", "webhook", "push"}, method) {
 				return errors.New("无效的通知方式")
+			}
+		}
+		if p.NightMode != "" && p.NightMode != "silent" && p.NightMode != "immediate" && p.NightMode != "after_count" {
+			return errors.New("夜间策略为仅记录、直接通知或累计后通知")
+		}
+		if p.NightAfterCount < 0 || p.NightAfterCount > 1000 {
+			return errors.New("夜间持续告警轮数必须为1到1000")
+		}
+		if p.NightMode == "immediate" || p.NightMode == "after_count" {
+			if p.Start == "" || p.End == "" || p.Start == p.End || len(p.NightMethods) == 0 {
+				return errors.New("夜间通知需要日间时段和夜间通知方式")
+			}
+			if p.NightMode == "after_count" && p.NightAfterCount < 1 {
+				return errors.New("夜间持续告警轮数必须为1到1000")
+			}
+		}
+		for _, method := range p.NightMethods {
+			if !includes([]string{"email", "sms", "voice", "chat", "webhook", "push"}, method) {
+				return errors.New("无效的夜间通知方式")
 			}
 		}
 		if p.Start != "" || p.End != "" {

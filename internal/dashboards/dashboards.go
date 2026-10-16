@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,14 +39,30 @@ type Panel struct {
 	Grid    Grid           `json:"grid"`
 }
 type Variable struct {
-	Name    string   `json:"name"`
-	Label   string   `json:"label,omitempty"`
-	Type    string   `json:"type"`
-	Options []string `json:"options,omitempty"`
-	SQL     string   `json:"sql,omitempty"`
-	Multi   bool     `json:"multi,omitempty"`
-	All     bool     `json:"all,omitempty"`
-	Value   any      `json:"value,omitempty"`
+	Name        string   `json:"name"`
+	Label       string   `json:"label,omitempty"`
+	Type        string   `json:"type"`
+	Options     []string `json:"options,omitempty"`
+	SQL         string   `json:"sql,omitempty"`
+	Multi       bool     `json:"multi,omitempty"`
+	All         bool     `json:"all,omitempty"`
+	Value       any      `json:"value,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Hide        bool     `json:"hide,omitempty"`
+	SkipURLSync bool     `json:"skip_url_sync,omitempty"`
+}
+type Row struct {
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	PanelIDs  []string `json:"panel_ids"`
+	Collapsed bool     `json:"collapsed,omitempty"`
+}
+type Link struct {
+	Title            string `json:"title"`
+	URL              string `json:"url"`
+	IncludeTime      bool   `json:"include_time,omitempty"`
+	IncludeVariables bool   `json:"include_variables,omitempty"`
+	NewTab           bool   `json:"new_tab,omitempty"`
 }
 type Dashboard struct {
 	ID          string       `json:"id"`
@@ -52,6 +70,9 @@ type Dashboard struct {
 	Description string       `json:"description"`
 	Panels      []Panel      `json:"panels"`
 	Variables   []Variable   `json:"variables"`
+	Rows        []Row        `json:"rows,omitempty"`
+	Links       []Link       `json:"links,omitempty"`
+	Tags        []string     `json:"tags,omitempty"`
 	Range       shared.Range `json:"range"`
 	Refresh     int          `json:"refresh"`
 	Revision    int64        `json:"revision"`
@@ -60,7 +81,8 @@ type Dashboard struct {
 type Module struct{ deps shared.Dependencies }
 
 var variableName = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,47}$`)
-var relativeTime = regexp.MustCompile(`^now(?:-[1-9][0-9]{0,6}[smhd])?$`)
+var relativeTime = regexp.MustCompile(`^now(?:[+-][1-9][0-9]{0,6}[smhdwMy])?(?:/[smhdwMy])?$`)
+var epochTime = regexp.MustCompile(`^\d{10}(?:\d{3})?$`)
 var parameterReference = regexp.MustCompile(`\{([a-zA-Z][a-zA-Z0-9_]*):[^}]+\}`)
 
 // Dependency planning ignores strings/comments; SQL execution and security stay
@@ -204,11 +226,35 @@ func normalize(d *Dashboard) error {
 	if len(d.Description) > 8000 || len(d.Panels) > 48 || len(d.Variables) > 16 {
 		return errors.New("大盘配置超出容量限制")
 	}
+	if len(d.Rows) > 24 || len(d.Links) > 24 || len(d.Tags) > 32 {
+		return errors.New("分组、链接或标签超出容量限制")
+	}
+	for _, link := range d.Links {
+		parsed, err := url.Parse(link.URL)
+		validURL := err == nil && !strings.ContainsAny(link.URL, "\\\r\n") && ((parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Hostname() != "" || parsed.Scheme == "" && parsed.Host == "" && strings.HasPrefix(link.URL, "/") && !strings.HasPrefix(link.URL, "//"))
+		if strings.TrimSpace(link.Title) == "" || len(link.Title) > 320 || len(link.URL) > 4096 || !validURL {
+			return errors.New("链接需要名称与 http(s) 或站内地址")
+		}
+	}
+	for _, tag := range d.Tags {
+		if strings.TrimSpace(tag) == "" || len(tag) > 160 {
+			return errors.New("标签无效")
+		}
+	}
 	if d.Refresh != 0 && d.Refresh < 5 || d.Refresh > 3600 {
 		return errors.New("刷新间隔须为 0 或 5–3600 秒")
 	}
 	if d.Range.From == "" {
 		d.Range = shared.Range{From: "now-1h", To: "now"}
+	}
+	for _, bound := range []*string{&d.Range.From, &d.Range.To} {
+		if epochTime.MatchString(*bound) {
+			value, _ := strconv.ParseInt(*bound, 10, 64)
+			if len(*bound) == 10 {
+				value *= 1000
+			}
+			*bound = time.UnixMilli(value).UTC().Format(time.RFC3339Nano)
+		}
 	}
 	for _, value := range []string{d.Range.From, d.Range.To} {
 		if !relativeTime.MatchString(value) {
@@ -272,6 +318,23 @@ func normalize(d *Dashboard) error {
 			if len(q.RefID) > 48 || strings.TrimSpace(q.SQL) == "" || len(q.SQL) > 100000 {
 				return errors.New("查询名称或 SQL 无效")
 			}
+		}
+	}
+	rowIDs, grouped := map[string]bool{}, map[string]bool{}
+	for i := range d.Rows {
+		row := &d.Rows[i]
+		if row.ID == "" {
+			row.ID = uuid.NewString()
+		}
+		if rowIDs[row.ID] || strings.TrimSpace(row.Title) == "" || len([]rune(row.Title)) > 160 {
+			return errors.New("分组名称无效或 ID 重复")
+		}
+		rowIDs[row.ID] = true
+		for _, panelID := range row.PanelIDs {
+			if !ids[panelID] || grouped[panelID] {
+				return errors.New("分组引用了不存在或重复的面板")
+			}
+			grouped[panelID] = true
 		}
 	}
 	names := map[string]bool{}
@@ -549,8 +612,17 @@ func (m *Module) copy(w http.ResponseWriter, r *http.Request) {
 	} else {
 		d.Title += " · 副本"
 	}
+	panelIDs := map[string]string{}
 	for i := range d.Panels {
+		old := d.Panels[i].ID
 		d.Panels[i].ID = uuid.NewString()
+		panelIDs[old] = d.Panels[i].ID
+	}
+	for i := range d.Rows {
+		d.Rows[i].ID = uuid.NewString()
+		for j, id := range d.Rows[i].PanelIDs {
+			d.Rows[i].PanelIDs[j] = panelIDs[id]
+		}
 	}
 	if err = normalize(&d); err != nil {
 		shared.Error(w, 400, err.Error())

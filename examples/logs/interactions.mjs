@@ -1,9 +1,12 @@
 // Additional real UI acceptance; run smoke.mjs first to create results/run.json.
+import { mediaDirectory } from '../../scripts/qa-artifacts.mjs';
 import {createRequire} from 'node:module';
 import {readFileSync,existsSync,mkdirSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
-const root=fileURLToPath(new URL('../../',import.meta.url));const require=createRequire(path.join(root,'web/package.json'));
+const root=fileURLToPath(new URL('../../',import.meta.url));
+const mediaOutput=mediaDirectory(path.join(root,'examples/logs/results'));
+const require=createRequire(path.join(root,'web/package.json'));
 const {chromium,request}=require('playwright'),{expect}=require('@playwright/test');
 const run=JSON.parse(readFileSync(path.join(root,'examples/logs/results/run.json'),'utf8'));
 const ui=process.env.LIGHTMONI_UI_URL??run.ui,base=process.env.LIGHTMONI_TEST_URL??run.base;
@@ -44,5 +47,5 @@ try{
  await page.setViewportSize({width:751,height:950});if(await page.locator('.lm-nav-collapse').isVisible())await page.locator('.lm-nav-collapse').click();await page.getByRole('button',{name:/字\s*段$/}).click();const fields=page.getByRole('dialog',{name:'字段探索'});await fields.getByRole('textbox',{name:'搜索字段'}).fill('status');await fields.getByRole('button',{name:'@ status',exact:true}).click();await expect(fields.locator('.lm-log-top-values')).toContainText('500');waiting=waitSearch();await fields.locator('.lm-log-top-values .lm-log-value-row > button').first().click();expect((await waiting).status()).toBe(200);await expected(total);await expect(fields).not.toBeVisible();await page.setViewportSize({width:1512,height:1100});
  // A real query validation failure retains the old rows and editable draft.
  await page.getByRole('textbox',{name:'开始 UTC',exact:true}).fill('invalid');waiting=waitSearch();await page.getByRole('button',{name:'查询',exact:true}).click();expect((await waiting).status()).toBe(400);await expect(page.getByRole('alert').filter({hasText:'开始时间'})).toBeVisible();await expected(total);await page.getByRole('textbox',{name:'开始 UTC',exact:true}).fill(from);waiting=waitSearch();await page.getByRole('button',{name:'查询',exact:true}).click();expect((await waiting).status()).toBe(200);await expected(total);
- expect(errors).toEqual([]);mkdirSync(path.join(root,'examples/logs/results'),{recursive:true});await page.screenshot({path:path.join(root,'examples/logs/results/interactions.png'),fullPage:true});console.log('PASS chips/edit/back-forward, saved update/copy/delete, mouse resize/reorder reload, unfixed columns, long-log virtualization/detail restore, refresh anchor, responsive fields/Top values, real validation error/recovery.');
-} catch(err){mkdirSync(path.join(root,'examples/logs/results'),{recursive:true});await page.screenshot({path:path.join(root,'examples/logs/results/interactions-failure.png'),fullPage:true});console.error((await page.locator('body').innerText()).slice(-2200));throw err} finally{const list=await send('/logs/saved-searches',undefined,'GET');for(const item of list.filter(x=>x.title.startsWith(title)))await api.delete('/api/v1/logs/saved-searches/'+item.id);await browser.close();await api.dispose()}
+ expect(errors).toEqual([]);mkdirSync(path.join(root,'examples/logs/results'),{recursive:true});await page.screenshot({path:path.join(mediaOutput,'interactions.png'),fullPage:true});console.log('PASS chips/edit/back-forward, saved update/copy/delete, mouse resize/reorder reload, unfixed columns, long-log virtualization/detail restore, refresh anchor, responsive fields/Top values, real validation error/recovery.');
+} catch(err){mkdirSync(path.join(root,'examples/logs/results'),{recursive:true});await page.screenshot({path:path.join(mediaOutput,'interactions-failure.png'),fullPage:true});console.error((await page.locator('body').innerText()).slice(-2200));throw err} finally{const list=await send('/logs/saved-searches',undefined,'GET');for(const item of list.filter(x=>x.title.startsWith(title)))await api.delete('/api/v1/logs/saved-searches/'+item.id);await browser.close();await api.dispose()}

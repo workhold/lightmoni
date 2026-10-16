@@ -1,5 +1,7 @@
 # 多语言 SDK 验收
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/multilang-sdk/`](../../../artifacts/screenshots/docs/evidence/multilang-sdk/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 2026-10-11。当前范围：Go、JavaScript/TypeScript/浏览器、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust。Java 库供 Kotlin/JVM 复用，不包含 Android/Multiplatform；没有 C/C++、Swift、Dart/Flutter 专用包或自动框架埋点。
 
 | 验收 | 结果 |
@@ -23,4 +25,4 @@ sh scripts/build-sdk-release.sh 0.1.0 internal/server/agent-dist
 
 这里验证的是手工埋点与 LightMoni 原生 OTLP 封装。新 SDK 使用显式 flush，应用负责定时调度；没有磁盘队列。没有把普通 exporter 的至少一次路径、自动框架埋点、性能基准或移动端专用支持算作已验收。Kotlin 复用已编译运行的 JVM 库，Kotlin 示例未单独编译。Ruby 夹具运行于本机 2.6.10，声明支持 2.7+；Java/.NET/PHP/Rust 在隔离容器执行。
 
-截图：[桌面](sdk-desktop.png)、[750](sdk-750.png)、[390](sdk-390.png)。移动截图在收起已有导航后拍摄。
+截图：[桌面](../../../artifacts/screenshots/docs/evidence/multilang-sdk/sdk-desktop.png)、[750](../../../artifacts/screenshots/docs/evidence/multilang-sdk/sdk-750.png)、[390](../../../artifacts/screenshots/docs/evidence/multilang-sdk/sdk-390.png)。移动截图在收起已有导航后拍摄。

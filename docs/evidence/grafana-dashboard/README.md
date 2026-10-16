@@ -1,5 +1,7 @@
 # 大盘交互与深色主题验收
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/grafana-dashboard/`](../../../artifacts/screenshots/docs/evidence/grafana-dashboard/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 2026-10-10 完成 Grafana 风格工具栏、时间选择、创建、查看、编辑、布局和保存流程；2026-10-11 按用户新要求改为深色，并移除新增的 As table。
 
 ## 验证
@@ -13,12 +15,12 @@
 
 ## 深色截图
 
-- [主机大盘桌面](dark-dashboard-desktop.jpg)
-- [图表全屏查看](dark-chart-view.jpg)
-- [图表编辑器](dark-chart-editor.jpg)
-- [数值面板 Max 预览](dark-stat-max.jpg)
-- [390px 编辑器](dark-editor-390.jpg)、[390px 设置](dark-settings-390.jpg)
-- [390px 时间选择](dark-time-picker-390.jpg)
-- [390px 新建可视化](dark-add-390.jpg)、[滚动后的类型选择](dark-add-390-scroll.jpg)
+- [主机大盘桌面](../../../artifacts/screenshots/docs/evidence/grafana-dashboard/dark-dashboard-desktop.jpg)
+- [图表全屏查看](../../../artifacts/screenshots/docs/evidence/grafana-dashboard/dark-chart-view.jpg)
+- [图表编辑器](../../../artifacts/screenshots/docs/evidence/grafana-dashboard/dark-chart-editor.jpg)
+- [数值面板 Max 预览](../../../artifacts/screenshots/docs/evidence/grafana-dashboard/dark-stat-max.jpg)
+- [390px 编辑器](../../../artifacts/screenshots/docs/evidence/grafana-dashboard/dark-editor-390.jpg)、[390px 设置](../../../artifacts/screenshots/docs/evidence/grafana-dashboard/dark-settings-390.jpg)
+- [390px 时间选择](../../../artifacts/screenshots/docs/evidence/grafana-dashboard/dark-time-picker-390.jpg)
+- [390px 新建可视化](../../../artifacts/screenshots/docs/evidence/grafana-dashboard/dark-add-390.jpg)、[滚动后的类型选择](../../../artifacts/screenshots/docs/evidence/grafana-dashboard/dark-add-390-scroll.jpg)
 
 本轮静态截图用于视觉复查；没有完整起、中、止三帧或录屏的动效不标为独立验收通过。

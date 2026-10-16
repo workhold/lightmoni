@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -6,14 +7,15 @@ const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:5178';
 const run=process.env.LIGHTMONI_QA_RUN??'1';
 const output=resolve(import.meta.dirname,'../../../docs/evidence/agent-groups');
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 let browser;try{browser=await chromium.launch({headless:true})}catch{browser=await chromium.launch({headless:true,channel:'chrome'})}
-const context=await browser.newContext({viewport:{width:1440,height:1000},permissions:['clipboard-read','clipboard-write'],recordVideo:run==='1'?{dir:output,size:{width:1440,height:1000}}:undefined});
+const context=await browser.newContext({viewport:{width:1440,height:1000},permissions:['clipboard-read','clipboard-write'],recordVideo:run==='1'?{dir:mediaOutput,size:{width:1440,height:1000}}:undefined});
 context.setDefaultTimeout(10000);
 const page=await context.newPage(),errors=[],checks=[];
 page.on('pageerror',error=>errors.push(error.message));
 async function request(path,options){const response=await context.request.fetch(base+'/api/v1'+path,options);if(!response.ok())throw new Error(`${path}: ${response.status()} ${await response.text()}`);return response.json()}
 const stamp=Date.now(),name=`生产服务器 ${run}-${stamp}`,secondary=`拨测服务器 ${run}-${stamp}`;
-async function screenshot(label){await page.screenshot({path:resolve(output,`${label}-${run}.png`),fullPage:true,animations:'disabled'})}
+async function screenshot(label){await page.screenshot({path:resolve(mediaOutput,`${label}-${run}.png`),fullPage:true,animations:'disabled'})}
 async function noOverflow(){expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)}
 try{
  const setup=await request('/setup');const account={name:'ingestion-qa',password:'local-ingestion-qa-password'};
@@ -83,4 +85,4 @@ try{
  await writeFile(resolve(output,`verification-${run}.json`),JSON.stringify({run,checks,pageErrors:errors,passed:true},null,2));
  console.log(JSON.stringify({run,passed:true,checks:checks.length}));
 }catch(error){await screenshot('failure');await writeFile(resolve(output,`verification-${run}.json`),JSON.stringify({run,checks,pageErrors:errors,passed:false,error:String(error)},null,2));throw error}
-finally{const video=page.video();await context.close();if(video&&run==='1'){await video.saveAs(resolve(output,'interaction-1.webm'));await video.delete()}await browser.close()}
+finally{const video=page.video();await context.close();if(video&&run==='1'){await video.saveAs(resolve(mediaOutput,'interaction-1.webm'));await video.delete()}await browser.close()}

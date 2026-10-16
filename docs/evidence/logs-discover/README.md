@@ -1,5 +1,7 @@
 # 日志 Discover 改造与验收
 
+本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/logs-discover/`](../../../artifacts/screenshots/docs/evidence/logs-discover/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
+
 沿用 LightMoni 的深色导航、明亮工作区、共享 AntD 控件和蓝色主操作，以日志内容为主角，参考 [Elastic Discover](https://www.elastic.co/docs/explore-analyze/discover/discover-get-started) 的查询、字段探索和结果下钻流程。没有新增全局设计系统。
 
 ## 实现变化

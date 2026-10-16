@@ -3,7 +3,7 @@ export type Responder={id:string;name:string;active:boolean;has_email:boolean;ha
 export type Shift={primary:string[];backup:string[]};
 export type Override=Shift&{id:string;from:string;until:string};
 export type Schedule={mode:string;timezone:string;anchor:string;interval_days:number;shifts:Shift[];overrides:Override[]};
-export type PriorityPolicy={methods:string[];start:string;end:string;weekdays:number[];repeat_seconds:number;backup_after_seconds:number;fallback_after_seconds:number;escalate_after_rounds:number;escalate_to:string;max_rounds:number;handling_seconds:number};
+export type PriorityPolicy={methods:string[];start:string;end:string;weekdays:number[];night_mode?:'silent'|'immediate'|'after_count';night_methods?:string[];night_after_count?:number;repeat_seconds:number;backup_after_seconds:number;fallback_after_seconds:number;escalate_after_rounds:number;escalate_to:string;max_rounds:number;handling_seconds:number};
 export type ResponseGroup={id:string;revision?:number;name:string;enabled:boolean;targets:{channel_id:string;recipient:{kind:string;value:string}}[];members:string[];primary:string[];backup:string[];fallback:string[];timezone:string;channel_ids:string[];schedule:Schedule;policies:Record<string,PriorityPolicy>};
 export type EvidenceProfile={log_table_id:string;trace_table_ids:string[];label_mappings:Record<string,string>;lookback_seconds:number};
 export type Evidence={status:string;captured_at:string;from:string;to:string;log_table_id:string;logs:Record<string,unknown>[];trace_ids:string[];trace_table_ids:string[];truncated:boolean;error?:string};
@@ -27,7 +27,7 @@ export function normalizeResponseGroup(group:Partial<ResponseGroup>|undefined,po
  const defaults=groupDefaults(policies),schedule={...defaults.schedule,...group?.schedule};
  const shifts=(schedule.shifts??[]).map(s=>({...s,primary:s.primary??[],backup:s.backup??[]}));
  const overrides=(schedule.overrides??[]).map(s=>({...s,primary:s.primary??[],backup:s.backup??[]}));
- const normalizedPolicies=Object.fromEntries(Object.entries({...policies,...group?.policies}).map(([key,p])=>[key,{...policies[key],...p,methods:[...(p?.methods??policies[key]?.methods??[])],weekdays:[...(p?.weekdays??policies[key]?.weekdays??[])]}])) as Record<string,PriorityPolicy>;
+ const normalizedPolicies=Object.fromEntries(Object.entries({...policies,...group?.policies}).map(([key,p])=>[key,{...policies[key],...p,night_mode:(group?group.policies?.[key]?.night_mode:p?.night_mode)??'silent',night_after_count:p?.night_after_count??0,night_methods:[...(p?.night_methods??[])],methods:[...(p?.methods??policies[key]?.methods??[])],weekdays:[...(p?.weekdays??policies[key]?.weekdays??[])]}])) as Record<string,PriorityPolicy>;
  return {...defaults,...group,members:group?.members??[],primary:group?.primary??[],backup:group?.backup??[],fallback:group?.fallback??[],channel_ids:group?.channel_ids??[],targets:group?.targets??[],timezone:group?.timezone||defaults.timezone,
   schedule:{...schedule,mode:schedule.mode||'fixed',timezone:schedule.timezone||group?.timezone||defaults.timezone,anchor:schedule.anchor&&!Number.isNaN(Date.parse(schedule.anchor))?schedule.anchor:defaults.schedule.anchor,interval_days:schedule.interval_days||1,shifts,overrides},policies:normalizedPolicies};
 }

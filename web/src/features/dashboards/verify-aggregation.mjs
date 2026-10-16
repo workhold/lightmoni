@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -6,6 +7,7 @@ const {panelIntervalFor}=loadSource(new URL('./query-options.ts',import.meta.url
 const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:5178',center=process.env.LIGHTMONI_QA_CENTER_URL??'http://localhost:18380';
 const output=resolve(import.meta.dirname,'../../../../docs/evidence/time-aggregation');
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 let browser;try{browser=await chromium.launch({headless:true});}catch{browser=await chromium.launch({headless:true,channel:'chrome'});}
 const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[],checks=[],requests=[];
 await context.addInitScript(()=>{localStorage.setItem('lightmoni.appearance','dark');localStorage.setItem('lightmoni.nav.collapsed','true');});
@@ -42,11 +44,11 @@ try{
  await page.locator('.lm-preview-toolbar').getByText('原始数据',{exact:true}).click();expect(requests.length).toBe(before);
  const p95Response=await run();verifyResult(p95Response,300000,{A:'p95',B:'max'});expect(requests.at(-1).interval_ms).toBe(300000);expect(requests.at(-1).queries[0].sql).toContain('quantileExact(0.95)(value)');expect(requests.at(-1).queries[1].sql).toContain('max(value*2)');
  await expect(page.locator('.lm-query-options')).toContainText('实际间隔 5min');checks.push('5min p95 / max 每条查询独立，数据库结果与原始样本计算一致；编辑待运行，原始数据模式保留桶宽');
- await page.locator('.lm-preview-toolbar').getByText('图表',{exact:true}).click();await page.locator('.lm-workbench-data').evaluate(node=>node.scrollTop=0);await settledChart();await page.screenshot({path:resolve(output,'editor-desktop.png'),animations:'disabled'});
+ await page.locator('.lm-preview-toolbar').getByText('图表',{exact:true}).click();await page.locator('.lm-workbench-data').evaluate(node=>node.scrollTop=0);await settledChart();await page.screenshot({path:resolve(mediaOutput,'editor-desktop.png'),animations:'disabled'});
  await interval('auto');const minimum=page.getByRole('combobox',{name:'最小聚合间隔',exact:true});await expect(minimum).toBeEnabled();await minimum.fill('30s');await minimum.press('Escape');await minimum.blur();await run();await expect(page.locator('.lm-panel-preview .lm-panel-body')).toHaveAttribute('data-query-interval-ms','30000');
  const points=page.getByRole('spinbutton',{name:'最大数据点',exact:true});await points.fill('12');await points.blur();await run();await expect(page.locator('.lm-panel-preview .lm-panel-body')).toHaveAttribute('data-query-interval-ms','300000');
  await page.setViewportSize({width:390,height:900});await noOverflow();await expect(page.getByRole('combobox',{name:'查询 A 聚合函数',exact:true})).toBeVisible();await expect(page.locator('.lm-panel-preview .lm-panel-body')).toHaveAttribute('data-query-interval-ms','300000');
- await expect(page.locator('.lm-panel-preview .lm-g2-chart')).toHaveAttribute('data-chart-layout','compact');await settledChart();await page.locator('.lm-workbench-data').evaluate(node=>node.scrollTop=0);await page.screenshot({path:resolve(output,'editor-390.png'),animations:'disabled'});checks.push('自动间隔尊重 30s 最小间隔；固定最大数据点 12 在桌面/390px 下均保持 5min；窄屏无页面横向溢出');
+ await expect(page.locator('.lm-panel-preview .lm-g2-chart')).toHaveAttribute('data-chart-layout','compact');await settledChart();await page.locator('.lm-workbench-data').evaluate(node=>node.scrollTop=0);await page.screenshot({path:resolve(mediaOutput,'editor-390.png'),animations:'disabled'});checks.push('自动间隔尊重 30s 最小间隔；固定最大数据点 12 在桌面/390px 下均保持 5min；窄屏无页面横向溢出');
  await page.setViewportSize({width:1440,height:1000});await points.fill('');await minimum.fill('');await minimum.blur();await run();
  const width=await page.locator('.lm-panel-preview .lm-panel-body').evaluate(node=>node.clientWidth);await expect(page.locator('.lm-panel-preview .lm-panel-body')).toHaveAttribute('data-query-interval-ms',String(panelIntervalFor(range,{query_interval:'auto'},width)));
  const invalidBefore=requests.length;await interval('0s');await page.getByRole('button',{name:'运行全部查询',exact:true}).click();await expect(page.getByText('聚合间隔须为正整数加单位，例如 30s、1min、5min 或 1h',{exact:true})).toBeVisible();expect(requests.length).toBe(invalidBefore);
@@ -63,5 +65,5 @@ try{
  await page.getByRole('button',{name:'返回大盘',exact:true}).click();await expect(grid).toHaveAttribute('data-query-interval-ms',String(gridInterval));checks.push('自动间隔在全屏查看中随像素宽度变细，返回网格后恢复；仅分辨率改变时重新查询');
  expect(errors).toEqual([]);
  await writeFile(resolve(output,'report.json'),JSON.stringify({passed:true,checks,range,rawSamples:raw.rows.length,errors},null,2)+'\n');console.log(JSON.stringify({passed:true,checks,rawSamples:raw.rows.length}));
-}catch(error){await page.screenshot({path:resolve(output,'failure.png'),animations:'disabled'}).catch(()=>{});await writeFile(resolve(output,'report.json'),JSON.stringify({passed:false,checks,errors,error:String(error)},null,2));console.error(error);process.exitCode=1;}
+}catch(error){await page.screenshot({path:resolve(mediaOutput,'failure.png'),animations:'disabled'}).catch(()=>{});await writeFile(resolve(output,'report.json'),JSON.stringify({passed:false,checks,errors,error:String(error)},null,2));console.error(error);process.exitCode=1;}
 finally{if(fixture){const latest=await json('/dashboards/'+fixture.id);await json(`/dashboards/${fixture.id}?revision=${latest.revision}`,{method:'DELETE'});}await context.close();await browser.close();}

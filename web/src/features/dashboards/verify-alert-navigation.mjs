@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -5,12 +6,13 @@ import {resolve} from 'node:path';
 const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:5178',run=process.env.LIGHTMONI_QA_RUN??'1';
 const output=resolve(import.meta.dirname,'../../../../docs/evidence/agent-alert-workflow');
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 let browser;try{browser=await chromium.launch({headless:true});}catch{browser=await chromium.launch({headless:true,channel:'chrome'});}
-const context=await browser.newContext({viewport:{width:1440,height:1000},recordVideo:run==='1'?{dir:output,size:{width:1440,height:1000}}:undefined}),page=await context.newPage(),errors=[],checks=[];
+const context=await browser.newContext({viewport:{width:1440,height:1000},recordVideo:run==='1'?{dir:mediaOutput,size:{width:1440,height:1000}}:undefined}),page=await context.newPage(),errors=[],checks=[];
 context.setDefaultTimeout(12000);page.on('pageerror',error=>errors.push(error.message));
 let dashboard,channel,group;const ruleIDs=[];
 async function json(path,options){const response=await context.request.fetch(base+'/api/v1'+path,options);if(!response.ok())throw new Error(path+': '+response.status()+' '+await response.text());return response.json();}
-async function shot(name){await page.screenshot({path:resolve(output,`${name}-${run}.png`),fullPage:true,animations:'disabled'});}
+async function shot(name){await page.screenshot({path:resolve(mediaOutput,`${name}-${run}.png`),fullPage:true,animations:'disabled'});}
 async function ready(){await expect.poll(()=>page.locator('.lm-g2-chart').evaluateAll(nodes=>nodes.length>0&&nodes.every(node=>Number(node.dataset.chartCommits)>0))).toBe(true);}
 // Inspect both the submitted marks and the actual canvas scene, leaving drawing unchanged.
 await page.route('**/src/features/dashboards/ChartView.tsx*',async route=>{const response=await route.fetch(),source=await response.text();await route.fulfill({response,body:source.replace('queue.submit(finalOptions);','node.__qaOptions=finalOptions; node.__qaChart=chart; queue.submit(finalOptions);')});});
@@ -54,7 +56,7 @@ try{
  await expect.poll(async()=>(await drawing('.lm-panel-preview .lm-g2-chart'))[0].labels.includes('阈值 85.00%')).toBe(true);
  const bounds=(await drawing('.lm-panel-preview .lm-g2-chart'))[0].thresholdBounds.sort((a,b)=>a.min[1]-b.min[1]);expect(bounds[0].max[1]).toBeLessThanOrEqual(bounds[1].min[1]);
  checks.push('规则列表直接打开正确面板的告警 Tab；失败保留输入与原规则；重试成功后预览阈值立即更新');await shot('alert-settings');
- if(run==='3'){await page.locator('.lm-panel-preview').evaluate(node=>node.style.zoom='2');await page.locator('.lm-panel-preview').screenshot({path:resolve(output,'threshold-200.png')});await page.locator('.lm-panel-preview').evaluate(node=>node.style.zoom='');}
+ if(run==='3'){await page.locator('.lm-panel-preview').evaluate(node=>node.style.zoom='2');await page.locator('.lm-panel-preview').screenshot({path:resolve(mediaOutput,'threshold-200.png')});await page.locator('.lm-panel-preview').evaluate(node=>node.style.zoom='');}
  await page.getByRole('button',{name:'放弃修改',exact:true}).click();
  await expect.poll(async()=>(await drawing())[0]?.labels.includes('阈值 85.00%')).toBe(true);
  await page.getByRole('button',{name:`${panel.title} 面板操作`,exact:true}).click();await page.getByRole('menuitem',{name:'设置图表告警',exact:true}).click();
@@ -73,12 +75,12 @@ try{
  const settings=page.locator('.lm-workbench-settings');await expect(settings.getByRole('tab',{name:'告警',exact:true})).toHaveAttribute('aria-selected','true');await expect(settings.getByRole('textbox',{name:'告警阈值 1',exact:true})).toHaveValue('0.85');
  await expect.poll(()=>settings.locator('.ant-drawer-content-wrapper').evaluate(node=>{const box=node.getBoundingClientRect();return box.width>200&&box.height>300&&box.left>=0&&box.right<=innerWidth+1;})).toBe(true);
  await settings.getByRole('textbox',{name:'告警阈值 1',exact:true}).fill('0.85');
- expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await settings.locator('.ant-drawer-body').screenshot({path:resolve(output,`narrow-settings-body-${run}.png`)});await shot('narrow-settings');checks.push('事件列表与详情提供对应设置链接；390px 跳转自动打开告警设置抽屉且无页面横向溢出');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await settings.locator('.ant-drawer-body').screenshot({path:resolve(mediaOutput,`narrow-settings-body-${run}.png`)});await shot('narrow-settings');checks.push('事件列表与详情提供对应设置链接；390px 跳转自动打开告警设置抽屉且无页面横向溢出');
  expect(errors).toEqual([]);await writeFile(resolve(output,`verification-${run}.json`),JSON.stringify({run,passed:true,checks,page_errors:errors,plots,fixtures:'隔离 SQLite 真实保存；查询结果及事件列表使用受控数据；未发送通知'},null,2));console.log(JSON.stringify({run,passed:true,checks}));
 }catch(error){await shot('failure').catch(()=>{});await writeFile(resolve(output,`verification-${run}.json`),JSON.stringify({run,passed:false,checks,page_errors:errors,error:String(error)},null,2));console.error(error);process.exitCode=1;}
 finally{
  if(dashboard)await json('/dashboards/'+dashboard.id,{method:'DELETE'}).catch(()=>{});
  for(const id of ruleIDs)await json('/alerts/rules/'+id,{method:'DELETE'}).catch(()=>{});
  if(group)await json('/alerts/groups/'+group.id,{method:'DELETE'}).catch(()=>{});if(channel)await json('/notify/channels/'+channel.id,{method:'DELETE'}).catch(()=>{});
- const video=page.video();await context.close();if(video&&run==='1'){await video.saveAs(resolve(output,'interaction-1.webm'));await video.delete();}await browser.close();
+ const video=page.video();await context.close();if(video&&run==='1'){await video.saveAs(resolve(mediaOutput,'interaction-1.webm'));await video.delete();}await browser.close();
 }

@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -6,6 +7,7 @@ import {resolve} from 'node:path';
 const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:5178';
 const output=resolve(import.meta.dirname,'../../../../docs/evidence/time-boundary');
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 let browser;try{browser=await chromium.launch({headless:true});}catch{browser=await chromium.launch({headless:true,channel:'chrome'});}
 const context=await browser.newContext({viewport:{width:1440,height:1000},timezoneId:'Asia/Shanghai'});
 const page=await context.newPage(),errors=[],requests=[],checks=[];
@@ -49,7 +51,7 @@ try{
  await page.goto(base+'/dashboards/time-boundary');
  let chart=await ready();
  const initial=await snapshot(chart);
- await page.screenshot({path:resolve(output,process.env.LIGHTMONI_QA_BASELINE?'before.png':'hourly.png'),animations:'disabled'});
+ await page.screenshot({path:resolve(mediaOutput,process.env.LIGHTMONI_QA_BASELINE?'before.png':'hourly.png'),animations:'disabled'});
  if(process.env.LIGHTMONI_QA_BASELINE){console.log(JSON.stringify(initial));}
  else{
   expect(initial.clip).toBe(true);expect(initial.plots.every(plot=>plot.clip)).toBe(true);
@@ -65,7 +67,7 @@ try{
   await page.setViewportSize({width:390,height:900});await ready();
   expect(requests.at(-1).interval_ms).toBe(60000);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  await page.screenshot({path:resolve(output,'minute-390.png'),animations:'disabled'});
+  await page.screenshot({path:resolve(mediaOutput,'minute-390.png'),animations:'disabled'});
   checks.push('390px 默认仍为 1min，页面无横向溢出');
   await page.setViewportSize({width:1440,height:1000});
   for(const nextType of ['area','bar','heatmap','timeline']){
@@ -79,6 +81,6 @@ try{
   console.log(JSON.stringify({checks,page_errors:errors}));
  }
 }catch(error){
- await page.screenshot({path:resolve(output,'failure.png'),animations:'disabled'});
+ await page.screenshot({path:resolve(mediaOutput,'failure.png'),animations:'disabled'});
  console.error(JSON.stringify({errors,spec:await snapshot(page.locator('.lm-g2-chart').first()),alerts:await page.locator('.ant-alert').allTextContents()}));throw error;
 }finally{await context.close();await browser.close();}

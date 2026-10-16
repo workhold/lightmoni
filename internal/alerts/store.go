@@ -62,7 +62,11 @@ func listBodies[T any](ctx context.Context, db *sql.DB, query string, args ...an
 	return out, rows.Err()
 }
 func (m *Module) groups(ctx context.Context) ([]Group, error) {
-	return listBodies[Group](ctx, m.deps.DB, "SELECT body FROM alert_groups ORDER BY name")
+	groups, e := listBodies[Group](ctx, m.deps.DB, "SELECT body FROM alert_groups ORDER BY name")
+	for i := range groups {
+		groups[i].fillLegacyPolicies()
+	}
+	return groups, e
 }
 func (m *Module) rules(ctx context.Context) ([]Rule, error) {
 	return listBodies[Rule](ctx, m.deps.DB, "SELECT body FROM alert_rules ORDER BY id")

@@ -1,11 +1,13 @@
 import type {Parameter, SQLQuery, TimeRange, QueryFrame, QueryResult} from '../../shared/types';
-import {rangeUtil} from '@grafana/data';
+import {dateMath,rangeUtil} from '@grafana/data';
 export interface Grid {x:number;y:number;w:number;h:number}
 export interface DashboardQuery extends SQLQuery {enabled?:boolean}
 export interface Panel {id:string;title:string;type:string;queries:DashboardQuery[];options:Record<string,unknown>;grid:Grid}
 export const defaultQueryInterval='1m';
-export interface Variable {name:string;label?:string;type:'custom'|'query'|'text'|'constant';options?:string[];sql?:string;multi?:boolean;all?:boolean;value?:unknown}
-export interface Dashboard {id:string;title:string;description:string;panels:Panel[];variables:Variable[];range:TimeRange;refresh:number;revision:number;updated_at?:string}
+export interface Variable {name:string;label?:string;description?:string;hide?:boolean;skip_url_sync?:boolean;type:'custom'|'query'|'text'|'constant';options?:string[];sql?:string;multi?:boolean;all?:boolean;value?:unknown}
+export interface DashboardRow {id:string;title:string;panel_ids:string[];collapsed?:boolean}
+export interface DashboardLink {title:string;url:string;include_time?:boolean;include_variables?:boolean;new_tab?:boolean}
+export interface Dashboard {id:string;title:string;description:string;panels:Panel[];variables:Variable[];rows?:DashboardRow[];links?:DashboardLink[];tags?:string[];range:TimeRange;refresh:number;revision:number;updated_at?:string}
 export interface Template {id:string;title:string;description:string;type:string;table_id:string;sql:string;options:Record<string,unknown>}
 export type Values = Record<string,string|string[]>;
 export interface Threshold {value:number;color:string;label?:string}
@@ -125,8 +127,8 @@ export function parameterReferences(sql:string):{name:string;type:string}[]{retu
 export const hasTimeBuckets=(sql:string)=>/\$__timeInterval\s*\(/.test(visibleSQL(sql));
 
 export function resolveRange(range:TimeRange,now=Date.now()):TimeRange {
- const parse=(value:string)=>{if(value==='now')return now;const match=/^now-(\d+)(s|m|h|d)$/.exec(value);if(match)return now-Number(match[1])*({s:1000,m:60000,h:3600000,d:86400000}[match[2] as 's'|'m'|'h'|'d']);const n=Date.parse(value);if(!Number.isFinite(n))throw new Error('时间需要为 now-1h 等相对范围或 ISO 日期');return n;};
- const from=parse(range.from),to=parse(range.to);if(from>=to)throw new Error('开始时间必须早于结束时间');return {from:new Date(from).toISOString(),to:new Date(to).toISOString()};
+ const parse=(value:string,roundUp:boolean)=>{const text=value.trim();if(text.startsWith('now')){const parsed=dateMath.toDateTime(text,{now,roundUp,timezone:'browser'});if(parsed?.isValid())return parsed.valueOf();}else{const n=/^\d{10,13}$/.test(text)?Number(text)*(text.length===10?1000:1):Date.parse(text);if(Number.isFinite(n))return n;}throw new Error('时间需要为 now-1h、now/d 等相对范围或完整日期时间');};
+ const from=parse(range.from,false),to=parse(range.to,true);if(from>=to)throw new Error('开始时间必须早于结束时间');return {from:new Date(from).toISOString(),to:new Date(to).toISOString()};
 }
 export function variableOrder(variables:Variable[]):Variable[]{
  const names=new Set(variables.map(v=>v.name)),done=new Set<string>(),active=new Set<string>(),ordered:Variable[]=[];

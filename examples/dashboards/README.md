@@ -1,5 +1,7 @@
 # 大盘运行样例
 
+截图和录屏位于本机 [`artifacts/screenshots/examples/dashboards/evidence/`](../../artifacts/screenshots/examples/dashboards/evidence/)，由 Git 忽略；JSON 报告继续保留在 `evidence/`。
+
 先启动真实主服务、ClickHouse、Agent，并执行 Go 与 Node SDK demo。Web 的“大盘 → 从采集数据快速开始”读取 `/api/v1/templates`，SQL 与物理表来自实时目录。页面可创建多张大盘，编辑面板查询和类型化变量后通过保存弹层保存；修改已有定义携带 revision，遇到 409 可保留草稿并另存副本。
 
 `http-overview.json` 对应 demo 的 `metric_http_sum` 和 `log_app`。通过已登录会话将 JSON 提交到 `POST /api/v1/dashboards` 可保存；不存在这些表时先执行 demo，不要直接复制到其他表结构。UI 不依赖此文件，实时目录模板不需要预先导入。
@@ -28,7 +30,7 @@ cd web
 node src/features/dashboards/verify-dual-axis.mjs
 ```
 
-脚本复制原 CPU 大盘，在共享 Select 中把 B 设为右轴，分别验证单位、线性/对数、独立上下界、颜色、tooltip、图例、保存/重载，以及真实 line/area/time-bar 图。保留最后 QA 副本和 `evidence/dual-axis-*.png`、`dual-axis-report.json`；不会修改原 CPU 大盘。右轴配置见 `options.right_axis_refs`、`right_unit`、`left_scale/right_scale` 和各轴 min/max，阈值仅使用左轴单位。
+脚本复制原 CPU 大盘，在共享 Select 中把 B 设为右轴，分别验证单位、线性/对数、独立上下界、颜色、tooltip、图例、保存/重载，以及真实 line/area/time-bar 图。保留最后 QA 副本、本地截图目录下的 `dual-axis-*.png` 和 `evidence/dual-axis-report.json`；不会修改原 CPU 大盘。右轴配置见 `options.right_axis_refs`、`right_unit`、`left_scale/right_scale` 和各轴 min/max，阈值仅使用左轴单位。
 
 
 监控工作台交互验收（真实运行版，先由主干更新 Docker）：

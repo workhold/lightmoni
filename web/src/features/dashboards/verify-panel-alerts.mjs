@@ -1,3 +1,4 @@
+import { mediaDirectory } from '../../../../scripts/qa-artifacts.mjs';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -6,6 +7,7 @@ import {createLightMoni} from '../../../../sdk/typescript/dist/src/index.js';
 
 const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:5175',apiBase=process.env.LIGHTMONI_ALERT_QA_API??'http://127.0.0.1:18881',run=Date.now().toString(),output=resolve(import.meta.dirname,'../../../../docs/evidence/panel-alerts',run);
 await mkdir(output,{recursive:true});
+const mediaOutput=mediaDirectory(output);
 const receipts=[],receiver=createServer(async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;receipts.push({path:req.url,body:JSON.parse(body)});res.writeHead(202).end();});
 await new Promise(resolve=>receiver.listen(0,'127.0.0.1',resolve));const endpoint=`http://127.0.0.1:${receiver.address().port}`;
 let browser;try{browser=await chromium.launch({headless:true});}catch{browser=await chromium.launch({headless:true,channel:'chrome'});}
@@ -32,7 +34,7 @@ try{
  await expect(page.getByText('关联告警规则',{exact:true})).toHaveCount(0);await expect(page.getByText('配置新告警',{exact:true})).toHaveCount(0);
  await select('告警曲线 1',services[0]);await page.getByRole('textbox',{name:'告警阈值 1',exact:true}).fill('0.8');await select('图表告警组 1',chartGroup.name);
  await page.getByRole('button',{name:'应用到大盘',exact:true}).click();await expect(page.getByText('请先保存或移除尚未保存的告警条件',{exact:true})).toBeVisible();await saveAlert(1);
- await page.locator('.lm-workbench-sidebar').screenshot({path:resolve(output,'threshold.png')});await page.locator('.lm-workbench-sidebar').evaluate(element=>element.style.zoom='2');await page.locator('.lm-workbench-sidebar').screenshot({path:resolve(output,'threshold-200.png')});await page.locator('.lm-workbench-sidebar').evaluate(element=>element.style.zoom='');
+ await page.locator('.lm-workbench-sidebar').screenshot({path:resolve(mediaOutput,'threshold.png')});await page.locator('.lm-workbench-sidebar').evaluate(element=>element.style.zoom='2');await page.locator('.lm-workbench-sidebar').screenshot({path:resolve(mediaOutput,'threshold-200.png')});await page.locator('.lm-workbench-sidebar').evaluate(element=>element.style.zoom='');
  await page.getByRole('button',{name:'添加告警条件',exact:true}).click();await select('告警曲线 2',services[0]);await select('告警触发条件 2','没有打点');await page.getByRole('spinbutton',{name:'告警回看窗口 2',exact:true}).fill('10');await page.getByRole('region',{name:'告警条件 2',exact:true}).getByText('检查与持续时间',{exact:true}).click();await page.getByRole('spinbutton',{name:'告警检查间隔 2',exact:true}).fill('1');await select('图表告警组 2',chartGroup.name);await saveAlert(2);
  await expect(page.getByRole('textbox',{name:'告警阈值 2',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'添加告警条件',exact:true}).click();await select('告警曲线 3',services[1]);await select('告警触发条件 3','低于');await page.getByRole('textbox',{name:'告警阈值 3',exact:true}).fill('0.3');await select('图表告警组 3',chartGroup.name);await saveAlert(3);
@@ -52,11 +54,11 @@ try{
  await expect.poll(async()=>{const events=await json('/alerts/events?rule_id='+missing.id);return events.some(event=>event.kind==='firing');},{timeout:75000}).toBe(true);
  await emit();await expect.poll(async()=>{const events=await json('/alerts/events?rule_id='+missing.id);return events.some(event=>event.kind==='resolved');},{timeout:75000}).toBe(true);
  await expect.poll(()=>receipts.some(receipt=>receipt.path==='/chart'),{timeout:20000}).toBe(true);if(receipts.some(receipt=>receipt.path==='/table'))throw new Error('Explicit chart alert sent to table group');
- await page.locator('.lm-workbench-sidebar').screenshot({path:resolve(output,'saved-conditions.png')});
- await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'图表与设置',exact:true}).click();await page.locator('.lm-workbench-settings').getByRole('tab',{name:'告警',exact:true}).click();await expect(page.locator('.lm-workbench-settings').getByRole('combobox',{name:'图表告警组 1',exact:true})).toBeVisible();await page.screenshot({path:resolve(output,'narrow.png'),fullPage:true});
+ await page.locator('.lm-workbench-sidebar').screenshot({path:resolve(mediaOutput,'saved-conditions.png')});
+ await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'图表与设置',exact:true}).click();await page.locator('.lm-workbench-settings').getByRole('tab',{name:'告警',exact:true}).click();await expect(page.locator('.lm-workbench-settings').getByRole('combobox',{name:'图表告警组 1',exact:true})).toBeVisible();await page.screenshot({path:resolve(mediaOutput,'narrow.png'),fullPage:true});
  const report={dashboard_id:dashboardID,rule_ids:ruleIDs,checks:['直接菜单打开图表告警，无关联规则选择器','当前曲线高于/低于/没有打点直接配置','SQL 实查 SDK 数据，最新值和点数正确','直接告警组覆盖数据表默认组，真实发送仅到本地测试接收器','保存/刷新/重新打开保持所有条件','修改图表查询后告警查询同步更新','保存失败保留输入且阻止丢失草稿','实际断点触发与恢复事件','390px 设置抽屉可配置告警组'],page_errors:errors,loopback_receipts:receipts.map(receipt=>({path:receipt.path,kind:receipt.body.event?.kind??receipt.body.kind}))};
  if(errors.length)throw new Error(errors.join('\n'));await writeFile(resolve(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({output,checks:report.checks,receipts:report.loopback_receipts}));
-}catch(error){await page.screenshot({path:resolve(output,'failure.png'),fullPage:true}).catch(()=>{});console.error(error);process.exitCode=1;}finally{
+}catch(error){await page.screenshot({path:resolve(mediaOutput,'failure.png'),fullPage:true}).catch(()=>{});console.error(error);process.exitCode=1;}finally{
  for(const id of ruleIDs)await json('/alerts/rules/'+id,{method:'DELETE'}).catch(()=>{});
  if(dashboardID)await json('/dashboards/'+dashboardID,{method:'DELETE'}).catch(()=>{});
  await json('/catalog/tables/metric_panel_alert_qa_gauge',{method:'PUT',data:{alert_group_id:''}}).catch(()=>{});

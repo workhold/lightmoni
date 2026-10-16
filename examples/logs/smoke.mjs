@@ -1,5 +1,6 @@
 // Real Docker ClickHouse + SQLite + local Agent + Go/Node SDK + browser acceptance.
 // No requests or query results are mocked.
+import { mediaDirectory } from '../../scripts/qa-artifacts.mjs';
 import {createRequire} from 'node:module';
 import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
@@ -7,6 +8,7 @@ import {existsSync,mkdirSync,writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 const root=fileURLToPath(new URL('../../',import.meta.url));
+const mediaOutput=mediaDirectory(path.join(root,'examples/logs/results'));
 const require=createRequire(path.join(root,'web/package.json'));
 const {chromium,request}=require('playwright');const {expect}=require('@playwright/test');
 const base=process.env.LIGHTMONI_TEST_URL??'http://127.0.0.1:18880';
@@ -61,7 +63,7 @@ try{
  await page.getByRole('button',{name:'更多日志操作'}).click();await page.getByRole('menuitem',{name:'查看执行 SQL'}).click();const sql=page.getByRole('dialog',{name:'实际执行的 SQL'});await expect(sql).toContainText('lm_log');await sql.getByRole('button',{name:'在 SQL 工作台打开'}).click();await expect(page).toHaveURL(/\/query\?/);await expect(page.getByRole('heading',{name:'SQL 工作台',exact:true})).toBeVisible();await page.goBack();await expect(page.getByText('48 条已载入',{exact:true})).toBeVisible();
  const downloadPromise=page.waitForEvent('download');downloadPromise.catch(()=>{});await page.getByRole('button',{name:'更多日志操作'}).click();await page.getByRole('menuitem',{name:'导出已载入日志 CSV'}).click();const download=await downloadPromise;expect(download.suggestedFilename()).toMatch(/\.csv$/);
  await page.getByRole('button',{name:/^实时$/}).click();await expect(page.getByRole('button',{name:'暂停实时',exact:true})).toBeVisible();console.log(execFileSync('go',['run','./examples/logs/go','-count','5'],{cwd:root,env,encoding:'utf8',timeout:60000}).trim());await expect(page.locator('.lm-log-new')).toContainText('1 条新到达',{timeout:20000});await expect(page.getByText('48 条已载入',{exact:true})).toBeVisible();await page.locator('.lm-log-new').click();await expect(page.getByText('49 条已载入',{exact:true})).toBeVisible();await page.getByRole('button',{name:'暂停实时',exact:true}).click();await page.getByRole('button',{name:'实时',exact:true}).click();await expect(page.getByRole('button',{name:'暂停实时',exact:true})).toBeVisible();await page.getByRole('button',{name:'暂停实时',exact:true}).click();
- const resultDir=path.join(root,'examples/logs/results');mkdirSync(resultDir,{recursive:true});await page.screenshot({path:path.join(resultDir,'explore.png'),fullPage:true});writeFileSync(path.join(resultDir,'run.json'),JSON.stringify({run,table,from,to,ui,base,endpoint},null,2));
+ const resultDir=path.join(root,'examples/logs/results');mkdirSync(resultDir,{recursive:true});await page.screenshot({path:path.join(mediaOutput,'explore.png'),fullPage:true});writeFileSync(path.join(resultDir,'run.json'),JSON.stringify({run,table,from,to,ui,base,endpoint},null,2));
  expect(errors).toEqual([]);console.log('PASS real SDK → Agent → ClickHouse logs: pagination, service/typed filter, fields, keyboard column resize, raw/JSON/context, saved share, SQL backlink, CSV, live pause/resume.');
  const items=await get('/logs/saved-searches');for(const item of items.filter(x=>x.title.startsWith(run)))await api.delete('/api/v1/logs/saved-searches/'+item.id);
-}catch(error){const dir=path.join(root,'examples/logs/results');mkdirSync(dir,{recursive:true});await page.screenshot({path:path.join(dir,'failure.png'),fullPage:true});console.error((await page.locator('body').innerText()).slice(-2500));throw error}finally{for(const item of (await get('/logs/saved-searches')).filter(item=>item.title.startsWith(run)))await api.delete('/api/v1/logs/saved-searches/'+item.id);await browser.close();await api.dispose()}
+}catch(error){const dir=path.join(root,'examples/logs/results');mkdirSync(dir,{recursive:true});await page.screenshot({path:path.join(mediaOutput,'failure.png'),fullPage:true});console.error((await page.locator('body').innerText()).slice(-2500));throw error}finally{for(const item of (await get('/logs/saved-searches')).filter(item=>item.title.startsWith(run)))await api.delete('/api/v1/logs/saved-searches/'+item.id);await browser.close();await api.dispose()}
