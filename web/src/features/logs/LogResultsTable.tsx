@@ -1,8 +1,8 @@
-import { memo, useCallback, useEffect, useMemo, useRef, type MouseEvent, type RefObject } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
 import type { ColumnsType, TableRef } from "antd/es/table";
-import { RightOutlined } from "@ant-design/icons";
-import { Button, Empty, Table, Tag, Tooltip } from "../../shared/ui";
-import { cell, initialView, printable, type Filter, type LogRow } from "./model";
+import { ArrowDownOutlined, ArrowUpOutlined, CopyOutlined, DownOutlined, MinusCircleOutlined, MoreOutlined, PlusCircleOutlined, RightOutlined } from "@ant-design/icons";
+import { Button, Dropdown, Empty, Table, Tag, Tooltip } from "../../shared/ui";
+import { attributeType, cell, fieldType, initialView, printable, type Filter, type LogRow } from "./model";
 
 export const severityColor = (level: unknown) =>
   ({ ERROR: "error", FATAL: "magenta", WARN: "warning", INFO: "success", DEBUG: "default", TRACE: "default" })[String(level)] ?? "default";
@@ -32,6 +32,12 @@ interface Props {
   onFilter: (filter: Filter) => void;
   onResize: (name: string, width: number) => void;
   onExpandRange: () => void;
+  sort: "asc" | "desc";
+  onSort: (sort: "asc" | "desc") => void;
+  onMoveColumn: (name: string, delta: number) => void;
+  onRemoveColumn: (name: string) => void;
+  onCopy: (value: string) => void;
+  density: "compact" | "comfortable";
 }
 const MessageCell = memo(function MessageCell({ row, rowLines, onSelect }: {
   row: LogRow; rowLines: number; onSelect: Props["onSelect"];
@@ -46,13 +52,30 @@ const MessageCell = memo(function MessageCell({ row, rowLines, onSelect }: {
 
 // Query drafts, field searches and drawers must not recreate the virtual table.
 export default memo(function LogResultsTable({ tableRef, rows, selectedColumns, widths, rowLines,
-  selectedID, loading, onSelect, onFilter, onResize, onExpandRange }: Props) {
+  selectedID, loading, onSelect, onFilter, onResize, onExpandRange, sort, onSort, onMoveColumn, onRemoveColumn, onCopy, density }: Props) {
   const resizeCleanup = useRef<(() => void) | null>(null);
+  const scrollElement = useRef<HTMLDivElement | null>(null);
+  const previousWidths = useRef(widths);
+  useEffect(() => { previousWidths.current = widths; }, [widths]);
+  const [height, setHeight] = useState(480);
+  const [containerWidth, setContainerWidth] = useState(0);
   useEffect(() => () => resizeCleanup.current?.(), []);
+  useEffect(() => {
+    const update = () => { if (scrollElement.current) {
+      setHeight(Math.max(160, window.innerHeight - scrollElement.current.getBoundingClientRect().top - 100));
+      setContainerWidth(scrollElement.current.clientWidth);
+    } };
+    const observer = new ResizeObserver(update);
+    const main = scrollElement.current?.closest(".lm-log-main");
+    if (main) observer.observe(main);
+    window.addEventListener("resize", update);
+    update();
+    return () => { observer.disconnect(); window.removeEventListener("resize", update); };
+  }, []);
   const startResize = useCallback((event: MouseEvent, name: string) => {
     event.preventDefault();
     resizeCleanup.current?.();
-    const start = event.clientX, width = columnWidth(name, widths);
+    const start = event.clientX, width = event.currentTarget.closest(".ant-table-cell")?.getBoundingClientRect().width ?? columnWidth(name, widths);
     let next = width, frame = 0;
     const apply = () => { frame = 0; onResize(name, next); };
     const move = (event: globalThis.MouseEvent) => {
@@ -71,6 +94,7 @@ export default memo(function LogResultsTable({ tableRef, rows, selectedColumns, 
     resizeCleanup.current = cleanup;
   }, [widths, onResize]);
   const bindScroll = useCallback((element: HTMLDivElement | null) => {
+    scrollElement.current = element;
     if (!element) return;
     let delta = 0, frame = 0;
     const onWheel = (event: WheelEvent) => {
@@ -91,9 +115,19 @@ export default memo(function LogResultsTable({ tableRef, rows, selectedColumns, 
       render: (_, row) => <Tooltip title="查看日志详情"><Button type="text" size="small"
         className="lm-log-open-detail" aria-label={`查看日志详情 ${row.event_id}`}
         icon={<RightOutlined />} onClick={() => onSelect(row)} /></Tooltip> },
-    ...selectedColumns.map(name => ({
+    ...selectedColumns.map((name, index) => ({
       key: name,
       title: <span className="lm-log-column-title"><span>{name.replace(/^attr:/, "")}</span>
+        {name === "event_time" && <Button size="small" type="text" className="lm-discover-time-sort" aria-label="切换时间排序"
+          icon={sort === "desc" ? <ArrowDownOutlined /> : <ArrowUpOutlined />} onClick={() => onSort(sort === "desc" ? "asc" : "desc")} />}
+        <Dropdown trigger={["click"]} menu={{items:[
+          ...(name === "event_time" ? [{key:"desc",label:"按时间降序",icon:<ArrowDownOutlined />},{key:"asc",label:"按时间升序",icon:<ArrowUpOutlined />},{type:"divider" as const}] : []),
+          {key:"left",label:"向左移动",disabled:index===0},
+          {key:"right",label:"向右移动",disabled:index===selectedColumns.length-1},
+          {key:"remove",label:"移除此列",disabled:selectedColumns.length===1},
+        ],onClick:({key}) => {if(key==="asc"||key==="desc")onSort(key);else if(key==="remove")onRemoveColumn(name);else onMoveColumn(name,key==="left"?-1:1);}}}>
+          <Button size="small" type="text" className="lm-discover-column-menu" aria-label={`列操作 ${name}`} icon={<DownOutlined />} />
+        </Dropdown>
         <span role="separator" tabIndex={0} aria-label={`调整 ${name} 列宽`} aria-orientation="vertical"
           className="lm-log-resize" onMouseDown={event => startResize(event, name)}
           onKeyDown={event => {
@@ -103,26 +137,43 @@ export default memo(function LogResultsTable({ tableRef, rows, selectedColumns, 
             }
           }} />
       </span>,
-      width: columnWidth(name, widths),
+      width: columnWidth(name, widths) + (index === selectedColumns.length - 1
+        ? Math.max(0, containerWidth - 34 - selectedColumns.reduce((sum, column) => sum + columnWidth(column, widths), 0)) : 0),
       // Body presentation also depends on rowLines; MessageCell handles that cache.
-      shouldCellUpdate: name === "body" ? undefined : (row: LogRow, previous: LogRow) => row !== previous,
-      render: (_: unknown, row: LogRow) => name === "body" ? <MessageCell row={row} rowLines={rowLines} onSelect={onSelect} /> :
+      shouldCellUpdate: name === "body" ? undefined : (row: LogRow, previous: LogRow) =>
+        row !== previous || previousWidths.current[name] !== widths[name],
+      render: (_: unknown, row: LogRow) => {
+        const value = cell(row, name), scalar = value !== undefined && value !== null && typeof value !== "object";
+        const filter: Filter = {scope:name.startsWith("attr:")?"attribute":"column",field:name.replace(/^attr:/,""),
+          type:name.startsWith("attr:")?attributeType(row,name.slice(5)):fieldType(value),op:"eq",value};
+        return <div className="lm-discover-table-cell"><div className="lm-discover-cell-content">{name === "body" ? <MessageCell row={row} rowLines={rowLines} onSelect={onSelect} /> :
         name === "severity" || name === "service" ? <button className="lm-log-inline-filter"
           title={name === "severity" ? "按级别筛选" : "按服务筛选"}
           onClick={() => onFilter({ scope: "column", field: name, type: "string", op: "eq", value: row[name] })}>
           {name === "severity" ? <Tag color={severityColor(row.severity)}>{printable(row.severity)}</Tag> : printable(row.service)}
         </button> : <span className="lm-log-cell" title={printable(cell(row, name))}>
           {name === "event_time" ? formatTime(row.event_time) : printable(cell(row, name))}
-        </span>,
+        </span>}</div><div className="lm-discover-cell-actions">
+          {columnWidth(name,widths) < 150 ? <Dropdown trigger={["click"]} menu={{items:[
+            {key:"include",label:"包含此值",disabled:!scalar,icon:<PlusCircleOutlined />},
+            {key:"exclude",label:"排除此值",disabled:!scalar,icon:<MinusCircleOutlined />},
+            {key:"copy",label:"复制值",icon:<CopyOutlined />},
+          ],onClick:({key}) => key==="copy"?onCopy(printable(value)):onFilter({...filter,op:key==="exclude"?"ne":"eq"})}}>
+            <Button size="small" type="text" aria-label={`单元格操作 ${name}`} icon={<MoreOutlined />} />
+          </Dropdown> : <>{scalar && <><Tooltip title="包含此值"><Button size="small" type="text" icon={<PlusCircleOutlined />} aria-label={`包含单元格 ${name}`} onClick={() => onFilter(filter)} /></Tooltip>
+            <Tooltip title="排除此值"><Button size="small" type="text" icon={<MinusCircleOutlined />} aria-label={`排除单元格 ${name}`} onClick={() => onFilter({...filter,op:"ne"})} /></Tooltip></>}
+          <Tooltip title="复制值"><Button size="small" type="text" icon={<CopyOutlined />} aria-label={`复制单元格 ${name}`} onClick={() => onCopy(printable(value))} /></Tooltip></>}
+        </div></div>;
+      },
     })),
-  ], [selectedColumns, widths, rowLines, onSelect, onFilter, onResize, startResize]);
+  ], [selectedColumns, widths, rowLines, onSelect, onFilter, onResize, startResize, sort, onSort, onMoveColumn, onRemoveColumn, onCopy, containerWidth]);
   const width = useMemo(() => columns.reduce((sum, column) => sum + Number(column.width), 0), [columns]);
-  const scroll = useMemo(() => ({ x: width, y: 480 }), [width]);
+  const scroll = useMemo(() => ({ x: width, y: height }), [width, height]);
   const rowClassName = useCallback((row: LogRow) => row.event_id === selectedID ? "lm-log-active-row" : "", [selectedID]);
   const locale = useMemo(() => ({ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
     description={loading ? "正在查询日志" : <span>没有匹配日志 <Button size="small" type="link"
       onClick={onExpandRange}>扩大到最近 24 小时</Button></span>} /> }), [loading, onExpandRange]);
-  return <div ref={bindScroll} className="lm-log-table-scroll" role="region"
+  return <div ref={bindScroll} className={`lm-log-table-scroll ${density === "comfortable" ? "is-comfortable" : ""}`} role="region"
     aria-label="日志表格，左右滚动查看所有列" tabIndex={0}>
     <Table<LogRow> ref={tableRef} size="small" virtual style={{ width, maxWidth: "none" }} tableLayout="fixed"
       rowKey="event_id" dataSource={rows} columns={columns} pagination={false} scroll={scroll}

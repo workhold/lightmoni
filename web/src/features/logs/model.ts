@@ -28,9 +28,11 @@ export interface View {
   aggregate_field?: string;
   explore_mode?: "logs" | "aggregate";
   chart_collapsed?: boolean;
+  histogram_breakdown?: "none" | "severity";
   query_syntax?: "literal" | "expression";
   fields_collapsed?: boolean;
   row_lines?: number;
+  density?: "compact" | "comfortable";
   refresh_seconds?: number;
 }
 export interface SearchResult {

@@ -110,3 +110,7 @@ URL 表达 from/to、重复 var-*、refresh、viewPanel 和 editPanel，历史�
 ## 多地址接入与 Agent 下载（2026-10-16）
 
 接入配置将单一默认地址改为命名地址列表，每行保留名称、URL、默认选择和移除操作；新增与保存分别为次要和主要操作。Agent 与 SDK 直连复用地址选择器，也允许临时输入，示例代码直接包含所选地址。Agent 命令内携带所填 Key，脚本、包及校验文件从当前项目鉴权下载。设置表单在窄屏拆成两行，不引入新视觉体系。浏览器实际复制、持久化、下载和测试记录见 [多地址接入验收](evidence/reporting-routes/README.md)。
+
+## 图表标题（2026-10-16）
+
+大盘卡片标题由 13px 调整为 16px、600 字重，并相对于整张卡片居中；标题栏两侧保留等宽空间，右侧菜单和左侧拖动图标不挤偏文字。编辑器预览标题同步调整。主 Agent 检查了查看与编辑模式下全部 12 个标题、标题菜单与预览，截图及几何校验见 [标题验收](../artifacts/screenshots/dashboard-titles/verification.json)，[页面截图](../artifacts/screenshots/dashboard-titles/overview.png)。局部样式修改，未新增动效或独立评审。
