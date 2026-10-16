@@ -1,15 +1,16 @@
 # Verification: 主流模型协议与可见模型发现
 
-Date: 2026-10-16
+Date: 2026-10-17
 
 ## Automated checks
-- PASS `npm --prefix ai-runtime run typecheck`, `npm --prefix ai-runtime run build`, `npm --prefix ai-runtime test` (28/28).
-- PASS `node --experimental-strip-types --test web/src/features/assistant/model-discovery.test.mjs web/src/features/assistant/model-protocol.test.mjs web/src/features/assistant/assistant.test.mjs web/src/shared/assistant-context.test.mjs` (25/25).
+- PASS `npm --prefix ai-runtime run typecheck`, `npm --prefix ai-runtime run build`, `npm --prefix ai-runtime test` (34/34), including reasoning-effort mapping for all four protocols, summary calls, and provider-default omission.
+- PASS `node --experimental-strip-types --test web/src/features/assistant/model-discovery.test.mjs web/src/features/assistant/model-protocol.test.mjs web/src/features/assistant/assistant.test.mjs web/src/shared/assistant-context.test.mjs` (26/26), including dynamic model guidance and reasoning selector choices.
 - PASS `npm --prefix web run typecheck`.
 - PASS `.local-dev/go/bin/go test -race ./...` after final backend credential hardening; log `.local-dev/multi-protocol-go-tests.log`.
 - PASS final `.local-dev/go/bin/go test -race ./internal/assistant` (7.278s), including explicit continuation-state error mapping; log `.local-dev/multi-protocol-assistant-tests.log`.
 - PASS `npm --prefix web run build`, then `.local-dev/go/bin/go build -o .local-dev/bin/lightmoni ./cmd/lightmoni`; serialized so Go embedded assets are stable. Vite emits existing dependency directive warnings; build succeeds.
 - PASS `git diff --check`; rebuilt local service `/healthz` returns status:ok.
+- PASS connection-test fixtures carry the selected `reasoning_effort` into the runtime and reject unsupported values without persistence.
 
 ## Native runtime evidence
 Real pinned SDKs and Mastra connect to isolated local fixture servers. All four protocols verify native endpoint/header/body, streamed text, tool call/result continuation, fresh-worker history replay, generation-based history summary, provider-error redaction and cancellation. Chat/Responses/Gemini missing raw usage stays unknown; Anthropic cache input and Gemini thought output count mappings have direct tests. Custom versioned paths remain intact. Responses explicitly sends store:false and requests reasoning.encrypted_content even for unknown model aliases.
@@ -37,11 +38,11 @@ Fresh authenticated tab8, final compiled production bundle at http://127.0.0.1:8
 - Browser console warnings/errors empty. Temporary fixture server stopped; final tab marked deliverable and shown. Screenshots: .local-dev/multi-protocol-models.png (all protocol choices), .local-dev/multi-protocol-models-ready.png (supplied address and visible fetch button).
 
 ## SDD completion
-All T001–T013 complete. Spec/checklist/plan/research/data-model/contracts/tasks preceded implementation; native continuation requirement was documented before its cross-layer edits. Independent review drove credential-error precedence and escaped-key echo regressions. No SQLite migration; source user data/config preserved.
+All T001–T022 complete. Spec/checklist/plan/research/data-model/contracts/tasks preceded implementation; native continuation requirement and the distinction between directory classification and generation protocol were documented before their cross-layer edits. Independent review drove credential-error precedence, escaped-key echo regressions, and provider-default reasoning compatibility. No SQLite migration; source user data/config preserved.
 
 ## Phase 6 address repair and explicit connection verification
 - PASS fresh-key root discovery probes `/models` then the same-origin `/v1/models` candidate, returns the successful canonical Base URL, and preserves 401/403 as credential errors when all candidates fail.
 - PASS automatic discovery keeps profile candidates separate so Google can use `/v1beta/models`; manual protocol mode probes only the selected profile; saved-key mode never crosses the exact canonical Base URL.
 - PASS admin-only `POST /api/v1/assistant/test-connection` validates concrete protocol/model input, exercises all four protocol configurations through the Mastra runtime fixture, maps timeout/provider failures to safe statuses, and does not persist a config or session.
-- PASS `npm --prefix ai-runtime run typecheck`, `npm --prefix ai-runtime test` (28/28), `node --experimental-strip-types --test web/src/features/assistant/model-discovery.test.mjs web/src/features/assistant/model-protocol.test.mjs web/src/features/assistant/assistant.test.mjs web/src/shared/assistant-context.test.mjs` (25/25), `npm --prefix web run typecheck`, `npm --prefix web run build`, `.local-dev/go/bin/go test ./...`, `.local-dev/go/bin/go test -race ./...`, `.local-dev/go/bin/go build -o .local-dev/bin/lightmoni ./cmd/lightmoni`, and `git diff --check`.
+- PASS the full Go/runtime/frontend/build verification listed above after the Phase 7 changes; current counts are 34/34 runtime tests and 26/26 assistant/frontend tests.
 - Directory refresh remains read-only; the UI keeps manual model entry available and only the explicit test action can create a provider generation request. No production provider key or generation request was used during verification.

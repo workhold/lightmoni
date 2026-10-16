@@ -204,7 +204,7 @@ func (s *Service) config(w http.ResponseWriter, r *http.Request) {
 	if base, err := canonicalAPIBase(c.BaseURL); err == nil {
 		baseURL = base
 	}
-	shared.JSON(w, 200, ConfigView{Runtime: "mastra", Protocol: c.Protocol, MaxInputTokens: c.MaxInputTokens, MaxOutputTokens: c.MaxOutputTokens, MaxSteps: c.MaxSteps, BaseURL: baseURL, Model: c.Model, HasKey: c.APIKey != "", Enabled: c.Enabled})
+	shared.JSON(w, 200, ConfigView{Runtime: "mastra", Protocol: c.Protocol, MaxInputTokens: c.MaxInputTokens, MaxOutputTokens: c.MaxOutputTokens, MaxSteps: c.MaxSteps, ReasoningEffort: c.ReasoningEffort, BaseURL: baseURL, Model: c.Model, HasKey: c.APIKey != "", Enabled: c.Enabled})
 }
 
 func decode(r *http.Request, value any, limit int64) error {

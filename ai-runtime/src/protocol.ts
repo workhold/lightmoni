@@ -21,6 +21,7 @@ export interface Input {
     max_input_tokens: number;
     max_output_tokens: number;
     max_steps: number;
+    reasoning_effort?: 'provider-default'|'none'|'minimal'|'low'|'medium'|'high'|'xhigh';
   };
   messages: Message[];
   summary?: string;

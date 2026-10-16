@@ -85,6 +85,9 @@ lines.on("line", (line) => {
 async function run(input: Input) {
   const signal = controller.signal;
   const protocol = protocolOf(input.config.protocol);
+  const reasoning = input.config.reasoning_effort && input.config.reasoning_effort !== 'provider-default'
+    ? input.config.reasoning_effort
+    : undefined;
   const providerModel = createModel(input.config);
   let phase: "compact" | "execute" = "execute";
   let boundaryError: string | undefined;
@@ -232,6 +235,7 @@ async function run(input: Input) {
             modelSettings: {
               maxOutputTokens: Math.min(1024, input.config.max_output_tokens),
               maxRetries: 0,
+              ...(reasoning ? { reasoning } : {}),
             },
           },
         );
@@ -292,6 +296,7 @@ async function run(input: Input) {
     modelSettings: {
       maxOutputTokens: input.config.max_output_tokens,
       maxRetries: 0,
+      ...(reasoning ? { reasoning } : {}),
     },
     onStepFinish: async (result) => {
       const messages = fromModelMessages(result.response.messages ?? []);

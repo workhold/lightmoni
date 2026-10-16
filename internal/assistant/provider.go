@@ -40,12 +40,27 @@ func normalizedConfig(c Config) Config {
 	if c.MaxSteps == 0 {
 		c.MaxSteps = 8
 	}
+	if c.ReasoningEffort == "" {
+		c.ReasoningEffort = ReasoningProviderDefault
+	}
 	return c
+}
+
+func validReasoningEffort(value string) bool {
+	switch value {
+	case ReasoningProviderDefault, ReasoningNone, ReasoningMinimal, ReasoningLow, ReasoningMedium, ReasoningHigh, ReasoningXHigh:
+		return true
+	default:
+		return false
+	}
 }
 func ValidateConfig(c Config) error {
 	c = normalizedConfig(c)
 	if !concreteProtocol(c.Protocol) {
 		return errors.New("select a concrete supported model protocol before saving")
+	}
+	if !validReasoningEffort(c.ReasoningEffort) {
+		return errors.New("select a supported reasoning effort")
 	}
 	if c.MaxInputTokens < 4096 || c.MaxInputTokens > 128000 || c.MaxOutputTokens < 256 || c.MaxOutputTokens > 16384 || c.MaxSteps < 1 || c.MaxSteps > 12 {
 		return errors.New("input limit must be 4096–128000, output limit 256–16384 and steps 1–12")

@@ -36,17 +36,21 @@ func TestConnectionTestUsesConcreteProtocolAndDoesNotPersist(t *testing.T) {
 			})
 
 			status, body := connectionRequest(t, server.URL, map[string]any{
-				"base_url":      "https://gateway.example/v1/chat/completions",
-				"api_key":       "temporary-secret",
-				"protocol":      protocol,
-				"model":         "fixture-model",
-				"use_saved_key": false,
+				"base_url":         "https://gateway.example/v1/chat/completions",
+				"api_key":          "temporary-secret",
+				"protocol":         protocol,
+				"model":            "fixture-model",
+				"reasoning_effort": ReasoningHigh,
+				"use_saved_key":    false,
 			})
 			if status != http.StatusOK || !bytes.Contains(body, []byte(`"ok":true`)) {
 				t.Fatalf("connection test: %d %s", status, body)
 			}
 			if got.Config.BaseURL != "https://gateway.example/v1" || got.Config.Protocol != protocol || got.Config.Model != "fixture-model" || got.Config.APIKey != "temporary-secret" {
 				t.Fatalf("runtime config: %+v", got.Config)
+			}
+			if got.Config.ReasoningEffort != ReasoningHigh {
+				t.Fatalf("runtime reasoning effort: %q", got.Config.ReasoningEffort)
 			}
 			if got.Config.MaxInputTokens != 4096 || got.Config.MaxOutputTokens != 256 || got.Config.MaxSteps != 1 || len(got.Tools) != 0 {
 				t.Fatalf("runtime probe limits/tools: %+v tools=%v", got.Config, got.Tools)
@@ -72,7 +76,7 @@ func TestConnectionTestSavedKeyRequiresExactBase(t *testing.T) {
 	var got RuntimeInput
 	s.options.Runtime = connectionFixtureRuntime(func(_ context.Context, input RuntimeInput) error { got = input; return nil })
 	status, body := connectionRequest(t, server.URL, map[string]any{"base_url": "https://gateway.example/v1", "use_saved_key": true, "protocol": ProtocolOpenAIChat, "model": "saved"})
-	if status != http.StatusOK || !bytes.Contains(body, []byte(`"ok":true`)) || got.Config.APIKey != "saved-secret" {
+	if status != http.StatusOK || !bytes.Contains(body, []byte(`"ok":true`)) || got.Config.APIKey != "saved-secret" || got.Config.ReasoningEffort != ReasoningProviderDefault {
 		t.Fatalf("saved key: %d %s config=%+v", status, body, got.Config)
 	}
 	status, body = connectionRequest(t, server.URL, map[string]any{"base_url": "https://gateway.example/other", "use_saved_key": true, "protocol": ProtocolOpenAIChat, "model": "saved"})
@@ -101,6 +105,7 @@ func TestConnectionTestRejectsInvalidInputAndNonAdmin(t *testing.T) {
 		{"base_url": "https://gateway.example/v1", "protocol": "auto", "model": "fixture"},
 		{"base_url": "https://gateway.example/v1", "protocol": ProtocolOpenAIChat, "model": ""},
 		{"base_url": "https://gateway.example/v1", "protocol": "unknown", "model": "fixture"},
+		{"base_url": "https://gateway.example/v1", "protocol": ProtocolOpenAIChat, "model": "fixture", "reasoning_effort": "unsupported"},
 	} {
 		status, _ := connectionRequest(t, server.URL, value)
 		if status != http.StatusBadRequest {

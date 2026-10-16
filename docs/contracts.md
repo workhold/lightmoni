@@ -93,6 +93,6 @@ Agent 的任务以分组为单位，组内共用版本和任务。登录后 `GET
 
 目录使用 Bearer、Anthropic `x-api-key` 或 Gemini `x-goog-api-key`，密钥不进入 URL。最多 6 个同源 GET，总超时 8 秒、禁止重定向、每个响应最大 1 MiB，返回排序去重的最多 500 个模型。根地址目录不存在且使用新填写的 Key 或无需 Key 时，每个协议 profile 最多回退一次到 `/v1` 或 Google `/v1beta`；复用已保存 Key 不回退。401/403 仍表示凭据问题，不能被后续候选路径的失败覆盖。分页仅标记截断，不跟随下一页。查询不持久化、不调用生成、错误不包含远端正文。设置页提供自动查询、独立获取按钮及手动模型输入，成功后回填实际可用的规范 Base URL，地址/Key/协议变更或关闭窗口会取消旧查询。规格、接口和验证见 specs/003-multi-protocol-models。
 
-管理员可通过 `POST /api/v1/assistant/test-connection` 主动验证具体协议和模型。请求必须包含合法 Base URL、具体协议和非空模型，可带新 Key 或仅在规范 Base URL 完全一致时复用已保存 Key。服务使用 Mastra runtime 发送一次固定短提示词的最小真实请求（无工具、4096 输入 token、256 输出 token、最多 1 步、15 秒超时），丢弃所有 runtime frame，不创建会话、不保存配置。成功只返回 `ok`、实际 Base URL、协议、模型和耗时；输入/密钥地址不匹配返回 400，超时返回 504，运行时或供应商错误返回不含上游正文的 502。目录刷新仍是只读操作，只有点击测试连接才可能产生供应商费用。
+管理员可通过 `POST /api/v1/assistant/test-connection` 主动验证具体协议、模型和可选的 `reasoning_effort`（`provider-default`、`none`、`minimal`、`low`、`medium`、`high`、`xhigh`；缺省跟随供应商）。请求必须包含合法 Base URL、具体协议和非空模型，可带新 Key 或仅在规范 Base URL 完全一致时复用已保存 Key。服务使用 Mastra runtime 发送一次固定短提示词的最小真实请求（无工具、4096 输入 token、256 输出 token、最多 1 步、15 秒超时），丢弃所有 runtime frame，不创建会话、不保存配置。成功只返回 `ok`、实际 Base URL、协议、模型和耗时；输入/密钥地址不匹配返回 400，超时返回 504，运行时或供应商错误返回不含上游正文的 502。目录刷新仍是只读操作，只有点击测试连接才可能产生供应商费用。
 
 四种协议通过实际原生 SDK 执行文本流、工具调用、摘要和取消。Responses 使用 `store:false`；供应商原始 usage 按协议解释，缺少字段保持未知。多轮延续仅持久化白名单内的签名、item ID 和加密推理内容，隐藏推理明文不保存；私有 worker 检查点校验大小和字段，服务端会话回读删除这些元数据后才返回浏览器。元数据计入上下文预算，不能静默丢弃超限状态。

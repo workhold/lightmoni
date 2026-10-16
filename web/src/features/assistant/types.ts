@@ -2,8 +2,9 @@ import type { SQLQuery, TimeRange } from '../../shared/types';
 
 export type ModelProtocol = 'openai-chat-completions' | 'openai-responses' | 'anthropic-messages' | 'google-generative-ai';
 export type ModelProtocolSelection = ModelProtocol | 'auto';
+export type ReasoningEffort = 'provider-default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 export type ModelProtocolSource = 'manual' | 'official-host' | 'endpoint-path' | 'catalog' | 'default';
-export interface AssistantConfig { base_url: string; model: string; has_key: boolean; enabled: boolean; runtime?: string; protocol?: ModelProtocol; max_input_tokens?: number; max_output_tokens?: number; max_steps?: number }
+export interface AssistantConfig { base_url: string; model: string; has_key: boolean; enabled: boolean; runtime?: string; protocol?: ModelProtocol; max_input_tokens?: number; max_output_tokens?: number; max_steps?: number; reasoning_effort?: ReasoningEffort }
 export interface ModelDiscoveryInput { base_url: string; api_key: string; use_saved_key: boolean; protocol: ModelProtocolSelection }
 export interface ModelDiscoveryResult { base_url: string; protocol: ModelProtocol; protocol_options: ModelProtocol[]; protocol_source: ModelProtocolSource; requires_confirmation: boolean; capabilities_verified: false; models: {id: string; label?: string}[]; truncated: boolean }
 export interface ModelConnectionTestResult { ok: true; base_url: string; protocol: ModelProtocol; model: string; latency_ms: number }

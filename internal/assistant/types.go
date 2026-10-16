@@ -25,6 +25,16 @@ type Principal struct {
 	Admin bool
 }
 
+const (
+	ReasoningProviderDefault = "provider-default"
+	ReasoningNone            = "none"
+	ReasoningMinimal         = "minimal"
+	ReasoningLow             = "low"
+	ReasoningMedium          = "medium"
+	ReasoningHigh            = "high"
+	ReasoningXHigh           = "xhigh"
+)
+
 type Config struct {
 	BaseURL         string `json:"base_url"`
 	Protocol        string `json:"protocol,omitempty"`
@@ -34,6 +44,7 @@ type Config struct {
 	MaxInputTokens  int    `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
 	MaxSteps        int    `json:"max_steps,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type ConfigView struct {
@@ -46,6 +57,7 @@ type ConfigView struct {
 	MaxInputTokens  int    `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
 	MaxSteps        int    `json:"max_steps,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type Event struct {

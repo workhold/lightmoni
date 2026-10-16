@@ -13,11 +13,12 @@ import (
 const connectionTestTimeout = 15 * time.Second
 
 type connectionTestInput struct {
-	BaseURL     string `json:"base_url"`
-	APIKey      string `json:"api_key"`
-	UseSavedKey bool   `json:"use_saved_key"`
-	Protocol    string `json:"protocol"`
-	Model       string `json:"model"`
+	BaseURL         string `json:"base_url"`
+	APIKey          string `json:"api_key"`
+	UseSavedKey     bool   `json:"use_saved_key"`
+	Protocol        string `json:"protocol"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type connectionTestView struct {
@@ -69,6 +70,14 @@ func (s *Service) testConnection(w http.ResponseWriter, r *http.Request) {
 		connectionError(w, http.StatusBadRequest, "invalid_input", "enter a valid model and API key")
 		return
 	}
+	reasoning := input.ReasoningEffort
+	if reasoning == "" {
+		reasoning = ReasoningProviderDefault
+	}
+	if !validReasoningEffort(reasoning) {
+		connectionError(w, http.StatusBadRequest, "invalid_input", "select a supported reasoning effort")
+		return
+	}
 
 	key, err := s.connectionKey(r.Context(), base, input.APIKey, input.UseSavedKey)
 	if err != nil {
@@ -93,6 +102,7 @@ func (s *Service) testConnection(w http.ResponseWriter, r *http.Request) {
 		MaxInputTokens:  4096,
 		MaxOutputTokens: 256,
 		MaxSteps:        1,
+		ReasoningEffort: reasoning,
 	}
 	runtimeInput := RuntimeInput{
 		System:   "Connection test. Reply with OK only.",

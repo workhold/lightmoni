@@ -32,7 +32,7 @@ function reply(p:Protocol,tool:boolean,stream:boolean,usage=true){
  const value={candidates:[{index:0,content:{role:'model',parts:[tool?{functionCall:{name:'list_tables',args:{}},thoughtSignature:'opaque-gemini-signature'}:{text,thoughtSignature:'opaque-text-signature'}]},finishReason:'STOP'}],usageMetadata:usage?{promptTokenCount:10,candidatesTokenCount:3,thoughtsTokenCount:2,totalTokenCount:15}:undefined};
  return stream?[value]:value;
 }
-async function worker(p:Protocol,mode:'tool'|'summary'|'missing'|'error'|'cancel', replay?:any[]){
+async function worker(p:Protocol,mode:'tool'|'summary'|'missing'|'error'|'cancel', replay?:any[], reasoning_effort?:'provider-default'|'none'|'minimal'|'low'|'medium'|'high'|'xhigh'){
  const requests:any[]=[];let child:ReturnType<typeof spawn>;
  const server=createServer(async(req,res)=>{
  let raw='';for await(const chunk of req)raw+=chunk;
@@ -52,7 +52,8 @@ async function worker(p:Protocol,mode:'tool'|'summary'|'missing'|'error'|'cancel
  child.stdout!.on('data',chunk=>{buffer+=chunk;let index;while((index=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,index);buffer=buffer.slice(index+1);const f=JSON.parse(line);frames.push(f);if(f.type==='tool.request')child.stdin!.write(JSON.stringify({type:'tool.response',id:f.id,value:{tables:['fixture']}})+'\n');}});
  child.stderr!.on('data',chunk=>stderr+=chunk);
  const messages=replay??(mode==='summary'?[{role:'user',content:'old '.repeat(350)},{role:'assistant',content:'old answer'},{role:'user',content:'older '.repeat(250)},{role:'assistant',content:'older answer'},{role:'user',content:'new question'}]:[{role:'user',content:'previous question'},{role:'assistant',content:'previous answer'},{role:'user',content:'current question'}]);
- child.stdin!.write(JSON.stringify({type:'start',input:{system:'monitoring',config:{protocol:p,base_url:`http://127.0.0.1:${port}/tenant/v1`,api_key:'fixture',model:p==='google-generative-ai'?'models/gemini-fixture':'fixture',max_input_tokens:mode==='summary'?4096:20000,max_output_tokens:1024,max_steps:4},messages,tools:[{name:'list_tables',description:'list',schema:{type:'object',properties:{}}}]}})+'\n');
+ const model = p === 'google-generative-ai' ? 'models/gemini-fixture' : p === 'openai-responses' && reasoning_effort ? 'gpt-5' : 'fixture';
+ child.stdin!.write(JSON.stringify({type:'start',input:{system:'monitoring',config:{protocol:p,base_url:`http://127.0.0.1:${port}/tenant/v1`,api_key:'fixture',model,max_input_tokens:mode==='summary'?4096:20000,max_output_tokens:1024,max_steps:4,...(reasoning_effort?{reasoning_effort}: {})},messages,tools:[{name:'list_tables',description:'list',schema:{type:'object',properties:{}}}]}})+'\n');
  const timer=setTimeout(()=>child.kill('SIGKILL'),15000);
  await new Promise<void>(r=>child.on('exit',()=>r()));clearTimeout(timer);server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));
  return {frames,requests,stderr};
@@ -65,6 +66,30 @@ for(const p of protocols){
  test(`${p} worker errors redacted and cancellation`,async()=>{for(const mode of ['error','cancel'] as const){const {frames,stderr}=await worker(p,mode);assert.equal(stderr,'');assert.ok(frames.some(f=>f.type==='error'));assert.ok(!JSON.stringify(frames).includes('secret fixture'));assert.ok(!frames.some(f=>f.type==='done'));}});
  if(p!=='anthropic-messages')test(`${p} missing usage is unknown`,async()=>{const {frames}=await worker(p,'missing');assert.ok(frames.some(f=>f.type==='done'),JSON.stringify(frames));assert.ok(!frames.some(f=>f.name==='turn.usage'));});
 }
+
+for(const p of protocols)test(`${p} reasoning effort reaches native request`,async()=>{
+ const {requests,frames}=await worker(p,'missing',undefined,'high');
+ assert.ok(frames.some(f=>f.type==='done'),JSON.stringify(frames));
+ const body=requests[0].body;
+ if(p==='openai-chat-completions') assert.equal(body.reasoning_effort,'high');
+ if(p==='openai-responses') assert.equal(body.reasoning?.effort,'high');
+ if(p==='anthropic-messages') assert.ok(body.thinking?.type==='enabled' || body.thinking?.type==='adaptive');
+ if(p==='google-generative-ai') assert.ok(body.generationConfig?.thinkingConfig?.thinkingBudget > 0 || ['minimal','low','medium','high'].includes(body.generationConfig?.thinkingConfig?.thinkingLevel));
+});
+
+test('reasoning effort also applies to history summarization',async()=>{
+ const {requests,frames}=await worker('openai-chat-completions','summary',undefined,'medium');
+ assert.ok(frames.some(f=>f.type==='compacted'),JSON.stringify(frames));
+ assert.ok(requests.length>=2);
+ assert.equal(requests[0].body.reasoning_effort,'medium');
+ assert.equal(requests.at(-1).body.reasoning_effort,'medium');
+});
+
+test('provider-default leaves reasoning override out of the request',async()=>{
+ const {requests,frames}=await worker('openai-chat-completions','missing',undefined,'provider-default');
+ assert.ok(frames.some(f=>f.type==='done'),JSON.stringify(frames));
+ assert.equal(requests[0].body.reasoning_effort,undefined);
+});
 
 for(const p of ['google-generative-ai','openai-responses'] as const)test(`${p} opaque continuation metadata survives new worker`,async()=>{
  const initial=await worker(p,'tool');

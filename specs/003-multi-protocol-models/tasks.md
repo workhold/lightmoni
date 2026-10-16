@@ -36,6 +36,13 @@
 - [x] T017 Add the UI test-connection action and copy; enable it only after a concrete protocol and model are present, and keep manual model fallback visible.
 - [x] T018 Run Go, runtime and frontend verification after remote-main merge; record root-without-version, manual-protocol, and test-connection evidence.
 
+## Phase7 Reasoning control and discovery copy (P2)
+**Independent test**: a successful ambiguous directory explains the distinction between directory category and generation protocol; model list guidance is not shown as a stale validation error; a stored reasoning effort reaches the Mastra runtime with provider-default preserving legacy requests.
+- [x] T019 Extend the config contract and SDD evidence with `reasoning_effort` defaults, validation and provider mapping boundaries.
+- [x] T020 Add the execution-limit reasoning selector and dynamic model-list guidance; preserve manual model entry and clear stale empty-field feedback after discovery.
+- [x] T021 Pass reasoning effort through Go/Node runtime for compaction and execution; cover legacy/default and concrete values in native fixtures.
+- [x] T022 Run full Go/runtime/frontend checks and restart the local service with the updated settings UI.
+
 ## Dependencies/Parallel execution
 T001-T003 before app edits. Backend owns internal/assistant/{types,provider,service,discovery,discovery_test}.go; runtime owns ai-runtime and optionally native runtime fixture file; UI owns web assistant settings/types/helpers/tests. Each writes meaningful tests before implementation; cross-side interfaces from contract frozen. Root handles docs, reviews and serialized final builds. Runtime package build before backend full native integration tests. Web build must not overlap Go compilation. US1/US2 ship together; US3 cannot imply generation verification.
 

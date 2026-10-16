@@ -1,7 +1,7 @@
 # Protocol contract
 
 ## Configuration
-Config.protocol is one of openai-chat-completions | openai-responses | anthropic-messages | google-generative-ai. Omitted/blank on old input means Chat; auto/unknown rejected400 before persistence. ConfigView returns stored concrete protocol. Changing only protocol on exact canonical base may keep saved key. Changed base still new key or clear_key required.
+Config.protocol is one of openai-chat-completions | openai-responses | anthropic-messages | google-generative-ai. Omitted/blank on old input means Chat; auto/unknown rejected400 before persistence. Config.reasoning_effort is provider-default | none | minimal | low | medium | high | xhigh; omitted/blank means provider-default and is not sent as an extra provider parameter. ConfigView returns stored concrete protocol and reasoning effort. Changing only protocol on exact canonical base may keep saved key. Changed base still new key or clear_key required.
 Canonical URL retains escaped tenant paths and current validation; additionally strip terminal /responses, /messages, and Gemini /models/{id}:generateContent or :streamGenerateContent, along with existing /chat/completions and /models. Model field remains independent; do not infer protocol from name.
 
 ## POST /api/v1/assistant/models
@@ -23,18 +23,19 @@ The repair scope is deliberately bounded: trim slashes and known generation/cata
 ## POST /api/v1/assistant/test-connection
 Admin-only, strict 16KiB JSON input:
 ```json
-{"base_url":"https://example.com/v1","api_key":"optional","use_saved_key":false,"protocol":"openai-chat-completions","model":"model-id"}
+{"base_url":"https://example.com/v1","api_key":"optional","use_saved_key":false,"protocol":"openai-chat-completions","model":"model-id","reasoning_effort":"provider-default"}
 ```
-`protocol` must be concrete and `model` non-empty. The endpoint applies the same canonical URL and saved-key address checks as configuration/discovery, then invokes the existing Mastra runtime with no tools, a fixed short prompt, `max_input_tokens=4096`, `max_output_tokens=256`, and a short timeout. Runtime frames and model text are discarded; no session or configuration is written.
+`protocol` must be concrete and `model` non-empty. `reasoning_effort` is optional and uses the same provider-default | none | minimal | low | medium | high | xhigh enum as configuration; omitted or blank follows the provider default. The endpoint applies the same canonical URL and saved-key address checks as configuration/discovery, then invokes the existing Mastra runtime with no tools, a fixed short prompt, `max_input_tokens=4096`, `max_output_tokens=256`, and a short timeout. Runtime frames and model text are discarded; no session or configuration is written.
 
 Success returns `{ "ok": true, "base_url": "...", "protocol": "...", "model": "...", "latency_ms": 123 }`. Invalid input or saved-key mismatch is 400, timeout is 504, and network/provider/runtime failure is a generic 502. Provider response bodies, API keys and generated text never appear in the response.
 
 ## Runtime
 OpenAI Chat /chat/completions via existing SDK; Responses /responses via createOpenAI.responses; Anthropic /messages via createAnthropic; Gemini /models/{model}:streamGenerateContent?alt=sse via createGoogleGenerativeAI. Custom base/version prefixes preserved, Gemini model IDs tolerate single models/ prefix. Native packages pinned to matching model-provider interface.
-All share Mastra/tool authority/budgets/history/cancel. Responses stateless store:false. Raw usage fields mapped per protocol including Anthropic additive cache input and Gemini output thoughts; missing raw fields stay unknown. Model errors fixed codes/no SDK error echo.
+All share Mastra/tool authority/budgets/history/cancel. Responses stateless store:false. `reasoning_effort` is passed through the AI SDK `reasoning` model setting when concrete; provider adapters map it to native fields where supported. `provider-default` leaves the request unchanged. Unsupported model/provider combinations may return a sanitized provider error; they do not silently claim the requested level was applied. Raw usage fields mapped per protocol including Anthropic additive cache input and Gemini output thoughts; missing raw fields stay unknown. Model errors fixed codes/no SDK error echo.
 
 ## UI
 Independent full-size 获取模型 button next to/after address+key, always visible. Protocol Select: 自动识别 plus4 concrete choices. Stable input auto queries; explicit retry available; connection/protocol edits cancel previous work. Auto recommendation displays source and caveat; ambiguous OpenAI directory requires choosing Chat or Responses before save. Query failure preserves manual model; choose concrete protocol to save without directory. Do not overwrite manual model or budgets. Keep scrollable modal/footer.
+The model field explains whether a directory list is available and keeps manual entry. A successful OpenAI-compatible directory says that the category is known but Chat/Responses still requires a concrete choice. Execution limits include a reasoning-effort selector labelled as best effort: 跟随模型, 关闭, 最小, 低, 中, 高, 极高.
 Old user tab5 is not reloaded because it has unsaved fields; fresh final tab visible and retained, with re-entry of Key by user (no extraction).
 
 ## Native durable metadata

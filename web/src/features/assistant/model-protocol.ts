@@ -1,4 +1,4 @@
-import type { AssistantConfig, ModelDiscoveryResult, ModelProtocol, ModelProtocolSelection } from './types';
+import type { AssistantConfig, ModelDiscoveryResult, ModelProtocol, ModelProtocolSelection, ReasoningEffort } from './types';
 
 export const protocolChoices: { value: ModelProtocolSelection; label: string }[] = [
   { value: 'auto', label: '自动识别' },
@@ -6,6 +6,16 @@ export const protocolChoices: { value: ModelProtocolSelection; label: string }[]
   { value: 'openai-responses', label: 'OpenAI · Responses' },
   { value: 'anthropic-messages', label: 'Anthropic · Messages' },
   { value: 'google-generative-ai', label: 'Google Gemini · 原生协议' },
+];
+
+export const reasoningEffortChoices: { value: ReasoningEffort; label: string }[] = [
+  { value: 'provider-default', label: '跟随模型（自动）' },
+  { value: 'none', label: '关闭思考' },
+  { value: 'minimal', label: '最小' },
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+  { value: 'xhigh', label: '极高' },
 ];
 
 export function isModelProtocol(value: unknown): value is ModelProtocol {

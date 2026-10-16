@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { App, Alert, AutoComplete, Button, Card, Checkbox, Collapse, Form, Input, InputNumber, Modal, Select, Switch, Tag } from '../../shared/ui';
 import { api } from '../../shared/api';
 import { discoveryInput, ModelDiscovery, type DiscoveryState } from './model-discovery';
-import { initialProtocol, isModelProtocol, modelConnectionError, protocolChoices, protocolLabel, protocolSourceLabel, resolveProtocol } from './model-protocol';
+import { initialProtocol, isModelProtocol, modelConnectionError, protocolChoices, protocolLabel, protocolSourceLabel, reasoningEffortChoices, resolveProtocol } from './model-protocol';
 import type { AssistantConfig, ModelConnectionTestResult, ModelDiscoveryResult, ModelProtocolSelection } from './types';
 
 export interface ModelSettingsProps {
@@ -49,6 +49,7 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
       base_url: config?.base_url ?? '', protocol: initialProtocol(config), model: config?.model ?? '', api_key: '', clear_key: false,
       enabled: config?.enabled ?? true, max_input_tokens: config?.max_input_tokens ?? 32000,
       max_output_tokens: config?.max_output_tokens ?? 4096, max_steps: config?.max_steps ?? 8,
+      reasoning_effort: config?.reasoning_effort ?? 'provider-default',
     });
     else form.setFieldValue('api_key', '');
   }, [visible, config, form, query]);
@@ -86,7 +87,7 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
     try {
       setError(''); setTestResult(undefined);
       const checked = await form.validateFields(['base_url', 'protocol', 'model']);
-      const values = { ...form.getFieldsValue(), ...checked } as Record<string, unknown> & { base_url?: string; protocol?: ModelProtocolSelection; model?: string; api_key?: string; clear_key?: boolean };
+      const values = { ...form.getFieldsValue(), ...checked } as Record<string, unknown> & { base_url?: string; protocol?: ModelProtocolSelection; model?: string; api_key?: string; clear_key?: boolean; reasoning_effort?: string };
       if (!isModelProtocol(values.protocol)) {
         const message = '测试连接前请选择具体 API 协议，不能使用自动识别。';
         form.setFields([{ name: 'protocol', errors: [message] }]); setError(message); return;
@@ -106,7 +107,7 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
       testAbort.current = abort;
       const result = await api<ModelConnectionTestResult>('/assistant/test-connection', {
         method: 'POST',
-        body: JSON.stringify({ base_url: input.base_url, api_key: input.api_key, use_saved_key: input.use_saved_key, protocol: values.protocol, model: modelName }),
+        body: JSON.stringify({ base_url: input.base_url, api_key: input.api_key, use_saved_key: input.use_saved_key, protocol: values.protocol, model: modelName, reasoning_effort: values.reasoning_effort }),
         signal: abort.signal,
       });
       if (generation !== testGeneration.current) return;
@@ -124,9 +125,17 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
   const options = discovery.result?.models.map(model => ({ value: model.id })) ?? [];
   const result = discovery.result;
   const candidates = result?.protocol_options?.map(option => protocolLabel(option)).join(' / ');
+  const displayedProtocol = result && (isModelProtocol(protocol) ? protocol : result.protocol);
+  const modelHint = options.length > 0
+    ? `已发现 ${options.length} 个模型，可从下拉列表选择，也可以手动输入。`
+    : discovery.status === 'success'
+      ? '目录为空，请手动填写模型名称。'
+      : discovery.status === 'error'
+        ? '未能获取模型目录，请手动填写模型名称。'
+        : '获取模型后可从下拉列表选择，也可以手动输入。';
   const canTest = !saving && !testing && isModelProtocol(protocol) && !!model?.trim() && !!discoveryInput({ base_url: base, protocol }, false);
   const formContent = <Form form={form} layout="vertical" onValuesChange={(changed, values) => {
-      if (['base_url', 'api_key', 'clear_key', 'protocol', 'model'].some(field => Object.hasOwn(changed, field))) {
+      if (['base_url', 'api_key', 'clear_key', 'protocol', 'model', 'reasoning_effort'].some(field => Object.hasOwn(changed, field))) {
         setError('');
         testAbort.current?.abort(); testAbort.current = null; setTestResult(undefined); setTesting(false); testGeneration.current++;
       }
@@ -157,10 +166,10 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
       </p>
       {discovery.status === 'error' && <Alert type="warning" showIcon title={discovery.error} description="获取列表不会保存配置，也不会发起生成请求。" />}
       {result && <Alert style={{ marginBottom: 16 }} type={result.requires_confirmation && protocol === 'auto' ? 'warning' : 'info'} showIcon
-        title={result.requires_confirmation && protocol === 'auto' ? '此目录无法区分实际调用协议，请在上方选择具体协议。' : <><Tag color="processing">{protocolLabel(result.protocol)}</Tag>{protocolSourceLabel(result.protocol_source)}</>}
-        description={<>{result.requires_confirmation && protocol === 'auto' && <p style={{ margin: '0 0 8px' }}>候选协议：{candidates}。</p>}获取模型列表尚未验证生成或工具调用能力，也不能确定模型的上下文长度。</>} />}
+        title={result.requires_confirmation && protocol === 'auto' ? '已识别为 OpenAI 兼容目录，但还需选择具体调用协议。' : <><Tag color="processing">{displayedProtocol ? protocolLabel(displayedProtocol) : '未知协议'}</Tag>{protocolSourceLabel(result.protocol_source)}</>}
+        description={<>{result.requires_confirmation && protocol === 'auto' && <p style={{ margin: '0 0 8px' }}>模型目录只返回模型 ID，无法判断 Chat Completions 还是 Responses；候选协议：{candidates}。请按服务实际支持的接口选择后再保存或测试连接。</p>}目录只提供模型名称，不验证生成、工具调用或上下文上限；测试连接才会验证一次最小生成请求。</>} />}
       <Form.Item name="model" label="模型名称"
-        extra="目录可能包含多个模型，系统不会默认选择第一项；请从列表中选择或手动输入准确名称。" rules={[{ required: true, whitespace: true, message: '选择或填写模型名称' }, { max: 200, message: '模型名称不能超过 200 个字符' }]}>
+        extra={modelHint} rules={[{ required: true, whitespace: true, message: '选择或填写模型名称' }, { max: 200, message: '模型名称不能超过 200 个字符' }]}>
         <AutoComplete options={options} placeholder="选择模型或手动输入" disabled={saving}
           filterOption={(input, option) => String(option?.value ?? '').toLowerCase().includes(input.toLowerCase())} />
       </Form.Item>
@@ -174,6 +183,7 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
         <Form.Item name="max_input_tokens" label="输入上下文预算" extra="用于保守估算并整理历史，请设在模型实际上下文限制以内。" rules={[{ required: true }]}><InputNumber disabled={saving} precision={0} min={4096} max={128000} step={1024} /></Form.Item>
         <Form.Item name="max_output_tokens" label="单次模型输出上限" rules={[{ required: true }]}><InputNumber disabled={saving} precision={0} min={256} max={16384} step={256} /></Form.Item>
         <Form.Item name="max_steps" label="每轮最多执行步数" rules={[{ required: true }]}><InputNumber disabled={saving} precision={0} min={1} max={12} /></Form.Item>
+        <Form.Item name="reasoning_effort" label="模型思考深度" extra="不同模型和服务商支持范围不同；默认跟随模型，不会额外发送推理参数。选择具体级别后由 SDK 尽力映射，实际是否支持请用测试连接验证。" rules={[{ required: true, message: '选择模型思考深度' }]}><Select options={reasoningEffortChoices} disabled={saving} /></Form.Item>
       </> }]} />
       <Form.Item name="enabled" label="启用 AI 助手" valuePropName="checked"><Switch disabled={saving} /></Form.Item>
       {error && <Alert type="error" title={error} showIcon />}

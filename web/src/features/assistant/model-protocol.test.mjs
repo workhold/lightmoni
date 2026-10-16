@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { initialProtocol, protocolChoices, protocolLabel, protocolSourceLabel, resolveProtocol, modelConnectionError } from './model-protocol.ts';
+import { initialProtocol, protocolChoices, protocolLabel, protocolSourceLabel, reasoningEffortChoices, resolveProtocol, modelConnectionError } from './model-protocol.ts';
 
 const catalog = { base_url: 'https://gateway.example/v1', protocol: 'openai-chat-completions', protocol_options: ['openai-chat-completions', 'openai-responses'], protocol_source: 'catalog', requires_confirmation: true, capabilities_verified: false, models: [{ id: 'manual-name-remains-independent' }], truncated: false };
 const concrete = ['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai'];
@@ -14,6 +14,11 @@ test('selector covers automatic and four concrete protocols; legacy and fresh se
     assert.equal(initialProtocol({ base_url: 'https://configured.example/v1', protocol }), protocol);
     assert.equal(typeof protocolLabel(protocol), 'string');
   }
+});
+
+test('reasoning selector exposes the provider-default and supported neutral levels', () => {
+  assert.deepEqual(reasoningEffortChoices.map(option => option.value), ['provider-default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+  assert.equal(reasoningEffortChoices[0].label, '跟随模型（自动）');
 });
 
 test('a shared OpenAI catalog requires a concrete selection, not its first recommendation', () => {
