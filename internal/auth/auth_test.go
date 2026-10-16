@@ -57,6 +57,41 @@ func authRequest(t *testing.T, c *http.Client, method, endpoint string, value an
 	_ = json.NewDecoder(response.Body).Decode(&result)
 	return response.StatusCode, result
 }
+
+func TestCheckOriginAllowsLocalHostAliases(t *testing.T) {
+	a, _, _ := testAuth(t)
+	a.ExternalURL = "http://localhost:8080"
+	cases := []struct {
+		name   string
+		origin string
+		allow  bool
+	}{
+		{name: "configured host", origin: "http://localhost:8080", allow: true},
+		{name: "loopback alias", origin: "http://127.0.0.1:8080", allow: true},
+		{name: "development frontend localhost", origin: "http://localhost:5173", allow: true},
+		{name: "development frontend loopback", origin: "http://127.0.0.1:5173", allow: true},
+		{name: "different local port", origin: "http://127.0.0.1:8081", allow: false},
+		{name: "different scheme", origin: "https://127.0.0.1:8080", allow: false},
+		{name: "local path", origin: "http://127.0.0.1:8080/path", allow: false},
+		{name: "local user info", origin: "http://user@127.0.0.1:8080", allow: false},
+		{name: "external host", origin: "https://evil.example", allow: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/assistant/models", nil)
+			r.Header.Set("Origin", tc.origin)
+			w := httptest.NewRecorder()
+			allowed := a.checkOrigin(w, r)
+			if allowed != tc.allow {
+				t.Fatalf("origin %q allowed=%v, want %v (status %d)", tc.origin, allowed, tc.allow, w.Code)
+			}
+			if !tc.allow && w.Code != http.StatusForbidden {
+				t.Fatalf("origin %q status=%d, want 403", tc.origin, w.Code)
+			}
+		})
+	}
+}
+
 func TestScopedKeyAndUserLifecycle(t *testing.T) {
 	a, s, c := testAuth(t)
 	status, admin := authRequest(t, c, "POST", s.URL+"/api/v1/setup", map[string]string{"name": "admin", "password": "password123"})

@@ -52,6 +52,8 @@ test('no directory still allows all manual protocols and model names; automatic 
 test('safe Chinese failures distinguish credentials, session, address mismatch and directory fallback', () => {
   assert.match(modelConnectionError({ status: 401, message: 'provider unauthorized' }), /有效的 API Key/);
   assert.match(modelConnectionError({ status: 401, message: 'login required' }), /登录/);
+  assert.match(modelConnectionError({ status: 403, message: 'invalid request origin' }), /来源|External URL/);
+  assert.match(modelConnectionError({ status: 403, message: 'administrator required' }), /只有管理员/);
   assert.match(modelConnectionError({ status: 400, message: 'saved credential is unavailable for this address' }), /重新填写|清除/);
   assert.match(modelConnectionError({ status: 400, message: 'a new API key or clear_key is required when changing the API base URL' }), /地址/);
   assert.match(modelConnectionError({ details: { code: 'directory_unsupported' } }), /手动/);

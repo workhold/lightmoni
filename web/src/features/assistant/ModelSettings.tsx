@@ -126,12 +126,15 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
   const result = discovery.result;
   const candidates = result?.protocol_options?.map(option => protocolLabel(option)).join(' / ');
   const displayedProtocol = result && (isModelProtocol(protocol) ? protocol : result.protocol);
+  const permissionDenied = discovery.error === '只有管理员可以获取模型或修改模型连接。';
   const modelHint = options.length > 0
     ? `已发现 ${options.length} 个模型，可从下拉列表选择，也可以手动输入。`
     : discovery.status === 'success'
       ? '目录为空，请手动填写模型名称。'
       : discovery.status === 'error'
-        ? '未能获取模型目录，请手动填写模型名称。'
+        ? permissionDenied
+          ? '当前账号没有模型配置权限，请切换管理员账号后重试。'
+          : '未能获取模型目录，请手动填写模型名称。'
         : '获取模型后可从下拉列表选择，也可以手动输入。';
   const canTest = !saving && !testing && isModelProtocol(protocol) && !!model?.trim() && !!discoveryInput({ base_url: base, protocol }, false);
   const formContent = <Form form={form} layout="vertical" onValuesChange={(changed, values) => {
@@ -161,7 +164,9 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
         {discovery.status === 'idle' && '填写服务地址和有效 API Key 后自动获取模型；无需密钥的服务可留空。'}
         {discovery.status === 'waiting' && '连接信息已更新，即将自动获取模型；也可以点击按钮立即查询。'}
         {discovery.status === 'loading' && '正在获取可用模型并确认目录格式…'}
-        {discovery.status === 'error' && '可修改连接信息后重试，或手动选择协议并填写模型名称。'}
+        {discovery.status === 'error' && (permissionDenied
+          ? '当前账号没有权限获取模型目录或修改模型连接，请切换管理员账号后重试。'
+          : '可修改连接信息后重试，或手动选择协议并填写模型名称。')}
         {discovery.status === 'success' && (options.length ? `已获取 ${options.length} 个模型${result?.truncated ? '（列表已截断，可手动输入其他模型）' : ''}。` : '服务返回了空模型列表，请手动填写模型名称。')}
       </p>
       {discovery.status === 'error' && <Alert type="warning" showIcon title={discovery.error} description="获取列表不会保存配置，也不会发起生成请求。" />}

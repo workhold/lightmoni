@@ -70,6 +70,9 @@ export function modelConnectionError(problem: unknown): string {
   if (code === 'directory_unsupported' || /directory is unavailable|format is unsupported/i.test(marker)) {
     return '服务未提供可识别的模型目录，请手动选择协议并填写模型名称。';
   }
+  if (/invalid request origin|request origin/i.test(marker)) {
+    return '请求来源校验失败，请通过当前服务地址打开页面，或检查服务的 External URL 配置。';
+  }
   if (issue.status === 403) return '只有管理员可以获取模型或修改模型连接。';
   if (issue.status === 429 || /rate limited/i.test(marker)) return '模型服务请求过于频繁，请稍后重试。';
   if (/base_url|invalid model discovery input|invalid assistant configuration/i.test(marker)) return '请检查服务地址、协议和连接信息。';

@@ -156,12 +156,52 @@ func (a *Auth) checkOrigin(w http.ResponseWriter, r *http.Request) bool {
 		expected = scheme + "://" + r.Host
 	}
 	expectedURL, _ := url.Parse(expected)
-	local := expectedURL != nil && (expectedURL.Hostname() == "localhost" || expectedURL.Hostname() == "127.0.0.1")
-	if origin != expected && !(local && (origin == "http://127.0.0.1:5173" || origin == "http://localhost:5173")) {
+	originURL, _ := url.Parse(origin)
+	local := expectedURL != nil && isLocalOriginHost(expectedURL.Hostname())
+	devOrigin := origin == "http://127.0.0.1:5173" || origin == "http://localhost:5173"
+	if origin != expected && !(local && devOrigin) && !sameLocalOrigin(expectedURL, originURL) {
 		shared.Error(w, 403, "invalid request origin")
 		return false
 	}
 	return true
+}
+
+func isLocalOriginHost(host string) bool {
+	switch strings.ToLower(strings.TrimSuffix(host, ".")) {
+	case "localhost", "127.0.0.1":
+		return true
+	default:
+		return false
+	}
+}
+
+// sameLocalOrigin accepts localhost and 127.0.0.1 as equivalent browser
+// origins while keeping the scheme and effective port bound to the configured
+// external URL. This avoids rejecting a local app merely because the browser
+// chose the other common loopback hostname.
+func sameLocalOrigin(expected, origin *url.URL) bool {
+	if expected == nil || origin == nil || !isLocalOriginHost(expected.Hostname()) || !isLocalOriginHost(origin.Hostname()) {
+		return false
+	}
+	if origin.User != nil || origin.Path != "" || origin.RawPath != "" || origin.RawQuery != "" || origin.Fragment != "" || origin.Opaque != "" || origin.ForceQuery {
+		return false
+	}
+	if !strings.EqualFold(expected.Scheme, origin.Scheme) {
+		return false
+	}
+	return effectiveOriginPort(expected) == effectiveOriginPort(origin)
+}
+
+func effectiveOriginPort(value *url.URL) string {
+	if port := value.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(value.Scheme) {
+	case "https":
+		return "443"
+	default:
+		return "80"
+	}
 }
 func admin(w http.ResponseWriter, r *http.Request) bool {
 	if !shared.IsAdmin(r) {
