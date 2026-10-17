@@ -30,6 +30,8 @@
 - [x] T014 切换中心 Docker、Agent 双架构包、安装及开发脚本与使用说明。
 - [x] T015 验证旧库和旧节点目录副本、隔离 ClickHouse/供应商、浏览器完整场景。
 - [x] T016 替代实现全部通过后移除旧 Go 服务与 Agent 运行代码，保留 Go SDK 业务支持。
-- [ ] T017 构建、启动、验收记录及独立 PR；未经授权不合入。
+- [x] T017 构建、启动、验收记录及独立 PR；未经授权不合入。
 
 依赖：T001→T002/T003；T004–T012按模块并行；T013合并后T014/T015；T016仅在等价门槛后，T017最终交付。
+
+交付：[PR #7](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/7)，目标 main，未合并。最终验收见 [validation.md](validation.md)。

@@ -1,6 +1,6 @@
 # Feature Specification: 统一中心服务与执行节点运行时
 
-Created: 2026-10-17 · Branch: feat/node-runtime-migration · Status: Implemented · validation completed; PR pending
+Created: 2026-10-17 · Branch: feat/node-runtime-migration · Status: Implemented and validated · PR #7 open
 
 ## User intent and scope
 

@@ -50,3 +50,7 @@ Live 用例只指向隔离 QA 服务。账号可通过 `LIGHTMONI_DOMAINS_USER/P
 - SQL/OAuth/布尔权限的安全收紧和内置面板迁移见 [覆盖矩阵](coverage.md)。大规模性能、长期稳定性与所有第三方供应商效果未在本次验证中作承诺。
 
 本次发现并修复了打包时绝对依赖链接、符号链接入口不执行 CLI、安装失败不回滚、失败绑定端口残留调度器及权限/SQL/旧 JSON 精度兼容问题；对应回归已加入上述测试。
+
+## PR 交付
+
+功能分支 `feat/node-runtime-migration`；[PR #7](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/7) 目标为实际主干 `main`，尚未合并。主实现提交 `121926c`。分支基于未合入的 #6，PR 相对 main 的当前差异包含其模型管理和节点助手变更，依赖关系已在描述中说明。
