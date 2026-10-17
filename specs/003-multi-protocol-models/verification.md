@@ -46,3 +46,11 @@ All T001–T022 complete. Spec/checklist/plan/research/data-model/contracts/task
 - PASS admin-only `POST /api/v1/assistant/test-connection` validates concrete protocol/model input, exercises all four protocol configurations through the Mastra runtime fixture, maps timeout/provider failures to safe statuses, and does not persist a config or session.
 - PASS the full Go/runtime/frontend/build verification listed above after the Phase 7 changes; current counts are 34/34 runtime tests and 26/26 assistant/frontend tests.
 - Directory refresh remains read-only; the UI keeps manual model entry available and only the explicit test action can create a provider generation request. No production provider key or generation request was used during verification.
+
+## Phase 8 visible address repair (2026-10-17)
+- PASS existing assistant/frontend tests (26/26), `npm --prefix web run typecheck`, production web build, serialized Go build, and restarted service `/healthz`.
+- PASS headless Chrome against the production assets with intercepted API fixtures: root to `/v1`, Gemini root to `/v1beta`, full Messages endpoint to base, trailing-slash/hostname/default-port normalization, and preservation of escaped tenant paths. The field contains the returned address; the adjacent notice contains the original address, corrected address and applicable reason.
+- PASS same-connection refresh preserves the notice without a feedback query; changing URL/protocol/Key clears it. A failed directory retains the submitted URL and manual model; a late cancelled result cannot overwrite a newer URL or restore its notice. An already canonical address has no repair notice.
+- PASS selected protocol and manually entered model remain unchanged. Intercepted test/save payloads use the corrected Base URL; save/reopen displays the saved canonical address without repeating the old notice.
+- PASS desktop and 390 px mobile visual inspection, long-address wrapping, no horizontal overflow and no page errors. Evidence: `.local-dev/model-address-repair-browser.json`, `.local-dev/model-address-repair.png`, `.local-dev/model-address-repair-mobile.png`.
+- All browser verification used intercepted model/config/test endpoints, with no external provider request and no write to the user's live configuration. The user's existing tabs and unsaved inputs were not reloaded.

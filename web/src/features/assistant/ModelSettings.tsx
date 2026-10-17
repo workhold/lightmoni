@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { App, Alert, AutoComplete, Button, Card, Checkbox, Collapse, Form, Input, InputNumber, Modal, Select, Switch, Tag } from '../../shared/ui';
 import { api } from '../../shared/api';
 import { discoveryInput, ModelDiscovery, type DiscoveryState } from './model-discovery';
+import { describeAddressCorrection, type AddressCorrection } from './model-address';
 import { initialProtocol, isModelProtocol, modelConnectionError, protocolChoices, protocolLabel, protocolSourceLabel, reasoningEffortChoices, resolveProtocol } from './model-protocol';
 import type { AssistantConfig, ModelConnectionTestResult, ModelDiscoveryResult, ModelProtocolSelection } from './types';
 
@@ -25,6 +26,7 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
   const testGeneration = useRef(0);
   const testAbort = useRef<AbortController | null>(null);
   const [discovery, setDiscovery] = useState<DiscoveryState>({ status: 'idle' });
+  const [addressCorrection, setAddressCorrection] = useState<AddressCorrection>();
   const base = Form.useWatch('base_url', form) as string | undefined;
   const key = Form.useWatch('api_key', form) as string | undefined;
   const clear = Form.useWatch('clear_key', form) as boolean | undefined;
@@ -35,6 +37,7 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
     state => {
       setDiscovery(state);
       if (state.result && form.getFieldValue('base_url') !== state.result.base_url) {
+        setAddressCorrection(describeAddressCorrection(form.getFieldValue('base_url'), state.result.base_url));
         testAbort.current?.abort(); testAbort.current = null; setTestResult(undefined); setTesting(false); testGeneration.current++;
         form.setFieldValue('base_url', state.result.base_url);
       }
@@ -44,7 +47,7 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
   const visible = embedded || open;
 
   useEffect(() => {
-    query.dispose(); testAbort.current?.abort(); testAbort.current = null; setDiscovery({ status: 'idle' }); setError(''); setTestResult(undefined); setTesting(false); testGeneration.current++;
+    query.dispose(); testAbort.current?.abort(); testAbort.current = null; setDiscovery({ status: 'idle' }); setAddressCorrection(undefined); setError(''); setTestResult(undefined); setTesting(false); testGeneration.current++;
     if (visible) form.setFieldsValue({
       base_url: config?.base_url ?? '', protocol: initialProtocol(config), model: config?.model ?? '', api_key: '', clear_key: false,
       enabled: config?.enabled ?? true, max_input_tokens: config?.max_input_tokens ?? 32000,
@@ -59,7 +62,7 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
   }, [visible, saving, base, key, clear, protocol, config?.has_key, query]);
   useEffect(() => () => { query.dispose(); testAbort.current?.abort(); testAbort.current = null; testGeneration.current++; }, [query]);
 
-  function close() { query.dispose(); testAbort.current?.abort(); testAbort.current = null; setTesting(false); testGeneration.current++; onClose?.(); }
+  function close() { query.dispose(); testAbort.current?.abort(); testAbort.current = null; setAddressCorrection(undefined); setTesting(false); testGeneration.current++; onClose?.(); }
   function refresh() {
     const input = discoveryInput(form.getFieldsValue(), !!config?.has_key);
     if (!input) { void form.validateFields(['base_url', 'protocol']).catch(() => {}); return; }
@@ -143,16 +146,23 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
         testAbort.current?.abort(); testAbort.current = null; setTestResult(undefined); setTesting(false); testGeneration.current++;
       }
       if (['base_url', 'api_key', 'clear_key', 'protocol'].some(field => Object.hasOwn(changed, field))) {
+        setAddressCorrection(undefined);
         query.setInput(discoveryInput(values, !!config?.has_key));
       }
     }}>
       <Form.Item name="protocol" label="API 协议" extra="自动识别依据地址与目录格式推荐；也可以直接选择服务实际支持的协议。" rules={[{ required: true, message: '选择 API 协议' }]}>
         <Select options={protocolChoices} disabled={saving} />
       </Form.Item>
-      <Form.Item name="base_url" label="API Base URL" extra="支持 API 基地址、服务根地址或完整的生成接口地址。"
+      <Form.Item name="base_url" label="API Base URL" extra="支持 API 基地址、服务根地址或完整接口地址；修正成功后，此处显示实际使用的地址。"
         rules={[{ required: true, message: '填写服务地址' }, { validator: (_, value) => !value || discoveryInput({ base_url: value }, false) ? Promise.resolve() : Promise.reject(new Error('填写有效的 HTTP(S) 地址，不含账号、查询参数或片段')) }]}>
         <Input placeholder="https://api.example.com/v1" disabled={saving} />
       </Form.Item>
+      {addressCorrection && <Alert className="lm-model-address-correction" style={{ marginBottom: 16 }} type="info" showIcon title="已修正 Base URL"
+        description={<div style={{ overflowWrap: 'anywhere' }}>
+          <div>{addressCorrection.reason}</div>
+          <div>原地址：{addressCorrection.original}</div>
+          <div>修正后：{addressCorrection.corrected}</div>
+        </div>} />}
       <Form.Item name="api_key" label="API Key" extra={config?.has_key ? '已保存密钥；原地址留空可复用，换地址请重新填写或清除旧密钥。' : '支持无需密钥的本地兼容模型服务。'}>
         <Input.Password placeholder={config?.has_key ? '保留原地址的已保存密钥' : '填写 API Key'} autoComplete="new-password" disabled={saving} />
       </Form.Item>

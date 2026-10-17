@@ -43,6 +43,12 @@
 - [x] T021 Pass reasoning effort through Go/Node runtime for compaction and execution; cover legacy/default and concrete values in native fixtures.
 - [x] T022 Run full Go/runtime/frontend checks and restart the local service with the updated settings UI.
 
+## Phase8 Visible address repair (P2)
+**Independent test**: successful repair replaces the Base URL field and shows original/corrected addresses and a reason; manual protocol/model and stale-response guards remain intact.
+- [x] T023 Record the address-repair notice and lifecycle requirements in the specification and UI contract before implementation.
+- [x] T024 Show a persistent repair notice beside Base URL, keep the corrected value in the field, and clear stale notices when connection information or configuration changes.
+- [x] T025 Verify real browser interactions for root/version repair, endpoint extraction, refresh, failure, stale responses and test/save payloads; run existing frontend checks and rebuild/restart the local service.
+
 ## Dependencies/Parallel execution
 T001-T003 before app edits. Backend owns internal/assistant/{types,provider,service,discovery,discovery_test}.go; runtime owns ai-runtime and optionally native runtime fixture file; UI owns web assistant settings/types/helpers/tests. Each writes meaningful tests before implementation; cross-side interfaces from contract frozen. Root handles docs, reviews and serialized final builds. Runtime package build before backend full native integration tests. Web build must not overlap Go compilation. US1/US2 ship together; US3 cannot imply generation verification.
 
