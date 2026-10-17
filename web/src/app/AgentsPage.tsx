@@ -135,7 +135,7 @@ export default function AgentsPage({user}:{user:User}) {
   ]} locale={{emptyText:<Empty description={loaded?'尚无任务标签':error?'读取失败，请刷新重试':'正在读取任务标签'}/>}}/>
  </div>;
  return <div className="lm-page lm-agents-page">
-  <div className="lm-page-heading"><div><h1>执行节点与任务</h1><p>统一管理 LightMoni Agent，通过任务标签为执行节点下发指标采集、服务拨测和目录日志任务。</p></div><Button icon={<ReloadOutlined/>} loading={loading} onClick={()=>void load()}>刷新</Button></div>
+  <div className="lm-page-heading"><div><h1>节点助手</h1><p>统一管理 LightMoni Agent，通过任务标签为执行节点下发指标采集、服务拨测和目录日志任务。</p></div><Button icon={<ReloadOutlined/>} loading={loading} onClick={()=>void load()}>刷新</Button></div>
   {!admin&&<Alert type="info" showIcon title="当前为只读模式；仅管理员可修改节点标签、任务和任务标签。" className="lm-agent-page-notice"/>}
   {error&&<Alert type="error" showIcon title={error} description={loaded?'已保留上次读取的数据，可刷新重试。':'请刷新重试。'} className="lm-agent-page-notice"/>}
   {actionError&&<Alert type="error" showIcon title={actionError} closable afterClose={()=>setActionError('')} className="lm-agent-page-notice"/>}
