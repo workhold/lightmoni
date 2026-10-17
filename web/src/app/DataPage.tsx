@@ -58,7 +58,7 @@ export default function DataPage({user}:{user:User}) {
   const sdkExample = sdkExamples[sdkLanguage] ?? sdkExamples.typescript;
   const isNew = keyEditor === 'new';
   return <div className="lm-page">
-    <div className="lm-page-heading"><div><h1>数据接入</h1><p>选择 SDK 或 Agent 接入，使用 Key 限定允许写入的 table。</p></div><Button icon={<ReloadOutlined/>} onClick={() => void load()}>刷新接入状态</Button></div>
+    <div className="lm-page-heading"><div><h1>数据接入</h1><p>选择 SDK 或接入执行节点，使用 Key 限定允许写入的 table。</p></div><Button icon={<ReloadOutlined/>} onClick={() => void load()}>刷新接入状态</Button></div>
 
     <Tabs activeKey={tab} onChange={setTab} destroyOnHidden items={[
       {key:'sdk',label:'SDK 接入',children:<div className="lm-surface">
@@ -80,7 +80,7 @@ export default function DataPage({user}:{user:User}) {
         <p>所有 SDK 支持 Counter、Gauge、Histogram、日志和基础链路。SDK 默认报告实例心跳与内部诊断；Go、Node.js、Python、Java、.NET、Ruby、Rust 每 30 秒报告，PHP 在请求结束或定时 flush 时报告。退出前停止生产，再调用有截止时间的 shutdown。</p>
         <p>浏览器通过业务后端转发，后端保管仅允许目标 table 的 Key，页面无需保存私有 Key。Java 包适用于 Kotlin/JVM 服务端。</p>
       </div>},
-      {key:'agent',label:'Agent 接入',children:<AgentInstall user={user} tables={tables} initialGroup={params.get('group') ?? undefined} onKeyCreated={() => void load()}/>},
+      {key:'agent',label:'执行节点接入',children:<AgentInstall user={user} tables={tables} initialGroup={params.get('group') ?? undefined} onKeyCreated={() => void load()}/>},
       {key:'keys',label:'上报 Key',children:user.role === 'admin' ? <div className="lm-surface">
         <div className="lm-toolbar"><Button type="primary" icon={<PlusOutlined/>} onClick={() => openKeyEditor('new')}>创建 Key</Button><span>可指定允许写入的 table，或显式允许所有 table；同一 Key 可供多个 service 使用。</span></div>
         {keys.some(key => !key.allow_all_tables && !key.allowed_tables.length) && <Alert type="warning" style={{marginBottom:16}} title="有 Key 尚未配置 table，数据写入已受限" description="请编辑这些 Key，指定允许写入的 table 或选择所有 table 后再继续上报。"/>}
@@ -97,7 +97,7 @@ export default function DataPage({user}:{user:User}) {
             <Button size="small" onClick={async () => { try { setKeyEvents(await api(`/keys/${key.id}/events`)); } catch (error) { setError(errorText(error)); } }}>查看上传记录</Button>
             <Button size="small" danger={key.active} disabled={!key.active && !key.allow_all_tables && !key.allowed_tables.length} onClick={() => Modal.confirm({
               title:`${key.active?'禁用':'启用'} ${key.name}？`,
-              content:key.active ? '使用此 Key 的 Agent 或 SDK 将停止上报；缓存不会删除。' : key.allow_all_tables ? '此 Key 将允许向所有 table 上传数据。' : '此 Key 将允许向已配置的 table 上传数据。',
+              content:key.active ? '使用此 Key 的执行节点或 SDK 将停止上报；缓存不会删除。' : key.allow_all_tables ? '此 Key 将允许向所有 table 上传数据。' : '此 Key 将允许向已配置的 table 上传数据。',
               onOk:async () => { try { await api(`/keys/${key.id}`,{method:'PUT',body:JSON.stringify({active:!key.active})}); await load(); } catch (error) { setError(errorText(error)); throw error; } },
             })}>{key.active?'禁用':'启用'}</Button>
           </Space>},
@@ -134,7 +134,7 @@ export default function DataPage({user}:{user:User}) {
       </Form>
     </Modal>
     <Modal title="Key 已创建，仅显示这一次" open={!!created} onCancel={() => setCreated(undefined)} footer={<Button type="primary" onClick={() => setCreated(undefined)}>已保存</Button>}>
-      <p>请保存到 Agent 或 SDK 配置。管理列表只保留摘要。</p>
+      <p>请保存到 LightMoni Agent 或 SDK 配置。管理列表只保留摘要。</p>
       <p>允许写入：{created?.allow_all_tables?'所有 table':created?.allowed_tables.join('、')}</p>
       <Typography.Paragraph copyable code>{created?.key}</Typography.Paragraph>
     </Modal>

@@ -15,7 +15,7 @@ const TracePage=lazy(()=>import('../features/alerts/TracePage'));
 const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
 const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
 
-const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','Agent',ApiOutlined],['/data','数据接入',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
+const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点管理',ApiOutlined],['/data','数据接入',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
 
 function ClaimLanding(){const {token}=useParams();return <Navigate to={'/alerts?claim='+encodeURIComponent(token??'')} replace/>}
 

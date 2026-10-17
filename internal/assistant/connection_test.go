@@ -52,6 +52,9 @@ func TestConnectionTestUsesConcreteProtocolAndDoesNotPersist(t *testing.T) {
 			if got.Config.ReasoningEffort != ReasoningHigh {
 				t.Fatalf("runtime reasoning effort: %q", got.Config.ReasoningEffort)
 			}
+			if !got.ConnectionTest {
+				t.Fatal("connection test did not enable the internal wire budget guard")
+			}
 			if got.Config.MaxInputTokens != 4096 || got.Config.MaxOutputTokens != 256 || got.Config.MaxSteps != 1 || len(got.Tools) != 0 {
 				t.Fatalf("runtime probe limits/tools: %+v tools=%v", got.Config, got.Tools)
 			}
@@ -144,5 +147,24 @@ func TestConnectionTestSanitizesRuntimeErrorsAndTimeout(t *testing.T) {
 	status, body = connectionRequest(t, server.URL, map[string]any{"base_url": "https://gateway.example/v1", "protocol": ProtocolOpenAIChat, "model": "fixture"})
 	if status != http.StatusGatewayTimeout || !bytes.Contains(body, []byte(`"code":"timeout"`)) {
 		t.Fatalf("runtime timeout: %d %s", status, body)
+	}
+}
+
+func TestConnectionTestDistinguishesBudgetLimitsFromProviderFailure(t *testing.T) {
+	s, server := fixtureService(t, nil)
+	for _, tc := range []struct {
+		code   string
+		status int
+	}{
+		{"test_budget_exceeded", http.StatusUnprocessableEntity},
+		{"output_limit", http.StatusBadGateway},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			s.options.Runtime = connectionFixtureRuntime(func(context.Context, RuntimeInput) error { return runtimeError(tc.code) })
+			status, body := connectionRequest(t, server.URL, map[string]any{"base_url": "https://gateway.example/v1", "protocol": ProtocolAnthropic, "model": "fixture", "reasoning_effort": "high"})
+			if status != tc.status || !bytes.Contains(body, []byte(`"code":"`+tc.code+`"`)) || bytes.Contains(body, []byte("provider_unavailable")) {
+				t.Fatalf("budget error misclassified: %d %s", status, body)
+			}
+		})
 	}
 }

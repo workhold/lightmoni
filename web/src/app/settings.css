@@ -20,4 +20,49 @@
 .lm-sidebar-profile>div{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lm-sidebar-profile:focus-visible{outline:2px solid var(--lm-accent);outline-offset:4px}
 .lm-settings-page .ant-tabs-tabpane-active{animation:lm-entry .18s ease-out}
+.lm-model-management{display:flex;flex-direction:column;gap:24px;max-width:1120px;min-width:0}
+.lm-model-management>.lm-surface{max-width:none;margin:0;min-width:0}
+.lm-model-management h2{font-size:17px;margin:0 0 6px}
+.lm-model-management .lm-settings-section-head{margin-bottom:16px}
+.lm-model-management .lm-settings-section-head p{margin-bottom:0}
+.lm-model-management .lm-settings-section-head>button{flex-shrink:0}
+.lm-model-price-identity{display:flex;flex-wrap:wrap;gap:4px 8px;margin:0 0 20px;font-size:13px;overflow-wrap:anywhere}
+.lm-model-price-identity>span{flex-basis:100%;color:var(--lm-muted)}
+.lm-model-price-fields{display:grid;grid-template-columns:150px minmax(0,1fr) minmax(0,1fr);gap:0 20px}
+.lm-model-price-fields .ant-form-item{min-width:0}
+.lm-model-price-fields .ant-input-number{width:100%}
+.lm-model-billing-note{margin:14px 0 0}
+.lm-model-section-alert{margin-bottom:18px}
+.lm-model-inline-loading{display:flex;align-items:center;gap:9px;margin:0 0 14px;color:var(--lm-muted);font-size:13px}
+.lm-model-usage-freshness>span{display:block}
+.lm-model-usage-statuses{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 16px}
+.lm-model-usage-statuses .ant-tag,.lm-model-status-compact .ant-tag{margin:0}
+.lm-model-status-compact{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+.lm-model-status-compact .ant-tag{font-size:11px}
+.lm-model-detail-lines{display:flex;align-items:flex-start;flex-direction:column;gap:5px;font-size:12px;font-variant-numeric:tabular-nums}
+.lm-model-detail-lines .ant-tag{white-space:normal}
+.lm-model-usage-filters{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:16px}
+.lm-model-usage-filters>div{display:flex;flex-direction:column;gap:6px;min-width:150px}
+.lm-model-usage-filters>div:last-child{width:270px;max-width:100%}
+.lm-model-usage-filters label{font-size:13px;color:var(--lm-muted)}
+.lm-model-usage-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:18px 0}
+.lm-model-usage-summary>div{padding:16px;border:1px solid var(--lm-border);border-radius:8px;min-width:0}
+.lm-model-usage-summary>div>span{display:block;color:var(--lm-muted);font-size:13px;margin-bottom:8px}
+.lm-model-usage-summary>div>strong,.lm-model-usage-summary .lm-model-token-value>strong{font-size:24px;line-height:1.35;font-weight:600;overflow-wrap:anywhere}
+.lm-model-token-value{font-variant-numeric:tabular-nums}
+.lm-model-token-value>small,.lm-model-cost>small,.lm-model-unpriced{display:block;font-size:12px;color:var(--lm-muted);line-height:1.6;font-weight:400}
+.lm-model-costs{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px 20px;font-variant-numeric:tabular-nums}
+.lm-model-cost{display:block;white-space:nowrap}
+.lm-model-cost>strong{font-weight:600}
+.lm-model-unpriced{flex-basis:100%}
+.lm-model-usage-cost-total{padding:16px 18px;background:var(--lm-surface-soft,var(--lm-bg));border:1px solid var(--lm-border);border-radius:8px;margin:0 0 22px}
+.lm-model-usage-cost-total>span{display:block;font-size:13px;color:var(--lm-muted);margin-bottom:8px}
+.lm-model-usage-cost-total .lm-model-cost>strong{font-size:18px}
+.lm-model-usage-tables{min-width:0}
+.lm-model-usage-tables .ant-table-cell{vertical-align:top}
+.lm-model-usage-model>strong,.lm-model-usage-model>small{display:block;overflow-wrap:anywhere}
+.lm-model-usage-model>small{color:var(--lm-muted);font-size:12px;line-height:1.65}
+.lm-model-usage .lm-settings-hint:last-child{margin-bottom:0}
+@media(max-width:800px){.lm-model-price-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.lm-model-price-fields>.ant-form-item:first-child{grid-column:1/-1;max-width:200px}.lm-model-usage-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.lm-model-management{gap:18px}.lm-model-price-fields{grid-template-columns:minmax(0,1fr)}.lm-model-price-fields>.ant-form-item:first-child{max-width:none}.lm-model-usage-summary{gap:10px}.lm-model-usage-summary>div{padding:12px}.lm-model-usage-summary>div>strong,.lm-model-usage-summary .lm-model-token-value>strong{font-size:21px}.lm-model-usage-filters>div,.lm-model-usage-filters>div:last-child{width:100%}.lm-model-usage-cost-total{padding:14px}.lm-model-management .lm-surface{padding:18px}}
 @media(max-width:600px){.lm-settings-section-head{flex-wrap:wrap}.lm-settings-page .lm-appearance-settings{flex-wrap:wrap;gap:16px}.lm-profile-avatar-row{gap:14px}.lm-profile-fields{grid-template-columns:minmax(0,1fr)}.lm-settings-page .ant-descriptions-item-content{overflow-wrap:anywhere}}

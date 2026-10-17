@@ -20,6 +20,7 @@ type RuntimeTool struct {
 	Schema      json.RawMessage `json:"schema"`
 }
 type RuntimeInput struct {
+	ConnectionTest bool            `json:"connection_test,omitempty"`
 	System         string          `json:"system"`
 	Config         Config          `json:"config"`
 	Messages       []Message       `json:"messages"`
@@ -83,12 +84,18 @@ func (m *MastraRuntime) Run(ctx context.Context, input RuntimeInput, tool func(c
 	terminal := false
 	seen := map[string]bool{}
 	for scanner.Scan() {
-		if err = ctx.Err(); err != nil {
-			return err
-		}
 		var frame RuntimeFrame
 		if json.Unmarshal(scanner.Bytes(), &frame) != nil {
 			return errors.New("invalid Mastra runtime response")
+		}
+		if ctx.Err() != nil {
+			// CommandContext terminates the worker, but stdout can still contain
+			// consumption frames written before cancellation. Drain those frames
+			// without running tools or replaying user-visible progress.
+			if frame.Type == "event" && (frame.Name == "model.request.started" || frame.Name == "turn.usage") {
+				_ = event(frame)
+			}
+			continue
 		}
 		switch frame.Type {
 		case "tool.request":
@@ -112,7 +119,7 @@ func (m *MastraRuntime) Run(ctx context.Context, input RuntimeInput, tool func(c
 			}
 		case "event":
 			switch frame.Name {
-			case "assistant.delta", "assistant.message", "step.started", "step.completed", "tool.call", "tool.result", "turn.usage", "context.compacting", "context.compacted":
+			case "assistant.delta", "assistant.message", "step.started", "step.completed", "tool.call", "tool.result", "model.request.started", "turn.usage", "context.compacting", "context.compacted":
 			default:
 				return errors.New("invalid Mastra event")
 			}
@@ -142,6 +149,10 @@ func (m *MastraRuntime) Run(ctx context.Context, input RuntimeInput, tool func(c
 	}
 	return nil
 }
+
+var errModelOutputLimit = errors.New("model reached its output limit; narrow the request or increase the output limit")
+var errTestBudgetExceeded = errors.New("model reasoning exceeds the connection test output budget")
+
 func runtimeError(code string) error {
 	switch code {
 	case "context_limit":
@@ -151,7 +162,9 @@ func runtimeError(code string) error {
 	case "step_limit":
 		return errors.New("assistant reached its tool step limit; narrow the request or increase the step limit")
 	case "output_limit":
-		return errors.New("model reached its output limit; narrow the request or increase the output limit")
+		return errModelOutputLimit
+	case "test_budget_exceeded":
+		return errTestBudgetExceeded
 	case "invalid_history", "invalid_checkpoint":
 		return errors.New("assistant history is inconsistent; start a new session")
 	case "invalid_provider_state":

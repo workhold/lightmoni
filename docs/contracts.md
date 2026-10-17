@@ -16,7 +16,7 @@ OTLP/HTTP `/v1/logs`、`/v1/metrics`、`/v1/traces`，支持标准 Protobuf 与 
 
 固定请求头：`X-Lightmoni-Table` 为逻辑表；`X-Lightmoni-Batch-ID` 为逐批 UUID；`X-Lightmoni-Batch-Created-At` 为冻结时 UTC RFC3339Nano。新窗口创建新 ID；重试保留 ID、创建时间和完全相同的解码 payload。同 ID 异正文拒绝。标准第三方 exporter 没有稳定批次 ID 时按至少一次兼容接入，其 SDK 级重试可能重复。
 
-SDK 直连主服务使用 `Authorization: Bearer <key>`；SDK 到本机 Agent 不需要私有 Key。主服务支持多份命名上报 Key，保存摘要，完整秘密仅创建时显示。每份 Key 可上传任意 service，不绑定/限制 service，也不按 service 路由；每份 Key 通过 `allowed_tables` 精确匹配 `X-Lightmoni-Table`，或由管理员显式设置 `allow_all_tables=true` 允许所有合法逻辑表。默认全表权限为 false，未配置仍无写入授权。日志、指标、链路均在正文读取、建表、批次重放和写库之前检查，越权返回 403 并记录拒绝原因。Agent 配置一份 Key 转发授权范围内的业务；机器指标、拨测和目录日志使用分组指定的逻辑表，默认 `host`、`probe`、`files`。旧 Key 迁移为无 table 授权，管理员显式配置后恢复写入。禁用、失效、轮换、最近使用、上传量与拒绝原因必须可查看。所有记录的 key_id 由主服务认证取得，不信任采集正文。Key 轮换不改变已有批次 ID/记录 ID；重试同批时 first_key_id 归因保持首次接收，传输尝试另记实际尝试Key。
+SDK 直连主服务使用 `Authorization: Bearer <key>`；SDK 到本机 Agent 不需要私有 Key。主服务支持多份命名上报 Key，保存摘要，完整秘密仅创建时显示。每份 Key 可上传任意 service，不绑定/限制 service，也不按 service 路由；每份 Key 通过 `allowed_tables` 精确匹配 `X-Lightmoni-Table`，或由管理员显式设置 `allow_all_tables=true` 允许所有合法逻辑表。默认全表权限为 false，未配置仍无写入授权。日志、指标、链路均在正文读取、建表、批次重放和写库之前检查，越权返回 403 并记录拒绝原因。Agent 配置一份 Key 转发授权范围内的业务；机器指标、拨测和目录日志使用匹配任务指定的逻辑表，默认 `host`、`probe`、`files`。旧 Key 迁移为无 table 授权，管理员显式配置后恢复写入。禁用、失效、轮换、最近使用、上传量与拒绝原因必须可查看。所有记录的 key_id 由主服务认证取得，不信任采集正文。Key 轮换不改变已有批次 ID/记录 ID；重试同批时 first_key_id 归因保持首次接收，传输尝试另记实际尝试Key。
 
 成功响应遵循对应 OTLP ExportResponse；自有链路整批校验、整批确认，不能用 partial_success 丢掉未知子集。Agent 先提交可恢复磁盘记录再 ACK；主服务等所有目标 ClickHouse 写入完成再 ACK。失败重试可能遇到部分已写行，但公开查询仍只计一次。兼容路径按 OTLP partial_success 规则处理。网络未知及 429/502/503/504 可重试；400 为永久协议拒绝；401/403 暂停等待修复凭证；其他状态按 OTLP 规范分类，不能所有 5xx 都盲目重试。
 
@@ -75,13 +75,17 @@ AI参考Doca骨架移植会话、时间线、可取消SSE、工具loop与草稿�
 指标数值使用独立原始数值字段：`value_float` 保留 Float64，`value_int` 保留 Nullable(Int64)。公开 `value` 是便于绘图的 Float64；精确整数计数使用 `sum(toDecimal256(value_int,0))`。禁止在采集入口将极小浮点值舍入为零。旧原型内部 Decimal 列仅作兼容迁移，公开视图读取原始浮点，新表结构与已有表会在启动时同步。
 
 
-## Agent 分组与目录日志
+## LightMoni Agent、执行节点与任务标签（2026-10-17）
 
-Agent 的任务以分组为单位，组内共用版本和任务。登录后 `GET /api/v1/agent-groups` 读取分组；管理员使用 `POST /api/v1/agent-groups`、`PUT /api/v1/agent-groups/{group}` 创建/修改名称及任务，`PUT /api/v1/agents/{id}/group` 改派机器。默认组不可删除，非空组不可删除。首次注册接受安装命令的 `group_id`；现有机器的注册和心跳不能覆盖平台保存的组。原有机器迁移到默认分组。
+LightMoni Agent 是安装软件，一个运行实例称“执行节点”，导航入口称“节点管理”；Collector/采集器是节点内部功能。“任务”是独立配置和启停的指标采集、服务拨测或目录日志工作，“任务标签”用于分发。节点和任务均可关联多个标签，任一标签相交即可命中，同一任务只下发一次。空目标不广播；节点无匹配任务时关闭内部采集和拨测，仍接收和转发已获 Key 授权的业务 OTLP。现有网页对话继续称“AI 助手”；本功能未增加节点智能执行或任意命令能力。
 
-组配置包含 `host_enabled`、`host_collectors`、`collect_interval_seconds`、`process_names`、`host_table`，HTTP/TCP `probes` 与 `probe_table`，`logs_enabled`、`log_sources` 与 `log_table`。目录源指定绝对路径 `directory`、文件名规则 `pattern`、子目录开关 `recursive`、首次历史开关 `from_beginning`。平台用表单编辑，API 的 JSON 是传输协议，不要求用户编辑配置文件。Agent 通过原配置轮询接口读取所属组任务，先缓存再应用；首次取得有效任务前暂停内部采集，离线重启可用已缓存任务。
+登录用户通过 `GET /api/v1/agent-task-labels`、`GET /api/v1/agent-tasks` 读取标签和任务；管理员使用各资源的 POST、PUT/DELETE `/{id}` 管理，使用 `PUT /api/v1/agents/{id}/labels` 的 `{label_ids:[]}` 设置节点标签。默认标签和仍被引用的标签不能删除。节点列表增加 `label_ids/labels/task_ids/tasks`，`config` 是最终有效配置。写入在事务内验证所有实际受影响节点；上报表、采集间隔或同 ID 拨测等配置冲突返回 409，整个更新回滚，旧配置保持。读取需登录，变更需管理员。
 
-目录日志按换行增量读取，文件 device/inode 与 host 标识定位持久进度；读取位置、截断代次、文件头指纹和冻结批次在同一 SQLite 事务提交，背压不推进位置。文件重命名仍沿用进度，截断或文件头变化增加代次；copytruncate 在文件快速长回且前 64 字节完全相同的情况下无法可靠识别，建议使用重命名轮转。以 observed_time 表示采集时间，并标记 `event_time_source=observed`；`file_path`、`file_name` 保留来源，`lightmoni.source_id` 结合主机、文件与代次，`lightmoni.source_seq` 为行/分片的起始字节位置。未换行的短行等待续写，超长行按最多 64 KiB 分片并标记 `log_fragment=true`。已进队列的数据继续按其原表补传，改组不改写历史批次。
+指标任务包含 `host_collectors`、`collect_interval_seconds`、`process_names`、`host_table`，拨测任务包含 HTTP/TCP `probes` 与 `probe_table`，目录日志包含 `log_sources` 与 `log_table`。目录源指定绝对路径 `directory`、文件名规则 `pattern`、子目录开关 `recursive`、首次历史开关 `from_beginning`。平台使用类型对应表单，中心将匹配任务合成为原有 RemoteConfig，旧 Agent 通过原配置轮询接口继续读取，先缓存再应用；首次取得有效任务前暂停内部采集，离线重启可用已缓存任务。详情见 [接口与合并约束](../specs/006-execution-nodes/contracts.md)。
+
+旧分组一次性迁移为同 ID 的标签及三类独立任务，已有节点仅绑定原标签，保留参数和自定义名称；迁移标记防止重启复活已删除任务。保留 `/agents`、旧 `?group=` 链接、`--group-id` 和注册 `group_id`，安装时选择一个初始标签，接入后可绑定多个。现有节点重新注册及心跳不能覆盖中心标签。旧 `/agent-groups` 接口保留兼容，遇到独立任务或跨标签调整时拒绝旧配置覆盖，提示转到任务管理。
+
+目录日志按换行增量读取，文件 device/inode 与 host 标识定位持久进度；读取位置、截断代次、文件头指纹和冻结批次在同一 SQLite 事务提交，背压不推进位置。文件重命名仍沿用进度，截断或文件头变化增加代次；copytruncate 在文件快速长回且前 64 字节完全相同的情况下无法可靠识别，建议使用重命名轮转。以 observed_time 表示采集时间，并标记 `event_time_source=observed`；`file_path`、`file_name` 保留来源，`lightmoni.source_id` 结合主机、文件与代次，`lightmoni.source_seq` 为行/分片的起始字节位置。未换行的短行等待续写，超长行按最多 64 KiB 分片并标记 `log_fragment=true`。已进队列的数据继续按其原表补传，调整任务或标签不改写历史批次。
 
 ### Mastra AI runtime (2026-10-14)
 
@@ -93,6 +97,16 @@ Agent 的任务以分组为单位，组内共用版本和任务。登录后 `GET
 
 目录使用 Bearer、Anthropic `x-api-key` 或 Gemini `x-goog-api-key`，密钥不进入 URL。最多 7 个同源 GET，总超时 8 秒、禁止重定向、每个响应最大 1 MiB，返回排序去重的最多 500 个模型。使用新填写的 Key 或无需 Key 时，OpenAI/Anthropic 根地址依次尝试 `/v1`、根地址，Google 依次尝试 `/v1`、`/v1beta`、根地址；复用已保存 Key 不回退。各协议集中维护版本修正、目录鉴权和查询参数，获取模型、测试连接及配置 PUT 复用协议地址规范化。OpenAI/Anthropic 仅把独立末段 `/v1beta` 修为 `/v1`，Google 保留显式版本，自定义前缀和转义路径保持；修正不能迁移旧密钥的实际存储地址。401/403 仍表示凭据问题，不能被后续候选路径的失败覆盖。分页仅标记截断，不跟随下一页。查询不持久化、不调用生成、错误不包含远端正文。设置页提供自动查询、独立获取按钮及手动模型输入，成功后回填实际可用的规范 Base URL，地址/Key/协议变更或关闭窗口会取消旧查询。规格、接口和验证见 specs/003-multi-protocol-models。
 
-管理员可通过 `POST /api/v1/assistant/test-connection` 主动验证具体协议、模型和可选的 `reasoning_effort`（`provider-default`、`none`、`minimal`、`low`、`medium`、`high`、`xhigh`；缺省跟随供应商）。请求必须包含合法 Base URL、具体协议和非空模型，可带新 Key 或仅在规范 Base URL 完全一致时复用已保存 Key。服务使用 Mastra runtime 发送一次固定短提示词的最小真实请求（无工具、4096 输入 token、256 输出 token、最多 1 步、15 秒超时），丢弃所有 runtime frame，不创建会话、不保存配置。成功只返回 `ok`、实际 Base URL、协议、模型和耗时；输入/密钥地址不匹配返回 400，超时返回 504，运行时或供应商错误返回不含上游正文的 502。目录刷新仍是只读操作，只有点击测试连接才可能产生供应商费用。
+管理员可通过 `POST /api/v1/assistant/test-connection` 主动验证具体协议、模型和可选的 `reasoning_effort`（`provider-default`、`none`、`minimal`、`low`、`medium`、`high`、`xhigh`；缺省跟随供应商）。请求必须包含合法 Base URL、具体协议和非空模型，可带新 Key 或仅在规范 Base URL 完全一致时复用已保存 Key。前端自动模式只有当前目录唯一确定协议后才提交该具体协议。服务使用 Mastra runtime 发送一次固定短提示词的最小真实请求（无工具、4096 输入 token、总输出预算最多 256 token、最多 1 步、15 秒超时），在实际 SDK 请求体上检查预算，保留所选思考深度；无法容纳的思考预算在发出请求前返回 422 / `test_budget_exceeded`。供应商有效响应因输出预算耗尽返回 502 / `output_limit`，请求状态仍为 succeeded，已报告用量保留。丢弃生成正文，请求生命周期和实际 usage 写入独立用量账本，不创建会话、不保存连接配置。成功只返回 `ok`、实际 Base URL、协议、模型和耗时；输入/密钥地址不匹配返回 400，超时返回 504，其他运行时或供应商错误返回不含上游正文的 502。目录刷新仍是只读操作，只有点击测试连接才可能产生供应商费用。
+
+### Model management and billing (2026-10-17)
+
+设置入口改名“模型管理”，保留 `/admin?tab=models`。管理员使用 `GET/PUT /api/v1/assistant/billing` 读取/保存当前连接的 `currency`（CNY/USD）、可空 `input_price_per_million` 与 `output_price_per_million`，并提交 `base_url/protocol/model` 身份。身份过期返回 409；价格有限且在 0–1e9 范围，null 未知、0 免费。保存价格不更改连接或密钥，连接身份不同的价格独立保存。
+
+`GET /api/v1/assistant/usage?days=7|30|90&timezone=Asia/Shanghai` 仅管理员可读，默认 30 天/UTC，采用包含今天的日历日范围（from 含、to 不含）。响应 totals/daily/models/sources 分别提供已知 token 合计、缺失计数的调用次数、未计价次数及各币种估算费用；具体结构见 `specs/005-model-management/contracts.md`。
+
+独立 SQLite 账本按主服务指定的会话/轮次及 runtime 稳定 `request_id` 幂等记录每个实际发出的模型请求，包括工具后续生成、历史整理及显式连接测试。`model.request.started` 记录 pending，`turn.usage` 只允许一次 succeeded/failed/cancelled 终态；主服务在 worker 中断时完成遗留请求。启动时先回填历史终态，再将仍 pending 的记录标为 failed、`failure_reason=service_interrupted`，不猜测缺失 token。统计包括各状态计数和未知状态的旧记录；本地校验及预算拒绝不计请求。未知用量不冒充零，失败或取消前已报告的消耗保留。
+
+每轮开始冻结连接和单价；账本保留输入/输出原单价、分项费用、已知合计及 complete/partial/unpriced/legacy 计价状态。只有一侧可计价时合计为已知部分，部分计价与完全未计价分别统计；已有终态不可因重放或改价而重新计算。旧事件按原事件序号去重，保留既有金额，不补造原单价或成功状态。`GET /api/v1/assistant/usage/details?days=30&timezone=Asia/Shanghai&limit=100` 仅管理员可读，limit 为 1–100，返回最近优先的 `{records,limit,has_more,from,to,timezone}`。该估算未实现供应商缓存折扣、阶梯价格等，不等同实际账单。启动时全量回填仍保留的旧会话，不受 200 条列表限制；账本独立于会话事件裁剪。所有统计及明细不包含密钥、提示词或生成正文。
 
 四种协议通过实际原生 SDK 执行文本流、工具调用、摘要和取消。Responses 使用 `store:false`；供应商原始 usage 按协议解释，缺少字段保持未知。多轮延续仅持久化白名单内的签名、item ID 和加密推理内容，隐藏推理明文不保存；私有 worker 检查点校验大小和字段，服务端会话回读删除这些元数据后才返回浏览器。元数据计入上下文预算，不能静默丢弃超限状态。

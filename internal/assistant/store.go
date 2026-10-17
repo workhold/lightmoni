@@ -18,7 +18,11 @@ func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SQLiteStore{db: db}, nil
+	store := &SQLiteStore{db: db}
+	if err := store.initUsageStore(context.Background()); err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
 func (s *SQLiteStore) Get(ctx context.Context, id string) ([]byte, error) {
@@ -55,11 +59,14 @@ func (s *SQLiteStore) List(ctx context.Context, prefix string) (map[string][]byt
 
 // MemoryStore is intentionally not used by New. It isolates protocol tests.
 type MemoryStore struct {
-	mu   sync.RWMutex
-	data map[string][]byte
+	mu    sync.RWMutex
+	data  map[string][]byte
+	usage map[string]UsageRecord
 }
 
-func NewMemoryStore() *MemoryStore { return &MemoryStore{data: map[string][]byte{}} }
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{data: map[string][]byte{}, usage: map[string]UsageRecord{}}
+}
 func (s *MemoryStore) Get(_ context.Context, id string) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -72,6 +79,9 @@ func (s *MemoryStore) Get(_ context.Context, id string) ([]byte, error) {
 func (s *MemoryStore) Put(_ context.Context, id string, b []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.data == nil {
+		s.data = map[string][]byte{}
+	}
 	s.data[id] = append([]byte(nil), b...)
 	return nil
 }

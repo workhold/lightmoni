@@ -59,6 +59,8 @@ export function modelConnectionError(problem: unknown): string {
   const issue = problem && typeof problem === 'object' ? problem as { status?: number; details?: { code?: unknown }; message?: unknown } : {};
   const code = issue.details?.code;
   const marker = typeof issue.message === 'string' ? issue.message : '';
+  if (code === 'test_budget_exceeded') return '当前思考深度超出连接测试的 256 Token 总输出预算。请改用模型默认或较低思考深度后重试；未发送生成请求。';
+  if (code === 'output_limit') return '模型服务已响应，但在测试输出预算内未完成。请降低思考深度后重试；本次请求可能已产生用量。';
   if (issue.status === 401 && /login required|unauthenticated/i.test(marker)) return '登录已失效，请重新登录后获取模型。';
   if (code === 'credentials_rejected' || issue.status === 401 || /rejected credentials|拒绝了密钥/i.test(marker)) {
     return '模型服务拒绝了凭据，请填写有效的 API Key，并检查所选协议和密钥权限。';

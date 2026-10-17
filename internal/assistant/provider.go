@@ -24,6 +24,7 @@ func concreteProtocol(protocol string) bool {
 }
 
 func normalizedConfig(c Config) Config {
+	c.Model = strings.TrimSpace(c.Model)
 	if c.Protocol == "" {
 		c.Protocol = ProtocolOpenAIChat
 	}

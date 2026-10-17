@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 //go:embed dist agent-dist
@@ -218,42 +217,17 @@ func (s *Server) registerCore() error {
 				shared.Error(w, 400, "agent_id required")
 				return
 			}
-			text := func(key string) string {
-				if v[key] == nil {
-					return ""
-				}
-				return fmt.Sprint(v[key])
-			}
-			groupID := text("group_id")
-			if groupID == "" {
-				groupID = defaultAgentGroup
-			}
-			var existingGroup string
-			err := s.DB.QueryRow("SELECT group_id FROM agents WHERE id=?", id).Scan(&existingGroup)
-			if err == nil {
-				groupID = existingGroup
-			} else if err != sql.ErrNoRows {
-				shared.Error(w, 503, "Agent 记录暂不可用")
-				return
-			}
-			if _, err := s.agentGroup(groupID); err != nil {
-				shared.Error(w, 400, "Agent 分组不存在，请重新选择分组生成安装命令")
-				return
-			}
 			if e = s.storeAgentEvents(r.Context(), id, key, v); e != nil {
-				shared.Error(w, 503, e.Error())
+				shared.Error(w, 503, "执行节点运行事件暂不可用")
 				return
 			}
-			v["runtime_key_id"] = key
-			delete(v, "runtime_events")
-			raw, _ := json.Marshal(v)
-			result, e := s.DB.Exec("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat,group_id) SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM agent_groups WHERE id=?) ON CONFLICT(id) DO UPDATE SET hostname=excluded.hostname,version=excluded.version,platform=excluded.platform,arch=excluded.arch,last_seen=excluded.last_seen,heartbeat=excluded.heartbeat", id, text("host_id"), text("hostname"), text("version"), text("platform"), text("arch"), time.Now().UTC().Format(time.RFC3339Nano), string(raw), groupID, groupID)
-			if e != nil {
-				shared.Error(w, 503, e.Error())
-				return
-			}
-			if n, err := result.RowsAffected(); err != nil || n == 0 {
-				shared.Error(w, 409, "接入分组已变更，请重新生成安装命令")
+			if e = s.recordAgentHeartbeat(id, v, key); e != nil {
+				status := agentErrorStatus(e)
+				if status == 500 {
+					shared.Error(w, 503, "执行节点记录暂不可用")
+					return
+				}
+				shared.Error(w, status, e.Error())
 				return
 			}
 			shared.JSON(w, 200, map[string]any{"agent_id": id, "ok": true})
@@ -264,57 +238,26 @@ func (s *Server) registerCore() error {
 			shared.Error(w, 401, "invalid write key")
 			return
 		}
-		var groupID string
-		if err := s.DB.QueryRow("SELECT group_id FROM agents WHERE id=?", r.PathValue("id")).Scan(&groupID); err != nil {
-			shared.Error(w, 404, "Agent 尚未接入")
-			return
-		}
-		group, err := s.agentGroup(groupID)
+		compiled, err := s.nodeEffectiveAgentTasks(r.PathValue("id"))
 		if err != nil {
-			shared.Error(w, 503, "分组任务暂不可用")
+			respondAgentError(w, err)
 			return
 		}
-		shared.JSON(w, 200, group.Config)
-
+		// Additional metadata is ignored by older LightMoni Agent binaries.
+		raw, _ := json.Marshal(compiled.Config)
+		var config map[string]any
+		_ = json.Unmarshal(raw, &config)
+		config["task_ids"] = compiled.TaskIDs
+		config["task_labels"] = compiled.Labels
+		shared.JSON(w, 200, config)
 	})
 	s.API.HandleFunc("GET /api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
-		groups, err := s.agentGroups()
+		nodes, err := s.listExecutionNodes()
 		if err != nil {
-			shared.Error(w, 500, err.Error())
+			respondAgentError(w, err)
 			return
 		}
-		byID := map[string]agentGroup{}
-		for _, group := range groups {
-			byID[group.ID] = group
-		}
-		rows, err := s.DB.Query("SELECT id,hostname,version,platform,arch,last_seen,heartbeat,group_id FROM agents ORDER BY last_seen DESC")
-		if err != nil {
-			shared.Error(w, 500, err.Error())
-			return
-		}
-		defer rows.Close()
-		list := []any{}
-		for rows.Next() {
-			var id, name, version, platform, arch, seen, raw, groupID string
-			if err = rows.Scan(&id, &name, &version, &platform, &arch, &seen, &raw, &groupID); err != nil {
-				shared.Error(w, 500, err.Error())
-				return
-			}
-			var heartbeat any
-			_ = json.Unmarshal([]byte(raw), &heartbeat)
-			group, ok := byID[groupID]
-			if !ok {
-				shared.Error(w, 500, "Agent 所属分组不存在")
-				return
-			}
-			list = append(list, map[string]any{"id": id, "hostname": name, "version": version, "platform": platform, "arch": arch, "last_seen": seen, "heartbeat": heartbeat, "group_id": groupID, "group_name": group.Name, "config": group.Config})
-		}
-		if err = rows.Err(); err != nil {
-			shared.Error(w, 500, err.Error())
-			return
-		}
-		shared.JSON(w, 200, list)
-
+		shared.JSON(w, 200, nodes)
 	})
 	s.registerAgentConfig()
 	return nil

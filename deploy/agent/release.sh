@@ -14,4 +14,4 @@ for arch in amd64 arm64; do
 done
 cp deploy/agent/install.sh deploy/agent/uninstall.sh deploy/agent/config.example.json "$release_dir/"
 (cd "$release_dir"; if command -v sha256sum >/dev/null; then sha256sum lightmoni-agent_*_linux_*.tar.gz; else shasum -a 256 lightmoni-agent_*_linux_*.tar.gz; fi) > "$release_dir/SHA256SUMS"
-echo "Agent release artifacts created in $release_dir"
+echo "LightMoni Agent release artifacts created in $release_dir"

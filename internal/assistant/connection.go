@@ -105,15 +105,47 @@ func (s *Service) testConnection(w http.ResponseWriter, r *http.Request) {
 		ReasoningEffort: reasoning,
 	}
 	runtimeInput := RuntimeInput{
-		System:   "Connection test. Reply with OK only.",
-		Config:   config,
-		Messages: []Message{{Role: "user", Content: "Reply with OK only."}},
-		Tools:    []RuntimeTool{},
+		ConnectionTest: true,
+		System:         "Connection test. Reply with OK only.",
+		Config:         config,
+		Messages:       []Message{{Role: "user", Content: "Reply with OK only."}},
+		Tools:          []RuntimeTool{},
 	}
-	// All runtime frames, including generated text and usage, are intentionally
-	// discarded. This request has no session and cannot mutate configuration.
-	err = s.options.Runtime.Run(ctx, runtimeInput, nil, func(RuntimeFrame) error { return nil })
+	billing, err := s.loadBilling(ctx, config)
 	if err != nil {
+		connectionError(w, http.StatusInternalServerError, "accounting_unavailable", "cannot read model pricing")
+		return
+	}
+	// Generated text is discarded. Reported usage is accounted separately; the
+	// test still creates no session and never changes the model configuration.
+	testID := randomID()
+	sequence := int64(0)
+	recorder := newUsageRecorder(s, "connection-test", p.ID, "", testID, billing)
+	err = s.options.Runtime.Run(ctx, runtimeInput, nil, func(frame RuntimeFrame) error {
+		if frame.Type != "event" || (frame.Name != "turn.usage" && frame.Name != "model.request.started") {
+			return nil
+		}
+		event := Event{Sequence: sequence, TurnID: testID, Type: frame.Name, Timestamp: now(), Data: frame.Data}
+		sequence++
+		return recorder.record(event)
+	})
+	status := "failed"
+	if ctx.Err() != nil {
+		status = "cancelled"
+	}
+	if accountingErr := recorder.finish(status); accountingErr != nil {
+		connectionError(w, http.StatusInternalServerError, "accounting_unavailable", "cannot persist model usage")
+		return
+	}
+	if err != nil {
+		if errors.Is(err, errTestBudgetExceeded) {
+			connectionError(w, http.StatusUnprocessableEntity, "test_budget_exceeded", "selected reasoning cannot fit the connection test output budget; no generation request was sent")
+			return
+		}
+		if errors.Is(err, errModelOutputLimit) {
+			connectionError(w, http.StatusBadGateway, "output_limit", "model responded but exhausted the connection test output budget")
+			return
+		}
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			connectionError(w, http.StatusGatewayTimeout, "timeout", "model connection test timed out")
 			return

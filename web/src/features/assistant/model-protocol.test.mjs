@@ -60,3 +60,8 @@ test('safe Chinese failures distinguish credentials, session, address mismatch a
   assert.match(modelConnectionError({ details: { code: 'timeout' } }), /超时/);
   assert.doesNotMatch(modelConnectionError(new Error('private-api-key provider response content')), /private-api-key|provider response/);
 });
+
+test('connection test distinguishes unsent reasoning budget rejection and a responding output limit', () => {
+ assert.match(modelConnectionError({status:422,details:{code:'test_budget_exceeded'}}), /256.*未发送生成请求/);
+ assert.match(modelConnectionError({status:502,details:{code:'output_limit'}}), /已响应.*可能已产生用量/);
+});

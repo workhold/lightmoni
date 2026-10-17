@@ -26,6 +26,39 @@ func workerForTest(t *testing.T) *MastraRuntime {
 	return &MastraRuntime{Entry: entry}
 }
 
+func TestMastraDrainsBufferedUsageAfterCancellation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "accounting-worker.mjs")
+	source := `process.stdin.once('data',()=>{
+process.stdout.write([
+ {type:'event',name:'step.started',data:{step:1}},
+ {type:'event',name:'model.request.started',data:{request_id:'request-1',phase:'execute'}},
+ {type:'event',name:'turn.usage',data:{request_id:'request-1',phase:'execute',status:'succeeded',input_tokens:10,output_tokens:2}},
+ {type:'tool.request',id:'never-run',name:'list_tables',input:{}}
+].map(frame=>JSON.stringify(frame)+'\n').join(''));
+setInterval(()=>{},1000);
+});`
+	if err := os.WriteFile(path, []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	frames := []RuntimeFrame{}
+	err := (&MastraRuntime{Entry: path}).Run(ctx, RuntimeInput{}, func(context.Context, string, json.RawMessage) (any, error) {
+		t.Error("tool executed after cancellation")
+		return nil, nil
+	}, func(frame RuntimeFrame) error {
+		if frame.Name == "step.started" {
+			cancel()
+		} else {
+			frames = append(frames, frame)
+		}
+		return nil
+	})
+	if err == nil || len(frames) != 2 || frames[0].Name != "model.request.started" || frames[1].Name != "turn.usage" || frames[1].Data["input_tokens"] != float64(10) {
+		t.Fatalf("buffered usage lost on cancellation: err=%v frames=%+v", err, frames)
+	}
+}
+
 func TestActualMastraWorkerToolHistoryAndUsage(t *testing.T) {
 	var requests atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -304,10 +337,15 @@ func TestMastraUnknownToolAndMissingUsage(t *testing.T) {
 		}
 		if f.Name == "turn.usage" {
 			reported = true
+			for _, field := range []string{"input_tokens", "output_tokens", "total_tokens"} {
+				if _, exists := f.Data[field]; exists {
+					t.Errorf("missing usage invented %s: %v", field, f.Data)
+				}
+			}
 		}
 		return nil
 	})
-	if err != nil || executed != 0 || !failedReceipt || reported {
+	if err != nil || executed != 0 || !failedReceipt || !reported {
 		t.Fatalf("unknown tool/usage: err=%v executed=%d failedReceipt=%v reported=%v", err, executed, failedReceipt, reported)
 	}
 }

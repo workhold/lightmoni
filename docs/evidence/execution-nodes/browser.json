@@ -1,0 +1,30 @@
+{
+  "checks": [
+    "全部执行节点、导航与三页签命名；展开查看心跳、配置版本、队列与匹配任务",
+    "标签新增、重命名；引用删除409保留弹框，默认标签保留",
+    "节点多标签、409保留选择及原配置、空标签不分发并保留转发能力",
+    "迁移停用空拨测/日志任务可只改名保存；切换启用空配置时阻止提交",
+    "任务启停完整更新与409保持原状态；三类型表单提交、空标签提示、目录输入验证阻止请求",
+    "任务编辑失败保留完整输入；完整配置可展开；删除取消不请求，确认后删除任务与无引用标签",
+    "旧group深链兼容；安装仅由启用匹配任务计算授权表；无任务/无效标签/读取失败及重试准确，未创建Key",
+    "读取失败保留数据并可重试；桌面和390px节点/任务/弹框无页面横向溢出，表格内部滚动",
+    "成员可读完整任务配置，所有写控件禁用且零写请求",
+    "首次无节点、无任务和首次读取失败分别准确展示空态"
+  ],
+  "screenshots": [
+    "artifacts/screenshots/docs/evidence/execution-nodes/lightmoni-execution-nodes-desktop.png",
+    "artifacts/screenshots/docs/evidence/execution-nodes/lightmoni-execution-nodes-tasks-desktop.png",
+    "artifacts/screenshots/docs/evidence/execution-nodes/lightmoni-execution-nodes-tasks-mobile.png",
+    "artifacts/screenshots/docs/evidence/execution-nodes/lightmoni-execution-nodes-mobile.png",
+    "artifacts/screenshots/docs/evidence/execution-nodes/lightmoni-execution-nodes-labels-modal-mobile.png",
+    "artifacts/screenshots/docs/evidence/execution-nodes/lightmoni-execution-nodes-task-modal-mobile.png"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "interceptedAPIRequests": 123,
+  "mockedWrites": 17,
+  "liveAPIWrites": 0,
+  "liveKeyWrites": 0,
+  "providerRequests": 0,
+  "base_url": "http://127.0.0.1:8080"
+}

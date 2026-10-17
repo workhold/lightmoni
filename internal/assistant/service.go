@@ -97,6 +97,10 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/assistant/config", s.config)
 	mux.HandleFunc("POST /api/v1/assistant/models", s.models)
 	mux.HandleFunc("POST /api/v1/assistant/test-connection", s.testConnection)
+	mux.HandleFunc("GET /api/v1/assistant/billing", s.billing)
+	mux.HandleFunc("PUT /api/v1/assistant/billing", s.billing)
+	mux.HandleFunc("GET /api/v1/assistant/usage", s.usage)
+	mux.HandleFunc("GET /api/v1/assistant/usage/details", s.usageDetails)
 	mux.HandleFunc("GET /api/v1/assistant/sessions", s.sessions)
 	mux.HandleFunc("POST /api/v1/assistant/sessions", s.sessions)
 	mux.HandleFunc("GET /api/v1/assistant/sessions/{id}", s.session)
@@ -364,6 +368,11 @@ func (s *Service) turn(w http.ResponseWriter, r *http.Request) {
 		shared.Error(w, 503, "AI provider is not configured or is disabled")
 		return
 	}
+	billing, err := s.loadBilling(r.Context(), cfg)
+	if err != nil {
+		shared.Error(w, 500, "cannot read model pricing")
+		return
+	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -406,9 +415,15 @@ func (s *Service) turn(w http.ResponseWriter, r *http.Request) {
 		sequence = session.Events[n-1].Sequence + 1
 	}
 	lastPersist := time.Now()
+	usage := newUsageRecorder(s, "assistant", p.ID, session.ID, turnID, billing)
 	emit := func(kind string, data map[string]any) error {
 		event := Event{Sequence: sequence, SessionID: session.ID, TurnID: turnID, Type: kind, Timestamp: now(), Data: data}
 		sequence++
+		if kind == "turn.usage" || kind == "model.request.started" {
+			if err := usage.record(event); err != nil {
+				return errors.New("cannot persist assistant usage")
+			}
+		}
 		// Coalesce adjacent text deltas only in durable history. Live SSE keeps
 		// original chunks; replay keeps the same text with fewer stored events.
 		storedEvent := event
@@ -444,6 +459,13 @@ func (s *Service) turn(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		err = s.run(ctx, p, cfg, &session, input.Context, emit)
+	}
+	fallbackStatus := UsageFailed
+	if ctx.Err() != nil {
+		fallbackStatus = UsageCancelled
+	}
+	if usageErr := usage.finish(fallbackStatus); usageErr != nil && err == nil {
+		err = errors.New("cannot persist assistant usage")
 	}
 	if err != nil {
 		kind := "turn.failed"

@@ -13,6 +13,8 @@ export interface Message {
 }
 export interface Input {
   system: string;
+  // Private worker instruction. It is never part of the saved model config.
+  connection_test?: boolean;
   config: {
     base_url: string;
     protocol?: import("./model.js").Protocol;

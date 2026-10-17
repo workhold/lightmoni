@@ -35,7 +35,7 @@ function formatUsage(usage: NonNullable<TurnView['usage']>): string {
   if (usage.input_tokens !== undefined) counts.push(`输入 ${usage.input_tokens.toLocaleString()}`);
   if (usage.output_tokens !== undefined) counts.push(`输出 ${usage.output_tokens.toLocaleString()}`);
   if (usage.total_tokens !== undefined) counts.push(`合计 ${usage.total_tokens.toLocaleString()}`);
-  return counts.join(' · ') + ' tokens';
+  return counts.length ? counts.join(' · ') + ' tokens' : '未报告 Token 数量';
 }
 function rangeFor(hours: number): TimeRange { const to = new Date(); return { from: new Date(to.getTime() - hours * 3_600_000).toISOString(), to: to.toISOString() }; }
 function errorText(error: unknown): string { return error instanceof Error ? error.message : '操作失败，请重试'; }

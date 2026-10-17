@@ -52,7 +52,7 @@ if [ "$key_stdin" = "yes" ]; then
   [ -n "$reporting_key" ] || { echo 'A reporting key is required.' >&2; exit 1; }
 fi
 if [ -z "$release_dir" ] && [ -z "$reporting_key" ]; then
-  echo 'Online installation requires --key-stdin to authenticate Agent downloads.' >&2
+  echo 'Online installation requires --key-stdin to authenticate LightMoni Agent downloads.' >&2
   exit 1
 fi
 artifact="lightmoni-agent_${version}_linux_${arch}.tar.gz"

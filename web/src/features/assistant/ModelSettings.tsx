@@ -14,9 +14,10 @@ export interface ModelSettingsProps {
   config?: AssistantConfig;
   onClose?: () => void;
   onSaved: (config: AssistantConfig) => void;
+  beforeSave?: (config: AssistantConfig) => Promise<boolean> | boolean;
 }
 
-export function ModelSettings({ open = false, embedded = false, config, onClose, onSaved }: ModelSettingsProps) {
+export function ModelSettings({ open = false, embedded = false, config, onClose, onSaved, beforeSave }: ModelSettingsProps) {
   const [form] = Form.useForm();
   const { message } = App.useApp();
   const [saving, setSaving] = useState(false);
@@ -77,8 +78,10 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
         form.setFields([{ name: 'protocol', errors: [resolved.error ?? '请选择具体 API 协议。'] }]);
         setError(resolved.error ?? '请选择具体 API 协议。'); return;
       }
+      const payload = { ...values, protocol: resolved.protocol } as AssistantConfig;
+      if (beforeSave && !(await beforeSave(payload))) return;
       setSaving(true); testAbort.current?.abort(); testAbort.current = null; setTestResult(undefined); testGeneration.current++; query.dispose(); setDiscovery({ status: 'idle' });
-      const saved = await api<AssistantConfig>('/assistant/config', { method: 'PUT', body: JSON.stringify({ ...values, protocol: resolved.protocol }) });
+      const saved = await api<AssistantConfig>('/assistant/config', { method: 'PUT', body: JSON.stringify(payload) });
       onSaved(saved); if (!embedded) onClose?.(); void message.success('AI 模型配置已保存');
     } catch (problem) {
       if (!(problem && typeof problem === 'object' && 'errorFields' in problem)) setError(modelConnectionError(problem));
@@ -91,8 +94,9 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
       setError(''); setTestResult(undefined);
       const checked = await form.validateFields(['base_url', 'protocol', 'model']);
       const values = { ...form.getFieldsValue(), ...checked } as Record<string, unknown> & { base_url?: string; protocol?: ModelProtocolSelection; model?: string; api_key?: string; clear_key?: boolean; reasoning_effort?: string };
-      if (!isModelProtocol(values.protocol)) {
-        const message = '测试连接前请选择具体 API 协议，不能使用自动识别。';
+      const resolved = resolveProtocol(values.protocol ?? 'auto', query.currentResult(discoveryInput(values, !!config?.has_key)));
+      if (!resolved.protocol) {
+        const message = resolved.error ?? '测试连接前请获取模型以识别协议，或手动选择具体 API 协议。';
         form.setFields([{ name: 'protocol', errors: [message] }]); setError(message); return;
       }
       const modelName = typeof values.model === 'string' ? values.model.trim() : '';
@@ -110,7 +114,7 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
       testAbort.current = abort;
       const result = await api<ModelConnectionTestResult>('/assistant/test-connection', {
         method: 'POST',
-        body: JSON.stringify({ base_url: input.base_url, api_key: input.api_key, use_saved_key: input.use_saved_key, protocol: values.protocol, model: modelName, reasoning_effort: values.reasoning_effort }),
+        body: JSON.stringify({ base_url: input.base_url, api_key: input.api_key, use_saved_key: input.use_saved_key, protocol: resolved.protocol, model: modelName, reasoning_effort: values.reasoning_effort }),
         signal: abort.signal,
       });
       if (generation !== testGeneration.current) return;
@@ -146,7 +150,8 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
           ? '当前账号没有模型配置权限，请切换管理员账号后重试。'
           : '未能获取模型目录，请手动填写模型名称。'
         : '获取模型后可从下拉列表选择，也可以手动输入。';
-  const canTest = !saving && !testing && isModelProtocol(protocol) && !!model?.trim() && !!discoveryInput({ base_url: base, protocol }, false);
+  const testProtocol = resolveProtocol(protocol ?? 'auto', query.currentResult(discoveryInput({ base_url: base, api_key: key, clear_key: clear, protocol }, !!config?.has_key))).protocol;
+  const canTest = !saving && !testing && !!testProtocol && !!model?.trim() && !!discoveryInput({ base_url: base, protocol }, false);
   const formContent = <Form form={form} layout="vertical" onValuesChange={(changed, values) => {
       if (['base_url', 'api_key', 'clear_key', 'protocol', 'model', 'reasoning_effort'].some(field => Object.hasOwn(changed, field))) {
         setError('');
@@ -197,7 +202,7 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
       </Form.Item>
       <div style={{ marginBottom: 16 }}>
         <Button type="default" block loading={testing} disabled={!canTest} onClick={() => void testConnection()}>测试连接</Button>
-        <small style={{ display: 'block', marginTop: 8, color: 'var(--lm-muted)' }}>选择具体 API 协议和模型后可用。测试会发送一次最小真实请求，可能产生少量供应商费用；获取模型目录不会发送生成请求。</small>
+        <small style={{ display: 'block', marginTop: 8, color: 'var(--lm-muted)' }}>{testProtocol ? `将使用 ${protocolLabel(testProtocol)} 测试。` : '选择模型并确定协议后可用；自动识别有歧义时请手动选择协议。'}测试会发送一次总输出预算最多 256 Token 的真实请求，思考配置无法满足该预算时会提示；可能产生少量供应商费用，用量会计入模型管理。</small>
       </div>
       {testResult?.status === 'success' && <Alert type="success" showIcon title={`连接测试成功${testResult.latency_ms === undefined ? '' : ` · ${testResult.latency_ms} ms`}`} description="已完成一次最小请求。请注意，真实模型调用可能产生供应商费用。" />}
       {testResult?.status === 'error' && <Alert type="error" showIcon title="连接测试失败" description={testResult.message} />}
