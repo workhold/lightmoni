@@ -1,0 +1,32 @@
+{
+  "name": "lightmoni-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node --import tsx --test test/*.test.ts",
+    "start": "node dist/server/main.js",
+    "agent": "node dist/agent/main.js"
+  },
+  "dependencies": {
+    "@clickhouse/parser": "0.3.0",
+    "@lightmoni/sdk": "file:../sdk/typescript",
+    "bcryptjs": "3.0.3",
+    "decimal.js": "10.6.0",
+    "lossless-json": "4.3.2",
+    "nodemailer": "10.1.2",
+    "protobufjs": "8.8.1",
+    "systeminformation": "5.33.15"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/nodemailer": "8.0.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}

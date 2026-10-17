@@ -19,7 +19,7 @@ export default function ReportingSettings(){
  }
  useEffect(()=>{void load();},[]);
  return <div className="lm-surface lm-reporting-settings">
-  <h2>上报地址</h2><p>为内网、公网等链路分别命名，复制 Agent 安装命令和 SDK 示例时可选择对应地址。</p>
+  <h2>上报地址</h2><p>为内网、公网等链路分别命名，复制 LightMoni Agent 安装命令和 SDK 示例时可选择对应地址。</p>
   {error&&<Alert type="error" showIcon title={error} style={{marginBottom:16}}/>}
   {loading?<Spin/>:!settings?<Button onClick={()=>void load()}>重新加载</Button>:<Form form={form} initialValues={{endpoints:settings.endpoints??[{id:'default',name:'默认地址',url:settings.effective_endpoint}],default_endpoint_id:settings.default_endpoint_id??'default'}} layout="vertical" disabled={saving} onFinish={async values=>{
    setSaving(true);setError('');
@@ -40,7 +40,7 @@ export default function ReportingSettings(){
     {!fields.length&&<p className="lm-settings-hint">保存后使用部署地址：{settings.default_endpoint}</p>}
     <Button icon={<PlusOutlined/>} disabled={saving||fields.length>=20} onClick={()=>{const id=crypto.randomUUID();add({id,name:'',url:''});if(!fields.length)form.setFieldValue('default_endpoint_id',id)}}>新增地址</Button>
    </>}</Form.List>
-   <Typography.Paragraph type="secondary" style={{marginTop:20}}>默认地址用于新生成的配置。已运行的 SDK 和 Agent 继续使用各自保存的地址。</Typography.Paragraph>
+   <Typography.Paragraph type="secondary" style={{marginTop:20}}>默认地址用于新生成的配置。已运行的 SDK 和执行节点继续使用各自保存的地址。</Typography.Paragraph>
    <Space wrap><Button type="primary" htmlType="submit" loading={saving}>保存上报地址</Button><Button onClick={()=>form.setFieldsValue({endpoints:[],default_endpoint_id:''})}>使用部署地址</Button><Link to="/data">生成接入配置</Link></Space>
   </Form>}
  </div>;

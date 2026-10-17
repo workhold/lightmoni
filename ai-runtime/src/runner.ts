@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline";
 import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
-import { createModel, protocolOf, rawUsage } from "./model.js";
+import { createModel, protocolOf, requestLifecycle } from "./model.js";
 import { z } from "zod";
 import {
   compactionPlan,
@@ -63,6 +63,7 @@ lines.on("line", (line) => {
             "output_limit",
             "invalid_checkpoint",
             "invalid_provider_state",
+            "test_budget_exceeded",
           ].includes(e?.message)
             ? e.message
             : "provider_error",
@@ -85,13 +86,11 @@ lines.on("line", (line) => {
 async function run(input: Input) {
   const signal = controller.signal;
   const protocol = protocolOf(input.config.protocol);
-  const providerModel = createModel(input.config);
+  const reasoning = input.config.reasoning_effort && input.config.reasoning_effort !== 'provider-default'
+    ? input.config.reasoning_effort
+    : undefined;
   let phase: "compact" | "execute" = "execute";
   let boundaryError: string | undefined;
-  const captureUsage = (usage: unknown) => {
-    const counts = rawUsage(protocol, usage);
-    if (counts) event("turn.usage", { ...counts, phase });
-  };
   // Check every model invocation, including added tool receipts. Using the
   // provider's raw usage avoids SDK-invented zero/default aggregate counts.
   const preflight = (options: any) => {
@@ -104,34 +103,13 @@ async function run(input: Input) {
       throw Error(boundaryError);
     }
   };
-  const model = new Proxy(providerModel, {
-    get(target, key, receiver) {
-      if (key === "doGenerate")
-        return async (options: any) => {
-          preflight(options);
-          const result = await target.doGenerate(options);
-          captureUsage(result.usage);
-          return result;
-        };
-      if (key === "doStream")
-        return async (options: any) => {
-          preflight(options);
-          const result = await target.doStream(options);
-          return {
-            ...result,
-            stream: result.stream.pipeThrough(
-              new TransformStream({
-                transform(part, streamController) {
-                  if (part.type === "finish") captureUsage(part.usage);
-                  streamController.enqueue(part);
-                },
-              }),
-            ),
-          };
-        };
-      return Reflect.get(target, key, receiver);
-    },
+  const lifecycle = requestLifecycle(protocol, {signal,phase:()=>phase,preflight,emit:event});
+  const providerModel = createModel(input.config, undefined, {
+    connectionTest: input.connection_test,
+    onProviderRequest: lifecycle.providerRequest,
+    onBudgetError: () => { boundaryError = "test_budget_exceeded"; },
   });
+  const model = lifecycle.wrap(providerModel);
   const tools = Object.fromEntries(
     (input.tools ?? []).map((t) => [
       t.name,
@@ -232,6 +210,7 @@ async function run(input: Input) {
             modelSettings: {
               maxOutputTokens: Math.min(1024, input.config.max_output_tokens),
               maxRetries: 0,
+              ...(reasoning ? { reasoning } : {}),
             },
           },
         );
@@ -292,6 +271,7 @@ async function run(input: Input) {
     modelSettings: {
       maxOutputTokens: input.config.max_output_tokens,
       maxRetries: 0,
+      ...(reasoning ? { reasoning } : {}),
     },
     onStepFinish: async (result) => {
       const messages = fromModelMessages(result.response.messages ?? []);

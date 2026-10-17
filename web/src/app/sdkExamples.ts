@@ -132,7 +132,7 @@ export function sdkEndpointIsLoopback(endpoint:string):boolean {
 export function sdkEnvironment(mode:SDKConnectionMode,endpoint:string):string {
   const quote=(value:string)=>"'"+value.replaceAll("'", "'\\''")+"'";
   const base=endpoint.trim().replace(/\/+$/,'');
-  return `export LIGHTMONI_ENDPOINT=${quote(base)}\n`+(mode==='direct'?"export LIGHTMONI_KEY='替换为允许 business 表的上报 Key'":"unset LIGHTMONI_KEY\n# Agent 开启本地访问令牌时，将 LIGHTMONI_KEY 设为该令牌");
+  return `export LIGHTMONI_ENDPOINT=${quote(base)}\n`+(mode==='direct'?"export LIGHTMONI_KEY='替换为允许 business 表的上报 Key'":"unset LIGHTMONI_KEY\n# 执行节点开启本地访问令牌时，将 LIGHTMONI_KEY 设为该令牌");
 }
 
 export interface SDKPackage {id:string;language:string;runtime:string;file:string;url:string;available:boolean}

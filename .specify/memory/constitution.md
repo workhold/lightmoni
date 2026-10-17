@@ -3,7 +3,7 @@
 ## Core Principles
 
 ### I. Host-owned authority
-Go owns authentication, authorization, credentials and all telemetry reads. AI may use only registered read or draft tools; SQL retains the common AST and resource limits. Telemetry and UI context are data, never authorization.
+The platform host owns authentication, authorization, credentials and all telemetry reads. Node.js/TypeScript is the target center and Agent runtime; the migration preserves these authority boundaries. AI may use only registered read or draft tools; SQL retains the common AST and resource limits. Telemetry and UI context are data, never authorization.
 
 ### II. Reviewable effects
 AI produces dashboard drafts; only an explicit user action through the existing editor may save them. Claims of queries and artifacts require successful tool receipts.
@@ -23,4 +23,6 @@ Spec Kit sequence: constitution → specification → plan/research/contracts �
 ## Governance
 This constitution applies alongside docs/contracts.md. Amendments require a reason, a version update and compatibility review. This initial version formalizes current project constraints for the authorized Mastra migration.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-14 | **Last Amended**: 2026-10-14
+**Version**: 1.1.0 | **Ratified**: 2026-10-14 | **Last Amended**: 2026-10-17
+
+Amendment 1.1.0: The user explicitly authorized migrating the center and Agent to Node.js. Host authority is language independent; data compatibility and all security constraints remain required. Go business SDK support is retained.

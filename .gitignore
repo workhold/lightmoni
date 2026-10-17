@@ -1,6 +1,5 @@
 node_modules/
 web/node_modules/
-internal/server/dist/
 bin/
 .lightmoni/
 data/
@@ -13,11 +12,7 @@ data/
 test-results/
 playwright-report/
 
-/internal/server/agent-dist/*.tar.gz
-/internal/server/agent-dist/SHA256SUMS
 
-/internal/server/agent-dist/*.tgz
-/internal/server/agent-dist/SDK_SHA256SUMS
 __pycache__/
 *.pyc
 *.egg-info/
@@ -30,6 +25,9 @@ __pycache__/
 /sdk/ruby/*.gem
 
 ai-runtime/dist/
+runtime/public/
+runtime/downloads/
+runtime/dist/
 .local-dev/
 *.log
 

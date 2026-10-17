@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { initialProtocol, protocolChoices, protocolLabel, protocolSourceLabel, resolveProtocol, modelConnectionError } from './model-protocol.ts';
+import { initialProtocol, protocolChoices, protocolLabel, protocolSourceLabel, reasoningEffortChoices, resolveProtocol, modelConnectionError } from './model-protocol.ts';
 
 const catalog = { base_url: 'https://gateway.example/v1', protocol: 'openai-chat-completions', protocol_options: ['openai-chat-completions', 'openai-responses'], protocol_source: 'catalog', requires_confirmation: true, capabilities_verified: false, models: [{ id: 'manual-name-remains-independent' }], truncated: false };
 const concrete = ['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai'];
@@ -14,6 +14,11 @@ test('selector covers automatic and four concrete protocols; legacy and fresh se
     assert.equal(initialProtocol({ base_url: 'https://configured.example/v1', protocol }), protocol);
     assert.equal(typeof protocolLabel(protocol), 'string');
   }
+});
+
+test('reasoning selector exposes the provider-default and supported neutral levels', () => {
+  assert.deepEqual(reasoningEffortChoices.map(option => option.value), ['provider-default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+  assert.equal(reasoningEffortChoices[0].label, '跟随模型（自动）');
 });
 
 test('a shared OpenAI catalog requires a concrete selection, not its first recommendation', () => {
@@ -47,9 +52,16 @@ test('no directory still allows all manual protocols and model names; automatic 
 test('safe Chinese failures distinguish credentials, session, address mismatch and directory fallback', () => {
   assert.match(modelConnectionError({ status: 401, message: 'provider unauthorized' }), /有效的 API Key/);
   assert.match(modelConnectionError({ status: 401, message: 'login required' }), /登录/);
+  assert.match(modelConnectionError({ status: 403, message: 'invalid request origin' }), /来源|External URL/);
+  assert.match(modelConnectionError({ status: 403, message: 'administrator required' }), /只有管理员/);
   assert.match(modelConnectionError({ status: 400, message: 'saved credential is unavailable for this address' }), /重新填写|清除/);
   assert.match(modelConnectionError({ status: 400, message: 'a new API key or clear_key is required when changing the API base URL' }), /地址/);
   assert.match(modelConnectionError({ details: { code: 'directory_unsupported' } }), /手动/);
   assert.match(modelConnectionError({ details: { code: 'timeout' } }), /超时/);
   assert.doesNotMatch(modelConnectionError(new Error('private-api-key provider response content')), /private-api-key|provider response/);
+});
+
+test('connection test distinguishes unsent reasoning budget rejection and a responding output limit', () => {
+ assert.match(modelConnectionError({status:422,details:{code:'test_budget_exceeded'}}), /256.*未发送生成请求/);
+ assert.match(modelConnectionError({status:502,details:{code:'output_limit'}}), /已响应.*可能已产生用量/);
 });

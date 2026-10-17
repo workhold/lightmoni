@@ -1,14 +1,14 @@
 # LightMoni SDK
 
-所有原生 SDK 支持指标、日志和链路，可通过 Agent 上报，也可带 Key 直连中心，容器和没有 Agent 的服务同样可以接入。配置业务 service、逻辑 table；Key 必须允许该 table。withTable / with_table 共享根客户端生命周期。
+所有原生 SDK 支持指标、日志和链路，可通过执行节点（LightMoni Agent）上报，也可带 Key 直连中心，容器和未部署执行节点的服务同样可以接入。配置业务 service、逻辑 table；Key 必须允许该 table。withTable / with_table 共享根客户端生命周期。
 
 ## 选择上报方式
 
-“数据接入 → SDK 接入”可切换“通过 Agent”和“直连中心”，生成所选语言的代码与环境变量。示例读取 `LIGHTMONI_ENDPOINT`、`LIGHTMONI_KEY` 并传入 SDK；SDK 本身不自动读取这两个变量。
+“数据接入 → SDK 接入”可切换“通过执行节点”和“直连中心”，生成所选语言的代码与环境变量。示例读取 `LIGHTMONI_ENDPOINT`、`LIGHTMONI_KEY` 并传入 SDK；SDK 本身不自动读取这两个变量。
 
 | 方式 | endpoint | key | 缓存 |
 | --- | --- | --- | --- |
-| 通过 Agent | Agent 地址，默认 `http://127.0.0.1:4318` | 通常留空；Agent 开启本地令牌时传该令牌 | SDK 进程内缓冲，Agent 持久化磁盘队列 |
+| 通过执行节点 | 节点接收地址，默认 `http://127.0.0.1:4318` | 通常留空；执行节点开启本地令牌时传该令牌 | SDK 进程内缓冲，执行节点持久化磁盘队列 |
 | 直连中心 | 业务进程可访问的中心基础地址 | 中心上报 Key，允许目标逻辑 table | SDK 进程内缓冲与重试 |
 
 直连示例的环境配置：
@@ -18,9 +18,9 @@ export LIGHTMONI_ENDPOINT='https://monitor.example.com'
 export LIGHTMONI_KEY='替换为允许 business 表的上报 Key'
 ~~~
 
-容器中通过 environment / Secret 配置这两个变量。容器的 `localhost` 指向容器本身；与中心位于同一个 Docker 网络时，可用 Compose 服务地址 `http://lightmoni:8080`；Docker Desktop 访问宿主机上的中心可用 `http://host.docker.internal:端口`。实际填写中心可达的域名或服务地址，SDK 自动追加 `/v1/metrics`、`/v1/logs`、`/v1/traces`，无需 Agent 中转。
+容器中通过 environment / Secret 配置这两个变量。容器的 `localhost` 指向容器本身；与中心位于同一个 Docker 网络时，可用 Compose 服务地址 `http://lightmoni:8080`；Docker Desktop 访问宿主机上的中心可用 `http://host.docker.internal:端口`。实际填写中心可达的域名或服务地址，SDK 自动追加 `/v1/metrics`、`/v1/logs`、`/v1/traces`，无需执行节点中转。
 
-通过 Agent 时，中心 Key 保存在 Agent，且必须允许业务 SDK 的 table。不同服务可共享同一个 Agent；使用 `withTable` / `with_table` 切换表时，中心 Key 也需授权对应 table。SDK 缓冲不写磁盘；需要本地磁盘缓存时选择 Agent。
+通过执行节点时，中心 Key 保存在 LightMoni Agent，且必须允许业务 SDK 的 table。不同服务可共享同一个执行节点；使用 `withTable` / `with_table` 切换表时，中心 Key 也需授权对应 table。SDK 缓冲不写磁盘；需要本地磁盘缓存时选择通过执行节点上报。
 
 | 语言 | 运行环境 | 安装与示例 |
 | --- | --- | --- |

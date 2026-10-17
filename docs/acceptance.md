@@ -1,5 +1,7 @@
 # 全流程与交互验收
 
+2026-10-17 平台已迁移到 Node.js/TypeScript，当前运行与验收入口见 [迁移规格](../specs/007-node-runtime-migration/spec.md)、[验证记录](../specs/007-node-runtime-migration/validation.md)。下文保留各阶段原始验收证据，其中 Go 平台路径和历史测试命令不再作为当前启动入口；业务 Go SDK 继续支持。
+
 2026-10-11 多语言扩展：Go、JavaScript/TypeScript、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust SDK 原生封装、安装包、业务示例和下载页已接通。六个新 SDK 的 60 项协议/故障测试、真实 Agent SQLite 关闭重开、八语言到隔离 ClickHouse 的完整查询验证通过，见 [多语言 SDK 验收](evidence/multilang-sdk/README.md)。新 SDK 使用显式 flush，非官方完整 OTel SDK 再导出。
 
 
@@ -68,7 +70,7 @@
 
 ## AI 多协议连接与模型发现（2026-10-14）
 
-按 specs/003-multi-protocol-models 的 SDD 规格完成四种真实 Mastra 原生适配器：OpenAI Chat Completions、Responses、Anthropic Messages、Google Gemini。设置提供独立获取按钮、自动目录发现/协议建议和具体协议选择；模糊 OpenAI 目录必须明确选择。28项运行时、25项前端测试和全Go race通过，原生签名/密文的跨worker延续、服务端私有保留、公开响应剔除及转义Key回显保护均有回归证据。生产构建和8080健康检查通过；浏览器实测见该规格目录 verification.md。Huayan未带Key目录查询返回401，未使用真实Key、未调用外部模型；真实供应商兼容性与模型效果仍须配置凭证后验收。
+按 specs/003-multi-protocol-models 的 SDD 规格完成四种真实 Mastra 原生适配器：OpenAI Chat Completions、Responses、Anthropic Messages、Google Gemini。设置提供独立获取按钮、自动目录发现/协议建议和具体协议选择；模糊 OpenAI 目录必须明确选择。执行限制新增跨协议思考深度（默认跟随模型），模型目录提示改为动态且保留手动输入；34项运行时、26项前端测试和全Go race通过，原生签名/密文的跨worker延续、服务端私有保留、公开响应剔除及转义Key回显保护均有回归证据。生产构建和8080健康检查通过；浏览器实测见该规格目录 verification.md。Huayan未带Key目录查询返回401，未使用真实Key、未调用外部模型；真实供应商兼容性与模型效果仍须配置凭证后验收。
 
 ## Python SDK 上报控制（2026-10-14）
 

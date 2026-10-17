@@ -13,6 +13,8 @@ export interface Message {
 }
 export interface Input {
   system: string;
+  // Private worker instruction. It is never part of the saved model config.
+  connection_test?: boolean;
   config: {
     base_url: string;
     protocol?: import("./model.js").Protocol;
@@ -21,6 +23,7 @@ export interface Input {
     max_input_tokens: number;
     max_output_tokens: number;
     max_steps: number;
+    reasoning_effort?: 'provider-default'|'none'|'minimal'|'low'|'medium'|'high'|'xhigh';
   };
   messages: Message[];
   summary?: string;

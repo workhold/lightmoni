@@ -113,6 +113,27 @@ test('canonical base adoption preserves automatic selection and avoids a feedbac
   } finally { discovery.dispose(); }
 });
 
+test('refresh retains automatic endpoint evidence after correcting the field; a connection edit clears it', async () => {
+  const calls = [], states = [];
+  const endpoint = 'https://example.com/v1/messages';
+  const native = { ...result, protocol: 'anthropic-messages', protocol_options: ['anthropic-messages'], protocol_source: 'endpoint-path', requires_confirmation: false };
+  const discovery = new ModelDiscovery(async value => {
+    calls.push(value);
+    return value.base_url === endpoint ? native : result;
+  }, state => states.push(state));
+  try {
+    discovery.setInput({ ...input, base_url: endpoint }); discovery.refresh(); await delay(0);
+    discovery.setInput(input); discovery.refresh(); await delay(0);
+    assert.deepEqual(calls.map(value => value.base_url), [endpoint, endpoint]);
+    assert.deepEqual(discovery.currentResult(input), native);
+    assert.equal(states.at(-1).result.protocol, 'anthropic-messages');
+    discovery.setInput({ ...input, api_key: 'changed-key' }); discovery.refresh(); await delay(0);
+    assert.equal(calls.at(-1).base_url, input.base_url);
+    assert.equal(calls.at(-1).api_key, 'changed-key');
+    assert.deepEqual(states.at(-1).result, result);
+  } finally { discovery.dispose(); }
+});
+
 test('directory credential and saved-key failures are actionable Chinese without provider text', async () => {
   const cases = [
     { status: 502, details: { code: 'credentials_rejected' }, expected: /有效的 API Key/ },

@@ -1,0 +1,19 @@
+{
+  "name": "lightmoni",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "setup": "npm --prefix sdk/typescript ci && npm --prefix sdk/typescript run build && npm --prefix runtime ci && npm --prefix ai-runtime ci && npm --prefix web ci",
+    "build": "npm --prefix sdk/typescript run build && npm --prefix runtime run build && npm --prefix ai-runtime run build && npm --prefix web run build",
+    "typecheck": "npm --prefix runtime run typecheck && npm --prefix ai-runtime run typecheck && npm --prefix web run typecheck",
+    "test": "npm --prefix runtime test && npm --prefix ai-runtime test && npm --prefix sdk/typescript test",
+    "start": "node runtime/dist/server/main.js",
+    "agent": "node runtime/dist/agent/main.js",
+    "release:agent": "node scripts/build-agent-release.mjs",
+    "release:sdk": "sh scripts/build-sdk-release.sh"
+  }
+}

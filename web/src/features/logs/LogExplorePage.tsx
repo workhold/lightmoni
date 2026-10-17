@@ -1442,7 +1442,7 @@ export default function LogExplorePage() {
       {!catalogReady ? (
         <Spin />
       ) : tables.length === 0 ? (
-        <Empty description="还没有日志表，请先通过 SDK 或 Agent 上报日志" />
+        <Empty description="还没有日志表，请先通过 SDK 或执行节点上报日志" />
       ) : (
         <>
           <div

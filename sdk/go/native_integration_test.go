@@ -1,17 +1,12 @@
 package moni_test
 
 import (
-	"context"
 	"encoding/hex"
-	"fmt"
-	"net"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
-	"github.com/lightmoni/lightmoni/internal/agent"
 	logcollector "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	metriccollector "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	tracecollector "go.opentelemetry.io/proto/otlp/collector/trace/v1"
@@ -26,58 +21,18 @@ func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := agent.DefaultConfig()
-	cfg.DataDir = t.TempDir()
-	cfg.Endpoint = "http://127.0.0.1:1"
-	cfg.Key = "sdk-conformance-test"
-	cfg.MinFreeBytes = 0
-	a, err := agent.New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	closed := false
-	t.Cleanup(func() {
-		if !closed {
-			_ = a.Close()
-		}
-	})
-	server := httptest.NewUnstartedServer(a.Handler())
-	server.Listener.Close()
-	// Docker Desktop's host gateway must be able to reach this isolated test receiver.
-	server.Listener, err = net.Listen("tcp", "0.0.0.0:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.Start()
-	defer server.Close()
-	port := server.Listener.Addr().(*net.TCPAddr).Port
-	endpoint := "http://127.0.0.1:" + fmt.Sprint(port)
-	command := exec.Command("python3", "scripts/test-sdks.py", "--docker", "--skip-build", "--agent-url", endpoint)
+	// Docker Desktop reaches this isolated receiver through its host gateway.
+	agent := newNodeAgent(t, root, "0.0.0.0:0")
+	command := exec.Command("python3", "scripts/test-sdks.py", "--docker", "--skip-build", "--agent-url", agent.url)
 	command.Dir = root
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("native SDK demos: %v\n%s", err, output)
 	}
-	if err := a.Close(); err != nil {
-		t.Fatal(err)
-	}
-	closed = true
-	queue, err := agent.OpenQueue(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer queue.Close()
+	queued := agent.stop(t)
 	totals := map[string]int64{}
 	logs, spans := map[string]map[string]bool{}, map[string]map[string]bool{}
 	batches := 0
-	for {
-		item, ok, err := queue.Next(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !ok {
-			break
-		}
-		b := item.Batch
+	for _, b := range queued {
 		batches++
 		switch b.Signal {
 		case "metrics":
@@ -122,9 +77,6 @@ func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 					}
 				}
 			}
-		}
-		if err := queue.Complete(context.Background(), b.ID); err != nil {
-			t.Fatal(err)
 		}
 	}
 	if batches != 18 || len(totals) != 6 {

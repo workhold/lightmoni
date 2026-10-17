@@ -26,6 +26,7 @@ export class ModelDiscovery {
   private publish: (state: DiscoveryState) => void;
   private debounceMs: number;
   private input?: ModelDiscoveryInput;
+  private endpointHintBase?: string;
   private result?: ModelDiscoveryResult;
   private timer?: ReturnType<typeof setTimeout>;
   private abort?: AbortController;
@@ -37,7 +38,7 @@ export class ModelDiscovery {
 
   setInput(input?: ModelDiscoveryInput) {
     if (JSON.stringify(input) === JSON.stringify(this.input)) return;
-    this.cancel(); this.result = undefined; this.input = input ? { ...input } : undefined;
+    this.cancel(); this.result = undefined; this.endpointHintBase = undefined; this.input = input ? { ...input } : undefined;
     if (!this.input) { this.publish({ status: 'idle' }); return; }
     this.publish({ status: 'waiting' });
     this.timer = setTimeout(() => this.refresh(), this.debounceMs);
@@ -47,13 +48,16 @@ export class ModelDiscovery {
     this.cancel();
     if (!this.input) return;
     this.result = undefined;
-    const version = this.generation, input = { ...this.input }, abort = new AbortController();
+    // Retain the original endpoint as evidence for automatic detection when
+    // refreshing the same corrected base. Editing the connection clears it.
+    const version = this.generation, input = { ...this.input, base_url: this.endpointHintBase ?? this.input.base_url }, abort = new AbortController();
     this.abort = abort; this.publish({ status: 'loading' });
     void this.request(input, abort.signal).then(result => {
       if (version !== this.generation || abort.signal.aborted) return;
       // Accept the discovered base as the same input, preventing a feedback
       // query when the UI displays the canonical address.
       this.input = { ...input, base_url: result.base_url };
+      this.endpointHintBase = input.protocol === 'auto' && result.protocol_source === 'endpoint-path' ? input.base_url : undefined;
       this.result = result;
       this.publish({ status: 'success', result });
     }).catch(error => {
@@ -66,7 +70,7 @@ export class ModelDiscovery {
     return input && JSON.stringify(input) === JSON.stringify(this.input) ? this.result : undefined;
   }
 
-  dispose() { this.cancel(); this.input = undefined; this.result = undefined; }
+  dispose() { this.cancel(); this.input = undefined; this.endpointHintBase = undefined; this.result = undefined; }
 
   private cancel() {
     this.generation++;

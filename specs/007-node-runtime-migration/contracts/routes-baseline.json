@@ -1,0 +1,991 @@
+[
+  {
+    "method": "DELETE",
+    "path": "/api/v1/agent-groups/:group",
+    "baseline": [
+      "internal/server/agent_config.go"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/agent-task-labels/:id",
+    "baseline": [
+      "internal/server/agent_task_routes.go"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/agent-tasks/:id",
+    "baseline": [
+      "internal/server/agent_task_routes.go"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/alerts/groups/:id",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/alerts/rules/:id",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/alerts/silences/:id",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/dashboards/:id",
+    "baseline": [
+      "internal/dashboards/dashboards.go"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/logs/saved-searches/:id",
+    "baseline": [
+      "internal/logs/logs.go"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/notify/channels/:id",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/settings/alert-directory-sources/:id",
+    "baseline": [
+      "internal/alerts/directory.go"
+    ]
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/settings/login-providers/:id",
+    "baseline": [
+      "internal/auth/oauth.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/agent-groups",
+    "baseline": [
+      "internal/server/agent_config.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/agent-install",
+    "baseline": [
+      "internal/server/agent_install.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/agent-task-labels",
+    "baseline": [
+      "internal/server/agent_task_routes.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/agent-tasks",
+    "baseline": [
+      "internal/server/agent_task_routes.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/agents",
+    "baseline": [
+      "internal/server/server.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/agents/:id/config",
+    "baseline": [
+      "internal/server/server.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/annotations",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/events",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/groups",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/incidents",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/incidents/:id",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/instances",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/policy-defaults",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/responders",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/response-statistics",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/rules",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/silences",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/alerts/tables",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/assistant/billing",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/assistant/config",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/assistant/sessions",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/assistant/sessions/:id",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/assistant/usage",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/assistant/usage/details",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/identities",
+    "baseline": [
+      "internal/auth/oauth.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/me",
+    "baseline": [
+      "internal/auth/auth.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/notification-profile",
+    "baseline": [
+      "internal/auth/notification.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth/:id/callback",
+    "baseline": [
+      "internal/auth/oauth.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth/:id/start",
+    "baseline": [
+      "internal/auth/oauth.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/profile",
+    "baseline": [
+      "internal/auth/profile.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/providers",
+    "baseline": [
+      "internal/auth/oauth.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/catalog/tables",
+    "baseline": [
+      "internal/server/server.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/catalog/tables/:id/log-sampling",
+    "baseline": [
+      "internal/server/sampling.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboards",
+    "baseline": [
+      "internal/dashboards/dashboards.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboards/:id",
+    "baseline": [
+      "internal/dashboards/dashboards.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/dashboards/:id/versions",
+    "baseline": [
+      "internal/dashboards/dashboards.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/keys",
+    "baseline": [
+      "internal/auth/keys.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/keys/:id/events",
+    "baseline": [
+      "internal/auth/keys.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/logs/:table/events/:event",
+    "baseline": [
+      "internal/logs/logs.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/logs/saved-searches",
+    "baseline": [
+      "internal/logs/logs.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/logs/saved-searches/:id",
+    "baseline": [
+      "internal/logs/logs.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/notify/channels",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/notify/channels/:id/callback-url",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/notify/deliveries",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/overview",
+    "baseline": [
+      "internal/server/server.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/sdk-install",
+    "baseline": [
+      "internal/server/agent_install.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/settings/alert-directory-sources",
+    "baseline": [
+      "internal/alerts/directory.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/settings/instance",
+    "baseline": [
+      "internal/server/server.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/settings/login-providers",
+    "baseline": [
+      "internal/auth/oauth.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/settings/reporting",
+    "baseline": [
+      "internal/server/reporting_settings.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/settings/retention",
+    "baseline": [
+      "internal/server/retention.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/settings/sdk-reporting",
+    "baseline": [
+      "internal/server/sampling.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/setup",
+    "baseline": [
+      "internal/auth/auth.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/templates",
+    "baseline": [
+      "internal/server/templates.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/traces/:trace_id",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/users",
+    "baseline": [
+      "internal/auth/auth.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/users/:id/notification-profile",
+    "baseline": [
+      "internal/auth/notification.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/downloads/agent/:file",
+    "baseline": [
+      "internal/server/agent_install.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/downloads/sdk/:file",
+    "baseline": [
+      "internal/server/agent_install.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/healthz",
+    "baseline": [
+      "internal/server/server.go",
+      "internal/agent/agent.go"
+    ]
+  },
+  {
+    "method": "GET",
+    "path": "/v1/sdk-config",
+    "baseline": [
+      "internal/server/sampling.go",
+      "internal/agent/agent.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/agent-groups",
+    "baseline": [
+      "internal/server/agent_config.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/agent-task-labels",
+    "baseline": [
+      "internal/server/agent_task_routes.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/agent-tasks",
+    "baseline": [
+      "internal/server/agent_task_routes.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/agents/:id/heartbeat",
+    "baseline": [
+      "internal/server/server.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/agents/register",
+    "baseline": [
+      "internal/server/server.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/claim",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/groups",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/groups/:id/schedule-preview",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/incidents/:id/ack",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/incidents/:id/escalate",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/incidents/:id/renew",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/incidents/:id/replan",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/incidents/:id/transfer",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/preview",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/rules",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/rules/:id/silence",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/alerts/silences",
+    "baseline": [
+      "internal/alerts/response_api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/assistant/models",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/assistant/sessions",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/assistant/sessions/:id/cancel",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/assistant/sessions/:id/turns",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/assistant/test-connection",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/login",
+    "baseline": [
+      "internal/auth/auth.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/logout",
+    "baseline": [
+      "internal/auth/auth.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/dashboards",
+    "baseline": [
+      "internal/dashboards/dashboards.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/dashboards/:id/copy",
+    "baseline": [
+      "internal/dashboards/dashboards.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/dashboards/alert-draft",
+    "baseline": [
+      "internal/dashboards/dashboards.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/keys",
+    "baseline": [
+      "internal/auth/keys.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/logs/aggregate",
+    "baseline": [
+      "internal/logs/logs.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/logs/context",
+    "baseline": [
+      "internal/logs/logs.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/logs/saved-searches",
+    "baseline": [
+      "internal/logs/logs.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/logs/search",
+    "baseline": [
+      "internal/logs/logs.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/logs/tail",
+    "baseline": [
+      "internal/logs/logs.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/notify/callbacks/:id/:token",
+    "baseline": [
+      "internal/alerts/interactive.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/notify/channels",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/notify/channels/:id/test",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/notify/deliveries/:id/retry",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/query",
+    "baseline": [
+      "internal/server/server.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/settings/alert-directory-sources/:id/sync",
+    "baseline": [
+      "internal/alerts/directory.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/setup",
+    "baseline": [
+      "internal/auth/auth.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/users",
+    "baseline": [
+      "internal/auth/auth.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/v1/logs",
+    "baseline": [
+      "internal/ingest/ingest.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/v1/metrics",
+    "baseline": [
+      "internal/ingest/ingest.go"
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/v1/traces",
+    "baseline": [
+      "internal/ingest/ingest.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/agent-groups/:group",
+    "baseline": [
+      "internal/server/agent_config.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/agent-task-labels/:id",
+    "baseline": [
+      "internal/server/agent_task_routes.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/agent-tasks/:id",
+    "baseline": [
+      "internal/server/agent_task_routes.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/agents/:id/group",
+    "baseline": [
+      "internal/server/agent_config.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/agents/:id/labels",
+    "baseline": [
+      "internal/server/agent_task_routes.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/alerts/groups/:id",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/alerts/rules/:id",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/assistant/billing",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/assistant/config",
+    "baseline": [
+      "internal/assistant/service.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/auth/notification-profile",
+    "baseline": [
+      "internal/auth/notification.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/auth/profile",
+    "baseline": [
+      "internal/auth/profile.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/catalog/tables/:id",
+    "baseline": [
+      "internal/server/server.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/catalog/tables/:id/log-sampling",
+    "baseline": [
+      "internal/server/sampling.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/catalog/tables/:id/retention",
+    "baseline": [
+      "internal/server/retention.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/dashboards/:id",
+    "baseline": [
+      "internal/dashboards/dashboards.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/keys/:id",
+    "baseline": [
+      "internal/auth/keys.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/logs/saved-searches/:id",
+    "baseline": [
+      "internal/logs/logs.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/notify/channels/:id",
+    "baseline": [
+      "internal/alerts/api.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/settings/alert-directory-sources/:id",
+    "baseline": [
+      "internal/alerts/directory.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/settings/login-providers/:id",
+    "baseline": [
+      "internal/auth/oauth.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/settings/reporting",
+    "baseline": [
+      "internal/server/reporting_settings.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/settings/retention",
+    "baseline": [
+      "internal/server/retention.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/settings/sdk-reporting",
+    "baseline": [
+      "internal/server/sampling.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/users/:id",
+    "baseline": [
+      "internal/auth/auth.go"
+    ]
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/users/:id/notification-profile",
+    "baseline": [
+      "internal/auth/notification.go"
+    ]
+  }
+]

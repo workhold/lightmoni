@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 version=0.1.0
-output=internal/server/agent-dist
+output=runtime/downloads
 if [ "$#" -gt 0 ]; then version=$1; fi
 if [ "$#" -gt 1 ]; then output=$2; fi
 case "$version" in *[!0-9A-Za-z._-]*|'') echo "invalid SDK version" >&2; exit 1 ;; esac

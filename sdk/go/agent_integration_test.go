@@ -1,9 +1,12 @@
 package moni_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
-	"net/http/httptest"
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lightmoni/lightmoni/internal/agent"
 	moni "github.com/lightmoni/lightmoni/sdk/go"
 	logcollector "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	metriccollector "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -34,24 +36,8 @@ func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(root, "sdk/typescript/dist/src/index.js")); err != nil {
 		t.Skip("build TypeScript SDK with npm ci && npm run build before cross-language integration")
 	}
-	cfg := agent.DefaultConfig()
-	cfg.DataDir = t.TempDir()
-	cfg.Endpoint = "http://127.0.0.1:1"
-	cfg.Key = "test-global-key"
-	cfg.MinFreeBytes = 0
-	a, err := agent.New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(a.Handler())
-	defer server.Close()
-	closed := false
-	t.Cleanup(func() {
-		if !closed {
-			_ = a.Close()
-		}
-	})
-	client, err := moni.New(moni.Config{DisableSelfTelemetry: true, Service: "example-go-api", Table: "http", Endpoint: server.URL})
+	agent := newNodeAgent(t, root, "127.0.0.1:0")
+	client, err := moni.New(moni.Config{DisableSelfTelemetry: true, Service: "example-go-api", Table: "http", Endpoint: agent.url})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,33 +62,17 @@ func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 			cmd.Env = append(cmd.Env, value)
 		}
 	}
-	cmd.Env = append(cmd.Env, "LIGHTMONI_ENDPOINT="+server.URL, "LIGHTMONI_SERVICE=example-node-api", "LIGHTMONI_COUNT=3", "LIGHTMONI_SELF_TELEMETRY=false")
+	cmd.Env = append(cmd.Env, "LIGHTMONI_ENDPOINT="+agent.url, "LIGHTMONI_SERVICE=example-node-api", "LIGHTMONI_COUNT=3", "LIGHTMONI_SELF_TELEMETRY=false")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Node demo: %v\n%s", err, output)
 	}
-	if err = a.Close(); err != nil {
-		t.Fatal(err)
-	}
-	closed = true
-	queue, err := agent.OpenQueue(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer queue.Close()
+	queued := agent.stop(t)
 	logs := map[string]map[string]bool{}
 	spans := map[string]map[string]bool{}
 	totals := map[string]int64{}
 	batches := 0
-	for {
-		item, ok, err := queue.Next(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !ok {
-			break
-		}
+	for _, b := range queued {
 		batches++
-		b := item.Batch
 		switch b.Signal {
 		case "metrics":
 			var request metriccollector.ExportMetricsServiceRequest
@@ -157,9 +127,6 @@ func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 				}
 			}
 		}
-		if err = queue.Complete(context.Background(), b.ID); err != nil {
-			t.Fatal(err)
-		}
 	}
 	if batches != 6 || totals["example-go-api"] != 2 || totals["example-node-api"] != 3 {
 		t.Fatalf("unexpected durable batches/totals: %d %+v", batches, totals)
@@ -171,4 +138,93 @@ func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 			}
 		}
 	}
+}
+
+// nodeTestAgent runs the production TypeScript receiver with a temporary spool.
+// It never starts collectors or forwards to the real center. On stop it reopens
+// the persisted spool and returns the original frozen protobuf payloads.
+type nodeTestBatch struct {
+	ID      string `json:"id"`
+	Signal  string `json:"signal"`
+	Service string `json:"service"`
+	Payload []byte `json:"payload"`
+}
+type nodeTestAgent struct {
+	cmd     *exec.Cmd
+	input   io.WriteCloser
+	output  *json.Decoder
+	stderr  bytes.Buffer
+	cancel  context.CancelFunc
+	url     string
+	stopped bool
+}
+
+func newNodeAgent(t *testing.T, root, listen string) *nodeTestAgent {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for Agent integration")
+	}
+	loader := filepath.Join(root, "runtime/node_modules/tsx/dist/loader.mjs")
+	if _, err = os.Stat(loader); err != nil {
+		t.Fatal("install runtime dependencies with npm ci --prefix runtime before SDK integration")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	a := &nodeTestAgent{cancel: cancel}
+	a.cmd = exec.CommandContext(ctx, node, "--import", loader, filepath.Join(root, "runtime/test/helpers/sdk-agent.ts"), t.TempDir(), listen)
+	a.cmd.Dir = root
+	a.cmd.Stderr = &a.stderr
+	stdout, err := a.cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	a.input, err = a.cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	a.output = json.NewDecoder(io.LimitReader(stdout, 32<<20))
+	if err = a.cmd.Start(); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if !a.stopped {
+			a.cancel()
+			_ = a.cmd.Wait()
+		}
+	})
+	var ready struct {
+		URL string `json:"url"`
+	}
+	if err = a.output.Decode(&ready); err != nil {
+		a.cancel()
+		_ = a.cmd.Wait()
+		a.stopped = true
+		t.Fatalf("Node Agent startup: %v\n%s", err, a.stderr.String())
+	}
+	a.url = ready.URL
+	return a
+}
+func (a *nodeTestAgent) stop(t *testing.T) []nodeTestBatch {
+	t.Helper()
+	if a.stopped {
+		t.Fatal("Node Agent already stopped")
+	}
+	if _, err := fmt.Fprintln(a.input, "stop"); err != nil {
+		t.Fatal(err)
+	}
+	_ = a.input.Close()
+	var result struct {
+		Batches []nodeTestBatch `json:"batches"`
+	}
+	decodeErr := a.output.Decode(&result)
+	waitErr := a.cmd.Wait()
+	a.stopped = true
+	a.cancel()
+	if decodeErr != nil || waitErr != nil {
+		t.Fatalf("Node Agent snapshot: %v / %v\n%s", decodeErr, waitErr, a.stderr.String())
+	}
+	return result.Batches
 }
