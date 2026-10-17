@@ -1,12 +1,14 @@
 # LightMoni
 
-面向个人和小团队的一体化监控工作台。Go 主服务内嵌 React + TypeScript 界面，SQLite 保存管理数据，ClickHouse 保存日志、指标和链路。LightMoni Agent 运行实例称为执行节点，采集主机、进程、拨测和目录日志，接收 Go、JavaScript/TypeScript、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust SDK 数据并持久化缓存。
+面向个人和小团队的一体化监控工作台。Node.js / TypeScript 主服务提供 React + TypeScript 界面，SQLite 保存管理数据，ClickHouse 保存日志、指标和链路。LightMoni Agent 运行实例称为执行节点，采集主机、进程、拨测和目录日志，接收 Go、JavaScript/TypeScript、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust SDK 数据并持久化缓存。
+
+中心与 LightMoni Agent 均由 Node.js / TypeScript 实现，公共协议和存储工具位于 `runtime/src/shared`；业务 Go SDK 与其余七种语言 SDK 保留。迁移规格与验收见 [Node 运行时迁移](specs/007-node-runtime-migration/spec.md) 和 [领域验证](specs/007-node-runtime-migration/domain-validation.md)。
 
 没有项目或租户概念。每份 Key 可配置逻辑 table 白名单，或显式允许所有 table，不绑定 service；服务通过 `service` 标识，业务通过逻辑 `table` 选择数据流。服务自动生成 `log_*`、`metric_*_sum/gauge/histogram`、`trace_*`，在记录中写入实际认证的 `key_id`。
 
 ## Docker Compose 部署
 
-根目录的 [compose.yaml](compose.yaml) 默认只启动 LightMoni，连接已有 ClickHouse。主服务镜像内置网页、两种 Linux 架构的 LightMoni Agent 安装包和八种语言的 SDK，无需单独部署前端。
+根目录的 [compose.yaml](compose.yaml) 默认只启动 LightMoni，连接已有 ClickHouse。主服务镜像内置网页、两种 Linux 架构的 LightMoni Agent 安装包和八种语言的 SDK，无需单独部署前端。最终镜像使用 `node:24.15.0-bookworm-slim`；Go 构建阶段只生成业务 Go SDK 下载包，中心和 Agent 的运行环境不包含 Go。
 
 在仓库根目录准备配置：
 
@@ -51,9 +53,9 @@ docker compose up -d --no-build --wait
 
 软件统一称 **LightMoni Agent**，部署在主机或容器中的运行实例称 **执行节点**；节点内部执行指标和日志采集的模块称采集器。导航入口为“节点助手”，网页对话能力仍称“AI 助手”。当前节点执行监控任务，不提供模型调用或通用命令执行能力。
 
-LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器或容器编排管理生命周期。业务通过 SDK 向执行节点上报，同一节点可接收多个业务的数据；业务启动、停止或重启不触发 Agent 启停。业务退出时完成 SDK flush/shutdown，Agent 继续采集和补传。已有二进制支持 `run --config` 前台运行并响应 SIGTERM；当前网页安装命令覆盖 Linux systemd 服务。每个 Agent 实例使用独立、可持久化的数据目录，以保留身份与待补传队列。
+LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器或容器编排管理生命周期。业务通过 SDK 向执行节点上报，同一节点可接收多个业务的数据；业务启动、停止或重启不触发 Agent 启停。业务退出时完成 SDK flush/shutdown，Agent 继续采集和补传。CLI 支持 `run --config` 前台运行并响应 SIGTERM；当前网页安装命令覆盖 Linux systemd 服务。每个 Agent 实例使用独立、可持久化的数据目录，以保留身份与待补传队列。
 
-“数据接入”提供独立的“SDK 接入”和“执行节点接入”Tab。接入时选择初始任务标签、上报地址并填写 Key，复制生成的安装命令到 Linux 服务器执行。安装程序保存连接配置，无需编辑 JSON；所填 Key 用于安装脚本、LightMoni Agent 包及校验文件的下载鉴权和后续上报。新 Key 默认填入当前标签匹配的启用任务所需表，业务 SDK 使用的 table 需另行授权；标签没有启用任务时需手动填写业务 table，不自动扩大权限。安装包支持 amd64 / arm64，验证 SHA256，安装 systemd 服务；升级、重装保留身份和磁盘队列。
+“数据接入”提供独立的“SDK 接入”和“执行节点接入”Tab。接入时选择初始任务标签、上报地址并填写 Key，复制生成的安装命令到 Linux 服务器执行。安装程序保存连接配置，无需编辑 JSON；所填 Key 用于安装脚本、LightMoni Agent 包及校验文件的下载鉴权和后续上报。新 Key 默认填入当前标签匹配的启用任务所需表，业务 SDK 使用的 table 需另行授权；标签没有启用任务时需手动填写业务 table，不自动扩大权限。安装包支持 Linux amd64 / arm64，自带固定 Node 24.15.0，要求 glibc ≥ 2.28，无需目标主机另装 Node/npm；验证 SHA256 后安装独立 systemd 服务，升级、重装保留身份和磁盘队列。
 
 “节点助手”提供“执行节点 / 任务管理 / 任务标签”三个页签。任务独立保存，类型为指标采集、服务拨测和目录日志；每个任务可关联多个任务标签，一个节点也可绑定多个标签。启用任务与节点任一标签相交即下发，同一任务不会因多次命中而重复执行。冲突配置会整体拒绝并保留原有效配置；未匹配任务时暂停内部采集和拨测，业务数据转发继续可用。已有节点重连时保留中心分配。指标采集任务可选择 CPU、内存、文件系统、磁盘 I/O、网络、负载或指定进程，并设置采集间隔。
 
@@ -102,20 +104,32 @@ node examples/sdk/traffic/index.mjs
 
 ## 本地开发和验收
 
-Go 1.26+、Node 24+、Docker Compose。在仓库根运行：
+本地构建建议使用 Node 24.15.0（运行时最低 Node 22.13），并准备可访问的真实 ClickHouse。仅开发 Go 业务 SDK、运行 Go 业务示例或打包八种 SDK 时需要 Go 1.26+。Docker Compose 用于容器部署，可在有 Docker 的环境启动隔离测试数据库：
 
 ```sh
 docker compose -p lightmoni-test -f deploy/server/compose.test.yml up -d
-npm --prefix web ci
-npm --prefix ai-runtime ci
-npm --prefix ai-runtime run build
-npm --prefix sdk/typescript ci
-npm --prefix sdk/typescript run build
-npm --prefix web run build
-sh deploy/agent/release.sh 0.1.0 internal/server/agent-dist
-sh scripts/build-sdk-release.sh 0.1.0 internal/server/agent-dist
-LIGHTMONI_ADDR=127.0.0.1:18880 LIGHTMONI_EXTERNAL_URL=http://127.0.0.1:18880 go run ./cmd/lightmoni
 ```
+
+在仓库根目录依次构建：
+
+```sh
+npm run setup
+npm run build
+LIGHTMONI_DATA=.local-dev/node-dev/state LIGHTMONI_ADDR=127.0.0.1:18880 LIGHTMONI_EXTERNAL_URL=http://127.0.0.1:18880 npm start
+```
+
+根脚本按 TypeScript SDK → runtime → ai-runtime → web 的依赖顺序安装和构建，对应各目录的 `npm ci` / `npm run build`。中心的直接启动入口是 `node runtime/dist/server/main.js`。
+
+中心实现位于 `runtime/src/server`，大盘/日志/告警位于 `runtime/src/domains`，AI 会话与工具位于 `runtime/src/assistant`，公共类型及存储工具位于 `runtime/src/shared`；执行节点位于 `runtime/src/agent`。网页构建输出到 `runtime/public`。数据库连接和状态目录继续使用 `LIGHTMONI_CH_URL` / `LIGHTMONI_CH_USER` / `LIGHTMONI_CH_PASSWORD` / `LIGHTMONI_DATA`。
+
+需要测试下载与安装时，单独生成发布包（默认输出 `runtime/downloads`）：
+
+```sh
+npm run release:agent -- 0.1.0
+npm run release:sdk -- 0.1.0
+```
+
+Agent 发布脚本下载并校验 Linux 双架构的固定 Node 发行包；打包成功不代表已在相应 Linux 主机运行验收。Agent 独立启动命令为 `node runtime/dist/agent/main.js run --config /path/agent-config.json`，生命周期和业务应用分开管理，详见 [执行节点接入](examples/agent/README.md)。
 
 另一个终端运行开发界面：
 
@@ -127,20 +141,27 @@ LIGHTMONI_DEV_API_URL=http://127.0.0.1:18880 npm run dev
 `scripts/demo-smoke.py` 用隔离开发实例创建测试管理员、允许 `http`/`app` 的 Key，运行 Go/Node demo，核对多服务计数、日志与 span 关联。默认地址 `127.0.0.1:18880`，默认测试用户名 `local-admin` / 密码 `local-demo-password`；只用于该测试工作流。主服务未初始化时脚本会初始化。
 
 ```sh
-python3 scripts/demo-smoke.py
-go test -race ./...
-npm --prefix sdk/typescript test
-python3 scripts/test-sdks.py --docker
-LIGHTMONI_NATIVE_SDK_TEST=1 go test -race ./sdk/go -run TestNativeSDKsDurablyAcceptedByActualAgent
-npm --prefix web run typecheck
-npm --prefix web run build
+npm run typecheck
+npm test
+npm run build
 ```
 
-开发模式测试 ClickHouse 只绑定 `127.0.0.1:18123`，使用固定测试密码；发版配置需要在 `.env` 中明确填写数据库密码。数据目录 `.lightmoni`、各目录的 `.env` 和构建产物不纳入源码。
+真实 ClickHouse 联调用隔离中心和测试账号，显式提供地址后运行；不应将 fixture 测试指向生产实例：
+
+```sh
+cd runtime
+LIGHTMONI_DOMAINS_URL=http://127.0.0.1:18885 node --import tsx --test test/domains-live.test.ts test/agent-live.test.ts
+```
+
+可通过 `LIGHTMONI_DOMAINS_USER` / `LIGHTMONI_DOMAINS_PASSWORD` 指定隔离测试账号。域联调覆盖真实 OTLP 入库、日志、Trace、大盘、SQL 告警和本地 Webhook；节点联调覆盖 SDK → Agent 磁盘队列 → 中心和重启补传。Go SDK 单独使用 `go test -race ./sdk/go`；多语言工具链和 Docker 齐备时可运行 `python3 scripts/test-sdks.py --docker`。`python3 scripts/demo-smoke.py` 是业务示例的补充检查。
+
+本次迁移的本机环境为 macOS，已运行真实 ClickHouse 和 Node 联调；没有 Docker，未执行 Docker 镜像构建或 Linux systemd 实机验收。具体证据及边界见 [迁移验收](specs/007-node-runtime-migration/quickstart.md) 和 [领域验证记录](specs/007-node-runtime-migration/domain-validation.md)。
+
+开发模式测试 ClickHouse 只绑定 `127.0.0.1:18123`，使用固定测试密码；发版配置需要在 `.env` 中明确填写数据库密码。默认数据目录 `.lightmoni`、示例隔离目录 `.local-dev`、各目录的 `.env` 和构建产物不纳入源码。
 
 ## AI 助手运行时
 
-Go 主服务为每轮对话启动一个 Mastra Node worker，使用私有 stdin/stdout 管道通信，无需额外端口。模型调用与多步决策由 Mastra 执行，表目录、SQL 和草稿工具仍由 Go 在当前登录用户上下文中执行。会话、事件、摘要和模型配置使用主服务 SQLite；API Key 加密保存，仅通过私有管道传入 worker，不进入浏览器响应或进程参数。Compose 镜像内包含 Node、锁定依赖和编译好的 worker。
+Node 主服务为每轮对话启动一个 Mastra Node worker，使用私有 stdin/stdout 管道通信，无需额外端口。模型调用与多步决策由 Mastra 执行，表目录、SQL 和草稿工具仍由中心 TypeScript 模块在当前登录用户上下文中执行。会话、事件、摘要和模型配置使用主服务 SQLite；API Key 加密保存，仅通过私有管道传入 worker，不进入浏览器响应或进程参数。Compose 镜像内包含 Node、锁定依赖和编译好的 worker。
 
 本地从仓库根启动，先执行 `npm --prefix ai-runtime ci && npm --prefix ai-runtime run build`。默认通过 PATH 中的 `node` 运行 `ai-runtime/dist/runner.js`；可用 `LIGHTMONI_AI_NODE` 指定 Node 可执行文件，用 `LIGHTMONI_AI_RUNNER` 指定编译后的入口绝对路径。缺少运行时会在对话中明确报错，其他监控服务保持可用。
 
@@ -154,9 +175,9 @@ Go 主服务为每轮对话启动一个 Mastra Node worker，使用私有 stdin/
 
 自动识别取得唯一协议建议后可直接测试连接，目录有歧义时需手选协议。测试会发送真实请求，并在 SDK 序列化后限制总输出预算最多 256 token；所选思考配置无法容纳时在发送前明确拒绝。供应商已响应但输出预算耗尽会单独提示，相关请求仍计入用量。
 
-摘要保留历史事实、用户要求和工具证据，原始记录仍保留。无法在预算内整理的单个历史轮次或超大的当前上下文会返回明确错误，需缩小查询或增大预算；源历史不被删除。停止、浏览器断开和超时会取消当前 worker 与 Go 工具。完成的检查点可重载，但进程中断后不会自动恢复执行。本轮不包含后台定时排查、自动修复或额外审阅模型。
+摘要保留历史事实、用户要求和工具证据，原始记录仍保留。无法在预算内整理的单个历史轮次或超大的当前上下文会返回明确错误，需缩小查询或增大预算；源历史不被删除。停止、浏览器断开和超时会取消当前 worker 与中心工具。完成的检查点可重载，但进程中断后不会自动恢复执行。本轮不包含后台定时排查、自动修复或额外审阅模型。
 
-SDD 规格和验收入口：[Mastra 助手](specs/001-mastra-assistant/spec.md)、[模型发现](specs/002-model-discovery/spec.md)、[多协议连接](specs/003-multi-protocol-models/spec.md)、[模型管理与计费](specs/005-model-management/spec.md)。使用仓库内 Spec Kit 技能继续维护规格、计划与任务。检查运行时使用 `npm --prefix ai-runtime test`、`npm --prefix ai-runtime run typecheck` 和 `go test -race ./internal/assistant`；构建 worker 后，Go 测试会通过真实 Mastra SDK 连接隔离模型 fixture。fixture 不代表真实供应商分析效果验收。
+SDD 规格和验收入口：[Mastra 助手](specs/001-mastra-assistant/spec.md)、[模型发现](specs/002-model-discovery/spec.md)、[多协议连接](specs/003-multi-protocol-models/spec.md)、[模型管理与计费](specs/005-model-management/spec.md)、[Node 运行时迁移](specs/007-node-runtime-migration/spec.md)。使用仓库内 Spec Kit 技能继续维护规格、计划与任务。检查运行时使用 `npm --prefix ai-runtime test`、`npm --prefix ai-runtime run typecheck` 和 `npm --prefix runtime test`；构建 worker 后，Node 集成测试会通过真实 Mastra SDK 连接隔离模型 fixture。fixture 不代表真实供应商分析效果验收。
 
 ## Key 的 table 权限
 
@@ -174,6 +195,6 @@ SDD 规格和验收入口：[Mastra 助手](specs/001-mastra-assistant/spec.md)�
 
 ### 系统自监控
 
-初始化会建立 `lightmoni_center`、`lightmoni_agent`、`lightmoni_sdk` 三类内置逻辑表，并创建「系统监控 · 上报中心 / 执行节点 / SDK」大盘。系统表通过标准查询、日志浏览和图表告警使用；首次初始化之后不会覆盖大盘编辑，也不会在重启时重新创建用户主动删除的大盘。
+初始化会建立 `lightmoni_center`、`lightmoni_agent`、`lightmoni_sdk` 三类内置逻辑表，并创建「系统监控 · 上报中心 / 执行节点 / SDK」大盘。系统表通过标准查询、日志浏览和图表告警使用；首次初始化之后保留大盘编辑，也不会在重启时重新创建用户主动删除的大盘。Node 迁移仅将未编辑的旧 Go 运行指标面板一次性更新为活跃资源和事件循环延迟，并保留版本记录。
 
-中心记录上报接口 QPS / 响应状态 / 耗时、首次成功确认的记录数与 OTLP 字节数、内存和自监控队列；重复批次只增加接口请求次数，不重复计算接收量。执行节点控制心跳转换成在线状态、队列和采集诊断；启动、配置变更与执行失败日志在中心 SQLite 暂存，写入 ClickHouse 成功后清除。SDK 自监控在原有业务权限验证后自动分流到系统 SDK 表。见 [SDK 内部监控](sdk/README.md#内部监控) 和 [本机封装 SDK 示例](examples/self-monitoring/README.md)。
+中心记录上报接口 QPS / 响应状态 / 耗时、首次成功确认的记录数与 OTLP 字节数、Node 堆内存、活跃资源、事件循环延迟和自监控队列；重复批次只增加接口请求次数，不重复计算接收量。执行节点控制心跳转换成在线状态、队列和采集诊断；启动、配置变更与执行失败日志在中心 SQLite 暂存，写入 ClickHouse 成功后清除。SDK 自监控在原有业务权限验证后自动分流到系统 SDK 表。见 [SDK 内部监控](sdk/README.md#内部监控) 和 [本机封装 SDK 示例](examples/self-monitoring/README.md)。

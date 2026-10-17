@@ -1,0 +1,198 @@
+{
+  "source_commit": "1d892c9e00005d497cfbc8660a5dd67b22d4da29",
+  "trace": {
+    "resourceSpans": [
+      {
+        "resource": {
+          "attributes": [
+            {
+              "key": "service.name",
+              "value": {
+                "stringValue": "fixture"
+              }
+            }
+          ]
+        },
+        "scopeSpans": [
+          {
+            "spans": [
+              {
+                "traceId": "00112233445566778899aabbccddeeff",
+                "spanId": "0123456789abcdef",
+                "startTimeUnixNano": "1000000000",
+                "endTimeUnixNano": "1000001000",
+                "events": [
+                  {
+                    "timeUnixNano": "18446744073709551615",
+                    "name": "<event> ",
+                    "attributes": [
+                      {
+                        "key": "int",
+                        "value": {
+                          "intValue": "9223372036854775807"
+                        }
+                      },
+                      {
+                        "key": "empty",
+                        "value": {}
+                      },
+                      {
+                        "key": "array",
+                        "value": {
+                          "arrayValue": {
+                            "values": [
+                              {
+                                "stringValue": ""
+                              },
+                              {
+                                "boolValue": false
+                              },
+                              {
+                                "doubleValue": 0
+                              },
+                              {
+                                "kvlistValue": {
+                                  "values": [
+                                    {
+                                      "key": "<key>",
+                                      "value": {
+                                        "bytesValue": "AP8="
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ],
+                    "droppedAttributesCount": 1
+                  },
+                  {}
+                ],
+                "links": [
+                  {
+                    "traceId": "ffeeddccbbaa99887766554433221100",
+                    "spanId": "fedcba9876543210",
+                    "traceState": "a=<x>",
+                    "attributes": [
+                      {
+                        "key": "n",
+                        "value": {
+                          "intValue": "-9223372036854775808"
+                        }
+                      }
+                    ],
+                    "flags": 257
+                  },
+                  {}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "config_raw": [
+    "{\"disable_rules\":[],\"log_sampling\":{\"zebra\":{\"rules\":[{\"conditions\":[{\"values\":[1.0,9223372036854775807,\"<x> \",true],\"operator\":\"in\",\"field\":\"attr:uid\"}],\"rate\":0.25}],\"key\":\"event_id\"},\"alpha\":{\"exclude\":[],\"rules\":[]}}}",
+    "{\"log_sampling\":{\"alpha\":{\"rules\":[{\"rate\":1,\"conditions\":[{\"field\":\"resource:role\",\"operator\":\"exists\",\"values\":[]}]}],\"exclude\":null}},\"disable_rules\":[{\"conditions\":[{\"operator\":\"in\",\"field\":\"service\",\"values\":[\"api\"]}]}]}",
+    "{\"log_sampling\":{},\"disable_rules\":null}"
+  ],
+  "doubles": [
+    0.0009765625,
+    -0.0009765625,
+    0.0029296875,
+    0,
+    1.2345678905,
+    1e-12,
+    1e+28
+  ],
+  "configs": [
+    {
+      "revision": "73aca51294131ae3731ac045fd67769f969a1e81ba7a6336f1bac1f11d2a7e20",
+      "log_sampling": {
+        "alpha": {
+          "key": "event_id",
+          "rules": [],
+          "exclude": []
+        },
+        "zebra": {
+          "key": "event_id",
+          "rules": [
+            {
+              "name": "",
+              "rate": 0.25,
+              "conditions": [
+                {
+                  "field": "attr:uid",
+                  "operator": "in",
+                  "values": [
+                    1,
+                    9223372036854776000,
+                    "<x> ",
+                    true
+                  ]
+                }
+              ]
+            }
+          ],
+          "exclude": []
+        }
+      },
+      "disable_rules": []
+    },
+    {
+      "revision": "f7ae3285cad0bb06e1a56eedbdd4e33e13eac42bbc0f5fd2f73cc8ab1f179ac6",
+      "log_sampling": {
+        "alpha": {
+          "key": "event_id",
+          "rules": [
+            {
+              "name": "",
+              "rate": 1,
+              "conditions": [
+                {
+                  "field": "resource:role",
+                  "operator": "exists"
+                }
+              ]
+            }
+          ],
+          "exclude": []
+        }
+      },
+      "disable_rules": [
+        {
+          "name": "",
+          "conditions": [
+            {
+              "field": "service",
+              "operator": "in",
+              "values": [
+                "api"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "revision": "b24db51572416a973fbf5bfbdd85ed00bc691120ff5a5a96cbb9ecd13ca31539",
+      "log_sampling": {},
+      "disable_rules": null
+    }
+  ],
+  "decimals": [
+    "0.000976562",
+    "-0.000976562",
+    "0.002929688",
+    "0.000000000",
+    "1.234567890",
+    "0.000000000",
+    "9999999999999999583119736832.000000000"
+  ],
+  "events_json": "[{\"time_unix_nano\":18446744073709551615,\"name\":\"\\u003cevent\\u003e\\u2028\",\"attributes\":[{\"key\":\"int\",\"value\":{\"Value\":{\"IntValue\":9223372036854775807}}},{\"key\":\"empty\",\"value\":{\"Value\":null}},{\"key\":\"array\",\"value\":{\"Value\":{\"ArrayValue\":{\"values\":[{\"Value\":{\"StringValue\":\"\"}},{\"Value\":{\"BoolValue\":false}},{\"Value\":{\"DoubleValue\":0}},{\"Value\":{\"KvlistValue\":{\"values\":[{\"key\":\"\\u003ckey\\u003e\",\"value\":{\"Value\":{\"BytesValue\":\"AP8=\"}}}]}}}]}}}}],\"dropped_attributes_count\":1},{}]",
+  "links_json": "[{\"trace_id\":\"ffeeddccbbaa99887766554433221100\",\"span_id\":\"fedcba9876543210\",\"trace_state\":\"a=\\u003cx\\u003e\",\"attributes\":[{\"key\":\"n\",\"value\":{\"Value\":{\"IntValue\":-9223372036854775808}}}],\"flags\":257},{}]"
+}

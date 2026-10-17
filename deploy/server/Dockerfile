@@ -1,42 +1,44 @@
-FROM node:24.15.0-alpine AS web
-WORKDIR /work/web
-COPY web/package*.json ./
-RUN npm ci
-COPY web/ ./
-# The reporting settings UI shares the SDK sampling model.
-COPY sdk/typescript/src/ /work/sdk/typescript/src/
-RUN npm run build
-WORKDIR /work/sdk/typescript
-COPY sdk/typescript/package*.json ./
-RUN npm ci
-COPY sdk/typescript/ ./
-RUN npm run build && mkdir -p /work/internal/server/agent-dist && npm pack --pack-destination /work/internal/server/agent-dist
-FROM node:24.15.0-alpine AS ai
-WORKDIR /opt/lightmoni-ai
-COPY ai-runtime/package*.json ./
-RUN npm ci
-COPY ai-runtime/tsconfig.json ./
-COPY ai-runtime/src ./src
-RUN npm run build && npm prune --omit=dev
-
-FROM golang:1.26.3-alpine AS go
+FROM golang:1.26.3-alpine AS go-sdk
 WORKDIR /work
-COPY go.mod go.sum ./
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=$GOPROXY
-RUN --mount=type=cache,target=/go/pkg/mod GOPROXY="$GOPROXY" go mod download
+COPY go.mod go.sum ./
+COPY sdk/ ./sdk/
+COPY examples/sdk/go/ ./examples/sdk/go/
+COPY scripts/build-go-sdk.sh ./scripts/build-go-sdk.sh
+# Go only packages the Go business SDK; it is absent from the platform runtime.
+RUN --mount=type=cache,target=/go/pkg/mod sh scripts/build-go-sdk.sh 0.1.0 /sdk-release
+
+FROM node:24.15.0-bookworm AS build
+WORKDIR /work
+COPY sdk/typescript/package*.json ./sdk/typescript/
+RUN npm --prefix sdk/typescript ci
+COPY sdk/typescript/ ./sdk/typescript/
+RUN npm --prefix sdk/typescript run build
+COPY runtime/package*.json ./runtime/
+RUN npm --prefix runtime ci
+COPY ai-runtime/package*.json ./ai-runtime/
+RUN npm --prefix ai-runtime ci
+COPY web/package*.json ./web/
+RUN npm --prefix web ci
 COPY . ./
-COPY --from=web /work/internal/server/dist ./internal/server/dist
-COPY --from=web /work/internal/server/agent-dist/ ./internal/server/agent-dist/
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build sh deploy/agent/release.sh 0.1.0 internal/server/agent-dist && sh scripts/build-go-sdk.sh 0.1.0 internal/server/agent-dist && sh scripts/build-native-sdks.sh 0.1.0 internal/server/agent-dist && CGO_ENABLED=0 go build -trimpath -o /lightmoni ./cmd/lightmoni
-FROM node:24.15.0-alpine
-RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 lightmoni && mkdir -p /data && chown lightmoni:lightmoni /data
-COPY --from=go /lightmoni /usr/local/bin/lightmoni
-COPY --from=ai /opt/lightmoni-ai/package.json /opt/lightmoni-ai/package.json
-COPY --from=ai /opt/lightmoni-ai/node_modules /opt/lightmoni-ai/node_modules
-COPY --from=ai /opt/lightmoni-ai/dist /opt/lightmoni-ai/dist
-ENV LIGHTMONI_ADDR=:8080 LIGHTMONI_DATA=/data/state LIGHTMONI_AI_RUNNER=/opt/lightmoni-ai/dist/runner.js
+RUN npm --prefix runtime run build && npm --prefix ai-runtime run build && npm --prefix web run build
+RUN node scripts/build-agent-release.mjs 0.1.0 runtime/downloads
+COPY --from=go-sdk /sdk-release/ ./runtime/downloads/
+RUN cd sdk/typescript && npm pack --pack-destination /work/runtime/downloads
+RUN sh scripts/build-native-sdks.sh 0.1.0 runtime/downloads && npm --prefix runtime prune --omit=dev && npm --prefix ai-runtime prune --omit=dev
+
+FROM node:24.15.0-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata wget && rm -rf /var/lib/apt/lists/* && groupadd --gid 10001 lightmoni && useradd --uid 10001 --gid lightmoni --no-create-home lightmoni && mkdir -p /data && chown lightmoni:lightmoni /data
+WORKDIR /opt/lightmoni
+COPY --from=build /work/runtime/ ./runtime/
+COPY --from=build /work/sdk/typescript/package.json ./sdk/typescript/package.json
+COPY --from=build /work/sdk/typescript/dist/ ./sdk/typescript/dist/
+COPY --from=build /work/ai-runtime/package.json ./ai-runtime/package.json
+COPY --from=build /work/ai-runtime/node_modules/ ./ai-runtime/node_modules/
+COPY --from=build /work/ai-runtime/dist/ ./ai-runtime/dist/
+ENV LIGHTMONI_ADDR=:8080 LIGHTMONI_DATA=/data/state LIGHTMONI_AI_RUNNER=/opt/lightmoni/ai-runtime/dist/runner.js
 USER lightmoni
 WORKDIR /data
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/lightmoni"]
+ENTRYPOINT ["node", "/opt/lightmoni/runtime/dist/server/main.js"]

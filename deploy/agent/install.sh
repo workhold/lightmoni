@@ -46,7 +46,57 @@ if [ -n "$endpoint" ] && [ "$key_stdin" != "yes" ]; then echo 'A reporting addre
 if [ -n "$config_source" ]; then [ -f "$config_source" ] || { echo 'Configuration file missing.' >&2; exit 1; }; fi
 
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
+transaction_started="no"
+service_changed="no"
+restart_attempted="no"
+enable_attempted="no"
+previous_active="no"
+previous_enabled="no"
+runtime_release=""
+rollback_failed="no"
+restore_file() {
+  destination="$1"
+  snapshot="$2"
+  if [ -e "$snapshot" ] || [ -L "$snapshot" ]; then
+    cp -Pp "$snapshot" "$destination.restore-$$" && mv -Tf "$destination.restore-$$" "$destination" || rollback_failed="yes"
+  else
+    rm -f "$destination" || rollback_failed="yes"
+  fi
+}
+finish() {
+  result="$1"
+  trap - EXIT HUP INT TERM
+  set +e
+  if [ "$result" -ne 0 ] && [ "$transaction_started" = "yes" ]; then
+    echo 'Installation failed; restoring the previous Agent installation and configuration.' >&2
+    if [ "$restart_attempted" = "yes" ]; then systemctl stop lightmoni-agent.service || rollback_failed="yes"; fi
+    restore_file /etc/lightmoni-agent/config.json "$tmp_dir/previous-config"
+    restore_file /usr/local/bin/lightmoni-agent "$tmp_dir/previous-launcher"
+    restore_file /etc/systemd/system/lightmoni-agent.service "$tmp_dir/previous-service"
+    restore_file /opt/lightmoni-agent/current "$tmp_dir/previous-current"
+    if [ "$service_changed" = "yes" ]; then systemctl daemon-reload || rollback_failed="yes"; fi
+    if [ "$enable_attempted" = "yes" ]; then
+      if [ "$previous_enabled" = "yes" ]; then systemctl enable lightmoni-agent.service || rollback_failed="yes"
+      else systemctl disable lightmoni-agent.service || rollback_failed="yes"; fi
+    fi
+    if [ "$restart_attempted" = "yes" ] && [ "$previous_active" = "yes" ]; then
+      systemctl restart lightmoni-agent.service || rollback_failed="yes"
+      systemctl is-active --quiet lightmoni-agent.service || rollback_failed="yes"
+    fi
+    rm -f "/opt/lightmoni-agent/.current-$$" "/usr/local/bin/.lightmoni-agent.new-$$" "/etc/lightmoni-agent/.config.new-$$"
+    if [ "$rollback_failed" = "no" ] && [ -n "$runtime_release" ]; then rm -rf "$runtime_release"; fi
+  fi
+  if [ "$rollback_failed" = "yes" ]; then
+    echo "Automatic restoration needs attention; previous files remain in $tmp_dir" >&2
+  else
+    rm -rf "$tmp_dir"
+  fi
+  exit "$result"
+}
+trap 'finish "$?"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if [ "$key_stdin" = "yes" ]; then
   IFS= read -r reporting_key || :
   [ -n "$reporting_key" ] || { echo 'A reporting key is required.' >&2; exit 1; }
@@ -69,27 +119,63 @@ expected="$(awk -v artifact="$artifact" '$2 == artifact { print $1 }' "$tmp_dir/
 actual="$(sha256sum "$tmp_dir/$artifact" | awk '{ print $1 }')"
 [ "$expected" = "$actual" ] || { echo 'Release checksum verification failed.' >&2; exit 1; }
 mkdir "$tmp_dir/unpacked"
-tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir/unpacked" lightmoni-agent lightmoni-agent.service
+tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir/unpacked" lightmoni-agent lightmoni-agent.service lightmoni-agent-runtime
 [ -f "$tmp_dir/unpacked/lightmoni-agent" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent" ] || { echo 'Invalid release binary.' >&2; exit 1; }
+[ -x "$tmp_dir/unpacked/lightmoni-agent-runtime/node" ] || { echo 'Bundled Node runtime is missing.' >&2; exit 1; }
+"$tmp_dir/unpacked/lightmoni-agent-runtime/node" --version >/dev/null || { echo 'The release requires Linux with glibc 2.28 or newer.' >&2; exit 1; }
 
+# Validate a staged configuration before replacing any installed file. The
+# configure/check commands do not open the queue or create an Agent identity.
+staged_config="$tmp_dir/config.json"
+if [ -f "$config_path" ]; then cp -p "$config_path" "$staged_config"
+elif [ -n "$config_source" ]; then cp "$config_source" "$staged_config"; fi
+if [ -n "$endpoint" ]; then
+  printf '%s\n' "$reporting_key" | "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --endpoint "$endpoint" --group-id "$group_id" --key-stdin --require-data-dir /var/lib/lightmoni-agent
+elif [ -n "$group_id" ]; then
+  "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --group-id "$group_id" --require-data-dir /var/lib/lightmoni-agent
+fi
+"$tmp_dir/unpacked/lightmoni-agent" check --config "$staged_config" --require-data-dir /var/lib/lightmoni-agent
+
+# Preserve old Go binaries as well as the Node launcher's current symlink.
+# Backups retain modes, ownership and symlink identity for an atomic rollback.
+for item in config launcher service current; do
+  case "$item" in
+    config) installed="$config_path" ;;
+    launcher) installed="/usr/local/bin/lightmoni-agent" ;;
+    service) installed="/etc/systemd/system/lightmoni-agent.service" ;;
+    current) installed="/opt/lightmoni-agent/current" ;;
+  esac
+  if [ -e "$installed" ] || [ -L "$installed" ]; then
+    [ ! -d "$installed" ] || [ -L "$installed" ] || { echo "Refusing to replace a directory at $installed" >&2; exit 1; }
+    cp -Pp "$installed" "$tmp_dir/previous-$item"
+  fi
+done
+if systemctl is-active --quiet lightmoni-agent.service; then previous_active="yes"; fi
+if systemctl is-enabled --quiet lightmoni-agent.service; then previous_enabled="yes"; fi
+transaction_started="yes"
 if id lightmoni-agent >/dev/null 2>&1; then :; else
   command -v useradd >/dev/null || { echo 'useradd is required.' >&2; exit 1; }
   useradd --system --no-create-home --home-dir /var/lib/lightmoni-agent --shell /usr/sbin/nologin lightmoni-agent
 fi
 install -d -m 0700 -o lightmoni-agent -g lightmoni-agent /etc/lightmoni-agent /var/lib/lightmoni-agent
-if [ ! -f "$config_path" ] && [ -n "$config_source" ]; then install -m 0600 -o lightmoni-agent -g lightmoni-agent "$config_source" "$config_path"; fi
-if [ -n "$endpoint" ]; then
-  printf '%s\n' "$reporting_key" | "$tmp_dir/unpacked/lightmoni-agent" configure --config "$config_path" --endpoint "$endpoint" --group-id "$group_id" --key-stdin --require-data-dir /var/lib/lightmoni-agent
-  chown lightmoni-agent:lightmoni-agent "$config_path"
-elif [ -n "$group_id" ]; then
-  "$tmp_dir/unpacked/lightmoni-agent" configure --config "$config_path" --group-id "$group_id" --require-data-dir /var/lib/lightmoni-agent
-  chown lightmoni-agent:lightmoni-agent "$config_path"
-fi
-"$tmp_dir/unpacked/lightmoni-agent" check --config "$config_path" --require-data-dir /var/lib/lightmoni-agent
-install -m 0755 "$tmp_dir/unpacked/lightmoni-agent" /usr/local/bin/.lightmoni-agent.new
-mv /usr/local/bin/.lightmoni-agent.new /usr/local/bin/lightmoni-agent
+install -m 0600 -o lightmoni-agent -g lightmoni-agent "$staged_config" "/etc/lightmoni-agent/.config.new-$$"
+mv -f "/etc/lightmoni-agent/.config.new-$$" "$config_path"
+# The live queue, receipts, cursors, identity and cached tasks stay untouched.
+install -d -m 0755 /opt/lightmoni-agent/releases
+runtime_release="/opt/lightmoni-agent/releases/${version}-$(printf '%s' "$actual" | cut -c1-16)-$$"
+cp -R "$tmp_dir/unpacked/lightmoni-agent-runtime" "$runtime_release"
+chmod -R go-w "$runtime_release"
+ln -s "$runtime_release" "/opt/lightmoni-agent/.current-$$"
+mv -Tf "/opt/lightmoni-agent/.current-$$" /opt/lightmoni-agent/current
+install -m 0755 "$tmp_dir/unpacked/lightmoni-agent" "/usr/local/bin/.lightmoni-agent.new-$$"
+mv -f "/usr/local/bin/.lightmoni-agent.new-$$" /usr/local/bin/lightmoni-agent
+service_changed="yes"
 install -m 0644 "$tmp_dir/unpacked/lightmoni-agent.service" /etc/systemd/system/lightmoni-agent.service
 systemctl daemon-reload
+enable_attempted="yes"
 systemctl enable lightmoni-agent.service
+restart_attempted="yes"
 systemctl restart lightmoni-agent.service
-echo 'LightMoni Agent installed. Existing identity, configuration and spool were preserved.'
+systemctl is-active --quiet lightmoni-agent.service
+transaction_started="no"
+echo 'LightMoni Agent installed. Existing identity and spool were preserved.'

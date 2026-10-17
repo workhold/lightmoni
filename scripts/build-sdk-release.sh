@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 version=${1:-0.1.0}
-output=${2:-internal/server/agent-dist}
+output=${2:-runtime/downloads}
 mkdir -p "$output"
 release_dir=$(cd "$output" && pwd)
 npm --prefix sdk/typescript run build

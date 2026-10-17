@@ -20,12 +20,7 @@ data
 **/bin
 **/obj
 web/tsconfig.tsbuildinfo
-internal/server/dist
 sdk/typescript/dist
-internal/server/agent-dist/*.tar.gz
-internal/server/agent-dist/*.tgz
-internal/server/agent-dist/SHA256SUMS
-internal/server/agent-dist/SDK_SHA256SUMS
 
 .local-dev
 artifacts/screenshots
@@ -35,3 +30,7 @@ specs
 access
 preprocessed_configs
 ai-runtime/dist
+
+runtime/dist
+runtime/public
+runtime/downloads
