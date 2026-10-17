@@ -163,7 +163,11 @@ func (s *Service) config(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		incoming := normalizedConfig(update.Config)
-		canonicalIncoming, canonicalErr := canonicalAPIBase(incoming.BaseURL)
+		if !concreteProtocol(incoming.Protocol) {
+			shared.Error(w, 400, "select a concrete supported model protocol before saving")
+			return
+		}
+		canonicalIncoming, canonicalErr := protocolAPIBase(incoming.BaseURL, incoming.Protocol)
 		if canonicalErr != nil {
 			shared.Error(w, 400, "base_url must be an HTTP(S) API base URL without credentials, query or fragment")
 			return
@@ -172,7 +176,7 @@ func (s *Service) config(w http.ResponseWriter, r *http.Request) {
 		// Empty key preserves the existing secret. clear_key explicitly removes it.
 		if incoming.APIKey == "" && !update.ClearKey {
 			if c.APIKey != "" {
-				oldBase, oldErr := canonicalAPIBase(c.BaseURL)
+				oldBase, oldErr := canonicalBaseIdentity(c.BaseURL)
 				if oldErr != nil || oldBase != incoming.BaseURL {
 					shared.Error(w, 400, "a new API key or clear_key is required when changing the API base URL")
 					return
@@ -201,7 +205,7 @@ func (s *Service) config(w http.ResponseWriter, r *http.Request) {
 	}
 	c = normalizedConfig(c)
 	baseURL := c.BaseURL
-	if base, err := canonicalAPIBase(c.BaseURL); err == nil {
+	if base, err := canonicalBaseIdentity(c.BaseURL); err == nil {
 		baseURL = base
 	}
 	shared.JSON(w, 200, ConfigView{Runtime: "mastra", Protocol: c.Protocol, MaxInputTokens: c.MaxInputTokens, MaxOutputTokens: c.MaxOutputTokens, MaxSteps: c.MaxSteps, ReasoningEffort: c.ReasoningEffort, BaseURL: baseURL, Model: c.Model, HasKey: c.APIKey != "", Enabled: c.Enabled})

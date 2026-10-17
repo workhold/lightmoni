@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -18,7 +17,7 @@ const (
 	maxDiscoveryBody    = 1 << 20
 	maxDiscoveryModels  = 500
 	maxDiscoveryIDBytes = 200
-	maxDiscoveryGETs    = 6
+	maxDiscoveryGETs    = 7
 )
 
 type discoveryInput struct {
@@ -68,24 +67,10 @@ func (s *Service) models(w http.ResponseWriter, r *http.Request) {
 		discoveryError(w, 400, "invalid_protocol", "select a supported model protocol")
 		return
 	}
-	base, err := canonicalAPIBase(input.BaseURL)
+	_, err := canonicalAPIBase(input.BaseURL)
 	if err != nil || len(input.APIKey) > 4096 || containsControl(input.APIKey) {
 		discoveryError(w, 400, "invalid_input", "invalid model discovery input")
 		return
-	}
-	key, usedSavedKey := input.APIKey, false
-	if key == "" && input.UseSavedKey {
-		cfg, err := s.loadConfig(r.Context())
-		if err != nil {
-			discoveryError(w, 500, "configuration_unavailable", "cannot read assistant configuration")
-			return
-		}
-		savedBase, savedErr := canonicalAPIBase(cfg.BaseURL)
-		if cfg.APIKey == "" || savedErr != nil || savedBase != base {
-			discoveryError(w, 400, "saved_key_mismatch", "saved credential is unavailable for this address; enter a new API key or clear the saved key")
-			return
-		}
-		key, usedSavedKey = cfg.APIKey, true
 	}
 	protocol, source := input.Protocol, "manual"
 	profiles := []string{protocol}
@@ -97,7 +82,7 @@ func (s *Service) models(w http.ResponseWriter, r *http.Request) {
 			profiles = []string{ProtocolOpenAIChat, ProtocolAnthropic, ProtocolGoogle}
 		}
 	}
-	models, actualBase, outcome := s.fetchModels(r.Context(), base, key, usedSavedKey, profiles)
+	models, actualBase, outcome := s.fetchModels(r.Context(), input.BaseURL, input.APIKey, input.UseSavedKey, profiles)
 	if !outcome.success {
 		discoveryError(w, outcome.status, outcome.code, outcome.message)
 		return
@@ -128,7 +113,7 @@ func directoryTimeout() directoryOutcome {
 	return directoryOutcome{status: 504, code: "timeout", message: "model directory request timed out"}
 }
 
-func (s *Service) fetchModels(parent context.Context, base, key string, usedSavedKey bool, profiles []string) ([]discoveryModel, string, directoryOutcome) {
+func (s *Service) fetchModels(parent context.Context, base, explicitKey string, useSavedKey bool, profiles []string) ([]discoveryModel, string, directoryOutcome) {
 	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()
 	client := *s.options.HTTPClient
@@ -136,26 +121,42 @@ func (s *Service) fetchModels(parent context.Context, base, key string, usedSave
 	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 		return errors.New("provider redirects are not allowed")
 	}
-	// Keep candidates tied to each protocol profile. A root URL may expose
-	// OpenAI/Anthropic under /v1 but Gemini under /v1beta; carrying one profile's
-	// fallback into another would make the native Gemini catalog unreachable.
-	root, rootErr := url.Parse(base)
-	rootBase := rootErr == nil && root.Path == ""
 	requests := 0
 	var outcome directoryOutcome
 	var authenticationFailure directoryOutcome
+	var savedKeyFailure directoryOutcome
+	usedSavedKey := explicitKey == "" && useSavedKey
 	stop := false
 	for _, profile := range profiles {
 		if stop || requests >= maxDiscoveryGETs {
 			break
 		}
-		candidates := []string{base}
-		if !usedSavedKey && rootBase {
-			version := "v1"
-			if profile == ProtocolGoogle {
-				version = "v1beta"
+		profileBase, err := protocolAPIBase(base, profile)
+		if err != nil {
+			return nil, base, directoryOutcome{status: 400, code: "invalid_input", message: "invalid model discovery input"}
+		}
+		// Normalize the destination before resolving a saved key. In auto mode
+		// an incompatible profile may be skipped, but the original saved base
+		// is never normalized under that profile to make its credential match.
+		key, err := s.connectionKey(ctx, profileBase, explicitKey, useSavedKey)
+		if err != nil {
+			status, code := 400, "saved_key_mismatch"
+			var keyErr *connectionKeyError
+			if errors.As(err, &keyErr) {
+				status, code = keyErr.status, keyErr.code
 			}
-			candidates = append(candidates, appendAPIPath(base, version))
+			failure := directoryOutcome{status: status, code: code, message: err.Error()}
+			if code != "saved_key_mismatch" {
+				return nil, base, failure
+			}
+			savedKeyFailure = failure
+			continue
+		}
+		// Candidates belong to their own profile. Only fresh/keyless roots may
+		// probe version alternatives; saved keys stay at their exact base.
+		candidates, err := protocolDiscoveryCandidates(profileBase, profile, usedSavedKey)
+		if err != nil {
+			return nil, base, directoryOutcome{status: 400, code: "invalid_input", message: "invalid model discovery input"}
 		}
 		for index, candidate := range candidates {
 			if requests >= maxDiscoveryGETs {
@@ -171,9 +172,8 @@ func (s *Service) fetchModels(parent context.Context, base, key string, usedSave
 			if result.code == "credentials_rejected" {
 				authenticationFailure = result
 			}
-			// A second candidate is only a bounded repair for an unsupported or
-			// authentication response at a fresh-key root. Never move a saved
-			// credential to another canonical base.
+			// Alternate version candidates are bounded repairs for unsupported
+			// or authentication responses, never generation probes.
 			if index+1 < len(candidates) && result.fallback {
 				continue
 			}
@@ -183,6 +183,9 @@ func (s *Service) fetchModels(parent context.Context, base, key string, usedSave
 			break
 		}
 	}
+	if outcome.code == "" && savedKeyFailure.code != "" {
+		outcome = savedKeyFailure
+	}
 	if (outcome.code == "directory_unsupported" || outcome.code == "provider_unavailable") && authenticationFailure.code != "" {
 		outcome = authenticationFailure
 	}
@@ -190,37 +193,9 @@ func (s *Service) fetchModels(parent context.Context, base, key string, usedSave
 }
 
 func (s *Service) fetchDirectory(ctx context.Context, client *http.Client, base, key, profile string) ([]discoveryModel, directoryOutcome) {
-	endpoint, err := url.Parse(appendAPIPath(base, "models"))
+	req, err := protocolDirectoryRequest(ctx, base, key, profile)
 	if err != nil {
 		return nil, directoryFailure("provider_unavailable", "cannot request model directory", false, false)
-	}
-	query := endpoint.Query()
-	if profile == ProtocolAnthropic {
-		query.Set("limit", "500")
-	}
-	if profile == ProtocolGoogle {
-		query.Set("pageSize", "500")
-	}
-	endpoint.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return nil, directoryFailure("provider_unavailable", "cannot request model directory", false, false)
-	}
-	req.Header.Set("Accept", "application/json")
-	switch profile {
-	case ProtocolAnthropic:
-		req.Header.Set("Anthropic-Version", "2023-06-01")
-		if key != "" {
-			req.Header.Set("X-Api-Key", key)
-		}
-	case ProtocolGoogle:
-		if key != "" {
-			req.Header.Set("X-Goog-Api-Key", key)
-		}
-	default:
-		if key != "" {
-			req.Header.Set("Authorization", "Bearer "+key)
-		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {

@@ -114,6 +114,13 @@ export function ModelSettings({ open = false, embedded = false, config, onClose,
         signal: abort.signal,
       });
       if (generation !== testGeneration.current) return;
+      if (form.getFieldValue('base_url') !== result.base_url) {
+        // Cancel any directory request for the old address before adopting the
+        // tested destination, so a late response cannot undo this correction.
+        query.setInput(discoveryInput({ ...values, base_url: result.base_url }, !!config?.has_key));
+        setAddressCorrection(describeAddressCorrection(form.getFieldValue('base_url'), result.base_url));
+        form.setFieldValue('base_url', result.base_url);
+      }
       setTestResult({ status: 'success', latency_ms: result.latency_ms });
       void message.success('连接测试成功');
     } catch (problem) {

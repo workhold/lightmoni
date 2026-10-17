@@ -33,10 +33,12 @@ export function describeAddressCorrection(original: string, corrected: string): 
     const endpoint = /(?:\/chat\/completions|\/responses|\/messages|\/models\/[^/]+:(?:generateContent|streamGenerateContent)|\/models)$/.exec(path);
     const basePath = endpoint ? path.slice(0, endpoint.index).replace(/\/+$/, '') : path;
     const versionAdded = basePath === '' && (correctedPath === '/v1' || correctedPath === '/v1beta');
-    const pathExplained = correctedPath === basePath || versionAdded;
+    const versionReplaced = basePath.endsWith('/v1beta') && correctedPath === `${basePath.slice(0, -'/v1beta'.length)}/v1`;
+    const pathExplained = correctedPath === basePath || versionAdded || versionReplaced;
 
     if (pathExplained && endpoint) reasons.push('已从完整接口地址提取 API 基址');
     if (versionAdded) reasons.push(`已补全模型目录可用的版本路径 ${correctedPath}`);
+    if (versionReplaced) reasons.push('已按所选协议将版本路径 /v1beta 修正为 /v1');
     if (pathExplained && before.path.endsWith('/') && !after.path.endsWith('/')) reasons.push('已去除地址末尾多余的 /');
     if (!pathExplained || before.origin !== after.origin) reasons.push('已规范化 API 基址格式');
   }

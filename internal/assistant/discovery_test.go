@@ -209,7 +209,7 @@ func TestModelProtocolsAutomaticRootUsesProfileVersionFallback(t *testing.T) {
 	if result.Protocol != ProtocolGoogle || result.ProtocolSource != "catalog" || result.RequiresConfirmation || len(result.Models) != 1 || result.Models[0].ID != "gemini-root" {
 		t.Fatalf("unexpected root fallback result: %s", body)
 	}
-	want := []string{"/models", "/v1/models", "/models", "/v1/models", "/models", "/v1beta/models"}
+	want := []string{"/v1/models", "/models", "/v1/models", "/models", "/v1/models", "/v1beta/models"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Fatalf("profile-specific fallback paths: got %v want %v", paths, want)
 	}
@@ -504,7 +504,7 @@ func TestModelDiscoveryRootFallbackAndEmptyDirectory(t *testing.T) {
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
 				switch r.URL.Path {
-				case "/models":
+				case "/v1/models":
 					switch first {
 					case "404":
 						w.WriteHeader(404)
@@ -515,7 +515,7 @@ func TestModelDiscoveryRootFallbackAndEmptyDirectory(t *testing.T) {
 					case "missing-data":
 						fmt.Fprint(w, `{"status":"ok"}`)
 					}
-				case "/v1/models":
+				case "/models":
 					fmt.Fprint(w, `{"data":[]}`)
 				default:
 					t.Errorf("unexpected path %q", r.URL.Path)
@@ -528,7 +528,7 @@ func TestModelDiscoveryRootFallbackAndEmptyDirectory(t *testing.T) {
 				t.Fatalf("fallback: %d %s", status, b)
 			}
 			result := decodeModels(t, b)
-			if result.BaseURL != provider.URL+"/v1" || len(result.Models) != 0 || calls.Load() != 2 {
+			if result.BaseURL != provider.URL || len(result.Models) != 0 || calls.Load() != 2 {
 				t.Fatalf("unexpected fallback: %s (calls %d)", b, calls.Load())
 			}
 		})
@@ -541,11 +541,11 @@ func TestModelDiscoveryFreshKeyRootAuthFallback(t *testing.T) {
 			var calls atomic.Int32
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
-				if r.URL.Path == "/models" {
+				if r.URL.Path == "/v1/models" {
 					w.WriteHeader(status)
 					return
 				}
-				if r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer fresh-secret" {
+				if r.URL.Path != "/models" || r.Header.Get("Authorization") != "Bearer fresh-secret" {
 					t.Errorf("unexpected repaired request: %s %s", r.Method, r.URL.RequestURI())
 					w.WriteHeader(http.StatusBadRequest)
 					return
@@ -559,7 +559,7 @@ func TestModelDiscoveryFreshKeyRootAuthFallback(t *testing.T) {
 				t.Fatalf("auth fallback: %d %s", statusCode, body)
 			}
 			result := decodeModels(t, body)
-			if result.BaseURL != provider.URL+"/v1" || len(result.Models) != 1 || result.Models[0].ID != "repaired-model" || calls.Load() != 2 {
+			if result.BaseURL != provider.URL || len(result.Models) != 1 || result.Models[0].ID != "repaired-model" || calls.Load() != 2 {
 				t.Fatalf("unexpected auth fallback: %s (calls %d)", body, calls.Load())
 			}
 		})
@@ -899,12 +899,16 @@ func TestModelDiscoveryRootEmptyNoFallbackAndCancellation(t *testing.T) {
 		var calls atomic.Int32
 		provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls.Add(1)
+			if r.URL.Path == "/v1/models" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 			fmt.Fprint(w, `{"data":[]}`)
 		}))
 		defer provider.Close()
 		_, server := fixtureService(t, nil)
 		status, b := modelRequest(t, server, provider.URL, "", false)
-		if status != 200 || calls.Load() != 1 || decodeModels(t, b).BaseURL != provider.URL {
+		if status != 200 || calls.Load() != 2 || decodeModels(t, b).BaseURL != provider.URL {
 			t.Fatalf("empty root caused fallback: %d %s (calls %d)", status, b, calls.Load())
 		}
 	})

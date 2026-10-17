@@ -49,7 +49,14 @@
 - [x] T024 Show a persistent repair notice beside Base URL, keep the corrected value in the field, and clear stale notices when connection information or configuration changes.
 - [x] T025 Verify real browser interactions for root/version repair, endpoint extraction, refresh, failure, stale responses and test/save payloads; run existing frontend checks and rebuild/restart the local service.
 
+## Phase9 Per-protocol URL rules
+- [x] T026 Specify per-protocol URL normalization, `/v1` preference, Gemini beta fallback and exact saved-key destinations before implementation.
+- [x] T027 Centralize protocol URL/candidate/catalog policies and apply shared normalization to discovery, connection tests and config save.
+- [x] T028 Cover misleading beta catalogs, Gemini version order, custom escaped paths, credential isolation and cross-entry-point consistency with provider/runtime fixtures.
+- [x] T029 Explain version replacements in the address notice, verify browser field/test/save behavior, and rebuild/restart the service.
+
 ## Dependencies/Parallel execution
+
 T001-T003 before app edits. Backend owns internal/assistant/{types,provider,service,discovery,discovery_test}.go; runtime owns ai-runtime and optionally native runtime fixture file; UI owns web assistant settings/types/helpers/tests. Each writes meaningful tests before implementation; cross-side interfaces from contract frozen. Root handles docs, reviews and serialized final builds. Runtime package build before backend full native integration tests. Web build must not overlap Go compilation. US1/US2 ship together; US3 cannot imply generation verification.
 
 ## Implementation strategy

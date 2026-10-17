@@ -10,7 +10,7 @@ Expose visible discovery action and protocol selector, keep automatic query, add
 **Storage**: Config JSON adds concrete protocol; legacy blank -> Chat. SQLite schema unchanged.
 **Testing**: Native SDK fixture integration, Go race/contract, frontend lifecycle checks/typecheck/build/browser.
 **Platform/Type**: Existing Go web host and private Node worker.
-**Constraints**: Same-origin catalog requests≤6, total8s, body1MiB, 500 model IDs; saved key no version path fallback; generated probe only after explicit test action; no personal key reuse from old DOM; reasoning override is omitted by default and must remain best-effort across providers.
+**Constraints**: Same-origin catalog requests≤7, total8s, body1MiB, 500 model IDs; saved key no version path fallback; generated probe only after explicit test action; no personal key reuse from old DOM; reasoning override is omitted by default and must remain best-effort across providers.
 **Performance**: 700ms debounce; same existing execution limits. A reasoning preference applies to each model step and the bounded history summarizer, without changing host input/output/step limits.
 
 ## Constitution Check
@@ -18,7 +18,7 @@ PASS pre/post-design: host credentials/tools unchanged; specification before app
 
 ## Project Structure
 Docs: spec/plan/research/data-model/contracts/quickstart/tasks/verification under specs/003-multi-protocol-models.
-Go: internal/assistant/{provider,types,service,discovery,discovery_test}.go; native SDK fixtures in ai-runtime/test and/or internal/assistant/runtime_test.go.
+Go: internal/assistant/{provider,protocol_rules,types,service,discovery,discovery_test}.go; protocol policies centralize version repair, ordered candidates, catalog headers/query parameters; native SDK fixtures in ai-runtime/test and/or internal/assistant/runtime_test.go.
 Node: ai-runtime/src/model.ts, protocol.ts, runner.ts, tests, package.json/package-lock.json.
 UI: ModelSettings.tsx, model-discovery.ts/tests, types.ts, model-protocol.ts helper if needed.
 Ownership: backend, runtime, frontend separate agents after shared contract; root coordinates docs/final review/build and user tab handoff.

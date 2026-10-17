@@ -19,12 +19,8 @@ const (
 )
 
 func concreteProtocol(protocol string) bool {
-	switch protocol {
-	case ProtocolOpenAIChat, ProtocolOpenAIResponses, ProtocolAnthropic, ProtocolGoogle:
-		return true
-	default:
-		return false
-	}
+	_, ok := modelProtocolRegistry[protocol]
+	return ok
 }
 
 func normalizedConfig(c Config) Config {
@@ -78,6 +74,16 @@ func ValidateConfig(c Config) error {
 // canonicalAPIBase accepts the API base or one of the standard endpoint URLs.
 // Escaped path bytes are preserved so tenant paths such as %2F remain distinct.
 func canonicalAPIBase(raw string) (string, error) {
+	return canonicalBaseURL(raw, true)
+}
+
+// Stored bases have already had an endpoint extracted. Normalize URL identity
+// without interpreting a tenant's final path segment as another endpoint.
+func canonicalBaseIdentity(raw string) (string, error) {
+	return canonicalBaseURL(raw, false)
+}
+
+func canonicalBaseURL(raw string, extractEndpoint bool) (string, error) {
 	if len(raw) > 2048 || containsControl(raw) || strings.Contains(raw, "#") {
 		return "", errors.New("invalid API base URL")
 	}
@@ -93,13 +99,15 @@ func canonicalAPIBase(raw string) (string, error) {
 	for strings.HasSuffix(escaped, "/") {
 		escaped = strings.TrimSuffix(escaped, "/")
 	}
-	if match := googleGenerationPath.FindStringIndex(escaped); match != nil {
-		escaped = escaped[:match[0]]
-	} else {
-		for _, suffix := range []string{"/chat/completions", "/responses", "/messages", "/models"} {
-			if strings.HasSuffix(escaped, suffix) {
-				escaped = strings.TrimSuffix(escaped, suffix)
-				break
+	if extractEndpoint {
+		if match := googleGenerationPath.FindStringIndex(escaped); match != nil {
+			escaped = escaped[:match[0]]
+		} else {
+			for _, suffix := range []string{"/chat/completions", "/responses", "/messages", "/models"} {
+				if strings.HasSuffix(escaped, suffix) {
+					escaped = strings.TrimSuffix(escaped, suffix)
+					break
+				}
 			}
 		}
 	}

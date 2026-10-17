@@ -60,7 +60,7 @@ func (s *Service) testConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base, err := canonicalAPIBase(input.BaseURL)
+	base, err := protocolAPIBase(input.BaseURL, input.Protocol)
 	if err != nil || !concreteProtocol(input.Protocol) {
 		connectionError(w, http.StatusBadRequest, "invalid_input", "enter a valid API base URL and a concrete model protocol")
 		return
@@ -136,7 +136,7 @@ func (s *Service) connectionKey(ctx context.Context, base, explicit string, useS
 		}
 		return "", &connectionKeyError{status: http.StatusInternalServerError, code: "configuration_unavailable", message: "cannot read assistant configuration"}
 	}
-	savedBase, savedErr := canonicalAPIBase(cfg.BaseURL)
+	savedBase, savedErr := canonicalBaseIdentity(cfg.BaseURL)
 	if cfg.APIKey == "" || savedErr != nil || savedBase != base {
 		return "", &connectionKeyError{status: http.StatusBadRequest, code: "saved_key_mismatch", message: "saved credential is unavailable for this address; enter a new API key or clear the saved key"}
 	}
