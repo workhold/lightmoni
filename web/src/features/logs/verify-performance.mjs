@@ -99,10 +99,10 @@ const measurements = {};
 try {
   const begun = Date.now();
   await page.goto(url);
-  await expect(page.getByText('200 条已载入', { exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '原始日志', exact: true }).locator('.lm-discover-count')).toHaveText('200');
   for (let count = 400; count <= 2000; count += 200) {
     await page.getByRole('button', { name: '加载更多', exact: true }).click();
-    await expect(page.getByText(count.toLocaleString() + ' 条已载入', { exact: true })).toBeVisible();
+    await expect(page.getByRole('tab', { name: '原始日志', exact: true }).locator('.lm-discover-count')).toHaveText(count.toLocaleString());
   }
   measurements.loadMs = Date.now() - begun;
   measurements.loaded = await snapshot();
@@ -142,9 +142,11 @@ try {
   await expect(page.locator('[data-row-key="perf-1999"]')).toBeVisible();
   await page.locator('[data-row-key="perf-1999"] .lm-log-message').click();
   const detail = page.getByRole('dialog', { name: /日志详情/ });
+  await detail.getByRole('tab', { name: '原文 / 堆栈', exact: true }).click();
   await expect(detail.locator('.lm-log-body')).toContainText('performance log 1999');
   await detail.locator('.ant-drawer-close').click();
   // Display settings must invalidate cached cell presentation.
+  await page.getByRole('button', { name: '表格显示选项', exact: true }).click();
   await page.getByRole('combobox', { name: '日志行数', exact: true }).click();
   await page.getByRole('combobox', { name: '日志行数', exact: true }).press('ArrowDown');
   await page.getByRole('combobox', { name: '日志行数', exact: true }).press('Enter');
@@ -157,11 +159,12 @@ try {
   await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2);
   await page.mouse.up();
   await expect.poll(() => handle.evaluate(element => Math.round(element.closest('.ant-table-cell').getBoundingClientRect().width))).toBe(280);
+  await page.getByRole('button', { name: '表格显示选项', exact: true }).click();
   // Replacing a row with the same ID must invalidate its cached values and type.
   rowData[0][frameColumns.findIndex(column => column.name === 'body')] = 'refreshed performance log';
   rowData[0][frameColumns.findIndex(column => column.name === 'attributes_json')] = '{"lm_perf_payload":"new","latency":"updated"}';
   await page.locator('.lm-log-results .lm-log-inline-filter').filter({ hasText: /^INFO$/ }).first().click();
-  await expect(page.getByText('200 条已载入', { exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: '原始日志', exact: true }).locator('.lm-discover-count')).toHaveText('200');
   expect(queries.at(-1).spec.filters).toEqual([{ scope: 'column', field: 'severity', type: 'string', op: 'eq', value: 'INFO' }]);
   const currentView = JSON.parse(new URL(page.url()).searchParams.get('q')).view;
   expect(currentView.row_lines).toBe(3);

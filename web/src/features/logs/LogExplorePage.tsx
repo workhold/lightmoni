@@ -14,7 +14,6 @@ import {
   ReloadOutlined,
   SaveOutlined,
   SearchOutlined,
-  SettingOutlined,
   ShareAltOutlined,
   MoreOutlined,
   FolderOpenOutlined,
@@ -24,11 +23,15 @@ import {
   CloseOutlined,
   UpOutlined,
   DownOutlined,
+  TableOutlined,
+  FullscreenOutlined,
+  FullscreenExitOutlined,
+  SlidersOutlined,
+  ClockCircleOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
   Button,
-  Descriptions,
   Drawer,
   Dropdown,
   Popover,
@@ -52,6 +55,8 @@ import { AssistantPanel } from "../assistant/AssistantPage";
 import Histogram from "./Histogram";
 import LogResultsTable, { severityColor } from "./LogResultsTable";
 import SearchBox from "./SearchBox";
+import DiscoverTimeRange from "./DiscoverTimeRange";
+import DocumentFields from "./DocumentFields";
 import FieldAggregate, { TopValues, useFieldAggregate } from "./FieldAggregate";
 import { parseExpression } from "./expression";
 import JSONTree from "./JSONTree";
@@ -132,6 +137,10 @@ export default function LogExplorePage() {
     [error, setError] = useState("");
   const [fieldsOpen, setFieldsOpen] = useState(false),
     [fieldSearch, setFieldSearch] = useState(""),
+    [fieldTypeFilter, setFieldTypeFilter] = useState("all"),
+    [selectedFieldsCollapsed, setSelectedFieldsCollapsed] = useState(false),
+    [availableFieldsCollapsed, setAvailableFieldsCollapsed] = useState(false),
+    [fullscreen, setFullscreen] = useState(false),
     [fieldOpen, setFieldOpen] = useState<string>(),
     [selected, setSelected] = useState<LogRow>(),
     [context, setContext] = useState<ContextResult>(),
@@ -184,6 +193,14 @@ export default function LogExplorePage() {
     interval_ms?: number;
   }>();
   const refreshSeconds = view.refresh_seconds ?? 0;
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setFullscreen(false); };
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKey);
+    return () => { document.body.style.overflow = overflow; document.removeEventListener("keydown", onKey); };
+  }, [fullscreen]);
   const table = tables.find((t) => t.id === spec.table_id),
     activeTable = tables.find((t) => t.id === activeSpec.table_id);
   const selectedForAI = useMemo(() =>
@@ -451,7 +468,7 @@ export default function LogExplorePage() {
     location.search,
     navigate,
   ]);
-  function commit(next: Spec, replace = false, nextView = view) {
+  function commit(next: Spec, replace = false, nextView = view, nextSaved: Saved | null = saved ?? null) {
     setSpec(next);
     setView(nextView);
     navigate(logURL(next, undefined, undefined, nextView), {
@@ -459,7 +476,7 @@ export default function LogExplorePage() {
       state: {
         logSpec: next,
         logView: nextView,
-        logSaved: saved,
+        logSaved: nextSaved ?? undefined,
         logQuery: true,
       },
     });
@@ -667,7 +684,8 @@ export default function LogExplorePage() {
   );
   const available = fieldMetadata.names;
   const filteredFields = available.filter((name) =>
-    name.toLowerCase().includes(fieldSearch.toLowerCase()),
+    fieldSearch.toLowerCase().split(/\s+/).every(token => name.toLowerCase().includes(token)) &&
+    (fieldTypeFilter === "all" || fieldMetadata.kinds.get(name) === fieldTypeFilter),
   );
   const fieldAggregate = useFieldAggregate(
     activeSpec,
@@ -781,6 +799,11 @@ export default function LogExplorePage() {
       return { ...v, columns };
     });
   }
+  function dropField(event: React.DragEvent) {
+    event.preventDefault();
+    const name = event.dataTransfer.getData("application/lightmoni-field");
+    if (available.includes(name) && !view.columns.includes(name)) toggleColumn(name);
+  }
   const resize = useCallback((name: string, width: number) => {
     const next = Math.max(80, Math.min(1200, width));
     setView((v) => v.widths[name] === next ? v : {
@@ -796,10 +819,16 @@ export default function LogExplorePage() {
       { ...view, lookback: 1440 },
     );
   }
-  const tableActions = useRef({ filter: quickFilter, expand: expandTableRange });
-  tableActions.current = { filter: quickFilter, expand: expandTableRange };
+  const sortTable = (sort: Spec["sort"]) => commit({...activeSpec,sort});
+  const moveTableColumn = (name: string, delta: number) => moveColumn(view.columns.indexOf(name),delta);
+  const tableActions = useRef({ filter: quickFilter, expand: expandTableRange, sort: sortTable, move: moveTableColumn, remove: toggleColumn, copy });
+  tableActions.current = { filter: quickFilter, expand: expandTableRange, sort: sortTable, move: moveTableColumn, remove: toggleColumn, copy };
   const filterFromTable = useCallback((filter: Filter) => tableActions.current.filter(filter), []);
   const expandFromTable = useCallback(() => tableActions.current.expand(), []);
+  const sortFromTable = useCallback((sort: Spec["sort"]) => tableActions.current.sort(sort), []);
+  const moveFromTable = useCallback((name: string, delta: number) => tableActions.current.move(name,delta), []);
+  const removeFromTable = useCallback((name: string) => tableActions.current.remove(name), []);
+  const copyFromTable = useCallback((value: string) => { void tableActions.current.copy(value); }, []);
 
   async function showContext(limit = contextLimit) {
     if (!selected) return;
@@ -961,11 +990,18 @@ export default function LogExplorePage() {
       <div
         className={`lm-log-field ${fieldOpen === name ? "selected" : ""}`}
         key={name}
+        draggable
+        onDragStart={event => { event.dataTransfer.setData("application/lightmoni-field", name); event.dataTransfer.effectAllowed = "copy"; }}
       >
+        <Popover trigger="click" placement="rightTop" open={fieldOpen === name} onOpenChange={open => setFieldOpen(open ? name : undefined)} content={<div className="lm-log-top-values">
+          <header><b>{name.replace(/^attr:/, "@ ")}</b><Button type="text" size="small" aria-label="关闭字段统计" icon={<CloseOutlined />} onClick={() => setFieldOpen(undefined)} /></header>
+          <small>{kind} · 当前查询范围 Top 10</small>
+          {fieldAggregate.loading ? <Spin size="small" /> : fieldAggregate.error ? <Alert type="error" title={fieldAggregate.error} /> : fieldAggregate.data ? <TopValues field={name} data={fieldAggregate.data} onFilter={quickFilter} /> : null}
+          <Button size="small" type="link" onClick={() => {explore("aggregate",name);setFieldOpen(undefined);}}>查看字段统计</Button>
+        </div>}>
         <button
           title={name}
           aria-expanded={fieldOpen === name}
-          onClick={() => setFieldOpen(fieldOpen === name ? undefined : name)}
         >
           <span className="lm-log-field-type" title={kind}>
             {name.startsWith("attr:")
@@ -980,6 +1016,7 @@ export default function LogExplorePage() {
           </span>
           <span>{name.replace(/^attr:/, "")}</span>
         </button>
+        </Popover>
         {index !== -1 && (
           <span className="lm-log-field-order">
             <Button
@@ -1022,19 +1059,18 @@ export default function LogExplorePage() {
   const fieldSidebar = (
     <>
       <header>
-        <b>字段</b>
+        <b>字段 <small>{available.length}</small></b>
         <Space size={2}>
-          <small>{available.length}</small>
           <Button
             type="text"
             size="small"
             aria-label="收起字段栏"
             icon={<LeftOutlined />}
-            onClick={() => setView((v) => ({ ...v, fields_collapsed: true }))}
+            onClick={() => narrow ? setFieldsOpen(false) : setView((v) => ({ ...v, fields_collapsed: true }))}
           />
         </Space>
       </header>
-      <Input
+      <div className="lm-discover-field-search"><Input
         size="small"
         allowClear
         prefix={<SearchOutlined />}
@@ -1042,52 +1078,20 @@ export default function LogExplorePage() {
         placeholder="搜索字段名称"
         value={fieldSearch}
         onChange={(e) => setFieldSearch(e.target.value)}
-      />
-      {fieldOpen && (
-        <div className="lm-log-top-values">
-          <header>
-            <b>{fieldOpen.replace(/^attr:/, "@ ")}</b>
-            <Button
-              type="text"
-              size="small"
-              aria-label="关闭字段统计"
-              icon={<CloseOutlined />}
-              onClick={() => setFieldOpen(undefined)}
-            />
-          </header>
-          <small>{fieldKind(fieldOpen)} · 当前查询范围 Top 10</small>
-          {fieldAggregate.loading ? (
-            <Spin size="small" />
-          ) : fieldAggregate.error ? (
-            <small>{fieldAggregate.error}</small>
-          ) : fieldAggregate.data ? (
-            <TopValues
-              field={fieldOpen}
-              data={fieldAggregate.data}
-              onFilter={quickFilter}
-            />
-          ) : null}
-          <Button
-            size="small"
-            type="link"
-            onClick={() => explore("aggregate", fieldOpen)}
-          >
-            查看字段统计
-          </Button>
-        </div>
-      )}
+      /><Popover trigger="click" placement="bottomLeft" content={<div className="lm-discover-field-types"><b>按字段类型筛选</b><Select aria-label="字段类型" value={fieldTypeFilter} onChange={setFieldTypeFilter}
+        options={[{value:"all",label:"全部类型"},...Array.from(new Set(fieldMetadata.kinds.values())).map(kind => ({value:kind,label:kind}))]} /></div>}>
+        <Button type={fieldTypeFilter === "all" ? "text" : "primary"} size="small" aria-label="筛选字段类型" icon={<FilterOutlined />} />
+      </Popover></div>
       <div className="lm-log-field-list">
         <div className="lm-log-field-group">
-          <b title="使用字段右侧的箭头调整列顺序">已选字段</b>
+          <button aria-expanded={!selectedFieldsCollapsed} onClick={() => setSelectedFieldsCollapsed(value => !value)}>{selectedFieldsCollapsed ? <RightOutlined /> : <DownOutlined />} 已选字段</button>
           <small>{view.columns.length}</small>
         </div>
-        {view.columns
-          .filter((name) =>
-            name.toLowerCase().includes(fieldSearch.toLowerCase()),
-          )
+        {!selectedFieldsCollapsed && view.columns
+          .filter((name) => filteredFields.includes(name))
           .map(renderField)}
         <div className="lm-log-field-group">
-          <b>可用字段</b>
+          <button aria-expanded={!availableFieldsCollapsed} onClick={() => setAvailableFieldsCollapsed(value => !value)}>{availableFieldsCollapsed ? <RightOutlined /> : <DownOutlined />} 可用字段</button>
           <small>
             {
               filteredFields.filter((name) => !view.columns.includes(name))
@@ -1095,7 +1099,7 @@ export default function LogExplorePage() {
             }
           </small>
         </div>
-        {filteredFields
+        {!availableFieldsCollapsed && filteredFields
           .filter((name) => !view.columns.includes(name))
           .map(renderField)}
         {!filteredFields.length && (
@@ -1106,18 +1110,19 @@ export default function LogExplorePage() {
         )}
       </div>
       <small className="lm-log-field-note">
-        属性字段发现于当前已载入日志；Top 值统计覆盖当前查询范围。
+        拖动字段到表格以添加列。属性字段来自已载入日志。
       </small>
     </>
   );
   return (
-    <div className="lm-page lm-logs-page">
+    <div className={`lm-page lm-logs-page ${fullscreen ? "is-fullscreen" : ""}`}>
       {toastContext}
       <header className="lm-log-page-heading">
         <div className="lm-log-title">
+          <SearchOutlined className="lm-discover-mark" />
           <h1>日志探索</h1>
-          <span>Discover</span>
-          {saved && <Tag>{saved.title}</Tag>}
+          <RightOutlined className="lm-discover-breadcrumb" />
+          <span>{saved?.title ?? "未保存的检索"}</span>
         </div>
         <Space size={4} wrap>
           <Button
@@ -1157,8 +1162,9 @@ export default function LogExplorePage() {
           </Button>
           <Button
             size="small"
-            type="primary"
+            type="default"
             icon={<SaveOutlined />}
+            aria-label="保存检索"
             disabled={!result}
             onClick={() => {
               setSaveTitle(
@@ -1173,6 +1179,7 @@ export default function LogExplorePage() {
       </header>
       <section className="lm-log-query">
         <div className="lm-log-search-line">
+          <div className="lm-discover-data-view"><span><TableOutlined /> 数据视图</span>
           <Tooltip title={table?.name ?? spec.table_id}>
             <Select
               showSearch
@@ -1192,18 +1199,20 @@ export default function LogExplorePage() {
               )}
               options={tables.map((t) => ({ value: t.id, label: t.name, title: t.name }))}
               onChange={(id) => {
-                setSpec({
-                  ...spec,
+                commit({
+                  ...activeSpec,
                   table_id: id,
                   services: [],
                   filters: [],
                   sql: `SELECT * FROM ${tables.find((t) => t.id === id)?.name ?? id}`,
-                });
+                }, false, view, null);
                 setFieldOpen(undefined);
                 setSaved(undefined);
               }}
             />
           </Tooltip>
+          </div>
+          <div className="lm-discover-query-input">
           <Select
             aria-label="检索模式"
             value={
@@ -1247,27 +1256,14 @@ export default function LogExplorePage() {
           ) : (
             <span className="lm-log-sql-hint">按所选时间范围查询原始日志</span>
           )}
-          <Select
-            aria-label="时间范围"
-            value={view.lookback}
-            className="lm-log-time-picker"
-            options={[
-              { value: 15, label: "最近 15 分钟" },
-              { value: 60, label: "最近 1 小时" },
-              { value: 360, label: "最近 6 小时" },
-              { value: 1440, label: "最近 24 小时" },
-              { value: 10080, label: "最近 7 天" },
-              { value: 0, label: "绝对时间" },
-            ]}
-            onChange={(lookback) => {
-              setView({ ...view, lookback });
-              if (lookback) setSpec({ ...spec, range: timeRange(lookback) });
-            }}
-          />
+          </div>
+          <DiscoverTimeRange range={spec.range} lookback={view.lookback} refreshSeconds={refreshSeconds}
+            onApply={(range, lookback) => { setBrushOrigin(undefined); commit({ ...activeSpec, range }, false, { ...view, lookback }); }}
+            onRefreshChange={refresh_seconds => setView(current => ({ ...current, refresh_seconds }))} />
           <Button
             type="primary"
             aria-label="查询"
-            icon={<SearchOutlined />}
+            icon={<ReloadOutlined />}
             onClick={run}
             disabled={!spec.table_id}
             loading={loading}
@@ -1306,37 +1302,16 @@ export default function LogExplorePage() {
             />
           </Popover>
         </div>
-        {view.lookback === 0 && (
-          <div className="lm-log-absolute">
-            <label>
-              开始 UTC
-              <Input
-                aria-label="开始 UTC"
-                value={spec.range.from}
-                onChange={(e) =>
-                  setSpec({
-                    ...spec,
-                    range: { ...spec.range, from: e.target.value },
-                  })
-                }
-              />
-            </label>
-            <label>
-              结束 UTC
-              <Input
-                aria-label="结束 UTC"
-                value={spec.range.to}
-                onChange={(e) =>
-                  setSpec({
-                    ...spec,
-                    range: { ...spec.range, to: e.target.value },
-                  })
-                }
-              />
-            </label>
-          </div>
-        )}
         <div className="lm-log-controls">
+          <Dropdown trigger={["click"]} menu={{items:[
+            {key:"enable",label:"启用所有过滤",disabled:!spec.filters.some(filter => filter.disabled)},
+            {key:"disable",label:"禁用所有过滤",disabled:!spec.filters.some(filter => !filter.disabled)},
+            {key:"invert",label:"反转所有过滤",disabled:!spec.filters.length},
+            {type:"divider"},
+            {key:"clear",label:"移除所有过滤",disabled:!spec.filters.length && !spec.services.length},
+          ],onClick:({key}) => commit({...activeSpec,filters:key==="clear"?[]:spec.filters.map(filter => key==="invert"?{...filter,op:inverse[filter.op]??filter.op}:{...filter,disabled:key==="disable"}),...(key==="clear"?{services:[]}: {})})}}>
+            <Button type="text" size="small" aria-label="管理所有过滤" icon={<FilterOutlined />} />
+          </Dropdown>
           {result && JSON.stringify(spec) !== JSON.stringify(activeSpec) && (
             <Tag color="processing">条件待应用</Tag>
           )}
@@ -1349,6 +1324,7 @@ export default function LogExplorePage() {
           >
             添加过滤
           </Button>
+          <Popover trigger="click" placement="bottomLeft" content={<div className="lm-discover-quick-filters"><b>快捷筛选</b>
           <Select
             mode="multiple"
             maxTagCount="responsive"
@@ -1362,25 +1338,17 @@ export default function LogExplorePage() {
               label: s,
               value: s,
             }))}
-            onChange={(services) => setSpec({ ...spec, services })}
+            onChange={(services) => commit({ ...activeSpec, services })}
           />
           {spec.mode==='filters'&&<Input size="small" allowClear aria-label="Trace ID 筛选" placeholder="Trace ID" style={{width:190}} value={String(spec.filters.find(filter=>filter.scope==='column'&&filter.field==='trace_id'&&filter.op==='eq')?.value??'')} onChange={event=>setSpec(current=>({...current,filters:[...current.filters.filter(filter=>!(filter.scope==='column'&&filter.field==='trace_id'&&filter.op==='eq')),...(event.target.value?[{scope:'column' as const,field:'trace_id',type:'string' as const,op:'eq' as const,value:event.target.value}]:[])]}))} onPressEnter={run}/>}
+          <Button size="small" type="primary" onClick={run}>应用筛选</Button></div>}>
+            <Button size="small" type="text" icon={<SlidersOutlined />}>快捷筛选{spec.services.length ? ` (${spec.services.length})` : ""}</Button>
+          </Popover>
+          <div className="lm-discover-inline-chips">
+            {spec.services.map(service => <Tag key={service} closable onClose={event => {event.preventDefault();commit({...activeSpec,services:spec.services.filter(value => value!==service)});}}>service: {service}</Tag>)}
+          </div>
           <div className="lm-log-refresh-controls">
-            <Select
-              aria-label="刷新间隔"
-              value={refreshSeconds}
-              size="small"
-              style={{ width: 115 }}
-              options={[
-                { value: 0, label: "手动刷新" },
-                { value: 10, label: "每 10 秒" },
-                { value: 30, label: "每 30 秒" },
-                { value: 60, label: "每 1 分钟" },
-              ]}
-              onChange={(refresh_seconds) =>
-                setView((v) => ({ ...v, refresh_seconds }))
-              }
-            />
+            <span className="lm-discover-refresh-status"><ClockCircleOutlined /> {refreshSeconds ? `每 ${refreshSeconds} 秒刷新` : "自动刷新已暂停"}</span>
             <Button
               size="small"
               type="text"
@@ -1423,26 +1391,13 @@ export default function LogExplorePage() {
                 }[f.op] ?? f.op}{" "}
                 {!["exists", "not_exists"].includes(f.op) && printable(f.value)}
               </button>
-              <Tooltip title="反转包含/排除">
-                <Button
-                  size="small"
-                  type="text"
-                  aria-label={`反转过滤 ${f.field}`}
-                  onClick={() => updateChip(i, "inverse")}
-                >
-                  ±
-                </Button>
-              </Tooltip>
-              <Tooltip title={f.disabled ? "启用" : "禁用"}>
-                <Button
-                  size="small"
-                  type="text"
-                  aria-label={`${f.disabled ? "启用" : "禁用"}过滤 ${f.field}`}
-                  onClick={() => updateChip(i, "disable")}
-                >
-                  {f.disabled ? "○" : "●"}
-                </Button>
-              </Tooltip>
+              <Dropdown trigger={["click"]} menu={{items:[
+                {key:"edit",label:"编辑过滤"},
+                {key:"inverse",label:"反转包含 / 排除"},
+                {key:"disable",label:f.disabled?"启用过滤":"禁用过滤"},
+              ],onClick:({key}) => key==="edit"?openFilter(i):updateChip(i,key as "inverse"|"disable")}}>
+                <Button size="small" type="text" aria-label={`过滤操作 ${f.field}`} icon={<DownOutlined />} />
+              </Dropdown>
               <Button
                 size="small"
                 type="text"
@@ -1499,13 +1454,14 @@ export default function LogExplorePage() {
             <main className="lm-log-main">
               <div className="lm-log-distribution">
                 <div className="lm-log-distribution-heading">
-                  <span>日志时间分布</span>
+                  <Tooltip title={view.chart_collapsed ? "展开时间图" : "收起时间图"}><Button size="small" type="text" aria-label={view.chart_collapsed ? "展开时间图" : "收起时间图"}
+                    icon={view.chart_collapsed ? <RightOutlined /> : <DownOutlined />} onClick={() => setView(current => ({...current,chart_collapsed:!current.chart_collapsed}))} /></Tooltip>
                   {result && !result.histogram_truncated && (
-                    <b>
+                    <b className="lm-discover-hit-count">
                       {asRows(result.histogram)
                         .reduce((sum, row) => sum + Number(row.count), 0)
                         .toLocaleString()}{" "}
-                      条匹配
+                      <span> 条匹配日志</span>
                     </b>
                   )}
                   <Select
@@ -1537,18 +1493,9 @@ export default function LogExplorePage() {
                       commit({ ...activeSpec, interval_ms })
                     }
                   />
-                  <Button
-                    size="small"
-                    type="text"
-                    onClick={() =>
-                      setView((v) => ({
-                        ...v,
-                        chart_collapsed: !v.chart_collapsed,
-                      }))
-                    }
-                  >
-                    {view.chart_collapsed ? "展开时间图" : "收起时间图"}
-                  </Button>
+                  {!view.chart_collapsed && <Select size="small" aria-label="时间图拆分" value={view.histogram_breakdown ?? "none"} style={{width:124}}
+                    options={[{value:"none",label:"不拆分"},{value:"severity",label:"按级别拆分"}]}
+                    onChange={histogram_breakdown => setView(current => ({...current,histogram_breakdown}))} />}
                   <Button
                     size="small"
                     type="link"
@@ -1573,6 +1520,7 @@ export default function LogExplorePage() {
                     frame={result?.histogram}
                     range={result?.range}
                     intervalMS={result?.interval_ms ?? 60000}
+                    breakdown={view.histogram_breakdown ?? "none"}
                     onRange={brush}
                   />
                 )}{" "}
@@ -1586,14 +1534,18 @@ export default function LogExplorePage() {
                   <small className="lm-log-scope">
                     {new Date(result.range.from).toLocaleString()} —{" "}
                     {new Date(result.range.to).toLocaleString()}
+                    <span> · event_time</span>
                   </small>
                 )}
               </div>
-              <section ref={resultArea} className="lm-log-results">
+              <section ref={resultArea} className="lm-log-results" onDragOver={event => {
+                if (event.dataTransfer.types.includes("application/lightmoni-field")) {event.preventDefault();event.dataTransfer.dropEffect="copy";}
+              }} onDrop={dropField}>
                 <div className="lm-log-results-toolbar">
                   <Space>
                     <Button
                       className={`lm-log-field-toggle ${view.fields_collapsed ? "is-visible" : ""}`}
+                      aria-label="字段"
                       size="small"
                       icon={<FilterOutlined />}
                       onClick={() =>
@@ -1623,7 +1575,7 @@ export default function LogExplorePage() {
                         onKeyDown={(e) => tabKey(e, "logs")}
                         onClick={() => explore("logs")}
                       >
-                        原始日志
+                        文档 <Tooltip title="当前已载入的文档数"><span className="lm-discover-count">{rows.length.toLocaleString()}</span></Tooltip>
                       </Button>
                       <Button
                         role="tab"
@@ -1642,20 +1594,16 @@ export default function LogExplorePage() {
                         字段统计
                       </Button>
                     </div>
-                    <b>
-                      {view.explore_mode === "aggregate"
-                        ? "当前查询完整范围"
-                        : `${rows.length.toLocaleString()} 条已载入`}
-                    </b>
+                    {view.explore_mode === "aggregate" && <b>当前查询完整范围</b>}
                     {loading && <Spin size="small" />}
-                    {view.explore_mode !== "aggregate" && result?.truncated && (
-                      <Tag color="warning">
-                        结果列表已截断 · 2,000 条 / 8 MiB
-                      </Tag>
-                    )}
                   </Space>
                   {view.explore_mode !== "aggregate" && (
                     <Space size={6} wrap>
+                      <Button
+                        aria-label="配置显示列"
+                        size="small" icon={<TableOutlined />}
+                        onClick={() => setColumnsOpen(true)}
+                      >列 <span className="lm-discover-count">{view.columns.length}</span></Button>
                       <Select
                         size="small"
                         aria-label="日志排序"
@@ -1666,13 +1614,6 @@ export default function LogExplorePage() {
                         ]}
                         onChange={(sort) => commit({ ...spec, sort })}
                       />
-                      <Button
-                        size="small"
-                        icon={<SettingOutlined />}
-                        onClick={() => setColumnsOpen(true)}
-                      >
-                        列
-                      </Button>
                       <Tooltip title="实时每 3 秒读取，查询可见延迟超过 15 秒时需历史刷新">
                         <Button
                           aria-label={live ? "暂停实时" : "实时"}
@@ -1689,7 +1630,8 @@ export default function LogExplorePage() {
                           {live ? "暂停实时" : "实时"}
                         </Button>
                       </Tooltip>
-                      <Select
+                      <Popover trigger="click" placement="bottomRight" content={<div className="lm-discover-display-options"><b>表格显示</b>
+                        <label>行高<Select
                         aria-label="日志行数"
                         size="small"
                         value={view.row_lines ?? 1}
@@ -1701,7 +1643,12 @@ export default function LogExplorePage() {
                         onChange={(row_lines) =>
                           setView((v) => ({ ...v, row_lines }))
                         }
-                      />
+                      /></label>
+                      <label>密度<Select aria-label="表格密度" size="small" value={view.density ?? "compact"} options={[{value:"compact",label:"紧凑"},{value:"comfortable",label:"宽松"}]}
+                        onChange={density => setView(current => ({...current,density}))} /></label>
+                      </div>}><Tooltip title="显示选项"><Button size="small" aria-label="表格显示选项" icon={<SlidersOutlined />} /></Tooltip></Popover>
+                      <Tooltip title={fullscreen ? "退出全屏 (Esc)" : "全屏查看"}><Button size="small" aria-label={fullscreen ? "退出全屏" : "全屏查看"}
+                        icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={() => setFullscreen(value => !value)} /></Tooltip>
                       <Dropdown
                         trigger={["click"]}
                         menu={{
@@ -1807,6 +1754,12 @@ export default function LogExplorePage() {
                       onFilter={filterFromTable}
                       onResize={resize}
                       onExpandRange={expandFromTable}
+                      sort={spec.sort}
+                      onSort={sortFromTable}
+                      onMoveColumn={moveFromTable}
+                      onRemoveColumn={removeFromTable}
+                      onCopy={copyFromTable}
+                      density={view.density ?? "compact"}
                     />
                   </div>
                 )}
@@ -1814,8 +1767,9 @@ export default function LogExplorePage() {
                   <footer className="lm-log-results-footer">
                     <span>
                       {result
-                        ? `会话冻结 ${result.total_loaded.toLocaleString()} 条，${new Date(result.expires_at).toLocaleTimeString()} 过期`
+                        ? `已载入 ${rows.length.toLocaleString()} / 可加载 ${result.total_loaded.toLocaleString()} 条 · ${new Date(result.expires_at).toLocaleTimeString()} 前有效`
                         : ""}
+                      {result?.truncated && <Tooltip title="本次查询结果最多 2,000 条 / 8 MiB，请缩小时间范围或添加过滤以查看其余日志。"><Tag color="warning">结果达上限</Tag></Tooltip>}
                     </span>
                     <Button
                       aria-label={
@@ -2131,34 +2085,15 @@ export default function LogExplorePage() {
           ) : null}
           <Button onClick={() => setAIOpen(true)}>AI 分析</Button>
         </Space>
-        {selected && (
-          <Descriptions
-            size="small"
-            column={2}
-            items={[
-              "event_time",
-              "ingested_at",
-              "service",
-              "instance_id",
-              "host_id",
-              "source_id",
-              "source_seq",
-              "trace_id",
-              "span_id",
-            ].map((name) => ({
-              key: name,
-              label: name,
-              children: (
-                <span className="lm-log-detail-value">
-                  {printable(selected[name])}
-                </span>
-              ),
-            }))}
-          />
-        )}
         <Tabs
-          defaultActiveKey="text"
+          defaultActiveKey="fields"
           items={[
+            {
+              key: "fields",
+              label: "表格",
+              children: selected && <DocumentFields row={selected} columns={view.columns} fields={available}
+                onFilter={quickFilter} onToggleColumn={toggleColumn} onCopy={value => void copy(value)} />,
+            },
             {
               key: "text",
               label: "原文 / 堆栈",
@@ -2174,81 +2109,10 @@ export default function LogExplorePage() {
             },
             {
               key: "json",
-              label: "规范化 JSON",
+              label: "JSON",
               children: <JSONTree value={normalizedSelected} />,
             },
-            {
-              key: "fields",
-              label: "属性字段",
-              children: (
-                <Table
-                  size="small"
-                  pagination={false}
-                  dataSource={selectedAttributes.map(([key, value]) => ({
-                    key,
-                    value,
-                  }))}
-                  columns={[
-                    { title: "字段", dataIndex: "key" },
-                    {
-                      title: "值",
-                      render: (_, r) => <span>{printable(r.value)}</span>,
-                    },
-                    {
-                      title: "操作",
-                      render: (_, r) =>
-                        r.value !== null && typeof r.value !== "object" ? (
-                          <Space size={2}>
-                            <Tooltip title="只看此值">
-                              <Button
-                                size="small"
-                                type="text"
-                                aria-label={`包含属性 ${r.key}`}
-                                icon={<PlusOutlined />}
-                                onClick={() =>
-                                  quickFilter({
-                                    scope: "attribute",
-                                    field: r.key,
-                                    type: attributeType(selected!, r.key),
-                                    op: "eq",
-                                    value: r.value,
-                                  })
-                                }
-                              />
-                            </Tooltip>
-                            <Tooltip title="排除此值">
-                              <Button
-                                size="small"
-                                type="text"
-                                aria-label={`排除属性 ${r.key}`}
-                                onClick={() =>
-                                  quickFilter({
-                                    scope: "attribute",
-                                    field: r.key,
-                                    type: attributeType(selected!, r.key),
-                                    op: "ne",
-                                    value: r.value,
-                                  })
-                                }
-                              >
-                                −
-                              </Button>
-                            </Tooltip>
-                            <Button
-                              size="small"
-                              type="text"
-                              aria-label={`添加属性列 ${r.key}`}
-                              onClick={() => toggleColumn("attr:" + r.key)}
-                            >
-                              列
-                            </Button>
-                          </Space>
-                        ) : null,
-                    },
-                  ]}
-                />
-              ),
-            },
+
           ]}
         />
         {contextError && <Alert type="error" title={contextError} />}{" "}
