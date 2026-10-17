@@ -104,7 +104,7 @@ node examples/sdk/traffic/index.mjs
 
 ## 本地开发和验收
 
-本地构建建议使用 Node 24.15.0（运行时最低 Node 22.13），并准备可访问的真实 ClickHouse。仅开发 Go 业务 SDK、运行 Go 业务示例或打包八种 SDK 时需要 Go 1.26+。Docker Compose 用于容器部署，可在有 Docker 的环境启动隔离测试数据库：
+本地构建建议使用 Node 24.15.0（运行时最低 Node 22.19），并准备可访问的真实 ClickHouse。仅开发 Go 业务 SDK、运行 Go 业务示例或打包八种 SDK 时需要 Go 1.26+。Docker Compose 用于容器部署，可在有 Docker 的环境启动隔离测试数据库：
 
 ```sh
 docker compose -p lightmoni-test -f deploy/server/compose.test.yml up -d
@@ -169,7 +169,7 @@ Node 主服务为每轮对话启动一个 Mastra Node worker，使用私有 stdi
 
 支持 API 基地址、根地址，以及完整 `/chat/completions`、`/responses`、`/messages` 或 Gemini 生成接口地址。使用新填写的 Key 或无需 Key 时，根地址按协议优先尝试 `/v1`；Gemini 可回退到 `/v1beta`，最后尝试无版本目录。OpenAI/Anthropic 的独立末段 `/v1beta` 会修正为 `/v1`；Gemini 明确填写的版本和自定义路径保留。各协议的版本修正、目录鉴权及查询参数集中维护，获取模型、测试连接和保存共用地址规范化；修正后在输入框回填并显示原因。已保存 Key 只可在原规范 API 基地址复用，改地址须重新填写或明确清除；同地址切换协议可保留 Key。目录查询不会保存配置或发起生成请求，401 表示供应商未接受凭证。
 
-默认输入预算 32,000、单次模型输出上限 4,096、每轮 8 步（最多 12 步），整轮仍限制 2 分钟，每个实例最多并行执行 4 轮，达到上限时明确提示稍后重试。输入预算使用保守的 UTF-8 字节估算并在每次模型调用前检查；它不是精确的 tokenizer 计数，应设在模型实际上下文容量以内并预留输出空间。历史整理会产生额外的模型请求和用量，只有供应商实际返回的计数才作为已知用量展示。管理员在“模型管理”中设置每百万 token 的输入、输出单价及币种，查看 7/30/90 天的 token 和估算费用；助手、历史整理及连接测试均计入，未知用量/单价分别标明，修改价格不重算历史费用。Responses 使用 `store:false`；多轮所需的加密推理状态和 Gemini 签名仅在服务端有界保存、通过私有管道重放，不返回浏览器，也不保存隐藏推理明文。
+默认输入预算 32,000、单次模型输出上限 4,096、每轮 8 步（最多 12 步），整轮仍限制 2 分钟，每个实例最多并行执行 4 轮，达到上限时明确提示稍后重试。输入预算使用保守的 UTF-8 字节估算并在每次模型调用前检查；它不是精确的 tokenizer 计数，应设在模型实际上下文容量以内并预留输出空间。历史整理会产生额外的模型请求和用量，只有供应商实际返回的计数才作为已知用量展示。管理员在“模型管理”中设置每百万 token 的输入、输出单价及币种，查看 7/30/90 天的 token 和估算费用；助手、历史整理、连接测试及 Pi 代码任务均计入，未知用量/单价分别标明，修改价格不重算历史费用。Responses 使用 `store:false`；多轮所需的加密推理状态和 Gemini 签名仅在服务端有界保存、通过私有管道重放，不返回浏览器，也不保存隐藏推理明文。
 
 模型管理记录每个实际发出请求的成功、失败、取消或进行中状态；服务重启会将遗留进行中请求标为中断失败，未报告的 token 保持未知。调用明细保留当时输入/输出单价和分项费用，仅有一侧可计价时显示已知部分。同一连接保存执行限制会保留单价草稿，更换连接或重新加载前提示确认。统计刷新保留分组和有效页码，默认最近日期优先，显示最后刷新时间。
 
@@ -177,7 +177,11 @@ Node 主服务为每轮对话启动一个 Mastra Node worker，使用私有 stdi
 
 摘要保留历史事实、用户要求和工具证据，原始记录仍保留。无法在预算内整理的单个历史轮次或超大的当前上下文会返回明确错误，需缩小查询或增大预算；源历史不被删除。停止、浏览器断开和超时会取消当前 worker 与中心工具。完成的检查点可重载，但进程中断后不会自动恢复执行。本轮不包含后台定时排查、自动修复或额外审阅模型。
 
-SDD 规格和验收入口：[Mastra 助手](specs/001-mastra-assistant/spec.md)、[模型发现](specs/002-model-discovery/spec.md)、[多协议连接](specs/003-multi-protocol-models/spec.md)、[模型管理与计费](specs/005-model-management/spec.md)、[Node 运行时迁移](specs/007-node-runtime-migration/spec.md)。使用仓库内 Spec Kit 技能继续维护规格、计划与任务。检查运行时使用 `npm --prefix ai-runtime test`、`npm --prefix ai-runtime run typecheck` 和 `npm --prefix runtime test`；构建 worker 后，Node 集成测试会通过真实 Mastra SDK 连接隔离模型 fixture。fixture 不代表真实供应商分析效果验收。
+可选代码能力采用 **Mastra 编排 + Pi Agent 任务内多轮执行**。运维显式配置 `LIGHTMONI_CODE_WORKSPACE=/srv/lightmoni-code-workspaces` 后，管理员可在 AI 助手中选择相对工作区，要求编写或修改轻量脚本。Pi 在临时副本读写，返回步骤、检查结果和 diff；管理员点击确认应用后才写回，原文件有变动则拒绝应用。不会自动提交、推送、合入或部署。预览 30 分钟有效，源码记录加密保存。
+
+检查命令默认关闭，运维可配置 `LIGHTMONI_CODE_CHECK_COMMANDS='["node --check app.js"]'`。副本不安装依赖、不复制 node_modules；只支持已具备运行条件的检查。命令以中心服务身份运行，临时副本不是操作系统沙箱，应仅授权专用可信源码目录和检查命令。容器部署需显式挂载工作区并传入环境变量，默认 Compose 不挂载主机源码。
+
+SDD 规格和验收入口：[Mastra 助手](specs/001-mastra-assistant/spec.md)、[模型发现](specs/002-model-discovery/spec.md)、[多协议连接](specs/003-multi-protocol-models/spec.md)、[模型管理与计费](specs/005-model-management/spec.md)、[Node 运行时迁移](specs/007-node-runtime-migration/spec.md)、[Mastra + Pi 代码任务](specs/008-mastra-pi-agent-code-tasks/spec.md)。使用仓库内 Spec Kit 技能继续维护规格、计划与任务。检查运行时使用 `npm --prefix ai-runtime test`、`npm --prefix ai-runtime run typecheck` 和 `npm --prefix runtime test`；构建 worker 后，Node 集成测试会通过真实 Mastra SDK 连接隔离模型 fixture。fixture 不代表真实供应商分析效果验收。
 
 ## Key 的 table 权限
 
