@@ -2,7 +2,7 @@
 
 ## Scope and specification
 
-按 Spec Kit 的规格、设计、任务、实现、验收流程完成。规格质量检查 5/5；前置检查返回完整 research/data-model/contracts/quickstart/tasks。无扩展 hooks。变更保留已有未提交模型管理工作；本轮没有提交、推送或合并 PR。
+按 Spec Kit 的规格、设计、任务、实现、验收流程完成。规格质量检查 5/5；前置检查返回完整 research/data-model/contracts/quickstart/tasks。无扩展 hooks。变更与此前模型管理工作一同通过功能分支提交 PR #6，目标为现有主干 main，尚未合并。
 
 ## Backend
 
@@ -33,3 +33,7 @@
 覆盖导航和三页签术语、节点状态与诊断、多标签与空标签、任务和标签 CRUD、启停及冲突失败保留输入、停用空任务重命名、启用空配置拒绝、旧安装深链、按启用任务计算授权表、无效标签、读取失败与重试、成员完整只读和空态。桌面 1440px 与窄屏 390px 页面及弹框无页面横向溢出，宽表在表内滚动。已查看六张截图，包括新任务长表单和节点标签弹框。截图保存在 `artifacts/screenshots/docs/evidence/execution-nodes/`（按仓库约定忽略本地截图）。
 
 独立只读审阅覆盖前端状态、权限与深链，后端权限、迁移和合成事务；发现并修复旧接口克隆/删改独立任务，以及停用空任务表单无法修改的问题。没有遗留阻塞项。
+
+## Deployment clarification
+
+Agent 作为独立进程或容器运行，业务启停不触发 Agent 启停。修正规格、README 和接入示例中此前误写的共同启停描述，并同步 PR #6。检查既有 systemd 服务及前台 CLI 的独立运行与信号退出行为，页面没有绑定业务生命周期的描述。本次仅修正文档，`git diff --check` 通过，无运行代码变化。

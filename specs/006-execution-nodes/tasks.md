@@ -24,6 +24,7 @@
 
 - [x] T009 [P] 新增web/src/app执行节点隔离浏览器验收并检查1440/390px布局。
 - [x] T010 运行类型检查、针对性race、生产构建与8080重启，将证据记录specs/006-execution-nodes/validation.md。
+- [x] T011 按部署定位修正规格、README及接入示例：Agent 独立运行，生命周期独立于业务，更新同一 PR 描述。
 
 ## Dependencies and strategy
 
