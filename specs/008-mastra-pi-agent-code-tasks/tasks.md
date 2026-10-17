@@ -12,6 +12,8 @@
 - [x] 增加前端执行步骤、检查、diff、真实状态刷新及审批确认
 - [x] 完成全仓相关 typecheck、test、build 和浏览器验证
 - [x] 记录边界、环境开关和可复跑验收证据
-- [ ] 创建独立 PR 到 main，保持未合并
+- [x] 创建独立 PR 到 main，保持未合并
 
 验收详情见 [validation.md](validation.md)。
+
+交付：[PR #8](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/8)，通过 SSH AGit 创建，未执行合并。
