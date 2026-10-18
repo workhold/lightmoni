@@ -1,0 +1,12 @@
+{
+  "run": "1",
+  "checks": [
+    "three tabs, four languages, empty dropdown only create; failed create retains name; retry creates one minimal-scope key and selects it",
+    "recommended names require approval; real ClickHouse logs/metrics/traces accepted only for active exemptions; wrong credentials rejected; descriptions persist; revocation immediately rejects uploads and retains data",
+    "legacy installer/table links, 390px, 200% zoom and reduced motion"
+  ],
+  "pageErrors": [],
+  "table": "app_logs_9e921728bb46c8db",
+  "createdKeyID": "01eee233dc492ff1924fb0fc48a1678f",
+  "passed": true
+}

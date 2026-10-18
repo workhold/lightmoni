@@ -105,7 +105,7 @@ export interface Catalog {
 export interface Auth {
   requireAdmin(ctx: Context): void;
   user(req: IncomingMessage): User | undefined;
-  validateKey(ctx: Context, table?: string): WriteKey;
+  validateKey(ctx: Context, table?: string, allowExempt?: boolean): WriteKey;
   master: Buffer;
 }
 export interface Dependencies {

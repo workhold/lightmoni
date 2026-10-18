@@ -112,3 +112,11 @@ LightMoni Agent 是安装软件，一个运行实例称“执行节点”，导�
 每轮开始冻结连接和单价；账本保留输入/输出原单价、分项费用、已知合计及 complete/partial/unpriced/legacy 计价状态。只有一侧可计价时合计为已知部分，部分计价与完全未计价分别统计；已有终态不可因重放或改价而重新计算。旧事件按原事件序号去重，保留既有金额，不补造原单价或成功状态。`GET /api/v1/assistant/usage/details?days=30&timezone=Asia/Shanghai&limit=100` 仅管理员可读，limit 为 1–100，返回最近优先的 `{records,limit,has_more,from,to,timezone}`。该估算未实现供应商缓存折扣、阶梯价格等，不等同实际账单。启动时全量回填仍保留的旧会话，不受 200 条列表限制；账本独立于会话事件裁剪。所有统计及明细不包含密钥、提示词或生成正文。
 
 四种协议通过实际原生 SDK 执行文本流、工具调用、摘要和取消。Responses 使用 `store:false`；供应商原始 usage 按协议解释，缺少字段保持未知。多轮延续仅持久化白名单内的签名、item ID 和加密推理内容，隐藏推理明文不保存；私有 worker 检查点校验大小和字段，服务端会话回读删除这些元数据后才返回浏览器。元数据计入上下文预算，不能静默丢弃超限状态。
+
+## SDK 接入与无密钥豁免
+
+`/data` 统一为“SDK 接入”，只含 SDK 样例、SDK 密钥、豁免表；样例及 `/api/v1/sdk-install` 提供 Go、Node.js、Rust、Python，历史其他语言 SDK 下载与客户端保持兼容。样例默认直连中心，选择有效密钥后才能生成；就地新建只需名称，自动授权当前逻辑表，并将一次性返回的完整值留在当前页面内存。密钥仍仅存摘要，已有密钥需要用户填入原完整值。
+
+管理员管理 `/api/v1/sdk-exempt-tables` 的精确逻辑表名单，默认空；无密钥模式仅可写启用的豁免表，推荐名使用随机后缀但不会自动授权。Authorization 头只要存在就按原密钥鉴权，错误或禁用密钥绝不降级。无密钥数据 key_id 为空，批次单独去重，SDK 自监控记录不路由到系统表；撤销豁免立即影响后续请求和批次重试。节点控制和 Agent 下载仍需要密钥。接口详见 `specs/009-sdk-onboarding/contracts/runtime.md`。
+
+执行节点安装移至 `/agents/install`，单表保留和日志规则移至 `/admin?tab=tables`；旧 `/data?tab=agent|tables|templates` 链接分别重定向到节点安装、数据表管理或大盘。

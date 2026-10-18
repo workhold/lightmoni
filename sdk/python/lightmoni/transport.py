@@ -71,7 +71,9 @@ class Request:
             raise TimeoutError("HTTP exchange deadline exceeded")
         with self.lock:
             active = self.socket
-        if active is not None:
+        # A fully consumed Connection: close response can already have released
+        # its socket. Cancellation/deadline checks still apply after EOF.
+        if active is not None and active.fileno() >= 0:
             active.settimeout(remaining)
 
     def exchange(self, method, body=None, headers=None, maximum=65536):

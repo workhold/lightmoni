@@ -55,7 +55,7 @@ docker compose up -d --no-build --wait
 
 LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器或容器编排管理生命周期。业务通过 SDK 向执行节点上报，同一节点可接收多个业务的数据；业务启动、停止或重启不触发 Agent 启停。业务退出时完成 SDK flush/shutdown，Agent 继续采集和补传。CLI 支持 `run --config` 前台运行并响应 SIGTERM；当前网页安装命令覆盖 Linux systemd 服务。每个 Agent 实例使用独立、可持久化的数据目录，以保留身份与待补传队列。
 
-“数据接入”提供独立的“SDK 接入”和“执行节点接入”Tab。接入时选择初始任务标签、上报地址并填写 Key，复制生成的安装命令到 Linux 服务器执行。安装程序保存连接配置，无需编辑 JSON；所填 Key 用于安装脚本、LightMoni Agent 包及校验文件的下载鉴权和后续上报。新 Key 默认填入当前标签匹配的启用任务所需表，业务 SDK 使用的 table 需另行授权；标签没有启用任务时需手动填写业务 table，不自动扩大权限。安装包支持 Linux amd64 / arm64，自带固定 Node 24.15.0，要求 glibc ≥ 2.28，无需目标主机另装 Node/npm；验证 SHA256 后安装独立 systemd 服务，升级、重装保留身份和磁盘队列。
+“SDK 接入”提供“SDK 样例 / SDK 密钥 / 豁免表”三个 Tab，样例仅展示 Go、Node.js、Rust、Python。执行节点安装位于“节点助手 → 接入执行节点”。接入时选择初始任务标签、上报地址并填写 Key，复制生成的安装命令到 Linux 服务器执行。安装程序保存连接配置，无需编辑 JSON；所填 Key 用于安装脚本、LightMoni Agent 包及校验文件的下载鉴权和后续上报。新 Key 默认填入当前标签匹配的启用任务所需表，业务 SDK 使用的 table 需另行授权；标签没有启用任务时需手动填写业务 table，不自动扩大权限。安装包支持 Linux amd64 / arm64，自带固定 Node 24.15.0，要求 glibc ≥ 2.28，无需目标主机另装 Node/npm；验证 SHA256 后安装独立 systemd 服务，升级、重装保留身份和磁盘队列。
 
 “节点助手”提供“执行节点 / 任务管理 / 任务标签”三个页签。任务独立保存，类型为指标采集、服务拨测和目录日志；每个任务可关联多个任务标签，一个节点也可绑定多个标签。启用任务与节点任一标签相交即下发，同一任务不会因多次命中而重复执行。冲突配置会整体拒绝并保留原有效配置；未匹配任务时暂停内部采集和拨测，业务数据转发继续可用。已有节点重连时保留中心分配。指标采集任务可选择 CPU、内存、文件系统、磁盘 I/O、网络、负载或指定进程，并设置采集间隔。
 
@@ -63,7 +63,7 @@ LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器�
 
 目录日志填写绝对目录、文件匹配规则（默认 `*.log*`）、是否包含子目录和首次从头读取。默认只采集现有文件后续新增的行，之后新建文件完整采集；读取进度与队列批次一起提交，支持重启续读、重命名轮转和截断检测。要求服务用户可读目录，采集 UTF-8 文本行，跳过压缩文件和符号链接；单行超过 64 KiB 分片，未结束的短行等待换行。事件时间使用采集时间，保留文件路径和字节位置。每个执行节点最多同时打开 256 个日志文件，每个目录单次扫描最多 10,000 个条目，超限会显示采集错误。源文件在采集前已删除或覆盖的内容无法恢复。
 
-“SDK 接入”可选择“通过执行节点”或“直连中心”，八种语言均提供对应的代码高亮示例、环境变量和复制按钮。通过执行节点默认连 `http://127.0.0.1:4318`，中心 Key 由执行节点保存。直连中心无需部署执行节点，传入中心地址和允许目标 table 的 Key，适用于容器、Serverless 等部署。示例读取 `LIGHTMONI_ENDPOINT` / `LIGHTMONI_KEY`；容器通过 environment / Secret 注入，中心地址应使用容器可访问的域名或服务地址。同一 Docker 网络可用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可用 `host.docker.internal`。SDK 通过执行节点上报时，也受节点 Key 的 table 白名单约束。
+“SDK 样例”默认直连中心，选择 SDK 密钥、服务和逻辑表后生成代码高亮示例及环境变量。密钥下拉框中可直接新建，只需名称，创建后自动授权当前表并选中；新密钥完整值仅保留在当前页面，已有密钥需填入之前保存的完整值。通过执行节点的既有 SDK 协议继续支持。通过执行节点默认连 `http://127.0.0.1:4318`，中心 Key 由执行节点保存。直连中心无需部署执行节点，传入中心地址和允许目标 table 的 Key，适用于容器、Serverless 等部署。示例读取 `LIGHTMONI_ENDPOINT` / `LIGHTMONI_KEY`；容器通过 environment / Secret 注入，中心地址应使用容器可访问的域名或服务地址。同一 Docker 网络可用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可用 `host.docker.internal`。SDK 通过执行节点上报时，也受节点 Key 的 table 白名单约束。
 
 管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址，并选择默认项，例如“公网”和“内网”。SDK 直连与执行节点接入均可从列表选择，也支持临时填写其他可访问地址；所选地址会进入复制的 SDK 示例、环境变量或 LightMoni Agent 安装命令。旧的单地址配置自动兼容；未配置列表时使用部署变量 `LIGHTMONI_EXTERNAL_URL`。这些地址应转发到同一个 LightMoni 实例。LightMoni Agent 安装脚本、amd64 / arm64 包和 SHA256 校验文件由当前项目内置的 `/downloads/agent/` 提供，全部要求 `Authorization: Bearer <上报 Key>`，无密钥、错误或禁用 Key 均不能下载。SDK 通过执行节点时默认使用本机节点地址。修改地址列表不改变已运行客户端的连接配置；重新生成安装命令可更新节点地址并保留身份和磁盘队列。此配置独立于登录回调和告警链接使用的工作台地址。
 
@@ -79,7 +79,9 @@ moni.log('info', 'order created', {order_id: '123'});
 await moni.flush();
 ```
 
-服务内的数据接入页提供八种 SDK 包，支持选择语言、安装命令、业务示例和下载校验。Node / 浏览器使用 npm 包，Go、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust 使用可本地安装或源码引用的独立包。Go 包解压后，在业务模块通过 `go mod edit -replace github.com/lightmoni/lightmoni=./lightmoni-go-sdk` 引用，再执行 `go mod tidy`；源码中的 import 路径不要求先发布远程仓库。
+服务内的 SDK 接入页提供 Go、Node.js、Rust、Python 四种语言的安装命令与业务样例；历史八种 SDK 包和下载地址继续兼容。Node / 浏览器使用 npm 包，Go、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust 使用可本地安装或源码引用的独立包。Go 包解压后，在业务模块通过 `go mod edit -replace github.com/lightmoni/lightmoni=./lightmoni-go-sdk` 引用，再执行 `go mod tidy`；源码中的 import 路径不要求先发布远程仓库。
+
+选择“无密钥模式”时，只能上报到管理员明确启用的豁免逻辑表，默认不开放任何表。页面推荐应用日志、业务指标与前端事件用途，并生成带随机后缀的复杂表名；确认添加后才生效。停用或移除豁免立即拒绝后续无密钥上报，已有数据保留。携带错误或禁用密钥不会降级为无密钥模式。数据表保留时长和日志规则在“管理后台 → 数据表”维护。
 
 所有语言的安装、API 和可靠性边界：[sdk/README.md](sdk/README.md)。Python、Java、.NET、PHP、Ruby、Rust 使用显式 flush，由应用定时或在请求结束时调用；Go / TypeScript 保留周期 collection。可运行示例：[examples/sdk](examples/sdk)。浏览器通过业务后端转发埋点，业务后端持有仅允许目标 table 的 Key；示例提供本地转发服务器，页面无需保存 Key。
 

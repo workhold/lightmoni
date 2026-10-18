@@ -300,7 +300,7 @@ export function registerSettings(d: Dependencies) {
   r.get(
     "/v1/sdk-config",
     (c) => {
-      const key = auth.validateKey(c);
+      const key = auth.validateKey(c, undefined, true);
       try {
         const all = policies();
         for (const table of Object.keys(all))

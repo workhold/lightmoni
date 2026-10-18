@@ -90,7 +90,10 @@ export function registerInstall(d: Dependencies, directory: string) {
       default_endpoint_id: settings.default_endpoint_id,
       node_url: base + `/downloads/sdk/lightmoni-sdk-${version}.tgz`,
       go_url: base + `/downloads/sdk/lightmoni-go-sdk_${version}.tar.gz`,
-      packages: packages(base),
+      packages: ["go", "typescript", "rust", "python"].map(id => {
+        const item = packages(base).find(item => item.id === id)!;
+        return id === "typescript" ? {...item,language:"Node.js",runtime:"Node.js 20+"} : item;
+      }),
       checksums_url: base + "/downloads/sdk/SDK_SHA256SUMS",
     });
   });

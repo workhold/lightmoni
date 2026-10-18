@@ -554,3 +554,50 @@ test("remote reporting settings preserve scalar types and exact values, scope by
     await f.close();
   }
 });
+
+test("SDK exemptions require admin, exact names, typed fields and persist after SQLite reopening", async () => {
+ const f=await fixture();try{
+  assert.equal((await fetch(f.base+'/api/v1/sdk-exempt-tables')).status,401);
+  await f.request('/api/v1/setup','POST',{name:'admin',password:'password123'});
+  assert.deepEqual((await f.request('/api/v1/sdk-exempt-tables')).data,[]);
+  for(const name of ['*','log_app','metric_app','trace_app','lightmoni_sdk','lightmoni_agent','lightmoni_center','a'.repeat(49),'UPPER'])assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',{name})).status,400,name);
+  for(const body of [{name:'app',active:'true'},{name:'app',description:1},{name:'app',unknown:true}])assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',body)).status,400);
+  const created=await f.request('/api/v1/sdk-exempt-tables','POST',{name:'app_logs_18aca241',description:'应用日志'});assert.equal(created.status,201);assert.equal(created.data.active,true);
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',{name:'app_logs_18aca241'})).status,409);
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables/app_logs_18aca241','PUT',{name:'rename'})).status,400);
+  const reopened=new DB(join(f.dir,'legacy.db'));try{const auth=new Auth(reopened,f.dir,f.base,new Router());assert.deepEqual(auth.validateKey({req:{headers:{}}} as any,undefined,true).allowed_tables,['app_logs_18aca241']);}finally{reopened.close();}
+  await f.request('/api/v1/users','POST',{name:'member',password:'password123',role:'member'});await f.request('/api/v1/auth/login','POST',{name:'member',password:'password123'});
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables')).status,200);
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',{name:'other'})).status,403);
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables/app_logs_18aca241','PUT',{active:false})).status,403);
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables/app_logs_18aca241','DELETE')).status,403);
+ }finally{await f.close();}
+});
+test("anonymous OTLP enforces exemptions for all signals, isolates retries and never downgrades wrong keys", async () => {
+ const f=await fixture();try{
+  await f.request('/api/v1/setup','POST',{name:'admin',password:'password123'});
+  assert.equal((await f.request('/v1/logs','POST',{}, {'X-Lightmoni-Table':'public_logs_123'})).status,401);
+  await f.request('/api/v1/sdk-exempt-tables','POST',{name:'public_logs_123'});
+  const key=(await f.request('/api/v1/keys','POST',{name:'named',allowed_tables:['public_logs_123']})).data;
+  const at=nowNano().toString(),resource={attributes:[{key:'service.name',value:{stringValue:'anonymous-qa'}}]};
+  const payloads:any={logs:{resourceLogs:[{resource,scopeLogs:[{logRecords:[{timeUnixNano:at,body:{stringValue:'anonymous'}}]}]}]},metrics:{resourceMetrics:[{resource,scopeMetrics:[{metrics:[{name:'requests',gauge:{dataPoints:[{timeUnixNano:at,asInt:'1'}]}}]}]}]},traces:{resourceSpans:[{resource,scopeSpans:[{spans:[{traceId:'a'.repeat(32),spanId:'b'.repeat(16),name:'anonymous',startTimeUnixNano:at,endTimeUnixNano:at}]}]}]}};
+  for(const signal of ['logs','metrics','traces']){
+   const headers={'X-Lightmoni-Table':'public_logs_123','X-Lightmoni-Batch-ID':'same-'+signal},payload=payloads[signal],before=f.inserts.length;
+   assert.equal((await f.request('/v1/'+signal,'POST',payload,headers)).status,200,signal);assert.equal(f.inserts.at(-1).rows[0].key_id,'');
+   assert.equal((await f.request('/v1/'+signal,'POST',payload,headers)).status,200);assert.equal(f.inserts.length,before+1);
+   assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,Authorization:'Bearer '+key.key})).status,200);assert.equal(f.inserts.length,before+2);assert.equal(f.inserts.at(-1).rows[0].key_id,key.id);
+   for(const Authorization of ['Bearer bad-key','Bearer ','Basic invalid'])assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,Authorization})).status,401);
+   for(const table of ['private','lightmoni_sdk'])assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,'X-Lightmoni-Table':table})).status,403);
+  }
+  const runtime={resourceLogs:[{resource,scopeLogs:[{logRecords:[{timeUnixNano:at,body:{stringValue:'started'},attributes:[{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'typescript'}},{key:'event',value:{stringValue:'started'}}]}]}]}]};
+  assert.equal((await f.request('/v1/logs','POST',runtime,{'X-Lightmoni-Table':'public_logs_123'})).status,200);assert.equal(f.inserts.at(-1).table,'_lm_log_public_logs_123');
+  f.db.run("INSERT INTO log_sampling VALUES(?,?,?)",'public_logs_123',JSON.stringify({key:'event_id',rules:[],exclude:[]}),1);
+  f.db.run("INSERT INTO log_sampling VALUES(?,?,?)",'private',JSON.stringify({key:'event_id',rules:[],exclude:[]}),1);
+  const publicConfig=await f.request('/v1/sdk-config');assert.equal(publicConfig.status,200);assert.deepEqual(Object.keys(publicConfig.data.log_sampling),['public_logs_123']);assert.throws(()=>f.a.validateKey({req:{headers:{}}} as any));
+  await f.request('/api/v1/keys/'+key.id,'PUT',{active:false});assert.equal((await f.request('/v1/logs','POST',payloads.logs,{'X-Lightmoni-Table':'public_logs_123',Authorization:'Bearer '+key.key})).status,401);
+  await f.request('/api/v1/sdk-exempt-tables/public_logs_123','PUT',{active:false});const count=f.inserts.length;
+  assert.equal((await f.request('/v1/logs','POST',payloads.logs,{'X-Lightmoni-Table':'public_logs_123','X-Lightmoni-Batch-ID':'same-logs'})).status,401);assert.equal(f.inserts.length,count);
+  await f.request('/api/v1/sdk-exempt-tables/public_logs_123','PUT',{active:true});assert.equal((await f.request('/api/v1/sdk-exempt-tables/public_logs_123','DELETE')).status,200);
+  assert.equal((await f.request('/v1/sdk-config')).status,401);assert.equal((await f.request('/v1/logs','POST',payloads.logs,{'X-Lightmoni-Table':'public_logs_123'})).status,401);
+ }finally{await f.close();}
+});

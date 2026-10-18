@@ -799,5 +799,41 @@ class ReportingTests(unittest.TestCase):
                 client.refresh_config(timeout=timeout)
 
 
+class ClosedResponseTransportTests(unittest.TestCase):
+    def test_complete_close_responses_do_not_retry_an_already_received_ack(self):
+        from lightmoni.transport import Request, Cancelled
+        for chunked in (False, True):
+            with self.subTest(chunked=chunked):
+                class Handler(BaseHTTPRequestHandler):
+                    protocol_version = "HTTP/1.1"
+                    def log_message(self, *args):
+                        pass
+                    def do_POST(self):
+                        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                        self.send_response(200)
+                        self.send_header("Connection", "close")
+                        if chunked:
+                            self.send_header("Transfer-Encoding", "chunked")
+                        else:
+                            self.send_header("Content-Length", "2")
+                        self.end_headers()
+                        self.wfile.write(b"2\r\n{}\r\n0\r\n\r\n" if chunked else b"{}")
+                        self.wfile.flush()
+                server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    request = Request("http://127.0.0.1:%d/v1/logs" % server.server_port, time.monotonic() + 2)
+                    status, _, body = request.exchange("POST", b"{}", {"Content-Type": "application/json"})
+                    self.assertEqual((status, body), (200, b"{}"))
+                    request.cancel()
+                    with self.assertRaises(Cancelled):
+                        request._check()
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2)
+
+
 if __name__ == "__main__":
     unittest.main()

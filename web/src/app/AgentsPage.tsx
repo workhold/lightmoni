@@ -103,7 +103,7 @@ export default function AgentsPage({user}:{user:User}) {
  };
  const filterControl=<Select allowClear showSearch={{optionFilterProp:'label'}} aria-label="按任务标签筛选" className="lm-agent-label-filter" placeholder="全部任务标签" value={labelFilter||undefined} onChange={value=>setFilter(value ?? '')} options={labelFilter&&!labels.some(label=>label.id===labelFilter)?[{value:labelFilter,label:`未知标签（${labelFilter}）`},...labelOptions]:labelOptions}/>;
  const nodesPanel=<div className="lm-surface">
-  <div className="lm-agent-policy-heading"><div><h2>执行节点</h2><p className="lm-agent-muted">LightMoni Agent 的运行实例；每个节点可关联多个任务标签。</p></div><Space wrap>{filterControl}<Link to={`/data?tab=agent${labelFilter?`&group=${encodeURIComponent(labelFilter)}`:''}`}><Button type="primary">接入执行节点</Button></Link></Space></div>
+  <div className="lm-agent-policy-heading"><div><h2>执行节点</h2><p className="lm-agent-muted">LightMoni Agent 的运行实例；每个节点可关联多个任务标签。</p></div><Space wrap>{filterControl}<Link to={`/agents/install${labelFilter?`?group=${encodeURIComponent(labelFilter)}`:''}`}><Button type="primary">接入执行节点</Button></Link></Space></div>
   <Table<AgentItem> rowKey="id" dataSource={visibleAgents} loading={loading} scroll={{x:1050}} pagination={{pageSize:10,hideOnSinglePage:true}} expandable={{expandedRowRender:agent=><NodeDetails agent={agent}/>}} columns={[
    {title:'节点名称',dataIndex:'hostname',width:180,render:(hostname:string,agent:AgentItem)=><div className="lm-agent-node-name"><strong>{hostname || agent.id}</strong><Typography.Text type="secondary">{agent.platform} / {agent.arch}</Typography.Text></div>},
    {title:'状态',width:110,render:(_:unknown,agent:AgentItem)=><Tag color={agentIsOnline(agent)?'success':'warning'}>{agentIsOnline(agent)?'在线':'心跳超时'}</Tag>},

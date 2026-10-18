@@ -428,7 +428,7 @@ export class Ingest {
     }
   }
   async receive(c: Context, signal: Signal) {
-    const key = this.auth.validateKey(c),
+    const key = this.auth.validateKey(c, undefined, true),
       table = String(c.req.headers["x-lightmoni-table"] ?? "");
     if (!validTable(table))
       fail(400, "X-Lightmoni-Table requires a logical business name");
@@ -456,8 +456,9 @@ export class Ingest {
         fail(400, "invalid gzip");
       }
     if (raw.length > 4 << 20) fail(413, "batch exceeds 4 MiB");
-    const batch = String(c.req.headers["x-lightmoni-batch-id"] ?? "") || id();
-    if (batch.length > 128) fail(400, "invalid batch ID");
+    const clientBatch = String(c.req.headers["x-lightmoni-batch-id"] ?? "") || id();
+    if (clientBatch.length > 128) fail(400, "invalid batch ID");
+    const batch = key.id ? clientBatch : "anonymous:" + hash(table + "\0" + clientBatch);
     const created = String(c.req.headers["x-lightmoni-batch-created-at"] ?? "");
     if (created) {
       let at: bigint;
@@ -472,6 +473,7 @@ export class Ingest {
         fail(400, "batch expired beyond 24-hour replay window");
     }
     await this.serial.run(async () => {
+      if (!key.id) this.auth.validateKey(c, table, true);
       const digest = hash(
         Buffer.concat([Buffer.from(signal + "\0" + table + "\0"), raw]),
       );
@@ -550,7 +552,7 @@ export class Ingest {
       try {
         for (const [i, n] of rows.entries()) {
           service = n.row.service;
-          const route = sdkRuntime(n, table) ? "lightmoni_sdk" : table,
+          const route = key.id && sdkRuntime(n, table) ? "lightmoni_sdk" : table,
             target =
               "_lm_" +
               (await this.cat.ensure(

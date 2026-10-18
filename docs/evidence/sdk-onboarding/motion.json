@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "report": [
+    {
+      "name": "entry",
+      "label": "start",
+      "time": 0,
+      "opacity": "0.3",
+      "transform": "matrix(1, 0, 0, 1, 0, 4)"
+    },
+    {
+      "name": "entry",
+      "label": "mid",
+      "time": 110,
+      "opacity": "0.77925",
+      "transform": "matrix(1, 0, 0, 1, 0, 1.26143)"
+    },
+    {
+      "name": "entry",
+      "label": "end",
+      "time": 220,
+      "opacity": "1",
+      "transform": "matrix(1, 0, 0, 1, 0, 0)"
+    },
+    {
+      "name": "authentication",
+      "label": "start",
+      "time": 0,
+      "opacity": "0.3",
+      "transform": "matrix(1, 0, 0, 1, 0, 4)"
+    },
+    {
+      "name": "authentication",
+      "label": "mid",
+      "time": 80,
+      "opacity": "0.77925",
+      "transform": "matrix(1, 0, 0, 1, 0, 1.26143)"
+    },
+    {
+      "name": "authentication",
+      "label": "end",
+      "time": 160,
+      "opacity": "1",
+      "transform": "matrix(1, 0, 0, 1, 0, 0)"
+    },
+    {
+      "name": "create",
+      "states": [
+        "dialog",
+        "loading",
+        "created and selected"
+      ],
+      "secretMasked": true
+    }
+  ]
+}

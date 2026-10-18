@@ -22,7 +22,7 @@ export default function AgentInstall({user,tables,onKeyCreated,initialGroup}:{us
  const command=metadata&&loaded&&label?agentInstallCommand(metadata,endpoint,labelID,key):'';
 
  return <div className="lm-surface">
-  <h2>接入执行节点</h2><p>安装 LightMoni Agent，选择初始任务标签、上报地址和 Key，复制命令到 Linux 服务器执行。节点接入后会同步该标签匹配的启用任务；可在节点助手中绑定多个任务标签。</p><Tag>Linux · amd64 / arm64 · systemd</Tag>
+  <h2>安装配置</h2><p>安装 LightMoni Agent，选择初始任务标签、上报地址和 Key，复制命令到 Linux 服务器执行。节点接入后会同步该标签匹配的启用任务；可在节点助手中绑定多个任务标签。</p><Tag>Linux · amd64 / arm64 · systemd</Tag>
   {error&&<Alert type="error" title={error} action={!loaded?<Button size="small" onClick={()=>setReload(value=>value+1)}>重新读取</Button>:undefined} style={{marginTop:16}}/>}
   <Form layout="vertical" style={{maxWidth:760,marginTop:20}}>
    <Form.Item label="初始任务标签" extra={<Link to="/agents?tab=labels">管理任务标签</Link>}><Select showSearch={{optionFilterProp:"label"}} aria-label="初始任务标签" value={labelID||undefined} onChange={value=>{setLabelID(value);setError('')}} disabled={!loaded||busy} options={labels.map(label=>({value:label.id,label:label.name}))}/></Form.Item>
