@@ -137,7 +137,14 @@ export function registerAgentCredentials(
       scopes.some((scope) => scope !== "agent.control" && scope !== "agent.data")
     )
       fail(400, "scopes must contain agent.control or agent.data");
-    return [...new Set(scopes)] as CredentialScope[];
+    const unique = [...new Set(scopes)] as CredentialScope[];
+    // The current installer and Agent configuration require both audiences.
+    // Keep the API from creating an active node that can never write a valid
+    // config; narrower scoped enrollment can be added with a matching client
+    // contract when credential rotation is implemented.
+    if (!unique.includes("agent.control") || !unique.includes("agent.data"))
+      fail(400, "enrollment currently requires both control and data scopes");
+    return unique;
   };
 
   router.post("/api/v1/agent-enrollments", async (ctx) => {
@@ -182,7 +189,7 @@ export function registerAgentCredentials(
         token_display_once: raw,
         token_expires_at: iso(expires),
         install_command_hint:
-          `lightmoni-agent install --endpoint ${endpointOrigin} --release-url ${endpointOrigin}/downloads/agent --version ${version} --enrollment-token-stdin`,
+          `sh install.sh --endpoint ${endpointOrigin} --release-url ${endpointOrigin}/downloads/agent --version ${version} --enrollment-token-stdin`,
       },
       201,
     );

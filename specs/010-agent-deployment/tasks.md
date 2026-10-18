@@ -53,7 +53,7 @@ Status: Baseline implementation delivered; hardening and Linux acceptance remain
 ## Script enrollment and per-node credentials (design follow-up)
 
 - [x] T027 明确用户从“节点助手”生成一次性安装会话、脚本通过 stdin/FD 传递秘密、状态轮询和失败回滚流程。
-- [x] T028 冻结 enrollment、pending activation、active/revoked/re-enrolling 状态及 `agent_id` 绑定、nonce 幂等和不回显秘密的原则。
+- [x] T028 冻结 enrollment、pending activation、active/revoked/re-enrolling 状态及 `agent_id` 绑定、nonce 幂等和不回显秘密的原则；当前公钥字段仅作元数据，未实现持有证明。
 - [x] T029 设计控制/数据/local token 分离、中心摘要存储、自动/管理员轮换、grace 窗口、单节点撤销和重新 enrollment 语义。
 - [x] T030 列出 enrollment、activate、abort、rotate、revoke、re-enroll API 及请求/响应边界；enrollment、activate、按节点 revoke 已实现，abort/rotate/re-enroll 仍为后续契约。
 - [x] T031 实现脚本部署 UI/下载安全、短期 enrollment token 和 pending 激活事务；已覆盖 token 不进安装命令、API 同 nonce 去重和不同 nonce 重放拒绝的运行时测试。丢失首次 bootstrap 响应后的安装器恢复、泄露审计及丢包/断电测试仍需补齐。

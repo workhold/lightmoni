@@ -146,9 +146,9 @@ sudo sh -c 'exec /tmp/lightmoni-agent-install.sh \
 rm -f /tmp/lightmoni-agent-install.sh
 ```
 
-安装器生成 `install_nonce` 和本机密钥材料，先兑换为短期 pending bootstrap，校验暂存配置后以 `service=ready`、`config_checked=true` 调用 activate。中心随后把节点置为 active 并签发每节点独立的 control credential 与 data credential，安装器才原子写入配置、身份并启动 systemd 服务。中心端重试必须复用同一 nonce，不会创建第二个节点；若首次兑换响应丢失，同 nonce 恢复会轮换并重新返回 bootstrap secret。激活前失败的 pending 会等待过期；激活后若服务启动失败，需要管理员撤销该节点凭据后重试。已有节点升级不会重新注册或删除身份、队列和缓存配置；自动撤销、轮换和重新 enrollment 尚待补齐。
+安装器生成 `install_nonce` 和本机身份元数据，先兑换为短期 pending bootstrap，校验暂存配置后以 `service=ready`、`config_checked=true` 调用 activate。这里是安装器的配置预检，不是中心独立验证 Agent 进程已经运行。中心随后把节点置为 active 并签发每节点独立的 control credential 与 data credential，安装器才原子写入配置、身份并启动 systemd 服务；如果后续启动失败，需要管理员撤销该节点凭据后重试。中心端重试必须复用同一 nonce，不会创建第二个节点；若首次兑换响应丢失，同 nonce 恢复会轮换并重新返回 bootstrap secret。激活前失败的 pending 会等待过期。已有节点升级不会重新注册或删除身份、队列和缓存配置；自动撤销、轮换和重新 enrollment 尚待补齐。
 
-每个节点的 `agent_id` 由中心绑定到本机首次生成的身份公钥和凭据摘要。控制凭据仅用于心跳、配置拉取和状态证明；数据凭据仅用于允许的遥测上报；本地 SDK 使用的 `local_token` 不发送到中心。中心只保存摘要，UI、审计、journal、诊断和错误输出只显示 credential ID、状态和时间，不显示完整 token。请求同时验证 token 的 audience、scope、有效期、撤销状态和 `agent_id`，不能靠请求体中的节点 ID 授权。
+每个节点的 `agent_id` 由中心绑定到 enrollment 时提交的身份材料和凭据摘要。当前提交的 `agent_public_key` 只是预留的节点元数据，尚未实现签名持有证明；实际认证边界是 bootstrap、control 和 data bearer credential。控制凭据仅用于心跳、配置拉取和状态证明；数据凭据仅用于允许的遥测上报；本地 SDK 使用的 `local_token` 不发送到中心。中心只保存摘要，UI、审计、journal、诊断和错误输出只显示 credential ID、状态和时间，不显示完整 token。请求同时验证 token 的 audience、scope、有效期、撤销状态和 `agent_id`，不能靠请求体中的节点 ID 授权。签名身份绑定属于后续发行与凭据强化工作。
 
 未来轮换设计是 Agent 在凭据接近过期时通过旧控制凭据和幂等 nonce 申请轮换，把新凭据写入 0600 临时文件并原子替换，确认后旧凭据只在短 grace 窗口内有效。当前仅支持管理员按节点或 audience revoke；撤销保留身份、队列和审计，但旧 token 不可恢复，重新接入必须生成新的 enrollment。断网时撤销无法即时停止已缓存任务，界面应显示待重连状态；配置租约实现后再以租约期限限制离线执行。
 

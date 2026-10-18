@@ -65,7 +65,7 @@ test("enrollment issues one-time bootstrap and separates control/data credential
   assert.equal(created.status, 201);
   assert.match(created.data.token_display_once, /^lm_enroll_/);
   assert.doesNotMatch(created.data.install_command_hint, /lm_enroll_/);
-  assert.match(created.data.install_command_hint, /--release-url .*\/downloads\/agent/);
+  assert.match(created.data.install_command_hint, /^sh install\.sh .*--release-url .*\/downloads\/agent/);
   assert.equal(
     f.store.canDownloadWithEnrollmentToken(created.data.token_display_once),
     true,
@@ -161,4 +161,12 @@ test("enrollment token cannot be replayed with a second nonce", async (t) => {
     arch: "amd64",
   });
   assert.equal(replay.status, 409);
+});
+
+test("enrollment cannot issue a credential subset the installer cannot persist", async (t) => {
+  const f = await fixture(t);
+  const created = await f.request("/api/v1/agent-enrollments", "POST", {
+    scopes: ["agent.control"],
+  });
+  assert.equal(created.status, 400);
 });

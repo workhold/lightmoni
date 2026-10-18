@@ -127,7 +127,7 @@ rm -f /tmp/lightmoni-agent-install.sh
 | 记录/状态 | 必填字段与规则 |
 | --- | --- |
 | `enrollment_session` | `id`、中心/租户、创建者、允许 arch/version、初始标签、scope、`token_digest`、`expires_at`、`used_at`、状态；token 只能消费一次，重复请求需匹配原 `install_nonce` |
-| `pending_agent` | `agent_id`、`install_nonce`、主机公钥/指纹、版本/架构、bootstrap credential 摘要、`pending_expires_at`；仅允许 activate/abort |
+| `pending_agent` | `agent_id`、`install_nonce`、安装器提交的身份元数据、版本/架构、bootstrap credential 摘要、`pending_expires_at`；当前不验证公钥持有证明，仅允许 activate/abort |
 | `agent_credential` | `credential_id`、`agent_id`、audience、scope、摘要、created/last_used/expires/revoked/grace 时间、撤销原因；中心不存明文 secret |
 | `agent` | `id`、状态、最近心跳、控制/数据 credential 状态、期望标签和配置 revision；状态变更写审计 |
 
@@ -178,7 +178,7 @@ type Activated = {
 };
 ```
 
-The server authenticates all post-enrollment requests by bearer credential plus audience/scope and `agent_id` binding; a body field alone is never authorization. Enrollment uses the `install_nonce` for pending replay protection; repeating the same nonce while pending returns the same pending record, while a different nonce is rejected. Activate currently consumes the bootstrap once and does not yet expose a lost-response status/retry operation; rotation idempotency is future work. After activation no endpoint returns a second copy of full secrets.
+The server authenticates all post-enrollment requests by bearer credential plus audience/scope and `agent_id` binding; a body field alone is never authorization. Enrollment uses the `install_nonce` for pending replay protection; repeating the same nonce while pending returns the same pending record, while a different nonce is rejected. The current installer enrollment always issues both control and data credentials; subset scopes are rejected until a matching client contract exists. Activate currently consumes the bootstrap once and does not yet expose a lost-response status/retry operation; rotation idempotency is future work. After activation no endpoint returns a second copy of full secrets. The submitted `agent_public_key` is metadata only until signed proof-of-possession is implemented.
 
 ### Credential operations
 
