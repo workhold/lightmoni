@@ -1,0 +1,58 @@
+{
+  "checks": [
+    "历史 awaiting_approval 快照回读 completed 后隐藏确认",
+    "GET 失败显示状态未确认且不可确认",
+    "GET 返回过期待确认提案时无确认按钮",
+    "GET 缺少完整 after 配置时不可确认",
+    "完整 SQL 原值/新值、创建/有效期、理由及影响可读",
+    "审阅先 GET 后显示 Modal，Modal 含完整 SQL，取消零 POST",
+    "明确确认只发一次 POST；连续点击、提交中关闭/取消/Escape 不重复提交",
+    "409 保留错误且不显示成功，刷新并重新审阅后才可再次确认",
+    "390px 卡片及长 SQL 不造成页面横向溢出",
+    "member 可读取和审阅告警卡片，不受代码任务管理员限制",
+    "告警页向助手发送当前 tab、筛选与正在编辑的规则 ID",
+    "member 明确确认后触发变更事件，告警页和静默工作台立即回读（已禁用轮询）"
+  ],
+  "pageerrors": [],
+  "unexpected": [],
+  "apply_posts": 3,
+  "proposal_gets": 21,
+  "captured_alert_contexts": [
+    {
+      "tab": "history",
+      "filters": {
+        "service": "checkout",
+        "enabled": "true"
+      }
+    },
+    {
+      "tab": "rules",
+      "filters": {
+        "service": "checkout",
+        "enabled": "true"
+      },
+      "editing_rule_id": "rule-checkout"
+    }
+  ],
+  "confirmation_view": {
+    "ready": true,
+    "opacity": 1,
+    "title": {
+      "x": 244,
+      "y": 120,
+      "width": 952,
+      "height": 27
+    },
+    "button": {
+      "x": 1080,
+      "y": 882,
+      "width": 116,
+      "height": 34
+    }
+  },
+  "screenshots": [
+    "desktop.png",
+    "mobile.png",
+    "confirmation.png"
+  ]
+}
