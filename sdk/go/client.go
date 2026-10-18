@@ -11,6 +11,7 @@ import (
 	"math"
 	mathrand "math/rand"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -33,16 +34,16 @@ type Attributes map[string]any
 // Config has no required private Key when using the local Agent.
 type Config struct {
 	// DisableSelfTelemetry is for embedded collectors and protocol fixtures.
-	DisableSelfTelemetry          bool
-	DisableRemoteConfig           bool
-	Disabled                      bool
-	ConfigEndpoint, ConfigKey     string
-	ConfigInterval                time.Duration
-	LogSampling                   map[string]LogSamplingPolicy
-	Service, Table, Endpoint, Key string
-	InstanceID                    string
-	Resource                      Attributes
-	Exporter                      Exporter
+	DisableSelfTelemetry                               bool
+	DisableRemoteConfig                                bool
+	Disabled                                           bool
+	ConfigEndpoint, ConfigKey                          string
+	ConfigInterval                                     time.Duration
+	LogSampling                                        map[string]LogSamplingPolicy
+	Service, Env, ServiceVersion, Table, Endpoint, Key string
+	InstanceID                                         string
+	Resource                                           Attributes
+	Exporter                                           Exporter
 	// TraceContextProvider bridges an existing request/OTel context when no
 	// LightMoni trace is present. It must be safe for concurrent calls.
 	TraceContextProvider                                               func(context.Context) (TraceContext, bool)
@@ -89,6 +90,7 @@ type queuedBatch struct {
 	records  int
 }
 type state struct {
+	observations                      map[string]*observation
 	mu                                sync.Mutex
 	cfg                               Config
 	resource                          *resourcepb.Resource
@@ -135,11 +137,35 @@ func validTable(table string) bool {
 	return tablePattern.MatchString(table) && !strings.HasPrefix(table, "log_") && !strings.HasPrefix(table, "metric_") && !strings.HasPrefix(table, "trace_")
 }
 
+func Init(service, env string) (*Client, error) { return New(Config{Service: service, Env: env}) }
 func New(cfg Config) (*Client, error) {
+	if cfg.Endpoint == "" && cfg.Exporter == nil {
+		cfg.Endpoint = os.Getenv("LIGHTMONI_ENDPOINT")
+		if cfg.Endpoint == "" {
+			cfg.Endpoint = "http://127.0.0.1:4318"
+		}
+		if cfg.Key == "" {
+			cfg.Key = os.Getenv("LIGHTMONI_KEY")
+		}
+	}
+	if (cfg.Env != "" && strings.TrimSpace(cfg.Env) == "") || len(cfg.Env) > 128 || len(cfg.ServiceVersion) > 128 || len(cfg.InstanceID) > 128 {
+		return nil, errors.New("resource identity exceeds 128 bytes")
+	}
+	resource := Attributes{}
+	for key, value := range cfg.Resource {
+		resource[key] = value
+	}
+	if cfg.Env != "" {
+		resource["deployment.environment.name"] = cfg.Env
+	}
+	if cfg.ServiceVersion != "" {
+		resource["service.version"] = cfg.ServiceVersion
+	}
+	cfg.Resource = resource
 	if cfg.Service == "" || len(cfg.Service) > 128 {
 		return nil, errors.New("service is required and must be at most 128 bytes")
 	}
-	if !validTable(cfg.Table) {
+	if cfg.Table != "" && !validTable(cfg.Table) {
 		return nil, errors.New("table must match [a-z][a-z0-9_]{0,47} without a reserved type prefix")
 	}
 	if cfg.Exporter == nil {
@@ -227,6 +253,7 @@ func New(cfg Config) (*Client, error) {
 		s.cfg.Exporter = NewHTTPExporter(cfg.Endpoint, cfg.Key, nil)
 	}
 	s.configKey = cfg.Key
+	s.observations = map[string]*observation{}
 	c := &Client{s: s, table: cfg.Table}
 	if err := c.UpdateLogSampling(cfg.LogSampling); err != nil {
 		cancel()
@@ -376,6 +403,14 @@ func (s *state) run() {
 			continue
 		}
 		item := s.queue[0]
+		if item.batch.Table == "lightmoni_sdk" && s.configKey == "" {
+			s.queue = s.queue[1:]
+			s.stats.PendingBatches--
+			s.stats.PendingBytes -= len(item.batch.Payload)
+			s.notifyLocked()
+			s.mu.Unlock()
+			continue
+		}
 		ctx, cancel := context.WithTimeout(s.ctx, s.cfg.RequestTimeout)
 		s.deliveryCancel = cancel
 		s.mu.Unlock()
@@ -470,6 +505,9 @@ func (s *state) collectLocked(now time.Time) {
 	// Split by metric point to keep even high-cardinality exports bounded while
 	// retaining one Metric per name within each OTLP request.
 	tables := map[string]bool{}
+	for _, o := range s.observations {
+		tables[o.table] = true
+	}
 	for _, m := range s.metrics {
 		tables[m.table] = true
 	}
@@ -486,6 +524,12 @@ func (s *state) collectLocked(now time.Time) {
 	sort.Strings(keys)
 	for _, table := range keys {
 		var metrics []*metricpb.Metric
+		for key, o := range s.observations {
+			if o.table == table {
+				metrics = append(metrics, o.collect(now)...)
+				delete(s.observations, key)
+			}
+		}
 		for _, m := range s.metrics {
 			if m.table == table {
 				metrics = append(metrics, m.collect(now)...)
@@ -493,7 +537,7 @@ func (s *state) collectLocked(now time.Time) {
 		}
 		sort.SliceStable(metrics, func(i, j int) bool { return metrics[i].Name < metrics[j].Name })
 		request := func(ms []*metricpb.Metric) *metriccollector.ExportMetricsServiceRequest {
-			return &metriccollector.ExportMetricsServiceRequest{ResourceMetrics: []*metricpb.ResourceMetrics{{Resource: s.resource, ScopeMetrics: []*metricpb.ScopeMetrics{{Scope: &commonpb.InstrumentationScope{Name: "lightmoni/sdk/go"}, Metrics: mergeMetrics(ms)}}}}}
+			return &metriccollector.ExportMetricsServiceRequest{ResourceMetrics: []*metricpb.ResourceMetrics{{Resource: s.resource, ScopeMetrics: metricScopes(ms)}}}
 		}
 		var group []*metricpb.Metric
 		count := 0

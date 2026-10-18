@@ -217,14 +217,57 @@ func (m *instrument) collect(now time.Time) []*metricpb.Metric {
 	return result
 }
 
+func metricKind(m *metricpb.Metric) string {
+	switch {
+	case m.GetSum() != nil:
+		return "sum"
+	case m.GetGauge() != nil:
+		return "gauge"
+	case m.GetHistogram() != nil:
+		return "histogram"
+	case m.GetExponentialHistogram() != nil:
+		return "exponential"
+	default:
+		return "summary"
+	}
+}
+func metricScopes(metrics []*metricpb.Metric) []*metricpb.ScopeMetrics {
+	groups := map[string][]*metricpb.Metric{}
+	base := map[string]string{}
+	for _, m := range metrics {
+		kind := metricKind(m)
+		scope := ""
+		if old, ok := base[m.Name]; ok && old != kind {
+			scope = kind
+		} else {
+			base[m.Name] = kind
+		}
+		groups[scope] = append(groups[scope], m)
+	}
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := []*metricpb.ScopeMetrics{}
+	for _, kind := range keys {
+		name := "lightmoni/sdk/go"
+		if kind != "" {
+			name += "/" + kind
+		}
+		result = append(result, &metricpb.ScopeMetrics{Scope: &commonpb.InstrumentationScope{Name: name}, Metrics: mergeMetrics(groups[kind])})
+	}
+	return result
+}
 func mergeMetrics(metrics []*metricpb.Metric) []*metricpb.Metric {
 	result := make([]*metricpb.Metric, 0, len(metrics))
 	byName := map[string]*metricpb.Metric{}
 	for _, metric := range metrics {
-		current := byName[metric.Name]
+		key := metric.Name + "\x00" + metricKind(metric)
+		current := byName[key]
 		if current == nil {
 			current = proto.Clone(metric).(*metricpb.Metric)
-			byName[metric.Name] = current
+			byName[key] = current
 			result = append(result, current)
 			continue
 		}
@@ -236,6 +279,12 @@ func mergeMetrics(metrics []*metricpb.Metric) []*metricpb.Metric {
 		}
 		if hist := current.GetHistogram(); hist != nil {
 			hist.DataPoints = append(hist.DataPoints, metric.GetHistogram().DataPoints...)
+		}
+		if hist := current.GetExponentialHistogram(); hist != nil {
+			hist.DataPoints = append(hist.DataPoints, metric.GetExponentialHistogram().DataPoints...)
+		}
+		if summary := current.GetSummary(); summary != nil {
+			summary.DataPoints = append(summary.DataPoints, metric.GetSummary().DataPoints...)
 		}
 	}
 	return result

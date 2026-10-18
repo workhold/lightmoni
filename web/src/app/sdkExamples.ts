@@ -3,27 +3,35 @@ export type SDKConnectionMode='agent'|'direct';
 export type SDKAuthMode='key'|'anonymous';
 export const SDK_AGENT_ENDPOINT='http://127.0.0.1:4318';
 export const SDK_LANGUAGES=[{value:'go',label:'Go'},{value:'typescript',label:'Node.js'},{value:'rust',label:'Rust'},{value:'python',label:'Python'}];
-export interface SDKSampleOptions {table?:string;service?:string;authMode?:SDKAuthMode;key?:string;keyName?:string}
-export const validSDKTable=(name:string)=>/^[a-z][a-z0-9_]{0,47}$/.test(name)&&!/^(log|metric|trace)_/.test(name)&&!['lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(name);
+export interface SDKSampleOptions {service?:string;env?:string;service_version?:string;instance_id?:string;authMode?:SDKAuthMode;key?:string;keyName?:string}
+export const validSDKTable=(name:string)=>/^[a-z][a-z0-9_]{0,47}$/.test(name)&&!/^(log|metric|trace)_/.test(name)&&!['lightmoni','lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(name);
 export function recommendedExemptTables(){
  const suffix=Array.from(crypto.getRandomValues(new Uint8Array(8)),value=>value.toString(16).padStart(2,'0')).join('');
  return [{name:`app_logs_${suffix}`,description:'应用日志'},{name:`app_metrics_${suffix}`,description:'业务指标'},{name:`browser_events_${suffix}`,description:'前端事件'}];
 }
 export function sdkSampleFor(language:string,mode:SDKConnectionMode='agent',endpoint?:string,options:SDKSampleOptions={}):string {
  const address=endpoint?.trim().replace(/\/+$/,'')||(mode==='agent'?SDK_AGENT_ENDPOINT:'');
- const fallback=JSON.stringify(address),table=JSON.stringify(options.table??'business'),service=JSON.stringify(options.service??'order-api'),anonymous=options.authMode==='anonymous';
+ const fallback=JSON.stringify(address),service=JSON.stringify(options.service??'order-api'),env=JSON.stringify(options.env??'test'),anonymous=options.authMode==='anonymous';
+ const jsIdentity=(options.service_version?`\n  service_version: ${JSON.stringify(options.service_version)},`:'')+(options.instance_id?`\n  instance_id: ${JSON.stringify(options.instance_id)},`:'');
+ const pyIdentity=(options.service_version?`\n    service_version=${JSON.stringify(options.service_version)},`:'')+(options.instance_id?`\n    instance_id=${JSON.stringify(options.instance_id)},`:'');
+ const goIdentity=(options.service_version?` ServiceVersion:${JSON.stringify(options.service_version)},`:'')+(options.instance_id?` InstanceID:${JSON.stringify(options.instance_id)},`:'');
+ const rustIdentity=(options.service_version?`\n    options.service_version = Some(${JSON.stringify(options.service_version)}.into());`:'')+(options.instance_id?`\n    options.instance_id = Some(${JSON.stringify(options.instance_id)}.into());`:'');
  const examples:Record<string,string>={
   typescript:`import {createLightMoni} from '@lightmoni/sdk';
 
 const moni = createLightMoni({
-  service: ${service}, table: ${table},
+  service: ${service}, env: ${env},${jsIdentity}
   endpoint: process.env.LIGHTMONI_ENDPOINT ?? ${fallback},
   key: ${anonymous?"''":"process.env.LIGHTMONI_KEY"}
 });
-await moni.withSpan('create_order', async () => {
-  moni.counter('orders_created').add(1, {region:'cn'});
-  moni.log('info', 'order created', {order_id:'123'});
-});
+
+// 每次数据库请求完成后调用，替换 your_table 为业务目标表。
+function recordDatabaseQuery(durationMs, isp, province) {
+  moni.record('your_table', 'db.query.duration_ms',
+    {key1: isp, key2: province}, durationMs, 1);
+}
+// 已有汇总数据：moni.record('your_table', 'restaurant.spend', {}, 100, 5);
+// 进程退出前执行：
 await moni.shutdown({timeoutMs:5000});`,
   go:`package main
 
@@ -34,20 +42,21 @@ import (
   moni "github.com/lightmoni/lightmoni/sdk/go"
 )
 
+func recordDatabaseQuery(client *moni.Client, durationMs float64, isp, province string) {
+  client.Record("your_table", "db.query.duration_ms",
+    moni.Attributes{"key1":isp, "key2":province}, durationMs, 1)
+}
+
 func main() {
   endpoint := os.Getenv("LIGHTMONI_ENDPOINT")
   if endpoint == "" { endpoint = ${fallback} }
   client, err := moni.New(moni.Config{
-    Service:${service}, Table:${table},
+    Service:${service}, Env:${env},${goIdentity}
     Endpoint:endpoint, Key:${anonymous?'""':'os.Getenv("LIGHTMONI_KEY")'},
   })
   if err != nil { panic(err) }
-  orders, err := client.Counter("orders_created", moni.MetricOptions{})
-  if err != nil { panic(err) }
-  requestCtx, span := client.StartSpan(context.Background(), "create_order")
-  orders.Add(requestCtx, 1, moni.Attributes{"region":"cn"})
-  client.Logger(requestCtx).Log("info", "order created", nil)
-  span.End()
+  // 每次数据库请求后调用 recordDatabaseQuery，替换 your_table。
+  // 已有汇总数据：client.Record("your_table", "restaurant.spend", nil, 100, 5)
   ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
   defer cancel()
   if err := client.Shutdown(ctx); err != nil { panic(err) }
@@ -56,27 +65,35 @@ func main() {
 from lightmoni import Client
 
 moni = Client(
-    service=${service}, table=${table},
+    service=${service}, env=${env},${pyIdentity}
     endpoint=os.getenv("LIGHTMONI_ENDPOINT", ${fallback}),
     key=${anonymous?'""':'os.getenv("LIGHTMONI_KEY", "")'}
 )
-moni.counter("orders_created").add(1, {"region":"cn"})
-with moni.start_span("create_order"):
-    moni.log("info", "order created", {"order_id":"123"})
+
+def record_database_query(duration_ms, isp, province):
+    # 每次数据库请求后调用，替换 your_table。
+    moni.record("your_table", "db.query.duration_ms",
+                {"key1": isp, "key2": province}, duration_ms, 1)
+
+# 已有汇总数据：moni.record("your_table", "restaurant.spend", {}, 100, 5)
 moni.shutdown(timeout=5)`,
-  rust:`use lightmoni::{Client, Attributes};
+  rust:`use lightmoni::{Client, Options, Attributes};
 use std::{env, time::Duration};
 
+fn record_database_query(moni: &Client, duration_ms: f64, isp: &str, province: &str) {
+    moni.record("your_table", "db.query.duration_ms",
+        &Attributes::from([("key1".into(), isp.into()), ("key2".into(), province.into())]),
+        duration_ms, 1);
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let endpoint = env::var("LIGHTMONI_ENDPOINT")
-        .unwrap_or_else(|_| ${fallback}.into());
-    let key = ${anonymous?'String::new()':'env::var("LIGHTMONI_KEY").unwrap_or_default()'};
-    let moni = Client::new(${service}, ${table}, &endpoint, &key)?;
-    moni.counter("orders_created")?.add(1,
-        &Attributes::from([("region".into(), "cn".into())]));
-    moni.with_span("create_order", &Attributes::new(), None, |scoped, _| {
-        scoped.log("info", "order created", &Attributes::new(), None);
-    })?;
+    let mut options = Options::new(${service}, ${env});${rustIdentity}
+    options.endpoint = Some(env::var("LIGHTMONI_ENDPOINT")
+        .unwrap_or_else(|_| ${fallback}.into()));
+    options.key = ${anonymous?'Some(String::new())':'env::var("LIGHTMONI_KEY").ok()'};
+    let moni = Client::init(options)?;
+    // 每次数据库请求后调用 record_database_query，替换 your_table。
+    // 已有汇总数据：moni.record("your_table", "restaurant.spend", &Attributes::new(), 100.0, 5);
     moni.shutdown(Duration::from_secs(5))?;
     Ok(())
 }`,

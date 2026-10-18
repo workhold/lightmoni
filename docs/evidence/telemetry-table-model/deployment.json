@@ -1,0 +1,28 @@
+{
+  "passed": true,
+  "url": "http://localhost:18380",
+  "health": "ok",
+  "admin_login": "verified",
+  "state_counts": {
+    "users": 1,
+    "dashboards": 5,
+    "agents": 1
+  },
+  "system_tables": [
+    "lightmoni_log",
+    "lightmoni_metric_gauge",
+    "lightmoni_metric_histogram",
+    "lightmoni_metric_sum"
+  ],
+  "sdk_languages": [
+    "go",
+    "typescript",
+    "rust",
+    "python"
+  ],
+  "old_and_new_queries": 12,
+  "image": "lightmoni:record-20261019",
+  "image_id": "sha256:4902376f9e13f288d1bbcfdcc8df174719ee3067351036bda4de9f13918a5269",
+  "index_sha256": "7a789fcd15519e9f01d88fd2a9c252bf11ebaa9a30cb099a9539924b58bcff7c",
+  "backup": ".local-dev/record-deploy/state-before"
+}

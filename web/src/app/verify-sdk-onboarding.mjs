@@ -3,7 +3,7 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {mediaDirectory} from '../../../scripts/qa-artifacts.mjs';
 const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:15176',run=process.env.LIGHTMONI_QA_RUN??'1';
-const output=resolve(import.meta.dirname,'../../../docs/evidence/sdk-onboarding');
+const output=resolve(import.meta.dirname,'../../../docs/evidence/telemetry-table-model');
 await mkdir(output,{recursive:true});const media=mediaDirectory(output);
 const browser=await chromium.launch({headless:true,channel:'chrome'}),context=await browser.newContext({viewport:{width:1440,height:1000},permissions:['clipboard-read','clipboard-write']});
 context.setDefaultTimeout(10000);const page=await context.newPage(),errors=[],checks=[];
@@ -32,19 +32,23 @@ try{
  await dialog.getByRole('button',{name:'创建并选择'}).click();await expect(dialog).toBeHidden();await page.unroute('**/api/v1/keys');
  await expect(page.locator('#sdk-key').locator('xpath=ancestor::div[contains(@class,"ant-select")]').first()).toContainText(keyName);
  await expect(copy).toBeEnabled();await expect(page.getByLabel('SDK 环境变量',{exact:true})).toContainText('lm_');
- const keys=await req('/keys'),created=keys.find(item=>item.name===keyName);expect(created.allowed_tables).toEqual(['business']);expect(created.key).toBeUndefined();
+ const keys=await req('/keys'),created=keys.find(item=>item.name===keyName);expect(created.allowed_tables).toEqual([]);expect(created.allow_all_tables).toBe(true);expect(created.key).toBeUndefined();
  const env=await page.getByLabel('SDK 环境变量',{exact:true}).innerText(),secret=env.match(/LIGHTMONI_KEY='([^']+)'/)[1];
- checks.push('three tabs, four languages, empty dropdown only create; failed create retains name; retry creates one minimal-scope key and selects it');
+ checks.push('three tabs, four languages, empty dropdown only create; failed create retains name; retry creates one all-business key and selects it');
  await page.getByRole('combobox',{name:'SDK 密钥',exact:true}).click();await expect(popup.getByRole('button',{name:'创建 SDK 密钥',exact:true})).toBeVisible();await expect(popup.locator('.ant-select-item-option')).toHaveCount(1);await page.keyboard.press('Escape');
  await page.getByRole('textbox',{name:'服务名称',exact:true}).fill('payments-qa');
+ await page.getByRole('textbox',{name:'环境',exact:true}).fill('');await expect(copy).toBeDisabled();
+ await page.getByRole('textbox',{name:'环境',exact:true}).fill('prod');
+ await page.locator('summary').filter({hasText:'可选实例信息'}).click();
+ await page.getByRole('textbox',{name:'服务版本',exact:true}).fill('v1.2');await page.getByRole('textbox',{name:'实例 ID',exact:true}).fill('qa-instance');
  for(const [name,language] of [['Go','go'],['Node.js','typescript'],['Rust','rust'],['Python','python']]){
-  await page.getByRole('combobox',{name:'SDK 语言',exact:true}).click();await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({hasText:name}).click();const code=page.getByLabel('业务接入 SDK 示例',{exact:true});await expect(code).toContainText('payments-qa');await expect(code).toContainText('business');await expect(code).toHaveAttribute('data-language',language);
+  await page.getByRole('combobox',{name:'SDK 语言',exact:true}).click();await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({hasText:name}).click();const code=page.getByLabel('业务接入 SDK 示例',{exact:true});await expect(code).toContainText('payments-qa');await expect(code).toContainText('prod');await expect(code).toContainText('v1.2');await expect(code).toContainText('qa-instance');await expect(code).toContainText('db.query.duration_ms');await expect(code).toContainText('100');await expect(code).not.toContainText('table:');await expect(code).not.toContainText('Table:');await expect(code).not.toContainText('orders_created');await expect(code).toHaveAttribute('data-language',language);
  }
  await page.reload();await page.getByRole('combobox',{name:'SDK 密钥',exact:true}).click();await page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({hasText:keyName}).click();await expect(page.getByLabel('SDK 环境变量',{exact:true})).toContainText(keyName);await expect(page.getByLabel('SDK 环境变量',{exact:true})).not.toContainText(secret);await shot('key-selected');
- await page.getByText('无密钥模式',{exact:true}).click();await expect(copy).toBeDisabled();
+ await page.getByText('无密钥模式',{exact:true}).click();await expect(copy).toBeEnabled();await expect(page.locator('#sdk-table')).toHaveCount(0);
  await expect(page.getByText('建议使用带随机后缀的复杂表名。',{exact:false})).toBeVisible();await shot('anonymous-recommendations');
  await page.locator('.lm-sdk-recommendation').first().getByRole('button',{name:'添加',exact:true}).click();const exemptionDialog=page.getByRole('dialog',{name:'添加豁免表',exact:true}),table=await exemptionDialog.getByRole('textbox',{name:'豁免逻辑表名',exact:true}).inputValue();expect(table).toMatch(/^app_logs_[a-f0-9]{16}$/);
- await exemptionDialog.getByRole('button',{name:'添加并启用',exact:true}).click();await expect(exemptionDialog).toBeHidden();await expect(copy).toBeEnabled();await expect(page.getByLabel('SDK 环境变量',{exact:true})).toContainText('unset LIGHTMONI_KEY');await expect(page.getByLabel('业务接入 SDK 示例',{exact:true})).not.toContainText('LIGHTMONI_KEY');await expect(page.getByLabel('业务接入 SDK 示例',{exact:true})).toContainText(table);await shot('anonymous-ready');
+ await exemptionDialog.getByRole('button',{name:'添加并启用',exact:true}).click();await expect(exemptionDialog).toBeHidden();await expect(copy).toBeEnabled();await expect(page.getByLabel('SDK 环境变量',{exact:true})).toContainText('unset LIGHTMONI_KEY');await expect(page.getByLabel('业务接入 SDK 示例',{exact:true})).not.toContainText('LIGHTMONI_KEY');await expect(page.getByLabel('业务接入 SDK 示例',{exact:true})).not.toContainText(table);await shot('anonymous-ready');
  const at=String(BigInt(Date.now())*1000000n),resource={attributes:[{key:'service.name',value:{stringValue:'sdk-ui-qa'}}]},payload={resourceLogs:[{resource,scopeLogs:[{logRecords:[{timeUnixNano:at,body:{stringValue:'SDK onboarding real log'}}]}]}]};
  const send=(signal,name,body,authorization)=>context.request.post(base+'/v1/'+signal,{data:body,headers:{'X-Lightmoni-Table':name,...(authorization?{Authorization:authorization}:{})}});
  expect((await send('logs',table,payload)).status()).toBe(200);
@@ -56,7 +60,7 @@ try{
  await page.reload();await expect(page.getByRole('row').filter({hasText:table})).toContainText('更新后的应用日志');await shot('exemption-list');
  await page.getByRole('switch',{name:'豁免 '+table,exact:true}).click();await expect(page.getByRole('switch',{name:'豁免 '+table,exact:true})).not.toBeChecked();expect((await send('logs',table,payload)).status()).toBe(401);
  const listed=await req('/catalog/tables');expect(listed.some(item=>item.name==='log_'+table)).toBe(true);
- checks.push('recommended names require approval; real ClickHouse logs/metrics/traces accepted only for active exemptions; wrong credentials rejected; descriptions persist; revocation immediately rejects uploads and retains data');
+ checks.push('recommended names require explicit registration; real ClickHouse logs/metrics/traces accepted only for active exemptions; wrong credentials rejected; descriptions persist; revocation immediately rejects uploads and retains data');
  await page.goto(base+'/data?tab=agent&group=default');await expect(page).toHaveURL(/\/agents\/install\?group=default/);await expect(page.getByRole('heading',{name:'接入执行节点',exact:true,level:1})).toBeVisible();
  await page.goto(base+'/data?tab=tables');await expect(page).toHaveURL(/\/admin\?tab=tables/);await expect(page.getByRole('heading',{name:'数据表管理'})).toBeVisible();
  await page.goto(base+'/data');await page.getByText('无密钥模式',{exact:true}).click();
@@ -65,7 +69,9 @@ try{
  await page.setViewportSize({width:1440,height:1000});await page.evaluate(()=>document.documentElement.style.zoom='2');await noOverflow();await page.evaluate(()=>document.documentElement.style.zoom='');
  const zoomContext=await browser.newContext({viewport:{width:720,height:500},deviceScaleFactor:2});await zoomContext.addCookies(await context.cookies());const zoomPage=await zoomContext.newPage();await zoomPage.goto(base+'/data');await zoomPage.getByText('无密钥模式',{exact:true}).click();expect(await zoomPage.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await zoomPage.screenshot({path:resolve(media,`zoom-200-${run}.png`),animations:'disabled'});await zoomPage.locator('.lm-sdk-recommendations').scrollIntoViewIfNeeded();await zoomPage.screenshot({path:resolve(media,`zoom-recommendations-${run}.png`),animations:'disabled'});await zoomContext.close();
  await page.emulateMedia({reducedMotion:'reduce'});await page.getByText('使用 SDK 密钥',{exact:true}).click();await expect(page.getByRole('combobox',{name:'SDK 密钥',exact:true})).toBeVisible();
- checks.push('legacy installer/table links, 390px, 200% zoom and reduced motion');
+ await page.locator('.lm-sdk-config').screenshot({path:resolve(media,`record-config-${run}.png`),animations:'disabled'});
+ await expect(page.getByLabel('业务指标查询 SQL',{exact:true})).toContainText('quantilesExactWeighted');await expect(page.getByLabel('业务指标查询 SQL',{exact:true})).toContainText('incomplete_distribution');
+ checks.push('record identity, mandatory count, SQL distribution coverage, legacy installer/table links, 390px, 200% zoom and reduced motion');
  await req('/keys/'+created.id,{method:'PUT',data:{active:false}});expect(errors).toEqual([]);
  await writeFile(resolve(output,`verification-${run}.json`),JSON.stringify({run,checks,pageErrors:errors,table,createdKeyID:created.id,passed:true},null,2));
  console.log(JSON.stringify({run,passed:true,checks:checks.length,pageErrors:errors}));

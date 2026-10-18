@@ -3,16 +3,17 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {loadSource} from '../features/dashboards/test-module.mjs';
 const {SDK_LANGUAGES,sdkExamples,sdkSampleFor,sdkEnvironment,sdkEndpointError,sdkEndpointIsLoopback,validSDKTable,recommendedExemptTables}=loadSource(new URL('./sdkExamples.ts',import.meta.url));
-test('four SDK demos carry the selected service, table, address and authentication',()=>{
+test('four SDK demos initialize identity without binding tables and expose one five-argument record call',()=>{
  assert.deepEqual(SDK_LANGUAGES.map(item=>item.value),['go','typescript','rust','python']);
  assert.deepEqual(Object.keys(sdkExamples).sort(),['go','python','rust','typescript']);
  for(const language of Object.keys(sdkExamples)){
   assert.match(sdkSampleFor(language,'agent'),/127\.0\.0\.1:4318/);
-  const direct=sdkSampleFor(language,'direct','https://monitor.example/base/',{service:'payments-prod',table:'payments_a182'});
-  for(const value of ['payments-prod','payments_a182','https://monitor.example/base','LIGHTMONI_KEY'])assert.ok(direct.includes(value),`${language}: ${value}`);
+  const direct=sdkSampleFor(language,'direct','https://monitor.example/base/',{service:'payments-prod',env:'prod',service_version:'v1.2',instance_id:'instance-one'});
+  for(const value of ['payments-prod','prod','v1.2','instance-one','https://monitor.example/base','LIGHTMONI_KEY'])assert.ok(direct.includes(value),`${language}: ${value}`);
   assert.doesNotMatch(direct,/127\.0\.0\.1:4318/);
-  const anonymous=sdkSampleFor(language,'direct','https://monitor.example',{authMode:'anonymous',table:'browser_events_192acf'});
-  assert.doesNotMatch(anonymous,/LIGHTMONI_KEY/);assert.match(anonymous,/browser_events_192acf/);
+  assert.doesNotMatch(direct, /\btable\s*[:=]|Table\s*:|orders_created|create_order/);assert.match(direct, /db\.query\.duration_ms/);assert.match(direct, /restaurant\.spend/);assert.match(direct, /100(?:\.0)?, 5/);
+  const anonymous=sdkSampleFor(language,'direct','https://monitor.example',{authMode:'anonymous'});
+  assert.doesNotMatch(anonymous,/LIGHTMONI_KEY/);assert.doesNotMatch(anonymous,/business|browser_events_192acf/);
  }
  assert.equal(sdkSampleFor('unknown'),sdkSampleFor('typescript'));
 });

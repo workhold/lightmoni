@@ -1,3 +1,4 @@
+import { Distribution } from './distribution.js';
 import { type LogSamplingPolicy } from './sampling.js';
 export type { LogSamplingPolicy, LogRule, LogCondition, LogExcludeRule, SDKConfig } from './sampling.js';
 export type Attributes = Record<string, string | boolean | number | bigint>;
@@ -22,7 +23,10 @@ export interface TraceContext {
 }
 export interface Options {
     service: string;
-    table: string;
+    env?: string;
+    service_version?: string;
+    instance_id?: string;
+    table?: string;
     endpoint?: string;
     key?: string;
     selfTelemetry?: boolean;
@@ -127,6 +131,14 @@ declare class State {
     };
     readonly instanceId: string;
     readonly instruments: Map<string, Instrument>;
+    readonly observations: Map<string, {
+        table: string;
+        name: string;
+        attributes: Attribute[];
+        distribution: Distribution;
+        summaryCount: bigint;
+        summarySum: number;
+    }>;
     readonly logs: Map<string, RecordValue[]>;
     readonly spans: Map<string, RecordValue[]>;
     readonly queue: Queued[];
@@ -180,6 +192,7 @@ declare class State {
     store(map: Map<string, RecordValue[]>, table: string, record: RecordValue): void;
     instrument(table: string, name: string, kind: Instrument["kind"], options: MetricOptions): Instrument;
     record(metric: Instrument, value: number | bigint, attrs: Attributes): void;
+    observe(table: string, name: string, dimensions: Record<string, string>, value: number, count: number | bigint): void;
     collect(): void;
     collectSelf(): void;
     enqueueSelf(signal: Signal, rows: RecordValue[], at: string): boolean;
@@ -215,6 +228,8 @@ export declare class LightMoni {
     private readonly boundTrace?;
     private constructor();
     static create(options: Options): LightMoni;
+    /** Record one observation; aggregation and delivery are automatic. */
+    record(table: string, metric_name: string, dimensions: Record<string, string>, value: number, count: number | bigint): void;
     get meter(): LightMoni;
     get instanceId(): string;
     withTable(table: string): LightMoni;

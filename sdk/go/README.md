@@ -1,5 +1,8 @@
 # Go SDK
 
+推荐新的五参数 Record/record 业务接口：初始化 service/env，可选版本/实例，SDK 自动聚合发送。完整语义、count总值规则、SQL字段与新样例见 [统一打点](../README.md#通用业务打点go--nodejs--python--rust)。下面原接口继续兼容。
+
+
 根 module 中的包为 `github.com/lightmoni/lightmoni/sdk/go`，package 名 `moni`。不使用磁盘；本机 Agent 是默认的持久化边界。
 
 ```go
@@ -60,6 +63,6 @@ handler := client.TraceHandler(http.HandlerFunc(func(w http.ResponseWriter, r *h
 
 ## SDK 自监控
 
-默认每 30 秒上报实例心跳和内部诊断，独立于业务采集周期，空闲进程也会发送。中心自动归入系统 SDK 表，使用原业务 table 的权限；WithTable 共享生命周期。可通过 `Config.DisableSelfTelemetry=true` 关闭。退出前仍需 Shutdown；完整语义见 [SDK 契约](../README.md#内部监控)。
+默认每 30 秒上报实例心跳和内部诊断，独立于业务采集周期，空闲进程也会发送。中心统一归入 lightmoni_log/lightmoni_metric_*，component=sdk；无密钥不产生自身遥测；WithTable 共享生命周期。可通过 `Config.DisableSelfTelemetry=true` 关闭。退出前仍需 Shutdown；完整语义见 [SDK 契约](../README.md#内部监控)。
 
 日志上报规则与动态停报：支持 Config.LogSampling（按逻辑表）、Config.Disabled，以及 UpdateLogSampling / SetReportingEnabled / RefreshConfig(ctx)。HTTP 入口默认每 30 秒更新；启用业务生产前可显式等待 RefreshConfig。SDK 整体停报影响全部信号；UID 排除和采样只影响业务日志，不改变 metric 聚合。完整配置与保留边界见 [上报规则契约](../README.md#sdk-停报与日志上报规则)。

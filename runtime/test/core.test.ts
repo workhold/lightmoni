@@ -345,7 +345,7 @@ test("SELECT AST blocks writes, external functions, hidden tables and overrides 
     parameter({ type: "UInt64", value: "18446744073709551616" }),
   );
 });
-test("OTLP ingest retains exact fields, freezes retry ids, denies grants, and validates before storage", async () => {
+test("OTLP ingest retains exact fields, freezes retry ids, permits any business table, and validates before storage", async () => {
   const f = await fixture();
   try {
     await f.request("/api/v1/setup", "POST", {
@@ -409,10 +409,11 @@ test("OTLP ingest retains exact fields, freezes retry ids, denies grants, and va
       (
         await f.request("/v1/metrics", "POST", raw, {
           ...headers,
-          "x-lightmoni-table": "denied",
+          "x-lightmoni-table": "another",
+          "x-lightmoni-batch-id": "another-batch",
         })
       ).status,
-      403,
+      200,
     );
     assert.equal(
       (
@@ -438,7 +439,7 @@ test("OTLP ingest retains exact fields, freezes retry ids, denies grants, and va
       ).status,
       200,
     );
-    assert.equal(f.inserts.length, 2);
+    assert.equal(f.inserts.length, 3);
     const result = await f.executor.execute({
       range: { from: "2026-10-17T00:00:00Z", to: "2026-10-18T00:00:00Z" },
       interval_ms: 60000,
@@ -590,7 +591,8 @@ test("anonymous OTLP enforces exemptions for all signals, isolates retries and n
    for(const table of ['private','lightmoni_sdk'])assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,'X-Lightmoni-Table':table})).status,403);
   }
   const runtime={resourceLogs:[{resource,scopeLogs:[{logRecords:[{timeUnixNano:at,body:{stringValue:'started'},attributes:[{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'typescript'}},{key:'event',value:{stringValue:'started'}}]}]}]}]};
-  assert.equal((await f.request('/v1/logs','POST',runtime,{'X-Lightmoni-Table':'public_logs_123'})).status,200);assert.equal(f.inserts.at(-1).table,'_lm_log_public_logs_123');
+  const beforeRuntime=f.inserts.length;
+  assert.equal((await f.request('/v1/logs','POST',runtime,{'X-Lightmoni-Table':'public_logs_123'})).status,200);assert.equal(f.inserts.length,beforeRuntime);
   f.db.run("INSERT INTO log_sampling VALUES(?,?,?)",'public_logs_123',JSON.stringify({key:'event_id',rules:[],exclude:[]}),1);
   f.db.run("INSERT INTO log_sampling VALUES(?,?,?)",'private',JSON.stringify({key:'event_id',rules:[],exclude:[]}),1);
   const publicConfig=await f.request('/v1/sdk-config');assert.equal(publicConfig.status,200);assert.deepEqual(Object.keys(publicConfig.data.log_sampling),['public_logs_123']);assert.throws(()=>f.a.validateKey({req:{headers:{}}} as any));
@@ -599,5 +601,27 @@ test("anonymous OTLP enforces exemptions for all signals, isolates retries and n
   assert.equal((await f.request('/v1/logs','POST',payloads.logs,{'X-Lightmoni-Table':'public_logs_123','X-Lightmoni-Batch-ID':'same-logs'})).status,401);assert.equal(f.inserts.length,count);
   await f.request('/api/v1/sdk-exempt-tables/public_logs_123','PUT',{active:true});assert.equal((await f.request('/api/v1/sdk-exempt-tables/public_logs_123','DELETE')).status,200);
   assert.equal((await f.request('/v1/sdk-config')).status,401);assert.equal((await f.request('/v1/logs','POST',payloads.logs,{'X-Lightmoni-Table':'public_logs_123'})).status,401);
+ }finally{await f.close();}
+});
+
+test("SDK keys cover every business table; shared self stream validates all records and disabled keys stay revoked",async()=>{
+ const f=await fixture();try{
+  await f.request('/api/v1/setup','POST',{name:'admin',password:'password123'});
+  const key=(await f.request('/api/v1/keys','POST',{name:'all-business'})).data;
+  assert.equal(key.allow_all_tables,true);assert.deepEqual(key.allowed_tables,[]);
+  const at=nowNano().toString(),resource={attributes:[{key:'service.name',value:{stringValue:'sdk-model'}}]},row={timeUnixNano:at,body:{stringValue:'business'}};
+  const payload=(records:any[])=>({resourceLogs:[{resource,scopeLogs:[{logRecords:records}]}]});
+  const send=(table:string,records:any[])=>f.request('/v1/logs','POST',payload(records),{Authorization:'Bearer '+key.key,'X-Lightmoni-Table':table});
+  for(const table of ['arbitrary_a','arbitrary_b'])assert.equal((await send(table,[row])).status,200);
+  const self={...row,attributes:[{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'python'}},{key:'event',value:{stringValue:'started'}}]};
+  assert.equal((await send('lightmoni_sdk',[self])).status,200);assert.equal(f.inserts.at(-1).table,'_lm_lightmoni_log');
+  const count=f.inserts.length;
+  assert.equal((await send('lightmoni_sdk',[self,row])).status,403);assert.equal(f.inserts.length,count);
+  for(const table of ['lightmoni_agent','lightmoni_center'])assert.equal((await send(table,[self])).status,403);
+  await f.request('/api/v1/sdk-exempt-tables','POST',{name:'public_a'});await f.request('/api/v1/sdk-exempt-tables','POST',{name:'public_b'});
+  for(const table of ['public_a','public_b']){assert.equal((await f.request('/v1/logs','POST',payload([self,row]),{'X-Lightmoni-Table':table})).status,200);assert.equal(f.inserts.at(-1).rows.length,1);assert.equal(f.inserts.at(-1).rows[0].body,'business');}
+  f.db.run("UPDATE ingest_keys SET allowed_tables_json='[\"obsolete\"]',allow_all_tables=0 WHERE id=?",key.id);
+  assert.equal((await send('another_business',[row])).status,200);
+  await f.request('/api/v1/keys/'+key.id,'PUT',{active:false});new Auth(f.db,f.dir,f.base,new Router());assert.equal((await send('arbitrary_a',[row])).status,401);
  }finally{await f.close();}
 });

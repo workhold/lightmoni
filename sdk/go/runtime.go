@@ -13,7 +13,7 @@ import (
 // Self telemetry uses fixed-size snapshots and fixed diagnostic text. It never
 // calls the user-facing recording API from an exporter failure or queue loss.
 func (s *state) collectSelfLocked(now time.Time) {
-	if s.reportingDisabled || s.cfg.DisableSelfTelemetry || (!s.selfLast.IsZero() && now.Sub(s.selfLast) < 30*time.Second) {
+	if s.configKey == "" || s.reportingDisabled || s.cfg.DisableSelfTelemetry || (!s.selfLast.IsZero() && now.Sub(s.selfLast) < 30*time.Second) {
 		return
 	}
 	s.selfLast = now
@@ -51,6 +51,6 @@ func (s *state) enqueueSelfLocked(signal string, message proto.Message, records 
 	if err != nil || len(payload) > s.cfg.MaxBatchBytes || len(s.queue) >= s.cfg.QueueBatches || s.stats.PendingBytes+len(payload) > s.cfg.QueueBytes {
 		return false
 	}
-	s.enqueueLocked(signal, s.cfg.Table, message, records, now)
+	s.enqueueLocked(signal, "lightmoni_sdk", message, records, now)
 	return true
 }

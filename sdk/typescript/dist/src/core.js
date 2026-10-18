@@ -1,3 +1,4 @@
+import { Distribution } from './distribution.js';
 import { copyLogSampling, copyExclusions, matches, sampleLog } from './sampling.js';
 export class DeliveryError extends Error {
     retryable;
@@ -45,6 +46,7 @@ class State {
     resource;
     instanceId;
     instruments = new Map();
+    observations = new Map();
     logs = new Map();
     spans = new Map();
     queue = [];
@@ -75,7 +77,7 @@ class State {
     constructor(options) {
         this.options = options;
         options.resource = { ...options.resource };
-        if (!options.service || encoder.encode(options.service).length > 128 || !validTable(options.table))
+        if (!options.service || encoder.encode(options.service).length > 128 || (options.table !== undefined && !validTable(options.table)))
             throw new Error("valid service and logical table are required");
         this.updateLogSampling(options.logSampling ?? {});
         Object.assign(this.stats, { sampledOutLogs: 0, unmatchedLogs: 0, excludedLogs: 0, disabledRecords: 0, reportingDisabled: options.disabled ?? false });
@@ -94,7 +96,14 @@ class State {
                 throw new Error("SDK limits and timeouts must be positive integers");
         if (this.settings.retryMaxMs < this.settings.retryMinMs || this.settings.maxBatchBytes > this.settings.queueBytes)
             throw new Error("invalid retry/batch limits");
-        this.instanceId = options.instanceId ?? uuid();
+        for (const value of [options.env, options.service_version, options.instance_id])
+            if (value !== undefined && (typeof value !== "string" || !value.trim() || encoder.encode(value).length > 128))
+                throw new Error("invalid resource identity");
+        this.instanceId = options.instance_id ?? options.instanceId ?? uuid();
+        if (options.env)
+            options.resource["deployment.environment.name"] = options.env;
+        if (options.service_version)
+            options.resource["service.version"] = options.service_version;
         const resource = this.attributes(options.resource ?? {});
         if (resource.some(a => a.key === "service.name" || a.key === "service.instance.id"))
             throw new Error("configure service identity separately");
@@ -146,6 +155,7 @@ class State {
                 m.series.clear();
                 m.start = nowNano();
             }
+            this.observations.clear();
             this.queue.length = 0;
             this.logs.clear();
             this.spans.clear();
@@ -245,6 +255,10 @@ class State {
         this.stats.lastError = message;
     }
     store(map, table, record) {
+        if (!validTable(table)) {
+            this.invalid("select a table with withTable before recording");
+            return;
+        }
         if (this.closing) {
             this.invalid("record after shutdown");
             return;
@@ -264,7 +278,7 @@ class State {
         map.set(table, rows);
     }
     instrument(table, name, kind, options) {
-        if (this.closing || !name || encoder.encode(name).length > 255 || (options.unit?.length ?? 0) > 64 || (options.description?.length ?? 0) > 1024)
+        if (!validTable(table) || this.closing || !name || encoder.encode(name).length > 255 || (options.unit?.length ?? 0) > 64 || (options.description?.length ?? 0) > 1024)
             throw new Error("invalid metric identity or SDK closed");
         const boundaries = kind === "histogram" ? [...(options.boundaries ?? [5, 10, 25, 50, 100, 250, 500, 1000])] : [];
         if (boundaries.length > 128 || boundaries.some((n, i) => !finite(n) || (i > 0 && boundaries[i - 1] >= n)))
@@ -359,10 +373,90 @@ class State {
         }
         point.observed = nowNano();
     }
+    observe(table, name, dimensions, value, count) {
+        if (this.closing) {
+            this.invalid("record after shutdown");
+            return;
+        }
+        if (this.stats.reportingDisabled) {
+            this.stats.disabledRecords++;
+            return;
+        }
+        if (!this.options.env?.trim() || !validTable(table) || ['lightmoni', 'lightmoni_center', 'lightmoni_agent', 'lightmoni_sdk'].includes(table) || !name || encoder.encode(name).length > 255 || !Number.isFinite(value) || !dimensions || typeof dimensions !== 'object' || Array.isArray(dimensions)) {
+            this.invalid("record requires env, business table, metric name, dimensions and finite value");
+            return;
+        }
+        let weight;
+        try {
+            if (typeof count === 'number' && (!Number.isSafeInteger(count) || count < 1))
+                throw new Error();
+            weight = BigInt(count);
+            if (weight < 1n || weight > maxUint64)
+                throw new Error();
+        }
+        catch {
+            this.invalid("count must be a positive integer");
+            return;
+        }
+        let attributes;
+        try {
+            for (const [key, val] of Object.entries(dimensions))
+                if (!/^key([1-9]|1[0-6])$/.test(key) || typeof val !== 'string')
+                    throw new Error("dimensions must be key1..key16 strings");
+            attributes = this.attributes(Object.fromEntries(Object.entries(dimensions).filter(([, v]) => v !== '')));
+        }
+        catch (error) {
+            this.invalid(error);
+            return;
+        }
+        const key = JSON.stringify([table, name, attributes]);
+        let group = this.observations.get(key);
+        if (!group) {
+            if (this.observations.size >= this.settings.cardinalityLimit) {
+                this.stats.overflowRecords++;
+                return;
+            }
+            const cost = encoder.encode(key).length + 256;
+            if (this.stats.bufferBytes + cost > this.settings.bufferBytes) {
+                this.lost(1, "SDK aggregate buffer capacity exceeded");
+                return;
+            }
+            this.stats.bufferBytes += cost;
+            group = { table, name, attributes, distribution: new Distribution(nowNano()), summaryCount: 0n, summarySum: 0 };
+            this.observations.set(key, group);
+        }
+        if (weight > 1n) {
+            if (group.summaryCount + weight > maxUint64 || !Number.isFinite(group.summarySum + value)) {
+                this.invalid("summary overflow");
+                return;
+            }
+            group.summaryCount += weight;
+            group.summarySum += value;
+            return;
+        }
+        const previous = group.distribution.bytes;
+        if (!group.distribution.observe(value, this.settings.bufferBytes - this.stats.bufferBytes)) {
+            this.invalid("distribution capacity or numeric overflow");
+            return;
+        }
+        this.stats.bufferBytes += group.distribution.bytes - previous;
+    }
     collect() {
         if (this.stats.reportingDisabled)
             return;
         const at = new Date().toISOString(), end = nowNano();
+        const grouped = new Map();
+        for (const group of this.observations.values()) {
+            const rows = grouped.get(group.table) ?? [];
+            if (group.distribution.count)
+                rows.push({ name: group.name, exponentialHistogram: { dataPoints: [group.distribution.point(end, group.attributes)], aggregationTemporality: 1 } });
+            if (group.summaryCount)
+                rows.push({ name: group.name, summary: { dataPoints: [{ attributes: group.attributes, startTimeUnixNano: String(group.distribution.start), timeUnixNano: String(end), count: String(group.summaryCount), sum: group.summarySum, quantileValues: [] }] } });
+            grouped.set(group.table, rows);
+        }
+        for (const [table, rows] of grouped)
+            this.pack("metrics", table, rows, at);
+        this.observations.clear();
         const tables = new Set([...this.logs.keys(), ...this.spans.keys(), ...Array.from(this.instruments.values(), i => i.table)]);
         for (const table of [...tables].sort()) {
             const metrics = [];
@@ -400,7 +494,7 @@ class State {
     }
     collectSelf() {
         const clock = performance.now();
-        if (this.stats.reportingDisabled || this.options.selfTelemetry === false || clock - this.selfLast < 30_000)
+        if (!this.options.key || this.stats.reportingDisabled || this.options.selfTelemetry === false || clock - this.selfLast < 30_000)
             return;
         this.selfLast = clock;
         const at = new Date().toISOString(), time = nano(nowNano());
@@ -421,26 +515,28 @@ class State {
         const bytes = this.payload(signal, rows).length;
         if (bytes > this.settings.maxBatchBytes || this.queue.length >= this.settings.queueBatches || this.stats.pendingBytes + bytes > this.settings.queueBytes)
             return false;
-        this.enqueue(signal, this.options.table, rows, at);
+        this.enqueue(signal, "lightmoni_sdk", rows, at);
         return true;
     }
     payload(signal, records) {
         const scope = { name: "lightmoni/sdk/typescript" };
         if (signal === "metrics") {
-            const merged = new Map();
+            const scopes = new Map();
             for (const record of records) {
-                const name = String(record.name), previous = merged.get(name);
-                if (!previous) {
+                const kind = ["sum", "gauge", "histogram", "exponentialHistogram", "summary"].find(k => record[k]);
+                const name = String(record.name), base = scopes.get("") ?? new Map();
+                scopes.set("", base);
+                const baseKind = base.has(name) ? ["sum", "gauge", "histogram", "exponentialHistogram", "summary"].find(k => base.get(name)[k]) : undefined;
+                const scopeKind = baseKind && baseKind !== kind ? kind : "";
+                const merged = scopes.get(scopeKind) ?? new Map();
+                scopes.set(scopeKind, merged);
+                const previous = merged.get(name);
+                if (!previous)
                     merged.set(name, structuredClone(record));
-                    continue;
-                }
-                for (const kind of ["sum", "gauge", "histogram"])
-                    if (previous[kind]) {
-                        const before = previous[kind];
-                        before.dataPoints.push(...record[kind].dataPoints);
-                    }
+                else
+                    previous[kind].dataPoints.push(...record[kind].dataPoints);
             }
-            return encoder.encode(JSON.stringify({ resourceMetrics: [{ resource: this.resource, scopeMetrics: [{ scope, metrics: [...merged.values()] }] }] }));
+            return encoder.encode(JSON.stringify({ resourceMetrics: [{ resource: this.resource, scopeMetrics: [...scopes].map(([kind, merged]) => ({ scope: { ...scope, name: scope.name + (kind ? "/" + kind : "") }, metrics: [...merged.values()] })) }] }));
         }
         if (signal === "logs")
             return encoder.encode(JSON.stringify({ resourceLogs: [{ resource: this.resource, scopeLogs: [{ scope, logRecords: records }] }] }));
@@ -486,6 +582,13 @@ class State {
         try {
             while (this.queue.length && !this.stopped) {
                 const item = this.queue[0];
+                if (item.batch.table === "lightmoni_sdk" && !this.options.key) {
+                    this.queue.shift();
+                    this.stats.pendingBatches--;
+                    this.stats.pendingBytes -= item.batch.payload.length;
+                    this.notify();
+                    continue;
+                }
                 this.request = new AbortController();
                 const timer = setTimeout(() => this.request?.abort(), this.settings.requestTimeoutMs);
                 let failure;
@@ -587,7 +690,9 @@ export class LightMoni {
         this.table = table;
         this.boundTrace = boundTrace;
     }
-    static create(options) { return new LightMoni(new State({ ...options }), options.table); }
+    static create(options) { return new LightMoni(new State({ ...options }), options.table ?? ""); }
+    /** Record one observation; aggregation and delivery are automatic. */
+    record(table, metric_name, dimensions, value, count) { this.state.observe(table, metric_name, dimensions, value, count); }
     get meter() { return this; }
     get instanceId() { return this.state.instanceId; }
     withTable(table) { if (!validTable(table))
@@ -696,7 +801,8 @@ export class LightMoni {
             Object.assign(record, { traceId: context.traceId, spanId: context.spanId, flags: context.flags });
         this.state.store(this.state.logs, this.table, record);
     }
-    startSpan(name, attrs = {}, parent = this.currentTrace()) { return new Span(this.state, this.table, name, attrs, parent ?? undefined); }
+    startSpan(name, attrs = {}, parent = this.currentTrace()) { if (!validTable(this.table))
+        throw new Error("select a table with withTable before recording"); return new Span(this.state, this.table, name, attrs, parent ?? undefined); }
     async flush({ timeoutMs = 10_000 } = {}) { if (this.state.stopped)
         throw new Error("SDK is closed"); this.state.collect(); const target = this.state.sequence; this.state.kick(); await this.state.wait(target, timeoutMs); }
     async shutdown({ timeoutMs = 10_000 } = {}) {

@@ -3,7 +3,7 @@ import {chromium,expect} from '../web/node_modules/@playwright/test/index.mjs';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {mediaDirectory} from './qa-artifacts.mjs';
-const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:15176',output=resolve('docs/evidence/sdk-onboarding'),media=mediaDirectory(output);
+const base=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:15176',output=resolve('docs/evidence/telemetry-table-model'),media=mediaDirectory(output);
 await mkdir(output,{recursive:true});
 const browser=await chromium.launch({headless:true,channel:'chrome'}),context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),report=[];
 await context.request.post(base+'/api/v1/auth/login',{data:{name:'sdk-onboarding-qa',password:'local-sdk-onboarding-password'}});
@@ -16,7 +16,7 @@ try{
   }
  }
  await frames('.lm-sdk-config','entry',220);
- await page.getByText('无密钥模式',{exact:true}).click();await frames('.lm-sdk-auth-fields','authentication',160);
+ await page.getByText('无密钥模式',{exact:true}).click();await frames('.lm-sdk-anonymous','authentication',160);
  await page.getByText('使用 SDK 密钥',{exact:true}).click();await page.getByRole('combobox',{name:'SDK 密钥',exact:true}).click();await page.getByRole('button',{name:'创建 SDK 密钥',exact:true}).click();
  const dialog=page.getByRole('dialog',{name:'创建 SDK 密钥',exact:true});await dialog.getByRole('textbox',{name:'密钥名称',exact:true}).fill('SDK 动效验收');await page.screenshot({path:resolve(media,'create-start.png')});
  let release,blocked;const pending=new Promise(resolve=>release=resolve),intercepted=new Promise(resolve=>blocked=resolve);

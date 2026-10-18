@@ -1,4 +1,6 @@
 //! Native synchronous OTLP/HTTP client. Recording does not perform network I/O.
+mod record;
+pub use record::Options;
 use serde_json::{json, Value};
 use std::{collections::{BTreeMap, VecDeque}, io::Read, sync::{Arc, Mutex}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use uuid::Uuid;
@@ -70,6 +72,7 @@ struct Batch { seq:u64,id:String,created:String,table:String,signal:String,raw:V
 struct Point { attrs:Value,integer:i64,value:f64,count:u64,buckets:Vec<u64>,min:f64,max:f64,at:u128 }
 struct Instrument { table:String,name:String,kind:String,unit:String,bounds:Vec<f64>,start:u128,series:BTreeMap<String,Point> }
 struct State {
+    observations:BTreeMap<String,record::Observation>,
     endpoint:String,key:String,limits:Limits,resource:Value,http:reqwest::blocking::Client,
     metrics:BTreeMap<String,Instrument>,records:BTreeMap<(String,String),Vec<Value>>,queue:VecDeque<Batch>,
     stats:BTreeMap<String,u64>,last_error:String,failure:Option<String>,seq:u64,closed:bool,
@@ -88,21 +91,16 @@ impl State {
     }
     fn payload(&self,signal:&str,rows:&[Value])->Vec<u8> {
         let (resource,scope,field)=match signal {"metrics"=>("resourceMetrics","scopeMetrics","metrics"),"logs"=>("resourceLogs","scopeLogs","logRecords"),_=>("resourceSpans","scopeSpans","spans")};
-        let normalized;
-        let rows=if signal=="metrics" {
-            let mut merged:BTreeMap<String,Value>=BTreeMap::new();
-            for row in rows {
-                let name=row["name"].as_str().unwrap().to_string();
-                let kind=["sum","gauge","histogram"].into_iter().find(|k|!row[*k].is_null()).unwrap();
-                if let Some(existing)=merged.get_mut(&name){existing[kind]["dataPoints"].as_array_mut().unwrap().extend(row[kind]["dataPoints"].as_array().unwrap().iter().cloned());}
-                else{merged.insert(name,row.clone());}
-            }
-            normalized=merged.into_values().collect::<Vec<_>>();&normalized[..]
-        }else{rows};
+        if signal=="metrics" {
+            let mut scopes:BTreeMap<String,BTreeMap<String,Value>>=BTreeMap::new();
+            for row in rows{let name=row["name"].as_str().unwrap().to_string();let kind=["sum","gauge","histogram","exponentialHistogram","summary"].into_iter().find(|k|!row[*k].is_null()).unwrap();let scope=match scopes.get("").and_then(|m|m.get(&name)){Some(existing)if existing[kind].is_null()=>kind,_=>""};let merged=scopes.entry(scope.into()).or_default();if let Some(existing)=merged.get_mut(&name){existing[kind]["dataPoints"].as_array_mut().unwrap().extend(row[kind]["dataPoints"].as_array().unwrap().iter().cloned());}else{merged.insert(name,row.clone());}}
+            return json!({"resourceMetrics":[{"resource":self.resource,"scopeMetrics":scopes.into_iter().map(|(kind,rows)|json!({"scope":{"name":if kind.is_empty(){"lightmoni/sdk/rust".to_string()}else{format!("lightmoni/sdk/rust/{kind}")},"version":"0.1.0"},"metrics":rows.into_values().collect::<Vec<_>>()})).collect::<Vec<_>>()}]}).to_string().into_bytes();
+        }
         json!({resource:[{"resource":self.resource,scope:[{"scope":{"name":"lightmoni/sdk/rust","version":"0.1.0"},field:rows}]}]}).to_string().into_bytes()
     }
     fn collect(&mut self) {
         let now=nano();
+        for(_,observation)in std::mem::take(&mut self.observations){let rows=observation.records(now);self.records.entry((observation.table,"metrics".into())).or_default().extend(rows);}
         for m in self.metrics.values_mut() {
             let end=now.max(m.start);
             for p in m.series.values() {
@@ -141,7 +139,7 @@ impl State {
         let table=self.self_table.clone();self.enqueue(&table,signal,rows,at);true
     }
     fn collect_self(&mut self) {
-        if !self.limits.self_telemetry || self.self_last.is_some_and(|at|at.elapsed()<Duration::from_secs(30)){return;}
+        if self.key.is_empty() || !self.limits.self_telemetry || self.self_last.is_some_and(|at|at.elapsed()<Duration::from_secs(30)){return;}
         self.self_last=Some(Instant::now());let at=format_rfc3339(nano());let time=nano().to_string();
         let attributes=json!([{"key":"lightmoni.component","value":{"stringValue":"sdk"}},{"key":"sdk.language","value":{"stringValue":"rust"}},{"key":"sdk.version","value":{"stringValue":"0.1.0"}}]);
         let mut values=BTreeMap::from([("heartbeat",1)]);
@@ -172,21 +170,23 @@ fn format_rfc3339(n:u128)->String {
 #[derive(Clone)]
 pub struct Client { state:Arc<Mutex<State>>,delivery:Arc<Mutex<()>>,table:String,context:Option<TraceContext> }
 impl Client {
+    /// Initialize without binding a business table; use with_table before recording.
+    pub fn connect(service:&str,endpoint:&str,key:&str)->Result<Self>{Self::with_limits(service,"",endpoint,key,Limits::default())}
     pub fn new(service:&str,table_name:&str,endpoint:&str,key:&str)->Result<Self>{Self::with_limits(service,table_name,endpoint,key,Limits::default())}
     pub fn with_limits(service:&str,table_name:&str,endpoint:&str,key:&str,limits:Limits)->Result<Self> {
-        let table=table(table_name)?;let url=reqwest::Url::parse(endpoint).map_err(|_|"invalid endpoint")?;
+        let table=if table_name.is_empty(){String::new()}else{table(table_name)?};let url=reqwest::Url::parse(endpoint).map_err(|_|"invalid endpoint")?;
         if service.is_empty() || service.len()>128 || !["http","https"].contains(&url.scheme()) || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some(){return Err("valid service and HTTP(S) endpoint required".into());}
         if [limits.queue_bytes,limits.queue_batches,limits.buffer_bytes,limits.max_batch_bytes,limits.cardinality_limit,limits.max_instruments].contains(&0) || limits.max_batch_bytes>limits.queue_bytes{return Err("invalid SDK limits".into());}
         let http=reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"cannot initialize HTTP transport")?;
         let stats=["pending_batches","pending_bytes","buffer_bytes","delivered_batches","retried_batches","invalid_records","overflow_records","dropped_records","rejected_records"].iter().map(|n|(n.to_string(),0)).collect();
         let resource=json!({"attributes":attrs(&BTreeMap::from([("service.name".into(),service.into()),("service.instance.id".into(),Uuid::new_v4().to_string().into())]))?});
-        let s=State{endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:table.clone(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
-        let enabled=s.limits.self_telemetry;
+        let s=State{observations:BTreeMap::new(),endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:"lightmoni_sdk".into(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
+        let enabled=true;
         let client=Self{state:Arc::new(Mutex::new(s)),delivery:Arc::new(Mutex::new(())),table,context:None};
         if enabled {
             let state=Arc::downgrade(&client.state);let delivery=Arc::downgrade(&client.delivery);let table=client.table.clone();
             std::thread::Builder::new().name("lightmoni-heartbeat".into()).spawn(move || loop {
-                std::thread::sleep(Duration::from_secs(30));
+                std::thread::sleep(Duration::from_secs(10));
                 let (Some(state),Some(delivery))=(state.upgrade(),delivery.upgrade()) else {break;};
                 if state.lock().unwrap().closed{break;}
                 let root=Client{state,delivery,table:table.clone(),context:None};let _=root.flush(Duration::from_secs(5));
@@ -211,6 +211,7 @@ impl Client {
     pub fn gauge(&self,name:&str)->Result<Metric>{self.instrument(name,"gauge","",&[])}
     pub fn histogram(&self,name:&str,bounds:&[f64])->Result<Metric>{self.instrument(name,"histogram","",bounds)}
     pub fn instrument(&self,name:&str,kind:&str,unit:&str,bounds:&[f64])->Result<Metric> {
+        table(&self.table)?;
         if name.is_empty() || name.len()>255 || unit.len()>64 || !["counter","gauge","histogram"].contains(&kind) || bounds.len()>128 || bounds.iter().any(|n|!n.is_finite()) || bounds.windows(2).any(|p|p[0]>=p[1]){return Err("invalid metric identity/boundaries".into());}
         let bounds=if kind=="histogram"{bounds.to_vec()}else{Vec::new()};let id=format!("{}\0{}",self.table,name);let mut s=self.state.lock().unwrap();
         if s.closed{return Err("SDK is closed".into());}
@@ -221,6 +222,7 @@ impl Client {
     pub fn log(&self,severity:&str,body:&str,attributes:&Attributes,context:Option<&TraceContext>) {
         let context=context.or(self.context.as_ref());
         let result=(||{
+            table(&self.table)?;
             let level=severity.to_lowercase();let i=["trace","debug","info","warn","error","fatal"].iter().position(|n|*n==level).ok_or("invalid log severity")?;
             if body.len()>65536 || context.is_some_and(|c|!c.valid()){return Err("invalid log body/context".into());}
             let now=nano().to_string();let mut row=json!({"timeUnixNano":now,"observedTimeUnixNano":now,"severityText":level,"severityNumber":1+4*i,"body":{"stringValue":body},"attributes":attrs(attributes)?});
@@ -230,6 +232,7 @@ impl Client {
         let mut s=self.state.lock().unwrap();match result{Ok(row)=>s.store(&self.table,"logs",row),Err(e)=>s.invalid(e)}
     }
     pub fn start_span(&self,name:&str,attributes:&Attributes,parent:Option<&TraceContext>)->Result<Span> {
+        table(&self.table)?;
         let parent=parent.or(self.context.as_ref());
         if self.state.lock().unwrap().closed{return Err("SDK is closed".into());}
         if name.is_empty() || name.len()>255 || parent.is_some_and(|p|!p.valid()){return Err("invalid span name/context".into());}
@@ -248,6 +251,7 @@ impl Client {
         let mut backoff=0.2;
         loop {
             let (b,http,url,key)={let s=self.state.lock().unwrap();match s.queue.front(){Some(b) if b.seq<=target=>(b.clone(),s.http.clone(),s.endpoint.clone(),s.key.clone()),_=>return s.failure.clone().map_or(Ok(()),Err)}};
+            if b.table=="lightmoni_sdk" && key.is_empty(){let mut s=self.state.lock().unwrap();s.queue.pop_front();*s.stats.get_mut("pending_batches").unwrap()-=1;*s.stats.get_mut("pending_bytes").unwrap()-=b.raw.len() as u64;continue;}
             let remaining=deadline.saturating_duration_since(Instant::now());if remaining.is_zero(){return Err("flush deadline exceeded; batches retained".into());}
             let mut status=0;let mut delay=0.0;let mut rejected=0;let mut ack=false;
             let mut request=http.post(format!("{url}/v1/{}",b.signal)).timeout(remaining.min(Duration::from_secs(10))).header("Content-Type","application/json").header("X-Lightmoni-Table",&b.table).header("X-Lightmoni-Batch-ID",&b.id).header("X-Lightmoni-Batch-Created-At",&b.created).body(b.raw.clone());

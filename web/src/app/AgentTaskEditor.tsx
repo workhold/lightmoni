@@ -2,7 +2,7 @@ import {useState} from 'react';
 import {Link} from 'react-router-dom';
 import {DeleteOutlined,PlusOutlined} from '@ant-design/icons';
 import {Alert,Button,Checkbox,Form,Input,InputNumber,Radio,Select,Space,Switch,Typography} from '../shared/ui';
-import {agentTaskTypes,defaultTasks,hostCollectors,logicalTableRules,taskFormValues,taskPayload,type AgentTaskLabel,type AgentTaskType,type LogSource,type ManagedAgentTask,type TaskForm} from './agent-model';
+import {agentTaskTypes,defaultTasks,hostCollectors,taskFormValues,taskPayload,type AgentTaskLabel,type AgentTaskType,type LogSource,type ManagedAgentTask,type TaskForm} from './agent-model';
 
 type TaskDraft = Omit<ManagedAgentTask,'id'>;
 const nameRules = [{required:true,whitespace:true,message:'请输入任务名称'},{validator:(_:unknown,value?:string) => new TextEncoder().encode(value?.trim() ?? '').length <= 128 ? Promise.resolve() : Promise.reject(new Error('任务名称最长 128 字节'))}];
@@ -44,12 +44,12 @@ export default function AgentTaskEditor({task,labels,onSave,onCancel,onBusyChang
       <Form.Item name="host_collectors" label="采集哪些指标" rules={[{validator:(_:unknown,value?:string[])=>!enabled||value?.length?Promise.resolve():Promise.reject(new Error('至少选择一项指标'))}]}><Checkbox.Group className="lm-agent-collectors" options={hostCollectors}/></Form.Item>
       <div className="lm-agent-form-grid">
         <Form.Item name="collect_interval_seconds" label="采集间隔（秒）" rules={[{required:true,type:'number',min:1,max:86400,message:'填写 1–86400 秒'}]}><InputNumber aria-label="采集间隔（秒）" min={1} max={86400} precision={0}/></Form.Item>
-        <Form.Item name="host_table" label="指标上报表" rules={logicalTableRules}><Input aria-label="指标上报表" placeholder="host"/></Form.Item>
+        <p className="lm-agent-muted">固定上报表：host（机器指标）</p>
       </div>
       <Form.Item noStyle shouldUpdate={(a,b)=>a.host_collectors!==b.host_collectors}>{({getFieldValue})=>(getFieldValue('host_collectors') ?? []).includes('process')?<Form.Item name="process_names" label="进程名称" rules={[{required:true,type:'array',min:1,max:32,message:'填写 1–32 个进程名称'}]} extra="按进程名匹配，例如 nginx、postgres；可使用 * 匹配多个进程。"><Select mode="tags" aria-label="进程名称" tokenSeparators={[',','，']} placeholder="输入进程名称并回车"/></Form.Item>:null}</Form.Item>
     </>}
     {type==='probe' && <>
-      <Form.Item name="probe_table" label="拨测结果上报表" rules={logicalTableRules}><Input aria-label="拨测结果上报表" placeholder="probe"/></Form.Item>
+      <p className="lm-agent-muted">固定上报表：probe（服务拨测）</p>
       <p className="lm-agent-muted">执行节点按配置检测 HTTP 或 TCP 目标，上报可用性、耗时和失败原因。</p>
       <Form.List name="probes" rules={[{validator:(_:unknown,value?:TaskForm['probes'])=>{
         if(!value?.length) return enabled?Promise.reject(new Error('至少添加一个拨测目标')):Promise.resolve();
@@ -84,7 +84,7 @@ export default function AgentTaskEditor({task,labels,onSave,onCancel,onBusyChang
       </>}</Form.List>
     </>}
     {type==='log' && <>
-      <Form.Item name="log_table" label="目录日志上报表" rules={logicalTableRules}><Input aria-label="目录日志上报表" placeholder="files"/></Form.Item>
+      <p className="lm-agent-muted">固定上报表：files（文件日志）</p>
       <p className="lm-agent-muted">逐行采集文件新增内容，支持日志轮转和重启续读。目录需允许 LightMoni Agent 服务用户读取。</p>
       <Form.List name="log_sources" rules={[{validator:(_:unknown,sources?:LogSource[])=>{
         if(!sources?.length) return enabled?Promise.reject(new Error('至少添加一个日志目录')):Promise.resolve();
@@ -102,7 +102,7 @@ export default function AgentTaskEditor({task,labels,onSave,onCancel,onBusyChang
         <Form.ErrorList errors={errors}/><Button icon={<PlusOutlined/>} disabled={saving||fields.length>=32} onClick={()=>add({directory:'',pattern:'*.log*',recursive:false,from_beginning:false})}>添加日志目录</Button>
       </>}</Form.List>
     </>}
-    <Typography.Paragraph type="secondary" className="lm-agent-report-note">上报表填写逻辑表名，上报 Key 需允许写入对应表。同类任务在同一节点上的采集间隔或目标表等配置不兼容时，保存会明确提示冲突。<Link to="/data?tab=keys">管理上报 Key</Link></Typography.Paragraph>
+    <Typography.Paragraph type="secondary" className="lm-agent-report-note">任务按类型写入固定表。同类任务在同一节点上的采集间隔等配置不兼容时，保存会明确提示冲突。<Link to="/data?tab=keys">管理上报 Key</Link></Typography.Paragraph>
     {error&&<Alert type="error" showIcon title={error} style={{marginTop:16}}/>}
     <Space className="lm-agent-editor-actions"><Button type="primary" htmlType="submit" loading={saving}>保存任务</Button><Button disabled={saving} onClick={onCancel}>取消</Button></Space>
   </Form>;

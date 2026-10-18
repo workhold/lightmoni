@@ -1,3 +1,5 @@
+import os
+from .distribution import Distribution
 """LightMoni native Python SDK. Recording never performs network I/O."""
 import bisect
 import contextvars
@@ -141,7 +143,7 @@ class _State:
         custom = _attrs(resource)
         self.resource_values = dict(resource, **{"service.name": service, "service.instance.id": self.instance})
         self.resource = {"attributes": custom + _attrs({"service.name": service, "service.instance.id": self.instance})}
-        self.metrics, self.records, self.queue = {}, {}, []
+        self.metrics, self.records, self.queue, self.observations = {}, {}, [], {}
         self.stats = dict(pending_batches=0, pending_bytes=0, buffer_bytes=0, delivered_batches=0,
                           retried_batches=0, invalid_records=0, overflow_records=0,
                           dropped_records=0, rejected_records=0, last_error="", sampled_out_logs=0,
@@ -175,6 +177,7 @@ class _State:
                 metric.series.clear()
                 metric.start = time.time_ns()
             self.records.clear()
+            self.observations.clear()
             self.queue.clear()
             self.stats["buffer_bytes"] = self.stats["pending_bytes"] = self.stats["pending_batches"] = 0
         else:
@@ -207,7 +210,9 @@ class _State:
 
     def store(self, table, signal, record):
         with self.lock:
-            if self.closed or self.closing:
+            if not table:
+                self.invalid("select a table with with_table before recording")
+            elif self.closed or self.closing:
                 self.invalid("record after shutdown")
             elif self.reporting_disabled:
                 self.stats["disabled_records"] += 1
@@ -216,14 +221,20 @@ class _State:
 
     def payload(self, signal, records):
         if signal == "metrics":
-            merged = {}
+            scopes = {}
             for record in records:
-                kind = next(k for k in ("sum", "gauge", "histogram") if k in record)
+                kind = next(k for k in ("sum", "gauge", "histogram", "exponentialHistogram", "summary") if k in record)
+                base = scopes.setdefault('', {})
+                existing = base.get(record['name'])
+                scope_kind = kind if existing and kind not in existing else ''
+                merged = scopes.setdefault(scope_kind, {})
                 if record["name"] not in merged:
                     merged[record["name"]] = dict(record, **{kind: dict(record[kind], dataPoints=list(record[kind]["dataPoints"]))})
                 else:
                     merged[record["name"]][kind]["dataPoints"].extend(record[kind]["dataPoints"])
-            records = list(merged.values())
+            return _json({"resourceMetrics": [{"resource": self.resource, "scopeMetrics": [
+                {"scope": {"name": "lightmoni/sdk/python" + ("/" + kind if kind else ""), "version": "0.1.0"}, "metrics": list(merged.values())}
+                for kind, merged in scopes.items()]}]})
         resource, scope, field = {"metrics": ("resourceMetrics", "scopeMetrics", "metrics"),
                                   "logs": ("resourceLogs", "scopeLogs", "logRecords"),
                                   "traces": ("resourceSpans", "scopeSpans", "spans")}[signal]
@@ -234,6 +245,14 @@ class _State:
         if self.reporting_disabled:
             return
         now = time.time_ns()
+        for group in self.observations.values():
+            distribution = group['distribution']
+            records = self.records.setdefault((group['table'], 'metrics'), [])
+            if distribution.count:
+                records.append(dict(name=group['name'], exponentialHistogram=dict(dataPoints=[distribution.point(now, group['attributes'])], aggregationTemporality=1)))
+            if group['summary_count']:
+                records.append(dict(name=group['name'], summary=dict(dataPoints=[dict(attributes=group['attributes'], startTimeUnixNano=str(distribution.start), timeUnixNano=str(max(now, distribution.start)), count=str(group['summary_count']), sum=group['summary_sum'], quantileValues=[])])))
+        self.observations.clear()
         for metric in self.metrics.values():
             end = max(now, metric.start)
             for point in metric.series.values():
@@ -289,7 +308,7 @@ class _State:
         return True
 
     def collect_self(self):
-        if self.reporting_disabled or not self.self_enabled or time.monotonic() - self.self_last < 30:
+        if not self.key or self.reporting_disabled or not self.self_enabled or time.monotonic() - self.self_last < 30:
             return
         self.self_last = time.monotonic()
         at = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -402,38 +421,47 @@ class Span:
 
 
 class Client:
-    def __init__(self, service, table, endpoint="http://127.0.0.1:4318", key="", self_telemetry=True, *,
+    def __init__(self, service, table=None, endpoint=None, key=None, self_telemetry=True, *,
                  log_sampling=None, disabled=False, remote_config=True, config_endpoint=None, config_key=None,
-                 config_interval=30, resource=None, instance_id=None, **limits):
+                 config_interval=30, resource=None, instance_id=None, env=None, service_version=None, **limits):
         if type(disabled) is not bool or type(remote_config) is not bool:
             raise ValueError("reporting switches require booleans")
         if type(config_interval) not in (int, float) or not math.isfinite(config_interval) or config_interval < 1:
             raise ValueError("configuration interval must be at least one second")
+        endpoint = os.environ.get("LIGHTMONI_ENDPOINT", "http://127.0.0.1:4318") if endpoint is None else endpoint
+        key = os.environ.get("LIGHTMONI_KEY", "") if key is None else key
+        resource = dict(resource or {})
+        for value in (env, service_version):
+            if value is not None and (not isinstance(value, str) or not value.strip() or len(value.encode()) > 128):
+                raise ValueError("invalid resource identity")
+        if env is not None:
+            resource['deployment.environment.name'] = env
+        if service_version is not None:
+            resource['service.version'] = service_version
         policies = copy_policies({} if log_sampling is None else log_sampling)
         config_url = _endpoint(config_endpoint if config_endpoint is not None else endpoint)
-        self.table, self._state = _table(table), _State(service, endpoint, key, limits, resource, instance_id)
+        self.table, self._state = (_table(table) if table is not None else ""), _State(service, endpoint, key, limits, resource, instance_id)
         self._state.local_sampling = policies
         self._state.local_disabled = disabled
         self._state.set_disabled(disabled)
         self._state.remote_config, self._state.config_endpoint = remote_config, config_url
         self._state.config_key, self._state.config_interval = config_key, config_interval
-        self._state.self_enabled, self._state.self_table = bool(self_telemetry), self.table
-        if self_telemetry:
-            reference, stop, table = weakref.ref(self._state), self._state.stop, self.table
-            def heartbeat():
-                while not stop.wait(30):
-                    state = reference()
-                    if state is None or state.closed or state.closing:
-                        return
-                    client = object.__new__(Client)
-                    client._state, client.table = state, table
-                    try:
-                        client.flush(timeout=5)
-                    except (OSError, ValueError, RuntimeError):
-                        pass
-                    del client, state
-            self._state.heartbeat_worker = threading.Thread(target=heartbeat, name="lightmoni-heartbeat", daemon=True)
-            self._state.heartbeat_worker.start()
+        self._state.self_enabled, self._state.self_table = bool(self_telemetry), "lightmoni_sdk"
+        reference, stop, table = weakref.ref(self._state), self._state.stop, self.table
+        def collect():
+            while not stop.wait(10):
+                state = reference()
+                if state is None or state.closed or state.closing:
+                    return
+                client = object.__new__(Client)
+                client._state, client.table = state, table
+                try:
+                    client.flush(timeout=5)
+                except (OSError, ValueError, RuntimeError):
+                    pass
+                del client, state
+        self._state.heartbeat_worker = threading.Thread(target=collect, name="lightmoni-collector", daemon=True)
+        self._state.heartbeat_worker.start()
         if remote_config:
             reference, stop, table = weakref.ref(self._state), self._state.stop, self.table
             def configuration():
@@ -451,6 +479,48 @@ class Client:
             self._state.config_worker = threading.Thread(target=configuration, name="lightmoni-config", daemon=True)
             self._state.config_worker.start()
 
+    def record(self, table, metric_name, dimensions, value, count):
+        s = self._state
+        with s.lock:
+            if s.closed or s.closing:
+                s.invalid("record after shutdown")
+                return
+            if s.reporting_disabled:
+                s.stats['disabled_records'] += 1
+                return
+            try:
+                _table(table)
+                if table in SYSTEM_TABLES or table == 'lightmoni' or not s.resource_values.get('deployment.environment.name') or not isinstance(metric_name, str) or not metric_name or len(metric_name.encode()) > 255:
+                    raise ValueError('record requires env, business table and metric name')
+                if type(count) is not int or not 1 <= count < 1 << 64 or type(value) not in (int, float) or not math.isfinite(value):
+                    raise ValueError('record requires finite value and positive integer count')
+                if not isinstance(dimensions, dict) or any(not re.fullmatch(r'key([1-9]|1[0-6])', key) or not isinstance(val, str) for key, val in dimensions.items()):
+                    raise ValueError('dimensions must be key1..key16 strings')
+                dimensions = {key: val for key, val in dimensions.items() if val != ''}
+                attributes = _attrs(dimensions)
+                key = (table, metric_name, tuple(sorted(dimensions.items())))
+                group = s.observations.get(key)
+                if group is None:
+                    if len(s.observations) >= s.limits['cardinality_limit']:
+                        s.stats['overflow_records'] += 1
+                        return
+                    if not s.reserve(len(_json(attributes)) + len(table) + len(metric_name) + 256):
+                        return
+                    group = dict(table=table, name=metric_name, attributes=attributes, distribution=Distribution(time.time_ns()), summary_count=0, summary_sum=0.)
+                    s.observations[key] = group
+                if count > 1:
+                    if group['summary_count'] + count >= 1 << 64 or not math.isfinite(group['summary_sum'] + value):
+                        raise ValueError('summary overflow')
+                    group['summary_count'] += count
+                    group['summary_sum'] += value
+                else:
+                    before = group['distribution'].bytes
+                    if not group['distribution'].observe(value, s.limits['buffer_bytes'] - s.stats['buffer_bytes']):
+                        raise ValueError('distribution capacity or numeric overflow')
+                    s.stats['buffer_bytes'] += group['distribution'].bytes - before
+            except (TypeError, ValueError, OverflowError) as error:
+                s.invalid(str(error))
+
     def with_table(self, table):
         child = object.__new__(Client)
         child.table, child._state = _table(table), self._state
@@ -458,6 +528,7 @@ class Client:
 
     def _metric(self, name, kind, unit="", boundaries=None):
         s = self._state
+        _table(self.table)
         bounds = list(_DEFAULT_BOUNDS if boundaries is None else boundaries) if kind == "histogram" else []
         if not name or len(name.encode()) > 255 or len(unit.encode()) > 64 or len(bounds) > 128 or any(not math.isfinite(n) or (i and bounds[i-1] >= n) for i, n in enumerate(bounds)):
             raise ValueError("invalid metric name/unit/boundaries")
@@ -635,6 +706,13 @@ class Client:
                 if remaining <= 0:
                     raise TimeoutError("flush deadline exceeded; batches retained")
                 seq, identity, created, table, signal, payload, count = item
+                if table == "lightmoni_sdk" and not key:
+                    with s.lock:
+                        if s.queue and s.queue[0] is item:
+                            s.queue.pop(0)
+                            s.stats['pending_batches'] -= 1
+                            s.stats['pending_bytes'] -= len(payload)
+                    continue
                 headers = {"Content-Type": "application/json", "X-Lightmoni-Table": table,
                            "X-Lightmoni-Batch-ID": identity, "X-Lightmoni-Batch-Created-At": created}
                 if key:

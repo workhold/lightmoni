@@ -79,29 +79,7 @@ export class RuntimeMonitor {
     });
   }
   async start() {
-    for (const [table, entries] of Object.entries({
-      lightmoni_center: [
-        "metric:sum",
-        "metric:gauge",
-        "metric:histogram",
-        "log:",
-      ],
-      lightmoni_agent: ["metric:gauge", "log:"],
-      lightmoni_sdk: ["metric:gauge", "log:"],
-    }))
-      for (const entry of entries) {
-        const [kind, type] = entry.split(":");
-        await this.ingest.cat.ensure(
-          table,
-          kind,
-          type,
-          table === "lightmoni_center"
-            ? "lightmoni-center"
-            : table === "lightmoni_agent"
-              ? "lightmoni-agent"
-              : "",
-        );
-      }
+    for(const entry of ["metric:sum","metric:gauge","metric:histogram","log:"]){const [kind,type]=entry.split(":");await this.ingest.cat.ensure("lightmoni",kind,type,"lightmoni-center");}
     this.loop.enable();
     const tick = () => {
       const stats = this.client.stats();

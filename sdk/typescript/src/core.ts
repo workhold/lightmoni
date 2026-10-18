@@ -1,3 +1,4 @@
+import { Distribution } from './distribution.js';
 import { copyLogSampling, copyExclusions, matches, sampleLog, type LogSamplingPolicy, type SDKConfig, type LogExcludeRule } from './sampling.js';
 export type { LogSamplingPolicy, LogRule, LogCondition, LogExcludeRule, SDKConfig } from './sampling.js';
 export type Attributes = Record<string, string | boolean | number | bigint>;
@@ -9,7 +10,7 @@ export interface FrozenBatch {
 export interface Exporter { deliver(batch: FrozenBatch, signal: AbortSignal): Promise<void> }
 export interface TraceContext { traceId: string; spanId: string; flags: number; traceState?: string }
 export interface Options {
-  service: string; table: string; endpoint?: string; key?: string;
+  service: string; env?: string; service_version?: string; instance_id?: string; table?: string; endpoint?: string; key?: string;
   selfTelemetry?: boolean;
   logSampling?: Record<string, LogSamplingPolicy>; disabled?: boolean;
   remoteConfig?: boolean; configEndpoint?: string; configIntervalMs?: number;
@@ -64,6 +65,7 @@ class State {
   readonly resource: { attributes: Attribute[] };
   readonly instanceId: string;
   readonly instruments = new Map<string, Instrument>();
+  readonly observations = new Map<string, {table:string;name:string;attributes:Attribute[];distribution:Distribution;summaryCount:bigint;summarySum:number}>();
   readonly logs = new Map<string, RecordValue[]>();
   readonly spans = new Map<string, RecordValue[]>();
   readonly queue: Queued[] = [];
@@ -93,7 +95,7 @@ class State {
   selfPrevious?: Stats;
   constructor(readonly options: Options) {
     options.resource = {...options.resource};
-    if (!options.service || encoder.encode(options.service).length > 128 || !validTable(options.table)) throw new Error("valid service and logical table are required");
+    if (!options.service || encoder.encode(options.service).length > 128 || (options.table !== undefined && !validTable(options.table))) throw new Error("valid service and logical table are required");
     this.updateLogSampling(options.logSampling ?? {});
     Object.assign(this.stats, {sampledOutLogs:0,unmatchedLogs:0,excludedLogs:0,disabledRecords:0,reportingDisabled:options.disabled??false});
     if(options.configIntervalMs!==undefined&&(!Number.isSafeInteger(options.configIntervalMs)||options.configIntervalMs<1000))throw new Error('configuration interval must be at least one second');
@@ -107,7 +109,10 @@ class State {
     };
     for (const value of Object.values(this.settings)) if (!Number.isSafeInteger(value) || value <= 0) throw new Error("SDK limits and timeouts must be positive integers");
     if (this.settings.retryMaxMs < this.settings.retryMinMs || this.settings.maxBatchBytes > this.settings.queueBytes) throw new Error("invalid retry/batch limits");
-    this.instanceId = options.instanceId ?? uuid();
+    for (const value of [options.env, options.service_version, options.instance_id]) if (value !== undefined && (typeof value !== "string" || !value.trim() || encoder.encode(value).length > 128)) throw new Error("invalid resource identity");
+    this.instanceId = options.instance_id ?? options.instanceId ?? uuid();
+    if(options.env) options.resource!["deployment.environment.name"] = options.env;
+    if(options.service_version) options.resource!["service.version"] = options.service_version;
     const resource = this.attributes(options.resource ?? {});
     if (resource.some(a => a.key === "service.name" || a.key === "service.instance.id")) throw new Error("configure service identity separately");
     this.resource = { attributes: [...resource, { key: "service.name", value: { stringValue: options.service } }, { key: "service.instance.id", value: { stringValue: this.instanceId } }] };
@@ -132,7 +137,7 @@ class State {
   setReportingDisabled(disabled:boolean):void {
     if(this.stats.reportingDisabled===disabled)return;this.stats.reportingDisabled=disabled;
     if(disabled){this.reportingGeneration++;this.request?.abort();this.retryNow?.();this.stats.disabledRecords+=this.queue.reduce((n,q)=>n+q.records,0)+[...this.logs.values(),...this.spans.values()].reduce((n,rows)=>n+rows.length,0);
-      for(const m of this.instruments.values()){this.stats.disabledRecords+=m.series.size;m.series.clear();m.start=nowNano();}this.queue.length=0;this.logs.clear();this.spans.clear();this.stats.pendingBytes=0;this.stats.pendingBatches=0;this.stats.bufferBytes=0;
+      for(const m of this.instruments.values()){this.stats.disabledRecords+=m.series.size;m.series.clear();m.start=nowNano();}this.observations.clear();this.queue.length=0;this.logs.clear();this.spans.clear();this.stats.pendingBytes=0;this.stats.pendingBatches=0;this.stats.bufferBytes=0;
     }else{this.selfLast=-Infinity;for(const m of this.instruments.values())m.start=nowNano();}this.notify();
   }
   refreshConfig():Promise<void> {
@@ -169,6 +174,7 @@ class State {
     this.failure = new Error(message); this.stats.lastError = message;
   }
   store(map: Map<string, RecordValue[]>, table: string, record: RecordValue): void {
+    if (!validTable(table)) { this.invalid("select a table with withTable before recording"); return; }
     if (this.closing) { this.invalid("record after shutdown"); return; }
     if(this.stats.reportingDisabled){this.stats.disabledRecords++;return;}
     const size = encoder.encode(JSON.stringify(record)).length + 64;
@@ -176,7 +182,7 @@ class State {
     this.stats.bufferBytes += size; const rows = map.get(table) ?? []; rows.push(record); map.set(table, rows);
   }
   instrument(table: string, name: string, kind: Instrument["kind"], options: MetricOptions): Instrument {
-    if (this.closing || !name || encoder.encode(name).length > 255 || (options.unit?.length ?? 0) > 64 || (options.description?.length ?? 0) > 1024) throw new Error("invalid metric identity or SDK closed");
+    if (!validTable(table) || this.closing || !name || encoder.encode(name).length > 255 || (options.unit?.length ?? 0) > 64 || (options.description?.length ?? 0) > 1024) throw new Error("invalid metric identity or SDK closed");
     const boundaries = kind === "histogram" ? [...(options.boundaries ?? [5, 10, 25, 50, 100, 250, 500, 1000])] : [];
     if (boundaries.length > 128 || boundaries.some((n, i) => !finite(n) || (i > 0 && boundaries[i - 1] >= n))) throw new Error("histogram boundaries must be finite and increasing");
     const key = `${table}\0${name}`, existing = this.instruments.get(key);
@@ -214,9 +220,32 @@ class State {
     }
     point.observed = nowNano();
   }
+  observe(table:string,name:string,dimensions:Record<string,string>,value:number,count:number|bigint):void {
+    if(this.closing){this.invalid("record after shutdown");return;}
+    if(this.stats.reportingDisabled){this.stats.disabledRecords++;return;}
+    if(!this.options.env?.trim() || !validTable(table) || ['lightmoni','lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(table) || !name || encoder.encode(name).length>255 || !Number.isFinite(value) || !dimensions || typeof dimensions!=='object' || Array.isArray(dimensions)) {this.invalid("record requires env, business table, metric name, dimensions and finite value");return;}
+    let weight:bigint;try{if(typeof count==='number'&&(!Number.isSafeInteger(count)||count<1))throw new Error();weight=BigInt(count);if(weight<1n||weight>maxUint64)throw new Error();}catch{this.invalid("count must be a positive integer");return;}
+    let attributes:Attribute[];
+    try {for(const [key,val] of Object.entries(dimensions))if(!/^key([1-9]|1[0-6])$/.test(key)||typeof val!=='string')throw new Error("dimensions must be key1..key16 strings");attributes=this.attributes(Object.fromEntries(Object.entries(dimensions).filter(([,v])=>v!=='')));}catch(error){this.invalid(error);return;}
+    const key=JSON.stringify([table,name,attributes]);let group=this.observations.get(key);
+    if(!group){if(this.observations.size>=this.settings.cardinalityLimit){this.stats.overflowRecords++;return;}const cost=encoder.encode(key).length+256;if(this.stats.bufferBytes+cost>this.settings.bufferBytes){this.lost(1,"SDK aggregate buffer capacity exceeded");return;}this.stats.bufferBytes+=cost;group={table,name,attributes,distribution:new Distribution(nowNano()),summaryCount:0n,summarySum:0};this.observations.set(key,group);}
+    if(weight>1n){if(group.summaryCount+weight>maxUint64||!Number.isFinite(group.summarySum+value)){this.invalid("summary overflow");return;}group.summaryCount+=weight;group.summarySum+=value;return;}
+    const previous=group.distribution.bytes;
+    if(!group.distribution.observe(value,this.settings.bufferBytes-this.stats.bufferBytes)){this.invalid("distribution capacity or numeric overflow");return;}
+    this.stats.bufferBytes+=group.distribution.bytes-previous;
+  }
   collect(): void {
     if(this.stats.reportingDisabled)return;
     const at = new Date().toISOString(), end = nowNano();
+    const grouped=new Map<string,RecordValue[]>();
+    for(const group of this.observations.values()){
+      const rows=grouped.get(group.table)??[];
+      if(group.distribution.count)rows.push({name:group.name,exponentialHistogram:{dataPoints:[group.distribution.point(end,group.attributes)],aggregationTemporality:1}});
+      if(group.summaryCount)rows.push({name:group.name,summary:{dataPoints:[{attributes:group.attributes,startTimeUnixNano:String(group.distribution.start),timeUnixNano:String(end),count:String(group.summaryCount),sum:group.summarySum,quantileValues:[]}]}});
+      grouped.set(group.table,rows);
+    }
+    for(const [table,rows] of grouped)this.pack("metrics",table,rows,at);
+    this.observations.clear();
     const tables = new Set([...this.logs.keys(), ...this.spans.keys(), ...Array.from(this.instruments.values(), i => i.table)]);
     for (const table of [...tables].sort()) {
       const metrics: RecordValue[] = [];
@@ -239,7 +268,7 @@ class State {
   }
   collectSelf(): void {
     const clock = performance.now();
-    if (this.stats.reportingDisabled || this.options.selfTelemetry === false || clock - this.selfLast < 30_000) return;
+    if (!this.options.key || this.stats.reportingDisabled || this.options.selfTelemetry === false || clock - this.selfLast < 30_000) return;
     this.selfLast = clock;
     const at = new Date().toISOString(), time = nano(nowNano());
     const attributes: Attribute[] = [{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'typescript'}},{key:'sdk.version',value:{stringValue:'0.1.0'}}];
@@ -255,20 +284,23 @@ class State {
   enqueueSelf(signal: Signal, rows: RecordValue[], at: string): boolean {
     const bytes = this.payload(signal, rows).length;
     if (bytes > this.settings.maxBatchBytes || this.queue.length >= this.settings.queueBatches || this.stats.pendingBytes + bytes > this.settings.queueBytes) return false;
-    this.enqueue(signal, this.options.table, rows, at); return true;
+    this.enqueue(signal, "lightmoni_sdk", rows, at); return true;
   }
   payload(signal: Signal, records: RecordValue[]): Uint8Array {
     const scope = { name: "lightmoni/sdk/typescript" };
     if (signal === "metrics") {
-      const merged = new Map<string, RecordValue>();
+      const scopes = new Map<string, Map<string, RecordValue>>();
       for (const record of records) {
-        const name = String(record.name), previous = merged.get(name);
-        if (!previous) { merged.set(name, structuredClone(record)); continue; }
-        for (const kind of ["sum", "gauge", "histogram"]) if (previous[kind]) {
-          const before = previous[kind] as { dataPoints: unknown[] }; before.dataPoints.push(...(record[kind] as { dataPoints: unknown[] }).dataPoints);
-        }
+        const kind=["sum","gauge","histogram","exponentialHistogram","summary"].find(k=>record[k])!;
+        const name=String(record.name),base=scopes.get("")??new Map<string,RecordValue>();scopes.set("",base);
+        const baseKind=base.has(name)?["sum","gauge","histogram","exponentialHistogram","summary"].find(k=>base.get(name)![k]):undefined;
+        const scopeKind=baseKind&&baseKind!==kind?kind:"";
+        const merged=scopes.get(scopeKind)??new Map<string,RecordValue>();scopes.set(scopeKind,merged);
+        const previous=merged.get(name);
+        if(!previous)merged.set(name,structuredClone(record));
+        else (previous[kind] as {dataPoints:unknown[]}).dataPoints.push(...(record[kind] as {dataPoints:unknown[]}).dataPoints);
       }
-      return encoder.encode(JSON.stringify({ resourceMetrics: [{ resource: this.resource, scopeMetrics: [{ scope, metrics: [...merged.values()] }] }] }));
+      return encoder.encode(JSON.stringify({resourceMetrics:[{resource:this.resource,scopeMetrics:[...scopes].map(([kind,merged])=>({scope:{...scope,name:scope.name+(kind?"/"+kind:"")},metrics:[...merged.values()]}))}]}));
     }
     if (signal === "logs") return encoder.encode(JSON.stringify({ resourceLogs: [{ resource: this.resource, scopeLogs: [{ scope, logRecords: records }] }] }));
     return encoder.encode(JSON.stringify({ resourceSpans: [{ resource: this.resource, scopeSpans: [{ scope, spans: records }] }] }));
@@ -297,7 +329,11 @@ class State {
   async pump(): Promise<void> {
     this.working = true; let backoff = this.settings.retryMinMs;
     try { while (this.queue.length && !this.stopped) {
-      const item = this.queue[0]; this.request = new AbortController();
+      const item = this.queue[0];
+      if (item.batch.table === "lightmoni_sdk" && !this.options.key) {
+        this.queue.shift(); this.stats.pendingBatches--; this.stats.pendingBytes -= item.batch.payload.length; this.notify(); continue;
+      }
+      this.request = new AbortController();
       const timer = setTimeout(() => this.request?.abort(), this.settings.requestTimeoutMs);
       let failure: unknown;
       try { await this.exporter.deliver({ ...item.batch, payload: item.batch.payload.slice() }, this.request.signal); } catch (error) { failure = error; } finally { clearTimeout(timer); this.request = undefined; }
@@ -330,7 +366,9 @@ export class Gauge { constructor(private readonly state: State, private readonly
 export class Histogram { constructor(private readonly state: State, private readonly metric: Instrument) {} record(value: number, attrs: Attributes = {}): void { this.state.record(this.metric, value, attrs); } }
 export class LightMoni {
   private constructor(private readonly state: State, readonly table: string, private readonly boundTrace?: TraceContext) {}
-  static create(options: Options): LightMoni { return new LightMoni(new State({ ...options }), options.table); }
+  static create(options: Options): LightMoni { return new LightMoni(new State({ ...options }), options.table ?? ""); }
+  /** Record one observation; aggregation and delivery are automatic. */
+  record(table:string,metric_name:string,dimensions:Record<string,string>,value:number,count:number|bigint):void {this.state.observe(table,metric_name,dimensions,value,count);}
   get meter(): LightMoni { return this; }
   get instanceId(): string { return this.state.instanceId; }
   withTable(table: string): LightMoni { if (!validTable(table)) throw new Error("invalid logical table"); return new LightMoni(this.state, table, this.boundTrace); }
@@ -394,7 +432,7 @@ export class LightMoni {
     if (validTrace(context)) Object.assign(record, { traceId: context.traceId, spanId: context.spanId, flags: context.flags });
     this.state.store(this.state.logs, this.table, record);
   }
-  startSpan(name: string, attrs: Attributes = {}, parent: TraceContext | null | undefined = this.currentTrace()): Span { return new Span(this.state, this.table, name, attrs, parent ?? undefined); }
+  startSpan(name: string, attrs: Attributes = {}, parent: TraceContext | null | undefined = this.currentTrace()): Span { if (!validTable(this.table)) throw new Error("select a table with withTable before recording"); return new Span(this.state, this.table, name, attrs, parent ?? undefined); }
   async flush({ timeoutMs = 10_000 }: { timeoutMs?: number } = {}): Promise<void> { if (this.state.stopped) throw new Error("SDK is closed"); this.state.collect(); const target = this.state.sequence; this.state.kick(); await this.state.wait(target, timeoutMs); }
   async shutdown({ timeoutMs = 10_000 }: { timeoutMs?: number } = {}): Promise<void> {
     if (this.state.stopped) { if (this.state.failure) throw this.state.failure; return; }

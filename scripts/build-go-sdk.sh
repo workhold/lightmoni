@@ -15,6 +15,7 @@ cp sdk/README.md "$sdk_tmp/lightmoni-go-sdk/sdk/README.md"
 cp sdk/go/README.md "$sdk_tmp/lightmoni-go-sdk/sdk/go/README.md"
 sed 's|(../README.md|(sdk/README.md|g' sdk/go/README.md > "$sdk_tmp/lightmoni-go-sdk/README.md"
 cp examples/sdk/go/main.go "$sdk_tmp/lightmoni-go-sdk/examples/sdk/go/"
+cp -R examples/sdk/go/record "$sdk_tmp/lightmoni-go-sdk/examples/sdk/go/record"
 cat > "$sdk_tmp/lightmoni-go-sdk/go.mod" <<'EOF'
 module github.com/lightmoni/lightmoni
 

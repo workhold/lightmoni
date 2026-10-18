@@ -30,3 +30,10 @@
 .lm-sdk-recommendation{flex-direction:column}.lm-sdk-recommendation strong{padding-right:60px}.lm-sdk-recommendation>.ant-btn{position:absolute;top:12px;right:12px}
 
 .lm-sdk-output .lm-code{white-space:pre;overflow-x:auto;overflow-wrap:normal;word-break:normal;max-width:100%}
+
+.lm-sdk-optional{margin:12px 0;color:var(--lm-muted)}
+.lm-sdk-optional summary{cursor:pointer}
+.lm-sdk-optional[open] summary{margin-bottom:12px}
+
+.lm-sdk-anonymous{animation:lm-sdk-enter .16s ease-out both}
+@media(prefers-reduced-motion:reduce){.lm-sdk-anonymous{animation:none}}

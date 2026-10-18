@@ -33,9 +33,9 @@ export const defaultTasks:AgentTasks = {
 };
 export const normalizeTasks = (tasks?:Partial<AgentTasks>):AgentTasks => ({...defaultTasks,...tasks,
   host_enabled:tasks?.host_enabled ?? true,host_collectors:tasks?.host_collectors ?? defaultTasks.host_collectors,
-  host_table:tasks?.host_table || 'host',probe_table:tasks?.probe_table || 'probe',
+  host_table:'host',probe_table:'probe',
   process_names:tasks?.process_names ?? [],probes:tasks?.probes ?? [],
-  logs_enabled:tasks?.logs_enabled ?? false,log_table:tasks?.log_table || 'files',log_sources:tasks?.log_sources ?? [],
+  logs_enabled:tasks?.logs_enabled ?? false,log_table:'files',log_sources:tasks?.log_sources ?? [],
 });
 export interface TaskForm extends Omit<AgentTasks,'probes'> {
   name?:string;type?:AgentTaskType;enabled?:boolean;label_ids?:string[];
@@ -45,8 +45,8 @@ export const taskFormValues = (tasks:AgentTasks):TaskForm => ({...normalizeTasks
   probes:(tasks.probes ?? []).map(probe => ({...probe,timeout_seconds:probe.timeout_ms/1000,expected_status:(probe.expected_status ?? []).map(String)})),
 });
 export const taskPayload = (values:TaskForm):AgentTasks => ({...(({name:_,type:__,enabled:___,label_ids:____,...rest}) => rest)(values),
-  host_table:values.host_table.trim(),probe_table:values.probe_table.trim(),
-  log_table:values.log_table.trim(),log_sources:(values.log_sources ?? []).map(source => ({...source,directory:source.directory.trim(),pattern:source.pattern.trim() || '*.log*'})),
+  host_table:'host',probe_table:'probe',
+  log_table:'files',log_sources:(values.log_sources ?? []).map(source => ({...source,directory:source.directory.trim(),pattern:source.pattern.trim() || '*.log*'})),
   process_names:(values.process_names ?? []).map(name => name.trim()),
   probes:(values.probes ?? []).map(({timeout_seconds,expected_status,...probe}) => ({...probe,
     id:probe.id.trim(),target:probe.target.trim(),timeout_ms:Math.round(timeout_seconds*1000),

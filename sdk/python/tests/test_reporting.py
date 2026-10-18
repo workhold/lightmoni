@@ -325,8 +325,44 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(stats["sampled_out_logs"], 1)
         self.assertEqual(stats["dropped_records"], 0)
 
+    def test_unbound_client_uses_explicit_tables_and_anonymous_has_no_self_records(self):
+        for key in ("", "test-key"):
+            client = Client("unbound", endpoint=self.receiver.url, key=key, remote_config=False)
+            with self.assertRaises(ValueError):
+                client.counter("missing")
+            client.log("info", "missing table")
+            client.with_table("first").log("info", "first")
+            client.with_table("second").log("info", "second")
+            client.shutdown()
+            requests = self.receiver.observed("POST")
+            tables = [request['headers']['X-Lightmoni-Table'] for request in requests]
+            self.assertIn('first', tables)
+            self.assertIn('second', tables)
+            self.assertEqual('lightmoni_sdk' in tables, bool(key))
+            if not key:
+                self.assertEqual(len(requests), 2)
+            with self.receiver.lock:
+                self.receiver.requests.clear()
+
+    def test_record_aggregates_samples_and_summary_has_no_fake_distribution(self):
+        client = Client('record', env='test', service_version='v1', instance_id='fixed', endpoint=self.receiver.url, key='', self_telemetry=False, remote_config=False)
+        for i in range(1, 1001):
+            client.record('app', 'duration', {'key1': 'telecom', 'key2': 'zhejiang'}, i, 1)
+        client.record('app', 'duration', {'key2': 'zhejiang', 'key1': 'telecom'}, 100, 5)
+        client.record('app', 'invalid', {}, 1, 0)
+        client.record('app', 'invalid', {'isp': 'bad'}, 1, 1)
+        client.shutdown()
+        metrics = self.receiver.records('metrics')
+        distributions = [point for m in metrics for point in m.get('exponentialHistogram', {}).get('dataPoints', [])]
+        summaries = [point for m in metrics for point in m.get('summary', {}).get('dataPoints', [])]
+        self.assertEqual(len(distributions), 1)
+        self.assertEqual((distributions[0]['count'], distributions[0]['sum']), ('1000', 500500))
+        self.assertEqual((summaries[0]['count'], summaries[0]['sum']), ('5', 100))
+        self.assertEqual(summaries[0]['quantileValues'], [])
+        self.assertEqual(client.stats()['invalid_records'], 2)
+
     def test_self_telemetry_bypasses_business_log_rules(self):
-        client = self.client(self_telemetry=True, log_sampling={"web": {"rules": []}})
+        client = self.client(key="test-key", self_telemetry=True, log_sampling={"web": {"rules": []}})
         client.log("info", "business ignored")
         client.flush()
         logs = self.receiver.records("logs")

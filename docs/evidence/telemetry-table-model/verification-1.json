@@ -1,0 +1,12 @@
+{
+  "run": "1",
+  "checks": [
+    "three tabs, four languages, empty dropdown only create; failed create retains name; retry creates one all-business key and selects it",
+    "recommended names require explicit registration; real ClickHouse logs/metrics/traces accepted only for active exemptions; wrong credentials rejected; descriptions persist; revocation immediately rejects uploads and retains data",
+    "record identity, mandatory count, SQL distribution coverage, legacy installer/table links, 390px, 200% zoom and reduced motion"
+  ],
+  "pageErrors": [],
+  "table": "app_logs_a701b8022d4afbd7",
+  "createdKeyID": "c444777dda551512c71f22f5eba441a1",
+  "passed": true
+}

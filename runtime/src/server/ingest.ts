@@ -1,3 +1,4 @@
+import { distributionPoint } from "./distribution.js";
 import { gunzipSync } from "node:zlib";
 import { LosslessNumber } from "lossless-json";
 import {
@@ -125,7 +126,8 @@ export function normalize(
       const resource = attrs(rs.resource?.attributes);
       for (const scope of rs.scopeMetrics ?? [])
         for (const metric of scope.metrics ?? []) {
-          const subtype = metric.sum
+          const subtype = metric.exponentialHistogram || metric.summary
+            ? "histogram" : metric.sum
             ? "sum"
             : metric.gauge
               ? "gauge"
@@ -136,7 +138,7 @@ export function normalize(
             throw Error(
               "unsupported metric type; use Sum/Gauge/explicit Histogram",
             );
-          const data = metric[subtype];
+          const data = metric.exponentialHistogram ?? metric.summary ?? metric[subtype];
           for (const p of data.dataPoints ?? []) {
             const row: any = base(
               resource,
@@ -150,6 +152,11 @@ export function normalize(
               unit: metric.unit ?? "",
               start_time: stamp(p.startTimeUnixNano ?? 0),
             });
+            if (metric.exponentialHistogram || metric.summary) {
+              if(metric.exponentialHistogram && Number(data.aggregationTemporality)!==1)throw Error("record histograms require delta temporality");
+              Object.assign(row,distributionPoint(p,!!metric.summary));
+              out.push({kind:"metric",subtype:"histogram",row});continue;
+            }
             if (subtype === "histogram") {
               const bounds = p.explicitBounds ?? [],
                 buckets = p.bucketCounts ?? [],
@@ -183,6 +190,12 @@ export function normalize(
                 min: p.min ?? null,
                 max: p.max ?? null,
                 temporality: temporality(data.aggregationTemporality),
+                bucket_values: buckets.map((_:unknown,i:number)=>{
+                  const lower=i===0?(p.min??bounds[0]??0):bounds[i-1],upper=i===bounds.length?(p.max??bounds.at(-1)??0):bounds[i];
+                  return lower/2+upper/2;
+                }),
+                distribution_count: Number.isFinite(p.min)&&Number.isFinite(p.max)&&bounds.length?count.toString():"0",
+                distribution_kind:"explicit",sketch_scale:null,quantile_error:null,
               });
             } else {
               if (p.asInt !== undefined)
@@ -401,12 +414,14 @@ export class Ingest {
   ) {
     if (!systemTable(table))
       throw Error("internal telemetry requires a system table");
+    const component=table==="lightmoni"?"":table.slice(10);
     const grouped = new Map<string, any[]>();
     for (const [i, n] of rows.entries()) {
+      if(component){n.row.attributes["lightmoni.component"]=component;n.row.attributes_json=goJSON(n.row.attributes,true);}
       const target =
         "_lm_" +
         (await this.cat.ensure(
-          table,
+          "lightmoni",
           n.kind,
           n.subtype,
           n.row.service,
@@ -432,7 +447,7 @@ export class Ingest {
       table = String(c.req.headers["x-lightmoni-table"] ?? "");
     if (!validTable(table))
       fail(400, "X-Lightmoni-Table requires a logical business name");
-    if (systemTable(table)) fail(403, "系统内置表由内部监控链路写入");
+    if (systemTable(table) && !(key.id && table === "lightmoni_sdk")) fail(403, "系统内置表由内部监控链路写入");
     if (!key.allow_all_tables && !key.allowed_tables.includes(table)) {
       this.auth.recordKey(
         key.id,
@@ -524,6 +539,10 @@ export class Ingest {
         );
         fail(400, e instanceof Error ? e.message : "invalid OTLP");
       }
+      if (table === "lightmoni_sdk" && rows.some(n => !sdkRuntime(n, table)))
+        fail(403, "SDK 系统表只接收 SDK 自身指标和事件");
+      // Older anonymous SDKs may mix diagnostics into a business stream.
+      if (!key.id) rows = rows.filter(n => n.row.attributes["lightmoni.component"] !== "sdk");
       const now = nowNano();
       for (const n of rows) {
         const at = parseNanoTime(n.row.event_time.replace(" ", "T") + "Z");
@@ -552,7 +571,7 @@ export class Ingest {
       try {
         for (const [i, n] of rows.entries()) {
           service = n.row.service;
-          const route = key.id && sdkRuntime(n, table) ? "lightmoni_sdk" : table,
+          const route = key.id && sdkRuntime(n, table) ? "lightmoni" : table,
             target =
               "_lm_" +
               (await this.cat.ensure(

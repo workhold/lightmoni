@@ -19,7 +19,7 @@ export const validTable = (s: unknown): s is string =>
   /^[a-z][a-z0-9_]{0,47}$/.test(s) &&
   !/^(log_|metric_|trace_)/.test(s);
 export const systemTable = (s: string) =>
-  ["lightmoni_agent", "lightmoni_center", "lightmoni_sdk"].includes(s);
+  ["lightmoni", "lightmoni_agent", "lightmoni_center", "lightmoni_sdk"].includes(s);
 const record = (v: any): Record<string, any> => {
   if (!v || typeof v !== "object" || Array.isArray(v))
     fail(400, "invalid request");
@@ -36,27 +36,6 @@ const keyFields = (v: Record<string, any>) => {
         v.allowed_tables.some((t: any) => typeof t !== "string")))
   )
     fail(400, "invalid key");
-};
-const storedTables = (raw: string): string[] => {
-  try {
-    return normalizeTables(JSON.parse(raw), false);
-  } catch {
-    return [];
-  }
-};
-const normalizeTables = (values: unknown, all: boolean): string[] => {
-  if (all) return [];
-  if (!Array.isArray(values) || values.length < 1 || values.length > 200)
-    fail(400, "请选择 1–200 个允许写入的逻辑 table");
-  const tables = values.map((v) => (typeof v === "string" ? v.trim() : ""));
-  if (tables.some((v) => !validTable(v)))
-    fail(
-      400,
-      "无效的逻辑 table；使用小写字母开头的字母、数字或下划线，最长 48 位，不带 log_/metric_/trace_ 前缀",
-    );
-  if (tables.some(systemTable))
-    fail(400, "系统内置表自动接收内部监控数据，无需配置写入权限");
-  return [...new Set(tables)].sort();
 };
 export const cookie = (req: IncomingMessage, name: string) => {
   const part = req.headers.cookie
@@ -100,6 +79,8 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
         db.exec(
           "ALTER TABLE ingest_keys ADD COLUMN " + name + " " + definition,
         );
+    // SDK keys authenticate business uploads; historical table scopes no longer restrict them.
+    db.run("UPDATE ingest_keys SET allowed_tables_json='[]',allow_all_tables=1 WHERE allow_all_tables<>1 OR allowed_tables_json<>'[]'");
     this.master = masterKey(dir);
     const c = cipher(this.master);
     this.encrypt = c.encrypt;
@@ -132,10 +113,10 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
       hash(value),
     );
     if (!row) fail(401, "invalid write key");
-    const tables = storedTables(row.allowed_tables_json);
+    const tables: string[] = [];
     if (
       table &&
-      (!validTable(table) || (!row.allow_all_tables && !tables.includes(table)))
+      !validTable(table)
     )
       fail(403, "key cannot write to this table");
     this.db.run(
@@ -147,7 +128,7 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
       id: row.id,
       name: row.name,
       allowed_tables: tables,
-      allow_all_tables: !!row.allow_all_tables,
+      allow_all_tables: true,
     };
   }
   recordKey(key: string, service: string, status: string, detail = "") {
@@ -375,8 +356,8 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
           .map(({ allowed_tables_json, ...row }) => ({
             ...row,
             active: !!row.active,
-            allow_all_tables: !!row.allow_all_tables,
-            allowed_tables: storedTables(allowed_tables_json),
+            allow_all_tables: true,
+            allowed_tables: [],
           })),
       );
     });
@@ -386,7 +367,7 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
       keyFields(v);
       if (typeof v.name !== "string" || !v.name.trim())
         fail(400, "Key 名称必填");
-      const tables = normalizeTables(v.allowed_tables, !!v.allow_all_tables),
+      const tables: string[] = [],
         uid = id(),
         key = "lm_" + token(),
         name = v.name.trim();
@@ -397,7 +378,7 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
         hash(key),
         new Date().toISOString(),
         JSON.stringify(tables),
-        !!v.allow_all_tables,
+        true,
       );
       c.json(
         {
@@ -405,7 +386,7 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
           key,
           name,
           allowed_tables: tables,
-          allow_all_tables: !!v.allow_all_tables,
+          allow_all_tables: true,
         },
         201,
       );
@@ -421,20 +402,14 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
         );
         if (!old) fail(404, "Key 不存在");
         const name = (v.name ?? old.name).trim(),
-          active = v.active ?? !!old.active,
-          all = v.allow_all_tables ?? !!old.allow_all_tables;
+          active = v.active ?? !!old.active;
         if (!name) fail(400, "Key 名称必填");
-        let tables = storedTables(old.allowed_tables_json);
-        if (v.allowed_tables != null || v.allow_all_tables != null)
-          tables = normalizeTables(v.allowed_tables ?? tables, all);
-        if (v.active === true && !all && !tables.length)
-          fail(400, "启用 Key 前请先配置允许写入的 table");
         db.run(
           "UPDATE ingest_keys SET name=?,active=?,allowed_tables_json=?,allow_all_tables=? WHERE id=?",
           name,
           active,
-          JSON.stringify(tables),
-          all,
+          "[]",
+          true,
           c.params.id,
         );
       });

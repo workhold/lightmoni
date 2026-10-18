@@ -461,6 +461,7 @@ func (s *state) setReportingDisabledLocked(disabled bool) {
 		for _, q := range s.queue {
 			s.stats.DisabledRecords += uint64(q.records)
 		}
+		s.observations = map[string]*observation{}
 		s.logs = map[string][]*logpb.LogRecord{}
 		s.spans = map[string][]*tracepb.Span{}
 		s.queue = nil

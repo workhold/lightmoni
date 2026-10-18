@@ -1,26 +1,39 @@
 # LightMoni SDK
 
-所有原生 SDK 支持指标、日志和链路，可通过执行节点（LightMoni Agent）上报，也可带 Key 直连中心，容器和未部署执行节点的服务同样可以接入。配置业务 service、逻辑 table；Key 必须允许该 table。withTable / with_table 共享根客户端生命周期。
+## 通用业务打点（Go / Node.js / Python / Rust）
+
+推荐统一调用 `record(table, metric_name, dimensions, value, count)`（Go 为 `Record`），五个参数均必填。初始化必填 service、env，可选 service_version、instance_id；实例 ID 默认自动生成。地址与密钥可读 LIGHTMONI_ENDPOINT / LIGHTMONI_KEY；无密钥时仅能写启用的豁免表且不产生 SDK 自身遥测。
+
+每次数据库请求后记录一次耗时，例如 `record("business", "db.query.duration_ms", {key1:"telecom", key2:"zhejiang"}, 128, 1)`。SDK 每10秒自动聚合与发送，业务不需注册指标或配置分桶。退出仍需 shutdown。维度仅支持 key1…key16 字符串；同一 metric_name 的槽含义和数值单位固定，不同指标可复用槽位。同一客户端可以上报多个表/指标。
+
+value 是 count 个样本的总值。count=1 提供单个观察；count>1 提供已有汇总，例金额100/人数5，平均20。已有汇总不包含个体分布，中心会保留sum/count/avg，在覆盖不完整时min/max/P值为NULL并标识incomplete_distribution，不把平均数伪装成个人样本。
+
+中心指标视图包含实际存储列 env/service_version/key1…key16，规范查询字段 metric_name/sample_count/value_sum/value_min/value_max/bucket_values/bucket_counts/distribution_count/quantile_error。分位数需合并压缩分布后计算，不平均实例或窗口的P95。系统日志为 lightmoni_log、系统指标为 lightmoni_metric_*，component区分center/agent/sdk。原系统查询入口保留兼容。
+
+SDK 接入页提供完整代码和可复制的统计/P值 SQL；各语言新样例分别位于 examples/sdk/go/record、sdk/typescript/examples/record.mjs、examples/sdk/python/record.py、sdk/rust/examples/record.rs。以下旧 instrument/默认表 API 保留兼容；其他历史语言仍使用旧接口。
+
+
+所有原生 SDK 支持指标、日志和链路，可通过执行节点（LightMoni Agent）上报，也可带 Key 直连中心，容器和未部署执行节点的服务同样可以接入。旧接口配置业务 service、默认 table；有效中心密钥可上报全部业务表。withTable / with_table 共享根客户端生命周期。
 
 ## 选择上报方式
 
-“数据接入 → SDK 接入”可切换“通过执行节点”和“直连中心”，生成所选语言的代码与环境变量。示例读取 `LIGHTMONI_ENDPOINT`、`LIGHTMONI_KEY` 并传入 SDK；SDK 本身不自动读取这两个变量。
+左侧“SDK 接入”提供 Go、Node.js、Rust、Python 的中心直连样例，以及 SDK 密钥、豁免表管理。四种语言的新初始化入口支持 `LIGHTMONI_ENDPOINT`、`LIGHTMONI_KEY` 环境配置；浏览器入口需显式传连接配置。已有执行节点接收与旧接口仍可使用下表配置。
 
 | 方式 | endpoint | key | 缓存 |
 | --- | --- | --- | --- |
 | 通过执行节点 | 节点接收地址，默认 `http://127.0.0.1:4318` | 通常留空；执行节点开启本地令牌时传该令牌 | SDK 进程内缓冲，执行节点持久化磁盘队列 |
-| 直连中心 | 业务进程可访问的中心基础地址 | 中心上报 Key，允许目标逻辑 table | SDK 进程内缓冲与重试 |
+| 直连中心 | 业务进程可访问的中心基础地址 | 有效启用的中心 SDK 密钥 | SDK 进程内缓冲与重试 |
 
 直连示例的环境配置：
 
 ~~~sh
 export LIGHTMONI_ENDPOINT='https://monitor.example.com'
-export LIGHTMONI_KEY='替换为允许 business 表的上报 Key'
+export LIGHTMONI_KEY='替换为有效启用的 SDK 密钥'
 ~~~
 
 容器中通过 environment / Secret 配置这两个变量。容器的 `localhost` 指向容器本身；与中心位于同一个 Docker 网络时，可用 Compose 服务地址 `http://lightmoni:8080`；Docker Desktop 访问宿主机上的中心可用 `http://host.docker.internal:端口`。实际填写中心可达的域名或服务地址，SDK 自动追加 `/v1/metrics`、`/v1/logs`、`/v1/traces`，无需执行节点中转。
 
-通过执行节点时，中心 Key 保存在 LightMoni Agent，且必须允许业务 SDK 的 table。不同服务可共享同一个执行节点；使用 `withTable` / `with_table` 切换表时，中心 Key 也需授权对应 table。SDK 缓冲不写磁盘；需要本地磁盘缓存时选择通过执行节点上报。
+通过执行节点时，中心 Key 保存在 LightMoni Agent，可以写入所有业务表。不同服务可共享同一个执行节点；使用 `withTable` / `with_table` 切换表时，有效启用的中心 Key 可写任意业务 table。SDK 缓冲不写磁盘；需要本地磁盘缓存时选择通过执行节点上报。
 
 | 语言 | 运行环境 | 安装与示例 |
 | --- | --- | --- |
@@ -78,7 +91,7 @@ trace 元数据在调用日志 API 时从上下文复制，与记录一起冻结
 
 ## 生命周期与边界
 
-Go / TypeScript 保留现有周期 collection 和后台 exporter。其他原生 SDK 的记录 API 只修改内存，提供显式 flush（.NET 为 FlushAsync）；默认自监控启用时，Python / Java / .NET / Ruby / Rust 的后台线程每 30 秒同时 Flush 当前业务窗口。关闭自监控后由应用调度 flush。Python 的配置轮询是独立线程，不受自监控或停报开关影响。PHP 限单请求/单 worker，不能跨线程共享。其他语言发送期间不持有记录锁；Rust 的 blocking exporter 应放在异步 runtime 的 blocking worker。
+Go / TypeScript 保留现有周期 collection 和后台 exporter。其他原生 SDK 的记录 API 只修改内存，提供显式 flush（.NET 为 FlushAsync）；Python / Rust 的业务收集每10秒运行并独立于自监控；历史 Java / .NET / Ruby 在自监控启用时每30秒 Flush，关闭后由应用调度。Python 的配置轮询是独立线程，不受自监控或停报开关影响。PHP 限单请求/单 worker，不能跨线程共享。其他语言发送期间不持有记录锁；Rust 的 blocking exporter 应放在异步 runtime 的 blocking worker。
 
 flush 冻结当前窗口，等待调用边界内所有批次得到 ACK，后续记录属于下一窗口。网络失败、429/502/503/504 使用有抖动的指数退避，尊重 Retry-After；401/403 保留队列等待修复 Key。超时保留未确认批次，下次 flush 使用相同 UUID、创建时间和正文。updateKey / update_key 不改冻结正文，正在进行的退避不会主动唤醒。
 
@@ -104,7 +117,7 @@ npm --prefix sdk/typescript test
 
 SDK 默认每 30 秒报告一次实例心跳、待发送批次/字节和累计重试、丢弃、拒绝、无效输入、维度溢出等诊断；启动及诊断变化会生成内部日志。原始心跳时间随冻结批次保留，断网补传不会把过期实例算作在线。中心按最近 90 秒的心跳统计在线 SDK 实例。
 
-自监控批次仍使用根客户端的业务 table 和 Key 经 Agent 或直连上报；中心验证业务 table 权限后，将识别出的 SDK 内部记录自动归入 `metric_lightmoni_sdk_gauge` / `log_lightmoni_sdk`，并保留 `source_table`、service、instance_id、agent_id、key_id。无需给 Key 添加系统表写入权限。WithTable 子客户端共享一次心跳生命周期。
+当前四种 SDK 自监控使用固定 SDK 通道和 Key 经 Agent 或直连上报；中心验证记录后统一归入 `lightmoni_metric_gauge` / `lightmoni_log`（component=sdk），并保留 `source_table`、service、instance_id、agent_id、key_id。无需给 Key 添加系统表写入权限。WithTable 子客户端共享一次心跳生命周期。
 
 内部快照排在业务批次之后，受同一队列容量限制；满队列时跳过自监控快照，下一周期重试。内部诊断只记录固定事件和计数，不复制网络请求、Key 或任意异常文本，也不会从上报失败处理器递归写入队列。后台发送是尽力上报；应用退出前仍需调用有截止时间的 Shutdown。
 
@@ -124,7 +137,7 @@ Go、JavaScript / TypeScript（Node 和浏览器）、Python 支持以下动态�
 
 保留的日志增加 lightmoni.sampling.rate、lightmoni.sampling.weight 和 lightmoni.sampling.rule 属性。日志查询的原始 count 仍是实际保留数量；weight 可用于估算总体数量，但不能保证还原完整用户、漏斗或会话。明确被规则忽略的日志不会计入 dropped_records，不会令 Flush 报数据损失。
 
-中心只存储和下发规则，不再次过滤或采样入库数据。`GET /v1/sdk-config` 使用现有上报 Key，日志策略只包含该 Key 允许的逻辑表。Agent 同路径转发配置，使用本地令牌认证并由 Agent 保管中心 Key，中心暂时不可达时可返回已验证的磁盘缓存。浏览器业务后端同时转发配置与 OTLP，演示见 examples/sdk/browser/server.mjs。
+中心只存储和下发规则，不再次过滤或采样入库数据。`GET /v1/sdk-config` 使用现有上报 Key，有效密钥可读取全部业务表策略，无密钥仅包含启用的豁免表。Agent 同路径转发配置，使用本地令牌认证并由 Agent 保管中心 Key，中心暂时不可达时可返回已验证的磁盘缓存。浏览器业务后端同时转发配置与 OTLP，演示见 examples/sdk/browser/server.mjs。
 
 HTTP SDK 默认每 30 秒拉取一次，配置经过完整验证后原子替换；失败或非法配置保留上一份有效策略。SDK 刚启动、首次配置尚未到达时沿用本地配置（未配置则全量），需要从第一条日志就执行远程 UID 排除/停报规则时，务必在业务生产前显式等待 RefreshConfig / refreshConfig 成功。自定义 Exporter 可另设配置地址。配置变更只影响后续 Log；已缓冲/冻结的日志与重试正文不重筛。整体停报是单独的强开关，会取消正在发送的请求并清空 SDK 的缓冲与队列。
 

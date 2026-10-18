@@ -235,7 +235,7 @@ export function registerNodes(
       if (!deps.cat.ensure) throw Error("telemetry catalog unavailable");
       const subtype = kind === "metric" ? "gauge" : "";
       await (deps.cat.ensure as any)(
-        "lightmoni_agent",
+        "lightmoni",
         kind,
         subtype,
         "lightmoni-agent",
@@ -244,8 +244,8 @@ export function registerNodes(
       await deps.ch.insert(
         "_lm_" +
           (kind === "metric"
-            ? "metric_lightmoni_agent_gauge"
-            : "log_lightmoni_agent"),
+            ? "lightmoni_metric_gauge"
+            : "lightmoni_log"),
         selected.map((row) => row.row),
         controller.signal,
       );

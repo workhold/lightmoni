@@ -1,0 +1,61 @@
+{
+  "passed": true,
+  "rows": [
+    {
+      "service": "record-go-anonymous",
+      "env": "test",
+      "service_version": "v-record",
+      "instance_id": "record-go-anonymous-one",
+      "samples": "1000"
+    },
+    {
+      "service": "record-go-key",
+      "env": "test",
+      "service_version": "v-record",
+      "instance_id": "record-go-key-one",
+      "samples": "1000"
+    },
+    {
+      "service": "record-python-anonymous",
+      "env": "test",
+      "service_version": "v-record",
+      "instance_id": "record-python-anonymous-one",
+      "samples": "1000"
+    },
+    {
+      "service": "record-python-key",
+      "env": "test",
+      "service_version": "v-record",
+      "instance_id": "record-python-key-one",
+      "samples": "1000"
+    },
+    {
+      "service": "record-rust-anonymous",
+      "env": "test",
+      "service_version": "v-record",
+      "instance_id": "record-rust-anonymous-one",
+      "samples": "1000"
+    },
+    {
+      "service": "record-rust-key",
+      "env": "test",
+      "service_version": "v-record",
+      "instance_id": "record-rust-key-one",
+      "samples": "1000"
+    },
+    {
+      "service": "record-typescript-anonymous",
+      "env": "test",
+      "service_version": "v-record",
+      "instance_id": "record-typescript-anonymous-one",
+      "samples": "1000"
+    },
+    {
+      "service": "record-typescript-key",
+      "env": "test",
+      "service_version": "v-record",
+      "instance_id": "record-typescript-key-one",
+      "samples": "1000"
+    }
+  ]
+}

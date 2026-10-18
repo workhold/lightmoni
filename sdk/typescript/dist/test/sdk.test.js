@@ -216,13 +216,13 @@ test("OTLP partial success is not retried or silently reported delivered", async
 });
 test('idle SDK emits a heartbeat without business records or flush', async () => {
     const { batches, exporter } = captured();
-    const mon = createLightMoni({ service: 'idle', table: 'business', exporter, intervalMs: 3_600_000 });
+    const mon = createLightMoni({ service: 'idle', key: 'test-key', exporter, intervalMs: 3_600_000 });
     try {
         await new Promise(resolve => setTimeout(resolve, 31_000));
         const metrics = batches.filter(b => b.signal === 'metrics').flatMap(b => JSON.parse(new TextDecoder().decode(b.payload)).resourceMetrics.flatMap((r) => r.scopeMetrics.flatMap((s) => s.metrics)));
         const heartbeat = metrics.find((m) => m.name === 'lightmoni.sdk.heartbeat');
         assert.equal(heartbeat?.gauge.dataPoints[0].asDouble, 1);
-        assert.ok(batches.every(b => b.table === 'business'));
+        assert.ok(batches.every(b => b.table === 'lightmoni_sdk'));
         assert.equal(batches.filter(b => b.signal === 'logs').length, 1);
     }
     finally {
@@ -370,5 +370,21 @@ test('whole SDK stop cancels frozen sends and suppresses spans that cross a stop
     }
     finally {
         await mon.shutdown();
+    }
+});
+test('unbound clients select business tables per write and anonymous SDK emits no diagnostics', async () => {
+    for (const key of ['', 'test-key']) {
+        const { batches, exporter } = captured(), mon = createLightMoni({ service: 'unbound', key, exporter, intervalMs: 60000 });
+        assert.throws(() => mon.counter('unbound'));
+        mon.log('info', 'missing table');
+        mon.withTable('first').log('info', 'first');
+        mon.withTable('second').counter('count').add(1);
+        await mon.shutdown();
+        assert.equal(batches.some(b => !b.table), false);
+        assert.ok(batches.some(b => b.table === 'first'));
+        assert.ok(batches.some(b => b.table === 'second'));
+        assert.equal(batches.some(b => b.table === 'lightmoni_sdk'), !!key);
+        if (!key)
+            assert.equal(batches.length, 2);
     }
 });

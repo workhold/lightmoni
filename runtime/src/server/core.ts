@@ -1,9 +1,10 @@
 import type { Dependencies } from "../shared/types.js";
 export function registerCore(deps: Dependencies) {
   const { router, db, cat } = deps;
+  const visible=async(signal?:AbortSignal)=>(await cat.list(signal)).filter(t=>!["lightmoni_center","lightmoni_agent","lightmoni_sdk"].includes(t.logical_name));
   router.get("/healthz", (c) => c.json({ status: "ok" }), { public: true });
   router.get("/api/v1/catalog/tables", async (c) =>
-    c.json(await cat.list(c.signal)),
+    c.json(await visible(c.signal)),
   );
   router.put("/api/v1/catalog/tables/:id", async (c) => {
     const v = await c.body();
@@ -32,7 +33,7 @@ export function registerCore(deps: Dependencies) {
   });
   router.get("/api/v1/overview", async (c) =>
     c.json({
-      tables: await cat.list(c.signal),
+      tables: await visible(c.signal),
       agent_count: db.get<any>("SELECT count(*) n FROM agents")!.n,
       user_count: db.get<any>("SELECT count(*) n FROM users WHERE active=1")!.n,
       key_count: db.get<any>(
