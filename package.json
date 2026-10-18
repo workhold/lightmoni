@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "setup": "npm --prefix sdk/typescript ci && npm --prefix sdk/typescript run build && npm --prefix runtime ci && npm --prefix ai-runtime ci && npm --prefix web ci",

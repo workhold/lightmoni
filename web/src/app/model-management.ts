@@ -137,7 +137,7 @@ export function costAmount(value: number): string {
 }
 
 export function usageSource(source: string): string {
-  return source === 'assistant' ? 'AI 助手（含历史整理）' : source === 'connection-test' ? '连接测试' : source || '未知来源';
+  return source === 'assistant' ? 'AI 助手（含历史整理）' : source === 'connection-test' ? '连接测试' : source === 'code-task' ? '代码任务（Pi）' : source || '未知来源';
 }
 
 export function browserTimezone(): string {

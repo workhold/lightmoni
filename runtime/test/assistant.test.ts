@@ -905,3 +905,170 @@ test("native model directories use protocol headers, Google generation filtering
     ]);
   }
 });
+
+test("code capability is opt-in, admin-only and binds the user workspace before executing the tool", async (t) => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const root = await mkdtemp(resolve(tmpdir(), "lightmoni-code-api-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const disabled = await fixture(t);
+  assert.equal(
+    (await disabled.request("/config")).data.code_tasks_enabled,
+    false,
+  );
+  assert.equal(
+    (
+      await disabled.request("/code-tasks", "POST", {
+        task: "inspect",
+        workspace: ".",
+      })
+    ).status,
+    503,
+  );
+  let observed: any,
+    offered: string[] = [];
+  const f = await fixture(t, {
+    codeWorkspaceRoot: root,
+    tools: [
+      {
+        name: "code_task",
+        effect: "code",
+        schema: { type: "object" },
+        description: "fixture",
+        execute: async (input) => {
+          observed = input;
+          return { status: "completed" };
+        },
+      },
+    ],
+    runtime: async (input, _signal, call) => {
+      offered = input.tools.map((tool) => tool.name);
+      if (offered.includes("code_task"))
+        await call!("code_task", {
+          task: "inspect files",
+          workspace: "model-picked-wrong-directory",
+        });
+    },
+  });
+  await configure(f);
+  assert.equal((await f.request("/config")).data.code_tasks_enabled, true);
+  const s = await session(f);
+  assert.equal(
+    (
+      await f.request(`/sessions/${s}/turns`, "POST", {
+        text: "inspect",
+        context: { code_workspace: "chosen-by-admin" },
+      })
+    ).status,
+    200,
+  );
+  assert.equal(observed.workspace, "chosen-by-admin");
+  assert.equal(
+    (
+      await f.request("/code-tasks", "POST", {
+        task: "inspect",
+        workspace: ".",
+        max_steps: 0,
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await f.request("/code-tasks", "POST", {
+        task: "inspect",
+        workspace: ".",
+        timeout_ms: 999999,
+      })
+    ).status,
+    400,
+  );
+  f.user.role = "member";
+  assert.equal((await f.request("/config")).data.code_tasks_enabled, false);
+  for (const [path, method] of [
+    ["/code-tasks", "POST"],
+    ["/code-tasks/abc", "GET"],
+    ["/code-tasks/abc/apply", "POST"],
+    ["/code-tasks/abc/cancel", "POST"],
+  ])
+    assert.equal(
+      (await f.request(path!, method!, method === "POST" ? {} : undefined))
+        .status,
+      403,
+    );
+  await f.request(`/sessions/${s}/turns`, "POST", { text: "inspect" });
+  assert.ok(!offered.includes("code_task"));
+});
+
+test("code-task receipts fit the Mastra channel and later turns reload the approved state", async (t) => {
+  const task = "a".repeat(32);
+  const result = {
+    id: task,
+    status: "awaiting_approval",
+    diff: "+".repeat(200000),
+    changed_files: ["app.js"],
+    checks: [],
+    steps: [],
+    created_at: at.toISOString(),
+    expires_at: new Date(at.getTime() + 100000).toISOString(),
+    summary: "preview",
+  };
+  const tools = monitoringTools({} as Dependencies, {
+    codeTask: { run: async () => result as any },
+  });
+  const receipt = await tools
+    .find((tool) => tool.name === "code_task")!
+    .execute({ task: "repair", workspace: "." }, new AbortController().signal, {
+      id: "alice",
+      role: "admin",
+    });
+  assert.equal(receipt.id, task);
+  assert.equal(receipt.diff_available, true);
+  assert.ok(Buffer.byteLength(JSON.stringify(receipt)) < 128 << 10);
+  let observed: any;
+  const f = await fixture(t, {
+    codeWorkspaceRoot: ".",
+    runtime: async (input) => {
+      observed = input.messages.find((message) => message.role === "tool");
+    },
+  });
+  await configure(f);
+  const s = await session(f),
+    store = new Store(f.db, () => at);
+  const history: any = store.get(`session/alice/${s}`);
+  history.messages = [
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          id: "code-call",
+          type: "function",
+          function: { name: "code_task", arguments: "{}" },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      tool_call_id: "code-call",
+      content: JSON.stringify(receipt),
+    },
+  ];
+  store.put(`session/alice/${s}`, history);
+  store.put(
+    `code-task/${task}`,
+    f.deps.encrypt(
+      JSON.stringify({
+        result: { ...result, status: "completed" },
+        owner: "alice",
+        workspace: ".",
+        changes: [],
+        applied: true,
+      }),
+    ),
+  );
+  await f.request(`/sessions/${s}/turns`, "POST", {
+    text: "Has it been applied?",
+  });
+  assert.equal(JSON.parse(observed.content).status, "completed");
+});

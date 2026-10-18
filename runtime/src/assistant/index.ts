@@ -49,7 +49,8 @@ import {
   validateMetadata,
   worker,
 } from "./worker.js";
-import { monitoringTools } from "./tools.js";
+import { codeTaskReceipt, monitoringTools } from "./tools.js";
+import { CodeTaskService, type CodeTaskInput } from "./code.js";
 export interface AssistantOptions {
   runtime?: Runtime;
   tools?: Tool[];
@@ -57,6 +58,8 @@ export interface AssistantOptions {
   connectionTimeout?: number;
   maxConcurrentTurns?: number;
   system?: string;
+  codeWorkspaceRoot?: string;
+  codeAllowedCommands?: string[];
 }
 const id = () => randomBytes(16).toString("hex");
 const key = (user: string, session: string) => `session/${user}/${session}`;
@@ -73,25 +76,43 @@ async function body(ctx: Context, keys: string[], limit: number): Promise<any> {
     throw new AssistantError(400, "invalid input");
   }
 }
+function validateCodeTaskInput(value: any): void {
+  if (
+    !value ||
+    typeof value.task !== "string" ||
+    value.task.trim().length < 2 ||
+    value.task.length > 12000 ||
+    typeof value.workspace !== "string" ||
+    !value.workspace.trim() ||
+    value.workspace.length > 512
+  )
+    throw new AssistantError(400, "invalid code task input", "invalid_input");
+  for (const field of ["allowed_paths", "allowed_commands"])
+    if (
+      value[field] != null &&
+      (!Array.isArray(value[field]) ||
+        value[field].length > (field === "allowed_paths" ? 128 : 16) ||
+        value[field].some((v: any) => typeof v !== "string" || v.length > 240))
+    )
+      throw new AssistantError(400, "invalid code task input", "invalid_input");
+  if (
+    (value.max_steps != null &&
+      (value.max_steps < 1 || value.max_steps > 12)) ||
+    (value.timeout_ms != null &&
+      (value.timeout_ms < 1000 || value.timeout_ms > 120000))
+  )
+    throw new AssistantError(400, "invalid code task limits", "invalid_input");
+  for (const field of ["max_steps", "timeout_ms"])
+    if (value[field] != null && !Number.isSafeInteger(value[field]))
+      throw new AssistantError(400, "invalid code task input", "invalid_input");
+}
 
 export function registerAssistant(
   deps: Dependencies,
   options: AssistantOptions = {},
 ): Module {
   const store = new Store(deps.db, deps.now),
-    run = options.runtime ?? worker(),
-    tools = options.tools ?? monitoringTools(deps);
-  if (
-    tools.some(
-      (tool, index) =>
-        !/^[a-zA-Z0-9_-]{1,64}$/.test(tool.name) ||
-        tools.slice(0, index).some((t) => t.name === tool.name) ||
-        !["read", "draft"].includes(tool.effect) ||
-        typeof tool.execute !== "function" ||
-        !tool.schema,
-    )
-  )
-    throw Error("invalid assistant tool");
+    run = options.runtime ?? worker();
   const concurrency = options.maxConcurrentTurns ?? 4;
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32)
     throw Error("assistant concurrency limit must be between 1 and 32");
@@ -139,6 +160,100 @@ export function registerAssistant(
       );
     }
   };
+  const codeWorkspace =
+    options.codeWorkspaceRoot ?? process.env.LIGHTMONI_CODE_WORKSPACE;
+  const codeTasks = codeWorkspace?.trim()
+    ? new CodeTaskService({
+        workspaceRoot: codeWorkspace,
+        now: deps.now,
+        config: load,
+        allowedCommands:
+          options.codeAllowedCommands ??
+          (() => {
+            try {
+              const value = JSON.parse(
+                process.env.LIGHTMONI_CODE_CHECK_COMMANDS || "[]",
+              );
+              if (
+                !Array.isArray(value) ||
+                value.some((v: any) => typeof v !== "string")
+              )
+                throw Error();
+              return value;
+            } catch {
+              throw Error(
+                "LIGHTMONI_CODE_CHECK_COMMANDS must be a JSON string array",
+              );
+            }
+          })(),
+        // Code previews contain source text. Protect persisted artifacts with the master key.
+        store: {
+          get: <T>(key: string) => {
+            const saved = store.get<string>(key);
+            return saved ? (JSON.parse(deps.decrypt(saved)) as T) : undefined;
+          },
+          put: (key, value) =>
+            store.put(key, deps.encrypt(JSON.stringify(value))),
+        },
+        usage: (task, owner, cfg) => {
+          const recorder = new Recorder(
+            store,
+            "code-task",
+            owner,
+            "",
+            task,
+            store.billing(cfg),
+          );
+          let sequence = 0;
+          return {
+            record: (type, data) =>
+              recorder.record({
+                sequence: sequence++,
+                session_id: "",
+                turn_id: task,
+                timestamp: now(),
+                type,
+                data,
+              }),
+            finish: (status) => recorder.finish(status),
+          };
+        },
+      })
+    : undefined;
+  const requireCodeTasks = (ctx: Context) => {
+    admin(ctx);
+    if (!codeTasks)
+      throw new AssistantError(
+        503,
+        "code workspace is not configured",
+        "code_tasks_disabled",
+      );
+    return codeTasks;
+  };
+  const tools =
+    options.tools ??
+    monitoringTools(
+      deps,
+      codeTasks
+        ? {
+            codeTask: {
+              run: (input, owner, signal) =>
+                codeTasks.run(input, owner, signal),
+            },
+          }
+        : {},
+    );
+  if (
+    tools.some(
+      (tool, index) =>
+        !/^[a-zA-Z0-9_-]{1,64}$/.test(tool.name) ||
+        tools.slice(0, index).some((t) => t.name === tool.name) ||
+        !["read", "draft", "code"].includes(tool.effect) ||
+        typeof tool.execute !== "function" ||
+        !tool.schema,
+    )
+  )
+    throw Error("invalid assistant tool");
   const connectionKey = (
     base: string,
     explicit: string,
@@ -191,6 +306,10 @@ export function registerAssistant(
         base_url: base,
         runtime: "mastra",
         has_key: !!api_key,
+        code_tasks_enabled: !!codeTasks && ctx.user.role === "admin",
+        ...(codeTasks && ctx.user.role === "admin"
+          ? { code_workspace: "." }
+          : {}),
       });
     }, "cannot read assistant configuration"),
   );
@@ -352,14 +471,11 @@ export function registerAssistant(
         bounds = usageWindow(deps.now(), opts.days, opts.timezone),
         records = store.list(bounds.from, bounds.to, opts.limit + 1);
       ctx.json({
-        records: records
-          .slice(0, opts.limit)
-          .map((r) => ({
-            ...r,
-            cost_status:
-              r.cost_status ||
-              (r.estimated_cost != null ? "legacy" : "unpriced"),
-          })),
+        records: records.slice(0, opts.limit).map((r) => ({
+          ...r,
+          cost_status:
+            r.cost_status || (r.estimated_cost != null ? "legacy" : "unpriced"),
+        })),
         limit: opts.limit,
         has_more: records.length > opts.limit,
         from: bounds.from,
@@ -579,6 +695,63 @@ export function registerAssistant(
     }, "model connection failed; check the endpoint, model and credentials"),
   );
   deps.router.post(
+    route + "/code-tasks",
+    safe(async (ctx) => {
+      const service = requireCodeTasks(ctx);
+      if (stopping) throw new AssistantError(503, "assistant is stopping");
+      const input = await body(
+        ctx,
+        [
+          "task",
+          "workspace",
+          "allowed_paths",
+          "allowed_commands",
+          "max_steps",
+          "timeout_ms",
+        ],
+        32 << 10,
+      );
+      validateCodeTaskInput(input);
+      const result = await service.run(
+        input as CodeTaskInput,
+        ctx.user,
+        ctx.signal,
+      );
+      ctx.json(result, 201);
+    }, "cannot run code task"),
+  );
+  deps.router.get(
+    route + "/code-tasks/:id",
+    safe((ctx) => {
+      const result = requireCodeTasks(ctx).get(ctx.params.id, ctx.user);
+      if (!result) throw new AssistantError(404, "code task not found");
+      ctx.json(result);
+    }, "cannot read code task"),
+  );
+  deps.router.post(
+    route + "/code-tasks/:id/apply",
+    safe(async (ctx) => {
+      const service = requireCodeTasks(ctx);
+      try {
+        ctx.json(await service.apply(ctx.params.id, ctx.user));
+      } catch {
+        throw new AssistantError(
+          409,
+          "code task cannot be applied; it may have expired or the workspace has changed",
+          "code_task_conflict",
+        );
+      }
+    }, "cannot apply code task"),
+  );
+  deps.router.post(
+    route + "/code-tasks/:id/cancel",
+    safe((ctx) => {
+      ctx.json({
+        cancelled: requireCodeTasks(ctx).cancel(ctx.params.id, ctx.user),
+      });
+    }, "cannot cancel code task"),
+  );
+  deps.router.post(
     route + "/sessions/:id/turns",
     safe(async (ctx) => {
       const input = await body(ctx, ["text", "context"], 48 << 10),
@@ -593,6 +766,14 @@ export function registerAssistant(
           "message is empty or exceeds the size limit",
         );
       let value = session(ctx);
+      const codeWorkspace = input.context?.code_workspace;
+      if (
+        codeWorkspace != null &&
+        (typeof codeWorkspace !== "string" ||
+          !codeWorkspace.trim() ||
+          codeWorkspace.length > 512)
+      )
+        throw new AssistantError(400, "invalid code workspace");
       const cfg = normalize(load());
       if (!cfg.enabled || !cfg.base_url || !cfg.model)
         throw new AssistantError(
@@ -690,6 +871,40 @@ export function registerAssistant(
           emit("user.message", { text: message });
           emit("turn.started", {});
           const base = structuredClone(value.messages);
+          if (codeTasks && ctx.user.role === "admin") {
+            const codeCalls = new Set(
+              base.flatMap(
+                (message) =>
+                  message.tool_calls
+                    ?.filter((call) => call.function.name === "code_task")
+                    .map((call) => call.id) ?? [],
+              ),
+            );
+            for (const message of base)
+              if (
+                message.role === "tool" &&
+                message.tool_call_id &&
+                codeCalls.has(message.tool_call_id)
+              ) {
+                try {
+                  const previous = JSON.parse(message.content);
+                  if (typeof previous.id !== "string") continue;
+                  const current = codeTasks.get(previous.id, ctx.user);
+                  message.content = JSON.stringify(
+                    current
+                      ? codeTaskReceipt(current)
+                      : {
+                          id: previous.id,
+                          status: "failed",
+                          summary:
+                            "Code preview is expired or unavailable; create a new preview before applying.",
+                        },
+                  );
+                } catch {
+                  /* Keep unrelated or failed tool receipts intact. */
+                }
+              }
+          }
           validateMetadata(base);
           let checkpointLength = 0;
           await run(
@@ -700,17 +915,28 @@ export function registerAssistant(
               summary: value.summary,
               summary_through: value.summary_through,
               context: input.context,
-              tools: tools.map(({ name, description, schema }) => ({
-                name,
-                description,
-                schema,
-              })),
+              tools: tools
+                .filter(
+                  (tool) => tool.effect !== "code" || ctx.user.role === "admin",
+                )
+                .map(({ name, description, schema }) => ({
+                  name,
+                  description,
+                  schema,
+                })),
             },
             signal,
             async (name, args) => {
               const tool = tools.find((t) => t.name === name);
               if (!tool) throw Error("this tool is not registered");
-              return tool.execute(args, signal);
+              if (tool.effect === "code") {
+                admin(ctx);
+                // A model may narrow allowed paths/checks, but cannot switch the user's workspace.
+                const scoped = { ...args, workspace: codeWorkspace ?? "." };
+                validateCodeTaskInput(scoped);
+                return tool.execute(scoped, signal, ctx.user);
+              }
+              return tool.execute(args, signal, ctx.user);
             },
             async (frame) => {
               if (frame.type === "compacted") {
@@ -797,7 +1023,11 @@ export function registerAssistant(
     async close() {
       stopping = true;
       for (const running of active.values()) running.controller.abort();
-      await Promise.all([...active.values()].map((r) => r.done));
+      await Promise.all(
+        [...active.values()]
+          .map((r) => r.done)
+          .concat(codeTasks ? [codeTasks.close()] : []),
+      );
     },
   };
 }

@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import type { Dependencies } from "../shared/types.js";
 import { bytes, object, text, type Tool } from "./types.js";
+import type { CodeTaskInput, CodeTaskResult } from "./code.js";
+import type { User } from "../shared/types.js";
 const string = { type: "string" },
   obj = (properties: Record<string, any>, required: string[] = []) => ({
     type: "object",
@@ -13,8 +15,37 @@ const querySchema = obj(
   { refId: string, sql: string, params: { type: "object" } },
   ["refId", "sql"],
 );
-export function monitoringTools(deps: Dependencies): Tool[] {
-  return [
+export interface MonitoringToolOptions {
+  codeTask?: {
+    run(
+      input: CodeTaskInput,
+      owner: User,
+      signal: AbortSignal,
+    ): Promise<CodeTaskResult>;
+  };
+}
+export function codeTaskReceipt(
+  result: CodeTaskResult,
+): CodeTaskResult & { diff_available: boolean; changed_file_count: number } {
+  return {
+    ...result,
+    diff: "",
+    diff_available: !!result.diff,
+    changed_files: result.changed_files
+      .slice(0, 20)
+      .map((path) => path.slice(0, 512)),
+    changed_file_count: result.changed_files.length,
+    steps: result.steps.slice(-64),
+    checks: result.checks
+      .slice(-16)
+      .map((check) => ({ ...check, output: check.output.slice(0, 512) })),
+  };
+}
+export function monitoringTools(
+  deps: Dependencies,
+  options: MonitoringToolOptions = {},
+): Tool[] {
+  const tools: Tool[] = [
     {
       name: "list_tables",
       description:
@@ -235,4 +266,48 @@ export function monitoringTools(deps: Dependencies): Tool[] {
       },
     },
   ];
+  if (options.codeTask) {
+    tools.push({
+      name: "code_task",
+      description:
+        "Prepare a lightweight script or code change in an isolated workspace. The result is a reviewable diff and test receipt; it never applies changes automatically.",
+      effect: "code",
+      schema: obj(
+        {
+          task: { type: "string", minLength: 2, maxLength: 12000 },
+          workspace: { type: "string", minLength: 1, maxLength: 512 },
+          allowed_paths: { type: "array", items: string, maxItems: 128 },
+          allowed_commands: { type: "array", items: string, maxItems: 16 },
+          max_steps: { type: "integer", minimum: 1, maximum: 12 },
+          timeout_ms: { type: "integer", minimum: 1000, maximum: 120000 },
+        },
+        ["task", "workspace"],
+      ),
+      execute: async (input, signal, user) => {
+        if (!user || user.role !== "admin")
+          throw Error("code task requires an administrator");
+        object(
+          input,
+          [
+            "task",
+            "workspace",
+            "allowed_paths",
+            "allowed_commands",
+            "max_steps",
+            "timeout_ms",
+          ],
+          ["task", "workspace"],
+        );
+        const result = await options.codeTask!.run(
+          input as CodeTaskInput,
+          user as User,
+          signal,
+        );
+        // Keep the private Mastra tool channel below 128 KiB. The authenticated
+        // UI fetches the full preview by ID; source diffs need not return to the model.
+        return codeTaskReceipt(result);
+      },
+    });
+  }
+  return tools;
 }
