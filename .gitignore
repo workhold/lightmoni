@@ -17,11 +17,6 @@ __pycache__/
 *.pyc
 *.egg-info/
 /sdk/rust/target/
-/sdk/dotnet/bin/
-/sdk/dotnet/obj/
-/examples/sdk/dotnet/bin/
-/examples/sdk/dotnet/obj/
-/sdk/java/target/
 /sdk/ruby/*.gem
 
 ai-runtime/dist/

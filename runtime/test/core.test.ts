@@ -17,6 +17,7 @@ import {
   parameter,
 } from "../src/server/query.js";
 import { registerSettings } from "../src/server/settings.js";
+import { registerAgentCredentials } from "../src/server/agent-credentials.js";
 import { stringifyJSON, parseJSON } from "../src/shared/json.js";
 import { cipher, hash } from "../src/shared/crypto.js";
 import { gzipSync } from "node:zlib";
@@ -80,8 +81,9 @@ async function fixture() {
     now: () => new Date(),
     logger: console,
   };
-  registerSettings(deps);
-  const ingest = new Ingest(cat, a);
+  const agentCredentials = registerAgentCredentials(deps);
+  registerSettings(deps, agentCredentials);
+  const ingest = new Ingest(cat, a, undefined, agentCredentials);
   ingest.register();
   const server = createServer(
     (req, res) =>
@@ -523,6 +525,25 @@ test("remote reporting settings preserve scalar types and exact values, scope by
     assert.equal(config.status, 200);
     assert.equal(config.headers.get("cache-control"), "no-store");
     assert.equal(config.data.log_sampling.app.rules[0].name, "VIP");
+    const credentialNow = new Date(),
+      credentialExpiry = new Date(credentialNow.getTime() + 60000);
+    f.db.run(
+      `INSERT INTO agent_credentials(id,agent_id,audience,scope,token_hash,created_at,expires_at)
+       VALUES(?,?,?,?,?,?,?)`,
+      "agent-config-credential",
+      "agent-config",
+      "control",
+      "agent.control",
+      hash("agent-config-control"),
+      credentialNow.toISOString(),
+      credentialExpiry.toISOString(),
+    );
+    const agentConfig = await f.request("/v1/sdk-config", "GET", undefined, {
+      authorization: "Bearer agent-config-control",
+      "x-lightmoni-agent-id": "agent-config",
+    });
+    assert.equal(agentConfig.status, 200);
+    assert.equal(agentConfig.data.log_sampling.app.rules[0].name, "VIP");
     assert.equal(
       (
         await f.request("/api/v1/settings/sdk-reporting", "PUT", {

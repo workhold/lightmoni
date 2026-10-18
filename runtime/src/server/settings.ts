@@ -10,6 +10,7 @@ import type { Dependencies, Context } from "../shared/types.js";
 import type { Catalog } from "./catalog.js";
 import { goJSON } from "../shared/otlp.js";
 import { systemTable } from "./auth.js";
+import type { AgentCredentialStore } from "./agent-credentials.js";
 export const defaultSampling = () => ({
   key: "event_id",
   rules: [{ name: "all", rate: 1, conditions: [] }],
@@ -220,7 +221,10 @@ function validateAddresses(book: any) {
   else if (!ids.has(book.default_endpoint_id))
     fail(400, "请选择列表中的默认上报地址");
 }
-export function registerSettings(d: Dependencies) {
+export function registerSettings(
+  d: Dependencies,
+  agentCredentials?: AgentCredentialStore,
+) {
   const { router: r, db, auth } = d,
     cat = d.cat as Catalog;
   db.exec(
@@ -300,7 +304,26 @@ export function registerSettings(d: Dependencies) {
   r.get(
     "/v1/sdk-config",
     (c) => {
-      const key = auth.validateKey(c);
+      const agentID = String(c.req.headers["x-lightmoni-agent-id"] ?? "");
+      // Re-enrolled Agents use the control audience to pull the same validated
+      // sampling configuration that legacy ingest keys could read. Keep the
+      // old key path for nodes that have not migrated yet.
+      const key =
+        agentID && agentCredentials?.has(agentID, "control")
+          ? (() => {
+              const credential = agentCredentials.authenticate(
+                c.req,
+                agentID,
+                "control",
+              );
+              return {
+                id: credential.credential_id,
+                name: "agent:" + agentID,
+                allowed_tables: [] as string[],
+                allow_all_tables: true,
+              };
+            })()
+          : auth.validateKey(c);
       try {
         const all = policies();
         for (const table of Object.keys(all))

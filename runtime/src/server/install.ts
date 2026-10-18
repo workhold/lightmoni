@@ -4,7 +4,12 @@ import { pipeline } from "node:stream/promises";
 import type { Dependencies } from "../shared/types.js";
 import { fail } from "../shared/http.js";
 import { reportingSettings } from "./settings.js";
-export function registerInstall(d: Dependencies, directory: string) {
+import type { AgentCredentialStore } from "./agent-credentials.js";
+export function registerInstall(
+  d: Dependencies,
+  directory: string,
+  agentCredentials?: AgentCredentialStore,
+) {
   const version = "0.1.0";
   const basePackages = [
     [
@@ -19,18 +24,6 @@ export function registerInstall(d: Dependencies, directory: string) {
       "Python",
       "Python 3.9+",
       `lightmoni-python-sdk_${version}.tar.gz`,
-    ],
-    [
-      "java",
-      "Java / Kotlin JVM",
-      "JDK 17+",
-      `lightmoni-java-sdk_${version}.tar.gz`,
-    ],
-    [
-      "dotnet",
-      "C# / .NET",
-      ".NET 8+",
-      `lightmoni-dotnet-sdk_${version}.tar.gz`,
     ],
     ["php", "PHP", "64 位 PHP 8.1+", `lightmoni-php-sdk_${version}.tar.gz`],
     ["ruby", "Ruby", "Ruby 2.7+", `lightmoni-ruby-sdk_${version}.tar.gz`],
@@ -53,9 +46,12 @@ export function registerInstall(d: Dependencies, directory: string) {
         if (type === "agent") {
           c.res.setHeader("cache-control", "private, no-store");
           c.res.setHeader("vary", "Authorization");
-          if (!c.req.headers.authorization?.startsWith("Bearer "))
+          const authorization = c.req.headers.authorization;
+          if (!authorization?.startsWith("Bearer "))
             fail(401, "下载 Agent 需要有效的上报 Key");
-          d.auth.validateKey(c);
+          const bearer = authorization.slice(7).trim();
+          if (!agentCredentials?.canDownloadWithEnrollmentToken(bearer))
+            d.auth.validateKey(c);
           if (
             !["install.sh", "uninstall.sh", "SHA256SUMS"].includes(file) &&
             !/^lightmoni-agent_[0-9A-Za-z._-]+_linux_(amd64|arm64)\.tar\.gz$/.test(

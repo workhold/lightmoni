@@ -30,8 +30,30 @@ import (
 
 type Attributes map[string]any
 
+// ConnectionMode selects the telemetry transport.  The zero value keeps the
+// historical direct HTTP behaviour; new deployments should set it explicitly.
+type ConnectionMode string
+
+const (
+	ModeAgent  ConnectionMode = "agent"
+	ModeDirect ConnectionMode = "direct"
+	ModeAuto   ConnectionMode = "auto"
+)
+
+// ConnectionConfig is the common connection contract used by all SDKs.
+// Secrets may be supplied explicitly or loaded by NewFromEnv.
+type ConnectionConfig struct {
+	Mode                                      ConnectionMode
+	Endpoint, DataKey, DataKeyFile            string
+	AgentEndpoint, LocalToken, LocalTokenFile string
+	DiscoveryTimeout                          time.Duration
+}
+
 // Config has no required private Key when using the local Agent.
 type Config struct {
+	Mode                                                            ConnectionMode
+	AgentEndpoint, LocalToken, LocalTokenFile, DataKey, DataKeyFile string
+	DiscoveryTimeout                                                time.Duration
 	// DisableSelfTelemetry is for embedded collectors and protocol fixtures.
 	DisableSelfTelemetry          bool
 	DisableRemoteConfig           bool
@@ -81,6 +103,9 @@ type Stats struct {
 	ConfigRevision, ConfigError                                                                        string
 	ReportingDisabled                                                                                  bool
 	ExcludedLogs, DisabledRecords                                                                      uint64
+	ConfiguredMode, SelectedRoute, AgentProbe, LastRouteError, CredentialSource                        string
+	FallbackCount                                                                                      uint64
+	RouteUncertain                                                                                     bool
 }
 
 type queuedBatch struct {
@@ -136,6 +161,53 @@ func validTable(table string) bool {
 }
 
 func New(cfg Config) (*Client, error) {
+	if cfg.Key == "" && cfg.DataKeyFile != "" {
+		value, _, err := secretValue("data key", "", cfg.DataKeyFile, "", "")
+		if err != nil {
+			return nil, err
+		}
+		cfg.Key = value
+	}
+	if cfg.LocalToken == "" && cfg.LocalTokenFile != "" {
+		value, _, err := secretValue("local token", "", cfg.LocalTokenFile, "", "")
+		if err != nil {
+			return nil, err
+		}
+		cfg.LocalToken = value
+	}
+	if cfg.Key == "" && cfg.DataKey != "" {
+		cfg.Key = cfg.DataKey
+	}
+	configuredMode := cfg.Mode
+	if configuredMode == "" {
+		// Preserve the pre-011 constructor where an endpoint without a key was
+		// commonly a local Agent. New applications should set Mode explicitly.
+		if cfg.Key == "" && cfg.AgentEndpoint == "" {
+			configuredMode = ModeAgent
+			cfg.AgentEndpoint = cfg.Endpoint
+		} else {
+			configuredMode = ModeDirect
+		}
+	}
+	selectedRoute := string(configuredMode)
+	probeResult := ""
+	if cfg.Exporter == nil {
+		cc := ConnectionConfig{Mode: configuredMode, Endpoint: cfg.Endpoint, DataKey: cfg.Key, AgentEndpoint: cfg.AgentEndpoint, LocalToken: cfg.LocalToken, DiscoveryTimeout: cfg.DiscoveryTimeout}
+		resolved, route, err := ResolveConnection(cc)
+		if err != nil {
+			return nil, err
+		}
+		selectedRoute = route
+		if route == "agent" {
+			cfg.Endpoint, cfg.Key = resolved.AgentEndpoint, resolved.LocalToken
+			probeResult = "healthy"
+		} else {
+			cfg.Endpoint, cfg.Key = resolved.Endpoint, resolved.DataKey
+			if configuredMode == ModeAuto {
+				probeResult = "unavailable_fallback"
+			}
+		}
+	}
 	if cfg.Service == "" || len(cfg.Service) > 128 {
 		return nil, errors.New("service is required and must be at most 128 bytes")
 	}
@@ -223,6 +295,7 @@ func New(cfg Config) (*Client, error) {
 	s := &state{cfg: cfg, resource: &resourcepb.Resource{Attributes: attrs}, instance: instance,
 		metrics: map[string]*instrument{}, logs: map[string][]*logpb.LogRecord{}, spans: map[string][]*tracepb.Span{},
 		changed: make(chan struct{}), wake: make(chan struct{}, 1), retryNow: make(chan struct{}, 1), ctx: ctx, cancel: cancel, done: make(chan struct{}), configDone: make(chan struct{})}
+	s.stats.ConfiguredMode, s.stats.SelectedRoute, s.stats.AgentProbe = string(configuredMode), selectedRoute, probeResult
 	if cfg.Exporter == nil {
 		s.cfg.Exporter = NewHTTPExporter(cfg.Endpoint, cfg.Key, nil)
 	}

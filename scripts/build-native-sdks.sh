@@ -9,15 +9,18 @@ source_version=$(sed -n 's/^version = "\(.*\)"/\1/p' sdk/python/pyproject.toml)
 if [ "$version" != "$source_version" ]; then echo "SDK source version and release version differ" >&2; exit 1; fi
 mkdir -p "$output"
 release_dir=$(cd "$output" && pwd)
+# Keep a reused release directory from advertising packages that were removed
+# from the current support matrix. Docker builds start with an empty directory,
+# but local release builds commonly reuse runtime/downloads.
+rm -f "$release_dir"/lightmoni-java-sdk_*.tar.gz \
+      "$release_dir"/lightmoni-dotnet-sdk_*.tar.gz
 sdk_tmp=$(mktemp -d)
 trap 'rm -rf "$sdk_tmp"' EXIT HUP INT TERM
-for language in python java dotnet php ruby rust; do
+for language in python php ruby rust; do
   root="$sdk_tmp/lightmoni-$language-sdk"
   mkdir -p "$root/sdk/$language" "$root/examples/sdk/$language"
   case "$language" in
     python) cp sdk/python/pyproject.toml "$root/sdk/python/"; mkdir -p "$root/sdk/python/lightmoni"; cp sdk/python/lightmoni/*.py "$root/sdk/python/lightmoni/" ;;
-    java) cp sdk/java/pom.xml "$root/sdk/java/"; cp -R sdk/java/src "$root/sdk/java/" ;;
-    dotnet) cp sdk/dotnet/*.cs sdk/dotnet/*.csproj "$root/sdk/dotnet/" ;;
     php) cp sdk/php/composer.json "$root/sdk/php/"; cp -R sdk/php/src "$root/sdk/php/" ;;
     ruby) cp sdk/ruby/*.gemspec "$root/sdk/ruby/"; cp -R sdk/ruby/lib "$root/sdk/ruby/" ;;
     rust) cp sdk/rust/Cargo.toml sdk/rust/Cargo.lock "$root/sdk/rust/"; cp -R sdk/rust/src sdk/rust/examples "$root/sdk/rust/" ;;

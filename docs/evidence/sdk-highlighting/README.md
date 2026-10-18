@@ -1,3 +1,5 @@
+> 历史验收记录。Java/C# 代码高亮结果属于已下线的 SDK 入口，不代表当前发行版支持矩阵。
+
 # SDK 示例代码高亮
 
 本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/sdk-highlighting/`](../../../artifacts/screenshots/docs/evidence/sdk-highlighting/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
@@ -9,3 +11,4 @@ SDK 接入页的业务示例按 TypeScript、Go、Python、Java、C#、PHP、Rub
 现有 verify-sdks.mjs 连续三次通过，报告分别在 run-1/ui-report.json、run-2/ui-report.json、run-3/ui-report.json。每次检查八种语言的实际彩色 token、完整代码、剪贴板、八个 SDK 下载、深浅主题及 1280/750/390px 布局；没有页面 JavaScript 错误。类型检查和生产构建通过。
 
 基线位于 before/，最终截图为 run-3/sdk-desktop.png、run-3/sdk-light.png、run-3/sdk-390.png。此改动没有新增流程或动效，也没有增删说明文字。已更新本地 Docker 实例 http://localhost:18380/data；健康检查及 22 个前端文件的字节校验通过。部署校验见 deployment.json，运行实例的额外浏览器验证见 deployed/ui-report.json。
+> 历史验收记录。Java/C# 代码高亮结果属于已下线的 SDK 入口，不代表当前发行版支持矩阵。

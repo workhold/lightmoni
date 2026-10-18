@@ -3,17 +3,10 @@ export type SDKConnectionMode='agent'|'direct';
 export const SDK_AGENT_ENDPOINT='http://127.0.0.1:4318';
 
 export function sdkSampleFor(language:string,mode:SDKConnectionMode='agent',endpoint?:string):string {
-  const address=endpoint?.trim().replace(/\/+$/,'')||(mode==='agent'?SDK_AGENT_ENDPOINT:'');
-  const fallback=JSON.stringify(address),hasFallback=!!address;
-  const singleQuoted="'"+address.replaceAll("\\","\\\\").replaceAll("'","\\'")+"'";
   const examples:Record<string,string>={
-    typescript:`import {createLightMoni} from '@lightmoni/sdk';
+    typescript:`import {createLightMoniFromEnv} from '@lightmoni/sdk';
 
-const moni = createLightMoni({
-  service: 'order-api', table: 'business',
-  endpoint: process.env.LIGHTMONI_ENDPOINT ?? ${fallback},
-  key: process.env.LIGHTMONI_KEY
-});
+const moni = createLightMoniFromEnv({service:'order-api', table:'business'});
 await moni.withSpan('create_order', async () => {
   moni.counter('orders_created').add(1, {region:'cn'});
   moni.log('info', 'order created', {order_id:'123'});
@@ -21,16 +14,11 @@ await moni.withSpan('create_order', async () => {
 await moni.shutdown({timeoutMs:5000});`,
     go:`import (
   "context"
-  "os"
   "time"
   moni "github.com/lightmoni/lightmoni/sdk/go"
 )
 
-endpoint := os.Getenv("LIGHTMONI_ENDPOINT")
-${hasFallback?`if endpoint == "" { endpoint = ${fallback} }\n`:''}client, err := moni.New(moni.Config{
-  Service:"order-api", Table:"business",
-  Endpoint:endpoint, Key:os.Getenv("LIGHTMONI_KEY"),
-})
+client, err := moni.NewFromEnv("order-api", "business", moni.Config{})
 if err != nil { panic(err) }
 orders, err := client.Counter("orders_created", moni.MetricOptions{})
 if err != nil { panic(err) }
@@ -41,49 +29,16 @@ span.End()
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 if err := client.Shutdown(ctx); err != nil { panic(err) }`,
-    python:`import os
-from lightmoni import Client
+    python:`from lightmoni import Client
 
-moni = Client(
-    service="order-api", table="business",
-    endpoint=os.getenv("LIGHTMONI_ENDPOINT", ${fallback}),
-    key=os.getenv("LIGHTMONI_KEY", "")
-)
+moni = Client.from_env("order-api", "business")
 moni.counter("orders_created").add(1, {"region":"cn"})
 with moni.start_span("create_order"):
     moni.log("info", "order created", {"order_id":"123"})
 moni.shutdown(timeout=5)`,
-    java:`import io.lightmoni.Client;
-import java.time.Duration;
-import java.util.Map;
-
-var moni = new Client("order-api", "business",
-    System.getenv().getOrDefault("LIGHTMONI_ENDPOINT", ${fallback}),
-    System.getenv().getOrDefault("LIGHTMONI_KEY", ""));
-moni.counter("orders_created").add(1, Map.of("region","cn"));
-moni.withSpan("create_order", span -> {
-  moni.log("info", "order created", Map.of("order_id","123"));
-  return null;
-});
-moni.shutdown(Duration.ofSeconds(5));`,
-    dotnet:`using System;
-using System.Collections.Generic;
-using LightMoni;
-
-var moni = new Client("order-api", "business",
-    endpoint: Environment.GetEnvironmentVariable("LIGHTMONI_ENDPOINT") ?? ${fallback},
-    key: Environment.GetEnvironmentVariable("LIGHTMONI_KEY") ?? "");
-moni.Counter("orders_created").Add(1,
-  new Dictionary<string,object> {["region"]="cn"});
-using (var span = moni.StartSpan("create_order"))
-using (var scope = span.MakeCurrent())
-  moni.Log("info", "order created");
-await moni.ShutdownAsync(TimeSpan.FromSeconds(5));`,
     php:`require './lightmoni-php-sdk/sdk/php/src/Client.php';
 
-$moni = new \\LightMoni\\Client('order-api', 'business',
-    getenv('LIGHTMONI_ENDPOINT') ?: ${singleQuoted},
-    getenv('LIGHTMONI_KEY') ?: '');
+$moni = \\LightMoni\\Client::fromEnv('order-api', 'business');
 $moni->counter('orders_created')->add(1, ['region'=>'cn']);
 $moni->withSpan('create_order', function() use ($moni) {
   $moni->log('info', 'order created', ['order_id'=>'123']);
@@ -91,22 +46,16 @@ $moni->withSpan('create_order', function() use ($moni) {
 $moni->shutdown(5);`,
     ruby:`require 'lightmoni'
 
-moni = LightMoni::Client.new(
-  service:'order-api', table:'business',
-  endpoint:ENV.fetch('LIGHTMONI_ENDPOINT'${hasFallback?`, ${singleQuoted}`:''}),
-  key:ENV.fetch('LIGHTMONI_KEY'${mode==='agent'?", ''":''})
-)
+moni = LightMoni.from_env(service:'order-api', table:'business')
 moni.counter('orders_created').add(1, 'region'=>'cn')
 moni.with_span('create_order') do
   moni.log('info', 'order created', 'order_id'=>'123')
 end
 moni.shutdown(timeout:5)`,
     rust:`use lightmoni::{Client, Attributes};
-use std::{env, time::Duration};
+use std::time::Duration;
 
-let endpoint = env::var("LIGHTMONI_ENDPOINT")${hasFallback?`.unwrap_or_else(|_| ${fallback}.into())`:'?'};
-let key = env::var("LIGHTMONI_KEY")${mode==='agent'?'.unwrap_or_default()':'?'};
-let moni = Client::new("order-api", "business", &endpoint, &key)?;
+let moni = Client::from_env("order-api", "business")?;
 moni.counter("orders_created")?.add(1,
   &Attributes::from([("region".into(), "cn".into())]));
 moni.with_span("create_order", &Attributes::new(), None, |scoped, _| {
@@ -132,7 +81,7 @@ export function sdkEndpointIsLoopback(endpoint:string):boolean {
 export function sdkEnvironment(mode:SDKConnectionMode,endpoint:string):string {
   const quote=(value:string)=>"'"+value.replaceAll("'", "'\\''")+"'";
   const base=endpoint.trim().replace(/\/+$/,'');
-  return `export LIGHTMONI_ENDPOINT=${quote(base)}\n`+(mode==='direct'?"export LIGHTMONI_KEY='替换为允许 business 表的上报 Key'":"unset LIGHTMONI_KEY\n# 执行节点开启本地访问令牌时，将 LIGHTMONI_KEY 设为该令牌");
+  return `export LIGHTMONI_MODE=${mode}\n`+(mode==='direct'?`export LIGHTMONI_ENDPOINT=${quote(base)}\nexport LIGHTMONI_DATA_KEY='替换为允许 business 表的上报 Key'\nunset LIGHTMONI_AGENT_ENDPOINT LIGHTMONI_LOCAL_TOKEN`:`export LIGHTMONI_AGENT_ENDPOINT=${quote(base || SDK_AGENT_ENDPOINT)}\nunset LIGHTMONI_ENDPOINT LIGHTMONI_DATA_KEY\nexport LIGHTMONI_LOCAL_TOKEN='执行节点本地访问令牌（如已启用）'`);
 }
 
 export interface SDKPackage {id:string;language:string;runtime:string;file:string;url:string;available:boolean}
@@ -152,16 +101,6 @@ export const sdkExamples:Record<string,{language:string;install:string;sample:st
     language:'python',
     install:'tar -xzf lightmoni-python-sdk_0.1.0.tar.gz\npython3 -m pip install ./lightmoni-python-sdk/sdk/python',
     sample:sdkSampleFor('python'),
-  },
-  java:{
-    language:'java',
-    install:'tar -xzf lightmoni-java-sdk_0.1.0.tar.gz\nmvn -f lightmoni-java-sdk/sdk/java/pom.xml install\n# 业务依赖：io.lightmoni:lightmoni-sdk:0.1.0',
-    sample:sdkSampleFor('java'),
-  },
-  dotnet:{
-    language:'csharp',
-    install:'tar -xzf lightmoni-dotnet-sdk_0.1.0.tar.gz\ndotnet add YourApp.csproj reference ./lightmoni-dotnet-sdk/sdk/dotnet/LightMoni.csproj',
-    sample:sdkSampleFor('dotnet'),
   },
   php:{
     language:'php',

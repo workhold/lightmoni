@@ -15,6 +15,7 @@ import { fail } from "../shared/http.js";
 import type { Context } from "../shared/types.js";
 import { Auth, validTable, systemTable } from "./auth.js";
 import { Catalog } from "./catalog.js";
+import type { AgentCredentialStore } from "./agent-credentials.js";
 export interface Normalized {
   kind: string;
   subtype: string;
@@ -354,8 +355,6 @@ export function sdkRuntime(n: Normalized, source: string) {
       "go",
       "typescript",
       "python",
-      "java",
-      "dotnet",
       "php",
       "ruby",
       "rust",
@@ -386,6 +385,7 @@ export class Ingest {
       records: number,
       bytes: number,
     ) => void,
+    readonly agentCredentials?: AgentCredentialStore,
   ) {}
   register() {
     for (const signal of ["logs", "metrics", "traces"] as const)
@@ -428,7 +428,23 @@ export class Ingest {
     }
   }
   async receive(c: Context, signal: Signal) {
-    const key = this.auth.validateKey(c),
+    const agentID = String(c.req.headers["x-lightmoni-agent-id"] ?? "");
+    const key =
+      agentID && this.agentCredentials?.has(agentID, "data")
+        ? (() => {
+            const credential = this.agentCredentials!.authenticate(
+              c.req,
+              agentID,
+              "data",
+            );
+            return {
+              id: credential.credential_id,
+              name: "agent:" + agentID,
+              allowed_tables: [] as string[],
+              allow_all_tables: true,
+            };
+          })()
+        : this.auth.validateKey(c),
       table = String(c.req.headers["x-lightmoni-table"] ?? "");
     if (!validTable(table))
       fail(400, "X-Lightmoni-Table requires a logical business name");

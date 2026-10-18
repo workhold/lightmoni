@@ -4,15 +4,15 @@
 
 已交付 `sdk/go`（package `moni`）、`sdk/typescript` 的 Node / 浏览器入口，以及 `examples/sdk/go`、`examples/sdk/node`、`examples/sdk/browser`。Go 使用标准 OTLP Protobuf；TypeScript 使用标准 OTLP JSON，含十六进制 trace ID 与十进制字符串 int64。多个 Key 可配置逻辑 table 白名单或显式允许所有 table，不按 service 绑定。Go / Node 的完整维度聚合、Gauge、Histogram、冻结批次、缓存边界、Key 轮换、partial success 测试通过；Go race 与 Go / Node → 真实 Agent HTTP → SQLite spool 关闭重开恢复测试通过。主干真实 ClickHouse 联调验证每个语言 service 的 Counter 总量 20、日志 20、span 20、trace JOIN 关联及同一全局 Key 的 key_id 来源。浏览器 demo 经业务后端转发已真实验收两次点击、log_web、metric_web_sum/gauge 和持久化 ACK；页面关闭的尽力 flush 与包体积验证仍需完成；自动框架埋点尚未交付。
 
-2026-10-11 扩展：新增 Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust 原生 OTLP JSON SDK、独立源码安装包、示例、语言选择与下载入口。不是完整官方 OTel SDK 的再导出。六种语言使用显式 flush（应用调度），共享有界聚合、冻结批次、Key 修复、W3C 上下文和诊断。60 个共享协议/故障测试通过；真实 Agent SQLite 关闭重开验收通过；八种 SDK 经 Agent 到隔离 ClickHouse，每服务 Counter=20、关联日志/span=20、Histogram count=20、Gauge=3。扩展接口与边界见 [SDK 总览](../../sdk/README.md)，证据见 [多语言验收](../evidence/multilang-sdk/README.md)。C/C++、Swift、Dart/Flutter 和自动框架埋点未包含在本轮。
+2026-10-11 历史扩展曾新增 Java/Kotlin JVM、C#/.NET 及其他原生 SDK；Java/C# 已于当前版本下线，不再发布或展示。不是完整官方 OTel SDK 的再导出。六种语言使用显式 flush（应用调度），共享有界聚合、冻结批次、Key 修复、W3C 上下文和诊断。60 个共享协议/故障测试通过；真实 Agent SQLite 关闭重开验收通过；六种 SDK 经 Agent 到隔离 ClickHouse，每服务 Counter=20、关联日志/span=20、Histogram count=20、Gauge=3。扩展接口与边界见 [SDK 总览](../../sdk/README.md)，证据见 [多语言验收](../evidence/multilang-sdk/README.md)。C/C++、Swift、Dart/Flutter 和自动框架埋点未包含在本轮。
 
 ## 目标与范围
 
-2026-10-14 Python 上报规则扩展：按 specs/004-python-sdk-reporting 的 SDD 规格新增远程停报、UID 排除、QA/VIP/普通日志稳定采样、独立配置轮询、本地覆盖 API 与资源/实例输入。规则仅影响业务日志，整体停报覆盖所有信号；generation 和可取消 HTTP 防止恢复后旧回包/Span 补交。验证命令与实际边界见该规格 verification.md。其他五种原生语言尚未接入此规则协议。
+2026-10-14 Python 上报规则扩展：按 specs/004-python-sdk-reporting 的 SDD 规格新增远程停报、UID 排除、QA/VIP/普通日志稳定采样、独立配置轮询、本地覆盖 API 与资源/实例输入。规则仅影响业务日志，整体停报覆盖所有信号；generation 和可取消 HTTP 防止恢复后旧回包/Span 补交。验证命令与实际边界见该规格 verification.md。其他三种原生语言尚未接入此规则协议。
 
-2026-10-13 扩展：八种 SDK 已提供请求/任务作用域或不可变绑定客户端，作用域内日志自动关联 trace；Go / Node HTTP 入口与出站、.NET 出站支持 W3C 传播。Go → Node → Go 多跳 HTTP、并发隔离、嵌套/异常恢复及原生示例已验证。完整第三方框架、消息和日志 appender 适配继续按需扩展。
+2026-10-13 历史记录：八种 SDK 曾提供请求/任务作用域或不可变绑定客户端，作用域内日志自动关联 trace；Go / Node HTTP 入口与出站、.NET 出站支持 W3C 传播。Go → Node → Go 多跳 HTTP、并发隔离、嵌套/异常恢复及原生示例已验证。完整第三方框架、消息和日志 appender 适配继续按需扩展。
 
-让 Go、JavaScript/TypeScript、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust 业务只配置 `service`、`table`、上报地址，就能记录多维指标、结构化日志和基础 trace。默认连接本机 Agent；需要直接上报主服务时增加实例级写入 Key。一个业务进程可以使用多个 table，一台机器的多个服务不需要分别申请 Key。
+让 Go、JavaScript/TypeScript、Python、PHP、Ruby、Rust 业务只配置 `service`、`table`、上报地址，就能记录多维指标、结构化日志和基础 trace。默认连接本机 Agent；需要直接上报主服务时增加实例级写入 Key。一个业务进程可以使用多个 table，一台机器的多个服务不需要分别申请 Key。
 
 实现复用 OpenTelemetry 的数据模型、OTLP 编码与 W3C 上下文协议，聚合由 LightMoni 的有界聚合器完成，未引入完整 OTel 自动埋点 SDK。LightMoni 封装初始化、table 路由、冻结批次、可靠重试和简单 API。依赖版本通过实际 build / 测试后锁定，不假定不同语言的日志、指标 API 具有相同成熟度。本轮覆盖 SDK 总览列出的服务端主流语言，不实现 PromQL、浏览器会话回放或浏览器磁盘离线队列。
 
@@ -86,7 +86,7 @@ await mon.flush({ timeoutMs: 5000 });
 await mon.shutdown({ timeoutMs: 5000 });
 ```
 
-样例是可运行工程。日志预留独立的可选 `trace_id`、`span_id`，请求/任务作用域内自动注入，业务无需逐条传 ID；无有效上下文时日志正常上报，字段为空。Go `TraceHandler`、Node `traceHandler` 创建或继承 HTTP 请求 trace；Go `TraceTransport`、SDK `fetch` 和 .NET `TraceHttpHandler` 传播 W3C header。所有语言支持作用域或绑定客户端，嵌套/异常恢复与并发隔离已纳入验收；关联在日志调用时捕获并随批次冻结。用法与跨服务边界见 [SDK 日志 trace 约定](../../sdk/README.md#日志-trace-字段预留)。具体消息框架、第三方日志 appender 与完整自动埋点矩阵仍作为可选适配层扩展。
+样例是可运行工程。日志预留独立的可选 `trace_id`、`span_id`，请求/任务作用域内自动注入，业务无需逐条传 ID；无有效上下文时日志正常上报，字段为空。Go `TraceHandler`、Node `traceHandler` 创建或继承 HTTP 请求 trace；Go `TraceTransport`、SDK `fetch` 传播 W3C header。所有语言支持作用域或绑定客户端，嵌套/异常恢复与并发隔离已纳入验收；关联在日志调用时捕获并随批次冻结。用法与跨服务边界见 [SDK 日志 trace 约定](../../sdk/README.md#日志-trace-字段预留)。具体消息框架、第三方日志 appender 与完整自动埋点矩阵仍作为可选适配层扩展。
 
 ## 指标语义
 
@@ -165,7 +165,7 @@ HTTP 处理遵循 [OTLP 规范](https://opentelemetry.io/docs/specs/otlp/)：网
 | 永久拒绝与部分成功 | `400/401/413` 等按契约停止同批重试，诊断可见；标准 partial_success 不重发已经接受的整批 |
 | 嵌入 Agent | 主机 collector 使用相同 SDK API，exporter 直接提交队列；无需启动本机 HTTP；不会递归产生遥测 |
 | 跨语言协议 | Go 与 Node 夹具经过同一解码/存储路径，类型、时间、trace 字段与维度语义一致；失败案例一致 |
-| 日志 trace 预留 | 八种 SDK 不传 trace 仍正常上报，固定 trace/span 列留空；有效上下文与正文/属性分离，无上下文日志不自动生成 trace，作用域退出不串链；冻结发送保留记录时上下文 |
+| 日志 trace 预留 | 六种 SDK 不传 trace 仍正常上报，固定 trace/span 列留空；有效上下文与正文/属性分离，无上下文日志不自动生成 trace，作用域退出不串链；冻结发送保留记录时上下文 |
 | 自动关联与跨服务 | 作用域内不逐条传 context 仍关联；并发任务隔离，嵌套/异常后恢复；Go → Node → Go 多跳 HTTP 同 trace、不同 span、父子关系和 flags/tracestate 保留 |
 | 浏览器 | 私有 Key 不进入包；CORS、公开权限、批次限制、公开凭证失效、页面关闭尽力发送行为有真实验证 |
 

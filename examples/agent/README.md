@@ -6,7 +6,7 @@
 
 Agent 独立运行，由自己的进程管理器或容器编排负责启动、停止和重启，生命周期独立于业务实例。以下 `run` 命令以前台进程运行，收到 SIGTERM 后关闭；网页安装器目前提供 systemd 安装流程。业务通过 SDK 上报，退出时完成自己的 SDK flush/shutdown，Agent 继续运行并处理采集与待补传数据。每个 Agent 实例使用独立数据目录，并在重启或容器重建后保留该目录；多个 Agent 实例不能共用同一队列目录。
 
-中心和 Agent 均使用 Node.js / TypeScript，业务八种 SDK 保留。Linux amd64 / arm64 发布包自带 Node 24.15.0，要求 glibc ≥ 2.28；主机无需预装 Node/npm。源码开发时建议使用 Node 24.15.0，并先在仓库根目录执行 `npm run setup`、`npm run build`。Go 工具链只用于 Go 业务 SDK，不用于运行 Agent。迁移说明见 [SDD 007](../../specs/007-node-runtime-migration/spec.md)。
+中心和 Agent 均使用 Node.js / TypeScript，业务六种 SDK 保留。Linux amd64 / arm64 发布包自带 Node 24.15.0，要求 glibc ≥ 2.28；主机无需预装 Node/npm。源码开发时建议使用 Node 24.15.0，并先在仓库根目录执行 `npm run setup`、`npm run build`。Go 工具链只用于 Go 业务 SDK，不用于运行 Agent。迁移说明见 [SDD 007](../../specs/007-node-runtime-migration/spec.md)。
 
 从仓库根目录运行 CLI，自动保存连接配置（Key 仅保存在本机配置文件）：
 

@@ -2,6 +2,8 @@
 
 Python 3.9+，标准库，无运行时第三方依赖。
 
+可用 `Client.from_env("order-api", "business")` 读取统一的 `LIGHTMONI_MODE`、`LIGHTMONI_ENDPOINT`、`LIGHTMONI_DATA_KEY`、`LIGHTMONI_AGENT_ENDPOINT` 和 `LIGHTMONI_LOCAL_TOKEN`；`LIGHTMONI_KEY` 仅作为兼容别名。显式 `Client(...)` 构造函数仍可使用 Secret Manager 提供的值。
+
 ~~~sh
 python3 -m pip install ./sdk/python
 python3 examples/sdk/python/main.py

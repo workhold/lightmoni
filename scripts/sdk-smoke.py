@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Eight SDKs -> Agent or direct service -> real ClickHouse."""
+"""Six supported SDKs -> Agent or direct service -> real ClickHouse."""
 import argparse
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -24,7 +24,7 @@ def main():
     parser.add_argument("--server-url", default="http://127.0.0.1:19380")
     parser.add_argument("--mode", choices=["agent", "direct"], default="agent")
     parser.add_argument("--container-endpoint", help="direct center URL reachable from SDK containers")
-    parser.add_argument("--docker-network", help="network for Java/.NET/PHP/Rust demo containers")
+    parser.add_argument("--docker-network", help="network for PHP/Rust demo containers")
     parser.add_argument("--agent-port", type=int, default=19318)
     parser.add_argument("--report", default=".lightmoni/sdk-test/e2e.json")
     args = parser.parse_args()
@@ -45,7 +45,7 @@ def main():
         api("/setup", account)
     else:
         api("/auth/login", account)
-    key = api("/keys", {"name": "sdk-eight-languages-" + args.mode, "allowed_tables": ["http", "app", "host", "probe"]})
+    key = api("/keys", {"name": "sdk-six-languages-" + args.mode, "allowed_tables": ["http", "app", "host", "probe"]})
     token = secrets.token_urlsafe(24)
     config = work / "agent.json"
     config.write_text(json.dumps({
@@ -66,7 +66,7 @@ def main():
                     if agent.poll() is not None:
                         raise RuntimeError("test Agent failed to start; inspect .lightmoni/sdk-test/e2e/agent.log")
                     time.sleep(.1)
-            languages = ["go", "node", "python", "java", "dotnet", "php", "ruby", "rust"]
+            languages = ["go", "node", "python", "php", "ruby", "rust"]
             for language in languages:
                 host = "host.docker.internal" if language in runner.IMAGES else "127.0.0.1"
                 endpoint = (args.container_endpoint or args.server_url.replace("127.0.0.1", host).replace("localhost", host)) if args.mode == "direct" and language in runner.IMAGES else args.server_url if args.mode == "direct" else f"http://{host}:{args.agent_port}"
@@ -79,7 +79,7 @@ def main():
                 subprocess.run(cmd, cwd=ROOT, env=env, check=True, timeout=60, stdout=subprocess.DEVNULL)
             now = datetime.now(timezone.utc)
             query = {
-                "request_id": "sdk-eight-languages", "range": {"from": (now-timedelta(hours=1)).isoformat(), "to": (now+timedelta(minutes=1)).isoformat()}, "interval_ms": 60000,
+                "request_id": "sdk-six-languages", "range": {"from": (now-timedelta(hours=1)).isoformat(), "to": (now+timedelta(minutes=1)).isoformat()}, "interval_ms": 60000,
                 "queries": [
                     {"refId": "counts", "sql": "SELECT service,sum(toDecimal256(value_int,0)) AS total FROM metric_http_sum WHERE key_id={key:String} AND name='http.requests' GROUP BY service"},
                     {"refId": "links", "sql": "SELECT l.service,count() AS total FROM log_app l JOIN trace_app t ON l.trace_id=t.trace_id AND l.span_id=t.span_id WHERE l.key_id={key:String} GROUP BY l.service"},
@@ -105,7 +105,7 @@ def main():
                 assert all(Decimal(str(row[1])) == expected[r["refId"]] for row in rows), rows
                 summary[r["refId"]] = {row[0]: str(row[1]) for row in rows}
             install = api("/sdk-install")
-            assert len(install["packages"]) == 8 and all(p["available"] for p in install["packages"])
+            assert len(install["packages"]) == 6 and all(p["available"] for p in install["packages"])
             for p in install["packages"]:
                 with urllib.request.urlopen(p["url"], timeout=10) as response:
                     assert response.status == 200 and response.read(2) == b"\x1f\x8b"
@@ -113,7 +113,7 @@ def main():
             target = ROOT / args.report
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
-            print("PASS eight SDKs: per service 20 Counter, 20 linked logs/spans, 20 Histogram, Gauge=3, SDK heartbeats/internal logs; eight downloads")
+            print("PASS six SDKs: per service 20 Counter, 20 linked logs/spans, 20 Histogram, Gauge=3, SDK heartbeats/internal logs; six downloads")
         finally:
             if agent:
                 agent.terminate()

@@ -33,6 +33,30 @@ final class Protocol {
         if (strlen(self::json($result))>4096) throw new \InvalidArgumentException('attribute bytes exceeded');
         return $result;
     }
+    private static function secret(string $explicit,string $file,string $env,string $fileEnv,string $label): array {
+        $file=$file ?: (getenv($fileEnv) ?: ''); $fromFile='';
+        if ($file!=='') { if (is_link($file) || !is_file($file)) throw new \InvalidArgumentException($label.' file must be a regular file'); $raw=file_get_contents($file); if ($raw===false || strlen($raw)>16*1024) throw new \InvalidArgumentException($label.' file unavailable'); $fromFile=rtrim($raw,"\r\n"); }
+        $fromEnv=getenv($env) ?: ''; $values=array_values(array_filter([$explicit,$fromFile,$fromEnv],fn($v)=>$v!=='')); if (count(array_unique($values))>1) throw new \InvalidArgumentException('credential_source_conflict: '.$env);
+        return [$explicit!==''?$explicit:($fromFile!==''?$fromFile:$fromEnv),$explicit!==''?'explicit':($fromFile!==''?'file':($fromEnv!==''?'env':''))];
+    }
+    public static function connection(array $options): array {
+        $mode=$options['mode'] ?? (getenv('LIGHTMONI_MODE') ?: 'direct'); if (!in_array($mode,['agent','direct','auto'],true)) throw new \InvalidArgumentException('mode must be agent, direct, or auto');
+        $endpoint=$options['endpoint'] ?? (getenv('LIGHTMONI_ENDPOINT') ?: ''); $agent=$options['agent_endpoint'] ?? (getenv('LIGHTMONI_AGENT_ENDPOINT') ?: 'http://127.0.0.1:4318');
+        [$local,$localSource]=self::secret($options['local_token']??'', $options['local_token_file']??'', 'LIGHTMONI_LOCAL_TOKEN','LIGHTMONI_LOCAL_TOKEN_FILE','local token');
+        [$data,$dataSource]=self::secret($options['data_key']??($options['key']??''), $options['data_key_file']??'', 'LIGHTMONI_DATA_KEY','LIGHTMONI_DATA_KEY_FILE','data key');
+        [$legacy,$legacySource]=self::secret('', '', 'LIGHTMONI_KEY','', 'legacy data key');
+        if ($data!=='' && $legacy!=='' && $data!==$legacy) throw new \InvalidArgumentException('credential_source_conflict: LIGHTMONI_KEY');
+        if ($data==='') { $data=$legacy; $dataSource=$legacy!==''?'legacy-env':$legacySource; }
+        $probe='not_probed'; $selected=$mode; $fallback=0;
+        if ($mode==='agent') { $endpoint=$agent; $key=$local; $probe='configured'; $source=$localSource; }
+        elseif ($mode==='direct') { if ($endpoint==='' || $data==='') throw new \InvalidArgumentException('direct mode requires endpoint and data key'); $key=$data; $source=$dataSource; }
+        else {
+            $healthy=false; $url=rtrim($agent,'/').'/healthz'; $ctx=stream_context_create(['http'=>['timeout'=>0.5,'ignore_errors'=>true,'method'=>'GET','header'=>$local!==''?'Authorization: Bearer '.$local."\r\n":'']]); @file_get_contents($url,false,$ctx); $status=$http_response_header[0]??''; if ($status!=='' && !preg_match('/\s2\d\d\s/', $status)) throw new \RuntimeException('agent probe '.$status); $healthy=(bool)preg_match('/\s2\d\d\s/', $status);
+            if ($healthy) { $endpoint=$agent; $key=$local; $selected='agent'; $probe='healthy'; $source=$localSource; }
+            else { if ($endpoint==='' || $data==='') throw new \InvalidArgumentException('auto_route_unavailable: agent unavailable and direct credentials are missing'); $key=$data; $selected='direct'; $probe='unavailable_fallback'; $fallback=1; $source=$dataSource; }
+        }
+        return [$endpoint,$key,$mode,$selected,$probe,$fallback,$source];
+    }
 }
 final class TraceContext {
     private static ?self $main=null;
@@ -87,7 +111,8 @@ final class State {
         foreach ($this->limits as $v) if (!is_int($v) || $v<=0) throw new \InvalidArgumentException('invalid SDK limits');
         if ($this->limits['max_batch_bytes']>$this->limits['queue_bytes']) throw new \InvalidArgumentException('invalid SDK limits');
         $this->resource=['attributes'=>Protocol::attrs(['service.name'=>$service,'service.instance.id'=>Protocol::uuid()])];
-        foreach (['pending_batches','pending_bytes','buffer_bytes','delivered_batches','retried_batches','invalid_records','overflow_records','dropped_records','rejected_records'] as $n) $this->stats[$n]=0;
+        foreach (['pending_batches','pending_bytes','buffer_bytes','delivered_batches','retried_batches','invalid_records','overflow_records','dropped_records','rejected_records','fallback_count'] as $n) $this->stats[$n]=0;
+        $this->stats += ['configured_mode'=>'','selected_route'=>'','agent_probe'=>'','last_route_error'=>'','credential_source'=>'','route_uncertain'=>false];
         $this->stats['last_error']='';
     }
     public function invalid(string $message): void { $this->stats['invalid_records']++; $this->stats['last_error']=$message; }
@@ -227,6 +252,11 @@ final class Span {
 final class Client {
     private State $s;
     private string $table;
+    public static function fromEnv(string $service,string $table,array $options=[]): self {
+        [$endpoint,$key,$mode,$selected,$probe,$fallback,$source]=Protocol::connection($options);
+        $limits=$options['limits']??[]; $limits['self_telemetry']=$options['self_telemetry']??true;
+        $client=new self($service,$table,$endpoint,$key,$limits); $client->s->stats['configured_mode']=$mode; $client->s->stats['selected_route']=$selected; $client->s->stats['agent_probe']=$probe; $client->s->stats['fallback_count']=$fallback; $client->s->stats['credential_source']=$source; return $client;
+    }
     public function __construct(string $service,string $table,string $endpoint='http://127.0.0.1:4318',string $key='',array $limits=[]) { $this->table=Protocol::table($table);$this->s=new State($service,$endpoint,$key,$limits);$this->s->selfTable=$this->table; }
     public function withTable(string $table): self { $child=clone $this; $child->table=Protocol::table($table); return $child; }
     public function counter(string $name,string $unit=''): Metric { return $this->instrument($name,'counter',$unit,[]); }

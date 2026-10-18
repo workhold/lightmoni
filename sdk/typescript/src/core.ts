@@ -2,6 +2,7 @@ import { copyLogSampling, copyExclusions, matches, sampleLog, type LogSamplingPo
 export type { LogSamplingPolicy, LogRule, LogCondition, LogExcludeRule, SDKConfig } from './sampling.js';
 export type Attributes = Record<string, string | boolean | number | bigint>;
 export type Signal = "metrics" | "logs" | "traces";
+export type ConnectionMode = "agent" | "direct" | "auto";
 export interface FrozenBatch {
   signal: Signal; table: string; service: string; id: string;
   createdAt: string; contentType: "application/json"; payload: Uint8Array;
@@ -10,6 +11,8 @@ export interface Exporter { deliver(batch: FrozenBatch, signal: AbortSignal): Pr
 export interface TraceContext { traceId: string; spanId: string; flags: number; traceState?: string }
 export interface Options {
   service: string; table: string; endpoint?: string; key?: string;
+  mode?: ConnectionMode; agentEndpoint?: string; localToken?: string;
+  discoveryTimeoutMs?: number;
   selfTelemetry?: boolean;
   logSampling?: Record<string, LogSamplingPolicy>; disabled?: boolean;
   remoteConfig?: boolean; configEndpoint?: string; configIntervalMs?: number;
@@ -29,6 +32,9 @@ export interface Stats {
   invalidRecords: number; overflowRecords: number; lastError?: string;
   sampledOutLogs: number; unmatchedLogs: number; excludedLogs: number; disabledRecords: number;
   reportingDisabled: boolean; configRevision?: string; configError?: string;
+  configuredMode?: ConnectionMode; selectedRoute?: "agent" | "direct" | "none";
+  agentProbe?: string; fallbackCount?: number; lastRouteError?: string;
+  credentialSource?: "explicit" | "file" | "env" | "legacy-env"; routeUncertain?: boolean;
 }
 export class DeliveryError extends Error {
   constructor(message: string, readonly retryable = false, readonly retryAfterMs = 0, readonly rejectedRecords = 0) { super(message); this.name = "DeliveryError"; }
@@ -111,11 +117,18 @@ class State {
     const resource = this.attributes(options.resource ?? {});
     if (resource.some(a => a.key === "service.name" || a.key === "service.instance.id")) throw new Error("configure service identity separately");
     this.resource = { attributes: [...resource, { key: "service.name", value: { stringValue: options.service } }, { key: "service.instance.id", value: { stringValue: this.instanceId } }] };
+    const mode = options.mode ?? "direct";
+    if (!["agent", "direct", "auto"].includes(mode)) throw new Error("mode must be agent, direct, or auto");
+    const selectedRoute = mode === "agent" || (mode === "auto" && options.agentEndpoint) ? "agent" : "direct";
+    const routeEndpoint = selectedRoute === "agent" ? (options.agentEndpoint ?? "http://127.0.0.1:4318") : options.endpoint;
     if (!options.exporter) {
-      const endpoint = new URL(options.endpoint ?? "");
+      const endpoint = new URL(routeEndpoint ?? "");
       if (!/^https?:$/.test(endpoint.protocol)) throw new Error("endpoint must use HTTP or HTTPS");
     }
-    this.exporter = options.exporter ?? new HTTPExporter(options.endpoint!, () => this.options.key);
+    if (mode === "auto" && !options.exporter && !options.agentEndpoint && (!options.endpoint || !options.key)) throw new Error("auto_route_unavailable: configure an Agent or direct credentials");
+    if (mode === "agent" && !options.exporter && !options.localToken && options.agentEndpoint && !options.agentEndpoint.startsWith("http://127.0.0.1")) throw new Error("agent mode requires local token for non-loopback endpoint");
+    this.stats.configuredMode = mode; this.stats.selectedRoute = selectedRoute; this.stats.agentProbe = mode === "auto" ? "pending" : "not_probed"; this.stats.credentialSource = "explicit";
+    this.exporter = options.exporter ?? (mode === "auto" ? new AutoExporter(options.agentEndpoint ?? "http://127.0.0.1:4318", options.localToken, options.endpoint, options.key, this.stats) : new HTTPExporter(routeEndpoint!, () => selectedRoute === "agent" ? this.options.localToken : this.options.key));
     this.interval = setInterval(() => { if (!this.closing) { this.collect(); this.kick(); } }, this.settings.intervalMs);
     // A library timer should not prevent an otherwise finished Node process exiting.
     const timer = this.interval as unknown as { unref?: () => void }; timer.unref?.();
@@ -458,4 +471,37 @@ export class HTTPExporter implements Exporter {
     try { result = JSON.parse(new TextDecoder().decode(body)); } catch { throw new DeliveryError("invalid OTLP JSON acknowledgment", true); }
     const partial = result.partialSuccess; if (partial) { const rejected = Number(partial.rejectedLogRecords ?? partial.rejectedDataPoints ?? partial.rejectedSpans ?? 0); if (rejected > 0) throw new DeliveryError("OTLP partial success (not retried)", false, 0, rejected); }
   }
+}
+
+/** Auto mode probes only the configured local Agent once, before the first
+ * business body. A failed probe may safely select direct; delivery failures
+ * after selection never switch routes for the same batch. */
+class AutoExporter implements Exporter {
+  private selected: "agent" | "direct" | undefined;
+  private readonly agent: HTTPExporter;
+  private readonly direct?: HTTPExporter;
+  constructor(private readonly agentEndpointValue: string, private readonly localToken: string | undefined, endpoint: string | undefined, key: string | undefined, private readonly stats: Stats) {
+    this.agent = new HTTPExporter(agentEndpointValue, () => localToken);
+    this.direct = endpoint ? new HTTPExporter(endpoint, () => key) : undefined;
+  }
+  private async select(signal: AbortSignal): Promise<"agent" | "direct"> {
+    if (this.selected) return this.selected;
+    const agentEndpoint = this.agentEndpointValue.replace(/\/$/, "");
+    try {
+      const headers: Record<string, string> = {}; if (this.localToken) headers.Authorization = `Bearer ${this.localToken}`;
+      const response = await fetch(`${agentEndpoint}/healthz`, { method: "GET", headers, signal, redirect: "error" });
+      await response.body?.cancel();
+      if (response.ok) { this.selected = "agent"; this.stats.selectedRoute = "agent"; this.stats.agentProbe = "healthy"; return this.selected; }
+      this.stats.agentProbe = `http_${response.status}`;
+      // An HTTP response proves the endpoint exists. Auth/protocol failures
+      // must remain visible and cannot silently bypass the configured Agent.
+      throw new DeliveryError(`Agent health probe failed with HTTP ${response.status}`);
+    } catch (error) {
+      if (error instanceof DeliveryError || signal.aborted) throw error;
+      this.stats.agentProbe = "unavailable";
+    }
+    if (!this.direct) { this.stats.lastRouteError = "auto_route_unavailable"; throw new DeliveryError("auto_route_unavailable: Agent unavailable and direct credentials are missing"); }
+    this.selected = "direct"; this.stats.selectedRoute = "direct"; this.stats.fallbackCount = (this.stats.fallbackCount ?? 0) + 1; return this.selected;
+  }
+  async deliver(batch: FrozenBatch, signal: AbortSignal): Promise<void> { const selected = await this.select(signal); if (selected === "agent") return this.agent.deliver(batch, signal); return this.direct!.deliver(batch, signal); }
 }

@@ -6,7 +6,7 @@
 
 中心和 Agent 的公共类型位于 `runtime/src/shared/types.ts`。模块使用 `Dependencies` 注入 SQLite `db`、统一 `query`、SQL AST `referencedTables`、`cat`、ClickHouse writer/reader、`auth`、`router`、`externalURL`、`encrypt/decrypt`、时钟和 logger；认证由 Router 注入 `Context.user`。模块通过注入的 Router 注册 `/api/v1` 路由并返回 `Module`，提供可选 `start()` / `close()`；后台任务使用 AbortSignal 传播取消，关闭时清除定时器并等待已启动的工作结束。模块在构造阶段提交自身 SQLite 建表/迁移，`runtime/src/server/app.ts` 控制初始化和关闭次序。
 
-中心功能分布在 `runtime/src/server`、`domains`、`assistant`；Agent 位于 `runtime/src/agent`。八种业务 SDK 均保留，Go module `github.com/lightmoni/lightmoni` 仅供 Go 业务 SDK 使用，不是中心或 Agent 的启动入口。生产发布固定 Node 24.15.0，Linux Agent 自带 Node 双架构包且要求 glibc ≥ 2.28。
+中心功能分布在 `runtime/src/server`、`domains`、`assistant`；Agent 位于 `runtime/src/agent`。六种业务 SDK 均保留，Go module `github.com/lightmoni/lightmoni` 仅供 Go 业务 SDK 使用，不是中心或 Agent 的启动入口。生产发布固定 Node 24.15.0，Linux Agent 自带 Node 双架构包且要求 glibc ≥ 2.28。
 
 前端使用 React/TypeScript、AntV G2、共享 Ant Design 基础控件及产品主题；所有 feature 输出默认 React 页面，主干注册路由。统一 `web/src/shared/api.ts` 和 `types.ts`，组件从 `web/src/shared/ui.tsx` 使用/重导出。禁止原生 select、window.alert/confirm/prompt；受控、带样式与校验的 Input 可以使用正常 HTML input。多个模块不得改 package.json、锁文件和应用壳。
 

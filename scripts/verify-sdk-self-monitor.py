@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify idle heartbeat and bounded diagnostics for the six native SDKs."""
+"""Verify idle heartbeat and bounded diagnostics for the four native SDKs."""
 import concurrent.futures
 import importlib.util
 import json
@@ -28,8 +28,8 @@ def run(language):
     assert all(a['table']=='http' for a in attempts)
     return {'language':language,'passed':True,'heartbeats':len(heartbeat),'internal_logs':len(logs),'idle_periodic':language!='php','pending_batches':stats['pending_batches']}
 try:
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-        report=list(pool.map(run,['python','ruby','java','dotnet','php','rust']))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        report=list(pool.map(run,['python','ruby','php','rust']))
     target=ROOT/'docs/evidence/self-monitoring/native-sdk-heartbeats.json';target.parent.mkdir(parents=True,exist_ok=True);target.write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report,indent=2))
 finally:

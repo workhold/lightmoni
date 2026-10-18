@@ -4,6 +4,7 @@ import type {
   Dependencies,
   Handler,
   Module,
+  WriteKey,
 } from "../shared/types.js";
 import { HTTPError } from "../shared/http.js";
 import { parseNanoTime, formatNanoTime } from "../shared/otlp.js";
@@ -15,6 +16,7 @@ import {
   unique,
   validName,
 } from "./nodes-model.js";
+import type { AgentCredentialStore } from "./agent-credentials.js";
 export interface NodesOptions {
   internalExporter?: (
     table: string,
@@ -23,6 +25,7 @@ export interface NodesOptions {
     signal?: AbortSignal,
   ) => Promise<void>;
   telemetryInterval?: number;
+  agentCredentials?: AgentCredentialStore;
 }
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const record = (value: any): value is Record<string, any> =>
@@ -76,7 +79,20 @@ export function registerNodes(
       throw new NodeError(400, "任务配置无效");
     }
   };
-  const key = (ctx: Context) => {
+  const key = (ctx: Context, agentID: string): WriteKey => {
+    if (options.agentCredentials?.has(agentID, "control")) {
+      const credential = options.agentCredentials.authenticate(
+        ctx.req,
+        agentID,
+        "control",
+      );
+      return {
+        id: credential.credential_id,
+        name: "agent:" + agentID,
+        allowed_tables: [],
+        allow_all_tables: true,
+      };
+    }
     try {
       return deps.auth.validateKey(ctx);
     } catch {
@@ -183,12 +199,12 @@ export function registerNodes(
     }),
   );
   const heartbeat: Handler = async (ctx) => {
-    const writeKey = key(ctx),
-      values = await body(ctx),
+    const values = await body(ctx),
       id =
         ctx.params.id ||
         (values.agent_id == null ? "" : String(values.agent_id));
     if (!id) throw new NodeError(400, "agent_id required");
+    const writeKey = key(ctx, id);
     try {
       store.events(id, writeKey.id, values);
     } catch {
@@ -209,7 +225,7 @@ export function registerNodes(
   router.get(
     base + "/agents/:id/config",
     safe((ctx) => {
-      key(ctx);
+      key(ctx, ctx.params.id);
       const compiled = store.effective(ctx.params.id);
       ctx.json({
         ...compiled.config,

@@ -28,7 +28,7 @@
 | 01 | 大盘 | docs/tasks/01-dashboards.md | web/src/features/dashboards、runtime/src/domains/dashboards.ts |
 | 02 | 日志探索 | docs/tasks/02-logs.md | web/src/features/logs、runtime/src/domains/logs.ts |
 | 03 | 告警与通知 | docs/tasks/03-alerts.md | web/src/features/alerts、runtime/src/domains/alert*.ts |
-| 04 | SDK | docs/tasks/04-sdk.md | sdk/{go,typescript,python,java,dotnet,php,ruby,rust}、examples/sdk |
+| 04 | SDK | docs/tasks/04-sdk.md | sdk/{go,typescript,python,php,ruby,rust}、examples/sdk |
 | 05 | Agent | docs/tasks/05-agent.md | runtime/src/agent、deploy/agent、examples/agent |
 | 07 | AI 助手 | docs/tasks/07-ai-assistant.md | runtime/src/assistant、ai-runtime、web/src/features/assistant |
 | 06 | 主干与集成 | docs/tasks/06-core.md | runtime/src/server、runtime/src/shared、web/src/app、web/src/shared、deploy/server |
@@ -45,7 +45,7 @@
 
 首版应完整打通安装、数据接入、查询、大盘、日志排查、拨测、用户管理、第三方登录、告警组和通知。Grafana/Kibana 核心功能与交互必须逐项对标，不能仅做到出图和列表；具体矩阵见 acceptance.md。插件市场、任意变换流水线、完全相同的 JSON 导入、完整 KQL/Lucene、完整 PromQL、会话回放、企业组织权限不作为首版验收项；值班排班与告警升级已纳入本次范围。
 
-保留 Go、TypeScript、Python、Java、.NET、PHP、Ruby、Rust 八种业务 SDK 和轻量浏览器接入。Node Agent 复用 TypeScript SDK，Go 仅用于业务 SDK 开发/打包。Linux 双架构 Agent 包自带 Node 24.15.0，要求 glibc ≥ 2.28；平台最终镜像使用 Node bookworm-slim，Go 镜像阶段仅打包 Go SDK。所有真实运行、故障恢复和资源占用结果需要实现后验证，方案不能当作测试证明。
+保留 Go、TypeScript、Python、PHP、Ruby、Rust 六种业务 SDK 和轻量浏览器接入。Node Agent 复用 TypeScript SDK，Go 仅用于业务 SDK 开发/打包。Linux 双架构 Agent 包自带 Node 24.15.0，要求 glibc ≥ 2.28；平台最终镜像使用 Node bookworm-slim，Go 镜像阶段仅打包 Go SDK。所有真实运行、故障恢复和资源占用结果需要实现后验证，方案不能当作测试证明。
 
 ## 最终验收硬要求
 
