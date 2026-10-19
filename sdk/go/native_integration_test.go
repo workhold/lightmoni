@@ -79,10 +79,10 @@ func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 			}
 		}
 	}
-	if batches != 18 || len(totals) != 6 {
-		t.Fatalf("expected 18 durable batches for six languages: batches=%d totals=%v", batches, totals)
+	if batches != 12 || len(totals) != 4 {
+		t.Fatalf("expected 12 durable batches for four native languages: batches=%d totals=%v", batches, totals)
 	}
-	for _, language := range []string{"python", "java", "dotnet", "php", "ruby", "rust"} {
+	for _, language := range []string{"python", "php", "ruby", "rust"} {
 		service := "conformance-" + language
 		if totals[service] != 20 || len(logs[service]) != 20 || len(spans[service]) != 20 {
 			t.Fatalf("%s totals=%d logs=%d spans=%d", service, totals[service], len(logs[service]), len(spans[service]))

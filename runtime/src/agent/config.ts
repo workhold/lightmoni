@@ -30,7 +30,12 @@ export interface LogSource {
 export interface Config {
   listen: string;
   endpoint: string;
+  /** Legacy shared key. Kept for nodes that have not re-enrolled yet. */
   key: string;
+  /** Node-bound control credential issued by Agent enrollment. */
+  control_credential: string;
+  /** Node-bound data credential issued by Agent enrollment. */
+  data_credential: string;
   group_id: string;
   local_token: string;
   data_dir: string;
@@ -77,6 +82,8 @@ export function defaultConfig(): Config {
     listen: "127.0.0.1:4318",
     endpoint: "",
     key: "",
+    control_credential: "",
+    data_credential: "",
     group_id: "",
     local_token: "",
     data_dir: "./agent-data",
@@ -193,7 +200,8 @@ export function validateConfig(c: Config): void {
     u.hash
   )
     throw Error("endpoint must be an http(s) URL");
-  if (!c.key) throw Error("default key is required");
+  if (!c.key && (!c.control_credential || !c.data_credential))
+    throw Error("legacy key or both control_credential and data_credential are required");
   if (Buffer.byteLength(c.group_id) > 64) throw Error("invalid agent group");
   const { host } = listenAddress(c.listen);
   if (

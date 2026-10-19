@@ -23,6 +23,7 @@ import { registerInstall } from "./install.js";
 import { registerTemplates } from "./templates.js";
 import { registerCore } from "./core.js";
 import { registerNodes } from "./nodes.js";
+import { registerAgentCredentials } from "./agent-credentials.js";
 import { registerAssistant } from "../assistant/index.js";
 import { registerDashboards } from "../domains/dashboards.js";
 import { registerLogs } from "../domains/logs.js";
@@ -101,16 +102,28 @@ export async function createApp(cfg: Config) {
         now: () => new Date(),
         logger,
       };
-    registerSettings(deps);
+    const agentCredentials = registerAgentCredentials(deps);
+    registerSettings(deps, agentCredentials);
     const ingest = new Ingest(cat, auth, (...args) =>
       monitor?.accepted(...args),
+      agentCredentials,
     );
     ingest.register();
     registerTemplates(deps);
-    registerInstall(deps, cfg.downloadsDir ?? join(root, "downloads"));
-    modules.push(
-      registerNodes(deps, { internalExporter: ingest.internal.bind(ingest) }),
+    registerInstall(
+      deps,
+      cfg.downloadsDir ?? join(root, "downloads"),
+      agentCredentials,
     );
+    modules.push(
+      registerNodes(deps, {
+        internalExporter: ingest.internal.bind(ingest),
+        agentCredentials,
+      }),
+    );
+    // Enrollment credentials are a separate migration boundary. Legacy
+    // config.key based nodes keep working until they explicitly re-enroll.
+    modules.push(agentCredentials);
     modules.push(registerAssistant(deps));
     modules.push(registerDashboards(deps));
     modules.push(registerLogs(deps));

@@ -490,6 +490,7 @@ test("SDK configuration relays local auth and keeps validated offline cache with
   };
   const center = await mock(t, (req, res) => {
     assert.equal(req.headers.authorization, "Bearer test-fake-key");
+    assert.ok(req.headers["x-lightmoni-agent-id"]);
     if (!online) {
       req.socket.destroy();
       return;

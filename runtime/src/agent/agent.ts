@@ -102,7 +102,9 @@ export class Agent {
         table: "host",
         instanceId: this.identity.agent_id,
         selfTelemetry: false,
-        key: config.key,
+        // Telemetry and SDK configuration use the data audience. The legacy
+        // key remains a compatibility fallback for nodes before enrollment.
+        key: config.data_credential || config.key,
         configEndpoint: config.endpoint,
         intervalMs: config.collect_interval_seconds * 1000,
         maxBatchBytes: Math.floor(config.max_batch_bytes / 2),
@@ -140,7 +142,12 @@ export class Agent {
     this.files = new FileLogReader(this);
   }
   private safe(message: string) {
-    for (const secret of [this.config.key, this.config.local_token])
+    for (const secret of [
+      this.config.key,
+      this.config.control_credential,
+      this.config.data_credential,
+      this.config.local_token,
+    ])
       if (secret) message = message.split(secret).join("[redacted]");
     let raw = Buffer.from(message);
     if (raw.length > 1024) {
@@ -433,7 +440,11 @@ export class Agent {
         this.config.endpoint.replace(/\/$/, "") + "/v1/sdk-config",
         {
           redirect: "manual",
-          headers: { Authorization: "Bearer " + this.config.key },
+          headers: {
+            "X-Lightmoni-Agent-ID": this.identity.agent_id,
+            Authorization:
+              "Bearer " + (this.config.control_credential || this.config.key),
+          },
           signal: AbortSignal.any([parent, AbortSignal.timeout(5000)]),
         },
       );
@@ -490,7 +501,8 @@ export class Agent {
         method,
         redirect: "manual",
         headers: {
-          Authorization: "Bearer " + this.config.key,
+          Authorization:
+            "Bearer " + (this.config.control_credential || this.config.key),
           "Content-Type": "application/json",
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -572,7 +584,9 @@ export class Agent {
             "X-Lightmoni-Table": batch.table,
             "X-Lightmoni-Batch-ID": batch.id,
             "X-Lightmoni-Batch-Created-At": batch.created_at,
-            Authorization: "Bearer " + this.config.key,
+            "X-Lightmoni-Agent-ID": this.identity.agent_id,
+            Authorization:
+              "Bearer " + (this.config.data_credential || this.config.key),
           },
           body: new Uint8Array(batch.payload),
           signal: AbortSignal.any([parent, AbortSignal.timeout(15000)]),

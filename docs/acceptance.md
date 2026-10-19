@@ -2,7 +2,7 @@
 
 2026-10-17 平台已迁移到 Node.js/TypeScript，当前运行与验收入口见 [迁移规格](../specs/007-node-runtime-migration/spec.md)、[验证记录](../specs/007-node-runtime-migration/validation.md)。下文保留各阶段原始验收证据，其中 Go 平台路径和历史测试命令不再作为当前启动入口；业务 Go SDK 继续支持。
 
-2026-10-11 多语言扩展：Go、JavaScript/TypeScript、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust SDK 原生封装、安装包、业务示例和下载页已接通。六个新 SDK 的 60 项协议/故障测试、真实 Agent SQLite 关闭重开、八语言到隔离 ClickHouse 的完整查询验证通过，见 [多语言 SDK 验收](evidence/multilang-sdk/README.md)。新 SDK 使用显式 flush，非官方完整 OTel SDK 再导出。
+2026-10-11 历史多语言验收曾覆盖 Go、JavaScript/TypeScript、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust。Java/C# SDK 已从当前发行版下线；历史测试证据仍保留在 [多语言 SDK 验收](evidence/multilang-sdk/README.md)，当前可用语言以 SDK 接入页和 [SDK 总览](../sdk/README.md) 为准。
 
 
 2026-10-11：SDK / Agent 接入已拆分 Tab，Key 改为逻辑 table 白名单。权限、旧 Key 迁移、管理流程与三轮浏览器验收见 [接入权限验收](evidence/ingestion-table-keys/README.md)。下文全局 Key 的描述保留此前真实验收背景，当前上报需显式授权 table。

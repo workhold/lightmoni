@@ -14,6 +14,7 @@ import time
 import urllib.parse
 import uuid
 import weakref
+import os
 from dataclasses import dataclass
 from .sampling import SYSTEM_TABLES, copy_policies, decode_config, matches, sample_log
 from .transport import Request, ResponseTooLarge
@@ -118,6 +119,56 @@ def _endpoint(value):
     return value.rstrip("/")
 
 
+def _secret(explicit, file_path, env_name, file_env_name, label):
+    """Resolve one secret without ever logging its content."""
+    file_path = file_path or os.environ.get(file_env_name, "")
+    file_value = ""
+    if file_path:
+        try:
+            if os.path.islink(file_path) or not os.path.isfile(file_path):
+                raise ValueError(f"{label} file must be a regular file")
+            with open(file_path, "rb") as fh:
+                raw = fh.read(16 * 1024 + 1)
+            if len(raw) > 16 * 1024:
+                raise ValueError(f"{label} file is too large")
+            file_value = raw.decode("utf-8").removesuffix("\n").removesuffix("\r")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError(f"{label} file unavailable") from exc
+    env_value = os.environ.get(env_name, "")
+    values = [v for v in (explicit, file_value, env_value) if v]
+    if len(set(values)) > 1:
+        raise ValueError(f"credential_source_conflict: {env_name}")
+    return (explicit or file_value or env_value), ("explicit" if explicit else "file" if file_value else "env" if env_value else "")
+
+
+def _select_connection(mode, endpoint, key, agent_endpoint, local_token, timeout):
+    mode = mode or "direct"
+    if mode not in ("agent", "direct", "auto"):
+        raise ValueError("mode must be agent, direct, or auto")
+    if mode == "agent":
+        return _endpoint(agent_endpoint or "http://127.0.0.1:4318"), local_token, "agent", "configured", ""
+    if mode == "direct":
+        if not endpoint:
+            raise ValueError("direct mode requires endpoint")
+        if not key:
+            raise ValueError("direct mode requires data key")
+        return _endpoint(endpoint), key, "direct", "not_probed", ""
+    agent_endpoint = _endpoint(agent_endpoint or "http://127.0.0.1:4318")
+    try:
+        request = Request(agent_endpoint + "/healthz", time.monotonic() + min(max(float(timeout), .05), 2.0))
+        status, _headers, _body = request.exchange("GET", maximum=1024)
+        if 200 <= status < 300:
+            return agent_endpoint, local_token, "agent", "healthy", ""
+        # A response proves the endpoint exists; auth/protocol failures must
+        # not be hidden by an automatic direct fallback.
+        raise ValueError(f"agent probe HTTP {status}")
+    except (OSError, TimeoutError):
+        pass
+    if not endpoint or not key:
+        raise ValueError("auto_route_unavailable: agent unavailable and direct credentials are missing")
+    return _endpoint(endpoint), key, "direct", "unavailable_fallback", "agent_unreachable_before_body"
+
+
 class _State:
     def __init__(self, service, endpoint, key, limits, resource=None, instance_id=None):
         if not isinstance(service, str) or not service or len(service.encode()) > 128:
@@ -146,7 +197,9 @@ class _State:
                           retried_batches=0, invalid_records=0, overflow_records=0,
                           dropped_records=0, rejected_records=0, last_error="", sampled_out_logs=0,
                           unmatched_logs=0, excluded_logs=0, disabled_records=0, reporting_disabled=False,
-                          config_revision="", config_error="")
+                          config_revision="", config_error="", configured_mode="", selected_route="",
+                          agent_probe="", fallback_count=0, last_route_error="", route_uncertain=False,
+                          credential_source="")
         self.local_sampling, self.remote_sampling = {}, {}
         self.local_disabled, self.remote_disabled, self.reporting_disabled = False, False, False
         self.reporting_generation, self.source_sequence = 0, 0
@@ -402,9 +455,29 @@ class Span:
 
 
 class Client:
+    @classmethod
+    def from_env(cls, service, table, **kwargs):
+        """Build a client from LIGHTMONI_* variables and optional explicit fields."""
+        mode = kwargs.pop("mode", os.environ.get("LIGHTMONI_MODE", "direct"))
+        endpoint = kwargs.pop("endpoint", "") or os.environ.get("LIGHTMONI_ENDPOINT", "")
+        agent_endpoint = kwargs.pop("agent_endpoint", "") or os.environ.get("LIGHTMONI_AGENT_ENDPOINT", "")
+        local_token, local_source = _secret(kwargs.pop("local_token", ""), kwargs.pop("local_token_file", ""), "LIGHTMONI_LOCAL_TOKEN", "LIGHTMONI_LOCAL_TOKEN_FILE", "local token")
+        data_key, data_source = _secret(kwargs.pop("data_key", kwargs.pop("key", "")), kwargs.pop("data_key_file", ""), "LIGHTMONI_DATA_KEY", "LIGHTMONI_DATA_KEY_FILE", "data key")
+        legacy_key, legacy_source = _secret("", "", "LIGHTMONI_KEY", "", "legacy data key")
+        if data_key and legacy_key and data_key != legacy_key:
+            raise ValueError("credential_source_conflict: LIGHTMONI_KEY")
+        if not data_key:
+            data_key, data_source = legacy_key, ("legacy-env" if legacy_key else legacy_source)
+        selected_endpoint, selected_key, selected_route, probe, fallback = _select_connection(mode, endpoint, data_key, agent_endpoint, local_token, kwargs.pop("discovery_timeout", .5))
+        client = cls(service, table, endpoint=selected_endpoint, key=selected_key, mode=mode, **kwargs)
+        client._state.stats.update(configured_mode=mode, selected_route=selected_route, agent_probe=probe, credential_source=local_source if selected_route == "agent" else data_source)
+        if fallback:
+            client._state.stats["fallback_count"] += 1
+        return client
+
     def __init__(self, service, table, endpoint="http://127.0.0.1:4318", key="", self_telemetry=True, *,
                  log_sampling=None, disabled=False, remote_config=True, config_endpoint=None, config_key=None,
-                 config_interval=30, resource=None, instance_id=None, **limits):
+                 config_interval=30, resource=None, instance_id=None, mode="direct", **limits):
         if type(disabled) is not bool or type(remote_config) is not bool:
             raise ValueError("reporting switches require booleans")
         if type(config_interval) not in (int, float) or not math.isfinite(config_interval) or config_interval < 1:
@@ -412,6 +485,7 @@ class Client:
         policies = copy_policies({} if log_sampling is None else log_sampling)
         config_url = _endpoint(config_endpoint if config_endpoint is not None else endpoint)
         self.table, self._state = _table(table), _State(service, endpoint, key, limits, resource, instance_id)
+        self._state.stats.update(configured_mode=mode, selected_route="agent" if mode == "agent" else "direct", agent_probe="configured", credential_source="explicit")
         self._state.local_sampling = policies
         self._state.local_disabled = disabled
         self._state.set_disabled(disabled)

@@ -1,6 +1,6 @@
 //! Native synchronous OTLP/HTTP client. Recording does not perform network I/O.
 use serde_json::{json, Value};
-use std::{collections::{BTreeMap, VecDeque}, io::Read, sync::{Arc, Mutex}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{collections::{BTreeMap, VecDeque}, fs, io::Read, sync::{Arc, Mutex}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use uuid::Uuid;
 
 pub type Attributes = BTreeMap<String, Attribute>;
@@ -12,6 +12,45 @@ impl From<bool> for Attribute { fn from(v: bool) -> Self { Self::Bool(v) } }
 impl From<i64> for Attribute { fn from(v: i64) -> Self { Self::Int(v) } }
 impl From<f64> for Attribute { fn from(v: f64) -> Self { Self::Double(v) } }
 pub type Result<T> = std::result::Result<T, String>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ConnectionMode { Agent, Direct, Auto }
+impl ConnectionMode { fn parse(value:&str)->Result<Self>{match value {"agent"=>Ok(Self::Agent),"direct"=>Ok(Self::Direct),"auto"=>Ok(Self::Auto),_=>Err("mode must be agent, direct, or auto".into())}} }
+#[derive(Clone, Debug)]
+pub struct ConnectionConfig {
+    pub mode: ConnectionMode, pub endpoint: Option<String>, pub data_key: Option<String>, pub data_key_file: Option<String>,
+    pub agent_endpoint: Option<String>, pub local_token: Option<String>, pub local_token_file: Option<String>, pub discovery_timeout: Duration,
+}
+impl Default for ConnectionConfig { fn default()->Self{Self{mode:ConnectionMode::Direct,endpoint:None,data_key:None,data_key_file:None,agent_endpoint:None,local_token:None,local_token_file:None,discovery_timeout:Duration::from_millis(500)}} }
+fn secret(explicit:Option<String>,file:Option<String>,env:&str,file_env:&str)->Result<(String,String)> {
+    let path=file.or_else(||std::env::var(file_env).ok()); let from_file=if let Some(path)=path { let meta=fs::symlink_metadata(&path).map_err(|_|format!("{env} file unavailable"))?; if !meta.file_type().is_file(){return Err(format!("{env} file must be a regular file"));} let raw=fs::read(&path).map_err(|_|format!("{env} file unavailable"))?;if raw.len()>16*1024{return Err(format!("{env} file is too large"));}String::from_utf8(raw).map_err(|_|format!("{env} file is not UTF-8"))?.trim_end_matches(&['\r','\n'][..]).to_string()}else{"".into()};
+    let from_env=std::env::var(env).unwrap_or_default(); let values=[explicit.clone().unwrap_or_default(),from_file.clone(),from_env.clone()]; let present:Vec<_>=values.iter().filter(|v|!v.is_empty()).collect(); if present.windows(2).any(|w|w[0]!=w[1]){return Err(format!("credential_source_conflict: {env}"));} let value=present.first().map(|v|(*v).clone()).unwrap_or_default(); let source=if explicit.as_ref().is_some_and(|v|!v.is_empty()){"explicit"}else if !from_file.is_empty(){"file"}else if !from_env.is_empty(){"env"}else{""}; Ok((value,source.into()))
+}
+impl ConnectionConfig {
+    pub fn from_env()->Result<Self>{
+        let mode=ConnectionMode::parse(&std::env::var("LIGHTMONI_MODE").unwrap_or_else(|_|"direct".into()))?;
+        let endpoint=std::env::var("LIGHTMONI_ENDPOINT").ok().filter(|v|!v.is_empty()); let agent_endpoint=std::env::var("LIGHTMONI_AGENT_ENDPOINT").ok().filter(|v|!v.is_empty());
+        let (data_key,data_key_source)=secret(None,None,"LIGHTMONI_DATA_KEY","LIGHTMONI_DATA_KEY_FILE")?; let (legacy,legacy_source)=secret(None,None,"LIGHTMONI_KEY","")?; if !data_key.is_empty()&&!legacy.is_empty()&&data_key!=legacy{return Err("credential_source_conflict: LIGHTMONI_KEY".into());} let data_key=if data_key.is_empty(){legacy}else{data_key};
+        let (local_token,_)=secret(None,None,"LIGHTMONI_LOCAL_TOKEN","LIGHTMONI_LOCAL_TOKEN_FILE")?;
+        Ok(Self{mode,endpoint,data_key:(!data_key.is_empty()).then_some(data_key),data_key_file:None,agent_endpoint,local_token:(!local_token.is_empty()).then_some(local_token),local_token_file:None,discovery_timeout:Duration::from_millis(500)})
+    }
+    fn selected(&self)->Result<(String,String,String,String,u64)> {
+        let agent=self.agent_endpoint.clone().unwrap_or_else(||"http://127.0.0.1:4318".into()); let local=self.local_token.clone().unwrap_or_default(); let direct=self.endpoint.clone().unwrap_or_default(); let data=self.data_key.clone().unwrap_or_default();
+        match self.mode {
+            ConnectionMode::Agent=>Ok((agent,local,"agent".into(),"configured".into(),0)),
+            ConnectionMode::Direct=>{if direct.is_empty()||data.is_empty(){Err("direct mode requires endpoint and data key".into())}else{Ok((direct,data,"direct".into(),"not_probed".into(),0))}},
+            ConnectionMode::Auto=>{
+                let client=reqwest::blocking::Client::builder().timeout(self.discovery_timeout.min(Duration::from_secs(2))).redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"cannot initialize HTTP transport")?; let url=format!("{}/healthz",agent.trim_end_matches('/')); let mut req=client.get(url);if !local.is_empty(){req=req.bearer_auth(&local);}let probe=req.send();
+                match probe {
+                    Ok(response) if response.status().is_success()=>Ok((agent,local,"agent".into(),"healthy".into(),0)),
+                    Ok(response)=>Err(format!("agent probe HTTP {}",response.status())),
+                    Err(_) if !direct.is_empty()&&!data.is_empty()=>Ok((direct,data,"direct".into(),"unavailable_fallback".into(),1)),
+                    Err(_)=>Err("auto_route_unavailable: agent unavailable and direct credentials are missing".into()),
+                }
+            }
+        }
+    }
+}
 fn nano() -> u128 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() }
 fn attrs(values: &Attributes) -> Result<Value> {
     if values.len()>32 { return Err("attribute count exceeded".into()); }
@@ -72,7 +111,7 @@ struct Instrument { table:String,name:String,kind:String,unit:String,bounds:Vec<
 struct State {
     endpoint:String,key:String,limits:Limits,resource:Value,http:reqwest::blocking::Client,
     metrics:BTreeMap<String,Instrument>,records:BTreeMap<(String,String),Vec<Value>>,queue:VecDeque<Batch>,
-    stats:BTreeMap<String,u64>,last_error:String,failure:Option<String>,seq:u64,closed:bool,
+    stats:BTreeMap<String,u64>,route_stats:BTreeMap<String,String>,last_error:String,failure:Option<String>,seq:u64,closed:bool,
     self_table:String,self_last:Option<Instant>,self_started:bool,self_previous:BTreeMap<String,u64>,
 }
 impl State {
@@ -173,6 +212,14 @@ fn format_rfc3339(n:u128)->String {
 pub struct Client { state:Arc<Mutex<State>>,delivery:Arc<Mutex<()>>,table:String,context:Option<TraceContext> }
 impl Client {
     pub fn new(service:&str,table_name:&str,endpoint:&str,key:&str)->Result<Self>{Self::with_limits(service,table_name,endpoint,key,Limits::default())}
+    pub fn from_env(service:&str,table_name:&str)->Result<Self>{
+        let config=ConnectionConfig::from_env()?; let (endpoint,key,selected,probe,fallback)=config.selected()?;
+        let client=Self::with_limits(service,table_name,&endpoint,&key,Limits::default())?;
+        let mut s=client.state.lock().unwrap();
+        s.route_stats.insert("configured_mode".into(),match config.mode{ConnectionMode::Agent=>"agent",ConnectionMode::Direct=>"direct",ConnectionMode::Auto=>"auto"}.into());
+        s.route_stats.insert("selected_route".into(),selected); s.route_stats.insert("agent_probe".into(),probe);
+        s.stats.insert("fallback_count".into(),fallback); Ok(client)
+    }
     pub fn with_limits(service:&str,table_name:&str,endpoint:&str,key:&str,limits:Limits)->Result<Self> {
         let table=table(table_name)?;let url=reqwest::Url::parse(endpoint).map_err(|_|"invalid endpoint")?;
         if service.is_empty() || service.len()>128 || !["http","https"].contains(&url.scheme()) || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some(){return Err("valid service and HTTP(S) endpoint required".into());}
@@ -180,7 +227,7 @@ impl Client {
         let http=reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"cannot initialize HTTP transport")?;
         let stats=["pending_batches","pending_bytes","buffer_bytes","delivered_batches","retried_batches","invalid_records","overflow_records","dropped_records","rejected_records"].iter().map(|n|(n.to_string(),0)).collect();
         let resource=json!({"attributes":attrs(&BTreeMap::from([("service.name".into(),service.into()),("service.instance.id".into(),Uuid::new_v4().to_string().into())]))?});
-        let s=State{endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:table.clone(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
+        let s=State{endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,route_stats:BTreeMap::new(),last_error:String::new(),failure:None,seq:0,closed:false,self_table:table.clone(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
         let enabled=s.limits.self_telemetry;
         let client=Self{state:Arc::new(Mutex::new(s)),delivery:Arc::new(Mutex::new(())),table,context:None};
         if enabled {
@@ -238,7 +285,7 @@ impl Client {
         if let Some(p)=parent{data["parentSpanId"]=json!(p.span_id);if !p.trace_state.is_empty(){data["traceState"]=json!(p.trace_state);}}
         Ok(Span{client:self.clone(),context,data,ended:false})
     }
-    pub fn stats(&self)->Value {let s=self.state.lock().unwrap();let mut value=json!(s.stats);value["last_error"]=json!(s.last_error);value}
+    pub fn stats(&self)->Value {let s=self.state.lock().unwrap();let mut value=json!(s.stats);value["last_error"]=json!(s.last_error);for (key,item) in &s.route_stats{value[key]=json!(item);}value}
     pub fn update_key(&self,key:&str){self.state.lock().unwrap().key=key.into();}
     pub fn flush(&self,timeout:Duration)->Result<()> {
         if timeout.is_zero(){return Err("timeout must be positive".into());}

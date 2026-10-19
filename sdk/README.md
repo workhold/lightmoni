@@ -1,10 +1,10 @@
 # LightMoni SDK
 
-所有原生 SDK 支持指标、日志和链路，可通过执行节点（LightMoni Agent）上报，也可带 Key 直连中心，容器和未部署执行节点的服务同样可以接入。配置业务 service、逻辑 table；Key 必须允许该 table。withTable / with_table 共享根客户端生命周期。
+所有原生 SDK 支持指标、日志和链路，可通过执行节点（LightMoni Agent）上报，也可带 data key 直连中心，容器和未部署执行节点的服务同样可以接入。配置业务 service、逻辑 table；凭据必须允许该 table。六种 SDK 都提供从环境变量构造客户端的入口（Go `NewFromEnv`、TypeScript `createLightMoniFromEnv`、Python `Client.from_env`、PHP `Client::fromEnv`、Ruby `Client.from_env`、Rust `Client::from_env`）。`LIGHTMONI_KEY` 仅作为旧配置兼容别名。
 
 ## 选择上报方式
 
-“数据接入 → SDK 接入”可切换“通过执行节点”和“直连中心”，生成所选语言的代码与环境变量。示例读取 `LIGHTMONI_ENDPOINT`、`LIGHTMONI_KEY` 并传入 SDK；SDK 本身不自动读取这两个变量。
+“数据接入 → SDK 接入”可切换“通过执行节点”和“直连中心”，生成所选语言的代码与环境变量。统一环境变量为 `LIGHTMONI_MODE=agent|direct|auto`、`LIGHTMONI_AGENT_ENDPOINT`、`LIGHTMONI_LOCAL_TOKEN`、`LIGHTMONI_ENDPOINT` 和 `LIGHTMONI_DATA_KEY`；各语言的 `from_env` 入口会读取这些变量，显式构造函数仍可用于 Secret Manager 等集成。
 
 | 方式 | endpoint | key | 缓存 |
 | --- | --- | --- | --- |
@@ -14,8 +14,9 @@
 直连示例的环境配置：
 
 ~~~sh
+export LIGHTMONI_MODE=direct
 export LIGHTMONI_ENDPOINT='https://monitor.example.com'
-export LIGHTMONI_KEY='替换为允许 business 表的上报 Key'
+export LIGHTMONI_DATA_KEY='替换为允许 business 表的 data key'
 ~~~
 
 容器中通过 environment / Secret 配置这两个变量。容器的 `localhost` 指向容器本身；与中心位于同一个 Docker 网络时，可用 Compose 服务地址 `http://lightmoni:8080`；Docker Desktop 访问宿主机上的中心可用 `http://host.docker.internal:端口`。实际填写中心可达的域名或服务地址，SDK 自动追加 `/v1/metrics`、`/v1/logs`、`/v1/traces`，无需执行节点中转。
@@ -27,15 +28,13 @@ export LIGHTMONI_KEY='替换为允许 business 表的上报 Key'
 | Go | Go 1.26+ | [Go](go/README.md) |
 | JavaScript / TypeScript / 浏览器 | Node 20+ / 现代浏览器 | [TypeScript](typescript/README.md) |
 | Python | Python 3.9+，标准库 | [Python](python/README.md) |
-| Java / Kotlin（JVM） | JDK 17+，Gson 2.11.0 | [Java](java/README.md) |
-| C# / .NET | .NET 8+，系统库 | [.NET](dotnet/README.md) |
 | PHP | 64 位 PHP 8.1+、JSON、HTTP/HTTPS stream wrapper | [PHP](php/README.md) |
 | Ruby | Ruby 2.7+，标准库 | [Ruby](ruby/README.md) |
 | Rust | Rust 1.85+；reqwest、serde_json、uuid、httpdate | [Rust](rust/README.md) |
 
 这里的“封装”是 LightMoni 的原生 OTLP 客户端，不是对各语言官方 OpenTelemetry SDK 的再导出。使用标准数据模型、OTLP 编码和 W3C traceparent；指标由各语言内的有界聚合器生成。官方 OpenTelemetry 的普通 exporter 也能上报，但没有稳定批次 ID 的路径只提供至少一次交付。协议依据：[OTLP](https://opentelemetry.io/docs/specs/otlp/)。
 
-原生 API 覆盖非负 Int64 Counter（monotonic Delta）、最后观测 Gauge、显式边界 Histogram、结构化属性日志、基础 span、请求/任务作用域、显式父上下文及 W3C header。作用域内日志自动关联 trace；Go / Node 提供 HTTP 入口与出站传播接口，其他语言通过作用域和 header 接口接入框架。Java SDK 可在 Kotlin/JVM 中使用，不包括 Android/Kotlin Multiplatform。没有全套框架自动埋点、C/C++、Swift、Dart/Flutter 专用封装。
+原生 API 覆盖非负 Int64 Counter（monotonic Delta）、最后观测 Gauge、显式边界 Histogram、结构化属性日志、基础 span、请求/任务作用域、显式父上下文及 W3C header。作用域内日志自动关联 trace；Go / Node 提供 HTTP 入口与出站传播接口，其他语言通过作用域和 header 接口接入框架。没有全套框架自动埋点、C/C++、Swift、Dart/Flutter 专用封装。
 
 ## 日志 trace 字段预留
 
@@ -55,30 +54,28 @@ trace 元数据在调用日志 API 时从上下文复制，与记录一起冻结
 | Node.js | `withSpan(name, action)` / `withTrace(context, action)` 使用 AsyncLocalStorage；作用域内普通 `log(...)` 自动关联；`contextProvider` 可桥接外部上下文 |
 | 浏览器 | `withSpan` 回调收到绑定客户端，使用该客户端记录日志；`withTrace(context)` 返回不可变绑定客户端；跨 await 不共享全局上下文 |
 | Python | `with start_span(...)` 与 `with_trace(context)` 使用 contextvars；普通 `log(...)` 自动关联 |
-| Java/Kotlin | `withSpan` 或 `span.makeCurrent()` / `TraceContext.activate()` 使用线程作用域；普通 `log(...)` 自动关联 |
-| .NET | `WithSpanAsync` 或 `span.MakeCurrent()` / `TraceContext.Activate()` 使用 AsyncLocal，支持 await 与并发 Task |
 | Ruby | `with_span` / `LightMoni.with_trace` 使用 Fiber 局部作用域；普通 `log(...)` 自动关联 |
 | PHP | `withSpan` / `context->run` 使用独立的主请求与 Fiber 上下文；普通 `log(...)` 自动关联 |
 | Rust | 同步 `with_span` 回调收到绑定客户端，或 `with_trace(&context)` 创建不可变绑定客户端；`log(..., None)` 自动读取绑定；异步任务持有 span 与绑定客户端直到完成 |
 
 ### 自动关联与跨服务传播
 
-显式传入的上下文优先。子 span 默认继承当前 trace，生成新的 span ID；正常结束或异常退出后恢复外层作用域。无作用域的普通日志继续不带 trace，只有请求/任务入口创建根 span。`WithTable` / `withTable` 子客户端保留关联与根生命周期。Java 线程池、Ruby/PHP 新 Fiber 需要在调度时捕获当前上下文并在新执行入口激活；Rust/浏览器将绑定客户端传入异步任务。SDK 不用进程全局的“最后一个 trace”关联日志。
+显式传入的上下文优先。子 span 默认继承当前 trace，生成新的 span ID；正常结束或异常退出后恢复外层作用域。无作用域的普通日志继续不带 trace，只有请求/任务入口创建根 span。`WithTable` / `withTable` 子客户端保留关联与根生命周期。Ruby/PHP 新 Fiber 需要在调度时捕获当前上下文并在新执行入口激活；Rust/浏览器将绑定客户端传入异步任务。SDK 不用进程全局的“最后一个 trace”关联日志。
 
 跨服务使用 W3C `traceparent`（`00-<32位trace_id>-<16位当前span_id>-<2位flags>`）和可选 `tracestate`：
 
-1. 发送业务 HTTP 请求或消息时，从当前作用域导出 header；保留业务原有 header。Go 使用 `http.Client{Transport: moni.TraceTransport{}}` 和带 `r.Context()` 的请求；Node/浏览器使用 SDK 的 `client.fetch`；.NET 使用 `new HttpClient(new TraceHttpHandler())`。
+1. 发送业务 HTTP 请求或消息时，从当前作用域导出 header；保留业务原有 header。Go 使用 `http.Client{Transport: moni.TraceTransport{}}` 和带 `r.Context()` 的请求；Node/浏览器使用 SDK 的 `client.fetch`。
 2. 下游提取 header，作为请求/消费 span 的 parent：沿用同一 trace ID，生成自己的 span ID，并保留 flags / tracestate。Go 的 `TraceHandler`、Node 的 `traceHandler` 自动处理 HTTP 入口；没有或非法 traceparent 时在入口创建一次新 trace。
-3. 其余语言可用已有 `extract` / `inject` 及当前上下文导出入口：Python `TraceContext.inject_current()`，Java/.NET/PHP `TraceContext.injectCurrent()` / `InjectCurrent()`，Ruby `LightMoni.trace_headers`，Rust `client.trace_headers()`。消费入口用提取结果创建作用域，不需逐条修改日志代码。
+3. 其余语言可用已有 `extract` / `inject` 及当前上下文导出入口：Python `TraceContext.inject_current()`，PHP `TraceContext.injectCurrent()` / `InjectCurrent()`，Ruby `LightMoni.trace_headers`，Rust `client.trace_headers()`。消费入口用提取结果创建作用域，不需逐条修改日志代码。
 4. 服务 A → B → C 的日志保持同一 `trace_id`，各服务的 span 指向上游发送时的 span。已有 OpenTelemetry 可通过 Go / Node provider 或各语言作用域桥接；Key、service、table 与 trace 身份独立。Agent/中心保留日志 payload 的关联字段，上报请求本身不替代业务上下文。
 
-代理需转发这两个 header；浏览器跨域业务接口需在 CORS 中允许 `traceparent` / `tracestate`。消息中间件可将同一组字符串写入消息 metadata，再在消费者恢复；具体消息框架、第三方日志 appender 和完整 HTTP client span 埋点尚未提供。Go `TraceTransport`、SDK `fetch` 和 .NET handler 当前负责传播已有作用域，不自动记录额外的 HTTP client span。
+代理需转发这两个 header；浏览器跨域业务接口需在 CORS 中允许 `traceparent` / `tracestate`。消息中间件可将同一组字符串写入消息 metadata，再在消费者恢复；具体消息框架、第三方日志 appender 和完整 HTTP client span 埋点尚未提供。Go `TraceTransport`、SDK `fetch` 当前负责传播已有作用域，不自动记录额外的 HTTP client span。
 
-验证入口：`LIGHTMONI_TRACE_TEST=1 go test -race ./sdk/go`（先 build TypeScript），包含 Go → Node → Go 真实 HTTP 多跳；`npm --prefix sdk/typescript test` 包含并发请求/浏览器任务、异常恢复与双服务 HTTP；`python3 scripts/test-sdks.py --docker` 包含六种原生语言的嵌套/并发作用域和自动关联业务示例。
+验证入口：`LIGHTMONI_TRACE_TEST=1 go test -race ./sdk/go`（先 build TypeScript），包含 Go → Node → Go 真实 HTTP 多跳；`npm --prefix sdk/typescript test` 包含并发请求/浏览器任务、异常恢复与双服务 HTTP；`python3 scripts/test-sdks.py --docker` 包含四种原生语言的嵌套/并发作用域和自动关联业务示例。
 
 ## 生命周期与边界
 
-Go / TypeScript 保留现有周期 collection 和后台 exporter。其他原生 SDK 的记录 API 只修改内存，提供显式 flush（.NET 为 FlushAsync）；默认自监控启用时，Python / Java / .NET / Ruby / Rust 的后台线程每 30 秒同时 Flush 当前业务窗口。关闭自监控后由应用调度 flush。Python 的配置轮询是独立线程，不受自监控或停报开关影响。PHP 限单请求/单 worker，不能跨线程共享。其他语言发送期间不持有记录锁；Rust 的 blocking exporter 应放在异步 runtime 的 blocking worker。
+Go / TypeScript 保留现有周期 collection 和后台 exporter。其他原生 SDK 的记录 API 只修改内存，提供显式 flush；默认自监控启用时，Python / Ruby / Rust 的后台线程每 30 秒同时 Flush 当前业务窗口。关闭自监控后由应用调度 flush。Python 的配置轮询是独立线程，不受自监控或停报开关影响。PHP 限单请求/单 worker，不能跨线程共享。其他语言发送期间不持有记录锁；Rust 的 blocking exporter 应放在异步 runtime 的 blocking worker。
 
 flush 冻结当前窗口，等待调用边界内所有批次得到 ACK，后续记录属于下一窗口。网络失败、429/502/503/504 使用有抖动的指数退避，尊重 Retry-After；401/403 保留队列等待修复 Key。超时保留未确认批次，下次 flush 使用相同 UUID、创建时间和正文。updateKey / update_key 不改冻结正文，正在进行的退避不会主动唤醒。
 
@@ -92,13 +89,13 @@ SDK 不写磁盘；Agent SQLite 提交 ACK 后才释放 SDK 批次。ACK 前进�
 
 ~~~sh
 python3 scripts/test-sdks.py
-# 本机缺运行时时用隔离容器运行 Java/.NET/PHP/Rust：
+# 本机缺运行时时用隔离容器运行 PHP/Rust：
 python3 scripts/test-sdks.py --docker
 go test -race ./sdk/go
 npm --prefix sdk/typescript test
 ~~~
 
-共享 HTTP 测试检查聚合、Int64 精度、Gauge 不补零、Histogram 桶、W3C 父上下文、日志/span 关联、跨 table、overflow、503/429/401/损坏 ACK/连接断开丢 ACK、冻结重试与下一窗口、永久拒绝、partialSuccess 和容量损失。真实 Agent 和隔离 ClickHouse 验收见 [验收证据](../docs/evidence/multilang-sdk/README.md)。`scripts/sdk-smoke.py --mode direct` 验证八种 SDK 直连中心；容器可用 `--container-endpoint` 和 `--docker-network` 指定中心地址与网络。
+共享 HTTP 测试检查聚合、Int64 精度、Gauge 不补零、Histogram 桶、W3C 父上下文、日志/span 关联、跨 table、overflow、503/429/401/损坏 ACK/连接断开丢 ACK、冻结重试与下一窗口、永久拒绝、partialSuccess 和容量损失。真实 Agent 和隔离 ClickHouse 验收见 [验收证据](../docs/evidence/multilang-sdk/README.md)。`scripts/sdk-smoke.py --mode direct` 验证六种 SDK 直连中心；容器可用 `--container-endpoint` 和 `--docker-network` 指定中心地址与网络。
 
 ## 内部监控
 
@@ -108,13 +105,13 @@ SDK 默认每 30 秒报告一次实例心跳、待发送批次/字节和累计�
 
 内部快照排在业务批次之后，受同一队列容量限制；满队列时跳过自监控快照，下一周期重试。内部诊断只记录固定事件和计数，不复制网络请求、Key 或任意异常文本，也不会从上报失败处理器递归写入队列。后台发送是尽力上报；应用退出前仍需调用有截止时间的 Shutdown。
 
-Go / Node.js 有独立的心跳定时器；Python / Java / .NET / Ruby / Rust 的后台工作线程每 30 秒调用一次有 5 秒截止时间的 Flush，连同当前业务窗口一起发送。PHP 使用请求生命周期：在请求结束调用 Flush/Shutdown，长驻 worker 每 30 秒调用 Flush；不创建后台线程。Python / Ruby fork 后请重新初始化 SDK。
+Go / Node.js 有独立的心跳定时器；Python / Ruby / Rust 的后台工作线程每 30 秒调用一次有 5 秒截止时间的 Flush，连同当前业务窗口一起发送。PHP 使用请求生命周期：在请求结束调用 Flush/Shutdown，长驻 worker 每 30 秒调用 Flush；不创建后台线程。Python / Ruby fork 后请重新初始化 SDK。
 
-可关闭自监控：Go `Config.DisableSelfTelemetry=true`；TypeScript `selfTelemetry:false`；Python / Ruby `self_telemetry=false`；Java `Limits.selfTelemetry=false`；.NET `new Limits(SelfTelemetry:false)`；PHP 限制数组 `['self_telemetry'=>false]`；Rust `Limits { self_telemetry:false, ..Limits::default() }`。Agent 与中心的嵌入 SDK 会关闭此功能并使用各自的系统监控通道。
+可关闭自监控：Go `Config.DisableSelfTelemetry=true`；TypeScript `selfTelemetry:false`；Python / Ruby `self_telemetry=false`；PHP 限制数组 `['self_telemetry'=>false]`；Rust `Limits { self_telemetry:false, ..Limits::default() }`。Agent 与中心的嵌入 SDK 会关闭此功能并使用各自的系统监控通道。
 
 ## SDK 停报与日志上报规则
 
-Go、JavaScript / TypeScript（Node 和浏览器）、Python 支持以下动态配置。Java、.NET、PHP、Ruby、Rust 当前仍按既有方式全量记录，尚未接入这一规则协议。
+Go、JavaScript / TypeScript（Node 和浏览器）、Python 支持以下动态配置。PHP、Ruby、Rust 当前仍按既有方式全量记录，尚未接入这一规则协议。
 
 - **SDK 整体停报**：在“数据接入 → SDK 接入 → SDK 停报规则”按 service、instance_id、sdk.language 或 resource:资源属性选择实例。命中任一规则后停止该根 SDK 与所有 WithTable 子客户端的日志、指标、链路和自监控，清空未发送数据。配置拉取继续运行，删除规则后自动恢复，不补传停报期间的数据。已经得到 Agent 持久化 ACK 或已经在网络上提交的数据不能撤回。
 - **部分 UID 日志不上报**：在“数据接入 → 数据表 → 业务日志表 → 上报规则”的排除规则中配置 attr:user_id 等实际字段。命中任一排除规则即忽略日志，优先于 QA、VIP 和普通上报规则。metric 和 trace 不受日志排除或降采样影响。

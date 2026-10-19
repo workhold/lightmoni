@@ -2,6 +2,7 @@ import { type LogSamplingPolicy } from './sampling.js';
 export type { LogSamplingPolicy, LogRule, LogCondition, LogExcludeRule, SDKConfig } from './sampling.js';
 export type Attributes = Record<string, string | boolean | number | bigint>;
 export type Signal = "metrics" | "logs" | "traces";
+export type ConnectionMode = "agent" | "direct" | "auto";
 export interface FrozenBatch {
     signal: Signal;
     table: string;
@@ -25,6 +26,10 @@ export interface Options {
     table: string;
     endpoint?: string;
     key?: string;
+    mode?: ConnectionMode;
+    agentEndpoint?: string;
+    localToken?: string;
+    discoveryTimeoutMs?: number;
     selfTelemetry?: boolean;
     logSampling?: Record<string, LogSamplingPolicy>;
     disabled?: boolean;
@@ -74,6 +79,13 @@ export interface Stats {
     reportingDisabled: boolean;
     configRevision?: string;
     configError?: string;
+    configuredMode?: ConnectionMode;
+    selectedRoute?: "agent" | "direct" | "none";
+    agentProbe?: string;
+    fallbackCount?: number;
+    lastRouteError?: string;
+    credentialSource?: "explicit" | "file" | "env" | "legacy-env";
+    routeUncertain?: boolean;
 }
 export declare class DeliveryError extends Error {
     readonly retryable: boolean;

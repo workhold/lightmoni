@@ -43,7 +43,7 @@ createServer((req, res) => {
 
 直连中心同时配置 `endpoint` 和 `key`，无需 Agent。每份 Key 可配置逻辑 table 白名单或显式允许所有 table、不绑定 service；本例需允许 `http`、`app`，使用 `withTable` 也需授权相应 table。Agent 路径不需要 SDK 保管中心 Key；Agent 开启本地令牌时，`key` 传该令牌。`updateKey` 可修复直连 401/403，保留冻结队列。标准 OTLP partialSuccess 不重发整批，拒绝记录可见。
 
-Node.js 容器、Serverless 等服务可用 `process.env.LIGHTMONI_ENDPOINT`、`process.env.LIGHTMONI_KEY` 传入配置，通过 environment / Secret 注入值。容器的 `localhost` 指向容器本身；同一 Docker 网络可使用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可使用 `http://host.docker.internal:端口`。直连缓冲只在进程内，需要本地磁盘缓存时使用 Agent。浏览器继续使用下文的业务后端转发。
+Node.js 容器、Serverless 等服务可调用 `createLightMoniFromEnv` 读取 `LIGHTMONI_MODE`、`LIGHTMONI_ENDPOINT`、`LIGHTMONI_DATA_KEY`、`LIGHTMONI_AGENT_ENDPOINT` 和 `LIGHTMONI_LOCAL_TOKEN`；`LIGHTMONI_KEY` 仅作为兼容别名。通过 environment / Secret 注入值。容器的 `localhost` 指向容器本身；同一 Docker 网络可使用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可使用 `http://host.docker.internal:端口`。直连缓冲只在进程内，需要本地磁盘缓存时使用 Agent。浏览器继续使用下文的业务后端转发。
 
 ```sh
 cd sdk/typescript

@@ -1,16 +1,18 @@
 # 多语言 SDK 验收
 
+> 历史验收记录（2026-10-11）。Java/Kotlin JVM 与 C#/.NET SDK 已从当前发行版下线，以下包含这些语言的结果仅用于追溯，当前支持矩阵以 [SDK 总览](../../../sdk/README.md) 为准。
+
 本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/multilang-sdk/`](../../../artifacts/screenshots/docs/evidence/multilang-sdk/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
 
-2026-10-11。当前范围：Go、JavaScript/TypeScript/浏览器、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust。Java 库供 Kotlin/JVM 复用，不包含 Android/Multiplatform；没有 C/C++、Swift、Dart/Flutter 专用包或自动框架埋点。
+2026-10-11 历史范围：Go、JavaScript/TypeScript/浏览器、Python、Java/Kotlin JVM、C#/.NET、PHP、Ruby、Rust。Java 库供 Kotlin/JVM 复用，不包含 Android/Multiplatform；没有 C/C++、Swift、Dart/Flutter 专用包或自动框架埋点。
 
 | 验收 | 结果 |
 | --- | --- |
 | 六个新 SDK 的共享 HTTP 夹具 | 60 项通过：完整维度、类型区分、调用方修改、Int64 精度、连续 Delta、Gauge 不补零、Histogram 边界、traceparent、跨 table、overflow；503、429/Retry-After、401/Key 修复、损坏 ACK、连接断开丢 ACK、永久拒绝、partialSuccess、容量损失 |
 | 真实 Agent HTTP → SQLite → 关闭重开 | 六种语言、18 个批次；每语言 Counter=20、日志=20、span=20，trace/span ID 关联一致；Go race 通过 |
-| 八种 SDK → Agent → 主服务 → 隔离 ClickHouse 26.8 | 每语言 Counter=20、关联日志/span=20、Histogram count=20、Gauge=3，全部使用同一 table-scoped Key；结果 [e2e-report.json](e2e-report.json) |
-| 数据接入页 | 八种语言选择、安装命令和业务样例对应正确，八个真实安装包均能下载，1280/750/390 宽度无页面横向溢出；[ui-report.json](ui-report.json) |
-| 发布 | npm 包、七个源码包、八个 SHA256 校验；Python pip 安装和 .NET NuGet pack 成功；Java 编译和实际运行成功；Rust 1.85 使用 Cargo.lock 构建成功 |
+| 历史八种 SDK → Agent → 主服务 → 隔离 ClickHouse 26.8 | 每语言 Counter=20、关联日志/span=20、Histogram count=20、Gauge=3，全部使用同一 table-scoped Key；结果 [e2e-report.json](e2e-report.json) |
+| 历史数据接入页 | 八种语言选择、安装命令和业务样例对应正确，八个真实安装包均能下载，1280/750/390 宽度无页面横向溢出；[ui-report.json](ui-report.json) |
+| 历史发布 | npm 包、七个源码包、八个 SHA256 校验；Python pip 安装和 .NET NuGet pack 成功；Java 编译和实际运行成功；Rust 1.85 使用 Cargo.lock 构建成功 |
 | 回归 | Go 全仓 race、TypeScript SDK 5 项测试、前端 typecheck 与生产 build 通过 |
 
 运行：
