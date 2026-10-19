@@ -131,7 +131,19 @@ export interface ManagedMachinesOptions {
   sshRunner?: SSHRunner;
 }
 
-export function registerManagedMachines(deps: Dependencies, options: ManagedMachinesOptions = {}): Module & ManagedMachineStore {
+export interface TerminalLease {
+  machine: MachineSummary;
+  credentialID: string;
+  privateKey: string;
+  valid(): boolean;
+  markUsed(): void;
+  release(): void;
+}
+export interface MachineTerminalAccess {
+  acquireTerminal(machineID: string, credentialID: string | undefined, invalidate: () => void): TerminalLease;
+}
+
+export function registerManagedMachines(deps: Dependencies, options: ManagedMachinesOptions = {}): Module & ManagedMachineStore & MachineTerminalAccess {
   const { db, router } = deps;
   db.exec(`
     CREATE TABLE IF NOT EXISTS managed_machines(
@@ -192,7 +204,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   `);
   const now = () => deps.now();
   const busy = new Set<string>();
-  const idle = (machineID: string) => { if (busy.has(machineID)) fail(409, "此主机正在检查或部署，请稍后重试"); };
+  const terminals = new Map<string, { credentialID: string; invalidate: () => void }>();
+  const idle = (machineID: string) => { if (busy.has(machineID)) fail(409, "此主机有终端、检查或部署正在进行，请先结束后重试"); };
   const targetRevision = (machine: any) => hash(JSON.stringify([machine.address, machine.port, machine.username, machine.connection_method, machine.host_key_fingerprint, deps.externalURL]));
   const parameters = (input: Record<string, any>, allowed: string[]) => {
     if (Object.keys(input).some(key => !allowed.includes(key))) fail(400, "unknown request parameter");
@@ -275,6 +288,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     admin(ctx);
     idle(ctx.params.id);
     const existing = ensureMachine(ctx.params.id), input = await machineBody(ctx), value = validateMachine(input, existing), at = iso(now());
+    idle(ctx.params.id);
     db.run(
       `UPDATE managed_machines SET name=?,address=?,port=?,username=?,connection_method=?,host_key_fingerprint=?,platform=?,arch=?,updated_at=? WHERE id=?`,
       value.name, value.address, value.port, value.username, value.connectionMethod, value.fingerprint, value.platform, value.arch, at, ctx.params.id,
@@ -326,6 +340,33 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       if (envelope.machine_id !== machineID || envelope.credential_id !== credential.id || !envelope.secret) throw Error();
       return envelope.secret;
     } catch { fail(500, "凭据解密或绑定校验失败，请重新登记私钥"); }
+  };
+  const acquireTerminal: MachineTerminalAccess["acquireTerminal"] = (machineID, credentialID, invalidate) => {
+    idle(machineID);
+    const { machine, credential } = sshCredential(machineID, credentialID);
+    const lease: TerminalLease = {
+      machine, credentialID: credential.id, privateKey: decryptKey(machineID, credential),
+      valid() {
+        if (released) return false;
+        try {
+          ensureCredential(machineID, credential.id);
+          return targetRevision(get(machineID)) === revision;
+        } catch { return false; }
+      },
+      markUsed() { db.run("UPDATE machine_credentials SET last_used_at=? WHERE id=?", iso(now()), credential.id); },
+      release() {
+        if (released) return;
+        released = true;
+        lease.privateKey = "";
+        terminals.delete(machineID);
+        busy.delete(machineID);
+      },
+    };
+    const revision = targetRevision(machine);
+    let released = false;
+    busy.add(machineID);
+    terminals.set(machineID, { credentialID: credential.id, invalidate });
+    return lease;
   };
   const checkSSH = async (machineID: string, input: { credential_id?: string }, actorID: string, signal: AbortSignal): Promise<SSHCheckResult> => {
     parameters(record(input), ["credential_id"]);
@@ -443,7 +484,15 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   router.post("/api/v1/machines/:id/ssh-check", safe(async ctx => { admin(ctx); ctx.json(await checkSSH(ctx.params.id, await machineBody(ctx), ctx.user.id, ctx.signal)); }));
   router.get("/api/v1/machines/:id/credentials", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); ctx.json(credentialRows(ctx.params.id)); }));
   router.post("/api/v1/machines/:id/credentials", safe(addCredential));
-  router.delete("/api/v1/machines/:id/credentials/:credentialId", safe((ctx) => { admin(ctx); idle(ctx.params.id); ensureCredential(ctx.params.id, ctx.params.credentialId); db.run("UPDATE machine_credentials SET revoked_at=? WHERE id=?", iso(now()), ctx.params.credentialId); ctx.json({ ok: true, warning: "凭据已撤销；如需继续接入，请生成新的凭据或使用手动脚本。" }); }));
+  router.delete("/api/v1/machines/:id/credentials/:credentialId", safe((ctx) => {
+    admin(ctx);
+    const terminal = terminals.get(ctx.params.id);
+    if (!terminal) idle(ctx.params.id);
+    ensureCredential(ctx.params.id, ctx.params.credentialId);
+    db.run("UPDATE machine_credentials SET revoked_at=? WHERE id=?", iso(now()), ctx.params.credentialId);
+    if (terminal?.credentialID === ctx.params.credentialId) terminal.invalidate();
+    ctx.json({ ok: true, warning: "凭据已撤销；如需继续接入，请生成新的凭据或使用手动脚本。" });
+  }));
   router.get("/api/v1/machines/:id/deployments", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); ctx.json(deployments(ctx.params.id)); }));
   router.post("/api/v1/machines/:id/deployments/plan", safe(plan));
   router.get("/api/v1/machines/:id/deployments/:deploymentId", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); const value = deployments(ctx.params.id).find((item) => item.id === ctx.params.deploymentId); if (!value) fail(404, "部署计划不存在"); ctx.json(value); }));
@@ -465,5 +514,5 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     };
     return { id: value.id, machine_id: value.machine_id, status: value.status, version: value.version, arch: value.arch, plan: parseJSON(value.plan_json, {}), receipt, error: value.error, created_at: value.created_at, started_at: value.started_at, finished_at: value.finished_at };
   };
-  return { list, get, assistantList, assistantGet, checkSSH, assistantPlan, assistantDeployment };
+  return { list, get, assistantList, assistantGet, checkSSH, assistantPlan, assistantDeployment, acquireTerminal };
 }

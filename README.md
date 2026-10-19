@@ -49,6 +49,8 @@ docker compose up -d --no-build --wait
 
 更新源码版本后重新运行 `docker compose up -d --build --wait`；查看日志使用 `docker compose logs -f --tail=100`，停止服务使用 `docker compose down`。SQLite、加密主密钥和队列保存在 `lightmoni-state` 卷，随附数据库使用独立的 `lightmoni-telemetry` 卷。备份和恢复时配套保存状态卷、ClickHouse 数据和 `.env`；普通更新保留数据卷。容器提供健康检查、退出宽限时间和日志轮转。
 
+管理员可在“主机管理 → 登录终端”打开交互式 SSH 小窗，支持实时命令、全屏和重连；连接前需要确认主机指纹并添加有效私钥。使用与代理配置见 [网页 SSH 终端](docs/machine-terminal.md)。
+
 ## LightMoni Agent、执行节点与 SDK
 
 软件统一称 **LightMoni Agent**，部署在主机或容器中的运行实例称 **执行节点**；节点内部执行指标和日志采集的模块称采集器。导航入口为“节点助手”，网页对话能力仍称“AI 助手”。当前节点执行监控任务，不提供模型调用或通用命令执行能力。

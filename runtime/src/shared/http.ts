@@ -177,34 +177,40 @@ export class Router implements RouterContract {
   }
   checkOrigin(req: IncomingMessage): void {
     if (["GET", "HEAD", "OPTIONS"].includes(req.method ?? "")) return;
-    const origin = req.headers.origin;
-    if (!origin) return;
-    let expected: URL, actual: URL;
-    try {
-      expected = new URL(this.externalURL || "http://" + req.headers.host);
-      actual = new URL(origin);
-    } catch {
-      return fail(403, "invalid request origin");
-    }
-    if (
-      !["http:", "https:"].includes(actual.protocol) ||
-      actual.username ||
-      actual.password ||
-      actual.pathname !== "/" ||
-      actual.search ||
-      actual.hash
-    )
-      fail(403, "invalid request origin");
-    const local = (u: URL) =>
-      ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname.toLowerCase());
-    if (actual.origin === expected.origin) return;
-    if (
-      local(expected) &&
-      local(actual) &&
-      actual.protocol === expected.protocol &&
-      (actual.port === expected.port || actual.port === "5173")
-    )
-      return;
-    fail(403, "invalid request origin");
+    checkRequestOrigin(req, this.externalURL);
   }
+}
+export function checkRequestOrigin(req: IncomingMessage, externalURL: string, required = false): void {
+  const origin = req.headers.origin;
+  if (!origin) {
+    if (required) fail(403, "invalid request origin");
+    return;
+  }
+  let expected: URL, actual: URL;
+  try {
+    expected = new URL(externalURL || "http://" + req.headers.host);
+    actual = new URL(origin);
+  } catch {
+    return fail(403, "invalid request origin");
+  }
+  if (
+    !["http:", "https:"].includes(actual.protocol) ||
+    actual.username ||
+    actual.password ||
+    actual.pathname !== "/" ||
+    actual.search ||
+    actual.hash
+  )
+    fail(403, "invalid request origin");
+  const local = (u: URL) =>
+    ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname.toLowerCase());
+  if (actual.origin === expected.origin) return;
+  if (
+    local(expected) &&
+    local(actual) &&
+    actual.protocol === expected.protocol &&
+    (actual.port === expected.port || actual.port === "5173")
+  )
+    return;
+  fail(403, "invalid request origin");
 }

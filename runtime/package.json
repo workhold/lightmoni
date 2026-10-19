@@ -25,11 +25,15 @@
     "lossless-json": "4.3.2",
     "nodemailer": "10.1.2",
     "protobufjs": "8.8.1",
-    "systeminformation": "5.33.15"
+    "ssh2": "1.17.0",
+    "systeminformation": "5.33.15",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
     "@types/nodemailer": "8.0.2",
+    "@types/ssh2": "1.15.6",
+    "@types/ws": "8.18.2",
     "tsx": "4.23.15",
     "typescript": "7.0.2"
   }
