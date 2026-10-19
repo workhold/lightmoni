@@ -1,3 +1,4 @@
+import { expandMetricFunctions, metricTableNames } from './metric-query.js';
 import { parse, format } from "@clickhouse/parser";
 import { isLosslessNumber } from "lossless-json";
 import { Semaphore } from "../shared/serial.js";
@@ -98,7 +99,7 @@ function checkedSQL(
 ): { tables: string[]; sql: string } {
   if (typeof sql !== "string" || Buffer.byteLength(sql) > 2 << 20)
     throw Error("invalid SQL");
-  const statements: any[] = parse(sql, { locations: false });
+  const statements: any[] = expandMetricFunctions(parse(sql, { locations: false }));
   if (statements.length !== 1) throw Error("only one SQL statement is allowed");
   if (
     ![
@@ -255,7 +256,7 @@ export class Executor {
     return referencedTables(
       expand(sql, { from: from.toISOString(), to: now.toISOString() }, 60000)
         .sql,
-      new Set((await this.catalog.list(signal)).map((t) => t.name)),
+      metricTableNames(await this.catalog.list(signal)),
     );
   }
   async execute(
@@ -272,7 +273,8 @@ export class Executor {
         request_id: req.request_id || id(),
         results: [],
       },
-      allowed = new Set((await this.catalog.list(signal)).map((t) => t.name));
+      tables=await this.catalog.list(signal),
+      allowed = metricTableNames(tables);
     for (const q of req.queries) {
       const start = Date.now(),
         r: QueryResponse["results"][number] = {
@@ -286,6 +288,29 @@ export class Executor {
       try {
         const expanded = expand(q.sql, req.range, req.interval_ms);
         const validated = checkedSQL(expanded.sql, allowed);
+        let metricAlignment: {range:QueryRequest["range"];interval_ms:number}|undefined;
+        const requiredPeriods:number[]=[];
+        for(const name of validated.tables){const table=tables.find(t=>t.name===name||t.logical_name===name&&t.kind==='metric'&&t.metric_type==='histogram');
+          if(!table?.columns?.some(c=>c.name==='window_seconds'))continue;
+          const metadata=await this.reader.query(`SELECT groupUniqArray(window_seconds) AS periods FROM ${name} WHERE window_start>={__lm_from:DateTime64(9,'UTC')} AND window_start<{__lm_to:DateTime64(9,'UTC')} AND window_seconds>0`,expanded.params,signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000));
+          const periods=metadata.data[0]?.periods??[];
+          requiredPeriods.push(...periods.map(Number));
+        }
+        if(requiredPeriods.length){
+          if(requiredPeriods.some(seconds=>!Number.isSafeInteger(seconds)||seconds<=0))throw Error('invalid stored metric window');
+          const gcd=(a:number,b:number):number=>b?gcd(b,a%b):a;
+          const seconds=requiredPeriods.reduce((multiple,seconds)=>multiple/gcd(multiple,seconds)*seconds,1);
+          if(!Number.isSafeInteger(seconds))throw Error('invalid stored metric window');
+          if(!Number.isSafeInteger(req.interval_ms)||req.interval_ms<=0)throw Error('query interval must be a positive integer');
+          const period=BigInt(seconds)*1_000_000_000n;
+          const from=parseNanoTime(req.range.from),to=parseNanoTime(req.range.to);
+          if(req.source?.startsWith('dashboard')||req.source?.startsWith('alert')){
+            const start=from/period*period,end=to/period*period;if(end<=start)throw Error('query range is shorter than one metric window');
+            const interval=Math.max(seconds*1000,Math.ceil(req.interval_ms/(seconds*1000))*seconds*1000);
+            expanded.params.__lm_from=formatNanoTime(start).replace('T',' ').replace(/Z$/,'');expanded.params.__lm_to=formatNanoTime(end).replace('T',' ').replace(/Z$/,'');expanded.params.__lm_interval=String(interval);
+            metricAlignment={range:{from:formatNanoTime(start),to:formatNanoTime(end)},interval_ms:interval};
+          }else if(from%period||to%period||!Number.isSafeInteger(req.interval_ms)||BigInt(req.interval_ms)*1_000_000n%period)throw Error('query range boundaries and interval must align to '+seconds+' second metric windows');
+        }
         for (const [k, p] of Object.entries(q.params ?? {})) {
           if (k.startsWith("__lm_") || !identifier.test(k))
             throw Error("invalid parameter name");
@@ -304,6 +329,7 @@ export class Executor {
         );
         r.truncated = data.data.length > 10000;
         const frame = {
+          ...(metricAlignment?{meta:{metric_window_alignment:metricAlignment}}:{}),
           columns: data.meta.map((c) => ({
             ...c,
             nullable: c.type.startsWith("Nullable("),

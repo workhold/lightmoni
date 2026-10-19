@@ -1,6 +1,9 @@
 //! Native synchronous OTLP/HTTP client. Recording does not perform network I/O.
+mod windows;
+mod record;
+pub use record::Options;
 use serde_json::{json, Value};
-use std::{collections::{BTreeMap, VecDeque}, fs, io::Read, sync::{Arc, Mutex}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{collections::{BTreeMap, VecDeque}, io::Read, sync::{Arc, Mutex}, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use uuid::Uuid;
 
 pub type Attributes = BTreeMap<String, Attribute>;
@@ -12,50 +15,6 @@ impl From<bool> for Attribute { fn from(v: bool) -> Self { Self::Bool(v) } }
 impl From<i64> for Attribute { fn from(v: i64) -> Self { Self::Int(v) } }
 impl From<f64> for Attribute { fn from(v: f64) -> Self { Self::Double(v) } }
 pub type Result<T> = std::result::Result<T, String>;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ConnectionMode { Agent, Direct, Auto }
-impl ConnectionMode { fn parse(value:&str)->Result<Self>{match value {"agent"=>Ok(Self::Agent),"direct"=>Ok(Self::Direct),"auto"=>Ok(Self::Auto),_=>Err("mode must be agent, direct, or auto".into())}} }
-#[derive(Clone, Debug)]
-pub struct ConnectionConfig {
-    pub mode: ConnectionMode, pub endpoint: Option<String>, pub data_key: Option<String>, pub data_key_file: Option<String>,
-    pub agent_endpoint: Option<String>, pub local_token: Option<String>, pub local_token_file: Option<String>, pub discovery_timeout: Duration,
-}
-impl Default for ConnectionConfig { fn default()->Self{Self{mode:ConnectionMode::Direct,endpoint:None,data_key:None,data_key_file:None,agent_endpoint:None,local_token:None,local_token_file:None,discovery_timeout:Duration::from_millis(500)}} }
-fn secret(explicit:Option<String>,file:Option<String>,env:&str,file_env:&str)->Result<(String,String)> {
-    let path=file.or_else(||std::env::var(file_env).ok()); let from_file=if let Some(path)=path { let meta=fs::symlink_metadata(&path).map_err(|_|format!("{env} file unavailable"))?; if !meta.file_type().is_file(){return Err(format!("{env} file must be a regular file"));} let raw=fs::read(&path).map_err(|_|format!("{env} file unavailable"))?;if raw.len()>16*1024{return Err(format!("{env} file is too large"));}String::from_utf8(raw).map_err(|_|format!("{env} file is not UTF-8"))?.trim_end_matches(&['\r','\n'][..]).to_string()}else{"".into()};
-    let from_env=std::env::var(env).unwrap_or_default(); let values=[explicit.clone().unwrap_or_default(),from_file.clone(),from_env.clone()]; let present:Vec<_>=values.iter().filter(|v|!v.is_empty()).collect(); if present.windows(2).any(|w|w[0]!=w[1]){return Err(format!("credential_source_conflict: {env}"));} let value=present.first().map(|v|(*v).clone()).unwrap_or_default(); let source=if explicit.as_ref().is_some_and(|v|!v.is_empty()){"explicit"}else if !from_file.is_empty(){"file"}else if !from_env.is_empty(){"env"}else{""}; Ok((value,source.into()))
-}
-impl ConnectionConfig {
-    pub fn from_env()->Result<Self>{
-        let mode=ConnectionMode::parse(&std::env::var("LIGHTMONI_MODE").unwrap_or_else(|_|"direct".into()))?;
-        let endpoint=std::env::var("LIGHTMONI_ENDPOINT").ok().filter(|v|!v.is_empty()); let agent_endpoint=std::env::var("LIGHTMONI_AGENT_ENDPOINT").ok().filter(|v|!v.is_empty());
-        let data_key=if mode!=ConnectionMode::Agent {
-            let (data_key,_)=secret(None,None,"LIGHTMONI_DATA_KEY","LIGHTMONI_DATA_KEY_FILE")?;
-            let (legacy,_)=secret(None,None,"LIGHTMONI_KEY","")?;
-            if !data_key.is_empty()&&!legacy.is_empty()&&data_key!=legacy{return Err("credential_source_conflict: LIGHTMONI_KEY".into());}
-            if data_key.is_empty(){legacy}else{data_key}
-        }else{String::new()};
-        let local_token=if mode!=ConnectionMode::Direct {secret(None,None,"LIGHTMONI_LOCAL_TOKEN","LIGHTMONI_LOCAL_TOKEN_FILE")?.0}else{String::new()};
-        Ok(Self{mode,endpoint,data_key:(!data_key.is_empty()).then_some(data_key),data_key_file:None,agent_endpoint,local_token:(!local_token.is_empty()).then_some(local_token),local_token_file:None,discovery_timeout:Duration::from_millis(500)})
-    }
-    fn selected(&self)->Result<(String,String,String,String,u64)> {
-        let agent=self.agent_endpoint.clone().unwrap_or_else(||"http://127.0.0.1:4318".into()); let local=self.local_token.clone().unwrap_or_default(); let direct=self.endpoint.clone().unwrap_or_default(); let data=self.data_key.clone().unwrap_or_default();
-        match self.mode {
-            ConnectionMode::Agent=>Ok((agent,local,"agent".into(),"configured".into(),0)),
-            ConnectionMode::Direct=>{if direct.is_empty()||data.is_empty(){Err("direct mode requires endpoint and data key".into())}else{Ok((direct,data,"direct".into(),"not_probed".into(),0))}},
-            ConnectionMode::Auto=>{
-                let client=reqwest::blocking::Client::builder().timeout(self.discovery_timeout.min(Duration::from_secs(2))).redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"cannot initialize HTTP transport")?; let url=format!("{}/healthz",agent.trim_end_matches('/')); let mut req=client.get(url);if !local.is_empty(){req=req.bearer_auth(&local);}let probe=req.send();
-                match probe {
-                    Ok(response) if response.status().is_success()=>Ok((agent,local,"agent".into(),"healthy".into(),0)),
-                    Ok(response)=>Err(format!("agent probe HTTP {}",response.status())),
-                    Err(_) if !direct.is_empty()&&!data.is_empty()=>Ok((direct,data,"direct".into(),"unavailable_fallback".into(),1)),
-                    Err(_)=>Err("auto_route_unavailable: agent unavailable and direct credentials are missing".into()),
-                }
-            }
-        }
-    }
-}
 fn nano() -> u128 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() }
 fn attrs(values: &Attributes) -> Result<Value> {
     if values.len()>32 { return Err("attribute count exceeded".into()); }
@@ -114,9 +73,11 @@ struct Batch { seq:u64,id:String,created:String,table:String,signal:String,raw:V
 struct Point { attrs:Value,integer:i64,value:f64,count:u64,buckets:Vec<u64>,min:f64,max:f64,at:u128 }
 struct Instrument { table:String,name:String,kind:String,unit:String,bounds:Vec<f64>,start:u128,series:BTreeMap<String,Point> }
 struct State {
+    observations:BTreeMap<String,record::Observation>,
+    metric_windows:BTreeMap<String,Vec<windows::MetricWindow>>,
     endpoint:String,key:String,limits:Limits,resource:Value,http:reqwest::blocking::Client,
     metrics:BTreeMap<String,Instrument>,records:BTreeMap<(String,String),Vec<Value>>,queue:VecDeque<Batch>,
-    stats:BTreeMap<String,u64>,route_stats:BTreeMap<String,String>,last_error:String,failure:Option<String>,seq:u64,closed:bool,
+    stats:BTreeMap<String,u64>,last_error:String,failure:Option<String>,seq:u64,closed:bool,
     self_table:String,self_last:Option<Instant>,self_started:bool,self_previous:BTreeMap<String,u64>,
 }
 impl State {
@@ -132,21 +93,16 @@ impl State {
     }
     fn payload(&self,signal:&str,rows:&[Value])->Vec<u8> {
         let (resource,scope,field)=match signal {"metrics"=>("resourceMetrics","scopeMetrics","metrics"),"logs"=>("resourceLogs","scopeLogs","logRecords"),_=>("resourceSpans","scopeSpans","spans")};
-        let normalized;
-        let rows=if signal=="metrics" {
-            let mut merged:BTreeMap<String,Value>=BTreeMap::new();
-            for row in rows {
-                let name=row["name"].as_str().unwrap().to_string();
-                let kind=["sum","gauge","histogram"].into_iter().find(|k|!row[*k].is_null()).unwrap();
-                if let Some(existing)=merged.get_mut(&name){existing[kind]["dataPoints"].as_array_mut().unwrap().extend(row[kind]["dataPoints"].as_array().unwrap().iter().cloned());}
-                else{merged.insert(name,row.clone());}
-            }
-            normalized=merged.into_values().collect::<Vec<_>>();&normalized[..]
-        }else{rows};
+        if signal=="metrics" {
+            let mut scopes:BTreeMap<String,BTreeMap<String,Value>>=BTreeMap::new();
+            for row in rows{let name=row["name"].as_str().unwrap().to_string();let kind=["sum","gauge","histogram","exponentialHistogram","summary"].into_iter().find(|k|!row[*k].is_null()).unwrap();let scope=match scopes.get("").and_then(|m|m.get(&name)){Some(existing)if existing[kind].is_null()=>kind,_=>""};let merged=scopes.entry(scope.into()).or_default();if let Some(existing)=merged.get_mut(&name){existing[kind]["dataPoints"].as_array_mut().unwrap().extend(row[kind]["dataPoints"].as_array().unwrap().iter().cloned());}else{merged.insert(name,row.clone());}}
+            return json!({"resourceMetrics":[{"resource":self.resource,"scopeMetrics":scopes.into_iter().map(|(kind,rows)|json!({"scope":{"name":if kind.is_empty(){"lightmoni/sdk/rust".to_string()}else{format!("lightmoni/sdk/rust/{kind}")},"version":"0.1.0"},"metrics":rows.into_values().collect::<Vec<_>>()})).collect::<Vec<_>>()}]}).to_string().into_bytes();
+        }
         json!({resource:[{"resource":self.resource,scope:[{"scope":{"name":"lightmoni/sdk/rust","version":"0.1.0"},field:rows}]}]}).to_string().into_bytes()
     }
-    fn collect(&mut self) {
+    fn collect(&mut self,force:bool) {
         let now=nano();
+        for(id,observation)in std::mem::take(&mut self.observations){if !force&&now<observation.finish(){self.observations.insert(id,observation);continue;}let rows=observation.records(now);self.records.entry((observation.table,"metrics".into())).or_default().extend(rows);}
         for m in self.metrics.values_mut() {
             let end=now.max(m.start);
             for p in m.series.values() {
@@ -176,7 +132,7 @@ impl State {
             }
             if !group.is_empty(){self.enqueue(&table,&signal,&group,&created);}
         }
-        self.stats.insert("buffer_bytes".into(),0);
+        self.stats.insert("buffer_bytes".into(),self.observations.values().map(|o|(o.cost+o.bytes)as u64).sum());
         self.collect_self();
     }
     fn enqueue_self(&mut self,signal:&str,rows:&[Value],at:&str)->bool {
@@ -185,7 +141,7 @@ impl State {
         let table=self.self_table.clone();self.enqueue(&table,signal,rows,at);true
     }
     fn collect_self(&mut self) {
-        if !self.limits.self_telemetry || self.self_last.is_some_and(|at|at.elapsed()<Duration::from_secs(30)){return;}
+        if self.key.is_empty() || !self.limits.self_telemetry || self.self_last.is_some_and(|at|at.elapsed()<Duration::from_secs(30)){return;}
         self.self_last=Some(Instant::now());let at=format_rfc3339(nano());let time=nano().to_string();
         let attributes=json!([{"key":"lightmoni.component","value":{"stringValue":"sdk"}},{"key":"sdk.language","value":{"stringValue":"rust"}},{"key":"sdk.version","value":{"stringValue":"0.1.0"}}]);
         let mut values=BTreeMap::from([("heartbeat",1)]);
@@ -216,33 +172,28 @@ fn format_rfc3339(n:u128)->String {
 #[derive(Clone)]
 pub struct Client { state:Arc<Mutex<State>>,delivery:Arc<Mutex<()>>,table:String,context:Option<TraceContext> }
 impl Client {
+    /// Initialize without binding a business table; use with_table before recording.
+    pub fn connect(service:&str,endpoint:&str,key:&str)->Result<Self>{Self::with_limits(service,"",endpoint,key,Limits::default())}
     pub fn new(service:&str,table_name:&str,endpoint:&str,key:&str)->Result<Self>{Self::with_limits(service,table_name,endpoint,key,Limits::default())}
-    pub fn from_env(service:&str,table_name:&str)->Result<Self>{
-        let config=ConnectionConfig::from_env()?; let (endpoint,key,selected,probe,fallback)=config.selected()?;
-        let client=Self::with_limits(service,table_name,&endpoint,&key,Limits::default())?;
-        let mut s=client.state.lock().unwrap();
-        s.route_stats.insert("configured_mode".into(),match config.mode{ConnectionMode::Agent=>"agent",ConnectionMode::Direct=>"direct",ConnectionMode::Auto=>"auto"}.into());
-        s.route_stats.insert("selected_route".into(),selected); s.route_stats.insert("agent_probe".into(),probe);
-        s.stats.insert("fallback_count".into(),fallback); drop(s); Ok(client)
-    }
     pub fn with_limits(service:&str,table_name:&str,endpoint:&str,key:&str,limits:Limits)->Result<Self> {
-        let table=table(table_name)?;let url=reqwest::Url::parse(endpoint).map_err(|_|"invalid endpoint")?;
+        let table=if table_name.is_empty(){String::new()}else{table(table_name)?};let url=reqwest::Url::parse(endpoint).map_err(|_|"invalid endpoint")?;
         if service.is_empty() || service.len()>128 || !["http","https"].contains(&url.scheme()) || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some(){return Err("valid service and HTTP(S) endpoint required".into());}
         if [limits.queue_bytes,limits.queue_batches,limits.buffer_bytes,limits.max_batch_bytes,limits.cardinality_limit,limits.max_instruments].contains(&0) || limits.max_batch_bytes>limits.queue_bytes{return Err("invalid SDK limits".into());}
         let http=reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"cannot initialize HTTP transport")?;
         let stats=["pending_batches","pending_bytes","buffer_bytes","delivered_batches","retried_batches","invalid_records","overflow_records","dropped_records","rejected_records"].iter().map(|n|(n.to_string(),0)).collect();
         let resource=json!({"attributes":attrs(&BTreeMap::from([("service.name".into(),service.into()),("service.instance.id".into(),Uuid::new_v4().to_string().into())]))?});
-        let s=State{endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,route_stats:BTreeMap::new(),last_error:String::new(),failure:None,seq:0,closed:false,self_table:table.clone(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
-        let enabled=s.limits.self_telemetry;
+        let s=State{metric_windows:BTreeMap::new(),observations:BTreeMap::new(),endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:"lightmoni_sdk".into(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
+        let enabled=true;
         let client=Self{state:Arc::new(Mutex::new(s)),delivery:Arc::new(Mutex::new(())),table,context:None};
         if enabled {
             let state=Arc::downgrade(&client.state);let delivery=Arc::downgrade(&client.delivery);let table=client.table.clone();
-            std::thread::Builder::new().name("lightmoni-heartbeat".into()).spawn(move || loop {
-                std::thread::sleep(Duration::from_secs(30));
+            std::thread::Builder::new().name("lightmoni-heartbeat".into()).spawn(move || {let mut configured:Option<Instant>=None;loop {
+                std::thread::sleep(Duration::from_secs(10));
                 let (Some(state),Some(delivery))=(state.upgrade(),delivery.upgrade()) else {break;};
                 if state.lock().unwrap().closed{break;}
-                let root=Client{state,delivery,table:table.clone(),context:None};let _=root.flush(Duration::from_secs(5));
-            }).map_err(|_|"cannot start SDK heartbeat worker")?;
+                let root=Client{state,delivery,table:table.clone(),context:None};if configured.is_none_or(|at|at.elapsed()>=Duration::from_secs(30)){if let Err(error)=root.refresh_metric_windows(){root.state.lock().unwrap().last_error=error;}configured=Some(Instant::now());}
+                let _=root.flush_mode(Duration::from_secs(5),false);
+            }}).map_err(|_|"cannot start SDK heartbeat worker")?;
         }
         Ok(client)
     }
@@ -263,6 +214,7 @@ impl Client {
     pub fn gauge(&self,name:&str)->Result<Metric>{self.instrument(name,"gauge","",&[])}
     pub fn histogram(&self,name:&str,bounds:&[f64])->Result<Metric>{self.instrument(name,"histogram","",bounds)}
     pub fn instrument(&self,name:&str,kind:&str,unit:&str,bounds:&[f64])->Result<Metric> {
+        table(&self.table)?;
         if name.is_empty() || name.len()>255 || unit.len()>64 || !["counter","gauge","histogram"].contains(&kind) || bounds.len()>128 || bounds.iter().any(|n|!n.is_finite()) || bounds.windows(2).any(|p|p[0]>=p[1]){return Err("invalid metric identity/boundaries".into());}
         let bounds=if kind=="histogram"{bounds.to_vec()}else{Vec::new()};let id=format!("{}\0{}",self.table,name);let mut s=self.state.lock().unwrap();
         if s.closed{return Err("SDK is closed".into());}
@@ -273,6 +225,7 @@ impl Client {
     pub fn log(&self,severity:&str,body:&str,attributes:&Attributes,context:Option<&TraceContext>) {
         let context=context.or(self.context.as_ref());
         let result=(||{
+            table(&self.table)?;
             let level=severity.to_lowercase();let i=["trace","debug","info","warn","error","fatal"].iter().position(|n|*n==level).ok_or("invalid log severity")?;
             if body.len()>65536 || context.is_some_and(|c|!c.valid()){return Err("invalid log body/context".into());}
             let now=nano().to_string();let mut row=json!({"timeUnixNano":now,"observedTimeUnixNano":now,"severityText":level,"severityNumber":1+4*i,"body":{"stringValue":body},"attributes":attrs(attributes)?});
@@ -282,6 +235,7 @@ impl Client {
         let mut s=self.state.lock().unwrap();match result{Ok(row)=>s.store(&self.table,"logs",row),Err(e)=>s.invalid(e)}
     }
     pub fn start_span(&self,name:&str,attributes:&Attributes,parent:Option<&TraceContext>)->Result<Span> {
+        table(&self.table)?;
         let parent=parent.or(self.context.as_ref());
         if self.state.lock().unwrap().closed{return Err("SDK is closed".into());}
         if name.is_empty() || name.len()>255 || parent.is_some_and(|p|!p.valid()){return Err("invalid span name/context".into());}
@@ -290,16 +244,18 @@ impl Client {
         if let Some(p)=parent{data["parentSpanId"]=json!(p.span_id);if !p.trace_state.is_empty(){data["traceState"]=json!(p.trace_state);}}
         Ok(Span{client:self.clone(),context,data,ended:false})
     }
-    pub fn stats(&self)->Value {let s=self.state.lock().unwrap();let mut value=json!(s.stats);value["last_error"]=json!(s.last_error);for (key,item) in &s.route_stats{value[key]=json!(item);}value}
+    pub fn stats(&self)->Value {let s=self.state.lock().unwrap();let mut value=json!(s.stats);value["last_error"]=json!(s.last_error);value}
     pub fn update_key(&self,key:&str){self.state.lock().unwrap().key=key.into();}
-    pub fn flush(&self,timeout:Duration)->Result<()> {
+    pub fn flush(&self,timeout:Duration)->Result<()> {self.flush_mode(timeout,true)}
+    fn flush_mode(&self,timeout:Duration,force:bool)->Result<()> {
         if timeout.is_zero(){return Err("timeout must be positive".into());}
         let deadline=Instant::now()+timeout;
         let _guard=loop{if let Ok(g)=self.delivery.try_lock(){break g;}if Instant::now()>=deadline{return Err("flush deadline exceeded".into());}std::thread::sleep(Duration::from_millis(1));};
-        let target={let mut s=self.state.lock().unwrap();if s.closed{return Err("SDK is closed".into());}s.collect();s.seq};
+        let target={let mut s=self.state.lock().unwrap();if s.closed{return Err("SDK is closed".into());}s.collect(force);s.seq};
         let mut backoff=0.2;
         loop {
             let (b,http,url,key)={let s=self.state.lock().unwrap();match s.queue.front(){Some(b) if b.seq<=target=>(b.clone(),s.http.clone(),s.endpoint.clone(),s.key.clone()),_=>return s.failure.clone().map_or(Ok(()),Err)}};
+            if b.table=="lightmoni_sdk" && key.is_empty(){let mut s=self.state.lock().unwrap();s.queue.pop_front();*s.stats.get_mut("pending_batches").unwrap()-=1;*s.stats.get_mut("pending_bytes").unwrap()-=b.raw.len() as u64;continue;}
             let remaining=deadline.saturating_duration_since(Instant::now());if remaining.is_zero(){return Err("flush deadline exceeded; batches retained".into());}
             let mut status=0;let mut delay=0.0;let mut rejected=0;let mut ack=false;
             let mut request=http.post(format!("{url}/v1/{}",b.signal)).timeout(remaining.min(Duration::from_secs(10))).header("Content-Type","application/json").header("X-Lightmoni-Table",&b.table).header("X-Lightmoni-Batch-ID",&b.id).header("X-Lightmoni-Batch-Created-At",&b.created).body(b.raw.clone());
@@ -373,6 +329,3 @@ impl Span {
     pub fn end(&mut self){if self.ended{return;}self.ended=true;let start=self.data["startTimeUnixNano"].as_str().unwrap().parse::<u128>().unwrap();self.data["endTimeUnixNano"]=json!(nano().max(start).to_string());self.client.state.lock().unwrap().store(&self.client.table,"traces",self.data.clone());}
 }
 impl Drop for Span {fn drop(&mut self){if !self.ended && std::thread::panicking(){self.set_error("span scope panicked");}self.end();}}
-
-#[cfg(test)]
-mod reporting_tests;

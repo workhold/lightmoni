@@ -39,9 +39,10 @@ type LogSamplingPolicy struct {
 	Exclude []LogExcludeRule `json:"exclude"`
 }
 type SDKConfig struct {
-	Revision     string                       `json:"revision"`
-	LogSampling  map[string]LogSamplingPolicy `json:"log_sampling"`
-	DisableRules []LogExcludeRule             `json:"disable_rules"`
+	MetricWindows map[string][]MetricWindow    `json:"metric_windows,omitempty"`
+	Revision      string                       `json:"revision"`
+	LogSampling   map[string]LogSamplingPolicy `json:"log_sampling"`
+	DisableRules  []LogExcludeRule             `json:"disable_rules"`
 }
 
 func DefaultLogSampling() LogSamplingPolicy {
@@ -221,6 +222,9 @@ func DecodeSDKConfig(reader io.Reader) (SDKConfig, error) {
 	if config.Revision == "" || len(config.Revision) > 128 || config.LogSampling == nil || len(config.LogSampling) > 200 {
 		return config, errors.New("invalid SDK configuration")
 	}
+	if err := validMetricWindows(config.MetricWindows); err != nil {
+		return config, err
+	}
 	for table, policy := range config.LogSampling {
 		if !validTable(table) || systemSamplingTable(table) {
 			return config, errors.New("invalid log policy table")
@@ -386,7 +390,7 @@ func (c *Client) RefreshConfig(ctx context.Context) error {
 	if endpoint == "" || closed {
 		return errors.New("SDK remote configuration is disabled or closed")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/v1/sdk-config", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/v1/sdk-config?metric_windows=1", nil)
 	if err != nil {
 		return err
 	}
@@ -411,6 +415,7 @@ func (c *Client) RefreshConfig(ctx context.Context) error {
 	if s.closing {
 		return errors.New("SDK is closed")
 	}
+	s.metricWindows = config.MetricWindows
 	s.remoteSampling = config.LogSampling
 	s.stats.ConfigRevision = config.Revision
 	s.stats.ConfigError = ""
@@ -461,6 +466,7 @@ func (s *state) setReportingDisabledLocked(disabled bool) {
 		for _, q := range s.queue {
 			s.stats.DisabledRecords += uint64(q.records)
 		}
+		s.observations = map[string]*observation{}
 		s.logs = map[string][]*logpb.LogRecord{}
 		s.spans = map[string][]*tracepb.Span{}
 		s.queue = nil

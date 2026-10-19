@@ -17,7 +17,6 @@ import {
   parameter,
 } from "../src/server/query.js";
 import { registerSettings } from "../src/server/settings.js";
-import { registerAgentCredentials } from "../src/server/agent-credentials.js";
 import { stringifyJSON, parseJSON } from "../src/shared/json.js";
 import { cipher, hash } from "../src/shared/crypto.js";
 import { gzipSync } from "node:zlib";
@@ -81,9 +80,8 @@ async function fixture() {
     now: () => new Date(),
     logger: console,
   };
-  const agentCredentials = registerAgentCredentials(deps);
-  registerSettings(deps, agentCredentials);
-  const ingest = new Ingest(cat, a, undefined, agentCredentials);
+  registerSettings(deps);
+  const ingest = new Ingest(cat, a);
   ingest.register();
   const server = createServer(
     (req, res) =>
@@ -347,7 +345,7 @@ test("SELECT AST blocks writes, external functions, hidden tables and overrides 
     parameter({ type: "UInt64", value: "18446744073709551616" }),
   );
 });
-test("OTLP ingest retains exact fields, freezes retry ids, denies grants, and validates before storage", async () => {
+test("OTLP ingest retains exact fields, freezes retry ids, permits any business table, and validates before storage", async () => {
   const f = await fixture();
   try {
     await f.request("/api/v1/setup", "POST", {
@@ -411,10 +409,11 @@ test("OTLP ingest retains exact fields, freezes retry ids, denies grants, and va
       (
         await f.request("/v1/metrics", "POST", raw, {
           ...headers,
-          "x-lightmoni-table": "denied",
+          "x-lightmoni-table": "another",
+          "x-lightmoni-batch-id": "another-batch",
         })
       ).status,
-      403,
+      200,
     );
     assert.equal(
       (
@@ -440,7 +439,7 @@ test("OTLP ingest retains exact fields, freezes retry ids, denies grants, and va
       ).status,
       200,
     );
-    assert.equal(f.inserts.length, 2);
+    assert.equal(f.inserts.length, 3);
     const result = await f.executor.execute({
       range: { from: "2026-10-17T00:00:00Z", to: "2026-10-18T00:00:00Z" },
       interval_ms: 60000,
@@ -525,25 +524,6 @@ test("remote reporting settings preserve scalar types and exact values, scope by
     assert.equal(config.status, 200);
     assert.equal(config.headers.get("cache-control"), "no-store");
     assert.equal(config.data.log_sampling.app.rules[0].name, "VIP");
-    const credentialNow = new Date(),
-      credentialExpiry = new Date(credentialNow.getTime() + 60000);
-    f.db.run(
-      `INSERT INTO agent_credentials(id,agent_id,audience,scope,token_hash,created_at,expires_at)
-       VALUES(?,?,?,?,?,?,?)`,
-      "agent-config-credential",
-      "agent-config",
-      "control",
-      "agent.control",
-      hash("agent-config-control"),
-      credentialNow.toISOString(),
-      credentialExpiry.toISOString(),
-    );
-    const agentConfig = await f.request("/v1/sdk-config", "GET", undefined, {
-      authorization: "Bearer agent-config-control",
-      "x-lightmoni-agent-id": "agent-config",
-    });
-    assert.equal(agentConfig.status, 200);
-    assert.equal(agentConfig.data.log_sampling.app.rules[0].name, "VIP");
     assert.equal(
       (
         await f.request("/api/v1/settings/sdk-reporting", "PUT", {
@@ -574,4 +554,104 @@ test("remote reporting settings preserve scalar types and exact values, scope by
   } finally {
     await f.close();
   }
+});
+
+test('metric period HTTP API persists independent tables, scopes SDK configuration and requires admin', async () => {
+ const f=await fixture();
+ try {
+  assert.equal((await fetch(f.base+'/api/v1/metric-windows/business')).status,401);
+  await f.request('/api/v1/setup','POST',{name:'admin',password:'password123'});
+  const initial=await f.request('/api/v1/metric-windows/business');
+  assert.equal(initial.status,200);assert.equal(initial.data.default_seconds,30);
+  for(const [table,seconds] of [['business',10],['private',300]] as const)assert.equal((await f.request('/api/v1/metric-windows/'+table,'PUT',{window_seconds:seconds})).status,200);
+  for(const body of [{window_seconds:[10,30]},{window_seconds:120},{window_seconds:'30'},[],null])assert.equal((await f.request('/api/v1/metric-windows/business','PUT',body)).status,400);
+  for(const name of ['lightmoni','metric_business','UPPER'])assert.equal((await f.request('/api/v1/metric-windows/'+name,'PUT',{window_seconds:30})).status,400);
+  const reopened=new DB(join(f.dir,'legacy.db'));
+  try {assert.equal(reopened.get<any>('SELECT window_seconds FROM metric_window_config WHERE logical_name=?','business')?.window_seconds,10);}finally{reopened.close();}
+  const key=(await f.request('/api/v1/keys','POST',{name:'windows'})).data.key;
+  const headers={Authorization:'Bearer '+key};
+  const legacy=await f.request('/v1/sdk-config','GET',undefined,headers);
+  assert.equal(legacy.status,200);assert.equal(legacy.data.metric_windows,undefined);
+  const modern=await f.request('/v1/sdk-config?metric_windows=1','GET',undefined,headers);
+  assert.equal(modern.status,200);assert.equal(modern.data.metric_windows.business.at(-1).seconds,10);assert.equal(modern.data.metric_windows.private.at(-1).seconds,300);
+  assert.notEqual(modern.data.revision,legacy.data.revision);
+  await f.request('/api/v1/sdk-exempt-tables','POST',{name:'business'});
+  const anonymous=await f.request('/v1/sdk-config?metric_windows=1');
+  assert.deepEqual(Object.keys(anonymous.data.metric_windows),['business']);
+  assert.equal((await f.request('/v1/sdk-config?metric_windows=1','GET',undefined,{Authorization:'Bearer invalid'})).status,401);
+  await f.request('/api/v1/users','POST',{name:'member',password:'password123',role:'member'});
+  await f.request('/api/v1/auth/login','POST',{name:'member',password:'password123'});
+  assert.equal((await f.request('/api/v1/metric-windows/business','GET')).status,200);
+  assert.equal((await f.request('/api/v1/metric-windows/business','PUT',{window_seconds:60})).status,403);
+ } finally {await f.close();}
+});
+
+test("SDK exemptions require admin, exact names, typed fields and persist after SQLite reopening", async () => {
+ const f=await fixture();try{
+  assert.equal((await fetch(f.base+'/api/v1/sdk-exempt-tables')).status,401);
+  await f.request('/api/v1/setup','POST',{name:'admin',password:'password123'});
+  assert.deepEqual((await f.request('/api/v1/sdk-exempt-tables')).data,[]);
+  for(const name of ['*','log_app','metric_app','trace_app','lightmoni_sdk','lightmoni_agent','lightmoni_center','a'.repeat(49),'UPPER'])assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',{name})).status,400,name);
+  for(const body of [{name:'app',active:'true'},{name:'app',description:1},{name:'app',unknown:true}])assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',body)).status,400);
+  const created=await f.request('/api/v1/sdk-exempt-tables','POST',{name:'app_logs_18aca241',description:'应用日志'});assert.equal(created.status,201);assert.equal(created.data.active,true);
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',{name:'app_logs_18aca241'})).status,409);
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables/app_logs_18aca241','PUT',{name:'rename'})).status,400);
+  const reopened=new DB(join(f.dir,'legacy.db'));try{const auth=new Auth(reopened,f.dir,f.base,new Router());assert.deepEqual(auth.validateKey({req:{headers:{}}} as any,undefined,true).allowed_tables,['app_logs_18aca241']);}finally{reopened.close();}
+  await f.request('/api/v1/users','POST',{name:'member',password:'password123',role:'member'});await f.request('/api/v1/auth/login','POST',{name:'member',password:'password123'});
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables')).status,200);
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',{name:'other'})).status,403);
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables/app_logs_18aca241','PUT',{active:false})).status,403);
+  assert.equal((await f.request('/api/v1/sdk-exempt-tables/app_logs_18aca241','DELETE')).status,403);
+ }finally{await f.close();}
+});
+test("anonymous OTLP enforces exemptions for all signals, isolates retries and never downgrades wrong keys", async () => {
+ const f=await fixture();try{
+  await f.request('/api/v1/setup','POST',{name:'admin',password:'password123'});
+  assert.equal((await f.request('/v1/logs','POST',{}, {'X-Lightmoni-Table':'public_logs_123'})).status,401);
+  await f.request('/api/v1/sdk-exempt-tables','POST',{name:'public_logs_123'});
+  const key=(await f.request('/api/v1/keys','POST',{name:'named',allowed_tables:['public_logs_123']})).data;
+  const at=nowNano().toString(),resource={attributes:[{key:'service.name',value:{stringValue:'anonymous-qa'}}]};
+  const payloads:any={logs:{resourceLogs:[{resource,scopeLogs:[{logRecords:[{timeUnixNano:at,body:{stringValue:'anonymous'}}]}]}]},metrics:{resourceMetrics:[{resource,scopeMetrics:[{metrics:[{name:'requests',gauge:{dataPoints:[{timeUnixNano:at,asInt:'1'}]}}]}]}]},traces:{resourceSpans:[{resource,scopeSpans:[{spans:[{traceId:'a'.repeat(32),spanId:'b'.repeat(16),name:'anonymous',startTimeUnixNano:at,endTimeUnixNano:at}]}]}]}};
+  for(const signal of ['logs','metrics','traces']){
+   const headers={'X-Lightmoni-Table':'public_logs_123','X-Lightmoni-Batch-ID':'same-'+signal},payload=payloads[signal],before=f.inserts.length;
+   assert.equal((await f.request('/v1/'+signal,'POST',payload,headers)).status,200,signal);assert.equal(f.inserts.at(-1).rows[0].key_id,'');
+   assert.equal((await f.request('/v1/'+signal,'POST',payload,headers)).status,200);assert.equal(f.inserts.length,before+1);
+   assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,Authorization:'Bearer '+key.key})).status,200);assert.equal(f.inserts.length,before+2);assert.equal(f.inserts.at(-1).rows[0].key_id,key.id);
+   for(const Authorization of ['Bearer bad-key','Bearer ','Basic invalid'])assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,Authorization})).status,401);
+   for(const table of ['private','lightmoni_sdk'])assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,'X-Lightmoni-Table':table})).status,403);
+  }
+  const runtime={resourceLogs:[{resource,scopeLogs:[{logRecords:[{timeUnixNano:at,body:{stringValue:'started'},attributes:[{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'typescript'}},{key:'event',value:{stringValue:'started'}}]}]}]}]};
+  const beforeRuntime=f.inserts.length;
+  assert.equal((await f.request('/v1/logs','POST',runtime,{'X-Lightmoni-Table':'public_logs_123'})).status,200);assert.equal(f.inserts.length,beforeRuntime);
+  f.db.run("INSERT INTO log_sampling VALUES(?,?,?)",'public_logs_123',JSON.stringify({key:'event_id',rules:[],exclude:[]}),1);
+  f.db.run("INSERT INTO log_sampling VALUES(?,?,?)",'private',JSON.stringify({key:'event_id',rules:[],exclude:[]}),1);
+  const publicConfig=await f.request('/v1/sdk-config');assert.equal(publicConfig.status,200);assert.deepEqual(Object.keys(publicConfig.data.log_sampling),['public_logs_123']);assert.throws(()=>f.a.validateKey({req:{headers:{}}} as any));
+  await f.request('/api/v1/keys/'+key.id,'PUT',{active:false});assert.equal((await f.request('/v1/logs','POST',payloads.logs,{'X-Lightmoni-Table':'public_logs_123',Authorization:'Bearer '+key.key})).status,401);
+  await f.request('/api/v1/sdk-exempt-tables/public_logs_123','PUT',{active:false});const count=f.inserts.length;
+  assert.equal((await f.request('/v1/logs','POST',payloads.logs,{'X-Lightmoni-Table':'public_logs_123','X-Lightmoni-Batch-ID':'same-logs'})).status,401);assert.equal(f.inserts.length,count);
+  await f.request('/api/v1/sdk-exempt-tables/public_logs_123','PUT',{active:true});assert.equal((await f.request('/api/v1/sdk-exempt-tables/public_logs_123','DELETE')).status,200);
+  assert.equal((await f.request('/v1/sdk-config')).status,401);assert.equal((await f.request('/v1/logs','POST',payloads.logs,{'X-Lightmoni-Table':'public_logs_123'})).status,401);
+ }finally{await f.close();}
+});
+
+test("SDK keys cover every business table; shared self stream validates all records and disabled keys stay revoked",async()=>{
+ const f=await fixture();try{
+  await f.request('/api/v1/setup','POST',{name:'admin',password:'password123'});
+  const key=(await f.request('/api/v1/keys','POST',{name:'all-business'})).data;
+  assert.equal(key.allow_all_tables,true);assert.deepEqual(key.allowed_tables,[]);
+  const at=nowNano().toString(),resource={attributes:[{key:'service.name',value:{stringValue:'sdk-model'}}]},row={timeUnixNano:at,body:{stringValue:'business'}};
+  const payload=(records:any[])=>({resourceLogs:[{resource,scopeLogs:[{logRecords:records}]}]});
+  const send=(table:string,records:any[])=>f.request('/v1/logs','POST',payload(records),{Authorization:'Bearer '+key.key,'X-Lightmoni-Table':table});
+  for(const table of ['arbitrary_a','arbitrary_b'])assert.equal((await send(table,[row])).status,200);
+  const self={...row,attributes:[{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'python'}},{key:'event',value:{stringValue:'started'}}]};
+  assert.equal((await send('lightmoni_sdk',[self])).status,200);assert.equal(f.inserts.at(-1).table,'_lm_lightmoni_log');
+  const count=f.inserts.length;
+  assert.equal((await send('lightmoni_sdk',[self,row])).status,403);assert.equal(f.inserts.length,count);
+  for(const table of ['lightmoni_agent','lightmoni_center'])assert.equal((await send(table,[self])).status,403);
+  await f.request('/api/v1/sdk-exempt-tables','POST',{name:'public_a'});await f.request('/api/v1/sdk-exempt-tables','POST',{name:'public_b'});
+  for(const table of ['public_a','public_b']){assert.equal((await f.request('/v1/logs','POST',payload([self,row]),{'X-Lightmoni-Table':table})).status,200);assert.equal(f.inserts.at(-1).rows.length,1);assert.equal(f.inserts.at(-1).rows[0].body,'business');}
+  f.db.run("UPDATE ingest_keys SET allowed_tables_json='[\"obsolete\"]',allow_all_tables=0 WHERE id=?",key.id);
+  assert.equal((await send('another_business',[row])).status,200);
+  await f.request('/api/v1/keys/'+key.id,'PUT',{active:false});new Auth(f.db,f.dir,f.base,new Router());assert.equal((await send('arbitrary_a',[row])).status,401);
+ }finally{await f.close();}
 });

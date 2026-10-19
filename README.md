@@ -1,14 +1,14 @@
 # LightMoni
 
-面向个人和小团队的一体化监控工作台。Node.js / TypeScript 主服务提供 React + TypeScript 界面，SQLite 保存管理数据，ClickHouse 保存日志、指标和链路。LightMoni Agent 运行实例称为执行节点，采集主机、进程、拨测和目录日志，接收 JavaScript/TypeScript、Python、Ruby SDK 数据并持久化缓存。Go/Rust 源码保留、后续支持，不纳本次发布验收；PHP SDK 已下线。
+面向个人和小团队的一体化监控工作台。Node.js / TypeScript主服务提供React界面，SQLite保存管理数据，ClickHouse保存遥测。业务接入提供Go、Node.js/TypeScript、Rust、Python四种record SDK，支持直连中心或由独立LightMoni Agent持久化转发。
 
-中心与 LightMoni Agent 均由 Node.js / TypeScript 实现，公共协议和存储工具位于 `runtime/src/shared`；当前发布 JavaScript/TypeScript、Python、Ruby 三种业务 SDK；Go/Rust 仅保留源码，不提供当前发布包或接入页安装入口。迁移规格与验收见 [Node 运行时迁移](specs/007-node-runtime-migration/spec.md) 和 [领域验证](specs/007-node-runtime-migration/domain-validation.md)。
+中心与LightMoni Agent均由Node.js / TypeScript实现，公共协议位于`runtime/src/shared`。SDK和中心上报采用本地通用打点与固定窗口方案，主机管理、SSH终端、Agent注册和control/data凭据、AI助手、告警与界面语言采用最新main；本次取舍见[整合说明](specs/011-aligned-metric-windows/main-integration.md)。
 
-没有项目或租户概念。每份 Key 可配置逻辑 table 白名单，或显式允许所有 table，不绑定 service；服务通过 `service` 标识，业务通过逻辑 `table` 选择数据流。服务自动生成 `log_*`、`metric_*_sum/gauge/histogram`、`trace_*`，在记录中写入实际认证的 `key_id`。
+没有项目或租户概念。SDK有效启用密钥可写任意业务表，按名称创建，不绑定service或table。缺失Authorization只允许启用的豁免表，无效密钥不降级。初始化填写service/env，`record(table,metric_name,dimensions,value,count)`按调用选择业务表和指标，key1…key16为固定维度槽。每表单选10秒、30秒（默认）、1分钟、5分钟、10分钟、30分钟、1小时，查询步长须为实际窗口的整数倍。
 
 ## Docker Compose 部署
 
-根目录的 [compose.yaml](compose.yaml) 默认只启动 LightMoni，连接已有 ClickHouse。主服务镜像内置网页、两种 Linux 架构的 LightMoni Agent 安装包和三种当前发布语言的 SDK，无需单独部署前端。最终镜像使用 `node:24.15.0-bookworm-slim`；中心、Agent 和当前 SDK 发布流程均不需要 Go 工具链。
+根目录的 [compose.yaml](compose.yaml) 默认只启动 LightMoni，连接已有 ClickHouse。主服务镜像内置网页、两种 Linux 架构的 LightMoni Agent 安装包和四种record SDK，无需单独部署前端。最终镜像使用 `node:24.15.0-bookworm-slim`；中心、Agent 和当前 SDK 发布流程均不需要 Go 工具链。
 
 在仓库根目录准备配置：
 
@@ -57,9 +57,9 @@ docker compose up -d --no-build --wait
 
 LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器或容器编排管理生命周期。业务 SDK 可直接上报平台（direct），也可明确选择经 Agent 上报（agent）；接入页默认 direct，安装 Agent 不是 SDK 直连的前置条件。同一节点可接收多个业务的数据，也可独立承担主机采集、拨测和目录日志，业务路由与这些节点任务互不绑定。业务启动、停止或重启不触发 Agent 启停。业务退出时完成 SDK flush/shutdown，Agent 继续采集和补传。CLI 支持 `run --config` 前台运行并响应 SIGTERM；当前网页安装命令覆盖 Linux systemd 服务。每个 Agent 实例使用独立、可持久化的数据目录，以保留身份与待补传队列。两条上报路径的配置与边界见 [SDK 接入](sdk/README.md#选择上报方式) 和 [SDD 012](specs/012-sdk-reporting-choice/spec.md)。
 
-“数据接入”只提供“SDK 接入”和“执行节点接入”两个页签。新节点接入时，管理员选择初始任务标签和上报地址，生成一次性 enrollment token，再将安装命令交给目标 Linux 服务器执行；令牌仅在生成时显示，通过安装脚本的 `--enrollment-token-stdin` 接收，可将秘密文件的 FD 重定向到 stdin，不放入 URL、命令行参数或环境变量。安装期间由中心兑换、激活并签发绑定节点身份的 `control_credential` 与 `data_credential`，分别用于心跳/配置和遥测上报；两者保存在 Agent 本机配置，不交给业务 SDK。安装包支持 Linux amd64 / arm64，自带固定 Node 24.15.0，要求 glibc ≥ 2.28，无需目标主机另装 Node/npm；验证 SHA256 后安装独立 systemd 服务，升级、重装保留持久身份和磁盘队列。
+“SDK接入”提供“SDK样例 / SDK密钥 / 豁免表”三个页签，执行节点安装入口为`/agents/install`。新节点接入时，管理员选择初始任务标签和上报地址，生成一次性 enrollment token，再将安装命令交给目标 Linux 服务器执行；令牌仅在生成时显示，通过安装脚本的 `--enrollment-token-stdin` 接收，可将秘密文件的 FD 重定向到 stdin，不放入 URL、命令行参数或环境变量。安装期间由中心兑换、激活并签发绑定节点身份的 `control_credential` 与 `data_credential`，分别用于心跳/配置和遥测上报；两者保存在 Agent 本机配置，不交给业务 SDK。安装包支持 Linux amd64 / arm64，自带固定 Node 24.15.0，要求 glibc ≥ 2.28，无需目标主机另装 Node/npm；验证 SHA256 后安装独立 systemd 服务，升级、重装保留持久身份和磁盘队列。
 
-管理员在“管理后台 → 接入凭据”统一管理“SDK 上报密钥 / Agent 接入令牌 / 节点凭据”三类身份。SDK 密钥保留逻辑表权限、启停和上报记录；接入令牌可查看状态和撤销未完成安装；节点凭据仅展示用途、有效期和使用记录，撤销会影响该节点指定用途的所有未撤销凭据。旧版 Agent 的 `config.key` 仍可使用原上报密钥，禁用前须确认它是否仍被节点使用。SDK 向本地 Agent 上报的 local token 由目标 Agent 本地配置管理，平台不签发或回显。数据表目录、单表保留时长和日志上报规则移到独立“数据管理”；图表模板保留在“监控大盘”。
+管理员在“管理后台 → 接入凭据”统一管理“SDK 上报密钥 / Agent 接入令牌 / 节点凭据”三类身份。SDK密钥按名称创建，保留启停和上报记录，有效密钥可写任意业务表；接入令牌可查看状态和撤销未完成安装；节点凭据仅展示用途、有效期和使用记录，撤销会影响该节点指定用途的所有未撤销凭据。旧版 Agent 的 `config.key` 仍可使用原上报密钥，禁用前须确认它是否仍被节点使用。SDK 向本地 Agent 上报的 local token 由目标 Agent 本地配置管理，平台不签发或回显。数据表目录、单表保留时长和日志上报规则移到独立“数据管理”；图表模板保留在“监控大盘”。
 
 “节点助手”提供“执行节点 / 任务管理 / 任务标签”三个页签。任务独立保存，类型为指标采集、服务拨测和目录日志；每个任务可关联多个任务标签，一个节点也可绑定多个标签。启用任务与节点任一标签相交即下发，同一任务不会因多次命中而重复执行。冲突配置会整体拒绝并保留原有效配置；未匹配任务时暂停内部采集和拨测，业务数据转发继续可用。已有节点重连时保留中心分配。指标采集任务可选择 CPU、内存、文件系统、磁盘 I/O、网络、负载或指定进程，并设置采集间隔。
 
@@ -67,22 +67,19 @@ LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器�
 
 目录日志填写绝对目录、文件匹配规则（默认 `*.log*`）、是否包含子目录和首次从头读取。默认只采集现有文件后续新增的行，之后新建文件完整采集；读取进度与队列批次一起提交，支持重启续读、重命名轮转和截断检测。要求服务用户可读目录，采集 UTF-8 文本行，跳过压缩文件和符号链接；单行超过 64 KiB 分片，未结束的短行等待换行。事件时间使用采集时间，保留文件路径和字节位置。每个执行节点最多同时打开 256 个日志文件，每个目录单次扫描最多 10,000 个条目，超限会显示采集错误。源文件在采集前已删除或覆盖的内容无法恢复。
 
-“SDK 接入”默认“直连平台”，也可选择“通过 LightMoni Agent”，三种当前发布语言均提供对应的代码高亮示例、环境变量和复制按钮。通过 Agent 默认连 `http://127.0.0.1:4318`，平台凭据由 Agent 保存；如节点开启本地令牌，SDK 使用 `LIGHTMONI_LOCAL_TOKEN`。直连平台无需部署执行节点，使用 `LIGHTMONI_ENDPOINT` 与允许目标 table 的 `LIGHTMONI_DATA_KEY`，适用于普通服务器、容器、Serverless 等部署；`LIGHTMONI_KEY` 仍作为兼容别名。三种当前发布 SDK 的 `from_env` / `fromEnv` 会读取所选模式的变量，也可继续使用显式构造函数。容器通过 environment / Secret 注入，平台或 Agent 地址应使用容器可访问的域名或服务地址。同一 Docker 网络访问平台可用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可用 `host.docker.internal`。新 Agent 的 data 凭据按节点和用途鉴权，当前允许上报合法业务逻辑表；旧版 Agent 使用上报 Key 时仍受该 Key 的 table 白名单约束。
+“SDK接入”生成四语言通用record样例。初始化必填service/env，地址与密钥可使用LIGHTMONI_ENDPOINT/LIGHTMONI_KEY；可选service_version/instance_id，实例标识默认自动生成。同一客户端可记录多个表和指标。直连使用中心地址与SDK密钥；经Agent时使用Agent接收地址及其可选本地token，Agent独立保存上游data凭据。业务SDK退出前调用有截止时间的shutdown，Agent继续补传。容器通过environment/Secret注入配置，使用容器可达的地址，Docker Desktop可用host.docker.internal。
 
 管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址，并选择默认项，例如“公网”和“内网”。SDK 直连与执行节点接入均可从列表选择，也支持临时填写其他可访问地址；所选地址会进入复制的 SDK 示例、环境变量或 LightMoni Agent 安装命令。旧的单地址配置自动兼容；未配置列表时使用部署变量 `LIGHTMONI_EXTERNAL_URL`。这些地址应转发到同一个 LightMoni 实例。LightMoni Agent 安装脚本、amd64 / arm64 包和 SHA256 校验文件由当前项目内置的 `/downloads/agent/` 提供，要求 Bearer 鉴权：新安装使用有效的 enrollment token；下载接口仍兼容启用的既有上报 Key，旧安装脚本保留 `--key-stdin`。节点 control/data 凭据不能代替安装令牌用于下载。SDK 通过执行节点时默认使用本机节点地址。修改地址列表不改变已运行客户端的连接配置；节点地址变更应按安装或重装流程更新并保留持久数据。此配置独立于登录回调和告警链接使用的工作台地址。
 
 ```ts
-// 按接入页配置 LIGHTMONI_MODE 及所选路径的地址、凭据。
-const moni = createLightMoniFromEnv({service: 'order-api', table: 'business'});
-const orders = moni.counter('orders_created');
-orders.add(1, {region: 'cn', payment: 'wechat'});
-moni.log('info', 'order created', {order_id: '123'});
-await moni.flush();
+const moni = createLightMoni({service: 'order-api', env: 'prod'});
+moni.record('business', 'db.query.duration_ms', {key1: 'mysql', key2: 'select'}, 128, 1);
+await moni.shutdown({timeoutMs: 5000});
 ```
 
-服务内的数据接入页提供 JavaScript/TypeScript、Python、Ruby 三种 SDK 包，支持选择语言、安装命令、业务示例和下载校验。Node / 浏览器使用 npm 包，Python、Ruby 使用可本地安装或源码引用的独立包。Go/Rust 仅保留源码，原生工具链和完整故障矩阵后续再验收，当前不提供安装入口或发布包。
+服务内接入页提供Go、Node.js、Rust、Python四种SDK包、安装命令、业务样例和校验。其他历史SDK源码保留兼容，未接入本次record周期协议。SDK业务窗口默认30秒，中心按表下发七档周期；显式flush可提交当前窗口增量，后台自动提交已结束窗口。
 
-所有语言的安装、API 和可靠性边界：[sdk/README.md](sdk/README.md)。Python、Ruby 提供显式 flush，由应用定时或在请求结束时调用；TypeScript 保留周期 collection。可运行示例：[examples/sdk](examples/sdk)。浏览器通过业务后端转发埋点，业务后端持有仅允许目标 table 的 Key；示例提供本地转发服务器，页面无需保存 Key。
+安装、API和可靠性边界见[sdk/README.md](sdk/README.md)。四语言record均有独立自动聚合，退出前仍需shutdown；可运行样例见[examples/sdk](examples/sdk)。浏览器通过业务后端转发，后端保管中心密钥；匿名仅使用启用的豁免表。
 
 要在真实库中观察日志查询、服务/级别/属性聚合与指标，可运行本地业务流量程序：
 
@@ -106,7 +103,7 @@ node examples/sdk/traffic/index.mjs
 
 ## 本地开发和验收
 
-本地构建建议使用 Node 24.15.0（运行时最低 Node 22.19），并准备可访问的真实 ClickHouse。仅开发后续支持的 Go SDK 源码或运行其历史业务示例时需要 Go 1.26+；当前发布无需 Go/Rust 工具链。Docker Compose 用于容器部署，可在有 Docker 的环境启动隔离测试数据库：
+本地构建建议使用 Node 24.15.0（运行时最低 Node 22.19），并准备可访问的真实 ClickHouse。测试Go SDK需Go 1.26+，测试Rust SDK需Rust 1.85+；中心与Agent运行无需这两种工具链，源码包打包复用锁定依赖清单。Docker Compose 用于容器部署，可在有 Docker 的环境启动隔离测试数据库：
 
 ```sh
 docker compose -p lightmoni-test -f deploy/server/compose.test.yml up -d
@@ -155,7 +152,7 @@ cd runtime
 LIGHTMONI_DOMAINS_URL=http://127.0.0.1:18885 node --import tsx --test test/domains-live.test.ts test/agent-live.test.ts
 ```
 
-可通过 `LIGHTMONI_DOMAINS_USER` / `LIGHTMONI_DOMAINS_PASSWORD` 指定隔离测试账号。域联调覆盖真实 OTLP 入库、日志、Trace、大盘、SQL 告警和本地 Webhook；节点联调覆盖 SDK → Agent 磁盘队列 → 中心和重启补传。当前发布语言使用 `python3 scripts/test-sdks.py`；Docker 齐备时可用 `--docker`。Go/Rust 原生测试为后续支持任务，不计入本次发布验收。`python3 scripts/demo-smoke.py` 是保留的历史 Go/Node 业务示例检查，需要额外准备 Go 工具链。
+可通过 `LIGHTMONI_DOMAINS_USER` / `LIGHTMONI_DOMAINS_PASSWORD` 指定隔离测试账号。域联调覆盖真实 OTLP 入库、日志、Trace、大盘、SQL 告警和本地 Webhook；节点联调覆盖 SDK → Agent 磁盘队列 → 中心和重启补传。当前发布语言使用 `python3 scripts/test-sdks.py`；Docker 齐备时可用 `--docker`。四语言原生测试和周期专项验收见[验收记录](docs/evidence/metric-periods/README.md)。`python3 scripts/demo-smoke.py` 是保留的历史 Go/Node 业务示例检查，需要额外准备 Go 工具链。
 
 本次迁移的本机环境为 macOS，已运行真实 ClickHouse 和 Node 联调；没有 Docker，未执行 Docker 镜像构建或 Linux systemd 实机验收。具体证据及边界见 [迁移验收](specs/007-node-runtime-migration/quickstart.md) 和 [领域验证记录](specs/007-node-runtime-migration/domain-validation.md)。
 
@@ -185,11 +182,9 @@ Node 主服务为每轮对话启动一个 Mastra Node worker，使用私有 stdi
 
 SDD 规格和验收入口：[Mastra 助手](specs/001-mastra-assistant/spec.md)、[模型发现](specs/002-model-discovery/spec.md)、[多协议连接](specs/003-multi-protocol-models/spec.md)、[模型管理与计费](specs/005-model-management/spec.md)、[Node 运行时迁移](specs/007-node-runtime-migration/spec.md)、[Mastra + Pi 代码任务](specs/008-mastra-pi-agent-code-tasks/spec.md)。使用仓库内 Spec Kit 技能继续维护规格、计划与任务。检查运行时使用 `npm --prefix ai-runtime test`、`npm --prefix ai-runtime run typecheck` 和 `npm --prefix runtime test`；构建 worker 后，Node 集成测试会通过真实 Mastra SDK 连接隔离模型 fixture。fixture 不代表真实供应商分析效果验收。
 
-## Key 的 table 权限
+## SDK密钥与豁免表
 
-管理员在“数据接入 → 上报 Key”创建、编辑上报范围：可选择“指定 table”并设置逻辑表白名单，也可选择“所有 table”，允许写入现有及未来的新 table。执行节点接入页创建 Key 时同样支持这两种范围；默认使用指定 table。白名单支持多选已有表，也可填写尚未上报的新逻辑表名，不使用通配符。`web` 对应 `log_web`、`metric_web_*`、`trace_web`，白名单匹配 SDK 的 `table` / `X-Lightmoni-Table`，不填写 SQL 表名前缀。权限对日志、指标、链路都生效，越权请求返回 403，不自动建表或写入数据。修改上报范围立即影响后续请求和批次重试。
-
-升级已有实例时，旧 Key 的白名单为空，数据写入会被拒绝。管理员需先编辑这些 Key 的上报范围（指定 table 或所有 table）；执行节点使用指定模式时需包含其匹配任务设置的机器指标、拨测、目录日志表（默认 `host`、`probe`、`files`）和实际业务 table。配置权限不更换原 Key。
+SDK密钥按名称创建，启用后可写所有合法业务表。旧权限字段经类型校验后忽略，现有密钥保留身份并使用同一规则；禁用后所有后续请求与重试仍被拒绝。无Authorization仅能写入当前启用的豁免表，错误或空凭据不会降级。SDK接入页管理密钥、豁免表，管理后台保留SDK凭据入口；Agent enrollment/control/data凭据继续按节点和用途隔离。
 
 ## 数据与可靠性边界
 
@@ -201,6 +196,6 @@ SDD 规格和验收入口：[Mastra 助手](specs/001-mastra-assistant/spec.md)�
 
 ### 系统自监控
 
-初始化会建立 `lightmoni_center`、`lightmoni_agent`、`lightmoni_sdk` 三类内置逻辑表，并创建「系统监控 · 上报中心 / 执行节点 / SDK」大盘。系统表通过标准查询、日志浏览和图表告警使用；首次初始化之后保留大盘编辑，也不会在重启时重新创建用户主动删除的大盘。Node 迁移仅将未编辑的旧 Go 运行指标面板一次性更新为活跃资源和事件循环延迟，并保留版本记录。
+初始化会建立 `lightmoni_center`、`lightmoni_agent`、`lightmoni_sdk` 三个历史兼容入口；新系统遥测统一写入lightmoni_log/lightmoni_metric_*，以component区分center/agent/sdk，并创建「系统监控 · 上报中心 / 执行节点 / SDK」大盘。系统表通过标准查询、日志浏览和图表告警使用；首次初始化之后保留大盘编辑，也不会在重启时重新创建用户主动删除的大盘。Node 迁移仅将未编辑的旧 Go 运行指标面板一次性更新为活跃资源和事件循环延迟，并保留版本记录。
 
 中心记录上报接口 QPS / 响应状态 / 耗时、首次成功确认的记录数与 OTLP 字节数、Node 堆内存、活跃资源、事件循环延迟和自监控队列；重复批次只增加接口请求次数，不重复计算接收量。执行节点控制心跳转换成在线状态、队列和采集诊断；启动、配置变更与执行失败日志在中心 SQLite 暂存，写入 ClickHouse 成功后清除。SDK 自监控在原有业务权限验证后自动分流到系统 SDK 表。见 [SDK 内部监控](sdk/README.md#内部监控) 和 [本机封装 SDK 示例](examples/self-monitoring/README.md)。

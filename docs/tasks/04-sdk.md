@@ -1,5 +1,7 @@
 # 04 · SDK 开发任务书
 
+2026-10-20整合更新：用户指定SDK与中心上报采用本地实现。当前接入和发布为Go、Node.js/TypeScript、Rust、Python四语言record SDK，默认30秒、七档周期；其他历史语言保留兼容源码。以下2026-10-19发布范围为整合前记录，本次行为与验收以[SDD 011整合说明](../../specs/011-aligned-metric-windows/main-integration.md)为准。
+
 状态：2026-10-19 当前发布 TypeScript/JavaScript、Python、Ruby；PHP 原生 SDK 下线，Go/Rust 仅保留源码、后续支持，不生成本次发布包或接入页安装选项，未纳本次发布验收。以下早期 Go/Node 与多语言测试结果为历史记录，不能替代当前版本验收。以 [产品约束](../brief.md) 和 [公共契约](../contracts.md) 为准。
 
 首版历史交付 `sdk/go`（package `moni`）、`sdk/typescript` 的 Node / 浏览器入口，以及 `examples/sdk/go`、`examples/sdk/node`、`examples/sdk/browser`。Go 使用标准 OTLP Protobuf；TypeScript 使用标准 OTLP JSON，含十六进制 trace ID 与十进制字符串 int64。多个 Key 可配置逻辑 table 白名单或显式允许所有 table，不按 service 绑定。Go / Node 的完整维度聚合、Gauge、Histogram、冻结批次、缓存边界、Key 轮换、partial success 测试通过；Go race 与 Go / Node → 真实 Agent HTTP → SQLite spool 关闭重开恢复测试通过。主干真实 ClickHouse 联调验证每个语言 service 的 Counter 总量 20、日志 20、span 20、trace JOIN 关联及同一全局 Key 的 key_id 来源。浏览器 demo 经业务后端转发已真实验收两次点击、log_web、metric_web_sum/gauge 和持久化 ACK；页面关闭的尽力 flush 与包体积验证仍需完成；自动框架埋点尚未交付。

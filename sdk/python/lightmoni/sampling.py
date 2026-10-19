@@ -1,3 +1,4 @@
+from .windows import copy_windows
 """Validated snapshots and the shared Go/TypeScript log selection algorithm."""
 import json
 import math
@@ -121,11 +122,11 @@ def decode_config(raw):
         raise ValueError("non-finite configuration number")
 
     value = json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid_constant)
-    _object(value, {"revision", "log_sampling", "disable_rules"})
+    _object(value, {"revision", "log_sampling", "disable_rules", "metric_windows"})
     if not _text(value.get("revision"), 128, True):
         raise ValueError("invalid SDK configuration revision")
     return {"revision": value["revision"], "log_sampling": copy_policies(value.get("log_sampling")),
-            "disable_rules": copy_exclusions(value.get("disable_rules", []), sdk=True)}
+            "disable_rules": copy_exclusions(value.get("disable_rules", []), sdk=True), "metric_windows": copy_windows(value.get("metric_windows"))}
 
 
 def _value(field, record, attributes, resource):

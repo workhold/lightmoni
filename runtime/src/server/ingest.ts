@@ -1,3 +1,5 @@
+import { METRIC_PERIODS, windowHistory } from './metric-windows.js';
+import { distributionPoint } from "./distribution.js";
 import { gunzipSync } from "node:zlib";
 import { LosslessNumber } from "lossless-json";
 import {
@@ -15,7 +17,7 @@ import { fail } from "../shared/http.js";
 import type { Context } from "../shared/types.js";
 import { Auth, validTable, systemTable } from "./auth.js";
 import { Catalog } from "./catalog.js";
-import type { AgentCredentialStore } from "./agent-credentials.js";
+import type { AgentCredentialStore } from './agent-credentials.js';
 export interface Normalized {
   kind: string;
   subtype: string;
@@ -126,7 +128,8 @@ export function normalize(
       const resource = attrs(rs.resource?.attributes);
       for (const scope of rs.scopeMetrics ?? [])
         for (const metric of scope.metrics ?? []) {
-          const subtype = metric.sum
+          const subtype = metric.exponentialHistogram || metric.summary
+            ? "histogram" : metric.sum
             ? "sum"
             : metric.gauge
               ? "gauge"
@@ -137,7 +140,7 @@ export function normalize(
             throw Error(
               "unsupported metric type; use Sum/Gauge/explicit Histogram",
             );
-          const data = metric[subtype];
+          const data = metric.exponentialHistogram ?? metric.summary ?? metric[subtype];
           for (const p of data.dataPoints ?? []) {
             const row: any = base(
               resource,
@@ -151,6 +154,13 @@ export function normalize(
               unit: metric.unit ?? "",
               start_time: stamp(p.startTimeUnixNano ?? 0),
             });
+            if (metric.exponentialHistogram || metric.summary) {
+              if(metric.exponentialHistogram && Number(data.aggregationTemporality)!==1)throw Error("record histograms require delta temporality");
+              const period=Number(row.attributes['lightmoni.window_seconds']??0);
+              if(period){const start=parseNanoTime(row.start_time.replace(' ','T')+'Z'),at=parseNanoTime(row.event_time.replace(' ','T')+'Z'),duration=BigInt(period)*1_000_000_000n;if(!METRIC_PERIODS.includes(period)||start%duration!==0n||at<start||at>start+duration)throw Error('invalid aligned metric window');Object.assign(row,{window_start:row.start_time,window_seconds:period,received_at:row.ingested_at});}
+              Object.assign(row,distributionPoint(p,!!metric.summary,!!period));
+              out.push({kind:"metric",subtype:"histogram",row});continue;
+            }
             if (subtype === "histogram") {
               const bounds = p.explicitBounds ?? [],
                 buckets = p.bucketCounts ?? [],
@@ -184,6 +194,12 @@ export function normalize(
                 min: p.min ?? null,
                 max: p.max ?? null,
                 temporality: temporality(data.aggregationTemporality),
+                bucket_values: buckets.map((_:unknown,i:number)=>{
+                  const lower=i===0?(p.min??bounds[0]??0):bounds[i-1],upper=i===bounds.length?(p.max??bounds.at(-1)??0):bounds[i];
+                  return lower/2+upper/2;
+                }),
+                distribution_count: Number.isFinite(p.min)&&Number.isFinite(p.max)&&bounds.length?count.toString():"0",
+                distribution_kind:"explicit",sketch_scale:null,quantile_error:null,
               });
             } else {
               if (p.asInt !== undefined)
@@ -355,6 +371,8 @@ export function sdkRuntime(n: Normalized, source: string) {
       "go",
       "typescript",
       "python",
+      "java",
+      "dotnet",
       "php",
       "ruby",
       "rust",
@@ -401,12 +419,14 @@ export class Ingest {
   ) {
     if (!systemTable(table))
       throw Error("internal telemetry requires a system table");
+    const component=table==="lightmoni"?"":table.slice(10);
     const grouped = new Map<string, any[]>();
     for (const [i, n] of rows.entries()) {
+      if(component){n.row.attributes["lightmoni.component"]=component;n.row.attributes_json=goJSON(n.row.attributes,true);}
       const target =
         "_lm_" +
         (await this.cat.ensure(
-          table,
+          "lightmoni",
           n.kind,
           n.subtype,
           n.row.service,
@@ -428,27 +448,17 @@ export class Ingest {
     }
   }
   async receive(c: Context, signal: Signal) {
-    const agentID = String(c.req.headers["x-lightmoni-agent-id"] ?? "");
-    const key =
-      agentID && this.agentCredentials?.has(agentID, "data")
-        ? (() => {
-            const credential = this.agentCredentials!.authenticate(
-              c.req,
-              agentID,
-              "data",
-            );
-            return {
-              id: credential.credential_id,
-              name: "agent:" + agentID,
-              allowed_tables: [] as string[],
-              allow_all_tables: true,
-            };
-          })()
-        : this.auth.validateKey(c),
+    const agentID = String(c.req.headers['x-lightmoni-agent-id'] ?? '');
+    const key = agentID && this.agentCredentials?.has(agentID, 'data')
+      ? (() => {
+          const credential = this.agentCredentials!.authenticate(c.req, agentID, 'data');
+          return {id: credential.credential_id, name: 'agent:' + agentID, allowed_tables: [] as string[], allow_all_tables: true};
+        })()
+      : this.auth.validateKey(c, undefined, true),
       table = String(c.req.headers["x-lightmoni-table"] ?? "");
     if (!validTable(table))
       fail(400, "X-Lightmoni-Table requires a logical business name");
-    if (systemTable(table)) fail(403, "系统内置表由内部监控链路写入");
+    if (systemTable(table) && !(key.id && table === "lightmoni_sdk")) fail(403, "系统内置表由内部监控链路写入");
     if (!key.allow_all_tables && !key.allowed_tables.includes(table)) {
       this.auth.recordKey(
         key.id,
@@ -472,8 +482,9 @@ export class Ingest {
         fail(400, "invalid gzip");
       }
     if (raw.length > 4 << 20) fail(413, "batch exceeds 4 MiB");
-    const batch = String(c.req.headers["x-lightmoni-batch-id"] ?? "") || id();
-    if (batch.length > 128) fail(400, "invalid batch ID");
+    const clientBatch = String(c.req.headers["x-lightmoni-batch-id"] ?? "") || id();
+    if (clientBatch.length > 128) fail(400, "invalid batch ID");
+    const batch = key.id ? clientBatch : "anonymous:" + hash(table + "\0" + clientBatch);
     const created = String(c.req.headers["x-lightmoni-batch-created-at"] ?? "");
     if (created) {
       let at: bigint;
@@ -488,6 +499,7 @@ export class Ingest {
         fail(400, "batch expired beyond 24-hour replay window");
     }
     await this.serial.run(async () => {
+      if (!key.id) this.auth.validateKey(c, table, true);
       const digest = hash(
         Buffer.concat([Buffer.from(signal + "\0" + table + "\0"), raw]),
       );
@@ -538,6 +550,12 @@ export class Ingest {
         );
         fail(400, e instanceof Error ? e.message : "invalid OTLP");
       }
+      if (table === "lightmoni_sdk" && rows.some(n => !sdkRuntime(n, table)))
+        fail(403, "SDK 系统表只接收 SDK 自身指标和事件");
+      // Older anonymous SDKs may mix diagnostics into a business stream.
+      if (!key.id) rows = rows.filter(n => n.row.attributes["lightmoni.component"] !== "sdk");
+      try{rows=mergeMetricWindows(rows);}catch(error){fail(400,error instanceof Error?error.message:'invalid metric window');}
+      for(const n of rows)if(n.row.window_seconds&&!windowHistory(this.cat.db,table).some(p=>p.seconds===n.row.window_seconds))fail(400,'metric window period has not been configured');
       const now = nowNano();
       for (const n of rows) {
         const at = parseNanoTime(n.row.event_time.replace(" ", "T") + "Z");
@@ -566,7 +584,7 @@ export class Ingest {
       try {
         for (const [i, n] of rows.entries()) {
           service = n.row.service;
-          const route = sdkRuntime(n, table) ? "lightmoni_sdk" : table,
+          const route = key.id && sdkRuntime(n, table) ? "lightmoni" : table,
             target =
               "_lm_" +
               (await this.cat.ensure(
@@ -616,4 +634,19 @@ export class Ingest {
       this.success(c);
     });
   }
+}
+
+// Only combine complementary points inside one immutable SDK batch. Independent
+// instances, retries and explicit flush fragments retain their own event IDs.
+export function mergeMetricWindows(rows:Normalized[]):Normalized[]{
+ const output:Normalized[]=[],groups=new Map<string,{n:Normalized;kinds:Set<string>}>();
+ for(const n of rows){const r=n.row;if(!r.window_seconds){output.push(n);continue;}
+ const key=goJSON([r.resource_json,r.name,r.unit,r.attributes_json,r.window_start,r.window_seconds],true),kind=r.distribution_kind;
+ const old=groups.get(key);if(!old){groups.set(key,{n,kinds:new Set([kind])});output.push(n);continue;}
+ if(old.kinds.has(kind))throw Error('duplicate metric kind in one window');old.kinds.add(kind);
+ const previous=old.n.row,complete=kind==='exponential'?r:previous,total=BigInt(previous.count)+BigInt(r.count),sum=Number(previous.sum)+Number(r.sum);
+ if(total>=(1n<<64n)||!Number.isFinite(sum))throw Error('window aggregate overflow');
+ old.n.row={...complete,count:String(total),sum,min:null,max:null,distribution_count:complete.distribution_count,distribution_kind:'mixed',event_time:previous.event_time>r.event_time?previous.event_time:r.event_time};
+ }
+ return output;
 }

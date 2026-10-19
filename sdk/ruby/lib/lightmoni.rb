@@ -22,62 +22,6 @@ module LightMoni
     raise ArgumentError, 'invalid logical table' unless value.is_a?(String) && /\A[a-z][a-z0-9_]{0,47}\z/.match?(value) && !/\A(log|metric|trace)_/.match?(value)
     value
   end
-  def self.secret(explicit, file, env, file_env, label)
-    path = file.to_s.empty? ? ENV[file_env] : file; from_file = ''
-    if path && !path.empty?
-      st = File.lstat(path); raise ArgumentError, "#{label} file must be a regular file" unless st.file? && !st.symlink?
-      raw = File.binread(path, 16 * 1024 + 1); raise ArgumentError, "#{label} file is too large" if raw.bytesize > 16 * 1024
-      from_file = raw.sub(/\r?\n\z/, '')
-    end
-    from_env = ENV[env].to_s; values = [explicit.to_s, from_file, from_env].reject(&:empty?); raise ArgumentError, "credential_source_conflict: #{env}" if values.uniq.size > 1
-    [values.first.to_s, explicit.to_s.empty? ? (from_file.empty? ? (from_env.empty? ? '' : 'env') : 'file') : 'explicit']
-  end
-  def self.from_env(service:, table:, **options)
-    mode = (options.delete(:mode) || ENV['LIGHTMONI_MODE'] || 'direct').to_s
-    raise ArgumentError, 'mode must be agent, direct, or auto' unless %w[agent direct auto].include?(mode)
-    endpoint = options.delete(:endpoint) || ENV['LIGHTMONI_ENDPOINT'].to_s
-    agent = options.delete(:agent_endpoint) || ENV['LIGHTMONI_AGENT_ENDPOINT'].to_s
-    agent = 'http://127.0.0.1:4318' if agent.empty?
-    explicit_local, local_file = options.delete(:local_token), options.delete(:local_token_file)
-    explicit_data, legacy_key, data_file = options.delete(:data_key), options.delete(:key), options.delete(:data_key_file)
-    explicit_data = legacy_key if explicit_data.nil?
-    local = local_source = data = data_source = ''
-    if mode != 'direct'
-      local, local_source = secret(explicit_local.to_s, local_file.to_s, 'LIGHTMONI_LOCAL_TOKEN', 'LIGHTMONI_LOCAL_TOKEN_FILE', 'local token')
-    end
-    if mode != 'agent'
-      data, data_source = secret(explicit_data.to_s, data_file.to_s, 'LIGHTMONI_DATA_KEY', 'LIGHTMONI_DATA_KEY_FILE', 'data key')
-      legacy, legacy_source = secret('', '', 'LIGHTMONI_KEY', '', 'legacy data key')
-      raise ArgumentError, 'credential_source_conflict: LIGHTMONI_KEY' if !data.empty? && !legacy.empty? && data != legacy
-      data, data_source = legacy, (legacy.empty? ? legacy_source : 'legacy-env') if data.empty?
-    end
-    probe = 'not_probed'; selected = mode; fallback = 0
-    if mode == 'agent'
-      endpoint, key, selected, probe, source = agent, local, 'agent', 'configured', local_source
-    elsif mode == 'direct'
-      raise ArgumentError, 'direct mode requires endpoint and data key' if endpoint.empty? || data.empty?
-      key, source = data, data_source
-    else
-      healthy = false
-      begin
-        uri = URI.join(agent.sub(%r{/$}, '') + '/', 'healthz'); req = Net::HTTP::Get.new(uri); req['Authorization'] = "Bearer #{local}" unless local.empty?
-        http = Net::HTTP.new(uri.host, uri.port); http.use_ssl = uri.scheme == 'https'; http.open_timeout = http.read_timeout = 0.5
-        response = http.start { |h| h.request(req) }; healthy = response.is_a?(Net::HTTPSuccess); raise ArgumentError, "agent probe HTTP #{response.code}" if !healthy
-      rescue ArgumentError => error
-        raise error if error.message.start_with?('agent probe HTTP')
-        healthy = false
-      rescue StandardError; healthy = false; end
-      if healthy
-        endpoint, key, selected, probe, source = agent, local, 'agent', 'healthy', local_source
-      else
-        raise ArgumentError, 'auto_route_unavailable: agent unavailable and direct credentials are missing' if endpoint.empty? || data.empty?
-        key, selected, probe, fallback, source = data, 'direct', 'unavailable_fallback', 1, data_source
-      end
-    end
-    client = Client.new(service: service, table: table, endpoint: endpoint, key: key, **options)
-    client.state.gate.synchronize { client.state.stats.merge!('configured_mode' => mode, 'selected_route' => selected, 'agent_probe' => probe, 'fallback_count' => fallback, 'credential_source' => source) }
-    client
-  end
   def self.attrs(values)
     raise ArgumentError, 'attribute count exceeded' if values.size > 32
     result = values.sort_by { |k, _| k.to_s }.map do |key, value|
@@ -132,7 +76,7 @@ module LightMoni
       @gate, @delivery = Monitor.new, Mutex.new
       @metrics, @records, @queue = {}, {}, []
       @stats = %w[pending_batches pending_bytes buffer_bytes delivered_batches retried_batches invalid_records overflow_records dropped_records rejected_records].to_h { |n| [n, 0] }
-      @stats['last_error'] = ''; @stats.merge!('configured_mode'=>'','selected_route'=>'','agent_probe'=>'','fallback_count'=>0,'last_route_error'=>'','credential_source'=>'','route_uncertain'=>false)
+      @stats['last_error'] = ''
       @self_enabled, @self_table, @self_last, @self_started, @self_previous = true, '', -Float::INFINITY, false, {}
       @resource = { 'attributes' => LightMoni.attrs('service.name' => service, 'service.instance.id' => SecureRandom.uuid) }
     end

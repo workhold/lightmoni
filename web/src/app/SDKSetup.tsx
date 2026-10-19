@@ -1,40 +1,83 @@
-import {useI18n} from '../shared/i18n';
-import {useMemo} from 'react';
+import {useEffect,useMemo,useState} from 'react';
 import {Link} from 'react-router-dom';
-import {CopyOutlined} from '@ant-design/icons';
-import {Alert,App,Button,Radio,Space,Tag,Typography} from '../shared/ui';
+import {CopyOutlined,PlusOutlined} from '@ant-design/icons';
+import {Alert,App,Button,Form,Input,Modal,Radio,Select,Space,Tag,Typography} from '../shared/ui';
 import CodeBlock from '../shared/CodeBlock';
-import {sdkEndpointError,sdkEndpointIsLoopback,sdkEnvironment,sdkExamples,sdkSampleFor,type SDKConnectionMode} from './sdkExamples';
 import ReportingAddressInput from './ReportingAddressInput';
-import type {ReportingAddress} from './reporting-addresses';
+import {ExemptTableEditor} from './SDKExemptTables';
+import {SDK_LANGUAGES,recommendedExemptTables,sdkEndpointError,sdkEndpointIsLoopback,sdkEnvironment,sdkExamples,sdkSampleFor,type SDKAuthMode,type SDKInstall} from './sdkExamples';
+import {sdkError,type SDKKey,type SDKKeyValues,type CreatedSDKKey,type ExemptTable,type ExemptTableValues} from './sdk-onboarding';
+import {sdkMetricQuery} from './sdkMetricQueries';
 import './sdk-setup.css';
 
-export default function SDKSetup({language,mode,endpoint,defaultEndpoint,reportingAddresses,defaultEndpointID,onModeChange,onEndpointChange,onResetEndpoint,onManageKeys}:{language:string;mode:SDKConnectionMode;endpoint:string;defaultEndpoint:string;reportingAddresses?:ReportingAddress[];defaultEndpointID?:string;onModeChange:(mode:SDKConnectionMode)=>void;onEndpointChange:(value:string)=>void;onResetEndpoint:()=>void;onManageKeys?:()=>void}){
- const {t,language:uiLanguage}=useI18n();
-
- const {message}=App.useApp(),direct=mode==='direct',error=sdkEndpointError(endpoint,uiLanguage);
- const sample=useMemo(()=>sdkSampleFor(language,mode,endpoint),[language,mode,endpoint]),environment=useMemo(()=>sdkEnvironment(mode,endpoint),[mode,endpoint]);
- const copy=async(text:string)=>{try{await navigator.clipboard.writeText(text);void message.success(t("已复制","Copied"));}catch{void message.error(t("复制失败，请选择代码手动复制","Unable to copy. Select and copy the code manually"));}};
- return <div className="lm-sdk-setup">
-  <h3>{t("上报方式","Reporting mode")}</h3>
-  <Radio.Group aria-label={t("SDK 上报方式","SDK reporting mode")} optionType="button" buttonStyle="solid" value={mode} onChange={event=>onModeChange(event.target.value)} options={[{label:t("直连平台","Direct to platform"),value:'direct'},{label:t("通过 LightMoni Agent","Through LightMoni Agent"),value:'agent'}]}/>
-  <p className="lm-sdk-mode-description">{direct?t("业务 SDK → LightMoni 平台。适用于普通服务器、容器和 Serverless；只需配置平台地址与业务 data key，无需安装或启动 Agent。","Business SDK → LightMoni platform. Suitable for servers, containers, and serverless. Configure only the platform address and business data key; no Agent installation is required."):t("业务 SDK → LightMoni Agent → 平台。SDK 配置 Agent 地址，Agent 独立管理平台连接、上报凭据和本地持久队列。","Business SDK → LightMoni Agent → platform. Configure the Agent address in the SDK. The Agent independently manages the platform connection, reporting credentials, and local persistent queue.")}</p>
-  <div className="lm-sdk-endpoint">
-   <label htmlFor="sdk-report-endpoint">{direct?t("平台上报地址","Platform reporting address"):t("Agent 接收地址","Agent receiver address")}</label>
-   <ReportingAddressInput id="sdk-report-endpoint" label={t("SDK 上报地址","SDK reporting address")} value={endpoint} onChange={onEndpointChange} addresses={direct?reportingAddresses:[]} defaultID={defaultEndpointID} error={error} placeholder={direct?t("选择内网或公网地址","Select an internal or public address"):'http://127.0.0.1:4318'}/>
-   {error?<Typography.Text type="danger">{error}</Typography.Text>:<Typography.Text type="secondary">{t("填写基础地址，SDK 自动追加 /v1/metrics、/v1/logs 或 /v1/traces。","Enter the base address. The SDK appends /v1/metrics, /v1/logs, or /v1/traces automatically.")}</Typography.Text>}
+export default function SDKSetup({install,keys,secrets,exempt,admin,ready,onCreateKey,onCreateExempt,onManageExempt}:{install?:SDKInstall;keys:SDKKey[];secrets:Record<string,string>;exempt:ExemptTable[];admin:boolean;ready:boolean;onCreateKey:(values:SDKKeyValues)=>Promise<CreatedSDKKey>;onCreateExempt:(values:ExemptTableValues)=>Promise<ExemptTable>;onManageExempt:()=>void}){
+ const {message}=App.useApp();
+ const [language,setLanguage]=useState('go'),[service,setService]=useState('order-api'),[env,setEnv]=useState('test'),[version,setVersion]=useState(''),[instanceID,setInstanceID]=useState('');
+ const [authMode,setAuthMode]=useState<SDKAuthMode>('key'),[keyID,setKeyID]=useState<string>(),[endpointOverride,setEndpointOverride]=useState<string>();
+ const [keyOpen,setKeyOpen]=useState(false),[creating,setCreating]=useState(false),[keyError,setKeyError]=useState('');
+ const [keyDropdown,setKeyDropdown]=useState(false),[suggestion,setSuggestion]=useState<ExemptTableValues>();
+ const suggestions=useMemo(()=>recommendedExemptTables(),[]),activeKeys=keys.filter(key=>key.active),activeExempt=exempt.filter(item=>item.active);
+ const selectedKey=activeKeys.find(key=>key.id===keyID),anonymous=authMode==='anonymous';
+ const endpoint=endpointOverride??install?.endpoint??location.origin,endpointError=sdkEndpointError(endpoint);
+ const identityValid=[env,version,instanceID].every(value=>value.length<=128&&!/[\u0000-\u001f]/.test(value))&&!!env.trim();
+ const serviceValid=!!service.trim()&&service.length<=128&&!/[\u0000-\u001f]/.test(service);
+ const canGenerate=ready&&(anonymous||!!selectedKey)&&serviceValid&&identityValid&&!endpointError;
+ const sampleOptions={service:service.trim(),env:env.trim(),service_version:version.trim()||undefined,instance_id:instanceID.trim()||undefined,authMode,key:keyID?secrets[keyID]:undefined,keyName:selectedKey?.name};
+ const environment=sdkEnvironment('direct',endpoint,sampleOptions),sample=sdkSampleFor(language,'direct',endpoint,sampleOptions);
+ const pkg=install?.packages.find(item=>item.id===language),example=sdkExamples[language];
+ useEffect(()=>{if(ready&&keyID&&!activeKeys.some(key=>key.id===keyID))setKeyID(undefined);},[keys,ready,keyID]);
+ const selectKey=(id:string)=>setKeyID(id);
+ const changeMode=(mode:SDKAuthMode)=>setAuthMode(mode);
+ const copy=async(text:string)=>{try{await navigator.clipboard.writeText(text);void message.success('已复制');}catch{void message.error('复制失败，请选择代码手动复制');}};
+ const openCreate=()=>{setKeyDropdown(false);setKeyError('');setKeyOpen(true);};
+ const createButton=<Button aria-label="创建 SDK 密钥" type="text" block icon={<PlusOutlined/>} disabled={!ready} onMouseDown={event=>event.preventDefault()} onClick={openCreate}>创建 SDK 密钥</Button>;
+ return <div className="lm-surface lm-sdk-workspace">
+  <div className="lm-sdk-config">
+   <div className="lm-sdk-section-heading"><div><h2>生成接入样例</h2><p>选择语言与认证方式，初始化后按业务需要指定上报表。</p></div><Tag>直连中心</Tag></div>
+   <div className="lm-sdk-fields">
+    <div><label htmlFor="sdk-language">SDK 语言</label><Select id="sdk-language" aria-label="SDK 语言" value={language} onChange={setLanguage} options={SDK_LANGUAGES}/></div>
+    <div><label htmlFor="sdk-service">服务名称</label><Input id="sdk-service" aria-label="服务名称" value={service} maxLength={128} onChange={event=>setService(event.target.value)} status={serviceValid?'':'error'}/></div>
+   </div>
+   <div className="lm-sdk-fields"><div><label htmlFor="sdk-env">环境</label><Input id="sdk-env" aria-label="环境" placeholder="test / prod" value={env} maxLength={128} onChange={event=>setEnv(event.target.value)} status={env.trim()?'':'error'}/></div></div>
+   <details className="lm-sdk-optional"><summary>可选实例信息</summary><div className="lm-sdk-fields"><div><label htmlFor="sdk-version">服务版本</label><Input id="sdk-version" aria-label="服务版本" value={version} maxLength={128} onChange={event=>setVersion(event.target.value)} placeholder="例如：1.2.0"/></div><div><label htmlFor="sdk-instance">实例 ID</label><Input id="sdk-instance" aria-label="实例 ID" value={instanceID} maxLength={128} onChange={event=>setInstanceID(event.target.value)} placeholder="留空时自动生成"/></div></div></details>
+   <div className="lm-sdk-auth">
+    <label>认证方式</label><Radio.Group aria-label="SDK 认证方式" optionType="button" buttonStyle="solid" value={authMode} onChange={event=>changeMode(event.target.value)} options={[{label:'使用 SDK 密钥',value:'key'},{label:'无密钥模式',value:'anonymous'}]}/>
+   </div>
+   <div className="lm-sdk-fields lm-sdk-auth-fields" key={authMode}>
+    {!anonymous&&<div><label htmlFor="sdk-key">SDK 密钥</label><Select id="sdk-key" aria-label="SDK 密钥" placeholder={admin?'选择 SDK 密钥':'请由管理员创建 SDK 密钥'} value={keyID} onChange={selectKey} disabled={!ready||!admin} open={keyDropdown} onOpenChange={setKeyDropdown} showSearch optionFilterProp="label" options={activeKeys.map(key=>({value:key.id,label:key.name}))} notFoundContent={activeKeys.length?'没有匹配的密钥':createButton} popupRender={menu=>activeKeys.length?<div>{menu}{admin&&<div className="lm-sdk-create-footer">{createButton}</div>}</div>:menu}/></div>}
+   </div>
+   {!anonymous&&<p className="lm-sdk-hint">{selectedKey?(secrets[selectedKey.id]?'新密钥已选中并带入环境变量，请及时保存完整值。':'此密钥仅保存摘要，请在环境变量中填入你保存的完整密钥。'):'选择或创建 SDK 密钥，即可向任意业务表上报。'}</p>}
+   {anonymous&&<div className="lm-sdk-anonymous">
+    <Alert type="info" showIcon title="仅允许写入已启用的豁免表" description="建议使用带随机后缀的复杂表名。知道豁免表名的客户端即可上报，其他表会被拒绝；无密钥 SDK 不上报自身日志、指标或事件。"/>
+    {!activeExempt.length&&<p>尚无可用豁免表。{admin?'可先复制初始化样例，再按业务需要注册豁免表。':'请联系管理员添加豁免表。'}</p>}
+    {!!activeExempt.length&&<p>已启用：{activeExempt.map(item=><Typography.Text code key={item.name}>{item.name} </Typography.Text>)}。无需在初始化时选择，在实际写入时指定表名。</p>}
+    <div className="lm-sdk-recommendations">{suggestions.map(item=><div className="lm-sdk-recommendation" key={item.name}><div><strong>{item.description}</strong><Typography.Text code>{item.name}</Typography.Text></div>{admin&&<Button aria-label="添加" size="small" icon={<PlusOutlined/>} disabled={!ready} onClick={()=>setSuggestion(item)}>添加</Button>}</div>)}</div>
+    <Button type="link" onClick={onManageExempt}>管理豁免表</Button>
+   </div>}
+   <div className="lm-sdk-endpoint"><label htmlFor="sdk-report-endpoint">中心上报地址</label><ReportingAddressInput id="sdk-report-endpoint" label="SDK 上报地址" value={endpoint} onChange={setEndpointOverride} addresses={install?.endpoints} defaultID={install?.default_endpoint_id} error={endpointError}/>{endpointError&&<Typography.Text type="danger">{endpointError}</Typography.Text>}</div>
+   {sdkEndpointIsLoopback(endpoint)&&<p className="lm-sdk-hint">容器中的 localhost 指向业务容器本身，请使用容器可访问的中心地址，例如 host.docker.internal。</p>}
+   <Space wrap><Button size="small" disabled={endpointOverride===undefined} onClick={()=>setEndpointOverride(undefined)}>恢复默认地址</Button>{admin&&<Link to="/admin?tab=reporting">配置上报地址</Link>}<Link to="/agents/install">接入执行节点</Link></Space>
   </div>
-  {direct&&<Space wrap><Typography.Text type="secondary">{t("选择已配置的内网或公网地址，也可临时填写其他地址。","Select a configured internal or public address, or temporarily enter another address.")}</Typography.Text><Button size="small" disabled={endpoint===defaultEndpoint} onClick={onResetEndpoint}>{t("恢复默认地址","Restore default address")}</Button>{onManageKeys&&<Link to="/admin?tab=reporting">{t("设置默认地址","Set default address")}</Link>}</Space>}
-  <Alert className="lm-sdk-container-note" type={sdkEndpointIsLoopback(endpoint)?'warning':'info'} showIcon title={t("容器上报地址","Container reporting address")} description={direct?t("容器中的 localhost / 127.0.0.1 指向业务容器本身。请填写容器可访问的平台域名或服务地址；同一 Docker 网络可用 http://lightmoni:8080，Docker Desktop 访问宿主机可用 host.docker.internal。","Inside a container, localhost / 127.0.0.1 points to the business container itself. Use a platform address reachable from that container. On the same Docker network, use http://lightmoni:8080; Docker Desktop can reach the host via host.docker.internal."):t("容器中的 localhost / 127.0.0.1 指向业务容器本身。Agent 在其他容器或宿主机时，请填写业务容器可访问的 Agent 地址；同一 Docker 网络可用 http://lightmoni-agent:4318，Docker Desktop 访问宿主机可用 host.docker.internal。","Inside a container, localhost / 127.0.0.1 points to the business container itself. If the Agent runs elsewhere, enter an Agent address reachable from the business container. On the same Docker network, use http://lightmoni-agent:4318; Docker Desktop can reach the host via host.docker.internal.")}/>
-  <Space wrap className="lm-sdk-key-help"><Typography.Text>{direct?t("平台 data key 需允许写入 business 表，通过 LIGHTMONI_DATA_KEY 或容器 Secret 注入。","The platform data key must allow writes to the business table. Inject it through LIGHTMONI_DATA_KEY or a container Secret."):t("业务 SDK 无需配置平台地址或平台上报凭据。仅在 Agent 启用本地鉴权时注入 LIGHTMONI_LOCAL_TOKEN。","The business SDK needs no platform address or platform reporting credentials. Inject LIGHTMONI_LOCAL_TOKEN only when local authentication is enabled on the Agent.")}</Typography.Text>{direct&&onManageKeys&&<Button size="small" onClick={onManageKeys}>{t("管理接入凭据","Manage access credentials")}</Button>}</Space>
-  <Alert type="info" showIcon title={t("SDK 自监控","SDK self-monitoring")} description={t("默认上报实例心跳、缓冲队列与重试、丢弃等诊断，自动写入系统 SDK 表。可在「系统监控 · SDK」大盘查看并配置告警，业务 Key 无需增加权限。","Instance heartbeats, buffer status, retries, and dropped-data diagnostics are reported to the system SDK table by default. View them and configure alerts in the System monitoring · SDK dashboard. No additional business-key permissions are required.")}/>
-  <h3>{t("环境变量","Environment variables")}</h3>
-  <p>{t("先将下面的变量配置到业务进程；复制执行会清理另一种方式及旧凭据来源，避免切换冲突。容器部署时按所选方式配置 environment 或 Secret。","Configure these variables in the business process. Running the copied commands clears the other mode and legacy credential sources to prevent conflicts. For containers, configure environment variables or Secrets for the selected mode.")}</p>
-  <CodeBlock code={environment} language="bash" ariaLabel={t("SDK 环境变量","SDK environment variables")}/>
-  <Button icon={<CopyOutlined/>} disabled={!!error} onClick={()=>void copy(environment)}>{t("复制环境变量","Copy environment variables")}</Button>
-  <div className="lm-sdk-example-heading"><h3>{t("业务接入示例","Business integration example")}</h3>{language==='typescript'&&<Tag>{t("Node.js 服务端","Node.js server")}</Tag>}</div>
-  <CodeBlock code={sample} language={sdkExamples[language]?.language??'typescript'} ariaLabel={t("业务接入 SDK 示例","Business SDK integration example")}/>
-  <Button type="primary" icon={<CopyOutlined/>} disabled={!!error} onClick={()=>void copy(sample)}>{t("复制接入样例","Copy integration example")}</Button>
-  <p className="lm-sdk-mode-description">{direct?t("直连使用 SDK 的有限进程内缓冲与重试；业务重启或缓冲超限可能丢失尚未上报的数据。需要独立的磁盘队列时可选择 Agent。","Direct reporting uses the SDK's bounded in-process buffer and retries. Restarts or buffer overflow may lose unsent data. Choose Agent mode if you need an independent disk queue."):t("Agent 成功响应表示批次已被本地持久队列接收，不代表平台已经入库；队列有容量和重放期限限制。Agent 的上报凭据需允许 business 表。","An Agent success response confirms receipt in its local persistent queue, not ingestion by the platform. Queue capacity and replay age are limited. Agent reporting credentials must allow the business table.")}{' '}{t("失败时不会自动改投另一条路径；重试仍使用原路径。使用 withTable / with_table 切换表时，上报凭据也需允许对应 table。","Failures do not switch reporting modes; retries use the original path. When switching tables with withTable / with_table, reporting credentials must allow the selected table.")}</p>
+  <div className="lm-sdk-output">
+   <div className="lm-sdk-section-heading"><h3>1. 安装 SDK</h3><Space wrap>{pkg?.runtime&&<Tag>{pkg.runtime}</Tag>}<Button aria-label="复制安装命令" size="small" icon={<CopyOutlined/>} onClick={()=>void copy(example.install)}>复制安装命令</Button><Button size="small" href={pkg?.url} disabled={!pkg?.available}>下载 SDK 与 Demo</Button></Space></div>
+   {pkg&&!pkg.available&&<Alert type="warning" title="当前服务尚未打包此 SDK，请先生成安装包。"/>}
+   <CodeBlock code={example.install} language="bash" ariaLabel="SDK 安装命令"/>
+   <div className="lm-sdk-section-heading"><h3>2. 设置环境变量</h3><Button aria-label="复制环境变量" size="small" icon={<CopyOutlined/>} disabled={!canGenerate} onClick={()=>void copy(environment)}>复制环境变量</Button></div>
+   {canGenerate?<CodeBlock code={environment} language="bash" ariaLabel="SDK 环境变量"/>:<div className="lm-sdk-awaiting">{!ready?'接入配置尚未加载，请重试刷新。':!anonymous&&!selectedKey?'选择或创建 SDK 密钥后生成接入样例。':'请填写有效的服务名称、环境和上报地址。'}</div>}
+   <div className="lm-sdk-section-heading"><h3>3. 业务接入 Demo</h3><Button aria-label="复制接入样例" type="primary" icon={<CopyOutlined/>} disabled={!canGenerate} onClick={()=>void copy(sample)}>复制接入样例</Button></div>
+   {canGenerate&&<CodeBlock code={sample} language={example.language} ariaLabel="业务接入 SDK 示例"/>}
+   <p className="lm-sdk-hint">每次请求后调用 record，传入表、指标名、业务维度、总值和数量；逐次打点数量填 1，SDK 自动聚合发送。</p><p className="lm-sdk-hint">请替换 your_table 后接入业务代码。</p>
+   <div className="lm-sdk-section-heading"><h3>4. 查询业务指标</h3><Button aria-label="复制指标查询" size="small" icon={<CopyOutlined/>} disabled={!identityValid||!serviceValid} onClick={()=>void copy(sdkMetricQuery('your_table',service.trim(),env.trim()))}>复制指标查询</Button></div>
+   <p className="lm-sdk-hint">替换 your_table 后查询最近 5 分钟的数据。示例按 key1、key2 汇总；其他维度可加入筛选或分组。数量是打点人数或请求数，平均值为总值除以数量。</p><p className="lm-sdk-hint">分布数据不完整时，最小值、最大值和 P 值为空；数量、总值和平均值仍可用。</p>
+   <CodeBlock code={sdkMetricQuery('your_table',service.trim(),env.trim())} language="sql" ariaLabel="业务指标查询 SQL"/>
+
+  </div>
+  <Modal title="创建 SDK 密钥" open={keyOpen} onCancel={()=>{if(!creating)setKeyOpen(false);}} footer={null} destroyOnHidden>
+   <p>启用后可向任意业务表上报。</p><Form layout="vertical" onFinish={async(values:{name:string})=>{setCreating(true);setKeyError('');try{const result=await onCreateKey({name:values.name.trim()});setKeyID(result.id);setKeyOpen(false);void message.success('SDK 密钥已创建并选中');}catch(error){setKeyError(sdkError(error));}finally{setCreating(false);}}}>
+    <Form.Item name="name" label="密钥名称" rules={[{required:true,whitespace:true,message:'请输入密钥名称'}]}><Input aria-label="密钥名称" placeholder="例如：订单服务生产环境" disabled={creating} maxLength={128}/></Form.Item>
+    {keyError&&<Alert type="error" showIcon title={keyError} className="lm-sdk-form-error"/>}<Button type="primary" htmlType="submit" loading={creating}>创建并选择</Button>
+   </Form>
+  </Modal>
+  {suggestion&&<ExemptTableEditor initial={suggestion} onClose={()=>setSuggestion(undefined)} onCreate={onCreateExempt} onSaved={()=>{setSuggestion(undefined);void message.success('豁免表已添加');}}/>}
  </div>;
 }

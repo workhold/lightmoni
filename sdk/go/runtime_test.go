@@ -11,7 +11,7 @@ import (
 
 func TestRuntimeHeartbeatDiagnosticsAndSharedLifecycle(t *testing.T) {
 	sink := &recorder{}
-	client, err := New(Config{Service: "idle", Table: "business", Exporter: sink, Interval: time.Hour})
+	client, err := New(Config{Service: "idle", Key: "test-key", Exporter: sink, Interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestRuntimeHeartbeatDiagnosticsAndSharedLifecycle(t *testing.T) {
 	if len(sink.snapshot()) != 2 {
 		t.Fatal("WithTable duplicated runtime lifecycle or heartbeat was not throttled")
 	}
-	counter, _ := client.Counter("requests", MetricOptions{})
+	counter, _ := client.WithTable("business").Counter("requests", MetricOptions{})
 	counter.Add(context.Background(), -1, nil)
 	client.s.mu.Lock()
 	client.s.selfLast = time.Now().Add(-31 * time.Second)
@@ -38,8 +38,8 @@ func TestRuntimeHeartbeatDiagnosticsAndSharedLifecycle(t *testing.T) {
 	}
 	logs := 0
 	for _, batch := range sink.snapshot() {
-		if batch.Table != "business" {
-			t.Fatal("runtime bypassed business permission route")
+		if batch.Table != "lightmoni_sdk" {
+			t.Fatal("runtime did not use the shared SDK stream")
 		}
 		if batch.Signal == "logs" {
 			var request logcollector.ExportLogsServiceRequest
@@ -64,7 +64,7 @@ func TestRuntimeHeartbeatDiagnosticsAndSharedLifecycle(t *testing.T) {
 }
 
 func TestRuntimeAtCapacityDoesNotRecursivelyRecordLoss(t *testing.T) {
-	client, err := New(Config{Service: "bounded", Table: "business", Exporter: &recorder{}, MaxBatchBytes: 64, QueueBytes: 64})
+	client, err := New(Config{Service: "bounded", Key: "test-key", Exporter: &recorder{}, MaxBatchBytes: 64, QueueBytes: 64})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestRuntimeAtCapacityDoesNotRecursivelyRecordLoss(t *testing.T) {
 
 func TestRuntimeIdleTimerProducesHeartbeat(t *testing.T) {
 	sink := &recorder{}
-	client, err := New(Config{Service: "idle-timer", Table: "business", Exporter: sink, Interval: time.Hour})
+	client, err := New(Config{Service: "idle-timer", Key: "test-key", Exporter: sink, Interval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,4 +93,28 @@ func TestRuntimeIdleTimerProducesHeartbeat(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("idle heartbeat requires no business record or explicit flush")
+}
+
+func TestUnboundAnonymousClientOnlySendsExplicitBusinessTables(t *testing.T) {
+	sink := &recorder{}
+	client, err := New(Config{Service: "unbound", Exporter: sink, Interval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Shutdown(context.Background())
+	if _, err = client.Counter("missing", MetricOptions{}); err == nil {
+		t.Fatal("unbound metric accepted")
+	}
+	client.WithTable("first").Logger(context.Background()).Log("info", "first", nil)
+	client.WithTable("second").Logger(context.Background()).Log("info", "second", nil)
+	flush(t, client)
+	batches := sink.snapshot()
+	if len(batches) != 2 {
+		t.Fatalf("anonymous client emitted unexpected batches: %d", len(batches))
+	}
+	for _, b := range batches {
+		if b.Table != "first" && b.Table != "second" {
+			t.Fatal("implicit table", b.Table)
+		}
+	}
 }

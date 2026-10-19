@@ -15,14 +15,15 @@ import (
 
 func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 	if os.Getenv("LIGHTMONI_NATIVE_SDK_TEST") != "1" {
-		t.Skip("deferred Go SDK check: enable with LIGHTMONI_NATIVE_SDK_TEST=1 after scripts/test-sdks.py")
+		t.Skip("enable with LIGHTMONI_NATIVE_SDK_TEST=1 after scripts/test-sdks.py --docker")
 	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent := newNodeAgent(t, root, "127.0.0.1:0")
-	command := exec.Command("python3", "scripts/test-sdks.py", "--skip-build", "--agent-url", agent.url)
+	// Docker Desktop reaches this isolated receiver through its host gateway.
+	agent := newNodeAgent(t, root, "0.0.0.0:0")
+	command := exec.Command("python3", "scripts/test-sdks.py", "--docker", "--skip-build", "--agent-url", agent.url)
 	command.Dir = root
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("native SDK demos: %v\n%s", err, output)
@@ -32,7 +33,7 @@ func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 	logs, spans := map[string]map[string]bool{}, map[string]map[string]bool{}
 	batches := 0
 	for _, b := range queued {
-		business := false
+		batches++
 		switch b.Signal {
 		case "metrics":
 			var request metriccollector.ExportMetricsServiceRequest
@@ -43,7 +44,6 @@ func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 				for _, scope := range resource.ScopeMetrics {
 					for _, m := range scope.Metrics {
 						if m.Name == "http.requests" {
-							business = true
 							for _, p := range m.GetSum().DataPoints {
 								totals[b.Service] += p.GetAsInt()
 							}
@@ -56,17 +56,10 @@ func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 			if err := proto.Unmarshal(b.Payload, &request); err != nil {
 				t.Fatal(err)
 			}
-			if logs[b.Service] == nil {
-				logs[b.Service] = map[string]bool{}
-			}
+			logs[b.Service] = map[string]bool{}
 			for _, resource := range request.ResourceLogs {
 				for _, scope := range resource.ScopeLogs {
 					for _, row := range scope.LogRecords {
-						// SDK startup/diagnostic logs coexist with business logs.
-						if row.Body.GetStringValue() != "sample payment completed" {
-							continue
-						}
-						business = true
 						logs[b.Service][hex.EncodeToString(row.TraceId)+":"+hex.EncodeToString(row.SpanId)] = true
 					}
 				}
@@ -76,26 +69,20 @@ func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 			if err := proto.Unmarshal(b.Payload, &request); err != nil {
 				t.Fatal(err)
 			}
-			if spans[b.Service] == nil {
-				spans[b.Service] = map[string]bool{}
-			}
+			spans[b.Service] = map[string]bool{}
 			for _, resource := range request.ResourceSpans {
 				for _, scope := range resource.ScopeSpans {
 					for _, row := range scope.Spans {
-						business = true
 						spans[b.Service][hex.EncodeToString(row.TraceId)+":"+hex.EncodeToString(row.SpanId)] = true
 					}
 				}
 			}
 		}
-		if business {
-			batches++
-		}
 	}
-	if batches != 6 || len(totals) != 2 {
-		t.Fatalf("expected 6 durable business batches for Python and Ruby: batches=%d totals=%v", batches, totals)
+	if batches != 18 || len(totals) != 6 {
+		t.Fatalf("expected 18 durable batches for six languages: batches=%d totals=%v", batches, totals)
 	}
-	for _, language := range []string{"python", "ruby"} {
+	for _, language := range []string{"python", "java", "dotnet", "php", "ruby", "rust"} {
 		service := "conformance-" + language
 		if totals[service] != 20 || len(logs[service]) != 20 || len(spans[service]) != 20 {
 			t.Fatalf("%s totals=%d logs=%d spans=%d", service, totals[service], len(logs[service]), len(spans[service]))

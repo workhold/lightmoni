@@ -1,0 +1,16 @@
+{
+  "url": "http://localhost:18380/data",
+  "admin_login": "verified",
+  "user_count": 1,
+  "agent_count": 1,
+  "dashboard_count": 5,
+  "sdk_languages": [
+    "Go",
+    "Node.js",
+    "Rust",
+    "Python"
+  ],
+  "default_exemptions": [],
+  "assets": "match local build",
+  "python_download": "includes verified transport fix"
+}

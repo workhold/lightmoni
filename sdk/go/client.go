@@ -11,6 +11,7 @@ import (
 	"math"
 	mathrand "math/rand"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -30,41 +31,19 @@ import (
 
 type Attributes map[string]any
 
-// ConnectionMode selects the telemetry transport.  The zero value keeps the
-// historical direct HTTP behaviour; new deployments should set it explicitly.
-type ConnectionMode string
-
-const (
-	ModeAgent  ConnectionMode = "agent"
-	ModeDirect ConnectionMode = "direct"
-	ModeAuto   ConnectionMode = "auto"
-)
-
-// ConnectionConfig is the common connection contract used by all SDKs.
-// Secrets may be supplied explicitly or loaded by NewFromEnv.
-type ConnectionConfig struct {
-	Mode                                      ConnectionMode
-	Endpoint, DataKey, DataKeyFile            string
-	AgentEndpoint, LocalToken, LocalTokenFile string
-	DiscoveryTimeout                          time.Duration
-}
-
 // Config has no required private Key when using the local Agent.
 type Config struct {
-	Mode                                                            ConnectionMode
-	AgentEndpoint, LocalToken, LocalTokenFile, DataKey, DataKeyFile string
-	DiscoveryTimeout                                                time.Duration
 	// DisableSelfTelemetry is for embedded collectors and protocol fixtures.
-	DisableSelfTelemetry          bool
-	DisableRemoteConfig           bool
-	Disabled                      bool
-	ConfigEndpoint, ConfigKey     string
-	ConfigInterval                time.Duration
-	LogSampling                   map[string]LogSamplingPolicy
-	Service, Table, Endpoint, Key string
-	InstanceID                    string
-	Resource                      Attributes
-	Exporter                      Exporter
+	DisableSelfTelemetry                               bool
+	DisableRemoteConfig                                bool
+	Disabled                                           bool
+	ConfigEndpoint, ConfigKey                          string
+	ConfigInterval                                     time.Duration
+	LogSampling                                        map[string]LogSamplingPolicy
+	Service, Env, ServiceVersion, Table, Endpoint, Key string
+	InstanceID                                         string
+	Resource                                           Attributes
+	Exporter                                           Exporter
 	// TraceContextProvider bridges an existing request/OTel context when no
 	// LightMoni trace is present. It must be safe for concurrent calls.
 	TraceContextProvider                                               func(context.Context) (TraceContext, bool)
@@ -103,9 +82,6 @@ type Stats struct {
 	ConfigRevision, ConfigError                                                                        string
 	ReportingDisabled                                                                                  bool
 	ExcludedLogs, DisabledRecords                                                                      uint64
-	ConfiguredMode, SelectedRoute, AgentProbe, LastRouteError, CredentialSource                        string
-	FallbackCount                                                                                      uint64
-	RouteUncertain                                                                                     bool
 }
 
 type queuedBatch struct {
@@ -114,6 +90,8 @@ type queuedBatch struct {
 	records  int
 }
 type state struct {
+	metricWindows                     map[string][]MetricWindow
+	observations                      map[string]*observation
 	mu                                sync.Mutex
 	cfg                               Config
 	resource                          *resourcepb.Resource
@@ -160,64 +138,35 @@ func validTable(table string) bool {
 	return tablePattern.MatchString(table) && !strings.HasPrefix(table, "log_") && !strings.HasPrefix(table, "metric_") && !strings.HasPrefix(table, "trace_")
 }
 
+func Init(service, env string) (*Client, error) { return New(Config{Service: service, Env: env}) }
 func New(cfg Config) (*Client, error) {
-	if cfg.Mode != "" && cfg.Mode != ModeAgent && cfg.Mode != ModeDirect && cfg.Mode != ModeAuto {
-		return nil, errors.New("mode must be agent, direct, or auto")
-	}
-	if cfg.Mode != ModeAgent && cfg.Key == "" && cfg.DataKeyFile != "" {
-		value, _, err := secretValue("data key", "", cfg.DataKeyFile, "", "")
-		if err != nil {
-			return nil, err
+	if cfg.Endpoint == "" && cfg.Exporter == nil {
+		cfg.Endpoint = os.Getenv("LIGHTMONI_ENDPOINT")
+		if cfg.Endpoint == "" {
+			cfg.Endpoint = "http://127.0.0.1:4318"
 		}
-		cfg.Key = value
-	}
-	if cfg.Mode != ModeDirect && cfg.LocalToken == "" && cfg.LocalTokenFile != "" {
-		value, _, err := secretValue("local token", "", cfg.LocalTokenFile, "", "")
-		if err != nil {
-			return nil, err
-		}
-		cfg.LocalToken = value
-	}
-	if cfg.Key == "" && cfg.DataKey != "" {
-		cfg.Key = cfg.DataKey
-	}
-	configuredMode := cfg.Mode
-	if configuredMode == "" {
-		// Preserve the pre-011 constructor where an endpoint without a key was
-		// commonly a local Agent. New applications should set Mode explicitly.
-		if cfg.Key == "" && cfg.AgentEndpoint == "" {
-			configuredMode = ModeAgent
-			cfg.AgentEndpoint = cfg.Endpoint
-		} else {
-			configuredMode = ModeDirect
+		if cfg.Key == "" {
+			cfg.Key = os.Getenv("LIGHTMONI_KEY")
 		}
 	}
-	selectedRoute := string(configuredMode)
-	probeResult := ""
-	if cfg.Exporter == nil {
-		cc := ConnectionConfig{Mode: configuredMode, Endpoint: cfg.Endpoint, DataKey: cfg.Key, AgentEndpoint: cfg.AgentEndpoint, LocalToken: cfg.LocalToken, DiscoveryTimeout: cfg.DiscoveryTimeout}
-		resolved, route, err := ResolveConnection(cc)
-		if err != nil {
-			return nil, err
-		}
-		selectedRoute = route
-		if route == "agent" {
-			cfg.Endpoint, cfg.Key = resolved.AgentEndpoint, resolved.LocalToken
-			probeResult = "healthy"
-		} else {
-			cfg.Endpoint, cfg.Key = resolved.Endpoint, resolved.DataKey
-			if configuredMode == ModeAuto {
-				probeResult = "unavailable_fallback"
-			}
-		}
+	if (cfg.Env != "" && strings.TrimSpace(cfg.Env) == "") || len(cfg.Env) > 128 || len(cfg.ServiceVersion) > 128 || len(cfg.InstanceID) > 128 {
+		return nil, errors.New("resource identity exceeds 128 bytes")
 	}
-	if cfg.Exporter == nil && cfg.Mode == ModeAgent {
-		cfg.ConfigEndpoint, cfg.ConfigKey = cfg.Endpoint, ""
+	resource := Attributes{}
+	for key, value := range cfg.Resource {
+		resource[key] = value
 	}
+	if cfg.Env != "" {
+		resource["deployment.environment.name"] = cfg.Env
+	}
+	if cfg.ServiceVersion != "" {
+		resource["service.version"] = cfg.ServiceVersion
+	}
+	cfg.Resource = resource
 	if cfg.Service == "" || len(cfg.Service) > 128 {
 		return nil, errors.New("service is required and must be at most 128 bytes")
 	}
-	if !validTable(cfg.Table) {
+	if cfg.Table != "" && !validTable(cfg.Table) {
 		return nil, errors.New("table must match [a-z][a-z0-9_]{0,47} without a reserved type prefix")
 	}
 	if cfg.Exporter == nil {
@@ -301,11 +250,11 @@ func New(cfg Config) (*Client, error) {
 	s := &state{cfg: cfg, resource: &resourcepb.Resource{Attributes: attrs}, instance: instance,
 		metrics: map[string]*instrument{}, logs: map[string][]*logpb.LogRecord{}, spans: map[string][]*tracepb.Span{},
 		changed: make(chan struct{}), wake: make(chan struct{}, 1), retryNow: make(chan struct{}, 1), ctx: ctx, cancel: cancel, done: make(chan struct{}), configDone: make(chan struct{})}
-	s.stats.ConfiguredMode, s.stats.SelectedRoute, s.stats.AgentProbe = string(configuredMode), selectedRoute, probeResult
 	if cfg.Exporter == nil {
 		s.cfg.Exporter = NewHTTPExporter(cfg.Endpoint, cfg.Key, nil)
 	}
 	s.configKey = cfg.Key
+	s.observations = map[string]*observation{}
 	c := &Client{s: s, table: cfg.Table}
 	if err := c.UpdateLogSampling(cfg.LogSampling); err != nil {
 		cancel()
@@ -432,7 +381,7 @@ func (s *state) run() {
 			case <-ticker.C:
 				s.mu.Lock()
 				if !s.closing {
-					s.collectLocked(time.Now())
+					s.collectLocked(time.Now(), false)
 					s.notifyLocked()
 				}
 				s.mu.Unlock()
@@ -455,6 +404,14 @@ func (s *state) run() {
 			continue
 		}
 		item := s.queue[0]
+		if item.batch.Table == "lightmoni_sdk" && s.configKey == "" {
+			s.queue = s.queue[1:]
+			s.stats.PendingBatches--
+			s.stats.PendingBytes -= len(item.batch.Payload)
+			s.notifyLocked()
+			s.mu.Unlock()
+			continue
+		}
 		ctx, cancel := context.WithTimeout(s.ctx, s.cfg.RequestTimeout)
 		s.deliveryCancel = cancel
 		s.mu.Unlock()
@@ -542,13 +499,16 @@ func (s *state) enqueueLocked(signal, table string, message proto.Message, recor
 	s.stats.PendingBytes += len(payload)
 }
 
-func (s *state) collectLocked(now time.Time) {
+func (s *state) collectLocked(now time.Time, force ...bool) {
 	if s.reportingDisabled {
 		return
 	}
 	// Split by metric point to keep even high-cardinality exports bounded while
 	// retaining one Metric per name within each OTLP request.
 	tables := map[string]bool{}
+	for _, o := range s.observations {
+		tables[o.table] = true
+	}
 	for _, m := range s.metrics {
 		tables[m.table] = true
 	}
@@ -565,6 +525,12 @@ func (s *state) collectLocked(now time.Time) {
 	sort.Strings(keys)
 	for _, table := range keys {
 		var metrics []*metricpb.Metric
+		for key, o := range s.observations {
+			if o.table == table && (len(force) == 0 || force[0] || !now.Before(o.start.Add(time.Duration(o.seconds)*time.Second))) {
+				metrics = append(metrics, o.collect(now)...)
+				delete(s.observations, key)
+			}
+		}
 		for _, m := range s.metrics {
 			if m.table == table {
 				metrics = append(metrics, m.collect(now)...)
@@ -572,7 +538,7 @@ func (s *state) collectLocked(now time.Time) {
 		}
 		sort.SliceStable(metrics, func(i, j int) bool { return metrics[i].Name < metrics[j].Name })
 		request := func(ms []*metricpb.Metric) *metriccollector.ExportMetricsServiceRequest {
-			return &metriccollector.ExportMetricsServiceRequest{ResourceMetrics: []*metricpb.ResourceMetrics{{Resource: s.resource, ScopeMetrics: []*metricpb.ScopeMetrics{{Scope: &commonpb.InstrumentationScope{Name: "lightmoni/sdk/go"}, Metrics: mergeMetrics(ms)}}}}}
+			return &metriccollector.ExportMetricsServiceRequest{ResourceMetrics: []*metricpb.ResourceMetrics{{Resource: s.resource, ScopeMetrics: metricScopes(ms)}}}
 		}
 		var group []*metricpb.Metric
 		count := 0
@@ -636,6 +602,9 @@ func (s *state) collectLocked(now time.Time) {
 	s.logs = map[string][]*logpb.LogRecord{}
 	s.spans = map[string][]*tracepb.Span{}
 	s.bufferBytes = 0
+	for _, o := range s.observations {
+		s.bufferBytes += o.cost + o.bytes
+	}
 	s.collectSelfLocked(now)
 }
 

@@ -354,7 +354,11 @@ export class Agent {
             result.status === 200 ? "application/json" : "text/plain",
           "Cache-Control": "no-store",
         });
-        res.end(result.body);
+        if (result.status === 200 && new URL(req.url ?? '/', 'http://localhost').searchParams.get('metric_windows') !== '1') {
+          const legacy = JSON.parse(result.body.toString());
+          delete legacy.metric_windows;
+          res.end(JSON.stringify(legacy));
+        } else res.end(result.body);
         return;
       }
       const signal = path.slice(4) as Signal;
@@ -437,7 +441,7 @@ export class Agent {
     let raw: Buffer | undefined;
     try {
       const response = await fetch(
-        this.config.endpoint.replace(/\/$/, "") + "/v1/sdk-config",
+        this.config.endpoint.replace(/\/$/, "") + "/v1/sdk-config?metric_windows=1",
         {
           redirect: "manual",
           headers: {

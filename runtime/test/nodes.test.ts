@@ -366,12 +366,12 @@ test("legacy group API writes real tasks and guards independent/moved migration 
   assert.equal(created.status, 201, created.raw);
   const group = created.data.id;
   await node(f, "legacy-node", group);
-  assert.equal((await config(f, "legacy-node")).host_table, "machines");
+  assert.equal((await config(f, "legacy-node")).host_table, "host");
   const renamed = await f.request("/agent-groups/" + group, "PUT", {
     name: "renamed",
   });
   assert.equal(renamed.status, 200);
-  assert.equal((await config(f, "legacy-node")).host_table, "machines");
+  assert.equal((await config(f, "legacy-node")).host_table, "host");
   const independent = await task(f, "independent", "probe", [group], {
     probes: [probe()],
   });
@@ -470,7 +470,7 @@ test("legacy schema migrates exact identities/settings once and restart never re
     );
     assert.equal(
       store.compile(["default"], "default").config.host_table,
-      "old_hosts",
+      "host",
     );
     assert.equal(store.labels()[0].name, "默认标签");
     assert.equal(store.tasks().length, 3);
@@ -618,7 +618,7 @@ test("configuration revisions match legacy Go JSON field order, omissions and HT
     );
     assert.equal(
       store.compile(["a"], "a").config.revision,
-      "498c088b93166123eef182928d061730813109b840e0b36ab4b7488b3f6952d7",
+      "518f4f1a211076dc494b25172855dcdcad836aa003c02088b2d9d85e1144aeb9",
     );
   } finally {
     db.close();

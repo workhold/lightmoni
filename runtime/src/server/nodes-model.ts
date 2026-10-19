@@ -253,7 +253,7 @@ export class NodeStore {
       .map((row) => ({
         ...row,
         enabled: !!row.enabled,
-        config: wire(JSON.parse(row.config)),
+        config: wire(normalizeRemote(JSON.parse(row.config))),
         label_ids: this.db
           .all<{
             label_id: string;

@@ -1,0 +1,125 @@
+{
+  "passed": true,
+  "checked_at": "2026-10-19T16:31:35.628Z",
+  "configuration": [
+    {
+      "seconds": 10,
+      "default_seconds": 30,
+      "saved": true
+    },
+    {
+      "seconds": 30,
+      "default_seconds": 30,
+      "saved": true
+    },
+    {
+      "seconds": 60,
+      "default_seconds": 30,
+      "saved": true
+    },
+    {
+      "seconds": 300,
+      "default_seconds": 30,
+      "saved": true
+    },
+    {
+      "seconds": 600,
+      "default_seconds": 30,
+      "saved": true
+    },
+    {
+      "seconds": 1800,
+      "default_seconds": 30,
+      "saved": true
+    },
+    {
+      "seconds": 3600,
+      "default_seconds": 30,
+      "saved": true
+    }
+  ],
+  "clickhouse": [
+    {
+      "seconds": 10,
+      "samples": 3,
+      "total": 60,
+      "incremental_flush": true
+    },
+    {
+      "seconds": 30,
+      "samples": 3,
+      "total": 60,
+      "incremental_flush": true
+    },
+    {
+      "seconds": 60,
+      "samples": 3,
+      "total": 60,
+      "incremental_flush": true
+    },
+    {
+      "seconds": 300,
+      "samples": 3,
+      "total": 60,
+      "incremental_flush": true
+    },
+    {
+      "seconds": 600,
+      "samples": 3,
+      "total": 60,
+      "incremental_flush": true
+    },
+    {
+      "seconds": 1800,
+      "samples": 3,
+      "total": 60,
+      "incremental_flush": true
+    },
+    {
+      "seconds": 3600,
+      "samples": 3,
+      "total": 60,
+      "incremental_flush": true
+    }
+  ],
+  "ui": [
+    {
+      "seconds": 10,
+      "saved": true,
+      "reopened": true
+    },
+    {
+      "seconds": 30,
+      "saved": true,
+      "reopened": true
+    },
+    {
+      "seconds": 60,
+      "saved": true,
+      "reopened": true
+    },
+    {
+      "seconds": 300,
+      "saved": true,
+      "reopened": true
+    },
+    {
+      "seconds": 600,
+      "saved": true,
+      "reopened": true
+    },
+    {
+      "seconds": 1800,
+      "saved": true,
+      "reopened": true
+    },
+    {
+      "seconds": 3600,
+      "saved": true,
+      "reopened": true
+    }
+  ],
+  "page_errors": [],
+  "fixture_history_seeded": true,
+  "save_failure_preserved": true
+}

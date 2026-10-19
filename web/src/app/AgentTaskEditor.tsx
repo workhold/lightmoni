@@ -3,7 +3,7 @@ import {useState} from 'react';
 import {Link} from 'react-router-dom';
 import {DeleteOutlined,PlusOutlined} from '@ant-design/icons';
 import {Alert,Button,Checkbox,Form,Input,InputNumber,Radio,Select,Space,Switch,Typography} from '../shared/ui';
-import {agentTaskTypes,defaultTasks,hostCollectors,hostCollectorName,localizedLogicalTableRules,taskTypeName,taskFormValues,taskPayload,type AgentTaskLabel,type AgentTaskType,type LogSource,type ManagedAgentTask,type TaskForm} from './agent-model';
+import {agentTaskTypes,defaultTasks,hostCollectors,hostCollectorName,taskTypeName,taskFormValues,taskPayload,type AgentTaskLabel,type AgentTaskType,type LogSource,type ManagedAgentTask,type TaskForm} from './agent-model';
 
 type TaskDraft = Omit<ManagedAgentTask,'id'>;
 
@@ -47,12 +47,12 @@ const nameRules = [{required:true,whitespace:true,message:t("请输入任务名�
       <Form.Item name="host_collectors" label={t("采集哪些指标","Metrics to collect")} rules={[{validator:(_:unknown,value?:string[])=>!enabled||value?.length?Promise.resolve():Promise.reject(new Error(t("至少选择一项指标","Select at least one metric")))}]}><Checkbox.Group className="lm-agent-collectors" options={hostCollectors.map(item=>({...item,label:hostCollectorName(item.value,uiLanguage)}))}/></Form.Item>
       <div className="lm-agent-form-grid">
         <Form.Item name="collect_interval_seconds" label={t("采集间隔（秒）","Collection interval (seconds)")} rules={[{required:true,type:'number',min:1,max:86400,message:t("填写 1–86400 秒","Enter 1–86400 seconds")}]}><InputNumber aria-label={t("采集间隔（秒）","Collection interval (seconds)")} min={1} max={86400} precision={0}/></Form.Item>
-        <Form.Item name="host_table" label={t("指标上报表","Metric reporting table")} rules={localizedLogicalTableRules(uiLanguage)}><Input aria-label={t("指标上报表","Metric reporting table")} placeholder="host"/></Form.Item>
+        <Form.Item label={t("指标上报表","Metric reporting table")}><Typography.Text code>host</Typography.Text></Form.Item>
       </div>
       <Form.Item noStyle shouldUpdate={(a,b)=>a.host_collectors!==b.host_collectors}>{({getFieldValue})=>(getFieldValue('host_collectors') ?? []).includes('process')?<Form.Item name="process_names" label={t("进程名称","Process names")} rules={[{required:true,type:'array',min:1,max:32,message:t("填写 1–32 个进程名称","Enter 1–32 process names")}]} extra={t("按进程名匹配，例如 nginx、postgres；可使用 * 匹配多个进程。","Match process names such as nginx or postgres. Use * to match multiple processes.")}><Select mode="tags" aria-label={t("进程名称","Process names")} tokenSeparators={[',','，']} placeholder={t("输入进程名称并回车","Enter a process name and press Enter")}/></Form.Item>:null}</Form.Item>
     </>}
     {type==='probe' && <>
-      <Form.Item name="probe_table" label={t("拨测结果上报表","Probe reporting table")} rules={localizedLogicalTableRules(uiLanguage)}><Input aria-label={t("拨测结果上报表","Probe reporting table")} placeholder="probe"/></Form.Item>
+      <Form.Item label={t("拨测结果上报表","Probe reporting table")}><Typography.Text code>probe</Typography.Text></Form.Item>
       <p className="lm-agent-muted">{t("执行节点按配置检测 HTTP 或 TCP 目标，上报可用性、耗时和失败原因。","Execution nodes probe configured HTTP or TCP targets and report availability, latency, and failure reasons.")}</p>
       <Form.List name="probes" rules={[{validator:(_:unknown,value?:TaskForm['probes'])=>{
         if(!value?.length) return enabled?Promise.reject(new Error(t("至少添加一个拨测目标","Add at least one probe target"))):Promise.resolve();
@@ -87,7 +87,7 @@ const nameRules = [{required:true,whitespace:true,message:t("请输入任务名�
       </>}</Form.List>
     </>}
     {type==='log' && <>
-      <Form.Item name="log_table" label={t("目录日志上报表","Directory log reporting table")} rules={localizedLogicalTableRules(uiLanguage)}><Input aria-label={t("目录日志上报表","Directory log reporting table")} placeholder="files"/></Form.Item>
+      <Form.Item label={t("目录日志上报表","Directory log reporting table")}><Typography.Text code>files</Typography.Text></Form.Item>
       <p className="lm-agent-muted">{t("逐行采集文件新增内容，支持日志轮转和重启续读。目录需允许 LightMoni Agent 服务用户读取。","Collect new file contents line by line, with log rotation and resume support. The LightMoni Agent service user must have read access to the directory.")}</p>
       <Form.List name="log_sources" rules={[{validator:(_:unknown,sources?:LogSource[])=>{
         if(!sources?.length) return enabled?Promise.reject(new Error(t("至少添加一个日志目录","Add at least one log directory"))):Promise.resolve();
@@ -105,7 +105,7 @@ const nameRules = [{required:true,whitespace:true,message:t("请输入任务名�
         <Form.ErrorList errors={errors}/><Button icon={<PlusOutlined/>} disabled={saving||fields.length>=32} onClick={()=>add({directory:'',pattern:'*.log*',recursive:false,from_beginning:false})}>{t("添加日志目录","Add log directory")}</Button>
       </>}</Form.List>
     </>}
-    <Typography.Paragraph type="secondary" className="lm-agent-report-note">{t("上报表填写逻辑表名，上报 Key 需允许写入对应表。同类任务在同一节点上的采集间隔或目标表等配置不兼容时，保存会明确提示冲突。","Enter a logical reporting table name and authorize it in the reporting key. Saving reports conflicts if tasks of the same type on a node have incompatible intervals, tables, or other settings.")}<Link to="/admin?tab=credentials&section=sdk">{t("管理接入凭据","Manage access credentials")}</Link></Typography.Paragraph>
+    <Typography.Paragraph type="secondary" className="lm-agent-report-note">{t("主机指标、拨测、目录日志分别写入固定的host、probe、files表。同类任务在同一节点上的采集间隔等配置不兼容时，保存会提示冲突。","Host metrics, probes, and directory logs use the fixed host, probe, and files tables. Saving reports conflicts when tasks have incompatible collection intervals or other settings.")}<Link to="/admin?tab=credentials&section=agents">{t("管理接入凭据","Manage access credentials")}</Link></Typography.Paragraph>
     {error&&<Alert type="error" showIcon title={error} style={{marginTop:16}}/>}
     <Space className="lm-agent-editor-actions"><Button type="primary" htmlType="submit" loading={saving}>{t("保存任务","Save task")}</Button><Button disabled={saving} onClick={onCancel}>{t("取消","Cancel")}</Button></Space>
   </Form>;

@@ -1,0 +1,68 @@
+{
+  "results": [
+    {
+      "language": "typescript",
+      "authMode": "key",
+      "status": "passed"
+    },
+    {
+      "language": "go",
+      "authMode": "key",
+      "status": "passed"
+    },
+    {
+      "language": "python",
+      "authMode": "key",
+      "status": "passed"
+    },
+    {
+      "language": "typescript",
+      "authMode": "anonymous",
+      "status": "passed"
+    },
+    {
+      "language": "go",
+      "authMode": "anonymous",
+      "status": "passed"
+    },
+    {
+      "language": "python",
+      "authMode": "anonymous",
+      "status": "passed"
+    }
+  ],
+  "logIdentityRows": [
+    [
+      "demo-go-anonymous",
+      "",
+      "2"
+    ],
+    [
+      "demo-go-key",
+      "76e129c8484eadc701129e661849ba3a",
+      "1"
+    ],
+    [
+      "demo-python-anonymous",
+      "",
+      "2"
+    ],
+    [
+      "demo-python-key",
+      "76e129c8484eadc701129e661849ba3a",
+      "1"
+    ],
+    [
+      "demo-typescript-anonymous",
+      "",
+      "2"
+    ],
+    [
+      "demo-typescript-key",
+      "76e129c8484eadc701129e661849ba3a",
+      "1"
+    ]
+  ],
+  "table": "sdk_demos_1a14f9d03f8",
+  "rust": "not executed: cargo unavailable on this host; browser and generation checks passed"
+}

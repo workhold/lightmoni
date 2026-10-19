@@ -1,10 +1,11 @@
 # Python SDK
 
+推荐新的五参数 Record/record 业务接口：初始化 service/env，可选版本/实例，SDK 自动聚合发送。完整语义、count总值规则、SQL字段与新样例见 [统一打点](../README.md#通用业务打点go--nodejs--python--rust)。下面原接口继续兼容。
+
+新record按表选择一个上报聚合周期，默认30秒，支持10秒、30秒、1分钟、5分钟、10分钟、30分钟、1小时。中心配置通过refresh_config/后台轮询下发；独立后台线程每10秒检查并发送已结束的固定窗口，不受self_telemetry开关影响。
+
+
 Python 3.9+，标准库，无运行时第三方依赖。
-
-可用 `Client.from_env("order-api", "business")` 读取统一的 `LIGHTMONI_MODE`、`LIGHTMONI_ENDPOINT`、`LIGHTMONI_DATA_KEY`、`LIGHTMONI_AGENT_ENDPOINT` 和 `LIGHTMONI_LOCAL_TOKEN`；`LIGHTMONI_KEY` 仅作为兼容别名。显式 `Client(...)` 构造函数仍可使用 Secret Manager 提供的值。
-
-缺省 direct，配置平台地址与 data key 即可，无需 Agent。明确选择 agent 时只配置 Agent 地址和可选 local token；对应 `_FILE` 注入继续有效。显式模式只读取所选路径的秘密并校验来源冲突，失败只在原路径重试。两条路径、环境块切换及容器/ACK 边界见 [选择上报方式](../README.md#选择上报方式)。
 
 ~~~sh
 python3 -m pip install ./sdk/python
@@ -13,7 +14,7 @@ python3 examples/sdk/python/main.py
 
 ~~~python
 from lightmoni import Client
-mon = Client.from_env("order-api", "business")
+mon = Client(service="order-api", table="business")
 mon.counter("orders_created").add(1, {"region": "cn"})
 with mon.start_span("create_order"):
     mon.log("info", "order created", {"order_id": "123"})
@@ -22,23 +23,23 @@ mon.shutdown(timeout=5)
 
 with_table 共享生命周期。Counter.add 接受 int，Gauge / Histogram.record 接受有限数值；boundaries 参数设置桶。span context manager 通过 contextvars 关联日志，异常时设置 error 并结束 span；TraceContext.extract(headers) / context.inject() 处理 W3C header。
 
-构造函数支持 endpoint/key 和 queue_bytes、queue_batches、buffer_bytes、max_batch_bytes、cardinality_limit、max_instruments。flush(timeout=10) 同步且有截止时间；默认自监控线程每 30 秒一起发送业务窗口，关闭自监控后由应用自行调度。update_key 修复凭证，stats 返回快照。asyncio 中显式 flush/shutdown 应放到工作线程。fork 后重新初始化。完整边界见 [SDK 契约](../README.md)。
+构造函数支持 endpoint/key 和 queue_bytes、queue_batches、buffer_bytes、max_batch_bytes、cardinality_limit、max_instruments。flush(timeout=10) 同步且有截止时间，可发送当前record窗口增量；独立后台线程自动发送已结束窗口。update_key 修复凭证，stats 返回快照。asyncio 中显式 flush/shutdown 应放到工作线程。fork 后重新初始化。完整边界见 [SDK 契约](../README.md)。
 
 HTTP/消息入口提取一次 `parent = TraceContext.extract(headers)`，用 `with mon.start_span("request", parent=parent):` 包住处理过程，普通日志自动加 trace；嵌套和异常后恢复外层。`from lightmoni import with_trace` 可用 `with with_trace(context):` 激活已有上下文，contextvars 隔离并发 asyncio task。出站使用 `TraceContext.inject_current()` 返回当前 W3C header，合并到业务 HTTP 请求或消息 metadata；`TraceContext.current()` 可捕获上下文供新线程入口使用。无作用域日志保持 trace 为空。
 
 ## SDK 自监控
 
-默认每 30 秒上报实例心跳和内部诊断，空闲进程也会发送；原生运行时的后台线程同时 Flush 当前业务窗口。中心自动归入系统 SDK 表，使用原业务 table 的权限；WithTable 共享生命周期。可通过 `self_telemetry=False` 关闭。退出前仍需 Shutdown；完整语义见 [SDK 契约](../README.md#内部监控)。
+默认每 30 秒上报实例心跳和内部诊断，空闲进程也会发送；业务record窗口按表配置独立封窗。中心统一归入 lightmoni_log/lightmoni_metric_*，component=sdk；无密钥不产生自身遥测；WithTable 共享生命周期。可通过 `self_telemetry=False` 关闭自身遥测。退出前仍需 Shutdown；完整语义见 [SDK 契约](../README.md#内部监控)。
 
 ## 远程停报与日志采样
 
-默认独立线程每 30 秒从平台或 Agent 的 `/v1/sdk-config` 拉取规则，使用所选路径的凭据认证。平台“SDK 停报规则”和业务日志表的“上报规则”可直接控制 Python SDK，无需重新部署业务代码。关闭自监控或命中停报后，配置拉取仍继续。
+默认独立线程每 30 秒从中心或 Agent 的 `/v1/sdk-config` 拉取规则，使用当前 key 认证。平台“SDK 停报规则”和业务日志表的“上报规则”可直接控制 Python SDK，无需重新部署业务代码。关闭自监控或命中停报后，配置拉取仍继续。
 
 ```python
 from lightmoni import Client
 
-mon = Client.from_env("order-api", "business",
-                      resource={"deployment.environment": "production"})
+mon = Client("order-api", "business", endpoint="http://127.0.0.1:4318",
+             resource={"deployment.environment": "production"})
 # 要求首条数据就执行平台规则时，启动业务之前等待刷新成功。
 mon.refresh_config(timeout=5)
 mon.log("info", "checkout clicked", {"user_id": "qa-1", "event": "click"})
@@ -50,7 +51,7 @@ mon.shutdown(timeout=5)
 - 日志采样不影响指标、Span 和 SDK 内部自监控。保留日志带 `lightmoni.sampling.rate/weight/rule`；权重只能用于估算，不能还原丢弃日志。
 - 整体停报清空所有子表的缓冲和未确认队列，取消等待响应或退避的发送。恢复只接收新数据，旧 Span 不补交。已在网络中提交的数据不可撤回；系统 DNS/连接阶段无法保证即时中止，但连接后发送前会检查取消。
 
-可选参数：`log_sampling={"business": policy}` 设置初始本地策略，`disabled=True` 初始本地停报，`remote_config=False` 关闭配置拉取；`config_interval` 为秒（默认 30，最小 1）。显式 agent 模式通过 Agent/local token 拉取规则，忽略独立的 `config_endpoint/config_key`。direct/auto 仍可用 `config_endpoint` 指定配置基础地址、`config_key` 指定独立配置凭证；仅在 `None` 时回退到 endpoint/当前 key，空配置凭证表示不认证。`resource` 支持标量资源属性，`instance_id` 可指定实例身份；不要在 resource 中覆盖 service.name/service.instance.id。
+可选参数：`log_sampling={"business": policy}` 设置初始本地策略，`disabled=True` 初始本地停报，`remote_config=False` 关闭配置拉取；`config_endpoint` 指定配置基础地址，`config_key` 指定独立配置凭证，`config_interval` 为秒（默认 30，最小 1）。地址和凭证仅在 `None` 时回退到 endpoint/当前 key，空配置凭证表示不认证。`resource` 支持标量资源属性，`instance_id` 可指定实例身份；不要在 resource 中覆盖 service.name/service.instance.id。
 
 运行时接口：`update_log_sampling(policies)`、`set_reporting_enabled(False/True)`、`refresh_config(timeout=5)`。远程表规则优先于本地规则，本地与远程任一停报开关开启都继续停报。非法/失败配置保留最后有效版本；首次自动拉取前沿用本地规则，未配置则全量。刷新采用最多五秒超时预算，阻塞的系统 DNS 解析可能超出预算。
 

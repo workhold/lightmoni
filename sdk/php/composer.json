@@ -1,0 +1,8 @@
+{
+  "name": "lightmoni/sdk",
+  "description": "Bounded OTLP/HTTP telemetry for LightMoni",
+  "version": "0.1.0",
+  "type": "library",
+  "require": {"php": ">=8.1", "ext-json": "*"},
+  "autoload": {"classmap": ["src/"]}
+}

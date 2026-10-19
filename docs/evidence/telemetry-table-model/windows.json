@@ -1,0 +1,52 @@
+{
+  "passed": true,
+  "points": 4,
+  "instances": 2,
+  "rows": [
+    {
+      "metric_name": "db.duration_ms",
+      "key1": "mysql",
+      "key2": "",
+      "sample_count": "400",
+      "total_value": 80200,
+      "average_value": 200.5,
+      "samples_per_second": 0.1111111111111111,
+      "minimum_value": 1,
+      "maximum_value": 400,
+      "distribution_status": "complete",
+      "relative_error_bound": 0.002707599557476328,
+      "percentiles": {
+        "P005": 1.9945848008850475,
+        "P05": 20.031707018280116,
+        "P10": 40.06341403656023,
+        "P30": 120.10911273528929,
+        "P50": 199.82271794152456,
+        "P70": 280.30585181376813,
+        "P90": 359.59597262330436,
+        "P95": 379.6057546576661,
+        "P995": 397.4871201271457
+      }
+    }
+  ],
+  "automatic": [
+    {
+      "samples": "1"
+    }
+  ],
+  "packagedExamples": [
+    {
+      "metric_name": "db.query.duration_ms",
+      "samples": "4",
+      "total": 512,
+      "instances": "4",
+      "empty_ids": "0"
+    },
+    {
+      "metric_name": "restaurant.spend",
+      "samples": "20",
+      "total": 400,
+      "instances": "4",
+      "empty_ids": "0"
+    }
+  ]
+}
