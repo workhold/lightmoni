@@ -24,6 +24,7 @@ import { registerTemplates } from "./templates.js";
 import { registerCore } from "./core.js";
 import { registerNodes } from "./nodes.js";
 import { registerAgentCredentials } from "./agent-credentials.js";
+import { registerMachineTerminal } from "./machine-terminal.js";
 import { registerManagedMachines } from "./managed-machines.js";
 import { registerAssistant } from "../assistant/index.js";
 import { registerDashboards } from "../domains/dashboards.js";
@@ -224,6 +225,7 @@ export async function createApp(cfg: Config) {
           if (!res.writableEnded) res.end('{"error":"服务暂不可用"}');
         });
     });
+    modules.push(registerMachineTerminal(deps, managedMachines, server));
     server.headersTimeout = 10000;
     server.requestTimeout = 30000;
     for (const module of modules) await module.start?.();

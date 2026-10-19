@@ -1,0 +1,15 @@
+{
+  "checked": [
+    "Real browser terminal automatically logs in and renders UTF-8 command output",
+    "Ctrl+C interrupts the remote command and shell remains usable",
+    "Fullscreen fits the terminal and propagates PTY resize",
+    "Disconnect and reconnect release the previous host lease",
+    "Closing and reopening the window releases the SSH session",
+    "Navigation unmount closes the terminal and frees the host",
+    "Narrow viewport keeps the terminal dialog usable",
+    "English terminal controls and status are localized",
+    "Multiple private keys require explicit selection without silently using the first"
+  ],
+  "errors": [],
+  "unexpected": []
+}

@@ -1,0 +1,13 @@
+.lm-terminal-dialog .ant-modal-container{padding:20px}
+.lm-terminal-panel{display:flex;flex-direction:column;gap:12px}
+.lm-terminal-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.lm-terminal-key{display:flex;align-items:center;gap:12px}
+.lm-terminal-key .ant-select{flex:1;min-width:0}
+.lm-terminal-screen{height:clamp(240px,55vh,640px);min-height:180px;overflow:hidden;background:#111827;padding:12px;border-radius:8px}
+.lm-terminal-screen .xterm{height:100%}
+.lm-terminal-hint{font-size:12px}
+.lm-terminal-full .ant-modal-container{height:calc(100dvh - 32px);display:flex;flex-direction:column}
+.lm-terminal-full .ant-modal-body{flex:1;min-height:0;display:flex}
+.lm-terminal-full .lm-terminal-panel{flex:1;min-height:0;min-width:0}
+.lm-terminal-full .lm-terminal-screen{flex:1;height:auto}
+@media(max-width:640px){.lm-terminal-dialog{max-width:calc(100vw - 16px);margin:0 auto}.lm-terminal-dialog .ant-modal-container{padding:16px}.lm-terminal-screen{padding:6px}.lm-terminal-toolbar .ant-typography{word-break:break-all}.lm-terminal-full .ant-modal-container{height:calc(100dvh - 32px)}}
