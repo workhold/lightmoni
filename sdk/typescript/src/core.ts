@@ -1,8 +1,9 @@
+import { copyMetricWindows, metricWindow, type MetricWindows } from './windows.js';
+import { Distribution } from './distribution.js';
 import { copyLogSampling, copyExclusions, matches, sampleLog, type LogSamplingPolicy, type SDKConfig, type LogExcludeRule } from './sampling.js';
 export type { LogSamplingPolicy, LogRule, LogCondition, LogExcludeRule, SDKConfig } from './sampling.js';
 export type Attributes = Record<string, string | boolean | number | bigint>;
 export type Signal = "metrics" | "logs" | "traces";
-export type ConnectionMode = "agent" | "direct" | "auto";
 export interface FrozenBatch {
   signal: Signal; table: string; service: string; id: string;
   createdAt: string; contentType: "application/json"; payload: Uint8Array;
@@ -10,9 +11,7 @@ export interface FrozenBatch {
 export interface Exporter { deliver(batch: FrozenBatch, signal: AbortSignal): Promise<void> }
 export interface TraceContext { traceId: string; spanId: string; flags: number; traceState?: string }
 export interface Options {
-  service: string; table: string; endpoint?: string; key?: string;
-  mode?: ConnectionMode; agentEndpoint?: string; localToken?: string;
-  discoveryTimeoutMs?: number;
+  service: string; env?: string; service_version?: string; instance_id?: string; table?: string; endpoint?: string; key?: string;
   selfTelemetry?: boolean;
   logSampling?: Record<string, LogSamplingPolicy>; disabled?: boolean;
   remoteConfig?: boolean; configEndpoint?: string; configIntervalMs?: number;
@@ -32,9 +31,6 @@ export interface Stats {
   invalidRecords: number; overflowRecords: number; lastError?: string;
   sampledOutLogs: number; unmatchedLogs: number; excludedLogs: number; disabledRecords: number;
   reportingDisabled: boolean; configRevision?: string; configError?: string;
-  configuredMode?: ConnectionMode; selectedRoute?: "agent" | "direct" | "none";
-  agentProbe?: string; fallbackCount?: number; lastRouteError?: string;
-  credentialSource?: "explicit" | "file" | "env" | "legacy-env"; routeUncertain?: boolean;
 }
 export class DeliveryError extends Error {
   constructor(message: string, readonly retryable = false, readonly retryAfterMs = 0, readonly rejectedRecords = 0) { super(message); this.name = "DeliveryError"; }
@@ -70,6 +66,8 @@ class State {
   readonly resource: { attributes: Attribute[] };
   readonly instanceId: string;
   readonly instruments = new Map<string, Instrument>();
+  private metricWindows:MetricWindows={};
+  readonly observations = new Map<string, {table:string;name:string;attributes:Attribute[];distribution:Distribution;summaryCount:bigint;summarySum:number;seconds:number;cost:number}>();
   readonly logs = new Map<string, RecordValue[]>();
   readonly spans = new Map<string, RecordValue[]>();
   readonly queue: Queued[] = [];
@@ -99,7 +97,7 @@ class State {
   selfPrevious?: Stats;
   constructor(readonly options: Options) {
     options.resource = {...options.resource};
-    if (!options.service || encoder.encode(options.service).length > 128 || !validTable(options.table)) throw new Error("valid service and logical table are required");
+    if (!options.service || encoder.encode(options.service).length > 128 || (options.table !== undefined && !validTable(options.table))) throw new Error("valid service and logical table are required");
     this.updateLogSampling(options.logSampling ?? {});
     Object.assign(this.stats, {sampledOutLogs:0,unmatchedLogs:0,excludedLogs:0,disabledRecords:0,reportingDisabled:options.disabled??false});
     if(options.configIntervalMs!==undefined&&(!Number.isSafeInteger(options.configIntervalMs)||options.configIntervalMs<1000))throw new Error('configuration interval must be at least one second');
@@ -113,31 +111,24 @@ class State {
     };
     for (const value of Object.values(this.settings)) if (!Number.isSafeInteger(value) || value <= 0) throw new Error("SDK limits and timeouts must be positive integers");
     if (this.settings.retryMaxMs < this.settings.retryMinMs || this.settings.maxBatchBytes > this.settings.queueBytes) throw new Error("invalid retry/batch limits");
-    this.instanceId = options.instanceId ?? uuid();
+    for (const value of [options.env, options.service_version, options.instance_id]) if (value !== undefined && (typeof value !== "string" || !value.trim() || encoder.encode(value).length > 128)) throw new Error("invalid resource identity");
+    this.instanceId = options.instance_id ?? options.instanceId ?? uuid();
+    if(options.env) options.resource!["deployment.environment.name"] = options.env;
+    if(options.service_version) options.resource!["service.version"] = options.service_version;
     const resource = this.attributes(options.resource ?? {});
     if (resource.some(a => a.key === "service.name" || a.key === "service.instance.id")) throw new Error("configure service identity separately");
     this.resource = { attributes: [...resource, { key: "service.name", value: { stringValue: options.service } }, { key: "service.instance.id", value: { stringValue: this.instanceId } }] };
-    const mode = options.mode ?? "direct";
-    if (!["agent", "direct", "auto"].includes(mode)) throw new Error("mode must be agent, direct, or auto");
-    const selectedRoute = mode === "agent" || (mode === "auto" && options.agentEndpoint) ? "agent" : "direct";
-    const routeEndpoint = selectedRoute === "agent" ? (options.agentEndpoint ?? "http://127.0.0.1:4318") : options.endpoint;
     if (!options.exporter) {
-      const endpoint = new URL(routeEndpoint ?? "");
+      const endpoint = new URL(options.endpoint ?? "");
       if (!/^https?:$/.test(endpoint.protocol)) throw new Error("endpoint must use HTTP or HTTPS");
     }
-    if (mode === "auto" && !options.exporter && !options.agentEndpoint && (!options.endpoint || !options.key)) throw new Error("auto_route_unavailable: configure an Agent or direct credentials");
-    if (mode === "agent" && !options.exporter && !options.localToken) {
-      const host = new URL(routeEndpoint!).hostname.toLowerCase();
-      if (host !== "localhost" && host !== "[::1]" && !/^127(?:\.\d{1,3}){3}$/.test(host)) throw new Error("agent mode requires local token for non-loopback endpoint");
-    }
-    this.stats.configuredMode = mode; this.stats.selectedRoute = selectedRoute; this.stats.agentProbe = mode === "auto" ? "pending" : "not_probed"; this.stats.credentialSource = "explicit";
-    this.exporter = options.exporter ?? (mode === "auto" ? new AutoExporter(options.agentEndpoint ?? "http://127.0.0.1:4318", options.localToken, options.endpoint, options.key, this.stats) : new HTTPExporter(routeEndpoint!, () => selectedRoute === "agent" ? this.options.localToken : this.options.key));
-    this.interval = setInterval(() => { if (!this.closing) { this.collect(); this.kick(); } }, this.settings.intervalMs);
+    this.exporter = options.exporter ?? new HTTPExporter(options.endpoint!, () => this.options.key);
+    this.interval = setInterval(() => { if (!this.closing) { this.collect(false); this.kick(); } }, this.settings.intervalMs);
     // A library timer should not prevent an otherwise finished Node process exiting.
     const timer = this.interval as unknown as { unref?: () => void }; timer.unref?.();
     this.selfInterval = setInterval(() => { if (!this.closing) { this.collectSelf(); this.kick(); } }, 30_000);
     (this.selfInterval as unknown as { unref?: () => void }).unref?.();
-    if(options.remoteConfig!==false&&this.configurationConnection().endpoint) {
+    if(options.remoteConfig!==false&&(options.configEndpoint||options.endpoint)) {
       this.configInterval=setInterval(()=>{if(!this.closing)void this.refreshConfig().catch(error=>{this.stats.configError=error instanceof Error?error.message:String(error);});},options.configIntervalMs??30_000);
       (this.configInterval as unknown as {unref?:()=>void}).unref?.();
     }
@@ -148,31 +139,28 @@ class State {
   setReportingDisabled(disabled:boolean):void {
     if(this.stats.reportingDisabled===disabled)return;this.stats.reportingDisabled=disabled;
     if(disabled){this.reportingGeneration++;this.request?.abort();this.retryNow?.();this.stats.disabledRecords+=this.queue.reduce((n,q)=>n+q.records,0)+[...this.logs.values(),...this.spans.values()].reduce((n,rows)=>n+rows.length,0);
-      for(const m of this.instruments.values()){this.stats.disabledRecords+=m.series.size;m.series.clear();m.start=nowNano();}this.queue.length=0;this.logs.clear();this.spans.clear();this.stats.pendingBytes=0;this.stats.pendingBatches=0;this.stats.bufferBytes=0;
+      for(const m of this.instruments.values()){this.stats.disabledRecords+=m.series.size;m.series.clear();m.start=nowNano();}this.observations.clear();this.queue.length=0;this.logs.clear();this.spans.clear();this.stats.pendingBytes=0;this.stats.pendingBatches=0;this.stats.bufferBytes=0;
     }else{this.selfLast=-Infinity;for(const m of this.instruments.values())m.start=nowNano();}this.notify();
   }
   refreshConfig():Promise<void> {
     if(this.configLoading)return this.configLoading;
     this.configLoading=this.fetchConfig().finally(()=>{this.configLoading=undefined;});return this.configLoading;
   }
-  private configurationConnection(): { endpoint?: string; key?: string } {
-    if (this.options.mode === "agent" && !this.options.exporter) return { endpoint: this.options.agentEndpoint ?? "http://127.0.0.1:4318", key: this.options.localToken };
-    return { endpoint: this.options.configEndpoint ?? this.options.endpoint, key: this.options.key };
-  }
   private async fetchConfig():Promise<void> {
-    const { endpoint, key }=this.configurationConnection();if(!endpoint||this.closing)throw new Error('remote configuration is disabled or SDK closed');
+    const endpoint=this.options.configEndpoint??this.options.endpoint;if(!endpoint||this.closing)throw new Error('remote configuration is disabled or SDK closed');
     const request=new AbortController();this.configRequest=request;const timer=setTimeout(()=>request.abort(),5000);
     try{
-      const response=await fetch(endpoint.replace(/\/$/,'')+'/v1/sdk-config',{headers:key?{Authorization:`Bearer ${key}`}:{},signal:request.signal,redirect:'error'});
+      const response=await fetch(endpoint.replace(/\/$/,'')+'/v1/sdk-config?metric_windows=1',{headers:this.options.key?{Authorization:`Bearer ${this.options.key}`}:{},signal:request.signal,redirect:'error'});
       if(response.status!==200){void response.body?.cancel();throw new Error(`SDK configuration HTTP ${response.status}`);}
       if(!response.body)throw new Error('missing SDK configuration');const reader=response.body.getReader(),parts:Uint8Array[]=[];let length=0;
       while(true){const chunk=await reader.read();if(chunk.done)break;length+=chunk.value.length;if(length>1024*1024){await reader.cancel();throw new Error('SDK configuration exceeds 1 MiB');}parts.push(chunk.value);}
       const raw=new Uint8Array(length);let offset=0;for(const part of parts){raw.set(part,offset);offset+=part.length;}
       const config=JSON.parse(new TextDecoder().decode(raw)) as SDKConfig;
-      if(!config||typeof config.revision!=='string'||!config.revision||config.revision.length>128||!config.log_sampling||Array.isArray(config.log_sampling)||typeof config.log_sampling!=='object'||Object.keys(config.log_sampling).length>200||Object.keys(config).some(k=>!['revision','log_sampling','disable_rules'].includes(k)))throw new Error('invalid SDK configuration');
+      if(!config||typeof config.revision!=='string'||!config.revision||config.revision.length>128||!config.log_sampling||Array.isArray(config.log_sampling)||typeof config.log_sampling!=='object'||Object.keys(config.log_sampling).length>200||Object.keys(config).some(k=>!['revision','log_sampling','disable_rules','metric_windows'].includes(k)))throw new Error('invalid SDK configuration');
       const policies:Record<string,LogSamplingPolicy>={};for(const[table,p]of Object.entries(config.log_sampling)){if(!validTable(table)||['lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(table))throw new Error('invalid log policy table');policies[table]=copyLogSampling(p);}
+      const windows=copyMetricWindows(config.metric_windows);
       const disable=copyExclusions(config.disable_rules??[],true);
-      if(this.closing)return;this.remoteSampling=policies;this.remoteDisabled=disable.some(rule=>matches(rule.conditions,this.samplingRecord()));this.setReportingDisabled(!!this.options.disabled||this.remoteDisabled);this.stats.configRevision=config.revision;this.stats.configError=undefined;
+      if(this.closing)return;this.metricWindows=windows;this.remoteSampling=policies;this.remoteDisabled=disable.some(rule=>matches(rule.conditions,this.samplingRecord()));this.setReportingDisabled(!!this.options.disabled||this.remoteDisabled);this.stats.configRevision=config.revision;this.stats.configError=undefined;
     }catch(error){throw new Error(error instanceof Error&&error.message.startsWith('SDK configuration')?error.message:'SDK configuration unavailable or invalid');}finally{clearTimeout(timer);this.configRequest=undefined;}
   }
   samplingRecord(attrs:Attributes={},level='',context?:TraceContext){return {record:{service:this.options.service,instance_id:this.instanceId,'sdk.language':'typescript',severity:level.toUpperCase(),trace_id:context?.traceId,event_id:`${this.instanceId}:${this.sourceSequence}`},attributes:attrs,resource:{...this.options.resource,'service.name':this.options.service,'service.instance.id':this.instanceId}};}
@@ -189,6 +177,7 @@ class State {
     this.failure = new Error(message); this.stats.lastError = message;
   }
   store(map: Map<string, RecordValue[]>, table: string, record: RecordValue): void {
+    if (!validTable(table)) { this.invalid("select a table with withTable before recording"); return; }
     if (this.closing) { this.invalid("record after shutdown"); return; }
     if(this.stats.reportingDisabled){this.stats.disabledRecords++;return;}
     const size = encoder.encode(JSON.stringify(record)).length + 64;
@@ -196,7 +185,7 @@ class State {
     this.stats.bufferBytes += size; const rows = map.get(table) ?? []; rows.push(record); map.set(table, rows);
   }
   instrument(table: string, name: string, kind: Instrument["kind"], options: MetricOptions): Instrument {
-    if (this.closing || !name || encoder.encode(name).length > 255 || (options.unit?.length ?? 0) > 64 || (options.description?.length ?? 0) > 1024) throw new Error("invalid metric identity or SDK closed");
+    if (!validTable(table) || this.closing || !name || encoder.encode(name).length > 255 || (options.unit?.length ?? 0) > 64 || (options.description?.length ?? 0) > 1024) throw new Error("invalid metric identity or SDK closed");
     const boundaries = kind === "histogram" ? [...(options.boundaries ?? [5, 10, 25, 50, 100, 250, 500, 1000])] : [];
     if (boundaries.length > 128 || boundaries.some((n, i) => !finite(n) || (i > 0 && boundaries[i - 1] >= n))) throw new Error("histogram boundaries must be finite and increasing");
     const key = `${table}\0${name}`, existing = this.instruments.get(key);
@@ -234,9 +223,36 @@ class State {
     }
     point.observed = nowNano();
   }
-  collect(): void {
+  observe(table:string,name:string,dimensions:Record<string,string>,value:number,count:number|bigint):void {
+    if(this.closing){this.invalid("record after shutdown");return;}
+    if(this.stats.reportingDisabled){this.stats.disabledRecords++;return;}
+    if(!this.options.env?.trim() || !validTable(table) || ['lightmoni','lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(table) || !name || encoder.encode(name).length>255 || !Number.isFinite(value) || !dimensions || typeof dimensions!=='object' || Array.isArray(dimensions)) {this.invalid("record requires env, business table, metric name, dimensions and finite value");return;}
+    let weight:bigint;try{if(typeof count==='number'&&(!Number.isSafeInteger(count)||count<1))throw new Error();weight=BigInt(count);if(weight<1n||weight>maxUint64)throw new Error();}catch{this.invalid("count must be a positive integer");return;}
+    let attributes:Attribute[];
+    try {for(const [key,val] of Object.entries(dimensions))if(!/^key([1-9]|1[0-6])$/.test(key)||typeof val!=='string')throw new Error("dimensions must be key1..key16 strings");attributes=this.attributes(Object.fromEntries(Object.entries(dimensions).filter(([,v])=>v!=='')));}catch(error){this.invalid(error);return;}
+    const window=metricWindow(this.metricWindows,table,nowNano());const key=JSON.stringify([table,name,attributes,window.seconds,String(window.start)]);let group=this.observations.get(key);
+    if(!group){if(this.observations.size>=this.settings.cardinalityLimit)this.collect(false);if(this.observations.size>=this.settings.cardinalityLimit){this.stats.overflowRecords++;return;}const cost=encoder.encode(key).length+256;if(this.stats.bufferBytes+cost>this.settings.bufferBytes){this.lost(1,"SDK aggregate buffer capacity exceeded");return;}this.stats.bufferBytes+=cost;group={table,name,attributes,distribution:new Distribution(window.start),seconds:window.seconds,cost,summaryCount:0n,summarySum:0};this.observations.set(key,group);}
+    if(weight>1n){if(group.summaryCount+weight>maxUint64||!Number.isFinite(group.summarySum+value)){this.invalid("summary overflow");return;}group.summaryCount+=weight;group.summarySum+=value;return;}
+    const previous=group.distribution.bytes;
+    if(!group.distribution.observe(value,this.settings.bufferBytes-this.stats.bufferBytes)){this.invalid("distribution capacity or numeric overflow");return;}
+    this.stats.bufferBytes+=group.distribution.bytes-previous;
+  }
+  collect(force=true): void {
     if(this.stats.reportingDisabled)return;
     const at = new Date().toISOString(), end = nowNano();
+    const grouped=new Map<string,RecordValue[]>();
+    for(const [key,group] of this.observations){
+      const finish=group.distribution.start+BigInt(group.seconds)*1_000_000_000n;
+      if(!force&&finish>end)continue;
+      const until=end<finish?end:finish;
+      const attributes=[...group.attributes,{key:'lightmoni.window_seconds',value:{intValue:String(group.seconds)}}];
+      this.observations.delete(key);
+      const rows=grouped.get(group.table)??[];
+      if(group.distribution.count)rows.push({name:group.name,exponentialHistogram:{dataPoints:[group.distribution.point(until,attributes)],aggregationTemporality:1}});
+      if(group.summaryCount)rows.push({name:group.name,summary:{dataPoints:[{attributes,startTimeUnixNano:String(group.distribution.start),timeUnixNano:String(until),count:String(group.summaryCount),sum:group.summarySum,quantileValues:[]}]}});
+      grouped.set(group.table,rows);
+    }
+    for(const [table,rows] of grouped)this.pack("metrics",table,rows,at);
     const tables = new Set([...this.logs.keys(), ...this.spans.keys(), ...Array.from(this.instruments.values(), i => i.table)]);
     for (const table of [...tables].sort()) {
       const metrics: RecordValue[] = [];
@@ -254,12 +270,12 @@ class State {
       }
       this.pack("metrics", table, metrics, at); this.pack("logs", table, this.logs.get(table) ?? [], at); this.pack("traces", table, this.spans.get(table) ?? [], at);
     }
-    this.logs.clear(); this.spans.clear(); this.stats.bufferBytes = 0;
+    this.logs.clear(); this.spans.clear(); this.stats.bufferBytes = [...this.observations.values()].reduce((n,g)=>n+g.cost+g.distribution.bytes,0);
     this.collectSelf();
   }
   collectSelf(): void {
     const clock = performance.now();
-    if (this.stats.reportingDisabled || this.options.selfTelemetry === false || clock - this.selfLast < 30_000) return;
+    if (!this.options.key || this.stats.reportingDisabled || this.options.selfTelemetry === false || clock - this.selfLast < 30_000) return;
     this.selfLast = clock;
     const at = new Date().toISOString(), time = nano(nowNano());
     const attributes: Attribute[] = [{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'typescript'}},{key:'sdk.version',value:{stringValue:'0.1.0'}}];
@@ -275,20 +291,23 @@ class State {
   enqueueSelf(signal: Signal, rows: RecordValue[], at: string): boolean {
     const bytes = this.payload(signal, rows).length;
     if (bytes > this.settings.maxBatchBytes || this.queue.length >= this.settings.queueBatches || this.stats.pendingBytes + bytes > this.settings.queueBytes) return false;
-    this.enqueue(signal, this.options.table, rows, at); return true;
+    this.enqueue(signal, "lightmoni_sdk", rows, at); return true;
   }
   payload(signal: Signal, records: RecordValue[]): Uint8Array {
     const scope = { name: "lightmoni/sdk/typescript" };
     if (signal === "metrics") {
-      const merged = new Map<string, RecordValue>();
+      const scopes = new Map<string, Map<string, RecordValue>>();
       for (const record of records) {
-        const name = String(record.name), previous = merged.get(name);
-        if (!previous) { merged.set(name, structuredClone(record)); continue; }
-        for (const kind of ["sum", "gauge", "histogram"]) if (previous[kind]) {
-          const before = previous[kind] as { dataPoints: unknown[] }; before.dataPoints.push(...(record[kind] as { dataPoints: unknown[] }).dataPoints);
-        }
+        const kind=["sum","gauge","histogram","exponentialHistogram","summary"].find(k=>record[k])!;
+        const name=String(record.name),base=scopes.get("")??new Map<string,RecordValue>();scopes.set("",base);
+        const baseKind=base.has(name)?["sum","gauge","histogram","exponentialHistogram","summary"].find(k=>base.get(name)![k]):undefined;
+        const scopeKind=baseKind&&baseKind!==kind?kind:"";
+        const merged=scopes.get(scopeKind)??new Map<string,RecordValue>();scopes.set(scopeKind,merged);
+        const previous=merged.get(name);
+        if(!previous)merged.set(name,structuredClone(record));
+        else (previous[kind] as {dataPoints:unknown[]}).dataPoints.push(...(record[kind] as {dataPoints:unknown[]}).dataPoints);
       }
-      return encoder.encode(JSON.stringify({ resourceMetrics: [{ resource: this.resource, scopeMetrics: [{ scope, metrics: [...merged.values()] }] }] }));
+      return encoder.encode(JSON.stringify({resourceMetrics:[{resource:this.resource,scopeMetrics:[...scopes].map(([kind,merged])=>({scope:{...scope,name:scope.name+(kind?"/"+kind:"")},metrics:[...merged.values()]}))}]}));
     }
     if (signal === "logs") return encoder.encode(JSON.stringify({ resourceLogs: [{ resource: this.resource, scopeLogs: [{ scope, logRecords: records }] }] }));
     return encoder.encode(JSON.stringify({ resourceSpans: [{ resource: this.resource, scopeSpans: [{ scope, spans: records }] }] }));
@@ -317,7 +336,11 @@ class State {
   async pump(): Promise<void> {
     this.working = true; let backoff = this.settings.retryMinMs;
     try { while (this.queue.length && !this.stopped) {
-      const item = this.queue[0]; this.request = new AbortController();
+      const item = this.queue[0];
+      if (item.batch.table === "lightmoni_sdk" && !this.options.key) {
+        this.queue.shift(); this.stats.pendingBatches--; this.stats.pendingBytes -= item.batch.payload.length; this.notify(); continue;
+      }
+      this.request = new AbortController();
       const timer = setTimeout(() => this.request?.abort(), this.settings.requestTimeoutMs);
       let failure: unknown;
       try { await this.exporter.deliver({ ...item.batch, payload: item.batch.payload.slice() }, this.request.signal); } catch (error) { failure = error; } finally { clearTimeout(timer); this.request = undefined; }
@@ -350,7 +373,9 @@ export class Gauge { constructor(private readonly state: State, private readonly
 export class Histogram { constructor(private readonly state: State, private readonly metric: Instrument) {} record(value: number, attrs: Attributes = {}): void { this.state.record(this.metric, value, attrs); } }
 export class LightMoni {
   private constructor(private readonly state: State, readonly table: string, private readonly boundTrace?: TraceContext) {}
-  static create(options: Options): LightMoni { return new LightMoni(new State({ ...options }), options.table); }
+  static create(options: Options): LightMoni { return new LightMoni(new State({ ...options }), options.table ?? ""); }
+  /** Record one observation; aggregation and delivery are automatic. */
+  record(table:string,metric_name:string,dimensions:Record<string,string>,value:number,count:number|bigint):void {this.state.observe(table,metric_name,dimensions,value,count);}
   get meter(): LightMoni { return this; }
   get instanceId(): string { return this.state.instanceId; }
   withTable(table: string): LightMoni { if (!validTable(table)) throw new Error("invalid logical table"); return new LightMoni(this.state, table, this.boundTrace); }
@@ -414,7 +439,7 @@ export class LightMoni {
     if (validTrace(context)) Object.assign(record, { traceId: context.traceId, spanId: context.spanId, flags: context.flags });
     this.state.store(this.state.logs, this.table, record);
   }
-  startSpan(name: string, attrs: Attributes = {}, parent: TraceContext | null | undefined = this.currentTrace()): Span { return new Span(this.state, this.table, name, attrs, parent ?? undefined); }
+  startSpan(name: string, attrs: Attributes = {}, parent: TraceContext | null | undefined = this.currentTrace()): Span { if (!validTable(this.table)) throw new Error("select a table with withTable before recording"); return new Span(this.state, this.table, name, attrs, parent ?? undefined); }
   async flush({ timeoutMs = 10_000 }: { timeoutMs?: number } = {}): Promise<void> { if (this.state.stopped) throw new Error("SDK is closed"); this.state.collect(); const target = this.state.sequence; this.state.kick(); await this.state.wait(target, timeoutMs); }
   async shutdown({ timeoutMs = 10_000 }: { timeoutMs?: number } = {}): Promise<void> {
     if (this.state.stopped) { if (this.state.failure) throw this.state.failure; return; }
@@ -478,37 +503,4 @@ export class HTTPExporter implements Exporter {
     try { result = JSON.parse(new TextDecoder().decode(body)); } catch { throw new DeliveryError("invalid OTLP JSON acknowledgment", true); }
     const partial = result.partialSuccess; if (partial) { const rejected = Number(partial.rejectedLogRecords ?? partial.rejectedDataPoints ?? partial.rejectedSpans ?? 0); if (rejected > 0) throw new DeliveryError("OTLP partial success (not retried)", false, 0, rejected); }
   }
-}
-
-/** Auto mode probes only the configured local Agent once, before the first
- * business body. A failed probe may safely select direct; delivery failures
- * after selection never switch routes for the same batch. */
-class AutoExporter implements Exporter {
-  private selected: "agent" | "direct" | undefined;
-  private readonly agent: HTTPExporter;
-  private readonly direct?: HTTPExporter;
-  constructor(private readonly agentEndpointValue: string, private readonly localToken: string | undefined, endpoint: string | undefined, key: string | undefined, private readonly stats: Stats) {
-    this.agent = new HTTPExporter(agentEndpointValue, () => localToken);
-    this.direct = endpoint ? new HTTPExporter(endpoint, () => key) : undefined;
-  }
-  private async select(signal: AbortSignal): Promise<"agent" | "direct"> {
-    if (this.selected) return this.selected;
-    const agentEndpoint = this.agentEndpointValue.replace(/\/$/, "");
-    try {
-      const headers: Record<string, string> = {}; if (this.localToken) headers.Authorization = `Bearer ${this.localToken}`;
-      const response = await fetch(`${agentEndpoint}/healthz`, { method: "GET", headers, signal, redirect: "error" });
-      await response.body?.cancel();
-      if (response.ok) { this.selected = "agent"; this.stats.selectedRoute = "agent"; this.stats.agentProbe = "healthy"; return this.selected; }
-      this.stats.agentProbe = `http_${response.status}`;
-      // An HTTP response proves the endpoint exists. Auth/protocol failures
-      // must remain visible and cannot silently bypass the configured Agent.
-      throw new DeliveryError(`Agent health probe failed with HTTP ${response.status}`);
-    } catch (error) {
-      if (error instanceof DeliveryError || signal.aborted) throw error;
-      this.stats.agentProbe = "unavailable";
-    }
-    if (!this.direct) { this.stats.lastRouteError = "auto_route_unavailable"; throw new DeliveryError("auto_route_unavailable: Agent unavailable and direct credentials are missing"); }
-    this.selected = "direct"; this.stats.selectedRoute = "direct"; this.stats.fallbackCount = (this.stats.fallbackCount ?? 0) + 1; return this.selected;
-  }
-  async deliver(batch: FrozenBatch, signal: AbortSignal): Promise<void> { const selected = await this.select(signal); if (selected === "agent") return this.agent.deliver(batch, signal); return this.direct!.deliver(batch, signal); }
 }

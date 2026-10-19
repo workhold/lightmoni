@@ -10,18 +10,24 @@ import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.request import urlretrieve
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / ".lightmoni/sdk-test"
-# Rust is retained for explicit follow-up checks, not current SDK acceptance.
-IMAGES = {"rust": "m.daocloud.io/docker.io/library/rust:1-bookworm"}
+IMAGES = {"java": "m.daocloud.io/docker.io/library/eclipse-temurin:17-jdk",
+          "dotnet": "mcr.microsoft.com/dotnet/sdk:8.0",
+          "php": "m.daocloud.io/docker.io/library/php:8.3-cli",
+          "rust": "m.daocloud.io/docker.io/library/rust:1-bookworm"}
 
 
 def command(language, docker):
     commands = {
         "python": ["python3", "examples/sdk/python/main.py"],
         "ruby": ["ruby", "examples/sdk/ruby/main.rb"],
+        "php": ["php", "examples/sdk/php/main.php"],
+        "java": ["java", "-cp", ".lightmoni/sdk-test/java/gson.jar:.lightmoni/sdk-test/java", "Main"],
+        "dotnet": ["dotnet", ".lightmoni/sdk-test/dotnet/Demo.dll"],
         "rust": [".lightmoni/sdk-test/rust/debug/examples/demo"],
     }
     if docker and language in IMAGES:
@@ -33,7 +39,14 @@ def command(language, docker):
 
 def prepare(languages, docker):
     CACHE.mkdir(parents=True, exist_ok=True)
+    if "java" in languages:
+        jar = CACHE / "java/gson.jar"
+        jar.parent.mkdir(exist_ok=True)
+        if not jar.exists():
+            urlretrieve("https://repo.maven.apache.org/maven2/com/google/code/gson/gson/2.11.0/gson-2.11.0.jar", jar)
     builds = {
+        "java": ["javac", "-cp", ".lightmoni/sdk-test/java/gson.jar", "-d", ".lightmoni/sdk-test/java", "sdk/java/src/main/java/io/lightmoni/Client.java", "examples/sdk/java/Main.java"],
+        "dotnet": ["dotnet", "build", "examples/sdk/dotnet/Demo.csproj", "-o", ".lightmoni/sdk-test/dotnet", "--nologo"],
         "rust": ["cargo", "build", "--manifest-path", "sdk/rust/Cargo.toml", "--example", "demo"],
     }
     for language in languages:
@@ -217,15 +230,13 @@ def validate(fault, attempts, stats):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--languages", default="python,ruby", help="current SDKs: python,ruby; rust is a deferred explicit check")
-    parser.add_argument("--docker", action="store_true", help="run explicitly selected deferred Rust in an isolated runtime container")
+    parser.add_argument("--languages", default="python,ruby,java,dotnet,php,rust")
+    parser.add_argument("--docker", action="store_true", help="Java/.NET/PHP/Rust in isolated runtime containers")
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--cases", default="fixture,trace_scope,demo,overflow,retry,rate,auth,invalid_ack,ack_loss,permanent,partial,capacity")
     parser.add_argument("--agent-url", help="run business demos against an actual Agent instead of fault fixtures")
     args = parser.parse_args()
     languages = args.languages.split(",")
-    if not languages or any(language not in {"python", "ruby", "rust"} for language in languages):
-        parser.error("--languages accepts python,ruby and explicitly selected deferred rust")
     if not args.skip_build:
         prepare(languages, args.docker)
     if args.agent_url:

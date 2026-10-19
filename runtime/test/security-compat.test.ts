@@ -130,7 +130,7 @@ async function fixture() {
     },
   };
 }
-test("original Go master, AES-GCM, bcrypt and session hashes work; old keys receive no implicit grants", async () => {
+test("original Go master, AES-GCM, bcrypt and session hashes work; old keys adopt all business tables while retaining identity", async () => {
   const f = await fixture();
   try {
     assert.equal(f.a.decrypt(legacyCipher), "legacy-oauth-secret");
@@ -165,24 +165,15 @@ test("original Go master, AES-GCM, bcrypt and session hashes work; old keys rece
       (k: any) => k.id === "old-key",
     );
     assert.deepEqual(old.allowed_tables, []);
-    assert.equal(old.allow_all_tables, false);
-    assert.throws(
-      () =>
-        f.a.validateKey(
-          {
-            req: { headers: { authorization: "Bearer legacy-write-key" } },
-          } as any,
-          "app",
-        ),
-      (e: any) => e.status === 403,
-    );
+    assert.equal(old.allow_all_tables, true);
+    assert.equal(f.a.validateKey({req:{headers:{authorization:"Bearer legacy-write-key"}}} as any,"app").id,"old-key");
     const reopened = new Auth(f.db, f.dir, f.base, new Router());
     assert.equal(reopened.decrypt(legacyCipher), "legacy-oauth-secret");
   } finally {
     await f.close();
   }
 });
-test("typed key permissions reject truthy strings and invalid updates atomically; corrupt saved grants fail closed", async () => {
+test("typed key permissions reject truthy strings and invalid updates atomically; legacy scopes are ignored", async () => {
   const f = await fixture();
   try {
     for (const body of [
@@ -225,18 +216,11 @@ test("typed key permissions reject truthy strings and invalid updates atomically
         .allowed_tables,
       [],
     );
-    assert.throws(
-      () =>
-        f.a.validateKey(
-          { req: { headers: { authorization: key.key } } } as any,
-          "app",
-        ),
-      (e: any) => e.status === 403,
-    );
+    assert.equal(f.a.validateKey({req:{headers:{authorization:key.key}}} as any,"other").allow_all_tables,true);
     assert.equal(
       (await f.request("/api/v1/keys/" + key.id, "PUT", { active: true }))
         .status,
-      400,
+      200,
     );
     assert.equal(
       (
@@ -252,7 +236,7 @@ test("typed key permissions reject truthy strings and invalid updates atomically
         { req: { headers: { authorization: key.key } } } as any,
         "app",
       ).allow_all_tables,
-      false,
+      true,
     );
   } finally {
     await f.close();

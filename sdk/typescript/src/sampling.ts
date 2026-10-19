@@ -2,7 +2,7 @@ export interface LogCondition { field: string; operator: 'in' | 'exists'; values
 export interface LogExcludeRule { name: string; conditions: LogCondition[] }
 export interface LogRule extends LogExcludeRule { rate: number }
 export interface LogSamplingPolicy { key?: string; rules: LogRule[]; exclude?: LogExcludeRule[] }
-export interface SDKConfig { revision: string; log_sampling: Record<string, LogSamplingPolicy>; disable_rules?: LogExcludeRule[] }
+export interface SDKConfig { revision: string; log_sampling: Record<string, LogSamplingPolicy>; disable_rules?: LogExcludeRule[]; metric_windows?: import("./windows.js").MetricWindows }
 export interface SamplingRecord { record: Record<string, unknown>; attributes: Record<string, unknown>; resource: Record<string, unknown> }
 const encoder = new TextEncoder();
 const fieldValid = (field: unknown): field is string => typeof field === 'string' && encoder.encode(field).length <= 136 && !field.includes('\0') && (/^(event_id|service|severity|trace_id|instance_id|sdk.language)$/.test(field) || /^(attr|resource):.+$/.test(field));

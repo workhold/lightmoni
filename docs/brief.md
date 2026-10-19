@@ -6,10 +6,10 @@
 
 - 面向个人和四五人的小团队。单套部署共享数据，不引入项目、工作空间、多租户、逐表或大盘 ACL。
 - 一体化主服务内置网页、采集、查询、大盘、日志探索、配置、告警和通知。中心端推荐主服务加 ClickHouse 两个容器；SQLite 内嵌保存管理数据。
-- 前端确定使用 React 与 TypeScript，使用 oil-ui 整理设计与交互，图表使用 AntV。禁止浏览器原生 select 和 window.alert/confirm/prompt；选择、确认和输入流程使用共享 React 组件。中心与 Agent 均使用 Node.js / TypeScript，运行入口为 `runtime/dist/server/main.js` 与 `runtime/dist/agent/main.js`。发布固定 Node 24.15.0，依赖版本见各 npm lockfile；当前发布 TypeScript/JavaScript、Python、Ruby；Go/Rust 仅保留源码、后续支持，不纳本次发布验收；PHP 已下线。
+- 前端确定使用 React 与 TypeScript，使用 oil-ui 整理设计与交互，图表使用 AntV。禁止浏览器原生 select 和 window.alert/confirm/prompt；选择、确认和输入流程使用共享 React 组件。中心与 Agent 均使用 Node.js / TypeScript，运行入口为 `runtime/dist/server/main.js` 与 `runtime/dist/agent/main.js`。发布固定 Node 24.15.0，依赖版本见各 npm lockfile；2026-10-20按用户指定保留本地SDK与中心上报实现：当前接入页提供Go、TypeScript/Node.js、Python、Rust四种record SDK，其他历史语言保留源码兼容。
 - Grafana、Kibana、OpenObserve 是功能和交互参考。LightMoni 自己实现功能，不在运行时依赖这三个产品，也不承诺兼容它们的导入格式或查询语言。
-- SDK/采集业务配置 service、table、上报地址；通过本机 Agent 时由 Agent 保管私有 Key。支持创建多份命名 Key，每份可配置允许写入的逻辑 table 白名单，或显式允许所有 table，不与 service 绑定或限制。Agent 配置其中一份，多个服务/Agent 可共用；记录实际 key_id、接入来源、最近使用与拒绝原因以排查问题。Key 不作为项目或租户边界，只授权写入。
-- 用户给出业务 table 名，系统添加 log_、metric_、trace_ 前缀。指标根据数据类型分表；自定义属性进入属性字段，不为每个属性自动增加物理列。
+- SDK业务初始化必填service/env；table与metric_name在五参数record调用时选择。SDK密钥只按名称创建，所有启用的有效Key可写任意业务表，不绑定service；缺失Authorization仅允许启用的豁免表，无效或空凭据不降级。Agent专用control/data凭据继续按节点和用途鉴权，记录实际凭据ID及接入来源。
+- 业务record按table、metric_name和key1…key16固定字符串槽聚合，默认30秒，支持10秒至1小时七档单周期配置。业务指标查询提供逻辑表短名及旧metric_视图；系统遥测统一lightmoni_log/lightmoni_metric_*并以component区分来源。
 - 服务和表首次上报后自动发现/创建。只有系统维护数据表结构；SQL 查询只读且受资源上限约束。
 - 大盘全局共享，可创建多个大盘，通过 SQL 查询多张表和多个 service，配置多个面板、图表、变量、时间范围与刷新。
 - 日志探索参考 Kibana Discover：表和服务筛选、关键词、字段过滤、时间分布、详情、上下文、保存检索、与大盘和 trace 联动。

@@ -1,0 +1,57 @@
+{
+  "passed": true,
+  "checked_at": "2026-10-19T16:36:36.449Z",
+  "sdk_packages": [
+    {
+      "id": "go",
+      "downloaded": true,
+      "checksum_verified": true
+    },
+    {
+      "id": "typescript",
+      "downloaded": true,
+      "checksum_verified": true
+    },
+    {
+      "id": "python",
+      "downloaded": true,
+      "checksum_verified": true
+    },
+    {
+      "id": "rust",
+      "downloaded": true,
+      "checksum_verified": true
+    }
+  ],
+  "pages": [
+    {
+      "path": "/data",
+      "sdk_languages": [
+        "Go",
+        "Node.js",
+        "Rust",
+        "Python"
+      ],
+      "three_tabs": true
+    },
+    {
+      "path": "/agents",
+      "main_task_management": true,
+      "fixed_reporting_table": true
+    },
+    {
+      "path": "/agents/install",
+      "main_enrollment": true
+    },
+    {
+      "path": "/machines",
+      "main_machine_management": true
+    },
+    {
+      "path": "/settings?tab=appearance",
+      "main_language_preferences": true
+    }
+  ],
+  "page_errors": [],
+  "http_500": []
+}

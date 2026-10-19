@@ -1,8 +1,8 @@
+import { Distribution } from './distribution.js';
 import { type LogSamplingPolicy } from './sampling.js';
 export type { LogSamplingPolicy, LogRule, LogCondition, LogExcludeRule, SDKConfig } from './sampling.js';
 export type Attributes = Record<string, string | boolean | number | bigint>;
 export type Signal = "metrics" | "logs" | "traces";
-export type ConnectionMode = "agent" | "direct" | "auto";
 export interface FrozenBatch {
     signal: Signal;
     table: string;
@@ -23,13 +23,12 @@ export interface TraceContext {
 }
 export interface Options {
     service: string;
-    table: string;
+    env?: string;
+    service_version?: string;
+    instance_id?: string;
+    table?: string;
     endpoint?: string;
     key?: string;
-    mode?: ConnectionMode;
-    agentEndpoint?: string;
-    localToken?: string;
-    discoveryTimeoutMs?: number;
     selfTelemetry?: boolean;
     logSampling?: Record<string, LogSamplingPolicy>;
     disabled?: boolean;
@@ -79,13 +78,6 @@ export interface Stats {
     reportingDisabled: boolean;
     configRevision?: string;
     configError?: string;
-    configuredMode?: ConnectionMode;
-    selectedRoute?: "agent" | "direct" | "none";
-    agentProbe?: string;
-    fallbackCount?: number;
-    lastRouteError?: string;
-    credentialSource?: "explicit" | "file" | "env" | "legacy-env";
-    routeUncertain?: boolean;
 }
 export declare class DeliveryError extends Error {
     readonly retryable: boolean;
@@ -139,6 +131,17 @@ declare class State {
     };
     readonly instanceId: string;
     readonly instruments: Map<string, Instrument>;
+    private metricWindows;
+    readonly observations: Map<string, {
+        table: string;
+        name: string;
+        attributes: Attribute[];
+        distribution: Distribution;
+        summaryCount: bigint;
+        summarySum: number;
+        seconds: number;
+        cost: number;
+    }>;
     readonly logs: Map<string, RecordValue[]>;
     readonly spans: Map<string, RecordValue[]>;
     readonly queue: Queued[];
@@ -170,7 +173,6 @@ declare class State {
     updateLogSampling(policies: Record<string, LogSamplingPolicy>): void;
     setReportingDisabled(disabled: boolean): void;
     refreshConfig(): Promise<void>;
-    private configurationConnection;
     private fetchConfig;
     samplingRecord(attrs?: Attributes, level?: string, context?: TraceContext): {
         record: {
@@ -193,7 +195,8 @@ declare class State {
     store(map: Map<string, RecordValue[]>, table: string, record: RecordValue): void;
     instrument(table: string, name: string, kind: Instrument["kind"], options: MetricOptions): Instrument;
     record(metric: Instrument, value: number | bigint, attrs: Attributes): void;
-    collect(): void;
+    observe(table: string, name: string, dimensions: Record<string, string>, value: number, count: number | bigint): void;
+    collect(force?: boolean): void;
     collectSelf(): void;
     enqueueSelf(signal: Signal, rows: RecordValue[], at: string): boolean;
     payload(signal: Signal, records: RecordValue[]): Uint8Array;
@@ -228,6 +231,8 @@ export declare class LightMoni {
     private readonly boundTrace?;
     private constructor();
     static create(options: Options): LightMoni;
+    /** Record one observation; aggregation and delivery are automatic. */
+    record(table: string, metric_name: string, dimensions: Record<string, string>, value: number, count: number | bigint): void;
     get meter(): LightMoni;
     get instanceId(): string;
     withTable(table: string): LightMoni;

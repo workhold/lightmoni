@@ -18,6 +18,7 @@ const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
 const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
 const MachinesPage=lazy(()=>import('./MachinesPage'));
 const DataManagementPage=lazy(()=>import('./DataManagementPage'));
+const AgentInstallPage=lazy(()=>import('./AgentInstall'));
 
 const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/data','数据接入',DatabaseOutlined],['/data-management','数据管理',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
 const englishLinks:Record<string,string>={'/':'Overview','/dashboards':'Dashboards','/logs':'Log explorer','/alerts':'Alerts','/agents':'Node assistants','/machines':'Machines','/data':'Data ingestion','/data-management':'Data management','/assistant':'AI assistant','/settings':'Personal settings','/admin':'Administration'};
@@ -54,6 +55,7 @@ export default function Root(){
     <Route path="/data" element={<DataPage user={user}/>}/>
     <Route path="/data-management" element={<DataManagementPage user={user}/>}/>
     <Route path="/agents" element={<AgentsPage user={user}/>}/>
+    <Route path="/agents/install" element={<AgentInstallPage user={user}/>}/>
     <Route path="/machines" element={user.role==='admin'?<MachinesPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>
     <Route path="/admin" element={user.role==='admin'?<AdminPage user={user}/>:<Navigate to="/settings" replace/>}/>

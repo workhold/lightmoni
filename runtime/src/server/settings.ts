@@ -1,3 +1,4 @@
+import { metricWindows, registerMetricWindows } from './metric-windows.js';
 import {
   isLosslessNumber,
   LosslessNumber,
@@ -225,6 +226,7 @@ export function registerSettings(
   d: Dependencies,
   agentCredentials?: AgentCredentialStore,
 ) {
+  registerMetricWindows(d);
   const { router: r, db, auth } = d,
     cat = d.cat as Catalog;
   db.exec(
@@ -323,13 +325,17 @@ export function registerSettings(
                 allow_all_tables: true,
               };
             })()
-          : auth.validateKey(c);
+          : auth.validateKey(c, undefined, true);
       try {
         const all = policies();
         for (const table of Object.keys(all))
           if (!key.allow_all_tables && !key.allowed_tables.includes(table))
             delete all[table];
-        const config = sdkConfiguration(all, disable());
+        const config: any = sdkConfiguration(all, disable());
+        if (c.url.searchParams.get('metric_windows') === '1') {
+          config.metric_windows = metricWindows(db, table => key.allow_all_tables || key.allowed_tables.includes(table));
+          config.revision = hash(goJSON(config));
+        }
         c.res.setHeader("cache-control", "no-store");
         c.json(config);
       } catch {

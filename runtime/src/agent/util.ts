@@ -84,7 +84,8 @@ export function delay(ms: number, signal?: AbortSignal): Promise<void> {
 export function validateSDKConfig(raw: Buffer): any {
   if (raw.length > 1 << 20) throw Error("invalid SDK configuration");
   const c = parseJSON<any>(raw.toString("utf8"));
-  keys(c, ["revision", "log_sampling", "disable_rules"]);
+  keys(c, ["revision", "log_sampling", "disable_rules", "metric_windows"]);
+  if(c.metric_windows!==undefined){keys(c.metric_windows,Object.keys(c.metric_windows));if(Object.keys(c.metric_windows).length>200)throw Error("too many metric policies");for(const[table,history]of Object.entries(c.metric_windows)){if(!validTable(table)||systemTable(table)||!Array.isArray(history)||history.length>256)throw Error("invalid metric policy");let previous=-1;for(const p of history){keys(p,["seconds","effective_at"]);if(![10,30,60,300,600,1800,3600].includes(p.seconds)||!Number.isSafeInteger(p.effective_at)||p.effective_at<=previous||p.effective_at<0||p.effective_at%p.seconds)throw Error("invalid metric policy");previous=p.effective_at;}}}
   if (
     typeof c.revision !== "string" ||
     !c.revision ||

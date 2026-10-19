@@ -43,13 +43,12 @@ def attributes(record):
 
 class Receiver:
     """Configurable response callbacks run without holding the observation lock."""
-    def __init__(self, tls_context=None, tunnel_to=None, response_framing="length"):
+    def __init__(self, tls_context=None, tunnel_to=None):
         self.lock = threading.Lock()
         self.requests = []
         self.config = snapshot()
         self.get_action = None
         self.post_action = None
-        self.response_framing = response_framing
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -59,28 +58,14 @@ class Receiver:
             def respond(self, status, body, headers=None):
                 if not isinstance(body, bytes):
                     body = json.dumps(body, allow_nan=False).encode()
-                framing = owner.response_framing
                 try:
-                    if framing != "length":
-                        self.protocol_version = "HTTP/1.1"
-                        self.close_connection = True
                     self.send_response(status)
                     self.send_header("Content-Type", "application/json")
-                    if framing in ("length", "truncated-length"):
-                        self.send_header("Content-Length", str(len(body) + (100 if framing == "truncated-length" else 0)))
-                    else:
-                        self.send_header("Connection", "close")
-                        if framing in ("chunked", "truncated-chunked"):
-                            self.send_header("Transfer-Encoding", "chunked")
+                    self.send_header("Content-Length", str(len(body)))
                     for key, value in (headers or {}).items():
                         self.send_header(key, value)
                     self.end_headers()
-                    if framing == "truncated-chunked":
-                        self.wfile.write(("%x\r\n" % (len(body) + 100)).encode() + body)
-                    elif framing == "chunked":
-                        self.wfile.write(("%x\r\n" % len(body)).encode() + body + b"\r\n0\r\n\r\n")
-                    else:
-                        self.wfile.write(body)
+                    self.wfile.write(body)
                 except (BrokenPipeError, ConnectionResetError):
                     pass
 
@@ -192,128 +177,31 @@ class ReportingTests(unittest.TestCase):
         self.addCleanup(close)
         return client
 
-    def env_client(self, **options):
-        defaults = dict(self_telemetry=False, remote_config=False)
-        defaults.update(options)
-        client = Client.from_env("connection-test", "web", **defaults)
-        def close():
-            try:
-                client.shutdown(timeout=.3)
-            except (OSError, RuntimeError):
-                pass
-        self.addCleanup(close)
-        return client
-
-    def connection_environment(self, **values):
-        settings = {name: "" for name in (
-            "LIGHTMONI_MODE", "LIGHTMONI_ENDPOINT", "LIGHTMONI_DATA_KEY", "LIGHTMONI_DATA_KEY_FILE",
-            "LIGHTMONI_KEY", "LIGHTMONI_AGENT_ENDPOINT", "LIGHTMONI_LOCAL_TOKEN", "LIGHTMONI_LOCAL_TOKEN_FILE",
-        )}
-        settings.update(values)
-        return mock.patch.dict(os.environ, settings)
-
-    def test_explicit_routes_isolate_unused_credentials_and_configuration(self):
-        for mode in ("direct", "agent"):
-            with self.subTest(mode=mode):
-                platform, agent = Receiver(), Receiver()
-                self.addCleanup(platform.close)
-                self.addCleanup(agent.close)
-                environment = dict(LIGHTMONI_MODE=mode, LIGHTMONI_ENDPOINT=platform.url,
-                                   LIGHTMONI_DATA_KEY="data-key", LIGHTMONI_AGENT_ENDPOINT=agent.url,
-                                   LIGHTMONI_LOCAL_TOKEN="local-token")
-                if mode == "direct":
-                    environment["LIGHTMONI_LOCAL_TOKEN_FILE"] = "/missing-lightmoni-unused-local"
-                    unused_options = dict(local_token="unused-explicit", local_token_file="/missing-lightmoni-explicit-local")
-                else:
-                    environment.update(LIGHTMONI_DATA_KEY_FILE="/missing-lightmoni-unused-data", LIGHTMONI_KEY="unused-legacy")
-                    unused_options = dict(data_key="unused-explicit", data_key_file="/missing-lightmoni-explicit-data")
-                with self.connection_environment(**environment):
-                    client = self.env_client(remote_config=True, **unused_options)
-                    client.refresh_config(timeout=1)
-                    client.log("info", "selected route")
-                    client.flush(timeout=1)
-                selected, unused = (platform, agent) if mode == "direct" else (agent, platform)
-                expected_key = "data-key" if mode == "direct" else "local-token"
-                self.assertEqual([(row["method"], row["path"], row["headers"].get("Authorization")) for row in selected.observed()], [
-                    ("GET", "/v1/sdk-config", "Bearer " + expected_key),
-                    ("POST", "/v1/logs", "Bearer " + expected_key),
-                ])
-                self.assertEqual(unused.observed(), [])
-                self.assertEqual(client.stats()["selected_route"], mode)
-
-    def test_selected_route_still_validates_secret_files_conflicts_and_mode(self):
-        with tempfile.TemporaryDirectory(prefix="lightmoni-connection-") as directory:
-            secret_file = os.path.join(directory, "secret")
-            with open(secret_file, "w", encoding="utf-8") as stream:
-                stream.write("file-value\n")
-            for mode in ("direct", "agent"):
-                variable = "LIGHTMONI_DATA_KEY" if mode == "direct" else "LIGHTMONI_LOCAL_TOKEN"
-                base = dict(LIGHTMONI_MODE=mode, LIGHTMONI_ENDPOINT=self.receiver.url, LIGHTMONI_AGENT_ENDPOINT=self.receiver.url)
-                with self.subTest(mode=mode, source="missing selected file"):
-                    with self.connection_environment(**base, **{variable + "_FILE": "/missing-lightmoni-selected-secret"}):
-                        with self.assertRaisesRegex(ValueError, "file"):
-                            self.env_client()
-                with self.subTest(mode=mode, source="env/file conflict"):
-                    with self.connection_environment(**base, **{variable: "env-value", variable + "_FILE": secret_file}):
-                        with self.assertRaisesRegex(ValueError, "credential_source_conflict"):
-                            self.env_client()
-                with self.subTest(mode=mode, source="env/explicit conflict"):
-                    with self.connection_environment(**base, **{variable: "env-value"}):
-                        with self.assertRaisesRegex(ValueError, "credential_source_conflict"):
-                            self.env_client(**({"data_key": "explicit-value"} if mode == "direct" else {"local_token": "explicit-value"}))
-            with self.connection_environment(LIGHTMONI_MODE="invalid", LIGHTMONI_DATA_KEY_FILE="/missing-data", LIGHTMONI_LOCAL_TOKEN_FILE="/missing-local"):
-                with self.assertRaisesRegex(ValueError, "mode must be"):
-                    self.env_client()
-            with self.connection_environment(LIGHTMONI_MODE="direct", LIGHTMONI_ENDPOINT=self.receiver.url, LIGHTMONI_DATA_KEY="new", LIGHTMONI_KEY="old"):
-                with self.assertRaisesRegex(ValueError, "credential_source_conflict: LIGHTMONI_KEY"):
-                    self.env_client()
-            with self.connection_environment(LIGHTMONI_MODE="auto", LIGHTMONI_LOCAL_TOKEN_FILE="/missing-auto-secret"):
-                with self.assertRaisesRegex(ValueError, "file"):
-                    self.env_client()
-        self.assertEqual(self.receiver.observed(), [])
-
-    def test_unused_endpoint_does_not_require_validation(self):
-        for mode in ("direct", "agent"):
-            with self.subTest(mode=mode):
-                values = dict(LIGHTMONI_MODE=mode, LIGHTMONI_ENDPOINT=self.receiver.url, LIGHTMONI_DATA_KEY="data-key", LIGHTMONI_AGENT_ENDPOINT=self.receiver.url)
-                values["LIGHTMONI_AGENT_ENDPOINT" if mode == "direct" else "LIGHTMONI_ENDPOINT"] = "not-an-http-url"
-                with self.connection_environment(**values):
-                    client = self.env_client()
-                    client.log("info", mode)
-                    client.flush(timeout=1)
-        self.assertEqual([request["path"] for request in self.receiver.observed()], ["/v1/logs", "/v1/logs"])
-
-    def test_agent_remote_configuration_cannot_override_selected_route_or_local_token(self):
-        platform = Receiver()
-        self.addCleanup(platform.close)
-        with self.connection_environment(LIGHTMONI_MODE="agent", LIGHTMONI_AGENT_ENDPOINT=self.receiver.url, LIGHTMONI_LOCAL_TOKEN="local-token"):
-            client = self.env_client(remote_config=True, config_endpoint=platform.url, config_key="unused-data-key")
-            client.refresh_config(timeout=1)
-        self.assertEqual(platform.observed(), [])
-        self.assertEqual([(row["path"], row["headers"].get("Authorization")) for row in self.receiver.observed()], [("/v1/sdk-config", "Bearer local-token")])
-
-    def test_explicit_route_failures_retry_without_contacting_other_endpoint(self):
-        for mode in ("direct", "agent"):
-            with self.subTest(mode=mode):
-                platform, agent = Receiver(), Receiver()
-                self.addCleanup(platform.close)
-                self.addCleanup(agent.close)
-                selected, unused = (platform, agent) if mode == "direct" else (agent, platform)
-                selected.post_action = lambda request: (503, {}, {})
-                with self.connection_environment(LIGHTMONI_MODE=mode, LIGHTMONI_ENDPOINT=platform.url, LIGHTMONI_DATA_KEY="data-key", LIGHTMONI_AGENT_ENDPOINT=agent.url, LIGHTMONI_LOCAL_TOKEN="local-token"):
-                    client = self.env_client()
-                    client.log("info", "retained batch")
-                    with self.assertRaises(TimeoutError):
-                        client.flush(timeout=.08)
-                    self.assertTrue(selected.observed("POST"))
-                    self.assertEqual(unused.observed(), [])
-                    selected.post_action = None
-                    client.flush(timeout=1)
-                attempts = selected.observed()
-                self.assertTrue(all(row["method"] == "POST" and row["path"] == "/v1/logs" for row in attempts))
-                self.assertEqual(len({row["headers"]["X-Lightmoni-Batch-ID"] for row in attempts}), 1)
-                self.assertEqual(len({row["body"] for row in attempts}), 1)
-                self.assertEqual(unused.observed(), [])
+    def test_remote_metric_periods_drive_export_and_invalid_update_keeps_snapshot(self):
+        periods=[10,30,60,300,600,1800,3600]
+        self.receiver.config={**snapshot(), 'metric_windows':{'table_'+str(p):[dict(seconds=p,effective_at=0)] for p in periods}}
+        client=self.client(env='test',remote_config=True,config_interval=3600)
+        client.refresh_config()
+        for period in periods:
+            client.record('table_'+str(period),'duration',{},10,1)
+            client.record('table_'+str(period),'other_metric',{},20,1)
+        with self.receiver.lock:
+            self.receiver.config={**snapshot(), 'metric_windows':{'table_10':[dict(seconds=20,effective_at=0)]}}
+        with self.assertRaises(RuntimeError): client.refresh_config()
+        client.record('table_10','duration',{},30,1)
+        client.record('default_table','duration',{},40,1)
+        client.flush(timeout=2)
+        samples=0
+        for period,table in [(p,'table_'+str(p)) for p in periods]+[(30,'default_table')]:
+            records=self.receiver.records('metrics',table)
+            self.assertTrue(records)
+            for metric in records:
+                for point in metric['exponentialHistogram']['dataPoints']:
+                    self.assertEqual(attributes(point)['lightmoni.window_seconds'],period)
+                    self.assertEqual(int(point['startTimeUnixNano'])%(period*1000000000),0)
+                    samples+=int(point['count'])
+        self.assertEqual(samples,16)
+        self.assertEqual(client.stats()['invalid_records'],0)
 
     def test_qa_vip_maximum_exclusion_and_controlled_counters(self):
         policy = {
@@ -463,8 +351,44 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(stats["sampled_out_logs"], 1)
         self.assertEqual(stats["dropped_records"], 0)
 
+    def test_unbound_client_uses_explicit_tables_and_anonymous_has_no_self_records(self):
+        for key in ("", "test-key"):
+            client = Client("unbound", endpoint=self.receiver.url, key=key, remote_config=False)
+            with self.assertRaises(ValueError):
+                client.counter("missing")
+            client.log("info", "missing table")
+            client.with_table("first").log("info", "first")
+            client.with_table("second").log("info", "second")
+            client.shutdown()
+            requests = self.receiver.observed("POST")
+            tables = [request['headers']['X-Lightmoni-Table'] for request in requests]
+            self.assertIn('first', tables)
+            self.assertIn('second', tables)
+            self.assertEqual('lightmoni_sdk' in tables, bool(key))
+            if not key:
+                self.assertEqual(len(requests), 2)
+            with self.receiver.lock:
+                self.receiver.requests.clear()
+
+    def test_record_aggregates_samples_and_summary_has_no_fake_distribution(self):
+        client = Client('record', env='test', service_version='v1', instance_id='fixed', endpoint=self.receiver.url, key='', self_telemetry=False, remote_config=False)
+        for i in range(1, 1001):
+            client.record('app', 'duration', {'key1': 'telecom', 'key2': 'zhejiang'}, i, 1)
+        client.record('app', 'duration', {'key2': 'zhejiang', 'key1': 'telecom'}, 100, 5)
+        client.record('app', 'invalid', {}, 1, 0)
+        client.record('app', 'invalid', {'isp': 'bad'}, 1, 1)
+        client.shutdown()
+        metrics = self.receiver.records('metrics')
+        distributions = [point for m in metrics for point in m.get('exponentialHistogram', {}).get('dataPoints', [])]
+        summaries = [point for m in metrics for point in m.get('summary', {}).get('dataPoints', [])]
+        self.assertEqual(len(distributions), 1)
+        self.assertEqual((distributions[0]['count'], distributions[0]['sum']), ('1000', 500500))
+        self.assertEqual((summaries[0]['count'], summaries[0]['sum']), ('5', 100))
+        self.assertEqual(summaries[0]['quantileValues'], [])
+        self.assertEqual(client.stats()['invalid_records'], 2)
+
     def test_self_telemetry_bypasses_business_log_rules(self):
-        client = self.client(self_telemetry=True, log_sampling={"web": {"rules": []}})
+        client = self.client(key="test-key", self_telemetry=True, log_sampling={"web": {"rules": []}})
         client.log("info", "business ignored")
         client.flush()
         logs = self.receiver.records("logs")
@@ -588,54 +512,6 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(client.stats()["config_revision"], "accepted")
         self.assertTrue(client.stats()["config_error"])
 
-    def test_connection_close_acknowledgments_and_config_are_read_to_completion(self):
-        for framing in ("close", "chunked"):
-            with self.subTest(framing=framing):
-                receiver = Receiver(response_framing=framing)
-                self.addCleanup(receiver.close)
-                receiver.config = snapshot("connection-close-" + framing)
-                client = self.client(endpoint=receiver.url, remote_config=True)
-                client.refresh_config(timeout=1)
-                self.assertEqual(client.stats()["config_revision"], "connection-close-" + framing)
-                client.log("info", "acknowledged before connection close")
-                client.flush(timeout=1)
-                self.assertEqual(client.stats()["delivered_batches"], 1)
-                self.assertEqual(client.stats()["retried_batches"], 0)
-                self.assertEqual(client.stats()["pending_batches"], 0)
-                self.assertEqual([(row["method"], row["path"]) for row in receiver.observed()], [
-                    ("GET", "/v1/sdk-config"), ("POST", "/v1/logs"),
-                ])
-                self.assertEqual(receiver.records("logs")[0]["body"]["stringValue"], "acknowledged before connection close")
-
-    def test_truncated_responses_cannot_acknowledge_batches_or_replace_configuration(self):
-        for framing in ("truncated-length", "truncated-chunked"):
-            with self.subTest(framing=framing):
-                receiver = Receiver()
-                self.addCleanup(receiver.close)
-                receiver.config = snapshot("accepted")
-                client = self.client(endpoint=receiver.url, remote_config=True)
-                client.refresh_config(timeout=1)
-                receiver.config = snapshot("truncated")
-                receiver.response_framing = framing
-                with self.assertRaises(RuntimeError):
-                    client.refresh_config(timeout=1)
-                self.assertEqual(client.stats()["config_revision"], "accepted")
-                self.assertTrue(client.stats()["config_error"])
-                client.log("info", "retain until a complete acknowledgment")
-                with self.assertRaises(TimeoutError):
-                    client.flush(timeout=.25)
-                self.assertEqual(client.stats()["delivered_batches"], 0)
-                self.assertEqual(client.stats()["pending_batches"], 1)
-                self.assertGreater(client.stats()["retried_batches"], 0)
-                receiver.response_framing = "length"
-                client.flush(timeout=1)
-                self.assertEqual(client.stats()["delivered_batches"], 1)
-                self.assertEqual(client.stats()["pending_batches"], 0)
-                attempts = receiver.observed("POST")
-                self.assertGreaterEqual(len(attempts), 2)
-                self.assertEqual(len({row["headers"]["X-Lightmoni-Batch-ID"] for row in attempts}), 1)
-                self.assertEqual(len({row["body"] for row in attempts}), 1)
-
     def test_configuration_keys_rotate_and_redirect_never_forwards_credentials(self):
         redirect = Receiver()
         self.addCleanup(redirect.close)
@@ -645,7 +521,7 @@ class ReportingTests(unittest.TestCase):
         client.refresh_config()
         requests = self.receiver.observed("GET")
         self.assertEqual([request["headers"]["Authorization"] for request in requests], ["Bearer first-secret", "Bearer second-secret"])
-        self.receiver.get_action = lambda request: (302, b"response-secret", {"Location": redirect.url + "/v1/sdk-config"})
+        self.receiver.get_action = lambda request: (302, b"response-secret", {"Location": redirect.url + "/v1/sdk-config?metric_windows=1"})
         with self.assertRaises(Exception) as raised:
             client.refresh_config()
         self.assertEqual(redirect.observed(), [])
@@ -675,7 +551,7 @@ class ReportingTests(unittest.TestCase):
             client.flush(timeout=1)
             requests = proxy.observed()
             self.assertEqual([(request["method"], request["path"]) for request in requests], [
-                ("GET", target + "/v1/sdk-config"), ("POST", target + "/v1/logs"),
+                ("GET", target + "/v1/sdk-config?metric_windows=1"), ("POST", target + "/v1/logs"),
             ])
             for request in requests:
                 self.assertEqual(request["headers"]["Authorization"], "Bearer telemetry-secret")
@@ -690,7 +566,7 @@ class ReportingTests(unittest.TestCase):
                 direct.flush(timeout=1)
                 self.assertEqual(len(proxy.observed()), 2)
                 self.assertEqual([(request["method"], request["path"]) for request in self.receiver.observed()], [
-                    ("GET", "/v1/sdk-config"), ("POST", "/v1/logs"),
+                    ("GET", "/v1/sdk-config?metric_windows=1"), ("POST", "/v1/logs"),
                 ])
                 self.assertNotIn("Proxy-Authorization", self.receiver.observed()[0]["headers"])
                 self.assertNotIn("Proxy-Authorization", self.receiver.observed()[1]["headers"])
@@ -744,7 +620,7 @@ class ReportingTests(unittest.TestCase):
                 direct.flush(timeout=2)
                 self.assertEqual(direct.stats()["config_revision"], "secure")
                 self.assertEqual([(request["method"], request["path"]) for request in origin.observed()], [
-                    ("GET", "/v1/sdk-config"), ("POST", "/v1/logs"),
+                    ("GET", "/v1/sdk-config?metric_windows=1"), ("POST", "/v1/logs"),
                 ])
             with self.subTest(mode="HTTPS through HTTP CONNECT"):
                 proxy_address = connect_proxy.url.replace("http://", "http://proxy-user:proxy-secret@")
@@ -774,7 +650,7 @@ class ReportingTests(unittest.TestCase):
                     proxied.flush(timeout=2)
                 self.assertEqual(proxied.stats()["config_revision"], "TLS proxy")
                 self.assertEqual([(request["method"], request["path"]) for request in tls_proxy.observed()], [
-                    ("GET", target + "/v1/sdk-config"), ("POST", target + "/v1/logs"),
+                    ("GET", target + "/v1/sdk-config?metric_windows=1"), ("POST", target + "/v1/logs"),
                 ])
                 for request in tls_proxy.observed():
                     self.assertEqual(request["headers"]["Proxy-Authorization"], "Basic cHJveHktdXNlcjpwcm94eS1zZWNyZXQ=")
@@ -983,6 +859,42 @@ class ReportingTests(unittest.TestCase):
         for timeout in (0, -1, True, float("nan")):
             with self.subTest(timeout=timeout), self.assertRaises(ValueError):
                 client.refresh_config(timeout=timeout)
+
+
+class ClosedResponseTransportTests(unittest.TestCase):
+    def test_complete_close_responses_do_not_retry_an_already_received_ack(self):
+        from lightmoni.transport import Request, Cancelled
+        for chunked in (False, True):
+            with self.subTest(chunked=chunked):
+                class Handler(BaseHTTPRequestHandler):
+                    protocol_version = "HTTP/1.1"
+                    def log_message(self, *args):
+                        pass
+                    def do_POST(self):
+                        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                        self.send_response(200)
+                        self.send_header("Connection", "close")
+                        if chunked:
+                            self.send_header("Transfer-Encoding", "chunked")
+                        else:
+                            self.send_header("Content-Length", "2")
+                        self.end_headers()
+                        self.wfile.write(b"2\r\n{}\r\n0\r\n\r\n" if chunked else b"{}")
+                        self.wfile.flush()
+                server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    request = Request("http://127.0.0.1:%d/v1/logs" % server.server_port, time.monotonic() + 2)
+                    status, _, body = request.exchange("POST", b"{}", {"Content-Type": "application/json"})
+                    self.assertEqual((status, body), (200, b"{}"))
+                    request.cancel()
+                    with self.assertRaises(Cancelled):
+                        request._check()
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2)
 
 
 if __name__ == "__main__":

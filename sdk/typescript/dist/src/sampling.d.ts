@@ -19,6 +19,7 @@ export interface SDKConfig {
     revision: string;
     log_sampling: Record<string, LogSamplingPolicy>;
     disable_rules?: LogExcludeRule[];
+    metric_windows?: import("./windows.js").MetricWindows;
 }
 export interface SamplingRecord {
     record: Record<string, unknown>;

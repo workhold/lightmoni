@@ -12,7 +12,7 @@ import { registerInstall } from "../src/server/install.js";
 import { registerSettings } from "../src/server/settings.js";
 import type { Dependencies } from "../src/shared/types.js";
 
-test("current SDK downloads exclude retired PHP and deferred Go/Rust even with stale archives", async () => {
+test("current SDK downloads expose the four record SDKs and reject stale legacy archives", async () => {
   const directory = mkdtempSync(join(tmpdir(), "lightmoni-sdk-release-"));
   const db = new DB(":memory:"), router = new Router();
   const auth = new Auth(db, directory, "http://localhost", router);
@@ -41,9 +41,9 @@ test("current SDK downloads exclude retired PHP and deferred Go/Rust even with s
     const response = await fetch(endpoint + "/api/v1/sdk-install", { headers: { cookie } });
     assert.equal(response.status, 200);
     const install = await response.json() as any;
-    assert.deepEqual(install.packages.map((p: any) => p.id), ["typescript", "python", "ruby"]);
+    assert.deepEqual(install.packages.map((p: any) => p.id), ["go", "typescript", "python", "rust"]);
     assert(install.packages.every((p: any) => p.available));
-    assert.deepEqual(install.deferred.map((p: any) => [p.id, p.status]), [["go", "deferred"], ["rust", "deferred"]]);
+    assert.equal(install.deferred,undefined);
     for (const pkg of install.packages) {
       const path = new URL(pkg.url).pathname;
       assert(path.startsWith("/base/downloads/sdk/"));
@@ -51,7 +51,7 @@ test("current SDK downloads exclude retired PHP and deferred Go/Rust even with s
       assert.equal(download.status, 200);
       assert.equal(await download.text(), pkg.id);
     }
-    for (const language of ["php", "go", "rust"]) {
+    for (const language of ["php", "ruby"]) {
       const stale = await fetch(endpoint + `/downloads/sdk/lightmoni-${language}-sdk_0.1.0.tar.gz`);
       assert.equal(stale.status, 404, language);
       await stale.text();

@@ -6,21 +6,21 @@
 
 中心和 Agent 的公共类型位于 `runtime/src/shared/types.ts`。模块使用 `Dependencies` 注入 SQLite `db`、统一 `query`、SQL AST `referencedTables`、`cat`、ClickHouse writer/reader、`auth`、`router`、`externalURL`、`encrypt/decrypt`、时钟和 logger；认证由 Router 注入 `Context.user`。模块通过注入的 Router 注册 `/api/v1` 路由并返回 `Module`，提供可选 `start()` / `close()`；后台任务使用 AbortSignal 传播取消，关闭时清除定时器并等待已启动的工作结束。模块在构造阶段提交自身 SQLite 建表/迁移，`runtime/src/server/app.ts` 控制初始化和关闭次序。
 
-中心功能分布在 `runtime/src/server`、`domains`、`assistant`；Agent 位于 `runtime/src/agent`。当前发布业务 SDK 为 TypeScript/JavaScript、Python、Ruby。PHP 原生 SDK 下线；Go/Rust 仅保留源码、后续支持，不生成本次发布包或接入页安装选项，未纳本次发布验收。Go module `github.com/lightmoni/lightmoni` 仅供保留的 Go SDK 源码使用，不是中心或 Agent 的启动入口。生产发布固定 Node 24.15.0，Linux Agent 自带 Node 双架构包且要求 glibc ≥ 2.28。
+中心功能分布在 `runtime/src/server`、`domains`、`assistant`；Agent 位于 `runtime/src/agent`。2026-10-20按用户指定保留本地业务SDK与中心上报逻辑：接入页提供Go、TypeScript/Node.js、Rust、Python四种record SDK；其他历史语言保留兼容源码。Go module `github.com/lightmoni/lightmoni` 仅供保留的 Go SDK 源码使用，不是中心或 Agent 的启动入口。生产发布固定 Node 24.15.0，Linux Agent 自带 Node 双架构包且要求 glibc ≥ 2.28。
 
 前端使用 React/TypeScript、AntV G2、共享 Ant Design 基础控件及产品主题；所有 feature 输出默认 React 页面，主干注册路由。统一 `web/src/shared/api.ts` 和 `types.ts`，组件从 `web/src/shared/ui.tsx` 使用/重导出。禁止原生 select、window.alert/confirm/prompt；受控、带样式与校验的 Input 可以使用正常 HTML input。多个模块不得改 package.json、锁文件和应用壳。
 
 ## 采集协议与 Key
 
-SDK 上报密钥管理：`POST /api/v1/keys` 请求 `{name, allowed_tables: ["web"]}`，选择所有 table 时请求 `{name, allow_all_tables: true}`，无需白名单；完整密钥只在创建响应中返回。`GET /api/v1/keys` 返回 `allowed_tables`、`allow_all_tables`，不返回密钥明文；`PUT /api/v1/keys/{id}` 可更新 `name`、`active`、`allowed_tables`、`allow_all_tables`，省略的字段保持原值。指定 table 模式至少填写一个合法逻辑表名，最多 200 个；重复项去重。所有 table 模式保存 `allow_all_tables=true` 与空白名单，包含未来新表；切回指定模式需同时提供 `allow_all_tables=false` 与有效白名单。省略权限字段的重命名、启停保留当前模式。管理入口为 `/admin?tab=credentials&section=sdk`，保留 `/keys/{id}/events` 上报记录。
+SDK上报密钥管理：POST /api/v1/keys只要求{name}，启用的有效密钥可写任意业务表；完整明文仅在创建响应中返回。旧allowed_tables/allow_all_tables输入经类型校验后忽略，输出统一allowed_tables=[]/allow_all_tables=true。PUT支持名称与启停，上报记录仍通过/keys/{id}/events读取。SDK接入页保留SDK样例、SDK密钥、豁免表三个页签；管理后台的SDK凭据入口复用同一规则。
 
 OTLP/HTTP `/v1/logs`、`/v1/metrics`、`/v1/traces`，支持标准 Protobuf 与 OTLP JSON 编码，不能把私有 JSON 称为 OTLP。自有 SDK 一批只有一个 signal、一个 table、一个 service。资源含 `service.name`、`service.instance.id`；log 可带 `lightmoni.source_id` 与 `lightmoni.source_seq`，Agent 添加安装期间固定 host_id/agent_id。自定义属性不代替资源身份。
 
 固定请求头：`X-Lightmoni-Table` 为逻辑表；`X-Lightmoni-Batch-ID` 为逐批 UUID；`X-Lightmoni-Batch-Created-At` 为冻结时 UTC RFC3339Nano。新窗口创建新 ID；重试保留 ID、创建时间和完全相同的解码 payload。同 ID 异正文拒绝。标准第三方 exporter 没有稳定批次 ID 时按至少一次兼容接入，其 SDK 级重试可能重复。
 
-SDK 直连主服务使用 `Authorization: Bearer <data key>`。主服务支持多份命名上报 Key，保存摘要，完整秘密仅创建时显示。每份 Key 可上传任意 service，不绑定/限制 service，也不按 service 路由；每份 Key 通过 `allowed_tables` 精确匹配 `X-Lightmoni-Table`，或由管理员显式设置 `allow_all_tables=true` 允许所有合法逻辑表。默认全表权限为 false，未配置仍无写入授权。日志、指标、链路均在正文读取、建表、批次重放和写库之前检查，越权返回 403 并记录拒绝原因。旧版 Agent 的 `config.key` 仍走此授权路径；旧 Key 迁移为无 table 授权，管理员显式配置后恢复写入。禁用密钥会同时影响引用它的 SDK 和旧节点。
+SDK直连主服务使用Authorization: Bearer <SDK key>。有效启用密钥可写所有合法业务表；旧密钥保留身份并采用同一业务表写入规则。缺失Authorization仅允许实时启用的豁免表；错误/空凭据返回401，不降级匿名。豁免表按管理员配置即时校验，匿名SDK不上报自身遥测。SDK Key与Agent专用control/data凭据保持分离。
 
-新 Agent 由管理员生成一次性 enrollment token，经安装脚本 `--enrollment-token-stdin` 接收，也可将秘密文件的 FD 重定向到 stdin，不放入 URL、命令行参数或环境变量。兑换、激活后由中心签发绑定节点身份的 `control_credential` 与 `data_credential`；control 用于心跳和配置，data 用于遥测上报，二者不能互换。上报请求带 `X-Lightmoni-Agent-ID` 并使用 data Bearer 凭据；当前节点 data 授权允许所有合法业务逻辑表，不能套用 SDK Key 白名单说明。机器指标、拨测和目录日志仍使用匹配任务指定的逻辑表，默认 `host`、`probe`、`files`。下载 `/downloads/agent/*` 接受有效 enrollment token，并兼容启用的既有上报 Key；旧安装脚本保留 `--key-stdin`。节点 control/data 凭据不用于下载鉴权。
+新 Agent 由管理员生成一次性 enrollment token，经安装脚本 `--enrollment-token-stdin` 接收，也可将秘密文件的 FD 重定向到 stdin，不放入 URL、命令行参数或环境变量。兑换、激活后由中心签发绑定节点身份的 `control_credential` 与 `data_credential`；control 用于心跳和配置，data 用于遥测上报，二者不能互换。上报请求带 `X-Lightmoni-Agent-ID` 并使用 data Bearer 凭据；当前节点 data 授权允许所有合法业务逻辑表，不能套用 SDK Key 白名单说明。机器指标、拨测和目录日志使用固定逻辑表`host`、`probe`、`files`，旧任务目标表在执行时规范化，历史数据仍可查询。下载 `/downloads/agent/*` 接受有效 enrollment token，并兼容启用的既有上报 Key；旧安装脚本保留 `--key-stdin`。节点 control/data 凭据不用于下载鉴权。
 
 SDK 到本机 Agent 不持有中心秘密；启用本地鉴权时使用 Agent 的 `local_token`，由目标 Agent 本地配置管理，平台不签发或回显。非 loopback 接收地址必须配置本地令牌。`GET /v1/sdk-config` 的直连请求使用 SDK data key；新 Agent 使用 control 凭据向中心拉取并缓存配置，旧节点兼容上报 Key。
 
@@ -32,9 +32,9 @@ SDK 到本机 Agent 不持有中心秘密；启用本地鉴权时使用 Agent �
 
 ## 接入与管理页面
 
-数据接入 `/data?tab=sdk|agent` 只保留两类安装流程，不依赖密钥、表目录或模板列表加载成功。管理员在 `/admin?tab=credentials&section=sdk|enrollments|agents` 统一管理三类凭据，成员不能读取或修改。`GET /api/v1/agent-enrollments` 与 `GET /api/v1/agent-credentials` 各展示最近最多 200 条，只返回白名单元数据，不返回明文、哈希、bootstrap 或安装 nonce；有效状态按当前时间计算，GET 不写状态。`POST /api/v1/agent-enrollments/:id/revoke` 撤销尚未完成接入的令牌，待激活令牌撤销后也不能继续激活。`POST /api/v1/agents/:id/credentials/revoke` 按节点及 audience 撤销该用途所有未撤销凭据，不是仅撤销所点击的一行；页面必须确认影响，撤销后需重新接入恢复该用途。
+SDK接入位于/data?tab=sdk|keys|exempt；执行节点接入位于/agents/install，/data?tab=agent兼容跳转。管理员在 `/admin?tab=credentials&section=sdk|enrollments|agents` 统一管理三类凭据，成员不能读取或修改。`GET /api/v1/agent-enrollments` 与 `GET /api/v1/agent-credentials` 各展示最近最多 200 条，只返回白名单元数据，不返回明文、哈希、bootstrap 或安装 nonce；有效状态按当前时间计算，GET 不写状态。`POST /api/v1/agent-enrollments/:id/revoke` 撤销尚未完成接入的令牌，待激活令牌撤销后也不能继续激活。`POST /api/v1/agents/:id/credentials/revoke` 按节点及 audience 撤销该用途所有未撤销凭据，不是仅撤销所点击的一行；页面必须确认影响，撤销后需重新接入恢复该用途。
 
-独立 `/data-management` 保留表目录、服务、类型和保留时长；成员只读，管理员可改单表时长及日志采样/停报规则。全局 SDK 停报仍从 SDK 接入页进入，图表模板保留在监控大盘。旧 `/data?tab=keys|tables|templates` 分别用 replace 跳转至接入凭据、数据管理、监控大盘；旧 keys 链接对成员回到 SDK 接入。模板 API 继续用于大盘，采集协议及已有表权限不变。完整路由和响应约束见 [SDD 015 契约](../specs/015-data-access-management/contracts.md)。
+独立 `/data-management` 保留表目录、服务、类型和保留时长；成员只读，管理员可改单表时长及日志采样/停报规则。全局 SDK 停报仍从 SDK 接入页进入，图表模板保留在监控大盘。/data?tab=keys为SDK密钥管理；旧tables/templates分别跳转数据管理与监控大盘。模板 API 继续用于大盘，采集协议及已有表权限不变。完整路由和响应约束见 [SDD 015 契约](../specs/015-data-access-management/contracts.md)。
 
 ## ClickHouse 数据模型
 
@@ -134,3 +134,8 @@ AI 通过 `list_alert_rules/get_alert_rule`、`list_alert_silences/get_alert_sil
 `GET /api/v1/assistant/alert-proposals/:id` 回读当前用户的完整提案；用户审阅前后配置、SQL、理由及影响后，独立点击确认才调用 `POST /api/v1/assistant/alert-proposals/:id/apply`，body 为 `{}`。提案绑定用户/会话，有效期 15 分钟；主服务在确认时重新检查权限、对象版本与有效期，在同一事务中保存业务变更、最终回读、完成状态及加密审计回执。重复确认返回原结果，回执写入失败则整体回滚。他人提案返回 404，配置冲突或过期返回 409。结束静默采用确认时的服务器时间，页面展示实际回执。
 
 后续轮次刷新持久化提案状态，并向模型单独提供当前会话最近 20 条可信状态；更早提案可用只读 `get_alert_proposal` 核验。已完成回执只证明当次执行成功，当前配置仍需重新查询。详情与验收见 [SDD 009](../specs/009-assistant-alert-controls/contracts.md)。Agent 独立运行、systemd 安装、持久身份/队列与后续升级设计见 [部署指南](agent-deployment.md) 和 [SDD 010](../specs/010-agent-deployment/spec.md)；本次只交付部署设计，未执行部署。
+
+
+## 通用record与固定窗口（2026-10-20整合）
+
+业务初始化service/env，record(table,metric_name,dimensions,value,count)五参数必填；value是count个样本总和。固定身份、key1…key16维度及统计/分布字段遵循[SDD 010](../specs/010-telemetry-table-model/contracts/runtime.md)。每表从10/30/60/300/600/1800/3600秒中选择一个周期，默认30秒；UTC固定边界、配置历史、查询整数倍与公倍数校验遵循[SDD 011](../specs/011-aligned-metric-windows/contracts/runtime.md)。数据管理增加管理员聚合周期入口；本次整合取舍见[main整合说明](../specs/011-aligned-metric-windows/main-integration.md)。

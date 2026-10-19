@@ -7,6 +7,7 @@ import {api} from '../shared/api';
 import type {CatalogTable,User} from '../shared/types';
 import {retentionLabel,TableRetentionEditor} from './RetentionSettings';
 import {LogReportingEditor} from './LogReportingSettings';
+import {MetricWindowEditor} from './MetricWindowSettings';
 
 export default function DataManagementPage({user}:{user:User}) {
  const {t}=useI18n();
@@ -17,6 +18,7 @@ const errorText=(error:unknown)=>error instanceof Error?error.message:t("请稍�
   const [error,setError]=useState('');
   const [retentionTable,setRetentionTable]=useState<CatalogTable>();
   const [logReportingTable,setLogReportingTable]=useState<CatalogTable>();
+  const [metricWindowTable,setMetricWindowTable]=useState<CatalogTable>();
   const request=useRef<AbortController|null>(null);
   const admin=user.role==='admin';
 
@@ -66,12 +68,14 @@ const errorText=(error:unknown)=>error instanceof Error?error.message:t("请稍�
           {title:t("服务","Service"),dataIndex:'services',width:180,render:(services:string[])=>services.length?services.join(' · '):'—'},
           {title:t("保留时长","Retention period"),width:240,render:(_:unknown,table:CatalogTable)=><Space wrap><span>{retentionLabel(table.effective_retention_days,t)}</span>{table.retention_days==null&&<Tag>{t("跟随全局","Use global default")}</Tag>}{admin&&<Button size="small" onClick={()=>setRetentionTable(table)}>{t("设置时长","Set retention")}</Button>}</Space>},
           {title:t("日志上报","Log reporting"),width:120,render:(_:unknown,table:CatalogTable)=>table.kind==='log'&&!table.system?(admin?<Button size="small" onClick={()=>setLogReportingTable(table)}>{t("上报规则","Reporting rules")}</Button>:t("由管理员配置","Configured by administrators")):'—'},
+          {title:t('指标上报','Metric reporting'),width:120,render:(_:unknown,table:CatalogTable)=>table.kind==='metric'&&table.metric_type==='histogram'&&!table.system?(admin?<Button size="small" onClick={()=>setMetricWindowTable(table)}>{t('聚合周期','Aggregation period')}</Button>:t('由管理员配置','Configured by administrators')):'—'},
         ]}
       />}
     </div>
     {admin&&<>
       <TableRetentionEditor table={retentionTable} onClose={()=>setRetentionTable(undefined)} onSaved={()=>void load()}/>
       <LogReportingEditor table={logReportingTable} onClose={()=>setLogReportingTable(undefined)}/>
+      <MetricWindowEditor table={metricWindowTable} onClose={()=>setMetricWindowTable(undefined)}/>
     </>}
   </div>;
 }

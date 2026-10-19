@@ -1,0 +1,74 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {once} from 'node:events';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createLightMoni,type FrozenBatch} from '@lightmoni/sdk';
+import {DB} from '../src/shared/sqlite.js';
+import {Router} from '../src/shared/http.js';
+import {Auth} from '../src/server/auth.js';
+import {Catalog} from '../src/server/catalog.js';
+import {Ingest} from '../src/server/ingest.js';
+import {registerSettings} from '../src/server/settings.js';
+import {registerAgentCredentials} from '../src/server/agent-credentials.js';
+import type {Dependencies} from '../src/shared/types.js';
+
+test('record reporting keeps SDK keys and node control/data credentials isolated',async()=>{
+ const directory=mkdtempSync(join(tmpdir(),'lm-record-credentials-'));
+ const db=new DB(':memory:'),router=new Router();
+ const auth=new Auth(db,directory,'http://127.0.0.1',router);router.auth=auth;auth.register();
+ const rows:any[]=[];
+ const ch={user:'fixture',async exec(){},async query(){return {meta:[],data:[],rows:0};},async insert(_table:string,records:any[]){rows.push(...records);}};
+ const cat=new Catalog(db,ch,ch);
+ const deps={db,router,auth,cat,ch,reader:ch,now:()=>new Date(),externalURL:'http://127.0.0.1'} as unknown as Dependencies;
+ const credentials=registerAgentCredentials(deps);
+ registerSettings(deps,credentials);
+ new Ingest(cat,auth,undefined,credentials).register();
+ const server=createServer(async(req,res)=>{if(!await router.handle(req,res)){res.writeHead(404);res.end();}});
+ server.listen(0,'127.0.0.1');await once(server,'listening');
+ const base=`http://127.0.0.1:${(server.address() as any).port}`;router.externalURL=base;deps.externalURL=base;
+ let cookie='';
+ const request=async(path:string,method='GET',body?:unknown,headers:Record<string,string>={})=>{
+  const response=await fetch(base+path,{method,headers:{cookie,'content-type':'application/json',...headers},body:body===undefined?undefined:JSON.stringify(body)});
+  if(response.headers.get('set-cookie'))cookie=response.headers.get('set-cookie')!.split(';')[0];
+  return {status:response.status,data:await response.json() as any};
+ };
+ try {
+  const setup=await request('/api/v1/setup','POST',{name:'admin',password:'fixture-password'});assert.equal(setup.status,201);
+  const key=await request('/api/v1/keys','POST',{name:'SDK record'});assert.equal(key.status,201);
+  const issued=credentials.issueEnrollment({endpoint_origin:base,version:'0.1.0',created_by:setup.data.id,expires_in_seconds:3600});
+  const enrolled=await request('/api/v1/agents/enroll','POST',{enrollment_token:issued.token_display_once,install_nonce:'fixture-nonce',agent_public_key:'fixture-public-key',version:'0.1.0',arch:'amd64'});
+  assert.equal(enrolled.status,201);
+  const agentID=enrolled.data.agent_id;
+  const activated=await request(`/api/v1/agents/${agentID}/activate`,'POST',{install_nonce:'fixture-nonce',health:{service:'ready',config_checked:true}},{Authorization:'Bearer '+enrolled.data.bootstrap_credential});
+  assert.equal(activated.status,200);
+  const control={'X-Lightmoni-Agent-ID':agentID,Authorization:'Bearer '+activated.data.control_credential};
+  const data={'X-Lightmoni-Agent-ID':agentID,Authorization:'Bearer '+activated.data.data_credential};
+  assert.equal((await request('/api/v1/metric-windows/business','PUT',{window_seconds:10})).status,200);
+  const config=await request('/v1/sdk-config?metric_windows=1','GET',undefined,control);
+  assert.equal(config.status,200);assert.equal(config.data.metric_windows.business.at(-1).seconds,10);
+  assert.equal((await request('/v1/sdk-config?metric_windows=1','GET',undefined,data)).status,401);
+  assert.equal((await request('/v1/sdk-config?metric_windows=1','GET',undefined,{Authorization:control.Authorization})).status,401);
+  const batches:FrozenBatch[]=[];
+  const client=createLightMoni({service:'record-credentials',env:'test',selfTelemetry:false,remoteConfig:false,exporter:{async deliver(batch){batches.push(batch);}}});
+  client.record('business','duration',{},128,1);await client.shutdown();
+  assert.equal(batches.length,1);
+  const payload=JSON.parse(new TextDecoder().decode(batches[0].payload));
+  const send=(headers:Record<string,string>,id:string)=>request('/v1/metrics','POST',payload,{'X-Lightmoni-Table':'business','X-Lightmoni-Batch-ID':id,...headers});
+  assert.equal((await send({Authorization:'Bearer '+key.data.key},'sdk-record')).status,200);
+  assert.equal(rows.at(-1).key_id,key.data.id);
+  assert.equal((await send(data,'node-record')).status,200);
+  const authenticated=credentials.authenticate({headers:{authorization:data.Authorization}} as any,agentID,'data');
+  assert.equal(rows.at(-1).key_id,authenticated.credential_id);
+  const accepted=rows.length;
+  for(const headers of [control,{Authorization:data.Authorization},{...data,Authorization:'Bearer '+key.data.key}])assert.equal((await send(headers,'wrong-scope')).status,401);
+  assert.equal(rows.length,accepted);
+  await request('/api/v1/keys/'+key.data.id,'PUT',{active:false});
+  assert.equal((await send({Authorization:'Bearer '+key.data.key},'disabled-sdk')).status,401);
+  assert.equal((await send(data,'node-still-valid')).status,200);
+ } finally {
+  server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));db.close();rmSync(directory,{recursive:true,force:true});
+ }
+});

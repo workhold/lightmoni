@@ -11,9 +11,8 @@ export function registerInstall(
   agentCredentials?: AgentCredentialStore,
 ) {
   const version = "0.1.0";
-  // Only these SDKs are part of the current release. Go and Rust stay in the
-  // repository for a later release and are reported separately below.
   const basePackages = [
+    ['go', 'Go', 'Go 1.26+', `lightmoni-go-sdk_${version}.tar.gz`],
     [
       "typescript",
       "JavaScript / TypeScript / 浏览器",
@@ -26,11 +25,7 @@ export function registerInstall(
       "Python 3.9+",
       `lightmoni-python-sdk_${version}.tar.gz`,
     ],
-    ["ruby", "Ruby", "Ruby 2.7+", `lightmoni-ruby-sdk_${version}.tar.gz`],
-  ];
-  const deferredPackages = [
-    ["go", "Go", "Go 1.26+"],
-    ["rust", "Rust", "Rust 1.85+"],
+    ['rust', 'Rust', 'Rust 1.85+', `lightmoni-rust-sdk_${version}.tar.gz`],
   ];
   const packages = (base: string) =>
     basePackages.map(([id, language, runtime, file]) => ({
@@ -89,13 +84,7 @@ export function registerInstall(
       default_endpoint_id: settings.default_endpoint_id,
       node_url: base + `/downloads/sdk/lightmoni-sdk-${version}.tgz`,
       packages: packages(base),
-      deferred: deferredPackages.map(([id, language, runtime]) => ({
-        id,
-        language,
-        runtime,
-        status: "deferred",
-        reason: "后续支持",
-      })),
+      go_url: base + `/downloads/sdk/lightmoni-go-sdk_${version}.tar.gz`,
       checksums_url: base + "/downloads/sdk/SDK_SHA256SUMS",
     });
   });

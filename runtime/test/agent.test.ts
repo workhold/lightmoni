@@ -595,7 +595,7 @@ test("real host collection uses TS SDK and selected destination; HTTP/TCP probes
   });
   await a.collectOnce();
   const q = a.queue.next()!;
-  assert.equal(q.table, "machine");
+  assert.equal(q.table, "host");
   const msg = decodeOTLP("metrics", q.payload, q.content_type),
     names = msg.resourceMetrics.flatMap((r: any) =>
       r.scopeMetrics.flatMap((s: any) => s.metrics.map((m: any) => m.name)),
@@ -743,15 +743,8 @@ test("remote task validation and Go glob semantics reject malformed and reserved
   assert(glob("[^a]*").test("worker"));
   assert(!glob("*").test("path/name"));
   assert.throws(() => glob("["));
-  assert.throws(() =>
-    validateRemote(
-      normalizeRemote({
-        revision: "x",
-        collect_interval_seconds: 15,
-        host_table: "lightmoni_sdk",
-      }),
-    ),
-  );
+  assert.equal(normalizeRemote({host_table:"lightmoni_sdk",probe_table:"custom",log_table:"custom"}).host_table,"host");
+  assert.throws(() => validateRemote({...normalizeRemote({revision:"x",collect_interval_seconds:15}),host_table:"lightmoni_sdk"}));
   assert.throws(() =>
     validateRemote(
       normalizeRemote({

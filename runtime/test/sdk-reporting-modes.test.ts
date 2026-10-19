@@ -62,7 +62,7 @@ test("SDK direct and Agent routes coexist; Agent ACK survives restart before pla
   try {
     const address = await agent.listen();
     const agentEndpoint = `http://127.0.0.1:${(address as any).port}`;
-    const direct = createLightMoni({ ...common, service: "direct-orders", mode: "direct", endpoint, key: "test-business-data", agentEndpoint, localToken: "unused-token" });
+    const direct = createLightMoni({ ...common, service: "direct-orders", endpoint, key: "test-business-data" });
     clients.push(direct);
     await record(direct, "direct-orders");
     assert.equal(agent.queue.stats().queue_batches, 0);
@@ -74,7 +74,7 @@ test("SDK direct and Agent routes coexist; Agent ACK survives restart before pla
 
     // The center is unavailable. A local durable ACK still lets the SDK finish.
     available = false;
-    const relayed = createLightMoni({ ...common, service: "agent-orders", mode: "agent", agentEndpoint, localToken: "test-local-token", endpoint, key: "unused-center-key" });
+    const relayed = createLightMoni({ ...common, service: "agent-orders", endpoint:agentEndpoint, key:"test-local-token" });
     clients.push(relayed);
     await record(relayed, "agent-orders");
     assert.equal(receipts.length, 3, "SDK Agent route must not contact the platform directly");
