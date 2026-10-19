@@ -2,6 +2,8 @@
 
 2026-10-19，基于已合入 PR #19 的 `origin/main`（`8a6203d`），分支 `feat/machine-web-terminal`。
 
+PR：[主机管理交互式 SSH 终端小窗 #20](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/20)，等待审核，未合并。
+
 ## 已实现
 
 - “主机管理 → 登录终端”打开真实 xterm 小窗，使用登记主机的用户名、端口、有效 SSH 私钥和已确认指纹。单私钥自动连接，多私钥显式选择；支持 Ctrl+C、UTF-8 输入输出、PTY 尺寸变化、全屏、断开和重连。

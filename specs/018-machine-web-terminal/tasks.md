@@ -6,4 +6,4 @@
 - [x] 主机页交互终端弹窗、断开/重连/全屏及双语。
 - [x] 类型检查、构建、相关测试、真实 SSH 和浏览器验收。
 - [x] 更新使用文档、本地启动与验收记录，同步 main。
-- [ ] 创建 PR 待审核。
+- [x] 创建 PR #20 待审核，未合并：https://gitea.heyphp.com/lightmoni/lightmoni/pulls/20
