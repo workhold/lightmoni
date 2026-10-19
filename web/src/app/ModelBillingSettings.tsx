@@ -1,3 +1,4 @@
+import {useI18n} from '../shared/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, App, Button, Form, InputNumber, Select, Spin, Tag } from '../shared/ui';
 import { api, ApiError } from '../shared/api';
@@ -12,6 +13,8 @@ interface BillingProps {
 }
 
 export default function ModelBillingSettings({ identity, onIdentityLoaded, onIdentityStale, onDirtyChange }: BillingProps) {
+ const {t}=useI18n();
+
   const [form] = Form.useForm<BillingFields>();
   const { message, modal } = App.useApp();
   const [billing, setBilling] = useState<ModelBilling>();
@@ -46,7 +49,7 @@ export default function ModelBillingSettings({ identity, onIdentityLoaded, onIde
       setBilling(value); setDirty(false); setStale(false);
       form.setFieldsValue({ currency: value.currency, input_price_per_million: value.input_price_per_million, output_price_per_million: value.output_price_per_million });
     } catch {
-      if (!abort.signal.aborted && version === generation.current) setError('无法加载模型单价或同步连接，请稍后重试；未保存的修改已保留。');
+      if (!abort.signal.aborted && version === generation.current) setError(t("无法加载模型单价或同步连接，请稍后重试；未保存的修改已保留。","Unable to load model prices or sync the connection. Try again later. Unsaved changes have been retained."));
     } finally {
       if (!abort.signal.aborted && version === generation.current) { setLoading(false); loadAbort.current = undefined; loadingIdentity.current = undefined; }
     }
@@ -63,9 +66,9 @@ export default function ModelBillingSettings({ identity, onIdentityLoaded, onIde
 
   async function reload() {
     if (dirty && !await modal.confirm({
-      title: '放弃未保存的单价修改？',
-      content: '重新加载将用服务器上的单价替换当前草稿。连接已变化时，旧草稿不会用于新模型。',
-      okText: '放弃修改并重新加载', cancelText: '继续编辑',
+      title: t("放弃未保存的单价修改？","Discard unsaved price changes?"),
+      content: t("重新加载将用服务器上的单价替换当前草稿。连接已变化时，旧草稿不会用于新模型。","Reloading replaces this draft with server prices. If the connection changed, the old draft will not apply to the new model."),
+      okText: t("放弃修改并重新加载","Discard changes and reload"), cancelText: t("继续编辑","Continue editing"),
     })) return;
     await load();
   }
@@ -82,45 +85,45 @@ export default function ModelBillingSettings({ identity, onIdentityLoaded, onIde
       if (version !== generation.current || abort.signal.aborted) return;
       billingRef.current = result;
       setBilling(result); setDirty(false); form.setFieldsValue(result);
-      void message.success('模型单价已保存');
+      void message.success(t("模型单价已保存","Model prices saved"));
     } catch (problem) {
       if (version !== generation.current || (problem && typeof problem === 'object' && 'errorFields' in problem)) return;
       if (problem instanceof ApiError && problem.status === 409) {
-        setStale(true); onIdentityStale(); setError('模型连接已更新，草稿已保留。请重新加载单价，同步当前连接后再保存。');
-      } else setError('模型单价保存失败，填写的内容已保留，请重试。');
+        setStale(true); onIdentityStale(); setError(t("模型连接已更新，草稿已保留。请重新加载单价，同步当前连接后再保存。","The model connection changed. Your draft is retained. Reload prices to sync the current connection before saving."));
+      } else setError(t("模型单价保存失败，填写的内容已保留，请重试。","Unable to save model prices. Your entries are retained. Try again."));
     } finally {
       if (version === generation.current) { setSaving(false); saveAbort.current = undefined; }
     }
   }
 
-  const priceRules = [{ validator: (_: unknown, value: unknown) => validPrice(value) ? Promise.resolve() : Promise.reject(new Error('填写 0 至 1,000,000,000 之间的有效单价，或留空')) }];
+  const priceRules = [{ validator: (_: unknown, value: unknown) => validPrice(value) ? Promise.resolve() : Promise.reject(new Error(t("填写 0 至 1,000,000,000 之间的有效单价，或留空","Enter a valid price from 0 to 1,000,000,000, or leave blank"))) }];
   const configured = !!billing?.base_url && !!billing?.model;
   const identityChanged = !!billing && modelIdentity(billing) !== identity;
   return <section className="lm-surface lm-model-billing" aria-labelledby="model-billing-title">
     <div className="lm-settings-section-head">
-      <div><h2 id="model-billing-title">模型计费 {dirty && <Tag color="warning">有未保存修改</Tag>}</h2><p>管理员填写当前模型的输入和输出单价，以每百万 Token 为单位估算费用。</p></div>
-      <Button onClick={() => void reload()} disabled={loading || saving}>重新加载单价</Button>
+      <div><h2 id="model-billing-title">{t("模型计费","Model pricing")} {dirty && <Tag color="warning">{t("有未保存修改","Unsaved changes")}</Tag>}</h2><p>{t("管理员填写当前模型的输入和输出单价，以每百万 Token 为单位估算费用。","Administrators can set input and output prices per million tokens to estimate costs for the current model.")}</p></div>
+      <Button onClick={() => void reload()} disabled={loading || saving}>{t("重新加载单价","Reload prices")}</Button>
     </div>
-    {loading && <div className="lm-model-inline-loading" role="status"><Spin size="small" />正在加载模型单价…</div>}
-    {error && <Alert className="lm-model-section-alert" type="error" showIcon title={error} action={!billing ? <Button onClick={() => void reload()}>重试加载</Button> : undefined} />}
+    {loading && <div className="lm-model-inline-loading" role="status"><Spin size="small" />{t("正在加载模型单价…","Loading model prices…")}</div>}
+    {error && <Alert className="lm-model-section-alert" type="error" showIcon title={error} action={!billing ? <Button onClick={() => void reload()}>{t("重试加载","Retry loading")}</Button> : undefined} />}
     {billing && <>
-      <p className="lm-model-price-identity">{identityChanged ? '原连接单价（待同步）：' : '当前模型：'}<strong>{billing.model || '尚未配置'}</strong><span>{billing.base_url}</span></p>
-      {!configured && <Alert className="lm-model-section-alert" type="info" showIcon title="请先完成模型连接配置，再设置模型单价。" />}
+      <p className="lm-model-price-identity">{identityChanged ? t("原连接单价（待同步）：","Previous connection prices (sync needed): ") : t("当前模型：","Current model: ")}<strong>{billing.model || t("尚未配置","Not configured")}</strong><span>{billing.base_url}</span></p>
+      {!configured && <Alert className="lm-model-section-alert" type="info" showIcon title={t("请先完成模型连接配置，再设置模型单价。","Configure a model connection before setting prices.")} />}
       <Form form={form} layout="vertical" onValuesChange={(_, values) => setDirty(billingIsDirty(billing, values))} onFinish={() => void save()} disabled={loading || saving || !configured || stale || identityChanged}>
         <div className="lm-model-price-fields">
-          <Form.Item name="currency" label="计费币种" rules={[{ required: true, message: '选择计费币种' }]}>
-            <Select options={[{ value: 'CNY', label: 'CNY · 人民币' }, { value: 'USD', label: 'USD · 美元' }]} />
+          <Form.Item name="currency" label={t("计费币种","Billing currency")} rules={[{ required: true, message: t("选择计费币种","Select a billing currency") }]}>
+            <Select options={[{ value: 'CNY', label: t("CNY · 人民币","CNY · Chinese yuan") }, { value: 'USD', label: t("USD · 美元","USD · US dollar") }]} />
           </Form.Item>
-          <Form.Item name="input_price_per_million" label="输入单价 / 百万 Token" extra="留空为未配置，0 表示免费。" rules={priceRules}>
-            <InputNumber min={0} max={1e9} step={0.1} placeholder="未配置" />
+          <Form.Item name="input_price_per_million" label={t("输入单价 / 百万 Token","Input price / million tokens")} extra={t("留空为未配置，0 表示免费。","Leave blank if unknown; 0 means free.")} rules={priceRules}>
+            <InputNumber min={0} max={1e9} step={0.1} placeholder={t("未配置","Not configured")} />
           </Form.Item>
-          <Form.Item name="output_price_per_million" label="输出单价 / 百万 Token" extra="留空为未配置，0 表示免费。" rules={priceRules}>
-            <InputNumber min={0} max={1e9} step={0.1} placeholder="未配置" />
+          <Form.Item name="output_price_per_million" label={t("输出单价 / 百万 Token","Output price / million tokens")} extra={t("留空为未配置，0 表示免费。","Leave blank if unknown; 0 means free.")} rules={priceRules}>
+            <InputNumber min={0} max={1e9} step={0.1} placeholder={t("未配置","Not configured")} />
           </Form.Item>
         </div>
-        <Button type="primary" htmlType="submit" loading={saving}>保存单价</Button>
+        <Button type="primary" htmlType="submit" loading={saving}>{t("保存单价","Save prices")}</Button>
       </Form>
-      <p className="lm-settings-hint lm-model-billing-note">费用为估算值，非供应商账单。每轮助手和连接测试使用开始时的单价，修改单价不会重算历史费用；缓存、推理 Token 与供应商折扣可能影响实际账单。</p>
+      <p className="lm-settings-hint lm-model-billing-note">{t("费用为估算值，非供应商账单。每轮助手和连接测试使用开始时的单价，修改单价不会重算历史费用；缓存、推理 Token 与供应商折扣可能影响实际账单。","Costs are estimates, not provider invoices. Each assistant turn or connection test uses its starting prices; changes do not recalculate historical costs. Caching, reasoning tokens, and provider discounts may affect actual billing.")}</p>
     </>}
   </section>;
 }

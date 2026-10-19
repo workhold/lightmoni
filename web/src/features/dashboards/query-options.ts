@@ -1,3 +1,4 @@
+import {monitoringText,type MonitoringLanguage} from '../monitoring-translations.ts';
 import type {TimeRange} from '../../shared/types';
 import {defaultQueryInterval,intervalFor,visibleSQL} from './model';
 
@@ -5,27 +6,33 @@ export const intervalChoices=[{value:'auto',label:'自动'},{value:'10s',label:'
 export const aggregationChoices=[{value:'avg',label:'avg · 平均值'},{value:'max',label:'max · 最大值'},{value:'min',label:'min · 最小值'},{value:'sum',label:'sum · 求和'},{value:'count',label:'count · 样本数'},{value:'p50',label:'p50 · 中位数'},{value:'p90',label:'p90'},{value:'p95',label:'p95'},{value:'p99',label:'p99'}];
 const queryKeys=['query_interval','query_min_interval','query_max_points'] as const;
 export function queryOptions(options:Record<string,unknown>):Record<string,unknown>{return Object.fromEntries(queryKeys.map(key=>[key,options[key]]));}
-export function durationMS(value:unknown):number{
+export function durationMS(value:unknown,language:MonitoringLanguage='zh-CN'):number{
+ const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
+
  const match=typeof value==='string'?/^([1-9]\d*)(ms|s|m|min|h|d)$/.exec(value.trim()):null;
- if(!match)throw new Error('聚合间隔须为正整数加单位，例如 30s、1min、5min 或 1h');
+ if(!match)throw new Error(l("聚合间隔须为正整数加单位，例如 30s、1min、5min 或 1h"));
  const milliseconds=Number(match[1])*({ms:1,s:1000,m:60000,min:60000,h:3600000,d:86400000}[match[2]]??0);
- if(!Number.isSafeInteger(milliseconds)||milliseconds>31536000000)throw new Error('聚合间隔不能超过 365d');
+ if(!Number.isSafeInteger(milliseconds)||milliseconds>31536000000)throw new Error(l("聚合间隔不能超过 365d"));
  return milliseconds;
 }
-export function validateQueryOptions(options:Record<string,unknown>):void{
- if(options.query_interval!==undefined&&options.query_interval!=='auto')durationMS(options.query_interval);
- if(options.query_min_interval!==undefined&&options.query_min_interval!=='')durationMS(options.query_min_interval);
+export function validateQueryOptions(options:Record<string,unknown>,language:MonitoringLanguage='zh-CN'):void{
+ const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
+
+ if(options.query_interval!==undefined&&options.query_interval!=='auto')durationMS(options.query_interval,language);
+ if(options.query_min_interval!==undefined&&options.query_min_interval!=='')durationMS(options.query_min_interval,language);
  const points=options.query_max_points;
- if(points!==undefined&&(typeof points!=='number'||!Number.isInteger(points)||points<1||points>10000))throw new Error('最大数据点须为 1–10000 的整数');
+ if(points!==undefined&&(typeof points!=='number'||!Number.isInteger(points)||points<1||points>10000))throw new Error(l("最大数据点须为 1–10000 的整数"));
 }
-export function panelIntervalFor(range:TimeRange,options:Record<string,unknown>,width=600):number{
- validateQueryOptions(options);
+export function panelIntervalFor(range:TimeRange,options:Record<string,unknown>,width=600,language:MonitoringLanguage='zh-CN'):number{
+ const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
+
+ validateQueryOptions(options,language);
  const duration=Date.parse(range.to)-Date.parse(range.from);
- if(!Number.isFinite(duration)||duration<=0)throw new Error('开始时间必须早于结束时间');
+ if(!Number.isFinite(duration)||duration<=0)throw new Error(l("开始时间必须早于结束时间"));
  const interval=options.query_interval??defaultQueryInterval;
- if(interval!=='auto')return durationMS(interval);
+ if(interval!=='auto')return durationMS(interval,language);
  const resolution=typeof options.query_max_points==='number'?options.query_max_points:Math.max(1,Math.min(10000,Math.floor(width)||600));
- const minimum=options.query_min_interval?durationMS(options.query_min_interval):1000;
+ const minimum=options.query_min_interval?durationMS(options.query_min_interval,language):1000;
  return Math.max(minimum,intervalFor(range,resolution));
 }
 export function intervalLabel(milliseconds:number):string{
@@ -59,9 +66,11 @@ export function sqlAggregation(sql:string):Aggregate|undefined{
  let depth=0;for(const char of visible.slice(open+1,end)){if(char==='(')depth++;else if(char===')')depth--;else if(char===','&&depth===0)return;}
  return {start,end:end+1,sample,value};
 }
-export function changeSQLAggregation(sql:string,value:string):string{
- if(!aggregationChoices.some(choice=>choice.value===value))throw new Error('未知聚合函数');
- const aggregate=sqlAggregation(sql);if(!aggregate)throw new Error('复合聚合请直接编辑 SQL');
+export function changeSQLAggregation(sql:string,value:string,language:MonitoringLanguage='zh-CN'):string{
+ const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
+
+ if(!aggregationChoices.some(choice=>choice.value===value))throw new Error(l("未知聚合函数"));
+ const aggregate=sqlAggregation(sql);if(!aggregate)throw new Error(l("复合聚合请直接编辑 SQL"));
  const expression=value.startsWith('p')?`quantileExact(${Number(value.slice(1))/100})(${aggregate.sample})`:`${value}(${aggregate.sample})`;
  return sql.slice(0,aggregate.start)+expression+sql.slice(aggregate.end);
 }

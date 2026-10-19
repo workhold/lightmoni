@@ -6,6 +6,8 @@
 
 “数据接入 → SDK 接入”默认展示“直连平台”，也可选择“通过 LightMoni Agent”，生成所选语言的代码与环境变量。两个选项各自保留输入地址，切换语言不改变路径。统一环境变量为 `LIGHTMONI_MODE=agent|direct|auto`、`LIGHTMONI_AGENT_ENDPOINT`、`LIGHTMONI_LOCAL_TOKEN`、`LIGHTMONI_ENDPOINT` 和 `LIGHTMONI_DATA_KEY`；两类秘密均支持对应的 `_FILE` 文件注入。显式 direct 只读取 data key，显式 agent 只读取 local token，未选路径的残留秘密不影响初始化；所选来源冲突仍会报错。auto 为已有兼容配置，本轮不改变其行为。
 
+管理员在“管理后台 → 接入凭据”统一管理 SDK 上报密钥、Agent 接入令牌和节点 control/data 凭据；三类凭据用途不同，不能互换。SDK 直连使用的上报密钥在“SDK 上报密钥”创建并配置逻辑表权限，明文仅在创建时显示。节点的一次性 enrollment token 从“数据接入 → 执行节点接入”生成，通过安装脚本 stdin 接收，或将秘密文件的 FD 重定向到 stdin；业务 SDK 不需要节点的接入令牌或 control/data 凭据。SDK 到 Agent 的 local token 由目标 Agent 的 `local_token` 配置管理，平台不签发或回显。
+
 | 方式 | endpoint | key | 缓存 |
 | --- | --- | --- | --- |
 | 直连平台（direct） | 业务进程可访问的平台基础地址 | 平台 data key，允许目标逻辑 table | SDK 进程内缓冲与重试 |
@@ -32,7 +34,7 @@ export LIGHTMONI_AGENT_ENDPOINT='http://127.0.0.1:4318'
 
 两种显式模式失败时都在原路径重试，不会因对方可用就自动改投。复制接入页生成的环境块会清理旧模式及遗留的 `_FILE` / legacy 变量；实际凭据应通过部署环境或 Secret 注入。容器连接宿主 Agent 同样需要可达的地址，`127.0.0.1` 仅适用于同网络命名空间。
 
-通过 Agent 时，平台凭据保存在 LightMoni Agent，且必须允许业务 SDK 的 table；业务无需持有节点的 enrollment、control 或 data credential。不同服务可共享同一个节点；使用 `withTable` / `with_table` 切换表时，上游凭据也需授权对应 table。SDK 缓冲不写磁盘；需要本地磁盘缓冲时选择通过 Agent 上报。Agent ACK 表示本地持久队列已接受，平台入库发生在后续转发成功后；队列有容量与最大重放期限，不承诺零丢失，也没有跨 SDK 合批或压缩。
+通过 Agent 时，平台凭据保存在 LightMoni Agent，业务无需持有节点的 enrollment、control 或 data credential。新 Agent 通过 enrollment 激活后，使用绑定节点的 data 凭据上报，当前允许合法业务逻辑表；旧版 Agent 的 `config.key` 仍使用 SDK 上报密钥，必须授权业务 SDK 及 `withTable` / `with_table` 子客户端涉及的 table。不同服务可共享同一个节点。SDK 缓冲不写磁盘；需要本地磁盘缓冲时选择通过 Agent 上报。Agent ACK 表示本地持久队列已接受，平台入库发生在后续转发成功后；队列有容量与最大重放期限，不承诺零丢失，也没有跨 SDK 合批或压缩。
 
 Agent 独立提供主机采集、目录日志和拨测，业务 SDK 可以同时采用 direct。节点助手是否在线、将来是否提供 AI 诊断工具，不决定 SDK 的路由。两路径的规格、契约与验证记录见 [SDD 012](../specs/012-sdk-reporting-choice/spec.md)。
 
@@ -124,14 +126,14 @@ Node.js 有独立的心跳定时器；Python/Ruby 的后台工作线程每 30 �
 当前发布的 JavaScript/TypeScript（Node 和浏览器）、Python 支持以下动态配置；Ruby 尚未接入这一规则协议。Go 源码保留对应实现但未纳本次发布验收，Rust 为后续支持。
 
 - **SDK 整体停报**：在“数据接入 → SDK 接入 → SDK 停报规则”按 service、instance_id、sdk.language 或 resource:资源属性选择实例。命中任一规则后停止该根 SDK 与所有 WithTable 子客户端的日志、指标、链路和自监控，清空未发送数据。配置拉取继续运行，删除规则后自动恢复，不补传停报期间的数据。已经得到 Agent 持久化 ACK 或已经在网络上提交的数据不能撤回。
-- **部分 UID 日志不上报**：在“数据接入 → 数据表 → 业务日志表 → 上报规则”的排除规则中配置 attr:user_id 等实际字段。命中任一排除规则即忽略日志，优先于 QA、VIP 和普通上报规则。metric 和 trace 不受日志排除或降采样影响。
+- **部分 UID 日志不上报**：在“数据管理 → 业务日志表 → 上报规则”的排除规则中配置 attr:user_id 等实际字段。命中任一排除规则即忽略日志，优先于 QA、VIP 和普通上报规则。metric 和 trace 不受日志排除或降采样影响。
 - **命中才上报**：每条上报规则有条件和保留比例；同一规则内条件全部命中，多条规则之间任意命中即可，重叠时取最高保留比例。QA / VIP 可设 100%，普通点击可设 10%。未命中任何规则的业务日志不入队。conditions=[] 显式匹配全部日志；rules=[] 显式忽略全部业务日志。未配置策略的表保持全量。错误日志需要配置 severity=ERROR/FATAL 的上报规则，没有隐式兜底。
 
 条件支持 in（类型严格的等于任一值）与 exists；字段支持 attr:属性、resource:资源属性、service、severity、trace_id、instance_id、sdk.language。字符串 "true" 与布尔 true 不相等；长 UID 建议作为字符串传输。key 可设置 attr:user_id / attr:session_id，按用户或会话稳定选取；字段缺失或空字符串时按单条事件选取。用户/会话采样不是事件数的严格配额；保留比例描述选取概率。
 
 保留的日志增加 lightmoni.sampling.rate、lightmoni.sampling.weight 和 lightmoni.sampling.rule 属性。日志查询的原始 count 仍是实际保留数量；weight 可用于估算总体数量，但不能保证还原完整用户、漏斗或会话。明确被规则忽略的日志不会计入 dropped_records，不会令 Flush 报数据损失。
 
-中心只存储和下发规则，不再次过滤或采样入库数据。`GET /v1/sdk-config` 使用现有上报 Key，日志策略只包含该 Key 允许的逻辑表。Agent 同路径转发配置，使用本地令牌认证并由 Agent 保管中心 Key，中心暂时不可达时可返回已验证的磁盘缓存。浏览器业务后端同时转发配置与 OTLP，演示见 examples/sdk/browser/server.mjs。
+中心只存储和下发规则，不再次过滤或采样入库数据。直连 SDK 的 `GET /v1/sdk-config` 使用上报 Key，日志策略只包含该 Key 允许的逻辑表。Agent 同路径转发配置，本地请求按 Agent 的 local token 配置鉴权；新 Agent 向中心使用 control 凭据拉取配置，旧版 Agent 兼容中心上报 Key，中心暂时不可达时可返回已验证的磁盘缓存。浏览器业务后端同时转发配置与 OTLP，演示见 examples/sdk/browser/server.mjs。
 
 HTTP SDK 默认每 30 秒拉取一次，配置经过完整验证后原子替换；失败或非法配置保留上一份有效策略。SDK 刚启动、首次配置尚未到达时沿用本地配置（未配置则全量），需要从第一条日志就执行远程 UID 排除/停报规则时，务必在业务生产前显式等待 RefreshConfig / refreshConfig 成功。自定义 Exporter 可另设配置地址。配置变更只影响后续 Log；已缓冲/冻结的日志与重试正文不重筛。整体停报是单独的强开关，会取消正在发送的请求并清空 SDK 的缓冲与队列。
 

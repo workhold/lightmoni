@@ -1,3 +1,4 @@
+import {monitoringText,type MonitoringLanguage} from '../monitoring-translations.ts';
 import type { Parameter, QueryFrame, TimeRange } from "../../shared/types";
 export interface Filter {
   scope: "column" | "attribute";
@@ -197,8 +198,10 @@ export function logURL(
 // session cursors, credentials, or live polling state. Old links remain valid.
 export function readLogURL(
   search: string,
-  fallback: Spec,
+  fallback: Spec,language:MonitoringLanguage='zh-CN'
 ): { spec: Spec; view?: View } {
+ const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
+
   const p = new URLSearchParams(search);
   let spec = { ...fallback };
   if (p.has("from") && p.has("to"))
@@ -265,7 +268,7 @@ export function readLogURL(
       view: { ...initialView, ...v, lookback: 0, refresh_seconds: 0 },
     };
   } catch {
-    throw new Error("检索链接中的条件无效，请检查链接或打开保存的检索。");
+    throw new Error(l("检索链接中的条件无效，请检查链接或打开保存的检索。"));
   }
 }
 export function fieldType(value: unknown): Filter["type"] {

@@ -1,10 +1,14 @@
+import type {Translator} from '../../shared/i18n';
+import {chinese} from './translation.ts';
 import type {EvidenceProfile} from './response-model';
 import type {Parameter} from '../../shared/types';
 export type PanelCondition={panel_id:string;query_ref:string;series?:Parameter;reducer:'last'|'avg'|'max'|'min'|'sum'|'count'};
 export type NoDataPolicy='keep_state'|'zero'|'value'|'alerting'|'normal';
-export const noDataOptions=[{value:'keep_state',label:'跳过计算（保留已触发告警）'},{value:'zero',label:'按 0 计算'},{value:'value',label:'按指定值计算'},{value:'alerting',label:'视为告警'},{value:'normal',label:'视为正常'}];
+export const getNoDataOptions=(t:Translator=chinese)=>([{value:'keep_state',label:t("跳过计算（保留已触发告警）","Skip evaluation (keep firing alerts)")},{value:'zero',label:t("按 0 计算","Evaluate as 0")},{value:'value',label:t("按指定值计算","Evaluate using a specified value")},{value:'alerting',label:t("视为告警","Treat as firing")},{value:'normal',label:t("视为正常","Treat as normal")}]);
+export const noDataOptions=getNoDataOptions();
 export type AlertGroup={id:string;name:string;enabled:boolean;targets?:unknown[];members?:string[];channel_ids?:string[]};
 export type AlertRule={unit?:string;id:string;name:string;kind:'metric'|'sql'|'log';enabled:boolean;revision:number;sql:string;source_table_ids:string[];group_ids?:string[];panel_condition?:PanelCondition;services:string[];params?:Record<string,Parameter>;value_field:string;label_fields:string[];operator:string;threshold:string;interval_seconds:number;window_seconds:number;delay_seconds:number;no_data_policy?:NoDataPolicy;no_data_value?:string;for_seconds:number;for_count?:number;recovery_seconds:number;repeat_seconds:number;health_for_seconds:number;notify_health:boolean;severity:string;evidence_profile?:EvidenceProfile;silence_until?:string};
 export type AlertEvent={id:string;rule_id:string;rule_name:string;kind:string;created_at:string;state:{value:string;labels:Record<string,string>};range:{from:string;to:string}};
 export const newAlertRule=():AlertRule=>({id:'',name:'',kind:'sql',enabled:true,revision:0,sql:'',source_table_ids:[],services:[],value_field:'value',label_fields:[],operator:'gt',threshold:'0',interval_seconds:60,window_seconds:300,delay_seconds:0,no_data_policy:'keep_state',no_data_value:'0',for_seconds:60,for_count:1,recovery_seconds:0,repeat_seconds:0,health_for_seconds:60,notify_health:true,severity:'P2'});
-export const alertKinds={metric:'指标阈值',sql:'自定义 SQL',log:'日志条件'};
+export const getAlertKinds=(t:Translator=chinese)=>({metric:t("指标阈值","Metric threshold"),sql:t("自定义 SQL","Custom SQL"),log:t("日志条件","Log conditions")});
+export const alertKinds=getAlertKinds();

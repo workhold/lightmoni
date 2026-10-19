@@ -1,12 +1,14 @@
 import {MonitoringScope,type PublishedScope} from '../shared/monitoring-context';
 import {lazy,Suspense,useEffect,useMemo,useState} from 'react';
 import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
-import {ApiOutlined,AppstoreOutlined,BellOutlined,DatabaseOutlined,DashboardOutlined,LogoutOutlined,MessageOutlined,SearchOutlined,SettingOutlined,SafetyCertificateOutlined,MenuFoldOutlined,MenuUnfoldOutlined,CloudServerOutlined} from '@ant-design/icons';
+import {ApiOutlined,AppstoreOutlined,BellOutlined,DatabaseOutlined,DashboardOutlined,MessageOutlined,SearchOutlined,SettingOutlined,SafetyCertificateOutlined,MenuFoldOutlined,MenuUnfoldOutlined,CloudServerOutlined} from '@ant-design/icons';
 import {Button,Drawer,Spin,Tooltip} from '../shared/ui';
 import {api} from '../shared/api';
 import type {User} from '../shared/types';
 import {LoginPage,OverviewPage,DataPage,AgentsPage} from './CorePages';
-import PersonalSettings,{UserAvatar} from './PersonalSettings';
+import PersonalSettings from './PersonalSettings';
+import {useI18n} from '../shared/i18n';
+import WorkspaceHeader from './WorkspaceHeader';
 const AdminPage=lazy(()=>import('./AdminPage'));
 const DashboardPage=lazy(()=>import('../features/dashboards/DashboardPage'));
 const LogExplorePage=lazy(()=>import('../features/logs/LogExplorePage'));
@@ -15,36 +17,42 @@ const TracePage=lazy(()=>import('../features/alerts/TracePage'));
 const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
 const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
 const MachinesPage=lazy(()=>import('./MachinesPage'));
+const DataManagementPage=lazy(()=>import('./DataManagementPage'));
 
-const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/data','数据接入',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
+const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/data','数据接入',DatabaseOutlined],['/data-management','数据管理',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
+const englishLinks:Record<string,string>={'/':'Overview','/dashboards':'Dashboards','/logs':'Log explorer','/alerts':'Alerts','/agents':'Node assistants','/machines':'Machines','/data':'Data ingestion','/data-management':'Data management','/assistant':'AI assistant','/settings':'Personal settings','/admin':'Administration'};
 
 function ClaimLanding(){const {token}=useParams();return <Navigate to={'/alerts?claim='+encodeURIComponent(token??'')} replace/>}
 
 export default function Root(){
+ const {t}=useI18n();
  const location=useLocation(),navigate=useNavigate();
  const[user,setUser]=useState<User|null>(null);
  const[loading,setLoading]=useState(true);
  const[assistant,setAssistant]=useState(false);
  useEffect(()=>setAssistant(false),[location.pathname]);
  const[publishedScope,setPublishedScope]=useState<PublishedScope>();
- const currentPage=links.find(([url])=>url==='/'?location.pathname==='/':location.pathname.startsWith(url))?.[1]??'监控工作台';
- const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:currentPage}}),[publishedScope,location.pathname,location.search,currentPage]);
+ const activePath=(url:string)=>location.pathname===url||(url!=='/'&&location.pathname.startsWith(url+'/'));
+ const currentLink=links.find(([url])=>activePath(url));
+ const currentPage=currentLink?t(currentLink[1],englishLinks[currentLink[0]]):t('监控工作台','Monitoring workspace');
+ const contextPageTitle=currentLink?.[1]??'监控工作台';
+ const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:contextPageTitle}}),[publishedScope,location.pathname,location.search,contextPageTitle]);
  const[navCollapsed,setNavCollapsed]=useState(()=>{try{const saved=localStorage.getItem('lightmoni.nav.collapsed');return saved===null?window.innerWidth<1100:saved==='true'}catch{return window.innerWidth<1100}});
  function toggleNavigation(){setNavCollapsed(value=>{try{localStorage.setItem('lightmoni.nav.collapsed',String(!value))}catch{}return !value})}
  useEffect(()=>{if(location.pathname==='/settings')setAssistant(false)},[location.pathname]);
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
  if(loading)return <div className="lm-loading"><Spin size="large"/></div>;
- if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/machines')||location.pathname.startsWith('/settings'))?location.pathname+location.search:'/')}}/>;
+ if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/machines')||location.pathname.startsWith('/settings')||location.pathname.startsWith('/data'))?location.pathname+location.search:'/')}}/>;
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'} ${/^\/dashboards\/[^/]+\/panels\//.test(location.pathname)?'is-panel-standalone':''}`}>
   <aside className="lm-sidebar">
-   <Link to="/" className="lm-brand"><span className="lm-brand-mark">L</span><span>LightMoni<small>监控工作台</small></span></Link>
-  <nav>{links.filter(([url])=>(url!=='/admin'&&url!=='/machines')||user.role==='admin').map(([url,label,Icon])=><Link key={url} aria-label={label} title={label} className={(url==='/'?location.pathname===url:location.pathname.startsWith(url))?'active':''} to={url}>{Icon&&<Icon/>}<span>{label}</span></Link>)}</nav>
-   <Button className="lm-nav-collapse" type="text" aria-label={navCollapsed?'展开导航':'收起导航'} title={navCollapsed?'展开导航':'收起导航'} icon={navCollapsed?<MenuUnfoldOutlined/>:<MenuFoldOutlined/>} onClick={toggleNavigation}>{!navCollapsed&&'收起导航'}</Button>
-   <div className="lm-sidebar-bottom"><Link to="/settings" className="lm-sidebar-profile" aria-label="编辑个人资料" title={user.nickname||user.name}><UserAvatar user={user}/><div>{user.nickname||user.name}<small>{user.role==='admin'?'管理员':'成员'}</small></div></Link><Button type="text" aria-label="退出登录" icon={<LogoutOutlined/>} onClick={async()=>{await api('/auth/logout',{method:'POST'});setUser(null)}}/></div>
+   <Link to="/" className="lm-brand"><span className="lm-brand-mark">L</span><span>LightMoni<small>{t('监控工作台','Monitoring workspace')}</small></span></Link>
+  <nav>{links.filter(([url])=>(url!=='/admin'&&url!=='/machines')||user.role==='admin').map(([url,label,Icon])=><Link key={url} aria-label={t(label,englishLinks[url])} title={t(label,englishLinks[url])} className={activePath(url)?'active':''} to={url}>{Icon&&<Icon/>}<span>{t(label,englishLinks[url])}</span></Link>)}</nav>
+   <Button className="lm-nav-collapse" type="text" aria-label={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} title={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} icon={navCollapsed?<MenuUnfoldOutlined/>:<MenuFoldOutlined/>} onClick={toggleNavigation}>{!navCollapsed&&t('收起导航','Collapse navigation')}</Button>
   </aside>
-  <main className="lm-main"><Suspense fallback={<div className="lm-page"><Spin/></div>}><Routes>
+  <main className="lm-main"><WorkspaceHeader user={user} title={currentPage} onLoggedOut={()=>setUser(null)}/><div className="lm-route-content"><Suspense fallback={<div className="lm-page"><Spin/></div>}><Routes>
     <Route path="/" element={<OverviewPage/>}/>
     <Route path="/data" element={<DataPage user={user}/>}/>
+    <Route path="/data-management" element={<DataManagementPage user={user}/>}/>
     <Route path="/agents" element={<AgentsPage user={user}/>}/>
     <Route path="/machines" element={user.role==='admin'?<MachinesPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>
@@ -59,7 +67,7 @@ export default function Root(){
     <Route path="/alerts/*" element={<AlertsPage/>}/>
     <Route path="/login" element={<Navigate to="/"/>}/>
     <Route path="*" element={<Navigate to="/" replace/>}/>
-   </Routes></Suspense></main>
-  {location.pathname!=='/assistant'&&<Tooltip title="AI 助手 · 分析当前页面" placement="left"><Button className="lm-assistant-launcher" type="primary" shape="circle" size="large" icon={<MessageOutlined/>} aria-label="打开 AI 助手" aria-expanded={assistant} onClick={()=>setAssistant(true)}/></Tooltip>}
-  <Drawer title="AI 助手" size="large" open={assistant} onClose={()=>setAssistant(false)} destroyOnHidden><Suspense fallback={<Spin/>}><AssistantPanel compact initialContext={currentContext}/></Suspense></Drawer></div></MonitoringScope.Provider>;
+   </Routes></Suspense></div></main>
+  {location.pathname!=='/assistant'&&<Tooltip title={t('AI 助手 · 分析当前页面','AI assistant · Analyze this page')} placement="left"><Button className="lm-assistant-launcher" type="primary" shape="circle" size="large" icon={<MessageOutlined/>} aria-label={t('打开 AI 助手','Open AI assistant')} aria-expanded={assistant} onClick={()=>setAssistant(true)}/></Tooltip>}
+  <Drawer title={t('AI 助手','AI assistant')} size="large" open={assistant} onClose={()=>setAssistant(false)} destroyOnHidden><Suspense fallback={<Spin/>}><AssistantPanel compact initialContext={currentContext}/></Suspense></Drawer></div></MonitoringScope.Provider>;
 }

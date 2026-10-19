@@ -20,6 +20,9 @@ const fixtures={
  '/api/v1/catalog/tables':[],
  '/api/v1/templates':[],
  '/api/v1/keys':[],
+ '/api/v1/users':[],
+ '/api/v1/settings/login-providers':[],
+ '/api/v1/settings/instance':{external_url:origin},
 };
 let browser;
 try{browser=await chromium.launch({headless:true});}
@@ -97,11 +100,13 @@ try{
  await input.fill('ftp://invalid.example');await expect(page.getByRole('button',{name:/复制环境变量/})).toBeDisabled();
  await expect(page.getByRole('button',{name:/复制接入样例/})).toBeDisabled();
  await input.fill(agent);await chooseMode('direct');await expect(input).toHaveValue(platform);
- await page.getByRole('button',{name:'管理上报 Key',exact:true}).click();await expect(page.getByRole('tab',{name:'上报 Key',exact:true})).toHaveAttribute('aria-selected','true');
- await page.getByRole('tab',{name:'SDK 接入',exact:true}).click();await expect(input).toHaveValue(platform);
+ await page.getByRole('button',{name:'管理接入凭据',exact:true}).click();
+ await expect(page).toHaveURL(origin+'/admin?tab=credentials&section=sdk');
+ await expect(page.getByRole('tab',{name:'SDK 上报密钥',exact:true})).toHaveAttribute('aria-selected','true');
+ await page.goBack();await expect(page.getByRole('heading',{name:'SDK 接入',exact:true})).toBeVisible();await expect(input).toHaveValue(platform);
  await expect(page.getByRole('radio',{name:'直连平台',exact:true})).toBeChecked();await expect(sample).toHaveText(sdkSampleFor('ruby','direct'));
  expect(errors).toEqual([]);expect(unexpected).toEqual([]);
- await writeFile(resolve(output,'ui-report.json'),JSON.stringify({production_bundle:true,supported_languages:Object.keys(names),deferred_languages:['go','rust'],php_removed:true,api_fixtures:true,live_backend:false,default_direct:true,mode_endpoints_preserved:true,language_retains_mode:true,clipboard_matches:true,container_notes_both_modes:true,key_tab_retains_setup:true,invalid_endpoint_blocks_copy:true,widths:[1280,390],checked,errors,unexpected},null,2)+'\n');
+ await writeFile(resolve(output,'ui-report.json'),JSON.stringify({production_bundle:true,supported_languages:Object.keys(names),deferred_languages:['go','rust'],php_removed:true,api_fixtures:true,live_backend:false,default_direct:true,mode_endpoints_preserved:true,language_retains_mode:true,clipboard_matches:true,container_notes_both_modes:true,credentials_navigation_retains_setup:true,invalid_endpoint_blocks_copy:true,widths:[1280,390],checked,errors,unexpected},null,2)+'\n');
  console.log('PASS production SDK page with API fixtures: three languages × two modes × desktop/mobile, retained addresses, clipboard, validation and container hints');
 }catch(error){await page.screenshot({path:resolve(screenshots,'failure.png'),fullPage:true}).catch(()=>{});throw error;}
 finally{await context.close();await browser.close();}

@@ -1,0 +1,16 @@
+{
+  "production_bundle": true,
+  "api_fixtures": true,
+  "live_backend": false,
+  "checks": [
+    "sign-in language control translates validation while retaining form drafts at 390px without requests or account header",
+    "initial setup language control translates validation while retaining form drafts at 390px without requests or account header",
+    "assistant drawer retains question, table, service and workspace on both language switches; context title translates without API requests",
+    "full assistant retains query draft, selected scope, lookback and workspace through the visible language menu",
+    "dashboard draft title, panel title and SQL survive both language switches; model-generated content stays unchanged",
+    "alert editor preserves rule name, typed parameters, threshold and service selection without requests or narrow-screen overflow"
+  ],
+  "writes": 0,
+  "errors": [],
+  "unexpected": []
+}

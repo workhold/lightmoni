@@ -1,3 +1,4 @@
+import {monitoringText,type MonitoringLanguage} from '../monitoring-translations.ts';
 import {getValueFormat,getValueFormats,formattedValueToString} from '@grafana/data';
 
 export const normalizedUnit=(unit:unknown):string=>String(unit??'');
@@ -12,7 +13,10 @@ export function formatValue(value:unknown,unit:unknown,decimals=2):string{
  if(!Number.isFinite(value))return '—';
  return formattedValueToString(getValueFormat(normalizedUnit(unit))(value,Math.min(10,Math.max(0,decimals))));
 }
-export function unitLabel(unit:unknown):string{
+export function unitLabel(unit:unknown,language:MonitoringLanguage='zh-CN'):string{
+ const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
+
  const id=normalizedUnit(unit);
- return unitGroups.flatMap(group=>group.options).find(option=>option.value===id)?.label??String(unit||'数值');
+ const known=unitGroups.flatMap(group=>group.options).find(option=>option.value===id);
+ return known?l(known.label):String(unit||l("数值"));
 }

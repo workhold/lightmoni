@@ -1,6 +1,6 @@
 # LightMoni 整体方案
 
-状态：2026-10-10 初稿；2026-10-17 更新为 Node.js / TypeScript 中心和 Agent。初稿中的 Go 运行时选型由 [SDD 007](../specs/007-node-runtime-migration/spec.md) 取代；历史任务与证据保留当时上下文，当前迁移验证见 [quickstart](../specs/007-node-runtime-migration/quickstart.md) 和 [领域验证](../specs/007-node-runtime-migration/domain-validation.md)。设计条款本身不表示性能已验证。用户约束见 [brief.md](brief.md)，模块共同遵守 [contracts.md](contracts.md)，派发顺序见 [任务索引](tasks/README.md)。
+状态：2026-10-10 初稿；2026-10-17 更新为 Node.js / TypeScript 中心和 Agent；2026-10-19 依 [SDD 015](../specs/015-data-access-management/spec.md) 整理接入、凭据与数据管理。初稿中的 Go 运行时选型由 [SDD 007](../specs/007-node-runtime-migration/spec.md) 取代；历史任务与证据保留当时上下文，当前迁移验证见 [quickstart](../specs/007-node-runtime-migration/quickstart.md) 和 [领域验证](../specs/007-node-runtime-migration/domain-validation.md)。设计条款本身不表示性能已验证。用户约束见 [brief.md](brief.md)，模块共同遵守 [contracts.md](contracts.md)，派发顺序见 [任务索引](tasks/README.md)。
 
 ## 1. 产品定位与技术选择
 
@@ -27,7 +27,7 @@ flowchart LR
     S -->|agent：OTLP HTTP 与可选 local token| A
     H[机器采集 / 拨测 / 目录日志] --> G[Agent 内置 TypeScript SDK]
     G -->|进程内 exporter| A
-    A[Node Agent：磁盘队列与重试] -->|限定 table 的上报 Key| M
+    A[Node Agent：磁盘队列与重试] -->|节点 data 凭据；旧节点兼容上报 Key| M
     U[React 管理界面] --> M
     M[Node 一体化主服务：接收 / 查询 / 大盘 / 日志 / 告警] --> Q[(SQLite：配置与状态)]
     M --> C[(ClickHouse：日志 / 指标 / 链路)]
@@ -52,7 +52,9 @@ moni.counter("orders_created").add(1, { region: "cn", payment: "wechat" });
 moni.log("info", "order created", { order_id: "123" });
 ```
 
-一台机器的两个服务共用一个 Agent；Agent 配置一份限定 table 的私有 Key。主服务支持多份命名 Key，每份均可上传任意 service，不做 service 绑定；table 通过显式白名单限定，或由管理员设置允许所有 table，服务端在上报入口精确校验。旧 Key 迁移为空白名单，需管理员配置后恢复写入。每条数据保存认证得到的 key_id，后台展示按 Key 的上报量、来源、最近使用和错误，方便排查。service 是数据属性，table 是业务数据集合。主机数据默认 service 为 `lightmoni-agent`、table 为 `host`，通过 host_id/agent_id 区分机器；拨测默认使用 table `probe`，目录日志默认使用 `files`；三类表均可在独立任务中更改。节点与任务通过多个任务标签匹配下发，安装选择初始标签，平台保存后续标签分配。
+一台机器的两个服务可以共用一个 Agent。新节点由一次性 enrollment token 兑换、激活，中心签发绑定节点身份的 control/data 凭据，分别用于心跳、配置与遥测上报；令牌通过安装脚本 stdin 接收，可从秘密文件的 FD 重定向，不进入 URL、命令行参数或环境变量。新 data 凭据当前允许合法业务逻辑表；旧版 Agent 保留 `config.key` 兼容路径，受该上报 Key 的逻辑表权限约束。SDK 到 Agent 的 local token 由目标 Agent 本地配置管理，平台不签发或回显。
+
+主服务为 SDK 直连支持多份命名上报 Key，每份均可上传任意 service，不做 service 绑定；table 通过显式白名单限定，或由管理员设置允许所有 table，服务端在上报入口精确校验。旧 Key 迁移为空白名单，需管理员配置后恢复写入。每条数据保存认证得到的 key_id；SDK 直连或旧节点使用上报 Key，新节点则记录 data credential ID。SDK 密钥管理展示上报量、来源、最近使用和错误，节点凭据管理展示节点、用途、有效期、使用时间和撤销状态。service 是数据属性，table 是业务数据集合。主机数据默认 service 为 `lightmoni-agent`、table 为 `host`，通过 host_id/agent_id 区分机器；拨测默认使用 table `probe`，目录日志默认使用 `files`；三类表均可在独立任务中更改。节点与任务通过多个任务标签匹配下发，安装选择初始标签，平台保存后续标签分配。
 
 登录区分管理员与成员，所有成员看到整个实例的数据。管理员管理用户、Key、登录供应商和外部渠道凭证；成员创建大盘、检索、告警与组目标，可以引用渠道但不能读取秘密。支持本地账号、微信、QQ、GitHub 和通用 OAuth 2.0 登录；外部身份绑定本地用户，禁用用户同时撤销会话。OAuth 回调与账号绑定由主服务处理，供应商密钥不进入前端。通用 OAuth 2.0 必须配置用户身份端点与稳定 ID 映射；OAuth 协议本身不定义用户资料格式。大盘全局保存，可以查询任意已发现表、多个 service。首个管理员在初始化时创建，私有写入 Key 与网页登录会话分开。
 
@@ -72,7 +74,7 @@ ClickHouse 支持数据库与表。首版只建一个数据库 `lightmoni`，不
 
 自定义维度保存在可查询属性字段，固定保留类型信息；首次出现字段不自动 ALTER TABLE。同一张表允许多个 service。表目录自动记录类型、字段、单位、已发现服务和 schema 版本；建表请求经单一主干入口去重、限量，防止把标签、日期或用户 ID 当作新表名。
 
-SQLite 保存用户/外部身份、Key 摘要与使用统计、大盘及版本快照、检索、告警组/表绑定/规则/状态、通知渠道/outbox、联系人/值班/响应/静默/回执/响应统计、Agent 身份/任务标签/任务配置、表目录和有限批次元信息。监控正文只存 ClickHouse。默认日志/trace 保留 7 天、metrics 保留 30 天作为初始配置建议，可全局或按表修改；TTL 删除存在后台执行延迟。真实资源评估前这些值不是容量保证。
+SQLite 保存用户/外部身份、SDK Key 摘要与使用统计、Agent 接入令牌摘要与状态、节点 control/data 凭据摘要与元数据、大盘及版本快照、检索、告警组/表绑定/规则/状态、通知渠道/outbox、联系人/值班/响应/静默/回执/响应统计、Agent 身份/任务标签/任务配置、表目录和有限批次元信息。监控正文只存 ClickHouse。默认日志/trace 保留 7 天、metrics 保留 30 天作为初始配置建议，可全局或按表修改；TTL 删除存在后台执行延迟。真实资源评估前这些值不是容量保证。
 
 ## 5. Metric：在 SDK 聚合，在服务端查询
 
@@ -116,7 +118,9 @@ SDK 到 Agent 之前的数据默认只在有界内存，业务进程崩溃可能
 
 UI 禁止原生 `<select>` 及 `window.alert/confirm/prompt`。选择、确认、输入、日期与时间使用共享 React 组件，键盘与焦点行为一并验收。AntV 绘制图表，共享表格展示无损数值。详细决定见 [UI 设计说明](ui-design.md)，核心交互对标与全流程验收见 [acceptance.md](acceptance.md)。
 
-共用侧栏：概览、大盘、日志、链路、告警、节点助手、数据接入、设置。接入页提供服务器安装命令、TypeScript/JavaScript、Python、Ruby 与浏览器 SDK 样例、数据到达状态和对应预置大盘。管理员选择初始任务标签并填入上报连接后生成自动配置的 Agent 安装命令；安装脚本有固定发布版本与校验和，Linux amd64/arm64 和 systemd 作为首批目标。
+共用侧栏包含概览、监控大盘、日志、链路、告警、节点助手、数据接入、数据管理与管理后台。数据接入仅保留 SDK 接入和执行节点接入：提供当前三种语言的安装示例、两种显式上报模式，以及节点接入命令。管理员选择初始任务标签与上报地址，生成只显示一次的 enrollment token，再通过安装命令在目标主机输入；下载支持有效接入令牌并兼容启用的既有上报 Key。安装脚本有固定发布版本与校验和，Linux amd64/arm64 和 systemd 作为首批目标。
+
+“管理后台 → 接入凭据”统一展示 SDK 上报密钥、Agent 接入令牌、节点凭据三类，不合并其权限或生命周期。接入令牌可撤销未完成安装，待激活令牌撤销后不能继续激活；节点凭据只展示元数据，按节点和 control/data 用途撤销所有未撤销凭据。独立“数据管理”向成员开放数据目录，管理员设置单表保留时长与日志上报规则；全局 SDK 停报仍位于 SDK 接入页。图表模板保留在监控大盘，不再在接入页重复展示。旧接入页密钥、数据表和模板深链分别转到对应管理入口，成员访问旧密钥链接回到 SDK 接入。
 
 中心端提供 Docker Compose、配置示例、初始化、升级/备份/恢复和数据卷说明。首次部署能够用预置样例确认“接收 → 查询 → 出图 → 检索 → 告警”链路。TLS 可由已有反向代理承担；不另外引入专用网关。SDK 与 Agent 的本机通信默认只绑定 loopback，容器场景明确如何连接宿主 Agent。
 
@@ -124,6 +128,6 @@ UI 禁止原生 `<select>` 及 `window.alert/confirm/prompt`。选择、确认�
 
 六个任务分别负责大盘、日志、告警、SDK、Agent、主干。主干先交付接口、样例、应用壳和共享组件；页面开发用共同 fixture 并行，SDK 与 Agent 用相同协议样例互测。TypeScript SDK 进程内导出接口、Agent 持久化 ACK、主服务去重必须在早期实际联调。
 
-第一道验收门是同一台机器两个 service 共用 Agent/Key，发送多维指标和日志，断网、重启、丢 ACK 后查询结果仍正确。随后验收跨服务大盘、补传日志翻页、SQL 告警与恢复通知。最后在干净机器上走部署、安装与接入步骤，并测资源占用。六条任务的精确归属、依赖与验收见 [任务索引](tasks/README.md)。
+第一道验收门是同一台机器两个 service 共用 Agent，分别覆盖节点凭据与既有上报 Key 兼容路径，发送多维指标和日志，断网、重启、丢 ACK 后查询结果仍正确。随后验收跨服务大盘、补传日志翻页、SQL 告警与恢复通知。最后在干净机器上走部署、安装与接入步骤，并测资源占用。六条任务的精确归属、依赖与验收见 [任务索引](tasks/README.md)。
 
 功能参考：[OpenObserve](https://github.com/openobserve/openobserve)、[Grafana 大盘](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/create-dashboard/)、[Kibana Discover](https://www.elastic.co/docs/explore-analyze/discover/discover-get-started)。参考界面工作流和数据组织方式，LightMoni 首版不承诺完整复刻三个产品的全部功能。

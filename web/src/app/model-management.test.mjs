@@ -68,3 +68,15 @@ test('usage labels distinguish assistant and explicit connection tests', () => {
   assert.equal(usageSource('connection-test'), '连接测试');
   assert.equal(usageSource(''), '未知来源');
 });
+
+test('English usage display preserves unknown values and partial accounting semantics', () => {
+  assert.equal(tokenCount(0, 1, 1, 'en-US'), 'Unknown');
+  assert.equal(tokenCount(0, 0, 1, 'en-US'), '0');
+  assert.equal(tokenCount(1234, 1, 2, 'en-US'), '1,234');
+  assert.equal(costAmount(1e-9, 'en-US'), '< 0.000001');
+  assert.equal(usageSource('connection-test', 'en-US'), 'Connection test');
+  assert.equal(usageSource('custom-provider-source', 'en-US'), 'custom-provider-source');
+  assert.equal(usageSource('', 'en-US'), 'Unknown source');
+  assert.equal(usageDateRange('2026-10-01T00:00:00Z', '2026-10-03T00:00:00Z', 'UTC', 'en-US'), '10/01/2026 to 10/02/2026');
+  assert.equal(tokenCount(0, 1, 1), '未知');
+});

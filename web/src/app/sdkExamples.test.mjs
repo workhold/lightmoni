@@ -80,3 +80,13 @@ test('all SDK demos carry the selected public or private route without changing 
  assert.match(sdkEnvironment('direct',"https://center/a'$value"),/https:\/\/center\/a'\\''\$value/);
  assert.match(sdkEnvironment('agent',"https://center/a'path"),/https:\/\/center\/a'\\''path/);
 });
+
+test('localized address errors preserve URL validation and never expose embedded credentials', () => {
+ const invalid='https://private-user:private-password@host.example.com';
+ assert.match(sdkEndpointError(invalid,'en-US'),/without a username, password, query, or fragment/);
+ assert.doesNotMatch(sdkEndpointError(invalid,'en-US'),/private-user|private-password/);
+ assert.match(sdkEndpointError(invalid),/请输入完整/);
+ for(const address of ['https://host.example.com:27502/path','http://lightmoni-agent:4318']){
+  assert.equal(sdkEndpointError(address,'en-US'),'');
+ }
+});

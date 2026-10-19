@@ -1,3 +1,4 @@
+import {useMonitoringI18n} from '../monitoring-i18n';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
 import type { ColumnsType, TableRef } from "antd/es/table";
 import { ArrowDownOutlined, ArrowUpOutlined, CopyOutlined, DownOutlined, MinusCircleOutlined, MoreOutlined, PlusCircleOutlined, RightOutlined } from "@ant-design/icons";
@@ -53,6 +54,8 @@ const MessageCell = memo(function MessageCell({ row, rowLines, onSelect }: {
 // Query drafts, field searches and drawers must not recreate the virtual table.
 export default memo(function LogResultsTable({ tableRef, rows, selectedColumns, widths, rowLines,
   selectedID, loading, onSelect, onFilter, onResize, onExpandRange, sort, onSort, onMoveColumn, onRemoveColumn, onCopy, density }: Props) {
+ const {l,language}=useMonitoringI18n();
+
   const resizeCleanup = useRef<(() => void) | null>(null);
   const scrollElement = useRef<HTMLDivElement | null>(null);
   const previousWidths = useRef(widths);
@@ -92,7 +95,7 @@ export default memo(function LogResultsTable({ tableRef, rows, selectedColumns, 
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", end);
     resizeCleanup.current = cleanup;
-  }, [widths, onResize]);
+  }, [widths, onResize,language]);
   const bindScroll = useCallback((element: HTMLDivElement | null) => {
     scrollElement.current = element;
     if (!element) return;
@@ -109,26 +112,26 @@ export default memo(function LogResultsTable({ tableRef, rows, selectedColumns, 
     };
     element.addEventListener("wheel", onWheel, { capture: true, passive: false });
     return () => { cancelAnimationFrame(frame); element.removeEventListener("wheel", onWheel, true); };
-  }, []);
+  }, [language]);
   const columns = useMemo<ColumnsType<LogRow>>(() => [
     { key: "detail", title: "", width: 34, shouldCellUpdate: (row, previous) => row !== previous,
-      render: (_, row) => <Tooltip title="查看日志详情"><Button type="text" size="small"
-        className="lm-log-open-detail" aria-label={`查看日志详情 ${row.event_id}`}
+      render: (_, row) => <Tooltip title={l("查看日志详情")}><Button type="text" size="small"
+        className="lm-log-open-detail" aria-label={l("查看日志详情 {0}",row.event_id)}
         icon={<RightOutlined />} onClick={() => onSelect(row)} /></Tooltip> },
     ...selectedColumns.map((name, index) => ({
       key: name,
       title: <span className="lm-log-column-title"><span>{name.replace(/^attr:/, "")}</span>
-        {name === "event_time" && <Button size="small" type="text" className="lm-discover-time-sort" aria-label="切换时间排序"
+        {name === "event_time" && <Button size="small" type="text" className="lm-discover-time-sort" aria-label={l("切换时间排序")}
           icon={sort === "desc" ? <ArrowDownOutlined /> : <ArrowUpOutlined />} onClick={() => onSort(sort === "desc" ? "asc" : "desc")} />}
         <Dropdown trigger={["click"]} menu={{items:[
-          ...(name === "event_time" ? [{key:"desc",label:"按时间降序",icon:<ArrowDownOutlined />},{key:"asc",label:"按时间升序",icon:<ArrowUpOutlined />},{type:"divider" as const}] : []),
-          {key:"left",label:"向左移动",disabled:index===0},
-          {key:"right",label:"向右移动",disabled:index===selectedColumns.length-1},
-          {key:"remove",label:"移除此列",disabled:selectedColumns.length===1},
+          ...(name === "event_time" ? [{key:"desc",label:l("按时间降序"),icon:<ArrowDownOutlined />},{key:"asc",label:l("按时间升序"),icon:<ArrowUpOutlined />},{type:"divider" as const}] : []),
+          {key:"left",label:l("向左移动"),disabled:index===0},
+          {key:"right",label:l("向右移动"),disabled:index===selectedColumns.length-1},
+          {key:"remove",label:l("移除此列"),disabled:selectedColumns.length===1},
         ],onClick:({key}) => {if(key==="asc"||key==="desc")onSort(key);else if(key==="remove")onRemoveColumn(name);else onMoveColumn(name,key==="left"?-1:1);}}}>
-          <Button size="small" type="text" className="lm-discover-column-menu" aria-label={`列操作 ${name}`} icon={<DownOutlined />} />
+          <Button size="small" type="text" className="lm-discover-column-menu" aria-label={l("列操作 {0}",name)} icon={<DownOutlined />} />
         </Dropdown>
-        <span role="separator" tabIndex={0} aria-label={`调整 ${name} 列宽`} aria-orientation="vertical"
+        <span role="separator" tabIndex={0} aria-label={l("调整 {0} 列宽",name)} aria-orientation="vertical"
           className="lm-log-resize" onMouseDown={event => startResize(event, name)}
           onKeyDown={event => {
             if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -148,33 +151,33 @@ export default memo(function LogResultsTable({ tableRef, rows, selectedColumns, 
           type:name.startsWith("attr:")?attributeType(row,name.slice(5)):fieldType(value),op:"eq",value};
         return <div className="lm-discover-table-cell"><div className="lm-discover-cell-content">{name === "body" ? <MessageCell row={row} rowLines={rowLines} onSelect={onSelect} /> :
         name === "severity" || name === "service" ? <button className="lm-log-inline-filter"
-          title={name === "severity" ? "按级别筛选" : "按服务筛选"}
+          title={name === "severity" ? l("按级别筛选") : l("按服务筛选")}
           onClick={() => onFilter({ scope: "column", field: name, type: "string", op: "eq", value: row[name] })}>
           {name === "severity" ? <Tag color={severityColor(row.severity)}>{printable(row.severity)}</Tag> : printable(row.service)}
         </button> : <span className="lm-log-cell" title={printable(cell(row, name))}>
           {name === "event_time" ? formatTime(row.event_time) : printable(cell(row, name))}
         </span>}</div><div className="lm-discover-cell-actions">
           {columnWidth(name,widths) < 150 ? <Dropdown trigger={["click"]} menu={{items:[
-            {key:"include",label:"包含此值",disabled:!scalar,icon:<PlusCircleOutlined />},
-            {key:"exclude",label:"排除此值",disabled:!scalar,icon:<MinusCircleOutlined />},
-            {key:"copy",label:"复制值",icon:<CopyOutlined />},
+            {key:"include",label:l("包含此值"),disabled:!scalar,icon:<PlusCircleOutlined />},
+            {key:"exclude",label:l("排除此值"),disabled:!scalar,icon:<MinusCircleOutlined />},
+            {key:"copy",label:l("复制值"),icon:<CopyOutlined />},
           ],onClick:({key}) => key==="copy"?onCopy(printable(value)):onFilter({...filter,op:key==="exclude"?"ne":"eq"})}}>
-            <Button size="small" type="text" aria-label={`单元格操作 ${name}`} icon={<MoreOutlined />} />
-          </Dropdown> : <>{scalar && <><Tooltip title="包含此值"><Button size="small" type="text" icon={<PlusCircleOutlined />} aria-label={`包含单元格 ${name}`} onClick={() => onFilter(filter)} /></Tooltip>
-            <Tooltip title="排除此值"><Button size="small" type="text" icon={<MinusCircleOutlined />} aria-label={`排除单元格 ${name}`} onClick={() => onFilter({...filter,op:"ne"})} /></Tooltip></>}
-          <Tooltip title="复制值"><Button size="small" type="text" icon={<CopyOutlined />} aria-label={`复制单元格 ${name}`} onClick={() => onCopy(printable(value))} /></Tooltip></>}
+            <Button size="small" type="text" aria-label={l("单元格操作 {0}",name)} icon={<MoreOutlined />} />
+          </Dropdown> : <>{scalar && <><Tooltip title={l("包含此值")}><Button size="small" type="text" icon={<PlusCircleOutlined />} aria-label={l("包含单元格 {0}",name)} onClick={() => onFilter(filter)} /></Tooltip>
+            <Tooltip title={l("排除此值")}><Button size="small" type="text" icon={<MinusCircleOutlined />} aria-label={l("排除单元格 {0}",name)} onClick={() => onFilter({...filter,op:"ne"})} /></Tooltip></>}
+          <Tooltip title={l("复制值")}><Button size="small" type="text" icon={<CopyOutlined />} aria-label={l("复制单元格 {0}",name)} onClick={() => onCopy(printable(value))} /></Tooltip></>}
         </div></div>;
       },
     })),
-  ], [selectedColumns, widths, rowLines, onSelect, onFilter, onResize, startResize, sort, onSort, onMoveColumn, onRemoveColumn, onCopy, containerWidth]);
-  const width = useMemo(() => columns.reduce((sum, column) => sum + Number(column.width), 0), [columns]);
-  const scroll = useMemo(() => ({ x: width, y: height }), [width, height]);
-  const rowClassName = useCallback((row: LogRow) => row.event_id === selectedID ? "lm-log-active-row" : "", [selectedID]);
+  ], [selectedColumns, widths, rowLines, onSelect, onFilter, onResize, startResize, sort, onSort, onMoveColumn, onRemoveColumn, onCopy, containerWidth,language]);
+  const width = useMemo(() => columns.reduce((sum, column) => sum + Number(column.width), 0), [columns,language]);
+  const scroll = useMemo(() => ({ x: width, y: height }), [width, height,language]);
+  const rowClassName = useCallback((row: LogRow) => row.event_id === selectedID ? "lm-log-active-row" : "", [selectedID,language]);
   const locale = useMemo(() => ({ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
-    description={loading ? "正在查询日志" : <span>没有匹配日志 <Button size="small" type="link"
-      onClick={onExpandRange}>扩大到最近 24 小时</Button></span>} /> }), [loading, onExpandRange]);
+    description={loading ? l("正在查询日志") : <span>{l("没有匹配日志 ")}<Button size="small" type="link"
+      onClick={onExpandRange}>{l("扩大到最近 24 小时")}</Button></span>} /> }), [loading, onExpandRange,language]);
   return <div ref={bindScroll} className={`lm-log-table-scroll ${density === "comfortable" ? "is-comfortable" : ""}`} role="region"
-    aria-label="日志表格，左右滚动查看所有列" tabIndex={0}>
+    aria-label={l("日志表格，左右滚动查看所有列")} tabIndex={0}>
     <Table<LogRow> ref={tableRef} size="small" virtual style={{ width, maxWidth: "none" }} tableLayout="fixed"
       rowKey="event_id" dataSource={rows} columns={columns} pagination={false} scroll={scroll}
       rowClassName={rowClassName} locale={locale} />

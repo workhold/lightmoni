@@ -5,6 +5,7 @@ export interface DiscoveryState {
   status: 'idle' | 'waiting' | 'loading' | 'success' | 'error';
   result?: ModelDiscoveryResult;
   error?: string;
+  error_english?: string;
 }
 
 export function discoveryInput(values: { base_url?: string; api_key?: string; clear_key?: boolean; protocol?: string }, hasKey: boolean): ModelDiscoveryInput | undefined {
@@ -62,7 +63,7 @@ export class ModelDiscovery {
       this.publish({ status: 'success', result });
     }).catch(error => {
       if (version !== this.generation || abort.signal.aborted) return;
-      this.publish({ status: 'error', error: modelConnectionError(error) });
+      this.publish({ status: 'error', error: modelConnectionError(error), error_english: modelConnectionError(error,'en-US') });
     }).finally(() => { if (version === this.generation) this.abort = undefined; });
   }
 

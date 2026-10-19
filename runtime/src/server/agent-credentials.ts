@@ -152,9 +152,21 @@ export function registerAgentCredentials(
     CREATE INDEX IF NOT EXISTS agent_credentials_lookup ON agent_credentials(agent_id,audience);
   `);
 
-  const now = () => new Date();
+  const now = () => deps.now?.() ?? new Date();
   const iso = (date: Date) => date.toISOString();
   const admin = (ctx: Context) => deps.auth.requireAdmin(ctx);
+  const effectiveEnrollmentStatus = (row: {
+    status: string;
+    expires_at: string;
+    pending_expires_at?: string | null;
+  }, at = now().getTime()): string => {
+    if (row.status !== "issued" && row.status !== "pending_activation") return row.status;
+    if (Date.parse(row.expires_at) <= at ||
+      (row.status === "pending_activation" &&
+        (!row.pending_expires_at || Date.parse(row.pending_expires_at) <= at)))
+      return "expired";
+    return row.status;
+  };
   const cleanScopes = (value: unknown): CredentialScope[] => {
     const scopes = value == null ? ["agent.control", "agent.data"] : value;
     if (
@@ -224,18 +236,52 @@ export function registerAgentCredentials(
 
   router.get("/api/v1/agent-enrollments", (ctx) => {
     admin(ctx);
+    const at = now().getTime();
     ctx.json(
       db.all<any>(
         `SELECT id,status,endpoint_origin,allowed_arch_json,version,initial_label_id,scopes_json,expires_at,created_at,used_at,pending_expires_at,agent_id
          FROM agent_enrollments ORDER BY created_at DESC LIMIT 200`,
       ).map((row) => ({
         ...row,
+        status: effectiveEnrollmentStatus(row, at),
         allowed_arch: JSON.parse(row.allowed_arch_json),
         scopes: JSON.parse(row.scopes_json),
         allowed_arch_json: undefined,
         scopes_json: undefined,
       })),
     );
+  });
+
+  router.post("/api/v1/agent-enrollments/:id/revoke", (ctx) => {
+    admin(ctx);
+    db.transaction(() => {
+      const row = db.get<any>(
+        "SELECT status,expires_at,pending_expires_at FROM agent_enrollments WHERE id=?",
+        ctx.params.id,
+      );
+      if (!row) fail(404, "enrollment token not found");
+      const status = effectiveEnrollmentStatus(row);
+      if (status === "cancelled") return;
+      if (status !== "issued" && status !== "pending_activation")
+        fail(409, "only an unexpired, unused enrollment token can be revoked");
+      db.run(
+        "UPDATE agent_enrollments SET status='cancelled',bootstrap_hash='' WHERE id=?",
+        ctx.params.id,
+      );
+    });
+    ctx.json({ ok: true });
+  });
+
+  router.get("/api/v1/agent-credentials", (ctx) => {
+    admin(ctx);
+    const at = now().getTime();
+    ctx.json(db.all<any>(
+      `SELECT id,agent_id,audience,scope,created_at,last_used_at,expires_at,revoked_at,revoke_reason
+       FROM agent_credentials ORDER BY created_at DESC,id DESC LIMIT 200`,
+    ).map((row) => ({
+      ...row,
+      status: row.revoked_at ? "revoked" : Date.parse(row.expires_at) <= at ? "expired" : "active",
+    })));
   });
 
   // The installer has no browser session. The enrollment token in the request
@@ -250,7 +296,7 @@ export function registerAgentCredentials(
     const row = db.get<any>("SELECT * FROM agent_enrollments WHERE token_hash=?", hash(enrollToken));
     if (!row) fail(401, "invalid enrollment token");
     const current = now();
-    if (Date.parse(row.expires_at) <= current.getTime()) {
+    if (effectiveEnrollmentStatus(row, current.getTime()) === "expired") {
       db.run("UPDATE agent_enrollments SET status='expired' WHERE id=? AND status='issued'", row.id);
       fail(401, "enrollment token expired");
     }
@@ -318,7 +364,7 @@ export function registerAgentCredentials(
     );
     if (!row || row.install_nonce !== nonce || !safeEqualHash(row.bootstrap_hash, hash(authorization)))
       fail(401, "invalid bootstrap credential");
-    if (!row.pending_expires_at || Date.parse(row.pending_expires_at) <= now().getTime())
+    if (effectiveEnrollmentStatus(row) === "expired")
       fail(401, "pending activation expired");
     if (value.health?.service !== "ready" || value.health?.config_checked !== true)
       fail(400, "health check is required before activation");
@@ -327,6 +373,16 @@ export function registerAgentCredentials(
     const at = now();
     const expiry = new Date(at.getTime() + 90 * 24 * 60 * 60 * 1000);
     db.transaction(() => {
+      const changed = db.run(
+        `UPDATE agent_enrollments SET status='active',used_at=?,bootstrap_hash=''
+         WHERE id=? AND status='pending_activation' AND bootstrap_hash=? AND expires_at>? AND pending_expires_at>?`,
+        iso(at),
+        row.id,
+        row.bootstrap_hash,
+        iso(at),
+        iso(at),
+      ).changes;
+      if (!changed) fail(401, "bootstrap credential is unavailable");
       for (const scope of scopes) {
         const audience: CredentialAudience = scope === "agent.control" ? "control" : "data";
         const value = secret(`lm_agent_${audience}_`);
@@ -343,11 +399,6 @@ export function registerAgentCredentials(
           iso(expiry),
         );
       }
-      db.run(
-        "UPDATE agent_enrollments SET status='active',used_at=?,bootstrap_hash='' WHERE id=?",
-        iso(at),
-        row.id,
-      );
       // Agent registration still happens through the legacy node route during
       // migration. This table is the source of truth for credential binding.
     });
@@ -415,18 +466,24 @@ export function registerAgentCredentials(
   const canDownloadWithEnrollmentToken = (value: string) => {
     if (!value || Buffer.byteLength(value) > 512) return false;
     const row = db.get<any>(
-      `SELECT status,expires_at FROM agent_enrollments WHERE token_hash=?`,
+      `SELECT status,expires_at,pending_expires_at FROM agent_enrollments WHERE token_hash=?`,
       hash(value),
     );
-    return !!row &&
-      (row.status === "issued" || row.status === "pending_activation") &&
-      Date.parse(row.expires_at) > now().getTime();
+    if (!row) return false;
+    const status = effectiveEnrollmentStatus(row);
+    return status === "issued" || status === "pending_activation";
   };
-  const enrollmentStatus = (enrollmentID: string) =>
-    db.get<{ status: string; agent_id: string; used_at: string }>(
-      "SELECT status,agent_id,COALESCE(used_at,'') AS used_at FROM agent_enrollments WHERE id=?",
+  const enrollmentStatus = (enrollmentID: string) => {
+    const row = db.get<any>(
+      "SELECT status,agent_id,COALESCE(used_at,'') AS used_at,expires_at,pending_expires_at FROM agent_enrollments WHERE id=?",
       enrollmentID,
     );
+    return row && {
+      status: effectiveEnrollmentStatus(row),
+      agent_id: row.agent_id,
+      used_at: row.used_at,
+    };
+  };
   const cancelEnrollment = (enrollmentID: string) => {
     db.run(
       "UPDATE agent_enrollments SET status='cancelled' WHERE id=? AND status IN ('issued','pending_activation')",

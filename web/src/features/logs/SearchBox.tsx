@@ -1,3 +1,4 @@
+import {useMonitoringI18n} from '../monitoring-i18n';
 import { useState } from "react";
 import { SearchOutlined } from "@ant-design/icons";
 import { AutoComplete, Input } from "../../shared/ui";
@@ -15,6 +16,8 @@ export default function SearchBox({
   fields: string[];
   expression: boolean;
 }) {
+ const {l,language}=useMonitoringI18n();
+
   const [open, setOpen] = useState(false);
   const token = value.match(/(?:^|\s)([@\w.]+)$/)?.[1];
   const suggestions =
@@ -28,7 +31,7 @@ export default function SearchBox({
             label: (
               <span className="lm-log-suggestion">
                 <code>{name}</code>
-                <small>字段筛选</small>
+                <small>{l("字段筛选")}</small>
               </span>
             ),
           }))
@@ -48,12 +51,12 @@ export default function SearchBox({
     >
       <Input
         allowClear
-        aria-label="日志关键词"
+        aria-label={l("日志关键词")}
         prefix={<SearchOutlined />}
         placeholder={
           expression
-            ? "输入 service:api AND @status>=500，或搜索正文"
-            : "搜索日志正文，支持中文、空格和特殊字符"
+            ? l("输入 service:api AND @status>=500，或搜索正文")
+            : l("搜索日志正文，支持中文、空格和特殊字符")
         }
         onFocus={() => setOpen(true)}
         onPressEnter={() => {
