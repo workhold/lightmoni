@@ -177,6 +177,129 @@ class ReportingTests(unittest.TestCase):
         self.addCleanup(close)
         return client
 
+    def env_client(self, **options):
+        defaults = dict(self_telemetry=False, remote_config=False)
+        defaults.update(options)
+        client = Client.from_env("connection-test", "web", **defaults)
+        def close():
+            try:
+                client.shutdown(timeout=.3)
+            except (OSError, RuntimeError):
+                pass
+        self.addCleanup(close)
+        return client
+
+    def connection_environment(self, **values):
+        settings = {name: "" for name in (
+            "LIGHTMONI_MODE", "LIGHTMONI_ENDPOINT", "LIGHTMONI_DATA_KEY", "LIGHTMONI_DATA_KEY_FILE",
+            "LIGHTMONI_KEY", "LIGHTMONI_AGENT_ENDPOINT", "LIGHTMONI_LOCAL_TOKEN", "LIGHTMONI_LOCAL_TOKEN_FILE",
+        )}
+        settings.update(values)
+        return mock.patch.dict(os.environ, settings)
+
+    def test_explicit_routes_isolate_unused_credentials_and_configuration(self):
+        for mode in ("direct", "agent"):
+            with self.subTest(mode=mode):
+                platform, agent = Receiver(), Receiver()
+                self.addCleanup(platform.close)
+                self.addCleanup(agent.close)
+                environment = dict(LIGHTMONI_MODE=mode, LIGHTMONI_ENDPOINT=platform.url,
+                                   LIGHTMONI_DATA_KEY="data-key", LIGHTMONI_AGENT_ENDPOINT=agent.url,
+                                   LIGHTMONI_LOCAL_TOKEN="local-token")
+                if mode == "direct":
+                    environment["LIGHTMONI_LOCAL_TOKEN_FILE"] = "/missing-lightmoni-unused-local"
+                    unused_options = dict(local_token="unused-explicit", local_token_file="/missing-lightmoni-explicit-local")
+                else:
+                    environment.update(LIGHTMONI_DATA_KEY_FILE="/missing-lightmoni-unused-data", LIGHTMONI_KEY="unused-legacy")
+                    unused_options = dict(data_key="unused-explicit", data_key_file="/missing-lightmoni-explicit-data")
+                with self.connection_environment(**environment):
+                    client = self.env_client(remote_config=True, **unused_options)
+                    client.refresh_config(timeout=1)
+                    client.log("info", "selected route")
+                    client.flush(timeout=1)
+                selected, unused = (platform, agent) if mode == "direct" else (agent, platform)
+                expected_key = "data-key" if mode == "direct" else "local-token"
+                self.assertEqual([(row["method"], row["path"], row["headers"].get("Authorization")) for row in selected.observed()], [
+                    ("GET", "/v1/sdk-config", "Bearer " + expected_key),
+                    ("POST", "/v1/logs", "Bearer " + expected_key),
+                ])
+                self.assertEqual(unused.observed(), [])
+                self.assertEqual(client.stats()["selected_route"], mode)
+
+    def test_selected_route_still_validates_secret_files_conflicts_and_mode(self):
+        with tempfile.TemporaryDirectory(prefix="lightmoni-connection-") as directory:
+            secret_file = os.path.join(directory, "secret")
+            with open(secret_file, "w", encoding="utf-8") as stream:
+                stream.write("file-value\n")
+            for mode in ("direct", "agent"):
+                variable = "LIGHTMONI_DATA_KEY" if mode == "direct" else "LIGHTMONI_LOCAL_TOKEN"
+                base = dict(LIGHTMONI_MODE=mode, LIGHTMONI_ENDPOINT=self.receiver.url, LIGHTMONI_AGENT_ENDPOINT=self.receiver.url)
+                with self.subTest(mode=mode, source="missing selected file"):
+                    with self.connection_environment(**base, **{variable + "_FILE": "/missing-lightmoni-selected-secret"}):
+                        with self.assertRaisesRegex(ValueError, "file"):
+                            self.env_client()
+                with self.subTest(mode=mode, source="env/file conflict"):
+                    with self.connection_environment(**base, **{variable: "env-value", variable + "_FILE": secret_file}):
+                        with self.assertRaisesRegex(ValueError, "credential_source_conflict"):
+                            self.env_client()
+                with self.subTest(mode=mode, source="env/explicit conflict"):
+                    with self.connection_environment(**base, **{variable: "env-value"}):
+                        with self.assertRaisesRegex(ValueError, "credential_source_conflict"):
+                            self.env_client(**({"data_key": "explicit-value"} if mode == "direct" else {"local_token": "explicit-value"}))
+            with self.connection_environment(LIGHTMONI_MODE="invalid", LIGHTMONI_DATA_KEY_FILE="/missing-data", LIGHTMONI_LOCAL_TOKEN_FILE="/missing-local"):
+                with self.assertRaisesRegex(ValueError, "mode must be"):
+                    self.env_client()
+            with self.connection_environment(LIGHTMONI_MODE="direct", LIGHTMONI_ENDPOINT=self.receiver.url, LIGHTMONI_DATA_KEY="new", LIGHTMONI_KEY="old"):
+                with self.assertRaisesRegex(ValueError, "credential_source_conflict: LIGHTMONI_KEY"):
+                    self.env_client()
+            with self.connection_environment(LIGHTMONI_MODE="auto", LIGHTMONI_LOCAL_TOKEN_FILE="/missing-auto-secret"):
+                with self.assertRaisesRegex(ValueError, "file"):
+                    self.env_client()
+        self.assertEqual(self.receiver.observed(), [])
+
+    def test_unused_endpoint_does_not_require_validation(self):
+        for mode in ("direct", "agent"):
+            with self.subTest(mode=mode):
+                values = dict(LIGHTMONI_MODE=mode, LIGHTMONI_ENDPOINT=self.receiver.url, LIGHTMONI_DATA_KEY="data-key", LIGHTMONI_AGENT_ENDPOINT=self.receiver.url)
+                values["LIGHTMONI_AGENT_ENDPOINT" if mode == "direct" else "LIGHTMONI_ENDPOINT"] = "not-an-http-url"
+                with self.connection_environment(**values):
+                    client = self.env_client()
+                    client.log("info", mode)
+                    client.flush(timeout=1)
+        self.assertEqual([request["path"] for request in self.receiver.observed()], ["/v1/logs", "/v1/logs"])
+
+    def test_agent_remote_configuration_cannot_override_selected_route_or_local_token(self):
+        platform = Receiver()
+        self.addCleanup(platform.close)
+        with self.connection_environment(LIGHTMONI_MODE="agent", LIGHTMONI_AGENT_ENDPOINT=self.receiver.url, LIGHTMONI_LOCAL_TOKEN="local-token"):
+            client = self.env_client(remote_config=True, config_endpoint=platform.url, config_key="unused-data-key")
+            client.refresh_config(timeout=1)
+        self.assertEqual(platform.observed(), [])
+        self.assertEqual([(row["path"], row["headers"].get("Authorization")) for row in self.receiver.observed()], [("/v1/sdk-config", "Bearer local-token")])
+
+    def test_explicit_route_failures_retry_without_contacting_other_endpoint(self):
+        for mode in ("direct", "agent"):
+            with self.subTest(mode=mode):
+                platform, agent = Receiver(), Receiver()
+                self.addCleanup(platform.close)
+                self.addCleanup(agent.close)
+                selected, unused = (platform, agent) if mode == "direct" else (agent, platform)
+                selected.post_action = lambda request: (503, {}, {})
+                with self.connection_environment(LIGHTMONI_MODE=mode, LIGHTMONI_ENDPOINT=platform.url, LIGHTMONI_DATA_KEY="data-key", LIGHTMONI_AGENT_ENDPOINT=agent.url, LIGHTMONI_LOCAL_TOKEN="local-token"):
+                    client = self.env_client()
+                    client.log("info", "retained batch")
+                    with self.assertRaises(TimeoutError):
+                        client.flush(timeout=.08)
+                    self.assertTrue(selected.observed("POST"))
+                    self.assertEqual(unused.observed(), [])
+                    selected.post_action = None
+                    client.flush(timeout=1)
+                attempts = selected.observed()
+                self.assertTrue(all(row["method"] == "POST" and row["path"] == "/v1/logs" for row in attempts))
+                self.assertEqual(len({row["headers"]["X-Lightmoni-Batch-ID"] for row in attempts}), 1)
+                self.assertEqual(len({row["body"] for row in attempts}), 1)
+                self.assertEqual(unused.observed(), [])
+
     def test_qa_vip_maximum_exclusion_and_controlled_counters(self):
         policy = {
             "key": "attr:uid",

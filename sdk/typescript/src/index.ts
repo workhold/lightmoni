@@ -15,15 +15,17 @@ function secret(explicit: string | undefined, file: string | undefined, env: str
 /** Node-only environment constructor. Secret files are never persisted by the SDK. */
 export function createLightMoniFromEnv(options: Omit<Options, "endpoint" | "key" | "mode" | "agentEndpoint" | "localToken"> & Partial<Pick<Options, "endpoint" | "key" | "mode" | "agentEndpoint" | "localToken">>) {
   const mode = options.mode ?? (process.env.LIGHTMONI_MODE as Options["mode"]) ?? "direct";
-  const endpoint = options.endpoint || process.env.LIGHTMONI_ENDPOINT;
-  const agentEndpoint = options.agentEndpoint || process.env.LIGHTMONI_AGENT_ENDPOINT || "http://127.0.0.1:4318";
-  const local = secret(options.localToken, undefined, "LIGHTMONI_LOCAL_TOKEN", "LIGHTMONI_LOCAL_TOKEN_FILE");
-  const data = secret(options.key, undefined, "LIGHTMONI_DATA_KEY", "LIGHTMONI_DATA_KEY_FILE");
-  const legacy = secret(undefined, undefined, "LIGHTMONI_KEY", "");
+  if (!["agent", "direct", "auto"].includes(mode)) throw new Error("mode must be agent, direct, or auto");
+  const endpoint = mode === "agent" ? (options.exporter ? options.endpoint : undefined) : options.endpoint || process.env.LIGHTMONI_ENDPOINT;
+  const agentEndpoint = mode === "direct" ? undefined : options.agentEndpoint || process.env.LIGHTMONI_AGENT_ENDPOINT || "http://127.0.0.1:4318";
+  const local = mode === "direct" ? {} : secret(options.localToken, undefined, "LIGHTMONI_LOCAL_TOKEN", "LIGHTMONI_LOCAL_TOKEN_FILE");
+  const data = mode === "agent" ? {} : secret(options.key, undefined, "LIGHTMONI_DATA_KEY", "LIGHTMONI_DATA_KEY_FILE");
+  const legacy = mode === "agent" ? {} : secret(undefined, undefined, "LIGHTMONI_KEY", "");
   if (data.value && legacy.value && data.value !== legacy.value) throw new Error("credential_source_conflict: LIGHTMONI_KEY");
   if (mode === "direct" && (!endpoint || !(data.value || legacy.value))) throw new Error("direct mode requires endpoint and data key");
   if (mode === "auto" && !endpoint && !agentEndpoint) throw new Error("auto_route_unavailable: configure an Agent or direct credentials");
-  return createLightMoni({ ...options, mode, endpoint, agentEndpoint, localToken: local.value, key: data.value || legacy.value });
+  const key = mode === "agent" && options.exporter ? options.key : data.value || legacy.value;
+  return createLightMoni({ ...options, mode, endpoint, agentEndpoint, localToken: local.value, key });
 }
 export function withTrace<T>(trace: TraceContext, action: () => T): T {
   // Validation and a snapshot prevent caller mutation from changing a scope.

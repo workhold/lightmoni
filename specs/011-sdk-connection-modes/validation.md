@@ -1,7 +1,7 @@
 # SDK 连接模式验收记录
 
 日期：2026-10-18
-状态：连接模式和凭据读取基线已实现；完整六语言集成、凭据泄露审计及工具链矩阵仍待补齐。
+状态：以下 2026-10-18 检查记录保留原始语言范围。2026-10-19 发布范围调整为 TypeScript/JavaScript、Python、Ruby；PHP 原生 SDK 下线，Go/Rust 仅保留源码、后续支持，不纳本次发布验收。当前范围调整的检查记录见 [012 验收](../012-sdk-reporting-choice/validation.md)。
 
 ## 已实现基线
 
@@ -33,21 +33,22 @@ Java/C# 源码、构建入口和当前发布清单扫描未发现残留；历史
 
 | 范围 | 状态 |
 | --- | --- |
-| Go SDK | 连接模式实现已在工作树；当前环境没有 `go`/`gofmt`，需 CI 或 Go 工具链运行 `go test -race ./sdk/go` |
-| PHP、Rust SDK | 代码已增加连接模式；当前环境没有对应编译器，需 CI/容器执行原生测试 |
-| 六语言 shared fixture | 各语言已有实现和局部测试，统一 direct/agent/auto fixture、401/403、TLS、丢响应和批次未知结果仍待完成 |
-| auto 语义 | TypeScript 已避免 HTTP 鉴权/协议错误静默回退；Python/PHP/Ruby/Rust 的跨语言错误矩阵仍需统一验证 |
+| Go SDK | 源码保留、后续支持；原生工具链和完整模式矩阵未纳本次发布验收，不生成本次发布包 |
+| PHP SDK | 已决定下线，历史代码基线与测试记录不代表当前发布支持 |
+| Rust SDK | 源码保留、后续支持；原生工具链和完整模式矩阵未纳本次发布验收，不生成本次发布包 |
+| 历史六语言 shared fixture | 各语言已有实现和局部测试，统一 direct/agent/auto fixture、401/403、TLS、丢响应和批次未知结果仍待完成 |
+| auto 语义 | 当前发布语言的完整跨语言错误矩阵仍需按实际检查记录验收；Go/Rust 验收延后，PHP 不再纳入 |
 | Java/C# 迁移 | 原生包已下线；标准 OTLP 迁移示例和外部 exporter 端到端验证仍需补充 |
 | Agent enrollment | 由 [010 规格](../010-agent-deployment/validation.md)负责；SDK 不签发 enrollment/control/data credential |
 | 凭据泄露审计 | argv、环境诊断、trace、容器层和浏览器 bundle 的完整审计仍待执行 |
 
 ## 待取得的验收证据
 
-1. 六语言 direct 和 Agent 集成测试：table 授权、local token、断网补传、401/403、429/5xx、key rotation。
+1. 当前三语言 direct 和 Agent 集成测试：table 授权、local token、断网补传、401/403、429/5xx、key rotation。
 2. auto 测试：Agent 成功、未监听回退、鉴权/TLS/协议错误不回退、body 已发送后未知结果不改投。
 3. 同一 OTLP fixture 的 metric/log/trace/table/headers 与自定义打点语义一致。
 4. 凭据在 argv、环境诊断、日志、trace attributes、URL、异常、batch payload、容器层和浏览器 bundle 中均无泄露。
 
 ## 验收结论
 
-连接配置、凭据读取、六语言支持范围及 Java/C# 下线的代码基线已完成并通过可用工具链检查；在 Go/PHP/Rust 工具链、统一 fixture、完整自动模式矩阵和泄露审计完成前，不声明完整跨语言生产验收通过。
+以上连接配置、凭据读取及原六语言代码基线是历史检查结论，未声明完整跨语言生产验收通过。本次发布仅包含 TypeScript/JavaScript、Python、Ruby；PHP 下线，Go/Rust 源码保留但未纳本次发布验收，后续必须另行完成工具链、统一 fixture 与完整故障矩阵。

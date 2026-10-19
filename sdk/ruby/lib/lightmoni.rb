@@ -38,12 +38,19 @@ module LightMoni
     endpoint = options.delete(:endpoint) || ENV['LIGHTMONI_ENDPOINT'].to_s
     agent = options.delete(:agent_endpoint) || ENV['LIGHTMONI_AGENT_ENDPOINT'].to_s
     agent = 'http://127.0.0.1:4318' if agent.empty?
-    local, local_source = secret(options.delete(:local_token).to_s, options.delete(:local_token_file).to_s, 'LIGHTMONI_LOCAL_TOKEN', 'LIGHTMONI_LOCAL_TOKEN_FILE', 'local token')
-    explicit_data = options.delete(:data_key); explicit_data = options.delete(:key) if explicit_data.nil?
-    data, data_source = secret(explicit_data.to_s, options.delete(:data_key_file).to_s, 'LIGHTMONI_DATA_KEY', 'LIGHTMONI_DATA_KEY_FILE', 'data key')
-    legacy, legacy_source = secret('', '', 'LIGHTMONI_KEY', '', 'legacy data key')
-    raise ArgumentError, 'credential_source_conflict: LIGHTMONI_KEY' if !data.empty? && !legacy.empty? && data != legacy
-    data, data_source = legacy, (legacy.empty? ? legacy_source : 'legacy-env') if data.empty?
+    explicit_local, local_file = options.delete(:local_token), options.delete(:local_token_file)
+    explicit_data, legacy_key, data_file = options.delete(:data_key), options.delete(:key), options.delete(:data_key_file)
+    explicit_data = legacy_key if explicit_data.nil?
+    local = local_source = data = data_source = ''
+    if mode != 'direct'
+      local, local_source = secret(explicit_local.to_s, local_file.to_s, 'LIGHTMONI_LOCAL_TOKEN', 'LIGHTMONI_LOCAL_TOKEN_FILE', 'local token')
+    end
+    if mode != 'agent'
+      data, data_source = secret(explicit_data.to_s, data_file.to_s, 'LIGHTMONI_DATA_KEY', 'LIGHTMONI_DATA_KEY_FILE', 'data key')
+      legacy, legacy_source = secret('', '', 'LIGHTMONI_KEY', '', 'legacy data key')
+      raise ArgumentError, 'credential_source_conflict: LIGHTMONI_KEY' if !data.empty? && !legacy.empty? && data != legacy
+      data, data_source = legacy, (legacy.empty? ? legacy_source : 'legacy-env') if data.empty?
+    end
     probe = 'not_probed'; selected = mode; fallback = 0
     if mode == 'agent'
       endpoint, key, selected, probe, source = agent, local, 'agent', 'configured', local_source
@@ -67,7 +74,7 @@ module LightMoni
         key, selected, probe, fallback, source = data, 'direct', 'unavailable_fallback', 1, data_source
       end
     end
-    client = new(service: service, table: table, endpoint: endpoint, key: key, **options)
+    client = Client.new(service: service, table: table, endpoint: endpoint, key: key, **options)
     client.state.gate.synchronize { client.state.stats.merge!('configured_mode' => mode, 'selected_route' => selected, 'agent_probe' => probe, 'fallback_count' => fallback, 'credential_source' => source) }
     client
   end

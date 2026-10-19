@@ -11,6 +11,8 @@ export function registerInstall(
   agentCredentials?: AgentCredentialStore,
 ) {
   const version = "0.1.0";
+  // Only these SDKs are part of the current release. Go and Rust stay in the
+  // repository for a later release and are reported separately below.
   const basePackages = [
     [
       "typescript",
@@ -18,16 +20,17 @@ export function registerInstall(
       "Node.js 20+ / 现代浏览器",
       `lightmoni-sdk-${version}.tgz`,
     ],
-    ["go", "Go", "Go 1.26+", `lightmoni-go-sdk_${version}.tar.gz`],
     [
       "python",
       "Python",
       "Python 3.9+",
       `lightmoni-python-sdk_${version}.tar.gz`,
     ],
-    ["php", "PHP", "64 位 PHP 8.1+", `lightmoni-php-sdk_${version}.tar.gz`],
     ["ruby", "Ruby", "Ruby 2.7+", `lightmoni-ruby-sdk_${version}.tar.gz`],
-    ["rust", "Rust", "Rust 1.85+", `lightmoni-rust-sdk_${version}.tar.gz`],
+  ];
+  const deferredPackages = [
+    ["go", "Go", "Go 1.26+"],
+    ["rust", "Rust", "Rust 1.85+"],
   ];
   const packages = (base: string) =>
     basePackages.map(([id, language, runtime, file]) => ({
@@ -85,8 +88,14 @@ export function registerInstall(
       endpoints: settings.endpoints,
       default_endpoint_id: settings.default_endpoint_id,
       node_url: base + `/downloads/sdk/lightmoni-sdk-${version}.tgz`,
-      go_url: base + `/downloads/sdk/lightmoni-go-sdk_${version}.tar.gz`,
       packages: packages(base),
+      deferred: deferredPackages.map(([id, language, runtime]) => ({
+        id,
+        language,
+        runtime,
+        status: "deferred",
+        reason: "后续支持",
+      })),
       checksums_url: base + "/downloads/sdk/SDK_SHA256SUMS",
     });
   });

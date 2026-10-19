@@ -3,8 +3,9 @@
 Node.js 20+，业务 API 使用标准 OTLP JSON；没有运行时 npm 依赖。浏览器入口不导入 Node 的 AsyncLocalStorage。
 
 ```typescript
-import { createLightMoni } from "@lightmoni/sdk";
-const mon = createLightMoni({ service: "payment-api", table: "http", endpoint: "http://127.0.0.1:4318" });
+import { createLightMoniFromEnv } from "@lightmoni/sdk";
+// 按接入页配置所选路径的环境变量；缺省 direct。
+const mon = createLightMoniFromEnv({ service: "payment-api", table: "http" });
 const count = mon.counter("http.requests");
 count.add(1, { route: "/payments", method: "POST", status: 200 });
 await mon.withTable("app").withSpan("payment.create", async () => {
@@ -41,9 +42,11 @@ createServer((req, res) => {
 
 配置与可靠性默认值同 Go SDK：10 秒 collection、有界 8 MiB 活跃缓冲和 8 MiB 待发送队列、256 批、1 MiB 单批、2000 维度、256 instruments；可按 options 调整。超限与非法输入看 `stats()`。快照冻结后重试 ID/创建时间/正文不变，读者前进 Delta 不丢掉原待发送窗口；队列丢失或永久拒绝会让该实例 flush/shutdown 持续返回错误。SDK 未获 Agent ACK 前崩溃会丢内存；持久化和服务端去重由 Agent/主服务完成。自定义 exporter 必须响应 AbortSignal，并在 durable commit 后成功返回。
 
-直连中心同时配置 `endpoint` 和 `key`，无需 Agent。每份 Key 可配置逻辑 table 白名单或显式允许所有 table、不绑定 service；本例需允许 `http`、`app`，使用 `withTable` 也需授权相应 table。Agent 路径不需要 SDK 保管中心 Key；Agent 开启本地令牌时，`key` 传该令牌。`updateKey` 可修复直连 401/403，保留冻结队列。标准 OTLP partialSuccess 不重发整批，拒绝记录可见。
+直连平台配置 `mode: 'direct'`、`endpoint` 和 `key`，无需 Agent。每份 Key 可配置逻辑 table 白名单或显式允许所有 table、不绑定 service；本例需允许 `http`、`app`，使用 `withTable` 也需授权相应 table。显式 Agent 模式使用 `mode: 'agent'`、`agentEndpoint` 和可选 `localToken`，无需平台 Key；旧的无 mode `endpoint/key` 构造仍兼容。`updateKey` 可修复直连 401/403，保留冻结队列。标准 OTLP partialSuccess 不重发整批，拒绝记录可见。
 
 Node.js 容器、Serverless 等服务可调用 `createLightMoniFromEnv` 读取 `LIGHTMONI_MODE`、`LIGHTMONI_ENDPOINT`、`LIGHTMONI_DATA_KEY`、`LIGHTMONI_AGENT_ENDPOINT` 和 `LIGHTMONI_LOCAL_TOKEN`；`LIGHTMONI_KEY` 仅作为兼容别名。通过 environment / Secret 注入值。容器的 `localhost` 指向容器本身；同一 Docker 网络可使用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可使用 `http://host.docker.internal:端口`。直连缓冲只在进程内，需要本地磁盘缓存时使用 Agent。浏览器继续使用下文的业务后端转发。
+
+显式 direct 只读取 data key，显式 agent 只读取 local token；对应 `_FILE` 注入和所选来源冲突校验继续有效。失败只在原路径重试。标准 HTTP agent 的 `refreshConfig` 也走 Agent/local token；自定义 exporter 的显式规则地址/凭证、direct/auto 保持兼容。环境块切换与 ACK 边界见 [选择上报方式](../README.md#选择上报方式)。
 
 ```sh
 cd sdk/typescript

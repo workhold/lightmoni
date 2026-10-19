@@ -434,7 +434,7 @@ export const systemDashboards = (): any[] => [
     id: "system-sdk",
     title: "系统监控 · SDK",
     description:
-      "业务 SDK 每 30 秒报告进程实例心跳、缓冲与诊断。90 秒无心跳视为离线；PHP 在请求结束或定时 flush 时上报。内部数据单独入表，不需要增加业务 Key 的 table 权限。",
+      "业务 SDK 每 30 秒报告进程实例心跳、缓冲与诊断。90 秒无心跳视为离线；内部数据单独入表，不需要增加业务 Key 的 table 权限。",
     range: {
       from: "now-1h",
       to: "now",

@@ -1,4 +1,5 @@
 #!/bin/sh
+# Deferred SDK: this is an explicit source-package tool, not a current release step.
 set -eu
 version=${1:-0.1.0}
 output=${2:-runtime/downloads}

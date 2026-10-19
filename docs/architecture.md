@@ -13,9 +13,9 @@
 | 中心与公共能力 | `runtime/src/server`、`shared`、`domains`、`assistant` | `node runtime/dist/server/main.js`；镜像使用 Node 24.15.0 bookworm-slim |
 | 执行节点 | `runtime/src/agent`，复用 TypeScript SDK 的指标与导出能力 | 独立进程/systemd；Linux amd64、arm64 包自带 Node 24.15.0，要求 glibc ≥ 2.28 |
 | AI 模型执行 | `ai-runtime` 中的 Mastra worker | 由中心通过私有管道启动和取消，无额外端口 |
-| 业务 SDK | Go、TypeScript、Python、PHP、Ruby、Rust | 六种 SDK 均保留；Go 工具链仅用于 Go SDK 开发和打包 |
+| 业务 SDK | TypeScript/JavaScript、Python、Ruby | 当前发布三种；PHP 下线；Go/Rust 仅保留源码、后续支持，不纳本次发布验收 |
 
-Node 版本与 npm 依赖锁定。Agent 安装包包含运行时和依赖，目标主机无需预装 Node/npm；中心与 Agent 不依赖 Go 可执行文件。旧 Go 方案不再作为新开发的推荐。Dockerfile 中 Go 阶段仅生成业务 Go SDK 下载包，最终平台镜像使用 Node。打包/构建配置与 Linux 实机运行验收分别记录，本机 macOS 验证未包含 Docker 镜像构建或 systemd 实机安装。
+Node 版本与 npm 依赖锁定。Agent 安装包包含运行时和依赖，目标主机无需预装 Node/npm；中心与 Agent 不依赖 Go 可执行文件。旧 Go 方案不再作为新开发的推荐。当前 SDK 发布无需 Go/Rust 工具链，最终平台镜像使用 Node。打包/构建配置与 Linux 实机运行验收分别记录，本机 macOS 验证未包含 Docker 镜像构建或 systemd 实机安装。
 
 ## 2. 部署与数据链路
 
@@ -23,7 +23,8 @@ Node 版本与 npm 依赖锁定。Agent 安装包包含运行时和依赖，目�
 flowchart LR
     B[浏览器埋点 SDK] --> P[业务后端转发]
     P -->|限定 table 的 Key| M
-    S[六种业务语言 SDK] -->|OTLP HTTP，按窗口聚合与批量发送| A
+    S[三种当前发布业务 SDK] -->|direct：平台 data key| M
+    S -->|agent：OTLP HTTP 与可选 local token| A
     H[机器采集 / 拨测 / 目录日志] --> G[Agent 内置 TypeScript SDK]
     G -->|进程内 exporter| A
     A[Node Agent：磁盘队列与重试] -->|限定 table 的上报 Key| M
@@ -33,7 +34,7 @@ flowchart LR
     M --> N[机器人 / 公众号推送 / 短信与手机推送 / 电话语音 / 邮件 / Webhook]
 ```
 
-SDK 默认连接本机 Agent；没有 Agent 的业务可直接连接主服务，但此时没有 Agent 的磁盘保护。浏览器通过业务后端转发采集，业务后端持有同一套限定 table 的 Key；不额外引入公开凭证类型。
+SDK 和接入页默认 direct，直接连接平台；用户也可明确选择 agent，经 LightMoni Agent 的磁盘队列转发。两种显式路径不自动互相改投；direct 使用进程内缓冲，agent 收到持久化 ACK 后由独立 Agent 补传。Agent 的主机采集、拨测和目录日志独立于业务路由，安装 Agent 不是 direct 的前置条件。两种方式仍分别需要连接地址及对应凭据，中转不等于免配置或已减少请求数。完整边界见 [SDD 012](../specs/012-sdk-reporting-choice/spec.md)。浏览器通过业务后端转发采集，业务后端持有同一套限定 table 的 Key；不额外引入公开凭证类型。
 
 主服务内部为模块化单体：统一 HTTP server、认证、SQLite、ClickHouse writer、查询执行器和后台任务生命周期。大盘、日志、告警是模块；不拆成独立微服务。中心端不需要 Redis、Kafka、Grafana 或 Kibana。ClickHouse 是整体资源占用的主要候选，需要实测后发布小机器的推荐配置，不能把“小团队”直接等同于固定的内存承诺。
 
@@ -43,10 +44,9 @@ SDK 默认连接本机 Agent；没有 Agent 的业务可直接连接主服务，
 
 ```ts
 // TypeScript SDK；在业务退出时 flush/shutdown。
-const moni = createLightMoni({
+const moni = createLightMoniFromEnv({
   service: "order-api",
   table: "business",
-  endpoint: "http://127.0.0.1:4318",
 });
 moni.counter("orders_created").add(1, { region: "cn", payment: "wechat" });
 moni.log("info", "order created", { order_id: "123" });
@@ -102,7 +102,7 @@ SDK 到 Agent 之前的数据默认只在有界内存，业务进程崩溃可能
 | SQL 大盘 | 多大盘、多面板/查询、图表配置、布局、变量、时间、刷新、跨表/服务、日志跳转 | 任意变换、面板插件、原版格式导入 |
 | 日志探索 | 关键词与字段过滤、分布图、列配置、详情/堆栈、同来源上下文、保存搜索、实时增量、trace 联动 | 完整 KQL/Lucene、大规模长期快照 |
 | 告警与通知 | 人员责任组、多主多备、固定/周期排班、分级窗口与升级、接手统计、日志/Trace现场、常见渠道及回执，保留规则求值/恢复 | 企业组织权限、依赖抑制 |
-| SDK | 六种业务语言、log/metric/trace、上下文、维度聚合、批量与重试、轻量浏览器入口 | 完整自动埋点矩阵、会话回放 |
+| SDK | 三种当前发布业务语言、log/metric/trace、上下文、维度聚合、批量与重试、轻量浏览器入口 | 完整自动埋点矩阵、会话回放 |
 | Agent | 机器/进程采集、HTTP/TCP 拨测、SDK 接收、磁盘缓存、心跳、配置轮询、安装脚本 | 更多操作系统、无缝在线升级 |
 | 主干 | 部署、用户管理、四类第三方登录、多 Key 管理与追踪、目录、存储、共享查询、只读 SQL、SDK/Agent 接入页、日志 Trace ID 筛选、自监控 | 多租户、HA 集群、PromQL 兼容 |
 
@@ -116,7 +116,7 @@ SDK 到 Agent 之前的数据默认只在有界内存，业务进程崩溃可能
 
 UI 禁止原生 `<select>` 及 `window.alert/confirm/prompt`。选择、确认、输入、日期与时间使用共享 React 组件，键盘与焦点行为一并验收。AntV 绘制图表，共享表格展示无损数值。详细决定见 [UI 设计说明](ui-design.md)，核心交互对标与全流程验收见 [acceptance.md](acceptance.md)。
 
-共用侧栏：概览、大盘、日志、链路、告警、节点助手、数据接入、设置。接入页提供服务器安装命令、六种语言与浏览器 SDK 样例、数据到达状态和对应预置大盘。管理员选择初始任务标签并填入上报连接后生成自动配置的 Agent 安装命令；安装脚本有固定发布版本与校验和，Linux amd64/arm64 和 systemd 作为首批目标。
+共用侧栏：概览、大盘、日志、链路、告警、节点助手、数据接入、设置。接入页提供服务器安装命令、TypeScript/JavaScript、Python、Ruby 与浏览器 SDK 样例、数据到达状态和对应预置大盘。管理员选择初始任务标签并填入上报连接后生成自动配置的 Agent 安装命令；安装脚本有固定发布版本与校验和，Linux amd64/arm64 和 systemd 作为首批目标。
 
 中心端提供 Docker Compose、配置示例、初始化、升级/备份/恢复和数据卷说明。首次部署能够用预置样例确认“接收 → 查询 → 出图 → 检索 → 告警”链路。TLS 可由已有反向代理承担；不另外引入专用网关。SDK 与 Agent 的本机通信默认只绑定 loopback，容器场景明确如何连接宿主 Agent。
 

@@ -1,6 +1,6 @@
 # SDK 连接模式验证 Quickstart
 
-本文是规格验收入口；六种 SDK 已提供三种 mode 的基线构造和路由选择，完整跨语言故障矩阵仍需按 validation 记录执行。
+本文是规格验收入口；本次发布的 TypeScript/JavaScript、Python、Ruby 已提供三种 mode 的基线构造和路由选择，完整跨语言故障矩阵仍需按 validation 记录执行。
 
 ## 1. 直连中心
 
@@ -42,7 +42,7 @@ export LIGHTMONI_DATA_KEY_FILE=/run/secrets/lightmoni-data-key
 
 ## 4. 自定义打点最小检查
 
-每种保留语言的示例都应创建一个 root client 和两个 table 子 client，并记录：
+每种当前发布语言的示例都应创建一个 root client 和两个 table 子 client，并记录：
 
 - 一个 Counter、Gauge、Histogram；
 - 一条结构化日志和带属性的 Span；
@@ -57,12 +57,11 @@ export LIGHTMONI_DATA_KEY_FILE=/run/secrets/lightmoni-data-key
 实现后从仓库根目录运行对应命令：
 
 ~~~sh
-go test -race ./sdk/go
 npm --prefix sdk/typescript test
 PYTHONPATH=sdk/python python3 -m unittest discover -s sdk/python/tests -v
-php sdk/php/tests
-ruby -I sdk/ruby/lib sdk/ruby/test
-cargo test --manifest-path sdk/rust/Cargo.toml
+ruby -I sdk/ruby/lib sdk/ruby/test/reporting_test.rb
 ~~~
 
 命令需按仓库实际测试脚本调整；验证证据必须额外包含本地 Agent、隔离中心、故障注入和凭据泄露扫描，不能只用单元测试替代真实 HTTP。
+
+PHP 原生 SDK 已下线。Go/Rust 仅保留源码、不提供本次发布包与接入页安装选项；原生工具链和完整连接模式验收列为后续任务，不纳本次发布验收。

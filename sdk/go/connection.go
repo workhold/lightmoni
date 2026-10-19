@@ -21,44 +21,48 @@ func NewFromEnv(service, table string, cfg Config) (*Client, error) {
 		return nil, err
 	}
 	cfg.Mode = ConnectionMode(mode)
-	if cfg.Endpoint == "" {
-		cfg.Endpoint = os.Getenv("LIGHTMONI_ENDPOINT")
+	if cfg.Mode != ModeAgent && cfg.Mode != ModeDirect && cfg.Mode != ModeAuto {
+		return nil, errors.New("mode must be agent, direct, or auto")
 	}
-	if cfg.AgentEndpoint == "" {
-		cfg.AgentEndpoint = os.Getenv("LIGHTMONI_AGENT_ENDPOINT")
+	if cfg.Mode != ModeDirect {
+		if cfg.AgentEndpoint == "" {
+			cfg.AgentEndpoint = os.Getenv("LIGHTMONI_AGENT_ENDPOINT")
+		}
+		if cfg.AgentEndpoint == "" {
+			cfg.AgentEndpoint = "http://127.0.0.1:4318"
+		}
+		if cfg.Mode == ModeAgent || cfg.LocalToken == "" {
+			cfg.LocalToken, cfg.LocalTokenFile, err = secretValue("local token", cfg.LocalToken, cfg.LocalTokenFile, "LIGHTMONI_LOCAL_TOKEN", "LIGHTMONI_LOCAL_TOKEN_FILE")
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
-	if cfg.AgentEndpoint == "" {
-		cfg.AgentEndpoint = "http://127.0.0.1:4318"
-	}
-	if cfg.LocalToken == "" {
-		cfg.LocalToken, cfg.LocalTokenFile, err = secretValue("local token", cfg.LocalToken, cfg.LocalTokenFile, "LIGHTMONI_LOCAL_TOKEN", "LIGHTMONI_LOCAL_TOKEN_FILE")
+	if cfg.Mode != ModeAgent {
+		if cfg.Endpoint == "" {
+			cfg.Endpoint = os.Getenv("LIGHTMONI_ENDPOINT")
+		}
+		explicitData := cfg.DataKey
+		if explicitData == "" {
+			explicitData = cfg.Key
+		}
+		cfg.DataKey, cfg.DataKeyFile, err = secretValue("data key", explicitData, cfg.DataKeyFile, "LIGHTMONI_DATA_KEY", "LIGHTMONI_DATA_KEY_FILE")
 		if err != nil {
 			return nil, err
 		}
-	}
-	explicitData := cfg.DataKey
-	if explicitData == "" {
-		explicitData = cfg.Key
-	}
-	cfg.DataKey, cfg.DataKeyFile, err = secretValue("data key", explicitData, cfg.DataKeyFile, "LIGHTMONI_DATA_KEY", "LIGHTMONI_DATA_KEY_FILE")
-	if err != nil {
-		return nil, err
-	}
-	legacy, _, legacyErr := secretValue("legacy data key", "", "", "LIGHTMONI_KEY", "")
-	if legacyErr != nil {
-		return nil, legacyErr
-	}
-	if cfg.DataKey != "" && legacy != "" && cfg.DataKey != legacy {
-		return nil, errors.New("credential_source_conflict: LIGHTMONI_KEY")
-	}
-	if cfg.DataKey == "" {
-		cfg.DataKey = legacy
-	}
-	if cfg.DataKey != "" {
-		cfg.Key = cfg.DataKey
-	}
-	if cfg.Key == "" {
-		cfg.Key = cfg.DataKey
+		legacy, _, legacyErr := secretValue("legacy data key", "", "", "LIGHTMONI_KEY", "")
+		if legacyErr != nil {
+			return nil, legacyErr
+		}
+		if cfg.DataKey != "" && legacy != "" && cfg.DataKey != legacy {
+			return nil, errors.New("credential_source_conflict: LIGHTMONI_KEY")
+		}
+		if cfg.DataKey == "" {
+			cfg.DataKey = legacy
+		}
+		if cfg.DataKey != "" {
+			cfg.Key = cfg.DataKey
+		}
 	}
 	return New(cfgWithService(service, table, cfg))
 }

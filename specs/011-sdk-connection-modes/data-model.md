@@ -110,4 +110,4 @@ sending -> uncertain        (body sent and response unknown)
 uncertain -> sending        (same route retry only)
 ~~~
 
-blocked 不发业务数据；closed 不允许新记录。SDK 的具体线程、Fiber、async task 或 PHP request 生命周期由各语言实现，但状态转换和 route 语义不变。
+blocked 不发业务数据；closed 不允许新记录。SDK 的具体线程、Fiber 或 async task 生命周期由各语言实现，但状态转换和 route 语义不变。

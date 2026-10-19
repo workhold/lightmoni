@@ -161,14 +161,17 @@ func validTable(table string) bool {
 }
 
 func New(cfg Config) (*Client, error) {
-	if cfg.Key == "" && cfg.DataKeyFile != "" {
+	if cfg.Mode != "" && cfg.Mode != ModeAgent && cfg.Mode != ModeDirect && cfg.Mode != ModeAuto {
+		return nil, errors.New("mode must be agent, direct, or auto")
+	}
+	if cfg.Mode != ModeAgent && cfg.Key == "" && cfg.DataKeyFile != "" {
 		value, _, err := secretValue("data key", "", cfg.DataKeyFile, "", "")
 		if err != nil {
 			return nil, err
 		}
 		cfg.Key = value
 	}
-	if cfg.LocalToken == "" && cfg.LocalTokenFile != "" {
+	if cfg.Mode != ModeDirect && cfg.LocalToken == "" && cfg.LocalTokenFile != "" {
 		value, _, err := secretValue("local token", "", cfg.LocalTokenFile, "", "")
 		if err != nil {
 			return nil, err
@@ -207,6 +210,9 @@ func New(cfg Config) (*Client, error) {
 				probeResult = "unavailable_fallback"
 			}
 		}
+	}
+	if cfg.Exporter == nil && cfg.Mode == ModeAgent {
+		cfg.ConfigEndpoint, cfg.ConfigKey = cfg.Endpoint, ""
 	}
 	if cfg.Service == "" || len(cfg.Service) > 128 {
 		return nil, errors.New("service is required and must be at most 128 bytes")

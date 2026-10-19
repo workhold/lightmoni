@@ -30,8 +30,13 @@ impl ConnectionConfig {
     pub fn from_env()->Result<Self>{
         let mode=ConnectionMode::parse(&std::env::var("LIGHTMONI_MODE").unwrap_or_else(|_|"direct".into()))?;
         let endpoint=std::env::var("LIGHTMONI_ENDPOINT").ok().filter(|v|!v.is_empty()); let agent_endpoint=std::env::var("LIGHTMONI_AGENT_ENDPOINT").ok().filter(|v|!v.is_empty());
-        let (data_key,data_key_source)=secret(None,None,"LIGHTMONI_DATA_KEY","LIGHTMONI_DATA_KEY_FILE")?; let (legacy,legacy_source)=secret(None,None,"LIGHTMONI_KEY","")?; if !data_key.is_empty()&&!legacy.is_empty()&&data_key!=legacy{return Err("credential_source_conflict: LIGHTMONI_KEY".into());} let data_key=if data_key.is_empty(){legacy}else{data_key};
-        let (local_token,_)=secret(None,None,"LIGHTMONI_LOCAL_TOKEN","LIGHTMONI_LOCAL_TOKEN_FILE")?;
+        let data_key=if mode!=ConnectionMode::Agent {
+            let (data_key,_)=secret(None,None,"LIGHTMONI_DATA_KEY","LIGHTMONI_DATA_KEY_FILE")?;
+            let (legacy,_)=secret(None,None,"LIGHTMONI_KEY","")?;
+            if !data_key.is_empty()&&!legacy.is_empty()&&data_key!=legacy{return Err("credential_source_conflict: LIGHTMONI_KEY".into());}
+            if data_key.is_empty(){legacy}else{data_key}
+        }else{String::new()};
+        let local_token=if mode!=ConnectionMode::Direct {secret(None,None,"LIGHTMONI_LOCAL_TOKEN","LIGHTMONI_LOCAL_TOKEN_FILE")?.0}else{String::new()};
         Ok(Self{mode,endpoint,data_key:(!data_key.is_empty()).then_some(data_key),data_key_file:None,agent_endpoint,local_token:(!local_token.is_empty()).then_some(local_token),local_token_file:None,discovery_timeout:Duration::from_millis(500)})
     }
     fn selected(&self)->Result<(String,String,String,String,u64)> {
@@ -218,7 +223,7 @@ impl Client {
         let mut s=client.state.lock().unwrap();
         s.route_stats.insert("configured_mode".into(),match config.mode{ConnectionMode::Agent=>"agent",ConnectionMode::Direct=>"direct",ConnectionMode::Auto=>"auto"}.into());
         s.route_stats.insert("selected_route".into(),selected); s.route_stats.insert("agent_probe".into(),probe);
-        s.stats.insert("fallback_count".into(),fallback); Ok(client)
+        s.stats.insert("fallback_count".into(),fallback); drop(s); Ok(client)
     }
     pub fn with_limits(service:&str,table_name:&str,endpoint:&str,key:&str,limits:Limits)->Result<Self> {
         let table=table(table_name)?;let url=reqwest::Url::parse(endpoint).map_err(|_|"invalid endpoint")?;
@@ -368,3 +373,6 @@ impl Span {
     pub fn end(&mut self){if self.ended{return;}self.ended=true;let start=self.data["startTimeUnixNano"].as_str().unwrap().parse::<u128>().unwrap();self.data["endTimeUnixNano"]=json!(nano().max(start).to_string());self.client.state.lock().unwrap().store(&self.client.table,"traces",self.data.clone());}
 }
 impl Drop for Span {fn drop(&mut self){if !self.ended && std::thread::panicking(){self.set_error("span scope panicked");}self.end();}}
+
+#[cfg(test)]
+mod reporting_tests;

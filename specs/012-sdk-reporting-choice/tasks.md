@@ -1,0 +1,12 @@
+# Tasks
+
+- [x] T001 先冻结规格、设计、契约与非目标。
+- [x] T002 当前发布 SDK 的显式模式只读取所选凭据；保留所选来源检查与 auto 兼容，并记录 Go/Rust 后续支持范围。
+- [x] T003 接入页默认 direct，保留两模式和独立地址，更新链路/凭据/容器提示。
+- [x] T004 环境示例清理遗留变量，正确表达可选 local token，更新当前三种发布 SDK 说明并移除 PHP。
+- [x] T005 添加配置隔离和真实收据检查，覆盖失败不改投及所选秘密仍校验。
+- [x] T006 运行相关 SDK/runtime/Web 检查并记录真实证据与缺失工具链。
+- [x] T007 同步远端 main，完成最终审查，推送分支并创建待审核 [PR #13](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/13)。
+
+- [x] T008 移除 PHP SDK 源码、示例与发布入口；Go/Rust 源码保留并标为后续支持，当前仅发布 TypeScript/JavaScript、Python、Ruby。
+- [x] T009 复验 API 旧包访问限制、发布包校验清单和三语言双路径桌面/窄屏页面。

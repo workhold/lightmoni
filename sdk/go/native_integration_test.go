@@ -15,15 +15,14 @@ import (
 
 func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 	if os.Getenv("LIGHTMONI_NATIVE_SDK_TEST") != "1" {
-		t.Skip("enable with LIGHTMONI_NATIVE_SDK_TEST=1 after scripts/test-sdks.py --docker")
+		t.Skip("deferred Go SDK check: enable with LIGHTMONI_NATIVE_SDK_TEST=1 after scripts/test-sdks.py")
 	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Docker Desktop reaches this isolated receiver through its host gateway.
-	agent := newNodeAgent(t, root, "0.0.0.0:0")
-	command := exec.Command("python3", "scripts/test-sdks.py", "--docker", "--skip-build", "--agent-url", agent.url)
+	agent := newNodeAgent(t, root, "127.0.0.1:0")
+	command := exec.Command("python3", "scripts/test-sdks.py", "--skip-build", "--agent-url", agent.url)
 	command.Dir = root
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("native SDK demos: %v\n%s", err, output)
@@ -79,10 +78,10 @@ func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 			}
 		}
 	}
-	if batches != 12 || len(totals) != 4 {
-		t.Fatalf("expected 12 durable batches for four native languages: batches=%d totals=%v", batches, totals)
+	if batches != 6 || len(totals) != 2 {
+		t.Fatalf("expected 6 durable batches for Python and Ruby: batches=%d totals=%v", batches, totals)
 	}
-	for _, language := range []string{"python", "php", "ruby", "rust"} {
+	for _, language := range []string{"python", "ruby"} {
 		service := "conformance-" + language
 		if totals[service] != 20 || len(logs[service]) != 20 || len(spans[service]) != 20 {
 			t.Fatalf("%s totals=%d logs=%d spans=%d", service, totals[service], len(logs[service]), len(spans[service]))
