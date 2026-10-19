@@ -1,7 +1,8 @@
 import { parseJSON } from "../shared/json.js";
 import type { Context } from "../shared/types.js";
 import type { Alerts } from "./alerts.js";
-import { finiteNumber } from "./alerts.js";
+import { AlertCapabilities, normalizeRule, validateRule } from "./alert-capabilities.js";
+export { validateRule } from "./alert-capabilities.js";
 import {
   bytes,
   clone,
@@ -17,12 +18,10 @@ import {
   validRange,
 } from "./common.js";
 import {
-  clockMinutes,
   defaultPolicies,
   onCall,
   policy,
   priority,
-  validZone,
   validatePolicyGroup,
   localParts,
   zonedDate,
@@ -36,150 +35,9 @@ import {
   validateRecipient,
 } from "./alert-notify.js";
 import {
-  autoEvidence,
   registerDirectory,
   traceDetail,
-  validateEvidence,
 } from "./alert-evidence.js";
-const numberFields = [
-  "interval_seconds",
-  "window_seconds",
-  "for_seconds",
-  "for_count",
-  "recovery_seconds",
-  "delay_seconds",
-  "health_for_seconds",
-  "repeat_seconds",
-];
-function normalizeRule(v: any): any {
-  v = clone(v);
-  for (const key of numberFields) v[key] ??= 0;
-  for (const key of [
-    "source_table_ids",
-    "group_ids",
-    "label_fields",
-    "services",
-  ])
-    v[key] ??= [];
-  for (const key of [
-    "name",
-    "sql",
-    "value_field",
-    "threshold",
-    "operator",
-    "kind",
-    "severity",
-    "no_data_policy",
-    "no_data_value",
-    "silence_until",
-    "unit",
-  ])
-    v[key] ??= "";
-  v.enabled = !!v.enabled;
-  v.notify_health = !!v.notify_health;
-  return v;
-}
-export async function validateRule(m: Alerts, v: any): Promise<void> {
-  if (v.evidence_profile == null) await autoEvidence(m, v);
-  if (
-    v.severity &&
-    !["P0", "P1", "P2", "P3", "warning", "critical"].includes(v.severity)
-  )
-    throw Error("告警级别必须为P0至P3");
-  v.severity = priority(v.severity);
-  await validateEvidence(m, v.evidence_profile);
-  if (!["metric", "sql", "log"].includes(v.kind))
-    throw Error("invalid alert kind");
-  if (!v.name.trim() || !v.sql.trim() || !v.value_field)
-    throw Error("name, SQL and value field required");
-  if (!finiteNumber(v.threshold))
-    throw Error("threshold must be a finite number");
-  if (!["gt", "gte", "lt", "lte", "eq", "ne", "no_data"].includes(v.operator))
-    throw Error("invalid operator");
-  if (
-    numberFields.some((k) => !Number.isInteger(v[k])) ||
-    v.interval_seconds < 1 ||
-    v.interval_seconds > 86400 ||
-    v.window_seconds < 1 ||
-    v.window_seconds > 604800 ||
-    [
-      "for_seconds",
-      "recovery_seconds",
-      "delay_seconds",
-      "health_for_seconds",
-      "repeat_seconds",
-    ].some((k) => v[k] < 0)
-  )
-    throw Error("invalid evaluation/window duration");
-  if (v.for_count < 0 || v.for_count > 1000)
-    throw Error("连续异常检测次数必须为1到1000");
-  v.for_count ||= 1;
-  if (
-    !["", "keep_state", "zero", "alerting", "normal", "value"].includes(
-      v.no_data_policy,
-    )
-  )
-    throw Error("invalid no-data policy");
-  if (
-    v.no_data_policy === "value" &&
-    v.operator !== "no_data" &&
-    !finiteNumber(v.no_data_value)
-  )
-    throw Error("无数据替代值必须为有限数值");
-  if (
-    v.panel_condition &&
-    !["last", "avg", "max", "min", "sum", "count"].includes(
-      v.panel_condition.reducer,
-    )
-  )
-    throw Error("invalid panel reducer");
-  const refs = await m.deps.referencedTables(v.sql, m.controller.signal),
-    tables = await m.deps.cat.list(m.controller.signal),
-    actual = refs
-      .map((name) => {
-        const t = tables.find((t) => t.name === name);
-        if (!t) throw Error("SQL reads unknown table");
-        return t.id;
-      })
-      .sort();
-  if (
-    !actual.length ||
-    encode(actual) !== encode([...v.source_table_ids].sort())
-  )
-    throw Error(
-      "source_table_ids must match SQL AST tables: " + actual.join(", "),
-    );
-  if (v.label_fields.length > 10) throw Error("too many label fields");
-  if (v.group_ids.length > 16) throw Error("最多绑定 16 个告警组");
-  if (
-    unique(v.group_ids).length !== v.group_ids.length ||
-    v.group_ids.some((key: string) => !key || !m.group(key))
-  )
-    throw Error("请选择有效且不重复的告警组");
-}
-function measurement(rule: any): string {
-  const v = normalizeRule(rule);
-  v.for_count = Math.max(1, v.for_count);
-  for (const key of [
-    "id",
-    "revision",
-    "name",
-    "enabled",
-    "severity",
-    "unit",
-    "repeat_seconds",
-    "silence_until",
-    "evidence_profile",
-  ])
-    delete v[key];
-  return encode(
-    Object.fromEntries(
-      Object.keys(v)
-        .sort()
-        .map((k) => [k, v[k]]),
-    ),
-  );
-}
 async function filteredIDs(
   m: Alerts,
   c: Context,
@@ -242,6 +100,7 @@ function resetPaging(v: any, m: Alerts): void {
 }
 export function registerAlertAPI(m: Alerts): void {
   const { router: r, db } = m.deps;
+  const capabilities = new AlertCapabilities(m);
   r.get("/api/v1/alerts/groups", (c) => c.json(m.groups()));
   const saveGroup = async (c: Context) => {
     const g = await c.body<any>();
@@ -453,52 +312,13 @@ export function registerAlertAPI(m: Alerts): void {
     { public: true },
   );
   r.get("/api/v1/alerts/rules", async (c) => {
-    const ids = await filteredIDs(m, c);
-    c.json(m.rules().filter((v) => ids.has(v.id)));
+    c.json(await capabilities.listRules(c.user, Object.fromEntries(c.url.searchParams)));
   });
+  r.get("/api/v1/alerts/rules/:id", (c) => c.json(capabilities.getRule(c.user, c.params.id)));
   const saveRule = async (c: Context) => {
-    const v = normalizeRule(await c.body<any>());
-    await guardedAsync(c, () => validateRule(m, v));
-    v.id = c.params.id || id();
-    const old = m.body("alert_rules", v.id);
-    if (old && old.revision !== v.revision)
-      c.error(409, "告警规则已更新，请刷新后重试");
-    v.revision = (old?.revision || 0) + 1;
-    const changed = !old || measurement(old) !== measurement(v);
-    db.transaction(() => {
-      db.run(
-        "INSERT INTO alert_rules(id,body) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,last_eval=''",
-        v.id,
-        encode(v),
-      );
-      if (changed) db.run("DELETE FROM alert_states WHERE rule_id=?", v.id);
-      else if (old.enabled !== v.enabled)
-        for (const s of m.list(
-          "SELECT body FROM alert_states WHERE rule_id=?",
-          v.id,
-        )) {
-          if (s.status === "pending") s.status = "normal";
-          if (s.status === "recovering") s.status = "firing";
-          s.since = "";
-          s.last_eval = "";
-          s.consecutive_failures = 0;
-          if (s.health !== "ok") s.health_since = stamp(m.now());
-          db.run(
-            "UPDATE alert_states SET body=? WHERE rule_id=? AND fingerprint=?",
-            encode(s),
-            v.id,
-            s.fingerprint,
-          );
-        }
-      if (changed || !v.enabled) {
-        m.cancelRule(v.id, v.enabled ? "规则判断已变更" : "规则已禁用");
-        db.run(
-          "UPDATE alert_outbox SET status='cancelled' WHERE status IN ('queued','retry') AND event_id IN (SELECT id FROM alert_events WHERE rule_id=?)",
-          v.id,
-        );
-      }
-    });
-    c.json(v);
+    const awaitBody = await c.body<any>();
+    const prepared = await guardedAsync(c, () => capabilities.prepareRuleSave(c.user, awaitBody, c.params.id, c.signal));
+    c.json(db.transaction(() => capabilities.commitRuleSave(c.user, prepared)));
   };
   r.post("/api/v1/alerts/rules", saveRule);
   r.put("/api/v1/alerts/rules/:id", saveRule);
@@ -516,34 +336,12 @@ export function registerAlertAPI(m: Alerts): void {
   });
   r.post("/api/v1/alerts/rules/:id/silence", async (c) => {
     const input = await c.body<any>();
-    if (input.until && !Number.isFinite(parseTime(input.until)))
-      c.error(400, "invalid silence end");
-    const rule = m.body("alert_rules", c.params.id);
-    if (!rule) c.error(404, "rule not found");
-    rule.silence_until = input.until || "";
-    rule.revision++;
-    db.transaction(() => {
-      db.run("UPDATE alert_rules SET body=? WHERE id=?", encode(rule), rule.id);
-      if (parseTime(input.until) > m.now().getTime()) {
-        db.run(
-          "UPDATE alert_outbox SET status='suppressed' WHERE status IN ('queued','retry') AND event_id IN (SELECT id FROM alert_events WHERE rule_id=?)",
-          rule.id,
-        );
-        for (const s of m.list(
-          "SELECT body FROM alert_states WHERE rule_id=?",
-          rule.id,
-        )) {
-          s.silenced = true;
-          db.run(
-            "UPDATE alert_states SET body=? WHERE rule_id=? AND fingerprint=?",
-            encode(s),
-            rule.id,
-            s.fingerprint,
-          );
-        }
-      }
-    });
-    c.json(rule);
+    if (!input || typeof input !== "object" || Array.isArray(input)) c.error(400, "配置必须为对象");
+    const rule = capabilities.getRule(c.user, c.params.id);
+    const prepared = await capabilities.prepare(c.user, "rule.silence", {
+      id: rule.id, revision: input.revision ?? rule.revision, until: input.until ?? "",
+    }, c.signal);
+    c.json(db.transaction(() => capabilities.commit(c.user, prepared)));
   });
   r.post("/api/v1/alerts/preview", async (c) => {
     const v = normalizeRule(await c.body<any>());
@@ -902,64 +700,35 @@ export function registerAlertAPI(m: Alerts): void {
     }
     c.json(out);
   });
-  const silencePermission = (s: any, c: Context) =>
-    c.user.role === "admin" ||
-    s.created_by === c.user.id ||
-    (s.scope === "group" && m.group(s.group_id)?.members.includes(c.user.id)) ||
-    (s.scope === "incident" &&
-      !!m.response(s.response_id) &&
-      canRespond(m, m.response(s.response_id), c));
-  r.get("/api/v1/alerts/silences", (c) =>
-    c.json(m.list("SELECT body FROM alert_silences ORDER BY rowid DESC")),
-  );
+  r.get("/api/v1/alerts/silences", (c) => c.json(capabilities.listSilences(c.user, Object.fromEntries(c.url.searchParams))));
+  r.get("/api/v1/alerts/silences/:id", (c) => c.json(capabilities.getSilence(c.user, c.params.id)));
   r.post("/api/v1/alerts/silences", async (c) => {
-    const s = await c.body<any>();
-    s.created_by = "";
-    if (!silencePermission(s, c)) c.error(403, "没有此范围的静默权限");
-    if (!["all", "group", "rule", "incident", "service"].includes(s.scope))
-      c.error(400, "无效的静默范围");
-    s.timezone ||= "Asia/Shanghai";
-    if (!validZone(s.timezone)) c.error(400, "无效的时区");
-    s.from ||= stamp(m.now());
-    if (!Number.isFinite(parseTime(s.from))) c.error(400, "无效的开始时间");
-    if (s.daily_start)
-      guarded(c, () => {
-        clockMinutes(s.daily_start);
-        clockMinutes(s.daily_end);
-      });
-    if (
-      (!s.until && !s.daily_start) ||
-      (s.until && !(parseTime(s.until) > parseTime(s.from)))
-    )
-      c.error(400, "静默结束时间必须晚于开始时间");
-    const target = (
-      {
-        group: "group_id",
-        rule: "rule_id",
-        incident: "response_id",
-        service: "service",
-      } as any
-    )[s.scope];
-    if (target && !s[target]) c.error(400, "静默范围缺少目标");
-    if (
-      (s.weekdays ?? []).some(
-        (d: number) => !Number.isInteger(d) || d < 0 || d > 6,
-      ) ||
-      (s.priorities ?? []).some((p: string) => priority(p) !== p)
-    )
-      c.error(400, "无效的星期或告警级别");
-    s.id = id();
-    s.created_by = c.user.id;
-    s.reason ||= "临时静默";
-    db.run("INSERT INTO alert_silences(id,body) VALUES(?,?)", s.id, encode(s));
-    c.json(s);
+    const input = await c.body<any>();
+    // Existing forms send empty host fields; identity and object IDs remain server-owned.
+    if (input && typeof input === "object" && !Array.isArray(input)) {
+      delete input.id;
+      delete input.created_by;
+      delete input.revision;
+      delete input.version;
+    }
+    const prepared = await capabilities.prepare(c.user, "silence.create", { silence: input }, c.signal);
+    c.json(db.transaction(() => capabilities.commit(c.user, prepared)));
   });
-  r.delete("/api/v1/alerts/silences/:id", (c) => {
-    const s = m.body("alert_silences", c.params.id);
-    if (!s) c.error(404, "静默不存在");
-    if (!silencePermission(s, c)) c.error(403, "没有结束此静默的权限");
-    s.until = stamp(m.now());
-    db.run("UPDATE alert_silences SET body=? WHERE id=?", encode(s), s.id);
+  r.put("/api/v1/alerts/silences/:id", async (c) => {
+    const input = await c.body<any>();
+    if (!input || typeof input !== "object" || Array.isArray(input)) c.error(400, "配置必须为对象");
+    const current = capabilities.getSilence(c.user, c.params.id);
+    const version = input.version ?? (Number.isSafeInteger(input.revision) && input.revision === current.revision ? current.version : "");
+    const patch = input.patch ?? Object.fromEntries(Object.entries(input).filter(([key]) => !["id", "created_by", "revision", "version", "ended_at"].includes(key)));
+    const prepared = await capabilities.prepare(c.user, "silence.update", { id: current.id, version, patch }, c.signal);
+    c.json(db.transaction(() => capabilities.commit(c.user, prepared)));
+  });
+  r.delete("/api/v1/alerts/silences/:id", async (c) => {
+    const current = capabilities.getSilence(c.user, c.params.id);
+    const prepared = await capabilities.prepare(c.user, "silence.end", {
+      id: current.id, version: c.url.searchParams.get("version") || current.version,
+    }, c.signal);
+    db.transaction(() => capabilities.commit(c.user, prepared));
     c.json({ ok: true });
   });
   r.get("/api/v1/alerts/response-statistics", (c) => responseStatistics(m, c));

@@ -3,6 +3,7 @@ import {Link,useSearchParams} from 'react-router-dom';
 import dayjs from 'dayjs';
 import {ConfigProvider,Alert,App,Button,Card,DatePicker,Descriptions,Form,Input,Modal,Progress,Select,Space,Table,Tabs,Tag,TimePicker,Typography} from '../../shared/ui';
 import {api,post} from '../../shared/api';
+import {subscribeAlertChanges} from '../../shared/alert-changes';
 import type {User} from '../../shared/types';
 import {ackMethods,displayTime,priorities,responseStates,secondsText,stages,traceURL,weekdays,type Incident,type Responder,type ResponseGroup,type Silence} from './response-model';
 
@@ -10,8 +11,9 @@ type Timeline={id:string;at:string;kind:string;message:string;method:string};
 type Statistic={user_id:string;user_name:string;notified:number;acknowledged:number;peer_claimed:number;recovered:number;cancelled:number;pending:number;ack_rate:number;mean_ack_seconds:number;median_ack_seconds:number;p95_ack_seconds:number;methods:Record<string,number>};
 type StatRecord={response_id:string;user_id?:string;source_priority?:string;user_name:string;group_name:string;rule_name:string;priority:string;stage:string;notified_at:string;ack_at:string;ack_method:string;ack_seconds:number;outcome:string};
 type Statistics={users:Statistic[];records:StatRecord[];definition:string;truncated:boolean};
+export type ResponseAssistantContext={tab:'incidents'|'statistics'|'silences';filters:{group_id?:string;priority?:string;state?:string};selected_incident_id?:string;editing_silence_id?:string};
 
-export default function ResponseWorkbench({groups,section='incidents'}:{groups:ResponseGroup[];section?:'incidents'|'statistics'|'silences'}) {
+export default function ResponseWorkbench({groups,section='incidents',active=true,onContextChange}:{groups:ResponseGroup[];section?:'incidents'|'statistics'|'silences';active?:boolean;onContextChange?:(context:ResponseAssistantContext)=>void}) {
  const {message}=App.useApp();const [params,setParams]=useSearchParams();const claimRef=useRef<string>('');const version=useRef(0);
  const [user,setUser]=useState<User>(),[incidents,setIncidents]=useState<Incident[]>([]),[silences,setSilences]=useState<Silence[]>([]),[people,setPeople]=useState<Responder[]>([]),[stats,setStats]=useState<Statistics>(),[selected,setSelected]=useState<Incident>(),[timeline,setTimeline]=useState<Timeline[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[state,setState]=useState<string>(),[group,setGroup]=useState<string>(),[level,setLevel]=useState<string>(),[range,setRange]=useState<[dayjs.Dayjs,dayjs.Dayjs]>([dayjs().subtract(30,'day'),dayjs()]),[silence,setSilence]=useState<Silence>(),[transfer,setTransfer]=useState<string>(),[transferUser,setTransferUser]=useState<string>();
  async function load(){const current=++version.current;const q=new URLSearchParams();if(state)q.set('state',state);if(group)q.set('group_id',group);if(level)q.set('priority',level);try{const [i,s,p]=await Promise.all([api<Incident[]>('/alerts/incidents?'+q),api<Silence[]>('/alerts/silences'),api<Responder[]>('/alerts/responders')]);if(current!==version.current)return;setIncidents(i);setSilences(s);setPeople(p)}catch(e){if(current===version.current)setError(String(e))}}
@@ -19,6 +21,8 @@ export default function ResponseWorkbench({groups,section='incidents'}:{groups:R
  async function statistics(){const q=new URLSearchParams({from:range[0].toISOString(),to:range[1].toISOString()});if(group)q.set('group_id',group);if(level)q.set('priority',level);try{setStats(await api<Statistics>('/alerts/response-statistics?'+q))}catch(e){setError(String(e))}}
  useEffect(()=>{void api<User>('/auth/me').then(setUser).catch(e=>setError(String(e)))},[]);
  useEffect(()=>{void load();const timer=setInterval(()=>void load(),5000);return()=>clearInterval(timer)},[state,group,level]);
+ useEffect(()=>subscribeAlertChanges(()=>{void load();if(selected?.id)void detail(selected.id);if(section==='statistics')void statistics()}),[state,group,level,section,selected?.id,range]);
+ useEffect(()=>{if(active)onContextChange?.({tab:section,filters:{group_id:group,priority:level,state:section==='incidents'?state:undefined},selected_incident_id:selected?.id,editing_silence_id:silence?.id||undefined})},[active,section,state,group,level,selected?.id,silence?.id,onContextChange]);
  useEffect(()=>{if(section==='statistics')void statistics()},[section,group,level,range]);
  useEffect(()=>{const claim=params.get('claim');if(section!=='incidents'||!claim||!user||claimRef.current===claim)return;claimRef.current=claim;setBusy(true);post<Incident>('/alerts/claim',{token:claim}).then(async v=>{void message.success('已接手告警');await detail(v.id);const next=new URLSearchParams(params);next.delete('claim');next.set('incident',v.id);setParams(next,{replace:true});await load()}).catch(e=>{setError(String(e));claimRef.current=''}).finally(()=>setBusy(false))},[params,user]);
  useEffect(()=>{const id=params.get('incident');if(section==='incidents'&&id)void detail(id)},[params]);

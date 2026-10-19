@@ -81,6 +81,32 @@ export interface AgentCredentialStore {
   ): AgentCredential;
   /** Return true only while an enrollment token can authorize a release download. */
   canDownloadWithEnrollmentToken(token: string): boolean;
+  /** Issue a one-time token for a trusted server-side deployment workflow. */
+  issueEnrollment(input: AgentEnrollmentInput): AgentEnrollmentIssued;
+  enrollmentStatus(enrollmentID: string): {
+    status: string;
+    agent_id: string;
+    used_at: string;
+  } | undefined;
+  /** Invalidate a token after a failed trusted deployment attempt. */
+  cancelEnrollment?(enrollmentID: string): void;
+}
+
+export interface AgentEnrollmentInput {
+  endpoint_origin: string;
+  version: string;
+  allowed_arch?: string[];
+  initial_label_id?: string;
+  scopes?: CredentialScope[];
+  expires_in_seconds?: number;
+  created_by: string;
+}
+
+export interface AgentEnrollmentIssued {
+  enrollment_id: string;
+  token_display_once: string;
+  token_expires_at: string;
+  install_command_hint: string;
 }
 
 /** Register the admin enrollment and public Agent exchange endpoints. */
@@ -147,15 +173,13 @@ export function registerAgentCredentials(
     return unique;
   };
 
-  router.post("/api/v1/agent-enrollments", async (ctx) => {
-    admin(ctx);
-    const value = record(await ctx.body());
-    const allowed = value.allowed_arch == null ? ["amd64", "arm64"] : value.allowed_arch;
+  const issueEnrollment = (input: AgentEnrollmentInput): AgentEnrollmentIssued => {
+    const allowed = input.allowed_arch == null ? ["amd64", "arm64"] : input.allowed_arch;
     if (!Array.isArray(allowed) || !allowed.length || allowed.some((a) => !ARCHES.has(a)))
       fail(400, "allowed_arch must contain amd64 or arm64");
-    const version = asString(value.version ?? "0.1.0", 64, "version");
+    const version = asString(input.version ?? "0.1.0", 64, "version");
     if (!VERSION.test(version)) fail(400, "invalid version");
-    const requested = Number(value.expires_in_seconds ?? DEFAULT_ENROLLMENT_SECONDS);
+    const requested = Number(input.expires_in_seconds ?? DEFAULT_ENROLLMENT_SECONDS);
     if (!Number.isSafeInteger(requested) || requested < 60)
       fail(400, "expires_in_seconds must be at least 60");
     const expiresIn = Math.min(requested, MAX_ENROLLMENT_SECONDS);
@@ -163,9 +187,9 @@ export function registerAgentCredentials(
     const raw = secret("lm_enroll_");
     const created = now();
     const expires = new Date(created.getTime() + expiresIn * 1000);
-    const label = value.initial_label_id == null ? "" : asString(value.initial_label_id, 128, "initial_label_id");
-    const scopes = cleanScopes(value.scopes);
-    const endpointOrigin = origin(value.endpoint_origin ?? deps.externalURL);
+    const label = input.initial_label_id == null ? "" : asString(input.initial_label_id, 128, "initial_label_id");
+    const scopes = cleanScopes(input.scopes);
+    const endpointOrigin = origin(input.endpoint_origin ?? deps.externalURL);
     db.run(
       `INSERT INTO agent_enrollments(id,token_hash,endpoint_origin,allowed_arch_json,version,initial_label_id,scopes_json,status,expires_at,created_at,created_by)
        VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
@@ -179,20 +203,23 @@ export function registerAgentCredentials(
       "issued",
       iso(expires),
       iso(created),
-      ctx.user.id,
+      input.created_by,
     );
+    return {
+      enrollment_id: idValue,
+      token_display_once: raw,
+      token_expires_at: iso(expires),
+      install_command_hint:
+        `sh install.sh --endpoint ${endpointOrigin} --release-url ${endpointOrigin}/downloads/agent --version ${version} --enrollment-token-stdin`,
+    };
+  };
+
+  router.post("/api/v1/agent-enrollments", async (ctx) => {
+    admin(ctx);
+    const value = record(await ctx.body());
     // The full token is intentionally returned only by this response. The
     // generated command contains no secret and is safe to copy from the UI.
-    ctx.json(
-      {
-        enrollment_id: idValue,
-        token_display_once: raw,
-        token_expires_at: iso(expires),
-        install_command_hint:
-          `sh install.sh --endpoint ${endpointOrigin} --release-url ${endpointOrigin}/downloads/agent --version ${version} --enrollment-token-stdin`,
-      },
-      201,
-    );
+    ctx.json(issueEnrollment({ ...value, created_by: ctx.user.id } as AgentEnrollmentInput), 201);
   });
 
   router.get("/api/v1/agent-enrollments", (ctx) => {
@@ -395,5 +422,23 @@ export function registerAgentCredentials(
       (row.status === "issued" || row.status === "pending_activation") &&
       Date.parse(row.expires_at) > now().getTime();
   };
-  return { has, authenticate, canDownloadWithEnrollmentToken };
+  const enrollmentStatus = (enrollmentID: string) =>
+    db.get<{ status: string; agent_id: string; used_at: string }>(
+      "SELECT status,agent_id,COALESCE(used_at,'') AS used_at FROM agent_enrollments WHERE id=?",
+      enrollmentID,
+    );
+  const cancelEnrollment = (enrollmentID: string) => {
+    db.run(
+      "UPDATE agent_enrollments SET status='cancelled' WHERE id=? AND status IN ('issued','pending_activation')",
+      enrollmentID,
+    );
+  };
+  return {
+    has,
+    authenticate,
+    canDownloadWithEnrollmentToken,
+    issueEnrollment,
+    enrollmentStatus,
+    cancelEnrollment,
+  };
 }

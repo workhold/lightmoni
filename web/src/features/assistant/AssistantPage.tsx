@@ -11,6 +11,7 @@ import {boundedMonitoringContext} from '../../shared/assistant-context';
 import type { CatalogTable, QueryResponse, TimeRange, User } from '../../shared/types';
 import { streamTurn } from './client';
 import { assistantTimeline, queryRangeFromTurn } from './timeline';
+import AlertProposalProgress from './AlertProposalProgress';
 import type { AssistantConfig, AssistantContext, AssistantEvent, AssistantSession, CodeTaskResult, DashboardDraft, DraftPanel, ToolTrace, TurnView } from './types';
 import './assistant.css';
 
@@ -22,11 +23,12 @@ export interface AssistantPanelProps {
   onSQL?: (sql: string) => void;
 }
 
-const toolLabels: Record<string, string> = { list_tables: '读取数据表目录', describe_table: '检查表结构', run_query: '执行 SQL 查询', draft_dashboard: '生成大盘草稿', code_task: '执行代码任务' };
+const toolLabels: Record<string, string> = { list_tables: '读取数据表目录', describe_table: '检查表结构', run_query: '执行 SQL 查询', draft_dashboard: '生成大盘草稿', code_task: '执行代码任务', list_alert_rules: '查询告警规则', get_alert_rule: '读取告警规则', list_alert_silences: '查询静默窗口', get_alert_silence: '读取静默窗口', list_alert_groups: '查询告警组', get_alert_proposal: '核验告警提案', propose_alert_change: '准备告警变更' };
 const ideas = [
   { title: '创建服务大盘', text: '根据现有数据创建服务监控大盘，包含请求量、错误率和延迟。先检查可用数据表，并生成可审阅的大盘草稿。', detail: '请求量、错误率和延迟' },
   { title: '分析异常日志', text: '分析当前时间范围的日志，找出主要错误、发生趋势和可能的原因。区分数据事实与推测，并给出后续排查 SQL。', detail: '定位问题与下一步排查' },
   { title: '帮我写 SQL', text: '检查现有数据表与字段，生成按服务统计请求量、错误率和延迟的 ClickHouse SQL。说明时间过滤和聚合方式。', detail: '根据真实字段生成查询' },
+  { title: '调整告警规则', text: '查看当前页面相关的告警规则和静默窗口，说明当前配置。根据我的要求准备变更提案，展示前后差异与影响，等我确认后再应用。', detail: '查看规则、调整阈值与静默' },
 ];
 
 function readable(value: unknown): string { return typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? ''; }
@@ -165,6 +167,7 @@ function ToolProgress({ turn, onDraft, canUseCodeTasks }: { turn: TurnView; onDr
   if (!tools.length) return null;
   return <div className="lm-assistant-tools">{tools.map(tool => {
     if (tool.name === 'code_task') return <CodeTaskProgress key={tool.callId} tool={tool} />;
+    if (tool.name === 'propose_alert_change') return <AlertProposalProgress key={tool.callId} tool={tool} />;
     const result = tool.result as { draft?: DashboardDraft; error?: string } | undefined;
     return <Collapse key={tool.callId} size="small" ghost items={[{ key: tool.callId, label: <Space><span className={`lm-assistant-tool-dot ${tool.status}`} /><span>{toolLabels[tool.name] ?? tool.name}</span><Tag bordered={false} color={tool.status === 'error' ? 'error' : tool.status === 'success' ? 'success' : 'processing'}>{tool.status === 'running' ? '执行中' : tool.status === 'error' ? '失败' : '完成'}</Tag></Space>, children: <div><div className="lm-assistant-tool-heading">调用参数</div><pre className="lm-assistant-tool-json">{readable(tool.input)}</pre>{tool.result !== undefined && <><div className="lm-assistant-tool-heading">执行结果</div><pre className="lm-assistant-tool-json">{readable(tool.result)}</pre></>}{tool.status === 'success' && result?.draft && <Button type="primary" onClick={() => onDraft(result.draft!, queryRangeFromTurn(turn, tool.callId))}>审阅大盘草稿</Button>}</div> }]} />;
   })}</div>;

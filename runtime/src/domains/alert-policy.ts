@@ -263,6 +263,7 @@ export function silenceMatches(s: any, r: any): boolean {
 }
 export function silenceActive(s: any, now: Date): boolean {
   const n = now.getTime();
+  if (Number.isFinite(parseTime(s.ended_at)) && n >= parseTime(s.ended_at)) return false;
   if (
     (Number.isFinite(parseTime(s.from)) && n < parseTime(s.from)) ||
     (Number.isFinite(parseTime(s.until)) && n >= parseTime(s.until))
@@ -315,7 +316,7 @@ export function responseActiveSeconds(
   for (let n = Math.floor(from / 60000) * 60000 + 60000; n < to; n += 60000)
     bounds.add(n);
   for (const s of silences)
-    for (const v of [s.from, s.until]) {
+    for (const v of [s.from, s.until, s.ended_at]) {
       const n = parseTime(v);
       if (n > from && n < to) bounds.add(n);
     }

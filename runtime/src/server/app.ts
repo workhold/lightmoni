@@ -24,10 +24,12 @@ import { registerTemplates } from "./templates.js";
 import { registerCore } from "./core.js";
 import { registerNodes } from "./nodes.js";
 import { registerAgentCredentials } from "./agent-credentials.js";
+import { registerManagedMachines } from "./managed-machines.js";
 import { registerAssistant } from "../assistant/index.js";
 import { registerDashboards } from "../domains/dashboards.js";
 import { registerLogs } from "../domains/logs.js";
 import { registerAlerts } from "../domains/alerts.js";
+import { AlertCapabilities } from "../domains/alert-capabilities.js";
 export interface Config {
   dataDir: string;
   chURL: string;
@@ -103,6 +105,7 @@ export async function createApp(cfg: Config) {
         logger,
       };
     const agentCredentials = registerAgentCredentials(deps);
+    const managedMachines = registerManagedMachines(deps, { agentCredentials });
     registerSettings(deps, agentCredentials);
     const ingest = new Ingest(cat, auth, (...args) =>
       monitor?.accepted(...args),
@@ -124,10 +127,17 @@ export async function createApp(cfg: Config) {
     // Enrollment credentials are a separate migration boundary. Legacy
     // config.key based nodes keep working until they explicitly re-enroll.
     modules.push(agentCredentials);
-    modules.push(registerAssistant(deps));
+    modules.push(managedMachines);
     modules.push(registerDashboards(deps));
     modules.push(registerLogs(deps));
-    modules.push(registerAlerts(deps));
+    const alerts = registerAlerts(deps);
+    modules.push(alerts);
+    modules.push(
+      registerAssistant(deps, {
+        machines: managedMachines,
+        alerts: new AlertCapabilities(alerts),
+      }),
+    );
     if (cfg.monitor !== false) {
       monitor = new RuntimeMonitor(ingest, [cfg.chPassword]);
       modules.unshift(monitor);

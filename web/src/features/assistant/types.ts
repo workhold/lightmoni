@@ -18,6 +18,7 @@ export interface AssistantContext { table?: string; service?: string; services?:
   query?: {sql: string; params?: Record<string, unknown>; range?: TimeRange; parameter_error?: string; lookback_hours?: number};
   log_query?: {keyword: string; mode: string; sql?: string; params?: Record<string, unknown>; sort: string; syntax?: string};
   status?: {loading?: boolean; error?: string; result_rows?: number; truncated?: boolean};
+  alerts?: {tab: string; filters?: {group_id?: string; table_id?: string; service?: string; enabled?: string; rule_id?: string}; response_filters?: {group_id?: string; state?: string; priority?: string}; editing_rule_id?: string; selected_event_id?: string; selected_incident_id?: string; editing_silence_id?: string};
   context_truncated?: boolean;
 }
 export interface DraftPanel { id?: string; title: string; type: string; queries: SQLQuery[]; options?: Record<string, unknown>; grid?: Record<string, number> }
@@ -33,6 +34,23 @@ export interface CodeTaskResult {
   steps: { index: number; action: string; status: 'started' | 'completed' | 'failed' | 'cancelled' }[];
   created_at: string;
   expires_at: string;
+}
+export type AlertChangeOperation = 'rule.update' | 'rule.silence' | 'silence.create' | 'silence.update' | 'silence.end';
+export interface AlertChangeProposal {
+  id: string;
+  session_id: string;
+  operation: AlertChangeOperation;
+  target_id: string;
+  status: 'awaiting_approval' | 'completed';
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  summary: string;
+  impact: string[];
+  reason: string;
+  created_at: string;
+  expires_at: string;
+  applied_at?: string;
+  result?: unknown;
 }
 export interface ToolTrace { callId: string; name: string; input: unknown; result?: unknown; status: 'running' | 'success' | 'error' }
 export interface TurnView { id: string; text: string; answer: string; tools: ToolTrace[]; timestamp: string; status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; compacting?: boolean; compacted?: boolean; usage?: {input_tokens?: number; output_tokens?: number; total_tokens?: number}; compactionUsage?: {input_tokens?: number; output_tokens?: number; total_tokens?: number} }

@@ -1,6 +1,6 @@
 # 公共开发契约 v1
 
-2026-10-10 实施基线；2026-10-11 更新 Key 权限；2026-10-17 依 [SDD 007](../specs/007-node-runtime-migration/spec.md) 将中心和 Agent 统一为 Node.js / TypeScript。早期任务和证据中的 Go 平台实现属于迁移前历史。本文声明目标行为，代码与真实验收状态单独记录。主干拥有公共类型与入口；变更先协调消费者，不能各模块另造查询协议。
+2026-10-10 实施基线；2026-10-11 更新 Key 权限；2026-10-17 依 [SDD 007](../specs/007-node-runtime-migration/spec.md) 将中心和 Agent 统一为 Node.js / TypeScript；2026-10-18 依 [SDD 009](../specs/009-assistant-alert-controls/spec.md) 增加共享告警能力与人工确认提案。早期任务和证据中的 Go 平台实现属于迁移前历史。本文声明目标行为，代码与真实验收状态单独记录。主干拥有公共类型与入口；变更先协调消费者，不能各模块另造查询协议。
 
 ## 模块注册与前端边界
 
@@ -112,3 +112,13 @@ LightMoni Agent 是安装软件，一个运行实例称“执行节点”，导�
 每轮开始冻结连接和单价；账本保留输入/输出原单价、分项费用、已知合计及 complete/partial/unpriced/legacy 计价状态。只有一侧可计价时合计为已知部分，部分计价与完全未计价分别统计；已有终态不可因重放或改价而重新计算。旧事件按原事件序号去重，保留既有金额，不补造原单价或成功状态。`GET /api/v1/assistant/usage/details?days=30&timezone=Asia/Shanghai&limit=100` 仅管理员可读，limit 为 1–100，返回最近优先的 `{records,limit,has_more,from,to,timezone}`。该估算未实现供应商缓存折扣、阶梯价格等，不等同实际账单。启动时全量回填仍保留的旧会话，不受 200 条列表限制；账本独立于会话事件裁剪。所有统计及明细不包含密钥、提示词或生成正文。
 
 四种协议通过实际原生 SDK 执行文本流、工具调用、摘要和取消。Responses 使用 `store:false`；供应商原始 usage 按协议解释，缺少字段保持未知。多轮延续仅持久化白名单内的签名、item ID 和加密推理内容，隐藏推理明文不保存；私有 worker 检查点校验大小和字段，服务端会话回读删除这些元数据后才返回浏览器。元数据计入上下文预算，不能静默丢弃超限状态。
+
+### 告警共享能力与助手变更提案（2026-10-18）
+
+规则和静默由 `AlertCapabilities` 统一提供查询、异步准备校验及同步提交能力；现有规则保存、临时静默、静默创建/结束 HTTP 接口委托同一业务层，保留状态、响应与通知队列副作用。新增 `GET /api/v1/alerts/rules/:id`、`GET /api/v1/alerts/silences/:id` 和 `PUT /api/v1/alerts/silences/:id`。修改规则保留 revision 检查，修改静默要求 version，或明确匹配的整数 revision；静默版本包含对象指纹，旧记录也能检测并发冲突。修改静默要求当前范围权限；原创建者即使已离组仍可结束自己的窗口。
+
+AI 通过 `list_alert_rules/get_alert_rule`、`list_alert_silences/get_alert_silence`、不含联系方式的 `list_alert_groups` 读取真实配置；`propose_alert_change` 只创建修改规则、规则临时静默及创建/修改/结束静默窗口的待确认提案。列表分页默认 30、最多 100，单项工具限 32 KiB，提案限 48 KiB，完整审批内容不能静默裁剪。模型不持有应用工具。
+
+`GET /api/v1/assistant/alert-proposals/:id` 回读当前用户的完整提案；用户审阅前后配置、SQL、理由及影响后，独立点击确认才调用 `POST /api/v1/assistant/alert-proposals/:id/apply`，body 为 `{}`。提案绑定用户/会话，有效期 15 分钟；主服务在确认时重新检查权限、对象版本与有效期，在同一事务中保存业务变更、最终回读、完成状态及加密审计回执。重复确认返回原结果，回执写入失败则整体回滚。他人提案返回 404，配置冲突或过期返回 409。结束静默采用确认时的服务器时间，页面展示实际回执。
+
+后续轮次刷新持久化提案状态，并向模型单独提供当前会话最近 20 条可信状态；更早提案可用只读 `get_alert_proposal` 核验。已完成回执只证明当次执行成功，当前配置仍需重新查询。详情与验收见 [SDD 009](../specs/009-assistant-alert-controls/contracts.md)。Agent 独立运行、systemd 安装、持久身份/队列与后续升级设计见 [部署指南](agent-deployment.md) 和 [SDD 010](../specs/010-agent-deployment/spec.md)；本次只交付部署设计，未执行部署。

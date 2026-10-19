@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "历史 awaiting_approval 快照回读 completed 后隐藏确认",
+    "silence.end 完成回执展示实际 ended_at/until 与完整配置，保留预览时间且无再次确认，核验工具标签中文"
+  ],
+  "pageerrors": [],
+  "unexpected": [],
+  "apply_posts": 0,
+  "proposal_gets": 2,
+  "captured_alert_contexts": [],
+  "screenshots": [
+    "receipt.png"
+  ]
+}
