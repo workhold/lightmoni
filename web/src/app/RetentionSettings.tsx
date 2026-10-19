@@ -17,7 +17,7 @@ export default function RetentionSettings(){
  return <div className="lm-surface lm-retention-settings"><h2>全局默认保留时长</h2><p>新数据表和“跟随全局”的表使用此时长，单表自定义设置优先。</p>{loading?<Spin/>:!loaded?<Button onClick={()=>void load()}>重新加载</Button>:<Form form={form} layout="vertical" onFinish={async values=>{setSaving(true);try{await api('/settings/retention',{method:'PUT',body:JSON.stringify({default_days:values.mode==='forever'?0:values.days})});void message.success('默认保留时长已保存，跟随全局的数据表已更新');}catch(error){void message.error((error as Error).message);}finally{setSaving(false);}}}>
   <Form.Item name="mode" label="保留方式"><Select aria-label="全局保留方式" disabled={saving} options={[{label:'按天保留',value:'days'},{label:'永久保留',value:'forever'}]}/></Form.Item>
   {mode==='days'&&<Form.Item name="days" label="默认保留天数" rules={dayRules}><InputNumber aria-label="默认保留天数" min={1} max={36500} precision={0} suffix="天" style={{width:160}} disabled={saving}/></Form.Item>}
-  <p className="lm-retention-hint">{cleanupHint}</p><Space wrap><Button type="primary" htmlType="submit" loading={saving}>保存默认时长</Button><Link to="/data?tab=tables">设置单表时长</Link></Space>
+  <p className="lm-retention-hint">{cleanupHint}</p><Space wrap><Button type="primary" htmlType="submit" loading={saving}>保存默认时长</Button><Link to="/data-management">设置单表时长</Link></Space>
  </Form>}</div>;
 }
 

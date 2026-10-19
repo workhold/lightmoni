@@ -23,7 +23,7 @@ export default function SDKSetup({language,mode,endpoint,defaultEndpoint,reporti
   </div>
   {direct&&<Space wrap><Typography.Text type="secondary">选择已配置的内网或公网地址，也可临时填写其他地址。</Typography.Text><Button size="small" disabled={endpoint===defaultEndpoint} onClick={onResetEndpoint}>恢复默认地址</Button>{onManageKeys&&<Link to="/admin?tab=reporting">设置默认地址</Link>}</Space>}
   <Alert className="lm-sdk-container-note" type={sdkEndpointIsLoopback(endpoint)?'warning':'info'} showIcon title="容器上报地址" description={direct?'容器中的 localhost / 127.0.0.1 指向业务容器本身。请填写容器可访问的平台域名或服务地址；同一 Docker 网络可用 http://lightmoni:8080，Docker Desktop 访问宿主机可用 host.docker.internal。':'容器中的 localhost / 127.0.0.1 指向业务容器本身。Agent 在其他容器或宿主机时，请填写业务容器可访问的 Agent 地址；同一 Docker 网络可用 http://lightmoni-agent:4318，Docker Desktop 访问宿主机可用 host.docker.internal。'}/>
-  <Space wrap className="lm-sdk-key-help"><Typography.Text>{direct?'平台 data key 需允许写入 business 表，通过 LIGHTMONI_DATA_KEY 或容器 Secret 注入。':'业务 SDK 无需配置平台地址或平台上报凭据。仅在 Agent 启用本地鉴权时注入 LIGHTMONI_LOCAL_TOKEN。'}</Typography.Text>{direct&&onManageKeys&&<Button size="small" onClick={onManageKeys}>管理上报 Key</Button>}</Space>
+  <Space wrap className="lm-sdk-key-help"><Typography.Text>{direct?'平台 data key 需允许写入 business 表，通过 LIGHTMONI_DATA_KEY 或容器 Secret 注入。':'业务 SDK 无需配置平台地址或平台上报凭据。仅在 Agent 启用本地鉴权时注入 LIGHTMONI_LOCAL_TOKEN。'}</Typography.Text>{direct&&onManageKeys&&<Button size="small" onClick={onManageKeys}>管理接入凭据</Button>}</Space>
   <Alert type="info" showIcon title="SDK 自监控" description="默认上报实例心跳、缓冲队列与重试、丢弃等诊断，自动写入系统 SDK 表。可在「系统监控 · SDK」大盘查看并配置告警，业务 Key 无需增加权限。"/>
   <h3>环境变量</h3>
   <p>先将下面的变量配置到业务进程；复制执行会清理另一种方式及旧凭据来源，避免切换冲突。容器部署时按所选方式配置 environment 或 Secret。</p>

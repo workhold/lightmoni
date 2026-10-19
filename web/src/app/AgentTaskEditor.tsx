@@ -102,7 +102,7 @@ export default function AgentTaskEditor({task,labels,onSave,onCancel,onBusyChang
         <Form.ErrorList errors={errors}/><Button icon={<PlusOutlined/>} disabled={saving||fields.length>=32} onClick={()=>add({directory:'',pattern:'*.log*',recursive:false,from_beginning:false})}>添加日志目录</Button>
       </>}</Form.List>
     </>}
-    <Typography.Paragraph type="secondary" className="lm-agent-report-note">上报表填写逻辑表名，上报 Key 需允许写入对应表。同类任务在同一节点上的采集间隔或目标表等配置不兼容时，保存会明确提示冲突。<Link to="/data?tab=keys">管理上报 Key</Link></Typography.Paragraph>
+    <Typography.Paragraph type="secondary" className="lm-agent-report-note">上报表填写逻辑表名，上报 Key 需允许写入对应表。同类任务在同一节点上的采集间隔或目标表等配置不兼容时，保存会明确提示冲突。<Link to="/admin?tab=credentials&section=sdk">管理接入凭据</Link></Typography.Paragraph>
     {error&&<Alert type="error" showIcon title={error} style={{marginTop:16}}/>}
     <Space className="lm-agent-editor-actions"><Button type="primary" htmlType="submit" loading={saving}>保存任务</Button><Button disabled={saving} onClick={onCancel}>取消</Button></Space>
   </Form>;

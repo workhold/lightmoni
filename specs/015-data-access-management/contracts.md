@@ -6,6 +6,7 @@
 - `/admin?tab=credentials&section=sdk|enrollments|agents`：管理员凭据管理，默认 sdk。
 - `/data-management`：目录与表级设置；成员只读，管理员沿用既有修改权限。
 - 旧 keys/tables/templates 深链用 replace 跳转；keys 对成员回到 SDK 接入，避免访问管理员界面。
+- SDK 接入在当前浏览器会话保留语言、模式和通过校验的不含凭据的地址，便于跳转管理后返回；不保存密钥或一次性 Agent 令牌。
 
 ## API
 

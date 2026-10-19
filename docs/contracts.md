@@ -1,6 +1,6 @@
 # 公共开发契约 v1
 
-2026-10-10 实施基线；2026-10-11 更新 Key 权限；2026-10-17 依 [SDD 007](../specs/007-node-runtime-migration/spec.md) 将中心和 Agent 统一为 Node.js / TypeScript；2026-10-18 依 [SDD 009](../specs/009-assistant-alert-controls/spec.md) 增加共享告警能力与人工确认提案。早期任务和证据中的 Go 平台实现属于迁移前历史。本文声明目标行为，代码与真实验收状态单独记录。主干拥有公共类型与入口；变更先协调消费者，不能各模块另造查询协议。
+2026-10-10 实施基线；2026-10-11 更新 Key 权限；2026-10-17 依 [SDD 007](../specs/007-node-runtime-migration/spec.md) 将中心和 Agent 统一为 Node.js / TypeScript；2026-10-18 依 [SDD 009](../specs/009-assistant-alert-controls/spec.md) 增加共享告警能力与人工确认提案；2026-10-19 依 [SDD 015](../specs/015-data-access-management/contracts.md) 整理接入凭据与数据管理。早期任务和证据中的 Go 平台实现属于迁移前历史。本文声明目标行为，代码与真实验收状态单独记录。主干拥有公共类型与入口；变更先协调消费者，不能各模块另造查询协议。
 
 ## 模块注册与前端边界
 
@@ -12,17 +12,29 @@
 
 ## 采集协议与 Key
 
-Key 管理：`POST /api/v1/keys` 请求 `{name, allowed_tables: ["web"]}`，选择所有 table 时请求 `{name, allow_all_tables: true}`，无需白名单；`GET /api/v1/keys` 返回 `allowed_tables`、`allow_all_tables`，不返回密钥明文；`PUT /api/v1/keys/{id}` 可更新 `name`、`active`、`allowed_tables`、`allow_all_tables`，省略的字段保持原值。指定 table 模式至少填写一个合法逻辑表名，最多 200 个；重复项去重。所有 table 模式保存 `allow_all_tables=true` 与空白名单，包含未来新表；切回指定模式需同时提供 `allow_all_tables=false` 与有效白名单。省略权限字段的重命名、启停保留当前模式。
+SDK 上报密钥管理：`POST /api/v1/keys` 请求 `{name, allowed_tables: ["web"]}`，选择所有 table 时请求 `{name, allow_all_tables: true}`，无需白名单；完整密钥只在创建响应中返回。`GET /api/v1/keys` 返回 `allowed_tables`、`allow_all_tables`，不返回密钥明文；`PUT /api/v1/keys/{id}` 可更新 `name`、`active`、`allowed_tables`、`allow_all_tables`，省略的字段保持原值。指定 table 模式至少填写一个合法逻辑表名，最多 200 个；重复项去重。所有 table 模式保存 `allow_all_tables=true` 与空白名单，包含未来新表；切回指定模式需同时提供 `allow_all_tables=false` 与有效白名单。省略权限字段的重命名、启停保留当前模式。管理入口为 `/admin?tab=credentials&section=sdk`，保留 `/keys/{id}/events` 上报记录。
 
 OTLP/HTTP `/v1/logs`、`/v1/metrics`、`/v1/traces`，支持标准 Protobuf 与 OTLP JSON 编码，不能把私有 JSON 称为 OTLP。自有 SDK 一批只有一个 signal、一个 table、一个 service。资源含 `service.name`、`service.instance.id`；log 可带 `lightmoni.source_id` 与 `lightmoni.source_seq`，Agent 添加安装期间固定 host_id/agent_id。自定义属性不代替资源身份。
 
 固定请求头：`X-Lightmoni-Table` 为逻辑表；`X-Lightmoni-Batch-ID` 为逐批 UUID；`X-Lightmoni-Batch-Created-At` 为冻结时 UTC RFC3339Nano。新窗口创建新 ID；重试保留 ID、创建时间和完全相同的解码 payload。同 ID 异正文拒绝。标准第三方 exporter 没有稳定批次 ID 时按至少一次兼容接入，其 SDK 级重试可能重复。
 
-SDK 直连主服务使用 `Authorization: Bearer <key>`；SDK 到本机 Agent 不需要私有 Key。主服务支持多份命名上报 Key，保存摘要，完整秘密仅创建时显示。每份 Key 可上传任意 service，不绑定/限制 service，也不按 service 路由；每份 Key 通过 `allowed_tables` 精确匹配 `X-Lightmoni-Table`，或由管理员显式设置 `allow_all_tables=true` 允许所有合法逻辑表。默认全表权限为 false，未配置仍无写入授权。日志、指标、链路均在正文读取、建表、批次重放和写库之前检查，越权返回 403 并记录拒绝原因。Agent 配置一份 Key 转发授权范围内的业务；机器指标、拨测和目录日志使用匹配任务指定的逻辑表，默认 `host`、`probe`、`files`。旧 Key 迁移为无 table 授权，管理员显式配置后恢复写入。禁用、失效、轮换、最近使用、上传量与拒绝原因必须可查看。所有记录的 key_id 由主服务认证取得，不信任采集正文。Key 轮换不改变已有批次 ID/记录 ID；重试同批时 first_key_id 归因保持首次接收，传输尝试另记实际尝试Key。
+SDK 直连主服务使用 `Authorization: Bearer <data key>`。主服务支持多份命名上报 Key，保存摘要，完整秘密仅创建时显示。每份 Key 可上传任意 service，不绑定/限制 service，也不按 service 路由；每份 Key 通过 `allowed_tables` 精确匹配 `X-Lightmoni-Table`，或由管理员显式设置 `allow_all_tables=true` 允许所有合法逻辑表。默认全表权限为 false，未配置仍无写入授权。日志、指标、链路均在正文读取、建表、批次重放和写库之前检查，越权返回 403 并记录拒绝原因。旧版 Agent 的 `config.key` 仍走此授权路径；旧 Key 迁移为无 table 授权，管理员显式配置后恢复写入。禁用密钥会同时影响引用它的 SDK 和旧节点。
+
+新 Agent 由管理员生成一次性 enrollment token，经安装脚本 `--enrollment-token-stdin` 接收，也可将秘密文件的 FD 重定向到 stdin，不放入 URL、命令行参数或环境变量。兑换、激活后由中心签发绑定节点身份的 `control_credential` 与 `data_credential`；control 用于心跳和配置，data 用于遥测上报，二者不能互换。上报请求带 `X-Lightmoni-Agent-ID` 并使用 data Bearer 凭据；当前节点 data 授权允许所有合法业务逻辑表，不能套用 SDK Key 白名单说明。机器指标、拨测和目录日志仍使用匹配任务指定的逻辑表，默认 `host`、`probe`、`files`。下载 `/downloads/agent/*` 接受有效 enrollment token，并兼容启用的既有上报 Key；旧安装脚本保留 `--key-stdin`。节点 control/data 凭据不用于下载鉴权。
+
+SDK 到本机 Agent 不持有中心秘密；启用本地鉴权时使用 Agent 的 `local_token`，由目标 Agent 本地配置管理，平台不签发或回显。非 loopback 接收地址必须配置本地令牌。`GET /v1/sdk-config` 的直连请求使用 SDK data key；新 Agent 使用 control 凭据向中心拉取并缓存配置，旧节点兼容上报 Key。
+
+所有记录的 key_id 由主服务认证取得，不信任采集正文；新节点记录 data credential ID，SDK/旧节点记录上报 Key ID。凭据轮换不改变已有批次 ID/记录 ID；重试同批时 first_key_id 归因保持首次接收，传输尝试另记实际凭据 ID。
 
 成功响应遵循对应 OTLP ExportResponse；自有链路整批校验、整批确认，不能用 partial_success 丢掉未知子集。Agent 先提交可恢复磁盘记录再 ACK；主服务等所有目标 ClickHouse 写入完成再 ACK。失败重试可能遇到部分已写行，但公开查询仍只计一次。兼容路径按 OTLP partial_success 规则处理。网络未知及 429/502/503/504 可重试；400 为永久协议拒绝；401/403 暂停等待修复凭证；其他状态按 OTLP 规范分类，不能所有 5xx 都盲目重试。
 
 建议初始解压后每批不超过 4 MiB；最大补传年龄 24 小时，Agent receipt 与主服务批次元信息保留至少 48 小时，均为可统一调整配置。receipt 达到容量时背压，不能提前忘记仍在保证窗口的记录。同一批次首次 enrichment、摘要、created_at、first_received_at 持久化，已回收 spool 后重试仍保持相同转发正文；过去最大补传年龄后明确 expired，不宣称无限期重放。SDK 内存满的丢弃有诊断，已 ACK 的 Agent 数据不能默默删除。
+
+## 接入与管理页面
+
+数据接入 `/data?tab=sdk|agent` 只保留两类安装流程，不依赖密钥、表目录或模板列表加载成功。管理员在 `/admin?tab=credentials&section=sdk|enrollments|agents` 统一管理三类凭据，成员不能读取或修改。`GET /api/v1/agent-enrollments` 与 `GET /api/v1/agent-credentials` 各展示最近最多 200 条，只返回白名单元数据，不返回明文、哈希、bootstrap 或安装 nonce；有效状态按当前时间计算，GET 不写状态。`POST /api/v1/agent-enrollments/:id/revoke` 撤销尚未完成接入的令牌，待激活令牌撤销后也不能继续激活。`POST /api/v1/agents/:id/credentials/revoke` 按节点及 audience 撤销该用途所有未撤销凭据，不是仅撤销所点击的一行；页面必须确认影响，撤销后需重新接入恢复该用途。
+
+独立 `/data-management` 保留表目录、服务、类型和保留时长；成员只读，管理员可改单表时长及日志采样/停报规则。全局 SDK 停报仍从 SDK 接入页进入，图表模板保留在监控大盘。旧 `/data?tab=keys|tables|templates` 分别用 replace 跳转至接入凭据、数据管理、监控大盘；旧 keys 链接对成员回到 SDK 接入。模板 API 继续用于大盘，采集协议及已有表权限不变。完整路由和响应约束见 [SDD 015 契约](../specs/015-data-access-management/contracts.md)。
 
 ## ClickHouse 数据模型
 
@@ -79,7 +91,7 @@ AI参考Doca骨架移植会话、时间线、可取消SSE、工具loop与草稿�
 
 ## LightMoni Agent、执行节点与任务标签（2026-10-17）
 
-LightMoni Agent 是安装软件，一个运行实例称“执行节点”，导航入口称“节点助手”；Collector/采集器是节点内部功能。“任务”是独立配置和启停的指标采集、服务拨测或目录日志工作，“任务标签”用于分发。节点和任务均可关联多个标签，任一标签相交即可命中，同一任务只下发一次。空目标不广播；节点无匹配任务时关闭内部采集和拨测，仍接收和转发已获 Key 授权的业务 OTLP。现有网页对话继续称“AI 助手”；本功能未增加节点智能执行或任意命令能力。
+LightMoni Agent 是安装软件，一个运行实例称“执行节点”，导航入口称“节点助手”；Collector/采集器是节点内部功能。“任务”是独立配置和启停的指标采集、服务拨测或目录日志工作，“任务标签”用于分发。节点和任务均可关联多个标签，任一标签相交即可命中，同一任务只下发一次。空目标不广播；节点无匹配任务时关闭内部采集和拨测，仍可接收业务 OTLP，并按节点 data 凭据或既有上报 Key 授权转发。现有网页对话继续称“AI 助手”；本功能未增加节点智能执行或任意命令能力。
 
 登录用户通过 `GET /api/v1/agent-task-labels`、`GET /api/v1/agent-tasks` 读取标签和任务；管理员使用各资源的 POST、PUT/DELETE `/{id}` 管理，使用 `PUT /api/v1/agents/{id}/labels` 的 `{label_ids:[]}` 设置节点标签。默认标签和仍被引用的标签不能删除。节点列表增加 `label_ids/labels/task_ids/tasks`，`config` 是最终有效配置。写入在事务内验证所有实际受影响节点；上报表、采集间隔或同 ID 拨测等配置冲突返回 409，整个更新回滚，旧配置保持。读取需登录，变更需管理员。
 

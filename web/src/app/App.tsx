@@ -15,8 +15,9 @@ const TracePage=lazy(()=>import('../features/alerts/TracePage'));
 const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
 const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
 const MachinesPage=lazy(()=>import('./MachinesPage'));
+const DataManagementPage=lazy(()=>import('./DataManagementPage'));
 
-const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/data','数据接入',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
+const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/data','数据接入',DatabaseOutlined],['/data-management','数据管理',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
 
 function ClaimLanding(){const {token}=useParams();return <Navigate to={'/alerts?claim='+encodeURIComponent(token??'')} replace/>}
 
@@ -27,24 +28,26 @@ export default function Root(){
  const[assistant,setAssistant]=useState(false);
  useEffect(()=>setAssistant(false),[location.pathname]);
  const[publishedScope,setPublishedScope]=useState<PublishedScope>();
- const currentPage=links.find(([url])=>url==='/'?location.pathname==='/':location.pathname.startsWith(url))?.[1]??'监控工作台';
+ const activePath=(url:string)=>location.pathname===url||(url!=='/'&&location.pathname.startsWith(url+'/'));
+ const currentPage=links.find(([url])=>activePath(url))?.[1]??'监控工作台';
  const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:currentPage}}),[publishedScope,location.pathname,location.search,currentPage]);
  const[navCollapsed,setNavCollapsed]=useState(()=>{try{const saved=localStorage.getItem('lightmoni.nav.collapsed');return saved===null?window.innerWidth<1100:saved==='true'}catch{return window.innerWidth<1100}});
  function toggleNavigation(){setNavCollapsed(value=>{try{localStorage.setItem('lightmoni.nav.collapsed',String(!value))}catch{}return !value})}
  useEffect(()=>{if(location.pathname==='/settings')setAssistant(false)},[location.pathname]);
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
  if(loading)return <div className="lm-loading"><Spin size="large"/></div>;
- if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/machines')||location.pathname.startsWith('/settings'))?location.pathname+location.search:'/')}}/>;
+ if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/machines')||location.pathname.startsWith('/settings')||location.pathname.startsWith('/data'))?location.pathname+location.search:'/')}}/>;
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'} ${/^\/dashboards\/[^/]+\/panels\//.test(location.pathname)?'is-panel-standalone':''}`}>
   <aside className="lm-sidebar">
    <Link to="/" className="lm-brand"><span className="lm-brand-mark">L</span><span>LightMoni<small>监控工作台</small></span></Link>
-  <nav>{links.filter(([url])=>(url!=='/admin'&&url!=='/machines')||user.role==='admin').map(([url,label,Icon])=><Link key={url} aria-label={label} title={label} className={(url==='/'?location.pathname===url:location.pathname.startsWith(url))?'active':''} to={url}>{Icon&&<Icon/>}<span>{label}</span></Link>)}</nav>
+  <nav>{links.filter(([url])=>(url!=='/admin'&&url!=='/machines')||user.role==='admin').map(([url,label,Icon])=><Link key={url} aria-label={label} title={label} className={activePath(url)?'active':''} to={url}>{Icon&&<Icon/>}<span>{label}</span></Link>)}</nav>
    <Button className="lm-nav-collapse" type="text" aria-label={navCollapsed?'展开导航':'收起导航'} title={navCollapsed?'展开导航':'收起导航'} icon={navCollapsed?<MenuUnfoldOutlined/>:<MenuFoldOutlined/>} onClick={toggleNavigation}>{!navCollapsed&&'收起导航'}</Button>
    <div className="lm-sidebar-bottom"><Link to="/settings" className="lm-sidebar-profile" aria-label="编辑个人资料" title={user.nickname||user.name}><UserAvatar user={user}/><div>{user.nickname||user.name}<small>{user.role==='admin'?'管理员':'成员'}</small></div></Link><Button type="text" aria-label="退出登录" icon={<LogoutOutlined/>} onClick={async()=>{await api('/auth/logout',{method:'POST'});setUser(null)}}/></div>
   </aside>
   <main className="lm-main"><Suspense fallback={<div className="lm-page"><Spin/></div>}><Routes>
     <Route path="/" element={<OverviewPage/>}/>
     <Route path="/data" element={<DataPage user={user}/>}/>
+    <Route path="/data-management" element={<DataManagementPage user={user}/>}/>
     <Route path="/agents" element={<AgentsPage user={user}/>}/>
     <Route path="/machines" element={user.role==='admin'?<MachinesPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>

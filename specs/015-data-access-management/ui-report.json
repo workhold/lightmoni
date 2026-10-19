@@ -1,0 +1,28 @@
+{
+  "production_bundle": true,
+  "api_fixtures": true,
+  "stateful_fixture_writes": true,
+  "live_backend": false,
+  "widths": [
+    1280,
+    390
+  ],
+  "checked": [
+    "data page has two tabs and no key/template/catalog dependency",
+    "SDK metadata failure has independent retry",
+    "legacy keys redirect and SDK list refresh/failure retains loaded entries",
+    "SDK key create/display-once/edit/disable/enable and event failure/retry",
+    "credential panels unmount on inactive administrator tabs and reload independently",
+    "enrollment lifecycle, refresh/retry and confirmed revocation",
+    "Agent token generation opens existing deployment flow and credentials return link",
+    "node credentials refresh/retry and revocation applies to every matching agent/audience",
+    "legacy tables redirect, catalog TTL/log editor, refresh failure retains prior data",
+    "legacy templates redirect to monitoring dashboards",
+    "first-load catalogue failure is not an empty success and can retry",
+    "six platform screens fit desktop 1280 and narrow 390 pixels",
+    "members retain read-only data access and cannot load administrator credential APIs"
+  ],
+  "api_requests": 120,
+  "errors": [],
+  "unexpected": []
+}
