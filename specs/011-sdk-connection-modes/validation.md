@@ -3,6 +3,8 @@
 日期：2026-10-18
 状态：以下 2026-10-18 检查记录保留原始语言范围。2026-10-19 发布范围调整为 TypeScript/JavaScript、Python、Ruby；PHP 原生 SDK 下线，Go/Rust 仅保留源码、后续支持，不纳本次发布验收。当前范围调整的检查记录见 [012 验收](../012-sdk-reporting-choice/validation.md)。
 
+2026-10-19 后续已安装 Go 1.27.2 与 Rust 1.99.1，补跑 Go 全量竞态/集成、Rust 8 项单元与 12 项 HTTP 场景，均通过；同时修复测试暴露的 Python 短连接响应问题。具体证据仍见 012 验收；完整模式故障矩阵和恢复 Go/Rust 发布继续延后，下表保留原发布边界。
+
 ## 已实现基线
 
 - 六种保留语言（Go、TypeScript/JavaScript、Python、PHP、Ruby、Rust）增加 `agent` / `direct` / `auto` 连接模式和等价环境构造入口。

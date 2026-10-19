@@ -43,12 +43,13 @@ def attributes(record):
 
 class Receiver:
     """Configurable response callbacks run without holding the observation lock."""
-    def __init__(self, tls_context=None, tunnel_to=None):
+    def __init__(self, tls_context=None, tunnel_to=None, response_framing="length"):
         self.lock = threading.Lock()
         self.requests = []
         self.config = snapshot()
         self.get_action = None
         self.post_action = None
+        self.response_framing = response_framing
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -58,14 +59,28 @@ class Receiver:
             def respond(self, status, body, headers=None):
                 if not isinstance(body, bytes):
                     body = json.dumps(body, allow_nan=False).encode()
+                framing = owner.response_framing
                 try:
+                    if framing != "length":
+                        self.protocol_version = "HTTP/1.1"
+                        self.close_connection = True
                     self.send_response(status)
                     self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(body)))
+                    if framing in ("length", "truncated-length"):
+                        self.send_header("Content-Length", str(len(body) + (100 if framing == "truncated-length" else 0)))
+                    else:
+                        self.send_header("Connection", "close")
+                        if framing in ("chunked", "truncated-chunked"):
+                            self.send_header("Transfer-Encoding", "chunked")
                     for key, value in (headers or {}).items():
                         self.send_header(key, value)
                     self.end_headers()
-                    self.wfile.write(body)
+                    if framing == "truncated-chunked":
+                        self.wfile.write(("%x\r\n" % (len(body) + 100)).encode() + body)
+                    elif framing == "chunked":
+                        self.wfile.write(("%x\r\n" % len(body)).encode() + body + b"\r\n0\r\n\r\n")
+                    else:
+                        self.wfile.write(body)
                 except (BrokenPipeError, ConnectionResetError):
                     pass
 
@@ -572,6 +587,54 @@ class ReportingTests(unittest.TestCase):
         self.assertLess(time.monotonic() - start, .5)
         self.assertEqual(client.stats()["config_revision"], "accepted")
         self.assertTrue(client.stats()["config_error"])
+
+    def test_connection_close_acknowledgments_and_config_are_read_to_completion(self):
+        for framing in ("close", "chunked"):
+            with self.subTest(framing=framing):
+                receiver = Receiver(response_framing=framing)
+                self.addCleanup(receiver.close)
+                receiver.config = snapshot("connection-close-" + framing)
+                client = self.client(endpoint=receiver.url, remote_config=True)
+                client.refresh_config(timeout=1)
+                self.assertEqual(client.stats()["config_revision"], "connection-close-" + framing)
+                client.log("info", "acknowledged before connection close")
+                client.flush(timeout=1)
+                self.assertEqual(client.stats()["delivered_batches"], 1)
+                self.assertEqual(client.stats()["retried_batches"], 0)
+                self.assertEqual(client.stats()["pending_batches"], 0)
+                self.assertEqual([(row["method"], row["path"]) for row in receiver.observed()], [
+                    ("GET", "/v1/sdk-config"), ("POST", "/v1/logs"),
+                ])
+                self.assertEqual(receiver.records("logs")[0]["body"]["stringValue"], "acknowledged before connection close")
+
+    def test_truncated_responses_cannot_acknowledge_batches_or_replace_configuration(self):
+        for framing in ("truncated-length", "truncated-chunked"):
+            with self.subTest(framing=framing):
+                receiver = Receiver()
+                self.addCleanup(receiver.close)
+                receiver.config = snapshot("accepted")
+                client = self.client(endpoint=receiver.url, remote_config=True)
+                client.refresh_config(timeout=1)
+                receiver.config = snapshot("truncated")
+                receiver.response_framing = framing
+                with self.assertRaises(RuntimeError):
+                    client.refresh_config(timeout=1)
+                self.assertEqual(client.stats()["config_revision"], "accepted")
+                self.assertTrue(client.stats()["config_error"])
+                client.log("info", "retain until a complete acknowledgment")
+                with self.assertRaises(TimeoutError):
+                    client.flush(timeout=.25)
+                self.assertEqual(client.stats()["delivered_batches"], 0)
+                self.assertEqual(client.stats()["pending_batches"], 1)
+                self.assertGreater(client.stats()["retried_batches"], 0)
+                receiver.response_framing = "length"
+                client.flush(timeout=1)
+                self.assertEqual(client.stats()["delivered_batches"], 1)
+                self.assertEqual(client.stats()["pending_batches"], 0)
+                attempts = receiver.observed("POST")
+                self.assertGreaterEqual(len(attempts), 2)
+                self.assertEqual(len({row["headers"]["X-Lightmoni-Batch-ID"] for row in attempts}), 1)
+                self.assertEqual(len({row["body"] for row in attempts}), 1)
 
     def test_configuration_keys_rotate_and_redirect_never_forwards_credentials(self):
         redirect = Receiver()

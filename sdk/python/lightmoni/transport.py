@@ -71,7 +71,10 @@ class Request:
             raise TimeoutError("HTTP exchange deadline exceeded")
         with self.lock:
             active = self.socket
-        if active is not None:
+        # http.client closes its socket when a close-delimited/chunked body
+        # reaches EOF. A completed response still needs the deadline/cancel
+        # check, but setting a timeout on that closed descriptor raises EBADF.
+        if active is not None and active.fileno() >= 0:
             active.settimeout(remaining)
 
     def exchange(self, method, body=None, headers=None, maximum=65536):
@@ -101,6 +104,11 @@ class Request:
                     self._check()
                     chunk = response.read1(min(65536, maximum + 1 - length))
                     if not chunk:
+                        # read1 does not enforce Content-Length at EOF like
+                        # read does. A valid JSON prefix is not a complete ACK.
+                        # http.client sets length=0 for HEAD/204 responses.
+                        if response.length:
+                            raise http.client.IncompleteRead(b"".join(chunks), response.length)
                         break
                     chunks.append(chunk)
                     length += len(chunk)

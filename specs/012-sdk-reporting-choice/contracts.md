@@ -12,6 +12,8 @@
 
 所有模式保持 OTLP HTTP `/v1/metrics`、`/v1/logs`、`/v1/traces`、table 和批次头兼容。上表是显式 mode 的契约；auto 仍由 011 定义。
 
+HTTP 接收端可以通过 `Content-Length`、分块传输或连接关闭界定响应长度。Python SDK 不应因接收端在响应头后关闭连接而把有效 ACK 当作网络失败；读取响应仍受同一请求截止时间与响应大小上限约束。没有有效 ACK 或读取中断时，继续保留原批次并按原路径重试。
+
 标准 HTTP Agent 构造的 SDK 规则获取也通过该 Agent，用 local token 认证；旧的单独 config endpoint/key 不应让显式 agent 绕回平台。自定义 exporter 没有内置 HTTP 上报路由，其显式规则配置保持兼容。direct 和 auto 的独立规则地址沿用原契约，本轮不扩展规则能力到原本未实现的语言。
 
 ## 环境示例的切换行为
