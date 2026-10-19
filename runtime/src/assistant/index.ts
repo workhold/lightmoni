@@ -52,6 +52,9 @@ import {
 import { codeTaskReceipt, monitoringTools } from "./tools.js";
 import { CodeTaskService, type CodeTaskInput } from "./code.js";
 import type { ManagedMachineStore } from "../server/managed-machines.js";
+import { AlertCapabilities, AlertCapabilityError } from "../domains/alert-capabilities.js";
+import { AlertProposalService } from "./alert-proposals.js";
+import { alertTools } from "./alert-tools.js";
 export interface AssistantOptions {
   runtime?: Runtime;
   tools?: Tool[];
@@ -62,6 +65,7 @@ export interface AssistantOptions {
   codeWorkspaceRoot?: string;
   codeAllowedCommands?: string[];
   machines?: ManagedMachineStore;
+  alerts?: AlertCapabilities;
 }
 const id = () => randomBytes(16).toString("hex");
 const key = (user: string, session: string) => `session/${user}/${session}`;
@@ -135,7 +139,7 @@ export function registerAssistant(
           if (!ctx.res.writableEnded) ctx.res.end();
           return;
         }
-        if (error instanceof AssistantError)
+        if (error instanceof AssistantError || error instanceof AlertCapabilityError)
           ctx.json(
             {
               error: error.message,
@@ -232,19 +236,27 @@ export function registerAssistant(
       );
     return codeTasks;
   };
+  const alertProposals = options.alerts
+    ? new AlertProposalService(deps.db, options.alerts, deps.now, deps.encrypt, deps.decrypt)
+    : undefined;
   const tools =
     options.tools ??
-    monitoringTools(deps, {
-      ...(codeTasks
+    [
+      ...monitoringTools(deps, {
+        ...(codeTasks
         ? {
             codeTask: {
               run: (input, owner, signal) =>
                 codeTasks.run(input, owner, signal),
             },
           }
-        : {}),
-      ...(options.machines ? { machines: options.machines } : {}),
-    });
+          : {}),
+        ...(options.machines ? { machines: options.machines } : {}),
+      }),
+      ...(options.alerts && alertProposals
+        ? alertTools(options.alerts, alertProposals)
+        : []),
+    ];
   if (
     tools.some(
       (tool, index) =>
@@ -294,6 +306,22 @@ export function registerAssistant(
     store.put(key(session.user_id, session.id), session);
   };
   const route = "/api/v1/assistant";
+  const requireAlertProposals = () => {
+    if (!alertProposals)
+      throw new AssistantError(503, "告警业务能力尚未接入", "alert_controls_disabled");
+    return alertProposals;
+  };
+  deps.router.get(
+    route + "/alert-proposals/:id",
+    safe((ctx) => ctx.json(requireAlertProposals().get(ctx.user, ctx.params.id)), "无法读取告警变更提案"),
+  );
+  deps.router.post(
+    route + "/alert-proposals/:id/apply",
+    safe(async (ctx) => {
+      await body(ctx, [], 1024);
+      ctx.json(await requireAlertProposals().apply(ctx.user, ctx.params.id, ctx.signal));
+    }, "无法应用告警变更，请刷新后重试"),
+  );
   deps.router.get(
     route + "/config",
     safe((ctx) => {
@@ -873,6 +901,19 @@ export function registerAssistant(
           emit("user.message", { text: message });
           emit("turn.started", {});
           const base = structuredClone(value.messages);
+          if (alertProposals) {
+            const calls = new Set(base.flatMap(message => message.tool_calls?.filter(call => call.function.name === "propose_alert_change").map(call => call.id) ?? []));
+            for (const message of base) {
+              if (message.role !== "tool" || !message.tool_call_id || !calls.has(message.tool_call_id)) continue;
+              try {
+                const previous = JSON.parse(message.content);
+                if (typeof previous.proposal?.id !== "string") continue;
+                message.content = JSON.stringify({ proposal: alertProposals.get(ctx.user, previous.proposal.id) });
+              } catch {
+                message.content = JSON.stringify({ error: "告警提案已不可用，请查询当前配置并重新预览；不得声称已应用。" });
+              }
+            }
+          }
           if (codeTasks && ctx.user.role === "admin") {
             const codeCalls = new Set(
               base.flatMap(
@@ -911,7 +952,7 @@ export function registerAssistant(
           let checkpointLength = 0;
           await run(
             {
-              system: options.system ?? SYSTEM,
+              system: (options.system ?? SYSTEM) + (alertProposals ? `\nCurrent server time (UTC): ${now()}. Use this time for relative silence durations; clarify the timezone for ambiguous local times.\nHost-verified alert proposal states for the current session (latest 20; facts only). These statuses take precedence over old conversation summaries or UI claims; a completed status means the change was applied at applied_at, not that the resource has remained unchanged. Use get_alert_proposal to verify older IDs and get_alert_rule/get_alert_silence for current configuration:\n${JSON.stringify(alertProposals.recent(ctx.user, value.id))}` : ""),
               config: cfg,
               messages: base,
               summary: value.summary,
@@ -936,9 +977,9 @@ export function registerAssistant(
                 // A model may narrow allowed paths/checks, but cannot switch the user's workspace.
                 const scoped = { ...args, workspace: codeWorkspace ?? "." };
                 validateCodeTaskInput(scoped);
-                return tool.execute(scoped, signal, ctx.user);
+                return tool.execute(scoped, signal, ctx.user, { session_id: value.id });
               }
-              return tool.execute(args, signal, ctx.user);
+              return tool.execute(args, signal, ctx.user, { session_id: value.id });
             },
             async (frame) => {
               if (frame.type === "compacted") {
