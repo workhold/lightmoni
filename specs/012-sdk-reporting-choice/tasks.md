@@ -6,4 +6,4 @@
 - [x] T004 环境示例清理遗留变量，正确表达可选 local token，更新六语言说明。
 - [x] T005 添加配置隔离和真实收据检查，覆盖失败不改投及所选秘密仍校验。
 - [x] T006 运行相关 SDK/runtime/Web 检查并记录真实证据与缺失工具链。
-- [ ] T007 同步远端 main，完成最终审查，推送分支并创建待审核 PR。
+- [x] T007 同步远端 main，完成最终审查，推送分支并创建待审核 [PR #13](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/13)。

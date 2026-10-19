@@ -34,4 +34,4 @@
 
 ## 交付
 
-待创建指向 main 的 PR；不自动合并。
+[PR #13](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/13) 指向 main，已创建完整标题与说明，等待用户审核；未合并。
