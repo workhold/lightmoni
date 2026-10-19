@@ -1,3 +1,4 @@
+import {useMonitoringI18n} from '../monitoring-i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TableRef } from "antd/es/table";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -114,6 +115,8 @@ interface ContextResult {
   limit_per_side: number;
 }
 export default function LogExplorePage() {
+ const {l,language}=useMonitoringI18n();
+
   const [narrow, setNarrow] = useState(
     () => window.matchMedia("(max-width:900px)").matches,
   );
@@ -164,7 +167,7 @@ export default function LogExplorePage() {
     [liveError, setLiveError] = useState(""),
     [pending, setPending] = useState<LogRow[]>([]),
     [dashboardOpen, setDashboardOpen] = useState(false),
-    [dashboardTitle, setDashboardTitle] = useState("日志概览"),
+    [dashboardTitle, setDashboardTitle] = useState(l("日志概览")),
     [dashboardBusy, setDashboardBusy] = useState(false);
   const queryPending = useRef(false),
     controller = useRef<AbortController | undefined>(undefined),
@@ -215,7 +218,7 @@ export default function LogExplorePage() {
           body: String(selected.body ?? "").slice(0, 2000),
           context_truncated: true,
         }
-      : selected, [selected]);
+      : selected, [selected,language]);
   usePublishMonitoringContext({
     table: activeSpec.table_id,
     services: activeSpec.services,
@@ -230,9 +233,9 @@ export default function LogExplorePage() {
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
-      void toast.success("已复制");
+      void toast.success(l("已复制"));
     } catch {
-      void toast.error("无法使用剪贴板，请从文本区域手动复制");
+      void toast.error(l("无法使用剪贴板，请从文本区域手动复制"));
     }
   }
   const preserveAnchor = () => {
@@ -275,7 +278,7 @@ export default function LogExplorePage() {
       if (seq !== generation.current) return;
       if (restore && data.anchor_found === false && readAnchor.current) {
         setError(
-          "阅读锚点不在新查询的有界结果中，继续保留当前结果；可点击查询切换到新结果。",
+          l("阅读锚点不在新查询的有界结果中，继续保留当前结果；可点击查询切换到新结果。"),
         );
         return;
       }
@@ -302,7 +305,7 @@ export default function LogExplorePage() {
         setLoading(false);
       }
     }
-  }, []);
+  }, [language]);
   useEffect(() => {
     const abort = new AbortController();
     void api<CatalogTable[]>("/catalog/tables", { signal: abort.signal })
@@ -340,7 +343,7 @@ export default function LogExplorePage() {
     let linkedView: View | undefined;
     if (!state?.logSpec) {
       try {
-        const linked = readLogURL(location.search, next);
+        const linked = readLogURL(location.search, next,language);
         next = linked.spec;
         linkedView = linked.view;
       } catch (err) {
@@ -491,7 +494,7 @@ export default function LogExplorePage() {
               table?.columns ?? [],
               available
                 .filter((n) => n.startsWith("attr:"))
-                .map((n) => n.slice(5)),
+                .map((n) => n.slice(5)),language
             )
           : { keyword: spec.keyword, filters: [] };
       const filters = [
@@ -641,7 +644,7 @@ export default function LogExplorePage() {
           if (seq !== generation.current || abort.signal.aborted) return;
           if (data.truncated) {
             setLive(false);
-            setLiveError("实时窗口结果已截断，请完整重新查询");
+            setLiveError(l("实时窗口结果已截断，请完整重新查询"));
             return;
           }
           pollSince.current = data.next_since;
@@ -656,7 +659,7 @@ export default function LogExplorePage() {
           if (boundBuffer(incoming).truncated) {
             setLive(false);
             setLiveError(
-              "待处理新日志超过 2,000 条 / 8 MiB，已暂停实时；请查看新日志后完整重查",
+              l("待处理新日志超过 2,000 条 / 8 MiB，已暂停实时；请查看新日志后完整重查"),
             );
             return;
           }
@@ -734,7 +737,7 @@ export default function LogExplorePage() {
   }
   function applyFilter() {
     if (!filter.field.trim()) {
-      void toast.error("请选择过滤字段");
+      void toast.error(l("请选择过滤字段"));
       return;
     }
     let value = filter.value;
@@ -753,7 +756,7 @@ export default function LogExplorePage() {
           ? literal
           : Number(literal);
       if (!String(filter.value).trim() || !Number.isFinite(Number(value))) {
-        void toast.error("请输入有限数字");
+        void toast.error(l("请输入有限数字"));
         return;
       }
     }
@@ -780,7 +783,7 @@ export default function LogExplorePage() {
   }
   function toggleColumn(name: string) {
     if (view.columns.length === 1 && view.columns.includes(name)) {
-      void toast.info("至少保留一个显示字段");
+      void toast.info(l("至少保留一个显示字段"));
       return;
     }
     setView((v) => ({
@@ -810,7 +813,7 @@ export default function LogExplorePage() {
       ...v,
       widths: { ...v.widths, [name]: next },
     });
-  }, []);
+  }, [language]);
   // Keep handlers current without invalidating the table for query drafts or drawers.
   function expandTableRange() {
     commit(
@@ -823,12 +826,12 @@ export default function LogExplorePage() {
   const moveTableColumn = (name: string, delta: number) => moveColumn(view.columns.indexOf(name),delta);
   const tableActions = useRef({ filter: quickFilter, expand: expandTableRange, sort: sortTable, move: moveTableColumn, remove: toggleColumn, copy });
   tableActions.current = { filter: quickFilter, expand: expandTableRange, sort: sortTable, move: moveTableColumn, remove: toggleColumn, copy };
-  const filterFromTable = useCallback((filter: Filter) => tableActions.current.filter(filter), []);
-  const expandFromTable = useCallback(() => tableActions.current.expand(), []);
-  const sortFromTable = useCallback((sort: Spec["sort"]) => tableActions.current.sort(sort), []);
-  const moveFromTable = useCallback((name: string, delta: number) => tableActions.current.move(name,delta), []);
-  const removeFromTable = useCallback((name: string) => tableActions.current.remove(name), []);
-  const copyFromTable = useCallback((value: string) => { void tableActions.current.copy(value); }, []);
+  const filterFromTable = useCallback((filter: Filter) => tableActions.current.filter(filter), [language]);
+  const expandFromTable = useCallback(() => tableActions.current.expand(), [language]);
+  const sortFromTable = useCallback((sort: Spec["sort"]) => tableActions.current.sort(sort), [language]);
+  const moveFromTable = useCallback((name: string, delta: number) => tableActions.current.move(name,delta), [language]);
+  const removeFromTable = useCallback((name: string) => tableActions.current.remove(name), [language]);
+  const copyFromTable = useCallback((value: string) => { void tableActions.current.copy(value); }, [language]);
 
   async function showContext(limit = contextLimit) {
     if (!selected) return;
@@ -872,7 +875,7 @@ export default function LogExplorePage() {
       );
       setSaved(item);
       setSaveOpen(false);
-      void toast.success("检索已保存");
+      void toast.success(l("检索已保存"));
       void refreshSaved();
     } catch (err) {
       void toast.error((err as Error).message);
@@ -883,13 +886,13 @@ export default function LogExplorePage() {
   async function duplicate(item: Saved) {
     try {
       const created = await post<Saved>("/logs/saved-searches", {
-        title: item.title + " 副本",
+        title: item.title + l(" 副本"),
         spec: item.spec,
         view: item.view,
       });
       await refreshSaved();
       setSavedOpen(false);
-      void toast.success("已创建独立检索副本");
+      void toast.success(l("已创建独立检索副本"));
       navigate(logURL(created.spec, undefined, created.id));
     } catch (err) {
       void toast.error((err as Error).message);
@@ -905,7 +908,7 @@ export default function LogExplorePage() {
     a.download = `logs-${activeSpec.table_id}-${Date.now()}.csv`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 0);
-    void toast.info(`已导出当前载入的 ${rows.length} 条日志，非全量数据`);
+    void toast.info(l("已导出当前载入的 {0} 条日志，非全量数据",rows.length));
   }
   function brush(from: string, to: string) {
     setBrushOrigin(
@@ -927,14 +930,14 @@ export default function LogExplorePage() {
     try {
       const draft = {
         title: dashboardTitle,
-        description: "从日志探索创建",
+        description: l("从日志探索创建"),
         range: activeSpec.range,
         refresh: 0,
         variables: [],
         panels: [
           {
             id: crypto.randomUUID(),
-            title: "日志时间分布",
+            title: l("日志时间分布"),
             type: "bar",
             queries: [
               { refId: "A", sql: result.histogram_sql, params: result.params },
@@ -961,7 +964,7 @@ export default function LogExplorePage() {
   function alertDraft() {
     if (!result) return;
     const draft = {
-      name: `${activeTable?.name ?? activeSpec.table_id} 日志告警`,
+      name: l("{0} 日志告警",activeTable?.name ?? activeSpec.table_id),
       sql: result.count_sql,
       params: result.params,
       source_table_ids: [activeSpec.table_id],
@@ -979,7 +982,7 @@ export default function LogExplorePage() {
     setContext(undefined);
     setContextError("");
     setContextLimit(25);
-  }, []);
+  }, [language]);
   function fieldKind(name: string) {
     return fieldMetadata.kinds.get(name) ?? "文本";
   }
@@ -994,16 +997,16 @@ export default function LogExplorePage() {
         onDragStart={event => { event.dataTransfer.setData("application/lightmoni-field", name); event.dataTransfer.effectAllowed = "copy"; }}
       >
         <Popover trigger="click" placement="rightTop" open={fieldOpen === name} onOpenChange={open => setFieldOpen(open ? name : undefined)} content={<div className="lm-log-top-values">
-          <header><b>{name.replace(/^attr:/, "@ ")}</b><Button type="text" size="small" aria-label="关闭字段统计" icon={<CloseOutlined />} onClick={() => setFieldOpen(undefined)} /></header>
-          <small>{kind} · 当前查询范围 Top 10</small>
+          <header><b>{name.replace(/^attr:/, "@ ")}</b><Button type="text" size="small" aria-label={l("关闭字段统计")} icon={<CloseOutlined />} onClick={() => setFieldOpen(undefined)} /></header>
+          <small>{l(kind)} {l(" · 当前查询范围 Top 10")}</small>
           {fieldAggregate.loading ? <Spin size="small" /> : fieldAggregate.error ? <Alert type="error" title={fieldAggregate.error} /> : fieldAggregate.data ? <TopValues field={name} data={fieldAggregate.data} onFilter={quickFilter} /> : null}
-          <Button size="small" type="link" onClick={() => {explore("aggregate",name);setFieldOpen(undefined);}}>查看字段统计</Button>
+          <Button size="small" type="link" onClick={() => {explore("aggregate",name);setFieldOpen(undefined);}}>{l("查看字段统计")}</Button>
         </div>}>
         <button
           title={name}
           aria-expanded={fieldOpen === name}
         >
-          <span className="lm-log-field-type" title={kind}>
+          <span className="lm-log-field-type" title={l(kind)}>
             {name.startsWith("attr:")
               ? "@"
               : kind === "时间"
@@ -1022,8 +1025,8 @@ export default function LogExplorePage() {
             <Button
               size="small"
               type="text"
-              title={`上移 ${name}`}
-              aria-label={`上移列 ${name}`}
+              title={l("上移 {0}",name)}
+              aria-label={l("上移列 {0}",name)}
               disabled={index === 0}
               icon={<UpOutlined />}
               onClick={() => moveColumn(index, -1)}
@@ -1031,8 +1034,8 @@ export default function LogExplorePage() {
             <Button
               size="small"
               type="text"
-              title={`下移 ${name}`}
-              aria-label={`下移列 ${name}`}
+              title={l("下移 {0}",name)}
+              aria-label={l("下移列 {0}",name)}
               disabled={index === view.columns.length - 1}
               icon={<DownOutlined />}
               onClick={() => moveColumn(index, 1)}
@@ -1042,7 +1045,7 @@ export default function LogExplorePage() {
         <Button
           size="small"
           type="text"
-          aria-label={`${view.columns.includes(name) ? "移除" : "添加"}列 ${name}`}
+          aria-label={l("{0}列 {1}",view.columns.includes(name) ? l("移除") : l("添加"),name)}
           onClick={() => toggleColumn(name)}
         >
           {view.columns.includes(name) ? "−" : "+"}
@@ -1052,19 +1055,19 @@ export default function LogExplorePage() {
   }
   const normalizedSelected = useMemo(() => selected
     ? { ...selected, attributes: attributes(selected) }
-    : {}, [selected]);
+    : {}, [selected,language]);
   const selectedAttributes = useMemo(() => selected
     ? Object.entries(attributes(selected))
-    : [], [selected]);
+    : [], [selected,language]);
   const fieldSidebar = (
     <>
       <header>
-        <b>字段 <small>{available.length}</small></b>
+        <b>{l("字段 ")}<small>{available.length}</small></b>
         <Space size={2}>
           <Button
             type="text"
             size="small"
-            aria-label="收起字段栏"
+            aria-label={l("收起字段栏")}
             icon={<LeftOutlined />}
             onClick={() => narrow ? setFieldsOpen(false) : setView((v) => ({ ...v, fields_collapsed: true }))}
           />
@@ -1074,24 +1077,24 @@ export default function LogExplorePage() {
         size="small"
         allowClear
         prefix={<SearchOutlined />}
-        aria-label="搜索字段"
-        placeholder="搜索字段名称"
+        aria-label={l("搜索字段")}
+        placeholder={l("搜索字段名称")}
         value={fieldSearch}
         onChange={(e) => setFieldSearch(e.target.value)}
-      /><Popover trigger="click" placement="bottomLeft" content={<div className="lm-discover-field-types"><b>按字段类型筛选</b><Select aria-label="字段类型" value={fieldTypeFilter} onChange={setFieldTypeFilter}
-        options={[{value:"all",label:"全部类型"},...Array.from(new Set(fieldMetadata.kinds.values())).map(kind => ({value:kind,label:kind}))]} /></div>}>
-        <Button type={fieldTypeFilter === "all" ? "text" : "primary"} size="small" aria-label="筛选字段类型" icon={<FilterOutlined />} />
+      /><Popover trigger="click" placement="bottomLeft" content={<div className="lm-discover-field-types"><b>{l("按字段类型筛选")}</b><Select aria-label={l("字段类型")} value={fieldTypeFilter} onChange={setFieldTypeFilter}
+        options={[{value:"all",label:l("全部类型")},...Array.from(new Set(fieldMetadata.kinds.values())).map(kind => ({value:kind,label:l(kind)}))]} /></div>}>
+        <Button type={fieldTypeFilter === "all" ? "text" : "primary"} size="small" aria-label={l("筛选字段类型")} icon={<FilterOutlined />} />
       </Popover></div>
       <div className="lm-log-field-list">
         <div className="lm-log-field-group">
-          <button aria-expanded={!selectedFieldsCollapsed} onClick={() => setSelectedFieldsCollapsed(value => !value)}>{selectedFieldsCollapsed ? <RightOutlined /> : <DownOutlined />} 已选字段</button>
+          <button aria-expanded={!selectedFieldsCollapsed} onClick={() => setSelectedFieldsCollapsed(value => !value)}>{selectedFieldsCollapsed ? <RightOutlined /> : <DownOutlined />} {l(" 已选字段")}</button>
           <small>{view.columns.length}</small>
         </div>
         {!selectedFieldsCollapsed && view.columns
           .filter((name) => filteredFields.includes(name))
           .map(renderField)}
         <div className="lm-log-field-group">
-          <button aria-expanded={!availableFieldsCollapsed} onClick={() => setAvailableFieldsCollapsed(value => !value)}>{availableFieldsCollapsed ? <RightOutlined /> : <DownOutlined />} 可用字段</button>
+          <button aria-expanded={!availableFieldsCollapsed} onClick={() => setAvailableFieldsCollapsed(value => !value)}>{availableFieldsCollapsed ? <RightOutlined /> : <DownOutlined />} {l(" 可用字段")}</button>
           <small>
             {
               filteredFields.filter((name) => !view.columns.includes(name))
@@ -1105,13 +1108,12 @@ export default function LogExplorePage() {
         {!filteredFields.length && (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="没有匹配字段"
+            description={l("没有匹配字段")}
           />
         )}
       </div>
       <small className="lm-log-field-note">
-        拖动字段到表格以添加列。属性字段来自已载入日志。
-      </small>
+        {l(" 拖动字段到表格以添加列。属性字段来自已载入日志。 ")}</small>
     </>
   );
   return (
@@ -1120,27 +1122,26 @@ export default function LogExplorePage() {
       <header className="lm-log-page-heading">
         <div className="lm-log-title">
           <SearchOutlined className="lm-discover-mark" />
-          <h1>日志探索</h1>
+          <h1>{l("日志探索")}</h1>
           <RightOutlined className="lm-discover-breadcrumb" />
-          <span>{saved?.title ?? "未保存的检索"}</span>
+          <span>{saved?.title ?? l("未保存的检索")}</span>
         </div>
         <Space size={4} wrap>
           <Button
             size="small"
             type="text"
-            aria-label="保存的检索"
+            aria-label={l("保存的检索")}
             icon={<FolderOpenOutlined />}
             onClick={() => {
               setSavedOpen(true);
               void refreshSaved();
             }}
           >
-            保存的检索
-          </Button>
+            {l(" 保存的检索 ")}</Button>
           <Button
             size="small"
             type="text"
-            aria-label="分享检索"
+            aria-label={l("分享检索")}
             icon={<ShareAltOutlined />}
             disabled={!result}
             onClick={() =>
@@ -1150,42 +1151,39 @@ export default function LogExplorePage() {
               )
             }
           >
-            分享检索
-          </Button>
+            {l(" 分享检索 ")}</Button>
           <Button
             size="small"
             type="text"
             icon={<MessageOutlined />}
             onClick={() => setAIOpen(true)}
           >
-            AI 排查
-          </Button>
+            {l(" AI 排查 ")}</Button>
           <Button
             size="small"
             type="default"
             icon={<SaveOutlined />}
-            aria-label="保存检索"
+            aria-label={l("保存检索")}
             disabled={!result}
             onClick={() => {
               setSaveTitle(
-                saved?.title ?? `${activeTable?.name ?? "日志"} 检索`,
+                saved?.title ?? l("{0} 检索",activeTable?.name ?? l("日志")),
               );
               setSaveOpen(true);
             }}
           >
-            保存检索
-          </Button>
+            {l(" 保存检索 ")}</Button>
         </Space>
       </header>
       <section className="lm-log-query">
         <div className="lm-log-search-line">
-          <div className="lm-discover-data-view"><span><TableOutlined /> 数据视图</span>
+          <div className="lm-discover-data-view"><span><TableOutlined /> {l(" 数据视图")}</span>
           <Tooltip title={table?.name ?? spec.table_id}>
             <Select
               showSearch
               optionFilterProp="label"
-              aria-label="日志表"
-              placeholder="选择日志表"
+              aria-label={l("日志表")}
+              placeholder={l("选择日志表")}
               value={spec.table_id || undefined}
               className="lm-log-table-picker"
               popupMatchSelectWidth={520}
@@ -1214,14 +1212,14 @@ export default function LogExplorePage() {
           </div>
           <div className="lm-discover-query-input">
           <Select
-            aria-label="检索模式"
+            aria-label={l("检索模式")}
             value={
               spec.mode === "sql" ? "sql" : (view.query_syntax ?? "literal")
             }
             className="lm-log-mode-picker"
             options={[
-              { value: "literal", label: "正文" },
-              { value: "expression", label: "字段表达式" },
+              { value: "literal", label: l("正文") },
+              { value: "expression", label: l("字段表达式") },
               { value: "sql", label: "SQL" },
             ]}
             onChange={(mode) => {
@@ -1254,7 +1252,7 @@ export default function LogExplorePage() {
               expression={view.query_syntax === "expression"}
             />
           ) : (
-            <span className="lm-log-sql-hint">按所选时间范围查询原始日志</span>
+            <span className="lm-log-sql-hint">{l("按所选时间范围查询原始日志")}</span>
           )}
           </div>
           <DiscoverTimeRange range={spec.range} lookback={view.lookback} refreshSeconds={refreshSeconds}
@@ -1262,14 +1260,13 @@ export default function LogExplorePage() {
             onRefreshChange={refresh_seconds => setView(current => ({ ...current, refresh_seconds }))} />
           <Button
             type="primary"
-            aria-label="查询"
+            aria-label={l("查询")}
             icon={<ReloadOutlined />}
             onClick={run}
             disabled={!spec.table_id}
             loading={loading}
           >
-            查询
-          </Button>
+            {l(" 查询 ")}</Button>
           {loading && (
             <Button
               onClick={() => {
@@ -1279,41 +1276,40 @@ export default function LogExplorePage() {
                 setLoading(false);
               }}
             >
-              取消
-            </Button>
+              {l(" 取消 ")}</Button>
           )}
           <Popover
             trigger="click"
-            title="检索语法"
+            title={l("检索语法")}
             content={
               <div className="lm-log-query-help">
-                <p>正文：按原样匹配日志内容，大小写不敏感。</p>
-                <p>字段表达式：字段条件会转成可编辑的过滤标签。</p>
+                <p>{l("正文：按原样匹配日志内容，大小写不敏感。")}</p>
+                <p>{l("字段表达式：字段条件会转成可编辑的过滤标签。")}</p>
                 <code>service:checkout-api AND level:ERROR</code>
                 <code>@status&gt;=500 @retryable:true</code>
-                <p>支持 AND、比较和字段存在（*）。复杂组合使用 SQL。</p>
+                <p>{l("支持 AND、比较和字段存在（*）。复杂组合使用 SQL。")}</p>
               </div>
             }
           >
             <Button
               type="text"
-              aria-label="检索语法帮助"
+              aria-label={l("检索语法帮助")}
               icon={<QuestionCircleOutlined />}
             />
           </Popover>
         </div>
         <div className="lm-log-controls">
           <Dropdown trigger={["click"]} menu={{items:[
-            {key:"enable",label:"启用所有过滤",disabled:!spec.filters.some(filter => filter.disabled)},
-            {key:"disable",label:"禁用所有过滤",disabled:!spec.filters.some(filter => !filter.disabled)},
-            {key:"invert",label:"反转所有过滤",disabled:!spec.filters.length},
+            {key:"enable",label:l("启用所有过滤"),disabled:!spec.filters.some(filter => filter.disabled)},
+            {key:"disable",label:l("禁用所有过滤"),disabled:!spec.filters.some(filter => !filter.disabled)},
+            {key:"invert",label:l("反转所有过滤"),disabled:!spec.filters.length},
             {type:"divider"},
-            {key:"clear",label:"移除所有过滤",disabled:!spec.filters.length && !spec.services.length},
+            {key:"clear",label:l("移除所有过滤"),disabled:!spec.filters.length && !spec.services.length},
           ],onClick:({key}) => commit({...activeSpec,filters:key==="clear"?[]:spec.filters.map(filter => key==="invert"?{...filter,op:inverse[filter.op]??filter.op}:{...filter,disabled:key==="disable"}),...(key==="clear"?{services:[]}: {})})}}>
-            <Button type="text" size="small" aria-label="管理所有过滤" icon={<FilterOutlined />} />
+            <Button type="text" size="small" aria-label={l("管理所有过滤")} icon={<FilterOutlined />} />
           </Dropdown>
           {result && JSON.stringify(spec) !== JSON.stringify(activeSpec) && (
-            <Tag color="processing">条件待应用</Tag>
+            <Tag color="processing">{l("条件待应用")}</Tag>
           )}
           <Button
             size="small"
@@ -1322,15 +1318,14 @@ export default function LogExplorePage() {
             onClick={() => openFilter()}
             disabled={!spec.table_id}
           >
-            添加过滤
-          </Button>
-          <Popover trigger="click" placement="bottomLeft" content={<div className="lm-discover-quick-filters"><b>快捷筛选</b>
+            {l(" 添加过滤 ")}</Button>
+          <Popover trigger="click" placement="bottomLeft" content={<div className="lm-discover-quick-filters"><b>{l("快捷筛选")}</b>
           <Select
             mode="multiple"
             maxTagCount="responsive"
             showSearch
-            aria-label="服务筛选"
-            placeholder="全部服务"
+            aria-label={l("服务筛选")}
+            placeholder={l("全部服务")}
             value={spec.services}
             size="small"
             style={{ width: 210 }}
@@ -1340,20 +1335,20 @@ export default function LogExplorePage() {
             }))}
             onChange={(services) => commit({ ...activeSpec, services })}
           />
-          {spec.mode==='filters'&&<Input size="small" allowClear aria-label="Trace ID 筛选" placeholder="Trace ID" style={{width:190}} value={String(spec.filters.find(filter=>filter.scope==='column'&&filter.field==='trace_id'&&filter.op==='eq')?.value??'')} onChange={event=>setSpec(current=>({...current,filters:[...current.filters.filter(filter=>!(filter.scope==='column'&&filter.field==='trace_id'&&filter.op==='eq')),...(event.target.value?[{scope:'column' as const,field:'trace_id',type:'string' as const,op:'eq' as const,value:event.target.value}]:[])]}))} onPressEnter={run}/>}
-          <Button size="small" type="primary" onClick={run}>应用筛选</Button></div>}>
-            <Button size="small" type="text" icon={<SlidersOutlined />}>快捷筛选{spec.services.length ? ` (${spec.services.length})` : ""}</Button>
+          {spec.mode==='filters'&&<Input size="small" allowClear aria-label={l("Trace ID 筛选")} placeholder="Trace ID" style={{width:190}} value={String(spec.filters.find(filter=>filter.scope==='column'&&filter.field==='trace_id'&&filter.op==='eq')?.value??'')} onChange={event=>setSpec(current=>({...current,filters:[...current.filters.filter(filter=>!(filter.scope==='column'&&filter.field==='trace_id'&&filter.op==='eq')),...(event.target.value?[{scope:'column' as const,field:'trace_id',type:'string' as const,op:'eq' as const,value:event.target.value}]:[])]}))} onPressEnter={run}/>}
+          <Button size="small" type="primary" onClick={run}>{l("应用筛选")}</Button></div>}>
+            <Button size="small" type="text" icon={<SlidersOutlined />}>{l("快捷筛选")}{spec.services.length ? ` (${spec.services.length})` : ""}</Button>
           </Popover>
           <div className="lm-discover-inline-chips">
             {spec.services.map(service => <Tag key={service} closable onClose={event => {event.preventDefault();commit({...activeSpec,services:spec.services.filter(value => value!==service)});}}>service: {service}</Tag>)}
           </div>
           <div className="lm-log-refresh-controls">
-            <span className="lm-discover-refresh-status"><ClockCircleOutlined /> {refreshSeconds ? `每 ${refreshSeconds} 秒刷新` : "自动刷新已暂停"}</span>
+            <span className="lm-discover-refresh-status"><ClockCircleOutlined /> {refreshSeconds ? l("每 {0} 秒刷新",refreshSeconds) : l("自动刷新已暂停")}</span>
             <Button
               size="small"
               type="text"
               icon={<ReloadOutlined />}
-              aria-label="刷新日志"
+              aria-label={l("刷新日志")}
               onClick={refresh}
               disabled={!result || loading}
             />
@@ -1380,10 +1375,10 @@ export default function LogExplorePage() {
                 {{
                   eq: ":",
                   ne: "≠",
-                  in: "属于",
-                  not_in: "不属于",
-                  exists: "存在",
-                  not_exists: "缺失",
+                  in: l("属于"),
+                  not_in: l("不属于"),
+                  exists: l("存在"),
+                  not_exists: l("缺失"),
                   gt: ">",
                   gte: "≥",
                   lt: "<",
@@ -1392,16 +1387,16 @@ export default function LogExplorePage() {
                 {!["exists", "not_exists"].includes(f.op) && printable(f.value)}
               </button>
               <Dropdown trigger={["click"]} menu={{items:[
-                {key:"edit",label:"编辑过滤"},
-                {key:"inverse",label:"反转包含 / 排除"},
-                {key:"disable",label:f.disabled?"启用过滤":"禁用过滤"},
+                {key:"edit",label:l("编辑过滤")},
+                {key:"inverse",label:l("反转包含 / 排除")},
+                {key:"disable",label:f.disabled?l("启用过滤"):l("禁用过滤")},
               ],onClick:({key}) => key==="edit"?openFilter(i):updateChip(i,key as "inverse"|"disable")}}>
-                <Button size="small" type="text" aria-label={`过滤操作 ${f.field}`} icon={<DownOutlined />} />
+                <Button size="small" type="text" aria-label={l("过滤操作 {0}",f.field)} icon={<DownOutlined />} />
               </Dropdown>
               <Button
                 size="small"
                 type="text"
-                aria-label={`删除过滤 ${f.field}`}
+                aria-label={l("删除过滤 {0}",f.field)}
                 onClick={() => updateChip(i, "delete")}
               >
                 ×
@@ -1412,13 +1407,12 @@ export default function LogExplorePage() {
             <Button
               size="small"
               type="link"
-              aria-label="清除筛选"
+              aria-label={l("清除筛选")}
               onClick={() =>
                 commit({ ...activeSpec, filters: [], services: [] })
               }
             >
-              清除
-            </Button>
+              {l(" 清除 ")}</Button>
           )}
         </div>
       </section>
@@ -1427,8 +1421,8 @@ export default function LogExplorePage() {
           type="error"
           showIcon
           title={error}
-          description="保留了检索条件；上次结果仅供参考。"
-          action={<Button onClick={run}>重新查询</Button>}
+          description={l("保留了检索条件；上次结果仅供参考。")}
+          action={<Button onClick={run}>{l("重新查询")}</Button>}
         />
       )}{" "}
       {liveError && (
@@ -1436,13 +1430,13 @@ export default function LogExplorePage() {
           type="warning"
           showIcon
           title={liveError}
-          action={<Button onClick={refresh}>完整重查</Button>}
+          action={<Button onClick={refresh}>{l("完整重查")}</Button>}
         />
       )}
       {!catalogReady ? (
         <Spin />
       ) : tables.length === 0 ? (
-        <Empty description="还没有日志表，请先通过 SDK 或执行节点上报日志" />
+        <Empty description={l("还没有日志表，请先通过 SDK 或执行节点上报日志")} />
       ) : (
         <>
           <div
@@ -1454,31 +1448,31 @@ export default function LogExplorePage() {
             <main className="lm-log-main">
               <div className="lm-log-distribution">
                 <div className="lm-log-distribution-heading">
-                  <Tooltip title={view.chart_collapsed ? "展开时间图" : "收起时间图"}><Button size="small" type="text" aria-label={view.chart_collapsed ? "展开时间图" : "收起时间图"}
+                  <Tooltip title={view.chart_collapsed ? l("展开时间图") : l("收起时间图")}><Button size="small" type="text" aria-label={view.chart_collapsed ? l("展开时间图") : l("收起时间图")}
                     icon={view.chart_collapsed ? <RightOutlined /> : <DownOutlined />} onClick={() => setView(current => ({...current,chart_collapsed:!current.chart_collapsed}))} /></Tooltip>
                   {result && !result.histogram_truncated && (
                     <b className="lm-discover-hit-count">
                       {asRows(result.histogram)
                         .reduce((sum, row) => sum + Number(row.count), 0)
                         .toLocaleString()}{" "}
-                      <span> 条匹配日志</span>
+                      <span> {l(" 条匹配日志")}</span>
                     </b>
                   )}
                   <Select
                     size="small"
-                    aria-label="时间桶"
+                    aria-label={l("时间桶")}
                     value={spec.interval_ms ?? 0}
                     style={{ width: 115 }}
                     options={[
-                      [0, "自动时间桶"],
-                      [1000, "1 秒"],
-                      [10000, "10 秒"],
-                      [30000, "30 秒"],
-                      [60000, "1 分钟"],
-                      [300000, "5 分钟"],
-                      [900000, "15 分钟"],
-                      [3600000, "1 小时"],
-                      [86400000, "1 天"],
+                      [0, l("自动时间桶")],
+                      [1000, l("1 秒")],
+                      [10000, l("10 秒")],
+                      [30000, l("30 秒")],
+                      [60000, l("1 分钟")],
+                      [300000, l("5 分钟")],
+                      [900000, l("15 分钟")],
+                      [3600000, l("1 小时")],
+                      [86400000, l("1 天")],
                     ].map(([value, label]) => ({
                       value: Number(value),
                       label: String(label),
@@ -1493,8 +1487,8 @@ export default function LogExplorePage() {
                       commit({ ...activeSpec, interval_ms })
                     }
                   />
-                  {!view.chart_collapsed && <Select size="small" aria-label="时间图拆分" value={view.histogram_breakdown ?? "none"} style={{width:124}}
-                    options={[{value:"none",label:"不拆分"},{value:"severity",label:"按级别拆分"}]}
+                  {!view.chart_collapsed && <Select size="small" aria-label={l("时间图拆分")} value={view.histogram_breakdown ?? "none"} style={{width:124}}
+                    options={[{value:"none",label:l("不拆分")},{value:"severity",label:l("按级别拆分")}]}
                     onChange={histogram_breakdown => setView(current => ({...current,histogram_breakdown}))} />}
                   <Button
                     size="small"
@@ -1512,7 +1506,7 @@ export default function LogExplorePage() {
                       setBrushOrigin(undefined);
                     }}
                   >
-                    {brushOrigin ? "清除时间选择" : "重置时间"}
+                    {brushOrigin ? l("清除时间选择") : l("重置时间")}
                   </Button>
                 </div>
                 {!view.chart_collapsed && (
@@ -1527,7 +1521,7 @@ export default function LogExplorePage() {
                 {result?.histogram_truncated && (
                   <Alert
                     type="warning"
-                    title="时间图已截断，请增大桶宽或缩小范围"
+                    title={l("时间图已截断，请增大桶宽或缩小范围")}
                   />
                 )}
                 {result && (
@@ -1545,7 +1539,7 @@ export default function LogExplorePage() {
                   <Space>
                     <Button
                       className={`lm-log-field-toggle ${view.fields_collapsed ? "is-visible" : ""}`}
-                      aria-label="字段"
+                      aria-label={l("字段")}
                       size="small"
                       icon={<FilterOutlined />}
                       onClick={() =>
@@ -1554,16 +1548,15 @@ export default function LogExplorePage() {
                           : setView((v) => ({ ...v, fields_collapsed: false }))
                       }
                     >
-                      字段
-                    </Button>
+                      {l(" 字段 ")}</Button>
                     <div
                       role="tablist"
-                      aria-label="日志结果视图"
+                      aria-label={l("日志结果视图")}
                       className="lm-log-result-tabs"
                     >
                       <Button
                         role="tab"
-                        aria-label="原始日志"
+                        aria-label={l("原始日志")}
                         data-mode="logs"
                         aria-selected={view.explore_mode !== "aggregate"}
                         aria-controls="lm-log-document-results"
@@ -1575,11 +1568,11 @@ export default function LogExplorePage() {
                         onKeyDown={(e) => tabKey(e, "logs")}
                         onClick={() => explore("logs")}
                       >
-                        文档 <Tooltip title="当前已载入的文档数"><span className="lm-discover-count">{rows.length.toLocaleString()}</span></Tooltip>
+                        {l(" 文档 ")}<Tooltip title={l("当前已载入的文档数")}><span className="lm-discover-count">{rows.length.toLocaleString()}</span></Tooltip>
                       </Button>
                       <Button
                         role="tab"
-                        aria-label="聚合"
+                        aria-label={l("聚合")}
                         data-mode="aggregate"
                         aria-selected={view.explore_mode === "aggregate"}
                         aria-controls="lm-log-aggregate-results"
@@ -1591,32 +1584,31 @@ export default function LogExplorePage() {
                         onKeyDown={(e) => tabKey(e, "aggregate")}
                         onClick={() => explore("aggregate")}
                       >
-                        字段统计
-                      </Button>
+                        {l(" 字段统计 ")}</Button>
                     </div>
-                    {view.explore_mode === "aggregate" && <b>当前查询完整范围</b>}
+                    {view.explore_mode === "aggregate" && <b>{l("当前查询完整范围")}</b>}
                     {loading && <Spin size="small" />}
                   </Space>
                   {view.explore_mode !== "aggregate" && (
                     <Space size={6} wrap>
                       <Button
-                        aria-label="配置显示列"
+                        aria-label={l("配置显示列")}
                         size="small" icon={<TableOutlined />}
                         onClick={() => setColumnsOpen(true)}
-                      >列 <span className="lm-discover-count">{view.columns.length}</span></Button>
+                      >{l("列 ")}<span className="lm-discover-count">{view.columns.length}</span></Button>
                       <Select
                         size="small"
-                        aria-label="日志排序"
+                        aria-label={l("日志排序")}
                         value={spec.sort}
                         options={[
-                          { value: "desc", label: "新 → 旧" },
-                          { value: "asc", label: "旧 → 新" },
+                          { value: "desc", label: l("新 → 旧") },
+                          { value: "asc", label: l("旧 → 新") },
                         ]}
                         onChange={(sort) => commit({ ...spec, sort })}
                       />
-                      <Tooltip title="实时每 3 秒读取，查询可见延迟超过 15 秒时需历史刷新">
+                      <Tooltip title={l("实时每 3 秒读取，查询可见延迟超过 15 秒时需历史刷新")}>
                         <Button
-                          aria-label={live ? "暂停实时" : "实时"}
+                          aria-label={live ? l("暂停实时") : l("实时")}
                           size="small"
                           icon={
                             live ? <PauseOutlined /> : <PlayCircleOutlined />
@@ -1627,27 +1619,27 @@ export default function LogExplorePage() {
                             setLiveError("");
                           }}
                         >
-                          {live ? "暂停实时" : "实时"}
+                          {live ? l("暂停实时") : l("实时")}
                         </Button>
                       </Tooltip>
-                      <Popover trigger="click" placement="bottomRight" content={<div className="lm-discover-display-options"><b>表格显示</b>
-                        <label>行高<Select
-                        aria-label="日志行数"
+                      <Popover trigger="click" placement="bottomRight" content={<div className="lm-discover-display-options"><b>{l("表格显示")}</b>
+                        <label>{l("行高")}<Select
+                        aria-label={l("日志行数")}
                         size="small"
                         value={view.row_lines ?? 1}
                         options={[
-                          { value: 1, label: "单行" },
-                          { value: 3, label: "三行" },
-                          { value: 0, label: "自动换行" },
+                          { value: 1, label: l("单行") },
+                          { value: 3, label: l("三行") },
+                          { value: 0, label: l("自动换行") },
                         ]}
                         onChange={(row_lines) =>
                           setView((v) => ({ ...v, row_lines }))
                         }
                       /></label>
-                      <label>密度<Select aria-label="表格密度" size="small" value={view.density ?? "compact"} options={[{value:"compact",label:"紧凑"},{value:"comfortable",label:"宽松"}]}
+                      <label>{l("密度")}<Select aria-label={l("表格密度")} size="small" value={view.density ?? "compact"} options={[{value:"compact",label:l("紧凑")},{value:"comfortable",label:l("宽松")}]}
                         onChange={density => setView(current => ({...current,density}))} /></label>
-                      </div>}><Tooltip title="显示选项"><Button size="small" aria-label="表格显示选项" icon={<SlidersOutlined />} /></Tooltip></Popover>
-                      <Tooltip title={fullscreen ? "退出全屏 (Esc)" : "全屏查看"}><Button size="small" aria-label={fullscreen ? "退出全屏" : "全屏查看"}
+                      </div>}><Tooltip title={l("显示选项")}><Button size="small" aria-label={l("表格显示选项")} icon={<SlidersOutlined />} /></Tooltip></Popover>
+                      <Tooltip title={fullscreen ? l("退出全屏 (Esc)") : l("全屏查看")}><Button size="small" aria-label={fullscreen ? l("退出全屏") : l("全屏查看")}
                         icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={() => setFullscreen(value => !value)} /></Tooltip>
                       <Dropdown
                         trigger={["click"]}
@@ -1655,25 +1647,25 @@ export default function LogExplorePage() {
                           items: [
                             {
                               key: "csv",
-                              label: "导出已载入日志 CSV",
+                              label: l("导出已载入日志 CSV"),
                               icon: <DownloadOutlined />,
                               disabled: !rows.length,
                             },
                             {
                               key: "sql",
-                              label: "查看执行 SQL",
+                              label: l("查看执行 SQL"),
                               icon: <CodeOutlined />,
                               disabled: !result,
                             },
                             { type: "divider" },
                             {
                               key: "dashboard",
-                              label: "加入大盘",
+                              label: l("加入大盘"),
                               disabled: !result,
                             },
                             {
                               key: "alert",
-                              label: "创建告警",
+                              label: l("创建告警"),
                               disabled: !result,
                             },
                           ],
@@ -1688,7 +1680,7 @@ export default function LogExplorePage() {
                         <Button
                           size="small"
                           type="text"
-                          aria-label="更多日志操作"
+                          aria-label={l("更多日志操作")}
                           icon={<MoreOutlined />}
                         />
                       </Dropdown>
@@ -1705,7 +1697,7 @@ export default function LogExplorePage() {
                         );
                         if (next.truncated)
                           void toast.info(
-                            "实时列表窗口最多 2,000 条 / 8 MiB，超出的历史日志请重新查询",
+                            l("实时列表窗口最多 2,000 条 / 8 MiB，超出的历史日志请重新查询"),
                           );
                         return next.rows;
                       });
@@ -1715,13 +1707,12 @@ export default function LogExplorePage() {
                       );
                     }}
                   >
-                    查看 {pending.length} 条新到达日志 · 当前阅读位置保持不变
-                  </button>
+                    {l(" 查看 ")}{pending.length} {l(" 条新到达日志 · 当前阅读位置保持不变 ")}</button>
                 )}
                 {view.explore_mode === "aggregate" ? (
                   <div
                     role="tabpanel"
-                    aria-label="聚合结果"
+                    aria-label={l("聚合结果")}
                     id="lm-log-aggregate-results"
                   >
                     <FieldAggregate
@@ -1739,7 +1730,7 @@ export default function LogExplorePage() {
                 ) : (
                   <div
                     role="tabpanel"
-                    aria-label="原始日志结果"
+                    aria-label={l("原始日志结果")}
                     id="lm-log-document-results"
                   >
                     <LogResultsTable
@@ -1767,19 +1758,19 @@ export default function LogExplorePage() {
                   <footer className="lm-log-results-footer">
                     <span>
                       {result
-                        ? `已载入 ${rows.length.toLocaleString()} / 可加载 ${result.total_loaded.toLocaleString()} 条 · ${new Date(result.expires_at).toLocaleTimeString()} 前有效`
+                        ? l("已载入 {0} / 可加载 {1} 条 · {2} 前有效",rows.length.toLocaleString(),result.total_loaded.toLocaleString(),new Date(result.expires_at).toLocaleTimeString())
                         : ""}
-                      {result?.truncated && <Tooltip title="本次查询结果最多 2,000 条 / 8 MiB，请缩小时间范围或添加过滤以查看其余日志。"><Tag color="warning">结果达上限</Tag></Tooltip>}
+                      {result?.truncated && <Tooltip title={l("本次查询结果最多 2,000 条 / 8 MiB，请缩小时间范围或添加过滤以查看其余日志。")}><Tag color="warning">{l("结果达上限")}</Tag></Tooltip>}
                     </span>
                     <Button
                       aria-label={
-                        result?.next_cursor ? "加载更多" : "已到本次结果末尾"
+                        result?.next_cursor ? l("加载更多") : l("已到本次结果末尾")
                       }
                       onClick={() => void more()}
                       loading={loading}
                       disabled={!result?.next_cursor}
                     >
-                      {result?.next_cursor ? "加载更多" : "已到本次结果末尾"}
+                      {result?.next_cursor ? l("加载更多") : l("已到本次结果末尾")}
                     </Button>
                   </footer>
                 )}
@@ -1789,7 +1780,7 @@ export default function LogExplorePage() {
         </>
       )}
       <Drawer
-        title="字段探索"
+        title={l("字段探索")}
         open={fieldsOpen}
         onClose={() => setFieldsOpen(false)}
         size={340}
@@ -1797,22 +1788,21 @@ export default function LogExplorePage() {
         <div className="lm-log-fields-mobile">{fieldSidebar}</div>
       </Drawer>
       <Modal
-        title={editing === null ? "添加过滤" : "编辑过滤"}
+        title={editing === null ? l("添加过滤") : l("编辑过滤")}
         open={filterOpen}
         onCancel={() => setFilterOpen(false)}
         onOk={applyFilter}
-        okText="应用过滤"
+        okText={l("应用过滤")}
         destroyOnHidden
       >
         <div className="lm-log-form">
           <label>
-            字段范围
-            <Select
-              aria-label="过滤字段范围"
+            {l(" 字段范围 ")}<Select
+              aria-label={l("过滤字段范围")}
               value={filter.scope}
               options={[
-                { value: "column", label: "固定字段" },
-                { value: "attribute", label: "自定义属性" },
+                { value: "column", label: l("固定字段") },
+                { value: "attribute", label: l("自定义属性") },
               ]}
               onChange={(scope) =>
                 setFilter({ ...filter, scope, field: "", value: "" })
@@ -1820,9 +1810,8 @@ export default function LogExplorePage() {
             />
           </label>
           <label>
-            字段
-            <Select
-              aria-label="过滤字段"
+            {l(" 字段 ")}<Select
+              aria-label={l("过滤字段")}
               showSearch
               optionFilterProp="label"
               value={filter.field || undefined}
@@ -1854,14 +1843,13 @@ export default function LogExplorePage() {
             />
           </label>
           <label>
-            值类型
-            <Select
-              aria-label="过滤值类型"
+            {l(" 值类型 ")}<Select
+              aria-label={l("过滤值类型")}
               value={filter.type}
               options={[
-                { value: "string", label: "字符串" },
-                { value: "number", label: "数字" },
-                { value: "boolean", label: "布尔" },
+                { value: "string", label: l("字符串") },
+                { value: "number", label: l("数字") },
+                { value: "boolean", label: l("布尔") },
               ]}
               onChange={(type) =>
                 setFilter({
@@ -1874,23 +1862,22 @@ export default function LogExplorePage() {
             />
           </label>
           <label>
-            运算符
-            <Select
-              aria-label="过滤运算符"
+            {l(" 运算符 ")}<Select
+              aria-label={l("过滤运算符")}
               value={filter.op}
               options={[
-                ["eq", "等于"],
-                ["ne", "不等于"],
-                ["in", "包含多个值"],
-                ["not_in", "排除多个值"],
-                ["exists", "字段存在"],
-                ["not_exists", "字段缺失"],
+                ["eq", l("等于")],
+                ["ne", l("不等于")],
+                ["in", l("包含多个值")],
+                ["not_in", l("排除多个值")],
+                ["exists", l("字段存在")],
+                ["not_exists", l("字段缺失")],
                 ...(filter.type === "number"
                   ? [
-                      ["gt", "大于"],
-                      ["gte", "大于等于"],
-                      ["lt", "小于"],
-                      ["lte", "小于等于"],
+                      ["gt", l("大于")],
+                      ["gte", l("大于等于")],
+                      ["lt", l("小于")],
+                      ["lte", l("小于等于")],
                     ]
                   : []),
               ].map(([value, label]) => ({ value, label }))}
@@ -1899,8 +1886,7 @@ export default function LogExplorePage() {
           </label>
           {!["exists", "not_exists"].includes(filter.op) && (
             <label>
-              值
-              {filter.type === "boolean" ? (
+              {l(" 值 ")}{filter.type === "boolean" ? (
                 <Select
                   value={filter.value === true ? "true" : "false"}
                   options={[
@@ -1921,7 +1907,7 @@ export default function LogExplorePage() {
                   }
                   placeholder={
                     ["in", "not_in"].includes(filter.op)
-                      ? "用逗号分隔多个值"
+                      ? l("用逗号分隔多个值")
                       : ""
                   }
                   onChange={(e) =>
@@ -1934,13 +1920,12 @@ export default function LogExplorePage() {
         </div>
       </Modal>
       <Modal
-        title="显示列与顺序"
+        title={l("显示列与顺序")}
         open={columnsOpen}
         onCancel={() => setColumnsOpen(false)}
         footer={
           <Button type="primary" onClick={() => setColumnsOpen(false)}>
-            完成
-          </Button>
+            {l(" 完成 ")}</Button>
         }
         width={660}
       >
@@ -1949,7 +1934,7 @@ export default function LogExplorePage() {
             <div
               key={name}
               draggable
-              title="拖动重排列，或使用上移/下移"
+              title={l("拖动重排列，或使用上移/下移")}
               onDragStart={(e) => {
                 e.dataTransfer.setData("text/plain", name);
                 e.dataTransfer.effectAllowed = "move";
@@ -1972,25 +1957,22 @@ export default function LogExplorePage() {
                 disabled={i === 0}
                 onClick={() => moveColumn(i, -1)}
               >
-                上移
-              </Button>
+                {l(" 上移 ")}</Button>
               <Button
                 size="small"
                 disabled={i === view.columns.length - 1}
                 onClick={() => moveColumn(i, 1)}
               >
-                下移
-              </Button>
+                {l(" 下移 ")}</Button>
               <Button size="small" onClick={() => toggleColumn(name)}>
-                移除
-              </Button>
+                {l(" 移除 ")}</Button>
             </div>
           ))}
         </div>
         <Select
           showSearch
-          aria-label="添加显示列"
-          placeholder="添加显示列"
+          aria-label={l("添加显示列")}
+          placeholder={l("添加显示列")}
           value={undefined}
           style={{ width: "100%" }}
           options={available
@@ -2002,7 +1984,7 @@ export default function LogExplorePage() {
       <Drawer
         title={
           <Space>
-            <span>日志详情</span>
+            <span>{l("日志详情")}</span>
             <Tag color={severityColor(selected?.severity)}>
               {String(selected?.severity ?? "")}
             </Tag>
@@ -2019,18 +2001,18 @@ export default function LogExplorePage() {
             <small>
               {selectedIndex >= 0
                 ? `${selectedIndex + 1} / ${rows.length}`
-                : "链接日志"}
+                : l("链接日志")}
             </small>
             <Button
               size="small"
-              aria-label="上一条日志"
+              aria-label={l("上一条日志")}
               icon={<LeftOutlined />}
               disabled={selectedIndex <= 0}
               onClick={() => selectEvent(rows[selectedIndex - 1])}
             />
             <Button
               size="small"
-              aria-label="下一条日志"
+              aria-label={l("下一条日志")}
               icon={<RightOutlined />}
               disabled={selectedIndex < 0 || selectedIndex >= rows.length - 1}
               onClick={() => selectEvent(rows[selectedIndex + 1])}
@@ -2043,15 +2025,13 @@ export default function LogExplorePage() {
             icon={<CopyOutlined />}
             onClick={() => void copy(printable(selected?.body))}
           >
-            复制原文
-          </Button>
+            {l(" 复制原文 ")}</Button>
           <Button
             onClick={() =>
               void copy(JSON.stringify(normalizedSelected, null, 2))
             }
           >
-            复制 JSON
-          </Button>
+            {l(" 复制 JSON ")}</Button>
           <Button
             onClick={() =>
               selected &&
@@ -2061,16 +2041,14 @@ export default function LogExplorePage() {
               )
             }
           >
-            复制链接
-          </Button>
+            {l(" 复制链接 ")}</Button>
           <Button
             loading={contextLoading}
             disabled={!selected?.source_id}
             icon={<ApiOutlined />}
             onClick={() => void showContext()}
           >
-            同源上下文
-          </Button>
+            {l(" 同源上下文 ")}</Button>
           {selected?.trace_id ? (
             <Button
               onClick={() =>
@@ -2080,23 +2058,22 @@ export default function LogExplorePage() {
                 )
               }
             >
-              按 Trace 筛选日志
-            </Button>
+              {l(" 按 Trace 筛选日志 ")}</Button>
           ) : null}
-          <Button onClick={() => setAIOpen(true)}>AI 分析</Button>
+          <Button onClick={() => setAIOpen(true)}>{l("AI 分析")}</Button>
         </Space>
         <Tabs
           defaultActiveKey="fields"
           items={[
             {
               key: "fields",
-              label: "表格",
+              label: l("表格"),
               children: selected && <DocumentFields row={selected} columns={view.columns} fields={available}
                 onFilter={quickFilter} onToggleColumn={toggleColumn} onCopy={value => void copy(value)} />,
             },
             {
               key: "text",
-              label: "原文 / 堆栈",
+              label: l("原文 / 堆栈"),
               children: (
                 <pre className="lm-log-body">
                   {printable(selected?.body)}
@@ -2119,10 +2096,10 @@ export default function LogExplorePage() {
         {context && (
           <section className="lm-log-context">
             <header>
-              <b>同源上下文</b>
+              <b>{l("同源上下文")}</b>
               <small>{context.scope}</small>
               <Tag>
-                {context.order === "source_seq" ? "源输出顺序" : "事件时间顺序"}
+                {context.order === "source_seq" ? l("源输出顺序") : l("事件时间顺序")}
               </Tag>
               <Button
                 size="small"
@@ -2134,8 +2111,7 @@ export default function LogExplorePage() {
                   void showContext(next);
                 }}
               >
-                扩大前后范围
-              </Button>
+                {l(" 扩大前后范围 ")}</Button>
             </header>
             {asRows(context.frame).map((row) => (
               <button
@@ -2157,38 +2133,35 @@ export default function LogExplorePage() {
         )}
       </Drawer>
       <Modal
-        title="保存检索"
-        okText="保存"
+        title={l("保存检索")}
+        okText={l("保存")}
         open={saveOpen}
         onCancel={() => setSaveOpen(false)}
         onOk={() => void save()}
         confirmLoading={saveBusy}
       >
         <label>
-          名称
-          <Input
-            aria-label="检索名称"
+          {l(" 名称 ")}<Input
+            aria-label={l("检索名称")}
             value={saveTitle}
             onChange={(e) => setSaveTitle(e.target.value)}
             onPressEnter={() => void save()}
           />
         </label>
         <p>
-          保存当前已执行的查询、时间模式、显示列和列顺序。实时状态和会话数据不会保存。
-        </p>
+          {l(" 保存当前已执行的查询、时间模式、显示列和列顺序。实时状态和会话数据不会保存。 ")}</p>
         {saved && (
           <Button
             onClick={() => {
               setSaved(undefined);
-              setSaveTitle(saveTitle + " 副本");
+              setSaveTitle(saveTitle + l(" 副本"));
             }}
           >
-            另存为新检索
-          </Button>
+            {l(" 另存为新检索 ")}</Button>
         )}
       </Modal>
       <Drawer
-        title="保存的检索"
+        title={l("保存的检索")}
         open={savedOpen}
         onClose={() => setSavedOpen(false)}
         size={650}
@@ -2200,7 +2173,7 @@ export default function LogExplorePage() {
           pagination={{ pageSize: 10 }}
           columns={[
             {
-              title: "名称",
+              title: l("名称"),
               render: (_, item) => (
                 <Button
                   type="link"
@@ -2213,14 +2186,13 @@ export default function LogExplorePage() {
                 </Button>
               ),
             },
-            { title: "表", render: (_, item) => item.spec.table_id },
+            { title: l("表"), render: (_, item) => item.spec.table_id },
             {
-              title: "操作",
+              title: l("操作"),
               render: (_, item) => (
                 <Space>
                   <Button size="small" onClick={() => void duplicate(item)}>
-                    复制
-                  </Button>
+                    {l(" 复制 ")}</Button>
                   <Button
                     size="small"
                     onClick={() =>
@@ -2230,15 +2202,13 @@ export default function LogExplorePage() {
                       )
                     }
                   >
-                    分享
-                  </Button>
+                    {l(" 分享 ")}</Button>
                   <Button
                     size="small"
                     danger
                     onClick={() => setDeleteTarget(item)}
                   >
-                    删除
-                  </Button>
+                    {l(" 删除 ")}</Button>
                 </Space>
               ),
             },
@@ -2246,7 +2216,7 @@ export default function LogExplorePage() {
         />
       </Drawer>
       <Modal
-        title="删除保存检索"
+        title={l("删除保存检索")}
         open={!!deleteTarget}
         onCancel={() => setDeleteTarget(undefined)}
         onOk={async () => {
@@ -2262,48 +2232,47 @@ export default function LogExplorePage() {
           }
         }}
         okButtonProps={{ danger: true }}
-        okText="删除"
+        okText={l("删除")}
       >
-        <p>删除“{deleteTarget?.title}”后，大盘中的独立副本仍保留。</p>
+        <p>{l("删除“")}{deleteTarget?.title}{l("”后，大盘中的独立副本仍保留。")}</p>
       </Modal>
       <Drawer
-        title="实际执行的 SQL"
+        title={l("实际执行的 SQL")}
         open={sqlOpen}
         onClose={() => setSQLOpen(false)}
         size="85vw"
       >
         <Space>
-          <Button onClick={() => void copy(result?.sql ?? "")}>复制 SQL</Button>
+          <Button onClick={() => void copy(result?.sql ?? "")}>{l("复制 SQL")}</Button>
         </Space>
         <SQLInput readOnly value={result?.sql ?? ""} height={300} />
-        <h3>参数（独立绑定，未插值）</h3>
+        <h3>{l("参数（独立绑定，未插值）")}</h3>
         <pre className="lm-log-body">
           {JSON.stringify(result?.params, null, 2)}
         </pre>
         <Alert
           type="info"
-          title="日志列表使用有界冻结会话；时间图为完整时间范围内的独立聚合。"
+          title={l("日志列表使用有界冻结会话；时间图为完整时间范围内的独立聚合。")}
         />
       </Drawer>
       <Modal
-        title="加入新大盘"
+        title={l("加入新大盘")}
         open={dashboardOpen}
         onCancel={() => setDashboardOpen(false)}
         onOk={() => void createDashboard()}
         confirmLoading={dashboardBusy}
-        okText="创建大盘"
+        okText={l("创建大盘")}
       >
         <Input
-          aria-label="大盘名称"
+          aria-label={l("大盘名称")}
           value={dashboardTitle}
           onChange={(e) => setDashboardTitle(e.target.value)}
         />
         <p>
-          使用当前表、服务、过滤和时间生成日志时间图。配置作为独立副本保存。
-        </p>
+          {l(" 使用当前表、服务、过滤和时间生成日志时间图。配置作为独立副本保存。 ")}</p>
       </Modal>
       <Drawer
-        title="AI 日志排查"
+        title={l("AI 日志排查")}
         open={aiOpen}
         onClose={() => setAIOpen(false)}
         size="min(820px,95vw)"
@@ -2312,7 +2281,7 @@ export default function LogExplorePage() {
         <AssistantPanel
           compact
           initialContext={{
-            page: {path: location.pathname + location.search, title: '日志探索'},
+            page: {path: location.pathname + location.search, title: l("日志探索")},
             log_query: {keyword: activeSpec.keyword, mode: activeSpec.mode, sql: activeSpec.mode === 'sql' ? activeSpec.sql : undefined, params: activeSpec.params, sort: activeSpec.sort, syntax: view.query_syntax},
             status: {loading, error, result_rows: rows.length, truncated: result?.truncated},
             table: activeTable?.name,
@@ -2325,7 +2294,7 @@ export default function LogExplorePage() {
             range: activeSpec.range,
             selected_logs: selected ? [normalizedSelected] : rows.slice(0, 5),
           }}
-          initialPrompt="分析当前日志中的异常，区分事实和推测，并给出后续排查 SQL。"
+          initialPrompt={l("分析当前日志中的异常，区分事实和推测，并给出后续排查 SQL。")}
           onSQL={(sql) => {
             setAIOpen(false);
             setSpec((s) => ({ ...s, mode: "sql", sql }));

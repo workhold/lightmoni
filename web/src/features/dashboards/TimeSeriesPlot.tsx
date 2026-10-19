@@ -1,3 +1,4 @@
+import {useMonitoringI18n} from '../monitoring-i18n';
 import {useLayoutEffect,useMemo,useRef,useState} from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
@@ -12,6 +13,9 @@ type Threshold={value:number;color:string;label:string;side:'left'|'right'};
 
 /** Cursor and selection live outside React; data refreshes update the same canvas. */
 export default function TimeSeriesPlot(props:Props){
+ const {l,language}=useMonitoringI18n();
+ const localization=useRef({l,language});localization.current={l,language};
+
  const node=useRef<HTMLDivElement>(null),plot=useRef<uPlot|undefined>(undefined),current=useRef(props),tooltip=useRef<HTMLDivElement|undefined>(undefined),hover=useRef(false),[error,setError]=useState('');
  current.current=props;
  const data=useMemo(()=>alignTimeSeries(props.rows,props.series),[props.rows,props.series]);
@@ -20,12 +24,12 @@ export default function TimeSeriesPlot(props:Props){
    const right=rightAxisRefs(props.panel.options),sides=new Map(props.series.map(name=>[name,right.includes(String(props.rows.find(row=>row.__series===name)?.__refId))?'right':'left'] as const));
    const sideFor=(rule:AlertRule):'left'|'right'=>right.length&&(rule.panel_condition?.query_ref?right.includes(rule.panel_condition.query_ref):(props.panel.options.alert_rule_axes as Record<string,string>|undefined)?.[rule.id]==='right')?'right':'left';
    const lines:Threshold[]=props.panel.options.show_thresholds===false?[]:thresholdsFor(props.panel.options).map(item=>({...item,label:item.label??'',side:'left'}));
-   if(props.panel.options.show_alert_thresholds!==false)for(const rule of props.alertRules.filter(item=>item.enabled&&item.operator!=='no_data')){const value=numeric(rule.threshold,props.panel.options.approximate===true);if(value!==null)lines.push({value,color:props.dark?'#ff738a':'#b42343',label:'阈值',side:sideFor(rule)});}
+   if(props.panel.options.show_alert_thresholds!==false)for(const rule of props.alertRules.filter(item=>item.enabled&&item.operator!=='no_data')){const value=numeric(rule.threshold,props.panel.options.approximate===true,language);if(value!==null)lines.push({value,color:props.dark?'#ff738a':'#b42343',label:l("阈值"),side:sideFor(rule)});}
    const events=props.panel.options.show_alert_events===false?[]:props.alertEvents.filter(event=>Number.isFinite(Date.parse(event.created_at))&&(!props.range||Date.parse(event.created_at)>=Date.parse(props.range.from)&&Date.parse(event.created_at)<=Date.parse(props.range.to)));
-   const scales=Object.fromEntries((right.length?['left','right']:['left']).map(side=>[side,axisScale(props.panel.options,side as 'left'|'right',props.rows.filter(row=>!props.hidden.includes(String(row.__series))&&sides.get(String(row.__series))===side),[...lines.filter(line=>line.side===side).map(line=>line.value),...events.filter(event=>{const rule=props.alertRules.find(item=>item.id===event.rule_id);return rule&&rule.operator!=='no_data'&&sideFor(rule)===side;}).map(event=>Number(event.state.value)).filter(Number.isFinite)])]));
+   const scales=Object.fromEntries((right.length?['left','right']:['left']).map(side=>[side,axisScale(props.panel.options,side as 'left'|'right',props.rows.filter(row=>!props.hidden.includes(String(row.__series))&&sides.get(String(row.__series))===side),[...lines.filter(line=>line.side===side).map(line=>line.value),...events.filter(event=>{const rule=props.alertRules.find(item=>item.id===event.rule_id);return rule&&rule.operator!=='no_data'&&sideFor(rule)===side;}).map(event=>Number(event.state.value)).filter(Number.isFinite)],language)]));
    return {sides,scales,lines,events,error:''};
   }catch(cause){return {sides:new Map<string,'left'|'right'>(),scales:{},lines:[],events:[],error:(cause as Error).message};}
- },[props.panel.options,props.rows,props.series,props.hidden,props.alertRules,props.alertEvents,props.range?.from,props.range?.to,props.dark]);
+ },[props.panel.options,props.rows,props.series,props.hidden,props.alertRules,props.alertEvents,props.range?.from,props.range?.to,props.dark,language]);
  const latest=useRef({data,prepared});latest.current={data,prepared};
  const structure=JSON.stringify({series:props.series,type:props.panel.type,options:props.panel.options,dark:props.dark,sides:[...prepared.sides],error:prepared.error});
 
@@ -44,10 +48,10 @@ export default function TimeSeriesPlot(props:Props){
    const index=chart.cursor.idx;
    if(!hover.current||index==null||(chart.cursor.left??-1)<0||(chart.cursor.top??-1)<0){hide();return;}
    if(index!==lastIndex){lastIndex=index;title.textContent=new Date(Number(chart.data[0][index])).toLocaleString(undefined,{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-    for(let i=0;i<series.length;i++){const name=series[i],value=chart.data[i+1][index],mapped=valueMapping(value,options);cells[i].value.textContent=mapped?.text??format(value,latest.current.prepared.sides.get(name));}
+    for(let i=0;i<series.length;i++){const name=series[i],value=chart.data[i+1][index],mapped=valueMapping(value,options,localization.current.language);cells[i].value.textContent=mapped?.text??format(value,latest.current.prepared.sides.get(name));}
    }
    for(let i=0;i<series.length;i++)cells[i].row.hidden=current.current.hidden.includes(series[i]);
-   const nearby=latest.current.prepared.events.filter(event=>Math.abs(chart.valToPos(Date.parse(event.created_at),'x')-(chart.cursor.left??0))<=8);eventDetails.hidden=!nearby.length;eventDetails.textContent=nearby.slice(0,3).map(event=>`${event.kind==='firing'?'告警触发':'告警恢复'} · ${event.rule_name}`).join('\n');
+   const nearby=latest.current.prepared.events.filter(event=>Math.abs(chart.valToPos(Date.parse(event.created_at),'x')-(chart.cursor.left??0))<=8);eventDetails.hidden=!nearby.length;eventDetails.textContent=nearby.slice(0,3).map(event=>localization.current.l("{0} · {1}",event.kind==='firing'?localization.current.l("告警触发"):localization.current.l("告警恢复"),event.rule_name)).join('\n');
    tip.hidden=false;
    const bounds=chart.over.getBoundingClientRect(),x=bounds.left+(chart.cursor.left??0),y=bounds.top+(chart.cursor.top??0),width=tip.offsetWidth,height=tip.offsetHeight;
    const left=x+18+width>window.innerWidth-8?x-width-18:x+18;
@@ -57,9 +61,9 @@ export default function TimeSeriesPlot(props:Props){
    const {lines,events}=latest.current.prepared,ctx=chart.ctx,{left,top,width,height}=chart.bbox,ratio=uPlot.pxRatio;
    ctx.save();ctx.beginPath();ctx.rect(left,top,width,height);ctx.clip();ctx.font=`${11*ratio}px sans-serif`;
    const labels:number[]=[],compact=chart.width<400;
-   for(const line of lines){const y=chart.valToPos(line.value,line.side,true);if(!Number.isFinite(y)||y<top||y>top+height)continue;ctx.strokeStyle=line.color;ctx.lineWidth=ratio;ctx.setLineDash([4*ratio,4*ratio]);ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(left+width,y);ctx.stroke();if(labels.every(value=>Math.abs(value-y)>16*ratio)){ctx.fillStyle=line.color;ctx.textAlign='right';ctx.fillText(`${compact?'':(line.label||'阈值')+' '}${format(line.value,line.side)}`,left+width-4*ratio,Math.max(top+12*ratio,y-5*ratio));labels.push(y);}}
+   for(const line of lines){const y=chart.valToPos(line.value,line.side,true);if(!Number.isFinite(y)||y<top||y>top+height)continue;ctx.strokeStyle=line.color;ctx.lineWidth=ratio;ctx.setLineDash([4*ratio,4*ratio]);ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(left+width,y);ctx.stroke();if(labels.every(value=>Math.abs(value-y)>16*ratio)){ctx.fillStyle=line.color;ctx.textAlign='right';ctx.fillText(localization.current.l("{0}{1}",compact?'':(line.label||localization.current.l("阈值"))+' ',format(line.value,line.side)),left+width-4*ratio,Math.max(top+12*ratio,y-5*ratio));labels.push(y);}}
    let lastLabel=-Infinity;
-   for(const event of [...events].sort((a,b)=>Date.parse(a.created_at)-Date.parse(b.created_at))){const x=chart.valToPos(Date.parse(event.created_at),'x',true),color=event.kind==='firing'?(dark?'#ff738a':'#b42343'):(dark?'#9ed68d':'#27713b');if(x<left||x>left+width)continue;ctx.strokeStyle=color;ctx.lineWidth=ratio;ctx.setLineDash([3*ratio,4*ratio]);ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,top+height);ctx.stroke();if(x-lastLabel>48*ratio){ctx.textAlign='left';ctx.fillStyle=color;ctx.fillText(event.kind==='firing'?'触发':'恢复',Math.min(x+4*ratio,left+width-28*ratio),top+height-6*ratio);lastLabel=x;}
+   for(const event of [...events].sort((a,b)=>Date.parse(a.created_at)-Date.parse(b.created_at))){const x=chart.valToPos(Date.parse(event.created_at),'x',true),color=event.kind==='firing'?(dark?'#ff738a':'#b42343'):(dark?'#9ed68d':'#27713b');if(x<left||x>left+width)continue;ctx.strokeStyle=color;ctx.lineWidth=ratio;ctx.setLineDash([3*ratio,4*ratio]);ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,top+height);ctx.stroke();if(x-lastLabel>48*ratio){ctx.textAlign='left';ctx.fillStyle=color;ctx.fillText(event.kind==='firing'?localization.current.l("触发"):localization.current.l("恢复"),Math.min(x+4*ratio,left+width-28*ratio),top+height-6*ratio);lastLabel=x;}
     const rule=current.current.alertRules.find(rule=>rule.id===event.rule_id),right=rightAxisRefs(options),side=rule?.panel_condition?.query_ref&&right.includes(rule.panel_condition.query_ref)?'right':'left',value=Number(event.state.value);if(rule?.operator!=='no_data'&&event.state.value!==null&&Number.isFinite(value)){const y=chart.valToPos(value,side,true);if(Number.isFinite(y)){ctx.setLineDash([]);ctx.fillStyle=color;ctx.strokeStyle=dark?'#181b1f':'#fff';ctx.beginPath();ctx.arc(x,y,4*ratio,0,Math.PI*2);ctx.fill();ctx.stroke();}}
    }
    ctx.restore();
@@ -78,5 +82,5 @@ export default function TimeSeriesPlot(props:Props){
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[structure]);
  useLayoutEffect(()=>{const chart=plot.current,host=node.current;if(!chart||!host||prepared.error)return;try{chart.batch(()=>{for(let index=0;index<props.series.length;index++)chart.setSeries(index+1,{show:!props.hidden.includes(props.series[index])},false);chart.setData(data);});host.dataset.chartCommits=String(Number(host.dataset.chartCommits??0)+1);tooltip.current?.setAttribute('hidden','');setError('');}catch(cause){setError((cause as Error).message);}},[data,prepared,props.hidden,props.range?.from,props.range?.to,structure]);
- return <>{(prepared.error||error)&&<Alert type="error" showIcon title={prepared.error||error}/>}<div ref={node} className="lm-chart-canvas lm-uplot-chart" aria-label={`${props.panel.title} 时间序列图`}/></>;
+ return <>{(prepared.error||error)&&<Alert type="error" showIcon title={prepared.error||error}/>}<div ref={node} className="lm-chart-canvas lm-uplot-chart" aria-label={l("{0} 时间序列图",props.panel.title)}/></>;
 }

@@ -124,20 +124,17 @@ export function billingPayload(billing: ModelBilling, values: Pick<ModelBilling,
   };
 }
 
-const integers = new Intl.NumberFormat('zh-CN');
-const amounts = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
-
-export function tokenCount(value: number, missing: number, requests: number): string {
-  return requests > 0 && missing >= requests ? '未知' : integers.format(value);
+export function tokenCount(value: number, missing: number, requests: number, language: string = 'zh-CN'): string {
+  return requests > 0 && missing >= requests ? (language==='en-US'?'Unknown':'未知') : new Intl.NumberFormat(language).format(value);
 }
 
-export function costAmount(value: number): string {
+export function costAmount(value: number, language: string = 'zh-CN'): string {
   if (value > 0 && value < 0.000001) return '< 0.000001';
-  return amounts.format(value);
+  return new Intl.NumberFormat(language, { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(value);
 }
 
-export function usageSource(source: string): string {
-  return source === 'assistant' ? 'AI 助手（含历史整理）' : source === 'connection-test' ? '连接测试' : source === 'code-task' ? '代码任务（Pi）' : source || '未知来源';
+export function usageSource(source: string, language: string = 'zh-CN'): string {
+  return source === 'assistant' ? (language==='en-US'?'AI assistant (including history compaction)':'AI 助手（含历史整理）') : source === 'connection-test' ? (language==='en-US'?'Connection test':'连接测试') : source === 'code-task' ? (language==='en-US'?'Code task (Pi)':'代码任务（Pi）') : source || (language==='en-US'?'Unknown source':'未知来源');
 }
 
 export function browserTimezone(): string {
@@ -153,9 +150,9 @@ export function timezoneChoices(current: string): { value: string; label: string
     .map(value => ({ value, label: value }));
 }
 
-export function usageDateRange(from: string, to: string, timezone: string): string {
+export function usageDateRange(from: string, to: string, timezone: string, language: string = 'zh-CN'): string {
   try {
-    const formatter = new Intl.DateTimeFormat('zh-CN', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
-    return `${formatter.format(new Date(from))} 至 ${formatter.format(new Date(new Date(to).getTime() - 1))}`;
+    const formatter = new Intl.DateTimeFormat(language, { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    return `${formatter.format(new Date(from))} ${language==='en-US'?'to':'至'} ${formatter.format(new Date(new Date(to).getTime() - 1))}`;
   } catch { return ''; }
 }

@@ -1,3 +1,4 @@
+import {monitoringText,type MonitoringLanguage} from '../monitoring-translations.ts';
 import type {Parameter,QueryResult} from '../../shared/types';
 import type {AlertRule,PanelCondition} from '../alerts/types';
 import {printable,type Dashboard,type Panel} from './model';
@@ -24,10 +25,12 @@ function seriesParameter(type:string,value:unknown):Parameter{
  return {type,value};
 }
 
-export function alertLines(panel:Panel,results:QueryResult[]):AlertLine[]{
+export function alertLines(panel:Panel,results:QueryResult[],language:MonitoringLanguage='zh-CN'):AlertLine[]{
+ const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
+
  const aliases=panel.options.series_aliases as Record<string,string>|undefined,seriesField=String(panel.options.series??''),lines:AlertLine[]=[];
  for(const query of panel.queries.filter(query=>query.enabled!==false)){
-  const all={query_ref:query.refId};lines.push({...all,value:lineKey(all),label:`查询 ${query.refId} · ${seriesField?'全部曲线':String(panel.options.y??'value')}`});
+  const all={query_ref:query.refId};lines.push({...all,value:lineKey(all),label:l("查询 {0} · {1}",query.refId,seriesField?l("全部曲线"):String(panel.options.y??'value'))});
   if(!seriesField)continue;
   const seen=new Set<string>();
   for(const frame of results.filter(result=>result.refId===query.refId&&result.status==='success').flatMap(result=>result.frames)){
@@ -40,16 +43,18 @@ export function alertLines(panel:Panel,results:QueryResult[]):AlertLine[]{
  return lines;
 }
 
-export function chartAlertSQL(panel:Panel,rule:AlertRule,source:{sql:string;params?:Record<string,Parameter>},results:QueryResult[]){
- const selection=rule.panel_condition;if(!selection)throw new Error('请选择当前图表的线');
+export function chartAlertSQL(panel:Panel,rule:AlertRule,source:{sql:string;params?:Record<string,Parameter>},results:QueryResult[],language:MonitoringLanguage='zh-CN'){
+ const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
+
+ const selection=rule.panel_condition;if(!selection)throw new Error(l("请选择当前图表的线"));
  const quote=(name:string)=>'`'+name.replaceAll('`','``')+'`',field=(name:string)=>'panel_alert_source.'+quote(name),value=field(String(panel.options.y??'value')),series=String(panel.options.series??'');
  let time=String(panel.options.x??'time');
  const frames=results.filter(result=>result.refId===selection.query_ref).flatMap(result=>result.frames),columns=frames.flatMap(frame=>frame.columns);
- if(columns.length&&!columns.some(column=>column.name===String(panel.options.y??'value')&&/Int|Float|Decimal/.test(column.type)))throw new Error('当前查询没有图表使用的数值字段，请检查字段映射');
+ if(columns.length&&!columns.some(column=>column.name===String(panel.options.y??'value')&&/Int|Float|Decimal/.test(column.type)))throw new Error(l("当前查询没有图表使用的数值字段，请检查字段映射"));
  const noData=rule.operator==='no_data',params={...source.params},where:string[]=[];
- if(!reducerOptions.some(option=>option.value===selection.reducer))throw new Error('请选择有效的取值方式');
+ if(!reducerOptions.some(option=>option.value===selection.reducer))throw new Error(l("请选择有效的取值方式"));
  if(selection.series){
-  if(!series)throw new Error('所选曲线的序列字段已移除，请重新选择');
+  if(!series)throw new Error(l("所选曲线的序列字段已移除，请重新选择"));
   if(selection.series.value===null)where.push(`isNull(${field(series)})`);
   else{let parameter='panel_alert_series';while(parameter in params)parameter+='x';params[parameter]=selection.series;where.push(`${field(series)} = {${parameter}:${selection.series.type}}`);}
  }
@@ -63,8 +68,8 @@ export function chartAlertSQL(panel:Panel,rule:AlertRule,source:{sql:string;para
     if(['stat','gauge'].includes(panel.type)&&!grouped){
      if(timestamps.length===1)time=timestamps[0].name;
      else if(timestamps.length===0&&frames.reduce((n,frame)=>n+frame.rows.length,0)<=1)directScalar=true;
-     else throw new Error('最新值需要时间字段，请运行查询或选择其他取值方式');
-    }else throw new Error('最新值需要时间字段，请运行查询或选择其他取值方式');
+     else throw new Error(l("最新值需要时间字段，请运行查询或选择其他取值方式"));
+    }else throw new Error(l("最新值需要时间字段，请运行查询或选择其他取值方式"));
    }
    // A scalar card may return an already aggregated single value without time.
    // Keep it lossless; LIMIT 2 lets the evaluator reject future ambiguous rows.

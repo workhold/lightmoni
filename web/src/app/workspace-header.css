@@ -1,0 +1,21 @@
+.lm-workspace-header{--lm-header-height:64px;position:sticky;top:0;z-index:29;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:var(--lm-header-height);padding:8px 20px;background:var(--lm-surface);border-bottom:1px solid var(--lm-border)}
+.lm-workspace-location{display:flex;align-items:center;gap:10px;min-width:0;color:var(--lm-muted);font-size:13px}
+.lm-workspace-location>strong{color:var(--lm-text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lm-workspace-actions{display:flex;align-items:center;gap:5px;flex-shrink:0}
+.lm-workspace-actions .lm-header-icon{width:36px;height:36px;color:var(--lm-muted);font-size:17px}
+.lm-workspace-actions .lm-account-trigger{display:flex;align-items:center;gap:9px;height:46px;max-width:270px;padding:4px 8px;color:var(--lm-text);text-align:left}
+.lm-account-summary{display:flex;flex-direction:column;gap:2px;min-width:0;line-height:1.35}
+.lm-account-summary>strong{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600}
+.lm-account-summary>small{font-size:11px;color:var(--lm-muted)}
+.lm-account-chevron{font-size:10px;color:var(--lm-muted)}
+.lm-account-identity{display:flex;flex-direction:column;max-width:min(300px,70vw);white-space:normal;overflow-wrap:anywhere;color:var(--lm-text);line-height:1.5}
+.lm-account-identity>small{font-size:12px;color:var(--lm-muted)}
+.lm-workspace-header .lm-account-trigger:focus-visible,.lm-workspace-header .lm-header-icon:focus-visible{outline:2px solid var(--lm-accent);outline-offset:2px}
+.lm-shell .lm-sidebar nav{min-height:0;overflow-y:auto;flex:1}
+.lm-shell .lm-nav-collapse{flex-shrink:0}
+.lm-shell .lm-assistant-launcher.ant-btn.ant-btn-circle{bottom:64px}
+.lm-route-content>.lm-assistant{height:calc(100dvh - 64px)}
+.lm-route-content .lm-dashboard-header{top:64px}
+.lm-route-content>.lm-logs-page{min-height:calc(100dvh - 64px)}
+@media(max-width:700px){.lm-workspace-header{padding:7px 10px;gap:8px}.lm-workspace-location{font-size:12px}.lm-workspace-location>span{display:none}.lm-workspace-actions{gap:2px}.lm-workspace-actions .lm-account-trigger{gap:6px;padding:4px}.lm-account-summary>strong{max-width:95px}.lm-account-chevron{display:none}}
+@media(max-width:430px){.lm-workspace-header{gap:4px;padding:7px 8px}.lm-workspace-location{max-width:95px;font-size:11px}.lm-workspace-actions .lm-header-icon{width:30px}.lm-account-summary>strong{max-width:68px}.lm-account-summary>small{font-size:10px}.lm-account-trigger .lm-avatar{width:26px!important;height:26px!important;font-size:11px!important}}

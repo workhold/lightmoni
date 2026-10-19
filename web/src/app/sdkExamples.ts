@@ -31,14 +31,14 @@ moni.shutdown(timeout:5)`,
   return examples[language]??examples.typescript;
 }
 
-export function sdkEndpointError(endpoint:string):string {
+export function sdkEndpointError(endpoint:string,language:string='zh-CN'):string {
   try {
     const value=endpoint.trim();
     if(!/^https?:\/\//i.test(value)||/[?#\\\s]/.test(value))throw new Error();
     const url=new URL(value);
     if(!['http:','https:'].includes(url.protocol)||!url.hostname||url.username||url.password||url.search||url.hash)throw new Error();
     return '';
-  } catch { return '请输入完整的 HTTP(S) 地址，不包含用户名、密码、查询参数或片段'; }
+  } catch { return language==='en-US'?'Enter a complete HTTP(S) URL without a username, password, query, or fragment':'请输入完整的 HTTP(S) 地址，不包含用户名、密码、查询参数或片段'; }
 }
 export function sdkEndpointIsLoopback(endpoint:string):boolean {
   try {const hostname=new URL(endpoint.trim()).hostname.toLowerCase();return hostname==='localhost'||hostname.endsWith('.localhost')||/^127\./.test(hostname)||hostname==='[::1]';}catch{return false;}

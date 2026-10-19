@@ -1,3 +1,4 @@
+import {useMonitoringI18n} from '../monitoring-i18n';
 import type {ReactNode} from 'react';
 import {Button} from '../../shared/ui';
 export const visualizations=[
@@ -20,5 +21,7 @@ export function VisualizationIcon({type}:{type:string}){
  return <svg className="lm-visualization-icon" viewBox="0 0 48 34" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[type]??paths.line}</svg>;
 }
 export default function VisualizationPicker({value,onChange,compact=false}:{value:string;onChange:(type:string)=>void;compact?:boolean}){
- return <div className={compact?'lm-visualization-strip':'lm-visualization-gallery'} role="radiogroup" aria-label="图表类型">{visualizations.map(item=><Button key={item.type} type="text" role="radio" aria-checked={(value==='timeseries'?'line':value)===item.type} data-visualization={item.type} className="lm-visualization-choice" onClick={()=>onChange(item.type)}><VisualizationIcon type={item.type}/><span><strong>{item.title}</strong>{!compact&&<small>{item.hint}</small>}</span></Button>)}</div>;
+ const {l,language}=useMonitoringI18n();
+
+ return <div className={compact?'lm-visualization-strip':'lm-visualization-gallery'} role="radiogroup" aria-label={l("图表类型")}>{visualizations.map(item=><Button key={item.type} type="text" role="radio" aria-checked={(value==='timeseries'?'line':value)===item.type} data-visualization={item.type} className="lm-visualization-choice" onClick={()=>onChange(item.type)}><VisualizationIcon type={item.type}/><span><strong>{l(item.title)}</strong>{!compact&&<small>{l(item.hint)}</small>}</span></Button>)}</div>;
 }

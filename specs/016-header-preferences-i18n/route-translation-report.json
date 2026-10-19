@@ -1,0 +1,140 @@
+[
+  {
+    "path": "/",
+    "remaining": []
+  },
+  {
+    "path": "/dashboards",
+    "remaining": []
+  },
+  {
+    "path": "/logs",
+    "remaining": []
+  },
+  {
+    "path": "/alerts",
+    "remaining": []
+  },
+  {
+    "path": "/alerts",
+    "tab": "Alert group",
+    "remaining": []
+  },
+  {
+    "path": "/alerts",
+    "tab": "Alert response",
+    "remaining": []
+  },
+  {
+    "path": "/alerts",
+    "tab": "Response statistics",
+    "remaining": []
+  },
+  {
+    "path": "/alerts",
+    "tab": "Silence windows",
+    "remaining": []
+  },
+  {
+    "path": "/alerts",
+    "tab": "Alert data tables",
+    "remaining": []
+  },
+  {
+    "path": "/alerts",
+    "tab": "Events and delivery history",
+    "remaining": []
+  },
+  {
+    "path": "/traces/fixture-trace",
+    "remaining": []
+  },
+  {
+    "path": "/agents",
+    "remaining": []
+  },
+  {
+    "path": "/agents?tab=tasks",
+    "remaining": []
+  },
+  {
+    "path": "/agents?tab=labels",
+    "remaining": []
+  },
+  {
+    "path": "/machines",
+    "remaining": []
+  },
+  {
+    "path": "/data",
+    "remaining": []
+  },
+  {
+    "path": "/data?tab=agent",
+    "remaining": []
+  },
+  {
+    "path": "/data-management",
+    "remaining": []
+  },
+  {
+    "path": "/assistant",
+    "remaining": []
+  },
+  {
+    "path": "/settings?tab=profile",
+    "remaining": []
+  },
+  {
+    "path": "/settings?tab=appearance",
+    "remaining": []
+  },
+  {
+    "path": "/settings?tab=bindings",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=users",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=login",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=models",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=reporting",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=credentials&section=sdk",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=credentials&section=enrollments",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=credentials&section=agents",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=notifications",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=directory",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=retention",
+    "remaining": []
+  },
+  {
+    "path": "/admin?tab=alerts",
+    "remaining": []
+  }
+]

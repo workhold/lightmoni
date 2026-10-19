@@ -1,0 +1,32 @@
+{
+  "production_bundle": true,
+  "api_fixtures": true,
+  "stateful_fixture_writes": true,
+  "live_backend": false,
+  "checked": [
+    "account name and role are visible at top right, without a sidebar duplicate",
+    "language changes live while retaining profile draft and without write requests",
+    "saved profile updates the top account name immediately",
+    "light theme and accent apply to the interface and survive reload with language",
+    "system theme follows OS changes, while explicit dark stays selected",
+    "top appearance shortcut uses the same preference state",
+    "header popup controls work with both normal and reduced motion",
+    "language and accent synchronize across tabs in the same browser",
+    "33 application routes render their fixed visible interface in English",
+    "both languages, long account names and appearance controls fit desktop and 390px",
+    "invalid stored preferences fall back safely and member permissions remain unchanged",
+    "preferences remain usable when browser storage is blocked",
+    "sign-out errors preserve the session and successful sign-out shows the login page"
+  ],
+  "widths": [
+    1280,
+    390
+  ],
+  "languages": [
+    "zh-CN",
+    "en-US"
+  ],
+  "routes": 33,
+  "errors": [],
+  "unexpected": []
+}

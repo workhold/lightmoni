@@ -17,7 +17,12 @@ export type AgentTaskType = 'host'|'probe'|'log';
 export const agentTaskTypes:{value:AgentTaskType;label:string}[] = [
   {value:'host',label:'指标采集'},{value:'probe',label:'服务拨测'},{value:'log',label:'目录日志'},
 ];
-export const taskTypeName = (type:AgentTaskType) => agentTaskTypes.find(item=>item.value===type)?.label ?? type;
+export const taskTypeName = (type:AgentTaskType,language:string='zh-CN') => language==='en-US'
+  ? ({host:'Metric collection',probe:'Service probes',log:'Directory logs'}[type] ?? type)
+  : agentTaskTypes.find(item=>item.value===type)?.label ?? type;
+export const hostCollectorName = (value:string,language:string='zh-CN') => language==='en-US'
+  ? ({cpu:'CPU',memory:'Memory and swap',filesystem:'Filesystem space',disk:'Disk I/O',network:'Network traffic',system:'Load and uptime',process:'Selected processes'} as Record<string,string>)[value] ?? value
+  : hostCollectors.find(item=>item.value===value)?.label ?? value;
 export interface AgentTaskLabel {id:string;name:string;node_count:number;task_count:number}
 export interface ManagedAgentTask {id:string;name:string;type:AgentTaskType;enabled:boolean;label_ids:string[];config:AgentTasks}
 export interface AgentItem {
@@ -53,10 +58,12 @@ export const taskPayload = (values:TaskForm):AgentTasks => ({...(({name:_,type:_
     expected_status:probe.kind === 'http' ? (expected_status ?? []).map(Number) : [],
   })),
 });
-export const logicalTableRules = [{required:true,message:'请填写上报表名'}, {
+export const localizedLogicalTableRules = (language:string='zh-CN') => [{required:true,message:language==='en-US'?'Enter a reporting table name':'请填写上报表名'}, {
   validator:(_:unknown,value?:string) => /^[a-z][a-z0-9_]{0,47}$/.test(value ?? '') && !/^(log|metric|trace)_/.test(value ?? '')
-    ? Promise.resolve() : Promise.reject(new Error('使用小写字母开头的逻辑表名，不带 metric_ 等前缀，最长 48 位')),
+    ? Promise.resolve() : Promise.reject(new Error(language==='en-US'?'Use a logical table name starting with a lowercase letter, without metric_ or similar prefixes, up to 48 characters':'使用小写字母开头的逻辑表名，不带 metric_ 等前缀，最长 48 位')),
 }];
+
+export const logicalTableRules=localizedLogicalTableRules();
 
 export const agentIsOnline=(agent:AgentItem,now=Date.now()):boolean=>{
  const interval=Number(agent.heartbeat?.control_interval_seconds??30),timeout=Math.max(90,Number.isFinite(interval)&&interval>0?interval*3:90);

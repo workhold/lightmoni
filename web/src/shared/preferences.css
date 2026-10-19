@@ -1,0 +1,22 @@
+.lm-interface-preferences{max-width:640px;min-width:0;display:flex;flex-direction:column;gap:24px}
+.lm-interface-preferences.is-compact{width:296px;max-width:calc(100vw - 64px);gap:18px;padding:4px 2px}
+.lm-preferences-heading h2{margin:0 0 8px;font-size:18px;font-weight:600}
+.lm-preferences-heading p,.lm-preferences-note{margin:0;color:var(--lm-muted);font-size:13px;line-height:1.6}
+.lm-preference-field{display:flex;flex-direction:column;gap:9px;min-width:0}
+.lm-preference-field>label,.lm-preference-label{font-size:14px;font-weight:600;color:var(--lm-text)}
+.lm-preference-field>.ant-select{width:100%;max-width:300px}
+.lm-interface-preferences.is-compact .lm-preference-field>.ant-select{max-width:none}
+.lm-accent-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;max-width:440px}
+.lm-accent-option{display:flex;align-items:center;justify-content:center;gap:7px;min-height:40px;padding:7px 10px;cursor:pointer;border:1px solid var(--lm-border);border-radius:6px;background:var(--lm-surface);color:var(--lm-text);font:inherit;font-size:13px}
+.lm-accent-option:hover,.lm-accent-option.is-selected{border-color:var(--lm-accent);background:var(--lm-accent-soft)}
+.lm-accent-option:focus-visible{outline:2px solid var(--lm-accent);outline-offset:3px}
+.lm-accent-swatch{width:19px;height:19px;flex:none;border-radius:50%;display:grid;place-items:center;font-size:11px;color:#fff;background:var(--swatch-color)}
+.lm-accent-option[data-accent-option=blue]{--swatch-color:#1d4ed8}
+.lm-accent-option[data-accent-option=teal]{--swatch-color:#0f766e}
+.lm-accent-option[data-accent-option=violet]{--swatch-color:#6d28d9}
+.lm-accent-option[data-accent-option=orange]{--swatch-color:#b45309}
+.lm-interface-preferences.is-compact .lm-accent-options{grid-template-columns:repeat(2,minmax(0,1fr))}
+:root[data-accent][data-theme] .lm-sidebar nav a.active{background:var(--lm-accent-soft);color:var(--lm-accent)}
+:root[data-accent][data-theme] .lm-sidebar nav a.active:before{background:var(--lm-accent)}
+:root[data-accent][data-theme=light] .lm-sidebar nav a:hover{background:var(--lm-accent-soft);color:var(--lm-accent)}
+@media(max-width:480px){.lm-accent-options{grid-template-columns:repeat(2,minmax(0,1fr))}}

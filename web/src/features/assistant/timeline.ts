@@ -2,6 +2,8 @@
 // Doca: MIT License, Copyright (c) 2026 smartdoca. See NOTICE.md.
 import type { AssistantEvent, TurnView } from './types';
 import type { TimeRange } from '../../shared/types';
+import type {Language} from '../../shared/i18n';
+import {translator} from '../alerts/translation.ts';
 
 /** Reproduce the successful analysis scope when previewing a stored draft. */
 export function queryRangeFromTurn(turn: TurnView, draftCallId?: string): TimeRange | undefined {
@@ -15,7 +17,8 @@ export function queryRangeFromTurn(turn: TurnView, draftCallId?: string): TimeRa
 }
 
 /** Pair by durable turn IDs, never by prompt text or response order. */
-export function assistantTimeline(events: AssistantEvent[]): TurnView[] {
+export function assistantTimeline(events: AssistantEvent[],language:Language='zh-CN'): TurnView[] {
+  const t=translator(language);
   const ordered = [...new Map(events.map(event => [event.sequence, event])).values()].sort((a, b) => a.sequence - b.sequence);
   const turns = new Map<string, TurnView>();
   const stepAnswers = new Map<string, Map<number, string>>();
@@ -54,7 +57,7 @@ export function assistantTimeline(events: AssistantEvent[]): TurnView[] {
     if (event.type === 'turn.cancelled' || event.type === 'turn.failed') {
       turn.status = event.type === 'turn.cancelled' ? 'cancelled' : 'failed';
       turn.compacting = false;
-      turn.error = String(data.error ?? '请求失败');
+      turn.error = String(data.error ?? t('请求失败','Request failed'));
       for (const tool of turn.tools) if (tool.status === 'running') { tool.status = 'error'; tool.result = { error: turn.error }; }
     }
   }

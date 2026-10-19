@@ -1,3 +1,4 @@
+import {monitoringText,type MonitoringLanguage} from '../monitoring-translations.ts';
 import type {Dashboard,DashboardLink,DashboardRow,Panel,Values,Variable} from './model';
 import type {TimeRange} from '../../shared/types';
 import {layoutItems,overlaps,previewLayout} from './layout';
@@ -47,11 +48,15 @@ export function copyDefinition(dashboard:Dashboard):Dashboard {
  const ids=new Map(dashboard.panels.map(panel=>[panel.id,crypto.randomUUID()]));
  return {...dashboard,id:'',revision:0,panels:dashboard.panels.map(panel=>({...structuredClone(panel),id:ids.get(panel.id)!})),rows:dashboard.rows?.map(row=>({...row,id:crypto.randomUUID(),panel_ids:row.panel_ids.map(id=>ids.get(id)!)}))};
 }
-export function interpolateTitle(text:string,values:Values):string {
- return text.replace(/\$\{([A-Za-z][\w]*)\}|\$([A-Za-z][\w]*)/g,(original,braced,plain)=>{const value=values[braced??plain];return value===undefined?original:Array.isArray(value)?value.includes('__all__')?'全部':value.join(', '):value;});
+export function interpolateTitle(text:string,values:Values,language:MonitoringLanguage='zh-CN'):string {
+ const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
+
+ return text.replace(/\$\{([A-Za-z][\w]*)\}|\$([A-Za-z][\w]*)/g,(original,braced,plain)=>{const value=values[braced??plain];return value===undefined?original:Array.isArray(value)?value.includes('__all__')?l("全部"):value.join(', '):value;});
 }
-export function dashboardLinkURL(link:DashboardLink,range:TimeRange,variables:Variable[],values:Values,origin:string):string {
- const url=new URL(link.url,origin);if(!['http:','https:'].includes(url.protocol))throw new Error('链接地址无效');
+export function dashboardLinkURL(link:DashboardLink,range:TimeRange,variables:Variable[],values:Values,origin:string,language:MonitoringLanguage='zh-CN'):string {
+ const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
+
+ const url=new URL(link.url,origin);if(!['http:','https:'].includes(url.protocol))throw new Error(l("链接地址无效"));
  if(link.include_time){url.searchParams.set('from',range.from);url.searchParams.set('to',range.to);}
  if(link.include_variables)url.search=writeVariableValues(url.searchParams,variables,values).toString();
  return url.toString();
