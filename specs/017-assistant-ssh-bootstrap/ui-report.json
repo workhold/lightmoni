@@ -1,0 +1,17 @@
+{
+  "checked": [
+    "Connected SSH with missing prerequisites does not propose or install",
+    "Pinned host-key failure is explained",
+    "Standalone successful SSH preflight",
+    "In-flight preflight can be cancelled without a late result reopening the dialog",
+    "Deployment form detects architecture and saves a plan without applying",
+    "Deep link reviews and confirms the same persisted plan exactly once",
+    "Failed installation refreshes its real status and removes the obsolete approval action",
+    "Expired plans cannot be confirmed in the UI",
+    "English preflight and saved-plan steps are localized",
+    "Assistant tool result links to its exact persisted installation plan",
+    "Members cannot load host data or SSH actions"
+  ],
+  "errors": [],
+  "unexpected": []
+}
