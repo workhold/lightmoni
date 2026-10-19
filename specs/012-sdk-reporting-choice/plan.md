@@ -7,6 +7,8 @@
 3. 接入页默认 direct；两种 mode 继续各自保存 endpoint。页面统一“平台 / LightMoni Agent”术语，说明节点采集独立于 SDK 路由。
 4. 生成环境块时显式清理旧变量（含 `_FILE` 和 `LIGHTMONI_KEY`），只输出当前路径的必需字段；Agent local token 作为可选配置说明，不导出假的占位令牌。
 5. 为 direct/agent 加配置隔离 fixture 和本地 HTTP 收据检查。检查所选来源冲突仍报错；不重做 011 中 auto 的全部矩阵，也不将未运行语言标记验证通过。
+6. 原生工具链复验中补查 Python HTTP 响应生命周期：`http.client` 将关闭连接的响应交给 `HTTPResponse` 后，读取超时设置使用仍存活的响应流 socket；以真实无 Content-Length、Connection: close 响应验证批次确认、读超时与大小限制。工具链安装与这些源码测试不恢复 Go/Rust 发布。
+7. 对声明 Content-Length 的响应在 EOF 时检查剩余长度，未读满则抛出传输错误；分块响应沿用 HTTPResponse 的完整性校验。用真实截断响应验证批次不确认、规则不更新，并保留 HTTPResponse 对无响应体状态的处理。
 
 ## 兼容性
 

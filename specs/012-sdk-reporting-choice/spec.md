@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-19
 **Branch**: `feat/sdk-reporting-modes`
-**Status**: Implemented; checks completed with native-toolchain limits recorded in [validation.md](validation.md)
+**Status**: Implemented; native-source regression checks recorded in [validation.md](validation.md), Go/Rust release remains deferred
 
 ## 用户需求
 
@@ -43,6 +43,8 @@
 - **FR-005** 页面准确展示两条链路、所需凭据、缓冲差异和节点独立职责；不宣称中转已经合批、压缩、免配置或保证零丢失。
 - **FR-006** 当前发布的每种 SDK 保留 direct/agent 环境构造与示例；不得恢复 Java/C# 或 PHP 原生包，Go/Rust 只能作为后续支持记录。
 - **FR-007** 新增隔离配置与网络收据测试，证明请求实际到达所选接收端，使用相应凭据，并且失败不访问另一端。
+- **FR-008** Python SDK 必须读取通过连接关闭界定长度的 HTTP 响应：接收端在成功响应中设置 `Connection: close` 且没有 `Content-Length` 时，仍按响应体确认批次；请求超时与响应大小限制继续有效。
+- **FR-009** 带 Content-Length 或分块编码的响应必须完整读取后才可确认批次或更新规则；提前 EOF 视为传输失败，保留原批次及已生效规则。
 
 ## 非目标
 

@@ -10,3 +10,6 @@
 
 - [x] T008 移除 PHP SDK 源码、示例与发布入口；Go/Rust 源码保留并标为后续支持，当前仅发布 TypeScript/JavaScript、Python、Ruby。
 - [x] T009 复验 API 旧包访问限制、发布包校验清单和三语言双路径桌面/窄屏页面。
+- [x] T010 按用户要求安装本机 Go/Rust 工具链，补跑现有原生与 HTTP 场景测试并记录结果；保留后续支持的发布范围。
+- [x] T011 修复 Python 对 Connection: close 响应的读取，补充真实 ACK、截止时间和响应大小限制回归检查，并复验 Go 启动的实际 Agent 集成。
+- [x] T012 拒绝截断的 Content-Length/chunked 响应，确认批次不被误确认、既有规则不被覆盖，复验 Python 与 Go→实际 Agent 集成。
