@@ -28,6 +28,7 @@ import { registerAssistant } from "../assistant/index.js";
 import { registerDashboards } from "../domains/dashboards.js";
 import { registerLogs } from "../domains/logs.js";
 import { registerAlerts } from "../domains/alerts.js";
+import { AlertCapabilities } from "../domains/alert-capabilities.js";
 export interface Config {
   dataDir: string;
   chURL: string;
@@ -124,10 +125,11 @@ export async function createApp(cfg: Config) {
     // Enrollment credentials are a separate migration boundary. Legacy
     // config.key based nodes keep working until they explicitly re-enroll.
     modules.push(agentCredentials);
-    modules.push(registerAssistant(deps));
     modules.push(registerDashboards(deps));
     modules.push(registerLogs(deps));
-    modules.push(registerAlerts(deps));
+    const alerts = registerAlerts(deps);
+    modules.push(alerts);
+    modules.push(registerAssistant(deps, { alerts: new AlertCapabilities(alerts) }));
     if (cfg.monitor !== false) {
       monitor = new RuntimeMonitor(ingest, [cfg.chPassword]);
       modules.unshift(monitor);
