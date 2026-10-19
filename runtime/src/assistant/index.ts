@@ -51,6 +51,7 @@ import {
 } from "./worker.js";
 import { codeTaskReceipt, monitoringTools } from "./tools.js";
 import { CodeTaskService, type CodeTaskInput } from "./code.js";
+import type { ManagedMachineStore } from "../server/managed-machines.js";
 export interface AssistantOptions {
   runtime?: Runtime;
   tools?: Tool[];
@@ -60,6 +61,7 @@ export interface AssistantOptions {
   system?: string;
   codeWorkspaceRoot?: string;
   codeAllowedCommands?: string[];
+  machines?: ManagedMachineStore;
 }
 const id = () => randomBytes(16).toString("hex");
 const key = (user: string, session: string) => `session/${user}/${session}`;
@@ -232,17 +234,17 @@ export function registerAssistant(
   };
   const tools =
     options.tools ??
-    monitoringTools(
-      deps,
-      codeTasks
+    monitoringTools(deps, {
+      ...(codeTasks
         ? {
             codeTask: {
               run: (input, owner, signal) =>
                 codeTasks.run(input, owner, signal),
             },
           }
-        : {},
-    );
+        : {}),
+      ...(options.machines ? { machines: options.machines } : {}),
+    });
   if (
     tools.some(
       (tool, index) =>

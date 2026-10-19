@@ -1,7 +1,7 @@
 import {MonitoringScope,type PublishedScope} from '../shared/monitoring-context';
 import {lazy,Suspense,useEffect,useMemo,useState} from 'react';
 import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
-import {ApiOutlined,AppstoreOutlined,BellOutlined,DatabaseOutlined,DashboardOutlined,LogoutOutlined,MessageOutlined,SearchOutlined,SettingOutlined,SafetyCertificateOutlined,MenuFoldOutlined,MenuUnfoldOutlined} from '@ant-design/icons';
+import {ApiOutlined,AppstoreOutlined,BellOutlined,DatabaseOutlined,DashboardOutlined,LogoutOutlined,MessageOutlined,SearchOutlined,SettingOutlined,SafetyCertificateOutlined,MenuFoldOutlined,MenuUnfoldOutlined,CloudServerOutlined} from '@ant-design/icons';
 import {Button,Drawer,Spin,Tooltip} from '../shared/ui';
 import {api} from '../shared/api';
 import type {User} from '../shared/types';
@@ -14,8 +14,9 @@ const AlertsPage=lazy(()=>import('../features/alerts/AlertsPage'));
 const TracePage=lazy(()=>import('../features/alerts/TracePage'));
 const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
 const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
+const MachinesPage=lazy(()=>import('./MachinesPage'));
 
-const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/data','数据接入',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
+const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/data','数据接入',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
 
 function ClaimLanding(){const {token}=useParams();return <Navigate to={'/alerts?claim='+encodeURIComponent(token??'')} replace/>}
 
@@ -33,11 +34,11 @@ export default function Root(){
  useEffect(()=>{if(location.pathname==='/settings')setAssistant(false)},[location.pathname]);
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
  if(loading)return <div className="lm-loading"><Spin size="large"/></div>;
- if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/settings'))?location.pathname+location.search:'/')}}/>;
+ if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/machines')||location.pathname.startsWith('/settings'))?location.pathname+location.search:'/')}}/>;
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'} ${/^\/dashboards\/[^/]+\/panels\//.test(location.pathname)?'is-panel-standalone':''}`}>
   <aside className="lm-sidebar">
    <Link to="/" className="lm-brand"><span className="lm-brand-mark">L</span><span>LightMoni<small>监控工作台</small></span></Link>
-   <nav>{links.filter(([url])=>url!=='/admin'||user.role==='admin').map(([url,label,Icon])=><Link key={url} aria-label={label} title={label} className={(url==='/'?location.pathname===url:location.pathname.startsWith(url))?'active':''} to={url}>{Icon&&<Icon/>}<span>{label}</span></Link>)}</nav>
+  <nav>{links.filter(([url])=>(url!=='/admin'&&url!=='/machines')||user.role==='admin').map(([url,label,Icon])=><Link key={url} aria-label={label} title={label} className={(url==='/'?location.pathname===url:location.pathname.startsWith(url))?'active':''} to={url}>{Icon&&<Icon/>}<span>{label}</span></Link>)}</nav>
    <Button className="lm-nav-collapse" type="text" aria-label={navCollapsed?'展开导航':'收起导航'} title={navCollapsed?'展开导航':'收起导航'} icon={navCollapsed?<MenuUnfoldOutlined/>:<MenuFoldOutlined/>} onClick={toggleNavigation}>{!navCollapsed&&'收起导航'}</Button>
    <div className="lm-sidebar-bottom"><Link to="/settings" className="lm-sidebar-profile" aria-label="编辑个人资料" title={user.nickname||user.name}><UserAvatar user={user}/><div>{user.nickname||user.name}<small>{user.role==='admin'?'管理员':'成员'}</small></div></Link><Button type="text" aria-label="退出登录" icon={<LogoutOutlined/>} onClick={async()=>{await api('/auth/logout',{method:'POST'});setUser(null)}}/></div>
   </aside>
@@ -45,6 +46,7 @@ export default function Root(){
     <Route path="/" element={<OverviewPage/>}/>
     <Route path="/data" element={<DataPage user={user}/>}/>
     <Route path="/agents" element={<AgentsPage user={user}/>}/>
+    <Route path="/machines" element={user.role==='admin'?<MachinesPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>
     <Route path="/admin" element={user.role==='admin'?<AdminPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/assistant" element={<AssistantPage/>}/>

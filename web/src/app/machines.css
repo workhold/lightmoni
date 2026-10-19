@@ -1,0 +1,4 @@
+.lm-machines-page .lm-machine-notice{margin-bottom:18px}
+.lm-machines-page .lm-machine-form-notice{margin:10px 0 16px}
+.lm-machines-page .ant-table-cell .ant-typography{display:block;margin-top:3px}
+@media(max-width:640px){.lm-machines-page .lm-page-heading{align-items:flex-start;gap:12px;flex-direction:column}.lm-machines-page .lm-page-heading .ant-space{width:100%}.lm-machines-page .lm-page-heading .ant-btn{flex:1}.lm-machines-page .lm-page-heading .ant-space-item{flex:1}}
