@@ -279,6 +279,7 @@ export function monitoringTools(
         schema: obj({}),
         execute: async (_input, _signal, user) => {
           if (!user || user.role !== "admin") throw Error("administrator required");
+          object(_input, []);
           return { machines: machines.assistantList() };
         },
       },
@@ -295,27 +296,43 @@ export function monitoringTools(
         },
       },
       {
+        name: "check_managed_machine_ssh",
+        description:
+          "Log in to a registered host through pinned SSH and run a fixed read-only Agent installation preflight. Returns only connection status, Linux/architecture, dependency, systemd, root/sudo and platform HTTPS checks. Use before proposing installation. No arbitrary commands or secrets. One valid private key is selected automatically; with multiple keys use an ID from get_managed_machine.",
+        effect: "read",
+        schema: obj({ machine_id: string, credential_id: string }, ["machine_id"]),
+        execute: async (input, signal, user) => {
+          if (!user || user.role !== "admin") throw Error("administrator required");
+          object(input, ["machine_id", "credential_id"]);
+          return machines.checkSSH(text(input.machine_id), {
+            ...(input.credential_id == null ? {} : { credential_id: text(input.credential_id) }),
+          }, user.id, signal);
+        },
+      },
+      {
         name: "propose_agent_install",
         description:
-          "Create a reviewable LightMoni Agent installation plan for one managed host. This only drafts a fixed plan; it does not connect by SSH, execute commands, reveal credentials, or install anything. The administrator must confirm in the host management page.",
+          "Persist a reviewable LightMoni Agent installation plan using a successful fresh check_id from check_managed_machine_ssh and its observed architecture. Return the review_url to the administrator. This only drafts a fixed plan; it does not connect by SSH, execute commands, reveal credentials, or install anything. The administrator must confirm in the host management page.",
         effect: "draft",
         schema: obj(
           {
             machine_id: string,
+            check_id: string,
             version: string,
             arch: { type: "string", enum: ["amd64", "arm64"] },
             initial_label_id: string,
           },
-          ["machine_id", "version", "arch"],
+          ["machine_id", "check_id", "version", "arch"],
         ),
         execute: async (input, _signal, user) => {
           if (!user || user.role !== "admin") throw Error("administrator required");
-          object(input, ["machine_id", "version", "arch", "initial_label_id"]);
+          object(input, ["machine_id", "check_id", "version", "arch", "initial_label_id"]);
           return machines.assistantPlan(text(input.machine_id), {
+            check_id: text(input.check_id),
             version: text(input.version),
             arch: text(input.arch),
             initial_label_id: input.initial_label_id == null ? "" : text(input.initial_label_id),
-          });
+          }, user.id);
         },
       },
       {

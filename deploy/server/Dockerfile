@@ -17,7 +17,7 @@ RUN cd sdk/typescript && npm pack --pack-destination /work/runtime/downloads
 RUN sh scripts/build-native-sdks.sh 0.1.0 runtime/downloads && npm --prefix runtime prune --omit=dev && npm --prefix ai-runtime prune --omit=dev
 
 FROM node:24.15.0-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata wget && rm -rf /var/lib/apt/lists/* && groupadd --gid 10001 lightmoni && useradd --uid 10001 --gid lightmoni --no-create-home lightmoni && mkdir -p /data && chown lightmoni:lightmoni /data
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata wget openssh-client && rm -rf /var/lib/apt/lists/* && groupadd --gid 10001 lightmoni && useradd --uid 10001 --gid lightmoni --no-create-home lightmoni && mkdir -p /data && chown lightmoni:lightmoni /data
 WORKDIR /opt/lightmoni
 COPY --from=build /work/runtime/ ./runtime/
 COPY --from=build /work/sdk/typescript/package.json ./sdk/typescript/package.json
