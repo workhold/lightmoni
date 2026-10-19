@@ -7,7 +7,7 @@
 
 ## 1. 配置对象
 
-所有保留语言提供等价字段；字段名按语言习惯使用 snake_case 或 camelCase，但序列化配置与错误代码保持一致。
+当前发布的 TypeScript/JavaScript、Python、Ruby 提供等价字段；字段名按语言习惯使用 snake_case 或 camelCase，但序列化配置与错误代码保持一致。
 
 ~~~text
 SdkConnectionConfig {
@@ -120,7 +120,7 @@ stats 至少提供：configured_mode、selected_route、agent_probe、fallback_c
 
 ## 6. 自定义打点契约
 
-每个保留语言的原生 SDK 都必须提供以下语义（名称按语言惯例）：
+每个当前发布语言的原生 SDK 都必须提供以下语义（名称按语言惯例）：
 
 | 信号 | 最低能力 | 约束 |
 | --- | --- | --- |
@@ -137,20 +137,20 @@ stats 至少提供：configured_mode、selected_route、agent_probe、fallback_c
 
 | 原生 SDK | 运行环境 | 三种模式 | 环境构造 | 自定义打点 | 发布状态 |
 | --- | --- | --- | --- | --- | --- |
-| Go | Go 1.26+ | agent/direct/auto | NewFromEnv（基线已实现）+ 显式 Config | metrics、logs、traces、W3C、table | 保留 |
+| Go | Go 1.26+ | 源码基线 | NewFromEnv + 显式 Config | 源码保留 | 后续支持；不生成本次发布包，未纳本次发布验收 |
 | TypeScript/JavaScript（Node） | Node 20+ | agent/direct/auto | createLightMoniFromEnv（基线已实现）+ options | metrics、logs、traces、W3C、table | 保留 |
 | TypeScript（浏览器） | 现代浏览器 | agent；direct 仅受限 relay/短期 token；auto 仅探测显式同源 Agent | createLightMoniFromEnv 由构建/宿主注入，不能读取中心长期 key | metrics、logs、traces、W3C、table | 保留，浏览器安全限制 |
 | Python | 3.9+，标准库 | agent/direct/auto | from_env（基线已实现）+ Client | metrics、logs、traces、W3C、table | 保留 |
-| PHP | 8.1+ | agent/direct/auto | Client::fromEnv（基线已实现）+ 构造参数 | metrics、logs、traces、W3C、table | 保留 |
+| PHP | — | — | — | 用标准 OTLP exporter 迁移 | 原生 SDK 下线 |
 | Ruby | 2.7+ | agent/direct/auto | LightMoni.from_env（基线已实现）+ options | metrics、logs、traces、W3C、table | 保留 |
-| Rust | 1.85+ | agent/direct/auto | Client::from_env（基线已实现）+ Config | metrics、logs、traces、W3C、table | 保留 |
+| Rust | 1.85+ | 源码基线 | Client::from_env + Config | 源码保留 | 后续支持；不生成本次发布包，未纳本次发布验收 |
 | Java/Kotlin | JDK 17+ | 不再扩展 | — | 用标准 OTLP exporter 迁移 | 原生 SDK 移除 |
 | C#/.NET | .NET 8+ | 不再扩展 | — | 用标准 OTLP exporter 迁移 | 原生 SDK 移除 |
 
-“支持”表示 LightMoni 原生包、文档、构建和语义验收；不限制用户使用外部 OpenTelemetry exporter 向兼容 OTLP endpoint 上报。Java/C# 源码移除前须保留一次迁移说明和中心 OTLP 兼容测试。
+“支持”表示 LightMoni 原生包、文档、构建和语义验收；不限制用户使用外部 OpenTelemetry exporter 向兼容 OTLP endpoint 上报。当前发布与接入页安装选项仅有 TypeScript/JavaScript、Python、Ruby；Go/Rust 源码基线不构成发布或验收承诺。Java/C#/PHP 的历史证据保留，标准 OTLP 接收与历史数据不受下线影响。
 
 ## 8. 兼容与迁移
 
 LIGHTMONI_KEY、现有显式 endpoint/key 构造和 Agent 旧配置可在过渡期继续读取，但只能映射到 data key/直连或 local token 的明确位置；不能将一个旧 key 继续当作 control/data 两种权限的长期设计。新文档、生成器和测试使用 LIGHTMONI_DATA_KEY 及 *_FILE。
 
-Java/C# 使用方迁移到标准 OpenTelemetry OTLP exporter 或自有 HTTP/OTLP 客户端，设置 table 头和 data key 的方式遵循中心契约。移除原生目录不删除已上报数据，不修改中心查询与接收接口。
+Java/C#/PHP 使用方迁移到标准 OpenTelemetry OTLP exporter 或自有 HTTP/OTLP 客户端，设置 table 头和 data key 的方式遵循中心契约。移除原生目录不删除已上报数据，不修改中心查询与接收接口。

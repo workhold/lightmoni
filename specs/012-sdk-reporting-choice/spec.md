@@ -1,7 +1,7 @@
 # Feature Specification: SDK 双路径上报与节点助手独立运行
 
-**Date**: 2026-10-19  
-**Branch**: `feat/sdk-reporting-modes`  
+**Date**: 2026-10-19
+**Branch**: `feat/sdk-reporting-modes`
 **Status**: Implemented; checks completed with native-toolchain limits recorded in [validation.md](validation.md)
 
 ## 用户需求
@@ -29,7 +29,8 @@
 ### US3 用户切换模式、语言或地址（P1）
 
 - 模式切换保留两条路径各自输入的地址；更换语言不改变所选路径。
-- 六种保留语言的环境示例明确写出 `LIGHTMONI_MODE`，仅注入所选路径的凭据。
+- 当前发布的 TypeScript/JavaScript、Python、Ruby 三种 SDK 的环境示例明确写出 `LIGHTMONI_MODE`，仅注入所选路径的凭据。
+- Go 与 Rust 源码保留作后续支持，暂不进入本次发布包，接入页只展示后续支持状态；PHP SDK 从发布范围移除。
 - 可直接执行的环境示例清理另一模式及当前模式遗留的 secret-file/legacy 别名配置，避免复制切换后出现来源冲突；不写出真实秘密。
 - direct 不以运行形态限制使用；普通服务器、容器和 Serverless 均可直连。容器的 localhost 提示也适用于 Agent 地址。
 
@@ -40,7 +41,7 @@
 - **FR-003** 模式选择不修改 Counter/Gauge/Histogram、日志、Span/Trace、table、批次 ID、有限缓冲、重试和 shutdown 语义。
 - **FR-004** 既有 auto 与旧 endpoint/key 构造 API 保持兼容；不将网络错误解释为切换模式的授权。
 - **FR-005** 页面准确展示两条链路、所需凭据、缓冲差异和节点独立职责；不宣称中转已经合批、压缩、免配置或保证零丢失。
-- **FR-006** 每种语言保留 direct/agent 环境构造与示例；不得恢复 Java/C# 原生包。
+- **FR-006** 当前发布的每种 SDK 保留 direct/agent 环境构造与示例；不得恢复 Java/C# 或 PHP 原生包，Go/Rust 只能作为后续支持记录。
 - **FR-007** 新增隔离配置与网络收据测试，证明请求实际到达所选接收端，使用相应凭据，并且失败不访问另一端。
 
 ## 非目标

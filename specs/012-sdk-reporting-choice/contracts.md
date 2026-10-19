@@ -23,3 +23,9 @@
 ## 页面
 
 选项：“直连平台” / “通过 LightMoni Agent”。初始 direct；两种 endpoint 独立保留。浏览器 bundle 不保存真实凭据；业务示例为服务端接入。Agent 不与 SDK 直连、节点在线状态或模型调用形成强制依赖。
+
+## 当前发布矩阵
+
+`GET /api/v1/sdk-install` 的 `packages` 只包含 TypeScript/JavaScript、Python、Ruby；这三种 SDK 才提供安装、下载与业务接入示例。`deferred` 返回 Go/Rust 的 `id`、`language`、`runtime`、`status: deferred`、`reason: 后续支持`，页面只展示后续支持状态。
+
+PHP SDK 源码、示例、发布及下载入口移除。即使下载目录残留旧的 PHP、Go 或 Rust 包，下载接口也返回 404。发布脚本清理旧包并重建校验清单，避免复用目录仍携带下线包。接收端继续兼容历史 OTLP 数据，不因停止发行而拒绝既有信号。
