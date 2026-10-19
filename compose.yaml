@@ -4,8 +4,6 @@ services:
     build:
       context: .
       dockerfile: deploy/server/Dockerfile
-      args:
-        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     ports:
       - "${LIGHTMONI_BIND_ADDRESS:-0.0.0.0}:${LIGHTMONI_PORT:-8080}:8080"
     environment:

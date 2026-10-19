@@ -1,6 +1,6 @@
 # SDK 双通道与 SQL 工作台移除验收
 
-> 历史验收记录。Java/.NET 相关结果保留用于追溯，当前版本不再发布或展示这两种 SDK；当前支持矩阵以 [SDK 总览](../../../sdk/README.md) 为准。
+> 历史验收记录。Java/.NET/PHP 已下线；Go/Rust 仅保留源码、后续支持，未纳本次发布验收。以下原始结果保留用于追溯，当前发布 TypeScript/JavaScript、Python、Ruby，支持矩阵以 [SDK 总览](../../../sdk/README.md) 为准。
 
 本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/sdk-modes/`](../../../artifacts/screenshots/docs/evidence/sdk-modes/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
 

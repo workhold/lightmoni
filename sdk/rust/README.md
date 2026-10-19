@@ -1,5 +1,7 @@
 # Rust SDK
 
+状态：**后续支持，仅保留源码**。不生成本次 SDK 发布包，接入页不提供安装选项；原生工具链、完整连接模式与故障矩阵尚未纳入本次发布验收。下文仅供后续开发参考，不构成当前发布支持承诺。当前可发布语言为 TypeScript/JavaScript、Python、Ruby，见 [SDK 总览](../README.md)。
+
 Rust 1.85+，Cargo.toml / Cargo.lock 固定依赖。源码路径依赖：
 
 包内 Cargo.lock 用于在 SDK 目录直接构建与运行示例。作为业务依赖时使用业务工程自己的 Cargo.lock；请锁定业务依赖并使用与解析结果匹配的 Rust 工具链。

@@ -1,14 +1,3 @@
-FROM golang:1.26.3-alpine AS go-sdk
-WORKDIR /work
-ARG GOPROXY=https://proxy.golang.org,direct
-ENV GOPROXY=$GOPROXY
-COPY go.mod go.sum ./
-COPY sdk/ ./sdk/
-COPY examples/sdk/go/ ./examples/sdk/go/
-COPY scripts/build-go-sdk.sh ./scripts/build-go-sdk.sh
-# Go only packages the Go business SDK; it is absent from the platform runtime.
-RUN --mount=type=cache,target=/go/pkg/mod sh scripts/build-go-sdk.sh 0.1.0 /sdk-release
-
 FROM node:24.15.0-bookworm AS build
 WORKDIR /work
 COPY sdk/typescript/package*.json ./sdk/typescript/
@@ -24,7 +13,6 @@ RUN npm --prefix web ci
 COPY . ./
 RUN npm --prefix runtime run build && npm --prefix ai-runtime run build && npm --prefix web run build
 RUN node scripts/build-agent-release.mjs 0.1.0 runtime/downloads
-COPY --from=go-sdk /sdk-release/ ./runtime/downloads/
 RUN cd sdk/typescript && npm pack --pack-destination /work/runtime/downloads
 RUN sh scripts/build-native-sdks.sh 0.1.0 runtime/downloads && npm --prefix runtime prune --omit=dev && npm --prefix ai-runtime prune --omit=dev
 

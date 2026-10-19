@@ -6,7 +6,7 @@
 
 - 面向个人和四五人的小团队。单套部署共享数据，不引入项目、工作空间、多租户、逐表或大盘 ACL。
 - 一体化主服务内置网页、采集、查询、大盘、日志探索、配置、告警和通知。中心端推荐主服务加 ClickHouse 两个容器；SQLite 内嵌保存管理数据。
-- 前端确定使用 React 与 TypeScript，使用 oil-ui 整理设计与交互，图表使用 AntV。禁止浏览器原生 select 和 window.alert/confirm/prompt；选择、确认和输入流程使用共享 React 组件。中心与 Agent 均使用 Node.js / TypeScript，运行入口为 `runtime/dist/server/main.js` 与 `runtime/dist/agent/main.js`。发布固定 Node 24.15.0，依赖版本见各 npm lockfile；业务 Go SDK 保留。
+- 前端确定使用 React 与 TypeScript，使用 oil-ui 整理设计与交互，图表使用 AntV。禁止浏览器原生 select 和 window.alert/confirm/prompt；选择、确认和输入流程使用共享 React 组件。中心与 Agent 均使用 Node.js / TypeScript，运行入口为 `runtime/dist/server/main.js` 与 `runtime/dist/agent/main.js`。发布固定 Node 24.15.0，依赖版本见各 npm lockfile；当前发布 TypeScript/JavaScript、Python、Ruby；Go/Rust 仅保留源码、后续支持，不纳本次发布验收；PHP 已下线。
 - Grafana、Kibana、OpenObserve 是功能和交互参考。LightMoni 自己实现功能，不在运行时依赖这三个产品，也不承诺兼容它们的导入格式或查询语言。
 - SDK/采集业务配置 service、table、上报地址；通过本机 Agent 时由 Agent 保管私有 Key。支持创建多份命名 Key，每份可配置允许写入的逻辑 table 白名单，或显式允许所有 table，不与 service 绑定或限制。Agent 配置其中一份，多个服务/Agent 可共用；记录实际 key_id、接入来源、最近使用与拒绝原因以排查问题。Key 不作为项目或租户边界，只授权写入。
 - 用户给出业务 table 名，系统添加 log_、metric_、trace_ 前缀。指标根据数据类型分表；自定义属性进入属性字段，不为每个属性自动增加物理列。
@@ -28,7 +28,7 @@
 | 01 | 大盘 | docs/tasks/01-dashboards.md | web/src/features/dashboards、runtime/src/domains/dashboards.ts |
 | 02 | 日志探索 | docs/tasks/02-logs.md | web/src/features/logs、runtime/src/domains/logs.ts |
 | 03 | 告警与通知 | docs/tasks/03-alerts.md | web/src/features/alerts、runtime/src/domains/alert*.ts |
-| 04 | SDK | docs/tasks/04-sdk.md | sdk/{go,typescript,python,php,ruby,rust}、examples/sdk |
+| 04 | SDK | docs/tasks/04-sdk.md | sdk/{typescript,python,ruby}（Go/Rust 源码保留供后续开发）、examples/sdk |
 | 05 | Agent | docs/tasks/05-agent.md | runtime/src/agent、deploy/agent、examples/agent |
 | 07 | AI 助手 | docs/tasks/07-ai-assistant.md | runtime/src/assistant、ai-runtime、web/src/features/assistant |
 | 06 | 主干与集成 | docs/tasks/06-core.md | runtime/src/server、runtime/src/shared、web/src/app、web/src/shared、deploy/server |
@@ -45,7 +45,7 @@
 
 首版应完整打通安装、数据接入、查询、大盘、日志排查、拨测、用户管理、第三方登录、告警组和通知。Grafana/Kibana 核心功能与交互必须逐项对标，不能仅做到出图和列表；具体矩阵见 acceptance.md。插件市场、任意变换流水线、完全相同的 JSON 导入、完整 KQL/Lucene、完整 PromQL、会话回放、企业组织权限不作为首版验收项；值班排班与告警升级已纳入本次范围。
 
-保留 Go、TypeScript、Python、PHP、Ruby、Rust 六种业务 SDK 和轻量浏览器接入。Node Agent 复用 TypeScript SDK，Go 仅用于业务 SDK 开发/打包。Linux 双架构 Agent 包自带 Node 24.15.0，要求 glibc ≥ 2.28；平台最终镜像使用 Node bookworm-slim，Go 镜像阶段仅打包 Go SDK。所有真实运行、故障恢复和资源占用结果需要实现后验证，方案不能当作测试证明。
+当前发布 TypeScript/JavaScript、Python、Ruby 三种业务 SDK 和轻量浏览器接入。PHP 原生 SDK 下线；Go/Rust 源码保留、后续支持，不生成本次发布包或接入页安装选项，未纳本次发布验收。Node Agent 复用 TypeScript SDK。Linux 双架构 Agent 包自带 Node 24.15.0，要求 glibc ≥ 2.28；平台最终镜像使用 Node bookworm-slim，当前发布不需要 Go/Rust 工具链。所有真实运行、故障恢复和资源占用结果需要实现后验证，方案不能当作测试证明。
 
 ## 最终验收硬要求
 

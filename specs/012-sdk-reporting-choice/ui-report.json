@@ -1,5 +1,15 @@
 {
   "production_bundle": true,
+  "supported_languages": [
+    "typescript",
+    "python",
+    "ruby"
+  ],
+  "deferred_languages": [
+    "go",
+    "rust"
+  ],
+  "php_removed": true,
   "api_fixtures": true,
   "live_backend": false,
   "default_direct": true,
@@ -21,27 +31,12 @@
     },
     {
       "width": 1280,
-      "language": "go",
-      "mode": "direct"
-    },
-    {
-      "width": 1280,
       "language": "python",
       "mode": "direct"
     },
     {
       "width": 1280,
-      "language": "php",
-      "mode": "direct"
-    },
-    {
-      "width": 1280,
       "language": "ruby",
-      "mode": "direct"
-    },
-    {
-      "width": 1280,
-      "language": "rust",
       "mode": "direct"
     },
     {
@@ -51,27 +46,12 @@
     },
     {
       "width": 1280,
-      "language": "go",
-      "mode": "agent"
-    },
-    {
-      "width": 1280,
       "language": "python",
       "mode": "agent"
     },
     {
       "width": 1280,
-      "language": "php",
-      "mode": "agent"
-    },
-    {
-      "width": 1280,
       "language": "ruby",
-      "mode": "agent"
-    },
-    {
-      "width": 1280,
-      "language": "rust",
       "mode": "agent"
     },
     {
@@ -81,27 +61,12 @@
     },
     {
       "width": 390,
-      "language": "go",
-      "mode": "direct"
-    },
-    {
-      "width": 390,
       "language": "python",
       "mode": "direct"
     },
     {
       "width": 390,
-      "language": "php",
-      "mode": "direct"
-    },
-    {
-      "width": 390,
       "language": "ruby",
-      "mode": "direct"
-    },
-    {
-      "width": 390,
-      "language": "rust",
       "mode": "direct"
     },
     {
@@ -111,27 +76,12 @@
     },
     {
       "width": 390,
-      "language": "go",
-      "mode": "agent"
-    },
-    {
-      "width": 390,
       "language": "python",
       "mode": "agent"
     },
     {
       "width": 390,
-      "language": "php",
-      "mode": "agent"
-    },
-    {
-      "width": 390,
       "language": "ruby",
-      "mode": "agent"
-    },
-    {
-      "width": 390,
-      "language": "rust",
       "mode": "agent"
     }
   ],

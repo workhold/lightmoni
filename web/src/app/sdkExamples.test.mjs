@@ -4,7 +4,7 @@ import {spawnSync} from 'node:child_process';
 import {loadSource} from '../features/dashboards/test-module.mjs';
 const {sdkExamples,sdkSampleFor,sdkEnvironment,sdkEndpointError,sdkEndpointIsLoopback}=loadSource(new URL('./sdkExamples.ts',import.meta.url));
 
-test('six supported SDK examples use environment constructors for both routes',()=>{
+test('current SDK examples use environment constructors for both routes',()=>{
  for(const language of Object.keys(sdkExamples)){
   const agent=sdkSampleFor(language,'agent'),direct=sdkSampleFor(language,'direct');
   assert.match(agent,/from_env|fromEnv|FromEnv/);
@@ -12,7 +12,7 @@ test('six supported SDK examples use environment constructors for both routes',(
   assert.equal(sdkExamples[language].sample,direct);
   assert.equal(sdkSampleFor(language),direct);
  }
- assert.match(sdkSampleFor('php','direct'),/LightMoni\\Client::fromEnv/);
+ assert.deepEqual(Object.keys(sdkExamples),['typescript','python','ruby']);
  assert.equal(sdkSampleFor('unknown','agent'),sdkSampleFor('typescript','agent'));
 });
 

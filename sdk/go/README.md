@@ -1,5 +1,7 @@
 # Go SDK
 
+状态：**后续支持，仅保留源码**。不生成本次 SDK 发布包，接入页不提供安装选项；原生工具链、完整连接模式与故障矩阵尚未纳入本次发布验收。下文仅供后续开发参考，不构成当前发布支持承诺。当前可发布语言为 TypeScript/JavaScript、Python、Ruby，见 [SDK 总览](../README.md)。
+
 根 module 中的包为 `github.com/lightmoni/lightmoni/sdk/go`，package 名 `moni`。SDK 使用进程内缓冲；需要独立磁盘队列时可明确选择 LightMoni Agent。
 
 ```go

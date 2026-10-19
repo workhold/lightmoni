@@ -12,11 +12,11 @@ const output=resolve(process.env.LIGHTMONI_QA_OUTPUT??'/tmp/lightmoni-sdk-report
 await mkdir(output,{recursive:true});
 const screenshots=mediaDirectory(output),errors=[],unexpected=[],checked=[];
 const platform='https://platform.example/monitor',agent='http://lightmoni-agent:4318';
-const names={typescript:'TypeScript / Node.js',go:'Go',python:'Python',php:'PHP',ruby:'Ruby',rust:'Rust'};
+const names={typescript:'TypeScript / Node.js',python:'Python',ruby:'Ruby'};
 const packages=Object.keys(sdkExamples).map(id=>({id,language:names[id],runtime:names[id],file:id+'.tar.gz',url:origin+'/downloads/'+id+'.tar.gz',available:true}));
 const fixtures={
  '/api/v1/auth/me':{id:'sdk-fixture-admin',name:'sdk-fixture-admin',role:'admin'},
- '/api/v1/sdk-install':{endpoint:platform,endpoints:[],version:'0.1.0',packages,checksums_url:''},
+ '/api/v1/sdk-install':{endpoint:platform,endpoints:[],version:'0.1.0',packages,deferred:[{id:'go',language:'Go',runtime:'Go 1.26+',status:'deferred',reason:'后续支持'},{id:'rust',language:'Rust',runtime:'Rust 1.85+',status:'deferred',reason:'后续支持'}],checksums_url:''},
  '/api/v1/catalog/tables':[],
  '/api/v1/templates':[],
  '/api/v1/keys':[],
@@ -57,6 +57,12 @@ async function checkCopy(language,mode,endpoint){
 }
 try{
  await page.goto(origin+'/data');await expect(page.getByRole('heading',{name:'SDK 接入',exact:true})).toBeVisible();
+ await expect(page.getByText('后续支持：Go、Rust。暂不提供安装包。',{exact:true})).toBeVisible();
+ await page.getByRole('combobox',{name:'SDK 语言'}).click();
+ const options=page.locator('.ant-select-dropdown:visible');
+ await expect(options.locator('.ant-select-item-option')).toHaveCount(3);
+ for(const label of ['PHP','Go','Rust'])await expect(options.getByText(label,{exact:true})).toHaveCount(0);
+ await page.keyboard.press('Escape');
  await expect(page.getByRole('radio',{name:'直连平台',exact:true})).toBeChecked();await expect(input).toHaveValue(platform);
  await expect(page.getByText('业务 SDK → LightMoni 平台。',{exact:false})).toContainText('无需安装或启动 Agent');
  await input.fill('http://127.0.0.1:8080');await expect(page.locator('.lm-sdk-container-note')).toHaveClass(/ant-alert-warning/);
@@ -93,9 +99,9 @@ try{
  await input.fill(agent);await chooseMode('direct');await expect(input).toHaveValue(platform);
  await page.getByRole('button',{name:'管理上报 Key',exact:true}).click();await expect(page.getByRole('tab',{name:'上报 Key',exact:true})).toHaveAttribute('aria-selected','true');
  await page.getByRole('tab',{name:'SDK 接入',exact:true}).click();await expect(input).toHaveValue(platform);
- await expect(page.getByRole('radio',{name:'直连平台',exact:true})).toBeChecked();await expect(sample).toHaveText(sdkSampleFor('rust','direct'));
+ await expect(page.getByRole('radio',{name:'直连平台',exact:true})).toBeChecked();await expect(sample).toHaveText(sdkSampleFor('ruby','direct'));
  expect(errors).toEqual([]);expect(unexpected).toEqual([]);
- await writeFile(resolve(output,'ui-report.json'),JSON.stringify({production_bundle:true,api_fixtures:true,live_backend:false,default_direct:true,mode_endpoints_preserved:true,language_retains_mode:true,clipboard_matches:true,container_notes_both_modes:true,key_tab_retains_setup:true,invalid_endpoint_blocks_copy:true,widths:[1280,390],checked,errors,unexpected},null,2)+'\n');
- console.log('PASS production SDK page with API fixtures: six languages × two modes × desktop/mobile, retained addresses, clipboard, validation and container hints');
+ await writeFile(resolve(output,'ui-report.json'),JSON.stringify({production_bundle:true,supported_languages:Object.keys(names),deferred_languages:['go','rust'],php_removed:true,api_fixtures:true,live_backend:false,default_direct:true,mode_endpoints_preserved:true,language_retains_mode:true,clipboard_matches:true,container_notes_both_modes:true,key_tab_retains_setup:true,invalid_endpoint_blocks_copy:true,widths:[1280,390],checked,errors,unexpected},null,2)+'\n');
+ console.log('PASS production SDK page with API fixtures: three languages × two modes × desktop/mobile, retained addresses, clipboard, validation and container hints');
 }catch(error){await page.screenshot({path:resolve(screenshots,'failure.png'),fullPage:true}).catch(()=>{});throw error;}
 finally{await context.close();await browser.close();}

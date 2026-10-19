@@ -1,6 +1,6 @@
 # 多语言 SDK 验收
 
-> 历史验收记录（2026-10-11）。Java/Kotlin JVM 与 C#/.NET SDK 已从当前发行版下线，以下包含这些语言的结果仅用于追溯，当前支持矩阵以 [SDK 总览](../../../sdk/README.md) 为准。
+> 历史验收记录（2026-10-11）。Java/Kotlin JVM、C#/.NET 与 PHP SDK 已下线；Go/Rust 仅保留源码、后续支持，未纳本次发布验收。以下原始结果仅用于追溯，当前发布 TypeScript/JavaScript、Python、Ruby，支持矩阵以 [SDK 总览](../../../sdk/README.md) 为准。
 
 本目录的截图、参考图和录屏仅保存在本机 [`artifacts/screenshots/docs/evidence/multilang-sdk/`](../../../artifacts/screenshots/docs/evidence/multilang-sdk/)，由 Git 忽略；下文未带路径的图片和录像文件名均相对此目录。文字报告继续保留在仓库中。
 

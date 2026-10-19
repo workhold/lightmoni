@@ -65,10 +65,11 @@ export default function DataPage({user}:{user:User}) {
         <Space wrap style={{marginBottom:14}}>
           <h2 style={{margin:0}}>SDK 接入</h2>
           <Select aria-label="SDK 语言" style={{minWidth:260}} value={sdkLanguage} onChange={setSDKLanguage}
-            options={(sdk?.packages ?? []).map(item => ({value:item.id,label:item.language}))}/>
+            options={(sdk?.packages ?? []).filter(item=>sdkExamples[item.id]).map(item => ({value:item.id,label:item.language}))}/>
           {sdkPackage && <Tag>{sdkPackage.runtime}</Tag>}
           {user.role==='admin'&&<Button onClick={()=>setSDKReportingOpen(true)}>SDK 停报规则</Button>}
         </Space>
+        {!!sdk?.deferred?.length&&<p>后续支持：{sdk.deferred.map(item=>item.language).join('、')}。暂不提供安装包。</p>}
         <p>下载源码包或 npm 安装包后，按所选语言的命令安装。解压包内包含 README 和可运行示例。</p>
         <Space wrap style={{marginBottom:14}}>
           <Button href={sdkPackage?.url} disabled={!sdkPackage?.available}>下载 SDK 与示例</Button>
@@ -77,7 +78,7 @@ export default function DataPage({user}:{user:User}) {
         {sdkPackage && !sdkPackage.available && <Alert type="warning" style={{marginBottom:14}} title="当前服务尚未打包此 SDK，请先构建 SDK 安装包。"/>}
         <CodeBlock code={sdkExample.install} language="bash" ariaLabel="SDK 安装命令"/>
         <SDKSetup language={sdkLanguage} mode={sdkMode} endpoint={sdkMode==='agent'?agentEndpoint:centerEndpoint??sdk?.endpoint??window.location.origin} defaultEndpoint={sdk?.endpoint??window.location.origin} reportingAddresses={sdk?.endpoints} defaultEndpointID={sdk?.default_endpoint_id} onModeChange={setSDKMode} onEndpointChange={sdkMode==='agent'?setAgentEndpoint:setCenterEndpoint} onResetEndpoint={()=>setCenterEndpoint(undefined)} onManageKeys={user.role==='admin'?()=>setTab('keys'):undefined}/>
-        <p>所有 SDK 支持 Counter、Gauge、Histogram、日志和基础链路。SDK 默认报告实例心跳与内部诊断；Go、Node.js、Python、Ruby、Rust 每 30 秒报告，PHP 在请求结束或定时 flush 时报告。退出前停止生产，再调用有截止时间的 shutdown。</p>
+        <p>所有 SDK 支持 Counter、Gauge、Histogram、日志和基础链路。SDK 默认报告实例心跳与内部诊断；Node.js、Python、Ruby 每 30 秒报告。退出前停止生产，再调用有截止时间的 shutdown。</p>
         <p>浏览器通过业务后端转发，后端保管仅允许目标 table 的 Key，页面无需保存私有 Key。</p>
       </div>},
       {key:'agent',label:'执行节点接入',children:<AgentInstall user={user} tables={tables} initialGroup={params.get('group') ?? undefined} onKeyCreated={() => void load()}/>},

@@ -22,7 +22,7 @@ async function choose(language){await page.getByRole('combobox',{name:'SDK 语�
 try{
  const login=await context.request.post(base+'/api/v1/auth/login',{data:{name:process.env.LIGHTMONI_TEST_USER??'sdk-local-admin',password:process.env.LIGHTMONI_TEST_PASSWORD??'sdk-local-test-password'}});
  expect(login.ok()).toBe(true);
- const install=await(await context.request.get(base+'/api/v1/sdk-install')).json();expect(install.packages).toHaveLength(6);
+ const install=await(await context.request.get(base+'/api/v1/sdk-install')).json();expect(install.packages).toHaveLength(3);
  await page.goto(base+'/data');await expect(page.getByRole('heading',{name:'SDK 接入',exact:true})).toBeVisible();
  await expect(endpoint).toHaveValue(install.endpoint??base);await expect(page.getByRole('radio',{name:'直连平台',exact:true})).toBeChecked();
  await mode('agent');await expect(endpoint).toHaveValue(SDK_AGENT_ENDPOINT);await endpoint.fill(agent);await mode('direct');expect(await endpoint.inputValue()).not.toBe(SDK_AGENT_ENDPOINT);
@@ -65,7 +65,7 @@ try{
  const query=await context.request.post(base+'/api/v1/query',{data:{request_id:'sdk-qa-query',range:{from:new Date(Date.now()-3600000).toISOString(),to:new Date().toISOString()},interval_ms:60000,queries:[{refId:'A',sql:'SELECT 1 AS value'}]}});
  expect(query.ok()).toBe(true);expect((await query.json()).results[0].status).toBe('success');
  expect(errors).toEqual([]);
- await writeFile(resolve(output,'ui-report.json'),JSON.stringify({routes:checked,widths:[1280,750,390],downloads:6,highlighted_samples:12,clipboard_samples:12,clipboard_environments:12,themes:['dark','light'],url_validation:true,mode_endpoint_preserved:true,key_navigation_preserves_setup:true,workbench_removed:true,query_api_preserved:true,errors},null,2)+'\n');
- console.log('PASS six SDK languages in both modes: highlighted code, exact clipboard, downloads, address validation, retained setup, themes/layout; SQL Workbench removed, query API works');
+ await writeFile(resolve(output,'ui-report.json'),JSON.stringify({routes:checked,widths:[1280,750,390],downloads:3,highlighted_samples:6,clipboard_samples:6,clipboard_environments:6,themes:['dark','light'],url_validation:true,mode_endpoint_preserved:true,key_navigation_preserves_setup:true,workbench_removed:true,query_api_preserved:true,errors},null,2)+'\n');
+ console.log('PASS three SDK languages in both modes: highlighted code, exact clipboard, downloads, address validation, retained setup, themes/layout; SQL Workbench removed, query API works');
 }catch(error){await page.screenshot({path:resolve(mediaOutput,'failure.png'),fullPage:true}).catch(()=>{});throw error;}
 finally{await context.close();await browser.close();}

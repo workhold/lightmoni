@@ -1,14 +1,14 @@
 # LightMoni
 
-面向个人和小团队的一体化监控工作台。Node.js / TypeScript 主服务提供 React + TypeScript 界面，SQLite 保存管理数据，ClickHouse 保存日志、指标和链路。LightMoni Agent 运行实例称为执行节点，采集主机、进程、拨测和目录日志，接收 Go、JavaScript/TypeScript、Python、PHP、Ruby、Rust SDK 数据并持久化缓存。
+面向个人和小团队的一体化监控工作台。Node.js / TypeScript 主服务提供 React + TypeScript 界面，SQLite 保存管理数据，ClickHouse 保存日志、指标和链路。LightMoni Agent 运行实例称为执行节点，采集主机、进程、拨测和目录日志，接收 JavaScript/TypeScript、Python、Ruby SDK 数据并持久化缓存。Go/Rust 源码保留、后续支持，不纳本次发布验收；PHP SDK 已下线。
 
-中心与 LightMoni Agent 均由 Node.js / TypeScript 实现，公共协议和存储工具位于 `runtime/src/shared`；业务 Go SDK 与其余五种语言 SDK 保留。迁移规格与验收见 [Node 运行时迁移](specs/007-node-runtime-migration/spec.md) 和 [领域验证](specs/007-node-runtime-migration/domain-validation.md)。
+中心与 LightMoni Agent 均由 Node.js / TypeScript 实现，公共协议和存储工具位于 `runtime/src/shared`；当前发布 JavaScript/TypeScript、Python、Ruby 三种业务 SDK；Go/Rust 仅保留源码，不提供当前发布包或接入页安装入口。迁移规格与验收见 [Node 运行时迁移](specs/007-node-runtime-migration/spec.md) 和 [领域验证](specs/007-node-runtime-migration/domain-validation.md)。
 
 没有项目或租户概念。每份 Key 可配置逻辑 table 白名单，或显式允许所有 table，不绑定 service；服务通过 `service` 标识，业务通过逻辑 `table` 选择数据流。服务自动生成 `log_*`、`metric_*_sum/gauge/histogram`、`trace_*`，在记录中写入实际认证的 `key_id`。
 
 ## Docker Compose 部署
 
-根目录的 [compose.yaml](compose.yaml) 默认只启动 LightMoni，连接已有 ClickHouse。主服务镜像内置网页、两种 Linux 架构的 LightMoni Agent 安装包和六种语言的 SDK，无需单独部署前端。最终镜像使用 `node:24.15.0-bookworm-slim`；Go 构建阶段只生成业务 Go SDK 下载包，中心和 Agent 的运行环境不包含 Go。
+根目录的 [compose.yaml](compose.yaml) 默认只启动 LightMoni，连接已有 ClickHouse。主服务镜像内置网页、两种 Linux 架构的 LightMoni Agent 安装包和三种当前发布语言的 SDK，无需单独部署前端。最终镜像使用 `node:24.15.0-bookworm-slim`；中心、Agent 和当前 SDK 发布流程均不需要 Go 工具链。
 
 在仓库根目录准备配置：
 
@@ -63,7 +63,7 @@ LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器�
 
 目录日志填写绝对目录、文件匹配规则（默认 `*.log*`）、是否包含子目录和首次从头读取。默认只采集现有文件后续新增的行，之后新建文件完整采集；读取进度与队列批次一起提交，支持重启续读、重命名轮转和截断检测。要求服务用户可读目录，采集 UTF-8 文本行，跳过压缩文件和符号链接；单行超过 64 KiB 分片，未结束的短行等待换行。事件时间使用采集时间，保留文件路径和字节位置。每个执行节点最多同时打开 256 个日志文件，每个目录单次扫描最多 10,000 个条目，超限会显示采集错误。源文件在采集前已删除或覆盖的内容无法恢复。
 
-“SDK 接入”默认“直连平台”，也可选择“通过 LightMoni Agent”，六种语言均提供对应的代码高亮示例、环境变量和复制按钮。通过 Agent 默认连 `http://127.0.0.1:4318`，平台凭据由 Agent 保存；如节点开启本地令牌，SDK 使用 `LIGHTMONI_LOCAL_TOKEN`。直连平台无需部署执行节点，使用 `LIGHTMONI_ENDPOINT` 与允许目标 table 的 `LIGHTMONI_DATA_KEY`，适用于普通服务器、容器、Serverless 等部署；`LIGHTMONI_KEY` 仍作为兼容别名。六种 SDK 的 `from_env` / `fromEnv` / `NewFromEnv` 会读取所选模式的变量，也可继续使用显式构造函数。容器通过 environment / Secret 注入，平台或 Agent 地址应使用容器可访问的域名或服务地址。同一 Docker 网络访问平台可用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可用 `host.docker.internal`。SDK 经 Agent 上报时，也受节点上游凭据的 table 白名单约束。
+“SDK 接入”默认“直连平台”，也可选择“通过 LightMoni Agent”，三种当前发布语言均提供对应的代码高亮示例、环境变量和复制按钮。通过 Agent 默认连 `http://127.0.0.1:4318`，平台凭据由 Agent 保存；如节点开启本地令牌，SDK 使用 `LIGHTMONI_LOCAL_TOKEN`。直连平台无需部署执行节点，使用 `LIGHTMONI_ENDPOINT` 与允许目标 table 的 `LIGHTMONI_DATA_KEY`，适用于普通服务器、容器、Serverless 等部署；`LIGHTMONI_KEY` 仍作为兼容别名。三种当前发布 SDK 的 `from_env` / `fromEnv` 会读取所选模式的变量，也可继续使用显式构造函数。容器通过 environment / Secret 注入，平台或 Agent 地址应使用容器可访问的域名或服务地址。同一 Docker 网络访问平台可用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可用 `host.docker.internal`。SDK 经 Agent 上报时，也受节点上游凭据的 table 白名单约束。
 
 管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址，并选择默认项，例如“公网”和“内网”。SDK 直连与执行节点接入均可从列表选择，也支持临时填写其他可访问地址；所选地址会进入复制的 SDK 示例、环境变量或 LightMoni Agent 安装命令。旧的单地址配置自动兼容；未配置列表时使用部署变量 `LIGHTMONI_EXTERNAL_URL`。这些地址应转发到同一个 LightMoni 实例。LightMoni Agent 安装脚本、amd64 / arm64 包和 SHA256 校验文件由当前项目内置的 `/downloads/agent/` 提供，全部要求 `Authorization: Bearer <上报 Key>`，无密钥、错误或禁用 Key 均不能下载。SDK 通过执行节点时默认使用本机节点地址。修改地址列表不改变已运行客户端的连接配置；重新生成安装命令可更新节点地址并保留身份和磁盘队列。此配置独立于登录回调和告警链接使用的工作台地址。
 
@@ -76,9 +76,9 @@ moni.log('info', 'order created', {order_id: '123'});
 await moni.flush();
 ```
 
-服务内的数据接入页提供六种 SDK 包，支持选择语言、安装命令、业务示例和下载校验。Node / 浏览器使用 npm 包，Go、Python、PHP、Ruby、Rust 使用可本地安装或源码引用的独立包。Go 包解压后，在业务模块通过 `go mod edit -replace github.com/lightmoni/lightmoni=./lightmoni-go-sdk` 引用，再执行 `go mod tidy`；源码中的 import 路径不要求先发布远程仓库。
+服务内的数据接入页提供 JavaScript/TypeScript、Python、Ruby 三种 SDK 包，支持选择语言、安装命令、业务示例和下载校验。Node / 浏览器使用 npm 包，Python、Ruby 使用可本地安装或源码引用的独立包。Go/Rust 仅保留源码，原生工具链和完整故障矩阵后续再验收，当前不提供安装入口或发布包。
 
-所有语言的安装、API 和可靠性边界：[sdk/README.md](sdk/README.md)。Python、PHP、Ruby、Rust 使用显式 flush，由应用定时或在请求结束时调用；Go / TypeScript 保留周期 collection。可运行示例：[examples/sdk](examples/sdk)。浏览器通过业务后端转发埋点，业务后端持有仅允许目标 table 的 Key；示例提供本地转发服务器，页面无需保存 Key。
+所有语言的安装、API 和可靠性边界：[sdk/README.md](sdk/README.md)。Python、Ruby 提供显式 flush，由应用定时或在请求结束时调用；TypeScript 保留周期 collection。可运行示例：[examples/sdk](examples/sdk)。浏览器通过业务后端转发埋点，业务后端持有仅允许目标 table 的 Key；示例提供本地转发服务器，页面无需保存 Key。
 
 要在真实库中观察日志查询、服务/级别/属性聚合与指标，可运行本地业务流量程序：
 
@@ -101,7 +101,7 @@ node examples/sdk/traffic/index.mjs
 
 ## 本地开发和验收
 
-本地构建建议使用 Node 24.15.0（运行时最低 Node 22.19），并准备可访问的真实 ClickHouse。仅开发 Go 业务 SDK、运行 Go 业务示例或打包六种 SDK 时需要 Go 1.26+。Docker Compose 用于容器部署，可在有 Docker 的环境启动隔离测试数据库：
+本地构建建议使用 Node 24.15.0（运行时最低 Node 22.19），并准备可访问的真实 ClickHouse。仅开发后续支持的 Go SDK 源码或运行其历史业务示例时需要 Go 1.26+；当前发布无需 Go/Rust 工具链。Docker Compose 用于容器部署，可在有 Docker 的环境启动隔离测试数据库：
 
 ```sh
 docker compose -p lightmoni-test -f deploy/server/compose.test.yml up -d
@@ -135,7 +135,7 @@ cd web
 LIGHTMONI_DEV_API_URL=http://127.0.0.1:18880 npm run dev
 ```
 
-`scripts/demo-smoke.py` 用隔离开发实例创建测试管理员、允许 `http`/`app` 的 Key，运行 Go/Node demo，核对多服务计数、日志与 span 关联。默认地址 `127.0.0.1:18880`，默认测试用户名 `local-admin` / 密码 `local-demo-password`；只用于该测试工作流。主服务未初始化时脚本会初始化。
+历史 Go/Node 联调脚本 `scripts/demo-smoke.py` 用隔离开发实例创建测试管理员、允许 `http`/`app` 的 Key，运行 Go/Node demo，核对多服务计数、日志与 span 关联。默认地址 `127.0.0.1:18880`，默认测试用户名 `local-admin` / 密码 `local-demo-password`；只用于该测试工作流。主服务未初始化时脚本会初始化。
 
 ```sh
 npm run typecheck
@@ -150,7 +150,7 @@ cd runtime
 LIGHTMONI_DOMAINS_URL=http://127.0.0.1:18885 node --import tsx --test test/domains-live.test.ts test/agent-live.test.ts
 ```
 
-可通过 `LIGHTMONI_DOMAINS_USER` / `LIGHTMONI_DOMAINS_PASSWORD` 指定隔离测试账号。域联调覆盖真实 OTLP 入库、日志、Trace、大盘、SQL 告警和本地 Webhook；节点联调覆盖 SDK → Agent 磁盘队列 → 中心和重启补传。Go SDK 单独使用 `go test -race ./sdk/go`；多语言工具链和 Docker 齐备时可运行 `python3 scripts/test-sdks.py --docker`。`python3 scripts/demo-smoke.py` 是业务示例的补充检查。
+可通过 `LIGHTMONI_DOMAINS_USER` / `LIGHTMONI_DOMAINS_PASSWORD` 指定隔离测试账号。域联调覆盖真实 OTLP 入库、日志、Trace、大盘、SQL 告警和本地 Webhook；节点联调覆盖 SDK → Agent 磁盘队列 → 中心和重启补传。当前发布语言使用 `python3 scripts/test-sdks.py`；Docker 齐备时可用 `--docker`。Go/Rust 原生测试为后续支持任务，不计入本次发布验收。`python3 scripts/demo-smoke.py` 是保留的历史 Go/Node 业务示例检查，需要额外准备 Go 工具链。
 
 本次迁移的本机环境为 macOS，已运行真实 ClickHouse 和 Node 联调；没有 Docker，未执行 Docker 镜像构建或 Linux systemd 实机验收。具体证据及边界见 [迁移验收](specs/007-node-runtime-migration/quickstart.md) 和 [领域验证记录](specs/007-node-runtime-migration/domain-validation.md)。
 
