@@ -15,17 +15,17 @@ const context=await browser.newContext({viewport:{width:1280,height:900},acceptD
 await context.addInitScript(()=>{localStorage.setItem('lightmoni.nav.collapsed','false');if(!localStorage.getItem('lightmoni.appearance'))localStorage.setItem('lightmoni.appearance','dark');});
 const page=await context.newPage(),errors=[],checked=[];
 page.on('pageerror',error=>errors.push(error.message));
-const code=page.locator('pre[aria-label="业务接入 SDK 示例"]'),environment=page.locator('pre[aria-label="SDK 环境变量"]'),endpoint=page.getByRole('textbox',{name:'SDK 上报地址',exact:true});
+const code=page.locator('pre[aria-label="业务接入 SDK 示例"]'),environment=page.locator('pre[aria-label="SDK 环境变量"]'),endpoint=page.getByRole('combobox',{name:'SDK 上报地址',exact:true});
 const center='http://lightmoni:8080',agent='http://remote-agent:4318';
-async function mode(value){const name=value==='direct'?'直连中心':'通过执行节点';await page.getByText(name,{exact:true}).click();await expect(page.getByRole('radio',{name,exact:true})).toBeChecked();}
+async function mode(value){const name=value==='direct'?'直连平台':'通过 LightMoni Agent';await page.getByText(name,{exact:true}).click();await expect(page.getByRole('radio',{name,exact:true})).toBeChecked();}
 async function choose(language){await page.getByRole('combobox',{name:'SDK 语言'}).click();await page.locator('.ant-select-dropdown:visible').getByText(language,{exact:true}).click();}
 try{
  const login=await context.request.post(base+'/api/v1/auth/login',{data:{name:process.env.LIGHTMONI_TEST_USER??'sdk-local-admin',password:process.env.LIGHTMONI_TEST_PASSWORD??'sdk-local-test-password'}});
  expect(login.ok()).toBe(true);
  const install=await(await context.request.get(base+'/api/v1/sdk-install')).json();expect(install.packages).toHaveLength(6);
  await page.goto(base+'/data');await expect(page.getByRole('heading',{name:'SDK 接入',exact:true})).toBeVisible();
- await expect(endpoint).toHaveValue(SDK_AGENT_ENDPOINT);await expect(page.getByRole('radio',{name:'通过执行节点',exact:true})).toBeChecked();
- await endpoint.fill(agent);await mode('direct');expect(await endpoint.inputValue()).not.toBe(SDK_AGENT_ENDPOINT);
+ await expect(endpoint).toHaveValue(install.endpoint??base);await expect(page.getByRole('radio',{name:'直连平台',exact:true})).toBeChecked();
+ await mode('agent');await expect(endpoint).toHaveValue(SDK_AGENT_ENDPOINT);await endpoint.fill(agent);await mode('direct');expect(await endpoint.inputValue()).not.toBe(SDK_AGENT_ENDPOINT);
  await endpoint.fill('ftp://invalid.example');await expect(page.getByText('请输入完整的 HTTP(S) 地址，不包含用户名、密码、查询参数或片段')).toBeVisible();
  await expect(page.getByRole('button',{name:/复制环境变量/})).toBeDisabled();await expect(page.getByRole('button',{name:/复制接入样例/})).toBeDisabled();
  await endpoint.fill('http://127.0.0.1:18380');await expect(page.locator('.lm-sdk-container-note')).toHaveClass(/ant-alert-warning/);
@@ -46,7 +46,7 @@ try{
   const downloaded=page.waitForEvent('download');await download.click();expect((await downloaded).suggestedFilename()).toBe(item.file);
  }
  await choose('Python');await page.getByRole('button',{name:'管理上报 Key',exact:true}).click();await expect(page.getByRole('tab',{name:'上报 Key',exact:true})).toHaveAttribute('aria-selected','true');
- await page.getByRole('tab',{name:'SDK 接入',exact:true}).click();await expect(page.getByRole('radio',{name:'直连中心',exact:true})).toBeChecked();await expect(endpoint).toHaveValue(center);await expect(code).toHaveText(sdkSampleFor('python','direct'));
+ await page.getByRole('tab',{name:'SDK 接入',exact:true}).click();await expect(page.getByRole('radio',{name:'直连平台',exact:true})).toBeChecked();await expect(endpoint).toHaveValue(center);await expect(code).toHaveText(sdkSampleFor('python','direct'));
  await page.mouse.move(10,890);await expect(page.locator('.ant-message-notice')).toHaveCount(0,{timeout:8000});await page.screenshot({path:resolve(mediaOutput,'sdk-desktop.png'),fullPage:true,animations:'disabled'});
  const darkColor=await code.locator('.hljs-keyword').first().evaluate(node=>getComputedStyle(node).color);
  // Reload resets the form but preserves the appearance preference.

@@ -170,6 +170,7 @@ declare class State {
     updateLogSampling(policies: Record<string, LogSamplingPolicy>): void;
     setReportingDisabled(disabled: boolean): void;
     refreshConfig(): Promise<void>;
+    private configurationConnection;
     private fetchConfig;
     samplingRecord(attrs?: Attributes, level?: string, context?: TraceContext): {
         record: {

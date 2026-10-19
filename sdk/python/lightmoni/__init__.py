@@ -459,15 +459,24 @@ class Client:
     def from_env(cls, service, table, **kwargs):
         """Build a client from LIGHTMONI_* variables and optional explicit fields."""
         mode = kwargs.pop("mode", os.environ.get("LIGHTMONI_MODE", "direct"))
-        endpoint = kwargs.pop("endpoint", "") or os.environ.get("LIGHTMONI_ENDPOINT", "")
-        agent_endpoint = kwargs.pop("agent_endpoint", "") or os.environ.get("LIGHTMONI_AGENT_ENDPOINT", "")
-        local_token, local_source = _secret(kwargs.pop("local_token", ""), kwargs.pop("local_token_file", ""), "LIGHTMONI_LOCAL_TOKEN", "LIGHTMONI_LOCAL_TOKEN_FILE", "local token")
-        data_key, data_source = _secret(kwargs.pop("data_key", kwargs.pop("key", "")), kwargs.pop("data_key_file", ""), "LIGHTMONI_DATA_KEY", "LIGHTMONI_DATA_KEY_FILE", "data key")
-        legacy_key, legacy_source = _secret("", "", "LIGHTMONI_KEY", "", "legacy data key")
-        if data_key and legacy_key and data_key != legacy_key:
-            raise ValueError("credential_source_conflict: LIGHTMONI_KEY")
-        if not data_key:
-            data_key, data_source = legacy_key, ("legacy-env" if legacy_key else legacy_source)
+        if mode not in ("agent", "direct", "auto"):
+            raise ValueError("mode must be agent, direct, or auto")
+        explicit_endpoint = kwargs.pop("endpoint", "")
+        explicit_agent = kwargs.pop("agent_endpoint", "")
+        explicit_local, local_file = kwargs.pop("local_token", ""), kwargs.pop("local_token_file", "")
+        explicit_data, data_file = kwargs.pop("data_key", kwargs.pop("key", "")), kwargs.pop("data_key_file", "")
+        endpoint = "" if mode == "agent" else explicit_endpoint or os.environ.get("LIGHTMONI_ENDPOINT", "")
+        agent_endpoint = "" if mode == "direct" else explicit_agent or os.environ.get("LIGHTMONI_AGENT_ENDPOINT", "")
+        local_token = local_source = data_key = data_source = ""
+        if mode != "direct":
+            local_token, local_source = _secret(explicit_local, local_file, "LIGHTMONI_LOCAL_TOKEN", "LIGHTMONI_LOCAL_TOKEN_FILE", "local token")
+        if mode != "agent":
+            data_key, data_source = _secret(explicit_data, data_file, "LIGHTMONI_DATA_KEY", "LIGHTMONI_DATA_KEY_FILE", "data key")
+            legacy_key, legacy_source = _secret("", "", "LIGHTMONI_KEY", "", "legacy data key")
+            if data_key and legacy_key and data_key != legacy_key:
+                raise ValueError("credential_source_conflict: LIGHTMONI_KEY")
+            if not data_key:
+                data_key, data_source = legacy_key, ("legacy-env" if legacy_key else legacy_source)
         selected_endpoint, selected_key, selected_route, probe, fallback = _select_connection(mode, endpoint, data_key, agent_endpoint, local_token, kwargs.pop("discovery_timeout", .5))
         client = cls(service, table, endpoint=selected_endpoint, key=selected_key, mode=mode, **kwargs)
         client._state.stats.update(configured_mode=mode, selected_route=selected_route, agent_probe=probe, credential_source=local_source if selected_route == "agent" else data_source)
@@ -483,14 +492,14 @@ class Client:
         if type(config_interval) not in (int, float) or not math.isfinite(config_interval) or config_interval < 1:
             raise ValueError("configuration interval must be at least one second")
         policies = copy_policies({} if log_sampling is None else log_sampling)
-        config_url = _endpoint(config_endpoint if config_endpoint is not None else endpoint)
+        config_url = _endpoint(endpoint if mode == "agent" else config_endpoint if config_endpoint is not None else endpoint)
         self.table, self._state = _table(table), _State(service, endpoint, key, limits, resource, instance_id)
         self._state.stats.update(configured_mode=mode, selected_route="agent" if mode == "agent" else "direct", agent_probe="configured", credential_source="explicit")
         self._state.local_sampling = policies
         self._state.local_disabled = disabled
         self._state.set_disabled(disabled)
         self._state.remote_config, self._state.config_endpoint = remote_config, config_url
-        self._state.config_key, self._state.config_interval = config_key, config_interval
+        self._state.config_key, self._state.config_interval = (None if mode == "agent" else config_key), config_interval
         self._state.self_enabled, self._state.self_table = bool(self_telemetry), self.table
         if self_telemetry:
             reference, stop, table = weakref.ref(self._state), self._state.stop, self.table

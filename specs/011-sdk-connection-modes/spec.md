@@ -7,7 +7,7 @@
 
 ## User intent and scope
 
-业务服务应能用同一套 SDK 记录自定义 Counter、Gauge、Histogram、日志、Span/Trace、属性和逻辑 table。部署了本机 Agent 的服务默认把数据交给 Agent，由 Agent 负责持久队列、主机身份和断网补传；无法安装 Agent 的服务仍可用受 table 限制的 data key 直连中心。SDK 只使用已经发放的凭据，不负责管理员操作、任意远程发现或签发密钥。
+业务服务应能用同一套 SDK 记录自定义 Counter、Gauge、Histogram、日志、Span/Trace、属性和逻辑 table。2026-10-19 用户确认保留 direct 与 agent 两种独立选择：SDK 和接入页默认 direct，使用受 table 限制的 data key 直连平台；需要 Agent 持久队列、节点身份和断网补传时明确选择 agent，已安装 Agent 也不强制改变业务路由。选择和凭据隔离的增量需求见 [012](../012-sdk-reporting-choice/spec.md)。SDK 只使用已经发放的凭据，不负责管理员操作、任意远程发现或签发密钥。
 
 本规格冻结三种连接模式、凭据来源、环境注入、发现和失败回退边界，以及原生 SDK 的支持矩阵。Agent 的 enrollment、control/data credential 签发与节点生命周期由 [010-agent-deployment](../010-agent-deployment/spec.md) 负责；本规格只定义 SDK 如何使用它们，不重复定义节点注册流程。
 

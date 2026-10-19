@@ -53,7 +53,7 @@ docker compose up -d --no-build --wait
 
 软件统一称 **LightMoni Agent**，部署在主机或容器中的运行实例称 **执行节点**；节点内部执行指标和日志采集的模块称采集器。导航入口为“节点助手”，网页对话能力仍称“AI 助手”。当前节点执行监控任务，不提供模型调用或通用命令执行能力。
 
-LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器或容器编排管理生命周期。业务通过 SDK 向执行节点上报，同一节点可接收多个业务的数据；业务启动、停止或重启不触发 Agent 启停。业务退出时完成 SDK flush/shutdown，Agent 继续采集和补传。CLI 支持 `run --config` 前台运行并响应 SIGTERM；当前网页安装命令覆盖 Linux systemd 服务。每个 Agent 实例使用独立、可持久化的数据目录，以保留身份与待补传队列。
+LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器或容器编排管理生命周期。业务 SDK 可直接上报平台（direct），也可明确选择经 Agent 上报（agent）；接入页默认 direct，安装 Agent 不是 SDK 直连的前置条件。同一节点可接收多个业务的数据，也可独立承担主机采集、拨测和目录日志，业务路由与这些节点任务互不绑定。业务启动、停止或重启不触发 Agent 启停。业务退出时完成 SDK flush/shutdown，Agent 继续采集和补传。CLI 支持 `run --config` 前台运行并响应 SIGTERM；当前网页安装命令覆盖 Linux systemd 服务。每个 Agent 实例使用独立、可持久化的数据目录，以保留身份与待补传队列。两条上报路径的配置与边界见 [SDK 接入](sdk/README.md#选择上报方式) 和 [SDD 012](specs/012-sdk-reporting-choice/spec.md)。
 
 “数据接入”提供独立的“SDK 接入”和“执行节点接入”Tab。接入时选择初始任务标签、上报地址并填写 Key，复制生成的安装命令到 Linux 服务器执行。安装程序保存连接配置，无需编辑 JSON；所填 Key 用于安装脚本、LightMoni Agent 包及校验文件的下载鉴权和后续上报。新 Key 默认填入当前标签匹配的启用任务所需表，业务 SDK 使用的 table 需另行授权；标签没有启用任务时需手动填写业务 table，不自动扩大权限。安装包支持 Linux amd64 / arm64，自带固定 Node 24.15.0，要求 glibc ≥ 2.28，无需目标主机另装 Node/npm；验证 SHA256 后安装独立 systemd 服务，升级、重装保留身份和磁盘队列。
 
@@ -63,16 +63,13 @@ LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器�
 
 目录日志填写绝对目录、文件匹配规则（默认 `*.log*`）、是否包含子目录和首次从头读取。默认只采集现有文件后续新增的行，之后新建文件完整采集；读取进度与队列批次一起提交，支持重启续读、重命名轮转和截断检测。要求服务用户可读目录，采集 UTF-8 文本行，跳过压缩文件和符号链接；单行超过 64 KiB 分片，未结束的短行等待换行。事件时间使用采集时间，保留文件路径和字节位置。每个执行节点最多同时打开 256 个日志文件，每个目录单次扫描最多 10,000 个条目，超限会显示采集错误。源文件在采集前已删除或覆盖的内容无法恢复。
 
-“SDK 接入”可选择“通过执行节点”或“直连中心”，六种语言均提供对应的代码高亮示例、环境变量和复制按钮。通过执行节点默认连 `http://127.0.0.1:4318`，中心凭据由执行节点保存；如节点开启本地令牌，SDK 使用 `LIGHTMONI_LOCAL_TOKEN`。直连中心无需部署执行节点，使用 `LIGHTMONI_ENDPOINT` 与允许目标 table 的 `LIGHTMONI_DATA_KEY`，适用于容器、Serverless 等部署；`LIGHTMONI_KEY` 仍作为兼容别名。六种 SDK 的 `from_env` / `fromEnv` / `NewFromEnv` 会读取这组变量，也可继续使用显式构造函数。容器通过 environment / Secret 注入，中心地址应使用容器可访问的域名或服务地址。同一 Docker 网络可用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可用 `host.docker.internal`。SDK 通过执行节点上报时，也受节点 Key 的 table 白名单约束。
+“SDK 接入”默认“直连平台”，也可选择“通过 LightMoni Agent”，六种语言均提供对应的代码高亮示例、环境变量和复制按钮。通过 Agent 默认连 `http://127.0.0.1:4318`，平台凭据由 Agent 保存；如节点开启本地令牌，SDK 使用 `LIGHTMONI_LOCAL_TOKEN`。直连平台无需部署执行节点，使用 `LIGHTMONI_ENDPOINT` 与允许目标 table 的 `LIGHTMONI_DATA_KEY`，适用于普通服务器、容器、Serverless 等部署；`LIGHTMONI_KEY` 仍作为兼容别名。六种 SDK 的 `from_env` / `fromEnv` / `NewFromEnv` 会读取所选模式的变量，也可继续使用显式构造函数。容器通过 environment / Secret 注入，平台或 Agent 地址应使用容器可访问的域名或服务地址。同一 Docker 网络访问平台可用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可用 `host.docker.internal`。SDK 经 Agent 上报时，也受节点上游凭据的 table 白名单约束。
 
 管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址，并选择默认项，例如“公网”和“内网”。SDK 直连与执行节点接入均可从列表选择，也支持临时填写其他可访问地址；所选地址会进入复制的 SDK 示例、环境变量或 LightMoni Agent 安装命令。旧的单地址配置自动兼容；未配置列表时使用部署变量 `LIGHTMONI_EXTERNAL_URL`。这些地址应转发到同一个 LightMoni 实例。LightMoni Agent 安装脚本、amd64 / arm64 包和 SHA256 校验文件由当前项目内置的 `/downloads/agent/` 提供，全部要求 `Authorization: Bearer <上报 Key>`，无密钥、错误或禁用 Key 均不能下载。SDK 通过执行节点时默认使用本机节点地址。修改地址列表不改变已运行客户端的连接配置；重新生成安装命令可更新节点地址并保留身份和磁盘队列。此配置独立于登录回调和告警链接使用的工作台地址。
 
 ```ts
-const moni = createLightMoni({
-  service: 'order-api', table: 'business',
-  endpoint: process.env.LIGHTMONI_ENDPOINT ?? 'http://127.0.0.1:4318',
-  key: process.env.LIGHTMONI_DATA_KEY
-});
+// 按接入页配置 LIGHTMONI_MODE 及所选路径的地址、凭据。
+const moni = createLightMoniFromEnv({service: 'order-api', table: 'business'});
 const orders = moni.counter('orders_created');
 orders.add(1, {region: 'cn', payment: 'wechat'});
 moni.log('info', 'order created', {order_id: '123'});

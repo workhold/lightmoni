@@ -126,7 +126,10 @@ class State {
       if (!/^https?:$/.test(endpoint.protocol)) throw new Error("endpoint must use HTTP or HTTPS");
     }
     if (mode === "auto" && !options.exporter && !options.agentEndpoint && (!options.endpoint || !options.key)) throw new Error("auto_route_unavailable: configure an Agent or direct credentials");
-    if (mode === "agent" && !options.exporter && !options.localToken && options.agentEndpoint && !options.agentEndpoint.startsWith("http://127.0.0.1")) throw new Error("agent mode requires local token for non-loopback endpoint");
+    if (mode === "agent" && !options.exporter && !options.localToken) {
+      const host = new URL(routeEndpoint!).hostname.toLowerCase();
+      if (host !== "localhost" && host !== "[::1]" && !/^127(?:\.\d{1,3}){3}$/.test(host)) throw new Error("agent mode requires local token for non-loopback endpoint");
+    }
     this.stats.configuredMode = mode; this.stats.selectedRoute = selectedRoute; this.stats.agentProbe = mode === "auto" ? "pending" : "not_probed"; this.stats.credentialSource = "explicit";
     this.exporter = options.exporter ?? (mode === "auto" ? new AutoExporter(options.agentEndpoint ?? "http://127.0.0.1:4318", options.localToken, options.endpoint, options.key, this.stats) : new HTTPExporter(routeEndpoint!, () => selectedRoute === "agent" ? this.options.localToken : this.options.key));
     this.interval = setInterval(() => { if (!this.closing) { this.collect(); this.kick(); } }, this.settings.intervalMs);
@@ -134,7 +137,7 @@ class State {
     const timer = this.interval as unknown as { unref?: () => void }; timer.unref?.();
     this.selfInterval = setInterval(() => { if (!this.closing) { this.collectSelf(); this.kick(); } }, 30_000);
     (this.selfInterval as unknown as { unref?: () => void }).unref?.();
-    if(options.remoteConfig!==false&&(options.configEndpoint||options.endpoint)) {
+    if(options.remoteConfig!==false&&this.configurationConnection().endpoint) {
       this.configInterval=setInterval(()=>{if(!this.closing)void this.refreshConfig().catch(error=>{this.stats.configError=error instanceof Error?error.message:String(error);});},options.configIntervalMs??30_000);
       (this.configInterval as unknown as {unref?:()=>void}).unref?.();
     }
@@ -152,11 +155,15 @@ class State {
     if(this.configLoading)return this.configLoading;
     this.configLoading=this.fetchConfig().finally(()=>{this.configLoading=undefined;});return this.configLoading;
   }
+  private configurationConnection(): { endpoint?: string; key?: string } {
+    if (this.options.mode === "agent" && !this.options.exporter) return { endpoint: this.options.agentEndpoint ?? "http://127.0.0.1:4318", key: this.options.localToken };
+    return { endpoint: this.options.configEndpoint ?? this.options.endpoint, key: this.options.key };
+  }
   private async fetchConfig():Promise<void> {
-    const endpoint=this.options.configEndpoint??this.options.endpoint;if(!endpoint||this.closing)throw new Error('remote configuration is disabled or SDK closed');
+    const { endpoint, key }=this.configurationConnection();if(!endpoint||this.closing)throw new Error('remote configuration is disabled or SDK closed');
     const request=new AbortController();this.configRequest=request;const timer=setTimeout(()=>request.abort(),5000);
     try{
-      const response=await fetch(endpoint.replace(/\/$/,'')+'/v1/sdk-config',{headers:this.options.key?{Authorization:`Bearer ${this.options.key}`}:{},signal:request.signal,redirect:'error'});
+      const response=await fetch(endpoint.replace(/\/$/,'')+'/v1/sdk-config',{headers:key?{Authorization:`Bearer ${key}`}:{},signal:request.signal,redirect:'error'});
       if(response.status!==200){void response.body?.cancel();throw new Error(`SDK configuration HTTP ${response.status}`);}
       if(!response.body)throw new Error('missing SDK configuration');const reader=response.body.getReader(),parts:Uint8Array[]=[];let length=0;
       while(true){const chunk=await reader.read();if(chunk.done)break;length+=chunk.value.length;if(length>1024*1024){await reader.cancel();throw new Error('SDK configuration exceeds 1 MiB');}parts.push(chunk.value);}

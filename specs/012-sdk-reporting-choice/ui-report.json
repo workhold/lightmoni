@@ -1,0 +1,140 @@
+{
+  "production_bundle": true,
+  "api_fixtures": true,
+  "live_backend": false,
+  "default_direct": true,
+  "mode_endpoints_preserved": true,
+  "language_retains_mode": true,
+  "clipboard_matches": true,
+  "container_notes_both_modes": true,
+  "key_tab_retains_setup": true,
+  "invalid_endpoint_blocks_copy": true,
+  "widths": [
+    1280,
+    390
+  ],
+  "checked": [
+    {
+      "width": 1280,
+      "language": "typescript",
+      "mode": "direct"
+    },
+    {
+      "width": 1280,
+      "language": "go",
+      "mode": "direct"
+    },
+    {
+      "width": 1280,
+      "language": "python",
+      "mode": "direct"
+    },
+    {
+      "width": 1280,
+      "language": "php",
+      "mode": "direct"
+    },
+    {
+      "width": 1280,
+      "language": "ruby",
+      "mode": "direct"
+    },
+    {
+      "width": 1280,
+      "language": "rust",
+      "mode": "direct"
+    },
+    {
+      "width": 1280,
+      "language": "typescript",
+      "mode": "agent"
+    },
+    {
+      "width": 1280,
+      "language": "go",
+      "mode": "agent"
+    },
+    {
+      "width": 1280,
+      "language": "python",
+      "mode": "agent"
+    },
+    {
+      "width": 1280,
+      "language": "php",
+      "mode": "agent"
+    },
+    {
+      "width": 1280,
+      "language": "ruby",
+      "mode": "agent"
+    },
+    {
+      "width": 1280,
+      "language": "rust",
+      "mode": "agent"
+    },
+    {
+      "width": 390,
+      "language": "typescript",
+      "mode": "direct"
+    },
+    {
+      "width": 390,
+      "language": "go",
+      "mode": "direct"
+    },
+    {
+      "width": 390,
+      "language": "python",
+      "mode": "direct"
+    },
+    {
+      "width": 390,
+      "language": "php",
+      "mode": "direct"
+    },
+    {
+      "width": 390,
+      "language": "ruby",
+      "mode": "direct"
+    },
+    {
+      "width": 390,
+      "language": "rust",
+      "mode": "direct"
+    },
+    {
+      "width": 390,
+      "language": "typescript",
+      "mode": "agent"
+    },
+    {
+      "width": 390,
+      "language": "go",
+      "mode": "agent"
+    },
+    {
+      "width": 390,
+      "language": "python",
+      "mode": "agent"
+    },
+    {
+      "width": 390,
+      "language": "php",
+      "mode": "agent"
+    },
+    {
+      "width": 390,
+      "language": "ruby",
+      "mode": "agent"
+    },
+    {
+      "width": 390,
+      "language": "rust",
+      "mode": "agent"
+    }
+  ],
+  "errors": [],
+  "unexpected": []
+}

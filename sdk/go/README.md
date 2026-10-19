@@ -1,11 +1,10 @@
 # Go SDK
 
-根 module 中的包为 `github.com/lightmoni/lightmoni/sdk/go`，package 名 `moni`。不使用磁盘；本机 Agent 是默认的持久化边界。
+根 module 中的包为 `github.com/lightmoni/lightmoni/sdk/go`，package 名 `moni`。SDK 使用进程内缓冲；需要独立磁盘队列时可明确选择 LightMoni Agent。
 
 ```go
-client, err := moni.New(moni.Config{
-    Service: "payment-api", Table: "http", Endpoint: "http://127.0.0.1:4318",
-})
+// 按接入页配置所选路径的环境变量；缺省 direct。
+client, err := moni.NewFromEnv("payment-api", "http", moni.Config{})
 if err != nil { return err }
 requests, err := client.Counter("http.requests", moni.MetricOptions{Unit: "{request}"})
 if err != nil { return err }
@@ -20,9 +19,11 @@ return client.Shutdown(shutdownCtx) // shutdownCtx 必须有 deadline。
 
 Agent 内嵌采集时设置 `Config.Exporter`：实现 `Deliver(ctx, FrozenBatch) error`，在磁盘队列提交完成后返回 nil；必须响应 context 取消。`FrozenBatch.Clone()` 复制不可变正文。普通 error 会重试，`DeliveryError{Retryable:false,Err:...}` 是永久拒绝。HTTP 模式传送标准 OTLP Protobuf。
 
-直连中心同时设置 `Config.Endpoint` 和 `Config.Key`，无需 Agent；每份 Key 可配置允许写入的逻辑 table 白名单，或显式允许所有 table，不绑定 service。一份 Key 可发任意 service，但指定 table 模式下只能上报到白名单中的 table（本例需允许 `http`、`app`）。SDK→Agent 不必配置中心 Key；Agent 开启本地令牌时，`Config.Key` 传该令牌。`UpdateKey` 更新直连 HTTP exporter 的 Key 并唤醒重试，保留已有批次。401/403 会保留队列并退避，等待修复。
+直连平台设置 `Mode: moni.ModeDirect`、`Config.Endpoint` 和 `Config.Key`，无需 Agent；每份 Key 可配置允许写入的逻辑 table 白名单，或显式允许所有 table，不绑定 service。一份 Key 可发任意 service，但指定 table 模式下只能上报到白名单中的 table（本例需允许 `http`、`app`）。显式 Agent 模式使用 `Mode: moni.ModeAgent`、`AgentEndpoint` 和可选 `LocalToken`，无需平台 Key；旧的无 mode `Endpoint/Key` 构造仍兼容。`UpdateKey` 更新直连 HTTP exporter 的 Key 并唤醒重试，保留已有批次。401/403 会保留队列并退避，等待修复。
 
 容器、Serverless 或没有 Agent 的服务可将中心地址和 data key 通过 environment / Secret 注入，并调用 `moni.NewFromEnv("order-api", "business", moni.Config{})`。直连使用 `LIGHTMONI_MODE=direct`、`LIGHTMONI_ENDPOINT` 和 `LIGHTMONI_DATA_KEY`；通过节点使用 `LIGHTMONI_MODE=agent`、`LIGHTMONI_AGENT_ENDPOINT` 和可选的 `LIGHTMONI_LOCAL_TOKEN`；`LIGHTMONI_KEY` 仅是兼容别名。容器的 `localhost` 指向容器本身；同一 Docker 网络可使用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可使用 `http://host.docker.internal:端口`。直连缓冲只在进程内，需要本地磁盘缓存时使用 Agent。
+
+显式 direct 只读取 data key，显式 agent 只读取 local token；对应 `_FILE` 注入和所选来源冲突校验继续有效。失败只在原路径重试。标准 HTTP agent 的 `RefreshConfig` 也走 Agent/local token；自定义 exporter 的独立规则配置、direct/auto 保持兼容。环境块切换与 ACK 边界见 [选择上报方式](../README.md#选择上报方式)。
 
 默认每 10 秒 collection；QueueBytes/BufferBytes 各 8 MiB、QueueBatches 256、单批 1 MiB、每 instrument 2000 维度、256 instruments。维度超限归入 `otel.metric.overflow=true`；队列/缓冲满明确丢弃新数据并更新 Stats。属性只支持 string/bool/int/int32/int64/float32/float64，保留类型。记录 API 不等待网络，非法输入在 Stats 中可见。
 

@@ -1,15 +1,15 @@
 # LightMoni SDK
 
-所有原生 SDK 支持指标、日志和链路，可通过执行节点（LightMoni Agent）上报，也可带 data key 直连中心，容器和未部署执行节点的服务同样可以接入。配置业务 service、逻辑 table；凭据必须允许该 table。六种 SDK 都提供从环境变量构造客户端的入口（Go `NewFromEnv`、TypeScript `createLightMoniFromEnv`、Python `Client.from_env`、PHP `Client::fromEnv`、Ruby `Client.from_env`、Rust `Client::from_env`）。`LIGHTMONI_KEY` 仅作为旧配置兼容别名。
+所有原生 SDK 支持指标、日志和链路，支持直连 LightMoni 平台和通过 LightMoni Agent 两种独立的上报路径。直连不需要安装或启动 Agent，普通服务器、容器和 Serverless 均可使用。配置业务 service、逻辑 table；凭据必须允许该 table。六种 SDK 都提供从环境变量构造客户端的入口（Go `NewFromEnv`、TypeScript `createLightMoniFromEnv`、Python `Client.from_env`、PHP `Client::fromEnv`、Ruby `LightMoni.from_env`、Rust `Client::from_env`）。`LIGHTMONI_KEY` 仅作为旧配置兼容别名。
 
 ## 选择上报方式
 
-“数据接入 → SDK 接入”可切换“通过执行节点”和“直连中心”，生成所选语言的代码与环境变量。统一环境变量为 `LIGHTMONI_MODE=agent|direct|auto`、`LIGHTMONI_AGENT_ENDPOINT`、`LIGHTMONI_LOCAL_TOKEN`、`LIGHTMONI_ENDPOINT` 和 `LIGHTMONI_DATA_KEY`；各语言的 `from_env` 入口会读取这些变量，显式构造函数仍可用于 Secret Manager 等集成。
+“数据接入 → SDK 接入”默认展示“直连平台”，也可选择“通过 LightMoni Agent”，生成所选语言的代码与环境变量。两个选项各自保留输入地址，切换语言不改变路径。统一环境变量为 `LIGHTMONI_MODE=agent|direct|auto`、`LIGHTMONI_AGENT_ENDPOINT`、`LIGHTMONI_LOCAL_TOKEN`、`LIGHTMONI_ENDPOINT` 和 `LIGHTMONI_DATA_KEY`；两类秘密均支持对应的 `_FILE` 文件注入。显式 direct 只读取 data key，显式 agent 只读取 local token，未选路径的残留秘密不影响初始化；所选来源冲突仍会报错。auto 为已有兼容配置，本轮不改变其行为。
 
 | 方式 | endpoint | key | 缓存 |
 | --- | --- | --- | --- |
-| 通过执行节点 | 节点接收地址，默认 `http://127.0.0.1:4318` | 通常留空；执行节点开启本地令牌时传该令牌 | SDK 进程内缓冲，执行节点持久化磁盘队列 |
-| 直连中心 | 业务进程可访问的中心基础地址 | 中心上报 Key，允许目标逻辑 table | SDK 进程内缓冲与重试 |
+| 直连平台（direct） | 业务进程可访问的平台基础地址 | 平台 data key，允许目标逻辑 table | SDK 进程内缓冲与重试 |
+| 通过 LightMoni Agent（agent） | Agent 接收地址，默认 `http://127.0.0.1:4318` | Agent 开启本地鉴权时使用 local token | SDK 进程内缓冲，Agent 持久化磁盘队列 |
 
 直连示例的环境配置：
 
@@ -19,9 +19,22 @@ export LIGHTMONI_ENDPOINT='https://monitor.example.com'
 export LIGHTMONI_DATA_KEY='替换为允许 business 表的 data key'
 ~~~
 
-容器中通过 environment / Secret 配置这两个变量。容器的 `localhost` 指向容器本身；与中心位于同一个 Docker 网络时，可用 Compose 服务地址 `http://lightmoni:8080`；Docker Desktop 访问宿主机上的中心可用 `http://host.docker.internal:端口`。实际填写中心可达的域名或服务地址，SDK 自动追加 `/v1/metrics`、`/v1/logs`、`/v1/traces`，无需执行节点中转。
+容器中通过 environment / Secret 配置上述变量。容器的 `localhost` 指向容器本身；与平台位于同一个 Docker 网络时，可用 Compose 服务地址 `http://lightmoni:8080`；Docker Desktop 访问宿主机上的平台可用 `http://host.docker.internal:端口`。实际填写平台可达的域名或服务地址，SDK 自动追加 `/v1/metrics`、`/v1/logs`、`/v1/traces`，无需 Agent 中转。
 
-通过执行节点时，中心 Key 保存在 LightMoni Agent，且必须允许业务 SDK 的 table。不同服务可共享同一个执行节点；使用 `withTable` / `with_table` 切换表时，中心 Key 也需授权对应 table。SDK 缓冲不写磁盘；需要本地磁盘缓存时选择通过执行节点上报。
+通过 Agent 的环境配置：
+
+~~~sh
+export LIGHTMONI_MODE=agent
+export LIGHTMONI_AGENT_ENDPOINT='http://127.0.0.1:4318'
+# 仅在 Agent 已启用本地鉴权时设置；也可使用 LIGHTMONI_LOCAL_TOKEN_FILE。
+# export LIGHTMONI_LOCAL_TOKEN='替换为 Agent 的 local token'
+~~~
+
+两种显式模式失败时都在原路径重试，不会因对方可用就自动改投。复制接入页生成的环境块会清理旧模式及遗留的 `_FILE` / legacy 变量；实际凭据应通过部署环境或 Secret 注入。容器连接宿主 Agent 同样需要可达的地址，`127.0.0.1` 仅适用于同网络命名空间。
+
+通过 Agent 时，平台凭据保存在 LightMoni Agent，且必须允许业务 SDK 的 table；业务无需持有节点的 enrollment、control 或 data credential。不同服务可共享同一个节点；使用 `withTable` / `with_table` 切换表时，上游凭据也需授权对应 table。SDK 缓冲不写磁盘；需要本地磁盘缓冲时选择通过 Agent 上报。Agent ACK 表示本地持久队列已接受，平台入库发生在后续转发成功后；队列有容量与最大重放期限，不承诺零丢失，也没有跨 SDK 合批或压缩。
+
+Agent 独立提供主机采集、目录日志和拨测，业务 SDK 可以同时采用 direct。节点助手是否在线、将来是否提供 AI 诊断工具，不决定 SDK 的路由。两路径的规格、契约与验证记录见 [SDD 012](../specs/012-sdk-reporting-choice/spec.md)。
 
 | 语言 | 运行环境 | 安装与示例 |
 | --- | --- | --- |

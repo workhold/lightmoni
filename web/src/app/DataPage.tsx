@@ -37,7 +37,7 @@ export default function DataPage({user}:{user:User}) {
   const [tab,setTab] = useState(params.get('tab')??'sdk');
   const [sdk,setSDK] = useState<SDKInstall>();
   const [sdkLanguage,setSDKLanguage] = useState('typescript');
-  const [sdkMode,setSDKMode]=useState<SDKConnectionMode>('agent'),[agentEndpoint,setAgentEndpoint]=useState(SDK_AGENT_ENDPOINT),[centerEndpoint,setCenterEndpoint]=useState<string>();
+  const [sdkMode,setSDKMode]=useState<SDKConnectionMode>('direct'),[agentEndpoint,setAgentEndpoint]=useState(SDK_AGENT_ENDPOINT),[centerEndpoint,setCenterEndpoint]=useState<string>();
   const navigate = useNavigate();
   const load = async () => {
     setError('');
@@ -58,7 +58,7 @@ export default function DataPage({user}:{user:User}) {
   const sdkExample = sdkExamples[sdkLanguage] ?? sdkExamples.typescript;
   const isNew = keyEditor === 'new';
   return <div className="lm-page">
-    <div className="lm-page-heading"><div><h1>数据接入</h1><p>选择 SDK 或接入执行节点，使用 Key 限定允许写入的 table。</p></div><Button icon={<ReloadOutlined/>} onClick={() => void load()}>刷新接入状态</Button></div>
+    <div className="lm-page-heading"><div><h1>数据接入</h1><p>业务 SDK 可直连平台或通过 LightMoni Agent 上报；节点助手独立负责主机采集、目录日志和拨测。</p></div><Button icon={<ReloadOutlined/>} onClick={() => void load()}>刷新接入状态</Button></div>
 
     <Tabs activeKey={tab} onChange={setTab} destroyOnHidden items={[
       {key:'sdk',label:'SDK 接入',children:<div className="lm-surface">

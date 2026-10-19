@@ -22,8 +22,8 @@ async function request(path,options){
 }
 const publicAddress='https://monitor.example.com/lightmoni',internalAddress='http://10.0.0.8:8080/lightmoni';
 const settingsInput=page.getByRole('textbox',{name:'默认上报地址',exact:true});
-const sdkInput=page.getByRole('textbox',{name:'SDK 上报地址',exact:true});
-const agentInput=page.getByRole('textbox',{name:'Agent 上报地址',exact:true});
+const sdkInput=page.getByRole('combobox',{name:'SDK 上报地址',exact:true});
+const agentInput=page.getByRole('combobox',{name:'节点上报地址',exact:true});
 const save=()=>page.getByRole('button',{name:'保存默认地址',exact:true}).click();
 async function noOverflow(){expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);}
 try{
@@ -51,17 +51,17 @@ try{
  await settingsInput.fill(publicAddress);await save();await expect(settingsInput).toHaveValue(publicAddress);
  await expect.poll(async()=>(await request('/settings/reporting')).effective_endpoint).toBe(publicAddress);
 
- await page.goto(base+'/data');await expect(sdkInput).toHaveValue('http://127.0.0.1:4318');
- await page.getByText('直连中心',{exact:true}).click();await expect(sdkInput).toHaveValue(publicAddress);
+ await page.goto(base+'/data');await expect(sdkInput).toHaveValue(publicAddress);
+ await expect(page.getByRole('radio',{name:'直连平台',exact:true})).toBeChecked();
  await expect(page.getByRole('link',{name:'下载 SDK 与示例',exact:true})).toHaveAttribute('href',publicAddress+'/downloads/sdk/lightmoni-sdk-0.1.0.tgz');
  await sdkInput.fill(internalAddress);
  await expect(page.locator('pre[aria-label="SDK 环境变量"]')).toContainText("export LIGHTMONI_ENDPOINT='"+internalAddress+"'");
- await page.getByText('通过 Agent',{exact:true}).click();await expect(sdkInput).toHaveValue('http://127.0.0.1:4318');
- await page.getByText('直连中心',{exact:true}).click();await expect(sdkInput).toHaveValue(internalAddress);
+ await page.getByText('通过 LightMoni Agent',{exact:true}).click();await expect(sdkInput).toHaveValue('http://127.0.0.1:4318');
+ await page.getByText('直连平台',{exact:true}).click();await expect(sdkInput).toHaveValue(internalAddress);
  await page.getByRole('button',{name:'恢复默认地址',exact:true}).click();await expect(sdkInput).toHaveValue(publicAddress);
  await sdkInput.fill(internalAddress);await page.screenshot({path:resolve(mediaOutput,'sdk-override-desktop.png'),fullPage:true});
 
- await page.getByRole('tab',{name:'Agent 接入',exact:true}).click();await expect(agentInput).toHaveValue(publicAddress);
+ await page.getByRole('tab',{name:'执行节点接入',exact:true}).click();await expect(agentInput).toHaveValue(publicAddress);
  await agentInput.fill(internalAddress+'///');
  const command=page.locator('pre[aria-label="Agent 安装命令"]');
  await expect(command).toContainText(internalAddress+'/downloads/agent/install.sh');
@@ -93,8 +93,8 @@ try{
  await settingsInput.fill('');await save();
  await expect.poll(async()=>(await request('/settings/reporting')).effective_endpoint).toBe(deployed);
  for(const path of ['/sdk-install','/agent-install'])expect((await request(path)).endpoint).toBe(deployed);
- await page.goto(base+'/data');await expect(sdkInput).toHaveValue('http://127.0.0.1:4318');
- await page.getByText('直连中心',{exact:true}).click();await expect(sdkInput).toHaveValue(deployed);await noOverflow();
+ await page.goto(base+'/data');await expect(sdkInput).toHaveValue(deployed);
+ await expect(page.getByRole('radio',{name:'直连平台',exact:true})).toBeChecked();await noOverflow();
  expect(errors).toEqual([]);
  await writeFile(resolve(output,'report.json'),JSON.stringify({saved_and_reloaded:true,save_failure_preserves_input:true,network_overrides:true,agent_downloads_follow_override:true,restore_default:true,member_permissions:true,widths:[1280,390],errors},null,2)+'\n');
  console.log('PASS persistent reporting defaults, SDK/Agent A/B overrides, installer downloads, reset, failed save, member permissions and mobile layout');

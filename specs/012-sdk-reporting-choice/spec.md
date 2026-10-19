@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-19  
 **Branch**: `feat/sdk-reporting-modes`  
-**Status**: Specified; implementation pending
+**Status**: Implemented; checks completed with native-toolchain limits recorded in [validation.md](validation.md)
 
 ## 用户需求
 
@@ -22,6 +22,7 @@
 
 - 页面保留“通过 LightMoni Agent”，配置可达的 Agent 基础地址；启用本地鉴权时注入 local token。
 - 业务 SDK 不需要平台地址、data key、enrollment token、control credential 或 Agent data credential。
+- 同机无鉴权 Agent 支持 localhost、IPv4 loopback 与 IPv6 loopback 地址；判断使用解析后的主机名，不把相似的远程域名误判为本机。
 - 未选中心的 secret 文件或 data key 冲突不影响 agent 初始化；Agent 不可达/拒绝时明确失败，不自动改投平台。
 - Agent 入队后返回的成功代表本地接收，不等同于平台已经入库；持久队列有容量与重放期限。
 

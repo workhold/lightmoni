@@ -12,6 +12,8 @@
 
 所有模式保持 OTLP HTTP `/v1/metrics`、`/v1/logs`、`/v1/traces`、table 和批次头兼容。上表是显式 mode 的契约；auto 仍由 011 定义。
 
+标准 HTTP Agent 构造的 SDK 规则获取也通过该 Agent，用 local token 认证；旧的单独 config endpoint/key 不应让显式 agent 绕回平台。自定义 exporter 没有内置 HTTP 上报路由，其显式规则配置保持兼容。direct 和 auto 的独立规则地址沿用原契约，本轮不扩展规则能力到原本未实现的语言。
+
 ## 环境示例的切换行为
 
 生成 direct 环境块：清理 `LIGHTMONI_AGENT_ENDPOINT`、`LIGHTMONI_LOCAL_TOKEN`、`LIGHTMONI_LOCAL_TOKEN_FILE`、`LIGHTMONI_DATA_KEY_FILE`、`LIGHTMONI_KEY`，再提供 endpoint 与 data key 占位值。

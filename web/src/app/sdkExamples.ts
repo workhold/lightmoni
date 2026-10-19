@@ -2,7 +2,7 @@ import type {ReportingAddress} from './reporting-addresses';
 export type SDKConnectionMode='agent'|'direct';
 export const SDK_AGENT_ENDPOINT='http://127.0.0.1:4318';
 
-export function sdkSampleFor(language:string,mode:SDKConnectionMode='agent',endpoint?:string):string {
+export function sdkSampleFor(language:string,mode:SDKConnectionMode='direct',endpoint?:string):string {
   const examples:Record<string,string>={
     typescript:`import {createLightMoniFromEnv} from '@lightmoni/sdk';
 
@@ -81,7 +81,12 @@ export function sdkEndpointIsLoopback(endpoint:string):boolean {
 export function sdkEnvironment(mode:SDKConnectionMode,endpoint:string):string {
   const quote=(value:string)=>"'"+value.replaceAll("'", "'\\''")+"'";
   const base=endpoint.trim().replace(/\/+$/,'');
-  return `export LIGHTMONI_MODE=${mode}\n`+(mode==='direct'?`export LIGHTMONI_ENDPOINT=${quote(base)}\nexport LIGHTMONI_DATA_KEY='替换为允许 business 表的上报 Key'\nunset LIGHTMONI_AGENT_ENDPOINT LIGHTMONI_LOCAL_TOKEN`:`export LIGHTMONI_AGENT_ENDPOINT=${quote(base || SDK_AGENT_ENDPOINT)}\nunset LIGHTMONI_ENDPOINT LIGHTMONI_DATA_KEY\nexport LIGHTMONI_LOCAL_TOKEN='执行节点本地访问令牌（如已启用）'`);
+  const reset=mode==='direct'
+    ?'unset LIGHTMONI_AGENT_ENDPOINT LIGHTMONI_LOCAL_TOKEN LIGHTMONI_LOCAL_TOKEN_FILE LIGHTMONI_DATA_KEY_FILE LIGHTMONI_KEY'
+    :'unset LIGHTMONI_ENDPOINT LIGHTMONI_DATA_KEY LIGHTMONI_DATA_KEY_FILE LIGHTMONI_KEY LIGHTMONI_LOCAL_TOKEN LIGHTMONI_LOCAL_TOKEN_FILE';
+  return `${reset}\nexport LIGHTMONI_MODE=${mode}\n`+(mode==='direct'
+    ?`export LIGHTMONI_ENDPOINT=${quote(base)}\nexport LIGHTMONI_DATA_KEY='替换为允许 business 表的上报 Key'`
+    :`export LIGHTMONI_AGENT_ENDPOINT=${quote(base || SDK_AGENT_ENDPOINT)}\n# 仅在 Agent 启用本地鉴权时配置；未启用时无需设置。\n# export LIGHTMONI_LOCAL_TOKEN='替换为 Agent 本地访问令牌'`);
 }
 
 export interface SDKPackage {id:string;language:string;runtime:string;file:string;url:string;available:boolean}

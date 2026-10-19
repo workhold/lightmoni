@@ -23,7 +23,8 @@ Node 版本与 npm 依赖锁定。Agent 安装包包含运行时和依赖，目�
 flowchart LR
     B[浏览器埋点 SDK] --> P[业务后端转发]
     P -->|限定 table 的 Key| M
-    S[六种业务语言 SDK] -->|OTLP HTTP，按窗口聚合与批量发送| A
+    S[六种业务语言 SDK] -->|direct：平台 data key| M
+    S -->|agent：OTLP HTTP 与可选 local token| A
     H[机器采集 / 拨测 / 目录日志] --> G[Agent 内置 TypeScript SDK]
     G -->|进程内 exporter| A
     A[Node Agent：磁盘队列与重试] -->|限定 table 的上报 Key| M
@@ -33,7 +34,7 @@ flowchart LR
     M --> N[机器人 / 公众号推送 / 短信与手机推送 / 电话语音 / 邮件 / Webhook]
 ```
 
-SDK 默认连接本机 Agent；没有 Agent 的业务可直接连接主服务，但此时没有 Agent 的磁盘保护。浏览器通过业务后端转发采集，业务后端持有同一套限定 table 的 Key；不额外引入公开凭证类型。
+SDK 和接入页默认 direct，直接连接平台；用户也可明确选择 agent，经 LightMoni Agent 的磁盘队列转发。两种显式路径不自动互相改投；direct 使用进程内缓冲，agent 收到持久化 ACK 后由独立 Agent 补传。Agent 的主机采集、拨测和目录日志独立于业务路由，安装 Agent 不是 direct 的前置条件。两种方式仍分别需要连接地址及对应凭据，中转不等于免配置或已减少请求数。完整边界见 [SDD 012](../specs/012-sdk-reporting-choice/spec.md)。浏览器通过业务后端转发采集，业务后端持有同一套限定 table 的 Key；不额外引入公开凭证类型。
 
 主服务内部为模块化单体：统一 HTTP server、认证、SQLite、ClickHouse writer、查询执行器和后台任务生命周期。大盘、日志、告警是模块；不拆成独立微服务。中心端不需要 Redis、Kafka、Grafana 或 Kibana。ClickHouse 是整体资源占用的主要候选，需要实测后发布小机器的推荐配置，不能把“小团队”直接等同于固定的内存承诺。
 
@@ -43,10 +44,9 @@ SDK 默认连接本机 Agent；没有 Agent 的业务可直接连接主服务，
 
 ```ts
 // TypeScript SDK；在业务退出时 flush/shutdown。
-const moni = createLightMoni({
+const moni = createLightMoniFromEnv({
   service: "order-api",
   table: "business",
-  endpoint: "http://127.0.0.1:4318",
 });
 moni.counter("orders_created").add(1, { region: "cn", payment: "wechat" });
 moni.log("info", "order created", { order_id: "123" });

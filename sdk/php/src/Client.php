@@ -42,11 +42,16 @@ final class Protocol {
     public static function connection(array $options): array {
         $mode=$options['mode'] ?? (getenv('LIGHTMONI_MODE') ?: 'direct'); if (!in_array($mode,['agent','direct','auto'],true)) throw new \InvalidArgumentException('mode must be agent, direct, or auto');
         $endpoint=$options['endpoint'] ?? (getenv('LIGHTMONI_ENDPOINT') ?: ''); $agent=$options['agent_endpoint'] ?? (getenv('LIGHTMONI_AGENT_ENDPOINT') ?: 'http://127.0.0.1:4318');
-        [$local,$localSource]=self::secret($options['local_token']??'', $options['local_token_file']??'', 'LIGHTMONI_LOCAL_TOKEN','LIGHTMONI_LOCAL_TOKEN_FILE','local token');
-        [$data,$dataSource]=self::secret($options['data_key']??($options['key']??''), $options['data_key_file']??'', 'LIGHTMONI_DATA_KEY','LIGHTMONI_DATA_KEY_FILE','data key');
-        [$legacy,$legacySource]=self::secret('', '', 'LIGHTMONI_KEY','', 'legacy data key');
-        if ($data!=='' && $legacy!=='' && $data!==$legacy) throw new \InvalidArgumentException('credential_source_conflict: LIGHTMONI_KEY');
-        if ($data==='') { $data=$legacy; $dataSource=$legacy!==''?'legacy-env':$legacySource; }
+        $local=$localSource=$data=$dataSource='';
+        if ($mode!=='direct') {
+            [$local,$localSource]=self::secret($options['local_token']??'', $options['local_token_file']??'', 'LIGHTMONI_LOCAL_TOKEN','LIGHTMONI_LOCAL_TOKEN_FILE','local token');
+        }
+        if ($mode!=='agent') {
+            [$data,$dataSource]=self::secret($options['data_key']??($options['key']??''), $options['data_key_file']??'', 'LIGHTMONI_DATA_KEY','LIGHTMONI_DATA_KEY_FILE','data key');
+            [$legacy,$legacySource]=self::secret('', '', 'LIGHTMONI_KEY','', 'legacy data key');
+            if ($data!=='' && $legacy!=='' && $data!==$legacy) throw new \InvalidArgumentException('credential_source_conflict: LIGHTMONI_KEY');
+            if ($data==='') { $data=$legacy; $dataSource=$legacy!==''?'legacy-env':$legacySource; }
+        }
         $probe='not_probed'; $selected=$mode; $fallback=0;
         if ($mode==='agent') { $endpoint=$agent; $key=$local; $probe='configured'; $source=$localSource; }
         elseif ($mode==='direct') { if ($endpoint==='' || $data==='') throw new \InvalidArgumentException('direct mode requires endpoint and data key'); $key=$data; $source=$dataSource; }
