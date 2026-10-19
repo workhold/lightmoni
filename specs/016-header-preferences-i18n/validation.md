@@ -33,3 +33,7 @@
 ## 本地平台
 
 继续使用原 `.lightmoni` 数据目录。`http://127.0.0.1:8080/healthz` 返回 `status:ok`，`/api/v1/setup` 返回 `required:false`；仅检查运行状态，不重置原有用户、模型或凭据。
+
+## 交付
+
+已同步远端 main，创建 [PR #18](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/18)，等待人工审核；本分支基于待审核 #17，建议先合入 #17。未直接推 main，未执行合并。
