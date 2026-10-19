@@ -3,6 +3,7 @@ import type { Dependencies } from "../shared/types.js";
 import { bytes, object, text, type Tool } from "./types.js";
 import type { CodeTaskInput, CodeTaskResult } from "./code.js";
 import type { User } from "../shared/types.js";
+import type { ManagedMachineStore } from "../server/managed-machines.js";
 const string = { type: "string" },
   obj = (properties: Record<string, any>, required: string[] = []) => ({
     type: "object",
@@ -23,6 +24,7 @@ export interface MonitoringToolOptions {
       signal: AbortSignal,
     ): Promise<CodeTaskResult>;
   };
+  machines?: ManagedMachineStore;
 }
 export function codeTaskReceipt(
   result: CodeTaskResult,
@@ -266,6 +268,70 @@ export function monitoringTools(
       },
     },
   ];
+  if (options.machines) {
+    const machines = options.machines;
+    tools.push(
+      {
+        name: "list_managed_machines",
+        description:
+          "List administrator-managed host metadata and LightMoni Agent status. This never returns SSH usernames' secrets, private keys, passwords, host keys, or command output.",
+        effect: "read",
+        schema: obj({}),
+        execute: async (_input, _signal, user) => {
+          if (!user || user.role !== "admin") throw Error("administrator required");
+          return { machines: machines.assistantList() };
+        },
+      },
+      {
+        name: "get_managed_machine",
+        description:
+          "Read one managed host's metadata and Agent status by platform machine ID. Secrets are never returned.",
+        effect: "read",
+        schema: obj({ machine_id: string }, ["machine_id"]),
+        execute: async (input, _signal, user) => {
+          if (!user || user.role !== "admin") throw Error("administrator required");
+          object(input, ["machine_id"]);
+          return machines.assistantGet(text(input.machine_id));
+        },
+      },
+      {
+        name: "propose_agent_install",
+        description:
+          "Create a reviewable LightMoni Agent installation plan for one managed host. This only drafts a fixed plan; it does not connect by SSH, execute commands, reveal credentials, or install anything. The administrator must confirm in the host management page.",
+        effect: "draft",
+        schema: obj(
+          {
+            machine_id: string,
+            version: string,
+            arch: { type: "string", enum: ["amd64", "arm64"] },
+            initial_label_id: string,
+          },
+          ["machine_id", "version", "arch"],
+        ),
+        execute: async (input, _signal, user) => {
+          if (!user || user.role !== "admin") throw Error("administrator required");
+          object(input, ["machine_id", "version", "arch", "initial_label_id"]);
+          return machines.assistantPlan(text(input.machine_id), {
+            version: text(input.version),
+            arch: text(input.arch),
+            initial_label_id: input.initial_label_id == null ? "" : text(input.initial_label_id),
+          });
+        },
+      },
+      {
+        name: "get_agent_installation",
+        description:
+          "Read a sanitized Agent installation plan or receipt by deployment ID. Never claim installation succeeded unless the receipt status is succeeded.",
+        effect: "read",
+        schema: obj({ deployment_id: string }, ["deployment_id"]),
+        execute: async (input, _signal, user) => {
+          if (!user || user.role !== "admin") throw Error("administrator required");
+          object(input, ["deployment_id"]);
+          return machines.assistantDeployment(text(input.deployment_id));
+        },
+      },
+    );
+  }
   if (options.codeTask) {
     tools.push({
       name: "code_task",
