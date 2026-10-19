@@ -6,4 +6,4 @@
 - [x] 主机页面检查/审核入口、助手工具与双语展示。
 - [x] Docker 依赖及使用说明。
 - [x] 后端测试、构建、隔离浏览器验收。
-- [ ] 同步 main、记录验收、创建 PR 等待审核。
+- [x] 同步 main、记录验收、创建 PR 等待审核：[#19](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/19)。
