@@ -175,7 +175,18 @@ export function registerAssistant(
   const instrumentationRoot =
     options.instrumentationWorkspaceRoot ?? codeWorkspace;
   const instrumentation = instrumentationRoot?.trim()
-    ? new InstrumentationService(instrumentationRoot)
+    ? new InstrumentationService(instrumentationRoot, {
+        now: deps.now,
+        // Instrumentation plans contain before snapshots so apply can verify
+        // the exact revision. Keep those snapshots encrypted at rest.
+        store: {
+          get: <T>(key: string) => {
+            const saved = store.get<string>(key);
+            return saved ? (JSON.parse(deps.decrypt(saved)) as T) : undefined;
+          },
+          put: (key, value) => store.put(key, deps.encrypt(JSON.stringify(value))),
+        },
+      })
     : undefined;
   const codeTasks = codeWorkspace?.trim()
     ? new CodeTaskService({
@@ -244,6 +255,16 @@ export function registerAssistant(
         "code_tasks_disabled",
       );
     return codeTasks;
+  };
+  const requireInstrumentation = (ctx: Context) => {
+    admin(ctx);
+    if (!instrumentation)
+      throw new AssistantError(
+        503,
+        "instrumentation workspace is not configured",
+        "instrumentation_disabled",
+      );
+    return instrumentation;
   };
   const alertProposals = options.alerts
     ? new AlertProposalService(deps.db, options.alerts, deps.now, deps.encrypt, deps.decrypt)
@@ -760,6 +781,40 @@ export function registerAssistant(
       );
       ctx.json(result, 201);
     }, "cannot run code task"),
+  );
+  deps.router.post(
+    "/api/v1/instrumentation-plans/:id/apply",
+    safe(async (ctx) => {
+      const service = requireInstrumentation(ctx);
+      const input = await body(ctx, ["base_revision", "approval", "idempotency_key"], 32 << 10);
+      if (
+        typeof input.base_revision !== "string" ||
+        !input.base_revision.trim() ||
+        input.approval !== "apply" ||
+        (input.idempotency_key != null &&
+          (typeof input.idempotency_key !== "string" || input.idempotency_key.length > 128))
+      )
+        throw new AssistantError(400, "invalid instrumentation apply input", "invalid_input");
+      try {
+        ctx.json(await service.apply(ctx.params.id, {
+          base_revision: input.base_revision,
+          approval: "apply",
+          ...(input.idempotency_key == null ? {} : { idempotency_key: input.idempotency_key }),
+        }, ctx.signal));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "instrumentation apply failed";
+        if (message === "instrumentation plan not found")
+          throw new AssistantError(404, "instrumentation plan not found", "not_found");
+        if (message === "revision conflict")
+          throw new AssistantError(409, "instrumentation plan revision is stale; scan again", "revision_conflict");
+        if (message === "approval_required")
+          throw new AssistantError(403, "administrator approval is required", "approval_required");
+        if (message === "invalid idempotency key" || message === "invalid instrumentation plan" || message === "invalid instrumentation operation" || message === "instrumentation plan has no changes" ||
+          /workspace path is outside root|symbolic link|regular file|size limit|exceeds size limit/.test(message))
+          throw new AssistantError(400, message, "invalid_input");
+        throw new AssistantError(409, "instrumentation plan could not be applied", "apply_conflict");
+      }
+    }, "cannot apply instrumentation plan"),
   );
   deps.router.get(
     route + "/code-tasks/:id",

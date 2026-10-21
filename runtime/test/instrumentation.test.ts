@@ -105,3 +105,82 @@ test("instrumentation proposal refuses stale revisions and gives manual steps wh
     /revision conflict/,
   );
 });
+
+test("instrumentation apply is administrator-gated by revision, writes atomically and is idempotent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lightmoni-instrumentation-apply-"));
+  const source = [
+    "import { createLightMoni } from '@lightmoni/sdk';",
+    "const app = createApp();",
+    "app.get('/health', (req, res) => {",
+    "  res.send('ok');",
+    "});",
+  ].join("\n");
+  await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { "@lightmoni/sdk": "^0.3.0" } }));
+  await mkdir(join(root, "src"));
+  const file = join(root, "src", "server.ts");
+  await writeFile(file, source);
+  const service = new InstrumentationService(root);
+  const plan = await service.propose({ workspace: ".", intent: "增加请求指标", service: "checkout", env: "prod" });
+  const applied = await service.apply(plan.plan_id, { base_revision: plan.base_revision, approval: "apply", idempotency_key: "apply-1" });
+  assert.equal(applied.state, "applied");
+  assert.deepEqual(applied.changed_files, ["src/server.ts"]);
+  assert.notEqual(applied.result_revision, plan.base_revision);
+  const changed = await readFile(file, "utf8");
+  assert.match(changed, /lightmoniClient\.record\("service", "requests_total"/);
+  const repeated = await service.apply(plan.plan_id, { base_revision: plan.base_revision, approval: "apply", idempotency_key: "retry" });
+  assert.equal(repeated.result_revision, applied.result_revision);
+  assert.equal(repeated.idempotent, true);
+  assert.equal(await readFile(file, "utf8"), changed);
+});
+
+test("instrumentation apply rejects a changed source and unsafe plan inputs without modifying files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lightmoni-instrumentation-apply-conflict-"));
+  await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { "@lightmoni/sdk": "^0.3.0" } }));
+  const file = join(root, "server.ts");
+  const source = [
+    "import { createLightMoni } from '@lightmoni/sdk';",
+    "app.get('/health', (req, res) => {",
+    "  res.send('ok');",
+    "});",
+  ].join("\n");
+  await writeFile(file, source);
+  const service = new InstrumentationService(root);
+  const plan = await service.propose({ workspace: ".", intent: "增加请求指标" });
+  await writeFile(file, `${source}\n// user edit\n`);
+  await assert.rejects(
+    () => service.apply(plan.plan_id, { base_revision: plan.base_revision, approval: "apply" }),
+    /revision conflict/,
+  );
+  assert.equal(await readFile(file, "utf8"), `${source}\n// user edit\n`);
+  await assert.rejects(
+    () => service.apply(plan.plan_id, { base_revision: "stale", approval: "apply" }),
+    /revision conflict/,
+  );
+});
+
+test("instrumentation apply rejects a persisted path or operation tamper", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lightmoni-instrumentation-apply-tamper-"));
+  await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { "@lightmoni/sdk": "^0.3.0" } }));
+  await writeFile(join(root, "server.ts"), [
+    "import { createLightMoni } from '@lightmoni/sdk';",
+    "app.get('/health', (req, res) => {",
+    "  res.send('ok');",
+    "});",
+  ].join("\n"));
+  const persisted = new Map<string, any>();
+  const store = {
+    get: <T>(key: string) => persisted.has(key) ? structuredClone(persisted.get(key)) as T : undefined,
+    put: <T>(key: string, value: T) => persisted.set(key, structuredClone(value)),
+  };
+  const first = new InstrumentationService(root, { store });
+  const plan = await first.propose({ workspace: ".", intent: "增加请求指标" });
+  const saved = persisted.get(`instrumentation-plan/${plan.plan_id}`);
+  saved.plan.files[0].path = "../outside.ts";
+  saved.plan.files[0].operations[0].content = "writeFile('/tmp/escape', secret)";
+  persisted.set(`instrumentation-plan/${plan.plan_id}`, saved);
+  const second = new InstrumentationService(root, { store });
+  await assert.rejects(
+    () => second.apply(plan.plan_id, { base_revision: plan.base_revision, approval: "apply" }),
+    /invalid instrumentation plan/,
+  );
+});

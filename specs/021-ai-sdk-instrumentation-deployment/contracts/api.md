@@ -2,7 +2,7 @@
 
 所有接口均挂在 `/api/v1`，需要登录；创建/应用源码变更、构建、Agent 安装、部署、回滚和修改目标仅管理员可用。响应不包含私钥、密码、token 或原始命令输出。
 
-> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现受管理员保护的 `approve`、状态查询、事件查询和 `rollback_pending` 提案，但不会创建 Agent job 或执行主机动作。插桩的只读 propose 已通过 AI 工具提供，但尚无持久化插桩 plan/apply HTTP、release 构建、Agent job 和真实验证接口。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
+> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现受管理员保护的 `approve`、状态查询、事件查询和 `rollback_pending` 提案，`approve` 会在 Agent 就绪后创建不可变 Agent job 并推进到 `agent_ready`，但不会执行主机动作或推进业务最终状态。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；release 构建、真实验证和部署状态最终闭环仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
 
 ## 通用约束
 
@@ -119,7 +119,7 @@
 
 ### `POST /deployments/:id/approve`
 
-管理员请求：`{"expected_state":"awaiting_approval","confirm":true}`。成功返回 `{id,state:"agent_ready",operation_id}`，并记录 `approved_by` 与状态事件。当前切片只授权下一阶段，不创建或执行 Agent job；若目标机器没有已激活且最近心跳的 Agent，返回 `409 agent_not_ready` 并保留计划供重试。重复审批不能跳过状态校验。
+管理员请求：`{"expected_state":"awaiting_approval","confirm":true}`。成功返回 `{id,state:"agent_ready",operation_id}`，并记录 `approved_by` 与状态事件，同时为已激活且最近心跳的 Agent 创建不可变 job；当前不会执行主机动作或推进业务最终状态。若目标机器没有已激活且最近心跳的 Agent，返回 `409 agent_not_ready` 并保留计划供重试。重复审批不能跳过状态校验。
 
 ### `GET /deployments/:id`
 

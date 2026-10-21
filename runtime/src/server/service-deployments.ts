@@ -2,6 +2,7 @@ import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import { deploymentAdapters } from "../deployment/index.js";
+import type { AgentJobStore } from "./agent-jobs.js";
 
 /**
  * Service delivery metadata.
@@ -172,7 +173,10 @@ const deploymentView = (row: any) => ({
 });
 
 /** Register service inventory and approval-ready delivery plan APIs. */
-export function registerServiceDeployments(deps: Dependencies): Module & ServiceDeploymentStore {
+export function registerServiceDeployments(
+  deps: Dependencies,
+  options: { jobs?: AgentJobStore } = {},
+): Module & ServiceDeploymentStore {
   const { db, router } = deps;
   db.exec(`
     CREATE TABLE IF NOT EXISTS services(
@@ -531,6 +535,21 @@ export function registerServiceDeployments(deps: Dependencies): Module & Service
       fail(409, "agent_not_ready");
     }
     const operationID = deployment.operation_id || id();
+    // Enqueue the immutable job before advancing the centre state. If job
+    // persistence fails, approval remains awaiting_approval and can be safely
+    // retried; no host action is started by this request.
+    if (options.jobs) {
+      const targetRow = db.get<any>("SELECT * FROM service_targets WHERE id=?", deployment.target_id);
+      const plan = parse<any>(deployment.plan_json, {});
+      options.jobs.enqueue({
+        agentID: String(target?.machine_id ? (db.get<any>("SELECT agent_id FROM managed_machines WHERE id=?", target.machine_id)?.agent_id ?? "") : ""),
+        deploymentID: deployment.id,
+        operationID,
+        actions: Array.isArray(plan.actions) ? plan.actions : [],
+        capabilities: Array.isArray(plan.capabilities) ? plan.capabilities : [],
+        target: targetRow ? { id: targetRow.id, config: parse(targetRow.config_json, {}) } : {},
+      });
+    }
     const result = transition(deployment.id, "agent_ready", ctx.user.id, "管理员已批准部署计划，等待 Agent 执行", "", { operationID, approvedBy: ctx.user.id });
     ctx.json({ ...result, operation_id: operationID });
   }));

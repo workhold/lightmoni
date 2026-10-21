@@ -213,9 +213,9 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 3. 已确认的 revision 经过受控构建生成带版本、架构、来源 revision 和 SHA-256 的 release。中心只保存 release 元数据和受控引用，生产 Agent 不接收源码仓库凭据或模型密钥。
 4. 管理员为 service 创建一个或多个 service target，选择运行方式适配器。MVP 的 `systemd` 适配器覆盖 Node、Python、Go、Rust、二进制和解释器服务；语言不是部署协议。Docker Compose、Kubernetes/Helm 和 CI/GitOps 作为后续适配器。
 5. 中心执行 `probe → plan → apply → verify → rollback` 的受控计划层，生成 `awaiting_approval` 部署计划。计划只包含 typed actions，不包含 shell 字符串；管理员审批可把计划推进到 `agent_ready`，并记录脱敏事件和 operation ID；Agent 安装与业务部署分别记录，Agent 未激活时不能进入业务执行阶段。
-6. 管理员批准后，未来 Agent executor 领取短时、有签名和能力白名单的 job，暂存不可变制品、切换 release、启停登记 unit，并执行 systemd/HTTP/TCP 健康检查。服务健康而没有新遥测时显示“部署成功，遥测未验证”，不能把它误判成失败。
+6. 管理员批准后，Agent executor 通过 control credential 拉取短时租约 job。中心保存不可变 actions、能力列表和 lease；Agent 只允许暂存制品、切换受控 release、启停登记 unit 及 systemd/HTTP/TCP 健康检查。服务健康而没有新遥测时显示“部署成功，遥测未验证”，不能把它误判成失败。
 
-当前切片持久化 service、target、release、deployment 元数据及脱敏 `deployment_events`，并提供 `awaiting_approval` 计划、管理员 approve 状态迁移、事件查询和 `rollback_pending` 提案。`runtime/src/deployment` 中的 systemd 适配器和 provider registry 已独立实现并测试，但尚未接入 Agent job executor；当前没有主机 apply、真实 preflight、健康检查、遥测验证或最终 `rolled_back` 回执。因此页面和 AI 只能展示审批/计划状态，不能声称业务已部署。
+当前切片持久化 service、target、release、deployment 元数据及脱敏 `deployment_events`，并提供 `awaiting_approval` 计划、管理员 approve 状态迁移、事件查询和 `rollback_pending` 提案。`runtime/src/server/agent-jobs.ts` 提供 Agent job 的 claim/lease、事件、结果、取消和租约过期 `unknown` 恢复；`runtime/src/agent/executor.ts` 执行 capability allow-list，`runtime/src/agent/jobs.ts` 负责拉取、回执和重启恢复。`verification.ts` 已提供固定服务/实例、窗口、deadline 和样本上限的中心侧健康/遥测证据判定，但真实 ClickHouse 验证、最终 `rolled_back` 状态和生产签名校验仍待后续切片。因此页面和 AI 不能把“已批准”或“已入队”当作业务已部署；真实状态闭环接入后才可依据结构化 Agent 回执判断。
 
 ## 8. 中心服务 HLD/LLD
 
@@ -264,13 +264,17 @@ shared (SQLite, ClickHouse, OTLP, crypto, JSON, time)
 | `/api/v1/deployments/:id/events` | 脱敏部署状态事件时间线 | 管理员 |
 | `/api/v1/deployments/:id/approve` | 管理员确认并推进到 `agent_ready` | 管理员 |
 | `/api/v1/deployments/:id/rollback` | 创建 `rollback_pending` 回滚提案 | 管理员 |
+| `/api/v1/agents/:id/jobs/claim` | Agent 拉取一个能力受限且带租约的部署 job | Agent control credential |
+| `/api/v1/agents/:id/jobs/:jobId/events` | Agent 上报幂等阶段事件和脱敏快照 | Agent control credential |
+| `/api/v1/agents/:id/jobs/:jobId/result` | Agent 提交成功、失败、取消或未知回执 | Agent control credential |
+| `/api/v1/agent-jobs/:jobId/cancel` | 管理员取消尚未完成的 Agent job | 管理员 |
 | `/api/v1/assistant/*` | 会话、模型、提案、用量和 AI 工具 | 登录/管理员按接口 |
 
 ## 9. 存储设计
 
 ### 9.1 SQLite
 
-SQLite 保存低体量、强一致的管理状态：用户和外部身份、会话、SDK Key 摘要与事件、enrollment 状态、Agent 身份和凭据摘要、节点/任务/标签、主机和 SSH 凭据密文、业务 services/service_targets/releases/deployments 及其脱敏回执、部署计划、告警规则/episode/静默/outbox、仪表盘和草稿、模型配置/用量账本、表目录、窗口历史和有限队列元数据。
+SQLite 保存低体量、强一致的管理状态：用户和外部身份、会话、SDK Key 摘要与事件、enrollment 状态、Agent 身份和凭据摘要、节点/任务/标签、主机和 SSH 凭据密文、业务 services/service_targets/releases/deployments、`agent_jobs`/`agent_job_events` 及其脱敏回执、部署计划、告警规则/episode/静默/outbox、仪表盘和草稿、模型配置/用量账本、表目录、窗口历史和有限队列元数据。
 
 明文 secret 只在创建/兑换/轮换响应的单次边界出现，随后使用加密存储或不可逆摘要。SQLite 不保存大量日志、指标或 Trace 正文。
 
@@ -543,7 +547,7 @@ docker compose up -d --build --wait
 - 中心和 Agent 使用 Node.js/TypeScript；Web 使用 React/TypeScript；AI runtime 使用 Mastra。
 - SDK、Agent、中心共享 OTLP 和公共 TypeScript 类型；Agent 使用同一个 TypeScript SDK 做内部指标和 exporter。
 - 节点标签/任务、Agent enrollment、control/data 凭据、主机 SSH 预检、部署计划和网页终端均有对应特性 SDD。
-- SDD 021 已加入业务服务/目标/发布元数据、只读 SDK 插桩扫描、受限 TS/JS 结构化插桩提案、中心部署状态迁移/审批/事件/回滚提案、独立测试的 systemd 纯计划适配器和 AI 的部署计划工具；当前 service API 的 approve 只推进到 `agent_ready`，未创建 Agent job 或接入适配器执行器。受控构建、插桩 apply、主机执行、健康/遥测闭环、最终回滚和 Docker/Kubernetes 适配器均未完成。
+- SDD 021 已加入业务服务/目标/发布元数据、只读 SDK 插桩扫描、受限 TS/JS 结构化插桩提案、管理员确认后的安全 apply、中心部署状态迁移/审批/事件/回滚提案、独立测试的 systemd 纯计划适配器、Agent job/租约协议、MVP capability executor 和 Agent job runner，以及 AI 的部署计划工具。当前 service API 的 approve 会在 Agent 就绪后创建不可变 job 并推进到 `agent_ready`；通用部署计划目前没有 typed actions，executor 会拒绝空 actions，因此还不会执行业务部署。受控构建、真实主机 preflight、部署回执驱动的最终状态、健康/遥测 ClickHouse 闭环、最终回滚和 Docker/Kubernetes 适配器均未完成。
 - AI 具备目录、查询、日志、告警读取、可审阅草稿、SDK 插桩提案、业务部署状态/事件读取、Pi 代码任务和模型用量/连接测试设计。
 - 告警规则、静默、值班、通知 outbox 和现场取证由中心域模块负责。
 

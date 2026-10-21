@@ -1,7 +1,7 @@
 import {MonitoringScope,type PublishedScope} from '../shared/monitoring-context';
 import {lazy,Suspense,useEffect,useMemo,useState} from 'react';
 import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
-import {ApiOutlined,AppstoreOutlined,BellOutlined,DatabaseOutlined,DashboardOutlined,MessageOutlined,SearchOutlined,SettingOutlined,SafetyCertificateOutlined,MenuFoldOutlined,MenuUnfoldOutlined,CloudServerOutlined} from '@ant-design/icons';
+import {ApiOutlined,AppstoreOutlined,BellOutlined,DatabaseOutlined,DashboardOutlined,MessageOutlined,SearchOutlined,SettingOutlined,SafetyCertificateOutlined,MenuFoldOutlined,MenuUnfoldOutlined,CloudServerOutlined,CloudUploadOutlined} from '@ant-design/icons';
 import {Button,Drawer,Spin,Tooltip} from '../shared/ui';
 import {api} from '../shared/api';
 import type {User} from '../shared/types';
@@ -19,9 +19,10 @@ const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then
 const MachinesPage=lazy(()=>import('./MachinesPage'));
 const DataManagementPage=lazy(()=>import('./DataManagementPage'));
 const AgentInstallPage=lazy(()=>import('./AgentInstall'));
+const ServiceDeploymentsPage=lazy(()=>import('./ServiceDeploymentsPage'));
 
-const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/data','数据接入',DatabaseOutlined],['/data-management','数据管理',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
-const englishLinks:Record<string,string>={'/':'Overview','/dashboards':'Dashboards','/logs':'Log explorer','/alerts':'Alerts','/agents':'Node assistants','/machines':'Machines','/data':'Data ingestion','/data-management':'Data management','/assistant':'AI assistant','/settings':'Personal settings','/admin':'Administration'};
+const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/services','服务部署',CloudUploadOutlined],['/data','数据接入',DatabaseOutlined],['/data-management','数据管理',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
+const englishLinks:Record<string,string>={'/':'Overview','/dashboards':'Dashboards','/logs':'Log explorer','/alerts':'Alerts','/agents':'Node assistants','/machines':'Machines','/services':'Service deployments','/data':'Data ingestion','/data-management':'Data management','/assistant':'AI assistant','/settings':'Personal settings','/admin':'Administration'};
 
 function ClaimLanding(){const {token}=useParams();return <Navigate to={'/alerts?claim='+encodeURIComponent(token??'')} replace/>}
 
@@ -43,7 +44,7 @@ export default function Root(){
  useEffect(()=>{if(location.pathname==='/settings')setAssistant(false)},[location.pathname]);
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
  if(loading)return <div className="lm-loading"><Spin size="large"/></div>;
- if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/machines')||location.pathname.startsWith('/settings')||location.pathname.startsWith('/data'))?location.pathname+location.search:'/')}}/>;
+ if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/machines')||location.pathname.startsWith('/services')||location.pathname.startsWith('/settings')||location.pathname.startsWith('/data'))?location.pathname+location.search:'/')}}/>;
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'} ${/^\/dashboards\/[^/]+\/panels\//.test(location.pathname)?'is-panel-standalone':''}`}>
   <aside className="lm-sidebar">
    <Link to="/" className="lm-brand"><span className="lm-brand-mark">L</span><span>LightMoni<small>{t('监控工作台','Monitoring workspace')}</small></span></Link>
@@ -57,6 +58,7 @@ export default function Root(){
     <Route path="/agents" element={<AgentsPage user={user}/>}/>
     <Route path="/agents/install" element={<AgentInstallPage user={user}/>}/>
     <Route path="/machines" element={user.role==='admin'?<MachinesPage user={user}/>:<Navigate to="/settings" replace/>}/>
+    <Route path="/services" element={user.role==='admin'?<ServiceDeploymentsPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>
     <Route path="/admin" element={user.role==='admin'?<AdminPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/assistant" element={<AssistantPage/>}/>

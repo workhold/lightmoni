@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { readdir, readFile, lstat, realpath } from "node:fs/promises";
+import { readdir, readFile, lstat, realpath, writeFile, rename, rm, chmod } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createTwoFilesPatch } from "diff";
 
@@ -64,11 +64,44 @@ export interface InstrumentationPlan {
   validation_steps: string[];
 }
 
+export interface InstrumentationApplyInput {
+  base_revision: string;
+  approval: "apply";
+  idempotency_key?: string;
+}
+
+export interface InstrumentationApplyResult {
+  plan_id: string;
+  state: "applied";
+  result_revision: string;
+  changed_files: string[];
+  applied_at: string;
+  idempotent?: boolean;
+}
+
+interface StoredInstrumentationPlan {
+  plan: InstrumentationPlan;
+  before: Record<string, string>;
+  applied: InstrumentationApplyResult | null;
+  idempotency_key?: string;
+}
+
+export interface InstrumentationStore {
+  get<T>(key: string): T | undefined;
+  put<T>(key: string, value: T): void;
+}
+
+export interface InstrumentationServiceOptions {
+  store?: InstrumentationStore;
+  now?: () => Date;
+}
+
 const SKIP = new Set([".git", "node_modules", "dist", "build", ".local-dev", ".lightmoni", ".ssh", "vendor", "target"]);
 const SOURCE = /\.(?:ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|swift)$/i;
 const MAX_FILES = 5000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 32 * 1024 * 1024;
+const MAX_PLAN_BYTES = 8 * 1024 * 1024;
 
 const VALID_IDENTITY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const VALID_TABLE = /^[a-z][a-z0-9_]{0,47}$/;
@@ -133,6 +166,52 @@ function insertAtLines(source: string, operations: InstrumentationOperation[]): 
   return lines.join("\n");
 }
 
+function planKey(id: string): string {
+  return `instrumentation-plan/${id}`;
+}
+
+function unsafePlanPath(value: unknown): boolean {
+  if (typeof value !== "string" || !value || value.length > 512 || /[\x00-\x1f]/.test(value)) return true;
+  const normalized = value.replaceAll("\\", "/");
+  if (isAbsolute(normalized) || /^[a-z]:/i.test(normalized)) return true;
+  if (normalized.split("/").includes("..")) return true;
+  const parts = normalized.split("/");
+  return parts.some((part) =>
+    part === ".git" || part === "node_modules" || part === ".ssh" || part === ".lightmoni" ||
+    part.startsWith(".") || /^\.env(?:\.|$)/i.test(part) ||
+    /^(?:\.npmrc|\.netrc|\.pypirc|credentials(?:\.json)?|secrets?(?:\..*)?|id_(?:rsa|ed25519)(?:\.pub)?)$/i.test(part) ||
+    /\.(?:pem|p12|pfx|key)$/i.test(part),
+  );
+}
+
+function validatePlanOperations(path: string, source: string, operations: unknown): InstrumentationOperation[] {
+  if (unsafePlanPath(path) || !Array.isArray(operations) || operations.length < 1 || operations.length > 32)
+    throw Error("invalid instrumentation plan");
+  const lines = source.split(/\r?\n/);
+  const result: InstrumentationOperation[] = [];
+  for (const operation of operations) {
+    if (!operation || typeof operation !== "object" || Array.isArray(operation)) throw Error("invalid instrumentation operation");
+    const value = operation as Record<string, unknown>;
+    if (value.op !== "insert" || !Number.isSafeInteger(value.line) || Number(value.line) < 1 || Number(value.line) > lines.length + 1 ||
+      typeof value.content !== "string" || !value.content || value.content.includes("\0") || Buffer.byteLength(value.content) > MAX_FILE_BYTES)
+      throw Error("invalid instrumentation operation");
+    if (Object.keys(value).some((key) => !["op", "line", "content"].includes(key))) throw Error("invalid instrumentation operation");
+    result.push({ op: "insert", line: Number(value.line), content: value.content });
+  }
+  return result;
+}
+
+async function atomicReplace(path: string, content: string, mode: number): Promise<void> {
+  const temporary = resolve(path + `.lightmoni-instrumentation-${randomBytes(12).toString("hex")}.tmp`);
+  try {
+    await writeFile(temporary, content, { flag: "wx", mode: mode & 0o777 });
+    await chmod(temporary, mode & 0o777);
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
 /**
  * Read-only SDK onboarding scan. It never imports a project, executes package
  * scripts, follows symlinks, or writes a patch. A later proposal can produce a
@@ -140,7 +219,32 @@ function insertAtLines(source: string, operations: InstrumentationOperation[]): 
  * flow for an explicit review.
  */
 export class InstrumentationService {
-  constructor(readonly root: string) {}
+  private readonly records = new Map<string, StoredInstrumentationPlan>();
+  private readonly now: () => Date;
+  constructor(readonly root: string, private readonly options: InstrumentationServiceOptions = {}) {
+    this.now = options.now ?? (() => new Date());
+  }
+
+  private loadPlan(id: string): StoredInstrumentationPlan | undefined {
+    if (!/^ip_[a-f0-9]{24}$/.test(id)) return undefined;
+    const saved = this.records.get(id) ?? this.options.store?.get<StoredInstrumentationPlan>(planKey(id));
+    return saved ? structuredClone(saved) : undefined;
+  }
+
+  private savePlan(id: string, value: StoredInstrumentationPlan): void {
+    const serialized = JSON.stringify(value);
+    if (Buffer.byteLength(serialized) > MAX_PLAN_BYTES) throw Error("instrumentation plan is too large");
+    this.options.store?.put(planKey(id), structuredClone(value));
+    this.records.set(id, structuredClone(value));
+    if (this.records.size > 100) {
+      const first = this.records.keys().next().value as string | undefined;
+      if (first) this.records.delete(first);
+    }
+  }
+
+  get(planID: string): InstrumentationPlan | undefined {
+    return this.loadPlan(planID)?.plan;
+  }
 
   async scan(workspace = ".", signal?: AbortSignal): Promise<InstrumentationScan> {
     const absolute = await safeWorkspace(this.root, workspace), files: string[] = [];
@@ -391,7 +495,7 @@ export class InstrumentationService {
       addManualStep(manualSteps, "未找到可安全自动插桩的请求边界，请人工选择文件和插入位置。");
     const validationSteps = [...new Set(planFiles.flatMap((file) => file.validation_steps))];
     if (!validationSteps.length) validationSteps.push("确认 SDK 已配置 service/env、endpoint 和凭据，再执行项目自身的检查");
-    return {
+    const plan: InstrumentationPlan = {
       plan_id: `ip_${randomBytes(12).toString("hex")}`,
       workspace: input.workspace,
       base_revision: scan.base_revision,
@@ -402,5 +506,82 @@ export class InstrumentationService {
       warnings,
       validation_steps: validationSteps,
     };
+    const before: Record<string, string> = {};
+    for (const file of plan.files) {
+      const snapshot = files.get(file.path)?.source;
+      if (snapshot === undefined) throw Error("instrumentation source disappeared");
+      before[file.path] = snapshot;
+    }
+    this.savePlan(plan.plan_id, { plan, before, applied: null });
+    return plan;
+  }
+
+  async apply(planID: string, input: InstrumentationApplyInput, signal?: AbortSignal): Promise<InstrumentationApplyResult> {
+    if (!/^ip_[a-f0-9]{24}$/.test(planID)) throw Error("instrumentation plan not found");
+    if (!input || typeof input.base_revision !== "string" || !input.base_revision || input.approval !== "apply")
+      throw Error("approval_required");
+    if (input.idempotency_key !== undefined &&
+      (typeof input.idempotency_key !== "string" || input.idempotency_key.length < 1 || input.idempotency_key.length > 128 || /[\x00-\x1f]/.test(input.idempotency_key)))
+      throw Error("invalid idempotency key");
+    const record = this.loadPlan(planID);
+    if (!record) throw Error("instrumentation plan not found");
+    if (record.applied) {
+      // Applying a completed plan again is safe and returns the original
+      // receipt. A changed key cannot make the source write a second time.
+      return { ...record.applied, idempotent: true };
+    }
+    if (record.plan.state !== "awaiting_approval" || input.base_revision !== record.plan.base_revision)
+      throw Error("revision conflict");
+    if (!record.plan.files.length) throw Error("instrumentation plan has no changes");
+    signal?.throwIfAborted();
+    const workspace = await safeWorkspace(this.root, record.plan.workspace);
+    const current = await this.scan(record.plan.workspace, signal);
+    if (current.base_revision !== record.plan.base_revision) throw Error("revision conflict");
+    const replacements: Array<{ path: string; target: string; before: string; after: string; mode: number }> = [];
+    let total = 0;
+    for (const file of record.plan.files) {
+      signal?.throwIfAborted();
+      const before = record.before[file.path];
+      if (before === undefined || unsafePlanPath(file.path)) throw Error("invalid instrumentation plan");
+      const target = resolve(workspace, file.path.replaceAll("\\", "/"));
+      const rel = relative(workspace, target);
+      if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw Error("workspace path is outside root");
+      const info = await lstat(target).catch(() => undefined);
+      if (!info || !info.isFile()) throw Error("instrumentation target is not a regular file");
+      const canonical = await realpath(target);
+      if (canonical !== target) throw Error("instrumentation target is a symbolic link");
+      const currentSource = await readFile(target);
+      if (currentSource.includes(0) || currentSource.toString("utf8") !== before) throw Error("revision conflict");
+      const operations = validatePlanOperations(file.path, before, file.operations);
+      const after = insertAtLines(before, operations);
+      if (after.includes("\0") || Buffer.byteLength(after) > MAX_FILE_BYTES) throw Error("instrumentation target exceeds size limit");
+      total += Buffer.byteLength(after);
+      if (total > MAX_TOTAL_BYTES) throw Error("instrumentation plan exceeds size limit");
+      replacements.push({ path: file.path, target, before, after, mode: info.mode });
+    }
+    const written: typeof replacements = [];
+    try {
+      for (const replacement of replacements) {
+        signal?.throwIfAborted();
+        await atomicReplace(replacement.target, replacement.after, replacement.mode);
+        written.push(replacement);
+      }
+    } catch (error) {
+      for (const replacement of written.reverse()) {
+        try { await atomicReplace(replacement.target, replacement.before, replacement.mode); } catch { /* retain original error */ }
+      }
+      throw error;
+    }
+    const resultRevision = (await this.scan(record.plan.workspace, signal)).base_revision;
+    const applied: InstrumentationApplyResult = {
+      plan_id: planID,
+      state: "applied",
+      result_revision: resultRevision,
+      changed_files: replacements.map((replacement) => replacement.path),
+      applied_at: this.now().toISOString(),
+      ...(input.idempotency_key ? { idempotent: false } : {}),
+    };
+    this.savePlan(planID, { ...record, applied, idempotency_key: input.idempotency_key });
+    return applied;
   }
 }

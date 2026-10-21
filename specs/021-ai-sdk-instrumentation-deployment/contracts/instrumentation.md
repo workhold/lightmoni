@@ -1,6 +1,6 @@
 # SDD 021：SDK 插桩契约
 
-> 本文件是目标契约。当前扫描器返回 `plan_id`、`workspace`、`base_revision`、`languages`、`frameworks`、`package_managers`、`sdk`、`candidates`、`warnings` 和 `files_scanned`。AI 可以基于授权 workspace 生成只读、可审阅的结构化插桩计划；应用 diff、构建和部署仍由后续受控流程负责。
+> 本文件是目标契约。当前扫描器返回 `plan_id`、`workspace`、`base_revision`、`languages`、`frameworks`、`package_managers`、`sdk`、`candidates`、`warnings` 和 `files_scanned`。AI 可以基于授权 workspace 生成只读、可审阅的结构化插桩计划；管理员 apply HTTP 已提供 revision/路径/符号链接/大小校验和原子写入，构建和部署仍由后续受控流程负责。
 
 ## 扫描报告
 

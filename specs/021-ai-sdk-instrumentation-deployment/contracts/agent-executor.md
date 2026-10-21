@@ -1,6 +1,6 @@
 # SDD 021：Agent Job 与执行器契约
 
-> 本文件是后续目标契约。当前分支没有 job claim/lease/event/result/cancel API，也没有实现 capability executor；任何部署计划都必须视为未执行。
+> 本文件是 Agent 执行协议契约。当前分支已提供中心侧 job claim/lease/event/result/cancel API，以及最小 capability executor 和 Agent 重启 unknown 回执；签名 job、真实 preflight、业务部署状态闭环和遥测验证仍未接入，因此只有 `agent_ready` 的计划仍必须视为未执行。
 
 ## Job 拉取与租约
 
@@ -11,7 +11,7 @@ Agent 使用 control credential 调用中心：
 - `POST /api/v1/agents/:id/jobs/:job_id/result`：提交最终成功/失败回执。
 - `POST /api/v1/agents/:id/jobs/:job_id/cancel`：中心取消未开始或可中止 job。
 
-Job 结构：
+Job 结构（当前中心返回的 `actions`、`target` 和能力集合保持不可变；`sha256` 签名字段待后续接入）：
 
 ```json
 {
@@ -27,7 +27,7 @@ Job 结构：
 }
 ```
 
-中心用 Agent 专用 control credential 和签名校验 audience、时间、job ID、deployment 归属、capabilities 和 plan digest。Agent 不能修改 actions；重复 job ID 返回此前 receipt，不重复执行。
+中心用 Agent 专用 control credential 校验 audience、时间、job ID 和 Agent 归属；job 的 `expires_at` 和租约限制领取窗口与执行时间。Agent 不能修改 actions；相同 deployment/operation 重试返回此前 job。签名和 plan digest 待后续接入前，中心只把 job 作为受限的内部协议，不应据此宣称生产可执行。
 
 ## 事件与回执
 

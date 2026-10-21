@@ -1,8 +1,8 @@
 # SDD 021：任务清单
 
-> 状态以代码、测试和回读证据为准。本次提交完成的是可审阅计划切片；Agent 执行、构建和遥测闭环仍未完成。
+> 状态以代码、测试和回读证据为准。本次提交完成的是可审阅计划与 Agent job/executor MVP 切片；受控构建、真实业务部署和遥测闭环仍未完成。
 >
-> `T003`/`T008` 的“已完成”仅表示独立的类型、registry 和 systemd 纯逻辑适配器已实现并测试；适配器仍未接入 Agent executor。T002/T010 当前已接入中心状态迁移、管理员审批、脱敏事件查询和回滚提案，但 Agent job、真实执行/验证及最终回滚状态仍未实现。
+> `T003`/`T008` 的“已完成”表示独立的类型、registry 和 systemd 纯逻辑适配器已实现并测试；生产 preflight、真实遥测和最终回滚状态仍待后续切片。T002/T010 当前已接入中心状态迁移、管理员审批、脱敏事件查询和回滚提案；T012-T014 已接入最小 job 协议、能力执行器和重启 unknown 恢复，但不代表业务部署已经完成。
 
 ## A. 规格与领域模型
 
@@ -18,7 +18,7 @@
 | --- | --- | --- | --- | --- |
 | T004 | 实现 workspace scanner：语言、lockfile、框架入口、SDK 包/版本、服务标识和已有打点识别 | T001 | 部分（只读启发式 scanner） | `runtime/src/assistant/instrumentation.ts`、scanner fixture |
 | T005 | 实现结构化插桩 plan/diff，无法安全定位时只给手动步骤 | T004 | 部分（只读提案；明确的 TypeScript/JavaScript 请求边界自动生成 diff，其余返回手动步骤） | `runtime/src/assistant/instrumentation.ts`、`runtime/test/instrumentation.test.ts`；未修改源文件的提案测试 |
-| T006 | 在管理员确认 API 应用 diff，校验 base revision、路径限制、符号链接和大小限制 | T005 | 待实现 | revision 冲突、恶意路径、重复 apply 测试 |
+| T006 | 在管理员确认 API 应用 diff，校验 base revision、路径限制、符号链接和大小限制 | T005 | 已完成（安全 apply；构建仍待实现） | `runtime/src/assistant/instrumentation.ts`、插桩 apply 测试 |
 | T007 | 实现隔离构建 worker 和 release digest 元数据，脱敏日志并限制资源 | T006 | 待实现 | 可重复 digest、构建失败、secret 脱敏测试 |
 
 ## C. 业务部署与适配器
@@ -34,18 +34,18 @@
 
 | ID | 任务 | 依赖 | 状态 | 验收证据 |
 | --- | --- | --- | --- | --- |
-| T012 | 实现 Agent job poll/lease/ack/result、过期和取消协议 | T009,T010 | 待实现 | 断线、重试、租约超时测试 |
-| T013 | 实现 capability allow-list executor：制品暂存、受控 systemd、健康检查 | T008,T012 | 待实现 | unit/路径/digest/命令注入负向测试 |
-| T014 | 实现 Agent 执行事件、脱敏摘要、重启后的 unknown 状态恢复 | T012,T013 | 待实现 | 回执 schema 和重启 fixture |
-| T015 | 接入真实健康与遥测验证；区分部署成功、遥测未验证和失败 | T010,T014 | 待实现 | ClickHouse 查询、延迟和超时场景 |
+| T012 | 实现 Agent job poll/lease/ack/result、过期和取消协议 | T009,T010 | 已完成（最小协议；签名 job 和部署状态闭环待后续） | `runtime/src/server/agent-jobs.ts`、`runtime/test/agent-jobs.test.ts` |
+| T013 | 实现 capability allow-list executor：制品暂存、受控 systemd、健康检查 | T008,T012 | 已完成（MVP allow-list；真实 preflight 待后续） | `runtime/src/agent/executor.ts`、digest/path/unit 负向测试 |
+| T014 | 实现 Agent 执行事件、脱敏摘要、重启后的 unknown 状态恢复 | T012,T013 | 已完成（回执/本地重启恢复；最终部署回执待后续） | `runtime/src/agent/jobs.ts`、`runtime/test/agent-job-runner.test.ts` |
+| T015 | 接入真实健康与遥测验证；区分部署成功、遥测未验证和失败 | T010,T014 | 部分完成（中心侧有界证据判定；真实 Agent/ClickHouse 查询待接入） | `runtime/src/deployment/verification.ts`、`runtime/test/deployment-verification.test.ts`；真实查询和执行器待实现 |
 
 ## E. AI 助手与工作台
 
 | ID | 任务 | 依赖 | 状态 | 验收证据 |
 | --- | --- | --- | --- | --- |
-| T016 | 暴露扫描、插桩提案、构建/部署提案、状态和回执工具 | T004,T010,T015 | 部分（扫描、只读插桩提案、服务计划、状态和事件工具） | `runtime/src/assistant/tools.ts`、assistant tool tests、typecheck |
-| T017 | 为源码 diff、部署计划、审批和执行时间线增加 Web 页面 | T006,T010,T015 | 待实现 | UI smoke/e2e 截图和错误状态 |
-| T018 | 在 AI 输出和 UI 中显示审批边界、风险、健康/遥测验证和 SSH 凭据清理提示 | T016,T017 | 待实现 | 文案快照和脱敏检查 |
+| T016 | 暴露扫描、插桩提案、构建/部署提案、状态和回执工具 | T004,T010,T015 | 部分（扫描、插桩提案、服务计划、状态和事件工具；apply 走管理员 HTTP 确认） | `runtime/src/assistant/tools.ts`、assistant tool tests、typecheck |
+| T017 | 为源码 diff、部署计划、审批和执行时间线增加 Web 页面 | T006,T010,T015 | 部分（服务部署、审批和时间线页面已完成；源码 diff 页面待补） | `web/src/app/ServiceDeploymentsPage.tsx`、web typecheck |
+| T018 | 在 AI 输出和 UI 中显示审批边界、风险、健康/遥测验证和 SSH 凭据清理提示 | T016,T017 | 部分（部署页面已显示审批边界、Agent 要求和未执行提示；AI/SSH 清理提示待补） | `web/src/app/ServiceDeploymentsPage.tsx`；文案快照待补 |
 
 ## F. 安全、可观测性与文档
 

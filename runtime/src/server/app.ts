@@ -27,6 +27,7 @@ import { registerAgentCredentials } from "./agent-credentials.js";
 import { registerMachineTerminal } from "./machine-terminal.js";
 import { registerManagedMachines } from "./managed-machines.js";
 import { registerServiceDeployments } from "./service-deployments.js";
+import { registerAgentJobs } from "./agent-jobs.js";
 import { registerAssistant } from "../assistant/index.js";
 import { registerDashboards } from "../domains/dashboards.js";
 import { registerLogs } from "../domains/logs.js";
@@ -107,11 +108,15 @@ export async function createApp(cfg: Config) {
         logger,
       };
     const agentCredentials = registerAgentCredentials(deps);
+    // Agent jobs are registered before service deployments so an approved
+    // deployment can enqueue its immutable pull-based job atomically with the
+    // centre state transition. The job module itself never executes commands.
+    const agentJobs = registerAgentJobs(deps, { agentCredentials });
     const managedMachines = registerManagedMachines(deps, { agentCredentials });
     registerSettings(deps, agentCredentials);
     // Service delivery metadata is intentionally separate from Agent bootstrap
     // records: plans can be reviewed before an Agent executes them.
-    const serviceDeployments = registerServiceDeployments(deps);
+    const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs });
     modules.push(serviceDeployments);
     const ingest = new Ingest(cat, auth, (...args) =>
       monitor?.accepted(...args),
@@ -130,6 +135,7 @@ export async function createApp(cfg: Config) {
         agentCredentials,
       }),
     );
+    modules.push(agentJobs);
     // Enrollment credentials are a separate migration boundary. Legacy
     // config.key based nodes keep working until they explicitly re-enroll.
     modules.push(agentCredentials);

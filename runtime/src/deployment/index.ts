@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./verification.js";
 export { SystemdDeploymentAdapter, systemdDeploymentAdapter } from "./systemd.js";
 
 import type { DeploymentAdapter } from "./types.js";

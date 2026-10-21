@@ -13,10 +13,10 @@
 
 本 SDD 描述的是完整目标能力；当前分支只实现了其中的可审阅计划切片，不能把它描述为已经可以自动部署业务：
 
-- `runtime/src/assistant/instrumentation.ts` 提供只读、启发式扫描器和受限的结构化插桩提案。提案目前只对可明确定位的 TypeScript/JavaScript 多行请求处理函数生成 unified diff；它不写入或应用 diff，也不执行构建或项目代码。Python、Go、Rust、Ruby 和歧义边界只返回手动步骤。
-- `runtime/src/deployment` 已有 `systemd` 纯逻辑适配器和显式 provider registry，并有边界测试；它尚未连接到业务部署 HTTP 模块或 Agent executor。
-- `runtime/src/server/service-deployments.ts` 目前持久化 service/target/release/deployment 元数据和脱敏 deployment events，生成 `awaiting_approval` 的通用计划，并提供管理员 `approve` 状态迁移、状态/事件查询和 `rollback_pending` 提案；尚无主机 apply、Agent job、真实 preflight、健康检查、遥测验证或最终回滚回执。
-- Assistant 目前提供扫描、只读插桩提案、服务列表、部署计划提案和部署状态读取工具。构建、插桩 apply、部署执行和回滚工具仍未提供。
+- `runtime/src/assistant/instrumentation.ts` 提供只读、启发式扫描器、受限的结构化插桩提案和管理员确认后的安全 apply。提案目前只对可明确定位的 TypeScript/JavaScript 多行请求处理函数生成 unified diff；apply 绑定 `base_revision`，检查路径、符号链接和文件大小并原子写入，仍不执行构建或项目代码。Python、Go、Rust、Ruby 和歧义边界只返回手动步骤。
+- `runtime/src/deployment` 已有 `systemd` 纯逻辑适配器和显式 provider registry，并有边界测试；适配器通过服务部署计划生成 typed action 的扩展点，主机动作由 Agent executor 解释。
+- `runtime/src/server/service-deployments.ts` 目前持久化 service/target/release/deployment 元数据和脱敏 deployment events，生成 `awaiting_approval` 的通用计划；管理员 `approve` 在 Agent 就绪后创建不可变 Agent job 并推进到 `agent_ready`，同时提供状态/事件查询和 `rollback_pending` 提案。当前通用计划没有 typed actions，executor 会拒绝空 actions，不会误报部署成功。`runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定，但尚无真实主机 preflight、真实 ClickHouse 查询、部署回执驱动的最终状态推进或最终回滚回执。
+- Assistant 目前提供扫描、只读插桩提案、管理员确认后的插桩 apply、服务列表、部署计划提案和部署状态读取工具。构建、真实部署编排和回滚工具仍未提供；Agent job 的拉取、能力执行和回执由 Agent 运行时独立完成。
 - `docker_compose` 目前最多作为目标元数据被登记，尚无对应适配器或执行器；只有注册到 registry 的 provider 才能执行，不能把登记成功解释为 provider 已支持。
 
 ## 背景与问题
