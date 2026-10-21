@@ -42,7 +42,7 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 
 ## 3. 设计原则
 
-1. **数据路径显式选择**：SDK 直连中心与 SDK 经 Agent 是两条完整路径，不因网络错误自动互相改投。
+1. **独立上报、路径显式**：业务 SDK 默认直连中心，Agent 独立上报自身任务数据；两者复用同一套 SDK 包，业务上报不依赖安装 Agent。已有显式 SDK 经 Agent 能力单独说明，不因网络错误自动互相改投。
 2. **Agent 是一等节点**：业务退出不会停止 Agent；Agent 不只是 SDK 的中转器，也不等同于“采集器”这个单一功能。
 3. **控制面和数据面分离**：控制凭据用于心跳和配置，数据凭据用于遥测；SDK Key、Agent local token、enrollment token 不能混用。
 4. **中心是配置权威**：任务、标签、告警、模型、密钥和部署计划在中心保存；Agent 只缓存可执行配置，SDK 只缓存端侧规则。
@@ -77,45 +77,69 @@ LightMoni 中心管理身份、配置和可查询数据，但不拥有业务代�
 
 ## 5. HLD 总体架构
 
+总览分为两个视图，避免把遥测、节点控制和浏览器入口混成一条链路。第一张图展示业务 SDK 与 Agent 各自上报中心：两个 SDK 节点表示同一套 SDK 包在不同进程中的实例。Agent 的采集和任务执行通过内嵌 SDK 打点，使用进程内 exporter 写入自己的持久队列，再由 Agent 发送。业务 SDK 的数据不经过 Agent。
+
+**独立数据上报与节点控制：**
+
 ```mermaid
 flowchart LR
-  subgraph Client[业务与节点]
+  subgraph Business[业务进程]
     App[业务服务]
     SDK[LightMoni SDK]
-    Agent[LightMoni Agent\n执行节点]
+    App --> SDK
+  end
+  subgraph Node[LightMoni Agent 独立进程]
     Collector[主机/进程/拨测/文件日志采集器]
     NodeSDK[Agent 内嵌同一 SDK]
+    Agent[Agent 持久队列与上报器]
+    Collector -->|打点| NodeSDK
+    NodeSDK -->|进程内 exporter| Agent
   end
   subgraph Center[LightMoni 中心]
-    HTTP[Node.js/TypeScript HTTP 主服务]
+    HTTP[遥测接收 API /v1/*]
+    Control[节点控制 API]
+    SQLite[SQLite 管理状态]
+    CH[ClickHouse 遥测正文]
+  end
+  SDK -->|HTTPS / SDK Key| HTTP
+  Agent -->|HTTPS / data credential| HTTP
+  Agent -->|心跳与拉配置 / control credential| Control
+  HTTP -->|校验后写入| CH
+  Control -->|节点身份与任务配置| SQLite
+```
+
+图中的箭头表示调用或发送方向；心跳和拉配置的响应沿原请求返回。任务配置由中心持有，节点主动拉取；这里没有新增中心主动连接 Agent 的入站要求。SDK → Agent 的现有显式转发能力见第 7.2 节，不作为当前推荐的业务主路径，也不因本次图示修正而删除。
+
+**用户入口与中心内部模块：**
+
+```mermaid
+flowchart LR
+  subgraph UI[同一 Web 工作台内的用户入口]
+    Web[React/TypeScript 工作台]
+    AIUI[AI 助手界面]
+    SSH[SSH 终端小窗]
+  end
+  subgraph Center[同一个 Node.js/TypeScript 中心服务]
+    API[中心管理 API / 登录会话]
     Auth[认证与凭据]
     Catalog[目录与查询]
     Domains[大盘/日志/告警/通知域]
     Assistant[AI 助手与审批]
-    SQLite[(SQLite\n管理状态)]
-    CH[(ClickHouse\n遥测正文)]
+    SQLite[SQLite 管理状态]
+    CH[ClickHouse 遥测查询]
   end
-  subgraph UI[用户入口]
-    Web[React/TypeScript 工作台]
-    AIUI[AI 助手界面]
-    SSH[SSH/终端小窗]
-  end
-  App --> SDK
-  SDK -->|direct：SDK Key| HTTP
-  SDK -->|agent：OTLP + local token| Agent
-  Collector --> Agent
-  NodeSDK -->|进程内 exporter| Agent
-  Agent -->|data credential + durable queue| HTTP
-  Web --> HTTP
-  AIUI --> Assistant
-  SSH --> HTTP
-  HTTP --> Auth
-  HTTP --> Catalog
-  HTTP --> Domains
-  HTTP --> Assistant
-  HTTP --> SQLite
-  HTTP --> CH
+  Web --> API
+  AIUI --> API
+  SSH -->|WebSocket / 管理员会话| API
+  API --> Auth
+  API --> Catalog
+  API --> Domains
+  API --> Assistant
+  API -->|共享状态仓储| SQLite
+  Catalog -->|统一 Query| CH
 ```
+
+图中拆开的 API 和领域模块是同一中心进程内的逻辑职责，不是新增的独立服务。鉴权先于领域处理；内部模块复用统一目录、查询与状态仓储，不在图中逐条展开依赖。AI 助手界面和 SSH 终端是两个用户入口，不相互调用；模型没有任意 SSH 终端权限。
 
 ### 5.1 部署拓扑
 
@@ -126,16 +150,13 @@ flowchart TB
   Browser[浏览器] -->|HTTPS| Proxy[可选反向代理]
   Proxy --> Center[LightMoni 主服务 :8080]
   Center --> CH[ClickHouse HTTP :8123]
-  Center --> State[(SQLite + secrets + outbox)]
-  HostA[用户主机 A] --> AgentA[Agent A :4318]
-  HostB[用户主机 B] --> AgentB[Agent B :4318]
-  AgentA -->|公网/内网 HTTPS| Center
-  AgentB -->|公网/内网 HTTPS| Center
-  Service[业务服务/容器] -->|直连中心或本机 Agent| Center
-  Service --> AgentA
+  Center --> State[SQLite + secrets + outbox]
+  Service[业务主机/容器：服务 + SDK] -->|HTTPS / SDK Key| Proxy
+  AgentA[用户主机 A：独立 Agent + 同一 SDK] -->|HTTPS / data 与 control 凭据| Proxy
+  AgentB[用户主机 B：独立 Agent + 同一 SDK] -->|HTTPS / data 与 control 凭据| Proxy
 ```
 
-TLS 可以由已有反向代理承担。中心外部地址必须能被 Agent 和直连 SDK 访问；容器中 `localhost` 只表示当前容器。发布的 Agent 包为 Linux amd64/arm64，并自带固定 Node 运行时；目标主机不需要另装 Node/npm。
+图中反向代理是可选的：不部署时，这些 HTTPS 请求直接到可访问的中心入口。业务主机与 Agent 主机可以是同一台，也可以分别部署；图中分开表示进程与凭据独立，不要求业务先找到 Agent 的本地端口。TLS 可以由已有反向代理承担。中心外部地址必须能被 Agent 和直连 SDK 访问；容器中 `localhost` 只表示当前容器。发布的 Agent 包为 Linux amd64/arm64，并自带固定 Node 运行时；目标主机不需要另装 Node/npm。
 
 ## 6. 组件职责和依赖方向
 
@@ -166,7 +187,9 @@ TLS 可以由已有反向代理承担。中心外部地址必须能被 Agent 和
 
 直连是 SDK 的默认目标，适合普通服务器、容器和 Serverless。安装 Agent 不是直连的前置条件。
 
-### 7.2 业务 SDK 经 Agent
+### 7.2 已有可选能力：业务 SDK 经 Agent
+
+本节记录已有的显式转发实现，供需要本地持久化和离线补传时选择。它不是总览主路径，也不是业务 SDK 的安装要求；本次系统设计图示修正不新增、删除或切换运行时能力。
 
 1. 用户明确选择 `LIGHTMONI_MODE=agent`，SDK 使用 Agent endpoint 和可选 local token。
 2. SDK 仍在业务进程内聚合和生成 OTLP，不把中心 control/data credential 暴露给业务。
