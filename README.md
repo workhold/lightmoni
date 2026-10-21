@@ -1,6 +1,10 @@
 # LightMoni
 
-面向个人和小团队的一体化监控工作台。Node.js / TypeScript主服务提供React界面，SQLite保存管理数据，ClickHouse保存遥测。业务接入提供Go、Node.js/TypeScript、Rust、Python四种record SDK，支持直连中心或由独立LightMoni Agent持久化转发。
+面向个人和小团队的一体化监控工作台。Node.js / TypeScript主服务提供React界面，SQLite保存管理数据，ClickHouse保存遥测。业务接入提供多语言 record SDK；当前发布与 deferred 矩阵以 `/api/v1/sdk-install`、发布脚本和 [SDD 012](specs/012-sdk-reporting-choice/spec.md) 为准，支持直连中心或由独立 LightMoni Agent 持久化转发。
+
+> **完整系统设计入口**：[LightMoni 系统设计基线](docs/system-design.md)
+>
+> 该文档按 SDD 方式维护，集中说明驱动目标、HLD、LLD、数据流、协议、凭据安全、部署、AI/Agent 联动、当前限制和演进路线。本文 README 保留部署和快速上手，系统级设计以该基线及其关联 SDD 为准。
 
 中心与LightMoni Agent均由Node.js / TypeScript实现，公共协议位于`runtime/src/shared`。SDK和中心上报采用本地通用打点与固定窗口方案，主机管理、SSH终端、Agent注册和control/data凭据、AI助手、告警与界面语言采用最新main；本次取舍见[整合说明](specs/011-aligned-metric-windows/main-integration.md)。
 
