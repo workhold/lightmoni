@@ -17,14 +17,19 @@ Every feature records user scenarios, measurable acceptance, design decisions, c
 ### V. Operable delivery
 Runtime dependencies are pinned and shipped with deployment artifacts. Credentials never appear in browser responses, process arguments or error details. Existing stored data is preserved. New Doca code is architectural reference only; current AGPL source is not copied under the historical MIT notice.
 
+### VI. Architecture documentation parity
+An architecture change is incomplete until the repository system design and the canonical Doca design document describe the same accepted behavior. The change SDD and pull request must identify the affected sections, record a successful Doca write and readback of the target text or native diagrams, and state why synchronization is not applicable for non-architecture changes. Doca availability or authentication failures must be reported honestly; credentials never enter source, logs, URLs, pull requests or document bodies.
+
 ## Development Workflow
-Spec Kit sequence: constitution → specification → plan/research/contracts → tasks → implementation → verification. Checklists review requirement quality, task checkboxes track implementation. Changes to scope update the spec and tasks first.
+Spec Kit sequence: constitution → specification → plan/research/contracts → tasks → implementation → verification. Architecture changes add repository/Doca design synchronization and readback evidence before the PR is considered complete. Checklists review requirement quality, task checkboxes track implementation. Changes to scope update the spec and tasks first.
 
 ## Governance
 This constitution applies alongside docs/contracts.md. Amendments require a reason, a version update and compatibility review. This initial version formalizes current project constraints for the authorized Mastra migration.
 
-**Version**: 1.2.0 | **Ratified**: 2026-10-14 | **Last Amended**: 2026-10-18
+**Version**: 1.3.0 | **Ratified**: 2026-10-14 | **Last Amended**: 2026-10-21
 
 Amendment 1.1.0: The user explicitly authorized migrating the center and Agent to Node.js. Host authority is language independent; data compatibility and all security constraints remain required. Go business SDK support is retained.
 
 Amendment 1.2.0: The user authorized shared alert rule/silence capabilities followed by unified assistant integration. This extends registered tools to reviewable platform change proposals, preserving existing business permissions and preventing model-side approval. Existing dashboard and code-task confirmation flows remain compatible.
+
+Amendment 1.3.0: Architecture changes now require parity between `docs/system-design.md` and the canonical Doca design document, with successful write/readback evidence in the SDD and pull request. Non-architecture changes record why synchronization is not applicable.
