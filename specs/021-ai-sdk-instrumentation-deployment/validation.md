@@ -81,4 +81,4 @@ npm test --workspace web -- --runInBand
 - [x] `docs/system-design.md` 与 Doca 在同一 PR 同步；PR 描述列出仓库章节、Doca 链接、写入/回读结果。
 - [ ] 管理员审批、secret 脱敏、SSH 清理提示和错误码均有 UI/AI 展示。
 - [x] runtime typecheck 和相关部署/扫描测试通过；执行器、健康/遥测和未知结果仍明确标为未实现。
-- [ ] PR 保持待审核，未经用户明确授权不合并。
+- [x] PR #25 已创建并保持待审核；未经用户明确授权不合并。
