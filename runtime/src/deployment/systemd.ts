@@ -102,7 +102,10 @@ export class SystemdDeploymentAdapter implements DeploymentAdapter {
     const errors = validateSpec(input.spec);
     if (input.probe.provider !== this.provider || input.probe.targetId !== input.spec.target.id)
       errors.push(issue("invalid_target", "probe does not belong to this systemd target"));
-    if (!input.probe.supported) errors.push(...input.probe.issues);
+    // A supported provider is not enough: the exact preflight snapshot must
+    // be ready. This prevents planning against a missing unit or unavailable
+    // systemd host when a caller only checks `supported`.
+    if (!input.probe.supported || !input.probe.ready) errors.push(...input.probe.issues);
     if (errors.length) {
       const details = errors.map((item) => item.message).join("; ");
       throw new Error(`cannot create deployment plan: ${details}`);

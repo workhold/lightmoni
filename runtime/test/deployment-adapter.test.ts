@@ -37,6 +37,10 @@ test("systemd adapter reports preflight issues without executing remote commands
   assert.equal(result.supported, true);
   assert.equal(result.ready, false);
   assert.equal(result.issues[0]?.code, "systemd_unavailable");
+  assert.throws(
+    () => adapter.plan({ id: "deployment-unavailable", spec, probe: result }),
+    /cannot create deployment plan/,
+  );
 });
 
 test("systemd adapter creates a reviewable typed plan and requires approval", () => {
