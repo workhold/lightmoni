@@ -26,6 +26,7 @@ import { registerNodes } from "./nodes.js";
 import { registerAgentCredentials } from "./agent-credentials.js";
 import { registerMachineTerminal } from "./machine-terminal.js";
 import { registerManagedMachines } from "./managed-machines.js";
+import { registerServiceDeployments } from "./service-deployments.js";
 import { registerAssistant } from "../assistant/index.js";
 import { registerDashboards } from "../domains/dashboards.js";
 import { registerLogs } from "../domains/logs.js";
@@ -107,6 +108,9 @@ export async function createApp(cfg: Config) {
       };
     const agentCredentials = registerAgentCredentials(deps);
     const managedMachines = registerManagedMachines(deps, { agentCredentials });
+    // Service delivery metadata is intentionally separate from Agent bootstrap
+    // records: plans can be reviewed before an Agent executes them.
+    modules.push(registerServiceDeployments(deps));
     registerSettings(deps, agentCredentials);
     const ingest = new Ingest(cat, auth, (...args) =>
       monitor?.accepted(...args),
