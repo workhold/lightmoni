@@ -353,4 +353,3 @@ export function registerServiceDeployments(deps: Dependencies): Module & Service
     createPlan(input.service_id, input.target_id, input.release_id, actorID);
   return { assistantServices, assistantDeployment, assistantPlan };
 }
-

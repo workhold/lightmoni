@@ -58,4 +58,3 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(detail.data.deployments.length, 1);
   assert.notEqual(id(), "");
 });
-

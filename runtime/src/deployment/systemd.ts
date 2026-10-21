@@ -183,4 +183,3 @@ export class SystemdDeploymentAdapter implements DeploymentAdapter {
 }
 
 export const systemdDeploymentAdapter = new SystemdDeploymentAdapter();
-
