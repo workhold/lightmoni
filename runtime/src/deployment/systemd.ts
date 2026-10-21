@@ -31,6 +31,7 @@ function validPath(value: string): boolean {
 function validateTarget(target: ServiceTarget): DeploymentIssue[] {
   const issues: DeploymentIssue[] = [];
   if (!target.id || target.id.length > 128) issues.push(issue("invalid_target", "target id is required"));
+  if (target.provider !== "systemd") issues.push(issue("invalid_target", "target provider is not systemd"));
   if (!UNIT.test(target.unit)) issues.push(issue("invalid_target", "systemd unit must end in .service"));
   if (!validPath(target.releaseDirectory)) issues.push(issue("invalid_target", "release directory must be an absolute controlled path"));
   return issues;

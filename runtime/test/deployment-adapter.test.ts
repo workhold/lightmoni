@@ -92,3 +92,11 @@ test("provider registry rejects implicit fallback and duplicate providers", () =
   assert.throws(() => registry.require("docker_compose"), /unsupported deployment provider/);
   assert.throws(() => registry.register(new SystemdDeploymentAdapter()), /already registered/);
 });
+
+test("systemd adapter refuses a target declared for another provider", () => {
+  const adapter = new SystemdDeploymentAdapter();
+  const foreign = { ...target, provider: "docker_compose" as never };
+  const probe = adapter.probe({ target: foreign, snapshot: snapshot() });
+  assert.equal(probe.ready, false);
+  assert.equal(probe.issues.some((item) => item.message.includes("provider")), true);
+});
