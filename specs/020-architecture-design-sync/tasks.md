@@ -7,4 +7,4 @@
 | T003 | 在 `docs/system-design.md` 增加维护规则和 Doca 链接 | 完成 | 第 1 节和索引可定位在线副本 |
 | T004 | 在 Doca 设计文档追加同语义原生富文本章节 | 完成 | 写入返回 saved，回读确认文本 |
 | T005 | 编写本 SDD 的计划、任务和验证记录 | 完成 | 四类文件齐全 |
-| T006 | 检查凭据、链接和文档一致性，提交待评审 PR | 进行中 | validation.md 与 PR 描述提供证据 |
+| T006 | 检查凭据、链接和文档一致性，提交待评审 PR | 完成 | [PR #24](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/24)；validation.md 与 PR 描述提供证据 |
