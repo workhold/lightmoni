@@ -13,10 +13,10 @@
 
 本 SDD 描述的是完整目标能力；当前分支只实现了其中的可审阅计划切片，不能把它描述为已经可以自动部署业务：
 
-- `runtime/src/assistant/instrumentation.ts` 是只读、启发式扫描器。它不生成或应用 diff，也不执行构建或项目代码。
+- `runtime/src/assistant/instrumentation.ts` 提供只读、启发式扫描器和受限的结构化插桩提案。提案目前只对可明确定位的 TypeScript/JavaScript 多行请求处理函数生成 unified diff；它不写入或应用 diff，也不执行构建或项目代码。Python、Go、Rust、Ruby 和歧义边界只返回手动步骤。
 - `runtime/src/deployment` 已有 `systemd` 纯逻辑适配器和显式 provider registry，并有边界测试；它尚未连接到业务部署 HTTP 模块或 Agent executor。
-- `runtime/src/server/service-deployments.ts` 目前持久化 service/target/release/deployment 元数据，并生成 `awaiting_approval` 的通用计划；尚无 `approve/apply/rollback`、Agent job、真实 preflight、健康检查或遥测验证。
-- Assistant 目前只提供扫描、服务列表、部署计划提案和部署状态读取工具。构建、插桩 apply、部署执行和回滚工具仍未提供。
+- `runtime/src/server/service-deployments.ts` 目前持久化 service/target/release/deployment 元数据和脱敏 deployment events，生成 `awaiting_approval` 的通用计划，并提供管理员 `approve` 状态迁移、状态/事件查询和 `rollback_pending` 提案；尚无主机 apply、Agent job、真实 preflight、健康检查、遥测验证或最终回滚回执。
+- Assistant 目前提供扫描、只读插桩提案、服务列表、部署计划提案和部署状态读取工具。构建、插桩 apply、部署执行和回滚工具仍未提供。
 - `docker_compose` 目前最多作为目标元数据被登记，尚无对应适配器或执行器；只有注册到 registry 的 provider 才能执行，不能把登记成功解释为 provider 已支持。
 
 ## 背景与问题

@@ -2,7 +2,7 @@
 
 所有接口均挂在 `/api/v1`，需要登录；创建/应用源码变更、构建、Agent 安装、部署、回滚和修改目标仅管理员可用。响应不包含私钥、密码、token 或原始命令输出。
 
-> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段，并且部署接口只生成/读取 `awaiting_approval` 通用计划；插桩 propose/apply、release 构建、approve/rollback、Agent job 和真实验证接口尚未实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
+> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现受管理员保护的 `approve`、状态查询、事件查询和 `rollback_pending` 提案，但不会创建 Agent job 或执行主机动作。插桩的只读 propose 已通过 AI 工具提供，但尚无持久化插桩 plan/apply HTTP、release 构建、Agent job 和真实验证接口。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
 
 ## 通用约束
 
@@ -119,15 +119,19 @@
 
 ### `POST /deployments/:id/approve`
 
-管理员请求：`{"expected_state":"awaiting_approval","confirm":true}`。成功返回 `{id,state:"agent_ready",operation_id}`。若 Agent 未激活，返回 `409 agent_not_ready` 并保留计划供重试。
+管理员请求：`{"expected_state":"awaiting_approval","confirm":true}`。成功返回 `{id,state:"agent_ready",operation_id}`，并记录 `approved_by` 与状态事件。当前切片只授权下一阶段，不创建或执行 Agent job；若目标机器没有已激活且最近心跳的 Agent，返回 `409 agent_not_ready` 并保留计划供重试。重复审批不能跳过状态校验。
 
 ### `GET /deployments/:id`
 
-返回脱敏计划、当前状态、phase、错误码、目标快照、健康结果、遥测验证、操作者和时间线摘要。
+返回脱敏计划、当前状态、phase、operation ID、previous/目标快照、错误码、健康结果、遥测验证、操作者和时间线摘要。
+
+### `GET /deployments/:id/events`
+
+返回按追加顺序排列的脱敏状态事件：`{id,deployment_id,phase,state,code,summary,actor,created_at}`。事件只由中心状态迁移写入，不能由 Agent 或 AI 直接伪造。
 
 ### `POST /deployments/:id/rollback`
 
-管理员请求：`{"reason":"health_check_failed","confirm":true}`。只允许 `failed`/`rollback_pending` 或已批准的激活状态；返回 `{id,state:"rolling_back",operation_id}`。
+管理员请求：`{"reason":"health_check_failed","confirm":true}`。只允许 `failed`/`rollback_pending` 或已批准的激活状态；当前切片生成 `rollback_pending` 审批/执行提案并记录 operation ID，不直接执行回滚。真正的 Agent 回滚 job 和 `rolling_back → rolled_back` 迁移属于后续执行器切片。
 
 ## AI 工具
 

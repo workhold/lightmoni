@@ -1,10 +1,10 @@
 # SDD 021：验证记录
 
-> 记录截至 2026-10-21。验证结果只覆盖本次计划层/扫描切片，不代表 Agent 执行、真实部署或遥测闭环已经完成。
+> 记录截至 2026-10-22。验证结果覆盖中心部署状态/审批提案、计划层和扫描切片，不代表 Agent 执行、真实部署或遥测闭环已经完成。
 
 ## 验收范围
 
-本文件记录从规格到实现的可复核证据。本次切片实现了业务服务/目标/版本/部署计划元数据、只读源码扫描、AI 计划工具和纯逻辑 systemd 适配器；Agent job executor、受控构建、自动插桩补丁和遥测验证仍待实现，不能把计划生成当作端到端部署完成。
+本文件记录从规格到实现的可复核证据。本次切片实现了业务服务/目标/版本/部署计划元数据、中心状态迁移、管理员审批边界、脱敏部署事件和回滚提案、只读源码扫描、明确 TypeScript/JavaScript 请求边界的结构化插桩提案、AI 计划工具和纯逻辑 systemd 适配器；Agent job executor、受控构建、插桩 apply 和遥测验证仍待实现，不能把审批或计划生成当作端到端部署完成。
 
 ## 规格与架构门
 
@@ -20,20 +20,23 @@
 | 场景 | 预期 | 当前证据 | 状态 |
 | --- | --- | --- | --- |
 | Node/Python/Go/Rust 扫描 | 报告语言、框架、SDK 和候选位置，不执行项目代码 | `runtime/test/instrumentation.test.ts` | 通过（当前为启发式扫描） |
-| 生成插桩 diff | 逐文件摘要、风险和验证命令；不自动写入 | instrumentation plan 待实现 | 待验证 |
+| 生成插桩 diff | 明确 TS/JS 多行请求边界逐文件生成摘要、unified diff、风险和验证命令；不自动写入；其他语言给手动步骤 | `runtime/test/instrumentation.test.ts`、`runtime/test/assistant-instrumentation-tools.test.ts` | 通过（受限只读提案） |
 | revision 冲突 | apply 返回 409，不覆盖新修改 | API 测试待实现 | 待验证 |
 | 直连 SDK | 无 Agent 仍能上报中心 | 既有 SDK/接收测试 | 兼容性复核 |
 | Agent SDK 模式 | Agent 本地持久化后用 data credential 上报 | 既有 Agent 队列；新闭环待复核 | 待验证 |
 | systemd probe | 缺 unit/systemd/坏路径时结构化拒绝 | `runtime/test/deployment-adapter.test.ts` | 通过（纯计划层） |
 | systemd plan | typed actions，禁止 shell | `runtime/test/deployment-adapter.test.ts` | 通过（纯计划层） |
 | 服务/目标/版本/部署计划 | 管理员创建并生成 awaiting approval 计划 | `runtime/test/service-deployments.test.ts` | 通过（不执行） |
+| 部署审批和状态迁移 | 已激活 Agent 才能由 awaiting approval 进入 agent_ready；非法状态拒绝 | `runtime/test/service-deployments.test.ts` | 通过（仅中心审批边界） |
+| 部署事件时间线 | 计划/审批/回滚提案写入脱敏、按追加顺序可读事件 | `runtime/test/service-deployments.test.ts` | 通过 |
+| 回滚提案 | 已批准/失败部署可进入 rollback_pending，不执行主机动作 | `runtime/test/service-deployments.test.ts` | 通过（不执行） |
 | AI 服务部署工具 | 结构化 ID 生成审核计划 | `runtime/src/assistant/tools.ts` + typecheck | 通过（不执行） |
 | Agent staging | digest 核对、受控 release 目录和幂等 job | executor 待实现 | 待验证 |
 | 成功部署 | active/HTTP 健康、遥测查询通过 | deployment API/验证待实现 | 待验证 |
 | 遥测延迟 | 显示部署成功、遥测未验证，不误报失败 | 遥测验证待实现 | 待验证 |
-| 健康失败回滚 | 保留 Agent，切换 previous release | executor/回滚 API 待实现 | 待验证 |
+| 健康失败回滚 | 保留 Agent，切换 previous release | Agent executor/最终回执待实现；中心可保存 rollback_pending 提案 | 待验证 |
 | 恶意输入 | 路径、unit、URL、shell、过期签名均拒绝 | 安全负向测试待实现 | 待验证 |
-| 权限和审批 | 只有管理员能 apply/build/approve/rollback | API/AI 工具待实现 | 待验证 |
+| 权限和审批 | 只有管理员能 apply/build/approve/rollback | service deployment API + `service-deployments.test.ts` | 部分通过（approve/rollback；apply/build 待实现） |
 | 重试和未知结果 | operation/job 幂等；重启后先 probe | Agent job 协议待实现 | 待验证 |
 
 ## 必跑检查
@@ -52,11 +55,14 @@ npm test --workspace web -- --runInBand
 本次已运行：
 
 - `npm --prefix runtime run typecheck`：通过。
-- `npm --prefix runtime test`：232 passed、3 skipped、0 failed（共 235 个测试）。
+- `npm --prefix runtime test`：241 tests，238 passed、3 skipped、0 failed。
+- 插桩专用 `node --import tsx --test runtime/test/instrumentation.test.ts`：5 passed、0 failed；AI 工具专用 `node --import tsx --test runtime/test/assistant-instrumentation-tools.test.ts`：2 passed、0 failed；部署状态/迁移专用测试通过。
 - `npm run typecheck`：runtime、ai-runtime、web 均通过。
-- `git diff --check`：提交前必须再次运行；文档或代码继续变更后以最后一次结果为准。
+- `git diff --check`：通过。
 
-- deployment adapter unit tests（合法/非法路径、摘要、状态迁移、健康检查、rollback）；
+本轮新增验证：部署计划事件与状态变更在同一 SQLite 事务内写入；审批要求 Agent 最近 180 秒内心跳；回滚重复请求复用已持久化 operation ID；插桩提案支持传入扫描返回的 `base_revision` 并拒绝过期 revision。
+
+- deployment adapter unit tests（合法/非法路径、摘要、健康检查、rollback）及 service deployment 状态迁移/审批/事件测试；
 - SQLite migration/repository 与 API 权限/幂等集成测试；
 - Agent job lease、过期、重启 unknown、capability allow-list 和回执脱敏测试；
 - scanner fixture、golden diff、revision conflict 和 secret 排除测试；

@@ -33,7 +33,7 @@ flowchart LR
 
 中心控制面只保存管理状态和制品元数据；遥测仍写入 ClickHouse。Agent 是独立节点执行平面，不能获得模型凭据或任意命令权限。SDK 默认直连中心，Agent 模式由用户显式选择。
 
-当前实现只覆盖中心的元数据和计划切片：systemd 适配器独立提供可测试的纯逻辑接口，但尚未由 `service-deployments` API 调用，也没有 Agent job 执行链路。下文带“后续”或“待实现”的模块不能在本次 PR 中宣称可用。
+当前实现覆盖中心的元数据、状态迁移和审批提案切片：systemd 适配器独立提供可测试的纯逻辑接口，`service-deployments` API 已持久化状态、审批、脱敏事件和 `rollback_pending` 提案，但尚未由 Agent job 执行链路调用。下文带“后续”或“待实现”的模块不能在本次 PR 中宣称可用。
 
 ## 3. 分层与模块
 
@@ -86,7 +86,7 @@ flowchart LR
 | `instrumentation_plans` | `id`, `service_id`, `workspace_ref`, `base_revision`, `diff_json`, `findings_json`, `state` | apply 必须匹配 base revision |
 | `agent_jobs` | `id`, `agent_id`, `deployment_id`, `capabilities`, `expires_at`, `state`, `receipt_json` | job ID 唯一，一次仅一个 deployment operation；当前尚未建表 |
 
-当前代码实际只创建 `services`、`service_targets`、`releases` 和 `deployments` 四张表；`deployment_events`、`instrumentation_plans`、`agent_jobs` 仍是目标模型。当前 service API 的字段是 `repository_url`、`adapter`、`config` 等，`default_mode`、`provider_config`、`agent_id` 和 release 构建状态等契约字段尚未接入，不能按目标契约调用。
+当前代码实际创建 `services`、`service_targets`、`releases`、`deployments` 和 `deployment_events` 五张表；`instrumentation_plans`、`agent_jobs` 仍是目标模型。当前 service API 的字段是 `repository_url`、`adapter`、`config` 等，`default_mode`、`provider_config`、`agent_id` 和 release 构建状态等契约字段尚未接入，不能按目标契约调用。部署 API 已实现 `awaiting_approval → agent_ready` 的管理员审批和合法迁移校验，以及 `GET .../events`、`rollback → rollback_pending` 提案；没有生成 job、执行 typed action、健康/遥测验证或 `rolled_back` 回执。
 
 ## 5. HTTP 与工具流程
 

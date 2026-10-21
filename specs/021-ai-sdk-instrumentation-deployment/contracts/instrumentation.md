@@ -1,6 +1,6 @@
 # SDD 021：SDK 插桩契约
 
-> 本文件是目标契约。当前扫描器返回 `plan_id`、`workspace`、`base_revision`、`languages`、`frameworks`、`package_managers`、`sdk`、`candidates`、`warnings` 和 `files_scanned`，只实现只读启发式扫描；`serviceCandidates`、结构化 diff、apply 和验证命令仍待实现。
+> 本文件是目标契约。当前扫描器返回 `plan_id`、`workspace`、`base_revision`、`languages`、`frameworks`、`package_managers`、`sdk`、`candidates`、`warnings` 和 `files_scanned`。AI 可以基于授权 workspace 生成只读、可审阅的结构化插桩计划；应用 diff、构建和部署仍由后续受控流程负责。
 
 ## 扫描报告
 
@@ -27,6 +27,50 @@ interface ScanReport {
 扫描器不能读取 `.env`/私钥等 secret 内容；只报告配置键名和引用位置。解析失败或置信度低时保留报告并要求手动步骤。
 
 ## 插桩计划和 diff
+
+### AI 工具：`propose_sdk_instrumentation`
+
+该工具只生成计划，不写入 workspace、不执行项目代码、不安装依赖，也不代表管理员批准。调用者应先运行 `scan_sdk_instrumentation`，再把用户确认的意图传入：
+
+```ts
+interface ProposeSdkInstrumentationInput {
+  workspace: string;
+  intent: string;
+  base_revision?: string;
+  service?: string;
+  env?: string;
+  mode?: "direct" | "agent";
+  table?: string;
+  metric?: string;
+}
+```
+
+如果调用者先执行扫描，应把扫描返回的 `base_revision` 原样传回；版本不匹配时提案返回 `revision conflict`，避免基于过期源码生成可应用 diff。
+
+返回的 `state` 固定为 `awaiting_approval`，并绑定本次扫描得到的 `base_revision`：
+
+```ts
+interface InstrumentationPlan {
+  plan_id: string;
+  workspace: string;
+  base_revision: string;
+  state: "awaiting_approval";
+  intent: string;
+  files: Array<{
+    path: string;
+    summary: string;
+    patch: string;
+    operations: Array<{op: "insert"; line: number; content: string}>;
+    risks: string[];
+    validation_steps: string[];
+  }>;
+  manual_steps: string[];
+  warnings: string[];
+  validation_steps: string[];
+}
+```
+
+当无法安全定位插桩位置时，`files` 可以为空，必须给出 `manual_steps` 和原因；工具不能为了生成 diff 而猜测业务语义或引入新依赖。
 
 计划必须绑定 `baseRevision`。每个变更文件带相对路径、摘要、结构化 patch、风险和验证命令。允许的首批插桩目标：
 

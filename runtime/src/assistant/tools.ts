@@ -286,6 +286,58 @@ export function monitoringTools(
         return instrumentation.scan(text(input.workspace), signal);
       },
     });
+    tools.push({
+      name: "propose_sdk_instrumentation",
+      description:
+        "Generate a structured, reviewable LightMoni SDK instrumentation plan for an authorized workspace. It may include patch previews, risks and validation steps, but it never writes files, executes project code, installs dependencies or applies a change. Run scan_sdk_instrumentation first when possible and include the returned workspace context.",
+      effect: "draft",
+      schema: obj(
+        {
+          workspace: { type: "string", minLength: 1, maxLength: 512 },
+          intent: { type: "string", minLength: 2, maxLength: 2000 },
+          base_revision: { type: "string", maxLength: 128 },
+          service: { type: "string", maxLength: 200 },
+          env: { type: "string", maxLength: 200 },
+          mode: { type: "string", enum: ["direct", "agent"] },
+          table: { type: "string", maxLength: 200 },
+          metric: { type: "string", maxLength: 200 },
+        },
+        ["workspace", "intent"],
+      ),
+      execute: async (input, signal, user) => {
+        if (!user || user.role !== "admin") throw Error("administrator required");
+        object(
+          input,
+          ["workspace", "intent", "base_revision", "service", "env", "mode", "table", "metric"],
+          ["workspace", "intent"],
+        );
+        const workspace = text(input.workspace).trim();
+        const intent = text(input.intent).trim();
+        if (!workspace || workspace.length > 512 || !intent || intent.length > 2000)
+          throw Error("workspace and intent are required");
+        if (input.base_revision != null && (typeof input.base_revision !== "string" || input.base_revision.length > 128 || !input.base_revision.trim()))
+          throw Error("invalid tool input");
+        for (const field of ["service", "env", "table", "metric"] as const) {
+          if (input[field] != null && (typeof input[field] !== "string" || input[field].length > 200))
+            throw Error("invalid tool input");
+        }
+        if (input.mode != null && input.mode !== "direct" && input.mode !== "agent")
+          throw Error("invalid tool input");
+        return instrumentation.propose(
+          {
+            workspace,
+            intent,
+            ...(input.base_revision == null ? {} : { base_revision: text(input.base_revision).trim() }),
+            ...(input.service == null ? {} : { service: text(input.service).trim() }),
+            ...(input.env == null ? {} : { env: text(input.env).trim() }),
+            ...(input.mode == null ? {} : { mode: input.mode }),
+            ...(input.table == null ? {} : { table: text(input.table).trim() }),
+            ...(input.metric == null ? {} : { metric: text(input.metric).trim() }),
+          },
+          signal,
+        );
+      },
+    });
   }
   if (options.deployments) {
     const deployments = options.deployments;
