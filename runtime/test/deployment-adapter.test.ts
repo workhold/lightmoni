@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SystemdDeploymentAdapter, type ServiceSpec, type SystemdSnapshot } from "../src/deployment/index.js";
+import { DeploymentAdapterRegistry, SystemdDeploymentAdapter, type ServiceSpec, type SystemdSnapshot } from "../src/deployment/index.js";
 
 const target = {
   id: "payments-prod",
@@ -81,4 +81,14 @@ test("systemd adapter rejects paths and units that could escape its capability b
     () => adapter.plan({ id: "deployment-3", spec: { ...spec, target: unsafe }, probe }),
     /cannot create deployment plan/,
   );
+});
+
+test("provider registry rejects implicit fallback and duplicate providers", () => {
+  const adapter = new SystemdDeploymentAdapter();
+  const registry = new DeploymentAdapterRegistry([adapter]);
+  assert.deepEqual(registry.list(), ["systemd"]);
+  assert.equal(registry.require("systemd"), adapter);
+  assert.equal(registry.get("docker_compose"), undefined);
+  assert.throws(() => registry.require("docker_compose"), /unsupported deployment provider/);
+  assert.throws(() => registry.register(new SystemdDeploymentAdapter()), /already registered/);
 });
