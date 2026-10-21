@@ -13,4 +13,4 @@
 | T009 | 提交功能分支并创建待审核 PR | 完成 | [PR #22](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/22) 已合入主干 |
 | T010 | 修正主图中的数据路径、节点控制和中心模块边界 | 完成 | SDK 与 Agent 分别上报，保留同一 SDK 包复用语义 |
 | T011 | 同步修正 Doca 原生图块及对应图例 | 完成 | 保留文档/原块 ID，回读确认节点和边 |
-| T012 | 验证修正并提交独立文档 PR | 进行中 | 记录检查证据和视觉验收限制，返回 PR URL |
+| T012 | 验证修正并提交独立文档 PR | 完成 | [PR #23](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/23) 待评审，验证与视觉验收限制已记录 |
