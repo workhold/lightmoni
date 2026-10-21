@@ -55,6 +55,8 @@ import type { ManagedMachineStore } from "../server/managed-machines.js";
 import { AlertCapabilities, AlertCapabilityError } from "../domains/alert-capabilities.js";
 import { AlertProposalService } from "./alert-proposals.js";
 import { alertTools } from "./alert-tools.js";
+import { InstrumentationService } from "./instrumentation.js";
+import type { ServiceDeploymentStore } from "../server/service-deployments.js";
 export interface AssistantOptions {
   runtime?: Runtime;
   tools?: Tool[];
@@ -66,6 +68,8 @@ export interface AssistantOptions {
   codeAllowedCommands?: string[];
   machines?: ManagedMachineStore;
   alerts?: AlertCapabilities;
+  deployments?: ServiceDeploymentStore;
+  instrumentationWorkspaceRoot?: string;
 }
 const id = () => randomBytes(16).toString("hex");
 const key = (user: string, session: string) => `session/${user}/${session}`;
@@ -168,6 +172,11 @@ export function registerAssistant(
   };
   const codeWorkspace =
     options.codeWorkspaceRoot ?? process.env.LIGHTMONI_CODE_WORKSPACE;
+  const instrumentationRoot =
+    options.instrumentationWorkspaceRoot ?? codeWorkspace;
+  const instrumentation = instrumentationRoot?.trim()
+    ? new InstrumentationService(instrumentationRoot)
+    : undefined;
   const codeTasks = codeWorkspace?.trim()
     ? new CodeTaskService({
         workspaceRoot: codeWorkspace,
@@ -252,6 +261,8 @@ export function registerAssistant(
           }
           : {}),
         ...(options.machines ? { machines: options.machines } : {}),
+        ...(options.deployments ? { deployments: options.deployments } : {}),
+        ...(instrumentation ? { instrumentation } : {}),
       }),
       ...(options.alerts && alertProposals
         ? alertTools(options.alerts, alertProposals)

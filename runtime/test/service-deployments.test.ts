@@ -43,6 +43,8 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   const serviceID = created.data.id;
   const target = await request(`/api/v1/services/${serviceID}/targets`, "POST", { machine_id: machineID, adapter: "systemd", config: { unit: "checkout.service" } });
   assert.equal(target.status, 201);
+  const unsupportedTarget = await request(`/api/v1/services/${serviceID}/targets`, "POST", { machine_id: "machine-1", adapter: "docker_compose", config: {} });
+  assert.equal(unsupportedTarget.status, 400);
   const release = await request(`/api/v1/services/${serviceID}/releases`, "POST", { version: "2026.10.21", source_type: "artifact", source_ref: "sha256:abc", artifact_digest: "sha256:abc" });
   assert.equal(release.status, 201);
   const plan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });

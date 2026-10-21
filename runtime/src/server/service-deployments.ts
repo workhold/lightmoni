@@ -1,6 +1,7 @@
 import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
+import { deploymentAdapters } from "../deployment/index.js";
 
 /**
  * Service delivery metadata.
@@ -20,7 +21,9 @@ export type DeploymentStatus =
   | "failed"
   | "cancelled";
 
-const ADAPTERS = new Set<ServiceAdapter>(["systemd", "docker_compose"]);
+// Keep the API in lockstep with the provider registry. A provider name that
+// only exists as a future type must not produce an apparently deployable plan.
+const ADAPTERS = new Set<string>(deploymentAdapters.list());
 const SERVICE_ID = /^[a-f0-9]{32}$/;
 const MAX_JSON_BYTES = 64 << 10;
 
@@ -64,6 +67,15 @@ const safe = (deps: Dependencies, handler: Handler): Handler => async (ctx) => {
     }
   }
 };
+
+export interface ServiceDeploymentStore {
+  /** Sanitized service inventory for assistant reads. */
+  assistantServices(): ReturnType<typeof serviceView>[];
+  /** Sanitized deployment record for assistant reads. */
+  assistantDeployment(deploymentID: string): Record<string, any>;
+  /** Create an approval-ready plan without executing a host action. */
+  assistantPlan(input: { service_id: string; target_id: string; release_id: string }, actorID: string): Record<string, any>;
+}
 
 const serviceView = (row: any) => ({
   id: row.id,
@@ -116,7 +128,7 @@ const deploymentView = (row: any) => ({
 });
 
 /** Register service inventory and approval-ready delivery plan APIs. */
-export function registerServiceDeployments(deps: Dependencies): Module {
+export function registerServiceDeployments(deps: Dependencies): Module & ServiceDeploymentStore {
   const { db, router } = deps;
   db.exec(`
     CREATE TABLE IF NOT EXISTS services(
@@ -223,6 +235,29 @@ export function registerServiceDeployments(deps: Dependencies): Module {
   };
   const body = async (ctx: Context) => record(await ctx.body());
 
+  const createPlan = (serviceID: string, targetID: string, releaseID: string, actorID: string) => {
+    const target = ensureTarget(serviceID, targetID);
+    const release = ensureRelease(serviceID, releaseID);
+    if (!ADAPTERS.has(target.adapter)) fail(400, "unsupported deployment provider");
+    if (target.status === "disabled") fail(409, "服务目标已禁用");
+    const machine = ensureMachine(target.machine_id), at = nowISO(deps), deploymentID = id();
+    const plan = {
+      version: "service-deployment/v1",
+      adapter: target.adapter,
+      provider_plan_status: "generic",
+      provider_plan_reason: "agent_preflight_required",
+      service_id: serviceID,
+      target_id: target.id,
+      release_id: release.id,
+      machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, username: machine.username },
+      release: { version: release.version, source_type: release.source_type, source_ref: release.source_ref, artifact_digest: release.artifact_digest },
+      steps: ["校验制品与部署目标", "由 Agent 暂存不可变制品", "切换服务版本", "执行健康检查", "验证 LightMoni 遥测", "失败时回滚到上一版本"],
+      safety: ["仅在管理员确认后执行", "Agent 只接受签名任务和能力白名单", "AI 不直接执行生产 Shell 或读取凭据"],
+    };
+    db.run("INSERT INTO deployments(id,service_id,target_id,release_id,adapter,status,plan_json,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?)", deploymentID, serviceID, target.id, release.id, target.adapter, "awaiting_approval", JSON.stringify(plan), at, actorID);
+    return { id: deploymentID, service_id: serviceID, target_id: target.id, release_id: release.id, adapter: target.adapter, status: "awaiting_approval", plan, review_url: `/services?service=${encodeURIComponent(serviceID)}&deployment=${encodeURIComponent(deploymentID)}` };
+  };
+
   router.get("/api/v1/services", safe(deps, (ctx) => {
     admin(deps, ctx);
     ctx.json(db.all<any>("SELECT * FROM services ORDER BY updated_at DESC,id").map(serviceView));
@@ -290,23 +325,7 @@ export function registerServiceDeployments(deps: Dependencies): Module {
   router.post("/api/v1/services/:id/deployments/plan", safe(deps, async (ctx) => {
     admin(deps, ctx);
     const serviceID = ctx.params.id, input = await body(ctx);
-    const target = ensureTarget(serviceID, text(input.target_id, "target_id", 128));
-    const release = ensureRelease(serviceID, text(input.release_id, "release_id", 128));
-    if (target.status === "disabled") fail(409, "服务目标已禁用");
-    const machine = ensureMachine(target.machine_id), at = nowISO(deps), deploymentID = id();
-    const plan = {
-      version: "service-deployment/v1",
-      adapter: target.adapter,
-      service_id: serviceID,
-      target_id: target.id,
-      release_id: release.id,
-      machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, username: machine.username },
-      release: { version: release.version, source_type: release.source_type, source_ref: release.source_ref, artifact_digest: release.artifact_digest },
-      steps: ["校验制品与部署目标", "由 Agent 暂存不可变制品", "切换服务版本", "执行健康检查", "验证 LightMoni 遥测", "失败时回滚到上一版本"],
-      safety: ["仅在管理员确认后执行", "Agent 只接受签名任务和能力白名单", "AI 不直接执行生产 Shell 或读取凭据"],
-    };
-    db.run("INSERT INTO deployments(id,service_id,target_id,release_id,adapter,status,plan_json,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?)", deploymentID, serviceID, target.id, release.id, target.adapter, "awaiting_approval", JSON.stringify(plan), at, ctx.user.id);
-    ctx.json({ id: deploymentID, service_id: serviceID, target_id: target.id, release_id: release.id, adapter: target.adapter, status: "awaiting_approval", plan, review_url: `/services?service=${encodeURIComponent(serviceID)}&deployment=${encodeURIComponent(deploymentID)}` }, 201);
+    ctx.json(createPlan(serviceID, text(input.target_id, "target_id", 128), text(input.release_id, "release_id", 128), ctx.user.id), 201);
   }));
   router.get("/api/v1/services/:id/deployments/:deploymentId", safe(deps, (ctx) => {
     admin(deps, ctx);
@@ -324,6 +343,14 @@ export function registerServiceDeployments(deps: Dependencies): Module {
     ctx.json(deploymentView(value));
   }));
 
-  return {};
+  const assistantServices = () => db.all<any>("SELECT * FROM services ORDER BY updated_at DESC,id").map(serviceView);
+  const assistantDeployment = (deploymentID: string) => {
+    const value = db.get<any>("SELECT * FROM deployments WHERE id=?", deploymentID);
+    if (!value) fail(404, "部署记录不存在");
+    return deploymentView(value);
+  };
+  const assistantPlan = (input: { service_id: string; target_id: string; release_id: string }, actorID: string) =>
+    createPlan(input.service_id, input.target_id, input.release_id, actorID);
+  return { assistantServices, assistantDeployment, assistantPlan };
 }
 

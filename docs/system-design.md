@@ -76,6 +76,10 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 | 批次 | 一个 signal、table、service 和稳定批次 ID 的发送单元 | SDK/Agent/中心链路 |
 | 告警规则 | 对查询结果进行求值并产生 episode 的配置 | 告警域 |
 | 提案 | AI 产生但尚未应用的变更或代码结果 | 中心 SQLite |
+| 业务服务 | 用户希望被打点、构建和部署的逻辑服务 | 中心 SQLite |
+| 服务目标 | 服务在一台登记主机上的运行实例及适配器配置 | 中心 SQLite |
+| 制品版本 | 带版本、来源和 SHA-256 的不可变发布输入 | 中心 SQLite/受控制品存储 |
+| 业务部署 | 将一个制品激活到一个服务目标的可审阅计划 | 中心 SQLite，Agent 执行 |
 
 ### 4.2 系统边界
 
@@ -202,6 +206,17 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 5. 用户在独立页面查看完整变更、影响、版本和回执，再由中心重新校验权限和 revision 后应用。
 6. 每次实际模型请求写入幂等用量账本；模型目录刷新不发送生成请求，测试连接才发送最小真实请求。
 
+### 7.5 SDK 插桩与业务部署流
+
+1. 管理员为业务服务提供已授权的源码 workspace；AI 先调用只读 `scan_sdk_instrumentation`，识别语言、框架、LightMoni SDK、直连/Agent 模式和候选请求/错误边界。
+2. 扫描不导入或执行业务代码，也不写文件。需要改写时，AI 把用户意图交给隔离 workspace 的 `code_task`，产生可审阅 diff、检查结果和基线 revision；只有管理员确认后才应用。
+3. 已确认的 revision 经过受控构建生成带版本、架构、来源 revision 和 SHA-256 的 release。中心只保存 release 元数据和受控引用，生产 Agent 不接收源码仓库凭据或模型密钥。
+4. 管理员为 service 创建一个或多个 service target，选择运行方式适配器。MVP 的 `systemd` 适配器覆盖 Node、Python、Go、Rust、二进制和解释器服务；语言不是部署协议。Docker Compose、Kubernetes/Helm 和 CI/GitOps 作为后续适配器。
+5. 中心执行 `probe → plan → apply → verify → rollback` 的纯计划层，生成 `awaiting_approval` 部署计划。计划只包含 typed actions，不包含 shell 字符串；Agent 安装与业务部署分别记录，Agent 未激活时不能进入业务执行阶段。
+6. 管理员批准后，未来 Agent executor 领取短时、有签名和能力白名单的 job，暂存不可变制品、切换 release、启停登记 unit，并执行 systemd/HTTP/TCP 健康检查。服务健康而没有新遥测时显示“部署成功，遥测未验证”，不能把它误判成失败。
+
+当前切片只持久化 service、target、release 和 deployment 元数据，并生成 `awaiting_approval` 的通用计划。`runtime/src/deployment` 中的 systemd 适配器和 provider registry 已独立实现并测试，但尚未接入此 HTTP 计划模块；当前没有 approve/apply/rollback、Agent job executor、真实 preflight、健康检查或遥测验证。因此页面和 AI 只能展示计划，不能声称业务已部署。
+
 ## 8. 中心服务 HLD/LLD
 
 ### 8.1 启动和模块装配
@@ -244,13 +259,15 @@ shared (SQLite, ClickHouse, OTLP, crypto, JSON, time)
 | `/api/v1/agent-credentials` | 凭据元数据 | 管理员 |
 | `/api/v1/agents/:id/heartbeat` | 节点心跳/配置通道 | Agent control credential |
 | `/api/v1/machines/*` | 受管主机、SSH、部署计划 | 管理员 |
+| `/api/v1/services/*` | 业务服务、服务目标、制品版本和审核计划 | 管理员 |
+| `/api/v1/deployments/:id` | 脱敏部署计划/回执查询 | 管理员 |
 | `/api/v1/assistant/*` | 会话、模型、提案、用量和 AI 工具 | 登录/管理员按接口 |
 
 ## 9. 存储设计
 
 ### 9.1 SQLite
 
-SQLite 保存低体量、强一致的管理状态：用户和外部身份、会话、SDK Key 摘要与事件、enrollment 状态、Agent 身份和凭据摘要、节点/任务/标签、主机和 SSH 凭据密文、部署计划、告警规则/episode/静默/outbox、仪表盘和草稿、模型配置/用量账本、表目录、窗口历史和有限队列元数据。
+SQLite 保存低体量、强一致的管理状态：用户和外部身份、会话、SDK Key 摘要与事件、enrollment 状态、Agent 身份和凭据摘要、节点/任务/标签、主机和 SSH 凭据密文、业务 services/service_targets/releases/deployments 及其脱敏回执、部署计划、告警规则/episode/静默/outbox、仪表盘和草稿、模型配置/用量账本、表目录、窗口历史和有限队列元数据。
 
 明文 secret 只在创建/兑换/轮换响应的单次边界出现，随后使用加密存储或不可逆摘要。SQLite 不保存大量日志、指标或 Trace 正文。
 
@@ -523,6 +540,7 @@ docker compose up -d --build --wait
 - 中心和 Agent 使用 Node.js/TypeScript；Web 使用 React/TypeScript；AI runtime 使用 Mastra。
 - SDK、Agent、中心共享 OTLP 和公共 TypeScript 类型；Agent 使用同一个 TypeScript SDK 做内部指标和 exporter。
 - 节点标签/任务、Agent enrollment、control/data 凭据、主机 SSH 预检、部署计划和网页终端均有对应特性 SDD。
+- SDD 021 已加入业务服务/目标/发布元数据、只读 SDK 插桩扫描、独立测试的 systemd 纯计划适配器和 AI 的部署计划工具；当前 service API 仍只生成通用 `awaiting_approval` 计划，未接入适配器或 Agent executor。受控构建、自动插桩补丁、审批/执行/回滚、健康/遥测闭环和 Docker/Kubernetes 适配器均未完成。
 - AI 具备目录、查询、日志、告警读取、可审阅草稿、Pi 代码任务和模型用量/连接测试设计。
 - 告警规则、静默、值班、通知 outbox 和现场取证由中心域模块负责。
 
@@ -579,5 +597,6 @@ docker compose up -d --build --wait
 - SDK 数据与模式：[SDD 010 telemetry](../specs/010-telemetry-table-model/spec.md)、[SDD 011](../specs/011-aligned-metric-windows/spec.md)、[SDD 012](../specs/012-sdk-reporting-choice/spec.md)
 - AI 告警、主机和终端：[SDD 009](../specs/009-assistant-alert-controls/spec.md)、[SDD 013](../specs/013-ai-alert-controls/spec.md)、[SDD 014](../specs/014-managed-machines-agent-bootstrap/spec.md)、[SDD 017](../specs/017-assistant-ssh-bootstrap/spec.md)、[SDD 018](../specs/018-machine-web-terminal/spec.md)
 - 设计基线 SDD：[SDD 019](../specs/019-system-design-baseline/spec.md)
+- AI SDK 插桩与业务部署：[SDD 021](../specs/021-ai-sdk-instrumentation-deployment/spec.md)
 - 在线设计副本：[Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)
 - 架构文档双端同步规则：[SDD 020](../specs/020-architecture-design-sync/spec.md)

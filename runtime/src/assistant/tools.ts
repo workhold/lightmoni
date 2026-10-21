@@ -4,6 +4,8 @@ import { bytes, object, text, type Tool } from "./types.js";
 import type { CodeTaskInput, CodeTaskResult } from "./code.js";
 import type { User } from "../shared/types.js";
 import type { ManagedMachineStore } from "../server/managed-machines.js";
+import type { ServiceDeploymentStore } from "../server/service-deployments.js";
+import type { InstrumentationService } from "./instrumentation.js";
 const string = { type: "string" },
   obj = (properties: Record<string, any>, required: string[] = []) => ({
     type: "object",
@@ -25,6 +27,8 @@ export interface MonitoringToolOptions {
     ): Promise<CodeTaskResult>;
   };
   machines?: ManagedMachineStore;
+  deployments?: ServiceDeploymentStore;
+  instrumentation?: InstrumentationService;
 }
 export function codeTaskReceipt(
   result: CodeTaskResult,
@@ -268,6 +272,59 @@ export function monitoringTools(
       },
     },
   ];
+  if (options.instrumentation) {
+    const instrumentation = options.instrumentation;
+    tools.push({
+      name: "scan_sdk_instrumentation",
+      description:
+        "Read-only scan of an authorized workspace for languages, frameworks, LightMoni SDK usage and likely request/error boundaries. It never executes project code or writes files; use code_task later for a reviewable diff.",
+      effect: "read",
+      schema: obj({ workspace: { type: "string", maxLength: 512 } }, ["workspace"]),
+      execute: async (input, signal, user) => {
+        if (!user || user.role !== "admin") throw Error("administrator required");
+        object(input, ["workspace"], ["workspace"]);
+        return instrumentation.scan(text(input.workspace), signal);
+      },
+    });
+  }
+  if (options.deployments) {
+    const deployments = options.deployments;
+    tools.push(
+      {
+        name: "list_services",
+        description: "List registered business services and repository metadata. This is read-only and never exposes credentials.",
+        effect: "read",
+        schema: obj({}),
+        execute: async (input, _signal, user) => {
+          if (!user || user.role !== "admin") throw Error("administrator required");
+          object(input, []);
+          return { services: deployments.assistantServices() };
+        },
+      },
+      {
+        name: "propose_service_deployment",
+        description: "Create an approval-ready deployment plan for an existing service target and ready release. It does not install an Agent, run SSH, execute shell, or start a service.",
+        effect: "draft",
+        schema: obj({ service_id: string, target_id: string, release_id: string }, ["service_id", "target_id", "release_id"]),
+        execute: async (input, _signal, user) => {
+          if (!user || user.role !== "admin") throw Error("administrator required");
+          object(input, ["service_id", "target_id", "release_id"], ["service_id", "target_id", "release_id"]);
+          return deployments.assistantPlan({ service_id: text(input.service_id), target_id: text(input.target_id), release_id: text(input.release_id) }, user.id);
+        },
+      },
+      {
+        name: "get_service_deployment",
+        description: "Read a sanitized business deployment plan or receipt. Never infer success from a draft or from model text.",
+        effect: "read",
+        schema: obj({ deployment_id: string }, ["deployment_id"]),
+        execute: async (input, _signal, user) => {
+          if (!user || user.role !== "admin") throw Error("administrator required");
+          object(input, ["deployment_id"], ["deployment_id"]);
+          return deployments.assistantDeployment(text(input.deployment_id));
+        },
+      },
+    );
+  }
   if (options.machines) {
     const machines = options.machines;
     tools.push(

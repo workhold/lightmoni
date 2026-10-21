@@ -108,10 +108,11 @@ export async function createApp(cfg: Config) {
       };
     const agentCredentials = registerAgentCredentials(deps);
     const managedMachines = registerManagedMachines(deps, { agentCredentials });
+    registerSettings(deps, agentCredentials);
     // Service delivery metadata is intentionally separate from Agent bootstrap
     // records: plans can be reviewed before an Agent executes them.
-    modules.push(registerServiceDeployments(deps));
-    registerSettings(deps, agentCredentials);
+    const serviceDeployments = registerServiceDeployments(deps);
+    modules.push(serviceDeployments);
     const ingest = new Ingest(cat, auth, (...args) =>
       monitor?.accepted(...args),
       agentCredentials,
@@ -141,6 +142,7 @@ export async function createApp(cfg: Config) {
       registerAssistant(deps, {
         machines: managedMachines,
         alerts: new AlertCapabilities(alerts),
+        deployments: serviceDeployments,
       }),
     );
     if (cfg.monitor !== false) {
