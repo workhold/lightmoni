@@ -315,6 +315,14 @@ export function registerServiceDeployments(deps: Dependencies): Module {
     if (!value) fail(404, "部署记录不存在");
     ctx.json(deploymentView(value));
   }));
+  // A stable global lookup is useful to the assistant and to polling clients;
+  // the service-scoped endpoint above remains the canonical UI route.
+  router.get("/api/v1/deployments/:deploymentId", safe(deps, (ctx) => {
+    admin(deps, ctx);
+    const value = db.get<any>("SELECT * FROM deployments WHERE id=?", ctx.params.deploymentId);
+    if (!value) fail(404, "部署记录不存在");
+    ctx.json(deploymentView(value));
+  }));
 
   return {};
 }
