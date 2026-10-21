@@ -43,7 +43,7 @@
 
 | ID | 任务 | 依赖 | 状态 | 验收证据 |
 | --- | --- | --- | --- | --- |
-| T016 | 暴露扫描、插桩提案、构建/部署提案、状态和回执工具 | T004,T010,T015 | 部分（扫描、只读插桩提案、服务计划、状态工具） | `runtime/src/assistant/tools.ts`、assistant tool tests、typecheck |
+| T016 | 暴露扫描、插桩提案、构建/部署提案、状态和回执工具 | T004,T010,T015 | 部分（扫描、只读插桩提案、服务计划、状态和事件工具） | `runtime/src/assistant/tools.ts`、assistant tool tests、typecheck |
 | T017 | 为源码 diff、部署计划、审批和执行时间线增加 Web 页面 | T006,T010,T015 | 待实现 | UI smoke/e2e 截图和错误状态 |
 | T018 | 在 AI 输出和 UI 中显示审批边界、风险、健康/遥测验证和 SSH 凭据清理提示 | T016,T017 | 待实现 | 文案快照和脱敏检查 |
 

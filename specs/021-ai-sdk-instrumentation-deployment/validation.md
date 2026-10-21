@@ -29,6 +29,7 @@
 | 服务/目标/版本/部署计划 | 管理员创建并生成 awaiting approval 计划 | `runtime/test/service-deployments.test.ts` | 通过（不执行） |
 | 部署审批和状态迁移 | 已激活 Agent 才能由 awaiting approval 进入 agent_ready；非法状态拒绝 | `runtime/test/service-deployments.test.ts` | 通过（仅中心审批边界） |
 | 部署事件时间线 | 计划/审批/回滚提案写入脱敏、按追加顺序可读事件 | `runtime/test/service-deployments.test.ts` | 通过 |
+| AI 部署事件工具 | 管理员可读取脱敏状态时间线，不把事件当作主机执行回执 | `runtime/test/assistant-instrumentation-tools.test.ts` | 通过 |
 | 回滚提案 | 已批准/失败部署可进入 rollback_pending，不执行主机动作 | `runtime/test/service-deployments.test.ts` | 通过（不执行） |
 | AI 服务部署工具 | 结构化 ID 生成审核计划 | `runtime/src/assistant/tools.ts` + typecheck | 通过（不执行） |
 | Agent staging | digest 核对、受控 release 目录和幂等 job | executor 待实现 | 待验证 |
@@ -55,12 +56,12 @@ npm test --workspace web -- --runInBand
 本次已运行：
 
 - `npm --prefix runtime run typecheck`：通过。
-- `npm --prefix runtime test`：241 tests，238 passed、3 skipped、0 failed。
+- `npm --prefix runtime test`：242 tests，239 passed、3 skipped、0 failed。
 - 插桩专用 `node --import tsx --test runtime/test/instrumentation.test.ts`：5 passed、0 failed；AI 工具专用 `node --import tsx --test runtime/test/assistant-instrumentation-tools.test.ts`：2 passed、0 failed；部署状态/迁移专用测试通过。
 - `npm run typecheck`：runtime、ai-runtime、web 均通过。
 - `git diff --check`：通过。
 
-本轮新增验证：部署计划事件与状态变更在同一 SQLite 事务内写入；审批要求 Agent 最近 180 秒内心跳；回滚重复请求复用已持久化 operation ID；插桩提案支持传入扫描返回的 `base_revision` 并拒绝过期 revision。
+本轮新增验证：部署计划事件与状态变更在同一 SQLite 事务内写入；审批要求 Agent 最近 180 秒内心跳；回滚重复请求复用已持久化 operation ID；插桩提案支持传入扫描返回的 `base_revision` 并拒绝过期 revision；AI 可读取脱敏部署事件时间线。
 
 - deployment adapter unit tests（合法/非法路径、摘要、健康检查、rollback）及 service deployment 状态迁移/审批/事件测试；
 - SQLite migration/repository 与 API 权限/幂等集成测试；

@@ -109,6 +109,8 @@ export interface ServiceDeploymentStore {
   assistantServices(): ReturnType<typeof serviceView>[];
   /** Sanitized deployment record for assistant reads. */
   assistantDeployment(deploymentID: string): Record<string, any>;
+  /** Sanitized append-only deployment events for assistant reads. */
+  assistantDeploymentEvents(deploymentID: string): Record<string, any>[];
   /** Create an approval-ready plan without executing a host action. */
   assistantPlan(input: { service_id: string; target_id: string; release_id: string }, actorID: string): Record<string, any>;
 }
@@ -561,7 +563,11 @@ export function registerServiceDeployments(deps: Dependencies): Module & Service
     if (!value) fail(404, "部署记录不存在");
     return deploymentView(value);
   };
+  const assistantDeploymentEvents = (deploymentID: string) => {
+    deploymentRow(deploymentID);
+    return events(deploymentID);
+  };
   const assistantPlan = (input: { service_id: string; target_id: string; release_id: string }, actorID: string) =>
     createPlan(input.service_id, input.target_id, input.release_id, actorID);
-  return { assistantServices, assistantDeployment, assistantPlan };
+  return { assistantServices, assistantDeployment, assistantDeploymentEvents, assistantPlan };
 }

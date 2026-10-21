@@ -375,6 +375,17 @@ export function monitoringTools(
           return deployments.assistantDeployment(text(input.deployment_id));
         },
       },
+      {
+        name: "get_service_deployment_events",
+        description: "Read the sanitized append-only timeline for a business deployment. Events show observed centre state transitions and never prove that a host action completed.",
+        effect: "read",
+        schema: obj({ deployment_id: string }, ["deployment_id"]),
+        execute: async (input, _signal, user) => {
+          if (!user || user.role !== "admin") throw Error("administrator required");
+          object(input, ["deployment_id"], ["deployment_id"]);
+          return { deployment_id: text(input.deployment_id), events: deployments.assistantDeploymentEvents(text(input.deployment_id)) };
+        },
+      },
     );
   }
   if (options.machines) {

@@ -102,3 +102,33 @@ test("propose_sdk_instrumentation rejects non-admins, unknown fields and invalid
     /invalid tool input/,
   );
 });
+
+test("get_service_deployment_events returns only the sanitized deployment timeline", async () => {
+  const deployments = {
+    assistantServices: () => [],
+    assistantPlan: () => ({}),
+    assistantDeployment: () => ({ id: "dep_1", status: "agent_ready" }),
+    assistantDeploymentEvents: (deploymentID: string) => [
+      { id: "event_1", deployment_id: deploymentID, state: "awaiting_approval", summary: "计划已生成" },
+      { id: "event_2", deployment_id: deploymentID, state: "agent_ready", summary: "已批准，等待 Agent" },
+    ],
+  };
+  const tools = monitoringTools({} as Dependencies, { deployments: deployments as any });
+  const tool = tools.find((item) => item.name === "get_service_deployment_events");
+  assert.ok(tool);
+  const result = await tool.execute(
+    { deployment_id: "dep_1" },
+    new AbortController().signal,
+    { id: "alice", role: "admin" },
+  );
+  assert.equal(result.deployment_id, "dep_1");
+  assert.deepEqual(result.events.map((event: any) => event.state), ["awaiting_approval", "agent_ready"]);
+  await assert.rejects(
+    tool.execute(
+      { deployment_id: "dep_1" },
+      new AbortController().signal,
+      { id: "member", role: "member" },
+    ),
+    /administrator required/,
+  );
+});

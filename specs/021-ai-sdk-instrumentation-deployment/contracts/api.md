@@ -144,7 +144,8 @@
 | `apply_sdk_instrumentation` | 管理员 | 校验 revision 后应用已批准计划 |
 | `propose_service_release` | 管理员 | 创建受控构建提案，不直接发布 |
 | `propose_service_deployment` | 管理员 | 运行 probe 并创建 awaiting approval 计划 |
-| `get_service_deployment` | 登录成员 | 返回脱敏状态和时间线 |
+| `get_service_deployment` | 管理员 | 返回脱敏状态 |
+| `get_service_deployment_events` | 管理员 | 返回脱敏追加事件时间线，不代表主机执行成功 |
 | `approve_service_deployment` | 管理员 | 触发 Agent job，不能携带 shell |
 | `rollback_service_deployment` | 管理员 | 生成受限回滚 job |
 

@@ -409,7 +409,7 @@ sequenceDiagram
 
 | effect | 示例 | 应用方式 |
 | --- | --- | --- |
-| `read` | list/describe tables、run_query、日志、告警读取、主机状态 | 有界执行，可直接返回 |
+| `read` | list/describe tables、run_query、日志、告警读取、主机状态、业务部署事件 | 有界执行，可直接返回 |
 | `draft` | dashboard draft、alert change、silence、SDK `propose_sdk_instrumentation`、Agent deployment plan | 保存或返回提案，用户审阅 |
 | `code` | Pi `code_task` | 隔离副本、检查、diff，用户确认应用 |
 | `execute` | 当前不提供模型任意 SSH/命令 | 未来单独 SDD，默认关闭 |
@@ -544,7 +544,7 @@ docker compose up -d --build --wait
 - SDK、Agent、中心共享 OTLP 和公共 TypeScript 类型；Agent 使用同一个 TypeScript SDK 做内部指标和 exporter。
 - 节点标签/任务、Agent enrollment、control/data 凭据、主机 SSH 预检、部署计划和网页终端均有对应特性 SDD。
 - SDD 021 已加入业务服务/目标/发布元数据、只读 SDK 插桩扫描、受限 TS/JS 结构化插桩提案、中心部署状态迁移/审批/事件/回滚提案、独立测试的 systemd 纯计划适配器和 AI 的部署计划工具；当前 service API 的 approve 只推进到 `agent_ready`，未创建 Agent job 或接入适配器执行器。受控构建、插桩 apply、主机执行、健康/遥测闭环、最终回滚和 Docker/Kubernetes 适配器均未完成。
-- AI 具备目录、查询、日志、告警读取、可审阅草稿、Pi 代码任务和模型用量/连接测试设计。
+- AI 具备目录、查询、日志、告警读取、可审阅草稿、SDK 插桩提案、业务部署状态/事件读取、Pi 代码任务和模型用量/连接测试设计。
 - 告警规则、静默、值班、通知 outbox 和现场取证由中心域模块负责。
 
 ### 22.2 兼容路径
