@@ -233,9 +233,18 @@ sequenceDiagram
   Agent->>Center: 最终 result 与健康检查回执
   Center->>Center: 成功/失败/unknown 状态迁移
   Center-->>Admin: 部署详情和时间线
+  opt 管理员请求取消
+    Admin->>Center: cancel + expected_state
+    alt 尚未批准或 Agent job 仍排队
+      Center->>Center: 原子取消部署与未领取 job
+      Center-->>Admin: cancelled
+    else Agent 已领取
+      Center-->>Admin: 409，要求先核查主机
+    end
+  end
 ```
 
-当前切片持久化 service、target、release、deployment 元数据及脱敏 `deployment_events`，提供 `awaiting_approval` 计划、管理员 approve、Agent 回执驱动的阶段/终态映射、事件查询和 `rollback_pending` 提案。`runtime/src/server/agent-jobs.ts` 提供 claim/lease、严格递增且阶段单调的事件序号、结果、取消和租约过期 `unknown` 恢复；`runtime/src/agent/executor.ts` 执行 capability allow-list，`runtime/src/agent/jobs.ts` 负责拉取、回执和重启恢复。`verification.ts` 提供固定服务/实例、窗口、deadline 和样本上限的中心侧健康/遥测证据判定，但真实 ClickHouse 验证、自动目标复核、最终 `rolled_back` 状态、受控构建/制品分发和生产签名校验仍待后续切片。因此页面和 AI 不能把“已批准”或“已入队”当作业务已部署；`succeeded` 仅说明 Agent 报告计划内 health_check 通过，不能代表遥测已验证。
+当前切片持久化 service、target、release、deployment 元数据及脱敏 `deployment_events`，提供 `awaiting_approval` 计划、管理员 approve、Agent 回执驱动的阶段/终态映射、事件查询和 `rollback_pending` 提案。管理员可以取消尚未审批的计划；已批准计划只有在 Agent 尚未领取 job 时才允许安全取消，若 Agent 已领取则拒绝取消并保留主机状态复核边界。`runtime/src/server/agent-jobs.ts` 提供 claim/lease、严格递增且阶段单调的事件序号、结果、取消和租约过期 `unknown` 恢复；`runtime/src/agent/executor.ts` 执行 capability allow-list，`runtime/src/agent/jobs.ts` 负责拉取、回执和重启恢复。`verification.ts` 提供固定服务/实例、窗口、deadline 和样本上限的中心侧健康/遥测证据判定，但真实 ClickHouse 验证、自动目标复核、最终 `rolled_back` 状态、受控构建/制品分发和生产签名校验仍待后续切片。因此页面和 AI 不能把“已批准”或“已入队”当作业务已部署；`succeeded` 仅说明 Agent 报告计划内 health_check 通过，不能代表遥测已验证。
 
 ## 8. 中心服务 HLD/LLD
 
@@ -282,6 +291,7 @@ shared (SQLite, ClickHouse, OTLP, crypto, JSON, time)
 | `/api/v1/services/*` | 业务服务、服务目标、制品版本和审核计划 | 管理员 |
 | `/api/v1/deployments/:id` | 脱敏部署计划/状态/回执查询 | 管理员 |
 | `/api/v1/deployments/:id/events` | 脱敏部署状态事件时间线 | 管理员 |
+| `/api/v1/deployments/:id/cancel` | 取消未审批部署或尚未领取的 Agent job；已领取任务拒绝取消 | 管理员 |
 | `/api/v1/deployments/:id/approve` | 管理员确认并推进到 `agent_ready` | 管理员 |
 | `/api/v1/deployments/:id/rollback` | 创建 `rollback_pending` 回滚提案 | 管理员 |
 | `/api/v1/agents/:id/jobs/claim` | Agent 拉取一个能力受限且带租约的部署 job | Agent control credential |

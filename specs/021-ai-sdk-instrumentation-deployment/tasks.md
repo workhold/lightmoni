@@ -44,8 +44,8 @@
 | ID | 任务 | 依赖 | 状态 | 验收证据 |
 | --- | --- | --- | --- | --- |
 | T016 | 暴露扫描、插桩提案、构建/部署提案、状态和回执工具 | T004,T010,T015 | 部分（扫描、插桩提案、服务计划、状态和事件工具；apply 走管理员 HTTP 确认） | `runtime/src/assistant/tools.ts`、assistant tool tests、typecheck |
-| T017 | 为源码 diff、部署计划、审批和执行时间线增加 Web 页面 | T006,T010,T015 | 部分（服务部署、审批/时间线、状态双语文案和 unknown 人工复核提示已接入；源码 diff 页面待补） | `web/src/app/ServiceDeploymentsPage.tsx`、web typecheck |
-| T018 | 在 AI 输出和 UI 中显示审批边界、风险、健康/遥测验证和 SSH 凭据清理提示 | T016,T017 | 部分（部署页面已显示审批边界、Agent 要求和未执行提示；AI/SSH 清理提示待补） | `web/src/app/ServiceDeploymentsPage.tsx`；文案快照待补 |
+| T017 | 为源码 diff、部署计划、审批和执行时间线增加 Web 页面 | T006,T010,T015 | 部分（部署计划缺少 typed actions 时隐藏审批入口并解释真实 Agent 预检尚未接入；增加未审批/未领取部署取消；源码 diff 页面待补） | `web/src/app/ServiceDeploymentsPage.tsx`、web typecheck/build |
+| T018 | 在 AI 输出和 UI 中显示审批边界、风险、健康/遥测验证和 SSH 凭据清理提示 | T016,T017 | 部分（部署页面显示审批边界、Agent 要求、计划不可执行原因、取消限制、unknown 人工复核和遥测提示；AI/SSH 清理提示待补） | `web/src/app/ServiceDeploymentsPage.tsx`；双语状态与文案 |
 
 ## F. 安全、可观测性与文档
 
@@ -54,9 +54,10 @@
 | T019 | 为插桩、构建、Agent job、部署、验证、回滚写审计事件和关联 ID | T009,T012 | 待实现 | 审计查询和关联性测试 |
 | T020 | 完成权限、secret 脱敏、签名 audience/TTL、幂等和资源上限审计 | T006,T013,T016 | 待实现 | 安全负向测试、`rg` secret 检查 |
 | T021 | 更新 `docs/system-design.md` 的 HLD/LLD、数据流、部署拓扑和 API 索引 | T001,T010,T013 | 已完成（本次切片章节） | `docs/system-design.md` diff |
-| T022 | 使用最新 Doca seq/epoch 更新对应富文本/原生图块并回读节点与连线 | T021 | 基线已完成；本轮回执闭环增量待同步 | Doca 原生流程图保存后可见，节点/连线回读确认；本轮访问返回“资源不存在或无权访问” |
+| T022 | 使用最新 Doca seq/epoch 更新对应富文本/原生图块并回读节点与连线 | T021 | 基线已完成；本轮部署取消控制路径增量待同步 | Doca 原生流程图保存后可见，节点/连线回读确认；本轮访问返回“资源不存在或无权访问” |
 | T023 | 运行 runtime/web 检查，记录验证矩阵并创建待评审 PR；禁止直接合并 | 全部 | 已完成 | `validation.md`、PR #25（保持开启，未合并） |
 | T024 | 把 Agent job 进度、取消、健康验证、成功/失败和未知结果安全映射到业务 deployment 状态 | T010,T012,T014 | 已实现（严格事件序号/阶段单调；无健康成功证据或执行中取消时保留 unknown；仅未领取/过期 job 可安全取消） | `runtime/src/server/agent-jobs.ts`、`runtime/src/server/service-deployments.ts`、对应服务部署与 Agent job 测试 |
+| T025 | 为管理员提供安全取消部署计划入口，并避免向不可执行的通用计划显示审批操作 | T010,T012,T017 | 已实现（未审批计划可取消；已审批计划仅能取消 queued job；Agent 已领取时拒绝并保留主机状态检查边界） | `runtime/src/server/service-deployments.ts`、`runtime/src/server/agent-jobs.ts`、`web/src/app/ServiceDeploymentsPage.tsx`、对应 API/job 测试 |
 
 ## 推荐执行顺序
 
@@ -66,6 +67,7 @@ T001 → T002/T003 → T004 → T005/T006 → T007
 T010/T015 → T016/T017/T018
 T019/T020 → T021 → T022 → T023
 T024 → T021 → T022 → T023
+T025 → T021 → T022 → T023
 ```
 
 任何任务若改变组件边界、协议、凭据、存储或部署拓扑，都必须先更新本 SDD 和 `docs/system-design.md`，并在同一 PR 完成 Doca 同步；不能把文档同步留给后续 PR。

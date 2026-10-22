@@ -15,7 +15,8 @@
 
 - `runtime/src/assistant/instrumentation.ts` 提供只读、启发式扫描器、受限的结构化插桩提案和管理员确认后的安全 apply。提案目前只对可明确定位的 TypeScript/JavaScript 多行请求处理函数生成 unified diff；apply 绑定 `base_revision`，检查路径、符号链接和文件大小并原子写入，仍不执行构建或项目代码。Python、Go、Rust、Ruby 和歧义边界只返回手动步骤。
 - `runtime/src/deployment` 已有 `systemd` 纯逻辑适配器和显式 provider registry，并有边界测试；适配器通过服务部署计划生成 typed action 的扩展点，主机动作由 Agent executor 解释。
-- `runtime/src/server/service-deployments.ts` 持久化 service/target/release/deployment 元数据和脱敏 deployment events。管理员 `approve` 在 Agent 就绪后要求至少一个 typed action 和带 capability 的 health_check，然后原子创建不可变 Agent job 并推进到 `agent_ready`。中心将 Agent 的单调阶段回执映射到部署状态；最终成功必须来自 verifying 状态且含 `health.healthy=true`。未领取 job 被取消或过期可安全取消部署；已领取/执行中的取消、租约过期和不完整成功回执均保留 unknown，不推断目标机已恢复或失败。中心后台定期清理 job 过期状态，事件状态与 receipt 在同一 SQLite 事务内更新。
+- `runtime/src/server/service-deployments.ts` 持久化 service/target/release/deployment 元数据和脱敏 deployment events。管理员 `approve` 在 Agent 就绪后要求至少一个 typed action 和带 capability 的 health_check，然后原子创建不可变 Agent job 并推进到 `agent_ready`。管理员可取消未审批计划；已批准计划仅在 Agent job 仍排队时允许原子取消，Agent 已领取后取消请求返回冲突，不宣称远端执行已停止。中心将 Agent 的单调阶段回执映射到部署状态；最终成功必须来自 verifying 状态且含 `health.healthy=true`。未领取 job 过期可安全取消；Agent 端执行取消、租约过期和不完整成功回执均保留 unknown，不推断目标机已恢复或失败。中心后台定期清理 job 过期状态，事件状态与 receipt 在同一 SQLite 事务内更新。
+- 部署工作台只有在计划明确为 ready 且包含 actions/capabilities 时显示批准按钮。通用元数据计划仍可以查看和取消，但页面说明 Agent 真实预检与可执行动作生成尚未接入。
 - `runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定。Agent 回报健康检查通过只代表 Agent 侧计划执行的检查通过，不代表中心已查询 ClickHouse 遥测；真实主机 preflight、受控构建/制品传输、真实 ClickHouse 查询、自动补偿和最终回滚回执仍未接入。
 - Assistant 目前提供扫描、只读插桩提案、管理员确认后的插桩 apply、服务列表、部署计划提案和部署状态读取工具。构建、真实部署编排和回滚工具仍未提供；Agent job 的拉取、能力执行和回执由 Agent 运行时独立完成。
 - `docker_compose` 目前最多作为目标元数据被登记，尚无对应适配器或执行器；只有注册到 registry 的 provider 才能执行，不能把登记成功解释为 provider 已支持。
@@ -106,6 +107,7 @@ LightMoni 已经有 AI 对话、Pi 代码任务、SDK 上报、受管主机和�
 - 中心持久化 `services`、`service_targets`、`releases`、`deployments`；目标必须绑定一台已登记机器和 provider 配置。
 - 部署状态至少包括：`draft`、`preflight`、`awaiting_approval`、`agent_ready`、`staging`、`activating`、`verifying`、`succeeded`、`failed`、`rollback_pending`、`rolling_back`、`rolled_back`。
 - 状态迁移由中心校验；Agent 回执只能推进其授权 operation，不能自行把失败写成成功。
+- 管理员可以取消未审批的部署或尚未被 Agent 领取的执行 job；Agent 已领取后，中心必须拒绝声称安全取消，执行中断/取消回执统一进入 `unknown` 并要求复核主机。
 - 每个部署保存 `requested_by`、`approved_by`、计划 revision、制品 digest、目标快照、开始/结束时间和错误码。
 
 ### FR-004 适配器和 systemd MVP

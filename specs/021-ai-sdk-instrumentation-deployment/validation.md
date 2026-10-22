@@ -28,7 +28,8 @@
 | systemd probe | 缺 unit/systemd/坏路径时结构化拒绝 | `runtime/test/deployment-adapter.test.ts` | 通过（纯计划层） |
 | systemd plan | typed actions，禁止 shell | `runtime/test/deployment-adapter.test.ts` | 通过（纯计划层） |
 | 服务/目标/版本/部署计划 | 管理员创建并生成 awaiting approval 计划 | `runtime/test/service-deployments.test.ts` | 通过（不执行） |
-| 部署审批和状态迁移 | 已激活 Agent 且计划含授权 health_check 才能入队；Agent 有序阶段和最终健康回执推进状态 | `runtime/test/service-deployments.test.ts` | 通过（不代表真实主机部署） |
+| 部署审批和状态迁移 | 已激活 Agent 且计划含授权 health_check 才能入队；Agent 有序阶段和最终健康回执推进状态；不可执行 generic plan 不向用户暴露批准操作 | `runtime/test/service-deployments.test.ts`、`web/src/app/ServiceDeploymentsPage.tsx` | 通过（不代表真实主机部署） |
+| 管理员取消部署 | 未批准计划可转为 cancelled；已批准计划仅可在 Agent job 仍 queued 时原子取消；Agent 已领取后返回 409 并保持部署状态供人工核查；通用已领取 job 取消会写为 unknown | `runtime/test/service-deployments.test.ts`、`runtime/test/agent-jobs.test.ts` | 通过 |
 | 部署事件时间线 | 计划/审批/Agent 阶段/终态/回滚提案写入脱敏、按追加顺序可读事件 | `runtime/test/service-deployments.test.ts` | 通过 |
 | Agent 事件顺序 | event 序号连续、重复请求幂等、阶段不能回退/跳跃；终态 event 不替代最终 result | `runtime/test/agent-jobs.test.ts` | 通过 |
 | 取消和未知结果 | 仅未领取任务可安全取消；领取后取消、租约过期和不完整成功回执保留 unknown | `runtime/test/agent-jobs.test.ts`、`runtime/test/service-deployments.test.ts` | 通过 |
@@ -71,6 +72,10 @@ npm test --workspace web -- --runInBand
 - `npm --prefix web run build`：通过，产物打包成功；依赖中的 `use client` 指令有现存 bundler warning。
 
 本轮新增验证：Agent 阶段回执与部署状态/时间线在同一 SQLite 事务内写入；管理员取消或过期的未领取 job 可安全终止，已领取 job 取消/超时保留 unknown，中心定时扫描不依赖 Agent 再次请求；事件序号连续、阶段单调且拒绝跳跃/回退；审批要求计划含 capability 授权的 health_check；只有 verifying 后且最终 `health.healthy=true` 才能进入 succeeded；缺少证据的成功回执被转成 unknown；秘密和原始快照不会进入部署详情/时间线。
+
+本轮追加切片：部署工作台仅对 ready 且含 actions/capabilities 的计划显示批准入口；管理员可取消未审批计划，或在 Agent 尚未领取时取消已批准 job。Agent 已领取后，取消请求被拒绝以避免把“取消”误解为远端进程已停止。Doca 在线副本回读状态仍需单独记录。
+
+本轮追加验证结果：`npm --prefix runtime exec tsx -- --test runtime/test/service-deployments.test.ts runtime/test/agent-jobs.test.ts` 6 项通过；`npm test` 全部通过（Runtime 256 项，253 通过、3 跳过；AI Runtime 71 项；TypeScript SDK 18 项）；`npm run typecheck` 通过；`npm --prefix web run build` 通过，仍有依赖包既有的 `use client` bundler 提示；`git diff --check` 通过。Doca 回读未完成：当前浏览器目标页显示“文档不存在 / 资源不存在或无权访问”，且此环境未提供 Doca MCP resource/template，不能标记在线文档同步完成。
 
 - deployment adapter unit tests（合法/非法路径、摘要、健康检查、rollback）及 service deployment 状态迁移/审批/事件测试；
 - deployment verification tests（服务/实例归属、UTC 窗口、deadline、样本上限和健康但遥测未验证）；

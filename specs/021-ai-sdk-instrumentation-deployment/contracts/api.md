@@ -121,6 +121,8 @@
 
 管理员请求：`{"expected_state":"awaiting_approval","confirm":true}`。计划必须包含至少一个 action，以及匹配的 capability 授权 health_check。成功返回 `{id,state:"agent_ready",operation_id}`，并记录 `approved_by` 与状态事件，同时为已激活且最近心跳的 Agent 创建不可变 job。Agent 阶段回执会单调推进部署状态；只有 verifying 后最终回执包含 `health.healthy=true` 才进入 `succeeded`。没有健康证据的成功回执、执行中取消和租约超时标记 `unknown` 并保留最后已知状态；未领取 job 取消则可安全标记 `cancelled`。若目标机器没有已激活且最近心跳的 Agent，返回 `409 agent_not_ready` 并保留计划供重试。重复审批不能跳过状态校验。
 
+管理员取消：`POST /api/v1/deployments/:deploymentId/cancel`，请求 `{"expected_state":"awaiting_approval|agent_ready","confirm":true}`。尚未审批的计划直接转为 `cancelled`；已批准计划只允许在关联 Agent job 仍处于 `queued` 时取消，中心以条件更新原子取消 job 并由同一 SQLite 事务推进部署状态。Agent 已领取任务后返回 `409 deployment_job_already_claimed`，不声称停止了主机上的执行；应先检查主机，再根据实际状态继续处理。状态不匹配返回 `409`，缺少明确确认返回 `400`。
+
 ### `GET /deployments/:id`
 
 返回脱敏计划、当前状态、phase、operation ID、previous/目标快照、错误码、健康结果、遥测验证、操作者和时间线摘要。

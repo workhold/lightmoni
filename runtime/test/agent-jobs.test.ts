@@ -70,6 +70,14 @@ test("success without verified health evidence becomes unknown and cancellation 
   f.jobs.cancel(queued.id, "admin");
   assert.equal(updates.at(-1).phase, "cancelled");
   assert.equal(updates.at(-1).previousState, "queued");
+  const claimed = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-claimed-cancel", operationID: "op-claimed-cancel", actions: [] });
+  const claimedLease = f.jobs.claim("agent-1", []);
+  assert.ok(claimedLease);
+  f.jobs.cancel(claimed.id, "admin");
+  assert.equal(f.jobs.get(claimed.id).state, "unknown");
+  assert.equal(f.jobs.get(claimed.id).receipt.code, "unknown_execution_result");
+  assert.equal(updates.at(-1).phase, "unknown");
+  assert.equal(updates.at(-1).previousState, "leased");
   const expired = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-expired", operationID: "op-expired", actions: [], expiresInSeconds: 60 });
   f.advance(61);
   assert.equal(f.jobs.claim("agent-1", []), null);

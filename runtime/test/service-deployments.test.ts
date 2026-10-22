@@ -150,7 +150,9 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(queuedCancelApproval.status, 200);
   const queuedJob = db.get<any>("SELECT id FROM agent_jobs WHERE deployment_id=?", queuedCancelPlan.data.id);
   assert.ok(queuedJob);
-  jobs.cancel(queuedJob!.id, "admin");
+  const queuedCancel = await request(`/api/v1/deployments/${queuedCancelPlan.data.id}/cancel`, "POST", { confirm: true, expected_state: "agent_ready" });
+  assert.equal(queuedCancel.status, 200);
+  assert.equal(jobs.get(queuedJob!.id).state, "cancelled");
   const safelyCancelled = await request(`/api/v1/deployments/${queuedCancelPlan.data.id}`);
   assert.equal(safelyCancelled.data.status, "cancelled");
   assert.equal(safelyCancelled.data.receipt.state, "cancelled");
@@ -162,6 +164,9 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   const runningJob = jobs.claim("agent-1", ["systemd.restart", "health.systemd"]);
   assert.ok(runningJob);
   jobs.event("agent-1", runningJob!.id, { lease_id: runningJob!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  const claimedCancel = await request(`/api/v1/deployments/${runningCancelPlan.data.id}/cancel`, "POST", { confirm: true, expected_state: "agent_ready" });
+  assert.equal(claimedCancel.status, 409);
+  assert.equal(claimedCancel.data.error, "deployment_job_already_claimed");
   jobs.cancel(runningJob!.id, "admin");
   const uncertainCancel = await request(`/api/v1/deployments/${runningCancelPlan.data.id}`);
   assert.equal(uncertainCancel.data.status, "agent_ready");
@@ -179,6 +184,13 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(invalidSuccess.data.status, "agent_ready");
   assert.equal(invalidSuccess.data.receipt.state, "unknown");
   assert.equal(invalidSuccess.data.receipt.code, "invalid_agent_sequence");
+
+  const unapprovedPlan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
+  const unapprovedCancel = await request(`/api/v1/deployments/${unapprovedPlan.data.id}/cancel`, "POST", { confirm: true, expected_state: "awaiting_approval" });
+  assert.equal(unapprovedCancel.status, 200);
+  assert.equal(unapprovedCancel.data.status, "cancelled");
+  const staleCancel = await request(`/api/v1/deployments/${unapprovedPlan.data.id}/cancel`, "POST", { confirm: true, expected_state: "awaiting_approval" });
+  assert.equal(staleCancel.status, 409);
   assert.notEqual(id(), "");
 });
 

@@ -653,6 +653,26 @@ export function registerServiceDeployments(
     });
     ctx.json({ ...result, operation_id: operationID });
   }));
+  router.post("/api/v1/deployments/:deploymentId/cancel", safe(deps, async (ctx) => {
+    admin(deps, ctx);
+    const input = await body(ctx), deployment = deploymentRow(ctx.params.deploymentId);
+    if (input.confirm !== true) fail(400, "必须明确确认取消部署");
+    const expected = input.expected_state == null ? deployment.status : text(input.expected_state, "expected_state", 32);
+    if (deployment.status !== expected) fail(409, "部署计划状态已变化，请重新查看");
+    const state = deploymentState(deployment);
+    if (state === "awaiting_approval") {
+      ctx.json(transition(deployment.id, "cancelled", ctx.user.id, "管理员取消了尚未批准的部署计划", "cancelled"));
+      return;
+    }
+    if (state !== "agent_ready") fail(409, "当前部署阶段不允许安全取消");
+    if (!options.jobs) fail(503, "agent_jobs_unavailable");
+    // Cancellation is safe only while the immutable job is still queued. The
+    // job store checks and updates it atomically; once an Agent has claimed it,
+    // we keep the operation visible for host verification instead of claiming
+    // that a running process was interrupted.
+    options.jobs.cancelQueuedDeployment(deployment.id, String(deployment.operation_id || ""), ctx.user.id);
+    ctx.json(deploymentView(deploymentRow(deployment.id)));
+  }));
   router.post("/api/v1/deployments/:deploymentId/rollback", safe(deps, async (ctx) => {
     admin(deps, ctx);
     const input = await body(ctx), deployment = deploymentRow(ctx.params.deploymentId);

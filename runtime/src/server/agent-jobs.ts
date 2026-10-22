@@ -50,6 +50,8 @@ export interface AgentJobStore {
   event(agentID: string, jobID: string, input: Record<string, any>): Record<string, any>;
   result(agentID: string, jobID: string, input: Record<string, any>): Record<string, any>;
   cancel(jobID: string, actor: string): Record<string, any>;
+  /** Cancel only an unclaimed job belonging to this deployment operation. */
+  cancelQueuedDeployment(deploymentID: string, operationID: string, actor: string): Record<string, any>;
   get(jobID: string): Record<string, any>;
   /** Internal synchronous observer; invoked inside the job's SQLite transaction. */
   onUpdate(listener: (update: AgentJobUpdate) => void): () => void;
@@ -347,14 +349,45 @@ export function registerAgentJobs(
     const current = row(jobID);
     if (terminal(current.state as AgentJobState)) return view(current);
     const at = iso(deps);
+    const safelyQueued = current.state === "queued";
+    const state: AgentJobState = safelyQueued ? "cancelled" : "unknown";
+    const code = safelyQueued ? "cancelled" : "unknown_execution_result";
+    const summary = safelyQueued
+      ? `cancelled by ${actor}`
+      : `Cancellation requested by ${actor} after Agent claim; target state requires re-check`;
     db.transaction(() => {
-      const changed = db.run("UPDATE agent_jobs SET state='cancelled',receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND state NOT IN ('succeeded','failed','cancelled','unknown')", json({ state: "cancelled", code: "cancelled", summary: `cancelled by ${actor}` }), at, jobID);
+      const changed = db.run("UPDATE agent_jobs SET state=?,receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND state NOT IN ('succeeded','failed','cancelled','unknown')", state, json({ state, code, summary }), at, jobID);
       if (!changed.changes) return;
       const next = Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM agent_job_events WHERE job_id=?", jobID)?.sequence ?? 1);
-      db.run("INSERT OR IGNORE INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)", jobID, next, "cancelled", "cancelled", "Agent job cancelled", at);
-      notify(row(jobID), "cancelled", "cancelled", { previousState: current.state as AgentJobState });
+      db.run("INSERT OR IGNORE INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)", jobID, next, state, code, summary.slice(0, MAX_SUMMARY_BYTES), at);
+      notify(row(jobID), state, code, { previousState: current.state as AgentJobState });
     });
     return view(row(jobID));
+  };
+  const cancelQueuedDeployment = (deploymentID: string, operationID: string, actor: string) => {
+    const current = db.get<any>(
+      "SELECT id,state FROM agent_jobs WHERE deployment_id=? AND operation_id=?",
+      deploymentID,
+      operationID,
+    );
+    if (!current) fail(409, "deployment_job_not_found");
+    if (current.state !== "queued") fail(409, "deployment_job_already_claimed");
+    const at = iso(deps);
+    db.transaction(() => {
+      const receipt = { state: "cancelled", code: "cancelled", summary: `cancelled by ${actor}` };
+      const changed = db.run(
+        "UPDATE agent_jobs SET state='cancelled',receipt_json=?,updated_at=? WHERE id=? AND state='queued'",
+        json(receipt), at, current.id,
+      );
+      if (!changed.changes) fail(409, "deployment_job_already_claimed");
+      const next = Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM agent_job_events WHERE job_id=?", current.id)?.sequence ?? 1);
+      db.run(
+        "INSERT INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)",
+        current.id, next, "cancelled", "cancelled", "Deployment cancelled before Agent claim", at,
+      );
+      notify(row(current.id), "cancelled", "cancelled", { previousState: "queued" });
+    });
+    return view(row(current.id));
   };
   const safe = (handler: Handler): Handler => async (ctx) => {
     try { await handler(ctx); } catch (error) {
@@ -387,7 +420,7 @@ export function registerAgentJobs(
     ctx.json(cancel(ctx.params.jobId, ctx.user.id + (value.reason ? ": " + text(value.reason, "reason", 256, false) : "")));
   }));
   return {
-    enqueue, claim, event, result, cancel, get: (jobID: string) => view(row(jobID)),
+    enqueue, claim, event, result, cancel, cancelQueuedDeployment, get: (jobID: string) => view(row(jobID)),
     start() {
       if (sweepTimer) return;
       sweepTimer = setInterval(() => {
