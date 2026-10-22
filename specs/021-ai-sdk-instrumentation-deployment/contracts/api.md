@@ -75,7 +75,8 @@
 - 必须为管理员 Cookie 会话并通过 Origin 校验；`Content-Type` 为 `application/vnd.lightmoni.release+gzip`。
 - `X-Artifact-SHA256` 必须是 64 位小写/大写 hex；`Content-Length` 为 1..64 MiB。服务端流式收件、计算摘要、与 release 元数据匹配后原子落盘。
 - 上传内容必须是 gzip 压缩 USTAR `lightmoni-release-v1.tar.gz`；manifest 的 `service_id`/`version` 必须和 URL 对应 release 匹配，服务端忽略客户端提供的 manifest 状态。中心拒绝常见凭据专用路径、私钥/知名 token 格式、URL/DSN userinfo、凭据查询参数、Basic Auth 和跨行配置中的常见有值凭据字段，错误不得回显匹配内容；该启发式检查不能证明制品无秘密。
-- 成功返回 `{release_id,sha256,size,status:"ready"}`；digest 不匹配返回 `422 digest_mismatch`，包格式、凭据检查或 service/version 不匹配返回 `422 invalid_artifact` / `422 artifact_release_mismatch`，已就绪不可变 release 不允许替换。失败上传正文留在私有 digest 存储，等待有引用检查和保留期的安全 GC；不得因单次失败按 digest 删除可能被其他 release 共用的对象。
+- 中心每个运行时进程最多同时接收并校验一个制品上传；容量已满立即返回 `503 artifact_upload_busy` 并关闭连接，不排队。准入槽覆盖流式收件、摘要/格式检查、凭据扫描和 release 状态更新，并在成功、失败或客户端断开时释放。
+- 成功返回 `{release_id,sha256,size,status:"ready"}`；容量已满返回 `503 artifact_upload_busy`，digest 不匹配返回 `422 digest_mismatch`，包格式、凭据检查或 service/version 不匹配返回 `422 invalid_artifact` / `422 artifact_release_mismatch`，已就绪不可变 release 不允许替换。失败上传正文留在私有 digest 存储，等待有引用检查和保留期的安全 GC；不得因单次失败按 digest 删除可能被其他 release 共用的对象。单槽门控限制并发负载，但不消除单个最大 bundle 的内存峰值；配额、GC 与流式解析仍待后续实现。
 - 制品正文绝不存入静态 `downloads`，状态查询只返回 digest/size/format，不返回服务器本地路径。
 
 Agent 对制品的唯一读取入口：

@@ -16,6 +16,7 @@
 - 管理员 `GET/POST /api/v1/services/:id/targets/:targetId/preflight`：只读 systemd preflight job 和目标 revision/一次性 request ID 绑定的 10 分钟快照；中心核对观测时间和回执绑定，并按目标状态、配置与 Agent 身份失效旧快照；不会推进业务 deployment 状态；
 - `GET/POST /api/v1/services/:id/releases`；
 - 管理员 `PUT /api/v1/services/:id/releases/:releaseId/artifact` 上传摘要校验后的私有 bundle；Agent 通过 `GET /api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId` 在 control credential + 当前 job lease 下下载；上传与 Agent 暂存共用启发式凭据扫描，拒绝常见凭据路径、私钥/知名 token、URL/DSN userinfo、凭据查询参数、Basic Auth 和有值凭据字段，但不保证发现所有秘密；失败上传的私有 blob 留待引用感知 GC；
+- 中心管理员 bundle 上传每个运行时进程最多一个并行请求，超额返回 `503 artifact_upload_busy` 且不排队；门控覆盖上传至 release 状态更新，不代替单包内存限制、存储配额或未引用 blob GC；
 - `GET /api/v1/services/:id/deployments`、`POST /api/v1/services/:id/deployments/plan`（ready bundle + 新鲜 ready preflight 可生成 systemd typed actions；缺少条件时仍为不可执行的 `awaiting_approval` 计划）；
 - `GET /api/v1/services/:id/deployments/:deploymentId`、`GET /api/v1/deployments/:deploymentId`、两种作用域的 deployment events 查询；
 - 管理员 `POST /api/v1/deployments/:deploymentId/approve` 与 `rollback`；approve 检查 Agent 就绪和带授权的 health_check，创建不可变 job 并推进到 `agent_ready`，之后将 Agent 的有序回执映射为部署状态；rollback 仅在新鲜 preflight 显示本次部署版本仍为 current、previous version 已登记为同一 service 的 ready release 且 Agent 在线时创建受限 Agent job，并核对健康/current-version 回执后进入 `rolled_back`；未知或不匹配回执会终结本次操作、将部署标记为 `failed` 并保留 `unknown` receipt，管理员检查主机并完成新的安全 preflight 后才可显式重试；

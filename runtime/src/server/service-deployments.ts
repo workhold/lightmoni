@@ -220,6 +220,11 @@ export function registerServiceDeployments(
   options: { jobs?: AgentJobStore; artifacts?: ReleaseArtifactStore } = {},
 ): Module & ServiceDeploymentStore {
   const { db, router } = deps;
+  // Parsing a maximum-size bundle is synchronous and temporarily retains the
+  // compressed archive, expanded tar, and copied entries. Admit one complete
+  // upload/validation at a time per center process; do not build an unbounded
+  // queue while the event loop is busy.
+  let artifactUploadActive = false;
   db.exec(`
     CREATE TABLE IF NOT EXISTS services(
       id TEXT PRIMARY KEY,
@@ -922,32 +927,49 @@ export function registerServiceDeployments(
     const expectedSha256 = String(ctx.req.headers["x-artifact-sha256"] ?? "").trim();
     if (!SHA256.test(expectedSha256)) fail(400, "invalid_artifact_digest");
 
-    let stored;
+    if (artifactUploadActive) {
+      // The request body has not been consumed yet. Close this connection
+      // after returning a bounded overload response instead of accepting an
+      // unmetered body or retaining it in an in-memory wait queue.
+      ctx.res.writeHead(503, {
+        "cache-control": "no-store",
+        "connection": "close",
+        "content-type": "application/json; charset=utf-8",
+      });
+      ctx.res.end('{"error":"artifact_upload_busy"}\n');
+      return;
+    }
+    artifactUploadActive = true;
     try {
-      stored = await options.artifacts.put(ctx.req, { contentLength, expectedSha256, signal: ctx.signal });
-    } catch (error) {
-      if (error instanceof ReleaseArtifactError) {
-        const status = error.code === "artifact_too_large" ? 413 : error.code === "artifact_io" ? 500 : error.code === "digest_mismatch" ? 422 : 400;
-        fail(status, error.code);
+      let stored;
+      try {
+        stored = await options.artifacts.put(ctx.req, { contentLength, expectedSha256, signal: ctx.signal });
+      } catch (error) {
+        if (error instanceof ReleaseArtifactError) {
+          const status = error.code === "artifact_too_large" ? 413 : error.code === "artifact_io" ? 500 : error.code === "digest_mismatch" ? 422 : 400;
+          fail(status, error.code);
+        }
+        throw error;
       }
-      throw error;
+      let bundle;
+      try {
+        bundle = parseReleaseBundle(await readFile(stored.path));
+        assertReleaseBundleHasNoCredentials(bundle);
+      } catch {
+        fail(422, "invalid_artifact");
+      }
+      if (bundle.manifest.service_id !== serviceID || bundle.manifest.version !== release.version) {
+        fail(422, "artifact_release_mismatch");
+      }
+      if (release.artifact_digest && (!SHA256.test(release.artifact_digest) || release.artifact_digest.toLowerCase() !== stored.sha256))
+        fail(422, "digest_mismatch");
+      db.run("UPDATE releases SET artifact_digest=?,artifact_size=?,artifact_format=?,manifest_json=?,status='ready' WHERE id=? AND service_id=? AND status='pending_artifact'", stored.sha256, stored.size, "lightmoni-release-v1.tar.gz", JSON.stringify(bundle.manifest), ctx.params.releaseId, serviceID);
+      const updated = db.get<any>("SELECT * FROM releases WHERE id=? AND service_id=?", ctx.params.releaseId, serviceID);
+      if (!updated || updated.status !== "ready" || updated.artifact_digest !== stored.sha256) fail(409, "release_changed_during_upload");
+      ctx.json({ release_id: updated.id, sha256: stored.sha256, size: stored.size, format: updated.artifact_format, status: "ready" }, 201);
+    } finally {
+      artifactUploadActive = false;
     }
-    let bundle;
-    try {
-      bundle = parseReleaseBundle(await readFile(stored.path));
-      assertReleaseBundleHasNoCredentials(bundle);
-    } catch {
-      fail(422, "invalid_artifact");
-    }
-    if (bundle.manifest.service_id !== serviceID || bundle.manifest.version !== release.version) {
-      fail(422, "artifact_release_mismatch");
-    }
-    if (release.artifact_digest && (!SHA256.test(release.artifact_digest) || release.artifact_digest.toLowerCase() !== stored.sha256))
-      fail(422, "digest_mismatch");
-    db.run("UPDATE releases SET artifact_digest=?,artifact_size=?,artifact_format=?,manifest_json=?,status='ready' WHERE id=? AND service_id=? AND status='pending_artifact'", stored.sha256, stored.size, "lightmoni-release-v1.tar.gz", JSON.stringify(bundle.manifest), ctx.params.releaseId, serviceID);
-    const updated = db.get<any>("SELECT * FROM releases WHERE id=? AND service_id=?", ctx.params.releaseId, serviceID);
-    if (!updated || updated.status !== "ready" || updated.artifact_digest !== stored.sha256) fail(409, "release_changed_during_upload");
-    ctx.json({ release_id: updated.id, sha256: stored.sha256, size: stored.size, format: updated.artifact_format, status: "ready" }, 201);
   }));
 
   router.get("/api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId", safe(deps, async (ctx) => {

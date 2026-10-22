@@ -97,6 +97,8 @@ git diff --check
 
 本轮新增回归验证：`node --import tsx --test test/agent-jobs.test.ts test/service-deployments.test.ts`（工作目录 `runtime/`）：8 passed、0 failed；覆盖普通部署不得跳过制品暂存、首次部署拒绝回滚、错误 current-version 成功回执不得标为 rolled_back、unknown 后不允许复用旧预检，并且管理员新预检后可显式创建新的 rollback operation。新增改动完成后，根目录 `npm test` 与 `npm run typecheck` 均通过；`git diff --check` 通过。
 
+2026-10-23 制品并发门控：管理员上传路由使用每进程一个准入槽，覆盖私有落盘、bundle 解析/凭据扫描和 release ready 更新；槽满返回 `503 artifact_upload_busy`、关闭连接且不积累等待队列。集成测试通过受控慢速上传验证第二个有效请求被拒绝，而首个请求完成后槽位可用。`npm test`（runtime、AI runtime、TypeScript SDK）通过；`npm run typecheck` 通过；上传 API 定向测试通过；`git diff --check` 通过。该门控不消除单个最大 bundle 的高峰内存占用（压缩、解压与文件副本可能同时驻留）、不提供跨进程配额；磁盘配额、引用感知 GC 与流式/隔离解析仍待实现。Doca MCP 工具和资源在本轮运行环境均不可用，在线文档未同步，不能标记完成。
+
 - deployment adapter unit tests（合法/非法路径、摘要、健康检查、rollback）及 service deployment 状态迁移/审批/事件测试；
 - deployment verification tests（服务/实例归属、UTC 窗口、deadline、样本上限和健康但遥测未验证）；
 - SQLite migration/repository 与 API 权限/幂等集成测试；

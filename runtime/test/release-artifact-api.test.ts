@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -44,6 +44,33 @@ function releaseBundle(serviceID: string, version: string, architecture = "linux
     ...extras.flatMap(tarEntry),
     Buffer.alloc(1024),
   ]));
+}
+
+function beginSlowArtifactPut(url: string, bytes: Buffer, sha256: string) {
+  const firstChunkLength = Math.max(1, Math.floor(bytes.length / 4));
+  const request = httpRequest(url, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/vnd.lightmoni.release+gzip",
+      "content-length": bytes.length,
+      "x-artifact-sha256": sha256,
+    },
+  });
+  let resolveResponse!: (value: { status: number; body: string }) => void;
+  let rejectResponse!: (reason: Error) => void;
+  const response = new Promise<{ status: number; body: string }>((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
+  });
+  request.once("response", (res) => {
+    let body = "";
+    res.setEncoding("utf8");
+    res.on("data", (chunk: string) => { body += chunk; });
+    res.once("end", () => resolveResponse({ status: res.statusCode ?? 0, body }));
+  });
+  request.once("error", rejectResponse);
+  request.write(bytes.subarray(0, firstChunkLength));
+  return { request, response, firstChunkLength };
 }
 
 test("admin uploads a validated private release and an active job lease gates Agent downloads", async (t) => {
@@ -96,6 +123,31 @@ test("admin uploads a validated private release and an active job lease gates Ag
   const release = await requestJSON(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v1", source_type: "artifact", source_ref: "git:0123456789abcdef" });
   assert.equal(release.status, 201);
   assert.equal(release.data.status, "pending_artifact");
+
+  const slowRelease = await requestJSON(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v-slow", source_type: "artifact", source_ref: "git:0123456789abcdef" });
+  const busyRelease = await requestJSON(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v-busy", source_type: "artifact", source_ref: "git:0123456789abcdef" });
+  const slowBytes = releaseBundle(serviceID, "v-slow"), slowDigest = createHash("sha256").update(slowBytes).digest("hex");
+  const slow = beginSlowArtifactPut(
+    `${base}/api/v1/services/${serviceID}/releases/${slowRelease.data.id}/artifact`,
+    slowBytes,
+    slowDigest,
+  );
+  // Keep the first request body open so the upload slot remains held while a
+  // second, otherwise-valid upload attempts admission.
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const busyBytes = releaseBundle(serviceID, "v-busy"), busyDigest = createHash("sha256").update(busyBytes).digest("hex");
+  const busyUpload = await fetch(`${base}/api/v1/services/${serviceID}/releases/${busyRelease.data.id}/artifact`, {
+    method: "PUT",
+    headers: { "content-type": "application/vnd.lightmoni.release+gzip", "x-artifact-sha256": busyDigest },
+    body: busyBytes,
+  });
+  assert.equal(busyUpload.status, 503);
+  assert.deepEqual(await busyUpload.json(), { error: "artifact_upload_busy" });
+  slow.request.end(slowBytes.subarray(slow.firstChunkLength));
+  const slowResult = await slow.response;
+  assert.equal(slowResult.status, 201);
+  assert.equal(JSON.parse(slowResult.body).sha256, slowDigest);
+
   const rejected = await requestJSON(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v-rejected", source_type: "artifact", source_ref: "git:0123456789abcdef" });
   const rejectedBytes = releaseBundle(serviceID, "different-version"), rejectedDigest = createHash("sha256").update(rejectedBytes).digest("hex");
   const rejectedUpload = await fetch(`${base}/api/v1/services/${serviceID}/releases/${rejected.data.id}/artifact`, {

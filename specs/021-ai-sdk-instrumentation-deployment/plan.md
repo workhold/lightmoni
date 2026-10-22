@@ -38,6 +38,8 @@ flowchart LR
 
 本轮将制品交付边界定义为受限 `lightmoni-release-v1.tar.gz`、中心私有 digest 存储、管理员有界上传、绑定 Agent/job lease 的下载以及仅含普通文件和目录的安全解包。部署入口固定为管理员预配置的 `<release_directory>/current/run`；Agent 不修改任意 systemd unit，而以相对 `releases/<version>` symlink 原子切换并比较预检时 previous version。内容寻址对象可能由多个 release 共用，因此上传内容格式或 manifest 校验失败时不得按 digest 立即删除；未引用对象留待有引用检查与保留期的安全 GC。完整构建 worker、真实 ClickHouse 查询和自动补偿仍待实现；管理员确认的回滚仅恢复已登记的 previous release，并经 CAS、restart、健康与 current-version 回执验证；首次部署无 previous release、目标版本已变化或执行结果未知时不自动覆盖/重试。回滚未知结果将关闭当前操作并要求人工复核；管理员只有经更新的安全 preflight 再次证明 current 仍为本次部署版本后才能显式重试。部署 `succeeded` 仅表示 Agent 报告计划内 health_check 通过，不代表中心遥测已验证。
 
+中心管理员制品上传使用进程级单槽准入门，覆盖收件到 release 状态提交，避免并行请求倍增临时磁盘和同步解析负载；槽位占用时返回 `503 artifact_upload_busy`，不建立等待队列。它不构成集群级门控，也不降低单个输入的最大解析内存；当前模块化单体按单中心进程部署。存储配额、未引用 digest 的引用感知 GC、Worker/流式解析属于后续资源硬化。
+
 制品进入私有 digest 存储前以及 Agent 暂存后都运行同一个有界凭据扫描器，检查常见私密路径、私钥/已知 token、URL/DSN userinfo、凭据查询参数、Basic Auth 和配置中的有值凭据字段；字段匹配支持跨行空白、窗口重叠与一次 percent 解码，并忽略明显的运行时环境引用及 token 计数/TTL 等元数据。扫描只是一层常见凭据拦截，不能代替来源审查或证明制品无密钥；运行凭据必须通过目标机独立秘密管理注入。
 
 受管 release 根目录必须由 root 持有并属于 Agent systemd unit 配置的 `lightmoni-agent` 主组（建议 `0775`，业务服务用户可读/遍历但只读）；Agent 的 `ProtectSystem=strict` 沙箱需将登记目录显式加入 `ReadWritePaths`。Agent 预检要求根目录 UID 为 0、GID 等于 Agent 有效主 GID、组可写、其他用户仅可读/遍历且 Agent 本身具有有效写访问。MVP 不读取扩展 POSIX ACL 或 systemd unit 的业务进程身份/附加组；管理员必须确保业务用户不属于 Agent 组、无 ACL 写权限。bundle 不承载任何密钥或运行环境凭据。
