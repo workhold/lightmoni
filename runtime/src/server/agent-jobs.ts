@@ -13,6 +13,7 @@ export type AgentJobState =
   | "queued"
   | "leased"
   | "accepted"
+  | "preflighting"
   | "staging"
   | "activating"
   | "verifying"
@@ -42,6 +43,7 @@ export interface AgentJobUpdate {
   code: string;
   healthVerified?: boolean;
   previousState?: AgentJobState;
+  snapshot?: Record<string, unknown>;
 }
 
 export interface AgentJobStore {
@@ -63,14 +65,62 @@ const LEASE_SECONDS = 45;
 const JOB_SECONDS = 15 * 60;
 const CAPABILITY = /^[a-z][a-z0-9_.-]{0,63}$/;
 const STATES = new Set<AgentJobState>([
-  "queued", "leased", "accepted", "staging", "activating", "verifying",
+  "queued", "leased", "accepted", "preflighting", "staging", "activating", "verifying",
   "succeeded", "failed", "cancelled", "unknown",
 ]);
 const EVENT_PHASES = new Set<AgentJobEventPhase>([
-  "accepted", "staging", "activating", "verifying", "succeeded", "failed", "cancelled", "unknown",
+  "accepted", "preflighting", "staging", "activating", "verifying", "succeeded", "failed", "cancelled", "unknown",
 ]);
 const terminal = (state: AgentJobState) => ["succeeded", "failed", "cancelled", "unknown"].includes(state);
-const EVENT_ORDER: Partial<Record<AgentJobEventPhase, number>> = { accepted: 0, staging: 1, activating: 2, verifying: 3 };
+const EVENT_ORDER: Partial<Record<AgentJobEventPhase, number>> = { accepted: 0, preflighting: 1, staging: 1, activating: 2, verifying: 3 };
+const readOnlyPreflight = (job: any) => {
+  try {
+    const actions = JSON.parse(job.actions_json || "[]"), caps = JSON.parse(job.capabilities_json || "[]");
+    return actions.length === 1 && actions[0]?.kind === "systemd_probe" && /^[a-f0-9]{32}$/.test(actions[0]?.preflightID ?? "")
+      && /^[a-f0-9]{64}$/i.test(actions[0]?.targetRevision ?? "") && caps.length === 1 && caps[0] === "systemd.probe";
+  } catch { return false; }
+};
+const preflightAction = (job: any) => {
+  try {
+    const actions = JSON.parse(job.actions_json || "[]"), caps = JSON.parse(job.capabilities_json || "[]");
+    return actions.length === 1 && actions[0]?.kind === "systemd_probe" && caps.length === 1 && caps[0] === "systemd.probe" ? actions[0] : undefined;
+  } catch { return undefined; }
+};
+const preflightSnapshot = (input: any, job: any, now: Date) => {
+  const value = input?.preflight;
+  if (!value || value.provider !== "systemd" || typeof value.ready !== "boolean"
+    || typeof value.systemd_available !== "boolean" || typeof value.unit_exists !== "boolean"
+    || typeof value.filesystem_check_supported !== "boolean"
+    || typeof value.release_directory_exists !== "boolean" || typeof value.release_directory_writable !== "boolean"
+    || !(value.enabled === true || value.enabled === false || value.enabled === "unknown")
+    || !["enabled", "enabled-runtime", "disabled", "static", "indirect", "masked", "masked-runtime", "linked", "linked-runtime", "alias", "generated", "transient", "unknown"].includes(value.unit_file_state)
+    || !["active", "reloading", "inactive", "failed", "activating", "deactivating", "maintenance", "refreshing", "unknown"].includes(value.active_state)
+    || typeof value.current_version !== "string" || (value.current_version !== "" && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.current_version))
+    || typeof value.observed_at !== "string" || !Number.isFinite(Date.parse(value.observed_at))) return undefined;
+  const action = preflightAction(job), observedAt = Date.parse(value.observed_at);
+  const createdAt = Date.parse(job.created_at);
+  if (!action || value.preflight_id !== action.preflightID || value.target_revision !== action.targetRevision
+    || !Number.isFinite(createdAt) || observedAt < createdAt - 60_000 || observedAt > now.getTime() + 60_000) return undefined;
+  const ready = value.filesystem_check_supported && value.systemd_available && value.unit_exists && ["active", "inactive"].includes(value.active_state)
+    && !["masked", "masked-runtime"].includes(value.unit_file_state)
+    && value.release_directory_exists && value.release_directory_writable;
+  if (value.ready !== ready) return undefined;
+  return {
+    health: { healthy: true },
+    preflight: {
+      provider: "systemd", ready, systemd_available: value.systemd_available,
+      unit_exists: value.unit_exists, active_state: value.active_state, enabled: value.enabled, unit_file_state: value.unit_file_state,
+      release_directory_exists: value.release_directory_exists,
+      filesystem_check_supported: value.filesystem_check_supported, release_directory_writable: value.release_directory_writable,
+      current_version: value.current_version, observed_at: new Date(value.observed_at).toISOString(),
+      preflight_id: action.preflightID, target_revision: action.targetRevision,
+    },
+  };
+};
+const safePreflightCode = (code: string) => new Set([
+  "job_expired", "capability_denied", "invalid_preflight_result", "systemd_failed",
+  "execution_cancelled", "execution_failed", "unknown_execution_result", "prerequisites_missing",
+]).has(code) ? code : "preflight_failed";
 
 const object = (value: unknown, field: string): Record<string, any> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail(400, `invalid ${field}`);
@@ -113,7 +163,7 @@ export function registerAgentJobs(
   const { db, router } = deps;
   const updateListeners = new Set<(update: AgentJobUpdate) => void>();
   let sweepTimer: ReturnType<typeof setInterval> | undefined;
-  const notify = (job: any, phase: AgentJobEventPhase, code = "", details: { healthVerified?: boolean; previousState?: AgentJobState } = {}) => {
+  const notify = (job: any, phase: AgentJobEventPhase, code = "", details: { healthVerified?: boolean; previousState?: AgentJobState; snapshot?: Record<string, unknown> } = {}) => {
     const update: AgentJobUpdate = {
       agentID: String(job.agent_id),
       deploymentID: String(job.deployment_id),
@@ -204,12 +254,12 @@ export function registerAgentJobs(
       });
     }
     for (const old of db.all<any>(
-      "SELECT id,state FROM agent_jobs WHERE state IN ('leased','accepted','staging','activating','verifying') AND lease_expires_at<>'' AND lease_expires_at<=?",
+      "SELECT id,state FROM agent_jobs WHERE state IN ('leased','accepted','preflighting','staging','activating','verifying') AND lease_expires_at<>'' AND lease_expires_at<=?",
       at,
     )) {
       db.transaction(() => {
         const changed = db.run(
-          "UPDATE agent_jobs SET state='unknown',receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND state IN ('leased','accepted','staging','activating','verifying')",
+          "UPDATE agent_jobs SET state='unknown',receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND state IN ('leased','accepted','preflighting','staging','activating','verifying')",
           json({ state: "unknown", code: "unknown_execution_result", summary: "Agent lease expired; execution result is unknown" }), at, old.id,
         );
         if (changed.changes) {
@@ -276,7 +326,19 @@ export function registerAgentJobs(
     if (!Number.isSafeInteger(sequence) || sequence < 1 || sequence > 100000) fail(400, "invalid sequence");
     const phase = text(value.phase, "phase", 32) as AgentJobEventPhase;
     if (!EVENT_PHASES.has(phase)) fail(400, "invalid phase");
-    const summary = eventSummary(value.summary), code = text(value.code ?? "", "code", 128, false), snapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
+    const isPreflight = readOnlyPreflight(stored);
+    let hasPreflightAction = false;
+    try { hasPreflightAction = JSON.parse(stored.actions_json || "[]").some((action: any) => action?.kind === "systemd_probe"); } catch {}
+    if (hasPreflightAction && !isPreflight) fail(409, "systemd preflight job must be isolated");
+    if ((isPreflight && ["staging", "activating", "verifying"].includes(phase)) || (!isPreflight && phase === "preflighting"))
+      fail(409, "agent job phase does not match its actions");
+    const originalSummary = eventSummary(value.summary), originalCode = text(value.code ?? "", "code", 128, false), originalSnapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
+    const probeJob = readOnlyPreflight(current);
+    const summary = probeJob ? (phase === "accepted" ? "Agent accepted read-only systemd preflight" : phase === "preflighting" ? "Agent inspected registered systemd target" : phase === "succeeded" ? "Read-only systemd preflight completed" : "Read-only systemd preflight state updated") : originalSummary;
+    const code = probeJob ? (originalCode ? safePreflightCode(originalCode) : "") : originalCode;
+    // A probe snapshot is accepted only from the final /result path, after the
+    // strict whitelist below. Events never persist Agent-provided snapshot data.
+    const snapshot = probeJob ? {} : originalSnapshot;
     const occurred = iso(deps);
     db.transaction(() => {
       const last = db.get<any>("SELECT * FROM agent_job_events WHERE job_id=? ORDER BY sequence DESC LIMIT 1", jobID);
@@ -289,18 +351,18 @@ export function registerAgentJobs(
       if (last && EVENT_ORDER[last.phase as AgentJobEventPhase] === undefined) fail(409, "agent job already has a terminal event");
       if (last && EVENT_ORDER[phase] !== undefined && EVENT_ORDER[last.phase as AgentJobEventPhase] !== undefined
         && EVENT_ORDER[phase]! < EVENT_ORDER[last.phase as AgentJobEventPhase]!) fail(409, "agent event phase cannot move backwards");
-      if (phase === "succeeded" && current.state !== "verifying") fail(409, "success event requires verification phase");
+      if (phase === "succeeded" && current.state !== "verifying" && !(current.state === "preflighting" && readOnlyPreflight(current))) fail(409, "success event requires verification phase");
       db.run("INSERT INTO agent_job_events(job_id,sequence,phase,code,summary,snapshot_json,occurred_at) VALUES(?,?,?,?,?,?,?)", jobID, sequence, phase, code, summary, json(snapshot), occurred);
       // Terminal events are observations only; /result is authoritative.
       if (terminal(phase)) return;
-      const allowed: AgentJobState[] = ["leased", "accepted", "staging", "activating", "verifying"];
+      const allowed: AgentJobState[] = ["leased", "accepted", "preflighting", "staging", "activating", "verifying"];
       if (!allowed.includes(current.state as AgentJobState)) fail(409, "agent job is no longer running");
       const previousRank = current.state === "leased" ? -1 : EVENT_ORDER[current.state as AgentJobEventPhase];
       const nextRank = EVENT_ORDER[phase];
       if (previousRank == null || nextRank == null || nextRank < previousRank || nextRank > previousRank + 1)
         fail(409, "agent event phase is not a valid next step");
       db.run("UPDATE agent_jobs SET state=?,updated_at=?,lease_expires_at=? WHERE id=? AND lease_id=?", phase, occurred, iso(deps, new Date(deps.now().getTime() + LEASE_SECONDS * 1000)), jobID, lease);
-      notify(row(jobID), phase, code, { previousState: current.state as AgentJobState });
+      notify(row(jobID), phase, code, { previousState: current.state as AgentJobState, snapshot });
     });
     return view(row(jobID));
   };
@@ -318,7 +380,21 @@ export function registerAgentJobs(
     let state = text(value.state, "state", 32) as AgentJobState;
     if (!["succeeded", "failed", "cancelled", "unknown"].includes(state)) fail(400, "invalid result state");
     let code = text(value.code ?? "", "code", 128, false), summary = eventSummary(value.summary), snapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
-    if (state === "succeeded" && (current.state !== "verifying" || (snapshot as any).health?.healthy !== true)) {
+    if (readOnlyPreflight(current)) {
+      code = code ? safePreflightCode(code) : "";
+      summary = state === "succeeded" ? "Read-only systemd preflight completed" : state === "failed" ? "Read-only systemd preflight failed" : "Read-only systemd preflight result requires review";
+      if (state === "succeeded") {
+        const sanitized = preflightSnapshot(snapshot, current, deps.now());
+        if (!sanitized) {
+          state = "failed";
+          code = "invalid_preflight_result";
+          summary = "Read-only systemd preflight returned an invalid structured result";
+          snapshot = {};
+        } else snapshot = sanitized;
+      } else snapshot = {};
+    }
+    const validSuccessPhase = readOnlyPreflight(current) ? current.state === "preflighting" : current.state === "verifying";
+    if (state === "succeeded" && (!validSuccessPhase || (snapshot as any).health?.healthy !== true)) {
       state = "unknown";
       code = "invalid_agent_sequence";
       summary = "Agent success receipt did not include a completed healthy verification";
@@ -341,6 +417,7 @@ export function registerAgentJobs(
       notify(row(jobID), state as AgentJobEventPhase, code, {
         healthVerified: state === "succeeded" && (snapshot as any).health?.healthy === true,
         previousState: current.state as AgentJobState,
+        snapshot: snapshot as Record<string, unknown>,
       });
     });
     return view(row(jobID));

@@ -1,6 +1,6 @@
 # SDD 021：Agent Job 与执行器契约
 
-> 本文件是 Agent 执行协议契约。当前分支已提供中心侧 job claim/lease/event/result/cancel API、最小 capability executor、Agent 重启 unknown 回执和 Agent 结果到业务 deployment 的脱敏状态映射；签名 job、真实 preflight、中心遥测验证、自动目标复核和最终回滚仍未接入。`agent_ready` 表示等待执行；`succeeded` 只代表 Agent 报告计划内 health_check 通过。
+> 本文件是 Agent 执行协议契约。当前分支已提供中心侧 job claim/lease/event/result/cancel API、最小 capability executor、Agent 重启 unknown 回执、只读 systemd preflight 和 Agent 结果到业务 deployment 的脱敏状态映射；签名 job、中心遥测验证、自动目标复核和最终回滚仍未接入。`preflighting` 是只读检查阶段，不能推进 service deployment 状态；`agent_ready` 表示业务 job 等待执行；业务 deployment `succeeded` 只代表 Agent 报告计划内 health_check 通过。
 
 ## Job 拉取与租约
 
@@ -64,5 +64,24 @@ MVP capability：
 - `artifact.activate_release`：只切换 target.releaseDirectory 下已暂存的版本指针；不得接受任意目录或版本。
 - `systemd.daemon_reload`、`systemd.enable`、`systemd.start`、`systemd.restart`、`systemd.stop`：只作用于 target 登记的 unit。
 - `health.systemd`、`health.http`、`health.tcp`：固定超时和并发，禁止带凭据的 URL。
+- `systemd.probe`：单独 job 中只读检查 action 登记且与 target 精确一致的 systemd unit 和 release directory；只报告 systemd 可用性、unit load/active/enabled 状态、目录存在/可写布尔值、安全版本标识、观测时间、一次性 preflight ID 与目标配置 revision。Agent 不返回原始命令输出、不创建目录、不改变 unit 状态；路径穿过符号链接时预检不就绪。只有 `active`/`inactive` 且 unit 未 masked、目录存在且可写时才返回 `ready=true`。
+
+Linux Agent 使用 `/proc/self/fd` 锚定已打开目录句柄并在逐级路径解析中拒绝符号链接；主机上的暂存与版本切换只在 Linux 提供这类安全文件操作的平台执行。macOS 上可开发和运行只读协议测试，但预检的 `filesystem_check_supported=false`、`ready=false`，暂存/切换明确返回 `unsupported_platform`。真实部署执行需在 Linux Agent 上验证。
+
+预检 action：
+
+```json
+{
+  "kind":"systemd_probe",
+  "unit":"checkout.service",
+  "releaseDirectory":"/opt/lightmoni/services/checkout",
+  "preflightID":"<32 lowercase hex characters>",
+  "targetRevision":"<sha256 hex>"
+}
+```
+
+最终 job result 的 `snapshot.preflight` 包含 `ready`、`systemd_available`、`unit_exists`、`active_state`、`enabled`、`unit_file_state`、`filesystem_check_supported`、`release_directory_exists`、`release_directory_writable`、`current_version`、`observed_at`、`preflight_id` 和 `target_revision`。只有 Agent 支持固定目录句柄安全检查的平台才允许 `filesystem_check_supported=true`；不支持时不能把“未检查”显示成“目录不存在”，且 `ready` 必须为 false。中心校验快照 ID、revision 和观测时间不得早于该 job 的签发时间（容忍最多 60 秒时钟偏差），避免跨 job 重放旧快照。顶层 `snapshot.health.healthy=true` 仅表示 Agent 成功完成了只读探测，不代表目标已符合部署条件；应以 `snapshot.preflight.ready` 作为可部署性判断。缺少或字段类型不符的快照不得被中心保存为成功预检。
+
+只读 job 的事件阶段仅允许 `accepted → preflighting → terminal`，不接受 `staging`、`activating` 或 `verifying`；常规部署 job 不接受 `preflighting`。
 
 不提供 `shell.exec`、`file.write_anywhere`、`package.install`、`ssh.forward` 或 `secret.read`。任何未知 capability、越界 path、digest mismatch、过期 job 或超时 action 都在执行前拒绝并审计。

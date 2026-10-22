@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { isAbsolute, normalize } from "node:path";
 import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
@@ -61,6 +63,9 @@ export function canTransitionDeployment(from: DeploymentStatus, to: DeploymentSt
 const ADAPTERS = new Set<string>(deploymentAdapters.list());
 const SERVICE_ID = /^[a-f0-9]{32}$/;
 const MAX_JSON_BYTES = 64 << 10;
+const PREFLIGHT_TTL_MS = 10 * 60_000;
+const SYSTEMD_UNIT = /^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,126}\.service$/;
+const RELEASE_VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 const nowISO = (deps: Dependencies) => deps.now().toISOString();
 const record = (value: unknown, field = "request"): Record<string, any> => {
@@ -170,6 +175,31 @@ const deploymentView = (row: any) => ({
   finished_at: row.finished_at,
 });
 
+const preflightView = (row: any, current = false) => {
+  const snapshot = parse<Record<string, any>>(row.snapshot_json, {});
+  return {
+    id: row.id,
+    status: row.status,
+    ready: snapshot.preflight?.ready === true,
+    snapshot,
+    error_code: row.error_code || "",
+    created_at: row.created_at,
+    completed_at: row.completed_at || "",
+    expires_at: row.expires_at || "",
+    current,
+  };
+};
+const safeTargetConfig = (adapter: string, raw: Record<string, any>) => {
+  if (adapter !== "systemd") fail(400, "unsupported deployment adapter");
+  const unit = text(raw.unit, "config.unit", 128);
+  const releaseDirectory = text(raw.release_directory ?? raw.releaseDirectory, "config.release_directory", 1024);
+  if (!SYSTEMD_UNIT.test(unit)) fail(400, "invalid systemd unit");
+  if (!isAbsolute(releaseDirectory) || releaseDirectory === "/" || normalize(releaseDirectory) !== releaseDirectory
+    || releaseDirectory.includes("\\") || releaseDirectory.split("/").includes("..") || /[\u0000-\u001f\u007f]/.test(releaseDirectory))
+    fail(400, "invalid systemd release directory");
+  return { unit, release_directory: releaseDirectory };
+};
+
 /** Register service inventory and approval-ready delivery plan APIs. */
 export function registerServiceDeployments(
   deps: Dependencies,
@@ -200,6 +230,21 @@ export function registerServiceDeployments(
     );
     CREATE INDEX IF NOT EXISTS service_targets_service ON service_targets(service_id,updated_at);
     CREATE INDEX IF NOT EXISTS service_targets_machine ON service_targets(machine_id,updated_at);
+    CREATE TABLE IF NOT EXISTS service_target_preflights(
+      id TEXT PRIMARY KEY,
+      target_id TEXT NOT NULL REFERENCES service_targets(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL,
+      operation_id TEXT NOT NULL UNIQUE,
+      job_id TEXT NOT NULL DEFAULT '',
+      target_revision TEXT NOT NULL,
+      status TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL DEFAULT '{}',
+      error_code TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      completed_at TEXT NOT NULL DEFAULT '',
+      expires_at TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS service_target_preflights_latest ON service_target_preflights(target_id,created_at);
     CREATE TABLE IF NOT EXISTS releases(
       id TEXT PRIMARY KEY,
       service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE,
@@ -304,7 +349,7 @@ export function registerServiceDeployments(
     return db.all<any>(
       `SELECT t.*,m.name AS machine_name FROM service_targets t JOIN managed_machines m ON m.id=t.machine_id WHERE t.service_id=? ORDER BY t.updated_at DESC,t.id`,
       serviceID,
-    ).map(targetView);
+    ).map((row) => ({ ...targetView(row), preflight: latestPreflight(serviceID, String(row.id)).view ?? null }));
   };
   const releases = (serviceID: string) => {
     ensureService(serviceID);
@@ -389,8 +434,79 @@ export function registerServiceDeployments(
     const age = deps.now().getTime() - seen;
     return Number.isFinite(seen) && age >= 0 && age < 180_000;
   };
+  const currentTarget = (serviceID: string, targetID: string) => {
+    const target = ensureTarget(serviceID, targetID);
+    const machine = ensureMachine(String(target.machine_id));
+    const rawConfig = parse<Record<string, any>>(target.config_json, {});
+    const config = {
+      unit: typeof rawConfig.unit === "string" ? rawConfig.unit : "",
+      release_directory: typeof rawConfig.release_directory === "string" ? rawConfig.release_directory : typeof rawConfig.releaseDirectory === "string" ? rawConfig.releaseDirectory : "",
+    };
+    const revision = createHash("sha256").update(JSON.stringify({
+      target_id: target.id, service_id: target.service_id, machine_id: target.machine_id,
+      adapter: target.adapter, status: target.status, updated_at: target.updated_at, config, agent_id: machine.agent_id, address: machine.address,
+      port: machine.port, username: machine.username,
+    })).digest("hex");
+    return { target, machine, config, revision };
+  };
+  const latestPreflight = (serviceID: string, targetID: string) => {
+    const current = currentTarget(serviceID, targetID);
+    const result = db.get<any>("SELECT * FROM service_target_preflights WHERE target_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1", targetID);
+    if (!result) return { current, result: undefined, view: undefined };
+    const fresh = result.status === "completed" && result.target_revision === current.revision
+      && Date.parse(result.expires_at || "") > deps.now().getTime();
+    return { current, result, view: preflightView(result, fresh) };
+  };
+  const validatePreflightSnapshot = (snapshot: unknown, expected: { id: string; target_revision: string; created_at: string }) => {
+    const value = (snapshot as any)?.preflight;
+    if (!value || value.provider !== "systemd" || typeof value.ready !== "boolean"
+      || typeof value.systemd_available !== "boolean" || typeof value.unit_exists !== "boolean"
+      || typeof value.filesystem_check_supported !== "boolean"
+      || typeof value.release_directory_exists !== "boolean" || typeof value.release_directory_writable !== "boolean"
+      || !(value.enabled === true || value.enabled === false || value.enabled === "unknown")
+      || !["enabled", "enabled-runtime", "disabled", "static", "indirect", "masked", "masked-runtime", "linked", "linked-runtime", "alias", "generated", "transient", "unknown"].includes(value.unit_file_state)
+      || !["active", "reloading", "inactive", "failed", "activating", "deactivating", "maintenance", "refreshing", "unknown"].includes(value.active_state)
+      || typeof value.current_version !== "string" || (value.current_version !== "" && !RELEASE_VERSION.test(value.current_version))
+      || value.preflight_id !== expected.id || value.target_revision !== expected.target_revision
+      || typeof value.observed_at !== "string" || !Number.isFinite(Date.parse(value.observed_at))) return undefined;
+    const observedAt = Date.parse(value.observed_at), createdAt = Date.parse(expected.created_at), receivedAt = deps.now().getTime();
+    if (observedAt < createdAt - 60_000 || observedAt > receivedAt + 60_000) return undefined;
+    const ready = value.filesystem_check_supported && value.systemd_available && value.unit_exists && ["active", "inactive"].includes(value.active_state)
+      && !["masked", "masked-runtime"].includes(value.unit_file_state)
+      && value.release_directory_exists && value.release_directory_writable;
+    if (value.ready !== ready) return undefined;
+    return {
+      provider: "systemd", ready, systemd_available: value.systemd_available,
+      unit_exists: value.unit_exists, active_state: value.active_state, enabled: value.enabled, unit_file_state: value.unit_file_state,
+      release_directory_exists: value.release_directory_exists,
+      filesystem_check_supported: value.filesystem_check_supported, release_directory_writable: value.release_directory_writable,
+      current_version: value.current_version, observed_at: new Date(value.observed_at).toISOString(),
+    };
+  };
   options.jobs?.onUpdate((update) => {
     if (!update.deploymentID || !update.operationID) return;
+    const preflight = db.get<any>("SELECT * FROM service_target_preflights WHERE operation_id=?", update.operationID);
+    if (preflight && update.deploymentID === `preflight:${preflight.id}`) {
+      if (preflight.agent_id !== update.agentID || (preflight.job_id && preflight.job_id !== update.jobID)) return;
+      const at = nowISO(deps);
+      if (update.phase === "accepted") {
+        db.run("UPDATE service_target_preflights SET status='running',job_id=? WHERE id=? AND status='queued'", update.jobID, preflight.id);
+      } else if (update.phase === "succeeded") {
+        const snapshot = validatePreflightSnapshot(update.snapshot, preflight);
+        if (!snapshot) {
+          db.run("UPDATE service_target_preflights SET status='failed',error_code='invalid_preflight_result',completed_at=? WHERE id=?", at, preflight.id);
+        } else {
+          const expiresAt = new Date(Date.parse(snapshot.observed_at) + PREFLIGHT_TTL_MS).toISOString();
+          db.run("UPDATE service_target_preflights SET status='completed',snapshot_json=?,error_code=?,completed_at=?,expires_at=? WHERE id=?", JSON.stringify({ preflight: snapshot }), snapshot.ready ? "" : "prerequisites_missing", at, expiresAt, preflight.id);
+        }
+      } else if (update.phase === "failed" || update.phase === "unknown") {
+        const code = /^[a-z][a-z0-9_.-]{0,63}$/.test(update.code) ? update.code : "preflight_failed";
+        db.run("UPDATE service_target_preflights SET status=?,error_code=?,completed_at=? WHERE id=?", update.phase, code, at, preflight.id);
+      } else if (update.phase === "cancelled") {
+        db.run("UPDATE service_target_preflights SET status=?,error_code=?,completed_at=? WHERE id=?", update.previousState === "queued" ? "expired" : "unknown", update.code || "job_cancelled", at, preflight.id);
+      }
+      return;
+    }
     const deployment = db.get<any>(
       "SELECT * FROM deployments WHERE id=? AND operation_id=?",
       update.deploymentID,
@@ -486,13 +602,15 @@ export function registerServiceDeployments(
     if (!ADAPTERS.has(target.adapter)) fail(400, "unsupported deployment provider");
     if (target.status === "disabled") fail(409, "服务目标已禁用");
     const machine = ensureMachine(target.machine_id), at = nowISO(deps), deploymentID = id();
+    const preflight = latestPreflight(serviceID, targetID);
     const plan = {
       version: "service-deployment/v1",
       adapter: target.adapter,
       provider_plan_status: "generic",
-      provider_plan_reason: "agent_preflight_required",
+      provider_plan_reason: preflight.view?.current && preflight.view.ready ? "artifact_transport_required" : "agent_preflight_required",
       service_id: serviceID,
       target_id: target.id,
+      preflight: preflight.view,
       release_id: release.id,
       machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, username: machine.username },
       release: { version: release.version, source_type: release.source_type, source_ref: release.source_ref, artifact_digest: release.artifact_digest },
@@ -546,21 +664,54 @@ export function registerServiceDeployments(
     const machine = ensureMachine(text(input.machine_id, "machine_id", 128));
     const adapter = text(input.adapter ?? "systemd", "adapter", 32) as ServiceAdapter;
     if (!ADAPTERS.has(adapter)) fail(400, "unsupported deployment adapter");
-    const config = jsonObject(input.config, "config");
+    const config = safeTargetConfig(adapter, jsonObject(input.config, "config"));
     const at = nowISO(deps), targetID = id();
     db.run("INSERT INTO service_targets(id,service_id,machine_id,adapter,config_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", targetID, serviceID, machine.id, adapter, JSON.stringify(config), at, at);
-    ctx.json(targetView(db.get<any>("SELECT t.*,m.name AS machine_name FROM service_targets t JOIN managed_machines m ON m.id=t.machine_id WHERE t.id=?", targetID)!), 201);
+    ctx.json({ ...targetView(db.get<any>("SELECT t.*,m.name AS machine_name FROM service_targets t JOIN managed_machines m ON m.id=t.machine_id WHERE t.id=?", targetID)!), preflight: null }, 201);
   }));
   router.patch("/api/v1/services/:id/targets/:targetId", safe(deps, async (ctx) => {
     admin(deps, ctx);
     const current = ensureTarget(ctx.params.id, ctx.params.targetId), input = await body(ctx);
     const adapter = text(input.adapter ?? current.adapter, "adapter", 32) as ServiceAdapter;
     if (!ADAPTERS.has(adapter)) fail(400, "unsupported deployment adapter");
-    const config = jsonObject(input.config ?? parse(current.config_json, {}), "config"), status = text(input.status ?? current.status, "status", 32);
+    const config = safeTargetConfig(adapter, jsonObject(input.config ?? parse(current.config_json, {}), "config")), status = text(input.status ?? current.status, "status", 32);
     if (!["unknown", "ready", "degraded", "disabled"].includes(status)) fail(400, "invalid target status");
     const at = nowISO(deps);
     db.run("UPDATE service_targets SET adapter=?,config_json=?,status=?,updated_at=? WHERE id=? AND service_id=?", adapter, JSON.stringify(config), status, at, current.id, current.service_id);
-    ctx.json(targetView(db.get<any>("SELECT t.*,m.name AS machine_name FROM service_targets t JOIN managed_machines m ON m.id=t.machine_id WHERE t.id=?", current.id)!));
+    ctx.json({ ...targetView(db.get<any>("SELECT t.*,m.name AS machine_name FROM service_targets t JOIN managed_machines m ON m.id=t.machine_id WHERE t.id=?", current.id)!), preflight: null });
+  }));
+
+  router.get("/api/v1/services/:id/targets/:targetId/preflight", safe(deps, (ctx) => {
+    admin(deps, ctx);
+    const latest = latestPreflight(ctx.params.id, ctx.params.targetId);
+    ctx.json(latest.view ?? null);
+  }));
+  router.post("/api/v1/services/:id/targets/:targetId/preflight", safe(deps, async (ctx) => {
+    admin(deps, ctx);
+    const input = await body(ctx);
+    if (Object.keys(input).some((key) => key !== "confirm") || input.confirm !== true) fail(400, "必须明确确认执行只读主机预检");
+    const latest = latestPreflight(ctx.params.id, ctx.params.targetId), { target, machine, config, revision } = latest.current;
+    if (target.status === "disabled") fail(409, "服务目标已禁用");
+    if (!machine.agent_id || !machineAgentReady(String(target.machine_id))) fail(409, "agent_not_ready");
+    if (!options.jobs) fail(503, "agent_jobs_unavailable");
+    if (latest.result && latest.result.target_revision === revision && ["queued", "running"].includes(latest.result.status)) {
+      ctx.json(latest.view);
+      return;
+    }
+    const preflightID = id(), operationID = id(), at = nowISO(deps);
+    const response = db.transaction(() => {
+      db.run("INSERT INTO service_target_preflights(id,target_id,agent_id,operation_id,target_revision,status,created_at) VALUES(?,?,?,?,?,'queued',?)", preflightID, target.id, machine.agent_id, operationID, revision, at);
+      const job = options.jobs!.enqueue({
+        agentID: String(machine.agent_id), deploymentID: `preflight:${preflightID}`, operationID,
+        actions: [{ kind: "systemd_probe", unit: config.unit, releaseDirectory: config.release_directory, preflightID, targetRevision: revision }],
+        capabilities: ["systemd.probe"],
+        target: { config: { unit: config.unit, release_directory: config.release_directory } },
+        expiresInSeconds: 10 * 60,
+      });
+      db.run("UPDATE service_target_preflights SET job_id=? WHERE id=?", String(job.id), preflightID);
+      return preflightView(db.get<any>("SELECT * FROM service_target_preflights WHERE id=?", preflightID)!, false);
+    });
+    ctx.json(response, 202);
   }));
 
   router.get("/api/v1/services/:id/releases", safe(deps, (ctx) => { admin(deps, ctx); ctx.json(releases(ctx.params.id)); }));

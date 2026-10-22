@@ -49,6 +49,15 @@ export type DeploymentAction =
   | {
       kind: "health_check";
       check: HealthCheck;
+    }
+  | {
+      /** A single-operation, read-only host probe; never mixed with deploy actions. */
+      kind: "systemd_probe";
+      unit: string;
+      releaseDirectory: string;
+      /** Per-request binding that prevents an earlier snapshot being replayed. */
+      preflightID: string;
+      targetRevision: string;
     };
 
 export type HealthCheck =

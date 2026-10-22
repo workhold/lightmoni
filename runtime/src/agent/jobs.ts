@@ -75,7 +75,7 @@ export class AgentJobRunner {
     const reply = await this.request(`/api/v1/agents/${encodeURIComponent(this.config.agentID)}/jobs/claim`, {
       capabilities: [
         "artifact.stage", "artifact.activate_release", "systemd.daemon_reload", "systemd.enable", "systemd.disable", "systemd.start", "systemd.restart", "systemd.stop",
-        "health.systemd", "health.http", "health.tcp",
+        "health.systemd", "health.http", "health.tcp", "systemd.probe",
       ],
       receipt_cursor: this.cursor,
     });

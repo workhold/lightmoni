@@ -16,8 +16,9 @@
 - `runtime/src/assistant/instrumentation.ts` 提供只读、启发式扫描器、受限的结构化插桩提案和管理员确认后的安全 apply。提案目前只对可明确定位的 TypeScript/JavaScript 多行请求处理函数生成 unified diff；apply 绑定 `base_revision`，检查路径、符号链接和文件大小并原子写入，仍不执行构建或项目代码。Python、Go、Rust、Ruby 和歧义边界只返回手动步骤。
 - `runtime/src/deployment` 已有 `systemd` 纯逻辑适配器和显式 provider registry，并有边界测试；适配器通过服务部署计划生成 typed action 的扩展点，主机动作由 Agent executor 解释。
 - `runtime/src/server/service-deployments.ts` 持久化 service/target/release/deployment 元数据和脱敏 deployment events。管理员 `approve` 在 Agent 就绪后要求至少一个 typed action 和带 capability 的 health_check，然后原子创建不可变 Agent job 并推进到 `agent_ready`。管理员可取消未审批计划；已批准计划仅在 Agent job 仍排队时允许原子取消，Agent 已领取后取消请求返回冲突，不宣称远端执行已停止。中心将 Agent 的单调阶段回执映射到部署状态；最终成功必须来自 verifying 状态且含 `health.healthy=true`。未领取 job 过期可安全取消；Agent 端执行取消、租约过期和不完整成功回执均保留 unknown，不推断目标机已恢复或失败。中心后台定期清理 job 过期状态，事件状态与 receipt 在同一 SQLite 事务内更新。
-- 部署工作台只有在计划明确为 ready 且包含 actions/capabilities 时显示批准按钮。通用元数据计划仍可以查看和取消，但页面说明 Agent 真实预检与可执行动作生成尚未接入。
-- `runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定。Agent 回报健康检查通过只代表 Agent 侧计划执行的检查通过，不代表中心已查询 ClickHouse 遥测；真实主机 preflight、受控构建/制品传输、真实 ClickHouse 查询、自动补偿和最终回滚回执仍未接入。
+- service target 可请求 Agent 执行只读 systemd preflight。Agent 只检查登记的 unit 与 release directory，返回固定字段的状态快照；中心保存结果，后续部署计划可绑定最近一次通过的快照。该预检不会运行部署动作或 shell，也不包含制品上传/下载，因此部署审批仍会安全拒绝缺少可执行 typed actions 的计划。
+- 部署工作台只有在计划明确为 ready 且包含 actions/capabilities 时显示批准按钮。目标可执行 Agent 只读 systemd 预检；计划缺少预检时提示先完成预检并重新生成，预检通过但缺少制品传输时明确显示当前不能审批。
+- `runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定。只读 systemd preflight 已通过 Agent job 检查目标 unit 和 release directory；Agent 回报部署健康检查通过只代表计划内的 Agent 检查，不代表中心已查询 ClickHouse 遥测。受控构建/制品传输、真实 ClickHouse 查询、自动补偿和最终回滚回执仍未接入。
 - Assistant 目前提供扫描、只读插桩提案、管理员确认后的插桩 apply、服务列表、部署计划提案和部署状态读取工具。构建、真实部署编排和回滚工具仍未提供；Agent job 的拉取、能力执行和回执由 Agent 运行时独立完成。
 - `docker_compose` 目前最多作为目标元数据被登记，尚无对应适配器或执行器；只有注册到 registry 的 provider 才能执行，不能把登记成功解释为 provider 已支持。
 
@@ -114,8 +115,11 @@ LightMoni 已经有 AI 对话、Pi 代码任务、SDK 上报、受管主机和�
 
 - 所有 provider 遵循 `probe → plan → apply → verify → rollback`，输入输出为 JSON 可序列化的类型，不返回 shell 字符串。
 - `systemd` probe 检查 systemd 可用、unit 存在、当前 active/enabled 状态、当前版本和受控 release 目录。
+- Agent 的 `systemd.probe` capability 仅允许读取 job 中登记的 unit 和 release directory；结果为有限枚举、布尔值、版本标识和固定错误码，不上传原始 stdout/stderr。中心将预检快照绑定到 target 和 operation，并在计划中保留最近一次未过期快照。
+- 预检快照缺失、过期或 `ready=false` 时，中心不得生成可审批部署动作；预检通过也不等于制品已可供 Agent 使用，artifact transport 接入前计划仍不可执行。
 - plan 仅生成受限 actions：暂存制品、daemon-reload、enable/start/restart、HTTP/TCP/systemd-active 健康检查和回滚动作。
 - Agent executor 只允许目标登记的 unit、受控 release 目录和允许的健康检查；unit/路径来自服务目标配置而非模型自由输入。
+- Agent 对受控目录的检查、制品暂存和版本指针切换要求 Linux 固定目录句柄与 `O_NOFOLLOW`；其他平台不标记预检 ready，也不执行部署文件写操作。检查 `current` 指针时不能因 FIFO 等特殊文件阻塞 Agent job loop。
 - systemd 适配器必须在不支持的主机/坏快照/摘要不匹配时拒绝计划，不尝试猜测或修正。
 
 ### FR-005 Agent 执行与回执

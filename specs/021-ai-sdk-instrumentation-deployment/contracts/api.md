@@ -2,7 +2,7 @@
 
 所有接口均挂在 `/api/v1`，需要登录；创建/应用源码变更、构建、Agent 安装、部署、回滚和修改目标仅管理员可用。响应不包含私钥、密码、token 或原始命令输出。
 
-> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和 `rollback_pending` 提案。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。该闭环不代表真实主机 preflight、中心遥测查询或自动回滚已实现。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；release 构建与受控制品分发仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
+> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现管理员服务目标配置、Agent 只读 systemd preflight、受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和 `rollback_pending` 提案。Preflight 通过独立 `systemd.probe` job 检查目标 unit 和受控目录，快照绑定目标配置 revision、最多保鲜 10 分钟；它不推进业务部署状态，也不执行主机写入。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。该闭环不代表制品上传/分发、中心遥测查询或自动回滚已实现。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；release 构建与受控制品分发仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
 
 ## 通用约束
 
@@ -86,6 +86,18 @@
 
 `provider_config` 仅允许所选 adapter 的字段；路径必须是受控绝对路径，URL 不得带用户名、密码或 hash。
 
+当前实现只接受 `adapter: "systemd"`，配置为 `{ "unit":"checkout.service", "release_directory":"/opt/lightmoni/checkout" }`。Unit 和路径由管理员登记，不从 AI 参数或主机发现结果推断。路径不能为根目录、含 `..` 或控制字符。
+
+### `POST /services/:id/targets/:targetId/preflight`
+
+管理员请求：`{"confirm":true}`。服务端从已登记的目标、机器与 Agent 绑定构建唯一只读 action，不接受客户端传入 unit、路径、Agent ID、command 或 capability。目标 Agent 必须在线且已激活。重复请求在相同目标配置下复用排队/执行中的预检；否则创建短期 Agent job，返回 `202` 和预检记录。
+
+Agent 只运行固定参数的 `systemctl show`，读取已登记 release directory 和其中的安全 `current` 版本指针；不建目录、不启停服务、不返回 stdout/stderr。目标路径穿过符号链接时会拒绝就绪；只有 unit 处于 `active`/`inactive`、未 masked 且 release directory 存在且可写才算 ready。中心发给 job 的 action 含一次性 `preflightID` 和 `targetRevision`；最终回执只允许固定字段，必须回显这两个绑定值，中心校验它们与 job/目标 revision 匹配，并校验 `observed_at` 不早于 job 签发时间（允许 60 秒时钟偏差）。超时、取消、错误/畸形输出和跨 job 旧快照返回固定错误状态，不刷新快照有效期。
+
+### `GET /services/:id/targets/:targetId/preflight`
+
+返回 `{id,status,ready,current,snapshot,error_code,created_at,completed_at,expires_at}`。`current` 仅当结果成功、目标/Agent 配置 revision 未改变且距 Agent `observed_at` 未超 10 分钟时为 true。目标状态、配置或机器身份变化使旧快照失效。`ready` 仅说明目标通过只读主机预检，并不表示制品可用或业务部署可执行。
+
 ### `POST /services/:id/deployments/plan`
 
 请求：
@@ -116,6 +128,8 @@
 ```
 
 创建计划不安装 Agent、不构建、不启动服务。
+
+当前计划会附最近一次预检摘要及目标配置 revision。预检缺失/过期/未就绪时标记 `agent_preflight_required`；预检通过时当前标记 `artifact_transport_required`。由于 release 目前没有中心受控存储和 Agent 下载通道，两个情形都不生成生产可执行 actions，审批 API 仍拒绝通用空计划。
 
 ### `POST /deployments/:id/approve`
 

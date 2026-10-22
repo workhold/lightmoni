@@ -211,9 +211,10 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 1. 管理员为业务服务提供已授权的源码 workspace；AI 先调用只读 `scan_sdk_instrumentation`，识别语言、框架、LightMoni SDK、直连/Agent 模式和候选请求/错误边界。
 2. 扫描不导入或执行业务代码，也不写文件。对于可以明确定位的 TypeScript/JavaScript 多行请求边界，AI 调用只读 `propose_sdk_instrumentation` 生成结构化 unified diff、风险、手动步骤和验证命令；Python、Go、Rust、Ruby 或歧义边界只给手动步骤。复杂改写才交给隔离 workspace 的 `code_task`，同样只产生可审阅 diff；所有 diff 都必须经过管理员确认后才应用。
 3. 已确认的 revision 经过受控构建生成带版本、架构、来源 revision 和 SHA-256 的 release。中心只保存 release 元数据和受控引用，生产 Agent 不接收源码仓库凭据或模型密钥。
-4. 管理员为 service 创建一个或多个 service target，选择运行方式适配器。MVP 的 `systemd` 适配器覆盖 Node、Python、Go、Rust、二进制和解释器服务；语言不是部署协议。Docker Compose、Kubernetes/Helm 和 CI/GitOps 作为后续适配器。
-5. 中心执行 `probe → plan → apply → verify → rollback` 的受控计划层，生成 `awaiting_approval` 部署计划。计划只包含 typed actions，不包含 shell 字符串；管理员审批前中心要求可执行 actions 和带能力授权的 health_check，随后原子写入不可变 Agent job 并把部署推进到 `agent_ready`。Agent 安装与业务部署分别记录，Agent 未激活时不能进入业务执行阶段。
-6. Agent executor 通过 control credential 拉取短时租约 job。中心后台定期处理过期任务，按单调序号接收阶段事件，并将 staging/activating/verifying/final receipt 映射到脱敏部署时间线。只有 verifying 后的最终回执包含 `health.healthy=true` 才标记 `succeeded`；未领取 job 可以安全取消或过期取消，已领取任务取消、租约过期或成功回执不完整时保留 `unknown`，要求重新检查目标主机。此状态仅表示 Agent 报告计划内健康检查通过，中心 ClickHouse 遥测验证仍单独显示未验证。
+4. 管理员为 service 创建一个或多个 service target，登记 systemd unit 与受控 release directory。MVP 的 `systemd` 适配器覆盖 Node、Python、Go、Rust、二进制和解释器服务；语言不是部署协议。Docker Compose、Kubernetes/Helm 和 CI/GitOps 作为后续适配器。
+5. 管理员可请求目标 Agent 执行 `systemd.probe` 只读预检。Job 仅检查绑定的 unit 与 release directory，通过固定参数调用 systemctl show 并读取版本指针状态；输出限定为状态枚举、布尔值、安全版本标识、观测时间、一次性请求 ID、目标配置 revision 和固定错误码，不回传原始命令输出，也不创建目录或改变服务。Agent 和中心校验请求 ID/revision 与观测时间，阻止跨 job 快照重放；路径含符号链接、unit 被 masked 或处于启动/停止过渡态时不标记 ready。文件系统检查仅在支持通过固定目录句柄拒绝符号链接的平台启用；当前实现为 Linux Agent，其他平台报告 `filesystem_check_supported=false` 且不就绪。中心按 target/operation 保存快照，部署计划可附最近 10 分钟且 ready 的预检结果。没有预检、预检过期或快照未就绪都不能得到可执行动作。
+6. 中心执行 `probe → plan → apply → verify → rollback` 的受控计划层，生成 `awaiting_approval` 部署计划。计划只包含 typed actions，不包含 shell 字符串；管理员审批前中心要求可执行 actions 和带能力授权的 health_check，随后原子写入不可变 Agent job 并把部署推进到 `agent_ready`。当前制品仍只有来源和摘要元数据，未实现受控上传与 Agent 下载，因此即使主机预检通过，计划也不能凭空得到可执行 artifact actions；审批 API 会安全拒绝通用计划。Agent 安装与业务部署分别记录，Agent 未激活时不能进入业务执行阶段。
+7. Agent executor 通过 control credential 拉取短时租约 job。中心后台定期处理过期任务，按单调序号接收阶段事件，并将 staging/activating/verifying/final receipt 映射到脱敏部署时间线。只有 verifying 后的最终回执包含 `health.healthy=true` 才标记业务 deployment `succeeded`；未领取 job 可以安全取消或过期取消，已领取任务取消、租约过期或成功回执不完整时保留 `unknown`，要求重新检查目标主机。此状态仅表示 Agent 报告计划内健康检查通过，中心 ClickHouse 遥测验证仍单独显示未验证。
 
 部署的执行和结果状态通过两条控制通道形成闭环：
 
@@ -223,6 +224,16 @@ sequenceDiagram
   participant Center as LightMoni 中心
   participant Agent as LightMoni Agent
   participant Host as 业务主机/systemd
+  Admin->>Center: 请求 systemd.probe 只读预检
+  Center->>Center: 绑定目标配置 revision 与 Agent identity
+  Agent->>Center: HTTPS claim（control credential）
+  Center-->>Agent: 单一 systemd_probe action，无写能力
+  Agent->>Host: 固定 argv systemctl show + 读取受控 current 指针
+  Agent->>Center: 固定字段 preflight snapshot（不含原始输出）
+  Center->>Center: 校验 Agent/target revision，保存 10 分钟快照
+  Admin->>Center: 基于新鲜快照生成服务部署计划
+  Center->>Center: 检查 typed actions 和 artifact 引用
+  Note over Center: 制品上传/Agent 下载未接入前不生成可审批写动作
   Admin->>Center: 审批带 health_check 的 typed plan
   Center->>Center: 原子创建 job 与 agent_ready 状态
   Agent->>Center: HTTPS claim（control credential）
@@ -244,7 +255,7 @@ sequenceDiagram
   end
 ```
 
-当前切片持久化 service、target、release、deployment 元数据及脱敏 `deployment_events`，提供 `awaiting_approval` 计划、管理员 approve、Agent 回执驱动的阶段/终态映射、事件查询和 `rollback_pending` 提案。管理员可以取消尚未审批的计划；已批准计划只有在 Agent 尚未领取 job 时才允许安全取消，若 Agent 已领取则拒绝取消并保留主机状态复核边界。`runtime/src/server/agent-jobs.ts` 提供 claim/lease、严格递增且阶段单调的事件序号、结果、取消和租约过期 `unknown` 恢复；`runtime/src/agent/executor.ts` 执行 capability allow-list，`runtime/src/agent/jobs.ts` 负责拉取、回执和重启恢复。`verification.ts` 提供固定服务/实例、窗口、deadline 和样本上限的中心侧健康/遥测证据判定，但真实 ClickHouse 验证、自动目标复核、最终 `rolled_back` 状态、受控构建/制品分发和生产签名校验仍待后续切片。因此页面和 AI 不能把“已批准”或“已入队”当作业务已部署；`succeeded` 仅说明 Agent 报告计划内 health_check 通过，不能代表遥测已验证。
+当前切片持久化 service、target、release、deployment 元数据及脱敏 `deployment_events`，提供 `awaiting_approval` 计划、管理员 approve、Agent 回执驱动的阶段/终态映射、事件查询和 `rollback_pending` 提案。Agent 新增独立只读 `systemd.probe` job，目标 unit、release directory、Agent identity、target config revision 与一次性 preflight ID 绑定；结果只含结构化状态，不含原始命令输出，有效期从 Agent 实际观测时间起算且最多 10 分钟。Linux Agent 通过固定目录句柄和 `O_NOFOLLOW` 执行路径检查、暂存与版本切换；其他平台不允许文件系统预检标 ready 或执行制品写操作。符号链接路径、masked/过渡态 unit 和旧 job 快照均不能得到 ready 结果。预检不会修改主机或推进业务 deployment 状态。管理员可以取消尚未审批的计划；已批准计划只有在 Agent 尚未领取 job 时才允许安全取消，若 Agent 已领取则拒绝取消并保留主机状态复核边界。`runtime/src/server/agent-jobs.ts` 提供 claim/lease、严格递增且阶段单调的事件序号、结果、取消和租约过期 `unknown` 恢复；`runtime/src/agent/executor.ts` 执行 capability allow-list，`runtime/src/agent/jobs.ts` 负责拉取、回执和重启恢复。预检通过仍不能生成可执行部署动作，因为受控构建/制品分发尚未接入，审批 API 会拒绝空动作计划。`verification.ts` 提供固定服务/实例、窗口、deadline 和样本上限的中心侧健康/遥测证据判定，但真实 ClickHouse 验证、自动目标复核、最终 `rolled_back` 状态、受控构建/制品分发和生产签名校验仍待后续切片。因此页面和 AI 不能把“预检通过”“已批准”或“已入队”当作业务已部署；`succeeded` 仅说明 Agent 报告计划内 health_check 通过，不能代表遥测已验证。
 
 ## 8. 中心服务 HLD/LLD
 
@@ -577,7 +588,7 @@ docker compose up -d --build --wait
 - 中心和 Agent 使用 Node.js/TypeScript；Web 使用 React/TypeScript；AI runtime 使用 Mastra。
 - SDK、Agent、中心共享 OTLP 和公共 TypeScript 类型；Agent 使用同一个 TypeScript SDK 做内部指标和 exporter。
 - 节点标签/任务、Agent enrollment、control/data 凭据、主机 SSH 预检、部署计划和网页终端均有对应特性 SDD。
-- SDD 021 已加入业务服务/目标/发布元数据、只读 SDK 插桩扫描、受限 TS/JS 结构化插桩提案、管理员确认后的安全 apply、中心部署状态迁移/审批/事件/回滚提案、Agent job/租约协议、MVP capability executor/runner 和 AI 部署计划工具。approve 要求带授权 capability 的 health_check 并创建不可变 job；Agent 的有序阶段回执、健康成功证据、取消和 unknown 结果已联动部署状态。通用部署计划尚未生成 typed actions，故默认计划仍会被安全拒绝；受控构建/制品分发、真实主机 preflight、中心 ClickHouse 遥测闭环、自动目标复核、最终回滚和 Docker/Kubernetes 适配器均未完成。
+- SDD 021 已加入业务服务/目标/发布元数据、只读 SDK 插桩扫描、受限 TS/JS 结构化插桩提案、管理员确认后的安全 apply、中心部署状态迁移/审批/事件/回滚提案、Agent job/租约协议、MVP capability executor/runner 和 AI 部署计划工具。approve 要求带授权 capability 的 health_check 并创建不可变 job；Agent 的有序阶段回执、健康成功证据、取消和 unknown 结果已联动部署状态。Agent 可通过隔离的 `systemd.probe` job 对登记目标做只读主机预检，中心保存绑定目标配置 revision 的 10 分钟快照；它不会改变主机或推进部署状态。通用部署计划尚未生成 typed actions，故默认计划仍会被安全拒绝；受控构建/制品分发、中心 ClickHouse 遥测闭环、自动目标复核、最终回滚和 Docker/Kubernetes 适配器均未完成。
 - AI 具备目录、查询、日志、告警读取、可审阅草稿、SDK 插桩提案、业务部署状态/事件读取、Pi 代码任务和模型用量/连接测试设计。
 - 告警规则、静默、值班、通知 outbox 和现场取证由中心域模块负责。
 

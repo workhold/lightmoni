@@ -116,3 +116,45 @@ test("expired Agent leases become unknown and cannot be completed", () => {
   assert.throws(() => f.jobs.result("agent-1", job.id, { lease_id: leased!.lease_id, state: "succeeded", summary: "late" }), /lease is invalid|expired/);
   f.db.close();
 });
+
+test("read-only systemd preflight jobs reject deployment phases and snapshots from an earlier request", () => {
+  const f = fixture();
+  const revision = "a".repeat(64);
+  const makeSnapshot = (preflightID: string) => ({
+    health: { healthy: true },
+    preflight: {
+      provider: "systemd", ready: true, systemd_available: true, unit_exists: true,
+      active_state: "active", enabled: true, unit_file_state: "enabled", filesystem_check_supported: true, release_directory_exists: true,
+      release_directory_writable: true, current_version: "v1", observed_at: "2026-10-22T00:00:00.000Z",
+      preflight_id: preflightID, target_revision: revision,
+    },
+  });
+  const queueProbe = (preflightID: string) => f.jobs.enqueue({
+    agentID: "agent-1", deploymentID: `preflight:${preflightID}`, operationID: `op-${preflightID}`,
+    capabilities: ["systemd.probe"],
+    actions: [{ kind: "systemd_probe", unit: "checkout.service", releaseDirectory: "/opt/checkout", preflightID, targetRevision: revision }],
+  });
+
+  const oldID = "b".repeat(32);
+  queueProbe(oldID);
+  const oldJob = f.jobs.claim("agent-1", ["systemd.probe"]);
+  assert.ok(oldJob);
+  f.jobs.event("agent-1", oldJob!.id, { lease_id: oldJob!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  f.jobs.event("agent-1", oldJob!.id, { lease_id: oldJob!.lease_id, sequence: 2, phase: "preflighting", summary: "preflight" });
+  const oldResult = f.jobs.result("agent-1", oldJob!.id, { lease_id: oldJob!.lease_id, state: "succeeded", summary: "completed", snapshot: makeSnapshot(oldID) });
+  assert.equal(oldResult.state, "succeeded");
+
+  const newID = "c".repeat(32);
+  queueProbe(newID);
+  const newJob = f.jobs.claim("agent-1", ["systemd.probe"]);
+  assert.ok(newJob);
+  f.jobs.event("agent-1", newJob!.id, { lease_id: newJob!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  f.jobs.event("agent-1", newJob!.id, { lease_id: newJob!.lease_id, sequence: 2, phase: "preflighting", summary: "preflight" });
+  assert.throws(() => f.jobs.event("agent-1", newJob!.id, { lease_id: newJob!.lease_id, sequence: 3, phase: "staging", summary: "must be rejected" }), /phase does not match/);
+  assert.throws(() => f.jobs.event("agent-1", newJob!.id, { lease_id: newJob!.lease_id, sequence: 3, phase: "verifying", summary: "must be rejected" }), /phase does not match/);
+  const replay = f.jobs.result("agent-1", newJob!.id, { lease_id: newJob!.lease_id, state: "succeeded", summary: "replayed", snapshot: makeSnapshot(oldID) });
+  assert.equal(replay.state, "failed");
+  assert.equal(replay.receipt.code, "invalid_preflight_result");
+  assert.deepEqual(replay.receipt.snapshot, {});
+  f.db.close();
+});

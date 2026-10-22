@@ -34,7 +34,7 @@ flowchart LR
 
 中心控制面只保存管理状态和制品元数据；遥测仍写入 ClickHouse。Agent 是独立节点执行平面，不能获得模型凭据或任意命令权限。SDK 默认直连中心，Agent 模式由用户显式选择。
 
-当前实现覆盖中心元数据、状态迁移、审批提案、有界验证判定、受控插桩 apply 和最小 Agent job/executor 切片：systemd 适配器提供可测试的纯逻辑接口；`service-deployments` 持久化审批与脱敏事件，管理员批准且 Agent 就绪时创建不可变 job；Agent 的有序阶段回执会推进部署状态，最终成功必须包含计划内 health_check 且回执报告健康通过。事件序号/阶段回退会被拒绝；取消未领取 job 可安全结束部署，已领取/执行任务取消、租约过期和不完整成功回执都保留为 `unknown` 供人工复核。`deployment/verification.ts` 仍只对已获取且有界的健康/遥测证据做中心侧判定，插桩 apply 绑定 revision 并在管理员确认后原子写入。通用部署计划仍未生成可执行 typed actions；真实 Agent preflight、受控构建和制品分发、ClickHouse 查询、目标复核与最终回滚仍待实现。部署 `succeeded` 仅表示 Agent 报告计划内健康检查通过，不代表中心遥测已验证。
+当前实现覆盖中心元数据、状态迁移、审批提案、有界验证判定、受控插桩 apply 和最小 Agent job/executor 切片：systemd 适配器提供可测试的纯逻辑接口；`service-deployments` 持久化审批与脱敏事件，管理员批准且 Agent 就绪时创建不可变 job；Agent 的有序阶段回执会推进部署状态，最终成功必须包含计划内 health_check 且回执报告健康通过。事件序号/阶段回退会被拒绝；取消未领取 job 可安全结束部署，已领取/执行任务取消、租约过期和不完整成功回执都保留为 `unknown` 供人工复核。Agent 可通过 `systemd.probe` 对登记目标进行只读 systemd preflight，中心保存有限状态快照并将新鲜快照附到后续计划；一次性 preflight ID、target revision 和观测时间绑定结果，旧 job 快照不能重放；路径符号链接、masked unit 和不稳定 active state 不会标为 ready。Linux 下 Agent 通过目录文件描述符和 `O_NOFOLLOW` 保护预检及制品文件操作；不支持的系统不标记 ready，FIFO 版本指针不会阻塞 job loop。这不会运行部署动作。`deployment/verification.ts` 仍只对已获取且有界的健康/遥测证据做中心侧判定，插桩 apply 绑定 revision 并在管理员确认后原子写入。受控构建和制品分发、ClickHouse 查询、自动目标复核与最终回滚仍待实现；在制品分发完成前通用部署计划仍不可审批。部署 `succeeded` 仅表示 Agent 报告计划内健康检查通过，不代表中心遥测已验证。
 
 ## 3. 分层与模块
 
@@ -87,7 +87,7 @@ flowchart LR
 | `instrumentation_plans` | `id`, `service_id`, `workspace_ref`, `base_revision`, `diff_json`, `findings_json`, `state` | apply 必须匹配 base revision |
 | `agent_jobs` | `id`, `agent_id`, `deployment_id`, `capabilities`, `expires_at`, `state`, `receipt_json` | job ID 唯一，一次仅一个 deployment operation；由 `runtime/src/server/agent-jobs.ts` 创建 |
 
-当前代码实际创建 `services`、`service_targets`、`releases`、`deployments`、`deployment_events` 和 Agent job 表；插桩计划以加密的键值记录保存，尚未迁移为独立 `instrumentation_plans` 表。当前 service API 的字段是 `repository_url`、`adapter`、`config` 等，`default_mode`、`provider_config`、`agent_id` 和 release 构建状态等契约字段尚未接入，不能按目标契约调用。部署 API 已实现 `awaiting_approval → agent_ready` 管理员审批、合法迁移校验、Agent 阶段回执和带健康证据的最终状态映射，以及 `GET .../events`、`rollback → rollback_pending` 提案；Agent job 的租约、单调事件、结果、取消、过期 `unknown` 和 MVP capability executor/runner 已落地。通用计划尚未提供 typed actions，真实 preflight、中心健康/遥测查询、自动补偿和 `rolled_back` 回执仍待实现。中心侧有界验证判定已独立实现并测试。
+当前代码实际创建 `services`、`service_targets`、`service_target_preflights`、`releases`、`deployments`、`deployment_events` 和 Agent job 表；插桩计划以加密的键值记录保存，尚未迁移为独立 `instrumentation_plans` 表。当前 service API 的字段是 `repository_url`、`adapter`、`config` 等，`default_mode`、`provider_config`、`agent_id` 和 release 构建状态等契约字段尚未接入，不能按目标契约调用。部署 API 已实现 `awaiting_approval → agent_ready` 管理员审批、合法迁移校验、Agent 阶段回执和带健康证据的最终状态映射，以及 `GET .../events`、`rollback → rollback_pending` 提案；Agent job 的租约、单调事件、结果、取消、过期 `unknown` 和 MVP capability executor/runner 已落地。只读 systemd preflight job 已检查并存储目标快照，但业务计划仍未提供可执行 typed actions；中心健康/遥测查询、自动补偿和 `rolled_back` 回执仍待实现。中心侧有界验证判定已独立实现并测试。
 
 ## 5. HTTP 与工具流程
 
@@ -104,11 +104,12 @@ AI 工具只调用扫描、提案和只读状态；apply/build 的接口返回 a
 ### 5.2 Agent + 业务部署
 
 1. `POST /api/v1/services/:id/targets` 登记目标和 provider 配置。
-2. `POST /api/v1/services/:id/deployments/plan` 运行 `ensure_agent` 依赖检查和 adapter `probe/plan`，状态为 `awaiting_approval`。
-3. `POST /api/v1/deployments/:id/approve` 由管理员确认；当前实现要求有可执行 actions 和获授权 health_check，检查 Agent 心跳、创建不可变 job 并推进到 `agent_ready`。
-4. Agent 使用 control credential 拉取 job、在 capability allow-list 内执行 typed actions 并提交单调阶段事件；中心映射 `staging → activating → verifying` 并将脱敏回执写入部署时间线。只有 verifying 后的最终结果含 `health.healthy=true` 才能进入 `succeeded`。
-5. 已领取任务取消、租约过期和缺少健康证据的成功回执都进入 `unknown`，保留最后已知部署状态并要求人工复核；未领取的 job 可安全取消。中心 ClickHouse 查询仍待接入，Agent 健康成功不等于遥测已验证。
-6. 后续 `POST /api/v1/deployments/:id/rollback` 生成回滚 job；Agent 完成并经中心验证后才能进入 `rolled_back`。
+2. `POST /api/v1/services/:id/targets/:targetId/preflight` 创建短时只读 Agent job，检查登记的 systemd unit 和 release directory；job 内含一次性 preflight ID 与 target revision，中心校验回执绑定和观测时间；`GET .../preflight` 返回最后一次脱敏预检结果。
+3. `POST /api/v1/services/:id/deployments/plan` 将最近 10 分钟内 ready 的预检快照绑定到计划；没有快照或快照未就绪时，计划保留原因并且不生成可执行动作。
+4. `POST /api/v1/deployments/:id/approve` 由管理员确认；当前实现要求有可执行 actions 和获授权 health_check，检查 Agent 心跳、创建不可变 job 并推进到 `agent_ready`。受控制品上传/分发未完成前，普通业务计划仍会被拒绝审批。
+5. Agent 使用 control credential 拉取 job、在 capability allow-list 内执行 typed actions 并提交单调阶段事件；中心映射 `staging → activating → verifying` 并将脱敏回执写入部署时间线。只有 verifying 后的最终结果含 `health.healthy=true` 才能进入 `succeeded`。
+6. 已领取任务取消、租约过期和缺少健康证据的成功回执都进入 `unknown`，保留最后已知部署状态并要求人工复核；未领取的 job 可安全取消。中心 ClickHouse 查询仍待接入，Agent 健康成功不等于遥测已验证。
+7. 后续 `POST /api/v1/deployments/:id/rollback` 生成回滚 job；Agent 完成并经中心验证后才能进入 `rolled_back`。
 
 ### 5.3 重试和未知结果
 
@@ -120,13 +121,13 @@ AI 工具只调用扫描、提案和只读状态；apply/build 的接口返回 a
 
 ### systemd（MVP）
 
-- `probe`：检查 systemd 可用、unit 存在、active/enabled、当前 release 和受控目录。
+- `probe`：通过 Agent `systemd.probe` job 检查 systemd 可用、unit 存在、active/enabled、当前版本和登记的 release directory。仅返回固定 schema 快照，不回传命令输出。快照绑定目标和预检 operation，并在部署计划生成时记录；快照最大有效期为 10 分钟。
 - `plan`：生成暂存制品、daemon-reload、enable/start/restart、健康检查和 rollback typed actions。
 - `apply`：只把已批准计划转成 Agent job，不直接启动子进程。
 - `verify`：对 Agent 回报的快照执行 active/version/health 检查；必要时向中心查询遥测。
 - `rollback`：切换到 `previous` 版本；不删除旧制品，便于审计和再次激活。
 
-中心侧验证抽象位于 `runtime/src/deployment/verification.ts`：它要求固定服务/实例、UTC 时间窗口、截止时间和最多 1000 条样本，只统计窗口内的精确匹配；健康通过但没有遥测时返回 `succeeded_telemetry_unverified`，不会把延迟误判为进程失败。当前 Agent 通过事件回执报告 typed health_check 执行状态，中心可将有健康证据的最终回执映射为 deployment `succeeded`；中心真实读取 ClickHouse 遥测、将其与业务服务关联并区分“遥测未验证”仍属后续 T015。真实主机 preflight、自动探测/补偿和最终回滚也未完成。
+中心侧验证抽象位于 `runtime/src/deployment/verification.ts`：它要求固定服务/实例、UTC 时间窗口、截止时间和最多 1000 条样本，只统计窗口内的精确匹配；健康通过但没有遥测时返回 `succeeded_telemetry_unverified`，不会把延迟误判为进程失败。只读 Agent systemd preflight 已检查 unit 与受控 release directory，并将快照绑定到 target config revision、一次性 preflight ID 和观测时间；当前 Agent 通过事件回执报告部署 typed health_check，中心可将有健康证据的最终回执映射为 deployment `succeeded`；中心真实读取 ClickHouse 遥测、将其与业务服务关联并区分“遥测未验证”仍属后续 T015。自动探测/补偿和最终回滚也未完成。
 
 ### 后续 provider
 

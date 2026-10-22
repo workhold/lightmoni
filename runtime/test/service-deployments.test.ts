@@ -43,34 +43,70 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   const created = await request("/api/v1/services", "POST", { name: "checkout", description: "Checkout API" });
   assert.equal(created.status, 201);
   const serviceID = created.data.id;
-  const target = await request(`/api/v1/services/${serviceID}/targets`, "POST", { machine_id: machineID, adapter: "systemd", config: { unit: "checkout.service" } });
+  const target = await request(`/api/v1/services/${serviceID}/targets`, "POST", { machine_id: machineID, adapter: "systemd", config: { unit: "checkout.service", release_directory: "/opt/lightmoni/services/checkout" } });
   assert.equal(target.status, 201);
+  const badTarget = await request(`/api/v1/services/${serviceID}/targets`, "POST", { machine_id: machineID, adapter: "systemd", config: { unit: "checkout.service; id", release_directory: "/opt/checkout" } });
+  assert.equal(badTarget.status, 400);
   const unsupportedTarget = await request(`/api/v1/services/${serviceID}/targets`, "POST", { machine_id: "machine-1", adapter: "docker_compose", config: {} });
   assert.equal(unsupportedTarget.status, 400);
+  db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL)");
+  db.run("INSERT INTO agents(id,last_seen) VALUES(?,?)", "agent-1", "2026-10-20T23:59:00Z");
+  const preflightQueued = await request(`/api/v1/services/${serviceID}/targets/${target.data.id}/preflight`, "POST", { confirm: true });
+  assert.equal(preflightQueued.status, 202);
+  const probeJob = jobs.claim("agent-1", ["systemd.probe"]);
+  assert.ok(probeJob);
+  assert.equal(probeJob!.actions[0].kind, "systemd_probe");
+  assert.equal(probeJob!.actions[0].unit, "checkout.service");
+  assert.equal(probeJob!.actions[0].releaseDirectory, "/opt/lightmoni/services/checkout");
+  assert.match(probeJob!.actions[0].preflightID, /^[a-f0-9]{32}$/);
+  assert.match(probeJob!.actions[0].targetRevision, /^[a-f0-9]{64}$/);
+  assert.deepEqual(probeJob!.capabilities, ["systemd.probe"]);
+  const preflightSnapshot = {
+    health: { healthy: true },
+    preflight: { provider: "systemd", ready: true, systemd_available: true, unit_exists: true, active_state: "active", enabled: true, unit_file_state: "enabled", filesystem_check_supported: true, release_directory_exists: true, release_directory_writable: true, current_version: "v1", observed_at: "2026-10-21T00:00:00.000Z", preflight_id: probeJob!.actions[0].preflightID, target_revision: probeJob!.actions[0].targetRevision, ignored_output: "secret" },
+  };
+  jobs.event("agent-1", probeJob!.id, { lease_id: probeJob!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  jobs.event("agent-1", probeJob!.id, { lease_id: probeJob!.lease_id, sequence: 2, phase: "preflighting", summary: "preflight" });
+  jobs.event("agent-1", probeJob!.id, { lease_id: probeJob!.lease_id, sequence: 3, phase: "succeeded", summary: "preflight complete" });
+  jobs.result("agent-1", probeJob!.id, { lease_id: probeJob!.lease_id, state: "succeeded", summary: "preflight complete", snapshot: preflightSnapshot });
+  const storedProbeJob = jobs.get(probeJob!.id);
+  assert.equal(JSON.stringify(storedProbeJob).includes("ignored_output"), false);
+  assert.equal(JSON.stringify(storedProbeJob).includes("secret"), false);
+  const preflightView = await request(`/api/v1/services/${serviceID}/targets/${target.data.id}/preflight`);
+  assert.equal(preflightView.status, 200);
+  assert.equal(preflightView.data.ready, true);
+  assert.equal(preflightView.data.current, true);
+  assert.equal(JSON.stringify(preflightView.data).includes("ignored_output"), false);
   const release = await request(`/api/v1/services/${serviceID}/releases`, "POST", { version: "2026.10.21", source_type: "artifact", source_ref: "sha256:abc", artifact_digest: "sha256:abc" });
   assert.equal(release.status, 201);
   const plan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
   assert.equal(plan.status, 201);
   assert.equal(plan.data.status, "awaiting_approval");
   assert.equal(plan.data.plan.adapter, "systemd");
+  assert.equal(plan.data.plan.preflight.ready, true);
+  assert.equal(plan.data.plan.provider_plan_reason, "artifact_transport_required");
+  await request(`/api/v1/services/${serviceID}/targets/${target.data.id}`, "PATCH", { status: "disabled" });
+  assert.equal((await request(`/api/v1/services/${serviceID}/targets/${target.data.id}/preflight`)).data.current, false);
+  await request(`/api/v1/services/${serviceID}/targets/${target.data.id}`, "PATCH", { status: "unknown" });
+  assert.equal((await request(`/api/v1/services/${serviceID}/targets/${target.data.id}/preflight`)).data.current, true);
   // Once the agents table exists, approval requires a recent heartbeat rather
   // than trusting a stale machine binding.
-  db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL)");
+  db.run("UPDATE agents SET last_seen=? WHERE id=?", "2026-10-20T23:00:00Z", "agent-1");
   const notReady = await request(`/api/v1/deployments/${plan.data.id}/approve`, "POST", { confirm: true, expected_state: "awaiting_approval" });
   assert.equal(notReady.status, 409);
   assert.equal(notReady.data.error, "agent_not_ready");
-  db.run("INSERT INTO agents(id,last_seen) VALUES(?,?)", "agent-1", "2026-10-20T23:59:00Z");
+  db.run("UPDATE agents SET last_seen=? WHERE id=?", "2026-10-20T23:59:00Z", "agent-1");
   const emptyApproval = await request("/api/v1/deployments/" + plan.data.id + "/approve", "POST", { confirm: true, expected_state: "awaiting_approval" });
   assert.equal(emptyApproval.status, 409);
   assert.equal(emptyApproval.data.error, "deployment_plan_not_executable");
-  assert.equal(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_jobs")?.count, 0);
+  assert.equal(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_jobs WHERE deployment_id=?", plan.data.id)?.count, 0);
   db.run("UPDATE deployments SET plan_json=? WHERE id=?", JSON.stringify({ ...plan.data.plan, actions: [{ kind: "systemd", operation: "restart", unit: "checkout.service" }], capabilities: ["systemd.restart"] }), plan.data.id);
   const noHealthApproval = await request(`/api/v1/deployments/${plan.data.id}/approve`, "POST", { confirm: true, expected_state: "awaiting_approval" });
   assert.equal(noHealthApproval.status, 409);
   assert.equal(noHealthApproval.data.error, "deployment_plan_not_executable");
-  assert.equal(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_jobs")?.count, 0);
-  // Exercise receipt-driven state using a reviewed typed action plan. A real
-  // preflight and trusted artifact builder are still required for production.
+  assert.equal(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_jobs WHERE deployment_id=?", plan.data.id)?.count, 0);
+  // Exercise receipt-driven state using a reviewed typed action plan. Trusted
+  // artifact upload and delivery are still required for production.
   const executablePlan = {
     ...plan.data.plan,
     actions: [
@@ -191,6 +227,13 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(unapprovedCancel.data.status, "cancelled");
   const staleCancel = await request(`/api/v1/deployments/${unapprovedPlan.data.id}/cancel`, "POST", { confirm: true, expected_state: "awaiting_approval" });
   assert.equal(staleCancel.status, 409);
+  const oldTargetConfig = target.data.config;
+  const changedTarget = await request(`/api/v1/services/${serviceID}/targets/${target.data.id}`, "PATCH", { config: { ...oldTargetConfig, release_directory: "/opt/lightmoni/services/checkout-v2" } });
+  assert.equal(changedTarget.status, 200);
+  const stalePreflight = await request(`/api/v1/services/${serviceID}/targets/${target.data.id}/preflight`);
+  assert.equal(stalePreflight.data.current, false);
+  const targetDetail = await request(`/api/v1/services/${serviceID}`);
+  assert.equal(targetDetail.data.targets[0].preflight.current, false);
   assert.notEqual(id(), "");
 });
 

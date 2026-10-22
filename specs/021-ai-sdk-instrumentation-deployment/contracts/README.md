@@ -13,6 +13,7 @@
 
 - `GET/POST /api/v1/services`、`GET /api/v1/services/:id`；
 - `GET/POST/PATCH /api/v1/services/:id/targets`；
+- 管理员 `GET/POST /api/v1/services/:id/targets/:targetId/preflight`：只读 systemd preflight job 和目标 revision/一次性 request ID 绑定的 10 分钟快照；中心核对观测时间和回执绑定，并按目标状态、配置与 Agent 身份失效旧快照；不会推进业务 deployment 状态；
 - `GET/POST /api/v1/services/:id/releases`；
 - `GET /api/v1/services/:id/deployments`、`POST /api/v1/services/:id/deployments/plan`（其中 POST 只生成 `awaiting_approval` 通用计划）；
 - `GET /api/v1/services/:id/deployments/:deploymentId`、`GET /api/v1/deployments/:deploymentId`、两种作用域的 deployment events 查询；
@@ -20,4 +21,4 @@
 - 管理员 `POST /api/v1/instrumentation-plans/:id/apply`，校验 revision、路径、符号链接和大小限制后原子应用已批准的插桩 diff；插桩计划本身仍是 AI 调用期间的受控记录；
 - AI 的 `scan_sdk_instrumentation`、只读 `propose_sdk_instrumentation`、`list_services`、`propose_service_deployment`、`get_service_deployment`、`get_service_deployment_events` 工具。
 
-当前仍没有 release 构建/制品分发、真实主机 preflight、中心 ClickHouse 遥测验证、自动目标复核、回滚 job 或 `rolled_back` 回执；插桩 apply HTTP 已接入，但没有独立持久化的 `instrumentation_plans` 表。Agent job 的 claim/lease/event/result/cancel、严格序号/阶段校验、MVP capability executor、Agent runner 和部署最终健康回执状态映射已接入；生产签名校验仍待后续切片。已领取 job 的取消和租约过期会保留 `unknown`。`propose_sdk_instrumentation` 只在 AI 工具调用期间生成内存中的只读计划，调用方必须以运行时代码为准，不能把下方目标请求当作已部署 API。
+当前仍没有 release 构建/制品分发、部署后的真实健康任务、中心 ClickHouse 遥测验证、自动目标复核、回滚 job 或 `rolled_back` 回执；插桩 apply HTTP 已接入，但没有独立持久化的 `instrumentation_plans` 表。Agent job 的 claim/lease/event/result/cancel、严格序号/阶段校验、MVP capability executor、只读 systemd preflight、Agent runner 和部署最终健康回执状态映射已接入；生产签名校验仍待后续切片。已领取 job 的取消和租约过期会保留 `unknown`。`propose_sdk_instrumentation` 只在 AI 工具调用期间生成内存中的只读计划，调用方必须以运行时代码为准，不能把下方目标请求当作已部署 API。

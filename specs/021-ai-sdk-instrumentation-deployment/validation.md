@@ -1,10 +1,10 @@
 # SDD 021：验证记录
 
-> 记录截至 2026-10-22。验证结果覆盖中心部署状态/审批、Agent 回执闭环、受限 job/executor、计划层和扫描切片，不代表真实业务部署或遥测闭环已经完成。
+> 记录截至 2026-10-22。验证结果覆盖中心部署状态/审批、Agent 回执闭环、受限 job/executor、只读 systemd preflight、计划层和扫描切片，不代表真实业务部署或遥测闭环已经完成。
 
 ## 验收范围
 
-本文件记录从规格到实现的可复核证据。本次切片实现了业务服务/目标/版本/部署计划元数据、中心状态迁移、管理员审批边界、脱敏部署事件和回滚提案、Agent 回执驱动状态映射、只读源码扫描、明确 TypeScript/JavaScript 请求边界的结构化插桩提案、管理员确认后的安全 apply、AI 计划工具、纯逻辑 systemd 适配器、Agent job/executor/runner 和中心侧有界验证判定；受控构建、真实主机 preflight、中心 ClickHouse 遥测验证和业务自动回滚仍待实现，不能把审批、job 入队或 Agent 健康回执当作端到端部署完成。
+本文件记录从规格到实现的可复核证据。本次切片实现了业务服务/目标/版本/部署计划元数据、中心状态迁移、管理员审批边界、脱敏部署事件和回滚提案、Agent 回执驱动状态映射、Agent 只读 systemd preflight、只读源码扫描、明确 TypeScript/JavaScript 请求边界的结构化插桩提案、管理员确认后的安全 apply、AI 计划工具、纯逻辑 systemd 适配器、Agent job/executor/runner 和中心侧有界验证判定；受控构建、制品上传/分发、中心 ClickHouse 遥测验证和业务自动回滚仍待实现，不能把预检、审批、job 入队或 Agent 健康回执当作端到端部署完成。
 
 ## 规格与架构门
 
@@ -12,8 +12,8 @@
 - [x] `plan.md` 定义 HLD/LLD 组件分层、数据模型、状态机、执行器和迁移策略。
 - [x] `tasks.md` 将实现拆分为有依赖关系的任务，并标注当前状态。
 - [x] `contracts/` 定义 HTTP/AI、适配器、Agent job 和插桩契约。
-- [x] `docs/system-design.md` 已更新本轮 Agent job → 部署状态控制路径、健康回执边界和 Mermaid 时序图。
-- [ ] Doca 基线图此前已同步；本轮状态回执控制路径增量尚未同步。浏览器打开目标时返回“资源不存在或无权访问”，因此不能标记完成，PR 发布门待恢复访问后回读文本、节点和连线。
+- [x] `docs/system-design.md` 已更新只读 preflight → 目标配置 revision → 部署计划控制路径、制品传输边界和 Mermaid 时序图。
+- [ ] Doca 基线图此前已同步；本轮只读 preflight 控制路径增量尚未同步。浏览器回读仍返回“文档不存在 / 资源不存在或无权访问”，且当前环境无 Doca MCP resource/template，因此不能标记完成，PR 发布门待恢复访问后回读文本、节点和连线。
 
 ## 功能验收矩阵
 
@@ -25,7 +25,9 @@
 | revision 冲突 | apply 返回 409，不覆盖新修改 | `runtime/test/instrumentation.test.ts` | 通过 |
 | 直连 SDK | 无 Agent 仍能上报中心 | 既有 SDK/接收测试 | 兼容性复核 |
 | Agent SDK 模式 | Agent 本地持久化后用 data credential 上报 | 既有 Agent 队列；新闭环待复核 | 待验证 |
-| systemd probe | 缺 unit/systemd/坏路径时结构化拒绝 | `runtime/test/deployment-adapter.test.ts` | 通过（纯计划层） |
+| systemd adapter probe | 缺 unit/systemd/坏路径时结构化拒绝 | `runtime/test/deployment-adapter.test.ts` | 通过（纯计划层） |
+| Agent systemd preflight | 只读固定 argv；要求单独 `systemd.probe` capability；目标 unit/path 精确绑定；拒绝符号链接目录、masked/过渡态、跨 job 快照重放和部署阶段事件；不推进业务 deployment | `runtime/test/agent-executor.test.ts`、`runtime/test/service-deployments.test.ts`、`runtime/test/agent-jobs.test.ts` | 通过（mock systemctl；真实 Linux 主机未验证） |
+| 预检快照失效 | 配置/Agent 绑定变化或超过 10 分钟时不作为当前快照绑定计划 | `runtime/test/service-deployments.test.ts` | 通过 |
 | systemd plan | typed actions，禁止 shell | `runtime/test/deployment-adapter.test.ts` | 通过（纯计划层） |
 | 服务/目标/版本/部署计划 | 管理员创建并生成 awaiting approval 计划 | `runtime/test/service-deployments.test.ts` | 通过（不执行） |
 | 部署审批和状态迁移 | 已激活 Agent 且计划含授权 health_check 才能入队；Agent 有序阶段和最终健康回执推进状态；不可执行 generic plan 不向用户暴露批准操作 | `runtime/test/service-deployments.test.ts`、`web/src/app/ServiceDeploymentsPage.tsx` | 通过（不代表真实主机部署） |
@@ -75,7 +77,13 @@ npm test --workspace web -- --runInBand
 
 本轮追加切片：部署工作台仅对 ready 且含 actions/capabilities 的计划显示批准入口；管理员可取消未审批计划，或在 Agent 尚未领取时取消已批准 job。Agent 已领取后，取消请求被拒绝以避免把“取消”误解为远端进程已停止。Doca 在线副本回读状态仍需单独记录。
 
-本轮追加验证结果：`npm --prefix runtime exec tsx -- --test runtime/test/service-deployments.test.ts runtime/test/agent-jobs.test.ts` 6 项通过；`npm test` 全部通过（Runtime 256 项，253 通过、3 跳过；AI Runtime 71 项；TypeScript SDK 18 项）；`npm run typecheck` 通过；`npm --prefix web run build` 通过，仍有依赖包既有的 `use client` bundler 提示；`git diff --check` 通过。Doca 回读未完成：当前浏览器目标页显示“文档不存在 / 资源不存在或无权访问”，且此环境未提供 Doca MCP resource/template，不能标记在线文档同步完成。
+本轮追加切片：管理员可为目标配置 systemd unit 和受控 release directory，提交独立只读 `systemd.probe` Agent job，并在工作台查看快照新鲜度。中心校验结果并去除 Agent 额外字段，绑定 target/Agent/config revision，TTL 10 分钟。该预检不启动或修改业务服务；部署计划附带预检，但由于制品上传/Agent 下载通道未实现，审批仍被拒绝。验证命令：`npm --prefix runtime run typecheck`；`npm --prefix runtime exec tsx -- --test runtime/test/agent-executor.test.ts runtime/test/agent-jobs.test.ts runtime/test/service-deployments.test.ts runtime/test/agent-job-runner.test.ts`（通过）。
+
+本轮 UI 补充：管理员可以编辑已登记目标的 systemd unit 和受控目录；预检完成后工作台展示 systemd/unit 状态、当前版本、目录存在和可写情况、有效期及安全错误码，并在平台不支持安全目录检查时显示对应提示。人工回归中的预检步骤通过 Agent `systemd.probe` job 执行，不依赖 SSH。根目录 `npm run typecheck` 和 `npm --prefix web run build` 通过。
+
+本轮安全补充：Agent 文件系统动作改用 Linux `/proc/self/fd` 锚定目录句柄并逐级 `O_NOFOLLOW`，避免路径检查后被 symlink swap；`current` 指针使用 `O_NONBLOCK` 打开并仅读取普通文件，避免 FIFO 阻塞 Agent job loop。macOS Agent 不声明安全目录检查可用，预检保持 not-ready；暂存与激活在非 Linux 平台明确拒绝。工作台区分“安全文件系统检查不支持”和“目录缺失”。
+
+本轮追加验证结果（2026-10-22）：`npm run typecheck` 通过；`npm test` 全部通过（Runtime 262 项，255 通过、7 跳过；AI Runtime 71 项；TypeScript SDK 18 项）；`npm --prefix web run build` 通过，仍有依赖包 `use client` 指令和大 chunk 警告；`git diff --check` 通过。macOS 上 Linux `/proc/self/fd` 文件操作测试（含 stage/activate 与 FIFO）按平台跳过，本机不能验证真实 Linux systemd。Doca 回读未完成：本环境 Doca MCP 没有暴露 resource/template，在线文档提示目标资源不存在或无权访问；本轮架构增量仍未同步，不能标记完成。
 
 - deployment adapter unit tests（合法/非法路径、摘要、健康检查、rollback）及 service deployment 状态迁移/审批/事件测试；
 - deployment verification tests（服务/实例归属、UTC 窗口、deadline、样本上限和健康但遥测未验证）；
@@ -89,7 +97,7 @@ npm test --workspace web -- --runInBand
 
 1. 建立一个只含测试服务的 workspace，运行扫描并确认没有读取 `.env` secret。
 2. 生成插桩 diff，修改 workspace 后尝试 apply，确认 revision conflict；恢复后由管理员 apply 并核对 changed files。
-3. 为目标机器登记 systemd unit，执行 SSH/Agent preflight；未激活 Agent 时确认 deployment approve 被拒绝。
+3. 为目标机器登记 systemd unit 和受控 release directory，通过 Agent `systemd.probe` 执行只读预检；检查状态诊断和有效期展示，修改目标配置后确认旧快照失效；未激活 Agent 时确认 deployment approve 被拒绝。
 4. 激活 Agent，创建 systemd plan，核对 typed actions、制品 digest、previous snapshot 和 review URL。
 5. 管理员 approve，观察 Agent 事件和健康检查；用中心查询验证新 batch，核对 deployment timeline。
 6. 用故意失败的 health check 触发 rollback，确认旧版本恢复且 Agent 仍心跳。
@@ -102,5 +110,5 @@ npm test --workspace web -- --runInBand
 - [x] SDD 任务状态和实现一致；未实现 provider 明确列在限制中。
 - [ ] `docs/system-design.md` 已在本轮更新；Doca 本轮增量因目标页面显示“资源不存在或无权访问”未完成，恢复访问并完成回读前不能关闭此发布门。
 - [ ] 管理员审批、secret 脱敏、SSH 清理提示和错误码均有 UI/AI 展示。
-- [x] 根目录 `npm test` 和 `npm run typecheck` 通过；Agent receipt 状态映射已实现，真实主机 preflight、构建/制品分发、中心遥测验证及最终回滚仍明确标为未实现。
+- [x] 根目录 `npm test` 和 `npm run typecheck` 通过；Agent 只读 preflight 已实现并由 mock systemctl 覆盖，真实 Linux 主机验证、构建/制品分发、中心遥测验证及最终回滚仍待实现。
 - [x] PR #25 已创建并保持待审核；未经用户明确授权不合并。
