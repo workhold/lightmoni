@@ -7,11 +7,9 @@ import type { AgentJobStore } from "./agent-jobs.js";
 /**
  * Service delivery metadata.
  *
- * This module owns the durable service/release/target/deployment records. It
- * deliberately stops at an approval-ready deployment plan; execution belongs
- * to an Agent adapter and is added in a later slice. Keeping the plan and
- * receipt here gives the UI and the assistant one stable contract without
- * allowing an assistant request to run arbitrary commands on a host.
+ * This module owns the durable service/release/target/deployment records.
+ * Agent receipts may advance an approved deployment, but only through the
+ * reviewed state graph and after a successful health-check receipt.
  */
 
 export type ServiceAdapter = "systemd" | "docker_compose";
@@ -341,39 +339,43 @@ export function registerServiceDeployments(
     if (!(state in DEPLOYMENT_TRANSITIONS)) fail(500, "部署记录状态无效");
     return state;
   };
-  const appendEvent = (deploymentID: string, phase: DeploymentStatus, state: DeploymentStatus, actor: string, summary: string, code = "") => {
+  const appendEvent = (deploymentID: string, phase: string, state: string, actor: string, summary: string, code = "") => {
     db.run(
       "INSERT INTO deployment_events(id,deployment_id,phase,state,code,summary,actor,created_at) VALUES(?,?,?,?,?,?,?,?)",
       id(), deploymentID, phase, state, code, summary.slice(0, 1000), actor, nowISO(deps),
     );
   };
-  const transition = (deploymentID: string, next: DeploymentStatus, actor: string, summary: string, code = "", options: { operationID?: string; approvedBy?: string; finished?: boolean } = {}) => {
+  const transitionInTransaction = (deploymentID: string, next: DeploymentStatus, actor: string, summary: string, code = "", options: { operationID?: string; approvedBy?: string; finished?: boolean; receipt?: Record<string, unknown> } = {}) => {
     const current = deploymentRow(deploymentID), from = deploymentState(current);
     if (!canTransitionDeployment(from, next)) fail(409, `部署状态不能从 ${from} 变更为 ${next}`);
     const operationID = options.operationID ?? current.operation_id ?? "";
     const at = nowISO(deps);
-    db.transaction(() => {
-      const set = ["status=?", "phase=?", "error_code=?", "error=?", "operation_id=?"];
-      const params: any[] = [next, next, code, code ? summary : "", operationID];
-      if (options.approvedBy !== undefined) {
-        set.push("approved_by=?", "approved_at=?");
-        params.push(options.approvedBy, at);
-      }
-      if (next !== "awaiting_approval" && next !== "agent_ready" && !current.started_at && ["staging", "activating", "verifying", "succeeded", "failed", "rollback_pending", "rolling_back", "rolled_back"].includes(next)) {
-        set.push("started_at=?");
-        params.push(at);
-      }
-      if (options.finished || ["succeeded", "failed", "rolled_back", "cancelled"].includes(next)) {
-        set.push("finished_at=?");
-        params.push(at);
-      }
-      params.push(deploymentID, from);
-      const updated = db.run(`UPDATE deployments SET ${set.join(",")} WHERE id=? AND status=?`, ...params);
-      if (updated.changes !== 1) fail(409, "部署状态已被其他操作更新");
-      appendEvent(deploymentID, next, next, actor, summary, code);
-    });
+    const set = ["status=?", "phase=?", "error_code=?", "error=?", "operation_id=?"];
+    const params: any[] = [next, next, code, code ? summary : "", operationID];
+    if (options.approvedBy !== undefined) {
+      set.push("approved_by=?", "approved_at=?");
+      params.push(options.approvedBy, at);
+    }
+    if (options.receipt !== undefined) {
+      set.push("receipt_json=?");
+      params.push(JSON.stringify(options.receipt));
+    }
+    if (next !== "awaiting_approval" && next !== "agent_ready" && !current.started_at && ["staging", "activating", "verifying", "succeeded", "failed", "rollback_pending", "rolling_back", "rolled_back"].includes(next)) {
+      set.push("started_at=?");
+      params.push(at);
+    }
+    if (options.finished || ["succeeded", "failed", "rolled_back", "cancelled"].includes(next)) {
+      set.push("finished_at=?");
+      params.push(at);
+    }
+    params.push(deploymentID, from);
+    const updated = db.run(`UPDATE deployments SET ${set.join(",")} WHERE id=? AND status=?`, ...params);
+    if (updated.changes !== 1) fail(409, "部署状态已被其他操作更新");
+    appendEvent(deploymentID, next, next, actor, summary, code);
     return deploymentView(deploymentRow(deploymentID));
   };
+  const transition = (deploymentID: string, next: DeploymentStatus, actor: string, summary: string, code = "", options: { operationID?: string; approvedBy?: string; finished?: boolean; receipt?: Record<string, unknown> } = {}) =>
+    db.transaction(() => transitionInTransaction(deploymentID, next, actor, summary, code, options));
   const machineAgentReady = (machineID: string) => {
     const machine = ensureMachine(machineID);
     if (!machine.agent_id) return false;
@@ -387,6 +389,93 @@ export function registerServiceDeployments(
     const age = deps.now().getTime() - seen;
     return Number.isFinite(seen) && age >= 0 && age < 180_000;
   };
+  options.jobs?.onUpdate((update) => {
+    if (!update.deploymentID || !update.operationID) return;
+    const deployment = db.get<any>(
+      "SELECT * FROM deployments WHERE id=? AND operation_id=?",
+      update.deploymentID,
+      update.operationID,
+    );
+    if (!deployment) return;
+    const state = deploymentState(deployment);
+    const actor = "agent:" + update.agentID;
+    const code = /^[a-z][a-z0-9_.-]{0,63}$/.test(update.code) ? update.code : "agent_error";
+    const receipt = (phase: string, receiptCode: string, summary: string) => ({
+      job_id: update.jobID, state: phase, code: receiptCode, summary, updated_at: nowISO(deps),
+    });
+    const appendObserved = (phase: string, summary: string, observedCode = "") => {
+      db.run(
+        "UPDATE deployments SET receipt_json=? WHERE id=? AND operation_id=?",
+        JSON.stringify(receipt(phase, observedCode, summary)),
+        update.deploymentID,
+        update.operationID,
+      );
+      appendEvent(update.deploymentID, phase, state, actor, summary, observedCode);
+    };
+    if (update.phase === "accepted") {
+      appendObserved("accepted", "LightMoni Agent 已接收部署任务");
+      return;
+    }
+    if (update.phase === "unknown") {
+      appendObserved(
+        "unknown",
+        update.code === "invalid_agent_sequence" ? "Agent 成功回执缺少有效健康检查证据，需重新检查目标主机" : "Agent 执行结果未知，需要重新检查目标主机",
+        update.code === "invalid_agent_sequence" ? "invalid_agent_sequence" : "unknown_execution_result",
+      );
+      return;
+    }
+    if (update.phase === "cancelled") {
+      if (state === "agent_ready" && update.previousState === "queued") {
+        transitionInTransaction(update.deploymentID, "cancelled", actor, "Agent 在执行前取消部署任务", "cancelled", {
+          receipt: receipt("cancelled", "cancelled", "Agent 在执行前取消部署任务"),
+        });
+      } else {
+        appendObserved("unknown", "任务已被领取或执行期间取消，实际主机状态需要重新检查", "unknown_execution_result");
+      }
+      return;
+    }
+    let next: DeploymentStatus | undefined;
+    let summary = "";
+    let nextCode = "";
+    switch (update.phase) {
+      case "staging":
+        next = "staging";
+        summary = "Agent 开始暂存部署制品";
+        break;
+      case "activating":
+        next = "activating";
+        summary = "Agent 开始切换服务版本";
+        break;
+      case "verifying":
+        next = "verifying";
+        summary = "Agent 正在执行部署健康检查";
+        break;
+      case "succeeded":
+        if (state === "verifying" && update.healthVerified === true) {
+          next = "succeeded";
+          summary = "Agent 已完成部署动作并回报健康检查通过";
+        } else {
+          appendObserved("unknown", "Agent 成功回执缺少有效健康检查证据，需重新检查目标主机", "invalid_agent_sequence");
+          return;
+        }
+        break;
+      case "failed":
+        next = "failed";
+        nextCode = code || "agent_execution_failed";
+        summary = "Agent 执行部署任务失败";
+        break;
+      default:
+        return;
+    }
+    if (!canTransitionDeployment(state, next)) {
+      appendObserved(update.phase, "忽略与当前部署状态不匹配的 Agent 回执", "invalid_agent_sequence");
+      return;
+    }
+    transitionInTransaction(update.deploymentID, next, actor, summary, nextCode, {
+      finished: next === "succeeded" || next === "failed",
+      receipt: receipt(update.phase, nextCode || code, summary),
+    });
+  });
   const body = async (ctx: Context) => record(await ctx.body());
 
   const createPlan = (serviceID: string, targetID: string, releaseID: string, actorID: string) => {
@@ -528,29 +617,38 @@ export function registerServiceDeployments(
     if (input.confirm !== true) fail(400, "必须明确确认部署计划");
     const expected = input.expected_state == null ? "awaiting_approval" : text(input.expected_state, "expected_state", 32);
     if (deployment.status !== expected) fail(409, "部署计划状态已变化，请重新查看");
-    // Approval does not start a service. It only authorizes the next Agent
-    // phase. The executor/job protocol is intentionally a later SDD slice.
+    // Approval does not start a service. It only authorizes a reviewed typed
+    // action list to run through the Agent's capability allow-list.
     const target = db.get<any>("SELECT machine_id FROM service_targets WHERE id=?", deployment.target_id);
     if (!target || !machineAgentReady(String(target.machine_id))) {
       fail(409, "agent_not_ready");
     }
     const operationID = deployment.operation_id || id();
-    // Enqueue the immutable job before advancing the centre state. If job
-    // persistence fails, approval remains awaiting_approval and can be safely
-    // retried; no host action is started by this request.
-    if (options.jobs) {
+    const plan = parse<any>(deployment.plan_json, {});
+    const healthActions = Array.isArray(plan.actions) ? plan.actions.filter((action: any) => action?.kind === "health_check") : [];
+    const hasAuthorizedHealthCheck = healthActions.some((action: any) => {
+      const kind = action.check?.kind;
+      const capability = kind === "systemd-active" ? "health.systemd" : kind === "http" ? "health.http" : kind === "tcp" ? "health.tcp" : "";
+      return capability && Array.isArray(plan.capabilities) && plan.capabilities.includes(capability);
+    });
+    if (!Array.isArray(plan.actions) || plan.actions.length === 0 || !Array.isArray(plan.capabilities) || plan.capabilities.length === 0 || !hasAuthorizedHealthCheck)
+      fail(409, "deployment_plan_not_executable");
+    if (!options.jobs) fail(503, "agent_jobs_unavailable");
+    // Enqueue the immutable job and advance the approval state in one SQLite
+    // transaction. A partial approval can neither strand a job nor leave the
+    // deployment approved without a corresponding job.
+    const result = db.transaction(() => {
       const targetRow = db.get<any>("SELECT * FROM service_targets WHERE id=?", deployment.target_id);
-      const plan = parse<any>(deployment.plan_json, {});
-      options.jobs.enqueue({
+      options.jobs!.enqueue({
         agentID: String(target?.machine_id ? (db.get<any>("SELECT agent_id FROM managed_machines WHERE id=?", target.machine_id)?.agent_id ?? "") : ""),
         deploymentID: deployment.id,
         operationID,
-        actions: Array.isArray(plan.actions) ? plan.actions : [],
-        capabilities: Array.isArray(plan.capabilities) ? plan.capabilities : [],
+        actions: plan.actions,
+        capabilities: plan.capabilities,
         target: targetRow ? { id: targetRow.id, config: parse(targetRow.config_json, {}) } : {},
       });
-    }
-    const result = transition(deployment.id, "agent_ready", ctx.user.id, "管理员已批准部署计划，等待 Agent 执行", "", { operationID, approvedBy: ctx.user.id });
+      return transitionInTransaction(deployment.id, "agent_ready", ctx.user.id, "管理员已批准部署计划，等待 Agent 执行", "", { operationID, approvedBy: ctx.user.id });
+    });
     ctx.json({ ...result, operation_id: operationID });
   }));
   router.post("/api/v1/deployments/:deploymentId/rollback", safe(deps, async (ctx) => {

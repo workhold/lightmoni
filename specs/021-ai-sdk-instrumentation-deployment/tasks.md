@@ -2,14 +2,14 @@
 
 > 状态以代码、测试和回读证据为准。本次提交完成的是可审阅计划与 Agent job/executor MVP 切片；受控构建、真实业务部署和遥测闭环仍未完成。
 >
-> `T003`/`T008` 的“已完成”表示独立的类型、registry 和 systemd 纯逻辑适配器已实现并测试；生产 preflight、真实遥测和最终回滚状态仍待后续切片。T002/T010 当前已接入中心状态迁移、管理员审批、脱敏事件查询和回滚提案；T012-T014 已接入最小 job 协议、能力执行器和重启 unknown 恢复，但不代表业务部署已经完成。
+> `T003`/`T008` 的“已完成”表示独立的类型、registry 和 systemd 纯逻辑适配器已实现并测试；生产 preflight、中心遥测验证和最终回滚状态仍待后续切片。T002/T010 已接入中心状态迁移、管理员审批、脱敏事件查询、Agent 回执推进和回滚提案；T012-T014 已接入有序 job 事件、能力执行器、取消/租约 unknown 处理和重启恢复，但不代表真实业务部署链路已经完成。
 
 ## A. 规格与领域模型
 
 | ID | 任务 | 依赖 | 状态 | 验收证据 |
 | --- | --- | --- | --- | --- |
 | T001 | 固化 `service`、`service_target`、`release`、`deployment`、`deployment_event`、`instrumentation_plan` 和 `agent_job` 的字段、状态和关联 | — | 部分（services/targets/releases/deployments） | `runtime/src/server/service-deployments.ts`、API 测试 |
-| T002 | 增加 deployment 状态机和合法迁移校验，区分 Agent 安装与业务部署 | T001 | 部分完成（中心迁移表/审批边界已实现；Agent 回执推进待实现） | `runtime/src/server/service-deployments.ts`、服务部署 API 测试；executor 迁移测试待补 |
+| T002 | 增加 deployment 状态机和合法迁移校验，区分 Agent 安装与业务部署 | T001 | 部分完成（中心迁移表、审批边界和有序 Agent 回执推进已实现；真实探测与补偿仍待接入） | `runtime/src/server/service-deployments.ts`、`runtime/test/service-deployments.test.ts` |
 | T003 | 定义 provider registry、健康检查和固定错误码；unsupported provider 必须安全拒绝 | T001 | 已完成（MVP 类型/registry） | `runtime/test/deployment-adapter.test.ts` |
 
 ## B. SDK 源码扫描与受控应用
@@ -27,24 +27,24 @@
 | --- | --- | --- | --- | --- |
 | T008 | 完成 systemd `probe/plan/apply/verify/rollback` 纯逻辑实现和注册 | T001,T003 | 已完成（纯计划层） | `runtime/test/deployment-adapter.test.ts` 及边界覆盖 |
 | T009 | 将 plan 序列化到 SQLite，保存制品、目标快照、previous 和 operation id | T001,T008 | 部分（计划/制品元数据） | `runtime/src/server/service-deployments.ts` |
-| T010 | 实现业务 deployment plan、approve、status、events 和 rollback API | T002,T009 | 部分完成（plan/approve/status/events/rollback_pending；无 Agent execute/verify/rolled_back） | `runtime/test/service-deployments.test.ts` |
+| T010 | 实现业务 deployment plan、approve、status、events 和 rollback API | T002,T009 | 部分完成（plan/approve/status/events、Agent 进度/最终回执映射和 rollback_pending；无真实 Agent preflight、中心 telemetry verify 或 rolled_back） | `runtime/test/service-deployments.test.ts` |
 | T011 | 为 Docker Compose/Kubernetes 添加明确的 unsupported provider 响应和扩展注册点 | T003 | 待实现 | 不执行 shell 的负向测试 |
 
 ## D. Agent 受限执行
 
 | ID | 任务 | 依赖 | 状态 | 验收证据 |
 | --- | --- | --- | --- | --- |
-| T012 | 实现 Agent job poll/lease/ack/result、过期和取消协议 | T009,T010 | 已完成（最小协议；签名 job 和部署状态闭环待后续） | `runtime/src/server/agent-jobs.ts`、`runtime/test/agent-jobs.test.ts` |
+| T012 | 实现 Agent job poll/lease/ack/result、过期和取消协议 | T009,T010 | 已完成（有序单调事件、幂等重放、健康回执前置条件；签名 job 待后续） | `runtime/src/server/agent-jobs.ts`、`runtime/test/agent-jobs.test.ts` |
 | T013 | 实现 capability allow-list executor：制品暂存、受控 systemd、健康检查 | T008,T012 | 已完成（MVP allow-list；真实 preflight 待后续） | `runtime/src/agent/executor.ts`、digest/path/unit 负向测试 |
-| T014 | 实现 Agent 执行事件、脱敏摘要、重启后的 unknown 状态恢复 | T012,T013 | 已完成（回执/本地重启恢复；最终部署回执待后续） | `runtime/src/agent/jobs.ts`、`runtime/test/agent-job-runner.test.ts` |
-| T015 | 接入真实健康与遥测验证；区分部署成功、遥测未验证和失败 | T010,T014 | 部分完成（中心侧有界证据判定；真实 Agent/ClickHouse 查询待接入） | `runtime/src/deployment/verification.ts`、`runtime/test/deployment-verification.test.ts`；真实查询和执行器待实现 |
+| T014 | 实现 Agent 执行事件、脱敏摘要、重启后的 unknown 状态恢复 | T012,T013 | 已完成（回执/本地重启恢复；中心已用 Agent 回执推进部署状态） | `runtime/src/agent/jobs.ts`、`runtime/src/server/service-deployments.ts`、`runtime/test/agent-job-runner.test.ts` |
+| T015 | 接入真实健康与遥测验证；区分部署成功、遥测未验证和失败 | T010,T014 | 部分完成（Agent 计划内 health_check 通过后可标记业务健康成功；中心侧有界证据判定已实现；真实主机 preflight 和 ClickHouse 查询待接入） | `runtime/src/deployment/verification.ts`、`runtime/test/deployment-verification.test.ts`、`runtime/test/service-deployments.test.ts` |
 
 ## E. AI 助手与工作台
 
 | ID | 任务 | 依赖 | 状态 | 验收证据 |
 | --- | --- | --- | --- | --- |
 | T016 | 暴露扫描、插桩提案、构建/部署提案、状态和回执工具 | T004,T010,T015 | 部分（扫描、插桩提案、服务计划、状态和事件工具；apply 走管理员 HTTP 确认） | `runtime/src/assistant/tools.ts`、assistant tool tests、typecheck |
-| T017 | 为源码 diff、部署计划、审批和执行时间线增加 Web 页面 | T006,T010,T015 | 部分（服务部署、审批和时间线页面已完成；源码 diff 页面待补） | `web/src/app/ServiceDeploymentsPage.tsx`、web typecheck |
+| T017 | 为源码 diff、部署计划、审批和执行时间线增加 Web 页面 | T006,T010,T015 | 部分（服务部署、审批/时间线、状态双语文案和 unknown 人工复核提示已接入；源码 diff 页面待补） | `web/src/app/ServiceDeploymentsPage.tsx`、web typecheck |
 | T018 | 在 AI 输出和 UI 中显示审批边界、风险、健康/遥测验证和 SSH 凭据清理提示 | T016,T017 | 部分（部署页面已显示审批边界、Agent 要求和未执行提示；AI/SSH 清理提示待补） | `web/src/app/ServiceDeploymentsPage.tsx`；文案快照待补 |
 
 ## F. 安全、可观测性与文档
@@ -54,8 +54,9 @@
 | T019 | 为插桩、构建、Agent job、部署、验证、回滚写审计事件和关联 ID | T009,T012 | 待实现 | 审计查询和关联性测试 |
 | T020 | 完成权限、secret 脱敏、签名 audience/TTL、幂等和资源上限审计 | T006,T013,T016 | 待实现 | 安全负向测试、`rg` secret 检查 |
 | T021 | 更新 `docs/system-design.md` 的 HLD/LLD、数据流、部署拓扑和 API 索引 | T001,T010,T013 | 已完成（本次切片章节） | `docs/system-design.md` diff |
-| T022 | 使用最新 Doca seq/epoch 更新对应富文本/原生图块并回读节点与连线 | T021 | 已完成 | Doca 原生流程图保存后可见，节点/连线回读确认 |
+| T022 | 使用最新 Doca seq/epoch 更新对应富文本/原生图块并回读节点与连线 | T021 | 基线已完成；本轮回执闭环增量待同步 | Doca 原生流程图保存后可见，节点/连线回读确认；本轮访问返回“资源不存在或无权访问” |
 | T023 | 运行 runtime/web 检查，记录验证矩阵并创建待评审 PR；禁止直接合并 | 全部 | 已完成 | `validation.md`、PR #25（保持开启，未合并） |
+| T024 | 把 Agent job 进度、取消、健康验证、成功/失败和未知结果安全映射到业务 deployment 状态 | T010,T012,T014 | 已实现（严格事件序号/阶段单调；无健康成功证据或执行中取消时保留 unknown；仅未领取 job 可安全取消） | `runtime/src/server/agent-jobs.ts`、`runtime/src/server/service-deployments.ts`、对应服务部署与 Agent job 测试 |
 
 ## 推荐执行顺序
 
@@ -64,6 +65,7 @@ T001 → T002/T003 → T004 → T005/T006 → T007
                  ↘ T008 → T009 → T010 → T012/T013 → T014/T015
 T010/T015 → T016/T017/T018
 T019/T020 → T021 → T022 → T023
+T024 → T021 → T022 → T023
 ```
 
 任何任务若改变组件边界、协议、凭据、存储或部署拓扑，都必须先更新本 SDD 和 `docs/system-design.md`，并在同一 PR 完成 Doca 同步；不能把文档同步留给后续 PR。

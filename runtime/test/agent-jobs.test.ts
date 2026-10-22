@@ -37,12 +37,39 @@ test("Agent job lease protocol is idempotent and records bounded receipts", () =
   assert.throws(() => f.jobs.event("other-agent", leased!.id, { lease_id: leased!.lease_id, sequence: 1, phase: "accepted" }), /does not belong/);
   const accepted = f.jobs.event("agent-1", leased!.id, { lease_id: leased!.lease_id, sequence: 1, phase: "accepted", summary: "job accepted" });
   assert.equal(accepted.state, "accepted");
+  assert.equal(f.jobs.event("agent-1", leased!.id, { lease_id: leased!.lease_id, sequence: 1, phase: "accepted", summary: "job accepted" }).state, "accepted");
   const staged = f.jobs.event("agent-1", leased!.id, { lease_id: leased!.lease_id, sequence: 2, phase: "staging", summary: "artifact staged", snapshot: { digest: "sha256:…" } });
   assert.equal(staged.state, "staging");
-  const done = f.jobs.result("agent-1", leased!.id, { lease_id: leased!.lease_id, state: "succeeded", code: "", summary: "service active", snapshot: { active_state: "active" } });
+  assert.throws(() => f.jobs.event("agent-1", leased!.id, { lease_id: leased!.lease_id, sequence: 3, phase: "accepted", summary: "late regression" }), /cannot move backwards/);
+  const activating = f.jobs.event("agent-1", leased!.id, { lease_id: leased!.lease_id, sequence: 3, phase: "activating", summary: "activate release" });
+  assert.equal(activating.state, "activating");
+  const verifying = f.jobs.event("agent-1", leased!.id, { lease_id: leased!.lease_id, sequence: 4, phase: "verifying", summary: "health check" });
+  assert.equal(verifying.state, "verifying");
+  assert.throws(() => f.jobs.event("agent-1", leased!.id, { lease_id: leased!.lease_id, sequence: 6, phase: "verifying", summary: "sequence gap" }), /sequence has a gap/);
+  const done = f.jobs.result("agent-1", leased!.id, { lease_id: leased!.lease_id, state: "succeeded", code: "", summary: "service active", snapshot: { active_state: "active", health: { healthy: true } } });
   assert.equal(done.state, "succeeded");
   assert.equal(done.lease_id, "");
   assert.equal(f.jobs.get(leased!.id).receipt.state, "succeeded");
+  f.db.close();
+});
+
+test("success without verified health evidence becomes unknown and cancellation reports prior state", () => {
+  const f = fixture();
+  const updates: any[] = [];
+  f.jobs.onUpdate((update) => updates.push(update));
+  const malformed = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-malformed", operationID: "op-malformed", actions: [{ kind: "health_check" }] });
+  const leased = f.jobs.claim("agent-1", []);
+  assert.ok(leased);
+  const invalid = f.jobs.result("agent-1", malformed.id, { lease_id: leased!.lease_id, state: "succeeded", summary: "claimed success", snapshot: { health: { healthy: true } } });
+  assert.equal(invalid.state, "unknown");
+  assert.equal(invalid.receipt.code, "invalid_agent_sequence");
+  assert.equal(updates.at(-1).previousState, "leased");
+  assert.equal(updates.at(-1).healthVerified, false);
+
+  const queued = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-queued", operationID: "op-queued", actions: [] });
+  f.jobs.cancel(queued.id, "admin");
+  assert.equal(updates.at(-1).phase, "cancelled");
+  assert.equal(updates.at(-1).previousState, "queued");
   f.db.close();
 });
 

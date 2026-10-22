@@ -2,7 +2,7 @@
 
 所有接口均挂在 `/api/v1`，需要登录；创建/应用源码变更、构建、Agent 安装、部署、回滚和修改目标仅管理员可用。响应不包含私钥、密码、token 或原始命令输出。
 
-> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现受管理员保护的 `approve`、状态查询、事件查询和 `rollback_pending` 提案，`approve` 会在 Agent 就绪后创建不可变 Agent job 并推进到 `agent_ready`，但不会执行主机动作或推进业务最终状态。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；release 构建、真实验证和部署状态最终闭环仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
+> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和 `rollback_pending` 提案。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。该闭环不代表真实主机 preflight、中心遥测查询或自动回滚已实现。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；release 构建与受控制品分发仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
 
 ## 通用约束
 
@@ -119,7 +119,7 @@
 
 ### `POST /deployments/:id/approve`
 
-管理员请求：`{"expected_state":"awaiting_approval","confirm":true}`。成功返回 `{id,state:"agent_ready",operation_id}`，并记录 `approved_by` 与状态事件，同时为已激活且最近心跳的 Agent 创建不可变 job；当前不会执行主机动作或推进业务最终状态。若目标机器没有已激活且最近心跳的 Agent，返回 `409 agent_not_ready` 并保留计划供重试。重复审批不能跳过状态校验。
+管理员请求：`{"expected_state":"awaiting_approval","confirm":true}`。计划必须包含至少一个 action，以及匹配的 capability 授权 health_check。成功返回 `{id,state:"agent_ready",operation_id}`，并记录 `approved_by` 与状态事件，同时为已激活且最近心跳的 Agent 创建不可变 job。Agent 阶段回执会单调推进部署状态；只有 verifying 后最终回执包含 `health.healthy=true` 才进入 `succeeded`。没有健康证据的成功回执、执行中取消和租约超时标记 `unknown` 并保留最后已知状态；未领取 job 取消则可安全标记 `cancelled`。若目标机器没有已激活且最近心跳的 Agent，返回 `409 agent_not_ready` 并保留计划供重试。重复审批不能跳过状态校验。
 
 ### `GET /deployments/:id`
 
@@ -127,7 +127,7 @@
 
 ### `GET /deployments/:id/events`
 
-返回按追加顺序排列的脱敏状态事件：`{id,deployment_id,phase,state,code,summary,actor,created_at}`。事件只由中心状态迁移写入，不能由 Agent 或 AI 直接伪造。
+返回按追加顺序排列的脱敏状态事件：`{id,deployment_id,phase,state,code,summary,actor,created_at}`。Agent 只能通过已鉴权、序号连续的 job event/result 协议推动中心写入事件；原始 Agent 摘要和快照不会暴露在部署详情/时间线。
 
 ### `POST /deployments/:id/rollback`
 

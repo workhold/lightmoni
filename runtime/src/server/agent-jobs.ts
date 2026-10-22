@@ -33,6 +33,17 @@ export interface AgentJobInput {
   expiresInSeconds?: number;
 }
 
+export interface AgentJobUpdate {
+  agentID: string;
+  deploymentID: string;
+  operationID: string;
+  jobID: string;
+  phase: AgentJobEventPhase;
+  code: string;
+  healthVerified?: boolean;
+  previousState?: AgentJobState;
+}
+
 export interface AgentJobStore {
   enqueue(input: AgentJobInput): Record<string, any>;
   claim(agentID: string, capabilities: string[], receiptCursor?: string): Record<string, any> | null;
@@ -40,6 +51,8 @@ export interface AgentJobStore {
   result(agentID: string, jobID: string, input: Record<string, any>): Record<string, any>;
   cancel(jobID: string, actor: string): Record<string, any>;
   get(jobID: string): Record<string, any>;
+  /** Internal synchronous observer; invoked inside the job's SQLite transaction. */
+  onUpdate(listener: (update: AgentJobUpdate) => void): () => void;
 }
 
 const MAX_JSON_BYTES = 128 << 10;
@@ -55,6 +68,7 @@ const EVENT_PHASES = new Set<AgentJobEventPhase>([
   "accepted", "staging", "activating", "verifying", "succeeded", "failed", "cancelled", "unknown",
 ]);
 const terminal = (state: AgentJobState) => ["succeeded", "failed", "cancelled", "unknown"].includes(state);
+const EVENT_ORDER: Partial<Record<AgentJobEventPhase, number>> = { accepted: 0, staging: 1, activating: 2, verifying: 3 };
 
 const object = (value: unknown, field: string): Record<string, any> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail(400, `invalid ${field}`);
@@ -95,6 +109,19 @@ export function registerAgentJobs(
   options: { agentCredentials?: AgentCredentialStore } = {},
 ): Module & AgentJobStore {
   const { db, router } = deps;
+  const updateListeners = new Set<(update: AgentJobUpdate) => void>();
+  const notify = (job: any, phase: AgentJobEventPhase, code = "", details: { healthVerified?: boolean; previousState?: AgentJobState } = {}) => {
+    const update: AgentJobUpdate = {
+      agentID: String(job.agent_id),
+      deploymentID: String(job.deployment_id),
+      operationID: String(job.operation_id),
+      jobID: String(job.id),
+      phase,
+      code,
+      ...details,
+    };
+    for (const listener of updateListeners) listener(update);
+  };
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_jobs(
       id TEXT PRIMARY KEY,
@@ -155,7 +182,7 @@ export function registerAgentJobs(
   const expireLeases = () => {
     const at = iso(deps);
     for (const old of db.all<any>(
-      "SELECT id FROM agent_jobs WHERE state IN ('leased','accepted','staging','activating','verifying') AND lease_expires_at<>'' AND lease_expires_at<=?",
+      "SELECT id,state FROM agent_jobs WHERE state IN ('leased','accepted','staging','activating','verifying') AND lease_expires_at<>'' AND lease_expires_at<=?",
       at,
     )) {
       db.transaction(() => {
@@ -169,6 +196,7 @@ export function registerAgentJobs(
             "INSERT OR IGNORE INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)",
             old.id, next, "unknown", "unknown_execution_result", "Agent lease expired; execution result is unknown", at,
           );
+          notify(row(old.id), "unknown", "unknown_execution_result", { previousState: old.state as AgentJobState });
         }
       });
     }
@@ -229,11 +257,28 @@ export function registerAgentJobs(
     const summary = eventSummary(value.summary), code = text(value.code ?? "", "code", 128, false), snapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
     const occurred = iso(deps);
     db.transaction(() => {
-      db.run("INSERT OR IGNORE INTO agent_job_events(job_id,sequence,phase,code,summary,snapshot_json,occurred_at) VALUES(?,?,?,?,?,?,?)", jobID, sequence, phase, code, summary, json(snapshot), occurred);
+      const last = db.get<any>("SELECT * FROM agent_job_events WHERE job_id=? ORDER BY sequence DESC LIMIT 1", jobID);
+      if (sequence <= Number(last?.sequence ?? 0)) {
+        const duplicate = db.get<any>("SELECT * FROM agent_job_events WHERE job_id=? AND sequence=?", jobID, sequence);
+        if (duplicate && duplicate.phase === phase && duplicate.code === code && duplicate.summary === summary && duplicate.snapshot_json === json(snapshot)) return;
+        fail(409, "agent event sequence is not increasing");
+      }
+      if (sequence !== Number(last?.sequence ?? 0) + 1) fail(409, "agent event sequence has a gap");
+      if (last && EVENT_ORDER[last.phase as AgentJobEventPhase] === undefined) fail(409, "agent job already has a terminal event");
+      if (last && EVENT_ORDER[phase] !== undefined && EVENT_ORDER[last.phase as AgentJobEventPhase] !== undefined
+        && EVENT_ORDER[phase]! < EVENT_ORDER[last.phase as AgentJobEventPhase]!) fail(409, "agent event phase cannot move backwards");
+      if (phase === "succeeded" && current.state !== "verifying") fail(409, "success event requires verification phase");
+      db.run("INSERT INTO agent_job_events(job_id,sequence,phase,code,summary,snapshot_json,occurred_at) VALUES(?,?,?,?,?,?,?)", jobID, sequence, phase, code, summary, json(snapshot), occurred);
+      // Terminal events are observations only; /result is authoritative.
       if (terminal(phase)) return;
       const allowed: AgentJobState[] = ["leased", "accepted", "staging", "activating", "verifying"];
       if (!allowed.includes(current.state as AgentJobState)) fail(409, "agent job is no longer running");
+      const previousRank = current.state === "leased" ? -1 : EVENT_ORDER[current.state as AgentJobEventPhase];
+      const nextRank = EVENT_ORDER[phase];
+      if (previousRank == null || nextRank == null || nextRank < previousRank || nextRank > previousRank + 1)
+        fail(409, "agent event phase is not a valid next step");
       db.run("UPDATE agent_jobs SET state=?,updated_at=?,lease_expires_at=? WHERE id=? AND lease_id=?", phase, occurred, iso(deps, new Date(deps.now().getTime() + LEASE_SECONDS * 1000)), jobID, lease);
+      notify(row(jobID), phase, code, { previousState: current.state as AgentJobState });
     });
     return view(row(jobID));
   };
@@ -248,16 +293,33 @@ export function registerAgentJobs(
     // terminal receipts are safe to return for idempotent retries.
     if (terminal(stored.state as AgentJobState) && stored.state !== "unknown") return view(stored);
     const current = leaseRow(agentID, jobID, lease);
-    const state = text(value.state, "state", 32) as AgentJobState;
+    let state = text(value.state, "state", 32) as AgentJobState;
     if (!["succeeded", "failed", "cancelled", "unknown"].includes(state)) fail(400, "invalid result state");
-    const code = text(value.code ?? "", "code", 128, false), summary = eventSummary(value.summary), receipt = {
-      state, code, summary, snapshot: value.snapshot == null ? {} : object(value.snapshot, "snapshot"), started_at: text(value.started_at ?? "", "started_at", 64, false), finished_at: text(value.finished_at ?? iso(deps), "finished_at", 64, false),
+    let code = text(value.code ?? "", "code", 128, false), summary = eventSummary(value.summary), snapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
+    if (state === "succeeded" && (current.state !== "verifying" || (snapshot as any).health?.healthy !== true)) {
+      state = "unknown";
+      code = "invalid_agent_sequence";
+      summary = "Agent success receipt did not include a completed healthy verification";
+      snapshot = {};
+    } else if (state === "cancelled") {
+      state = "unknown";
+      code = "unknown_execution_result";
+      summary = "Agent reported cancellation after claiming the job; target state requires re-check";
+      snapshot = {};
+    }
+    const receipt = {
+      state, code, summary, snapshot, started_at: text(value.started_at ?? "", "started_at", 64, false), finished_at: text(value.finished_at ?? iso(deps), "finished_at", 64, false),
     };
     const occurred = iso(deps);
     db.transaction(() => {
-      db.run("UPDATE agent_jobs SET state=?,receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND lease_id=? AND state NOT IN ('succeeded','failed','cancelled','unknown')", state, json(receipt), occurred, jobID, lease);
+      const changed = db.run("UPDATE agent_jobs SET state=?,receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND lease_id=? AND state NOT IN ('succeeded','failed','cancelled','unknown')", state, json(receipt), occurred, jobID, lease);
+      if (!changed.changes) return;
       const next = Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM agent_job_events WHERE job_id=?", jobID)?.sequence ?? 1);
       db.run("INSERT OR IGNORE INTO agent_job_events(job_id,sequence,phase,code,summary,snapshot_json,occurred_at) VALUES(?,?,?,?,?,?,?)", jobID, next, state, code, summary, json(receipt.snapshot), occurred);
+      notify(row(jobID), state as AgentJobEventPhase, code, {
+        healthVerified: state === "succeeded" && (snapshot as any).health?.healthy === true,
+        previousState: current.state as AgentJobState,
+      });
     });
     return view(row(jobID));
   };
@@ -266,9 +328,11 @@ export function registerAgentJobs(
     if (terminal(current.state as AgentJobState)) return view(current);
     const at = iso(deps);
     db.transaction(() => {
-      db.run("UPDATE agent_jobs SET state='cancelled',receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND state NOT IN ('succeeded','failed','cancelled','unknown')", json({ state: "cancelled", code: "cancelled", summary: `cancelled by ${actor}` }), at, jobID);
+      const changed = db.run("UPDATE agent_jobs SET state='cancelled',receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND state NOT IN ('succeeded','failed','cancelled','unknown')", json({ state: "cancelled", code: "cancelled", summary: `cancelled by ${actor}` }), at, jobID);
+      if (!changed.changes) return;
       const next = Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM agent_job_events WHERE job_id=?", jobID)?.sequence ?? 1);
       db.run("INSERT OR IGNORE INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)", jobID, next, "cancelled", "cancelled", "Agent job cancelled", at);
+      notify(row(jobID), "cancelled", "cancelled", { previousState: current.state as AgentJobState });
     });
     return view(row(jobID));
   };
@@ -302,5 +366,11 @@ export function registerAgentJobs(
     const value = await body(ctx);
     ctx.json(cancel(ctx.params.jobId, ctx.user.id + (value.reason ? ": " + text(value.reason, "reason", 256, false) : "")));
   }));
-  return { enqueue, claim, event, result, cancel, get: (jobID: string) => view(row(jobID)) };
+  return {
+    enqueue, claim, event, result, cancel, get: (jobID: string) => view(row(jobID)),
+    onUpdate(listener: (update: AgentJobUpdate) => void) {
+      updateListeners.add(listener);
+      return () => updateListeners.delete(listener);
+    },
+  };
 }

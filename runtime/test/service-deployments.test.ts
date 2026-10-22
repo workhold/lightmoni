@@ -6,6 +6,7 @@ import { DB } from "../src/shared/sqlite.js";
 import { Router } from "../src/shared/http.js";
 import { id } from "../src/shared/crypto.js";
 import { canTransitionDeployment, registerServiceDeployments } from "../src/server/service-deployments.js";
+import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import type { Dependencies } from "../src/shared/types.js";
 
 test("service inventory creates an approval-ready deployment plan", async (t) => {
@@ -27,7 +28,8 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
     reader: { exec: async () => {}, query: async () => ({ meta: [], data: [], rows: 0 }), insert: async () => {} },
   } as unknown as Dependencies;
   router.auth = deps.auth;
-  registerServiceDeployments(deps);
+  const jobs = registerAgentJobs(deps);
+  registerServiceDeployments(deps, { jobs });
   const server = createServer((req, res) => void router.handle(req, res));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -58,25 +60,125 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(notReady.status, 409);
   assert.equal(notReady.data.error, "agent_not_ready");
   db.run("INSERT INTO agents(id,last_seen) VALUES(?,?)", "agent-1", "2026-10-20T23:59:00Z");
+  const emptyApproval = await request("/api/v1/deployments/" + plan.data.id + "/approve", "POST", { confirm: true, expected_state: "awaiting_approval" });
+  assert.equal(emptyApproval.status, 409);
+  assert.equal(emptyApproval.data.error, "deployment_plan_not_executable");
+  assert.equal(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_jobs")?.count, 0);
+  db.run("UPDATE deployments SET plan_json=? WHERE id=?", JSON.stringify({ ...plan.data.plan, actions: [{ kind: "systemd", operation: "restart", unit: "checkout.service" }], capabilities: ["systemd.restart"] }), plan.data.id);
+  const noHealthApproval = await request(`/api/v1/deployments/${plan.data.id}/approve`, "POST", { confirm: true, expected_state: "awaiting_approval" });
+  assert.equal(noHealthApproval.status, 409);
+  assert.equal(noHealthApproval.data.error, "deployment_plan_not_executable");
+  assert.equal(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_jobs")?.count, 0);
+  // Exercise receipt-driven state using a reviewed typed action plan. A real
+  // preflight and trusted artifact builder are still required for production.
+  const executablePlan = {
+    ...plan.data.plan,
+    actions: [
+      { kind: "systemd", operation: "restart", unit: "checkout.service" },
+      { kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } },
+    ],
+    capabilities: ["systemd.restart", "health.systemd"],
+  };
+  db.run("UPDATE deployments SET plan_json=? WHERE id=?", JSON.stringify(executablePlan), plan.data.id);
   const approval = await request(`/api/v1/deployments/${plan.data.id}/approve`, "POST", { confirm: true, expected_state: "awaiting_approval" });
   assert.equal(approval.status, 200);
   assert.equal(approval.data.status, "agent_ready");
   assert.match(approval.data.operation_id, /^[a-f0-9]{32}$/);
+  const leased = jobs.claim("agent-1", ["systemd.restart", "health.systemd"]);
+  assert.ok(leased);
+  let sequence = 0;
+  for (const phase of ["accepted", "staging", "activating", "verifying"] as const) {
+    jobs.event("agent-1", leased!.id, {
+      lease_id: leased!.lease_id, sequence: ++sequence, phase, summary: "untrusted agent detail",
+    });
+  }
+  jobs.result("agent-1", leased!.id, {
+    lease_id: leased!.lease_id, state: "succeeded", code: "",
+    summary: "secret=must-not-appear", snapshot: { private_key: "must-not-appear", health: { healthy: true } },
+    started_at: "2026-10-21T00:00:00.000Z", finished_at: "2026-10-21T00:00:01.000Z",
+  });
+  const completed = await request("/api/v1/deployments/" + plan.data.id);
+  assert.equal(completed.data.status, "succeeded");
+  assert.equal(JSON.stringify(completed.data).includes("must-not-appear"), false);
   const events = await request(`/api/v1/deployments/${plan.data.id}/events`);
   assert.equal(events.status, 200);
-  assert.deepEqual(events.data.map((event: any) => event.state), ["awaiting_approval", "agent_ready"]);
+  assert.deepEqual(events.data.map((event: any) => event.state), ["awaiting_approval", "agent_ready", "agent_ready", "staging", "activating", "verifying", "succeeded"]);
+  assert.equal(JSON.stringify(events.data).includes("untrusted agent detail"), false);
   const rollback = await request(`/api/v1/deployments/${plan.data.id}/rollback`, "POST", { confirm: true, reason: "人工检查" });
   assert.equal(rollback.status, 200);
   assert.equal(rollback.data.status, "rollback_pending");
   const repeatedRollback = await request(`/api/v1/deployments/${plan.data.id}/rollback`, "POST", { confirm: true });
   assert.equal(repeatedRollback.status, 200);
   assert.equal(repeatedRollback.data.operation_id, rollback.data.operation_id);
+  const uncertainPlan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
+  assert.equal(uncertainPlan.status, 201);
+  const uncertainExecutablePlan = {
+    ...uncertainPlan.data.plan,
+    actions: [
+      { kind: "systemd", operation: "restart", unit: "checkout.service" },
+      { kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } },
+    ],
+    capabilities: ["systemd.restart", "health.systemd"],
+  };
+  db.run("UPDATE deployments SET plan_json=? WHERE id=?", JSON.stringify(uncertainExecutablePlan), uncertainPlan.data.id);
+  const uncertainApproval = await request(`/api/v1/deployments/${uncertainPlan.data.id}/approve`, "POST", { confirm: true, expected_state: "awaiting_approval" });
+  assert.equal(uncertainApproval.status, 200);
+  const uncertainJob = jobs.claim("agent-1", ["systemd.restart", "health.systemd"]);
+  assert.ok(uncertainJob);
+  jobs.result("agent-1", uncertainJob!.id, {
+    lease_id: uncertainJob!.lease_id, state: "unknown", code: "unknown_execution_result",
+    summary: "private output must not reach deployment history", snapshot: { authorization: "secret" },
+  });
+  const uncertainDetail = await request(`/api/v1/deployments/${uncertainPlan.data.id}`);
+  assert.equal(uncertainDetail.data.status, "agent_ready");
+  assert.equal(uncertainDetail.data.receipt.state, "unknown");
+  assert.equal(JSON.stringify(uncertainDetail.data).includes("secret"), false);
   const detail = await request(`/api/v1/services/${serviceID}`);
   assert.equal(detail.status, 200);
   assert.equal(detail.data.targets.length, 1);
   assert.equal(detail.data.releases.length, 1);
-  assert.equal(detail.data.deployments.length, 1);
-  assert.equal(detail.data.deployments[0].status, "rollback_pending");
+  assert.equal(detail.data.deployments.length, 2);
+  assert.equal(detail.data.deployments.find((item: any) => item.id === plan.data.id).status, "rollback_pending");
+
+  const queuedCancelPlan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
+  const cancelActions = [
+    { kind: "systemd", operation: "restart", unit: "checkout.service" },
+    { kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } },
+  ];
+  db.run("UPDATE deployments SET plan_json=? WHERE id=?", JSON.stringify({ ...queuedCancelPlan.data.plan, actions: cancelActions, capabilities: ["systemd.restart", "health.systemd"] }), queuedCancelPlan.data.id);
+  const queuedCancelApproval = await request(`/api/v1/deployments/${queuedCancelPlan.data.id}/approve`, "POST", { confirm: true, expected_state: "awaiting_approval" });
+  assert.equal(queuedCancelApproval.status, 200);
+  const queuedJob = db.get<any>("SELECT id FROM agent_jobs WHERE deployment_id=?", queuedCancelPlan.data.id);
+  assert.ok(queuedJob);
+  jobs.cancel(queuedJob!.id, "admin");
+  const safelyCancelled = await request(`/api/v1/deployments/${queuedCancelPlan.data.id}`);
+  assert.equal(safelyCancelled.data.status, "cancelled");
+  assert.equal(safelyCancelled.data.receipt.state, "cancelled");
+
+  const runningCancelPlan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
+  db.run("UPDATE deployments SET plan_json=? WHERE id=?", JSON.stringify({ ...runningCancelPlan.data.plan, actions: cancelActions, capabilities: ["systemd.restart", "health.systemd"] }), runningCancelPlan.data.id);
+  const runningCancelApproval = await request(`/api/v1/deployments/${runningCancelPlan.data.id}/approve`, "POST", { confirm: true, expected_state: "awaiting_approval" });
+  assert.equal(runningCancelApproval.status, 200);
+  const runningJob = jobs.claim("agent-1", ["systemd.restart", "health.systemd"]);
+  assert.ok(runningJob);
+  jobs.event("agent-1", runningJob!.id, { lease_id: runningJob!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  jobs.cancel(runningJob!.id, "admin");
+  const uncertainCancel = await request(`/api/v1/deployments/${runningCancelPlan.data.id}`);
+  assert.equal(uncertainCancel.data.status, "agent_ready");
+  assert.equal(uncertainCancel.data.receipt.state, "unknown");
+
+  const invalidSuccessPlan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
+  db.run("UPDATE deployments SET plan_json=? WHERE id=?", JSON.stringify({ ...invalidSuccessPlan.data.plan, actions: cancelActions, capabilities: ["systemd.restart", "health.systemd"] }), invalidSuccessPlan.data.id);
+  const invalidSuccessApproval = await request(`/api/v1/deployments/${invalidSuccessPlan.data.id}/approve`, "POST", { confirm: true, expected_state: "awaiting_approval" });
+  assert.equal(invalidSuccessApproval.status, 200);
+  const invalidSuccessJob = jobs.claim("agent-1", ["systemd.restart", "health.systemd"]);
+  assert.ok(invalidSuccessJob);
+  jobs.event("agent-1", invalidSuccessJob!.id, { lease_id: invalidSuccessJob!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  jobs.result("agent-1", invalidSuccessJob!.id, { lease_id: invalidSuccessJob!.lease_id, state: "succeeded", summary: "invalid success", snapshot: { health: { healthy: true } } });
+  const invalidSuccess = await request(`/api/v1/deployments/${invalidSuccessPlan.data.id}`);
+  assert.equal(invalidSuccess.data.status, "agent_ready");
+  assert.equal(invalidSuccess.data.receipt.state, "unknown");
+  assert.equal(invalidSuccess.data.receipt.code, "invalid_agent_sequence");
   assert.notEqual(id(), "");
 });
 

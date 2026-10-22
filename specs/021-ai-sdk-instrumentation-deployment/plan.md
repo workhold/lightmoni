@@ -25,6 +25,7 @@ flowchart LR
   Adapter --> Job[签名 Agent Job]
   Job --> Agent[LightMoni Agent]
   Agent --> Runtime[systemd / Compose / K8s 目标]
+  Agent -->|阶段事件、最终结果/健康回执| Center
   Runtime --> SDK[LightMoni SDK]
   SDK -->|direct 或 agent 模式| Center
   Center --> Verify[健康与遥测验证]
@@ -33,7 +34,7 @@ flowchart LR
 
 中心控制面只保存管理状态和制品元数据；遥测仍写入 ClickHouse。Agent 是独立节点执行平面，不能获得模型凭据或任意命令权限。SDK 默认直连中心，Agent 模式由用户显式选择。
 
-当前实现覆盖中心的元数据、状态迁移、审批提案、有界验证判定、受控插桩 apply 和最小 Agent job/executor 切片：systemd 适配器独立提供可测试的纯逻辑接口，`service-deployments` API 已持久化状态、审批、脱敏事件和 `rollback_pending` 提案，管理员批准且 Agent 就绪时会创建不可变 job；`deployment/verification.ts` 只对已获取且有界的健康/遥测证据做中心侧判定，插桩 apply 绑定 revision 并在管理员确认后原子写入。当前通用部署计划尚未生成可执行 typed actions，真实 Agent preflight、受控构建、ClickHouse 查询、回执驱动的最终状态和生产回滚仍待实现。下文带“后续”或“待实现”的模块不能在本次 PR 中宣称可用。
+当前实现覆盖中心元数据、状态迁移、审批提案、有界验证判定、受控插桩 apply 和最小 Agent job/executor 切片：systemd 适配器提供可测试的纯逻辑接口；`service-deployments` 持久化审批与脱敏事件，管理员批准且 Agent 就绪时创建不可变 job；Agent 的有序阶段回执会推进部署状态，最终成功必须包含计划内 health_check 且回执报告健康通过。事件序号/阶段回退会被拒绝；取消未领取 job 可安全结束部署，已领取/执行任务取消、租约过期和不完整成功回执都保留为 `unknown` 供人工复核。`deployment/verification.ts` 仍只对已获取且有界的健康/遥测证据做中心侧判定，插桩 apply 绑定 revision 并在管理员确认后原子写入。通用部署计划仍未生成可执行 typed actions；真实 Agent preflight、受控构建和制品分发、ClickHouse 查询、目标复核与最终回滚仍待实现。部署 `succeeded` 仅表示 Agent 报告计划内健康检查通过，不代表中心遥测已验证。
 
 ## 3. 分层与模块
 
@@ -86,7 +87,7 @@ flowchart LR
 | `instrumentation_plans` | `id`, `service_id`, `workspace_ref`, `base_revision`, `diff_json`, `findings_json`, `state` | apply 必须匹配 base revision |
 | `agent_jobs` | `id`, `agent_id`, `deployment_id`, `capabilities`, `expires_at`, `state`, `receipt_json` | job ID 唯一，一次仅一个 deployment operation；由 `runtime/src/server/agent-jobs.ts` 创建 |
 
-当前代码实际创建 `services`、`service_targets`、`releases`、`deployments`、`deployment_events` 和 Agent job 表；插桩计划以加密的键值记录保存，尚未迁移为独立 `instrumentation_plans` 表。当前 service API 的字段是 `repository_url`、`adapter`、`config` 等，`default_mode`、`provider_config`、`agent_id` 和 release 构建状态等契约字段尚未接入，不能按目标契约调用。部署 API 已实现 `awaiting_approval → agent_ready` 的管理员审批和合法迁移校验，审批会创建 Agent job，以及 `GET .../events`、`rollback → rollback_pending` 提案；Agent job 的租约、事件、结果、取消、过期 `unknown` 和 MVP capability executor/runner 已落地，但通用计划尚未提供 typed actions，真实 preflight、健康/遥测查询、回执驱动状态推进或 `rolled_back` 回执仍待实现。中心侧有界验证判定已独立实现并测试。
+当前代码实际创建 `services`、`service_targets`、`releases`、`deployments`、`deployment_events` 和 Agent job 表；插桩计划以加密的键值记录保存，尚未迁移为独立 `instrumentation_plans` 表。当前 service API 的字段是 `repository_url`、`adapter`、`config` 等，`default_mode`、`provider_config`、`agent_id` 和 release 构建状态等契约字段尚未接入，不能按目标契约调用。部署 API 已实现 `awaiting_approval → agent_ready` 管理员审批、合法迁移校验、Agent 阶段回执和带健康证据的最终状态映射，以及 `GET .../events`、`rollback → rollback_pending` 提案；Agent job 的租约、单调事件、结果、取消、过期 `unknown` 和 MVP capability executor/runner 已落地。通用计划尚未提供 typed actions，真实 preflight、中心健康/遥测查询、自动补偿和 `rolled_back` 回执仍待实现。中心侧有界验证判定已独立实现并测试。
 
 ## 5. HTTP 与工具流程
 
@@ -104,15 +105,15 @@ AI 工具只调用扫描、提案和只读状态；apply/build 的接口返回 a
 
 1. `POST /api/v1/services/:id/targets` 登记目标和 provider 配置。
 2. `POST /api/v1/services/:id/deployments/plan` 运行 `ensure_agent` 依赖检查和 adapter `probe/plan`，状态为 `awaiting_approval`。
-3. `POST /api/v1/deployments/:id/approve` 由管理员确认；当前实现检查 Agent 心跳、创建不可变 job 并推进到 `agent_ready`，后续回执状态才允许沿 `staging → activating → verifying` 推进。
-4. Agent 使用 control credential 拉取 job、在 capability allow-list 内执行 typed actions 并回报事件；当前通用计划没有 actions，executor 会安全拒绝空计划。
-5. 后续中心接入 Agent 快照和 ClickHouse 查询，执行健康/遥测验证，进入 `succeeded` 或 `rollback_pending`。
+3. `POST /api/v1/deployments/:id/approve` 由管理员确认；当前实现要求有可执行 actions 和获授权 health_check，检查 Agent 心跳、创建不可变 job 并推进到 `agent_ready`。
+4. Agent 使用 control credential 拉取 job、在 capability allow-list 内执行 typed actions 并提交单调阶段事件；中心映射 `staging → activating → verifying` 并将脱敏回执写入部署时间线。只有 verifying 后的最终结果含 `health.healthy=true` 才能进入 `succeeded`。
+5. 已领取任务取消、租约过期和缺少健康证据的成功回执都进入 `unknown`，保留最后已知部署状态并要求人工复核；未领取的 job 可安全取消。中心 ClickHouse 查询仍待接入，Agent 健康成功不等于遥测已验证。
 6. 后续 `POST /api/v1/deployments/:id/rollback` 生成回滚 job；Agent 完成并经中心验证后才能进入 `rolled_back`。
 
 ### 5.3 重试和未知结果
 
 - HTTP 请求使用 `Idempotency-Key`；重复 plan/approve/rollback 返回原计划或原回执。
-- Agent 断线时中心保留租约和最后状态；job 租约过期转 `unknown`，拒绝迟到的成功回执，先重新 probe，再决定是否重放；业务 deployment 状态的补偿推进仍待接入。
+- Agent 断线时中心保留租约和最后状态；job 租约过期转 `unknown` 并同步保留部署最后已知状态，拒绝迟到的成功回执；先重新 probe，再决定是否重放。取消已领取任务也标记为 unknown，因为不能证明主机没有发生副作用。
 - activating 后进程是否已切换不能靠客户端超时判断；必须以 Agent 快照和目标健康检查为准。
 
 ## 6. 适配器实现策略
@@ -125,7 +126,7 @@ AI 工具只调用扫描、提案和只读状态；apply/build 的接口返回 a
 - `verify`：对 Agent 回报的快照执行 active/version/health 检查；必要时向中心查询遥测。
 - `rollback`：切换到 `previous` 版本；不删除旧制品，便于审计和再次激活。
 
-中心侧验证抽象位于 `runtime/src/deployment/verification.ts`：它要求固定服务/实例、UTC 时间窗口、截止时间和最多 1000 条样本，只统计窗口内的精确匹配；健康通过但没有遥测时返回 `succeeded_telemetry_unverified`，不会把延迟误判为进程失败。真实 Agent/ClickHouse 查询、回执持久化到业务 deployment 状态以及最终回滚仍属于后续 T015。
+中心侧验证抽象位于 `runtime/src/deployment/verification.ts`：它要求固定服务/实例、UTC 时间窗口、截止时间和最多 1000 条样本，只统计窗口内的精确匹配；健康通过但没有遥测时返回 `succeeded_telemetry_unverified`，不会把延迟误判为进程失败。当前 Agent 通过事件回执报告 typed health_check 执行状态，中心可将有健康证据的最终回执映射为 deployment `succeeded`；中心真实读取 ClickHouse 遥测、将其与业务服务关联并区分“遥测未验证”仍属后续 T015。真实主机 preflight、自动探测/补偿和最终回滚也未完成。
 
 ### 后续 provider
 

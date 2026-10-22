@@ -1,10 +1,10 @@
 # SDD 021：验证记录
 
-> 记录截至 2026-10-22。验证结果覆盖中心部署状态/审批提案、受限 Agent job/executor、计划层和扫描切片，不代表真实业务部署或遥测闭环已经完成。
+> 记录截至 2026-10-22。验证结果覆盖中心部署状态/审批、Agent 回执闭环、受限 job/executor、计划层和扫描切片，不代表真实业务部署或遥测闭环已经完成。
 
 ## 验收范围
 
-本文件记录从规格到实现的可复核证据。本次切片实现了业务服务/目标/版本/部署计划元数据、中心状态迁移、管理员审批边界、脱敏部署事件和回滚提案、只读源码扫描、明确 TypeScript/JavaScript 请求边界的结构化插桩提案、管理员确认后的安全 apply、AI 计划工具、纯逻辑 systemd 适配器、Agent job/executor/runner 和中心侧有界验证判定；受控构建、真实主机 preflight、真实健康/遥测查询和业务 deployment 回执闭环仍待实现，不能把审批、job 入队或计划生成当作端到端部署完成。
+本文件记录从规格到实现的可复核证据。本次切片实现了业务服务/目标/版本/部署计划元数据、中心状态迁移、管理员审批边界、脱敏部署事件和回滚提案、Agent 回执驱动状态映射、只读源码扫描、明确 TypeScript/JavaScript 请求边界的结构化插桩提案、管理员确认后的安全 apply、AI 计划工具、纯逻辑 systemd 适配器、Agent job/executor/runner 和中心侧有界验证判定；受控构建、真实主机 preflight、中心 ClickHouse 遥测验证和业务自动回滚仍待实现，不能把审批、job 入队或 Agent 健康回执当作端到端部署完成。
 
 ## 规格与架构门
 
@@ -12,8 +12,8 @@
 - [x] `plan.md` 定义 HLD/LLD 组件分层、数据模型、状态机、执行器和迁移策略。
 - [x] `tasks.md` 将实现拆分为有依赖关系的任务，并标注当前状态。
 - [x] `contracts/` 定义 HTTP/AI、适配器、Agent job 和插桩契约。
-- [x] `docs/system-design.md` 已同步新增业务服务、SDK 扫描和适配器架构章节。
-- [x] Doca 在线设计已写入并回读：在第 5 节加入业务部署流程原生流程图，确认节点和连线可见；当前图标注 Agent job/executor 已接入协议，真实健康/遥测验证和回滚闭环仍是目标能力。
+- [x] `docs/system-design.md` 已更新本轮 Agent job → 部署状态控制路径、健康回执边界和 Mermaid 时序图。
+- [ ] Doca 基线图此前已同步；本轮状态回执控制路径增量尚未同步。浏览器打开目标时返回“资源不存在或无权访问”，因此不能标记完成，PR 发布门待恢复访问后回读文本、节点和连线。
 
 ## 功能验收矩阵
 
@@ -28,13 +28,17 @@
 | systemd probe | 缺 unit/systemd/坏路径时结构化拒绝 | `runtime/test/deployment-adapter.test.ts` | 通过（纯计划层） |
 | systemd plan | typed actions，禁止 shell | `runtime/test/deployment-adapter.test.ts` | 通过（纯计划层） |
 | 服务/目标/版本/部署计划 | 管理员创建并生成 awaiting approval 计划 | `runtime/test/service-deployments.test.ts` | 通过（不执行） |
-| 部署审批和状态迁移 | 已激活 Agent 才能由 awaiting approval 进入 agent_ready；非法状态拒绝 | `runtime/test/service-deployments.test.ts` | 通过（仅中心审批边界） |
-| 部署事件时间线 | 计划/审批/回滚提案写入脱敏、按追加顺序可读事件 | `runtime/test/service-deployments.test.ts` | 通过 |
+| 部署审批和状态迁移 | 已激活 Agent 且计划含授权 health_check 才能入队；Agent 有序阶段和最终健康回执推进状态 | `runtime/test/service-deployments.test.ts` | 通过（不代表真实主机部署） |
+| 部署事件时间线 | 计划/审批/Agent 阶段/终态/回滚提案写入脱敏、按追加顺序可读事件 | `runtime/test/service-deployments.test.ts` | 通过 |
+| Agent 事件顺序 | event 序号连续、重复请求幂等、阶段不能回退/跳跃；终态 event 不替代最终 result | `runtime/test/agent-jobs.test.ts` | 通过 |
+| 取消和未知结果 | 仅未领取任务可安全取消；领取后取消、租约过期和不完整成功回执保留 unknown | `runtime/test/agent-jobs.test.ts`、`runtime/test/service-deployments.test.ts` | 通过 |
 | AI 部署事件工具 | 管理员可读取脱敏状态时间线，不把事件当作主机执行回执 | `runtime/test/assistant-instrumentation-tools.test.ts` | 通过 |
 | 回滚提案 | 已批准/失败部署可进入 rollback_pending，不执行主机动作 | `runtime/test/service-deployments.test.ts` | 通过（不执行） |
 | AI 服务部署工具 | 结构化 ID 生成审核计划 | `runtime/src/assistant/tools.ts` + typecheck | 通过（不执行） |
 | Agent staging | digest 核对、受控 release 目录和幂等 job | `runtime/src/agent/executor.ts`、`runtime/test/agent-executor.test.ts` | 通过（MVP typed actions；真实制品分发待接入） |
-| 成功部署 | active/HTTP 健康、遥测查询通过 | `runtime/src/agent/executor.ts`、`runtime/src/deployment/verification.ts`（执行器和中心判定抽象）；真实 deployment 回执/查询待接入 | 部分通过（纯逻辑） |
+| Agent 健康成功 | 计划含授权 health_check 且最终结果有 `health.healthy=true` 后才进入 succeeded | `runtime/src/agent/executor.ts`、`runtime/src/server/agent-jobs.ts`、`runtime/test/service-deployments.test.ts` | 通过（不代表中心遥测已验证） |
+| 中心遥测验证 | 业务部署后查询 ClickHouse 核对新遥测 | `runtime/src/deployment/verification.ts`（仅有界判定器） | 待实现 |
+| 部署状态可读性 | 中文/英文显示各阶段；unknown 提示人工检查；成功文案说明遥测未验证 | `web/src/app/ServiceDeploymentsPage.tsx`、根目录 `npm run typecheck` | 通过 |
 | 遥测延迟 | 显示部署成功、遥测未验证，不误报失败 | `runtime/test/deployment-verification.test.ts` | 通过（有界证据；真实查询待接入） |
 | 健康失败回滚 | 保留 Agent，切换 previous release | systemd 适配器 + deployment API；Agent 回执驱动回滚闭环待接入 | 待验证 |
 | 恶意输入 | 路径、unit、URL、shell、过期签名均拒绝 | 安全负向测试待实现 | 待验证 |
@@ -57,12 +61,15 @@ npm test --workspace web -- --runInBand
 本次已运行：
 
 - `npm --prefix runtime run typecheck`：通过。
-- `npm --prefix runtime test`：254 tests，251 passed、3 skipped、0 failed。
+- `npm --prefix runtime test`：255 tests，252 passed、3 skipped、0 failed。
+- `npm test`（根目录）：runtime 255 tests（252 passed、3 skipped）、ai-runtime 71 passed、TypeScript SDK 18 passed；0 failed。
 - 插桩专用 `node --import tsx --test runtime/test/instrumentation.test.ts`：8 passed、0 failed；AI 工具专用 `node --import tsx --test runtime/test/assistant-instrumentation-tools.test.ts`：2 passed、0 failed；部署状态/迁移专用测试通过。
 - `npm run typecheck`：runtime、ai-runtime、web 均通过。
 - `git diff --check`：通过。
+- `web/src/app/ServiceDeploymentsPage.tsx` 状态双语文案和 unknown/遥测提示已通过 web TypeScript 检查。
+- `npm --prefix web run build`：通过，产物打包成功；依赖中的 `use client` 指令有现存 bundler warning。
 
-本轮新增验证：部署计划事件与状态变更在同一 SQLite 事务内写入；审批要求 Agent 最近 180 秒内心跳；回滚重复请求复用已持久化 operation ID；插桩提案支持传入扫描返回的 `base_revision` 并拒绝过期 revision；管理员 apply 原子写入并在重复请求时返回原始回执；AI 可读取脱敏部署事件时间线。
+本轮新增验证：Agent 阶段回执与部署状态/时间线在同一 SQLite 事务内写入；管理员取消未领取 job 可安全终止，已领取 job 取消保留 unknown；事件序号连续、阶段单调且拒绝跳跃/回退；审批要求计划含 capability 授权的 health_check；只有 verifying 后且最终 `health.healthy=true` 才能进入 succeeded；缺少证据的成功回执被转成 unknown；秘密和原始快照不会进入部署详情/时间线。
 
 - deployment adapter unit tests（合法/非法路径、摘要、健康检查、rollback）及 service deployment 状态迁移/审批/事件测试；
 - deployment verification tests（服务/实例归属、UTC 窗口、deadline、样本上限和健康但遥测未验证）；
@@ -87,7 +94,7 @@ npm test --workspace web -- --runInBand
 
 - [x] 代码只在功能分支，目标为 `main`，没有直接推送主干。
 - [x] SDD 任务状态和实现一致；未实现 provider 明确列在限制中。
-- [x] `docs/system-design.md` 与 Doca 在同一 PR 同步；PR 描述列出仓库章节、Doca 链接、写入/回读结果。
+- [ ] `docs/system-design.md` 已在本轮更新；Doca 本轮增量因目标页面显示“资源不存在或无权访问”未完成，恢复访问并完成回读前不能关闭此发布门。
 - [ ] 管理员审批、secret 脱敏、SSH 清理提示和错误码均有 UI/AI 展示。
-- [x] runtime typecheck 和相关部署/扫描测试通过；执行器和未知结果协议已实现，真实主机部署、健康/遥测查询及业务状态闭环仍明确标为未实现。
+- [x] 根目录 `npm test` 和 `npm run typecheck` 通过；Agent receipt 状态映射已实现，真实主机 preflight、构建/制品分发、中心遥测验证及最终回滚仍明确标为未实现。
 - [x] PR #25 已创建并保持待审核；未经用户明确授权不合并。

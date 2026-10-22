@@ -1,6 +1,6 @@
 # SDD 021：部署适配器契约
 
-> 本文件是目标执行契约。当前已实现的 `SystemdDeploymentAdapter` 和 registry 只负责纯逻辑 `probe/plan/apply/verify/rollback` 与 typed action 校验；它们不调用远程主机，也没有接入 `service-deployments` 的 HTTP 状态机或 Agent executor。
+> 本文件是目标执行契约。当前 `SystemdDeploymentAdapter` 和 registry 只负责纯逻辑 `probe/plan/apply/verify/rollback` 与 typed action 校验，不调用远程主机。`service-deployments` 已接入管理员审批、Agent job 和最终健康回执状态映射，但通用部署计划尚未调用 systemd adapter 来生成 actions，因此默认计划仍会被安全拒绝。
 
 适配器是中心的纯计划层。它不能调用 `child_process`、SSH、shell、systemctl、Docker CLI 或 Kubernetes API；这些动作由 Agent executor 在 capability allow-list 内解释。
 
@@ -70,5 +70,6 @@ Agent 必须验证：action 的 unit 等于已登记 target.unit；stage destina
 - 计划只能从 `draft/preflight` 到 `awaiting_approval`；未批准计划不能进入 `staging`。
 - Agent 激活前不能进入 `agent_ready` 之后阶段。
 - `activating`/`verifying` 失败只能进入 `failed` 或 `rollback_pending`，不能直接标记成功。
+- Agent 的 `succeeded` 回执必须来自 `verifying` 阶段并包含健康检查通过证据；缺失证据或执行中断时保留最后已知状态，并在 receipt 中标记 `unknown`。
 - `rollback_pending → rolling_back → rolled_back`；回滚失败保留 `failed`、回执和人工处理提示。
 - 成功的 release 不可原地修改；再次部署必须引用新的 version/digest。
