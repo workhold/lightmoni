@@ -15,7 +15,7 @@
 
 - `runtime/src/assistant/instrumentation.ts` 提供只读、启发式扫描器、受限的结构化插桩提案和管理员确认后的安全 apply。提案目前只对可明确定位的 TypeScript/JavaScript 多行请求处理函数生成 unified diff；apply 绑定 `base_revision`，检查路径、符号链接和文件大小并原子写入，仍不执行构建或项目代码。Python、Go、Rust、Ruby 和歧义边界只返回手动步骤。
 - `runtime/src/deployment` 已有 `systemd` 纯逻辑适配器和显式 provider registry，并有边界测试；适配器通过服务部署计划生成 typed action 的扩展点，主机动作由 Agent executor 解释。
-- `runtime/src/server/service-deployments.ts` 持久化 service/target/release/deployment 元数据和脱敏 deployment events。管理员 `approve` 在 Agent 就绪后要求至少一个 typed action 和带 capability 的 health_check，然后原子创建不可变 Agent job 并推进到 `agent_ready`。中心将 Agent 的单调阶段回执映射到部署状态；最终成功必须来自 verifying 状态且含 `health.healthy=true`。取消尚未领取的 job 可安全取消部署；已领取/执行中的取消、租约过期和不完整成功回执均保留 unknown，不推断目标机已恢复或失败。事件状态与 receipt 在同一 SQLite 事务内更新。
+- `runtime/src/server/service-deployments.ts` 持久化 service/target/release/deployment 元数据和脱敏 deployment events。管理员 `approve` 在 Agent 就绪后要求至少一个 typed action 和带 capability 的 health_check，然后原子创建不可变 Agent job 并推进到 `agent_ready`。中心将 Agent 的单调阶段回执映射到部署状态；最终成功必须来自 verifying 状态且含 `health.healthy=true`。未领取 job 被取消或过期可安全取消部署；已领取/执行中的取消、租约过期和不完整成功回执均保留 unknown，不推断目标机已恢复或失败。中心后台定期清理 job 过期状态，事件状态与 receipt 在同一 SQLite 事务内更新。
 - `runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定。Agent 回报健康检查通过只代表 Agent 侧计划执行的检查通过，不代表中心已查询 ClickHouse 遥测；真实主机 preflight、受控构建/制品传输、真实 ClickHouse 查询、自动补偿和最终回滚回执仍未接入。
 - Assistant 目前提供扫描、只读插桩提案、管理员确认后的插桩 apply、服务列表、部署计划提案和部署状态读取工具。构建、真实部署编排和回滚工具仍未提供；Agent job 的拉取、能力执行和回执由 Agent 运行时独立完成。
 - `docker_compose` 目前最多作为目标元数据被登记，尚无对应适配器或执行器；只有注册到 registry 的 provider 才能执行，不能把登记成功解释为 provider 已支持。

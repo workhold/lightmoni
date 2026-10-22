@@ -426,8 +426,10 @@ export function registerServiceDeployments(
     }
     if (update.phase === "cancelled") {
       if (state === "agent_ready" && update.previousState === "queued") {
-        transitionInTransaction(update.deploymentID, "cancelled", actor, "Agent 在执行前取消部署任务", "cancelled", {
-          receipt: receipt("cancelled", "cancelled", "Agent 在执行前取消部署任务"),
+        const code = update.code === "job_expired" ? "job_expired" : "cancelled";
+        const summary = update.code === "job_expired" ? "Agent 未领取任务，任务已过期，部署已取消" : "Agent 在领取任务前取消部署任务";
+        transitionInTransaction(update.deploymentID, "cancelled", actor, summary, code, {
+          receipt: receipt("cancelled", code, summary),
         });
       } else {
         appendObserved("unknown", "任务已被领取或执行期间取消，实际主机状态需要重新检查", "unknown_execution_result");

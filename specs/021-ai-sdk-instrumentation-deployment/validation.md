@@ -32,6 +32,7 @@
 | 部署事件时间线 | 计划/审批/Agent 阶段/终态/回滚提案写入脱敏、按追加顺序可读事件 | `runtime/test/service-deployments.test.ts` | 通过 |
 | Agent 事件顺序 | event 序号连续、重复请求幂等、阶段不能回退/跳跃；终态 event 不替代最终 result | `runtime/test/agent-jobs.test.ts` | 通过 |
 | 取消和未知结果 | 仅未领取任务可安全取消；领取后取消、租约过期和不完整成功回执保留 unknown | `runtime/test/agent-jobs.test.ts`、`runtime/test/service-deployments.test.ts` | 通过 |
+| 中心过期扫描 | Agent 离线后无需再请求，后台即可将租约过期任务转 unknown，并取消未领取的过期 job | `runtime/test/agent-jobs.test.ts` | 通过 |
 | AI 部署事件工具 | 管理员可读取脱敏状态时间线，不把事件当作主机执行回执 | `runtime/test/assistant-instrumentation-tools.test.ts` | 通过 |
 | 回滚提案 | 已批准/失败部署可进入 rollback_pending，不执行主机动作 | `runtime/test/service-deployments.test.ts` | 通过（不执行） |
 | AI 服务部署工具 | 结构化 ID 生成审核计划 | `runtime/src/assistant/tools.ts` + typecheck | 通过（不执行） |
@@ -61,15 +62,15 @@ npm test --workspace web -- --runInBand
 本次已运行：
 
 - `npm --prefix runtime run typecheck`：通过。
-- `npm --prefix runtime test`：255 tests，252 passed、3 skipped、0 failed。
-- `npm test`（根目录）：runtime 255 tests（252 passed、3 skipped）、ai-runtime 71 passed、TypeScript SDK 18 passed；0 failed。
+- `npm --prefix runtime test`：256 tests，253 passed、3 skipped、0 failed。
+- `npm test`（根目录）：runtime 256 tests（253 passed、3 skipped）、ai-runtime 71 passed、TypeScript SDK 18 passed；0 failed。
 - 插桩专用 `node --import tsx --test runtime/test/instrumentation.test.ts`：8 passed、0 failed；AI 工具专用 `node --import tsx --test runtime/test/assistant-instrumentation-tools.test.ts`：2 passed、0 failed；部署状态/迁移专用测试通过。
 - `npm run typecheck`：runtime、ai-runtime、web 均通过。
 - `git diff --check`：通过。
 - `web/src/app/ServiceDeploymentsPage.tsx` 状态双语文案和 unknown/遥测提示已通过 web TypeScript 检查。
 - `npm --prefix web run build`：通过，产物打包成功；依赖中的 `use client` 指令有现存 bundler warning。
 
-本轮新增验证：Agent 阶段回执与部署状态/时间线在同一 SQLite 事务内写入；管理员取消未领取 job 可安全终止，已领取 job 取消保留 unknown；事件序号连续、阶段单调且拒绝跳跃/回退；审批要求计划含 capability 授权的 health_check；只有 verifying 后且最终 `health.healthy=true` 才能进入 succeeded；缺少证据的成功回执被转成 unknown；秘密和原始快照不会进入部署详情/时间线。
+本轮新增验证：Agent 阶段回执与部署状态/时间线在同一 SQLite 事务内写入；管理员取消或过期的未领取 job 可安全终止，已领取 job 取消/超时保留 unknown，中心定时扫描不依赖 Agent 再次请求；事件序号连续、阶段单调且拒绝跳跃/回退；审批要求计划含 capability 授权的 health_check；只有 verifying 后且最终 `health.healthy=true` 才能进入 succeeded；缺少证据的成功回执被转成 unknown；秘密和原始快照不会进入部署详情/时间线。
 
 - deployment adapter unit tests（合法/非法路径、摘要、健康检查、rollback）及 service deployment 状态迁移/审批/事件测试；
 - deployment verification tests（服务/实例归属、UTC 窗口、deadline、样本上限和健康但遥测未验证）；

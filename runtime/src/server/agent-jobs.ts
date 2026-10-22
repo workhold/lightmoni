@@ -106,10 +106,11 @@ function view(row: any): Record<string, any> {
 
 export function registerAgentJobs(
   deps: Dependencies,
-  options: { agentCredentials?: AgentCredentialStore } = {},
+  options: { agentCredentials?: AgentCredentialStore; expirySweepIntervalMs?: number } = {},
 ): Module & AgentJobStore {
   const { db, router } = deps;
   const updateListeners = new Set<(update: AgentJobUpdate) => void>();
+  let sweepTimer: ReturnType<typeof setInterval> | undefined;
   const notify = (job: any, phase: AgentJobEventPhase, code = "", details: { healthVerified?: boolean; previousState?: AgentJobState } = {}) => {
     const update: AgentJobUpdate = {
       agentID: String(job.agent_id),
@@ -181,6 +182,25 @@ export function registerAgentJobs(
   };
   const expireLeases = () => {
     const at = iso(deps);
+    for (const queued of db.all<any>(
+      "SELECT id,state FROM agent_jobs WHERE state='queued' AND expires_at<=?",
+      at,
+    )) {
+      db.transaction(() => {
+        const changed = db.run(
+          "UPDATE agent_jobs SET state='cancelled',receipt_json=?,updated_at=? WHERE id=? AND state='queued' AND expires_at<=?",
+          json({ state: "cancelled", code: "job_expired", summary: "Agent job expired before it was claimed" }), at, queued.id, at,
+        );
+        if (changed.changes) {
+          const next = Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM agent_job_events WHERE job_id=?", queued.id)?.sequence ?? 1);
+          db.run(
+            "INSERT OR IGNORE INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)",
+            queued.id, next, "cancelled", "job_expired", "Agent job expired before it was claimed", at,
+          );
+          notify(row(queued.id), "cancelled", "job_expired", { previousState: "queued" });
+        }
+      });
+    }
     for (const old of db.all<any>(
       "SELECT id,state FROM agent_jobs WHERE state IN ('leased','accepted','staging','activating','verifying') AND lease_expires_at<>'' AND lease_expires_at<=?",
       at,
@@ -368,6 +388,17 @@ export function registerAgentJobs(
   }));
   return {
     enqueue, claim, event, result, cancel, get: (jobID: string) => view(row(jobID)),
+    start() {
+      if (sweepTimer) return;
+      sweepTimer = setInterval(() => {
+        try { expireLeases(); } catch (error) { deps.logger.warn("agent job expiry sweep failed", error); }
+      }, Math.max(10, Math.min(60_000, options.expirySweepIntervalMs ?? 5000)));
+      sweepTimer.unref?.();
+    },
+    close() {
+      if (sweepTimer) clearInterval(sweepTimer);
+      sweepTimer = undefined;
+    },
     onUpdate(listener: (update: AgentJobUpdate) => void) {
       updateListeners.add(listener);
       return () => updateListeners.delete(listener);

@@ -34,7 +34,7 @@
 
 | ID | 任务 | 依赖 | 状态 | 验收证据 |
 | --- | --- | --- | --- | --- |
-| T012 | 实现 Agent job poll/lease/ack/result、过期和取消协议 | T009,T010 | 已完成（有序单调事件、幂等重放、健康回执前置条件；签名 job 待后续） | `runtime/src/server/agent-jobs.ts`、`runtime/test/agent-jobs.test.ts` |
+| T012 | 实现 Agent job poll/lease/ack/result、过期和取消协议 | T009,T010 | 已完成（有序单调事件、幂等重放、健康回执前置条件、中心定时过期清理；签名 job 待后续） | `runtime/src/server/agent-jobs.ts`、`runtime/test/agent-jobs.test.ts` |
 | T013 | 实现 capability allow-list executor：制品暂存、受控 systemd、健康检查 | T008,T012 | 已完成（MVP allow-list；真实 preflight 待后续） | `runtime/src/agent/executor.ts`、digest/path/unit 负向测试 |
 | T014 | 实现 Agent 执行事件、脱敏摘要、重启后的 unknown 状态恢复 | T012,T013 | 已完成（回执/本地重启恢复；中心已用 Agent 回执推进部署状态） | `runtime/src/agent/jobs.ts`、`runtime/src/server/service-deployments.ts`、`runtime/test/agent-job-runner.test.ts` |
 | T015 | 接入真实健康与遥测验证；区分部署成功、遥测未验证和失败 | T010,T014 | 部分完成（Agent 计划内 health_check 通过后可标记业务健康成功；中心侧有界证据判定已实现；真实主机 preflight 和 ClickHouse 查询待接入） | `runtime/src/deployment/verification.ts`、`runtime/test/deployment-verification.test.ts`、`runtime/test/service-deployments.test.ts` |
@@ -56,7 +56,7 @@
 | T021 | 更新 `docs/system-design.md` 的 HLD/LLD、数据流、部署拓扑和 API 索引 | T001,T010,T013 | 已完成（本次切片章节） | `docs/system-design.md` diff |
 | T022 | 使用最新 Doca seq/epoch 更新对应富文本/原生图块并回读节点与连线 | T021 | 基线已完成；本轮回执闭环增量待同步 | Doca 原生流程图保存后可见，节点/连线回读确认；本轮访问返回“资源不存在或无权访问” |
 | T023 | 运行 runtime/web 检查，记录验证矩阵并创建待评审 PR；禁止直接合并 | 全部 | 已完成 | `validation.md`、PR #25（保持开启，未合并） |
-| T024 | 把 Agent job 进度、取消、健康验证、成功/失败和未知结果安全映射到业务 deployment 状态 | T010,T012,T014 | 已实现（严格事件序号/阶段单调；无健康成功证据或执行中取消时保留 unknown；仅未领取 job 可安全取消） | `runtime/src/server/agent-jobs.ts`、`runtime/src/server/service-deployments.ts`、对应服务部署与 Agent job 测试 |
+| T024 | 把 Agent job 进度、取消、健康验证、成功/失败和未知结果安全映射到业务 deployment 状态 | T010,T012,T014 | 已实现（严格事件序号/阶段单调；无健康成功证据或执行中取消时保留 unknown；仅未领取/过期 job 可安全取消） | `runtime/src/server/agent-jobs.ts`、`runtime/src/server/service-deployments.ts`、对应服务部署与 Agent job 测试 |
 
 ## 推荐执行顺序
 

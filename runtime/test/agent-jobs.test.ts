@@ -5,7 +5,7 @@ import { Router } from "../src/shared/http.js";
 import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import type { Dependencies } from "../src/shared/types.js";
 
-function fixture() {
+function fixture(expirySweepIntervalMs?: number) {
   const db = new DB(":memory:");
   let current = new Date("2026-10-22T00:00:00.000Z");
   const deps = {
@@ -22,7 +22,7 @@ function fixture() {
     reader: { exec: async () => {}, query: async () => ({ meta: [], data: [], rows: 0 }), insert: async () => {} },
   } as unknown as Dependencies;
   const credentials = { authenticate() { return { credential_id: "cred", agent_id: "agent-1", audience: "control", scope: "agent.control", expires_at: "", last_used_at: "" }; } } as any;
-  return { db, deps, jobs: registerAgentJobs(deps, { agentCredentials: credentials }), advance(seconds: number) { current = new Date(current.getTime() + seconds * 1000); } };
+  return { db, deps, jobs: registerAgentJobs(deps, { agentCredentials: credentials, expirySweepIntervalMs }), advance(seconds: number) { current = new Date(current.getTime() + seconds * 1000); } };
 }
 
 test("Agent job lease protocol is idempotent and records bounded receipts", () => {
@@ -70,7 +70,29 @@ test("success without verified health evidence becomes unknown and cancellation 
   f.jobs.cancel(queued.id, "admin");
   assert.equal(updates.at(-1).phase, "cancelled");
   assert.equal(updates.at(-1).previousState, "queued");
+  const expired = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-expired", operationID: "op-expired", actions: [], expiresInSeconds: 60 });
+  f.advance(61);
+  assert.equal(f.jobs.claim("agent-1", []), null);
+  assert.equal(f.jobs.get(expired.id).state, "cancelled");
+  assert.equal(f.jobs.get(expired.id).receipt.code, "job_expired");
+  assert.equal(updates.at(-1).previousState, "queued");
   f.db.close();
+});
+
+test("centre sweep expires lost Agent leases without waiting for another Agent request", async () => {
+  const f = fixture(10);
+  const job = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-offline", operationID: "op-offline", actions: [] });
+  const leased = f.jobs.claim("agent-1", []);
+  assert.ok(leased);
+  f.advance(46);
+  f.jobs.start();
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(f.jobs.get(job.id).state, "unknown");
+  } finally {
+    f.jobs.close();
+    f.db.close();
+  }
 });
 
 test("expired Agent leases become unknown and cannot be completed", () => {

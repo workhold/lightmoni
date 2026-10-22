@@ -213,7 +213,7 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 3. 已确认的 revision 经过受控构建生成带版本、架构、来源 revision 和 SHA-256 的 release。中心只保存 release 元数据和受控引用，生产 Agent 不接收源码仓库凭据或模型密钥。
 4. 管理员为 service 创建一个或多个 service target，选择运行方式适配器。MVP 的 `systemd` 适配器覆盖 Node、Python、Go、Rust、二进制和解释器服务；语言不是部署协议。Docker Compose、Kubernetes/Helm 和 CI/GitOps 作为后续适配器。
 5. 中心执行 `probe → plan → apply → verify → rollback` 的受控计划层，生成 `awaiting_approval` 部署计划。计划只包含 typed actions，不包含 shell 字符串；管理员审批前中心要求可执行 actions 和带能力授权的 health_check，随后原子写入不可变 Agent job 并把部署推进到 `agent_ready`。Agent 安装与业务部署分别记录，Agent 未激活时不能进入业务执行阶段。
-6. Agent executor 通过 control credential 拉取短时租约 job。中心按单调序号接收阶段事件，并将 staging/activating/verifying/final receipt 映射到脱敏部署时间线。只有 verifying 后的最终回执包含 `health.healthy=true` 才标记 `succeeded`；未领取 job 可以安全取消，已领取任务取消、租约过期或成功回执不完整时保留 `unknown`，要求重新检查目标主机。此状态仅表示 Agent 报告计划内健康检查通过，中心 ClickHouse 遥测验证仍单独显示未验证。
+6. Agent executor 通过 control credential 拉取短时租约 job。中心后台定期处理过期任务，按单调序号接收阶段事件，并将 staging/activating/verifying/final receipt 映射到脱敏部署时间线。只有 verifying 后的最终回执包含 `health.healthy=true` 才标记 `succeeded`；未领取 job 可以安全取消或过期取消，已领取任务取消、租约过期或成功回执不完整时保留 `unknown`，要求重新检查目标主机。此状态仅表示 Agent 报告计划内健康检查通过，中心 ClickHouse 遥测验证仍单独显示未验证。
 
 部署的执行和结果状态通过两条控制通道形成闭环：
 

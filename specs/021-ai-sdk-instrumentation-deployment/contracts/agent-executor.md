@@ -37,6 +37,7 @@ Job 结构（当前中心返回的 `actions`、`target` 和能力集合保持不
 - 执行阶段只能按 `accepted → staging → activating → verifying` 前进；同一阶段可重复报告，不允许跳步或回退。
 - 终态 event 仅是观察信息，不会结束 job；`/result` 才是最终状态的权威输入。
 - 未领取的 queued job 被管理员取消时可安全将部署标记为 `cancelled`。任务被领取后取消、租约过期或 Agent 重启时，目标主机状态不确定，部署回执记为 `unknown` 并保留最后已知 deployment 状态。
+- 中心后台每 5 秒执行一次过期扫描：尚未领取且超过 `expires_at` 的 job 标记 `cancelled/job_expired`；租约过期的已领取 job 标记 `unknown/unknown_execution_result`。Agent 不必再次上线才能刷新部署时间线。
 - 成功结果要求 job 已进入 `verifying`，且最终 snapshot 包含 `health.healthy=true`。缺少任一条件时中心把 Agent 的成功声称降级为 `unknown`，不会把它记作 deployment failed。
 
 最终回执：
