@@ -53,13 +53,19 @@ type HealthCheck =
 允许的 `DeploymentAction`：
 
 ```ts
-| {kind:"stage_artifact"; source:string; destination:string; sha256:string}
-| {kind:"activate_release"; releaseDirectory:string; version:string}
+| {kind:"stage_artifact"; release_id:string; service_id:string; version:string; architecture:"any"|"linux-amd64"|"linux-arm64"; destination:string; sha256:string; size:number}
+| {kind:"activate_release"; releaseDirectory:string; version:string; expectedCurrentVersion:string}
 | {kind:"systemd"; operation:"daemon-reload"|"enable"|"disable"|"start"|"restart"|"stop"; unit:string}
 | {kind:"health_check"; check:HealthCheck}
 ```
 
-Agent 必须验证：action 的 unit 等于已登记 target.unit；stage destination 位于 releaseDirectory 下；`activate_release.releaseDirectory` 等于已登记目录且 version 来自已批准 release；source、digest 和 release 元数据一致；健康检查 URL/host/port 通过 provider 校验。任何额外 action 或字段都拒绝。
+Agent 必须验证：action 的 unit 等于已登记 target.unit；stage destination 位于 releaseDirectory 下；artifact_id、service_id、version、架构、size 与该 job 的 release 一致；下载包 digest 与 action 匹配；`activate_release.releaseDirectory` 等于已登记目录且 version 来自已批准 release；`expectedCurrentVersion` 与目标 `current` 指针仍一致；健康检查 URL/host/port 通过 provider 校验。任何额外 action 或字段都拒绝。
+
+`stage_artifact` 不含中心文件系统路径、任意 URL 或 bearer token。Agent 通过当前 job 专用下载端点取得内容，中心以 Agent control credential + job lease + action 中的 release/digest 三重绑定授权。MVP bundle 是 `lightmoni-release-v1.tar.gz`：严格 USTAR gzip，根有 `manifest.json` 与可执行 `run`；只允许普通文件和目录，拒绝 links/devices/extensions、路径逃逸、重复项和超限输入。Agent 在 SHA-256 通过后才解包。
+
+systemd target 的管理员预置 unit 必须执行稳定入口 `<releaseDirectory>/current/run`。Agent 不编辑 unit；`current` 是相对链接 `releases/<version>`，以相同父目录的临时 symlink + 原子 rename 切换。普通文本 `current` 不符合新激活契约。
+
+MVP 的受管 release 根目录由 root 创建，属主为 root，组为 `lightmoni-agent`（例如 `root:lightmoni-agent`、`0775`）；业务服务用户可读/遍历但不得加入 Agent 组或获得写权限。Agent 的 systemd 沙箱需将精确 release 根目录加入 `ReadWritePaths`。bundle 仅包含运行所需文件，任何密钥、环境凭据和私钥都必须通过独立秘密管理传递，不得放入版本包。
 
 ## 错误码
 

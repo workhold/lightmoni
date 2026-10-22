@@ -125,7 +125,8 @@ test("read-only systemd preflight jobs reject deployment phases and snapshots fr
     preflight: {
       provider: "systemd", ready: true, systemd_available: true, unit_exists: true,
       active_state: "active", enabled: true, unit_file_state: "enabled", filesystem_check_supported: true, release_directory_exists: true,
-      release_directory_writable: true, current_version: "v1", observed_at: "2026-10-22T00:00:00.000Z",
+      release_directory_writable: true, entrypoint_matches: true, current_pointer_valid: true,
+      current_version: "v1", observed_at: "2026-10-22T00:00:00.000Z",
       preflight_id: preflightID, target_revision: revision,
     },
   });

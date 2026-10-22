@@ -1,9 +1,14 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, normalize } from "node:path";
+import { createReadStream } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import { deploymentAdapters } from "../deployment/index.js";
+import { parseReleaseBundle } from "../deployment/release-bundle.js";
+import { ReleaseArtifactError, ReleaseArtifactStore } from "../deployment/artifact-store.js";
 import type { AgentJobStore } from "./agent-jobs.js";
 
 /**
@@ -66,6 +71,8 @@ const MAX_JSON_BYTES = 64 << 10;
 const PREFLIGHT_TTL_MS = 10 * 60_000;
 const SYSTEMD_UNIT = /^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,126}\.service$/;
 const RELEASE_VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const SHA256 = /^[a-f0-9]{64}$/i;
+const RELEASE_BUNDLE_CONTENT_TYPE = "application/vnd.lightmoni.release+gzip";
 
 const nowISO = (deps: Dependencies) => deps.now().toISOString();
 const record = (value: unknown, field = "request"): Record<string, any> => {
@@ -98,6 +105,10 @@ const safe = (deps: Dependencies, handler: Handler): Handler => async (ctx) => {
   try {
     await handler(ctx);
   } catch (error) {
+    if (ctx.res.headersSent) {
+      if (!ctx.res.writableEnded) ctx.res.end();
+      return;
+    }
     if (error instanceof HTTPError) ctx.json({ error: error.message }, error.status);
     else if (error instanceof Error && /UNIQUE constraint failed/.test(error.message))
       ctx.json({ error: "服务名称已存在" }, 409);
@@ -147,6 +158,8 @@ const releaseView = (row: any) => ({
   source_type: row.source_type,
   source_ref: row.source_ref,
   artifact_digest: row.artifact_digest,
+  artifact_size: Number(row.artifact_size || 0),
+  artifact_format: row.artifact_format || "",
   manifest: parse(row.manifest_json, {}),
   status: row.status,
   created_at: row.created_at,
@@ -195,7 +208,7 @@ const safeTargetConfig = (adapter: string, raw: Record<string, any>) => {
   const releaseDirectory = text(raw.release_directory ?? raw.releaseDirectory, "config.release_directory", 1024);
   if (!SYSTEMD_UNIT.test(unit)) fail(400, "invalid systemd unit");
   if (!isAbsolute(releaseDirectory) || releaseDirectory === "/" || normalize(releaseDirectory) !== releaseDirectory
-    || releaseDirectory.includes("\\") || releaseDirectory.split("/").includes("..") || /[\u0000-\u001f\u007f]/.test(releaseDirectory))
+    || releaseDirectory.includes("\\") || releaseDirectory.split("/").includes("..") || /[\s\u0000-\u001f\u007f]/.test(releaseDirectory))
     fail(400, "invalid systemd release directory");
   return { unit, release_directory: releaseDirectory };
 };
@@ -203,7 +216,7 @@ const safeTargetConfig = (adapter: string, raw: Record<string, any>) => {
 /** Register service inventory and approval-ready delivery plan APIs. */
 export function registerServiceDeployments(
   deps: Dependencies,
-  options: { jobs?: AgentJobStore } = {},
+  options: { jobs?: AgentJobStore; artifacts?: ReleaseArtifactStore } = {},
 ): Module & ServiceDeploymentStore {
   const { db, router } = deps;
   db.exec(`
@@ -252,6 +265,8 @@ export function registerServiceDeployments(
       source_type TEXT NOT NULL,
       source_ref TEXT NOT NULL,
       artifact_digest TEXT NOT NULL DEFAULT '',
+      artifact_size INTEGER NOT NULL DEFAULT 0,
+      artifact_format TEXT NOT NULL DEFAULT '',
       manifest_json TEXT NOT NULL DEFAULT '{}',
       status TEXT NOT NULL DEFAULT 'ready',
       created_at TEXT NOT NULL,
@@ -295,6 +310,10 @@ export function registerServiceDeployments(
     );
     CREATE INDEX IF NOT EXISTS deployment_events_deployment ON deployment_events(deployment_id,created_at,id);
   `);
+
+  const releaseColumns = new Set(db.all<{ name: string }>("PRAGMA table_info(releases)").map((column) => column.name));
+  if (!releaseColumns.has("artifact_size")) db.exec("ALTER TABLE releases ADD COLUMN artifact_size INTEGER NOT NULL DEFAULT 0");
+  if (!releaseColumns.has("artifact_format")) db.exec("ALTER TABLE releases ADD COLUMN artifact_format TEXT NOT NULL DEFAULT ''");
 
   // Existing installations created before the approval slice need the new
   // metadata columns without a destructive migration. SQLite permits adding
@@ -340,7 +359,7 @@ export function registerServiceDeployments(
     ensureService(serviceID);
     const row = db.get<any>("SELECT * FROM releases WHERE id=? AND service_id=?", releaseID, serviceID);
     if (!row) fail(404, "服务版本不存在");
-    if (row.status !== "ready") fail(409, "服务版本未就绪");
+    if (!new Set(["pending_artifact", "ready"]).has(row.status)) fail(409, "服务版本未就绪");
     return row;
   };
   const service = (idValue: string) => serviceView(ensureService(idValue));
@@ -461,6 +480,7 @@ export function registerServiceDeployments(
     const value = (snapshot as any)?.preflight;
     if (!value || value.provider !== "systemd" || typeof value.ready !== "boolean"
       || typeof value.systemd_available !== "boolean" || typeof value.unit_exists !== "boolean"
+      || typeof value.entrypoint_matches !== "boolean" || typeof value.current_pointer_valid !== "boolean"
       || typeof value.filesystem_check_supported !== "boolean"
       || typeof value.release_directory_exists !== "boolean" || typeof value.release_directory_writable !== "boolean"
       || !(value.enabled === true || value.enabled === false || value.enabled === "unknown")
@@ -473,11 +493,13 @@ export function registerServiceDeployments(
     if (observedAt < createdAt - 60_000 || observedAt > receivedAt + 60_000) return undefined;
     const ready = value.filesystem_check_supported && value.systemd_available && value.unit_exists && ["active", "inactive"].includes(value.active_state)
       && !["masked", "masked-runtime"].includes(value.unit_file_state)
-      && value.release_directory_exists && value.release_directory_writable;
+      && value.release_directory_exists && value.release_directory_writable
+      && value.entrypoint_matches && value.current_pointer_valid;
     if (value.ready !== ready) return undefined;
     return {
       provider: "systemd", ready, systemd_available: value.systemd_available,
       unit_exists: value.unit_exists, active_state: value.active_state, enabled: value.enabled, unit_file_state: value.unit_file_state,
+      entrypoint_matches: value.entrypoint_matches, current_pointer_valid: value.current_pointer_valid,
       release_directory_exists: value.release_directory_exists,
       filesystem_check_supported: value.filesystem_check_supported, release_directory_writable: value.release_directory_writable,
       current_version: value.current_version, observed_at: new Date(value.observed_at).toISOString(),
@@ -603,17 +625,80 @@ export function registerServiceDeployments(
     if (target.status === "disabled") fail(409, "服务目标已禁用");
     const machine = ensureMachine(target.machine_id), at = nowISO(deps), deploymentID = id();
     const preflight = latestPreflight(serviceID, targetID);
+    const observed = preflight.view?.snapshot?.preflight;
+    let providerPlanStatus = "generic";
+    let providerPlanReason = !release.artifact_digest || Number(release.artifact_size || 0) < 1
+      ? "artifact_missing"
+      : !preflight.view?.current || !preflight.view.ready ? "agent_preflight_required" : "deployment_adapter_required";
+    let actions: Record<string, unknown>[] = [];
+    let capabilities: string[] = [];
+    const manifest = parse<Record<string, any>>(release.manifest_json, {});
+    if (providerPlanReason === "deployment_adapter_required") {
+      const agent = db.get<any>("SELECT platform,arch FROM agents WHERE id=?", machine.agent_id);
+      const targetArchitecture = agent?.platform === "linux" && agent.arch === "amd64" ? "linux-amd64"
+        : agent?.platform === "linux" && agent.arch === "arm64" ? "linux-arm64" : "";
+      if (release.status !== "ready" || release.artifact_format !== "lightmoni-release-v1.tar.gz"
+        || !SHA256.test(String(release.artifact_digest)) || !Number.isSafeInteger(Number(release.artifact_size))
+        || Number(release.artifact_size) < 1 || manifest.service_id !== serviceID || manifest.version !== release.version
+        || !new Set(["any", "linux-amd64", "linux-arm64"]).has(manifest.architecture)) {
+        providerPlanReason = "artifact_invalid";
+      } else if (manifest.architecture !== "any" && manifest.architecture !== targetArchitecture) {
+        providerPlanReason = targetArchitecture ? "artifact_architecture_mismatch" : "agent_architecture_unknown";
+      } else if (!observed?.entrypoint_matches || !observed?.current_pointer_valid) {
+        providerPlanReason = "unit_entrypoint_mismatch";
+      } else {
+        try {
+          const adapter = deploymentAdapters.require("systemd");
+          const targetSnapshot = {
+            available: observed.systemd_available === true,
+            unitExists: observed.unit_exists === true,
+            activeState: observed.active_state,
+            enabled: observed.enabled,
+            currentVersion: observed.current_version,
+          };
+          const serviceTarget = { id: target.id, provider: "systemd" as const, unit: preflight.current.config.unit, releaseDirectory: preflight.current.config.release_directory };
+          const probe = adapter.probe({ target: serviceTarget, snapshot: targetSnapshot });
+          const providerPlan = adapter.plan({
+            id: deploymentID,
+            spec: {
+              serviceId: serviceID,
+              target: serviceTarget,
+              artifact: {
+                release_id: release.id, service_id: serviceID, version: release.version,
+                architecture: manifest.architecture, sha256: release.artifact_digest,
+                size: Number(release.artifact_size),
+              },
+              healthChecks: [{ kind: "systemd-active", unit: serviceTarget.unit }],
+            },
+            probe,
+          });
+          actions = [...providerPlan.apply, ...providerPlan.verify];
+          capabilities = [...new Set(actions.map((action: any) => action.kind === "stage_artifact" ? "artifact.stage"
+            : action.kind === "activate_release" ? "artifact.activate_release"
+              : action.kind === "systemd" ? `systemd.${action.operation.replace(/-/g, "_")}`
+                : action.kind === "health_check" ? `health.${action.check.kind === "systemd-active" ? "systemd" : action.check.kind}` : ""))].filter(Boolean).sort();
+          providerPlanStatus = "ready";
+          providerPlanReason = "";
+        } catch {
+          providerPlanReason = "deployment_adapter_rejected";
+        }
+      }
+    }
     const plan = {
       version: "service-deployment/v1",
       adapter: target.adapter,
-      provider_plan_status: "generic",
-      provider_plan_reason: preflight.view?.current && preflight.view.ready ? "artifact_transport_required" : "agent_preflight_required",
+      provider_plan_status: providerPlanStatus,
+      provider_plan_reason: providerPlanReason,
       service_id: serviceID,
       target_id: target.id,
+      target_revision: preflight.current.revision,
+      preflight_id: preflight.view?.id ?? "",
       preflight: preflight.view,
       release_id: release.id,
       machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, username: machine.username },
-      release: { version: release.version, source_type: release.source_type, source_ref: release.source_ref, artifact_digest: release.artifact_digest },
+      release: { version: release.version, source_type: release.source_type, source_ref: release.source_ref, artifact_digest: release.artifact_digest, artifact_size: Number(release.artifact_size || 0), artifact_format: release.artifact_format || "" },
+      actions,
+      capabilities,
       steps: ["校验制品与部署目标", "由 Agent 暂存不可变制品", "切换服务版本", "执行健康检查", "验证 LightMoni 遥测", "失败时回滚到上一版本"],
       safety: ["仅在管理员确认后执行", "Agent 只接受签名任务和能力白名单", "AI 不直接执行生产 Shell 或读取凭据"],
     };
@@ -720,16 +805,79 @@ export function registerServiceDeployments(
     const serviceID = ctx.params.id, input = await body(ctx);
     ensureService(serviceID);
     const version = text(input.version, "version", 128);
-    if (!/^[A-Za-z0-9][A-Za-z0-9._+/-]{0,127}$/.test(version)) fail(400, "invalid version");
+    if (!RELEASE_VERSION.test(version)) fail(400, "invalid version");
     const sourceType = text(input.source_type ?? "artifact", "source_type", 32);
     if (!["artifact", "git", "container"].includes(sourceType)) fail(400, "invalid source_type");
     const sourceRef = text(input.source_ref, "source_ref", 2048);
-    const digest = text(input.artifact_digest ?? "", "artifact_digest", 256, false);
-    const manifest = jsonObject(input.manifest, "manifest");
     const at = nowISO(deps), releaseID = id();
-    db.run("INSERT INTO releases(id,service_id,version,source_type,source_ref,artifact_digest,manifest_json,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?)", releaseID, serviceID, version, sourceType, sourceRef, digest, JSON.stringify(manifest), at, ctx.user.id);
+    db.run("INSERT INTO releases(id,service_id,version,source_type,source_ref,artifact_digest,artifact_size,artifact_format,manifest_json,status,created_at,created_by) VALUES(?,?,?,?,?,'',0,'','{}','pending_artifact',?,?)", releaseID, serviceID, version, sourceType, sourceRef, at, ctx.user.id);
     ctx.json(releaseView(db.get<any>("SELECT * FROM releases WHERE id=?", releaseID)!), 201);
   }));
+  router.put("/api/v1/services/:id/releases/:releaseId/artifact", safe(deps, async (ctx) => {
+    admin(deps, ctx);
+    if (!options.artifacts) fail(503, "release artifact storage unavailable");
+    const serviceID = ctx.params.id;
+    const release = db.get<any>("SELECT * FROM releases WHERE id=? AND service_id=?", ctx.params.releaseId, serviceID);
+    if (!release) fail(404, "服务版本不存在");
+    if (release.status === "ready") fail(409, "已就绪的服务版本不可替换");
+    if (release.status !== "pending_artifact") fail(409, "服务版本状态不允许上传制品");
+    const contentType = String(ctx.req.headers["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase();
+    if (contentType !== RELEASE_BUNDLE_CONTENT_TYPE) fail(415, "invalid_artifact_content_type");
+    const lengthHeader = String(ctx.req.headers["content-length"] ?? "");
+    if (!/^\d{1,9}$/.test(lengthHeader)) fail(411, "content_length_required");
+    const contentLength = Number(lengthHeader);
+    if (contentLength < 1 || contentLength > 64 * 1024 * 1024) fail(413, "artifact_too_large");
+    const expectedSha256 = String(ctx.req.headers["x-artifact-sha256"] ?? "").trim();
+    if (!SHA256.test(expectedSha256)) fail(400, "invalid_artifact_digest");
+
+    let stored;
+    try {
+      stored = await options.artifacts.put(ctx.req, { contentLength, expectedSha256, signal: ctx.signal });
+    } catch (error) {
+      if (error instanceof ReleaseArtifactError) {
+        const status = error.code === "artifact_too_large" ? 413 : error.code === "artifact_io" ? 500 : error.code === "digest_mismatch" ? 422 : 400;
+        fail(status, error.code);
+      }
+      throw error;
+    }
+    let bundle;
+    try {
+      bundle = parseReleaseBundle(await readFile(stored.path));
+    } catch {
+      await options.artifacts.discard(stored.sha256).catch(() => {});
+      fail(422, "invalid_artifact");
+    }
+    if (bundle.manifest.service_id !== serviceID || bundle.manifest.version !== release.version) {
+      await options.artifacts.discard(stored.sha256).catch(() => {});
+      fail(422, "artifact_release_mismatch");
+    }
+    if (release.artifact_digest && (!SHA256.test(release.artifact_digest) || release.artifact_digest.toLowerCase() !== stored.sha256))
+      fail(422, "digest_mismatch");
+    db.run("UPDATE releases SET artifact_digest=?,artifact_size=?,artifact_format=?,manifest_json=?,status='ready' WHERE id=? AND service_id=? AND status='pending_artifact'", stored.sha256, stored.size, "lightmoni-release-v1.tar.gz", JSON.stringify(bundle.manifest), ctx.params.releaseId, serviceID);
+    const updated = db.get<any>("SELECT * FROM releases WHERE id=? AND service_id=?", ctx.params.releaseId, serviceID);
+    if (!updated || updated.status !== "ready" || updated.artifact_digest !== stored.sha256) fail(409, "release_changed_during_upload");
+    ctx.json({ release_id: updated.id, sha256: stored.sha256, size: stored.size, format: updated.artifact_format, status: "ready" }, 201);
+  }));
+
+  router.get("/api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId", safe(deps, async (ctx) => {
+    if (!options.jobs?.authorizeArtifact) fail(503, "agent artifact authorization unavailable");
+    if (!options.artifacts) fail(503, "release artifact storage unavailable");
+    const access = options.jobs.authorizeArtifact(ctx, ctx.params.agentId, ctx.params.jobId, ctx.params.releaseId);
+    const artifact = await options.artifacts.inspect(access.sha256);
+    if (!artifact || artifact.size !== access.size) fail(404, "artifact not found");
+    ctx.res.writeHead(200, {
+      "cache-control": "private, no-store",
+      "content-type": RELEASE_BUNDLE_CONTENT_TYPE,
+      "content-length": artifact.size,
+      "content-disposition": 'attachment; filename="lightmoni-release-v1.tar.gz"',
+      "x-artifact-sha256": artifact.sha256,
+      "x-artifact-format": "lightmoni-release-v1.tar.gz",
+      "x-content-type-options": "nosniff",
+      vary: "Authorization, X-LightMoni-Job-Lease",
+    });
+    if (ctx.req.method === "HEAD") { ctx.res.end(); return; }
+    await pipeline(createReadStream(artifact.path), ctx.res, { signal: ctx.signal });
+  }), { public: true });
 
   router.get("/api/v1/services/:id/deployments", safe(deps, (ctx) => { admin(deps, ctx); ctx.json(deployments(ctx.params.id)); }));
   router.post("/api/v1/services/:id/deployments/plan", safe(deps, async (ctx) => {
@@ -772,28 +920,42 @@ export function registerServiceDeployments(
     if (deployment.status !== expected) fail(409, "部署计划状态已变化，请重新查看");
     // Approval does not start a service. It only authorizes a reviewed typed
     // action list to run through the Agent's capability allow-list.
-    const target = db.get<any>("SELECT machine_id FROM service_targets WHERE id=?", deployment.target_id);
-    if (!target || !machineAgentReady(String(target.machine_id))) {
-      fail(409, "agent_not_ready");
-    }
-    const operationID = deployment.operation_id || id();
-    const plan = parse<any>(deployment.plan_json, {});
-    const healthActions = Array.isArray(plan.actions) ? plan.actions.filter((action: any) => action?.kind === "health_check") : [];
-    const hasAuthorizedHealthCheck = healthActions.some((action: any) => {
-      const kind = action.check?.kind;
-      const capability = kind === "systemd-active" ? "health.systemd" : kind === "http" ? "health.http" : kind === "tcp" ? "health.tcp" : "";
-      return capability && Array.isArray(plan.capabilities) && plan.capabilities.includes(capability);
-    });
-    if (!Array.isArray(plan.actions) || plan.actions.length === 0 || !Array.isArray(plan.capabilities) || plan.capabilities.length === 0 || !hasAuthorizedHealthCheck)
-      fail(409, "deployment_plan_not_executable");
     if (!options.jobs) fail(503, "agent_jobs_unavailable");
+    const operationID = deployment.operation_id || id();
     // Enqueue the immutable job and advance the approval state in one SQLite
     // transaction. A partial approval can neither strand a job nor leave the
     // deployment approved without a corresponding job.
     const result = db.transaction(() => {
-      const targetRow = db.get<any>("SELECT * FROM service_targets WHERE id=?", deployment.target_id);
+      const plan = parse<any>(deployment.plan_json, {});
+      const current = currentTarget(deployment.service_id, deployment.target_id);
+      if (current.target.status === "disabled" || plan.target_revision !== current.revision
+        || plan.service_id !== deployment.service_id || plan.target_id !== current.target.id)
+        fail(409, "deployment_target_changed");
+      const currentPreflight = latestPreflight(deployment.service_id, deployment.target_id);
+      if (!currentPreflight.view?.current || !currentPreflight.view.ready
+        || !plan.preflight_id || plan.preflight_id !== currentPreflight.view.id)
+        fail(409, "deployment_preflight_stale");
+      const stagesArtifact = Array.isArray(plan.actions) && plan.actions.some((action: any) => action?.kind === "stage_artifact");
+      if (deployment.release_id !== plan.release_id || (stagesArtifact && plan.provider_plan_status !== "ready"))
+        fail(409, "deployment_plan_not_executable");
+      const targetRow = db.get<any>("SELECT * FROM service_targets WHERE id=? AND service_id=?", deployment.target_id, deployment.service_id);
+      if (!targetRow || !machineAgentReady(String(current.target.machine_id))) fail(409, "agent_not_ready");
+      const release = db.get<any>("SELECT * FROM releases WHERE id=? AND service_id=?", deployment.release_id, deployment.service_id);
+      const plannedRelease = plan.release ?? {};
+      if (!release || (stagesArtifact && (release.status !== "ready" || release.artifact_digest !== plannedRelease.artifact_digest
+        || Number(release.artifact_size) !== Number(plannedRelease.artifact_size)
+        || release.artifact_format !== plannedRelease.artifact_format)))
+        fail(409, "deployment_release_changed");
+      const healthActions = Array.isArray(plan.actions) ? plan.actions.filter((action: any) => action?.kind === "health_check") : [];
+      const hasAuthorizedHealthCheck = healthActions.some((action: any) => {
+        const kind = action.check?.kind;
+        const capability = kind === "systemd-active" ? "health.systemd" : kind === "http" ? "health.http" : kind === "tcp" ? "health.tcp" : "";
+        return capability && Array.isArray(plan.capabilities) && plan.capabilities.includes(capability);
+      });
+      if (!Array.isArray(plan.actions) || plan.actions.length === 0 || !Array.isArray(plan.capabilities) || plan.capabilities.length === 0 || !hasAuthorizedHealthCheck)
+        fail(409, "deployment_plan_not_executable");
       options.jobs!.enqueue({
-        agentID: String(target?.machine_id ? (db.get<any>("SELECT agent_id FROM managed_machines WHERE id=?", target.machine_id)?.agent_id ?? "") : ""),
+        agentID: String(current.machine.agent_id || ""),
         deploymentID: deployment.id,
         operationID,
         actions: plan.actions,

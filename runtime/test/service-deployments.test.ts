@@ -63,7 +63,7 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.deepEqual(probeJob!.capabilities, ["systemd.probe"]);
   const preflightSnapshot = {
     health: { healthy: true },
-    preflight: { provider: "systemd", ready: true, systemd_available: true, unit_exists: true, active_state: "active", enabled: true, unit_file_state: "enabled", filesystem_check_supported: true, release_directory_exists: true, release_directory_writable: true, current_version: "v1", observed_at: "2026-10-21T00:00:00.000Z", preflight_id: probeJob!.actions[0].preflightID, target_revision: probeJob!.actions[0].targetRevision, ignored_output: "secret" },
+    preflight: { provider: "systemd", ready: true, systemd_available: true, unit_exists: true, active_state: "active", enabled: true, unit_file_state: "enabled", filesystem_check_supported: true, release_directory_exists: true, release_directory_writable: true, entrypoint_matches: true, current_pointer_valid: true, current_version: "v1", observed_at: "2026-10-21T00:00:00.000Z", preflight_id: probeJob!.actions[0].preflightID, target_revision: probeJob!.actions[0].targetRevision, ignored_output: "secret" },
   };
   jobs.event("agent-1", probeJob!.id, { lease_id: probeJob!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
   jobs.event("agent-1", probeJob!.id, { lease_id: probeJob!.lease_id, sequence: 2, phase: "preflighting", summary: "preflight" });
@@ -84,7 +84,7 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(plan.data.status, "awaiting_approval");
   assert.equal(plan.data.plan.adapter, "systemd");
   assert.equal(plan.data.plan.preflight.ready, true);
-  assert.equal(plan.data.plan.provider_plan_reason, "artifact_transport_required");
+  assert.equal(plan.data.plan.provider_plan_reason, "artifact_missing");
   await request(`/api/v1/services/${serviceID}/targets/${target.data.id}`, "PATCH", { status: "disabled" });
   assert.equal((await request(`/api/v1/services/${serviceID}/targets/${target.data.id}/preflight`)).data.current, false);
   await request(`/api/v1/services/${serviceID}/targets/${target.data.id}`, "PATCH", { status: "unknown" });
@@ -227,6 +227,12 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(unapprovedCancel.data.status, "cancelled");
   const staleCancel = await request(`/api/v1/deployments/${unapprovedPlan.data.id}/cancel`, "POST", { confirm: true, expected_state: "awaiting_approval" });
   assert.equal(staleCancel.status, 409);
+  const staleTargetPlan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
+  await request(`/api/v1/services/${serviceID}/targets/${target.data.id}`, "PATCH", { config: { ...target.data.config, release_directory: "/opt/lightmoni/services/checkout-v2" } });
+  db.run("UPDATE agents SET last_seen=? WHERE id=?", "2026-10-20T23:59:00Z", "agent-1");
+  const staleTargetApproval = await request(`/api/v1/deployments/${staleTargetPlan.data.id}/approve`, "POST", { confirm: true, expected_state: "awaiting_approval" });
+  assert.equal(staleTargetApproval.status, 409);
+  assert.equal(staleTargetApproval.data.error, "deployment_target_changed");
   const oldTargetConfig = target.data.config;
   const changedTarget = await request(`/api/v1/services/${serviceID}/targets/${target.data.id}`, "PATCH", { config: { ...oldTargetConfig, release_directory: "/opt/lightmoni/services/checkout-v2" } });
   assert.equal(changedTarget.status, 200);

@@ -17,10 +17,12 @@
 - `runtime/src/deployment` 已有 `systemd` 纯逻辑适配器和显式 provider registry，并有边界测试；适配器通过服务部署计划生成 typed action 的扩展点，主机动作由 Agent executor 解释。
 - `runtime/src/server/service-deployments.ts` 持久化 service/target/release/deployment 元数据和脱敏 deployment events。管理员 `approve` 在 Agent 就绪后要求至少一个 typed action 和带 capability 的 health_check，然后原子创建不可变 Agent job 并推进到 `agent_ready`。管理员可取消未审批计划；已批准计划仅在 Agent job 仍排队时允许原子取消，Agent 已领取后取消请求返回冲突，不宣称远端执行已停止。中心将 Agent 的单调阶段回执映射到部署状态；最终成功必须来自 verifying 状态且含 `health.healthy=true`。未领取 job 过期可安全取消；Agent 端执行取消、租约过期和不完整成功回执均保留 unknown，不推断目标机已恢复或失败。中心后台定期清理 job 过期状态，事件状态与 receipt 在同一 SQLite 事务内更新。
 - service target 可请求 Agent 执行只读 systemd preflight。Agent 只检查登记的 unit 与 release directory，返回固定字段的状态快照；中心保存结果，后续部署计划可绑定最近一次通过的快照。该预检不会运行部署动作或 shell，也不包含制品上传/下载，因此部署审批仍会安全拒绝缺少可执行 typed actions 的计划。
-- 部署工作台只有在计划明确为 ready 且包含 actions/capabilities 时显示批准按钮。目标可执行 Agent 只读 systemd 预检；计划缺少预检时提示先完成预检并重新生成，预检通过但缺少制品传输时明确显示当前不能审批。
-- `runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定。只读 systemd preflight 已通过 Agent job 检查目标 unit 和 release directory；Agent 回报部署健康检查通过只代表计划内的 Agent 检查，不代表中心已查询 ClickHouse 遥测。受控构建/制品传输、真实 ClickHouse 查询、自动补偿和最终回滚回执仍未接入。
+- 部署工作台只有在计划明确为 ready 且包含 actions/capabilities 时显示批准按钮。目标需先通过 Agent 只读 systemd 预检，并选择已校验的 ready bundle；缺少预检、制品或执行动作时不能审批。
+- `runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定。只读 systemd preflight 已通过 Agent job 检查目标 unit 和 release directory；Agent 回报部署健康检查通过只代表计划内的 Agent 检查，不代表中心已查询 ClickHouse 遥测。受控源码构建、真实 ClickHouse 查询、自动补偿和最终回滚回执仍未接入。
 - Assistant 目前提供扫描、只读插桩提案、管理员确认后的插桩 apply、服务列表、部署计划提案和部署状态读取工具。构建、真实部署编排和回滚工具仍未提供；Agent job 的拉取、能力执行和回执由 Agent 运行时独立完成。
 - `docker_compose` 目前最多作为目标元数据被登记，尚无对应适配器或执行器；只有注册到 registry 的 provider 才能执行，不能把登记成功解释为 provider 已支持。
+- 业务制品与激活契约已在本轮收敛为 `lightmoni-release-v1.tar.gz`：受限 USTAR gzip 包、根目录 `manifest.json` 与可执行 `run` 入口；内容存入中心私有 digest-addressed 目录，Agent 仅能在有效 job lease 下下载。目标 systemd unit 必须预先使用 `<release_directory>/current/run`，Agent 将 `current` 原子切换为 `releases/<version>` 相对符号链接；LightMoni 不改写任意 unit。此契约先于完整构建 worker 实现，当前 status 仍以任务表为准。
+- MVP 主机权限约束：release 根目录由 root 创建和持有，属组为 `lightmoni-agent`（建议 `0775`，其他用户只读/遍历），Agent 的 systemd 沙箱需通过精确 `ReadWritePaths` 获得该目录写权限；业务服务运行用户不得属于 Agent 组或写入目录。bundle 只放运行所需文件，禁止携带密钥、环境凭据和私钥。真实主机预检需验证该权限组合。
 
 ## 背景与问题
 
@@ -99,8 +101,11 @@ LightMoni 已经有 AI 对话、Pi 代码任务、SDK 上报、受管主机和�
 ### FR-002 构建与制品
 
 - 构建输入必须是已应用且已确认的 revision；构建环境隔离，构建日志脱敏并限制时长、CPU、内存和网络。
-- 制品不可变，至少包含 `service_id`、`version`、`sha256`、架构、来源 revision 和创建者。
-- Agent 只接收制品路径/受控下载引用和摘要，不接收源码仓库凭据或模型密钥。
+- 制品不可变，至少包含 `service_id`、`version`、`sha256`、架构、来源 revision 和创建者。MVP 文件格式为 gzip 压缩 USTAR `lightmoni-release-v1.tar.gz`，中心与 Agent 限制压缩体积 64 MiB、解包总体积 256 MiB、最多 10,000 个条目；只允许普通文件和目录，拒绝符号链接、硬链接、设备、稀疏文件、PAX/GNU 扩展、重复路径、绝对路径和 `..`。
+- 包根必须有不超过 64 KiB 的 `manifest.json` 和可执行普通文件 `run`。Manifest schema 为 `{schema_version:1,service_id,version,architecture,source_revision,entrypoint:"run"}`；架构仅为 `any`、`linux-amd64` 或 `linux-arm64`。Agent 校验 manifest 与 release、目标服务、主机架构一致后才可激活。
+- 中心制品正文存储于非静态、私有的 content-addressed 目录，SQLite 只记录 release 元数据、摘要、大小和状态。上传接口要求管理员认证、大小限制、摘要复核、原子落盘和不可变摘要；公开 `/downloads` 不得承载业务制品。
+- Agent 只接收 release ID、摘要和 job-scoped 下载接口；下载必须同时验证 Agent control credential、Agent ID、当前未过期 job lease、job action 中的 release ID/摘要和 release 归属。凭据只能放 Authorization/header，不放 URL；下载路径不能接受任意主机 URL。
+- Agent 下载后先校验压缩包 SHA-256，再安全解包到 `<release_directory>/releases/<version>`，逐文件使用受控目录句柄和 `O_NOFOLLOW` 原子创建。release 内容不可覆盖；同一 digest 重试幂等。
 - 构建失败不得创建可激活 release；同一 digest 重试必须幂等。
 
 ### FR-003 服务、目标和部署状态
@@ -115,11 +120,12 @@ LightMoni 已经有 AI 对话、Pi 代码任务、SDK 上报、受管主机和�
 
 - 所有 provider 遵循 `probe → plan → apply → verify → rollback`，输入输出为 JSON 可序列化的类型，不返回 shell 字符串。
 - `systemd` probe 检查 systemd 可用、unit 存在、当前 active/enabled 状态、当前版本和受控 release 目录。
+- systemd 服务由管理员预先配置稳定的 `ExecStart=<release_directory>/current/run`；Agent 只校验该固定入口，不修改 unit 文件、环境文件或服务用户。未满足此入口约定的目标不 ready。
 - Agent 的 `systemd.probe` capability 仅允许读取 job 中登记的 unit 和 release directory；结果为有限枚举、布尔值、版本标识和固定错误码，不上传原始 stdout/stderr。中心将预检快照绑定到 target 和 operation，并在计划中保留最近一次未过期快照。
-- 预检快照缺失、过期或 `ready=false` 时，中心不得生成可审批部署动作；预检通过也不等于制品已可供 Agent 使用，artifact transport 接入前计划仍不可执行。
+- 预检快照缺失、过期或 `ready=false` 时，中心不得生成可审批部署动作；预检通过也不等于部署完成，计划还须绑定 ready bundle 和实际执行动作。
 - plan 仅生成受限 actions：暂存制品、daemon-reload、enable/start/restart、HTTP/TCP/systemd-active 健康检查和回滚动作。
 - Agent executor 只允许目标登记的 unit、受控 release 目录和允许的健康检查；unit/路径来自服务目标配置而非模型自由输入。
-- Agent 对受控目录的检查、制品暂存和版本指针切换要求 Linux 固定目录句柄与 `O_NOFOLLOW`；其他平台不标记预检 ready，也不执行部署文件写操作。检查 `current` 指针时不能因 FIFO 等特殊文件阻塞 Agent job loop。
+- Agent 对受控目录的检查、制品暂存和版本切换要求 Linux 固定目录句柄与 `O_NOFOLLOW`；其他平台不标记预检 ready，也不执行部署文件写操作。`current` 是指向 `releases/<safe-version>` 的相对符号链接，Agent 通过同目录临时 symlink + 原子 rename 切换；执行前比较计划绑定的 previous version，避免覆盖预检后发生的外部部署。检查 `current` 时不能因 FIFO 等特殊文件阻塞 Agent job loop。
 - systemd 适配器必须在不支持的主机/坏快照/摘要不匹配时拒绝计划，不尝试猜测或修正。
 
 ### FR-005 Agent 执行与回执

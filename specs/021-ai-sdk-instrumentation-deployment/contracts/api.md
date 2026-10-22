@@ -2,7 +2,7 @@
 
 所有接口均挂在 `/api/v1`，需要登录；创建/应用源码变更、构建、Agent 安装、部署、回滚和修改目标仅管理员可用。响应不包含私钥、密码、token 或原始命令输出。
 
-> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现管理员服务目标配置、Agent 只读 systemd preflight、受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和 `rollback_pending` 提案。Preflight 通过独立 `systemd.probe` job 检查目标 unit 和受控目录，快照绑定目标配置 revision、最多保鲜 10 分钟；它不推进业务部署状态，也不执行主机写入。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。该闭环不代表制品上传/分发、中心遥测查询或自动回滚已实现。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；release 构建与受控制品分发仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
+> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现管理员服务目标配置、私有 release bundle 上传/摘要校验、Agent 只读 systemd preflight、lease 绑定制品下载、受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和 `rollback_pending` 提案。Preflight 通过独立 `systemd.probe` job 检查目标 unit 和受控目录，快照绑定目标配置 revision、最多保鲜 10 分钟；它不推进业务部署状态，也不执行主机写入。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。该闭环不代表中心遥测查询、自动回滚、签名构建、GC/配额或真实 Linux 主机验收已实现。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；源码 release 构建仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
 
 ## 通用约束
 
@@ -68,6 +68,24 @@
 
 返回 `{release:{id,service_id,version,sha256,arch,state:"building"|"ready"|"failed"}}`。只有 `ready` release 可放入 deployment plan。
 
+当前 systemd MVP 接受已构建 release bundle 的管理员上传；这不是源码构建 API：
+
+`PUT /api/v1/services/:serviceId/releases/:releaseId/artifact`
+
+- 必须为管理员 Cookie 会话并通过 Origin 校验；`Content-Type` 为 `application/vnd.lightmoni.release+gzip`。
+- `X-Artifact-SHA256` 必须是 64 位小写/大写 hex；`Content-Length` 为 1..64 MiB。服务端流式收件、计算摘要、与 release 元数据匹配后原子落盘。
+- 上传内容必须是 gzip 压缩 USTAR `lightmoni-release-v1.tar.gz`；manifest 的 `service_id`/`version` 必须和 URL 对应 release 匹配，服务端忽略客户端提供的 manifest 状态。
+- 成功返回 `{release_id,sha256,size,status:"ready"}`；digest 不匹配返回 `422 digest_mismatch`，包格式或 service/version 不匹配返回 `422 invalid_artifact` / `422 artifact_release_mismatch`，已就绪不可变 release 不允许替换。校验失败时立即移除未引用 blob。
+- 制品正文绝不存入静态 `downloads`，状态查询只返回 digest/size/format，不返回服务器本地路径。
+
+Agent 对制品的唯一读取入口：
+
+`GET /api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId`
+
+- `Authorization: Bearer <control credential>` 与 `X-LightMoni-Job-Lease: <lease>` 必须同时有效。
+- 中心校验 Agent 所属、lease TTL、job 状态以及 job 中 `stage_artifact` 的 release ID、digest 和 service ID；任何不匹配返回 403/409，不提供 filesystem path 或 redirect。
+- 响应为原始 bundle bytes、`Content-Length`、`X-Artifact-SHA256` 和 `X-Artifact-Format`。Agent 必须再次校验长度、格式和 SHA-256。
+
 ## 目标和部署
 
 ### `POST /services/:id/targets`
@@ -92,7 +110,7 @@
 
 管理员请求：`{"confirm":true}`。服务端从已登记的目标、机器与 Agent 绑定构建唯一只读 action，不接受客户端传入 unit、路径、Agent ID、command 或 capability。目标 Agent 必须在线且已激活。重复请求在相同目标配置下复用排队/执行中的预检；否则创建短期 Agent job，返回 `202` 和预检记录。
 
-Agent 只运行固定参数的 `systemctl show`，读取已登记 release directory 和其中的安全 `current` 版本指针；不建目录、不启停服务、不返回 stdout/stderr。目标路径穿过符号链接时会拒绝就绪；只有 unit 处于 `active`/`inactive`、未 masked 且 release directory 存在且可写才算 ready。中心发给 job 的 action 含一次性 `preflightID` 和 `targetRevision`；最终回执只允许固定字段，必须回显这两个绑定值，中心校验它们与 job/目标 revision 匹配，并校验 `observed_at` 不早于 job 签发时间（允许 60 秒时钟偏差）。超时、取消、错误/畸形输出和跨 job 旧快照返回固定错误状态，不刷新快照有效期。
+Agent 只运行固定参数的 `systemctl show`，读取已登记 release directory 和其中的安全 `current` 版本指针；不建目录、不启停服务、不返回 stdout/stderr。目标路径穿过符号链接时会拒绝就绪；目标 unit 必须执行 `<release_directory>/current/run`，release 根目录须由 root 持有、Agent 组可写、业务用户不可写，且 Agent 的 `ReadWritePaths` 允许访问。只有 unit 处于 `active`/`inactive`、未 masked 且目录存在、权限受控并对 Agent 实际可写才算 ready。中心发给 job 的 action 含一次性 `preflightID` 和 `targetRevision`；最终回执只允许固定字段，必须回显这两个绑定值，中心校验它们与 job/目标 revision 匹配，并校验 `observed_at` 不早于 job 签发时间（允许 60 秒时钟偏差）。超时、取消、错误/畸形输出和跨 job 旧快照返回固定错误状态，不刷新快照有效期。
 
 ### `GET /services/:id/targets/:targetId/preflight`
 
@@ -120,16 +138,16 @@ Agent 只运行固定参数的 `systemctl show`，读取已登记 release direct
   "provider":"systemd",
   "agent_stage":{"required":true,"status":"pending|ready|failed"},
   "probe":{},
-  "actions":[{"kind":"stage_artifact","destination":"/opt/lightmoni/checkout/releases/2026.10.21-1","sha256":"..."}],
+  "actions":[{"kind":"stage_artifact","release_id":"release_...","destination":"releases/2026.10.21-1","sha256":"...","size":1234}],
   "verify":[{"kind":"systemd-active","unit":"checkout.service"}],
   "rollback":[],
   "review_url":"/deployments/dep_..."
 }
 ```
 
-创建计划不安装 Agent、不构建、不启动服务。
+创建计划不安装 Agent、不构建、不启动服务。只有 release 已上传且 ready、目标有新鲜 ready 预检、manifest/service/architecture 和 unit 激活入口均匹配时，systemd adapter 才能生成带 release ID/digest/size 的 typed actions。
 
-当前计划会附最近一次预检摘要及目标配置 revision。预检缺失/过期/未就绪时标记 `agent_preflight_required`；预检通过时当前标记 `artifact_transport_required`。由于 release 目前没有中心受控存储和 Agent 下载通道，两个情形都不生成生产可执行 actions，审批 API 仍拒绝通用空计划。
+当前计划会附最近一次预检摘要及目标配置 revision。预检缺失/过期/未就绪时标记 `agent_preflight_required`；release 未上传或摘要状态不匹配时标记 `artifact_missing`。未就绪时不生成生产可执行 actions，审批 API 仍拒绝通用空计划。
 
 ### `POST /deployments/:id/approve`
 

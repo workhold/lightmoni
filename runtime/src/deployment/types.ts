@@ -25,15 +25,21 @@ export type DeploymentState = (typeof DEPLOYMENT_STATES)[number];
 export type DeploymentAction =
   | {
       kind: "stage_artifact";
-      source: string;
+      release_id: string;
+      service_id: string;
+      version: string;
+      architecture: "any" | "linux-amd64" | "linux-arm64";
+      /** Relative path beneath the registered release directory. */
       destination: string;
-      /** The digest is checked by the Agent before the copy is activated. */
       sha256: string;
+      size: number;
     }
   | {
       kind: "activate_release";
       releaseDirectory: string;
       version: string;
+      /** Compare-and-swap binding captured by the approved deployment plan. */
+      expectedCurrentVersion: string;
     }
   | {
       kind: "systemd";
@@ -66,11 +72,12 @@ export type HealthCheck =
   | { kind: "tcp"; host: string; port: number; timeoutMs?: number };
 
 export interface DeploymentArtifact {
-  /** A content-addressed or otherwise immutable artifact path. */
-  source: string;
+  release_id: string;
+  service_id: string;
   version: string;
+  architecture: "any" | "linux-amd64" | "linux-arm64";
   sha256: string;
-  fileName?: string;
+  size: number;
 }
 
 export interface ServiceTarget {
@@ -132,7 +139,7 @@ export interface DeploymentPlan {
   targetId: string;
   state: "awaiting_approval";
   version: string;
-  artifact: Pick<DeploymentArtifact, "source" | "version" | "sha256">;
+  artifact: Pick<DeploymentArtifact, "release_id" | "service_id" | "version" | "architecture" | "sha256" | "size">;
   previous: Pick<SystemdSnapshot, "currentVersion" | "currentArtifact" | "activeState">;
   previousRelease?: string;
   apply: DeploymentAction[];

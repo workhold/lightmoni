@@ -23,9 +23,12 @@ const spec: ServiceSpec = {
   serviceId: "payments",
   target,
   artifact: {
-    source: "/var/lib/lightmoni/artifacts/payments-2026.10.21.tar.zst",
+    release_id: "release-1",
+    service_id: "payments",
     version: "2026.10.21",
+    architecture: "linux-amd64",
     sha256: "a".repeat(64),
+    size: 128,
   },
   enableOnBoot: true,
   healthChecks: [{ kind: "systemd-active", unit: target.unit }],
@@ -49,7 +52,13 @@ test("systemd adapter creates a reviewable typed plan and requires approval", ()
   const plan = adapter.plan({ id: "deployment-1", spec, probe });
   assert.equal(plan.state, "awaiting_approval");
   assert.equal(plan.apply[0]?.kind, "stage_artifact");
+  assert.deepEqual(plan.apply[0], {
+    kind: "stage_artifact", release_id: "release-1", service_id: "payments", version: "2026.10.21",
+    architecture: "linux-amd64", destination: "releases/2026.10.21", sha256: "a".repeat(64), size: 128,
+  });
   assert.equal(plan.apply[1]?.kind, "activate_release");
+  assert.equal(plan.apply[1]?.kind === "activate_release" && plan.apply[1].expectedCurrentVersion, "2026.10.20");
+  assert.equal(plan.apply.some((action) => action.kind === "systemd" && action.operation === "daemon-reload"), false);
   assert.equal(plan.apply.some((action) => action.kind === "systemd" && action.operation === "restart"), true);
   assert.throws(() => adapter.apply(plan, false), /requires administrator approval/);
   const applied = adapter.apply(plan, true);

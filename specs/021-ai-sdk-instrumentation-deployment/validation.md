@@ -1,10 +1,10 @@
 # SDD 021：验证记录
 
-> 记录截至 2026-10-22。验证结果覆盖中心部署状态/审批、Agent 回执闭环、受限 job/executor、只读 systemd preflight、计划层和扫描切片，不代表真实业务部署或遥测闭环已经完成。
+> 记录截至 2026-10-22。验证结果覆盖中心部署状态/审批、Agent 回执闭环、受限 job/executor、只读 systemd preflight、release bundle 传输、计划层和扫描切片，不代表真实 Linux 主机部署或遥测闭环已经完成。
 
 ## 验收范围
 
-本文件记录从规格到实现的可复核证据。本次切片实现了业务服务/目标/版本/部署计划元数据、中心状态迁移、管理员审批边界、脱敏部署事件和回滚提案、Agent 回执驱动状态映射、Agent 只读 systemd preflight、只读源码扫描、明确 TypeScript/JavaScript 请求边界的结构化插桩提案、管理员确认后的安全 apply、AI 计划工具、纯逻辑 systemd 适配器、Agent job/executor/runner 和中心侧有界验证判定；受控构建、制品上传/分发、中心 ClickHouse 遥测验证和业务自动回滚仍待实现，不能把预检、审批、job 入队或 Agent 健康回执当作端到端部署完成。
+本文件记录从规格到实现的可复核证据。本次切片实现了业务服务/目标/版本/部署计划元数据、中心状态迁移、管理员审批边界、脱敏部署事件和回滚提案、Agent 回执驱动状态映射、Agent 只读 systemd preflight、私有 release bundle 上传/校验/租约下载、Linux Agent 安全解包与 current symlink 激活、只读源码扫描、明确 TypeScript/JavaScript 请求边界的结构化插桩提案、管理员确认后的安全 apply、AI 计划工具、纯逻辑 systemd 适配器、Agent job/executor/runner 和中心侧有界验证判定；受控源码构建、中心 ClickHouse 遥测验证、业务自动回滚和真实 Linux 主机验收仍待实现，不能把预检、审批、job 入队或 Agent 健康回执当作端到端部署完成。
 
 ## 规格与架构门
 
@@ -13,7 +13,7 @@
 - [x] `tasks.md` 将实现拆分为有依赖关系的任务，并标注当前状态。
 - [x] `contracts/` 定义 HTTP/AI、适配器、Agent job 和插桩契约。
 - [x] `docs/system-design.md` 已更新只读 preflight → 目标配置 revision → 部署计划控制路径、制品传输边界和 Mermaid 时序图。
-- [ ] Doca 基线图此前已同步；本轮只读 preflight 控制路径增量尚未同步。浏览器回读仍返回“文档不存在 / 资源不存在或无权访问”，且当前环境无 Doca MCP resource/template，因此不能标记完成，PR 发布门待恢复访问后回读文本、节点和连线。
+- [ ] Doca 基线图此前已同步；本轮 bundle 上传/租约下载/current symlink/目录权限控制路径增量尚未同步。浏览器回读返回“文档不存在 / 资源不存在或无权访问”，当前环境也没有 Doca MCP resource/template，因此不能标记完成；需恢复访问后回读文本、节点和连线。
 
 ## 功能验收矩阵
 
@@ -39,7 +39,9 @@
 | AI 部署事件工具 | 管理员可读取脱敏状态时间线，不把事件当作主机执行回执 | `runtime/test/assistant-instrumentation-tools.test.ts` | 通过 |
 | 回滚提案 | 已批准/失败部署可进入 rollback_pending，不执行主机动作 | `runtime/test/service-deployments.test.ts` | 通过（不执行） |
 | AI 服务部署工具 | 结构化 ID 生成审核计划 | `runtime/src/assistant/tools.ts` + typecheck | 通过（不执行） |
-| Agent staging | digest 核对、受控 release 目录和幂等 job | `runtime/src/agent/executor.ts`、`runtime/test/agent-executor.test.ts` | 通过（MVP typed actions；真实制品分发待接入） |
+| Agent staging | digest 核对、受控 release 目录、私有租约下载和幂等 job | `runtime/src/agent/executor.ts`、`runtime/test/agent-executor.test.ts`、`runtime/test/release-artifact-api.test.ts` | 通过（Linux 专属文件操作在 macOS 跳过） |
+| Bundle 上传/下载 | 管理员有界上传、私有 digest 存储、格式校验、lease 绑定且无路径泄漏 | `runtime/test/release-artifact-api.test.ts`、`runtime/test/release-artifact-store.test.ts`、`runtime/test/release-bundle.test.ts` | 通过（拒绝包的孤儿 blob 即时清理；GC/配额待硬化） |
+| 可执行部署计划 | 仅 ready release + 新鲜 ready preflight + 匹配 systemd 入口生成 typed actions，审批时复核目标/快照/制品 | `runtime/test/service-deployments.test.ts`、`runtime/test/release-artifact-api.test.ts` | 通过（真实 Linux 目标仍待验证） |
 | Agent 健康成功 | 计划含授权 health_check 且最终结果有 `health.healthy=true` 后才进入 succeeded | `runtime/src/agent/executor.ts`、`runtime/src/server/agent-jobs.ts`、`runtime/test/service-deployments.test.ts` | 通过（不代表中心遥测已验证） |
 | 中心遥测验证 | 业务部署后查询 ClickHouse 核对新遥测 | `runtime/src/deployment/verification.ts`（仅有界判定器） | 待实现 |
 | 部署状态可读性 | 中文/英文显示各阶段；unknown 提示人工检查；成功文案说明遥测未验证 | `web/src/app/ServiceDeploymentsPage.tsx`、根目录 `npm run typecheck` | 通过 |
@@ -65,8 +67,8 @@ npm test --workspace web -- --runInBand
 本次已运行：
 
 - `npm --prefix runtime run typecheck`：通过。
-- `npm --prefix runtime test`：256 tests，253 passed、3 skipped、0 failed。
-- `npm test`（根目录）：runtime 256 tests（253 passed、3 skipped）、ai-runtime 71 passed、TypeScript SDK 18 passed；0 failed。
+- `npm --prefix runtime test`：串行运行 286 tests，272 passed、14 skipped、0 failed；并发运行会让时序敏感的后台生命周期测试互相争抢资源，因此脚本固定串行。
+- `npm test`（根目录）：runtime 串行 286 tests（272 passed、14 skipped）、ai-runtime 71 passed、TypeScript SDK 18 passed；0 failed。
 - 插桩专用 `node --import tsx --test runtime/test/instrumentation.test.ts`：8 passed、0 failed；AI 工具专用 `node --import tsx --test runtime/test/assistant-instrumentation-tools.test.ts`：2 passed、0 failed；部署状态/迁移专用测试通过。
 - `npm run typecheck`：runtime、ai-runtime、web 均通过。
 - `git diff --check`：通过。
@@ -77,13 +79,13 @@ npm test --workspace web -- --runInBand
 
 本轮追加切片：部署工作台仅对 ready 且含 actions/capabilities 的计划显示批准入口；管理员可取消未审批计划，或在 Agent 尚未领取时取消已批准 job。Agent 已领取后，取消请求被拒绝以避免把“取消”误解为远端进程已停止。Doca 在线副本回读状态仍需单独记录。
 
-本轮追加切片：管理员可为目标配置 systemd unit 和受控 release directory，提交独立只读 `systemd.probe` Agent job，并在工作台查看快照新鲜度。中心校验结果并去除 Agent 额外字段，绑定 target/Agent/config revision，TTL 10 分钟。该预检不启动或修改业务服务；部署计划附带预检，但由于制品上传/Agent 下载通道未实现，审批仍被拒绝。验证命令：`npm --prefix runtime run typecheck`；`npm --prefix runtime exec tsx -- --test runtime/test/agent-executor.test.ts runtime/test/agent-jobs.test.ts runtime/test/service-deployments.test.ts runtime/test/agent-job-runner.test.ts`（通过）。
+本轮追加切片：管理员可为目标配置 systemd unit 和受控 release directory，提交独立只读 `systemd.probe` Agent job，并在工作台查看快照新鲜度。中心校验结果并去除 Agent 额外字段，绑定 target/Agent/config revision，TTL 10 分钟。该预检不启动或修改业务服务；部署计划现在可绑定 ready bundle、生成 typed actions，并由 control credential + job lease 授权 Agent 下载；真实 Linux 主机仍待验证。验证命令：`npm --prefix runtime run typecheck`；`npm --prefix runtime test`（串行通过）。
 
 本轮 UI 补充：管理员可以编辑已登记目标的 systemd unit 和受控目录；预检完成后工作台展示 systemd/unit 状态、当前版本、目录存在和可写情况、有效期及安全错误码，并在平台不支持安全目录检查时显示对应提示。人工回归中的预检步骤通过 Agent `systemd.probe` job 执行，不依赖 SSH。根目录 `npm run typecheck` 和 `npm --prefix web run build` 通过。
 
 本轮安全补充：Agent 文件系统动作改用 Linux `/proc/self/fd` 锚定目录句柄并逐级 `O_NOFOLLOW`，避免路径检查后被 symlink swap；`current` 指针使用 `O_NONBLOCK` 打开并仅读取普通文件，避免 FIFO 阻塞 Agent job loop。macOS Agent 不声明安全目录检查可用，预检保持 not-ready；暂存与激活在非 Linux 平台明确拒绝。工作台区分“安全文件系统检查不支持”和“目录缺失”。
 
-本轮追加验证结果（2026-10-22）：`npm run typecheck` 通过；`npm test` 全部通过（Runtime 262 项，255 通过、7 跳过；AI Runtime 71 项；TypeScript SDK 18 项）；`npm --prefix web run build` 通过，仍有依赖包 `use client` 指令和大 chunk 警告；`git diff --check` 通过。macOS 上 Linux `/proc/self/fd` 文件操作测试（含 stage/activate 与 FIFO）按平台跳过，本机不能验证真实 Linux systemd。Doca 回读未完成：本环境 Doca MCP 没有暴露 resource/template，在线文档提示目标资源不存在或无权访问；本轮架构增量仍未同步，不能标记完成。
+本轮追加验证结果（2026-10-22）：`npm run typecheck` 通过；runtime 串行全量 272 通过、14 跳过、0 失败；release bundle、artifact API/store 和安全路径负向测试通过；`npm --prefix web run build` 通过，仍有依赖包 `use client` 指令和大 chunk 警告；`git diff --check` 通过。macOS 上 Linux `/proc/self/fd` 文件操作测试（含 stage/activate、FIFO、权限祖先检查）按平台跳过，本机不能验证真实 Linux systemd。上传校验失败的 blob 会立即清理；孤儿/中断 partial 的后台 GC、存储配额和解析并发门控仍待后续硬化。Doca 回读未完成：本环境 Doca 页面提示“文档不存在 / 资源不存在或无权访问”，本轮架构增量仍未同步，不能标记完成。
 
 - deployment adapter unit tests（合法/非法路径、摘要、健康检查、rollback）及 service deployment 状态迁移/审批/事件测试；
 - deployment verification tests（服务/实例归属、UTC 窗口、deadline、样本上限和健康但遥测未验证）；
@@ -108,7 +110,8 @@ npm test --workspace web -- --runInBand
 
 - [x] 代码只在功能分支，目标为 `main`，没有直接推送主干。
 - [x] SDD 任务状态和实现一致；未实现 provider 明确列在限制中。
-- [ ] `docs/system-design.md` 已在本轮更新；Doca 本轮增量因目标页面显示“资源不存在或无权访问”未完成，恢复访问并完成回读前不能关闭此发布门。
+- [x] `docs/system-design.md` 与 SDD/contracts 已同步本轮架构；Doca 对应图块增量因目标页面显示“资源不存在或无权访问”未完成。
+- [ ] Doca 图块已写入并回读节点和连线；当前访问受阻，恢复权限后补齐并更新本 PR。
 - [ ] 管理员审批、secret 脱敏、SSH 清理提示和错误码均有 UI/AI 展示。
-- [x] 根目录 `npm test` 和 `npm run typecheck` 通过；Agent 只读 preflight 已实现并由 mock systemctl 覆盖，真实 Linux 主机验证、构建/制品分发、中心遥测验证及最终回滚仍待实现。
+- [x] 根目录 `npm test` 和 `npm run typecheck` 通过；Agent 只读 preflight、release bundle 上传/下载/安全解包与 systemd typed actions 已实现并由测试覆盖，真实 Linux 主机验证、受控源码构建、中心遥测验证及最终回滚仍待实现。
 - [x] PR #25 已创建并保持待审核；未经用户明确授权不合并。

@@ -210,10 +210,10 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 
 1. 管理员为业务服务提供已授权的源码 workspace；AI 先调用只读 `scan_sdk_instrumentation`，识别语言、框架、LightMoni SDK、直连/Agent 模式和候选请求/错误边界。
 2. 扫描不导入或执行业务代码，也不写文件。对于可以明确定位的 TypeScript/JavaScript 多行请求边界，AI 调用只读 `propose_sdk_instrumentation` 生成结构化 unified diff、风险、手动步骤和验证命令；Python、Go、Rust、Ruby 或歧义边界只给手动步骤。复杂改写才交给隔离 workspace 的 `code_task`，同样只产生可审阅 diff；所有 diff 都必须经过管理员确认后才应用。
-3. 已确认的 revision 经过受控构建生成带版本、架构、来源 revision 和 SHA-256 的 release。中心只保存 release 元数据和受控引用，生产 Agent 不接收源码仓库凭据或模型密钥。
-4. 管理员为 service 创建一个或多个 service target，登记 systemd unit 与受控 release directory。MVP 的 `systemd` 适配器覆盖 Node、Python、Go、Rust、二进制和解释器服务；语言不是部署协议。Docker Compose、Kubernetes/Helm 和 CI/GitOps 作为后续适配器。
-5. 管理员可请求目标 Agent 执行 `systemd.probe` 只读预检。Job 仅检查绑定的 unit 与 release directory，通过固定参数调用 systemctl show 并读取版本指针状态；输出限定为状态枚举、布尔值、安全版本标识、观测时间、一次性请求 ID、目标配置 revision 和固定错误码，不回传原始命令输出，也不创建目录或改变服务。Agent 和中心校验请求 ID/revision 与观测时间，阻止跨 job 快照重放；路径含符号链接、unit 被 masked 或处于启动/停止过渡态时不标记 ready。文件系统检查仅在支持通过固定目录句柄拒绝符号链接的平台启用；当前实现为 Linux Agent，其他平台报告 `filesystem_check_supported=false` 且不就绪。中心按 target/operation 保存快照，部署计划可附最近 10 分钟且 ready 的预检结果。没有预检、预检过期或快照未就绪都不能得到可执行动作。
-6. 中心执行 `probe → plan → apply → verify → rollback` 的受控计划层，生成 `awaiting_approval` 部署计划。计划只包含 typed actions，不包含 shell 字符串；管理员审批前中心要求可执行 actions 和带能力授权的 health_check，随后原子写入不可变 Agent job 并把部署推进到 `agent_ready`。当前制品仍只有来源和摘要元数据，未实现受控上传与 Agent 下载，因此即使主机预检通过，计划也不能凭空得到可执行 artifact actions；审批 API 会安全拒绝通用计划。Agent 安装与业务部署分别记录，Agent 未激活时不能进入业务执行阶段。
+3. 已确认的 revision 目标上由隔离构建器生成带版本、架构、来源 revision 和 SHA-256 的 release；构建器尚未实现前，systemd MVP 允许管理员上传预构建的 `lightmoni-release-v1.tar.gz`。Manifest 至少包含 `schema_version`、`service_id`、`version`、`architecture`、`source_revision` 和固定 `entrypoint:"run"`。中心只保存元数据与私有 digest-addressed 正文，不能从静态下载路由取到业务制品；生产 Agent 不接收源码仓库凭据或模型密钥。
+4. 管理员为 service 创建一个或多个 service target，登记 systemd unit 与受控 release directory。release 根目录由 root 持有并属于 `lightmoni-agent` 组（建议 `0775`，业务服务用户只读且可遍历）；Agent 的 `ProtectSystem=strict` 沙箱需把该精确目录加入 `ReadWritePaths`。unit 必须预先配置稳定入口 `ExecStart=<release_directory>/current/run`；LightMoni Agent 不编辑任意 unit、环境文件或服务用户。release bundle 只放运行所需文件，不能放密钥或环境凭据。MVP 的 `systemd` 适配器覆盖 Node、Python、Go、Rust、二进制和解释器服务；语言不是部署协议。Docker Compose、Kubernetes/Helm 和 CI/GitOps 作为后续适配器。
+5. 管理员可请求目标 Agent 执行 `systemd.probe` 只读预检。Job 仅检查绑定的 unit 与 release directory，通过固定参数读取 systemd 属性和版本指针；输出限定为状态枚举、布尔值、安全版本标识、观测时间、一次性请求 ID、目标配置 revision 和固定错误码，不回传原始命令输出，也不创建目录或改变服务。Agent 确认 `ExecStart` 精确使用登记路径下的 `current/run`；中心校验请求 ID/revision 与观测时间，阻止跨 job 快照重放；路径含符号链接、unit 不符合入口、被 masked 或处于启动/停止过渡态时不标记 ready。文件系统检查仅在支持通过固定目录句柄拒绝符号链接的平台启用；当前实现为 Linux Agent，其他平台报告 `filesystem_check_supported=false` 且不就绪。中心按 target/operation 保存快照，部署计划可附最近 10 分钟且 ready 的预检结果。没有预检、预检过期或快照未就绪都不能得到可执行动作。
+6. 中心执行 `probe → plan → apply → verify → rollback` 的受控计划层，生成 `awaiting_approval` 部署计划。计划只包含 typed actions，不包含 shell 字符串；管理员审批前中心要求 release ready、目标快照新鲜且 ready、manifest 与目标匹配，以及带能力授权的 health_check，随后原子写入不可变 Agent job 并把部署推进到 `agent_ready`。制品上传只允许管理员认证的有界接口；Agent 下载只允许 control credential、当前 lease 和 action 绑定的 agent/release/digest 同时匹配，不接受任意 URL，秘密不进 URL。
 7. Agent executor 通过 control credential 拉取短时租约 job。中心后台定期处理过期任务，按单调序号接收阶段事件，并将 staging/activating/verifying/final receipt 映射到脱敏部署时间线。只有 verifying 后的最终回执包含 `health.healthy=true` 才标记业务 deployment `succeeded`；未领取 job 可以安全取消或过期取消，已领取任务取消、租约过期或成功回执不完整时保留 `unknown`，要求重新检查目标主机。此状态仅表示 Agent 报告计划内健康检查通过，中心 ClickHouse 遥测验证仍单独显示未验证。
 
 部署的执行和结果状态通过两条控制通道形成闭环：
@@ -222,6 +222,7 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 sequenceDiagram
   participant Admin as 管理员
   participant Center as LightMoni 中心
+  participant Artifact as 私有制品存储
   participant Agent as LightMoni Agent
   participant Host as 业务主机/systemd
   Admin->>Center: 请求 systemd.probe 只读预检
@@ -231,13 +232,21 @@ sequenceDiagram
   Agent->>Host: 固定 argv systemctl show + 读取受控 current 指针
   Agent->>Center: 固定字段 preflight snapshot（不含原始输出）
   Center->>Center: 校验 Agent/target revision，保存 10 分钟快照
-  Admin->>Center: 基于新鲜快照生成服务部署计划
-  Center->>Center: 检查 typed actions 和 artifact 引用
-  Note over Center: 制品上传/Agent 下载未接入前不生成可审批写动作
+  Admin->>Center: 上传已构建的 release bundle
+  Center->>Center: 校验 SHA-256、manifest、大小与 USTAR 路径
+  Center->>Artifact: 原子保存到私有 digest-addressed 存储
+  Admin->>Center: 基于新鲜快照和 ready release 生成服务计划
+  Center->>Center: 绑定 previous version、typed actions 和 artifact 引用
   Admin->>Center: 审批带 health_check 的 typed plan
   Center->>Center: 原子创建 job 与 agent_ready 状态
   Agent->>Center: HTTPS claim（control credential）
   Center-->>Agent: 不可变 actions、capabilities、lease
+  Agent->>Center: control credential + job lease 请求制品
+  Center->>Center: 校验 agent/job/lease/release/digest 绑定
+  Center->>Artifact: 读取制品流
+  Artifact-->>Agent: gzip USTAR bytes + digest/size headers
+  Agent->>Agent: 校验 SHA-256 并安全解包到 releases/<version>
+  Agent->>Agent: CAS previous version，原子 current symlink 切换
   Agent->>Center: accepted/staging/activating/verifying 事件
   Center->>Center: 校验序号与阶段，追加脱敏部署时间线
   Agent->>Host: allow-list 部署和健康检查动作
@@ -255,7 +264,9 @@ sequenceDiagram
   end
 ```
 
-当前切片持久化 service、target、release、deployment 元数据及脱敏 `deployment_events`，提供 `awaiting_approval` 计划、管理员 approve、Agent 回执驱动的阶段/终态映射、事件查询和 `rollback_pending` 提案。Agent 新增独立只读 `systemd.probe` job，目标 unit、release directory、Agent identity、target config revision 与一次性 preflight ID 绑定；结果只含结构化状态，不含原始命令输出，有效期从 Agent 实际观测时间起算且最多 10 分钟。Linux Agent 通过固定目录句柄和 `O_NOFOLLOW` 执行路径检查、暂存与版本切换；其他平台不允许文件系统预检标 ready 或执行制品写操作。符号链接路径、masked/过渡态 unit 和旧 job 快照均不能得到 ready 结果。预检不会修改主机或推进业务 deployment 状态。管理员可以取消尚未审批的计划；已批准计划只有在 Agent 尚未领取 job 时才允许安全取消，若 Agent 已领取则拒绝取消并保留主机状态复核边界。`runtime/src/server/agent-jobs.ts` 提供 claim/lease、严格递增且阶段单调的事件序号、结果、取消和租约过期 `unknown` 恢复；`runtime/src/agent/executor.ts` 执行 capability allow-list，`runtime/src/agent/jobs.ts` 负责拉取、回执和重启恢复。预检通过仍不能生成可执行部署动作，因为受控构建/制品分发尚未接入，审批 API 会拒绝空动作计划。`verification.ts` 提供固定服务/实例、窗口、deadline 和样本上限的中心侧健康/遥测证据判定，但真实 ClickHouse 验证、自动目标复核、最终 `rolled_back` 状态、受控构建/制品分发和生产签名校验仍待后续切片。因此页面和 AI 不能把“预检通过”“已批准”或“已入队”当作业务已部署；`succeeded` 仅说明 Agent 报告计划内 health_check 通过，不能代表遥测已验证。
+当前代码已持久化 service、target、release、deployment 元数据及脱敏 `deployment_events`，提供 `awaiting_approval` 计划、管理员 approve、Agent 回执状态映射、事件查询和 `rollback_pending` 提案。Agent 的只读 `systemd.probe` job 将目标配置 revision 与一次性 preflight ID 绑定，有效期最多 10 分钟；Agent 校验 `ExecStart=<release_directory>/current/run`，并以受控 bundle 的相对 symlink 维护 `current`。本轮已接入制品私有存储、管理员上传、control credential + job lease 绑定下载、USTAR 校验、安全解包和 systemd typed actions；没有 ready bundle、预检或 typed actions 的计划仍被审批 API 拒绝。
+
+本轮将 bundle 限定为 gzip USTAR，要求 manifest 与可执行 `run`，只允许普通文件和目录；中心私有保存 digest 正文，Agent 下载须经 control credential + 当前 job lease + release/digest 匹配。Agent 在摘要验证后安全解包，并通过 CAS 与原子相对 symlink 将 `current` 指向 `releases/<version>`；目标 unit 由管理员预先配置为 `current/run`。受控源码构建、真实 ClickHouse 遥测查询、自动补偿、最终回滚回执、生产签名、存储 GC/配额和 Linux 主机验收仍待后续切片。页面与 AI 不得把“预检通过”“已批准”或“已入队”当作业务已部署；`succeeded` 仅说明 Agent 报告计划内 health_check 通过，不能代表遥测已验证。
 
 ## 8. 中心服务 HLD/LLD
 
@@ -300,6 +311,8 @@ shared (SQLite, ClickHouse, OTLP, crypto, JSON, time)
 | `/api/v1/agents/:id/heartbeat` | 节点心跳/配置通道 | Agent control credential |
 | `/api/v1/machines/*` | 受管主机、SSH、部署计划 | 管理员 |
 | `/api/v1/services/*` | 业务服务、服务目标、制品版本和审核计划 | 管理员 |
+| `/api/v1/services/:serviceId/releases/:releaseId/artifact` | 有界上传预构建 release bundle；正文进入私有存储 | 管理员 |
+| `/api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId` | lease 与 release/digest 绑定的私有制品下载 | Agent control credential + job lease |
 | `/api/v1/deployments/:id` | 脱敏部署计划/状态/回执查询 | 管理员 |
 | `/api/v1/deployments/:id/events` | 脱敏部署状态事件时间线 | 管理员 |
 | `/api/v1/deployments/:id/cancel` | 取消未审批部署或尚未领取的 Agent job；已领取任务拒绝取消 | 管理员 |
@@ -588,7 +601,7 @@ docker compose up -d --build --wait
 - 中心和 Agent 使用 Node.js/TypeScript；Web 使用 React/TypeScript；AI runtime 使用 Mastra。
 - SDK、Agent、中心共享 OTLP 和公共 TypeScript 类型；Agent 使用同一个 TypeScript SDK 做内部指标和 exporter。
 - 节点标签/任务、Agent enrollment、control/data 凭据、主机 SSH 预检、部署计划和网页终端均有对应特性 SDD。
-- SDD 021 已加入业务服务/目标/发布元数据、只读 SDK 插桩扫描、受限 TS/JS 结构化插桩提案、管理员确认后的安全 apply、中心部署状态迁移/审批/事件/回滚提案、Agent job/租约协议、MVP capability executor/runner 和 AI 部署计划工具。approve 要求带授权 capability 的 health_check 并创建不可变 job；Agent 的有序阶段回执、健康成功证据、取消和 unknown 结果已联动部署状态。Agent 可通过隔离的 `systemd.probe` job 对登记目标做只读主机预检，中心保存绑定目标配置 revision 的 10 分钟快照；它不会改变主机或推进部署状态。通用部署计划尚未生成 typed actions，故默认计划仍会被安全拒绝；受控构建/制品分发、中心 ClickHouse 遥测闭环、自动目标复核、最终回滚和 Docker/Kubernetes 适配器均未完成。
+- SDD 021 已加入业务服务/目标/发布元数据、只读 SDK 插桩扫描、受限 TS/JS 结构化插桩提案、管理员确认后的安全 apply、中心部署状态迁移/审批/事件/回滚提案、Agent job/租约协议、MVP capability executor/runner 和 AI 部署计划工具。approve 要求带授权 capability 的 health_check 并创建不可变 job；Agent 的有序阶段回执、健康成功证据、取消和 unknown 结果已联动部署状态。Agent 可通过隔离的 `systemd.probe` job 对登记目标做只读主机预检，中心保存绑定目标配置 revision 的 10 分钟快照；它不会改变主机或推进部署状态。本轮已落地 release bundle 格式、私有存储和 job-scoped 下载、受限解包、current symlink 激活和 systemd typed actions；真实 ClickHouse 遥测闭环、自动目标复核、最终回滚、源码构建、签名、GC/配额、Linux 主机验收和 Docker/Kubernetes 适配器仍未完成。
 - AI 具备目录、查询、日志、告警读取、可审阅草稿、SDK 插桩提案、业务部署状态/事件读取、Pi 代码任务和模型用量/连接测试设计。
 - 告警规则、静默、值班、通知 outbox 和现场取证由中心域模块负责。
 

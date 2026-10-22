@@ -1,6 +1,6 @@
 # SDD 021：Agent Job 与执行器契约
 
-> 本文件是 Agent 执行协议契约。当前分支已提供中心侧 job claim/lease/event/result/cancel API、最小 capability executor、Agent 重启 unknown 回执、只读 systemd preflight 和 Agent 结果到业务 deployment 的脱敏状态映射；签名 job、中心遥测验证、自动目标复核和最终回滚仍未接入。`preflighting` 是只读检查阶段，不能推进 service deployment 状态；`agent_ready` 表示业务 job 等待执行；业务 deployment `succeeded` 只代表 Agent 报告计划内 health_check 通过。
+> 本文件是 Agent 执行协议契约。当前分支已提供中心侧 job claim/lease/event/result/cancel API、最小 capability executor、Agent 重启 unknown 回执、只读 systemd preflight、私有制品下载/安全解包/版本 symlink 激活和 Agent 结果到业务 deployment 的脱敏状态映射；签名 job、中心遥测验证、自动目标复核和最终回滚尚未接入。`preflighting` 是只读检查阶段，不能推进 service deployment 状态；`agent_ready` 表示业务 job 等待执行；业务 deployment `succeeded` 只代表 Agent 报告计划内 health_check 通过。
 
 ## Job 拉取与租约
 
@@ -10,6 +10,7 @@ Agent 使用 control credential 调用中心：
 - `POST /api/v1/agents/:id/jobs/:job_id/events`：发送阶段事件，支持幂等 sequence。
 - `POST /api/v1/agents/:id/jobs/:job_id/result`：提交最终成功/失败回执。
 - `POST /api/v1/agents/:id/jobs/:job_id/cancel`：中心取消未开始或可中止 job。
+- `GET /api/v1/agents/:agent_id/jobs/:job_id/artifacts/:release_id`：仅在 control credential 认证通过、`X-LightMoni-Job-Lease` 有效且该 job 的不可变 action 明确引用此 release/digest 时流式下载一个私有制品。不接受任意 URL；lease 不放在 URL。
 
 Job 结构（当前中心返回的 `actions`、`target` 和能力集合保持不可变；`sha256` 签名字段待后续接入）：
 
@@ -60,13 +61,13 @@ Job 结构（当前中心返回的 `actions`、`target` 和能力集合保持不
 
 MVP capability：
 
-- `artifact.stage`：只写入 target.releaseDirectory 下的 immutable release 目录，复制后核对 SHA-256。
-- `artifact.activate_release`：只切换 target.releaseDirectory 下已暂存的版本指针；不得接受任意目录或版本。
+- `artifact.stage`：以 job ID/release ID 通过受控中心通道取制品；校验压缩包 SHA-256 和长度后，只向 target.releaseDirectory 下的新 immutable release 目录解包。只接受受限 USTAR gzip、根目录固定 `manifest.json` 与可执行 `run`；压缩 ≤64 MiB、解压 ≤256 MiB、条目 ≤10,000，只允许普通文件和目录，拒绝 link/device/PAX/GNU extension、路径逃逸和重复项。
+- `artifact.activate_release`：校验目标已登记的 `releaseDirectory`、已暂存版本及当前版本仍等于计划绑定的 `expectedCurrentVersion`，仅切换受控 current symlink；不得接受任意目录或版本。
 - `systemd.daemon_reload`、`systemd.enable`、`systemd.start`、`systemd.restart`、`systemd.stop`：只作用于 target 登记的 unit。
 - `health.systemd`、`health.http`、`health.tcp`：固定超时和并发，禁止带凭据的 URL。
 - `systemd.probe`：单独 job 中只读检查 action 登记且与 target 精确一致的 systemd unit 和 release directory；只报告 systemd 可用性、unit load/active/enabled 状态、目录存在/可写布尔值、安全版本标识、观测时间、一次性 preflight ID 与目标配置 revision。Agent 不返回原始命令输出、不创建目录、不改变 unit 状态；路径穿过符号链接时预检不就绪。只有 `active`/`inactive` 且 unit 未 masked、目录存在且可写时才返回 `ready=true`。
 
-Linux Agent 使用 `/proc/self/fd` 锚定已打开目录句柄并在逐级路径解析中拒绝符号链接；主机上的暂存与版本切换只在 Linux 提供这类安全文件操作的平台执行。macOS 上可开发和运行只读协议测试，但预检的 `filesystem_check_supported=false`、`ready=false`，暂存/切换明确返回 `unsupported_platform`。真实部署执行需在 Linux Agent 上验证。
+Linux Agent 使用 `/proc/self/fd` 锚定已打开目录句柄并在逐级路径解析中拒绝符号链接；主机上的暂存与版本切换只在 Linux 提供这类安全文件操作的平台执行。`current` 是相对 symlink `releases/<version>`，Agent 先在同一受控目录创建临时 symlink，再原子 rename；systemd unit 必须由管理员预先配置 `ExecStart=<releaseDirectory>/current/run`，Agent 通过固定只读属性检查确认该入口，不修改 unit。macOS 上可开发和运行只读协议测试，但预检的 `filesystem_check_supported=false`、`ready=false`，暂存/切换明确返回 `unsupported_platform`。真实部署执行需在 Linux Agent 上验证。
 
 预检 action：
 

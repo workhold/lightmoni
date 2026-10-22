@@ -55,6 +55,8 @@ export interface AgentJobStore {
   /** Cancel only an unclaimed job belonging to this deployment operation. */
   cancelQueuedDeployment(deploymentID: string, operationID: string, actor: string): Record<string, any>;
   get(jobID: string): Record<string, any>;
+  /** Authorize one private release read against the live Agent lease and immutable deployment action. */
+  authorizeArtifact(ctx: Context, agentID: string, jobID: string, releaseID: string): { sha256: string; size: number };
   /** Internal synchronous observer; invoked inside the job's SQLite transaction. */
   onUpdate(listener: (update: AgentJobUpdate) => void): () => void;
 }
@@ -90,6 +92,7 @@ const preflightSnapshot = (input: any, job: any, now: Date) => {
   const value = input?.preflight;
   if (!value || value.provider !== "systemd" || typeof value.ready !== "boolean"
     || typeof value.systemd_available !== "boolean" || typeof value.unit_exists !== "boolean"
+    || typeof value.entrypoint_matches !== "boolean" || typeof value.current_pointer_valid !== "boolean"
     || typeof value.filesystem_check_supported !== "boolean"
     || typeof value.release_directory_exists !== "boolean" || typeof value.release_directory_writable !== "boolean"
     || !(value.enabled === true || value.enabled === false || value.enabled === "unknown")
@@ -103,13 +106,15 @@ const preflightSnapshot = (input: any, job: any, now: Date) => {
     || !Number.isFinite(createdAt) || observedAt < createdAt - 60_000 || observedAt > now.getTime() + 60_000) return undefined;
   const ready = value.filesystem_check_supported && value.systemd_available && value.unit_exists && ["active", "inactive"].includes(value.active_state)
     && !["masked", "masked-runtime"].includes(value.unit_file_state)
-    && value.release_directory_exists && value.release_directory_writable;
+    && value.release_directory_exists && value.release_directory_writable
+    && value.entrypoint_matches && value.current_pointer_valid;
   if (value.ready !== ready) return undefined;
   return {
     health: { healthy: true },
     preflight: {
       provider: "systemd", ready, systemd_available: value.systemd_available,
       unit_exists: value.unit_exists, active_state: value.active_state, enabled: value.enabled, unit_file_state: value.unit_file_state,
+      entrypoint_matches: value.entrypoint_matches, current_pointer_valid: value.current_pointer_valid,
       release_directory_exists: value.release_directory_exists,
       filesystem_check_supported: value.filesystem_check_supported, release_directory_writable: value.release_directory_writable,
       current_version: value.current_version, observed_at: new Date(value.observed_at).toISOString(),
@@ -466,6 +471,41 @@ export function registerAgentJobs(
     });
     return view(row(current.id));
   };
+  const authorizeArtifact = (ctx: Context, agentID: string, jobID: string, releaseID: string) => {
+    authenticate(ctx, agentID);
+    const leaseID = String(ctx.req.headers["x-lightmoni-job-lease"] ?? "").trim();
+    if (!leaseID) fail(401, "agent job lease is required");
+    const current = leaseRow(agentID, jobID, leaseID);
+    if (current.state !== "staging" || Date.parse(current.expires_at) <= deps.now().getTime())
+      fail(409, "agent job is not staging an artifact");
+    let actionList: any[];
+    let caps: string[];
+    try {
+      actionList = JSON.parse(current.actions_json || "[]");
+      caps = JSON.parse(current.capabilities_json || "[]");
+    } catch {
+      fail(409, "agent job artifact action is invalid");
+    }
+    const action = actionList.find((candidate) => candidate?.kind === "stage_artifact" && candidate?.release_id === releaseID);
+    if (!action || !caps.includes("artifact.stage")
+      || typeof action.service_id !== "string" || typeof action.sha256 !== "string"
+      || !/^[a-f0-9]{64}$/i.test(action.sha256) || !Number.isSafeInteger(action.size) || action.size < 1)
+      fail(403, "agent job does not authorize this artifact");
+    const binding = db.get<any>(
+      `SELECT d.service_id,d.release_id,t.machine_id,m.agent_id,r.artifact_digest,r.artifact_size,r.status
+       FROM deployments d
+       JOIN service_targets t ON t.id=d.target_id AND t.service_id=d.service_id
+       JOIN managed_machines m ON m.id=t.machine_id
+       JOIN releases r ON r.id=d.release_id AND r.service_id=d.service_id
+       WHERE d.id=?`,
+      current.deployment_id,
+    );
+    if (!binding || binding.agent_id !== agentID || binding.service_id !== action.service_id
+      || binding.release_id !== releaseID || binding.status !== "ready"
+      || binding.artifact_digest !== action.sha256.toLowerCase() || Number(binding.artifact_size) !== action.size)
+      fail(403, "agent job artifact binding is invalid");
+    return { sha256: binding.artifact_digest, size: Number(binding.artifact_size) };
+  };
   const safe = (handler: Handler): Handler => async (ctx) => {
     try { await handler(ctx); } catch (error) {
       if (error instanceof HTTPError) ctx.json({ error: error.message }, error.status);
@@ -497,7 +537,7 @@ export function registerAgentJobs(
     ctx.json(cancel(ctx.params.jobId, ctx.user.id + (value.reason ? ": " + text(value.reason, "reason", 256, false) : "")));
   }));
   return {
-    enqueue, claim, event, result, cancel, cancelQueuedDeployment, get: (jobID: string) => view(row(jobID)),
+    enqueue, claim, event, result, cancel, cancelQueuedDeployment, get: (jobID: string) => view(row(jobID)), authorizeArtifact,
     start() {
       if (sweepTimer) return;
       sweepTimer = setInterval(() => {

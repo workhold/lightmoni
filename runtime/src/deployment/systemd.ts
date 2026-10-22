@@ -40,9 +40,12 @@ function validateTarget(target: ServiceTarget): DeploymentIssue[] {
 function validateSpec(spec: ServiceSpec): DeploymentIssue[] {
   const issues = validateTarget(spec.target);
   if (!spec.serviceId || spec.serviceId.length > 128) issues.push(issue("invalid_target", "service id is required"));
+  if (!spec.artifact.release_id || spec.artifact.release_id.length > 128) issues.push(issue("invalid_artifact", "artifact release id is invalid"));
+  if (spec.artifact.service_id !== spec.serviceId) issues.push(issue("invalid_artifact", "artifact service binding is invalid"));
   if (!VERSION.test(spec.artifact.version)) issues.push(issue("invalid_artifact", "artifact version is invalid"));
+  if (!new Set(["any", "linux-amd64", "linux-arm64"]).has(spec.artifact.architecture)) issues.push(issue("invalid_artifact", "artifact architecture is invalid"));
   if (!SHA256.test(spec.artifact.sha256)) issues.push(issue("invalid_artifact", "artifact sha256 must be a hex digest"));
-  if (!validPath(spec.artifact.source)) issues.push(issue("invalid_artifact", "artifact source must be an absolute path"));
+  if (!Number.isSafeInteger(spec.artifact.size) || spec.artifact.size < 1 || spec.artifact.size > 64 * 1024 * 1024) issues.push(issue("invalid_artifact", "artifact size is invalid"));
   for (const check of spec.healthChecks ?? []) {
     if (check.kind === "http") {
       try {
@@ -113,9 +116,17 @@ export class SystemdDeploymentAdapter implements DeploymentAdapter {
     }
     const destination = releasePath(input.spec.target, input.spec.artifact.version);
     const apply: DeploymentAction[] = [
-      { kind: "stage_artifact", source: input.spec.artifact.source, destination, sha256: input.spec.artifact.sha256 },
-      { kind: "activate_release", releaseDirectory: input.spec.target.releaseDirectory, version: input.spec.artifact.version },
-      { kind: "systemd", operation: "daemon-reload", unit: input.spec.target.unit },
+      {
+        kind: "stage_artifact",
+        release_id: input.spec.artifact.release_id,
+        service_id: input.spec.serviceId,
+        version: input.spec.artifact.version,
+        architecture: input.spec.artifact.architecture,
+        destination: `releases/${input.spec.artifact.version}`,
+        sha256: input.spec.artifact.sha256,
+        size: input.spec.artifact.size,
+      },
+      { kind: "activate_release", releaseDirectory: input.spec.target.releaseDirectory, version: input.spec.artifact.version, expectedCurrentVersion: input.probe.snapshot.currentVersion ?? "" },
       ...(input.spec.enableOnBoot ? [{ kind: "systemd", operation: "enable", unit: input.spec.target.unit } as const] : []),
       { kind: "systemd", operation: input.probe.snapshot.activeState === "active" ? "restart" : "start", unit: input.spec.target.unit },
     ];
@@ -125,9 +136,8 @@ export class SystemdDeploymentAdapter implements DeploymentAdapter {
     // an operator to inspect and retry safely; activation is the reversible bit.
     const rollback: DeploymentAction[] = [
       ...(input.probe.snapshot.currentVersion
-        ? [{ kind: "activate_release", releaseDirectory: input.spec.target.releaseDirectory, version: input.probe.snapshot.currentVersion } as const]
+        ? [{ kind: "activate_release", releaseDirectory: input.spec.target.releaseDirectory, version: input.probe.snapshot.currentVersion, expectedCurrentVersion: input.spec.artifact.version } as const]
         : []),
-      { kind: "systemd", operation: "daemon-reload", unit: input.spec.target.unit },
       { kind: "systemd", operation: input.probe.snapshot.activeState === "active" ? "restart" : "stop", unit: input.spec.target.unit },
     ];
     return {
@@ -137,7 +147,14 @@ export class SystemdDeploymentAdapter implements DeploymentAdapter {
       targetId: input.spec.target.id,
       state: "awaiting_approval",
       version: input.spec.artifact.version,
-      artifact: { source: input.spec.artifact.source, version: input.spec.artifact.version, sha256: input.spec.artifact.sha256 },
+      artifact: {
+        release_id: input.spec.artifact.release_id,
+        service_id: input.spec.serviceId,
+        version: input.spec.artifact.version,
+        architecture: input.spec.artifact.architecture,
+        sha256: input.spec.artifact.sha256,
+        size: input.spec.artifact.size,
+      },
       previous: {
         currentVersion: input.probe.snapshot.currentVersion,
         currentArtifact: input.probe.snapshot.currentArtifact,

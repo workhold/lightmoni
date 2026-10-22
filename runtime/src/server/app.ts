@@ -28,6 +28,7 @@ import { registerMachineTerminal } from "./machine-terminal.js";
 import { registerManagedMachines } from "./managed-machines.js";
 import { registerServiceDeployments } from "./service-deployments.js";
 import { registerAgentJobs } from "./agent-jobs.js";
+import { ReleaseArtifactStore } from "../deployment/artifact-store.js";
 import { registerAssistant } from "../assistant/index.js";
 import { registerDashboards } from "../domains/dashboards.js";
 import { registerLogs } from "../domains/logs.js";
@@ -116,7 +117,8 @@ export async function createApp(cfg: Config) {
     registerSettings(deps, agentCredentials);
     // Service delivery metadata is intentionally separate from Agent bootstrap
     // records: plans can be reviewed before an Agent executes them.
-    const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs });
+    const releaseArtifacts = new ReleaseArtifactStore(join(cfg.dataDir, "release-artifacts"));
+    const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs, artifacts: releaseArtifacts });
     modules.push(serviceDeployments);
     const ingest = new Ingest(cat, auth, (...args) =>
       monitor?.accepted(...args),
