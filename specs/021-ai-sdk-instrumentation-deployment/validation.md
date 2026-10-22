@@ -1,6 +1,6 @@
 # SDD 021：验证记录
 
-> 记录截至 2026-10-22。验证结果覆盖中心部署状态/审批、Agent 回执闭环、受限 job/executor、只读 systemd preflight、release bundle 传输、计划层和扫描切片，不代表真实 Linux 主机部署或遥测闭环已经完成。
+> 记录截至 2026-10-23。验证结果覆盖中心部署状态/审批、Agent 回执闭环、受限 job/executor、只读 systemd preflight、release bundle 传输、计划层和扫描切片，不代表真实 Linux 主机部署或遥测闭环已经完成。
 
 ## 验收范围
 
@@ -13,7 +13,7 @@
 - [x] `tasks.md` 将实现拆分为有依赖关系的任务，并标注当前状态。
 - [x] `contracts/` 定义 HTTP/AI、适配器、Agent job 和插桩契约。
 - [x] `docs/system-design.md` 已更新只读 preflight → 目标配置 revision → 部署计划控制路径、制品传输边界和 Mermaid 时序图。
-- [ ] Doca 基线图此前已同步；本轮 bundle 上传/租约下载/current symlink/目录权限控制路径增量尚未同步。浏览器回读返回“文档不存在 / 资源不存在或无权访问”，当前环境也没有 Doca MCP resource/template，因此不能标记完成；需恢复访问后回读文本、节点和连线。
+- [ ] Doca 基线图此前已同步；本轮 bundle 上传/租约下载/current symlink/目录权限控制路径增量尚未同步。2026-10-23 检查确认 Codex CLI 配置了 Doca MCP endpoint，但当前执行环境没有对应 bearer-token 运行时凭据，浏览器仍返回“文档不存在 / 资源不存在或无权访问”；本轮未向 Doca 写入，不能标记完成。恢复安全凭据后须读取最新版本、保留原生图块，写入后回读文本、节点和连线。
 
 ## 功能验收矩阵
 
@@ -86,7 +86,7 @@ git diff --check
 
 本轮安全补充：Agent 文件系统动作改用 Linux `/proc/self/fd` 锚定目录句柄并逐级 `O_NOFOLLOW`，避免路径检查后被 symlink swap；`current` 指针使用 `O_NONBLOCK` 打开并仅读取普通文件，避免 FIFO 阻塞 Agent job loop。macOS Agent 不声明安全目录检查可用，预检保持 not-ready；暂存与激活在非 Linux 平台明确拒绝。工作台区分“安全文件系统检查不支持”和“目录缺失”。
 
-本轮既有验证结果（2026-10-22）：`npm run typecheck` 通过；runtime 串行全量 272 通过、14 跳过、0 失败；release bundle、artifact API/store 和安全路径负向测试通过；`npm --prefix web run build` 通过，仍有依赖包 `use client` 指令和大 chunk 警告；`git diff --check` 通过。macOS 上 Linux `/proc/self/fd` 文件操作测试（含 stage/activate、FIFO、权限祖先检查）按平台跳过，本机不能验证真实 Linux systemd。Doca 回读未完成：本环境 Doca 页面提示“文档不存在 / 资源不存在或无权访问”，在线设计增量仍未同步，不能标记完成。
+本轮既有验证结果（2026-10-22）：`npm run typecheck` 通过；runtime 串行全量 272 通过、14 跳过、0 失败；release bundle、artifact API/store 和安全路径负向测试通过；`npm --prefix web run build` 通过，仍有依赖包 `use client` 指令和大 chunk 警告；`git diff --check` 通过。macOS 上 Linux `/proc/self/fd` 文件操作测试（含 stage/activate、FIFO、权限祖先检查）按平台跳过，本机不能验证真实 Linux systemd。Doca 回读未完成；2026-10-23 的访问检查确认当前运行环境没有 bearer-token 凭据，在线设计增量仍未同步，不能标记完成。
 
 本轮补充：release 根目录预检及执行现要求 root 所有、Agent 所属组有写权限、其他用户可读/遍历但不可写；失败的格式或 manifest 上传不再按共享 digest 立即删除，避免破坏其他 ready release。新增同 digest 误传回归测试。回滚结果未知会结束当前操作并保留 unknown receipt；管理员必须检查主机并通过较新的安全 preflight 后才能显式重试。普通部署 job 不得跳过 staging，阶段跳过例外只适用于固定 rollback action 组合。本机 macOS 不执行 Linux 目录句柄测试，必须由 root 权限 Linux CI/实机验证该权限门。
 
@@ -115,8 +115,8 @@ git diff --check
 
 - [x] 代码只在功能分支，目标为 `main`，没有直接推送主干。
 - [x] SDD 任务状态和实现一致；未实现 provider 明确列在限制中。
-- [x] `docs/system-design.md` 与 SDD/contracts 已同步本轮架构；Doca 对应图块增量因目标页面显示“资源不存在或无权访问”未完成。
-- [ ] Doca 图块已写入并回读节点和连线；当前访问受阻，恢复权限后补齐并更新本 PR。
+- [x] `docs/system-design.md` 与 SDD/contracts 已同步本轮架构；Doca 对应原生图块增量仍未完成。
+- [ ] Doca 原生图块已写入并回读节点和连线；当前执行环境缺少受保护的 bearer-token 运行时凭据，且浏览器显示资源不可访问，恢复安全访问后补齐并更新本 PR。
 - [ ] 管理员审批、secret 脱敏、SSH 清理提示和错误码均有 UI/AI 展示。
 - [x] 根目录 `npm test` 和 `npm run typecheck` 通过；Agent 只读 preflight、release bundle 上传/下载/安全解包、systemd typed actions 和管理员确认的回滚闭环已实现并由测试覆盖，真实 Linux 主机验证、受控源码构建、中心遥测验证和自动补偿仍待实现。
 - [x] PR #25 已创建并保持待审核；未经用户明确授权不合并。
