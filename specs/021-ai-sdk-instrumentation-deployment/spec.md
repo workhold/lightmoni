@@ -104,7 +104,8 @@ LightMoni 已经有 AI 对话、Pi 代码任务、SDK 上报、受管主机和�
 - 制品不可变，至少包含 `service_id`、`version`、`sha256`、架构、来源 revision 和创建者。MVP 文件格式为 gzip 压缩 USTAR `lightmoni-release-v1.tar.gz`，中心与 Agent 限制压缩体积 64 MiB、解包总体积 256 MiB、最多 10,000 个条目；只允许普通文件和目录，拒绝符号链接、硬链接、设备、稀疏文件、PAX/GNU 扩展、重复路径、绝对路径和 `..`。上传和 Agent 暂存都拒绝常见凭据专用路径、私钥/知名 token、URL/DSN userinfo、凭据查询参数、Basic Auth 及跨行配置中的有值凭据字段；扫描使用有界窗口、单次 percent 解码且错误不回显匹配内容。该规则是减少误打包风险的启发式门，不保证识别所有秘密，也不替代构建来源审查；bundle 只放运行文件，密钥必须由目标主机的独立秘密管理提供。
 - 包根必须有不超过 64 KiB 的 `manifest.json` 和可执行普通文件 `run`。Manifest schema 为 `{schema_version:1,service_id,version,architecture,source_revision,entrypoint:"run"}`；架构仅为 `any`、`linux-amd64` 或 `linux-arm64`。Agent 校验 manifest 与 release、目标服务、主机架构一致后才可激活。
 - 中心制品正文存储于非静态、私有的 content-addressed 目录，SQLite 只记录 release 元数据、摘要、大小和状态。上传接口要求管理员认证、大小限制、摘要复核、原子落盘和不可变摘要；公开 `/downloads` 不得承载业务制品。
-- 中心每个运行时进程最多同时处理一个管理员制品上传，准入范围覆盖流式落盘、完整性/格式检查、凭据扫描和 release 状态更新。容量已满时拒绝新请求并关闭连接，不能无限排队。此门控限制并发放大，不消除单个最大制品解析带来的内存峰值；存储配额、引用感知 GC 和流式解析仍需后续实现。
+- 中心每个运行时进程最多同时处理一个管理员制品上传，准入范围覆盖流式落盘、完整性/格式检查、凭据扫描和 release 状态更新。容量已满时拒绝新请求并关闭连接，不能无限排队。此门控限制并发放大，不消除单个最大制品解析带来的内存峰值；硬磁盘配额和流式解析仍需后续实现。
+- 管理员可以先预览再显式确认清理未引用制品。仅清理私有 content-addressed 存储中超过 24 小时、未被任何状态的 release 引用的普通文件；每轮最多检查 10,000 个条目并删除 500 个对象，达到上限时提供不透明游标续扫。游标在当前进程保留最多 5 分钟，绑定 dry-run/确认模式和首次保留期截止时间，每轮重新读取 release 引用。新扫描会使旧游标失效，失效游标必须报错，不能静默从头重跑。清理与上传互斥；存储祖先的所有者/写权限校验与读取一致，不跟随内部符号链接、不处理硬链接、不删除 release 元数据，异常目录项跳过。此入口不提供自动删除近期失败上传的行为。
 - Agent 只接收 release ID、摘要和 job-scoped 下载接口；下载必须同时验证 Agent control credential、Agent ID、当前未过期 job lease、job action 中的 release ID/摘要和 release 归属。凭据只能放 Authorization/header，不放 URL；下载路径不能接受任意主机 URL。
 - Agent 下载后先校验压缩包 SHA-256，再安全解包到 `<release_directory>/releases/<version>`，逐文件使用受控目录句柄和 `O_NOFOLLOW` 原子创建。release 内容不可覆盖；同一 digest 重试幂等。
 - 构建失败不得创建可激活 release；同一 digest 重试必须幂等。

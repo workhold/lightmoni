@@ -2,7 +2,7 @@
 
 所有接口均挂在 `/api/v1`，需要登录；创建/应用源码变更、构建、Agent 安装、部署、回滚和修改目标仅管理员可用。响应不包含私钥、密码、token 或原始命令输出。
 
-> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现管理员服务目标配置、私有 release bundle 上传/摘要校验、Agent 只读 systemd preflight、lease 绑定制品下载、受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和人工确认的 systemd 回滚 job。Preflight 通过独立 `systemd.probe` job 检查目标 unit 和受控目录，快照绑定目标配置 revision、最多保鲜 10 分钟；它不推进业务部署状态，也不执行主机写入。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。回滚要求新的结构安全 preflight（允许 unit 处于 active/inactive/failed，但路径、入口、current 指针须安全），显示 current 仍为本次部署版本，且 previous version 关联同一 service 的 ready release；Agent 执行 CAS 切换、restart 和 health check，中心仅在回执健康且 current version 等于 previous 时标记 `rolled_back`。首次部署、目标版本变化、无 previous release 或结果未知不自动回滚/重试。扩展 POSIX ACL 与 systemd 业务进程身份仍由管理员按 MVP 运行前提保证。该闭环不代表中心遥测查询、自动补偿、签名构建、GC/配额或真实 Linux 主机验收已实现。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；源码 release 构建仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
+> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现管理员服务目标配置、私有 release bundle 上传/摘要校验、管理员有界孤儿 GC、Agent 只读 systemd preflight、lease 绑定制品下载、受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和人工确认的 systemd 回滚 job。Preflight 通过独立 `systemd.probe` job 检查目标 unit 和受控目录，快照绑定目标配置 revision、最多保鲜 10 分钟；它不推进业务部署状态，也不执行主机写入。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。回滚要求新的结构安全 preflight（允许 unit 处于 active/inactive/failed，但路径、入口、current 指针须安全），显示 current 仍为本次部署版本，且 previous version 关联同一 service 的 ready release；Agent 执行 CAS 切换、restart 和 health check，中心仅在回执健康且 current version 等于 previous 时标记 `rolled_back`。首次部署、目标版本变化、无 previous release 或结果未知不自动回滚/重试。扩展 POSIX ACL 与 systemd 业务进程身份仍由管理员按 MVP 运行前提保证。该闭环不代表中心遥测查询、自动补偿、签名构建、硬配额或真实 Linux 主机验收已实现。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；源码 release 构建仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
 
 ## 通用约束
 
@@ -76,8 +76,17 @@
 - `X-Artifact-SHA256` 必须是 64 位小写/大写 hex；`Content-Length` 为 1..64 MiB。服务端流式收件、计算摘要、与 release 元数据匹配后原子落盘。
 - 上传内容必须是 gzip 压缩 USTAR `lightmoni-release-v1.tar.gz`；manifest 的 `service_id`/`version` 必须和 URL 对应 release 匹配，服务端忽略客户端提供的 manifest 状态。中心拒绝常见凭据专用路径、私钥/知名 token 格式、URL/DSN userinfo、凭据查询参数、Basic Auth 和跨行配置中的常见有值凭据字段，错误不得回显匹配内容；该启发式检查不能证明制品无秘密。
 - 中心每个运行时进程最多同时接收并校验一个制品上传；容量已满立即返回 `503 artifact_upload_busy` 并关闭连接，不排队。准入槽覆盖流式收件、摘要/格式检查、凭据扫描和 release 状态更新，并在成功、失败或客户端断开时释放。
-- 成功返回 `{release_id,sha256,size,status:"ready"}`；容量已满返回 `503 artifact_upload_busy`，digest 不匹配返回 `422 digest_mismatch`，包格式、凭据检查或 service/version 不匹配返回 `422 invalid_artifact` / `422 artifact_release_mismatch`，已就绪不可变 release 不允许替换。失败上传正文留在私有 digest 存储，等待有引用检查和保留期的安全 GC；不得因单次失败按 digest 删除可能被其他 release 共用的对象。单槽门控限制并发负载，但不消除单个最大 bundle 的内存峰值；配额、GC 与流式解析仍待后续实现。
+- 成功返回 `{release_id,sha256,size,status:"ready"}`；容量已满返回 `503 artifact_upload_busy`，digest 不匹配返回 `422 digest_mismatch`，包格式、凭据检查或 service/version 不匹配返回 `422 invalid_artifact` / `422 artifact_release_mismatch`，已就绪不可变 release 不允许替换。失败上传正文留在私有 digest 存储，等待超过 24 小时后由管理员通过 GC 清理；不得因单次失败按 digest 立即删除可能被其他 release 共用的对象。单槽门控限制并发负载，但不消除单个最大 bundle 的内存峰值；硬配额与流式解析仍待实现。
 - 制品正文绝不存入静态 `downloads`，状态查询只返回 digest/size/format，不返回服务器本地路径。
+
+管理员可预览或显式确认清理私有制品存储中的孤儿对象：
+
+`POST /api/v1/admin/release-artifacts/gc`
+
+- 需要管理员 Cookie 会话并通过 Origin 校验。请求 `{}` 只执行 dry-run；必须显式传 `{ "confirm": true }` 才会删除。可选 `cursor` 为上一轮返回的不透明游标；其余字段及不合法类型返回 400。
+- 只处理所有状态的 `releases.artifact_digest` 都未引用、mtime 早于 24 小时的 sha256 内容文件；保留所有被引用对象，不删除 release 元数据。存储祖先、sha256 和前缀目录必须通过与读取一致的所有者/写权限检查；不跟随存储内部符号链接，不处理硬链接或未知文件名。
+- 每轮最多扫描 10,000 项、删除 500 个对象；达到上限时返回 `truncated: true` 和 `cursor`。使用相同确认模式和该游标续扫，防止前面的保留文件让后面的孤儿永久不可达。游标只保存在当前进程，最多有效 5 分钟；重新开始无游标扫描、进程重启或超时会使旧游标失效。每轮重新读取 release 引用，续扫使用首次扫描的保留期截止时间；无效或模式不匹配的游标返回 400。dry-run 和确认删除是独立扫描，不接受跨模式游标。响应只包含扫描/候选/删除/失败计数、字节数和续扫游标，不包含本地路径或 digest。
+- 上传与 GC 使用同一进程级互斥槽；忙时上传返回 `503 artifact_upload_busy`，GC 返回 `503 artifact_maintenance_busy`，均不排队。该锁仅覆盖单个中心进程；共享目录多进程写入不属于当前 MVP 支持范围。
 
 Agent 对制品的唯一读取入口：
 

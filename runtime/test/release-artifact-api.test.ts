@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { createServer, request as httpRequest } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DB } from "../src/shared/sqlite.js";
@@ -81,7 +81,7 @@ test("admin uploads a validated private release and an active job lease gates Ag
   db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL)");
   db.run("INSERT INTO agents(id,last_seen) VALUES(?,?)", "agent-1", new Date().toISOString());
   const auth = {
-    requireAdmin() {},
+    requireAdmin(ctx: any) { if (ctx.req.headers["x-test-role"] === "viewer") throw new HTTPError(403, "administrator required"); },
     user: () => user,
     validateKey() { throw Error("unused"); },
     master: Buffer.alloc(32),
@@ -118,6 +118,17 @@ test("admin uploads a validated private release and an active job lease gates Ag
   const created = await requestJSON("/api/v1/services", "POST", { name: "checkout" });
   assert.equal(created.status, 201);
   const serviceID = created.data.id as string;
+  const forbiddenGC = await fetch(base + "/api/v1/admin/release-artifacts/gc", {
+    method: "POST", headers: { "content-type": "application/json", "x-test-role": "viewer" }, body: JSON.stringify({ confirm: true }),
+  });
+  assert.equal(forbiddenGC.status, 403);
+  for (const invalid of [null, [], "yes", { confirm: false }, { confirm: "true" }, { confirm: null }, { path: "/tmp" }, { cursor: null }, { cursor: "../outside" }]) {
+    const rejected = await requestJSON("/api/v1/admin/release-artifacts/gc", "POST", invalid);
+    assert.equal(rejected.status, 400, `GC must reject ${JSON.stringify(invalid)}`);
+  }
+  const unknownCursor = await requestJSON("/api/v1/admin/release-artifacts/gc", "POST", { cursor: "11111111-1111-4111-8111-111111111111" });
+  assert.equal(unknownCursor.status, 400);
+  assert.equal(unknownCursor.data.error, "invalid_artifact_collection_cursor");
   const target = await requestJSON(`/api/v1/services/${serviceID}/targets`, "POST", { machine_id: "machine-1", adapter: "systemd", config: { unit: "checkout.service", release_directory: "/opt/lightmoni/checkout" } });
   assert.equal(target.status, 201);
   const release = await requestJSON(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v1", source_type: "artifact", source_ref: "git:0123456789abcdef" });
@@ -143,6 +154,9 @@ test("admin uploads a validated private release and an active job lease gates Ag
   });
   assert.equal(busyUpload.status, 503);
   assert.deepEqual(await busyUpload.json(), { error: "artifact_upload_busy" });
+  const busyGC = await requestJSON("/api/v1/admin/release-artifacts/gc", "POST", {});
+  assert.equal(busyGC.status, 503);
+  assert.equal(busyGC.data.error, "artifact_maintenance_busy");
   slow.request.end(slowBytes.subarray(slow.firstChunkLength));
   const slowResult = await slow.response;
   assert.equal(slowResult.status, 201);
@@ -154,7 +168,75 @@ test("admin uploads a validated private release and an active job lease gates Ag
     method: "PUT", headers: { "content-type": "application/vnd.lightmoni.release+gzip", "x-artifact-sha256": rejectedDigest }, body: rejectedBytes,
   });
   assert.equal(rejectedUpload.status, 422);
-  assert.ok(await artifacts.inspect(rejectedDigest), "a rejected upload remains private until reference-aware GC is available");
+  assert.ok(await artifacts.inspect(rejectedDigest), "a rejected upload remains private until its retention window expires");
+  const orphan = await artifacts.inspect(rejectedDigest);
+  assert.ok(orphan);
+  const stale = new Date(Date.now() - 25 * 60 * 60 * 1000);
+  await utimes(orphan.path, stale, stale);
+  const previewGC = await requestJSON("/api/v1/admin/release-artifacts/gc", "POST", {});
+  assert.equal(previewGC.status, 200);
+  assert.equal(previewGC.data.dry_run, true);
+  assert.equal(previewGC.data.eligible_count, 1);
+  assert.equal(previewGC.data.deleted_count, 0);
+  assert.ok(await artifacts.inspect(rejectedDigest), "dry-run cannot remove the orphan");
+  const confirmGC = await requestJSON("/api/v1/admin/release-artifacts/gc", "POST", { confirm: true });
+  assert.equal(confirmGC.status, 200);
+  assert.equal(confirmGC.data.dry_run, false);
+  assert.equal(confirmGC.data.deleted_count, 1);
+  assert.equal(await artifacts.inspect(rejectedDigest), undefined, "confirmed GC removes the old unreferenced digest");
+
+  // Hold maintenance before its directory scan, then exercise the other
+  // direction of the shared upload/GC admission gate.
+  let markCollectionStarted!: () => void, releaseCollection!: () => void;
+  const collectionStarted = new Promise<void>((resolve) => { markCollectionStarted = resolve; });
+  const collectionBarrier = new Promise<void>((resolve) => { releaseCollection = resolve; });
+  const originalCollect = artifacts.collectUnreferenced.bind(artifacts);
+  artifacts.collectUnreferenced = async (...args) => {
+    markCollectionStarted();
+    await collectionBarrier;
+    return originalCollect(...args);
+  };
+  const heldGC = requestJSON("/api/v1/admin/release-artifacts/gc", "POST", {});
+  await collectionStarted;
+  try {
+    const uploadDuringGC = await fetch(`${base}/api/v1/services/${serviceID}/releases/${busyRelease.data.id}/artifact`, {
+      method: "PUT", headers: { "content-type": "application/vnd.lightmoni.release+gzip", "x-artifact-sha256": busyDigest }, body: busyBytes,
+    });
+    assert.equal(uploadDuringGC.status, 503);
+    assert.deepEqual(await uploadDuringGC.json(), { error: "artifact_upload_busy" });
+    const anotherGC = await requestJSON("/api/v1/admin/release-artifacts/gc", "POST", {});
+    assert.equal(anotherGC.status, 503);
+    assert.equal(anotherGC.data.error, "artifact_maintenance_busy");
+  } finally {
+    releaseCollection();
+    artifacts.collectUnreferenced = originalCollect;
+    assert.equal((await heldGC).status, 200);
+  }
+
+  const orphanDirectory = join(artifacts.directory, "sha256", "ab");
+  await mkdir(orphanDirectory, { recursive: true });
+  const orphanDigests = Array.from({ length: 502 }, (_, index) => `ab${index.toString(16).padStart(62, "0")}`);
+  await Promise.all(orphanDigests.map(async (digest) => {
+    const path = join(orphanDirectory, digest);
+    await writeFile(path, "old orphan");
+    await utimes(path, stale, stale);
+  }));
+  // Even pending releases reserve their digest; GC must read every state.
+  db.run("UPDATE releases SET artifact_digest=? WHERE id=?", orphanDigests[501], busyRelease.data.id);
+  const firstGC = await requestJSON("/api/v1/admin/release-artifacts/gc", "POST", { confirm: true });
+  assert.equal(firstGC.status, 200);
+  assert.equal(firstGC.data.deleted_count, 500);
+  assert.equal(firstGC.data.truncated, true);
+  assert.equal(typeof firstGC.data.cursor, "string");
+  const wrongMode = await requestJSON("/api/v1/admin/release-artifacts/gc", "POST", { cursor: firstGC.data.cursor });
+  assert.equal(wrongMode.status, 400);
+  const nextGC = await requestJSON("/api/v1/admin/release-artifacts/gc", "POST", { confirm: true, cursor: firstGC.data.cursor });
+  assert.equal(nextGC.status, 200);
+  assert.equal(nextGC.data.deleted_count, 1);
+  assert.equal(nextGC.data.truncated, false);
+  assert.equal(nextGC.data.cursor, undefined);
+  assert.ok(await stat(join(orphanDirectory, orphanDigests[501])), "a pending release still protects its digest");
+  db.run("UPDATE releases SET artifact_digest='' WHERE id=?", busyRelease.data.id);
   const secretRelease = await requestJSON(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v-secret", source_type: "artifact", source_ref: "git:0123456789abcdef" });
   const secretBytes = releaseBundle(serviceID, "v-secret", "linux-amd64", [
     { name: "config/app.json", content: Buffer.from('{"api_key":"sk-live-example-secret-value-0123456789"}'), mode: 0o644 },

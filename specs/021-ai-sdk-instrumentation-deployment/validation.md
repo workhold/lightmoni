@@ -40,8 +40,8 @@
 | 管理员确认的 systemd 回滚 | 新鲜安全 preflight、previous ready release、current-version CAS、restart/health 和 current-version 回执；首次部署/变化目标拒绝，unknown 收口为人工复核并要求新预检后显式重试 | `runtime/test/service-deployments.test.ts`、`runtime/test/agent-jobs.test.ts` | 通过（模拟 Agent/SQLite；真实 Linux 主机待验） |
 | AI 服务部署工具 | 结构化 ID 生成审核计划 | `runtime/src/assistant/tools.ts` + typecheck | 通过（不执行） |
 | Agent staging | digest 核对、root 所有且 Agent 组可写的受控 release 根目录、私有租约下载和幂等 job | `runtime/src/agent/executor.ts`、`runtime/test/agent-executor.test.ts`、`runtime/test/release-artifact-api.test.ts` | 通过（Linux root-owned 路径测试在 macOS/非 root runner 跳过） |
-| Bundle 上传/下载 | 管理员有界上传、私有 digest 存储、格式校验、lease 绑定且无路径泄漏 | `runtime/test/release-artifact-api.test.ts`、`runtime/test/release-artifact-store.test.ts`、`runtime/test/release-bundle.test.ts` | 通过（拒绝包可能成为未引用 blob；不会误删共享 digest。安全 GC/配额待硬化） |
-| Bundle 凭据排除 | 上传与 Agent 暂存拒绝常见凭据专用路径、私钥/知名 token、URL/DSN userinfo、查询参数、Basic Auth 和跨行配置字段；运行时引用/token 元数据可通过；错误不回显内容 | `runtime/test/release-bundle.test.ts`、`runtime/test/release-artifact-api.test.ts` | 通过（启发式，不保证检测所有秘密；未引用的失败上传仍由后续安全 GC 清理） |
+| Bundle 上传/下载与 GC | 管理员有界上传、私有 digest 存储、格式校验、lease 绑定下载；管理员 GC dry-run/确认、24 小时保留期、引用保护、单轮上限和上传互斥 | `runtime/test/release-artifact-api.test.ts`、`runtime/test/release-artifact-store.test.ts`、`runtime/test/release-bundle.test.ts` | 通过（硬存储配额和单包解析峰值优化待硬化） |
+| Bundle 凭据排除 | 上传与 Agent 暂存拒绝常见凭据专用路径、私钥/知名 token、URL/DSN userinfo、查询参数、Basic Auth 和跨行配置字段；运行时引用/token 元数据可通过；错误不回显内容 | `runtime/test/release-bundle.test.ts`、`runtime/test/release-artifact-api.test.ts` | 通过（启发式，不保证检测所有秘密；有引用的 digest 不被 GC 删除） |
 | 可执行部署计划 | 仅 ready release + 新鲜 ready preflight + 匹配 systemd 入口生成 typed actions，审批时复核目标/快照/制品 | `runtime/test/service-deployments.test.ts`、`runtime/test/release-artifact-api.test.ts` | 通过（真实 Linux 目标仍待验证） |
 | Agent 健康成功 | 计划含授权 health_check 且最终结果有 `health.healthy=true` 后才进入 succeeded | `runtime/src/agent/executor.ts`、`runtime/src/server/agent-jobs.ts`、`runtime/test/service-deployments.test.ts` | 通过（不代表中心遥测已验证） |
 | 中心遥测验证 | 业务部署后查询 ClickHouse 核对新遥测 | `runtime/src/deployment/verification.ts`（仅有界判定器） | 待实现 |
@@ -97,7 +97,11 @@ git diff --check
 
 本轮新增回归验证：`node --import tsx --test test/agent-jobs.test.ts test/service-deployments.test.ts`（工作目录 `runtime/`）：8 passed、0 failed；覆盖普通部署不得跳过制品暂存、首次部署拒绝回滚、错误 current-version 成功回执不得标为 rolled_back、unknown 后不允许复用旧预检，并且管理员新预检后可显式创建新的 rollback operation。新增改动完成后，根目录 `npm test` 与 `npm run typecheck` 均通过；`git diff --check` 通过。
 
-2026-10-23 制品并发门控：管理员上传路由使用每进程一个准入槽，覆盖私有落盘、bundle 解析/凭据扫描和 release ready 更新；槽满返回 `503 artifact_upload_busy`、关闭连接且不积累等待队列。集成测试通过受控慢速上传验证第二个有效请求被拒绝，而首个请求完成后槽位可用。`npm test`（runtime、AI runtime、TypeScript SDK）通过；`npm run typecheck` 通过；上传 API 定向测试通过；`git diff --check` 通过。该门控不消除单个最大 bundle 的高峰内存占用（压缩、解压与文件副本可能同时驻留）、不提供跨进程配额；磁盘配额、引用感知 GC 与流式/隔离解析仍待实现。Doca MCP 工具和资源在本轮运行环境均不可用，在线文档未同步，不能标记完成。
+2026-10-23 制品并发门控：管理员上传路由使用每进程一个准入槽，覆盖私有落盘、bundle 解析/凭据扫描和 release ready 更新；槽满返回 `503 artifact_upload_busy`、关闭连接且不积累等待队列。集成测试通过受控慢速上传验证第二个有效请求被拒绝，而首个请求完成后槽位可用。该门控不消除单个最大 bundle 的高峰内存占用（压缩、解压与文件副本可能同时驻留），也不提供跨进程配额。
+
+2026-10-23 管理员孤儿 GC：新增 `POST /api/v1/admin/release-artifacts/gc`；默认 `{}` 仅 dry-run，只有 `{ "confirm": true }` 才删除。保留所有 release 状态记录的 digest，只处理 mtime 超过 24 小时的普通内容文件；每轮最多扫描 10,000 项、删除 500 项，跳过符号链接、异常名称和硬链接，并和上传共用单进程互斥门。达到上限提供当前进程内最多有效 5 分钟的游标，绑定模式和初始截止时间，后续轮次重新读取 release 引用；新扫描、完成、重启或超时使旧游标失效并释放目录句柄。读取与 GC 共用可信祖先 UID/写权限校验。API 覆盖管理员拒绝、严格请求类型、双向 busy 互斥、dry-run、确认删除、cursor 续扫及 pending release 引用保护；存储覆盖 10,102 项扫描续页、500 项删除上限不漏后续条目、最新引用保护、截止时间不漂移、cursor 模式/失效和 unsafe ancestor/symlink/hardlink。定向 API/store 共 10 项通过；runtime 全量 279 passed、16 skipped、0 failed；AI runtime 71 passed、TypeScript SDK 18 passed；全仓 `npm run typecheck` 通过，最终 runtime 类型检查及 `git diff --check` 通过。已 fetch 远端，`origin/main` 没有本分支未包含的提交。
+
+硬磁盘配额、跨进程锁与单包解析峰值优化仍待实现。Builder 审查确认当前 `CodeTaskService` 不是操作系统沙箱，本机也没有 Docker/Podman/bwrap；自动源码构建 T007 继续待实现，不能在中心身份下执行用户脚本。Doca MCP 工具及资源目录均为空，浏览器再次访问在线基线仍显示“文档不存在”；本轮未向 Doca 写入，在线同步发布门保持未通过。
 
 - deployment adapter unit tests（合法/非法路径、摘要、健康检查、rollback）及 service deployment 状态迁移/审批/事件测试；
 - deployment verification tests（服务/实例归属、UTC 窗口、deadline、样本上限和健康但遥测未验证）；

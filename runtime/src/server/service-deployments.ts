@@ -224,7 +224,7 @@ export function registerServiceDeployments(
   // compressed archive, expanded tar, and copied entries. Admit one complete
   // upload/validation at a time per center process; do not build an unbounded
   // queue while the event loop is busy.
-  let artifactUploadActive = false;
+  let artifactWork: "upload" | "maintenance" | undefined;
   db.exec(`
     CREATE TABLE IF NOT EXISTS services(
       id TEXT PRIMARY KEY,
@@ -927,7 +927,7 @@ export function registerServiceDeployments(
     const expectedSha256 = String(ctx.req.headers["x-artifact-sha256"] ?? "").trim();
     if (!SHA256.test(expectedSha256)) fail(400, "invalid_artifact_digest");
 
-    if (artifactUploadActive) {
+    if (artifactWork) {
       // The request body has not been consumed yet. Close this connection
       // after returning a bounded overload response instead of accepting an
       // unmetered body or retaining it in an in-memory wait queue.
@@ -939,7 +939,7 @@ export function registerServiceDeployments(
       ctx.res.end('{"error":"artifact_upload_busy"}\n');
       return;
     }
-    artifactUploadActive = true;
+    artifactWork = "upload";
     try {
       let stored;
       try {
@@ -968,7 +968,55 @@ export function registerServiceDeployments(
       if (!updated || updated.status !== "ready" || updated.artifact_digest !== stored.sha256) fail(409, "release_changed_during_upload");
       ctx.json({ release_id: updated.id, sha256: stored.sha256, size: stored.size, format: updated.artifact_format, status: "ready" }, 201);
     } finally {
-      artifactUploadActive = false;
+      artifactWork = undefined;
+    }
+  }));
+
+  router.post("/api/v1/admin/release-artifacts/gc", safe(deps, async (ctx) => {
+    admin(deps, ctx);
+    if (!options.artifacts) fail(503, "release artifact storage unavailable");
+    const input = record(await body(ctx), "artifact collection request");
+    if (Object.keys(input).some((key) => key !== "confirm" && key !== "cursor")
+      || (Object.hasOwn(input, "confirm") && input.confirm !== true)
+      || (Object.hasOwn(input, "cursor") && (typeof input.cursor !== "string" || !/^[a-f0-9-]{36}$/.test(input.cursor))))
+      fail(400, "invalid artifact collection request");
+    if (artifactWork) fail(503, "artifact_maintenance_busy");
+    artifactWork = "maintenance";
+    try {
+      // Preserve every recorded digest, even for a release that is not ready;
+      // a later upload or recovery path must never lose an object by GC.
+      const references = new Set(
+        db.all<{ artifact_digest: string }>("SELECT DISTINCT artifact_digest FROM releases WHERE artifact_digest!=''")
+          .map((row) => String(row.artifact_digest).toLowerCase()),
+      );
+      const dryRun = input.confirm !== true;
+      const retentionHours = 24;
+      let collected;
+      try {
+        collected = await options.artifacts.collectUnreferenced(references, {
+          olderThanMs: deps.now().getTime() - retentionHours * 60 * 60 * 1000,
+          dryRun,
+          cursor: input.cursor,
+        });
+      } catch (error) {
+        if (error instanceof ReleaseArtifactError)
+          fail(error.code === "invalid_artifact" ? 400 : 503, error.code === "invalid_artifact" ? "invalid_artifact_collection_cursor" : "artifact_collection_unavailable");
+        throw error;
+      }
+      ctx.json({
+        dry_run: dryRun,
+        retention_hours: retentionHours,
+        scanned_entries: collected.scannedEntries,
+        eligible_count: collected.eligibleCount,
+        eligible_bytes: collected.eligibleBytes,
+        deleted_count: collected.deletedCount,
+        deleted_bytes: collected.deletedBytes,
+        failed_count: collected.failedCount,
+        truncated: collected.truncated,
+        ...(collected.cursor ? { cursor: collected.cursor } : {}),
+      });
+    } finally {
+      artifactWork = undefined;
     }
   }));
 
