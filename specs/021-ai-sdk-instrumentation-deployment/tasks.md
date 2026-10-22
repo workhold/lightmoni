@@ -52,14 +52,14 @@
 | ID | 任务 | 依赖 | 状态 | 验收证据 |
 | --- | --- | --- | --- | --- |
 | T019 | 为插桩、构建、Agent job、部署、验证、回滚写审计事件和关联 ID | T009,T012 | 待实现 | 审计查询和关联性测试 |
-| T020 | 完成权限、secret 脱敏、签名 audience/TTL、幂等和资源上限审计 | T006,T013,T016 | 待实现 | 安全负向测试、`rg` secret 检查 |
+| T020 | 完成权限、secret 脱敏、签名 audience/TTL、幂等和资源上限审计 | T006,T013,T016 | 部分（上传与 Agent 暂存共用启发式扫描，覆盖保留路径、私钥/知名 token、URL/DSN userinfo、查询凭据、Basic Auth 和跨行有值字段；不能保证识别所有秘密。签名、完整权限/资源审计待做） | `runtime/test/release-bundle.test.ts`、`runtime/test/release-artifact-api.test.ts`；安全负向测试、`rg` secret 检查 |
 | T021 | 更新 `docs/system-design.md` 的 HLD/LLD、数据流、部署拓扑和 API 索引 | T001,T010,T013 | 已完成（本次切片章节） | `docs/system-design.md` diff |
-| T022 | 使用最新 Doca seq/epoch 更新对应富文本/原生图块并回读节点与连线 | T021 | 基线已完成；本轮部署取消控制路径增量待同步 | Doca 原生流程图保存后可见，节点/连线回读确认；本轮访问返回“资源不存在或无权访问” |
+| T022 | 使用最新 Doca seq/epoch 更新对应富文本/原生图块并回读节点与连线 | T021 | 基线已完成；本轮部署、回滚与制品凭据扫描增量待同步。当前 Codex 执行环境无 Doca bearer-token 运行时凭据，浏览器返回“资源不存在或无权访问” | Doca 原生流程图保存后可见，节点/连线回读确认 |
 | T023 | 运行 runtime/web 检查，记录验证矩阵并创建待评审 PR；禁止直接合并 | 全部 | 已完成 | `validation.md`、PR #25（保持开启，未合并） |
 | T024 | 把 Agent job 进度、取消、健康验证、成功/失败和未知结果安全映射到业务 deployment 状态 | T010,T012,T014 | 已实现（严格事件序号/阶段单调；无健康成功证据或执行中取消时保留 unknown；仅未领取/过期 job 可安全取消） | `runtime/src/server/agent-jobs.ts`、`runtime/src/server/service-deployments.ts`、对应服务部署与 Agent job 测试 |
 | T025 | 为管理员提供安全取消部署计划入口，并避免向不可执行的通用计划显示审批操作 | T010,T012,T017 | 已实现（未审批计划可取消；已审批计划仅能取消 queued job；Agent 已领取时拒绝并保留主机状态检查边界） | `runtime/src/server/service-deployments.ts`、`runtime/src/server/agent-jobs.ts`、`web/src/app/ServiceDeploymentsPage.tsx`、对应 API/job 测试 |
 | T026 | 通过 Agent job 执行只读 systemd preflight，并将有限快照按目标持久化及绑定到后续部署计划 | T010,T012,T013 | 部分完成（Linux 支持安全目录检查；不支持平台明确不就绪；拒绝符号链接、masked/过渡态和跨 job 快照重放；FIFO 不会阻塞；10 分钟快照；不生成部署动作；Linux 主机验证待 CI） | `runtime/src/agent/executor.ts`、`runtime/src/server/service-deployments.ts`、`runtime/test/agent-executor.test.ts`、`runtime/test/agent-jobs.test.ts`、`runtime/test/service-deployments.test.ts` |
-| T027 | 增加有界管理员制品上传、私有 digest 存储及 Agent 身份/job lease/release 绑定下载 | T009,T012 | 已完成 MVP（失败校验不删除可能被其他 release 引用的共享 digest；未引用 blob 的安全 GC、配额/解析并发门控待硬化） | `runtime/test/release-artifact-api.test.ts`、`runtime/test/release-artifact-store.test.ts` |
+| T027 | 增加有界管理员制品上传、私有 digest 存储及 Agent 身份/job lease/release 绑定下载 | T009,T012 | 已完成 MVP（失败校验不删除可能被其他 release 引用的共享 digest；上传与 Agent 暂存共享启发式凭据扫描；未引用 blob 的安全 GC、配额/解析并发门控待硬化） | `runtime/test/release-artifact-api.test.ts`、`runtime/test/release-artifact-store.test.ts`、`runtime/test/release-bundle.test.ts` |
 | T028 | 验证 `lightmoni-release-v1.tar.gz` manifest 与安全 USTAR 条目，并由 Agent 原子暂存后以 previous-version CAS 切换 current symlink | T013,T027 | 已完成 MVP（Linux 文件系统验收待 CI） | `runtime/test/release-bundle.test.ts`、`runtime/test/agent-executor.test.ts` |
 | T029 | 接入可执行 systemd typed actions，要求 unit `ExecStart=<release_directory>/current/run` 并生成部署 job | T010,T026,T027,T028 | 已完成 MVP（真实 Linux systemd 主机和中心遥测待后续） | `runtime/src/deployment/systemd.ts`、`runtime/test/service-deployments.test.ts` |
 | T030 | 接入管理员确认的 systemd 回滚 job：仅恢复已登记 previous release；fresh preflight、CAS、健康/current-version 回执、幂等和 unknown 边界 | T010,T012,T013,T015,T029 | 已实现（首次部署和目标变化拒绝；错版本/未知回执进入人工复核终态；显式重试要求更新预检；不做自动补偿） | `runtime/src/server/service-deployments.ts`、`runtime/src/server/agent-jobs.ts`、`runtime/test/service-deployments.test.ts`、`runtime/test/agent-jobs.test.ts` |

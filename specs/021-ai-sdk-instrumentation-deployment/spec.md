@@ -3,7 +3,7 @@
 ## 状态
 
 - 状态：部分实现（受限插桩 apply、Agent 执行协议与部署回执状态映射）、待评审
-- 日期：2026-10-22
+- 日期：2026-10-23
 - 关联总设计：[`docs/system-design.md`](../../docs/system-design.md)
 - 前置设计：SDD 012（SDK 上报路径）、SDD 014（Agent 接入）、SDD 017（SSH 引导）、SDD 020（架构双端同步）
 - 架构影响：是。新增源码改写边界、业务制品与部署状态、Agent 执行任务和中心/Agent 控制路径。
@@ -101,7 +101,7 @@ LightMoni 已经有 AI 对话、Pi 代码任务、SDK 上报、受管主机和�
 ### FR-002 构建与制品
 
 - 构建输入必须是已应用且已确认的 revision；构建环境隔离，构建日志脱敏并限制时长、CPU、内存和网络。
-- 制品不可变，至少包含 `service_id`、`version`、`sha256`、架构、来源 revision 和创建者。MVP 文件格式为 gzip 压缩 USTAR `lightmoni-release-v1.tar.gz`，中心与 Agent 限制压缩体积 64 MiB、解包总体积 256 MiB、最多 10,000 个条目；只允许普通文件和目录，拒绝符号链接、硬链接、设备、稀疏文件、PAX/GNU 扩展、重复路径、绝对路径和 `..`。
+- 制品不可变，至少包含 `service_id`、`version`、`sha256`、架构、来源 revision 和创建者。MVP 文件格式为 gzip 压缩 USTAR `lightmoni-release-v1.tar.gz`，中心与 Agent 限制压缩体积 64 MiB、解包总体积 256 MiB、最多 10,000 个条目；只允许普通文件和目录，拒绝符号链接、硬链接、设备、稀疏文件、PAX/GNU 扩展、重复路径、绝对路径和 `..`。上传和 Agent 暂存都拒绝常见凭据专用路径、私钥/知名 token、URL/DSN userinfo、凭据查询参数、Basic Auth 及跨行配置中的有值凭据字段；扫描使用有界窗口、单次 percent 解码且错误不回显匹配内容。该规则是减少误打包风险的启发式门，不保证识别所有秘密，也不替代构建来源审查；bundle 只放运行文件，密钥必须由目标主机的独立秘密管理提供。
 - 包根必须有不超过 64 KiB 的 `manifest.json` 和可执行普通文件 `run`。Manifest schema 为 `{schema_version:1,service_id,version,architecture,source_revision,entrypoint:"run"}`；架构仅为 `any`、`linux-amd64` 或 `linux-arm64`。Agent 校验 manifest 与 release、目标服务、主机架构一致后才可激活。
 - 中心制品正文存储于非静态、私有的 content-addressed 目录，SQLite 只记录 release 元数据、摘要、大小和状态。上传接口要求管理员认证、大小限制、摘要复核、原子落盘和不可变摘要；公开 `/downloads` 不得承载业务制品。
 - Agent 只接收 release ID、摘要和 job-scoped 下载接口；下载必须同时验证 Agent control credential、Agent ID、当前未过期 job lease、job action 中的 release ID/摘要和 release 归属。凭据只能放 Authorization/header，不放 URL；下载路径不能接受任意主机 URL。

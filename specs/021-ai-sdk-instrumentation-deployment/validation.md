@@ -41,6 +41,7 @@
 | AI 服务部署工具 | 结构化 ID 生成审核计划 | `runtime/src/assistant/tools.ts` + typecheck | 通过（不执行） |
 | Agent staging | digest 核对、root 所有且 Agent 组可写的受控 release 根目录、私有租约下载和幂等 job | `runtime/src/agent/executor.ts`、`runtime/test/agent-executor.test.ts`、`runtime/test/release-artifact-api.test.ts` | 通过（Linux root-owned 路径测试在 macOS/非 root runner 跳过） |
 | Bundle 上传/下载 | 管理员有界上传、私有 digest 存储、格式校验、lease 绑定且无路径泄漏 | `runtime/test/release-artifact-api.test.ts`、`runtime/test/release-artifact-store.test.ts`、`runtime/test/release-bundle.test.ts` | 通过（拒绝包可能成为未引用 blob；不会误删共享 digest。安全 GC/配额待硬化） |
+| Bundle 凭据排除 | 上传与 Agent 暂存拒绝常见凭据专用路径、私钥/知名 token、URL/DSN userinfo、查询参数、Basic Auth 和跨行配置字段；运行时引用/token 元数据可通过；错误不回显内容 | `runtime/test/release-bundle.test.ts`、`runtime/test/release-artifact-api.test.ts` | 通过（启发式，不保证检测所有秘密；未引用的失败上传仍由后续安全 GC 清理） |
 | 可执行部署计划 | 仅 ready release + 新鲜 ready preflight + 匹配 systemd 入口生成 typed actions，审批时复核目标/快照/制品 | `runtime/test/service-deployments.test.ts`、`runtime/test/release-artifact-api.test.ts` | 通过（真实 Linux 目标仍待验证） |
 | Agent 健康成功 | 计划含授权 health_check 且最终结果有 `health.healthy=true` 后才进入 succeeded | `runtime/src/agent/executor.ts`、`runtime/src/server/agent-jobs.ts`、`runtime/test/service-deployments.test.ts` | 通过（不代表中心遥测已验证） |
 | 中心遥测验证 | 业务部署后查询 ClickHouse 核对新遥测 | `runtime/src/deployment/verification.ts`（仅有界判定器） | 待实现 |
@@ -88,6 +89,10 @@ git diff --check
 
 本轮既有验证结果（2026-10-22）：`npm run typecheck` 通过；runtime 串行全量 272 通过、14 跳过、0 失败；release bundle、artifact API/store 和安全路径负向测试通过；`npm --prefix web run build` 通过，仍有依赖包 `use client` 指令和大 chunk 警告；`git diff --check` 通过。macOS 上 Linux `/proc/self/fd` 文件操作测试（含 stage/activate、FIFO、权限祖先检查）按平台跳过，本机不能验证真实 Linux systemd。Doca 回读未完成；2026-10-23 的访问检查确认当前运行环境没有 bearer-token 凭据，在线设计增量仍未同步，不能标记完成。
 
+本轮安全修复（2026-10-23）：只按文件名排除 `.env`/私钥等路径会漏掉 `config/app.json` 中的明文 key，随后 release 文件会变为主机用户可读。中心上传与 Agent 暂存共用 bundle 凭据检查，覆盖常见保留路径、私钥/供应商 token、URL/DSN userinfo、凭据查询参数、Basic Auth 和跨行有值字段；检查按有界重叠窗口处理、只解码 percent 编码一次，错误仅返回固定错误，不回显匹配内容。`${ENV_VAR}` 等常见占位符/运行时引用和 `token_count` 等元数据通过。复核还补了超长字段值及跨窗口空白用例。该检测是启发式拒绝规则，不能证明无秘密；制品只能包含运行文件，真实凭据仍须由目标机独立秘密管理注入。被拒绝上传不会使 release 就绪；bundle blob 留在私有 digest 存储，供引用感知 GC 清理，不会因校验失败误删共享 digest。定向验证和完整验证结果见下方追加记录。
+
+2026-10-23 完整验证：`npm test` 通过（runtime、AI runtime、TypeScript SDK 全量测试）；`npm run typecheck` 通过；`npm --prefix web run build` 通过；`git diff --check` 通过。前端构建仍报告依赖包 `use client` 指令与大 chunk 警告。定向凭据扫描/API/Agent executor 验证：25 项中 14 通过、11 项 Linux 专属测试在 macOS 跳过、0 失败。完整 `npm test` 覆盖新增扫描回归；本机仍无法替代 Linux root 权限的目录句柄和 systemd 实机验收。Doca 图块增量仍待有权会话写入并回读。
+
 本轮补充：release 根目录预检及执行现要求 root 所有、Agent 所属组有写权限、其他用户可读/遍历但不可写；失败的格式或 manifest 上传不再按共享 digest 立即删除，避免破坏其他 ready release。新增同 digest 误传回归测试。回滚结果未知会结束当前操作并保留 unknown receipt；管理员必须检查主机并通过较新的安全 preflight 后才能显式重试。普通部署 job 不得跳过 staging，阶段跳过例外只适用于固定 rollback action 组合。本机 macOS 不执行 Linux 目录句柄测试，必须由 root 权限 Linux CI/实机验证该权限门。
 
 本轮新增回归验证：`node --import tsx --test test/agent-jobs.test.ts test/service-deployments.test.ts`（工作目录 `runtime/`）：8 passed、0 failed；覆盖普通部署不得跳过制品暂存、首次部署拒绝回滚、错误 current-version 成功回执不得标为 rolled_back、unknown 后不允许复用旧预检，并且管理员新预检后可显式创建新的 rollback operation。新增改动完成后，根目录 `npm test` 与 `npm run typecheck` 均通过；`git diff --check` 通过。
@@ -115,7 +120,7 @@ git diff --check
 
 - [x] 代码只在功能分支，目标为 `main`，没有直接推送主干。
 - [x] SDD 任务状态和实现一致；未实现 provider 明确列在限制中。
-- [x] `docs/system-design.md` 与 SDD/contracts 已同步本轮架构；Doca 对应原生图块增量仍未完成。
+- [x] `docs/system-design.md` 与 SDD/contracts 已同步本轮安全架构；Doca 对应原生图块增量仍未完成。
 - [ ] Doca 原生图块已写入并回读节点和连线；当前执行环境缺少受保护的 bearer-token 运行时凭据，且浏览器显示资源不可访问，恢复安全访问后补齐并更新本 PR。
 - [ ] 管理员审批、secret 脱敏、SSH 清理提示和错误码均有 UI/AI 展示。
 - [x] 根目录 `npm test` 和 `npm run typecheck` 通过；Agent 只读 preflight、release bundle 上传/下载/安全解包、systemd typed actions 和管理员确认的回滚闭环已实现并由测试覆盖，真实 Linux 主机验证、受控源码构建、中心遥测验证和自动补偿仍待实现。

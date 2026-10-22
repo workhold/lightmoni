@@ -8,7 +8,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { connect as connectTCP } from "node:net";
 import type { DeploymentAction, HealthCheck } from "../deployment/types.js";
-import { parseReleaseBundle } from "../deployment/release-bundle.js";
+import { assertReleaseBundleHasNoCredentials, parseReleaseBundle } from "../deployment/release-bundle.js";
 
 const execFile = promisify(execFileCallback);
 const SHA256 = /^[a-f0-9]{64}$/i;
@@ -56,16 +56,6 @@ export interface ExecutorOptions {
   emit?: (event: ExecutionEvent) => Promise<void> | void;
 }
 
-const isDisallowedReleasePath = (value: string) => {
-  const path = value.toLowerCase();
-  const parts = path.split("/");
-  const sensitiveDirectory = /^(?:\.ssh|\.aws|\.azure|\.gcloud|\.kube|secrets?|credentials?|private[-_]?keys?)$/;
-  if (parts.some((part) => sensitiveDirectory.test(part))) return true;
-  const basename = parts.at(-1) ?? "";
-  if (/^\.env(?:\..*)?$/.test(basename)) return true;
-  if (/^(?:id_rsa|id_ecdsa|id_ed25519)(?:\..*)?$/.test(basename)) return true;
-  return /\.(?:pem|key|p12|pfx|jks|keystore)$/i.test(basename);
-};
 const safePath = (value: string) => {
   if (!isAbsolute(value) || value.includes("\0") || value.split(/[\\/]/).includes("..")) return false;
   return normalize(value) === value;
@@ -355,9 +345,8 @@ export class CapabilityExecutor {
     let bundle;
     try { bundle = parseReleaseBundle(bytes); }
     catch { throw Object.assign(Error("release bundle failed validation"), { code: "invalid_artifact" }); }
-    if (bundle.files.some((entry) => isDisallowedReleasePath(entry.path))
-      || bundle.directories.some((entry) => isDisallowedReleasePath(entry)))
-      throw Object.assign(Error("release bundle contains a path reserved for private credentials"), { code: "invalid_artifact" });
+    try { assertReleaseBundleHasNoCredentials(bundle); }
+    catch { throw Object.assign(Error("release bundle contains private credential material"), { code: "invalid_artifact" }); }
     const hostArchitecture = process.arch === "x64" ? "linux-amd64" : process.arch === "arm64" ? "linux-arm64" : "unsupported";
     if (bundle.manifest.service_id.toLowerCase() !== action.service_id.toLowerCase()
       || bundle.manifest.version !== action.version

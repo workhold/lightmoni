@@ -36,11 +36,12 @@ function tarEntry(entry: TarEntry) {
   const padding = Buffer.alloc((512 - entry.content.length % 512) % 512);
   return [header, entry.content, padding];
 }
-function releaseBundle(serviceID: string, version: string, architecture = "linux-amd64") {
+function releaseBundle(serviceID: string, version: string, architecture = "linux-amd64", extras: TarEntry[] = []) {
   const manifest = Buffer.from(JSON.stringify({ schema_version: 1, service_id: serviceID, version, architecture, source_revision: "git:0123456789abcdef", entrypoint: "run" }));
   return gzipSync(Buffer.concat([
     ...tarEntry({ name: "manifest.json", content: manifest, mode: 0o644 }),
     ...tarEntry({ name: "run", content: Buffer.from("#!/bin/sh\necho ok\n"), mode: 0o755 }),
+    ...extras.flatMap(tarEntry),
     Buffer.alloc(1024),
   ]));
 }
@@ -102,6 +103,17 @@ test("admin uploads a validated private release and an active job lease gates Ag
   });
   assert.equal(rejectedUpload.status, 422);
   assert.ok(await artifacts.inspect(rejectedDigest), "a rejected upload remains private until reference-aware GC is available");
+  const secretRelease = await requestJSON(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v-secret", source_type: "artifact", source_ref: "git:0123456789abcdef" });
+  const secretBytes = releaseBundle(serviceID, "v-secret", "linux-amd64", [
+    { name: "config/app.json", content: Buffer.from('{"api_key":"sk-live-example-secret-value-0123456789"}'), mode: 0o644 },
+  ]);
+  const secretDigest = createHash("sha256").update(secretBytes).digest("hex");
+  const secretUpload = await fetch(`${base}/api/v1/services/${serviceID}/releases/${secretRelease.data.id}/artifact`, {
+    method: "PUT", headers: { "content-type": "application/vnd.lightmoni.release+gzip", "x-artifact-sha256": secretDigest }, body: secretBytes,
+  });
+  assert.equal(secretUpload.status, 422);
+  const secretReleases = await requestJSON(`/api/v1/services/${serviceID}/releases`);
+  assert.equal(secretReleases.data.find((item: any) => item.id === secretRelease.data.id)?.status, "pending_artifact");
   const bytes = releaseBundle(serviceID, "v1"), digest = createHash("sha256").update(bytes).digest("hex");
   const upload = await fetch(`${base}/api/v1/services/${serviceID}/releases/${release.data.id}/artifact`, {
     method: "PUT",

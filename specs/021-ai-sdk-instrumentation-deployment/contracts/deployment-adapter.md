@@ -65,7 +65,7 @@ Agent 必须验证：action 的 unit 等于已登记 target.unit；stage destina
 
 systemd target 的管理员预置 unit 必须执行稳定入口 `<releaseDirectory>/current/run`。Agent 不编辑 unit；`current` 是相对链接 `releases/<version>`，以相同父目录的临时 symlink + 原子 rename 切换。普通文本 `current` 不符合新激活契约。
 
-MVP 的受管 release 根目录由 root 创建，属主为 root，组为 Agent systemd unit 配置的主组 `lightmoni-agent`（例如 `root:lightmoni-agent`、`0775`）；预检与执行校验目录 UID=0、GID 等于 Agent 主 GID、该组可写、其他用户只读/遍历且不可写。业务服务用户不得加入 Agent 组或获得写权限。Agent 的 systemd 沙箱需将精确 release 根目录加入 `ReadWritePaths`。bundle 仅包含运行所需文件，任何密钥、环境凭据和私钥都必须通过独立秘密管理传递，不得放入版本包。
+MVP 的受管 release 根目录由 root 创建，属主为 root，组为 Agent systemd unit 配置的主组 `lightmoni-agent`（例如 `root:lightmoni-agent`、`0775`）；预检与执行校验目录 UID=0、GID 等于 Agent 主 GID、该组可写、其他用户只读/遍历且不可写。业务服务用户不得加入 Agent 组或获得写权限。Agent 的 systemd 沙箱需将精确 release 根目录加入 `ReadWritePaths`。bundle 仅包含运行所需文件，任何密钥、环境凭据和私钥都必须通过独立秘密管理传递，不得放入版本包。中心上传和 Agent 暂存都检查常见凭据专用路径、私钥/知名 token、URL/DSN userinfo、凭据查询参数、Basic Auth 和跨行有值凭据字段，按有界窗口处理且不记录匹配内容；这只是启发式拒绝规则，不能保证检测所有秘密。
 
 ## 错误码
 

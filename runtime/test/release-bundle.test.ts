@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { gzipSync } from "node:zlib";
-import { parseReleaseBundle } from "../src/deployment/release-bundle.js";
+import { assertReleaseBundleHasNoCredentials, parseReleaseBundle } from "../src/deployment/release-bundle.js";
 
 type Entry = {
   name: string;
@@ -82,6 +82,56 @@ test("parses valid gzip USTAR bundle and preserves regular files", () => {
   assert.equal(result.files.find((file) => file.path === "run")?.mode, 0o755);
   assert.equal(result.files.find((file) => file.path === "config/default.json")?.content.toString(), "{}");
   assert.ok(result.expandedBytes > 1024);
+});
+
+test("rejects embedded credentials while allowing runtime references and placeholders", () => {
+  const safe = parseReleaseBundle(bundle(validEntries([
+    { name: "config/app.json", content: JSON.stringify({ api_key: "${LIGHTMONI_API_KEY}", password: "CHANGE_ME" }) },
+    { name: "config/public.json", content: JSON.stringify({ token_count: 8192, service_url: "https://example.com/v1" }) },
+    { name: "src/config.ts", content: 'const token = process.env.LIGHTMONI_TOKEN;\nconst bracketToken = process.env["LIGHTMONI_TOKEN"];\nconst sessionToken = getSessionToken();\nconst password = "example-password";' },
+  ])));
+  assert.doesNotThrow(() => assertReleaseBundleHasNoCredentials(safe));
+
+  for (const content of [
+    JSON.stringify({ api_key: "sk-live-example-secret-value-0123456789" }),
+    JSON.stringify({ apiKey: "camelCase-secret-value-123456" }),
+    '{\n  "api_key":\n    "multiline-secret-123456"\n}',
+    'export DATABASE_PASSWORD="prod-db-password-123"',
+    "database_password: prod-db-password-123",
+    "database_password:\n  multiline-db-password-123",
+    "DATABASE_URL=postgres://alice:VerySecret123@db.internal/app",
+    "DATABASE_URL=postgres://alice:p%40ssw0rd%21@db.internal/app",
+    "SERVICE_URL=https://api.internal/v1?api_key=very-secret-query-value",
+    "SERVICE_URL=https://api.internal/v1?api%5Fkey=very-secret-encoded-query-value",
+    "Authorization: Basic YWxpY2U6cGFzc3dvcmQ=",
+    "-----BEGIN OPENSSH PRIVATE KEY-----\\nnot-a-real-key\\n-----END OPENSSH PRIVATE KEY-----",
+    "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.signaturepartthatistoolong",
+    `{"api_key":"${"s".repeat(9_000)}"}`,
+  ]) {
+    const parsed = parseReleaseBundle(bundle(validEntries([{ name: "config/app.json", content }])));
+    assert.throws(() => assertReleaseBundleHasNoCredentials(parsed), /credential material/);
+  }
+
+  const boundaryContent = Buffer.concat([
+    Buffer.alloc(64 * 1024 - 4, 0x20),
+    Buffer.from('{"api_key":"sk-live-example-secret-value-0123456789"}'),
+  ]);
+  const boundary = parseReleaseBundle(bundle(validEntries([{ name: "config/boundary.json", content: boundaryContent }])));
+  assert.throws(() => assertReleaseBundleHasNoCredentials(boundary), /credential material/);
+
+  const paddedBoundaryContent = Buffer.concat([
+    Buffer.alloc(110 * 1024, 0x20),
+    Buffer.from('"api_key"' + " ".repeat(30 * 1024) + ':"window-crossing-secret-123"'),
+  ]);
+  const paddedBoundary = parseReleaseBundle(bundle(validEntries([{ name: "config/padded.json", content: paddedBoundaryContent }])));
+  assert.throws(() => assertReleaseBundleHasNoCredentials(paddedBoundary), /credential material/);
+});
+
+test("rejects credential-only paths before upload or execution", () => {
+  for (const name of ["config/.env.production", "credentials/cloud.json", "certs/service.pem"]) {
+    const parsed = parseReleaseBundle(bundle(validEntries([{ name, content: "runtime config" }])));
+    assert.throws(() => assertReleaseBundleHasNoCredentials(parsed), /path reserved for private credentials/);
+  }
 });
 
 test("limits total entries so directories cannot bypass the bundle cap", () => {

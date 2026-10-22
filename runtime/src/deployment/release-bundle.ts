@@ -34,6 +34,86 @@ export interface ParsedReleaseBundle {
   expandedBytes: number;
 }
 
+const SENSITIVE_DIRECTORY = /^(?:\.ssh|\.aws|\.azure|\.gcloud|\.kube|secrets?|credentials?|private[-_]?keys?)$/i;
+const SENSITIVE_ASSIGNMENT = /(?:^|[,{;\s])(?:(?:export|const|let|var)[ \t]+)?["']?([A-Za-z0-9_.-]{1,256})["']?[ \t\r\n]{0,32768}[:=][ \t\r\n]{0,32768}(?:(["'])([^"'\r\n]{1,8192})\2|([^,\s#};]{1,8192}))/gim;
+const SECRET_TOKEN = /(?:-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|\b(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{20,}|ya29\.[A-Za-z0-9_-]{20,})\b|\bBearer\s+[A-Za-z0-9._~+/-]{24,})/i;
+const URL_USERINFO = /\b[a-z][a-z0-9+.-]*:\/\/[^/\s?#:@]*:([^/\s?#@]+)@/gi;
+const URL_QUERY_PARAMETER = /[?&]([^=&#\s"'<>]{1,256})=([^&#\s"'<>]{1,8192})/g;
+const BASIC_AUTH = /\bBasic[ \t]+([A-Za-z0-9+/]{16,}={0,2})(?=$|[^A-Za-z0-9+/=])/gi;
+const CREDENTIAL_SCAN_CHUNK_BYTES = 128 * 1024;
+// The largest assignment match is under 74 KiB (two 32 KiB whitespace gaps,
+// a 256-byte key and an 8 KiB value), so the overlap retains the whole match.
+const CREDENTIAL_SCAN_OVERLAP_BYTES = 80 * 1024;
+
+function decodePercentEscapes(value: string): string {
+  // Decode one pass only: enough to recognize encoded field names without
+  // recursively interpreting attacker-controlled encodings.
+  return value.replace(/%([a-f\d]{2})/gi, (_match, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+}
+
+function isSensitiveFieldName(value: string): boolean {
+  const parts = value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().replace(/[^a-z0-9]+/g, "_").split("_").filter(Boolean);
+  if (parts.some((part) => ["secret", "password", "passwd", "credential", "credentials"].includes(part))) return true;
+  if (parts.includes("private") && parts.includes("key")) return true;
+  if (parts.includes("api") && parts.includes("key")) return true;
+  if ((parts.includes("access") || parts.includes("refresh") || parts.includes("auth") || parts.includes("bearer")) && parts.includes("token")) return true;
+  // A token used as the field name or suffix is credential-like; metadata such
+  // as token_count, token_ttl_seconds and token_enabled is not.
+  return parts.at(-1) === "token";
+}
+
+function isPlaceholderCredential(value: string): boolean {
+  const normalized = value.trim().replace(/^['"`]|['"`]$/g, "").trim();
+  return normalized === "" || /^(?:your(?:[-_ ]?[\w]+)?|<[^>]+>|\$\{[^}]+\}|\$[A-Za-z_][\w]*|\{\{[^}]+\}\}|(?:process\.)?env(?:\.[A-Za-z_$][\w$]*|\[[^\]]{1,256}\])|(?:config|credentials|secrets?|vault|settings|options|runtime|context)\.[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|(?:env|get[A-Za-z_$][\w$]*(?:token|secret|credential)|read[A-Za-z_$]*(?:token|secret|credential)|load[A-Za-z_$]*(?:token|secret|credential))\([^)]{0,256}\)|(?:replace|change|set)[-_ ]?me|(?:example|sample|dummy|fake|redacted|placeholder|todo|none|null|undefined|not[-_ ]?set|test(?:[-_ ]?key)?|x{3,}|\*{3,})(?:[-_ ]?[\w]+)?)$/i.test(normalized);
+}
+
+function containsCredentialMaterial(content: Buffer): boolean {
+  // Scan bounded byte-preserving windows so a maximum-size bundle entry does
+  // not require a second equally large JS string. Never expose a match. Each
+  // window is scanned raw and with one percent-decoding pass for encoded keys.
+  for (let start = 0; start < content.length; start += CREDENTIAL_SCAN_CHUNK_BYTES) {
+    const windowStart = Math.max(0, start - CREDENTIAL_SCAN_OVERLAP_BYTES);
+    const source = content.subarray(windowStart, Math.min(content.length, start + CREDENTIAL_SCAN_CHUNK_BYTES)).toString("latin1");
+    const decoded = decodePercentEscapes(source);
+    for (const candidate of [source, decoded]) {
+      if (SECRET_TOKEN.test(candidate)) return true;
+      URL_USERINFO.lastIndex = 0;
+      for (let match = URL_USERINFO.exec(candidate); match; match = URL_USERINFO.exec(candidate)) {
+        if (!isPlaceholderCredential(decodePercentEscapes(match[1]!))) return true;
+      }
+      URL_QUERY_PARAMETER.lastIndex = 0;
+      for (let match = URL_QUERY_PARAMETER.exec(candidate); match; match = URL_QUERY_PARAMETER.exec(candidate)) {
+        if (isSensitiveFieldName(decodePercentEscapes(match[1]!))
+          && !isPlaceholderCredential(decodePercentEscapes(match[2]!))) return true;
+      }
+      BASIC_AUTH.lastIndex = 0;
+      if (BASIC_AUTH.test(candidate)) return true;
+      SENSITIVE_ASSIGNMENT.lastIndex = 0;
+      for (let match = SENSITIVE_ASSIGNMENT.exec(candidate); match; match = SENSITIVE_ASSIGNMENT.exec(candidate)) {
+        if (isSensitiveFieldName(match[1]!) && !isPlaceholderCredential(match[3] ?? match[4] ?? "")) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Reject obvious secret paths and credential material before a release is stored or staged. */
+export function assertReleaseBundleHasNoCredentials(bundle: ParsedReleaseBundle): void {
+  const paths = [...bundle.directories, ...bundle.files.map((file) => file.path)];
+  for (const path of paths) {
+    const parts = path.toLowerCase().split("/");
+    const basename = parts.at(-1) ?? "";
+    if (parts.some((part) => SENSITIVE_DIRECTORY.test(part))
+      || /^\.env(?:\..*)?$/.test(basename)
+      || /^(?:id_rsa|id_ecdsa|id_ed25519)(?:\..*)?$/.test(basename)
+      || /\.(?:pem|key|p12|pfx|jks|keystore)$/i.test(basename)) {
+      throw new Error("release bundle contains a path reserved for private credentials");
+    }
+  }
+  if (bundle.files.some((file) => containsCredentialMaterial(file.content)))
+    throw new Error("release bundle contains credential material; provide runtime secrets separately");
+}
+
 function invalid(message: string): never {
   throw new Error(`invalid release bundle: ${message}`);
 }

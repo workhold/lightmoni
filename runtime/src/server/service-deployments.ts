@@ -7,7 +7,7 @@ import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import { deploymentAdapters } from "../deployment/index.js";
-import { parseReleaseBundle } from "../deployment/release-bundle.js";
+import { assertReleaseBundleHasNoCredentials, parseReleaseBundle } from "../deployment/release-bundle.js";
 import { ReleaseArtifactError, ReleaseArtifactStore } from "../deployment/artifact-store.js";
 import type { AgentJobStore } from "./agent-jobs.js";
 
@@ -935,6 +935,7 @@ export function registerServiceDeployments(
     let bundle;
     try {
       bundle = parseReleaseBundle(await readFile(stored.path));
+      assertReleaseBundleHasNoCredentials(bundle);
     } catch {
       fail(422, "invalid_artifact");
     }
