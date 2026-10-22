@@ -148,14 +148,4 @@ export class ReleaseArtifactStore {
     }
   }
 
-  /** Remove an object that failed bundle validation before it was referenced by a release. */
-  async discard(sha256: string): Promise<void> {
-    const path = this.contentPath(sha256);
-    try {
-      const info = await lstat(path);
-      if (info.isFile() && !info.isSymbolicLink()) await unlink(path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new ReleaseArtifactError("artifact_io");
-    }
-  }
 }

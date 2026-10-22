@@ -364,7 +364,18 @@ export function registerAgentJobs(
       if (!allowed.includes(current.state as AgentJobState)) fail(409, "agent job is no longer running");
       const previousRank = current.state === "leased" ? -1 : EVENT_ORDER[current.state as AgentJobEventPhase];
       const nextRank = EVENT_ORDER[phase];
-      if (previousRank == null || nextRank == null || nextRank < previousRank || nextRank > previousRank + 1)
+      // A rollback job restores an already-staged release and therefore moves
+      // directly from accepted to activating; it must not invent a staging
+      // phase or download/replace an artifact. Restrict the exception to that
+      // typed action shape so a normal deployment cannot skip artifact staging.
+      let actions: any[] = [];
+      try { actions = JSON.parse(current.actions_json || "[]"); } catch {}
+      const isRollbackJob = actions.length === 3
+        && actions[0]?.kind === "activate_release"
+        && actions[1]?.kind === "systemd" && actions[1]?.operation === "restart"
+        && actions[2]?.kind === "health_check";
+      const rollbackStageSkip = isRollbackJob && current.state === "accepted" && phase === "activating";
+      if (previousRank == null || nextRank == null || nextRank < previousRank || (nextRank > previousRank + 1 && !rollbackStageSkip))
         fail(409, "agent event phase is not a valid next step");
       db.run("UPDATE agent_jobs SET state=?,updated_at=?,lease_expires_at=? WHERE id=? AND lease_id=?", phase, occurred, iso(deps, new Date(deps.now().getTime() + LEASE_SECONDS * 1000)), jobID, lease);
       notify(row(jobID), phase, code, { previousState: current.state as AgentJobState, snapshot });

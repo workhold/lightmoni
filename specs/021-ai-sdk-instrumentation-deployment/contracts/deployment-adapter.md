@@ -1,6 +1,6 @@
 # SDD 021：部署适配器契约
 
-> 本文件是目标执行契约。当前 `SystemdDeploymentAdapter` 和 registry 只负责纯逻辑 `probe/plan/apply/verify/rollback` 与 typed action 校验，不调用远程主机。`service-deployments` 已接入管理员审批、Agent job 和最终健康回执状态映射，但通用部署计划尚未调用 systemd adapter 来生成 actions，因此默认计划仍会被安全拒绝。
+> 本文件是目标执行契约。`SystemdDeploymentAdapter` 和 registry 负责纯逻辑 `probe/plan/apply/verify/rollback`；Agent 执行 typed actions。当前 service deployment 已生成受限 systemd 动作，并在管理员确认、previous release 登记与新鲜结构安全快照满足时创建 Agent rollback job。
 
 适配器是中心的纯计划层。它不能调用 `child_process`、SSH、shell、systemctl、Docker CLI 或 Kubernetes API；这些动作由 Agent executor 在 capability allow-list 内解释。
 
@@ -65,7 +65,7 @@ Agent 必须验证：action 的 unit 等于已登记 target.unit；stage destina
 
 systemd target 的管理员预置 unit 必须执行稳定入口 `<releaseDirectory>/current/run`。Agent 不编辑 unit；`current` 是相对链接 `releases/<version>`，以相同父目录的临时 symlink + 原子 rename 切换。普通文本 `current` 不符合新激活契约。
 
-MVP 的受管 release 根目录由 root 创建，属主为 root，组为 `lightmoni-agent`（例如 `root:lightmoni-agent`、`0775`）；业务服务用户可读/遍历但不得加入 Agent 组或获得写权限。Agent 的 systemd 沙箱需将精确 release 根目录加入 `ReadWritePaths`。bundle 仅包含运行所需文件，任何密钥、环境凭据和私钥都必须通过独立秘密管理传递，不得放入版本包。
+MVP 的受管 release 根目录由 root 创建，属主为 root，组为 Agent systemd unit 配置的主组 `lightmoni-agent`（例如 `root:lightmoni-agent`、`0775`）；预检与执行校验目录 UID=0、GID 等于 Agent 主 GID、该组可写、其他用户只读/遍历且不可写。业务服务用户不得加入 Agent 组或获得写权限。Agent 的 systemd 沙箱需将精确 release 根目录加入 `ReadWritePaths`。bundle 仅包含运行所需文件，任何密钥、环境凭据和私钥都必须通过独立秘密管理传递，不得放入版本包。
 
 ## 错误码
 
@@ -78,4 +78,5 @@ MVP 的受管 release 根目录由 root 创建，属主为 root，组为 `lightm
 - `activating`/`verifying` 失败只能进入 `failed` 或 `rollback_pending`，不能直接标记成功。
 - Agent 的 `succeeded` 回执必须来自 `verifying` 阶段并包含健康检查通过证据；缺失证据或执行中断时保留最后已知状态，并在 receipt 中标记 `unknown`。
 - `rollback_pending → rolling_back → rolled_back`；回滚失败保留 `failed`、回执和人工处理提示。
+- 回滚操作的未知结果或版本/健康回执不匹配会关闭当前 operation，以 deployment `failed` + receipt `unknown` 表示需要人工复核；管理员检查主机后必须重新执行安全 preflight，且 current 仍为本次部署版本时才能显式创建新 operation。Agent 事件的 `accepted → activating` 跳阶段例外仅允许固定的三步回滚 action 序列，不适用于普通部署。
 - 成功的 release 不可原地修改；再次部署必须引用新的 version/digest。

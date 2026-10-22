@@ -11,6 +11,7 @@ import type { Dependencies } from "../src/shared/types.js";
 
 test("service inventory creates an approval-ready deployment plan", async (t) => {
   const db = new DB(":memory:"), router = new Router(), user = { id: "admin", name: "Admin", role: "admin" };
+  let clock = new Date("2026-10-21T00:00:00.000Z");
   db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,port INTEGER NOT NULL,username TEXT NOT NULL,agent_id TEXT NOT NULL DEFAULT '')");
   const machineID = "machine-1";
   db.run("INSERT INTO managed_machines(id,name,address,port,username,agent_id) VALUES(?,?,?,?,?,?)", machineID, "app-1", "10.0.0.9", 22, "deploy", "agent-1");
@@ -18,7 +19,7 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
     db,
     router,
     auth: { requireAdmin: () => {}, user: () => user, validateKey: () => { throw Error("unused"); }, master: Buffer.alloc(32) },
-    now: () => new Date("2026-10-21T00:00:00Z"),
+    now: () => new Date(clock),
     externalURL: "http://127.0.0.1:8080",
     encrypt: (value: string) => value,
     decrypt: (value: string) => value,
@@ -39,6 +40,17 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
     const data = await response.json();
     return { status: response.status, data };
   };
+  const completePreflight = async (serviceIDValue: string, targetIDValue: string, currentVersion: string) => {
+    const queued = await request(`/api/v1/services/${serviceIDValue}/targets/${targetIDValue}/preflight`, "POST", { confirm: true });
+    assert.equal(queued.status, 202);
+    const job = jobs.claim("agent-1", ["systemd.probe"]);
+    assert.ok(job);
+    jobs.event("agent-1", job!.id, { lease_id: job!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+    jobs.event("agent-1", job!.id, { lease_id: job!.lease_id, sequence: 2, phase: "preflighting", summary: "preflight" });
+    const action = job!.actions[0];
+    jobs.result("agent-1", job!.id, { lease_id: job!.lease_id, state: "succeeded", summary: "preflight complete", snapshot: { health: { healthy: true }, preflight: { provider: "systemd", ready: true, systemd_available: true, unit_exists: true, active_state: "active", enabled: true, unit_file_state: "enabled", filesystem_check_supported: true, release_directory_exists: true, release_directory_writable: true, entrypoint_matches: true, current_pointer_valid: true, current_version: currentVersion, observed_at: clock.toISOString(), preflight_id: action.preflightID, target_revision: action.targetRevision } } });
+    return job!;
+  };
   t.after(() => { server.close(); db.close(); });
   const created = await request("/api/v1/services", "POST", { name: "checkout", description: "Checkout API" });
   assert.equal(created.status, 201);
@@ -49,8 +61,8 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(badTarget.status, 400);
   const unsupportedTarget = await request(`/api/v1/services/${serviceID}/targets`, "POST", { machine_id: "machine-1", adapter: "docker_compose", config: {} });
   assert.equal(unsupportedTarget.status, 400);
-  db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL)");
-  db.run("INSERT INTO agents(id,last_seen) VALUES(?,?)", "agent-1", "2026-10-20T23:59:00Z");
+  db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL,platform TEXT NOT NULL DEFAULT 'linux',arch TEXT NOT NULL DEFAULT 'amd64')");
+  db.run("INSERT INTO agents(id,last_seen,platform,arch) VALUES(?,?,?,?)", "agent-1", "2026-10-20T23:59:00Z", "linux", "amd64");
   const preflightQueued = await request(`/api/v1/services/${serviceID}/targets/${target.data.id}/preflight`, "POST", { confirm: true });
   assert.equal(preflightQueued.status, 202);
   const probeJob = jobs.claim("agent-1", ["systemd.probe"]);
@@ -77,14 +89,36 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(preflightView.data.ready, true);
   assert.equal(preflightView.data.current, true);
   assert.equal(JSON.stringify(preflightView.data).includes("ignored_output"), false);
+  const previousRelease = await request(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v1", source_type: "artifact", source_ref: "git:0123456789abcdef" });
+  assert.equal(previousRelease.status, 201);
+  db.run("UPDATE releases SET status='ready',artifact_digest=?,artifact_size=1,artifact_format='lightmoni-release-v1.tar.gz',manifest_json=? WHERE id=?", "b".repeat(64), JSON.stringify({ schema_version: 1, service_id: serviceID, version: "v1", architecture: "any", entrypoint: "run" }), previousRelease.data.id);
   const release = await request(`/api/v1/services/${serviceID}/releases`, "POST", { version: "2026.10.21", source_type: "artifact", source_ref: "sha256:abc", artifact_digest: "sha256:abc" });
   assert.equal(release.status, 201);
+  db.run("UPDATE releases SET status='ready',artifact_digest=?,artifact_size=1,artifact_format='lightmoni-release-v1.tar.gz',manifest_json=? WHERE id=?", "a".repeat(64), JSON.stringify({ schema_version: 1, service_id: serviceID, version: "2026.10.21", architecture: "any", entrypoint: "run" }), release.data.id);
   const plan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
   assert.equal(plan.status, 201);
   assert.equal(plan.data.status, "awaiting_approval");
   assert.equal(plan.data.plan.adapter, "systemd");
   assert.equal(plan.data.plan.preflight.ready, true);
-  assert.equal(plan.data.plan.provider_plan_reason, "artifact_missing");
+  assert.equal(plan.data.plan.provider_plan_status, "ready");
+  assert.equal(plan.data.plan.provider_plan_reason, "");
+  assert.equal(plan.data.plan.rollback.available, true);
+  assert.equal(plan.data.plan.rollback.previous_version, "v1");
+  assert.equal(plan.data.plan.rollback.previous_release_id, previousRelease.data.id);
+
+  const firstService = await request("/api/v1/services", "POST", { name: "first-deploy", description: "First deployment has no previous release" });
+  const firstTarget = await request(`/api/v1/services/${firstService.data.id}/targets`, "POST", { machine_id: machineID, adapter: "systemd", config: { unit: "first-deploy.service", release_directory: "/opt/lightmoni/services/first-deploy" } });
+  await completePreflight(firstService.data.id, firstTarget.data.id, "");
+  const firstRelease = await request(`/api/v1/services/${firstService.data.id}/releases`, "POST", { version: "v1", source_type: "artifact", source_ref: "git:first-deploy" });
+  db.run("UPDATE releases SET status='ready',artifact_digest=?,artifact_size=1,artifact_format='lightmoni-release-v1.tar.gz',manifest_json=? WHERE id=?", "c".repeat(64), JSON.stringify({ schema_version: 1, service_id: firstService.data.id, version: "v1", architecture: "any", entrypoint: "run" }), firstRelease.data.id);
+  const firstPlan = await request(`/api/v1/services/${firstService.data.id}/deployments/plan`, "POST", { target_id: firstTarget.data.id, release_id: firstRelease.data.id });
+  assert.equal(firstPlan.data.plan.rollback.available, false);
+  db.run("UPDATE deployments SET status='succeeded',phase='succeeded' WHERE id=?", firstPlan.data.id);
+  const firstRollback = await request(`/api/v1/deployments/${firstPlan.data.id}/rollback`, "POST", { confirm: true, expected_state: "succeeded" });
+  assert.equal(firstRollback.status, 409);
+  assert.equal(firstRollback.data.error, "rollback_unavailable_no_previous_release");
+  assert.equal(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_jobs WHERE deployment_id=?", firstPlan.data.id)?.count, 0);
+
   await request(`/api/v1/services/${serviceID}/targets/${target.data.id}`, "PATCH", { status: "disabled" });
   assert.equal((await request(`/api/v1/services/${serviceID}/targets/${target.data.id}/preflight`)).data.current, false);
   await request(`/api/v1/services/${serviceID}/targets/${target.data.id}`, "PATCH", { status: "unknown" });
@@ -96,6 +130,7 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(notReady.status, 409);
   assert.equal(notReady.data.error, "agent_not_ready");
   db.run("UPDATE agents SET last_seen=? WHERE id=?", "2026-10-20T23:59:00Z", "agent-1");
+  db.run("UPDATE deployments SET plan_json=? WHERE id=?", JSON.stringify({ ...plan.data.plan, actions: [], capabilities: [] }), plan.data.id);
   const emptyApproval = await request("/api/v1/deployments/" + plan.data.id + "/approve", "POST", { confirm: true, expected_state: "awaiting_approval" });
   assert.equal(emptyApproval.status, 409);
   assert.equal(emptyApproval.data.error, "deployment_plan_not_executable");
@@ -140,12 +175,68 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(events.status, 200);
   assert.deepEqual(events.data.map((event: any) => event.state), ["awaiting_approval", "agent_ready", "agent_ready", "staging", "activating", "verifying", "succeeded"]);
   assert.equal(JSON.stringify(events.data).includes("untrusted agent detail"), false);
-  const rollback = await request(`/api/v1/deployments/${plan.data.id}/rollback`, "POST", { confirm: true, reason: "人工检查" });
-  assert.equal(rollback.status, 200);
+  const rollbackWithoutFreshProbe = await request(`/api/v1/deployments/${plan.data.id}/rollback`, "POST", { confirm: true, reason: "人工检查", expected_state: "succeeded" });
+  assert.equal(rollbackWithoutFreshProbe.status, 409);
+  assert.equal(rollbackWithoutFreshProbe.data.error, "rollback_preflight_required");
+  await completePreflight(serviceID, target.data.id, "external-v9");
+  const changedCurrentRollback = await request(`/api/v1/deployments/${plan.data.id}/rollback`, "POST", { confirm: true, reason: "人工检查", expected_state: "succeeded" });
+  assert.equal(changedCurrentRollback.status, 409);
+  assert.equal(changedCurrentRollback.data.error, "rollback_target_changed");
+  assert.equal(db.get<{ count: number }>("SELECT COUNT(*) AS count FROM agent_jobs WHERE deployment_id=?", plan.data.id)?.count, 1, "a changed current version must not enqueue a rollback job");
+  await completePreflight(serviceID, target.data.id, "2026.10.21");
+  const rollback = await request(`/api/v1/deployments/${plan.data.id}/rollback`, "POST", { confirm: true, reason: "人工检查", expected_state: "succeeded" });
+  assert.equal(rollback.status, 202);
   assert.equal(rollback.data.status, "rollback_pending");
+  assert.equal(rollback.data.operation_kind, "rollback");
+  assert.equal(rollback.data.job_state, "queued");
   const repeatedRollback = await request(`/api/v1/deployments/${plan.data.id}/rollback`, "POST", { confirm: true });
   assert.equal(repeatedRollback.status, 200);
   assert.equal(repeatedRollback.data.operation_id, rollback.data.operation_id);
+  const rollbackJob = jobs.claim("agent-1", ["artifact.activate_release", "systemd.restart", "health.systemd"]);
+  assert.ok(rollbackJob);
+  assert.deepEqual(rollbackJob!.actions, [
+    { kind: "activate_release", releaseDirectory: "/opt/lightmoni/services/checkout", version: "v1", expectedCurrentVersion: "2026.10.21" },
+    { kind: "systemd", operation: "restart", unit: "checkout.service" },
+    { kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } },
+  ]);
+  jobs.event("agent-1", rollbackJob!.id, { lease_id: rollbackJob!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  jobs.event("agent-1", rollbackJob!.id, { lease_id: rollbackJob!.lease_id, sequence: 2, phase: "activating", summary: "restoring previous release" });
+  jobs.event("agent-1", rollbackJob!.id, { lease_id: rollbackJob!.lease_id, sequence: 3, phase: "verifying", summary: "checking restored release" });
+  jobs.result("agent-1", rollbackJob!.id, { lease_id: rollbackJob!.lease_id, state: "succeeded", summary: "rollback complete", snapshot: { current_version: "v1", health: { healthy: true } } });
+  const rolledBack = await request(`/api/v1/deployments/${plan.data.id}`);
+  assert.equal(rolledBack.data.status, "rolled_back");
+  assert.equal(rolledBack.data.receipt.state, "rolled_back");
+  const idempotentRolledBack = await request(`/api/v1/deployments/${plan.data.id}/rollback`, "POST", { confirm: true, expected_state: "rolled_back" });
+  assert.equal(idempotentRolledBack.status, 200);
+  assert.equal(idempotentRolledBack.data.operation_id, rollback.data.operation_id);
+
+  await completePreflight(serviceID, target.data.id, "v1");
+  const invalidReceiptPlan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
+  assert.equal(invalidReceiptPlan.data.plan.rollback.previous_version, "v1");
+  db.run("UPDATE deployments SET status='succeeded',phase='succeeded' WHERE id=?", invalidReceiptPlan.data.id);
+  await completePreflight(serviceID, target.data.id, "2026.10.21");
+  const invalidReceiptRollback = await request(`/api/v1/deployments/${invalidReceiptPlan.data.id}/rollback`, "POST", { confirm: true, expected_state: "succeeded" });
+  assert.equal(invalidReceiptRollback.status, 202);
+  const invalidReceiptJob = jobs.claim("agent-1", ["artifact.activate_release", "systemd.restart", "health.systemd"]);
+  assert.ok(invalidReceiptJob);
+  jobs.event("agent-1", invalidReceiptJob!.id, { lease_id: invalidReceiptJob!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  jobs.event("agent-1", invalidReceiptJob!.id, { lease_id: invalidReceiptJob!.lease_id, sequence: 2, phase: "activating", summary: "restoring previous release" });
+  jobs.event("agent-1", invalidReceiptJob!.id, { lease_id: invalidReceiptJob!.lease_id, sequence: 3, phase: "verifying", summary: "checking restored release" });
+  jobs.result("agent-1", invalidReceiptJob!.id, { lease_id: invalidReceiptJob!.lease_id, state: "succeeded", summary: "rollback complete", snapshot: { current_version: "unexpected-v9", health: { healthy: true } } });
+  const invalidReceiptDetail = await request(`/api/v1/deployments/${invalidReceiptPlan.data.id}`);
+  assert.equal(invalidReceiptDetail.data.status, "failed");
+  assert.equal(invalidReceiptDetail.data.receipt.state, "unknown");
+  assert.notEqual(invalidReceiptDetail.data.status, "rolled_back");
+  const retryWithoutNewPreflight = await request(`/api/v1/deployments/${invalidReceiptPlan.data.id}/rollback`, "POST", { confirm: true, expected_state: "failed" });
+  assert.equal(retryWithoutNewPreflight.status, 409);
+  assert.equal(retryWithoutNewPreflight.data.error, "rollback_preflight_required");
+  clock = new Date(clock.getTime() + 1000);
+  await completePreflight(serviceID, target.data.id, "2026.10.21");
+  const explicitlyRetriedRollback = await request(`/api/v1/deployments/${invalidReceiptPlan.data.id}/rollback`, "POST", { confirm: true, expected_state: "failed", reason: "管理员检查主机并重新预检后确认重试" });
+  assert.equal(explicitlyRetriedRollback.status, 202);
+  assert.notEqual(explicitlyRetriedRollback.data.operation_id, invalidReceiptRollback.data.operation_id);
+  jobs.cancel(explicitlyRetriedRollback.data.job_id, "test cleanup");
+
   const uncertainPlan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
   assert.equal(uncertainPlan.status, 201);
   const uncertainExecutablePlan = {
@@ -172,9 +263,9 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   const detail = await request(`/api/v1/services/${serviceID}`);
   assert.equal(detail.status, 200);
   assert.equal(detail.data.targets.length, 1);
-  assert.equal(detail.data.releases.length, 1);
-  assert.equal(detail.data.deployments.length, 2);
-  assert.equal(detail.data.deployments.find((item: any) => item.id === plan.data.id).status, "rollback_pending");
+  assert.equal(detail.data.releases.length, 2);
+  assert.equal(detail.data.deployments.length, 3);
+  assert.equal(detail.data.deployments.find((item: any) => item.id === plan.data.id).status, "rolled_back");
 
   const queuedCancelPlan = await request(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
   const cancelActions = [

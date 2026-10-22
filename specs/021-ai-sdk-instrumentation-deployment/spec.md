@@ -18,11 +18,11 @@
 - `runtime/src/server/service-deployments.ts` 持久化 service/target/release/deployment 元数据和脱敏 deployment events。管理员 `approve` 在 Agent 就绪后要求至少一个 typed action 和带 capability 的 health_check，然后原子创建不可变 Agent job 并推进到 `agent_ready`。管理员可取消未审批计划；已批准计划仅在 Agent job 仍排队时允许原子取消，Agent 已领取后取消请求返回冲突，不宣称远端执行已停止。中心将 Agent 的单调阶段回执映射到部署状态；最终成功必须来自 verifying 状态且含 `health.healthy=true`。未领取 job 过期可安全取消；Agent 端执行取消、租约过期和不完整成功回执均保留 unknown，不推断目标机已恢复或失败。中心后台定期清理 job 过期状态，事件状态与 receipt 在同一 SQLite 事务内更新。
 - service target 可请求 Agent 执行只读 systemd preflight。Agent 只检查登记的 unit 与 release directory，返回固定字段的状态快照；中心保存结果，后续部署计划可绑定最近一次通过的快照。该预检不会运行部署动作或 shell，也不包含制品上传/下载，因此部署审批仍会安全拒绝缺少可执行 typed actions 的计划。
 - 部署工作台只有在计划明确为 ready 且包含 actions/capabilities 时显示批准按钮。目标需先通过 Agent 只读 systemd 预检，并选择已校验的 ready bundle；缺少预检、制品或执行动作时不能审批。
-- `runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定。只读 systemd preflight 已通过 Agent job 检查目标 unit 和 release directory；Agent 回报部署健康检查通过只代表计划内的 Agent 检查，不代表中心已查询 ClickHouse 遥测。受控源码构建、真实 ClickHouse 查询、自动补偿和最终回滚回执仍未接入。
+- `runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定。只读 systemd preflight 已通过 Agent job 检查目标 unit 和 release directory；Agent 回报部署健康检查通过只代表计划内的 Agent 检查，不代表中心已查询 ClickHouse 遥测。受控源码构建、真实 ClickHouse 查询和自动补偿仍未接入；人工确认的 systemd 回滚 job 仅支持恢复已登记的 previous release。
 - Assistant 目前提供扫描、只读插桩提案、管理员确认后的插桩 apply、服务列表、部署计划提案和部署状态读取工具。构建、真实部署编排和回滚工具仍未提供；Agent job 的拉取、能力执行和回执由 Agent 运行时独立完成。
 - `docker_compose` 目前最多作为目标元数据被登记，尚无对应适配器或执行器；只有注册到 registry 的 provider 才能执行，不能把登记成功解释为 provider 已支持。
 - 业务制品与激活契约已在本轮收敛为 `lightmoni-release-v1.tar.gz`：受限 USTAR gzip 包、根目录 `manifest.json` 与可执行 `run` 入口；内容存入中心私有 digest-addressed 目录，Agent 仅能在有效 job lease 下下载。目标 systemd unit 必须预先使用 `<release_directory>/current/run`，Agent 将 `current` 原子切换为 `releases/<version>` 相对符号链接；LightMoni 不改写任意 unit。此契约先于完整构建 worker 实现，当前 status 仍以任务表为准。
-- MVP 主机权限约束：release 根目录由 root 创建和持有，属组为 `lightmoni-agent`（建议 `0775`，其他用户只读/遍历），Agent 的 systemd 沙箱需通过精确 `ReadWritePaths` 获得该目录写权限；业务服务运行用户不得属于 Agent 组或写入目录。bundle 只放运行所需文件，禁止携带密钥、环境凭据和私钥。真实主机预检需验证该权限组合。
+- MVP 主机权限约束：release 根目录由 root 创建和持有，属组为 Agent systemd unit 配置的主组 `lightmoni-agent`（建议 `0775`，其他用户只读/遍历），Agent 预检和执行必须校验 UID=0、目录 GID 等于 Agent 主 GID、该组可写且其他用户不可写；Agent 的 systemd 沙箱需通过精确 `ReadWritePaths` 获得该目录写权限。业务服务运行用户不得属于 Agent 组或写入目录。bundle 只放运行所需文件，禁止携带密钥、环境凭据和私钥。真实主机预检需验证该权限组合。
 
 ## 背景与问题
 
@@ -85,7 +85,7 @@ LightMoni 已经有 AI 对话、Pi 代码任务、SDK 上报、受管主机和�
 
 作为管理员，我希望看到制品摘要、计划 diff、执行状态、健康检查、遥测验证和回滚结果，而不是只看到模型声称成功。
 
-**验收**：每个阶段均有审计事件和幂等 operation ID；健康失败触发可审阅的回滚；服务健康但无新遥测时显示未验证而非失败。
+**验收**：每个阶段均有审计事件和幂等 operation ID；管理员确认后可将当前部署 CAS 切回已登记的 previous release，并要求 Agent 回报版本与健康检查证据；没有 previous release、目标版本已变化或结果未知时拒绝盲目回滚/重试；服务健康但无新遥测时显示未验证而非失败。
 
 ## 功能需求
 
@@ -113,7 +113,7 @@ LightMoni 已经有 AI 对话、Pi 代码任务、SDK 上报、受管主机和�
 - 中心持久化 `services`、`service_targets`、`releases`、`deployments`；目标必须绑定一台已登记机器和 provider 配置。
 - 部署状态至少包括：`draft`、`preflight`、`awaiting_approval`、`agent_ready`、`staging`、`activating`、`verifying`、`succeeded`、`failed`、`rollback_pending`、`rolling_back`、`rolled_back`。
 - 状态迁移由中心校验；Agent 回执只能推进其授权 operation，不能自行把失败写成成功。
-- 管理员可以取消未审批的部署或尚未被 Agent 领取的执行 job；Agent 已领取后，中心必须拒绝声称安全取消，执行中断/取消回执统一进入 `unknown` 并要求复核主机。
+- 管理员可以取消未审批的部署或尚未被 Agent 领取的执行 job；Agent 已领取后，中心必须拒绝声称安全取消，执行中断/取消回执统一进入 `unknown` 并要求复核主机。对回滚操作，未知或不匹配的最终回执会将当前操作收口为 `failed`、receipt 保留 `unknown`，避免界面永久显示“回滚中”；只有新鲜安全预检仍证明本次部署版本是 current 时，管理员才能显式创建新 operation 重试。
 - 每个部署保存 `requested_by`、`approved_by`、计划 revision、制品 digest、目标快照、开始/结束时间和错误码。
 
 ### FR-004 适配器和 systemd MVP
@@ -175,7 +175,7 @@ LightMoni 已经有 AI 对话、Pi 代码任务、SDK 上报、受管主机和�
 1. **无 Agent 的直连 SDK**：创建服务和 SDK Key，应用插桩 diff，构建/部署业务或仅运行服务；中心能接收数据，流程不要求 Agent。
 2. **Agent 先于业务**：Agent enrollment/SSH 预检失败时，业务 deployment 不能进入 staging；Agent 激活后重新执行可继续。
 3. **systemd 成功**：有效 unit、受控目录和制品摘要生成计划，经管理员批准后执行，active/HTTP 检查和至少一批遥测通过，状态为 succeeded。
-4. **健康失败回滚**：unit 启动失败或检查超时，状态进入 rollback_pending，执行旧版本激活；Agent 保持在线，回执含固定错误码。
+4. **人工回滚**：管理员确认后，只有当前版本仍是该部署版本、previous version 已作为 ready release 登记，且有新鲜结构安全的 preflight 时才创建 Agent rollback job；unit 可为 active/inactive/failed，但 unit、受控目录、入口与 current 指针必须安全。Agent 以 CAS 恢复旧版本、restart 并验证健康，中心核对 `current_version` 后才标记 `rolled_back`。首次部署没有 previous release 时返回明确错误；CAS 冲突拒绝覆盖。执行结果未知或版本/健康回执不匹配会结束当前操作并保留 unknown receipt，管理员检查主机并重新预检后才可显式重试，不自动重试。
 5. **遥测延迟**：服务健康但查询窗口无数据，状态显示部署成功、遥测未验证并提供重试；不能直接标记部署失败。
 6. **恶意输入**：任意 shell、越界路径、错误 unit、digest 不匹配和过期 job 均在 Agent 执行前拒绝并审计。
 7. **并发 revision**：用户在 AI 计划生成后修改源码，应用接口拒绝旧 revision，要求重新扫描，不能覆盖新文件。

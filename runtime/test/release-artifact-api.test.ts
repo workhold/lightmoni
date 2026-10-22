@@ -101,7 +101,7 @@ test("admin uploads a validated private release and an active job lease gates Ag
     method: "PUT", headers: { "content-type": "application/vnd.lightmoni.release+gzip", "x-artifact-sha256": rejectedDigest }, body: rejectedBytes,
   });
   assert.equal(rejectedUpload.status, 422);
-  assert.equal(await artifacts.inspect(rejectedDigest), undefined, "a manifest mismatch must remove the unreferenced blob");
+  assert.ok(await artifacts.inspect(rejectedDigest), "a rejected upload remains private until reference-aware GC is available");
   const bytes = releaseBundle(serviceID, "v1"), digest = createHash("sha256").update(bytes).digest("hex");
   const upload = await fetch(`${base}/api/v1/services/${serviceID}/releases/${release.data.id}/artifact`, {
     method: "PUT",
@@ -122,6 +122,17 @@ test("admin uploads a validated private release and an active job lease gates Ag
     method: "PUT", headers: { "content-type": "application/vnd.lightmoni.release+gzip", "x-artifact-sha256": digest }, body: bytes,
   });
   assert.equal(replacement.status, 409);
+
+  const secondRelease = await requestJSON(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v2", source_type: "artifact", source_ref: "git:0123456789abcdef" });
+  const sharedDigestMismatch = await fetch(`${base}/api/v1/services/${serviceID}/releases/${secondRelease.data.id}/artifact`, {
+    method: "PUT", headers: { "content-type": "application/vnd.lightmoni.release+gzip", "x-artifact-sha256": digest }, body: bytes,
+  });
+  assert.equal(sharedDigestMismatch.status, 422);
+  const sharedArtifact = await artifacts.inspect(digest);
+  assert.equal(sharedArtifact?.sha256, digest);
+  assert.equal(sharedArtifact?.size, bytes.length);
+  const stillReady = await requestJSON(`/api/v1/services/${serviceID}/releases`);
+  assert.equal(stillReady.data.find((item: any) => item.id === release.data.id)?.status, "ready");
 
   const plan = await requestJSON(`/api/v1/services/${serviceID}/deployments/plan`, "POST", { target_id: target.data.id, release_id: release.data.id });
   assert.equal(plan.status, 201);

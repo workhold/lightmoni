@@ -53,6 +53,37 @@ test("Agent job lease protocol is idempotent and records bounded receipts", () =
   f.db.close();
 });
 
+test("only typed rollback jobs may skip artifact staging", () => {
+  const f = fixture();
+  const deployment = f.jobs.enqueue({
+    agentID: "agent-1", deploymentID: "dep-deploy", operationID: "op-deploy",
+    actions: [
+      { kind: "stage_artifact", digest: "a".repeat(64) },
+      { kind: "activate_release", version: "v2", expectedCurrentVersion: "v1" },
+      { kind: "systemd", operation: "restart", unit: "checkout.service" },
+      { kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } },
+    ],
+  });
+  const deploymentLease = f.jobs.claim("agent-1", []);
+  assert.ok(deploymentLease);
+  f.jobs.event("agent-1", deployment.id, { lease_id: deploymentLease!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  assert.throws(() => f.jobs.event("agent-1", deployment.id, { lease_id: deploymentLease!.lease_id, sequence: 2, phase: "activating", summary: "must stage first" }), /valid next step/);
+
+  const rollback = f.jobs.enqueue({
+    agentID: "agent-1", deploymentID: "dep-rollback", operationID: "op-rollback",
+    actions: [
+      { kind: "activate_release", version: "v1", expectedCurrentVersion: "v2" },
+      { kind: "systemd", operation: "restart", unit: "checkout.service" },
+      { kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } },
+    ],
+  });
+  const rollbackLease = f.jobs.claim("agent-1", []);
+  assert.ok(rollbackLease);
+  f.jobs.event("agent-1", rollback.id, { lease_id: rollbackLease!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  assert.equal(f.jobs.event("agent-1", rollback.id, { lease_id: rollbackLease!.lease_id, sequence: 2, phase: "activating", summary: "restore previous release" }).state, "activating");
+  f.db.close();
+});
+
 test("success without verified health evidence becomes unknown and cancellation reports prior state", () => {
   const f = fixture();
   const updates: any[] = [];

@@ -2,7 +2,7 @@
 
 所有接口均挂在 `/api/v1`，需要登录；创建/应用源码变更、构建、Agent 安装、部署、回滚和修改目标仅管理员可用。响应不包含私钥、密码、token 或原始命令输出。
 
-> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现管理员服务目标配置、私有 release bundle 上传/摘要校验、Agent 只读 systemd preflight、lease 绑定制品下载、受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和 `rollback_pending` 提案。Preflight 通过独立 `systemd.probe` job 检查目标 unit 和受控目录，快照绑定目标配置 revision、最多保鲜 10 分钟；它不推进业务部署状态，也不执行主机写入。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。该闭环不代表中心遥测查询、自动回滚、签名构建、GC/配额或真实 Linux 主机验收已实现。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；源码 release 构建仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
+> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现管理员服务目标配置、私有 release bundle 上传/摘要校验、Agent 只读 systemd preflight、lease 绑定制品下载、受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和人工确认的 systemd 回滚 job。Preflight 通过独立 `systemd.probe` job 检查目标 unit 和受控目录，快照绑定目标配置 revision、最多保鲜 10 分钟；它不推进业务部署状态，也不执行主机写入。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。回滚要求新的结构安全 preflight（允许 unit 处于 active/inactive/failed，但路径、入口、current 指针须安全），显示 current 仍为本次部署版本，且 previous version 关联同一 service 的 ready release；Agent 执行 CAS 切换、restart 和 health check，中心仅在回执健康且 current version 等于 previous 时标记 `rolled_back`。首次部署、目标版本变化、无 previous release 或结果未知不自动回滚/重试。扩展 POSIX ACL 与 systemd 业务进程身份仍由管理员按 MVP 运行前提保证。该闭环不代表中心遥测查询、自动补偿、签名构建、GC/配额或真实 Linux 主机验收已实现。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；源码 release 构建仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
 
 ## 通用约束
 
@@ -165,7 +165,7 @@ Agent 只运行固定参数的 `systemctl show`，读取已登记 release direct
 
 ### `POST /deployments/:id/rollback`
 
-管理员请求：`{"reason":"health_check_failed","confirm":true}`。只允许 `failed`/`rollback_pending` 或已批准的激活状态；当前切片生成 `rollback_pending` 审批/执行提案并记录 operation ID，不直接执行回滚。真正的 Agent 回滚 job 和 `rolling_back → rolled_back` 迁移属于后续执行器切片。
+管理员请求：`{"reason":"health_check_failed","confirm":true,"expected_state":"succeeded"}`。只允许管理员确认，且部署计划保存了 previous version/release；latest preflight 必须不同于原部署快照、与当前 target revision 匹配且结构安全（unit 可为 active/inactive/failed，不能 masked；systemd、unit、受控目录、入口、current 指针检查通过），显示 current version 仍为本次部署版本；Agent 在线，previous release 属于同一 service 且为 ready。中心生成固定 typed actions：`activate_release(previous, expectedCurrentVersion=deployed)`、`systemd.restart(registered unit)`、`health_check(systemd-active)`，capability 从动作派生并严格收敛。首次部署、previous release 未登记、preflight 过期、current version 改变或 Agent 不在线均返回 409，不创建 job。相同 operation 的重复调用复用原状态；新的显式重试必须来自终结失败状态并重新执行 preflight。成功回执必须包含 `health.healthy=true` 且 `current_version=previous version` 才转 `rolled_back`；CAS/健康失败为 `failed`，执行中租约过期、版本不匹配或结果未知会终结当前操作、保留 unknown receipt 并要求人工检查；系统不会自动重试。管理员只有在较新的安全 preflight 再次证明 current 仍为本次部署版本后才可显式创建新 operation。
 
 ## AI 工具
 

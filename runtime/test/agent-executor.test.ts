@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, chmodSync, writeFileSync, readFileSync, existsSync, realpathSync, symlinkSync, readlinkSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, chmodSync, chownSync, writeFileSync, readFileSync, existsSync, realpathSync, symlinkSync, readlinkSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { digest } from "../src/agent/config.js";
 import { CapabilityExecutor } from "../src/agent/executor.js";
+
+const linuxRoot = process.platform === "linux" && process.geteuid?.() === 0;
 
 function releaseBundle(overrides: { service_id: string; version: string; architecture: "any" | "linux-amd64" | "linux-arm64" }, extras: Array<{ name: string; content: Buffer; mode: number }> = []) {
   const entries = [
@@ -47,10 +49,15 @@ function systemdOutput(releaseDirectory: string, options: { loadState?: string; 
   ].join("\n");
 }
 
-test("capability executor stages matching digest and atomically activates release", { skip: process.platform !== "linux" }, async () => {
+function makeReleaseRoot(path: string) {
+  mkdirSync(path, { recursive: true });
+  chmodSync(path, 0o775);
+}
+
+test("capability executor stages matching digest and atomically activates release", { skip: !linuxRoot }, async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "lightmoni-executor-"));
   const release = join(root, "service"), version = "v1";
-  mkdirSync(release);
+  makeReleaseRoot(release);
   const bytes = releaseBundle({ service_id: "a".repeat(32), version, architecture: process.arch === "arm64" ? "linux-arm64" : "linux-amd64" });
   const digestValue = digest(bytes);
   const executor = new CapabilityExecutor({
@@ -80,9 +87,9 @@ test("capability executor stages matching digest and atomically activates releas
   });
 });
 
-test("capability executor rejects bad digest, path escape, unit mismatch and unknown capability", { skip: process.platform !== "linux" }, async () => {
+test("capability executor rejects bad digest, path escape, unit mismatch and unknown capability", { skip: !linuxRoot }, async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "lightmoni-executor-negative-")), release = join(root, "service");
-  mkdirSync(release);
+  makeReleaseRoot(release);
   const bytes = releaseBundle({ service_id: "a".repeat(32), version: "v1", architecture: process.arch === "arm64" ? "linux-arm64" : "linux-amd64" });
   const base = { kind: "stage_artifact" as const, release_id: "release_1", service_id: "a".repeat(32), version: "v1", architecture: process.arch === "arm64" ? "linux-arm64" as const : "linux-amd64" as const, destination: "releases/v1", sha256: "0".repeat(64), size: bytes.length };
   const executor = new CapabilityExecutor({ now: () => new Date("2026-10-22T00:00:00Z"), command: async () => ({ stdout: "", stderr: "" }), downloadArtifact: async () => bytes });
@@ -98,9 +105,9 @@ test("capability executor rejects bad digest, path escape, unit mismatch and unk
   assert.equal(unknown.code, "capability_denied");
 });
 
-test("release staging checks size, manifest binding and immutability before publishing", { skip: process.platform !== "linux" }, async () => {
+test("release staging checks size, manifest binding and immutability before publishing", { skip: !linuxRoot }, async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "lightmoni-stage-bundle-")), release = join(root, "service");
-  mkdirSync(release);
+  makeReleaseRoot(release);
   const bytes = releaseBundle({ service_id: "a".repeat(32), version: "v1", architecture: process.arch === "arm64" ? "linux-arm64" : "linux-amd64" });
   const base = { kind: "stage_artifact" as const, release_id: "release_1", service_id: "a".repeat(32), version: "v1", architecture: process.arch === "arm64" ? "linux-arm64" as const : "linux-amd64" as const, destination: "releases/v1", sha256: digest(bytes), size: bytes.length };
   const run = async (action: typeof base, downloaded: Buffer) => new CapabilityExecutor({
@@ -144,14 +151,21 @@ test("release staging rejects path ancestors and roots with unsafe ownership per
   const rootResult = await probe(writableRelease);
   assert.equal(rootResult.snapshot.preflight.ready, false);
   assert.equal(rootResult.snapshot.preflight.release_directory_writable, false);
+
+  const wrongOwnerRelease = join(safeParent, "wrong-owner");
+  makeReleaseRoot(wrongOwnerRelease);
+  if (process.geteuid?.() === 0) chownSync(wrongOwnerRelease, 65534, process.getgid?.() ?? 0);
+  const wrongOwnerResult = await probe(wrongOwnerRelease);
+  assert.equal(wrongOwnerResult.snapshot.preflight.ready, false, "the registered release root must be owned by root");
 });
 
 
-test("protected release path permits a root-owned sticky shared ancestor such as /tmp", { skip: process.platform !== "linux" }, async () => {
+test("protected release path permits a root-owned sticky shared ancestor such as /tmp", { skip: !linuxRoot }, async () => {
   const shared = realpathSync(tmpdir());
   const base = mkdtempSync(join(shared, "lightmoni-sticky-release-"));
   const release = join(base, "service");
   mkdirSync(join(release, "releases", "v1"), { recursive: true });
+  chmodSync(release, 0o775);
   writeFileSync(join(release, "releases", "v1", "run"), "#!/bin/sh\n", { mode: 0o555 });
   symlinkSync("releases/v1", join(release, "current"));
   const result = await new CapabilityExecutor({
@@ -166,9 +180,9 @@ test("protected release path permits a root-owned sticky shared ancestor such as
   assert.equal(result.snapshot.preflight.ready, true);
 });
 
-test("bundle paths reserved for credentials are rejected while runtime payloads stay read-only to host users", { skip: process.platform !== "linux" }, async () => {
+test("bundle paths reserved for credentials are rejected while runtime payloads stay read-only to host users", { skip: !linuxRoot }, async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "lightmoni-private-release-files-")), release = join(root, "service");
-  mkdirSync(release);
+  makeReleaseRoot(release);
   const privateBundle = releaseBundle(
     { service_id: "a".repeat(32), version: "v1", architecture: process.arch === "arm64" ? "linux-arm64" : "linux-amd64" },
     [{ name: ".env.production", content: Buffer.from("TOKEN=private\n"), mode: 0o600 }],
@@ -186,9 +200,10 @@ test("bundle paths reserved for credentials are rejected while runtime payloads 
   assert.equal(existsSync(join(release, "releases", "v1")), false);
 });
 
-test("release activation compares the prior symlink and leaves a changed current untouched", { skip: process.platform !== "linux" }, async () => {
+test("release activation compares the prior symlink and leaves a changed current untouched", { skip: !linuxRoot }, async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "lightmoni-activate-cas-")), release = join(root, "service");
   mkdirSync(join(release, "releases", "v0"), { recursive: true });
+  chmodSync(release, 0o775);
   writeFileSync(join(release, "releases", "v0", "run"), "#!/bin/sh\n", { mode: 0o550 });
   symlinkSync("releases/v0", join(release, "current"));
   const bytes = releaseBundle({ service_id: "a".repeat(32), version: "v1", architecture: process.arch === "arm64" ? "linux-arm64" : "linux-amd64" });
@@ -214,9 +229,10 @@ test("release activation compares the prior symlink and leaves a changed current
   assert.equal(readlinkSync(join(release, "current")), "releases/v1");
 });
 
-test("systemd preflight is read-only, target-bound, structured, and redacts command output", async () => {
+test("systemd preflight is read-only, target-bound, structured, and redacts command output", { skip: !linuxRoot }, async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "lightmoni-preflight-")), release = join(root, "service");
   mkdirSync(join(release, "releases", "v1"), { recursive: true });
+  chmodSync(release, 0o775);
   symlinkSync("releases/v1", join(release, "current"));
   const calls: string[][] = [];
   const executor = new CapabilityExecutor({
@@ -242,9 +258,9 @@ test("systemd preflight is read-only, target-bound, structured, and redacts comm
   assert.equal(JSON.stringify(result).includes("daemon-reload"), false);
 });
 
-test("systemd preflight accepts a missing current symlink for first deployment", async () => {
+test("systemd preflight accepts a missing current symlink for first deployment", { skip: !linuxRoot }, async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "lightmoni-preflight-first-deploy-")), release = join(root, "service");
-  mkdirSync(release);
+  makeReleaseRoot(release);
   const result = await new CapabilityExecutor({
     now: () => new Date("2026-10-22T00:00:00Z"), command: async () => ({ stdout: systemdOutput(release), stderr: "" }),
   }).execute({

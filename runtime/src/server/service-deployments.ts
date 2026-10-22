@@ -53,7 +53,7 @@ export const DEPLOYMENT_TRANSITIONS: Record<DeploymentStatus, readonly Deploymen
   running: ["succeeded", "failed", "rollback_pending"],
   succeeded: ["rollback_pending"],
   failed: ["rollback_pending", "cancelled"],
-  rollback_pending: ["rolling_back", "cancelled"],
+  rollback_pending: ["rolling_back", "failed", "cancelled"],
   rolling_back: ["rolled_back", "failed"],
   rolled_back: [],
   cancelled: [],
@@ -175,6 +175,7 @@ const deploymentView = (row: any) => ({
   state: row.status,
   phase: row.phase || row.status,
   operation_id: row.operation_id || "",
+  operation_kind: row.operation_kind || "deploy",
   plan: parse(row.plan_json, {}),
   previous: parse(row.previous_json, {}),
   target_snapshot: parse(row.target_snapshot_json, {}),
@@ -289,6 +290,7 @@ export function registerServiceDeployments(
       error_code TEXT NOT NULL DEFAULT '',
       phase TEXT NOT NULL DEFAULT 'awaiting_approval',
       operation_id TEXT NOT NULL DEFAULT '',
+      operation_kind TEXT NOT NULL DEFAULT 'deploy',
       created_at TEXT NOT NULL,
       created_by TEXT NOT NULL,
       approved_at TEXT NOT NULL DEFAULT '',
@@ -325,6 +327,7 @@ export function registerServiceDeployments(
     ["error_code", "TEXT NOT NULL DEFAULT ''"],
     ["phase", "TEXT NOT NULL DEFAULT 'awaiting_approval'"],
     ["operation_id", "TEXT NOT NULL DEFAULT ''"],
+    ["operation_kind", "TEXT NOT NULL DEFAULT 'deploy'"],
     ["approved_by", "TEXT NOT NULL DEFAULT ''"],
   ] as const) {
     if (!columns.has(name)) db.exec(`ALTER TABLE deployments ADD COLUMN ${name} ${definition}`);
@@ -409,13 +412,13 @@ export function registerServiceDeployments(
       id(), deploymentID, phase, state, code, summary.slice(0, 1000), actor, nowISO(deps),
     );
   };
-  const transitionInTransaction = (deploymentID: string, next: DeploymentStatus, actor: string, summary: string, code = "", options: { operationID?: string; approvedBy?: string; finished?: boolean; receipt?: Record<string, unknown> } = {}) => {
+  const transitionInTransaction = (deploymentID: string, next: DeploymentStatus, actor: string, summary: string, code = "", options: { operationID?: string; operationKind?: "deploy" | "rollback"; approvedBy?: string; finished?: boolean; receipt?: Record<string, unknown> } = {}) => {
     const current = deploymentRow(deploymentID), from = deploymentState(current);
     if (!canTransitionDeployment(from, next)) fail(409, `部署状态不能从 ${from} 变更为 ${next}`);
     const operationID = options.operationID ?? current.operation_id ?? "";
     const at = nowISO(deps);
-    const set = ["status=?", "phase=?", "error_code=?", "error=?", "operation_id=?"];
-    const params: any[] = [next, next, code, code ? summary : "", operationID];
+    const set = ["status=?", "phase=?", "error_code=?", "error=?", "operation_id=?", "operation_kind=?"];
+    const params: any[] = [next, next, code, code ? summary : "", operationID, options.operationKind ?? current.operation_kind ?? "deploy"];
     if (options.approvedBy !== undefined) {
       set.push("approved_by=?", "approved_at=?");
       params.push(options.approvedBy, at);
@@ -438,7 +441,7 @@ export function registerServiceDeployments(
     appendEvent(deploymentID, next, next, actor, summary, code);
     return deploymentView(deploymentRow(deploymentID));
   };
-  const transition = (deploymentID: string, next: DeploymentStatus, actor: string, summary: string, code = "", options: { operationID?: string; approvedBy?: string; finished?: boolean; receipt?: Record<string, unknown> } = {}) =>
+  const transition = (deploymentID: string, next: DeploymentStatus, actor: string, summary: string, code = "", options: { operationID?: string; operationKind?: "deploy" | "rollback"; approvedBy?: string; finished?: boolean; receipt?: Record<string, unknown> } = {}) =>
     db.transaction(() => transitionInTransaction(deploymentID, next, actor, summary, code, options));
   const machineAgentReady = (machineID: string) => {
     const machine = ensureMachine(machineID);
@@ -536,6 +539,7 @@ export function registerServiceDeployments(
     );
     if (!deployment) return;
     const state = deploymentState(deployment);
+    const isRollback = deployment.operation_kind === "rollback";
     const actor = "agent:" + update.agentID;
     const code = /^[a-z][a-z0-9_.-]{0,63}$/.test(update.code) ? update.code : "agent_error";
     const receipt = (phase: string, receiptCode: string, summary: string) => ({
@@ -555,11 +559,21 @@ export function registerServiceDeployments(
       return;
     }
     if (update.phase === "unknown") {
-      appendObserved(
-        "unknown",
-        update.code === "invalid_agent_sequence" ? "Agent 成功回执缺少有效健康检查证据，需重新检查目标主机" : "Agent 执行结果未知，需要重新检查目标主机",
-        update.code === "invalid_agent_sequence" ? "invalid_agent_sequence" : "unknown_execution_result",
-      );
+      const unknownCode = update.code === "invalid_agent_sequence" ? "invalid_agent_sequence" : "unknown_execution_result";
+      const unknownSummary = isRollback
+        ? "回滚执行结果未知，需检查主机并重新预检；系统不会自动重试"
+        : update.code === "invalid_agent_sequence" ? "Agent 成功回执缺少有效健康检查证据，需重新检查目标主机" : "Agent 执行结果未知，需要重新检查目标主机";
+      if (isRollback && (state === "rollback_pending" || state === "rolling_back")) {
+        // End the operation as requiring operator review. A later explicit
+        // rollback request is accepted only after a newer safe preflight and
+        // only if the deployed version is still current.
+        transitionInTransaction(update.deploymentID, "failed", actor, unknownSummary, unknownCode, {
+          finished: true,
+          receipt: receipt("unknown", unknownCode, unknownSummary),
+        });
+      } else {
+        appendObserved("unknown", unknownSummary, unknownCode);
+      }
       return;
     }
     if (update.phase === "cancelled") {
@@ -569,8 +583,59 @@ export function registerServiceDeployments(
         transitionInTransaction(update.deploymentID, "cancelled", actor, summary, code, {
           receipt: receipt("cancelled", code, summary),
         });
+      } else if (isRollback && state === "rollback_pending" && update.previousState === "queued") {
+        const summary = "Agent 未领取回滚任务，回滚未执行；重新预检后可由管理员重新请求";
+        transitionInTransaction(update.deploymentID, "failed", actor, summary, "rollback_job_not_executed", {
+          finished: true,
+          receipt: receipt("failed", "rollback_job_not_executed", summary),
+        });
       } else {
         appendObserved("unknown", "任务已被领取或执行期间取消，实际主机状态需要重新检查", "unknown_execution_result");
+      }
+      return;
+    }
+    if (isRollback) {
+      if (update.phase === "activating") {
+        if (state === "rollback_pending") {
+          transitionInTransaction(update.deploymentID, "rolling_back", actor, "Agent 开始恢复已登记的 previous release", "", {
+            receipt: receipt("activating", "", "Agent 开始恢复 previous release"),
+          });
+        } else if (state === "rolling_back") {
+          appendObserved("activating", "Agent 正在切换回 previous release");
+        }
+        return;
+      }
+      if (update.phase === "verifying") {
+        if (state === "rolling_back") appendObserved("verifying", "Agent 正在验证恢复版本健康");
+        return;
+      }
+      if (update.phase === "succeeded") {
+        const plan = parse<any>(deployment.plan_json, {});
+        const previousVersion = String(plan.rollback?.previous_version || "");
+        if (state === "rolling_back" && update.healthVerified === true && update.snapshot?.current_version === previousVersion) {
+          const summary = `Agent 已恢复 ${previousVersion} 并回报 systemd 健康检查通过`;
+          transitionInTransaction(update.deploymentID, "rolled_back", actor, summary, "", {
+            finished: true,
+            receipt: receipt("rolled_back", "", summary),
+          });
+        } else {
+          const summary = "回滚回执未能同时证明 previous version 与健康状态；需检查主机并重新预检后再决定是否重试";
+          transitionInTransaction(update.deploymentID, "failed", actor, summary, "invalid_rollback_receipt", {
+            finished: true,
+            receipt: receipt("unknown", "invalid_rollback_receipt", summary),
+          });
+        }
+        return;
+      }
+      if (update.phase === "failed") {
+        if (state === "rollback_pending" || state === "rolling_back") {
+          const summary = "Agent 回滚任务失败，需检查目标主机后再决定是否重试";
+          transitionInTransaction(update.deploymentID, "failed", actor, summary, code || "rollback_failed", {
+            finished: true,
+            receipt: receipt("failed", code || "rollback_failed", summary),
+          });
+        }
+        return;
       }
       return;
     }
@@ -632,6 +697,12 @@ export function registerServiceDeployments(
       : !preflight.view?.current || !preflight.view.ready ? "agent_preflight_required" : "deployment_adapter_required";
     let actions: Record<string, unknown>[] = [];
     let capabilities: string[] = [];
+    let rollbackActions: Record<string, unknown>[] = [];
+    let rollbackCapabilities: string[] = [];
+    const previousVersion = typeof observed?.current_version === "string" ? observed.current_version : "";
+    const previousRelease = previousVersion
+      ? db.get<any>("SELECT id,version,status FROM releases WHERE service_id=? AND version=?", serviceID, previousVersion)
+      : undefined;
     const manifest = parse<Record<string, any>>(release.manifest_json, {});
     if (providerPlanReason === "deployment_adapter_required") {
       const agent = db.get<any>("SELECT platform,arch FROM agents WHERE id=?", machine.agent_id);
@@ -679,6 +750,14 @@ export function registerServiceDeployments(
                 : action.kind === "health_check" ? `health.${action.check.kind === "systemd-active" ? "systemd" : action.check.kind}` : ""))].filter(Boolean).sort();
           providerPlanStatus = "ready";
           providerPlanReason = "";
+          if (previousVersion && previousRelease?.status === "ready") {
+            rollbackActions = [
+              { kind: "activate_release", releaseDirectory: serviceTarget.releaseDirectory, version: previousVersion, expectedCurrentVersion: release.version },
+              { kind: "systemd", operation: "restart", unit: serviceTarget.unit },
+              { kind: "health_check", check: { kind: "systemd-active", unit: serviceTarget.unit } },
+            ];
+            rollbackCapabilities = ["artifact.activate_release", "health.systemd", "systemd.restart"];
+          }
         } catch {
           providerPlanReason = "deployment_adapter_rejected";
         }
@@ -699,10 +778,23 @@ export function registerServiceDeployments(
       release: { version: release.version, source_type: release.source_type, source_ref: release.source_ref, artifact_digest: release.artifact_digest, artifact_size: Number(release.artifact_size || 0), artifact_format: release.artifact_format || "" },
       actions,
       capabilities,
+      rollback: {
+        available: rollbackActions.length === 3,
+        reason: rollbackActions.length === 3 ? "" : previousVersion ? "previous_release_not_registered" : "no_previous_release",
+        previous_version: previousVersion,
+        previous_release_id: previousRelease?.status === "ready" ? String(previousRelease.id) : "",
+        actions: rollbackActions,
+        capabilities: rollbackCapabilities,
+      },
       steps: ["校验制品与部署目标", "由 Agent 暂存不可变制品", "切换服务版本", "执行健康检查", "验证 LightMoni 遥测", "失败时回滚到上一版本"],
       safety: ["仅在管理员确认后执行", "Agent 只接受签名任务和能力白名单", "AI 不直接执行生产 Shell 或读取凭据"],
     };
-    const previous = target.desired_release_id ? { release_id: target.desired_release_id } : {};
+    const previous = {
+      desired_release_id: target.desired_release_id || "",
+      version: previousVersion,
+      release_id: previousRelease?.status === "ready" ? String(previousRelease.id) : "",
+      active_state: observed?.active_state ?? "unknown",
+    };
     const targetSnapshot = {
       id: target.id,
       service_id: target.service_id,
@@ -844,11 +936,9 @@ export function registerServiceDeployments(
     try {
       bundle = parseReleaseBundle(await readFile(stored.path));
     } catch {
-      await options.artifacts.discard(stored.sha256).catch(() => {});
       fail(422, "invalid_artifact");
     }
     if (bundle.manifest.service_id !== serviceID || bundle.manifest.version !== release.version) {
-      await options.artifacts.discard(stored.sha256).catch(() => {});
       fail(422, "artifact_release_mismatch");
     }
     if (release.artifact_digest && (!SHA256.test(release.artifact_digest) || release.artifact_digest.toLowerCase() !== stored.sha256))
@@ -962,7 +1052,7 @@ export function registerServiceDeployments(
         capabilities: plan.capabilities,
         target: targetRow ? { id: targetRow.id, config: parse(targetRow.config_json, {}) } : {},
       });
-      return transitionInTransaction(deployment.id, "agent_ready", ctx.user.id, "管理员已批准部署计划，等待 Agent 执行", "", { operationID, approvedBy: ctx.user.id });
+      return transitionInTransaction(deployment.id, "agent_ready", ctx.user.id, "管理员已批准部署计划，等待 Agent 执行", "", { operationID, operationKind: "deploy", approvedBy: ctx.user.id });
     });
     ctx.json({ ...result, operation_id: operationID });
   }));
@@ -991,22 +1081,70 @@ export function registerServiceDeployments(
     const input = await body(ctx), deployment = deploymentRow(ctx.params.deploymentId);
     if (input.confirm !== true) fail(400, "必须明确确认回滚");
     const reason = text(input.reason ?? "管理员请求回滚", "reason", 1000, false) || "管理员请求回滚";
-    if (deployment.status === "rollback_pending") {
-      let operationID = deployment.operation_id || "";
-      if (!operationID) {
-        const candidate = id();
-        const updated = db.run("UPDATE deployments SET operation_id=? WHERE id=? AND status='rollback_pending' AND operation_id=''", candidate, deployment.id);
-        operationID = updated.changes === 1 ? candidate : String(deploymentRow(deployment.id).operation_id || "");
-      }
-      const current = deploymentRow(deployment.id);
-      ctx.json({ ...deploymentView(current), operation_id: current.operation_id || operationID });
+    const expected = input.expected_state == null ? deployment.status : text(input.expected_state, "expected_state", 32);
+    if (deployment.status !== expected) fail(409, "部署计划状态已变化，请重新查看");
+    if (deployment.status === "rollback_pending" || deployment.status === "rolling_back" || deployment.status === "rolled_back") {
+      const existingJob = deployment.operation_id
+        ? db.get<any>("SELECT id,state FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deployment.id, deployment.operation_id)
+        : undefined;
+      ctx.json({ ...deploymentView(deployment), ...(existingJob ? { job_id: existingJob.id, job_state: existingJob.state } : {}) });
       return;
     }
-    if (!(DEPLOYMENT_TRANSITIONS[deployment.status as DeploymentStatus] ?? []).includes("rollback_pending"))
+    if (!(["succeeded", "failed"] as string[]).includes(deployment.status)
+      || !(DEPLOYMENT_TRANSITIONS[deployment.status as DeploymentStatus] ?? []).includes("rollback_pending"))
       fail(409, "当前部署状态不允许回滚");
-    const operationID = id();
-    const result = transition(deployment.id, "rollback_pending", ctx.user.id, reason, "rollback_requested", { operationID });
-    ctx.json({ ...result, operation_id: operationID });
+    if (!options.jobs) fail(503, "agent_jobs_unavailable");
+    const plan = parse<any>(deployment.plan_json, {});
+    const rollbackPlan = plan.rollback ?? {};
+    const previousVersion = String(rollbackPlan.previous_version || "");
+    const previousReleaseID = String(rollbackPlan.previous_release_id || "");
+    if (!previousVersion) fail(409, "rollback_unavailable_no_previous_release");
+    if (!previousReleaseID || rollbackPlan.available !== true) fail(409, "rollback_previous_release_not_registered");
+    const current = currentTarget(deployment.service_id, deployment.target_id);
+    if (current.target.status === "disabled" || current.revision !== plan.target_revision
+      || current.target.adapter !== "systemd") fail(409, "deployment_target_changed");
+    const latest = latestPreflight(deployment.service_id, deployment.target_id);
+    const probe = latest.view?.snapshot?.preflight;
+    const safeRollbackProbe = probe?.provider === "systemd" && probe.systemd_available === true && probe.unit_exists === true
+      && probe.filesystem_check_supported === true && probe.release_directory_exists === true && probe.release_directory_writable === true
+      && probe.entrypoint_matches === true && probe.current_pointer_valid === true
+      && ["active", "inactive", "failed"].includes(String(probe.active_state))
+      && !["masked", "masked-runtime"].includes(String(probe.unit_file_state));
+    if (!latest.view?.current || !safeRollbackProbe || latest.result?.target_revision !== current.revision || latest.view.id === plan.preflight_id)
+      fail(409, "rollback_preflight_required");
+    if (deployment.operation_kind === "rollback" && deployment.status === "failed"
+      && Date.parse(String(latest.view.snapshot?.preflight?.observed_at || "")) <= Date.parse(String(deployment.finished_at || "")))
+      fail(409, "rollback_preflight_required");
+    const currentVersion = String(latest.view.snapshot?.preflight?.current_version ?? "");
+    if (currentVersion !== String(plan.release?.version || "")) fail(409, "rollback_target_changed");
+    const previousRelease = db.get<any>("SELECT id,version,status FROM releases WHERE id=? AND service_id=?", previousReleaseID, deployment.service_id);
+    if (!previousRelease || previousRelease.status !== "ready" || previousRelease.version !== previousVersion)
+      fail(409, "rollback_previous_release_not_registered");
+    const deployedRelease = db.get<any>("SELECT id,version,status FROM releases WHERE id=? AND service_id=?", deployment.release_id, deployment.service_id);
+    if (!deployedRelease || deployedRelease.status !== "ready" || deployedRelease.version !== currentVersion)
+      fail(409, "rollback_target_changed");
+    if (!current.machine.agent_id || !machineAgentReady(String(current.target.machine_id))) fail(409, "agent_not_ready");
+    const actions: Record<string, unknown>[] = [
+      { kind: "activate_release", releaseDirectory: current.config.release_directory, version: previousVersion, expectedCurrentVersion: currentVersion },
+      { kind: "systemd", operation: "restart", unit: current.config.unit },
+      { kind: "health_check", check: { kind: "systemd-active", unit: current.config.unit } },
+    ];
+    const capabilities = ["artifact.activate_release", "health.systemd", "systemd.restart"];
+    const result = db.transaction(() => {
+      const fresh = deploymentRow(deployment.id);
+      if (fresh.status !== expected) fail(409, "部署计划状态已变化，请重新查看");
+      const operationID = id();
+      const job = options.jobs!.enqueue({
+        agentID: String(current.machine.agent_id), deploymentID: deployment.id, operationID,
+        actions, capabilities,
+        target: { id: current.target.id, config: current.config },
+      });
+      const value = transitionInTransaction(deployment.id, "rollback_pending", ctx.user.id, reason, "rollback_requested", {
+        operationID, operationKind: "rollback", receipt: { state: "queued", code: "", summary: "回滚任务已进入 Agent 队列" },
+      });
+      return { ...value, operation_id: operationID, job_id: job.id, job_state: job.state };
+    });
+    ctx.json(result, 202);
   }));
 
   const assistantServices = () => db.all<any>("SELECT * FROM services ORDER BY updated_at DESC,id").map(serviceView);

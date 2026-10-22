@@ -83,7 +83,7 @@ const descriptorPath = (handle: FileHandle) => {
 const openDirectory = async (path: string) => open(path, DIRECTORY_FLAGS);
 const duplicateDirectory = async (handle: FileHandle) => open(descriptorPath(handle), constants.O_RDONLY | (constants.O_DIRECTORY ?? 0));
 const groupCanWrite = (info: { gid: number }) => {
-  const groups = new Set([process.getgid?.(), ...(process.getgroups?.() ?? [])].filter((value): value is number => typeof value === "number"));
+  const groups = new Set([process.getgid?.(), process.getegid?.(), ...(process.getgroups?.() ?? [])].filter((value): value is number => typeof value === "number"));
   return groups.has(info.gid);
 };
 const openAbsoluteDirectory = async (path: string, create = false, protectReleaseRoot = false): Promise<FileHandle> => {
@@ -107,14 +107,16 @@ const openAbsoluteDirectory = async (path: string, create = false, protectReleas
       if (protectReleaseRoot) {
         const info = await next.stat();
         const uid = process.geteuid?.() ?? 0;
+        const agentPrimaryGid = process.getegid?.() ?? process.getgid?.() ?? -1;
         const ownerTrusted = info.uid === 0 || info.uid === uid;
         const groupWritable = (info.mode & 0o020) !== 0;
         const otherWritable = (info.mode & 0o002) !== 0;
+        const otherReadableTraversable = (info.mode & 0o005) === 0o005;
         const groupWriteTrusted = !groupWritable || groupCanWrite(info);
         const isReleaseRoot = index === components.length - 1;
         const safeStickyAncestor = !isReleaseRoot && (info.mode & 0o1000) !== 0 && ownerTrusted;
         const protectedDirectory = isReleaseRoot
-          ? ownerTrusted && !otherWritable && groupWriteTrusted
+          ? info.uid === 0 && info.gid === agentPrimaryGid && groupWritable && groupCanWrite(info) && !otherWritable && otherReadableTraversable
           : ownerTrusted && ((!otherWritable && groupWriteTrusted) || safeStickyAncestor);
         if (!info.isDirectory() || !protectedDirectory) {
           await next.close().catch(() => {});
