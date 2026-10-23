@@ -1,0 +1,29 @@
+# SDD 021 契约索引
+
+- [HTTP 与 AI 工具](api.md)
+- [部署适配器](deployment-adapter.md)
+- [Agent Job 与执行器](agent-executor.md)
+- [SDK 插桩](instrumentation.md)
+
+这些契约描述目标接口。实现或历史接口不一致时，应在对应 SDD 任务中记录兼容策略，并以运行时代码和验证结果为当前事实。
+
+## 当前实现边界
+
+本目录的 HTTP、插桩和 Agent job 契约按切片标注实现边界。当前分支已提供：
+
+- `GET/POST /api/v1/services`、`GET /api/v1/services/:id`；
+- `GET/POST/PATCH /api/v1/services/:id/targets`；
+- 管理员 `GET/POST /api/v1/services/:id/targets/:targetId/preflight`：只读 systemd preflight job 和目标 revision/一次性 request ID 绑定的 10 分钟快照；中心核对观测时间和回执绑定，并按目标状态、配置与 Agent 身份失效旧快照；不会推进业务 deployment 状态；
+- `GET/POST /api/v1/services/:id/releases`；
+- 管理员 `PUT /api/v1/services/:id/releases/:releaseId/artifact` 上传摘要校验后的私有 bundle；Agent 通过 `GET /api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId` 在 control credential + 当前 job lease 下下载；上传与 Agent 暂存共用启发式凭据扫描，拒绝常见凭据路径、私钥/知名 token、URL/DSN userinfo、凭据查询参数、Basic Auth 和有值凭据字段，但不保证发现所有秘密；失败上传 blob 可由管理员在超过保留期后通过有界 GC 回收；
+- 中心管理员 bundle 上传每个运行时进程最多一个并行请求，超额返回 `503 artifact_upload_busy` 且不排队；门控覆盖上传至 release 状态更新，不代替单包内存限制或硬存储配额；管理员可通过有界 GC 回收超过 24 小时且未被任意 release 状态引用的 blob；
+- 管理员 `POST /api/v1/admin/release-artifacts/gc` 可 dry-run 或显式确认清理超过 24 小时且未被任何 release 状态引用的私有 digest 文件；每轮最多扫描 10,000 项、删除 500 项，并与上传互斥。达到上限时提供绑定模式/截止时间、当前进程内最多有效 5 分钟的游标续扫；每轮重新检查引用，可信目录校验与读取一致；
+- `GET /api/v1/services/:id/deployments`、`POST /api/v1/services/:id/deployments/plan`（ready bundle + 新鲜 ready preflight 可生成 systemd typed actions；缺少条件时仍为不可执行的 `awaiting_approval` 计划）；
+- `GET /api/v1/services/:id/deployments/:deploymentId`、`GET /api/v1/deployments/:deploymentId`、两种作用域的 deployment events 查询；
+- 管理员 `POST /api/v1/deployments/:deploymentId/approve` 与 `rollback`；approve 检查 Agent 就绪和带授权的 health_check，创建不可变 job 并推进到 `agent_ready`，之后将 Agent 的有序回执映射为部署状态；rollback 仅在新鲜 preflight 显示本次部署版本仍为 current、previous version 已登记为同一 service 的 ready release 且 Agent 在线时创建受限 Agent job，并核对健康/current-version 回执后进入 `rolled_back`；未知或不匹配回执会终结本次操作、将部署标记为 `failed` 并保留 `unknown` receipt，管理员检查主机并完成新的安全 preflight 后才可显式重试；
+- 管理员 `POST /api/v1/instrumentation-plans/:id/apply`，校验 revision、路径、符号链接和大小限制后原子应用已批准的插桩 diff；插桩计划本身仍是 AI 调用期间的受控记录；
+- 管理员 `POST /api/v1/deployments/:deploymentId/verify-telemetry`（严格 `{}`），按目标快照显式绑定的业务表、SDK 服务/实例和 release.version 做固定部署后窗口的有界 reader 查询；独立摘要持久化，GET/AI 只读返回并标注 stale，不轮询、不自动回滚；
+- AI 的 `scan_sdk_instrumentation`、只读 `propose_sdk_instrumentation`、`list_services`、`propose_service_deployment`、`get_service_deployment`、`get_service_deployment_events` 工具。
+- `lightmoni-release-v1.tar.gz` 严格 USTAR 校验、digest 私有存储、Agent lease 下载、上传与 Agent 暂存共用的启发式凭据扫描、Linux Agent 安全解包和 CAS 相对 symlink 激活；受管目录权限由 root/Agent service group 管理，业务 service user 只读。凭据扫描仅拦截常见特征，不构成制品无秘密证明。
+
+本轮已接入显式绑定的管理员手动 ClickHouse 遥测验证；当前仍没有自动 release 构建、部署后的中心独立健康复探任务和自动补偿，真实 ClickHouse/Linux 验收仍待环境；人工 systemd 回滚 job、回滚未知结果的人工复核终态与 `rolled_back` 回执已接入。插桩 apply HTTP 已接入，但没有独立持久化的 `instrumentation_plans` 表。Agent job 的 claim/lease/event/result/cancel、严格序号/阶段校验、MVP capability executor、只读 systemd preflight、Agent runner 和部署最终健康回执状态映射已接入；生产签名校验、硬 artifact 配额与 Linux 实机验收仍待后续切片。管理员有界孤儿 GC 已接入。普通部署已领取 job 的取消和租约过期会保留最后已知状态与 `unknown` receipt；回滚操作则关闭当前 operation，要求管理员检查主机并重新预检，系统不自动重试。`propose_sdk_instrumentation` 只在 AI 工具调用期间生成内存中的只读计划，调用方必须以运行时代码为准，不能把下方目标请求当作已部署 API。
