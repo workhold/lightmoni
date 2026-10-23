@@ -118,7 +118,7 @@ AI 工具只调用扫描、提案和只读状态；apply/build 的接口返回 a
 3. `POST /api/v1/services/:id/deployments/plan` 将最近 10 分钟内 ready 的预检快照绑定到计划；没有快照或快照未就绪时，计划保留原因并且不生成可执行动作。
 4. `POST /api/v1/deployments/:id/approve` 由管理员确认；当前实现要求有可执行 actions 和获授权 health_check，检查 Agent 心跳、创建不可变 job 并推进到 `agent_ready`。无 ready bundle、预检或 typed actions 的普通业务计划仍会被拒绝审批。
 5. Agent 使用 control credential 拉取 job、在 capability allow-list 内执行 typed actions 并提交单调阶段事件；中心映射 `staging → activating → verifying` 并将脱敏回执写入部署时间线。只有 verifying 后的最终结果含 `health.healthy=true` 才能进入 `succeeded`。
-6. 已领取任务取消、租约过期和缺少健康证据的成功回执都进入 `unknown`，保留最后已知部署状态并要求人工复核；未领取的 job 可安全取消。中心 ClickHouse 查询仍待接入，Agent 健康成功不等于遥测已验证。
+6. 已领取任务取消、租约过期和缺少健康证据的成功回执都进入 `unknown`，保留最后已知部署状态并要求人工复核；未领取的 job 可安全取消。Agent 健康成功不等于遥测已验证；管理员可按快照绑定、发布版本和固定时间窗显式发起中心 reader 核验，独立保存摘要。
 7. 管理员通过 `PUT /api/v1/services/:serviceId/releases/:releaseId/artifact` 上传有界 bundle。中心验证 `X-Artifact-SHA256`、manifest 归属和格式后，原子写入私有 digest 目录并将 release 标记 ready。因 digest 可共享，失败上传不立即删除 blob；GC 需确认无 release 引用、无进行中的上传且满足保留期后才能删除。
 8. 批准部署后 Agent 通过 `GET /api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId` 下载制品；请求须使用 control credential 和 `X-LightMoni-Job-Lease`，中心验证 lease、Agent、release 与不可变 action 精确匹配。Agent 先验摘要再安全解包至 `releases/<version>`。
 9. Agent 通过 `systemd.probe` 验证目标 unit `ExecStart` 指向 `<release_directory>/current/run`；审批计划绑定 previous version。激活创建同目录临时相对 symlink 并原子替换 `current`，只有指针仍等于 previous version 才允许切换；随后执行允许的 restart/start 与 health check。
@@ -140,7 +140,7 @@ AI 工具只调用扫描、提案和只读状态；apply/build 的接口返回 a
 - `verify`：对 Agent 回报的快照执行 active/version/health 检查；必要时向中心查询遥测。
 - `rollback`：管理员确认后切换到已登记的 `previous` 版本，CAS 期望当前版本为此次部署版本；随后 restart 并执行 systemd health check。没有 previous release 或 fresh preflight、目标已被其他部署改变、Agent 不在线时拒绝执行；不删除 release。只有最终回执健康通过且 current version 等于 previous 才算 `rolled_back`。
 
-中心侧验证抽象位于 `runtime/src/deployment/verification.ts`：它要求固定服务/实例、UTC 时间窗口、截止时间和最多 1000 条样本，只统计窗口内的精确匹配；健康通过但没有遥测时返回 `succeeded_telemetry_unverified`，不会把延迟误判为进程失败。只读 Agent systemd preflight 已检查 unit 与受控 release directory，并将快照绑定到 target config revision、一次性 preflight ID 和观测时间；当前 Agent 通过事件回执报告部署 typed health_check，中心可将有健康证据的最终回执映射为 deployment `succeeded`；中心真实读取 ClickHouse 遥测、将其与业务服务关联并区分“遥测未验证”仍属后续 T015。自动探测/补偿仍未完成；管理员确认的 current-version CAS 回滚已接入，真实 Linux 主机验收待 CI/实机验证。
+中心侧验证抽象位于 `runtime/src/deployment/verification.ts`：它要求固定服务/实例、UTC 时间窗口、截止时间和最多 1000 条样本，只统计窗口内的精确匹配；健康通过但没有遥测时返回 `succeeded_telemetry_unverified`，不会把延迟误判为进程失败。只读 Agent systemd preflight 已检查 unit 与受控 release directory，并将快照绑定到 target config revision、一次性 preflight ID 和观测时间；当前 Agent 通过事件回执报告部署 typed health_check，中心可将有健康证据的最终回执映射为 deployment `succeeded`；本轮 T015 已增加显式 SDK 服务/实例绑定和发布版本匹配的中心 reader 查询，使用固定部署后窗口、单进程单槽以及查询前后上下文校验；结果独立保存、过期结果标记 stale。真实 ClickHouse/业务主机验收仍待环境。自动探测/补偿仍未完成；管理员确认的 current-version CAS 回滚已接入，真实 Linux 主机验收待 CI/实机验证。
 
 ### 后续 provider
 
@@ -179,3 +179,13 @@ AI 工具只调用扫描、提案和只读状态；apply/build 的接口返回 a
 3. 所有新增 API 有权限、错误码、幂等和审计验证。
 4. `docs/system-design.md` 已更新，Doca 最新版本回读确认文本、节点和连线；不能用旧 seq 或“已提交”代替保存确认。
 5. PR 描述列出架构影响、文档章节、Doca 链接、验证命令、已知限制和未实现 provider。
+
+
+## T015 本轮实施计划：受绑定的 ClickHouse 核验
+
+1. 先固化 `contracts/api.md` 的可选 target telemetry binding、固定时间窗、独立结果和过期 CAS。
+2. 复用纯证据判定并拆开平台 service ID 与 SDK service/name/version；新增有界 reader 查询模块和身份/时间/目录负向测试。
+3. 增加非破坏 `telemetry_json` 迁移及管理员手动核验 API；单槽并发保护，查询前后核对 deployment/target/release，拒绝后续批准操作取代的部署。GET/AI 标注旧结果过期。
+4. Web 目标编辑加入可选绑定，部署详情展示独立核验结果及固定窗口；明确 SDK 版本/实例要求和证据限制。
+5. API 覆盖持久化、权限、严格 body、未配置、查询失败、单槽、回滚/目标修改/新部署竞态；执行类型检查、测试和前端构建。
+6. 同步仓库设计及 PR #25；Doca 不可访问时维持发布门未通过，记录真实阻塞。源码隔离 Builder、真实 Linux/ClickHouse 验收、自动补偿仍不在本切片内。

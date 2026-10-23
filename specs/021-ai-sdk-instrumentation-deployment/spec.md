@@ -18,7 +18,7 @@
 - `runtime/src/server/service-deployments.ts` 持久化 service/target/release/deployment 元数据和脱敏 deployment events。管理员 `approve` 在 Agent 就绪后要求至少一个 typed action 和带 capability 的 health_check，然后原子创建不可变 Agent job 并推进到 `agent_ready`。管理员可取消未审批计划；已批准计划仅在 Agent job 仍排队时允许原子取消，Agent 已领取后取消请求返回冲突，不宣称远端执行已停止。中心将 Agent 的单调阶段回执映射到部署状态；最终成功必须来自 verifying 状态且含 `health.healthy=true`。未领取 job 过期可安全取消；Agent 端执行取消、租约过期和不完整成功回执均保留 unknown，不推断目标机已恢复或失败。中心后台定期清理 job 过期状态，事件状态与 receipt 在同一 SQLite 事务内更新。
 - service target 可请求 Agent 执行只读 systemd preflight。Agent 只检查登记的 unit 与 release directory，返回固定字段的状态快照；中心保存结果，后续部署计划可绑定最近一次通过的快照。该预检不会运行部署动作或 shell，也不包含制品上传/下载，因此部署审批仍会安全拒绝缺少可执行 typed actions 的计划。
 - 部署工作台只有在计划明确为 ready 且包含 actions/capabilities 时显示批准按钮。目标需先通过 Agent 只读 systemd 预检，并选择已校验的 ready bundle；缺少预检、制品或执行动作时不能审批。
-- `runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定。只读 systemd preflight 已通过 Agent job 检查目标 unit 和 release directory；Agent 回报部署健康检查通过只代表计划内的 Agent 检查，不代表中心已查询 ClickHouse 遥测。受控源码构建、真实 ClickHouse 查询和自动补偿仍未接入；人工确认的 systemd 回滚 job 仅支持恢复已登记的 previous release。
+- `runtime/src/deployment/verification.ts` 已提供中心侧有界健康/遥测证据判定。只读 systemd preflight 已通过 Agent job 检查目标 unit 和 release directory；Agent 回报部署健康检查通过只代表计划内的 Agent 检查，不能替代独立的中心 ClickHouse 遥测核验。本轮接入显式绑定、管理员手动触发的有界 ClickHouse reader 查询，结果独立于健康结论并检测过期；受控源码构建、真实 ClickHouse/业务主机验收和自动补偿仍未完成；人工确认的 systemd 回滚 job 仅支持恢复已登记的 previous release。
 - Assistant 目前提供扫描、只读插桩提案、管理员确认后的插桩 apply、服务列表、部署计划提案和部署状态读取工具。构建、真实部署编排和回滚工具仍未提供；Agent job 的拉取、能力执行和回执由 Agent 运行时独立完成。
 - `docker_compose` 目前最多作为目标元数据被登记，尚无对应适配器或执行器；只有注册到 registry 的 provider 才能执行，不能把登记成功解释为 provider 已支持。
 - 业务制品与激活契约已在本轮收敛为 `lightmoni-release-v1.tar.gz`：受限 USTAR gzip 包、根目录 `manifest.json` 与可执行 `run` 入口；内容存入中心私有 digest-addressed 目录，Agent 仅能在有效 job lease 下下载。目标 systemd unit 必须预先使用 `<release_directory>/current/run`，Agent 将 `current` 原子切换为 `releases/<version>` 相对符号链接；LightMoni 不改写任意 unit。此契约先于完整构建 worker 实现，当前 status 仍以任务表为准。
@@ -182,3 +182,8 @@ LightMoni 已经有 AI 对话、Pi 代码任务、SDK 上报、受管主机和�
 6. **恶意输入**：任意 shell、越界路径、错误 unit、digest 不匹配和过期 job 均在 Agent 执行前拒绝并审计。
 7. **并发 revision**：用户在 AI 计划生成后修改源码，应用接口拒绝旧 revision，要求重新扫描，不能覆盖新文件。
 8. **重复请求**：相同 deployment/job ID 重试不重复复制、启停或计费，中心返回之前的结构化回执。
+
+
+### T015 本轮需求：部署完成后的匹配遥测
+
+管理员可为部署目标显式绑定 SDK 服务名、稳定实例 ID 和业务公开表，按发布版本精确核验部署完成后五分钟内的数据。管理员手动触发有界只读查询，接收一条匹配数据即可标记遥测已核验；没有数据、目录不可用或查询失败均独立显示，不改变 Agent 健康部署结论。配置和部署状态变化、回滚或新批准操作会使旧结论失效。系统不得从模型声明、平台 service ID 或其他实例的数据推断已完成接入。SDK 版本与实例需用户实际配置，自动源码构建与注入仍待后续。

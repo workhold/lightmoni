@@ -9,6 +9,7 @@ import type { Context, Dependencies, Handler, Module } from "../shared/types.js"
 import { deploymentAdapters } from "../deployment/index.js";
 import { assertReleaseBundleHasNoCredentials, parseReleaseBundle } from "../deployment/release-bundle.js";
 import { ReleaseArtifactError, ReleaseArtifactStore } from "../deployment/artifact-store.js";
+import { queryDeploymentTelemetry, validateTelemetryBinding } from "../deployment/telemetry-query.js";
 import type { AgentJobStore } from "./agent-jobs.js";
 
 /**
@@ -165,7 +166,7 @@ const releaseView = (row: any) => ({
   created_at: row.created_at,
   created_by: row.created_by,
 });
-const deploymentView = (row: any) => ({
+const baseDeploymentView = (row: any) => ({
   id: row.id,
   service_id: row.service_id,
   target_id: row.target_id,
@@ -211,7 +212,12 @@ const safeTargetConfig = (adapter: string, raw: Record<string, any>) => {
   if (!isAbsolute(releaseDirectory) || releaseDirectory === "/" || normalize(releaseDirectory) !== releaseDirectory
     || releaseDirectory.includes("\\") || releaseDirectory.split("/").includes("..") || /[\s\u0000-\u001f\u007f]/.test(releaseDirectory))
     fail(400, "invalid systemd release directory");
-  return { unit, release_directory: releaseDirectory };
+  if (raw.telemetry === undefined) return { unit, release_directory: releaseDirectory };
+  try {
+    return { unit, release_directory: releaseDirectory, telemetry: validateTelemetryBinding(raw.telemetry) };
+  } catch {
+    fail(400, "invalid config.telemetry");
+  }
 };
 
 /** Register service inventory and approval-ready delivery plan APIs. */
@@ -225,6 +231,7 @@ export function registerServiceDeployments(
   // upload/validation at a time per center process; do not build an unbounded
   // queue while the event loop is busy.
   let artifactWork: "upload" | "maintenance" | undefined;
+  let telemetryWork = false;
   db.exec(`
     CREATE TABLE IF NOT EXISTS services(
       id TEXT PRIMARY KEY,
@@ -291,6 +298,7 @@ export function registerServiceDeployments(
       previous_json TEXT NOT NULL DEFAULT '{}',
       target_snapshot_json TEXT NOT NULL DEFAULT '{}',
       receipt_json TEXT NOT NULL DEFAULT '{}',
+      telemetry_json TEXT NOT NULL DEFAULT '{}',
       error TEXT NOT NULL DEFAULT '',
       error_code TEXT NOT NULL DEFAULT '',
       phase TEXT NOT NULL DEFAULT 'awaiting_approval',
@@ -334,6 +342,7 @@ export function registerServiceDeployments(
     ["operation_id", "TEXT NOT NULL DEFAULT ''"],
     ["operation_kind", "TEXT NOT NULL DEFAULT 'deploy'"],
     ["approved_by", "TEXT NOT NULL DEFAULT ''"],
+    ["telemetry_json", "TEXT NOT NULL DEFAULT '{}'"],
   ] as const) {
     if (!columns.has(name)) db.exec(`ALTER TABLE deployments ADD COLUMN ${name} ${definition}`);
   }
@@ -468,6 +477,9 @@ export function registerServiceDeployments(
     const config = {
       unit: typeof rawConfig.unit === "string" ? rawConfig.unit : "",
       release_directory: typeof rawConfig.release_directory === "string" ? rawConfig.release_directory : typeof rawConfig.releaseDirectory === "string" ? rawConfig.releaseDirectory : "",
+      // Preserve revisions for old unbound targets; a new binding is part of
+      // the reviewed configuration and invalidates earlier plans/preflights.
+      ...(rawConfig.telemetry === undefined ? {} : { telemetry: rawConfig.telemetry }),
     };
     const revision = createHash("sha256").update(JSON.stringify({
       target_id: target.id, service_id: target.service_id, machine_id: target.machine_id,
@@ -475,6 +487,52 @@ export function registerServiceDeployments(
       port: machine.port, username: machine.username,
     })).digest("hex");
     return { target, machine, config, revision };
+  };
+  const telemetryContext = (deployment: any) => {
+    if (deployment.status !== "succeeded" || deployment.operation_kind !== "deploy"
+      || !deployment.operation_id || !deployment.approved_at || !Number.isFinite(Date.parse(deployment.finished_at)))
+      fail(409, "deployment_telemetry_not_ready");
+    const receipt = parse<any>(deployment.receipt_json, {});
+    if (!options.jobs || receipt.state !== "succeeded" || !receipt.job_id)
+      fail(409, "deployment_health_unverified");
+    const job = db.get<any>("SELECT rowid AS approval_order,* FROM agent_jobs WHERE id=? AND deployment_id=? AND operation_id=?", receipt.job_id, deployment.id, deployment.operation_id);
+    if (!job || job.state !== "succeeded" || parse<any>(job.receipt_json, {}).snapshot?.health?.healthy !== true)
+      fail(409, "deployment_health_unverified");
+    const plan = parse<any>(deployment.plan_json, {});
+    const snapshot = parse<any>(deployment.target_snapshot_json, {});
+    const current = currentTarget(deployment.service_id, deployment.target_id);
+    if (current.target.status === "disabled" || plan.target_revision !== current.revision
+      || snapshot.id !== current.target.id || snapshot.service_id !== deployment.service_id
+      || snapshot.machine_id !== current.target.machine_id || snapshot.adapter !== current.target.adapter
+      || JSON.stringify(snapshot.config) !== JSON.stringify(parse(current.target.config_json, {})))
+      fail(409, "deployment_target_changed");
+    // Job rowid is the durable approval order, even when two approvals share
+    // a clock timestamp or plans were created in the opposite order. Merely
+    // drafting another deployment does not supersede a successful release.
+    if (db.get("SELECT 1 FROM agent_jobs j JOIN deployments d ON d.id=j.deployment_id WHERE d.target_id=? AND j.rowid>? AND d.id<>? LIMIT 1", deployment.target_id, job.approval_order, deployment.id))
+      fail(409, "deployment_superseded");
+    const release = db.get<any>("SELECT * FROM releases WHERE id=? AND service_id=?", deployment.release_id, deployment.service_id);
+    if (!release || release.status !== "ready" || !RELEASE_VERSION.test(release.version)
+      || plan.release_id !== release.id || plan.release?.version !== release.version)
+      fail(409, "deployment_release_changed");
+    const guard = createHash("sha256").update(JSON.stringify({
+      id: deployment.id, status: deployment.status, operation: deployment.operation_id, kind: deployment.operation_kind,
+      finished: deployment.finished_at, approved: deployment.approved_at, plan: deployment.plan_json,
+      snapshot: deployment.target_snapshot_json, receipt: deployment.receipt_json, revision: current.revision,
+      release: { id: release.id, version: release.version, status: release.status, digest: release.artifact_digest, manifest: release.manifest_json },
+      job: { id: job.id, receipt: job.receipt_json },
+    })).digest("hex");
+    return { guard, release, binding: snapshot.config?.telemetry };
+  };
+  const deploymentView = (row: any) => {
+    const stored = parse<any>(row.telemetry_json, {});
+    let telemetry = null;
+    if (stored.result && typeof stored.guard === "string") {
+      let stale = true;
+      try { stale = telemetryContext(row).guard !== stored.guard; } catch { /* Historical evidence stays visibly stale. */ }
+      telemetry = { ...stored.result, stale };
+    }
+    return { ...baseDeploymentView(row), telemetry };
   };
   const latestPreflight = (serviceID: string, targetID: string) => {
     const current = currentTarget(serviceID, targetID);
@@ -1072,6 +1130,38 @@ export function registerServiceDeployments(
     const deployment = deploymentRow(ctx.params.deploymentId);
     if (deployment.service_id !== ctx.params.id) fail(404, "部署记录不存在");
     ctx.json(events(ctx.params.deploymentId));
+  }));
+  router.post("/api/v1/deployments/:deploymentId/verify-telemetry", safe(deps, async (ctx) => {
+    admin(deps, ctx);
+    const input = await body(ctx);
+    if (Object.keys(input).length !== 0) fail(400, "invalid telemetry verification request");
+    if (telemetryWork) fail(503, "telemetry_verification_busy");
+    const deployment = deploymentRow(ctx.params.deploymentId);
+    const before = telemetryContext(deployment);
+    telemetryWork = true;
+    try {
+      const now = deps.now(), finished = Date.parse(deployment.finished_at);
+      const result = before.binding === undefined ? {
+        state: "unconfigured", code: "telemetry_unconfigured", serviceId: deployment.service_id, deploymentId: deployment.id,
+        selector: null, serviceVersion: before.release.version, observedSamples: 0, minSamples: 1,
+        from: new Date(finished).toISOString(), to: new Date(finished + 5 * 60_000).toISOString(),
+        deadline: new Date(finished + 6 * 60_000).toISOString(), checkedAt: now.toISOString(),
+      } : await queryDeploymentTelemetry({
+        reader: deps.reader, cat: deps.cat, serviceId: deployment.service_id, deploymentId: deployment.id,
+        binding: before.binding, serviceVersion: before.release.version, finishedAt: deployment.finished_at, now, signal: ctx.signal,
+      });
+      if (ctx.signal.aborted) fail(409, "telemetry_verification_cancelled");
+      const view = db.transaction(() => {
+        const current = deploymentRow(deployment.id);
+        if (telemetryContext(current).guard !== before.guard) fail(409, "deployment_telemetry_context_changed");
+        db.run("UPDATE deployments SET telemetry_json=? WHERE id=?", JSON.stringify({ guard: before.guard, result }), deployment.id);
+        appendEvent(deployment.id, "telemetry", current.status, ctx.user.id, "管理员已核验部署完成后的匹配遥测；结果独立于服务健康状态", result.code);
+        return deploymentView(deploymentRow(deployment.id));
+      });
+      ctx.json(view);
+    } finally {
+      telemetryWork = false;
+    }
   }));
   router.post("/api/v1/deployments/:deploymentId/approve", safe(deps, async (ctx) => {
     admin(deps, ctx);

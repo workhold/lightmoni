@@ -57,3 +57,34 @@ test("healthy service is explicitly successful but telemetry-unverified", () => 
   assert.equal(verified.state, "succeeded");
 });
 
+test("deployment telemetry separates platform ID from exact SDK identity and release version", () => {
+  const bound = { ...request, selector: { service: "orders SDK", instance_id: "pod/节点-a" }, serviceVersion: "v2" };
+  const sample = { service: "orders SDK", instanceId: "pod/节点-a", serviceVersion: "v2", eventTime: "2026-10-22T00:00:30.000Z", ingestedAt: "2026-10-22T00:00:31.000Z" };
+  const result = verifyTelemetry(bound, [sample,
+    { ...sample, service: request.serviceId }, { ...sample, instanceId: "other" },
+    { ...sample, serviceVersion: "v1" }, { ...sample, serviceVersion: undefined },
+    { ...sample, ingestedAt: undefined }, { ...sample, ingestedAt: "2026-10-21T23:59:59.999999999Z" },
+    { ...sample, ingestedAt: "2026-10-22T00:02:00.000000001Z" },
+  ], new Date("2026-10-22T00:02:00.000Z"));
+  assert.equal(result.state, "verified");
+  assert.equal(result.serviceId, request.serviceId);
+  assert.equal(result.observedSamples, 1);
+});
+
+test("telemetry UTC nanosecond boundaries cannot accept pre-window or future evidence", () => {
+  const sample = { service: request.serviceId, instanceId: request.instanceId, eventTime: "2026-10-22T00:00:30Z" };
+  const result = verifyTelemetry(request, [
+    { ...sample, eventTime: "2026-10-21T23:59:59.999999999Z" },
+    { ...sample, eventTime: "2026-10-22T00:00:30.000000001Z" },
+    { ...sample, eventTime: "2026-10-22T00:00:30Z" },
+    { ...sample, eventTime: "2026-10-22T00:00:29.999999999Z" },
+    { ...sample, eventTime: "2026-10-22T00:00:00Z" },
+    { ...sample, eventTime: "2026-02-30T00:00:20Z" },
+  ], new Date("2026-10-22T00:00:30Z"));
+  assert.equal(result.observedSamples, 2);
+  const beforeStart = verifyTelemetry(request, undefined, new Date(request.from));
+  assert.equal(beforeStart.state, "waiting");
+  assert.equal(beforeStart.observedSamples, 0);
+  assert.equal(verifyTelemetry(request, [], new Date("invalid")).state, "invalid");
+});
+

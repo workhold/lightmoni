@@ -117,10 +117,10 @@ git diff --check
 2. 生成插桩 diff，修改 workspace 后尝试 apply，确认 revision conflict；恢复后由管理员 apply 并核对 changed files。
 3. 为目标机器登记 systemd unit 和受控 release directory，通过 Agent `systemd.probe` 执行只读预检；检查状态诊断和有效期展示，修改目标配置后确认旧快照失效；未激活 Agent 时确认 deployment approve 被拒绝。
 4. 激活 Agent，创建 systemd plan，核对 typed actions、制品 digest、previous snapshot 和 review URL。
-5. 管理员 approve，观察 Agent 事件和健康检查；用中心查询验证新 batch，核对 deployment timeline。
-6. 用故意失败的 health check 触发 rollback，确认旧版本恢复且 Agent 仍心跳。
+5. 管理员 approve，观察 Agent 事件和健康检查；SDK 配置稳定实例及与 release 相同的版本，手动核验部署完成后的匹配数据，核对独立摘要、固定窗口和 deployment timeline。
+6. 健康检查失败后，管理员先执行新的安全预检，再显式确认回滚；核对旧版本恢复且 Agent 仍心跳。系统不会自动补偿。
 7. 模拟 Agent 断线/进程重启，确认状态为 unknown/重探测，不发生盲目重复 restart。
-8. 在 Doca 写入前读取最新版本；保存后回读设计文本、流程图节点和边。图应包含源码 workspace、SDK 扫描/人工确认/构建、Agent preflight、systemd 计划、管理员批准、已接入的 Agent job/executor 协议以及待实现的真实验证/回滚边界。
+8. 在 Doca 写入前读取最新版本；保存后回读设计文本、流程图节点和边。图应包含源码 workspace、SDK 扫描/人工确认/构建、Agent preflight、systemd 计划、管理员批准、已接入的 Agent job/executor 协议以及独立遥测核验、受限人工回滚及待完成的真实环境验收边界。
 
 ## PR 发布前检查
 
@@ -129,5 +129,23 @@ git diff --check
 - [x] `docs/system-design.md` 与 SDD/contracts 已同步本轮安全架构；Doca 对应原生图块增量仍未完成。
 - [ ] Doca 原生图块已写入并回读节点和连线；当前执行环境缺少受保护的 bearer-token 运行时凭据，且浏览器显示资源不可访问，恢复安全访问后补齐并更新本 PR。
 - [ ] 管理员审批、secret 脱敏、SSH 清理提示和错误码均有 UI/AI 展示。
-- [x] 根目录 `npm test` 和 `npm run typecheck` 通过；Agent 只读 preflight、release bundle 上传/下载/安全解包、systemd typed actions 和管理员确认的回滚闭环已实现并由测试覆盖，真实 Linux 主机验证、受控源码构建、中心遥测验证和自动补偿仍待实现。
+- [x] 根目录 `npm test` 和 `npm run typecheck` 通过；Agent 只读 preflight、release bundle 上传/下载/安全解包、systemd typed actions 和管理员确认的回滚闭环已实现并由测试覆盖，真实 Linux 主机验证、显式绑定的中心遥测手动核验已接入；真实 ClickHouse 验收、受控源码构建和自动补偿仍待完成。
 - [x] PR #25 已创建并保持待审核；未经用户明确授权不合并。
+
+
+## 2026-10-23 T015：部署后独立遥测核验
+
+先更新本 SDD spec/plan/API 契约和子任务，再实现。可选 target `config.telemetry` 为严格的业务公开表、SDK service.name 与稳定 service.instance.id；绑定进入 plan snapshot/revision，release.version 作为唯一期望版本。管理员 POST verify-telemetry 只接受 `{}`，要求真实 job 健康成功回执。观察窗口固定完成后五分钟、截止六分钟，同时限制事件/入库时间，未配置不查询。目录校验与 reader 查询最多 1000 条身份/时间样本，不读取正文，固定 3 秒执行/5 秒取消、64 MiB 内存/100 万扫描行，每进程一个核验槽。
+
+查询结果单独持久化，不修改健康部署状态；查询前后复核 deployment/operation/finished_at、目标 revision 与 snapshot、release 和全局 job 批准顺序。回滚、目标修改、版本修改或后续批准部署期间，旧查询 409 丢弃。GET 和 AI 只读工具读取持久摘要，不发起查询，并将过期历史结果标为 stale。页面支持可选绑定、SDK 版本/实例要求、独立结果及手动重试。证据仅表明部署完成后匹配数据已入库，不证明部署因果或不可伪造身份。
+
+验证结果：
+
+- 纯判定、reader 查询和真实 preflight/approve/Agent health 回执 API 联合定向测试 27 项通过。覆盖身份/版本、UTC 纳秒与未来时间、旧批次、目录规范/系统/别名/缺列、1000 行、不可用/脱敏、无配置零查询、权限与严格 body、持久化和 AI 读取、单槽，以及目标/release/回滚/后续批准部署竞态。
+- 最终 runtime 全量 302 passed、16 skipped、0 failed。全仓 `npm test` 亦通过：AI runtime 71 passed、TypeScript SDK 18 passed。
+- 最终全仓 `npm run typecheck` 与 Web production build 通过。构建仍有依赖模块指令警告。
+- 独立审查未发现阻塞问题；生成 SQL 连同真实客户端追加的 `FORMAT JSON` 通过 ClickHouse parser。未连接真实 ClickHouse，未做真实 Linux systemd 主机或浏览器页面验收。
+- 已再次 `git fetch origin`，远端功能分支与开始开发时一致，`origin/main` 无遗漏提交。
+- 仓库 `docs/system-design.md` 第 7.5 节流程/时序图、第 8.4 节 API 和当前边界已更新。再次访问 Doca 基线仍显示“文档不存在”，当前环境无 Doca MCP 工具/运行时凭据；本轮没有在线写入或回读，合并发布门仍未通过。
+
+仍待完成：隔离 Linux Builder、真实 Linux/ClickHouse 验收、自动补偿、生产签名、硬存储配额、单包解析峰值优化和后续 provider。本次更新 PR #25，保持未合并。

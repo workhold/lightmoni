@@ -2,7 +2,7 @@
 
 所有接口均挂在 `/api/v1`，需要登录；创建/应用源码变更、构建、Agent 安装、部署、回滚和修改目标仅管理员可用。响应不包含私钥、密码、token 或原始命令输出。
 
-> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现管理员服务目标配置、私有 release bundle 上传/摘要校验、管理员有界孤儿 GC、Agent 只读 systemd preflight、lease 绑定制品下载、受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和人工确认的 systemd 回滚 job。Preflight 通过独立 `systemd.probe` job 检查目标 unit 和受控目录，快照绑定目标配置 revision、最多保鲜 10 分钟；它不推进业务部署状态，也不执行主机写入。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。回滚要求新的结构安全 preflight（允许 unit 处于 active/inactive/failed，但路径、入口、current 指针须安全），显示 current 仍为本次部署版本，且 previous version 关联同一 service 的 ready release；Agent 执行 CAS 切换、restart 和 health check，中心仅在回执健康且 current version 等于 previous 时标记 `rolled_back`。首次部署、目标版本变化、无 previous release 或结果未知不自动回滚/重试。扩展 POSIX ACL 与 systemd 业务进程身份仍由管理员按 MVP 运行前提保证。该闭环不代表中心遥测查询、自动补偿、签名构建、硬配额或真实 Linux 主机验收已实现。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；源码 release 构建仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
+> 这是目标 API 契约，不是当前已部署接口清单。当前实现的 service API 使用 `repository_url`、`adapter`、`config` 等字段；部署切片已实现管理员服务目标配置、私有 release bundle 上传/摘要校验、管理员有界孤儿 GC、Agent 只读 systemd preflight、lease 绑定制品下载、受管理员保护的 `approve`、状态查询、事件查询、Agent 事件序号/状态校验、最终健康回执状态映射和人工确认的 systemd 回滚 job。Preflight 通过独立 `systemd.probe` job 检查目标 unit 和受控目录，快照绑定目标配置 revision、最多保鲜 10 分钟；它不推进业务部署状态，也不执行主机写入。`approve` 要求有 capability 授权的 health_check，创建不可变 Agent job 并推进到 `agent_ready`；Agent 有序回执可推进阶段状态，缺少健康证据/执行期间取消/租约过期记为 `unknown`。回滚要求新的结构安全 preflight（允许 unit 处于 active/inactive/failed，但路径、入口、current 指针须安全），显示 current 仍为本次部署版本，且 previous version 关联同一 service 的 ready release；Agent 执行 CAS 切换、restart 和 health check，中心仅在回执健康且 current version 等于 previous 时标记 `rolled_back`。首次部署、目标版本变化、无 previous release 或结果未知不自动回滚/重试。扩展 POSIX ACL 与 systemd 业务进程身份仍由管理员按 MVP 运行前提保证。本轮新增显式绑定、管理员手动触发的中心遥测查询（见文末实现契约）；自动补偿、签名构建、硬配额和真实 Linux/ClickHouse 验收仍未完成。插桩的只读 propose 已通过 AI 工具提供，管理员 apply HTTP 已接入并执行安全原子写入；源码 release 构建仍待实现。请以 `contracts/README.md` 的当前实现边界和运行时代码为准。
 
 ## 通用约束
 
@@ -194,3 +194,14 @@ Agent 只运行固定参数的 `systemctl show`，读取已登记 release direct
 | `rollback_service_deployment` | 管理员 | 生成受限回滚 job |
 
 所有 apply/approve/rollback 工具都应返回 `approval_required` 或 `operation_id`，不能让模型把工具调用本身当作管理员确认。
+
+
+## 本轮实现契约：部署后管理员遥测核验（T015）
+
+- systemd target 的 `config.telemetry` 可选，配置时必须是严格对象 `{table,service,instance_id}`，全部为非空字符串。`table` 是目录内非系统业务公开表（规范表名、包含 service/instance_id/service_version/event_time/ingested_at）；配置保存只校验字段及标识格式，实际目录存在性与列在核验时检查。它代表 SDK `service.name` 和 `service.instance.id`，不能使用平台随机 service ID 推断。管理员必须让 SDK 配置稳定实例 ID 及 `service.version=release.version`。
+- binding 随 target config 写入部署快照和目标 revision。修改 binding 会使已有预检/计划过期。
+- `POST /api/v1/deployments/:deploymentId/verify-telemetry` 仅管理员，body 必须为 `{}`，不能传 SQL、表、版本或时间。仅 `succeeded`、普通 deploy operation、有效健康回执的部署可核验；当前 target revision 必须仍匹配计划；相同目标有更晚批准的其他部署则拒绝。查询前后均校验状态、operation、finished_at、plan、snapshot、release 和目标 revision，过期结果 409 丢弃。
+- 固定观察窗口 `[finished_at, finished_at+5min)`，查询上界是 `min(now,window.to)`，同时 `ingested_at>=finished_at` 且不晚于核验时刻；截止时间为 finished_at+6min。按 SDK service、instance、release.version 精确匹配。它只证明部署完成后匹配数据已入库，不证明部署因果关系或不可伪造的 SDK 身份；启动/健康检查之前的数据不算证据。截止后仍可手动重试同一固定窗口，不延长窗口。
+- 使用 ClickHouse reader，值参数化，只取五个身份/时间字段，最多 1000 条；不读取日志正文。3 秒执行上限、5 秒取消、64 MiB 查询内存、最多扫描 100 万行；单进程一个核验槽，忙时 `503 telemetry_verification_busy`，不排队。目录/查询失败使用固定 unavailable 码，不回传 SQL、上游异常或原始行。
+- `deployment.telemetry` 为独立持久化摘要：`state` = `unconfigured|verified|waiting|timed_out|unavailable|invalid`，包含固定 code、平台 serviceId/deploymentId、SDK selector、serviceVersion、observedSamples（最多1000、为有界样本数）、minSamples=1、from/to/deadline/checkedAt。未核验旧记录返回 `null`。无配置返回 unconfigured，不发查询；查询失败不修改 deployment.status，不自动回滚。rollback/目标变更/后续批准操作会使旧摘要显示 stale，GET/AI 读取不把旧结果当当前有效核验。
+- Web 提供可选 binding、独立结果和管理员手动核验/重试入口，无自动轮询查询。AI 现有只读部署工具读取摘要，本轮不增加 AI 自动触发查询或写入权限。
