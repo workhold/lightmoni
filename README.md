@@ -53,6 +53,10 @@ docker compose up -d --no-build --wait
 
 更新源码版本后重新运行 `docker compose up -d --build --wait`；查看日志使用 `docker compose logs -f --tail=100`，停止服务使用 `docker compose down`。SQLite、加密主密钥和队列保存在 `lightmoni-state` 卷，随附数据库使用独立的 `lightmoni-telemetry` 卷。备份和恢复时配套保存状态卷、ClickHouse 数据和 `.env`；普通更新保留数据卷。容器提供健康检查、退出宽限时间和日志轮转。
 
+更新 Git 源码或本地 Node 实例不会自动更新已运行的 Docker 容器。部署更新时，在所选目录的 `.env` 中将 `LIGHTMONI_IMAGE` 设为本次固定标签（例如 `lightmoni:main-<提交短号>`），将 `LIGHTMONI_BUILD_REVISION` 设为 `git rev-parse HEAD` 的结果，再执行上述构建和启动命令。镜像的 `org.opencontainers.image.revision` 标签可用于核对源码版本。两种部署方式都从根 Compose 继承相同构建参数。
+
+如果官方 npm、Node 归档或 Debian 下载路径在部署网络中超时，可按 `.env.example` 配置 `LIGHTMONI_NPM_REGISTRY`、`LIGHTMONI_NODE_DIST_URL`、`LIGHTMONI_DEBIAN_MIRROR` 和 `LIGHTMONI_DEBIAN_SECURITY_MIRROR`。缺省仍使用官方源，替换源不会关闭 npm 锁文件 integrity 或 Debian 仓库签名校验；Agent 的 Node 归档始终核对官方发行站的 SHA256 清单。只填写无凭据的公开源地址。具体更新、数据卷沿用和回滚步骤见 [Docker 更新与回滚](deploy/server/README.md)。
+
 管理员可在“主机管理 → 登录终端”打开交互式 SSH 小窗，支持实时命令、全屏和重连；连接前需要确认主机指纹并添加有效私钥。使用与代理配置见 [网页 SSH 终端](docs/machine-terminal.md)。
 
 ## LightMoni Agent、执行节点与 SDK
