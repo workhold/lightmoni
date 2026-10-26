@@ -33,3 +33,9 @@ node runtime/dist/server/admin-cli.js reset-password --name admin
 | `CLICKHOUSE_IMAGE` | `clickhouse/clickhouse-server:26.8` | 数据库镜像 |
 
 示例不增加运行配置项，不通过 `.env` 设置管理员密码；源码构建源参数仍为可选项。架构同步不适用，理由见 spec。
+
+## 指标 Demo 与合入
+
+`examples/metric-demo` 的 `setup` 使用环境变量中的管理员凭据调用既有 API，创建或更新示例 SDK Key、大盘、通知通道、告警组和告警规则；状态与 SDK Key 保存在 git 忽略目录的 0600 文件中，不输出管理员密码或 Key。`start` 默认仅监听 `127.0.0.1:18481`，提供状态查询、normal/slow 模式切换及本地 webhook。`verify` 仅对脚本做 Node 语法校验，不连接真实实例。完整运行前先构建 TypeScript SDK 并使用测试实例。
+
+用户已授权将全部改动推送并合并；合并目标为 `main`，通过现有 PR #27 及 Gitea 合并接口完成，不直接推送 main。

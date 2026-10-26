@@ -1,0 +1,22 @@
+import{createLightMoni}from'../../sdk/typescript/dist/src/index.js';import{admin,readState,saveState}from'./common.mjs';
+const endpoint=(process.env.LIGHTMONI_ENDPOINT??'http://localhost:18380').replace(/\/$/,''),table=process.env.LIGHTMONI_DEMO_TABLE??'metric_demo';if(!/^[a-z][a-z0-9_]{0,47}$/.test(table))throw Error('Invalid demo table');
+const {request,user}=await admin(endpoint);let state;try{state=await readState();}catch{}if(state&&(state.endpoint!==endpoint||state.table!==table))throw Error('Choose a different LIGHTMONI_DEMO_STATE for a different deployment/table');
+state??={endpoint,table};const keys=await request('/keys');if(!state.key||!keys.some(k=>k.id===state.key_id&&k.active)){const key=await request('/keys','POST',{name:'SDK窗口Demo'});state.key=key.key;state.key_id=key.id;await saveState(state);}
+const bootstrap=createLightMoni({service:'metric-demo',env:'demo',instance_id:'demo-bootstrap',endpoint,key:state.key,selfTelemetry:false});bootstrap.record(table,'db.query.duration_ms',{key1:'mysql',key2:'bootstrap'},20,1);await bootstrap.shutdown();
+const make=(title,type,x,y,w,h,sql,options={})=>({id:crypto.randomUUID(),title,type,queries:[{refId:'A',sql}],options:{query_interval:'30s',...options},grid:{x,y,w,h}});
+const filter=`FROM ${table} WHERE service='metric-demo' AND env='demo' AND metric_name='db.query.duration_ms' AND $__timeFilter(window_start)`;
+const dashboard={title:'SDK指标窗口 Demo',description:'双实例每次请求打点；JSON控制端口18481，POST /mode 切换 normal/slow。30秒UTC窗口，P95/P995，分组统计和已有汇总。',range:{from:'now-15m',to:'now'},refresh:5,variables:[],panels:[
+ make('请求次数','stat',0,0,4,4,`SELECT sum(count) AS value ${filter}`),
+ make('平均耗时','stat',4,0,4,4,`SELECT sum(value)/nullIf(sum(count),0) AS value ${filter}`,{unit:'ms'}),
+ make('最大耗时','stat',8,0,4,4,`SELECT metric_max(distribution) AS value ${filter}`,{unit:'ms'}),
+ make('数据库耗时 · 平均 / P95 / P995','line',0,4,8,7,`SELECT $__timeInterval(window_start) AS time,sum(value)/sum(count) AS avg_ms,p95(distribution) AS p95_ms,p995(distribution) AS p995_ms ${filter} GROUP BY time ORDER BY time`,{unit:'ms'}),
+ make('请求速率','line',8,4,4,7,`SELECT $__timeInterval(window_start) AS time,sum(count)/30.0 AS qps ${filter} GROUP BY time ORDER BY time`),
+ make('按实例和操作统计','table',0,11,8,6,`SELECT instance_id,key2,sum(count) AS requests,sum(value)/sum(count) AS avg_ms,p95(distribution) AS p95_ms ${filter} GROUP BY instance_id,key2 ORDER BY instance_id,key2`),
+ make('已有汇总 · 总消费 / 人数 / 人均','table',8,11,4,6,`SELECT sum(value) AS total_spend,sum(count) AS people,sum(value)/sum(count) AS per_person,p95(distribution) AS unavailable_p95 FROM ${table} WHERE metric_name='restaurant.spend' AND $__timeFilter(window_start)`)
+]};
+const existing=(await request('/dashboards')).find(d=>d.id===state.dashboard_id);const saved=existing?await request('/dashboards/'+existing.id,'PUT',{...dashboard,revision:existing.revision}):await request('/dashboards','POST',dashboard);state.dashboard_id=saved.id;await saveState(state);
+if(!state.channel_id){const channel=await request('/notify/channels','POST',{name:'SDK Demo 本地回调',type:'webhook',enabled:true,config:{url:process.env.LIGHTMONI_DEMO_WEBHOOK_URL??'http://host.docker.internal:18481/hook'}});state.channel_id=channel.id;await saveState(state);}
+if(!state.group_id){const group=await request('/alerts/groups','POST',{name:'SDK Demo',enabled:true,members:[user.id],primary:[user.id],channel_ids:[state.channel_id],policies:{P2:{methods:['webhook'],repeat_seconds:60,max_rounds:1,handling_seconds:60}}});state.group_id=group.id;await saveState(state);}
+const rule={name:'SDK Demo · P95耗时超过300ms',kind:'sql',enabled:true,sql:`SELECT p95(distribution) AS value FROM ${table} WHERE service='metric-demo' AND env='demo' AND metric_name='db.query.duration_ms' AND window_start=toStartOfInterval(now(),INTERVAL 30 SECOND)-INTERVAL 30 SECOND`,value_field:'value',source_table_ids:['metric_'+table+'_histogram'],threshold:'300',operator:'gt',interval_seconds:5,window_seconds:120,for_count:1,recovery_seconds:0,severity:'P2',group_ids:[state.group_id],services:['metric-demo'],no_data_policy:'keep'};
+if(state.rule_id)await request('/alerts/rules/'+state.rule_id,'PUT',rule);else {const saved=await request('/alerts/rules','POST',rule);state.rule_id=saved.id;}await saveState(state);
+console.log(JSON.stringify({dashboard:endpoint+'/dashboards/'+state.dashboard_id,rule_id:state.rule_id,table,state:'saved with owner-only permissions; SDK key is not printed'},null,2));

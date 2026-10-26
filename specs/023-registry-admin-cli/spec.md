@@ -13,9 +13,12 @@
 - `reset-password --name <name>` 仅重置已有管理员，保留角色、启用状态、ID、其他用户和其他数据，并在同一事务撤销该用户所有 session。
 - 密码通过无回显终端双次输入，自动化支持 `--password-stdin`；至少 8 个 Unicode 字符、最多 72 UTF-8 字节；不接受明文密码参数，不输出密码/哈希。失败退出非零。
 - 使用与中心一致的 `LIGHTMONI_DATA`（默认 `.lightmoni`，容器 `/data/state`）、SQLite WAL、权限和 bcrypt；不依赖 ClickHouse或启动 HTTP/AI worker。重置不存在的数据目录时拒绝并不创建空库。
+- 用户要求将全部工作区改动推送并合并时，同时纳入已有 `examples/metric-demo` 示例，补充其运行/凭据/静态校验说明；修正引用缺失文件的校验入口，不改变中心、Agent 或 SDK 的行为。
 
 ## 架构影响
 
 适用：新增受本机/容器执行权限保护的运维入口，直接写入既有 SQLite 身份及 session 表；不新增 HTTP 后门。同步 `docs/system-design.md` §20.1/20.4 与 Doca 系统设计基线，并记录最新版本回读及既有图块保留核对。发布地址调整沿用现有中心 + ClickHouse 拓扑。
 
 环境示例补充的架构同步不适用：只整理现有变量及默认值说明，不改变运行环境变量契约、监听映射、组件、存储、凭据用途或部署拓扑。
+
+指标 Demo 补充的架构同步不适用：只演示已有 SDK、管理 API 和本地 webhook，不加入生产部署，不新增中心协议、存储模型或权限边界。

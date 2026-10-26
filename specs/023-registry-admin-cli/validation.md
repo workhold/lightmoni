@@ -19,7 +19,7 @@
 
 ## 双架构容器验收
 
-在 Docker Desktop Linux arm64 宿主执行；arm64 原生运行，amd64 通过模拟执行，随附 ClickHouse 使用宿主架构。构建从干净 Git archive 取源，强制解析官方多架构基础镜像索引，最终镜像的 OCI revision 均为 `7b55205f0b573ed0f289e088d4a8a8fe7dfea999`。后续提交仅补充验收文档与证据。
+在 Docker Desktop Linux arm64 宿主执行；arm64 原生运行，amd64 通过模拟执行，随附 ClickHouse 使用宿主架构。构建从干净 Git archive 取源，强制解析官方多架构基础镜像索引，最终镜像的 OCI revision 均为 `7b55205f0b573ed0f289e088d4a8a8fe7dfea999`。后续提交补充部署文档、环境示例、独立指标 Demo 与验收证据，中心镜像运行模块未修改。
 
 两种架构使用独立 Compose 项目和新建的两个数据卷，均验证：
 
@@ -52,4 +52,10 @@
 
 ## Pull Request
 
-提交前已 fetch 并确认主干仍为 `9432fa5`，相关检查通过。代码与验收记录位于 `codex/docker-release-admin-cli` 功能分支，经 Gitea AGit 提交到目标 `main` 的 [PR #27](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/27)，远端 `refs/pull/27/head` 已核对与本地提交一致。PR 描述包含最终行为、默认内置 ClickHouse 的兼容影响、认证/容器验收、仓库章节、Doca 链接和最新版本回读结果；尚未合并。
+提交前已 fetch 并确认主干仍为 `9432fa5`，相关检查通过。代码与验收记录位于 `codex/docker-release-admin-cli` 功能分支，经 Gitea AGit 提交到目标 `main` 的 [PR #27](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/27)，远端 `refs/pull/27/head` 已核对与本地提交一致。PR 描述包含最终行为、默认内置 ClickHouse 的兼容影响、认证/容器验收、仓库章节、Doca 链接和最新版本回读结果。
+
+## 全部改动提交与合并检查
+
+用户明确授权将全部改动推送并合并到远端 main，因此将此前未跟踪的 `examples/metric-demo` 一并纳入。保留现有示例逻辑，修正指向缺失文件的 `verify` 入口为三个脚本的 Node 语法检查，并补充凭据来源、资源副作用、监听端口、回调地址和状态文件说明。本轮只验证 Demo 语法，未运行针对真实实例的资源创建、上报或告警，不声称 Demo 已完成端到端验收；作为现有 API/SDK 的独立测试示例，架构同步不适用。
+
+合并前重新同步远端 main，无分叉冲突；runtime 类型检查通过，完整测试 321 项中 304 通过、17 项外部环境依赖跳过、0 失败。两份环境示例 8 项配置检查与 Demo 静态检查通过。合并前检查 PR 最新 head、目标分支、mergeable 状态、评审及提交检查；使用绑定最新 head 的正常 PR 合并请求，不 force merge，不直接推送 main。最终合入提交与状态以 [PR #27](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/27) 和远端 main 的回读结果为准。
