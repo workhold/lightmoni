@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-26",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "source_revision": "7b55205f0b573ed0f289e088d4a8a8fe7dfea999",
+  "upload": "512 KiB OCI distribution chunks",
+  "tags": [
+    {
+      "tag": "20261026-admin",
+      "digest": "sha256:51ebf2093ec5e604dc0a6e0f5b6a231caed9e85a2476edb05d37adb00cd72826",
+      "platforms": [
+        {
+          "platform": "linux/amd64",
+          "digest": "sha256:d1969dd556ffc80021c6b6339b8e0a00c1707151cf82ece20f1acf900a57f0a0"
+        },
+        {
+          "platform": "linux/arm64",
+          "digest": "sha256:675873cbbe29a828127435827e596529912a82a0e55c5f6250639de6101974fa"
+        }
+      ]
+    },
+    {
+      "tag": "latest",
+      "digest": "sha256:51ebf2093ec5e604dc0a6e0f5b6a231caed9e85a2476edb05d37adb00cd72826",
+      "platforms": [
+        {
+          "platform": "linux/amd64",
+          "digest": "sha256:d1969dd556ffc80021c6b6339b8e0a00c1707151cf82ece20f1acf900a57f0a0"
+        },
+        {
+          "platform": "linux/arm64",
+          "digest": "sha256:675873cbbe29a828127435827e596529912a82a0e55c5f6250639de6101974fa"
+        }
+      ]
+    }
+  ]
+}

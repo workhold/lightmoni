@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-26",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261026-admin",
+  "source_revision": "7b55205f0b573ed0f289e088d4a8a8fe7dfea999",
+  "platforms": [
+    {
+      "platform": "linux/arm64",
+      "health": true,
+      "static_assets": 9,
+      "uid": 10001,
+      "initialization": true,
+      "password_reset": true,
+      "old_session_rejected": true,
+      "clickhouse_ingest_query": true,
+      "recreation_persists": true,
+      "downloads": [
+        {
+          "file": "lightmoni-go-sdk_0.1.0.tar.gz",
+          "bytes": 50807,
+          "sha256": "a6746c9f22d2066b8a130812a10fb0accf815e8f99b5ce3e609f13835718fd30"
+        },
+        {
+          "file": "lightmoni-python-sdk_0.1.0.tar.gz",
+          "bytes": 31637,
+          "sha256": "31599680ea606884ea9966af544cf432272500dd336bd98263256b31f126c26f"
+        },
+        {
+          "file": "lightmoni-rust-sdk_0.1.0.tar.gz",
+          "bytes": 37446,
+          "sha256": "b021ae2a634e92f88d6ef66a71b06744d766e0425f9f7db37bbfe248c9ab6daa"
+        },
+        {
+          "file": "lightmoni-sdk-0.1.0.tgz",
+          "bytes": 23265,
+          "sha256": "b7ee65824ad4b7f41016fd25a9595981022c0d3f1f00ea956bd30d93737ea6c6"
+        },
+        {
+          "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+          "bytes": 74466429,
+          "sha256": "5c0c4b89a0e5a40d736a4b199a803a93a25c7d8af482a521224f17b413a63632"
+        },
+        {
+          "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+          "bytes": 74145722,
+          "sha256": "9c834a6e2a62ceedf4fa535e0d9abd8641e820308a9707bc2628809a61931357"
+        }
+      ]
+    },
+    {
+      "platform": "linux/amd64",
+      "health": true,
+      "static_assets": 9,
+      "uid": 10001,
+      "initialization": true,
+      "password_reset": true,
+      "old_session_rejected": true,
+      "clickhouse_ingest_query": true,
+      "recreation_persists": true,
+      "downloads": [
+        {
+          "file": "lightmoni-go-sdk_0.1.0.tar.gz",
+          "bytes": 50820,
+          "sha256": "fdc8c2adff68dcc9577cd4badb6e28d2c783b1f054e72b4a212fd779c4fb4a63"
+        },
+        {
+          "file": "lightmoni-python-sdk_0.1.0.tar.gz",
+          "bytes": 31638,
+          "sha256": "fb49669974c90a5387d083e9f370f362f1eb9b2749ac49b3383305f97025adf2"
+        },
+        {
+          "file": "lightmoni-rust-sdk_0.1.0.tar.gz",
+          "bytes": 37441,
+          "sha256": "ad470d1018ffb26175a695ef58dfc1208a4214f4cd4ad89e1ca28cd380aafd27"
+        },
+        {
+          "file": "lightmoni-sdk-0.1.0.tgz",
+          "bytes": 23265,
+          "sha256": "b7ee65824ad4b7f41016fd25a9595981022c0d3f1f00ea956bd30d93737ea6c6"
+        },
+        {
+          "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+          "bytes": 74460632,
+          "sha256": "ed040cac12f503a3d5f4794605a8f5dfa65ffc9489725b8b5598d0afb84d2e57"
+        },
+        {
+          "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+          "bytes": 74148022,
+          "sha256": "6048c868a49f3b8b84f48c5307e6f3cea6c3267997757a153a67675e1906468c"
+        }
+      ]
+    }
+  ]
+}

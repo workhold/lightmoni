@@ -17,6 +17,27 @@
 - 修复首次 WAL 转换锁竞争后，连续 20 轮双进程初始化仅创建一个管理员。
 - 完整 runtime 测试：321 项，304 通过、17 跳过、0 失败（跳过项依赖显式外部验收环境）。
 
-## 发布进度
+## 双架构容器验收
 
-镜像构建、双架构容器验收、远端发布及完整 runtime 测试结果待补充。尚未修改现有部署的管理员或数据卷。
+在 Docker Desktop Linux arm64 宿主执行；arm64 原生运行，amd64 通过模拟执行，随附 ClickHouse 使用宿主架构。构建从干净 Git archive 取源，强制解析官方多架构基础镜像索引，最终镜像的 OCI revision 均为 `7b55205f0b573ed0f289e088d4a8a8fe7dfea999`。后续提交仅补充验收文档与证据。
+
+两种架构使用独立 Compose 项目和新建的两个数据卷，均验证：
+
+- 中心启动前以标准输入初始化管理员，不启动 ClickHouse/HTTP；中心与数据库随后达到健康状态。
+- 容器 Node 实际 `process.arch` 分别为 `arm64`/`x64`，运行 UID 均为 10001；网页首页及其引用静态资源可读，管理员登录及重复网页初始化保护正常。
+- 4 种 SDK 与 2 个 Agent 包下载后逐一核对 SHA256。
+- 通过有效 SDK Key 将真实 OTLP 日志写入 ClickHouse，再由只读 Query API 查询确认。
+- 在线重置密码后旧密码/旧登录 cookie 被拒绝，新密码成功登录。
+- 强制重新创建中心容器后，管理员 ID、新密码、主密钥摘要及 ClickHouse 日志均保留。
+
+跨架构验收 override 显式设置 `platform` 并清除 `build`，验证已打包镜像；这避免宿主 Compose 在本地平台检查时意外进入源码构建。验收完成后只清理本次隔离项目及新建卷，既有 `lightmoni-acceptance` 的服务、管理员和数据卷未修改。
+
+机器记录：[container-report.json](../../docs/evidence/registry-admin-cli/container-report.json)、[Doca 回读记录](../../docs/evidence/registry-admin-cli/doca-sync.json)。
+
+## 注册表发布
+
+发布仓库为 `docker.heyphp.com/lightmoni/lightmoni`。普通 Docker push 遇到 HTTP 413 请求体限制，改为 OCI Distribution API 的 512 KiB 分块上传，复用受保护的 Docker 运行时凭据；凭据与上传会话 URL 不进入仓库或证据。
+
+固定标签 `20261026-admin` 和 `latest` 已发布并分别回读，index digest 均为 `sha256:51ebf2093ec5e604dc0a6e0f5b6a231caed9e85a2476edb05d37adb00cd72826`。两个标签都包含 Linux amd64/arm64 及相应构建证明，远端原始 manifest SHA256 与本地已验收镜像一致。详细记录：[registry-report.json](../../docs/evidence/registry-admin-cli/registry-report.json)。
+
+独立使用 Docker CLI `buildx imagetools inspect` 核对两个标签的 digest 与平台，再分别执行 `docker pull --platform linux/amd64` 和 `docker pull --platform linux/arm64`，均成功。
