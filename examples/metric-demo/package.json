@@ -1,0 +1,1 @@
+{"name":"lightmoni-metric-demo","private":true,"type":"module","scripts":{"setup":"node setup.mjs","start":"node server.mjs","verify":"node --check common.mjs && node --check setup.mjs && node --check server.mjs"},"engines":{"node":">=22"}}

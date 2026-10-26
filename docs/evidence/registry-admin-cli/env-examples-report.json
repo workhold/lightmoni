@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-26",
+  "architecture_sync": "not applicable: example comments, existing defaults and configuration documentation only",
+  "results": [
+    {
+      "sample": ".env.example",
+      "scenario": "default",
+      "passed": true,
+      "host_ip": "0.0.0.0",
+      "published": "8080",
+      "container_port": 8080,
+      "external_url": "http://localhost:8080"
+    },
+    {
+      "sample": ".env.example",
+      "scenario": "custom port and localhost",
+      "passed": true,
+      "host_ip": "0.0.0.0",
+      "published": "18080",
+      "container_port": 8080,
+      "external_url": "http://localhost:18080"
+    },
+    {
+      "sample": ".env.example",
+      "scenario": "loopback proxy and project",
+      "passed": true,
+      "host_ip": "127.0.0.1",
+      "published": "18080",
+      "container_port": 8080,
+      "external_url": "https://lightmoni.example.com"
+    },
+    {
+      "sample": ".env.example",
+      "scenario": "missing database password rejected",
+      "passed": true
+    },
+    {
+      "sample": "deploy/with-clickhouse/.env.example",
+      "scenario": "default",
+      "passed": true,
+      "host_ip": "0.0.0.0",
+      "published": "8080",
+      "container_port": 8080,
+      "external_url": "http://localhost:8080"
+    },
+    {
+      "sample": "deploy/with-clickhouse/.env.example",
+      "scenario": "custom port and localhost",
+      "passed": true,
+      "host_ip": "0.0.0.0",
+      "published": "18080",
+      "container_port": 8080,
+      "external_url": "http://localhost:18080"
+    },
+    {
+      "sample": "deploy/with-clickhouse/.env.example",
+      "scenario": "loopback proxy and project",
+      "passed": true,
+      "host_ip": "127.0.0.1",
+      "published": "18080",
+      "container_port": 8080,
+      "external_url": "https://lightmoni.example.com"
+    },
+    {
+      "sample": "deploy/with-clickhouse/.env.example",
+      "scenario": "missing database password rejected",
+      "passed": true
+    }
+  ]
+}

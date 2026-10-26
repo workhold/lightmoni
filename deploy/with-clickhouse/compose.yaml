@@ -1,36 +1,14 @@
 services:
   lightmoni:
-    # 同时继承根配置的镜像标签、构建源与修订号参数。
+    # 兼容原部署目录；服务、健康依赖与环境变量统一继承根配置。
     extends:
       file: ../../compose.yaml
       service: lightmoni
-    environment:
-      LIGHTMONI_CH_URL: http://clickhouse:8123
-    depends_on:
-      clickhouse:
-        condition: service_healthy
 
   clickhouse:
-    image: ${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.8}
-    environment:
-      CLICKHOUSE_USER: ${LIGHTMONI_CH_USER:-lightmoni}
-      CLICKHOUSE_PASSWORD: ${LIGHTMONI_CH_PASSWORD:?Set LIGHTMONI_CH_PASSWORD in .env}
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-    volumes:
-      - lightmoni-telemetry:/var/lib/clickhouse
-    healthcheck:
-      test: ["CMD-SHELL", "clickhouse-client --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1'"]
-      interval: 5s
-      timeout: 3s
-      start_period: 30s
-      retries: 30
-    stop_grace_period: 60s
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    extends:
+      file: ../../compose.yaml
+      service: clickhouse
 
 volumes:
   lightmoni-state:
