@@ -12,52 +12,49 @@
 
 ## Docker Compose 部署
 
-根目录的 [compose.yaml](compose.yaml) 默认只启动 LightMoni，连接已有 ClickHouse。主服务镜像内置网页、两种 Linux 架构的 LightMoni Agent 安装包和四种record SDK，无需单独部署前端。最终镜像使用 `node:24.15.0-bookworm-slim`；中心、Agent 和当前 SDK 发布流程均不需要 Go 工具链。
-
-在仓库根目录准备配置：
+根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像默认为 `docker.heyphp.com/lightmoni/lightmoni:20261026-admin`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。中心以非 root 用户运行。
 
 ```sh
 cp .env.example .env
 chmod 600 .env
-```
-
-编辑 `.env`，填写 `LIGHTMONI_CH_URL`、`LIGHTMONI_CH_USER` 和 `LIGHTMONI_CH_PASSWORD`。数据库地址使用 ClickHouse 的 HTTP(S) 接口；宿主机上的数据库可以使用 `http://host.docker.internal:8123`，远程数据库使用其域名或 IP，数据库监听地址应允许容器访问。该账号需支持建库、建表、创建视图、读写、创建只读查询用户和授权；服务启动时会初始化 `lightmoni` 数据库和 `lightmoni_reader` 查询账号。
-
-配置 `LIGHTMONI_PORT` 和 `LIGHTMONI_EXTERNAL_URL` 后构建并启动：
-
-```sh
+# 编辑 .env，填写 LIGHTMONI_CH_PASSWORD，按需修改端口和域名。
 docker compose config --quiet
-docker compose up -d --build --wait
+docker compose pull
 ```
 
-打开默认的 `http://localhost:8080` 创建管理员。使用 Nginx 时，把 `LIGHTMONI_EXTERNAL_URL` 设为浏览器访问的 HTTPS 域名；如只允许宿主机反向代理访问，设置 `LIGHTMONI_BIND_ADDRESS=127.0.0.1`。SDK / 执行节点的默认中心上报地址初始使用该工作台地址，也可在“管理后台 → 接入配置”保存多个内网、公网入口。兼容启动脚本 `sh deploy/server/start.sh` 使用同一套根目录配置。
+Compose 已设置好容器内地址 `http://clickhouse:8123`。中心的 `LIGHTMONI_CH_URL`、`LIGHTMONI_CH_USER`、`LIGHTMONI_CH_PASSWORD` 由环境变量注入；ClickHouse 使用同一用户名和密码，允许中心建库、建表、创建只读查询用户和授权。数据库不暴露宿主机端口，中心等待数据库健康后启动。
 
-如果需要同时启动 ClickHouse，使用独立目录 [deploy/with-clickhouse](deploy/with-clickhouse/README.md) 中的 Compose 和 `.env.example`：
-
-```sh
-cd deploy/with-clickhouse
-cp .env.example .env
-chmod 600 .env
-# 编辑 .env，填写 LIGHTMONI_CH_PASSWORD，并按部署环境修改端口和域名。
-docker compose up -d --build --wait
-```
-
-该版本等待 ClickHouse 就绪后启动主服务，数据库端口只在 Compose 网络内开放。根目录和该目录的 `.env` 各自使用，选择对应目录执行命令。
-
-两种配置默认构建 `lightmoni:0.1.0`。使用已发布镜像时，将对应 `.env` 中的 `LIGHTMONI_IMAGE` 改为仓库地址与固定版本，再在对应目录运行：
+系统没有默认管理员或默认密码。首次启动前可通过命令创建：
 
 ```sh
-docker compose pull lightmoni
+docker compose run --rm --no-deps --entrypoint lightmoni-admin lightmoni init --name admin
 docker compose up -d --no-build --wait
 ```
 
-更新源码版本后重新运行 `docker compose up -d --build --wait`；查看日志使用 `docker compose logs -f --tail=100`，停止服务使用 `docker compose down`。SQLite、加密主密钥和队列保存在 `lightmoni-state` 卷，随附数据库使用独立的 `lightmoni-telemetry` 卷。备份和恢复时配套保存状态卷、ClickHouse 数据和 `.env`；普通更新保留数据卷。容器提供健康检查、退出宽限时间和日志轮转。
+密码按无回显提示输入两次，至少 8 个字符且最多 72 个 UTF-8 字节。也可先启动服务，再在首次访问 `http://localhost:8080` 时创建管理员；初始化只允许空用户库。
 
-更新 Git 源码或本地 Node 实例不会自动更新已运行的 Docker 容器。部署更新时，在所选目录的 `.env` 中将 `LIGHTMONI_IMAGE` 设为本次固定标签（例如 `lightmoni:main-<提交短号>`），将 `LIGHTMONI_BUILD_REVISION` 设为 `git rev-parse HEAD` 的结果，再执行上述构建和启动命令。镜像的 `org.opencontainers.image.revision` 标签可用于核对源码版本。两种部署方式都从根 Compose 继承相同构建参数。
+忘记管理员密码时执行：
 
-如果官方 npm、Node 归档或 Debian 下载路径在部署网络中超时，可按 `.env.example` 配置 `LIGHTMONI_NPM_REGISTRY`、`LIGHTMONI_NODE_DIST_URL`、`LIGHTMONI_DEBIAN_MIRROR` 和 `LIGHTMONI_DEBIAN_SECURITY_MIRROR`。缺省仍使用官方源，替换源不会关闭 npm 锁文件 integrity 或 Debian 仓库签名校验；Agent 的 Node 归档始终核对官方发行站的 SHA256 清单。只填写无凭据的公开源地址。具体更新、数据卷沿用和回滚步骤见 [Docker 更新与回滚](deploy/server/README.md)。
+```sh
+docker compose exec lightmoni lightmoni-admin reset-password --name admin
+```
 
-管理员可在“主机管理 → 登录终端”打开交互式 SSH 小窗，支持实时命令、全屏和重连；连接前需要确认主机指纹并添加有效私钥。使用与代理配置见 [网页 SSH 终端](docs/machine-terminal.md)。
+重置只修改指定管理员密码并撤销该用户旧登录会话，保留账号角色和启用状态。中心停止时可用 `docker compose run --rm --no-deps --entrypoint lightmoni-admin lightmoni reset-password --name admin`。自动化标准输入及源码运行用法见 [管理员操作](deploy/server/README.md#管理员初始化与密码恢复)。
+
+使用 Nginx 时，将 `LIGHTMONI_EXTERNAL_URL` 设为浏览器访问的 HTTPS 域名；如只允许宿主机反向代理访问，设置 `LIGHTMONI_BIND_ADDRESS=127.0.0.1`。SDK/节点默认上报地址初始使用工作台地址，也可在“管理后台 → 接入配置”保存多个入口。`sh deploy/server/start.sh` 使用根配置拉取并启动。原 [deploy/with-clickhouse](deploy/with-clickhouse/README.md) 入口继续兼容，两个服务统一继承根配置；沿用原项目名、`.env` 和卷名。
+
+更新时，在 `.env` 中设置所需固定 `LIGHTMONI_IMAGE`，执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`。仓库也提供 `latest`；生产部署建议固定标签或 digest。发布仓库需要鉴权时先执行 `docker login docker.heyphp.com`。源码构建则填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD` 的结果，并显式执行：
+
+```sh
+docker compose build lightmoni
+docker compose up -d --no-build --pull never --wait
+```
+
+构建源参数仍支持 `LIGHTMONI_NPM_REGISTRY`、`LIGHTMONI_NODE_DIST_URL`、`LIGHTMONI_DEBIAN_MIRROR` 和 `LIGHTMONI_DEBIAN_SECURITY_MIRROR`，默认使用官方源，继续核对 npm integrity、Node 官方 SHA256 和 Debian 仓库签名。地址只填写无凭据公开源。
+
+`lightmoni-state` 卷保存 SQLite、加密主密钥和队列，`lightmoni-telemetry` 卷保存 ClickHouse 数据。普通更新与 `docker compose down` 保留卷；备份和恢复时配套保存两个卷及受限 `.env`。查看日志使用 `docker compose logs -f --tail=100`。更多步骤见 [Docker 更新与回滚](deploy/server/README.md)。
+
+管理员可在“主机管理 → 登录终端”打开交互式 SSH 小窗，连接前需要确认主机指纹并添加有效私钥，见 [网页 SSH 终端](docs/machine-terminal.md)。
 
 ## LightMoni Agent、执行节点与 SDK
 

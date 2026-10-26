@@ -13,6 +13,7 @@
     "test": "npm --prefix runtime test && npm --prefix ai-runtime test && npm --prefix sdk/typescript test",
     "start": "node runtime/dist/server/main.js",
     "agent": "node runtime/dist/agent/main.js",
+    "admin": "node runtime/dist/server/admin-cli.js",
     "release:agent": "node scripts/build-agent-release.mjs",
     "release:sdk": "sh scripts/build-sdk-release.sh"
   }

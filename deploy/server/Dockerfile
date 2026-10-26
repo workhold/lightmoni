@@ -33,6 +33,7 @@ COPY --from=build /work/sdk/typescript/dist/ ./sdk/typescript/dist/
 COPY --from=build /work/ai-runtime/package.json ./ai-runtime/package.json
 COPY --from=build /work/ai-runtime/node_modules/ ./ai-runtime/node_modules/
 COPY --from=build /work/ai-runtime/dist/ ./ai-runtime/dist/
+COPY --chmod=755 deploy/server/admin.sh /usr/local/bin/lightmoni-admin
 ENV LIGHTMONI_ADDR=:8080 LIGHTMONI_DATA=/data/state LIGHTMONI_AI_RUNNER=/opt/lightmoni/ai-runtime/dist/runner.js
 USER lightmoni
 WORKDIR /data

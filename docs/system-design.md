@@ -619,10 +619,11 @@ ClickHouse 写入前后的 SQLite 状态不是跨数据库原子事务；中心�
 cp .env.example .env
 chmod 600 .env
 docker compose config --quiet
-docker compose up -d --build --wait
+docker compose pull
+docker compose up -d --no-build --wait
 ```
 
-根 Compose 默认运行中心并连接外部 ClickHouse；`deploy/with-clickhouse` 提供一起启动的隔离配置。启动时初始化 `lightmoni` 数据库和读账号。升级保留 SQLite、密钥主密钥、队列和 ClickHouse 数据卷；备份必须同时保存状态卷、遥测卷和 `.env`。
+根 Compose 默认同时运行中心与 ClickHouse；`deploy/with-clickhouse` 作为兼容目录继承两个服务。中心使用发布镜像 `docker.heyphp.com/lightmoni/lightmoni:20261026-admin`（Linux amd64/arm64），通过 `LIGHTMONI_CH_URL`（默认 `http://clickhouse:8123`）、`LIGHTMONI_CH_USER/PASSWORD` 接入数据库；ClickHouse 使用同一账号密码环境变量，不向宿主机映射端口，中心等待其健康后启动。启动时初始化 `lightmoni` 数据库和读账号。升级保留 SQLite、加密主密钥、队列和 ClickHouse 数据卷；备份必须同时保存状态卷、遥测卷和 `.env`。源码构建仍可显式 `build lightmoni` 后 `up --no-build --pull never --wait`。
 
 ### 20.2 Agent
 
@@ -631,6 +632,12 @@ docker compose up -d --build --wait
 ### 20.3 关闭顺序
 
 中心停止接收新后台任务，等待可取消请求，关闭 AI worker、通知 outbox、目录轮询、ClickHouse writer 和 SQLite。业务 SDK 先停止生产再在截止时间内 `shutdown`；Agent 先停止采集，再等待队列尝试，最后关闭 HTTP server 和 SQLite。
+
+### 20.4 管理员初始化与密码恢复
+
+系统没有默认管理员或默认密码；空用户库允许网页首次设置，或由有本机/容器执行权限的运维人员运行 `lightmoni-admin init --name <name>`。运维命令直接访问 `LIGHTMONI_DATA/lightmoni.db`（容器 `/data/state`），复用中心 users/sessions 表、bcrypt cost=10 和 SQLite WAL/事务，不启动 HTTP、ClickHouse、AI worker 或主密钥初始化。此入口属于本机状态卷管理边界，不能作为 HTTP 后门或 AI 工具调用。
+
+`reset-password --name <name>` 仅修改已有管理员的 bcrypt 密码哈希，并在同一 `BEGIN IMMEDIATE` 事务清除该用户所有登录会话；不提升成员、不创建未知用户、不改变启用状态。`init` 在事务中重查用户数，仅允许空库创建启用管理员，避免与网页初始化并发覆盖。密码由无回显终端双次输入或显式 `--password-stdin` 单行受限输入提供，至少 8 个 Unicode 字符、最多 72 个 UTF-8 字节；不进入 CLI 参数、Compose 环境、镜像层、日志或文档正文。具体命令与验收见 SDD 023。
 
 ## 21. 可观测性和审计
 
@@ -705,3 +712,4 @@ docker compose up -d --build --wait
 - AI SDK 插桩与业务部署：[SDD 021](../specs/021-ai-sdk-instrumentation-deployment/spec.md)
 - 在线设计副本：[Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)
 - 架构文档双端同步规则：[SDD 020](../specs/020-architecture-design-sync/spec.md)
+- 镜像发布与管理员运维：[SDD 023](../specs/023-registry-admin-cli/spec.md)
