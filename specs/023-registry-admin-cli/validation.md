@@ -42,6 +42,14 @@
 
 独立使用 Docker CLI `buildx imagetools inspect` 核对两个标签的 digest 与平台，再分别执行 `docker pull --platform linux/amd64` 和 `docker pull --platform linux/arm64`，均成功。
 
+## 环境示例与启动端口补充
+
+两份 `.env.example` 均已纳入 Git，内容保持一致，按项目/镜像、监听/访问、数据库、源码构建和可选 AI 配置分组。`LIGHTMONI_PORT` 控制宿主端口，容器端口仍为 8080；`LIGHTMONI_EXTERNAL_URL` 明确要求按实际端口或代理域名同步修改。README 提供变量表和 18080 端口示例。
+
+分别以根目录与兼容目录示例作为真实 `--env-file` 输入解析对应 Compose，8 项检查通过：默认 0.0.0.0:8080、改为 18080 并同步 localhost URL、127.0.0.1 监听与 HTTPS 代理 URL/自定义项目名/数据库账号、空数据库密码拒绝。核对容器端口固定 8080、两端数据库账号密码一致、健康依赖和数据卷项目前缀均正确，ClickHouse 无宿主映射端口。临时密码文件验证后删除，证据不含密码：[env-examples-report.json](../../docs/evidence/registry-admin-cli/env-examples-report.json)。
+
+本次环境示例补充的架构同步不适用：只整理已有环境变量、默认值说明及使用示例，不改变运行组件、监听映射、存储、凭据用途或部署拓扑；未额外改写系统设计/Doca，也无需重新打包镜像。
+
 ## Pull Request
 
 提交前已 fetch 并确认主干仍为 `9432fa5`，相关检查通过。代码与验收记录位于 `codex/docker-release-admin-cli` 功能分支，经 Gitea AGit 提交到目标 `main` 的 [PR #27](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/27)，远端 `refs/pull/27/head` 已核对与本地提交一致。PR 描述包含最终行为、默认内置 ClickHouse 的兼容影响、认证/容器验收、仓库章节、Doca 链接和最新版本回读结果；尚未合并。

@@ -9,3 +9,5 @@
 5. 同步仓库/Doca 运维章节，保存回执并回读；记录测试、发布 digest、源码 revision 和限制。功能分支提交 PR，未经授权不合并。
 
 用户追加要求：根 Compose 纳入既有 ClickHouse 服务，中心默认 `LIGHTMONI_CH_URL=http://clickhouse:8123`，两端复用 `LIGHTMONI_CH_USER/PASSWORD`，健康依赖与状态/遥测命名卷和原随附配置保持一致。`deploy/with-clickhouse` 同时继承两个服务，作为已有部署入口兼容；不对宿主机开放 ClickHouse 端口。
+
+环境示例补充：两份 `.env.example` 优先展示部署所需的镜像、监听地址、宿主端口、外部访问地址和数据库账号，源码构建参数放在后面；README 提供变量表及修改为 18080 的示例。通过两份真实示例解析 Compose，核对默认值、端口覆盖、数据库变量一致性和空密码拒绝。此补充为配置说明整理，架构同步不适用，不重建镜像。

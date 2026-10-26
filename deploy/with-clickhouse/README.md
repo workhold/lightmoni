@@ -2,6 +2,8 @@
 
 根目录现在默认同时启动中心与 ClickHouse；本目录继续保留，两个服务均继承根配置。已有实例继续使用本目录 `.env`、原项目名与原卷名即可。
 
+本目录 [`.env.example`](.env.example) 包含监听地址、宿主端口、外部访问 URL 和数据库配置。通过 `LIGHTMONI_PORT` 修改宿主端口时，同步修改 `LIGHTMONI_EXTERNAL_URL`；容器内部端口固定为 8080。完整变量表和 18080 端口示例见 [根 README](../../README.md#docker-compose-部署)。
+
 ```sh
 cd deploy/with-clickhouse
 cp .env.example .env

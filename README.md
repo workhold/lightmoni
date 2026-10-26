@@ -22,6 +22,30 @@ docker compose config --quiet
 docker compose pull
 ```
 
+完整示例见 [根目录 `.env.example`](.env.example)；兼容部署目录也提供 [`.env.example`](deploy/with-clickhouse/.env.example)。启动相关配置如下：
+
+| 配置项 | 默认值 | 用途 |
+| --- | --- | --- |
+| `COMPOSE_PROJECT_NAME` | `lightmoni` | 项目名；已有实例沿用原值以匹配数据卷 |
+| `LIGHTMONI_IMAGE` | `docker.heyphp.com/lightmoni/lightmoni:20261026-admin` | 中心镜像 |
+| `LIGHTMONI_BIND_ADDRESS` | `0.0.0.0` | 宿主机监听地址；仅本机反向代理访问可设为 `127.0.0.1` |
+| `LIGHTMONI_PORT` | `8080` | 宿主机 HTTP 端口，映射到容器固定端口 8080 |
+| `LIGHTMONI_EXTERNAL_URL` | `http://localhost:8080` | 用户实际访问地址，用于默认上报地址、登录回调和通知链接 |
+| `LIGHTMONI_CH_URL` | `http://clickhouse:8123` | 数据库容器的 HTTP 地址，通常保持默认 |
+| `LIGHTMONI_CH_USER` | `lightmoni` | 中心与数据库共用账号 |
+| `LIGHTMONI_CH_PASSWORD` | 必填 | 数据库密码，可用 `openssl rand -hex 24` 生成 |
+| `CLICKHOUSE_IMAGE` | `clickhouse/clickhouse-server:26.8` | 数据库镜像 |
+
+例如将宿主端口改为 18080，在 `.env` 中同时修改：
+
+```dotenv
+LIGHTMONI_BIND_ADDRESS=0.0.0.0
+LIGHTMONI_PORT=18080
+LIGHTMONI_EXTERNAL_URL=http://localhost:18080
+```
+
+远程访问时将 URL 中的 `localhost` 换成服务器 IP 或域名；经过 HTTPS 反向代理时填写浏览器使用的 HTTPS 域名。修改 `.env` 后执行 `docker compose up -d --no-build --wait` 使配置生效。
+
 Compose 已设置好容器内地址 `http://clickhouse:8123`。中心的 `LIGHTMONI_CH_URL`、`LIGHTMONI_CH_USER`、`LIGHTMONI_CH_PASSWORD` 由环境变量注入；ClickHouse 使用同一用户名和密码，允许中心建库、建表、创建只读查询用户和授权。数据库不暴露宿主机端口，中心等待数据库健康后启动。
 
 系统没有默认管理员或默认密码。首次启动前可通过命令创建：
