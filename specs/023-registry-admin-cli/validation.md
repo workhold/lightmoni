@@ -41,3 +41,7 @@
 固定标签 `20261026-admin` 和 `latest` 已发布并分别回读，index digest 均为 `sha256:51ebf2093ec5e604dc0a6e0f5b6a231caed9e85a2476edb05d37adb00cd72826`。两个标签都包含 Linux amd64/arm64 及相应构建证明，远端原始 manifest SHA256 与本地已验收镜像一致。详细记录：[registry-report.json](../../docs/evidence/registry-admin-cli/registry-report.json)。
 
 独立使用 Docker CLI `buildx imagetools inspect` 核对两个标签的 digest 与平台，再分别执行 `docker pull --platform linux/amd64` 和 `docker pull --platform linux/arm64`，均成功。
+
+## Pull Request
+
+提交前已 fetch 并确认主干仍为 `9432fa5`，相关检查通过。代码与验收记录位于 `codex/docker-release-admin-cli` 功能分支，经 Gitea AGit 提交到目标 `main` 的 [PR #27](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/27)，远端 `refs/pull/27/head` 已核对与本地提交一致。PR 描述包含最终行为、默认内置 ClickHouse 的兼容影响、认证/容器验收、仓库章节、Doca 链接和最新版本回读结果；尚未合并。
