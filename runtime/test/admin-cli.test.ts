@@ -94,7 +94,7 @@ test("concurrent initialization creates exactly one administrator", async t => {
   const dir = mkdtempSync(join(tmpdir(), "lightmoni-admin-race-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const results = await Promise.all([run(dir, args("init", "one")), run(dir, args("init", "two"))]);
-  assert.deepEqual(results.map(r => r.code).sort(), [0, 1]);
+  assert.deepEqual(results.map(r => r.code).sort(), [0, 1], JSON.stringify(results));
   const db = new DB(join(dir, "lightmoni.db"));
   try { assert.equal(db.get<any>("SELECT count(*) n FROM users")!.n, 1); } finally { db.close(); }
 });
