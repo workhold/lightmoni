@@ -1,5 +1,6 @@
 services:
   lightmoni:
+    # 同时继承根配置的镜像标签、构建源与修订号参数。
     extends:
       file: ../../compose.yaml
       service: lightmoni

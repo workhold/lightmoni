@@ -23,6 +23,16 @@ const repo = resolve(fileURLToPath(new URL("..", import.meta.url))),
   output = resolve(process.argv[3] ?? join(repo, "runtime/downloads")),
   nodeVersion = "24.15.0";
 if (!/^[0-9A-Za-z._-]+$/.test(version)) throw Error("Invalid fixed version");
+const officialNodeDistribution = "https://nodejs.org/dist";
+let nodeDistribution;
+try {
+  const url = new URL(process.env.LIGHTMONI_NODE_DIST_URL ?? officialNodeDistribution);
+  if (url.protocol !== "https:" || url.username || url.password || url.href.includes("?") || url.href.includes("#"))
+    throw Error();
+  nodeDistribution = url.href.replace(/\/+$/, "");
+} catch {
+  throw Error("Node distribution URL must use HTTPS without credentials, query or fragment");
+}
 if (!existsSync(join(repo, "runtime/dist/agent/main.js")))
   throw Error("Build the TypeScript SDK and runtime first");
 mkdirSync(output, { recursive: true });
@@ -43,7 +53,7 @@ async function download(file) {
       "--location",
       "--max-time",
       "120",
-      "https://nodejs.org/dist/v" + nodeVersion + "/" + file,
+      (file === "SHASUMS256.txt" ? officialNodeDistribution : nodeDistribution) + "/v" + nodeVersion + "/" + file,
     ],
     { maxBuffer: 128 << 20 },
   );

@@ -1,0 +1,224 @@
+{
+  "application_main_revision": "2a35bf025a821c683bd1854c9a89555913ca4243",
+  "image": "lightmoni:main-2a35bf0-20261025",
+  "image_id": "sha256:adffbacf4739c383470b91a58f7433f7a35a50d93b650a25257bb9f299508394",
+  "platform": "linux/arm64",
+  "dockerfile": "deploy/server/Dockerfile",
+  "compose": "deploy/with-clickhouse/compose.yaml",
+  "existing_instance": "http://localhost:18380",
+  "isolated_instance": "http://127.0.0.1:18890",
+  "build": "passed",
+  "compose_defaults": {
+    "external": {
+      "build_args": {
+        "BUILD_REVISION": "unknown",
+        "DEBIAN_MIRROR": "http://deb.debian.org/debian",
+        "DEBIAN_SECURITY_MIRROR": "http://deb.debian.org/debian-security",
+        "NODE_DIST_URL": "https://nodejs.org/dist",
+        "NPM_REGISTRY": "https://registry.npmjs.org"
+      },
+      "services": [
+        "lightmoni"
+      ]
+    },
+    "bundled": {
+      "build_args": {
+        "BUILD_REVISION": "unknown",
+        "DEBIAN_MIRROR": "http://deb.debian.org/debian",
+        "DEBIAN_SECURITY_MIRROR": "http://deb.debian.org/debian-security",
+        "NODE_DIST_URL": "https://nodejs.org/dist",
+        "NPM_REGISTRY": "https://registry.npmjs.org"
+      },
+      "services": [
+        "clickhouse",
+        "lightmoni"
+      ]
+    },
+    "LIGHTMONI_CH_URL_required": true,
+    "LIGHTMONI_CH_PASSWORD_required": true
+  },
+  "node_mirror_validation": {
+    "invalid_public_mirror_urls_rejected": 6,
+    "secret_values_not_reflected": true
+  },
+  "checks": {
+    "initial": {
+      "phase": "initial",
+      "commit": "2a35bf025a821c683bd1854c9a89555913ca4243",
+      "base": "http://127.0.0.1:18890",
+      "health": "ok",
+      "administrator": "verified",
+      "web_assets": 9,
+      "query": "success",
+      "packages": [
+        {
+          "file": "lightmoni-go-sdk_0.1.0.tar.gz",
+          "sha256": "5ab4c55aa3261bddada7506eda4a15034056a5c1177bad1342b222c7642c6ef9",
+          "bytes": 50809
+        },
+        {
+          "file": "lightmoni-sdk-0.1.0.tgz",
+          "sha256": "b7ee65824ad4b7f41016fd25a9595981022c0d3f1f00ea956bd30d93737ea6c6",
+          "bytes": 23265
+        },
+        {
+          "file": "lightmoni-python-sdk_0.1.0.tar.gz",
+          "sha256": "2a3c2600e44b78a515892d6bebec896a3d5085d45161d1964c281a876ee96a9e",
+          "bytes": 31635
+        },
+        {
+          "file": "lightmoni-rust-sdk_0.1.0.tar.gz",
+          "sha256": "41624b6df0be803181a08ea1447250d3563573fc42b091639aea5f7215a02029",
+          "bytes": 37442
+        },
+        {
+          "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+          "sha256": "99bb623f04acbe8cc39e7e2c72d0425639a3a034a3b03809322946b9370f1a9e",
+          "bytes": 74454166
+        },
+        {
+          "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+          "sha256": "d81c585647b35cfb41df74b7224b1029e85b2f4a7626e30a584aa8f3878731b0",
+          "bytes": 74139575
+        }
+      ],
+      "clickhouse_log": "verified",
+      "sqlite_settings": "verified",
+      "passed": true
+    },
+    "after-recreate": {
+      "phase": "after-recreate",
+      "commit": "2a35bf025a821c683bd1854c9a89555913ca4243",
+      "base": "http://127.0.0.1:18890",
+      "health": "ok",
+      "administrator": "verified",
+      "web_assets": 9,
+      "query": "success",
+      "clickhouse_log": "verified",
+      "sqlite_settings": "verified",
+      "passed": true
+    },
+    "external-clickhouse": {
+      "phase": "external-clickhouse",
+      "commit": "2a35bf025a821c683bd1854c9a89555913ca4243",
+      "base": "http://127.0.0.1:18890",
+      "health": "ok",
+      "administrator": "verified",
+      "web_assets": 9,
+      "query": "success",
+      "clickhouse_log": "verified",
+      "sqlite_settings": "verified",
+      "passed": true
+    },
+    "final-image": {
+      "phase": "final-image",
+      "commit": "2a35bf025a821c683bd1854c9a89555913ca4243",
+      "base": "http://127.0.0.1:18890",
+      "health": "ok",
+      "administrator": "verified",
+      "web_assets": 9,
+      "query": "success",
+      "clickhouse_log": "verified",
+      "sqlite_settings": "verified",
+      "passed": true
+    },
+    "existing-baseline": {
+      "phase": "baseline",
+      "url": "http://localhost:18380",
+      "health": "ok",
+      "existing_administrator": "verified",
+      "dashboards": 5,
+      "catalog": 11,
+      "readonly_query": "verified",
+      "passed": true
+    },
+    "existing-deployed": {
+      "phase": "deployed",
+      "url": "http://localhost:18380",
+      "health": "ok",
+      "existing_administrator": "verified",
+      "dashboards": 5,
+      "catalog": 11,
+      "readonly_query": "verified",
+      "main_service_deployment_api": "verified",
+      "main_compiled_artifacts": "verified",
+      "downloaded_packages": [
+        {
+          "file": "lightmoni-go-sdk_0.1.0.tar.gz",
+          "sha256": "9e3ead00694929d7e4d436551cb1472c7fa160d4d0f4514b76c05f6d8894b383"
+        },
+        {
+          "file": "lightmoni-python-sdk_0.1.0.tar.gz",
+          "sha256": "facf8ce70fd11d76c4e866d9e5531d11e1e6305ae5de833676342d7dc77d0e60"
+        },
+        {
+          "file": "lightmoni-rust-sdk_0.1.0.tar.gz",
+          "sha256": "2f3f42b5c4064cacaad36569c34d2720c12564aa19814bdbcc10b528504403f9"
+        },
+        {
+          "file": "lightmoni-sdk-0.1.0.tgz",
+          "sha256": "b7ee65824ad4b7f41016fd25a9595981022c0d3f1f00ea956bd30d93737ea6c6"
+        },
+        {
+          "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+          "sha256": "8ac2b5467c6db1a5baa95507fed4c00ea4390f6419936c5886be9b93d444c921"
+        },
+        {
+          "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+          "sha256": "fb6d69ae2d0a26e3007b0efa56bb1855e3172855172ae5df2b84cf5caaf143d6"
+        }
+      ],
+      "image": "lightmoni:main-2a35bf0-20261025",
+      "image_revision": "2a35bf025a821c683bd1854c9a89555913ca4243",
+      "canonical_compose": "verified",
+      "passed": true
+    },
+    "existing-recreated": {
+      "phase": "recreated",
+      "url": "http://localhost:18380",
+      "health": "ok",
+      "existing_administrator": "verified",
+      "dashboards": 5,
+      "catalog": 11,
+      "readonly_query": "verified",
+      "main_service_deployment_api": "verified",
+      "main_compiled_artifacts": "verified",
+      "image": "lightmoni:main-2a35bf0-20261025",
+      "image_revision": "2a35bf025a821c683bd1854c9a89555913ca4243",
+      "canonical_compose": "verified",
+      "passed": true
+    }
+  },
+  "state_before": {
+    "users": 1,
+    "dashboards": 5,
+    "catalog": 19
+  },
+  "state_after": {
+    "users": 1,
+    "dashboards": 5,
+    "catalog": 19
+  },
+  "master_key": "unchanged",
+  "backups": {
+    "state_bytes": 24381440,
+    "clickhouse_bytes": 7368376320,
+    "protected_local_files": true
+  },
+  "credential_rotation": {
+    "database_credential_rotated": true,
+    "deployment_and_rollback_configuration_updated": true,
+    "verification": "passed",
+    "previous_credential_rejected": true
+  },
+  "architecture_sync": {
+    "applicable": false,
+    "reason": "Existing center + ClickHouse topology and runtime boundaries remain unchanged; build-source, revision metadata and canonical Compose operation only."
+  },
+  "limits": [
+    "Center image validated on Linux arm64; no amd64 center-image build.",
+    "Both Agent archives checked; arm64 bundled Node launcher executed in Linux.",
+    "No live systemd installation or model-provider calls in this deployment check."
+  ],
+  "isolated_test_resources": "removed"
+}
