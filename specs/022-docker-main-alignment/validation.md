@@ -37,4 +37,6 @@
 
 ## 合入
 
-提交前已重新 fetch main 并确认仍为上述基线；相关配置、构建与运行检查通过。配置修正位于功能分支，PR 创建需要 Gitea 登录；尚未合入主干。
+提交前已重新 fetch main 并确认仍为上述基线；相关配置、构建与运行检查通过。配置修正位于 `codex/docker-main-alignment` 功能分支。
+
+2026-10-26 使用本地已登记的 SSH 密钥，通过 Gitea AGit 提交并取得 [PR #26](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/26)，目标为 `main`；远端 `refs/pull/26/head` 已核对与提交一致。无需网页登录或另行提供 API token，尚未合入主干。
