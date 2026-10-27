@@ -343,7 +343,10 @@ class Smoke:
         self.docker("pull", "--platform", self.native_platform, CLICKHOUSE_IMAGE, timeout=900)
         self.check("ClickHouse 26.8 image explicitly pulled")
         network, telemetry, state = (self.run_id + "-" + suffix for suffix in ["network", "telemetry", "state"])
-        self.create("network", network, "--internal")
+        # Use a dedicated bridge with loopback-only published HTTP. Docker's
+        # internal network blocked host ingress on the hosted runners even
+        # while the center's in-container health endpoint returned 200.
+        self.create("network", network)
         self.create("volume", telemetry)
         self.create("volume", state)
         ch_name, center = self.run_id + "-ch", self.run_id + "-center"
