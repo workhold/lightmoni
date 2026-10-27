@@ -55,3 +55,4 @@ rg -n "system-design\.md|SDK.*Agent|Agent.*SDK|Java|C#|PHP|Go|Rust|Ruby" README.
 - 本机 `origin` 指向 `git@github.com:workhold/lightmoni.git`，`remote.pushDefault` 为 `origin`，本地 `main` 的上游调整为 `origin/main`。其他开发者需在自己的克隆中核对相同配置。
 - 本次只更新协作流程文档，不改变系统运行架构；仓库系统设计与 Doca 同步不适用。未修改待审许可证 PR #1 的内容，也未推送 Gitea。
 - 验证：`git diff --check` 通过；本地默认推送远端和 `main` 上游配置回读符合上述约定。
+- 后续按用户授权将上述 GitHub 协作规则 PR #3 与 #1/#4/#5 统一纳入[整合 PR #8](https://github.com/workhold/lightmoni/pull/8)。最终整合验收及状态入口见 [SDD 027](../027-pr-consolidation/validation.md)，不覆盖本节原执行时点的记录。

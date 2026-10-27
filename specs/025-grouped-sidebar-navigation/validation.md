@@ -56,3 +56,4 @@
 - 导航配置共五组十三个唯一路径；成员过滤保留九项入口，隐藏 `/machines`、`/services`、`/operations`、`/admin`。当前分类默认展开、其他分类默认收起、单开或全收以及图标侧栏逻辑沿用原实现；`/operations` 现在能正确匹配当前分类与页面标题。
 - `npm --prefix web run typecheck`、`npm --prefix web run build`（包含 `tsc -b`）及 `git diff --check` 通过。生产产物生成到被忽略的 `runtime/public`；构建仍有第三方 `use client` 与大块体积提示，无构建错误。
 - 整合后的浏览器验收见 [SDD 027 验收记录](../027-pr-consolidation/validation.md)，覆盖管理员十三入口、成员九入口、折叠、中英文、路由保护、窄屏和短屏。仅变更导航展示与原有路由的衔接，系统设计及 Doca 架构同步仍不适用。
+- 本次统一交付为[整合 PR #8](https://github.com/workhold/lightmoni/pull/8)，原 PR #4 的交付状态仅代表原提交时点。

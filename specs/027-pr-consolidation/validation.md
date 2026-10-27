@@ -54,10 +54,10 @@ python3 -m venv /tmp/lightmoni-pr1-sdk-audit-jcdyy0fu/py-venv
 
 ## 文档与差异检查
 
-`git diff --check origin/main` 通过。变更 Markdown 的 75 个本地相对链接目标存在、代码围栏配对，JSON 可解析。针对相对主干的增量执行私钥头、Doca/GitHub token、AWS access key 模式检查，没有命中；这不等同于重新执行全历史秘密审计，原迁移审计范围与限制保留在 SDD 025。
+`git diff --check origin/main` 通过。变更 Markdown 的 77 个本地相对链接目标存在、代码围栏配对，JSON 可解析。针对相对主干的增量执行私钥头、Doca/GitHub token、AWS access key 模式检查，没有命中；这不等同于重新执行全历史秘密审计，原迁移审计范围与限制保留在 SDD 025。
 
 ## 架构与交付边界
 
 架构同步不适用：本次改变许可、SDK 包标识、协作流程、历史调研说明和导航展示，不改变运行组件职责、数据或控制路径、凭据、存储、协议、部署拓扑及 AI 工具边界；无需改写系统设计或 Doca。
 
-整合 PR 是本次统一交付入口；按用户授权在校验后合入，再关闭被覆盖的四个旧 PR。最终操作状态以整合 PR 时间线为准。本次不发布镜像、不更新线上容器或远程 Agent；合入源码后，线上界面仍需构建发布新镜像并升级才会显示。
+[整合 PR #8](https://github.com/workhold/lightmoni/pull/8) 是本次统一交付入口；按用户授权在校验后合入，再关闭被覆盖的四个旧 PR。最终操作状态以整合 PR 时间线为准。本次不发布镜像、不更新线上容器或远程 Agent；合入源码后，线上界面仍需构建发布新镜像并升级才会显示。

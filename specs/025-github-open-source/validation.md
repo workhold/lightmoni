@@ -46,3 +46,7 @@ git diff --check
 ## PR 交付
 
 开源准备改动通过 `chore/github-open-source` 分支提交 [GitHub PR #1](https://github.com/workhold/lightmoni/pull/1)，处于开放、未合并状态；许可证、模块路径和贡献入口在 PR 合入后进入默认分支。本次不自动合并。
+
+## 后续统一交付（2026-10-27）
+
+上述交付状态为原 PR 创建时点。用户随后授权把 #1、#3、#4、#5 整合并合入，开源准备内容已完整纳入[整合 PR #8](https://github.com/workhold/lightmoni/pull/8)；最新测试、兼容影响及最终 PR 状态入口见 [SDD 027](../027-pr-consolidation/validation.md)。
