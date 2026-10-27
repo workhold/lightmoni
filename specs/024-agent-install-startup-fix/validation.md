@@ -19,3 +19,5 @@
 本次只修改分发安装脚本及检查/文档，不更改打包 Node 或应用内容。源码合并后仍需更新平台镜像/分发目录中的 `install.sh`；本次未发布线上平台，也未登录或修改用户远端主机。若旧安装在激活后回滚，需在平台撤销该节点凭据并创建新的 enrollment token 重装。
 
 架构同步不适用，理由见 [规格](spec.md)。
+
+交付：[PR #28](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/28)，目标 `main`，待审核；未合并、未发布。提交前已 fetch 确认基于最新主干 `5fea503`。
