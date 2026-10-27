@@ -8,6 +8,7 @@ it never invokes Docker and does not claim a docker pull or container execution.
 """
 import argparse
 import base64
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import getpass
 import gzip
 import hashlib
@@ -29,6 +30,9 @@ USERNAME = "liminghan"
 FIXED_TAG = "20261027-operations"
 ARCHES = ("amd64", "arm64")
 CHUNK_SIZE = 512 * 1024
+MAX_BLOB_WORKERS = 6
+UPLOAD_PROGRESS_BYTES = 8 * 1024 * 1024
+UPLOAD_PROGRESS_SECONDS = 30
 UPLOAD_TIMEOUT = 600
 READ_TIMEOUT = 600
 METADATA_LIMIT = 16 << 20
@@ -79,6 +83,29 @@ def putblob(root, data):
 def write_report(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
     path.chmod(0o600)
+
+
+def independent_blobs(worker, values):
+    """Bound independent blob transfers; never replay a failed/uncertain write."""
+    with ThreadPoolExecutor(max_workers=MAX_BLOB_WORKERS) as executor:
+        futures = [executor.submit(worker, value) for value in values]
+        try:
+            return [future.result() for future in as_completed(futures)]
+        except BaseException:
+            # Running transfers may finish their own isolated blob; queued
+            # transfers are cancelled. No manifest/tag write follows a failure.
+            for future in futures:
+                future.cancel()
+            raise
+
+
+def unique_blob(inventory, value):
+    value = descriptor(value)
+    previous = inventory.get(value["digest"])
+    require(previous is None or (previous["size"] == value["size"]
+        and previous.get("mediaType") == value.get("mediaType")),
+        "Conflicting descriptors for the same blob digest")
+    inventory[value["digest"]] = value
 
 
 def prepare(root, revision):
@@ -235,7 +262,11 @@ class RegistryClient:
         location = header(headers, "location")
         require(location, "Registry upload location missing")
         source = blobpath(root, value)
+        source_size = source.stat().st_size
         offset = 0
+        started = time.monotonic()
+        last_progress = started
+        next_progress = UPLOAD_PROGRESS_BYTES
         with source.open("rb") as handle:
             while chunk := handle.read(CHUNK_SIZE):
                 status, headers, _ = self.request("PATCH", location, chunk,
@@ -243,6 +274,12 @@ class RegistryClient:
                 require(status == 202, "Registry did not accept the blob chunk")
                 location = header(headers, "location") or location
                 offset += len(chunk)
+                now = time.monotonic()
+                if offset >= next_progress or now - last_progress >= UPLOAD_PROGRESS_SECONDS or offset == source_size:
+                    print("Blob upload progress", value[:23], "offset", offset,
+                        "elapsed_seconds", round(now - started, 1), flush=True)
+                    next_progress = (offset // UPLOAD_PROGRESS_BYTES + 1) * UPLOAD_PROGRESS_BYTES
+                    last_progress = now
         location += ("&" if "?" in location else "?") + urllib.parse.urlencode({"digest": value})
         status, _, _ = self.request("PUT", location, b"", {"Content-Type": "application/octet-stream"})
         require(status == 201, "Registry did not commit the uploaded blob")
@@ -326,7 +363,8 @@ class IndependentOCIReader:
             "Independent OCI index mismatch")
         manifests = index.get("manifests")
         require(isinstance(manifests, list) and len(manifests) == 2, "Expected a two-platform OCI index")
-        seen, results = set(), []
+        seen, results, pending = set(), [], []
+        unique_layers = {}
         for entry in manifests:
             entry = descriptor(entry)
             platform = entry.get("platform", {})
@@ -347,16 +385,27 @@ class IndependentOCIReader:
             layers = manifest.get("layers")
             require(isinstance(layers, list) and len(layers) == len(config.get("rootfs", {}).get("diff_ids", [])),
                 "Independent OCI layer inventory mismatch")
-            total = 0
-            for number, layer in enumerate(layers, 1):
+            for layer in layers:
                 require(descriptor(layer).get("mediaType") == LAYER_MEDIA, "Unexpected OCI layer media type")
-                total += self.blob(layer)
-                print("OCI layer verified", arch, str(number) + "/" + str(len(layers)), flush=True)
+                unique_blob(unique_layers, layer)
+            pending.append((arch, entry, config_descriptor, layers))
+        require(seen == set(ARCHES), "Independent OCI verification missed an architecture")
+
+        def read_layer(layer):
+            # No shared opener/redirect state between workers. Every transfer
+            # independently hashes its entire response against its descriptor.
+            size = IndependentOCIReader(self.authorization).blob(layer)
+            print("OCI layer verified", layer["digest"][:23], size, flush=True)
+            return layer["digest"], size
+
+        verified_sizes = dict(independent_blobs(read_layer,
+            sorted(unique_layers.values(), key=lambda item: item["size"], reverse=True)))
+        for arch, entry, config_descriptor, layers in pending:
+            total = sum(verified_sizes[layer["digest"]] for layer in layers)
             results.append({"platform": "linux/" + arch, "manifest_digest": entry["digest"],
                 "config_digest": config_descriptor["digest"], "layer_count": len(layers),
                 "compressed_layer_bytes": total, "verified_tags": [FIXED_TAG, "latest"]})
             print("Independent OCI pull verified", arch, flush=True)
-        require(seen == set(ARCHES), "Independent OCI verification missed an architecture")
         return results
 
 
@@ -384,12 +433,28 @@ def publish(root, revision):
     status, _, previous = client.request("GET", "/v2/" + REPOSITORY + "/manifests/" + FIXED_TAG,
         headers={"Accept": INDEX_MEDIA}, allowed=(404,))
     require(status != 200 or digest(previous) == expected_index, "Refusing to overwrite an existing fixed tag")
+    manifests, upload_blobs = [], {}
     for arch in ARCHES:
         body = (root / (arch + "-manifest.json")).read_bytes()
         manifest = json.loads(body)
         require(manifest.get("mediaType") == MANIFEST_MEDIA, "Unexpected prepared image manifest")
         for entry in [manifest["config"], *manifest["layers"]]:
-            client.upload(root, descriptor(entry)["digest"])
+            unique_blob(upload_blobs, entry)
+        manifests.append(body)
+
+    def upload_blob(entry):
+        # Each blob has its own upload session, offset and HTTP opener. A shared
+        # content digest is submitted only once across both architectures.
+        RegistryClient(authorization).upload(root, entry["digest"])
+
+    print("Queued unique blobs", len(upload_blobs), "compressed_bytes",
+        sum(item["size"] for item in upload_blobs.values()), "workers", MAX_BLOB_WORKERS, flush=True)
+    independent_blobs(upload_blob,
+        sorted(upload_blobs.values(), key=lambda item: item["size"], reverse=True))
+    # All independent blobs must succeed before any manifest or tag is written.
+    # These references remain deliberately sequential, including both existing
+    # fixed-tag overwrite checks and the final readback.
+    for body in manifests:
         status, _, _ = client.request("PUT", "/v2/" + REPOSITORY + "/manifests/" + digest(body),
             body, {"Content-Type": MANIFEST_MEDIA})
         require(status == 201, "Registry did not store the image manifest")

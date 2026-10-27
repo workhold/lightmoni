@@ -8,6 +8,10 @@ on:
       - .github/scripts/release-registry.py
       - .github/scripts/inspect-release-downloads.py
 
+concurrency:
+  group: lightmoni-operations-registry-release
+  cancel-in-progress: false
+
 permissions:
   contents: read
   actions: read
@@ -15,7 +19,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 180
     defaults:
       run:
         shell: bash
