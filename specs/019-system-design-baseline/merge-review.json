@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-27",
+  "source_pr": "https://gitea.heyphp.com/lightmoni/lightmoni/pulls/23",
+  "source_main": "a3992bff5627b8142266b9d50785602a86b4c414",
+  "pr17_already_in_main": true,
+  "pr17_landed_via": "Gitea #18",
+  "doca_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "before_seq": 310,
+  "saved_seq": 311,
+  "native_diagrams": [
+    {
+      "block_id": "f-architecture-8a1f",
+      "nodes": 10,
+      "edges": 8,
+      "seq": 311,
+      "identities_endpoints_layout_and_styles_preserved": true
+    },
+    {
+      "block_id": "f-center-modules-7d039612",
+      "nodes": 10,
+      "edges": 9,
+      "seq": 311,
+      "identities_endpoints_layout_and_styles_preserved": true
+    },
+    {
+      "block_id": "f-deployment-2b7c",
+      "nodes": 8,
+      "edges": 7,
+      "seq": 311,
+      "identities_endpoints_layout_and_styles_preserved": true
+    }
+  ],
+  "captions_read_back_equal_to_repository": true,
+  "all_unrelated_blocks_preserved_by_targeted_operations": true,
+  "actual_editor_visual_validation": false,
+  "validation_limit": "MCP native graph structure and paragraph readback verified; no claim of current editor pixel rendering validation."
+}
