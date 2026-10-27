@@ -5,4 +5,6 @@
 - [x] 修复最终 runtime 与已有父目录权限，保持凭据与数据目录权限。
 - [x] 实现有界连续活跃观察与回滚前安全诊断。
 - [x] 权限/启动延迟/短暂活跃/失败/恢复回归与 shell/typecheck/runtime 检查；12 项定向、311 项完整回归通过，16 项环境相关跳过。
-- [x] 更新部署文档、验收记录并推送独立 [PR #28](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/28)；保持未合并。
+- [x] 更新部署文档、验收记录并推送独立 [PR #28](https://gitea.heyphp.com/lightmoni/lightmoni/pulls/28)；交付时未自动合并，后由用户合并。
+- [x] 用户合并 #28 并授权 SSH 后，在指定 Linux amd64 主机使用修复脚本与线上包首装，验证非 root 运行、持续心跳、配置同步与真实主机指标入库；保留服务供用户使用。
+- [ ] Linux arm64、真实升级/回滚与中断恢复验收；未将 amd64 首装扩大为双架构全场景结论。

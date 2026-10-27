@@ -2,7 +2,7 @@
 
 本文说明当前可用部署方式及后续设计。推荐每台 Linux 主机一个独立 systemd Agent，使用专用非 root 用户运行，身份与离线数据放在固定持久目录。Agent 不随业务应用重启、发布或删除；业务通过 SDK 上报或授权日志目录接入。节点助手现在支持一次性 enrollment、pending 激活和独立的 control/data credential；旧节点仍可通过 legacy Key 运行。
 
-本次基线已在中心、安装脚本和运行时测试中实现，但没有执行真实主机安装、升级或发布容器。现有 Node 迁移的 Linux 双架构 systemd 实机验收仍待完成，当前 shell 安装测试使用命令 shim。参见 [验收边界](../specs/007-node-runtime-migration/agent-validation.md)。
+本次基线已在中心、安装脚本和运行时测试中实现。2026-10-27 已用修复安装器与线上 0.1.0 包完成一次 Linux amd64 systemd 首装、真实 enrollment、非 root 运行、配置同步和主机指标入库验收，见 [实机记录](../specs/024-agent-install-startup-fix/validation.md)。arm64、真实升级/回滚和发布容器仍未验收，自动 shell 回归使用命令 shim；不能把该首装结果等同于 Linux 双架构全场景验收。参见 [迁移验收边界](../specs/007-node-runtime-migration/agent-validation.md)。
 
 ## 当前支持范围
 
