@@ -1,18 +1,28 @@
 services:
   lightmoni:
-    image: ${LIGHTMONI_IMAGE:-lightmoni:0.1.0}
+    image: ${LIGHTMONI_IMAGE:-docker.heyphp.com/lightmoni/lightmoni:20261027-agent-install}
+    pull_policy: missing
     build:
       context: .
       dockerfile: deploy/server/Dockerfile
+      args:
+        NPM_REGISTRY: ${LIGHTMONI_NPM_REGISTRY:-https://registry.npmjs.org}
+        NODE_DIST_URL: ${LIGHTMONI_NODE_DIST_URL:-https://nodejs.org/dist}
+        DEBIAN_MIRROR: ${LIGHTMONI_DEBIAN_MIRROR:-http://deb.debian.org/debian}
+        DEBIAN_SECURITY_MIRROR: ${LIGHTMONI_DEBIAN_SECURITY_MIRROR:-http://deb.debian.org/debian-security}
+        BUILD_REVISION: ${LIGHTMONI_BUILD_REVISION:-unknown}
     ports:
       - "${LIGHTMONI_BIND_ADDRESS:-0.0.0.0}:${LIGHTMONI_PORT:-8080}:8080"
     environment:
       LIGHTMONI_ADDR: ":8080"
       LIGHTMONI_DATA: /data/state
       LIGHTMONI_EXTERNAL_URL: ${LIGHTMONI_EXTERNAL_URL:-http://localhost:8080}
-      LIGHTMONI_CH_URL: ${LIGHTMONI_CH_URL:?Set LIGHTMONI_CH_URL in .env}
+      LIGHTMONI_CH_URL: ${LIGHTMONI_CH_URL:-http://clickhouse:8123}
       LIGHTMONI_CH_USER: ${LIGHTMONI_CH_USER:-lightmoni}
       LIGHTMONI_CH_PASSWORD: ${LIGHTMONI_CH_PASSWORD:?Set LIGHTMONI_CH_PASSWORD in .env}
+    depends_on:
+      clickhouse:
+        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -31,5 +41,28 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  clickhouse:
+    image: ${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.8}
+    environment:
+      CLICKHOUSE_USER: ${LIGHTMONI_CH_USER:-lightmoni}
+      CLICKHOUSE_PASSWORD: ${LIGHTMONI_CH_PASSWORD:?Set LIGHTMONI_CH_PASSWORD in .env}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - lightmoni-telemetry:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 30
+    stop_grace_period: 60s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   lightmoni-state:
+  lightmoni-telemetry:

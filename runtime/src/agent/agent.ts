@@ -52,6 +52,7 @@ import {
 import { Collector } from "./collect.js";
 import { FileLogReader } from "./file-logs.js";
 import { checkProbe } from "./probe.js";
+import { AgentJobRunner } from "./jobs.js";
 import {
   ReceiveError,
   requestBytes,
@@ -71,6 +72,7 @@ export class Agent {
   readonly queue: Queue;
   readonly sdk: LightMoni;
   readonly files: FileLogReader;
+  readonly jobs?: AgentJobRunner;
   tasks: RemoteConfig;
   tasksReady = false;
   revision = "";
@@ -140,6 +142,15 @@ export class Agent {
       throw e;
     }
     this.files = new FileLogReader(this);
+    if (config.control_credential) {
+      this.jobs = new AgentJobRunner({
+        endpoint: config.endpoint,
+        agentID: this.identity.agent_id,
+        controlCredential: config.control_credential,
+        dataDir: config.data_dir,
+        pollIntervalMs: Math.max(5000, config.control_interval_seconds * 1000),
+      });
+    }
   }
   private safe(message: string) {
     for (const secret of [
@@ -754,6 +765,10 @@ export class Agent {
       this.files.close();
     }
   }
+  private async jobLoop() {
+    if (!this.jobs) return;
+    await this.jobs.run(this.controller.signal);
+  }
   private async probeLoop() {
     if (!(await this.waitTasks())) return;
     const next = new Map<string, number>(),
@@ -846,6 +861,7 @@ export class Agent {
       this.collectLoop(),
       this.probeLoop(),
       this.fileLogLoop(),
+      this.jobLoop(),
     ];
   }
   async run(parent?: AbortSignal) {

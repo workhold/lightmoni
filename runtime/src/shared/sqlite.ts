@@ -26,10 +26,16 @@ export class DB {
     if (path !== ":memory:")
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.native = new DatabaseSync(path);
-    this.native.exec(
-      "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;",
-    );
-    if (path !== ":memory:") chmodSync(path, 0o600);
+    try {
+      // Apply the timeout before the WAL transition, which can race on first open.
+      this.native.exec(
+        "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;",
+      );
+      if (path !== ":memory:") chmodSync(path, 0o600);
+    } catch (error) {
+      this.native.close();
+      throw error;
+    }
   }
   exec(sql: string): void {
     this.native.exec(sql);

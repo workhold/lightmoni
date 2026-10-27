@@ -11,9 +11,9 @@ import type {
 } from "../shared/types.js";
 import { registerProfiles } from "./profiles.js";
 import { registerOAuth } from "./oauth.js";
+import { accountSchema, validPassword } from "./accounts.js";
+export { validPassword } from "./accounts.js";
 
-export const validPassword = (s: unknown): s is string =>
-  typeof s === "string" && [...s].length >= 8 && Buffer.byteLength(s) <= 72;
 export const validTable = (s: unknown): s is string =>
   typeof s === "string" &&
   /^[a-z][a-z0-9_]{0,47}$/.test(s) &&
@@ -57,9 +57,8 @@ export class Auth implements AuthContract {
     readonly externalURL: string,
     readonly router: Router,
   ) {
-    db.exec(`CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,password_hash TEXT NOT NULL DEFAULT '',role TEXT NOT NULL DEFAULT 'member',active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,expires_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS ingest_keys(id TEXT PRIMARY KEY,name TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,last_used TEXT,upload_batches INTEGER NOT NULL DEFAULT 0,error_count INTEGER NOT NULL DEFAULT 0,allowed_tables_json TEXT NOT NULL DEFAULT '[]',allow_all_tables INTEGER NOT NULL DEFAULT 0);
+    accountSchema(db);
+    db.exec(`CREATE TABLE IF NOT EXISTS ingest_keys(id TEXT PRIMARY KEY,name TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,last_used TEXT,upload_batches INTEGER NOT NULL DEFAULT 0,error_count INTEGER NOT NULL DEFAULT 0,allowed_tables_json TEXT NOT NULL DEFAULT '[]',allow_all_tables INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS key_events(id INTEGER PRIMARY KEY AUTOINCREMENT,key_id TEXT NOT NULL,at TEXT NOT NULL,service TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,detail TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS sdk_exempt_tables(name TEXT PRIMARY KEY,description TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS oauth_providers(id TEXT PRIMARY KEY,config TEXT NOT NULL);

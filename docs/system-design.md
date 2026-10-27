@@ -17,6 +17,12 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 
 “当前”表示代码或验证证据已经存在；“兼容”表示为了已部署版本保留；“目标”表示设计方向，必须经过新的 SDD 和验证才能变成当前能力。本文不以规划代替测试。
 
+### 1.1 变更维护与双端同步
+
+本文的仓库来源是 [`docs/system-design.md`](system-design.md)，在线协作副本是 [Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。任何影响组件职责、数据或控制路径、凭据边界、存储、协议、部署拓扑或 AI/工具边界的架构变更，都必须在同一个 SDD 和 Pull Request 中同步更新这两个位置。
+
+同步时保留 Doca 的原生图块和无关内容；写入成功后使用最新版本回读目标章节或图块，核对文字、节点和连线。Pull Request 必须记录架构影响判断、仓库文档章节、Doca 链接和回读结果。Doca 不可访问、鉴权失败或保存未确认时，不得声称设计已同步。不影响架构的改动填写“不适用”及理由即可；凭据不得写入仓库、日志、URL、Pull Request 或文档正文。
+
 ## 2. 驱动目标
 
 ### 2.1 产品目标
@@ -70,6 +76,10 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 | 批次 | 一个 signal、table、service 和稳定批次 ID 的发送单元 | SDK/Agent/中心链路 |
 | 告警规则 | 对查询结果进行求值并产生 episode 的配置 | 告警域 |
 | 提案 | AI 产生但尚未应用的变更或代码结果 | 中心 SQLite |
+| 业务服务 | 用户希望被打点、构建和部署的逻辑服务 | 中心 SQLite |
+| 服务目标 | 服务在一台登记主机上的运行实例及适配器配置 | 中心 SQLite |
+| 制品版本 | 带版本、来源和 SHA-256 的不可变发布输入 | 中心 SQLite/受控制品存储 |
+| 业务部署 | 将一个制品激活到一个服务目标的可审阅计划 | 中心 SQLite，Agent 执行 |
 
 ### 4.2 系统边界
 
@@ -103,12 +113,12 @@ flowchart LR
   end
   SDK -->|HTTPS / SDK Key| HTTP
   Agent -->|HTTPS / data credential| HTTP
-  Agent -->|心跳与拉配置 / control credential| Control
+  Agent -->|心跳、配置与任务 / control credential| Control
   HTTP -->|校验后写入| CH
   Control -->|节点身份与任务配置| SQLite
 ```
 
-图中的箭头表示调用或发送方向；心跳和拉配置的响应沿原请求返回。任务配置由中心持有，节点主动拉取；这里没有新增中心主动连接 Agent 的入站要求。SDK → Agent 的现有显式转发能力见第 7.2 节，不作为当前推荐的业务主路径，也不因本次图示修正而删除。
+图中的箭头表示调用或发送方向；心跳、拉配置与部署任务的 claim/events/result 使用 control credential，响应沿原请求返回，遥测上报使用 data credential。任务配置由中心持有，节点主动拉取；这里没有新增中心主动连接 Agent 的入站要求。SDK → Agent 的现有显式转发能力见第 7.2 节，不作为当前推荐的业务主路径，也不因本次图示修正而删除。
 
 **用户入口与中心内部模块：**
 
@@ -156,7 +166,7 @@ flowchart TB
   AgentB[用户主机 B：独立 Agent + 同一 SDK] -->|HTTPS / data 与 control 凭据| Proxy
 ```
 
-图中反向代理是可选的：不部署时，这些 HTTPS 请求直接到可访问的中心入口。业务主机与 Agent 主机可以是同一台，也可以分别部署；图中分开表示进程与凭据独立，不要求业务先找到 Agent 的本地端口。TLS 可以由已有反向代理承担。中心外部地址必须能被 Agent 和直连 SDK 访问；容器中 `localhost` 只表示当前容器。发布的 Agent 包为 Linux amd64/arm64，并自带固定 Node 运行时；目标主机不需要另装 Node/npm。
+图中反向代理是可选的：不部署时，这些 HTTPS 请求直接到可访问的中心入口。Agent 的 data 凭据仅用于遥测；control 凭据用于心跳、配置和部署任务的 job claim/events/result。业务主机与 Agent 主机可以是同一台，也可以分别部署；图中分开表示进程与凭据独立，不要求业务先找到 Agent 的本地端口。TLS 可以由已有反向代理承担。中心外部地址必须能被 Agent 和直连 SDK 访问；容器中 `localhost` 只表示当前容器。发布的 Agent 包为 Linux amd64/arm64，并自带固定 Node 运行时；目标主机不需要另装 Node/npm。
 
 ## 6. 组件职责和依赖方向
 
@@ -219,6 +229,110 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 5. 用户在独立页面查看完整变更、影响、版本和回执，再由中心重新校验权限和 revision 后应用。
 6. 每次实际模型请求写入幂等用量账本；模型目录刷新不发送生成请求，测试连接才发送最小真实请求。
 
+### 7.5 SDK 插桩与业务部署流
+
+1. 管理员为业务服务提供已授权的源码 workspace；AI 先调用只读 `scan_sdk_instrumentation`，识别语言、框架、LightMoni SDK、直连/Agent 模式和候选请求/错误边界。
+2. 扫描不导入或执行业务代码，也不写文件。对于可以明确定位的 TypeScript/JavaScript 多行请求边界，AI 调用只读 `propose_sdk_instrumentation` 生成结构化 unified diff、风险、手动步骤和验证命令；Python、Go、Rust、Ruby 或歧义边界只给手动步骤。复杂改写才交给隔离 workspace 的 `code_task`，同样只产生可审阅 diff；所有 diff 都必须经过管理员确认后才应用。
+3. 已确认的 revision 目标上由隔离构建器生成带版本、架构、来源 revision 和 SHA-256 的 release；构建器尚未实现前，systemd MVP 允许管理员上传预构建的 `lightmoni-release-v1.tar.gz`。Manifest 至少包含 `schema_version`、`service_id`、`version`、`architecture`、`source_revision` 和固定 `entrypoint:"run"`。中心上传与 Agent 暂存都会拒绝常见私密凭据路径，以及扫描窗口内匹配到的私钥、知名 token、URL/DSN userinfo、凭据查询参数、Basic Auth 和有值凭据字段；错误不回显匹配内容。该启发式检查不能保证检测所有秘密，bundle 仍只能包含运行文件，运行凭据须由目标主机的独立秘密管理注入。中心只保存元数据与私有 digest-addressed 正文，不能从静态下载路由取到业务制品；生产 Agent 不接收源码仓库凭据或模型密钥。
+4. 管理员为 service 创建一个或多个 service target，登记 systemd unit 与受控 release directory。release 根目录由 root 持有并属于 Agent systemd unit 配置的 `lightmoni-agent` 主组（建议 `0775`，业务服务用户只读且可遍历，并且不得属于 Agent 组）；Agent 的 `ProtectSystem=strict` 沙箱需把该精确目录加入 `ReadWritePaths`。Agent 预检检查根目录 UID/GID 与 POSIX mode 位，要求 root 所有、Agent 有效主组可写、其他用户仅可读/遍历。MVP 不检查扩展 POSIX ACL，也不解析 systemd unit 的业务进程 User/Group/附加组；管理员必须确保业务用户不属于 Agent 组且无 ACL 写权限。unit 必须预先配置稳定入口 `ExecStart=<release_directory>/current/run`；LightMoni Agent 不编辑任意 unit、环境文件或服务用户。release bundle 只放运行所需文件，不能放密钥或环境凭据。MVP 的 `systemd` 适配器覆盖 Node、Python、Go、Rust、二进制和解释器服务；语言不是部署协议。Docker Compose、Kubernetes/Helm 和 CI/GitOps 作为后续适配器。
+5. 管理员可请求目标 Agent 执行 `systemd.probe` 只读预检。Job 仅检查绑定的 unit 与 release directory，通过固定参数读取 systemd 属性和版本指针；输出限定为状态枚举、布尔值、安全版本标识、观测时间、一次性请求 ID、目标配置 revision 和固定错误码，不回传原始命令输出，也不创建目录或改变服务。Agent 确认 `ExecStart` 精确使用登记路径下的 `current/run`；中心校验请求 ID/revision 与观测时间，阻止跨 job 快照重放；路径含符号链接、unit 不符合入口、被 masked 或处于启动/停止过渡态时不标记 ready。文件系统检查仅在支持通过固定目录句柄拒绝符号链接的平台启用；当前实现为 Linux Agent，其他平台报告 `filesystem_check_supported=false` 且不就绪。中心按 target/operation 保存快照，部署计划可附最近 10 分钟且 ready 的预检结果。没有预检、预检过期或快照未就绪都不能得到可执行动作。
+6. 中心执行 `probe → plan → apply → verify → rollback` 的受控计划层，生成 `awaiting_approval` 部署计划。计划只包含 typed actions，不包含 shell 字符串；管理员审批前中心要求 release ready、目标快照新鲜且 ready、manifest 与目标匹配，以及带能力授权的 health_check，随后原子写入不可变 Agent job 并把部署推进到 `agent_ready`。制品上传只允许管理员认证的有界接口；Agent 下载只允许 control credential、当前 lease 和 action 绑定的 agent/release/digest 同时匹配，不接受任意 URL，秘密不进 URL。
+   - 中心 bundle 上传以进程级单槽门限制并行收件与同步校验；槽位占用时不排队并返回 `503 artifact_upload_busy`。管理员可通过 `POST /api/v1/admin/release-artifacts/gc` 先 dry-run 再确认清理超过 24 小时且未被任一 release 引用的私有对象；每轮最多扫描 10,000 项并删除 500 项，且与上传互斥。达到上限时用当前进程内最多有效 5 分钟的不透明游标续扫，游标绑定扫描模式和初始保留期截止时间；每轮重新读取引用。新扫描、进程重启或超时会使旧游标失效。存储祖先必须通过与读取一致的 UID/写权限校验，内部符号链接和硬链接不参与回收。这允许回收旧孤儿，但不消除单个最大 bundle 的解析内存峰值，也不提供硬磁盘配额或集群级协调。
+7. Agent executor 通过 control credential 拉取短时租约 job。中心后台定期处理过期任务，按单调序号接收阶段事件，并将 staging/activating/verifying/final receipt 映射到脱敏部署时间线。只有 verifying 后的最终回执包含 `health.healthy=true` 才标记业务 deployment `succeeded`；未领取 job 可以安全取消或过期取消。普通部署若执行结果未知或成功回执不完整，保留最后确认的部署阶段并将 receipt 标为 `unknown`，要求检查目标主机，不推断为部署失败；回滚操作的未知结果或不匹配回执则结束本次操作，将 deployment 标为 `failed`、receipt 标为 `unknown`，管理员完成新的安全预检后才能显式重试。此状态仅表示 Agent 报告计划内健康检查通过，中心遥测结论独立保存，由管理员显式发起 ClickHouse 核验，不能仅靠健康回执标记遥测成功。
+8. 管理员若要回滚，先为目标执行新的只读 preflight。仅当快照新鲜且结构安全（允许 unit 为 `active`、`inactive` 或 `failed`）、current 仍指向本次部署版本、previous version 是同一 service 下登记的 ready release、Agent 在线时，中心才创建受限 rollback job。Agent 通过 current-pointer CAS 恢复 previous version，随后 restart 并执行 systemd health check；中心同时核对 `health.healthy=true` 和回报的 current version 才转为 `rolled_back`。首次部署、CAS 冲突或旧版本未登记时拒绝创建任务。执行结果未知或回执不匹配会结束当前操作并将部署标为 `failed`、receipt 标为 `unknown`，提示人工检查；系统不自动重试，只有管理员再次执行新鲜安全预检且 current 仍是本次部署版本后，才可显式创建新的回滚操作。
+
+9. 管理员可在 target 的可选 `config.telemetry` 中绑定规范业务公开表、SDK `service.name` 和稳定 `service.instance.id`；绑定进入目标 revision 与不可变部署快照，配置变更会使既有预检/计划和旧核验结果过期。SDK 必须自行设置 `service.version=release.version`；平台随机 service ID 不能用于推断 SDK 服务名。只有普通 deploy 已有有效 Agent 健康成功回执、目标配置仍匹配且没有后续已批准操作时，管理员才能通过 `POST /api/v1/deployments/:deploymentId/verify-telemetry`（严格 `{}`）发起一次核验。
+   - 观察窗口固定为 `[finished_at, finished_at+5min)`，查询时仅观察到 `min(now, window.to)`，并限制 `ingested_at` 在完成时间至核验时刻之间；接收等待截止为完成后 6 分钟。SDK 服务、实例和发布版本均须精确匹配，最多读取 1000 条身份/时间样本。该证据只证明部署完成后的匹配遥测已入库，不证明部署因果关系或 SDK 身份不可伪造，启动及健康检查前的数据不算入本窗口。
+   - 中心从目录验证非系统、规范公开业务表和必需列，使用 ClickHouse reader 参数化值查询；不读取遥测正文或接收任意 SQL。单次最多执行 3 秒、5 秒取消、64 MiB 查询内存和 100 万扫描行；单进程只允许一个核验请求，不排队。查询前后校验状态/operation、完成时间、目标 revision、计划/快照、release 和后续批准 job 顺序，变化时丢弃结果。
+   - SQLite `deployments.telemetry_json` 单独保存脱敏摘要和上下文指纹；GET 与 AI 只读工具显示 `verified/waiting/timed_out/unavailable/invalid/unconfigured`，未核验为 null，过期结论标记 `stale`。查询失败、超时或无配置均不改部署健康状态，不触发自动回滚。Web 仅提供手动核验/重试，无自动查询轮询。
+
+部署的执行、健康结果和独立遥测核验通过以下通道联动：
+
+```mermaid
+sequenceDiagram
+  participant Admin as 管理员
+  participant Center as LightMoni 中心
+  participant Artifact as 私有制品存储
+  participant Agent as LightMoni Agent
+  participant Host as 业务主机/systemd
+  participant SDK as 业务 SDK（独立上报）
+  participant CH as ClickHouse 业务公开视图
+  Admin->>Center: 请求 systemd.probe 只读预检
+  Center->>Center: 绑定目标配置 revision 与 Agent identity
+  Agent->>Center: HTTPS claim（control credential）
+  Center-->>Agent: 单一 systemd_probe action，无写能力
+  Agent->>Host: 固定 argv systemctl show + 读取受控 current 指针
+  Agent->>Center: 固定字段 preflight snapshot（不含原始输出）
+  Center->>Center: 校验 Agent/target revision，保存 10 分钟快照
+  Admin->>Center: 上传已构建的 release bundle
+  Center->>Center: 校验 SHA-256、manifest、大小与 USTAR 路径
+  Center->>Artifact: 原子保存到私有 digest-addressed 存储
+  Admin->>Center: 基于新鲜快照和 ready release 生成服务计划
+  Center->>Center: 绑定 previous version、typed actions 和 artifact 引用
+  Admin->>Center: 审批带 health_check 的 typed plan
+  Center->>Center: 原子创建 job 与 agent_ready 状态
+  Agent->>Center: HTTPS claim（control credential）
+  Center-->>Agent: 不可变 actions、capabilities、lease
+  Agent->>Center: control credential + job lease 请求制品
+  Center->>Center: 校验 agent/job/lease/release/digest 绑定
+  Center->>Artifact: 读取制品流
+  Artifact-->>Agent: gzip USTAR bytes + digest/size headers
+  Agent->>Agent: 校验 SHA-256 并安全解包到 releases/<version>
+  Agent->>Agent: CAS previous version，原子 current symlink 切换
+  Agent->>Center: accepted/staging/activating/verifying 事件
+  Center->>Center: 校验序号与阶段，追加脱敏部署时间线
+  Agent->>Host: allow-list 部署和健康检查动作
+  Agent->>Center: 最终 result 与健康检查回执
+  Center->>Center: 成功/失败/unknown 状态迁移
+  Center-->>Admin: 部署详情和时间线
+  SDK->>Center: 独立 OTLP 上报，携带服务/实例/版本
+  Center->>CH: 正常接收管道写入遥测
+  opt 管理员手动核验部署后遥测
+    Admin->>Center: verify-telemetry 空对象
+    Center->>Center: 验证健康回执、快照绑定和当前部署上下文
+    Center->>CH: reader 固定窗口/身份参数化查询（最多1000条）
+    CH-->>Center: 有界身份和时间样本，无正文
+    Center->>Center: 再次校验上下文；独立保存核验摘要
+    Center-->>Admin: 遥测结果或已过期冲突；健康状态不变
+  end
+  opt 管理员请求取消
+    Admin->>Center: cancel + expected_state
+    alt 尚未批准或 Agent job 仍排队
+      Center->>Center: 原子取消部署与未领取 job
+      Center-->>Admin: cancelled
+    else Agent 已领取
+      Center-->>Admin: 409，要求先核查主机
+    end
+  end
+  opt 管理员请求回滚
+    Admin->>Center: 请求新的 systemd.probe 只读预检
+    Agent->>Host: 读取 current version 与受控 unit 状态
+    Agent->>Center: 回报绑定 revision 的最新快照
+    Admin->>Center: 确认回滚并提交 expected_state
+    Center->>Center: 校验 previous release、当前部署版本和 Agent 在线
+    alt 没有 previous release 或 current version 已变化
+      Center-->>Admin: 409，要求人工检查或拒绝自动回滚
+    else 条件满足
+      Center->>Center: 创建不可变 rollback job 与唯一 operation ID
+      Agent->>Center: claim rollback typed actions
+      Agent->>Host: current-version CAS 切回 previous release
+      Agent->>Host: restart 已登记 unit 并执行 systemd health check
+      Agent->>Center: 最终回执含健康结果和 current version
+      alt 健康通过且 current version 等于 previous
+        Center->>Center: 转为 rolled_back
+        Center-->>Admin: 回滚成功和时间线
+      else 结果未知或回执不匹配
+        Center->>Center: 结束当前操作，deployment failed + receipt unknown
+        Center-->>Admin: 要求检查主机并重新预检；不会自动重试
+      end
+    end
+  end
+```
+
+当前代码已持久化 service、target、release、deployment 元数据及脱敏 `deployment_events`，提供 `awaiting_approval` 计划、管理员 approve、Agent 回执状态映射、事件查询和受限人工 systemd 回滚 job。回滚仅在新鲜且结构安全的 preflight 显示 current version 仍为本次部署、previous version 有同 service ready release 记录且 Agent 在线时入队；即使 unit 处于 failed，只要目标路径和入口安全也允许尝试恢复。Agent 执行 current-pointer CAS、systemd restart 和 health check，并核对回执 current version 后才标记 `rolled_back`。Agent 的只读 `systemd.probe` job 将目标配置 revision 与一次性 preflight ID 绑定，有效期最多 10 分钟；Agent 校验 `ExecStart=<release_directory>/current/run`，并以受控 bundle 的相对 symlink 维护 `current`。本轮已接入制品私有存储、管理员上传、control credential + job lease 绑定下载、USTAR 校验、安全解包和 systemd typed actions；digest 对象可被多个 release 共享，校验失败的上传不会立即按 digest 删除对象，管理员可在保留期后用有界 GC 清理无引用对象；没有 ready bundle、预检或 typed actions 的计划仍被审批 API 拒绝。
+
+本轮将 bundle 限定为 gzip USTAR，要求 manifest 与可执行 `run`，只允许普通文件和目录；中心私有保存 digest 正文，Agent 下载须经 control credential + 当前 job lease + release/digest 匹配。Agent 在摘要验证后安全解包，并通过 CAS 与原子相对 symlink 将 `current` 指向 `releases/<version>`；目标 unit 由管理员预先配置为 `current/run`。管理员确认的受限回滚闭环及有保留期、引用检查和分批上限的手动孤儿 GC 已实现；手动、显式身份绑定的 ClickHouse 核验已接入；自动补偿、真实 ClickHouse/业务主机验收、生产签名与硬存储配额仍待后续切片。页面与 AI 不得把“预检通过”“已批准”或“已入队”当作业务已部署；`succeeded` 仅说明 Agent 报告计划内 health_check 通过，不能代表遥测已验证。
+
 ## 8. 中心服务 HLD/LLD
 
 ### 8.1 启动和模块装配
@@ -261,13 +375,27 @@ shared (SQLite, ClickHouse, OTLP, crypto, JSON, time)
 | `/api/v1/agent-credentials` | 凭据元数据 | 管理员 |
 | `/api/v1/agents/:id/heartbeat` | 节点心跳/配置通道 | Agent control credential |
 | `/api/v1/machines/*` | 受管主机、SSH、部署计划 | 管理员 |
+| `/api/v1/services/*` | 业务服务、服务目标、制品版本和审核计划 | 管理员 |
+| `/api/v1/services/:serviceId/releases/:releaseId/artifact` | 有界上传预构建 release bundle；正文进入私有存储 | 管理员 |
+| `/api/v1/admin/release-artifacts/gc` | 预览或确认清理有保留期的未引用私有制品 | 管理员 |
+| `/api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId` | lease 与 release/digest 绑定的私有制品下载 | Agent control credential + job lease |
+| `/api/v1/deployments/:id` | 脱敏部署计划/状态/回执查询 | 管理员 |
+| `/api/v1/deployments/:id/events` | 脱敏部署状态事件时间线 | 管理员 |
+| `/api/v1/deployments/:id/verify-telemetry` | 固定身份、版本与时间窗的独立遥测核验；严格 `{}`，单进程单槽 | 管理员 |
+| `/api/v1/deployments/:id/cancel` | 取消未审批部署或尚未领取的 Agent job；已领取任务拒绝取消 | 管理员 |
+| `/api/v1/deployments/:id/approve` | 管理员确认并推进到 `agent_ready` | 管理员 |
+| `/api/v1/deployments/:id/rollback` | 新鲜预检、旧版本登记、CAS/健康回执满足时创建回滚 job | 管理员 |
+| `/api/v1/agents/:id/jobs/claim` | Agent 拉取一个能力受限且带租约的部署 job | Agent control credential |
+| `/api/v1/agents/:id/jobs/:jobId/events` | Agent 上报幂等阶段事件和脱敏快照 | Agent control credential |
+| `/api/v1/agents/:id/jobs/:jobId/result` | Agent 提交成功、失败、取消或未知回执 | Agent control credential |
+| `/api/v1/agent-jobs/:jobId/cancel` | 管理员取消尚未完成的 Agent job | 管理员 |
 | `/api/v1/assistant/*` | 会话、模型、提案、用量和 AI 工具 | 登录/管理员按接口 |
 
 ## 9. 存储设计
 
 ### 9.1 SQLite
 
-SQLite 保存低体量、强一致的管理状态：用户和外部身份、会话、SDK Key 摘要与事件、enrollment 状态、Agent 身份和凭据摘要、节点/任务/标签、主机和 SSH 凭据密文、部署计划、告警规则/episode/静默/outbox、仪表盘和草稿、模型配置/用量账本、表目录、窗口历史和有限队列元数据。
+SQLite 保存低体量、强一致的管理状态：用户和外部身份、会话、SDK Key 摘要与事件、enrollment 状态、Agent 身份和凭据摘要、节点/任务/标签、主机和 SSH 凭据密文、业务 services/service_targets/releases/deployments、`agent_jobs`/`agent_job_events` 及其脱敏回执、部署计划、告警规则/episode/静默/outbox、仪表盘和草稿、模型配置/用量账本、表目录、窗口历史和有限队列元数据。
 
 明文 secret 只在创建/兑换/轮换响应的单次边界出现，随后使用加密存储或不可逆摘要。SQLite 不保存大量日志、指标或 Trace 正文。
 
@@ -406,8 +534,8 @@ sequenceDiagram
 
 | effect | 示例 | 应用方式 |
 | --- | --- | --- |
-| `read` | list/describe tables、run_query、日志、告警读取、主机状态 | 有界执行，可直接返回 |
-| `draft` | dashboard draft、alert change、silence、Agent deployment plan | 保存提案，用户审阅 |
+| `read` | list/describe tables、run_query、日志、告警读取、主机状态、业务部署事件 | 有界执行，可直接返回 |
+| `draft` | dashboard draft、alert change、silence、SDK `propose_sdk_instrumentation`、Agent deployment plan | 保存或返回提案，用户审阅 |
 | `code` | Pi `code_task` | 隔离副本、检查、diff，用户确认应用 |
 | `execute` | 当前不提供模型任意 SSH/命令 | 未来单独 SDD，默认关闭 |
 
@@ -514,10 +642,11 @@ ClickHouse 写入前后的 SQLite 状态不是跨数据库原子事务；中心�
 cp .env.example .env
 chmod 600 .env
 docker compose config --quiet
-docker compose up -d --build --wait
+docker compose pull
+docker compose up -d --no-build --wait
 ```
 
-根 Compose 默认运行中心并连接外部 ClickHouse；`deploy/with-clickhouse` 提供一起启动的隔离配置。启动时初始化 `lightmoni` 数据库和读账号。升级保留 SQLite、密钥主密钥、队列和 ClickHouse 数据卷；备份必须同时保存状态卷、遥测卷和 `.env`。
+根 Compose 默认同时运行中心与 ClickHouse；`deploy/with-clickhouse` 作为兼容目录继承两个服务。中心使用发布镜像 `docker.heyphp.com/lightmoni/lightmoni:20261026-admin`（Linux amd64/arm64），通过 `LIGHTMONI_CH_URL`（默认 `http://clickhouse:8123`）、`LIGHTMONI_CH_USER/PASSWORD` 接入数据库；ClickHouse 使用同一账号密码环境变量，不向宿主机映射端口，中心等待其健康后启动。启动时初始化 `lightmoni` 数据库和读账号。升级保留 SQLite、加密主密钥、队列和 ClickHouse 数据卷；备份必须同时保存状态卷、遥测卷和 `.env`。源码构建仍可显式 `build lightmoni` 后 `up --no-build --pull never --wait`。
 
 ### 20.2 Agent
 
@@ -526,6 +655,12 @@ docker compose up -d --build --wait
 ### 20.3 关闭顺序
 
 中心停止接收新后台任务，等待可取消请求，关闭 AI worker、通知 outbox、目录轮询、ClickHouse writer 和 SQLite。业务 SDK 先停止生产再在截止时间内 `shutdown`；Agent 先停止采集，再等待队列尝试，最后关闭 HTTP server 和 SQLite。
+
+### 20.4 管理员初始化与密码恢复
+
+系统没有默认管理员或默认密码；空用户库允许网页首次设置，或由有本机/容器执行权限的运维人员运行 `lightmoni-admin init --name <name>`。运维命令直接访问 `LIGHTMONI_DATA/lightmoni.db`（容器 `/data/state`），复用中心 users/sessions 表、bcrypt cost=10 和 SQLite WAL/事务，不启动 HTTP、ClickHouse、AI worker 或主密钥初始化。此入口属于本机状态卷管理边界，不能作为 HTTP 后门或 AI 工具调用。
+
+`reset-password --name <name>` 仅修改已有管理员的 bcrypt 密码哈希，并在同一 `BEGIN IMMEDIATE` 事务清除该用户所有登录会话；不提升成员、不创建未知用户、不改变启用状态。`init` 在事务中重查用户数，仅允许空库创建启用管理员，避免与网页初始化并发覆盖。密码由无回显终端双次输入或显式 `--password-stdin` 单行受限输入提供，至少 8 个 Unicode 字符、最多 72 个 UTF-8 字节；不进入 CLI 参数、Compose 环境、镜像层、日志或文档正文。具体命令与验收见 SDD 023。
 
 ## 21. 可观测性和审计
 
@@ -540,7 +675,8 @@ docker compose up -d --build --wait
 - 中心和 Agent 使用 Node.js/TypeScript；Web 使用 React/TypeScript；AI runtime 使用 Mastra。
 - SDK、Agent、中心共享 OTLP 和公共 TypeScript 类型；Agent 使用同一个 TypeScript SDK 做内部指标和 exporter。
 - 节点标签/任务、Agent enrollment、control/data 凭据、主机 SSH 预检、部署计划和网页终端均有对应特性 SDD。
-- AI 具备目录、查询、日志、告警读取、可审阅草稿、Pi 代码任务和模型用量/连接测试设计。
+- SDD 021 已加入业务服务/目标/发布元数据、只读 SDK 插桩扫描、受限 TS/JS 结构化插桩提案、管理员确认后的安全 apply、中心部署状态迁移/审批/事件/人工回滚 job、Agent job/租约协议、MVP capability executor/runner 和 AI 部署计划工具。approve 要求带授权 capability 的 health_check 并创建不可变 job；Agent 的有序阶段回执、健康成功证据、取消和 unknown 结果已联动部署状态。Agent 可通过隔离的 `systemd.probe` job 对登记目标做只读主机预检，中心保存绑定目标配置 revision 的 10 分钟快照；它不会改变主机或推进部署状态。本轮已落地 release bundle 格式、私有存储、job-scoped 下载、有界管理员孤儿 GC、受限解包、current symlink 激活、CAS 回滚和 systemd typed actions；已加入管理员手动 ClickHouse 遥测核验与独立结果；真实 ClickHouse/业务主机验收、自动补偿、源码构建、签名、硬配额和 Docker/Kubernetes 适配器仍未完成。
+- AI 具备目录、查询、日志、告警读取、可审阅草稿、SDK 插桩提案、业务部署状态/事件读取、Pi 代码任务和模型用量/连接测试设计。
 - 告警规则、静默、值班、通知 outbox 和现场取证由中心域模块负责。
 
 ### 22.2 兼容路径
@@ -596,3 +732,7 @@ docker compose up -d --build --wait
 - SDK 数据与模式：[SDD 010 telemetry](../specs/010-telemetry-table-model/spec.md)、[SDD 011](../specs/011-aligned-metric-windows/spec.md)、[SDD 012](../specs/012-sdk-reporting-choice/spec.md)
 - AI 告警、主机和终端：[SDD 009](../specs/009-assistant-alert-controls/spec.md)、[SDD 013](../specs/013-ai-alert-controls/spec.md)、[SDD 014](../specs/014-managed-machines-agent-bootstrap/spec.md)、[SDD 017](../specs/017-assistant-ssh-bootstrap/spec.md)、[SDD 018](../specs/018-machine-web-terminal/spec.md)
 - 设计基线 SDD：[SDD 019](../specs/019-system-design-baseline/spec.md)
+- AI SDK 插桩与业务部署：[SDD 021](../specs/021-ai-sdk-instrumentation-deployment/spec.md)
+- 在线设计副本：[Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)
+- 架构文档双端同步规则：[SDD 020](../specs/020-architecture-design-sync/spec.md)
+- 镜像发布与管理员运维：[SDD 023](../specs/023-registry-admin-cli/spec.md)

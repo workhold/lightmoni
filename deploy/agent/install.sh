@@ -74,6 +74,32 @@ previous_active="no"
 previous_enabled="no"
 runtime_release=""
 rollback_failed="no"
+installation_phase="install-files"
+wait_service_active() {
+  startup_attempt=0
+  active_observations=0
+  while [ "$startup_attempt" -lt 10 ]; do
+    startup_attempt=$((startup_attempt + 1))
+    if systemctl is-active --quiet lightmoni-agent.service; then
+      active_observations=$((active_observations + 1))
+      [ "$active_observations" -lt 2 ] || return 0
+    else
+      active_observations=0
+    fi
+    if [ "$startup_attempt" -lt 10 ]; then sleep 1; fi
+  done
+  return 1
+}
+report_service_failure() {
+  echo "Agent installation failed during: $installation_phase" >&2
+  # Read only fixed status properties, before stopping or restoring the unit.
+  # Raw journal/status output may contain application arguments or secrets.
+  systemctl show lightmoni-agent.service --no-pager \
+    --property=LoadState --property=ActiveState --property=SubState \
+    --property=Result --property=ExecMainCode --property=ExecMainStatus \
+    >&2 2>/dev/null || echo 'Systemd diagnostic properties unavailable.' >&2
+  echo 'Inspect locally: sudo journalctl -u lightmoni-agent.service -n 100 --no-pager' >&2
+}
 restore_file() {
   destination="$1"
   snapshot="$2"
@@ -88,6 +114,7 @@ finish() {
   trap - EXIT HUP INT TERM
   set +e
   if [ "$result" -ne 0 ] && [ "$transaction_started" = "yes" ]; then
+    report_service_failure
     echo 'Installation failed; restoring the previous Agent installation and configuration.' >&2
     if [ "$restart_attempted" = "yes" ]; then systemctl stop lightmoni-agent.service || rollback_failed="yes"; fi
     restore_file /etc/lightmoni-agent/config.json "$tmp_dir/previous-config"
@@ -255,21 +282,31 @@ if [ "$enrollment_mode" = "yes" ]; then
   mv -f "/var/lib/lightmoni-agent/.identity.new-$$" "/var/lib/lightmoni-agent/identity.json"
 fi
 # The live queue, receipts, cursors, identity and cached tasks stay untouched.
-install -d -m 0755 /opt/lightmoni-agent/releases
+install -d -m 0755 /opt/lightmoni-agent /opt/lightmoni-agent/releases
 runtime_release="/opt/lightmoni-agent/releases/${version}-$(printf '%s' "$actual" | cut -c1-16)-$$"
 cp -R "$tmp_dir/unpacked/lightmoni-agent-runtime" "$runtime_release"
-chmod -R go-w "$runtime_release"
+# cp under umask 077 creates root-only directories and files. The dedicated
+# service user needs read/traverse access to public code and the bundled Node;
+# credentials and persistent data retain their separate 0700/0600 permissions.
+chmod -R u=rwX,go=rX "$runtime_release"
 ln -s "$runtime_release" "/opt/lightmoni-agent/.current-$$"
 mv -Tf "/opt/lightmoni-agent/.current-$$" /opt/lightmoni-agent/current
 install -m 0755 "$tmp_dir/unpacked/lightmoni-agent" "/usr/local/bin/.lightmoni-agent.new-$$"
 mv -f "/usr/local/bin/.lightmoni-agent.new-$$" /usr/local/bin/lightmoni-agent
 service_changed="yes"
 install -m 0644 "$tmp_dir/unpacked/lightmoni-agent.service" /etc/systemd/system/lightmoni-agent.service
+installation_phase="daemon-reload"
 systemctl daemon-reload
+installation_phase="enable"
 enable_attempted="yes"
 systemctl enable lightmoni-agent.service
+installation_phase="restart"
 restart_attempted="yes"
 systemctl restart lightmoni-agent.service
-systemctl is-active --quiet lightmoni-agent.service
+installation_phase="startup-check"
+if ! wait_service_active; then
+  echo 'Agent did not remain active during the startup observation window.' >&2
+  exit 1
+fi
 transaction_started="no"
 echo 'LightMoni Agent installed. Existing identity and spool were preserved.'

@@ -1,0 +1,89 @@
+{
+  "date": "2026-10-27",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "source_revision": "c3c01fae989bf3885756e4aab3b6cda78ce8ae04",
+  "build_mode": "fixed validated base plus installer COPY patch; runtime and dependencies not recompiled",
+  "base_index_digest": "sha256:51ebf2093ec5e604dc0a6e0f5b6a231caed9e85a2476edb05d37adb00cd72826",
+  "old_fixed_tag_retained": true,
+  "tags": [
+    {
+      "tag": "20261027-agent-install",
+      "digest": "sha256:1a7c231eb2e2c7981369dcff21a5d8239a2b45d7ee56318c2008d17387ad977e",
+      "platforms": [
+        {
+          "platform": "linux/amd64",
+          "digest": "sha256:71fb939648cb609e7132720eb30e82093941873a06064a68c8fee99986638a1d"
+        },
+        {
+          "platform": "linux/arm64",
+          "digest": "sha256:2aa9ee26916efd35d54e1456f22f939699e84b5b9483073e7943c2611ac7124d"
+        }
+      ]
+    },
+    {
+      "tag": "latest",
+      "digest": "sha256:1a7c231eb2e2c7981369dcff21a5d8239a2b45d7ee56318c2008d17387ad977e",
+      "platforms": [
+        {
+          "platform": "linux/amd64",
+          "digest": "sha256:71fb939648cb609e7132720eb30e82093941873a06064a68c8fee99986638a1d"
+        },
+        {
+          "platform": "linux/arm64",
+          "digest": "sha256:2aa9ee26916efd35d54e1456f22f939699e84b5b9483073e7943c2611ac7124d"
+        }
+      ]
+    }
+  ],
+  "platform_verification": [
+    {
+      "platform": "linux/amd64",
+      "digest": "sha256:71fb939648cb609e7132720eb30e82093941873a06064a68c8fee99986638a1d",
+      "config_digest": "sha256:2feda0b0611348354fef627caa4019798ca473445450c52bcaddffc8226e9fde",
+      "base_manifest_digest": "sha256:d1969dd556ffc80021c6b6339b8e0a00c1707151cf82ece20f1acf900a57f0a0",
+      "base_layer_count": 15,
+      "base_layer_content_unchanged": true,
+      "runtime_config_unchanged": true,
+      "patch_layer": {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:b82c5a02a48b20368b05a1835a3ec6d695790bb23e29ab0284e698ac077526e9",
+        "size": 4825
+      },
+      "patch_entries": [
+        "opt/",
+        "opt/lightmoni/",
+        "opt/lightmoni/runtime/",
+        "opt/lightmoni/runtime/downloads/",
+        "opt/lightmoni/runtime/downloads/install.sh"
+      ],
+      "installer_sha256": "ee69fe1241f07495cf153fec9f1f9a0c5d477b6d29d5e2d0b2b60ec37eb0e4ff"
+    },
+    {
+      "platform": "linux/arm64",
+      "digest": "sha256:2aa9ee26916efd35d54e1456f22f939699e84b5b9483073e7943c2611ac7124d",
+      "config_digest": "sha256:edbf2a22c66e29109e77a28e497f2e9590f80bafbeb0cb750ef3ad2a55aeb5f7",
+      "base_manifest_digest": "sha256:675873cbbe29a828127435827e596529912a82a0e55c5f6250639de6101974fa",
+      "base_layer_count": 15,
+      "base_layer_content_unchanged": true,
+      "runtime_config_unchanged": true,
+      "patch_layer": {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "digest": "sha256:51c35e0f9e2618049316a112b677f4d49f49b03182880e8ba5c6986da6103c55",
+        "size": 4823
+      },
+      "patch_entries": [
+        "opt/",
+        "opt/lightmoni/",
+        "opt/lightmoni/runtime/",
+        "opt/lightmoni/runtime/downloads/",
+        "opt/lightmoni/runtime/downloads/install.sh"
+      ],
+      "installer_sha256": "ee69fe1241f07495cf153fec9f1f9a0c5d477b6d29d5e2d0b2b60ec37eb0e4ff"
+    }
+  ],
+  "limitations": [
+    "No arm64 container execution in this release environment",
+    "No new ClickHouse/HTTP full-stack smoke for this installer-only patch; prior dual-architecture validation retained",
+    "Existing online platform container not replaced"
+  ]
+}

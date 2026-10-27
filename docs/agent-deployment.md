@@ -2,7 +2,7 @@
 
 本文说明当前可用部署方式及后续设计。推荐每台 Linux 主机一个独立 systemd Agent，使用专用非 root 用户运行，身份与离线数据放在固定持久目录。Agent 不随业务应用重启、发布或删除；业务通过 SDK 上报或授权日志目录接入。节点助手现在支持一次性 enrollment、pending 激活和独立的 control/data credential；旧节点仍可通过 legacy Key 运行。
 
-本次基线已在中心、安装脚本和运行时测试中实现，但没有执行真实主机安装、升级或发布容器。现有 Node 迁移的 Linux 双架构 systemd 实机验收仍待完成，当前 shell 安装测试使用命令 shim。参见 [验收边界](../specs/007-node-runtime-migration/agent-validation.md)。
+本次基线已在中心、安装脚本和运行时测试中实现。2026-10-27 已用修复安装器与线上 0.1.0 包完成一次 Linux amd64 systemd 首装、真实 enrollment、非 root 运行、配置同步和主机指标入库验收，见 [实机记录](../specs/024-agent-install-startup-fix/validation.md)。arm64、真实升级/回滚和发布容器仍未验收，自动 shell 回归使用命令 shim；不能把该首装结果等同于 Linux 双架构全场景验收。参见 [迁移验收边界](../specs/007-node-runtime-migration/agent-validation.md)。
 
 ## 当前支持范围
 
@@ -57,7 +57,7 @@ sudo sh -c 'exec sh /srv/lightmoni-agent/releases/0.1.0/install.sh \
 | 路径 | 用途 |
 | --- | --- |
 | `/usr/local/bin/lightmoni-agent` | launcher |
-| `/opt/lightmoni-agent/releases/…`、`current` | 固定发行文件和当前版本链接 |
+| `/opt/lightmoni-agent/releases/…`、`current` | root 管理的固定发行文件和当前版本链接；目录/可执行文件 0755，普通文件 0644，服务用户只读 |
 | `/etc/lightmoni-agent/config.json` | 中心地址、control/data credential（旧节点为 legacy Key）、本地令牌；目录 0700、文件 0600 |
 | `/var/lib/lightmoni-agent` | 持久身份、SQLite 队列、receipt、日志游标、缓存任务；目录 0700 |
 | `/etc/systemd/system/lightmoni-agent.service` | 独立服务，用户 `lightmoni-agent` |
@@ -84,6 +84,10 @@ sudo -u lightmoni-agent /usr/local/bin/lightmoni-agent status --config /etc/ligh
 ```
 
 `check` 仅校验本地配置，不探测中心、网络或日志权限。`status` 使用本地令牌读取状态，关注 queue/隔离、配置 revision、collector 状态、最后错误与成功时间；最后成功时间在进程重启后重新开始记录。
+
+安装时显示 `configuration valid` 只代表 root 对暂存配置的检查通过，随后仍可能在专用用户启动 systemd 服务时失败。安装器会在恢复旧文件之前显示失败阶段和固定 systemd 状态字段，再给出本机 `journalctl` 检查命令；不会自动打印可能包含敏感信息的原始日志。查看日志后请先移除凭据再分享。
+
+旧安装器受 `umask 077` 影响可能把运行时复制为 root-only，造成配置检查通过但服务无法启动；修正版显式补足公开运行文件的读取和目录遍历权限，配置与状态目录继续保持 0700/0600。更新平台分发的 `install.sh` 后再安装；仅更新 Git 源码不会替换线上脚本。若本次 enrollment 已激活但启动失败，本地文件回滚不会撤销中心凭据：请先在平台撤销该失败节点的凭据，再新建一次性 token 重装，不要复用已兑换的 token。
 
 健康需要分别检查：
 
@@ -117,7 +121,7 @@ sudo -u lightmoni-agent /usr/local/bin/lightmoni-agent quarantine --config /etc/
 
 - 掉电、SIGKILL、系统崩溃可能跳过 shell trap，不能保证自动恢复。
 - 安装文件恢复不还原数据目录/schema；不能直接假定任意旧版可以读取新版状态。
-- 安装成功仅通过 `systemctl is-active`，不验证中心登记、任务或数据送达，成功后没有自动健康回滚和批量 rollout。
+- 安装器在 restart 成功后最多观察 10 次 `systemctl is-active`，间隔 1 秒，连续两次 active 才报告成功。该观察只验证短期本机进程状态，不验证中心登记、任务或数据送达，成功后没有自动健康回滚和批量 rollout。
 
 升级后使用上述诊断并检查中心数据。需要回退时，先确认旧版可读当前 schema；不可逆变更需采用升级前一致快照恢复。制作快照应先停服务，再按 SQLite 一致备份方法保存整个必要状态及配置；运行中只复制 `queue.sqlite` 可能遗漏 WAL。不要用未验证的旧包直接覆盖活跃状态。
 
