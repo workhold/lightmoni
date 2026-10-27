@@ -22,6 +22,8 @@ for language in python rust; do
     for file in examples/sdk/"$language"/*; do if [ -f "$file" ]; then cp "$file" "$root/examples/sdk/$language/"; fi; done
   fi
   cp sdk/"$language"/README.md "$root/sdk/$language/"
+  cp LICENSE "$root/LICENSE"
+  cp sdk/"$language"/LICENSE "$root/sdk/$language/LICENSE"
   cp sdk/README.md "$root/sdk/README.md"
   sed 's|(../README.md|(sdk/README.md|g' sdk/"$language"/README.md > "$root/README.md"
   tar -czf "$release_dir/lightmoni-$language-sdk_$version.tar.gz" -C "$sdk_tmp" "lightmoni-$language-sdk"

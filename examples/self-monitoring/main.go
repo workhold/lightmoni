@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/lightmoni/lightmoni/examples/self-monitoring/telemetry"
+	"github.com/workhold/lightmoni/examples/self-monitoring/telemetry"
 	"log"
 	"net/http"
 	"os"
