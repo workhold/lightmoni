@@ -16,13 +16,14 @@ const AlertsPage=lazy(()=>import('../features/alerts/AlertsPage'));
 const TracePage=lazy(()=>import('../features/alerts/TracePage'));
 const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
 const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
+const OperationsPage=lazy(()=>import('./OperationsPage'));
 const MachinesPage=lazy(()=>import('./MachinesPage'));
 const DataManagementPage=lazy(()=>import('./DataManagementPage'));
 const AgentInstallPage=lazy(()=>import('./AgentInstall'));
 const ServiceDeploymentsPage=lazy(()=>import('./ServiceDeploymentsPage'));
 
-const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/services','服务部署',CloudUploadOutlined],['/data','数据接入',DatabaseOutlined],['/data-management','数据管理',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
-const englishLinks:Record<string,string>={'/':'Overview','/dashboards':'Dashboards','/logs':'Log explorer','/alerts':'Alerts','/agents':'Node assistants','/machines':'Machines','/services':'Service deployments','/data':'Data ingestion','/data-management':'Data management','/assistant':'AI assistant','/settings':'Personal settings','/admin':'Administration'};
+const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/services','服务部署',CloudUploadOutlined],['/operations','运维工具',CloudServerOutlined],['/data','数据接入',DatabaseOutlined],['/data-management','数据管理',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
+const englishLinks:Record<string,string>={'/':'Overview','/dashboards':'Dashboards','/logs':'Log explorer','/alerts':'Alerts','/agents':'Node assistants','/machines':'Machines','/services':'Service deployments','/operations':'Operations','/data':'Data ingestion','/data-management':'Data management','/assistant':'AI assistant','/settings':'Personal settings','/admin':'Administration'};
 
 function ClaimLanding(){const {token}=useParams();return <Navigate to={'/alerts?claim='+encodeURIComponent(token??'')} replace/>}
 
@@ -44,11 +45,11 @@ export default function Root(){
  useEffect(()=>{if(location.pathname==='/settings')setAssistant(false)},[location.pathname]);
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
  if(loading)return <div className="lm-loading"><Spin size="large"/></div>;
- if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/machines')||location.pathname.startsWith('/services')||location.pathname.startsWith('/settings')||location.pathname.startsWith('/data'))?location.pathname+location.search:'/')}}/>;
+ if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/machines')||location.pathname.startsWith('/services')||location.pathname.startsWith('/operations')||location.pathname.startsWith('/settings')||location.pathname.startsWith('/data'))?location.pathname+location.search:'/')}}/>;
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'} ${/^\/dashboards\/[^/]+\/panels\//.test(location.pathname)?'is-panel-standalone':''}`}>
   <aside className="lm-sidebar">
    <Link to="/" className="lm-brand"><span className="lm-brand-mark">L</span><span>LightMoni<small>{t('监控工作台','Monitoring workspace')}</small></span></Link>
-  <nav>{links.filter(([url])=>(url!=='/admin'&&url!=='/machines')||user.role==='admin').map(([url,label,Icon])=><Link key={url} aria-label={t(label,englishLinks[url])} title={t(label,englishLinks[url])} className={activePath(url)?'active':''} to={url}>{Icon&&<Icon/>}<span>{t(label,englishLinks[url])}</span></Link>)}</nav>
+  <nav>{links.filter(([url])=>(url!=='/admin'&&url!=='/machines'&&url!=='/operations')||user.role==='admin').map(([url,label,Icon])=><Link key={url} aria-label={t(label,englishLinks[url])} title={t(label,englishLinks[url])} className={activePath(url)?'active':''} to={url}>{Icon&&<Icon/>}<span>{t(label,englishLinks[url])}</span></Link>)}</nav>
    <Button className="lm-nav-collapse" type="text" aria-label={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} title={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} icon={navCollapsed?<MenuUnfoldOutlined/>:<MenuFoldOutlined/>} onClick={toggleNavigation}>{!navCollapsed&&t('收起导航','Collapse navigation')}</Button>
   </aside>
   <main className="lm-main"><WorkspaceHeader user={user} title={currentPage} onLoggedOut={()=>setUser(null)}/><div className="lm-route-content"><Suspense fallback={<div className="lm-page"><Spin/></div>}><Routes>
@@ -59,6 +60,7 @@ export default function Root(){
     <Route path="/agents/install" element={<AgentInstallPage user={user}/>}/>
     <Route path="/machines" element={user.role==='admin'?<MachinesPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/services" element={user.role==='admin'?<ServiceDeploymentsPage user={user}/>:<Navigate to="/settings" replace/>}/>
+    <Route path="/operations" element={user.role==='admin'?<OperationsPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>
     <Route path="/admin" element={user.role==='admin'?<AdminPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/assistant" element={<AssistantPage/>}/>
