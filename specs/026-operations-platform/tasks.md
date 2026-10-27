@@ -16,7 +16,7 @@
 - [x] T012 系统设计仓库第26章与Doca同步：文字回读seq411，新增原生图保存并回读seq412；原247块和6图完整保留，新图15节点/17边与预期一致。
 - [x] T013 核对真实Linux Nginx/TLS、Docker/Compose领域记录与隔离模拟后端网页交互证据；未将模拟页面称为真实平台全流程，支持边界见validation及运维手册。
 - [x] T014 runtime全量373通过/17跳过；最终锁目录fsync补丁定向72通过/3跳过；runtime和AI类型检查、runtime/Web构建及diff检查通过。已同步origin/main并核对基线，无冲突。
-- [ ] T015 主任务创建待审GitHub PR，附架构/Doca状态、真实验收与未验范围，返回链接；未获授权不得合并。
+- [x] T015 已创建待审[GitHub PR #6](https://github.com/workhold/lightmoni/pull/6)，目标main，附架构/Doca状态、真实验收与未验范围；等待人工审核，未合并。
 
 ## 明确不算已验收的范围
 
