@@ -1,5 +1,7 @@
 # LightMoni
 
+[GitHub 仓库](https://github.com/workhold/lightmoni) · [问题反馈](https://github.com/workhold/lightmoni/issues) · [贡献指南](CONTRIBUTING.md) · [安全反馈](SECURITY.md)
+
 面向个人和小团队的一体化监控工作台。Node.js / TypeScript主服务提供React界面，SQLite保存管理数据，ClickHouse保存遥测。业务接入提供多语言 record SDK；当前发布与 deferred 矩阵以 `/api/v1/sdk-install`、发布脚本和 [SDD 012](specs/012-sdk-reporting-choice/spec.md) 为准，支持直连中心或由独立 LightMoni Agent 持久化转发。
 
 > **完整系统设计入口**：[LightMoni 系统设计基线](docs/system-design.md)
@@ -13,6 +15,15 @@
 ## Docker Compose 部署
 
 根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像默认为 `docker.heyphp.com/lightmoni/lightmoni:20261027-agent-install`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。中心以非 root 用户运行。
+
+首次获取源码：
+
+```sh
+git clone https://github.com/workhold/lightmoni.git
+cd lightmoni
+```
+
+现有预构建镜像仍由 `docker.heyphp.com` 提供，需要该注册表的访问权限；GitHub 源码公开不代表已提供公开镜像。没有镜像仓库权限时，可在完成 `.env` 配置后按下文的源码构建步骤运行。已有部署继续沿用原镜像、项目名和数据卷。
 
 ```sh
 cp .env.example .env
@@ -222,6 +233,16 @@ SDK密钥按名称创建，启用后可写所有合法业务表。旧权限字�
 只读 SQL 通过 AST 校验和独立查询账号；禁止私有表、跨库、外部表函数和自行设置资源限额。默认每次最多 8 个查询、10 秒执行、10,000 行展示。时间范围为 `[from,to)`，`UInt64` / `Int64` / Decimal 结果保留字符串。指标 `value_float` 保存原始浮点，`value_int` 保存精确整数，公开 `value` 为浮点；整数汇总使用 `sum(toDecimal256(value_int,0))`；图表超出安全精度时要求明确选择近似展示。日志/链路默认保留 7 天，指标 30 天。
 
 详细方案：[docs/architecture.md](docs/architecture.md)、[docs/contracts.md](docs/contracts.md)。验收证据和未验收项：[docs/acceptance.md](docs/acceptance.md)。没有真实账号凭证的第三方登录、通知和 AI 供应商只能标注协议测试，不能视为真实供应商验收。Grafana / Kibana 核心交互以任务矩阵逐项验证；不作未经对比测试的性能或完整功能等同承诺。
+
+## 仓库与贡献
+
+后续开发和问题反馈使用 [workhold/lightmoni](https://github.com/workhold/lightmoni)。Gitea 原仓库保留历史 PR、评论与验收来源；文档中的历史 Gitea PR 链接指向原记录，不与 GitHub 的 PR 编号混用。Git 迁移保留提交历史，平台上的 PR 评论、评审和 Issue 不会随 Git push 自动迁移。
+
+贡献使用 SDD：先写规格、设计和任务，再实施与验收，最后通过功能分支提交 PR。架构变更必须同步仓库系统设计和 Doca 基线，具体要求见 [AGENTS.md](AGENTS.md) 与 [贡献指南](CONTRIBUTING.md)。
+
+## 许可证
+
+LightMoni 自有代码使用 [Apache-2.0](LICENSE) 许可证。第三方代码及依赖保留各自许可，包括 [Spec Kit 的 MIT 许可](.specify/LICENSE) 与 [Doca 参考代码声明](web/src/features/assistant/NOTICE.md)。
 
 ### 系统自监控
 

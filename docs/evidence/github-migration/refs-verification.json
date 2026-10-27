@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-27",
+  "source_repository": "https://gitea.heyphp.com/lightmoni/lightmoni",
+  "target_repository": "https://github.com/workhold/lightmoni",
+  "source_rechecked_after_upload": true,
+  "all_source_refs_match_target": true,
+  "branches": 19,
+  "tags": 0,
+  "reachable_commits": 117,
+  "refs": [
+    {
+      "ref": "refs/heads/004-python-sdk-reporting",
+      "commit_sha": "e817465742b6d330b562609b1e3ca0fe2a1db46e"
+    },
+    {
+      "ref": "refs/heads/chore/publish-agent-install-fix",
+      "commit_sha": "627fc749fe63e7de1f068c5b664760a9b588175f"
+    },
+    {
+      "ref": "refs/heads/codex/docker-main-alignment",
+      "commit_sha": "c331a5a0e6ffc148a6ce651ff9b297401af1c710"
+    },
+    {
+      "ref": "refs/heads/codex/sdk-metric-windows-main",
+      "commit_sha": "71611d15af3e7a7ac7ab00b40574fa52494073a4"
+    },
+    {
+      "ref": "refs/heads/codex/sdk-onboarding",
+      "commit_sha": "f90264ec20fc8ef0fddd5484187e3d7987d9782a"
+    },
+    {
+      "ref": "refs/heads/docs/agent-linux-install-validation",
+      "commit_sha": "243abe7fd953e179ffb67a52bb46494300cb3582"
+    },
+    {
+      "ref": "refs/heads/docs/fix-system-architecture-diagrams",
+      "commit_sha": "64cee38b5522f9d0d02954c16affba9154a4ffa7"
+    },
+    {
+      "ref": "refs/heads/docs/require-architecture-design-sync",
+      "commit_sha": "3e8a4d2e80d2a3466e827c7e3bbfa364d2d76ac5"
+    },
+    {
+      "ref": "refs/heads/docs/system-design-baseline",
+      "commit_sha": "8437cb0f4eefeaac0cdeb0389f93c311140c31e4"
+    },
+    {
+      "ref": "refs/heads/feat/ai-alert-controls",
+      "commit_sha": "f28973a40cb6596a090fe2539698f8a71e2f0f1f"
+    },
+    {
+      "ref": "refs/heads/feat/ai-sdk-instrumentation-deployment",
+      "commit_sha": "2643de6421f3d1e088556121d627a6252efbcb3a"
+    },
+    {
+      "ref": "refs/heads/feat/managed-machines-agent-bootstrap",
+      "commit_sha": "4a0c582921798023ca8b7e280899cb329aebc16c"
+    },
+    {
+      "ref": "refs/heads/feat/sdk-agent-credentials",
+      "commit_sha": "cb675486b42d53bb3de1c3e74ae7a15410177ce0"
+    },
+    {
+      "ref": "refs/heads/feat/sdk-reporting-modes",
+      "commit_sha": "8595c919d9fdc27db60e3b6c113219b1a2cb22dd"
+    },
+    {
+      "ref": "refs/heads/feature_fix_chart_overline",
+      "commit_sha": "95bd20291cf2fc138e2986ecf7b5c4868c6ecf87"
+    },
+    {
+      "ref": "refs/heads/feature_mastra_ai_assistant",
+      "commit_sha": "7324cc209524f578c0920d8e5a69f9a4fee1c816"
+    },
+    {
+      "ref": "refs/heads/feature_ui_fix",
+      "commit_sha": "749d8a554f651e2864ce0bb48c4d0eb55d84271f"
+    },
+    {
+      "ref": "refs/heads/fix/agent-install-runtime-permissions",
+      "commit_sha": "208433ecaf9b97ace6375580b1c2d35736b72a96"
+    },
+    {
+      "ref": "refs/heads/main",
+      "commit_sha": "a3992bff5627b8142266b9d50785602a86b4c414"
+    }
+  ]
+}

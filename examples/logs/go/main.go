@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	moni "github.com/lightmoni/lightmoni/sdk/go"
+	moni "github.com/workhold/lightmoni/sdk/go"
 )
 
 func main() {

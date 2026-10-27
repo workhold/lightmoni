@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-27",
+  "source_repository": "https://gitea.heyphp.com/lightmoni/lightmoni",
+  "target_repository": "https://github.com/workhold/lightmoni",
+  "source_main": "a3992bff5627b8142266b9d50785602a86b4c414",
+  "source_branches": 19,
+  "source_tags": 0,
+  "source_reachable_commits": 117,
+  "manual_review": {
+    "reachable_unique_blobs": 2660,
+    "blob_bytes": 116843093,
+    "confirmed_credentials": 0,
+    "current_png_media": 6,
+    "historical_media_blobs": 411,
+    "all_media_frames_reviewed": false,
+    "media_scope": "Current media and historical fixture generation/source reviewed; not every historical frame was visually inspected."
+  },
+  "scanner": {
+    "tool": "Gitleaks",
+    "version": "8.30.1",
+    "release_archive_sha256": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",
+    "official_release_checksum_verified": true,
+    "mode": "git --log-opts=--all --redact=100",
+    "exit_code": 1,
+    "findings": 3,
+    "confirmed_real_credentials": 0,
+    "findings_review": [
+      {
+        "rule": "jwt",
+        "file": "runtime/test/release-bundle.test.ts",
+        "commit": "9c60f188d9d5faa15a5b331de5743350ee30dbd1",
+        "line": 108,
+        "disposition": "synthetic credential-rejection JWT fixture"
+      },
+      {
+        "rule": "private-key",
+        "file": "runtime/test/managed-machines.test.ts",
+        "commit": "9e83aa076fe49280f993c4944e81bae2d5d1233b",
+        "line": 44,
+        "disposition": "invalid placeholder PEM in isolated managed-machine fixture"
+      },
+      {
+        "rule": "private-key",
+        "file": "runtime/test/managed-machines.test.ts",
+        "commit": "9e83aa076fe49280f993c4944e81bae2d5d1233b",
+        "line": 70,
+        "disposition": "invalid placeholder PEM in isolated managed-machine fixture"
+      }
+    ]
+  },
+  "limits": [
+    "No claim of frame-by-frame audit of all historical media",
+    "Only source heads/tags imported; Gitea review comments, issues and PR state remain at original source"
+  ],
+  "license_decision": {
+    "selected_by": "repository owner",
+    "spdx": "Apache-2.0",
+    "delivery": "GitHub preparation PR; imported source main remains unchanged until merge"
+  }
+}

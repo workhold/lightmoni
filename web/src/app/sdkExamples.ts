@@ -39,7 +39,7 @@ import (
   "context"
   "os"
   "time"
-  moni "github.com/lightmoni/lightmoni/sdk/go"
+  moni "github.com/workhold/lightmoni/sdk/go"
 )
 
 func recordDatabaseQuery(client *moni.Client, durationMs float64, isp, province string) {
@@ -122,7 +122,7 @@ export interface SDKPackage {id:string;language:string;runtime:string;file:strin
 export interface SDKInstall {endpoint?:string;endpoints?:ReportingAddress[];default_endpoint_id?:string;version:string;node_url:string;go_url:string;packages:SDKPackage[];checksums_url:string}
 export const sdkExamples:Record<string,{language:string;install:string;sample:string}>={
  typescript:{language:'typescript',install:'npm install ./lightmoni-sdk-0.1.0.tgz',sample:sdkSampleFor('typescript')},
- go:{language:'go',install:'tar -xzf lightmoni-go-sdk_0.1.0.tar.gz\ngo mod edit -replace github.com/lightmoni/lightmoni=./lightmoni-go-sdk\ngo get github.com/lightmoni/lightmoni/sdk/go\ngo mod tidy',sample:sdkSampleFor('go')},
+ go:{language:'go',install:'tar -xzf lightmoni-go-sdk_0.1.0.tar.gz\ngo mod edit -replace github.com/workhold/lightmoni=./lightmoni-go-sdk\ngo get github.com/workhold/lightmoni/sdk/go\ngo mod tidy',sample:sdkSampleFor('go')},
  rust:{language:'rust',install:'tar -xzf lightmoni-rust-sdk_0.1.0.tar.gz\n# Cargo.toml [dependencies]\n# lightmoni = { path = "./lightmoni-rust-sdk/sdk/rust" }',sample:sdkSampleFor('rust')},
  python:{language:'python',install:'tar -xzf lightmoni-python-sdk_0.1.0.tar.gz\npython3 -m pip install ./lightmoni-python-sdk/sdk/python',sample:sdkSampleFor('python')},
 };

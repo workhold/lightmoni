@@ -5,7 +5,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
-	moni "github.com/lightmoni/lightmoni/sdk/go"
+	moni "github.com/workhold/lightmoni/sdk/go"
 	"net/http"
 	"sync/atomic"
 	"time"

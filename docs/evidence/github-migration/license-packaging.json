@@ -1,0 +1,22 @@
+{
+  "license": "Apache-2.0",
+  "license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+  "standard_source": "Local rustup distribution LICENSE-APACHE, including standard appendix; no third-party copyright notice copied",
+  "checks": {
+    "sdk_license_copies_match_root": true,
+    "npm_offline_pack_license_and_metadata": true,
+    "python_offline_sdist_and_wheel_license": true,
+    "python_wheel_spdx_metadata": "Apache-2.0",
+    "python_runtime_requirement_unchanged": ">=3.9",
+    "python_build_backend_minimum": "setuptools>=77 (PEP 639 license metadata)",
+    "go_release_archive_license": true,
+    "python_release_archive_license": true,
+    "rust_release_archive_license": true,
+    "cargo_offline_no_deps_metadata_license": "Apache-2.0",
+    "third_party_spec_kit_and_doca_notices_unchanged": true
+  },
+  "limits": [
+    "Cargo .crate package and package --list were attempted offline but could not resolve missing cached hyper index; no crate build or publication is claimed. The existing Rust SDK tar.gz release was built and its embedded license verified."
+  ],
+  "publication": "No npm, PyPI, crates.io or Go version release was published."
+}

@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	moni "github.com/lightmoni/lightmoni/sdk/go"
+	moni "github.com/workhold/lightmoni/sdk/go"
 	"os"
 	"time"
 )

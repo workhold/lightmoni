@@ -5,7 +5,7 @@
 新Record按表选择一个上报聚合周期，默认30秒，支持10秒、30秒、1分钟、5分钟、10分钟、30分钟、1小时。中心配置通过RefreshConfig/后台轮询下发；下文10秒collection为后台收集检查间隔，Record只自动发送已结束的固定窗口。
 
 
-根 module 中的包为 `github.com/lightmoni/lightmoni/sdk/go`，package 名 `moni`。不使用磁盘；本机 Agent 是默认的持久化边界。
+根 module 中的包为 `github.com/workhold/lightmoni/sdk/go`，package 名 `moni`。不使用磁盘；本机 Agent 是默认的持久化边界。
 
 ```go
 client, err := moni.New(moni.Config{
