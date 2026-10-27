@@ -1,0 +1,118 @@
+name: Publish validated operations images
+
+on:
+  push:
+    branches: [chore/operations-image-release]
+    paths:
+      - .github/workflows/operations-image-publish.yml
+      - .github/scripts/release-registry.py
+      - .github/scripts/inspect-release-downloads.py
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      SOURCE_REVISION: ac30ec91e5804e0e9ad961d7a38d2259b3eb2106
+      RELEASE_ROOT: /tmp/lightmoni-operations-release
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: Download the successful native build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ github.token }}
+          run-id: 40497221213
+          pattern: operations-*
+          path: ${{ runner.temp }}/lightmoni-operations-inputs
+      - name: Verify build reports and unpack image archives
+        env:
+          INPUT_ROOT: ${{ runner.temp }}/lightmoni-operations-inputs
+        run: |
+          python3 - <<'PY'
+          import gzip,hashlib,json,os,pathlib,re,shutil
+          root=pathlib.Path(os.environ['RELEASE_ROOT']);root.mkdir(mode=0o700)
+          inputs=pathlib.Path(os.environ['INPUT_ROOT']);reports=[]
+          for arch in ['amd64','arm64']:
+              candidates=list((inputs/('operations-validation-'+arch)).rglob('report.json'))
+              assert len(candidates)==1,'Missing unique native validation report'
+              report=json.loads(candidates[0].read_text())
+              assert report['passed'] is True and report['source_revision']==os.environ['SOURCE_REVISION'],'Native validation failed'
+              assert report['docker_platform']=='linux/'+arch and len(report['checks'])>=9,'Native validation platform mismatch'
+              assert all(check['passed'] is True for check in report['checks']),'Incomplete native validation'
+              assert report['cleanup']['errors']==[],'Native validation cleanup failed'
+              (root/(arch+'-container-report.json')).write_text(json.dumps(report,indent=2))
+              source=inputs/('operations-image-'+arch)
+              archive=source/(arch+'.tar.gz')
+              checksum=(source/'SHA256SUMS').read_text().strip()
+              match=re.fullmatch(r'([0-9a-f]{64})\s+'+arch+r'\.tar\.gz',checksum)
+              assert match,'Archive checksum metadata invalid'
+              digest=hashlib.sha256()
+              with archive.open('rb') as stream:
+                  while chunk:=stream.read(1<<20):digest.update(chunk)
+              assert digest.hexdigest()==match[1],'Archive checksum mismatch'
+              with gzip.open(archive,'rb') as stream,(root/(arch+'.tar')).open('xb') as target:
+                  shutil.copyfileobj(stream,target)
+              reports.append({'platform':'linux/'+arch,'archive_sha256':digest.hexdigest(),'native_image_id':report['image_id']})
+          (root/'artifact-report.json').write_text(json.dumps({'build_run_id':40497221213,'source_revision':os.environ['SOURCE_REVISION'],'images':reports},indent=2))
+          PY
+          cp .github/scripts/inspect-release-downloads.py "$RELEASE_ROOT/inspect-downloads.py"
+          python3 "$RELEASE_ROOT/inspect-downloads.py"
+          python3 .github/scripts/release-registry.py prepare --root "$RELEASE_ROOT" --revision "$SOURCE_REVISION"
+          python3 - <<'PY'
+          import json,os,pathlib
+          root=pathlib.Path(os.environ['RELEASE_ROOT'])
+          prepared=json.loads((root/'prepared-report.json').read_text())
+          for image in prepared['platforms']:
+              arch=image['platform'].split('/')[1]
+              report=json.loads((root/(arch+'-container-report.json')).read_text())
+              assert image['config_digest']==report['image_id'],'Prepared image differs from the native image that passed validation'
+          assert json.loads((root/'downloads-report.json').read_text())['status']=='passed','Packaged downloads failed verification'
+          (root/'ready-to-publish').touch(mode=0o600)
+          PY
+      - name: Publish and independently read back both platforms
+        env:
+          LIGHTMONI_RELEASE_REGISTRY_PASSWORD: ${{ secrets.LIGHTMONI_OPERATIONS_RELEASE_20261027 }}
+        run: |
+          test -n "$LIGHTMONI_RELEASE_REGISTRY_PASSWORD"
+          python3 .github/scripts/release-registry.py publish --root "$RELEASE_ROOT" --revision "$SOURCE_REVISION"
+          python3 - <<'PY'
+          import base64,json,os,pathlib,subprocess,tempfile
+          password=os.environ.pop('LIGHTMONI_RELEASE_REGISTRY_PASSWORD')
+          auth=base64.b64encode(('liminghan:'+password).encode()).decode();del password
+          root=pathlib.Path(os.environ['RELEASE_ROOT']);report={'verified':[],'method':'Independent Docker pull and image inspect; no service deployment'}
+          prepared=json.loads((root/'prepared-report.json').read_text())
+          with tempfile.TemporaryDirectory(prefix='lightmoni-release-auth-') as folder:
+              path=pathlib.Path(folder)/'config.json'
+              path.write_text(json.dumps({'auths':{'docker.heyphp.com':{'auth':auth}}}));path.chmod(0o600)
+              for image in prepared['platforms']:
+                  result=subprocess.run(['docker','--config',folder,'pull','--platform',image['platform'],'docker.heyphp.com/lightmoni/lightmoni:20261027-operations'],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+                  assert result.returncode==0,'Independent Docker pull failed'
+                  inspected=subprocess.run(['docker','image','inspect',image['config_digest']],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+                  assert inspected.returncode==0,'Pulled image inspect failed'
+                  config=json.loads(inspected.stdout)[0]
+                  assert config['Architecture']==image['platform'].split('/')[1],'Pulled architecture mismatch'
+                  assert config['Config']['User']=='lightmoni' and config['Config']['Labels']['org.opencontainers.image.revision']==os.environ['SOURCE_REVISION'],'Pulled revision or user mismatch'
+                  report['verified'].append({'platform':image['platform'],'config_digest':image['config_digest']})
+          report['temporary_docker_auth_removed']=True
+          (root/'docker-pull-report.json').write_text(json.dumps(report,indent=2))
+          print('Independent Docker pulls verified for both platforms')
+          PY
+      - name: Upload credential-free release evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: operations-release-evidence
+          path: |
+            /tmp/lightmoni-operations-release/*-report.json
+          if-no-files-found: error
+          retention-days: 7
