@@ -9,7 +9,8 @@ import {LoginPage,OverviewPage,DataPage,AgentsPage} from './CorePages';
 import PersonalSettings from './PersonalSettings';
 import {useI18n} from '../shared/i18n';
 import WorkspaceHeader from './WorkspaceHeader';
-import {navigationGroups,navigationLinks} from './navigation';
+import {navigationLinks} from './navigation';
+import SidebarNavigation from './SidebarNavigation';
 import './navigation.css';
 const AdminPage=lazy(()=>import('./AdminPage'));
 const DashboardPage=lazy(()=>import('../features/dashboards/DashboardPage'));
@@ -37,7 +38,6 @@ export default function Root(){
  const currentLink=navigationLinks.find(link=>activePath(link.path));
  const currentPage=currentLink?t(currentLink.label,currentLink.english):t('监控工作台','Monitoring workspace');
  const contextPageTitle=currentLink?.label??'监控工作台';
- const visibleGroups=navigationGroups.map(group=>({...group,items:group.items.filter(item=>!item.adminOnly||user?.role==='admin')})).filter(group=>group.items.length>0);
  const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:contextPageTitle}}),[publishedScope,location.pathname,location.search,contextPageTitle]);
  const[navCollapsed,setNavCollapsed]=useState(()=>{try{const saved=localStorage.getItem('lightmoni.nav.collapsed');return saved===null?window.innerWidth<1100:saved==='true'}catch{return window.innerWidth<1100}});
  function toggleNavigation(){setNavCollapsed(value=>{try{localStorage.setItem('lightmoni.nav.collapsed',String(!value))}catch{}return !value})}
@@ -48,10 +48,7 @@ export default function Root(){
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'} ${/^\/dashboards\/[^/]+\/panels\//.test(location.pathname)?'is-panel-standalone':''}`}>
   <aside className="lm-sidebar">
    <Link to="/" className="lm-brand"><span className="lm-brand-mark">L</span><span>LightMoni<small>{t('监控工作台','Monitoring workspace')}</small></span></Link>
-  <nav aria-label={t('主导航','Main navigation')}>{visibleGroups.map(group=><section className="lm-nav-group" key={group.id} aria-labelledby={`lm-nav-${group.id}`}>
-    <h2 className="lm-nav-group-title" id={`lm-nav-${group.id}`}>{t(group.label,group.english)}</h2>
-    <div className="lm-nav-group-links">{group.items.map(({path,label,english,icon:Icon})=><Link key={path} aria-label={t(label,english)} title={t(label,english)} aria-current={activePath(path)?'page':undefined} className={activePath(path)?'active':''} to={path}><Icon/><span>{t(label,english)}</span></Link>)}</div>
-   </section>)}</nav>
+   <SidebarNavigation pathname={location.pathname} role={user.role} collapsed={navCollapsed}/>
    <Button className="lm-nav-collapse" type="text" aria-label={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} title={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} icon={navCollapsed?<MenuUnfoldOutlined/>:<MenuFoldOutlined/>} onClick={toggleNavigation}>{!navCollapsed&&t('收起导航','Collapse navigation')}</Button>
   </aside>
   <main className="lm-main"><WorkspaceHeader user={user} title={currentPage} onLoggedOut={()=>setUser(null)}/><div className="lm-route-content"><Suspense fallback={<div className="lm-page"><Spin/></div>}><Routes>
