@@ -1,0 +1,74 @@
+name: Operations release image build
+
+on:
+  push:
+    branches: [chore/operations-image-release]
+    paths:
+      - .github/workflows/operations-image-build.yml
+      - .github/scripts/release-image-smoke.py
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Native Linux ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      SOURCE_REVISION: ac30ec91e5804e0e9ad961d7a38d2259b3eb2106
+      IMAGE: lightmoni-operations:${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ac30ec91e5804e0e9ad961d7a38d2259b3eb2106
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: release-tools
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Build full source image
+        run: >-
+          docker build --pull --platform linux/${{ matrix.arch }}
+          --build-arg BUILD_REVISION="$SOURCE_REVISION"
+          --file source/deploy/server/Dockerfile --tag "$IMAGE" source
+      - name: Validate native container, HTTP and packaged Agent
+        run: |
+          mkdir -p "$RUNNER_TEMP/lightmoni-release-validation"
+          python3 release-tools/.github/scripts/release-image-smoke.py \
+            "$IMAGE" "$SOURCE_REVISION" "$RUNNER_TEMP/lightmoni-release-validation" \
+            | tee "$RUNNER_TEMP/lightmoni-release-validation/result.json"
+      - name: Save validated image archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/lightmoni-release-artifact"
+          docker save "$IMAGE" | gzip -1 > "$RUNNER_TEMP/lightmoni-release-artifact/${{ matrix.arch }}.tar.gz"
+          cd "$RUNNER_TEMP/lightmoni-release-artifact"
+          sha256sum "${{ matrix.arch }}.tar.gz" > SHA256SUMS
+      - name: Upload image archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: operations-image-${{ matrix.arch }}
+          path: ${{ runner.temp }}/lightmoni-release-artifact/
+          compression-level: 0
+          retention-days: 2
+      - name: Upload credential-free validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operations-validation-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/lightmoni-release-validation/result.json
+            ${{ runner.temp }}/lightmoni-release-validation/*/report.json
+          if-no-files-found: ignore
+          retention-days: 2

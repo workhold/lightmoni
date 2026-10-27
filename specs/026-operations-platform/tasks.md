@@ -21,3 +21,12 @@
 ## 明确不算已验收的范围
 
 公网ACME发证/续期、AWS/MinIO等真实S3厂商、生产高并发/大容量、多dataDir克隆身份、任意远端Docker context、K8s、数据库一致性/迁移恢复、源码自动构建与任意Compose YAML。实现中的协议夹具、类型和菜单不能替代这些验收。
+
+## 运维镜像发布补充（2026-10-27）
+
+- [ ] T016 从已合入主干的`ac30ec91e5804e0e9ad961d7a38d2259b3eb2106`干净快照完整构建Linux amd64/arm64中心镜像，重建双架构Agent包；隔离检查后发布固定标签`20261027-operations`及`latest`，回读manifest/digest与源码revision，不替换线上容器。
+- [ ] T017 保存发布/容器验收证据并通过GitHub PR记录；现有Agent需单独升级，运维节点仍须按手册准备依赖与权限。
+
+架构影响：本次仅打包并发布SDD 026已经同步的实现，不改变组件、协议、凭据、存储或部署拓扑，设计与Doca再次同步不适用。
+
+发布构建补充：`vchive`资源不足并出现SSH持续超时，改用本分支临时GitHub Actions任务，在Linux amd64/arm64原生runner中从上述固定提交构建并执行隔离HTTP/ClickHouse与双架构Agent包验收；仅上传构建产物和不含凭据的报告，不向GitHub提供镜像仓库密码。发布在本机完成，临时工作流将在记录最终证据时移除。
