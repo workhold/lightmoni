@@ -32,6 +32,7 @@ git diff --check
 - 网页 SDK 示例测试 4/4、Python 测试 32/32；另外核对动态生成的 Go 安装/示例路径及 npm/Python/Cargo 仓库元数据。
 - TypeScript SDK `npm pack --offline`、Python `uv build --offline` 的 sdist/wheel、`scripts/build-go-sdk.sh` 与 `scripts/build-native-sdks.sh` 实际生成的 Go/Python/Rust tarball 均已检查包含正确许可证。npm、Python wheel 和 Cargo 元数据均为 Apache-2.0。
 - Python SPDX 元数据使用 `setuptools>=77` 构建，SDK 运行要求仍为 Python 3.9+。
+- 准备提交增量 `gitleaks git --redact=100 --log-opts=origin/main..HEAD` 扫描退出码为 0，没有新增命中。
 - Rust `cargo package --offline --allow-dirty --no-verify` 和 `--list` 因本机缺少 `hyper` 缓存索引失败；只确认现有 Rust 发布 tarball 及 Cargo 元数据，未声称生成 `.crate` 或向包注册表发布。
 - 本次未修改产品运行逻辑，未重跑需要外部模型、ClickHouse 或 Linux/systemd 的完整产品验收。
 
@@ -44,4 +45,4 @@ git diff --check
 
 ## PR 交付
 
-开源准备改动通过 `chore/github-open-source` 分支提交 GitHub PR；许可证、模块路径和贡献入口在 PR 合入后进入默认分支。本次不自动合并。
+开源准备改动通过 `chore/github-open-source` 分支提交 [GitHub PR #1](https://github.com/workhold/lightmoni/pull/1)，处于开放、未合并状态；许可证、模块路径和贡献入口在 PR 合入后进入默认分支。本次不自动合并。
