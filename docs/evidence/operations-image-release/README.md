@@ -1,6 +1,8 @@
 # 运维功能双架构镜像发布（2026-10-27）
 
-已发布 `docker.heyphp.com/lightmoni/lightmoni:20261027-operations`，`latest` 指向相同双平台索引。两个标签均回读为 `sha256:0c314e78da2243d9e2aba641d9bab460f3dd24a78a0c4dcf2abbc389c5defeff`，支持 Linux amd64/arm64。
+本记录对应 `docker.heyphp.com/lightmoni/lightmoni:20261027-operations` 的历史发布，当时 `latest` 指向相同双平台索引。两个标签在本次历史验收时均回读为 `sha256:0c314e78da2243d9e2aba641d9bab460f3dd24a78a0c4dcf2abbc389c5defeff`，支持 Linux amd64/arm64。
+
+2026-10-28 已从合入后的 `ec30880` 在本机重建新版本，`latest` 现指向新索引；`20261027-operations` 固定标签保留不变。当前发布、默认标签和本机验收证据见[本机镜像发布记录](../local-image-release-ec30880/README.md)。下文保留旧版本的构建环境与验收范围。
 
 ## 源码与构建
 

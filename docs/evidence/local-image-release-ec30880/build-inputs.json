@@ -1,0 +1,222 @@
+{
+  "source_revision": "ec3088093498d8f052323ff395ada52607473d0a",
+  "source_snapshot": "git archive of the fixed main revision; no local uncommitted content",
+  "dockerfile": "deploy/server/Dockerfile",
+  "workstation": {
+    "os": "macOS",
+    "architecture": "arm64"
+  },
+  "local_vm": {
+    "profile": "lightmoni-release",
+    "driver": "macOS Virtualization.Framework",
+    "architecture": "aarch64",
+    "cpu": 6,
+    "memory_bytes": 8589934592,
+    "data_disk_bytes": 25769803776,
+    "host_mounts": []
+  },
+  "tool_versions": {
+    "colima": "0.10.3",
+    "docker_client": "29.9.2",
+    "docker_server": "29.5.2",
+    "containerd": "2.2.4",
+    "buildx": "0.38.1",
+    "buildkit": "0.33.1"
+  },
+  "buildkit_limits": {
+    "memory_bytes": 6442450944,
+    "max_parallelism": 2
+  },
+  "build_contexts": {
+    "node:24.15.0-bookworm": "docker-image://docker.m.daocloud.io/library/node@sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940",
+    "node:24.15.0-bookworm-slim": "docker-image://docker.m.daocloud.io/library/node@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+  },
+  "common_build_args": {
+    "DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+    "DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security"
+  },
+  "platform_build_args": {
+    "amd64": {
+      "NPM_REGISTRY": "https://registry.npmmirror.com"
+    },
+    "arm64": {}
+  },
+  "platform_metadata": {
+    "amd64": {
+      "buildx.build.provenance": {
+        "builder": {
+          "id": ""
+        },
+        "buildType": "https://mobyproject.org/buildkit@v1",
+        "materials": [
+          {
+            "uri": "pkg:docker/docker.m.daocloud.io/library/node?digest=sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d&platform=linux%2Famd64",
+            "digest": {
+              "sha256": "4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+            }
+          },
+          {
+            "uri": "pkg:docker/docker.m.daocloud.io/library/node?digest=sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940&platform=linux%2Famd64",
+            "digest": {
+              "sha256": "f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+            }
+          }
+        ],
+        "invocation": {
+          "configSource": {
+            "entryPoint": "Dockerfile"
+          },
+          "parameters": {
+            "frontend": "dockerfile.v0",
+            "args": {
+              "build-arg:BUILD_REVISION": "ec3088093498d8f052323ff395ada52607473d0a",
+              "build-arg:DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+              "build-arg:DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+              "build-arg:NPM_REGISTRY": "https://registry.npmmirror.com",
+              "context:node:24.15.0-bookworm": "docker-image://docker.m.daocloud.io/library/node@sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940",
+              "context:node:24.15.0-bookworm-slim": "docker-image://docker.m.daocloud.io/library/node@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d",
+              "frontend.caps": "moby.buildkit.frontend.contexts+forward"
+            },
+            "locals": [
+              {
+                "name": "context"
+              },
+              {
+                "name": "dockerfile"
+              }
+            ],
+            "root": {
+              "configSource": {
+                "path": "Dockerfile"
+              },
+              "request": {
+                "args": {
+                  "build-arg:BUILD_REVISION": "ec3088093498d8f052323ff395ada52607473d0a",
+                  "build-arg:DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+                  "build-arg:DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+                  "build-arg:NPM_REGISTRY": "https://registry.npmmirror.com",
+                  "context:node:24.15.0-bookworm": "docker-image://docker.m.daocloud.io/library/node@sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940",
+                  "context:node:24.15.0-bookworm-slim": "docker-image://docker.m.daocloud.io/library/node@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d",
+                  "frontend.caps": "moby.buildkit.frontend.contexts+forward"
+                }
+              }
+            },
+            "compatibilityVersion": 30
+          },
+          "environment": {
+            "dockerfileVersion": "1.27.0",
+            "platform": "linux/arm64"
+          }
+        }
+      },
+      "buildx.build.ref": "lightmoni-ec30880/lightmoni-ec308800/3szw3vhazehja7f5fmls8nwza",
+      "containerimage.descriptor": {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": "sha256:51dd3d6ad8bef3050f631aaaf464fa481d705c6951d1dc90de79344a8afa15e0",
+        "size": 3142,
+        "annotations": {
+          "org.opencontainers.image.created": "2026-10-27T16:11:18Z"
+        },
+        "platform": {
+          "architecture": "amd64",
+          "os": "linux"
+        }
+      },
+      "containerimage.digest": "sha256:51dd3d6ad8bef3050f631aaaf464fa481d705c6951d1dc90de79344a8afa15e0",
+      "image.name": "docker.io/local/lightmoni:ec30880-amd64"
+    },
+    "arm64": {
+      "buildx.build.provenance": {
+        "builder": {
+          "id": ""
+        },
+        "buildType": "https://mobyproject.org/buildkit@v1",
+        "materials": [
+          {
+            "uri": "pkg:docker/docker.m.daocloud.io/library/node?digest=sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d&platform=linux%2Farm64",
+            "digest": {
+              "sha256": "4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+            }
+          },
+          {
+            "uri": "pkg:docker/docker.m.daocloud.io/library/node?digest=sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940&platform=linux%2Farm64",
+            "digest": {
+              "sha256": "f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+            }
+          }
+        ],
+        "invocation": {
+          "configSource": {
+            "entryPoint": "Dockerfile"
+          },
+          "parameters": {
+            "frontend": "dockerfile.v0",
+            "args": {
+              "build-arg:BUILD_REVISION": "ec3088093498d8f052323ff395ada52607473d0a",
+              "build-arg:DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+              "build-arg:DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+              "context:node:24.15.0-bookworm": "docker-image://docker.m.daocloud.io/library/node@sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940",
+              "context:node:24.15.0-bookworm-slim": "docker-image://docker.m.daocloud.io/library/node@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d",
+              "frontend.caps": "moby.buildkit.frontend.contexts+forward"
+            },
+            "locals": [
+              {
+                "name": "context"
+              },
+              {
+                "name": "dockerfile"
+              }
+            ],
+            "root": {
+              "configSource": {
+                "path": "Dockerfile"
+              },
+              "request": {
+                "args": {
+                  "build-arg:BUILD_REVISION": "ec3088093498d8f052323ff395ada52607473d0a",
+                  "build-arg:DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+                  "build-arg:DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+                  "context:node:24.15.0-bookworm": "docker-image://docker.m.daocloud.io/library/node@sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940",
+                  "context:node:24.15.0-bookworm-slim": "docker-image://docker.m.daocloud.io/library/node@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d",
+                  "frontend.caps": "moby.buildkit.frontend.contexts+forward"
+                }
+              }
+            },
+            "compatibilityVersion": 30
+          },
+          "environment": {
+            "dockerfileVersion": "1.27.0",
+            "platform": "linux/arm64"
+          }
+        }
+      },
+      "buildx.build.ref": "lightmoni-ec30880/lightmoni-ec308800/0np4vsd8uz7bdquxwjb1zxram",
+      "containerimage.descriptor": {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": "sha256:f96efe5f6756e195bae7c1d4d62d7668c33af4f6529e7188d0a5878d8cca028b",
+        "size": 3142,
+        "annotations": {
+          "org.opencontainers.image.created": "2026-10-27T16:02:46Z"
+        },
+        "platform": {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      },
+      "containerimage.digest": "sha256:f96efe5f6756e195bae7c1d4d62d7668c33af4f6529e7188d0a5878d8cca028b",
+      "image.name": "docker.io/local/lightmoni:ec30880-arm64"
+    }
+  },
+  "network_workarounds": [
+    "Pinned Node and ClickHouse mirror indexes/platforms matched official Docker Hub digests",
+    "Debian mirror uses existing Dockerfile build arguments and retains apt signature verification",
+    "amd64 NPM mirror uses existing build argument; package-lock integrity verification retained",
+    "Embedded Node Agent runtime downloads use nodejs.org and official SHASUMS",
+    "Initial buildx upload failed with proxy HTTP 413 before any platform manifest or tag write; isolated authorization file removed",
+    "Final upload sends 512 KiB OCI PATCH chunks from this exact local export, at most four independent clients; credentials remain only in process memory"
+  ],
+  "remote_build_used": false,
+  "github_actions_used": false,
+  "global_docker_context_changed": false,
+  "host_ssh_config_changed": false
+}

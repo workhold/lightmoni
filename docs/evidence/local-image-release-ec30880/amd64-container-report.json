@@ -1,0 +1,183 @@
+{
+  "passed": true,
+  "image": "local/lightmoni:ec30880-amd64",
+  "expected_source_revision": "ec3088093498d8f052323ff395ada52607473d0a",
+  "docker_platform": "linux/amd64",
+  "checks": [
+    {
+      "check": "OCI revision and requested-platform image",
+      "passed": true,
+      "platform": "linux/amd64",
+      "execution": "emulated Linux containers in local VM",
+      "unprivileged_user": "lightmoni"
+    },
+    {
+      "check": "ClickHouse 26.8 image explicitly pulled",
+      "passed": true
+    },
+    {
+      "check": "ClickHouse 26.8 authenticated real HTTP",
+      "passed": true
+    },
+    {
+      "check": "real center healthz and fresh state",
+      "passed": true
+    },
+    {
+      "check": "admin init from stdin, login and session",
+      "passed": true
+    },
+    {
+      "check": "operations page and four typed APIs",
+      "passed": true,
+      "anonymous_status": 401,
+      "member_status": 403,
+      "approved_jobs": 0
+    },
+    {
+      "check": "center imports, four operation capabilities and AI read/draft tools",
+      "passed": true
+    },
+    {
+      "check": "AMD and ARM archive SHA256, ELF and operation modules",
+      "passed": true,
+      "executed_platform": "linux/amd64",
+      "static_platform": "linux/arm64"
+    },
+    {
+      "check": "embedded target-platform Node entry point",
+      "passed": true,
+      "version": "0.1.0",
+      "runtime": "linux/x64",
+      "platform": "linux/amd64",
+      "command": "version",
+      "agent_daemon_started": false
+    },
+    {
+      "check": "four SDK downloads, checksums, Apache licenses and GitHub Go module",
+      "passed": true,
+      "languages": [
+        "go",
+        "python",
+        "rust",
+        "typescript"
+      ],
+      "license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+      "go_module": "github.com/workhold/lightmoni"
+    }
+  ],
+  "downloads": [
+    {
+      "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+      "bytes": 74492146,
+      "sha256": "f9b96908882cf10bc2e5b05e3c8a925eeca0f8eae91e7bc214cd2e935fa748ae",
+      "platform": "linux/amd64",
+      "elf_machine": 62,
+      "node_version": "24.15.0",
+      "operation_modules": 4,
+      "executed": true
+    },
+    {
+      "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+      "bytes": 74187635,
+      "sha256": "42ffe7fde8a2a4c51afcf571fd6acff950fa550f6d5bb9745946bf410a1c7a22",
+      "platform": "linux/arm64",
+      "elf_machine": 183,
+      "node_version": "24.15.0",
+      "operation_modules": 4,
+      "executed": false
+    }
+  ],
+  "sdk_downloads": [
+    {
+      "language": "go",
+      "file": "lightmoni-go-sdk_0.1.0.tar.gz",
+      "bytes": 56362,
+      "sha256": "454dfea09650c0ba490c26c2e14b3f8e2f5a6f92a8cdb958fcc24cfd7ae0aab5",
+      "checksum_verified": true,
+      "apache_license_paths": [
+        "lightmoni-go-sdk/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+      "go_module": "github.com/workhold/lightmoni"
+    },
+    {
+      "language": "typescript",
+      "file": "lightmoni-sdk-0.1.0.tgz",
+      "bytes": 27317,
+      "sha256": "d087b534cad21f20c1058451c8da4eaecf6a9991275b2a522156a28e92b2fd71",
+      "checksum_verified": true,
+      "apache_license_paths": [
+        "package/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+    },
+    {
+      "language": "python",
+      "file": "lightmoni-python-sdk_0.1.0.tar.gz",
+      "bytes": 39845,
+      "sha256": "c1485266ea7d7d6951c1114fc09abd25963f663411690ff25eb6b8fdc08bb110",
+      "checksum_verified": true,
+      "apache_license_paths": [
+        "lightmoni-python-sdk/LICENSE",
+        "lightmoni-python-sdk/sdk/python/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+    },
+    {
+      "language": "rust",
+      "file": "lightmoni-rust-sdk_0.1.0.tar.gz",
+      "bytes": 41744,
+      "sha256": "f88ec0612018f6abf46376e52c974eb6534883156b412d9d66d2aef6ff766f56",
+      "checksum_verified": true,
+      "apache_license_paths": [
+        "lightmoni-rust-sdk/LICENSE",
+        "lightmoni-rust-sdk/sdk/rust/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+    }
+  ],
+  "test_network": "dedicated bridge, center published on host loopback; outbound routing is available; no model provider is configured",
+  "resource_limits": {
+    "center_memory_bytes": 1073741824,
+    "clickhouse_memory_bytes": 3221225472,
+    "additional_swap_bytes": 0,
+    "clickhouse_server_memory_bytes": 2147483648,
+    "clickhouse_query_memory_bytes": 536870912,
+    "clickhouse_query_threads": 2
+  },
+  "limitations": [
+    "linux/arm64 Agent package inspected statically only; target-platform execution is emulated Linux containers in local VM",
+    "No Agent daemon or approved job was run",
+    "No live Nginx/Docker/ACME/S3 operation executed",
+    "HTTP assets are checked; this is not interactive browser acceptance",
+    "Fresh isolated volumes only; no existing production data upgrade is tested",
+    "No remote machine, registry tag or production container is modified"
+  ],
+  "target_platform": "linux/amd64",
+  "workstation_os": "Darwin",
+  "workstation_architecture": "arm64",
+  "docker_daemon_platform": "linux/arm64",
+  "execution_environment": "emulated Linux containers in local VM",
+  "emulated": true,
+  "emulation_implementation": "registered Docker daemon emulation; implementation not independently identified",
+  "executed_agent_platform": "linux/amd64",
+  "static_agent_platform": "linux/arm64",
+  "image_id": "sha256:51dd3d6ad8bef3050f631aaaf464fa481d705c6951d1dc90de79344a8afa15e0",
+  "source_revision": "ec3088093498d8f052323ff395ada52607473d0a",
+  "navigation_assets": {
+    "bilingual_five_categories": true,
+    "websites_and_operations_entry": true,
+    "collapsible_group_markers": true,
+    "verification": "real production JS returned by image HTTP; not interactive browser testing"
+  },
+  "last_stage": "four SDK HTTP downloads, SHA256, Apache licenses and Go module",
+  "cleanup": {
+    "removed": {
+      "container": 2,
+      "volume": 2,
+      "network": 1
+    },
+    "errors": []
+  }
+}

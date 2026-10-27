@@ -1,0 +1,33 @@
+{
+  "test_resource_cleanup_confirmed": true,
+  "remaining_containers": [
+    {
+      "name": "buildx_buildkit_lightmoni-ec308800",
+      "state": "exited"
+    }
+  ],
+  "remaining_volumes": [
+    "buildx_buildkit_lightmoni-ec308800_state"
+  ],
+  "remaining_networks": [
+    "bridge",
+    "host",
+    "none"
+  ],
+  "isolated_auth_config_present": false,
+  "final_chunked_publisher_auth_config_used": false,
+  "initial_buildx_auth_config_removed": true,
+  "local_builder_stopped": true,
+  "local_vm_stopped": true,
+  "retained": [
+    "dedicated VM disk",
+    "tested local images",
+    "BuildKit cache",
+    "restricted local OCI export and evidence scratch"
+  ],
+  "global_prune_executed": false,
+  "remote_host_or_agent_modified": false,
+  "production_container_modified": false,
+  "local_vm_status_readback": "Stopped",
+  "completed_at_utc": "2026-10-27T16:29:52.371339+00:00"
+}
