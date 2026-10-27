@@ -12,7 +12,7 @@
 
 ## Docker Compose 部署
 
-根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像默认为 `docker.heyphp.com/lightmoni/lightmoni:20261026-admin`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。中心以非 root 用户运行。
+根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像默认为 `docker.heyphp.com/lightmoni/lightmoni:20261027-agent-install`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。中心以非 root 用户运行。
 
 ```sh
 cp .env.example .env
@@ -27,7 +27,7 @@ docker compose pull
 | 配置项 | 默认值 | 用途 |
 | --- | --- | --- |
 | `COMPOSE_PROJECT_NAME` | `lightmoni` | 项目名；已有实例沿用原值以匹配数据卷 |
-| `LIGHTMONI_IMAGE` | `docker.heyphp.com/lightmoni/lightmoni:20261026-admin` | 中心镜像 |
+| `LIGHTMONI_IMAGE` | `docker.heyphp.com/lightmoni/lightmoni:20261027-agent-install` | 中心镜像 |
 | `LIGHTMONI_BIND_ADDRESS` | `0.0.0.0` | 宿主机监听地址；仅本机反向代理访问可设为 `127.0.0.1` |
 | `LIGHTMONI_PORT` | `8080` | 宿主机 HTTP 端口，映射到容器固定端口 8080 |
 | `LIGHTMONI_EXTERNAL_URL` | `http://localhost:8080` | 用户实际访问地址，用于默认上报地址、登录回调和通知链接 |

@@ -1,13 +1,13 @@
 # Docker 更新与回滚
 
-根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像默认 `docker.heyphp.com/lightmoni/lightmoni:20261026-admin`。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
+根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像默认 `docker.heyphp.com/lightmoni/lightmoni:20261027-agent-install`。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
 
 ## 更新
 
 1. 在所选 `.env` 中填写要部署的 `LIGHTMONI_IMAGE` 固定标签或 digest；私有仓库先运行 `docker login docker.heyphp.com`。源码构建时另外填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD`。`0.1.0` 是应用/包版本，不能单独证明源码已更新。
 2. 保留旧镜像标签及受限的旧 `.env`。备份配套的 SQLite、主密钥与 ClickHouse 数据；备份文件与配置仅允许运维用户读取。
 3. 如网络需要，在 `.env` 中选择公开 npm、Node 归档、Debian 和 Debian security 镜像源；默认官方源不变。Node 归档仍与官方发行站的 SHA256 清单校验。镜像源不得携带凭据、token 或查询参数；不要关闭证书、npm integrity 或 Debian 签名校验。
-4. 从仓库根目录执行下面的命令。只部署中心时将 `-f` 改为 `compose.yaml`，并使用根目录 `.env`。
+4. 从仓库根目录执行下面的命令。使用根目录部署入口时将 `-f` 改为 `compose.yaml`，并使用根目录 `.env`；两个入口都会管理中心与 ClickHouse。
 
 ```sh
 docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/compose.yaml config --quiet
@@ -17,6 +17,8 @@ docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/
 ```
 
 通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对镜像提交；随后检查网页、原有管理员登录、只读查询和 SDK/Agent 下载。需要 `up` 重新创建容器才能切换镜像；本地 `npm run build`、`release:sdk` 和 `release:agent` 只更新本地生成物。
+
+`20261027-agent-install` 在已验收的 `20261026-admin` 固定镜像上增加安装脚本补丁层，修复 Agent 安装后的非 root 读取权限与启动观察；没有重新编译服务、依赖或下载包。`latest` 同时指向此次双架构版本。已有 `.env` 若仍固定旧标签，需先更新 `LIGHTMONI_IMAGE=docker.heyphp.com/lightmoni/lightmoni:20261027-agent-install`，再执行上述 `pull` 和 `up`；单独拉取镜像不会更新正在运行的平台。旧固定标签保留供回退。构建方式及本次验证边界见 [SDD 024](../../specs/024-agent-install-startup-fix/validation.md)。
 
 ## 回滚与已有临时配置迁移
 

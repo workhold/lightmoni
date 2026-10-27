@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: ${LIGHTMONI_IMAGE:-docker.heyphp.com/lightmoni/lightmoni:20261026-admin}
+    image: ${LIGHTMONI_IMAGE:-docker.heyphp.com/lightmoni/lightmoni:20261027-agent-install}
     pull_policy: missing
     build:
       context: .

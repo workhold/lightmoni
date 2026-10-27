@@ -11,6 +11,16 @@
 3. 启动失败时，在 stop/恢复旧 unit 前显示固定失败阶段、systemd LoadState/ActiveState/SubState/Result/ExecMainCode/ExecMainStatus 与本机 journalctl 检查命令，不自动输出 journal、命令行、配置、环境或凭据。诊断不可阻止回滚，缺少 systemctl show 也必须继续恢复。
 4. 失败继续恢复先前 launcher/config/unit/current/identity、启用与活跃状态；保留已有队列和游标。不自动重试 enrollment、不操作用户远端主机。
 
+## 镜像交付追加需求（2026-10-27）
+
+用户授权重新制作中心镜像并发布至既有 `docker.heyphp.com/lightmoni/lightmoni`。新增固定标签 `20261027-agent-install` 并更新 `latest`，保留此前固定版本供回退。本次仅发布镜像，不替换线上平台正在运行的容器。
+
+发布必须包含 Linux amd64/arm64，两者分发的安装脚本均与 PR #28 修复源码一致。先核对此前已验收镜像的源码 revision 与当前 main：若运行内容只有 `deploy/agent/install.sh` 改动，可以以此前固定 OCI digest 为基础，增加安装脚本补丁层，保留原运行环境、依赖、双架构 Agent 包和 SDK。若存在其他运行差异，则回到完整源码构建，不用局部覆盖掩盖差异。
+
+发布成功后将 Compose、环境示例与部署文档的默认固定标签更新到此次版本；历史验收记录保留原标签，不改写旧证据。用户已有 `.env` 需自行更新 `LIGHTMONI_IMAGE` 并重新创建容器。
+
+凭据仅通过受保护内存、stdin 或短期 0600 Docker 配置使用，不能进入构建上下文、镜像层、日志、提交或证据。发布后回读远端 manifest/index、平台和安装脚本摘要，至少执行当前可用 amd64 容器运行验证；arm64 若无执行环境，明确记录静态验证与实际执行的边界。
+
 ## 架构影响
 
 不适用：本次恢复已有非 root 安装契约所需的运行文件权限，并改进本机启动观察与安全错误提示；不新增组件、控制/数据通路、凭据、存储、协议或部署拓扑。配置与持久状态仍受原权限保护。无需改写 `docs/system-design.md` 或 Doca 原生图块。Linux systemd 双架构验收仍待实机，不以 shell shim 替代。
