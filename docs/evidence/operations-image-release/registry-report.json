@@ -1,0 +1,82 @@
+{
+  "source_revision": "ac30ec91e5804e0e9ad961d7a38d2259b3eb2106",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "platforms": [
+    {
+      "platform": "linux/amd64",
+      "digest": "sha256:89598799a3938249e55856d047648db8e6d8d0ef5a3116144ffa400ccb315d2d",
+      "size": 2697,
+      "config_digest": "sha256:922577ece1464355d6dc3f799a8595652eb55912d2dc22e0846ad0c46719b948",
+      "layer_count": 15,
+      "runtime_user": "lightmoni"
+    },
+    {
+      "platform": "linux/arm64",
+      "digest": "sha256:485da71c679a9cf59ebeb3283cd5d784fff8087cc9dc04f1cdd5e4b71b4a0f8a",
+      "size": 2697,
+      "config_digest": "sha256:54087aa7f93898edf86573ed65ed49f8a0014e9b9c7e4d154f3e2b9c8878e1b7",
+      "layer_count": 15,
+      "runtime_user": "lightmoni"
+    }
+  ],
+  "index_digest": "sha256:0c314e78da2243d9e2aba641d9bab460f3dd24a78a0c4dcf2abbc389c5defeff",
+  "tags": [
+    {
+      "tag": "20261027-operations",
+      "digest": "sha256:0c314e78da2243d9e2aba641d9bab460f3dd24a78a0c4dcf2abbc389c5defeff"
+    },
+    {
+      "tag": "latest",
+      "digest": "sha256:0c314e78da2243d9e2aba641d9bab460f3dd24a78a0c4dcf2abbc389c5defeff"
+    }
+  ],
+  "previous_latest_digest": "sha256:1a7c231eb2e2c7981369dcff21a5d8239a2b45d7ee56318c2008d17387ad977e",
+  "independent_oci_pull_details": [
+    {
+      "platform": "linux/amd64",
+      "manifest_digest": "sha256:89598799a3938249e55856d047648db8e6d8d0ef5a3116144ffa400ccb315d2d",
+      "config_digest": "sha256:922577ece1464355d6dc3f799a8595652eb55912d2dc22e0846ad0c46719b948",
+      "layer_count": 15,
+      "compressed_layer_bytes": 304522819,
+      "verified_tags": [
+        "20261027-operations",
+        "latest"
+      ]
+    },
+    {
+      "platform": "linux/arm64",
+      "manifest_digest": "sha256:485da71c679a9cf59ebeb3283cd5d784fff8087cc9dc04f1cdd5e4b71b4a0f8a",
+      "config_digest": "sha256:54087aa7f93898edf86573ed65ed49f8a0014e9b9c7e4d154f3e2b9c8878e1b7",
+      "layer_count": 15,
+      "compressed_layer_bytes": 303119824,
+      "verified_tags": [
+        "20261027-operations",
+        "latest"
+      ]
+    }
+  ],
+  "independent_oci_pull_verified": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "verification_method": "Independent OCI HTTP GET: index, image manifests, configs and every streamed layer digest/size",
+  "docker_pull_executed": false,
+  "container_execution_verified": false,
+  "limitations": [
+    "This is an independent OCI distribution pull verification; no Docker pull or container execution was performed"
+  ],
+  "date": "2026-10-27",
+  "publish_location": "local workstation",
+  "build_mode": "Full clean source with deploy/server/Dockerfile on native amd64/arm64 GitHub runners",
+  "build_run_id": 40497221213,
+  "source_clean_snapshot": true,
+  "old_fixed_tag_retained": true,
+  "online_platform_replaced": false,
+  "temporary_github_secret_deleted": true,
+  "verification_scope": "Independent OCI HTTP reads only; native container execution is recorded in amd64-container-report.json and arm64-container-report.json",
+  "local_tool_sha256": {
+    "registry-concurrent.py": "d9d5ebd502d5f3016d4b9da39cc8edcdc4bb09bddc5ac04765745cff205426fe",
+    "registry_keepalive.py": "70060cd216686c7d157d7030e3289a5963539b80d88086f8c617cd93043fe59c",
+    "local-publish.py": "0a249cdfc0cc53de9172e32276395f8079eec58fa4e83313affb215e910731b2"
+  }
+}
