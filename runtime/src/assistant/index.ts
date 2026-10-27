@@ -55,6 +55,8 @@ import type { ManagedMachineStore } from "../server/managed-machines.js";
 import { AlertCapabilities, AlertCapabilityError } from "../domains/alert-capabilities.js";
 import { AlertProposalService } from "./alert-proposals.js";
 import { alertTools } from "./alert-tools.js";
+import { operationTools } from "./operation-tools.js";
+import type { OperationsStore } from "../operations/types.js";
 import { InstrumentationService } from "./instrumentation.js";
 import type { ServiceDeploymentStore } from "../server/service-deployments.js";
 export interface AssistantOptions {
@@ -69,6 +71,7 @@ export interface AssistantOptions {
   machines?: ManagedMachineStore;
   alerts?: AlertCapabilities;
   deployments?: ServiceDeploymentStore;
+  operations?: OperationsStore;
   instrumentationWorkspaceRoot?: string;
 }
 const id = () => randomBytes(16).toString("hex");
@@ -272,6 +275,7 @@ export function registerAssistant(
   const tools =
     options.tools ??
     [
+      ...(options.operations ? operationTools(options.operations) : []),
       ...monitoringTools(deps, {
         ...(codeTasks
         ? {

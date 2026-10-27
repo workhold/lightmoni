@@ -3,6 +3,9 @@ import { join } from "node:path";
 import { atomicJSON } from "../shared/io.js";
 import { CapabilityExecutor, type ExecutorJob, type ExecutionReceipt } from "./executor.js";
 import type { DeploymentAction } from "../deployment/types.js";
+import { executeOperation, operationCapabilities, operationCommand } from "./operations.js";
+import type { OperationPayload } from "../operations/types.js";
+import { recoverWebsiteGateway } from "../operations/websites.js";
 
 const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
 const ARTIFACT_FORMAT = "lightmoni-release-v1.tar.gz";
@@ -131,6 +134,7 @@ export class AgentJobRunner {
       capabilities: [
         "artifact.stage", "artifact.activate_release", "systemd.daemon_reload", "systemd.enable", "systemd.disable", "systemd.start", "systemd.restart", "systemd.stop",
         "health.systemd", "health.http", "health.tcp", "systemd.probe",
+        ...operationCapabilities,
       ],
       receipt_cursor: this.cursor,
     });
@@ -193,7 +197,20 @@ export class AgentJobRunner {
     };
     let result: ExecutionReceipt;
     try {
-      result = await executor.execute({ id: job.id, expires_at: job.expires_at, capabilities: job.capabilities, actions: job.actions, target } as ExecutorJob, controller.signal);
+      if (job.actions?.length === 1 && job.actions[0]?.kind === "operations") {
+        const response = await this.fetcher(this.config.endpoint.replace(/\/$/, "") + `/api/v1/agents/${encodeURIComponent(this.config.agentID)}/jobs/${encodeURIComponent(job.id)}/operations`, {
+          headers: { authorization: "Bearer " + this.config.controlCredential, "X-LightMoni-Job-Lease": job.lease_id },
+          redirect: "error", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+        });
+        if (!response.ok || !response.body) { await response.body?.cancel(); throw Error("operations_payload_unavailable"); }
+        const reader = response.body.getReader(), chunks: Buffer[] = []; let bytes = 0;
+        try { while (true) { const part = await reader.read(); if (part.done) break; bytes += part.value.length; if (bytes > 1_200_000) { await reader.cancel(); throw Error("operations_payload_too_large"); } chunks.push(Buffer.from(part.value)); } } finally { reader.releaseLock(); }
+        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")).payload as OperationPayload;
+        if (payload.operation_id !== job.actions[0].operation_id || payload.resource.agent_id !== this.config.agentID || payload.resource.kind !== job.actions[0].domain || !job.capabilities?.includes("operations." + payload.resource.kind) || Date.parse(job.expires_at) <= this.now().getTime()) throw Error("operations_payload_mismatch");
+        result = await executeOperation(payload, { dataDir: this.config.dataDir, signal: controller.signal, now: this.now, command: (file, args, opts) => operationCommand(file, args, { ...opts, signal: controller.signal }) }, enqueueEvent);
+      } else {
+        result = await executor.execute({ id: job.id, expires_at: job.expires_at, capabilities: job.capabilities, actions: job.actions, target } as ExecutorJob, controller.signal);
+      }
     } finally {
       clearInterval(heartbeatTimer);
       await eventTail;
@@ -208,6 +225,11 @@ export class AgentJobRunner {
   }
   async run(signal: AbortSignal): Promise<void> {
     await this.recoverUnknown();
+    try {
+      await recoverWebsiteGateway({ dataDir: this.config.dataDir, signal, now: this.now, command: (file, args, opts) => operationCommand(file, args, { ...opts, signal }) });
+    } catch {
+      await this.io.emit?.({ phase: "failed", code: "website_gateway_recovery_failed", summary: "Managed website gateway recovery failed; inspect dependencies and configuration" });
+    }
     const delay = Math.max(1000, this.config.pollIntervalMs ?? 5000);
     while (!signal.aborted && !this.stopped) {
       try { await this.pollOnce(); } catch { /* next poll retries; centre retains the lease */ }

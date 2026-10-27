@@ -294,10 +294,14 @@ export function registerAgentJobs(
     ensureAgent(agentID);
     const caps = new Set(capabilities(offered));
     expireLeases();
+    return db.transaction(() => {
     const at = deps.now(), nowText = iso(deps, at);
+    // A node has one execution lane, including when two runner processes poll.
+    // Shared Nginx state and project registries must never mutate concurrently.
+    if (db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state IN ('leased','accepted','preflighting','staging','activating','verifying') AND lease_expires_at>?", agentID, nowText)) return null;
     const candidate = db.get<any>(
-      "SELECT * FROM agent_jobs WHERE agent_id=? AND state='queued' AND expires_at>? ORDER BY created_at,id LIMIT 1",
-      agentID, nowText,
+      "SELECT * FROM agent_jobs WHERE agent_id=? AND state='queued' AND expires_at>? AND NOT EXISTS (SELECT 1 FROM json_each(agent_jobs.capabilities_json) required WHERE required.value NOT IN (SELECT value FROM json_each(?))) ORDER BY created_at,id LIMIT 1",
+      agentID, nowText, JSON.stringify([...caps]),
     );
     if (!candidate) return null;
     const required = JSON.parse(candidate.capabilities_json || "[]") as string[];
@@ -308,6 +312,7 @@ export function registerAgentJobs(
     );
     if (!changed.changes) return null;
     return view(row(candidate.id));
+    });
   };
   const leaseRow = (agentID: string, jobID: string, leaseID: string) => {
     const value = row(jobID);
@@ -410,6 +415,10 @@ export function registerAgentJobs(
       } else snapshot = {};
     }
     const validSuccessPhase = readOnlyPreflight(current) ? current.state === "preflighting" : current.state === "verifying";
+    const operationAction = JSON.parse(current.actions_json || "[]").find((action: any) => action?.kind === "operations");
+    if (operationAction && state === "succeeded" && (snapshot.operations?.operation_id !== operationAction.operation_id || snapshot.operations?.resource_id !== JSON.parse(current.target_json || "{}").operations_resource_id)) {
+      state = "unknown"; code = "invalid_operations_receipt"; summary = "Operation receipt did not match the approved resource and operation"; snapshot = {};
+    }
     if (state === "succeeded" && (!validSuccessPhase || (snapshot as any).health?.healthy !== true)) {
       state = "unknown";
       code = "invalid_agent_sequence";

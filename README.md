@@ -80,9 +80,15 @@ docker compose up -d --no-build --pull never --wait
 
 管理员可在“主机管理 → 登录终端”打开交互式 SSH 小窗，连接前需要确认主机指纹并添加有效私钥，见 [网页 SSH 终端](docs/machine-terminal.md)。
 
+## 网站、容器、备份与计划任务
+
+管理员从“运维工具”（`/operations`）管理小型静态网站、反向代理、HTTPS 证书、受管 Compose、目录备份和计划任务。先登记节点与配置，生成方案并人工批准，再查看真实执行回执；保存配置不会自动执行。AI 助手可以读取资源和创建方案，批准仍由管理员完成。
+
+目标是受信 Linux 主机：网站按需安装 Nginx/OpenSSL，ACME 另需 Certbot，容器需 Docker 与 Compose plugin；执行节点不持有模型 Key。网站使用独立受管网关，不自动接管现有 Nginx/1Panel 或 80/443。Compose 接受受限 JSON 文档，配置回退保留卷数据。备份只覆盖 root 管理的普通文件目录，不承诺活动数据库一致性。详细步骤、依赖和验证边界见 [运维使用说明](docs/operations.md)、[HLD/LLD](docs/system-design.md#26-运维平台网站容器备份与计划任务sdd-026) 与 [SDD 026](specs/026-operations-platform/spec.md)。
+
 ## LightMoni Agent、执行节点与 SDK
 
-软件统一称 **LightMoni Agent**，部署在主机或容器中的运行实例称 **执行节点**；节点内部执行指标和日志采集的模块称采集器。导航入口为“节点助手”，网页对话能力仍称“AI 助手”。当前节点执行监控任务，不提供模型调用或通用命令执行能力。
+软件统一称 **LightMoni Agent**，部署在主机或容器中的运行实例称 **执行节点**；节点内部执行指标和日志采集的模块称采集器。导航入口为“节点助手”，网页对话能力仍称“AI 助手”。节点执行监控任务和经批准的受限运维任务，不提供模型调用或通用命令执行能力。
 
 LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器或容器编排管理生命周期。业务 SDK 可直接上报平台（direct），也可明确选择经 Agent 上报（agent）；接入页默认 direct，安装 Agent 不是 SDK 直连的前置条件。同一节点可接收多个业务的数据，也可独立承担主机采集、拨测和目录日志，业务路由与这些节点任务互不绑定。业务启动、停止或重启不触发 Agent 启停。业务退出时完成 SDK flush/shutdown，Agent 继续采集和补传。CLI 支持 `run --config` 前台运行并响应 SIGTERM；当前网页安装命令覆盖 Linux systemd 服务。每个 Agent 实例使用独立、可持久化的数据目录，以保留身份与待补传队列。两条上报路径的配置与边界见 [SDK 接入](sdk/README.md#选择上报方式) 和 [SDD 012](specs/012-sdk-reporting-choice/spec.md)。
 

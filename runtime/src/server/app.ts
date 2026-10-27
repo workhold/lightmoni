@@ -28,6 +28,12 @@ import { registerMachineTerminal } from "./machine-terminal.js";
 import { registerManagedMachines } from "./managed-machines.js";
 import { registerServiceDeployments } from "./service-deployments.js";
 import { registerAgentJobs } from "./agent-jobs.js";
+import { registerOperations } from "./operations.js";
+import { registerOperationSchedules } from "./operation-schedules.js";
+import { websiteDefinition } from "../operations/websites.js";
+import { certificateDefinition } from "../operations/certificates.js";
+import { composeDefinition } from "../operations/containers.js";
+import { backupDefinition } from "../operations/backups.js";
 import { ReleaseArtifactStore } from "../deployment/artifact-store.js";
 import { registerAssistant } from "../assistant/index.js";
 import { registerDashboards } from "../domains/dashboards.js";
@@ -120,6 +126,8 @@ export async function createApp(cfg: Config) {
     const releaseArtifacts = new ReleaseArtifactStore(join(cfg.dataDir, "release-artifacts"));
     const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs, artifacts: releaseArtifacts });
     modules.push(serviceDeployments);
+    const operations = registerOperations(deps, { jobs: agentJobs, credentials: agentCredentials, definitions: [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition] });
+    modules.push(operations, registerOperationSchedules(deps, operations));
     const ingest = new Ingest(cat, auth, (...args) =>
       monitor?.accepted(...args),
       agentCredentials,
@@ -151,6 +159,7 @@ export async function createApp(cfg: Config) {
         machines: managedMachines,
         alerts: new AlertCapabilities(alerts),
         deployments: serviceDeployments,
+        operations,
       }),
     );
     if (cfg.monitor !== false) {

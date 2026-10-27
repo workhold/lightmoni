@@ -68,6 +68,7 @@ test("only typed rollback jobs may skip artifact staging", () => {
   assert.ok(deploymentLease);
   f.jobs.event("agent-1", deployment.id, { lease_id: deploymentLease!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
   assert.throws(() => f.jobs.event("agent-1", deployment.id, { lease_id: deploymentLease!.lease_id, sequence: 2, phase: "activating", summary: "must stage first" }), /valid next step/);
+  f.jobs.result("agent-1", deployment.id, { lease_id: deploymentLease!.lease_id, state: "failed", summary: "preparation failed" });
 
   const rollback = f.jobs.enqueue({
     agentID: "agent-1", deploymentID: "dep-rollback", operationID: "op-rollback",
@@ -82,6 +83,16 @@ test("only typed rollback jobs may skip artifact staging", () => {
   f.jobs.event("agent-1", rollback.id, { lease_id: rollbackLease!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
   assert.equal(f.jobs.event("agent-1", rollback.id, { lease_id: rollbackLease!.lease_id, sequence: 2, phase: "activating", summary: "restore previous release" }).state, "activating");
   f.db.close();
+});
+
+test("one node cannot claim another job while a previous lease is active", () => {
+  const f = fixture();
+  f.jobs.enqueue({agentID:"agent-1",deploymentID:"one",operationID:"one",actions:[]});
+  f.jobs.enqueue({agentID:"agent-1",deploymentID:"two",operationID:"two",actions:[]});
+  const first=f.jobs.claim("agent-1",[])!;
+  assert.ok(first); assert.equal(f.jobs.claim("agent-1",[]),null);
+  f.jobs.result("agent-1",first.id,{lease_id:first.lease_id,state:"failed",summary:"closed"});
+  assert.ok(f.jobs.claim("agent-1",[])); f.db.close();
 });
 
 test("success without verified health evidence becomes unknown and cancellation reports prior state", () => {
