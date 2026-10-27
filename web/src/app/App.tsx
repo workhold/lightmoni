@@ -1,7 +1,7 @@
 import {MonitoringScope,type PublishedScope} from '../shared/monitoring-context';
 import {lazy,Suspense,useEffect,useMemo,useState} from 'react';
 import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
-import {ApiOutlined,AppstoreOutlined,BellOutlined,DatabaseOutlined,DashboardOutlined,MessageOutlined,SearchOutlined,SettingOutlined,SafetyCertificateOutlined,MenuFoldOutlined,MenuUnfoldOutlined,CloudServerOutlined,CloudUploadOutlined} from '@ant-design/icons';
+import {MessageOutlined,MenuFoldOutlined,MenuUnfoldOutlined} from '@ant-design/icons';
 import {Button,Drawer,Spin,Tooltip} from '../shared/ui';
 import {api} from '../shared/api';
 import type {User} from '../shared/types';
@@ -9,6 +9,8 @@ import {LoginPage,OverviewPage,DataPage,AgentsPage} from './CorePages';
 import PersonalSettings from './PersonalSettings';
 import {useI18n} from '../shared/i18n';
 import WorkspaceHeader from './WorkspaceHeader';
+import {navigationGroups,navigationLinks} from './navigation';
+import './navigation.css';
 const AdminPage=lazy(()=>import('./AdminPage'));
 const DashboardPage=lazy(()=>import('../features/dashboards/DashboardPage'));
 const LogExplorePage=lazy(()=>import('../features/logs/LogExplorePage'));
@@ -21,9 +23,6 @@ const DataManagementPage=lazy(()=>import('./DataManagementPage'));
 const AgentInstallPage=lazy(()=>import('./AgentInstall'));
 const ServiceDeploymentsPage=lazy(()=>import('./ServiceDeploymentsPage'));
 
-const links=[['/','概览',DashboardOutlined],['/dashboards','监控大盘',AppstoreOutlined],['/logs','日志探索',SearchOutlined],['/alerts','告警中心',BellOutlined],['/agents','节点助手',ApiOutlined],['/machines','主机管理',CloudServerOutlined],['/services','服务部署',CloudUploadOutlined],['/data','数据接入',DatabaseOutlined],['/data-management','数据管理',DatabaseOutlined],['/assistant','AI 助手',MessageOutlined],['/settings','个人设置',SettingOutlined],['/admin','管理后台',SafetyCertificateOutlined]] as const;
-const englishLinks:Record<string,string>={'/':'Overview','/dashboards':'Dashboards','/logs':'Log explorer','/alerts':'Alerts','/agents':'Node assistants','/machines':'Machines','/services':'Service deployments','/data':'Data ingestion','/data-management':'Data management','/assistant':'AI assistant','/settings':'Personal settings','/admin':'Administration'};
-
 function ClaimLanding(){const {token}=useParams();return <Navigate to={'/alerts?claim='+encodeURIComponent(token??'')} replace/>}
 
 export default function Root(){
@@ -35,9 +34,10 @@ export default function Root(){
  useEffect(()=>setAssistant(false),[location.pathname]);
  const[publishedScope,setPublishedScope]=useState<PublishedScope>();
  const activePath=(url:string)=>location.pathname===url||(url!=='/'&&location.pathname.startsWith(url+'/'));
- const currentLink=links.find(([url])=>activePath(url));
- const currentPage=currentLink?t(currentLink[1],englishLinks[currentLink[0]]):t('监控工作台','Monitoring workspace');
- const contextPageTitle=currentLink?.[1]??'监控工作台';
+ const currentLink=navigationLinks.find(link=>activePath(link.path));
+ const currentPage=currentLink?t(currentLink.label,currentLink.english):t('监控工作台','Monitoring workspace');
+ const contextPageTitle=currentLink?.label??'监控工作台';
+ const visibleGroups=navigationGroups.map(group=>({...group,items:group.items.filter(item=>!item.adminOnly||user?.role==='admin')})).filter(group=>group.items.length>0);
  const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:contextPageTitle}}),[publishedScope,location.pathname,location.search,contextPageTitle]);
  const[navCollapsed,setNavCollapsed]=useState(()=>{try{const saved=localStorage.getItem('lightmoni.nav.collapsed');return saved===null?window.innerWidth<1100:saved==='true'}catch{return window.innerWidth<1100}});
  function toggleNavigation(){setNavCollapsed(value=>{try{localStorage.setItem('lightmoni.nav.collapsed',String(!value))}catch{}return !value})}
@@ -48,7 +48,10 @@ export default function Root(){
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'} ${/^\/dashboards\/[^/]+\/panels\//.test(location.pathname)?'is-panel-standalone':''}`}>
   <aside className="lm-sidebar">
    <Link to="/" className="lm-brand"><span className="lm-brand-mark">L</span><span>LightMoni<small>{t('监控工作台','Monitoring workspace')}</small></span></Link>
-  <nav>{links.filter(([url])=>(url!=='/admin'&&url!=='/machines')||user.role==='admin').map(([url,label,Icon])=><Link key={url} aria-label={t(label,englishLinks[url])} title={t(label,englishLinks[url])} className={activePath(url)?'active':''} to={url}>{Icon&&<Icon/>}<span>{t(label,englishLinks[url])}</span></Link>)}</nav>
+  <nav aria-label={t('主导航','Main navigation')}>{visibleGroups.map(group=><section className="lm-nav-group" key={group.id} aria-labelledby={`lm-nav-${group.id}`}>
+    <h2 className="lm-nav-group-title" id={`lm-nav-${group.id}`}>{t(group.label,group.english)}</h2>
+    <div className="lm-nav-group-links">{group.items.map(({path,label,english,icon:Icon})=><Link key={path} aria-label={t(label,english)} title={t(label,english)} aria-current={activePath(path)?'page':undefined} className={activePath(path)?'active':''} to={path}><Icon/><span>{t(label,english)}</span></Link>)}</div>
+   </section>)}</nav>
    <Button className="lm-nav-collapse" type="text" aria-label={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} title={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} icon={navCollapsed?<MenuUnfoldOutlined/>:<MenuFoldOutlined/>} onClick={toggleNavigation}>{!navCollapsed&&t('收起导航','Collapse navigation')}</Button>
   </aside>
   <main className="lm-main"><WorkspaceHeader user={user} title={currentPage} onLoggedOut={()=>setUser(null)}/><div className="lm-route-content"><Suspense fallback={<div className="lm-page"><Spin/></div>}><Routes>
