@@ -1,0 +1,37 @@
+{
+  "build_run_id": 40497221213,
+  "images": [
+    {
+      "arch": "amd64",
+      "build_run_id": 40497221213,
+      "artifact_id": 12731176695,
+      "artifact_zip_bytes": 315684637,
+      "artifact_zip_sha256": "23564c6e83ad02d6ad5b3dc1e8f5597476469d7c1ccd7f82b24b61b83d2f3510",
+      "artifact_zip_sha256_verified": true,
+      "zip_crc_verified": true,
+      "image_archive_sha256": "e726bf6a77058caa27cc8f57e716378136fbeddeea1e0b99efb4c99221435cb3",
+      "image_archive_sha256_verified": true,
+      "image_archive_path": "amd64-artifact/amd64.tar.gz",
+      "docker_save_path": "amd64.tar",
+      "docker_save_bytes": 699467264,
+      "no_rebuild": true,
+      "elapsed_seconds": 1372.155
+    },
+    {
+      "arch": "arm64",
+      "build_run_id": 40497221213,
+      "artifact_id": 12732235155,
+      "artifact_zip_bytes": 314016044,
+      "artifact_zip_sha256": "c50de57db076ab4cf3ac4cb2650bb397b9427480a4faa988ac2e64156a22d741",
+      "artifact_zip_sha256_verified": true,
+      "zip_crc_verified": true,
+      "image_archive_sha256": "4e119176191998714340f6d52d7aa09046d9b1cfcdcc8485b1301af45f900928",
+      "image_archive_sha256_verified": true,
+      "image_archive_path": "arm64-artifact/arm64.tar.gz",
+      "docker_save_path": "arm64.tar",
+      "docker_save_bytes": 720456704,
+      "no_rebuild": true,
+      "elapsed_seconds": 1374.336
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Docker 更新与回滚
 
-根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像默认 `docker.heyphp.com/lightmoni/lightmoni:20261027-agent-install`。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
+根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像默认 `docker.heyphp.com/lightmoni/lightmoni:20261027-operations`。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
 
 ## 更新
 
@@ -18,7 +18,9 @@ docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/
 
 通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对镜像提交；随后检查网页、原有管理员登录、只读查询和 SDK/Agent 下载。需要 `up` 重新创建容器才能切换镜像；本地 `npm run build`、`release:sdk` 和 `release:agent` 只更新本地生成物。
 
-`20261027-agent-install` 在已验收的 `20261026-admin` 固定镜像上增加安装脚本补丁层，修复 Agent 安装后的非 root 读取权限与启动观察；没有重新编译服务、依赖或下载包。`latest` 同时指向此次双架构版本。已有 `.env` 若仍固定旧标签，需先更新 `LIGHTMONI_IMAGE=docker.heyphp.com/lightmoni/lightmoni:20261027-agent-install`，再执行上述 `pull` 和 `up`；单独拉取镜像不会更新正在运行的平台。旧固定标签保留供回退。构建方式及本次验证边界见 [SDD 024](../../specs/024-agent-install-startup-fix/validation.md)。
+`20261027-operations` 从已合入主干的 `ac30ec91e5804e0e9ad961d7a38d2259b3eb2106` 完整构建中心、网页、Mastra 运行时和双架构 Agent 包，包含网站、证书、容器、备份与计划任务管理。`latest` 同时指向此双架构版本。已有 `.env` 若仍固定旧标签，需先更新 `LIGHTMONI_IMAGE=docker.heyphp.com/lightmoni/lightmoni:20261027-operations`，再执行上述 `pull` 和 `up`；单独拉取镜像不会更新正在运行的平台。旧固定标签 `20261027-agent-install` 保留供回退。构建与验收证据见 [运维镜像发布记录](../../docs/evidence/operations-image-release/README.md)。
+
+中心镜像更新不会自动更新已安装的 Agent。需要使用新运维能力的节点应单独升级 Agent，并按[运维手册](../../docs/operations.md)准备 Nginx、Docker/Compose 等所需依赖及目录、服务权限；不能仅凭 capability 出现就认定节点已有执行权限。公网 ACME 与真实 S3 等未验收范围仍以 [SDD 026](../../specs/026-operations-platform/validation.md)为准。
 
 ## 回滚与已有临时配置迁移
 

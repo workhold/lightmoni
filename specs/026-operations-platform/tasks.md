@@ -16,7 +16,7 @@
 - [x] T012 系统设计仓库第26章与Doca同步：文字回读seq411，新增原生图保存并回读seq412；原247块和6图完整保留，新图15节点/17边与预期一致。
 - [x] T013 核对真实Linux Nginx/TLS、Docker/Compose领域记录与隔离模拟后端网页交互证据；未将模拟页面称为真实平台全流程，支持边界见validation及运维手册。
 - [x] T014 runtime全量373通过/17跳过；最终锁目录fsync补丁定向72通过/3跳过；runtime和AI类型检查、runtime/Web构建及diff检查通过。已同步origin/main并核对基线，无冲突。
-- [x] T015 已创建待审[GitHub PR #6](https://github.com/workhold/lightmoni/pull/6)，目标main，附架构/Doca状态、真实验收与未验范围；等待人工审核，未合并。
+- [x] T015 [GitHub PR #6](https://github.com/workhold/lightmoni/pull/6)已合入`main`，合并提交为`ac30ec91e5804e0e9ad961d7a38d2259b3eb2106`；架构/Doca状态、真实验收与未验范围已随PR交付。
 
 ## 明确不算已验收的范围
 
@@ -24,10 +24,10 @@
 
 ## 运维镜像发布补充（2026-10-27）
 
-- [ ] T016 从已合入主干的`ac30ec91e5804e0e9ad961d7a38d2259b3eb2106`干净快照完整构建Linux amd64/arm64中心镜像，重建双架构Agent包；隔离检查后发布固定标签`20261027-operations`及`latest`，回读manifest/digest与源码revision，不替换线上容器。
-- [ ] T017 保存发布/容器验收证据并通过GitHub PR记录；现有Agent需单独升级，运维节点仍须按手册准备依赖与权限。
-- [ ] T018 发布成功后将Compose与环境变量示例的默认固定镜像标签、README升级说明一并更新，保留旧标签回退说明。
+- [x] T016 从已合入主干的`ac30ec91e5804e0e9ad961d7a38d2259b3eb2106`干净快照完整构建Linux amd64/arm64中心镜像，重建双架构Agent包；隔离检查后发布固定标签`20261027-operations`及`latest`，回读manifest/digest与源码revision，不替换线上容器。
+- [x] T017 保存发布/容器验收证据并通过GitHub PR记录；现有Agent需单独升级，运维节点仍须按手册准备依赖与权限。
+- [x] T018 发布成功后将Compose与环境变量示例的默认固定镜像标签、README升级说明一并更新，保留旧标签回退说明。
 
 架构影响：本次仅打包并发布SDD 026已经同步的实现，不改变组件、协议、凭据、存储或部署拓扑，设计与Doca再次同步不适用。
 
-发布构建补充：`vchive`仅有2GB内存且出现SSH持续超时，改用本分支临时GitHub Actions任务，在Linux amd64/arm64原生runner中从上述固定提交构建并执行隔离HTTP/ClickHouse与双架构Agent包验收；构建与原生验收通过后，本机下载产物速度过低，改在GitHub上直接发布已验收的同一批产物：临时加密Secret只注入发布步骤，发布结束立即删除；凭据不会进入代码、日志或证据。临时工作流将在记录最终证据时移除。
+发布构建补充：`vchive`仅有2GB内存且出现SSH持续超时，改在Linux amd64/arm64原生GitHub runner中从上述固定提交构建并执行隔离HTTP/ClickHouse与双架构Agent包验收。曾尝试从GitHub直接上传，因跨境链路过慢而在标签写入前取消；最终按用户要求优先本机上传：本机并发下载同一批已验收产物，核对GitHub artifact ZIP摘要、CRC、归档SHA与原生验收config digest，再使用持久连接分块发布。临时GitHub Secret已删除并回读列表确认为空；本机发布凭据仅经交互stdin进入内存，不进入代码、日志或证据。临时工作流和脚本从最终PR差异移除。

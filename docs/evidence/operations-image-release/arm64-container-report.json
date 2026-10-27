@@ -1,0 +1,105 @@
+{
+  "passed": true,
+  "image": "lightmoni-operations:arm64",
+  "expected_source_revision": "ac30ec91e5804e0e9ad961d7a38d2259b3eb2106",
+  "docker_platform": "linux/arm64",
+  "checks": [
+    {
+      "check": "OCI revision and native image",
+      "passed": true,
+      "platform": "linux/arm64"
+    },
+    {
+      "check": "ClickHouse 26.8 image explicitly pulled",
+      "passed": true
+    },
+    {
+      "check": "ClickHouse 26.8 authenticated real HTTP",
+      "passed": true
+    },
+    {
+      "check": "real center healthz and fresh state",
+      "passed": true
+    },
+    {
+      "check": "admin init from stdin, login and session",
+      "passed": true
+    },
+    {
+      "check": "operations page and four typed APIs",
+      "passed": true,
+      "anonymous_status": 401,
+      "member_status": 403,
+      "approved_jobs": 0
+    },
+    {
+      "check": "center imports, four operation capabilities and AI read/draft tools",
+      "passed": true
+    },
+    {
+      "check": "AMD and ARM archive SHA256, ELF and operation modules",
+      "passed": true,
+      "native_platform": "linux/arm64",
+      "static_platform": "linux/amd64"
+    },
+    {
+      "check": "embedded native Node entry point",
+      "passed": true,
+      "version": "0.1.0",
+      "runtime": "linux/arm64",
+      "platform": "linux/arm64",
+      "command": "version",
+      "agent_daemon_started": false
+    }
+  ],
+  "downloads": [
+    {
+      "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+      "bytes": 74480170,
+      "sha256": "bae0936b176f0b4bb25f9d6f60c2edcfa2a3eb2fc4927b962ab62ee60b24ca9f",
+      "platform": "linux/amd64",
+      "elf_machine": 62,
+      "node_version": "24.15.0",
+      "operation_modules": 4,
+      "executed": false
+    },
+    {
+      "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+      "bytes": 74169390,
+      "sha256": "31c8de9d2415611b55ec246c24a1f93426598c270180f204c5e6c74df805efee",
+      "platform": "linux/arm64",
+      "elf_machine": 183,
+      "node_version": "24.15.0",
+      "operation_modules": 4,
+      "executed": true
+    }
+  ],
+  "resource_limits": {
+    "center_memory_bytes": 1073741824,
+    "clickhouse_memory_bytes": 3221225472,
+    "additional_swap_bytes": 0,
+    "clickhouse_server_memory_bytes": 2147483648,
+    "clickhouse_query_memory_bytes": 536870912,
+    "clickhouse_user_memory_bytes": 1073741824,
+    "clickhouse_query_threads": 2
+  },
+  "limitations": [
+    "linux/amd64 Agent package statically verified only; no emulated execution",
+    "No Agent daemon or approved job was run",
+    "No live Nginx/Docker/ACME/S3 operation executed",
+    "HTTP assets are checked; this is not interactive browser acceptance"
+  ],
+  "native_agent_platform": "linux/arm64",
+  "static_agent_platform": "linux/amd64",
+  "image_id": "sha256:54087aa7f93898edf86573ed65ed49f8a0014e9b9c7e4d154f3e2b9c8878e1b7",
+  "source_revision": "ac30ec91e5804e0e9ad961d7a38d2259b3eb2106",
+  "last_stage": "native embedded Node Agent entry point",
+  "cleanup": {
+    "removed": {
+      "container": 2,
+      "volume": 2,
+      "network": 1
+    },
+    "errors": []
+  }
+}

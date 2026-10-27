@@ -1,0 +1,23 @@
+{
+  "source_revision": "ac30ec91e5804e0e9ad961d7a38d2259b3eb2106",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "platforms": [
+    {
+      "platform": "linux/amd64",
+      "digest": "sha256:89598799a3938249e55856d047648db8e6d8d0ef5a3116144ffa400ccb315d2d",
+      "size": 2697,
+      "config_digest": "sha256:922577ece1464355d6dc3f799a8595652eb55912d2dc22e0846ad0c46719b948",
+      "layer_count": 15,
+      "runtime_user": "lightmoni"
+    },
+    {
+      "platform": "linux/arm64",
+      "digest": "sha256:485da71c679a9cf59ebeb3283cd5d784fff8087cc9dc04f1cdd5e4b71b4a0f8a",
+      "size": 2697,
+      "config_digest": "sha256:54087aa7f93898edf86573ed65ed49f8a0014e9b9c7e4d154f3e2b9c8878e1b7",
+      "layer_count": 15,
+      "runtime_user": "lightmoni"
+    }
+  ],
+  "index_digest": "sha256:0c314e78da2243d9e2aba641d9bab460f3dd24a78a0c4dcf2abbc389c5defeff"
+}

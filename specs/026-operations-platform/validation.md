@@ -1,6 +1,6 @@
 # SDD 026：统一验证记录
 
-日期：2026-10-27。状态：实现、分层验证与Doca同步已完成，GitHub PR #6等待人工审核。本记录不把代码已实现等同于生产已验证。
+日期：2026-10-27。状态：实现、分层验证与Doca同步已完成，GitHub PR #6已合入`main`（`ac30ec91e5804e0e9ad961d7a38d2259b3eb2106`）。本记录不把代码已实现等同于生产已验证。
 
 ## 验证矩阵
 
@@ -18,7 +18,7 @@
 | Web交互 | 隔离内存模拟后端127.0.0.1:19865 | 已清理临时服务；不能称真实平台全流程或远端写操作 |
 | 仓库架构文档 | `docs/system-design.md`第26章与`docs/operations.md` | 已核对最终实现、支持边界和在线文本 |
 | Doca | 第26章文字seq411回读；新增原生图保存/回读seq412 | 原247块/6图保留，新33文字块及15节点/17边已核对，见下方证据 |
-| GitHub PR | [#6](https://github.com/workhold/lightmoni/pull/6)，功能分支`feat/operations-foundation`→`main` | 已创建待审，未合并 |
+| GitHub PR | [#6](https://github.com/workhold/lightmoni/pull/6)，功能分支`feat/operations-foundation`→`main` | 已合入main，合并提交ac30ec9 |
 
 ## 备份与计划的具体证据
 
@@ -48,4 +48,14 @@
 - 原有247个块逐块深比较相等、相对顺序一致，包含原6张原生流程图。新增运维控制图保留为可编辑原生图，块ID为`ca797620-3473-4683-b77a-58f7f968d79c`，保存回执`saved=true, seq=412`；同一版本按blockId回读确认15节点、17边、端点和路由数据与预期完全一致。epoch为`63d4490e-11da-4b5a-8674-cd671d8ad4b6`。浏览器重新加载后可见第7张彩色流程图。
 - 已核对最终真实Linux领域证据和模拟网页交互的不同范围；未将模拟UI视为真实平台全流程验收。真实隔离测试的专属容器、卷、网络、临时服务与目录已清理。
 - 最终`git diff --check`通过，生成的`web/tsconfig.tsbuildinfo`未纳入提交；已同步GitHub `origin/main`，基线为`0735d26fd29ff54b956e7a30d5b988a30bef9d17`，无新增远端主干提交或合并冲突。
-- 已创建待审[GitHub PR #6](https://github.com/workhold/lightmoni/pull/6)，目标`main`；仅推送功能分支到GitHub，未推送Gitea、未合并。
+- 功能通过[GitHub PR #6](https://github.com/workhold/lightmoni/pull/6)交付，后已合入`main`，合并提交为`ac30ec91e5804e0e9ad961d7a38d2259b3eb2106`；后续镜像发布仅更新发布说明和证据，未推送Gitea。
+
+## 运维镜像发布（2026-10-27）
+
+从 PR #6 已合入的 `ac30ec91e5804e0e9ad961d7a38d2259b3eb2106` 干净源码完整构建双架构中心、网页、Mastra 和双架构 Agent 包。[原生构建验收 run 40497221213](https://github.com/workhold/lightmoni/actions/runs/40497221213)两平台各 9 项通过；本机下载同一批产物，完成 ZIP SHA、CRC、内层归档 SHA、下载文件及 diff_id 检查，config digest 与原生验收 image ID 完全一致。
+
+按用户要求从本机发布 `docker.heyphp.com/lightmoni/lightmoni:20261027-operations`，`latest` 同指索引 `sha256:0c314e78da2243d9e2aba641d9bab460f3dd24a78a0c4dcf2abbc389c5defeff`。两标签、两平台 manifest/config 及全部层的完整字节摘要和长度均通过独立 OCI HTTP GET 回读。此项属于 registry 协议核验，本机未执行 Docker pull 或容器；原生执行证据来自上述构建验收。详见[发布记录](../../docs/evidence/operations-image-release/README.md)。
+
+仅发布镜像，没有替换线上容器。存量 Agent 需单独升级并准备节点依赖与权限；旧固定镜像保留。不将新建空卷验收视为存量数据升级，也不宣称本次镜像验收执行过真实远端运维任务。此前两次 GitHub 上传因网络问题在写标签前取消；临时 Secret 已删除并回读列表为空，临时工作流和脚本从最终 PR 差异移除。最初 vchive 尝试因 SSH 持续 banner 超时，专属临时目录和 builder 清理未能回读确认，未执行全局 prune。
+
+架构影响不适用：本次仅打包已同步的 SDD 026 实现并更新默认标签及证据，组件、控制/数据路径、凭据、存储、协议和拓扑无变化，无需再次改写系统设计及 Doca。

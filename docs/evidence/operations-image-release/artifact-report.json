@@ -1,0 +1,16 @@
+{
+  "build_run_id": 40497221213,
+  "source_revision": "ac30ec91e5804e0e9ad961d7a38d2259b3eb2106",
+  "images": [
+    {
+      "platform": "linux/amd64",
+      "archive_sha256": "e726bf6a77058caa27cc8f57e716378136fbeddeea1e0b99efb4c99221435cb3",
+      "native_image_id": "sha256:922577ece1464355d6dc3f799a8595652eb55912d2dc22e0846ad0c46719b948"
+    },
+    {
+      "platform": "linux/arm64",
+      "archive_sha256": "4e119176191998714340f6d52d7aa09046d9b1cfcdcc8485b1301af45f900928",
+      "native_image_id": "sha256:54087aa7f93898edf86573ed65ed49f8a0014e9b9c7e4d154f3e2b9c8878e1b7"
+    }
+  ]
+}
