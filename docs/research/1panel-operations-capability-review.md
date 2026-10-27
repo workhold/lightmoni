@@ -2,7 +2,7 @@
 
 调研日期：2026-10-27。
 
-> 本文是候选能力和实施顺序的调研建议，尚未批准实施，不代表 LightMoni 已具备这些能力，也不替代现行系统设计。后续实施须先建立 SDD，再更新设计、契约、任务与验收记录。
+> 本文保留基于 `main` 提交 `0735d26` 的调研快照。网站、证书、Compose、备份和计划任务的首批受限能力后来通过 [SDD 026](../../specs/026-operations-platform/spec.md) 与 [PR #6](https://github.com/workhold/lightmoni/pull/6) 合入；当前实现、限制和验收以[运维手册](../operations.md)、[SDD 026 验收](../../specs/026-operations-platform/validation.md)及[系统设计第 26 章](../system-design.md)为准。下文缺口与路线描述调研时状态，不代表当前主干仍全部缺失；未覆盖的建议仍须独立 SDD，不能把候选流程直接当作系统设计基线。
 
 ## 1. 调研结论与基准
 
@@ -14,13 +14,13 @@ LightMoni 适合借鉴 1Panel 的网站、证书、容器、备份、计划任�
 | --- | --- | --- |
 | 1Panel | 稳定版 [v2.4.1][s1]，2026-10-22 发布，commit `f9f9169a4d8cba736b0761e828b3df574e242918` | 官方 README、路由、Core/Agent 实现与文档 |
 | 1Panel 官方文档 | `1Panel-dev/docs` commit `bd6538915493a7b8dee4b4665baf5e7d4cd70aa0` | 固定快照，避免文档站跳转与后续版本变化 |
-| LightMoni | `main` commit `0735d26fd29ff54b956e7a30d5b988a30bef9d17` | 当前源码、SDD 021、系统设计第 22 节 |
+| LightMoni | `main` commit `0735d26fd29ff54b956e7a30d5b988a30bef9d17` | 调研时源码、SDD 021、系统设计第 22 节 |
 
 这是源码和文档调研，未安装运行 1Panel，未验证其性能、商业版实际行为或迁移兼容性；LightMoni 的“已有”表示有对应实现，具体实机验收边界仍以相关 SDD 为准。
 
 ## 2. 能力对照
 
-| 能力 | 1Panel 提供的参考 | LightMoni 当前现状 | 建议 |
+| 能力 | 1Panel 提供的参考 | LightMoni 调研基线现状（0735d26） | 建议 |
 | --- | --- | --- | --- |
 | 主机与终端 | 文件、进程、SSH、终端、磁盘和主机设置 [S9][s9] | 已有主机、指纹确认、加密凭据、Agent 引导安装、人工网页 SSH 终端；自动 SSH 只支持私钥 | 复用现有主机身份；先补诊断和受控服务操作 |
 | 网站与入口 | 静态站、运行环境、反代、应用绑定、子网站、TCP/UDP 代理 [S2][s2] | 无网站对象、域名绑定、网关配置生成、检测和回滚 | 第一批：静态站、HTTP 反代、关联已有服务 |
@@ -36,12 +36,12 @@ LightMoni 适合借鉴 1Panel 的网站、证书、容器、备份、计划任�
 | 多节点与编排 | Pro/Ent 多节点管理 [S0][s0] [S12][s12] | 已有多机器、节点身份、标签、任务领取；没有滚动/批次发布与 K8s 控制 | 保留现有中心/Agent 模型，后续增加编排策略 |
 | 监控与 AI | 面板监控、日志及按版本提供的 AI 能力 [S0][s0] | 已有 SDK、指标/日志/告警、Mastra 和受限 Pi 代码任务；没有网站/容器/数据库领域工具 | 把运维结果接入已有监控，让 UI 与 AI 使用相同领域 API |
 
-当前实现的关键证据：
+调研基线的实现证据（固定提交 `0735d26`，不代表后续主干）：
 
-- [部署适配器注册](../../runtime/src/deployment/index.ts)：仅注册 `systemdDeploymentAdapter`；[部署目标校验](../../runtime/src/server/service-deployments.ts)也明确拒绝其他适配器。`docker_compose` 类型或界面选项、平台自己的 `compose.yaml` 均不能作为已支持用户容器管理的证据。
-- [Agent 执行器](../../runtime/src/agent/executor.ts)：可执行能力限于制品、受控 systemd、健康检查和只读预检，没有通用 Docker、网关、备份、文件或 cron 动作。
-- [主机管理](../../runtime/src/server/managed-machines.ts)、[网页终端](../../runtime/src/server/machine-terminal.ts)、[Agent jobs](../../runtime/src/server/agent-jobs.ts)和[AI 工具](../../runtime/src/assistant/tools.ts)：有可复用的身份、审批、领取、事件、结果和提案底座；人工终端不是 AI 任意 shell 工具。
-- [SDD 021 任务](../../specs/021-ai-sdk-instrumentation-deployment/tasks.md)与[系统设计](../system-design.md)：源码构建 worker、Docker/Kubernetes 适配器、自动补偿、job 签名、完整 Linux/ClickHouse 实机验收等仍未完成。当前部署成功与 SDK 遥测核验也是两个独立结果。
+- [部署适配器注册](https://github.com/workhold/lightmoni/blob/0735d26fd29ff54b956e7a30d5b988a30bef9d17/runtime/src/deployment/index.ts)：仅注册 `systemdDeploymentAdapter`；[部署目标校验](https://github.com/workhold/lightmoni/blob/0735d26fd29ff54b956e7a30d5b988a30bef9d17/runtime/src/server/service-deployments.ts)也明确拒绝其他适配器。`docker_compose` 类型或界面选项、平台自己的 `compose.yaml` 均不能作为已支持用户容器管理的证据。
+- [Agent 执行器](https://github.com/workhold/lightmoni/blob/0735d26fd29ff54b956e7a30d5b988a30bef9d17/runtime/src/agent/executor.ts)：可执行能力限于制品、受控 systemd、健康检查和只读预检，没有通用 Docker、网关、备份、文件或 cron 动作。
+- [主机管理](https://github.com/workhold/lightmoni/blob/0735d26fd29ff54b956e7a30d5b988a30bef9d17/runtime/src/server/managed-machines.ts)、[网页终端](https://github.com/workhold/lightmoni/blob/0735d26fd29ff54b956e7a30d5b988a30bef9d17/runtime/src/server/machine-terminal.ts)、[Agent jobs](https://github.com/workhold/lightmoni/blob/0735d26fd29ff54b956e7a30d5b988a30bef9d17/runtime/src/server/agent-jobs.ts)和[AI 工具](https://github.com/workhold/lightmoni/blob/0735d26fd29ff54b956e7a30d5b988a30bef9d17/runtime/src/assistant/tools.ts)：有可复用的身份、审批、领取、事件、结果和提案底座；人工终端不是 AI 任意 shell 工具。
+- [SDD 021 任务](https://github.com/workhold/lightmoni/blob/0735d26fd29ff54b956e7a30d5b988a30bef9d17/specs/021-ai-sdk-instrumentation-deployment/tasks.md)与[系统设计](https://github.com/workhold/lightmoni/blob/0735d26fd29ff54b956e7a30d5b988a30bef9d17/docs/system-design.md)：源码构建 worker、Docker/Kubernetes 适配器、自动补偿、job 签名、完整 Linux/ClickHouse 实机验收等仍未完成。当前部署成功与 SDK 遥测核验也是两个独立结果。
 
 ## 3. “网站”具体应该补什么
 
@@ -62,7 +62,7 @@ LightMoni 适合借鉴 1Panel 的网站、证书、容器、备份、计划任�
 
 首期暂不覆盖完整 DNS 托管、邮件服务器、任意 Nginx 指令编辑、复杂流量策略、全语言运行环境和 WAF。DNS 验证凭据用于证书挑战，不等于完整域名/DNS 产品。基础站点上线后，再根据真实使用补重定向、CORS、限流和缓存等策略。
 
-下面是**拟议流程**，不是当前已实现架构：
+下面是**调研时拟议流程**，保留用于比较；当前已采纳的架构以系统设计第 26 章为准：
 
 ```mermaid
 flowchart TD
@@ -131,7 +131,7 @@ Compose 发布继续关联已有 service、target、release、deployment 和事�
 
 ## 7. 许可与版本范围
 
-1Panel v2.4.1 使用 [GPL-3.0][s13]；LightMoni 计划采用 Apache-2.0。可以参考功能、工作流和公开协议并独立实现；复制或改写 GPL 代码通常带来 GPL 合规与再分发义务，不能将这些代码仅按 Apache-2.0 发布。商店模板、依赖和第三方应用各自的许可也需单独检查。
+1Panel v2.4.1 使用 [GPL-3.0][s13]；LightMoni 自有代码采用 [Apache-2.0](../../LICENSE)。可以参考功能、工作流和公开协议并独立实现；复制或改写 GPL 代码通常带来 GPL 合规与再分发义务，不能将这些代码仅按 Apache-2.0 发布。商店模板、依赖和第三方应用各自的许可也需单独检查。
 
 固定版本 README 将多节点、网站防篡改、网站可用性监控等列为 Pro/Ent，将 AI Gateway 等列为 Ent；基础 WAF 和部分 AI 能力在社区版可用，不能把所有安全/AI 功能都写成收费。[S0][s0] 网站创建的基本类型在官方文档中列为各版本可用；计划任务失败告警等高级功能存在版本限制。[S2][s2] [S8][s8]
 
@@ -139,7 +139,7 @@ Compose 发布继续关联已有 service、target、release、deployment 和事�
 
 ## 8. SDD 与架构同步判断
 
-本 PR 只新增调研报告，不改变运行时代码、API、组件职责、数据/控制路径、存储、凭据、协议或部署拓扑。**架构双端同步：不适用；现行仓库设计和 Doca 均未改动，不声称已同步。**
+本报告的资料整理不改变运行时代码、API、组件职责、数据/控制路径、存储、凭据、协议或部署拓扑。**本报告的架构双端同步：不适用；现行仓库设计和 Doca 均未改动，不声称已同步。**
 
 采用上述建议时，按网站、Compose、备份等用户闭环分别建立 `spec.md`、`plan.md`、契约、`tasks.md` 和验证记录，明确支持矩阵、升级/接管、失败/恢复与 AI 审批边界。凡改变架构，须在同一 SDD/PR 更新 [docs/system-design.md](../system-design.md) 与 [Doca 系统设计](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)，并回读确认；不能把本次提案图直接视为已采纳的系统基线。
 

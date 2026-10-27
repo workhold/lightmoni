@@ -48,3 +48,11 @@
 - 侧栏缩成图标时全部 12 个管理员入口可见，分类按钮不参与键盘导航；重新展开时恢复当前展开组。
 - 成员 `/agents` 默认只展开运维工具，里面仅出现节点助手；页面继续显示只读提示，主机管理和服务部署均不出现。
 - 独立只读复核未发现阻塞问题。截图 `accordion-current-group.png` 保存本地，修订推送至同一 [GitHub PR #4](https://github.com/workhold/lightmoni/pull/4)。
+
+## 开放 PR 整合（2026-10-27）
+
+- 将导航分组与现有主干的页面懒加载、管理员 `/operations` 路由整合；未改变已有登录回跳、路由保护或功能页面实现。
+- 在“运维工具”分类新增管理员入口“网站与运维 / Websites & operations”，包含网站、证书、容器、备份和计划任务。顶部标题与 AI 当前页上下文继续使用该页面已有的“运维工具 / Operations”，避免把导航分类名和子入口显示为同名条目。
+- 导航配置共五组十三个唯一路径；成员过滤保留九项入口，隐藏 `/machines`、`/services`、`/operations`、`/admin`。当前分类默认展开、其他分类默认收起、单开或全收以及图标侧栏逻辑沿用原实现；`/operations` 现在能正确匹配当前分类与页面标题。
+- `npm --prefix web run typecheck`、`npm --prefix web run build`（包含 `tsc -b`）及 `git diff --check` 通过。生产产物生成到被忽略的 `runtime/public`；构建仍有第三方 `use client` 与大块体积提示，无构建错误。
+- 整合后的浏览器验收见 [SDD 027 验收记录](../027-pr-consolidation/validation.md)，覆盖管理员十三入口、成员九入口、折叠、中英文、路由保护、窄屏和短屏。仅变更导航展示与原有路由的衔接，系统设计及 Doca 架构同步仍不适用。

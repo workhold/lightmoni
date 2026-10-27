@@ -1,4 +1,4 @@
-import {ApiOutlined,AppstoreOutlined,BellOutlined,CloudServerOutlined,CloudUploadOutlined,DashboardOutlined,DatabaseOutlined,MessageOutlined,SafetyCertificateOutlined,SearchOutlined,SettingOutlined} from '@ant-design/icons';
+import {ApiOutlined,AppstoreOutlined,BellOutlined,CloudServerOutlined,CloudUploadOutlined,DashboardOutlined,DatabaseOutlined,MessageOutlined,SafetyCertificateOutlined,SearchOutlined,SettingOutlined,ToolOutlined} from '@ant-design/icons';
 
 export const navigationGroups=[
  {id:'workspace',label:'工作台',english:'Workspace',items:[
@@ -14,6 +14,7 @@ export const navigationGroups=[
   {path:'/machines',label:'主机管理',english:'Machines',icon:CloudServerOutlined,adminOnly:true},
   {path:'/agents',label:'节点助手',english:'Node assistants',icon:ApiOutlined,adminOnly:false},
   {path:'/services',label:'服务部署',english:'Service deployments',icon:CloudUploadOutlined,adminOnly:true},
+  {path:'/operations',label:'网站与运维',english:'Websites & operations',pageLabel:'运维工具',pageEnglish:'Operations',icon:ToolOutlined,adminOnly:true},
  ]},
  {id:'data',label:'数据与接入',english:'Data & ingestion',items:[
   {path:'/data',label:'数据接入',english:'Data ingestion',icon:DatabaseOutlined,adminOnly:false},
@@ -25,4 +26,4 @@ export const navigationGroups=[
  ]},
 ];
 
-export const navigationLinks=navigationGroups.flatMap(group=>group.items);
+export const navigationLinks=navigationGroups.flatMap(group=>group.items).map(item=>({...item,pageLabel:('pageLabel' in item?item.pageLabel:undefined)??item.label,pageEnglish:('pageEnglish' in item?item.pageEnglish:undefined)??item.english}));

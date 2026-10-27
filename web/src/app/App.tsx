@@ -37,8 +37,8 @@ export default function Root(){
  const[publishedScope,setPublishedScope]=useState<PublishedScope>();
  const activePath=(url:string)=>location.pathname===url||(url!=='/'&&location.pathname.startsWith(url+'/'));
  const currentLink=navigationLinks.find(link=>activePath(link.path));
- const currentPage=currentLink?t(currentLink.label,currentLink.english):t('监控工作台','Monitoring workspace');
- const contextPageTitle=currentLink?.label??'监控工作台';
+ const currentPage=currentLink?t(currentLink.pageLabel,currentLink.pageEnglish):t('监控工作台','Monitoring workspace');
+ const contextPageTitle=currentLink?.pageLabel??'监控工作台';
  const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:contextPageTitle}}),[publishedScope,location.pathname,location.search,contextPageTitle]);
  const[navCollapsed,setNavCollapsed]=useState(()=>{try{const saved=localStorage.getItem('lightmoni.nav.collapsed');return saved===null?window.innerWidth<1100:saved==='true'}catch{return window.innerWidth<1100}});
  function toggleNavigation(){setNavCollapsed(value=>{try{localStorage.setItem('lightmoni.nav.collapsed',String(!value))}catch{}return !value})}
