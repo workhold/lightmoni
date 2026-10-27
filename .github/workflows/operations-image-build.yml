@@ -23,6 +23,9 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
     env:
       SOURCE_REVISION: ac30ec91e5804e0e9ad961d7a38d2259b3eb2106
       IMAGE: lightmoni-operations:${{ matrix.arch }}
