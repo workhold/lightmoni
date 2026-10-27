@@ -11,6 +11,7 @@ import {
   existsSync,
   statSync,
   readdirSync,
+  chmodSync,
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
@@ -20,13 +21,17 @@ const repo = resolve(import.meta.dirname, "../.."),
   artifact = "lightmoni-agent_0.1.0_linux_amd64.tar.gz";
 /** Execute the real shell installer with every writable absolute destination
  * rewritten into one temporary root. Root/Linux/systemd/install/checksum/mv are
- * command shims; the fixture does not claim Linux Node/systemd execution. */
+ * command shims. The service-user check examines POSIX mode bits rather than
+ * changing UID, and does not claim Linux Node/systemd or ownership validation. */
 function fixture(
   t: any,
   options: {
     old?: "node" | "go" | "none";
     active?: boolean;
     failRestart?: boolean;
+    failRestartStatus?: number;
+    startupStates?: boolean[];
+    failShow?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lightmoni-install-")),
@@ -39,6 +44,7 @@ function fixture(
     bin,
     release,
     packageDir,
+    join(root, "opt"),
     join(root, "etc/systemd/system"),
     join(root, "usr/local/bin"),
   ])
@@ -64,16 +70,21 @@ function fixture(
     current = join(root, "opt/lightmoni-agent/current"),
     launcher = join(root, "usr/local/bin/lightmoni-agent"),
     service = join(root, "etc/systemd/system/lightmoni-agent.service");
-  mkdirSync(data, { recursive: true });
+  mkdirSync(data, { recursive: true, mode: 0o700 });
+  chmodSync(data, 0o700);
   writeFileSync(
     join(data, "identity.json"),
     '{"agent_id":"synthetic-agent","host_id":"synthetic-host"}\n',
+    { mode: 0o600 },
   );
   writeFileSync(
     join(data, "queue.sqlite"),
     Buffer.from("unchanged synthetic spool\0\xff", "latin1"),
+    { mode: 0o600 },
   );
-  writeFileSync(join(data, "remote-config.json"), '{"revision":"old-tasks"}');
+  writeFileSync(join(data, "remote-config.json"), '{"revision":"old-tasks"}', {
+    mode: 0o600,
+  });
   const old = options.old ?? "node",
     oldConfig = {
       endpoint: "http://old.example",
@@ -82,7 +93,7 @@ function fixture(
       group_id: "old",
     };
   if (old !== "none") {
-    mkdirSync(dirname(config), { recursive: true });
+    mkdirSync(dirname(config), { recursive: true, mode: 0o700 });
     writeFileSync(config, JSON.stringify(oldConfig), { mode: 0o600 });
     writeFileSync(
       launcher,
@@ -97,6 +108,10 @@ function fixture(
       symlinkSync(oldRuntime, current);
     }
   }
+  // An earlier attempt under umask 077 can leave this existing ancestor root-only.
+  const runtimeParent = join(root, "opt/lightmoni-agent");
+  mkdirSync(runtimeParent, { recursive: true });
+  chmodSync(runtimeParent, 0o700);
   const before = {
     launcher: old === "none" ? undefined : readFileSync(launcher),
     service: old === "none" ? undefined : readFileSync(service),
@@ -113,6 +128,10 @@ function fixture(
       enabled: old !== "none",
       calls: [],
       restarts: 0,
+      startupChecks: 0,
+      startupStates: options.startupStates,
+      runtimeAccessible: false,
+      sleeps: [],
     }),
   );
   writeFileSync(
@@ -139,14 +158,63 @@ function fixture(
   );
   js(
     join(bin, "systemctl"),
-    `const fs=require('fs'),file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file)),args=process.argv.slice(2),op=args[0];s.calls.push(args.join(' '));let status=0;if(op==='is-active')status=s.active?0:3;else if(op==='is-enabled')status=s.enabled?0:1;else if(op==='enable')s.enabled=true;else if(op==='disable')s.enabled=false;else if(op==='stop')s.active=false;else if(op==='restart'){s.restarts++;if(process.env.TEST_FAIL_RESTART==='yes'&&s.restarts===1){s.active=false;status=1;}else s.active=true;}fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
+    `const fs=require('fs'),path=require('path'),file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file)),args=process.argv.slice(2),op=args[0];
+s.calls.push(args.join(' '));let status=0;
+function accessibleRuntime(){
+  const parent=process.env.TEST_RUNTIME_PARENT,current=path.join(parent,'current');
+  try{
+    const release=fs.realpathSync(current);
+    const directories=[parent,path.join(parent,'releases'),release,path.join(release,'app'),path.join(release,'app/agent'),path.join(release,'node_modules'),path.join(release,'node_modules/synthetic'),path.join(release,'bin')];
+    const files=['app/agent/main.js','node_modules/synthetic/index.js','package.json'];
+    const executables=['node','bin/helper'];
+    return directories.every(p=>(fs.statSync(p).mode&0o005)===0o005)&&files.every(p=>(fs.statSync(path.join(release,p)).mode&0o004)!==0)&&executables.every(p=>(fs.statSync(path.join(release,p)).mode&0o005)===0o005);
+  }catch{return false;}
+}
+if(op==='is-active'){
+  if(s.restarts===1){
+    const index=s.startupChecks++;
+    if(s.startupStates)s.active=s.runtimeAccessible&&(s.startupStates[index]??false);
+  }
+  status=s.active?0:3;
+}else if(op==='is-enabled')status=s.enabled?0:1;
+else if(op==='enable')s.enabled=true;
+else if(op==='disable')s.enabled=false;
+else if(op==='stop')s.active=false;
+else if(op==='restart'){
+  s.restarts++;
+  if(process.env.TEST_FAIL_RESTART==='yes'&&s.restarts===1){s.active=false;status=Number(process.env.TEST_FAIL_RESTART_STATUS);}
+  else if(s.restarts===1){s.runtimeAccessible=accessibleRuntime();s.active=s.runtimeAccessible;}
+  else s.active=true;
+}else if(op==='show'){
+  if(process.env.TEST_FAIL_SHOW==='yes')status=1;
+  else console.log('LoadState=loaded\\nActiveState='+ (s.active?'active':'failed')+'\\nSubState='+ (s.active?'running':'failed')+'\\nResult=exit-code\\nExecMainCode=exited\\nExecMainStatus=1');
+}
+fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
   );
-  mkdirSync(join(packageDir, "lightmoni-agent-runtime"), { recursive: true });
+  js(
+    join(bin, "sleep"),
+    `const fs=require('fs'),file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file));s.sleeps.push(process.argv.slice(2));fs.writeFileSync(file,JSON.stringify(s));`,
+  );
+  const packagedRuntime = join(packageDir, "lightmoni-agent-runtime");
+  for (const path of ["app/agent", "node_modules/synthetic", "bin"])
+    mkdirSync(join(packagedRuntime, path), { recursive: true, mode: 0o755 });
   writeFileSync(
-    join(packageDir, "lightmoni-agent-runtime/node"),
+    join(packagedRuntime, "node"),
     "#!/bin/sh\necho v24.15.0\n",
     { mode: 0o755 },
   );
+  writeFileSync(join(packagedRuntime, "app/agent/main.js"), "// agent entry\n", {
+    mode: 0o644,
+  });
+  writeFileSync(join(packagedRuntime, "node_modules/synthetic/index.js"), "export {};\n", {
+    mode: 0o644,
+  });
+  writeFileSync(join(packagedRuntime, "package.json"), '{"type":"module"}\n', {
+    mode: 0o644,
+  });
+  writeFileSync(join(packagedRuntime, "bin/helper"), "#!/bin/sh\nexit 0\n", {
+    mode: 0o755,
+  });
   js(
     join(packageDir, "lightmoni-agent"),
     `const fs=require('fs'),args=process.argv.slice(2),command=args.shift(),get=key=>args[args.indexOf(key)+1],path=get('--config'),dir=get('--require-data-dir');if(command==='configure'){let c=fs.existsSync(path)?JSON.parse(fs.readFileSync(path)):{};c.endpoint=get('--endpoint');c.group_id=get('--group-id');c.data_dir=dir;c.key=fs.readFileSync(0,'utf8').trim();fs.writeFileSync(path,JSON.stringify(c));}else if(command==='check'){const c=JSON.parse(fs.readFileSync(path));if(c.data_dir!==dir)process.exit(1);}else process.exit(1);`,
@@ -189,6 +257,9 @@ function fixture(
           PATH: bin + ":" + process.env.PATH,
           TEST_SYSTEM_STATE: system,
           TEST_FAIL_RESTART: options.failRestart ? "yes" : "no",
+          TEST_FAIL_RESTART_STATUS: String(options.failRestartStatus ?? 1),
+          TEST_FAIL_SHOW: options.failShow ? "yes" : "no",
+          TEST_RUNTIME_PARENT: runtimeParent,
         },
         timeout: 20000,
       },
@@ -204,6 +275,9 @@ function fixture(
       readFileSync(join(data, "remote-config.json")),
       before.remote,
     );
+    assert.equal(statSync(data).mode & 0o777, 0o700);
+    for (const name of ["identity.json", "queue.sqlite", "remote-config.json"])
+      assert.equal(statSync(join(data, name)).mode & 0o777, 0o600);
   };
   const restored = () => {
     unchangedData();
@@ -229,12 +303,57 @@ function fixture(
     current,
     launcher,
     service,
+    data,
+    runtimeParent,
     before,
     run,
     state,
     unchangedData,
     restored,
   };
+}
+function assertRuntimePermissions(f: ReturnType<typeof fixture>) {
+  const runtime = readlinkSync(f.current);
+  for (const path of [
+    f.runtimeParent,
+    join(f.runtimeParent, "releases"),
+    runtime,
+    join(runtime, "app"),
+    join(runtime, "app/agent"),
+    join(runtime, "node_modules"),
+    join(runtime, "node_modules/synthetic"),
+    join(runtime, "bin"),
+  ])
+    assert.equal(statSync(path).mode & 0o777, 0o755, path);
+  for (const path of ["app/agent/main.js", "node_modules/synthetic/index.js", "package.json"])
+    assert.equal(statSync(join(runtime, path)).mode & 0o777, 0o644, path);
+  for (const path of ["node", "bin/helper"])
+    assert.equal(statSync(join(runtime, path)).mode & 0o777, 0o755, path);
+  assert.equal(statSync(dirname(f.config)).mode & 0o777, 0o700);
+  assert.equal(statSync(f.config).mode & 0o777, 0o600);
+  assert.equal(f.state().runtimeAccessible, true);
+}
+function assertSafeStartupDiagnostics(
+  f: ReturnType<typeof fixture>,
+  result: ReturnType<ReturnType<typeof fixture>["run"]>,
+  phase: "restart" | "startup-check",
+) {
+  assert.match(result.stderr, new RegExp(phase));
+  assert.match(result.stderr, /journalctl\s+-u\s+lightmoni-agent\.service/);
+  const calls: string[] = f.state().calls,
+    showIndex = calls.findIndex((call) => call.startsWith("show ")),
+    stopIndex = calls.findIndex((call) => call.startsWith("stop "));
+  assert(showIndex >= 0, "systemd state is inspected before rollback");
+  assert(stopIndex > showIndex, "diagnostics precede stopping the failed service");
+  const query = calls[showIndex];
+  for (const property of ["LoadState", "ActiveState", "SubState", "Result", "ExecMainCode", "ExecMainStatus"])
+    assert(query.includes(property), "missing safe property " + property);
+  assert(!/ExecStart|Environment|status /.test(query));
+  assert(!calls.some((call) => call.startsWith("status ")));
+  assert(!result.stdout.includes("test-new-key"));
+  assert(!result.stderr.includes("test-new-key"));
+  assert(!result.stdout.includes("test-old-key"));
+  assert(!result.stderr.includes("test-old-key"));
 }
 test("checksum rejection leaves the installed release, service, config, queue and identity unchanged", (t) => {
   const f = fixture(t);
@@ -260,7 +379,77 @@ test("verified release switches atomically, configures and restarts while preser
   assert.equal(statSync(f.config).mode & 0o777, 0o600);
   assert.equal(f.state().restarts, 1);
   assert(f.state().active);
+  assert.equal(f.state().startupChecks, 2);
+  assertRuntimePermissions(f);
   f.unchangedData();
+});
+test("first installation publishes readable runtime and executable helpers without exposing config or persisted state", (t) => {
+  const f = fixture(t, { old: "none", active: false }),
+    result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  assertRuntimePermissions(f);
+  f.unchangedData();
+});
+test("startup observation tolerates delayed activation and requires two consecutive active checks", (t) => {
+  const f = fixture(t, { startupStates: [false, false, true, true] }),
+    result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(f.state().startupChecks, 4);
+  assert.equal(f.state().sleeps.length, 3);
+  assert(f.state().sleeps.every((args: string[]) => args.length === 1 && args[0] === "1"));
+  assert(!f.state().calls.some((call: string) => call.startsWith("show ")));
+  assertRuntimePermissions(f);
+  f.unchangedData();
+});
+test("isolated active observations do not count as successful startup and rollback remains intact", (t) => {
+  const f = fixture(t, { startupStates: [true, false, true, false, true, false, true, false, true, false] }),
+    result = f.run();
+  assert.notEqual(result.status, 0);
+  assert.equal(f.state().startupChecks, 10);
+  assert.equal(f.state().sleeps.length, 9);
+  assertSafeStartupDiagnostics(f, result, "startup-check");
+  assert.match(result.stderr, /LoadState=loaded/);
+  assert.match(result.stderr, /ExecMainStatus=1/);
+  assert(!result.stdout.includes("Agent installed"));
+  f.restored();
+  assert.equal(f.state().restarts, 2);
+  assert(f.state().active);
+  assert(f.state().enabled);
+});
+test("persistently inactive first installation stops after ten checks and removes new live files", (t) => {
+  const f = fixture(t, { old: "none", active: false, startupStates: [] }),
+    result = f.run();
+  assert.notEqual(result.status, 0);
+  assert.equal(f.state().startupChecks, 10);
+  assert.equal(f.state().sleeps.length, 9);
+  assertSafeStartupDiagnostics(f, result, "startup-check");
+  assert(!result.stdout.includes("Agent installed"));
+  f.restored();
+  assert.equal(f.state().restarts, 1);
+  assert.equal(f.state().active, false);
+  assert.equal(f.state().enabled, false);
+});
+test("failed diagnostic collection cannot prevent restoring the previous installation", (t) => {
+  const f = fixture(t, { startupStates: [], failShow: true }),
+    result = f.run();
+  assert.notEqual(result.status, 0);
+  assert.equal(f.state().startupChecks, 10);
+  assertSafeStartupDiagnostics(f, result, "startup-check");
+  f.restored();
+  assert.equal(f.state().restarts, 2);
+  assert(f.state().active);
+  assert(f.state().enabled);
+  assert(!result.stderr.includes("Automatic restoration needs attention"));
+});
+test("restart exit status survives diagnostic failure and successful restoration", (t) => {
+  const f = fixture(t, { failRestart: true, failRestartStatus: 7, failShow: true }),
+    result = f.run();
+  assert.equal(result.status, 7);
+  assertSafeStartupDiagnostics(f, result, "restart");
+  f.restored();
+  assert.equal(f.state().restarts, 2);
+  assert(f.state().active);
+  assert(f.state().enabled);
 });
 for (const old of ["node", "go"] as const)
   test(
@@ -272,6 +461,7 @@ for (const old of ["node", "go"] as const)
         result = f.run();
       assert.notEqual(result.status, 0);
       assert.match(result.stderr, /restoring the previous/);
+      assertSafeStartupDiagnostics(f, result, "restart");
       assert(!result.stdout.includes("Agent installed"));
       f.restored();
       assert.equal(f.state().restarts, 2);
