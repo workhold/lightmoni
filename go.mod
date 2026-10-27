@@ -1,4 +1,4 @@
-module github.com/lightmoni/lightmoni
+module github.com/workhold/lightmoni
 
 go 1.26.0
 

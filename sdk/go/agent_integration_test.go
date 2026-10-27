@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	moni "github.com/lightmoni/lightmoni/sdk/go"
+	moni "github.com/workhold/lightmoni/sdk/go"
 	logcollector "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	metriccollector "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	tracecollector "go.opentelemetry.io/proto/otlp/collector/trace/v1"

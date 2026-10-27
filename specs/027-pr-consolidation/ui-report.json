@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-27",
+  "method": "Manual browser verification of the production web build with two read-only API fixtures",
+  "baseline": "a7e5fe23b4931d0dfd05a556e7a5c579f1d70377",
+  "scope": "Frontend navigation and route guards; not a backend authorization or deployment test",
+  "checks": {
+    "admin_initial_operations_group_only": true,
+    "admin_operations_links": [
+      "/machines",
+      "/agents",
+      "/services",
+      "/operations"
+    ],
+    "admin_unique_icon_links": 13,
+    "admin_current_path": "/operations",
+    "single_current_page_marker": true,
+    "keyboard_collapse_and_group_exclusivity": true,
+    "route_and_browser_back_restore_group": true,
+    "english_menu_label": "Websites & operations",
+    "english_page_title": "Operations",
+    "member_operations_redirect": "/settings",
+    "member_operations_links": [
+      "/agents"
+    ],
+    "member_unique_icon_links": 9,
+    "member_hidden_paths": [
+      "/machines",
+      "/services",
+      "/operations",
+      "/admin"
+    ],
+    "member_agents_read_only_notice": true,
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "document_width": 390,
+      "horizontal_overflow": false
+    },
+    "short_screen": {
+      "width": 1280,
+      "height": 600,
+      "nav_height": 412,
+      "nav_scroll_height": 576,
+      "nav_scroll_top": 164,
+      "admin_center_y": 446,
+      "admin_receives_pointer": true
+    },
+    "screenshots_visually_reviewed": true,
+    "viewport_overrides_reset": true,
+    "test_tabs_closed": true,
+    "fixture_servers_stopped": true
+  },
+  "api_request_counts": {
+    "admin": {
+      "/api/v1/auth/me": 2,
+      "/api/v1/operations/resources": 3,
+      "/api/v1/operations/runs": 3,
+      "/api/v1/operations/agents": 3,
+      "/api/v1/operation-schedules": 3,
+      "/api/v1/services": 3,
+      "/api/v1/auth/profile": 1
+    },
+    "member": {
+      "/api/v1/auth/me": 1,
+      "/api/v1/auth/profile": 1,
+      "/api/v1/agents": 43,
+      "/api/v1/agent-task-labels": 43,
+      "/api/v1/agent-tasks": 43
+    },
+    "rejected_writes": 0
+  },
+  "limitations": [
+    "Fixture responses are synthetic and contain no real accounts, host data or credentials.",
+    "No real SSH, deployment or model requests were performed.",
+    "Screenshots were reviewed in the tool session and are not attached as repository files."
+  ]
+}

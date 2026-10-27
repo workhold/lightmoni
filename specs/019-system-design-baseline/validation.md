@@ -48,3 +48,11 @@ rg -n "system-design\.md|SDK.*Agent|Agent.*SDK|Java|C#|PHP|Go|Rust|Ruby" README.
 - 按本次授权通过原 Gitea #23 合入，并以 GitHub PR 接入新开发主干；不直接推送任一主干。GitHub 的许可证准备 PR #1 不在此次 #23/#17 的合并授权范围内。
 - Gitea #23 已成功合并，页面显示“已合并”，主干提交 `086b96a849ab7af5a0a54a735bb75197bba8630e` 已通过 Git fetch 回读。GitHub 同步分支保留这次原站合并提交及所有原作者历史。
 - 最终相对最新基线的 `git diff --check origin/main HEAD` 通过；6 个 Markdown 文件的 63 个相对链接目标存在、围栏配对正常。整次更新仅 6 个系统设计/SDD 文档文件；合并时主干原有的运行时代码行尾空行不属于本次新增差异。
+
+## 后续开发入口（2026-10-27）
+
+- 用户明确要求后续代码推送到 GitHub，不再推送到 Gitea。`AGENTS.md` 据此约定 GitHub 为代码、文档分支和 PR 的统一入口；Gitea 仅保留历史参考，写入须有新的明确指令。
+- 本机 `origin` 指向 `git@github.com:workhold/lightmoni.git`，`remote.pushDefault` 为 `origin`，本地 `main` 的上游调整为 `origin/main`。其他开发者需在自己的克隆中核对相同配置。
+- 本次只更新协作流程文档，不改变系统运行架构；仓库系统设计与 Doca 同步不适用。未修改待审许可证 PR #1 的内容，也未推送 Gitea。
+- 验证：`git diff --check` 通过；本地默认推送远端和 `main` 上游配置回读符合上述约定。
+- 后续按用户授权将上述 GitHub 协作规则 PR #3 与 #1/#4/#5 统一纳入[整合 PR #8](https://github.com/workhold/lightmoni/pull/8)。最终整合验收及状态入口见 [SDD 027](../027-pr-consolidation/validation.md)，不覆盖本节原执行时点的记录。
