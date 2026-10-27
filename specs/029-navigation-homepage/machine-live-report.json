@@ -1,0 +1,111 @@
+{
+  "date": "2026-10-28",
+  "timezone": "Asia/Shanghai",
+  "target": "https://moni.heyphp.com/machines",
+  "checks": [
+    {
+      "check": "Anonymous machine list is rejected",
+      "passed": true,
+      "status": 401
+    },
+    {
+      "check": "Administrator login and session work",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Administrator can list registered hosts",
+      "passed": true,
+      "initial_host_count": 0
+    },
+    {
+      "check": "Reject URL instead of host",
+      "passed": true,
+      "status": 400
+    },
+    {
+      "check": "Reject port below range",
+      "passed": true,
+      "status": 400
+    },
+    {
+      "check": "Reject port above range",
+      "passed": true,
+      "status": 400
+    },
+    {
+      "check": "Reject unsafe username",
+      "passed": true,
+      "status": 400
+    },
+    {
+      "check": "Reject invalid fingerprint",
+      "passed": true,
+      "status": 400
+    },
+    {
+      "check": "Secret-free synthetic host can be registered",
+      "passed": true,
+      "status": 201
+    },
+    {
+      "check": "Host detail exposes no secret or deployment history for the fixture",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "SSH preflight is blocked before SSH without a confirmed fingerprint",
+      "passed": true,
+      "status": 400
+    },
+    {
+      "check": "Terminal session is blocked before SSH without a confirmed fingerprint",
+      "passed": true,
+      "status": 400
+    },
+    {
+      "check": "Agent installation plan is blocked before SSH without a successful preflight record",
+      "passed": true,
+      "status": 400
+    },
+    {
+      "check": "Backend supports editing the owned test host",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Owned test host removed; original host set restored",
+      "passed": true,
+      "status": 200
+    }
+  ],
+  "passed": true,
+  "scope": "HTTPS API with a separate in-memory authenticated test session. Only this run's synthetic, secret-free host record can be updated or deleted; no existing host is modified.",
+  "remote_ssh_executed": false,
+  "agent_installation_executed": false,
+  "credential_saved": false,
+  "limitations": [
+    "No existing hosts were registered at start; production SSH, WSS relay, remote prerequisites and Agent installation are not established by this check."
+  ],
+  "initial_host_count": 0,
+  "cleanup": {
+    "owned_test_host_removed": true,
+    "login_session_closed": true
+  },
+  "completed_at_utc": "2026-10-27T16:59:59.764552+00:00",
+  "browser_manual": {
+    "tool": "Codex in-app browser",
+    "checks": [
+      "Authenticated administrator can open the machines page and the initial empty state.",
+      "Registration form defaults to direct SSH and port 22, and empty required fields are rejected.",
+      "A disposable secret-free fixture displays an unverified fingerprint, not-enrolled Agent and zero valid credentials.",
+      "SSH test, terminal login and automatic installation actions remain disabled without the required trust and credentials.",
+      "Fixture details contain no credentials or deployment history.",
+      "After API cleanup, browser reload shows the original empty host list."
+    ],
+    "passed": true,
+    "secret_entered_or_saved_in_machine_form": false,
+    "remote_ssh_executed": false,
+    "agent_installation_executed": false
+  }
+}

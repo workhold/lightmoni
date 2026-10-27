@@ -60,6 +60,13 @@ async function harness({role='admin',language='zh-CN'}={}){
 let current;
 try{
  const {page,state}=await harness();current=page;await page.goto(origin+'/machines');
+ await page.context().grantPermissions(['clipboard-read','clipboard-write'],{origin});
+ await page.locator('.ant-table-tbody .ant-typography-copy').first().click();
+ await expect.poll(()=>page.evaluate(()=>navigator.clipboard.readText())).toBe('host.example.com:22');mark('Copying the displayed host address copies address:port rather than the machine ID');
+ await page.getByRole('button',{name:'添加凭据',exact:true}).click();
+ await expect(page.getByText('密码凭据默认 15 分钟后失效，且不能用于自动 SSH 部署。到期或撤销不会自动删除已保存的密文。请避免长期保存，用后及时撤销；优先使用每台主机独立的 SSH 私钥或手动 enrollment 脚本。',{exact:true})).toBeVisible();
+ await expect(page.getByText('有效秒数',{exact:true})).toBeVisible();
+ await page.locator('.ant-modal:visible .ant-modal-close').click();mark('Chinese credential hints describe expiry without claiming stored ciphertext is deleted');
  await page.getByRole('button',{name:'SSH 安装检查',exact:true}).click();
  state.result={...state.result,ready:false,checks:{...state.result.checks,systemd:false},error_code:'prerequisites_missing'};
  await page.getByRole('button',{name:'开始 SSH 检查',exact:true}).click();await expect(page.getByText('SSH 已连接，安装条件不满足',{exact:true})).toBeVisible();
@@ -80,7 +87,12 @@ try{
  await expect(page.getByText('部署状态：failed',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'我已审阅，确认执行 SSH 部署',exact:true})).toHaveCount(0);state.failApply=false;mark('Failed installation refreshes its real status and removes the obsolete approval action');
  state.plan={...state.plan,status:'awaiting_approval',plan:{...state.plan.plan,expires_at:'2000-01-01T00:00:00Z'}};
  await page.goto(origin+state.plan.review_url);await expect(page.getByRole('button',{name:'我已审阅，确认执行 SSH 部署',exact:true})).toBeDisabled();mark('Expired plans cannot be confirmed in the UI');
- const en=await harness({language:'en-US'});current=en.page;await en.page.goto(origin+'/machines');await en.page.getByRole('button',{name:'SSH preflight',exact:true}).click();await en.page.getByRole('button',{name:'Run SSH preflight',exact:true}).click();await expect(en.page.getByText('SSH connected; installation checks passed',{exact:true})).toBeVisible();
+ const en=await harness({language:'en-US'});current=en.page;await en.page.goto(origin+'/machines');
+ await en.page.getByRole('button',{name:'Add credential',exact:true}).click();
+ await expect(en.page.getByText('Password credentials expire after 15 minutes by default and cannot be used for automatic SSH deployment. Expiration or revocation does not automatically delete the stored ciphertext. Avoid long-term storage and revoke credentials after use; prefer per-host SSH keys or manual enrollment scripts.',{exact:true})).toBeVisible();
+ await expect(en.page.getByText('Validity in seconds',{exact:true})).toBeVisible();
+ await en.page.getByRole('button',{name:'Close',exact:true}).click();mark('English credential hints match the same validity and retention behavior');
+ await en.page.getByRole('button',{name:'SSH preflight',exact:true}).click();await en.page.getByRole('button',{name:'Run SSH preflight',exact:true}).click();await expect(en.page.getByText('SSH connected; installation checks passed',{exact:true})).toBeVisible();
  await en.page.getByRole('button',{name:'Close',exact:true}).click();await en.page.goto(origin+en.state.plan.review_url);await expect(en.page.getByText('Install the independent systemd Agent service',{exact:true})).toBeVisible();mark('English preflight and saved-plan steps are localized');
  await en.page.getByRole('button',{name:'Close',exact:true}).click();await en.page.goto(origin+'/assistant');await en.page.getByRole('button',{name:/SSH fixture session/}).click();
  await en.page.getByText('SSH installation preflight',{exact:true}).click();await expect(en.page.getByText('SSH connected; installation checks passed',{exact:true})).toBeVisible();await en.page.getByText('Prepare Agent deployment plan',{exact:true}).click();await en.page.getByRole('button',{name:'Review deployment plan',exact:true}).click();await expect(en.page).toHaveURL(origin+en.state.plan.review_url);await expect(en.page.getByText('fixture-plan',{exact:true})).toBeVisible();mark('Assistant tool result links to its exact persisted installation plan');

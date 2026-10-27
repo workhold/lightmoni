@@ -2,7 +2,7 @@ import {ApiOutlined,AppstoreOutlined,BellOutlined,CloudServerOutlined,CloudUploa
 
 export const navigationGroups=[
  {id:'workspace',label:'工作台',english:'Workspace',items:[
-  {path:'/',label:'概览',english:'Overview',icon:DashboardOutlined,adminOnly:false},
+  {path:'/overview',label:'概览',english:'Overview',icon:DashboardOutlined,adminOnly:false},
   {path:'/assistant',label:'AI 助手',english:'AI assistant',icon:MessageOutlined,adminOnly:false},
  ]},
  {id:'monitoring',label:'监控分析',english:'Monitoring',items:[

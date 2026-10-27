@@ -1,6 +1,6 @@
 import {useState} from 'react';
 import {useNavigate} from 'react-router-dom';
-import {CheckOutlined,DownOutlined,GlobalOutlined,LogoutOutlined,SettingOutlined,SkinOutlined,UserOutlined} from '@ant-design/icons';
+import {CheckOutlined,DownOutlined,GlobalOutlined,HomeOutlined,LogoutOutlined,SettingOutlined,SkinOutlined,UserOutlined} from '@ant-design/icons';
 import {App,Button,Dropdown,Popover} from '../shared/ui';
 import {api} from '../shared/api';
 import type {User} from '../shared/types';
@@ -37,10 +37,11 @@ export default function WorkspaceHeader({user,title,onLoggedOut}:{user:User;titl
     {key:'identity',label:<span className="lm-account-identity"><strong>{name}</strong><small>{user.name} · {role}</small></span>,disabled:true},
     {type:'divider'},
     {key:'profile',label:t('个人设置','Personal settings'),icon:<UserOutlined/>},
+    {key:'homepage',label:t('默认首页','Default homepage'),icon:<HomeOutlined/>},
     {key:'preferences',label:t('外观与语言','Appearance and language'),icon:<SettingOutlined/>},
     {type:'divider'},
     {key:'logout',label:loggingOut?t('正在退出…','Signing out…'):t('退出登录','Sign out'),icon:<LogoutOutlined/>,danger:true,disabled:loggingOut},
-   ],onClick:({key})=>{if(key==='profile')navigate('/settings?tab=profile');else if(key==='preferences')navigate('/settings?tab=appearance');else if(key==='logout')void logout()}}}>
+   ],onClick:({key})=>{if(key==='profile')navigate('/settings?tab=profile');else if(key==='homepage')navigate('/settings?tab=appearance&section=homepage');else if(key==='preferences')navigate('/settings?tab=appearance');else if(key==='logout')void logout()}}}>
     <Button type="text" className="lm-account-trigger" aria-label={`${t('账户菜单','Account menu')}: ${name} · ${role}`} title={`${name} (${user.name}) · ${role}`} loading={loggingOut}>
      <UserAvatar user={user}/><span className="lm-account-summary"><strong>{name}</strong><small>{role}</small></span><DownOutlined className="lm-account-chevron"/>
     </Button>

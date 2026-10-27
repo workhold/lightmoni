@@ -1,0 +1,46 @@
+{
+  "production_bundle": true,
+  "bundle": {
+    "index_sha256": "451765b8dabd5a1bdbfeb707bc9700aeef584c9f912bfd35daa0d835d44b8176",
+    "entry": "/assets/index-CZ5E8L0_.js",
+    "entry_sha256": "7c1b6449f7b061ea324c2e37eef7e928082244a5b03b5dff4107b96b1a699f1c"
+  },
+  "api_fixtures": true,
+  "stateful_fixture_authentication": true,
+  "fixture_claim": "Intentionally expired token; no incident changed",
+  "real_browser_storage": true,
+  "live_backend": false,
+  "production_writes": false,
+  "widths": [
+    1280,
+    390
+  ],
+  "languages": [
+    "zh-CN",
+    "en-US"
+  ],
+  "deep_links": [
+    "/logs?keyword=timeout&service=orders",
+    "/agents?tab=tasks&label=fixture",
+    "/agents/install?task=fixture",
+    "/assistant?conversation=fixture&source=logs",
+    "/a/fixture-claim?tab=events&from=2026-10-27",
+    "/traces/fixture-trace?from=2026-10-27&to=2026-10-28"
+  ],
+  "checked": [
+    "root, authenticated login and unknown paths default to AI assistant",
+    "independent categories retain multi-open state across routes and whole-sidebar collapse; keyboard and aria controls work",
+    "choosing Overview saves immediately without leaving settings; brand, root, authenticated login and fresh sign-in use /overview",
+    "account-menu shortcut focuses Default homepage; choosing Machines controls root and fresh sign-in",
+    "fresh sign-in preserves logs, nodes, node installation, assistant, alert-claim and trace deep links with their query parameters",
+    "two real fixture login sessions in one browser retain independent account preferences",
+    "role downgrade invalidates an administrator homepage and hides unauthorized choices; protected routes remain protected",
+    "external, query-bearing, fragment, nested and unauthorized stored paths fall back to AI assistant",
+    "throwing and silently dropped storage writes report failure, retain the prior selection and stored default, and never claim success",
+    "unreadable browser storage falls back to AI assistant without crashing",
+    "a successful write followed by failed readback reports unconfirmed persistence instead of claiming success or an unchanged setting; reload sees the persisted value",
+    "preference changes synchronize across tabs; translated labels and controls fit 1280px and 390px without horizontal page overflow"
+  ],
+  "errors": [],
+  "unexpected": []
+}

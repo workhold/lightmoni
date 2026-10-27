@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-28",
+  "timezone": "Asia/Shanghai",
+  "source_revision": "1dd4b2556cd901b8917b4f2feac04da38ffb3ad0",
+  "scope": "Local isolated fixtures only. No production hosts, accounts, credentials, Agent services, or model requests were used.",
+  "runtime": {
+    "command": "cd runtime && node --import tsx --test --test-concurrency=1 test/managed-machines.test.ts test/machine-ssh.test.ts test/machine-terminal.test.ts test/machine-ssh-live.test.ts",
+    "result": {
+      "tests": 25,
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0
+    },
+    "checks": [
+      "managed machines validate host input and never return credential secrets",
+      "password credentials are short lived and cannot start automatic deployment",
+      "manual script credentials cannot be mistaken for automatic SSH deployment",
+      "credential decryption failure closes a deployment as failed",
+      "failed SSH deployment cancels the one-time enrollment token",
+      "deployment plan requires host pinning and apply keeps tokens out of command/output",
+      "AI preflight really calls SSH, saves an auditable result and creates the exact reviewable plan",
+      "SSH tools and HTTP reject members and arbitrary host/command/secret parameters",
+      "SSH login success with missing prerequisites is not an installable host; raw output is never returned",
+      "preflight errors and malformed host output return fixed codes without leaking secrets",
+      "multiple, revoked, expired, cross-host and unsupported SSH credentials never connect",
+      "checks and plans bind target, architecture, credential and expiry before enrollment issuance",
+      "in-flight check is exclusive per host and cancellation releases its lock",
+      "host key pin matches the exact key even when another algorithm appears first",
+      "fixed preflight executes valid POSIX shell and returns only bounded enum/boolean values",
+      "preflight rejects duplicates, arbitrary text, inconsistent statuses and credential-bearing platform URLs",
+      "terminal REST and upgrades enforce administrator, exact login, origin, owner, machine and single use",
+      "pending expiry, caps, ambiguous/expired/revoked keys and revocation release leases",
+      "real PTY: UTF-8, commands, Ctrl+C, resize, flow control, single attach, disconnect and revocation",
+      "real SSH validates host pin and auth, and cleans up on invalid protocol, logout, expiry, exit and shutdown",
+      "real terminal pauses output without ACK and closes idle sessions",
+      "global cap and cancelled pending entry release the exclusive host lease",
+      "real terminal total time limit closes an active connection and allows reconnect",
+      "SSH connection deadline closes a nonresponsive peer without retaining a lock",
+      "real SSH handshake, exact host pin, private-key authentication, timeout and cancellation"
+    ],
+    "real_ssh": "Disposable loopback sshd, temporary generated keys, actual OpenSSH and ssh2 connections, actual PTY commands. No user SSH configuration was used.",
+    "installation_boundary": "The managed-machine installation success and failure paths use a mock SSH runner and mock enrollment receipts. This is not evidence of a real Agent installation."
+  },
+  "browser_before_display_fix": {
+    "command": "LIGHTMONI_QA_OUTPUT=<temporary-directory> node web/src/app/verify-machine-ssh.mjs",
+    "fixture": "All requests intercepted against isolated production frontend bundle; no remote machine or credentials are accessed.",
+    "result": {
+      "checks": 11,
+      "passed": 11,
+      "errors": [],
+      "unexpected_requests": []
+    },
+    "checks": [
+      "Connected SSH with missing prerequisites does not propose or install",
+      "Pinned host-key failure is explained",
+      "Standalone successful SSH preflight",
+      "In-flight preflight can be cancelled without a late result reopening the dialog",
+      "Deployment form detects architecture and saves a plan without applying",
+      "Deep link reviews and confirms the same persisted plan exactly once",
+      "Failed installation refreshes its real status and removes the obsolete approval action",
+      "Expired plans cannot be confirmed in the UI",
+      "English preflight and saved-plan steps are localized",
+      "Assistant tool result links to its exact persisted installation plan",
+      "Members cannot load host data or SSH actions"
+    ]
+  },
+  "display_changes": [
+    "The host address copy control copies the displayed address:port instead of the platform machine ID.",
+    "Chinese and English credential hints distinguish validity/expiration from deleting stored ciphertext and retain recommendations against long-term storage and to revoke credentials after use."
+  ],
+  "browser_after_display_fix": {
+    "command": "LIGHTMONI_QA_OUTPUT=<temporary-directory> node web/src/app/verify-machine-ssh.mjs",
+    "status": "passed",
+    "fixture": "Updated local production bundle, all browser requests intercepted, no production state or secrets accessed.",
+    "result": {
+      "checks": 14,
+      "passed": 14,
+      "errors": [],
+      "unexpected_requests": []
+    },
+    "checks": [
+      "Copying the displayed host address copies address:port rather than the machine ID",
+      "Chinese credential hints describe expiry without claiming stored ciphertext is deleted",
+      "Connected SSH with missing prerequisites does not propose or install",
+      "Pinned host-key failure is explained",
+      "Standalone successful SSH preflight",
+      "In-flight preflight can be cancelled without a late result reopening the dialog",
+      "Deployment form detects architecture and saves a plan without applying",
+      "Deep link reviews and confirms the same persisted plan exactly once",
+      "Failed installation refreshes its real status and removes the obsolete approval action",
+      "Expired plans cannot be confirmed in the UI",
+      "English credential hints match the same validity and retention behavior",
+      "English preflight and saved-plan steps are localized",
+      "Assistant tool result links to its exact persisted installation plan",
+      "Members cannot load host data or SSH actions"
+    ],
+    "source_sha256": {
+      "web/src/app/MachinesPage.tsx": "69d2ae39a043390c1a17c09b18195049a2617a04ef91aacdc7262784c54a06a4",
+      "web/src/app/verify-machine-ssh.mjs": "56bc9e24509b5f42ed6378958c2fd0b4c7f611745533aae3ff341eca06cc3760"
+    },
+    "verification_detail": "The address control was clicked in a real headless Chromium page and navigator.clipboard.readText() returned host.example.com:22. Chinese and English warnings and validity field labels were asserted visible.",
+    "test_harness_note": "An initial supplementary run timed out while looking for the English Close name in the Chinese modal; the selector was corrected to the modal close control before the successful 14-check run. No product error or unexpected request was observed."
+  },
+  "limitations": [
+    "Production validation is tracked separately; this report does not establish production SSH connectivity or reverse-proxy WebSocket behavior.",
+    "The frontend lacks machine editing and deletion controls although corresponding backend APIs exist; this is outside the scoped display fixes.",
+    "No backend credential persistence or purge behavior was changed."
+  ]
+}
