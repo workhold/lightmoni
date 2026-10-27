@@ -1,0 +1,183 @@
+{
+  "source": "read-only export of newly built local Colima Docker containerd content",
+  "revision": "ec3088093498d8f052323ff395ada52607473d0a",
+  "manifests": [
+    {
+      "digest": "sha256:51dd3d6ad8bef3050f631aaaf464fa481d705c6951d1dc90de79344a8afa15e0",
+      "size": 3142,
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "platform": {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    },
+    {
+      "digest": "sha256:f96efe5f6756e195bae7c1d4d62d7668c33af4f6529e7188d0a5878d8cca028b",
+      "size": 3142,
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "platform": {
+        "os": "linux",
+        "architecture": "arm64"
+      }
+    }
+  ],
+  "unique_blobs": [
+    {
+      "digest": "sha256:58bf9858980e894d0555aaf579f313a169b05115f6f7eb8530b77e1aa35b7b9b",
+      "bytes": 11561,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:068fedd6b0f109b8186d00d49327b6fc6747c428fd3c9a8739424ff5f38d7531",
+      "bytes": 28233543,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:2ef05dcd22f2d7562470826b6b9dc1faf9fda10320238b812a2946f94d8918b5",
+      "bytes": 3310,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:37b6eb746f79394ccadf666bd8cae1f2a1d69f6b50df9c52af7dc7aae065b1a9",
+      "bytes": 49671192,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:be6d2dd2599a8023f198d6770dc2733997bcb533cd8b4ac654244586032d1131",
+      "bytes": 1712657,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:57549c358e5b195528c8d6389e1c6d2205498d35d8a8a302059258e9b4455838",
+      "bytes": 448,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:8ce1ac81627d8dd7f087e315089555537d537e6d6f113d58a6fc595227eff579",
+      "bytes": 7362232,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:96e4e6033fd2eddf9ce097f80c7412546f025ad9536e3b0cef988d3fbf4afeda",
+      "bytes": 116,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:e28ad42d5729f0fb0874c191f35856728fbbbbc537b87d710d5233862448299b",
+      "bytes": 180548633,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:056f114e98ddccf053b7498718c12df811286b588d4654bdfa7a9a80d709f870",
+      "bytes": 644,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:1bbe512600721aab308700efc024768e9815416595df5db59645ebb017649240",
+      "bytes": 25769,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:8813e89668d9c3b8bc6348c39f25a9f7b44daf9257aff35b2581287c08086968",
+      "bytes": 473,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:8b79b722b8a7e4b35ed90f4c1a4f8374b3e78f8b1c2d5969512704bc8e5e5d24",
+      "bytes": 24403647,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:7f355e773e78867696285bc9bcd8428b2b59683111c989821915d5238ab0baa5",
+      "bytes": 7952,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:11fa331798fc09b18c06816b78401437349a0ce27126bad57a115834dbab0a19",
+      "bytes": 245,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+      "bytes": 32,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:9c407b5e2c17a7eed858925cbfff957977907fe73ce5317887749ae73447821b",
+      "bytes": 11566,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:f400d36d7784570c9fb7558e367d2b5d38e8b2f1d6faee041815acea7f87e669",
+      "bytes": 28115043,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:10c63fb2a2011ac33da39cb3bd0d56c640a734566eca7b46a67add7785f18853",
+      "bytes": 3310,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:a86139c8545fe38d81a160767eab8791023f36897db9f36820bc0480e75eb7e4",
+      "bytes": 49651454,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:51809ea1719c01b43b214dce501b84dd4df8f0b34265dca122a9765e05c528e3",
+      "bytes": 1712603,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:fc03b5e40b38afd0c82e19e179133ea7b9b0740e12099f6464202f5c54f004c7",
+      "bytes": 444,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:3cb917a1928b5582c0c2c27a0130da24301daca1600541f5e72348f97c9faa1a",
+      "bytes": 7163426,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:6b5095527ef96c0bbc44aa240ce7fc123f6d45f41e5b5eeeaf5c3b977ce171d7",
+      "bytes": 119,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:ac23417f5c45106703a454e565ebfb03a080e3f386b0632ce08152267bbecc76",
+      "bytes": 180547213,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:0a14ccf36d667bf3f31af0d4393a5306076588288a7d1f7426cc457b0aa439a6",
+      "bytes": 644,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:2a6f86bb1e161801ad296f2bb0e0066da0c6db145a723e7e1b48e58ef3d6b96d",
+      "bytes": 25759,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:222ac7f815cb4543d151f419c8d3f629b6fb8283482ba268a41261c654e1e7dd",
+      "bytes": 475,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:eeda181e39cd7f635fb495aebbb9f741039a44462ba228c85849819b0062dd2e",
+      "bytes": 24402963,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:0dd00fffc1f2f6017378684ab6b058c6aa3fb2a03347639fbc258ef8f8590181",
+      "bytes": 7954,
+      "sha256_verified": true
+    },
+    {
+      "digest": "sha256:fb44abde09443e321c06efc3d4f2c2508920e3044206b0dbf7e7e6a51f8c8ff4",
+      "bytes": 245,
+      "sha256_verified": true
+    }
+  ],
+  "unique_blob_bytes": 583625672,
+  "all_sha256_and_descriptor_sizes_verified": true
+}

@@ -1,0 +1,44 @@
+[
+  {
+    "source": "docker.io/library/node:24.15.0-bookworm",
+    "official_registry": "https://registry-1.docker.io",
+    "official_digest_source": "https://hub.docker.com/v2/repositories/library/node/tags/24.15.0-bookworm",
+    "official_metadata_file": "node-bookworm-hub-tls12.json",
+    "index_digest": "sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940",
+    "platform_manifests": {
+      "amd64": "sha256:da81deb96d49fc84c9813bc4f16dfdb1d4d7e3671b74cd54fd944428f1444afe",
+      "arm64": "sha256:92c191629a40c9ca674e7d5c0c1edf25febb5e2f30f551f187ac71f61595b9f8"
+    },
+    "transport_image": "docker.m.daocloud.io/library/node@sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940",
+    "verified_at_utc": "2026-10-27T15:39:11.608001+00:00",
+    "verification_method": "Official Docker Hub tag API index/platform digests match the SHA-256 of the pinned mirror response and its Docker-Content-Digest header."
+  },
+  {
+    "source": "docker.io/library/node:24.15.0-bookworm-slim",
+    "official_registry": "https://registry-1.docker.io",
+    "official_digest_source": "https://hub.docker.com/v2/repositories/library/node/tags/24.15.0-bookworm-slim",
+    "official_metadata_file": "node-bookworm-slim-hub-tls12.json",
+    "index_digest": "sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d",
+    "platform_manifests": {
+      "amd64": "sha256:152aceace5c03e2597988763165ee33e3fd3633636db0fc983cd2e126b02cfde",
+      "arm64": "sha256:682f301a9e8e5731d4bb1889182a2186fe65a312cc81ae86cea6038ef8b1603f"
+    },
+    "transport_image": "docker.m.daocloud.io/library/node@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d",
+    "verified_at_utc": "2026-10-27T15:39:12.293705+00:00",
+    "verification_method": "Official Docker Hub tag API index/platform digests match the SHA-256 of the pinned mirror response and its Docker-Content-Digest header."
+  },
+  {
+    "source": "docker.io/clickhouse/clickhouse-server:26.8",
+    "official_registry": "https://registry-1.docker.io",
+    "official_digest_source": "https://hub.docker.com/v2/repositories/clickhouse/clickhouse-server/tags/26.8",
+    "official_metadata_file": "clickhouse-hub-tls12.json",
+    "index_digest": "sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7",
+    "platform_manifests": {
+      "amd64": "sha256:0805f9f529673d2a68d1fb50dfef90f30f1710bb1b62d4c3f1d1a99d37459ecc",
+      "arm64": "sha256:46ec9b0b588c2c37ca091e0d636c54db0740f9a9c936ad950dc28c2b552ed7cb"
+    },
+    "transport_image": "docker.m.daocloud.io/clickhouse/clickhouse-server@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7",
+    "verified_at_utc": "2026-10-27T15:39:12.980395+00:00",
+    "verification_method": "Official Docker Hub tag API index/platform digests match the SHA-256 of the pinned mirror response and its Docker-Content-Digest header."
+  }
+]

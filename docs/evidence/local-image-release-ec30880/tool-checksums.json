@@ -1,0 +1,10 @@
+{
+  "purpose": "SHA256 identities of temporary tools used in this release; these files are not shipped in the image or installed into the product",
+  "files": {
+    "release-image-smoke.py": "bc7172a768912743ae075e3a85d9998749db0fe3239b34c49f00704249ce3b4b",
+    "publish-local.py": "b0d8a185c24e258b65c9d8ec6a8357402662d7dffbbbb1aa241e3ebe8edd6654",
+    "verify-registry-readonly.py": "f6ca3390596f3c5dd3a2f331770724baf2a19485281b544166907e3c1e7f2063",
+    "registry_keepalive.py": "70060cd216686c7d157d7030e3289a5963539b80d88086f8c617cd93043fe59c",
+    "export-local-oci.py": "e79bd1c15128aefce1967c84a05e3b9d4a6b159994030f00bfa2005ced1ecc70"
+  }
+}

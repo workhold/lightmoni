@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: ${LIGHTMONI_IMAGE:-docker.heyphp.com/lightmoni/lightmoni:20261027-operations}
+    image: ${LIGHTMONI_IMAGE:-docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880}
     pull_policy: missing
     build:
       context: .

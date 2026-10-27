@@ -1,0 +1,133 @@
+{
+  "config_binding": {
+    "passed": true,
+    "checks": [
+      {
+        "check": "actual ARM raw bytes distinguish tested manifest and config digests",
+        "passed": true
+      },
+      {
+        "check": "mistaking config digest for Docker 29 image identity rejected",
+        "passed": true
+      },
+      {
+        "check": "current descriptor identity mismatch rejected",
+        "passed": true
+      },
+      {
+        "check": "current Docker image identity mismatch rejected",
+        "passed": true
+      },
+      {
+        "check": "current uncompressed filesystem mismatch rejected",
+        "passed": true
+      },
+      {
+        "check": "altered raw config rejected",
+        "passed": true
+      },
+      {
+        "check": "altered raw manifest rejected",
+        "passed": true
+      },
+      {
+        "check": "manifest descriptor size mismatch rejected",
+        "passed": true
+      },
+      {
+        "check": "config source revision mismatch rejected",
+        "passed": true
+      }
+    ],
+    "docker_executed": false,
+    "network_accessed": false,
+    "credentials_read": false,
+    "actual_arm64_manifest_digest": "sha256:f96efe5f6756e195bae7c1d4d62d7668c33af4f6529e7188d0a5878d8cca028b",
+    "actual_arm64_config_digest": "sha256:9c407b5e2c17a7eed858925cbfff957977907fe73ce5317887749ae73447821b"
+  },
+  "chunked_upload_flow": {
+    "passed": true,
+    "checks": [
+      {
+        "scenario": "success",
+        "passed": true,
+        "docker_login_or_buildx": false,
+        "auth_config_created": false
+      },
+      {
+        "scenario": "upload_failure",
+        "passed": true,
+        "docker_login_or_buildx": false,
+        "auth_config_created": false
+      },
+      {
+        "scenario": "corrupt_blob",
+        "passed": true,
+        "docker_login_or_buildx": false,
+        "auth_config_created": false
+      },
+      {
+        "scenario": "unknown_fixed_tag",
+        "passed": true,
+        "docker_login_or_buildx": false,
+        "auth_config_created": false
+      },
+      {
+        "scenario": "latest_concurrent",
+        "passed": true,
+        "docker_login_or_buildx": false,
+        "auth_config_created": false
+      }
+    ],
+    "real_docker_executed": false,
+    "real_network_accessed": false,
+    "real_credentials_read": false
+  },
+  "smoke_harness": {
+    "passed": true,
+    "executed_docker": false,
+    "checks": [
+      "py_compile",
+      "help",
+      "four prior SDK packaging fixtures licensed Apache-2.0; macOS AppleDouble metadata removed to model Linux packaging",
+      "Go module GitHub path",
+      "five navigation labels in current production JS",
+      "raw and escaped JS Unicode",
+      "SDK checksum inventory and rejection cases"
+    ],
+    "sdk_inspections": {
+      "typescript": {
+        "apache_license_paths": [
+          "package/LICENSE"
+        ],
+        "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "fixture_appledouble_metadata_removed": 0
+      },
+      "go": {
+        "apache_license_paths": [
+          "lightmoni-go-sdk/LICENSE"
+        ],
+        "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "go_module": "github.com/workhold/lightmoni",
+        "fixture_appledouble_metadata_removed": 32
+      },
+      "python": {
+        "apache_license_paths": [
+          "lightmoni-python-sdk/LICENSE",
+          "lightmoni-python-sdk/sdk/python/LICENSE"
+        ],
+        "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "fixture_appledouble_metadata_removed": 20
+      },
+      "rust": {
+        "apache_license_paths": [
+          "lightmoni-rust-sdk/LICENSE",
+          "lightmoni-rust-sdk/sdk/rust/LICENSE"
+        ],
+        "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "fixture_appledouble_metadata_removed": 20
+      }
+    },
+    "script_sha256": "1030eec31c66d1ea45875cac0fa53dfd76d3575118008cb67af8f33f214fa16a"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "creator": 5785480,
+  "id": 1289133542,
+  "images": [
+    {
+      "architecture": "amd64",
+      "features": "",
+      "variant": null,
+      "digest": "sha256:0805f9f529673d2a68d1fb50dfef90f30f1710bb1b62d4c3f1d1a99d37459ecc",
+      "os": "linux",
+      "os_features": "",
+      "os_version": null,
+      "size": 279854236,
+      "status": "active",
+      "last_pulled": "2026-10-27T15:26:59.719983518Z",
+      "last_pushed": "2026-10-26T18:20:55.596957196Z"
+    },
+    {
+      "architecture": "arm64",
+      "features": "",
+      "variant": null,
+      "digest": "sha256:46ec9b0b588c2c37ca091e0d636c54db0740f9a9c936ad950dc28c2b552ed7cb",
+      "os": "linux",
+      "os_features": "",
+      "os_version": null,
+      "size": 262867545,
+      "status": "active",
+      "last_pulled": "2026-10-27T15:27:09.702358739Z",
+      "last_pushed": "2026-10-26T18:20:56.044879177Z"
+    }
+  ],
+  "last_updated": "2026-10-26T18:21:00.884403Z",
+  "last_updater": 5785480,
+  "last_updater_username": "robotclickhouse",
+  "name": "26.8",
+  "repository": 9419231,
+  "full_size": 279854236,
+  "v2": true,
+  "tag_status": "active",
+  "tag_last_pulled": "2026-10-27T15:27:09.702358739Z",
+  "tag_last_pushed": "2026-10-26T18:21:00.884403Z",
+  "media_type": "application/vnd.oci.image.index.v1+json",
+  "content_type": "image",
+  "digest": "sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7"
+}

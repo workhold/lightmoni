@@ -1,0 +1,58 @@
+{
+  "completed_at_utc": "2026-10-27T16:28:27.506291+00:00",
+  "source_revision": "ec3088093498d8f052323ff395ada52607473d0a",
+  "passed": true,
+  "build_location": "local macOS arm64 workstation, dedicated Colima Linux VM",
+  "architectures": [
+    {
+      "platform": "linux/amd64",
+      "emulated": true,
+      "image_manifest_digest": "sha256:51dd3d6ad8bef3050f631aaaf464fa481d705c6951d1dc90de79344a8afa15e0",
+      "checks_passed": 10,
+      "evidence": "amd64-container-report.json",
+      "navigation_assets": {
+        "bilingual_five_categories": true,
+        "websites_and_operations_entry": true,
+        "collapsible_group_markers": true,
+        "verification": "real production JS returned by image HTTP; not interactive browser testing"
+      },
+      "cleanup": {
+        "removed": {
+          "container": 2,
+          "volume": 2,
+          "network": 1
+        },
+        "errors": []
+      }
+    },
+    {
+      "platform": "linux/arm64",
+      "emulated": false,
+      "image_manifest_digest": "sha256:f96efe5f6756e195bae7c1d4d62d7668c33af4f6529e7188d0a5878d8cca028b",
+      "checks_passed": 10,
+      "evidence": "arm64-container-report.json",
+      "navigation_assets": {
+        "bilingual_five_categories": true,
+        "websites_and_operations_entry": true,
+        "collapsible_group_markers": true,
+        "verification": "real production JS returned by image HTTP; not interactive browser testing"
+      },
+      "cleanup": {
+        "removed": {
+          "container": 2,
+          "volume": 2,
+          "network": 1
+        },
+        "errors": []
+      }
+    }
+  ],
+  "limitations": [
+    "amd64 runs through local daemon emulation, not an amd64 native runner; emulation implementation is not independently identified",
+    "Fresh isolated volumes only; no production data upgrade or disaster recovery tested",
+    "HTTP production assets checked; no interactive browser acceptance",
+    "Agent target-platform version entry and modules checked; no Agent daemon or approved operational task run",
+    "No live Nginx, Docker Compose, public ACME, or real S3 operation executed",
+    "No model generation, production deployment, remote build or remote Agent upgrade performed"
+  ]
+}
