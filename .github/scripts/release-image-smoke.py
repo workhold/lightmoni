@@ -6,7 +6,7 @@ Usage: python3 /tmp/lightmoni-ops-image-smoke.py IMAGE SOURCE_REVISION WORK_DIR
 Requires Python 3 and Docker on a Linux amd64 or arm64 Docker host. The tested LightMoni
 image must already exist locally. ClickHouse 26.8 is explicitly pulled with a
 900-second timeout before startup. Center/ClickHouse memory is capped at
-512/768 MiB with no additional swap. Only dedicated, labelled resources are removed.
+1/3 GiB with no additional swap. Only dedicated, labelled resources are removed.
 Passwords/tokens/cookies remain in memory or temporary 0600 environment files;
 neither raw HTTP errors, Docker output nor container logs are printed.
 
@@ -42,7 +42,7 @@ DOMAINS = ["websites", "certificates", "containers", "backups"]
 LABEL_KEY = "io.lightmoni.qa.run"
 CLICKHOUSE_SERVER_XML = """<clickhouse>
   <logger><level>warning</level></logger>
-  <max_server_memory_usage>536870912</max_server_memory_usage>
+  <max_server_memory_usage>2147483648</max_server_memory_usage>
   <max_connections>32</max_connections>
   <max_concurrent_queries>4</max_concurrent_queries>
   <max_thread_pool_size>128</max_thread_pool_size>
@@ -71,12 +71,50 @@ CLICKHOUSE_SERVER_XML = """<clickhouse>
 CLICKHOUSE_USERS_XML = """<clickhouse><profiles><default>
   <max_threads>2</max_threads>
   <max_insert_threads>1</max_insert_threads>
-  <max_memory_usage>134217728</max_memory_usage>
-  <max_memory_usage_for_user>268435456</max_memory_usage_for_user>
+  <max_memory_usage>536870912</max_memory_usage>
+  <max_memory_usage_for_user>1073741824</max_memory_usage_for_user>
   <max_bytes_before_external_group_by>67108864</max_bytes_before_external_group_by>
   <max_bytes_before_external_sort>67108864</max_bytes_before_external_sort>
 </default></profiles></clickhouse>
 """
+CENTER_LOG_CATEGORIES = {
+    "LIGHTMONI_STARTUP_FAILED": rb"LightMoni startup failed:",
+    "CLICKHOUSE_REQUEST_FAILED": rb"ClickHouse request failed \([1-5][0-9]{2}\)",
+    "CLICKHOUSE_RESPONSE_TOO_LARGE": rb"ClickHouse response too large",
+    "FETCH_FAILED": rb"\bfetch failed\b",
+    "OUT_OF_MEMORY": rb"heap out of memory|Allocation failed|Fatal process out of memory",
+    "SQLITE_FAILURE": rb"\b(?:SQLITE_[A-Z_]+|ERR_SQLITE_ERROR)\b",
+    "MODULE_LOAD_FAILURE": rb"\b(?:ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|ERR_DLOPEN_FAILED)\b",
+}
+NODE_ERROR_CODES = (
+    "ERR_SQLITE_ERROR", "SQLITE_ERROR", "SQLITE_BUSY", "SQLITE_CANTOPEN", "SQLITE_READONLY",
+    "SQLITE_CORRUPT", "SQLITE_NOTADB", "ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND",
+    "ERR_PACKAGE_PATH_NOT_EXPORTED", "ERR_DLOPEN_FAILED", "ERR_INVALID_ARG_VALUE",
+    "ERR_INVALID_ARG_TYPE", "EADDRINUSE", "EADDRNOTAVAIL", "EACCES", "EPERM", "ENOENT",
+    "ENOTDIR", "ENOSPC", "EROFS", "ENOMEM", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN",
+    "ETIMEDOUT", "ECONNRESET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET",
+)
+CLICKHOUSE_ERROR_CODES = (
+    "MEMORY_LIMIT_EXCEEDED", "ACCESS_DENIED", "AUTHENTICATION_FAILED", "UNKNOWN_SETTING",
+    "UNKNOWN_USER", "NOT_ENOUGH_SPACE", "CANNOT_ALLOCATE_MEMORY", "CANNOT_OPEN_FILE",
+    "CANNOT_STAT", "CANNOT_LOAD_CONFIG", "CANNOT_PARSE_CONFIG", "BAD_ARGUMENTS",
+    "NETWORK_ERROR", "UNKNOWN_TABLE", "UNKNOWN_IDENTIFIER", "TOO_MANY_SIMULTANEOUS_QUERIES",
+    "CANNOT_SCHEDULE_TASK", "TOO_MANY_PARTS", "LOGICAL_ERROR", "READONLY", "TABLE_ALREADY_EXISTS",
+)
+
+
+def matching_codes(logs, allowed):
+    # Return only literals from this allowlist, never a captured log token.
+    return [code for code in allowed if re.search(rb"\b" + code.encode() + rb"\b", logs)]
+
+
+def center_log_summary(logs):
+    return {
+        "categories": [name for name, pattern in CENTER_LOG_CATEGORIES.items() if re.search(pattern, logs)],
+        "clickhouse_http_statuses": sorted({int(status) for status in
+            re.findall(rb"ClickHouse request failed \(([1-5][0-9]{2})\)", logs)}),
+        "node_error_codes": matching_codes(logs, NODE_ERROR_CODES),
+    }
 
 
 class SmokeError(Exception):
@@ -158,9 +196,10 @@ class Smoke:
         self.stage = "preflight"
         self.report = {"passed": False, "image": args.image, "expected_source_revision": args.source_revision,
             "docker_platform": None, "checks": [], "downloads": [],
-            "resource_limits": {"center_memory_bytes": 512 << 20, "clickhouse_memory_bytes": 768 << 20,
-                "additional_swap_bytes": 0, "clickhouse_server_memory_bytes": 512 << 20,
-                "clickhouse_query_memory_bytes": 128 << 20, "clickhouse_query_threads": 2},
+            "resource_limits": {"center_memory_bytes": 1 << 30, "clickhouse_memory_bytes": 3 << 30,
+                "additional_swap_bytes": 0, "clickhouse_server_memory_bytes": 2 << 30,
+                "clickhouse_query_memory_bytes": 512 << 20, "clickhouse_user_memory_bytes": 1 << 30,
+                "clickhouse_query_threads": 2},
             "limitations": ["Agent execution is limited to the detected native architecture; the other package is inspected statically",
                 "No Agent daemon or approved job was run", "No live Nginx/Docker/ACME/S3 operation executed",
                 "HTTP assets are checked; this is not interactive browser acceptance"]}
@@ -202,6 +241,53 @@ class Smoke:
 
     def check(self, name, **details):
         self.report["checks"].append({"check": name, "passed": True, **details})
+
+    def startup_diagnostics(self, center, clickhouse):
+        # Raw inspect/log output stays in memory. Only selected state fields,
+        # fixed category names, numeric HTTP statuses and allowlisted codes may
+        # enter the report. In particular, ClickHouse may log SQL containing the
+        # generated reader password, so no log line or error message is copied.
+        diagnostics = {}
+        for role, name in [("center", center), ("clickhouse", clickhouse)]:
+            safe = {"available": False}
+            diagnostics[role] = safe
+            try:
+                if name not in self.owned["container"]:
+                    continue
+                labels = self.docker("inspect", "--format", "{{json .Config.Labels}}", name,
+                    checked=False, timeout=15)
+                if labels.returncode or json.loads(labels.stdout).get(LABEL_KEY) != self.run_id:
+                    continue
+                selected = '{"Status":{{json .State.Status}},"ExitCode":{{json .State.ExitCode}},"OOMKilled":{{json .State.OOMKilled}}}'
+                inspected = self.docker("inspect", "--format", selected, name, checked=False, timeout=15)
+                if not inspected.returncode:
+                    state = json.loads(inspected.stdout)
+                    status = state.get("Status")
+                    safe["state"] = {
+                        "Status": status if status in {"created", "running", "paused", "restarting", "removing", "exited", "dead"} else "unrecognized",
+                        "ExitCode": state.get("ExitCode") if type(state.get("ExitCode")) is int else None,
+                        "OOMKilled": state.get("OOMKilled") if type(state.get("OOMKilled")) is bool else None,
+                    }
+                    if role == "center" and status == "running":
+                        # Distinguish center startup from host access to a
+                        # published port on Docker's isolated internal network.
+                        probe_js = b'''const result={status:null,ok:false};try{const response=await fetch('http://127.0.0.1:8080/healthz',{signal:AbortSignal.timeout(5000)});result.status=response.status;const body=await response.json();result.ok=response.ok&&body?.status==='ok';}catch{}process.stdout.write(JSON.stringify(result));'''
+                        probed = self.docker("exec", "-i", name, "node", "--input-type=module", "-",
+                            stdin=probe_js, checked=False, timeout=10)
+                        health = json.loads(probed.stdout) if not probed.returncode else {}
+                        safe["loopback_health"] = {
+                            "status": health.get("status") if type(health.get("status")) is int and 100 <= health["status"] <= 599 else None,
+                            "ok": health.get("ok") is True,
+                        }
+                logs = self.docker("logs", "--tail", "200", name, checked=False, timeout=15)
+                if not logs.returncode:
+                    raw = logs.stdout + b"\n" + logs.stderr
+                    safe["log_summary"] = center_log_summary(raw) if role == "center" else {
+                        "error_codes": matching_codes(raw, CLICKHOUSE_ERROR_CODES)}
+                safe["available"] = True
+            except (SmokeError, ValueError, TypeError, AttributeError):
+                safe["diagnostic_collection_failed"] = True
+        self.report["startup_diagnostics"] = diagnostics
 
     def cleanup(self):
         results = {"removed": {}, "errors": []}
@@ -286,7 +372,7 @@ exec /entrypoint.sh
 """
         self.docker("run", "-d", "--pull", "never", "--name", ch_name, *self.labels(), "--platform", self.native_platform,
             "--network", network, "--env-file", ch_env, "--ulimit", "nofile=262144:262144",
-            "--memory", "768m", "--memory-swap", "768m", "--entrypoint", "/bin/sh",
+            "--memory", "3g", "--memory-swap", "3g", "--entrypoint", "/bin/sh",
             "--mount", "type=bind,source=" + ch_server_xml + ",target=/run/lightmoni-smoke-server.xml,readonly",
             "--mount", "type=bind,source=" + ch_users_xml + ",target=/run/lightmoni-smoke-users.xml,readonly",
             "--mount", "type=volume,source=" + telemetry + ",target=/var/lib/clickhouse",
@@ -304,7 +390,7 @@ exec /entrypoint.sh
         self.owned["container"].append(center)
         self.docker("run", "-d", "--pull", "never", "--name", center, *self.labels(), "--platform", self.native_platform,
             "--network", network, "--env-file", center_env, "--publish", "127.0.0.1:" + str(port) + ":8080",
-            "--memory", "512m", "--memory-swap", "512m",
+            "--memory", "1g", "--memory-swap", "1g",
             "--mount", "type=volume,source=" + state + ",target=/data", self.image_id)
         anonymous = Client(base)
         deadline, healthy = time.monotonic() + 150, False
@@ -316,6 +402,8 @@ exec /entrypoint.sh
             except (SmokeError, OSError):
                 pass
             time.sleep(1)
+        if not healthy:
+            self.startup_diagnostics(center, ch_name)
         require(healthy, "Center did not become healthy")
         require(anonymous.json("/api/v1/setup").get("required") is True, "Fresh isolated state was not empty")
         self.check("real center healthz and fresh state")
