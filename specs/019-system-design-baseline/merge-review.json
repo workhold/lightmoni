@@ -33,5 +33,13 @@
   "captions_read_back_equal_to_repository": true,
   "all_unrelated_blocks_preserved_by_targeted_operations": true,
   "actual_editor_visual_validation": false,
-  "validation_limit": "MCP native graph structure and paragraph readback verified; no claim of current editor pixel rendering validation."
+  "validation_limit": "MCP native graph structure and paragraph readback verified; no claim of current editor pixel rendering validation.",
+  "gitea_pr23_merged": true,
+  "gitea_merge_commit": "086b96a849ab7af5a0a54a735bb75197bba8630e",
+  "documentation_check": {
+    "markdown_files": 6,
+    "relative_links": 63,
+    "check_against_current_main_passed": true,
+    "credential_tests_passed": 12
+  }
 }

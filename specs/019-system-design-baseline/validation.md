@@ -46,3 +46,5 @@ rg -n "system-design\.md|SDK.*Agent|Agent.*SDK|Java|C#|PHP|Go|Rust|Ruby" README.
 - 凭据相关 `access-credentials`、`agent-credentials`、`telemetry-agent-credentials` 测试 12/12 通过，用于复核 #17 的已落地功能；未执行与本次文档变更无关的完整产品回归。
 - `git diff --check`、Markdown 围栏配对、相对链接目标和独立上报/控制路径断言通过。Doca 当前编辑器的像素渲染仍未验收，不把 MCP 数据回读等同于线上视觉验收。
 - 按本次授权通过原 Gitea #23 合入，并以 GitHub PR 接入新开发主干；不直接推送任一主干。GitHub 的许可证准备 PR #1 不在此次 #23/#17 的合并授权范围内。
+- Gitea #23 已成功合并，页面显示“已合并”，主干提交 `086b96a849ab7af5a0a54a735bb75197bba8630e` 已通过 Git fetch 回读。GitHub 同步分支保留这次原站合并提交及所有原作者历史。
+- 最终相对最新基线的 `git diff --check origin/main HEAD` 通过；6 个 Markdown 文件的 63 个相对链接目标存在、围栏配对正常。整次更新仅 6 个系统设计/SDD 文档文件；合并时主干原有的运行时代码行尾空行不属于本次新增差异。
