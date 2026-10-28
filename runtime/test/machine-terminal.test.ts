@@ -32,7 +32,7 @@ async function fixture(t:TestContext,limits:Record<string,number>={}){
  server.listen(0,'127.0.0.1');await once(server,'listening');
  const origin=`http://127.0.0.1:${(server.address() as any).port}`;deps.externalURL=router.externalURL=origin;
  const terminal=registerMachineTerminal(deps,machines,server,limits);
- t.after(async()=>{await terminal.close?.();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));db.close();await rm(dir,{recursive:true,force:true})});
+ t.after(async()=>{await terminal.close?.();await machines.close?.();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));db.close();await rm(dir,{recursive:true,force:true})});
  const request=async(path:string,method='GET',body?:unknown,login='admin',headers:Record<string,string>={})=>{
   const res=await fetch(origin+'/api/v1'+path,{method,headers:{cookie:`lm_session=${login}`,origin,'content-type':'application/json',...headers},body:body===undefined?undefined:JSON.stringify(body)});
   return {status:res.status,data:await res.json() as any};
@@ -131,7 +131,8 @@ test('real SSH validates host pin and auth, and cleans up on invalid protocol, l
  c=await f.attach((await f.create(h)).data);await c.connected();c.send({type:'input',data:'x'.repeat(16385)});await c.closed('invalid_message');
  c=await f.attach((await f.create(h)).data);await c.connected();
  f.db.run('UPDATE machine_credentials SET expires_at=? WHERE id=?','2000-01-01T00:00:00Z',h.credentialID);await c.closed('credential_invalid');
- f.db.run('UPDATE machine_credentials SET expires_at=? WHERE id=?',new Date(Date.now()+60000).toISOString(),h.credentialID);
+ assert.equal(f.db.get<any>('SELECT secret_encrypted FROM machine_credentials WHERE id=?',h.credentialID)?.secret_encrypted,'');
+ const replacement=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'ssh_key',secret:ssh.privateKey});assert.equal(replacement.status,201);h.credentialID=replacement.data.credential_id;
  c=await f.attach((await f.create(h)).data);await c.connected();f.db.run("UPDATE users SET role='member' WHERE id='admin'");await c.closed('login_expired');
  f.db.run("UPDATE users SET role='admin' WHERE id='admin'");
  c=await f.attach((await f.create(h)).data);await c.connected();await f.request('/auth/logout','POST',{});await c.closed('login_expired');

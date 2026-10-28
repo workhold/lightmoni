@@ -25,6 +25,7 @@ db.run('INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)',hash(
 db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL DEFAULT '')");
 const deps={db,router,auth,encrypt:auth.encrypt,decrypt:auth.decrypt,now:()=>new Date(),externalURL:'',logger:{info(){},warn(){},error(){console.error('Fixture operation failed')}}} as Dependencies;
 const machines=registerManagedMachines(deps),publicDir=resolve('public');
+await machines.start?.();
 for(const [path,value] of Object.entries({'/api/v1/catalog/tables':[],'/api/v1/dashboards':[],'/api/v1/assistant/config':{enabled:false,has_key:false}}))router.get(path,ctx=>ctx.json(value));
 const server=createServer(async(req,res)=>{
  if(await router.handle(req,res))return;
@@ -44,5 +45,5 @@ await request(`/machines/${machine.id}/credentials`,passwordMode?{method:'passwo
 if(passwordMode)router.post('/api/v1/fixtures/password-credential',async ctx=>{deps.auth.requireAdmin(ctx);ctx.json(await request(`/machines/${machine.id}/credentials`,{method:'password',secret:(ssh as Awaited<ReturnType<typeof passwordSSHServer>>).password}));});
 console.log(JSON.stringify({origin,machineID:machine.id}));
 let stopped=false;
-const close=async()=>{if(stopped)return;stopped=true;await terminal.close?.();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));db.close();await rm(dir,{recursive:true,force:true});for(const fn of [...cleanups].reverse())await fn();process.exit(0)};
+const close=async()=>{if(stopped)return;stopped=true;await terminal.close?.();await machines.close?.();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));db.close();await rm(dir,{recursive:true,force:true});for(const fn of [...cleanups].reverse())await fn();process.exit(0)};
 process.on('SIGTERM',()=>void close());process.on('SIGINT',()=>void close());

@@ -1,5 +1,8 @@
 {
   "checked": [
+    "Copying the displayed host address copies address:port rather than the machine ID",
+    "Switching credential methods clears the previous secret before it can be reused or displayed",
+    "Chinese credential hints describe temporary defaults and secret clearing",
     "Connected SSH with missing prerequisites does not propose or install",
     "Pinned host-key failure is explained",
     "Standalone successful SSH preflight",
@@ -8,6 +11,10 @@
     "Deep link reviews and confirms the same persisted plan exactly once",
     "Failed installation refreshes its real status and removes the obsolete approval action",
     "Expired plans cannot be confirmed in the UI",
+    "Host deletion keeps the detail open and surfaces the backend credential guard",
+    "An unexecuted expired plan can be cancelled from history without running SSH",
+    "Successful host deletion closes details and refreshes the empty list",
+    "English credential hints match the same validity and retention behavior",
     "English preflight and saved-plan steps are localized",
     "Assistant tool result links to its exact persisted installation plan",
     "Members cannot load host data or SSH actions"

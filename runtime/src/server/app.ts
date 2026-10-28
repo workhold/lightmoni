@@ -120,6 +120,7 @@ export async function createApp(cfg: Config) {
     // centre state transition. The job module itself never executes commands.
     const agentJobs = registerAgentJobs(deps, { agentCredentials });
     const managedMachines = registerManagedMachines(deps, { agentCredentials });
+    modules.push(managedMachines);
     registerSettings(deps, agentCredentials);
     // Service delivery metadata is intentionally separate from Agent bootstrap
     // records: plans can be reviewed before an Agent executes them.
@@ -149,7 +150,6 @@ export async function createApp(cfg: Config) {
     // Enrollment credentials are a separate migration boundary. Legacy
     // config.key based nodes keep working until they explicitly re-enroll.
     modules.push(agentCredentials);
-    modules.push(managedMachines);
     modules.push(registerDashboards(deps));
     modules.push(registerLogs(deps));
     const alerts = registerAlerts(deps);
