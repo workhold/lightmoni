@@ -1,4 +1,8 @@
 .lm-machines-page .lm-machine-notice{margin-bottom:18px}
 .lm-machines-page .lm-machine-form-notice{margin:10px 0 16px}
+.lm-machine-detail-actions{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-top:20px;padding-top:16px;border-top:1px solid var(--lm-border,#e5e7eb)}
+.lm-machine-detail-actions>div{flex:1}
+.lm-machine-detail-actions .ant-alert{margin-bottom:10px}
 .lm-machines-page .ant-table-cell .ant-typography{display:block;margin-top:3px}
 @media(max-width:640px){.lm-machines-page .lm-page-heading{align-items:flex-start;gap:12px;flex-direction:column}.lm-machines-page .lm-page-heading .ant-space{width:100%}.lm-machines-page .lm-page-heading .ant-btn{flex:1}.lm-machines-page .lm-page-heading .ant-space-item{flex:1}}
+@media(max-width:640px){.lm-machine-detail-actions{align-items:stretch;flex-direction:column}.lm-machine-detail-actions .ant-btn{width:100%}}
