@@ -22,18 +22,18 @@ const bundle={index_sha256:createHash('sha256').update(bundleIndex).digest('hex'
 if(bundleEntry)bundle.entry_sha256=createHash('sha256').update(await readFile(resolve(publicDirectory,'.'+bundleEntry))).digest('hex');
 let browser;try{browser=await chromium.launch({headless:true})}catch{browser=await chromium.launch({headless:true,channel:'chrome'})}
 
-async function harness({signedIn=true,account='alice',saved={},storageMode='normal'}={}){
+async function harness({signedIn=true,account='alice',saved={},storageMode='normal',viewport={width:1280,height:900},navCollapsed='false'}={}){
  const actors={
   alice:{id:'homepage-alice',name:'alice',nickname:'Alice',role:'admin'},
   bob:{id:'homepage-bob',name:'bob',nickname:'Bob',role:'admin'},
   member:{id:'homepage-member',name:'member',nickname:'Member',role:'member'},
  };
  const state={actors,account,signedIn};
- const context=await browser.newContext({viewport:{width:1280,height:900},colorScheme:'dark',reducedMotion:'reduce'});contexts.push(context);
- await context.addInitScript(({saved,storageMode})=>{
+ const context=await browser.newContext({viewport,colorScheme:'dark',reducedMotion:'reduce'});contexts.push(context);
+ await context.addInitScript(({saved,storageMode,navCollapsed})=>{
   const originalGet=Storage.prototype.getItem,originalSet=Storage.prototype.setItem;
   if(!originalGet.call(sessionStorage,'homepage-fixture-initialized')){
-   originalSet.call(localStorage,'lightmoni.nav.collapsed','false');
+   if(navCollapsed!==null)originalSet.call(localStorage,'lightmoni.nav.collapsed',navCollapsed);
    for(const [key,value] of Object.entries(saved))originalSet.call(localStorage,key,value);
    originalSet.call(sessionStorage,'homepage-fixture-initialized','true');
   }
@@ -45,7 +45,7 @@ async function harness({signedIn=true,account='alice',saved={},storageMode='norm
    Storage.prototype.getItem=function(key){if(key.startsWith('lightmoni.homepage.')&&blockReads)throw new Error('fixture readback blocked');return originalGet.call(this,key)};
    Storage.prototype.setItem=function(key,value){originalSet.call(this,key,value);if(key.startsWith('lightmoni.homepage.'))blockReads=true};
   }
- },{saved,storageMode});
+ },{saved,storageMode,navCollapsed});
  const config={base_url:'https://models.example/v1',model:'fixture-model',protocol:'openai-chat-completions',has_key:false,enabled:false,max_input_tokens:32000,max_output_tokens:4096,max_steps:8,reasoning_effort:'default',code_tasks_enabled:false};
  const fixtures={
   '/api/v1/setup':{required:false},'/api/v1/auth/providers':[],
@@ -137,6 +137,28 @@ try{
  for(const title of ['工作台','监控分析','运维工具'])await expect(group(page,title)).toHaveAttribute('aria-expanded','true');
  await expect(group(page,'数据与接入')).toHaveAttribute('aria-expanded','false');await screenshot(page,'navigation-multiple-open-zh-1280');
  mark('independent categories retain multi-open state across routes and whole-sidebar collapse; keyboard and aria controls work');
+
+ const coldMachines=await harness();currentPage=coldMachines.page;await open(coldMachines.page,'/machines');
+ await expect(group(coldMachines.page,'运维工具')).toHaveAttribute('aria-expanded','true');
+ await expect(coldMachines.page.locator('.lm-sidebar').getByRole('link',{name:'主机管理',exact:true})).toBeVisible();
+ for(const title of ['工作台','监控分析','数据与接入','系统设置'])await expect(group(coldMachines.page,title)).toHaveAttribute('aria-expanded','false');
+ mark('a cold Machines deep link opens Operations and leaves the other four categories collapsed');
+
+ const narrowNavigation=await harness({viewport:{width:390,height:844},navCollapsed:null});currentPage=narrowNavigation.page;
+ await open(narrowNavigation.page,'/machines');
+ expect(await narrowNavigation.page.evaluate(()=>localStorage.getItem('lightmoni.nav.collapsed'))).toBeNull();
+ await expect(narrowNavigation.page.locator('.lm-shell')).toHaveClass(/is-nav-collapsed/);
+ await expect(narrowNavigation.page.locator('.lm-nav-group-toggle')).toHaveCount(0);
+ await narrowNavigation.page.getByRole('button',{name:'展开导航',exact:true}).click();
+ await expect(narrowNavigation.page.locator('.lm-shell')).toHaveClass(/is-nav-expanded/);
+ for(const title of ['工作台','监控分析','运维工具','数据与接入','系统设置'])await expect(group(narrowNavigation.page,title)).toBeVisible();
+ await expect(group(narrowNavigation.page,'运维工具')).toHaveAttribute('aria-expanded','true');
+ await group(narrowNavigation.page,'工作台').click();await group(narrowNavigation.page,'监控分析').click();
+ for(const title of ['工作台','监控分析','运维工具'])await expect(group(narrowNavigation.page,title)).toHaveAttribute('aria-expanded','true');
+ for(const title of ['数据与接入','系统设置'])await expect(group(narrowNavigation.page,title)).toHaveAttribute('aria-expanded','false');
+ await screenshot(narrowNavigation.page,'navigation-multiple-open-zh-390');
+ mark('without a saved sidebar preference, narrow screens start collapsed; expanding reveals all five categories and supports independent multi-open drawers');
+ currentPage=page;
 
  await settings(page);await chooseHome(page,'概览');await selectedHome(page,'概览');await expect(page.getByText('默认首页已保存',{exact:true})).toBeVisible();await destination(page,'/settings?tab=appearance&section=homepage');
  expect(await page.evaluate(key=>localStorage.getItem(key),storageKey(state.actors.alice.id))).toBe('/overview');
