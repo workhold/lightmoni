@@ -2,6 +2,8 @@
 
 日期：2026-10-28
 
+交付：[GitHub PR #12](https://github.com/workhold/lightmoni/pull/12)，目标 `main`；创建前已同步远端主干，等待审核合入。
+
 ## 后端与真实 SSH 协议
 
 - `runtime/test/managed-machines.test.ts`：28/28 通过。覆盖临时/托管/一次性 TTL、明确确认与权限、当前密文清空、首清除原因和事件幂等、无页面读取时的 30 秒清理、模块关闭、过期边界、旧 schema 两次重启迁移、密码摘要清理、Agent 激活按主机清理并保留托管、未激活保留临时凭据、清理不误取消运行中部署。

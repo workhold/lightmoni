@@ -5,4 +5,4 @@
 - [x] 前端策略/期限选择、状态及能力提示
 - [x] 隔离 API/生命周期与浏览器验收
 - [x] 仓库与 Doca 设计同步并回读
-- [ ] 同步 main、提交 GitHub PR 和验证结果
+- [x] 同步 main、提交 GitHub PR 和验证结果（[PR #12](https://github.com/workhold/lightmoni/pull/12)）
