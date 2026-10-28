@@ -8,4 +8,4 @@
 - [x] 对 vchive 及线上主机管理进行受控验证并记录实际限制。
 - [x] 同步仓库系统设计和 Doca，回读确认。
 - [x] 同步 GitHub 主干并确认本分支基于最新 main；完成针对性验收。
-- [ ] 提交 GitHub PR（不直接合并，不发布或部署本轮镜像）。
+- [x] 创建 [GitHub PR #13](https://github.com/workhold/lightmoni/pull/13) 等待审核；未直接合并，未发布或部署本轮镜像。

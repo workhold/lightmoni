@@ -40,3 +40,7 @@
 本次改变 Agent 生命周期控制路径及凭据撤销边界，已更新仓库 `docs/system-design.md` 第 13 节和部署说明。Doca 第 13 节 seq 769→771：最终七段逐段 SHA 回读一致，五个原生图块完整 JSON、节点、连线及样式保持一致；无关内容保留。
 
 证据：[doca-sync.json](doca-sync.json)；[Doca 系统设计](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。本轮功能须经 PR 合入、构建发布并部署后才在线上生效；本次没有发布镜像或变更生产 Agent。
+
+## 提交状态
+
+已同步最新 `origin/main`（7872b17），无新增主干提交或冲突；最终只读审查未发现阻塞问题。[GitHub PR #13](https://github.com/workhold/lightmoni/pull/13) 已创建等待审核，未合并。
