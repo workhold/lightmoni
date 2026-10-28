@@ -517,7 +517,7 @@ SSH 是首次接入、临时维护和故障恢复通道。登记流程由连接�
 
 SSH 预检是只读固定命令集合，检查网络、指纹、Linux、架构、systemd、权限、HTTPS 可达性及已有 Agent 安装。私钥或明确选用 temporary/managed 的可复用密码可用于预检、终端、固定身份核验和 Agent 安装/卸载；one_time 密码只用于一次预检或终端，结束即清除，无论成功、失败或取消。密码经 ssh2 内存参数认证，不进入命令行、环境、进程 stdin、模型上下文或原始日志；enrollment token 单独经 SSH exec channel stdin 传递。密码不保存秘密摘要，历史密码指纹启动时清空；同一主机各类 SSH 操作互斥。
 
-预检通过后生成持久化部署计划；管理员明确确认后，后端使用固定安装模板、有效私钥或可复用密码、stdin enrollment token 及版本/架构白名单执行。下载脚本和包需要鉴权，0600 curl 配置暂存 token；不进入 URL、argv、环境、日志或回执。生成计划、执行前和安装锁内拒绝覆盖既有安装。计划绑定主机名称及连接 revision，执行前改名使旧计划失效；固定模板将公开 machine_id/machine_name 写入暂存 Agent 配置，不改 Agent identity.host_id。确认 enrollment 激活后事务绑定 Agent，并清除本机所有 temporary/one_time 秘密，保留有效 managed 凭据。失败但新 enrollment 已激活时，仅撤销本次节点凭据并提示核对，不影响已有节点。日常管理优先走 Agent。
+预检通过后生成持久化部署计划；管理员明确确认后，后端使用固定安装模板、有效私钥或可复用密码、stdin enrollment token 及版本/架构白名单执行。下载脚本和包需要鉴权，0600 curl 配置暂存 token；不进入 URL、argv、环境、日志或回执。生成计划、执行前和安装锁内拒绝覆盖既有安装。计划绑定主机名称及连接 revision，执行前改名使旧计划失效；主机资产与 Agent 身份继续分开管理。确认 enrollment 激活后事务绑定 Agent，并清除本机所有 temporary/one_time 秘密，保留有效 managed 凭据。失败但新 enrollment 已激活时，仅撤销本次节点凭据并提示核对，不影响已有节点。日常管理优先走 Agent。
 
 卸载使用独立的持久化计划和回执。中心固定只读探测核对远端独立身份、主机关联、受管服务及未结束任务；同一节点卸载与任务按 agent_id 跨主机互斥。计划绑定主机名称、地址、端口、用户名、可信指纹、有效私钥或可复用密码、节点身份及 15 分钟预检有效期；目标或授权变化不能复用。网页提供预览、确认、取消和历史，AI 不能绕过确认执行卸载。
 
@@ -560,27 +560,26 @@ flowchart LR
   VIEW --> UI[主机列表 / 实例详情]
 ```
 
-### 13.2 当前分支：登记接入与 SDK 主机变量（SDD 037）
+### 13.2 当前分支：登记接入与平台主机标识（SDD 037）
 
 主界面统一称“主机”，移除“脚本接入节点”按钮，主路径是登记主机、保存所选期限的凭据、SSH 预检、审阅确认后自动安装宿主机 Agent。旧脚本接入路由和 enrollment 协议保留兼容，不因隐藏按钮删除历史 Agent。登记资产本身不执行 SSH 或远端写入。
 
-主机摘要派生公开 sdk_environment：LIGHTMONI_MACHINE_ID 为不可变 managed_machines.id，LIGHTMONI_MACHINE_NAME 为用户设置的名称。Node.js、Python、Go、Rust SDK 从启动环境补充 lightmoni.machine.id/name，显式 resource 优先，空值、控制字符或超长环境值忽略；浏览器不读取进程环境。变量只是遥测归属声明，不是密钥或物理位置证明，不授予 Agent/SSH 执行权限。
+平台通过 managed_machines.id 和 name 标识主机资产。ID 在登记时由中心自动生成，作为不可变主键；名称由用户填写和修改，是展示名称而非唯一键。同名主机通过不同 ID 区分，改名不改变资产 ID、凭据归属或已有 Agent 关联，界面详情保留稳定 ID 供核对。
 
-页面提供可复制的安全引用环境配置。用户需要将其传入业务 systemd、Compose 或 Kubernetes 启动环境并重启/重建进程；登记数据库不会改变远端已有进程。当前业务部署适配器尚无自动修改 unit 环境的动作，本轮不声称替用户完成该注入。改名后的配置只作用于后续加载，不反向修改历史遥测。
+本轮不创建或展示 SDK 主机环境变量，不扩展 SDK 读取能力，不在安装参数、Agent 配置或 SDK 遥测中注入平台资产 ID/名称。SDK 与 Agent 各自独立上报的既有路径保持；主机与 Agent 的绑定继续走已认证身份和现有受管关联流程。
 
-平台固定 Agent 安装流程将同一主机 ID/名称保存至暂存配置并校验，再发布安装；Agent 自用公共 SDK 附相同元信息，独立 agent_id/host_id 及 control/data 身份保持不变。此增量不包含 SDD 036 的完整 SDK 归属表、显式绑定和双时间心跳汇总；这些仍是目标设计。
+SDD 036 的完整 SDK 归属表、显式绑定和双时间心跳汇总仍是目标设计。当前仅完成平台内主机身份、凭据有效期和登记安装主路径，不从主机名称、地址或 SDK 声明自动认定归属。
 
 ```mermaid
 flowchart LR
-  REG[管理员登记主机] --> META[中心资产 ID / 用户名称]
+  REG[管理员登记主机] --> META[平台自动生成 ID / 用户填写名称]
   REG --> CREDS[所选期限的加密 SSH 凭据]
+  META --> RECORD[平台主机资产记录]
   CREDS --> APPROVE[预检 / 审阅确认]
   APPROVE --> AG[固定安装 Agent]
-  META --> AG
-  META --> ENV[业务启动环境配置]
-  ENV --> SDK[公共 SDK]
-  AG --> CENTER[中心平台]
-  SDK -->|独立直报| CENTER
+  AG --> LINK[已认证 Agent 关联]
+  RECORD --> LINK
+  LINK --> CENTER[中心平台管理]
 ```
 
 ## 14. AI 助手设计

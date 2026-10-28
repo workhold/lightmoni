@@ -103,10 +103,6 @@ export class Agent {
         service: "lightmoni-agent",
         table: "host",
         instanceId: this.identity.agent_id,
-        resource: {
-          ...(config.machine_id ? { "lightmoni.machine.id": config.machine_id } : {}),
-          ...(config.machine_name ? { "lightmoni.machine.name": config.machine_name } : {}),
-        },
         selfTelemetry: false,
         // Telemetry and SDK configuration use the data audience. The legacy
         // key remains a compatibility fallback for nodes before enrollment.

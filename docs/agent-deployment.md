@@ -197,8 +197,8 @@ rm -f /tmp/lightmoni-agent-install.sh
 
 容器场景有两种边界：只做 OTLP 转发时可以用独立 sidecar/DaemonSet；要采集宿主指标、进程或目录日志，优先把 Agent 安装在宿主机，或明确挂载目录、网络和 namespace。Agent 不应作为业务容器的默认生命周期依赖，也不应默认要求 privileged 或 Docker socket。
 
-## SDK 主机变量
+## 平台主机标识
 
-登记主机后，在详情复制 `LIGHTMONI_MACHINE_ID` 和 `LIGHTMONI_MACHINE_NAME`，传入业务进程的启动环境。SDK 自动将它们作为 `lightmoni.machine.id/name` 资源属性上报；显式 resource 对应属性优先。主机 ID 是公开资产标识，不是认证凭据，不替代 SDK Key，也不自动证明物理位置。
+平台在登记时自动生成不可变主机 ID，由用户设置主机名称。名称可修改，同名资产以 ID 区分；详情展示 ID 供核对。主机资产 ID 与 Agent 自身身份分开，通过现有经认证的受管关联连接。
 
-现有业务需在 systemd 的 Environment/EnvironmentFile、Compose 的 environment/env_file 或 Kubernetes 的 env 中配置，再重启/重建进程。平台不会因登记主机自动改写已运行服务环境。平台自动安装的 Agent 自身会使用相同主机元信息打点，保留独立 Agent 身份。
+当前不为业务或 Agent 创建主机 ID/名称环境变量，也不新增 SDK 读取能力。SDK 保持独立直报；登记主机不修改已有业务启动环境。

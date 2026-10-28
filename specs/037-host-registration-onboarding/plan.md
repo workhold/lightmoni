@@ -6,8 +6,6 @@
 
 部署/卸载能力使用可复用凭据数量（私钥或 retention 为 temporary/managed 的密码）；不以一次性密码数量开启。固定 SSH 执行器可用 ssh2 password 认证，密码仅放内存连接参数，enrollment token 经 exec channel stdin 传递；无 token/password argv、环境或日志。安装计划、指纹、目标版本、超时与审计守卫保持。
 
-主机摘要新增公开 `sdk_environment`，从既有 id/name 派生，无需新增主机身份。名称拒绝控制字符，shell 配置严格引用；用户自定义 Unicode 名称保留。Node/Python/Go/Rust SDK 仅从启动环境补充缺失的 resource 属性；不读取未知路径或扫描 Agent。Node 入口处理环境，browser 入口不访问 process。无变量保持兼容；变量不作为认证。
+主机身份继续使用既有 `managed_machines.id/name`：POST 由中心生成不可变 ID，用户填写名称；PUT 只修改允许的描述及连接字段，不接受用户指定或修改 ID。同名资产允许存在，以 ID 区分，名称拒绝控制字符。列表和详情继续展示名称和稳定 ID。SDK、Agent 配置及安装器恢复此前契约，不生成 SDK 环境摘要、不写入主机环境、不新增读取逻辑。平台与 Agent 的关联继续使用已有经认证的 `agent_id` 关系。
 
-固定安装器新增可选 machine-id / machine-name 元信息参数，传入 Agent 配置并在 Agent 自用 SDK 中附相同声明。部署的 Agent 仍使用自身持久 agent_id / host_id 和独立 control/data 凭据。环境配置需用户注入业务 systemd/Compose/K8s 启动环境后重启，不自动修改运行中业务、系统主机名或全局环境。
-
-本轮同时更新系统设计与 Doca 并回读。036 目标设计与本增量分别标识：036 的显式绑定及汇总未实现，本增量只提供声明变量、限时凭据和登记安装主路径。
+本轮同时更新系统设计与 Doca 并回读。036 目标设计与本增量分别标识：036 的显式绑定及汇总未实现，本增量只提供平台资产 ID/名称、限时凭据和登记安装主路径。

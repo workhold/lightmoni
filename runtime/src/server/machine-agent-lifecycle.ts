@@ -65,11 +65,7 @@ ${observation}`);
 }
 
 /** Token arrives only through SSH stdin. curl's credential file is mode 0600. */
-export function agentBootstrapCommand(endpoint: string, version: string, machine?: { machine_id: string; machine_name: string }) {
-  if (machine && (!/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(machine.machine_id) ||
-    !machine.machine_name.trim() || Buffer.byteLength(machine.machine_name) > 128 || /[\u0000-\u001f\u007f-\u009f]/.test(machine.machine_name)))
-    throw Error("invalid machine metadata");
-  const metadata = machine ? ` --machine-id ${quote(machine.machine_id)} --machine-name ${quote(machine.machine_name)}` : "";
+export function agentBootstrapCommand(endpoint: string, version: string) {
   const script = `set -eu
 ${freshAgentGuard}
 umask 077
@@ -81,6 +77,6 @@ trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 printf 'header = "Authorization: Bearer %s"\\n' "$enrollment_token" > "$tmp_dir/curl.conf"
 curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 120 --config "$tmp_dir/curl.conf" -o "$tmp_dir/install.sh" ${quote(endpoint.replace(/\/$/, "") + "/downloads/agent/install.sh")}
 chmod 700 "$tmp_dir/install.sh"
-printf '%s\\n' "$enrollment_token" | sh "$tmp_dir/install.sh" --fresh --endpoint ${quote(endpoint)} --version ${quote(version)} --enrollment-token-stdin${metadata}`;
+printf '%s\\n' "$enrollment_token" | sh "$tmp_dir/install.sh" --fresh --endpoint ${quote(endpoint)} --version ${quote(version)} --enrollment-token-stdin`;
   return privileged(script);
 }

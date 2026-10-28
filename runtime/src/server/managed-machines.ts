@@ -118,7 +118,6 @@ export interface MachineSummary {
   active_ssh_credential_count: number;
   active_ssh_key_count: number;
   active_reusable_ssh_credential_count: number;
-  sdk_environment: { LIGHTMONI_MACHINE_ID: string; LIGHTMONI_MACHINE_NAME: string };
   ssh_recovery_available: boolean;
   capabilities: { terminal: MachineCapability; ssh_check: MachineCapability; deploy_agent: MachineCapability; uninstall_agent: MachineCapability };
   last_deployment_status: DeploymentStatus | "";
@@ -353,7 +352,6 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       active_credential_count: Number(value.active_credential_count ?? 0),
       active_ssh_credential_count: activeSSH, active_ssh_key_count: activeKeys,
       active_reusable_ssh_credential_count: reusableSSH,
-      sdk_environment: { LIGHTMONI_MACHINE_ID: value.id, LIGHTMONI_MACHINE_NAME: value.name },
       ssh_recovery_available: value.connection_method === "direct_ssh" && Boolean(value.host_key_fingerprint) && activeSSH > 0,
       capabilities: { terminal: capability(), ssh_check: capability(), deploy_agent: deployCapability, uninstall_agent: uninstallCapability },
       last_deployment_status: value.last_deployment_status || "", last_uninstallation_status: value.last_uninstallation_status || "", updated_at: value.updated_at, created_at: value.created_at,
@@ -397,6 +395,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     return value;
   };
   const validateMachine = (input: Record<string, any>, existing?: any) => {
+    if (Object.hasOwn(input, "id")) fail(400, "主机 ID 由平台自动生成，不能指定或修改");
     const name = text(input.name ?? existing?.name, "name", 128);
     if (/[\u0000-\u001f\u007f-\u009f]/.test(input.name ?? existing?.name)) fail(400, "主机名称不能包含控制字符");
     const address = safeAddress(input.address ?? existing?.address);
@@ -659,7 +658,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       credential: { id: credential.id, method: credential.method, retention: credential.retention, expires_at: credential.expires_at },
       check_id: check.id, target_revision: targetRevision(machine), preflight: check,
       version, arch, initial_label_id: text(input.initial_label_id ?? "", "initial_label_id", 128, false), expires_at: check.expires_at,
-      steps: ["确认主机公钥指纹", "建立受限 SSH 连接", "下载固定版本 Agent 并校验 SHA256", "通过 stdin 注入一次性 enrollment token", "传入公开主机 ID 和用户设置的主机名称", "安装独立 systemd Agent", "等待 Agent 激活回执"],
+      steps: ["确认主机公钥指纹", "建立受限 SSH 连接", "下载固定版本 Agent 并校验 SHA256", "通过 stdin 注入一次性 enrollment token", "安装独立 systemd Agent", "等待 Agent 激活回执"],
       warnings: ["AI 不会读取或发送 SSH 秘密。", "用户确认后才执行固定部署流程。", "SSH 密码建议只使用一次，不要长期保存。", "Agent 激活后日常操作优先使用 Agent 通道。"],
     };
     db.run(`INSERT INTO machine_deployments(id,machine_id,credential_id,status,version,arch,initial_label_id,plan_json,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`,
@@ -704,7 +703,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       if (!fresh.ready || fresh.agent_installation.state !== "absent" || get(machine.id).agent_id) fail(409, "发现已有 Agent 或安装条件已变化，未签发新身份");
       ensureCredential(machine.id, credential.id); checked(get(machine.id), savedPlan.check_id, credential.id);
       enrollment = options.agentCredentials.issueEnrollment({ endpoint_origin: deps.externalURL, version: deployment.version, allowed_arch: [deployment.arch], initial_label_id: deployment.initial_label_id, created_by: ctx.user.id });
-      const command = agentBootstrapCommand(deps.externalURL.replace(/\/$/, ""), deployment.version, { machine_id: machine.id, machine_name: machine.name });
+      const command = agentBootstrapCommand(deps.externalURL.replace(/\/$/, ""), deployment.version);
       const result = await (options.sshRunner ?? defaultSSHRunner)({ machine, privateKey, ...(password ? { password } : {}), command, enrollmentToken: enrollment.token_display_once, signal: ctx.signal, port: machine.port });
       const status = options.agentCredentials.enrollmentStatus(enrollment.enrollment_id);
       if (!status || status.status !== "active" || !status.agent_id) throw Error("Agent 未完成激活回执");

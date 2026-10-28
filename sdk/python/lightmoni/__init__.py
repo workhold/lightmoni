@@ -437,18 +437,6 @@ class Client:
         endpoint = os.environ.get("LIGHTMONI_ENDPOINT", "http://127.0.0.1:4318") if endpoint is None else endpoint
         key = os.environ.get("LIGHTMONI_KEY", "") if key is None else key
         resource = dict(resource or {})
-        # Public telemetry declarations, never credentials or host authorization.
-        for variable, attribute, max_bytes in (
-            ('LIGHTMONI_MACHINE_ID', 'lightmoni.machine.id', 64),
-            ('LIGHTMONI_MACHINE_NAME', 'lightmoni.machine.name', 128),
-        ):
-            value = os.environ.get(variable, '')
-            try:
-                valid = bool(value.strip()) and len(value.encode('utf-8')) <= max_bytes and not any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value)
-            except UnicodeEncodeError:
-                valid = False
-            if attribute not in resource and valid:
-                resource[attribute] = value
         for value in (env, service_version):
             if value is not None and (not isinstance(value, str) or not value.strip() or len(value.encode()) > 128):
                 raise ValueError("invalid resource identity")

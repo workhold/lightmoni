@@ -69,13 +69,19 @@ test('password credential preserves intentional leading/trailing whitespace duri
  const checked=await f.request(`/machines/${created.data.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(checked.status,200,checked.raw);assert.equal(received,original);
 });
 
-test('registration publishes stable SDK machine variables and rejects control characters in names',async t=>{
+test('registration assigns immutable platform IDs while user names remain editable and need not be unique',async t=>{
  const f=await fixture(t),name="生产主机 'one' $(printf ignored)";
  const created=await f.request('/machines','POST',{name,address:'host.example.com',username:'deploy'});assert.equal(created.status,201,created.raw);
- const mid=created.data.id,expected={LIGHTMONI_MACHINE_ID:mid,LIGHTMONI_MACHINE_NAME:name};
- assert.deepEqual(created.data.sdk_environment,expected);assert.deepEqual(f.machines.get(mid).sdk_environment,expected);
- assert.deepEqual((await f.request('/machines')).data[0].sdk_environment,expected);
- const renamed=await f.request(`/machines/${mid}`,'PUT',{name:'新名称'});assert.equal(renamed.status,200,renamed.raw);assert.deepEqual(renamed.data.sdk_environment,{...expected,LIGHTMONI_MACHINE_NAME:'新名称'});
+ const mid=created.data.id;assert.match(mid,/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/);assert.equal(created.data.name,name);assert.equal(f.machines.get(mid).name,name);
+ assert.equal(Object.hasOwn(created.data,'sdk_environment'),false);assert.equal(Object.hasOwn(f.machines.get(mid),'sdk_environment'),false);
+ const sameName=await f.request('/machines','POST',{name,address:'other.example.com',username:'deploy'});assert.equal(sameName.status,201,sameName.raw);assert.equal(sameName.data.name,name);assert.notEqual(sameName.data.id,mid);
+ const listed=await f.request('/machines');assert.equal(listed.status,200);assert.deepEqual(new Set(listed.data.map((machine:any)=>machine.id)),new Set([mid,sameName.data.id]));assert.ok(listed.data.every((machine:any)=>!Object.hasOwn(machine,'sdk_environment')));
+ const renamed=await f.request(`/machines/${mid}`,'PUT',{name:'新名称'});assert.equal(renamed.status,200,renamed.raw);assert.equal(renamed.data.id,mid);assert.equal(renamed.data.name,'新名称');assert.equal(f.machines.get(sameName.data.id).name,name);
+ for(const requestedID of ['user-selected-id',mid,null]) {
+  assert.equal((await f.request('/machines','POST',{id:requestedID,name:'manual-id',address:'manual.example.com',username:'deploy'})).status,400);
+  assert.equal((await f.request(`/machines/${mid}`,'PUT',{id:requestedID,name:'ignored-new-name'})).status,400);
+ }
+ assert.equal(f.machines.get(mid).id,mid);assert.equal(f.machines.get(mid).name,'新名称');
  for(const bad of ['line\nbreak','\tleading','trailing\r','control\u0000','delete\u007f','c1\u0085']) {
   assert.equal((await f.request('/machines','POST',{name:bad,address:'other.example.com',username:'deploy'})).status,400,JSON.stringify(bad));
   assert.equal((await f.request(`/machines/${mid}`,'PUT',{name:bad})).status,400,JSON.stringify(bad));
@@ -109,7 +115,7 @@ test('reusable password installs through the fixed approved plan, redacts secret
   assert.equal((await f.request(`/machines/${mid}/deployments/${plan.data.id}/apply`,'POST',{confirm:false})).status,400);
   const applied=await f.request(`/machines/${mid}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,200,applied.raw);assert.equal(applied.data.status,'succeeded');
   const installed=calls.find(c=>c.enrollmentToken);assert.equal(installed.password,secret);assert.equal(installed.privateKey,'');assert.equal(installed.enrollmentToken,'lm_enroll_secret');assert.ok(!installed.command.includes(secret));assert.ok(!installed.command.includes(installed.enrollmentToken));
-  assert.ok(installed.command.includes(mid));assert.ok(!applied.raw.includes(secret));assert.ok(!applied.raw.includes('lm_enroll_secret'));assert.equal(f.machines.get(mid).agent_id,'agent-1');
+  assert.ok(!installed.command.includes(mid));assert.ok(!installed.command.includes('--machine-id'));assert.ok(!installed.command.includes('--machine-name'));assert.ok(!applied.raw.includes(secret));assert.ok(!applied.raw.includes('lm_enroll_secret'));assert.equal(f.machines.get(mid).agent_id,'agent-1');
   const stored=credentialRow(f,cid);assert.equal(stored.secret_fingerprint,'');if(retention==='temporary'){assert.equal(stored.secret_encrypted,'');assert.equal(stored.clear_reason,'agent_activated')}else{assert.notEqual(stored.secret_encrypted,'');assert.equal(stored.clear_reason,'')}
  }
 });
