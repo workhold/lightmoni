@@ -1,0 +1,102 @@
+{
+  "scope": "Local Colima Linux arm64 VM; actual systemd and isolated synthetic offline Agent; no production endpoints or credentials",
+  "passed": true,
+  "checks": [
+    {
+      "check": "VM had no Agent paths, service user, or group before this fixture",
+      "passed": true,
+      "environment": [
+        "running",
+        "Linux aarch64",
+        "255.4-1ubuntu8.15"
+      ]
+    },
+    {
+      "check": "Published arm64 artifact matches SHA256SUMS extracted from tested local release image",
+      "passed": true,
+      "sha256": "dd95c82c0ce094c361165fbc24c69076c876cad411f67bfe9752ae2ca57b5587",
+      "artifact": "lightmoni-agent_0.1.0_linux_arm64.tar.gz"
+    },
+    {
+      "check": "Current offline installer starts the actual systemd service",
+      "passed": true,
+      "systemd": [
+        "NRestarts=0",
+        "User=lightmoni-agent",
+        "Group=lightmoni-agent",
+        "ActiveState=active",
+        "SubState=running"
+      ]
+    },
+    {
+      "check": "Agent accepts a synthetic OTLP batch into its real persistent queue",
+      "passed": true,
+      "status": {
+        "agent_id": "643bd296-e304-4a20-a9ac-e5c756c6e4fe",
+        "host_id": "85e56dc0-95e7-4ca0-865b-730916a599ca",
+        "queue_batches": 1,
+        "version": "0.1.0",
+        "platform": "linux",
+        "arch": "arm64"
+      }
+    },
+    {
+      "check": "Fixed identity probe observes the real managed running service",
+      "passed": true,
+      "observation": {
+        "LMAGENT": "1",
+        "agent_id": "643bd296-e304-4a20-a9ac-e5c756c6e4fe",
+        "installation": "present",
+        "program_complete": "1",
+        "unit_managed": "1",
+        "service_running": "1",
+        "lifecycle_locked": "0",
+        "operation_lock": "0",
+        "data_retained": "1"
+      }
+    },
+    {
+      "check": "Fixed uninstaller removes actual systemd service/runtime and verifies retained identity",
+      "passed": true,
+      "observation": {
+        "LMAGENT": "1",
+        "agent_id": "643bd296-e304-4a20-a9ac-e5c756c6e4fe",
+        "installation": "absent",
+        "program_complete": "0",
+        "unit_managed": "1",
+        "service_running": "0",
+        "lifecycle_locked": "0",
+        "operation_lock": "0",
+        "data_retained": "1"
+      }
+    },
+    {
+      "check": "Accepted cached telemetry, exact configuration and identity survive removal",
+      "passed": true,
+      "evidence": {
+        "removed_paths_absent": true,
+        "retained_file_sha256": {
+          "/etc/lightmoni-agent/config.json": "cc4dce050d997b6f4a22a41f203caa3ca2628c2c135cbe49446e59213d49a13c",
+          "/var/lib/lightmoni-agent/identity.json": "1c15c9bf0f09a64ac83d77b6de2a4100775cf725647005846161ea07f62a40cb"
+        },
+        "queue_batches": 1,
+        "pending_batches": 1,
+        "service_user_retained": true,
+        "unit_load_state": "not-found"
+      }
+    },
+    {
+      "check": "Independent read-only probe confirms the removed state",
+      "passed": true
+    }
+  ],
+  "cleanup": {
+    "synthetic_vm_files_user_service_removed": true,
+    "colima_profile_stopped": true
+  },
+  "limitations": [
+    "No enrollment or platform credential revocation is exercised; synthetic endpoint is loopback port 9.",
+    "Uses the previously published 0.1.0 arm64 runtime package with current installer/lifecycle scripts."
+  ],
+  "installer_sha256": "5e73443549f5666c9b7ad2ba223dac16ba5b72c2a8887375dbbd4548fe7bd8b3"
+}

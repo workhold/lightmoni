@@ -11,7 +11,7 @@ import {monitoringTools} from '../src/assistant/tools.js';
 import {SSHError} from '../src/server/machine-ssh.js';
 import type {Dependencies} from '../src/shared/types.js';
 
-const checkOutput='LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\n';
+const checkOutput='LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n';
 const master=Buffer.alloc(32,9), now=new Date('2026-10-19T00:00:00.000Z');
 async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverride?:SSHRunner){
  const db=new DB(':memory:'), router=new Router(), encryption=cipher(master), user={id:'admin',name:'Admin',role:'admin'};
@@ -418,4 +418,97 @@ test('expiry clears database secrets but leaves a bounded running install intact
  clock=new Date(now.getTime()+60_000);t.mock.timers.tick(30_000);
  assert.equal(credentialRow(f,h.credential).secret_encrypted,'');assert.equal(credentialRow(f,h.credential).clear_reason,'expired');assert.equal(f.db.get<any>('SELECT status FROM machine_deployments WHERE id=?',running.data.id)?.status,'running');assert.equal(f.db.get<any>('SELECT status FROM machine_deployments WHERE id=?',pending.data.id)?.status,'cancelled');assert.equal(f.machines.get(h.id).capabilities.deploy_agent.reason,'host_busy');
  finish();const completed=await application;assert.equal(completed.status,200,completed.raw);assert.equal(f.db.get<any>('SELECT status FROM machine_deployments WHERE id=?',running.data.id)?.status,'succeeded');assert.equal(credentialRow(f,h.credential).clear_reason,'expired');
+});
+
+const probeOutput=(agentID='node-known',removed=false,options:{running?:boolean;lock?:boolean;complete?:boolean;managed?:boolean}={})=>`LMAGENT=1\nagent_id=${agentID}\ninstallation=${removed?'absent':'present'}\nprogram_complete=${options.complete??!removed?1:0}\nunit_managed=${options.managed===false?0:1}\nservice_running=${options.running??!removed?1:0}\nlifecycle_locked=${options.lock?1:0}\noperation_lock=0\ndata_retained=1\n`;
+async function uninstallHost(f:Awaited<ReturnType<typeof fixture>>,linked=true){
+ const h=await host(f,'uninstall-'+Math.random().toString(36).slice(2));
+ f.db.exec("CREATE TABLE IF NOT EXISTS agent_credentials(id TEXT PRIMARY KEY,agent_id TEXT,audience TEXT,revoked_at TEXT,revoke_reason TEXT DEFAULT '')");
+ f.db.run("INSERT INTO agent_credentials(id,agent_id,audience) VALUES(?,?,?)",'node-control','node-known','control');
+ f.db.run("INSERT INTO agent_credentials(id,agent_id,audience) VALUES(?,?,?)",'node-data','node-known','data');
+ if(linked)f.db.run("UPDATE managed_machines SET agent_id='node-known' WHERE id=?",h.id);
+ const check=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential});assert.equal(check.status,200,check.raw);
+ return {...h,check:check.data.id};
+}
+const uninstallPlan=(f:Awaited<ReturnType<typeof fixture>>,h:{id:string;credential:string;check:string})=>f.request(`/machines/${h.id}/uninstallations/plan`,'POST',{check_id:h.check,credential_id:h.credential});
+
+test('fixed uninstall plan is reviewed, preserves data, revokes both node credentials and retains history',async t=>{
+ let removed=false, destructive=0;const f=await fixture(t,{},async input=>{
+  if(input.command.includes('systemctl stop')){destructive++;removed=true;return {stdout:probeOutput('node-known',removed),stderr:'',stages:[]};}
+  return {stdout:input.command.includes('LMAGENT')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};
+ });
+ const h=await uninstallHost(f),planned=await uninstallPlan(f,h);assert.equal(planned.status,201,planned.raw);assert.equal(destructive,0);assert.equal(planned.data.plan.agent_id,'node-known');
+ assert.equal((await f.request(`/machines/${h.id}`,'PUT',{name:'blocked'})).status,409);
+ assert.equal((await f.request(`/machines/${h.id}`,'DELETE')).status,409);
+ assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{})).status,400);
+ const result=await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,200,result.raw);assert.equal(result.data.status,'succeeded');assert.equal(result.data.receipt.revoked_credentials,2);assert.equal(result.data.receipt.data_retained,true);assert.equal(destructive,1);
+ assert.equal(f.db.all<any>("SELECT * FROM agent_credentials WHERE revoked_at IS NOT NULL").length,2);
+ const detail=await f.request(`/machines/${h.id}`);assert.equal(detail.data.machine.agent_status,'uninstalled');assert.equal(detail.data.uninstallations.length,1);
+ assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true})).status,409);assert.equal(destructive,1);
+});
+
+test('unbound host must prove registered remote node and cannot uninstall a different or busy node',async t=>{
+ let observed='node-known';const f=await fixture(t,{},async input=>({stdout:input.command.includes('LMAGENT')?probeOutput(observed):checkOutput,stderr:'',stages:[]}));
+ const h=await uninstallHost(f,false);observed='unregistered';assert.equal((await uninstallPlan(f,h)).status,409);
+ observed='node-known';const good=await uninstallPlan(f,h);assert.equal(good.status,201,good.raw);assert.equal(f.machines.get(h.id).agent_id,'');
+ await f.request(`/machines/${h.id}/uninstallations/${good.data.id}/cancel`,'POST',{});
+ f.db.exec("CREATE TABLE agent_jobs(id TEXT,agent_id TEXT,state TEXT)");
+ for(const state of ['queued','leased','accepted','preflighting','staging','activating','verifying','unknown']){
+  f.db.run('INSERT INTO agent_jobs VALUES(?,?,?)','job','node-known',state);assert.equal((await uninstallPlan(f,h)).status,409,state);f.db.run('DELETE FROM agent_jobs');
+ }
+ f.db.run("UPDATE managed_machines SET agent_id='different-agent' WHERE id=?",h.id);assert.equal((await uninstallPlan(f,h)).status,409);
+});
+
+test('unknown uninstall never blindly retries and read-only reconcile can complete actual removal',async t=>{
+ let removed=false,destructive=0;const f=await fixture(t,{},async input=>{
+  if(input.command.includes('systemctl stop')){destructive++;removed=true;throw new SSHError('timed_out');}
+  return {stdout:input.command.includes('LMAGENT')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};
+ });
+ const h=await uninstallHost(f),planned=await uninstallPlan(f,h);
+ const apply=()=>f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true});
+ assert.equal((await apply()).status,502);assert.equal(f.db.get<any>('SELECT status FROM machine_uninstallations WHERE id=?',planned.data.id)?.status,'unknown');
+ assert.equal(f.db.all('SELECT id FROM agent_credentials WHERE revoked_at IS NOT NULL').length,0);
+ assert.equal((await apply()).status,409);assert.equal((await uninstallPlan(f,h)).status,409);assert.equal(destructive,1);
+ const reconciled=await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/reconcile`,'POST',{});assert.equal(reconciled.status,200,reconciled.raw);assert.equal(reconciled.data.status,'succeeded');assert.equal(destructive,1);
+});
+
+test('reconcile fails closed on lock or partial state and can release a verified unchanged running node',async t=>{
+ let state:{removed:boolean;running:boolean;lock:boolean;complete:boolean}={removed:false,running:true,lock:false,complete:true};
+ const f=await fixture(t,{},async input=>{
+  if(input.command.includes('systemctl stop'))throw new SSHError('timed_out');
+  return {stdout:input.command.includes('LMAGENT')?probeOutput('node-known',state.removed,state):checkOutput,stderr:'',stages:[]};
+ });
+ const h=await uninstallHost(f),planned=await uninstallPlan(f,h);
+ await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true});
+ const reconcile=()=>f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/reconcile`,'POST',{});
+ state.lock=true;assert.equal((await reconcile()).status,409);state.lock=false;state.complete=false;state.running=false;assert.equal((await reconcile()).status,409);
+ state.complete=true;state.running=true;const restored=await reconcile();assert.equal(restored.status,200,restored.raw);assert.equal(restored.data.status,'failed');assert.equal(restored.data.receipt.credentials_revoked,false);
+ assert.equal(f.db.all('SELECT id FROM agent_credentials WHERE revoked_at IS NOT NULL').length,0);
+ assert.equal((await uninstallPlan(f,h)).status,201);
+});
+
+test('uninstall rejects members, changed identities, expired plans and revoked keys without destructive calls',async t=>{
+ let clock=now,observed='node-known',destructive=0;const f=await fixture(t,{now:()=>clock},async input=>{if(input.command.includes('systemctl stop'))destructive++;return {stdout:input.command.includes('LMAGENT')?probeOutput(observed):checkOutput,stderr:'',stages:[]};});
+ const h=await uninstallHost(f);f.user.role='member';assert.equal((await uninstallPlan(f,h)).status,403);f.user.role='admin';
+ const planned=await uninstallPlan(f,h);observed='other-node';assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true})).status,409);assert.equal(destructive,0);observed='node-known';
+ const planned2=await uninstallPlan(f,h);clock=new Date(now.getTime()+900001);assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned2.data.id}/apply`,'POST',{confirm:true})).status,409);assert.equal(destructive,0);
+ clock=now;await f.request(`/machines/${h.id}/uninstallations/${planned2.data.id}/cancel`,'POST',{});const planned3=await uninstallPlan(f,h);await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ assert.equal(f.db.get<any>('SELECT status FROM machine_uninstallations WHERE id=?',planned3.data.id)?.status,'cancelled');assert.equal(destructive,0);
+});
+
+test('fresh installation cannot replace discovered or newly appeared Agent before signing enrollment',async t=>{
+ let present=true;const f=await fixture(t,{},async()=>({stdout:present?checkOutput.replace('agent_installation=absent','agent_installation=present'):checkOutput,stderr:'',stages:[]}));
+ const h=await host(f,'fresh-guard');let check=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});assert.equal(check.data.agent_installation.state,'present');
+ assert.equal((await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:check.data.id,version:'0.1.0',arch:'amd64'})).status,409);
+ present=false;check=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});const planned=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:check.data.id,version:'0.1.0',arch:'amd64'});assert.equal(planned.status,201,planned.raw);
+ present=true;assert.equal((await f.request(`/machines/${h.id}/deployments/${planned.data.id}/apply`,'POST',{confirm:true})).status,502);assert.equal(f.issued,undefined);
+});
+
+test('failed post-activation installation revokes only the new enrollment identity',async t=>{
+ const f=await fixture(t,{},async input=>{if(input.enrollmentToken)throw new SSHError('timed_out');return {stdout:checkOutput,stderr:'',stages:[]};}),h=await host(f,'failed-activated');
+ f.db.exec("CREATE TABLE agent_enrollments(id TEXT PRIMARY KEY,agent_id TEXT); CREATE TABLE agent_credentials(id TEXT PRIMARY KEY,agent_id TEXT,revoked_at TEXT,revoke_reason TEXT)");
+ f.db.run("INSERT INTO agent_enrollments VALUES('enroll-1','agent-1')");f.db.run("INSERT INTO agent_credentials VALUES('new','agent-1',NULL,'')");f.db.run("INSERT INTO agent_credentials VALUES('old','old-agent',NULL,'')");
+ const check=await f.request(`/machines/${h.id}/ssh-check`,'POST',{}),plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:check.data.id,version:'0.1.0',arch:'amd64'});
+ const result=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,502,result.raw);assert.match(result.raw,/核对远端/);
+ assert.ok(f.db.get<any>("SELECT revoked_at FROM agent_credentials WHERE id='new'")?.revoked_at);assert.equal(f.db.get<any>("SELECT revoked_at FROM agent_credentials WHERE id='old'")?.revoked_at,null);
 });

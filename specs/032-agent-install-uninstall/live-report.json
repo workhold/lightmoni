@@ -1,0 +1,160 @@
+{
+  "target": "https://moni.heyphp.com",
+  "checks": [
+    {
+      "check": "temporary credential registered",
+      "passed": true
+    },
+    {
+      "check": "SSH action enabled with valid temporary key",
+      "passed": true
+    },
+    {
+      "check": "platform real SSH preflight using forced read-only key",
+      "passed": true
+    },
+    {
+      "check": "existing Agent heartbeat preserved",
+      "passed": true
+    },
+    {
+      "check": "existing Agent metrics actually present within five minutes",
+      "passed": true
+    },
+    {
+      "check": "existing Agent queue and quarantine empty",
+      "passed": true
+    }
+  ],
+  "agent_installation_executed": false,
+  "existing_agent_replaced": false,
+  "machine": {
+    "id": "8f6f6f7c1a3391fa",
+    "name": "vchive",
+    "agent_id": "",
+    "agent_status": "unknown",
+    "active_ssh_credential_count": 0
+  },
+  "agent_before": {
+    "id": "d745d58ca953d5d4a6eb3785f7bded69",
+    "version": "0.1.0",
+    "platform": "linux",
+    "arch": "amd64",
+    "last_seen": "2026-10-28T11:41:13.156Z",
+    "heartbeat": {
+      "queue_batches": 0,
+      "queue_bytes": 0,
+      "quarantine_batches": 0,
+      "last_success_at": "2026-10-28T11:41:12.17Z",
+      "config_revision": "7395b25fb356580051a9b34035efcbb95ff036866a9c486b2237531e57d22d03",
+      "collectors_status": {
+        "file_logs": "disabled",
+        "cpu": "ok",
+        "memory": "ok",
+        "system": "ok",
+        "filesystem": "ok",
+        "disk": "ok",
+        "network": "ok"
+      }
+    }
+  },
+  "host_tables": [
+    "metric_host_gauge",
+    "metric_host_sum"
+  ],
+  "host_telemetry_query": {
+    "request_id": "69fbf30c81ab92e661f216e60a43af4b",
+    "results": [
+      {
+        "refId": "A",
+        "status": "success",
+        "frames": [
+          {
+            "columns": [
+              {
+                "name": "samples",
+                "type": "UInt64",
+                "nullable": false
+              },
+              {
+                "name": "latest",
+                "type": "DateTime64(9, 'UTC')",
+                "nullable": false
+              }
+            ],
+            "rows": [
+              [
+                "342",
+                "2026-10-28T11:41:01.872000000Z"
+              ]
+            ]
+          }
+        ],
+        "complete": true,
+        "truncated": false,
+        "elapsed_ms": 17
+      }
+    ]
+  },
+  "ssh_check": {
+    "connected": true,
+    "ready": true,
+    "platform": "linux",
+    "arch": "amd64",
+    "checks": {
+      "linux": true,
+      "supported_arch": true,
+      "curl": true,
+      "tar": true,
+      "gzip": true,
+      "sha256sum": true,
+      "systemd": true,
+      "install_privilege": true,
+      "platform_https": true
+    },
+    "error_code": ""
+  },
+  "agent_after": {
+    "id": "d745d58ca953d5d4a6eb3785f7bded69",
+    "last_seen": "2026-10-28T11:41:13.156Z"
+  },
+  "cleanup": {
+    "platform_test_secret_revoked_and_cleared": true,
+    "temporary_forced_read_only_ssh_authorization_removed": true,
+    "session_closed": true
+  },
+  "passed": true,
+  "proposed_lifecycle_probe_on_vchive": {
+    "passed": true,
+    "read_only": true,
+    "fields": 9,
+    "observation": {
+      "agent_id": "d745d58ca953d5d4a6eb3785f7bded69",
+      "installation": "present",
+      "service_running": true,
+      "operation_lock": false,
+      "program_complete": true,
+      "lifecycle_locked": false,
+      "unit_managed": true,
+      "data_retained": true
+    }
+  },
+  "date": "2026-10-28",
+  "scope": "Deployed platform HTTPS API and user-authorized vchive development host. A dedicated 15-minute SSH key is restricted to a fixed read-only prerequisite script. No installer, uninstaller, existing Agent configuration, or node credentials were changed.",
+  "known_findings": [
+    {
+      "finding": "Machine record is not bound to the already-running manually installed Agent. The old page shows not enrolled although the node has a healthy heartbeat.",
+      "fixed_in_this_release": false
+    },
+    {
+      "finding": "Deployed automatic SSH installer fetches install.sh without required Authorization; anonymous download returns 401.",
+      "deployed_download_status": 401,
+      "fix_in_pull_request": true
+    }
+  ],
+  "limitations": [
+    "Fresh install was not executed on vchive because an existing Agent must not be replaced.",
+    "No production uninstallation was executed.",
+    "The proposed lifecycle probe result reflects a working-tree read-only command, not a deployed platform API."
+  ]
+}

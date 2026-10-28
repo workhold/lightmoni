@@ -8,3 +8,6 @@
 @media(max-width:640px){.lm-machine-detail-actions{align-items:stretch;flex-direction:column}.lm-machine-detail-actions .ant-btn{width:100%}}
 .lm-machine-actions .lm-machine-blocked{margin-top:8px;font-size:12px;line-height:1.55;color:var(--lm-text-secondary,#64748b)}
 .lm-machine-actions .lm-machine-blocked .ant-btn-link{height:auto;padding:2px 0;font-size:12px;white-space:normal}
+.lm-machine-uninstall-steps{padding-left:22px;line-height:1.9}
+.lm-machine-uninstall-actions{margin:12px 0}
+.lm-machine-path{display:block;overflow-wrap:anywhere}

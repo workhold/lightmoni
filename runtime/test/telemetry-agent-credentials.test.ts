@@ -68,6 +68,14 @@ test('record reporting keeps SDK keys and node control/data credentials isolated
   await request('/api/v1/keys/'+key.data.id,'PUT',{active:false});
   assert.equal((await send({Authorization:'Bearer '+key.data.key},'disabled-sdk')).status,401);
   assert.equal((await send(data,'node-still-valid')).status,200);
+  await request('/api/v1/keys/'+key.data.id,'PUT',{active:true});
+  assert.equal((await request(`/api/v1/agents/${agentID}/credentials/revoke`,'POST',{})).status,200);
+  assert.equal(credentials.registered?.(agentID),true);assert.equal(credentials.has(agentID,'control'),false);assert.equal(credentials.has(agentID,'data'),false);
+  assert.equal((await send(data,'revoked-node')).status,401);
+  assert.equal((await send({'X-Lightmoni-Agent-ID':agentID,Authorization:'Bearer '+key.data.key},'revoked-node-shared-key')).status,401);
+  assert.equal((await request('/v1/sdk-config?metric_windows=1','GET',undefined,{'X-Lightmoni-Agent-ID':agentID,Authorization:'Bearer '+key.data.key})).status,401);
+  assert.equal((await send({Authorization:'Bearer '+key.data.key},'ordinary-sdk-survives')).status,200);
+
  } finally {
   server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));db.close();rmSync(directory,{recursive:true,force:true});
  }

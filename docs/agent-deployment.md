@@ -2,7 +2,7 @@
 
 本文说明当前可用部署方式及后续设计。推荐每台 Linux 主机一个独立 systemd Agent，使用专用非 root 用户运行，身份与离线数据放在固定持久目录。Agent 不随业务应用重启、发布或删除；业务通过 SDK 上报或授权日志目录接入。节点助手现在支持一次性 enrollment、pending 激活和独立的 control/data credential；旧节点仍可通过 legacy Key 运行。
 
-本次基线已在中心、安装脚本和运行时测试中实现。2026-10-27 已用修复安装器与线上 0.1.0 包完成一次 Linux amd64 systemd 首装、真实 enrollment、非 root 运行、配置同步和主机指标入库验收，见 [实机记录](../specs/024-agent-install-startup-fix/validation.md)。arm64、真实升级/回滚和发布容器仍未验收，自动 shell 回归使用命令 shim；不能把该首装结果等同于 Linux 双架构全场景验收。参见 [迁移验收边界](../specs/007-node-runtime-migration/agent-validation.md)。
+本次基线已在中心、安装脚本和运行时测试中实现。2026-10-27 已用修复安装器与线上 0.1.0 包完成一次 Linux amd64 systemd 首装、真实 enrollment、非 root 运行、配置同步和主机指标入库验收，见 [实机记录](../specs/024-agent-install-startup-fix/validation.md)。2026-10-28 另在本机 Colima 的 Ubuntu arm64、glibc 2.39、systemd 255.4 隔离环境中，使用已发布 0.1.0 arm64 包和当前安装/卸载脚本完成 8 项真实验收：非 root 服务运行、OTLP 日志入队、卸载后程序及 unit 移除、配置和身份 SHA 不变、待上报批次保留，见 [SDD 032 systemd 报告](../specs/032-agent-install-uninstall/systemd-report.json)。这次 arm64 测试使用离线合成身份和不可用的本机 endpoint，不覆盖生产 enrollment 或平台凭据撤销；后两者需分别看真实平台验收与隔离 API 测试证据。真实升级/回滚、amd64 真实卸载及独立 Agent 发布容器仍未验收，其余自动 shell 回归使用命令 shim；这些结果不能等同于 Linux 双架构全场景验收。参见 [迁移验收边界](../specs/007-node-runtime-migration/agent-validation.md)。
 
 ## 当前支持范围
 
@@ -21,15 +21,15 @@
 
 ### 通过主机管理和 AI 助手首次安装
 
-管理员在“主机管理”登记目标主机的地址、SSH 端口、用户名，以及通过可信渠道核对的 `SHA256:...` 主机公钥指纹，再保存该主机专用、无需口令的 SSH 私钥。密码仅供短期登记，不用于自动 SSH；建议不要长期保存密码，安装完成后也可以撤销首次接入私钥。
+管理员在“主机管理”登记目标主机的地址、SSH 端口、用户名，以及通过可信渠道核对的 `SHA256:...` 主机公钥指纹，再保存该主机专用、无需口令的 SSH 私钥。新私钥默认临时接入，最长保存 1 小时，成功安装后清空；需要保留 SSH 恢复通道时显式选择长期托管并确认，默认 90 天、最长 365 天。密码只能执行一次只读 SSH 检查或建立一次网页终端，不能自动安装/卸载 Agent，操作结束立即清空；建议不要长期保存 SSH 秘密。
 
-点击“SSH 安装检查”会真实登录并执行固定只读检查：Linux、amd64/arm64、curl/tar/gzip/sha256sum、运行中的 systemd、root 或免交互 sudo，以及目标机器到平台 HTTPS 外部地址的连通性。检查最长 60 秒，可以取消。平台尚为 HTTP 时仍能检查 SSH，但 HTTPS 条件不通过，不能生成自动安装计划。
+点击“SSH 安装检查”会真实登录并执行固定只读检查：Linux、amd64/arm64、curl/tar/gzip/sha256sum、运行中的 systemd、root 或免交互 sudo、目标机器到平台 HTTPS 外部地址的连通性，以及已有 Agent 程序、服务、配置或身份。检查最长 60 秒，可以取消。平台尚为 HTTP 时仍能检查 SSH，但 HTTPS 条件不通过，不能生成自动安装计划。
 
 也可以让 AI 助手“检查这台主机并准备安装 LightMoni Agent”。助手使用 `get_managed_machine`、`check_managed_machine_ssh` 和 `propose_agent_install`，通过后返回“审阅部署计划”入口。只有一个有效私钥时自动选择；多个私钥时需要明确指定凭据 ID。助手无法读取密钥或原始 SSH 输出。
 
-审核入口打开同一条已保存的部署计划。计划和检查有效期为 15 分钟；主机地址、端口、用户名、指纹、连接方式、平台外部地址或所选私钥改变后需要重新检查。确认前不签发 enrollment token，也不安装。管理员明确确认后运行固定安装脚本，只有收到 Agent 激活回执才报告成功。检查通过仍不保证特定发行包存在、glibc 兼容或后续安装一定成功。
+审核入口打开同一条已保存的部署计划。计划和检查有效期为 15 分钟；主机地址、端口、用户名、指纹、连接方式、平台外部地址或所选私钥改变后需要重新检查。生成计划、执行前及安装器生命周期锁内都会拒绝已有 Agent 安装，不能为测试或重试覆盖原节点身份。确认前不签发 enrollment token，也不安装。管理员明确确认后运行固定安装脚本，脚本与发行包下载均需鉴权；一次性 token 由 SSH stdin 传入、写入远端 0600 临时 curl 配置，退出时清理，不进入 URL、命令参数、环境或回执。只有收到 Agent 激活回执才报告成功；若部署失败而本次 enrollment 已激活，平台只撤销该安装会话签发的新节点凭据，不影响已有节点，管理员需先核对远端残留再重新接入。检查通过仍不保证特定发行包存在、glibc 兼容或后续安装一定成功。
 
-目前自动 SSH 仅支持直接连接。跳板机和 SSM 使用手动安装脚本；不提供通用远程 shell 或网页终端。中心主机需有 `ssh` 和 `ssh-keyscan`（Docker 运行镜像包含 `openssh-client`）。Agent 激活后，日常采集和任务仍通过 Agent 通道执行。
+目前自动 SSH 仅支持直接连接。跳板机和 SSM 使用手动安装脚本。管理员可使用有时限的网页 SSH 终端；终端输出不持久化，也不交给 AI，不是 AI 任意 shell 工具。中心主机需有 `ssh` 和 `ssh-keyscan`（Docker 运行镜像包含 `openssh-client`）。Agent 激活后，日常采集和任务仍通过 Agent 通道执行。
 
 升级前生成的旧待审核计划不含 SSH 检查绑定，需要重新检查并生成计划；已完成的部署历史保留。
 
@@ -42,6 +42,7 @@
 
 ```sh
 sudo sh -c 'exec sh /srv/lightmoni-agent/releases/0.1.0/install.sh \
+  --fresh \
   --release-dir /srv/lightmoni-agent/releases/0.1.0 \
   --version 0.1.0 \
   --endpoint https://monitor.example.com \
@@ -87,7 +88,7 @@ sudo -u lightmoni-agent /usr/local/bin/lightmoni-agent status --config /etc/ligh
 
 安装时显示 `configuration valid` 只代表 root 对暂存配置的检查通过，随后仍可能在专用用户启动 systemd 服务时失败。安装器会在恢复旧文件之前显示失败阶段和固定 systemd 状态字段，再给出本机 `journalctl` 检查命令；不会自动打印可能包含敏感信息的原始日志。查看日志后请先移除凭据再分享。
 
-旧安装器受 `umask 077` 影响可能把运行时复制为 root-only，造成配置检查通过但服务无法启动；修正版显式补足公开运行文件的读取和目录遍历权限，配置与状态目录继续保持 0700/0600。更新平台分发的 `install.sh` 后再安装；仅更新 Git 源码不会替换线上脚本。若本次 enrollment 已激活但启动失败，本地文件回滚不会撤销中心凭据：请先在平台撤销该失败节点的凭据，再新建一次性 token 重装，不要复用已兑换的 token。
+旧安装器受 `umask 077` 影响可能把运行时复制为 root-only，造成配置检查通过但服务无法启动；修正版显式补足公开运行文件的读取和目录遍历权限，配置与状态目录继续保持 0700/0600。更新平台分发的 `install.sh` 后再安装；仅更新 Git 源码不会替换线上脚本。若本次 enrollment 已激活但启动失败，本地文件回滚本身不会撤销中心凭据：主机管理部署 worker 会按本次安装会话撤销新节点凭据；手动运行安装器时请先在平台核对并撤销该失败节点凭据。核对远端残留后再新建一次性 token 接入，不要复用已兑换的 token。
 
 健康需要分别检查：
 
@@ -125,7 +126,19 @@ sudo -u lightmoni-agent /usr/local/bin/lightmoni-agent quarantine --config /etc/
 
 升级后使用上述诊断并检查中心数据。需要回退时，先确认旧版可读当前 schema；不可逆变更需采用升级前一致快照恢复。制作快照应先停服务，再按 SQLite 一致备份方法保存整个必要状态及配置；运行中只复制 `queue.sqlite` 可能遗漏 WAL。不要用未验证的旧包直接覆盖活跃状态。
 
-默认卸载保留 `/etc/lightmoni-agent` 和 `/var/lib/lightmoni-agent`，以后可恢复身份和补传。`uninstall.sh --purge` 会删除配置和状态，包括已 ACK 但未转发的数据，必须明确接受数据丢失后使用。
+### 通过主机管理安全卸载
+
+删除平台里的主机记录不会卸载远端 Agent。卸载应在主机详情中独立发起，使用仍有效的私钥与已确认指纹；成功安装时已清空临时私钥的主机，需要重新添加临时接入私钥或使用有效的托管私钥。密码不用于自动卸载。
+
+1. 运行新的 SSH 检查，再生成卸载计划。平台以固定只读探测核对远端身份属于本平台独立凭据节点、与已有主机关联一致且未绑定其他主机，拒绝身份不一致、无法确认节点以及运行中、已派发或结果未知的节点任务。未绑定主机同样需要核验，旧的主机绑定不能单独作为卸载依据。
+2. 审阅目标、影响与保留内容，明确确认后执行。计划绑定当前主机地址、端口、用户名、指纹、私钥和节点身份，沿用 SSH 检查的 15 分钟有效期，有效期内也不能在连接参数改变后继续使用；未执行计划可以取消。
+3. 平台仅执行内置固定脚本：核对标准路径的受管 `lightmoni-agent.service`，拒绝其他来源的同名 unit，停止并禁用服务，确认停止后移除该服务文件、`/usr/local/bin/lightmoni-agent` 和 `/opt/lightmoni-agent`。停止失败不会继续删除程序。
+4. 保留 `/etc/lightmoni-agent`、`/var/lib/lightmoni-agent` 和服务用户，保留业务服务、部署目录、制品、容器和卷。网页不开放 purge；保留配置、身份、缓存和队列用于核查与恢复，不保证未送达数据自动补传。
+5. 程序路径移除、服务 not-found 且未运行、身份匹配、数据目录保留及无未完成任务标记全部核验通过后，中心在同一事务中撤销对应节点的全部 control/data 凭据并完成记录，保存主机、节点和卸载历史。配置文件里的旧凭据此后无效，已登记节点也不能降级到 legacy Key；重新接入需要新 enrollment，不能将保留配置直接当作有效安装继续启动。
+
+SSH 断开或结果不确定时状态为“结果未知”，平台不会报告成功或自动重跑卸载。管理员可用“核对卸载结果”执行固定只读探测：完全移除且全部核验条件满足后才补做凭据撤销并成功；完整程序仍在、服务状态明确且无生命周期锁或任务标记时记为失败，保留节点凭据，可重新审阅新计划；只移除了一部分或状态不确定时保持未知。原临时私钥已到期时，可添加新的有效私钥用于只读核对。节点任务结果不明时先核对任务。同一节点的卸载与任务按节点身份跨主机互斥，主机检查、网页终端、安装和卸载执行互斥；待审核/结果未知时允许管理员用终端人工核查，但禁止改主机、删除或新部署，实际卸载或核对时不能同时打开终端。
+
+手动脚本 `uninstall.sh` 仍默认保留配置和状态，但本机脚本不等于中心已撤销节点凭据，需要管理员在中心核对并撤销。脚本的 `--purge` 会删除配置和状态，包括已 ACK 但未转发的数据，必须明确接受数据丢失后使用；网页卸载不会提供该参数。恢复或重新接入前先核查保留数据和身份，平台首装不会自动覆盖它们。实现规格、契约和验收证据见 [SDD 032](../specs/032-agent-install-uninstall/spec.md)。
 
 ## 容器业务如何接入
 
@@ -155,16 +168,20 @@ Agent 容器的 `127.0.0.1`、应用容器的 `127.0.0.1` 和宿主各不相同�
 脚本不把 token 放进 URL、argv 或普通环境变量。交互式模式隐藏输入，自动化模式从权限为 0600 的秘密文件或受限 FD 通过 `--enrollment-token-stdin` 传入。生产建议先下载脚本、验证签名/哈希和 HTTPS，再执行固定文件；不把 `curl | sh` 作为默认安装方法。示例：
 
 ```sh
-curl --fail --proto '=https' --tlsv1.2 -o /tmp/lightmoni-agent-install.sh \
+sudo curl --config /run/secrets/lightmoni-agent-download.curl \
+  --fail --proto '=https' --tlsv1.2 -o /tmp/lightmoni-agent-install.sh \
   https://monitor.example.com/downloads/agent/install.sh
 chmod 700 /tmp/lightmoni-agent-install.sh
 sudo sh -c 'exec /tmp/lightmoni-agent-install.sh \
+  --fresh \
   --endpoint https://monitor.example.com --version 0.1.0 \
   --enrollment-token-stdin < /run/secrets/lightmoni-agent-enrollment-token'
 rm -f /tmp/lightmoni-agent-install.sh
 ```
 
-安装器生成 `install_nonce` 和本机身份元数据，先兑换为短期 pending bootstrap，校验暂存配置后以 `service=ready`、`config_checked=true` 调用 activate。这里是安装器的配置预检，不是中心独立验证 Agent 进程已经运行。中心随后把节点置为 active 并签发每节点独立的 control credential 与 data credential，安装器才原子写入配置、身份并启动 systemd 服务；如果后续启动失败，需要管理员撤销该节点凭据后重试。中心端重试必须复用同一 nonce，不会创建第二个节点；若首次兑换响应丢失，同 nonce 恢复会轮换并重新返回 bootstrap secret。激活前失败的 pending 会等待过期。已有节点升级不会重新注册或删除身份、队列和缓存配置；自动撤销、轮换和重新 enrollment 尚待补齐。
+其中 `/run/secrets/lightmoni-agent-download.curl` 必须由受保护的秘密流程提供，文件为 root 所有且权限 0600，在其中设置 enrollment token 的 Bearer 下载鉴权，勿把 token 写进命令参数或普通环境变量。安装脚本和发行包均受下载鉴权保护，直接无鉴权 `curl` 会被拒绝。安装完成后回收临时 curl 配置和 enrollment 文件。
+
+安装器生成 `install_nonce` 和本机身份元数据，先兑换为短期 pending bootstrap，校验暂存配置后以 `service=ready`、`config_checked=true` 调用 activate。这里是安装器的配置预检，不是中心独立验证 Agent 进程已经运行。中心随后把节点置为 active 并签发每节点独立的 control credential 与 data credential，安装器才原子写入配置、身份并启动 systemd 服务；如果后续启动失败，主机管理部署 worker 按本次安装会话撤销新节点凭据，手动运行安装器则仍需管理员核对并撤销，之后再重新接入。中心端重试必须复用同一 nonce，不会创建第二个节点；若首次兑换响应丢失，同 nonce 恢复会轮换并重新返回 bootstrap secret。激活前失败的 pending 会等待过期。已有节点升级不会重新注册或删除身份、队列和缓存配置；自动定期轮换和完整重新 enrollment 流程尚待补齐。
 
 每个节点的 `agent_id` 由中心绑定到 enrollment 时提交的身份材料和凭据摘要。当前提交的 `agent_public_key` 只是预留的节点元数据，尚未实现签名持有证明；实际认证边界是 bootstrap、control 和 data bearer credential。控制凭据仅用于心跳、配置拉取和状态证明；数据凭据仅用于允许的遥测上报；本地 SDK 使用的 `local_token` 不发送到中心。中心只保存摘要，UI、审计、journal、诊断和错误输出只显示 credential ID、状态和时间，不显示完整 token。请求同时验证 token 的 audience、scope、有效期、撤销状态和 `agent_id`，不能靠请求体中的节点 ID 授权。签名身份绑定属于后续发行与凭据强化工作。
 

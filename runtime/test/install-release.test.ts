@@ -45,11 +45,13 @@ function fixture(
     release,
     packageDir,
     join(root, "opt"),
+    join(root, "run"),
     join(root, "etc/systemd/system"),
     join(root, "usr/local/bin"),
   ])
     mkdirSync(path, { recursive: true });
   const locations = [
+    "/run/lightmoni-agent-lifecycle.lock",
     "/etc/lightmoni-agent",
     "/var/lib/lightmoni-agent",
     "/opt/lightmoni-agent",
@@ -236,11 +238,12 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     .update(readFileSync(join(release, artifact)))
     .digest("hex");
   writeFileSync(join(release, "SHA256SUMS"), checksum + "  " + artifact + "\n");
-  const run = () =>
+  const run = (extraArgs: string[] = []) =>
     spawnSync(
       "/bin/sh",
       [
         script,
+        ...extraArgs,
         "--release-dir",
         release,
         "--endpoint",
@@ -490,4 +493,11 @@ test("first-install restart failure removes new live files and does not claim in
   assert.equal(f.state().active, false);
   assert.equal(f.state().enabled, false);
   assert.equal(f.state().restarts, 1);
+});
+
+
+test("fresh installer refuses retained identity and releases lifecycle lock without replacing files", t => {
+  const f = fixture(t), result = f.run(["--fresh"]);
+  assert.notEqual(result.status, 0); assert.match(result.stderr, /Existing Agent/); f.restored();
+  assert.equal(existsSync(join(f.root, "run/lightmoni-agent-lifecycle.lock")), false);
 });

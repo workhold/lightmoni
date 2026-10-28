@@ -13,6 +13,8 @@ export interface SSHRunInput {
   password?: string;
   command: string;
   enrollmentToken?: string;
+  /** Non-secret fixed script input, never used for a password. */
+  stdin?: string;
   signal: AbortSignal;
   port: number;
   timeoutMs?: number;
@@ -73,7 +75,7 @@ export async function defaultSSHRunner(input: SSHRunInput) {
       "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "ProxyCommand=none", "-o", "ProxyJump=none",
       "-o", "ControlMaster=no", "-o", "LogLevel=ERROR", "-i", keyPath,
       `${input.machine.username}@${input.machine.address}`, input.command,
-    ], input.enrollmentToken == null ? undefined : input.enrollmentToken + "\n", signal, input.timeoutMs ?? 30 * 60_000);
+    ], input.stdin ?? (input.enrollmentToken == null ? undefined : input.enrollmentToken + "\n"), signal, input.timeoutMs ?? 30 * 60_000);
     return { ...result, stages: ["checking_host_key", "host_key_confirmed", "connecting_ssh", "remote_command_completed"] };
   } catch (error) {
     if (input.signal.aborted) throw new SSHError("cancelled");
@@ -166,6 +168,7 @@ export function preflightCommand(endpoint: string) {
     ...["curl", "tar", "gzip", "sha256sum"].map(name => `if command -v ${name} >/dev/null 2>&1; then echo '${name}=1'; else echo '${name}=0'; fi`),
     "if command -v systemctl >/dev/null 2>&1 && test -d /run/systemd/system; then echo 'systemd=1'; else echo 'systemd=0'; fi",
     "if test \"$(id -u)\" = 0 || sudo -n /bin/sh -c 'test \"$(id -u)\" = 0' </dev/null >/dev/null 2>&1; then echo 'install_privilege=1'; else echo 'install_privilege=0'; fi",
+    "if test \"$(id -u)\" = 0; then sh -c 'if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json; then echo agent_installation=present; else echo agent_installation=absent; fi'; elif sudo -n /bin/sh -c 'if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json; then echo agent_installation=present; else echo agent_installation=absent; fi' </dev/null 2>/dev/null; then :; else echo agent_installation=unknown; fi",
     url.protocol === "https:" ? `if curl --fail --silent --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 10 --output /dev/null ${quote(health)} </dev/null 2>/dev/null; then echo 'platform_https=1'; else echo 'platform_https=0'; fi` : "echo 'platform_https=0'",
   ].join("\n");
 }
@@ -176,11 +179,13 @@ export function parsePreflight(output: string) {
     if (!match || values.has(match[1])) throw new SSHError("invalid_response");
     values.set(match[1], match[2]);
   }
-  if (values.size !== CHECK_NAMES.length + 3 || values.get("LMSSH") !== "1" ||
+  const installation = values.get("agent_installation") ?? "unknown";
+  if (!["present", "absent", "unknown"].includes(installation)) throw new SSHError("invalid_response");
+  if (values.size !== CHECK_NAMES.length + 3 + Number(values.has("agent_installation")) || values.get("LMSSH") !== "1" ||
       !["linux", "unsupported"].includes(values.get("platform") ?? "") ||
       !["amd64", "arm64", "unsupported"].includes(values.get("arch") ?? "") ||
       CHECK_NAMES.some(name => !["0", "1"].includes(values.get(name) ?? ""))) throw new SSHError("invalid_response");
   const checks = Object.fromEntries(CHECK_NAMES.map(name => [name, values.get(name) === "1"])) as SSHChecks;
   if (checks.linux !== (values.get("platform") === "linux") || checks.supported_arch !== (values.get("arch") !== "unsupported")) throw new SSHError("invalid_response");
-  return { platform: values.get("platform")!, arch: values.get("arch")!, checks, ready: Object.values(checks).every(Boolean) };
+  return { platform: values.get("platform")!, arch: values.get("arch")!, agent_installation: { state: installation as "present" | "absent" | "unknown" }, checks, ready: Object.values(checks).every(Boolean) };
 }
