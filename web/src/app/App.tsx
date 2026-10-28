@@ -11,6 +11,7 @@ import {useI18n} from '../shared/i18n';
 import WorkspaceHeader from './WorkspaceHeader';
 import {navigationLinks} from './navigation';
 import SidebarNavigation from './SidebarNavigation';
+import {loginDestination,useDefaultHomepage} from './default-homepage';
 import './navigation.css';
 const AdminPage=lazy(()=>import('./AdminPage'));
 const DashboardPage=lazy(()=>import('../features/dashboards/DashboardPage'));
@@ -25,12 +26,13 @@ const DataManagementPage=lazy(()=>import('./DataManagementPage'));
 const AgentInstallPage=lazy(()=>import('./AgentInstall'));
 const ServiceDeploymentsPage=lazy(()=>import('./ServiceDeploymentsPage'));
 
-function ClaimLanding(){const {token}=useParams();return <Navigate to={'/alerts?claim='+encodeURIComponent(token??'')} replace/>}
+function ClaimLanding(){const {token}=useParams(),{search}=useLocation(),params=new URLSearchParams(search);params.set('claim',token??'');return <Navigate to={'/alerts?'+params} replace/>}
 
 export default function Root(){
  const {t}=useI18n();
  const location=useLocation(),navigate=useNavigate();
  const[user,setUser]=useState<User|null>(null);
+ const homepage=useDefaultHomepage(user);
  const[loading,setLoading]=useState(true);
  const[assistant,setAssistant]=useState(false);
  useEffect(()=>setAssistant(false),[location.pathname]);
@@ -45,15 +47,16 @@ export default function Root(){
  useEffect(()=>{if(location.pathname==='/settings')setAssistant(false)},[location.pathname]);
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
  if(loading)return <div className="lm-loading"><Spin size="large"/></div>;
- if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate((location.pathname.startsWith('/alerts')||location.pathname.startsWith('/a/')||location.pathname.startsWith('/traces/')||location.pathname.startsWith('/dashboards')||location.pathname.startsWith('/admin')||location.pathname.startsWith('/machines')||location.pathname.startsWith('/services')||location.pathname.startsWith('/operations')||location.pathname.startsWith('/settings')||location.pathname.startsWith('/data'))?location.pathname+location.search:'/')}}/>;
+ if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate(loginDestination(u,location.pathname,location.search),{replace:true})}}/>;
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'} ${/^\/dashboards\/[^/]+\/panels\//.test(location.pathname)?'is-panel-standalone':''}`}>
   <aside className="lm-sidebar">
-   <Link to="/" className="lm-brand"><span className="lm-brand-mark">L</span><span>LightMoni<small>{t('监控工作台','Monitoring workspace')}</small></span></Link>
+   <Link to={homepage} className="lm-brand" aria-label={t('返回默认首页','Go to default homepage')}><span className="lm-brand-mark">L</span><span>LightMoni<small>{t('监控工作台','Monitoring workspace')}</small></span></Link>
    <SidebarNavigation pathname={location.pathname} role={user.role} collapsed={navCollapsed}/>
    <Button className="lm-nav-collapse" type="text" aria-label={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} title={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} icon={navCollapsed?<MenuUnfoldOutlined/>:<MenuFoldOutlined/>} onClick={toggleNavigation}>{!navCollapsed&&t('收起导航','Collapse navigation')}</Button>
   </aside>
   <main className="lm-main"><WorkspaceHeader user={user} title={currentPage} onLoggedOut={()=>setUser(null)}/><div className="lm-route-content"><Suspense fallback={<div className="lm-page"><Spin/></div>}><Routes>
-    <Route path="/" element={<OverviewPage/>}/>
+    <Route path="/" element={<Navigate to={homepage} replace/>}/>
+    <Route path="/overview" element={<OverviewPage/>}/>
     <Route path="/data" element={<DataPage user={user}/>}/>
     <Route path="/data-management" element={<DataManagementPage user={user}/>}/>
     <Route path="/agents" element={<AgentsPage user={user}/>}/>
@@ -71,8 +74,8 @@ export default function Root(){
     <Route path="/a/:token" element={<ClaimLanding/>}/>
     <Route path="/traces/:trace_id" element={<TracePage/>}/>
     <Route path="/alerts/*" element={<AlertsPage/>}/>
-    <Route path="/login" element={<Navigate to="/"/>}/>
-    <Route path="*" element={<Navigate to="/" replace/>}/>
+    <Route path="/login" element={<Navigate to={homepage} replace/>}/>
+    <Route path="*" element={<Navigate to={homepage} replace/>}/>
    </Routes></Suspense></div></main>
   {location.pathname!=='/assistant'&&<Tooltip title={t('AI 助手 · 分析当前页面','AI assistant · Analyze this page')} placement="left"><Button className="lm-assistant-launcher" type="primary" shape="circle" size="large" icon={<MessageOutlined/>} aria-label={t('打开 AI 助手','Open AI assistant')} aria-expanded={assistant} onClick={()=>setAssistant(true)}/></Tooltip>}
   <Drawer title={t('AI 助手','AI assistant')} size="large" open={assistant} onClose={()=>setAssistant(false)} destroyOnHidden><Suspense fallback={<Spin/>}><AssistantPanel compact initialContext={currentContext}/></Suspense></Drawer></div></MonitoringScope.Provider>;
