@@ -80,7 +80,7 @@ export function registerNodes(
     }
   };
   const key = (ctx: Context, agentID: string): WriteKey => {
-    if (options.agentCredentials?.has(agentID, "control")) {
+    if ((options.agentCredentials?.registered?.(agentID) ?? options.agentCredentials?.has(agentID, "control"))) {
       const credential = options.agentCredentials.authenticate(
         ctx.req,
         agentID,

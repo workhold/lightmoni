@@ -311,7 +311,7 @@ export function registerSettings(
       // sampling configuration that legacy ingest keys could read. Keep the
       // old key path for nodes that have not migrated yet.
       const key =
-        agentID && agentCredentials?.has(agentID, "control")
+        agentID && (agentCredentials?.registered?.(agentID) ?? agentCredentials?.has(agentID, "control"))
           ? (() => {
               const credential = agentCredentials.authenticate(
                 c.req,

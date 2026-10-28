@@ -201,3 +201,17 @@ test("read-only systemd preflight jobs reject deployment phases and snapshots fr
   assert.deepEqual(replay.receipt.snapshot, {});
   f.db.close();
 });
+
+test('pending, running, unknown and completed node uninstallations block enqueue and claim',()=>{
+ const f=fixture();try{
+  f.db.exec('CREATE TABLE machine_uninstallations(id TEXT,agent_id TEXT,status TEXT)');
+  f.jobs.enqueue({agentID:'agent-1',deploymentID:'prior',operationID:'prior',actions:[]});
+  for(const state of ['awaiting_approval','running','unknown','succeeded']){
+   f.db.run('INSERT INTO machine_uninstallations VALUES(?,?,?)','u','agent-1',state);
+   assert.throws(()=>f.jobs.enqueue({agentID:'agent-1',deploymentID:state,operationID:state,actions:[]}),/uninstallation_blocks_jobs/);
+   assert.equal(f.jobs.claim('agent-1',[]),null);
+   f.db.run('DELETE FROM machine_uninstallations');
+  }
+  assert.ok(f.jobs.claim('agent-1',[]));
+ }finally{f.jobs.close?.();f.db.close();}
+});

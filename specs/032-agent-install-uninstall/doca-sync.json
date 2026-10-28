@@ -1,0 +1,103 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "sections": [
+    "13"
+  ],
+  "before_seq": 769,
+  "saved_seq": 771,
+  "readback_seq": 771,
+  "paragraph_readback": [
+    {
+      "block_id": "a3691724-b5f2-4daf-bc4e-a0bd21316a74",
+      "seq": 771,
+      "verified": true,
+      "sha256": "a62bfece75dc04736dc3ca449f32aecf439ba84946e42d69a41664d4338e795c"
+    },
+    {
+      "block_id": "83e070ef-3ca3-4981-b59e-9fca7a9b8a58",
+      "seq": 771,
+      "verified": true,
+      "sha256": "dab5f15b674baaf78555ead9743b8179dd319603dcd48b7edfe8164dc523fc13"
+    },
+    {
+      "block_id": "credentials031-17052312-a666-4673-99b9-89125e223023",
+      "seq": 771,
+      "verified": true,
+      "sha256": "584fa9f73e73aa5f8873d01ce9bf2364e7a906fc5fa0d9e2bc422cdb8eeb3524"
+    },
+    {
+      "block_id": "agent-lifecycle032-section13-4",
+      "seq": 771,
+      "verified": true,
+      "sha256": "fa03355fce72914e695b28c368d9def1021cf5818bebcd91f15e21265fbcd1a6"
+    },
+    {
+      "block_id": "agent-lifecycle032-section13-5",
+      "seq": 771,
+      "verified": true,
+      "sha256": "1ff807f205410191e2cb22e607770067cf316af6fbbb1bb925b1a60a7b0b929f"
+    },
+    {
+      "block_id": "agent-lifecycle032-section13-6",
+      "seq": 771,
+      "verified": true,
+      "sha256": "b291f0b0da2a97dc519b89d419493e3f435ef95f71e9d28c2a79c9ae5a9cf14e"
+    },
+    {
+      "block_id": "credentials031-8486b2ee-7e45-4f42-9ed1-1cd3b27292f0",
+      "seq": 771,
+      "verified": true,
+      "sha256": "ba840535f0b8f29c372c0177d05a2c384ec08cfd530e306be870023860f0848c"
+    }
+  ],
+  "native_diagrams": [
+    {
+      "block_id": "f-architecture-8a1f",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "ef3293915bbdac0c03b0d02609e1fabc77d486e3ba762f81f51a203cc4498823",
+      "node_count": 10,
+      "edge_count": 8
+    },
+    {
+      "block_id": "f-center-modules-7d039612",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "bf7fa372ebf82d7ecc6ec20f307a1307d7b6075e98c38215a2c139563ad1fb2f",
+      "node_count": 10,
+      "edge_count": 9
+    },
+    {
+      "block_id": "f-deployment-2b7c",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "54bc6de02ee3f05563a759db9bbb03a612df4fd944f2a33ee563d1162f335ce2",
+      "node_count": 8,
+      "edge_count": 7
+    },
+    {
+      "block_id": "f-enrollment-4c9d",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "6708f0cabff6b59a5bc879dedaf3e35de668032e81ef1357c1a762c3af2b2e51",
+      "node_count": 10,
+      "edge_count": 11
+    },
+    {
+      "block_id": "f-ai-sequence-5e0f",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "2e7c217eb8baedb5e5528284c625585846e6ae326c9cab68247e64e341761913",
+      "node_count": 10,
+      "edge_count": 10
+    }
+  ],
+  "native_diagram_count": 5,
+  "native_diagram_nodes_and_edges_unchanged": true,
+  "unrelated_visible_outline_blocks_verified_unchanged": 193,
+  "unrelated_displaced_blocks_verified_present": 3,
+  "outline_window_limit": 200,
+  "outline_order_matches_only_three_insertions": true,
+  "total_block_count_delta": 3,
+  "scope": "Only four existing section 13 paragraphs and three new lifecycle paragraphs. Existing native diagrams and unrelated content preserved."
+}

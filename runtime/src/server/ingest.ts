@@ -449,7 +449,7 @@ export class Ingest {
   }
   async receive(c: Context, signal: Signal) {
     const agentID = String(c.req.headers['x-lightmoni-agent-id'] ?? '');
-    const key = agentID && this.agentCredentials?.has(agentID, 'data')
+    const key = agentID && (this.agentCredentials?.registered?.(agentID) ?? this.agentCredentials?.has(agentID, 'data'))
       ? (() => {
           const credential = this.agentCredentials!.authenticate(c.req, agentID, 'data');
           return {id: credential.credential_id, name: 'agent:' + agentID, allowed_tables: [] as string[], allow_all_tables: true};

@@ -74,6 +74,8 @@ export interface AgentCredential {
 
 export interface AgentCredentialStore {
   has(agentID: string, audience: CredentialAudience): boolean;
+  /** Registered identities never fall back to a shared legacy reporting key. */
+  registered?(agentID: string): boolean;
   authenticate(
     req: IncomingMessage,
     agentID: string,
@@ -490,8 +492,10 @@ export function registerAgentCredentials(
       enrollmentID,
     );
   };
+  const registered = (agentID: string) => Boolean(db.get("SELECT id FROM agent_credentials WHERE agent_id=? LIMIT 1", agentID) || db.get("SELECT id FROM agent_enrollments WHERE agent_id=? LIMIT 1", agentID));
   return {
     has,
+    registered,
     authenticate,
     canDownloadWithEnrollmentToken,
     issueEnrollment,

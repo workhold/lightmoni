@@ -3,6 +3,7 @@ set -eu
 umask 077
 
 version="0.1.0"
+fresh="no"
 release_url=""
 release_dir=""
 config_source=""
@@ -19,12 +20,13 @@ agent_public_key=""
 enrollment_mode="no"
 
 usage() {
-  echo 'Usage: install.sh (--release-url URL [--key-stdin | --enrollment-token-stdin] | --release-dir DIR) [--version VERSION] [--config FILE | --endpoint URL (--key-stdin | --enrollment-token-stdin)] [--group-id GROUP]'
+  echo 'Usage: install.sh (--release-url URL [--key-stdin | --enrollment-token-stdin] | --release-dir DIR) [--fresh] [--version VERSION] [--config FILE | --endpoint URL (--key-stdin | --enrollment-token-stdin)] [--group-id GROUP]'
   echo 'The reporting configuration is generated automatically. Existing identity and cached data are preserved.'
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --fresh) fresh="yes"; shift ;;
     --version) version="$2"; shift 2 ;;
     --release-url) release_url="$2"; shift 2 ;;
     --release-dir) release_dir="$2"; shift 2 ;;
@@ -65,6 +67,8 @@ elif [ -n "$endpoint" ] && [ "$key_stdin" != "yes" ]; then
 fi
 if [ -n "$config_source" ]; then [ -f "$config_source" ] || { echo 'Configuration file missing.' >&2; exit 1; }; fi
 
+lifecycle_lock=/run/lightmoni-agent-lifecycle.lock
+lifecycle_locked="no"
 tmp_dir="$(mktemp -d)"
 transaction_started="no"
 service_changed="no"
@@ -141,12 +145,19 @@ finish() {
   else
     rm -rf "$tmp_dir"
   fi
+  if [ "$lifecycle_locked" = "yes" ]; then rmdir "$lifecycle_lock" || true; fi
   exit "$result"
 }
 trap 'finish "$?"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+mkdir "$lifecycle_lock" || { echo 'Agent lifecycle operation already in progress.' >&2; exit 1; }
+lifecycle_locked="yes"
+if [ "$fresh" = "yes" ] && { [ -e /usr/local/bin/lightmoni-agent ] || [ -L /usr/local/bin/lightmoni-agent ] || [ -e /opt/lightmoni-agent ] || [ -e /etc/systemd/system/lightmoni-agent.service ] || [ -e /etc/lightmoni-agent/config.json ] || [ -e /var/lib/lightmoni-agent/identity.json ]; }; then
+  echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2
+  exit 1
+fi
 if [ "$key_stdin" = "yes" ]; then
   IFS= read -r reporting_key || :
   [ -n "$reporting_key" ] || { echo 'A reporting key is required.' >&2; exit 1; }
