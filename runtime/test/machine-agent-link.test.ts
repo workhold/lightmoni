@@ -50,7 +50,7 @@ test('SSH identity verification links the exact independent node and records a s
  assert.equal((await f.request(`/machines/${h.id}`)).data.machine.agent_status,'removed');
 });
 
-test('identity link rejects members, injected commands, passwords, unpinned or legacy nodes without SSH',async t=>{
+test('identity link rejects members, injected commands, one-time passwords, unpinned or legacy nodes without SSH',async t=>{
  const f=await fixture(t),h=await f.host();f.user.role='member';assert.equal((await f.link(h)).status,403);f.user.role='admin';
  assert.equal((await f.link(h,{command:'id'})).status,400);
  await f.request(`/machines/${h.id}`,'PUT',{host_key_fingerprint:''});assert.equal((await f.link(h)).status,400);
@@ -58,6 +58,14 @@ test('identity link rejects members, injected commands, passwords, unpinned or l
  const password=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'one-time-test'});
  assert.equal((await f.link(h,{credential_id:password.data.credential_id})).status,400);
  f.db.run("DELETE FROM agent_credentials WHERE audience='data'");assert.equal((await f.link(h)).status,409);assert.equal(f.calls,0);
+});
+
+test('explicit reusable password can verify an existing node without exposing or consuming its secret',async t=>{
+ const f=await fixture(t),h=await f.host();await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ const added=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'temporary-link-password',retention:'temporary'});assert.equal(added.status,201,added.raw);
+ const result=await f.link(h,{credential_id:added.data.credential_id});assert.equal(result.status,200,result.raw);assert.equal(result.data.agent_id,'node-one');
+ assert.equal(f.sshInput.password,'temporary-link-password');assert.equal(f.sshInput.privateKey,'');assert.ok(!result.raw.includes('temporary-link-password'));
+ assert.notEqual(f.db.get<any>('SELECT secret_encrypted FROM machine_credentials WHERE id=?',added.data.credential_id)?.secret_encrypted,'');
 });
 
 test('remote identity or incomplete/locked installation cannot create a link',async t=>{

@@ -202,7 +202,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     mkdirSync(join(packagedRuntime, path), { recursive: true, mode: 0o755 });
   writeFileSync(
     join(packagedRuntime, "node"),
-    "#!/bin/sh\necho v24.15.0\n",
+    `#!/bin/sh\nexec '${process.execPath.replace(/'/g, "'\\''")}' "$@"\n`,
     { mode: 0o755 },
   );
   writeFileSync(join(packagedRuntime, "app/agent/main.js"), "// agent entry\n", {
@@ -385,6 +385,22 @@ test("verified release switches atomically, configures and restarts while preser
   assert.equal(f.state().startupChecks, 2);
   assertRuntimePermissions(f);
   f.unchangedData();
+});
+test("installer stages literal platform machine metadata without altering Agent identity", t => {
+  const f = fixture(t), name = "生产主机 ' $HOME `literal`";
+  const result = f.run(["--machine-id", "machine_01", "--machine-name", name]);
+  assert.equal(result.status, 0, result.stderr);
+  const cfg = JSON.parse(readFileSync(f.config, "utf8"));
+  assert.equal(cfg.machine_id, "machine_01"); assert.equal(cfg.machine_name, name);
+  f.unchangedData();
+});
+test("invalid machine metadata aborts before publishing or restarting", t => {
+  const f = fixture(t);
+  const result = f.run(["--machine-id", "machine_01", "--machine-name", "bad\nname"]);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /invalid machine metadata/);
+  f.restored();
+  assert.deepEqual(f.state().calls, []);
 });
 test("first installation publishes readable runtime and executable helpers without exposing config or persisted state", (t) => {
   const f = fixture(t, { old: "none", active: false }),

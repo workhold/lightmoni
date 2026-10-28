@@ -34,6 +34,8 @@ export async function execute(
     "require-data-dir": "",
     endpoint: "",
     "group-id": "",
+    "machine-id": "",
+    "machine-name": "",
     "key-stdin": false,
   };
   for (let i = 0; i < remaining.length; i++) {
@@ -57,6 +59,8 @@ export async function execute(
     const config = existsSync(path) ? loadConfig(path) : defaultConfig();
     if (flags.endpoint) config.endpoint = String(flags.endpoint);
     if (flags["group-id"]) config.group_id = String(flags["group-id"]);
+    if (flags["machine-id"]) config.machine_id = String(flags["machine-id"]);
+    if (flags["machine-name"]) config.machine_name = String(flags["machine-name"]);
     if (requireDir) config.data_dir = requireDir;
     if (flags["key-stdin"]) {
       const parts: Buffer[] = [];

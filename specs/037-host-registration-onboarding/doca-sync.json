@@ -1,0 +1,25 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "status": "blocked_server_error_save_not_confirmed",
+  "repository_sections": [
+    "13",
+    "13.2",
+    "17 credential boundary table"
+  ],
+  "before_seq": 773,
+  "latest_readback_seq": 773,
+  "saved": false,
+  "error": {
+    "status": 500,
+    "message": "MCP operation failed",
+    "attempts": 3,
+    "parameter_correction": "Replaced two table text operations with setCellContent, then refreshed discovery and isolated new-section insertions; all returned the same server error."
+  },
+  "online_content_verified_unchanged": true,
+  "existing_native_diagrams_verified_unchanged": 8,
+  "pending_native_diagram": {
+    "nodes": 8,
+    "edges": 9
+  },
+  "required_followup": "After Doca write service is restored, read latest seq/epoch, synchronize repository sections, and read back text/nodes/edges before marking architecture sync complete."
+}

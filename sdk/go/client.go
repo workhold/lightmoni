@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	logcollector "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	metriccollector "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -155,6 +157,16 @@ func New(cfg Config) (*Client, error) {
 	resource := Attributes{}
 	for key, value := range cfg.Resource {
 		resource[key] = value
+	}
+	// Public telemetry declarations only; these values do not authorize a host.
+	for _, setting := range []struct {
+		variable, attribute string
+		maxBytes            int
+	}{{"LIGHTMONI_MACHINE_ID", "lightmoni.machine.id", 64}, {"LIGHTMONI_MACHINE_NAME", "lightmoni.machine.name", 128}} {
+		value := os.Getenv(setting.variable)
+		if _, explicit := resource[setting.attribute]; !explicit && strings.TrimSpace(value) != "" && len(value) <= setting.maxBytes && utf8.ValidString(value) && !strings.ContainsFunc(value, unicode.IsControl) {
+			resource[setting.attribute] = value
+		}
 	}
 	if cfg.Env != "" {
 		resource["deployment.environment.name"] = cfg.Env

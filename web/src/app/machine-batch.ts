@@ -13,7 +13,7 @@ export const machineBatchPath=(id:string)=>`/machines/${encodeURIComponent(id)}`
 export const batchPlanPath=(action:BatchAction,machineID:string,planID?:string)=>`${machineBatchPath(machineID)}/${batchPlanKind(action)}${planID?`/${encodeURIComponent(planID)}`:''}`;
 export const batchHistoryURL=(action:BatchAction,machineID:string,planID?:string)=>`/machines?machine=${encodeURIComponent(machineID)}${planID?`&${action==='uninstall'?'uninstallation':'deployment'}=${encodeURIComponent(planID)}`:''}`;
 export const activeBatchCredential=(credential:BatchCredential,now=Date.now())=>!credential.revoked_at&&!credential.secret_cleared_at&&Date.parse(credential.expires_at)>now;
-export const batchCredentials=(action:BatchAction,credentials:BatchCredential[],now=Date.now())=>credentials.filter(credential=>activeBatchCredential(credential,now)&&(credential.method==='ssh_key'||(action==='ssh_check'&&credential.method==='password')));
+export const batchCredentials=(action:BatchAction,credentials:BatchCredential[],now=Date.now())=>credentials.filter(credential=>activeBatchCredential(credential,now)&&(credential.method==='ssh_key'||credential.method==='password'&&(action==='ssh_check'||['temporary','managed'].includes(credential.retention||''))));
 export const batchPlanExpired=(record:BatchPlan,now=Date.now())=>!Number.isFinite(Date.parse(record.plan?.expires_at||''))||Date.parse(record.plan?.expires_at||'')<=now;
 export const batchPlanStatus=(record:BatchPlan):BatchStatus=>record.status==='succeeded'?'success':['running','unknown'].includes(record.status)?'unknown':['failed','cancelled'].includes(record.status)?'failed':'pending';
 
@@ -39,7 +39,7 @@ export function batchUnavailableReason(action:BatchAction,target:BatchTarget,det
  if(detail){
   if(action!=='ssh_check'&&detail.deployments?.some(plan=>['awaiting_approval','running'].includes(plan.status)))return 'deployment_pending';
   if(action!=='ssh_check'&&detail.uninstallations?.some(plan=>['awaiting_approval','running','unknown'].includes(plan.status)))return 'uninstallation_pending';
-  if(!batchCredentials(action,detail.credentials).length)return action==='ssh_check'?'ssh_credential_required':'ssh_key_required';
+  if(!batchCredentials(action,detail.credentials).length)return action==='ssh_check'?'ssh_credential_required':'reusable_ssh_credential_required';
  }
  return '';
 }

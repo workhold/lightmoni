@@ -72,10 +72,10 @@ try{
  await page.locator('.ant-table-tbody .ant-typography-copy').first().click();
  await expect.poll(()=>page.evaluate(()=>navigator.clipboard.readText())).toBe('host.example.com:22');mark('Copying the displayed host address copies address:port rather than the machine ID');
  await page.getByRole('button',{name:'添加凭据',exact:true}).click();
- await expect(page.getByText('私钥默认临时保留 1 小时，密码默认 15 分钟且使用后清除。到期、撤销或 Agent 激活后会清除临时秘密；日常管理优先使用 Agent。需要长期 SSH 恢复通道时，请主动选择托管。',{exact:true})).toBeVisible();
+ await expect(page.getByText('建议短期保存 SSH 凭据',{exact:true})).toBeVisible();
  await expect(page.getByText('有效秒数',{exact:true})).toBeVisible();
- await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('密码（仅一次性使用）',{exact:true}).click();
- const passwordInput=page.getByPlaceholder('输入一次性 SSH 密码',{exact:true});await passwordInput.fill('fixture-password');
+ await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('SSH 密码',{exact:true}).click();
+ const passwordInput=page.getByPlaceholder('输入 SSH 密码',{exact:true});await passwordInput.fill('fixture-password');
  await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('SSH 私钥（推荐）',{exact:true}).click();
  await expect(page.getByPlaceholder('SSH 私钥内容',{exact:true})).toHaveValue('');mark('Switching credential methods clears the previous secret before it can be reused or displayed');
  await page.locator('.ant-modal:visible .ant-modal-close').click();mark('Chinese credential hints describe temporary defaults and secret clearing');
@@ -104,7 +104,7 @@ try{
  await page.getByRole('dialog').locator('.ant-modal-close').click();state.deleteError='';await page.getByRole('button',{name:'删除主机',exact:true}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByText('尚无主机或节点',{exact:true})).toBeVisible();expect(state.requests.filter(r=>r.method==='DELETE'&&r.path.endsWith('/fixture-machine'))).toHaveLength(2);mark('Successful list deletion closes its confirmation and refreshes the empty list');
  const en=await harness({language:'en-US'});current=en.page;await en.page.goto(origin+'/machines');
  await en.page.getByRole('button',{name:'Add credential',exact:true}).click();
- await expect(en.page.getByText('Private keys are temporary for 1 hour by default. Passwords expire after 15 minutes and are cleared after use. Temporary secrets are cleared on expiry, revocation, or Agent activation. Prefer Agent for daily management; explicitly choose managed storage for long-term SSH recovery.',{exact:true})).toBeVisible();
+ await expect(en.page.getByText('Prefer short-lived SSH credentials',{exact:true})).toBeVisible();
  await expect(en.page.getByText('Validity in seconds',{exact:true})).toBeVisible();
  await en.page.getByRole('button',{name:'Close',exact:true}).click();mark('English credential hints match the same validity and retention behavior');
  await en.page.getByRole('button',{name:'SSH preflight',exact:true}).click();await en.page.getByRole('button',{name:'Run SSH preflight',exact:true}).click();await expect(en.page.getByText('SSH connected; installation checks passed',{exact:true})).toBeVisible();

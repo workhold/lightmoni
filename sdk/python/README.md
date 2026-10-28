@@ -27,6 +27,19 @@ with_table 共享生命周期。Counter.add 接受 int，Gauge / Histogram.recor
 
 HTTP/消息入口提取一次 `parent = TraceContext.extract(headers)`，用 `with mon.start_span("request", parent=parent):` 包住处理过程，普通日志自动加 trace；嵌套和异常后恢复外层。`from lightmoni import with_trace` 可用 `with with_trace(context):` 激活已有上下文，contextvars 隔离并发 asyncio task。出站使用 `TraceContext.inject_current()` 返回当前 W3C header，合并到业务 HTTP 请求或消息 metadata；`TraceContext.current()` 可捕获上下文供新线程入口使用。无作用域日志保持 trace 为空。
 
+## 主机归属声明
+
+初始化时读取 `LIGHTMONI_MACHINE_ID`、`LIGHTMONI_MACHINE_NAME`，补充资源属性 `lightmoni.machine.id/name`。在主机管理登记后复制实际 ID 和用户设置的名称；显式 `resource` 对应属性优先。它们只是公开遥测标签，不是认证凭据或控制权限，不替代主机身份核验，也不覆盖 Agent 的 `host.id`、service 或实例身份。
+
+必须将变量注入**业务进程**的启动环境并重启业务；登记主机或安装 Agent 不会自动改变现有进程的环境。SDK 不自动读取配置文件。systemd 可在业务 unit 的 `[Service]` 中配置：
+
+```ini
+Environment="LIGHTMONI_MACHINE_ID=平台生成的主机ID"
+Environment="LIGHTMONI_MACHINE_NAME=支付主机"
+```
+
+Docker Compose 在业务服务下配置 `environment: { LIGHTMONI_MACHINE_ID: "实际主机ID", LIGHTMONI_MACHINE_NAME: "支付主机" }` 后重新创建容器。名称变更也需要更新启动配置并重启。空值、纯空白、控制字符和超长变量会被忽略（ID 最多 64 UTF-8 字节，名称 128 字节）；无变量保持原行为。
+
 ## SDK 自监控
 
 默认每 30 秒上报实例心跳和内部诊断，空闲进程也会发送；业务record窗口按表配置独立封窗。中心统一归入 lightmoni_log/lightmoni_metric_*，component=sdk；无密钥不产生自身遥测；WithTable 共享生命周期。可通过 `self_telemetry=False` 关闭自身遥测。退出前仍需 Shutdown；完整语义见 [SDK 契约](../README.md#内部监控)。

@@ -9,7 +9,7 @@ import type { MachineSummary } from "./managed-machines.js";
 export interface SSHRunInput {
   machine: MachineSummary;
   privateKey: string;
-  /** One-time password authentication is accepted only by the preflight runner. */
+  /** SSH password stays in this in-memory connection input, never argv/env/stdin. */
   password?: string;
   command: string;
   enrollmentToken?: string;
@@ -59,6 +59,7 @@ function runProcess(command: string, args: string[], input: string | undefined, 
 }
 
 export async function defaultSSHRunner(input: SSHRunInput) {
+  if (input.password !== undefined) return passwordSSHRunner(input);
   const dir = await mkdtemp(join(tmpdir(), "lightmoni-ssh-"));
   const keyPath = join(dir, "id"), knownPath = join(dir, "known_hosts");
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs ?? 30 * 60_000)]);
@@ -87,16 +88,17 @@ export async function defaultSSHRunner(input: SSHRunInput) {
 }
 
 /**
- * Run the fixed, read-only preflight with an SSH password.
+ * Run a platform-owned fixed command with an SSH password.
  *
  * This deliberately uses ssh2 instead of an ssh/sshpass subprocess: the
  * password never becomes a command-line argument, environment variable, or
- * process stdin. Callers must provide a short-lived credential and this
- * runner is never selected by Agent deployment or the interactive terminal.
+ * process stdin. Reusable credentials may authenticate fixed installation,
+ * removal and verification plans. The enrollment token travels separately
+ * through the authenticated exec channel's stdin.
  */
 export async function passwordSSHRunner(input: SSHRunInput) {
   if (!input.password) throw new SSHError("ssh_failed");
-  const timeoutMs = input.timeoutMs ?? 60_000;
+  const timeoutMs = input.timeoutMs ?? 30 * 60_000;
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(timeoutMs)]);
   if (signal.aborted) throw new SSHError(input.signal.aborted ? "cancelled" : "timed_out");
   const client = new Client();
@@ -136,6 +138,9 @@ export async function passwordSSHRunner(input: SSHRunInput) {
         if (code !== 0) return finish(new SSHError("ssh_failed"));
         finish(undefined, { stdout, stderr, stages: ["checking_host_key", "host_key_confirmed", "connecting_ssh", "remote_command_completed"] });
       });
+      // Only the fixed command's input is sent here. Password authentication
+      // is performed by ssh2.connect() below, before this channel exists.
+      stream.end(input.stdin ?? (input.enrollmentToken == null ? undefined : input.enrollmentToken + "\n"));
     });
   });
   try {

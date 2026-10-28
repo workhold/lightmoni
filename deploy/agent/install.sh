@@ -9,6 +9,8 @@ release_dir=""
 config_source=""
 endpoint=""
 group_id=""
+machine_id=""
+machine_name=""
 key_stdin=""
 enrollment_token_stdin=""
 reporting_key=""
@@ -20,7 +22,7 @@ agent_public_key=""
 enrollment_mode="no"
 
 usage() {
-  echo 'Usage: install.sh (--release-url URL [--key-stdin | --enrollment-token-stdin] | --release-dir DIR) [--fresh] [--version VERSION] [--config FILE | --endpoint URL (--key-stdin | --enrollment-token-stdin)] [--group-id GROUP]'
+  echo 'Usage: install.sh (--release-url URL [--key-stdin | --enrollment-token-stdin] | --release-dir DIR) [--fresh] [--version VERSION] [--config FILE | --endpoint URL (--key-stdin | --enrollment-token-stdin)] [--group-id GROUP] [--machine-id ID --machine-name NAME]'
   echo 'The reporting configuration is generated automatically. Existing identity and cached data are preserved.'
 }
 
@@ -33,6 +35,8 @@ while [ "$#" -gt 0 ]; do
     --config) config_source="$2"; shift 2 ;;
     --endpoint) endpoint="$2"; shift 2 ;;
     --group-id) group_id="$2"; shift 2 ;;
+    --machine-id) machine_id="$2"; shift 2 ;;
+    --machine-name) machine_name="$2"; shift 2 ;;
     --key-stdin) key_stdin="yes"; shift ;;
     --enrollment-token-stdin) enrollment_token_stdin="yes"; shift ;;
     --help) usage; exit 0 ;;
@@ -244,6 +248,11 @@ if [ -n "$endpoint" ]; then
   printf '%s\n' "$configure_credential" | "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --endpoint "$endpoint" --group-id "$group_id" --key-stdin --require-data-dir /var/lib/lightmoni-agent
 elif [ -n "$group_id" ]; then
   "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --group-id "$group_id" --require-data-dir /var/lib/lightmoni-agent
+fi
+if [ -n "$machine_id" ] || [ -n "$machine_name" ]; then
+  # Metadata is public. Pass it as literal argv to Node, never as script code.
+  # Staging and validation happen before replacing any installed configuration.
+  "$node" -e 'const fs=require("node:fs");const [path,id,name]=process.argv.slice(1);if(!/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(id)||!name.trim()||Buffer.byteLength(name)>128||/[\u0000-\u001f\u007f-\u009f]/.test(name))throw Error("invalid machine metadata");const c=JSON.parse(fs.readFileSync(path,"utf8"));c.machine_id=id;c.machine_name=name;fs.writeFileSync(path,JSON.stringify(c,null,2)+"\n",{mode:0o600});fs.chmodSync(path,0o600);' "$staged_config" "$machine_id" "$machine_name"
 fi
 "$tmp_dir/unpacked/lightmoni-agent" check --config "$staged_config" --require-data-dir /var/lib/lightmoni-agent
 

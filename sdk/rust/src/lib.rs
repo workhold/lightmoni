@@ -176,12 +176,25 @@ impl Client {
     pub fn connect(service:&str,endpoint:&str,key:&str)->Result<Self>{Self::with_limits(service,"",endpoint,key,Limits::default())}
     pub fn new(service:&str,table_name:&str,endpoint:&str,key:&str)->Result<Self>{Self::with_limits(service,table_name,endpoint,key,Limits::default())}
     pub fn with_limits(service:&str,table_name:&str,endpoint:&str,key:&str,limits:Limits)->Result<Self> {
+        Self::with_resource(service,table_name,endpoint,key,limits,Attributes::new())
+    }
+    /// Create a client with explicit resource attributes, which override machine environment declarations.
+    pub fn with_resource(service:&str,table_name:&str,endpoint:&str,key:&str,limits:Limits,mut resource:Attributes)->Result<Self> {
         let table=if table_name.is_empty(){String::new()}else{table(table_name)?};let url=reqwest::Url::parse(endpoint).map_err(|_|"invalid endpoint")?;
         if service.is_empty() || service.len()>128 || !["http","https"].contains(&url.scheme()) || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some(){return Err("valid service and HTTP(S) endpoint required".into());}
         if [limits.queue_bytes,limits.queue_batches,limits.buffer_bytes,limits.max_batch_bytes,limits.cardinality_limit,limits.max_instruments].contains(&0) || limits.max_batch_bytes>limits.queue_bytes{return Err("invalid SDK limits".into());}
         let http=reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"cannot initialize HTTP transport")?;
         let stats=["pending_batches","pending_bytes","buffer_bytes","delivered_batches","retried_batches","invalid_records","overflow_records","dropped_records","rejected_records"].iter().map(|n|(n.to_string(),0)).collect();
-        let resource=json!({"attributes":attrs(&BTreeMap::from([("service.name".into(),service.into()),("service.instance.id".into(),Uuid::new_v4().to_string().into())]))?});
+        if resource.contains_key("service.name") || resource.contains_key("service.instance.id") {return Err("configure service identity separately".into());}
+        // Public telemetry declarations only; never credentials or host authorization.
+        for (variable,attribute,max_bytes) in [("LIGHTMONI_MACHINE_ID","lightmoni.machine.id",64),("LIGHTMONI_MACHINE_NAME","lightmoni.machine.name",128)] {
+            if let Ok(value)=std::env::var(variable) {
+                if !value.trim().is_empty() && value.len()<=max_bytes && !value.chars().any(char::is_control) {resource.entry(attribute.into()).or_insert(value.into());}
+            }
+        }
+        resource.insert("service.name".into(),service.into());
+        resource.insert("service.instance.id".into(),Uuid::new_v4().to_string().into());
+        let resource=json!({"attributes":attrs(&resource)?});
         let s=State{metric_windows:BTreeMap::new(),observations:BTreeMap::new(),endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:"lightmoni_sdk".into(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
         let enabled=true;
         let client=Self{state:Arc::new(Mutex::new(s)),delivery:Arc::new(Mutex::new(())),table,context:None};
@@ -329,3 +342,7 @@ impl Span {
     pub fn end(&mut self){if self.ended{return;}self.ended=true;let start=self.data["startTimeUnixNano"].as_str().unwrap().parse::<u128>().unwrap();self.data["endTimeUnixNano"]=json!(nano().max(start).to_string());self.client.state.lock().unwrap().store(&self.client.table,"traces",self.data.clone());}
 }
 impl Drop for Span {fn drop(&mut self){if !self.ended && std::thread::panicking(){self.set_error("span scope panicked");}self.end();}}
+
+#[cfg(test)]
+#[path = "machine_identity_tests.rs"]
+mod machine_identity_tests;

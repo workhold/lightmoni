@@ -33,6 +33,19 @@ flush(Duration) 同步阻塞，Tokio 内使用 spawn_blocking，由应用定时�
 
 `with_trace(&context)` 返回不可变绑定客户端，`with_table` 保留绑定；`log(..., None)` 和 `start_span(..., None)` 自动读取该绑定。将绑定客户端 clone 到任务即可保留跨线程/await 关联，无全局 thread-local。`with_span` 是同步回调，正常返回或 panic 时结束 span；异步处理用 `start_span` 创建 span 和绑定客户端，持有 span 到 await 完成后再 end，不把 Future 作为同步回调结果。应用返回业务 Result 时可显式 set_error。HTTP/消息入口用提取结果作为 parent，出站通过 `client.trace_headers()` 导出 W3C header，`current_trace()` 可读取当前绑定。
 
+## 主机归属声明
+
+初始化时读取 `LIGHTMONI_MACHINE_ID`、`LIGHTMONI_MACHINE_NAME`，补充资源属性 `lightmoni.machine.id/name`。在主机管理登记后复制实际 ID 和用户设置的名称。需要显式覆盖时使用新增构造方法 `Client::with_resource(service, table, endpoint, key, limits, resource)`，其中 `resource: Attributes` 对应键优先；原有构造方法及 `Options` 结构保持兼容。它们只是公开遥测标签，不是认证凭据或控制权限，不替代主机身份核验，也不覆盖 Agent 的 `host.id`、service 或实例身份。
+
+必须将变量注入**业务进程**的启动环境并重启业务；登记主机或安装 Agent 不会自动改变现有进程的环境。SDK 不自动读取配置文件。systemd 可在业务 unit 的 `[Service]` 中配置：
+
+```ini
+Environment="LIGHTMONI_MACHINE_ID=平台生成的主机ID"
+Environment="LIGHTMONI_MACHINE_NAME=支付主机"
+```
+
+Docker Compose 在业务服务下配置 `environment: { LIGHTMONI_MACHINE_ID: "实际主机ID", LIGHTMONI_MACHINE_NAME: "支付主机" }` 后重新创建容器。名称变更也需要更新启动配置并重启。空值、纯空白、控制字符和超长变量会被忽略（ID 最多 64 UTF-8 字节，名称 128 字节）；无变量保持原行为。
+
 ## SDK 自监控
 
 默认每 30 秒上报实例心跳和内部诊断，空闲进程也会发送；业务record窗口按表配置独立封窗。中心统一归入 lightmoni_log/lightmoni_metric_*，component=sdk；无密钥不产生自身遥测；WithTable 共享生命周期。可通过 `Limits { self_telemetry:false, ..Limits::default() }` 关闭自身遥测。退出前仍需 Shutdown；完整语义见 [SDK 契约](../README.md#内部监控)。

@@ -37,6 +37,9 @@ export interface Config {
   /** Node-bound data credential issued by Agent enrollment. */
   data_credential: string;
   group_id: string;
+  /** Public platform asset metadata; distinct from persistent Agent identity. */
+  machine_id?: string;
+  machine_name?: string;
   local_token: string;
   data_dir: string;
   max_batch_bytes: number;
@@ -85,6 +88,8 @@ export function defaultConfig(): Config {
     control_credential: "",
     data_credential: "",
     group_id: "",
+    machine_id: "",
+    machine_name: "",
     local_token: "",
     data_dir: "./agent-data",
     max_batch_bytes: 4 << 20,
@@ -203,6 +208,11 @@ export function validateConfig(c: Config): void {
   if (!c.key && (!c.control_credential || !c.data_credential))
     throw Error("legacy key or both control_credential and data_credential are required");
   if (Buffer.byteLength(c.group_id) > 64) throw Error("invalid agent group");
+  const machineID = c.machine_id ?? "", machineName = c.machine_name ?? "";
+  if (typeof machineID !== "string" || typeof machineName !== "string" ||
+    (machineID !== "" && !/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/.test(machineID)) ||
+    Buffer.byteLength(machineName) > 128 || /[\u0000-\u001f\u007f-\u009f]/.test(machineName) ||
+    Boolean(machineID) !== Boolean(machineName.trim())) throw Error("invalid machine metadata");
   const { host } = listenAddress(c.listen);
   if (
     host !== "localhost" &&
