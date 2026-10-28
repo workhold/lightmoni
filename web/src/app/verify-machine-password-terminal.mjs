@@ -27,17 +27,16 @@ async function pageFor(language){
 let page;
 try{
  page=await pageFor('zh-CN');await page.getByRole('button',{name:'登录终端',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'已连接'})).toBeVisible();
- await expect(page.getByText('密码终端结束或连接失败后，密码凭据会自动撤销。重新连接请添加新密码，避免长期保存。',{exact:true})).toBeVisible();
+ await expect(page.getByText('密码终端结束或连接失败后，会自动撤销并清除已保存的密码。重新连接请添加新密码。',{exact:true})).toBeVisible();
  await page.locator('.xterm-helper-textarea').focus();await page.keyboard.insertText('fixture-identify');await page.locator('.xterm-helper-textarea').press('Enter');
  await expect.poll(()=>page.locator('.xterm-screen').innerText()).toContain('FIXTURE_USER=fixture');mark('Chinese UI opens a real SSH password/PTY connection and renders identification output');
  await page.locator('.ant-modal:visible').screenshot({path:resolve(media,'password-terminal-zh.png'),animations:'disabled'});
  await page.getByRole('button',{name:'断开',exact:true}).click();await expect(page.getByRole('button',{name:'重新连接',exact:true})).toBeDisabled();
  await expect(page.getByText('请添加有效的无口令 SSH 私钥或新的一次性密码。',{exact:true})).toBeVisible();mark('Disconnect consumes the one-time password locally and prevents reconnect');
- await page.locator('.ant-modal-close').click();await page.getByRole('button',{name:'登录终端',exact:true}).click();await expect(page.getByRole('button',{name:'连接',exact:true})).toBeDisabled();mark('Reopening fetches revoked credential metadata and cannot reuse the password');
- await page.locator('.ant-modal-close').click();
+ await page.locator('.ant-modal-close').click();await expect(page.getByRole('button',{name:'登录终端',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'添加新的 SSH 凭据',exact:true})).toBeVisible();mark('Terminal release refreshes capabilities and prevents reopening with the consumed password');
  const seeded=await page.request.post(ready.origin+'/api/v1/fixtures/password-credential',{headers:{origin:ready.origin},data:{}});expect(seeded.ok()).toBe(true);
  await page.close();page=await pageFor('en-US');await page.getByRole('button',{name:'Open terminal',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Connected'})).toBeVisible();
- await expect(page.getByText('Password credentials are automatically revoked when the terminal ends or connection fails. Add a new password to reconnect; avoid long-term storage.',{exact:true})).toBeVisible();
+ await expect(page.getByText('Stored passwords are revoked and cleared when the terminal ends or connection fails. Add a new password to reconnect.',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Disconnect',exact:true}).click();await expect(page.getByRole('button',{name:'Reconnect',exact:true})).toBeDisabled();mark('English password terminal warning and single-use reconnect behavior match Chinese');
  expect(errors).toEqual([]);expect(unexpected).toEqual([]);
  await writeFile(resolve(output,'password-terminal-ui-report.json'),JSON.stringify({checked,errors,unexpected},null,2)+'\n');

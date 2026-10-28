@@ -15,7 +15,7 @@ const mark=value=>{checked.push(value);console.log('PASS '+value)};
 let browser;try{browser=await chromium.launch({headless:true})}catch{browser=await chromium.launch({headless:true,channel:'chrome'})}
 async function harness({role='admin',language='zh-CN'}={}){
  const at=new Date().toISOString(),expires=new Date(Date.now()+900_000).toISOString();
- const machine={id:'fixture-machine',name:'Fixture host',address:'host.example.com',port:22,username:'deploy',connection_method:'direct_ssh',host_key_fingerprint:'SHA256:fixtureconfirmedfingerprint',host_key_status:'confirmed',agent_id:'',agent_status:'unknown',active_credential_count:1,credential_count:1,arch:'',platform:'',updated_at:at,created_at:at};
+ const machine={id:'fixture-machine',name:'Fixture host',address:'host.example.com',port:22,username:'deploy',connection_method:'direct_ssh',host_key_fingerprint:'SHA256:fixtureconfirmedfingerprint',host_key_status:'confirmed',agent_id:'',agent_status:'unknown',active_credential_count:1,active_ssh_credential_count:1,active_ssh_key_count:1,ssh_recovery_available:true,capabilities:{terminal:{available:true,reason:''},ssh_check:{available:true,reason:''},deploy_agent:{available:true,reason:''}},credential_count:1,arch:'',platform:'',updated_at:at,created_at:at};
  const credential={id:'fixture-key',method:'ssh_key',secret_fingerprint:'fixture-metadata-only',expires_at:expires,retention:'managed'};
  const result={id:'fixture-check',machine_id:machine.id,credential_id:credential.id,connected:true,ready:true,platform:'linux',arch:'arm64',checks:{linux:true,supported_arch:true,curl:true,tar:true,gzip:true,sha256sum:true,systemd:true,install_privilege:true,platform_https:true},error_code:'',checked_at:at,expires_at:expires};
  const plan={id:'fixture-plan',machine_id:machine.id,status:'awaiting_approval',plan:{machine,credential,preflight:result,version:'0.1.0',arch:'arm64',expires_at:expires,steps:['确认主机公钥指纹','建立受限 SSH 连接','安装独立 systemd Agent','等待 Agent 激活回执'],warnings:['AI 不会读取或发送 SSH 秘密。']},review_url:'/machines?machine=fixture-machine&deployment=fixture-plan'};
@@ -71,13 +71,13 @@ try{
  await page.locator('.ant-table-tbody .ant-typography-copy').first().click();
  await expect.poll(()=>page.evaluate(()=>navigator.clipboard.readText())).toBe('host.example.com:22');mark('Copying the displayed host address copies address:port rather than the machine ID');
  await page.getByRole('button',{name:'添加凭据',exact:true}).click();
- await expect(page.getByText('密码凭据默认 15 分钟后失效，且不能用于自动 SSH 部署。到期或撤销不会自动删除已保存的密文。请避免长期保存，用后及时撤销；优先使用每台主机独立的 SSH 私钥或手动 enrollment 脚本。',{exact:true})).toBeVisible();
+ await expect(page.getByText('私钥默认临时保留 1 小时，密码默认 15 分钟且使用后清除。到期、撤销或 Agent 激活后会清除临时秘密；日常管理优先使用 Agent。需要长期 SSH 恢复通道时，请主动选择托管。',{exact:true})).toBeVisible();
  await expect(page.getByText('有效秒数',{exact:true})).toBeVisible();
- await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('密码（仅一次性登记）',{exact:true}).click();
+ await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('密码（仅一次性使用）',{exact:true}).click();
  const passwordInput=page.getByPlaceholder('输入一次性 SSH 密码',{exact:true});await passwordInput.fill('fixture-password');
  await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('SSH 私钥（推荐）',{exact:true}).click();
  await expect(page.getByPlaceholder('SSH 私钥内容',{exact:true})).toHaveValue('');mark('Switching credential methods clears the previous secret before it can be reused or displayed');
- await page.locator('.ant-modal:visible .ant-modal-close').click();mark('Chinese credential hints describe expiry without claiming stored ciphertext is deleted');
+ await page.locator('.ant-modal:visible .ant-modal-close').click();mark('Chinese credential hints describe temporary defaults and secret clearing');
  await page.getByRole('button',{name:'SSH 安装检查',exact:true}).click();
  state.result={...state.result,ready:false,checks:{...state.result.checks,systemd:false},error_code:'prerequisites_missing'};
  await page.getByRole('button',{name:'开始 SSH 检查',exact:true}).click();await expect(page.getByText('SSH 已连接，安装条件不满足',{exact:true})).toBeVisible();
@@ -103,7 +103,7 @@ try{
  state.deleteError='';await page.getByRole('button',{name:/删除主机/}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByText('尚未登记主机',{exact:true})).toBeVisible();expect(state.requests.filter(r=>r.method==='DELETE'&&r.path.endsWith('/fixture-machine'))).toHaveLength(2);mark('Successful host deletion closes details and refreshes the empty list');
  const en=await harness({language:'en-US'});current=en.page;await en.page.goto(origin+'/machines');
  await en.page.getByRole('button',{name:'Add credential',exact:true}).click();
- await expect(en.page.getByText('Password credentials expire after 15 minutes by default and cannot be used for automatic SSH deployment. Expiration or revocation does not automatically delete the stored ciphertext. Avoid long-term storage and revoke credentials after use; prefer per-host SSH keys or manual enrollment scripts.',{exact:true})).toBeVisible();
+ await expect(en.page.getByText('Private keys are temporary for 1 hour by default. Passwords expire after 15 minutes and are cleared after use. Temporary secrets are cleared on expiry, revocation, or Agent activation. Prefer Agent for daily management; explicitly choose managed storage for long-term SSH recovery.',{exact:true})).toBeVisible();
  await expect(en.page.getByText('Validity in seconds',{exact:true})).toBeVisible();
  await en.page.getByRole('button',{name:'Close',exact:true}).click();mark('English credential hints match the same validity and retention behavior');
  await en.page.getByRole('button',{name:'SSH preflight',exact:true}).click();await en.page.getByRole('button',{name:'Run SSH preflight',exact:true}).click();await expect(en.page.getByText('SSH connected; installation checks passed',{exact:true})).toBeVisible();

@@ -1,0 +1,52 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "sections": [
+    "13",
+    "17.1"
+  ],
+  "before_seq": 767,
+  "saved_seq": 769,
+  "readback_seq": 769,
+  "paragraph_readback": [
+    {
+      "block_id": "a3691724-b5f2-4daf-bc4e-a0bd21316a74",
+      "seq": 769,
+      "verified": true,
+      "sha256": "87746d66d2e6e6874d315ad03d5a3e386295af89132f909c53096cbbec7751e5"
+    },
+    {
+      "block_id": "83e070ef-3ca3-4981-b59e-9fca7a9b8a58",
+      "seq": 769,
+      "verified": true,
+      "sha256": "33628e262a88f9df19f2931dcfd70b4432f0c567ae0b83209ca2dd8e3a941b1e"
+    },
+    {
+      "block_id": "credentials031-30e2efa0-cc37-4e4f-8614-e9ad10ddbca3",
+      "seq": 769,
+      "verified": true,
+      "sha256": "ba9ca6948bc0c46d3ffbb7cd8da58279d68c4fda467b0bb01355df003518e1d6"
+    },
+    {
+      "block_id": "credentials031-17052312-a666-4673-99b9-89125e223023",
+      "seq": 769,
+      "verified": true,
+      "sha256": "0dba9b18cfa20ff3bc26ca76f9d930f36802d163e80466713e48f5dd98e86ef7"
+    },
+    {
+      "block_id": "credentials031-487bb0ed-9411-4423-8569-7609600aaa3a",
+      "seq": 769,
+      "verified": true,
+      "sha256": "602cdee0ce3b207239c33d884d70aafd10b9bd3a398cf2e0a67f43127562e9bf"
+    },
+    {
+      "block_id": "credentials031-8486b2ee-7e45-4f42-9ed1-1cd3b27292f0",
+      "seq": 769,
+      "verified": true,
+      "sha256": "65551efba291af37c760df0b5e871f91ee8ba2b3dc186dcf992bd83dcaa4af50"
+    }
+  ],
+  "credential_matrix_verified": true,
+  "native_diagram_outline_unchanged": true,
+  "native_diagram_count": 5,
+  "scope": "Only credential lifecycle paragraphs and SSH credential matrix cells; no diagram edits."
+}
