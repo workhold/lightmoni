@@ -1,6 +1,7 @@
 {
   "checked": [
     "Copying the displayed host address copies address:port rather than the machine ID",
+    "Switching credential methods clears the previous secret before it can be reused or displayed",
     "Chinese credential hints describe expiry without claiming stored ciphertext is deleted",
     "Connected SSH with missing prerequisites does not propose or install",
     "Pinned host-key failure is explained",

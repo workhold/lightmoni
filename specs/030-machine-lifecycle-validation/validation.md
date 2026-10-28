@@ -8,7 +8,7 @@
 - runtime 全量测试：400 项中 383 项通过、17 项按环境条件跳过、0 失败。
 - `runtime/test/machine-password-ssh.test.ts`：使用内存随机 host key 和真实 `ssh2` loopback 服务，覆盖密码成功、错误密码、指纹不匹配、超时、预检取消和连接中止；不创建操作系统用户，不修改本机 sshd。
 - `web/src/app/verify-machine-password-terminal.mjs`：密码终端浏览器回归 4/4 通过；断开后不能本地复用，重新打开会读到已撤销状态。
-- 原私钥网页终端回归 9/9 通过，主机删除 UI 回归 17/17 通过。
+- 原私钥网页终端回归 9/9 通过，主机删除与凭据切换 UI 回归 18/18 通过。
 - runtime/web TypeScript 检查、Web 生产构建和 `git diff --check` 通过。
 
 ## vchive 受控验证

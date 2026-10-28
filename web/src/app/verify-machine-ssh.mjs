@@ -73,6 +73,10 @@ try{
  await page.getByRole('button',{name:'添加凭据',exact:true}).click();
  await expect(page.getByText('密码凭据默认 15 分钟后失效，且不能用于自动 SSH 部署。到期或撤销不会自动删除已保存的密文。请避免长期保存，用后及时撤销；优先使用每台主机独立的 SSH 私钥或手动 enrollment 脚本。',{exact:true})).toBeVisible();
  await expect(page.getByText('有效秒数',{exact:true})).toBeVisible();
+ await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('密码（仅一次性登记）',{exact:true}).click();
+ const passwordInput=page.getByPlaceholder('输入一次性 SSH 密码',{exact:true});await passwordInput.fill('fixture-password');
+ await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('SSH 私钥（推荐）',{exact:true}).click();
+ await expect(page.getByPlaceholder('SSH 私钥内容',{exact:true})).toHaveValue('');mark('Switching credential methods clears the previous secret before it can be reused or displayed');
  await page.locator('.ant-modal:visible .ant-modal-close').click();mark('Chinese credential hints describe expiry without claiming stored ciphertext is deleted');
  await page.getByRole('button',{name:'SSH 安装检查',exact:true}).click();
  state.result={...state.result,ready:false,checks:{...state.result.checks,systemd:false},error_code:'prerequisites_missing'};
