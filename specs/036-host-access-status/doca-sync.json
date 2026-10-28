@@ -1,0 +1,24 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "sections": [
+    "13.1"
+  ],
+  "status": "design_proposal_not_implemented",
+  "before_seq": 772,
+  "saved_seq": 773,
+  "readback_seq": 773,
+  "full_document_readback": true,
+  "new_blocks_verified": 10,
+  "text_blocks_verified": 9,
+  "unrelated_blocks_verified_unchanged": 294,
+  "existing_native_diagrams_verified_unchanged": 7,
+  "new_native_diagram": {
+    "block_id": "host-access036-native-flow",
+    "nodes": 9,
+    "edges": 9,
+    "nodes_and_edges_readback_match": true,
+    "sha256": "e75ecd844995adb92312f43e317caaac550b262684ef69dcc3c33d583f1f7b47"
+  },
+  "native_visual_render_verified": false,
+  "scope": "Only inserted a clearly labeled target proposal at section 13.1; current implementation narrative and all existing blocks/diagrams preserved."
+}
