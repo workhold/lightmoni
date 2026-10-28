@@ -19,7 +19,7 @@ async function harness({role='admin',language='zh-CN'}={}){
  const credential={id:'fixture-key',method:'ssh_key',secret_fingerprint:'fixture-metadata-only',expires_at:expires,retention:'managed'};
  const result={id:'fixture-check',machine_id:machine.id,credential_id:credential.id,connected:true,ready:true,platform:'linux',arch:'arm64',checks:{linux:true,supported_arch:true,curl:true,tar:true,gzip:true,sha256sum:true,systemd:true,install_privilege:true,platform_https:true},error_code:'',checked_at:at,expires_at:expires};
  const plan={id:'fixture-plan',machine_id:machine.id,status:'awaiting_approval',plan:{machine,credential,preflight:result,version:'0.1.0',arch:'arm64',expires_at:expires,steps:['确认主机公钥指纹','建立受限 SSH 连接','安装独立 systemd Agent','等待 Agent 激活回执'],warnings:['AI 不会读取或发送 SSH 秘密。']},review_url:'/machines?machine=fixture-machine&deployment=fixture-plan'};
- const state={role,result,plan,hold:false,failApply:false,release:undefined,requests:[]};
+ const state={role,result,plan,hold:false,failApply:false,release:undefined,requests:[],deleted:false,deleteError:'请先撤销或等待所有有效连接凭据失效后再删除主机'};
  const context=await browser.newContext({viewport:{width:1365,height:1000},reducedMotion:'reduce'});contexts.push(context);
  await context.addInitScript(language=>{localStorage.setItem('lightmoni.language',language);localStorage.setItem('lightmoni.nav.collapsed','true')},language);
  const user={id:'fixture-admin',name:'Fixture Admin',role};
@@ -36,14 +36,21 @@ async function harness({role='admin',language='zh-CN'}={}){
   if(url.origin!==origin){unexpected.push(url.href);return route.abort()}
   if(path.startsWith('/api/')){
    const body=request.postData()?request.postDataJSON():undefined;state.requests.push({method,path,body});
-   if(path==='/api/v1/machines'&&method==='GET')return route.fulfill({json:[machine]});
-   if(path==='/api/v1/machines/'+machine.id&&method==='GET')return route.fulfill({json:{machine,credentials:[credential],deployments:[plan]}});
+   if(path==='/api/v1/machines'&&method==='GET')return route.fulfill({json:state.deleted?[]:[machine]});
+   if(path==='/api/v1/machines/'+machine.id&&method==='GET')return route.fulfill({json:{machine,credentials:[credential],deployments:[state.plan]}});
+   if(path==='/api/v1/machines/'+machine.id&&method==='DELETE'){
+    if(state.deleteError)return route.fulfill({status:409,json:{error:state.deleteError}});
+    state.deleted=true;return route.fulfill({json:{ok:true}});
+   }
    if(path.endsWith('/ssh-check')&&method==='POST'){
     if(state.hold)await new Promise(resolve=>{state.release=resolve});
     return route.fulfill({json:state.result}).catch(()=>{});
    }
    if(path.endsWith('/deployments/plan')&&method==='POST'){expect(body.arch).toBe('arm64');expect(body.check_id).toBe('fixture-check');return route.fulfill({json:state.plan})}
    if(path.endsWith('/deployments/fixture-plan')&&method==='GET')return route.fulfill({json:state.plan});
+   if(path.endsWith('/deployments/fixture-plan/cancel')&&method==='POST'){
+    state.plan={...state.plan,status:'cancelled'};return route.fulfill({json:state.plan});
+   }
    if(path.endsWith('/deployments/fixture-plan/apply')&&method==='POST'){
     expect(body).toEqual({confirm:true});
     if(state.failApply){state.plan={...state.plan,status:'failed',error:'Fixture SSH installation failed'};return route.fulfill({status:502,json:{error:state.plan.error}})}
@@ -66,6 +73,10 @@ try{
  await page.getByRole('button',{name:'添加凭据',exact:true}).click();
  await expect(page.getByText('密码凭据默认 15 分钟后失效，且不能用于自动 SSH 部署。到期或撤销不会自动删除已保存的密文。请避免长期保存，用后及时撤销；优先使用每台主机独立的 SSH 私钥或手动 enrollment 脚本。',{exact:true})).toBeVisible();
  await expect(page.getByText('有效秒数',{exact:true})).toBeVisible();
+ await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('密码（仅一次性登记）',{exact:true}).click();
+ const passwordInput=page.getByPlaceholder('输入一次性 SSH 密码',{exact:true});await passwordInput.fill('fixture-password');
+ await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('SSH 私钥（推荐）',{exact:true}).click();
+ await expect(page.getByPlaceholder('SSH 私钥内容',{exact:true})).toHaveValue('');mark('Switching credential methods clears the previous secret before it can be reused or displayed');
  await page.locator('.ant-modal:visible .ant-modal-close').click();mark('Chinese credential hints describe expiry without claiming stored ciphertext is deleted');
  await page.getByRole('button',{name:'SSH 安装检查',exact:true}).click();
  state.result={...state.result,ready:false,checks:{...state.result.checks,systemd:false},error_code:'prerequisites_missing'};
@@ -87,6 +98,9 @@ try{
  await expect(page.getByText('部署状态：failed',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'我已审阅，确认执行 SSH 部署',exact:true})).toHaveCount(0);state.failApply=false;mark('Failed installation refreshes its real status and removes the obsolete approval action');
  state.plan={...state.plan,status:'awaiting_approval',plan:{...state.plan.plan,expires_at:'2000-01-01T00:00:00Z'}};
  await page.goto(origin+state.plan.review_url);await expect(page.getByRole('button',{name:'我已审阅，确认执行 SSH 部署',exact:true})).toBeDisabled();mark('Expired plans cannot be confirmed in the UI');
+ await page.goto(origin+'/machines');await page.getByRole('button',{name:/详\s*情/}).click();await page.getByRole('button',{name:/删除主机/}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await expect(page.locator('.ant-modal .ant-alert').getByText('请先撤销或等待所有有效连接凭据失效后再删除主机',{exact:true})).toBeVisible();mark('Host deletion keeps the detail open and surfaces the backend credential guard');
+ await page.getByRole('button',{name:'取消计划',exact:true}).click();await page.getByRole('button',{name:'确认取消',exact:true}).click();await expect(page.locator('.ant-modal').getByText('cancelled',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'取消计划',exact:true})).toHaveCount(0);mark('An unexecuted expired plan can be cancelled from history without running SSH');
+ state.deleteError='';await page.getByRole('button',{name:/删除主机/}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByText('尚未登记主机',{exact:true})).toBeVisible();expect(state.requests.filter(r=>r.method==='DELETE'&&r.path.endsWith('/fixture-machine'))).toHaveLength(2);mark('Successful host deletion closes details and refreshes the empty list');
  const en=await harness({language:'en-US'});current=en.page;await en.page.goto(origin+'/machines');
  await en.page.getByRole('button',{name:'Add credential',exact:true}).click();
  await expect(en.page.getByText('Password credentials expire after 15 minutes by default and cannot be used for automatic SSH deployment. Expiration or revocation does not automatically delete the stored ciphertext. Avoid long-term storage and revoke credentials after use; prefer per-host SSH keys or manual enrollment scripts.',{exact:true})).toBeVisible();

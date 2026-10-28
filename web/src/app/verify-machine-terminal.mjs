@@ -51,7 +51,7 @@ try{
  // Add a second metadata-bound key to verify explicit selection; the private
  // key is intentionally invalid and never used to connect in this scenario.
  await page.request.post(ready.origin+`/api/v1/machines/${ready.machineID}/credentials`,{data:{method:'ssh_key',secret:'-----BEGIN OPENSSH PRIVATE KEY-----\ninvalid-fixture-only\n-----END OPENSSH PRIVATE KEY-----'}});
- await page.locator('.ant-modal-close').click();await page.getByRole('button',{name:'Open terminal',exact:true}).click();await expect(page.getByRole('combobox',{name:'Terminal SSH private key'})).toBeVisible();await expect(page.getByRole('button',{name:'Connect',exact:true})).toBeDisabled();mark('Multiple private keys require explicit selection without silently using the first');
+ await page.locator('.ant-modal-close').click();await page.getByRole('button',{name:'Open terminal',exact:true}).click();await expect(page.getByRole('combobox',{name:'Terminal SSH credential'})).toBeVisible();await expect(page.getByRole('button',{name:'Connect',exact:true})).toBeDisabled();mark('Multiple private keys require explicit selection without silently using the first');
  expect(errors).toEqual([]);expect(unexpected).toEqual([]);
  await writeFile(resolve(output,'ui-report.json'),JSON.stringify({checked,errors,unexpected},null,2)+'\n');
 }catch(error){if(page)await page.screenshot({path:resolve(media,'terminal-failure.png'),fullPage:true}).catch(()=>{});console.error({errors,unexpected,fixtureErrors});throw error}

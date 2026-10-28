@@ -143,7 +143,8 @@ export function registerMachineTerminal(deps: Dependencies, machines: MachineTer
       const m = s.lease.machine;
       client.connect({
         host: m.address.replace(/^\[|\]$/g, ""), port: m.port, username: m.username,
-        privateKey: s.lease.privateKey, readyTimeout: limits.connectMs,
+        ...(s.lease.credentialMethod === "password" ? { password: s.lease.password, tryKeyboard: false } : { privateKey: s.lease.privateKey }),
+        readyTimeout: limits.connectMs,
         keepaliveInterval: 15_000, keepaliveCountMax: 2,
         hostVerifier(key: Buffer) {
           const actual = "SHA256:" + createHash("sha256").update(key).digest("base64").replace(/=+$/, "");
@@ -151,9 +152,10 @@ export function registerMachineTerminal(deps: Dependencies, machines: MachineTer
           return !mismatch;
         },
       });
-    } catch { close(s, "invalid_private_key"); }
-    // ssh2 has parsed the key; do not retain a second plaintext copy in the lease.
-    s.lease.privateKey = "";
+    } catch { close(s, s.lease.credentialMethod === "password" ? "authentication_failed" : "invalid_private_key"); }
+    // ssh2 owns the in-flight authentication; do not retain a second plaintext
+    // key or password copy in the terminal lease.
+    s.lease.privateKey = ""; s.lease.password = "";
   };
   const path = "/api/v1/machines/:id/terminal-sessions";
   deps.router.post(path, async ctx => {

@@ -51,10 +51,79 @@ test('managed machines validate host input and never return credential secrets',
  const assistant=f.machines.assistantGet(machine.id);assert.equal(assistant.host_key_fingerprint,'');
 });
 
-test('password credentials are short lived and cannot start automatic deployment',async t=>{
- const f=await fixture(t);const created=await f.request('/machines','POST',{name:'prod-2',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',host_key_fingerprint:'SHA256:abcdefghijklmnop'});const machine=created.data;
+test('password credentials can run one fixed SSH check once, then are revoked and cannot deploy',async t=>{
+ let sshInput:any;
+ const f=await fixture(t,{},async input=>{sshInput=input;return {stdout:checkOutput,stderr:'',stages:['checking_host_key','remote_command_completed']}});
+ const created=await f.request('/machines','POST',{name:'prod-2',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',host_key_fingerprint:'SHA256:abcdefghijklmnop'});const machine=created.data;
  const password=await f.request(`/machines/${machine.id}/credentials`,'POST',{method:'password',secret:'temporary-password'});assert.equal(password.status,201);assert.equal(password.data.retention,'one_time');assert.match(password.data.warning,/不要长期保存/);
- const plan=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(plan.status,400);assert.match(plan.raw,/密码/);
+ const checked=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(checked.status,200,checked.raw);assert.equal(checked.data.connected,true);assert.equal(checked.data.ready,true);assert.equal(sshInput.password,'temporary-password');assert.equal(sshInput.privateKey,'');
+ const detail=await f.request(`/machines/${machine.id}`);assert.equal(detail.data.credentials[0].revoked_at!==null,true);assert.equal(detail.data.credentials[0].last_used_at!==null,true);
+ const reused=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(reused.status,409);assert.match(reused.raw,/撤销/);
+ const deployment=await f.request(`/machines/${machine.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:password.data.credential_id,version:'0.1.0',arch:'amd64'});assert.equal(deployment.status,409);assert.match(deployment.raw,/撤销|凭据/);
+});
+
+test('password credential preserves intentional leading/trailing whitespace during SSH check',async t=>{
+ let received='';const f=await fixture(t,{},async input=>{received=input.password??'';return {stdout:checkOutput,stderr:'',stages:[]}});
+ const created=await f.request('/machines','POST',{name:'password-space',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',host_key_fingerprint:'SHA256:abcdefghijklmnop'});
+ const original='  password with spaces \t';const password=await f.request(`/machines/${created.data.id}/credentials`,'POST',{method:'password',secret:original});assert.equal(password.status,201);
+ const checked=await f.request(`/machines/${created.data.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(checked.status,200,checked.raw);assert.equal(received,original);
+});
+
+test('host deletion requires credentials and pending deployments to be cleared first',async t=>{
+ const f=await fixture(t),h=await host(f,'delete-guard');
+ const blockedByCredential=await f.request(`/machines/${h.id}`,'DELETE');
+ assert.equal(blockedByCredential.status,409,blockedByCredential.raw);assert.match(blockedByCredential.raw,/撤销|有效连接凭据/);
+ await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ const deleted=await f.request(`/machines/${h.id}`,'DELETE');
+ assert.equal(deleted.status,200,deleted.raw);assert.deepEqual(deleted.data,{ok:true});
+ assert.equal((await f.request(`/machines/${h.id}`)).status,404);
+ assert.equal(f.db.get(`SELECT id FROM machine_credentials WHERE machine_id=?`,h.id),undefined);
+});
+
+test('host deletion rejects an unended deployment plan even after its credential is revoked',async t=>{
+ const f=await fixture(t),h=await host(f,'delete-plan');
+ const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});assert.equal(checked.status,200,checked.raw);
+ const plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:h.credential,version:'0.1.0',arch:'amd64'});
+ assert.equal(plan.status,201,plan.raw);assert.equal(plan.data.status,'awaiting_approval');
+ await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ const blocked=await f.request(`/machines/${h.id}`,'DELETE');
+ assert.equal(blocked.status,409,blocked.raw);assert.match(blocked.raw,/未结束的部署任务/);
+});
+
+test('cancelled plans are idempotent, block members and permit complete host cleanup',async t=>{
+ let clock=now;const f=await fixture(t,{now:()=>clock}),h=await host(f,'delete-cleanup');
+ const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});
+ const plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:h.credential,version:'0.1.0',arch:'amd64'});
+ assert.equal(plan.status,201,plan.raw);
+ f.user.role='member';
+ assert.equal((await f.request(`/machines/${h.id}`,'DELETE')).status,403);
+ assert.equal((await f.request(`/machines/${h.id}/deployments/${plan.data.id}/cancel`,'POST',{})).status,403);
+ f.user.role='admin';
+ clock=new Date(now.getTime()+900_001);
+ const cancelled=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/cancel`,'POST',{});
+ assert.equal(cancelled.status,200,cancelled.raw);assert.equal(cancelled.data.status,'cancelled');
+ const repeated=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/cancel`,'POST',{});
+ assert.equal(repeated.status,200,repeated.raw);assert.equal(repeated.data.status,'cancelled');
+ await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ const deleted=await f.request(`/machines/${h.id}`,'DELETE');
+ assert.equal(deleted.status,200,deleted.raw);
+ for(const table of ['managed_machines','machine_credentials','machine_ssh_checks','machine_deployments']){
+  const key=table==='managed_machines'?'id':'machine_id';
+  assert.equal(f.db.get(`SELECT id FROM ${table} WHERE ${key}=?`,h.id),undefined,table+' should be cleared');
+ }
+});
+
+test('completed deployment plans cannot be cancelled and an active terminal blocks cancellation',async t=>{
+ const f=await fixture(t),h=await host(f,'cancel-guard');
+ const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});
+ const plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:h.credential,version:'0.1.0',arch:'amd64'});
+ const lease=f.machines.acquireTerminal(h.id,h.credential,()=>{});
+ const busy=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/cancel`,'POST',{});
+ assert.equal(busy.status,409,busy.raw);assert.match(busy.raw,/终端|检查|部署正在进行/);
+ lease.release();
+ const applied=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,200,applied.raw);
+ const completed=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/cancel`,'POST',{});
+ assert.equal(completed.status,409,completed.raw);assert.match(completed.raw,/尚未执行/);
 });
 
 test('manual script credentials cannot be mistaken for automatic SSH deployment',async t=>{

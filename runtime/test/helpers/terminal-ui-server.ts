@@ -11,10 +11,13 @@ import {Auth} from '../../src/server/auth.js';
 import {registerManagedMachines} from '../../src/server/managed-machines.js';
 import {registerMachineTerminal} from '../../src/server/machine-terminal.js';
 import {isolatedSSHD} from './isolated-sshd.js';
+import {passwordSSHServer} from './password-ssh-server.js';
 import type {Dependencies} from '../../src/shared/types.js';
 import type {TestContext} from 'node:test';
 
-const cleanups:(()=>unknown)[]=[],ssh=await isolatedSSHD({after:(fn:()=>unknown)=>cleanups.push(fn)} as TestContext);
+const cleanups:(()=>unknown)[]=[],passwordMode=process.env.LIGHTMONI_TERMINAL_AUTH==='password';
+const cleanupContext={after:(fn:()=>unknown)=>cleanups.push(fn)} as TestContext;
+const ssh=passwordMode?await passwordSSHServer(cleanupContext):await isolatedSSHD(cleanupContext);
 const dir=await mkdtemp(join(tmpdir(),'lightmoni-terminal-browser-')),db=new DB(':memory:'),router=new Router();
 const auth=new Auth(db,dir,'',router);auth.register();router.auth=auth;
 db.run("INSERT INTO users(id,name,role,created_at) VALUES('qa-admin','QA Admin','admin',?)",new Date().toISOString());
@@ -35,7 +38,10 @@ const origin=`http://127.0.0.1:${(server.address() as any).port}`;deps.externalU
 const terminal=registerMachineTerminal(deps,machines,server);
 const request=async(path:string,body:unknown)=>{const res=await fetch(origin+'/api/v1'+path,{method:'POST',headers:{cookie:'lm_session=fixture-browser-login','content-type':'application/json',origin},body:JSON.stringify(body)});if(!res.ok)throw Error('Fixture setup failed');return res.json() as any};
 const machine=await request('/machines',{name:'Terminal fixture',address:ssh.address,port:ssh.port,username:ssh.username,connection_method:'direct_ssh',host_key_fingerprint:ssh.pin});
-await request(`/machines/${machine.id}/credentials`,{method:'ssh_key',secret:ssh.privateKey});
+await request(`/machines/${machine.id}/credentials`,passwordMode?{method:'password',secret:(ssh as Awaited<ReturnType<typeof passwordSSHServer>>).password}:{method:'ssh_key',secret:(ssh as Awaited<ReturnType<typeof isolatedSSHD>>).privateKey});
+// A test-only seed route avoids sending generated fixture passwords through
+// browser script arguments or reports. It never returns the secret.
+if(passwordMode)router.post('/api/v1/fixtures/password-credential',async ctx=>{deps.auth.requireAdmin(ctx);ctx.json(await request(`/machines/${machine.id}/credentials`,{method:'password',secret:(ssh as Awaited<ReturnType<typeof passwordSSHServer>>).password}));});
 console.log(JSON.stringify({origin,machineID:machine.id}));
 let stopped=false;
 const close=async()=>{if(stopped)return;stopped=true;await terminal.close?.();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));db.close();await rm(dir,{recursive:true,force:true});for(const fn of [...cleanups].reverse())await fn();process.exit(0)};

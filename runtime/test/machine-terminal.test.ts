@@ -16,6 +16,7 @@ import {registerManagedMachines} from '../src/server/managed-machines.js';
 import {registerMachineTerminal} from '../src/server/machine-terminal.js';
 import type {Dependencies} from '../src/shared/types.js';
 import {isolatedSSHD} from './helpers/isolated-sshd.js';
+import {passwordSSHServer} from './helpers/password-ssh-server.js';
 
 const fakeKey='-----BEGIN OPENSSH PRIVATE KEY-----\nfixture-only-invalid-key\n-----END OPENSSH PRIVATE KEY-----';
 async function fixture(t:TestContext,limits:Record<string,number>={}){
@@ -36,9 +37,9 @@ async function fixture(t:TestContext,limits:Record<string,number>={}){
   const res=await fetch(origin+'/api/v1'+path,{method,headers:{cookie:`lm_session=${login}`,origin,'content-type':'application/json',...headers},body:body===undefined?undefined:JSON.stringify(body)});
   return {status:res.status,data:await res.json() as any};
  };
- const host=async(overrides:Record<string,unknown>={},key=fakeKey)=>{
+ const host=async(overrides:Record<string,unknown>={},key=fakeKey,method='ssh_key')=>{
   const m=await request('/machines','POST',{name:'Fixture',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',host_key_fingerprint:'SHA256:abcdefghijklmnop',...overrides});assert.equal(m.status,201);
-  const c=await request(`/machines/${m.data.id}/credentials`,'POST',{method:'ssh_key',secret:key});assert.equal(c.status,201);
+  const c=await request(`/machines/${m.data.id}/credentials`,'POST',{method,secret:key});assert.equal(c.status,201);
   return {id:m.data.id,credentialID:c.data.credential_id,path:`/machines/${m.data.id}/terminal-sessions`};
  };
  const create=async(h:Awaited<ReturnType<typeof host>>,body:unknown={},login='admin')=>request(h.path,'POST',body,login);
@@ -53,7 +54,7 @@ async function fixture(t:TestContext,limits:Record<string,number>={}){
   const wait=async(predicate:()=>boolean)=>{for(let i=0;i<500;i++){if(predicate())return;await new Promise(r=>setTimeout(r,20))}assert.fail('terminal event timed out: '+JSON.stringify(messages))};
   return {ws,messages,chunks,wait,text:()=>Buffer.concat(chunks).toString(),send:(value:any)=>ws.send(JSON.stringify(value)),connected:()=>wait(()=>messages.some(m=>m.status==='connected')),closed:(reason?:string)=>wait(()=>messages.some(m=>m.status==='closed'&&(!reason||m.reason===reason)))};
  };
- return {db,request,host,create,rejected,attach,origin,terminal,machines,logs};
+ return {db,request,host,create,rejected,attach,origin,terminal,machines,logs,decrypt:auth.decrypt};
 }
 
 test('terminal REST and upgrades enforce administrator, exact login, origin, owner, machine and single use',async t=>{
@@ -175,4 +176,63 @@ test('SSH connection deadline closes a nonresponsive peer without retaining a lo
  const c=await f.attach((await f.create(h)).data);await c.closed('connect_timeout');
  assert.equal((await f.request(`/machines/${h.id}`,'PUT',{username:'deploy'})).status,200);
  assert.deepEqual(f.logs,[]);
+});
+
+test('password terminal uses real SSH password and PTY, then revokes the one-time credential on disconnect',async t=>{
+ const ssh=await passwordSSHServer(t),f=await fixture(t,{checkMs:50,idleMs:10_000}),h=await f.host({address:ssh.address,port:ssh.port,username:ssh.username,host_key_fingerprint:ssh.pin},ssh.password,'password');
+ const created=await f.create(h,{credential_id:h.credentialID,cols:91,rows:27});assert.equal(created.status,201);
+ const c=await f.attach(created.data);await c.connected();await c.wait(()=>c.text().includes('FIXTURE_READY'));
+ assert.ok(ssh.authMethods.includes('password'));assert.deepEqual(ssh.ptys,[{cols:91,rows:27,term:'xterm-256color'}]);
+ c.send({type:'input',data:'fixture-identify\r'});await c.wait(()=>c.text().includes('FIXTURE_USER=fixture'));
+ assert.deepEqual(ssh.commands,['fixture-identify']);
+ assert.equal(f.db.get<any>('SELECT revoked_at FROM machine_credentials WHERE id=?',h.credentialID)?.revoked_at,null);
+ await f.request(`${h.path}/${created.data.id}`,'DELETE');await c.closed('disconnected');
+ const credential=f.db.get<any>('SELECT revoked_at,last_used_at FROM machine_credentials WHERE id=?',h.credentialID);assert.ok(credential.revoked_at&&credential.last_used_at);
+ assert.equal((await f.create(h,{credential_id:h.credentialID})).status,409);
+ assert.ok(!c.text().includes(ssh.password));assert.ok(!JSON.stringify(f.db.all('SELECT * FROM machine_terminal_events')).includes(ssh.password));assert.deepEqual(f.logs,[]);
+});
+
+test('password terminal rejects wrong password and pin, and expires or revokes an active session',async t=>{
+ const ssh=await passwordSSHServer(t),f=await fixture(t,{checkMs:50,idleMs:10_000});
+ const target={address:ssh.address,port:ssh.port,username:ssh.username,host_key_fingerprint:ssh.pin};
+ const wrong=await f.host(target,'incorrect-fixture-password','password');
+ let c=await f.attach((await f.create(wrong)).data);await c.closed('authentication_failed');
+ assert.ok(f.db.get<any>('SELECT revoked_at FROM machine_credentials WHERE id=?',wrong.credentialID)?.revoked_at);
+ const unpinned=await f.host({...target,host_key_fingerprint:'SHA256:wrongconfirmedfingerprint'},ssh.password,'password');
+ c=await f.attach((await f.create(unpinned)).data);await c.closed('host_key_mismatch');
+ assert.ok(f.db.get<any>('SELECT revoked_at FROM machine_credentials WHERE id=?',unpinned.credentialID)?.revoked_at);
+ const expired=await f.host(target,ssh.password,'password');c=await f.attach((await f.create(expired)).data);await c.connected();
+ f.db.run('UPDATE machine_credentials SET expires_at=? WHERE id=?','2000-01-01T00:00:00Z',expired.credentialID);await c.closed('credential_invalid');
+ assert.ok(f.db.get<any>('SELECT revoked_at FROM machine_credentials WHERE id=?',expired.credentialID)?.revoked_at);
+ const revoked=await f.host(target,ssh.password,'password');c=await f.attach((await f.create(revoked)).data);await c.connected();
+ await f.request(`/machines/${revoked.id}/credentials/${revoked.credentialID}`,'DELETE');await c.closed('credential_invalid');
+ assert.equal((await f.create(revoked)).status,400);assert.deepEqual(ssh.commands,[]);assert.deepEqual(f.logs,[]);
+});
+
+test('pending password terminal cancellation and entry timeout revoke credentials and clear plaintext leases',async t=>{
+ const f=await fixture(t,{pendingMs:100,checkMs:50});
+ const cancelled=await f.host({},'temporary-fixture-password','password');
+ const entry=await f.create(cancelled);assert.equal(entry.status,201);
+ await f.request(`${cancelled.path}/${entry.data.id}`,'DELETE');
+ assert.ok(f.db.get<any>('SELECT revoked_at FROM machine_credentials WHERE id=?',cancelled.credentialID)?.revoked_at);
+ const expired=await f.host({},'temporary-fixture-password','password');const pending=await f.create(expired);assert.equal(pending.status,201);
+ await new Promise(resolve=>setTimeout(resolve,150));assert.ok(f.db.get<any>('SELECT revoked_at FROM machine_credentials WHERE id=?',expired.credentialID)?.revoked_at);
+ assert.equal(await f.rejected(pending.data),404);
+ const direct=await f.host({},'temporary-fixture-password','password');const lease=f.machines.acquireTerminal(direct.id,direct.credentialID,()=>{});
+ assert.equal(lease.privateKey,'');assert.equal(lease.password,'temporary-fixture-password');assert.equal(lease.valid(),true);lease.release();
+ assert.equal(lease.privateKey,'');assert.equal(lease.password,'');assert.equal(lease.valid(),false);
+ assert.ok(f.db.get<any>('SELECT revoked_at FROM machine_credentials WHERE id=?',direct.credentialID)?.revoked_at);assert.deepEqual(f.logs,[]);
+});
+
+test('SSH password whitespace survives encrypted storage and authenticates without rewriting',async t=>{
+ const original='  fixture-password-with-spaces \t',ssh=await passwordSSHServer(t,{password:original}),f=await fixture(t,{checkMs:50});
+ const h=await f.host({address:ssh.address,port:ssh.port,username:ssh.username,host_key_fingerprint:ssh.pin},original,'password');
+ const saved=f.db.get<any>('SELECT secret_encrypted FROM machine_credentials WHERE id=?',h.credentialID);
+ assert.ok(saved.secret_encrypted);assert.ok(!saved.secret_encrypted.includes(original));
+ assert.equal(JSON.parse(f.decrypt(saved.secret_encrypted)).secret,original);
+ const c=await f.attach((await f.create(h,{credential_id:h.credentialID})).data);await c.connected();
+ c.send({type:'input',data:'fixture-identify\r'});await c.wait(()=>c.text().includes('FIXTURE_USER=fixture'));
+ c.send({type:'input',data:'fixture-exit\r'});await c.closed('remote_closed');
+ assert.ok(f.db.get<any>('SELECT revoked_at FROM machine_credentials WHERE id=?',h.credentialID)?.revoked_at);
+ assert.ok(!c.text().includes(original));assert.deepEqual(f.logs,[]);
 });

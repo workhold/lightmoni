@@ -3,11 +3,14 @@ import { createHash } from "node:crypto";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Client } from "ssh2";
 import type { MachineSummary } from "./managed-machines.js";
 
 export interface SSHRunInput {
   machine: MachineSummary;
   privateKey: string;
+  /** One-time password authentication is accepted only by the preflight runner. */
+  password?: string;
   command: string;
   enrollmentToken?: string;
   signal: AbortSignal;
@@ -79,6 +82,73 @@ export async function defaultSSHRunner(input: SSHRunInput) {
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/**
+ * Run the fixed, read-only preflight with an SSH password.
+ *
+ * This deliberately uses ssh2 instead of an ssh/sshpass subprocess: the
+ * password never becomes a command-line argument, environment variable, or
+ * process stdin. Callers must provide a short-lived credential and this
+ * runner is never selected by Agent deployment or the interactive terminal.
+ */
+export async function passwordSSHRunner(input: SSHRunInput) {
+  if (!input.password) throw new SSHError("ssh_failed");
+  const timeoutMs = input.timeoutMs ?? 60_000;
+  const signal = AbortSignal.any([input.signal, AbortSignal.timeout(timeoutMs)]);
+  if (signal.aborted) throw new SSHError(input.signal.aborted ? "cancelled" : "timed_out");
+  const client = new Client();
+  let timer: NodeJS.Timeout | undefined;
+  let settled = false;
+  let mismatch = false;
+  let stdout = "", stderr = "";
+  const finish = (error?: SSHError, result?: { stdout: string; stderr: string; stages: string[] }) => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
+    client.destroy();
+    if (error) rejectPromise?.(error);
+    else resolvePromise?.(result!);
+  };
+  let resolvePromise: ((value: { stdout: string; stderr: string; stages: string[] }) => void) | undefined;
+  let rejectPromise: ((error: SSHError) => void) | undefined;
+  const promise = new Promise<{ stdout: string; stderr: string; stages: string[] }>((resolve, reject) => {
+    resolvePromise = resolve; rejectPromise = reject;
+  });
+  const abort = () => finish(new SSHError(input.signal.aborted ? "cancelled" : "timed_out"));
+  timer = setTimeout(() => finish(new SSHError("timed_out")), timeoutMs);
+  signal.addEventListener("abort", abort, { once: true });
+  client.on("error", (error: Error & { level?: string }) => {
+    finish(new SSHError(mismatch ? "host_key_mismatch" : error.level === "client-authentication" ? "ssh_failed" : "ssh_failed"));
+  });
+  client.on("close", () => { if (!settled) finish(new SSHError("ssh_failed")); });
+  client.on("ready", () => {
+    if (settled) return;
+    client.exec(input.command, (error, stream) => {
+      if (error || !stream) return finish(new SSHError("ssh_failed"));
+      stream.on("data", (chunk: Buffer) => { stdout = (stdout + chunk.toString()).slice(-12_000); });
+      stream.stderr.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-12_000); });
+      stream.on("error", () => finish(new SSHError("ssh_failed")));
+      stream.on("close", (code: number | null) => {
+        if (code !== 0) return finish(new SSHError("ssh_failed"));
+        finish(undefined, { stdout, stderr, stages: ["checking_host_key", "host_key_confirmed", "connecting_ssh", "remote_command_completed"] });
+      });
+    });
+  });
+  try {
+    const machine = input.machine;
+    client.connect({
+      host: machine.address.replace(/^\[|\]$/g, ""), port: input.port, username: machine.username,
+      password: input.password, readyTimeout: Math.min(timeoutMs, 20_000), tryKeyboard: false,
+      hostVerifier(key: Buffer) {
+        const actual = "SHA256:" + createHash("sha256").update(key).digest("base64").replace(/=+$/, "");
+        mismatch = actual !== machine.host_key_fingerprint;
+        return !mismatch;
+      },
+    });
+  } catch { finish(new SSHError("ssh_failed")); }
+  return promise;
 }
 
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";

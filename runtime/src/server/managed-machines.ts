@@ -6,7 +6,7 @@ import type {
   AgentEnrollmentIssued,
 } from "./agent-credentials.js";
 
-import { defaultSSHRunner, SSHError, preflightCommand, parsePreflight, type SSHRunner } from "./machine-ssh.js";
+import { defaultSSHRunner, passwordSSHRunner, SSHError, preflightCommand, parsePreflight, type SSHRunner } from "./machine-ssh.js";
 export type { SSHRunInput, SSHRunner } from "./machine-ssh.js";
 
 export type ConnectionMethod = "direct_ssh" | "bastion" | "ssm" | "manual_script";
@@ -134,7 +134,9 @@ export interface ManagedMachinesOptions {
 export interface TerminalLease {
   machine: MachineSummary;
   credentialID: string;
+  credentialMethod: "ssh_key" | "password";
   privateKey: string;
+  password: string;
   valid(): boolean;
   markUsed(): void;
   release(): void;
@@ -253,6 +255,16 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (!MACHINE_ID.test(machineID) || !db.get("SELECT id FROM managed_machines WHERE id=?", machineID)) fail(404, "主机不存在");
     return row(machineID)!;
   };
+  const ensureDeletable = (machineID: string) => {
+    ensureMachine(machineID);
+    // Keep the existing in-flight lease guard first so an active terminal,
+    // check, or deployment receives the precise busy error.
+    idle(machineID);
+    if (db.get("SELECT id FROM machine_credentials WHERE machine_id=? AND revoked_at IS NULL AND expires_at>? LIMIT 1", machineID, iso(now())))
+      fail(409, "请先撤销或等待所有有效连接凭据失效后再删除主机");
+    if (db.get("SELECT id FROM machine_deployments WHERE machine_id=? AND status IN ('awaiting_approval','running') LIMIT 1", machineID))
+      fail(409, "该主机有未结束的部署任务，请先完成或取消后再删除");
+  };
   const ensureCredential = (machineID: string, credentialID: string) => {
     const value = db.get<any>("SELECT * FROM machine_credentials WHERE id=? AND machine_id=?", credentialID, machineID);
     if (!value) fail(404, "连接凭据不存在");
@@ -300,7 +312,13 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     ensureMachine(ctx.params.id);
     const input = await machineBody(ctx), method = text(input.method, "method", 32) as CredentialMethod;
     if (!CREDENTIALS.has(method)) fail(400, "invalid credential method");
-    const secret = text(input.secret, "secret", method === "ssh_key" ? 64 << 10 : 4096, method !== "manual_script");
+    let secret: string;
+    if (method === "password") {
+      // Whitespace is part of an SSH password; validation must not trim or
+      // otherwise rewrite authentication material before encryption/use.
+      if (typeof input.secret !== "string" || input.secret.length === 0 || Buffer.byteLength(input.secret) > 4096) fail(400, "invalid secret");
+      secret = input.secret;
+    } else secret = text(input.secret, "secret", method === "ssh_key" ? 64 << 10 : 4096, method !== "manual_script");
     if (method === "ssh_key" && !/PRIVATE KEY/.test(secret)) fail(400, "SSH 凭据必须是私钥内容");
     const requested = integer(input.expires_in_seconds, "expires_in_seconds", 60, method === "password" ? PASSWORD_MAX_SECONDS : KEY_MAX_SECONDS, method === "password" ? 900 : 90 * 86400);
     const at = now(), expires = new Date(at.getTime() + requested * 1000), credentialID = id();
@@ -319,19 +337,20 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const deployments = (machineID: string) => db.all<any>(
     `SELECT id,machine_id,credential_id,status,version,arch,initial_label_id,plan_json,receipt_json,error,created_at,created_by,approved_at,started_at,finished_at FROM machine_deployments WHERE machine_id=? ORDER BY created_at DESC LIMIT 100`, machineID,
   ).map((value) => ({ id: value.id, machine_id: value.machine_id, credential_id: value.credential_id, status: value.status, version: value.version, arch: value.arch, initial_label_id: value.initial_label_id, plan: parseJSON(value.plan_json, {}), receipt: parseJSON(value.receipt_json, {}), error: value.error, created_at: value.created_at, created_by: value.created_by, approved_at: value.approved_at, started_at: value.started_at, finished_at: value.finished_at }));
-  const sshCredential = (machineID: string, credentialID?: string) => {
+  const sshCredential = (machineID: string, credentialID?: string, allowPassword = false) => {
     const machine = get(machineID);
     if (machine.connection_method !== "direct_ssh") fail(400, "自动 SSH 目前仅支持直接 SSH；跳板机和 SSM 请使用手动脚本");
     if (!machine.host_key_fingerprint) fail(400, "请先确认主机公钥指纹");
     let selected = credentialID;
     if (!selected) {
-      const keys = credentialRows(machineID).filter(c => c.method === "ssh_key" && !c.revoked_at && Date.parse(c.expires_at) > now().getTime());
-      if (!keys.length) fail(400, "请先添加有效的 SSH 私钥；密码和手动脚本不能用于自动 SSH");
-      if (keys.length > 1) fail(409, "存在多个有效 SSH 私钥，请明确选择 credential_id");
+      const methods = allowPassword ? ["ssh_key", "password"] : ["ssh_key"];
+      const keys = credentialRows(machineID).filter(c => methods.includes(c.method) && !c.revoked_at && Date.parse(c.expires_at) > now().getTime());
+      if (!keys.length) fail(400, allowPassword ? "请先添加有效的 SSH 私钥或一次性密码凭据" : "请先添加有效的 SSH 私钥；密码和手动脚本不能用于自动 SSH");
+      if (keys.length > 1) fail(409, allowPassword ? "存在多个有效 SSH 凭据，请明确选择 credential_id" : "存在多个有效 SSH 私钥，请明确选择 credential_id");
       selected = keys[0].id;
     }
     const credential = ensureCredential(machineID, text(selected, "credential_id", 64));
-    if (credential.method !== "ssh_key") fail(400, "当前自动 SSH 只支持私钥；密码请一次性手动使用，手动脚本请在目标主机上执行");
+    if (credential.method !== "ssh_key" && !(allowPassword && credential.method === "password")) fail(400, "当前自动 SSH 只支持私钥；密码仅用于一次性 SSH 检查，手动脚本请在目标主机上执行");
     return { machine, credential };
   };
   const decryptKey = (machineID: string, credential: any) => {
@@ -343,9 +362,11 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   };
   const acquireTerminal: MachineTerminalAccess["acquireTerminal"] = (machineID, credentialID, invalidate) => {
     idle(machineID);
-    const { machine, credential } = sshCredential(machineID, credentialID);
+    const { machine, credential } = sshCredential(machineID, credentialID, true);
     const lease: TerminalLease = {
-      machine, credentialID: credential.id, privateKey: decryptKey(machineID, credential),
+      machine, credentialID: credential.id, credentialMethod: credential.method,
+      privateKey: credential.method === "ssh_key" ? decryptKey(machineID, credential) : "",
+      password: credential.method === "password" ? decryptSecret(machineID, credential) : "",
       valid() {
         if (released) return false;
         try {
@@ -357,7 +378,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       release() {
         if (released) return;
         released = true;
-        lease.privateKey = "";
+        lease.privateKey = ""; lease.password = "";
+        if (credential.method === "password") db.run("UPDATE machine_credentials SET revoked_at=? WHERE id=? AND revoked_at IS NULL", iso(now()), credential.id);
         terminals.delete(machineID);
         busy.delete(machineID);
       },
@@ -368,10 +390,17 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     terminals.set(machineID, { credentialID: credential.id, invalidate });
     return lease;
   };
+  const decryptSecret = (machineID: string, credential: any) => {
+    try {
+      const envelope = parseJSON<{machine_id?: string; credential_id?: string; secret?: string}>(deps.decrypt(credential.secret_encrypted), {});
+      if (envelope.machine_id !== machineID || envelope.credential_id !== credential.id || !envelope.secret) throw Error();
+      return envelope.secret;
+    } catch { fail(500, "凭据解密或绑定校验失败，请重新登记连接凭据"); }
+  };
   const checkSSH = async (machineID: string, input: { credential_id?: string }, actorID: string, signal: AbortSignal): Promise<SSHCheckResult> => {
     parameters(record(input), ["credential_id"]);
     idle(machineID);
-    const { machine, credential } = sshCredential(machineID, input.credential_id);
+    const { machine, credential } = sshCredential(machineID, input.credential_id, true);
     let command: string;
     try { command = preflightCommand(deps.externalURL); } catch { fail(400, "请先将平台外部地址配置为目标机器可访问的 HTTPS 地址"); }
     const at = now();
@@ -382,15 +411,24 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const checkSignal = AbortSignal.any([signal, AbortSignal.timeout(CHECK_TIMEOUT_MS)]);
     try {
       signal.throwIfAborted();
-      const output = await (options.sshRunner ?? defaultSSHRunner)({ machine, privateKey: decryptKey(machineID, credential), command,
-        signal: checkSignal, port: machine.port, timeoutMs: CHECK_TIMEOUT_MS });
+      const output = await (options.sshRunner ?? (credential.method === "password" ? passwordSSHRunner : defaultSSHRunner))({
+        machine,
+        privateKey: credential.method === "ssh_key" ? decryptKey(machineID, credential) : "",
+        password: credential.method === "password" ? decryptSecret(machineID, credential) : undefined,
+        command, signal: checkSignal, port: machine.port, timeoutMs: CHECK_TIMEOUT_MS,
+      });
       result.connected = true;
       Object.assign(result, parsePreflight(output.stdout));
       if (!result.ready) result.error_code = "prerequisites_missing";
       db.run("UPDATE machine_credentials SET last_used_at=? WHERE id=?", iso(now()), credential.id);
     } catch (error) {
       result.error_code = signal.aborted ? "cancelled" : checkSignal.aborted ? "timed_out" : error instanceof SSHError ? error.code : "ssh_failed";
-    } finally { busy.delete(machineID); }
+    } finally {
+      // Password credentials are deliberately one-shot: even a failed login
+      // attempt must not leave a reusable password stored in the platform.
+      if (credential.method === "password") db.run("UPDATE machine_credentials SET revoked_at=? WHERE id=? AND revoked_at IS NULL", iso(now()), credential.id);
+      busy.delete(machineID);
+    }
     db.run("INSERT INTO machine_ssh_checks(id,machine_id,credential_id,target_revision,result_json,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
       result.id, machineID, credential.id, targetRevision(machine), JSON.stringify(result), actorID, iso(at));
     return result;
@@ -480,7 +518,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   router.post("/api/v1/machines", safe(createMachine));
   router.get("/api/v1/machines/:id", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); ctx.json({ machine: get(ctx.params.id), credentials: credentialRows(ctx.params.id), deployments: deployments(ctx.params.id) }); }));
   router.put("/api/v1/machines/:id", safe(updateMachine));
-  router.delete("/api/v1/machines/:id", safe((ctx) => { admin(ctx); idle(ctx.params.id); ensureMachine(ctx.params.id); db.run("DELETE FROM managed_machines WHERE id=?", ctx.params.id); ctx.json({ ok: true }); }));
+  router.delete("/api/v1/machines/:id", safe((ctx) => { admin(ctx); ensureDeletable(ctx.params.id); db.run("DELETE FROM managed_machines WHERE id=?", ctx.params.id); ctx.json({ ok: true }); }));
   router.post("/api/v1/machines/:id/ssh-check", safe(async ctx => { admin(ctx); ctx.json(await checkSSH(ctx.params.id, await machineBody(ctx), ctx.user.id, ctx.signal)); }));
   router.get("/api/v1/machines/:id/credentials", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); ctx.json(credentialRows(ctx.params.id)); }));
   router.post("/api/v1/machines/:id/credentials", safe(addCredential));
@@ -496,6 +534,16 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   router.get("/api/v1/machines/:id/deployments", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); ctx.json(deployments(ctx.params.id)); }));
   router.post("/api/v1/machines/:id/deployments/plan", safe(plan));
   router.get("/api/v1/machines/:id/deployments/:deploymentId", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); const value = deployments(ctx.params.id).find((item) => item.id === ctx.params.deploymentId); if (!value) fail(404, "部署计划不存在"); ctx.json(value); }));
+  router.post("/api/v1/machines/:id/deployments/:deploymentId/cancel", safe((ctx) => {
+    admin(ctx);
+    ensureMachine(ctx.params.id);
+    idle(ctx.params.id);
+    const deployment = db.get<any>("SELECT id,status FROM machine_deployments WHERE id=? AND machine_id=?", ctx.params.deploymentId, ctx.params.id);
+    if (!deployment) fail(404, "部署计划不存在");
+    if (deployment.status !== "awaiting_approval" && deployment.status !== "cancelled") fail(409, "只能取消尚未执行的部署计划");
+    if (deployment.status === "awaiting_approval") db.run("UPDATE machine_deployments SET status='cancelled',finished_at=?,error=? WHERE id=? AND status='awaiting_approval'", iso(now()), "管理员已取消部署计划", deployment.id);
+    ctx.json({ id: deployment.id, machine_id: ctx.params.id, status: "cancelled" });
+  }));
   router.post("/api/v1/machines/:id/deployments/:deploymentId/apply", safe(apply));
   const assistantSafe = (machine: MachineSummary) => ({ ...machine, host_key_fingerprint: "" });
   const assistantList = () => list().map(assistantSafe);
