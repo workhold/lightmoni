@@ -4,6 +4,7 @@ import type { Context, Dependencies, Handler, Module } from "../shared/types.js"
 import type { AgentJobStore } from "./agent-jobs.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import type { OperationDefinition, OperationPayload, OperationResource, OperationsStore } from "../operations/types.js";
+import { assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
 
 const KINDS = new Set(["website", "certificate", "compose", "backup"]);
 const ACTIVE = new Set(["queued", "leased", "accepted", "staging", "activating", "verifying"]);
@@ -18,6 +19,7 @@ const redact = (value: any): any => Array.isArray(value) ? value.map(redact) : v
 
 export function registerOperations(deps: Dependencies, options: { jobs: AgentJobStore; credentials: AgentCredentialStore; definitions: OperationDefinition[] }): Module & OperationsStore {
   const { db, router } = deps, definitions = new Map(options.definitions.map(d => [d.kind, d]));
+  createAgentLifecycleSchema(db);
   db.exec(`CREATE TABLE IF NOT EXISTS ops_resources(
     id TEXT PRIMARY KEY,kind TEXT NOT NULL,name TEXT NOT NULL,agent_id TEXT NOT NULL,revision INTEGER NOT NULL,
     config_cipher TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,created_by TEXT NOT NULL);
@@ -76,6 +78,7 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
     validateOperation,
     plan(resourceID, operation, input, actor) {
       const r = raw(resourceID), validated = validateOperation(resourceID, operation, input), key = id();
+      assertAgentActive(db, r.agent_id);
       referenceCheck(r.kind, configOf(r), r.agent_id, r.id);
       const payload: OperationPayload = { version: 1, operation_id: key, operation, resource: { ...view(r), config: configOf(r) }, input: validated };
       const preview = { resource: view(r), operation, input: redact(validated), read_only: definition(r.kind).readOnly.includes(operation), warning: "Review the target, action and configuration before approving. Remote actions may interrupt service. Rollback does not revert data migrations." };
@@ -112,10 +115,11 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
   };
   const admin = (fn: Handler) => safe(async ctx => { deps.auth.requireAdmin(ctx); await fn(ctx); });
   router.get("/api/v1/operations/resources", admin(ctx => ctx.json({ resources: store.list(ctx.url.searchParams.get("kind") ?? undefined) })));
-  router.get("/api/v1/operations/agents", admin(ctx => ctx.json({ agents: db.all("SELECT id,host_id,last_seen FROM agents ORDER BY last_seen DESC,id LIMIT 1000") })));
+  router.get("/api/v1/operations/agents", admin(ctx => ctx.json({ agents: db.all("SELECT id,host_id,last_seen FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed') ORDER BY last_seen DESC,id LIMIT 1000") })));
   router.post("/api/v1/operations/resources", admin(async ctx => {
     const b = obj(await ctx.body()), kind = text(b.kind), name = text(b.name), agentID = text(b.agent_id), config = validateConfig(kind, b.config);
     if (!db.get("SELECT id FROM agents WHERE id=?", agentID)) fail(400, "registered_agent_required");
+    assertAgentActive(db, agentID);
     referenceCheck(kind, config, agentID);
     const key = id();
     db.run("INSERT INTO ops_resources(id,kind,name,agent_id,revision,config_cipher,created_at,updated_at,created_by) VALUES(?,?,?,?,1,?,?,?,?)", key, kind, name, agentID, deps.encrypt(JSON.stringify(config)), at(), at(), ctx.user.id);

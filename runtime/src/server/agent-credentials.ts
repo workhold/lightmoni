@@ -3,6 +3,7 @@ import type { IncomingMessage } from "node:http";
 import { id, hash, token } from "../shared/crypto.js";
 import type { Context, Dependencies, Module } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
+import { assertAgentActive, createAgentLifecycleSchema, isAgentRemoved } from "./agent-lifecycle.js";
 
 /**
  * Credentials used by the scripted Agent enrollment flow.
@@ -116,6 +117,7 @@ export function registerAgentCredentials(
   deps: Dependencies,
 ): Module & AgentCredentialStore {
   const { db, router } = deps;
+  createAgentLifecycleSchema(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_enrollments(
       id TEXT PRIMARY KEY,
@@ -375,6 +377,7 @@ export function registerAgentCredentials(
     const at = now();
     const expiry = new Date(at.getTime() + 90 * 24 * 60 * 60 * 1000);
     db.transaction(() => {
+      assertAgentActive(db, row.agent_id, 401);
       const changed = db.run(
         `UPDATE agent_enrollments SET status='active',used_at=?,bootstrap_hash=''
          WHERE id=? AND status='pending_activation' AND bootstrap_hash=? AND expires_at>? AND pending_expires_at>?`,
@@ -433,6 +436,7 @@ export function registerAgentCredentials(
     agentID: string,
     audience: CredentialAudience,
   ): AgentCredential => {
+    assertAgentActive(db, agentID, 401);
     const value = bearer(req);
     if (!value) throw new HTTPError(401, "agent credential required");
     const row = db.get<any>(
@@ -445,7 +449,8 @@ export function registerAgentCredentials(
     if (!row || row.revoked_at || Date.parse(row.expires_at) <= now().getTime())
       throw new HTTPError(401, "invalid agent credential");
     const used = iso(now());
-    db.run("UPDATE agent_credentials SET last_used_at=? WHERE id=?", used, row.id);
+    const changed = db.run("UPDATE agent_credentials SET last_used_at=? WHERE id=? AND revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed')", used, row.id, agentID);
+    if (!changed.changes) throw new HTTPError(401, "invalid agent credential");
     return {
       credential_id: row.id,
       agent_id: row.agent_id,
@@ -456,6 +461,7 @@ export function registerAgentCredentials(
     };
   };
   const has = (agentID: string, audience: CredentialAudience) => {
+    if (isAgentRemoved(db, agentID)) return false;
     const row = db.get<any>(
       `SELECT 1 FROM agent_credentials
        WHERE agent_id=? AND audience=? AND revoked_at IS NULL AND expires_at>? LIMIT 1`,
@@ -492,7 +498,7 @@ export function registerAgentCredentials(
       enrollmentID,
     );
   };
-  const registered = (agentID: string) => Boolean(db.get("SELECT id FROM agent_credentials WHERE agent_id=? LIMIT 1", agentID) || db.get("SELECT id FROM agent_enrollments WHERE agent_id=? LIMIT 1", agentID));
+  const registered = (agentID: string) => Boolean(db.get("SELECT agent_id FROM agent_lifecycle WHERE agent_id=?", agentID) || db.get("SELECT id FROM agent_credentials WHERE agent_id=? LIMIT 1", agentID) || db.get("SELECT id FROM agent_enrollments WHERE agent_id=? LIMIT 1", agentID));
   return {
     has,
     registered,

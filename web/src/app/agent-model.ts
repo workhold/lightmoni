@@ -27,6 +27,7 @@ export interface AgentTaskLabel {id:string;name:string;node_count:number;task_co
 export interface ManagedAgentTask {id:string;name:string;type:AgentTaskType;enabled:boolean;label_ids:string[];config:AgentTasks}
 export interface AgentItem {
   id:string;hostname:string;platform:string;arch:string;version:string;last_seen:string;
+  lifecycle_state?:'active'|'removed';removed_at?:string;removal_reason?:string;
   heartbeat:Record<string,unknown>;config:AgentTasks;group_id:string;group_name:string;
   label_ids:string[];labels:{id:string;name:string}[];task_ids:string[];tasks:{id:string;name:string;type:AgentTaskType}[];
 }
@@ -66,6 +67,7 @@ export const localizedLogicalTableRules = (language:string='zh-CN') => [{require
 export const logicalTableRules=localizedLogicalTableRules();
 
 export const agentIsOnline=(agent:AgentItem,now=Date.now()):boolean=>{
+ if(agent.lifecycle_state==='removed')return false;
  const interval=Number(agent.heartbeat?.control_interval_seconds??30),timeout=Math.max(90,Number.isFinite(interval)&&interval>0?interval*3:90);
  return Number.isFinite(Date.parse(agent.last_seen))&&now-Date.parse(agent.last_seen)<=timeout*1000;
 };

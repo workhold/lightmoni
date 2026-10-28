@@ -23,6 +23,7 @@ async function harness(language){
   const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();
   if(url.origin!==origin){unexpected.push(url.href);return route.abort()}
   if(path.startsWith('/api/')){
+   if(method==='GET'&&['/api/v1/agents','/api/v1/agent-task-labels'].includes(path))return route.fulfill({json:[]});
    const body=request.postData()?request.postDataJSON():undefined;state.requests.push({method,path,body});
    if(path==='/api/v1/machines'&&method==='GET')return route.fulfill({json:[state.machine]});
    if(path==='/api/v1/machines/fixture-machine'&&method==='GET')return route.fulfill({json:{machine:state.machine,credentials:state.credentials,deployments:[]}});

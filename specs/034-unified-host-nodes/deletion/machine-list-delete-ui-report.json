@@ -1,0 +1,20 @@
+{
+  "checked": [
+    "zh-CN: list action binds name/address/ID without a detail fetch; Cancel and Escape send no DELETE",
+    "zh-CN: credential, deployment, removal, and active-operation rejections remain visible with the correct host and translated cause",
+    "zh-CN: server permission rejection preserves the host and exact unknown cause",
+    "zh-CN: rejection links to its host details; cancel-plan errors do not replace the list deletion error",
+    "zh-CN: synchronous repeated confirmation sends one DELETE, locks cancellation, refreshes only the deleted row, and supports retry after rejection",
+    "en-US: list action binds name/address/ID without a detail fetch; Cancel and Escape send no DELETE",
+    "en-US: credential, deployment, removal, and active-operation rejections remain visible with the correct host and translated cause",
+    "en-US: server permission rejection preserves the host and exact unknown cause",
+    "en-US: rejection links to its host details; cancel-plan errors do not replace the list deletion error",
+    "en-US: synchronous repeated confirmation sends one DELETE, locks cancellation, refreshes only the deleted row, and supports retry after rejection",
+    "Deleting alpha leaves beta details intact when its in-flight read finishes during deletion",
+    "A late detail response for a deleted host cannot reopen its stale dialog",
+    "A successful DELETE removes its row immediately even when the following list refresh fails",
+    "A stale list response arriving after deletion cannot restore the deleted row"
+  ],
+  "errors": [],
+  "unexpected": []
+}

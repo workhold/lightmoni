@@ -1,0 +1,120 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "sections": [
+    "13"
+  ],
+  "before_seq": 771,
+  "saved_seq": 772,
+  "readback_seq": 772,
+  "paragraph_readback": [
+    {
+      "block_id": "unified-host-nodes034-section13-1",
+      "seq": 772,
+      "verified": true,
+      "sha256": "51a6508ee407647f97654f164ad65ea332025071597dabb0e501134e24c136c4"
+    },
+    {
+      "block_id": "unified-host-nodes034-section13-2",
+      "seq": 772,
+      "verified": true,
+      "sha256": "5641dea90e0f914955b99c761512d532c71b31b7dc4ea6dd7ee0037cc3d05d53"
+    },
+    {
+      "block_id": "unified-host-nodes034-section13-3",
+      "seq": 772,
+      "verified": true,
+      "sha256": "4daff8363af04b89c7dba84611e092eb87a5f04a126d072f00888f785b58be6c"
+    },
+    {
+      "block_id": "unified-host-nodes034-section13-4",
+      "seq": 772,
+      "verified": true,
+      "sha256": "7adeb76d5fdae3acdf38beee11f38125bda5c73709e5f46abdf5137c8377ff9b"
+    },
+    {
+      "block_id": "unified-host-nodes034-section13-5",
+      "seq": 772,
+      "verified": true,
+      "sha256": "60c89d4e3512c6feda1271c3ade9f094797a9bc1473021826ef384e3276a4117"
+    },
+    {
+      "block_id": "unified-host-nodes034-section13-6",
+      "seq": 772,
+      "verified": true,
+      "sha256": "0fec7a2200db702931ec9a046c01dab2751b7b6dbcc9ac94405b97be973feba0"
+    },
+    {
+      "block_id": "credentials031-8486b2ee-7e45-4f42-9ed1-1cd3b27292f0",
+      "seq": 772,
+      "verified": true,
+      "sha256": "e2e4c35f1451d58df4418bd8e10bc78a75da6e6e0592de82c3baf3987558eb06"
+    }
+  ],
+  "native_diagrams": [
+    {
+      "block_id": "f-architecture-8a1f",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "ef3293915bbdac0c03b0d02609e1fabc77d486e3ba762f81f51a203cc4498823",
+      "node_count": 10,
+      "edge_count": 8
+    },
+    {
+      "block_id": "f-center-modules-7d039612",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "bf7fa372ebf82d7ecc6ec20f307a1307d7b6075e98c38215a2c139563ad1fb2f",
+      "node_count": 10,
+      "edge_count": 9
+    },
+    {
+      "block_id": "f-deployment-2b7c",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "54bc6de02ee3f05563a759db9bbb03a612df4fd944f2a33ee563d1162f335ce2",
+      "node_count": 8,
+      "edge_count": 7
+    },
+    {
+      "block_id": "f-enrollment-4c9d",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "6708f0cabff6b59a5bc879dedaf3e35de668032e81ef1357c1a762c3af2b2e51",
+      "node_count": 10,
+      "edge_count": 11
+    },
+    {
+      "block_id": "f-ai-sequence-5e0f",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "2e7c217eb8baedb5e5528284c625585846e6ae326c9cab68247e64e341761913",
+      "node_count": 10,
+      "edge_count": 10
+    },
+    {
+      "block_id": "9a7f0e0f-303b-47a8-a194-6434833a4da1",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "412668b0f5129c33079edef856e482356725af297d9adcef647c3c743109e1b8",
+      "node_count": 7,
+      "edge_count": 6
+    },
+    {
+      "block_id": "ca797620-3473-4683-b77a-58f7f968d79c",
+      "type": "flowchart",
+      "verified_unchanged": true,
+      "sha256": "911268e96b1fbe92b5902f1c5af2b1eecaf382e611927b6d81353dd60d0d7851",
+      "node_count": 15,
+      "edge_count": 17
+    }
+  ],
+  "native_diagram_count": 7,
+  "native_diagram_nodes_and_edges_unchanged": true,
+  "full_document_readback": true,
+  "unrelated_blocks_verified_unchanged": 287,
+  "total_block_count_before": 288,
+  "total_block_count_after": 294,
+  "total_block_count_delta": 6,
+  "outline_order_matches_only_six_insertions": true,
+  "scope": "Six new native section 13 paragraphs and one existing capability paragraph reference update. Full-document native readback preserves all other blocks, styles, links, diagrams, nodes and edges."
+}

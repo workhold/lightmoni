@@ -14,7 +14,7 @@ export function isAllowedHomepage(value:unknown,role:User['role']):value is stri
 
 export function readDefaultHomepage(user:HomepageUser|null):string{
  if(!user?.id)return DEFAULT_HOMEPAGE;
- try{const value=localStorage.getItem(homepageStorageKey(user.id));return isAllowedHomepage(value,user.role)?value:DEFAULT_HOMEPAGE}
+ try{const value=localStorage.getItem(homepageStorageKey(user.id));return value==='/agents'?'/machines':isAllowedHomepage(value,user.role)?value:DEFAULT_HOMEPAGE}
  catch{return DEFAULT_HOMEPAGE}
 }
 
@@ -42,7 +42,7 @@ export function useDefaultHomepage(user:HomepageUser|null){
 
 export function isPageDeepLink(pathname:string):boolean{
  // Segment boundaries keep similarly named unknown paths out of login redirects.
- return navigationLinks.some(link=>pathname===link.path||pathname.startsWith(link.path+'/'))
+ return pathname==='/agents'||pathname.startsWith('/agents/')||navigationLinks.some(link=>pathname===link.path||pathname.startsWith(link.path+'/'))
   ||/^\/(a|traces)\/[^/]+\/?$/.test(pathname);
 }
 

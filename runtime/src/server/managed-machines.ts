@@ -1,4 +1,5 @@
-import { agentBootstrapCommand } from "./machine-agent-lifecycle.js";
+import { agentBootstrapCommand, agentProbeCommand, parseAgentProbe } from "./machine-agent-lifecycle.js";
+import { createAgentLifecycleSchema, assertAgentActive } from "./agent-lifecycle.js";
 import { createUninstallationSchema, registerMachineUninstallations, type UninstallationStatus } from "./machine-uninstallations.js";
 import { id, hash } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
@@ -17,7 +18,7 @@ export type CredentialRetention = "temporary" | "managed" | "one_time" | "none";
 export type CredentialClearReason = "expired" | "revoked" | "consumed" | "agent_activated";
 export type MachineCapabilityReason = "host_busy" | "direct_ssh_required" | "host_fingerprint_required" | "ssh_credential_required" | "ssh_key_required" | "agent_not_linked" | "agent_task_busy" | "uninstallation_pending" | "uninstallation_unknown" | "";
 export interface MachineCapability { available: boolean; reason: MachineCapabilityReason }
-export type MachineStatus = "unknown" | "online" | "offline" | "installing" | "uninstalled" | "error";
+export type MachineStatus = "unknown" | "online" | "offline" | "installing" | "uninstalled" | "removed" | "error";
 export type DeploymentStatus = "awaiting_approval" | "running" | "succeeded" | "failed" | "cancelled";
 
 const MACHINE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/;
@@ -85,6 +86,7 @@ const redact = (value: string, secrets: string[] = []) => {
   return output.replace(/lm_(?:enroll|bootstrap|agent)_[A-Za-z0-9_-]+/g, "[redacted-token]");
 };
 const statusOf = (row: any, now: Date): MachineStatus => {
+  if (row.node_lifecycle_state === "removed") return "removed";
   if (row.last_uninstallation_status === "succeeded") return "uninstalled";
   if (row.agent_id) {
     const last = Math.max(
@@ -163,6 +165,7 @@ export interface MachineTerminalAccess {
 
 export function registerManagedMachines(deps: Dependencies, options: ManagedMachinesOptions = {}): Module & ManagedMachineStore & MachineTerminalAccess {
   const { db, router } = deps;
+  createAgentLifecycleSchema(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS managed_machines(
       id TEXT PRIMARY KEY,
@@ -221,6 +224,11 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       created_by TEXT NOT NULL, created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS machine_ssh_checks_machine ON machine_ssh_checks(machine_id,created_at);
+
+    CREATE TABLE IF NOT EXISTS machine_agent_link_events(
+      id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES managed_machines(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL,credential_id TEXT NOT NULL,actor_id TEXT NOT NULL,verified_at TEXT NOT NULL
+    );
 
   `);
   createUninstallationSchema(deps);
@@ -307,8 +315,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       COALESCE((SELECT count(*) FROM machine_credentials c WHERE c.machine_id=m.id AND c.revoked_at IS NULL AND c.expires_at>? AND c.secret_cleared_at='' AND c.method='ssh_key' AND c.secret_encrypted!=''),0) active_ssh_key_count,
       COALESCE((SELECT d.status FROM machine_deployments d WHERE d.machine_id=m.id ORDER BY d.created_at DESC LIMIT 1),'') last_deployment_status,
       COALESCE((SELECT u.status FROM machine_uninstallations u WHERE u.machine_id=m.id ORDER BY u.created_at DESC,u.id DESC LIMIT 1),'') last_uninstallation_status,
-      COALESCE(a.last_seen,'') AS node_last_seen
-     FROM managed_machines m LEFT JOIN agents a ON a.id=m.agent_id`;
+      COALESCE(a.last_seen,'') AS node_last_seen,COALESCE(l.state,'active') AS node_lifecycle_state
+     FROM managed_machines m LEFT JOIN agents a ON a.id=m.agent_id LEFT JOIN agent_lifecycle l ON l.agent_id=m.agent_id`;
   const row = (machineID: string) => {
     cleanupInvalidCredentials();
     const at = iso(now());
@@ -372,8 +380,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (db.get("SELECT id FROM machine_deployments WHERE machine_id=? AND status IN ('awaiting_approval','running') LIMIT 1", machineID))
       fail(409, "该主机有未结束的部署任务，请先完成或取消后再删除");
   };
-  const ensureCredential = (machineID: string, credentialID: string) => {
-    cleanupInvalidCredentials();
+  const ensureCredential = (machineID: string, credentialID: string, cleanup = true) => {
+    if (cleanup) cleanupInvalidCredentials();
     const value = db.get<any>("SELECT * FROM machine_credentials WHERE id=? AND machine_id=?", credentialID, machineID);
     if (!value) fail(404, "连接凭据不存在");
     if (value.revoked_at) fail(409, "连接凭据已撤销");
@@ -570,6 +578,59 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     return result;
   };
   const uninstallations = registerMachineUninstallations(deps, { get, idle, revision: targetRevision, checked, credential: sshCredential, decrypt: decryptKey, busy, runner: options.sshRunner ?? defaultSSHRunner, safe });
+  const linkAgent = async (ctx: Context) => {
+    admin(ctx);
+    const input = parameters(record(await ctx.body()), ["agent_id", "credential_id"]);
+    const agentID = text(input.agent_id, "agent_id", 256);
+    if (!/^[A-Za-z0-9._:-]+$/.test(agentID)) fail(400, "invalid agent_id");
+    idle(ctx.params.id); uninstallations.assertFree(ctx.params.id);
+    const { machine, credential } = sshCredential(ctx.params.id, input.credential_id);
+    const revision = targetRevision(machine), previousAgent = machine.agent_id;
+    const assertTarget = () => {
+      assertAgentActive(db, agentID);
+      if (!db.get("SELECT id FROM agents WHERE id=?", agentID)) fail(404, "节点不存在");
+      const independent = db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_credentials'");
+      if (!independent || !["control", "data"].every(audience => db.get("SELECT id FROM agent_credentials WHERE agent_id=? AND audience=? AND revoked_at IS NULL AND expires_at>? LIMIT 1", agentID, audience, iso(now()))))
+        fail(409, "节点没有有效的独立 control/data 凭据，请重新接入后关联");
+      const fresh = db.get<any>("SELECT * FROM managed_machines WHERE id=?", machine.id);
+      if (!fresh) fail(404, "主机不存在");
+      if (targetRevision(fresh) !== revision || fresh.agent_id !== previousAgent) fail(409, "主机连接或节点关联已变化，请重新核对");
+      if (fresh.agent_id && fresh.agent_id !== agentID) fail(409, "此主机已关联其他节点，不能覆盖关联");
+      if (db.get("SELECT id FROM managed_machines WHERE agent_id=? AND id!=? LIMIT 1", agentID, machine.id)) fail(409, "此节点已关联另一主机，请先核对身份");
+      if (db.get("SELECT id FROM machine_deployments WHERE machine_id=? AND status IN ('awaiting_approval','running') LIMIT 1", machine.id)) fail(409, "请先完成或取消 Agent 安装计划");
+      uninstallations.assertFree(machine.id);
+      if (db.get("SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", agentID) || uninstallations.taskBusy(agentID))
+        fail(409, "节点有未结束或结果未知的任务或卸载，请先完成或核对");
+      ensureCredential(machine.id, credential.id, false);
+    };
+    assertTarget(); busy.add(machine.id);
+    const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(CHECK_TIMEOUT_MS)]);
+    try {
+      const output = await (options.sshRunner ?? defaultSSHRunner)({ machine, privateKey: decryptKey(machine.id, credential), command: agentProbeCommand(), signal, port: machine.port, timeoutMs: CHECK_TIMEOUT_MS });
+      signal.throwIfAborted();
+      const observed = parseAgentProbe(output.stdout);
+      if (observed.agent_id !== agentID) fail(409, "远端 Agent 身份与所选节点不一致，未建立关联");
+      if (observed.installation !== "present" || !observed.program_complete || !observed.unit_managed || !observed.data_retained || observed.lifecycle_locked || observed.operation_lock)
+        fail(409, "远端 Agent 不是完整受管安装或有未完成操作，请人工核对");
+      // Expiry cleanup has its own audit transaction; complete it before the
+      // atomic identity recheck, whose reads must never open nested transactions.
+      cleanupInvalidCredentials();
+      db.transaction(() => {
+        assertTarget();
+        const at = iso(now());
+        db.run("UPDATE managed_machines SET agent_id=?,agent_last_seen='',last_error='',updated_at=? WHERE id=?", agentID, at, machine.id);
+        db.run("UPDATE machine_credentials SET last_used_at=? WHERE id=?", at, credential.id);
+        db.run("INSERT INTO machine_agent_link_events(id,machine_id,agent_id,credential_id,actor_id,verified_at) VALUES(?,?,?,?,?,?)", id(), machine.id, agentID, credential.id, ctx.user.id, at);
+      });
+      ctx.json(get(machine.id));
+    } catch (error) {
+      if (error instanceof HTTPError) throw error;
+      if (error instanceof SSHError) fail(502, "SSH 身份核验失败，未建立关联：" + error.code);
+      if (ctx.signal.aborted) fail(409, "身份核验已取消，未建立关联");
+      if (signal.aborted) fail(504, "SSH 身份核验超时，未建立关联");
+      fail(502, "SSH 身份核验失败，未建立关联");
+    } finally { busy.delete(machine.id); }
+  };
   const createPlan = (machineID: string, input: InstallPlanInput, actorID: string) => {
     parameters(record(input), ["check_id", "credential_id", "version", "arch", "initial_label_id"]);
     idle(machineID);
@@ -667,6 +728,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   router.put("/api/v1/machines/:id", safe(updateMachine));
   router.delete("/api/v1/machines/:id", safe((ctx) => { admin(ctx); ensureDeletable(ctx.params.id); db.run("DELETE FROM managed_machines WHERE id=?", ctx.params.id); ctx.json({ ok: true }); }));
   router.post("/api/v1/machines/:id/ssh-check", safe(async ctx => { admin(ctx); ctx.json(await checkSSH(ctx.params.id, await machineBody(ctx), ctx.user.id, ctx.signal)); }));
+  router.post("/api/v1/machines/:id/agent-link", safe(linkAgent));
   router.get("/api/v1/machines/:id/credentials", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); ctx.json(credentialRows(ctx.params.id)); }));
   router.post("/api/v1/machines/:id/credentials", safe(addCredential));
   router.delete("/api/v1/machines/:id/credentials/:credentialId", safe((ctx) => {

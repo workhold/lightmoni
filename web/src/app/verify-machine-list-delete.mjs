@@ -28,6 +28,7 @@ async function harness(language='zh-CN',width=1440){
   const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();
   if(url.origin!==origin){unexpected.push(url.href);return route.abort()}
   if(path.startsWith('/api/')){
+   if(method==='GET'&&['/api/v1/agents','/api/v1/agent-task-labels'].includes(path))return route.fulfill({json:[]});
    state.requests.push({method,path});
    if(path==='/api/v1/machines'&&method==='GET'){
     if(state.holdNextList){const snapshot=[...state.machines];state.holdNextList=false;await new Promise(resolve=>{state.releaseList=resolve});return route.fulfill({json:snapshot})}
