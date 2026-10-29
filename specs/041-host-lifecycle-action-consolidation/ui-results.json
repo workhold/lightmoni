@@ -25,5 +25,13 @@
       "unexpected": []
     }
   },
-  "total_passed": 67
+  "total_passed": 67,
+  "label_simplification_followup": {
+    "build": "passed",
+    "script_syntax_checks": 5,
+    "bulk_ui_passed": 24,
+    "errors": [],
+    "unexpected": [],
+    "other_ui_rerun": false
+  }
 }

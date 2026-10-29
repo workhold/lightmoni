@@ -212,7 +212,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   {admin&&<div className="lm-machine-batch-toolbar" role="region" aria-label={t('批量操作','Bulk actions')}>
    <Space wrap><Typography.Text strong>{t(`已选择 ${selectedRows.length} 项`,`Selected ${selectedRows.length}`)}</Typography.Text><Button size="small" disabled={!selectedRows.length||!!batch} onClick={()=>setSelectedIDs([])}>{t('清除选择','Clear selection')}</Button></Space>
    <Space wrap>{([
-    ['ssh_check',t('批量 SSH 安装检查','Bulk SSH preflight')],['install',t('批量部署 Agent','Bulk deploy Agent')],['uninstall',t('批量卸载 Agent','Bulk uninstall Agent')],['remove_node',t('批量移除节点','Bulk remove nodes')],['delete_host',t('批量删除主机','Bulk delete hosts')],
+    ['ssh_check',t('批量 SSH 安装检查','Bulk SSH preflight')],['install',t('批量部署 Agent','Bulk deploy Agent')],['uninstall',t('卸载 Agent','Uninstall Agent')],['remove_node',t('移除节点','Remove nodes')],['delete_host',t('删除主机','Delete hosts')],
    ] as [BatchAction,string][]).map(([action,label])=><Button key={action} size="small" aria-label={label} danger={['uninstall','remove_node','delete_host'].includes(action)} disabled={loading||!selectedRows.length||!!batch} onClick={()=>openBatch(action)}>{label}</Button>)}</Space>
    <Typography.Text type="secondary">{t('勾选后按主机逐台执行；安装和卸载会先生成计划供统一审阅。每批最多 50 项。','Select rows to act on each host in sequence. Review installation and uninstall plans before execution. Up to 50 targets per batch.')}</Typography.Text>
   </div>}
