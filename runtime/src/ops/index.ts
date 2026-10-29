@@ -1,3 +1,4 @@
+import { applicationCatalog, catalogInstallation } from "./catalog.js";
 import { HTTPError, fail } from "../shared/http.js";
 import { OperationRejectedError } from "../operations/errors.js";
 import type { Dependencies, Handler, Module } from "../shared/types.js";
@@ -67,35 +68,136 @@ export function registerOperationsPlatform(
         }
       }
     };
+  const publicKinds = new Set([
+    "credential",
+    "dns_zone",
+    "acme_account",
+    "certificate",
+    "certificate_target",
+    "cluster",
+    "application",
+    "website",
+  ]);
   const kind = (v: string | null) => {
-    if (v && !store.definitions.has(v as ResourceKind))
+    if (v && (!store.definitions.has(v as ResourceKind) || !publicKinds.has(v)))
       fail(400, "unsupported_platform_resource_kind");
     return v as ResourceKind | undefined;
+  };
+  const inCluster = (
+    resource: ReturnType<typeof store.get>,
+    cid: string | null,
+  ) => {
+    if (!cid) return true;
+    if (resource.kind === "cluster") return resource.id === cid;
+    if (resource.kind === "application")
+      return (
+        resource.spec.deployments?.some((d: any) => d.cluster_id === cid) ??
+        false
+      );
+    if (resource.kind === "website")
+      return resource.spec.cluster_ids?.includes(cid) ?? false;
+    return true; // Credentials, certificates and managed domains are shared.
   };
   const agents = () =>
     deps.db.all<any>(
       "SELECT id,host_id,hostname,version,platform,arch,last_seen,group_id FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed') ORDER BY last_seen DESC,id LIMIT 1000",
     );
+  const machines = () => {
+    if (
+      !deps.db.get(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='managed_machines'",
+      )
+    )
+      return [];
+    return deps.db
+      .all<any>(
+        "SELECT m.id,m.name,m.address,m.agent_id,c.cluster_id FROM managed_machines m LEFT JOIN ops_platform_cluster_members c ON c.machine_id=m.id ORDER BY m.name,m.id",
+      )
+      .map((m) => ({
+        ...m,
+        agent_status:
+          m.agent_id &&
+          deps.db.get(
+            "SELECT id FROM agents WHERE id=? AND last_seen>?",
+            m.agent_id,
+            new Date(deps.now().getTime() - 120000).toISOString(),
+          )
+            ? "online"
+            : "offline",
+      }));
+  };
+  router.get(
+    "/api/v1/ops/catalog",
+    safe((ctx) => ctx.json({ templates: applicationCatalog })),
+  );
+  router.post(
+    "/api/v1/ops/catalog/:id/install",
+    safe(async (ctx) => {
+      const b = safeObject(await ctx.body());
+      if (b.confirmed !== undefined && typeof b.confirmed !== "boolean")
+        fail(400, "platform_confirmation_required");
+      const installation = catalogInstallation(ctx.params.id, b);
+      const resource = store.create(
+        "application",
+        installation.name,
+        installation.spec,
+        ctx.user.id,
+      );
+      let result: Record<string, any> = {};
+      if (b.confirmed === true) {
+        try {
+          result = await workloads.perform(resource, "deploy", {}, ctx.user.id);
+        } catch (error) {
+          const candidate =
+            error instanceof HTTPError ||
+            error instanceof OperationRejectedError
+              ? error.message.split(":", 1)[0]
+              : "platform_deployment_failed";
+          const code = /^[a-zA-Z][a-zA-Z0-9_.-]{0,179}$/.test(candidate)
+            ? candidate
+            : "platform_deployment_failed";
+          store.patchStatus(resource.id, {
+            last_error: code,
+            last_error_at: deps.now().toISOString(),
+          });
+          result = { runs: store.actions(resource.id), deployment_error: code };
+        }
+      }
+      ctx.json(
+        { resource: store.public(store.get(resource.id)), ...result },
+        201,
+      );
+    }),
+  );
   router.get(
     "/api/v1/ops/overview",
     safe((ctx) =>
       ctx.json({
         resources: store
           .list()
+          .filter(
+            (r) =>
+              publicKinds.has(r.kind) &&
+              inCluster(r, ctx.url.searchParams.get("cluster_id")),
+          )
           .slice(0, 1000)
           .map((r) => store.public(r)),
         agents: agents(),
+        machines: machines(),
         runs: store.actions(),
         capabilities: {
-          kinds: [...store.definitions.keys()],
+          kinds: [...publicKinds],
           dns_providers: ["aliyun", "dnspod"],
           certificate_cloud_providers: ["aliyun", "tencent", "volcengine"],
           agent_capability: "operations.platform",
         },
-        total: Number(
-          deps.db.get<any>("SELECT COUNT(*) AS n FROM ops_platform_resources")
-            ?.n ?? 0,
-        ),
+        total: store
+          .list()
+          .filter(
+            (r) =>
+              publicKinds.has(r.kind) &&
+              inCluster(r, ctx.url.searchParams.get("cluster_id")),
+          ).length,
         limit: 1000,
       }),
     ),
@@ -104,7 +206,13 @@ export function registerOperationsPlatform(
     "/api/v1/ops/resources",
     safe((ctx) => {
       const k = kind(ctx.url.searchParams.get("kind")),
-        resources = store.list(k),
+        resources = store
+          .list(k)
+          .filter(
+            (r) =>
+              publicKinds.has(r.kind) &&
+              inCluster(r, ctx.url.searchParams.get("cluster_id")),
+          ),
         offset = Number(ctx.url.searchParams.get("offset") ?? 0),
         limit = Number(ctx.url.searchParams.get("limit") ?? 1000);
       if (
@@ -122,17 +230,7 @@ export function registerOperationsPlatform(
         limit,
         offset,
         next_offset: offset + limit < resources.length ? offset + limit : null,
-        total: Number(
-          (k
-            ? deps.db.get<any>(
-                "SELECT COUNT(*) AS n FROM ops_platform_resources WHERE kind=?",
-                k,
-              )
-            : deps.db.get<any>(
-                "SELECT COUNT(*) AS n FROM ops_platform_resources",
-              )
-          )?.n ?? 0,
-        ),
+        total: resources.length,
       });
     }),
   );
@@ -146,6 +244,12 @@ export function registerOperationsPlatform(
     "/api/v1/ops/resources",
     safe(async (ctx) => {
       const b = safeObject(await ctx.body());
+      if (b.kind === "application" && !b.spec?.deployments)
+        fail(400, "application_deployment_required");
+      if (b.kind === "website" && !b.spec?.cluster_ids)
+        fail(400, "website_cluster_required");
+      if (b.kind === "website" && !b.spec?.bindings)
+        fail(400, "website_binding_required");
       ctx.json(
         {
           resource: store.public(
@@ -214,6 +318,12 @@ export function registerOperationsPlatform(
       if (b.revision !== r.revision) fail(409, "platform_revision_conflict");
       if (b.confirmed !== true) fail(400, "platform_confirmation_required");
       if (typeof b.action !== "string") fail(400, "platform_action_required");
+      if (
+        (["service", "node_pool", "gateway_group"].includes(r.kind) ||
+          (r.kind === "application" && !r.spec.deployments)) &&
+        ["deploy", "reconcile"].includes(b.action)
+      )
+        fail(409, "legacy_deployment_requires_cluster_migration");
       const domain = domains.find((d) => d.actions(r).includes(b.action));
       if (!domain) fail(400, "unsupported_platform_action");
       const result = await domain.perform(

@@ -53,6 +53,8 @@ const TASKS = [
   "gateway.apply",
   "gateway.inspect",
   "gateway.stop",
+  "gateway.remove",
+  "gateway.logs",
   "certificate.install",
   "certificate.inspect",
   "hook.run",
@@ -770,11 +772,13 @@ async function executeWorkload(
   }
   // Check explicit mappings before Docker mutates anything; existing owned mappings are already reserved locally.
   const ownPorts = new Set(
-    prior.flatMap((x) =>
-      Object.values(x.HostConfig?.PortBindings ?? {})
-        .flatMap((v: any) => v ?? [])
-        .map((x: any) => String(x.HostPort)),
-    ),
+    prior
+      .filter((x) => x.State?.Running)
+      .flatMap((x) =>
+        Object.values(x.HostConfig?.PortBindings ?? {})
+          .flatMap((v: any) => v ?? [])
+          .map((x: any) => String(x.HostPort)),
+      ),
   );
   for (const p of applicationPorts(app))
     if (!ownPorts.has(String(p.host_port))) await availablePort(p, context);
@@ -1331,6 +1335,37 @@ async function executeGateway(
       },
     };
   }
+  if (c.task === "gateway.logs") {
+    if (!existing) reject("CONTAINER_NOT_FOUND");
+    const tail = Number(c.tail ?? 100);
+    if (!Number.isInteger(tail) || tail < 1 || tail > 500)
+      reject("INVALID_LOG_TAIL");
+    const output = await context.command(
+      "docker",
+      ["logs", "--tail", String(tail), name],
+      { timeoutMs: 15000 },
+    );
+    return {
+      verified: true,
+      data: {
+        instance_id: id,
+        text: (output.stdout + output.stderr).slice(-32000),
+        sensitive_logs: true,
+      },
+    };
+  }
+  if (c.task === "gateway.remove") {
+    if (existing)
+      await context.command("docker", ["rm", "--force", name], {
+        timeoutMs: 30000,
+      });
+    if (await gatewayContainer(context, id))
+      throw Error("GATEWAY_REMOVE_NOT_VERIFIED");
+    return {
+      verified: true,
+      data: { instance_id: id, removed: true, stopped: true, healthy: false },
+    };
+  }
   if (c.task === "gateway.stop") {
     if (existing)
       await context.command("docker", ["stop", "--time", "20", name], {
@@ -1343,6 +1378,12 @@ async function executeGateway(
       data: { instance_id: id, stopped: true, healthy: false },
     };
   }
+  if (!existing?.State?.Running)
+    for (const p of [c.http_port ?? 80, c.https_port ?? 443])
+      await availablePort(
+        { host_port: p, protocol: "tcp", host_ip: "0.0.0.0" },
+        context,
+      );
   const image = text(
       c.image ?? "openresty/openresty:1.27.1.2-0-alpine",
       "image",

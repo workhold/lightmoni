@@ -747,6 +747,9 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     db.transaction(() => {
       const target = db.get<{agent_id:string}>("SELECT agent_id FROM managed_machines WHERE id=?", ctx.params.id);
       if (!target) fail(404, "主机不存在");
+      if (db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='ops_platform_cluster_members'")
+        && db.get("SELECT machine_id FROM ops_platform_cluster_members WHERE machine_id=?", ctx.params.id))
+        fail(409, "主机仍属于集群，请先从集群移除");
       assertAgentDeletionSafe(ctx.params.id, target.agent_id);
       db.run("DELETE FROM managed_machines WHERE id=?", ctx.params.id);
     });

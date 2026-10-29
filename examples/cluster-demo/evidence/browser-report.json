@@ -1,0 +1,45 @@
+{
+  "verified_at": "2026-10-29T17:34:11.759Z",
+  "browser_version": "156.0.8078.73",
+  "entry": "http://127.0.0.1:19043/qa/workbench",
+  "unauthenticated_status": 401,
+  "user_id": "demo-admin",
+  "role": "admin",
+  "http_only_session": true,
+  "applications": [
+    {
+      "id": "d8438060805e0f925d43905cc3de28ec",
+      "service_name": "demo-web",
+      "mode": "managed",
+      "clusters": [
+        "143c789ff1154b88dded4ddc9aff948a",
+        "98324ef47c76a19b5784257726f0e0c8"
+      ]
+    },
+    {
+      "id": "ba2aefb65627bd630a641d7a690e0a5c",
+      "service_name": "demo-openresty",
+      "mode": "managed",
+      "clusters": [
+        "143c789ff1154b88dded4ddc9aff948a",
+        "98324ef47c76a19b5784257726f0e0c8"
+      ]
+    },
+    {
+      "id": "9705327a94bb1e387b077f9073dcba13",
+      "service_name": "demo-mysql",
+      "mode": "manual",
+      "clusters": [
+        "143c789ff1154b88dded4ddc9aff948a"
+      ]
+    }
+  ],
+  "browser_database_write_read": true,
+  "admin_port": "admin",
+  "screenshots": [
+    "workbench-applications.png",
+    "workbench-websites.png",
+    "demo-message-saved.png"
+  ],
+  "page_errors": []
+}

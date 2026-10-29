@@ -12,7 +12,11 @@ export const navigationGroups=[
  ]},
  {id:'operations',label:'运维工具',english:'Operations',items:[
   {path:'/machines',label:'主机',english:'Hosts',icon:CloudServerOutlined,adminOnly:false},
-  {path:'/operations',label:'网站与运维',english:'Websites & operations',pageLabel:'网站与运维',pageEnglish:'Websites & operations',icon:ToolOutlined,adminOnly:true},
+  {path:'/clusters',label:'集群',english:'Clusters',icon:CloudServerOutlined,adminOnly:true},
+  {path:'/applications',label:'应用管理',english:'Applications',icon:AppstoreOutlined,adminOnly:true},
+  {path:'/websites',label:'网站',english:'Websites',icon:ToolOutlined,adminOnly:true},
+  {path:'/domains',label:'托管域名',english:'DNS zones',icon:DatabaseOutlined,adminOnly:true},
+  {path:'/certificates',label:'证书管理',english:'Certificates',icon:SafetyCertificateOutlined,adminOnly:true},
  ]},
  {id:'data',label:'数据与接入',english:'Data & ingestion',items:[
   {path:'/data',label:'数据接入',english:'Data ingestion',icon:DatabaseOutlined,adminOnly:false},
@@ -24,4 +28,4 @@ export const navigationGroups=[
  ]},
 ];
 
-export const navigationLinks=navigationGroups.flatMap(group=>group.items).map(item=>({...item,pageLabel:('pageLabel' in item?item.pageLabel:undefined)??item.label,pageEnglish:('pageEnglish' in item?item.pageEnglish:undefined)??item.english}));
+export const navigationLinks=navigationGroups.flatMap(group=>group.items).map(item=>({...item,pageLabel:item.label,pageEnglish:item.english}));

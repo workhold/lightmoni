@@ -91,6 +91,24 @@ export class OperationsPlatformStore implements PlatformStore {
    job_id TEXT NOT NULL,actor TEXT NOT NULL,dedupe_key TEXT UNIQUE,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
    CREATE INDEX IF NOT EXISTS ops_platform_run_resource ON ops_platform_runs(resource_id,created_at);
    CREATE INDEX IF NOT EXISTS ops_platform_run_job ON ops_platform_runs(job_id);`);
+    // Display names of deployments are labels; service_name is their unique identity.
+    const original =
+      deps.db.get<any>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='ops_platform_resources'",
+      )?.sql ?? "";
+    if (/UNIQUE\s*\(kind\s*,\s*name\)/i.test(original)) {
+      deps.db.transaction(() => {
+        deps.db
+          .exec(`ALTER TABLE ops_platform_resources RENAME TO ops_platform_resources_legacy_names;
+          CREATE TABLE ops_platform_resources(id TEXT PRIMARY KEY,kind TEXT NOT NULL,name TEXT NOT NULL,revision INTEGER NOT NULL,spec_cipher TEXT NOT NULL,status_json TEXT NOT NULL,created_by TEXT NOT NULL,authorized_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+          INSERT INTO ops_platform_resources SELECT * FROM ops_platform_resources_legacy_names;
+          DROP TABLE ops_platform_resources_legacy_names;`);
+      });
+    }
+    deps.db
+      .exec(`CREATE UNIQUE INDEX IF NOT EXISTS ops_platform_named_resource ON ops_platform_resources(kind,name) WHERE kind!='application';
+      CREATE TABLE IF NOT EXISTS ops_platform_application_keys(resource_id TEXT PRIMARY KEY,service_name TEXT NOT NULL UNIQUE,cluster_id TEXT NOT NULL,role TEXT NOT NULL);
+      DROP INDEX IF EXISTS ops_platform_openresty_cluster;`);
     // A previous process may have completed a cloud request before persisting its receipt.
     deps.db.run(
       "UPDATE ops_platform_runs SET state='unknown',result_json=?,updated_at=? WHERE state='running' AND job_id=''",
@@ -176,11 +194,15 @@ export class OperationsPlatformStore implements PlatformStore {
     actor: string,
   ) {
     this.requireActor(actor);
-    const valid = this.definition(kind).validate(safeObject(spec));
     const key = id(),
-      at = this.at(),
-      cipher = this.deps.encrypt(JSON.stringify(valid));
+      at = this.at();
     this.deps.db.transaction(() => {
+      const valid = this.definition(kind).validate(
+        safeObject(spec),
+        undefined,
+        { id: key },
+      );
+      const cipher = this.deps.encrypt(JSON.stringify(valid));
       this.deps.db.run(
         "INSERT INTO ops_platform_resources(id,kind,name,revision,spec_cipher,status_json,created_by,authorized_by,created_at,updated_at) VALUES(?,?,?,1,?,?,?,?,?,?)",
         key,
@@ -201,6 +223,8 @@ export class OperationsPlatformStore implements PlatformStore {
         actor,
         at,
       );
+      this.syncKeys(this.get(key));
+      this.definition(kind).afterSave?.(this.get(key));
     });
     return this.get(key);
   }
@@ -226,6 +250,7 @@ export class OperationsPlatformStore implements PlatformStore {
       const valid = this.definition(previous.kind).validate(
           safeObject(spec),
           previous.spec,
+          { id: key },
         ),
         cipher = this.deps.encrypt(JSON.stringify(valid)),
         at = this.at();
@@ -247,6 +272,8 @@ export class OperationsPlatformStore implements PlatformStore {
         actor,
         at,
       );
+      this.syncKeys(this.get(key));
+      this.definition(previous.kind).afterSave?.(this.get(key), previous);
       return this.get(key);
     });
     // Cancel only unclaimed old tasks after the resource transaction; claim races
@@ -305,7 +332,35 @@ export class OperationsPlatformStore implements PlatformStore {
           fail(409, "platform_resource_in_use");
       if (r.status.active === true) fail(409, "platform_stop_before_delete");
       this.deps.db.run("DELETE FROM ops_platform_resources WHERE id=?", key);
+      this.deps.db.run(
+        "DELETE FROM ops_platform_application_keys WHERE resource_id=?",
+        key,
+      );
+      this.definition(r.kind).afterDelete?.(r);
     });
+  }
+  private syncKeys(resource: PlatformResource) {
+    if (
+      resource.kind !== "application" ||
+      (!resource.spec.deployments && !resource.spec.cluster_id)
+    )
+      return;
+    const { service_name, role } = resource.spec;
+    const cluster_id = "";
+    const duplicate = this.deps.db.get<any>(
+      "SELECT resource_id FROM ops_platform_application_keys WHERE service_name=? AND resource_id!=?",
+      service_name,
+      resource.id,
+    );
+    if (duplicate) fail(409, "service_name_conflict");
+
+    this.deps.db.run(
+      "INSERT INTO ops_platform_application_keys VALUES(?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET service_name=excluded.service_name,cluster_id=excluded.cluster_id,role=excluded.role",
+      resource.id,
+      service_name,
+      cluster_id,
+      role,
+    );
   }
   private runRow(key: string) {
     const r = this.deps.db.get<any>(

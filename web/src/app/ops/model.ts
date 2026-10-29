@@ -5,9 +5,7 @@ export type ResourceKind =
   | "certificate"
   | "certificate_target"
   | "application"
-  | "service"
-  | "node_pool"
-  | "gateway_group"
+  | "cluster"
   | "website";
 export type Spec = Record<string, any>;
 export type Resource = {
@@ -39,7 +37,10 @@ export type Run = {
   updated_at: string;
   job_id?: string;
 };
+export type Machine = { id: string; name: string; address?: string; agent_id?: string; agent_status?: string; cluster_id?: string };
+export type CatalogTemplate = { id: string; name: string; description?: string; category?: string; version: string; versions?: string[]; managed_recommended: boolean; managed_reason?: string; parameters?: {key: string; label: string; type: string; required?: boolean; default?: unknown}[]; spec?: Spec };
 export type Overview = {
+  machines?: Machine[];
   resources: Resource[];
   agents: Agent[];
   runs: Run[];
@@ -51,10 +52,8 @@ export const ACTIONS: Record<ResourceKind, string[]> = {
   acme_account: ["register"],
   certificate: ["issue", "renew", "inspect"],
   certificate_target: ["sync", "inspect", "retry"],
-  application: ["deploy", "inspect", "stop", "remove", "logs"],
-  service: ["deploy", "reconcile", "inspect", "stop", "endpoints"],
-  node_pool: ["inspect"],
-  gateway_group: ["deploy", "inspect", "stop"],
+  application: ["deploy", "inspect", "stop", "remove", "logs", "endpoints", "reconcile"],
+  cluster: ["inspect"],
   website: ["deploy", "inspect", "disable"],
 };
 export const KIND_NAMES: Record<ResourceKind, [string, string]> = {
@@ -63,11 +62,10 @@ export const KIND_NAMES: Record<ResourceKind, [string, string]> = {
   certificate: ["证书", "Certificates"],
   certificate_target: ["证书目标", "Certificate targets"],
   application: ["应用", "Applications"],
-  service: ["托管服务", "Hosted services"],
+
   credential: ["云平台凭据", "Cloud credentials"],
   acme_account: ["ACME 账号", "ACME accounts"],
-  node_pool: ["机器池", "Node pools"],
-  gateway_group: ["网关组", "Gateway groups"],
+  cluster: ["集群", "Clusters"],
 };
 export const ACTION_NAMES: Record<string, [string, string]> = {
   test: ["测试凭据", "Test credentials"],
@@ -93,10 +91,26 @@ export function time(value?: string) {
 }
 export function resourceState(resource: Resource): string {
   const s = resource.status ?? {};
+  const current = (Array.isArray(s.instances) ? s.instances : []).filter((instance: Spec) => !instance.retired);
+  if (resource.kind === "application" && Array.isArray(resource.spec.deployments)) {
+    const published = Object.values(s.deployments ?? {}).filter((deployment: any) => deployment.enabled && Number(deployment.desired_revision) > 0) as Spec[];
+    if (published.length) {
+      if (current.some((instance: Spec) => instance.state === "unknown")) return "unknown";
+      const allApplied = published.every((deployment) => Number(deployment.applied_revision) === Number(deployment.desired_revision));
+      if (allApplied && current.length && current.every((instance: Spec) => instance.healthy && instance.state === "running")) return "running";
+      if (allApplied && !current.length && resource.spec.deployment_mode === "managed" && resource.spec.deployments.every((deployment: Spec) => deployment.replicas === 0)) return "stopped";
+      if (published.some((deployment) => deployment.last_error) || current.some((instance: Spec) => ["failed", "error"].includes(instance.state))) return "failed";
+      return "pending";
+    }
+  }
   if (s.state) return String(s.state);
   if (s.phase) return String(s.phase);
   if (s.last_error) return "failed";
-  const instances = Array.isArray(s.instances) ? s.instances : [];
+  const instances = current;
+  if (instances.length && instances.every((i: Spec) => i.state === "removed"))
+    return "removed";
+  if (instances.length && instances.every((i: Spec) => ["stopped", "removed"].includes(i.state)))
+    return "stopped";
   if (instances.some((i: Spec) => i.state === "unknown")) return "unknown";
   if (instances.some((i: Spec) => ["failed", "error"].includes(i.state)))
     return "failed";
@@ -167,27 +181,19 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
       network_mode: "bridge",
       cpu: 1,
       memory_mb: 512,
-      agent_ids: [],
+      source: { type: "custom" },
+      deployment_mode: "manual",
+      role: "generic",
+      deployments: [{machine_ids: [], replicas: 1, cpu: 1, memory_mb: 512}],
+      stateful: false,
+      health: { type: "tcp", interval_seconds: 10 },
       ports: [],
       mounts: [],
     },
-    service: {
-      replicas: 1,
-      container_port: 8080,
-      cpu: 1,
-      memory_mb: 512,
-      health: { type: "tcp", interval_seconds: 10 },
-      stateful: false,
-    },
-    node_pool: { agent_ids: [], port_start: 20000, port_end: 29999, nodes: [] },
-    gateway_group: {
-      agent_ids: [],
-      image: "openresty/openresty:1.27.1.2-0-alpine",
-      http_port: 80,
-      https_port: 443,
-    },
+    cluster: { machine_ids: [], port_start: 20000, port_end: 29999, nodes: [] },
     website: {
-      domains: [],
+      cluster_ids: [],
+      bindings: [{ domains: [], https: false, dns_enabled: false, locations: [] }],
       mode: "proxy",
       https: false,
       dns_enabled: false,
@@ -209,6 +215,8 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
     },
   };
   const spec = { ...defaults[kind], ...resource?.spec };
+  if (kind === "application" && !spec.deployments?.length && spec.cluster_id) spec.deployments = [{cluster_id:spec.cluster_id,machine_ids:spec.machine_ids??[],replicas:spec.replicas??1,cpu:spec.cpu??1,memory_mb:spec.memory_mb??512}];
+  if (kind === "website" && !spec.cluster_ids?.length && spec.cluster_id) spec.cluster_ids = [spec.cluster_id];
   spec.env_rows = mapRows(spec.environment ?? spec.env);
   spec.file_rows = mapRows(spec.static_files);
   spec.public_address_rows = mapRows(spec.public_addresses);
@@ -217,31 +225,11 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
     value,
   }));
   if (kind === "website") {
-    spec.nginx = {
-      ...spec.nginx,
-      response_headers_text: headerText(spec.nginx?.response_headers),
-    };
-    spec.locations = (
-      spec.locations ??
-      (spec.upstreams?.length
-        ? [
-            {
-              path: "/",
-              match: "prefix",
-              action: "proxy",
-              target: "upstream",
-              upstreams: spec.upstreams,
-            },
-          ]
-        : [])
-    ).map((r: Spec) => ({
-      ...r,
-      upstreams: (r.upstreams ?? []).map((u: any) =>
-        typeof u === "string" ? { url: u, weight: 1 } : u,
-      ),
-      request_headers_text: headerText(r.request_headers),
-      response_headers_text: headerText(r.response_headers),
-    }));
+    spec.nginx = { ...spec.nginx, response_headers_text: headerText(spec.nginx?.response_headers) };
+    spec.bindings = (spec.bindings ?? []).map((binding: Spec) => ({ ...binding, locations: (binding.locations ?? []).map((r: Spec) => ({ ...r,
+      upstreams: (r.upstreams ?? []).map((u: any) => typeof u === "string" ? { url: u, weight: 1 } : u),
+      request_headers_text: headerText(r.request_headers), response_headers_text: headerText(r.response_headers),
+    })) }));
   }
   spec.mounts = (spec.mounts ?? []).map((mount: Spec) => ({
     ...mount,
@@ -263,13 +251,12 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
       delete mount.file_rows;
       return mount;
     });
-    if (spec.network_mode === "host") delete spec.ports;
+
     if (spec.network_mode !== "bridge") delete spec.networks;
     if (spec.mode === "compose") {
       delete spec.image;
       delete spec.command;
       delete spec.environment;
-      delete spec.ports;
       delete spec.networks;
       delete spec.network_mode;
       try {
@@ -281,30 +268,39 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
   }
   if (kind === "website") {
     spec.static_files = rowsMap(spec.file_rows);
-    spec.nginx = {
-      ...spec.nginx,
-      response_headers: parseHeaders(spec.nginx?.response_headers_text),
-    };
+    spec.nginx = { ...spec.nginx, response_headers: parseHeaders(spec.nginx?.response_headers_text) };
     delete spec.nginx.response_headers_text;
-    spec.locations = (spec.locations ?? []).map((r: Spec) => {
-      const route: Spec = {
-        ...r,
-        request_headers: parseHeaders(r.request_headers_text),
-        response_headers: parseHeaders(r.response_headers_text),
-      };
-      delete route.request_headers_text;
-      delete route.response_headers_text;
-      return route;
+    spec.bindings = (spec.bindings ?? []).map((binding: Spec) => {
+      const result: Spec = { ...binding, locations: (binding.locations ?? []).map((r: Spec) => {
+        const route: Spec = { ...r, request_headers: parseHeaders(r.request_headers_text), response_headers: parseHeaders(r.response_headers_text) };
+        delete route.request_headers_text; delete route.response_headers_text;
+        route.cluster_targets = (route.action === "return" ? [] : route.cluster_targets ?? []).map((target: Spec) => {
+          const value = { ...target };
+          if (value.target === "application") delete value.upstreams;
+          else { delete value.application_id; delete value.port_name; }
+          return value;
+        });
+        for (const key of ["application_id", "port_name", "upstreams", "target", "service_id"]) delete route[key];
+        return route;
+      }) };
+      if (!result.https) delete result.certificate_id;
+      if (!result.dns_enabled) delete result.dns_zone_id;
+      return result;
     });
-    delete spec.upstreams;
     if (spec.mode !== "static") delete spec.static_files;
-    if (spec.mode !== "proxy") delete spec.upstreams;
-    if (spec.mode !== "service") delete spec.service_id;
-    if (!spec.https) delete spec.certificate_id;
-    if (!spec.dns_enabled) delete spec.dns_zone_id;
+    for (const key of ["domains", "https", "dns_enabled", "certificate_id", "dns_zone_id", "gateway_group_id", "service_id", "locations", "upstreams", "cluster_id", "openresty_application_id"]) delete spec[key];
   }
-  if (kind === "gateway_group")
-    spec.public_addresses = rowsMap(spec.public_address_rows);
+  if (kind === "application") {
+    spec.deployments = (spec.deployments ?? []).map((deployment: Spec) => {
+      const result = { ...deployment };
+      if (spec.deployment_mode === "managed") delete result.machine_ids;
+      else delete result.replicas;
+      return result;
+    });
+    for (const key of ["cluster_id", "machine_ids", "replicas", "cpu", "memory_mb", "stateful_acknowledged"]) delete spec[key];
+    if (!spec.service_name) delete spec.service_name;
+    if (!spec.health?.port_name) delete spec.health;
+  }
   if (kind === "certificate_target") {
     spec.env = rowsMap(spec.env_rows);
     const fields: Record<string, string[]> = {

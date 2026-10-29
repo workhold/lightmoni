@@ -6,6 +6,7 @@ export type ResourceKind =
   | "acme_account"
   | "certificate"
   | "certificate_target"
+  | "cluster"
   | "application"
   | "service"
   | "node_pool"
@@ -41,7 +42,10 @@ export interface ResourceDefinition {
   validate(
     spec: Record<string, any>,
     previous?: Record<string, any>,
+    context?: { id: string },
   ): Record<string, any>;
+  afterSave?(resource: PlatformResource, previous?: PlatformResource): void;
+  afterDelete?(resource: PlatformResource): void;
   publicSpec?(spec: Record<string, any>): Record<string, any>;
   beforeDelete?(resource: PlatformResource): void;
 }

@@ -21,7 +21,7 @@ function setup(t: any, fetcher?: typeof fetch) {
       now: () => now,
       logger: { info() {}, warn() {}, error() {} },
     } as unknown as Dependencies,
-    jobs = registerAgentJobs(deps),
+    jobs = registerAgentJobs(deps, { agentCredentials: { has: () => true } as any }),
     store = new OperationsPlatformStore(deps, jobs),
     controller = createWorkloadController({
       store,
