@@ -1,6 +1,6 @@
 # 公共开发契约 v1
 
-2026-10-10 实施基线；2026-10-11 更新 Key 权限；2026-10-17 依 [SDD 007](../specs/007-node-runtime-migration/spec.md) 将中心和 Agent 统一为 Node.js / TypeScript；2026-10-18 依 [SDD 009](../specs/009-assistant-alert-controls/spec.md) 增加共享告警能力与人工确认提案；2026-10-19 依 [SDD 015](../specs/015-data-access-management/contracts.md) 整理接入凭据与数据管理。早期任务和证据中的 Go 平台实现属于迁移前历史。本文声明目标行为，代码与真实验收状态单独记录。主干拥有公共类型与入口；变更先协调消费者，不能各模块另造查询协议。
+2026-10-10 实施基线；2026-10-11 更新 Key 权限；2026-10-17 依 [SDD 007](../specs/007-node-runtime-migration/spec.md) 将中心和 Agent 统一为 Node.js / TypeScript；2026-10-18 依 [SDD 009](../specs/009-assistant-alert-controls/spec.md) 增加共享告警能力与人工确认提案；2026-10-19 依 [SDD 015](../specs/015-data-access-management/contracts.md) 整理接入凭据与数据管理；2026-10-29 依 [SDD 038](../specs/038-registered-host-agent-onboarding/spec.md) 将 Agent 接入统一为登记主机的平台部署流程，移除旧身份兼容。早期任务和证据中的 Go 平台实现属于迁移前历史。本文声明目标行为，代码与真实验收状态单独记录。主干拥有公共类型与入口；变更先协调消费者，不能各模块另造查询协议。
 
 ## 模块注册与前端边界
 
@@ -20,11 +20,13 @@ OTLP/HTTP `/v1/logs`、`/v1/metrics`、`/v1/traces`，支持标准 Protobuf 与 
 
 SDK直连主服务使用Authorization: Bearer <SDK key>。有效启用密钥可写所有合法业务表；旧密钥保留身份并采用同一业务表写入规则。缺失Authorization仅允许实时启用的豁免表；错误/空凭据返回401，不降级匿名。豁免表按管理员配置即时校验，匿名SDK不上报自身遥测。SDK Key与Agent专用control/data凭据保持分离。
 
-新 Agent 由管理员生成一次性 enrollment token，经安装脚本 `--enrollment-token-stdin` 接收，也可将秘密文件的 FD 重定向到 stdin，不放入 URL、命令行参数或环境变量。兑换、激活后由中心签发绑定节点身份的 `control_credential` 与 `data_credential`；control 用于心跳和配置，data 用于遥测上报，二者不能互换。上报请求带 `X-Lightmoni-Agent-ID` 并使用 data Bearer 凭据；当前节点 data 授权允许所有合法业务逻辑表，不能套用 SDK Key 白名单说明。机器指标、拨测和目录日志使用固定逻辑表`host`、`probe`、`files`，旧任务目标表在执行时规范化，历史数据仍可查询。下载 `/downloads/agent/*` 接受有效 enrollment token，并兼容启用的既有上报 Key；旧安装脚本保留 `--key-stdin`。节点 control/data 凭据不用于下载鉴权。
+Agent 只能从登记主机的平台部署流程接入：中心内部签发 enrollment 时强制绑定已登记 `machine_id`，公共独立签发接口返回 409，手工关联接口移除。安装器经 SSH stdin 接收短期 token，不进入 URL、argv、环境变量、日志或 AI 上下文；兑换、激活、注册/心跳核验主机预约及独立身份，注册不创建资产或抢占其他主机。`host_id` 是 Agent 遥测资源 ID，不代替平台主机 ID；名称、出口 IP 不能作为自动关联证据。无主机预约的旧 token/Agent、共享 SDK Key 控制面 fallback 不再支持，不自动迁移或删除历史资产。
 
-SDK 到本机 Agent 不持有中心秘密；启用本地鉴权时使用 Agent 的 `local_token`，由目标 Agent 本地配置管理，平台不签发或回显。非 loopback 接收地址必须配置本地令牌。`GET /v1/sdk-config` 的直连请求使用 SDK data key；新 Agent 使用 control 凭据向中心拉取并缓存配置，旧节点兼容上报 Key。
+中心签发绑定 `agent_id` 的 `control_credential` 与 `data_credential`，control 仅用于心跳/配置等控制请求，data 仅用于遥测，二者不能互换。Agent 上报带 `X-Lightmoni-Agent-ID` 和 data Bearer，允许合法业务逻辑表；机器指标、拨测和目录日志固定逻辑表为 `host`、`probe`、`files`。`/downloads/agent/*` 仅使用该主机安装会话的有效 enrollment 下载授权，SDK Key 和节点 control/data 不代替安装令牌。
 
-所有记录的 key_id 由主服务认证取得，不信任采集正文；新节点记录 data credential ID，SDK/旧节点记录上报 Key ID。凭据轮换不改变已有批次 ID/记录 ID；重试同批时 first_key_id 归因保持首次接收，传输尝试另记实际凭据 ID。
+SDK 默认直连中心，不要求主机登记或 Agent。显式使用本机 Agent OTLP 接收能力时不持有中心秘密，使用由目标 Agent 本地配置管理的 `local_token`，非 loopback 监听必须启用。Agent 向中心拉取配置强制使用独立 control；SDK 直连 `/v1/sdk-config` 使用 SDK Key，不因 Agent 控制凭据收敛改变 SDK 数据权限。
+
+所有记录的 key_id 由主服务认证取得，不信任采集正文；Agent 记录 data credential ID，SDK 记录 SDK Key ID。凭据轮换不改变已有批次 ID/记录 ID，同批重试保留首次接收的 first_key_id，传输尝试另记实际凭据 ID。
 
 成功响应遵循对应 OTLP ExportResponse；自有链路整批校验、整批确认，不能用 partial_success 丢掉未知子集。Agent 先提交可恢复磁盘记录再 ACK；主服务等所有目标 ClickHouse 写入完成再 ACK。失败重试可能遇到部分已写行，但公开查询仍只计一次。兼容路径按 OTLP partial_success 规则处理。网络未知及 429/502/503/504 可重试；400 为永久协议拒绝；401/403 暂停等待修复凭证；其他状态按 OTLP 规范分类，不能所有 5xx 都盲目重试。
 
@@ -32,7 +34,9 @@ SDK 到本机 Agent 不持有中心秘密；启用本地鉴权时使用 Agent �
 
 ## 接入与管理页面
 
-SDK接入位于/data?tab=sdk|keys|exempt；执行节点接入位于/agents/install，/data?tab=agent兼容跳转。管理员在 `/admin?tab=credentials&section=sdk|enrollments|agents` 统一管理三类凭据，成员不能读取或修改。`GET /api/v1/agent-enrollments` 与 `GET /api/v1/agent-credentials` 各展示最近最多 200 条，只返回白名单元数据，不返回明文、哈希、bootstrap 或安装 nonce；有效状态按当前时间计算，GET 不写状态。`POST /api/v1/agent-enrollments/:id/revoke` 撤销尚未完成接入的令牌，待激活令牌撤销后也不能继续激活。`POST /api/v1/agents/:id/credentials/revoke` 按节点及 audience 撤销该用途所有未撤销凭据，不是仅撤销所点击的一行；页面必须确认影响，撤销后需重新接入恢复该用途。
+SDK 接入位于 `/data?tab=sdk|keys|exempt`。主机是唯一受管资产，Agent 安装只从 `/machines` 的登记、预检和部署计划发起，无独立脚本安装页面。主机列表按平台主机 ID 展示，Agent 补充通道和任务；成员仅可查看已关联主机 ID/名称和原有 Agent 可见信息，不获得 SSH 元数据。主机 ID 不可修改，名称及完整 SSH 连接可编辑；有效 Agent 身份须先移除再删主机，移除/卸载不删除资产。
+
+管理员在 `/admin?tab=credentials&section=sdk|enrollments|agents` 查看三类凭据；enrollment 页面只保留平台部署会话的审计与撤销，不单独签发。`GET /api/v1/agent-enrollments` 与 `GET /api/v1/agent-credentials` 各展示最近最多 200 条白名单元数据，不返回秘密、哈希、bootstrap 或 nonce；GET 不写状态。`POST /api/v1/agent-enrollments/:id/revoke` 可撤销尚未完成的会话。节点凭据撤销按 Agent 与 audience 影响该用途全部未撤销凭据，须确认影响，恢复通过主机的新部署流程。
 
 独立 `/data-management` 保留表目录、服务、类型和保留时长；成员只读，管理员可改单表时长及日志采样/停报规则。全局 SDK 停报仍从 SDK 接入页进入，图表模板保留在监控大盘。/data?tab=keys为SDK密钥管理；旧tables/templates分别跳转数据管理与监控大盘。模板 API 继续用于大盘，采集协议及已有表权限不变。完整路由和响应约束见 [SDD 015 契约](../specs/015-data-access-management/contracts.md)。
 
@@ -91,13 +95,13 @@ AI参考Doca骨架移植会话、时间线、可取消SSE、工具loop与草稿�
 
 ## LightMoni Agent、执行节点与任务标签（2026-10-17）
 
-LightMoni Agent 是安装软件，一个运行实例称“执行节点”，导航入口称“节点助手”；Collector/采集器是节点内部功能。“任务”是独立配置和启停的指标采集、服务拨测或目录日志工作，“任务标签”用于分发。节点和任务均可关联多个标签，任一标签相交即可命中，同一任务只下发一次。空目标不广播；节点无匹配任务时关闭内部采集和拨测，仍可接收业务 OTLP，并按节点 data 凭据或既有上报 Key 授权转发。现有网页对话继续称“AI 助手”；本功能未增加节点智能执行或任意命令能力。
+LightMoni Agent 是主机上的管理通道，一个运行实例内部称“执行节点”，统一从主机管理接入和查看；Collector/采集器是内部功能。“任务”是独立配置和启停的指标采集、服务拨测或目录日志工作，“任务标签”用于分发。节点和任务均可关联多个标签，任一标签相交即可命中，同一任务只下发一次。空目标不广播；节点无匹配任务时关闭内部采集和拨测，仍可接收业务 OTLP，并按独立节点 data 凭据授权转发；共享 SDK Key 不授予 Agent 控制权。现有网页对话继续称“AI 助手”；本功能未增加节点智能执行或任意命令能力。
 
 登录用户通过 `GET /api/v1/agent-task-labels`、`GET /api/v1/agent-tasks` 读取标签和任务；管理员使用各资源的 POST、PUT/DELETE `/{id}` 管理，使用 `PUT /api/v1/agents/{id}/labels` 的 `{label_ids:[]}` 设置节点标签。默认标签和仍被引用的标签不能删除。节点列表增加 `label_ids/labels/task_ids/tasks`，`config` 是最终有效配置。写入在事务内验证所有实际受影响节点；上报表、采集间隔或同 ID 拨测等配置冲突返回 409，整个更新回滚，旧配置保持。读取需登录，变更需管理员。
 
-指标任务包含 `host_collectors`、`collect_interval_seconds`、`process_names`、`host_table`，拨测任务包含 HTTP/TCP `probes` 与 `probe_table`，目录日志包含 `log_sources` 与 `log_table`。目录源指定绝对路径 `directory`、文件名规则 `pattern`、子目录开关 `recursive`、首次历史开关 `from_beginning`。平台使用类型对应表单，中心将匹配任务合成为原有 RemoteConfig，旧 Agent 通过原配置轮询接口继续读取，先缓存再应用；首次取得有效任务前暂停内部采集，离线重启可用已缓存任务。详情见 [接口与合并约束](../specs/006-execution-nodes/contracts.md)。
+指标任务包含 `host_collectors`、`collect_interval_seconds`、`process_names`、`host_table`，拨测任务包含 HTTP/TCP `probes` 与 `probe_table`，目录日志包含 `log_sources` 与 `log_table`。目录源指定绝对路径 `directory`、文件名规则 `pattern`、子目录开关 `recursive`、首次历史开关 `from_beginning`。平台使用类型对应表单，中心将匹配任务合成为原有 RemoteConfig，已认证 Agent 通过控制配置轮询接口读取，先缓存再应用；首次取得有效任务前暂停内部采集，离线重启可用已缓存任务。详情见 [接口与合并约束](../specs/006-execution-nodes/contracts.md)。
 
-旧分组一次性迁移为同 ID 的标签及三类独立任务，已有节点仅绑定原标签，保留参数和自定义名称；迁移标记防止重启复活已删除任务。保留 `/agents`、旧 `?group=` 链接、`--group-id` 和注册 `group_id`，安装时选择一个初始标签，接入后可绑定多个。现有节点重新注册及心跳不能覆盖中心标签。旧 `/agent-groups` 接口保留兼容，遇到独立任务或跨标签调整时拒绝旧配置覆盖，提示转到任务管理。
+早期 SDD 006 中的分组迁移和旧任务接口属于任务配置历史，不授予新接入权限。当前 Agent 必须满足 SDD 038 的主机预约和独立身份契约；部署计划选择初始标签，后续通过任务标签接口管理，重新注册和心跳不能覆盖中心标签。
 
 目录日志按换行增量读取，文件 device/inode 与 host 标识定位持久进度；读取位置、截断代次、文件头指纹和冻结批次在同一 SQLite 事务提交，背压不推进位置。文件重命名仍沿用进度，截断或文件头变化增加代次；copytruncate 在文件快速长回且前 64 字节完全相同的情况下无法可靠识别，建议使用重命名轮转。以 observed_time 表示采集时间，并标记 `event_time_source=observed`；`file_path`、`file_name` 保留来源，`lightmoni.source_id` 结合主机、文件与代次，`lightmoni.source_seq` 为行/分片的起始字节位置。未换行的短行等待续写，超长行按最多 64 KiB 分片并标记 `log_fragment=true`。已进队列的数据继续按其原表补传，调整任务或标签不改写历史批次。
 

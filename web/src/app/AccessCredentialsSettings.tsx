@@ -40,8 +40,8 @@ const enrollmentStates:Record<EnrollmentStatus,{label:string;color:string}>={
   const {message,modal}=App.useApp(),list=useCredentialList<Enrollment>('/agent-enrollments');
   const [actionError,setActionError]=useState('');
   return <div className="lm-surface">
-    <div className="lm-toolbar"><Space wrap><Link to="/data?tab=agent"><Button type="primary">{t("生成 Agent 接入令牌","Create Agent enrollment token")}</Button></Link><Button icon={<ReloadOutlined/>} loading={list.loading} onClick={list.refresh}>{t("刷新令牌","Refresh tokens")}</Button></Space></div>
-    <p>{t("一次性令牌用于新节点接入，明文只在生成时显示。撤销待激活令牌会同时阻止该安装继续激活；已接入节点的 control/data 凭据请到「节点凭据」管理。","One-time tokens enroll new nodes and are displayed only when created. Revoking a token awaiting activation also blocks that installation from activating. Manage enrolled nodes' control/data credentials under Node credentials.")}</p>
+    <div className="lm-toolbar"><Space wrap><Link to="/machines"><Button type="primary">{t("前往主机管理部署 Agent","Deploy Agent from Hosts")}</Button></Link><Button icon={<ReloadOutlined/>} loading={list.loading} onClick={list.refresh}>{t("刷新令牌","Refresh tokens")}</Button></Space></div>
+    <p>{t("一次性令牌由平台在已登记主机的部署流程中内部签发，不再提供独立脚本签发。撤销待激活令牌会阻止该安装继续激活；已接入 Agent 的 control/data 凭据可在「节点凭据」管理。","The platform issues one-time tokens internally when deploying Agent to a registered host. Standalone script tokens are no longer issued. Revoking a pending token blocks activation. Manage Agent control/data credentials under Node credentials.")}</p>
     <p>{t("仅展示最近 200 条签发记录。","Showing the latest 200 issued tokens.")}</p>
     {list.error&&<Alert type="error" showIcon title={t("Agent 接入令牌加载失败","Unable to load Agent enrollment tokens")} description={list.error} action={<Button size="small" onClick={list.refresh}>{t("重试","Retry")}</Button>} style={{marginBottom:16}}/>}
     {actionError&&<Alert type="error" closable onClose={()=>setActionError('')} title={actionError} style={{marginBottom:16}}/>}
@@ -55,7 +55,7 @@ const enrollmentStates:Record<EnrollmentStatus,{label:string;color:string}>={
       {title:t("有效期至","Expires at"),width:180,render:(_:unknown,item:Enrollment)=>dateText(item.pending_expires_at&&new Date(item.pending_expires_at)<new Date(item.expires_at)?item.pending_expires_at:item.expires_at)},
       {title:t("节点 ID","Node ID"),dataIndex:'agent_id',width:200,render:(value?:string)=>value?<Typography.Text code>{value}</Typography.Text>:'—'},
       {title:t("操作","Actions"),width:110,render:(_:unknown,item:Enrollment)=><Button size="small" danger disabled={!['issued','pending_activation'].includes(item.status)} onClick={()=>modal.confirm({
-        title:t("撤销此 Agent 接入令牌？","Revoke this Agent enrollment token?"),content:item.status==='pending_activation'?t("该令牌已兑换但节点尚未激活。撤销后此安装无法继续激活，需要重新生成令牌并接入。","This token has been redeemed, but the node has not activated. Revoking it blocks activation; create a new token to enroll again."):t("撤销后无法使用此令牌安装或接入节点，需要重新生成令牌。","After revocation, this token cannot install or enroll a node. A new token is required."),
+        title:t("撤销此 Agent 接入令牌？","Revoke this Agent enrollment token?"),content:item.status==='pending_activation'?t("该令牌已兑换但节点尚未激活。撤销后此安装无法继续激活，请回到主机管理重新生成部署计划。","This token has been redeemed, but the node has not activated. Revoking it blocks activation; return to Hosts to create a new deployment plan."):t("撤销后无法使用此令牌安装或接入节点，请回到主机管理重新生成部署计划。","After revocation, this token cannot install or enroll a node. Create a new deployment plan from Hosts."),
         okText:t("撤销令牌","Revoke token"),okButtonProps:{danger:true},onOk:async()=>{setActionError('');try{await post(`/agent-enrollments/${encodeURIComponent(item.id)}/revoke`,{});list.refresh();void message.success(t("接入令牌已撤销","Enrollment token revoked"))}catch(error){setActionError(errorText(error));throw error}},
       })}>{t("撤销令牌","Revoke token")}</Button>},
     ]}/>}

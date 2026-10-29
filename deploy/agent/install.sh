@@ -9,9 +9,7 @@ release_dir=""
 config_source=""
 endpoint=""
 group_id=""
-key_stdin=""
 enrollment_token_stdin=""
-reporting_key=""
 enrollment_token=""
 bootstrap_credential=""
 agent_id=""
@@ -20,7 +18,7 @@ agent_public_key=""
 enrollment_mode="no"
 
 usage() {
-  echo 'Usage: install.sh (--release-url URL [--key-stdin | --enrollment-token-stdin] | --release-dir DIR) [--fresh] [--version VERSION] [--config FILE | --endpoint URL (--key-stdin | --enrollment-token-stdin)] [--group-id GROUP]'
+  echo 'Usage: install.sh (--release-url URL --enrollment-token-stdin | --release-dir DIR) [--fresh] [--version VERSION] [--config FILE | --endpoint URL --enrollment-token-stdin] [--group-id GROUP]'
   echo 'The reporting configuration is generated automatically. Existing identity and cached data are preserved.'
 }
 
@@ -33,7 +31,6 @@ while [ "$#" -gt 0 ]; do
     --config) config_source="$2"; shift 2 ;;
     --endpoint) endpoint="$2"; shift 2 ;;
     --group-id) group_id="$2"; shift 2 ;;
-    --key-stdin) key_stdin="yes"; shift ;;
     --enrollment-token-stdin) enrollment_token_stdin="yes"; shift ;;
     --help) usage; exit 0 ;;
     *) usage >&2; exit 1 ;;
@@ -51,18 +48,14 @@ case "$version" in *[!0-9A-Za-z._-]*|'') echo 'Invalid fixed version.' >&2; exit
 
 config_path="/etc/lightmoni-agent/config.json"
 if [ ! -f "$config_path" ] && [ -z "$config_source" ] && [ -z "$endpoint" ]; then
-  echo 'First installation requires a reporting address and credential; generate the command in LightMoni.' >&2
-  exit 1
-fi
-if [ "$key_stdin" = "yes" ] && [ "$enrollment_token_stdin" = "yes" ]; then
-  echo '--key-stdin and --enrollment-token-stdin are mutually exclusive.' >&2
+  echo 'First installation requires a registered-host deployment enrollment; use LightMoni host management.' >&2
   exit 1
 fi
 if [ -n "$enrollment_token_stdin" ]; then
   [ -n "$endpoint" ] || { echo '--enrollment-token-stdin requires --endpoint.' >&2; exit 1; }
   enrollment_mode="yes"
-elif [ -n "$endpoint" ] && [ "$key_stdin" != "yes" ]; then
-  echo 'A reporting address requires --key-stdin or --enrollment-token-stdin.' >&2
+elif [ -n "$endpoint" ]; then
+  echo 'A reporting address requires --enrollment-token-stdin from a registered-host deployment.' >&2
   exit 1
 fi
 if [ -n "$config_source" ]; then [ -f "$config_source" ] || { echo 'Configuration file missing.' >&2; exit 1; }; fi
@@ -158,16 +151,12 @@ if [ "$fresh" = "yes" ] && { [ -e /usr/local/bin/lightmoni-agent ] || [ -L /usr/
   echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2
   exit 1
 fi
-if [ "$key_stdin" = "yes" ]; then
-  IFS= read -r reporting_key || :
-  [ -n "$reporting_key" ] || { echo 'A reporting key is required.' >&2; exit 1; }
-fi
 if [ "$enrollment_token_stdin" = "yes" ]; then
   IFS= read -r enrollment_token || :
   [ -n "$enrollment_token" ] || { echo 'An enrollment token is required.' >&2; exit 1; }
 fi
-if [ -z "$release_dir" ] && [ -z "$reporting_key" ] && [ -z "$enrollment_token" ]; then
-  echo 'Online installation requires --key-stdin or --enrollment-token-stdin to authenticate LightMoni Agent downloads.' >&2
+if [ -z "$release_dir" ] && [ -z "$enrollment_token" ]; then
+  echo 'Online installation requires --enrollment-token-stdin to authenticate LightMoni Agent downloads.' >&2
   exit 1
 fi
 artifact="lightmoni-agent_${version}_linux_${arch}.tar.gz"
@@ -176,8 +165,7 @@ if [ -n "$release_dir" ]; then
   cp "$release_dir/SHA256SUMS" "$tmp_dir/SHA256SUMS"
 else
   command -v curl >/dev/null || { echo 'curl is required for online installation.' >&2; exit 1; }
-  download_credential="$reporting_key"
-  [ -n "$download_credential" ] || download_credential="$enrollment_token"
+  download_credential="$enrollment_token"
   # Keep the secret out of curl's argv and environment. The config file is
   # mode 0600 and is removed with the transaction directory on every exit.
   curl_auth="$tmp_dir/curl-auth.conf"
@@ -208,7 +196,7 @@ rewrite_credentials() {
   data_file="$tmp_dir/data-credential"
   printf '%s' "$control_credential" > "$control_file"
   printf '%s' "$data_credential" > "$data_file"
-  "$node" -e 'const fs=require("node:fs");const [path,controlPath,dataPath]=process.argv.slice(1);const config=JSON.parse(fs.readFileSync(path,"utf8"));config.key="";config.control_credential=fs.readFileSync(controlPath,"utf8");config.data_credential=fs.readFileSync(dataPath,"utf8");fs.writeFileSync(path,JSON.stringify(config,null,2)+"\n",{mode:0o600});fs.chmodSync(path,0o600);' "$staged_config" "$control_file" "$data_file"
+  "$node" -e 'const fs=require("node:fs");const [path,controlPath,dataPath]=process.argv.slice(1);const config=JSON.parse(fs.readFileSync(path,"utf8"));config.control_credential=fs.readFileSync(controlPath,"utf8");config.data_credential=fs.readFileSync(dataPath,"utf8");fs.writeFileSync(path,JSON.stringify(config,null,2)+"\n",{mode:0o600});fs.chmodSync(path,0o600);' "$staged_config" "$control_file" "$data_file"
 }
 stage_identity() {
   staged_identity="$tmp_dir/identity.json"
@@ -238,14 +226,15 @@ fi
 staged_config="$tmp_dir/config.json"
 if [ -f "$config_path" ]; then cp -p "$config_path" "$staged_config"
 elif [ -n "$config_source" ]; then cp "$config_source" "$staged_config"; fi
-if [ -n "$endpoint" ]; then
-  configure_credential="$reporting_key"
-  [ -n "$configure_credential" ] || configure_credential="$bootstrap_credential"
-  printf '%s\n' "$configure_credential" | "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --endpoint "$endpoint" --group-id "$group_id" --key-stdin --require-data-dir /var/lib/lightmoni-agent
-elif [ -n "$group_id" ]; then
-  "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --group-id "$group_id" --require-data-dir /var/lib/lightmoni-agent
+if [ "$enrollment_mode" = "yes" ]; then
+  "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --endpoint "$endpoint" --group-id "$group_id" --pending-enrollment --require-data-dir /var/lib/lightmoni-agent
+  "$tmp_dir/unpacked/lightmoni-agent" check --config "$staged_config" --pending-enrollment --require-data-dir /var/lib/lightmoni-agent
+else
+  if [ -n "$group_id" ]; then
+    "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --group-id "$group_id" --require-data-dir /var/lib/lightmoni-agent
+  fi
+  "$tmp_dir/unpacked/lightmoni-agent" check --config "$staged_config" --require-data-dir /var/lib/lightmoni-agent
 fi
-"$tmp_dir/unpacked/lightmoni-agent" check --config "$staged_config" --require-data-dir /var/lib/lightmoni-agent
 
 if [ "$enrollment_mode" = "yes" ]; then
   # The bootstrap credential is used only for this health-gated activation;

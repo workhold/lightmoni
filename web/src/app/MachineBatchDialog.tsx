@@ -40,6 +40,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
   deployment_pending:t('存在待确认或执行中的安装计划，请在主机历史中处理。','A pending or running installation plan exists. Resolve it in host history.'),
   uninstallation_pending:t('存在待确认、执行中或结果未知的卸载流程，请在主机历史中处理。','A pending, running, or uncertain uninstall workflow exists. Resolve it in host history.'),
   uninstallation_unknown:t('上次卸载结果未知，请在历史中只读核对。','The previous uninstall outcome is unknown. Verify it read-only in host history.'),
+  active_agent:t('主机仍有有效 Agent 身份，请先移除身份，再删除主机。','Remove the active Agent identity before deleting the host.'),
   active_credentials:t('请先撤销有效连接凭据，随后再删除主机记录。','Revoke active connection credentials before deleting the host record.'),
   choose_credential:t('请选择有效的 SSH 凭据。多条凭据时需要明确选择。','Select an active SSH credential. An explicit selection is required when multiple credentials exist.'),
   plan_expired:t('计划已过期，未执行。请取消后重新检查。','The plan expired and was not executed. Cancel it before running new checks.'),

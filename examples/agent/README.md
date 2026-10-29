@@ -1,58 +1,62 @@
-# LightMoni Agent 执行节点接入与断网恢复
+# LightMoni Agent 运行与断网恢复
 
-平台接入：在“数据接入 → 执行节点接入”选择初始任务标签、从内网/公网地址列表选择上报入口并填写 Key，复制安装命令以部署 LightMoni Agent。运行实例称为执行节点，在“节点助手”中绑定多个任务标签；中心下发与任一标签匹配的启用任务，同一任务重复命中只执行一次。任务类型为指标采集、服务拨测和目录日志，在“任务管理”中独立编辑，配置冲突时整体拒绝保存。无匹配任务时内部采集和拨测暂停，业务转发继续。Key 默认填入当前标签匹配的启用任务所需表；空任务标签不会自动授权默认采集表。
+Agent 接入统一从“主机管理”发起：登记名称及 SSH 目标地址、端口、用户名，核对指纹、选择凭据保存期限、执行预检和审阅计划，再由平台安装。指纹与凭据可稍后添加。平台内部生成预绑定主机 ID 的一次性 enrollment，随后签发 Agent 独立 control/data 凭据。不再提供独立脚本安装、共享上报 Key 控制或手工主机关联；源码启动命令不能创建有效平台身份。完整步骤和凭据边界见 [部署与恢复](../../docs/agent-deployment.md)、[系统设计](../../docs/system-design.md#133-当前登记主机与-agent-身份一体化sdd-038) 与 [SDD 038](../../specs/038-registered-host-agent-onboarding/spec.md)。
 
-旧分组会迁移为同名任务标签和独立任务，已有节点身份、配置参数、目标表及中心分配保留。CLI 的 `--group-id` 继续表示初始任务标签，重连不会覆盖中心保存的多个标签。
+Agent 独立于业务生命周期运行。平台安装 Linux amd64/arm64 systemd 服务，发行包自带 Node 24.15.0、要求 glibc ≥ 2.28；容器发布、自动 sidecar/DaemonSet 注入未实现。中心与 Agent 均为 Node.js / TypeScript，发布语言矩阵以 [SDK 说明](../../sdk/README.md) 与接入页为准。
 
-Agent 独立运行，由自己的进程管理器或容器编排负责启动、停止和重启，生命周期独立于业务实例。以下 `run` 命令以前台进程运行，收到 SIGTERM 后关闭；网页安装器目前提供 systemd 安装流程。业务通过 SDK 上报，退出时完成自己的 SDK flush/shutdown，Agent 继续运行并处理采集与待补传数据。每个 Agent 实例使用独立数据目录，并在重启或容器重建后保留该目录；多个 Agent 实例不能共用同一队列目录。
+## 源码开发入口
 
-中心和 Agent 均使用 Node.js / TypeScript，当前发布的业务 SDK 为 TypeScript/JavaScript、Python、Ruby；PHP SDK 已下线，Go/Rust 仅保留源码、后续支持，不纳本次发布验收。Linux amd64 / arm64 发布包自带 Node 24.15.0，要求 glibc ≥ 2.28；主机无需预装 Node/npm。源码开发时建议使用 Node 24.15.0，并先在仓库根目录执行 `npm run setup`、`npm run build`。Go 工具链只用于 Go 业务 SDK，不用于运行 Agent。迁移说明见 [SDD 007](../../specs/007-node-runtime-migration/spec.md)。
-
-从仓库根目录运行 CLI，自动保存连接配置（Key 仅保存在本机配置文件）：
+先在仓库根执行 `npm run setup` 和 `npm run build`。已有受管主机配置和独立身份的 Agent 可以以前台方式运行：
 
 ```sh
-read -r AGENT_REPORT_KEY
-printf '%s' "$AGENT_REPORT_KEY" | node runtime/dist/agent/main.js configure --config ./agent-config.json --endpoint http://127.0.0.1:8080 --group-id default --key-stdin --require-data-dir ./agent-data
-unset AGENT_REPORT_KEY
-node runtime/dist/agent/main.js check --config ./agent-config.json
-node runtime/dist/agent/main.js run --config ./agent-config.json
+node runtime/dist/agent/main.js check --config /path/private-agent-config.json
+node runtime/dist/agent/main.js run --config /path/private-agent-config.json
 ```
 
-同机两个业务分别使用 `service=order-api` 和 `service=worker`，`table=business`、`endpoint=http://127.0.0.1:4318`。业务 SDK 不配置主服务 Key；执行节点使用一个上报 Key 上报两份数据。Key 不属于 service，主服务记录实际认证的 Key 来源。更换配置中的上报 Key 后重启 LightMoni Agent，已有持久批次 ID 和内容保持不变。
+`run` 收到 SIGTERM 后关闭，不能与使用相同状态目录的 systemd 实例同时运行。独立实例不得共用或克隆身份、队列；重启原实例保留持久目录。未配置主机预约的旧身份不能通过共享 SDK Key 接入，不自动补建主机。
 
-`node runtime/dist/agent/main.js status --config ./agent-config.json` 显示积压、receipt、quarantine 和采集器状态。业务 SDK 到执行节点的成功确认表示 SQLite `synchronous=FULL` 提交完成；主服务确认后执行节点回收 spool，receipt 保留至少配置的保证窗口。业务 SDK 尚未得到节点 ACK 的内存数据可能随业务进程崩溃丢失。
+业务 SDK 默认使用中心地址和 SDK Key 独立上报，不依赖 Agent。本地 OTLP 接收仅作为显式使用的 Agent 能力；配置时使用 Agent 的本地接收地址及 local token，Agent 上游使用自己的 data 凭据，业务不持有 Agent 控制秘密。Agent 可使用相同 TypeScript SDK 为自身采集与任务打点。
 
-可停止主服务，发送日志与多维计数，然后重启 LightMoni Agent 和主服务，确认补传保留原始时间。队列满时执行节点返回 503，不静默删除已经确认的数据。永久拒绝或超龄批次进入 quarantine：
+## 本地状态与队列
+
+`status` 显示积压、receipt、quarantine 和采集器状态。`check` 只验证本地配置，不代表中心鉴权、网络、任务和数据上报均正常：
 
 ```sh
-node runtime/dist/agent/main.js quarantine --config ./agent-config.json
-node runtime/dist/agent/main.js quarantine --config ./agent-config.json --action retry --id BATCH_ID
-# 确认该批次确实无需保留后，显式记录一次丢弃：
-node runtime/dist/agent/main.js quarantine --config ./agent-config.json --action discard --id BATCH_ID --confirm-data-loss
+node runtime/dist/agent/main.js status --config /path/private-agent-config.json
 ```
 
-主机数据默认 table=host、service=lightmoni-agent；执行节点队列状态使用同一机器指标表，HTTP/TCP 拨测默认 table=probe，目录日志默认 table=files；可在独立任务中修改。进程仅采集配置的 `process_names` 通配符，每个匹配器最多 8 个进程；不会上传完整命令行。采集权限不足和网络/TLS/超时有独立状态，不伪装为正常零值。
+Agent 在 SQLite 持久化后才确认已接收批次；中心确认后回收 spool，receipt 保留有界保证窗口。SDK 尚未得到确认的内存数据可能随业务崩溃丢失。队列容量、最大重放年龄和存储空间均有限，满队列返回 503；永久拒绝或超龄批次进入 quarantine，不静默删除已确认数据。
 
-容器中的 `127.0.0.1` 指该容器。Linux 可选择宿主网络连接 loopback 执行节点，或者显式将 LightMoni Agent 绑定受限宿主地址并配置 `local_token`。SDK 的 Key 此时仅用本地 token，主服务私有 Key 仍只在 LightMoni Agent 配置。避免将宿主接收端口默认开放到公网。
-
-固定版本发布与 Linux 安装：
+隔离区维护前停止 Agent，避免并发修改队列：
 
 ```sh
-npm run release:agent -- 0.1.0
-sudo sh deploy/agent/install.sh --release-dir runtime/downloads --config /path/private-agent-config.json
-# 在线安装使用平台生成的完整命令，由当前项目提供鉴权下载。
-sudo sh deploy/agent/uninstall.sh
+node runtime/dist/agent/main.js quarantine --config /path/private-agent-config.json --action list
+node runtime/dist/agent/main.js quarantine --config /path/private-agent-config.json --action retry --id BATCH_ID
 ```
 
-默认重装/卸载保留配置、机器身份及 spool；卸载无需访问主服务。`--purge` 明确删除缓存，可能丢失已经由执行节点接收但未送达的数据。正式镜像内置安装脚本、amd64 / arm64 自带 Node 的 LightMoni Agent 包与 SHA256 校验文件，通过当前项目的 `/downloads/agent/` 下载接口提供，并以有效上报 Key 鉴权。本地开发或自定义版本可运行上述发布脚本生成内置包，默认输出 `runtime/downloads`。Linux 安装器将应用和运行时安装到 `/opt/lightmoni-agent`，systemd 启动独立的 `lightmoni-agent` launcher；业务进程退出不停止该服务。本次 macOS 验证包含 Node Agent 队列和真实 ClickHouse 联调，未执行 Docker 镜像构建或 Linux systemd 实机安装，见 [验证记录](../../specs/007-node-runtime-migration/quickstart.md)。
+只有接受数据丢失后才使用 `--action discard --id BATCH_ID --confirm-data-loss`。维护后重启服务并核对实际中心数据，不通过删除 queue 文件解除容量压力。
 
+## 任务和日志
 
-目录日志任务中填写例如 `/var/log/nginx`、`*.log*`，根据需要开启子目录。默认跳过首次发现的现有内容，只读新增行；首次从头开关可导入已有日志。读取进度与日志队列原子保存，重启不会重复读取已入队内容。轮转建议重命名，避免快速 copytruncate 保持相同文件头导致无法识别。目录与文件需允许 `lightmoni-agent` 服务用户读取；检查平台执行节点详情的“采集状态”定位路径、权限或数量限制问题。日志是 UTF-8 逐行文本，压缩文件、符号链接不采集，超长行分片。事件时间为采集时间，原始业务时间不会自动解析。
+任务在主机工作区独立管理，Agent 和任务可绑定多个标签，任一标签相交就下发，重复命中只执行一次。无匹配任务时内部采集/拨测暂停，冲突配置整体拒绝。任务标签不授予 SSH 或任意命令执行权限。机器指标、拨测和目录日志默认逻辑表为 `host`、`probe`、`files`。
 
-可先运行 `npm --prefix runtime run typecheck` 和 `npm --prefix runtime test`。针对隔离中心的真实链路测试从 `runtime` 目录运行：
+目录日志使用明确绝对目录、文件匹配与读取权限；默认只采集首次发现后新增的内容，后续新文件完整采集。读取进度与日志队列原子保存，支持重启续读、重命名轮转和截断检测。服务用户必须有目录遍历和文件读取权限；仅采集 UTF-8 文本行，跳过压缩文件和符号链接，超长行分片。事件时间为采集时间，原始业务时间不自动解析。
+
+## 构建、测试与卸载
+
+维护发行物使用 `npm run release:agent -- 0.1.0`；构建 Linux 包不代表已完成 Linux 运行验收，也不是用户独立接入入口。安装/卸载脚本由平台固定流程调用，用户从主机管理审阅并确认卸载；删除主机记录不会停止远端 Agent，且有效 Agent 身份必须先移除。网页卸载保留身份、配置与队列用于核查，不开放 purge。
+
+本地检查：
+
+```sh
+npm --prefix runtime run typecheck
+npm --prefix runtime test
+```
+
+隔离真实中心测试可从 `runtime` 目录运行：
 
 ```sh
 LIGHTMONI_DOMAINS_URL=http://127.0.0.1:18885 node --import tsx --test test/agent-live.test.ts
 ```
 
-账号使用 `LIGHTMONI_DOMAINS_USER` / `LIGHTMONI_DOMAINS_PASSWORD` 指定，不要指向生产中心；未提供 URL 时该测试默认跳过。
+使用 `LIGHTMONI_DOMAINS_USER` / `LIGHTMONI_DOMAINS_PASSWORD` 指定隔离账号，不指向生产中心；未提供 URL 时默认跳过。实际覆盖与未验收边界以对应 SDD 记录为准。

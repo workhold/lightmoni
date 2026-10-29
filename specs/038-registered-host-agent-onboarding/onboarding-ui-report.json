@@ -1,0 +1,28 @@
+{
+  "checked": [
+    "zh-CN: registration stays in one two-step flow and hides script enrollment entry",
+    "zh-CN: passwords default to 15-minute reusable temporary storage; single-use remains available with a one-hour ceiling",
+    "zh-CN: credential failure preserves the registered host and allows retry without duplicate registration",
+    "zh-CN: temporary password custom validity saves without preflight or remote installation",
+    "zh-CN: onboarding can create a password-backed plan after explicit preflight while preserving apply confirmation",
+    "zh-CN: host details show the user name and immutable platform-generated ID without SDK environment configuration",
+    "zh-CN: managed passwords default to one day, allow 365 days, and require affirmative confirmation",
+    "zh-CN: installation offers managed and temporary passwords but excludes single-use passwords",
+    "zh-CN: uninstall credential selection accepts reusable passwords and rejects single-use passwords",
+    "zh-CN: batch deployment retains per-host selection and filters single-use passwords",
+    "en-US: registration stays in one two-step flow and hides script enrollment entry",
+    "en-US: passwords default to 15-minute reusable temporary storage; single-use remains available with a one-hour ceiling",
+    "en-US: credential failure preserves the registered host and allows retry without duplicate registration",
+    "en-US: temporary password custom validity saves without preflight or remote installation",
+    "en-US: onboarding can create a password-backed plan after explicit preflight while preserving apply confirmation",
+    "en-US: host details show the user name and immutable platform-generated ID without SDK environment configuration",
+    "en-US: managed passwords default to one day, allow 365 days, and require affirmative confirmation",
+    "en-US: installation offers managed and temporary passwords but excludes single-use passwords",
+    "en-US: uninstall credential selection accepts reusable passwords and rejects single-use passwords",
+    "en-US: batch deployment retains per-host selection and filters single-use passwords",
+    "390px: two-step form wraps without page overflow and configure-later preserves the asset without saving secrets",
+    "member: no host registration, bulk controls, SSH metadata, or administrative host request"
+  ],
+  "errors": [],
+  "unexpected": []
+}

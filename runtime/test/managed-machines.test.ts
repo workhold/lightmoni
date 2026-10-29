@@ -185,10 +185,15 @@ test('completed deployment plans cannot be cancelled and an active terminal bloc
  assert.equal(completed.status,409,completed.raw);assert.match(completed.raw,/尚未执行/);
 });
 
-test('manual script credentials cannot be mistaken for automatic SSH deployment',async t=>{
- const f=await fixture(t);const created=await f.request('/machines','POST',{name:'prod-script',address:'host.example.com',username:'deploy',connection_method:'manual_script'});assert.equal(created.status,201,created.raw);const machine=created.data;
- const credential=await f.request(`/machines/${machine.id}/credentials`,'POST',{method:'manual_script'});assert.equal(credential.status,201,credential.raw);
- const plan=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:credential.data.credential_id});assert.equal(plan.status,400);assert.match(plan.raw,/手动脚本/);
+test('host APIs accept only direct SSH and credentials require an explicit supported method',async t=>{
+ const f=await fixture(t),input={name:'prod-direct',address:'host.example.com',username:'deploy'};
+ const created=await f.request('/machines','POST',input);assert.equal(created.status,201,created.raw);const machine=created.data;assert.equal(machine.connection_method,'direct_ssh');
+ for(const connection_method of ['manual_script','bastion','ssm','unknown','']) {
+  assert.equal((await f.request('/machines','POST',{...input,connection_method})).status,400,connection_method);
+  assert.equal((await f.request(`/machines/${machine.id}`,'PUT',{connection_method})).status,400,connection_method);
+ }
+ for(const body of [{},{secret:'not-a-method'},{method:'manual_script'},{method:'unknown',secret:'unused'}])assert.equal((await f.request(`/machines/${machine.id}/credentials`,'POST',body)).status,400,JSON.stringify(body));
+ assert.equal(f.machines.get(machine.id).connection_method,'direct_ssh');assert.equal(f.machines.get(machine.id).credential_count,0);assert.equal(f.sshInput,undefined);
 });
 
 test('credential decryption failure closes a deployment as failed',async t=>{
@@ -286,8 +291,10 @@ test('multiple, revoked, expired, cross-host and unsupported SSH credentials nev
  assert.equal((await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential})).status,409);
  f.db.run('UPDATE machine_credentials SET expires_at=? WHERE id=?',now.toISOString(),second.data.credential_id);
  assert.equal((await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:second.data.credential_id})).status,409);
- await f.request(`/machines/${other.id}`,'PUT',{connection_method:'bastion'});
+ assert.equal((await f.request(`/machines/${other.id}`,'PUT',{connection_method:'bastion'})).status,400);
+ f.db.run("UPDATE managed_machines SET connection_method='bastion' WHERE id=?",other.id);
  assert.equal((await f.request(`/machines/${other.id}/ssh-check`,'POST',{})).status,400);
+ assert.equal(f.db.get<any>('SELECT connection_method FROM managed_machines WHERE id=?',other.id)?.connection_method,'bastion');
  assert.equal(f.sshInput,undefined);
 });
 
@@ -348,7 +355,7 @@ test('credential policies require explicit managed consent and enforce per-polic
  const temporaryPassword=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'reuse-temporary',retention:'temporary'});assert.equal(temporaryPassword.status,201,temporaryPassword.raw);assert.equal(Date.parse(temporaryPassword.data.expires_at)-now.getTime(),900_000);
  const managedPassword=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'reuse-managed',retention:'managed',confirm_managed:true});assert.equal(managedPassword.status,201,managedPassword.raw);assert.equal(Date.parse(managedPassword.data.expires_at)-now.getTime(),86_400_000);assert.equal(managedPassword.data.secret_fingerprint,'');
  for(const seconds of [60,31_536_000])assert.equal((await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'explicit-limit',retention:'managed',confirm_managed:true,expires_in_seconds:seconds})).status,201);
- const script=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'manual_script'});assert.equal(script.status,201);assert.equal(script.data.retention,'none');assert.equal(credentialRow(f,script.data.credential_id).secret_encrypted,'');
+ const script=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'manual_script'});assert.equal(script.status,400);
  assert.equal((await f.request(`/machines/${h.id}/credentials`,'POST',{method:'manual_script',secret:'must-not-be-saved'})).status,400);
  assert.equal((await f.request(`/machines/${h.id}/credentials`,'POST',{method:'manual_script',retention:'managed',confirm_managed:true})).status,400);
 });
@@ -408,11 +415,11 @@ test('password failures, cancellation and unused terminal closure consume and er
 
 test('capabilities distinguish connection, fingerprint, usable password, private key and busy state', async t => {
  const f=await fixture(t);const made=await f.request('/machines','POST',{name:'capabilities',address:'host.example.com',username:'deploy'}),mid=made.data.id;
- let machine=f.machines.get(mid);assert.equal(machine.capabilities.terminal.reason,'direct_ssh_required');assert.equal(machine.ssh_recovery_available,false);
+ let machine=f.machines.get(mid);assert.equal(machine.connection_method,'direct_ssh');assert.equal(machine.capabilities.terminal.reason,'host_fingerprint_required');assert.equal(machine.ssh_recovery_available,false);
  await f.request(`/machines/${mid}`,'PUT',{connection_method:'direct_ssh'});assert.equal(f.machines.get(mid).capabilities.ssh_check.reason,'host_fingerprint_required');
  await f.request(`/machines/${mid}`,'PUT',{host_key_fingerprint:'SHA256:abcdefghijklmnop'});
- const script=await f.request(`/machines/${mid}/credentials`,'POST',{method:'manual_script'});assert.equal(script.status,201);
- machine=f.machines.get(mid);assert.equal(machine.active_credential_count,1);assert.equal(machine.active_ssh_credential_count,0);assert.equal(machine.capabilities.terminal.reason,'ssh_credential_required');assert.equal(machine.capabilities.deploy_agent.reason,'reusable_ssh_credential_required');
+ const script=await f.request(`/machines/${mid}/credentials`,'POST',{method:'manual_script'});assert.equal(script.status,400);
+ machine=f.machines.get(mid);assert.equal(machine.active_credential_count,0);assert.equal(machine.active_ssh_credential_count,0);assert.equal(machine.capabilities.terminal.reason,'ssh_credential_required');assert.equal(machine.capabilities.deploy_agent.reason,'reusable_ssh_credential_required');
  const password=await f.request(`/machines/${mid}/credentials`,'POST',{method:'password',secret:'temporary'});const pid=password.data.credential_id;
  machine=f.machines.get(mid);assert.equal(machine.active_ssh_credential_count,1);assert.equal(machine.active_ssh_key_count,0);assert.equal(machine.active_reusable_ssh_credential_count,0);assert.equal(machine.ssh_recovery_available,true);assert.equal(machine.capabilities.terminal.available,true);assert.equal(machine.capabilities.ssh_check.available,true);assert.equal(machine.capabilities.deploy_agent.reason,'reusable_ssh_credential_required');
  const lease=f.machines.acquireTerminal(mid,pid,()=>{});for(const value of Object.values(f.machines.get(mid).capabilities)) assert.equal(value.reason,'host_busy');lease.release();

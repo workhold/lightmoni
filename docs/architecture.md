@@ -1,6 +1,6 @@
 # LightMoni 整体方案
 
-状态：2026-10-10 初稿；2026-10-17 更新为 Node.js / TypeScript 中心和 Agent；2026-10-19 依 [SDD 015](../specs/015-data-access-management/spec.md) 整理接入、凭据与数据管理。初稿中的 Go 运行时选型由 [SDD 007](../specs/007-node-runtime-migration/spec.md) 取代；历史任务与证据保留当时上下文，当前迁移验证见 [quickstart](../specs/007-node-runtime-migration/quickstart.md) 和 [领域验证](../specs/007-node-runtime-migration/domain-validation.md)。设计条款本身不表示性能已验证。用户约束见 [brief.md](brief.md)，模块共同遵守 [contracts.md](contracts.md)，派发顺序见 [任务索引](tasks/README.md)。
+状态：2026-10-10 初稿；2026-10-17 更新为 Node.js / TypeScript 中心和 Agent；2026-10-19 依 [SDD 015](../specs/015-data-access-management/spec.md) 整理接入、凭据与数据管理；2026-10-29 依 [SDD 038](../specs/038-registered-host-agent-onboarding/spec.md) 统一主机登记与 Agent 身份接入。系统级现行基线见 [system-design.md](system-design.md)。初稿中的 Go 运行时选型由 [SDD 007](../specs/007-node-runtime-migration/spec.md) 取代；历史任务与证据保留当时上下文，当前迁移验证见 [quickstart](../specs/007-node-runtime-migration/quickstart.md) 和 [领域验证](../specs/007-node-runtime-migration/domain-validation.md)。设计条款本身不表示性能已验证。用户约束见 [brief.md](brief.md)，模块共同遵守 [contracts.md](contracts.md)，派发顺序见 [任务索引](tasks/README.md)。
 
 ## 1. 产品定位与技术选择
 
@@ -27,7 +27,7 @@ flowchart LR
     S -->|agent：OTLP HTTP 与可选 local token| A
     H[机器采集 / 拨测 / 目录日志] --> G[Agent 内置 TypeScript SDK]
     G -->|进程内 exporter| A
-    A[Node Agent：磁盘队列与重试] -->|节点 data 凭据；旧节点兼容上报 Key| M
+    A[Node Agent：磁盘队列与重试] -->|独立节点 data 凭据| M
     U[React 管理界面] --> M
     M[Node 一体化主服务：接收 / 查询 / 大盘 / 日志 / 告警] --> Q[(SQLite：配置与状态)]
     M --> C[(ClickHouse：日志 / 指标 / 链路)]
@@ -49,9 +49,9 @@ moni.record('business', 'db.query.duration_ms', {key1: 'mysql', key2: 'select'},
 await moni.shutdown({timeoutMs: 5000});
 ```
 
-一台机器的两个服务可以共用一个 Agent。新节点由一次性 enrollment token 兑换、激活，中心签发绑定节点身份的 control/data 凭据，分别用于心跳、配置与遥测上报；令牌通过安装脚本 stdin 接收，可从秘密文件的 FD 重定向，不进入 URL、命令行参数或环境变量。新 data 凭据当前允许合法业务逻辑表；旧版 Agent 保留 `config.key` 兼容路径，按有效SDK密钥规则写入所有合法业务表。SDK 到 Agent 的 local token 由目标 Agent 本地配置管理，平台不签发或回显。
+主机是唯一受管资产，每台主机最多关联一个 Agent。新接入由主机部署流程内部签发预绑定主机的 enrollment，兑换/激活后使用独立 control/data 凭据，分别承担控制与遥测；内部安装器从 SSH stdin 接收 token，不进入 URL、argv、环境或日志。注册/心跳只关联已有预约，不创建资产，也不回退共享 SDK Key。业务 SDK 可独立直报中心；显式使用 Agent 本地接收时，local token 由目标 Agent 管理，不是平台主机或中心控制身份。
 
-主服务SDK密钥只按名称创建，所有有效启用密钥可写任意业务表；缺失Authorization只允许管理员启用的豁免表。SDK/旧节点使用上报Key，新节点保留main的control/data用途隔离并记录实际凭据ID。业务指标用key1…key16固定槽，默认30秒UTC窗口；每表可选择七档周期，查询按实际窗口对齐。主机、拨测、目录日志使用固定host/probe/files表，任务标签与主机管理逻辑采用main版本。
+主服务SDK密钥只按名称创建，所有有效启用密钥可写任意业务表；缺失Authorization只允许管理员启用的豁免表。SDK 使用上报 Key，Agent 强制独立 control/data 用途隔离并记录实际凭据 ID。业务指标用key1…key16固定槽，默认30秒UTC窗口；每表可选择七档周期，查询按实际窗口对齐。主机、拨测、目录日志使用固定host/probe/files表，任务标签与主机管理逻辑采用main版本。
 
 登录区分管理员与成员，所有成员看到整个实例的数据。管理员管理用户、Key、登录供应商和外部渠道凭证；成员创建大盘、检索、告警与组目标，可以引用渠道但不能读取秘密。支持本地账号、微信、QQ、GitHub 和通用 OAuth 2.0 登录；外部身份绑定本地用户，禁用用户同时撤销会话。OAuth 回调与账号绑定由主服务处理，供应商密钥不进入前端。通用 OAuth 2.0 必须配置用户身份端点与稳定 ID 映射；OAuth 协议本身不定义用户资料格式。大盘全局保存，可以查询任意已发现表、多个 service。首个管理员在初始化时创建，私有写入 Key 与网页登录会话分开。
 
@@ -115,9 +115,9 @@ SDK 到 Agent 之前的数据默认只在有界内存，业务进程崩溃可能
 
 UI 禁止原生 `<select>` 及 `window.alert/confirm/prompt`。选择、确认、输入、日期与时间使用共享 React 组件，键盘与焦点行为一并验收。AntV 绘制图表，共享表格展示无损数值。详细决定见 [UI 设计说明](ui-design.md)，核心交互对标与全流程验收见 [acceptance.md](acceptance.md)。
 
-共用侧栏包含概览、监控大盘、日志、链路、告警、节点助手、数据接入、数据管理与管理后台。数据接入仅保留 SDK 接入和执行节点接入：提供当前三种语言的安装示例、两种显式上报模式，以及节点接入命令。管理员选择初始任务标签与上报地址，生成只显示一次的 enrollment token，再通过安装命令在目标主机输入；下载支持有效接入令牌并兼容启用的既有上报 Key。安装脚本有固定发布版本与校验和，Linux amd64/arm64 和 systemd 作为首批目标。
+侧栏按监控和运维能力分类，主机管理是唯一 Agent 接入入口。登记时填写名称与 SSH 目标地址、端口、用户名，再核对指纹、选择凭据保存期限、预检和审阅部署；中心内部预绑定主机与 enrollment，平台固定安装器执行 Linux amd64/arm64 systemd 首装。无独立 token 签发、用户脚本安装、手工关联和共享 SDK Key 控制面兼容。注册/心跳不能创建主机；列表只展示真实平台资产及 Agent 通道。SDK 接入保留样例、SDK Key 和豁免表，SDK 默认独立直报，安装 Agent 不是其前置条件。当前主机身份与接入契约见 [SDD 038](../specs/038-registered-host-agent-onboarding/spec.md)。
 
-“管理后台 → 接入凭据”统一展示 SDK 上报密钥、Agent 接入令牌、节点凭据三类，不合并其权限或生命周期。接入令牌可撤销未完成安装，待激活令牌撤销后不能继续激活；节点凭据只展示元数据，按节点和 control/data 用途撤销所有未撤销凭据。独立“数据管理”向成员开放数据目录，管理员设置单表保留时长与日志上报规则；全局 SDK 停报仍位于 SDK 接入页。图表模板保留在监控大盘，不再在接入页重复展示。旧接入页密钥、数据表和模板深链分别转到对应管理入口，成员访问旧密钥链接回到 SDK 接入。
+“管理后台 → 接入凭据”统一展示 SDK 上报密钥、Agent 接入令牌、节点凭据三类，不合并其权限或生命周期。接入令牌仅由主机部署内部产生，凭据页可查看状态并撤销未完成安装，待激活令牌撤销后不能继续激活；节点凭据只展示元数据，按节点和 control/data 用途撤销所有未撤销凭据。独立“数据管理”向成员开放数据目录，管理员设置单表保留时长与日志上报规则；全局 SDK 停报仍位于 SDK 接入页。图表模板保留在监控大盘，不再在接入页重复展示。旧接入页密钥、数据表和模板深链分别转到对应管理入口，成员访问旧密钥链接回到 SDK 接入。
 
 中心端提供 Docker Compose、配置示例、初始化、升级/备份/恢复和数据卷说明。首次部署能够用预置样例确认“接收 → 查询 → 出图 → 检索 → 告警”链路。TLS 可由已有反向代理承担；不另外引入专用网关。SDK 与 Agent 的本机通信默认只绑定 loopback，容器场景明确如何连接宿主 Agent。
 
@@ -125,6 +125,6 @@ UI 禁止原生 `<select>` 及 `window.alert/confirm/prompt`。选择、确认�
 
 六个任务分别负责大盘、日志、告警、SDK、Agent、主干。主干先交付接口、样例、应用壳和共享组件；页面开发用共同 fixture 并行，SDK 与 Agent 用相同协议样例互测。TypeScript SDK 进程内导出接口、Agent 持久化 ACK、主服务去重必须在早期实际联调。
 
-第一道验收门是同一台机器两个 service 共用 Agent，分别覆盖节点凭据与既有上报 Key 兼容路径，发送多维指标和日志，断网、重启、丢 ACK 后查询结果仍正确。随后验收跨服务大盘、补传日志翻页、SQL 告警与恢复通知。最后在干净机器上走部署、安装与接入步骤，并测资源占用。六条任务的精确归属、依赖与验收见 [任务索引](tasks/README.md)。
+接入验收先检查登记主机、预检与审阅部署、主机预约、独立凭据、重试幂等和越权拒绝。数据验收分别覆盖 SDK 直报与显式使用 Agent 的独立凭据路径，发送多维指标和日志，断网、重启、丢 ACK 后查询结果仍正确；不验收已移除的共享 Key 控制路径。随后验收跨服务大盘、补传日志翻页、SQL 告警与恢复通知。最后在干净机器上走部署、安装与接入步骤，并测资源占用。六条任务的精确归属、依赖与验收见 [任务索引](tasks/README.md)。
 
 功能参考：[OpenObserve](https://github.com/openobserve/openobserve)、[Grafana 大盘](https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/create-dashboard/)、[Kibana Discover](https://www.elastic.co/docs/explore-analyze/discover/discover-get-started)。参考界面工作流和数据组织方式，LightMoni 首版不承诺完整复刻三个产品的全部功能。

@@ -30,6 +30,10 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
     created_at TEXT NOT NULL,expires_at TEXT NOT NULL,created_by TEXT NOT NULL,approved_by TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS ops_runs_resource ON ops_runs(resource_id,created_at);`);
   const at = () => deps.now().toISOString();
+  const availableAgent = (agentID: string) => {
+    assertAgentActive(db, agentID);
+    if (!options.credentials.has(agentID, "control")) fail(409, "registered_host_required: 主机没有有效的 Agent 控制通道");
+  };
   const raw = (key: string): any => { const r = db.get("SELECT * FROM ops_resources WHERE id=?", key); if (!r) fail(404, "operations_resource_not_found"); return r; };
   const definition = (kind: string) => { const d = definitions.get(kind as any); if (!d) fail(400, "unsupported_operations_kind"); return d; };
   const configOf = (r: any) => JSON.parse(deps.decrypt(r.config_cipher));
@@ -78,7 +82,7 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
     validateOperation,
     plan(resourceID, operation, input, actor) {
       const r = raw(resourceID), validated = validateOperation(resourceID, operation, input), key = id();
-      assertAgentActive(db, r.agent_id);
+      availableAgent(r.agent_id);
       referenceCheck(r.kind, configOf(r), r.agent_id, r.id);
       const payload: OperationPayload = { version: 1, operation_id: key, operation, resource: { ...view(r), config: configOf(r) }, input: validated };
       const preview = { resource: view(r), operation, input: redact(validated), read_only: definition(r.kind).readOnly.includes(operation), warning: "Review the target, action and configuration before approving. Remote actions may interrupt service. Rollback does not revert data migrations." };
@@ -115,11 +119,11 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
   };
   const admin = (fn: Handler) => safe(async ctx => { deps.auth.requireAdmin(ctx); await fn(ctx); });
   router.get("/api/v1/operations/resources", admin(ctx => ctx.json({ resources: store.list(ctx.url.searchParams.get("kind") ?? undefined) })));
-  router.get("/api/v1/operations/agents", admin(ctx => ctx.json({ agents: db.all("SELECT id,host_id,last_seen FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed') ORDER BY last_seen DESC,id LIMIT 1000") })));
+  router.get("/api/v1/operations/agents", admin(ctx => ctx.json({ agents: db.all<{id:string}>("SELECT id,host_id,last_seen FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed') ORDER BY last_seen DESC,id LIMIT 1000").filter(agent => options.credentials.has(agent.id, "control")) })));
   router.post("/api/v1/operations/resources", admin(async ctx => {
     const b = obj(await ctx.body()), kind = text(b.kind), name = text(b.name), agentID = text(b.agent_id), config = validateConfig(kind, b.config);
     if (!db.get("SELECT id FROM agents WHERE id=?", agentID)) fail(400, "registered_agent_required");
-    assertAgentActive(db, agentID);
+    availableAgent(agentID);
     referenceCheck(kind, config, agentID);
     const key = id();
     db.run("INSERT INTO ops_resources(id,kind,name,agent_id,revision,config_cipher,created_at,updated_at,created_by) VALUES(?,?,?,?,1,?,?,?,?)", key, kind, name, agentID, deps.encrypt(JSON.stringify(config)), at(), at(), ctx.user.id);

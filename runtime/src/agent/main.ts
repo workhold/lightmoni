@@ -22,10 +22,6 @@ export async function execute(
     remaining.length && !remaining[0].startsWith("-")
       ? remaining.shift()!
       : "run";
-  if (command === "version") {
-    io.write(VERSION + "\n");
-    return;
-  }
   const flags: Record<string, string | boolean> = {
     config: "/etc/lightmoni-agent/config.json",
     action: "list",
@@ -34,13 +30,15 @@ export async function execute(
     "require-data-dir": "",
     endpoint: "",
     "group-id": "",
-    "key-stdin": false,
+    "pending-enrollment": false,
   };
+  const seenFlags = new Set<string>();
   for (let i = 0; i < remaining.length; i++) {
     const raw = remaining[i];
     if (!raw.startsWith("-")) throw Error("unexpected argument " + raw);
     const [key, ...value] = raw.replace(/^--?/, "").split("=");
     if (!Object.hasOwn(flags, key)) throw Error("unknown flag " + key);
+    seenFlags.add(key);
     if (typeof flags[key] === "boolean") {
       if (value.length && !["true", "false"].includes(value.join("=")))
         throw Error("invalid boolean flag");
@@ -51,29 +49,25 @@ export async function execute(
       flags[key] = text;
     }
   }
+  if (seenFlags.has("pending-enrollment") && !["configure", "check"].includes(command))
+    throw Error("--pending-enrollment is only allowed for configure and check");
+  if (command === "version") {
+    io.write(VERSION + "\n");
+    return;
+  }
+  const validation = { pendingEnrollment: Boolean(flags["pending-enrollment"]) };
   const path = String(flags.config),
     requireDir = String(flags["require-data-dir"]);
   if (command === "configure") {
-    const config = existsSync(path) ? loadConfig(path) : defaultConfig();
+    const config = existsSync(path) ? loadConfig(path, validation) : defaultConfig();
     if (flags.endpoint) config.endpoint = String(flags.endpoint);
     if (flags["group-id"]) config.group_id = String(flags["group-id"]);
     if (requireDir) config.data_dir = requireDir;
-    if (flags["key-stdin"]) {
-      const parts: Buffer[] = [];
-      let count = 0;
-      for await (const value of io.input) {
-        const data = Buffer.from(value);
-        count += data.length;
-        if (count > 4096) throw Error("reporting key is too long");
-        parts.push(data);
-      }
-      config.key = Buffer.concat(parts).toString("utf8").trim();
-    }
-    saveConfig(path, config);
+    saveConfig(path, config, validation);
     io.write("reporting configuration saved\n");
     return;
   }
-  const config = loadConfig(path);
+  const config = loadConfig(path, validation);
   if (command === "check") {
     if (requireDir && config.data_dir !== requireDir)
       throw Error("this system service requires data_dir=" + requireDir);

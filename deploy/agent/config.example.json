@@ -1,7 +1,8 @@
 {
   "listen": "127.0.0.1:4318",
   "endpoint": "http://127.0.0.1:8080",
-  "key": "REPLACE_WITH_TABLE_AUTHORIZED_KEY",
+  "control_credential": "",
+  "data_credential": "",
   "data_dir": "/var/lib/lightmoni-agent",
   "max_batch_bytes": 4194304,
   "max_queue_bytes": 268435456,

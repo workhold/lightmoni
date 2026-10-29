@@ -93,29 +93,29 @@ docker compose up -d --no-build --pull never --wait
 
 ## 网站、容器、备份与计划任务
 
-管理员从“运维工具”（`/operations`）管理小型静态网站、反向代理、HTTPS 证书、受管 Compose、目录备份和计划任务。先登记节点与配置，生成方案并人工批准，再查看真实执行回执；保存配置不会自动执行。AI 助手可以读取资源和创建方案，批准仍由管理员完成。
+管理员从“运维工具”（`/operations`）管理小型静态网站、反向代理、HTTPS 证书、受管 Compose、目录备份和计划任务。先登记主机、部署 Agent 并配置运维资源，生成方案并人工批准，再查看真实执行回执；保存配置不会自动执行。AI 助手可以读取资源和创建方案，批准仍由管理员完成。
 
 目标是受信 Linux 主机：网站按需安装 Nginx/OpenSSL，ACME 另需 Certbot，容器需 Docker 与 Compose plugin；执行节点不持有模型 Key。网站使用独立受管网关，不自动接管现有 Nginx/1Panel 或 80/443。Compose 接受受限 JSON 文档，配置回退保留卷数据。备份只覆盖 root 管理的普通文件目录，不承诺活动数据库一致性。详细步骤、依赖和验证边界见 [运维使用说明](docs/operations.md)、[HLD/LLD](docs/system-design.md#26-运维平台网站容器备份与计划任务sdd-026) 与 [SDD 026](specs/026-operations-platform/spec.md)。
 
 ## LightMoni Agent、执行节点与 SDK
 
-软件统一称 **LightMoni Agent**，部署在主机或容器中的运行实例称 **执行节点**；节点内部执行指标和日志采集的模块称采集器。导航入口为“节点助手”，网页对话能力仍称“AI 助手”。节点执行监控任务和经批准的受限运维任务，不提供模型调用或通用命令执行能力。
+软件统一称 **LightMoni Agent**，是登记主机上的管理通道；内部采集指标和日志的模块称采集器，网页对话能力称“AI 助手”。用户从“主机管理”统一查看主机资产、Agent 通道与监控任务，不再单独管理未关联主机的执行节点。Agent 执行监控任务和经批准的受限运维任务，不持有模型 Key，也不提供通用远程 shell。
 
-LightMoni Agent 作为独立进程或容器运行，由自己的进程管理器或容器编排管理生命周期。业务 SDK 可直接上报平台（direct），也可明确选择经 Agent 上报（agent）；接入页默认 direct，安装 Agent 不是 SDK 直连的前置条件。同一节点可接收多个业务的数据，也可独立承担主机采集、拨测和目录日志，业务路由与这些节点任务互不绑定。业务启动、停止或重启不触发 Agent 启停。业务退出时完成 SDK flush/shutdown，Agent 继续采集和补传。CLI 支持 `run --config` 前台运行并响应 SIGTERM；当前网页安装命令覆盖 Linux systemd 服务。每个 Agent 实例使用独立、可持久化的数据目录，以保留身份与待补传队列。两条上报路径的配置与边界见 [SDK 接入](sdk/README.md#选择上报方式) 和 [SDD 012](specs/012-sdk-reporting-choice/spec.md)。
+接入只有一条路径：**登记主机与 SSH 目标 → 核对指纹并保存限期凭据 → SSH 预检 → 审阅确认 → 平台部署 Agent**。登记需填写名称及 SSH 目标地址、端口、用户名；主机 ID 由平台生成、不可修改。指纹和凭据可稍后添加，Agent 可稍后部署。enrollment 由平台内部签发并预绑定该主机，安装器通过 SSH stdin 接收，不进入 URL、命令参数、环境变量或 AI 上下文。兑换、激活、注册和心跳使用预约与独立 control/data 凭据核验，注册不会创建第二台主机；没有独立 token 签发、用户手动安装和手工主机关联入口。旧无主机预约身份和共享 SDK Key 不再兼容控制面，不自动迁移或删除历史数据。完整流程见 [Agent 部署与恢复](docs/agent-deployment.md) 和 [SDD 038](specs/038-registered-host-agent-onboarding/spec.md)。
 
-“SDK接入”提供“SDK样例 / SDK密钥 / 豁免表”三个页签，执行节点安装入口为`/agents/install`。新节点接入时，管理员选择初始任务标签和上报地址，生成一次性 enrollment token，再将安装命令交给目标 Linux 服务器执行；令牌仅在生成时显示，通过安装脚本的 `--enrollment-token-stdin` 接收，可将秘密文件的 FD 重定向到 stdin，不放入 URL、命令行参数或环境变量。安装期间由中心兑换、激活并签发绑定节点身份的 `control_credential` 与 `data_credential`，分别用于心跳/配置和遥测上报；两者保存在 Agent 本机配置，不交给业务 SDK。安装包支持 Linux amd64 / arm64，自带固定 Node 24.15.0，要求 glibc ≥ 2.28，无需目标主机另装 Node/npm；验证 SHA256 后安装独立 systemd 服务，升级、重装保留持久身份和磁盘队列。
+Agent 在宿主机以独立 systemd 服务运行，生命周期与业务服务分开。Linux amd64/arm64 包自带 Node 24.15.0，要求 glibc ≥ 2.28，无需另装 Node/npm；安装器验证 SHA256。持久目录保存身份、队列和日志游标，不应复制到另一台主机。主机管理首装拒绝覆盖已有安装，升级/回滚能力的验证边界见部署文档。
 
-管理员在“管理后台 → 接入凭据”统一管理“SDK 上报密钥 / Agent 接入令牌 / 节点凭据”三类身份。SDK密钥按名称创建，保留启停和上报记录，有效密钥可写任意业务表；接入令牌可查看状态和撤销未完成安装；节点凭据仅展示用途、有效期和使用记录，撤销会影响该节点指定用途的所有未撤销凭据。旧版 Agent 的 `config.key` 仍可使用原上报密钥，禁用前须确认它是否仍被节点使用。SDK 向本地 Agent 上报的 local token 由目标 Agent 本地配置管理，平台不签发或回显。数据表目录、单表保留时长和日志上报规则移到独立“数据管理”；图表模板保留在“监控大盘”。
+SDK 默认独立直报中心，安装 Agent 不是 SDK 的前置条件。现有本地 Agent OTLP 接收能力可显式使用，SDK 使用本地 token，Agent 保存自己的上游 data 凭据；SDK 与主机资产无隐式绑定，不创建主机 ID/名称环境变量。Agent 可使用相同公开 TypeScript SDK 为自身打点，业务服务启停不会影响 Agent。两种上报路径的配置与边界见 [SDK 接入](sdk/README.md#选择上报方式)。
 
-“节点助手”提供“执行节点 / 任务管理 / 任务标签”三个页签。任务独立保存，类型为指标采集、服务拨测和目录日志；每个任务可关联多个任务标签，一个节点也可绑定多个标签。启用任务与节点任一标签相交即下发，同一任务不会因多次命中而重复执行。冲突配置会整体拒绝并保留原有效配置；未匹配任务时暂停内部采集和拨测，业务数据转发继续可用。已有节点重连时保留中心分配。指标采集任务可选择 CPU、内存、文件系统、磁盘 I/O、网络、负载或指定进程，并设置采集间隔。
+“SDK接入”保留“SDK样例 / SDK密钥 / 豁免表”。“管理后台 → 接入凭据”展示 SDK 上报密钥、平台部署产生的 Agent 接入会话和节点凭据；安装会话仅查看状态/撤销，创建操作统一从主机管理发起。独立 control 用于心跳/配置，data 用于遥测，不交给业务 SDK。节点凭据只展示用途、状态和时间，撤销影响该节点对应用途的全部未撤销凭据；SDK Key 不授予 Agent 控制权。数据目录和保留时长位于“数据管理”，图表模板位于“监控大盘”。
 
-升级会将原分组迁移为同名任务标签和独立任务，保留节点身份、原参数及目标表；迁移完成后不再重建已删除任务。既有 `/agents` 页面地址、`--group-id` 安装参数和节点轮询协议继续兼容，安装参数表示初始任务标签，接入后可在中心绑定多个标签。
+主机工作区保留任务管理与任务标签。任务类型为指标采集、服务拨测和目录日志，每个任务和 Agent 可绑定多个标签，启用任务与任一标签相交即下发且不重复执行。配置冲突整体拒绝并保留原有效配置；未匹配任务时暂停内部采集和拨测。指标采集可选择 CPU、内存、文件系统、磁盘 I/O、网络、负载或指定进程，并设置间隔。任务标签只决定任务分发，不授权 SSH 或任意命令执行。
 
 目录日志填写绝对目录、文件匹配规则（默认 `*.log*`）、是否包含子目录和首次从头读取。默认只采集现有文件后续新增的行，之后新建文件完整采集；读取进度与队列批次一起提交，支持重启续读、重命名轮转和截断检测。要求服务用户可读目录，采集 UTF-8 文本行，跳过压缩文件和符号链接；单行超过 64 KiB 分片，未结束的短行等待换行。事件时间使用采集时间，保留文件路径和字节位置。每个执行节点最多同时打开 256 个日志文件，每个目录单次扫描最多 10,000 个条目，超限会显示采集错误。源文件在采集前已删除或覆盖的内容无法恢复。
 
 “SDK接入”生成四语言通用record样例。初始化必填service/env，地址与密钥可使用LIGHTMONI_ENDPOINT/LIGHTMONI_KEY；可选service_version/instance_id，实例标识默认自动生成。同一客户端可记录多个表和指标。直连使用中心地址与SDK密钥；经Agent时使用Agent接收地址及其可选本地token，Agent独立保存上游data凭据。业务SDK退出前调用有截止时间的shutdown，Agent继续补传。容器通过environment/Secret注入配置，使用容器可达的地址，Docker Desktop可用host.docker.internal。
 
-管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址，并选择默认项，例如“公网”和“内网”。SDK 直连与执行节点接入均可从列表选择，也支持临时填写其他可访问地址；所选地址会进入复制的 SDK 示例、环境变量或 LightMoni Agent 安装命令。旧的单地址配置自动兼容；未配置列表时使用部署变量 `LIGHTMONI_EXTERNAL_URL`。这些地址应转发到同一个 LightMoni 实例。LightMoni Agent 安装脚本、amd64 / arm64 包和 SHA256 校验文件由当前项目内置的 `/downloads/agent/` 提供，要求 Bearer 鉴权：新安装使用有效的 enrollment token；下载接口仍兼容启用的既有上报 Key，旧安装脚本保留 `--key-stdin`。节点 control/data 凭据不能代替安装令牌用于下载。SDK 通过执行节点时默认使用本机节点地址。修改地址列表不改变已运行客户端的连接配置；节点地址变更应按安装或重装流程更新并保留持久数据。此配置独立于登录回调和告警链接使用的工作台地址。
+管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址并选择默认项，例如“公网”和“内网”；SDK 示例可选择可达入口，未配置时使用 `LIGHTMONI_EXTERNAL_URL`。这些地址应指向同一 LightMoni 实例。Agent 安装使用平台部署计划中校验过的 HTTPS 中心地址，内部下载脚本、双架构包和 SHA256 清单由 `/downloads/agent/` 提供，必须使用该主机安装会话的有效 enrollment 鉴权；control/data 凭据与 SDK Key 不能替代安装授权。修改地址列表不会自动修改运行客户端，亦不等于迁移或重新绑定主机。
 
 ```ts
 const moni = createLightMoni({service: 'order-api', env: 'prod'});
@@ -174,7 +174,7 @@ npm run release:agent -- 0.1.0
 npm run release:sdk -- 0.1.0
 ```
 
-Agent 发布脚本下载并校验 Linux 双架构的固定 Node 发行包；打包成功不代表已在相应 Linux 主机运行验收。Agent 独立启动命令为 `node runtime/dist/agent/main.js run --config /path/agent-config.json`，生命周期和业务应用分开管理，详见 [执行节点接入](examples/agent/README.md)。
+Agent 发布脚本下载并校验 Linux 双架构的固定 Node 发行包；打包成功不代表已在相应 Linux 主机运行验收。已由平台部署并取得独立凭据的 Agent，其源码运行入口为 `node runtime/dist/agent/main.js run --config /path/agent-config.json`；这个命令不签发身份，也不能绕过主机预约。生命周期和业务应用分开管理，诊断与隔离开发说明见 [Agent 运行与恢复](examples/agent/README.md)。
 
 另一个终端运行开发界面：
 

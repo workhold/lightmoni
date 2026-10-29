@@ -24,6 +24,7 @@ export function batchUnavailableReason(action:BatchAction,target:BatchTarget,det
  const machine=detail?.machine||target.machine;
  if(!machine)return 'host_required';
  if(action==='delete_host'){
+  if(machine.agent_id&&!['removed','uninstalled'].includes(machine.agent_status))return 'active_agent';
   if(!detail)return '';
   if(detail.credentials.some(credential=>activeBatchCredential(credential)))return 'active_credentials';
   if(detail.deployments?.some(plan=>['awaiting_approval','running'].includes(plan.status)))return 'deployment_pending';

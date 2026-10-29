@@ -19,7 +19,6 @@ export default function DataPage({user}:{user:User}){
  useEffect(()=>{void load();return()=>{request.current++;};},[load]);
  const createKey=async(values:SDKKeyValues)=>{const created=await post<CreatedSDKKey>('/keys',values);setKeys(previous=>[{...created,active:true,last_used:'',upload_batches:0,error_count:0},...previous]);setSecrets(previous=>({...previous,[created.id]:created.key}));return created;};
  const createExempt=async(values:ExemptTableValues)=>{const item=await post<ExemptTable>('/sdk-exempt-tables',values);setExempt(previous=>[item,...previous]);return item;};
- if(requestedTab==='agent')return <Navigate replace to={`/agents/install${params.get('group')?`?group=${encodeURIComponent(params.get('group')!)}`:''}`}/>;
  if(requestedTab==='tables')return <Navigate replace to="/data-management"/>;
  if(requestedTab==='templates')return <Navigate replace to="/dashboards"/>;
  return <div className="lm-page lm-sdk-page">

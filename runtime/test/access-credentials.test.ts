@@ -6,6 +6,7 @@ import { DB } from "../src/shared/sqlite.js";
 import { fail, Router } from "../src/shared/http.js";
 import { registerAgentCredentials } from "../src/server/agent-credentials.js";
 import type { Dependencies } from "../src/shared/types.js";
+import { issueHostEnrollment } from "./helpers/host-enrollment.js";
 
 async function fixture(t: any) {
   const db = new DB(":memory:");
@@ -50,7 +51,7 @@ async function fixture(t: any) {
     });
     return { status: response.status, data: await response.json() as any };
   };
-  const issue = (expires_in_seconds = 24 * 60 * 60) => store.issueEnrollment({
+  const issue = (expires_in_seconds = 24 * 60 * 60) => issueHostEnrollment(db, store, {
     endpoint_origin: "https://monitor.example.test",
     version: "0.1.0",
     expires_in_seconds,
