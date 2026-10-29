@@ -8,4 +8,4 @@
 - [x] 有意义的模型/HTTP/Agent/浏览器验收。
 - [x] 仓库系统设计和 Doca 同步、原生图块回读。
 - [x] 验收证据和本地运行。
-- [ ] GitHub PR 交付。
+- [x] GitHub PR 交付：[PR #17](https://github.com/workhold/lightmoni/pull/17)，等待审阅合入。

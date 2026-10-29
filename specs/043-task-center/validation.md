@@ -1,6 +1,6 @@
 # 验收记录
 
-本轮在 macOS 本地完成开发与验证。未操作 vchive、生产主机或生产 Agent，未发布镜像。
+本轮在 macOS 本地完成开发与验证。交付 [GitHub PR #17](https://github.com/workhold/lightmoni/pull/17)，等待审阅合入。未操作 vchive、生产主机或生产 Agent，未发布镜像。
 
 | 检查 | 结果 |
 | --- | --- |
