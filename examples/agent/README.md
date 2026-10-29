@@ -1,6 +1,6 @@
 # LightMoni Agent 运行与断网恢复
 
-Agent 接入统一从“主机管理”发起：登记名称及 SSH 目标地址、端口、用户名，核对指纹、选择凭据保存期限、执行预检和审阅计划，再由平台安装。指纹与凭据可稍后添加。平台内部生成预绑定主机 ID 的一次性 enrollment，随后签发 Agent 独立 control/data 凭据。不再提供独立脚本安装、共享上报 Key 控制或手工主机关联；源码启动命令不能创建有效平台身份。完整步骤和凭据边界见 [部署与恢复](../../docs/agent-deployment.md)、[系统设计](../../docs/system-design.md#133-当前登记主机与-agent-身份一体化sdd-038) 与 [SDD 038](../../specs/038-registered-host-agent-onboarding/spec.md)。
+Agent 接入统一从“主机管理”发起：同屏登记名称及 SSH 目标地址、端口、用户名、密码或私钥和保存时长，默认密码登录、保存 6 小时；也可只登记后补凭据。主机公钥指纹用于核验远端身份，不能替代密码或私钥，不随登录凭据到期删除。有限保存到期/撤销清除，永久保存须明确确认、直到撤销，二者均加密保存且不因 Agent 激活提前清除；建议优先短期保存。核对指纹、执行预检并审阅计划后，由平台安装。平台内部生成预绑定主机 ID 的一次性 enrollment，随后签发 Agent 独立 control/data 凭据。不再提供独立脚本安装、共享上报 Key 控制或手工主机关联；源码启动命令不能创建有效平台身份。完整步骤和凭据边界见 [部署与恢复](../../docs/agent-deployment.md)、[系统设计](../../docs/system-design.md#133-当前登记主机与-agent-身份一体化sdd-038)、[SDD 038](../../specs/038-registered-host-agent-onboarding/spec.md) 与 [保存时长](../../specs/039-host-registration-credential-retention/spec.md)。
 
 Agent 独立于业务生命周期运行。平台安装 Linux amd64/arm64 systemd 服务，发行包自带 Node 24.15.0、要求 glibc ≥ 2.28；容器发布、自动 sidecar/DaemonSet 注入未实现。中心与 Agent 均为 Node.js / TypeScript，发布语言矩阵以 [SDK 说明](../../sdk/README.md) 与接入页为准。
 

@@ -89,7 +89,7 @@ docker compose up -d --no-build --pull never --wait
 
 `lightmoni-state` 卷保存 SQLite、加密主密钥和队列，`lightmoni-telemetry` 卷保存 ClickHouse 数据。普通更新与 `docker compose down` 保留卷；备份和恢复时配套保存两个卷及受限 `.env`。查看日志使用 `docker compose logs -f --tail=100`。更多步骤见 [Docker 更新与回滚](deploy/server/README.md)。
 
-管理员可在“主机管理 → 登录终端”打开交互式 SSH 小窗，连接前需要确认主机指纹并添加有效私钥，见 [网页 SSH 终端](docs/machine-terminal.md)。
+管理员可在“主机管理 → 登录终端”打开交互式 SSH 小窗，连接前需要确认主机指纹并保存有效登录密码或 SSH 私钥，见 [网页 SSH 终端](docs/machine-terminal.md)。
 
 ## 网站、容器、备份与计划任务
 
@@ -101,7 +101,11 @@ docker compose up -d --no-build --pull never --wait
 
 软件统一称 **LightMoni Agent**，是登记主机上的管理通道；内部采集指标和日志的模块称采集器，网页对话能力称“AI 助手”。用户从“主机管理”统一查看主机资产、Agent 通道与监控任务，不再单独管理未关联主机的执行节点。Agent 执行监控任务和经批准的受限运维任务，不持有模型 Key，也不提供通用远程 shell。
 
-接入只有一条路径：**登记主机与 SSH 目标 → 核对指纹并保存限期凭据 → SSH 预检 → 审阅确认 → 平台部署 Agent**。登记需填写名称及 SSH 目标地址、端口、用户名；主机 ID 由平台生成、不可修改。指纹和凭据可稍后添加，Agent 可稍后部署。enrollment 由平台内部签发并预绑定该主机，安装器通过 SSH stdin 接收，不进入 URL、命令参数、环境变量或 AI 上下文。兑换、激活、注册和心跳使用预约与独立 control/data 凭据核验，注册不会创建第二台主机；没有独立 token 签发、用户手动安装和手工主机关联入口。旧无主机预约身份和共享 SDK Key 不再兼容控制面，不自动迁移或删除历史数据。完整流程见 [Agent 部署与恢复](docs/agent-deployment.md) 和 [SDD 038](specs/038-registered-host-agent-onboarding/spec.md)。
+接入只有一条路径：**登记主机与 SSH 登录信息 → 核对主机指纹 → SSH 预检 → 审阅确认 → 平台部署 Agent**。登记弹窗同屏填写名称、地址、端口、用户名、登录密码或 SSH 私钥及保存时长，默认密码登录、保存 6 小时；也可只登记主机、稍后补充凭据。主机 ID 由平台生成、不可修改。主机公钥指纹用于核验远端身份，不能替代登录密码或私钥；指纹、主机 ID 和名称不随登录凭据到期而删除。
+
+有限期登录凭据到期或撤销后清除；明确选择并确认“永久保存”时没有固定过期时间，直到主动撤销。两种保存方式均加密存储，Agent 激活不会提前清除；建议优先短期保存，使用结束后撤销。登记和凭据保存仍不会执行 SSH；凭据保存失败可在同一表单重试，使用已登记主机 ID，不重复创建主机。保存策略见 [SDD 039](specs/039-host-registration-credential-retention/spec.md)。
+
+enrollment 由平台内部签发并预绑定该主机，安装器通过 SSH stdin 接收，不进入 URL、命令参数、环境变量或 AI 上下文。兑换、激活、注册和心跳使用预约与独立 control/data 凭据核验，注册不会创建第二台主机；没有独立 token 签发、用户手动安装和手工主机关联入口。旧无主机预约身份和共享 SDK Key 不再兼容控制面，不自动迁移或删除历史数据。完整流程见 [Agent 部署与恢复](docs/agent-deployment.md) 和 [SDD 038](specs/038-registered-host-agent-onboarding/spec.md)。
 
 Agent 在宿主机以独立 systemd 服务运行，生命周期与业务服务分开。Linux amd64/arm64 包自带 Node 24.15.0，要求 glibc ≥ 2.28，无需另装 Node/npm；安装器验证 SHA256。持久目录保存身份、队列和日志游标，不应复制到另一台主机。主机管理首装拒绝覆盖已有安装，升级/回滚能力的验证边界见部署文档。
 

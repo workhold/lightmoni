@@ -1,0 +1,13 @@
+# HLD / LLD 与任务
+
+主机元数据与登录秘密分开管理。主机指纹独立用于 SSH host-key verification；登录方法为 password/ssh_key，所选秘密共享同一个 retention 选择。保留统一主机资产与平台部署 Agent 架构。
+
+凭据有效性必须统一为“未撤销、秘密未清除，且 permanent 或有限 expires_at 大于当前时间”。permanent 的 expires_at=''，仅 retention 明确为 permanent 时解释为永不过期；缺失/畸形有限有效期不应误判为有效。永久仍服从凭据解密绑定、管理员权限、目标指纹与计划审阅、撤销事件及终端失效。
+
+有限 managed 默认6h；永久要求 confirm_permanent=true且不能同时设置有限秒数。前端默认方式password，6h保存；有限托管沿用 confirm_managed=true 契约，由明确保存动作提交；永久另需显式确认。表单拆分可复用凭据字段，登记和添加凭据共享，秘密切换/关闭清理，失败后保留创建的资产ID重试。
+
+- [x] 规格与契约先行
+- [x] 后端默认6h与永久生命周期，定向测试
+- [x] 单屏登记、可复用凭据字段、各操作永久有效性统一
+- [x] 架构文档与Doca同步回读
+- [x] 自动验证、本地查看、PR更新

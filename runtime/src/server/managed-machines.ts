@@ -1,4 +1,5 @@
 import { agentBootstrapCommand } from "./machine-agent-lifecycle.js";
+import { machineCredentialCurrent, machineCredentialCurrentSQL } from "./machine-credential-policy.js";
 import { createAgentLifecycleSchema } from "./agent-lifecycle.js";
 import { createAgentHostSchema, replaceableAgentBinding } from "./agent-hosts.js";
 import { createUninstallationSchema, registerMachineUninstallations, type UninstallationStatus } from "./machine-uninstallations.js";
@@ -15,7 +16,7 @@ export type { SSHRunInput, SSHRunner } from "./machine-ssh.js";
 
 export type ConnectionMethod = "direct_ssh";
 export type CredentialMethod = "ssh_key" | "password";
-export type CredentialRetention = "temporary" | "managed" | "one_time";
+export type CredentialRetention = "temporary" | "managed" | "one_time" | "permanent";
 export type CredentialClearReason = "expired" | "revoked" | "consumed" | "agent_activated";
 export type MachineCapabilityReason = "host_busy" | "direct_ssh_required" | "host_fingerprint_required" | "ssh_credential_required" | "ssh_key_required" | "reusable_ssh_credential_required" | "agent_not_linked" | "agent_task_busy" | "uninstallation_pending" | "uninstallation_unknown" | "";
 export interface MachineCapability { available: boolean; reason: MachineCapabilityReason }
@@ -30,8 +31,7 @@ const CREDENTIALS = new Set<CredentialMethod>(["ssh_key", "password"]);
 const FINGERPRINT = /^SHA256:[A-Za-z0-9+/=_-]{16,128}$/;
 const PASSWORD_MAX_SECONDS = 60 * 60;
 const TEMPORARY_KEY_SECONDS = 60 * 60;
-const MANAGED_KEY_DEFAULT_SECONDS = 90 * 24 * 60 * 60;
-const MANAGED_PASSWORD_DEFAULT_SECONDS = 24 * 60 * 60;
+const MANAGED_DEFAULT_SECONDS = 6 * 60 * 60;
 const KEY_MAX_SECONDS = 365 * 24 * 60 * 60;
 const CLEANUP_INTERVAL_MS = 30_000;
 const PLAN_SECONDS = 15 * 60;
@@ -290,7 +290,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const cleanupInvalidCredentials = () => {
     const at = iso(now());
     const invalid = db.all<any>(`SELECT id,revoked_at FROM machine_credentials
-      WHERE (revoked_at IS NOT NULL OR expires_at<=?) AND (secret_encrypted!='' OR secret_cleared_at='')`, at);
+      WHERE (revoked_at IS NOT NULL OR NOT ${machineCredentialCurrentSQL()}) AND (secret_encrypted!='' OR secret_cleared_at='')`, at);
     for (const credential of invalid) clearCredential(credential.id, credential.revoked_at ? "revoked" : "expired");
   };
   cleanupInvalidCredentials();
@@ -314,10 +314,10 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     }
   };
   const machineSelect = `SELECT m.*,COALESCE((SELECT count(*) FROM machine_credentials c WHERE c.machine_id=m.id),0) credential_count,
-      COALESCE((SELECT count(*) FROM machine_credentials c WHERE c.machine_id=m.id AND c.revoked_at IS NULL AND c.expires_at>? AND c.secret_cleared_at='' AND c.method IN ('ssh_key','password') AND c.secret_encrypted!=''),0) active_credential_count,
-      COALESCE((SELECT count(*) FROM machine_credentials c WHERE c.machine_id=m.id AND c.revoked_at IS NULL AND c.expires_at>? AND c.secret_cleared_at='' AND c.method IN ('ssh_key','password') AND c.secret_encrypted!=''),0) active_ssh_credential_count,
-      COALESCE((SELECT count(*) FROM machine_credentials c WHERE c.machine_id=m.id AND c.revoked_at IS NULL AND c.expires_at>? AND c.secret_cleared_at='' AND c.method='ssh_key' AND c.secret_encrypted!=''),0) active_ssh_key_count,
-      COALESCE((SELECT count(*) FROM machine_credentials c WHERE c.machine_id=m.id AND c.revoked_at IS NULL AND c.expires_at>? AND c.secret_cleared_at='' AND c.secret_encrypted!='' AND (c.method='ssh_key' OR (c.method='password' AND c.retention IN ('temporary','managed')))),0) active_reusable_ssh_credential_count,
+      COALESCE((SELECT count(*) FROM machine_credentials c WHERE c.machine_id=m.id AND c.revoked_at IS NULL AND ${machineCredentialCurrentSQL("c")} AND c.secret_cleared_at='' AND c.method IN ('ssh_key','password') AND c.secret_encrypted!=''),0) active_credential_count,
+      COALESCE((SELECT count(*) FROM machine_credentials c WHERE c.machine_id=m.id AND c.revoked_at IS NULL AND ${machineCredentialCurrentSQL("c")} AND c.secret_cleared_at='' AND c.method IN ('ssh_key','password') AND c.secret_encrypted!=''),0) active_ssh_credential_count,
+      COALESCE((SELECT count(*) FROM machine_credentials c WHERE c.machine_id=m.id AND c.revoked_at IS NULL AND ${machineCredentialCurrentSQL("c")} AND c.secret_cleared_at='' AND c.method='ssh_key' AND c.secret_encrypted!=''),0) active_ssh_key_count,
+      COALESCE((SELECT count(*) FROM machine_credentials c WHERE c.machine_id=m.id AND c.revoked_at IS NULL AND ${machineCredentialCurrentSQL("c")} AND c.secret_cleared_at='' AND c.secret_encrypted!='' AND (c.method='ssh_key' OR (c.method='password' AND c.retention IN ('temporary','managed','permanent')))),0) active_reusable_ssh_credential_count,
       COALESCE((SELECT d.status FROM machine_deployments d WHERE d.machine_id=m.id ORDER BY d.created_at DESC LIMIT 1),'') last_deployment_status,
       COALESCE((SELECT u.status FROM machine_uninstallations u WHERE u.machine_id=m.id AND u.agent_id=m.agent_id ORDER BY u.created_at DESC,u.id DESC LIMIT 1),'') last_uninstallation_status,
       COALESCE(a.last_seen,'') AS node_last_seen,COALESCE(l.state,'active') AS node_lifecycle_state
@@ -383,7 +383,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     // Keep the existing in-flight lease guard first so an active terminal,
     // check, or deployment receives the precise busy error.
     idle(machineID);
-    if (db.get("SELECT id FROM machine_credentials WHERE machine_id=? AND revoked_at IS NULL AND expires_at>? LIMIT 1", machineID, iso(now())))
+    if (db.get(`SELECT id FROM machine_credentials WHERE machine_id=? AND revoked_at IS NULL AND secret_cleared_at='' AND secret_encrypted!='' AND ${machineCredentialCurrentSQL()} LIMIT 1`, machineID, iso(now())))
       fail(409, "请先撤销或等待所有有效连接凭据失效后再删除主机");
     if (db.get("SELECT id FROM machine_deployments WHERE machine_id=? AND status IN ('awaiting_approval','running') LIMIT 1", machineID))
       fail(409, "该主机有未结束的部署任务，请先完成或取消后再删除");
@@ -403,7 +403,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const value = db.get<any>("SELECT * FROM machine_credentials WHERE id=? AND machine_id=?", credentialID, machineID);
     if (!value) fail(404, "连接凭据不存在");
     if (value.revoked_at) fail(409, "连接凭据已撤销");
-    if (Date.parse(value.expires_at) <= now().getTime()) fail(409, "连接凭据已过期");
+    if (!machineCredentialCurrent(value, now())) fail(409, "连接凭据已过期或有效期无效");
     if (!CREDENTIALS.has(value.method)) fail(400, "连接凭据仅支持 SSH 私钥或密码，请添加有效凭据");
     if (value.secret_cleared_at || !value.secret_encrypted) fail(409, "连接凭据秘密已清除，请添加新凭据");
     return value;
@@ -449,7 +449,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const addCredential = async (ctx: Context) => {
     admin(ctx);
     ensureMachine(ctx.params.id);
-    const input = parameters(await machineBody(ctx), ["method", "secret", "expires_in_seconds", "retention", "confirm_managed"]), method = text(input.method, "method", 32) as CredentialMethod;
+    const input = parameters(await machineBody(ctx), ["method", "secret", "expires_in_seconds", "retention", "confirm_managed", "confirm_permanent"]), method = text(input.method, "method", 32) as CredentialMethod;
     if (!CREDENTIALS.has(method)) fail(400, "invalid credential method");
     let secret: string;
     if (method === "password") {
@@ -460,34 +460,38 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     } else secret = text(input.secret, "secret", 64 << 10);
     if (method === "ssh_key" && !/PRIVATE KEY/.test(secret)) fail(400, "SSH 凭据必须是私钥内容");
     if (input.retention !== undefined && typeof input.retention !== "string") fail(400, "invalid retention");
-    const retention = (input.retention ?? (method === "password" ? "one_time" : "temporary")) as CredentialRetention;
-    if (method === "ssh_key" && retention !== "temporary" && retention !== "managed") fail(400, "SSH 私钥只支持临时接入或明确确认的长期托管");
-    if (method === "password" && !["one_time", "temporary", "managed"].includes(retention)) fail(400, "密码只支持一次性、临时接入或明确确认的托管保存");
-    if (retention === "managed" && input.confirm_managed !== true) fail(400, "长期托管需要明确确认 confirm_managed=true");
+    const retention = (input.retention ?? "managed") as CredentialRetention;
+    if (method === "ssh_key" && !["temporary", "managed", "permanent"].includes(retention)) fail(400, "SSH 私钥只支持临时接入、有限托管或明确确认的永久保存");
+    if (method === "password" && !["one_time", "temporary", "managed", "permanent"].includes(retention)) fail(400, "密码只支持一次性、临时接入、有限托管或明确确认的永久保存");
+    if (retention === "managed" && input.confirm_managed !== true) fail(400, "托管保存需要明确确认 confirm_managed=true");
     if (input.confirm_managed !== undefined && typeof input.confirm_managed !== "boolean") fail(400, "invalid confirm_managed");
     if (retention !== "managed" && input.confirm_managed === true) fail(400, "只有托管凭据可以确认保存");
+    if (input.confirm_permanent !== undefined && typeof input.confirm_permanent !== "boolean") fail(400, "invalid confirm_permanent");
+    if (retention === "permanent" && input.confirm_permanent !== true) fail(400, "永久保存需要明确确认 confirm_permanent=true");
+    if (retention !== "permanent" && input.confirm_permanent === true) fail(400, "只有永久凭据可以确认永久保存");
+    if (retention === "permanent" && Object.hasOwn(input, "expires_in_seconds")) fail(400, "永久保存不能同时指定 expires_in_seconds");
     const maxSeconds = retention === "managed" ? KEY_MAX_SECONDS : method === "password" ? PASSWORD_MAX_SECONDS : TEMPORARY_KEY_SECONDS;
-    const defaultSeconds = retention === "managed" ? (method === "password" ? MANAGED_PASSWORD_DEFAULT_SECONDS : MANAGED_KEY_DEFAULT_SECONDS) : method === "password" ? 900 : TEMPORARY_KEY_SECONDS;
+    const defaultSeconds = retention === "managed" ? MANAGED_DEFAULT_SECONDS : method === "password" ? 900 : TEMPORARY_KEY_SECONDS;
     if (retention === "temporary" && Number(input.expires_in_seconds) > TEMPORARY_KEY_SECONDS) fail(400, "临时 SSH 凭据最长保存 1 小时；如需更长时间，请明确选择托管保存并确认");
-    const requested = integer(input.expires_in_seconds, "expires_in_seconds", 60, maxSeconds, defaultSeconds);
+    const requested = retention === "permanent" ? 0 : integer(input.expires_in_seconds, "expires_in_seconds", 60, maxSeconds, defaultSeconds);
     const policySource = input.retention === undefined ? "default" : "explicit";
-    const at = now(), expires = new Date(at.getTime() + requested * 1000), credentialID = id();
+    const at = now(), expiresAt = retention === "permanent" ? "" : iso(new Date(at.getTime() + requested * 1000)), credentialID = id();
     const envelope = deps.encrypt(JSON.stringify({ machine_id: ctx.params.id, credential_id: credentialID, secret }));
     const fingerprint = method === "ssh_key" ? hash(secret).slice(0, 20) : "";
     db.transaction(() => {
       db.run(
       `INSERT INTO machine_credentials(id,machine_id,method,secret_encrypted,secret_fingerprint,retention,policy_source,created_at,expires_at,created_by)
-         VALUES(?,?,?,?,?,?,?,?,?,?)`, credentialID, ctx.params.id, method, envelope, fingerprint, retention, policySource, iso(at), iso(expires), ctx.user.id,
+         VALUES(?,?,?,?,?,?,?,?,?,?)`, credentialID, ctx.params.id, method, envelope, fingerprint, retention, policySource, iso(at), expiresAt, ctx.user.id,
       );
       db.run("INSERT INTO machine_credential_events(id,machine_id,credential_id,event,actor_id,created_at) VALUES(?,?,?,?,?,?)",
         id(), ctx.params.id, credentialID, "created", ctx.user.id, iso(at));
     });
-    const warning = method === "password"
+    const warning = retention === "permanent" ? "已明确确认无固定期限保存；建议优先短期保存，Agent 激活后仍保留此 SSH 恢复通道，可随时撤销并清除秘密。" : method === "password"
       ? retention === "one_time" ? "密码仅建议一次性使用，不要长期保存；一次检查或终端结束后清除，不能用于自动部署。"
         : retention === "managed" ? "已明确确认按所选时长托管密码；建议不要长期保存，Agent 激活后仍保留此 SSH 恢复通道，可随时撤销。"
           : "密码最长临时保存 1 小时，到期或 Agent 激活后清除；可用于固定 SSH 安装流程，建议不要长期保存。"
-      : retention === "managed" ? "已明确确认长期托管；建议按需轮换，Agent 激活后仍保留此 SSH 恢复通道。" : "临时私钥最长保存 1 小时，Agent 激活后自动清除；建议不要长期保存。";
-    ctx.json({ credential_id: credentialID, method, retention, policy_source: policySource, secret_cleared_at: "", clear_reason: "", secret_fingerprint: fingerprint, expires_at: iso(expires), warning }, 201);
+      : retention === "managed" ? "已明确确认按所选时长托管私钥；建议优先短期保存，Agent 激活后仍保留此 SSH 恢复通道，可随时撤销。" : "临时私钥最长保存 1 小时，Agent 激活后自动清除；建议不要长期保存。";
+    ctx.json({ credential_id: credentialID, method, retention, policy_source: policySource, secret_cleared_at: "", clear_reason: "", secret_fingerprint: fingerprint, expires_at: expiresAt, warning }, 201);
   };
   const deployments = (machineID: string) => db.all<any>(
     `SELECT id,machine_id,credential_id,status,version,arch,initial_label_id,plan_json,receipt_json,error,created_at,created_by,approved_at,started_at,finished_at FROM machine_deployments WHERE machine_id=? ORDER BY created_at DESC LIMIT 100`, machineID,
@@ -498,13 +502,13 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (!machine.host_key_fingerprint) fail(400, "请先确认主机公钥指纹");
     let selected = credentialID;
     if (!selected) {
-      const keys = credentialRows(machineID).filter(c => (c.method === "ssh_key" || c.method === "password" && (allowOneTime || ["temporary", "managed"].includes(c.retention))) && !c.revoked_at && !c.secret_cleared_at && Date.parse(c.expires_at) > now().getTime());
+      const keys = credentialRows(machineID).filter(c => (c.method === "ssh_key" || c.method === "password" && (allowOneTime || ["temporary", "managed", "permanent"].includes(c.retention))) && !c.revoked_at && !c.secret_cleared_at && machineCredentialCurrent(c, now()));
       if (!keys.length) fail(400, allowOneTime ? "请先添加有效的 SSH 私钥或密码凭据" : "请先添加有效的 SSH 私钥或可复用密码；一次性密码不能用于自动安装或卸载");
       if (keys.length > 1) fail(409, "存在多个有效 SSH 凭据，请明确选择 credential_id");
       selected = keys[0].id;
     }
     const credential = ensureCredential(machineID, text(selected, "credential_id", 64));
-    if (credential.method !== "ssh_key" && !(credential.method === "password" && (allowOneTime || ["temporary", "managed"].includes(credential.retention)))) fail(400, "自动 SSH 安装和卸载需要私钥或可复用密码；一次性密码仅用于单次检查或终端");
+    if (credential.method !== "ssh_key" && !(credential.method === "password" && (allowOneTime || ["temporary", "managed", "permanent"].includes(credential.retention)))) fail(400, "自动 SSH 安装和卸载需要私钥或可复用密码；一次性密码仅用于单次检查或终端");
     return { machine, credential };
   };
   const decryptKey = (machineID: string, credential: any) => {
@@ -645,7 +649,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (savedPlan.machine?.agent_id !== machine.agent_id) fail(409, "主机 Agent 身份已变更，请重新检查并生成部署计划");
     checked(get(machine.id), savedPlan.check_id, deployment.credential_id);
     const credential = ensureCredential(machine.id, deployment.credential_id);
-    if (credential.method !== "ssh_key" && !(credential.method === "password" && ["temporary", "managed"].includes(credential.retention))) fail(400, "自动部署需要 SSH 私钥或可复用密码，一次性密码不能用于部署");
+    if (credential.method !== "ssh_key" && !(credential.method === "password" && ["temporary", "managed", "permanent"].includes(credential.retention))) fail(400, "自动部署需要 SSH 私钥或可复用密码，一次性密码不能用于部署");
     if (!options.agentCredentials) fail(503, "Agent enrollment 尚未配置");
     if (!machine.host_key_fingerprint) fail(400, "请先确认主机公钥指纹");
     const started = db.run("UPDATE machine_deployments SET status='running',approved_at=?,started_at=? WHERE id=? AND status='awaiting_approval'", iso(now()), iso(now()), deployment.id);
@@ -736,7 +740,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const assistantSafe = (machine: MachineSummary) => ({ ...machine, host_key_fingerprint: "" });
   const assistantList = () => list().map(assistantSafe);
   const assistantGet = (machineID: string) => ({ ...assistantSafe(get(machineID)), ssh_credentials: credentialRows(machineID)
-    .filter(c => (c.method === "ssh_key" || c.method === "password" && ["temporary", "managed"].includes(c.retention)) && !c.revoked_at && !c.secret_cleared_at && Date.parse(c.expires_at) > now().getTime())
+    .filter(c => (c.method === "ssh_key" || c.method === "password" && ["temporary", "managed", "permanent"].includes(c.retention)) && !c.revoked_at && !c.secret_cleared_at && machineCredentialCurrent(c, now()))
     .map(c => ({ id: c.id, method: c.method, expires_at: c.expires_at })) });
   const assistantPlan = createPlan;
   const assistantDeployment = (deploymentID: string) => {

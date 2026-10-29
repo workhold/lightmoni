@@ -115,7 +115,7 @@ SDK 到 Agent 之前的数据默认只在有界内存，业务进程崩溃可能
 
 UI 禁止原生 `<select>` 及 `window.alert/confirm/prompt`。选择、确认、输入、日期与时间使用共享 React 组件，键盘与焦点行为一并验收。AntV 绘制图表，共享表格展示无损数值。详细决定见 [UI 设计说明](ui-design.md)，核心交互对标与全流程验收见 [acceptance.md](acceptance.md)。
 
-侧栏按监控和运维能力分类，主机管理是唯一 Agent 接入入口。登记时填写名称与 SSH 目标地址、端口、用户名，再核对指纹、选择凭据保存期限、预检和审阅部署；中心内部预绑定主机与 enrollment，平台固定安装器执行 Linux amd64/arm64 systemd 首装。无独立 token 签发、用户脚本安装、手工关联和共享 SDK Key 控制面兼容。注册/心跳不能创建主机；列表只展示真实平台资产及 Agent 通道。SDK 接入保留样例、SDK Key 和豁免表，SDK 默认独立直报，安装 Agent 不是其前置条件。当前主机身份与接入契约见 [SDD 038](../specs/038-registered-host-agent-onboarding/spec.md)。
+侧栏按监控和运维能力分类，主机管理是唯一 Agent 接入入口。登记同屏填写名称、SSH 目标地址、端口、用户名、密码或私钥与保存时长，默认密码登录、保存 6 小时，也可只登记后补凭据。主机公钥指纹独立核验远端身份，不是登录凭据，和主机 ID/名称一样不受秘密有效期影响。有限 managed 到期/撤销清除；明确选择并确认的 permanent 没有固定过期时间，直到撤销，二者均加密保存且不因 Agent 激活提前清除。建议优先短期保存。预检和审阅部署后，中心内部预绑定主机与 enrollment，平台固定安装器执行 Linux amd64/arm64 systemd 首装。无独立 token 签发、用户脚本安装、手工关联和共享 SDK Key 控制面兼容。注册/心跳不能创建主机；列表只展示真实平台资产及 Agent 通道。SDK 接入保留样例、SDK Key 和豁免表，SDK 默认独立直报，安装 Agent 不是其前置条件。当前契约见 [SDD 038](../specs/038-registered-host-agent-onboarding/spec.md) 与 [SDD 039](../specs/039-host-registration-credential-retention/spec.md)。
 
 “管理后台 → 接入凭据”统一展示 SDK 上报密钥、Agent 接入令牌、节点凭据三类，不合并其权限或生命周期。接入令牌仅由主机部署内部产生，凭据页可查看状态并撤销未完成安装，待激活令牌撤销后不能继续激活；节点凭据只展示元数据，按节点和 control/data 用途撤销所有未撤销凭据。独立“数据管理”向成员开放数据目录，管理员设置单表保留时长与日志上报规则；全局 SDK 停报仍位于 SDK 接入页。图表模板保留在监控大盘，不再在接入页重复展示。旧接入页密钥、数据表和模板深链分别转到对应管理入口，成员访问旧密钥链接回到 SDK 接入。
 
