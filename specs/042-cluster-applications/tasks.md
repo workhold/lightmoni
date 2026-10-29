@@ -16,7 +16,7 @@
 - [x] T009 真实Linux Agent/Docker/HTTP部署并演示数据库读写、多端口/TLS、Web重建数据保留，记录证据。
 - [x] T010 UI实际入口/保存刷新/失败/窄屏/200%及动效取证，主Agent连续三轮验证并独立视觉评审。
 - [x] T011 docs/system-design.md及Doca基线同步，原生图/文字保存后回读记录。
-- [ ] T012 相关回归、类型与构建、diff检查、同步origin/main、GitHub功能分支PR，不合并。
+- [x] T012 相关回归、类型与构建、diff检查、同步origin/main、GitHub功能分支PR，不合并。
 
 T001–T002先于功能代码；T003–T006与T007按共享契约并行，T008独立；T009依赖集成完成。Spec Kit要求并行任务按文件独立分工；Oil UI要求隔离视觉评审。
 
@@ -30,3 +30,5 @@ T001–T002先于功能代码；T003–T006与T007按共享契约并行，T008�
 ## 完成证据
 
 Runtime/AI/SDK回归、真实Docker与数据库故障链路、最终UI连续三轮、独立视觉评审及Doca双端回读见 [validation.md](validation.md)。T004最终实现位于cluster-workloads.ts，workloads.ts只保留旧模型历史路径。T010补齐网站重新编辑读回及退役实例过滤；截图等待有限过渡结束。
+
+交付PR：[GitHub #18](https://github.com/workhold/lightmoni/pull/18)，目标main，草稿待评审，未合并。

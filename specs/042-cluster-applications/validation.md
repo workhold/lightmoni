@@ -1,6 +1,6 @@
 # 验收记录
 
-日期：2026-10-30（Asia/Shanghai）。功能分支 `codex/042-cluster-applications`，目标 `origin/main`；不自动合并。
+日期：2026-10-30（Asia/Shanghai）。功能分支 `codex/042-cluster-applications`，已推送origin并创建 [GitHub PR #18](https://github.com/workhold/lightmoni/pull/18)，目标main，草稿待评审；未合并。
 
 ## 自动化验证
 
