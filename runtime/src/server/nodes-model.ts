@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { normalize as clean } from "node:path";
 import type { DB } from "../shared/types.js";
 import { agentLifecycle, assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
+import { createAgentHostSchema, ensureAgentHost } from "./agent-hosts.js";
 import {
   normalizeRemote,
   validateRemote,
@@ -183,6 +184,7 @@ export class NodeStore {
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY,host_id TEXT NOT NULL,hostname TEXT NOT NULL,version TEXT NOT NULL,platform TEXT NOT NULL,arch TEXT NOT NULL,last_seen TEXT NOT NULL,heartbeat TEXT NOT NULL,group_id TEXT NOT NULL DEFAULT 'default'); CREATE TABLE IF NOT EXISTS agent_runtime_events(agent_id TEXT NOT NULL,event_id TEXT NOT NULL,key_id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(agent_id,event_id)); CREATE TABLE IF NOT EXISTS agent_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,config TEXT NOT NULL,created_at TEXT NOT NULL);`,
     );
+    createAgentHostSchema(this.db);
     if (
       !this.db
         .all<any>("PRAGMA table_info('agents')")
@@ -496,7 +498,7 @@ export class NodeStore {
   nodes(includeRemoved = false): any[] {
     return this.db
       .all<any>(
-        "SELECT id,hostname,version,platform,arch,last_seen,heartbeat,group_id FROM agents" + (includeRemoved ? "" : " WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle x WHERE x.agent_id=agents.id AND x.state='removed')") + " ORDER BY last_seen DESC,id",
+        "SELECT id,hostname,version,platform,arch,last_seen,heartbeat,group_id,(SELECT m.id FROM managed_machines m WHERE m.agent_id=agents.id ORDER BY m.created_at,m.id LIMIT 1) AS machine_id,(SELECT m.name FROM managed_machines m WHERE m.agent_id=agents.id ORDER BY m.created_at,m.id LIMIT 1) AS machine_name FROM agents WHERE EXISTS (SELECT 1 FROM managed_machines m WHERE m.agent_id=agents.id)" + (includeRemoved ? "" : " AND NOT EXISTS (SELECT 1 FROM agent_lifecycle x WHERE x.agent_id=agents.id AND x.state='removed')") + " ORDER BY last_seen DESC,id",
       )
       .map((node) => {
         node.heartbeat = JSON.parse(node.heartbeat);
@@ -717,10 +719,10 @@ export class NodeStore {
       label,
     )!.n;
   }
-  heartbeat(id: string, values: any, writeKey: string): void {
+  heartbeat(id: string, values: any, writeKey: string): { machine_id: string; machine_name: string } {
     const text = (field: string) =>
       values[field] == null ? "" : String(values[field]).trim();
-    this.db.transaction(() => {
+    return this.db.transaction(() => {
       // Recheck under the same writer lock as removal: authentication may have
       // happened before an asynchronous request body or a second centre writer.
       assertAgentActive(this.db, id, 401);
@@ -760,6 +762,7 @@ export class NodeStore {
           id,
           group,
         );
+      return ensureAgentHost(this.db, id, values, this.timestamp());
     });
   }
   events(id: string, writeKey: string, values: any): void {

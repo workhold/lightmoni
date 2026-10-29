@@ -46,10 +46,10 @@ export function registerInstall(
           c.res.setHeader("vary", "Authorization");
           const authorization = c.req.headers.authorization;
           if (!authorization?.startsWith("Bearer "))
-            fail(401, "下载 Agent 需要有效的上报 Key");
+            fail(401, "下载 Agent 需要主机部署流程签发的接入令牌");
           const bearer = authorization.slice(7).trim();
           if (!agentCredentials?.canDownloadWithEnrollmentToken(bearer))
-            d.auth.validateKey(c);
+            fail(401, "invalid host-bound enrollment token");
           if (
             !["install.sh", "uninstall.sh", "SHA256SUMS"].includes(file) &&
             !/^lightmoni-agent_[0-9A-Za-z._-]+_linux_(amd64|arm64)\.tar\.gz$/.test(

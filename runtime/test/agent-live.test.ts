@@ -1,18 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createLightMoni } from "@lightmoni/sdk";
 import { createAgent } from "../src/agent/agent.js";
 import { defaultConfig } from "../src/agent/config.js";
 
 const base = process.env.LIGHTMONI_DOMAINS_URL;
+const agentID = process.env.LIGHTMONI_AGENT_LIVE_ID;
+const controlCredential = process.env.LIGHTMONI_AGENT_LIVE_CONTROL_CREDENTIAL;
+const dataCredential = process.env.LIGHTMONI_AGENT_LIVE_DATA_CREDENTIAL;
+const missingHostBoundFixture = !agentID || !controlCredential || !dataCredential;
 test(
   "live Node Agent persists SDK batches, reopens identity and forwards to real ClickHouse exactly once",
-  { skip: !base, timeout: 30000 },
-  async () => {
+  { skip: !base ? "LIGHTMONI_DOMAINS_URL is not set" : missingHostBoundFixture ? "A predeployed registered-host Agent fixture requires LIGHTMONI_AGENT_LIVE_ID and independent CONTROL_CREDENTIAL/DATA_CREDENTIAL variables" : false, timeout: 30000 },
+  async (t) => {
     let cookie = "";
     const request = async (
       path: string,
@@ -42,17 +46,16 @@ test(
     });
     const table = "qa_agent_" + randomBytes(4).toString("hex"),
       directory = mkdtempSync(join(tmpdir(), "lightmoni-agent-live-"));
-    const key = await request(
-      "/api/v1/keys",
-      "POST",
-      { name: table, allowed_tables: [table] },
-      201,
-    );
+    t.after(()=>rmSync(directory,{recursive:true,force:true}));
+    const machines = await request("/api/v1/machines");
+    assert(machines.some((machine:any) => machine.agent_id===agentID), "The supplied Agent fixture must already belong to a registered host");
+    writeFileSync(join(directory,"identity.json"),JSON.stringify({agent_id:agentID,host_id:randomUUID()}),{mode:0o600});
     const config = {
       ...defaultConfig(),
       listen: "127.0.0.1:0",
       endpoint: base!,
-      key: key.key,
+      control_credential: controlCredential!,
+      data_credential: dataCredential!,
       local_token: "fixture-local-token",
       data_dir: directory,
       min_free_bytes: 0,
@@ -136,7 +139,6 @@ test(
     } finally {
       await client?.shutdown();
       await agent.close();
-      await request("/api/v1/keys/" + key.id, "PUT", { active: false });
       rmSync(directory, { recursive: true, force: true });
     }
   },

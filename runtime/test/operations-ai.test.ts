@@ -78,7 +78,7 @@ test("AI truncates known receipt lists explicitly while preserving current CAS e
 test("AI returns a persisted large-site proposal ID and review URL without a post-insert size failure", async t => {
   const db = new DB(":memory:"), crypto = cipher(Buffer.alloc(32, 9));
   const deps = { db, router: new Router(), ...crypto, now: () => new Date("2026-10-27T00:00:00Z") } as unknown as Dependencies;
-  const ops = registerOperations(deps, { definitions: [websiteDefinition], credentials: {} as any, jobs: { onUpdate: () => () => {} } as any });
+  const ops = registerOperations(deps, { definitions: [websiteDefinition], credentials: { has: () => true } as any, jobs: { onUpdate: () => () => {} } as any });
   t.after(() => { ops.close?.(); db.close(); });
   const config = websiteDefinition.validate({ domains: ["example.test"], mode: "static", static_files: { "index.html": "x".repeat(512 * 1024) } });
   db.run("INSERT INTO ops_resources(id,kind,name,agent_id,revision,config_cipher,created_at,updated_at,created_by) VALUES(?,?,?,?,1,?,?,?,?)", "site-one", "website", "Site", "agent-one", crypto.encrypt(JSON.stringify(config)), "", "", "admin");

@@ -1,0 +1,20 @@
+{
+  "checked": [
+    "zh-CN: new private keys use managed 6-hour storage without an extra managed confirmation step",
+    "zh-CN: permanent password is explicit and omits finite expiry",
+    "zh-CN: details distinguish legacy managed keys and secret-clear reasons",
+    "zh-CN: password-only capability allows terminal and preflight but explains disabled deployment",
+    "zh-CN: completed password checks refresh consumed credentials and recovery guidance",
+    "zh-CN: periodic refresh updates backend capability changes without reloading the page",
+    "zh-CN: fingerprint and connection-method restrictions show actionable explanations",
+    "en-US: new private keys use managed 6-hour storage without an extra managed confirmation step",
+    "en-US: permanent password is explicit and omits finite expiry",
+    "en-US: details distinguish legacy managed keys and secret-clear reasons",
+    "en-US: password-only capability allows terminal and preflight but explains disabled deployment",
+    "en-US: completed password checks refresh consumed credentials and recovery guidance",
+    "en-US: periodic refresh updates backend capability changes without reloading the page",
+    "en-US: fingerprint and connection-method restrictions show actionable explanations"
+  ],
+  "errors": [],
+  "unexpected": []
+}

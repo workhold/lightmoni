@@ -30,8 +30,6 @@ export interface LogSource {
 export interface Config {
   listen: string;
   endpoint: string;
-  /** Legacy shared key. Kept for nodes that have not re-enrolled yet. */
-  key: string;
   /** Node-bound control credential issued by Agent enrollment. */
   control_credential: string;
   /** Node-bound data credential issued by Agent enrollment. */
@@ -81,7 +79,6 @@ export function defaultConfig(): Config {
   return {
     listen: "127.0.0.1:4318",
     endpoint: "",
-    key: "",
     control_credential: "",
     data_credential: "",
     group_id: "",
@@ -184,7 +181,8 @@ export function validateProbes(probes: Probe[]): void {
       throw Error("invalid expected status");
   }
 }
-export function validateConfig(c: Config): void {
+export interface ConfigValidation { pendingEnrollment?: boolean }
+export function validateConfig(c: Config, options: ConfigValidation = {}): void {
   let u: URL;
   try {
     u = new URL(c.endpoint);
@@ -200,8 +198,14 @@ export function validateConfig(c: Config): void {
     u.hash
   )
     throw Error("endpoint must be an http(s) URL");
-  if (!c.key && (!c.control_credential || !c.data_credential))
-    throw Error("legacy key or both control_credential and data_credential are required");
+  if (Object.hasOwn(c, "key"))
+    throw Error("shared key configuration is not supported; enroll Agent through a registered host");
+  for (const value of [c.control_credential, c.data_credential])
+    if (typeof value !== "string" || Buffer.byteLength(value) > 4096 || /[\u0000-\u0020\u007f]/.test(value))
+      throw Error("invalid Agent credential");
+  if ((!c.control_credential || !c.data_credential)
+    && !(options.pendingEnrollment && !c.control_credential && !c.data_credential))
+    throw Error("both control_credential and data_credential are required");
   if (Buffer.byteLength(c.group_id) > 64) throw Error("invalid agent group");
   const { host } = listenAddress(c.listen);
   if (
@@ -242,13 +246,13 @@ function validateMatchers(patterns: string[]) {
     glob(p);
   }
 }
-export function loadConfig(path: string): Config {
+export function loadConfig(path: string, options: ConfigValidation = {}): Config {
   const c = { ...defaultConfig(), ...JSON.parse(readFileSync(path, "utf8")) };
-  validateConfig(c);
+  validateConfig(c, options);
   return c;
 }
-export function saveConfig(path: string, c: Config): void {
-  validateConfig(c);
+export function saveConfig(path: string, c: Config, options: ConfigValidation = {}): void {
+  validateConfig(c, options);
   atomicJSON(path, c);
 }
 export function loadIdentity(dir: string): Identity {

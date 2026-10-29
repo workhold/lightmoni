@@ -82,24 +82,9 @@ export function registerNodes(
   };
   const key = (ctx: Context, agentID: string): WriteKey => {
     assertAgentActive(deps.db, agentID, 401);
-    if ((options.agentCredentials?.registered?.(agentID) ?? options.agentCredentials?.has(agentID, "control"))) {
-      const credential = options.agentCredentials.authenticate(
-        ctx.req,
-        agentID,
-        "control",
-      );
-      return {
-        id: credential.credential_id,
-        name: "agent:" + agentID,
-        allowed_tables: [],
-        allow_all_tables: true,
-      };
-    }
-    try {
-      return deps.auth.validateKey(ctx);
-    } catch {
-      throw new NodeError(401, "invalid write key");
-    }
+    if (!options.agentCredentials) throw new NodeError(401, "独立 Agent control 凭据未配置");
+    const credential = options.agentCredentials.authenticate(ctx.req, agentID, "control");
+    return { id: credential.credential_id, name: "agent:" + agentID, allowed_tables: [], allow_all_tables: true };
   };
   router.get(
     base + "/agents",
@@ -244,13 +229,14 @@ export function registerNodes(
       if (e instanceof NodeError || e instanceof HTTPError) throw e;
       throw new NodeError(503, "执行节点运行事件暂不可用");
     }
+    let machine: { machine_id: string; machine_name: string };
     try {
-      store.heartbeat(id, values, writeKey.id);
+      machine = store.heartbeat(id, values, writeKey.id);
     } catch (e) {
       if (e instanceof NodeError || e instanceof HTTPError) throw e;
       throw new NodeError(503, "执行节点记录暂不可用");
     }
-    ctx.json({ agent_id: id, ok: true });
+    ctx.json({ agent_id: id, ...machine, ok: true });
   };
   router.post(base + "/agents/register", safe(heartbeat), { public: true });
   router.post(base + "/agents/:id/heartbeat", safe(heartbeat), {

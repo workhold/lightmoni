@@ -4,13 +4,13 @@ import { id, hash, token } from "../shared/crypto.js";
 import type { Context, Dependencies, Module } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
 import { assertAgentActive, createAgentLifecycleSchema, isAgentRemoved } from "./agent-lifecycle.js";
+import { replaceableAgentBinding } from "./agent-hosts.js";
 
 /**
  * Credentials used by the scripted Agent enrollment flow.
  *
- * This module deliberately does not replace the legacy ingest key.  Existing
- * agents continue using config.key until they are re-enrolled; new routes use
- * audience-scoped credentials and never trust an agent_id supplied by itself.
+ * Agent control credentials belong to a server-reserved registered host.
+ * SDK reporting keys are a separate data-plane credential.
  */
 export type CredentialAudience = "control" | "data";
 export type CredentialScope = "agent.control" | "agent.data";
@@ -103,6 +103,10 @@ export interface AgentEnrollmentInput {
   scopes?: CredentialScope[];
   expires_in_seconds?: number;
   created_by: string;
+  /** Trusted server-side installation reservation; never accepted from clients. */
+  machine_id: string;
+  /** The exact retired identity reviewed in the installation plan. */
+  previous_agent_id?: string;
 }
 
 export interface AgentEnrollmentIssued {
@@ -155,6 +159,10 @@ export function registerAgentCredentials(
     );
     CREATE INDEX IF NOT EXISTS agent_credentials_lookup ON agent_credentials(agent_id,audience);
   `);
+  if (!db.all<{name:string}>("PRAGMA table_info(agent_enrollments)").some(column => column.name === "machine_id"))
+    db.exec("ALTER TABLE agent_enrollments ADD COLUMN machine_id TEXT NOT NULL DEFAULT ''");
+  if (!db.all<{name:string}>("PRAGMA table_info(agent_enrollments)").some(column => column.name === "replaces_agent_id"))
+    db.exec("ALTER TABLE agent_enrollments ADD COLUMN replaces_agent_id TEXT NOT NULL DEFAULT ''");
 
   const now = () => deps.now?.() ?? new Date();
   const iso = (date: Date) => date.toISOString();
@@ -170,6 +178,16 @@ export function registerAgentCredentials(
         (!row.pending_expires_at || Date.parse(row.pending_expires_at) <= at)))
       return "expired";
     return row.status;
+  };
+  const validHostReservation = (row: { machine_id?: string; agent_id?: string; status?: string; replaces_agent_id?: string }) => {
+    if (!row.machine_id || !db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='managed_machines'")) return false;
+    const machine = db.get<{agent_id:string}>("SELECT agent_id FROM managed_machines WHERE id=?", row.machine_id);
+    if (!machine) return false;
+    if (row.status === "active") return Boolean(row.agent_id && machine.agent_id === row.agent_id);
+    return machine.agent_id === (row.replaces_agent_id || "") && replaceableAgentBinding(db, machine.agent_id, iso(now()));
+  };
+  const requireHostReservation = (row: { machine_id?: string; agent_id?: string; status?: string; replaces_agent_id?: string }, status = 409) => {
+    if (!validHostReservation(row)) fail(status, "registered_host_required: 请先登记主机，再从主机管理部署 Agent");
   };
   const cleanScopes = (value: unknown): CredentialScope[] => {
     const scopes = value == null ? ["agent.control", "agent.data"] : value;
@@ -203,24 +221,32 @@ export function registerAgentCredentials(
     const raw = secret("lm_enroll_");
     const created = now();
     const expires = new Date(created.getTime() + expiresIn * 1000);
-    const label = input.initial_label_id == null ? "" : asString(input.initial_label_id, 128, "initial_label_id");
+    const label = input.initial_label_id == null || input.initial_label_id === "" ? "" : asString(input.initial_label_id, 128, "initial_label_id");
     const scopes = cleanScopes(input.scopes);
     const endpointOrigin = origin(input.endpoint_origin ?? deps.externalURL);
-    db.run(
-      `INSERT INTO agent_enrollments(id,token_hash,endpoint_origin,allowed_arch_json,version,initial_label_id,scopes_json,status,expires_at,created_at,created_by)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
-      idValue,
-      hash(raw),
-      endpointOrigin,
-      JSON.stringify([...new Set(allowed)]),
-      version,
-      label,
-      JSON.stringify(scopes),
-      "issued",
-      iso(expires),
-      iso(created),
-      input.created_by,
-    );
+    const machineID = asString(input.machine_id, 64, "machine_id");
+    const previousAgentID = input.previous_agent_id == null || input.previous_agent_id === "" ? "" : asString(input.previous_agent_id, 256, "previous_agent_id");
+    db.transaction(() => {
+      const machine = db.get<{agent_id:string}>("SELECT agent_id FROM managed_machines WHERE id=?", machineID);
+      if (!machine || machine.agent_id !== previousAgentID || !replaceableAgentBinding(db, machine.agent_id, iso(created))) fail(409, "安装目标主机不存在、Agent 身份已变化或尚未撤销");
+      db.run(
+        `INSERT INTO agent_enrollments(id,token_hash,endpoint_origin,allowed_arch_json,version,initial_label_id,scopes_json,status,expires_at,created_at,created_by,machine_id,replaces_agent_id)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        idValue,
+        hash(raw),
+        endpointOrigin,
+        JSON.stringify([...new Set(allowed)]),
+        version,
+        label,
+        JSON.stringify(scopes),
+        "issued",
+        iso(expires),
+        iso(created),
+        input.created_by,
+        machineID,
+        machine.agent_id,
+      );
+    });
     return {
       enrollment_id: idValue,
       token_display_once: raw,
@@ -232,10 +258,7 @@ export function registerAgentCredentials(
 
   router.post("/api/v1/agent-enrollments", async (ctx) => {
     admin(ctx);
-    const value = record(await ctx.body());
-    // The full token is intentionally returned only by this response. The
-    // generated command contains no secret and is safe to copy from the UI.
-    ctx.json(issueEnrollment({ ...value, created_by: ctx.user.id } as AgentEnrollmentInput), 201);
+    fail(409, "请先登记主机，再从主机管理部署 Agent；不再签发独立脚本接入令牌");
   });
 
   router.get("/api/v1/agent-enrollments", (ctx) => {
@@ -299,6 +322,7 @@ export function registerAgentCredentials(
     const arch = asArch(value.arch);
     const row = db.get<any>("SELECT * FROM agent_enrollments WHERE token_hash=?", hash(enrollToken));
     if (!row) fail(401, "invalid enrollment token");
+    requireHostReservation(row);
     const current = now();
     if (effectiveEnrollmentStatus(row, current.getTime()) === "expired") {
       db.run("UPDATE agent_enrollments SET status='expired' WHERE id=? AND status='issued'", row.id);
@@ -368,6 +392,7 @@ export function registerAgentCredentials(
     );
     if (!row || row.install_nonce !== nonce || !safeEqualHash(row.bootstrap_hash, hash(authorization)))
       fail(401, "invalid bootstrap credential");
+    requireHostReservation(row);
     if (effectiveEnrollmentStatus(row) === "expired")
       fail(401, "pending activation expired");
     if (value.health?.service !== "ready" || value.health?.config_checked !== true)
@@ -378,6 +403,7 @@ export function registerAgentCredentials(
     const expiry = new Date(at.getTime() + 90 * 24 * 60 * 60 * 1000);
     db.transaction(() => {
       assertAgentActive(db, row.agent_id, 401);
+      requireHostReservation(row);
       const changed = db.run(
         `UPDATE agent_enrollments SET status='active',used_at=?,bootstrap_hash=''
          WHERE id=? AND status='pending_activation' AND bootstrap_hash=? AND expires_at>? AND pending_expires_at>?`,
@@ -404,8 +430,11 @@ export function registerAgentCredentials(
           iso(expiry),
         );
       }
-      // Agent registration still happens through the legacy node route during
-      // migration. This table is the source of truth for credential binding.
+      // Activation claims the reserved host in the same writer transaction.
+      // Concurrent tokens cannot activate different identities on one host.
+      const claimed = db.run("UPDATE managed_machines SET agent_id=?,agent_last_seen='' WHERE id=? AND agent_id=?", row.agent_id, row.machine_id, row.replaces_agent_id);
+      if (!claimed.changes) fail(409, "registered_host_required: 安装目标身份已变化");
+      // Registration subsequently records the Agent's observed host metadata.
     });
     ctx.json({
       agent_id: row.agent_id,
@@ -448,6 +477,9 @@ export function registerAgentCredentials(
     );
     if (!row || row.revoked_at || Date.parse(row.expires_at) <= now().getTime())
       throw new HTTPError(401, "invalid agent credential");
+    const enrollment = db.get<any>("SELECT machine_id,agent_id,status FROM agent_enrollments WHERE agent_id=? AND status='active' ORDER BY created_at DESC LIMIT 1", agentID);
+    if (!enrollment) fail(401, "registered_host_required: Agent 必须由已登记主机部署");
+    requireHostReservation(enrollment, 401);
     const used = iso(now());
     const changed = db.run("UPDATE agent_credentials SET last_used_at=? WHERE id=? AND revoked_at IS NULL AND NOT EXISTS (SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed')", used, row.id, agentID);
     if (!changed.changes) throw new HTTPError(401, "invalid agent credential");
@@ -462,6 +494,8 @@ export function registerAgentCredentials(
   };
   const has = (agentID: string, audience: CredentialAudience) => {
     if (isAgentRemoved(db, agentID)) return false;
+    const enrollment = db.get<any>("SELECT machine_id,agent_id,status FROM agent_enrollments WHERE agent_id=? AND status='active' ORDER BY created_at DESC LIMIT 1", agentID);
+    if (!enrollment || !validHostReservation(enrollment)) return false;
     const row = db.get<any>(
       `SELECT 1 FROM agent_credentials
        WHERE agent_id=? AND audience=? AND revoked_at IS NULL AND expires_at>? LIMIT 1`,
@@ -474,20 +508,20 @@ export function registerAgentCredentials(
   const canDownloadWithEnrollmentToken = (value: string) => {
     if (!value || Buffer.byteLength(value) > 512) return false;
     const row = db.get<any>(
-      `SELECT status,expires_at,pending_expires_at FROM agent_enrollments WHERE token_hash=?`,
+      `SELECT status,expires_at,pending_expires_at,machine_id,agent_id,replaces_agent_id FROM agent_enrollments WHERE token_hash=?`,
       hash(value),
     );
-    if (!row) return false;
+    if (!row || !validHostReservation(row)) return false;
     const status = effectiveEnrollmentStatus(row);
     return status === "issued" || status === "pending_activation";
   };
   const enrollmentStatus = (enrollmentID: string) => {
     const row = db.get<any>(
-      "SELECT status,agent_id,COALESCE(used_at,'') AS used_at,expires_at,pending_expires_at FROM agent_enrollments WHERE id=?",
+      "SELECT status,agent_id,machine_id,replaces_agent_id,COALESCE(used_at,'') AS used_at,expires_at,pending_expires_at FROM agent_enrollments WHERE id=?",
       enrollmentID,
     );
     return row && {
-      status: effectiveEnrollmentStatus(row),
+      status: validHostReservation(row) ? effectiveEnrollmentStatus(row) : "unavailable",
       agent_id: row.agent_id,
       used_at: row.used_at,
     };

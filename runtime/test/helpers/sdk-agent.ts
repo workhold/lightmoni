@@ -10,7 +10,8 @@ const config = {
   data_dir: directory,
   listen,
   endpoint: "http://127.0.0.1:1",
-  key: "test-sdk-integration-key",
+  control_credential: "test-sdk-integration-control",
+  data_credential: "test-sdk-integration-data",
   min_free_bytes: 0,
   collect_interval_seconds: 3600,
 };

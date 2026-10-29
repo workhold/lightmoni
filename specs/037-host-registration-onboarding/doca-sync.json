@@ -1,25 +1,84 @@
 {
   "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
-  "status": "blocked_server_error_save_not_confirmed",
+  "status": "synchronized_after_pr14_merged",
+  "source_commit": "e7384bcfc717435c322ffaf78e989bca2755aa8e",
+  "merged_pr_url": "https://github.com/workhold/lightmoni/pull/14",
   "repository_sections": [
     "13",
     "13.2",
     "17 credential boundary table"
   ],
-  "revision": "Platform-generated immutable host ID and user-configured name only; SDK variable and Agent metadata extensions withdrawn.",
-  "before_seq": 773,
-  "latest_readback_seq": 773,
-  "saved": false,
-  "latest_error": {
-    "status": 500,
-    "message": "MCP operation failed"
-  },
-  "attempt_history": "Prior 037 attempts failed with 500. Revised request rejected setBlock children with 400; corrected to documented text/setCellContent/insertBlock, then received 500. No further retries.",
-  "online_content_verified_unchanged": true,
-  "existing_native_diagrams_verified_unchanged": 8,
-  "pending_native_diagram": {
+  "revision": "Platform-generated immutable host ID and user-configured name only; SDK environment/Agent metadata extensions are not present.",
+  "before_seq": 776,
+  "saved_seq": 781,
+  "latest_readback_seq": 781,
+  "saved": true,
+  "updated_text_blocks_verified": 7,
+  "new_blocks_verified": 7,
+  "all_unrelated_native_content_verified_unchanged": true,
+  "existing_native_diagrams_verified_unchanged": 9,
+  "new_native_diagram": {
+    "block_id": "host037-merged-native-flow",
     "nodes": 8,
-    "edges": 8
+    "edges": 8,
+    "nodes_and_edges_readback_match": true,
+    "connections": [
+      {
+        "source": "管理员登记主机",
+        "target": "平台自动 ID / 用户名称"
+      },
+      {
+        "source": "管理员登记主机",
+        "target": "所选期限的加密 SSH 凭据"
+      },
+      {
+        "source": "平台自动 ID / 用户名称",
+        "target": "平台主机资产记录"
+      },
+      {
+        "source": "所选期限的加密 SSH 凭据",
+        "target": "预检 / 审阅确认"
+      },
+      {
+        "source": "预检 / 审阅确认",
+        "target": "固定安装 Agent"
+      },
+      {
+        "source": "固定安装 Agent",
+        "target": "已认证 Agent 关联"
+      },
+      {
+        "source": "平台主机资产记录",
+        "target": "已认证 Agent 关联"
+      },
+      {
+        "source": "已认证 Agent 关联",
+        "target": "中心平台管理"
+      }
+    ]
   },
-  "required_followup": "Read latest version, synchronize platform host identity and credential/onboarding sections, and verify text/nodes/edges after Doca write service recovers."
+  "native_visual_render_verified": false,
+  "writes": [
+    {
+      "part": "body",
+      "seq": 777
+    },
+    {
+      "part": "table",
+      "seq": 778
+    },
+    {
+      "part": "section-paragraphs",
+      "seq": 779
+    },
+    {
+      "part": "chart",
+      "seq": 780
+    },
+    {
+      "part": "reference",
+      "seq": 781
+    }
+  ],
+  "recovery_note": "Native paragraph and table edits saved. The combined section insertion returned 500 without changing seq; paragraphs then saved separately, and the native graph saved after using globally unique node/edge IDs. Exact service-side failure cause was not exposed. Final text/structure readback passed."
 }

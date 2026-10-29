@@ -19,6 +19,7 @@ import { registerCore } from "../src/server/core.js";
 import { registerServiceDeployments } from "../src/server/service-deployments.js";
 import { registerOperations } from "../src/server/operations.js";
 import type { OperationDefinition } from "../src/operations/types.js";
+import { issueHostEnrollment } from "./helpers/host-enrollment.js";
 
 async function fixture(t: any, persistent = false) {
   const directory = mkdtempSync(join(tmpdir(), "lm-node-lifecycle-"));
@@ -40,7 +41,7 @@ async function fixture(t: any, persistent = false) {
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
   const request = async (path: string, method = "GET", body?: unknown, headers: Record<string, string> = {}) => { const response = await fetch(base + path, { method, headers: { "content-type": "application/json", ...headers }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: response.status, data: await response.json() as any }; };
   const enroll = async () => {
-    const issued = credentials.issueEnrollment({ endpoint_origin: base, version: "0.1.0", created_by: user.id });
+    const issued = issueHostEnrollment(db, credentials, { endpoint_origin: base, version: "0.1.0", created_by: user.id });
     const enrolled = await request("/api/v1/agents/enroll", "POST", { enrollment_token: issued.token_display_once, install_nonce: issued.enrollment_id, agent_public_key: "fixture", version: "0.1.0", arch: "amd64" });
     const activated = await request(`/api/v1/agents/${enrolled.data.agent_id}/activate`, "POST", { install_nonce: issued.enrollment_id, health: { service: "ready", config_checked: true } }, { authorization: "Bearer " + enrolled.data.bootstrap_credential });
     assert.equal(activated.status, 200);
@@ -92,11 +93,12 @@ test("removed node cannot heartbeat, fetch config, claim jobs, send data or down
   assert.equal(f.credentials.registered?.(node.id), true); assert.equal((await f.request(`/api/v1/agents/${node.id}/heartbeat`, "POST", {}, { authorization: "Bearer shared-sdk-key" })).status, 401);
 });
 
-test("legacy nodes cannot be removed by revoking a shared key used by SDKs", async t => {
+test("shared SDK keys cannot register or control Agent identities", async t => {
   const f = await fixture(t);
-  assert.equal((await f.request("/api/v1/agents/register", "POST", { agent_id: "legacy" }, { authorization: "Bearer shared-sdk-key" })).status, 200);
-  const result = await remove(f, "legacy"); assert.equal(result.status, 409); assert.match(result.data.error, /共享.*Key/); assert.equal(isAgentRemoved(f.db, "legacy"), false);
-  assert.equal((await f.request(`/api/v1/agents/legacy/heartbeat`, "POST", {}, { authorization: "Bearer shared-sdk-key" })).status, 200);
+  const headers = { authorization: "Bearer shared-sdk-key" };
+  assert.equal((await f.request("/api/v1/agents/register", "POST", { agent_id: "legacy" }, headers)).status, 401);
+  assert.equal((await f.request("/api/v1/agents/legacy/heartbeat", "POST", {}, headers)).status, 401);
+  assert.equal(f.db.get("SELECT id FROM agents WHERE id='legacy'"), undefined);
 });
 
 test("queued, executing and unknown jobs plus pending uninstalls prevent partial node removal", async t => {
@@ -123,7 +125,8 @@ test("an upload authenticated before removal is rejected when its body completes
 
 test("node tombstone and job enqueue remain mutually exclusive across SQLite writers", async t => {
   const f = await fixture(t, true), node = await f.enroll(), second = new DB(f.db.path); t.after(() => second.close());
-  const otherJobs = registerAgentJobs({ ...f.deps, db: second, router: new Router() });
+  const otherCredentials = registerAgentCredentials({ ...f.deps, db: second, router: new Router() });
+  const otherJobs = registerAgentJobs({ ...f.deps, db: second, router: new Router() }, { agentCredentials: otherCredentials });
   assertAgentActive(second, node.id);
   const originalRun = second.run.bind(second); let raced = false;
   second.run = (sql: string, ...params: any[]) => {
@@ -186,13 +189,12 @@ test("overview and operations selectors exclude archived nodes and new plans rej
 
 test("service deployment preflight treats a removed node as unavailable despite its recent heartbeat", async t => {
   const f = await fixture(t), node = await f.enroll();
-  f.db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT,address TEXT,port INTEGER,username TEXT,agent_id TEXT)");
-  f.db.run("INSERT INTO managed_machines VALUES('machine','fixture','127.0.0.1',22,'fixture',?)", node.id);
+  const machineID = f.db.get<any>("SELECT id FROM managed_machines WHERE agent_id=?", node.id)!.id;
   const deployments = registerServiceDeployments({ ...f.deps, encrypt: v => v, decrypt: v => v }, { jobs: f.jobs });
   t.after(() => deployments.close?.());
   const service = await f.request("/api/v1/services", "POST", { name: "fixture-service" });
   assert.equal(service.status, 201);
-  const target = await f.request(`/api/v1/services/${service.data.id}/targets`, "POST", { machine_id: "machine", adapter: "systemd", config: { unit: "fixture.service", release_directory: "/opt/lightmoni/services/fixture" } });
+  const target = await f.request(`/api/v1/services/${service.data.id}/targets`, "POST", { machine_id: machineID, adapter: "systemd", config: { unit: "fixture.service", release_directory: "/opt/lightmoni/services/fixture" } });
   assert.equal(target.status, 201);
   const path = `/api/v1/services/${service.data.id}/targets/${target.data.id}/preflight`;
   assert.equal((await f.request(path, "POST", { confirm: true })).status, 202);

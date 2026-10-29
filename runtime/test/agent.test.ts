@@ -49,7 +49,8 @@ function config(t: any, extra: Partial<Config> = {}): Config {
     ...defaultConfig(),
     data_dir: dir,
     endpoint: "http://127.0.0.1:1",
-    key: "test-fake-key",
+    control_credential: "test-control-credential",
+    data_credential: "test-data-credential",
     listen: "127.0.0.1:0",
     min_free_bytes: 0,
     collect_interval_seconds: 3600,
@@ -336,7 +337,7 @@ test("lost upstream ACK retries exact frozen bytes; credentials pause and partia
   mode = "credential";
   assert.equal(await a.forwardOnce(), 30000);
   assert.equal(a.queue.stats().quarantine_batches, 0);
-  a.config.key = "test-rotated-key";
+  a.config.data_credential = "test-rotated-key";
   a.queue.db.run("UPDATE batches SET next_ns=0");
   mode = "ok";
   await a.forwardOnce();
@@ -489,7 +490,7 @@ test("SDK configuration relays local auth and keeps validated offline cache with
     disable_rules: [],
   };
   const center = await mock(t, (req, res) => {
-    assert.equal(req.headers.authorization, "Bearer test-fake-key");
+    assert.equal(req.headers.authorization, "Bearer test-control-credential");
     assert.ok(req.headers["x-lightmoni-agent-id"]);
     if (!online) {
       req.socket.destroy();
@@ -510,7 +511,7 @@ test("SDK configuration relays local auth and keeps validated offline cache with
   assert.deepEqual(await cached.json(), policy);
   assert(
     !readFileSync(join(a.config.data_dir, "sdk-config.json"), "utf8").includes(
-      "test-fake-key",
+      "test-control-credential",
     ),
   );
   for (const rule of [
@@ -550,7 +551,7 @@ test("control registers, acknowledges runtime events and persists tasks for offl
   });
   const center = await mock(t, (req, res) => {
     calls.push(req.url!);
-    assert.equal(req.headers.authorization, "Bearer test-fake-key");
+    assert.equal(req.headers.authorization, "Bearer test-control-credential");
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(req.method === "GET" ? JSON.stringify(remote) : "{}");
   });
@@ -662,10 +663,11 @@ test("real host collection uses TS SDK and selected destination; HTTP/TCP probes
 test("CLI config preserves identity/spool, protects files and requires explicit quarantine discard", async (t) => {
   const cfg = config(t),
     path = join(cfg.data_dir, "config.json");
+  writeFileSync(path, JSON.stringify(cfg));
   const output: string[] = [],
     io = {
       input: (async function* () {
-        yield "test-fake-key\n";
+        throw Error("configure must not consume a shared key from stdin");
       })(),
       write: (s: string) => output.push(s),
     };
@@ -680,11 +682,12 @@ test("CLI config preserves identity/spool, protects files and requires explicit 
       "production",
       "--require-data-dir",
       cfg.data_dir,
-      "--key-stdin",
     ],
     io,
   );
-  assert.equal(loadConfig(path).key, "test-fake-key");
+  assert.equal(loadConfig(path).control_credential, "test-control-credential");
+  assert.equal(loadConfig(path).data_credential, "test-data-credential");
+  assert.equal(Object.hasOwn(loadConfig(path), "key"), false);
   assert.equal(statSync(path).mode & 0o777, 0o600);
   const a = createAgent(loadConfig(path)),
     id = a.identity.agent_id,

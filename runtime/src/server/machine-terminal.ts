@@ -1,6 +1,6 @@
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
-import { createHash } from "node:crypto";
+import { hostKeyAlgorithms } from "./machine-host-keys.js";
 import { Client, type ClientChannel } from "ssh2";
 import { WebSocket, WebSocketServer } from "ws";
 import { id, hash } from "../shared/crypto.js";
@@ -144,11 +144,10 @@ export function registerMachineTerminal(deps: Dependencies, machines: MachineTer
       client.connect({
         host: m.address.replace(/^\[|\]$/g, ""), port: m.port, username: m.username,
         ...(s.lease.credentialMethod === "password" ? { password: s.lease.password, tryKeyboard: false } : { privateKey: s.lease.privateKey }),
-        readyTimeout: limits.connectMs,
+        algorithms: hostKeyAlgorithms(m), readyTimeout: limits.connectMs,
         keepaliveInterval: 15_000, keepaliveCountMax: 2,
         hostVerifier(key: Buffer) {
-          const actual = "SHA256:" + createHash("sha256").update(key).digest("base64").replace(/=+$/, "");
-          mismatch = actual !== m.host_key_fingerprint;
+          try { mismatch = !s.lease.verifyHostKey(key); } catch { mismatch = true; }
           return !mismatch;
         },
       });

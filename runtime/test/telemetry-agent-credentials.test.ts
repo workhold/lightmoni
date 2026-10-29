@@ -14,6 +14,7 @@ import {Ingest} from '../src/server/ingest.js';
 import {registerSettings} from '../src/server/settings.js';
 import {registerAgentCredentials} from '../src/server/agent-credentials.js';
 import type {Dependencies} from '../src/shared/types.js';
+import {issueHostEnrollment} from './helpers/host-enrollment.js';
 
 test('record reporting keeps SDK keys and node control/data credentials isolated',async()=>{
  const directory=mkdtempSync(join(tmpdir(),'lm-record-credentials-'));
@@ -38,7 +39,7 @@ test('record reporting keeps SDK keys and node control/data credentials isolated
  try {
   const setup=await request('/api/v1/setup','POST',{name:'admin',password:'fixture-password'});assert.equal(setup.status,201);
   const key=await request('/api/v1/keys','POST',{name:'SDK record'});assert.equal(key.status,201);
-  const issued=credentials.issueEnrollment({endpoint_origin:base,version:'0.1.0',created_by:setup.data.id,expires_in_seconds:3600});
+  const issued=issueHostEnrollment(db,credentials,{endpoint_origin:base,version:'0.1.0',created_by:setup.data.id,expires_in_seconds:3600});
   const enrolled=await request('/api/v1/agents/enroll','POST',{enrollment_token:issued.token_display_once,install_nonce:'fixture-nonce',agent_public_key:'fixture-public-key',version:'0.1.0',arch:'amd64'});
   assert.equal(enrolled.status,201);
   const agentID=enrolled.data.agent_id;
@@ -59,6 +60,7 @@ test('record reporting keeps SDK keys and node control/data credentials isolated
   const send=(headers:Record<string,string>,id:string)=>request('/v1/metrics','POST',payload,{'X-Lightmoni-Table':'business','X-Lightmoni-Batch-ID':id,...headers});
   assert.equal((await send({Authorization:'Bearer '+key.data.key},'sdk-record')).status,200);
   assert.equal(rows.at(-1).key_id,key.data.id);
+  assert.equal((await send({Authorization:'Bearer '+key.data.key,'X-Lightmoni-Agent-ID':'unknown-agent'},'unknown-agent-cannot-use-sdk-key')).status,401);
   assert.equal((await send(data,'node-record')).status,200);
   const authenticated=credentials.authenticate({headers:{authorization:data.Authorization}} as any,agentID,'data');
   assert.equal(rows.at(-1).key_id,authenticated.credential_id);
