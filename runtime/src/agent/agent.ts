@@ -104,10 +104,10 @@ export class Agent {
         table: "host",
         instanceId: this.identity.agent_id,
         selfTelemetry: false,
-        // Telemetry and SDK configuration use the data audience. The legacy
-        // key remains a compatibility fallback for nodes before enrollment.
-        key: config.data_credential || config.key,
-        configEndpoint: config.endpoint,
+        // Telemetry and SDK configuration use the independent data audience.
+        key: config.data_credential,
+        // Agent task configuration is fetched through its authenticated control plane.
+        remoteConfig: false,
         intervalMs: config.collect_interval_seconds * 1000,
         maxBatchBytes: Math.floor(config.max_batch_bytes / 2),
         exporter: {
@@ -154,7 +154,6 @@ export class Agent {
   }
   private safe(message: string) {
     for (const secret of [
-      this.config.key,
       this.config.control_credential,
       this.config.data_credential,
       this.config.local_token,
@@ -458,7 +457,7 @@ export class Agent {
           headers: {
             "X-Lightmoni-Agent-ID": this.identity.agent_id,
             Authorization:
-              "Bearer " + (this.config.control_credential || this.config.key),
+              "Bearer " + this.config.control_credential,
           },
           signal: AbortSignal.any([parent, AbortSignal.timeout(5000)]),
         },
@@ -517,7 +516,7 @@ export class Agent {
         redirect: "manual",
         headers: {
           Authorization:
-            "Bearer " + (this.config.control_credential || this.config.key),
+            "Bearer " + this.config.control_credential,
           "Content-Type": "application/json",
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -601,7 +600,7 @@ export class Agent {
             "X-Lightmoni-Batch-Created-At": batch.created_at,
             "X-Lightmoni-Agent-ID": this.identity.agent_id,
             Authorization:
-              "Bearer " + (this.config.data_credential || this.config.key),
+              "Bearer " + this.config.data_credential,
           },
           body: new Uint8Array(batch.payload),
           signal: AbortSignal.any([parent, AbortSignal.timeout(15000)]),

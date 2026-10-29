@@ -21,7 +21,7 @@ function fixture(expirySweepIntervalMs?: number) {
     ch: { exec: async () => {}, query: async () => ({ meta: [], data: [], rows: 0 }), insert: async () => {} },
     reader: { exec: async () => {}, query: async () => ({ meta: [], data: [], rows: 0 }), insert: async () => {} },
   } as unknown as Dependencies;
-  const credentials = { authenticate() { return { credential_id: "cred", agent_id: "agent-1", audience: "control", scope: "agent.control", expires_at: "", last_used_at: "" }; } } as any;
+  const credentials = { has: () => true, authenticate() { return { credential_id: "cred", agent_id: "agent-1", audience: "control", scope: "agent.control", expires_at: "", last_used_at: "" }; } } as any;
   return { db, deps, jobs: registerAgentJobs(deps, { agentCredentials: credentials, expirySweepIntervalMs }), advance(seconds: number) { current = new Date(current.getTime() + seconds * 1000); } };
 }
 

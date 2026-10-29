@@ -26,6 +26,7 @@ export const hostCollectorName = (value:string,language:string='zh-CN') => langu
 export interface AgentTaskLabel {id:string;name:string;node_count:number;task_count:number}
 export interface ManagedAgentTask {id:string;name:string;type:AgentTaskType;enabled:boolean;label_ids:string[];config:AgentTasks}
 export interface AgentItem {
+  machine_id?:string;machine_name?:string;
   id:string;hostname:string;platform:string;arch:string;version:string;last_seen:string;
   lifecycle_state?:'active'|'removed';removed_at?:string;removal_reason?:string;
   heartbeat:Record<string,unknown>;config:AgentTasks;group_id:string;group_name:string;

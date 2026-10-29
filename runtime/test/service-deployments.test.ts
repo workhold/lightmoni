@@ -29,7 +29,7 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
     reader: { exec: async () => {}, query: async () => ({ meta: [], data: [], rows: 0 }), insert: async () => {} },
   } as unknown as Dependencies;
   router.auth = deps.auth;
-  const jobs = registerAgentJobs(deps);
+  const jobs = registerAgentJobs(deps, { agentCredentials: { has: () => true } as any });
   registerServiceDeployments(deps, { jobs });
   const server = createServer((req, res) => void router.handle(req, res));
   server.listen(0, "127.0.0.1");

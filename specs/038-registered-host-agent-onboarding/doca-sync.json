@@ -1,0 +1,44 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "status": "synchronized",
+  "sections": [
+    "2 terms",
+    "8 API",
+    "12",
+    "13",
+    "13.1",
+    "13.2",
+    "13.3",
+    "16 UI",
+    "17 credentials",
+    "22 implemented boundaries"
+  ],
+  "before_seq": 781,
+  "saved_seq": 784,
+  "readback_seq": 784,
+  "text_blocks_verified": 22,
+  "new_blocks_verified": 6,
+  "unrelated_top_level_blocks_unchanged": 315,
+  "existing_native_diagrams_unchanged": 9,
+  "existing_enrollment_diagram": {
+    "nodes": 10,
+    "edges": 11,
+    "all_edges_unchanged": true,
+    "modified_node_labels": [
+      "e-issued",
+      "e-active"
+    ]
+  },
+  "new_native_flowchart": {
+    "block_id": "host038-registered-onboarding-flow",
+    "nodes": 8,
+    "edges": 7,
+    "nodes_and_edges_match": true
+  },
+  "native_visual_render_verified": false,
+  "writes": [
+    782,
+    783,
+    784
+  ]
+}

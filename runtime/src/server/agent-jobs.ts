@@ -284,6 +284,7 @@ export function registerAgentJobs(
   const enqueue = (input: AgentJobInput) => {
     const agentID = ensureAgent(input.agentID), deploymentID = text(input.deploymentID, "deployment_id"), operationID = text(input.operationID, "operation_id");
     assertAgentActive(db, agentID);
+    if (!options.agentCredentials?.has(agentID, "control")) fail(409, "registered_host_required: 主机没有有效的 Agent 控制通道");
     const actionList = actions(input.actions), caps = capabilities(input.capabilities ?? []);
     const existing = db.get<any>("SELECT * FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deploymentID, operationID);
     if (existing) return view(existing);

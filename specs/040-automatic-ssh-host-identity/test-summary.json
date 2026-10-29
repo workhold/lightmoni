@@ -1,0 +1,27 @@
+{
+  "runtime": {
+    "total": 467,
+    "passed": 450,
+    "skipped": 17,
+    "failed": 0
+  },
+  "runtime_build": "passed",
+  "runtime_typecheck": "passed",
+  "web_build": "passed",
+  "ui": {
+    "checks": 117,
+    "page_errors": 0,
+    "unexpected_requests": 0,
+    "reports": {
+      "onboarding-ui-report.json": 36,
+      "hosts-nodes-ui-report.json": 11,
+      "retention-ui-report.json": 14,
+      "ssh-ui-report.json": 18,
+      "bulk-ui-report.json": 24,
+      "uninstall-ui-report.json": 14
+    }
+  },
+  "ssh_test_scope": "Isolated loopback ssh2/system sshd and temporary keys; no production or vchive operations",
+  "local_preview": "http://127.0.0.1:18080/machines",
+  "production_deployment": false
+}

@@ -1,3 +1,4 @@
+import {reusableMachineCredential} from './machine-credentials';
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Descriptions,Form,Modal,Popconfirm,Select,Space,Typography} from '../shared/ui';
 import {api} from '../shared/api';
@@ -19,7 +20,7 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
  const [record,setRecord]=useState(existing),[check,setCheck]=useState<SSHCheckResult>(),[busy,setBusy]=useState(false),[error,setError]=useState(''),[now,setNow]=useState(Date.now()),[refreshNeeded,setRefreshNeeded]=useState(false);
  const controller=useRef<AbortController|null>(null);
  const prefix=`/machines/${encodeURIComponent(machine.id)}/uninstallations`;
- const keys=credentials.filter(c=>(c.method==='ssh_key'||c.method==='password'&&['temporary','managed'].includes(c.retention||''))&&!c.revoked_at&&!c.secret_cleared_at&&Date.parse(c.expires_at)>Date.now());
+ const keys=credentials.filter(c=>reusableMachineCredential(c));
  const localizeMessage=(value:string)=>({
   '此主机有待审批、运行中或结果未知的 Agent 卸载，请先取消或核对':t('此主机有待审批、运行中或结果未知的 Agent 卸载，请先取消或核对','This host has a pending, running, or uncertain Agent removal. Cancel or verify it first.'),
   '远端 Agent 身份与主机关联不一致':t('远端 Agent 身份与主机关联不一致','The remote Agent identity does not match this host binding.'),
@@ -105,9 +106,9 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
   {!record&&<>
    <p>{t('先使用固定只读检查核对远端身份与中心绑定，生成计划后再确认；此步骤不会卸载 Agent。','Run fixed read-only checks to match the remote identity to the platform binding, then review the saved plan. This step does not uninstall the Agent.')}</p>
    {keys.length?<Form layout="vertical" onFinish={makePlan} disabled={busy} initialValues={{credential_id:keys.length===1?keys[0].id:undefined}}>
-    <Form.Item label={t('可复用 SSH 凭据','Reusable SSH credential')} name="credential_id" rules={[{required:true,message:t('请选择有效私钥或可复用密码','Select an active key or reusable password')}]}><Select options={keys.map(c=>({value:c.id,label:`${c.method==='password'?(c.retention==='managed'?t('托管密码','Managed password'):t('临时密码','Temporary password')):t('SSH 私钥','SSH private key')} · ${c.secret_fingerprint||c.id} · ${time(c.expires_at)}`}))}/></Form.Item>
+    <Form.Item label={t('可复用 SSH 凭据','Reusable SSH credential')} name="credential_id" rules={[{required:true,message:t('请选择有效私钥或可复用密码','Select an active key or reusable password')}]}><Select options={keys.map(c=>({value:c.id,label:`${c.method==='password'?(c.retention==='permanent'?t('永久密码','Permanent password'):c.retention==='managed'?t('托管密码','Managed password'):t('临时密码','Temporary password')):t('SSH 私钥','SSH private key')} · ${c.secret_fingerprint||c.id} · ${c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)}`}))}/></Form.Item>
     <Button type="primary" htmlType="submit" loading={busy} block>{t('核对身份并生成卸载计划','Verify identity and create uninstall plan')}</Button>
-   </Form>:<Alert type="info" showIcon title={t('卸载需要有效私钥或可复用密码','An active key or reusable password is required to uninstall')} description={t('请先添加有效私钥或临时/托管密码并确认主机指纹；一次性密码不能用于自动卸载。','Add an active key or temporary/managed password and verify the host fingerprint. Single-use passwords cannot be used for automatic removal.')}/>}
+   </Form>:<Alert type="info" showIcon title={t('卸载需要有效私钥或可复用密码','An active key or reusable password is required to uninstall')} description={t('请先添加有效私钥或临时、托管、永久密码；主机公钥由平台自动记录和校验。一次性密码不能用于自动卸载。','Add an active key or temporary, managed, or permanent password. The platform records and verifies the host public key automatically. Single-use passwords cannot be used for automatic removal.')}/>}
    {check&&<SSHCheckSummary result={check}/>}
   </>}
   {record&&<>

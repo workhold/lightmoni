@@ -1,3 +1,4 @@
+import {activeMachineCredential,reusableMachineCredential} from './machine-credentials';
 export type BatchAction='ssh_check'|'install'|'uninstall'|'remove_node'|'delete_host';
 export type BatchMachine={id:string;name:string;address:string;port:number;agent_id:string;agent_status:string;connection_method:string;host_key_status:string;username?:string;capabilities?:Record<string,{available:boolean;reason:string}>};
 export type BatchTarget={id:string;name:string;address?:string;port?:number;machine?:BatchMachine;agent?:{id:string;hostname:string;lifecycle_state?:'active'|'removed'}};
@@ -12,8 +13,8 @@ export const batchPlanKind=(action:BatchAction)=>action==='uninstall'?'uninstall
 export const machineBatchPath=(id:string)=>`/machines/${encodeURIComponent(id)}`;
 export const batchPlanPath=(action:BatchAction,machineID:string,planID?:string)=>`${machineBatchPath(machineID)}/${batchPlanKind(action)}${planID?`/${encodeURIComponent(planID)}`:''}`;
 export const batchHistoryURL=(action:BatchAction,machineID:string,planID?:string)=>`/machines?machine=${encodeURIComponent(machineID)}${planID?`&${action==='uninstall'?'uninstallation':'deployment'}=${encodeURIComponent(planID)}`:''}`;
-export const activeBatchCredential=(credential:BatchCredential,now=Date.now())=>!credential.revoked_at&&!credential.secret_cleared_at&&Date.parse(credential.expires_at)>now;
-export const batchCredentials=(action:BatchAction,credentials:BatchCredential[],now=Date.now())=>credentials.filter(credential=>activeBatchCredential(credential,now)&&(credential.method==='ssh_key'||credential.method==='password'&&(action==='ssh_check'||['temporary','managed'].includes(credential.retention||''))));
+export const activeBatchCredential=(credential:BatchCredential,now=Date.now())=>activeMachineCredential(credential,now);
+export const batchCredentials=(action:BatchAction,credentials:BatchCredential[],now=Date.now())=>credentials.filter(credential=>activeBatchCredential(credential,now)&&(action==='ssh_check'&&(credential.method==='ssh_key'||credential.method==='password')||reusableMachineCredential(credential,now)));
 export const batchPlanExpired=(record:BatchPlan,now=Date.now())=>!Number.isFinite(Date.parse(record.plan?.expires_at||''))||Date.parse(record.plan?.expires_at||'')<=now;
 export const batchPlanStatus=(record:BatchPlan):BatchStatus=>record.status==='succeeded'?'success':['running','unknown'].includes(record.status)?'unknown':['failed','cancelled'].includes(record.status)?'failed':'pending';
 
@@ -24,6 +25,7 @@ export function batchUnavailableReason(action:BatchAction,target:BatchTarget,det
  const machine=detail?.machine||target.machine;
  if(!machine)return 'host_required';
  if(action==='delete_host'){
+  if(machine.agent_id&&!['removed','uninstalled'].includes(machine.agent_status))return 'active_agent';
   if(!detail)return '';
   if(detail.credentials.some(credential=>activeBatchCredential(credential)))return 'active_credentials';
   if(detail.deployments?.some(plan=>['awaiting_approval','running'].includes(plan.status)))return 'deployment_pending';
@@ -31,7 +33,6 @@ export function batchUnavailableReason(action:BatchAction,target:BatchTarget,det
   return '';
  }
  if(machine.connection_method!=='direct_ssh')return 'direct_ssh_required';
- if(machine.host_key_status!=='confirmed')return 'host_fingerprint_required';
  if(action==='install'&&machine.agent_id)return 'agent_already_installed';
  if(action==='uninstall'&&!machine.agent_id)return 'agent_not_linked';
  const capability=machine.capabilities?.[action==='install'?'deploy_agent':action==='uninstall'?'uninstall_agent':'ssh_check'];

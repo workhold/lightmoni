@@ -90,7 +90,8 @@ function fixture(
   const old = options.old ?? "node",
     oldConfig = {
       endpoint: "http://old.example",
-      key: "test-old-key",
+      control_credential: "test-old-control",
+      data_credential: "test-old-data",
       data_dir: data,
       group_id: "old",
     };
@@ -202,7 +203,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     mkdirSync(join(packagedRuntime, path), { recursive: true, mode: 0o755 });
   writeFileSync(
     join(packagedRuntime, "node"),
-    "#!/bin/sh\necho v24.15.0\n",
+    "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " \"$@\"\n",
     { mode: 0o755 },
   );
   writeFileSync(join(packagedRuntime, "app/agent/main.js"), "// agent entry\n", {
@@ -219,8 +220,9 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
   });
   js(
     join(packageDir, "lightmoni-agent"),
-    `const fs=require('fs'),args=process.argv.slice(2),command=args.shift(),get=key=>args[args.indexOf(key)+1],path=get('--config'),dir=get('--require-data-dir');if(command==='configure'){let c=fs.existsSync(path)?JSON.parse(fs.readFileSync(path)):{};c.endpoint=get('--endpoint');c.group_id=get('--group-id');c.data_dir=dir;c.key=fs.readFileSync(0,'utf8').trim();fs.writeFileSync(path,JSON.stringify(c));}else if(command==='check'){const c=JSON.parse(fs.readFileSync(path));if(c.data_dir!==dir)process.exit(1);}else process.exit(1);`,
+    `const fs=require('fs'),args=process.argv.slice(2),command=args.shift(),get=key=>args.includes(key)?args[args.indexOf(key)+1]:undefined,path=get('--config'),dir=get('--require-data-dir'),pending=args.includes('--pending-enrollment');if(args.includes('--key-stdin'))throw Error('shared key flag forbidden');if(command==='configure'){let c=fs.existsSync(path)?JSON.parse(fs.readFileSync(path)):{};if(get('--endpoint'))c.endpoint=get('--endpoint');if(get('--group-id'))c.group_id=get('--group-id');c.data_dir=dir;c.control_credential??='';c.data_credential??='';if(Object.hasOwn(c,'key')||(!pending&&(!c.control_credential||!c.data_credential)))throw Error('invalid credentials');fs.writeFileSync(path,JSON.stringify(c));}else if(command==='check'){const c=JSON.parse(fs.readFileSync(path));if(c.data_dir!==dir||Object.hasOwn(c,'key')||(!pending&&(!c.control_credential||!c.data_credential)))process.exit(1);const state=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE));state.configChecks??=[];state.configChecks.push({pending,credentialsPresent:!!c.control_credential&&!!c.data_credential,containsBootstrap:JSON.stringify(c).includes('test-bootstrap')});fs.writeFileSync(process.env.TEST_SYSTEM_STATE,JSON.stringify(state));}else process.exit(1);`,
   );
+  js(join(bin, "curl"), `const fs=require('fs'),args=process.argv.slice(2),get=flag=>args[args.indexOf(flag)+1],url=args.find(v=>v.startsWith('http://')),output=get('--output'),auth=fs.readFileSync(get('--config'),'utf8'),body=JSON.parse(fs.readFileSync(0,'utf8')),state=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE));let response;if(url.endsWith('/agents/enroll')){if(!auth.includes('test-enrollment')||body.enrollment_token!=='test-enrollment')throw Error('invalid enrollment fixture');state.enrollments=(state.enrollments||0)+1;response={agent_id:'synthetic-agent',bootstrap_credential:'test-bootstrap'};}else if(url.endsWith('/synthetic-agent/activate')){if(!auth.includes('test-bootstrap')||body.health.config_checked!==true)throw Error('invalid activation fixture');state.activations=(state.activations||0)+1;response={control_credential:'test-new-control',data_credential:'test-new-data'};}else throw Error('unexpected fixture request');fs.writeFileSync(process.env.TEST_SYSTEM_STATE,JSON.stringify(state));fs.writeFileSync(output,JSON.stringify(response));`);
   writeFileSync(
     join(packageDir, "lightmoni-agent.service"),
     "synthetic new service\n",
@@ -246,14 +248,12 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
         ...extraArgs,
         "--release-dir",
         release,
-        "--endpoint",
-        "http://new.example",
+        ...(old === "none" ? ["--endpoint", "http://new.example", "--enrollment-token-stdin"] : []),
         "--group-id",
         "new",
-        "--key-stdin",
       ],
       {
-        input: "test-new-key\n",
+        input: old === "none" ? "test-enrollment\n" : "",
         encoding: "utf8",
         env: {
           ...process.env,
@@ -353,10 +353,14 @@ function assertSafeStartupDiagnostics(
     assert(query.includes(property), "missing safe property " + property);
   assert(!/ExecStart|Environment|status /.test(query));
   assert(!calls.some((call) => call.startsWith("status ")));
-  assert(!result.stdout.includes("test-new-key"));
-  assert(!result.stderr.includes("test-new-key"));
-  assert(!result.stdout.includes("test-old-key"));
-  assert(!result.stderr.includes("test-old-key"));
+  assert(!result.stdout.includes("test-new-control"));
+  assert(!result.stdout.includes("test-enrollment"));
+  assert(!result.stdout.includes("test-bootstrap"));
+  assert(!result.stderr.includes("test-new-control"));
+  assert(!result.stderr.includes("test-enrollment"));
+  assert(!result.stderr.includes("test-bootstrap"));
+  assert(!result.stdout.includes("test-old-control"));
+  assert(!result.stderr.includes("test-old-control"));
 }
 test("checksum rejection leaves the installed release, service, config, queue and identity unchanged", (t) => {
   const f = fixture(t);
@@ -377,8 +381,10 @@ test("verified release switches atomically, configures and restarts while preser
   assert.match(readFileSync(f.service, "utf8"), /new service/);
   assert.equal(
     JSON.parse(readFileSync(f.config, "utf8")).endpoint,
-    "http://new.example",
+    "http://old.example",
   );
+  const saved = JSON.parse(readFileSync(f.config,"utf8"));
+  assert.equal(saved.control_credential,"test-old-control"); assert.equal(saved.data_credential,"test-old-data"); assert.equal(saved.group_id,"new"); assert.equal(Object.hasOwn(saved,"key"),false);
   assert.equal(statSync(f.config).mode & 0o777, 0o600);
   assert.equal(f.state().restarts, 1);
   assert(f.state().active);
@@ -391,6 +397,10 @@ test("first installation publishes readable runtime and executable helpers witho
     result = f.run();
   assert.equal(result.status, 0, result.stderr);
   assertRuntimePermissions(f);
+  const saved = JSON.parse(readFileSync(f.config,"utf8"));
+  assert.equal(saved.control_credential,"test-new-control"); assert.equal(saved.data_credential,"test-new-data"); assert.equal(Object.hasOwn(saved,"key"),false);
+  assert.equal(f.state().enrollments,1); assert.equal(f.state().activations,1);
+  assert.deepEqual(f.state().configChecks,[{pending:true,credentialsPresent:false,containsBootstrap:false},{pending:false,credentialsPresent:true,containsBootstrap:false}]);
   f.unchangedData();
 });
 test("startup observation tolerates delayed activation and requires two consecutive active checks", (t) => {
@@ -500,4 +510,10 @@ test("fresh installer refuses retained identity and releases lifecycle lock with
   const f = fixture(t), result = f.run(["--fresh"]);
   assert.notEqual(result.status, 0); assert.match(result.stderr, /Existing Agent/); f.restored();
   assert.equal(existsSync(join(f.root, "run/lightmoni-agent-lifecycle.lock")), false);
+});
+
+
+test("installer rejects the removed shared-key flag before changing installed state", t => {
+  const f=fixture(t), result=f.run(["--key-stdin"]);
+  assert.notEqual(result.status,0);f.restored();assert.deepEqual(f.state().calls,[]);
 });

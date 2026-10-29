@@ -1,9 +1,6 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { Client } from "ssh2";
+import { hostKeyAlgorithms } from "./machine-host-keys.js";
 import type { MachineSummary } from "./managed-machines.js";
 
 export interface SSHRunInput {
@@ -12,6 +9,9 @@ export interface SSHRunInput {
   /** SSH password stays in this in-memory connection input, never argv/env/stdin. */
   password?: string;
   command: string;
+  credentialID?: string;
+  /** Synchronous, atomic host identity check from this exact SSH handshake. */
+  verifyHostKey?: (key: Buffer) => boolean;
   enrollmentToken?: string;
   /** Non-secret fixed script input, never used for a password. */
   stdin?: string;
@@ -26,7 +26,7 @@ export class SSHError extends Error {
   }
 }
 
-// Trust only keys matching the administrator's pin, never every scanned key.
+// Match a fixed pin; kept as a pure parser for existing tooling and tests.
 export function pinnedHostKeys(scanned: string, expected: string): string {
   const matches = scanned.split("\n").filter(line => {
     const parts = line.trim().split(/\s+/);
@@ -38,53 +38,8 @@ export function pinnedHostKeys(scanned: string, expected: string): string {
   return matches.join("\n") + "\n";
 }
 
-function runProcess(command: string, args: string[], input: string | undefined, signal: AbortSignal, timeoutMs: number) {
-  if (signal.aborted) return Promise.reject(new SSHError("cancelled"));
-  return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "", stderr = "", stopped: SSHError | undefined;
-    const stop = (code: "cancelled" | "timed_out") => { stopped ??= new SSHError(code); child.kill("SIGKILL"); };
-    const onAbort = () => stop("cancelled");
-    const timer = setTimeout(() => stop("timed_out"), timeoutMs);
-    const clean = () => { clearTimeout(timer); signal.removeEventListener("abort", onAbort); };
-    signal.addEventListener("abort", onAbort, { once: true });
-    child.stdout.on("data", chunk => { stdout = (stdout + chunk.toString()).slice(-12_000); });
-    child.stderr.on("data", chunk => { stderr = (stderr + chunk.toString()).slice(-12_000); });
-    child.once("error", () => { clean(); reject(stopped ?? new SSHError("ssh_failed")); });
-    child.once("close", code => { clean(); if (stopped || code !== 0) reject(stopped ?? new SSHError("ssh_failed")); else resolve({ stdout, stderr }); });
-    child.stdin.on("error", () => {}); // An authentication failure can close stdin before its write.
-    child.stdin.end(input);
-    if (signal.aborted) onAbort();
-  });
-}
-
 export async function defaultSSHRunner(input: SSHRunInput) {
-  if (input.password !== undefined) return passwordSSHRunner(input);
-  const dir = await mkdtemp(join(tmpdir(), "lightmoni-ssh-"));
-  const keyPath = join(dir, "id"), knownPath = join(dir, "known_hosts");
-  const signal = AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs ?? 30 * 60_000)]);
-  try {
-    await writeFile(keyPath, input.privateKey + "\n", { mode: 0o600 });
-    const scanned = await runProcess("ssh-keyscan", ["-T", "5", "-t", "rsa,ecdsa,ed25519", "-p", String(input.port), input.machine.address], undefined, signal, 15_000);
-    await writeFile(knownPath, pinnedHostKeys(scanned.stdout, input.machine.host_key_fingerprint), { mode: 0o600 });
-    const result = await runProcess("ssh", [
-      "-F", "/dev/null", "-T", "-p", String(input.port),
-      "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ConnectionAttempts=1",
-      "-o", "StrictHostKeyChecking=yes", "-o", `UserKnownHostsFile=${knownPath}`,
-      "-o", "GlobalKnownHostsFile=/dev/null", "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
-      "-o", "PreferredAuthentications=publickey", "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
-      "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-o", "ProxyCommand=none", "-o", "ProxyJump=none",
-      "-o", "ControlMaster=no", "-o", "LogLevel=ERROR", "-i", keyPath,
-      `${input.machine.username}@${input.machine.address}`, input.command,
-    ], input.stdin ?? (input.enrollmentToken == null ? undefined : input.enrollmentToken + "\n"), signal, input.timeoutMs ?? 30 * 60_000);
-    return { ...result, stages: ["checking_host_key", "host_key_confirmed", "connecting_ssh", "remote_command_completed"] };
-  } catch (error) {
-    if (input.signal.aborted) throw new SSHError("cancelled");
-    if (signal.aborted) throw new SSHError("timed_out");
-    throw error instanceof SSHError ? error : new SSHError("ssh_failed");
-  } finally {
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
+  return fixedCommandSSHRunner(input);
 }
 
 /**
@@ -98,6 +53,12 @@ export async function defaultSSHRunner(input: SSHRunInput) {
  */
 export async function passwordSSHRunner(input: SSHRunInput) {
   if (!input.password) throw new SSHError("ssh_failed");
+  return fixedCommandSSHRunner(input);
+}
+
+/** One handshake supplies both host verification and password/private-key auth. */
+async function fixedCommandSSHRunner(input: SSHRunInput) {
+  if (input.password === undefined && !input.privateKey) throw new SSHError("ssh_failed");
   const timeoutMs = input.timeoutMs ?? 30 * 60_000;
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(timeoutMs)]);
   if (signal.aborted) throw new SSHError(input.signal.aborted ? "cancelled" : "timed_out");
@@ -105,6 +66,7 @@ export async function passwordSSHRunner(input: SSHRunInput) {
   let timer: NodeJS.Timeout | undefined;
   let settled = false;
   let mismatch = false;
+  let verifiedHostKey: Buffer | undefined;
   let stdout = "", stderr = "";
   const finish = (error?: SSHError, result?: { stdout: string; stderr: string; stages: string[] }) => {
     if (settled) return;
@@ -127,10 +89,16 @@ export async function passwordSSHRunner(input: SSHRunInput) {
     finish(new SSHError(mismatch ? "host_key_mismatch" : error.level === "client-authentication" ? "ssh_failed" : "ssh_failed"));
   });
   client.on("close", () => { if (!settled) finish(new SSHError("ssh_failed")); });
+  const stillVerified = () => {
+    if (settled || signal.aborted || !verifiedHostKey) return false;
+    try { return input.verifyHostKey ? input.verifyHostKey(verifiedHostKey) : true; } catch { return false; }
+  };
   client.on("ready", () => {
     if (settled) return;
+    if (!stillVerified()) return finish(new SSHError("ssh_failed"));
     client.exec(input.command, (error, stream) => {
       if (error || !stream) return finish(new SSHError("ssh_failed"));
+      if (!stillVerified()) { stream.destroy(); return finish(new SSHError("ssh_failed")); }
       stream.on("data", (chunk: Buffer) => { stdout = (stdout + chunk.toString()).slice(-12_000); });
       stream.stderr.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-12_000); });
       stream.on("error", () => finish(new SSHError("ssh_failed")));
@@ -147,10 +115,14 @@ export async function passwordSSHRunner(input: SSHRunInput) {
     const machine = input.machine;
     client.connect({
       host: machine.address.replace(/^\[|\]$/g, ""), port: input.port, username: machine.username,
-      password: input.password, readyTimeout: Math.min(timeoutMs, 20_000), tryKeyboard: false,
+      ...(input.password !== undefined ? { password: input.password, tryKeyboard: false } : { privateKey: input.privateKey }),
+      algorithms: hostKeyAlgorithms(machine), readyTimeout: Math.min(timeoutMs, 20_000), tryKeyboard: false,
       hostVerifier(key: Buffer) {
+        if (settled || signal.aborted) return false;
         const actual = "SHA256:" + createHash("sha256").update(key).digest("base64").replace(/=+$/, "");
-        mismatch = actual !== machine.host_key_fingerprint;
+        try { mismatch = input.verifyHostKey ? !input.verifyHostKey(key) : !machine.host_key_fingerprint || actual !== machine.host_key_fingerprint; }
+        catch { mismatch = true; }
+        if (!mismatch) verifiedHostKey = key;
         return !mismatch;
       },
     });
