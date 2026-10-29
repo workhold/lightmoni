@@ -131,6 +131,8 @@ URL 表达 from/to、重复 var-*、refresh、viewPanel 和 editPanel，历史�
 
 主机列表展示 Agent 在线状态、标签、匹配任务、配置同步状态和心跳，展开查看身份、队列、最近采集错误及有效配置。管理员可多选或清空标签；成员只能读取主机 ID/名称及允许的 Agent 信息，不读取 SSH 地址和凭据。任务按类型提供表单并独立启停，空目标明确说明不会下发；冲突或保存失败保留输入与原有效配置。标签显示 Agent/任务引用数量，可跳转过滤，默认及在用标签禁止删除。
 
+移除 Agent 身份和删除主机统一放在勾选后的批量工具栏，勾选一台也使用同一入口；未选择时禁用。列表行尾与详情不重复提供这两个按钮，行尾保留登录、详情、编辑、凭据、SSH 检查、部署/卸载 Agent 等上下文操作。统一弹窗保留影响说明、明确确认和逐项结果，后端保护条件不变。见 [041 操作入口收敛](../specs/041-host-lifecycle-action-consolidation/spec.md)。
+
 管理员从登记主机的 SSH 预检与部署计划选择初始任务标签，接入后可绑定多个。enrollment、control/data 凭据与业务 SDK Key 隔离，不提供旧共享 Key 控制面兼容。凭据保留期限、逐主机批量结果、计划审阅与取消均有明确反馈；移除/卸载 Agent 保留主机资产，删除有效身份所在主机需先处理 Agent。SDK 默认独立直报，不依赖 Agent，不新增主机 ID/名称环境变量。
 
 当前规格与验收见 [038 主机登记部署](../specs/038-registered-host-agent-onboarding/spec.md) 和 [验收记录](../specs/038-registered-host-agent-onboarding/validation.md)。[006 执行节点](../specs/006-execution-nodes/spec.md) 与 [其验收记录](../specs/006-execution-nodes/validation.md) 保留历史语境，接入身份与主机展示以 038 为准。

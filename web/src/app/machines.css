@@ -7,8 +7,6 @@
 .lm-machine-uninstall-steps{padding-left:22px;line-height:1.9}
 .lm-machine-uninstall-actions{margin:12px 0}
 .lm-machine-path{display:block;overflow-wrap:anywhere}
-.lm-machine-delete-error .ant-typography{margin-bottom:10px;overflow-wrap:anywhere}
-.lm-machine-delete-dialog .ant-descriptions-item-content{overflow-wrap:anywhere}
 .lm-hosts-nodes-page>.lm-machine-notice{margin-bottom:18px}
 .lm-hosts-nodes-page .lm-node-actions{margin-bottom:10px}
 .lm-hosts-nodes-page .lm-machines-page>.lm-page-heading{gap:16px;flex-wrap:wrap;margin-bottom:16px}

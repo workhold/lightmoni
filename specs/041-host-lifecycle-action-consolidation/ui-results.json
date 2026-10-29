@@ -1,0 +1,29 @@
+{
+  "production_bundle": true,
+  "api_fixtures": true,
+  "real_ssh": false,
+  "production_writes": false,
+  "reports": {
+    "bulk": {
+      "passed": 24,
+      "errors": [],
+      "unexpected": []
+    },
+    "hosts": {
+      "passed": 13,
+      "errors": [],
+      "unexpected": []
+    },
+    "list_delete": {
+      "passed": 12,
+      "errors": [],
+      "unexpected": []
+    },
+    "ssh": {
+      "passed": 18,
+      "errors": [],
+      "unexpected": []
+    }
+  },
+  "total_passed": 67
+}
