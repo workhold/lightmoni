@@ -155,6 +155,20 @@ test("real platform HTTP checks role, confirmation and revision with saved state
   assert.equal(read.body.resources[0].id, app.id);
   assert.equal(read.body.agents[0].hostname, "Test node");
 });
+test("removed nodes disappear from deployment candidates and cannot become new deployment targets", async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.req("/ops/overview")).body.agents.length, 1);
+  f.db.run("INSERT INTO agent_lifecycle(agent_id,state) VALUES('node-a','removed')");
+  assert.deepEqual((await f.req("/ops/overview")).body.agents, []);
+  const saved = await f.req("/ops/resources", "POST", {
+    kind: "application",
+    name: "Removed target",
+    spec: { mode: "container", image: "nginx:1.27.5", agent_ids: ["node-a"] },
+  });
+  assert.equal(saved.status, 400);
+  assert.equal(saved.body.error, "registered_agent_required");
+  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0);
+});
 test("self-signed certificate travels through real HTTP, private Agent lease, directory and update script", async (t) => {
   const f = await setup(t),
     cert = await f.create("certificate", "QA certificate", {

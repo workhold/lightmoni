@@ -1,0 +1,25 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "status": "blocked_server_error_save_not_confirmed",
+  "repository_sections": [
+    "13",
+    "13.2",
+    "17 credential boundary table"
+  ],
+  "revision": "Platform-generated immutable host ID and user-configured name only; SDK variable and Agent metadata extensions withdrawn.",
+  "before_seq": 773,
+  "latest_readback_seq": 773,
+  "saved": false,
+  "latest_error": {
+    "status": 500,
+    "message": "MCP operation failed"
+  },
+  "attempt_history": "Prior 037 attempts failed with 500. Revised request rejected setBlock children with 400; corrected to documented text/setCellContent/insertBlock, then received 500. No further retries.",
+  "online_content_verified_unchanged": true,
+  "existing_native_diagrams_verified_unchanged": 8,
+  "pending_native_diagram": {
+    "nodes": 8,
+    "edges": 8
+  },
+  "required_followup": "Read latest version, synchronize platform host identity and credential/onboarding sections, and verify text/nodes/edges after Doca write service recovers."
+}

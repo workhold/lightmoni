@@ -35,6 +35,7 @@
 - [x] T020 网站类型化高级设置和多路径表单，中英文/窄屏/保存读回。
 - [x] T021 URI、匹配优先级、头部、WebSocket、限制与片段边界测试，以及真实OpenResty回归。
 - [x] T022 同步SDD/仓库/Doca，记录实际页面和Nginx验收并更新PR #15。
+- [x] T023 同步主干统一主机入口与节点生命周期，完成相关回归、推送功能分支并启动/检查开发服务；记录见 validation-main-sync.md。
 T001→T002；T003/T004 与 T005/T006/T007 可独立并行；T008 共用 Agent 执行器；T009 依赖应用，T010/T011 依赖证书/服务/网关；T012 按固定 API 并行；最终 T014–T017。
 
 ## Parallel examples and implementation strategy

@@ -13,7 +13,7 @@ import {
 import { stringifyJSON } from "../shared/json.js";
 import { hash, id } from "../shared/crypto.js";
 import { Serial } from "../shared/serial.js";
-import { fail } from "../shared/http.js";
+import { fail, HTTPError } from "../shared/http.js";
 import type { Context } from "../shared/types.js";
 import { Auth, validTable, systemTable } from "./auth.js";
 import { Catalog } from "./catalog.js";
@@ -449,7 +449,8 @@ export class Ingest {
   }
   async receive(c: Context, signal: Signal) {
     const agentID = String(c.req.headers['x-lightmoni-agent-id'] ?? '');
-    const key = agentID && (this.agentCredentials?.registered?.(agentID) ?? this.agentCredentials?.has(agentID, 'data'))
+    const usesAgentCredential = agentID && (this.agentCredentials?.registered?.(agentID) ?? this.agentCredentials?.has(agentID, 'data'));
+    const key = usesAgentCredential
       ? (() => {
           const credential = this.agentCredentials!.authenticate(c.req, agentID, 'data');
           return {id: credential.credential_id, name: 'agent:' + agentID, allowed_tables: [] as string[], allow_all_tables: true};
@@ -499,6 +500,11 @@ export class Ingest {
         fail(400, "batch expired beyond 24-hour replay window");
     }
     await this.serial.run(async () => {
+      // Request upload and receiver serialization can outlive node removal.
+      // Revalidate at acceptance, including a newly-created tombstone for an
+      // identity that used a legacy key when the request first arrived.
+      if (agentID && (usesAgentCredential || this.agentCredentials?.registered?.(agentID)))
+        this.agentCredentials!.authenticate(c.req, agentID, 'data');
       if (!key.id) this.auth.validateKey(c, table, true);
       const digest = hash(
         Buffer.concat([Buffer.from(signal + "\0" + table + "\0"), raw]),
@@ -599,9 +605,13 @@ export class Ingest {
           data.push(n.row);
           grouped.set(target, data);
         }
-        for (const [target, data] of grouped)
+        for (const [target, data] of grouped) {
+          if (agentID && (usesAgentCredential || this.agentCredentials?.registered?.(agentID)))
+            this.agentCredentials!.authenticate(c.req, agentID, 'data');
           await this.cat.ch.insert(target, data, c.signal);
+        }
       } catch (e) {
+        if (e instanceof HTTPError) throw e;
         this.auth.recordKey(
           key.id,
           service,

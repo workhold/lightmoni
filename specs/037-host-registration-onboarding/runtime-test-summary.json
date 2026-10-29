@@ -1,0 +1,11 @@
+{
+  "command": "npm test",
+  "working_directory": "runtime",
+  "tests": 451,
+  "passed": 434,
+  "failed": 0,
+  "skipped": 17,
+  "exit_code": 0,
+  "typecheck": "passed",
+  "build": "passed"
+}

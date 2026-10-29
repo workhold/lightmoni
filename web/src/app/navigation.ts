@@ -1,4 +1,4 @@
-import {ApiOutlined,AppstoreOutlined,BellOutlined,CloudServerOutlined,DashboardOutlined,DatabaseOutlined,MessageOutlined,SafetyCertificateOutlined,SearchOutlined,SettingOutlined,ToolOutlined} from '@ant-design/icons';
+import {AppstoreOutlined,BellOutlined,CloudServerOutlined,DashboardOutlined,DatabaseOutlined,MessageOutlined,SafetyCertificateOutlined,SearchOutlined,SettingOutlined,ToolOutlined} from '@ant-design/icons';
 
 export const navigationGroups=[
  {id:'workspace',label:'工作台',english:'Workspace',items:[
@@ -11,8 +11,7 @@ export const navigationGroups=[
   {path:'/alerts',label:'告警中心',english:'Alerts',icon:BellOutlined,adminOnly:false},
  ]},
  {id:'operations',label:'运维工具',english:'Operations',items:[
-  {path:'/machines',label:'主机管理',english:'Machines',icon:CloudServerOutlined,adminOnly:true},
-  {path:'/agents',label:'节点助手',english:'Node assistants',icon:ApiOutlined,adminOnly:false},
+  {path:'/machines',label:'主机',english:'Hosts',icon:CloudServerOutlined,adminOnly:false},
   {path:'/operations',label:'网站与运维',english:'Websites & operations',pageLabel:'网站与运维',pageEnglish:'Websites & operations',icon:ToolOutlined,adminOnly:true},
  ]},
  {id:'data',label:'数据与接入',english:'Data & ingestion',items:[

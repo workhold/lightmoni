@@ -13,7 +13,7 @@ type PageTab = 'nodes'|'tasks'|'labels';
 type Deleting = {kind:'task'|'label';id:string;name:string};
 const failure = (error:unknown,fallback:string) => error instanceof Error?error.message:fallback;
 
-function NodeDetails({agent}:{agent:AgentItem}) {
+export function NodeDetails({agent}:{agent:AgentItem}) {
  const {t,language:uiLanguage}=useI18n();
 const time = (value:unknown) => value && String(value)!=='0001-01-01T00:00:00Z' && Number.isFinite(Date.parse(String(value)))?new Date(String(value)).toLocaleString(uiLanguage):t("尚无记录","No records yet");
 
@@ -24,7 +24,7 @@ const time = (value:unknown) => value && String(value)!=='0001-01-01T00:00:00Z' 
   {key:'success',label:t("最近成功上报","Last successful report"),children:time(heartbeat.last_success_at)},
   {key:'queue',label:t("待上报批次","Queued batches"),children:String(heartbeat.queue_batches ?? 0)},
   {key:'error',label:t("最近错误","Latest error"),span:2,children:String(heartbeat.last_error || t("无","None"))},
-  {key:'tasks',label:t("当前匹配任务","Currently matched tasks"),span:2,children:agent.tasks?.length?<Space size={[0,6]} wrap>{agent.tasks.map(task=><Tag key={task.id}>{task.name} · {taskTypeName(task.type,uiLanguage)}</Tag>)}</Space>:t("未匹配启用任务；指标采集、日志采集和拨测暂停，业务数据转发继续可用。","No enabled tasks match. Metric and log collection and probing are paused; business data forwarding remains available.")},
+  {key:'tasks',label:t("当前匹配任务","Currently matched tasks"),span:2,children:agent.tasks?.length?<Space size={[0,6]} wrap>{agent.tasks.map(task=><Tag key={task.id}>{task.name} · {taskTypeName(task.type,uiLanguage)}</Tag>)}</Space>:t("未匹配启用任务；指标采集、日志采集和拨测暂停，SDK 独立直报不受影响。","No enabled tasks match. Metric and log collection and probing are paused; independent SDK reporting is unaffected.")},
   {key:'config',label:t("中心下发配置","Platform configuration"),span:2,children:config?<Space size={[0,6]} wrap><Tag>{t("指标采集：","Metric collection: ")}{config.host_enabled?t(`${config.collect_interval_seconds} 秒 → ${config.host_table}`,`${config.collect_interval_seconds} s → ${config.host_table}`):t("关闭","Off")}</Tag><Tag>{t("服务拨测：","Service probes: ")}{config.probes.length}  {t("个 →"," →")} {config.probe_table}</Tag><Tag>{t("目录日志：","Directory logs: ")}{config.logs_enabled?t(`${config.log_sources.length} 个 → ${config.log_table}`,`${config.log_sources.length} → ${config.log_table}`):t("关闭","Off")}</Tag></Space>:t("尚未获取配置","Configuration not received yet")},
   {key:'revision',label:t("中心配置版本","Platform configuration version"),children:<Typography.Text code>{agent.config?.revision || t("尚无版本","No version yet")}</Typography.Text>},
   {key:'actual-revision',label:t("节点已应用版本","Version applied by node"),children:<Typography.Text code>{String(heartbeat.config_revision || t("等待同步","Awaiting sync"))}</Typography.Text>},
@@ -52,7 +52,7 @@ function TaskDetails({task}:{task:ManagedAgentTask}) {
  ]}/>)}{!config.log_sources.length&&<Typography.Text type="secondary">{t("未配置日志目录","No log directories configured")}</Typography.Text>}</div>;
 }
 
-export default function AgentsPage({user}:{user:User}) {
+export default function AgentsPage({user,embeddedTab}:{user:User;embeddedTab?:'tasks'|'labels'}) {
  const {t,language:uiLanguage}=useI18n();
 const time = (value:unknown) => value && String(value)!=='0001-01-01T00:00:00Z' && Number.isFinite(Date.parse(String(value)))?new Date(String(value)).toLocaleString(uiLanguage):t("尚无记录","No records yet");
 const taskSummary = (task:ManagedAgentTask) => {
@@ -64,7 +64,7 @@ const taskSummary = (task:ManagedAgentTask) => {
 
  const [agents,setAgents]=useState<AgentItem[]>([]),[labels,setLabels]=useState<AgentTaskLabel[]>([]),[tasks,setTasks]=useState<ManagedAgentTask[]>([]);
  const [searchParams,setSearchParams]=useSearchParams();
- const tabParam=searchParams.get('tab'),tab:PageTab=tabParam==='tasks'||tabParam==='labels'?tabParam:'nodes';
+ const tabParam=searchParams.get('tab'),tab:PageTab=embeddedTab||(tabParam==='tasks'||tabParam==='labels'?tabParam:'nodes');
  const labelFilter=searchParams.get('group') ?? '';
  const setTab=(next:string)=>setSearchParams(previous=>{const params=new URLSearchParams(previous);if(next==='nodes')params.delete('tab');else params.set('tab',next);return params;});
  const setFilter=(next:string)=>setSearchParams(previous=>{const params=new URLSearchParams(previous);if(next)params.set('group',next);else params.delete('group');return params;});
@@ -142,12 +142,12 @@ const taskSummary = (task:ManagedAgentTask) => {
    {title:t("操作","Actions"),width:180,render:(_:unknown,label:AgentTaskLabel)=><Space><Button size="small" disabled={!admin} onClick={()=>openLabel(label)}>{t("重命名","Rename")}</Button><Button size="small" danger disabled={!admin||label.id==='default'} onClick={()=>openDelete({kind:'label',id:label.id,name:label.name})}>{t("删除","Delete")}</Button></Space>},
   ]} locale={{emptyText:<Empty description={loaded?t("尚无任务标签","No task labels yet"):error?t("读取失败，请刷新重试","Unable to load. Refresh to try again"):t("正在读取任务标签","Loading task labels")}/>}}/>
  </div>;
- return <div className="lm-page lm-agents-page">
-  <div className="lm-page-heading"><div><h1>{t("节点助手","Node assistant")}</h1><p>{t("统一管理 LightMoni Agent，通过任务标签为执行节点下发指标采集、服务拨测和目录日志任务。","Manage LightMoni Agent and deliver metric collection, service probing, and directory log tasks to execution nodes using task labels.")}</p></div><Button icon={<ReloadOutlined/>} loading={loading} onClick={()=>void load()}>{t("刷新","Refresh")}</Button></div>
+ return <div className={embeddedTab?"lm-agents-page":"lm-page lm-agents-page"}>
+  {!embeddedTab&&<div className="lm-page-heading"><div><h1>{t("节点助手","Node assistant")}</h1><p>{t("统一管理 LightMoni Agent，通过任务标签为执行节点下发指标采集、服务拨测和目录日志任务。","Manage LightMoni Agent and deliver metric collection, service probing, and directory log tasks to execution nodes using task labels.")}</p></div><Button icon={<ReloadOutlined/>} loading={loading} onClick={()=>void load()}>{t("刷新","Refresh")}</Button></div>}
   {!admin&&<Alert type="info" showIcon title={t("当前为只读模式；仅管理员可修改节点标签、任务和任务标签。","Read-only mode. Only administrators can change node labels, tasks, and task labels.")} className="lm-agent-page-notice"/>}
   {error&&<Alert type="error" showIcon title={error} description={loaded?t("已保留上次读取的数据，可刷新重试。","The previous data is retained. Refresh to try again."):t("请刷新重试。","Refresh to try again.")} className="lm-agent-page-notice"/>}
   {actionError&&<Alert type="error" showIcon title={actionError} closable afterClose={()=>setActionError('')} className="lm-agent-page-notice"/>}
-  <Tabs className="lm-agent-tabs" activeKey={tab} onChange={setTab} items={[{key:'nodes',label:t("执行节点","Execution nodes"),children:nodesPanel},{key:'tasks',label:t("任务管理","Task management"),children:tasksPanel},{key:'labels',label:t("任务标签","Task labels"),children:labelsPanel}]}/>
+  {embeddedTab?(embeddedTab==='tasks'?tasksPanel:labelsPanel):<Tabs className="lm-agent-tabs" activeKey={tab} onChange={setTab} items={[{key:'nodes',label:t("执行节点","Execution nodes"),children:nodesPanel},{key:'tasks',label:t("任务管理","Task management"),children:tasksPanel},{key:'labels',label:t("任务标签","Task labels"),children:labelsPanel}]}/>}
   <Modal title={editing==='new'?t("新建任务","Create task"):t(`编辑任务 · ${editing?.name ?? ''}`,`Edit task · ${editing?.name ?? ''}`)} open={!!editing} onCancel={()=>{if(!taskBusy)setEditing(undefined);}} closable={!taskBusy} keyboard={!taskBusy} maskClosable={false} footer={null} width={760} destroyOnHidden>
    {editing&&<AgentTaskEditor key={editing==='new'?'new':editing.id} task={editing==='new'?undefined:editing} labels={labels} onBusyChange={setTaskBusy} onCancel={()=>setEditing(undefined)} onSave={async draft=>{await api(editing==='new'?'/agent-tasks':`/agent-tasks/${encodeURIComponent(editing.id)}`,{method:editing==='new'?'POST':'PUT',body:JSON.stringify(draft)});await load();setEditing(undefined);void message.success(t("任务已保存，匹配的执行节点将自动同步","Task saved. Matching execution nodes will sync automatically"));}}/>}
   </Modal>
@@ -159,7 +159,7 @@ const taskSummary = (task:ManagedAgentTask) => {
   }}>
    <p>{t("可选择多个任务标签，节点接收任一标签匹配的启用任务。请确认上报 Key 已授权这些任务的目标表。","Select multiple task labels. The node receives enabled tasks matching any label. Ensure the reporting key permits their target tables.")}</p>
    <Select mode="multiple" allowClear showSearch={{optionFilterProp:'label'}} aria-label={t("节点任务标签","Node task labels")} style={{width:'100%'}} value={targetLabels} onChange={setTargetLabels} disabled={moveBusy} options={labelOptions} placeholder={t("选择任务标签","Select task labels")}/>
-   {!targetLabels.length&&<Alert type="info" showIcon title={t("未选择任务标签，节点将暂停指标采集、日志采集和拨测；业务数据转发继续可用。","No task labels selected. Metric and log collection and probing will pause; business data forwarding remains available.")} className="lm-agent-form-notice"/>}
+   {!targetLabels.length&&<Alert type="info" showIcon title={t("未选择任务标签，节点将暂停指标采集、日志采集和拨测；SDK 独立直报不受影响。","No task labels selected. Metric and log collection and probing will pause; independent SDK reporting is unaffected.")} className="lm-agent-form-notice"/>}
    {moveError&&<Alert type="error" showIcon title={moveError} className="lm-agent-form-notice"/>}
   </Modal>
   <Modal title={editingLabel==='new'?t("新建任务标签","Create task label"):t(`重命名任务标签 · ${editingLabel?.name ?? ''}`,`Rename task label · ${editingLabel?.name ?? ''}`)} open={!!editingLabel} onCancel={()=>{if(!labelBusy)setEditingLabel(undefined);}} closable={!labelBusy} keyboard={!labelBusy} maskClosable={false} confirmLoading={labelBusy} okText={t("保存标签","Save label")} cancelButtonProps={{disabled:labelBusy}} destroyOnHidden onOk={()=>void saveLabel()}>

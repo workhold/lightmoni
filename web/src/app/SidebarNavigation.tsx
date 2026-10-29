@@ -7,7 +7,7 @@ import {navigationGroups} from './navigation';
 
 export default function SidebarNavigation({pathname,role,collapsed}:{pathname:string;role:User['role'];collapsed:boolean}){
  const {t}=useI18n();
- const activePath=(path:string)=>pathname===path||(path!=='/'&&pathname.startsWith(path+'/'));
+ const activePath=(path:string)=>pathname===path||(path==='/machines'&&(pathname==='/agents'||pathname.startsWith('/agents/')))||(path!=='/'&&pathname.startsWith(path+'/'));
  const groups=navigationGroups.map(group=>({...group,items:group.items.filter(item=>!item.adminOnly||role==='admin')})).filter(group=>group.items.length>0);
  const currentGroup=groups.find(group=>group.items.some(item=>activePath(item.path)))?.id;
  const [expandedGroups,setExpandedGroups]=useState(()=>new Set(currentGroup?[currentGroup]:[]));

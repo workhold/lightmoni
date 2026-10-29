@@ -3,18 +3,18 @@ import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import ssh2 from "ssh2";
-import { passwordSSHRunner } from "../src/server/machine-ssh.js";
+import { defaultSSHRunner, passwordSSHRunner } from "../src/server/machine-ssh.js";
 import type { MachineSummary } from "../src/server/managed-machines.js";
 
 // A real SSH protocol fixture on loopback verifies password authentication
 // without creating a local OS user or touching the user's SSH service/config.
-test("one-time password SSH runner pins the host and handles authentication, timeout and cancellation", async t => {
+test("password SSH runner pins the host, separates token stdin and handles timeout and cancellation", async t => {
   const { Server, utils } = ssh2;
   const key = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { format: "pem", type: "pkcs1" }, publicKeyEncoding: { format: "pem", type: "pkcs1" } });
   const parsed = utils.parseKey(key.privateKey);
   if (parsed instanceof Error || Array.isArray(parsed)) throw new Error("fixture host key invalid");
   const fingerprint = "SHA256:" + createHash("sha256").update(parsed.getPublicSSH()).digest("base64").replace(/=+$/, "");
-  const password = randomBytes(24).toString("base64url"), commands: string[] = [];
+  const password = randomBytes(24).toString("base64url"), commands: string[] = [], inputs: string[] = [];
   let waiting: (() => void) | undefined;
   const connections = new Set<any>();
   const server = new Server({ hostKeys: [key.privateKey] }, client => {
@@ -29,6 +29,12 @@ test("one-time password SSH runner pins the host and handles authentication, tim
       session.on("exec", (accept, _reject, info) => {
         const channel = accept(); commands.push(info.command);
         if (info.command === "fixture-wait") { waiting?.(); return; }
+        if (info.command === "fixture-enroll") {
+          let received = "";
+          channel.on("data", (data: Buffer) => { received += data.toString(); });
+          channel.on("end", () => { inputs.push(received); channel.write("accepted-input\n"); channel.exit(0); channel.end(); });
+          return;
+        }
         channel.write("LMSSH=1\n"); channel.stderr.write("fixture bounded warning\n"); channel.exit(0); channel.end();
       });
     }));
@@ -44,6 +50,12 @@ test("one-time password SSH runner pins the host and handles authentication, tim
   await assert.rejects(() => passwordSSHRunner({ ...input, password: "incorrect" }), /ssh_failed/);
   await assert.rejects(() => passwordSSHRunner({ ...input, machine: { ...input.machine, host_key_fingerprint: "SHA256:wrong-confirmed-key" } }), /host_key_mismatch/);
   assert.equal(commands.length, 1, "failed authentication and host pin must not execute a command");
+  const token = randomBytes(24).toString("base64url");
+  const enrolled = await defaultSSHRunner({ ...input, command: "fixture-enroll", enrollmentToken: token });
+  assert.equal(enrolled.stdout, "accepted-input\n"); assert.deepEqual(inputs, [token + "\n"]);
+  await passwordSSHRunner({ ...input, command: "fixture-enroll", stdin: "fixed-script-input\n", enrollmentToken: "unused-token" });
+  assert.deepEqual(inputs, [token + "\n", "fixed-script-input\n"]);assert.ok(commands.every(command=>!command.includes(token)&&!command.includes(password)));
+  assert.ok(!JSON.stringify(enrolled).includes(token));assert.ok(inputs.every(value=>!value.includes(password)));
   await assert.rejects(() => passwordSSHRunner({ ...input, command: "fixture-wait", timeoutMs: 250 }), /timed_out/);
   const controller = new AbortController(); controller.abort();
   await assert.rejects(() => passwordSSHRunner({ ...input, signal: controller.signal }), /cancelled/);
@@ -51,6 +63,6 @@ test("one-time password SSH runner pins the host and handles authentication, tim
   const pending = passwordSSHRunner({ ...input, command: "fixture-wait", signal: during.signal });
   await entered; during.abort();
   await assert.rejects(() => pending, /cancelled/);
-  assert.deepEqual(commands, ["fixture-preflight", "fixture-wait", "fixture-wait"]);
+  assert.deepEqual(commands, ["fixture-preflight", "fixture-enroll", "fixture-enroll", "fixture-wait", "fixture-wait"]);
   assert.ok(!JSON.stringify(result).includes(password), "runner output must not contain a credential");
 });

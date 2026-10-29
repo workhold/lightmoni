@@ -1,0 +1,49 @@
+{
+  "production_bundle": true,
+  "bundle": {
+    "index_sha256": "46a3cf4602eb0507e5ec6c82150e28819637fca3cb430b940184d3e7bc1e8471",
+    "entry": "/assets/index-C-SGUtiU.js",
+    "entry_sha256": "4a4b9bc34c66ed0ec83619f12091c5a00673bc1451a7c8c71ad630b01392bccf"
+  },
+  "api_fixtures": true,
+  "stateful_fixture_authentication": true,
+  "fixture_claim": "Intentionally expired token; no incident changed",
+  "real_browser_storage": true,
+  "live_backend": false,
+  "production_writes": false,
+  "widths": [
+    1280,
+    390
+  ],
+  "languages": [
+    "zh-CN",
+    "en-US"
+  ],
+  "deep_links": [
+    "/logs?keyword=timeout&service=orders",
+    "/agents?tab=tasks&label=fixture",
+    "/agents/install?task=fixture",
+    "/assistant?conversation=fixture&source=logs",
+    "/a/fixture-claim?tab=events&from=2026-10-27",
+    "/traces/fixture-trace?from=2026-10-27&to=2026-10-28"
+  ],
+  "checked": [
+    "root, authenticated login and unknown paths default to AI assistant",
+    "independent categories retain multi-open state across routes and whole-sidebar collapse; keyboard and aria controls work",
+    "the former service-deployment route opens hosted services and the sidebar provides one operations entry",
+    "a cold Machines deep link opens Operations and leaves the other four categories collapsed",
+    "without a saved sidebar preference, narrow screens start collapsed; expanding reveals all five categories and supports independent multi-open drawers",
+    "choosing Overview saves immediately without leaving settings; brand, root, authenticated login and fresh sign-in use /overview",
+    "account-menu shortcut focuses Default homepage; choosing Machines controls root and fresh sign-in",
+    "fresh sign-in preserves logs, nodes, node installation, assistant, alert-claim and trace deep links with their query parameters",
+    "two real fixture login sessions in one browser retain independent account preferences",
+    "role downgrade retains the read-only Hosts & nodes homepage and hides administrative choices",
+    "external, query-bearing, fragment, nested and unauthorized stored paths fall back to AI assistant",
+    "throwing and silently dropped storage writes report failure, retain the prior selection and stored default, and never claim success",
+    "unreadable browser storage falls back to AI assistant without crashing",
+    "a successful write followed by failed readback reports unconfirmed persistence instead of claiming success or an unchanged setting; reload sees the persisted value",
+    "preference changes synchronize across tabs; translated labels and controls fit 1280px and 390px without horizontal page overflow"
+  ],
+  "errors": [],
+  "unexpected": []
+}

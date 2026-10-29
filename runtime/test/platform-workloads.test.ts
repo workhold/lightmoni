@@ -158,6 +158,18 @@ test("hosted replicas reserve distinct machine ports and publish only verified f
   );
   assert.equal(endpoints.result.endpoints.length, 0);
 });
+test("a removed node with a fresh heartbeat cannot receive a hosted service replica", async (t) => {
+  const f = setup(t), pool = f.pool(), app = f.app();
+  f.db.run("INSERT INTO agent_lifecycle(agent_id,state) VALUES('node-a','removed')");
+  const service = f.store.create("service", "Active node only", {
+    application_id: app.id, node_pool_id: pool.id, replicas: 1,
+    container_port: 8080, cpu: 1, memory_mb: 512,
+  }, "admin");
+  const deployment = await f.controller.perform(service, "deploy", {}, "admin");
+  assert.equal(deployment.runs.length, 1);
+  assert.deepEqual(f.db.all<any>("SELECT agent_id FROM ops_platform_instances").map(row => row.agent_id), ["node-b"]);
+  assert.equal(f.jobs.claim("node-b", ["operations.platform"])?.agent_id, "node-b");
+});
 test("unknown execution preserves port ownership and blocks automatic redeployment", async (t) => {
   const f = setup(t),
     pool = f.pool(),

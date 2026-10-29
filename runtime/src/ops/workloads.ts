@@ -195,7 +195,7 @@ export function createWorkloadController(
   const instance = (key: string) =>
     db.get<Instance>("SELECT * FROM ops_platform_instances WHERE id=?", key)!;
   const agent = (key: string): any =>
-    db.get("SELECT * FROM agents WHERE id=?", key);
+    db.get("SELECT * FROM agents WHERE id=? AND NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed')", key);
   const online = (key: string) => {
     const a = agent(key);
     return (

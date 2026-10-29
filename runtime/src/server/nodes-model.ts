@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { normalize as clean } from "node:path";
 import type { DB } from "../shared/types.js";
+import { agentLifecycle, assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
 import {
   normalizeRemote,
   validateRemote,
@@ -178,6 +179,7 @@ export class NodeStore {
     return this.now().toISOString();
   }
   init(): void {
+    createAgentLifecycleSchema(this.db);
     this.db.exec(
       `CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY,host_id TEXT NOT NULL,hostname TEXT NOT NULL,version TEXT NOT NULL,platform TEXT NOT NULL,arch TEXT NOT NULL,last_seen TEXT NOT NULL,heartbeat TEXT NOT NULL,group_id TEXT NOT NULL DEFAULT 'default'); CREATE TABLE IF NOT EXISTS agent_runtime_events(agent_id TEXT NOT NULL,event_id TEXT NOT NULL,key_id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(agent_id,event_id)); CREATE TABLE IF NOT EXISTS agent_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,config TEXT NOT NULL,created_at TEXT NOT NULL);`,
     );
@@ -242,7 +244,7 @@ export class NodeStore {
   }
   labels(): Label[] {
     return this.db.all<Label>(
-      `SELECT l.id,l.name,(SELECT count(*) FROM agent_node_labels WHERE label_id=l.id) AS node_count,(SELECT count(*) FROM agent_task_targets WHERE label_id=l.id) AS task_count FROM agent_task_labels l ORDER BY CASE WHEN l.id='default' THEN 0 ELSE 1 END,l.created_at,l.id`,
+      `SELECT l.id,l.name,(SELECT count(*) FROM agent_node_labels n WHERE label_id=l.id AND NOT EXISTS (SELECT 1 FROM agent_lifecycle x WHERE x.agent_id=n.agent_id AND x.state='removed')) AS node_count,(SELECT count(*) FROM agent_task_targets WHERE label_id=l.id) AS task_count FROM agent_task_labels l ORDER BY CASE WHEN l.id='default' THEN 0 ELSE 1 END,l.created_at,l.id`,
     );
   }
   tasks(): Task[] {
@@ -450,7 +452,7 @@ export class NodeStore {
   }
   validateAll(): void {
     for (const node of this.db.all<any>(
-      "SELECT id,hostname,group_id FROM agents ORDER BY id",
+      "SELECT id,hostname,group_id FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle x WHERE x.agent_id=agents.id AND x.state='removed') ORDER BY id",
     ))
       try {
         this.compile(this.nodeLabels(node.id), node.group_id);
@@ -461,6 +463,7 @@ export class NodeStore {
       }
   }
   setLabels(id: string, ids: string[], legacy = ""): void {
+    assertAgentActive(this.db, id);
     if (
       !Array.isArray(ids) ||
       ids.length > 64 ||
@@ -482,6 +485,7 @@ export class NodeStore {
     this.db.run("UPDATE agents SET group_id=? WHERE id=?", group, id);
   }
   effective(id: string): Compiled {
+    assertAgentActive(this.db, id);
     const node = this.db.get<{ group_id: string }>(
       "SELECT group_id FROM agents WHERE id=?",
       id,
@@ -489,16 +493,27 @@ export class NodeStore {
     if (!node) problem(404, "执行节点或任务标签不存在");
     return this.compile(this.nodeLabels(id), node!.group_id);
   }
-  nodes(): any[] {
+  nodes(includeRemoved = false): any[] {
     return this.db
       .all<any>(
-        "SELECT id,hostname,version,platform,arch,last_seen,heartbeat,group_id FROM agents ORDER BY last_seen DESC,id",
+        "SELECT id,hostname,version,platform,arch,last_seen,heartbeat,group_id FROM agents" + (includeRemoved ? "" : " WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle x WHERE x.agent_id=agents.id AND x.state='removed')") + " ORDER BY last_seen DESC,id",
       )
       .map((node) => {
         node.heartbeat = JSON.parse(node.heartbeat);
-        const compiled = this.compile(this.nodeLabels(node.id), node.group_id);
+        const lifecycle = agentLifecycle(this.db, node.id);
+        // Archived assignments are historical metadata, not executable config.
+        // Later task edits must not make the history view fail compilation.
+        const labelIDs = this.nodeLabels(node.id);
+        const compiled: Compiled = lifecycle.lifecycle_state === "removed" ? {
+          config: remote({ revision: "", collect_interval_seconds: 15, host_enabled: false, host_collectors: [], logs_enabled: false, group_id: node.group_id }),
+          label_ids: labelIDs,
+          labels: this.labels().filter(label => labelIDs.includes(label.id)).map(({id,name}) => ({id,name})),
+          task_ids: [],
+          tasks: [],
+        } : this.compile(labelIDs, node.group_id);
         return {
           ...node,
+          ...lifecycle,
           ...compiled,
           group_name:
             compiled.labels.find((l) => l.id === node.group_id)?.name || "",
@@ -706,6 +721,9 @@ export class NodeStore {
     const text = (field: string) =>
       values[field] == null ? "" : String(values[field]).trim();
     this.db.transaction(() => {
+      // Recheck under the same writer lock as removal: authentication may have
+      // happened before an asynchronous request body or a second centre writer.
+      assertAgentActive(this.db, id, 401);
       const old = this.db.get<{ group_id: string }>(
           "SELECT group_id FROM agents WHERE id=?",
           id,
@@ -749,6 +767,7 @@ export class NodeStore {
     if (!Array.isArray(events) || events.length > 64)
       throw Error("invalid runtime events");
     this.db.transaction(() => {
+      assertAgentActive(this.db, id, 401);
       let pending = this.db.get<{ n: number }>(
         "SELECT count(*) AS n FROM agent_runtime_events",
       )!.n;

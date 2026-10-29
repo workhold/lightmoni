@@ -74,7 +74,7 @@ export function registerOperationsPlatform(
   };
   const agents = () =>
     deps.db.all<any>(
-      "SELECT id,host_id,hostname,version,platform,arch,last_seen,group_id FROM agents ORDER BY last_seen DESC,id LIMIT 1000",
+      "SELECT id,host_id,hostname,version,platform,arch,last_seen,group_id FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed') ORDER BY last_seen DESC,id LIMIT 1000",
     );
   router.get(
     "/api/v1/ops/overview",

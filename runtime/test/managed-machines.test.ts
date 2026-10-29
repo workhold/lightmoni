@@ -69,6 +69,64 @@ test('password credential preserves intentional leading/trailing whitespace duri
  const checked=await f.request(`/machines/${created.data.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(checked.status,200,checked.raw);assert.equal(received,original);
 });
 
+test('registration assigns immutable platform IDs while user names remain editable and need not be unique',async t=>{
+ const f=await fixture(t),name="生产主机 'one' $(printf ignored)";
+ const created=await f.request('/machines','POST',{name,address:'host.example.com',username:'deploy'});assert.equal(created.status,201,created.raw);
+ const mid=created.data.id;assert.match(mid,/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/);assert.equal(created.data.name,name);assert.equal(f.machines.get(mid).name,name);
+ assert.equal(Object.hasOwn(created.data,'sdk_environment'),false);assert.equal(Object.hasOwn(f.machines.get(mid),'sdk_environment'),false);
+ const sameName=await f.request('/machines','POST',{name,address:'other.example.com',username:'deploy'});assert.equal(sameName.status,201,sameName.raw);assert.equal(sameName.data.name,name);assert.notEqual(sameName.data.id,mid);
+ const listed=await f.request('/machines');assert.equal(listed.status,200);assert.deepEqual(new Set(listed.data.map((machine:any)=>machine.id)),new Set([mid,sameName.data.id]));assert.ok(listed.data.every((machine:any)=>!Object.hasOwn(machine,'sdk_environment')));
+ const renamed=await f.request(`/machines/${mid}`,'PUT',{name:'新名称'});assert.equal(renamed.status,200,renamed.raw);assert.equal(renamed.data.id,mid);assert.equal(renamed.data.name,'新名称');assert.equal(f.machines.get(sameName.data.id).name,name);
+ for(const requestedID of ['user-selected-id',mid,null]) {
+  assert.equal((await f.request('/machines','POST',{id:requestedID,name:'manual-id',address:'manual.example.com',username:'deploy'})).status,400);
+  assert.equal((await f.request(`/machines/${mid}`,'PUT',{id:requestedID,name:'ignored-new-name'})).status,400);
+ }
+ assert.equal(f.machines.get(mid).id,mid);assert.equal(f.machines.get(mid).name,'新名称');
+ for(const bad of ['line\nbreak','\tleading','trailing\r','control\u0000','delete\u007f','c1\u0085']) {
+  assert.equal((await f.request('/machines','POST',{name:bad,address:'other.example.com',username:'deploy'})).status,400,JSON.stringify(bad));
+  assert.equal((await f.request(`/machines/${mid}`,'PUT',{name:bad})).status,400,JSON.stringify(bad));
+ }
+ f.user.role='member';assert.equal((await f.request('/machines')).status,403);assert.equal((await f.request(`/machines/${mid}`)).status,403);
+});
+
+test('explicit reusable passwords survive checks and terminal release, then follow expiry or revocation',async t=>{
+ for(const retention of ['temporary','managed']) {
+  let clock=now;const f=await fixture(t,{now:()=>clock}),h=await host(f,'reusable-'+retention);
+  const created=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'  reusable '+retention+' \t',retention,expires_in_seconds:60,...retention==='managed'?{confirm_managed:true}:{}});assert.equal(created.status,201,created.raw);const cid=created.data.credential_id;
+  assert.equal(f.machines.get(h.id).active_reusable_ssh_credential_count,2);
+  const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:cid});assert.equal(checked.status,200,checked.raw);assert.equal(checked.data.ready,true);assert.equal(f.sshInput.password,'  reusable '+retention+' \t');assert.notEqual(credentialRow(f,cid).secret_encrypted,'');
+  const lease=f.machines.acquireTerminal(h.id,cid,()=>{});assert.equal(lease.password,'  reusable '+retention+' \t');lease.release();assert.equal(lease.password,'');assert.notEqual(credentialRow(f,cid).secret_encrypted,'');
+  assert.ok(f.machines.assistantGet(h.id).ssh_credentials.some(c=>c.id===cid));
+  if(retention==='temporary') {clock=new Date(now.getTime()+60_000);assert.equal((await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:cid})).status,409);assert.equal(credentialRow(f,cid).clear_reason,'expired');}
+  else {assert.equal((await f.request(`/machines/${h.id}/credentials/${cid}`,'DELETE')).status,200);assert.equal(credentialRow(f,cid).clear_reason,'revoked');}
+  assert.equal(credentialRow(f,cid).secret_encrypted,'');assert.equal(credentialRow(f,cid).secret_fingerprint,'');
+ }
+});
+
+test('reusable password installs through the fixed approved plan, redacts secrets and applies its retention policy',async t=>{
+ for(const retention of ['temporary','managed']) {
+  const calls:any[]=[],secret='  deploy-secret '+retention+' \t';
+  const f=await fixture(t,{},async input=>{calls.push(input);return {stdout:input.enrollmentToken?`installed ${input.enrollmentToken} ${input.password}`:checkOutput,stderr:input.enrollmentToken?`echo ${input.password}`:'',stages:['remote_command_completed']}});
+  const made=await f.request('/machines','POST',{name:"主机 'user name'",address:'host.example.com',username:'deploy',connection_method:'direct_ssh',host_key_fingerprint:'SHA256:abcdefghijklmnop'});const mid=made.data.id;
+  const added=await f.request(`/machines/${mid}/credentials`,'POST',{method:'password',secret,retention,...retention==='managed'?{confirm_managed:true}:{}});assert.equal(added.status,201,added.raw);const cid=added.data.credential_id;
+  const machine=f.machines.get(mid);assert.equal(machine.active_ssh_key_count,0);assert.equal(machine.active_reusable_ssh_credential_count,1);assert.equal(machine.capabilities.deploy_agent.available,true);assert.equal(machine.capabilities.uninstall_agent.available,true);
+  const checked=await f.request(`/machines/${mid}/ssh-check`,'POST',{credential_id:cid});assert.equal(checked.status,200,checked.raw);
+  const plan=await f.request(`/machines/${mid}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:cid,version:'0.1.0',arch:'amd64'});assert.equal(plan.status,201,plan.raw);assert.equal(plan.data.plan.credential.method,'password');assert.ok(!plan.raw.includes(secret));
+  assert.equal((await f.request(`/machines/${mid}/deployments/${plan.data.id}/apply`,'POST',{confirm:false})).status,400);
+  const applied=await f.request(`/machines/${mid}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,200,applied.raw);assert.equal(applied.data.status,'succeeded');
+  const installed=calls.find(c=>c.enrollmentToken);assert.equal(installed.password,secret);assert.equal(installed.privateKey,'');assert.equal(installed.enrollmentToken,'lm_enroll_secret');assert.ok(!installed.command.includes(secret));assert.ok(!installed.command.includes(installed.enrollmentToken));
+  assert.ok(!installed.command.includes(mid));assert.ok(!installed.command.includes('--machine-id'));assert.ok(!installed.command.includes('--machine-name'));assert.ok(!applied.raw.includes(secret));assert.ok(!applied.raw.includes('lm_enroll_secret'));assert.equal(f.machines.get(mid).agent_id,'agent-1');
+  const stored=credentialRow(f,cid);assert.equal(stored.secret_fingerprint,'');if(retention==='temporary'){assert.equal(stored.secret_encrypted,'');assert.equal(stored.clear_reason,'agent_activated')}else{assert.notEqual(stored.secret_encrypted,'');assert.equal(stored.clear_reason,'')}
+ }
+});
+
+test('renaming a host invalidates an approved installation snapshot before identity issuance',async t=>{
+ const f=await fixture(t),h=await host(f,'name-snapshot');
+ const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential});const plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:h.credential,version:'0.1.0',arch:'amd64'});assert.equal(plan.status,201,plan.raw);
+ assert.equal((await f.request(`/machines/${h.id}`,'PUT',{name:'revised-name'})).status,200);
+ const applied=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,409,applied.raw);assert.equal(f.issued,undefined);
+});
+
 test('host deletion requires credentials and pending deployments to be cleared first',async t=>{
  const f=await fixture(t),h=await host(f,'delete-guard');
  const blockedByCredential=await f.request(`/machines/${h.id}`,'DELETE');
@@ -286,7 +344,10 @@ test('credential policies require explicit managed consent and enforce per-polic
  const saved=credentialRow(f,managed.data.credential_id);assert.equal(saved.retention,'managed');assert.equal(saved.policy_source,'explicit');assert.equal(Date.parse(saved.expires_at)-Date.parse(saved.created_at),7_776_000_000);
  assert.equal((await add({retention:'managed',confirm_managed:true,expires_in_seconds:31_536_000})).status,201);
  const password=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'one-time'});assert.equal(password.status,201);assert.equal(password.data.retention,'one_time');assert.equal(password.data.secret_fingerprint,'');assert.equal(credentialRow(f,password.data.credential_id).secret_fingerprint,'');assert.equal(Date.parse(password.data.expires_at)-now.getTime(),900_000);
- for(const body of [{retention:'temporary'},{retention:'managed',confirm_managed:true},{expires_in_seconds:3601}]) assert.equal((await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'one-time',...body})).status,400);
+ for(const body of [{retention:'managed'},{retention:'managed',confirm_managed:false},{retention:'managed',confirm_managed:'true'},{retention:'unknown'},{retention:'none'},{retention:'one_time',confirm_managed:true},{expires_in_seconds:3601},{retention:'temporary',expires_in_seconds:3601},{retention:'managed',confirm_managed:true,expires_in_seconds:31_536_001}]) assert.equal((await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'one-time',...body})).status,400,JSON.stringify(body));
+ const temporaryPassword=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'reuse-temporary',retention:'temporary'});assert.equal(temporaryPassword.status,201,temporaryPassword.raw);assert.equal(Date.parse(temporaryPassword.data.expires_at)-now.getTime(),900_000);
+ const managedPassword=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'reuse-managed',retention:'managed',confirm_managed:true});assert.equal(managedPassword.status,201,managedPassword.raw);assert.equal(Date.parse(managedPassword.data.expires_at)-now.getTime(),86_400_000);assert.equal(managedPassword.data.secret_fingerprint,'');
+ for(const seconds of [60,31_536_000])assert.equal((await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'explicit-limit',retention:'managed',confirm_managed:true,expires_in_seconds:seconds})).status,201);
  const script=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'manual_script'});assert.equal(script.status,201);assert.equal(script.data.retention,'none');assert.equal(credentialRow(f,script.data.credential_id).secret_encrypted,'');
  assert.equal((await f.request(`/machines/${h.id}/credentials`,'POST',{method:'manual_script',secret:'must-not-be-saved'})).status,400);
  assert.equal((await f.request(`/machines/${h.id}/credentials`,'POST',{method:'manual_script',retention:'managed',confirm_managed:true})).status,400);
@@ -332,7 +393,7 @@ test('using an expired credential clears it immediately before any SSH attempt',
  clock=new Date(now.getTime()+3_600_000);
  const attempt=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential});assert.equal(attempt.status,409);assert.match(attempt.raw,/过期/);assert.equal(f.sshInput,undefined);
  assert.equal(credentialRow(f,h.credential).secret_encrypted,'');assert.equal(credentialRow(f,h.credential).clear_reason,'expired');
- assert.equal(f.machines.get(h.id).active_ssh_key_count,0);assert.equal(f.machines.get(h.id).capabilities.deploy_agent.reason,'ssh_key_required');
+ assert.equal(f.machines.get(h.id).active_ssh_key_count,0);assert.equal(f.machines.get(h.id).capabilities.deploy_agent.reason,'reusable_ssh_credential_required');
 });
 
 test('password failures, cancellation and unused terminal closure consume and erase the password', async t => {
@@ -351,9 +412,9 @@ test('capabilities distinguish connection, fingerprint, usable password, private
  await f.request(`/machines/${mid}`,'PUT',{connection_method:'direct_ssh'});assert.equal(f.machines.get(mid).capabilities.ssh_check.reason,'host_fingerprint_required');
  await f.request(`/machines/${mid}`,'PUT',{host_key_fingerprint:'SHA256:abcdefghijklmnop'});
  const script=await f.request(`/machines/${mid}/credentials`,'POST',{method:'manual_script'});assert.equal(script.status,201);
- machine=f.machines.get(mid);assert.equal(machine.active_credential_count,1);assert.equal(machine.active_ssh_credential_count,0);assert.equal(machine.capabilities.terminal.reason,'ssh_credential_required');assert.equal(machine.capabilities.deploy_agent.reason,'ssh_key_required');
+ machine=f.machines.get(mid);assert.equal(machine.active_credential_count,1);assert.equal(machine.active_ssh_credential_count,0);assert.equal(machine.capabilities.terminal.reason,'ssh_credential_required');assert.equal(machine.capabilities.deploy_agent.reason,'reusable_ssh_credential_required');
  const password=await f.request(`/machines/${mid}/credentials`,'POST',{method:'password',secret:'temporary'});const pid=password.data.credential_id;
- machine=f.machines.get(mid);assert.equal(machine.active_ssh_credential_count,1);assert.equal(machine.active_ssh_key_count,0);assert.equal(machine.ssh_recovery_available,true);assert.equal(machine.capabilities.terminal.available,true);assert.equal(machine.capabilities.ssh_check.available,true);assert.equal(machine.capabilities.deploy_agent.reason,'ssh_key_required');
+ machine=f.machines.get(mid);assert.equal(machine.active_ssh_credential_count,1);assert.equal(machine.active_ssh_key_count,0);assert.equal(machine.active_reusable_ssh_credential_count,0);assert.equal(machine.ssh_recovery_available,true);assert.equal(machine.capabilities.terminal.available,true);assert.equal(machine.capabilities.ssh_check.available,true);assert.equal(machine.capabilities.deploy_agent.reason,'reusable_ssh_credential_required');
  const lease=f.machines.acquireTerminal(mid,pid,()=>{});for(const value of Object.values(f.machines.get(mid).capabilities)) assert.equal(value.reason,'host_busy');lease.release();
  const key=await f.request(`/machines/${mid}/credentials`,'POST',{method:'ssh_key',secret:'-----BEGIN PRIVATE KEY----- fixture -----END PRIVATE KEY-----'});
  machine=f.machines.get(mid);assert.equal(machine.active_ssh_key_count,1);assert.equal(machine.capabilities.deploy_agent.available,true);
@@ -445,6 +506,19 @@ test('fixed uninstall plan is reviewed, preserves data, revokes both node creden
  assert.equal(f.db.all<any>("SELECT * FROM agent_credentials WHERE revoked_at IS NOT NULL").length,2);
  const detail=await f.request(`/machines/${h.id}`);assert.equal(detail.data.machine.agent_status,'uninstalled');assert.equal(detail.data.uninstallations.length,1);
  assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true})).status,409);assert.equal(destructive,1);
+});
+
+test('managed password authenticates fixed uninstall probes and removal without consuming the credential',async t=>{
+ const password='retained-uninstall-password',calls:any[]=[];let removed=false;
+ const f=await fixture(t,{},async input=>{calls.push(input);if(input.command.includes('systemctl stop'))removed=true;return {stdout:input.command.includes('LMAGENT')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]}});
+ const h=await uninstallHost(f);await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ const added=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:password,retention:'managed',confirm_managed:true});assert.equal(added.status,201,added.raw);
+ const cid=added.data.credential_id,checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:cid});assert.equal(checked.status,200,checked.raw);
+ assert.equal(f.machines.get(h.id).active_ssh_key_count,0);assert.equal(f.machines.get(h.id).capabilities.uninstall_agent.available,true);
+ const planned=await uninstallPlan(f,{...h,credential:cid,check:checked.data.id});assert.equal(planned.status,201,planned.raw);
+ const applied=await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,200,applied.raw);assert.equal(applied.data.status,'succeeded');
+ assert.ok(calls.filter(call=>call.command.includes('LMAGENT')).every(call=>call.password===password&&call.privateKey===''));
+ assert.ok(!planned.raw.includes(password));assert.ok(!applied.raw.includes(password));assert.notEqual(credentialRow(f,cid).secret_encrypted,'');assert.equal(credentialRow(f,cid).clear_reason,'');
 });
 
 test('unbound host must prove registered remote node and cannot uninstall a different or busy node',async t=>{
