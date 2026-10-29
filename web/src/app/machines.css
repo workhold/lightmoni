@@ -1,13 +1,26 @@
 .lm-machines-page .lm-machine-notice{margin-bottom:18px}
 .lm-machines-page .lm-machine-form-notice{margin:10px 0 16px}
-.lm-machine-detail-actions{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-top:20px;padding-top:16px;border-top:1px solid var(--lm-border,#e5e7eb)}
-.lm-machine-detail-actions>div{flex:1}
-.lm-machine-detail-actions .ant-alert{margin-bottom:10px}
 .lm-machines-page .ant-table-cell .ant-typography{display:block;margin-top:3px}
 @media(max-width:640px){.lm-machines-page .lm-page-heading{align-items:flex-start;gap:12px;flex-direction:column}.lm-machines-page .lm-page-heading .ant-space{width:100%}.lm-machines-page .lm-page-heading .ant-btn{flex:1}.lm-machines-page .lm-page-heading .ant-space-item{flex:1}}
-@media(max-width:640px){.lm-machine-detail-actions{align-items:stretch;flex-direction:column}.lm-machine-detail-actions .ant-btn{width:100%}}
 .lm-machine-actions .lm-machine-blocked{margin-top:8px;font-size:12px;line-height:1.55;color:var(--lm-text-secondary,#64748b)}
 .lm-machine-actions .lm-machine-blocked .ant-btn-link{height:auto;padding:2px 0;font-size:12px;white-space:normal}
 .lm-machine-uninstall-steps{padding-left:22px;line-height:1.9}
 .lm-machine-uninstall-actions{margin:12px 0}
 .lm-machine-path{display:block;overflow-wrap:anywhere}
+.lm-machine-delete-error .ant-typography{margin-bottom:10px;overflow-wrap:anywhere}
+.lm-machine-delete-dialog .ant-descriptions-item-content{overflow-wrap:anywhere}
+.lm-hosts-nodes-page>.lm-machine-notice{margin-bottom:18px}
+.lm-hosts-nodes-page .lm-node-actions{margin-bottom:10px}
+.lm-hosts-nodes-page .lm-machines-page>.lm-page-heading{gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.lm-hosts-nodes-page .lm-machines-page>.lm-page-heading>div{min-width:200px;flex:1}
+.lm-hosts-nodes-page .lm-machines-page>.lm-page-heading>.ant-space{flex:0 1 auto}
+.lm-machine-batch-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 16px;margin:16px 0;border:1px solid var(--lm-border,#30343e);border-radius:8px;background:var(--lm-surface,#17191f)}
+.lm-machine-batch-toolbar>.ant-typography{flex-basis:100%;font-size:12px}
+@media(max-width:600px){.lm-machine-batch-toolbar{padding:12px;gap:10px}.lm-machine-batch-toolbar>.ant-space{width:100%}}
+
+.lm-machine-onboarding-steps{display:flex;gap:24px;padding:0 0 14px 20px;margin:0 0 16px;color:var(--lm-text-secondary,#64748b);border-bottom:1px solid var(--lm-border,#30343e)}
+.lm-machine-onboarding-steps [aria-current="step"]{font-weight:600;color:var(--lm-text,#e2e8f0)}
+.lm-machine-onboarding-later{margin-top:10px}
+@media(max-width:480px){.lm-machine-onboarding-steps{gap:20px;font-size:12px}}
+
+.lm-machine-credential-dialog .ant-modal-body{max-height:calc(100dvh - 132px);overflow-y:auto;padding-right:4px}

@@ -1,6 +1,8 @@
 import type { Dependencies } from "../shared/types.js";
+import { createAgentLifecycleSchema } from "./agent-lifecycle.js";
 export function registerCore(deps: Dependencies) {
   const { router, db, cat } = deps;
+  createAgentLifecycleSchema(db);
   const visible=async(signal?:AbortSignal)=>(await cat.list(signal)).filter(t=>!["lightmoni_center","lightmoni_agent","lightmoni_sdk"].includes(t.logical_name)).map(t=>t.kind==='metric'&&t.metric_type==='histogram'&&!t.system?{...t,name:t.logical_name}:t);
   router.get("/healthz", (c) => c.json({ status: "ok" }), { public: true });
   router.get("/api/v1/catalog/tables", async (c) =>
@@ -34,7 +36,7 @@ export function registerCore(deps: Dependencies) {
   router.get("/api/v1/overview", async (c) =>
     c.json({
       tables: await visible(c.signal),
-      agent_count: db.get<any>("SELECT count(*) n FROM agents")!.n,
+      agent_count: db.get<any>("SELECT count(*) n FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed')")!.n,
       user_count: db.get<any>("SELECT count(*) n FROM users WHERE active=1")!.n,
       key_count: db.get<any>(
         "SELECT count(*) n FROM ingest_keys WHERE active=1",

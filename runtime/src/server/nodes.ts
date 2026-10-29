@@ -17,6 +17,7 @@ import {
   validName,
 } from "./nodes-model.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
+import { agentLifecycle, assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
 export interface NodesOptions {
   internalExporter?: (
     table: string,
@@ -80,6 +81,7 @@ export function registerNodes(
     }
   };
   const key = (ctx: Context, agentID: string): WriteKey => {
+    assertAgentActive(deps.db, agentID, 401);
     if ((options.agentCredentials?.registered?.(agentID) ?? options.agentCredentials?.has(agentID, "control"))) {
       const credential = options.agentCredentials.authenticate(
         ctx.req,
@@ -101,8 +103,39 @@ export function registerNodes(
   };
   router.get(
     base + "/agents",
-    safe((ctx) => ctx.json(store.nodes())),
+    safe((ctx) => {
+      const includeRemoved = ctx.url.searchParams.get("include_removed") === "true";
+      if (includeRemoved) admin(ctx);
+      ctx.json(store.nodes(includeRemoved));
+    }),
   );
+  router.post(base + "/agents/:id/remove", safe(async (ctx) => {
+    admin(ctx);
+    const input = await body(ctx);
+    if (input.confirm !== true) throw new NodeError(400, "必须明确确认移除节点");
+    if (Object.keys(input).some(field => !["confirm", "reason"].includes(field))
+      || (input.reason != null && (typeof input.reason !== "string" || Buffer.byteLength(input.reason) > 512)))
+      throw new NodeError(400, "移除原因无效，最长 512 字节");
+    const agentID = ctx.params.id, reason = (input.reason ?? "").trim();
+    const table = (name: string) => Boolean(deps.db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?", name));
+    const lifecycle = deps.db.transaction(() => {
+      if (!deps.db.get("SELECT id FROM agents WHERE id=?", agentID)) throw new NodeError(404, "执行节点不存在");
+      if (isAgentRemoved(deps.db, agentID)) return agentLifecycle(deps.db, agentID);
+      if (table("agent_jobs") && deps.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID))
+        throw new NodeError(409, "节点有待执行、运行中或结果未知的任务，请先完成或核对");
+      if (table("machine_uninstallations") && deps.db.get("SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", agentID))
+        throw new NodeError(409, "节点有待审批、运行中或结果未知的卸载，请先取消或核对");
+      const audiences = table("agent_credentials") ? deps.db.all<{audience:string}>("SELECT DISTINCT audience FROM agent_credentials WHERE agent_id=?", agentID).map(row => row.audience) : [];
+      if (!audiences.includes("control") || !audiences.includes("data"))
+        throw new NodeError(409, "此节点使用共享上报 Key，需先迁移到独立 control/data 凭据后才能完整移除；共享 SDK Key 保持有效");
+      const at = deps.now().toISOString();
+      deps.db.run("INSERT INTO agent_lifecycle(agent_id,state,removed_at,removed_by,removal_reason) VALUES(?,'removed',?,?,?)", agentID, at, ctx.user.id, reason);
+      const revoked = deps.db.run("UPDATE agent_credentials SET revoked_at=?,revoke_reason=? WHERE agent_id=? AND revoked_at IS NULL", at, "节点已移除" + (reason ? ": " + reason : ""), agentID).changes;
+      deps.db.run("INSERT INTO agent_lifecycle_events(id,agent_id,event,actor_id,occurred_at,reason,revoked_credentials) VALUES(?,?,'removed',?,?,?,?)", nodeID(), agentID, ctx.user.id, at, reason, revoked);
+      return agentLifecycle(deps.db, agentID);
+    });
+    ctx.json({ agent_id: agentID, ...lifecycle, credentials_revoked: true, remote_uninstalled: false });
+  }));
   router.get(
     base + "/agent-task-labels",
     safe((ctx) => ctx.json(store.labels())),
@@ -207,13 +240,14 @@ export function registerNodes(
     const writeKey = key(ctx, id);
     try {
       store.events(id, writeKey.id, values);
-    } catch {
+    } catch (e) {
+      if (e instanceof NodeError || e instanceof HTTPError) throw e;
       throw new NodeError(503, "执行节点运行事件暂不可用");
     }
     try {
       store.heartbeat(id, values, writeKey.id);
     } catch (e) {
-      if (e instanceof NodeError) throw e;
+      if (e instanceof NodeError || e instanceof HTTPError) throw e;
       throw new NodeError(503, "执行节点记录暂不可用");
     }
     ctx.json({ agent_id: id, ok: true });
@@ -301,7 +335,7 @@ export function registerNodes(
   };
   const publish = async () => {
     for (const node of deps.db.all<any>(
-      "SELECT id,host_id,last_seen,heartbeat,group_id FROM agents",
+      "SELECT id,host_id,last_seen,heartbeat,group_id FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle x WHERE x.agent_id=agents.id AND x.state='removed')",
     )) {
       const signature = node.last_seen + "/" + node.group_id;
       if (sent.get(node.id) === signature) continue;

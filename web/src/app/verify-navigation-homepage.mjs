@@ -11,7 +11,7 @@ import {mediaDirectory} from '../../../scripts/qa-artifacts.mjs';
 const origin='http://127.0.0.1:19849';
 const publicDirectory=await mkdtemp(resolve(tmpdir(),'lightmoni-homepage-'));
 await cp(resolve(import.meta.dirname,'../../../runtime/public'),publicDirectory,{recursive:true});
-const output=resolve(import.meta.dirname,'../../../specs/029-navigation-homepage');
+const output=resolve(process.env.LIGHTMONI_QA_OUTPUT??resolve(import.meta.dirname,'../../../specs/029-navigation-homepage'));
 await mkdir(output,{recursive:true});
 const screenshots=mediaDirectory(output),checked=[],errors=[],unexpected=[],requests=[],contexts=[];
 const storageKey=id=>'lightmoni.homepage.'+encodeURIComponent(id);
@@ -22,18 +22,18 @@ const bundle={index_sha256:createHash('sha256').update(bundleIndex).digest('hex'
 if(bundleEntry)bundle.entry_sha256=createHash('sha256').update(await readFile(resolve(publicDirectory,'.'+bundleEntry))).digest('hex');
 let browser;try{browser=await chromium.launch({headless:true})}catch{browser=await chromium.launch({headless:true,channel:'chrome'})}
 
-async function harness({signedIn=true,account='alice',saved={},storageMode='normal'}={}){
+async function harness({signedIn=true,account='alice',saved={},storageMode='normal',viewport={width:1280,height:900},navCollapsed='false'}={}){
  const actors={
   alice:{id:'homepage-alice',name:'alice',nickname:'Alice',role:'admin'},
   bob:{id:'homepage-bob',name:'bob',nickname:'Bob',role:'admin'},
   member:{id:'homepage-member',name:'member',nickname:'Member',role:'member'},
  };
  const state={actors,account,signedIn};
- const context=await browser.newContext({viewport:{width:1280,height:900},colorScheme:'dark',reducedMotion:'reduce'});contexts.push(context);
- await context.addInitScript(({saved,storageMode})=>{
+ const context=await browser.newContext({viewport,colorScheme:'dark',reducedMotion:'reduce'});contexts.push(context);
+ await context.addInitScript(({saved,storageMode,navCollapsed})=>{
   const originalGet=Storage.prototype.getItem,originalSet=Storage.prototype.setItem;
   if(!originalGet.call(sessionStorage,'homepage-fixture-initialized')){
-   originalSet.call(localStorage,'lightmoni.nav.collapsed','false');
+   if(navCollapsed!==null)originalSet.call(localStorage,'lightmoni.nav.collapsed',navCollapsed);
    for(const [key,value] of Object.entries(saved))originalSet.call(localStorage,key,value);
    originalSet.call(sessionStorage,'homepage-fixture-initialized','true');
   }
@@ -45,7 +45,7 @@ async function harness({signedIn=true,account='alice',saved={},storageMode='norm
    Storage.prototype.getItem=function(key){if(key.startsWith('lightmoni.homepage.')&&blockReads)throw new Error('fixture readback blocked');return originalGet.call(this,key)};
    Storage.prototype.setItem=function(key,value){originalSet.call(this,key,value);if(key.startsWith('lightmoni.homepage.'))blockReads=true};
   }
- },{saved,storageMode});
+ },{saved,storageMode,navCollapsed});
  const config={base_url:'https://models.example/v1',model:'fixture-model',protocol:'openai-chat-completions',has_key:false,enabled:false,max_input_tokens:32000,max_output_tokens:4096,max_steps:8,reasoning_effort:'default',code_tasks_enabled:false};
  const fixtures={
   '/api/v1/setup':{required:false},'/api/v1/auth/providers':[],
@@ -95,7 +95,7 @@ async function destination(page,path){await expect(page).toHaveURL(origin+path);
 async function open(page,path){await page.goto(origin+path);await destination(page,path)}
 async function chooseHome(page,label){
  const select=page.getByRole('combobox',{name:'默认首页',exact:true});await select.click();
- const order=['概览','AI 助手','监控大盘','日志探索','告警中心','主机管理','节点助手','服务部署','网站与运维','数据接入','数据管理','个人设置','管理后台'];
+ const order=['概览','AI 助手','监控大盘','日志探索','告警中心','主机与节点','服务部署','网站与运维','数据接入','数据管理','个人设置','管理后台'];
  // Traverse the real keyboard selection so offscreen virtualized options need
  // no forced clicks or DOM writes. This also exercises keyboard accessibility.
  for(let index=0;index<20;index++){
@@ -127,7 +127,7 @@ try{
  await expect(group(page,'工作台')).toHaveAttribute('aria-expanded','true');await expect(group(page,'监控分析')).toHaveAttribute('aria-expanded','false');await expect(group(page,'运维工具')).toHaveAttribute('aria-expanded','false');
  await group(page,'监控分析').click();await group(page,'运维工具').click();
  for(const title of ['工作台','监控分析','运维工具'])await expect(group(page,title)).toHaveAttribute('aria-expanded','true');
- await page.locator('.lm-sidebar').getByRole('link',{name:'节点助手',exact:true}).click();await destination(page,'/agents');
+ await page.locator('.lm-sidebar').getByRole('link',{name:'主机与节点',exact:true}).click();await destination(page,'/machines');
  for(const title of ['工作台','监控分析','运维工具'])await expect(group(page,title)).toHaveAttribute('aria-expanded','true');
  await group(page,'运维工具').click();await expect(group(page,'运维工具')).toHaveAttribute('aria-expanded','false');
  await group(page,'运维工具').focus();await page.keyboard.press('Enter');await expect(group(page,'运维工具')).toHaveAttribute('aria-expanded','true');
@@ -138,6 +138,28 @@ try{
  await expect(group(page,'数据与接入')).toHaveAttribute('aria-expanded','false');await screenshot(page,'navigation-multiple-open-zh-1280');
  mark('independent categories retain multi-open state across routes and whole-sidebar collapse; keyboard and aria controls work');
 
+ const coldMachines=await harness();currentPage=coldMachines.page;await open(coldMachines.page,'/machines');
+ await expect(group(coldMachines.page,'运维工具')).toHaveAttribute('aria-expanded','true');
+ await expect(coldMachines.page.locator('.lm-sidebar').getByRole('link',{name:'主机与节点',exact:true})).toBeVisible();
+ for(const title of ['工作台','监控分析','数据与接入','系统设置'])await expect(group(coldMachines.page,title)).toHaveAttribute('aria-expanded','false');
+ mark('a cold Machines deep link opens Operations and leaves the other four categories collapsed');
+
+ const narrowNavigation=await harness({viewport:{width:390,height:844},navCollapsed:null});currentPage=narrowNavigation.page;
+ await open(narrowNavigation.page,'/machines');
+ expect(await narrowNavigation.page.evaluate(()=>localStorage.getItem('lightmoni.nav.collapsed'))).toBeNull();
+ await expect(narrowNavigation.page.locator('.lm-shell')).toHaveClass(/is-nav-collapsed/);
+ await expect(narrowNavigation.page.locator('.lm-nav-group-toggle')).toHaveCount(0);
+ await narrowNavigation.page.getByRole('button',{name:'展开导航',exact:true}).click();
+ await expect(narrowNavigation.page.locator('.lm-shell')).toHaveClass(/is-nav-expanded/);
+ for(const title of ['工作台','监控分析','运维工具','数据与接入','系统设置'])await expect(group(narrowNavigation.page,title)).toBeVisible();
+ await expect(group(narrowNavigation.page,'运维工具')).toHaveAttribute('aria-expanded','true');
+ await group(narrowNavigation.page,'工作台').click();await group(narrowNavigation.page,'监控分析').click();
+ for(const title of ['工作台','监控分析','运维工具'])await expect(group(narrowNavigation.page,title)).toHaveAttribute('aria-expanded','true');
+ for(const title of ['数据与接入','系统设置'])await expect(group(narrowNavigation.page,title)).toHaveAttribute('aria-expanded','false');
+ await screenshot(narrowNavigation.page,'navigation-multiple-open-zh-390');
+ mark('without a saved sidebar preference, narrow screens start collapsed; expanding reveals all five categories and supports independent multi-open drawers');
+ currentPage=page;
+
  await settings(page);await chooseHome(page,'概览');await selectedHome(page,'概览');await expect(page.getByText('默认首页已保存',{exact:true})).toBeVisible();await destination(page,'/settings?tab=appearance&section=homepage');
  expect(await page.evaluate(key=>localStorage.getItem(key),storageKey(state.actors.alice.id))).toBe('/overview');
  await expect(page.locator('.lm-brand')).toHaveAttribute('href','/overview');
@@ -146,7 +168,7 @@ try{
  mark('choosing Overview saves immediately without leaving settings; brand, root, authenticated login and fresh sign-in use /overview');
 
  await page.getByRole('button',{name:/账户菜单:/}).click();await page.getByRole('menuitem',{name:/默认首页/}).click();await destination(page,'/settings?tab=appearance&section=homepage');
- await expect(page.getByRole('combobox',{name:'默认首页',exact:true})).toBeFocused();await chooseHome(page,'主机管理');await selectedHome(page,'主机管理');
+ await expect(page.getByRole('combobox',{name:'默认首页',exact:true})).toBeFocused();await chooseHome(page,'主机与节点');await selectedHome(page,'主机与节点');
  await page.goto(origin+'/');await destination(page,'/machines');await relogin(page,'/machines');
  mark('account-menu shortcut focuses Default homepage; choosing Machines controls root and fresh sign-in');
 
@@ -166,12 +188,12 @@ try{
  expect(await page.evaluate(keys=>keys.map(key=>localStorage.getItem(key)),[storageKey(state.actors.alice.id),storageKey(state.actors.bob.id)])).toEqual(['/machines','/overview']);
  mark('two real fixture login sessions in one browser retain independent account preferences');
 
- state.actors.alice.role='member';await page.goto(origin+'/');await destination(page,'/assistant');await settings(page);await selectedHome(page,'AI 助手');
+ state.actors.alice.role='member';await page.goto(origin+'/');await destination(page,'/machines');await settings(page);await selectedHome(page,'主机与节点');
  await page.getByRole('combobox',{name:'默认首页',exact:true}).click();
- for(const name of ['主机管理','服务部署','网站与运维','管理后台'])await expect(page.locator('.ant-select-dropdown:visible').getByText(name,{exact:true})).toHaveCount(0);
- await page.keyboard.press('Escape');await expect(page.locator('.lm-sidebar').getByRole('link',{name:'主机管理',exact:true})).toHaveCount(0);
- await page.goto(origin+'/machines');await destination(page,'/settings');
- mark('role downgrade invalidates an administrator homepage and hides unauthorized choices; protected routes remain protected');
+ for(const name of ['服务部署','网站与运维','管理后台'])await expect(page.locator('.ant-select-dropdown:visible').getByText(name,{exact:true})).toHaveCount(0);
+ await page.keyboard.press('Escape');await expect(page.locator('.lm-sidebar').getByRole('link',{name:'主机与节点',exact:true,includeHidden:true})).toHaveCount(1);
+ await page.goto(origin+'/machines');await destination(page,'/machines');
+ mark('role downgrade retains the read-only Hosts & nodes homepage and hides administrative choices');
 
  for(const invalid of ['https://evil.invalid/','//evil.invalid/','/overview?unexpected=1','/logs/search','/assistant#fragment','/admin']){
   await page.evaluate(({key,value})=>localStorage.setItem(key,value),{key:storageKey(state.actors.alice.id),value:invalid});
@@ -181,7 +203,7 @@ try{
 
  for(const storageMode of ['write-blocked','write-dropped']){
   const fixture=await harness({saved:{[storageKey('homepage-alice')]:'/overview'},storageMode});currentPage=fixture.page;
-  await settings(fixture.page);await selectedHome(fixture.page,'概览');await chooseHome(fixture.page,'主机管理');
+  await settings(fixture.page);await selectedHome(fixture.page,'概览');await chooseHome(fixture.page,'主机与节点');
   await expect(fixture.page.getByText('无法确认默认首页已保存，请检查浏览器存储权限后重试。',{exact:true})).toBeVisible();await selectedHome(fixture.page,'概览');
   expect(await fixture.page.evaluate(key=>localStorage.getItem(key),storageKey('homepage-alice'))).toBe('/overview');
   await expect(fixture.page.getByText('默认首页已保存',{exact:true})).toHaveCount(0);
@@ -192,17 +214,17 @@ try{
  await blocked.page.goto(origin+'/');await destination(blocked.page,'/assistant');await settings(blocked.page);await selectedHome(blocked.page,'AI 助手');
  mark('unreadable browser storage falls back to AI assistant without crashing');
  const readback=await harness({saved:{[storageKey('homepage-alice')]:'/overview'},storageMode:'readback-blocked'});currentPage=readback.page;
- await settings(readback.page);await selectedHome(readback.page,'概览');await chooseHome(readback.page,'主机管理');
+ await settings(readback.page);await selectedHome(readback.page,'概览');await chooseHome(readback.page,'主机与节点');
  await expect(readback.page.getByText('无法确认默认首页已保存，请检查浏览器存储权限后重试。',{exact:true})).toBeVisible();
  await expect(readback.page.getByText('默认首页已保存',{exact:true})).toHaveCount(0);
- await readback.page.reload();await selectedHome(readback.page,'主机管理');
+ await readback.page.reload();await selectedHome(readback.page,'主机与节点');
  await readback.page.goto(origin+'/');await destination(readback.page,'/machines');
  mark('a successful write followed by failed readback reports unconfirmed persistence instead of claiming success or an unchanged setting; reload sees the persisted value');
 
  state.actors.alice.role='admin';currentPage=page;
  await page.evaluate(key=>localStorage.setItem(key,'/overview'),storageKey('homepage-alice'));await settings(page);
  const peer=await context.newPage();peer.on('pageerror',error=>errors.push(error.message));await peer.goto(origin+'/overview');
- await chooseHome(page,'主机管理');await expect(peer.locator('.lm-brand')).toHaveAttribute('href','/machines');await peer.close();
+ await chooseHome(page,'主机与节点');await expect(peer.locator('.lm-brand')).toHaveAttribute('href','/machines');await peer.close();
  await chooseHome(page,'概览');await screenshot(page,'default-homepage-zh-1280');
  await page.getByRole('button',{name:'切换语言',exact:true}).click();await page.getByRole('menuitem',{name:'English',exact:true}).click();
  await expect(page.locator('html')).toHaveAttribute('lang','en-US');await expect(page.getByRole('heading',{name:'Default homepage',exact:true})).toBeVisible();await expect(page.locator('#lm-homepage-settings .ant-select')).toContainText('Overview');

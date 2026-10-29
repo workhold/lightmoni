@@ -9,7 +9,7 @@ interface Access {
   get(id: string): MachineSummary; idle(id: string): void; revision(machine: MachineSummary): string;
   checked(machine: MachineSummary, checkID: string, credentialID?: string): SSHCheckResult;
   credential(machineID: string, credentialID?: string): { machine: MachineSummary; credential: any };
-  decrypt(machineID: string, credential: any): string;
+  authentication(machineID: string, credential: any): { privateKey: string; password?: string };
   busy: Set<string>; runner: SSHRunner;
   safe(handler: Handler): Handler;
 }
@@ -52,7 +52,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     if (taskBusy(agentID)) fail(409, "Agent 有待执行、运行中或结果未知的任务，请先完成或核对");
   };
   const probe = async (machine: MachineSummary, credential: any, signal: AbortSignal) => {
-    const output = await access.runner({ machine, privateKey: access.decrypt(machine.id, credential), command: agentProbeCommand(), signal, port: machine.port, timeoutMs: 60_000 });
+    const output = await access.runner({ machine, ...access.authentication(machine.id, credential), command: agentProbeCommand(), signal, port: machine.port, timeoutMs: 60_000 });
     db.run("UPDATE machine_credentials SET last_used_at=? WHERE id=?", at(), credential.id);
     return parseAgentProbe(output.stdout);
   };
@@ -132,7 +132,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
       const changed = db.run("UPDATE machine_uninstallations SET status='running',approved_at=?,started_at=? WHERE id=? AND status='awaiting_approval'", at(), at(), operation.id);
       if (!changed.changes) fail(409, "卸载计划已被其他请求执行");
       destructive = true;
-      const result = await access.runner({ machine, privateKey: access.decrypt(machine.id, credential), command: agentUninstallCommand(operation.agent_id), signal: ctx.signal, port: machine.port, timeoutMs: 120_000 });
+      const result = await access.runner({ machine, ...access.authentication(machine.id, credential), command: agentUninstallCommand(operation.agent_id), signal: ctx.signal, port: machine.port, timeoutMs: 120_000 });
       const removed = parseAgentProbe(result.stdout);
       complete(operation, removed);
       ctx.json(decode(row(machine.id, operation.id)));

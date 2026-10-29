@@ -5,7 +5,7 @@ import {MessageOutlined,MenuFoldOutlined,MenuUnfoldOutlined} from '@ant-design/i
 import {Button,Drawer,Spin,Tooltip} from '../shared/ui';
 import {api} from '../shared/api';
 import type {User} from '../shared/types';
-import {LoginPage,OverviewPage,DataPage,AgentsPage} from './CorePages';
+import {LoginPage,OverviewPage,DataPage} from './CorePages';
 import PersonalSettings from './PersonalSettings';
 import {useI18n} from '../shared/i18n';
 import WorkspaceHeader from './WorkspaceHeader';
@@ -21,7 +21,7 @@ const TracePage=lazy(()=>import('../features/alerts/TracePage'));
 const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
 const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
 const OperationsPage=lazy(()=>import('./OperationsPage'));
-const MachinesPage=lazy(()=>import('./MachinesPage'));
+const HostsNodesPage=lazy(()=>import('./HostsNodesPage'));
 const DataManagementPage=lazy(()=>import('./DataManagementPage'));
 const AgentInstallPage=lazy(()=>import('./AgentInstall'));
 const ServiceDeploymentsPage=lazy(()=>import('./ServiceDeploymentsPage'));
@@ -37,7 +37,7 @@ export default function Root(){
  const[assistant,setAssistant]=useState(false);
  useEffect(()=>setAssistant(false),[location.pathname]);
  const[publishedScope,setPublishedScope]=useState<PublishedScope>();
- const activePath=(url:string)=>location.pathname===url||(url!=='/'&&location.pathname.startsWith(url+'/'));
+ const activePath=(url:string)=>location.pathname===url||(url==='/machines'&&(location.pathname==='/agents'||location.pathname.startsWith('/agents/')))||(url!=='/'&&location.pathname.startsWith(url+'/'));
  const currentLink=navigationLinks.find(link=>activePath(link.path));
  const currentPage=currentLink?t(currentLink.pageLabel,currentLink.pageEnglish):t('监控工作台','Monitoring workspace');
  const contextPageTitle=currentLink?.pageLabel??'监控工作台';
@@ -59,9 +59,9 @@ export default function Root(){
     <Route path="/overview" element={<OverviewPage/>}/>
     <Route path="/data" element={<DataPage user={user}/>}/>
     <Route path="/data-management" element={<DataManagementPage user={user}/>}/>
-    <Route path="/agents" element={<AgentsPage user={user}/>}/>
+    <Route path="/agents" element={<HostsNodesPage user={user}/>}/>
     <Route path="/agents/install" element={<AgentInstallPage user={user}/>}/>
-    <Route path="/machines" element={user.role==='admin'?<MachinesPage user={user}/>:<Navigate to="/settings" replace/>}/>
+    <Route path="/machines" element={<HostsNodesPage user={user}/>}/>
     <Route path="/services" element={user.role==='admin'?<ServiceDeploymentsPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/operations" element={user.role==='admin'?<OperationsPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>

@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
+import { createAgentLifecycleSchema, isAgentRemoved } from "./agent-lifecycle.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import { deploymentAdapters } from "../deployment/index.js";
 import { assertReleaseBundleHasNoCredentials, parseReleaseBundle } from "../deployment/release-bundle.js";
@@ -226,6 +227,7 @@ export function registerServiceDeployments(
   options: { jobs?: AgentJobStore; artifacts?: ReleaseArtifactStore } = {},
 ): Module & ServiceDeploymentStore {
   const { db, router } = deps;
+  createAgentLifecycleSchema(db);
   // Parsing a maximum-size bundle is synchronous and temporarily retains the
   // compressed archive, expanded tar, and copied entries. Admit one complete
   // upload/validation at a time per center process; do not build an unbounded
@@ -460,6 +462,7 @@ export function registerServiceDeployments(
   const machineAgentReady = (machineID: string) => {
     const machine = ensureMachine(machineID);
     if (!machine.agent_id) return false;
+    if (isAgentRemoved(db, machine.agent_id)) return false;
     // Test fixtures and older databases may not have the agents table yet;
     // an explicit machine binding is sufficient in that compatibility mode.
     const hasAgents = db.get<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='agents'");

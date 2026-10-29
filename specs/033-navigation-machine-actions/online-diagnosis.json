@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-28",
+  "scope": "Read-only public HTTP and existing authenticated browser session; no host or Agent changes.",
+  "url": "https://moni.heyphp.com/machines",
+  "after_browser_reload": {
+    "sidebar_expanded": true,
+    "category_drawer_buttons_present": false,
+    "overview_path": "/",
+    "agent_uninstall_action_present": false,
+    "script": "/assets/index-BFWEf903.js"
+  },
+  "public_http": {
+    "status": 200,
+    "cache_control": "no-cache",
+    "script": "/assets/index-BFWEf903.js"
+  },
+  "previously_published_image": {
+    "tag": "docker.heyphp.com/lightmoni/lightmoni:20261028-dd1279b",
+    "digest": "sha256:e60020f6afddbe635d21955f81d89a5aa06960c82f4032ddbb6863a31eebeb9e",
+    "verified_platforms": ["linux/amd64", "linux/arm64"],
+    "entry": "/assets/index-WIPghcjV.js",
+    "category_markers_verified_in_production_javascript": true
+  },
+  "conclusion": "The frontend returned by the online service differs from the published dd1279b image. The deployed container, reverse proxy and static-file routing were not changed or inspected at the server, so the exact deployment cause is not yet established.",
+  "compose_note": "The repository compose.yaml defaults to the older fixed tag 20261027-ec30880 with pull_policy missing. Updating latest alone does not update a deployment using that fixed tag. The live deployment's actual compose settings were not inspected.",
+  "production_host_records_deleted": false
+}

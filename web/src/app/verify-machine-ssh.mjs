@@ -35,6 +35,7 @@ async function harness({role='admin',language='zh-CN'}={}){
   const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();
   if(url.origin!==origin){unexpected.push(url.href);return route.abort()}
   if(path.startsWith('/api/')){
+   if(method==='GET'&&['/api/v1/agents','/api/v1/agent-task-labels'].includes(path))return route.fulfill({json:[]});
    const body=request.postData()?request.postDataJSON():undefined;state.requests.push({method,path,body});
    if(path==='/api/v1/machines'&&method==='GET')return route.fulfill({json:state.deleted?[]:[machine]});
    if(path==='/api/v1/machines/'+machine.id&&method==='GET')return route.fulfill({json:{machine,credentials:[credential],deployments:[state.plan]}});
@@ -71,10 +72,10 @@ try{
  await page.locator('.ant-table-tbody .ant-typography-copy').first().click();
  await expect.poll(()=>page.evaluate(()=>navigator.clipboard.readText())).toBe('host.example.com:22');mark('Copying the displayed host address copies address:port rather than the machine ID');
  await page.getByRole('button',{name:'添加凭据',exact:true}).click();
- await expect(page.getByText('私钥默认临时保留 1 小时，密码默认 15 分钟且使用后清除。到期、撤销或 Agent 激活后会清除临时秘密；日常管理优先使用 Agent。需要长期 SSH 恢复通道时，请主动选择托管。',{exact:true})).toBeVisible();
+ await expect(page.getByText('建议短期保存 SSH 凭据',{exact:true})).toBeVisible();
  await expect(page.getByText('有效秒数',{exact:true})).toBeVisible();
- await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('密码（仅一次性使用）',{exact:true}).click();
- const passwordInput=page.getByPlaceholder('输入一次性 SSH 密码',{exact:true});await passwordInput.fill('fixture-password');
+ await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('SSH 密码',{exact:true}).click();
+ const passwordInput=page.getByPlaceholder('输入 SSH 密码',{exact:true});await passwordInput.fill('fixture-password');
  await page.getByRole('combobox',{name:'凭据类型',exact:true}).click();await page.getByText('SSH 私钥（推荐）',{exact:true}).click();
  await expect(page.getByPlaceholder('SSH 私钥内容',{exact:true})).toHaveValue('');mark('Switching credential methods clears the previous secret before it can be reused or displayed');
  await page.locator('.ant-modal:visible .ant-modal-close').click();mark('Chinese credential hints describe temporary defaults and secret clearing');
@@ -98,12 +99,12 @@ try{
  await expect(page.getByText('部署状态：failed',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'我已审阅，确认执行 SSH 部署',exact:true})).toHaveCount(0);state.failApply=false;mark('Failed installation refreshes its real status and removes the obsolete approval action');
  state.plan={...state.plan,status:'awaiting_approval',plan:{...state.plan.plan,expires_at:'2000-01-01T00:00:00Z'}};
  await page.goto(origin+state.plan.review_url);await expect(page.getByRole('button',{name:'我已审阅，确认执行 SSH 部署',exact:true})).toBeDisabled();mark('Expired plans cannot be confirmed in the UI');
- await page.goto(origin+'/machines');await page.getByRole('button',{name:/详\s*情/}).click();await page.getByRole('button',{name:/删除主机/}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await expect(page.locator('.ant-modal .ant-alert').getByText('请先撤销或等待所有有效连接凭据失效后再删除主机',{exact:true})).toBeVisible();mark('Host deletion keeps the detail open and surfaces the backend credential guard');
+ await page.goto(origin+'/machines');await page.getByRole('button',{name:'删除主机',exact:true}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await expect(page.locator('.lm-machine-delete-error')).toContainText('请先撤销或等待所有有效连接凭据失效后再删除主机');await page.getByRole('button',{name:'查看详情并处理',exact:true}).click();await expect(page.getByRole('dialog').getByRole('button',{name:'删除主机',exact:true})).toHaveCount(0);mark('List deletion surfaces the backend credential guard and links to details without a duplicate delete entry');
  await page.getByRole('button',{name:'取消计划',exact:true}).click();await page.getByRole('button',{name:'确认取消',exact:true}).click();await expect(page.locator('.ant-modal').getByText('cancelled',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'取消计划',exact:true})).toHaveCount(0);mark('An unexecuted expired plan can be cancelled from history without running SSH');
- state.deleteError='';await page.getByRole('button',{name:/删除主机/}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByText('尚未登记主机',{exact:true})).toBeVisible();expect(state.requests.filter(r=>r.method==='DELETE'&&r.path.endsWith('/fixture-machine'))).toHaveLength(2);mark('Successful host deletion closes details and refreshes the empty list');
+ await page.getByRole('dialog').locator('.ant-modal-close').click();state.deleteError='';await page.getByRole('button',{name:'删除主机',exact:true}).click();await page.getByRole('button',{name:'确认删除',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByText('尚无主机或节点',{exact:true})).toBeVisible();expect(state.requests.filter(r=>r.method==='DELETE'&&r.path.endsWith('/fixture-machine'))).toHaveLength(2);mark('Successful list deletion closes its confirmation and refreshes the empty list');
  const en=await harness({language:'en-US'});current=en.page;await en.page.goto(origin+'/machines');
  await en.page.getByRole('button',{name:'Add credential',exact:true}).click();
- await expect(en.page.getByText('Private keys are temporary for 1 hour by default. Passwords expire after 15 minutes and are cleared after use. Temporary secrets are cleared on expiry, revocation, or Agent activation. Prefer Agent for daily management; explicitly choose managed storage for long-term SSH recovery.',{exact:true})).toBeVisible();
+ await expect(en.page.getByText('Prefer short-lived SSH credentials',{exact:true})).toBeVisible();
  await expect(en.page.getByText('Validity in seconds',{exact:true})).toBeVisible();
  await en.page.getByRole('button',{name:'Close',exact:true}).click();mark('English credential hints match the same validity and retention behavior');
  await en.page.getByRole('button',{name:'SSH preflight',exact:true}).click();await en.page.getByRole('button',{name:'Run SSH preflight',exact:true}).click();await expect(en.page.getByText('SSH connected; installation checks passed',{exact:true})).toBeVisible();
@@ -111,7 +112,7 @@ try{
  await en.page.getByRole('button',{name:'Close',exact:true}).click();await en.page.goto(origin+'/assistant');await en.page.getByRole('button',{name:/SSH fixture session/}).click();
  await en.page.getByText('SSH installation preflight',{exact:true}).click();await expect(en.page.getByText('SSH connected; installation checks passed',{exact:true})).toBeVisible();await en.page.getByText('Prepare Agent deployment plan',{exact:true}).click();await en.page.getByRole('button',{name:'Review deployment plan',exact:true}).click();await expect(en.page).toHaveURL(origin+en.state.plan.review_url);await expect(en.page.getByText('fixture-plan',{exact:true})).toBeVisible();mark('Assistant tool result links to its exact persisted installation plan');
  await en.page.locator('.ant-modal:visible').screenshot({path:resolve(media,'ssh-plan-ui.png'),animations:'disabled'});
- const member=await harness({role:'member'});current=member.page;await member.page.goto(origin+'/machines');await expect(member.page).toHaveURL(origin+'/settings');await expect(member.page.getByRole('button',{name:'SSH 安装检查',exact:true})).toHaveCount(0);expect(member.state.requests.filter(r=>r.path.startsWith('/api/v1/machines'))).toHaveLength(0);mark('Members cannot load host data or SSH actions');
+ const member=await harness({role:'member'});current=member.page;await member.page.goto(origin+'/machines');await expect(member.page).toHaveURL(origin+'/machines');await expect(member.page.getByRole('button',{name:'SSH 安装检查',exact:true})).toHaveCount(0);expect(member.state.requests.filter(r=>r.path.startsWith('/api/v1/machines'))).toHaveLength(0);mark('Members cannot load host data or SSH actions');
  expect(errors).toEqual([]);expect(unexpected).toEqual([]);
  await writeFile(resolve(output,'ui-report.json'),JSON.stringify({checked,errors,unexpected},null,2)+'\n');
 }catch(error){if(current)await current.screenshot({path:resolve(media,'ssh-ui-failure.png'),fullPage:true}).catch(()=>{});console.error({errors,unexpected});throw error}

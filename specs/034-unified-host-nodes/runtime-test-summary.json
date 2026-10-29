@@ -1,0 +1,16 @@
+{
+  "command": "npm --prefix runtime test",
+  "exit_code": 0,
+  "tests": 445,
+  "passed": 428,
+  "failed": 0,
+  "skipped": 17,
+  "cancelled": 0,
+  "duration_ms": 70881.005583,
+  "environment_skip_reasons": [],
+  "new_coverage": {
+    "machine_agent_link": 8,
+    "node_lifecycle": 11
+  },
+  "log_is_local_only": "/tmp/lightmoni-034-runtime-final-tests.log"
+}

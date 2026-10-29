@@ -2,6 +2,7 @@ import { id, token } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
+import { assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
 
 /**
  * Durable, pull based execution jobs.  A job is immutable after enqueue: the
@@ -166,6 +167,7 @@ export function registerAgentJobs(
   options: { agentCredentials?: AgentCredentialStore; expirySweepIntervalMs?: number } = {},
 ): Module & AgentJobStore {
   const { db, router } = deps;
+  createAgentLifecycleSchema(db);
   const updateListeners = new Set<(update: AgentJobUpdate) => void>();
   let sweepTimer: ReturnType<typeof setInterval> | undefined;
   const notify = (job: any, phase: AgentJobEventPhase, code = "", details: { healthVerified?: boolean; previousState?: AgentJobState; snapshot?: Record<string, unknown> } = {}) => {
@@ -281,6 +283,7 @@ export function registerAgentJobs(
   const uninstallBlocked = (agentID: string) => Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_uninstallations'") && db.get("SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown','succeeded') LIMIT 1", agentID));
   const enqueue = (input: AgentJobInput) => {
     const agentID = ensureAgent(input.agentID), deploymentID = text(input.deploymentID, "deployment_id"), operationID = text(input.operationID, "operation_id");
+    assertAgentActive(db, agentID);
     const actionList = actions(input.actions), caps = capabilities(input.capabilities ?? []);
     const existing = db.get<any>("SELECT * FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deploymentID, operationID);
     if (existing) return view(existing);
@@ -288,18 +291,23 @@ export function registerAgentJobs(
     const now = deps.now(), expires = new Date(now.getTime() + Math.min(Math.max(input.expiresInSeconds ?? JOB_SECONDS, 60), 24 * 60 * 60) * 1000), idValue = id();
     const lifecycleTable = Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_uninstallations'"));
     const inserted = db.run(
-      "INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,target_json,issued_at,expires_at,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,?" + (lifecycleTable ? " WHERE NOT EXISTS (SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown','succeeded'))" : ""),
-      idValue, agentID, deploymentID, operationID, "queued", json(caps), json(actionList), json(input.target ?? {}), iso(deps, now), iso(deps, expires), iso(deps, now), iso(deps, now), ...(lifecycleTable ? [agentID] : []),
+      "INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,target_json,issued_at,expires_at,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed')" + (lifecycleTable ? " AND NOT EXISTS (SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown','succeeded'))" : ""),
+      idValue, agentID, deploymentID, operationID, "queued", json(caps), json(actionList), json(input.target ?? {}), iso(deps, now), iso(deps, expires), iso(deps, now), iso(deps, now), agentID, ...(lifecycleTable ? [agentID] : []),
     );
-    if (!inserted.changes) fail(409, "agent_uninstallation_blocks_jobs");
+    if (!inserted.changes) {
+      assertAgentActive(db, agentID);
+      fail(409, "agent_uninstallation_blocks_jobs");
+    }
     return view(row(idValue));
   };
   const claim = (agentID: string, offered: string[], _cursor = "") => {
     ensureAgent(agentID);
+    assertAgentActive(db, agentID);
     const caps = new Set(capabilities(offered));
     if (uninstallBlocked(agentID)) return null;
     expireLeases();
     return db.transaction(() => {
+    assertAgentActive(db, agentID);
     const at = deps.now(), nowText = iso(deps, at);
     // A node has one execution lane, including when two runner processes poll.
     // Shared Nginx state and project registries must never mutate concurrently.
@@ -320,6 +328,7 @@ export function registerAgentJobs(
     });
   };
   const leaseRow = (agentID: string, jobID: string, leaseID: string) => {
+    assertAgentActive(db, agentID);
     const value = row(jobID);
     if (value.agent_id !== agentID) fail(403, "agent job does not belong to agent");
     if (!leaseID || value.lease_id !== leaseID) fail(409, "agent job lease is invalid");
@@ -330,6 +339,7 @@ export function registerAgentJobs(
     return value;
   };
   const event = (agentID: string, jobID: string, input: Record<string, any>) => {
+    assertAgentActive(db, agentID);
     const value = object(input, "event"), lease = text(value.lease_id, "lease_id", 256), stored = row(jobID);
     if (stored.agent_id !== agentID) fail(403, "agent job does not belong to agent");
     // Unknown is intentionally a hard boundary: a late completion after a
@@ -393,6 +403,7 @@ export function registerAgentJobs(
     return view(row(jobID));
   };
   const result = (agentID: string, jobID: string, input: Record<string, any>) => {
+    assertAgentActive(db, agentID);
     const value = object(input, "result"), lease = text(value.lease_id, "lease_id", 256), stored = row(jobID);
     if (stored.agent_id !== agentID) fail(403, "agent job does not belong to agent");
     // A lost HTTP response may cause the Agent to retry its final receipt.

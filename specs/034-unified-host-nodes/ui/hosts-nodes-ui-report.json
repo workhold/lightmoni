@@ -1,0 +1,23 @@
+{
+  "production_bundle": true,
+  "api_fixtures": true,
+  "real_ssh": false,
+  "production_writes": false,
+  "checked": [
+    "one navigation entry and three distinct host/node states; explicit identity aggregation never duplicates a linked node",
+    "independent nodes explain SSH and manual uninstall requirements without executing an action",
+    "node removal binds its target and explains archive versus uninstall; cancellation sends no write",
+    "backend task/removal conflict stays visible and keeps the node intact",
+    "retry and synchronous repeated confirmation send one removal request; success hides only the target node",
+    "administrator history reads include_removed, retains archive metadata, and never offers restoration or repeat removal",
+    "monitoring tasks and labels reuse existing editors in one workspace",
+    "legacy /agents task deep links work and legacy default-homepage preferences resolve to /machines",
+    "explicit SSH identity-link UI sends only reviewed IDs, preserves failures, and merges rows only after successful server verification",
+    "unified node rows keep the task-label editor and its exact node identity",
+    "SSH identity linking without an active key gives a reason and cannot submit",
+    "members retain node and task views while never requesting machine, credential, or lifecycle APIs, including hostile machine deep links",
+    "English unified list and removal confirmation fit a 390px viewport without page overflow"
+  ],
+  "errors": [],
+  "unexpected": []
+}
