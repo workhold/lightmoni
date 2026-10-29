@@ -207,14 +207,6 @@ export function normalizeLocations(value: any): Config[] {
     };
     if (out.action === "return") {
       out.return_status = num(s.return_status, 302, 599, 200);
-      if (
-        !Number.isInteger(out.return_status) ||
-        ![
-          200, 201, 204, 301, 302, 303, 307, 308, 400, 401, 403, 404, 410, 429,
-          500, 502, 503,
-        ].includes(out.return_status)
-      )
-        bad("INVALID_NGINX_RETURN_STATUS");
       out.return_value = str(s.return_value ?? "");
       return out;
     }

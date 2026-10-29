@@ -136,6 +136,8 @@ test("Nginx compiler exposes weighted upstreams, SNI, headers, streaming, CORS a
   );
 });
 test("Nginx validation rejects directive injection, protocol ambiguity and reserved proof paths", () => {
+  for (const status of [418, 444, 501, 599]) assert.equal(normalizeLocations([{path:"/",action:"return",return_status:status}])[0].return_status,status);
+  for (const status of [199, 600, 302.5]) assert.throws(()=>normalizeLocations([{path:"/",action:"return",return_status:status}]));
   for (const route of [
     { path: "/", upstreams: ["http://a", "https://b"] },
     { path: "/.well-known/lightmoni-health", upstreams: ["http://a"] },
