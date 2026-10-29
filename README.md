@@ -89,7 +89,7 @@ docker compose up -d --no-build --pull never --wait
 
 `lightmoni-state` 卷保存 SQLite、加密主密钥和队列，`lightmoni-telemetry` 卷保存 ClickHouse 数据。普通更新与 `docker compose down` 保留卷；备份和恢复时配套保存两个卷及受限 `.env`。查看日志使用 `docker compose logs -f --tail=100`。更多步骤见 [Docker 更新与回滚](deploy/server/README.md)。
 
-管理员可在“主机管理 → 登录终端”打开交互式 SSH 小窗，连接前需要确认主机指纹并保存有效登录密码或 SSH 私钥，见 [网页 SSH 终端](docs/machine-terminal.md)。
+管理员可在“主机管理 → 登录终端”打开交互式 SSH 小窗，连接前保存有效登录密码或 SSH 私钥；主机公钥与指纹首次连接自动记录、后续自动核验，见 [网页 SSH 终端](docs/machine-terminal.md)。
 
 ## 网站、容器、备份与计划任务
 
@@ -101,7 +101,7 @@ docker compose up -d --no-build --pull never --wait
 
 软件统一称 **LightMoni Agent**，是登记主机上的管理通道；内部采集指标和日志的模块称采集器，网页对话能力称“AI 助手”。用户从“主机管理”统一查看主机资产、Agent 通道与监控任务，不再单独管理未关联主机的执行节点。Agent 执行监控任务和经批准的受限运维任务，不持有模型 Key，也不提供通用远程 shell。
 
-接入只有一条路径：**登记主机与 SSH 登录信息 → 核对主机指纹 → SSH 预检 → 审阅确认 → 平台部署 Agent**。登记弹窗同屏填写名称、地址、端口、用户名、登录密码或 SSH 私钥及保存时长，默认密码登录、保存 6 小时；也可只登记主机、稍后补充凭据。主机 ID 由平台生成、不可修改。主机公钥指纹用于核验远端身份，不能替代登录密码或私钥；指纹、主机 ID 和名称不随登录凭据到期而删除。
+接入只有一条路径：**登记主机与 SSH 登录信息 → SSH 预检（自动记录主机公钥） → 审阅确认 → 平台部署 Agent**。登记弹窗同屏填写名称、地址、端口、用户名、登录密码或 SSH 私钥及保存时长，默认密码登录、保存 6 小时；也可只登记主机、稍后补充凭据。主机 ID 由平台生成、不可修改。主机公钥与指纹无需填写或确认，首次 SSH 握手自动记录，在详情只读展示，后续连接自动比对；指纹、主机 ID 和名称不随登录凭据到期而删除。详见 [自动主机身份](specs/040-automatic-ssh-host-identity/spec.md)。
 
 有限期登录凭据到期或撤销后清除；明确选择并确认“永久保存”时没有固定过期时间，直到主动撤销。两种保存方式均加密存储，Agent 激活不会提前清除；建议优先短期保存，使用结束后撤销。登记和凭据保存仍不会执行 SSH；凭据保存失败可在同一表单重试，使用已登记主机 ID，不重复创建主机。保存策略见 [SDD 039](specs/039-host-registration-credential-retention/spec.md)。
 

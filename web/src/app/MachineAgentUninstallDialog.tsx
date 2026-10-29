@@ -108,7 +108,7 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
    {keys.length?<Form layout="vertical" onFinish={makePlan} disabled={busy} initialValues={{credential_id:keys.length===1?keys[0].id:undefined}}>
     <Form.Item label={t('可复用 SSH 凭据','Reusable SSH credential')} name="credential_id" rules={[{required:true,message:t('请选择有效私钥或可复用密码','Select an active key or reusable password')}]}><Select options={keys.map(c=>({value:c.id,label:`${c.method==='password'?(c.retention==='permanent'?t('永久密码','Permanent password'):c.retention==='managed'?t('托管密码','Managed password'):t('临时密码','Temporary password')):t('SSH 私钥','SSH private key')} · ${c.secret_fingerprint||c.id} · ${c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)}`}))}/></Form.Item>
     <Button type="primary" htmlType="submit" loading={busy} block>{t('核对身份并生成卸载计划','Verify identity and create uninstall plan')}</Button>
-   </Form>:<Alert type="info" showIcon title={t('卸载需要有效私钥或可复用密码','An active key or reusable password is required to uninstall')} description={t('请先添加有效私钥或临时/托管密码并确认主机指纹；一次性密码不能用于自动卸载。','Add an active key or temporary/managed password and verify the host fingerprint. Single-use passwords cannot be used for automatic removal.')}/>}
+   </Form>:<Alert type="info" showIcon title={t('卸载需要有效私钥或可复用密码','An active key or reusable password is required to uninstall')} description={t('请先添加有效私钥或临时、托管、永久密码；主机公钥由平台自动记录和校验。一次性密码不能用于自动卸载。','Add an active key or temporary, managed, or permanent password. The platform records and verifies the host public key automatically. Single-use passwords cannot be used for automatic removal.')}/>}
    {check&&<SSHCheckSummary result={check}/>}
   </>}
   {record&&<>

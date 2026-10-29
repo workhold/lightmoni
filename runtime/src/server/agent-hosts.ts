@@ -14,6 +14,9 @@ export function createAgentHostSchema(db: DB): void {
   const columns = new Set(db.all<{name:string}>("PRAGMA table_info(managed_machines)").map(row => row.name));
   for (const [name, definition] of [
     ["observed_hostname", "TEXT NOT NULL DEFAULT ''"],
+    ["host_key_public_key", "TEXT NOT NULL DEFAULT ''"],
+    ["host_key_observed_at", "TEXT NOT NULL DEFAULT ''"],
+    ["ssh_target_generation", "INTEGER NOT NULL DEFAULT 0"],
   ]) if (!columns.has(name)) db.exec(`ALTER TABLE managed_machines ADD COLUMN ${name} ${definition}`);
 }
 

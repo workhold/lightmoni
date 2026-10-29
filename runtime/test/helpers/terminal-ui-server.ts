@@ -38,7 +38,7 @@ server.listen(0,'127.0.0.1');await once(server,'listening');
 const origin=`http://127.0.0.1:${(server.address() as any).port}`;deps.externalURL=router.externalURL=origin;
 const terminal=registerMachineTerminal(deps,machines,server);
 const request=async(path:string,body:unknown)=>{const res=await fetch(origin+'/api/v1'+path,{method:'POST',headers:{cookie:'lm_session=fixture-browser-login','content-type':'application/json',origin},body:JSON.stringify(body)});if(!res.ok)throw Error('Fixture setup failed');return res.json() as any};
-const machine=await request('/machines',{name:'Terminal fixture',address:ssh.address,port:ssh.port,username:ssh.username,connection_method:'direct_ssh',host_key_fingerprint:ssh.pin});
+const machine=await request('/machines',{name:'Terminal fixture',address:ssh.address,port:ssh.port,username:ssh.username,connection_method:'direct_ssh'});
 await request(`/machines/${machine.id}/credentials`,passwordMode?{method:'password',secret:(ssh as Awaited<ReturnType<typeof passwordSSHServer>>).password,retention:'one_time'}:{method:'ssh_key',secret:(ssh as Awaited<ReturnType<typeof isolatedSSHD>>).privateKey,retention:'temporary'});
 // A test-only seed route avoids sending generated fixture passwords through
 // browser script arguments or reports. It never returns the secret.

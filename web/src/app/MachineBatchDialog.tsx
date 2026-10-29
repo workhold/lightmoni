@@ -30,7 +30,6 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
   duplicate_target:t('相同目标已在本批次中，仅执行一次。','The same target already appears in this batch and will run once.'),
   host_busy:t('主机有正在进行的操作，请先完成。','The host has an operation in progress. Finish it first.'),
   direct_ssh_required:t('当前连接方式不支持直接 SSH。','The connection method does not support direct SSH.'),
-  host_fingerprint_required:t('请先登记并确认 SSH 主机指纹。','Register and verify the SSH host fingerprint first.'),
   ssh_credential_required:t('没有有效的 SSH 私钥或密码。','No active SSH private key or password is available.'),
   ssh_key_required:t('安装和卸载需要有效私钥或可复用密码；一次性密码不能用于此操作。','Installation and removal need an active key or reusable password. Single-use passwords cannot be used.'),
   reusable_ssh_credential_required:t('请添加有效私钥或临时/托管密码；一次性密码不能用于安装或卸载。','Add an active key or temporary/managed password. Single-use passwords cannot install or uninstall Agent.'),
@@ -51,7 +50,8 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
   unavailable:t('当前不可执行，请刷新主机详情并处理前置条件。','Unavailable. Refresh host details and resolve prerequisites.'),
  }[code]||code);
  const stepText=(step:string)=>({
-  '确认主机公钥指纹':t('确认主机公钥指纹','Verify the host public-key fingerprint'),
+  '确认主机公钥指纹':t('自动校验主机公钥','Automatically verify the host public key'),
+  '自动校验主机公钥':t('自动校验主机公钥','Automatically verify the host public key'),
   '建立受限 SSH 连接':t('建立受限 SSH 连接','Establish a restricted SSH connection'),
   '下载固定版本 Agent 并校验 SHA256':t('下载固定版本 Agent 并校验 SHA256','Download the fixed Agent release and verify SHA256'),
   '通过 stdin 注入一次性 enrollment token':t('通过 stdin 注入一次性 enrollment token','Pass a one-time enrollment token through stdin'),

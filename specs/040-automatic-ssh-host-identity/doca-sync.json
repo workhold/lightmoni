@@ -1,0 +1,31 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "status": "synchronized",
+  "sections": [
+    "13 SSH onboarding",
+    "13.2 registration",
+    "13.4 credential retention",
+    "13.5 automatic SSH host identity",
+    "17.2 host-key rule"
+  ],
+  "before_seq": 785,
+  "saved_seq": 786,
+  "readback_seq": 786,
+  "text_blocks_verified": 9,
+  "new_blocks_verified": 7,
+  "unrelated_top_level_blocks_unchanged": 339,
+  "existing_native_diagrams_unchanged": 11,
+  "existing_retention_diagram_update": {
+    "block_id": "host039-retention-flow",
+    "node_labels_updated": 1,
+    "node_ids_positions_and_other_properties_preserved": true,
+    "all_edges_unchanged": true
+  },
+  "new_native_flowchart": {
+    "block_id": "host040-automatic-identity-flow",
+    "nodes": 9,
+    "edges": 9,
+    "nodes_and_edges_match": true
+  },
+  "native_visual_render_verified": false
+}

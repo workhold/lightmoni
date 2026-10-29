@@ -38,7 +38,9 @@ async function fixture(t:TestContext,limits:Record<string,number>={}){
   return {status:res.status,data:await res.json() as any};
  };
  const host=async(overrides:Record<string,unknown>={},key=fakeKey,method='ssh_key')=>{
-  const m=await request('/machines','POST',{name:'Fixture',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',host_key_fingerprint:'SHA256:abcdefghijklmnop',...overrides});assert.equal(m.status,201);
+  const {host_key_fingerprint:pin='SHA256:abcdefghijklmnop',...target}=overrides;
+  const m=await request('/machines','POST',{name:'Fixture',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',...target});assert.equal(m.status,201);
+  if(pin)db.run('UPDATE managed_machines SET host_key_fingerprint=? WHERE id=?',pin,m.data.id);
   const c=await request(`/machines/${m.data.id}/credentials`,'POST',{method,secret:key,retention:method==='password'?'one_time':'temporary'});assert.equal(c.status,201);
   return {id:m.data.id,credentialID:c.data.credential_id,path:`/machines/${m.data.id}/terminal-sessions`};
  };
@@ -121,7 +123,7 @@ test('real PTY: UTF-8, commands, Ctrl+C, resize, flow control, single attach, di
 test('real SSH validates host pin and auth, and cleans up on invalid protocol, logout, expiry, exit and shutdown',{skip:!existsSync('/usr/sbin/sshd'),timeout:30000},async t=>{
  const ssh=await isolatedSSHD(t),f=await fixture(t,{checkMs:50,idleMs:10_000}),h=await f.host({address:ssh.address,port:ssh.port,username:ssh.username,host_key_fingerprint:'SHA256:wrongconfirmedfingerprint'},ssh.privateKey);
  let c=await f.attach((await f.create(h)).data);await c.closed('host_key_mismatch');
- await f.request(`/machines/${h.id}`,'PUT',{host_key_fingerprint:ssh.pin});
+ f.db.run("UPDATE managed_machines SET host_key_fingerprint=?,host_key_public_key='',host_key_observed_at='' WHERE id=?",ssh.pin,h.id);
 
  // Authentication failures return a fixed code; raw ssh2 errors never cross WS.
  const wrong=await f.host({address:ssh.address,port:ssh.port,username:ssh.username,host_key_fingerprint:ssh.pin},ssh.wrongKey);
@@ -250,4 +252,18 @@ test('SSH password whitespace survives encrypted storage and authenticates witho
  c.send({type:'input',data:'fixture-exit\r'});await c.closed('remote_closed');
  assert.ok(f.db.get<any>('SELECT revoked_at FROM machine_credentials WHERE id=?',h.credentialID)?.revoked_at);
  assert.ok(!c.text().includes(original));assert.deepEqual(f.logs,[]);
+});
+
+test('terminal first connection records the server key automatically and remains valid across reconnects',async t=>{
+ const ssh=await passwordSSHServer(t),f=await fixture(t,{checkMs:30,idleMs:10_000});
+ const h=await f.host({address:ssh.address,port:ssh.port,username:ssh.username,host_key_fingerprint:''},ssh.password,'password');
+ const reusable=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:ssh.password,retention:'managed',confirm_managed:true});assert.equal(reusable.status,201);
+ assert.equal(f.machines.get(h.id).host_key_fingerprint,'');assert.equal(f.machines.get(h.id).capabilities.terminal.available,true);
+ for(let index=0;index<2;index++){
+  const entry=await f.create(h,{credential_id:reusable.data.credential_id});assert.equal(entry.status,201);
+  const c=await f.attach(entry.data);await c.connected();c.send({type:'input',data:'fixture-identify\n'});await c.wait(()=>c.text().includes('FIXTURE_HOST=loopback'));
+  const current=f.machines.get(h.id);assert.equal(current.host_key_fingerprint,ssh.pin);assert.match(current.host_key_public_key,/^ssh-rsa [A-Za-z0-9+/]+=*$/);assert.equal(current.host_key_status,'observed');
+  await f.request(`${h.path}/${entry.data.id}`,'DELETE');await c.closed();await c.wait(()=>c.ws.readyState===WebSocket.CLOSED);
+ }
+ assert.equal(f.db.all('SELECT id FROM machine_terminal_events WHERE connected_at!=\'\'').length,2);
 });

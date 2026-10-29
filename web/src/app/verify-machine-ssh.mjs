@@ -18,7 +18,7 @@ async function harness({role='admin',language='zh-CN'}={}){
  const machine={id:'fixture-machine',name:'Fixture host',address:'host.example.com',port:22,username:'deploy',connection_method:'direct_ssh',host_key_fingerprint:'SHA256:fixtureconfirmedfingerprint',host_key_status:'confirmed',agent_id:'',agent_status:'unknown',active_credential_count:1,active_ssh_credential_count:1,active_ssh_key_count:1,ssh_recovery_available:true,capabilities:{terminal:{available:true,reason:''},ssh_check:{available:true,reason:''},deploy_agent:{available:true,reason:''}},credential_count:1,arch:'',platform:'',updated_at:at,created_at:at};
  const credential={id:'fixture-key',method:'ssh_key',secret_fingerprint:'fixture-metadata-only',expires_at:expires,retention:'managed'};
  const result={id:'fixture-check',machine_id:machine.id,credential_id:credential.id,connected:true,ready:true,platform:'linux',arch:'arm64',checks:{linux:true,supported_arch:true,curl:true,tar:true,gzip:true,sha256sum:true,systemd:true,install_privilege:true,platform_https:true},error_code:'',checked_at:at,expires_at:expires};
- const plan={id:'fixture-plan',machine_id:machine.id,status:'awaiting_approval',plan:{machine,credential,preflight:result,version:'0.1.0',arch:'arm64',expires_at:expires,steps:['确认主机公钥指纹','建立受限 SSH 连接','安装独立 systemd Agent','等待 Agent 激活回执'],warnings:['AI 不会读取或发送 SSH 秘密。']},review_url:'/machines?machine=fixture-machine&deployment=fixture-plan'};
+ const plan={id:'fixture-plan',machine_id:machine.id,status:'awaiting_approval',plan:{machine,credential,preflight:result,version:'0.1.0',arch:'arm64',expires_at:expires,steps:['自动校验主机公钥','建立受限 SSH 连接','安装独立 systemd Agent','等待 Agent 激活回执'],warnings:['AI 不会读取或发送 SSH 秘密。']},review_url:'/machines?machine=fixture-machine&deployment=fixture-plan'};
  const state={role,result,plan,hold:false,failApply:false,release:undefined,requests:[],deleted:false,deleteError:'请先撤销或等待所有有效连接凭据失效后再删除主机'};
  const context=await browser.newContext({viewport:{width:1365,height:1000},reducedMotion:'reduce'});contexts.push(context);
  await context.addInitScript(language=>{localStorage.setItem('lightmoni.language',language);localStorage.setItem('lightmoni.nav.collapsed','true')},language);
@@ -83,7 +83,7 @@ try{
  await page.getByRole('button',{name:'开始 SSH 检查',exact:true}).click();await expect(page.getByText('SSH 已连接，安装条件不满足',{exact:true})).toBeVisible();
  expect(state.requests.filter(r=>r.path.endsWith('/deployments/plan'))).toHaveLength(0);mark('Connected SSH with missing prerequisites does not propose or install');
  state.result={...state.result,connected:false,checks:{},error_code:'host_key_mismatch'};
- await page.getByRole('button',{name:'开始 SSH 检查',exact:true}).click();await expect(page.getByText('主机公钥与已确认的指纹不一致，请通过可信渠道核实。',{exact:true})).toBeVisible();mark('Pinned host-key failure is explained');
+ await page.getByRole('button',{name:'开始 SSH 检查',exact:true}).click();await expect(page.getByText('主机公钥与已记录的身份不一致，连接已停止。',{exact:true})).toBeVisible();mark('Pinned host-key failure is explained');
  state.result={...state.plan.plan.preflight};
  await page.getByRole('button',{name:'开始 SSH 检查',exact:true}).click();await expect(page.getByText('SSH 已连接，安装检查通过',{exact:true})).toBeVisible();mark('Standalone successful SSH preflight');
  state.hold=true;await page.getByRole('button',{name:'开始 SSH 检查',exact:true}).click();await expect(page.getByRole('button',{name:'取消检查',exact:true})).toBeEnabled();

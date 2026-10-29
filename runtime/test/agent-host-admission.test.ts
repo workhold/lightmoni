@@ -47,8 +47,8 @@ async function fixture(t: any) {
     return { status: result.status, data: await result.json() as any };
   };
   const host = async (name = "用户主机") => {
-    const result = await request("/machines", "POST", { name, address: "ssh.example.test", username: "deploy", connection_method: "direct_ssh", host_key_fingerprint: "SHA256:abcdefghijklmnop" });
-    assert.equal(result.status, 201); return result.data;
+    const result = await request("/machines", "POST", { name, address: "ssh.example.test", username: "deploy", connection_method: "direct_ssh" });
+    assert.equal(result.status, 201); db.run("UPDATE managed_machines SET host_key_fingerprint=? WHERE id=?", "SHA256:abcdefghijklmnop", result.data.id); return machines.get(result.data.id);
   };
   const issue = (machineID: string) => credentials.issueEnrollment({ endpoint_origin: deps.externalURL, version: "0.1.0", created_by: user.id, machine_id: machineID, previous_agent_id: machines.get(machineID).agent_id });
   const exchange = async (token: string, nonce = "fixture-nonce") => request("/agents/enroll", "POST", { enrollment_token: token, install_nonce: nonce, agent_public_key: "fixture-key", version: "0.1.0", arch: "amd64" });

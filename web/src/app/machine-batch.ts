@@ -33,7 +33,6 @@ export function batchUnavailableReason(action:BatchAction,target:BatchTarget,det
   return '';
  }
  if(machine.connection_method!=='direct_ssh')return 'direct_ssh_required';
- if(machine.host_key_status!=='confirmed')return 'host_fingerprint_required';
  if(action==='install'&&machine.agent_id)return 'agent_already_installed';
  if(action==='uninstall'&&!machine.agent_id)return 'agent_not_linked';
  const capability=machine.capabilities?.[action==='install'?'deploy_agent':action==='uninstall'?'uninstall_agent':'ssh_check'];

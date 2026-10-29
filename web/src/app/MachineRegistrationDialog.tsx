@@ -12,14 +12,14 @@ export default function MachineRegistrationDialog({onClose,onChanged,onCheck,onP
   if(pending.current)return;pending.current=true;setBusy(true);setError('');
   try{
    let target=registered.current;
-   if(!target){target=await api<Host>('/machines',{method:'POST',body:JSON.stringify({name:values.name,address:values.address,port:values.port,username:values.username,connection_method:'direct_ssh',host_key_fingerprint:values.host_key_fingerprint||''})});registered.current=target;setHost(target);await onChanged()}
+   if(!target){target=await api<Host>('/machines',{method:'POST',body:JSON.stringify({name:values.name,address:values.address,port:values.port,username:values.username,connection_method:'direct_ssh'})});registered.current=target;setHost(target);await onChanged()}
    if(withCredential)await api(`/machines/${encodeURIComponent(target.id)}/credentials`,{method:'POST',body:JSON.stringify(credentialPayload(values))});
    form.setFieldsValue({secret:undefined,confirm_permanent:false});
    if(!withCredential){onClose();return}
    setComplete(true);try{const fresh=await api<{machine:Host}>(`/machines/${encodeURIComponent(target.id)}`);setHost(fresh.machine)}catch{/* The save succeeded; refreshing capabilities can be retried from the list. */}await onChanged();
   }catch(e){setError(e instanceof Error?e.message:t('保存失败','Save failed'))}finally{pending.current=false;setBusy(false)}
  };
- const registerOnly=async()=>{try{await save(await form.validateFields(['name','address','port','username','host_key_fingerprint']),false)}catch{/* Inline host field validation explains what is missing. */}};
+ const registerOnly=async()=>{try{await save(await form.validateFields(['name','address','port','username']),false)}catch{/* Inline host field validation explains what is missing. */}};
  const close=()=>{if(pending.current)return;form.resetFields();onClose()};
  return <Modal open className="lm-machine-credential-dialog" style={{top:24}} title={t('登记主机','Register host')} onCancel={close} closable={!busy} maskClosable={false} keyboard={!busy} footer={null} width={640} destroyOnHidden>
   {!complete?<Form name="host-registration" form={form} layout="vertical" onFinish={values=>void save(values)} disabled={busy} initialValues={{port:22,...credentialInitialValues}} onValuesChange={changed=>clearCredentialSecrets(form,changed)}>
@@ -28,7 +28,6 @@ export default function MachineRegistrationDialog({onClose,onChanged,onCheck,onP
    <Form.Item label={t('地址','Address')} name="address" rules={[{required:true,message:t('请输入主机名或 IP','Enter a hostname or IP')}]}><Input disabled={busy||!!host} placeholder={t('host.example.com 或 10.0.0.12','host.example.com or 10.0.0.12')}/></Form.Item>
    <Space.Compact block><Form.Item label={t('SSH 端口','SSH port')} name="port" rules={[{required:true}]} style={{width:'35%'}}><InputNumber disabled={busy||!!host} min={1} max={65535} style={{width:'100%'}}/></Form.Item><Form.Item label={t('登录用户名','Login username')} name="username" rules={[{required:true}]} style={{width:'65%'}}><Input disabled={busy||!!host} placeholder={t('例如：deploy','Example: deploy')}/></Form.Item></Space.Compact>
    <MachineCredentialFields/>
-   <Form.Item label={t('主机身份指纹','Host identity fingerprint')} name="host_key_fingerprint" extra={t('由远端主机的 SSH 公钥生成，用于确认连接的主机，与登录私钥用途不同。请填写已核对的 SHA256:... 指纹；确认前不能自动 SSH。','Generated from the remote host’s SSH public key to verify the server identity, independently of your login private key. Enter a verified SHA256:... fingerprint. Automatic SSH requires a verified fingerprint.')}><Input disabled={busy||!!host} placeholder="SHA256:..."/></Form.Item>
    {error&&<Alert type="error" showIcon title={error} className="lm-machine-form-notice"/>}
    <Button type="primary" aria-label={host?t('重试保存凭据','Retry saving credential'):t('登记并保存凭据','Register and save credential')} htmlType="submit" loading={busy} block>{host?t('重试保存凭据','Retry saving credential'):t('登记并保存凭据','Register and save credential')}</Button>
    <Button block className="lm-machine-onboarding-later" disabled={busy} onClick={()=>void registerOnly()}>{host?t('稍后配置凭据','Configure credentials later'):t('仅登记，稍后配置凭据','Register only; configure credentials later')}</Button>

@@ -116,7 +116,7 @@ function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased}
  },[machine.id,start,stop]);
  const busy=['creating','connecting','connected'].includes(state);
  const explanations:Record<string,string>={
-  host_key_mismatch:t('主机指纹不匹配，请在主机管理中核实。','Host fingerprint mismatch. Verify the registered host.'),
+  host_key_mismatch:t('主机公钥与已记录的身份不一致，连接已停止。','The host public key differs from the recorded identity. The connection was stopped.'),
   authentication_failed:t('SSH 凭据认证失败，请检查用户名、私钥或密码。','SSH credential authentication failed. Check the username, private key, or password.'),
   invalid_private_key:t('私钥无法使用；目前仅支持无口令的 SSH 私钥。','The key cannot be used. Only SSH keys without a passphrase are supported.'),
   credential_invalid:t('凭据已撤销、过期或主机连接已变更。','The credential was revoked or expired, or the host changed.'),
