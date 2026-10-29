@@ -27,7 +27,7 @@
 - [x] T014 runtime/test/platform-*.test.ts 领域协议、SQLite/HTTP/租约、并发资源和失败边界；修复实质问题。
 - [x] T015 specs/033-operations-control-plane/validation.md Docker 实际执行、页面真实交互与视觉证据，明确外部服务未验范围。
 - [x] T016 docs/system-design.md 与 Doca 同步文字/原生图，最新版本回读并记录结果。
-- [ ] T017 定向/相关回归、类型与构建、diff 检查，同步 origin/main 并通过 GitHub 功能分支 PR 交付，未经授权不合并。
+- [x] T017 定向/相关回归、类型与构建、diff 检查，同步 origin/main 并通过 GitHub 功能分支 [PR #15](https://github.com/workhold/lightmoni/pull/15) 交付，未经授权不合并。
 
 ## Dependencies
 T001→T002；T003/T004 与 T005/T006/T007 可独立并行；T008 共用 Agent 执行器；T009 依赖应用，T010/T011 依赖证书/服务/网关；T012 按固定 API 并行；最终 T014–T017。

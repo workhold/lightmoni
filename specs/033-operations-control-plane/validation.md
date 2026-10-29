@@ -1,6 +1,6 @@
 # SDD 033 验证与交付记录
 
-日期：2026-10-29（Asia/Shanghai）。分支：`codex/033-operations-control-plane`。交付 PR 在创建后补记。
+日期：2026-10-29（Asia/Shanghai）。分支：`codex/033-operations-control-plane`。交付：[GitHub PR #15](https://github.com/workhold/lightmoni/pull/15)，目标main，未合并。
 
 ## 实现与验收结论
 
