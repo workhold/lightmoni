@@ -59,6 +59,7 @@ async function harness({signedIn=true,account='alice',saved={},storageMode='norm
   '/api/v1/assistant/config':config,'/api/v1/assistant/sessions':{items:[]},
   '/api/v1/logs/saved-searches':[],
   '/api/v1/dashboards':[],
+  '/api/v1/ops/overview':{resources:[],agents:[],runs:[],capabilities:{}},
   '/api/v1/alerts/groups':[],'/api/v1/alerts/rules':[],'/api/v1/alerts/tables':[],
   '/api/v1/alerts/instances':[],'/api/v1/alerts/events':[],'/api/v1/alerts/incidents':[],
   '/api/v1/alerts/silences':[],'/api/v1/alerts/responders':[],'/api/v1/alerts/policy-defaults':{},
@@ -95,7 +96,7 @@ async function destination(page,path){await expect(page).toHaveURL(origin+path);
 async function open(page,path){await page.goto(origin+path);await destination(page,path)}
 async function chooseHome(page,label){
  const select=page.getByRole('combobox',{name:'默认首页',exact:true});await select.click();
- const order=['概览','AI 助手','监控大盘','日志探索','告警中心','主机管理','节点助手','服务部署','网站与运维','数据接入','数据管理','个人设置','管理后台'];
+ const order=['概览','AI 助手','监控大盘','日志探索','告警中心','主机管理','节点助手','网站与运维','数据接入','数据管理','个人设置','管理后台'];
  // Traverse the real keyboard selection so offscreen virtualized options need
  // no forced clicks or DOM writes. This also exercises keyboard accessibility.
  for(let index=0;index<20;index++){
@@ -137,6 +138,8 @@ try{
  for(const title of ['工作台','监控分析','运维工具'])await expect(group(page,title)).toHaveAttribute('aria-expanded','true');
  await expect(group(page,'数据与接入')).toHaveAttribute('aria-expanded','false');await screenshot(page,'navigation-multiple-open-zh-1280');
  mark('independent categories retain multi-open state across routes and whole-sidebar collapse; keyboard and aria controls work');
+ await page.goto(origin+'/services');await destination(page,'/operations?tab=service');await expect(page.getByRole('heading',{name:'网站与运维',exact:true})).toBeVisible();await expect(page.locator('.lm-sidebar').getByRole('link',{name:'服务部署',exact:true})).toHaveCount(0);await expect(page.getByRole('tab',{name:/托管服务/})).toHaveAttribute('aria-selected','true');
+ mark('the former service-deployment route opens hosted services and the sidebar provides one operations entry');
 
  await settings(page);await chooseHome(page,'概览');await selectedHome(page,'概览');await expect(page.getByText('默认首页已保存',{exact:true})).toBeVisible();await destination(page,'/settings?tab=appearance&section=homepage');
  expect(await page.evaluate(key=>localStorage.getItem(key),storageKey(state.actors.alice.id))).toBe('/overview');

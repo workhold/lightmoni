@@ -1,0 +1,47 @@
+{
+  "checked_at": "2026-10-29T01:50:10.522Z",
+  "fixture": "Isolated in-memory HTTP API. No Docker, DNS, CA or cloud calls.",
+  "checks": [
+    "五能力入口、共享资源和既有视觉加载",
+    "容器 typed 表单、端口、托管文件、保存后刷新读回",
+    "长表单新增多行后内部滚动，标题、关闭和保存按钮始终可见",
+    "HTTP 409 保存失败保持名称、镜像和当前位置",
+    "失败摘要提供检查凭据提示，长版本缩写且详情保留完整值",
+    "阿里云、腾讯云、火山 CDN 目标表单与期望/应用版本差异",
+    "证书更新脚本正文、解释器、环境、超时和自动授权",
+    "DNS 增加记录、确认写入与平台回读表格",
+    "HTTP 202 业务失败保持 DNS 编辑器输入并显示真实失败",
+    "服务详情展示机器、资源、探活与服务发现端点",
+    "网站服务发现、HTTPS 与 DNS 关联表单",
+    "英文界面",
+    "390px 窄屏无页面横向溢出"
+  ],
+  "writes": [
+    {
+      "kind": "application",
+      "name": "UI 容器"
+    },
+    {
+      "kind": "certificate_target",
+      "name": "UI aliyun CDN"
+    },
+    {
+      "kind": "certificate_target",
+      "name": "UI tencent CDN"
+    },
+    {
+      "kind": "certificate_target",
+      "name": "UI volcengine CDN"
+    },
+    {
+      "kind": "certificate_target",
+      "name": "UI 更新脚本"
+    },
+    {
+      "kind": "website",
+      "name": "UI 服务网站"
+    }
+  ],
+  "page_errors": [],
+  "media": "/Users/zhangsiwen/dev/lightmoni/lightmoni/artifacts/screenshots/specs/033-operations-control-plane/evidence/ui"
+}

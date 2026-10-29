@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-10-29",
+  "commands": [
+    {
+      "component": "runtime",
+      "command": "npm --prefix runtime test",
+      "tests": 482,
+      "pass": 462,
+      "fail": 0,
+      "skipped": 20,
+      "duration_ms": 151560.709667
+    },
+    {
+      "component": "ai-runtime",
+      "command": "npm --prefix ai-runtime test",
+      "tests": 71,
+      "pass": 71,
+      "fail": 0,
+      "skipped": 0,
+      "duration_ms": 33216.853416
+    },
+    {
+      "component": "sdk/typescript",
+      "command": "npm --prefix sdk/typescript test",
+      "tests": 18,
+      "pass": 18,
+      "fail": 0,
+      "skipped": 0,
+      "duration_ms": 32188.371666
+    }
+  ],
+  "total_tests": 571,
+  "total_pass": 551,
+  "total_fail": 0,
+  "total_skipped": 20,
+  "typecheck": {
+    "command": "npm run typecheck",
+    "exit_code": 0
+  },
+  "build": {
+    "command": "npm run build",
+    "exit_code": 0
+  },
+  "notes": "Docker现场两项另行显式启用；默认回归中的跳过项不计为通过。"
+}

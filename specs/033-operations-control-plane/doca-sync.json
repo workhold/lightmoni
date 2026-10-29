@@ -1,0 +1,30 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "recorded_at": "2026-10-29",
+  "initial_seq": 773,
+  "saved_seq": 775,
+  "saved": true,
+  "title_restored": true,
+  "original_blocks": 304,
+  "preserved_unchanged": 303,
+  "intentionally_changed": [
+    {
+      "id": "a70bdd49-33a9-434e-b937-ee418d0eeb16",
+      "reason": "第26章标题标记新章替代网站、证书与容器设计，保留备份恢复说明"
+    }
+  ],
+  "original_order_preserved": true,
+  "original_native_diagrams": 8,
+  "original_native_diagrams_unchanged": true,
+  "added_blocks": 23,
+  "total_blocks": 327,
+  "chapter_appended_after_original": true,
+  "all_added_text_and_native_data_match": true,
+  "new_native_diagram": {
+    "id": "ops033-control-plane-native",
+    "nodes": 11,
+    "edges": 14,
+    "exact_match": true
+  },
+  "readback": "保存后按最新版本读取并逐块比较正文与原生节点/连线；发现首标题被列表自动转换及后续块插在开头后，定点恢复标题、移动新增块，最终复核原有块与顺序。"
+}
