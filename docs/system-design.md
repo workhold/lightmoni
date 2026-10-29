@@ -462,11 +462,12 @@ LightMoni Agent 是独立运行的系统级执行节点。它可以接收业务 
 | `collect.ts` | CPU、内存、磁盘、网络、负载和进程采集 |
 | `probe.ts` | HTTP/TCP 拨测和超时 |
 | `file-logs.ts` | 目录日志增量读取、轮转、截断和分片 |
+| `task-runner.ts` | 通用脚本任务出站领取、租约、独立工作目录、有界子进程及结果回传（SDD 043） |
 | `main.ts` | `run --config`、信号、启动和优雅关闭 |
 
 ### 11.3 节点控制协议
 
-节点通过 control credential 注册/心跳并拉取 `RemoteConfig`，其中包含 revision、任务标签合并后的指标/拨测/日志配置和控制间隔。Agent 先校验、写入本地缓存，再应用 revision。中心不接受 Agent 在心跳请求体中自行声明的 `agent_id` 作为授权依据。
+节点通过 control credential 注册/心跳并拉取 `RemoteConfig`，其中包含 revision、基于平台主机标签与单机覆盖合并后的指标/拨测/日志配置和控制间隔。标签归属主机 ID，Agent 不得通过心跳自行选择可触发脚本的标签。Agent 先校验、写入本地缓存，再应用 revision。中心不接受 Agent 在心跳请求体中自行声明的 `agent_id` 作为授权依据。有限脚本任务通过独立的 task-runs 出站领取协议执行，不与部署 job 的健康验证状态机混用，见第 27 节。
 
 Agent 上报使用 data credential 和 `X-Lightmoni-Agent-ID`。队列至少一次交付；`receipts` 防止同一 batch 重复入队，队列满或磁盘不足时返回背压而不是 ACK 后删除。重启后继续发送原 ID；超过最大补传年龄的批次进入明确的过期/隔离状态。
 
@@ -503,13 +504,13 @@ stateDiagram-v2
 
 平台自动安装默认在宿主机运行独立的 systemd Agent 服务，不与业务服务的启动、休眠或停止绑定。后续容器部署可选择独立 Agent 容器、Kubernetes DaemonSet，或在用户部署业务时显式注入 sidecar；本轮不实现自动 sidecar 注入，不默认改写用户业务镜像。容器内 Agent 的执行范围取决于真实挂载、命名空间和运行权限，不能仅因登记为节点就声称具备宿主机操作能力。业务 SDK 与 Agent 均可独立上报中心，SDK 不依赖 Agent 安装、不强制经 Agent 转发；Agent 需要自监控打点时复用同一公开 SDK。
 
-前端统一“主机”入口，将主机列表、监控任务和任务标签放在同一工作区。所有列表行使用真实平台主机 ID，Agent 仅补充通道状态和任务；不再拼接无主机资产的独立节点行。主机展示 Agent 在线/离线、未接入、已卸载、已移除与 SSH 是否配置/恢复可用。旧 /machines、/agents 路由和任务深链继续可用。普通成员通过 Agent 的主机 ID/名称投影查看已接入主机和任务，不获取管理员 SSH 地址、凭据或生命周期操作能力。
+前端统一“主机”入口，将主机列表、任务中心和主机标签放在同一工作区。所有列表行使用真实平台主机 ID，Agent 仅补充通道状态和任务；不再拼接无主机资产的独立节点行。主机展示 Agent 在线/离线、未接入、已卸载、已移除与 SSH 是否配置/恢复可用。旧 /machines、/agents 路由和任务深链继续可用。普通成员通过不含 SSH 秘密的主机目录与任务接口只读访问，不获取管理员 SSH 凭据或生命周期操作能力。通用任务模型见第 27 节。
 
 Agent 接入只有“先登记主机、再由平台部署”路径。已认证 Agent 按已有绑定或服务端安装预约确定所属主机，注册/心跳不创建资产；enrollment 由中心预绑定已登记主机，兑换、激活和控制面均核验预约与关联。独立签发及手工主机关联入口移除，共享 SDK Key 不再用于控制面降级。不能按 hostname、出口 IP 或 Agent 本地 host_id 合并或认领主机。SQLite 事务防止提前注册造成重复资产或抢占其他 Agent；MVP 一条主机最多一个 Agent，容器 Agent 的执行范围不等于物理宿主机。
 
 “移除节点”是中心侧归档操作：管理员二次确认后，在同一 SQLite 事务保存移除时间、操作者和原因，撤销该身份全部 control/data 凭据，并保留身份、凭据墓碑、遥测历史和审计。移除不停止或卸载远端程序，不删除主机，不撤销共享 SDK Key。未结束、已派发或结果未知的节点任务，以及待审批、执行中或结果未知的卸载流程阻止移除；重复请求幂等。默认节点列表排除已移除身份，管理员可查询历史；控制鉴权、数据鉴权和任务派发均拒绝已移除节点，禁止回退共享 Key 或由后续心跳复活。共享 SDK Key 不用于 Agent 控制面；旧无预约身份需从主机管理重新部署，不能通过撤销全局 SDK Key 实现 Agent 移除，也不恢复旧秘密。
 
-节点承担已支持的周期指标采集、日志采集、拨测和受限运维任务。AI 助手通过中心授权工具发起已支持任务，中心完成权限校验和所需审批后派发，Agent 通过平台控制通道接收任务并回传有界结果；日常交互不要求 AI 持有 SSH 秘密，也不赋予模型任意远程 shell。SSH 保留为首次安装、固定身份核验、卸载及离线恢复通道。通用定时脚本调度、任意代码远程执行、Agent 自卸载以及 Agent 本地模型决策均不是本轮已交付能力。
+节点承担周期指标、日志、拨测、受限运维任务和管理员授权的有限脚本。任务中心支持 Node.js/POSIX shell 的立即派发与固定间隔调度，脚本具有 Agent 用户权限，边界详见第 27 节。AI 助手通过中心工具查询或生成行动提案，用户审阅批准后才创建执行；Agent 通过出站控制通道领取并回传有界结果。SSH 保留为首次安装、固定身份核验、卸载及离线恢复通道。Agent 自卸载、Agent 本地模型决策和操作系统脚本沙箱仍是后续能力。
 
 登记须填写主机名称和 SSH 目标地址、端口及登录用户；连接凭据可稍后添加，Agent 可稍后部署。主机公钥及指纹在首次 SSH 握手时自动记录，无需用户填写或确认。观测 hostname 不自动成为可信 SSH 地址，管理员可编辑同一主机名称和目标连接。秘密提交后由服务端使用 AES-256-GCM 加密，主密钥独立于数据库保存，页面永远不回显；模型只能看到主机元数据、凭据 ID 和结构化检查结果。主机删除是管理员操作：先移除仍有效的 Agent 身份，并结束终端、检查、部署/卸载和未结束计划、撤销有效连接凭据后才可删除，避免后续心跳自动重建。移除/卸载 Agent 不删除主机资产，删除记录不等于远端程序已卸载。
 
@@ -837,6 +838,7 @@ docker compose up -d --no-build --wait
 - SDK 远程停报、日志采样和规则配置不是每种语言都已接入；未支持的语言不能声称平台规则已生效。
 - Agent 离线时撤销不能即时停止其已缓存任务，配置租约仍是后续强化。
 - SSH 终端是管理员临时工具，不给 AI 增加任意 shell 能力。
+- SDD 043 的通用脚本使用 Agent 进程权限，独立目录、最小环境与有界子进程不构成不可信代码沙箱；不得在脚本中写入连接凭据。默认开启的拨测任务在地址未配置时为“待配置”，不产生虚构成功。有限脚本支持立即执行和固定间隔（10 秒至 30 天）；不承诺 cron、持续守护脚本、跨主机编排 DAG 或分布式 exactly-once。
 - 代码任务副本不是操作系统沙箱；白名单命令只适用于受信 workspace，不能当成不可信代码隔离。
 - ClickHouse 的掉电可靠性、极端容量、Linux 实机和完整 Docker 发布需要按证据目录继续验收。
 
@@ -965,3 +967,82 @@ ACME 采用 Certbot webroot HTTP 验证，不停止已有 Web 服务。前提是
 首期允许 backup create/verify/prune、certificate renew、website inspect、compose inspect；不开放周期任意 shell、恢复、重启或发布。手动运行也使用相同边界与回执，计划启用表示管理员对固定目标/参数的持续授权，不能由 AI 代为启用。
 
 管理员按需为 Linux Agent 准备 Nginx、OpenSSL、Certbot、Docker 与 Compose plugin；中心不需要 docker.sock，节点不能通过模型生成任意 shell。命令用参数数组、shell:false、超时/取消与合计输出限制，不继承 DOCKER_HOST 或中心秘密环境变量。POSIX 中断会终止整个子进程组，但不能据此认定 Docker daemon 的操作也已撤销，因此未知结果保留持久写锁，恢复步骤见 26.3 和 [运维手册](operations.md)。真实 Linux 隔离验证覆盖网站、反代、TLS 轮换、日志/恢复/停用、Compose 生命周期与配置回退；公网 ACME、S3 供应商、生产并发与大容量继续按验收记录说明。规格、输入契约和证据统一见 [SDD 026](../specs/026-operations-platform/spec.md) 及其 validation 文档。
+
+
+## 27. 任务中心与主机标签（SDD 043）
+
+### 27.1 驱动目标与统一概念
+
+任务中心统一管理平台内置能力与用户自定义任务。任务定义描述做什么，目标描述哪些主机执行，派发创建配置或执行实例，执行记录说明真实结果。内置指标采集、HTTP/TCP 拨测、目录日志使用 Agent 原生处理器；自定义 Node.js/POSIX shell 使用有限脚本处理器。两者共享任务目录、主机目标和单机覆盖，不要求把持续采集改写成重复启动的脚本。
+
+平台提供只读任务模板，用户可创建任务、复制模板、调整参数或停用自己的任务。新库默认启用面向所有已登记主机的指标和拨测任务。指标采集在 Agent 接入后开始；未配置探测目标的拨测显示 waiting_config，enabled 不等于已经执行。升级保留原有任务、参数、目标和用户停用选择；默认初始化只执行一次，不在每次启动时重新启用任务。
+
+主机工作台采用“主机 / 任务中心 / 主机标签”。主机列表只展示分类标签；实际任务、单机覆盖和执行记录放在详情与任务中心。原生任务用持续配置状态反映应用情况，不伪造 succeeded 脚本执行记录。
+
+### 27.2 HLD：控制与执行路径
+
+```mermaid
+flowchart TB
+  Admin[管理员 / AI 助手] --> Draft[任务定义或行动提案]
+  Draft --> Review[用户审阅代码、目标与影响]
+  Review --> Center[任务中心：定义与目标解析]
+  Labels[主机 ID 与标签] --> Center
+  Override[单机启用与参数覆盖] --> Center
+  Center --> Native[持续内置配置 / revision]
+  Center --> Runs[有限脚本执行快照 / task_runs]
+  Native --> Agent[主机 Agent 出站 control 通道]
+  Runs --> Agent
+  Agent --> Handler[指标 / 拨测 / 日志原生处理器]
+  Agent --> Script[独立工作目录 / 有界脚本子进程]
+  Handler --> Data[SDK / data 通道上报遥测]
+  Script --> Receipt[领取租约 / 心跳 / 有界结果]
+  Receipt --> Runs
+```
+
+业务 SDK 继续独立直报中心。任务控制只使用节点 control credential，遥测只使用 data credential。任务脚本不接收 Agent 凭据或中心模型 Key。AI 仅能生成持久化提案，不能调用 apply 或绕过用户审阅直接执行脚本。
+
+### 27.3 LLD：主机标签、任务定义和优先级
+
+machine_host_labels(machine_id,label_id) 关联平台主机与标签目录；已安装 Agent 的历史标签一次性迁移到对应主机。无 Agent 的主机也可以设置标签；移除/卸载后保留，重装读取同一主机关系。Agent heartbeat.group_id 不能授予主机标签，避免持有 control credential 的节点自行扩大脚本接收范围。主机名称由用户设置，主机 ID 由平台产生；不向业务环境注入 SDK 主机变量。
+
+Task 包括 id/name/type/enabled、origin、template_id、target_all、host_ids、label_ids、config、schedule 及可选 script。内置类型为 host/probe/log，脚本为 script。目标是全部主机、明确主机 ID 或任一相同标签的并集；空目标不广播。单机 override 覆盖启用状态及内置参数，清除后恢复继承。同一主机匹配的自定义指标任务覆盖内置指标基线；多个自定义指标任务仍需通过表名与采集间隔冲突检查。
+
+脚本定义包含运行时 shell/node、源码、超时和输出上限。任务定义提供稳定内容摘要 revision，手动派发和重试提交审阅时的 expected_task_revision；写事务内再次比较，代码或目标定义变化时拒绝旧预览。源码最多 64 KiB，超时 1–3600 秒，总输出配置上限 1–256 KiB。内置持续任务与有限脚本使用不同执行策略：continuous 仅用于原生采集，once/interval 用于有限脚本。任务保存时校验运行时、目标、间隔、脚本、采集冲突和模板来源，不能通过修改 origin 伪装成平台内置模板。
+
+### 27.4 LLD：执行快照、租约与调度
+
+task_runs 保存任务、主机、当时的 Agent 身份、脚本和运行参数的不可变快照，以及 trigger、requested_by、retry_of、superseded_by、状态、租约散列、有限 stdout/stderr、退出码与时间。resolved_at, resolved_by, resolution_reason 记录管理员对 unknown 的人工核对决议。执行列表只返回状态摘要，完整输出和代码通过单条记录读取，避免历史列表随着脚本和输出长度无界放大。用户执行记录接口不返回 lease_token，领取时仅向对应 Agent 返回一次原始凭证。运行记录不引用可被后续修改的源码来执行；显式重试读取当前定义，必须重新审阅，并建立关联的新记录。
+
+```mermaid
+stateDiagram-v2
+  [*] --> queued: 明确派发 / 到期调度
+  queued --> running: 对应 Agent 领取并取得租约
+  queued --> cancelled: 取消 / 过期 / 目标不再有效
+  running --> succeeded: 当前租约提交退出成功
+  running --> failed: 超时 / 输出超限 / 非零退出
+  running --> cancelled: Agent 确认进程已终止
+  running --> unknown: 租约丢失 / 进程重启 / 无法确认
+  unknown --> queued: 人工明确重试，建立新记录
+```
+
+图中 unknown 到 queued 表示创建新的关联执行，旧记录保持 unknown，不改写历史。领取租约有效期为 60 秒，未领取队列在 24 小时后过期取消。中心按 task/host 防止重叠；尚未解决的 unknown 不自动重放。task_schedules 持久化固定间隔 next_due 与定义摘要；每次扫描最多派发当前周期，不追赶历史遗漏，重启不重置未来到期时间。单个 Agent 只领取一个脚本任务，避免多脚本同时修改主机。
+
+Agent 通过 task.script.v1 能力声明领取，旧版本不会误领新任务。control 认证、主机当前 Agent 绑定和节点生命周期在领取、续租和提交结果时检查。取消 queued 直接终止；取消 running 先置取消请求，由 Agent 杀死子进程后回执。控制连接失败或父进程关闭时终止脚本；独立监督进程保留截止时间并检测 Agent 父进程，避免主进程崩溃后任务失去超时控制。本地 0600 执行标记用于重新提交已得到的结果，不因本地重启再次执行同一领取。远端副作用是否已完成无法确认时保留 unknown；本协议不提供分布式 exactly-once。
+
+脚本运行使用新建的私有工作目录、固定解释器和参数、最小环境变量；不继承 Agent control/data credential。Unix 下按进程组处理超时、取消和输出上限，避免只终止父 shell 后留下直接后代。任意脚本仍具有 Agent 运行用户权限，本次不提供操作系统沙箱。运行中的脚本或未核对的 unknown 会阻止相关主机删除、身份替换或 Agent 卸载，不能通过生命周期操作绕过执行边界。管理员可人工核对未知执行的实际影响后，填写原因并明确确认结束，记录 resolved_at, resolved_by, resolution_reason 后解除阻塞；旧状态仍为 unknown，不重新执行、不转成成功，也不接受晚回执覆盖。该决议不证明远端进程已停止，界面必须说明；AI 不提供代替人工核对的确认工具。
+
+### 27.5 LLD：接口与 AI 审阅边界
+
+- /api/v1/agent-tasks：统一任务定义目录；内部旧路径不等于产品概念。
+- /api/v1/task-templates：只读内置模板；/task-hosts：不含 SSH 秘密的主机目录。
+- /api/v1/host-labels 与 /machines/:id/labels：主机标签目录与归属。
+- /api/v1/machines/:id/tasks 和 /task-overrides/:taskId：单机任务、覆盖与恢复继承。
+- /api/v1/agent-tasks/:id/dispatch、/task-runs、/task-runs/:id/cancel|retry|resolve：明确派发、记录、取消、重试与人工核对结束。
+- /api/v1/agents/:id/task-runs/claim、/:runId/heartbeat|result：出站 control 领取、租约及回执。
+- /api/v1/assistant/task-proposals/:id 和 /apply：用户查看与明确确认任务行动提案。
+
+平台写接口仅管理员可用，普通成员通过安全主机目录和任务接口只读访问。AI 工具提供 list_tasks/get_task、list_task_runs/get_task_run、propose_task_action/get_task_proposal；没有 apply 或直接执行工具。提案支持创建/修改任务、派发、取消、重试，保存所有者、会话、前后差异、目标绑定摘要与 15 分钟有效期，正文及审计加密保存。用户批准时，在同一数据库事务中重新核对任务定义、主机/Agent/标签/单机覆盖或执行状态，再提交变更和审批回执；重复确认返回已有结果，不产生第二次派发。AI 的执行查询只提供有限状态元数据，原始主机输出与领取凭证不进入模型上下文。
+
+### 27.6 验证与边界
+
+验证必须覆盖真实数据库迁移与重启、未安装主机标签、重新接入继承、默认拨测待配置、成员权限、派发原子性、快照不变、领取隔离、租约失效 unknown、结果重试、取消、当前定义显式重试、周期不重叠、不追赶、真实子进程超时/输出上限/最小环境以及浏览器任务操作。仅有任务 enabled 或创建 queued 记录不能声称主机已执行成功。发布到真实用户主机需要新 Agent 包；本地受控子进程验收不等于 vchive 或生产发布验收。
