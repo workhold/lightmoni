@@ -27,6 +27,7 @@ Agent config task: node.inspect / workload.apply / workload.inspect / workload.s
 API: /api/v1/ops/resources CRUD、resources/:id/actions、runs、overview；写动作 body 带 revision、confirmed=true、input。保存 enabled/auto_renew 及策略意味着管理员持续授权，保存记录 authorized_by；每次自动执行重查管理员权限。
 
 ## Design Decisions
+网站扩展使用共享 runtime/src/operations/nginx.ts 验证与编译普通站点配置，中心保存结构化 nginx/locations，Agent再次验证后生成完整版本包。每路径可直接后端或引用托管服务，服务端点在组包时解析；无健康端点只影响对应路径。自定义片段只在server/location上下文，词法扫描拒绝逃逸/include/动态代码等越界指令，仍由nginx -t最终验证。中心preview仅返回占位证书路径和公共配置，不含PEM/密钥/运行环境。现有Agent租约、完整包检查/切换/验证/恢复保持不变。
 中心每轮有界 reconciliation，持久队列和唯一键去重；多副本资源/端口在 SQLite transaction 预留，节点仍须现场检查。使用机器可达 IP+发布端口作发现；节点陈旧排除调度和发现，但 unknown 不释放资源、不静默迁移本地数据。网关默认覆盖组内全部节点，按各节点完整版本包执行 nginx -t/切换/reload/实际验证。DNS 只管理具有平台记录 ID 和归属的记录。云证书以上传/部署/回读多阶段确认；脚本按目标+证书版本去重，未知不自动重放。
 
 ## Delivery and Validation

@@ -4,6 +4,8 @@
 
 ## 实现与验收结论
 
+本轮多路径与Nginx高级配置、用户实际页面404修复和最新验收见 [validation-nginx.md](validation-nginx.md)。本文原有三轮页面记录为首版验收，新能力的独立三轮记录为ui-live/nginx-run-*.json；Doca最新同步为seq776。
+
 五个核心能力已接入真实管理 API、SQLite 加密资源和现有 Agent pull job/control lease：DNS 双平台；ACME/上传/自签及三类证书目标；Docker/Compose 应用；机器池、副本与健康发现；host OpenResty 网站。中心未引入 Docker socket 或第二控制通道。前端以五核心页签和基础设施抽屉管理共享资源，旧 `/services` 入口转向托管服务。
 
 证书新增目标覆盖阿里云、腾讯云、火山引擎的 CDN 域名，以及指定 Agent 的目录和更新脚本。配置与发布分开，证书目标/续期的持续策略要求管理员明确启用；执行按不可变版本去重，unknown 不自动重放。云端真实账号及公网发证未执行，不能由本地协议测试代替。
@@ -12,14 +14,14 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm --prefix runtime test` | 482项，462通过、20跳过、0失败，151.56秒 |
+| `npm --prefix runtime test` | 491项，470通过、21跳过、0失败，127.05秒 |
 | `npm --prefix ai-runtime test` | 71通过、0失败，33.22秒 |
 | `npm --prefix sdk/typescript test` | 18通过、0失败，32.19秒 |
 | `npm run typecheck` | runtime、ai-runtime、web全部通过 |
 | `npm run build` | SDK、runtime、ai-runtime、Web全部通过 |
 | `git diff --check` | 通过 |
 
-合计571项，551通过、20跳过。跳过包括Linux专属/旧systemd执行、需要外部ClickHouse和Go基线工具链的测试，以及默认未启用的Docker现场项；不计为通过。Docker现场另行显式启用，见下节。结构化计数见 [regression.json](evidence/regression.json)。构建存在依赖包已有的 `use client` 指令提示，退出码为0。
+合计580项，559通过、21跳过。跳过包括Linux专属/旧systemd执行、需要外部ClickHouse和Go基线工具链的测试，以及默认未启用的Docker现场项；不计为通过。Docker现场另行显式启用，见下节。结构化计数见 [regression.json](evidence/regression.json)。构建存在依赖包已有的 `use client` 指令提示，退出码为0。
 
 新增定向测试覆盖：全量资源引用校验与API分页、中心动作及真实Agent lease忙锁、加密请求快照/输入、关闭等待、独立领域收敛、角色撤销、DNS完整分页/64位ID/记录归属、云协议独立签名向量、ACME订单重启与同名TXT清理、不可变证书版本、逐目标结果、资源/端口事务预留、跨轮逐副本发布、离线/unknown和有界健康重建。
 

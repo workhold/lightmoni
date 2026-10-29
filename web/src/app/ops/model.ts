@@ -120,6 +120,24 @@ export function rowsMap(rows?: { key?: string; value?: string }[]) {
       .map((row) => [row.key!.trim(), row.value ?? ""]),
   );
 }
+const headerText = (value?: Spec) =>
+  Object.entries(value ?? {})
+    .map(([key, value]) => key + ": " + value)
+    .join("\n");
+function parseHeaders(text?: string): Spec {
+  const result: Spec = {};
+  for (const line of (text ?? "").split("\n")) {
+    if (!line.trim()) continue;
+    const colon = line.indexOf(":");
+    if (colon < 1)
+      throw Error("Header must use Name: Value / 请求头格式应为 名称: 值");
+    const key = line.slice(0, colon).trim();
+    if (Object.keys(result).some((k) => k.toLowerCase() === key.toLowerCase()))
+      throw Error("Duplicate header / 请求头名称重复");
+    result[key] = line.slice(colon + 1).trim();
+  }
+  return result;
+}
 export function editorValues(kind: ResourceKind, resource?: Resource) {
   const defaults: Partial<Record<ResourceKind, Spec>> = {
     credential: { provider: "aliyun" },
@@ -168,7 +186,27 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
       http_port: 80,
       https_port: 443,
     },
-    website: { domains: [], mode: "proxy", https: false, dns_enabled: false },
+    website: {
+      domains: [],
+      mode: "proxy",
+      https: false,
+      dns_enabled: false,
+      nginx: {
+        body_size_mb: 20,
+        keepalive_seconds: 75,
+        gzip: false,
+        gzip_level: 5,
+        access_log: true,
+        error_log_level: "warn",
+        http2: false,
+        redirect_https: false,
+        tls_protocols: ["TLSv1.2", "TLSv1.3"],
+        index: ["index.html"],
+        spa_fallback: false,
+        autoindex: false,
+        expires_seconds: 0,
+      },
+    },
   };
   const spec = { ...defaults[kind], ...resource?.spec };
   spec.env_rows = mapRows(spec.environment ?? spec.env);
@@ -178,6 +216,33 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
   spec.upstream_rows = (spec.upstreams ?? []).map((value: string) => ({
     value,
   }));
+  if (kind === "website") {
+    spec.nginx = {
+      ...spec.nginx,
+      response_headers_text: headerText(spec.nginx?.response_headers),
+    };
+    spec.locations = (
+      spec.locations ??
+      (spec.upstreams?.length
+        ? [
+            {
+              path: "/",
+              match: "prefix",
+              action: "proxy",
+              target: "upstream",
+              upstreams: spec.upstreams,
+            },
+          ]
+        : [])
+    ).map((r: Spec) => ({
+      ...r,
+      upstreams: (r.upstreams ?? []).map((u: any) =>
+        typeof u === "string" ? { url: u, weight: 1 } : u,
+      ),
+      request_headers_text: headerText(r.request_headers),
+      response_headers_text: headerText(r.response_headers),
+    }));
+  }
   spec.mounts = (spec.mounts ?? []).map((mount: Spec) => ({
     ...mount,
     file_rows: mapRows(mount.files),
@@ -216,9 +281,22 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
   }
   if (kind === "website") {
     spec.static_files = rowsMap(spec.file_rows);
-    spec.upstreams = (spec.upstream_rows ?? [])
-      .map((r: Spec) => r.value?.trim())
-      .filter(Boolean);
+    spec.nginx = {
+      ...spec.nginx,
+      response_headers: parseHeaders(spec.nginx?.response_headers_text),
+    };
+    delete spec.nginx.response_headers_text;
+    spec.locations = (spec.locations ?? []).map((r: Spec) => {
+      const route: Spec = {
+        ...r,
+        request_headers: parseHeaders(r.request_headers_text),
+        response_headers: parseHeaders(r.response_headers_text),
+      };
+      delete route.request_headers_text;
+      delete route.response_headers_text;
+      return route;
+    });
+    delete spec.upstreams;
     if (spec.mode !== "static") delete spec.static_files;
     if (spec.mode !== "proxy") delete spec.upstreams;
     if (spec.mode !== "service") delete spec.service_id;

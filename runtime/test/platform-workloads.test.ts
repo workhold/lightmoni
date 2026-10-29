@@ -702,3 +702,59 @@ test("an unconfigured machine pool discovers actual node capacity before schedul
     2,
   );
 });
+
+test("per-path service discovery preserves independent manual routes and blocks nested service deletion", async (t) => {
+  const f = setup(t),
+    pool = f.pool(),
+    app = f.app();
+  const service = f.store.create(
+    "service",
+    "Route service",
+    {
+      application_id: app.id,
+      node_pool_id: pool.id,
+      replicas: 1,
+      container_port: 8080,
+    },
+    "admin",
+  );
+  const group = f.store.create(
+    "gateway_group",
+    "Route gateways",
+    { agent_ids: ["node-a"] },
+    "admin",
+  );
+  const site = f.store.create(
+    "website",
+    "Routes",
+    {
+      domains: ["paths.example.test"],
+      gateway_group_id: group.id,
+      mode: "proxy",
+      locations: [
+        { path: "/api/", target: "service", service_id: service.id },
+        { path: "/", upstreams: ["http://10.1.0.8:8080"] },
+      ],
+    },
+    "admin",
+  );
+  assert.throws(
+    () => f.store.remove(service.id, service.revision),
+    /platform_resource_in_use/,
+  );
+  await f.controller.perform(site, "deploy", {}, "admin");
+  const payload = f.finish("node-a", {
+    healthy: true,
+    running: true,
+    digest: "test",
+    task: "gateway.apply",
+    instance_id: f.db.get<any>(
+      "SELECT id FROM ops_platform_instances WHERE owner_id=?",
+      group.id,
+    )!.id,
+  });
+  const routes = payload.resource.config.sites[0].locations;
+  assert.equal(routes[0].unavailable, true);
+  assert.equal(routes[0].service_id, service.id);
+  assert.equal(routes[1].upstreams[0].url, "http://10.1.0.8:8080");
+});

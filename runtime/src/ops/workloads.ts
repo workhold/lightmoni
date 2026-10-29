@@ -10,7 +10,9 @@ import {
   normalizeApplication,
   object,
   port,
+  renderGateway,
 } from "../operations/platform.js";
+import { normalizeNginx, normalizeLocations } from "../operations/nginx.js";
 import { getCertificateMaterial } from "./certificates.js";
 import { ensureDnsRecords } from "./cloud.js";
 import type {
@@ -338,7 +340,14 @@ export function createWorkloadController(
     if (
       store
         .list(kind as any)
-        .some((r) => r.spec[field] === key || desired(r).spec[field] === key)
+        .some((r) =>
+          [r.spec, desired(r).spec].some(
+            (s) =>
+              s[field] === key ||
+              (field === "service_id" &&
+                (s.locations ?? []).some((l: any) => l.service_id === key)),
+          ),
+        )
     )
       fail(409, "platform_resource_in_use");
   };
@@ -484,6 +493,7 @@ export function createWorkloadController(
         gateway_group_id: s.gateway_group_id,
         https: Boolean(s.https ?? s.certificate_id),
         dns_enabled: Boolean(s.dns_enabled ?? s.dns_zone_id),
+        nginx: normalizeNginx(s.nginx),
       };
       if (s.mode === "static")
         out.static_files = files(
@@ -492,31 +502,28 @@ export function createWorkloadController(
               "<!doctype html><html><body><h1>LightMoni</h1></body></html>",
           },
         );
+      if (
+        s.mode === "static" &&
+        out.nginx.spa_fallback &&
+        !(out.nginx.index[0] in out.static_files)
+      )
+        fail(400, "spa_index_file_required");
       if (s.mode === "proxy") {
-        out.upstreams = values(
-          s.upstreams ?? (s.upstream ? [s.upstream] : []),
-          "upstreams",
-          100,
+        out.locations = normalizeLocations(
+          s.locations ?? [
+            {
+              path: "/",
+              upstreams: s.upstreams ?? (s.upstream ? [s.upstream] : []),
+            },
+          ],
         );
-        if (!out.upstreams.length) fail(400, "website_upstream_required");
-        for (const p of out.upstreams) {
-          let u: URL;
-          try {
-            u = new URL(p);
-          } catch {
-            fail(400, "invalid_website_upstream");
-          }
-          if (
-            !["http:", "https:"].includes(u!.protocol) ||
-            u!.username ||
-            u!.password ||
-            u!.pathname !== "/" ||
-            u!.search ||
-            u!.hash
-          )
-            fail(400, "invalid_website_upstream");
-        }
+        if (!out.locations.length) fail(400, "website_location_required");
+      } else {
+        out.locations = normalizeLocations(s.locations ?? []);
       }
+      for (const location of out.locations)
+        if (location.target === "service")
+          store.get(location.service_id, "service");
       if (s.mode === "service") {
         store.get(s.service_id, "service");
         out.service_id = s.service_id;
@@ -984,6 +991,84 @@ export function createWorkloadController(
     });
     return instance(i!.id);
   }
+  function siteBundle(site: PlatformResource, preview = false) {
+    const s: any = {
+      id: site.id,
+      domains: site.spec.domains,
+      mode: site.spec.mode,
+      nginx: structuredClone(site.spec.nginx ?? {}),
+      locations: structuredClone(site.spec.locations ?? []),
+    };
+    const serviceURLs = (key: string) =>
+      endpoints(key).map(
+        (e) =>
+          "http://" +
+          (isIP(e.ip) === 6 ? "[" + e.ip + "]" : e.ip) +
+          ":" +
+          e.port,
+      );
+    if (site.spec.mode === "static") s.static_files = site.spec.static_files;
+    if (
+      site.spec.mode === "service" &&
+      !s.locations.some(
+        (r: any) =>
+          r.path === "/" &&
+          ["prefix", "prefer_prefix"].includes(r.match ?? "prefix"),
+      )
+    )
+      s.locations.unshift({
+        path: "/",
+        target: "service",
+        service_id: site.spec.service_id,
+      });
+    if (site.spec.mode === "proxy" && !s.locations.length)
+      s.locations = [{ path: "/", upstreams: site.spec.upstreams ?? [] }];
+    for (const route of s.locations) {
+      if (route.target === "service") {
+        route.upstreams = serviceURLs(route.service_id);
+        route.unavailable = !route.upstreams.length;
+      }
+      if (preview) {
+        route.custom_config = route.custom_config
+          ? "# Custom location directives omitted from preview"
+          : "";
+        for (const h of [route.request_headers, route.response_headers])
+          for (const key of Object.keys(h ?? {}))
+            if (/authorization|cookie|token|secret|api.?key/i.test(key))
+              h[key] = "[redacted]";
+      }
+    }
+    if (preview)
+      for (const key of Object.keys(s.nginx.response_headers ?? {}))
+        if (/authorization|cookie|token|secret|api.?key/i.test(key))
+          s.nginx.response_headers[key] = "[redacted]";
+    if (preview && s.nginx?.server_snippet)
+      s.nginx = {
+        ...s.nginx,
+        server_snippet: "# Custom server directives omitted from preview",
+      };
+    if (site.spec.https)
+      s.certificate = preview
+        ? {}
+        : getCertificateMaterial(store, site.spec.certificate_id);
+    return s;
+  }
+  deps.router.get("/api/v1/ops/resources/:id/nginx", (ctx) => {
+    deps.auth.requireAdmin(ctx);
+    const site = store.get(ctx.params.id, "website"),
+      group = store.get(site.spec.gateway_group_id, "gateway_group");
+    ctx.res.setHeader("cache-control", "no-store");
+    ctx.json({
+      revision: site.revision,
+      config: renderGateway(
+        { ...group.spec, sites: [siteBundle(site, true)] },
+        "PREVIEW",
+        true,
+      ),
+      redacted: true,
+      validated: false,
+    });
+  });
   function gatewayBundle(group: PlatformResource) {
     const sites: any[] = [],
       revisions: Record<string, number> = {};
@@ -996,29 +1081,7 @@ export function createWorkloadController(
         continue;
       revisions[site.id] = site.revision;
       if (site.status.enabled !== true) continue;
-      const s: any = {
-        id: site.id,
-        domains: site.spec.domains,
-        mode: site.spec.mode,
-        ...(site.spec.mode === "static"
-          ? { static_files: site.spec.static_files }
-          : {
-              upstreams:
-                site.spec.mode === "service"
-                  ? endpoints(site.spec.service_id).map(
-                      (e) =>
-                        "http://" +
-                        (isIP(e.ip) === 6 ? "[" + e.ip + "]" : e.ip) +
-                        ":" +
-                        e.port,
-                    )
-                  : site.spec.upstreams,
-            }),
-      };
-      if (site.spec.https)
-        s.certificate = getCertificateMaterial(store, site.spec.certificate_id);
-      if (s.mode !== "static" && !s.upstreams?.length) s.unavailable = true;
-      sites.push(s);
+      sites.push(siteBundle(site));
     }
     const config = {
       task: "gateway.apply",

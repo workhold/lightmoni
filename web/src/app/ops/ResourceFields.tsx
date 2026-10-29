@@ -14,6 +14,7 @@ import {
 } from "../../shared/ui";
 import { useI18n } from "../../shared/i18n";
 import type { Agent, Resource, ResourceKind } from "./model";
+import NginxFields from "./NginxFields";
 
 type Props = {
   kind: ResourceKind;
@@ -1292,15 +1293,9 @@ export default function ResourceFields({
               code
             />
           )}
-          {mode === "proxy" && (
-            <Values
-              name="upstream_rows"
-              label={t("后端地址", "Backend addresses")}
-              placeholder="http://10.0.0.11:8080"
-            />
-          )}
           {mode === "service" &&
             ref("service_id", t("托管服务", "Hosted service"), "service")}
+          <NginxFields resources={resources} mode={mode}/>
           <Divider titlePlacement="start">
             {t("HTTPS 与域名联动", "HTTPS and DNS integration")}
           </Divider>

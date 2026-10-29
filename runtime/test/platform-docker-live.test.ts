@@ -272,3 +272,260 @@ test(
     );
   },
 );
+
+test(
+  "real host OpenResty applies multi-path URI routing, CORS, headers, WebSocket and rejects a bad reload",
+  { skip: !live || process.platform !== "linux", timeout: 180000 },
+  async (t) => {
+    const { createServer, request } = await import("node:http");
+    const { createHash } = await import("node:crypto");
+    let backendCount = 0;
+    const backend = createServer(async (req, res) => {
+      res.setHeader("X-Backend-Count", String(++backendCount));
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      res.setHeader("content-type", "application/json");
+      res.setHeader("X-Upstream-Secret", "hidden");
+      res.end(
+        JSON.stringify({
+          url: req.url,
+          host: req.headers.host,
+          request_id: req.headers["x-request-id"],
+          body,
+        }),
+      );
+    });
+    const upgraded = new Set<any>();
+    backend.on("upgrade", (req, socket) => {
+      upgraded.add(socket);
+      socket.once("close", () => upgraded.delete(socket));
+      socket.write(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " +
+          createHash("sha1")
+            .update(
+              String(req.headers["sec-websocket-key"]) +
+                "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+            )
+            .digest("base64") +
+          "\r\n\r\n",
+      );
+    });
+    await new Promise<void>((resolve) =>
+      backend.listen(0, "127.0.0.1", resolve),
+    );
+    t.after(async () => {
+      for (const s of upgraded) s.destroy();
+      backend.closeAllConnections();
+      await new Promise<void>((resolve) => backend.close(() => resolve()));
+    });
+    const url = "http://127.0.0.1:" + (backend.address() as any).port,
+      f = await setup(t),
+      site = crypto.randomUUID().replaceAll("-", ""),
+      http_port = 23891;
+    const config: any = {
+      task: "gateway.apply",
+      http_port,
+      https_port: 23892,
+      sites: [
+        {
+          id: site,
+          domains: ["paths.example.test"],
+          mode: "proxy",
+          nginx: {
+            body_size_mb: 1,
+            gzip: true,
+            response_headers: { "X-Site": "site-value" },
+            server_snippet: "client_body_timeout 15s;",
+          },
+          locations: [
+            {
+              path: "/api/",
+              upstreams: [url],
+              uri_mode: "strip_prefix",
+              request_headers: { "X-Request-ID": "$request_id" },
+              response_headers: { "X-Route": "api" },
+              hide_headers: ["X-Upstream-Secret"],
+              cors: {
+                enabled: true,
+                origin: "https://app.example.test",
+                credentials: true,
+              },
+              buffering: false,
+            },
+            { path: "/raw/", upstreams: [url], host_header: "origin.internal" },
+            {
+              path: "/legacy/",
+              upstreams: [url],
+              uri_mode: "replace_prefix",
+              uri_prefix: "/v2/",
+            },
+            {
+              path: "/go",
+              match: "exact",
+              action: "return",
+              return_status: 308,
+              return_value: "https://example.test/new",
+            },
+            { path: "^/images/", match: "regex", upstreams: [url] },
+            { path: "/ws", upstreams: [url], websocket: true },
+            { path: "/private", upstreams: [url], deny: ["all"] },
+            {
+              path: "/cached/",
+              upstreams: [url],
+              cache: { enabled: true, ttl_seconds: 60, max_size_mb: 10 },
+            },
+            {
+              path: "/limited/",
+              upstreams: [url],
+              requests_per_second: 1,
+              connections: 10,
+            },
+          ],
+        },
+      ],
+    };
+    const get = (path: string, options: any = {}): Promise<Response> =>
+      new Promise((resolve, reject) => {
+        const req = request(
+          {
+            host: "127.0.0.1",
+            port: http_port,
+            path,
+            method: options.method ?? "GET",
+            headers: { Host: "paths.example.test", ...options.headers },
+          },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on("data", (chunk) => chunks.push(chunk));
+            res.on("end", () =>
+              resolve(
+                new Response(
+                  res.statusCode === 204 ? null : Buffer.concat(chunks),
+                  {
+                    status: res.statusCode,
+                    headers: Object.fromEntries(
+                      Object.entries(res.headers)
+                        .filter(([, v]) => v !== undefined)
+                        .map(([k, v]) => [
+                          k,
+                          Array.isArray(v) ? v.join(", ") : String(v),
+                        ]),
+                    ),
+                  },
+                ),
+              ),
+            );
+          },
+        );
+        req.once("error", reject);
+        req.end(options.body);
+      });
+    let receipt = await f.run(config);
+    assert.equal(receipt.state, "succeeded", JSON.stringify(receipt));
+    let response = await get("/api/items?x=1");
+    assert.equal(response.status, 200);
+    const data: any = await response.json();
+    assert.equal(data.url, "/items?x=1");
+    assert.match(data.request_id, /^[a-f0-9]{32}$/);
+    assert.equal(response.headers.get("x-site"), "site-value");
+    assert.equal(response.headers.get("x-route"), "api");
+    assert.equal(response.headers.get("x-upstream-secret"), null);
+    assert.equal(
+      response.headers.get("access-control-allow-origin"),
+      "https://app.example.test",
+    );
+    response = await get("/raw/items");
+    assert.deepEqual(await response.json(), {
+      url: "/raw/items",
+      host: "origin.internal",
+      body: "",
+    });
+    assert.equal(
+      ((await (await get("/legacy/items?x=2")).json()) as any).url,
+      "/v2/items?x=2",
+    );
+    assert.equal(
+      ((await (await get("/images/a.png")).json()) as any).url,
+      "/images/a.png",
+    );
+    response = await get("/api/items", {
+      method: "OPTIONS",
+      headers: { Origin: "https://app.example.test" },
+    });
+    assert.equal(response.status, 204);
+    assert.equal(
+      response.headers.get("access-control-allow-credentials"),
+      "true",
+    );
+    response = await get("/go");
+    assert.equal(response.status, 308);
+    assert.equal(response.headers.get("location"), "https://example.test/new");
+    assert.equal((await get("/unmatched")).status, 404);
+    assert.equal((await get("/private")).status, 403);
+    assert.equal(
+      (
+        await get("/api/upload", {
+          method: "POST",
+          body: "x".repeat(1024 * 1024 + 1),
+        })
+      ).status,
+      413,
+    );
+    await new Promise<void>((resolve, reject) => {
+      const req = request(
+        {
+          host: "127.0.0.1",
+          port: http_port,
+          path: "/ws",
+          headers: {
+            Host: "paths.example.test",
+            Connection: "Upgrade",
+            Upgrade: "websocket",
+            "Sec-WebSocket-Key": Buffer.alloc(16).toString("base64"),
+            "Sec-WebSocket-Version": "13",
+          },
+        },
+        (res) => reject(Error("upgrade returned " + res.statusCode)),
+      );
+      req.once("upgrade", (res, socket) => {
+        assert.equal(res.statusCode, 101);
+        socket.destroy();
+        resolve();
+      });
+      req.once("error", reject);
+      req.setTimeout(5000, () => req.destroy(Error("upgrade timeout")));
+      req.end();
+    });
+    response = await get("/cached/item");
+    assert.equal(response.headers.get("x-lightmoni-cache"), "MISS");
+    const cachedCount = response.headers.get("x-backend-count");
+    response = await get("/cached/item");
+    assert.equal(response.headers.get("x-lightmoni-cache"), "HIT");
+    assert.equal(response.headers.get("x-backend-count"), cachedCount);
+    for (const headers of [
+      { Authorization: "Bearer private-user-token" },
+      { Cookie: "session=private-session" },
+    ]) {
+      response = await get("/cached/item", { headers });
+      assert.equal(response.headers.get("x-lightmoni-cache"), "BYPASS");
+      assert.notEqual(response.headers.get("x-backend-count"), cachedCount);
+    }
+    const limited = await Promise.all([
+      get("/limited/a"),
+      get("/limited/b"),
+      get("/limited/c"),
+    ]);
+    assert.ok(limited.some((r) => r.status === 429));
+    config.sites[0].nginx.server_snippet = "unknown_lightmoni_directive on;";
+    receipt = await f.run(config);
+    assert.equal(receipt.state, "failed");
+    assert.equal(
+      ((await (await get("/api/still-active")).json()) as any).url,
+      "/still-active",
+    );
+    assert.equal(
+      (await f.run({ task: "gateway.stop" }, "stop")).state,
+      "succeeded",
+    );
+  },
+);

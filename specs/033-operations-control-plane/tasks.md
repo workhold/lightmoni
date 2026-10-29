@@ -30,6 +30,11 @@
 - [x] T017 定向/相关回归、类型与构建、diff 检查，同步 origin/main 并通过 GitHub 功能分支 [PR #15](https://github.com/workhold/lightmoni/pull/15) 交付，未经授权不合并。
 
 ## Dependencies
+- [x] T018 修复当前18880开发运行实例版本滞后，浏览器实际页面验证。
+- [x] T019 扩展网站Nginx模型、共享校验/编译、多location与站点/代理选项，增加安全配置预览。
+- [x] T020 网站类型化高级设置和多路径表单，中英文/窄屏/保存读回。
+- [x] T021 URI、匹配优先级、头部、WebSocket、限制与片段边界测试，以及真实OpenResty回归。
+- [x] T022 同步SDD/仓库/Doca，记录实际页面和Nginx验收并更新PR #15。
 T001→T002；T003/T004 与 T005/T006/T007 可独立并行；T008 共用 Agent 执行器；T009 依赖应用，T010/T011 依赖证书/服务/网关；T012 按固定 API 并行；最终 T014–T017。
 
 ## Parallel examples and implementation strategy

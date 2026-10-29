@@ -20,3 +20,7 @@ Decision: 管理员证书脚本作为显式策略固定正文/目标/解释器/�
 三云映射按凭据账号与证书指纹持久去重；写入超时后先回读，无法确定的执行保留 unknown，不自动重放。目标 inspect 只回读云绑定、实际目录证书或原脚本成功标记；核对不能自动解除 Agent 全节点执行隔离。已知失败通过管理员 retry 重试，证书签发/续期失败通过 issue/renew 重试；首版未声称实现自动失败退避。DNS 区域每五分钟进行只读观察同步，单轮最多十个到期区域，授权被撤销即停止新动作。到期提醒提供公开 expiry_warning/expired 状态，首版没有声称已发送邮件等通知。
 
 本地协议验证包含真实 SQLite、HTTP 身份校验/分页、Agent job/lease/receipt、独立计算的腾讯/火山签名固定向量、64 位 DNS ID、两平台 CRUD、三云上传/绑定/回读与同名 ACME TXT 清理。云端请求与 ACME CA 在本地测试中使用协议夹具；没有运行时云凭据，未执行真实云账号写入或公网 ACME staging 签发，交付验收必须保留这一限制。
+
+## Nginx扩展
+
+以官方[proxy模块](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)、[core/location模块](https://nginx.org/en/docs/http/ngx_http_core_module.html)、[upstream模块](https://nginx.org/en/docs/http/ngx_http_upstream_module.html)核对URI替换、匹配优先级、header继承、缓冲与缓存、upstream权重/失败参数。站点与Agent复用共享编译器；不拼接HTTP/URL中的未转义指令。真实OpenResty验收覆盖原生匹配、查询串、缓存命中/鉴权绕过、429和错误配置前置拒绝，不能只凭生成字符串推断行为。

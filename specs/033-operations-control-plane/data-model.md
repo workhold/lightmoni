@@ -16,3 +16,5 @@ ops_dns_observed: (zone_id,record_id) PK、name/type/value/record_json，全量�
 ops_cloud_certificates: id PK、credential_id/fingerprint/provider_certificate_id/state/updated_at。id 由提供商、账号身份和证书指纹派生，复用上传并以回读确认绑定，避免跨账号错误复用。
 
 中心执行的 payload_cipher 保存 resource_snapshot 与 input，Agent执行保存完整冻结config；普通job不含PEM、云凭据或脚本。所有秘密列使用现有中心AES-GCM，公用status/result保存脱敏有界摘要。此版本直接建立新模型，不迁移旧网站/容器记录。
+
+网站spec新增 `nginx`（站点设置）和 `locations[]`（匹配、动作、后端、转发/缓存/ACL/头部/片段）。沿用现有spec_cipher和不可变修订，不新增数据库表。Location可引用service_id，当前与已发布修订均限制删除依赖服务；网关包中逐路径固化健康端点，摘要包含全部Nginx配置。缓存/限流区由siteID+规则索引隔离，数据存网关容器/tmp，不进入业务持久卷。

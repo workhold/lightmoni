@@ -230,11 +230,109 @@ test("self-signed certificate travels through real HTTP, private Agent lease, di
   );
 });
 
-test('first HTTPS website deployment automatically issues its selected certificate before queuing gateways',async t=>{
- const f=await setup(t),cert=await f.create('certificate','First HTTPS certificate',{source:'self_signed',domains:['first.example.test'],validity_days:3,auto_renew:false}),group=await f.create('gateway_group','First HTTPS gateways',{agent_ids:['node-a'],http_port:18088,https_port:18488});
- const website=await f.create('website','First HTTPS website',{mode:'static',domains:['first.example.test'],static_files:{'index.html':'<h1>First HTTPS</h1>'},gateway_group_id:group.id,https:true,certificate_id:cert.id});
- assert.equal(f.platform.store.get(cert.id).status.certificate_version,undefined);
- const deployed=await f.action(website,'deploy');assert.equal(deployed.status,202,JSON.stringify(deployed));assert.equal(deployed.body.runs.length,1);
- assert.ok(f.platform.store.get(cert.id).status.certificate_version);const job=f.jobs.claim('node-a',['operations.platform'])!,payload=f.platform.resolvePayload(job);
- assert.equal(payload.resource.config.task,'gateway.apply');assert.match(payload.resource.config.sites[0].certificate.certificate_pem,/BEGIN CERTIFICATE/);assert.equal(JSON.stringify(job).includes('BEGIN CERTIFICATE'),false);
+test("first HTTPS website deployment automatically issues its selected certificate before queuing gateways", async (t) => {
+  const f = await setup(t),
+    cert = await f.create("certificate", "First HTTPS certificate", {
+      source: "self_signed",
+      domains: ["first.example.test"],
+      validity_days: 3,
+      auto_renew: false,
+    }),
+    group = await f.create("gateway_group", "First HTTPS gateways", {
+      agent_ids: ["node-a"],
+      http_port: 18088,
+      https_port: 18488,
+    });
+  const website = await f.create("website", "First HTTPS website", {
+    mode: "static",
+    domains: ["first.example.test"],
+    static_files: { "index.html": "<h1>First HTTPS</h1>" },
+    gateway_group_id: group.id,
+    https: true,
+    certificate_id: cert.id,
+  });
+  assert.equal(
+    f.platform.store.get(cert.id).status.certificate_version,
+    undefined,
+  );
+  const deployed = await f.action(website, "deploy");
+  assert.equal(deployed.status, 202, JSON.stringify(deployed));
+  assert.equal(deployed.body.runs.length, 1);
+  assert.ok(f.platform.store.get(cert.id).status.certificate_version);
+  const job = f.jobs.claim("node-a", ["operations.platform"])!,
+    payload = f.platform.resolvePayload(job);
+  assert.equal(payload.resource.config.task, "gateway.apply");
+  assert.match(
+    payload.resource.config.sites[0].certificate.certificate_pem,
+    /BEGIN CERTIFICATE/,
+  );
+  assert.equal(JSON.stringify(job).includes("BEGIN CERTIFICATE"), false);
+});
+
+test("saved multi-path Nginx preview is administrator-only, redacted and does not deploy", async (t) => {
+  const f = await setup(t);
+  const group = await f.create("gateway_group", "Preview gateways", {
+    agent_ids: ["node-a"],
+    http_port: 18080,
+    https_port: 18443,
+  });
+  const site = await f.create("website", "Multiple paths", {
+    domains: ["routes.example.test"],
+    gateway_group_id: group.id,
+    mode: "proxy",
+    nginx: { gzip: true, server_snippet: "client_body_timeout 45s;" },
+    locations: [
+      {
+        path: "/api/",
+        upstreams: [{ url: "http://127.0.0.1:3000", weight: 2 }],
+        uri_mode: "strip_prefix",
+        request_headers: { Authorization: "private-header-value" },
+        custom_config: "proxy_cookie_path / /app/;",
+      },
+      {
+        path: "/old",
+        match: "exact",
+        action: "return",
+        return_status: 308,
+        return_value: "https://$host/new",
+      },
+    ],
+  });
+  assert.equal(site.spec.locations.length, 2);
+  const preview = await f.req("/ops/resources/" + site.id + "/nginx");
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.validated, false);
+  assert.equal(preview.body.redacted, true);
+  assert.ok(preview.body.config.includes('location "/api/"'));
+  assert.ok(preview.body.config.includes("gzip on;"));
+  assert.ok(preview.body.config.includes("[redacted]"));
+  for (const value of [
+    "private-header-value",
+    "proxy_cookie_path",
+    "client_body_timeout",
+  ])
+    assert.ok(!preview.body.config.includes(value));
+  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0);
+  assert.equal(
+    (
+      await f.req("/ops/resources/" + site.id + "/nginx", "GET", undefined, {
+        "x-role": "member",
+      })
+    ).status,
+    403,
+  );
+  const invalid = await f.req("/ops/resources/" + site.id, "PUT", {
+    revision: site.revision,
+    name: site.name,
+    spec: {
+      ...site.spec,
+      locations: [
+        {
+          ...site.spec.locations[0],
+          custom_config: "} server { return 200; }",
+        },
+      ],
+    },
+  });
+  assert.equal(invalid.status, 400);
 });

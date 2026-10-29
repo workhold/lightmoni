@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-29T01:50:10.522Z",
+  "checked_at": "2026-10-29T02:18:08.305Z",
   "fixture": "Isolated in-memory HTTP API. No Docker, DNS, CA or cloud calls.",
   "checks": [
     "五能力入口、共享资源和既有视觉加载",

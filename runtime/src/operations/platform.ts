@@ -34,6 +34,12 @@ import {
   probeHTTP,
 } from "./website-files.js";
 import { certificateMetadata } from "./certificates.js";
+import {
+  normalizeNginx,
+  normalizeLocations,
+  renderNginxOptions,
+  renderLocations,
+} from "./nginx.js";
 
 const INSTANCE_LABEL = "io.lightmoni.platform.instance";
 const OWNER_LABEL = "io.lightmoni.platform.owner";
@@ -1126,7 +1132,7 @@ async function inspectHook(
   };
 }
 
-function renderGateway(c: any, digest: string): string {
+export function renderGateway(c: any, digest: string, preview = false): string {
   const base = "/etc/lightmoni/versions/" + digest,
     sites = c.sites ?? [],
     lines = [
@@ -1139,6 +1145,7 @@ function renderGateway(c: any, digest: string): string {
       "  default_type application/octet-stream;",
       "  access_log /dev/stdout;",
       "  server_tokens off;",
+      '  map $http_upgrade $lightmoni_connection_upgrade { default upgrade; "" ""; }',
       `  server { listen ${port(c.http_port ?? 80)} default_server; server_name _; location = /.well-known/lightmoni-gateway { default_type text/plain; return 200 ${quote(digest)}; } location / { return 404; } }`,
     ];
   for (const site of sites) {
@@ -1149,74 +1156,77 @@ function renderGateway(c: any, digest: string): string {
       domains.some((d) => !/^\*?\.?[A-Za-z0-9.-]+$/.test(d) || d.includes(".."))
     )
       reject("INVALID_WEBSITE_DOMAIN");
-    let upstreams: string[] = [];
-    if (site.mode !== "static" && !site.unavailable) {
-      upstreams = strings(site.upstreams ?? [], "upstream", 200);
-      if (!upstreams.length) reject("WEBSITE_HAS_NO_HEALTHY_ENDPOINT");
-      lines.push(`  upstream backend_${siteID} {`);
-      for (const raw of upstreams) {
-        let u: URL;
-        try {
-          u = new URL(raw);
-        } catch {
-          reject("INVALID_UPSTREAM");
-        }
-        if (
-          !["http:", "https:"].includes(u!.protocol) ||
-          u!.username ||
-          u!.password ||
-          u!.pathname !== "/" ||
-          u!.search ||
-          u!.hash
-        )
-          reject("INVALID_UPSTREAM");
-        if (upstreams.some((s) => new URL(s).protocol !== u!.protocol))
-          reject("MIXED_UPSTREAM_PROTOCOLS");
-        lines.push(
-          `    server ${u!.host}${u!.port ? "" : u!.protocol === "https:" ? ":443" : ":80"};`,
-        );
-      }
-      lines.push("  }");
-    }
+    const settings = normalizeNginx(site.nginx);
+    const rawRoutes =
+      site.locations ??
+      (site.mode === "static"
+        ? []
+        : [
+            {
+              path: "/",
+              upstreams: site.upstreams ?? [],
+              unavailable: site.unavailable,
+            },
+          ]);
+    const routes = normalizeLocations(rawRoutes);
+    const rendered = renderLocations(routes, siteID, settings);
+    lines.push(...rendered.upstreams);
     lines.push(
       "  server {",
       `    listen ${port(c.http_port ?? 80)};`,
       `    server_name ${domains.join(" ")};`,
-      `    location = /.well-known/lightmoni-health { default_type text/plain; return 200 ${quote(proof)}; }`,
+      `    location = /.well-known/lightmoni-health { allow 127.0.0.1; allow ::1; deny all; default_type text/plain; return 200 ${quote(proof)}; }`,
     );
     if (site.certificate) {
-      certificateMetadata(
-        site.certificate.certificate_pem,
-        site.certificate.private_key_pem,
-        domains,
-        undefined,
-      );
+      if (!preview)
+        certificateMetadata(
+          site.certificate.certificate_pem,
+          site.certificate.private_key_pem,
+          domains,
+          undefined,
+        );
       lines.push(
         `    listen ${port(c.https_port ?? 443)} ssl;`,
-        "    ssl_protocols TLSv1.2 TLSv1.3;",
+        `    ssl_protocols ${settings.tls_protocols.join(" ")};`,
+        ...(settings.http2 ? ["    http2 on;"] : []),
         `    ssl_certificate ${quote(base + "/sites/" + siteID + "/fullchain.pem")};`,
         `    ssl_certificate_key ${quote(base + "/sites/" + siteID + "/privkey.pem")};`,
       );
     }
-    if (site.mode === "static")
+    lines.push(...renderNginxOptions(settings));
+    const redirect =
+      settings.redirect_https && site.certificate
+        ? `if ($scheme = http) { return 308 https://$host${Number(c.https_port ?? 443) === 443 ? "" : ":" + port(c.https_port)}$request_uri; }`
+        : "";
+    // Redirects belong to user locations so the internal deployment proof remains reachable.
+    if (redirect)
+      for (let n = 0; n < rendered.locations.length; n++)
+        if (rendered.locations[n].startsWith("location "))
+          rendered.locations.splice(++n, 0, redirect);
+    if (site.mode === "static") {
       lines.push(
         `    root ${quote(base + "/sites/" + siteID + "/public")};`,
-        "    index index.html;",
-        "    location / { try_files $uri $uri/ =404; }",
+        `    index ${settings.index.join(" ")};`,
+        `    autoindex ${settings.autoindex ? "on" : "off"};`,
+        ...(settings.expires_seconds
+          ? [`expires ${settings.expires_seconds}s;`]
+          : []),
+        ...(!routes.some(
+          (r) =>
+            r.path === "/" && ["prefix", "prefer_prefix"].includes(r.match),
+        )
+          ? [
+              `location / { ${redirect} try_files $uri $uri/ ${settings.spa_fallback ? "/" + settings.index[0] : "=404"}; }`,
+            ]
+          : []),
       );
-    else if (site.unavailable) lines.push("    location / { return 503; }");
-    else
-      lines.push(
-        "    location / {",
-        `      proxy_pass ${new URL(upstreams[0]).protocol}//backend_${siteID};`,
-        "      proxy_set_header Host $host;",
-        "      proxy_set_header X-Real-IP $remote_addr;",
-        "      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "      proxy_set_header X-Forwarded-Proto $scheme;",
-        "      proxy_ssl_server_name on;",
-        "      proxy_connect_timeout 5s;",
-        "    }",
-      );
+    } else if (
+      !routes.some(
+        (r) => r.path === "/" && ["prefix", "prefer_prefix"].includes(r.match),
+      )
+    )
+      lines.push(`location / { ${redirect} return 404; }`);
+    lines.push(...rendered.locations);
     lines.push("  }");
   }
   return lines.concat("}").join("\n") + "\n";
