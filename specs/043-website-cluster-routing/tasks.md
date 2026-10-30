@@ -25,7 +25,9 @@
 ## Phase 6 Validation and documentation
 - [x] T010 在web/src/app/ops/verify-website-routing-ui.mjs完成实际SQLite保存/刷新/失败/窄屏/200%及连续三轮验证，截图独立评审。
 - [x] T011 更新docs/system-design.md42.4–42.6及42.9与Doca基线，保存并回读正文与原生图节点连线，在specs/043-website-cluster-routing/validation.md记录。
-- [ ] T012 运行相关回归和runtime/web类型检查、同步origin/main与diff检查，在specs/043-website-cluster-routing/validation.md记录最终验证及限制，并推送GitHub功能分支创建面向main的草稿PR，不合并。
+- [x] T012 运行相关回归和runtime/web类型检查、同步origin/main与diff检查，在specs/043-website-cluster-routing/validation.md记录最终验证及限制，并推送GitHub功能分支创建面向main的草稿PR，不合并。
 
 ## Dependencies and implementation strategy
 T001→T002→T003→US1→US2→US3→验证。MVP先完成US1再逐故事推进；共享cluster-workloads.ts顺序编辑，避免冲突。只读DNS研究按speckit-plan要求隔离派发；最终UI独立视觉评审按oil-ui要求派发。独立验证可并行运行，代码与审批保持顺序。不创建与本请求无关的服务或部署生产资源。
+
+交付：[GitHub #19](https://github.com/workhold/lightmoni/pull/19)，草稿，目标main，依赖#18，未合并。12/12任务完成，验收及真实环境边界见[validation.md](validation.md)。

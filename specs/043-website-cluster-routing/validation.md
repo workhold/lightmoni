@@ -55,4 +55,4 @@ LIGHTMONI_UI_RUN=3 node web/src/app/ops/verify-website-routing-ui.mjs
 
 ## 交付
 
-提交前已fetch origin/main，未发现新主干提交需要合并。当前特性基于#18的跨集群模型，交付PR目标main，标记草稿并明确依赖#18；未获得合并授权，不合并、不推main。最终PR链接在创建后补充。
+提交前已fetch origin/main，未发现新主干提交需要合并。当前特性基于#18的跨集群模型，交付PR目标main，标记草稿并明确依赖#18；未获得合并授权，不合并、不推main。交付：[GitHub #19](https://github.com/workhold/lightmoni/pull/19)，草稿，目标main，依赖#18，未合并。

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/043-website-cluster-routing`
 **Created**: 2026-10-30
-**Status**: Accepted for implementation
+**Status**: Implemented; draft PR #19, pending review
 **Input**: 用户要求调整已安装应用的部署集群及配置；全局唯一 OpenResty，集群独立入口域名；网站托管服务自动发现或手动集群后端；展示实际集群并支持开关、权重和运营商/省份线路；健康驱动 CNAME 撤下及默认线路回退。
 
 ## User Scenarios & Testing
