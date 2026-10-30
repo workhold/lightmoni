@@ -2,7 +2,7 @@
 
 [GitHub 仓库](https://github.com/workhold/lightmoni) · [问题反馈](https://github.com/workhold/lightmoni/issues) · [贡献指南](CONTRIBUTING.md) · [安全反馈](SECURITY.md)
 
-面向个人和小团队的一体化监控工作台。Node.js / TypeScript主服务提供React界面，SQLite保存管理数据，ClickHouse保存遥测。业务接入提供多语言 record SDK；当前发布与 deferred 矩阵以 `/api/v1/sdk-install`、发布脚本和 [SDD 012](specs/012-sdk-reporting-choice/spec.md) 为准，支持直连中心或由独立 LightMoni Agent 持久化转发。
+面向个人和小团队的一体化监控工作台。Node.js / TypeScript主服务提供React界面，SQLite保存管理数据，ClickHouse保存遥测。业务接入提供多语言 record SDK；当前发布与 deferred 矩阵以 `/api/v1/sdk-install`、发布脚本和 [SDD 012](specs/012-sdk-reporting-choice/spec.md) 为准，业务SDK仅直连中心，SDK与Agent各自支持中心内网优先、公网备用。
 
 > **完整系统设计入口**：[LightMoni 系统设计基线](docs/system-design.md)
 >
@@ -112,7 +112,7 @@ enrollment 由平台内部签发并预绑定该主机，安装器通过 SSH stdi
 
 Agent 在宿主机以独立 systemd 服务运行，生命周期与业务服务分开。Linux amd64/arm64 包自带 Node 24.15.0，要求 glibc ≥ 2.28，无需另装 Node/npm；安装器验证 SHA256。持久目录保存身份、队列和日志游标，不应复制到另一台主机。主机管理首装拒绝覆盖已有安装，升级/回滚能力的验证边界见部署文档。
 
-SDK 默认独立直报中心，安装 Agent 不是 SDK 的前置条件。现有本地 Agent OTLP 接收能力可显式使用，SDK 使用本地 token，Agent 保存自己的上游 data 凭据；SDK 与主机资产无隐式绑定，不创建主机 ID/名称环境变量。Agent 可使用相同公开 TypeScript SDK 为自身打点，业务服务启停不会影响 Agent。两种上报路径的配置与边界见 [SDK 接入](sdk/README.md#选择上报方式)。
+SDK仅独立直报中心，安装Agent不是前置条件。Agent只将自身采集和任务数据通过内部持久队列上报，不提供SDK接收与配置代理。SDK与主机资产无隐式绑定；Agent内嵌同一SDK通过进程内exporter打点，业务启停不影响Agent。详见[SDK接入](sdk/README.md#中心地址与自动同步)。
 
 “SDK接入”保留“SDK样例 / SDK密钥 / 豁免表”。“管理后台 → 接入凭据”展示 SDK 上报密钥、平台部署产生的 Agent 接入会话和节点凭据；安装会话仅查看状态/撤销，创建操作统一从主机管理发起。独立 control 用于心跳/配置，data 用于遥测，不交给业务 SDK。节点凭据只展示用途、状态和时间，撤销影响该节点对应用途的全部未撤销凭据；SDK Key 不授予 Agent 控制权。数据目录和保留时长位于“数据管理”，图表模板位于“监控大盘”。
 
@@ -122,9 +122,9 @@ SDK 默认独立直报中心，安装 Agent 不是 SDK 的前置条件。现有�
 
 目录日志填写绝对目录、文件匹配规则（默认 `*.log*`）、是否包含子目录和首次从头读取。默认只采集现有文件后续新增的行，之后新建文件完整采集；读取进度与队列批次一起提交，支持重启续读、重命名轮转和截断检测。要求服务用户可读目录，采集 UTF-8 文本行，跳过压缩文件和符号链接；单行超过 64 KiB 分片，未结束的短行等待换行。事件时间使用采集时间，保留文件路径和字节位置。每个执行节点最多同时打开 256 个日志文件，每个目录单次扫描最多 10,000 个条目，超限会显示采集错误。源文件在采集前已删除或覆盖的内容无法恢复。
 
-“SDK接入”生成四语言通用record样例。初始化必填service/env，地址与密钥可使用LIGHTMONI_ENDPOINT/LIGHTMONI_KEY；可选service_version/instance_id，实例标识默认自动生成。同一客户端可记录多个表和指标。直连使用中心地址与SDK密钥；经Agent时使用Agent接收地址及其可选本地token，Agent独立保存上游data凭据。业务SDK退出前调用有截止时间的shutdown，Agent继续补传。容器通过environment/Secret注入配置，使用容器可达的地址，Docker Desktop可用host.docker.internal。
+“SDK接入”生成四语言通用record样例。初始化必填service/env，地址与密钥可使用LIGHTMONI_ENDPOINT/LIGHTMONI_KEY；可选service_version/instance_id，实例标识默认自动生成。同一客户端可记录多个表和指标。SDK仅使用中心公网引导地址和SDK密钥；运行时同步内网地址。业务SDK退出前调用有截止时间的shutdown，Agent独立补传自身采集数据。容器通过environment/Secret注入配置，使用容器可达的地址，Docker Desktop可用host.docker.internal。
 
-管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址并选择默认项，例如“公网”和“内网”；SDK 示例可选择可达入口，未配置时使用 `LIGHTMONI_EXTERNAL_URL`。这些地址应指向同一 LightMoni 实例。Agent 安装使用平台部署计划中校验过的 HTTPS 中心地址，内部下载脚本、双架构包和 SHA256 清单由 `/downloads/agent/` 提供，必须使用该主机安装会话的有效 enrollment 鉴权；control/data 凭据与 SDK Key 不能替代安装授权。修改地址列表不会自动修改运行客户端，亦不等于迁移或重新绑定主机。
+管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址并选择默认项，例如“公网”和“内网”；SDK 示例可选择可达入口，未配置时使用 `LIGHTMONI_EXTERNAL_URL`。这些地址应指向同一 LightMoni 实例。Agent 安装使用平台部署计划中校验过的 HTTPS 中心地址，内部下载脚本、双架构包和 SHA256 清单由 `/downloads/agent/` 提供，必须使用该主机安装会话的有效 enrollment 鉴权；control/data 凭据与 SDK Key 不能替代安装授权。管理员标记内网/公网用途后，SDK和Agent每30秒同步地址，内网优先、公网备用；Agent控制、任务与上报共用入口。业务SDK仅直连中心，详见[中心地址同步](docs/center-endpoints.md)。
 
 ```ts
 const moni = createLightMoni({service: 'order-api', env: 'prod'});
@@ -142,7 +142,7 @@ await moni.shutdown({timeoutMs: 5000});
 node examples/sdk/traffic/index.mjs
 ```
 
-程序在 `127.0.0.1:18419` 发起真实 HTTP 请求，通过 SDK 和本机执行节点上报三个测试服务，默认运行 30 分钟。可用 `LIGHTMONI_ENDPOINT`、`LIGHTMONI_DURATION_SECONDS` 调整接收地址和时间；本次运行的验收执行节点地址为 `http://127.0.0.1:14318`。这些记录用于测试，资源属性注明 `telemetry_source=sdk-traffic-fixture`。
+程序在 `127.0.0.1:18419` 发起真实 HTTP 请求，通过SDK直报中心的三个测试服务，默认运行 30 分钟。可用 `LIGHTMONI_ENDPOINT`、`LIGHTMONI_DURATION_SECONDS` 调整接收地址和时间；历史执行节点路径已移除。这些记录用于测试，资源属性注明 `telemetry_source=sdk-traffic-fixture`。
 
 ## 工作台功能
 

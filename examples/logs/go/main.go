@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	endpoint := flag.String("endpoint", env("LIGHTMONI_ENDPOINT", "http://127.0.0.1:4318"), "local Agent HTTP endpoint")
+	endpoint := flag.String("endpoint", env("LIGHTMONI_ENDPOINT", "https://monitor.example.com"), "local Agent HTTP endpoint")
 	count := flag.Int("count", 240, "number of logs")
 	run := flag.String("run", env("LIGHTMONI_LOGS_RUN", "logs-demo"), "searchable run marker")
 	flag.Parse()

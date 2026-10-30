@@ -8,7 +8,7 @@ function check(bool $v): void { if (!$v) throw new RuntimeException('SDK conform
 $mode=env('LIGHTMONI_TEST_MODE','demo');
 $limits=$mode==='overflow'?['cardinality_limit'=>2]:($mode==='capacity'?['queue_bytes'=>1024,'max_batch_bytes'=>1024,'buffer_bytes'=>64]:[]);
 $limits['self_telemetry']=in_array($mode,['demo','selfmonitor'],true);
-$mon=new Client(env('LIGHTMONI_SERVICE','example-php-api'),'http',env('LIGHTMONI_ENDPOINT','http://127.0.0.1:4318'),env('LIGHTMONI_KEY',''),$limits);
+$mon=new Client(env('LIGHTMONI_SERVICE','example-php-api'),'http',env('LIGHTMONI_ENDPOINT','https://monitor.example.com'),env('LIGHTMONI_KEY',''),$limits);
 $counter=$mon->counter('http.requests');
 switch ($mode) {
 case 'selfmonitor':

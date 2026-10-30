@@ -8,15 +8,15 @@ import {
 import { hostname } from "node:os";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { randomUUID, timingSafeEqual } from "node:crypto";
-import protobuf from "protobufjs";
+import { timingSafeEqual } from "node:crypto";
 import {
   createLightMoni,
+  CenterEndpoints,
   DeliveryError,
   type LightMoni,
   type FrozenBatch,
 } from "@lightmoni/sdk";
-import { atomicWrite, atomicJSON } from "../shared/io.js";
+import { atomicJSON } from "../shared/io.js";
 import { stringifyJSON } from "../shared/json.js";
 import {
   decodeOTLP,
@@ -58,10 +58,8 @@ import { AgentTaskRunner } from "./task-runner.js";
 import { SCRIPT_TASK_CAPABILITIES } from "../shared/task-center.js";
 import {
   ReceiveError,
-  requestBytes,
   responseBytes,
   delay,
-  validateSDKConfig,
 } from "./util.js";
 export interface RuntimeEvent {
   id: string;
@@ -72,6 +70,7 @@ export interface RuntimeEvent {
 }
 export class Agent {
   readonly identity;
+  readonly endpoints: CenterEndpoints;
   readonly queue: Queue;
   readonly sdk: LightMoni;
   readonly files: FileLogReader;
@@ -92,10 +91,10 @@ export class Agent {
   private runtimeInstance = nowNano().toString();
   private closed = false;
   private taskGeneration = 0;
-  private relayPromise: Promise<{ status: number; body: Buffer }> | undefined;
   constructor(readonly config: Config) {
     validateConfig(config);
     this.identity = loadIdentity(config.data_dir);
+    this.endpoints = new CenterEndpoints(config.endpoint, () => ({Authorization: "Bearer " + config.control_credential, "X-Lightmoni-Agent-ID": this.identity.agent_id}));
     this.queue = new Queue(config);
     this.tasks = normalizeRemote({
       collect_interval_seconds: config.collect_interval_seconds,
@@ -155,7 +154,7 @@ export class Agent {
         controlCredential: config.control_credential,
         dataDir: config.data_dir,
         pollIntervalMs: Math.max(5000, config.control_interval_seconds * 1000),
-      });
+      }, {fetch: this.endpoints.fetch});
       this.taskRunner = new AgentTaskRunner({
         endpoint: config.endpoint,
         agentID: this.identity.agent_id,
@@ -163,7 +162,7 @@ export class Agent {
         dataCredential: config.data_credential,
         dataDir: config.data_dir,
         pollIntervalMs: Math.max(5000, config.control_interval_seconds * 1000),
-      });
+      }, {fetch: this.endpoints.fetch});
     }
   }
   private safe(message: string) {
@@ -219,6 +218,7 @@ export class Agent {
       platform: process.platform === "win32" ? "windows" : process.platform,
       arch: process.arch === "x64" ? "amd64" : process.arch,
       config_revision: this.revision,
+      center_connection: this.endpoints.status(),
       ...this.queue.stats(),
       last_error: this.lastError,
       last_success_at: this.lastSuccess,
@@ -324,11 +324,11 @@ export class Agent {
       throw e;
     }
   }
-  authorize(req: IncomingMessage, receiver = false) {
+  authorize(req: IncomingMessage) {
     const expected = this.config.local_token;
     if (!expected) return true;
     const header = String(req.headers.authorization ?? "");
-    if (!receiver && !header.startsWith("Bearer ")) return false;
+    if (!header.startsWith("Bearer ")) return false;
     const token = header.replace(/^Bearer /, "");
     const a = Buffer.from(token),
       b = Buffer.from(expected);
@@ -360,42 +360,6 @@ export class Agent {
         respond(200, this.status());
         return;
       }
-      if (method === "GET" && path === "/v1/sdk-config") {
-        if (!this.authorize(req)) {
-          respond(401, "local token required", false);
-          return;
-        }
-        const controller = new AbortController();
-        res.once("close", () => {
-          if (!res.writableFinished) controller.abort();
-        });
-        this.relayPromise ??= this.relaySDKConfig(controller.signal).finally(
-          () => {
-            this.relayPromise = undefined;
-          },
-        );
-        const result = await this.relayPromise;
-        res.writeHead(result.status, {
-          "Content-Type":
-            result.status === 200 ? "application/json" : "text/plain",
-          "Cache-Control": "no-store",
-        });
-        if (result.status === 200 && new URL(req.url ?? '/', 'http://localhost').searchParams.get('metric_windows') !== '1') {
-          const legacy = JSON.parse(result.body.toString());
-          delete legacy.metric_windows;
-          res.end(JSON.stringify(legacy));
-        } else res.end(result.body);
-        return;
-      }
-      const signal = path.slice(4) as Signal;
-      if (
-        method === "POST" &&
-        ["logs", "metrics", "traces"].includes(signal) &&
-        path === "/v1/" + signal
-      ) {
-        await this.receive(req, res, signal);
-        return;
-      }
       respond(404, "Not Found", false);
     } catch (e) {
       if (res.headersSent) {
@@ -409,105 +373,6 @@ export class Agent {
       }
     }
   };
-  private async receive(
-    req: IncomingMessage,
-    res: ServerResponse,
-    signal: Signal,
-  ) {
-    const contentType = String(
-      req.headers["content-type"] ?? "application/x-protobuf",
-    )
-      .split(";")[0]
-      .trim()
-      .toLowerCase();
-    const fail = (status: number, message: string) => {
-      if (status === 429 || status === 503) res.setHeader("Retry-After", "2");
-      res.writeHead(status, { "Content-Type": contentType });
-      res.end(
-        contentType === "application/json"
-          ? JSON.stringify({ message })
-          : Buffer.from(
-              protobuf.Writer.create().uint32(18).string(message).finish(),
-            ),
-      );
-    };
-    try {
-      if (!this.authorize(req, true))
-        throw new ReceiveError(401, "local receiver token required");
-      const payload = await requestBytes(req, this.config.max_batch_bytes),
-        headerID = req.headers["x-lightmoni-batch-id"],
-        owned = typeof headerID === "string" && headerID !== "";
-      this.accept(
-        {
-          id: owned ? headerID : randomUUID(),
-          signal,
-          table: String(req.headers["x-lightmoni-table"] ?? ""),
-          created_at: owned
-            ? String(req.headers["x-lightmoni-batch-created-at"] ?? "")
-            : formatNanoTime(nowNano()),
-          payload,
-          content_type: contentType,
-        },
-        owned,
-      );
-      res.writeHead(200, { "Content-Type": contentType });
-      res.end(contentType === "application/json" ? "{}" : Buffer.alloc(0));
-    } catch (e) {
-      if (e instanceof ReceiveError) fail(e.status, e.message);
-      else {
-        this.setError("durable receive: " + (e as Error).message);
-        fail(503, "durable queue unavailable");
-      }
-    }
-  }
-  private async relaySDKConfig(
-    parent: AbortSignal,
-  ): Promise<{ status: number; body: Buffer }> {
-    const path = join(this.config.data_dir, "sdk-config.json");
-    let raw: Buffer | undefined;
-    try {
-      const response = await fetch(
-        this.config.endpoint.replace(/\/$/, "") + "/v1/sdk-config?metric_windows=1",
-        {
-          redirect: "manual",
-          headers: {
-            "X-Lightmoni-Agent-ID": this.identity.agent_id,
-            Authorization:
-              "Bearer " + this.config.control_credential,
-          },
-          signal: AbortSignal.any([parent, AbortSignal.timeout(5000)]),
-        },
-      );
-      if (response.status !== 200 && response.status < 500) {
-        await response.body?.cancel();
-        return {
-          status: response.status,
-          body: Buffer.from("configuration access denied"),
-        };
-      }
-      if (response.status !== 200) {
-        await response.body?.cancel();
-        throw Error("unavailable");
-      }
-      raw = await responseBytes(response, 1 << 20);
-    } catch {
-      try {
-        raw = readFileSync(path);
-      } catch {
-        return { status: 503, body: Buffer.from("configuration unavailable") };
-      }
-    }
-    try {
-      const config = validateSDKConfig(raw);
-      if (!existsSync(path) || !readFileSync(path).equals(raw))
-        try {
-          atomicWrite(path, raw);
-        } catch {}
-      return { status: 200, body: Buffer.from(stringifyJSON(config)) };
-    } catch {
-      return { status: 503, body: Buffer.from("invalid configuration") };
-    }
-  }
   applyRemote(config: Partial<RemoteConfig>, persist = true) {
     const c = normalizeRemote(config);
     validateRemote(c);
@@ -525,8 +390,8 @@ export class Agent {
     );
   }
   private async controlRequest(path: string, method: string, body?: any) {
-    const response = await fetch(
-      this.config.endpoint.replace(/\/$/, "") + path,
+    const response = await this.endpoints.request(
+      path,
       {
         method,
         redirect: "manual",
@@ -605,8 +470,8 @@ export class Agent {
     parent = this.controller.signal,
   ): Promise<{ message: string; permanent?: boolean; retryAfter?: number }> {
     try {
-      const response = await fetch(
-        this.config.endpoint.replace(/\/$/, "") + "/v1/" + batch.signal,
+      const response = await this.endpoints.request(
+        "/v1/" + batch.signal,
         {
           method: "POST",
           redirect: "manual",
@@ -868,6 +733,13 @@ export class Agent {
     });
     return this.server.address();
   }
+  async refreshEndpoints() { return this.endpoints.refresh(this.controller.signal); }
+  private async endpointLoop() {
+    while (!this.controller.signal.aborted) {
+      try { await this.refreshEndpoints(); } catch (e) { if (!this.controller.signal.aborted) this.setError("center discovery: " + (e as Error).message); }
+      await delay(30000, this.controller.signal);
+    }
+  }
   async start(parent?: AbortSignal) {
     if (parent) {
       if (parent.aborted) this.controller.abort(parent.reason);
@@ -880,6 +752,7 @@ export class Agent {
     }
     await this.listen();
     this.loops = [
+      this.endpointLoop(),
       this.forwardLoop(),
       this.controlLoop(),
       this.collectLoop(),
@@ -905,6 +778,7 @@ export class Agent {
     if (this.closed) return;
     this.closed = true;
     this.controller.abort();
+    this.endpoints.close();
     if (this.server) {
       this.server.closeIdleConnections();
       await new Promise<void>((resolve) => {

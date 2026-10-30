@@ -35,17 +35,20 @@ func (e *DeliveryError) Error() string {
 func (e *DeliveryError) Unwrap() error { return e.Err }
 
 type HTTPExporter struct {
-	Endpoint string
-	Client   *http.Client
-	mu       sync.RWMutex
-	key      string
+	Endpoint  string
+	Client    *http.Client
+	mu        sync.RWMutex
+	key       string
+	endpoints *centerEndpoints
 }
 
 func NewHTTPExporter(endpoint, key string, client *http.Client) *HTTPExporter {
 	if client == nil {
 		client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	return &HTTPExporter{Endpoint: strings.TrimRight(endpoint, "/"), key: key, Client: client}
+	bounded := *client
+	bounded.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &HTTPExporter{Endpoint: strings.TrimRight(endpoint, "/"), key: key, Client: &bounded, endpoints: newCenterEndpoints(endpoint)}
 }
 func (e *HTTPExporter) UpdateKey(key string) { e.mu.Lock(); e.key = key; e.mu.Unlock() }
 func (c *Client) UpdateKey(key string) error {
@@ -64,7 +67,14 @@ func (c *Client) UpdateKey(key string) error {
 	return nil
 }
 func (e *HTTPExporter) Deliver(ctx context.Context, b FrozenBatch) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.Endpoint+"/v1/"+b.Signal, bytes.NewReader(b.Payload))
+	e.mu.RLock()
+	routeKey := e.key
+	e.mu.RUnlock()
+	endpoint, routeErr := e.endpoints.resolve(ctx, e.Client, routeKey, false)
+	if routeErr != nil {
+		return &DeliveryError{Retryable: true, Err: routeErr}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/v1/"+b.Signal, bytes.NewReader(b.Payload))
 	if err != nil {
 		return &DeliveryError{Err: err}
 	}
@@ -80,11 +90,17 @@ func (e *HTTPExporter) Deliver(ctx context.Context, b FrozenBatch) error {
 	}
 	resp, err := e.Client.Do(req)
 	if err != nil {
+		if centerTransportFailure(err) {
+			e.endpoints.failure(endpoint)
+		}
 		return &DeliveryError{Retryable: true, Err: errors.New("telemetry network request failed")}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	if err != nil {
+		if centerTransportFailure(err) {
+			e.endpoints.failure(endpoint)
+		}
 		return &DeliveryError{Retryable: true, Err: errors.New("telemetry response interrupted")}
 	}
 	if len(body) > 64<<10 {

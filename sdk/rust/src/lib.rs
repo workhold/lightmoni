@@ -1,4 +1,5 @@
 //! Native synchronous OTLP/HTTP client. Recording does not perform network I/O.
+mod endpoints;
 mod windows;
 mod record;
 pub use record::Options;
@@ -75,7 +76,7 @@ struct Instrument { table:String,name:String,kind:String,unit:String,bounds:Vec<
 struct State {
     observations:BTreeMap<String,record::Observation>,
     metric_windows:BTreeMap<String,Vec<windows::MetricWindow>>,
-    endpoint:String,key:String,limits:Limits,resource:Value,http:reqwest::blocking::Client,
+    endpoint:String,endpoints:Arc<Mutex<endpoints::CenterEndpoints>>,endpoint_failures:Arc<Mutex<BTreeMap<String,Instant>>>,key:String,limits:Limits,resource:Value,http:reqwest::blocking::Client,
     metrics:BTreeMap<String,Instrument>,records:BTreeMap<(String,String),Vec<Value>>,queue:VecDeque<Batch>,
     stats:BTreeMap<String,u64>,last_error:String,failure:Option<String>,seq:u64,closed:bool,
     self_table:String,self_last:Option<Instant>,self_started:bool,self_previous:BTreeMap<String,u64>,
@@ -182,7 +183,8 @@ impl Client {
         let http=reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"cannot initialize HTTP transport")?;
         let stats=["pending_batches","pending_bytes","buffer_bytes","delivered_batches","retried_batches","invalid_records","overflow_records","dropped_records","rejected_records"].iter().map(|n|(n.to_string(),0)).collect();
         let resource=json!({"attributes":attrs(&BTreeMap::from([("service.name".into(),service.into()),("service.instance.id".into(),Uuid::new_v4().to_string().into())]))?});
-        let s=State{metric_windows:BTreeMap::new(),observations:BTreeMap::new(),endpoint:endpoint.trim_end_matches('/').into(),key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:"lightmoni_sdk".into(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
+        let endpoint_failures=Arc::new(Mutex::new(BTreeMap::new()));
+        let s=State{metric_windows:BTreeMap::new(),observations:BTreeMap::new(),endpoint:endpoint.trim_end_matches('/').into(),endpoints:Arc::new(Mutex::new(endpoints::CenterEndpoints::new(endpoint,endpoint_failures.clone()))),endpoint_failures,key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:"lightmoni_sdk".into(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
         let enabled=true;
         let client=Self{state:Arc::new(Mutex::new(s)),delivery:Arc::new(Mutex::new(())),table,context:None};
         if enabled {
@@ -191,12 +193,19 @@ impl Client {
                 std::thread::sleep(Duration::from_secs(10));
                 let (Some(state),Some(delivery))=(state.upgrade(),delivery.upgrade()) else {break;};
                 if state.lock().unwrap().closed{break;}
-                let root=Client{state,delivery,table:table.clone(),context:None};if configured.is_none_or(|at|at.elapsed()>=Duration::from_secs(30)){if let Err(error)=root.refresh_metric_windows(){root.state.lock().unwrap().last_error=error;}configured=Some(Instant::now());}
+                let root=Client{state,delivery,table:table.clone(),context:None};let _=root.resolve_endpoint(false,Instant::now()+Duration::from_secs(5));if configured.is_none_or(|at|at.elapsed()>=Duration::from_secs(30)){if let Err(error)=root.refresh_metric_windows(){root.state.lock().unwrap().last_error=error;}configured=Some(Instant::now());}
                 let _=root.flush_mode(Duration::from_secs(5),false);
             }}).map_err(|_|"cannot start SDK heartbeat worker")?;
         }
         Ok(client)
     }
+    fn mark_endpoint_failure(&self,url:&str){let pending=self.state.lock().unwrap().endpoint_failures.clone();pending.lock().unwrap().insert(url.into(),Instant::now()+Duration::from_secs(30));}
+    fn resolve_endpoint(&self,force:bool,deadline:Instant)->Result<String>{
+        let(http,key,endpoints)={let s=self.state.lock().unwrap();if s.closed{return Err("SDK is closed".into());}(s.http.clone(),s.key.clone(),s.endpoints.clone())};
+        loop {match endpoints.try_lock(){Ok(mut selector)=>return selector.resolve(&http,&key,force,deadline),Err(std::sync::TryLockError::Poisoned(_))=>return Err("center discovery state unavailable".into()),Err(_)=>{if Instant::now()>=deadline{return Err("center discovery deadline exceeded".into());}std::thread::sleep(Duration::from_millis(1));}}}
+    }
+    /// Query the latest center entrances and re-evaluate internal access.
+    pub fn refresh_endpoints(&self)->Result<String>{self.resolve_endpoint(true,Instant::now()+Duration::from_secs(5))}
     pub fn with_table(&self,name:&str)->Result<Self>{Ok(Self{table:table(name)?,..self.clone()})}
     /// Immutable task binding; safe when an async task moves between threads.
     pub fn with_trace(&self,context:&TraceContext)->Result<Self>{
@@ -254,20 +263,25 @@ impl Client {
         let target={let mut s=self.state.lock().unwrap();if s.closed{return Err("SDK is closed".into());}s.collect(force);s.seq};
         let mut backoff=0.2;
         loop {
-            let (b,http,url,key)={let s=self.state.lock().unwrap();match s.queue.front(){Some(b) if b.seq<=target=>(b.clone(),s.http.clone(),s.endpoint.clone(),s.key.clone()),_=>return s.failure.clone().map_or(Ok(()),Err)}};
+            let (b,http,_bootstrap,key)={let s=self.state.lock().unwrap();match s.queue.front(){Some(b) if b.seq<=target=>(b.clone(),s.http.clone(),s.endpoint.clone(),s.key.clone()),_=>return s.failure.clone().map_or(Ok(()),Err)}};
             if b.table=="lightmoni_sdk" && key.is_empty(){let mut s=self.state.lock().unwrap();s.queue.pop_front();*s.stats.get_mut("pending_batches").unwrap()-=1;*s.stats.get_mut("pending_bytes").unwrap()-=b.raw.len() as u64;continue;}
+            let remaining=deadline.saturating_duration_since(Instant::now());if remaining.is_zero(){return Err("flush deadline exceeded; batches retained".into());}
+            let url=self.resolve_endpoint(false,deadline)?;
             let remaining=deadline.saturating_duration_since(Instant::now());if remaining.is_zero(){return Err("flush deadline exceeded; batches retained".into());}
             let mut status=0;let mut delay=0.0;let mut rejected=0;let mut ack=false;
             let mut request=http.post(format!("{url}/v1/{}",b.signal)).timeout(remaining.min(Duration::from_secs(10))).header("Content-Type","application/json").header("X-Lightmoni-Table",&b.table).header("X-Lightmoni-Batch-ID",&b.id).header("X-Lightmoni-Batch-Created-At",&b.created).body(b.raw.clone());
             if !key.is_empty(){request=request.bearer_auth(key);}
-            if let Ok(response)=request.send(){
+            let sent=request.send();
+            if sent.as_ref().is_err_and(endpoints::transport_failure){self.mark_endpoint_failure(&url);}
+            if let Ok(response)=sent{
                 status=response.status().as_u16();
                 if let Some(raw)=response.headers().get("Retry-After").and_then(|v|v.to_str().ok()){
                     delay=raw.parse::<u64>().map(|n|n as f64).unwrap_or_else(|_|httpdate::parse_http_date(raw).ok().and_then(|d|d.duration_since(SystemTime::now()).ok()).map(|d|d.as_secs_f64()).unwrap_or(0.0));
                 }
                 if status==200 {
                     let mut body=Vec::new();
-                    if response.take(65537).read_to_end(&mut body).is_ok() && body.len()<=65536{
+                    let read=response.take(65537).read_to_end(&mut body);if read.is_err(){self.mark_endpoint_failure(&url);}
+                    if read.is_ok() && body.len()<=65536{
                         if let Ok(value)=serde_json::from_slice::<Value>(if body.is_empty(){b"{}"}else{&body}){
                             if value.is_object() && (value["partialSuccess"].is_null() || value["partialSuccess"].is_object()){
                                 let field=match b.signal.as_str(){"logs"=>"rejectedLogRecords","metrics"=>"rejectedDataPoints",_=>"rejectedSpans"};

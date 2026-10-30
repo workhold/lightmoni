@@ -70,6 +70,9 @@ class Receiver:
                     pass
 
             def do_GET(self):
+                if self.path.endswith("/v1/center-endpoints"):
+                    self.respond(404, {})
+                    return
                 with owner.lock:
                     owner.requests.append({"method": "GET", "path": self.path, "headers": dict(self.headers)})
                     action, config = owner.get_action, copy.deepcopy(owner.config)
@@ -630,8 +633,8 @@ class ReportingTests(unittest.TestCase):
                     tunneled.log("info", "HTTPS CONNECT")
                     tunneled.flush(timeout=2)
                 requests = connect_proxy.observed()
-                self.assertEqual([request["method"] for request in requests], ["CONNECT", "CONNECT"])
-                self.assertEqual([request["path"] for request in requests], ["localhost:%d" % origin.server.server_port] * 2)
+                self.assertEqual([request["method"] for request in requests], ["CONNECT", "CONNECT", "CONNECT"])
+                self.assertEqual([request["path"] for request in requests], ["localhost:%d" % origin.server.server_port] * 3)
                 for request in requests:
                     self.assertEqual(request["headers"]["Proxy-Authorization"], "Basic cHJveHktdXNlcjpwcm94eS1zZWNyZXQ=")
                     self.assertNotIn("Authorization", request["headers"])

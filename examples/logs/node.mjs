@@ -2,7 +2,7 @@ import {createLightMoni,withTrace} from '../../sdk/typescript/dist/src/index.js'
 const run=process.env.LIGHTMONI_LOGS_RUN??'logs-demo';
 const count=Number(process.env.LIGHTMONI_LOGS_COUNT??240);
 if(!Number.isSafeInteger(count)||count<1||count>2000)throw new Error('LIGHTMONI_LOGS_COUNT must be 1–2000');
-const client=createLightMoni({service:'logs-node-demo',table:process.env.LIGHTMONI_LOGS_TABLE??'acceptance',endpoint:process.env.LIGHTMONI_ENDPOINT??'http://127.0.0.1:4318',key:process.env.LIGHTMONI_KEY});
+const client=createLightMoni({service:'logs-node-demo',table:process.env.LIGHTMONI_LOGS_TABLE??'acceptance',endpoint:process.env.LIGHTMONI_ENDPOINT??'https://monitor.example.com',key:process.env.LIGHTMONI_KEY});
 for(let i=0;i<count;i++){
  const status=i%5===0?500:200;const span=client.startSpan('payment.process');
  await withTrace(span.context,async()=>{
