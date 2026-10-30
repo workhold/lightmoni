@@ -1,0 +1,39 @@
+{
+  "status": "synchronized",
+  "spec": "046-platform-mcp",
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository_sections": [
+    "docs/system-design.md 14.4 与 25",
+    "docs/platform-mcp.md 全文（HLD/LLD）"
+  ],
+  "before_seq": 803,
+  "readback_seq": 806,
+  "existing_blocks_unchanged": 448,
+  "existing_native_diagrams_unchanged": 19,
+  "new_blocks_verified": 74,
+  "native_diagrams": [
+    {
+      "id": "mcp046-overview",
+      "nodes": 15,
+      "edges": 17,
+      "nodes_and_edges_match_mermaid": true
+    },
+    {
+      "id": "mcp046-approval",
+      "nodes": 10,
+      "edges": 10,
+      "nodes_and_edges_match_mermaid": true
+    },
+    {
+      "id": "mcp046-idempotency",
+      "nodes": 8,
+      "edges": 9,
+      "nodes_and_edges_match_mermaid": true
+    }
+  ],
+  "links_verified": true,
+  "full_document_block_order_verified": true,
+  "section_heading_styles_verified": true,
+  "native_visual_render_verified": false,
+  "heading_numbering": "Doca 详细章节使用无数字前缀的原生 h3，顺序及正文与仓库一致，避免被自动转换为有序列表。"
+}
