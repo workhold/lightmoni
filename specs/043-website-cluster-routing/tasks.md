@@ -30,4 +30,8 @@
 ## Dependencies and implementation strategy
 T001→T002→T003→US1→US2→US3→验证。MVP先完成US1再逐故事推进；共享cluster-workloads.ts顺序编辑，避免冲突。只读DNS研究按speckit-plan要求隔离派发；最终UI独立视觉评审按oil-ui要求派发。独立验证可并行运行，代码与审批保持顺序。不创建与本请求无关的服务或部署生产资源。
 
-交付：[GitHub #19](https://github.com/workhold/lightmoni/pull/19)，草稿，目标main，依赖#18，未合并。12/12任务完成，验收及真实环境边界见[validation.md](validation.md)。
+交付：[GitHub #19](https://github.com/workhold/lightmoni/pull/19)，草稿，目标main，依赖#18，未合并。14/14任务完成，验收及真实环境边界见[validation.md](validation.md)。
+
+## 用户界面优先级修订
+- [x] T013 [US1] 在web/src/app/OperationsPage.tsx将OpenResty详情收进“OpenResty 管理”抽屉，网站主体优先用户网站，保留安装/配置与空态。
+- [x] T014 在web/src/app/ops/verify-website-routing-ui.mjs更新OpenResty 管理路径，验证主表优先及抽屉操作，更新SDD与Doca界面描述并推送同一PR。

@@ -14,7 +14,7 @@ SDD先于代码；中心管理员、revision及confirmed不变；秘密只存后
 ## Project Structure
 - runtime/src/ops/cluster-workloads.ts：域名/策略校验、发现和健康驱动DNS、共享入口DNS。
 - runtime/src/ops/cloud.ts,index.ts：线路查询、权重协议、DNS归属增量字段及按线路核对。
-- web/src/app/OperationsPage.tsx,ops/*：OpenResty管理、应用编辑、网站模式与实际集群流量策略。
+- web/src/app/OperationsPage.tsx,ops/*：网站主表优先；次要“OpenResty 管理”抽屉承载入口配置；应用编辑、网站模式与实际集群流量策略。
 - runtime/test/platform-website-routing.test.ts,platform-clusters.test.ts：HTTP、持久化、调度和DNS回归。
 - web/src/app/ops/verify-website-routing-ui.mjs：真实保存/刷新/失败/窄屏验证。
 
