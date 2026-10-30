@@ -1,0 +1,60 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved": true,
+  "seq": 790,
+  "sections": [
+    "42.4",
+    "42.5",
+    "42.6",
+    "42.9"
+  ],
+  "readback": [
+    {
+      "blockId": "cluster042-baseline-b-4",
+      "seq": 790,
+      "contentLength": 414,
+      "nextOffset": null,
+      "textMatch": true
+    },
+    {
+      "blockId": "cluster042-baseline-b-5",
+      "seq": 790,
+      "contentLength": 429,
+      "nextOffset": null,
+      "textMatch": true
+    },
+    {
+      "blockId": "cluster042-baseline-b-6",
+      "seq": 790,
+      "contentLength": 439,
+      "nextOffset": null,
+      "textMatch": true
+    },
+    {
+      "blockId": "cluster042-baseline-model",
+      "seq": 790,
+      "nodes": 8,
+      "edges": 6,
+      "contentLength": 2391,
+      "nextOffset": null
+    },
+    {
+      "blockId": "website043-routing-boundaries",
+      "seq": 790,
+      "contentLength": 360,
+      "nextOffset": null
+    },
+    {
+      "blockId": "website043-routing-native",
+      "seq": 790,
+      "nodes": 8,
+      "edges": 9,
+      "contentLength": 2974,
+      "nextOffset": null
+    }
+  ],
+  "preservation": {
+    "existingNodeIDsUnchanged": true,
+    "existingEdgesUnchanged": true
+  }
+}

@@ -1,0 +1,6 @@
+# Contracts
+
+所有API仍要求管理员。PUT /api/v1/ops/resources/:id带revision，保留安装秘密与serviceName不可变。application.spec.deployments增加gateway_domain、gateway_dns_zone_id；运行中的移除返回application_deployment_in_use；全局第二套OpenResty返回openresty_already_installed。
+website.spec新增routing_mode、service_application_id、service_port_name、dns_record_mode、cluster_policies，字段及默认见data-model。managed忽略调用者cluster_ids并从服务发现；生成的cluster_targets不能改变公共路径选项。实际集群以status.actual_cluster_ids为准，status.cluster_traffic逐集群说明enabled/weight/domain/eligible/线路。
+GET /api/v1/ops/resources/:id/dns-lines仅dns_zone，返回{provider,lines:[{id,name}],weight:{min:1,max:100},verification:'provider_required'}；无权/套餐/厂商查询失败明确返回错误，不返回秘密。保存仅验证语法，发布/自动DNS刷新在任何删除前验证厂商线路集合，非法线路不能静默降级。
+DNSInput/DNSRecord新增weight；自动化归属及匹配必须包含规范化line/line_id，值和线路相同只更新权重不换身份。自动化禁止接管外部记录。新CNAME模式未设置任一启用目标入口域名返回openresty_cluster_domain_required；循环入口域名拒绝。DNS状态准确区分已接受/回读/传播未检查；错误只记录安全code。

@@ -27,6 +27,7 @@ export default function NginxFields({
 }) {
   const { t } = useI18n();
   const form = Form.useFormInstance();
+  const routing=Form.useWatch(['spec','routing_mode'],form);
   const clusterIds: string[] = Form.useWatch(["spec","cluster_ids"],form) ?? [];
   const input = (name: Path, zh: string, en: string, placeholder?: string) => (
     <Form.Item name={name} label={t(zh, en)}>
@@ -85,7 +86,7 @@ export default function NginxFields({
                     path: "/",
                     match: "prefix",
                     action: "proxy",
-                    cluster_targets: clusterIds.map(cluster_id=>({cluster_id,target:"application",upstreams:[{url:"",weight:1}]})),
+                    cluster_targets: clusterIds.map(cluster_id=>({cluster_id,target:"proxy",upstreams:[{url:"",weight:1}]})),
                     uri_mode: "preserve",
                     websocket: true,
                     buffering: true,
@@ -192,7 +193,7 @@ export default function NginxFields({
                       </div>
                     ) : (
                       <>
-                        <ClusterUpstreams resources={resources} routeIndex={f.name} watchPath={watchPath}/>
+                        {routing==='managed'?<Alert type="info" showIcon title={t("使用所选托管服务，在各集群发现健康后端","Uses the selected managed service and healthy backends in each cluster")}/>:<ClusterUpstreams resources={resources} routeIndex={f.name} watchPath={watchPath}/>}
                         <Collapse
                           size="small"
                           items={[

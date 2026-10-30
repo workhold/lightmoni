@@ -25,6 +25,8 @@ export interface DNSRecord {
   line?: string;
   line_id?: string;
   priority?: number;
+  weight?: number;
+  weighted?: boolean;
   enabled: boolean;
 }
 export interface DNSInput {
@@ -36,6 +38,7 @@ export interface DNSInput {
   line?: string;
   line_id?: string;
   priority?: number;
+  weight?: number;
   enabled?: boolean;
 }
 export class CloudError extends Error {
@@ -350,7 +353,9 @@ export class CloudClient {
             ttl: Number(r.TTL),
             line: r.Line,
             priority: r.Priority === undefined ? undefined : Number(r.Priority),
-            enabled: r.Status === "ENABLE",
+            weight: r.Weight == null ? undefined : Number(r.Weight),
+            weighted: r.LbaStatus === true || r.LbaStatus === "true",
+            enabled: String(r.Status).toUpperCase() === "ENABLE",
           })),
         );
         if (
@@ -384,7 +389,8 @@ export class CloudClient {
             line: r.Line,
             line_id: r.LineId,
             priority: r.MX === undefined ? undefined : Number(r.MX),
-            enabled: r.Status === "ENABLE",
+            weight: r.Weight == null ? undefined : Number(r.Weight),
+            enabled: String(r.Status).toUpperCase() === "ENABLE",
           })),
         );
         if (items.length < 500) return records;
@@ -410,7 +416,10 @@ export class CloudClient {
         },
         true,
       );
-      return String(r.RecordId ?? record.id ?? "");
+      const id = String(r.RecordId ?? record.id ?? "");
+      if (record.weight !== undefined)
+        await this.setWeight(domain, { ...record, id });
+      return id;
     }
     const r = await this.request(
       "tencent",
@@ -427,10 +436,94 @@ export class CloudClient {
         Value: record.value,
         TTL: record.ttl ?? 600,
         MX: record.priority,
+        Weight: record.weight,
       },
       true,
     );
     return integerString(r.RecordId ?? record.id ?? "");
+  }
+  async setWeight(
+    domain: string,
+    record: DNSInput,
+    authorize: () => boolean = () => true,
+  ): Promise<void> {
+    if (this.credential.provider !== "aliyun" || record.weight === undefined)
+      return;
+    if (!authorize())
+      throw new HTTPError(403, "operations_authorization_revoked");
+    await this.request(
+      "aliyun",
+      "alidns",
+      "SetDNSSLBStatus",
+      "2015-01-09",
+      {
+        DomainName: domain,
+        SubDomain: record.name + "." + domain,
+        Type: record.type,
+        Line: record.line ?? "default",
+        Open: true,
+      },
+      true,
+    );
+    if (!authorize())
+      throw new HTTPError(403, "operations_authorization_revoked");
+    await this.request(
+      "aliyun",
+      "alidns",
+      "UpdateDNSSLBWeight",
+      "2015-01-09",
+      { RecordId: record.id, Weight: record.weight },
+      true,
+    );
+  }
+  async dnsLines(
+    domain: string,
+  ): Promise<{
+    provider: string;
+    lines: { id: string; name: string }[];
+    weight: { min: number; max: number };
+    verification: string;
+  }> {
+    const lines: { id: string; name: string }[] = [];
+    if (this.credential.provider === "aliyun") {
+      const r = await this.request(
+        "aliyun",
+        "alidns",
+        "DescribeDomainInfo",
+        "2015-01-09",
+        { DomainName: domain, NeedDetailAttributes: true },
+      );
+      for (const l of r.RecordLines?.RecordLine ?? [])
+        lines.push({
+          id: l.LineCode,
+          name: l.LineDisplayName ?? l.LineName ?? l.LineCode,
+        });
+      if (!lines.some((l) => l.id === "default"))
+        lines.unshift({ id: "default", name: "默认" });
+    } else if (this.credential.provider === "tencent") {
+      const r = await this.request(
+        "tencent",
+        "dnspod",
+        "DescribeRecordLineCategoryList",
+        "2021-03-23",
+        { Domain: domain },
+      );
+      const walk = (items: any[]) => {
+        for (const l of items) {
+          if (l.Useful === true)
+            lines.push({ id: String(l.LineId), name: l.LineName });
+          walk(l.SubGroup ?? []);
+        }
+      };
+      walk(r.LineList ?? []);
+    } else throw new CloudError("dns_provider_not_supported");
+    if (!lines.length) throw new CloudError("dns_capability_unavailable");
+    return {
+      provider: this.credential.provider,
+      lines,
+      weight: { min: 1, max: 100 },
+      verification: "provider_required",
+    };
   }
   async deleteRecord(domain: string, id: string): Promise<void> {
     if (this.credential.provider === "aliyun")
@@ -561,6 +654,13 @@ export function recordInput(
         input.priority <= 65535,
       "invalid_dns_priority",
     );
+  if (input.weight !== undefined)
+    need(
+      Number.isInteger(input.weight) &&
+        input.weight >= 1 &&
+        input.weight <= 100,
+      "invalid_dns_weight",
+    );
   if (input.id !== undefined)
     need(/^[0-9]{1,30}$/.test(String(input.id)), "invalid_dns_record_id");
   for (const field of ["line", "line_id"])
@@ -580,6 +680,7 @@ export function recordInput(
     line: input.line,
     line_id: input.line_id,
     priority: input.priority,
+    weight: input.weight,
     enabled: input.enabled,
   };
 }
@@ -597,6 +698,13 @@ export function initDNSSchema(options: PlatformOptions): void {
   options.deps.db
     .exec(`CREATE TABLE IF NOT EXISTS ops_dns_owned(id TEXT PRIMARY KEY,zone_id TEXT NOT NULL,owner_id TEXT NOT NULL,record_id TEXT NOT NULL DEFAULT '',name TEXT NOT NULL,type TEXT NOT NULL,value TEXT NOT NULL,ttl INTEGER NOT NULL,state TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS ops_dns_owned_owner ON ops_dns_owned(zone_id,owner_id);
     CREATE TABLE IF NOT EXISTS ops_dns_observed(zone_id TEXT NOT NULL,record_id TEXT NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL,value TEXT NOT NULL,record_json TEXT NOT NULL,PRIMARY KEY(zone_id,record_id));`);
+  const fields = options.deps.db.all<any>("PRAGMA table_info(ops_dns_owned)");
+  if (!fields.some((f) => f.name === "line"))
+    options.deps.db.exec(
+      "ALTER TABLE ops_dns_owned ADD COLUMN line TEXT NOT NULL DEFAULT ''",
+    );
+  if (!fields.some((f) => f.name === "weight"))
+    options.deps.db.exec("ALTER TABLE ops_dns_owned ADD COLUMN weight INTEGER");
 }
 export function publishDNSRecords(
   options: PlatformOptions,
@@ -652,127 +760,209 @@ export async function ensureDnsRecords(
   const { zone, client } = zoneFor(options, zoneID),
     db = options.deps.db,
     at = () => options.deps.now().toISOString();
-  const desired = inputs.map((r) => recordInput(zone, r)),
-    observed = await client.listRecords(zone.spec.domain);
+  const lineKey = (r: { line?: string; line_id?: string }) => {
+    const value = r.line_id ?? r.line ?? "";
+    return ["", "default", "默认", "0"].includes(value) ? "" : value;
+  };
+  const desired = inputs.map((r) => recordInput(zone, r));
+  // Preflight every requested line before removing any currently serving record.
+  if (desired.some((r) => r.weight !== undefined || lineKey(r))) {
+    const capability = await client.dnsLines(zone.spec.domain);
+    for (const record of desired) {
+      const key = lineKey(record),
+        line = capability.lines.find(
+          (l) => lineKey({ line: l.id }) === key || l.name === record.line,
+        );
+      if (!line) throw new CloudError("dns_line_not_supported");
+      if (client.credential.provider === "tencent") {
+        record.line_id = line.id;
+        record.line = line.name;
+      } else record.line = line.id;
+    }
+  }
+  const identity = (r: {
+    name: string;
+    type: string;
+    value: string;
+    line?: string;
+    line_id?: string;
+  }) => [r.name, r.type, r.value, lineKey(r)].join("\0");
+  const observed = await client.listRecords(zone.spec.domain);
   const owned = db.all<any>(
     "SELECT * FROM ops_dns_owned WHERE zone_id=? AND owner_id=?",
     zoneID,
     ownerID,
   );
   for (const row of owned) {
-    if (row.state === "unknown")
+    if (row.state === "unknown" || (row.state === "creating" && !row.record_id))
       throw new CloudError("dns_ownership_unknown", "", true);
     const current = observed.find((r) => r.id === row.record_id);
     if (
       current &&
-      (current.name !== row.name ||
-        current.type !== row.type ||
-        current.value !== row.value)
+      (identity(current) !== identity(row) ||
+        (row.state === "applied" &&
+          (current.ttl !== row.ttl ||
+            (row.weight != null && current.weight !== row.weight))))
     )
       throw new CloudError("dns_owned_record_modified_externally");
-    if (
-      !desired.some(
-        (r) =>
-          r.name === row.name && r.type === row.type && r.value === row.value,
-      )
-    ) {
-      if (current) {
-        if (!options.store.authorized(actor))
-          throw new HTTPError(403, "operations_authorization_revoked");
-        await client.deleteRecord(zone.spec.domain, row.record_id);
-      }
-      db.run("DELETE FROM ops_dns_owned WHERE id=?", row.id);
-    }
   }
   for (const record of desired) {
-    const key = hash(
-      [zoneID, ownerID, record.name, record.type, record.value].join("\0"),
-    );
-    const row = db.get<any>("SELECT * FROM ops_dns_owned WHERE id=?", key);
-    const exists = observed.find(
+    const conflict = observed.find(
       (r) =>
         r.name === record.name &&
-        r.type === record.type &&
-        r.value === record.value &&
-        r.enabled,
+        (record.type === "CNAME" ? r.type !== "CNAME" : r.type === "CNAME") &&
+        !owned.some((o) => o.record_id === r.id),
     );
-    if (exists) {
-      // A pre-existing external value already satisfies this owner, but remains external.
-      if (row && row.record_id !== exists.id)
-        throw new CloudError("dns_ownership_unknown", "", true);
-      if (row && exists.ttl !== record.ttl) {
-        if (!options.store.authorized(actor))
-          throw new HTTPError(403, "operations_authorization_revoked");
-        await client.writeRecord(zone.spec.domain, {
-          ...record,
-          id: exists.id,
-        });
-        db.run(
-          "UPDATE ops_dns_owned SET ttl=?,updated_at=? WHERE id=?",
-          record.ttl,
-          at(),
-          key,
-        );
-      }
-      continue;
+    if (conflict) throw new CloudError("dns_record_conflict");
+    if (
+      record.weight !== undefined &&
+      observed.some(
+        (r) =>
+          r.name === record.name &&
+          r.type === record.type &&
+          lineKey(r) === lineKey(record) &&
+          identity(r) !== identity(record) &&
+          !owned.some((o) => o.record_id === r.id),
+      )
+    )
+      throw new CloudError("dns_record_conflict");
+    const external = observed.find(
+      (r) =>
+        identity(r) === identity(record) &&
+        !owned.some((o) => o.record_id === r.id),
+    );
+    if (
+      external &&
+      (!external.enabled ||
+        external.ttl !== record.ttl ||
+        (record.weight !== undefined &&
+          (external.weight !== record.weight ||
+            (client.credential.provider === "aliyun" && !external.weighted))))
+    )
+      throw new CloudError("dns_record_conflict");
+  }
+  for (const row of owned) {
+    if (desired.some((r) => identity(r) === identity(row))) continue;
+    if (observed.some((r) => r.id === row.record_id)) {
+      if (!options.store.authorized(actor))
+        throw new HTTPError(403, "operations_authorization_revoked");
+      await client.deleteRecord(zone.spec.domain, row.record_id);
     }
+    db.run("DELETE FROM ops_dns_owned WHERE id=?", row.id);
+  }
+  for (const record of desired) {
+    const row = owned.find((o) => identity(o) === identity(record));
+    const existing = observed.find((r) => identity(r) === identity(record));
+    if (existing && !row) continue; // External records remain external.
+    // Providers can delay indexing a successful creation. Never create a second
+    // record while its durable record ID is awaiting observation.
+    if (row?.record_id && !existing && depsAge(row.updated_at) < 30000)
+      continue;
+    const key = row?.id ?? hash([zoneID, ownerID, identity(record)].join("\0"));
+    const differs =
+      !existing ||
+      !existing.enabled ||
+      existing.ttl !== record.ttl ||
+      (record.weight !== undefined &&
+        (existing.weight !== record.weight ||
+          (client.credential.provider === "aliyun" && !existing.weighted)));
+    if (!differs) continue;
     if (!options.store.authorized(actor))
       throw new HTTPError(403, "operations_authorization_revoked");
-    if (row && ["creating", "unknown"].includes(row.state))
-      throw new CloudError("dns_ownership_unknown", "", true);
     db.run(
-      "INSERT OR REPLACE INTO ops_dns_owned(id,zone_id,owner_id,record_id,name,type,value,ttl,state,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+      "INSERT OR REPLACE INTO ops_dns_owned(id,zone_id,owner_id,record_id,name,type,value,ttl,state,updated_at,line,weight) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
       key,
       zoneID,
       ownerID,
-      row?.record_id ?? "",
+      existing?.id ?? "",
       record.name,
       record.type,
       record.value,
       record.ttl,
       "creating",
       at(),
+      lineKey(record),
+      record.weight ?? null,
     );
+    let remote = existing?.id;
     try {
-      const remote = await client.writeRecord(zone.spec.domain, {
+      // Journal the new record ID before the separate Aliyun SLB calls. A failed
+      // weight call must never orphan a created DNS record or trigger duplication.
+      remote = await client.writeRecord(zone.spec.domain, {
         ...record,
-        id: row?.record_id || undefined,
+        id: existing?.id,
+        ...(client.credential.provider === "aliyun"
+          ? { weight: undefined }
+          : {}),
       });
       if (!remote) throw new CloudError("dns_record_id_missing", "", true);
-      if (row && observed.some((r) => r.id === remote && !r.enabled))
-        await client.setRecordStatus(zone.spec.domain, remote, true);
       db.run(
-        "UPDATE ops_dns_owned SET record_id=?,state='applied',updated_at=? WHERE id=?",
+        "UPDATE ops_dns_owned SET record_id=?,state='verifying',updated_at=? WHERE id=?",
         remote,
         at(),
         key,
       );
+      if (
+        client.credential.provider === "aliyun" &&
+        record.weight !== undefined
+      )
+        await client.setWeight(
+          zone.spec.domain,
+          { ...record, id: remote },
+          () => options.store.authorized(actor),
+        );
+      if (existing && !existing.enabled) {
+        if (!options.store.authorized(actor))
+          throw new HTTPError(403, "operations_authorization_revoked");
+        await client.setRecordStatus(zone.spec.domain, remote, true);
+      }
     } catch (error) {
       db.run(
-        "UPDATE ops_dns_owned SET state=?,updated_at=? WHERE id=?",
-        (error as any).state === "unknown" ? "unknown" : "failed",
+        "UPDATE ops_dns_owned SET record_id=?,state=?,updated_at=? WHERE id=?",
+        remote ?? "",
+        remote
+          ? "verifying"
+          : (error as any).state === "unknown"
+            ? "unknown"
+            : "failed",
         at(),
         key,
       );
       throw error;
     }
   }
+  function depsAge(value: string) {
+    return options.deps.now().getTime() - Date.parse(value);
+  }
   const current = await client.listRecords(zone.spec.domain);
-  const verified = desired.every((record) =>
-    current.some(
-      (r) =>
-        r.name === record.name &&
-        r.type === record.type &&
-        r.value === record.value &&
-        r.enabled,
-    ),
-  );
+  const verified =
+    desired.every((record) =>
+      current.some(
+        (r) =>
+          identity(r) === identity(record) &&
+          r.enabled &&
+          r.ttl === record.ttl &&
+          (record.weight === undefined ||
+            (r.weight === record.weight &&
+              (client.credential.provider !== "aliyun" || r.weighted))),
+      ),
+    ) &&
+    owned
+      .filter((row) => !desired.some((r) => identity(r) === identity(row)))
+      .every((row) => !current.some((r) => r.id === row.record_id));
+  if (verified)
+    db.run(
+      "UPDATE ops_dns_owned SET state='applied' WHERE zone_id=? AND owner_id=? AND state='verifying'",
+      zoneID,
+      ownerID,
+    );
   return {
     ...publishDNSRecords(options, zone, current),
     verified,
     propagation: "not_checked",
   };
 }
+
 export async function dnsPropagation(
   domain: string,
   type: string,
