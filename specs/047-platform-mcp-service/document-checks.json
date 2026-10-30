@@ -22,7 +22,7 @@
     "docs/mcp.md": "62b2aae7f41bca42be7797f8503e7de0f74181dd0fc302a87cb24edac6a26f58"
   },
   "changed_files_secret_scan": {
-    "files_checked": 1,
+    "files_checked": 35,
     "pattern_findings": 0,
     "scope": "known token prefixes and private key blocks; does not prove absence of every possible secret"
   }
