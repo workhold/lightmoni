@@ -30,6 +30,7 @@ import { registerServiceDeployments } from "./service-deployments.js";
 import { registerAgentJobs } from "./agent-jobs.js";
 import { registerTaskCenter } from "./task-center.js";
 import { registerOperations } from "./operations.js";
+import { registerOperationsPlatform } from "../ops/index.js";
 import { registerOperationSchedules } from "./operation-schedules.js";
 import { websiteDefinition } from "../operations/websites.js";
 import { certificateDefinition } from "../operations/certificates.js";
@@ -128,7 +129,9 @@ export async function createApp(cfg: Config) {
     const releaseArtifacts = new ReleaseArtifactStore(join(cfg.dataDir, "release-artifacts"));
     const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs, artifacts: releaseArtifacts });
     modules.push(serviceDeployments);
-    const operations = registerOperations(deps, { jobs: agentJobs, credentials: agentCredentials, definitions: [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition] });
+    const platform = registerOperationsPlatform(deps, { jobs: agentJobs, dataDir: cfg.dataDir });
+    modules.push(platform);
+    const operations = registerOperations(deps, { jobs: agentJobs, credentials: agentCredentials, resolvePayload: platform.resolvePayload, definitions: [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition] });
     modules.push(operations, registerOperationSchedules(deps, operations));
     const ingest = new Ingest(cat, auth, (...args) =>
       monitor?.accepted(...args),

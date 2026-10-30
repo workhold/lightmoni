@@ -23,7 +23,6 @@ const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then
 const OperationsPage=lazy(()=>import('./OperationsPage'));
 const HostsNodesPage=lazy(()=>import('./HostsNodesPage'));
 const DataManagementPage=lazy(()=>import('./DataManagementPage'));
-const ServiceDeploymentsPage=lazy(()=>import('./ServiceDeploymentsPage'));
 
 function ClaimLanding(){const {token}=useParams(),{search}=useLocation(),params=new URLSearchParams(search);params.set('claim',token??'');return <Navigate to={'/alerts?'+params} replace/>}
 
@@ -60,7 +59,7 @@ export default function Root(){
     <Route path="/data-management" element={<DataManagementPage user={user}/>}/>
     <Route path="/agents" element={<HostsNodesPage user={user}/>}/>
     <Route path="/machines" element={<HostsNodesPage user={user}/>}/>
-    <Route path="/services" element={user.role==='admin'?<ServiceDeploymentsPage user={user}/>:<Navigate to="/settings" replace/>}/>
+    <Route path="/services" element={<Navigate to={user.role==='admin'?"/operations?tab=service":"/settings"} replace/>}/>
     <Route path="/operations" element={user.role==='admin'?<OperationsPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>
     <Route path="/admin" element={user.role==='admin'?<AdminPage user={user}/>:<Navigate to="/settings" replace/>}/>

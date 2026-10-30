@@ -1,0 +1,45 @@
+{
+  "recorded_at": "2026-10-29",
+  "commands": [
+    {
+      "component": "runtime",
+      "command": "npm --prefix runtime test",
+      "tests": 491,
+      "pass": 470,
+      "fail": 0,
+      "skipped": 21,
+      "duration_ms": 127046.717209
+    },
+    {
+      "component": "ai-runtime",
+      "command": "npm --prefix ai-runtime test",
+      "tests": 71,
+      "pass": 71,
+      "fail": 0,
+      "skipped": 0,
+      "duration_ms": 33216.853416
+    },
+    {
+      "component": "sdk/typescript",
+      "command": "npm --prefix sdk/typescript test",
+      "tests": 18,
+      "pass": 18,
+      "fail": 0,
+      "skipped": 0,
+      "duration_ms": 32188.371666
+    }
+  ],
+  "total_tests": 580,
+  "total_pass": 559,
+  "total_fail": 0,
+  "total_skipped": 21,
+  "typecheck": {
+    "command": "npm run typecheck",
+    "exit_code": 0
+  },
+  "build": {
+    "command": "npm run build",
+    "exit_code": 0
+  },
+  "notes": "Nginx扩展后Runtime全量回归；AI/SDK代码未变，沿用同SDD的已通过结果。真实Linux OpenResty两项另行启用执行，默认跳过不计为通过。"
+}

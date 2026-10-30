@@ -1,4 +1,4 @@
-export type OperationKind = "website" | "certificate" | "compose" | "backup";
+export type OperationKind = "website" | "certificate" | "compose" | "backup" | "platform";
 export type OperationConfig = Record<string, any>;
 export interface OperationDefinition {
   kind: OperationKind;
@@ -19,7 +19,7 @@ export interface OperationPayload {
 export interface OperationExecutionContext {
   dataDir: string; signal: AbortSignal; now: () => Date;
   publicDir?: string;
-  command(file: string, args: string[], options?: { cwd?: string; stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal }): Promise<{ stdout: string; stderr: string }>;
+  command(file: string, args: string[], options?: { cwd?: string; stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal; env?: Record<string,string> }): Promise<{ stdout: string; stderr: string }>;
 }
 export interface OperationExecutionResult { verified: boolean; data: OperationConfig; }
 export interface OperationsStore {
