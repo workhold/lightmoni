@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "entry": "compose.yaml",
+      "only_image_changed": true,
+      "legacy_image_variable_ignored": true,
+      "trusted_proxy_passthrough": true
+    },
+    {
+      "entry": "deploy/with-clickhouse/compose.yaml",
+      "only_image_changed": true,
+      "legacy_image_variable_ignored": true,
+      "trusted_proxy_passthrough": true
+    }
+  ],
+  "containers_started": false,
+  "compose_version": "5.1.4"
+}

@@ -1,0 +1,12 @@
+{
+  "amd64": {
+    "manifest_digest": "sha256:787aeabe3c74fbc8dfeb6b49039437ffbf71c8b24862121e67264d36d3122d2e",
+    "config_digest": "sha256:aabb61115b3a0dabd94d9fe7b0f1dc67d562fdc16c64eb373b2acad2e5f7dac7",
+    "rootfs_diff_ids_verified": true
+  },
+  "arm64": {
+    "manifest_digest": "sha256:10b0face01cf779993397772c88bb2b0fdbc8c7478a5b4d9b3747daa30db6470",
+    "config_digest": "sha256:ff08f0261d8e28ce1ad971d7df7003edd133ee142a2bd16548e6347f63bbee60",
+    "rootfs_diff_ids_verified": true
+  }
+}

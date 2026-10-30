@@ -1,0 +1,265 @@
+{
+  "passed": true,
+  "image": "local/lightmoni:e3d1192-amd64",
+  "expected_source_revision": "e3d11928ed85a30d76af15e12552e01fe0712627",
+  "docker_platform": "linux/amd64",
+  "checks": [
+    {
+      "check": "OCI revision and requested-platform image",
+      "passed": true,
+      "platform": "linux/amd64",
+      "execution": "emulated Linux containers in local VM",
+      "unprivileged_user": "lightmoni"
+    },
+    {
+      "check": "real ClickHouse 26.8 HTTP, center health and fresh isolated state",
+      "passed": true
+    },
+    {
+      "check": "admin init from stdin, login and session",
+      "passed": true
+    },
+    {
+      "check": "current operations/cluster/catalog APIs and read-only task directories",
+      "passed": true,
+      "admin_paths": 6,
+      "anonymous_status": 401,
+      "member_admin_status": 403,
+      "default_tasks_enabled": true
+    },
+    {
+      "check": "central six-hour encrypted password, host default binding and immutable undiscovered network",
+      "passed": true,
+      "default_seconds": 21600,
+      "ssh_connections": 0,
+      "agent_installs": 0,
+      "discovered_network_write_protected": true,
+      "revocation_fail_closed": true
+    },
+    {
+      "check": "production credential route, default binding UI and bilingual host-network assets",
+      "passed": true,
+      "assets": 30,
+      "interactive_browser": false
+    },
+    {
+      "check": "dual Agent SHA/ELF/dist provenance, embedded private-network fixture, latest capabilities and four SDK checksums",
+      "passed": true,
+      "compared_modules": 10,
+      "executed_platform": "linux/amd64",
+      "other_architecture_static_only": true,
+      "sdk_languages": [
+        "go",
+        "python",
+        "rust",
+        "typescript"
+      ],
+      "installer_executed": false
+    },
+    {
+      "check": "AI runner, model and current platform/assistant modules import without model requests",
+      "passed": true,
+      "model_requests": 0
+    }
+  ],
+  "downloads": [
+    {
+      "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+      "bytes": 77568720,
+      "sha256": "cce466968e938cad04ecb8278815eda819a84c61dd13975c8b056fa98b6599b6",
+      "dist_matches_platform": true,
+      "compared_modules": [
+        "agent/agent.js",
+        "agent/network-addresses.js",
+        "agent/application-observer.js",
+        "agent/task-runner.js",
+        "agent/operations.js",
+        "shared/host-network.js",
+        "shared/application-observation.js",
+        "shared/task-center.js",
+        "server/host-network.js",
+        "server/connection-credentials.js"
+      ],
+      "platform": "linux/amd64",
+      "elf_machine": 62,
+      "node_version": "24.15.0",
+      "operation_modules": 5,
+      "task_script_capabilities": [
+        "task.script.v1",
+        "task.script.v2"
+      ],
+      "v2_args_cwd_packaged": true,
+      "finite_task_runner_packaged_and_wired": true,
+      "executed": true
+    },
+    {
+      "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+      "bytes": 77255673,
+      "sha256": "cb6bc8c4464b5a2c5715c4379137b2244840176d3ac76a8d89129284907b5d97",
+      "dist_matches_platform": true,
+      "compared_modules": [
+        "agent/agent.js",
+        "agent/network-addresses.js",
+        "agent/application-observer.js",
+        "agent/task-runner.js",
+        "agent/operations.js",
+        "shared/host-network.js",
+        "shared/application-observation.js",
+        "shared/task-center.js",
+        "server/host-network.js",
+        "server/connection-credentials.js"
+      ],
+      "platform": "linux/arm64",
+      "elf_machine": 183,
+      "node_version": "24.15.0",
+      "operation_modules": 5,
+      "task_script_capabilities": [
+        "task.script.v1",
+        "task.script.v2"
+      ],
+      "v2_args_cwd_packaged": true,
+      "finite_task_runner_packaged_and_wired": true,
+      "executed": false
+    }
+  ],
+  "sdk_downloads": [
+    {
+      "language": "typescript",
+      "file": "lightmoni-sdk-0.1.0.tgz",
+      "bytes": 27317,
+      "sha256": "d087b534cad21f20c1058451c8da4eaecf6a9991275b2a522156a28e92b2fd71",
+      "checksum_verified": true,
+      "apache_license_paths": [
+        "package/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+    },
+    {
+      "language": "go",
+      "file": "lightmoni-go-sdk_0.1.0.tar.gz",
+      "bytes": 56369,
+      "sha256": "8a7f4b84acbb74b28740d1f6883d02dfd402c075f2f0d700a2f66d8144c32209",
+      "checksum_verified": true,
+      "apache_license_paths": [
+        "lightmoni-go-sdk/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+      "go_module": "github.com/workhold/lightmoni"
+    },
+    {
+      "language": "python",
+      "file": "lightmoni-python-sdk_0.1.0.tar.gz",
+      "bytes": 39842,
+      "sha256": "b3ddbb596fb9a56860130b465fb187febdb23ecbabf21816fd6783960a0ad6a0",
+      "checksum_verified": true,
+      "apache_license_paths": [
+        "lightmoni-python-sdk/LICENSE",
+        "lightmoni-python-sdk/sdk/python/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+    },
+    {
+      "language": "rust",
+      "file": "lightmoni-rust-sdk_0.1.0.tar.gz",
+      "bytes": 41742,
+      "sha256": "9af730a4724666bfe2f0afce70e54550ff743f3775a08f6597bf7821f5d751df",
+      "checksum_verified": true,
+      "apache_license_paths": [
+        "lightmoni-rust-sdk/LICENSE",
+        "lightmoni-rust-sdk/sdk/rust/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+    }
+  ],
+  "test_network": "dedicated bridge, center published on host loopback; outbound routing is available; no model provider is configured",
+  "resource_limits": {
+    "center_memory_bytes": 1073741824,
+    "clickhouse_memory_bytes": 3221225472,
+    "additional_swap_bytes": 0,
+    "clickhouse_server_memory_bytes": 2147483648,
+    "clickhouse_query_memory_bytes": 536870912,
+    "clickhouse_query_threads": 2
+  },
+  "limitations": [
+    "linux/arm64 Agent package inspected statically only; target-platform execution is emulated Linux containers in local VM",
+    "No SSH, Agent daemon, installer, approved operation or task script was run; only version/imports and a pure network fixture execute",
+    "No live Nginx/Docker/ACME/S3 operation executed",
+    "HTTP assets are checked; this is not interactive browser acceptance",
+    "Fresh isolated volumes only; no existing production data upgrade is tested",
+    "No remote machine, registry tag or production container is modified"
+  ],
+  "target_platform": "linux/amd64",
+  "workstation_os": "Darwin",
+  "workstation_architecture": "arm64",
+  "docker_daemon_platform": "linux/arm64",
+  "execution_environment": "emulated Linux containers in local VM",
+  "emulated": true,
+  "emulation_implementation": "registered Docker daemon emulation; implementation not independently identified",
+  "executed_agent_platform": "linux/amd64",
+  "static_agent_platform": "linux/arm64",
+  "image_id": "sha256:787aeabe3c74fbc8dfeb6b49039437ffbf71c8b24862121e67264d36d3122d2e",
+  "source_revision": "e3d11928ed85a30d76af15e12552e01fe0712627",
+  "credential_lifetime_seconds": 21600.0,
+  "web_asset_inventory": {
+    "javascript_asset_count": 30,
+    "javascript_bytes": 8692997,
+    "paths": [
+      "/assets/AdminPage-CydXKkdZ.js",
+      "/assets/AlertsPage-c_r4Z1wc.js",
+      "/assets/AssistantPage-Dg5twpOZ.js",
+      "/assets/ConnectionCredentialsPage-DrXK4lz7.js",
+      "/assets/DashboardPage-uT7zSJ0o.js",
+      "/assets/DataManagementPage-wfRdw5Rt.js",
+      "/assets/FullscreenOutlined-Baz7PFl2.js",
+      "/assets/HistoryOutlined-DQykF8nx.js",
+      "/assets/HostsNodesPage-C_ZgQls_.js",
+      "/assets/LogExplorePage-BDTaEpjj.js",
+      "/assets/MinusCircleOutlined-BkhhOjKI.js",
+      "/assets/OperationsPage-BZ-uN1ZQ.js",
+      "/assets/QuestionCircleOutlined-BiuSfvXN.js",
+      "/assets/RetentionSettings-CRG0J85b.js",
+      "/assets/SQLInput-DSW4AOUX.js",
+      "/assets/SSHCheckSummary-5EN3GcDB.js",
+      "/assets/TracePage-C3TXIyRv.js",
+      "/assets/alert-changes-DUVWoRJD.js",
+      "/assets/alert-preview-BWQ5HRSX.js",
+      "/assets/api-DBD3TKJw.js",
+      "/assets/assistant-context-BcZQj6_c.js",
+      "/assets/channels-BdpoTSs4.js",
+      "/assets/connection-credentials-CAKVbAYn.js",
+      "/assets/esm-CRQ4f_3K.js",
+      "/assets/index-BB2sIXaU.js",
+      "/assets/popconfirm-Bp_NDaQR.js",
+      "/assets/rolldown-runtime-C0FnF6B9.js",
+      "/assets/tag-DblrsHHZ.js",
+      "/assets/translation-4Wanh2Ix.js",
+      "/assets/typography-MtRwgbit.js"
+    ],
+    "verification": "same-origin production HTTP assets; not interactive browser acceptance"
+  },
+  "embedded_agent": {
+    "version": "0.1.0",
+    "private_fixture": true,
+    "count": 3,
+    "capabilities": [
+      "operations.website",
+      "operations.certificate",
+      "operations.compose",
+      "operations.backup",
+      "operations.platform"
+    ],
+    "runtime": "linux/x64",
+    "daemon_started": false,
+    "ssh_connections": 0,
+    "installer_executed": false
+  },
+  "last_stage": "AI runtime and assistant imports without a provider or model request",
+  "cleanup": {
+    "removed": {
+      "container": 2,
+      "volume": 2,
+      "network": 1
+    },
+    "errors": []
+  }
+}

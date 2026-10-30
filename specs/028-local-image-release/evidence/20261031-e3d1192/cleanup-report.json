@@ -1,0 +1,33 @@
+{
+  "source_revision": "e3d11928ed85a30d76af15e12552e01fe0712627",
+  "test_resources": {
+    "amd64": {
+      "removed": {
+        "container": 2,
+        "volume": 2,
+        "network": 1
+      },
+      "errors": []
+    },
+    "arm64": {
+      "removed": {
+        "container": 2,
+        "volume": 2,
+        "network": 1
+      },
+      "errors": []
+    }
+  },
+  "containers_before_vm_stop": [
+    "buildx_buildkit_lightmoni-ec308800"
+  ],
+  "vm_profile": "lightmoni-release",
+  "vm_status": "Stopped",
+  "colima_stop_exit_code": 0,
+  "docker_default_context": "default",
+  "isolated_docker_authorization_config_exists": false,
+  "registry_password_persistence": "getpass input; publisher process memory only; no Docker auth config",
+  "online_platform_modified": false,
+  "vchive_accessed": false,
+  "global_prune_executed": false
+}

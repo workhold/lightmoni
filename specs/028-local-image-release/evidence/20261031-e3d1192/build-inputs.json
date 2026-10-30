@@ -1,0 +1,32 @@
+{
+  "revision": "e3d11928ed85a30d76af15e12552e01fe0712627",
+  "source": "git archive of merged main",
+  "workstation": "macOS arm64; dedicated local Colima Linux VM",
+  "remote_build_used": false,
+  "github_actions_used": false,
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "emulation": "amd64 executes in local ARM VM via registered emulation; not a native amd64 runner",
+  "build_args": {
+    "DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+    "DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+    "NODE_DIST_URL": "https://cdn.npmmirror.com/binaries/node"
+  },
+  "platform_build_args": {
+    "amd64": {
+      "NPM_REGISTRY": "https://registry.npmmirror.com"
+    },
+    "arm64": {
+      "NPM_REGISTRY": "https://registry.npmmirror.com"
+    }
+  },
+  "base_contexts": {
+    "node:24.15.0-bookworm": "docker-image://docker.m.daocloud.io/library/node@sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940",
+    "node:24.15.0-bookworm-slim": "docker-image://docker.m.daocloud.io/library/node@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+  },
+  "digest_pins_source": "Node mirror indexes bound to retained official Docker Hub digest evidence; npm lock integrity and official Node archive checksums remain enforced",
+  "network_adjustment": "Official Debian large package download stalled; retried with TUNA using existing Dockerfile args and unchanged apt signature checks",
+  "smoke_adjustment": "First amd64 check used exact equality between separately sampled creation/expiry clocks; allow at most one second elapsed insertion work, then rerun all eight amd64 groups successfully"
+}

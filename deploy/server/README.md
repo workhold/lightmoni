@@ -1,6 +1,6 @@
 # Docker 更新与回滚
 
-根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
+根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261031-e3d1192`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
 
 ## 更新
 
@@ -18,7 +18,9 @@ docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/
 
 通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对镜像提交；随后检查网页、原有管理员登录、只读查询和 SDK/Agent 下载。需要 `up` 重新创建容器才能切换镜像；本地 `npm run build`、`release:sdk` 和 `release:agent` 只更新本地生成物。
 
-`20261030-ddd7426` 从已合入 PR #15/#18/#19/#20 的 `ddd7426cfc97fa86ed3072dbc04b808d979f73f5` 在本机完整重建，包含集群应用、网站域名独立集群路由、应用自动观测和统一系统日志。固定标签与 `latest` 指向同一双架构索引 `sha256:5cc3dbe52b86feb5412509c2e744a10097db0b2e80e9191c626d95207fea2ef4`。旧 `.env` 中的 `LIGHTMONI_IMAGE` 可删除，不再影响此入口；单独拉取镜像不会更新正在运行的平台，仍需执行 `up`。旧固定标签保留供回退，当前发布与 Compose 验收见 [SDD 028](../../specs/028-local-image-release/validation.md#2026-10-30-compose-直接指定已发布镜像)；[2026-10-28 的发布记录](../../docs/evidence/local-image-release-ec30880/README.md)保留历史信息。
+`20261031-e3d1192` 从已合入 PR #25 的 `e3d11928ed85a30d76af15e12552e01fe0712627` 在本机完整构建，包含集中连接凭据、默认 SSH 绑定与主机内网/来源地址，以及主干现有集群、网站与应用观测能力。固定标签与 `latest` 指向同一双架构索引 `sha256:85cdbacc6bf4e97b6947b694f88224e86624a367db8342ca1f294042b2e824ae`。旧 `.env` 中的 `LIGHTMONI_IMAGE` 可删除，不再影响此入口；单独拉取镜像不会更新正在运行的平台，仍需执行 `up`。旧固定标签保留供回退，验收与范围见 [SDD 028](../../specs/028-local-image-release/validation.md#2026-10-31-集中凭据与主机地址版本)。通过 1Panel 管理时需将镜像标签改成此固定版本，并拉取后重新创建容器。
+
+首次部署 vchive 或其他主机时，先在“连接凭据”添加 SSH 私钥/密码，再登记主机并选择已有凭据，执行 SSH 安装检查、审阅后部署 Agent。新 Agent 上报后显示网卡内网 IP；平台镜像升级不会自动升级已安装的 Agent。
 
 中心镜像更新不会自动更新已安装的 Agent。需要使用新运维能力的节点应单独升级 Agent，并按[运维手册](../../docs/operations.md)准备 Nginx、Docker/Compose 等所需依赖及目录、服务权限；不能仅凭 capability 出现就认定节点已有执行权限。公网 ACME 与真实 S3 等未验收范围仍以 [SDD 026](../../specs/026-operations-platform/validation.md)为准。
 

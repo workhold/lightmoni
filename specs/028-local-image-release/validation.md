@@ -47,3 +47,33 @@
 架构同步不适用：仅变更镜像选择配置与部署说明，组件、拓扑、存储、协议、数据/控制路径、凭据和 AI/工具边界均不变，不为此改写仓库系统设计或 Doca。本轮用户明确要求改完后交付 GitHub 主分支，已授权通过功能分支 PR 合入 main。
 
 交付入口：[GitHub PR #26](https://github.com/workhold/lightmoni/pull/26)，目标 `main`；合入状态以 GitHub PR 记录为准。
+
+## 2026-10-31 集中凭据与主机地址版本
+
+本次发布固定源码为已合入 PR #25 的 main `e3d11928ed85a30d76af15e12552e01fe0712627`，通过 `git archive` 导出干净构建上下文。完整构建中心、AI runtime、网页、双架构 Agent 和四 SDK，未使用远端主机或 GitHub Actions 构建。
+
+### 构建与容器验收
+
+- [构建输入](evidence/20261031-e3d1192/build-inputs.json)记录本机专属 Colima VM、基础镜像摘要及网络镜像参数。使用现有 Dockerfile 参数切换下载镜像，保持 npm integrity、官方 Node archive SHA256 与 apt 签名校验。
+- [amd64 容器报告](evidence/20261031-e3d1192/amd64-container-report.json)和 [arm64 容器报告](evidence/20261031-e3d1192/arm64-container-report.json)各 8 组通过，包括真实 ClickHouse 26.8、中心健康、管理员初始化/登录/权限、任务与运维接口、中央凭据 API/默认主机绑定/撤销失效、主机网络字段只读、生产网页资源以及 AI 模块导入。
+- 两份 Agent 包均核对 SHA256、ELF 架构及 10 个编译模块与平台构建输出一致；每个平台实际运行对应 Agent 的 `version` 和纯函数网络 fixture，覆盖私网、ULA 和 CGNAT 地址。四 SDK 的校验和与 Apache 许可完整。
+- [本地镜像身份](evidence/20261031-e3d1192/local-image-identities.json)绑定验收镜像的 manifest/config 与 rootfs；[工具摘要](evidence/20261031-e3d1192/tool-checksums.json)记录临时构建、验收和发布脚本。
+- 首轮 amd64 凭据时长检查误将两次采样时间要求为精确相等，调整为只容许一秒内插入耗时且不放宽 6 小时上限，随后完整重跑 8 组通过；生产代码未改动。
+
+### 注册表与 Compose
+
+固定标签为 `docker.heyphp.com/lightmoni/lightmoni:20261031-e3d1192`，同时更新 `latest`。两个标签已写入并回读一致，索引为 `sha256:85cdbacc6bf4e97b6947b694f88224e86624a367db8342ca1f294042b2e824ae`。[注册表报告](evidence/20261031-e3d1192/registry-report.json)独立 GET 索引、两平台 manifest/config 和全部 29 个唯一镜像层，SHA256、长度、架构与源码 revision 均通过，并与本地已验收镜像身份一致。旧固定标签 `20261030-ddd7426` 保留为 `sha256:5cc3dbe52b86feb5412509c2e744a10097db0b2e80e9191c626d95207fea2ef4`。
+
+[本地完整 OCI 校验](evidence/20261031-e3d1192/local-oci-export-verification.json)在写入注册表标签前验证全部 31 个 layer/config blob，共 602,575,546 字节；上传采用本机 512 KiB PATCH 分块。[发布结果](evidence/20261031-e3d1192/release-attempt.json)状态为 `verified`，固定标签和 `latest` 均完成；密码通过无回显输入仅保留于发布进程内存，未使用 Docker auth config。注册表没有原子标签 CAS，发布工具在提升 `latest` 前核对其未被其他发布修改，仍无法消除核对与写入之间的并发窗口。
+
+[Compose 验证](evidence/20261031-e3d1192/compose-verification.json)使用实际 Docker Compose 5.1.4 解析根目录和兼容入口，除中心镜像字段外与发布前配置完全一致；遗留 `LIGHTMONI_IMAGE` 不覆盖新固定版本，数据库环境、持久卷与可信代理透传保持。解析没有启动平台实例。部署说明同步给出 1Panel 改标签、拉取并重新创建容器，以及通过已有凭据登记主机、SSH 安装检查和审阅后部署 Agent 的流程。
+
+[清理报告](evidence/20261031-e3d1192/cleanup-report.json)记录两轮验收各移除 2 个容器、2 个卷和 1 个网络且无错误；专用 `lightmoni-release` VM 已停止，全局默认 Docker context 保持 `default`，未执行全局 prune。`git diff --check` 与证据 JSON 解析/凭据模式检查通过。
+
+### 验证范围与架构判断
+
+- 两平台在本机 ARM Linux VM；amd64 经已注册仿真执行，不属于原生 amd64 runner。
+- 使用全新隔离卷，未验证存量生产数据升级；网页检查为真实 HTTP 生产资源，不属于交互式浏览器验收。
+- 未执行 SSH、Agent daemon、安装器、批准任务或用户脚本，也未操作线上平台及 vchive。Agent 包校验和网络 fixture 不代表实际主机安装已经成功。
+- 未请求模型生成，未执行真实 Nginx/公网 ACME/云/DNS/S3 操作。独立完整镜像层 GET 不等于 Docker pull 或执行从远端重新拉取的镜像。
+- 架构同步不适用：本轮仅打包发布已合入能力、更新 Compose 镜像指针及发布证据，组件职责、拓扑、协议、存储、数据/控制路径、凭据和 AI/工具边界未改变，不重复改写仓库系统设计或 Doca。

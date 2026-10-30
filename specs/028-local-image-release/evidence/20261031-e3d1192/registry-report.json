@@ -1,0 +1,391 @@
+{
+  "source_revision": "e3d11928ed85a30d76af15e12552e01fe0712627",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tags": [
+    {
+      "tag": "20261031-e3d1192",
+      "digest": "sha256:85cdbacc6bf4e97b6947b694f88224e86624a367db8342ca1f294042b2e824ae",
+      "size": 493
+    },
+    {
+      "tag": "latest",
+      "digest": "sha256:85cdbacc6bf4e97b6947b694f88224e86624a367db8342ca1f294042b2e824ae",
+      "size": 493
+    }
+  ],
+  "index_digest": "sha256:85cdbacc6bf4e97b6947b694f88224e86624a367db8342ca1f294042b2e824ae",
+  "platforms": [
+    {
+      "platform": "linux/amd64",
+      "manifest_digest": "sha256:787aeabe3c74fbc8dfeb6b49039437ffbf71c8b24862121e67264d36d3122d2e",
+      "config_digest": "sha256:aabb61115b3a0dabd94d9fe7b0f1dc67d562fdc16c64eb373b2acad2e5f7dac7",
+      "layer_count": 15,
+      "compressed_layer_bytes": 301444825,
+      "runtime_user": "lightmoni"
+    },
+    {
+      "platform": "linux/arm64",
+      "manifest_digest": "sha256:10b0face01cf779993397772c88bb2b0fdbc8c7478a5b4d9b3747daa30db6470",
+      "config_digest": "sha256:ff08f0261d8e28ce1ad971d7df7003edd133ee142a2bd16548e6347f63bbee60",
+      "layer_count": 15,
+      "compressed_layer_bytes": 301107619,
+      "runtime_user": "lightmoni"
+    }
+  ],
+  "preserved_tags": [
+    {
+      "tag": "20261030-ddd7426",
+      "digest": "sha256:5cc3dbe52b86feb5412509c2e744a10097db0b2e80e9191c626d95207fea2ef4"
+    }
+  ],
+  "unique_layers": [
+    {
+      "digest": "sha256:068fedd6b0f109b8186d00d49327b6fc6747c428fd3c9a8739424ff5f38d7531",
+      "size": 28233543
+    },
+    {
+      "digest": "sha256:10c63fb2a2011ac33da39cb3bd0d56c640a734566eca7b46a67add7785f18853",
+      "size": 3310
+    },
+    {
+      "digest": "sha256:1d8fcac53b6538020ad22aae87d4767e5ae45d2359852231b60f534a7a99145f",
+      "size": 190022608
+    },
+    {
+      "digest": "sha256:2934824fe6b440ff44d15f21bafa0e2f3a19c8a3383344187eaf0c954075ed93",
+      "size": 472
+    },
+    {
+      "digest": "sha256:2ef05dcd22f2d7562470826b6b9dc1faf9fda10320238b812a2946f94d8918b5",
+      "size": 3310
+    },
+    {
+      "digest": "sha256:37b6eb746f79394ccadf666bd8cae1f2a1d69f6b50df9c52af7dc7aae065b1a9",
+      "size": 49671192
+    },
+    {
+      "digest": "sha256:46e055b2c1f18032336346d47b1a3b35ee1208b648b77faa263ebf98b43c1b66",
+      "size": 25770
+    },
+    {
+      "digest": "sha256:4ef21095dd426d1d033a5e8e509209b619258402d7ef37b96400ee98e506ec53",
+      "size": 246
+    },
+    {
+      "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+      "size": 32
+    },
+    {
+      "digest": "sha256:51809ea1719c01b43b214dce501b84dd4df8f0b34265dca122a9765e05c528e3",
+      "size": 1712603
+    },
+    {
+      "digest": "sha256:57549c358e5b195528c8d6389e1c6d2205498d35d8a8a302059258e9b4455838",
+      "size": 448
+    },
+    {
+      "digest": "sha256:5e2657b0b9762b544471fecb1d77cbc5123b015c094661716003429ee9ee69a7",
+      "size": 24399144
+    },
+    {
+      "digest": "sha256:72ec432570925cb352a0d20ed9fefe5a4aee90fab6a8738c3bee844c41ced385",
+      "size": 474
+    },
+    {
+      "digest": "sha256:7a79ae4d9d704c2c2d817741486867f0a772413da811352e4044222924487116",
+      "size": 190026895
+    },
+    {
+      "digest": "sha256:a400244ab144a626745bfa5d2e8dc678dccd87c0ea76e7e9fead573d87bf56bd",
+      "size": 7163508
+    },
+    {
+      "digest": "sha256:a86139c8545fe38d81a160767eab8791023f36897db9f36820bc0480e75eb7e4",
+      "size": 49651454
+    },
+    {
+      "digest": "sha256:b327f5ff55e3671ae9997ef698c13bf29771939445bd2f9023b4cdcf3512f789",
+      "size": 245
+    },
+    {
+      "digest": "sha256:be6d2dd2599a8023f198d6770dc2733997bcb533cd8b4ac654244586032d1131",
+      "size": 1712657
+    },
+    {
+      "digest": "sha256:ca7e123267682763992760050dca37b20585d015c3c84605d73f85822a1f732c",
+      "size": 644
+    },
+    {
+      "digest": "sha256:ce56bbc78c7e7c9beee01d4aa558e12eb59a93054e9362e2ee63689614fa3415",
+      "size": 7362245
+    },
+    {
+      "digest": "sha256:d594c765f7bfdf3a1354941d78af35f9bc91a861cc117e8ffa450649f83249bf",
+      "size": 25758
+    },
+    {
+      "digest": "sha256:da8dd24ed17ce03b006dcc82e5ae6f8307a39bd1f23fc1d1be18b07c9547c8a8",
+      "size": 642
+    },
+    {
+      "digest": "sha256:e4ab760e80740fc83e3d1bc80a097286e3e72534de3b8f66040a9bd812358491",
+      "size": 24403582
+    },
+    {
+      "digest": "sha256:e4cf8228fad9f787227553d31da263b0e623f2f267daca16b4f9e510efb868a2",
+      "size": 7950
+    },
+    {
+      "digest": "sha256:f38b6ad59b3c4cc9a32fda00a678a64306e16c7b37be2420ec9ec458ef08a202",
+      "size": 7957
+    },
+    {
+      "digest": "sha256:f400d36d7784570c9fb7558e367d2b5d38e8b2f1d6faee041815acea7f87e669",
+      "size": 28115043
+    },
+    {
+      "digest": "sha256:f97bd1a82b9f3e8587cfea88fd96de7b5e639590dbc8589fb39003fc8f00b36f",
+      "size": 118
+    },
+    {
+      "digest": "sha256:f9e07211bd16627f8bda079fe02db093b0c8c51176f508f3fddf041035155aa7",
+      "size": 118
+    },
+    {
+      "digest": "sha256:fc03b5e40b38afd0c82e19e179133ea7b9b0740e12099f6464202f5c54f004c7",
+      "size": 444
+    }
+  ],
+  "verification_method": "Independent HTTPS GET of index, image manifests, configs, and every full layer digest and size",
+  "registry_operations": [
+    "GET"
+  ],
+  "docker_pull_executed": false,
+  "container_execution_verified": true,
+  "previous_latest_digest": "sha256:5cc3dbe52b86feb5412509c2e744a10097db0b2e80e9191c626d95207fea2ef4",
+  "publish_location": "local workstation",
+  "build_mode": "Exact locally tested image manifests and complete local OCI blob export",
+  "upload_mode": "chunked",
+  "auth_config_used": false,
+  "no_auth_config_used": true,
+  "local_oci_export_evidence": {
+    "root": "/private/tmp/lightmoni-image-e3d1192/local-oci",
+    "complete_required_blob_export": true,
+    "source": "Full blobs exported from the dedicated local Docker containerd store",
+    "manifest_source": "Exact local image manifest bytes bound to tested Docker image identities",
+    "tested_image_manifests": {
+      "amd64": "sha256:787aeabe3c74fbc8dfeb6b49039437ffbf71c8b24862121e67264d36d3122d2e",
+      "arm64": "sha256:10b0face01cf779993397772c88bb2b0fdbc8c7478a5b4d9b3747daa30db6470"
+    },
+    "tested_image_configs": {
+      "amd64": "sha256:aabb61115b3a0dabd94d9fe7b0f1dc67d562fdc16c64eb373b2acad2e5f7dac7",
+      "arm64": "sha256:ff08f0261d8e28ce1ad971d7df7003edd133ee142a2bd16548e6347f63bbee60"
+    },
+    "unique_blob_count": 31,
+    "total_blob_bytes": 602575546,
+    "verified_blobs": [
+      {
+        "digest": "sha256:068fedd6b0f109b8186d00d49327b6fc6747c428fd3c9a8739424ff5f38d7531",
+        "size": 28233543,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:10c63fb2a2011ac33da39cb3bd0d56c640a734566eca7b46a67add7785f18853",
+        "size": 3310,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:1d8fcac53b6538020ad22aae87d4767e5ae45d2359852231b60f534a7a99145f",
+        "size": 190022608,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:2934824fe6b440ff44d15f21bafa0e2f3a19c8a3383344187eaf0c954075ed93",
+        "size": 472,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:2ef05dcd22f2d7562470826b6b9dc1faf9fda10320238b812a2946f94d8918b5",
+        "size": 3310,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:37b6eb746f79394ccadf666bd8cae1f2a1d69f6b50df9c52af7dc7aae065b1a9",
+        "size": 49671192,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:46e055b2c1f18032336346d47b1a3b35ee1208b648b77faa263ebf98b43c1b66",
+        "size": 25770,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:4ef21095dd426d1d033a5e8e509209b619258402d7ef37b96400ee98e506ec53",
+        "size": 246,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+        "size": 32,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:51809ea1719c01b43b214dce501b84dd4df8f0b34265dca122a9765e05c528e3",
+        "size": 1712603,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:57549c358e5b195528c8d6389e1c6d2205498d35d8a8a302059258e9b4455838",
+        "size": 448,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:5e2657b0b9762b544471fecb1d77cbc5123b015c094661716003429ee9ee69a7",
+        "size": 24399144,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:72ec432570925cb352a0d20ed9fefe5a4aee90fab6a8738c3bee844c41ced385",
+        "size": 474,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:7a79ae4d9d704c2c2d817741486867f0a772413da811352e4044222924487116",
+        "size": 190026895,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:a400244ab144a626745bfa5d2e8dc678dccd87c0ea76e7e9fead573d87bf56bd",
+        "size": 7163508,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:a86139c8545fe38d81a160767eab8791023f36897db9f36820bc0480e75eb7e4",
+        "size": 49651454,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:aabb61115b3a0dabd94d9fe7b0f1dc67d562fdc16c64eb373b2acad2e5f7dac7",
+        "size": 11566,
+        "mediaType": "application/vnd.oci.image.config.v1+json"
+      },
+      {
+        "digest": "sha256:b327f5ff55e3671ae9997ef698c13bf29771939445bd2f9023b4cdcf3512f789",
+        "size": 245,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:be6d2dd2599a8023f198d6770dc2733997bcb533cd8b4ac654244586032d1131",
+        "size": 1712657,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:ca7e123267682763992760050dca37b20585d015c3c84605d73f85822a1f732c",
+        "size": 644,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:ce56bbc78c7e7c9beee01d4aa558e12eb59a93054e9362e2ee63689614fa3415",
+        "size": 7362245,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:d594c765f7bfdf3a1354941d78af35f9bc91a861cc117e8ffa450649f83249bf",
+        "size": 25758,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:da8dd24ed17ce03b006dcc82e5ae6f8307a39bd1f23fc1d1be18b07c9547c8a8",
+        "size": 642,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:e4ab760e80740fc83e3d1bc80a097286e3e72534de3b8f66040a9bd812358491",
+        "size": 24403582,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:e4cf8228fad9f787227553d31da263b0e623f2f267daca16b4f9e510efb868a2",
+        "size": 7950,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:f38b6ad59b3c4cc9a32fda00a678a64306e16c7b37be2420ec9ec458ef08a202",
+        "size": 7957,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:f400d36d7784570c9fb7558e367d2b5d38e8b2f1d6faee041815acea7f87e669",
+        "size": 28115043,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:f97bd1a82b9f3e8587cfea88fd96de7b5e639590dbc8589fb39003fc8f00b36f",
+        "size": 118,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:f9e07211bd16627f8bda079fe02db093b0c8c51176f508f3fddf041035155aa7",
+        "size": 118,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:fc03b5e40b38afd0c82e19e179133ea7b9b0740e12099f6464202f5c54f004c7",
+        "size": 444,
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"
+      },
+      {
+        "digest": "sha256:ff08f0261d8e28ce1ad971d7df7003edd133ee142a2bd16548e6347f63bbee60",
+        "size": 11568,
+        "mediaType": "application/vnd.oci.image.config.v1+json"
+      }
+    ],
+    "verified_before_any_registry_tag_write": true
+  },
+  "build_contexts": {
+    "node:24.15.0-bookworm": "docker-image://docker.m.daocloud.io/library/node@sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940",
+    "node:24.15.0-bookworm-slim": "docker-image://docker.m.daocloud.io/library/node@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+  },
+  "official_base_images": {
+    "node:24.15.0-bookworm": {
+      "source": "docker.io/library/node:24.15.0-bookworm",
+      "official_registry": "https://registry-1.docker.io",
+      "index_digest": "sha256:f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+    },
+    "node:24.15.0-bookworm-slim": {
+      "source": "docker.io/library/node:24.15.0-bookworm-slim",
+      "official_registry": "https://registry-1.docker.io",
+      "index_digest": "sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+    }
+  },
+  "build_args": {
+    "DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+    "DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+    "NODE_DIST_URL": "https://cdn.npmmirror.com/binaries/node"
+  },
+  "platform_build_args": {
+    "amd64": {
+      "NPM_REGISTRY": "https://registry.npmmirror.com"
+    },
+    "arm64": {
+      "NPM_REGISTRY": "https://registry.npmmirror.com"
+    }
+  },
+  "tested_image_manifests": {
+    "amd64": "sha256:787aeabe3c74fbc8dfeb6b49039437ffbf71c8b24862121e67264d36d3122d2e",
+    "arm64": "sha256:10b0face01cf779993397772c88bb2b0fdbc8c7478a5b4d9b3747daa30db6470"
+  },
+  "tested_image_configs": {
+    "amd64": "sha256:aabb61115b3a0dabd94d9fe7b0f1dc67d562fdc16c64eb373b2acad2e5f7dac7",
+    "arm64": "sha256:ff08f0261d8e28ce1ad971d7df7003edd133ee142a2bd16548e6347f63bbee60"
+  },
+  "container_execution_evidence": {
+    "amd64": "/private/tmp/lightmoni-image-e3d1192/smoke-amd64/ops-image-acceaa66782d-ifmq1xjj/report.json",
+    "arm64": "/private/tmp/lightmoni-image-e3d1192/smoke-arm64/ops-image-9ed38bef04d3-m8y2n4ct/report.json"
+  },
+  "online_platform_replaced": false,
+  "old_fixed_tag_retained": true,
+  "limitations": [
+    "The registry has no atomic tag compare-and-swap; latest is checked immediately before promotion"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "release-image-smoke.py": "c2acccc8e77e9cc803b68374438df3715fa6b8dcc4e1b307cbca1f7994aabc47",
+  "publish-local.py": "cb470df23a9bee66248b508188c09f1c9331c8286e0e8d664fb1a521193bc646",
+  "verify-registry-readonly.py": "f6ca3390596f3c5dd3a2f331770724baf2a19485281b544166907e3c1e7f2063",
+  "registry_keepalive.py": "70060cd216686c7d157d7030e3289a5963539b80d88086f8c617cd93043fe59c",
+  "prepare-identities.py": "22c65e7eef3dd72fe7e6ebb263b001096e3df4b7d19fa558bef18f5ebac2eef6",
+  "export-local-oci.py": "8d708010abd6904069799013c7a2c94bdc707ef23231a1741d220f9cde453409",
+  "build-local.sh": "268959ea67af9e137ae60826a87cfed9791a13a34f292c4d2fce52b0a08f52dd"
+}
