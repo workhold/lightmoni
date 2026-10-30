@@ -1,4 +1,4 @@
-import {AppstoreOutlined,BellOutlined,CloudServerOutlined,CloudUploadOutlined,DashboardOutlined,DatabaseOutlined,MessageOutlined,SafetyCertificateOutlined,SearchOutlined,SettingOutlined,ToolOutlined} from '@ant-design/icons';
+import {ApiOutlined,AppstoreOutlined,BellOutlined,CloudServerOutlined,CloudUploadOutlined,DashboardOutlined,DatabaseOutlined,MessageOutlined,SafetyCertificateOutlined,SearchOutlined,SettingOutlined,ToolOutlined} from '@ant-design/icons';
 
 export const navigationGroups=[
  {id:'workspace',label:'工作台',english:'Workspace',items:[
@@ -20,6 +20,7 @@ export const navigationGroups=[
   {path:'/data-management',label:'数据管理',english:'Data management',icon:DatabaseOutlined,adminOnly:false},
  ]},
  {id:'settings',label:'系统设置',english:'Settings',items:[
+  {path:'/mcp-access',label:'MCP 接入',english:'MCP access',icon:ApiOutlined,adminOnly:false},
   {path:'/settings',label:'个人设置',english:'Personal settings',icon:SettingOutlined,adminOnly:false},
   {path:'/admin',label:'管理后台',english:'Administration',icon:SafetyCertificateOutlined,adminOnly:true},
  ]},

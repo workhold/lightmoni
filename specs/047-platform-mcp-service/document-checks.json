@@ -1,0 +1,29 @@
+{
+  "relative_links_checked": 105,
+  "missing_links": 0,
+  "mermaid_diagrams": 3,
+  "diagram_graph_checks": [
+    {
+      "nodes": 15,
+      "edges": 17
+    },
+    {
+      "nodes": 10,
+      "edges": 10
+    },
+    {
+      "nodes": 8,
+      "edges": 9
+    }
+  ],
+  "source_sha256": {
+    "docs/system-design.md": "e7ee3a121d9b80c1cfbf5c6aa846ab1694b3c0dd76a0f12febd40acd70b14f0a",
+    "docs/platform-mcp.md": "61a9d2f864d69f60ab2f59d19789b633e3ddfeca662603f095e9178632915aec",
+    "docs/mcp.md": "62b2aae7f41bca42be7797f8503e7de0f74181dd0fc302a87cb24edac6a26f58"
+  },
+  "changed_files_secret_scan": {
+    "files_checked": 35,
+    "pattern_findings": 0,
+    "scope": "known token prefixes and private key blocks; does not prove absence of every possible secret"
+  }
+}

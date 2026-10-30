@@ -101,6 +101,7 @@ export function safeReturnTarget(s: string) {
       u.origin === "https://local" &&
       (u.pathname === "/" ||
         u.pathname === "/alerts" ||
+        (u.pathname === "/mcp/authorize" && !u.hash) ||
         u.pathname.startsWith("/traces/") ||
         u.pathname.startsWith("/a/"))
     );

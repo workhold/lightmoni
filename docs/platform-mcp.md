@@ -1,6 +1,6 @@
 # LightMoni 平台开放能力与 MCP 架构
 
-状态：SDD 046 目标架构，尚未实现。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，不将现有助手工具或 HTTP 接口声称为 MCP 服务。
+状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
 
 ## 1. 驱动目标与设计结论
 
@@ -37,7 +37,7 @@ flowchart TB
 
 ## 3. 当前事实与待建设部分
 
-当前 `assistant/types.ts` 的 Tool 只有 name/schema/effect/execute，传入登录用户和助手 session。任务及告警提案把 owner 与助手会话绑定，代码工作区也属于中心。现有工具有查询、提案和有界回执，但没有通用外部主体、MCP 入口、OAuth 资源服务器、外部控制面 token 或统一 Dispatcher。
+SDD 046 调研时，`assistant/types.ts` 的 Tool 只有 name/schema/effect/execute，传入登录用户和助手 session。SDD 047 新增专用外部主体、MCP 入口、OAuth/PAT 与 Dispatcher，并迁移首批任务工具及通用任务提案。其余告警、运维和源码工具尚未整体迁移，不能把原助手工具直接对外导出；中心代码工作区也没有变成用户本地工作区。
 
 现有 TaskRunStore、Agent job、运维 run、部署计划和生命周期操作继续负责真实状态、租约、取消和恢复。Agent 升级闭环属于独立 [PR #21 / SDD 045](https://github.com/workhold/lightmoni/pull/21)，本设计不复制其实现或声称它已合入主干。统一执行索引是关联和投影，不是另建一个取代所有领域的队列。
 
@@ -71,7 +71,7 @@ scope 按领域和动作区分，例如 hosts.read、tasks.propose、tasks.sourc
 
 ## 7. Streamable HTTP 与协议边界
 
-目标入口 `https://<平台域名>/api/v1/mcp`，使用官方 SDK 的受支持 Streamable HTTP。协议适配器与业务 Dispatcher 分开：首个候选客户端兼容基线为 MCP 2025-11-25，必须记录真实 Codex/Claude 版本后才能承诺支持；它不是当前最新协议。2026-07-28 已移除 initialize/initialized 与协议会话，改为 server/discover 和每请求 _meta，要求独立适配与验收，不能把新旧握手混写。当前两个适配器均未实现；后续升级不等于无条件接受任意版本。
+入口 `https://<平台域名>/api/v1/mcp`，使用官方 SDK 的受支持 Streamable HTTP。协议适配器与业务 Dispatcher 分开：SDD 047 固定官方 TypeScript SDK 1.32.2，以 MCP 2025-11-25 为测试基线；它不是当前最新协议。2026-07-28 已移除 initialize/initialized 与协议会话，改为 server/discover 和每请求 _meta，要求独立适配与验收，不能把新旧握手混写。2026 适配器尚未实现；后续升级不等于无条件接受任意版本。
 
 2025-11-25 兼容实现：POST 接收单个标准 JSON-RPC 消息，按协议返回 JSON 或 SSE，通知接受后返回 202。采用无状态请求处理，不颁发 MCP-Session-Id，不声明持久 SSE 恢复；GET 无独立事件流时返回该版本允许的 405，DELETE 不支持会话管理时同样明确处理。2026-07-28 实现单独处理 Mcp-Method/Mcp-Name、每请求版本/能力元数据、resultType 和授权相关缓存语义；事件流使用 subscriptions/listen，不复用旧 GET 或 Last-Event-ID。实际支持集合由适配器声明，业务执行契约不随传输变化。
 
@@ -165,8 +165,20 @@ JSON-RPC request ID 只用于本次协议响应关联，MCP 会话只用于协�
 
 先抽取应用能力/通用提案/执行索引并让现有助手和页面走同一服务，再提供 MCP 与独立授权，最后扩展服务主体和持续授权。读取工具逐领域迁移，不一次原样暴露全部助手工具；写入口在领域适配器落地前不对外宣传。
 
-首个可发布版本必须记录具体 Codex/Claude 版本及真实握手、发现、授权、读取、提案、平台审阅和结果查询。PAT-only 调试成功不等于 OAuth 通用互操作。协议/权限/幂等/断连/撤销与领域回归验收门见 [实施计划](../specs/046-platform-mcp/plan.md)。本轮仅设计文档，所有目标端点及新工具均未实现。
+发布必须记录具体 Codex/Claude 版本及真实握手、发现、授权、读取、提案、平台审阅和结果查询的实际覆盖程度。PAT-only 调试成功不等于 OAuth 通用互操作。协议/权限/幂等/断连/撤销与领域回归验收门见 [实施计划](../specs/046-platform-mcp/plan.md)。SDD 046 为设计交付；SDD 047 的实现及客户端验收以其独立记录为准，不能把局部通过表述为全部完成。
 
 ## 15. 协议依据
 
 设计核对 MCP 2025-11-25 官方 [Transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)、[Authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)、[Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)，以及 [2026-07-28 破坏性变化](https://modelcontextprotocol.io/specification/2026-07-28/changelog)。协议允许的选项由实际实现声明；不得把 MCP 注解、旧版可选会话或协议任务扩展当作 LightMoni 的权限和持久执行保证。
+
+## 16. 首期落地范围（SDD 047）
+
+`runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手首批任务工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。外部查询包括主机、任务/模板、执行、提案、遥测表目录和告警规则目录；遥测行、任意 SQL、告警修改、部署与运维写工具尚未开放。表和告警没有主机级数据隔离，目录工具只允许全主机范围授权。
+
+外部任务操作仅创建已有任务的派发、取消与重试提案。TaskProposalService 保存真实来源、凭据与稳定 grant，不伪造助手 session；既有 owner 和人工审批边界保留。审批前与 Agent 领取排队项前分别复验外部授权，撤销、过期、降权或主机范围缩小后不得开始新项。新脚本/任务定义、持续授权和服务主体不属于本期。短期 OAuth access token 到期不使已批准项失效，稳定 grant 到期/撤销才阻止尚未开始项。
+
+统一索引本期仅关联真实 task run，在接受和查询时投影；不声称已覆盖全部领域或实时维护所有投影。查询始终读取原生 run 状态。提案读取不隐含 executions.read：缺少该权限时仅返回执行 ID 引用。默认输出省略源码、配置、原始主机输出与租约；源码须 tasks.source.read 显式请求。
+
+`runtime/src/mcp/` 实现无状态 SDK 传输、专用 PAT 与 OAuth 授权码/PKCE/刷新轮换；用户可在 `/mcp-access` 管理自己的令牌、授权与预注册公共客户端。`/mcp/authorize` 明确选择主机与期限，复用平台登录及 SSO。固定 externalURL 须为 HTTPS origin 或本机 HTTP origin；不满足时禁用 MCP，原平台继续运行。请求有体积、深度、频率、并发及时间上限；协议请求与业务幂等分离，断连后同业务键重试不会重新派发。
+
+实现契约、测试结果、实际客户端覆盖及剩余工作见 [SDD 047](../specs/047-platform-mcp-service/spec.md) 与 [接入指南](mcp.md)。总体设计中尚未落地的部分不构成当前服务能力。

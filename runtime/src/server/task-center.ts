@@ -25,6 +25,8 @@ const confirm = (v: Record<string, any>) => { if (v.confirm !== true) fail(400, 
 /** Finite script jobs deliberately do not share deployment health-verification states. */
 export class TaskRunStore {
   readonly nodes: NodeStore;
+  /** Rechecks a persisted external grant immediately before a queued run starts. */
+  beforeStart?: (run: {id:string;host_id:string;requested_by:string}) => boolean;
   constructor(readonly deps: Dependencies, readonly credentials?: AgentCredentialStore) {
     this.nodes = new NodeStore(deps.db, deps.now);
     deps.db.exec(`CREATE TABLE IF NOT EXISTS task_runs(
@@ -188,6 +190,12 @@ export class TaskRunStore {
       if (this.deps.db.get("SELECT id FROM task_runs WHERE agent_id=? AND state='running'", agentID)) return null;
       const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE agent_id=? AND state='queued' ORDER BY created_at,rowid LIMIT 200", agentID);
       for (const r of pending) {
+        const external = this.deps.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='capability_run_authorizations'")
+          && this.deps.db.get("SELECT 1 FROM capability_run_authorizations WHERE run_id=?", r.id);
+        if (external && (!this.beforeStart || !this.beforeStart(r))) {
+          this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='authorization_revoked',summary='External authorization is no longer valid before Agent claim' WHERE id=? AND state='queued'", this.now(), r.id);
+          continue;
+        }
         try { this.eligible(r.task_id, r.host_id); } catch (error) {
           if (!(error instanceof NodeError || error instanceof HTTPError)) throw error;
           this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='task_no_longer_eligible',summary='Task disabled, removed, or target changed before claim' WHERE id=?", this.now(), r.id);
