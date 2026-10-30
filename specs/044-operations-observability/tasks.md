@@ -8,4 +8,6 @@
 - [x] T006 针对性测试、类型检查、浏览器验收与证据
 - [x] T007 仓库/Doca 架构同步与原生图回读
 - [x] T009 全系统日志 outbox、历史补录、共享 ClickHouse 查询与故障重试
-- [ ] T008 同步 origin/main、提交功能分支及 GitHub PR，记录兼容和验证结果
+- [x] T008 同步 origin/main、提交功能分支及 GitHub PR，记录兼容和验证结果
+
+交付：[GitHub PR #20](https://github.com/workhold/lightmoni/pull/20)，目标 main，依赖 #18；未合入、未部署生产。

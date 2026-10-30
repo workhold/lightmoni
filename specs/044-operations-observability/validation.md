@@ -1,6 +1,6 @@
 # SDD 044 验收记录
 
-日期：2026-10-30。分支 `codex/044-operations-observability`，基于 SDD 042 的 bc57c82；不包含原工作树未提交的 SDD 043 代码。提交期间远端主干更新到0ab3e25（#17任务中心），已合并主干并保留双方设计章节、主机标签/任务入口及 Agent runner；另将任务中心执行/取消/结果核对元数据接入系统日志。GitHub PR 以 main 为目标，依赖 #18；未合入、未部署生产。
+日期：2026-10-30。分支 `codex/044-operations-observability`，基于 SDD 042 的 bc57c82；不包含原工作树未提交的 SDD 043 代码。提交期间远端主干更新到0ab3e25（#17任务中心），已合并主干并保留双方设计章节、主机标签/任务入口及 Agent runner；另将任务中心执行/取消/结果核对元数据接入系统日志。[GitHub PR #20](https://github.com/workhold/lightmoni/pull/20) 以 main 为目标，依赖 #18；未合入、未部署生产。
 
 ## 最终行为与存储
 
