@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { DB } from "../src/shared/sqlite.js";
 import { Router, HTTPError } from "../src/shared/http.js";
-import { NodeStore, NodeError, normalizeTask, taskTemplates } from "../src/server/nodes-model.js";
+import { NodeStore, NodeError, normalizeTask } from "../src/server/nodes-model.js";
 import { registerNodes } from "../src/server/nodes.js";
 import { hasActiveTaskRuns, replaceableAgentBinding } from "../src/server/agent-hosts.js";
 import type { Dependencies } from "../src/shared/types.js";
@@ -17,19 +17,21 @@ const machine = (db: DB, id: string, agent = "") => {
 const script = (more: Record<string,unknown> = {}) => ({ name:"Test script", type:"script", enabled:true, label_ids:[], host_ids:[], target_all:false, schedule:{mode:"once"}, script:{runtime:"node",code:"console.log('ok')",timeout_seconds:10,max_output_bytes:4096}, ...more });
 const code = (status: number) => (error: unknown) => error instanceof NodeError && error.status === status;
 
-test("fresh defaults are enabled and target all registered hosts; restart preserves user stop and deletion", t => {
+test("fresh defaults are persisted, enabled for all hosts and cannot be deleted; restart preserves edits", t => {
   const {db,store}=fixture(t); machine(db,"first","agent-first");
-  const defaults=store.tasks(); assert.equal(defaults.length,2);
-  assert.deepEqual(defaults.map(x=>[x.type,x.enabled,x.target_all,x.origin]),[["host",true,true,"builtin"],["probe",true,true,"builtin"]]);
-  assert.equal(store.effectiveHostTasks("first").find(x=>x.type==="probe")?.status,"waiting_config");
+  const defaults=store.tasks(); assert.equal(defaults.length,3);
+  assert.deepEqual(defaults.map(x=>[x.type,x.enabled,x.target_all,x.origin]).sort(),[["host",true,true,"builtin"],["log",true,true,"builtin"],["probe",true,true,"builtin"]]);
+  for (const type of ["probe","log"]) assert.equal(store.effectiveHostTasks("first").find(x=>x.type===type)?.status,"waiting_config");
   assert.equal(store.effective("agent-first").config.host_enabled,true);
+  assert.equal(store.effective("agent-first").config.logs_enabled,false);
   const metrics=defaults.find(x=>x.type==="host")!;
-  store.task({...metrics,enabled:false},metrics.id,false);
-  let reopened=new NodeStore(db,()=>at); assert.equal(reopened.getTask(metrics.id).enabled,false);
-  reopened.deleteTask(metrics.id); reopened=new NodeStore(db,()=>at);
-  assert.throws(()=>reopened.getTask(metrics.id),code(404));
-  const template=taskTemplates(); template[0].config.host_collectors.length=0;
-  assert.ok(taskTemplates()[0].config.host_collectors.length>0);
+  store.task({...metrics,name:"My metrics",enabled:false,host_ids:["first"],target_all:false},metrics.id,false);
+  store.setOverride("first",metrics.id,{config:{collect_interval_seconds:30}});
+  const reopened=new NodeStore(db,()=>at);
+  assert.equal(reopened.getTask(metrics.id).name,"My metrics"); assert.equal(reopened.getTask(metrics.id).enabled,false);
+  assert.deepEqual(reopened.getTask(metrics.id).host_ids,["first"]); assert.equal(reopened.getTask(metrics.id).target_all,false);
+  assert.throws(()=>reopened.deleteTask(metrics.id),code(409)); assert.equal(reopened.tasks().length,3);
+  assert.ok(db.get("SELECT 1 FROM machine_task_overrides WHERE machine_id='first' AND task_id=?",metrics.id));
 });
 
 test("labels belong to offline hosts, survive Agent replacement and empty labels stay empty across restart", t => {
@@ -60,10 +62,10 @@ test("legacy linked labels migrate once without resetting user-disabled tasks or
   INSERT INTO agent_task_labels VALUES('production','Production','2026-01-01');`);
   let store=new NodeStore(db,()=>at); machine(db,"host","old");
   db.run("INSERT INTO agent_node_labels VALUES('old','production')");
-  const previous=store.task({name:"Existing probe",type:"probe",enabled:false,label_ids:["production"],config:{}},"existing",true);
+  const previous=normalizeTask({id:"existing",name:"Existing probe",type:"probe",enabled:false,label_ids:["production"],config:{}}); store.saveTask(previous);
   db.run("DELETE FROM agent_task_migrations WHERE version='host-task-center-v1'");
   store=new NodeStore(db,()=>at); assert.deepEqual(store.hostLabels("host"),["production"]);
-  assert.equal(store.getTask(previous.id).enabled,false); assert.equal(store.tasks().length,1);
+  assert.equal(store.getTask(previous.id).enabled,false); assert.equal(store.tasks().length,4);
   store.setHostLabels("host",[]); store=new NodeStore(db,()=>at); assert.deepEqual(store.hostLabels("host"),[]);
 });
 
@@ -94,16 +96,16 @@ test("single-host overrides and custom host collection do not change other hosts
   store.setOverride("a",metrics.id,{config:{collect_interval_seconds:30}});
   assert.equal(store.effective("agent-a").config.collect_interval_seconds,30); assert.equal(store.effective("agent-b").config.collect_interval_seconds,15);
   store.clearOverride("a",metrics.id);
-  store.task({name:"Custom metrics",type:"host",enabled:true,host_ids:["a"],config:{collect_interval_seconds:45,host_collectors:["memory"]}},"custom",true);
+  db.transaction(()=>{store.saveTask(normalizeTask({id:"custom",name:"Custom metrics",type:"host",enabled:true,host_ids:["a"],config:{collect_interval_seconds:45,host_collectors:["memory"]}}));store.validateAll();});
   assert.equal(store.effective("agent-a").config.collect_interval_seconds,45); assert.equal(store.effective("agent-b").config.collect_interval_seconds,15);
-  assert.throws(()=>store.task({name:"Conflicting metrics",type:"host",enabled:true,host_ids:["a"],config:{collect_interval_seconds:60}},"conflict",true),code(409));
+  assert.throws(()=>db.transaction(()=>{store.saveTask(normalizeTask({id:"conflict",name:"Conflicting metrics",type:"host",enabled:true,host_ids:["a"],config:{collect_interval_seconds:60}}));store.validateAll();}),code(409));
   assert.throws(()=>store.getTask("conflict"),code(404));
   const own=store.task(script({host_ids:["a"]}),"script",true);
   assert.throws(()=>store.setOverride("a",own.id,{config:{}}),code(400));
   assert.throws(()=>store.setOverride("b",own.id,{enabled:false}),code(409));
 });
 
-test("script input limits, schedules, immutable template identity and prepared approval writes", t => {
+test("script input limits, schedules, immutable source/type and prepared approval writes", t => {
   const {db,store}=fixture(t); machine(db,"a");
   for (const patch of [
     {script:{runtime:"python",code:"x",timeout_seconds:1,max_output_bytes:1024}},
@@ -152,28 +154,21 @@ test("host labels and task directory expose read-only host identity; members can
   user.role="admin"; const label=await request("/host-labels","POST",{name:"Production"}); assert.equal(label.status,201);
   assert.equal((await request("/machines/offline/labels","PUT",{label_ids:[label.data.id]})).status,200);
   assert.deepEqual(store.hostLabels("offline"),[label.data.id]);
-  const templates=await request("/task-templates"); assert.equal(templates.data.length,3); assert.equal(templates.data[1].enabled,true);
+  assert.equal((await fetch(url+"/task-templates")).status,404);
 });
 
-test("legacy default task promotion preserves disabled choices and ignores user-retargeted defaults", t => {
+test("existing custom native tasks keep their source and targets when new defaults are filled once", t => {
   const {db}=fixture(t);
-  // Emulate rows from the pre-task-center version: metadata did not exist.
   db.run("UPDATE agent_tasks SET metadata_json='{}',enabled=0");
   db.run("INSERT INTO agent_task_targets(task_id,label_id) SELECT id,'default' FROM agent_tasks");
-  db.run("DELETE FROM agent_task_migrations WHERE version='host-task-center-v1'");
+  db.run("DELETE FROM agent_task_migrations WHERE version IN ('host-task-center-v1','platform-default-tasks-v1')");
   let store=new NodeStore(db,()=>at);
-  for (const task of store.tasks()) {
-    assert.equal(task.origin,"builtin"); assert.equal(task.target_all,true); assert.equal(task.enabled,false); assert.deepEqual(task.label_ids,[]);
-  }
-  machine(db,"later"); assert.ok(store.effectiveHostTasks("later").every(task=>task.status==="disabled"));
-  store.label("Production","production",true);
-  const metrics=store.tasks().find(task=>task.type==="host")!;
-  db.run("UPDATE agent_tasks SET metadata_json='{}' WHERE id=?",metrics.id);
-  db.run("INSERT INTO agent_task_targets VALUES(?,'production')",metrics.id);
-  db.run("DELETE FROM agent_task_migrations WHERE version='host-task-center-v1'");
-  store=new NodeStore(db,()=>at);
-  assert.equal(store.getTask(metrics.id).origin,"custom"); assert.equal(store.getTask(metrics.id).target_all,false);
-  assert.deepEqual(store.getTask(metrics.id).label_ids,["production"]);
+  const custom=store.tasks().filter(task=>task.origin==="custom"), builtin=store.tasks().filter(task=>task.origin==="builtin");
+  assert.equal(custom.length,3); assert.equal(builtin.length,3);
+  for(const task of custom){assert.equal(task.target_all,false);assert.equal(task.enabled,false);assert.deepEqual(task.label_ids,["default"]);}
+  assert.ok(builtin.every(task=>task.enabled&&task.target_all));
+  store=new NodeStore(db,()=>at); assert.equal(store.tasks().length,6);
+  machine(db,"later"); assert.equal(store.effectiveHostTasks("later").length,3);
 });
 
 test("task revisions bind scripts, schedules and targets while ignoring supplied hashes and view state", t => {

@@ -30,6 +30,29 @@ const convert = <T>(fn: () => T): T => {
 };
 const str = { type: "string" };
 const schema = (properties: Record<string, any>, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
+const taskDraftSchema = schema({
+  name: str, type: { type: "string", enum: ["host", "probe", "log", "script"], description: "Create only script. Existing continuous tasks may be edited; type is immutable." }, enabled: { type: "boolean" },
+  host_ids: { type: "array", items: str, maxItems: 500 }, label_ids: { type: "array", items: str, maxItems: 64 }, target_all: { type: "boolean" },
+  config: { type: "object", description: "Configuration for editing an existing continuous task; omitted for new script tasks." },
+  schedule: schema({
+    mode: { type: "string", enum: ["continuous", "once", "interval", "at", "cron"], description: "continuous is for collectors; once means manual; at runs at one future timestamp." },
+    interval_seconds: { type: "integer", minimum: 10, maximum: 2592000 },
+    run_at: { type: "string", description: "ISO timestamp with an explicit UTC offset, only for at." },
+    cron: { type: "string", description: "Five-field minute cron expression, e.g. 0 2 * * * for daily 02:00." },
+    timezone: { type: "string", description: "IANA timezone required for cron, e.g. Asia/Shanghai." },
+  }, ["mode"]),
+  script: schema({
+    runtime: { type: "string", enum: ["shell", "node"] }, code: { type: "string", description: "The complete reviewed script, up to 64 KiB; never a path to a file on the user's laptop." },
+    args: { type: "array", items: { type: "string" }, maxItems: 32, description: "Literal argv entries; not shell-expanded. Requires Agent task.script.v2 when nonempty." },
+    cwd: { type: "string", description: "Optional absolute directory on the remote host, requiring Agent task.script.v2." },
+    timeout_seconds: { type: "integer", minimum: 1, maximum: 3600 }, max_output_bytes: { type: "integer", minimum: 1024, maximum: 262144 },
+  }, ["runtime", "code"]),
+  execution_policy: schema({
+    max_concurrency: { type: "integer", minimum: 1, maximum: 100 }, queue_timeout_seconds: { type: "integer", minimum: 10, maximum: 86400 },
+    retry_count: { type: "integer", minimum: 0, maximum: 3, description: "Default zero. Explicit failed receipts only; unknown is never retried automatically." },
+    retry_delay_seconds: { type: "integer", minimum: 10, maximum: 3600 },
+  }),
+});
 const id = (value: unknown) => {
   if (typeof value !== "string" || !value.trim() || value.length > 128) throw new AssistantError(400, "请指定准确的任务或执行 ID");
   return value;
@@ -156,7 +179,7 @@ export class TaskProposalService {
 export function taskTools(service: TaskProposalService): Tool[] {
   const nodes = service.nodes, runs = service.runs;
   return [
-    { name: "list_tasks", effect: "read", description: "List real built-in and custom tasks. Filters are optional. Script bodies and detailed collector configuration are omitted. Task enabled does not prove execution; probes without targets are waiting for configuration.",
+    { name: "list_tasks", effect: "read", description: "List real platform-default and user tasks; there is no separate template catalog. Filters are optional. Script bodies and detailed collector configuration are omitted. Task enabled does not prove execution; probes without targets and logs without directories are waiting for configuration.",
       schema: schema({ host_id: str, type: { type: "string", enum: ["host", "probe", "log", "script"] } }),
       execute: async (input, _signal, user) => convert(() => { requireAdmin(user); object(input, ["host_id", "type"]);
         if (input.type != null && !["host", "probe", "log", "script"].includes(input.type)) throw new AssistantError(400, "invalid task type");
@@ -173,8 +196,8 @@ export function taskTools(service: TaskProposalService): Tool[] {
     { name: "get_task_run", effect: "read", description: "Read one execution's actual state and receipt metadata. Raw host output is available in the administrator task center; it is deliberately omitted from model context.", schema: schema({ id: str }, ["id"]),
       execute: async (input, _signal, user) => convert(() => { requireAdmin(user); object(input, ["id"], ["id"]); return { run: runMetadata(runs.get(id(input.id))), review_url: "/machines?tab=tasks&run=" + encodeURIComponent(input.id), output_omitted: true }; }),
     },
-    { name: "propose_task_action", effect: "draft", description: "Create a saved, owner-bound proposal for task.create, task.update, task.dispatch, run.cancel or run.retry. Requires reason and exact known target IDs. The tool NEVER applies a change or runs a script: return review_url and wait for human approval in the task center. Updates merge task fields with current definition. Generated scripts require human review; an enabled interval schedule authorizes recurring execution only after approval.",
-      schema: schema({ operation: { type: "string", enum: ["task.create", "task.update", "task.dispatch", "run.cancel", "run.retry"] }, task_id: str, run_id: str, task: { type: "object" }, host_ids: { type: "array", items: str, maxItems: 200 }, reason: str }, ["operation", "reason"]),
+    { name: "propose_task_action", effect: "draft", description: "Create a saved, owner-bound proposal for task.create, task.update, task.dispatch, run.cancel or run.retry. Requires reason and exact known target IDs. The tool NEVER applies a change or runs a script: return review_url and wait for human approval in the task center. task.create only accepts a custom script task. Platform-default tasks are initialized by the server and may be configured or disabled via task.update; their origin and type cannot change. Agent authentication, heartbeats and task transport are independent of task switches. Updates merge top-level task fields with the current definition; provide a complete schedule or script object when replacing it. Scripts support manual once, future at, interval, and five-field cron with an explicit IANA timezone. Supply actual code, not a local file path. Generated scripts and enabled plans require human review; an approved enabled schedule authorizes subsequent scheduled execution, with retries only when explicitly configured.",
+      schema: schema({ operation: { type: "string", enum: ["task.create", "task.update", "task.dispatch", "run.cancel", "run.retry"] }, task_id: str, run_id: str, task: taskDraftSchema, host_ids: { type: "array", items: str, maxItems: 200 }, reason: str }, ["operation", "reason"]),
       execute: async (input, signal, user, scope) => { signal.throwIfAborted(); const p = service.create(requireAdmin(user), scope?.session_id ?? "", input);
         return { proposal: { id: p.id, operation: p.operation, task_id: p.task_id, run_id: p.run_id, status: p.status, review_url: p.review_url, expires_at: p.expires_at } }; },
     },
