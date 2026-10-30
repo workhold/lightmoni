@@ -66,3 +66,7 @@ LIGHTMONI_UI_RUN=3 node web/src/app/ops/verify-website-routing-ui.mjs
 ## 交付
 
 已同步origin/main至a11ae1f，合并提交6ea8d01；系统设计EOF冲突同时保留主干任务中心章节和网站/集群章节。依主干锁文件补齐依赖后，相关86项回归和两端类型检查再次通过。当前特性基于#18的跨集群模型，交付PR目标main，标记草稿并明确依赖#18；未获得合并授权，不合并、不推main。交付：[GitHub #19](https://github.com/workhold/lightmoni/pull/19)，草稿，目标main，依赖#18，未合并。
+
+## 2026-10-30 合入前复核
+
+同步 origin/main ece3f33（含 #15、#18），系统设计冲突保留本特性的域名级集群与加权 CNAME 演进，同时保留主干任务中心章节。全仓类型检查、全部 platform 与 managed-machines 相关测试及 diff 检查通过。额外架构同步不适用：合入已同步设计与测试契约适配；原 Doca 回读证据保留。
