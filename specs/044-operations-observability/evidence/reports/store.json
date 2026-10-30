@@ -1,0 +1,158 @@
+[
+  {
+    "file": "motion-probe",
+    "state": null,
+    "size": "1440x1000",
+    "zoom": 1,
+    "motion": {
+      "load": {
+        "elements": 4,
+        "loops": 0,
+        "maxMove": 10,
+        "maxSize": 0.29,
+        "maxOpacity": 0.5,
+        "top": [
+          {
+            "el": "i.ant-spin-dot-item",
+            "move": 10,
+            "size": 0.29,
+            "opacity": 0.19,
+            "loop": false,
+            "sources": [
+              "css:css-dev-only-do-not-override-oc1rc0-antSpinMove"
+            ]
+          },
+          {
+            "el": "span.ant-spin-dot.ant-spin-dot-spin",
+            "move": 6,
+            "size": 0.29,
+            "opacity": 0,
+            "loop": false,
+            "sources": [
+              "css:css-dev-only-do-not-override-oc1rc0-antRotate"
+            ]
+          },
+          {
+            "el": "div.ant-spin-container",
+            "move": 2,
+            "size": 0,
+            "opacity": 0.5,
+            "loop": false,
+            "sources": [
+              "transition:opacity"
+            ]
+          },
+          {
+            "el": "div.ant-spin-container",
+            "move": 0,
+            "size": 0,
+            "opacity": 0.5,
+            "loop": false,
+            "sources": [
+              "transition:opacity"
+            ]
+          }
+        ]
+      },
+      "steps": {
+        "elements": 6,
+        "loops": 0,
+        "maxMove": 1000,
+        "maxSize": 0,
+        "maxOpacity": 1,
+        "top": [
+          {
+            "el": "div.ant-spin-container",
+            "move": 1000,
+            "size": 0,
+            "opacity": 0.5,
+            "loop": false,
+            "sources": [
+              "transition:opacity"
+            ]
+          },
+          {
+            "el": "div.ant-spin-container",
+            "move": 1000,
+            "size": 0,
+            "opacity": 0.5,
+            "loop": false,
+            "sources": [
+              "transition:opacity"
+            ]
+          },
+          {
+            "el": "div.ant-drawer-content-wrapper",
+            "move": 1000,
+            "size": 0,
+            "opacity": 0.3,
+            "loop": false,
+            "sources": [
+              "transition:transform",
+              "transition:opacity"
+            ]
+          },
+          {
+            "el": "div.ant-tabs-ink-bar.ant-tabs-ink-bar-animated",
+            "move": 1000,
+            "size": 0,
+            "opacity": 0,
+            "loop": false,
+            "sources": [
+              "js:style"
+            ]
+          },
+          {
+            "el": "div.ant-drawer-mask",
+            "move": 0,
+            "size": 0,
+            "opacity": 1,
+            "loop": false,
+            "sources": [
+              "transition:opacity"
+            ]
+          },
+          {
+            "el": "div.ant-wave.css-dev-only-do-not-override-oc1rc0",
+            "move": 0,
+            "size": 0,
+            "opacity": 0.09,
+            "loop": false,
+            "sources": [
+              "transition:opacity",
+              "transition:box-shadow"
+            ]
+          }
+        ]
+      },
+      "hero": {
+        "elements": 0,
+        "loops": 0,
+        "maxMove": 0,
+        "maxSize": 0,
+        "maxOpacity": 0,
+        "top": [],
+        "layers": 0
+      },
+      "scroll": {
+        "elements": 0,
+        "loops": 0,
+        "maxMove": 0,
+        "maxSize": 0,
+        "maxOpacity": 0,
+        "top": [],
+        "scrollable": false
+      }
+    },
+    "issues": [
+      "加载错误：Failed to load resource: the server responded with a status of 404 (Not Found) http://127.0.0.1:19947/favicon.ico"
+    ]
+  },
+  {
+    "file": "page.png",
+    "state": null,
+    "size": "1440x1000",
+    "zoom": 1,
+    "issues": []
+  }
+]

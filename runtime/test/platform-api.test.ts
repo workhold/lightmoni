@@ -222,6 +222,15 @@ async function setup(t: any) {
     finish,
   };
 }
+test("historical log receipts remain readable beyond the overview limit and are redacted and admin-only", async (t) => {
+  const f = await setup(t);
+  const old = await f.platform.store.run(f.cluster, "inspect", "admin", async () => ({ state: "succeeded", stdout: "private-command-output" }));
+  for (let i=0;i<101;i++) f.db.run("INSERT INTO ops_platform_runs(id,resource_id,resource_revision,agent_id,action,state,payload_cipher,result_json,job_id,actor,dedupe_key,created_at,updated_at) SELECT ?,resource_id,resource_revision,agent_id,action,state,payload_cipher,result_json,job_id,actor,NULL,created_at,updated_at FROM ops_platform_runs WHERE id=?",'new-'+i,old.id);
+  assert(!(await f.req('/ops/runs')).body.runs.some((r:any)=>r.id===old.id));
+  const receipt=await f.req('/ops/runs/'+old.id);assert.equal(receipt.status,200);assert.equal(receipt.body.id,old.id);assert.doesNotMatch(JSON.stringify(receipt.body),/private-command-output|payload_cipher/);
+  assert.equal((await f.req('/ops/runs/'+old.id,'GET',undefined,{'x-role':'member'})).status,403);
+  assert.equal((await f.req('/ops/runs/missing')).status,404);
+});
 test("real platform HTTP checks role, confirmation and revision with saved state readback", async (t) => {
   const f = await setup(t);
   assert.equal(

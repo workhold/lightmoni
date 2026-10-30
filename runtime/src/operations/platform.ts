@@ -1147,7 +1147,9 @@ export function renderGateway(c: any, digest: string, preview = false): string {
       "http {",
       "  include /usr/local/openresty/nginx/conf/mime.types;",
       "  default_type application/octet-stream;",
-      "  access_log /dev/stdout;",
+      `  log_format lightmoni_application escape=json '{"lightmoni_access":true,"website_id":"$lightmoni_website_id","status":$status,"request_time":$request_time,"upstream_addr":"$upstream_addr"}';`,
+      '  map $server_name $lightmoni_website_id { default ""; }',
+      "  access_log /dev/stdout lightmoni_application;",
       "  server_tokens off;",
       '  map $http_upgrade $lightmoni_connection_upgrade { default upgrade; "" ""; }',
       `  server { listen ${port(c.http_port ?? 80)} default_server; server_name _; location = /.well-known/lightmoni-gateway { default_type text/plain; return 200 ${quote(digest)}; } location / { return 404; } }`,
@@ -1179,7 +1181,8 @@ export function renderGateway(c: any, digest: string, preview = false): string {
       "  server {",
       `    listen ${port(c.http_port ?? 80)};`,
       `    server_name ${domains.join(" ")};`,
-      `    location = /.well-known/lightmoni-health { allow 127.0.0.1; allow ::1; deny all; default_type text/plain; return 200 ${quote(proof)}; }`,
+      `    set $lightmoni_website_id "${siteID}";`,
+      `    location = /.well-known/lightmoni-health { allow 127.0.0.1; allow ::1; deny all; access_log off; default_type text/plain; return 200 ${quote(proof)}; }`,
     );
     if (site.certificate) {
       if (!preview)
@@ -1197,7 +1200,7 @@ export function renderGateway(c: any, digest: string, preview = false): string {
         `    ssl_certificate_key ${quote(base + "/sites/" + siteID + "/privkey.pem")};`,
       );
     }
-    lines.push(...renderNginxOptions(settings));
+    lines.push(...renderNginxOptions(settings).map(line => line === 'access_log /dev/stdout;' ? 'access_log /dev/stdout lightmoni_application;' : line));
     const redirect =
       settings.redirect_https && site.certificate
         ? `if ($scheme = http) { return 308 https://$host${Number(c.https_port ?? 443) === 443 ? "" : ":" + port(c.https_port)}$request_uri; }`

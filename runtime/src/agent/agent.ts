@@ -1,3 +1,4 @@
+import { ApplicationObserver } from "./application-observer.js";
 import {
   createServer,
   type Server,
@@ -74,6 +75,7 @@ export class Agent {
   readonly queue: Queue;
   readonly sdk: LightMoni;
   readonly files: FileLogReader;
+  readonly applications: ApplicationObserver;
   readonly jobs?: AgentJobRunner;
   readonly taskRunner?: AgentTaskRunner;
   tasks: RemoteConfig;
@@ -145,6 +147,7 @@ export class Agent {
       throw e;
     }
     this.files = new FileLogReader(this);
+    this.applications = new ApplicationObserver(this);
     if (config.control_credential) {
       this.jobs = new AgentJobRunner({
         endpoint: config.endpoint,
@@ -220,6 +223,7 @@ export class Agent {
       last_error: this.lastError,
       last_success_at: this.lastSuccess,
       collectors_status: { ...this.collectors },
+      docker_inventory: this.applications?.inventory,
       sdk: legacyStats,
       runtime_events: [...this.runtimeEvents],
       control_interval_seconds: this.config.control_interval_seconds,
@@ -554,12 +558,13 @@ export class Agent {
       registered = true;
       this.acknowledgeRuntime(status.runtime_events);
     }
-    await this.controlRequest(
+    const heartbeat = await this.controlRequest(
       "/api/v1/agents/" + this.identity.agent_id + "/heartbeat",
       "POST",
       status,
     );
     this.acknowledgeRuntime(status.runtime_events);
+    if (Array.isArray(heartbeat?.application_targets)) this.applications.targets = heartbeat.application_targets;
     const remote = await this.controlRequest(
       "/api/v1/agents/" + this.identity.agent_id + "/config",
       "GET",
@@ -757,6 +762,14 @@ export class Agent {
         );
     }
   }
+  private async applicationLoop() {
+    if (!(await this.waitTasks())) return;
+    while (!this.controller.signal.aborted) {
+      try { await this.applications.collect(this.controller.signal); this.collectorStatus('applications', 'ok'); }
+      catch { this.collectorStatus('applications', 'application_collection_unavailable'); }
+      await delay(Math.max(10, this.tasks.collect_interval_seconds) * 1000, this.controller.signal);
+    }
+  }
   private async fileLogLoop() {
     if (!(await this.waitTasks())) return;
     try {
@@ -872,6 +885,7 @@ export class Agent {
       this.collectLoop(),
       this.probeLoop(),
       this.fileLogLoop(),
+      this.applicationLoop(),
       this.jobLoop(),
       this.taskRunner?.run(this.controller.signal) ?? Promise.resolve(),
     ];

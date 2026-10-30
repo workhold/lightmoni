@@ -378,6 +378,9 @@ export class OperationsPlatformStore implements PlatformStore {
       result: cleanResult(JSON.parse(row.result_json || "{}")),
     };
   }
+  action(id: string) {
+    return this.runView(this.runRow(id));
+  }
   actions(resourceID?: string) {
     return (
       resourceID

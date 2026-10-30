@@ -195,7 +195,7 @@ test("static SPA options and HTTPS redirect retain the internal proof and TLS op
   assert.match(config, /return 308 https:\/\/\$host:18443\$request_uri/);
   assert.ok(
     config.includes(
-      "location = /.well-known/lightmoni-health { allow 127.0.0.1; allow ::1; deny all; default_type text/plain; return 200",
+      "location = /.well-known/lightmoni-health { allow 127.0.0.1; allow ::1; deny all; access_log off; default_type text/plain; return 200",
     ),
   );
   assert.ok(
@@ -252,4 +252,8 @@ test("proxy cache and per-IP limits render with authenticated traffic bypass and
       ]),
     /CACHE_REQUIRES/,
   );
+});
+
+test('gateway access logs keep the structured application format after per-site Nginx options',()=>{
+ const config=gateway({locations:[{path:'/',action:'return',return_status:200,return_value:'ok'}]});assert.match(config,/log_format lightmoni_application escape=json/);assert.match(config,/set \$lightmoni_website_id/);assert.equal(config.includes('access_log /dev/stdout;'),false);assert.match(config,/access_log \/dev\/stdout lightmoni_application;/);
 });

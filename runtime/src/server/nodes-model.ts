@@ -1,3 +1,4 @@
+import { dockerInventory } from "../shared/application-observation.js";
 import { createHash, randomBytes } from "node:crypto";
 import { normalize as clean } from "node:path";
 import type { DB } from "../shared/types.js";
@@ -749,7 +750,7 @@ export class NodeStore {
             );
           throw e;
         }
-      values = { ...values, runtime_key_id: writeKey };
+      values = { ...values, runtime_key_id: writeKey, docker_inventory: dockerInventory(values.docker_inventory) };
       delete values.runtime_events;
       this.db.run(
         `INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat,group_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET hostname=excluded.hostname,version=excluded.version,platform=excluded.platform,arch=excluded.arch,last_seen=excluded.last_seen,heartbeat=excluded.heartbeat`,

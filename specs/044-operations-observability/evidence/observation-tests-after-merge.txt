@@ -1,0 +1,20 @@
+✔ transactional system log outbox retries, backfills idempotently, excludes secrets and rolls back with state (5.300917ms)
+✔ three applications share exactly one independent gauge and one log physical table (1.424625ms)
+✔ revision backfill uses the whole primary key so simultaneous resource revisions remain distinct (1.611584ms)
+✔ job explanations reach shared logs with credentials redacted and without snapshots or terminal output (0.828917ms)
+✔ auth, node, terminal, alert and assistant audit metadata share the system log pipeline (1.879667ms)
+✔ task-center state, cancellation and resolution reach system logs without script output (1.02975ms)
+✔ authenticated deployment ownership overrides spoofed application/cluster/host and rejects foreign Agent (0.598458ms)
+✔ inventory allowlist retains external stopped Docker and omits private fields (0.289292ms)
+✔ same-timestamp log lines resume from durable cursor; queue failure does not advance or skip data (58.529209ms)
+✔ automatic Docker discovery records app gauges and does not adopt external containers (29.963291ms)
+✔ large log backlog drains multiple batches without tail loss or duplicate cursor sequences (2496.180042ms)
+✔ bounded Docker reader resumes a multiline event larger than its byte cap and retains the final unterminated line (6266.545375ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9118.913917

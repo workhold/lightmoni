@@ -19,7 +19,7 @@ export const validTable = (s: unknown): s is string =>
   /^[a-z][a-z0-9_]{0,47}$/.test(s) &&
   !/^(log_|metric_|trace_)/.test(s);
 export const systemTable = (s: string) =>
-  ["lightmoni", "lightmoni_agent", "lightmoni_center", "lightmoni_sdk"].includes(s);
+  ["lightmoni", "lightmoni_agent", "lightmoni_center", "lightmoni_sdk", "lightmoni_application"].includes(s);
 const record = (v: any): Record<string, any> => {
   if (!v || typeof v !== "object" || Array.isArray(v))
     fail(400, "invalid request");

@@ -98,7 +98,7 @@ export const applicationCatalog = [
     id: "redis",
     name: "Redis",
     description: "可独立安装多套 Redis，默认启用 AOF 并保留本机数据。",
-    category: "database",
+    category: "cache",
     version: "7.4-alpine",
     versions: ["7.4-alpine"],
     managed_recommended: false,
@@ -206,3 +206,9 @@ export function catalogInstallation(id: string, input: Input) {
     },
   };
 }
+
+export const applicationCategories = [
+  {id:'database',name:'数据库',name_en:'Databases'},
+  {id:'cache',name:'缓存',name_en:'Caching'},
+  {id:'web',name:'网站与网关',name_en:'Web & gateways'},
+].map(c=>({...c,count:applicationCatalog.filter(t=>t.category===c.id).length}));
