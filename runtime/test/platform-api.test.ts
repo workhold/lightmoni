@@ -65,6 +65,25 @@ async function setup(t: any) {
   } as any;
   const jobs = registerAgentJobs(deps, { agentCredentials: credentials }),
     platform = registerOperationsPlatform(deps, { jobs, dataDir: root });
+  db.exec(
+    "CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT,address TEXT,agent_id TEXT);INSERT INTO managed_machines VALUES('machine-a','Test node','127.0.0.1','node-a')",
+  );
+  const cluster = platform.store.create(
+    "cluster",
+    "API cluster",
+    {
+      machine_ids: ["machine-a"],
+      nodes: [
+        {
+          machine_id: "machine-a",
+          address: "127.0.0.1",
+          cpu: 4,
+          memory_mb: 4096,
+        },
+      ],
+    },
+    "admin",
+  );
   const legacy = registerOperations(deps, {
     jobs,
     credentials,
@@ -98,6 +117,52 @@ async function setup(t: any) {
     return { status: response.status, body: (await response.json()) as any };
   };
   const create = async (kind: string, name: string, spec: any) => {
+    if (kind === "gateway_group") {
+      kind = "application";
+      spec = {
+        deployments: [{ cluster_id: cluster.id, machine_ids: ["machine-a"] }],
+        role: "openresty",
+        deployment_mode: "manual",
+        mode: "container",
+        image: "openresty/openresty:1.27.1.2-0-alpine",
+        ports: [
+          { name: "http", host_port: 80, container_port: 80 },
+          { name: "https", host_port: 443, container_port: 443 },
+        ],
+      };
+    } else if (kind === "application")
+      spec = {
+        ...spec,
+        deployments: [{ cluster_id: cluster.id, machine_ids: ["machine-a"] }],
+        deployment_mode: "manual",
+        ports: (spec.ports ?? []).map((p: any, n: number) => ({
+          ...p,
+          name: p.name ?? "port-" + n,
+        })),
+      };
+    else if (kind === "website")
+      spec = {
+        ...spec,
+        cluster_ids: [cluster.id],
+        bindings: [
+          {
+            domains: spec.domains,
+            https: spec.https,
+            certificate_id: spec.certificate_id,
+            locations: (spec.locations ?? []).map((l: any) => ({
+              ...l,
+              upstreams: undefined,
+              cluster_targets: [
+                {
+                  cluster_id: cluster.id,
+                  target: "proxy",
+                  upstreams: l.upstreams,
+                },
+              ],
+            })),
+          },
+        ],
+      };
     const r = await req("/ops/resources", "POST", { kind, name, spec });
     assert.equal(r.status, 201, JSON.stringify(r));
     return r.body.resource;
@@ -115,7 +180,47 @@ async function setup(t: any) {
     controlCredential: "qa-control",
     dataDir: join(root, "agent"),
   });
-  return { root, db, jobs, platform, req, create, action, runner };
+  const finish = () => {
+    const job = jobs.claim("node-a", ["operations.platform"])!;
+    const payload = platform.resolvePayload(job);
+    for (const [n, phase] of [
+      "accepted",
+      "staging",
+      "activating",
+      "verifying",
+    ].entries())
+      jobs.event("node-a", job.id, {
+        lease_id: job.lease_id,
+        sequence: n + 1,
+        phase,
+        summary: "fixture",
+      });
+    jobs.result("node-a", job.id, {
+      lease_id: job.lease_id,
+      state: "succeeded",
+      summary: "fixture",
+      snapshot: {
+        health: { healthy: true },
+        operations: {
+          operation_id: payload.operation_id,
+          resource_id: payload.resource.id,
+          data: { healthy: true, running: true },
+        },
+      },
+    });
+  };
+  return {
+    root,
+    db,
+    jobs,
+    platform,
+    req,
+    create,
+    action,
+    runner,
+    cluster,
+    finish,
+  };
 }
 test("real platform HTTP checks role, confirmation and revision with saved state readback", async (t) => {
   const f = await setup(t);
@@ -159,12 +264,19 @@ test("real platform HTTP checks role, confirmation and revision with saved state
 test("removed nodes disappear from deployment candidates and cannot become new deployment targets", async (t) => {
   const f = await setup(t);
   assert.equal((await f.req("/ops/overview")).body.agents.length, 1);
-  f.db.run("INSERT INTO agent_lifecycle(agent_id,state) VALUES('node-a','removed')");
+  f.db.run(
+    "INSERT INTO agent_lifecycle(agent_id,state) VALUES('node-a','removed')",
+  );
   assert.deepEqual((await f.req("/ops/overview")).body.agents, []);
   const saved = await f.req("/ops/resources", "POST", {
     kind: "application",
     name: "Removed target",
-    spec: { mode: "container", image: "nginx:1.27.5", agent_ids: ["node-a"] },
+    spec: {
+      mode: "container",
+      image: "nginx:1.27.5",
+      deployments: [{ cluster_id: f.cluster.id, machine_ids: ["machine-a"] }],
+      deployment_mode: "manual",
+    },
   });
   assert.equal(saved.status, 400);
   assert.equal(saved.body.error, "registered_agent_required");
@@ -258,6 +370,8 @@ test("first HTTPS website deployment automatically issues its selected certifica
       http_port: 18088,
       https_port: 18488,
     });
+  await f.action(group, "deploy");
+  f.finish();
   const website = await f.create("website", "First HTTPS website", {
     mode: "static",
     domains: ["first.example.test"],
@@ -313,8 +427,10 @@ test("saved multi-path Nginx preview is administrator-only, redacted and does no
       },
     ],
   });
-  assert.equal(site.spec.locations.length, 2);
-  const preview = await f.req("/ops/resources/" + site.id + "/nginx");
+  assert.equal(site.spec.bindings[0].locations.length, 2);
+  const preview = await f.req(
+    "/ops/resources/" + site.id + "/nginx?cluster_id=" + f.cluster.id,
+  );
   assert.equal(preview.status, 200);
   assert.equal(preview.body.validated, false);
   assert.equal(preview.body.redacted, true);
@@ -330,9 +446,14 @@ test("saved multi-path Nginx preview is administrator-only, redacted and does no
   assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0);
   assert.equal(
     (
-      await f.req("/ops/resources/" + site.id + "/nginx", "GET", undefined, {
-        "x-role": "member",
-      })
+      await f.req(
+        "/ops/resources/" + site.id + "/nginx?cluster_id=" + f.cluster.id,
+        "GET",
+        undefined,
+        {
+          "x-role": "member",
+        },
+      )
     ).status,
     403,
   );
@@ -341,10 +462,15 @@ test("saved multi-path Nginx preview is administrator-only, redacted and does no
     name: site.name,
     spec: {
       ...site.spec,
-      locations: [
+      bindings: [
         {
-          ...site.spec.locations[0],
-          custom_config: "} server { return 200; }",
+          ...site.spec.bindings[0],
+          locations: [
+            {
+              ...site.spec.bindings[0].locations[0],
+              custom_config: "} server { return 200; }",
+            },
+          ],
         },
       ],
     },

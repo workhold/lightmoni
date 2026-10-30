@@ -684,3 +684,18 @@ test('failed post-activation installation revokes only the new enrollment identi
  const result=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,502,result.raw);assert.match(result.raw,/核对远端/);
  assert.ok(f.db.get<any>("SELECT revoked_at FROM agent_credentials WHERE id='new'")?.revoked_at);assert.equal(f.db.get<any>("SELECT revoked_at FROM agent_credentials WHERE id='old'")?.revoked_at,null);
 });
+
+test('cluster membership prevents deleting stable machine identity until explicitly detached',async t=>{
+ const f=await fixture(t);
+ const created=await f.request('/machines','POST',{name:'cluster-host',address:'10.0.0.30',port:22,username:'deploy',connection_method:'direct_ssh'});
+ assert.equal(created.status,201,created.raw);
+ const machineID=created.data.id;
+ f.db.exec('CREATE TABLE ops_platform_cluster_members(machine_id TEXT PRIMARY KEY,cluster_id TEXT NOT NULL)');
+ f.db.run('INSERT INTO ops_platform_cluster_members VALUES(?,?)',machineID,'cluster-1');
+ const blocked=await f.request('/machines/'+machineID,'DELETE');
+ assert.equal(blocked.status,409,blocked.raw);
+ assert.match(blocked.raw,/集群/);
+ assert.ok(f.db.get('SELECT id FROM managed_machines WHERE id=?',machineID));
+ f.db.run('DELETE FROM ops_platform_cluster_members WHERE machine_id=?',machineID);
+ assert.equal((await f.request('/machines/'+machineID,'DELETE')).status,200);
+});

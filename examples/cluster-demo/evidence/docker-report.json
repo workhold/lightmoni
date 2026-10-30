@@ -1,0 +1,912 @@
+{
+  "verified_at": "2026-10-29T17:01:06.266Z",
+  "method": "Real platform HTTP CRUD/actions, authenticated Agent private-payload HTTP, actual lease and Docker receipts",
+  "scope": {
+    "physical_docker_hosts": 1,
+    "logical_nodes": 3,
+    "clusters": 2,
+    "namespace_isolation": "Two independent nested Docker engines; fixed 80/443 isolated",
+    "mocked": [
+      "local Host routing and explicit provider DNS mock",
+      "self-signed certificate instead of public ACME"
+    ]
+  },
+  "runtime_build": {
+    "compiled_at": "2026-10-29T16:58:39.492Z",
+    "controller_sha256": "eba42e6383e6b47889cae243425c7fb1223dc1b0a54e9d00b7735a7df3999d85"
+  },
+  "migration": {
+    "applications": [
+      {
+        "id": "9705327a94bb1e387b077f9073dcba13",
+        "name": "Demo MySQL",
+        "preserved": true
+      },
+      {
+        "id": "d8438060805e0f925d43905cc3de28ec",
+        "name": "Demo 留言程序",
+        "preserved": true
+      },
+      {
+        "id": "ba2aefb65627bd630a641d7a690e0a5c",
+        "name": "Demo OpenResty",
+        "preserved": true
+      }
+    ],
+    "instances": [
+      {
+        "id": "ed780671f71b6620e489e28dfb4ee38a",
+        "owner_id": "9705327a94bb1e387b077f9073dcba13",
+        "machine_id": "demo-machine",
+        "preserved": true
+      },
+      {
+        "id": "70ab9e310e531003342a7901ba4c08af",
+        "owner_id": "d8438060805e0f925d43905cc3de28ec",
+        "machine_id": "demo-machine",
+        "preserved": true
+      },
+      {
+        "id": "c4cd36d900c7e81821839233991e8d8d",
+        "owner_id": "ba2aefb65627bd630a641d7a690e0a5c",
+        "machine_id": "demo-machine",
+        "preserved": true
+      }
+    ]
+  },
+  "website": {
+    "http_status": 201,
+    "read_back": true,
+    "mysql_message_id": 13,
+    "admin_port_status": 200
+  },
+  "tls": {
+    "status": 200,
+    "subject": "CN=demo.example.test",
+    "subject_alt_name": "DNS:demo.example.test, DNS:admin.example.test",
+    "fingerprint256": "AD:E4:13:F3:54:CF:05:DC:0F:83:18:EA:04:AA:29:FD:DB:A6:93:B6:DB:07:F6:CF:22:F9:42:FA:73:DE:A4:BC",
+    "valid_to": "Nov 28 16:59:57 2026 GMT"
+  },
+  "rebuild": {
+    "before_instance": "b59f7137edc3",
+    "after_instance": "4a0157bfdbb7",
+    "data_preserved": true
+  },
+  "cross_cluster": {
+    "global_application_id": "d8438060805e0f925d43905cc3de28ec",
+    "global_service_name": "demo-web",
+    "clusters": [
+      "143c789ff1154b88dded4ddc9aff948a",
+      "98324ef47c76a19b5784257726f0e0c8"
+    ],
+    "first_endpoints": [
+      {
+        "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+        "instance_id": "71b1739c0b328704997de37b5400cc34",
+        "agent_id": "0734f61b0c917dadaa6ff7cbb83a3b12",
+        "machine_id": "demo-machine",
+        "ip": "172.17.0.1",
+        "port": 24001,
+        "port_name": "admin",
+        "protocol": "tcp",
+        "app_protocol": "http",
+        "version": "9"
+      },
+      {
+        "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+        "instance_id": "71b1739c0b328704997de37b5400cc34",
+        "agent_id": "0734f61b0c917dadaa6ff7cbb83a3b12",
+        "machine_id": "demo-machine",
+        "ip": "172.17.0.1",
+        "port": 24000,
+        "port_name": "http",
+        "protocol": "tcp",
+        "app_protocol": "http",
+        "version": "9"
+      }
+    ],
+    "second_endpoints": [
+      {
+        "cluster_id": "98324ef47c76a19b5784257726f0e0c8",
+        "instance_id": "97fad716d39d003dce7f1bb499235a60",
+        "agent_id": "9b9c4ae8accbb393b626b6733d0d1ecb",
+        "machine_id": "demo-secondary",
+        "ip": "172.17.0.4",
+        "port": 25001,
+        "port_name": "admin",
+        "protocol": "tcp",
+        "app_protocol": "http",
+        "version": "9"
+      },
+      {
+        "cluster_id": "98324ef47c76a19b5784257726f0e0c8",
+        "instance_id": "97fad716d39d003dce7f1bb499235a60",
+        "agent_id": "9b9c4ae8accbb393b626b6733d0d1ecb",
+        "machine_id": "demo-secondary",
+        "ip": "172.17.0.4",
+        "port": 25000,
+        "port_name": "http",
+        "protocol": "tcp",
+        "app_protocol": "http",
+        "version": "9"
+      }
+    ],
+    "second_website_tls": 200,
+    "shared_database_read_back": true,
+    "second_container": "5faef6e1a435",
+    "isolation": "Independent nested Docker engines and network namespaces on the same physical Docker host"
+  },
+  "dns_records": [
+    {
+      "RecordId": "1",
+      "RR": "mail",
+      "Type": "MX",
+      "Value": "external.mail.example.test",
+      "TTL": 600,
+      "Status": "ENABLE"
+    },
+    {
+      "RecordId": "3",
+      "RR": "admin",
+      "Type": "A",
+      "Value": "192.0.2.20",
+      "TTL": 600,
+      "Status": "ENABLE"
+    },
+    {
+      "RecordId": "5",
+      "RR": "demo",
+      "Type": "A",
+      "Value": "192.0.2.20",
+      "TTL": 600,
+      "Status": "ENABLE"
+    },
+    {
+      "RecordId": "8",
+      "RR": "admin",
+      "Type": "A",
+      "Value": "192.0.2.10",
+      "TTL": 600,
+      "Status": "ENABLE"
+    },
+    {
+      "RecordId": "9",
+      "RR": "demo",
+      "Type": "A",
+      "Value": "192.0.2.10",
+      "TTL": 600,
+      "Status": "ENABLE"
+    }
+  ],
+  "failover": {
+    "started_at": "2026-10-29T16:54:20.187Z",
+    "verified_at": "2026-10-29T16:56:30.913Z",
+    "fault": "Paused the isolated standby Docker node and its actual Agent/containers",
+    "before": {
+      "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+      "instance_id": "e0dbeca83a4ded9e03f48c6161cdfefb",
+      "agent_id": "3443ea72da45d5023b5437441df040aa",
+      "machine_id": "demo-a-standby",
+      "ip": "172.17.0.3",
+      "port": 80,
+      "port_name": "http",
+      "protocol": "tcp",
+      "app_protocol": "http",
+      "version": "2"
+    },
+    "after": {
+      "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+      "instance_id": "0f4fce9df7c4b9817fc6d16788f1d1bc",
+      "agent_id": "0734f61b0c917dadaa6ff7cbb83a3b12",
+      "machine_id": "demo-machine",
+      "ip": "172.17.0.1",
+      "port": 80,
+      "port_name": "http",
+      "protocol": "tcp",
+      "app_protocol": "http",
+      "version": "2"
+    },
+    "actual_tls_status": 200,
+    "dns_before": [
+      {
+        "RecordId": "1",
+        "RR": "mail",
+        "Type": "MX",
+        "Value": "external.mail.example.test",
+        "TTL": 600,
+        "Status": "ENABLE"
+      },
+      {
+        "RecordId": "3",
+        "RR": "admin",
+        "Type": "A",
+        "Value": "192.0.2.20",
+        "TTL": 600,
+        "Status": "ENABLE"
+      },
+      {
+        "RecordId": "5",
+        "RR": "demo",
+        "Type": "A",
+        "Value": "192.0.2.20",
+        "TTL": 600,
+        "Status": "ENABLE"
+      },
+      {
+        "RecordId": "6",
+        "RR": "admin",
+        "Type": "A",
+        "Value": "192.0.2.11",
+        "TTL": 600,
+        "Status": "ENABLE"
+      },
+      {
+        "RecordId": "7",
+        "RR": "demo",
+        "Type": "A",
+        "Value": "192.0.2.11",
+        "TTL": 600,
+        "Status": "ENABLE"
+      }
+    ],
+    "dns_after": [
+      {
+        "RecordId": "1",
+        "RR": "mail",
+        "Type": "MX",
+        "Value": "external.mail.example.test",
+        "TTL": 600,
+        "Status": "ENABLE"
+      },
+      {
+        "RecordId": "3",
+        "RR": "admin",
+        "Type": "A",
+        "Value": "192.0.2.20",
+        "TTL": 600,
+        "Status": "ENABLE"
+      },
+      {
+        "RecordId": "5",
+        "RR": "demo",
+        "Type": "A",
+        "Value": "192.0.2.20",
+        "TTL": 600,
+        "Status": "ENABLE"
+      },
+      {
+        "RecordId": "8",
+        "RR": "admin",
+        "Type": "A",
+        "Value": "192.0.2.10",
+        "TTL": 600,
+        "Status": "ENABLE"
+      },
+      {
+        "RecordId": "9",
+        "RR": "demo",
+        "Type": "A",
+        "Value": "192.0.2.10",
+        "TTL": 600,
+        "Status": "ENABLE"
+      }
+    ],
+    "unmanaged_record_preserved": true,
+    "physical_host_count": 1
+  },
+  "applications": [
+    {
+      "id": "9705327a94bb1e387b077f9073dcba13",
+      "name": "Demo MySQL",
+      "service_name": "demo-mysql",
+      "mode": "manual",
+      "source": {
+        "type": "store",
+        "template_id": "mysql",
+        "template_version": "8.4"
+      },
+      "revision": 1,
+      "deployments": {
+        "143c789ff1154b88dded4ddc9aff948a": {
+          "pending": "",
+          "last_error": "",
+          "desired_revision": 1,
+          "enabled": true,
+          "policy_actor": "demo-admin",
+          "instances_total": 1,
+          "applied_revision": 1
+        }
+      },
+      "instances": [
+        {
+          "id": "ed780671f71b6620e489e28dfb4ee38a",
+          "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+          "machine_id": "demo-machine",
+          "state": "running",
+          "healthy": true,
+          "retired": false,
+          "ports": [
+            {
+              "instance_id": "ed780671f71b6620e489e28dfb4ee38a",
+              "name": "mysql",
+              "service": "mysql",
+              "container_port": 3306,
+              "host_port": 23306,
+              "protocol": "tcp",
+              "app_protocol": "tcp",
+              "host_ip": "0.0.0.0"
+            }
+          ],
+          "desired_generation": "1",
+          "observed_generation": "1"
+        }
+      ]
+    },
+    {
+      "id": "d8438060805e0f925d43905cc3de28ec",
+      "name": "Demo 留言程序",
+      "service_name": "demo-web",
+      "mode": "managed",
+      "source": {
+        "type": "custom"
+      },
+      "revision": 9,
+      "deployments": {
+        "143c789ff1154b88dded4ddc9aff948a": {
+          "pending": "",
+          "last_error": "",
+          "desired_revision": 9,
+          "enabled": true,
+          "policy_actor": "demo-admin",
+          "instances_total": 1,
+          "applied_revision": 9
+        },
+        "98324ef47c76a19b5784257726f0e0c8": {
+          "pending": "",
+          "last_error": "",
+          "desired_revision": 9,
+          "enabled": true,
+          "policy_actor": "demo-admin",
+          "instances_total": 1,
+          "applied_revision": 9
+        }
+      },
+      "instances": [
+        {
+          "id": "70ab9e310e531003342a7901ba4c08af",
+          "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+          "machine_id": "demo-machine",
+          "state": "stopped",
+          "healthy": false,
+          "retired": true,
+          "ports": [
+            {
+              "instance_id": "70ab9e310e531003342a7901ba4c08af",
+              "name": "admin",
+              "service": "",
+              "container_port": 9090,
+              "host_port": 24001,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            },
+            {
+              "instance_id": "70ab9e310e531003342a7901ba4c08af",
+              "name": "http",
+              "service": "",
+              "container_port": 8080,
+              "host_port": 24000,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            }
+          ],
+          "desired_generation": "6",
+          "observed_generation": "6"
+        },
+        {
+          "id": "223145f91194de7f91f19560c950dace",
+          "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+          "machine_id": "demo-a-standby",
+          "state": "stopped",
+          "healthy": false,
+          "retired": true,
+          "ports": [
+            {
+              "instance_id": "223145f91194de7f91f19560c950dace",
+              "name": "admin",
+              "service": "",
+              "container_port": 9090,
+              "host_port": 24001,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            },
+            {
+              "instance_id": "223145f91194de7f91f19560c950dace",
+              "name": "http",
+              "service": "",
+              "container_port": 8080,
+              "host_port": 24000,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            }
+          ],
+          "desired_generation": "7",
+          "observed_generation": "7"
+        },
+        {
+          "id": "71b1739c0b328704997de37b5400cc34",
+          "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+          "machine_id": "demo-machine",
+          "state": "running",
+          "healthy": true,
+          "retired": false,
+          "ports": [
+            {
+              "instance_id": "71b1739c0b328704997de37b5400cc34",
+              "name": "admin",
+              "service": "",
+              "container_port": 9090,
+              "host_port": 24001,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            },
+            {
+              "instance_id": "71b1739c0b328704997de37b5400cc34",
+              "name": "http",
+              "service": "",
+              "container_port": 8080,
+              "host_port": 24000,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            }
+          ],
+          "desired_generation": "9",
+          "observed_generation": "9"
+        },
+        {
+          "id": "97fad716d39d003dce7f1bb499235a60",
+          "cluster_id": "98324ef47c76a19b5784257726f0e0c8",
+          "machine_id": "demo-secondary",
+          "state": "running",
+          "healthy": true,
+          "retired": false,
+          "ports": [
+            {
+              "instance_id": "97fad716d39d003dce7f1bb499235a60",
+              "name": "admin",
+              "service": "",
+              "container_port": 9090,
+              "host_port": 25001,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            },
+            {
+              "instance_id": "97fad716d39d003dce7f1bb499235a60",
+              "name": "http",
+              "service": "",
+              "container_port": 8080,
+              "host_port": 25000,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            }
+          ],
+          "desired_generation": "9",
+          "observed_generation": "9"
+        }
+      ]
+    },
+    {
+      "id": "ba2aefb65627bd630a641d7a690e0a5c",
+      "name": "Demo OpenResty",
+      "service_name": "demo-openresty",
+      "mode": "managed",
+      "source": {
+        "type": "store",
+        "template_id": "openresty",
+        "template_version": "1.27.1.2-0-alpine"
+      },
+      "revision": 2,
+      "deployments": {
+        "143c789ff1154b88dded4ddc9aff948a": {
+          "pending": "",
+          "last_error": "",
+          "desired_revision": 2,
+          "enabled": true,
+          "policy_actor": "demo-admin",
+          "instances_total": 1,
+          "applied_revision": 2
+        },
+        "98324ef47c76a19b5784257726f0e0c8": {
+          "pending": "",
+          "last_error": "",
+          "desired_revision": 2,
+          "enabled": true,
+          "policy_actor": "demo-admin",
+          "instances_total": 1,
+          "applied_revision": 2
+        }
+      },
+      "instances": [
+        {
+          "id": "c4cd36d900c7e81821839233991e8d8d",
+          "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+          "machine_id": "demo-machine",
+          "state": "stopped",
+          "healthy": false,
+          "retired": true,
+          "ports": [
+            {
+              "instance_id": "c4cd36d900c7e81821839233991e8d8d",
+              "name": "http",
+              "service": "",
+              "container_port": 80,
+              "host_port": 80,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            },
+            {
+              "instance_id": "c4cd36d900c7e81821839233991e8d8d",
+              "name": "https",
+              "service": "",
+              "container_port": 443,
+              "host_port": 443,
+              "protocol": "tcp",
+              "app_protocol": "https",
+              "host_ip": "0.0.0.0"
+            }
+          ],
+          "desired_generation": "2",
+          "observed_generation": "2"
+        },
+        {
+          "id": "e0dbeca83a4ded9e03f48c6161cdfefb",
+          "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+          "machine_id": "demo-a-standby",
+          "state": "stopped",
+          "healthy": false,
+          "retired": true,
+          "ports": [
+            {
+              "instance_id": "e0dbeca83a4ded9e03f48c6161cdfefb",
+              "name": "http",
+              "service": "",
+              "container_port": 80,
+              "host_port": 80,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            },
+            {
+              "instance_id": "e0dbeca83a4ded9e03f48c6161cdfefb",
+              "name": "https",
+              "service": "",
+              "container_port": 443,
+              "host_port": 443,
+              "protocol": "tcp",
+              "app_protocol": "https",
+              "host_ip": "0.0.0.0"
+            }
+          ],
+          "desired_generation": "2",
+          "observed_generation": "2"
+        },
+        {
+          "id": "0f4fce9df7c4b9817fc6d16788f1d1bc",
+          "cluster_id": "143c789ff1154b88dded4ddc9aff948a",
+          "machine_id": "demo-machine",
+          "state": "running",
+          "healthy": true,
+          "retired": false,
+          "ports": [
+            {
+              "instance_id": "0f4fce9df7c4b9817fc6d16788f1d1bc",
+              "name": "http",
+              "service": "",
+              "container_port": 80,
+              "host_port": 80,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            },
+            {
+              "instance_id": "0f4fce9df7c4b9817fc6d16788f1d1bc",
+              "name": "https",
+              "service": "",
+              "container_port": 443,
+              "host_port": 443,
+              "protocol": "tcp",
+              "app_protocol": "https",
+              "host_ip": "0.0.0.0"
+            }
+          ],
+          "desired_generation": "2",
+          "observed_generation": "2"
+        },
+        {
+          "id": "7aa27173b7b811e1a2db9299d1e5e8a3",
+          "cluster_id": "98324ef47c76a19b5784257726f0e0c8",
+          "machine_id": "demo-secondary",
+          "state": "running",
+          "healthy": true,
+          "retired": false,
+          "ports": [
+            {
+              "instance_id": "7aa27173b7b811e1a2db9299d1e5e8a3",
+              "name": "http",
+              "service": "",
+              "container_port": 80,
+              "host_port": 80,
+              "protocol": "tcp",
+              "app_protocol": "http",
+              "host_ip": "0.0.0.0"
+            },
+            {
+              "instance_id": "7aa27173b7b811e1a2db9299d1e5e8a3",
+              "name": "https",
+              "service": "",
+              "container_port": 443,
+              "host_port": 443,
+              "protocol": "tcp",
+              "app_protocol": "https",
+              "host_ip": "0.0.0.0"
+            }
+          ],
+          "desired_generation": "2",
+          "observed_generation": "2"
+        }
+      ]
+    }
+  ],
+  "containers": [
+    {
+      "application_id": "9705327a94bb1e387b077f9073dcba13",
+      "instance_id": "ed780671f71b6620e489e28dfb4ee38a",
+      "id": "b50bd15fe6c1",
+      "name": "lm-ed780671f71b6620e489e28dfb4ee38a-mysql-1",
+      "image": "mysql:8.4",
+      "state": "running",
+      "ports": "0.0.0.0:23306->3306/tcp"
+    },
+    {
+      "application_id": "d8438060805e0f925d43905cc3de28ec",
+      "instance_id": "70ab9e310e531003342a7901ba4c08af",
+      "id": "456aced7d116",
+      "name": "lm-70ab9e310e531003342a7901ba4c08af-app-1",
+      "image": "lightmoni-cluster-demo-web:1.0.0",
+      "state": "exited",
+      "ports": ""
+    },
+    {
+      "application_id": "d8438060805e0f925d43905cc3de28ec",
+      "instance_id": "223145f91194de7f91f19560c950dace",
+      "id": "55f05a7d1ae0",
+      "name": "lm-223145f91194de7f91f19560c950dace-app-1",
+      "image": "lightmoni-cluster-demo-web:1.0.0",
+      "state": "exited",
+      "ports": ""
+    },
+    {
+      "application_id": "d8438060805e0f925d43905cc3de28ec",
+      "instance_id": "71b1739c0b328704997de37b5400cc34",
+      "id": "4a0157bfdbb7",
+      "name": "lm-71b1739c0b328704997de37b5400cc34-app-1",
+      "image": "lightmoni-cluster-demo-web:1.0.0",
+      "state": "running",
+      "ports": "0.0.0.0:24000->8080/tcp, 0.0.0.0:24001->9090/tcp"
+    },
+    {
+      "application_id": "d8438060805e0f925d43905cc3de28ec",
+      "instance_id": "97fad716d39d003dce7f1bb499235a60",
+      "id": "5faef6e1a435",
+      "name": "lm-97fad716d39d003dce7f1bb499235a60-app-1",
+      "image": "lightmoni-cluster-demo-web:1.0.0",
+      "state": "running",
+      "ports": "0.0.0.0:25000->8080/tcp, 0.0.0.0:25001->9090/tcp"
+    },
+    {
+      "application_id": "ba2aefb65627bd630a641d7a690e0a5c",
+      "instance_id": "c4cd36d900c7e81821839233991e8d8d",
+      "id": "94da3101a837",
+      "name": "lm-gateway-c4cd36d900c7e81821839233991e8d8d",
+      "image": "openresty/openresty:1.27.1.2-0-alpine",
+      "state": "exited",
+      "ports": ""
+    },
+    {
+      "application_id": "ba2aefb65627bd630a641d7a690e0a5c",
+      "instance_id": "e0dbeca83a4ded9e03f48c6161cdfefb",
+      "id": "0aaa8035529a",
+      "name": "lm-gateway-e0dbeca83a4ded9e03f48c6161cdfefb",
+      "image": "openresty/openresty:1.27.1.2-0-alpine",
+      "state": "exited",
+      "ports": ""
+    },
+    {
+      "application_id": "ba2aefb65627bd630a641d7a690e0a5c",
+      "instance_id": "0f4fce9df7c4b9817fc6d16788f1d1bc",
+      "id": "457b06c3e8d6",
+      "name": "lm-gateway-0f4fce9df7c4b9817fc6d16788f1d1bc",
+      "image": "openresty/openresty:1.27.1.2-0-alpine",
+      "state": "running",
+      "ports": ""
+    },
+    {
+      "application_id": "ba2aefb65627bd630a641d7a690e0a5c",
+      "instance_id": "7aa27173b7b811e1a2db9299d1e5e8a3",
+      "id": "10415c521043",
+      "name": "lm-gateway-7aa27173b7b811e1a2db9299d1e5e8a3",
+      "image": "openresty/openresty:1.27.1.2-0-alpine",
+      "state": "running",
+      "ports": ""
+    }
+  ],
+  "agent_receipts": [
+    {
+      "job_id": "09f429fb29f9d9ba0ecd09b81d150cfc",
+      "operation_id": "0a7a03e136ad029180c62482c114e0c3",
+      "resource_id": "9705327a94bb1e387b077f9073dcba13",
+      "task": "workload.apply",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T16:59:57.709Z"
+    },
+    {
+      "job_id": "6383bb3251d502037ab1aa23f5527878",
+      "operation_id": "8af5222bbd32f5c57fc9253de094a2af",
+      "resource_id": "437f4e54433e6fde4480acbf1a2c502a",
+      "task": "gateway.apply",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T16:59:58.360Z"
+    },
+    {
+      "job_id": "06768d677afa2a68734ad6168c1f3bc1",
+      "operation_id": "17a5cab19130190af4b755bc64d9bfb6",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T16:59:59.972Z"
+    },
+    {
+      "job_id": "f452c60201bcfd60640a665cd2ebba0e",
+      "operation_id": "291036dd89bba9dbf89a260d7bde2bd9",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:00:00.296Z"
+    },
+    {
+      "job_id": "3498681c80fa5243106645c2e946bf00",
+      "operation_id": "31458458f1725bc2e9ef604e4da14371",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:00:01.974Z"
+    },
+    {
+      "job_id": "ba4de82480f4aded55bb36932913e2a4",
+      "operation_id": "7a053274a9b4fb3502b1be5a4a2f4a6a",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.apply",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:00:06.235Z"
+    },
+    {
+      "job_id": "6de57c374c837833c615b84e7b3d5a49",
+      "operation_id": "e1197a18d9822eaf71fca017ff7486f1",
+      "resource_id": "437f4e54433e6fde4480acbf1a2c502a",
+      "task": "gateway.apply",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:00:15.701Z"
+    },
+    {
+      "job_id": "1aefd0c7bc5255ace043e79ae960db37",
+      "operation_id": "9389f53bfd6a6303322ebb9688e9db3a",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:00:39.058Z"
+    },
+    {
+      "job_id": "dd661c91bcf7b133f63c84a56c02fdb9",
+      "operation_id": "cb835e1ba974d56461fe8ddccc836571",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:00:40.631Z"
+    },
+    {
+      "job_id": "028019bae82233070e5351ae350ce362",
+      "operation_id": "ad25698bbe65b7380cdb136e1e44a492",
+      "resource_id": "ba2aefb65627bd630a641d7a690e0a5c",
+      "task": "gateway.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:00:55.477Z"
+    },
+    {
+      "job_id": "d08c025f7474023ef4cecc7460fae836",
+      "operation_id": "da9f920b9b2521f36301936809112d3e",
+      "resource_id": "9705327a94bb1e387b077f9073dcba13",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:00:57.046Z"
+    },
+    {
+      "job_id": "2f604e6f2de57dfe4c23a92d24e9bd80",
+      "operation_id": "a7c51759b57673995311e51e27afb38d",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:00:59.068Z"
+    },
+    {
+      "job_id": "c26543d2e7cd3d1a237934cffd640e3f",
+      "operation_id": "f60075ee64baa66eb6aebfb6dfd40f05",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:01:00.637Z"
+    },
+    {
+      "job_id": "134450ebb12dc9d719e4e660d9ab1f81",
+      "operation_id": "f5afb8f4610e6c65dabf2a1de3461dc7",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:01:01.321Z"
+    },
+    {
+      "job_id": "f8676a5ee78b1bfaf89ca23359ca776a",
+      "operation_id": "38ec864957679f3234d5163fac8d669c",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:01:02.901Z"
+    },
+    {
+      "job_id": "8beb7434876d11f907709f20c5576722",
+      "operation_id": "7bf088b0a3934c5ac372b92f9c05f439",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:01:03.540Z"
+    },
+    {
+      "job_id": "c2b755f12496d6cf67329e7f822a5ca3",
+      "operation_id": "f51a65d1912b98dafd16fe6b4cfbf231",
+      "resource_id": "d8438060805e0f925d43905cc3de28ec",
+      "task": "workload.inspect",
+      "state": "succeeded",
+      "code": "",
+      "finished_at": "2026-10-29T17:01:05.926Z"
+    }
+  ],
+  "access": {
+    "website": "http://127.0.0.1:18080",
+    "admin": "http://127.0.0.1:18081",
+    "tls_port": 18443,
+    "workbench": "http://127.0.0.1:19043/qa/workbench"
+  }
+}

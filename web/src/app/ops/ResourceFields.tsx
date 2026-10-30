@@ -13,14 +13,18 @@ import {
   Switch,
 } from "../../shared/ui";
 import { useI18n } from "../../shared/i18n";
-import type { Agent, Resource, ResourceKind } from "./model";
-import NginxFields from "./NginxFields";
+import type { Agent, Machine, Resource, ResourceKind } from "./model";
+import ClusterFields, {ApplicationPlacement, type QuickCreate} from "./ClusterFields";
+import WebsiteFields from "./WebsiteFields";
 
 type Props = {
   kind: ResourceKind;
   resources: Resource[];
   agents: Agent[];
   existing?: Resource;
+  machines?: Machine[];
+  onQuickCreate?: QuickCreate;
+  onRefresh?: () => void;
 };
 export function MapFields({
   name,
@@ -144,6 +148,7 @@ export default function ResourceFields({
   resources,
   agents,
   existing,
+  machines = [], onQuickCreate, onRefresh,
 }: Props) {
   const { t } = useI18n(),
     form = Form.useFormInstance(),
@@ -151,9 +156,9 @@ export default function ResourceFields({
     mode = Form.useWatch(["spec", "mode"], form),
     targetType = Form.useWatch(["spec", "type"], form),
     provider = Form.useWatch(["spec", "provider"], form),
-    https = Form.useWatch(["spec", "https"], form),
-    dnsEnabled = Form.useWatch(["spec", "dns_enabled"], form),
     healthType = Form.useWatch(["spec", "health", "type"], form),
+    deploymentMode = Form.useWatch(["spec", "deployment_mode"], form),
+    role = Form.useWatch(["spec", "role"], form),
     networkMode = Form.useWatch(["spec", "network_mode"], form);
   const required = [
     { required: true, message: t("请填写此项", "This field is required") },
@@ -176,6 +181,7 @@ export default function ResourceFields({
       name={["spec", name]}
       label={label}
       rules={needed ? required : []}
+      extra={onQuickCreate && <Button type="link" size="small" icon={<PlusOutlined aria-hidden/>} onClick={()=>onQuickCreate(resourceKind,r=>form.setFieldValue(["spec",name],r.id))}>{t("新建", "New")}{t(resourceKind==="credential"?"DNS 账号":resourceKind==="acme_account"?"ACME 账号":resourceKind==="dns_zone"?"托管域名":resourceKind==="certificate"?"证书":"资源",resourceKind==="credential"?"DNS account":resourceKind==="acme_account"?"ACME account":resourceKind==="dns_zone"?"DNS zone":resourceKind==="certificate"?"Certificate":"resource")}</Button>}
     >
       <Select
         showSearch
@@ -226,24 +232,6 @@ export default function ResourceFields({
         tokenSeparators={[",", " ", "\n"]}
         open={false}
         placeholder={placeholder}
-      />
-    </Form.Item>
-  );
-  const targets = (
-    <Form.Item
-      name={["spec", "agent_ids"]}
-      label={t("目标机器", "Target machines")}
-      rules={required}
-    >
-      <Select
-        mode="multiple"
-        showSearch
-        optionFilterProp="label"
-        options={agentOptions}
-        placeholder={t(
-          "选择已注册 Agent 的机器",
-          "Choose machines with registered Agents",
-        )}
       />
     </Form.Item>
   );
@@ -427,6 +415,7 @@ export default function ResourceFields({
                 name={["spec", "dns_zone_ids"]}
                 label={t("DNS 验证域名", "DNS validation zones")}
                 rules={required}
+                extra={onQuickCreate&&<Button type="link" size="small" onClick={()=>onQuickCreate("dns_zone",r=>form.setFieldValue(["spec","dns_zone_ids"],[...(form.getFieldValue(["spec","dns_zone_ids"])??[]),r.id]))}>{t("新建托管域名","Create DNS zone")}</Button>}
               >
                 <Select mode="multiple" options={opts("dns_zone")} />
               </Form.Item>
@@ -725,9 +714,15 @@ export default function ResourceFields({
       )}
       {kind === "application" && (
         <>
+          <ApplicationPlacement resources={resources} machines={machines} existing={existing} onQuickCreate={onQuickCreate}/>
+          <Form.Item name={["spec","source","type"]} hidden><Input/></Form.Item>
+          <Form.Item name={["spec","source","template_id"]} hidden><Input/></Form.Item>
+          <Form.Item name={["spec","source","template_version"]} hidden><Input/></Form.Item>
+          {!existing&&<p className="lm-ops-note">{t("自己的程序先通过 Dockerfile 构建镜像，再填写镜像或 Compose 配置部署。","Build your program image with a Dockerfile, then deploy its image or Compose configuration.")}</p>}
+          <Form.Item name={["spec","role"]} hidden><Input/></Form.Item>
           <Form.Item
             name={["spec", "mode"]}
-            label={t("部署方式", "Deployment mode")}
+            label={t("程序类型", "Runtime type")}
             rules={required}
           >
             <Select
@@ -737,7 +732,6 @@ export default function ResourceFields({
               ]}
             />
           </Form.Item>
-          {targets}
           {mode === "compose" ? (
             <Form.Item
               name={["spec", "compose"]}
@@ -810,7 +804,7 @@ export default function ResourceFields({
                   rules={required}
                 >
                   <Select
-                    options={["bridge", "host", "none"].map((value) => ({
+                    options={(role==="openresty"?["host"]:["bridge"]).map((value) => ({
                       value,
                       label: value,
                     }))}
@@ -824,7 +818,9 @@ export default function ResourceFields({
                     "app-network",
                   )}
               </div>
-              {networkMode !== "host" ? (
+            </>
+          )}
+              {(
                 <Form.List name={["spec", "ports"]}>
                   {(fields, { add, remove }) => (
                     <div className="lm-ops-repeater">
@@ -833,15 +829,17 @@ export default function ResourceFields({
                         <Button
                           size="small"
                           aria-label={t("添加端口", "Add port")}
+                          disabled={role==="openresty"}
                           icon={<PlusOutlined aria-hidden />}
-                          onClick={() => add({ protocol: "tcp" })}
+                          onClick={() => add({ name: "", host_port: 0, protocol: "tcp", app_protocol: "http" })}
                         >
                           {t("添加端口", "Add port")}
                         </Button>
                       </div>
                       {fields.map((f) => (
-                        <div key={f.key} className="lm-ops-port-row">
-                          <Form.Item name={[f.name, "host_ip"]}>
+                        <div key={f.key} className="lm-ops-named-port-row">
+                          <Form.Item name={[f.name,"name"]} label={t("端口名称","Port name")} rules={[...required,{pattern:/^[a-z0-9][a-z0-9-]*$/,message:t("使用小写英文、数字或短横线","Use lowercase letters, numbers and hyphens")}]}><Input disabled={role==="openresty"} aria-label={t("端口名称","Port name")} placeholder="api" maxLength={63}/></Form.Item>
+                          <Form.Item name={[f.name, "host_ip"]} label={t("宿主 IP","Host IP")}>
                             <Input
                               placeholder={t(
                                 "宿主 IP（可选）",
@@ -852,10 +850,12 @@ export default function ResourceFields({
                           </Form.Item>
                           <Form.Item
                             name={[f.name, "host_port"]}
+                            label={t("宿主端口（0 自动）","Host port (0 automatic)")}
                             rules={required}
                           >
                             <InputNumber
-                              min={1}
+                              min={0}
+                              disabled={role==="openresty"}
                               max={65535}
                               placeholder={t("宿主端口", "Host port")}
                               aria-label={t("宿主端口", "Host port")}
@@ -864,16 +864,18 @@ export default function ResourceFields({
                           <span>→</span>
                           <Form.Item
                             name={[f.name, "container_port"]}
+                            label={t("容器端口","Container port")}
                             rules={required}
                           >
                             <InputNumber
                               min={1}
                               max={65535}
+                              disabled={role==="openresty"}
                               placeholder={t("容器端口", "Container port")}
                               aria-label={t("容器端口", "Container port")}
                             />
                           </Form.Item>
-                          <Form.Item name={[f.name, "protocol"]}>
+                          <Form.Item name={[f.name, "protocol"]} label={t("传输协议","Transport")}>
                             <Select
                               options={[
                                 { value: "tcp", label: "TCP" },
@@ -881,9 +883,12 @@ export default function ResourceFields({
                               ]}
                             />
                           </Form.Item>
+                          {mode==='compose'&&<Form.Item name={[f.name,"service"]} label={t("Compose 组件","Compose component")} rules={required}><Input placeholder="web"/></Form.Item>}
+                          <Form.Item name={[f.name,"app_protocol"]} label={t("应用协议","Application protocol")}><Select allowClear options={["http","https","tcp"].map(value=>({value,label:value.toUpperCase()}))}/></Form.Item>
                           <Button
                             type="text"
                             aria-label={t("删除端口", "Remove port")}
+                            disabled={role==="openresty"}
                             icon={<MinusCircleOutlined aria-hidden />}
                             onClick={() => remove(f.name)}
                           />
@@ -892,18 +897,9 @@ export default function ResourceFields({
                     </div>
                   )}
                 </Form.List>
-              ) : (
-                <Alert
-                  type="info"
-                  showIcon
-                  title={t(
-                    "host 网络直接使用宿主端口",
-                    "Host networking uses host ports directly",
-                  )}
-                />
               )}
-            </>
-          )}
+          {deploymentMode==='managed'&&<><div className="lm-ops-grid"><Form.Item name={["spec","health","type"]} label={t("探活方式","Health check")}><Select options={[{value:"tcp",label:"TCP"},{value:"http",label:"HTTP"}]}/></Form.Item><Form.Item name={["spec","health","port_name"]} label={t("探活端口名称","Health port name")} rules={required}><Input placeholder="api"/></Form.Item><Form.Item name={["spec","health","interval_seconds"]} label={t("探活间隔（秒）","Health interval (seconds)")}><InputNumber min={1} max={3600}/></Form.Item>{healthType==='http'&&<Form.Item name={["spec","health","path"]} label={t("健康检查路径","Health path")} rules={required}><Input placeholder="/health"/></Form.Item>}</div></>}
+          <Form.Item name={["spec","stateful"]} label={t("有状态 / 本地业务数据","Stateful / local business data")} valuePropName="checked"><Switch/></Form.Item>
           <Form.List name={["spec", "mounts"]}>
             {(fields, { add, remove }) => (
               <div className="lm-ops-repeater">
@@ -1010,10 +1006,7 @@ export default function ResourceFields({
               </div>
             )}
           </Form.List>
-          <div className="lm-ops-grid">
-            {number("cpu", t("CPU 核数", "CPU cores"), 0.01, 1024)}
-            {number("memory_mb", t("内存（MiB）", "Memory (MiB)"), 16, 1048576)}
-          </div>
+
           <Alert
             type="info"
             showIcon
@@ -1024,315 +1017,8 @@ export default function ResourceFields({
           />
         </>
       )}
-      {kind === "service" && (
-        <>
-          <div className="lm-ops-grid">
-            <Form.Item
-              name={["spec", "application_id"]}
-              label={t("应用", "Application")}
-              rules={required}
-            >
-              <Select
-                showSearch
-                optionFilterProp="label"
-                options={resources
-                  .filter(
-                    (r) =>
-                      r.kind === "application" &&
-                      r.spec.mode === "container" &&
-                      r.spec.network_mode !== "host",
-                  )
-                  .map((r) => ({ value: r.id, label: r.name }))}
-              />
-            </Form.Item>
-            {ref(
-              "node_pool_id",
-              t("目标机器池", "Target node pool"),
-              "node_pool",
-            )}
-            {number("replicas", t("副本数", "Replicas"), 0, 100)}
-            {number(
-              "container_port",
-              t("容器服务端口", "Container service port"),
-            )}
-            {number(
-              "cpu",
-              t("每副本 CPU 核数", "CPU cores per replica"),
-              0.01,
-              1024,
-            )}
-            {number(
-              "memory_mb",
-              t("每副本内存（MiB）", "Memory per replica (MiB)"),
-              16,
-              1048576,
-            )}
-          </div>
-          <Divider titlePlacement="start">
-            {t("健康与数据约束", "Health and data constraints")}
-          </Divider>
-          <div className="lm-ops-grid">
-            <Form.Item
-              name={["spec", "health", "type"]}
-              label={t("探活方式", "Health check")}
-            >
-              <Select
-                options={[
-                  { value: "tcp", label: "TCP" },
-                  { value: "http", label: "HTTP" },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item
-              name={["spec", "health", "interval_seconds"]}
-              label={t("探活间隔（秒）", "Health interval (seconds)")}
-            >
-              <InputNumber min={1} max={3600} />
-            </Form.Item>
-          </div>
-          {healthType === "http" && (
-            <Form.Item
-              name={["spec", "health", "path"]}
-              label={t("健康检查路径", "Health path")}
-              rules={required}
-            >
-              <Input placeholder="/health" />
-            </Form.Item>
-          )}
-          <Form.Item
-            name={["spec", "stateful"]}
-            label={t("有状态 / 本地业务数据", "Stateful / local business data")}
-            valuePropName="checked"
-          >
-            <Switch />
-          </Form.Item>
-          <Alert
-            type="info"
-            showIcon
-            title={t(
-              "平台在机器池内分配资源与端口；只有就绪实例进入服务发现",
-              "The platform reserves node resources and ports; only ready instances enter discovery",
-            )}
-            description={t(
-              "有状态实例绑定数据所在机器。Agent 失联时保留资源，需确认原实例状态后再恢复。",
-              "Stateful instances stay with their data. Agent disconnection preserves reservations until the original instance is checked.",
-            )}
-          />
-        </>
-      )}
-      {kind === "node_pool" && (
-        <>
-          {targets}
-          <div className="lm-ops-grid">
-            {number(
-              "port_start",
-              t("托管端口起始值", "Managed port range start"),
-            )}
-            {number("port_end", t("托管端口结束值", "Managed port range end"))}
-          </div>
-          <Form.List name={["spec", "nodes"]}>
-            {(fields, { add, remove }) => (
-              <div className="lm-ops-repeater">
-                <div className="lm-ops-subheading">
-                  <span>
-                    {t("机器地址与资源容量", "Node addresses and capacity")}
-                  </span>
-                  <Button
-                    size="small"
-                    icon={<PlusOutlined aria-hidden />}
-                    onClick={() => add({ cpu: 2, memory_mb: 2048 })}
-                  >
-                    {t("添加机器容量", "Add node capacity")}
-                  </Button>
-                </div>
-                {fields.map((f) => (
-                  <div className="lm-ops-mount" key={f.key}>
-                    <div className="lm-ops-grid">
-                      <Form.Item
-                        name={[f.name, "agent_id"]}
-                        label={t("机器", "Machine")}
-                        rules={required}
-                      >
-                        <Select options={agentOptions} />
-                      </Form.Item>
-                      <Form.Item
-                        name={[f.name, "address"]}
-                        label={t("机器可达 IP", "Reachable IP")}
-                        rules={required}
-                      >
-                        <Input placeholder="10.0.0.11" />
-                      </Form.Item>
-                      <Form.Item
-                        name={[f.name, "public_address"]}
-                        label={t("公网 IP（可选）", "Public IP (optional)")}
-                      >
-                        <Input />
-                      </Form.Item>
-                      <Form.Item
-                        name={[f.name, "cpu"]}
-                        label={t("可分配 CPU", "Allocatable CPU")}
-                        rules={required}
-                      >
-                        <InputNumber min={0.1} />
-                      </Form.Item>
-                      <Form.Item
-                        name={[f.name, "memory_mb"]}
-                        label={t(
-                          "可分配内存（MiB）",
-                          "Allocatable memory (MiB)",
-                        )}
-                        rules={required}
-                      >
-                        <InputNumber min={16} />
-                      </Form.Item>
-                    </div>
-                    <Button size="small" danger onClick={() => remove(f.name)}>
-                      {t("删除机器配置", "Remove node settings")}
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Form.List>
-        </>
-      )}
-      {kind === "gateway_group" && (
-        <>
-          {targets}
-          {text("image", t("OpenResty 镜像", "OpenResty image"), true)}
-          <div className="lm-ops-grid">
-            {number("http_port", t("HTTP 监听端口", "HTTP listener port"))}
-            {number("https_port", t("HTTPS 监听端口", "HTTPS listener port"))}
-          </div>
-          <Form.List name={["spec", "public_address_rows"]}>
-            {(fields, { add, remove }) => (
-              <div className="lm-ops-repeater">
-                <div className="lm-ops-subheading">
-                  <span>
-                    {t(
-                      "机器公网地址（DNS 使用）",
-                      "Node public addresses (for DNS)",
-                    )}
-                  </span>
-                  <Button
-                    size="small"
-                    icon={<PlusOutlined aria-hidden />}
-                    onClick={() => add({})}
-                  >
-                    {t("添加地址", "Add address")}
-                  </Button>
-                </div>
-                {fields.map((f) => (
-                  <div className="lm-ops-map-row" key={f.key}>
-                    <Form.Item name={[f.name, "key"]} rules={required}>
-                      <Select
-                        aria-label={t("网关机器", "Gateway machine")}
-                        options={agentOptions}
-                        placeholder={t("选择机器", "Choose a machine")}
-                      />
-                    </Form.Item>
-                    <Form.Item name={[f.name, "value"]} rules={required}>
-                      <Input
-                        aria-label={t("公网 IP", "Public IP")}
-                        placeholder="203.0.113.10"
-                      />
-                    </Form.Item>
-                    <Button
-                      type="text"
-                      icon={<MinusCircleOutlined aria-hidden />}
-                      aria-label={t("删除地址", "Remove address")}
-                      onClick={() => remove(f.name)}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </Form.List>
-          <Alert
-            type="info"
-            showIcon
-            title={t(
-              "OpenResty 使用 host 网络；网站同步到组内全部机器",
-              "OpenResty uses host networking; websites synchronize to every node in the group",
-            )}
-          />
-        </>
-      )}
-      {kind === "website" && (
-        <>
-          {tags(
-            "domains",
-            t("网站域名", "Website domains"),
-            true,
-            "www.example.com",
-          )}
-          {ref(
-            "gateway_group_id",
-            t("OpenResty 网关组", "OpenResty gateway group"),
-            "gateway_group",
-          )}
-          <Form.Item
-            name={["spec", "mode"]}
-            label={t("网站类型", "Website type")}
-            rules={required}
-          >
-            <Select
-              options={[
-                { value: "static", label: t("静态网站", "Static website") },
-                { value: "proxy", label: t("反向代理", "Reverse proxy") },
-                { value: "service", label: t("托管服务", "Hosted service") },
-              ]}
-            />
-          </Form.Item>
-          {mode === "static" && (
-            <MapFields
-              name={["spec", "file_rows"]}
-              label={t("静态文件", "Static files")}
-              keyLabel={t("相对文件路径", "Relative file path")}
-              valueLabel={t("文件内容", "File content")}
-              code
-            />
-          )}
-          {mode === "service" &&
-            ref("service_id", t("托管服务", "Hosted service"), "service")}
-          <NginxFields resources={resources} mode={mode}/>
-          <Divider titlePlacement="start">
-            {t("HTTPS 与域名联动", "HTTPS and DNS integration")}
-          </Divider>
-          <div className="lm-ops-grid">
-            <Form.Item
-              name={["spec", "https"]}
-              label={t("启用 HTTPS", "Enable HTTPS")}
-              valuePropName="checked"
-            >
-              <Switch />
-            </Form.Item>
-            {https &&
-              ref(
-                "certificate_id",
-                t("使用证书", "Certificate"),
-                "certificate",
-              )}
-            <Form.Item
-              name={["spec", "dns_enabled"]}
-              label={t("自动维护域名解析", "Manage DNS records automatically")}
-              valuePropName="checked"
-            >
-              <Switch />
-            </Form.Item>
-            {dnsEnabled &&
-              ref("dns_zone_id", t("托管域名", "DNS zone"), "dns_zone")}
-          </div>
-          <Alert
-            type="info"
-            showIcon
-            title={t(
-              "部署先验证网关，再更新受管 DNS；服务变化自动刷新代理后端",
-              "Deployment verifies gateways before updating managed DNS; service changes refresh proxy backends",
-            )}
-          />
-        </>
-      )}
+      {kind === "cluster" && <ClusterFields machines={machines} resources={resources} existing={existing} onRefresh={onRefresh}/>}
+      {kind === "website" && <WebsiteFields resources={resources} existing={existing} onQuickCreate={onQuickCreate}/>}
     </>
   );
 }

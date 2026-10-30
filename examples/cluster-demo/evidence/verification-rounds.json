@@ -1,0 +1,8 @@
+{
+  "method": "Three sequential real HTTP QA verification requests after loading the final runtime and independent TLS probes",
+  "rounds": [
+    { "round": 1, "status": 200, "verified_at": "2026-10-29T17:01:01.242Z", "read_back": true, "tls": true, "cross_cluster": true, "failover_evidence_retained": true },
+    { "round": 2, "status": 200, "verified_at": "2026-10-29T17:01:03.483Z", "read_back": true, "tls": true, "cross_cluster": true, "failover_evidence_retained": true },
+    { "round": 3, "status": 200, "verified_at": "2026-10-29T17:01:06.266Z", "read_back": true, "tls": true, "cross_cluster": true, "failover_evidence_retained": true }
+  ]
+}

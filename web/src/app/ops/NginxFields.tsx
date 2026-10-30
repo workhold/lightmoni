@@ -11,16 +11,23 @@ import {
 } from "../../shared/ui";
 import { useI18n } from "../../shared/i18n";
 import type { Resource } from "./model";
+import ClusterUpstreams from "./ClusterUpstreams";
 
 type Path = (string | number)[];
 export default function NginxFields({
   resources,
-  mode,
+  mode, locationsPath = ["spec", "locations"], watchPath = ["spec", "locations"], showSiteOptions = true, showRoutes = true,
 }: {
   resources: Resource[];
   mode: string;
+  locationsPath?: Path;
+  watchPath?: Path;
+  showSiteOptions?: boolean;
+  showRoutes?: boolean;
 }) {
   const { t } = useI18n();
+  const form = Form.useFormInstance();
+  const clusterIds: string[] = Form.useWatch(["spec","cluster_ids"],form) ?? [];
   const input = (name: Path, zh: string, en: string, placeholder?: string) => (
     <Form.Item name={name} label={t(zh, en)}>
       <Input placeholder={placeholder} />
@@ -64,7 +71,7 @@ export default function NginxFields({
   const p = ["spec", "nginx"];
   return (
     <>
-      <Form.List name={["spec", "locations"]}>
+      {showRoutes && <Form.List name={locationsPath}>
         {(fields, { add, remove, move }) => (
           <div className="lm-ops-repeater">
             <div className="lm-ops-subheading">
@@ -78,8 +85,7 @@ export default function NginxFields({
                     path: "/",
                     match: "prefix",
                     action: "proxy",
-                    target: "upstream",
-                    upstreams: [{ url: "", weight: 1 }],
+                    cluster_targets: clusterIds.map(cluster_id=>({cluster_id,target:"application",upstreams:[{url:"",weight:1}]})),
                     uri_mode: "preserve",
                     websocket: true,
                     buffering: true,
@@ -161,13 +167,13 @@ export default function NginxFields({
                 <Form.Item
                   noStyle
                   shouldUpdate={(a, b) =>
-                    JSON.stringify(a.spec?.locations?.[f.name]) !==
-                    JSON.stringify(b.spec?.locations?.[f.name])
+                    JSON.stringify(watchPath.reduce((v: any,k)=>v?.[k],a)?.[f.name]) !==
+                    JSON.stringify(watchPath.reduce((v: any,k)=>v?.[k],b)?.[f.name])
                   }
                 >
                   {({ getFieldValue }) => {
                     const route =
-                      getFieldValue(["spec", "locations", f.name]) ?? {};
+                      getFieldValue([...watchPath, f.name]) ?? {};
                     return route.action === "return" ? (
                       <div className="lm-ops-grid">
                         {number(
@@ -186,95 +192,7 @@ export default function NginxFields({
                       </div>
                     ) : (
                       <>
-                        {select(
-                          [f.name, "target"],
-                          "后端来源",
-                          "Backend source",
-                          [
-                            ["upstream", "手动后端", "Manual upstreams"],
-                            [
-                              "service",
-                              "托管服务发现",
-                              "Hosted service discovery",
-                            ],
-                          ],
-                        )}
-                        {route.target === "service" ? (
-                          <Form.Item
-                            name={[f.name, "service_id"]}
-                            label={t("路径对应服务", "Route service")}
-                            rules={[{ required: true }]}
-                          >
-                            <Select
-                              options={resources
-                                .filter((r) => r.kind === "service")
-                                .map((r) => ({ value: r.id, label: r.name }))}
-                            />
-                          </Form.Item>
-                        ) : (
-                          <Form.List name={[f.name, "upstreams"]}>
-                            {(backends, { add, remove }) => (
-                              <div className="lm-ops-repeater">
-                                <div className="lm-ops-subheading">
-                                  <span>
-                                    {t(
-                                      "后端地址（仅协议、主机、端口）",
-                                      "Upstreams (scheme, host and port)",
-                                    )}
-                                  </span>
-                                  <Button
-                                    size="small"
-                                    onClick={() => add({ url: "", weight: 1 })}
-                                  >
-                                    {t("添加后端", "Add upstream")}
-                                  </Button>
-                                </div>
-                                {backends.map((b) => (
-                                  <div className="lm-ops-grid" key={b.key}>
-                                    <Form.Item
-                                      name={[b.name, "url"]}
-                                      label={t("后端 URL", "Upstream URL")}
-                                      rules={[{ required: true }]}
-                                    >
-                                      <Input placeholder="http://10.0.0.11:8080" />
-                                    </Form.Item>
-                                    {number(
-                                      [b.name, "weight"],
-                                      "权重",
-                                      "Weight",
-                                      1,
-                                      1000,
-                                    )}
-                                    {number(
-                                      [b.name, "max_fails"],
-                                      "失败次数阈值",
-                                      "Max failures",
-                                      0,
-                                      100,
-                                    )}
-                                    {number(
-                                      [b.name, "fail_timeout_seconds"],
-                                      "失败隔离秒数",
-                                      "Failure timeout (s)",
-                                    )}
-                                    {toggle(
-                                      [b.name, "backup"],
-                                      "备用后端",
-                                      "Backup upstream",
-                                    )}
-                                    <Button
-                                      danger
-                                      size="small"
-                                      onClick={() => remove(b.name)}
-                                    >
-                                      {t("移除后端", "Remove upstream")}
-                                    </Button>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </Form.List>
-                        )}
+                        <ClusterUpstreams resources={resources} routeIndex={f.name} watchPath={watchPath}/>
                         <Collapse
                           size="small"
                           items={[
@@ -597,8 +515,8 @@ export default function NginxFields({
             ))}
           </div>
         )}
-      </Form.List>
-      <Collapse
+      </Form.List>}
+      {showSiteOptions && <Collapse
         items={[
           {
             key: "common",
@@ -765,7 +683,7 @@ export default function NginxFields({
             ),
           },
         ]}
-      />
+      />}
     </>
   );
 }

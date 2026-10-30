@@ -442,12 +442,36 @@ export function createCertificateController(
         if (!row) throw new HTTPError(409, "authorized_revision_missing");
         specs.push(JSON.parse(deps.decrypt(row.spec_cipher)));
       }
+      // Each website cluster can still serve a separately frozen revision.
+      if (
+        r.kind === "website" &&
+        db.get(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='ops_platform_website_deployments'",
+        )
+      ) {
+        for (const deployed of db.all<any>(
+          "SELECT DISTINCT desired_revision FROM ops_platform_website_deployments WHERE website_id=? AND desired_revision>0 AND enabled=1",
+          r.id,
+        )) {
+          const saved = db.get<any>(
+            "SELECT spec_cipher FROM ops_platform_revisions WHERE resource_id=? AND revision=?",
+            r.id,
+            deployed.desired_revision,
+          );
+          if (!saved) throw new HTTPError(409, "authorized_revision_missing");
+          specs.push(JSON.parse(deps.decrypt(saved.spec_cipher)));
+        }
+      }
       return specs.some((spec) =>
         [
           spec.credential_id,
           spec.acme_account_id,
           spec.certificate_id,
           ...(spec.dns_zone_ids ?? []),
+          ...(spec.bindings ?? []).flatMap((binding: any) => [
+            binding.certificate_id,
+            binding.dns_zone_id,
+          ]),
         ].includes(id),
       );
     });

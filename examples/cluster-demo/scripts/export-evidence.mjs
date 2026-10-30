@@ -1,0 +1,10 @@
+import {readFile,writeFile,mkdir} from 'node:fs/promises';
+import {resolve,join} from 'node:path';
+const state=resolve('.local-dev/042-cluster-demo'),output=resolve('examples/cluster-demo/evidence');
+const report=JSON.parse(await readFile(join(state,'report.json'),'utf8'));
+const evidence={verified_at:report.verified_at,method:report.method,scope:{physical_docker_hosts:1,logical_nodes:3,clusters:2,namespace_isolation:'Two independent nested Docker engines; fixed 80/443 isolated',mocked:report.mocked},runtime_build:report.runtime_build,migration:report.migration,website:report.website,tls:report.tls,rebuild:report.rebuild,cross_cluster:report.cross_cluster,dns_records:report.dns_records,failover:report.failover,applications:report.applications.map(application=>({id:application.id,name:application.name,service_name:application.service_name,mode:application.mode,source:application.source,revision:application.revision,deployments:application.status.deployments,instances:application.status.instances.map(instance=>({id:instance.id,cluster_id:instance.cluster_id,machine_id:instance.machine_id,state:instance.state,healthy:instance.healthy,retired:instance.retired,ports:instance.ports,desired_generation:instance.desired_generation,observed_generation:instance.observed_generation}))})),containers:report.containers,agent_receipts:report.agent_receipts,access:report.access};
+const text=JSON.stringify(evidence,null,2)+'\n';
+if(/-----BEGIN|lm_agent_|lm_enroll_|lm_bootstrap_|lm_session=/.test(text))throw Error('Secret-shaped content must never enter evidence');
+await mkdir(output,{recursive:true});await writeFile(join(output,'docker-report.json'),text);
+try{const browser=JSON.parse(await readFile(join(state,'browser/report.json'),'utf8'));await writeFile(join(output,'browser-report.json'),JSON.stringify(browser,null,2)+'\n');}catch(error){if(error.code!=='ENOENT')throw error;}
+console.log(JSON.stringify({output,verified_at:evidence.verified_at,cross_cluster:Boolean(evidence.cross_cluster),failover:Boolean(evidence.failover),migration_preserved:evidence.migration?.instances.every(instance=>instance.preserved)},null,2));

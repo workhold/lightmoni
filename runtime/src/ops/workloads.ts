@@ -1,3 +1,4 @@
+import { createClusterWorkloads } from "./cluster-workloads.js";
 import { isIP } from "node:net";
 import { domainToASCII } from "node:url";
 import { id } from "../shared/crypto.js";
@@ -167,6 +168,7 @@ export function createWorkloadController(
  CREATE INDEX IF NOT EXISTS ops_platform_instances_agent ON ops_platform_instances(agent_id,state);
  CREATE TABLE IF NOT EXISTS ops_platform_ports(agent_id TEXT NOT NULL,protocol TEXT NOT NULL,port INTEGER NOT NULL,instance_id TEXT NOT NULL,PRIMARY KEY(agent_id,protocol,port));
  CREATE TABLE IF NOT EXISTS ops_platform_nodes(agent_id TEXT PRIMARY KEY,node_json TEXT NOT NULL,last_seen TEXT NOT NULL);`);
+  const modern = createClusterWorkloads(options);
   const instances = (owner: string) =>
     db.all<Instance>(
       "SELECT * FROM ops_platform_instances WHERE owner_id=? ORDER BY slot,id",
@@ -195,7 +197,10 @@ export function createWorkloadController(
   const instance = (key: string) =>
     db.get<Instance>("SELECT * FROM ops_platform_instances WHERE id=?", key)!;
   const agent = (key: string): any =>
-    db.get("SELECT * FROM agents WHERE id=? AND NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed')", key);
+    db.get(
+      "SELECT * FROM agents WHERE id=? AND NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed')",
+      key,
+    );
   const online = (key: string) => {
     const a = agent(key);
     return (
@@ -352,7 +357,18 @@ export function createWorkloadController(
       fail(409, "platform_resource_in_use");
   };
   store.register("application", {
-    validate(spec, previous) {
+    validate(spec, previous, context) {
+      if (
+        spec.deployments ||
+        previous?.deployments ||
+        spec.cluster_id ||
+        previous?.cluster_id
+      )
+        return modern.validateApplication(
+          preserveEnvironment(spec, previous),
+          previous,
+          context,
+        );
       const c = normalizeApplication(
         preserveEnvironment(normalizeApplication(spec), previous),
       );
@@ -361,8 +377,16 @@ export function createWorkloadController(
       if (c.agent_ids?.length) checkAgents(c.agent_ids);
       return c;
     },
+    afterSave(r, previous) {
+      if (r.spec.deployments) modern.afterSaveApplication(r, previous);
+    },
+    afterDelete(r) {
+      if (r.spec.deployments) modern.afterDeleteApplication(r);
+    },
     publicSpec: sanitizeEnvironment,
     beforeDelete(r) {
+      if (r.spec.deployments || r.spec.cluster_id)
+        return modern.beforeDeleteApplication(r);
       referenced("service", r.id, "application_id");
       noLive(r);
     },
@@ -472,7 +496,15 @@ export function createWorkloadController(
     },
   });
   store.register("website", {
-    validate(spec, previous) {
+    afterSave(r) {
+      if (r.spec.cluster_ids) modern.afterSaveWebsite(r);
+    },
+    afterDelete(r) {
+      if (r.spec.cluster_ids) modern.afterDeleteWebsite(r);
+    },
+    validate(spec, previous, context) {
+      if (spec.bindings || previous?.bindings)
+        return modern.validateWebsite(spec, previous, context);
       const s = object(spec),
         names = domains(s.domains);
       store.get(s.gateway_group_id, "gateway_group");
@@ -559,6 +591,7 @@ export function createWorkloadController(
       return out;
     },
     beforeDelete(r) {
+      if (r.spec.bindings) return modern.beforeDeleteWebsite(r);
       if (dnsPending.has(r.id)) fail(409, "website_dns_refresh_in_progress");
       if (r.status.enabled !== false && r.status.active)
         fail(409, "disable_website_before_deleting");
@@ -1055,8 +1088,21 @@ export function createWorkloadController(
   }
   deps.router.get("/api/v1/ops/resources/:id/nginx", (ctx) => {
     deps.auth.requireAdmin(ctx);
-    const site = store.get(ctx.params.id, "website"),
-      group = store.get(site.spec.gateway_group_id, "gateway_group");
+    const site = store.get(ctx.params.id, "website");
+    if (site.spec.bindings) {
+      ctx.res.setHeader("cache-control", "no-store");
+      ctx.json({
+        revision: site.revision,
+        config: modern.preview(
+          site,
+          ctx.url.searchParams.get("cluster_id") ?? "",
+        ),
+        redacted: true,
+        validated: false,
+      });
+      return;
+    }
+    const group = store.get(site.spec.gateway_group_id, "gateway_group");
     ctx.res.setHeader("cache-control", "no-store");
     ctx.json({
       revision: site.revision,
@@ -1140,6 +1186,7 @@ export function createWorkloadController(
     return { runs };
   }
   const observer = store.subscribe((run, config, update) => {
+    if (config.modern_cluster || config.modern_instance) return;
     if (config.task === "node.inspect") {
       if (run.state === "succeeded" && run.result.node) {
         db.run(
@@ -1372,8 +1419,25 @@ export function createWorkloadController(
       });
     dnsPending.set(resource.id, work);
   }
+  deps.router.get("/api/v1/ops/resources/:id/endpoints", (ctx) => {
+    deps.auth.requireAdmin(ctx);
+    const app = store.get(ctx.params.id, "application");
+    const name = ctx.url.searchParams.get("port_name") ?? undefined;
+    if (name && !app.spec.ports.some((p: any) => p.name === name))
+      fail(400, "application_port_not_found");
+    ctx.res.setHeader("cache-control", "no-store");
+    const cid = ctx.url.searchParams.get("cluster_id");
+    if (!cid) fail(400, "cluster_required");
+    if (!app.spec.deployments?.some((d: any) => d.cluster_id === cid))
+      fail(400, "application_not_deployed_in_cluster");
+    ctx.json({
+      service_name: app.spec.service_name,
+      endpoints: modern.endpoints(app.id, name, cid),
+    });
+  });
   const controller: DomainController = {
     actions(r) {
+      if (modern.handles(r)) return modern.actions(r);
       if (r.kind === "application")
         return ["deploy", "inspect", "stop", "remove", "logs"];
       if (r.kind === "service")
@@ -1384,6 +1448,7 @@ export function createWorkloadController(
       return [];
     },
     async perform(r, action, input, actor) {
+      if (modern.handles(r)) return modern.perform(r, action, input, actor);
       if (!this.actions(r).includes(action))
         fail(400, "unsupported_workload_action");
       if (r.kind === "node_pool")
@@ -1520,11 +1585,13 @@ export function createWorkloadController(
     },
     async tick() {
       if (closed) return;
+      await modern.tick();
       for (const r of store
         .list()
         .filter(
           (r) =>
             ownKinds.has(r.kind) &&
+            !modern.handles(r) &&
             store.authorized(r.status.policy_actor ?? r.authorized_by),
         )) {
         const actor = r.status.policy_actor ?? r.authorized_by;
@@ -1576,6 +1643,7 @@ export function createWorkloadController(
     },
     async close() {
       closed = true;
+      await modern.close();
       await Promise.allSettled([...dnsPending.values()]);
       observer();
     },
