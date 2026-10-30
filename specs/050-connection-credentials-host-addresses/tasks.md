@@ -8,4 +8,4 @@
 - [x] 后端/SSH回归、类型检查、构建与浏览器验收。
 - [x] 仓库设计与 Doca 同步、最新版本回读。
 - [x] 独立审查。
-- [ ] GitHub PR 与结果交付。
+- [x] GitHub PR 与结果交付：[PR #25](https://github.com/workhold/lightmoni/pull/25)，面向 main、可审核、待合并。
