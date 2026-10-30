@@ -7,4 +7,4 @@
 - [x] 新建宽抽屉、导入/编写、日历计划、目标和审阅 UI。
 - [x] 端到端/安全边界回归、类型、构建和独立审查。
 - [x] 仓库系统设计与 Doca 同步并回读。
-- [ ] 提交 GitHub PR，记录当前支持范围与验收结果。
+- [x] 提交 GitHub [PR #24](https://github.com/workhold/lightmoni/pull/24)，记录当前支持范围与验收结果。
