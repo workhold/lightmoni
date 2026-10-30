@@ -1,0 +1,112 @@
+{
+  "sdd": "048-task-authoring-schedules",
+  "date": "2026-10-30",
+  "status": "local_validation_passed",
+  "design_first_commit": "51f30ea",
+  "checks": {
+    "root_typecheck": {
+      "command": "npm run typecheck",
+      "exit_code": 0,
+      "log": "/tmp/lightmoni-048-typecheck-final.log",
+      "packages": [
+        "runtime",
+        "ai-runtime",
+        "web"
+      ]
+    },
+    "root_build": {
+      "command": "npm run build",
+      "exit_code": 0,
+      "log": "/tmp/lightmoni-048-build.log",
+      "packages": [
+        "sdk/typescript",
+        "runtime",
+        "ai-runtime",
+        "web"
+      ],
+      "nonblocking_output": "Third-party antd module-level use client directive warnings"
+    },
+    "root_tests": {
+      "command": "npm test",
+      "exit_code": 0,
+      "log": "/tmp/lightmoni-048-tests.log",
+      "snapshot": "Before the final additional v2-only Agent regression",
+      "suites": {
+        "runtime": {
+          "tests": 527,
+          "passed": 510,
+          "skipped": 17,
+          "failed": 0
+        },
+        "ai-runtime": {
+          "tests": 71,
+          "passed": 71,
+          "skipped": 0,
+          "failed": 0
+        },
+        "sdk-typescript": {
+          "tests": 18,
+          "passed": 18,
+          "skipped": 0,
+          "failed": 0
+        }
+      },
+      "skip_reason_categories": [
+        "Linux/root prerequisites",
+        "Live ClickHouse or integration service environment not configured"
+      ]
+    },
+    "final_targeted_tests": {
+      "working_directory": "runtime",
+      "command": "node --import tsx --test test/task-schedules.test.ts test/task-script-options.test.ts test/assistant-tasks.test.ts",
+      "exit_code": 0,
+      "log": "/tmp/lightmoni-048-final-targeted.log",
+      "tests": 33,
+      "passed": 33,
+      "skipped": 0,
+      "failed": 0,
+      "files": {
+        "test/task-schedules.test.ts": 15,
+        "test/task-script-options.test.ts": 7,
+        "test/assistant-tasks.test.ts": 11
+      },
+      "includes_final_v2_only_regression": true,
+      "full_runtime_suite_rerun_after_final_added_test": false
+    },
+    "browser": {
+      "report": "ui-report.json",
+      "check_groups": 10,
+      "production_bundle": true,
+      "api_fixtures": true,
+      "page_errors": 0,
+      "unexpected_requests": 0,
+      "real_scheduler_execution": false,
+      "real_agent_execution": false,
+      "production_writes": false,
+      "real_agent_end_to_end": false
+    },
+    "independent_review": {
+      "report": "review.md",
+      "p2_findings": 3,
+      "resolved_p2_findings": 3,
+      "unresolved_code_blockers": 0
+    },
+    "doca_sync": {
+      "report": "doca-sync.md",
+      "method": "Browser UI edit, save and reload verification by integrator",
+      "reloaded_blocks": 537,
+      "native_diagrams_preserved": 22,
+      "related_task_diagrams_readonly_checked": 2,
+      "diagram_nodes_labels_and_connection_endpoints_matched": true,
+      "diagrams_modified_or_saved": false,
+      "all_native_diagrams_readonly_checked": 22
+    }
+  },
+  "limitations": [
+    "The full runtime run contained 527 tests before one final additional regression; no claim is made that a 528-test full runtime suite ran.",
+    "Skipped Linux/root and live integration tests are not counted as passed.",
+    "Browser checks use mocked APIs and do not prove a real center-to-Agent end-to-end flow.",
+    "Local subprocess tests do not prove production or vchive deployment.",
+    "No image publication, production changes or user-host deployment was performed in this validation."
+  ]
+}
