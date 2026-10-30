@@ -18,7 +18,7 @@
 
 ## Docker Compose 部署
 
-根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像默认为 `docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。中心以非 root 用户运行。
+根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。镜像版本由仓库维护，无需在 `.env` 指定；旧 `LIGHTMONI_IMAGE` 值不再覆盖它。中心以非 root 用户运行。
 
 首次获取源码：
 
@@ -27,7 +27,7 @@ git clone https://github.com/workhold/lightmoni.git
 cd lightmoni
 ```
 
-现有预构建镜像仍由 `docker.heyphp.com` 提供，需要该注册表的访问权限；GitHub 源码公开不代表已提供公开镜像。没有镜像仓库权限时，可在完成 `.env` 配置后按下文的源码构建步骤运行。已有部署继续沿用原镜像、项目名和数据卷。
+现有预构建镜像仍由 `docker.heyphp.com` 提供，需要该注册表的访问权限；GitHub 源码公开不代表已提供公开镜像。没有镜像仓库权限时，可在完成 `.env` 配置后按下文的源码构建步骤运行。已有部署继续沿用原项目名、数据库配置和数据卷。
 
 ```sh
 cp .env.example .env
@@ -42,7 +42,6 @@ docker compose pull
 | 配置项 | 默认值 | 用途 |
 | --- | --- | --- |
 | `COMPOSE_PROJECT_NAME` | `lightmoni` | 项目名；已有实例沿用原值以匹配数据卷 |
-| `LIGHTMONI_IMAGE` | `docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880` | 中心镜像 |
 | `LIGHTMONI_BIND_ADDRESS` | `0.0.0.0` | 宿主机监听地址；仅本机反向代理访问可设为 `127.0.0.1` |
 | `LIGHTMONI_PORT` | `8080` | 宿主机 HTTP 端口，映射到容器固定端口 8080 |
 | `LIGHTMONI_EXTERNAL_URL` | `http://localhost:8080` | 用户实际访问地址，用于默认上报地址、登录回调和通知链接 |
@@ -82,7 +81,7 @@ docker compose exec lightmoni lightmoni-admin reset-password --name admin
 
 使用 Nginx 时，将 `LIGHTMONI_EXTERNAL_URL` 设为浏览器访问的 HTTPS 域名；如只允许宿主机反向代理访问，设置 `LIGHTMONI_BIND_ADDRESS=127.0.0.1`。SDK/节点默认上报地址初始使用工作台地址，也可在“管理后台 → 接入配置”保存多个入口。`sh deploy/server/start.sh` 使用根配置拉取并启动。原 [deploy/with-clickhouse](deploy/with-clickhouse/README.md) 入口继续兼容，两个服务统一继承根配置；沿用原项目名、`.env` 和卷名。
 
-更新时，在 `.env` 中设置所需固定 `LIGHTMONI_IMAGE`，执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`。仓库也提供 `latest`；生产部署建议固定标签或 digest。发布仓库需要鉴权时先执行 `docker login docker.heyphp.com`。源码构建则填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD` 的结果，并显式执行：
+更新时先执行 `git pull --ff-only origin main`，获取仓库维护的镜像版本，再执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`，无需修改 `.env` 的镜像设置。仓库也提供 `latest`；根 Compose 使用固定发布标签。数据库密码、端口和项目名仍通过 `.env` 配置。发布仓库需要鉴权时先执行 `docker login docker.heyphp.com`；指定历史版本的回滚方法见 [Docker 更新与回滚](deploy/server/README.md#回滚与已有临时配置迁移)。源码构建则填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD` 的结果，并显式执行：
 
 ```sh
 docker compose build lightmoni
