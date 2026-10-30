@@ -9,6 +9,6 @@
 - [x] Linux 执行器、SQLite/HTTP 故障、浏览器与完整相关回归。
 - [x] 仓库设计与 Doca 原生图同步并回读。
 - [x] 本地平台启动，读取真实双架构发行目录并查看主机页。
-- [ ] 同步 main、提交并推送功能分支、创建 GitHub PR。
+- [x] 同步 main、提交并推送功能分支、创建 [GitHub PR #21](https://github.com/workhold/lightmoni/pull/21)。
 
 本轮不发布镜像、不修改真实用户主机。实际验收结果见 [validation.md](validation.md)；真实 systemd 验收仅覆盖 arm64，amd64 只完成构建及运行时摘要/架构核验。
