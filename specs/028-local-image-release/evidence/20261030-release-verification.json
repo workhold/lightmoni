@@ -1,0 +1,44 @@
+{
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tags": {
+    "20261030-ddd7426": "sha256:5cc3dbe52b86feb5412509c2e744a10097db0b2e80e9191c626d95207fea2ef4",
+    "latest": "sha256:5cc3dbe52b86feb5412509c2e744a10097db0b2e80e9191c626d95207fea2ef4"
+  },
+  "revision": "ddd7426cfc97fa86ed3072dbc04b808d979f73f5",
+  "docker_pull_verification": [
+    {
+      "platform": "linux/amd64",
+      "image_id": "sha256:4cf94992ce282bfeb6cdfa4699202e7e2a642b5cbc27771b0f9b01b96a486032",
+      "matches_tested_image": true
+    },
+    {
+      "platform": "linux/arm64",
+      "image_id": "sha256:cfc1f7483ca2a841dbae332d127399364b1527eba895d3882d312edacb3b9475",
+      "matches_tested_image": true
+    }
+  ],
+  "local_container_checks": {
+    "amd64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "AI runtime and task tools import"
+    ],
+    "arm64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "AI runtime and task tools import"
+    ]
+  },
+  "architecture_sync": "not applicable: packaging and publishing unchanged main",
+  "test_resources_cleaned": true
+}

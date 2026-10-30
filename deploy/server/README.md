@@ -1,10 +1,10 @@
 # Docker 更新与回滚
 
-根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像默认 `docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880`。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
+根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
 
 ## 更新
 
-1. 在所选 `.env` 中填写要部署的 `LIGHTMONI_IMAGE` 固定标签或 digest；私有仓库先运行 `docker login docker.heyphp.com`。源码构建时另外填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD`。`0.1.0` 是应用/包版本，不能单独证明源码已更新。
+1. 执行 `git pull --ff-only origin main` 获取根 Compose 维护的固定发布镜像，不再通过 `.env` 中的 `LIGHTMONI_IMAGE` 选择版本；私有仓库先运行 `docker login docker.heyphp.com`。源码构建时另外填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD`。`0.1.0` 是应用/包版本，不能单独证明源码已更新。
 2. 保留旧镜像标签及受限的旧 `.env`。备份配套的 SQLite、主密钥与 ClickHouse 数据；备份文件与配置仅允许运维用户读取。
 3. 如网络需要，在 `.env` 中选择公开 npm、Node 归档、Debian 和 Debian security 镜像源；默认官方源不变。Node 归档仍与官方发行站的 SHA256 清单校验。镜像源不得携带凭据、token 或查询参数；不要关闭证书、npm integrity 或 Debian 签名校验。
 4. 从仓库根目录执行下面的命令。使用根目录部署入口时将 `-f` 改为 `compose.yaml`，并使用根目录 `.env`；两个入口都会管理中心与 ClickHouse。
@@ -18,13 +18,26 @@ docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/
 
 通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对镜像提交；随后检查网页、原有管理员登录、只读查询和 SDK/Agent 下载。需要 `up` 重新创建容器才能切换镜像；本地 `npm run build`、`release:sdk` 和 `release:agent` 只更新本地生成物。
 
-`20261027-ec30880` 从已合入 PR #8 的 `ec3088093498d8f052323ff395ada52607473d0a` 在本机完整重建，包含分类与折叠导航、Apache-2.0 SDK 包和已有网站、证书、容器、备份与计划任务管理能力。`latest` 同时指向此双架构版本。已有 `.env` 若仍固定旧标签，需先更新 `LIGHTMONI_IMAGE=docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880`，再执行上述 `pull` 和 `up`；单独拉取镜像不会更新正在运行的平台。旧固定标签 `20261027-operations` 保留供回退。构建与验收证据见 [本机镜像发布记录](../../docs/evidence/local-image-release-ec30880/README.md)。
+`20261030-ddd7426` 从已合入 PR #15/#18/#19/#20 的 `ddd7426cfc97fa86ed3072dbc04b808d979f73f5` 在本机完整重建，包含集群应用、网站域名独立集群路由、应用自动观测和统一系统日志。固定标签与 `latest` 指向同一双架构索引 `sha256:5cc3dbe52b86feb5412509c2e744a10097db0b2e80e9191c626d95207fea2ef4`。旧 `.env` 中的 `LIGHTMONI_IMAGE` 可删除，不再影响此入口；单独拉取镜像不会更新正在运行的平台，仍需执行 `up`。旧固定标签保留供回退，当前发布与 Compose 验收见 [SDD 028](../../specs/028-local-image-release/validation.md#2026-10-30-compose-直接指定已发布镜像)；[2026-10-28 的发布记录](../../docs/evidence/local-image-release-ec30880/README.md)保留历史信息。
 
 中心镜像更新不会自动更新已安装的 Agent。需要使用新运维能力的节点应单独升级 Agent，并按[运维手册](../../docs/operations.md)准备 Nginx、Docker/Compose 等所需依赖及目录、服务权限；不能仅凭 capability 出现就认定节点已有执行权限。公网 ACME 与真实 S3 等未验收范围仍以 [SDD 026](../../specs/026-operations-platform/validation.md)为准。
 
 ## 回滚与已有临时配置迁移
 
-将 `.env` 的 `LIGHTMONI_IMAGE` 改回保留的旧镜像，使用同一项目名与 Compose 文件执行 `up -d --no-build --wait`。这会保留两个命名卷。如果升级已执行无法向后兼容的存储迁移，先停止中心，按配套备份恢复 SQLite、主密钥和需要恢复的 ClickHouse 数据，再启动旧镜像；只换旧镜像不能替代数据恢复。
+需要回滚时，在所选 Compose 目录创建本地覆盖文件 `compose.rollback.yaml`，指定保留的旧镜像，避免修改仓库维护的 `compose.yaml`：
+
+```yaml
+services:
+  lightmoni:
+    image: docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880
+```
+
+```sh
+docker compose -f compose.yaml -f compose.rollback.yaml pull lightmoni
+docker compose -f compose.yaml -f compose.rollback.yaml up -d --no-build --wait
+```
+
+回滚期间的后续命令继续携带该覆盖文件。原 `.env` 中的 `LIGHTMONI_IMAGE` 不再选择版本；恢复仓库维护版本时省略覆盖文件，重新执行 `pull` 和 `up`。沿用同一项目名和基本 Compose 配置会保留两个命名卷。如果升级已执行无法向后兼容的存储迁移，先停止中心，按配套备份恢复 SQLite、主密钥和需要恢复的 ClickHouse 数据，再启动旧镜像；只换旧镜像不能替代数据恢复。
 
 从历史临时 Compose JSON 迁移时，先核对 `com.docker.compose.project`、容器端口、数据库账号和两个卷名。把相同项目名与连接信息写入 0600 的 `.env`，改用仓库标准 Compose；不要重新生成主密钥、创建同名以外的空数据卷或运行 `down -v`。迁移后后续更新继续使用这份标准配置。
 

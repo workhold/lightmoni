@@ -15,9 +15,9 @@ docker compose run --rm --no-deps --entrypoint lightmoni-admin lightmoni init --
 docker compose up -d --no-build --wait
 ```
 
-初始化只用于空用户库；已有实例跳过该步。密码按无回显提示输入。默认镜像 `docker.heyphp.com/lightmoni/lightmoni:20261027-agent-install`，支持 Linux amd64/arm64；两端共用 `LIGHTMONI_CH_USER/PASSWORD`，中心连接 `LIGHTMONI_CH_URL=http://clickhouse:8123`，数据库端口不向宿主机开放。
+初始化只用于空用户库；已有实例跳过该步。密码按无回显提示输入。中心镜像从根 Compose 直接继承 `docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426`，无需设置 `LIGHTMONI_IMAGE`，旧环境中的该值也不再覆盖镜像。支持 Linux amd64/arm64；两端共用 `LIGHTMONI_CH_USER/PASSWORD`，中心连接 `LIGHTMONI_CH_URL=http://clickhouse:8123`，数据库端口不向宿主机开放。
 
-更新执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`。重置管理员执行 `docker compose exec lightmoni lightmoni-admin reset-password --name admin`。源码构建执行 `docker compose build lightmoni` 和 `docker compose up -d --no-build --pull never --wait`。
+更新时先在仓库执行 `git pull --ff-only origin main`，再从本目录执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`。重置管理员执行 `docker compose exec lightmoni lightmoni-admin reset-password --name admin`。源码构建执行 `docker compose build lightmoni` 和 `docker compose up -d --no-build --pull never --wait`。
 
 `lightmoni-state` 保存 SQLite、主密钥和队列，`lightmoni-telemetry` 保存数据库。备份时配套保存 `.env` 和两个卷；`docker compose down` 保留卷。两个 Compose 入口默认项目名均为 `lightmoni`，应选择一个入口并沿用项目名。历史 `deploy/server/compose.yml` 迁移时把 `CLICKHOUSE_PASSWORD` 改为 `LIGHTMONI_CH_PASSWORD`，保持密码和卷名。
 
