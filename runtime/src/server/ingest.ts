@@ -1,3 +1,4 @@
+import { APPLICATION_TABLE, bindApplicationRows } from "../shared/application-observation.js";
 import { METRIC_PERIODS, windowHistory } from './metric-windows.js';
 import { distributionPoint } from "./distribution.js";
 import { gunzipSync } from "node:zlib";
@@ -419,14 +420,14 @@ export class Ingest {
   ) {
     if (!systemTable(table))
       throw Error("internal telemetry requires a system table");
-    const component=table==="lightmoni"?"":table.slice(10);
+    const component=table==="lightmoni"?"":table===APPLICATION_TABLE?"application":table.slice(10);
     const grouped = new Map<string, any[]>();
     for (const [i, n] of rows.entries()) {
       if(component){n.row.attributes["lightmoni.component"]=component;n.row.attributes_json=goJSON(n.row.attributes,true);}
       const target =
         "_lm_" +
         (await this.cat.ensure(
-          "lightmoni",
+          table === APPLICATION_TABLE ? APPLICATION_TABLE : "lightmoni",
           n.kind,
           n.subtype,
           n.row.service,
@@ -459,7 +460,7 @@ export class Ingest {
       table = String(c.req.headers["x-lightmoni-table"] ?? "");
     if (!validTable(table))
       fail(400, "X-Lightmoni-Table requires a logical business name");
-    if (systemTable(table) && !(key.id && table === "lightmoni_sdk")) fail(403, "系统内置表由内部监控链路写入");
+    if (systemTable(table) && !(key.id && table === "lightmoni_sdk") && !(agentID && table === APPLICATION_TABLE)) fail(403, "系统内置表由内部监控链路写入");
     if (!key.allow_all_tables && !key.allowed_tables.includes(table)) {
       this.auth.recordKey(
         key.id,
@@ -555,6 +556,7 @@ export class Ingest {
         );
         fail(400, e instanceof Error ? e.message : "invalid OTLP");
       }
+      if (table === APPLICATION_TABLE) bindApplicationRows(this.cat.db, agentID, rows, this.auth.decrypt);
       if (table === "lightmoni_sdk" && rows.some(n => !sdkRuntime(n, table)))
         fail(403, "SDK 系统表只接收 SDK 自身指标和事件");
       // Older anonymous SDKs may mix diagnostics into a business stream.

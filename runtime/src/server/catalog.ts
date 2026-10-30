@@ -349,7 +349,7 @@ export class Catalog {
   ) {
     return this.serial.run(async () => {
       if (!validTable(name)) throw Error("invalid logical table name");
-      if (systemTable(name)) name = "lightmoni";
+      if (systemTable(name) && name !== "lightmoni_application") name = "lightmoni";
       const publicName = publicTableName(name, kind, type);
       const old = this.db.get<any>(
         "SELECT services_json FROM catalog WHERE name=?",

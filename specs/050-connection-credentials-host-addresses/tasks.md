@@ -9,3 +9,8 @@
 - [x] 仓库设计与 Doca 同步、最新版本回读。
 - [x] 独立审查。
 - [x] GitHub PR 与结果交付：[PR #25](https://github.com/workhold/lightmoni/pull/25)，面向 main、可审核、待合并。
+
+## 主干集成
+
+- [x] 同步最新主干，保留节点网络与 Docker 观测以及所有路由、导航入口。
+- [x] 完成集成回归、记录结果并更新 PR #25。

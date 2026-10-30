@@ -57,3 +57,16 @@ node web/src/app/verify-host-registration-onboarding.mjs
 ![登记主机选择已有私钥](evidence/registration-existing-zh-1440.png)
 
 ![390px 登记与新增凭据](evidence/registration-new-zh-390.png)
+
+
+## 2026-10-31 最新主干冲突整合
+
+同步 GitHub main `57e770d`，解决 `nodes-model.ts`、`App.tsx`、`navigation.ts` 三处文本冲突；没有丢弃任一侧功能。心跳同时规范并保存网络地址与 Docker 清单，前端保留集群/应用/网站/域名/证书、应用观测及旧路由重定向，同时提供管理员连接凭据入口。主机删除仍同时检查有效凭据与集群成员关系。
+
+- Runtime 全量：667 项，647 通过、20 项按外部条件跳过、0 失败。新联合心跳测试包含在全量结果中。
+- 凭据/SSH/集群/网站/观测集成：144/144。网络/任务模型/应用观测专项：32/32。各组可能重叠，不累加为独立用例总数。
+- 凭据界面：16/16，页面错误和非预期请求为空，见 [UI 报告](main-merge-regression/ui-report.json)。
+- 导航/默认首页界面：15/15，中英与 1280/390px、分类多开、旧路由、管理员入口、存储失败边界均通过，见 [导航报告](main-merge-navigation/ui-report.json)。同步旧路径断言、补齐只读 fixture 并修正键盘选择等待；生产行为未因此变更。
+- 根目录 `npm run typecheck`、`npm run build` 和最终差异检查通过。
+
+[机器可读检查摘要](main-merge-regression/checks.json)。本轮无新增架构设计，额外 Doca 改写不适用，详见同步记录；未发布镜像、未操作线上或 vchive。

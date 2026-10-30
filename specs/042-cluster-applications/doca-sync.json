@@ -1,0 +1,26 @@
+{
+  "proposal_url": "https://doca.heyphp.com/#/r/9a1e7f9c-e177-4113-a77b-0952ea747c6a",
+  "baseline_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved": true,
+  "seq": 788,
+  "original_blocks": 356,
+  "current_blocks": 375,
+  "original_blocks_unchanged": true,
+  "original_order_preserved": true,
+  "chapter_appended_at_end": true,
+  "text_matches": true,
+  "nodes_match": true,
+  "edges_match": true,
+  "node_count": 8,
+  "edge_count": 6,
+  "proposal_acceptance": {
+    "saved": true,
+    "seq": 3,
+    "text_matches": true,
+    "acceptance_matches": true,
+    "nodes_match": true,
+    "edges_match": true,
+    "node_count": 8,
+    "edge_count": 6
+  }
+}

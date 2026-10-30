@@ -1,3 +1,4 @@
+import { applicationTargets } from "../shared/application-observation.js";
 import { createHash } from "node:crypto";
 import type {
   Context,
@@ -264,7 +265,7 @@ export function registerNodes(
       if (e instanceof NodeError || e instanceof HTTPError) throw e;
       throw new NodeError(503, "执行节点记录暂不可用");
     }
-    ctx.json({ agent_id: id, ...machine, ok: true });
+    ctx.json({ agent_id: id, ...machine, ok: true, application_targets: applicationTargets(deps.db, id, deps.decrypt) });
   };
   router.post(base + "/agents/register", safe(heartbeat), { public: true });
   router.post(base + "/agents/:id/heartbeat", safe(heartbeat), {

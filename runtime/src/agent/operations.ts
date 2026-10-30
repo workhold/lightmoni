@@ -7,13 +7,14 @@ import { executeCompose, composeDefinition } from "../operations/containers.js";
 import { executeBackup, backupDefinition } from "../operations/backups.js";
 import { acquireOperationLock } from "./operation-lock.js";
 import { OperationRejectedError } from "../operations/errors.js";
+import { executePlatform, platformDefinition } from "../operations/platform.js";
 
-export const operationCapabilities = ["operations.website", "operations.certificate", "operations.compose", "operations.backup"];
+export const operationCapabilities = ["operations.website", "operations.certificate", "operations.compose", "operations.backup", "operations.platform"];
 export const operationCommand: OperationExecutionContext["command"] = (file, args, options = {}) => new Promise((resolve, reject) => {
   const allowed = ["PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot", "SSL_CERT_FILE", "SSL_CERT_DIR"];
   const env = Object.fromEntries(allowed.flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []));
   const grouped = process.platform !== "win32";
-  const child = spawn(file, args, { cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"], detached: grouped, shell: false, signal: options.signal, killSignal: "SIGKILL", env: { ...env, LC_ALL: "C", LANG: "C" } });
+  const child = spawn(file, args, { cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"], detached: grouped, shell: false, signal: options.signal, killSignal: "SIGKILL", env: { ...env, ...options.env, LC_ALL: "C", LANG: "C" } });
   let stdout = "", stderr = "", settled = false;
   const finish = (error?: Error) => { if (settled) return; settled = true; clearTimeout(timer); if (error) { if (grouped && child.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch {} } child.kill("SIGKILL"); reject(error); } else resolve({ stdout, stderr }); };
   const timer = setTimeout(() => finish(Object.assign(Error("operation_command_timeout"), { code: "operation_command_timeout" })), Math.min(600_000, options.timeoutMs ?? 30_000));
@@ -40,7 +41,7 @@ export async function executeOperation(payload: OperationPayload, context: Opera
   };
   try {
     if (payload.version !== 1 || !/^[a-f0-9]{32}$/.test(payload.operation_id) || !/^[a-f0-9]{32}$/.test(payload.resource.id)) throw Error("invalid_operations_payload");
-    const definition = [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition].find(d => d.kind === payload.resource.kind);
+    const definition = [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition, platformDefinition].find(d => d.kind === payload.resource.kind);
     if (!definition?.operations.includes(payload.operation)) throw Error("unsupported_operations_action");
     const config = definition.validate(payload.resource.config);
     definition.validateInput(payload.operation, payload.input, config);
@@ -50,7 +51,7 @@ export async function executeOperation(payload: OperationPayload, context: Opera
     await emit({ phase: "staging", summary: "Preparing registered operation prerequisites" });
     await emit({ phase: "activating", summary: "Executing the approved bounded operation" });
     begun = true;
-    const executors: Record<string, (p: OperationPayload, c: OperationExecutionContext) => Promise<OperationExecutionResult>> = { website: executeWebsite, certificate: executeCertificate, compose: executeCompose, backup: executeBackup };
+    const executors: Record<string, (p: OperationPayload, c: OperationExecutionContext) => Promise<OperationExecutionResult>> = { website: executeWebsite, certificate: executeCertificate, compose: executeCompose, backup: executeBackup, platform: executePlatform };
     const executor = executors[payload.resource.kind];
     if (!executor) throw Error("unsupported_operations_kind");
     const result = await executor(payload, context);

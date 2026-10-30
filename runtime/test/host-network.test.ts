@@ -95,6 +95,25 @@ test("authenticated register records local inventory and observed source, never 
   assert.deepEqual(f.store.hostDirectory()[0].network,network);
 });
 
+test("one authenticated heartbeat normalizes and persists both network addresses and Docker inventory",async t=>{
+  const f=await fixture(t);f.enroll();
+  const response=await f.post("/agents/register",{
+    agent_id:"agent-1",network_addresses:[{...entry("10.2.3.4"),scope:"public",mac:"omit-network-secret"},entry("10.2.3.4"),entry("fd12:0000::2")],
+    docker_inventory:{state:"ready",observed_at:"2026-10-30T10:00:00Z",containers:[{
+      id:"a".repeat(64),name:"orders\n-app",image:"orders:1",state:"running",ports:"8080",deployment_id:"instance-a",
+      environment:"omit-container-secret",command:"omit-command-secret",
+    }]},
+  });
+  assert.equal(response.status,200,JSON.stringify(response.body));
+  const network=machineNetwork(f.db,"host-1"),heartbeat=JSON.parse(f.db.get<any>("SELECT heartbeat FROM agents WHERE id='agent-1'")!.heartbeat);
+  assert.deepEqual(network.private_ips,["10.2.3.4","fd12::2"]);
+  assert.deepEqual(heartbeat.network_addresses,network.addresses);
+  assert.equal(heartbeat.docker_inventory.observed_at,"2026-10-30T10:00:00.000Z");
+  assert.equal(heartbeat.docker_inventory.truncated,false);
+  assert.deepEqual(heartbeat.docker_inventory.containers,[{id:"a".repeat(64),name:"orders-app",image:"orders:1",state:"running",ports:"8080",deployment_id:"instance-a"}]);
+  assert.doesNotMatch(JSON.stringify(heartbeat),/omit-network-secret|omit-container-secret|omit-command-secret/);
+});
+
 test("legacy heartbeat preserves last snapshot timestamp; explicit empty snapshot clears it",async t=>{
   const f=await fixture(t);f.enroll();
   assert.equal((await f.post("/agents/register",{agent_id:"agent-1",network_addresses:[entry("192.168.1.4")]})).status,200);

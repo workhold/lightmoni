@@ -1,0 +1,10 @@
+import {readFile} from 'node:fs/promises';
+const root=process.env.DEMO_STATE;
+if(!root)throw Error('DEMO_STATE is required');
+const token=(await readFile(root+'/qa.token','utf8')).trim();
+const action=process.argv[2]||'status';
+if(!['status','verify','rebuild','stop','start','failover'].includes(action))throw Error('Unknown demo command');
+const response=await fetch('http://127.0.0.1:19042/qa/'+action,{method:action==='status'?'GET':'POST',headers:{authorization:'Bearer '+token}});
+const data=await response.json();
+console.log(JSON.stringify(data,null,2));
+if(!response.ok)process.exitCode=1;

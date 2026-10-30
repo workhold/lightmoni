@@ -27,7 +27,7 @@ try {
       resolve();
     });
   });
-  console.info("LightMoni Node listening on " + at.host + ":" + at.port);
+  app.deps.logger.info("LightMoni Node listening on " + at.host + ":" + at.port);
   let stopping = false;
   const stop = async () => {
     if (stopping) return;

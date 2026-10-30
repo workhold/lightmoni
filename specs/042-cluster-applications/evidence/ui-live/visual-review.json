@@ -1,0 +1,32 @@
+{
+  "checked_at": "2026-10-29T17:36:04.293236+00:00",
+  "mode": "Existing interface review, independent context, no score",
+  "viewport": [
+    "1440x1000",
+    "390x844",
+    "720x500 at deviceScaleFactor 2"
+  ],
+  "evidence": [
+    "application-editor-desktop.png",
+    "application-deployments-desktop.png",
+    "website-editor-desktop.png",
+    "website-targets-desktop.png",
+    "store-install-desktop.png",
+    "applications-390.png",
+    "application-editor-390.png",
+    "application-editor-200.png",
+    "../motion/record.mp4",
+    "../motion-save/record.mp4"
+  ],
+  "findings_resolved": [
+    "Wait for finite CSS transitions before screenshots; include top and per-cluster sections.",
+    "Remove duplicate manual deployment explanation in MySQL form.",
+    "Record actual save and observable success, alongside entry and store drawer.",
+    "Website editor retains saved per-cluster targets on initial watch registration.",
+    "Exclude retired instances from current state and installed machine summary."
+  ],
+  "result": "No observable visual blockers in final supplied screenshots and recordings. Real data/flows verified separately.",
+  "known_nonblocking": [
+    "Existing favicon.ico 404."
+  ]
+}

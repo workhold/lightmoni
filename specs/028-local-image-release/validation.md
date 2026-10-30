@@ -27,3 +27,23 @@
 - 本次只更新打包发布与默认标签，架构同步不适用；不重复改写仓库系统设计或 Doca。
 
 完整说明见[发布记录](../../docs/evidence/local-image-release-ec30880/README.md)。
+
+## 2026-10-30 Compose 直接指定已发布镜像
+
+根 Compose 直接固定 `docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426`，兼容入口继承它；两个环境示例不再提供 `LIGHTMONI_IMAGE`。旧 `.env` 或 shell 中残留该变量时也不能覆盖仓库选择的镜像。数据库密码、监听、项目名等仍沿用已有 `.env`。
+
+### 验证
+
+- 使用 Docker Compose 实际解析，共 12 项通过：根目录/兼容入口各覆盖镜像变量缺省、旧 `.env` 值、旧 shell 值、显式回滚覆盖、数据库密码仍必填，另检查两个环境示例均未声明镜像变量。
+- 根/兼容入口的每种正常解析与修改前配置完整对比，除 `services.lightmoni.image` 外完全一致；包括数据库环境、端口、挂载、卷、项目名、健康依赖与构建参数。
+- 显式回滚覆盖文件能选择旧固定镜像，其他配置与仓库新配置完全一致。部署说明已给出覆盖方式。
+- 通过 Docker 客户端回读注册表，新固定标签的索引为 `sha256:5cc3dbe52b86feb5412509c2e744a10097db0b2e80e9191c626d95207fea2ef4`，含 Linux amd64/arm64，与前轮已发布且两平台实际拉取核验的镜像一致。
+- `git diff --check` 通过。本次只有 Compose、环境示例、文档和 SDD 变化，未重复运行无关业务测试或重建镜像，也未重启本地或远端实例。
+
+解析与远端回读证据：[20261030-compose-image.json](evidence/20261030-compose-image.json)。前轮镜像两平台各 8 组容器检查及 Docker 实际拉取对照结果：[20261030-release-verification.json](evidence/20261030-release-verification.json)；使用隔离 ARM64 ClickHouse，amd64 中心/Agent 在本机 Docker 仿真运行，不将其称为原生 amd64 或生产升级验收。
+
+### 架构与交付
+
+架构同步不适用：仅变更镜像选择配置与部署说明，组件、拓扑、存储、协议、数据/控制路径、凭据和 AI/工具边界均不变，不为此改写仓库系统设计或 Doca。本轮用户明确要求改完后交付 GitHub 主分支，已授权通过功能分支 PR 合入 main。
+
+交付入口：[GitHub PR #26](https://github.com/workhold/lightmoni/pull/26)，目标 `main`；合入状态以 GitHub PR 记录为准。
