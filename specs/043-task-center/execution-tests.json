@@ -1,0 +1,44 @@
+{
+  "sdd": "043-task-center",
+  "passed": true,
+  "commands": [
+    {
+      "command": "node --import tsx --test test/task-center.test.ts",
+      "cwd": "runtime",
+      "passed": 16,
+      "failed": 0
+    },
+    {
+      "command": "npm --prefix runtime run typecheck",
+      "passed": true
+    },
+    {
+      "command": "git diff --check",
+      "passed": true
+    }
+  ],
+  "coverage": [
+    "manual confirmation, immutable snapshots, target validation and request idempotency",
+    "capability negotiation, per-Agent serialization, hashed lease secrecy and ownership",
+    "lost lease unknown, no replay, explicit retry using current definition",
+    "concurrent source edit rejected against reviewed task revision",
+    "queued/running cancellation and host identity replacement",
+    "durable interval scheduler, no overlapping or catch-up dispatch, host overrides",
+    "real Node/POSIX shell processes: minimum environment, output redaction, timeout and output bounds",
+    "real authenticated HTTP pull execution and administrator/control-audience boundary",
+    "crash recovery never replays code",
+    "lost committed result response resends only receipt, execution count stays one",
+    "live script cancellation and control disconnect terminate process",
+    "independent supervisor terminates script when Agent process is SIGKILLed",
+    "scheduler rechecks task definition under writer lock after a concurrent scan-to-dispatch edit",
+    "relative Agent data directories resolve to absolute supervisor/script paths for Node and shell",
+    "manual unknown resolution requires admin confirmation/reason, preserves unknown history, is idempotent, and rejects late receipts/retry",
+    "resolution-column schema upgrade preserves old run snapshots, active leases and existing receipts"
+  ],
+  "limitations": [
+    "test servers use isolated memory databases and synthetic control authentication dependency; production Agent credential audience authentication is invoked by the same HTTP handler",
+    "no remote machine or production Agent was operated",
+    "finite scripts execute with Agent user permissions; process groups and deadlines are not an OS sandbox",
+    "built-in continuous tasks keep native collection handlers; these tests do not claim new generic cron or arbitrary persistent daemon execution"
+  ]
+}

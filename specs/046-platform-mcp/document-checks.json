@@ -1,0 +1,23 @@
+{
+  "documentation_only": true,
+  "relative_links_checked": 92,
+  "missing_links": 0,
+  "mermaid_diagrams": 3,
+  "native_diagram_graphs_prevalidated": [
+    {
+      "nodes": 15,
+      "edges": 17
+    },
+    {
+      "nodes": 10,
+      "edges": 10
+    },
+    {
+      "nodes": 8,
+      "edges": 9
+    }
+  ],
+  "runtime_tests_run": false,
+  "runtime_changes": false,
+  "source_sha256": "ede5a649bf71e03a80d0d15de0bca071ffd7e52c13fc682a15e2099c24810e82"
+}

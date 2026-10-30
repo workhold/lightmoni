@@ -1,0 +1,186 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "method": "已登录浏览器UI逐块修改；重载后回读；原生编辑器只读核对并关闭、未保存图示",
+  "verified_at": "2026-10-30T07:29:23.594Z",
+  "before_blocks": 537,
+  "after_blocks": 540,
+  "reloaded_text_matches_saved_snapshot": true,
+  "unrelated_original_blocks_preserved": true,
+  "text_snapshot_sha256": "6b10890937005c65e49ac205a59df86b16bafee38a1699a800065a2994dec712",
+  "native_figures": 22,
+  "native_audit_comparison": "重载前后比较稳定cell IDs、shape、labels、node transforms、edge路径首末坐标；去重两个画布，忽略渲染session marker及自动路由中间点",
+  "native_audits": [
+    {
+      "id": "f-architecture-8a1f",
+      "nodes": 10,
+      "edges": 8,
+      "matches": true
+    },
+    {
+      "id": "f-center-modules-7d039612",
+      "nodes": 10,
+      "edges": 9,
+      "matches": true
+    },
+    {
+      "id": "f-deployment-2b7c",
+      "nodes": 8,
+      "edges": 7,
+      "matches": true
+    },
+    {
+      "id": "f-enrollment-4c9d",
+      "nodes": 10,
+      "edges": 11,
+      "matches": true
+    },
+    {
+      "id": "host-access036-native-flow",
+      "nodes": 9,
+      "edges": 9,
+      "matches": true
+    },
+    {
+      "id": "host037-merged-native-flow",
+      "nodes": 8,
+      "edges": 8,
+      "matches": true
+    },
+    {
+      "id": "host038-registered-onboarding-flow",
+      "nodes": 8,
+      "edges": 7,
+      "matches": true
+    },
+    {
+      "id": "host039-retention-flow",
+      "nodes": 8,
+      "edges": 9,
+      "matches": true
+    },
+    {
+      "id": "host040-automatic-identity-flow",
+      "nodes": 9,
+      "edges": 9,
+      "matches": true
+    },
+    {
+      "id": "f-ai-sequence-5e0f",
+      "nodes": 10,
+      "edges": 10,
+      "matches": true
+    },
+    {
+      "id": "9a7f0e0f-303b-47a8-a194-6434833a4da1",
+      "nodes": 7,
+      "edges": 6,
+      "matches": true
+    },
+    {
+      "id": "ca797620-3473-4683-b77a-58f7f968d79c",
+      "nodes": 15,
+      "edges": 17,
+      "matches": true
+    },
+    {
+      "id": "ops033-control-plane-native",
+      "nodes": 11,
+      "edges": 14,
+      "matches": true
+    },
+    {
+      "id": "cluster042-baseline-model",
+      "nodes": 8,
+      "edges": 6,
+      "matches": true
+    },
+    {
+      "id": "website043-routing-native",
+      "nodes": 8,
+      "edges": 9,
+      "matches": true
+    },
+    {
+      "id": "task043-control-flow",
+      "nodes": 12,
+      "edges": 13,
+      "matches": true
+    },
+    {
+      "id": "task043-execution-states",
+      "nodes": 7,
+      "edges": 7,
+      "matches": true
+    },
+    {
+      "id": "agent044-maintenance-flow",
+      "nodes": 14,
+      "edges": 14,
+      "matches": true
+    },
+    {
+      "id": "agent044-update-states",
+      "nodes": 8,
+      "edges": 11,
+      "matches": true
+    },
+    {
+      "id": "mcp046-overview",
+      "nodes": 15,
+      "edges": 17,
+      "matches": true
+    },
+    {
+      "id": "mcp046-approval",
+      "nodes": 10,
+      "edges": 10,
+      "matches": true
+    },
+    {
+      "id": "mcp046-idempotency",
+      "nodes": 8,
+      "edges": 9,
+      "matches": true
+    }
+  ],
+  "sections": [
+    {
+      "old_id": "task043-p-3",
+      "new_id": "77d1c24f-7cd8-4a8e-836f-6c8ae2952952",
+      "text": "平台初始化直接持久化指标采集、服务拨测、目录日志三条默认任务，默认启用并面向所有登记主机，不再提供独立模板目录。Agent 接入后自动获得适用任务；空拨测目标或空日志目录为 waiting_config，不执行空配置。用户可调整默认任务配置、目标和启停，通过停用停止默认任务；新建任务直接编写或上传脚本。升级一次性补齐缺失默认任务，保留已有 ID、参数、目标、主机覆盖和停用选择，重启不重置。"
+    },
+    {
+      "old_id": "e0bd6c65-e48c-49f7-ade7-77132334ea49",
+      "new_id": "969aab73-f5f7-4ba2-acd2-7a17873408ae",
+      "text": "Task 包括 id/name/type/enabled、origin、target_all、host_ids、label_ids、config、schedule 及脚本专用 script/execution_policy。原生持续任务类型为 host/probe/log，有限脚本为 script；来源仅由服务端初始化或既有记录决定，展示为平台默认/用户任务。新建仅允许 script，更新锁定类型和来源，默认任务不能删除；既有用户原生任务保留编辑能力。目标是全部主机、明确主机 ID 或任一相同标签的并集；空目标不广播。单机 override 覆盖启用状态及内置参数，清除后恢复继承。同一主机匹配的自定义指标任务覆盖内置指标基线；多个自定义指标任务仍需通过表名与采集间隔冲突检查。"
+    },
+    {
+      "old_id": "a973136d-0921-49bf-aa6b-95d3acc8cb38",
+      "new_id": "c0b8cbc2-6c2d-446d-b605-533edd645df8",
+      "text": "脚本定义包含运行时 shell/node、源码、超时和输出上限，可选参数数组 args 和远端绝对工作目录 cwd。上传与直接编写最终保存同一份代码，上传文件不会作为可变路径在后续执行时读取。任务 revision 包括代码、目标、计划和执行策略；手动派发和显式重试携带 expected_task_revision，事务内拒绝已变化的旧预览。源码最多 64 KiB、超时 1–3600 秒、输出 1–256 KiB；args 最多32项/总8KiB，cwd 最多4096字节。continuous 仅用于原生采集；脚本 once 表示手动，at 为指定时间一次，interval 为10秒至30天固定间隔，cron 为五段表达式加 IANA 时区。保存时统一校验模式专属字段、目标、脚本、采集冲突及服务端来源/类型约束。"
+    },
+    {
+      "old_id": "bb04782c-80ba-42f5-b9ec-24bd1e06ca4e",
+      "new_id": "1a258802-5146-4af2-9c0a-e7f691f53fcf",
+      "text": "/api/v1/task-hosts：不含 SSH 秘密的主机目录；模板目录接口已移除。任务创建仅接受脚本，默认任务删除返回409。"
+    },
+    {
+      "old_id": "65ef0ebe-974a-4cc6-9359-89f19d5e3e50",
+      "new_id": "d8cee602-0208-4e27-a480-ea1b50017360",
+      "text": "任务宽抽屉的新建入口直接打开脚本编辑器，不再选择模板。UTF-8 .sh/.js/.mjs 文件经64KiB、编码和NUL检查后填入同一编辑器，用户可继续修改；替换已有内容前确认，不新增二进制执行或可变文件引用接口。Node.js 沿用 ESM 语义。表单依次展示执行内容、计划、目标与高级策略，实时预览实际匹配主机和 Agent 就绪状态；手动和 AI 创建共用 normalizeTask。"
+    },
+    {
+      "id": "e31aa81d-603a-478a-b9d2-3198d5dfec69",
+      "text": "27.8 平台默认任务与统一目录（SDD 049）"
+    },
+    {
+      "id": "1eb0a526-4f40-4a79-b8e0-f10b414c5b83",
+      "text": "默认任务是持久化的真实 Task，与用户任务共用目标、启停、单机覆盖和状态目录；不再保留 template_id 或独立模板 API。新库创建三条默认任务，旧库通过 platform-default-tasks-v1 一次性事务补齐，已有默认定义和运行历史不重写。主机尚无 Agent 时等待接入，后注册或重装后按当前目标自动获取任务；停用、排除目标或单机停用后不采集。"
+    },
+    {
+      "id": "fa05ea86-f006-46a2-973c-509f37861b5a",
+      "text": "原生持续处理器使用配置 revision 与应用状态，有限脚本使用 TaskRun、快照及租约，不为每次采样生成执行记录。Agent 心跳、鉴权、配置领取和结果回传属于基础协议，不作为可停用任务。移除模板元数据可能使旧定义 revision 变化，旧预览及旧版本自动重试按现有校验拒绝；普通已排队或运行中的执行继续沿用已审阅快照，历史和单次消费记录保持，不自动重放。平台来源仅服务端生成，新建脚本或更新任务的人工/AI路径共用校验及审批。详见 SDD 049（https://github.com/workhold/lightmoni/blob/feat/task-authoring-scheduling/specs/049-platform-default-tasks/spec.md）。"
+    }
+  ],
+  "screenshot": "evidence/doca-049-saved.png"
+}

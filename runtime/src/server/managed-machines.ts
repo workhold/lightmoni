@@ -2,7 +2,8 @@ import { recordMachineHostKey } from "./machine-host-keys.js";
 import { agentBootstrapCommand } from "./machine-agent-lifecycle.js";
 import { machineCredentialCurrent, machineCredentialCurrentSQL } from "./machine-credential-policy.js";
 import { createAgentLifecycleSchema } from "./agent-lifecycle.js";
-import { createAgentHostSchema, replaceableAgentBinding } from "./agent-hosts.js";
+import { createAgentHostSchema, replaceableAgentBinding, hasActiveTaskRuns } from "./agent-hosts.js";
+import { NodeStore } from "./nodes-model.js";
 import { createUninstallationSchema, registerMachineUninstallations, type UninstallationStatus } from "./machine-uninstallations.js";
 import { id, hash } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
@@ -100,6 +101,8 @@ export interface MachineSummary {
   id: string;
   name: string;
   observed_hostname: string;
+  label_ids: string[];
+  labels: {id:string;name:string}[];
   address: string;
   port: number;
   username: string;
@@ -326,6 +329,11 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const at = iso(now());
     return db.get<any>(machineSelect + " WHERE m.id=?", at, at, at, at, machineID);
   };
+  const hostLabels = (machineID: string) => {
+    const available = db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_host_labels'");
+    const labels = available ? db.all<{id:string;name:string}>("SELECT l.id,l.name FROM machine_host_labels h JOIN agent_task_labels l ON l.id=h.label_id WHERE h.machine_id=? ORDER BY l.id", machineID) : [];
+    return { label_ids: labels.map(label => label.id), labels };
+  };
   const summary = (value: any): MachineSummary => {
     if (!value) fail(404, "主机不存在");
     const activeSSH = Number(value.active_ssh_credential_count ?? 0), activeKeys = Number(value.active_ssh_key_count ?? 0);
@@ -338,13 +346,14 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     };
     const pendingUninstall = uninstallations.pending(value.id);
     const uninstallReason = pendingUninstall ? (pendingUninstall.status === "unknown" ? "uninstallation_unknown" : "uninstallation_pending")
-      : uninstallations.taskBusy(value.agent_id) ? "agent_task_busy" : "";
+      : uninstallations.taskBusy(value.agent_id) || hasActiveTaskRuns(db, value.agent_id, value.id) ? "agent_task_busy" : "";
     const uninstallCapability = capability(true);
     if (uninstallCapability.available && uninstallReason) { uninstallCapability.available = false; uninstallCapability.reason = uninstallReason; }
     const deployCapability = capability(true);
     if (deployCapability.available && uninstallReason) { deployCapability.available = false; deployCapability.reason = uninstallReason; }
     return {
       id: value.id, name: value.name, observed_hostname: value.observed_hostname,
+      ...hostLabels(value.id),
       address: value.address, port: Number(value.port), username: value.username,
       connection_method: value.connection_method, host_key_fingerprint: value.host_key_fingerprint, ssh_target_generation: Number(value.ssh_target_generation || 0),
       host_key_public_key: value.host_key_public_key || "", host_key_observed_at: value.host_key_observed_at || "",
@@ -389,6 +398,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     assertAgentDeletionSafe(machineID, machine.agent_id);
   };
   const assertAgentDeletionSafe = (machineID: string, agentID: string) => {
+    if (hasActiveTaskRuns(db, agentID, machineID)) fail(409, "主机有待执行、运行中或结果未知的任务中心记录，请先处理");
     if (!agentID || db.get("SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed'", agentID)) return;
     const installed = db.get<{status:string}>("SELECT status FROM machine_uninstallations WHERE machine_id=? AND agent_id=? ORDER BY created_at DESC,id DESC LIMIT 1", machineID, agentID);
     const credentials = db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_credentials'");
@@ -706,6 +716,14 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       const currentTarget = get(machine.id);
       if (!fresh.ready || fresh.agent_installation.state !== "absent" || currentTarget.agent_id !== machine.agent_id || !replaceableAgentBinding(db, currentTarget.agent_id, iso(now()))) fail(409, "发现已有 Agent 或安装条件已变化，未签发新身份");
       ensureCredential(machine.id, credential.id); checked(get(machine.id), savedPlan.check_id, credential.id);
+      if (deployment.initial_label_id && db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_host_labels'")) {
+        if (!db.get("SELECT 1 FROM agent_task_labels WHERE id=?", deployment.initial_label_id)) fail(409, "初始主机标签已删除，请重新生成部署计划");
+        // The host may already have labels from an earlier installation. Use
+        // the same atomic compiler validation as administrator label edits
+        // before issuing an identity or installing a conflicting task set.
+        const tasks = new NodeStore(db, now);
+        tasks.setHostLabels(machine.id, [...tasks.hostLabels(machine.id), deployment.initial_label_id]);
+      }
       enrollment = options.agentCredentials.issueEnrollment({ endpoint_origin: deps.externalURL, version: deployment.version, allowed_arch: [deployment.arch], initial_label_id: deployment.initial_label_id, created_by: ctx.user.id, machine_id: machine.id, previous_agent_id: machine.agent_id });
       const command = agentBootstrapCommand(deps.externalURL.replace(/\/$/, ""), deployment.version);
       const result = await runSSH({ credentialID: credential.id, machine, privateKey, ...(password ? { password } : {}), command, enrollmentToken: enrollment.token_display_once, signal: ctx.signal, port: machine.port });

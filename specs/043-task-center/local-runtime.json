@@ -1,0 +1,33 @@
+{
+  "base": "http://127.0.0.1:18080",
+  "api_fixtures": false,
+  "ssh_connections": 0,
+  "checks": [
+    "Actual local HTTP/SQLite task definitions, safe host directory and templates are available",
+    "Actual host page uses host labels and links to the task center",
+    "Actual host label directory renders"
+  ],
+  "errors": [],
+  "tasks": [
+    {
+      "id": "legacy:default:host",
+      "type": "host",
+      "origin": "builtin",
+      "enabled": true
+    },
+    {
+      "id": "legacy:default:log",
+      "type": "log",
+      "origin": "custom",
+      "enabled": false
+    },
+    {
+      "id": "legacy:default:probe",
+      "type": "probe",
+      "origin": "builtin",
+      "enabled": false
+    }
+  ],
+  "host_count": 3,
+  "template_count": 3
+}
