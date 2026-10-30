@@ -43,6 +43,25 @@ test("AI calendar script creation uses the same reviewed definition as manual ta
   assert.ok((tool.schema as any).properties.task.properties.schedule.properties.timezone);
 });
 
+test("AI creates only scripts and edits platform-default tasks through human approval without changing origin or type", t => {
+  const f = fixture(t), defaults = f.nodes.tasks().filter(task => task.origin === "builtin");
+  assert.equal(defaults.length, 3);
+  for (const type of ["host", "probe", "log"]) {
+    assert.throws(() => f.proposals.create(admin, "session", { operation: "task.create", reason: "Cannot create another collector", task: { name: "Extra collector", type, enabled: true, target_all: true } }), /脚本|script/);
+  }
+  assert.throws(() => f.proposals.create(admin, "session", { operation: "task.create", reason: "Cannot forge a default", task: { ...f.definition, origin: "builtin" } }), /来源/);
+  assert.throws(() => f.proposals.create(admin, "session", { operation: "task.create", reason: "Removed template contract", task: { ...f.definition, template_id: "metrics" } }), /模板|template/);
+  const metrics = defaults.find(task => task.type === "host")!;
+  const disable = f.proposals.create(admin, "session", { operation: "task.update", task_id: metrics.id, reason: "Pause default collection", task: { enabled: false } });
+  assert.equal(f.nodes.getTask(metrics.id).enabled, true);
+  f.proposals.apply(admin, disable.id);
+  assert.equal(f.nodes.getTask(metrics.id).enabled, false);
+  assert.equal(f.nodes.getTask(metrics.id).origin, "builtin");
+  assert.throws(() => f.proposals.create(admin, "session", { operation: "task.update", task_id: metrics.id, reason: "Cannot convert default to script", task: { ...f.definition } }), /类型/);
+  assert.throws(() => f.proposals.create(admin, "session", { operation: "task.update", task_id: metrics.id, reason: "Cannot strip default source", task: { origin: "custom" } }), /来源/);
+  assert.equal(f.runs.list().length, 0);
+});
+
 test("an AI one-time plan that becomes past before approval must be rescheduled rather than silently replayed", t => {
   const f=fixture(t);
   const draft=f.proposals.create(admin,"session",{operation:"task.create",reason:"One future check",task:{...f.definition,name:"One-time check",schedule:{mode:"at",run_at:"2026-10-30T01:01:00Z"}}});

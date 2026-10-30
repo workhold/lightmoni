@@ -29,7 +29,7 @@ export interface TaskSchedule {mode:'continuous'|'once'|'interval'|'at'|'cron';i
 export interface TaskExecutionPolicy {max_concurrency:number;queue_timeout_seconds:number;retry_count:number;retry_delay_seconds:number}
 export const defaultExecutionPolicy:TaskExecutionPolicy={max_concurrency:10,queue_timeout_seconds:3600,retry_count:0,retry_delay_seconds:60};
 export interface TaskHost {task_capabilities?:string[];id:string;name:string;agent_id:string;agent_status?:string;label_ids:string[];labels?:{id:string;name:string}[]}
-export interface ManagedAgentTask {revision?:string;id:string;name:string;type:AgentTaskType;enabled:boolean;label_ids:string[];config:AgentTasks;origin?:'builtin'|'custom';template_id?:string;target_all?:boolean;host_ids?:string[];schedule?:TaskSchedule;script?:TaskScript;execution_policy?:TaskExecutionPolicy}
+export interface ManagedAgentTask {revision?:string;id:string;name:string;type:AgentTaskType;enabled:boolean;label_ids:string[];config:AgentTasks;origin?:'builtin'|'custom';target_all?:boolean;host_ids?:string[];schedule?:TaskSchedule;script?:TaskScript;execution_policy?:TaskExecutionPolicy}
 export const requiredScriptCapability=(script?:TaskScript)=>script?.args?.length||script?.cwd?'task.script.v2':'task.script.v1';
 export const hostCanRunScript=(host:TaskHost,script?:TaskScript)=>!!host.agent_id&&!!host.task_capabilities?.some(capability=>capability===requiredScriptCapability(script)||capability==='task.script.v2');
 export const taskScheduleSummary=(schedule?:TaskSchedule,language='zh-CN')=>{

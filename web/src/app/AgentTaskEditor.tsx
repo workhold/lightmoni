@@ -1,9 +1,9 @@
 import {useI18n} from '../shared/i18n';
 import {useRef,useState} from 'react';
 import {Link} from 'react-router-dom';
-import {CodeOutlined,DeleteOutlined,PlusOutlined,UploadOutlined} from '@ant-design/icons';
+import {DeleteOutlined,PlusOutlined,UploadOutlined} from '@ant-design/icons';
 import {Alert,Button,Checkbox,Collapse,Descriptions,Form,Input,InputNumber,Modal,Radio,Select,Space,Switch,Tag,Typography} from '../shared/ui';
-import {agentTaskTypes,defaultExecutionPolicy,defaultTasks,hostCanRunScript,hostCollectors,hostCollectorName,requiredScriptCapability,taskScheduleSummary,taskTypeName,taskFormValues,taskPayload,type AgentTaskLabel,type AgentTaskType,type LogSource,type ManagedAgentTask,type TaskForm,type TaskHost} from './agent-model';
+import {defaultExecutionPolicy,defaultTasks,hostCanRunScript,hostCollectors,hostCollectorName,requiredScriptCapability,taskScheduleSummary,taskTypeName,taskFormValues,taskPayload,type AgentTaskLabel,type LogSource,type ManagedAgentTask,type TaskForm,type TaskHost} from './agent-model';
 import TaskScheduleFields,{cleanTaskSchedule} from './TaskScheduleFields';
 
 type TaskDraft = Omit<ManagedAgentTask,'id'>;
@@ -17,7 +17,7 @@ export default function AgentTaskEditor({task,labels,hosts=[],hostOverride=false
  const [form]=Form.useForm<TaskForm>(),[saving,setSaving]=useState(false),[error,setError]=useState(''),[uploadError,setUploadError]=useState(''),[uploadedName,setUploadedName]=useState('');
  const [replacement,setReplacement]=useState<{name:string;code:string;runtime:'shell'|'node'}>(),[review,setReview]=useState<TaskDraft>(),[reviewed,setReviewed]=useState(false);
  const fileInput=useRef<HTMLInputElement>(null),savePending=useRef(false);
- const type=(Form.useWatch('type',form)??task?.type??'script') as AgentTaskType;
+ const type=task?.id?task.type:'script';
  const enabled=Form.useWatch('enabled',form) as boolean|undefined;
  const selectedLabels=Form.useWatch('label_ids',form) as string[]|undefined;
  const targetAll=Form.useWatch('target_all',form) as boolean|undefined;
@@ -47,13 +47,13 @@ export default function AgentTaskEditor({task,labels,hosts=[],hostOverride=false
    script:{...initialValues.script,...stored.script,...values.script},
    schedule:{...initialValues.schedule,...stored.schedule,...values.schedule},
    execution_policy:{...defaultExecutionPolicy,...initialValues.execution_policy,...stored.execution_policy,...values.execution_policy},
-  } as TaskForm,taskType=all.type??'script',config=taskPayload(all);
+  } as TaskForm,taskType=type,config=taskPayload(all);
   config.host_enabled=taskType==='host';config.logs_enabled=taskType==='log';
   if(taskType!=='host'){config.host_collectors=[];config.process_names=[]}if(taskType!=='probe')config.probes=[];if(taskType!=='log')config.log_sources=[];
   delete config.revision;delete config.group_id;
   const args=taskType==='script'?argsFrom(all.script_args_text):[],directory=all.script?.cwd;
   const script=all.script?{runtime:all.script.runtime,code:all.script.code,timeout_seconds:all.script.timeout_seconds,max_output_bytes:all.script.max_output_bytes,...(args.length?{args}:{}),...(directory?{cwd:directory}:{})}:undefined;
-  return {name:all.name?.trim()??'',type:taskType,enabled:enabledOverride??!!all.enabled,label_ids:all.label_ids??[],config,origin:task?.id?task.origin??'custom':'custom',template_id:task?.type===taskType?task?.template_id??'':'',target_all:!!all.target_all,host_ids:all.host_ids??[],schedule:taskType==='script'?cleanTaskSchedule(all.schedule):{mode:'continuous'},...(taskType==='script'?{script,execution_policy:{...defaultExecutionPolicy,...all.execution_policy}}:{})};
+  return {name:all.name?.trim()??'',type:taskType,enabled:enabledOverride??!!all.enabled,label_ids:all.label_ids??[],config,origin:task?.id?task.origin??'custom':'custom',target_all:!!all.target_all,host_ids:all.host_ids??[],schedule:taskType==='script'?cleanTaskSchedule(all.schedule):{mode:'continuous'},...(taskType==='script'?{script,execution_policy:{...defaultExecutionPolicy,...all.execution_policy}}:{})};
  };
  const persist=async(draft:TaskDraft)=>{
   if(savePending.current)return;savePending.current=true;setSaving(true);onBusyChange(true);setError('');
@@ -65,13 +65,9 @@ export default function AgentTaskEditor({task,labels,hosts=[],hostOverride=false
  };
  return <Form form={form} layout="vertical" initialValues={initialValues} disabled={saving} onFinish={()=>void prepare()} scrollToFirstError className="lm-task-editor">
   {!hostOverride&&<>
-   {!task?.id&&<div className="lm-task-kind-picker" role="group" aria-label={t('选择任务内容','Choose task content')}>
-    <button type="button" aria-pressed={type==='script'} disabled={saving} onClick={()=>{if(type!=='script'){form.setFieldValue('type','script');form.setFieldValue('schedule',{mode:'once'})}}}><CodeOutlined/><strong>{t('自定义脚本','Custom script')}</strong><span>{t('上传脚本，或直接编写代码','Upload a script or write code directly')}</span></button>
-    <button type="button" aria-pressed={type!=='script'} disabled={saving} onClick={()=>{if(type==='script'){form.setFieldValue('type','host');form.setFieldValue('schedule',{mode:'continuous'})}}}><PlusOutlined/><strong>{t('内置任务模板','Built-in task template')}</strong><span>{t('指标采集、服务拨测、目录日志','Metrics, service probes, and directory logs')}</span></button>
-   </div>}
    <div className="lm-agent-form-grid">
     <Form.Item name="name" label={t('任务名称','Task name')} rules={nameRules}><Input aria-label={t('任务名称','Task name')} placeholder={type==='script'?t('例如：数据库每日备份','Example: Daily database backup'):t('例如：生产主机指标','Example: Production host metrics')}/></Form.Item>
-    <Form.Item name="type" label={t('任务类型','Task type')} rules={[{required:true}]} extra={task?.id?t('既有任务的类型固定；需要其他类型时请新建任务。','Existing task types cannot be changed. Create a new task for a different type.'):undefined}><Select aria-label={t('任务类型','Task type')} disabled={saving||!!task?.id} onChange={next=>form.setFieldValue('schedule',{mode:next==='script'?'once':'continuous'})} options={agentTaskTypes.map(item=>({...item,label:taskTypeName(item.value,uiLanguage)}))}/></Form.Item>
+    <Form.Item label={t('任务类型','Task type')}><Typography.Text>{taskTypeName(type,uiLanguage)}</Typography.Text>{task?.id&&<div><Tag>{task.origin==='builtin'?t('平台默认','Platform default'):t('用户任务','User task')}</Tag></div>}</Form.Item>
    </div>
    <h3>{t('1. 执行内容','1. Execution content')}</h3>
   </>}

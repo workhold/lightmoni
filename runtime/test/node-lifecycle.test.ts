@@ -11,7 +11,7 @@ import type { Dependencies } from "../src/shared/types.js";
 import { registerAgentCredentials } from "../src/server/agent-credentials.js";
 import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { registerNodes } from "../src/server/nodes.js";
-import { NodeStore } from "../src/server/nodes-model.js";
+import { NodeStore, normalizeTask } from "../src/server/nodes-model.js";
 import { assertAgentActive, isAgentRemoved } from "../src/server/agent-lifecycle.js";
 import { Catalog } from "../src/server/catalog.js";
 import { Ingest } from "../src/server/ingest.js";
@@ -216,9 +216,9 @@ test("archived history retains labels but never compiles current or global tasks
   // existing conflicting definition to verify archival never compiles it.
   let conflictingID = "";
   for (const [name, label_ids, interval] of [["global", [], 15], ["current-one", ["default"], 15], ["current-two", ["default"], 30]] as const) {
-    const task = await f.request("/api/v1/agent-tasks", "POST", { name, type: "host", enabled: name !== "current-two", label_ids, config: { collect_interval_seconds: interval, host_collectors: ["memory"] } });
-    assert.equal(task.status, 201);
-    if (name === "current-two") conflictingID = task.data.id;
+    const store=new NodeStore(f.db,()=>new Date());
+    store.saveTask(normalizeTask({id:name,name,type:"host",enabled:name!=="current-two",label_ids,config:{collect_interval_seconds:interval,host_collectors:["memory"]}}));
+    if (name === "current-two") conflictingID = name;
   }
   f.db.run("UPDATE agent_tasks SET enabled=1 WHERE id=?", conflictingID);
   const history = await f.request("/api/v1/agents?include_removed=true");
