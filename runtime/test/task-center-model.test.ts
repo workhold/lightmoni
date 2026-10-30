@@ -45,7 +45,8 @@ test("labels belong to offline hosts, survive Agent replacement and empty labels
   store.setHostLabels("host",[]); const reopened=new NodeStore(db,()=>at);
   assert.deepEqual(reopened.hostLabels("host"),[]); assert.deepEqual(reopened.hostLabels("other"),["production"]);
   assert.equal(reopened.hostDirectory()[0].address,undefined);
-  assert.deepEqual(Object.keys(reopened.hostDirectory()[0]).sort(),["agent_id","agent_status","id","label_ids","labels","name","task_capabilities"]);
+  assert.deepEqual(Object.keys(reopened.hostDirectory()[0]).sort(),["agent_id","agent_status","id","label_ids","labels","name","network","task_capabilities"]);
+  assert.deepEqual(reopened.hostDirectory()[0].network,{addresses:[],private_ips:[],public_ips:[],observed_at:"",source_ip:"",source_observed_at:"",source_kind:"unavailable"});
 });
 
 test("legacy linked labels migrate once without resetting user-disabled tasks or reviving removed labels", t => {

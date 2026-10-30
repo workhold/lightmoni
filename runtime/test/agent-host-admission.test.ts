@@ -1,3 +1,4 @@
+import {fixturePrivateKey} from "./helpers/ssh-key.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -114,7 +115,7 @@ test("Agent downloads require a valid server-reserved host token and never accep
 
 test("Agent registration before SSH installation receipt remains bound to the originally registered host", async t => {
   const f = await fixture(t), host = await f.host("SSH 安装目标");
-  const credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: "-----BEGIN OPENSSH PRIVATE KEY-----\nfixture-secret\n-----END OPENSSH PRIVATE KEY-----", retention: "temporary" });
+  const credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "temporary" });
   assert.equal(credential.status, 201);
   let installedID = "";
   f.setRunner(async input => {
@@ -170,7 +171,7 @@ test("orphan and revoked identities cannot receive operations resources, plans o
 });
 
 test("a failed activated install can safely reinstall with the same host ID after fresh absent preflight", async t => {
-  const f = await fixture(t), host = await f.host(), credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: "-----BEGIN OPENSSH PRIVATE KEY-----\nfixture-secret\n-----END OPENSSH PRIVATE KEY-----", retention: "managed", confirm_managed: true });
+  const f = await fixture(t), host = await f.host(), credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "managed", confirm_managed: true });
   assert.equal(credential.status, 201);
   let failInstallation = true;
   const identities: string[] = [];
@@ -200,7 +201,7 @@ test("retired Agent replacement retains host ID and plan snapshots reject a chan
   // A verified successful uninstall is historical evidence; a fresh preflight
   // must still prove that retained files were reviewed and the install is absent.
   f.db.run("INSERT INTO machine_uninstallations(id,machine_id,agent_id,credential_id,status,plan_json,created_at,created_by) VALUES('uninstalled',?,?,'old','succeeded','{}',?,'admin')", host.id, old.agentID, at.toISOString());
-  const credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: "-----BEGIN OPENSSH PRIVATE KEY-----\nfixture\n-----END OPENSSH PRIVATE KEY-----", retention: "temporary" });
+  const credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "temporary" });
   const check = await f.request(`/machines/${host.id}/ssh-check`, "POST", { credential_id: credential.data.credential_id }); assert.equal(check.status, 200);
   const plan = await f.request(`/machines/${host.id}/deployments/plan`, "POST", { check_id: check.data.id, credential_id: credential.data.credential_id, version: "0.1.0", arch: "amd64" }); assert.equal(plan.status, 201, JSON.stringify(plan.data));
   f.db.run("UPDATE managed_machines SET agent_id='changed-agent' WHERE id=?", host.id);

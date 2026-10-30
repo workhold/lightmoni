@@ -108,6 +108,10 @@ docker compose up -d --no-build --pull never --wait
 
 有限期登录凭据到期或撤销后清除；明确选择并确认“永久保存”时没有固定过期时间，直到主动撤销。两种保存方式均加密存储，Agent 激活不会提前清除；建议优先短期保存，使用结束后撤销。登记和凭据保存仍不会执行 SSH；凭据保存失败可在同一表单重试，使用已登记主机 ID，不重复创建主机。保存策略见 [SDD 039](specs/039-host-registration-credential-retention/spec.md)。
 
+“运维工具 → 连接凭据”集中管理 SSH 私钥和密码，登记主机可选已有凭据或手动新增。主机绑定默认凭据后，终端、检查和安装/卸载自动使用；同一私钥按真实公钥指纹去重复用。主机解绑只影响该主机，全局撤销影响所有关联主机，秘密不回显。详见 [SDD 050](specs/050-connection-credentials-host-addresses/spec.md)。
+
+主机栏同时展示 SSH 地址、Agent 发现的内网 IP 与其他网卡 IP、平台观测的出口/来源 IP，支持多网卡和 IPv6。未发现时不会猜测，IP 变化也不改变主机 ID。来源可能是内网或代理地址；反向代理需显式配置 `LIGHTMONI_TRUSTED_PROXIES` 的代理 IP/CIDR，才会采用可信转发链。设计与边界见 [系统设计 13.6–13.7](docs/system-design.md#136-集中连接凭据与主机默认绑定sdd-050)。
+
 enrollment 由平台内部签发并预绑定该主机，安装器通过 SSH stdin 接收，不进入 URL、命令参数、环境变量或 AI 上下文。兑换、激活、注册和心跳使用预约与独立 control/data 凭据核验，注册不会创建第二台主机；没有独立 token 签发、用户手动安装和手工主机关联入口。旧无主机预约身份和共享 SDK Key 不再兼容控制面，不自动迁移或删除历史数据。完整流程见 [Agent 部署与恢复](docs/agent-deployment.md) 和 [SDD 038](specs/038-registered-host-agent-onboarding/spec.md)。
 
 Agent 在宿主机以独立 systemd 服务运行，生命周期与业务服务分开。Linux amd64/arm64 包自带 Node 24.15.0，要求 glibc ≥ 2.28，无需另装 Node/npm；安装器验证 SHA256。持久目录保存身份、队列和日志游标，不应复制到另一台主机。主机管理首装拒绝覆盖已有安装，升级/回滚能力的验证边界见部署文档。

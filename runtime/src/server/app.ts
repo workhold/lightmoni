@@ -52,6 +52,7 @@ export interface Config {
   publicDir?: string;
   downloadsDir?: string;
   monitor?: boolean;
+  trustedProxies?: string[];
 }
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const mime: Record<string, string> = {
@@ -150,6 +151,7 @@ export async function createApp(cfg: Config) {
       registerNodes(deps, {
         internalExporter: ingest.internal.bind(ingest),
         agentCredentials,
+        trustedProxies: cfg.trustedProxies,
       }),
     );
     modules.push(agentJobs);
