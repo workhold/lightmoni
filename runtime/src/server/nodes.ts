@@ -19,6 +19,7 @@ import {
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import { agentLifecycle, assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
 import { hasActiveTaskRuns } from "./agent-hosts.js";
+import { observeNetworkSource, trustedProxyMatcher } from "./host-network.js";
 export interface NodesOptions {
   internalExporter?: (
     table: string,
@@ -28,6 +29,7 @@ export interface NodesOptions {
   ) => Promise<void>;
   telemetryInterval?: number;
   agentCredentials?: AgentCredentialStore;
+  trustedProxies?: string[];
 }
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const record = (value: any): value is Record<string, any> =>
@@ -52,6 +54,7 @@ export function registerNodes(
     base = "/api/v1",
     sent = new Map<string, string>(),
     controller = new AbortController();
+  const trustedProxy = trustedProxyMatcher(options.trustedProxies);
   let timer: NodeJS.Timeout | undefined, inflight: Promise<void> | undefined;
   const safe =
     (handler: Handler): Handler =>
@@ -256,7 +259,7 @@ export function registerNodes(
     }
     let machine: { machine_id: string; machine_name: string };
     try {
-      machine = store.heartbeat(id, values, writeKey.id);
+      machine = store.heartbeat(id, values, writeKey.id, observeNetworkSource(ctx.req, trustedProxy));
     } catch (e) {
       if (e instanceof NodeError || e instanceof HTTPError) throw e;
       throw new NodeError(503, "执行节点记录暂不可用");

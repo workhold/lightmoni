@@ -1,4 +1,4 @@
-import {AppstoreOutlined,BellOutlined,CloudServerOutlined,CloudUploadOutlined,DashboardOutlined,DatabaseOutlined,MessageOutlined,SafetyCertificateOutlined,SearchOutlined,SettingOutlined,ToolOutlined} from '@ant-design/icons';
+import {AppstoreOutlined,BellOutlined,CloudServerOutlined,CloudUploadOutlined,DashboardOutlined,DatabaseOutlined,KeyOutlined,MessageOutlined,SafetyCertificateOutlined,SearchOutlined,SettingOutlined,ToolOutlined} from '@ant-design/icons';
 
 export const navigationGroups=[
  {id:'workspace',label:'工作台',english:'Workspace',items:[
@@ -12,6 +12,7 @@ export const navigationGroups=[
  ]},
  {id:'operations',label:'运维工具',english:'Operations',items:[
   {path:'/machines',label:'主机',english:'Hosts',icon:CloudServerOutlined,adminOnly:false},
+  {path:'/connection-credentials',label:'连接凭据',english:'Connection credentials',icon:KeyOutlined,adminOnly:true},
   {path:'/services',label:'服务部署',english:'Service deployments',icon:CloudUploadOutlined,adminOnly:true},
   {path:'/operations',label:'网站与运维',english:'Websites & operations',pageLabel:'运维工具',pageEnglish:'Operations',icon:ToolOutlined,adminOnly:true},
  ]},

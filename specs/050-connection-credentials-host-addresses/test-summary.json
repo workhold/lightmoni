@@ -1,0 +1,32 @@
+{
+  "runtime": {
+    "tests": 554,
+    "pass": 537,
+    "fail": 0,
+    "skipped": 17
+  },
+  "ai": {
+    "tests": 71,
+    "pass": 71,
+    "fail": 0,
+    "skipped": 0
+  },
+  "sdk": {
+    "tests": 18,
+    "pass": 18,
+    "fail": 0,
+    "skipped": 0
+  },
+  "credentials": {
+    "tests": 95,
+    "pass": 95,
+    "fail": 0,
+    "skipped": 0
+  },
+  "directory_network": {
+    "tests": 20,
+    "pass": 20,
+    "fail": 0,
+    "skipped": 0
+  }
+}

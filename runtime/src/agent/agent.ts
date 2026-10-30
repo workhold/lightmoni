@@ -55,6 +55,7 @@ import { checkProbe } from "./probe.js";
 import { AgentJobRunner } from "./jobs.js";
 import { AgentTaskRunner } from "./task-runner.js";
 import { SCRIPT_TASK_CAPABILITIES } from "../shared/task-center.js";
+import { collectNetworkAddresses } from "./network-addresses.js";
 import {
   ReceiveError,
   requestBytes,
@@ -224,6 +225,7 @@ export class Agent {
       runtime_events: [...this.runtimeEvents],
       control_interval_seconds: this.config.control_interval_seconds,
       task_capabilities: [...SCRIPT_TASK_CAPABILITIES],
+      network_addresses: collectNetworkAddresses(),
     };
   }
   accept(batch: Batch, owned: boolean, cursor?: LogCursor): void {

@@ -1,0 +1,28 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "seq": 881,
+  "epochId": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "saved": true,
+  "readback_matches_repository_sections": [
+    "13.6",
+    "13.7"
+  ],
+  "original_native_diagrams_preserved_exactly": 22,
+  "new_native_diagram": {
+    "block_id": "host050-design-6",
+    "nodes": 7,
+    "edges": 6,
+    "exact_readback": true
+  },
+  "unchanged_existing_blocks": 538,
+  "unexpected_existing_changes": [],
+  "intentionally_updated_existing_blocks": [
+    "host039-paragraph-2",
+    "a3691724-b5f2-4daf-bc4e-a0bd21316a74"
+  ],
+  "removed_only_our_accidental_empty_block": true,
+  "new_blocks": 11,
+  "total_blocks": 551,
+  "diagram_snapshot_sha256": "c1768a8b1431c511459ce1036f1c3e3a3c0b7636bd41725f504e1eb4972e12be",
+  "verification": "MCP latest content readback, native graph node/edge and existing block equality; no browser visual-render claim"
+}

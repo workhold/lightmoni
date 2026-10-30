@@ -22,6 +22,14 @@ docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/
 
 中心镜像更新不会自动更新已安装的 Agent。需要使用新运维能力的节点应单独升级 Agent，并按[运维手册](../../docs/operations.md)准备 Nginx、Docker/Compose 等所需依赖及目录、服务权限；不能仅凭 capability 出现就认定节点已有执行权限。公网 ACME 与真实 S3 等未验收范围仍以 [SDD 026](../../specs/026-operations-platform/validation.md)为准。
 
+## 主机 IP 与可信反向代理
+
+新版 Agent 在注册/心跳时采集本机网卡地址，主机管理区分 SSH 连接地址、内网 IP、其他网卡 IP 和平台观测来源 IP。支持多网卡 IPv4/IPv6；不依赖第三方 IP 查询，不根据 IP 合并主机。Agent 更新前显示“待发现”，旧 Agent 未提供网卡字段时保留已有快照及原观测时间。
+
+中心默认使用 TCP 对端地址，忽略客户端发送的 `X-Forwarded-For`。如果中心位于 Nginx 或其他反向代理后，在 `.env` 配置 `LIGHTMONI_TRUSTED_PROXIES` 为中心实际看到的代理 IP/CIDR，多个用逗号分隔，例如 `172.20.0.1/32,::1/128`；根 Compose 已透传，继承入口同步生效。只填写实际受控代理地址，不要信任用户主机网段或全部地址；代理应覆盖或追加真实连接来源到 `X-Forwarded-For`。
+
+只有直接对端受信时才从右向左剥离已知代理，取第一个非受信来源；可信代理缺少或传入无效地址链时显示“来源待发现”。无效信任 IP/CIDR 配置会拒绝启动。平台观测地址可能是内网、NAT、VPN 或代理的出口，只代表访问当前平台的路径，不代表所有出口或可从公网连接的地址。更换 Agent 身份后，不将旧 Agent 的地址快照当作当前数据。
+
 ## 回滚与已有临时配置迁移
 
 将 `.env` 的 `LIGHTMONI_IMAGE` 改回保留的旧镜像，使用同一项目名与 Compose 文件执行 `up -d --no-build --wait`。这会保留两个命名卷。如果升级已执行无法向后兼容的存储迁移，先停止中心，按配套备份恢复 SQLite、主密钥和需要恢复的 ClickHouse 数据，再启动旧镜像；只换旧镜像不能替代数据恢复。

@@ -16,6 +16,7 @@ try {
     ),
     publicDir: process.env.LIGHTMONI_PUBLIC_DIR,
     downloadsDir: process.env.LIGHTMONI_DOWNLOADS_DIR,
+    trustedProxies: (process.env.LIGHTMONI_TRUSTED_PROXIES ?? "").split(/[\s,]+/).filter(Boolean),
   });
   const server = app.server;
   await new Promise<void>((resolve, reject) => {
