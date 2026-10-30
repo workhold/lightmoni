@@ -6,9 +6,9 @@
     "_lm_metric_lightmoni_application_gauge"
   ],
   "metricRows": 9,
-  "logRows": 7,
+  "logRows": 5,
   "websiteBuckets": 1,
-  "containerCount": 36,
-  "app": "056bb83672ef56d1db60df397d3cfb4c",
-  "cluster": "a15b7551b674114d54f8af47908a3e87"
+  "containerCount": 35,
+  "app": "2735a3b69d2741b8144d2eaf26cde554",
+  "cluster": "04d25628cd7985c84536adbe8c3b3dc1"
 }

@@ -2,7 +2,7 @@
   "resource": "2902a80f-c592-414e-9aed-64fe19f2ed53",
   "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
   "epoch": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
-  "seq": 797,
+  "seq": 798,
   "title": "LightMoni 系统设计基线",
   "textsMatch": true,
   "sections": 13,
@@ -20,5 +20,5 @@
   "latestEdgeCount": 159,
   "latestSystemTextMatches": true,
   "nativeComparisonAtSeq": 796,
-  "textOnlyUpdateAtSeq": 797
+  "textOnlyUpdateAtSeq": 798
 }

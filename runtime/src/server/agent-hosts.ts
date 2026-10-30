@@ -28,9 +28,16 @@ const observation = (value: unknown, max: number): string => {
 };
 const table = (db: DB, name: string) => Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?", name));
 
+/** Unknown attempts remain a barrier until explicitly retried or reviewed. */
+export function hasActiveTaskRuns(db: DB, agentID: string, hostID = ""): boolean {
+  if (!table(db, "task_runs")) return false;
+  return !!db.get("SELECT id FROM task_runs WHERE (agent_id=? OR (?<>'' AND host_id=?)) AND (state IN ('queued','running') OR (state='unknown' AND superseded_by='' AND resolved_at='')) LIMIT 1", agentID, hostID, hostID);
+}
+
 /** A new identity may replace a retired one only after it can no longer act. */
 export function replaceableAgentBinding(db: DB, agentID: string, at: string): boolean {
   if (!agentID) return true;
+  if (hasActiveTaskRuns(db, agentID)) return false;
   if (table(db, "agent_jobs") && db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID)) return false;
   if (table(db, "machine_uninstallations") && db.get("SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", agentID)) return false;
   if (isAgentRemoved(db, agentID)) return true;

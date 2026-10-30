@@ -9,6 +9,7 @@ import {parseJSON} from '../src/shared/json.js';
 import {registerManagedMachines, type SSHRunner} from '../src/server/managed-machines.js';
 import {monitoringTools} from '../src/assistant/tools.js';
 import {SSHError} from '../src/server/machine-ssh.js';
+import {NodeStore} from '../src/server/nodes-model.js';
 import type {Dependencies} from '../src/shared/types.js';
 
 const checkOutput='LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n';
@@ -133,6 +134,24 @@ test('renaming a host invalidates an approved installation snapshot before ident
  const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential});const plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:h.credential,version:'0.1.0',arch:'amd64'});assert.equal(plan.status,201,plan.raw);
  assert.equal((await f.request(`/machines/${h.id}`,'PUT',{name:'revised-name'})).status,200);
  const applied=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,409,applied.raw);assert.equal(f.issued,undefined);
+});
+
+test('installation validates the complete retained host label union before issuing an Agent identity',async t=>{
+ let installations=0;const f=await fixture(t,{},async input=>{if(input.enrollmentToken)installations++;return {stdout:checkOutput,stderr:'',stages:[]};});
+ const h=await host(f,'label-union'),tasks=new NodeStore(f.db,()=>now);
+ tasks.label('Existing label','existing',true);tasks.label('Install label','install',true);
+ tasks.setHostLabels(h.id,['existing']);
+ tasks.task({name:'Existing metrics',type:'host',enabled:true,label_ids:['existing'],config:{collect_interval_seconds:15,host_collectors:['memory']}},'existing-metrics',true);
+ tasks.task({name:'Install metrics',type:'host',enabled:true,label_ids:['install'],config:{collect_interval_seconds:30,host_collectors:['memory']}},'install-metrics',true);
+ const check=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});
+ const plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:check.data.id,version:'0.1.0',arch:'amd64',initial_label_id:'install'});assert.equal(plan.status,201,plan.raw);
+ const applied=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});
+ assert.equal(applied.status,502,applied.raw);assert.match(applied.raw,/间隔/);assert.equal(f.issued,undefined);assert.equal(installations,0);
+ assert.deepEqual(tasks.hostLabels(h.id),['existing']);assert.equal(f.db.get<any>('SELECT status FROM machine_deployments WHERE id=?',plan.data.id)?.status,'failed');
+ tasks.task({...tasks.getTask('install-metrics'),config:{collect_interval_seconds:15,host_collectors:['memory']}},'install-metrics',false);
+ const safePlan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:check.data.id,version:'0.1.0',arch:'amd64',initial_label_id:'install'});
+ const installed=await f.request(`/machines/${h.id}/deployments/${safePlan.data.id}/apply`,'POST',{confirm:true});
+ assert.equal(installed.status,200,installed.raw);assert.equal(installations,1);assert.deepEqual(tasks.hostLabels(h.id),['existing','install']);
 });
 
 test('host deletion requires credentials and pending deployments to be cleared first',async t=>{

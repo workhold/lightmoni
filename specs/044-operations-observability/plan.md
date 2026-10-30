@@ -22,3 +22,5 @@
 中心运行日志已接 RuntimeMonitor，Agent runtime_events 已有 outbox，但运维/任务/主机生命周期主要是 SQLite。新增系统事件持久 outbox，事务触发器记录白名单元数据，对既有记录幂等补录；复用 Ingest.internal 写入现有 `_lm_lightmoni_log`（公开 `lightmoni_log`）。审批/任务/配置状态不迁离 SQLite。系统日志抽屉通过统一 Query 读取 ClickHouse，保留控制回执详情接口。系统日志采集不因关闭性能自监控而关闭。
 
 全日志表盘点还包括 Key 接入事件、节点移除、终端连接/关闭元数据、告警事件/响应及 AI 告警提案应用审计。这些记录也导出白名单身份、动作和状态；禁止复制终端字节、告警联系人、通知载荷和 AI 对话或加密回执。终端连接/关闭分别形成事件。
+
+提交期间同步主干新合入的 SDD 043 任务中心：保留主机标签与主机任务入口、Agent 新任务 runner 和心跳能力；将 task_runs 的执行/取消/结果核对元数据接入同一 outbox，不导出脚本 stdout/stderr。

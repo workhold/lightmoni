@@ -51,7 +51,7 @@ db.run('UPDATE agents SET host_id=? WHERE id=?',agent.identity.host_id,'qa-agent
 const ingest=new Ingest(cat,auth,undefined,credentials);ingest.register();const logs=new SystemLogs(deps,ingest);logs.start();
 router.get('/api/v1/machines',ctx=>ctx.json(db.all<any>('SELECT * FROM managed_machines').map(m=>({...m,port:22,username:'deploy',agent_status:m.agent_id==='qa-agent'?'online':'offline',connection_method:'direct_ssh',created_at:timestamp,updated_at:timestamp,capabilities:{terminal:{available:false},ssh_check:{available:false},deploy_agent:{available:false}},credential_count:0,active_credential_count:0,active_ssh_credential_count:0,active_ssh_key_count:0}))));
 router.get('/api/v1/agents',ctx=>ctx.json(db.all<any>('SELECT * FROM agents').map(a=>({...a,heartbeat:JSON.parse(a.heartbeat||'{}'),machine_id:a.id==='qa-agent'?'qa-host-a':'qa-host-b',online:a.id==='qa-agent'}))));
-router.get('/api/v1/agent-task-labels',ctx=>ctx.json([]));
+router.get('/api/v1/agent-task-labels',ctx=>ctx.json([]));router.get('/api/v1/host-labels',ctx=>ctx.json([]));
 router.get('/api/v1/auth/me',ctx=>ctx.json(user));router.get('/api/v1/user/preferences',ctx=>ctx.json({default_homepage:'/applications'}));router.get('/api/v1/assistant/providers',ctx=>ctx.json({providers:[]}));router.get('/api/v1/assistant/sessions',ctx=>ctx.json({sessions:[]}));
 router.get('/api/v1/qa/state',ctx=>ctx.json({app:app.id,app2:app2.id,gateway:gateway.id,site:site.id,cluster:cluster.id,cluster2:cluster2.id,machine:'qa-host-a'}));
 router.get('/api/v1/qa/collect',async ctx=>{await collect();ctx.json({ok:true});});

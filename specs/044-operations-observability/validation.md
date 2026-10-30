@@ -1,6 +1,6 @@
 # SDD 044 验收记录
 
-日期：2026-10-30。分支 `codex/044-operations-observability`，基于 SDD 042 的 bc57c82；不包含原工作树未提交的 SDD 043 代码。提交前已 fetch `origin/main`，当前远端主干 ba892c4 是本分支祖先，无冲突。GitHub PR 以 main 为目标，依赖 #18；未合入、未部署生产。
+日期：2026-10-30。分支 `codex/044-operations-observability`，基于 SDD 042 的 bc57c82；不包含原工作树未提交的 SDD 043 代码。提交期间远端主干更新到0ab3e25（#17任务中心），已合并主干并保留双方设计章节、主机标签/任务入口及 Agent runner；另将任务中心执行/取消/结果核对元数据接入系统日志。GitHub PR 以 main 为目标，依赖 #18；未合入、未部署生产。
 
 ## 最终行为与存储
 
@@ -9,17 +9,17 @@
 - 主机可查看实际实例对应的平台应用、全部 Docker 快照（含停止与外部容器）；应用列表支持主机和集群组合筛选，实际实例查询使用实例表而非截断的状态摘要。
 - 每个应用自动派生监控入口，无需创建大盘。按集群、部署、容器查询 CPU、内存、网络和磁盘速率及增量 stdout/stderr；关联网站提供按集群统计的分钟平均 QPS 和耗时。
 - 全部应用自动指标共用 `_lm_metric_lightmoni_application_gauge`，应用日志共用 `_lm_log_lightmoni_application`；公开视图分别为 `metric_lightmoni_application_gauge`、`log_lightmoni_application`。
-- 平台运行、Agent、运维/任务/发布、主机生命周期、凭据与 Key 接入、节点移除、终端连接/关闭、告警/响应和 AI 告警提案应用审计，统一进入平台系统表 `_lm_lightmoni_log` / `lightmoni_log`。SQLite 保留事务控制状态和可靠投递 outbox。任务解释脱敏；终端内容、脚本、环境、联系人、通知载荷、AI 对话和加密回执不复制到日志。
+- 平台运行、Agent、运维/任务/发布、主机生命周期、凭据与 Key 接入、节点移除、终端连接/关闭、告警/响应和 AI 告警提案应用审计及任务中心执行状态，统一进入平台系统表 `_lm_lightmoni_log` / `lightmoni_log`。SQLite 保留事务控制状态和可靠投递 outbox。任务解释脱敏；终端内容、脚本、环境、联系人、通知载荷、AI 对话和加密回执不复制到日志。
 
 ## 自动检查
 
 在 runtime 目录运行：
 
 ```sh
-node --import tsx --test --test-concurrency=1 test/agent.test.ts test/nodes.test.ts test/platform-api.test.ts test/platform-clusters.test.ts test/platform-executor.test.ts test/platform-nginx.test.ts test/ingest-compat.test.ts test/application-observability.test.ts
+node --import tsx --test --test-concurrency=1 test/agent.test.ts test/nodes.test.ts test/platform-api.test.ts test/platform-clusters.test.ts test/platform-executor.test.ts test/platform-nginx.test.ts test/ingest-compat.test.ts test/application-observability.test.ts test/task-center-model.test.ts test/task-center.test.ts test/assistant-tasks.test.ts test/managed-machines.test.ts test/node-lifecycle.test.ts
 ```
 
-76 / 76 通过，0 失败、0 跳过。原始结果见 [runtime-tests.txt](evidence/runtime-tests.txt)。覆盖原平台与 Agent 行为、共享物理表、归属覆盖与跨 Agent 拒绝、系统表禁止业务 Key 写入、清单白名单、队列失败游标不推进、同纳秒多行/跨读取上限补传、末行无换行、outbox 回滚与重试、完整联合主键补录、脱敏解释及各审计来源；超过 overview 100 条窗口的历史回执仍可按 ID 读取、脱敏并限制管理员权限。
+169 / 169 通过，0 失败、0 跳过。原始结果见 [runtime-tests.txt](evidence/runtime-tests.txt)。覆盖原平台与 Agent 行为、共享物理表、归属覆盖与跨 Agent 拒绝、系统表禁止业务 Key 写入、清单白名单、队列失败游标不推进、同纳秒多行/跨读取上限补传、末行无换行、outbox 回滚与重试、完整联合主键补录、脱敏解释及各审计来源；超过 overview 100 条窗口的历史回执仍可按 ID 读取、脱敏并限制管理员权限。
 
 `npm --prefix runtime run typecheck`、`npm --prefix web run typecheck`、`git diff --check` 通过。按相关变更选择检查，没有运行全量测试或生产构建。
 
@@ -48,7 +48,7 @@ node --import tsx --test --test-concurrency=1 test/agent.test.ts test/nodes.test
 | 主机平台应用 → 全部 Docker → 外部容器搜索 | 通过 | 通过 | 通过 |
 | 主机与集群组合筛选、刷新后仍有正确应用 | 通过 | 通过 | 通过 |
 
-另确认监控页面刷新后保留网站流量标签。安装入口仅进入配置表单，没有提交安装。日志右上入口打开、刷新和回执列可见。
+合并最新主干后，主机应用与 Docker 流程又连续三次通过，主机标签与主机任务入口同时保留。另确认监控页面刷新后保留网站流量标签。安装入口仅进入配置表单，没有提交安装。日志右上入口打开、刷新和回执列可见。
 
 图片/录屏按仓库政策保存在忽略目录 `artifacts/screenshots/specs/044-operations-observability/evidence/`，新克隆需重跑生成；可提交的探测报告位于 [reports](evidence/reports)。三处基本动效：打开商店抽屉、缓存分类指示与内容切换、Redis 安装按钮反馈及配置面板切换，证据 `store-motion/record.mp4` 和三帧；操作日志抽屉证据 `system-logs/record.mp4` 和三帧。数据台没有落地页滚动叙事要求。报告仅有测试 Vite 环境 favicon.ico 404，无业务接口失败或页面横向溢出。
 

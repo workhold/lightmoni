@@ -54,6 +54,8 @@ import { Collector } from "./collect.js";
 import { FileLogReader } from "./file-logs.js";
 import { checkProbe } from "./probe.js";
 import { AgentJobRunner } from "./jobs.js";
+import { AgentTaskRunner } from "./task-runner.js";
+import { SCRIPT_TASK_CAPABILITY } from "../shared/task-center.js";
 import {
   ReceiveError,
   requestBytes,
@@ -75,6 +77,7 @@ export class Agent {
   readonly files: FileLogReader;
   readonly applications: ApplicationObserver;
   readonly jobs?: AgentJobRunner;
+  readonly taskRunner?: AgentTaskRunner;
   tasks: RemoteConfig;
   tasksReady = false;
   revision = "";
@@ -153,6 +156,14 @@ export class Agent {
         dataDir: config.data_dir,
         pollIntervalMs: Math.max(5000, config.control_interval_seconds * 1000),
       });
+      this.taskRunner = new AgentTaskRunner({
+        endpoint: config.endpoint,
+        agentID: this.identity.agent_id,
+        controlCredential: config.control_credential,
+        dataCredential: config.data_credential,
+        dataDir: config.data_dir,
+        pollIntervalMs: Math.max(5000, config.control_interval_seconds * 1000),
+      });
     }
   }
   private safe(message: string) {
@@ -216,6 +227,7 @@ export class Agent {
       sdk: legacyStats,
       runtime_events: [...this.runtimeEvents],
       control_interval_seconds: this.config.control_interval_seconds,
+      task_capabilities: [SCRIPT_TASK_CAPABILITY],
     };
   }
   accept(batch: Batch, owned: boolean, cursor?: LogCursor): void {
@@ -875,6 +887,7 @@ export class Agent {
       this.fileLogLoop(),
       this.applicationLoop(),
       this.jobLoop(),
+      this.taskRunner?.run(this.controller.signal) ?? Promise.resolve(),
     ];
   }
   async run(parent?: AbortSignal) {
