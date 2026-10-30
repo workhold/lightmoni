@@ -192,6 +192,9 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
     },
     cluster: { machine_ids: [], port_start: 20000, port_end: 29999, nodes: [] },
     website: {
+      routing_mode:"manual",
+      dns_record_mode:resource?"address":"cname",
+      cluster_policies:[],
       cluster_ids: [],
       bindings: [{ domains: [], https: false, dns_enabled: false, locations: [] }],
       mode: "proxy",
@@ -225,6 +228,7 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
     value,
   }));
   if (kind === "website") {
+    spec.domain_routes = domainRouteValues(spec);
     spec.nginx = { ...spec.nginx, response_headers_text: headerText(spec.nginx?.response_headers) };
     spec.bindings = (spec.bindings ?? []).map((binding: Spec) => ({ ...binding, locations: (binding.locations ?? []).map((r: Spec) => ({ ...r,
       upstreams: (r.upstreams ?? []).map((u: any) => typeof u === "string" ? { url: u, weight: 1 } : u),
@@ -238,6 +242,24 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
   if (typeof spec.compose === "object")
     spec.compose = JSON.stringify(spec.compose, null, 2);
   return { name: resource?.name ?? "", spec };
+}
+export function websiteDomainClusters(spec:Spec,domain:string,available:string[]):string[]{
+  const selected=spec.domain_routes?.find((r:Spec)=>r.domain===domain)?.cluster_ids;
+  return selected===undefined?available:available.filter(id=>selected.includes(id));
+}
+export function websiteDomainPolicy(spec:Spec,domain:string,clusterId:string):Spec{
+  return {cluster_id:clusterId,enabled:true,weight:1,default:true,lines:[],...spec.cluster_policies?.find((p:Spec)=>p.cluster_id===clusterId),...spec.domain_routes?.find((r:Spec)=>r.domain===domain)?.cluster_policies?.find((p:Spec)=>p.cluster_id===clusterId)};
+}
+export function domainRouteValues(spec:Spec):Spec[]{
+  return [...new Set<string>((spec.bindings??[]).flatMap((b:Spec)=>b.domains??[]))].map(domain=>{const row=spec.domain_routes?.find((r:Spec)=>r.domain===domain)??{domain};return {...row,custom_policy:row.cluster_policies!==undefined}});
+}
+export function serializeDomainRoutes(rows:Spec[]=[],membershipSpec?:Spec):Spec[]{
+  return rows.map(row=>{
+    // Traffic-only forms do not register cluster assignment inputs. Keep the
+    // saved membership instead of silently widening it to follow-all.
+    const ids=membershipSpec?membershipSpec.domain_routes?.find((r:Spec)=>r.domain===row.domain)?.cluster_ids:row.cluster_ids;
+    return {domain:row.domain,...(ids!==undefined?{cluster_ids:ids}:{}),...(row.custom_policy?{cluster_policies:row.cluster_policies??[]}: {})};
+  });
 }
 export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
   const spec = { ...values };
@@ -267,6 +289,7 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
     } else delete spec.compose;
   }
   if (kind === "website") {
+    spec.domain_routes = serializeDomainRoutes(spec.domain_routes);
     spec.static_files = rowsMap(spec.file_rows);
     spec.nginx = { ...spec.nginx, response_headers: parseHeaders(spec.nginx?.response_headers_text) };
     delete spec.nginx.response_headers_text;

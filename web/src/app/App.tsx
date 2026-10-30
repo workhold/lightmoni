@@ -41,6 +41,7 @@ export default function Root(){
  const contextPageTitle=currentLink?.pageLabel??'监控工作台';
  const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:contextPageTitle}}),[publishedScope,location.pathname,location.search,contextPageTitle]);
  const[navCollapsed,setNavCollapsed]=useState(()=>{try{const saved=localStorage.getItem('lightmoni.nav.collapsed');return saved===null?window.innerWidth<1100:saved==='true'}catch{return window.innerWidth<1100}});
+ useEffect(()=>{const narrow=window.matchMedia('(max-width:680px)');const adapt=()=>{if(narrow.matches){setNavCollapsed(true);return;}try{const saved=localStorage.getItem('lightmoni.nav.collapsed');setNavCollapsed(saved===null?window.innerWidth<1100:saved==='true')}catch{setNavCollapsed(window.innerWidth<1100)}};adapt();narrow.addEventListener('change',adapt);return()=>narrow.removeEventListener('change',adapt)},[]);
  function toggleNavigation(){setNavCollapsed(value=>{try{localStorage.setItem('lightmoni.nav.collapsed',String(!value))}catch{}return !value})}
  useEffect(()=>{if(location.pathname==='/settings')setAssistant(false)},[location.pathname]);
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);

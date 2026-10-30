@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "OpenResty 管理抽屉调整OpenResty，新增部署集群和域名读回，网站主体不展开基础设施",
+    "托管网站一次选择服务与端口发现双集群，保存后刷新，流量设置独立关闭南方",
+    "同一绑定组双域名独立集群/权重保存刷新，配置预览隔离，独立流量关闭不影响另一域名",
+    "保存冲突显示错误且保留输入",
+    "手动网站按集群保存两份不同后端",
+    "已安装普通应用可修改集群安装配置",
+    "390px页面无溢出，入口/流量表单窄屏及200%动作可见"
+  ],
+  "errors": [],
+  "media": "artifacts/screenshots/specs/043-website-cluster-routing/evidence/domain-ui-2",
+  "dnsCatalogue": "browser fixture; real API covered separately"
+}

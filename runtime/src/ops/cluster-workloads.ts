@@ -14,7 +14,7 @@ import {
 } from "../operations/platform.js";
 import { normalizeLocations, normalizeNginx } from "../operations/nginx.js";
 import { getCertificateMaterial } from "./certificates.js";
-import { ensureDnsRecords } from "./cloud.js";
+import { ensureDnsRecords, normalizeDomain, CloudError } from "./cloud.js";
 import type {
   PlatformOptions,
   PlatformResource,
@@ -77,6 +77,32 @@ const names = (value: any) =>
       fail(400, "invalid_website_domain");
     return d;
   });
+const domainClusters = (
+  spec: Row,
+  domain: string,
+  available: string[],
+): string[] => {
+  const selected = spec.domain_routes?.find(
+    (r: Row) => r.domain === domain,
+  )?.cluster_ids;
+  return selected === undefined
+    ? available
+    : available.filter((cid) => selected.includes(cid));
+};
+const domainNames = (spec: Row): string[] =>
+  (spec.bindings ?? []).flatMap((b: Row) => b.domains);
+const policyFor = (spec: Row, cid: string, domain?: string): Row => ({
+  enabled: true,
+  weight: 1,
+  default: true,
+  lines: [],
+  ...(spec.cluster_policies ?? []).find((p: Row) => p.cluster_id === cid),
+  ...(domain
+    ? spec.domain_routes
+        ?.find((r: Row) => r.domain === domain)
+        ?.cluster_policies?.find((p: Row) => p.cluster_id === cid)
+    : {}),
+});
 export function createClusterWorkloads(
   options: PlatformOptions & {
     ensureCertificateMaterial?: (id: string, actor: string) => Promise<void>;
@@ -592,6 +618,13 @@ export function createClusterWorkloads(
       fail(400, "invalid_application_source");
     if (!["generic", "openresty"].includes(role))
       fail(400, "invalid_application_role");
+    if (
+      role === "openresty" &&
+      store
+        .list("application")
+        .some((a) => a.id !== context?.id && a.spec.role === "openresty")
+    )
+      fail(409, "openresty_already_installed");
     if (previous && previous.role !== role)
       fail(409, "application_role_immutable");
     if (source.type === "store") {
@@ -734,7 +767,22 @@ export function createClusterWorkloads(
         )
       )
         fail(409, "openresty_already_installed");
+      const gateway: Row = {};
+      if (role === "openresty" && d.gateway_domain) {
+        gateway.gateway_domain = normalizeDomain(d.gateway_domain);
+        if (d.gateway_dns_zone_id) {
+          const zone = store.get(d.gateway_dns_zone_id, "dns_zone");
+          if (
+            gateway.gateway_domain !== zone.spec.scope &&
+            !gateway.gateway_domain.endsWith("." + zone.spec.scope)
+          )
+            fail(400, "gateway_domain_outside_dns_scope");
+          gateway.gateway_dns_zone_id = zone.id;
+        }
+      } else if (d.gateway_dns_zone_id)
+        fail(400, "openresty_cluster_domain_required");
       return {
+        ...gateway,
         cluster_id: c.id,
         machine_ids: targets,
         replicas,
@@ -743,6 +791,16 @@ export function createClusterWorkloads(
         stateful_acknowledged: d.stateful_acknowledged === true,
       };
     });
+    const gatewayNames = deployments
+      .map((d: Row) => d.gateway_domain)
+      .filter(Boolean);
+    if (new Set(gatewayNames).size !== gatewayNames.length)
+      fail(400, "duplicate_gateway_domain");
+    for (const site of store.list("website"))
+      for (const saved of snapshots(site))
+        for (const b of saved.bindings ?? [])
+          if (b.domains.some((name: string) => gatewayNames.includes(name)))
+            fail(400, "gateway_domain_conflicts_with_website");
     if (
       new Set(deployments.map((d: Row) => d.cluster_id)).size !==
       deployments.length
@@ -795,6 +853,18 @@ export function createClusterWorkloads(
             for (const l of b.locations ?? [])
               for (const target of l.cluster_targets ?? []) {
                 if (target.application_id !== context?.id) continue;
+                if (
+                  spec.routing_mode === "managed" &&
+                  spec.service_application_id === context?.id
+                ) {
+                  if (
+                    !declared.some(
+                      (p: Row) => p.name === spec.service_port_name,
+                    )
+                  )
+                    fail(409, "application_port_in_use");
+                  continue;
+                }
                 if (
                   !deployments.some(
                     (d: Row) => d.cluster_id === target.cluster_id,
@@ -885,6 +955,12 @@ export function createClusterWorkloads(
       );
   }
   function beforeDeleteApplication(r: PlatformResource) {
+    if (dnsPending.has(r.id)) fail(409, "application_dns_refresh_in_progress");
+    if (
+      tableExists("ops_dns_owned") &&
+      db.get("SELECT id FROM ops_dns_owned WHERE owner_id=?", r.id)
+    )
+      fail(409, "dns_records_cleanup_pending");
     if (rows(r.id, true).some((i) => !["stopped", "removed"].includes(i.state)))
       fail(409, "stop_instances_before_deleting");
     for (const site of store.list("website"))
@@ -898,6 +974,57 @@ export function createClusterWorkloads(
         )
           fail(409, "platform_resource_in_use");
   }
+  function normalizeTrafficPolicies(inputs: Row[]): Row[] {
+    if (!Array.isArray(inputs) || inputs.length > 100)
+      fail(400, "invalid_website_cluster_policy");
+    const policies = inputs.map((p: Row) => {
+      if (!p || typeof p !== "object" || Array.isArray(p))
+        fail(400, "invalid_website_cluster_policy");
+      cluster(p.cluster_id);
+      if (
+        !Number.isInteger(p.weight ?? 1) ||
+        (p.weight ?? 1) < 1 ||
+        (p.weight ?? 1) > 100
+      )
+        fail(400, "invalid_website_cluster_weight");
+      if (
+        (p.enabled !== undefined && typeof p.enabled !== "boolean") ||
+        (p.default !== undefined && typeof p.default !== "boolean")
+      )
+        fail(400, "invalid_website_cluster_policy");
+      if (!Array.isArray(p.lines ?? []) || (p.lines ?? []).length > 100)
+        fail(400, "invalid_dns_line");
+      const lines = (p.lines ?? []).map((l: Row) => {
+        if (
+          !l ||
+          typeof l !== "object" ||
+          typeof l.id !== "string" ||
+          !l.id ||
+          l.id.length > 99 ||
+          /[\r\n\0]/.test(l.id) ||
+          typeof l.name !== "string" ||
+          !l.name ||
+          l.name.length > 100
+        )
+          fail(400, "invalid_dns_line");
+        return { id: l.id, name: l.name };
+      });
+      if (new Set(lines.map((l: Row) => l.id)).size !== lines.length)
+        fail(400, "invalid_dns_line");
+      return {
+        cluster_id: p.cluster_id,
+        enabled: p.enabled !== false,
+        weight: p.weight ?? 1,
+        default: p.default !== false,
+        lines,
+      };
+    });
+    if (
+      new Set(policies.map((p: Row) => p.cluster_id)).size !== policies.length
+    )
+      fail(400, "duplicate_website_cluster_policy");
+    return policies;
+  }
   function validateWebsite(
     input: Row,
     previous?: Row,
@@ -906,7 +1033,28 @@ export function createClusterWorkloads(
     const s = normalizeLegacy("website", input);
     if (s.cluster_overrides || s.scope || s.openresty_application_id)
       fail(400, "website_cluster_override_not_supported");
-    const ids = list(s.cluster_ids ?? [], "cluster_ids");
+    const routing = s.routing_mode ?? "manual",
+      dnsMode = s.dns_record_mode ?? "address";
+    if (!["manual", "managed"].includes(routing))
+      fail(400, "invalid_website_routing_mode");
+    if (!["address", "cname"].includes(dnsMode))
+      fail(400, "invalid_website_dns_mode");
+    let service: PlatformResource | undefined;
+    if (routing === "managed") {
+      service = store.get(s.service_application_id, "application");
+      const p = service.spec.ports.find(
+        (p: Row) =>
+          p.name === s.service_port_name &&
+          p.protocol === "tcp" &&
+          ["http", "https"].includes(p.app_protocol),
+      );
+      if (service.spec.role === "openresty" || !p)
+        fail(400, "application_port_not_found");
+      if (s.mode === "static") fail(400, "invalid_website_routing_mode");
+    }
+    const ids = service
+      ? (service.spec.deployments.map((d: Row) => d.cluster_id) as string[])
+      : list(s.cluster_ids ?? [], "cluster_ids");
     if (!ids.length) fail(400, "website_cluster_required");
     ids.forEach(cluster);
     if (
@@ -916,13 +1064,49 @@ export function createClusterWorkloads(
     )
       fail(400, "website_binding_required");
     const allNames = new Set<string>();
+    for (const binding of s.bindings)
+      for (const domain of names(binding.domains)) {
+        if (allNames.has(domain)) fail(409, "website_domain_conflict");
+        allNames.add(domain);
+      }
+    if (
+      !Array.isArray(s.domain_routes ?? []) ||
+      (s.domain_routes ?? []).length > 5000
+    )
+      fail(400, "invalid_website_domain_route");
+    const seenRoutes = new Set<string>();
+    const domainRoutes = (s.domain_routes ?? []).map((route: Row) => {
+      if (
+        !route ||
+        typeof route !== "object" ||
+        typeof route.domain !== "string"
+      )
+        fail(400, "invalid_website_domain_route");
+      const domain = names([route.domain])[0];
+      if (!allNames.has(domain) || seenRoutes.has(domain))
+        fail(400, "invalid_website_domain_route");
+      seenRoutes.add(domain);
+      const out: Row = { domain };
+      if (route.cluster_ids !== undefined) {
+        out.cluster_ids = list(route.cluster_ids, "domain_cluster_ids");
+        if (!out.cluster_ids.length)
+          fail(400, "website_domain_cluster_required");
+        if (out.cluster_ids.some((cid: string) => !ids.includes(cid)))
+          fail(400, "website_domain_cluster_mismatch");
+      }
+      if (route.cluster_policies !== undefined)
+        out.cluster_policies = normalizeTrafficPolicies(route.cluster_policies);
+      return out;
+    });
+    const domainSpec = { ...s, domain_routes: domainRoutes };
     const bindings = s.bindings.map((b: Row) => {
       const domains = names(b.domains);
       if (!domains.length) fail(400, "website_domain_required");
-      for (const d of domains) {
-        if (allNames.has(d)) fail(409, "website_domain_conflict");
-        allNames.add(d);
-      }
+      const bindingIds = ids.filter((cid) =>
+        domains.some((domain) =>
+          domainClusters(domainSpec, domain, ids).includes(cid),
+        ),
+      );
       const locations = (b.locations ?? []).map((raw: Row) => {
         if (
           [
@@ -946,7 +1130,19 @@ export function createClusterWorkloads(
         delete normalized.unavailable;
         const targets = noUpstream
           ? []
-          : (raw.cluster_targets ?? []).map((t: Row) => {
+          : (service
+              ? bindingIds.map((cluster_id) => ({
+                  cluster_id,
+                  target: "application",
+                  application_id: service!.id,
+                  port_name: s.service_port_name,
+                }))
+              : (raw.cluster_targets ?? []).filter(
+                  (t: Row) =>
+                    !ids.includes(t.cluster_id) ||
+                    bindingIds.includes(t.cluster_id),
+                )
+            ).map((t: Row) => {
               if (
                 Object.keys(t).some(
                   (k) =>
@@ -1006,7 +1202,9 @@ export function createClusterWorkloads(
           new Set(targets.map((t: Row) => t.cluster_id)).size !==
             targets.length ||
           (!noUpstream &&
-            ids.some((cid) => !targets.some((t: Row) => t.cluster_id === cid)))
+            bindingIds.some(
+              (cid) => !targets.some((t: Row) => t.cluster_id === cid),
+            ))
         )
           fail(400, "website_cluster_target_required");
         return { ...normalized, cluster_targets: targets };
@@ -1063,10 +1261,72 @@ export function createClusterWorkloads(
     for (const cid of previous?.cluster_ids ?? [])
       if (
         !ids.includes(cid) &&
+        routing !== "managed" &&
         deploymentRow("website", context?.id ?? "", cid)?.enabled
       )
         fail(409, "website_deployment_in_use");
+    if (
+      !Array.isArray(s.cluster_policies ?? []) ||
+      (s.cluster_policies ?? []).length > 100
+    )
+      fail(400, "invalid_website_cluster_policy");
+    const policyInputs = [...(s.cluster_policies ?? [])];
+    // Editing a draft service selection must not reset the traffic switch of a
+    // cluster that still serves the previously published website.
+    for (const policy of previous?.cluster_policies ?? [])
+      if (
+        !ids.includes(policy.cluster_id) &&
+        !policyInputs.some((p) => p.cluster_id === policy.cluster_id) &&
+        deploymentRow("website", context?.id ?? "", policy.cluster_id)?.enabled
+      )
+        policyInputs.push(policy);
+    const policies = normalizeTrafficPolicies(policyInputs);
+    if (dnsMode === "cname")
+      for (const binding of bindings.filter((b: Row) => b.dns_enabled))
+        for (const domain of binding.domains) {
+          const domainIds = domainClusters(domainSpec, domain, ids),
+            enabled = domainIds.filter(
+              (cid) =>
+                policyFor(
+                  { ...domainSpec, cluster_policies: policies },
+                  cid,
+                  domain,
+                ).enabled !== false,
+            );
+          if (
+            enabled.length &&
+            !enabled.some(
+              (cid) =>
+                policyFor(
+                  { ...domainSpec, cluster_policies: policies },
+                  cid,
+                  domain,
+                ).default !== false,
+            )
+          )
+            fail(400, "website_default_cluster_required");
+          for (const cid of enabled) {
+            const gateway = store
+              .list("application")
+              .find((a) => a.spec.role === "openresty")
+              ?.spec.deployments.find((d: Row) => d.cluster_id === cid);
+            if (!gateway?.gateway_domain)
+              fail(400, "openresty_cluster_domain_required");
+            if (allNames.has(gateway.gateway_domain))
+              fail(400, "gateway_domain_conflicts_with_website");
+          }
+        }
     return {
+      routing_mode: routing,
+      dns_record_mode: dnsMode,
+      cluster_policies: policies,
+      ...(domainRoutes.length ? { domain_routes: domainRoutes } : {}),
+      ...(service
+        ? {
+            service_application_id: service.id,
+            service_port_name: s.service_port_name,
+          }
+        : {}),
       cluster_ids: ids,
       bindings,
       nginx: normalizeNginx(s.nginx),
@@ -1080,12 +1340,110 @@ export function createClusterWorkloads(
         : {}),
     };
   }
+  function websiteClusters(r: PlatformResource): string[] {
+    if (r.spec.routing_mode === "managed")
+      return store
+        .get(r.spec.service_application_id, "application")
+        .spec.deployments.map((d: Row) => d.cluster_id);
+    return r.spec.cluster_ids ?? [];
+  }
+  function publishedDomainMemberships(r: PlatformResource): Row {
+    const records = db.all<Row>(
+      "SELECT cluster_id FROM ops_platform_website_deployments WHERE website_id=? AND desired_revision>0",
+      r.id,
+    );
+    const result: Row = {},
+      preferred = websiteClusters(publishedWebsite(r));
+    for (const domain of domainNames(publishedWebsite(r).spec))
+      result[domain] = [];
+    if (!records.length) {
+      const available = websiteClusters(r);
+      for (const domain of domainNames(r.spec))
+        result[domain] = domainClusters(r.spec, domain, available);
+      return result;
+    }
+    // Independently published clusters may still serve different frozen revisions.
+    // Include each published range until that cluster receives its cleanup package.
+    for (const record of records) {
+      const site = desired(r, record.cluster_id),
+        available = websiteClusters(site);
+      for (const domain of domainNames(site.spec)) {
+        result[domain] ??= [];
+        if (
+          domainClusters(site.spec, domain, available).includes(
+            record.cluster_id,
+          ) &&
+          !result[domain].includes(record.cluster_id)
+        )
+          result[domain].push(record.cluster_id);
+      }
+    }
+    for (const ids of Object.values(result) as string[][])
+      ids.sort((a, b) => {
+        const ai = preferred.indexOf(a),
+          bi = preferred.indexOf(b);
+        return (ai < 0 ? 100 : ai) - (bi < 0 ? 100 : bi) || a.localeCompare(b);
+      });
+    return result;
+  }
+  function publishedWebsite(r: PlatformResource) {
+    const latest = db.get<Row>(
+      "SELECT cluster_id FROM ops_platform_website_deployments WHERE website_id=? AND desired_revision>0 ORDER BY desired_revision DESC LIMIT 1",
+      r.id,
+    );
+    return latest ? desired(r, latest.cluster_id) : r;
+  }
+  function followManagedWebsite(r: PlatformResource) {
+    const source = publishedWebsite(r);
+    if (source.spec.routing_mode !== "managed") return;
+    const ids = websiteClusters(source),
+      existing = db.all<Row>(
+        "SELECT * FROM ops_platform_website_deployments WHERE website_id=?",
+        r.id,
+      );
+    const published = existing
+      .filter((d) => d.enabled && d.desired_revision > 0)
+      .sort((a, b) => b.desired_revision - a.desired_revision)[0];
+    for (const cid of ids) {
+      const row = existing.find((d) => d.cluster_id === cid);
+      if (row) {
+        if (!row.desired_revision && published)
+          patchDeployment("website", r.id, cid, {
+            desired_revision: published.desired_revision,
+            enabled: true,
+            policy_actor: published.policy_actor,
+          });
+        continue;
+      }
+      db.run(
+        "INSERT INTO ops_platform_website_deployments(website_id,cluster_id,desired_revision,enabled,policy_actor) VALUES(?,?,?,?,?)",
+        r.id,
+        cid,
+        published?.desired_revision ?? 0,
+        published ? 1 : 0,
+        published?.policy_actor ?? "",
+      );
+    }
+    for (const d of existing)
+      if (!ids.includes(d.cluster_id) && d.enabled)
+        patchDeployment("website", r.id, d.cluster_id, {
+          enabled: false,
+          active: false,
+        });
+    store.patchStatus(r.id, {
+      actual_cluster_ids: [
+        ...new Set<string>(
+          Object.values(publishedDomainMemberships(r)).flat() as string[],
+        ),
+      ],
+    });
+  }
   function afterSaveWebsite(r: PlatformResource) {
     for (const d of db.all<Row>(
-      "SELECT cluster_id FROM ops_platform_website_deployments WHERE website_id=?",
+      "SELECT * FROM ops_platform_website_deployments WHERE website_id=?",
       r.id,
     ))
-      if (!r.spec.cluster_ids.includes(d.cluster_id))
+      if (!r.spec.cluster_ids.includes(d.cluster_id) && !d.desired_revision)
         db.run(
           "DELETE FROM ops_platform_website_deployments WHERE website_id=? AND cluster_id=?",
           r.id,
@@ -1100,6 +1458,11 @@ export function createClusterWorkloads(
   }
   function beforeDeleteWebsite(r: PlatformResource) {
     if (dnsPending.has(r.id)) fail(409, "website_dns_refresh_in_progress");
+    if (
+      tableExists("ops_dns_owned") &&
+      db.get("SELECT id FROM ops_dns_owned WHERE owner_id=?", r.id)
+    )
+      fail(409, "dns_records_cleanup_pending");
     if (
       db.get(
         "SELECT website_id FROM ops_platform_website_deployments WHERE website_id=? AND enabled=1",
@@ -1325,15 +1688,31 @@ export function createClusterWorkloads(
     };
   }
   function siteBundle(site: PlatformResource, cid: string, preview = false) {
-    return site.spec.bindings.map((b: Row, n: number) => {
+    return site.spec.bindings.flatMap((b: Row, n: number) => {
+      const domains = b.domains.filter((domain: string) =>
+        domainClusters(site.spec, domain, websiteClusters(site)).includes(cid),
+      );
+      if (!domains.length) return [];
       const routes = b.locations.map((l: Row) => {
         const out = structuredClone(l),
-          target = l.cluster_targets?.find((t: Row) => t.cluster_id === cid);
+          target =
+            site.spec.routing_mode === "managed" &&
+            l.action !== "return" &&
+            l.action !== "deny"
+              ? {
+                  target: "application",
+                  application_id: site.spec.service_application_id,
+                  port_name: site.spec.service_port_name,
+                }
+              : l.cluster_targets?.find((t: Row) => t.cluster_id === cid);
         delete out.cluster_targets;
         out.target = "upstream";
         if (target?.target === "application") {
           const app = store.get(target.application_id, "application");
-          if (!app.spec.deployments?.some((d: Row) => d.cluster_id === cid))
+          if (
+            !app.spec.deployments?.some((d: Row) => d.cluster_id === cid) &&
+            site.spec.routing_mode !== "managed"
+          )
             fail(400, "application_not_deployed_in_cluster");
           const p = app.spec.ports.find(
             (p: Row) => p.name === target.port_name,
@@ -1373,7 +1752,7 @@ export function createClusterWorkloads(
       }
       return {
         id: hash(site.id + ":" + n).slice(0, 32),
-        domains: b.domains,
+        domains,
         mode: site.spec.mode === "static" ? "static" : "proxy",
         locations: routes,
         nginx,
@@ -1767,6 +2146,11 @@ export function createClusterWorkloads(
     const all = Object.values(deployments) as Row[];
     store.patchStatus(siteID, {
       deployments,
+      actual_cluster_ids: [
+        ...new Set<string>(
+          Object.values(publishedDomainMemberships(current)).flat() as string[],
+        ),
+      ],
       enabled: all.some((d) => d.enabled),
       active: all.some((d) => d.active),
       synchronized: all.length > 0 && all.every((d) => d.synchronized),
@@ -1997,41 +2381,137 @@ export function createClusterWorkloads(
       ))
         websiteStatus(d.website_id, i.cluster_id);
   });
-  function startDNS(current: PlatformResource) {
-    if (closed || dnsPending.has(current.id) || dnsPending.size >= 8) return;
+  const trafficPolicy = (
+    r: PlatformResource,
+    cid: string,
+    domain?: string,
+  ): Row => {
+    if (
+      domain &&
+      (!domainNames(r.spec).includes(domain) ||
+        !websiteClusters(r).includes(cid))
+    ) {
+      const source = publishedWebsite(r);
+      const route = source.spec.domain_routes?.find(
+        (v: Row) => v.domain === domain,
+      );
+      return policyFor(
+        { ...r.spec, domain_routes: route ? [route] : [] },
+        cid,
+        domain,
+      );
+    }
+    return policyFor(r.spec, cid, domain);
+  };
+  function servingGateway(i: Row) {
+    return (
+      !i.retired &&
+      i.healthy === 1 &&
+      i.desired_state === "running" &&
+      !["stopped", "removed", "failed", "unknown"].includes(i.state) &&
+      machine(i.machine_id).agent_id === i.agent_id &&
+      online(i.agent_id) &&
+      deps.now().getTime() - Date.parse(i.last_seen) < 120000
+    );
+  }
+  function startGatewayDNS(app: PlatformResource) {
     const grouped = new Map<string, Row[]>();
+    for (const d of app.spec.deployments) {
+      if (!d.gateway_domain || !d.gateway_dns_zone_id) continue;
+      if (!grouped.has(d.gateway_dns_zone_id))
+        grouped.set(d.gateway_dns_zone_id, []);
+      const deployment = deploymentRow("application", app.id, d.cluster_id);
+      if (!deployment?.enabled) continue;
+      for (const i of rows(app.id, false, d.cluster_id).filter(
+        servingGateway,
+      )) {
+        const ip = capacity(cluster(d.cluster_id), i.machine_id).public_address;
+        if (ip && isIP(ip))
+          grouped.get(d.gateway_dns_zone_id)!.push({
+            name: d.gateway_domain,
+            type: isIP(ip) === 6 ? "AAAA" : "A",
+            value: ip,
+            ttl: 600,
+          });
+      }
+    }
+    syncDNS(app, grouped, app.authorized_by);
+  }
+  function startDNS(current: PlatformResource) {
+    const grouped = new Map<string, Row[]>(),
+      traffic: Row = {};
     let actor = current.authorized_by;
+    const memberships = publishedDomainMemberships(current),
+      actual = [
+        ...new Set<string>(Object.values(memberships).flat() as string[]),
+      ];
+    const domainTraffic: Row = {};
+    let domainBytes = 0,
+      domainTruncated = false;
+    for (const domain of Object.keys(memberships)) {
+      const value = {
+        cluster_ids: memberships[domain],
+        eligible_cluster_ids: [] as string[],
+      };
+      domainBytes += Buffer.byteLength(JSON.stringify({ [domain]: value }));
+      if (domainBytes > 12000) {
+        domainTruncated = true;
+        continue;
+      }
+      domainTraffic[domain] = value;
+    }
+    for (const cid of actual) {
+      const app = openresty(cid),
+        deployment = app?.spec.deployments.find(
+          (d: Row) => d.cluster_id === cid,
+        ),
+        policy = trafficPolicy(current, cid);
+      traffic[cid] = {
+        ...policy,
+        gateway_domain: deployment?.gateway_domain ?? "",
+        eligible: false,
+      };
+    }
     for (const d of db.all<Row>(
       "SELECT * FROM ops_platform_website_deployments WHERE website_id=? AND desired_revision>0",
       current.id,
     )) {
       const site = desired(current, d.cluster_id),
-        state = deploymentStatus(d);
+        state = deploymentStatus(d),
+        policy = trafficPolicy(current, d.cluster_id);
       actor = d.policy_actor || actor;
       for (const binding of site.spec.bindings.filter(
         (b: Row) => b.dns_enabled,
       ))
         if (!grouped.has(binding.dns_zone_id))
           grouped.set(binding.dns_zone_id, []);
+      if (!d.enabled || !websiteClusters(site).includes(d.cluster_id)) continue;
+      if (
+        site.spec.routing_mode === "managed" &&
+        !endpoints(
+          site.spec.service_application_id,
+          site.spec.service_port_name,
+          d.cluster_id,
+        ).length
+      ) {
+        if (traffic[d.cluster_id])
+          traffic[d.cluster_id].error = "service_backend_not_ready";
+        continue;
+      }
       const app = openresty(d.cluster_id);
       if (!app) continue;
-      const c = cluster(d.cluster_id);
+      traffic[d.cluster_id] ??= { ...policy, eligible: false };
+      const deployment = app.spec.deployments.find(
+        (p: Row) => p.cluster_id === d.cluster_id,
+      );
+      if (!deploymentRow("application", app.id, d.cluster_id)?.enabled)
+        continue;
       for (const i of rows(app.id, false, d.cluster_id)) {
         const receipt = state.instances?.[i.id];
-        // A queued reload still serves its last verified bundle. Keep that bundle's
-        // DNS leases until a new receipt, a failure, or observation expiry.
-        const serving =
-          !i.retired &&
-          i.healthy === 1 &&
-          i.desired_state === "running" &&
-          !["stopped", "removed", "failed", "unknown"].includes(i.state) &&
-          machine(i.machine_id).agent_id === i.agent_id &&
-          online(i.agent_id) &&
-          deps.now().getTime() - Date.parse(i.last_seen) < 120000;
         if (
-          !serving ||
+          !servingGateway(i) ||
           receipt?.state !== "succeeded" ||
-          (receipt.enabled ?? !!d.enabled) === false
+          receipt.enabled === false
         )
           continue;
         const version = db.get<Row>(
@@ -2044,31 +2524,83 @@ export function createClusterWorkloads(
           "website",
           JSON.parse(deps.decrypt(version.spec_cipher)),
         );
-        const ip = capacity(c, i.machine_id).public_address;
-        if (!ip || !isIP(ip)) {
-          store.patchStatus(site.id, {
-            dns_error: "openresty_public_ip_required_for_dns",
-          });
-          return;
+        const cname = applied.dns_record_mode === "cname",
+          domain = deployment?.gateway_domain;
+        if (cname && !domain) {
+          traffic[d.cluster_id].error = "openresty_cluster_domain_required";
+          continue;
+        }
+        const ip = capacity(cluster(d.cluster_id), i.machine_id).public_address;
+        if (!cname && (!ip || !isIP(ip))) {
+          traffic[d.cluster_id].error = "openresty_public_ip_required_for_dns";
+          continue;
         }
         for (const binding of applied.bindings.filter(
           (b: Row) => b.dns_enabled,
         )) {
           if (!grouped.has(binding.dns_zone_id))
             grouped.set(binding.dns_zone_id, []);
-          grouped
-            .get(binding.dns_zone_id)!
-            .push(
-              ...binding.domains.map((name: string) => ({
-                name,
-                type: isIP(ip) === 6 ? "AAAA" : "A",
-                value: ip,
-                ttl: 600,
-              })),
+          for (const name of binding.domains) {
+            const wanted = site.spec.bindings.find(
+              (b: Row) =>
+                b.dns_enabled &&
+                b.dns_zone_id === binding.dns_zone_id &&
+                b.domains.includes(name),
             );
+            // Both the desired published package and the successful applied
+            // receipt must authorize this exact domain in this cluster.
+            if (
+              !wanted ||
+              !domainClusters(site.spec, name, websiteClusters(site)).includes(
+                d.cluster_id,
+              ) ||
+              !domainClusters(applied, name, websiteClusters(site)).includes(
+                d.cluster_id,
+              )
+            )
+              continue;
+            const domainPolicy = trafficPolicy(current, d.cluster_id, name);
+            if (domainPolicy.enabled === false) continue;
+            traffic[d.cluster_id].eligible = true;
+            const summary = domainTraffic[name];
+            if (summary && !summary.eligible_cluster_ids.includes(d.cluster_id))
+              summary.eligible_cluster_ids.push(d.cluster_id);
+            const lines = cname
+              ? [
+                  ...(domainPolicy.default !== false
+                    ? [{ id: "default", name: "default" }]
+                    : []),
+                  ...domainPolicy.lines,
+                ]
+              : [undefined];
+            for (const line of lines)
+              grouped.get(binding.dns_zone_id)!.push({
+                name,
+                type: cname ? "CNAME" : isIP(ip) === 6 ? "AAAA" : "A",
+                value: cname ? domain : ip,
+                ttl: 600,
+                ...(cname
+                  ? { line: line.id, weight: domainPolicy.weight }
+                  : {}),
+              });
+          }
         }
       }
     }
+    store.patchStatus(current.id, {
+      actual_cluster_ids: actual,
+      cluster_traffic: traffic,
+      domain_traffic: domainTraffic,
+      domain_traffic_truncated: domainTruncated,
+    });
+    syncDNS(current, grouped, actor);
+  }
+  function syncDNS(
+    current: PlatformResource,
+    grouped: Map<string, Row[]>,
+    actor: string,
+  ) {
+    if (closed || dnsPending.has(current.id) || dnsPending.size >= 8) return;
     if (tableExists("ops_dns_owned"))
       for (const old of db.all<Row>(
         "SELECT DISTINCT zone_id FROM ops_dns_owned WHERE owner_id=?",
@@ -2080,7 +2612,10 @@ export function createClusterWorkloads(
         zone,
         [
           ...new Map(
-            records.map((r) => [r.name + ":" + r.type + ":" + r.value, r]),
+            records.map((r) => [
+              [r.name, r.type, r.value, r.line ?? "", r.weight ?? ""].join(":"),
+              r,
+            ]),
           ).values(),
         ].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
       );
@@ -2122,9 +2657,10 @@ export function createClusterWorkloads(
             dns_error: "dns_verification_pending",
             dns_error_at: at(),
           });
-      } catch {
+      } catch (error) {
         store.patchStatus(current.id, {
-          dns_error: "dns_refresh_failed",
+          dns_error:
+            error instanceof CloudError ? error.code : errorCode(error),
           dns_error_at: at(),
         });
       } finally {
@@ -2197,7 +2733,7 @@ export function createClusterWorkloads(
     const ids =
       r.kind === "application"
         ? r.spec.deployments.map((d: Row) => d.cluster_id)
-        : r.spec.cluster_ids;
+        : websiteClusters(r);
     if (input.cluster_id && !ids.includes(input.cluster_id))
       fail(
         400,
@@ -2205,6 +2741,7 @@ export function createClusterWorkloads(
           ? "application_not_deployed_in_cluster"
           : "website_cluster_mismatch",
       );
+    if (r.kind === "website") followManagedWebsite(r);
     const selected = input.cluster_id ? [input.cluster_id] : ids;
     if (action === "endpoints") {
       if (!input.cluster_id) fail(400, "cluster_required");
@@ -2404,7 +2941,10 @@ export function createClusterWorkloads(
           }
           publish(r.id);
         }
+      if (r.kind === "application" && r.spec.role === "openresty")
+        startGatewayDNS(r);
       if (r.kind === "website") {
+        followManagedWebsite(r);
         for (const d of db.all<Row>(
           "SELECT cluster_id FROM ops_platform_website_deployments WHERE website_id=? AND desired_revision>0",
           r.id,
