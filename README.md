@@ -8,6 +8,8 @@
 >
 > 该文档按 SDD 方式维护，集中说明驱动目标、HLD、LLD、数据流、协议、凭据安全、部署、AI/Agent 联动、当前限制和演进路线。本文 README 保留部署和快速上手，系统级设计以该基线及其关联 SDD 为准。
 
+外部 Codex/Claude 与平台 AI 共用能力的 MCP 目标架构见 [平台开放能力与 MCP](docs/platform-mcp.md)：统一能力、授权、提案与执行记录；本轮为设计提案，MCP/OAuth 服务尚未实现。
+
 中心与LightMoni Agent均由Node.js / TypeScript实现，公共协议位于`runtime/src/shared`。SDK和中心上报采用本地通用打点与固定窗口方案，主机管理、SSH终端、Agent注册和control/data凭据、AI助手、告警与界面语言采用最新main；本次取舍见[整合说明](specs/011-aligned-metric-windows/main-integration.md)。
 
 没有项目或租户概念。SDK有效启用密钥可写任意业务表，按名称创建，不绑定service或table。缺失Authorization只允许启用的豁免表，无效密钥不降级。初始化填写service/env，`record(table,metric_name,dimensions,value,count)`按调用选择业务表和指标，key1…key16为固定维度槽。每表单选10秒、30秒（默认）、1分钟、5分钟、10分钟、30分钟、1小时，查询步长须为实际窗口的整数倍。
