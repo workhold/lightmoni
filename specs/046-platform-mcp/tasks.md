@@ -4,6 +4,6 @@
 - [x] 编写需求、HLD/LLD、协议/授权/工具/执行契约与实施验收计划。
 - [x] 仓库系统设计与 README 更新，Doca 原生图写入并完整回读验证。
 - [x] 文档链接、图与边界审查，同步主干。
-- [ ] 创建 GitHub 文档 PR。
+- [x] 创建 GitHub 文档 PR：[#22](https://github.com/workhold/lightmoni/pull/22)。
 
 本轮不实现 MCP/OAuth 端点。阶段 A/B/C 的代码和真实客户端验收均待后续开发。
