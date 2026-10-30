@@ -6,6 +6,8 @@ import { normalizeIPAddress, normalizeNetworkAddresses, type HostNetworkAddress 
 export type SourceKind = "direct" | "trusted_proxy" | "unavailable";
 export interface NetworkSource { source_ip: string; source_kind: SourceKind }
 export interface MachineNetwork {
+  hostname: string;
+  observed_via: "ssh" | "agent" | "unavailable";
   addresses: HostNetworkAddress[];
   private_ips: string[];
   public_ips: string[];
@@ -16,15 +18,41 @@ export interface MachineNetwork {
 }
 
 export function createHostNetworkSchema(db: DB): void {
-  db.exec(`CREATE TABLE IF NOT EXISTS machine_network_observations(
-    machine_id TEXT PRIMARY KEY REFERENCES managed_machines(id) ON DELETE CASCADE,
-    agent_id TEXT NOT NULL,
-    addresses_json TEXT NOT NULL DEFAULT '[]',
-    observed_at TEXT NOT NULL DEFAULT '',
-    source_ip TEXT NOT NULL DEFAULT '',
-    source_observed_at TEXT NOT NULL DEFAULT '',
-    source_kind TEXT NOT NULL DEFAULT 'unavailable'
-  )`);
+  // DDL and the one-time ownership backfill must commit together. SAVEPOINT
+  // also works when schema setup runs inside a caller's write transaction.
+  db.exec("SAVEPOINT lightmoni_host_network_schema");
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS machine_network_observations(
+      machine_id TEXT PRIMARY KEY REFERENCES managed_machines(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL,
+      addresses_json TEXT NOT NULL DEFAULT '[]',
+      observed_at TEXT NOT NULL DEFAULT '',
+      source_ip TEXT NOT NULL DEFAULT '',
+      source_observed_at TEXT NOT NULL DEFAULT '',
+      source_kind TEXT NOT NULL DEFAULT 'unavailable',
+      observed_via TEXT NOT NULL DEFAULT 'unavailable',
+      snapshot_agent_id TEXT NOT NULL DEFAULT '',
+      snapshot_ssh_generation INTEGER NOT NULL DEFAULT -1,
+      snapshot_host_key_fingerprint TEXT NOT NULL DEFAULT '',
+      hostname TEXT NOT NULL DEFAULT ''
+    )`);
+    const columns = new Set(db.all<{name:string}>("PRAGMA table_info(machine_network_observations)").map(row => row.name));
+    for (const [name, definition] of [
+      ["observed_via", "TEXT NOT NULL DEFAULT 'agent'"],
+      ["snapshot_agent_id", "TEXT NOT NULL DEFAULT ''"],
+      ["snapshot_ssh_generation", "INTEGER NOT NULL DEFAULT -1"],
+      ["snapshot_host_key_fingerprint", "TEXT NOT NULL DEFAULT ''"],
+      ["hostname", "TEXT NOT NULL DEFAULT ''"],
+    ]) if (!columns.has(name)) db.exec(`ALTER TABLE machine_network_observations ADD COLUMN ${name} ${definition}`);
+    // Only the migration that introduces snapshot_agent_id may backfill it.
+    // Later source owners must never become an earlier snapshot's identity.
+    if (!columns.has("snapshot_agent_id")) db.run("UPDATE machine_network_observations SET snapshot_agent_id=agent_id WHERE observed_via='agent'");
+    db.exec("RELEASE lightmoni_host_network_schema");
+  } catch (error) {
+    try { db.exec("ROLLBACK TO lightmoni_host_network_schema"); }
+    finally { db.exec("RELEASE lightmoni_host_network_schema"); }
+    throw error;
+  }
 }
 
 export function trustedProxyMatcher(ranges: string[] = []): (address: string) => boolean {
@@ -59,28 +87,65 @@ export function observeNetworkSource(req: IncomingMessage, trusted: (address: st
   return { source_ip: source, source_kind: "trusted_proxy" };
 }
 
+interface HostIdentity { id: string; agent_id: string; ssh_target_generation: number; host_key_fingerprint: string }
+const snapshotCurrent = (row: any, host: HostIdentity): boolean => Number.isFinite(Date.parse(row?.observed_at)) && (
+  row.observed_via === "agent" && !!row.snapshot_agent_id && row.snapshot_agent_id === host.agent_id
+  || row.observed_via === "ssh" && Number(row.snapshot_ssh_generation) === Number(host.ssh_target_generation)
+    && !!row.snapshot_host_key_fingerprint && row.snapshot_host_key_fingerprint === host.host_key_fingerprint
+);
+const mayReplace = (row: any, host: HostIdentity, at: string): boolean => !snapshotCurrent(row, host)
+  || Date.parse(at) >= Date.parse(row.observed_at);
+const safeHostname = (value: unknown): string => typeof value === "string" && Buffer.byteLength(value.trim()) <= 128
+  && !/[\u0000-\u001f\u007f-\u009f]/.test(value) ? value.trim() : "";
+const identity = (db: DB, machineID: string) => db.get<HostIdentity>("SELECT id,agent_id,ssh_target_generation,host_key_fingerprint FROM managed_machines WHERE id=?", machineID);
+
 /** Caller holds the heartbeat writer transaction and has checked host binding. */
-export function recordHostNetwork(db: DB, machineID: string, agentID: string, addresses: HostNetworkAddress[] | undefined, source: NetworkSource | undefined, at: string): void {
-  const previous = db.get<{agent_id:string}>("SELECT agent_id FROM machine_network_observations WHERE machine_id=?", machineID);
-  if (previous && previous.agent_id !== agentID) db.run("DELETE FROM machine_network_observations WHERE machine_id=?", machineID);
-  db.run("INSERT OR IGNORE INTO machine_network_observations(machine_id,agent_id) VALUES(?,?)", machineID, agentID);
-  if (addresses !== undefined) db.run("UPDATE machine_network_observations SET addresses_json=?,observed_at=? WHERE machine_id=?", JSON.stringify(addresses), at, machineID);
-  if (source !== undefined) db.run("UPDATE machine_network_observations SET source_ip=?,source_kind=?,source_observed_at=? WHERE machine_id=?", source.source_ip, source.source_kind, at, machineID);
+export function recordHostNetwork(db: DB, machineID: string, agentID: string, addresses: HostNetworkAddress[] | undefined, source: NetworkSource | undefined, at: string, hostname?: unknown): void {
+  const host = identity(db, machineID);
+  if (!host || host.agent_id !== agentID || !Number.isFinite(Date.parse(at))) throw Error("invalid network observation identity");
+  const previous = db.get<any>("SELECT * FROM machine_network_observations WHERE machine_id=?", machineID);
+  db.run("INSERT OR IGNORE INTO machine_network_observations(machine_id,agent_id) VALUES(?,'')", machineID);
+  if (addresses !== undefined && mayReplace(previous, host, at)) db.run(`UPDATE machine_network_observations
+    SET addresses_json=?,observed_at=?,observed_via='agent',snapshot_agent_id=?,snapshot_ssh_generation=-1,snapshot_host_key_fingerprint='',hostname=? WHERE machine_id=?`,
+    JSON.stringify(addresses), at, agentID, safeHostname(hostname), machineID);
+  // Connection provenance has its own owner and clock; a new identity must
+  // never inherit a previous Agent's source just because an SSH sample exists.
+  if (source !== undefined && (previous?.agent_id !== agentID || !previous?.source_observed_at || Date.parse(at) >= Date.parse(previous.source_observed_at)))
+    db.run("UPDATE machine_network_observations SET agent_id=?,source_ip=?,source_kind=?,source_observed_at=? WHERE machine_id=?", agentID, source.source_ip, source.source_kind, at, machineID);
+}
+
+/** A successful optional preflight sample, never a platform connection source. */
+export function recordSSHHostNetwork(db: DB, expected: { id: string; ssh_target_generation: number; host_key_fingerprint: string }, snapshot: {hostname: string;addresses: HostNetworkAddress[];observed_at: string}, stillAuthorized: () => boolean = () => true): boolean {
+  return db.transaction(() => {
+    if (!stillAuthorized()) return false;
+    const host = identity(db, expected.id);
+    if (!host || Number(host.ssh_target_generation) !== Number(expected.ssh_target_generation) || !expected.host_key_fingerprint
+      || host.host_key_fingerprint !== expected.host_key_fingerprint || !Number.isFinite(Date.parse(snapshot.observed_at))) return false;
+    const addresses = normalizeNetworkAddresses(snapshot.addresses), hostname = safeHostname(snapshot.hostname);
+    if (!addresses || !hostname) return false;
+    const previous = db.get<any>("SELECT * FROM machine_network_observations WHERE machine_id=?", host.id);
+    if (!mayReplace(previous, host, snapshot.observed_at)) return true;
+    db.run("INSERT OR IGNORE INTO machine_network_observations(machine_id,agent_id) VALUES(?,'')", host.id);
+    db.run(`UPDATE machine_network_observations SET addresses_json=?,observed_at=?,observed_via='ssh',snapshot_agent_id='',snapshot_ssh_generation=?,snapshot_host_key_fingerprint=?,hostname=? WHERE machine_id=?`,
+      JSON.stringify(addresses), snapshot.observed_at, host.ssh_target_generation, host.host_key_fingerprint, hostname, host.id);
+    return true;
+  });
 }
 
 export function machineNetwork(db: DB, machineID: string): MachineNetwork {
-  const empty: MachineNetwork = { addresses: [], private_ips: [], public_ips: [], observed_at: "", source_ip: "", source_observed_at: "", source_kind: "unavailable" };
+  const empty: MachineNetwork = { hostname: "", observed_via: "unavailable", addresses: [], private_ips: [], public_ips: [], observed_at: "", source_ip: "", source_observed_at: "", source_kind: "unavailable" };
   if (!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_network_observations'")) return empty;
-  const row = db.get<any>("SELECT n.* FROM machine_network_observations n JOIN managed_machines m ON m.id=n.machine_id AND m.agent_id=n.agent_id WHERE n.machine_id=?", machineID);
-  if (!row) return empty;
+  const host = identity(db, machineID), row = db.get<any>("SELECT * FROM machine_network_observations WHERE machine_id=?", machineID);
+  if (!row || !host) return empty;
   let addresses: HostNetworkAddress[];
-  try { addresses = normalizeNetworkAddresses(JSON.parse(row.addresses_json)) ?? []; } catch { addresses = []; }
-  return { addresses,
+  const current = snapshotCurrent(row, host), sourceCurrent = !!row.agent_id && row.agent_id === host.agent_id;
+  try { addresses = current ? normalizeNetworkAddresses(JSON.parse(row.addresses_json)) ?? [] : []; } catch { addresses = []; }
+  return { addresses, hostname: current ? safeHostname(row.hostname) : "", observed_via: current ? row.observed_via : "unavailable",
     private_ips: [...new Set(addresses.filter(item => item.scope === "private").map(item => item.address))],
     public_ips: [...new Set(addresses.filter(item => item.scope === "public").map(item => item.address))],
-    observed_at: row.observed_at,
-    source_ip: row.source_ip,
-    source_observed_at: row.source_observed_at,
-    source_kind: row.source_kind,
+    observed_at: current ? row.observed_at : "",
+    source_ip: sourceCurrent ? row.source_ip : "",
+    source_observed_at: sourceCurrent ? row.source_observed_at : "",
+    source_kind: sourceCurrent ? row.source_kind : "unavailable",
   };
 }

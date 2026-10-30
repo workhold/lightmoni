@@ -1,0 +1,48 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved": true,
+  "seq": 885,
+  "epochId": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "readback_matches_repository_sections": [
+    "13.7"
+  ],
+  "readback_matches_repository_diagram_semantics": [
+    "13.6",
+    "13.7"
+  ],
+  "section_paragraphs_exact": 7,
+  "original_block_count": 556,
+  "latest_block_count": 561,
+  "all_original_block_ids_and_order_preserved": true,
+  "unchanged_existing_blocks": 551,
+  "unexpected_existing_changes": [],
+  "intentionally_updated_existing_blocks": [
+    "host050-design-6",
+    "host050-design-7",
+    "host050-design-8",
+    "host050-design-9",
+    "host050-design-10"
+  ],
+  "original_native_diagrams": 23,
+  "untouched_native_diagrams_preserved_exactly": 22,
+  "updated_native_diagram": {
+    "block_id": "host050-design-6",
+    "nodes": 7,
+    "edges": 7,
+    "existing_node_ids_and_coordinates_preserved": true,
+    "exact_readback": true
+  },
+  "new_native_diagram": {
+    "block_id": "host051-network-discovery-flow",
+    "nodes": 10,
+    "edges": 10,
+    "exact_readback": true
+  },
+  "new_blocks": 5,
+  "unchanged_existing_blocks_sha256": "82fb2e01b4321a990ed65029019f96e3ae965f002dbdc1040c7cd2d2964703c6",
+  "native_graphs_before_sha256": "6f4b2219ae81003e5a89f87d98074fb169d1b8c41fc3d6847d5e9c23b1b6d450",
+  "native_graphs_after_sha256": "dac39291324d10a2da9f449f20eb50409e7cf4feca892ef3e4883ed0d46db446",
+  "repository_section_paragraphs_sha256": "5bdf453c782cc5d46ed2d6aa5f2453f429c5671a8989aa877cba9126581b5bbb",
+  "verification": "Latest MCP content readback, exact paragraph/native graph equality, unrelated block content/properties/IDs and original order preserved; no browser visual-render claim",
+  "credential_handling": "Protected 0600 local Unix socket to getpass worker; bearer token only in worker process memory; no token in repository or evidence"
+}

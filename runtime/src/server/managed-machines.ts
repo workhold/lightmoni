@@ -1,5 +1,5 @@
 import { connectionCredentials } from "./connection-credentials.js";
-import { machineNetwork, type MachineNetwork } from "./host-network.js";
+import { createHostNetworkSchema, machineNetwork, recordSSHHostNetwork, type MachineNetwork } from "./host-network.js";
 import { recordMachineHostKey } from "./machine-host-keys.js";
 import { agentBootstrapCommand } from "./machine-agent-lifecycle.js";
 import { machineCredentialCurrent, machineCredentialCurrentSQL } from "./machine-credential-policy.js";
@@ -15,7 +15,7 @@ import type {
   AgentEnrollmentIssued,
 } from "./agent-credentials.js";
 
-import { defaultSSHRunner, SSHError, preflightCommand, parsePreflight, type SSHRunner } from "./machine-ssh.js";
+import { defaultSSHRunner, SSHError, preflightCommand, parsePreflight, unavailableSSHDiscovery, type SSHDiscovery, type SSHRunner } from "./machine-ssh.js";
 export type { SSHRunInput, SSHRunner } from "./machine-ssh.js";
 
 export type ConnectionMethod = "direct_ssh";
@@ -134,6 +134,7 @@ export interface SSHCheckResult {
   platform: string; arch: string; checks: Record<string, boolean>; error_code: string;
   checked_at: string; expires_at: string;
   agent_installation: { state: "present" | "absent" | "unknown" };
+  discovery: SSHDiscovery;
 }
 export interface InstallPlanInput {
   check_id: string; credential_id?: string; version: string; arch: string; initial_label_id?: string;
@@ -173,6 +174,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const { db, router } = deps;
   createAgentLifecycleSchema(db);
   createAgentHostSchema(db);
+  createHostNetworkSchema(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS managed_machines(
       id TEXT PRIMARY KEY,
@@ -606,7 +608,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const at = now();
     const result: SSHCheckResult = { id: id(), machine_id: machineID, credential_id: credential.id,
       connected: false, ready: false, platform: "", arch: "", checks: {}, error_code: "",
-      agent_installation: { state: "unknown" }, checked_at: iso(at), expires_at: iso(new Date(at.getTime() + PLAN_SECONDS * 1000)) };
+      agent_installation: { state: "unknown" }, discovery: unavailableSSHDiscovery(), checked_at: iso(at), expires_at: iso(new Date(at.getTime() + PLAN_SECONDS * 1000)) };
     busy.add(machineID);
     const checkSignal = AbortSignal.any([signal, AbortSignal.timeout(CHECK_TIMEOUT_MS)]);
     try {
@@ -618,8 +620,23 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
         command, credentialID: credential.id, signal: checkSignal, port: machine.port, timeoutMs: CHECK_TIMEOUT_MS,
       });
       result.connected = true;
-      Object.assign(result, parsePreflight(output.stdout));
+      Object.assign(result, parsePreflight(output.stdout, iso(now())));
       if (!result.ready) result.error_code = "prerequisites_missing";
+      if (result.discovery.status === "succeeded") {
+        try {
+          const saved = recordSSHHostNetwork(db, machine, result.discovery, () => {
+            checkSignal.throwIfAborted();
+            ensureCredential(machineID, credential.id, false);
+            const current = db.get<any>("SELECT * FROM managed_machines WHERE id=?", machineID);
+            return !!current && targetRevision(current) === targetRevision(machine);
+          });
+          if (!saved) result.discovery = unavailableSSHDiscovery();
+        } catch {
+          // Optional metadata must never turn a successful installation check
+          // into a failure, or survive cancellation/revocation/target changes.
+          result.discovery = unavailableSSHDiscovery();
+        }
+      }
       db.run("UPDATE machine_credentials SET last_used_at=? WHERE id=?", iso(now()), credential.id); library.used(credential.id);
     } catch (error) {
       result.error_code = signal.aborted ? "cancelled" : checkSignal.aborted ? "timed_out" : error instanceof SSHError ? error.code : "ssh_failed";

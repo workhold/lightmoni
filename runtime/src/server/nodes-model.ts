@@ -772,7 +772,7 @@ export class NodeStore {
         group,
       );
       const machine = ensureAgentHost(this.db, id, values, this.timestamp());
-      recordHostNetwork(this.db, machine.machine_id, id, addresses, source, this.timestamp());
+      recordHostNetwork(this.db, machine.machine_id, id, addresses, source, this.timestamp(), values.hostname);
       return machine;
     });
   }
