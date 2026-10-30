@@ -1,0 +1,25 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "status": "synchronized",
+  "sections": [
+    "13 SSH credential lifecycle",
+    "13.2 prior registration scope",
+    "13.4 single-form host registration and retention",
+    "16 browser secret submission",
+    "17 credential boundaries"
+  ],
+  "before_seq": 784,
+  "saved_seq": 785,
+  "readback_seq": 785,
+  "text_blocks_verified": 8,
+  "new_blocks_verified": 7,
+  "unrelated_top_level_blocks_unchanged": 334,
+  "existing_native_diagrams_unchanged": 11,
+  "new_native_flowchart": {
+    "block_id": "host039-retention-flow",
+    "nodes": 8,
+    "edges": 9,
+    "nodes_and_edges_match": true
+  },
+  "native_visual_render_verified": false
+}

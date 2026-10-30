@@ -5,7 +5,7 @@ import { once } from "node:events";
 import type { Dependencies } from "../src/shared/types.js";
 import { Router, HTTPError } from "../src/shared/http.js";
 import { DB } from "../src/shared/sqlite.js";
-import { NodeStore } from "../src/server/nodes-model.js";
+import { NodeStore, normalizeTask, nodeID } from "../src/server/nodes-model.js";
 import { registerNodes, type NodesOptions } from "../src/server/nodes.js";
 const at = new Date("2026-10-17T03:00:00Z");
 const host = {
@@ -56,8 +56,15 @@ async function fixture(
       logger: { info() {}, warn() {}, error() {} },
     } as unknown as Dependencies;
   router.auth = deps.auth;
-  const module = registerNodes(deps, options),
-    server = createServer(async (req, res) => {
+  const agentCredentials = { authenticate(req: any, agentID: string) {
+    if (req.headers.authorization !== "Bearer fixture-key") throw new HTTPError(401, "invalid control credential");
+    return { credential_id: "key-id", agent_id: agentID, audience: "control", scope: "agent.control", expires_at: "", last_used_at: "" };
+  } } as any;
+  const module = registerNodes(deps, { agentCredentials, ...options });
+  // These cases isolate explicitly label-targeted user tasks. SDD 042 defaults
+  // are verified independently in task-center-model.test.ts.
+  db.run("UPDATE agent_tasks SET enabled=0 WHERE json_extract(metadata_json,'$.origin')='builtin'");
+  const server = createServer(async (req, res) => {
       if (!(await router.handle(req, res))) {
         res.writeHead(404);
         res.end();
@@ -110,17 +117,22 @@ async function task(
   config: any,
   enabled = true,
 ) {
-  const result = await f.request("/agent-tasks", "POST", {
-    name,
-    type,
-    label_ids: labels,
-    config,
-    enabled,
-  });
-  assert.equal(result.status, 201, result.raw);
-  return result.data;
+  // Native definitions here represent user tasks retained across upgrade.
+  const store = new NodeStore(f.db,()=>at), value=normalizeTask({id:nodeID(),name,type,label_ids:labels,config,enabled});
+  f.db.transaction(()=>store.saveTask(value));
+  return store.getTask(value.id);
 }
 async function node(f: any, id: string, group: string, extra: any = {}) {
+  // Task tests use a trusted, server-reserved installation identity.
+  f.db.exec("CREATE TABLE IF NOT EXISTS agent_enrollments(id TEXT PRIMARY KEY,agent_id TEXT,status TEXT,machine_id TEXT,created_at TEXT)");
+  f.db.run("INSERT OR IGNORE INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'deploy','direct_ssh',?,?,?)", "machine-" + id, id, id + ".example.test", id, at.toISOString(), at.toISOString());
+  f.db.run("INSERT OR IGNORE INTO agent_enrollments VALUES(?,?,'active',?,'2026-10-01T00:00:00.000Z')", id, id, "machine-" + id);
+  // An administrator assigns the host; Agent control messages cannot opt in
+  // to labels which may grant script-task execution.
+  if (!f.db.get("SELECT id FROM agents WHERE id=?", id)) {
+    const assigned = await f.request(`/machines/machine-${id}/labels`, "PUT", {label_ids:[group]});
+    assert.equal(assigned.status,200,assigned.raw);
+  }
   const result = await f.request(
     "/agents/register",
     "POST",
@@ -238,7 +250,8 @@ test("probe id and log-source strategy conflicts reject, identical work deduplic
   await task(f, "p2", "probe", [a], { probes: [probe()] });
   await node(f, "node", a);
   assert.equal((await config(f, "node")).probes.length, 1);
-  const bad = await f.request("/agent-tasks", "POST", {
+  const badTask = await task(f,"bad","probe",[a],{},false);
+  const bad = await f.request("/agent-tasks/"+badTask.id, "PUT", {
     name: "bad",
     type: "probe",
     enabled: true,
@@ -265,9 +278,10 @@ test("probe id and log-source strategy conflicts reject, identical work deduplic
     ],
   });
   assert.equal((await config(f, "node")).log_sources.length, 1);
+  const thirdLog = await task(f,"l3","log",[a],{},false);
   assert.equal(
     (
-      await f.request("/agent-tasks", "POST", {
+      await f.request("/agent-tasks/"+thirdLog.id, "PUT", {
         name: "l3",
         type: "log",
         enabled: true,
@@ -357,76 +371,20 @@ test("new label starts with no tasks and cannot be deleted while referenced; rea
     401,
   );
 });
-test("legacy group API writes real tasks and guards independent/moved migration tasks", async (t) => {
-  const f = await fixture(t),
-    created = await f.request("/agent-groups", "POST", {
-      name: "legacy",
-      config: { ...host, host_enabled: true },
-    });
-  assert.equal(created.status, 201, created.raw);
-  const group = created.data.id;
-  await node(f, "legacy-node", group);
-  assert.equal((await config(f, "legacy-node")).host_table, "host");
-  const renamed = await f.request("/agent-groups/" + group, "PUT", {
-    name: "renamed",
-  });
-  assert.equal(renamed.status, 200);
-  assert.equal((await config(f, "legacy-node")).host_table, "host");
-  const independent = await task(f, "independent", "probe", [group], {
-    probes: [probe()],
-  });
-  const combined = (await f.request("/agent-groups")).data.find(
-    (g: any) => g.id === group,
-  );
-  assert.equal(combined.config.probes.length, 1);
-  assert.equal(
-    (
-      await f.request("/agent-groups/" + group, "PUT", {
-        name: "legacy",
-        config: combined.config,
-      })
-    ).status,
-    409,
-  );
-  assert.equal(
-    (
-      await f.request("/agent-groups/" + group, "PUT", {
-        name: "renamed again",
-      })
-    ).status,
-    200,
-  );
-  assert.equal(
-    (await f.request("/agent-tasks")).data.filter(
-      (task: any) => task.type === "probe" && task.enabled,
-    ).length,
-    1,
-  );
-  await f.request("/agents/legacy-node/group", "PUT", { group_id: "default" });
-  assert.equal(
-    (await f.request("/agent-groups/" + group, "DELETE")).status,
-    409,
-  );
-  await f.request("/agent-tasks/" + independent.id, "DELETE");
-  const old = (await f.request("/agent-tasks")).data.find(
-      (task: any) => task.id === `legacy:${group}:host`,
-    ),
-    b = await label(f, "b");
-  await f.request("/agent-tasks/" + old.id, "PUT", { ...old, label_ids: [b] });
-  assert.equal(
-    (await f.request("/agent-groups/" + group, "DELETE")).status,
-    409,
-  );
-  assert.equal(
-    (
-      await f.request("/agent-groups/" + group, "PUT", {
-        name: "rename",
-        config: created.data.config,
-      })
-    ).status,
-    409,
-  );
+test("legacy group API only maintains labels and cannot create or rewrite native tasks", async t => {
+  const f=await fixture(t), before=(await f.request("/agent-tasks")).data;
+  assert.equal((await f.request("/agent-groups","POST",{name:"legacy",config:{...host,host_enabled:true}})).status,410);
+  const created=await f.request("/agent-groups","POST",{name:"legacy"}); assert.equal(created.status,201,created.raw);
+  const id=created.data.id;
+  assert.equal((await f.request("/agent-groups/"+id,"PUT",{name:"rewritten",config:{}})).status,410);
+  assert.deepEqual((await f.request("/agent-tasks")).data,before);
+  assert.equal((await f.request("/agent-groups/"+id,"PUT",{name:"renamed"})).status,200);
+  const existing=await task(f,"retained","probe",[id],{});
+  assert.equal((await f.request("/agent-groups/"+id,"DELETE")).status,409);
+  assert.equal((await f.request("/agent-tasks/"+existing.id,"DELETE")).status,200);
+  assert.equal((await f.request("/agent-groups/"+id,"DELETE")).status,200);
 });
+
 test("legacy schema migrates exact identities/settings once and restart never recreates deleted tasks", () => {
   const db = new DB(":memory:");
   try {
@@ -473,14 +431,14 @@ test("legacy schema migrates exact identities/settings once and restart never re
       "host",
     );
     assert.equal(store.labels()[0].name, "默认标签");
-    assert.equal(store.tasks().length, 3);
-    const t = store.tasks().find((t) => t.type === "probe")!;
+    assert.equal(store.tasks().length, 6);
+    const t = store.tasks().find((t) => t.type === "probe" && t.origin === "custom")!;
     store.deleteTask(t.id);
     new NodeStore(db, () => at);
-    assert.equal(store.tasks().length, 2);
+    assert.equal(store.tasks().length, 5);
     assert.equal(
       db.get<any>("SELECT count(*) AS n FROM agent_task_migrations").n,
-      1,
+      3,
     );
     assert.deepEqual(db.all("PRAGMA foreign_key_check"), []);
   } finally {
@@ -605,17 +563,16 @@ test("configuration revisions match legacy Go JSON field order, omissions and HT
       "a0bad55f72a6814061c1582aa87fcc872996844c8784b0fbbfb94b1c16535692",
     );
     store.label("生产&<客户>", "a", true);
-    store.task(
+    store.saveTask(normalizeTask(
       {
+        id: "host1",
         name: "指标&<用户>",
         type: "host",
         enabled: true,
         label_ids: ["a"],
         config: host,
       },
-      "host1",
-      true,
-    );
+    ));
     assert.equal(
       store.compile(["a"], "a").config.revision,
       "518f4f1a211076dc494b25172855dcdcad836aa003c02088b2d9d85e1144aeb9",

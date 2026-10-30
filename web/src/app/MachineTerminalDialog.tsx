@@ -7,6 +7,7 @@ import {api} from '../shared/api';
 import {useI18n} from '../shared/i18n';
 import '@xterm/xterm/css/xterm.css';
 import './machine-terminal.css';
+import {activeMachineCredential} from './machine-credentials';
 
 type Host={id:string;name:string;address:string;port:number;username:string};
 type Key={id:string;method:string;retention?:string;secret_fingerprint:string;expires_at:string;revoked_at?:string;secret_cleared_at?:string};
@@ -25,9 +26,9 @@ export default function MachineTerminalDialog({machine,credentials,onClose,onRel
 function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased}:{machine:Host;credentials:Key[];full:boolean;toggleFull:()=>void;closeRef:MutableRefObject<(()=>Promise<void>)|undefined>;onReleased?:()=>void|Promise<void>}){
  const {t}=useI18n();
  const [consumed,setConsumed]=useState<Set<string>>(()=>new Set());
- const keys=credentials.filter(c=>(c.method==='ssh_key'||c.method==='password')&&!c.revoked_at&&!c.secret_cleared_at&&Date.parse(c.expires_at)>Date.now()&&!consumed.has(c.id));
+ const keys=credentials.filter(c=>(c.method==='ssh_key'||c.method==='password')&&activeMachineCredential(c)&&!consumed.has(c.id));
  const [credential,setCredential]=useState<string|undefined>(keys.length===1?keys[0].id:undefined);
- const passwordIDs=useRef(new Set(credentials.filter(c=>c.method==='password'&&!['temporary','managed'].includes(c.retention||'')).map(c=>c.id))),activePassword=useRef<string|undefined>(undefined);
+ const passwordIDs=useRef(new Set(credentials.filter(c=>c.method==='password'&&!['temporary','managed','permanent'].includes(c.retention||'')).map(c=>c.id))),activePassword=useRef<string|undefined>(undefined);
  const [state,setState]=useState<State>('idle'),[reason,setReason]=useState(''),[error,setError]=useState('');
  const host=useRef<HTMLDivElement>(null),terminal=useRef<Terminal|null>(null),socket=useRef<WebSocket|null>(null);
  const connected=useRef(false),releaseCallback=useRef(onReleased);releaseCallback.current=onReleased;
@@ -115,7 +116,7 @@ function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased}
  },[machine.id,start,stop]);
  const busy=['creating','connecting','connected'].includes(state);
  const explanations:Record<string,string>={
-  host_key_mismatch:t('主机指纹不匹配，请在主机管理中核实。','Host fingerprint mismatch. Verify the registered host.'),
+  host_key_mismatch:t('主机公钥与已记录的身份不一致，连接已停止。','The host public key differs from the recorded identity. The connection was stopped.'),
   authentication_failed:t('SSH 凭据认证失败，请检查用户名、私钥或密码。','SSH credential authentication failed. Check the username, private key, or password.'),
   invalid_private_key:t('私钥无法使用；目前仅支持无口令的 SSH 私钥。','The key cannot be used. Only SSH keys without a passphrase are supported.'),
   credential_invalid:t('凭据已撤销、过期或主机连接已变更。','The credential was revoked or expired, or the host changed.'),
@@ -138,9 +139,9 @@ function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased}
  const labels:Record<State,string>={idle:t('待连接','Ready'),creating:t('正在准备','Preparing'),connecting:t('正在连接','Connecting'),connected:t('已连接','Connected'),closed:t('已断开','Disconnected'),error:t('连接失败','Connection failed')};
  return <div className="lm-terminal-panel">
   <div className="lm-terminal-toolbar"><Space wrap><Tag color={state==='connected'?'success':state==='error'?'error':busy?'processing':'default'} role="status">{labels[state]}</Tag><Typography.Text code>{machine.username}@{machine.address}:{machine.port}</Typography.Text></Space><Space><Button aria-label={t('全屏切换','Toggle fullscreen')} icon={full?<FullscreenExitOutlined/>:<FullscreenOutlined/>} onClick={toggleFull}>{full?t('退出全屏','Exit fullscreen'):t('全屏','Fullscreen')}</Button>{busy?<Button aria-label={t('断开','Disconnect')} icon={<DisconnectOutlined/>} onClick={()=>{void stop().then(()=>{if(alive.current){setState('closed');setReason('disconnected')}})}}>{t('断开','Disconnect')}</Button>:<Button aria-label={state==='idle'?t('连接','Connect'):t('重新连接','Reconnect')} type="primary" icon={<ReloadOutlined/>} disabled={!keys.some(k=>k.id===credential)} onClick={()=>void start(credential)}>{state==='idle'?t('连接','Connect'):t('重新连接','Reconnect')}</Button>}</Space></div>
-  {keys.length!==1&&<div className="lm-terminal-key"><span>{t('SSH 凭据','SSH credential')}</span><Select aria-label={t('终端 SSH 凭据','Terminal SSH credential')} value={credential} onChange={setCredential} disabled={busy} placeholder={t('请选择有效的 SSH 凭据','Select an active SSH credential')} options={keys.map(k=>({value:k.id,label:k.method==='password'?`${k.retention==='managed'?t('托管密码','Managed password'):k.retention==='temporary'?t('临时密码（可复用）','Temporary password (reusable)'):t('一次性密码','One-time password')} · ${k.secret_fingerprint||k.id}`:t(`SSH 私钥 · ${k.secret_fingerprint||k.id}`,`SSH private key · ${k.secret_fingerprint||k.id}`)}))}/></div>}
+  {keys.length!==1&&<div className="lm-terminal-key"><span>{t('SSH 凭据','SSH credential')}</span><Select aria-label={t('终端 SSH 凭据','Terminal SSH credential')} value={credential} onChange={setCredential} disabled={busy} placeholder={t('请选择有效的 SSH 凭据','Select an active SSH credential')} options={keys.map(k=>({value:k.id,label:k.method==='password'?`${k.retention==='permanent'?t('永久密码','Permanent password'):k.retention==='managed'?t('托管密码','Managed password'):k.retention==='temporary'?t('临时密码（可复用）','Temporary password (reusable)'):t('一次性密码','One-time password')} · ${k.secret_fingerprint||k.id}`:t(`SSH 私钥 · ${k.secret_fingerprint||k.id}`,`SSH private key · ${k.secret_fingerprint||k.id}`)}))}/></div>}
   {!keys.length&&<Alert type="warning" showIcon title={t('请添加有效的无口令 SSH 私钥或密码。','Add an active SSH key without a passphrase or password.')}/>}
-  {passwordIDs.current.size>0&&<Alert type="info" showIcon title={t('一次性密码在终端结束或连接失败后清除；临时或托管密码可在有效期内复用。','Single-use passwords are cleared when the terminal ends or connection fails. Temporary or managed passwords can be reused within their validity.')}/>}
+  {passwordIDs.current.size>0&&<Alert type="info" showIcon title={t('一次性密码在终端结束或连接失败后清除；临时、托管或永久密码可在有效期内复用。','Single-use passwords are cleared when the terminal ends or connection fails. Temporary, managed, or permanent passwords can be reused within their validity.')}/>}
   {(error||reason)&&<Alert type={state==='error'||!['remote_closed','disconnected'].includes(reason)?'warning':'info'} showIcon title={error||explanations[reason]||t('连接已关闭，请重新连接。','Connection closed. Reconnect.')}/>}
   <div className="lm-terminal-screen" ref={host} aria-label={t('交互式 SSH 终端','Interactive SSH terminal')}/>
   <Typography.Text type="secondary" className="lm-terminal-hint">{t('命令将直接在目标主机执行。关闭窗口会断开连接；10 分钟无输入或 30 分钟后自动断开。平台不保存终端输入与输出。','Commands run directly on the host. Closing this window disconnects SSH. Sessions close after 10 minutes without input or 30 minutes in total. Terminal input and output are not stored by the platform.')}</Typography.Text>

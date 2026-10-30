@@ -38,3 +38,7 @@ API: /api/v1/ops/resources CRUD、resources/:id/actions、runs、overview；写�
 
 ## Parallel Work
 按 speckit-plan 研究完成后并行独立文件：云与证书控制器；工作负载/Agent 执行器；界面。主任务负责共享模型、API/租约集成、跨域收敛、文档与最终验证。共享文件变更由主任务协调。
+
+## 2026-10-30 主干合入兼容
+
+同步 origin/main a11ae1f，保留任务中心与主机接入约束。App 清除已移除的 Agent 安装页及不再使用的旧服务页加载，保留运维服务重定向；系统设计并列保留任务中心与运维章节。运维测试夹具补充主干要求的 control 凭据可用性契约，不改变生产鉴权。额外架构同步不适用：合入既有设计及测试适配，不新增组件、路径或凭据边界。验收追加到 validation-main-sync.md。

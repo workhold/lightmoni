@@ -6,6 +6,7 @@ import { DB } from "../src/shared/sqlite.js";
 import { Router } from "../src/shared/http.js";
 import { registerAgentCredentials } from "../src/server/agent-credentials.js";
 import type { Dependencies } from "../src/shared/types.js";
+import { issueHostEnrollment } from "./helpers/host-enrollment.js";
 
 async function fixture(t: any) {
   const db = new DB(":memory:"), router = new Router(), user = {
@@ -51,12 +52,13 @@ async function fixture(t: any) {
     const raw = await response.text();
     return { status: response.status, data: raw ? JSON.parse(raw) : undefined };
   };
-  return { db, store, request };
+  const issue = (input: Partial<Parameters<typeof store.issueEnrollment>[0]> = {}) => ({ status: 201, data: issueHostEnrollment(db, store, { endpoint_origin: "https://monitor.example.test", version: "0.1.0", created_by: user.id, ...input }) });
+  return { db, store, request, issue };
 }
 
 test("enrollment issues one-time bootstrap and separates control/data credentials", async (t) => {
   const f = await fixture(t);
-  const created = await f.request("/api/v1/agent-enrollments", "POST", {
+  const created = f.issue({
     endpoint_origin: "https://monitor.example.test",
     version: "0.1.0",
     allowed_arch: ["amd64"],
@@ -143,7 +145,7 @@ test("enrollment issues one-time bootstrap and separates control/data credential
 
 test("enrollment token cannot be replayed with a second nonce", async (t) => {
   const f = await fixture(t);
-  const created = await f.request("/api/v1/agent-enrollments", "POST", {});
+  const created = f.issue();
   assert.equal(created.status, 201);
   const first = await f.request("/api/v1/agents/enroll", "POST", {
     enrollment_token: created.data.token_display_once,
@@ -165,8 +167,15 @@ test("enrollment token cannot be replayed with a second nonce", async (t) => {
 
 test("enrollment cannot issue a credential subset the installer cannot persist", async (t) => {
   const f = await fixture(t);
-  const created = await f.request("/api/v1/agent-enrollments", "POST", {
-    scopes: ["agent.control"],
-  });
-  assert.equal(created.status, 400);
+  assert.throws(() => f.issue({ scopes: ["agent.control"] }), /requires both control and data scopes/);
+});
+
+test("standalone enrollment issuance is disabled even when a client submits a machine ID", async (t) => {
+  const f = await fixture(t);
+  for (const body of [{}, { machine_id: "user-selected-host" }]) {
+    const result = await f.request("/api/v1/agent-enrollments", "POST", body);
+    assert.equal(result.status, 409); assert.match(result.data.error, /主机管理部署 Agent/);
+  }
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_enrollments")!.n, 0);
+  assert.throws(() => f.store.issueEnrollment({ endpoint_origin: "https://monitor.example.test", version: "0.1.0", created_by: "admin" } as any), /machine_id/);
 });

@@ -449,9 +449,9 @@ export class Ingest {
   }
   async receive(c: Context, signal: Signal) {
     const agentID = String(c.req.headers['x-lightmoni-agent-id'] ?? '');
-    const usesAgentCredential = agentID && (this.agentCredentials?.registered?.(agentID) ?? this.agentCredentials?.has(agentID, 'data'));
-    const key = usesAgentCredential
+    const key = agentID
       ? (() => {
+          if (!this.agentCredentials) fail(401, 'agent data credential required');
           const credential = this.agentCredentials!.authenticate(c.req, agentID, 'data');
           return {id: credential.credential_id, name: 'agent:' + agentID, allowed_tables: [] as string[], allow_all_tables: true};
         })()
@@ -501,9 +501,8 @@ export class Ingest {
     }
     await this.serial.run(async () => {
       // Request upload and receiver serialization can outlive node removal.
-      // Revalidate at acceptance, including a newly-created tombstone for an
-      // identity that used a legacy key when the request first arrived.
-      if (agentID && (usesAgentCredential || this.agentCredentials?.registered?.(agentID)))
+      // Revalidate the reserved identity after asynchronous request upload.
+      if (agentID)
         this.agentCredentials!.authenticate(c.req, agentID, 'data');
       if (!key.id) this.auth.validateKey(c, table, true);
       const digest = hash(
@@ -606,7 +605,7 @@ export class Ingest {
           grouped.set(target, data);
         }
         for (const [target, data] of grouped) {
-          if (agentID && (usesAgentCredential || this.agentCredentials?.registered?.(agentID)))
+          if (agentID)
             this.agentCredentials!.authenticate(c.req, agentID, 'data');
           await this.cat.ch.insert(target, data, c.signal);
         }

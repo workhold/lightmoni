@@ -53,6 +53,7 @@ async function setup(t: any) {
   } as unknown as Dependencies;
   router.auth = deps.auth;
   const credentials = {
+    has: (agentID: string, audience: string) => agentID === "node-a" && audience === "control",
     authenticate(req: any, agentID: string) {
       if (
         agentID !== "node-a" ||

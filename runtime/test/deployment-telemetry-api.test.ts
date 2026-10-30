@@ -61,7 +61,7 @@ async function fixture(t: TestContext, configured = true) {
     reader: { query: async (...args: Parameters<ClickHouse["query"]>) => { reads++; return readerQuery(...args); }, exec: async () => {}, insert: async () => {} },
   } as unknown as Dependencies;
   router.auth = deps.auth;
-  const jobs = registerAgentJobs(deps);
+  const jobs = registerAgentJobs(deps, { agentCredentials: { has: () => true } as any });
   const services = registerServiceDeployments(deps, { jobs });
   const server = createServer((req, res) => { void router.handle(req, res).then((handled) => { if (!handled) { res.statusCode = 404; res.end(); } }); });
   server.listen(0, "127.0.0.1");

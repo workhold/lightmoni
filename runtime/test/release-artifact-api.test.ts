@@ -96,6 +96,7 @@ test("admin uploads a validated private release and an active job lease gates Ag
   } as unknown as Dependencies;
   router.auth = auth as any;
   const credentials = {
+    has: () => true,
     authenticate(req: any, agentID: string, audience: string) {
       if (agentID !== "agent-1" || audience !== "control" || req.headers.authorization !== "Bearer control-secret") throw new HTTPError(401, "invalid Agent credential");
       return { credential_id: "credential-1", agent_id: agentID, audience, scope: "agent.control", expires_at: "", last_used_at: "" };

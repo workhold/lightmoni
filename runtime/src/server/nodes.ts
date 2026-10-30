@@ -18,6 +18,7 @@ import {
 } from "./nodes-model.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import { agentLifecycle, assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
+import { hasActiveTaskRuns } from "./agent-hosts.js";
 export interface NodesOptions {
   internalExporter?: (
     table: string,
@@ -82,24 +83,9 @@ export function registerNodes(
   };
   const key = (ctx: Context, agentID: string): WriteKey => {
     assertAgentActive(deps.db, agentID, 401);
-    if ((options.agentCredentials?.registered?.(agentID) ?? options.agentCredentials?.has(agentID, "control"))) {
-      const credential = options.agentCredentials.authenticate(
-        ctx.req,
-        agentID,
-        "control",
-      );
-      return {
-        id: credential.credential_id,
-        name: "agent:" + agentID,
-        allowed_tables: [],
-        allow_all_tables: true,
-      };
-    }
-    try {
-      return deps.auth.validateKey(ctx);
-    } catch {
-      throw new NodeError(401, "invalid write key");
-    }
+    if (!options.agentCredentials) throw new NodeError(401, "独立 Agent control 凭据未配置");
+    const credential = options.agentCredentials.authenticate(ctx.req, agentID, "control");
+    return { id: credential.credential_id, name: "agent:" + agentID, allowed_tables: [], allow_all_tables: true };
   };
   router.get(
     base + "/agents",
@@ -121,6 +107,7 @@ export function registerNodes(
     const lifecycle = deps.db.transaction(() => {
       if (!deps.db.get("SELECT id FROM agents WHERE id=?", agentID)) throw new NodeError(404, "执行节点不存在");
       if (isAgentRemoved(deps.db, agentID)) return agentLifecycle(deps.db, agentID);
+      if (hasActiveTaskRuns(deps.db, agentID)) throw new NodeError(409, "节点有待执行、运行中或结果未知的任务中心记录，请先处理");
       if (table("agent_jobs") && deps.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID))
         throw new NodeError(409, "节点有待执行、运行中或结果未知的任务，请先完成或核对");
       if (table("machine_uninstallations") && deps.db.get("SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", agentID))
@@ -135,6 +122,33 @@ export function registerNodes(
       return agentLifecycle(deps.db, agentID);
     });
     ctx.json({ agent_id: agentID, ...lifecycle, credentials_revoked: true, remote_uninstalled: false });
+  }));
+  router.get(base + "/task-hosts", safe(ctx => ctx.json(store.hostDirectory())));
+  router.get(base + "/host-labels", safe(ctx => ctx.json(store.labels())));
+  router.post(base + "/host-labels", safe(async ctx => {
+    admin(ctx); const input = await body(ctx);
+    ctx.json(store.label(input.name, nodeID(), true), 201);
+  }));
+  router.put(base + "/host-labels/:id", safe(async ctx => {
+    admin(ctx); const input = await body(ctx); ctx.json(store.label(input.name, ctx.params.id, false));
+  }));
+  router.delete(base + "/host-labels/:id", safe(ctx => { admin(ctx); store.deleteLabel(ctx.params.id); ctx.json({ok:true}); }));
+  router.get(base + "/machines/:id/labels", safe(ctx => {
+    const label_ids = store.hostLabels(ctx.params.id);
+    ctx.json({ label_ids, labels: store.labels().filter(label => label_ids.includes(label.id)).map(({id,name}) => ({id,name})) });
+  }));
+  router.put(base + "/machines/:id/labels", safe(async ctx => {
+    admin(ctx); const input = await body(ctx);
+    if (Object.keys(input).some(key => key !== "label_ids")) throw new NodeError(400, "主机标签请求无效");
+    const label_ids = store.setHostLabels(ctx.params.id, input.label_ids);
+    ctx.json({ label_ids, labels: store.labels().filter(label => label_ids.includes(label.id)).map(({id,name}) => ({id,name})) });
+  }));
+  router.get(base + "/machines/:id/tasks", safe(ctx => ctx.json(store.effectiveHostTasks(ctx.params.id))));
+  router.put(base + "/machines/:id/task-overrides/:taskId", safe(async ctx => {
+    admin(ctx); ctx.json(store.setOverride(ctx.params.id, ctx.params.taskId, await body(ctx)));
+  }));
+  router.delete(base + "/machines/:id/task-overrides/:taskId", safe(ctx => {
+    admin(ctx); ctx.json(store.clearOverride(ctx.params.id, ctx.params.taskId));
   }));
   router.get(
     base + "/agent-task-labels",
@@ -189,9 +203,7 @@ export function registerNodes(
       const input = await body(ctx);
       if (!Array.isArray(input.label_ids))
         throw new NodeError(400, "请提供任务标签列表，可为空数组");
-      deps.db.transaction(() =>
-        store.setLabels(ctx.params.id, input.label_ids),
-      );
+      store.setLabels(ctx.params.id, input.label_ids);
       ctx.json({ label_ids: unique(input.label_ids) });
     }),
   );
@@ -225,9 +237,7 @@ export function registerNodes(
       const input = await body(ctx);
       if (typeof input.group_id !== "string" || !input.group_id)
         throw new NodeError(400, "请选择初始任务标签");
-      deps.db.transaction(() =>
-        store.setLabels(ctx.params.id, [input.group_id], input.group_id),
-      );
+      store.setLabels(ctx.params.id, [input.group_id], input.group_id);
       ctx.json(store.group(input.group_id));
     }),
   );
@@ -244,13 +254,14 @@ export function registerNodes(
       if (e instanceof NodeError || e instanceof HTTPError) throw e;
       throw new NodeError(503, "执行节点运行事件暂不可用");
     }
+    let machine: { machine_id: string; machine_name: string };
     try {
-      store.heartbeat(id, values, writeKey.id);
+      machine = store.heartbeat(id, values, writeKey.id);
     } catch (e) {
       if (e instanceof NodeError || e instanceof HTTPError) throw e;
       throw new NodeError(503, "执行节点记录暂不可用");
     }
-    ctx.json({ agent_id: id, ok: true });
+    ctx.json({ agent_id: id, ...machine, ok: true });
   };
   router.post(base + "/agents/register", safe(heartbeat), { public: true });
   router.post(base + "/agents/:id/heartbeat", safe(heartbeat), {

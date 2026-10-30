@@ -1,0 +1,30 @@
+{
+  "production_bundle": true,
+  "api_fixtures": true,
+  "real_agent_execution": false,
+  "backend_contract_validation": false,
+  "ssh_connections": 0,
+  "production_writes": false,
+  "checks": [
+    "uninstalled host label editing uses host identity and preserves host metadata",
+    "host task details show waiting states and persist/reset per-host enable and configuration overrides",
+    "default metric/probe tasks are enabled while empty probe remains awaiting configuration",
+    "enabled probe task can save empty targets without fabricated probe URLs",
+    "custom Node script creation saves code, all-host targets, finite limits and interval schedule",
+    "hosts without script capability are visibly upgrade-required and cannot be selected for dispatch",
+    "dispatch conflict retains reviewed revision and requires reload plus fresh approval after task changes",
+    "script dispatch requires explicit code/host review and prevents duplicate confirmation requests",
+    "queued run cancellation is explicit and displays distinction from terminating running work",
+    "full run detail preserves output across summary polling and supports explicit result refresh",
+    "retry reviews current script and previous effects before creating a new run",
+    "unknown run resolution requires manual reason and child-process confirmation, keeps unknown history and prevents duplicate or repeated actions",
+    "three platform defaults share the directory without clone/delete controls or template requests; new scripts open directly and save as user drafts",
+    "host label creation works and referenced-label deletion preserves conflict feedback",
+    "AI task proposal deep link exposes before/after and requires reviewed user approval",
+    "member sees uninstalled host labels and tasks via safe directory without SSH APIs or write controls",
+    "English task center and responsive 390px layout preserve waiting-state semantics without page overflow"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "screenshots": "/Users/liminghan/Documents/lightmoni/lightmoni/specs/049-platform-default-tasks/evidence/task-center"
+}

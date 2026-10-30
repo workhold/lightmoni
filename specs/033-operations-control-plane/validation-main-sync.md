@@ -19,3 +19,11 @@
 本轮架构同步不适用：合并并复用已有统一主机入口、节点生命周期和运维平台，没有新增组件职责、存储、协议、凭据或拓扑。仓库 system-design.md 自动合并保留两分支设计，Doca 既有同步证据保留；本轮没有重写或声称重新保存 Doca。
 
 代码通过功能分支推送至 GitHub，PR #15 继续面向 main；尚未取得合并授权，不合并主干。
+
+## 2026-10-30 合入前复核
+
+- 已同步 GitHub origin/main a11ae1f，解决 App 懒加载冲突及系统设计章节追加冲突，保留两侧既有功能与章节。
+- 旧运维测试夹具补齐 Agent control 凭据可用性接口，生产鉴权逻辑不变。
+- `npm run typecheck`、`npm run build`、`git diff --check` 通过。构建有既有第三方 use client 及 chunk 大小提示。
+- `node --import tsx --test --test-concurrency=1 --test-reporter=spec test/platform-*.test.ts test/managed-machines.test.ts`：118 项，115 通过、3 环境跳过、0 失败。
+- 额外架构同步不适用：本次仅同步已有主干、保留既有章节及适配测试契约；原 Doca 同步证据保持，未另行修改在线文档。

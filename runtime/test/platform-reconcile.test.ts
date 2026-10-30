@@ -21,7 +21,7 @@ test("two workload reconciliation rounds continue while a DNS observation remain
     auth: { requireAdmin() {} },
     logger: { info() {}, warn() {}, error() {} },
   } as unknown as Dependencies;
-  const jobs = registerAgentJobs(deps);
+  const jobs = registerAgentJobs(deps, { agentCredentials: { has: () => true } as any });
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;

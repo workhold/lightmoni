@@ -53,7 +53,7 @@ function setup(
     now: () => now,
     logger: { info() {}, warn() {}, error() {} },
   } as unknown as Dependencies;
-  const jobs = registerAgentJobs(deps),
+  const jobs = registerAgentJobs(deps, { agentCredentials: { has: () => true } as any }),
     store = new OperationsPlatformStore(deps, jobs),
     options: PlatformOptions = {
       store,

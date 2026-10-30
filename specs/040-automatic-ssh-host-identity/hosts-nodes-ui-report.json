@@ -1,0 +1,21 @@
+{
+  "production_bundle": true,
+  "api_fixtures": true,
+  "real_ssh": false,
+  "production_writes": false,
+  "checked": [
+    "one host asset list uses persisted IDs, enriches Agent status, and does not manufacture SSH addresses for registered hosts",
+    "registered hosts explain SSH and manual uninstall requirements without executing an action",
+    "node removal binds its target and explains archive versus uninstall; cancellation sends no write",
+    "backend task/removal conflict stays visible and keeps the node intact",
+    "retry and synchronous repeated confirmation send one removal request; identity removal retains its host asset",
+    "administrator history reads include_removed, retains archive metadata, and never offers restoration or repeat removal",
+    "monitoring tasks and labels reuse existing editors in one workspace",
+    "legacy /agents task deep links work and legacy default-homepage preferences resolve to /machines",
+    "registered host editing keeps immutable asset identity, saves a chosen name alone, and requires explicit SSH connection details without performing remote work",
+    "members retain real host IDs and task views while never requesting machine, credential, or lifecycle APIs, including hostile machine deep links",
+    "English unified list and removal confirmation fit a 390px viewport without page overflow"
+  ],
+  "errors": [],
+  "unexpected": []
+}

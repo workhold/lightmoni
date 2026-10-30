@@ -18,7 +18,7 @@ function setup(t: any) {
     now: () => new Date("2026-10-29T02:00:00Z"),
     logger: { info() {}, warn() {}, error() {} },
   } as unknown as Dependencies;
-  const jobs = registerAgentJobs(deps),
+  const jobs = registerAgentJobs(deps, { agentCredentials: { has: () => true } as any }),
     store = new OperationsPlatformStore(deps, jobs);
   store.register("application", {
     validate: (s) => s,

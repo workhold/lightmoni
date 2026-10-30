@@ -27,7 +27,7 @@ async function fixture(t: any) {
     user: (req: any) => req.headers["x-role"] === "agent" ? undefined : ({id: "admin",name:"Admin",role:req.headers["x-role"] ?? "admin"}),
   }} as unknown as Dependencies;
   router.auth = deps.auth;
-  const credentials = { authenticate(req: any, agentID: string) { if (agentID !== "agent-1" || req.headers.authorization !== "Bearer control-secret") fail(403, "invalid agent credential"); return { agent_id: agentID }; } } as any;
+  const credentials = { has: () => true, authenticate(req: any, agentID: string) { if (agentID !== "agent-1" || req.headers.authorization !== "Bearer control-secret") fail(403, "invalid agent credential"); return { agent_id: agentID }; } } as any;
   const jobs = registerAgentJobs(deps, { agentCredentials: credentials });
   const definition: OperationDefinition = { kind: "certificate", operations: ["inspect", "install"], readOnly: ["inspect"], validate: v => v as any, publicConfig: v => ({domains:v.domains,has_private_key:!!v.private_key_pem}), validateInput: (_op,v) => v as any };
   const ops = registerOperations(deps, { jobs, credentials, definitions: [definition, backupDefinition, composeDefinition, websiteDefinition] });

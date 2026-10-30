@@ -307,12 +307,12 @@ export function registerSettings(
     "/v1/sdk-config",
     (c) => {
       const agentID = String(c.req.headers["x-lightmoni-agent-id"] ?? "");
-      // Re-enrolled Agents use the control audience to pull the same validated
-      // sampling configuration that legacy ingest keys could read. Keep the
-      // old key path for nodes that have not migrated yet.
+      // Requests declaring an Agent identity require independent control auth.
+      // Ordinary SDK configuration keeps the SDK reporting-key data path.
       const key =
-        agentID && (agentCredentials?.registered?.(agentID) ?? agentCredentials?.has(agentID, "control"))
+        agentID
           ? (() => {
+              if (!agentCredentials) fail(401, "agent control credential required");
               const credential = agentCredentials.authenticate(
                 c.req,
                 agentID,

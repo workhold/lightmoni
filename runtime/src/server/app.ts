@@ -28,6 +28,7 @@ import { registerMachineTerminal } from "./machine-terminal.js";
 import { registerManagedMachines } from "./managed-machines.js";
 import { registerServiceDeployments } from "./service-deployments.js";
 import { registerAgentJobs } from "./agent-jobs.js";
+import { registerTaskCenter } from "./task-center.js";
 import { registerOperations } from "./operations.js";
 import { registerOperationsPlatform } from "../ops/index.js";
 import { registerOperationSchedules } from "./operation-schedules.js";
@@ -150,6 +151,8 @@ export async function createApp(cfg: Config) {
       }),
     );
     modules.push(agentJobs);
+    const taskCenter = registerTaskCenter(deps, { agentCredentials });
+    modules.push(taskCenter);
     // Enrollment credentials are a separate migration boundary. Legacy
     // config.key based nodes keep working until they explicitly re-enroll.
     modules.push(agentCredentials);
@@ -163,6 +166,7 @@ export async function createApp(cfg: Config) {
         alerts: new AlertCapabilities(alerts),
         deployments: serviceDeployments,
         operations,
+        taskCenter,
       }),
     );
     if (cfg.monitor !== false) {

@@ -1,0 +1,34 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "status": "synchronized",
+  "spec": "043-task-center",
+  "repository_sections": [
+    "11.2",
+    "11.3",
+    "13",
+    "22.3",
+    "27.1–27.6"
+  ],
+  "before_seq": 788,
+  "readback_seq": 789,
+  "updated_existing_paragraphs": 4,
+  "new_blocks_verified": 29,
+  "unrelated_top_level_blocks_unchanged": 371,
+  "existing_native_diagrams_unchanged": 14,
+  "native_flowcharts": [
+    {
+      "id": "task043-control-flow",
+      "nodes": 12,
+      "edges": 13,
+      "nodes_and_edges_match": true
+    },
+    {
+      "id": "task043-execution-states",
+      "nodes": 7,
+      "edges": 7,
+      "nodes_and_edges_match": true
+    }
+  ],
+  "preserved_parallel_cluster042_chapter": true,
+  "native_visual_render_verified": false
+}

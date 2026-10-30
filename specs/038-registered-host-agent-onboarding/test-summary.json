@@ -1,0 +1,40 @@
+{
+  "runtime": {
+    "tests": 455,
+    "passed": 438,
+    "skipped": 17,
+    "failed": 0
+  },
+  "final_host_admission_nodes": {
+    "passed": 19,
+    "failed": 0
+  },
+  "agent_targeted": {
+    "passed": 15,
+    "failed": 0
+  },
+  "typescript_sdk": {
+    "passed": 18,
+    "failed": 0
+  },
+  "builds": {
+    "runtime": "passed",
+    "web": "passed"
+  },
+  "ui": {
+    "passed": 57,
+    "page_errors": 0,
+    "unexpected_requests": 0,
+    "production_bundle": true,
+    "api_fixtures": true
+  },
+  "real_remote_installation_verified": false,
+  "production_writes": false,
+  "doca_readback_seq": 784,
+  "full_runtime_precedes_final_host_admission_hardening": false,
+  "managed_machines": {
+    "passed": 40,
+    "failed": 0
+  },
+  "full_runtime_includes_final_direct_ssh_hardening": true
+}

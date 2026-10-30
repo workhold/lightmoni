@@ -53,6 +53,8 @@ import { Collector } from "./collect.js";
 import { FileLogReader } from "./file-logs.js";
 import { checkProbe } from "./probe.js";
 import { AgentJobRunner } from "./jobs.js";
+import { AgentTaskRunner } from "./task-runner.js";
+import { SCRIPT_TASK_CAPABILITIES } from "../shared/task-center.js";
 import {
   ReceiveError,
   requestBytes,
@@ -73,6 +75,7 @@ export class Agent {
   readonly sdk: LightMoni;
   readonly files: FileLogReader;
   readonly jobs?: AgentJobRunner;
+  readonly taskRunner?: AgentTaskRunner;
   tasks: RemoteConfig;
   tasksReady = false;
   revision = "";
@@ -104,10 +107,10 @@ export class Agent {
         table: "host",
         instanceId: this.identity.agent_id,
         selfTelemetry: false,
-        // Telemetry and SDK configuration use the data audience. The legacy
-        // key remains a compatibility fallback for nodes before enrollment.
-        key: config.data_credential || config.key,
-        configEndpoint: config.endpoint,
+        // Telemetry and SDK configuration use the independent data audience.
+        key: config.data_credential,
+        // Agent task configuration is fetched through its authenticated control plane.
+        remoteConfig: false,
         intervalMs: config.collect_interval_seconds * 1000,
         maxBatchBytes: Math.floor(config.max_batch_bytes / 2),
         exporter: {
@@ -150,11 +153,18 @@ export class Agent {
         dataDir: config.data_dir,
         pollIntervalMs: Math.max(5000, config.control_interval_seconds * 1000),
       });
+      this.taskRunner = new AgentTaskRunner({
+        endpoint: config.endpoint,
+        agentID: this.identity.agent_id,
+        controlCredential: config.control_credential,
+        dataCredential: config.data_credential,
+        dataDir: config.data_dir,
+        pollIntervalMs: Math.max(5000, config.control_interval_seconds * 1000),
+      });
     }
   }
   private safe(message: string) {
     for (const secret of [
-      this.config.key,
       this.config.control_credential,
       this.config.data_credential,
       this.config.local_token,
@@ -213,6 +223,7 @@ export class Agent {
       sdk: legacyStats,
       runtime_events: [...this.runtimeEvents],
       control_interval_seconds: this.config.control_interval_seconds,
+      task_capabilities: [...SCRIPT_TASK_CAPABILITIES],
     };
   }
   accept(batch: Batch, owned: boolean, cursor?: LogCursor): void {
@@ -458,7 +469,7 @@ export class Agent {
           headers: {
             "X-Lightmoni-Agent-ID": this.identity.agent_id,
             Authorization:
-              "Bearer " + (this.config.control_credential || this.config.key),
+              "Bearer " + this.config.control_credential,
           },
           signal: AbortSignal.any([parent, AbortSignal.timeout(5000)]),
         },
@@ -517,7 +528,7 @@ export class Agent {
         redirect: "manual",
         headers: {
           Authorization:
-            "Bearer " + (this.config.control_credential || this.config.key),
+            "Bearer " + this.config.control_credential,
           "Content-Type": "application/json",
         },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -601,7 +612,7 @@ export class Agent {
             "X-Lightmoni-Batch-Created-At": batch.created_at,
             "X-Lightmoni-Agent-ID": this.identity.agent_id,
             Authorization:
-              "Bearer " + (this.config.data_credential || this.config.key),
+              "Bearer " + this.config.data_credential,
           },
           body: new Uint8Array(batch.payload),
           signal: AbortSignal.any([parent, AbortSignal.timeout(15000)]),
@@ -862,6 +873,7 @@ export class Agent {
       this.probeLoop(),
       this.fileLogLoop(),
       this.jobLoop(),
+      this.taskRunner?.run(this.controller.signal) ?? Promise.resolve(),
     ];
   }
   async run(parent?: AbortSignal) {
