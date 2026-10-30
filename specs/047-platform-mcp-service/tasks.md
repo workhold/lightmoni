@@ -6,7 +6,7 @@
 - [x] 官方SDK MCP传输、限制及集成测试。
 - [x] MCP管理与授权同意界面、中英支持。
 - [x] 回归测试、独立审查、仓库/Doca同步与回读，证据见 [验证记录](validation.md) 和 [Doca 同步记录](doca-sync.json)。
-- [ ] 提交分支并创建面向 main 的 GitHub PR。
+- [x] 提交分支并创建面向 main 的 [GitHub PR #23](https://github.com/workhold/lightmoni/pull/23)。
 
 ## 后续验收
 
