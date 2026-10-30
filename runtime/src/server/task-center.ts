@@ -4,6 +4,7 @@ import { fail, HTTPError } from "../shared/http.js";
 import { NodeError, NodeStore, type Task } from "./nodes-model.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import { assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
+import { assertNoPendingAgentUpdate, hasPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { SCRIPT_TASK_CAPABILITY, TASK_LEASE_SECONDS, validateTaskScript,
   type ClaimedTaskRun, type TaskRun, type TaskRunResult, type TaskRunSnapshot } from "../shared/task-center.js";
 
@@ -98,6 +99,7 @@ export class TaskRunStore {
     const existing = this.deps.db.get<any>("SELECT * FROM task_runs WHERE task_id=? AND host_id=? AND request_id=?", task.id, hostID, requestID);
     if (existing) return this.view(existing);
     const h = this.host(hostID);
+    assertNoPendingAgentUpdate(this.deps.db, h.agent_id, h.id);
     if (!h.agent_id || !this.validBinding(h.id, h.agent_id)) fail(409, "host requires an active enrolled Agent");
     if (this.active(task.id, h.id, trigger !== "retry")) fail(409, "task already queued, running, or unresolved; explicitly retry an unknown run after review");
     validateTaskScript(task.script);
@@ -185,6 +187,7 @@ export class TaskRunStore {
     if (!Array.isArray(capabilities) || capabilities.length > 32 || capabilities.some(x => typeof x !== "string")) fail(400, "invalid task capabilities");
     if (!capabilities.includes(SCRIPT_TASK_CAPABILITY)) return null;
     return this.deps.db.transaction(() => {
+      if (hasPendingAgentUpdate(this.deps.db, agentID)) return null;
       if (this.deps.db.get("SELECT id FROM task_runs WHERE agent_id=? AND state='running'", agentID)) return null;
       const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE agent_id=? AND state='queued' ORDER BY created_at,rowid LIMIT 200", agentID);
       for (const r of pending) {
@@ -270,7 +273,7 @@ export class TaskRunStore {
         this.deps.db.run("UPDATE task_schedules SET next_due=? WHERE task_id=?", next, t.id);
         const hosts = this.deps.db.all<{ id: string; agent_id: string }>("SELECT id,agent_id FROM managed_machines WHERE agent_id<>'' ORDER BY id");
         for (const h of hosts) {
-          if (!this.validBinding(h.id, h.agent_id) || this.active(t.id, h.id)) continue;
+          if (!this.validBinding(h.id, h.agent_id) || this.active(t.id, h.id) || hasPendingAgentUpdate(this.deps.db, h.agent_id, h.id)) continue;
           const effective = this.nodes.effectiveHostTasks(h.id).find(v => v.id === t.id && v.enabled && v.status !== "upgrade_required");
           if (effective) this.insert(effective, h.id, "schedule", "scheduler", "schedule:" + old.next_due);
         }

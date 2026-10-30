@@ -1,7 +1,8 @@
 FROM node:24.15.0-bookworm AS build
 ARG NPM_REGISTRY=https://registry.npmjs.org
 ARG NODE_DIST_URL=https://nodejs.org/dist
-ENV npm_config_registry=${NPM_REGISTRY} npm_config_audit=false npm_config_fund=false npm_config_nodedir=/usr/local LIGHTMONI_NODE_DIST_URL=${NODE_DIST_URL}
+ARG BUILD_REVISION
+ENV npm_config_registry=${NPM_REGISTRY} npm_config_audit=false npm_config_fund=false npm_config_nodedir=/usr/local LIGHTMONI_NODE_DIST_URL=${NODE_DIST_URL} LIGHTMONI_BUILD_REVISION=${BUILD_REVISION}
 WORKDIR /work
 COPY sdk/typescript/package*.json ./sdk/typescript/
 RUN npm --prefix sdk/typescript ci

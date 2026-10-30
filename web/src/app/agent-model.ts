@@ -32,6 +32,7 @@ export interface EffectiveHostTask extends ManagedAgentTask {status:string;overr
 export interface TaskRun {resolved_at?:string;resolved_by?:string;resolution_reason?:string;superseded_by?:string;details_omitted?:boolean;id:string;task_id:string;task_name:string;host_id:string;host_name:string;agent_id:string;state:'queued'|'running'|'succeeded'|'failed'|'cancelled'|'unknown';trigger:'manual'|'schedule'|'retry';retry_of:string;created_at:string;started_at:string;finished_at:string;lease_expires_at:string;cancel_requested:boolean;code:string;summary:string;stdout:string;stderr:string;exit_code:number|null;snapshot:{task_id:string;task_name:string;host_id:string;host_name:string;agent_id:string;script:TaskScript}}
 export interface AgentItem {
   machine_id?:string;machine_name?:string;
+  release?:{version?:string;source_revision?:string;build_id?:string;state_schema?:number;artifact_sha256?:string};boot_id?:string;
   id:string;hostname:string;platform:string;arch:string;version:string;last_seen:string;
   lifecycle_state?:'active'|'removed';removed_at?:string;removal_reason?:string;
   heartbeat:Record<string,unknown>;config:AgentTasks;group_id:string;group_name:string;

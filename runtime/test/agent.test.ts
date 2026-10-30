@@ -824,7 +824,10 @@ test("running Agent waits for assigned tasks, withdraws probes/logs and stops in
     ],
   });
   await new Promise((resolve) => setTimeout(resolve, 450));
-  assert.equal(probes, 1);
+  // A loaded event loop can legitimately run more than one one-second probe
+  // before this timer resumes. Withdrawal must stop subsequent probes.
+  assert(probes >= 1);
+  const probesBeforeWithdrawal = probes;
   assert.equal(a.files.files.size, 1);
   appendFileSync(join(logs, "app.log"), "after withdrawal\n");
   a.applyRemote({
@@ -836,7 +839,7 @@ test("running Agent waits for assigned tasks, withdraws probes/logs and stops in
     probes: [],
   });
   await new Promise((resolve) => setTimeout(resolve, 2100));
-  assert.equal(probes, 1);
+  assert.equal(probes, probesBeforeWithdrawal);
   assert.equal(a.files.files.size, 0);
   assert(signals.includes("/v1/logs"));
   assert(signals.includes("/v1/metrics"));

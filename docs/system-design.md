@@ -528,7 +528,7 @@ SSH 预检是只读固定命令集合，检查网络、指纹、Linux、架构�
 
 凭据到期或撤销时同样清空当前记录的 `secret_encrypted`，保留 ID、策略来源、有效期、清除时间/原因和不含秘密的事件。有限凭据在启动时、读取/使用前和每 30 秒统一清理；永久凭据仅在明确撤销时清除，不以空期限计算为到期。统一有效性判断要求未撤销、秘密未清除，且永久策略无固定期限或有限期限在未来；关闭模块时释放定时器；清理幂等，并取消引用失效凭据的待审批计划，不改写正在运行的计划。终端租约在到期或撤销后失效。清空当前记录不等于擦除 SQLite WAL/free pages、备份、已进入有界操作的进程副本或远端 authorized_keys。
 
-主机能力由后端按连接方式、忙状态及有效凭据计算 terminal、ssh_check、deploy_agent、uninstall_agent。active_reusable_ssh_credential_count 只统计私钥及 temporary/managed/permanent 密码，安装/卸载不能用含一次性密码或手动脚本的总数推导。界面展示能力及置灰原因；所有操作后刷新状态。未记录主机身份不会置灰，首次 SSH 操作自动记录。实现契约见 SDD 031、032、034、037、038、039、040。
+主机能力由后端按连接方式、忙状态及有效凭据计算 terminal、ssh_check、deploy_agent、uninstall_agent、update_agent、rollback_agent。active_reusable_ssh_credential_count 只统计私钥及 temporary/managed/permanent 密码，安装、卸载和升级不能用含一次性密码或手动脚本的总数推导。界面展示能力及置灰原因；所有操作后刷新状态。未记录主机身份不会置灰，首次 SSH 操作自动记录。实现契约见 SDD 031、032、034、037、038、039、040、045。
 
 网页终端是管理员本人使用的临时 PTY：同源 Origin、登录 cookie、首次自动记录且后续比对的主机公钥、单次 WebSocket 入口、输入/输出上限、10 分钟空闲和 30 分钟总时长。终端输出不持久化、不写日志、不发送给 AI。终端不是 AI 任意 shell 工具。
 
@@ -797,7 +797,7 @@ docker compose up -d --no-build --wait
 
 ### 20.2 Agent
 
-发布脚本构建 Linux amd64/arm64 包和 SHA256；安装脚本校验 HTTPS、版本、架构和包完整性。Agent 以独立 systemd 服务或容器启动，`node runtime/dist/agent/main.js run --config /path/agent-config.json` 是源码运行入口。重装和升级保留 identity、凭据（若未撤销）、配置 revision 和队列；安装失败不能删除已有节点数据。
+发布脚本构建 Linux amd64/arm64 包、带源码/构建身份的发行目录和 SHA256；安装脚本校验 HTTPS、版本、架构和包完整性。平台接入使用宿主机独立 systemd 服务，`node runtime/dist/agent/main.js run --config /path/agent-config.json` 是源码运行入口。首装拒绝覆盖已有身份，受管升级采用第 28 节的独立确认与回退协议；维护保留 identity、凭据（若未撤销）、配置 revision 和队列，不能删除已有节点数据。
 
 ### 20.3 关闭顺序
 
@@ -845,7 +845,7 @@ docker compose up -d --no-build --wait
 ## 23. 演进路线
 
 1. **一致性门**：统一 SDK 发布矩阵、接入页、下载 API 和验证 fixture；清理过时的 Java/C#/PHP 发布文字。
-2. **Agent 强化**：配置租约、凭据持有证明、在线升级、更多 OS、受限 Agent Executor；每项先建 SDD。
+2. **Agent 强化**：配置租约、凭据持有证明、更多 OS、受限 Agent Executor；每项先建 SDD。宿主机受管 Agent 的 SSH 升级与确认/回退协议见第 28 节。
 3. **服务发现**：在 K8s/sidecar/本机部署场景增加明确的 Agent endpoint 注入或服务发现协议，不凭主机猜测身份，不改变 direct 默认。
 4. **AI 工具扩展**：在中心实现受审计的 Agent 操作 API 后，再让 AI 调用节点工具；不把 SSH 作为长期路径，也不让节点获得模型 Key。
 5. **数据和告警**：增加更强的降采样估算、依赖抑制、事件关联和大规模查询优化，同时保留明确的截断与计价状态。
@@ -1046,3 +1046,87 @@ Agent 通过 task.script.v1 能力声明领取，旧版本不会误领新任务�
 ### 27.6 验证与边界
 
 验证必须覆盖真实数据库迁移与重启、未安装主机标签、重新接入继承、默认拨测待配置、成员权限、派发原子性、快照不变、领取隔离、租约失效 unknown、结果重试、取消、当前定义显式重试、周期不重叠、不追赶、真实子进程超时/输出上限/最小环境以及浏览器任务操作。仅有任务 enabled 或创建 queued 记录不能声称主机已执行成功。发布到真实用户主机需要新 Agent 包；本地受控子进程验收不等于 vchive 或生产发布验收。
+
+## 28. Agent 版本、升级与回退（SDD 045）
+
+### 28.1 驱动目标和职责
+
+更新中心镜像只更新平台与可下载发行物，不会改变用户主机正在运行的 Agent。主机管理应分别展示 Agent 报告的运行发行身份、可用发行与维护结果。管理员可准备单机升级、回退和串行批次；AI 可查询和准备计划，执行仍由管理员明确批准。开发与实际验收记录见 [SDD 045](../specs/045-agent-lifecycle-updates/spec.md)。
+
+Agent 常态以专用非 root 用户运行。自身程序和 systemd unit 由 root 管理；本轮维护继续使用主机的 SSH root/免交互 sudo 通道，运行独立的固定维护器。业务任务仍通过 Agent 出站 control 通道派发，无需中心入站连接 Agent。升级不重新 enrollment，不替换 Agent ID，不注入 SDK 主机变量，SDK 继续独立直报。
+
+### 28.2 HLD：审批、独立维护与中心确认
+
+```mermaid
+flowchart TB
+  Actor[管理员 / AI 准备计划] --> Plan[固定包摘要与当前程序指纹]
+  Catalog[发行目录 / 内容寻址缓存] --> Plan
+  Plan --> Review[管理员明确审批]
+  Review --> SSH[SSH root 固定维护入口]
+  SSH --> Worker[独立 systemd 维护单元]
+  Worker --> Stage[验证 / 暂存 / 原子切换]
+  Stage --> Agent[同身份新启动 Agent]
+  Agent --> Control[出站 control 心跳 / 配置应用]
+  Control --> Proof[精确发行 / 新 boot / 新鲜健康证据]
+  Proof --> Commit[中心发送 commit]
+  Worker --> Timeout[无确认 / 启动失败]
+  Timeout --> Rollback[恢复先前程序 / 保留实时数据]
+  Commit --> History[持久维护回执]
+  Rollback --> History
+```
+
+维护器生命周期独立于 SSH 会话。等待中心确认期间，平台断线不代表成功；维护器达到确认期限后自动尝试恢复原程序。掉电可能中断维护器，不能承诺系统未运行时完成恢复；远端持久事务和程序指纹供恢复后核对，平台不自动重复切换。
+
+### 28.3 LLD：发行身份与固定下载
+
+AgentRelease 包含 version、source_revision、build_id、state_schema、platform、arch、file、sha256。version 只是展示信息，同版本不同源码或编译内容必须具有可区别的构建身份。包内 release.json 声明源码和状态兼容域，外部清单保存整个 tar 包 SHA256，避免自身摘要循环依赖。首装和升级在对应受管发行目录保存不含秘密的安装摘要。
+
+运行进程从自身代码所属发行目录读取 release metadata 和安装摘要；不能动态读取 current 链接后把仍在运行的旧进程误报成新程序。每次进程启动产生新的 boot_id，心跳携带 release 与 boot_id。旧 Agent 无此信息时显示未知；平台不得只靠 version=0.1.0 判断更新或升级成功。
+
+中心生成计划时校验发行清单与包，保留不可变内容寻址副本，固定维护脚本和包摘要，避免更新平台镜像或替换 downloads 文件改变已批准内容。短期维护下载票据限定计划、目标主机和文件，中心仅保存散列，通过 SSH stdin 输入，root 私有临时文件用于 curl 鉴权；票据不放 URL、命令参数、普通环境变量或 AI 上下文。该 scope 与 enrollment、control、data 完全分离，不能用于创建节点身份或任意文件下载。
+
+### 28.4 LLD：维护事务和数据兼容
+
+SSH 计划核对目标主机、公钥、Agent ID、受管路径/unit、当前程序指纹、服务运行状态、发行架构和权限；审批绑定当前主机连接 revision、Agent 归属、当前程序指纹、服务运行状态与目标摘要，15 分钟后失效。中心执行前、远端维护器接收及切换前再次核对；不一致时拒绝旧计划，避免失败恢复采用未经审阅的运行状态。已有任务、任务 unknown、其他生命周期计划或执行锁阻止开始维护；维护期间也阻止新增/领取冲突任务、重绑定、卸载与删除。
+
+root 私有事务目录保存请求、备份与 receipt。维护器取得固定生命周期锁，验证暂存包及配置后，保留原 launcher/unit/current 并原子切换程序；配置、control/data credential、identity、SQLite 队列、日志游标、任务回执均保持原路径和内容。普通服务保持专用非 root 用户及现有 systemd 权限边界。
+
+维护状态包括准备、切换、等待确认、成功、已回退和失败。中心只有同时看到远端等待确认、同 Agent ID 的目标包摘要/build/schema、新 boot、新鲜心跳、已应用配置且无控制错误，才发送 commit 并记录 succeeded。本地 systemd active 只能作为存活证据，不能单独作为平台升级成功。
+
+本轮只支持相同 state_schema=1 的程序升级和回退；受管旧 0.1.0 Node 包须经过明确识别，未知 manifest/schema 拒绝自动维护。旧包可作为升级来源及失败自动恢复目标，显式回退目标必须提供完整发行和新 boot 证明，缺少 metadata 的旧包不降级为猜测成功。回退恢复程序和 unit，保留实时队列；不恢复旧数据快照以免丢失升级后遥测或重复已确认数据。跨 schema 迁移需要独立 SDD 和恢复方案。显式回退也创建新审批计划，目标固定为保留的上一发行，重新验证指纹与健康；受管新程序已经故障停止时仍可核对身份与文件后准备回退，普通升级来源则必须健康。
+
+### 28.5 LLD：不确定结果与批次
+
+```mermaid
+stateDiagram-v2
+  [*] --> awaiting_approval: 只读核对并固定计划
+  awaiting_approval --> cancelled: 取消未执行计划
+  awaiting_approval --> running: 明确批准一次
+  running --> verifying: 新程序等待中心确认
+  verifying --> succeeded: 目标新启动健康 / commit
+  running --> rolled_back: 失败并确认恢复旧程序
+  verifying --> rolled_back: 确认超时并恢复旧程序
+  running --> unknown: 断连 / 平台重启 / 证据不完整
+  verifying --> unknown: 无法确定 commit 结果
+  unknown --> succeeded: 只读核对已持久提交
+  unknown --> rolled_back: 只读核对已持久恢复
+  unknown --> failed: 只读核对未切换且状态明确
+```
+
+unknown 不自动重跑。核对读取原操作 receipt、真实 Agent 身份和当前程序；waiting_confirmation 不由核对自动提交，等待远端确认期限处理。原 SSH 凭据失效时可提供新有效凭据；结果证据仍须绑定同一操作和目标，不把另一次维护状态当本次成功。若远端已经持久提交但确认响应丢失，随后 Agent 又正常重启，核对以当前只读程序指纹、精确目标发行、新 boot 与新鲜心跳独立验证当前健康，在 receipt.current_verification 保存核对证据，并保留原提交 boot 历史。回退失败或部分结果保持未知并阻塞冲突操作；掉电、强杀导致 accepted/preparing 遗留且维护器已停止时同样保守保留 unknown，管理员通过外部 SSH 检查持久事务和对应 systemd 单元，不凭无锁观察自动清除。
+
+批次最多 20 台，逐机保存不可变计划与结果，默认串行。失败、已回退或 unknown 自动暂停后续机器；继续须重新明确批准。取消只取消未启动项，已开始操作继续由自身健康/回退协议结束，历史保持真实结果。平台重启暂停批次并把未确认执行记 unknown，不自动重放。批次本身完成不替代逐机成功证明。
+
+### 28.6 LLD：接口与 AI 边界
+
+发行目录使用 GET /api/v1/agent-releases；单机计划、历史、审批、取消、核对使用 /api/v1/machines/:id/agent-updates；批次使用 /api/v1/agent-rollouts。平台写操作仅管理员；成员只读安全版本和状态。接口不接受用户任意维护脚本、远程路径或 sudo 命令。下载接口独立验证操作 scope，不接受 SDK Key 替代。
+
+AI 工具 list_agent_releases、propose_agent_update、get_agent_update 只返回安全 metadata、计划、结果和审阅链接。准备计划可执行固定只读 SSH probe；助手不能 apply、commit、执行回退或读取下载票据、原始 SSH 输出和主机秘密。rolled_back 表示本次更新未成功但原程序已恢复；unknown 需要核对，不能被助手改写为完成。
+
+### 28.7 任务中心的统一演进方向
+
+后续将任务中心作为外部 API、平台界面与 AI 共用的任务提交和执行记录入口。任务定义描述动作及参数，执行实例固定目标主机/Agent、代码或结构化参数摘要、来源、发起人、审批、幂等键、状态和结果。自定义脚本与平台内置结构化能力并存；结构化文件、服务、部署等能力应显式声明 capability、参数 schema、影响级别和验证策略。AI、外部客户端和平台页面复用相同权限、审批、目标解析与执行服务，不能创建绕开记录的 Agent 命令通道。
+
+统一入口和记录保留底层执行策略：持续采集使用配置 revision；有限脚本使用租约与退出结果；服务部署使用分阶段健康回执；Agent 首装/升级使用 SSH 生命周期与独立维护确认。主机检查等短操作可同步返回执行结果，耗时任务异步返回执行 ID，均记录来源、授权和目标；交互式能力另用会话协议，关联授权、开始、结束及退出状态，不把每次按键拆成任务，也不将终端原始输出持久化或发送给模型。高频采样不逐条创建任务执行记录。首次安装尚无 Agent 可接收任务，仍通过 SSH。周期任务与单次任务均归属明确主机，结果未知不会被幂等重试偷偷重放。
+
+本轮交付 Agent 维护自身的计划、审批和完整结果 API；跨脚本、业务运维、Agent 生命周期的统一执行读模型、外部服务身份及 scope、自定义 typed action 注册表属于后续单独 SDD，本轮不将已有分散接口声称为统一外部任务 API。

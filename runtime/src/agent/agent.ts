@@ -31,7 +31,6 @@ import {
   type Signal,
 } from "../shared/otlp.js";
 import {
-  VERSION,
   validateConfig,
   loadIdentity,
   normalizeRemote,
@@ -55,6 +54,7 @@ import { checkProbe } from "./probe.js";
 import { AgentJobRunner } from "./jobs.js";
 import { AgentTaskRunner } from "./task-runner.js";
 import { SCRIPT_TASK_CAPABILITY } from "../shared/task-center.js";
+import { readAgentRelease } from "./release.js";
 import {
   ReceiveError,
   requestBytes,
@@ -70,6 +70,8 @@ export interface RuntimeEvent {
   body: string;
 }
 export class Agent {
+  readonly bootID = randomUUID();
+  readonly release = readAgentRelease();
   readonly identity;
   readonly queue: Queue;
   readonly sdk: LightMoni;
@@ -212,7 +214,9 @@ export class Agent {
       group_id: this.config.group_id,
       host_id: this.identity.host_id,
       hostname: hostname(),
-      version: VERSION,
+      version: this.release.version,
+      boot_id: this.bootID,
+      release: { ...this.release },
       platform: process.platform === "win32" ? "windows" : process.platform,
       arch: process.arch === "x64" ? "amd64" : process.arch,
       config_revision: this.revision,
