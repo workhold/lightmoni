@@ -898,7 +898,7 @@ export default function ResourceFields({
                   )}
                 </Form.List>
               )}
-          {deploymentMode==='managed'&&<><div className="lm-ops-grid"><Form.Item name={["spec","health","type"]} label={t("探活方式","Health check")}><Select options={[{value:"tcp",label:"TCP"},{value:"http",label:"HTTP"}]}/></Form.Item><Form.Item name={["spec","health","port_name"]} label={t("探活端口名称","Health port name")} rules={required}><Input placeholder="api"/></Form.Item><Form.Item name={["spec","health","interval_seconds"]} label={t("探活间隔（秒）","Health interval (seconds)")}><InputNumber min={1} max={3600}/></Form.Item>{healthType==='http'&&<Form.Item name={["spec","health","path"]} label={t("健康检查路径","Health path")} rules={required}><Input placeholder="/health"/></Form.Item>}</div></>}
+          {deploymentMode==='managed'&&role!=='openresty'&&<><div className="lm-ops-grid"><Form.Item name={["spec","health","type"]} label={t("探活方式","Health check")}><Select options={[{value:"tcp",label:"TCP"},{value:"http",label:"HTTP"}]}/></Form.Item><Form.Item name={["spec","health","port_name"]} label={t("探活端口名称","Health port name")} rules={required}><Input placeholder="api"/></Form.Item><Form.Item name={["spec","health","interval_seconds"]} label={t("探活间隔（秒）","Health interval (seconds)")}><InputNumber min={1} max={3600}/></Form.Item>{healthType==='http'&&<Form.Item name={["spec","health","path"]} label={t("健康检查路径","Health path")} rules={required}><Input placeholder="/health"/></Form.Item>}</div></>}
           <Form.Item name={["spec","stateful"]} label={t("有状态 / 本地业务数据","Stateful / local business data")} valuePropName="checked"><Switch/></Form.Item>
           <Form.List name={["spec", "mounts"]}>
             {(fields, { add, remove }) => (

@@ -62,13 +62,13 @@ export const applicationCatalog = [
     id: "openresty",
     name: "OpenResty",
     description:
-      "当前集群网站的唯一入口，所选机器同步完整网站配置，监听 80/443。",
+      "全局共享的网站入口，可部署到多个集群，监听 80/443。",
     category: "web",
     version: "1.27.1.2-0-alpine",
     versions: ["1.27.1.2-0-alpine"],
     managed_recommended: true,
     managed_reason:
-      "无状态入口支持托管：固定监听 80/443，冲突节点跳过，换机验证成功后统一更新网站域名解析。",
+      "无状态入口支持托管：固定监听 80/443，冲突节点跳过，换机验证成功后更新集群入口域名解析。",
     parameters: [],
     spec: {
       mode: "container",

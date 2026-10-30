@@ -9,7 +9,7 @@ import {parseJSON} from '../src/shared/json.js';
 import {registerManagedMachines, type SSHRunner} from '../src/server/managed-machines.js';
 import {monitoringTools} from '../src/assistant/tools.js';
 import {SSHError} from '../src/server/machine-ssh.js';
-import {NodeStore} from '../src/server/nodes-model.js';
+import {NodeStore,normalizeTask} from '../src/server/nodes-model.js';
 import type {Dependencies} from '../src/shared/types.js';
 
 const checkOutput='LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n';
@@ -141,8 +141,12 @@ test('installation validates the complete retained host label union before issui
  const h=await host(f,'label-union'),tasks=new NodeStore(f.db,()=>now);
  tasks.label('Existing label','existing',true);tasks.label('Install label','install',true);
  tasks.setHostLabels(h.id,['existing']);
- tasks.task({name:'Existing metrics',type:'host',enabled:true,label_ids:['existing'],config:{collect_interval_seconds:15,host_collectors:['memory']}},'existing-metrics',true);
- tasks.task({name:'Install metrics',type:'host',enabled:true,label_ids:['install'],config:{collect_interval_seconds:30,host_collectors:['memory']}},'install-metrics',true);
+ // Native tasks model retained user definitions from before script-only creation.
+ f.db.transaction(()=>{
+  tasks.saveTask(normalizeTask({id:'existing-metrics',name:'Existing metrics',type:'host',enabled:true,label_ids:['existing'],config:{collect_interval_seconds:15,host_collectors:['memory']}}));
+  tasks.saveTask(normalizeTask({id:'install-metrics',name:'Install metrics',type:'host',enabled:true,label_ids:['install'],config:{collect_interval_seconds:30,host_collectors:['memory']}}));
+  tasks.validateAll();
+ });
  const check=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});
  const plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:check.data.id,version:'0.1.0',arch:'amd64',initial_label_id:'install'});assert.equal(plan.status,201,plan.raw);
  const applied=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});

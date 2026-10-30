@@ -1,3 +1,4 @@
+import { CloudError, zoneFor } from "./cloud.js";
 import { registerObservability } from "./observability.js";
 import { applicationCatalog, applicationCategories, catalogInstallation } from "./catalog.js";
 import { HTTPError, fail } from "../shared/http.js";
@@ -54,6 +55,10 @@ export function registerOperationsPlatform(
         deps.auth.requireAdmin(ctx);
         await fn(ctx);
       } catch (error: any) {
+        if (error instanceof CloudError) {
+          ctx.json({ error: error.code }, 400);
+          return;
+        }
         if (error instanceof HTTPError)
           ctx.json({ error: error.message }, error.status);
         else if (error instanceof OperationRejectedError)
@@ -97,7 +102,7 @@ export function registerOperationsPlatform(
         false
       );
     if (resource.kind === "website")
-      return resource.spec.cluster_ids?.includes(cid) ?? false;
+      return (resource.status.actual_cluster_ids ?? resource.spec.cluster_ids)?.includes(cid) ?? false;
     return true; // Credentials, certificates and managed domains are shared.
   };
   const agents = () =>
@@ -295,6 +300,13 @@ export function registerOperationsPlatform(
     }),
   );
   router.get('/api/v1/ops/runs/:id', safe(ctx => ctx.json(store.action(ctx.params.id))));
+  router.get(
+    "/api/v1/ops/resources/:id/dns-lines",
+    safe(async (ctx) => {
+      const { zone, client } = zoneFor(domainOptions, ctx.params.id);
+      ctx.json(await client.dnsLines(zone.spec.domain));
+    }),
+  );
   router.get(
     "/api/v1/ops/runs",
     safe((ctx) =>

@@ -16,7 +16,6 @@ import {
   nodeID,
   unique,
   validName,
-  taskTemplates,
 } from "./nodes-model.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import { agentLifecycle, assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
@@ -125,7 +124,6 @@ export function registerNodes(
     });
     ctx.json({ agent_id: agentID, ...lifecycle, credentials_revoked: true, remote_uninstalled: false });
   }));
-  router.get(base + "/task-templates", safe(ctx => ctx.json(taskTemplates())));
   router.get(base + "/task-hosts", safe(ctx => ctx.json(store.hostDirectory())));
   router.get(base + "/host-labels", safe(ctx => ctx.json(store.labels())));
   router.post(base + "/host-labels", safe(async ctx => {

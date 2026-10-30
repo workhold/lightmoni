@@ -468,6 +468,9 @@ export function createCertificateController(
           spec.acme_account_id,
           spec.certificate_id,
           ...(spec.dns_zone_ids ?? []),
+          ...(spec.deployments ?? []).map(
+            (deployment: any) => deployment.gateway_dns_zone_id,
+          ),
           ...(spec.bindings ?? []).flatMap((binding: any) => [
             binding.certificate_id,
             binding.dns_zone_id,

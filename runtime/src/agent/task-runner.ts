@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { atomicJSON } from "../shared/io.js";
-import { SCRIPT_TASK_CAPABILITY, validateTaskScript, type ClaimedTaskRun, type TaskRunResult, type TaskScript } from "../shared/task-center.js";
+import { SCRIPT_TASK_CAPABILITIES, requiredTaskScriptCapability, validateTaskScript, type ClaimedTaskRun, type TaskRunResult, type TaskScript } from "../shared/task-center.js";
 
 export interface ScriptOutcome {
   state: "succeeded" | "failed" | "cancelled" | "unknown";
@@ -20,9 +20,9 @@ const utf8Prefix = (v: string, max: number) => {
 // A separate supervisor keeps its own deadline and observes reparenting if the
 // Agent is killed. The user script shares this process group, without IPC.
 const SUPERVISOR = `import {spawn} from 'node:child_process';
-const [runtime,file,seconds,parent]=process.argv.slice(2);
+const [runtime,file,seconds,parent,...args]=process.argv.slice(2);
 const stop=()=>{try{if(process.platform!=='win32')process.kill(-process.pid,'SIGKILL');else child.kill('SIGKILL')}catch{}process.exit(1)};
-const child=spawn(runtime==='node'?process.execPath:'/bin/sh',[file],{stdio:['ignore','inherit','inherit'],env:process.env});
+const child=spawn(runtime==='node'?process.execPath:'/bin/sh',[file,...args],{stdio:['ignore','inherit','inherit'],env:process.env});
 child.once('error',()=>{process.send?.({type:'complete',exit_code:null,spawn_error:true})});
 child.once('exit',code=>{process.send?.({type:'complete',exit_code:code})});
 setInterval(()=>{if(process.ppid!==Number(parent))stop()},200);
@@ -55,8 +55,8 @@ export async function executeTaskScript(script: TaskScript, options: {
       let stdout = Buffer.alloc(0), stderr = Buffer.alloc(0), received = 0, reason = "", done = false;
       let timeout: NodeJS.Timeout | undefined, force: NodeJS.Timeout | undefined;
       let scriptExit: number | null | undefined, spawnError = false;
-      const child = spawn(process.execPath, [supervisor, script.runtime, file, String(script.timeout_seconds), String(process.pid)], {
-        cwd: work, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe", "ipc"],
+      const child = spawn(process.execPath, [supervisor, script.runtime, file, String(script.timeout_seconds), String(process.pid), ...(script.args ?? [])], {
+        cwd: script.cwd || work, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe", "ipc"],
         env: { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: work, TMPDIR: work, LANG: "C.UTF-8", LIGHTMONI_TASK_RUN_ID: options.runID },
       });
       const kill = (signal: NodeJS.Signals) => {
@@ -162,12 +162,14 @@ export class AgentTaskRunner {
     this.polling = true;
     try {
       await this.recover(parent);
-      const value = await this.request(`/api/v1/agents/${encodeURIComponent(this.config.agentID)}/task-runs/claim`, { capabilities: [SCRIPT_TASK_CAPABILITY] }, parent);
+      const value = await this.request(`/api/v1/agents/${encodeURIComponent(this.config.agentID)}/task-runs/claim`, { capabilities: [...SCRIPT_TASK_CAPABILITIES] }, parent);
       const run = value.run as ClaimedTaskRun | null; if (!run) return null;
       if (typeof run.id !== "string" || !/^[a-f0-9]{64}$/.test(run.lease_token) || run.agent_id !== this.config.agentID
         || run.snapshot?.agent_id !== this.config.agentID || run.snapshot?.host_id !== run.host_id || run.snapshot?.task_id !== run.task_id)
         throw Error("invalid claimed task binding");
       validateTaskScript(run.snapshot.script);
+      if (!(SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(requiredTaskScriptCapability(run.snapshot.script)))
+        throw Error("unsupported claimed script capability");
       this.save({ id: run.id, lease_token: run.lease_token });
       const controller = new AbortController();
       const parentAbort = () => controller.abort(Object.assign(Error("Agent stopping"), { code: "control_lost" }));
