@@ -6,4 +6,4 @@
 - [x] T004 完成针对性后端、SSH/凭据回归、类型检查和构建。
 - [x] T005 完成中文/英文、无 Agent 首次预检及窄屏网页验收。
 - [x] T006 同步仓库系统设计及 Doca，回读章节/原生图与无关内容保护。
-- [ ] T007 同步主干、记录验收，创建并附加 GitHub PR。
+- [x] T007 同步主干、记录验收，创建并附加 [GitHub PR #30](https://github.com/workhold/lightmoni/pull/30)。

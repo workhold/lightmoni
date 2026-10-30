@@ -39,3 +39,5 @@
 架构影响：有。更新 `docs/system-design.md` 13.7 及 13.6/13.7 流程图，并通过 Doca MCP 局部同步。[同步说明](doca-sync.md)与[最新回读](doca-readback.json)确认第 13.7 节 7 段正文和两张目标原生图一致；其余 22 张图、551 个无关原有块及所有原有块顺序保持。受保护 context 和内存凭据 worker 已关闭，不将结构回读称为浏览器渲染验收。
 
 本轮未访问生产平台或 vchive，未执行真实 Agent 安装、daemon 或部署审批，也未制作/发布新镜像。目标缺少 `ip`、`timeout`、`head`、`od`、`tr` 或不支持 JSON brief 时只显示未发现；不自动安装依赖，不调用第三方公网 IP 服务。真实 Linux 发行版/iproute2 版本矩阵、实际 NAT 入站映射和生产 SSH 安装仍不属于本地 fixture 验收。
+
+交付：[GitHub PR #30](https://github.com/workhold/lightmoni/pull/30)，目标 main，非 Draft；未自动合入。
