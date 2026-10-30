@@ -33,3 +33,5 @@
 不适用。仅在浏览器内组合既有逐记录 API，未改变服务器职责、数据/控制路径、存储、协议、凭据、AI/工具边界或部署拓扑。仓库 `docs/system-design.md` 与 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 均无需修改，本次未执行 Doca 写入或宣称回读同步。
 
 差异审阅核对了：未选择字段不会覆盖、未将厂商记录 ID 转为 number、202 失败不显示成功、未知请求不重放、选择清理、分页竞态和组件退出停止后续。主分支仅通过 PR 合入，未获得合并授权时不合并。
+
+已推送 GitHub origin 功能分支并创建 [PR #27](https://github.com/workhold/lightmoni/pull/27)，目标 main，等待评审，未合并。
