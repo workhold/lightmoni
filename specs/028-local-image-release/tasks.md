@@ -11,4 +11,4 @@
 - [x] T006 补充规格、计划及 Compose 配置契约。
 - [x] T007 修改根 Compose、两个环境示例与当前部署说明。
 - [x] T008 验证根/兼容入口、遗留环境变量、回滚覆盖和注册表摘要，并记录证据与架构判断。
-- [ ] T009 创建面向 GitHub main 的功能分支 PR，记录用户合入授权和验收结果。
+- [x] T009 创建面向 GitHub main 的功能分支 [PR #26](https://github.com/workhold/lightmoni/pull/26)，记录用户合入授权和验收结果。

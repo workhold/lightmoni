@@ -45,3 +45,5 @@
 ### 架构与交付
 
 架构同步不适用：仅变更镜像选择配置与部署说明，组件、拓扑、存储、协议、数据/控制路径、凭据和 AI/工具边界均不变，不为此改写仓库系统设计或 Doca。本轮用户明确要求改完后交付 GitHub 主分支，已授权通过功能分支 PR 合入 main。
+
+交付入口：[GitHub PR #26](https://github.com/workhold/lightmoni/pull/26)，目标 `main`；合入状态以 GitHub PR 记录为准。
