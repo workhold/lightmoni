@@ -1,3 +1,4 @@
+import { SystemLogs } from "./system-logs.js";
 import {
   createServer,
   type IncomingMessage,
@@ -66,18 +67,19 @@ export async function createApp(cfg: Config) {
   const db = new DB(join(cfg.dataDir, "lightmoni.db")),
     modules: Module[] = [];
   let monitor: RuntimeMonitor | undefined;
+  let systemLogs: SystemLogs | undefined;
   const logger = {
     info: (...args: any[]) => {
       console.info(...args);
-      monitor?.log("info", String(args[0] ?? ""));
+      systemLogs?.record("info", String(args[0] ?? ""));
     },
     warn: (...args: any[]) => {
       console.warn(...args);
-      monitor?.log("warn", String(args[0] ?? ""));
+      systemLogs?.record("warn", String(args[0] ?? ""));
     },
     error: (...args: any[]) => {
       console.error(...args);
-      monitor?.log("error", String(args[0] ?? ""));
+      systemLogs?.record("error", String(args[0] ?? ""));
     },
   };
   const router = new Router(() => logger.error("HTTP request failed"));
@@ -254,6 +256,8 @@ export async function createApp(cfg: Config) {
     modules.push(registerMachineTerminal(deps, managedMachines, server));
     server.headersTimeout = 10000;
     server.requestTimeout = 30000;
+    systemLogs = new SystemLogs(deps, ingest, [cfg.chPassword]);
+    modules.unshift(systemLogs);
     for (const module of modules) await module.start?.();
     let closed = false;
     return {

@@ -1,0 +1,28 @@
+{
+  "hostApplications": 3,
+  "primaryClusterApplications": 3,
+  "secondaryClusterApplications": 1,
+  "applicationDeployments": 2,
+  "dockerContainers": 35,
+  "includesExternal": true,
+  "includesStopped": true,
+  "telemetry": {
+    "load": {
+      "status": "success",
+      "rows": 18
+    },
+    "logs": {
+      "status": "success",
+      "rows": 46
+    },
+    "web": {
+      "status": "success",
+      "rows": 1
+    }
+  },
+  "systemLogRows": 37,
+  "systemLogsIncludeOperationReceipts": true,
+  "invalidRangeStatus": 400,
+  "businessKeySystemTableStatus": 403,
+  "authMode": "synthetic loopback admin and Agent credentials; production auth exercised in runtime tests"
+}

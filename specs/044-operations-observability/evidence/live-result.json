@@ -1,0 +1,14 @@
+{
+  "mode": "real Docker, real Agent queue, real HTTP ingest, real ClickHouse and unified Query",
+  "applications": 3,
+  "tables": [
+    "_lm_log_lightmoni_application",
+    "_lm_metric_lightmoni_application_gauge"
+  ],
+  "metricRows": 9,
+  "logRows": 7,
+  "websiteBuckets": 1,
+  "containerCount": 36,
+  "app": "056bb83672ef56d1db60df397d3cfb4c",
+  "cluster": "a15b7551b674114d54f8af47908a3e87"
+}

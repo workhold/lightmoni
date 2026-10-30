@@ -1,3 +1,4 @@
+import ApplicationMonitoring from "./ApplicationMonitoring";
 import {MonitoringScope,type PublishedScope} from '../shared/monitoring-context';
 import {lazy,Suspense,useEffect,useMemo,useState} from 'react';
 import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
@@ -62,6 +63,7 @@ export default function Root(){
     <Route path="/services" element={<Navigate to={user.role==='admin'?"/applications":"/settings"} replace/>}/>
     <Route path="/operations" element={<Navigate to="/clusters" replace/>}/>
     {["/clusters","/applications","/websites","/domains","/certificates"].map(path=><Route key={path} path={path} element={user.role==='admin'?<OperationsPage user={user}/>:<Navigate to="/settings" replace/>}/>)}
+    <Route path="/applications/:id/monitoring" element={user.role==='admin'?<ApplicationMonitoring/>:<Navigate to="/settings" replace/>}/>
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>
     <Route path="/admin" element={user.role==='admin'?<AdminPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/assistant" element={<AssistantPage/>}/>

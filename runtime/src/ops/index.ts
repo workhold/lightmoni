@@ -1,4 +1,5 @@
-import { applicationCatalog, catalogInstallation } from "./catalog.js";
+import { registerObservability } from "./observability.js";
+import { applicationCatalog, applicationCategories, catalogInstallation } from "./catalog.js";
 import { HTTPError, fail } from "../shared/http.js";
 import { OperationRejectedError } from "../operations/errors.js";
 import type { Dependencies, Handler, Module } from "../shared/types.js";
@@ -68,6 +69,7 @@ export function registerOperationsPlatform(
         }
       }
     };
+  registerObservability(deps, store, safe);
   const publicKinds = new Set([
     "credential",
     "dns_zone",
@@ -128,7 +130,7 @@ export function registerOperationsPlatform(
   };
   router.get(
     "/api/v1/ops/catalog",
-    safe((ctx) => ctx.json({ templates: applicationCatalog })),
+    safe((ctx) => ctx.json({ templates: applicationCatalog, categories: applicationCategories })),
   );
   router.post(
     "/api/v1/ops/catalog/:id/install",
@@ -292,6 +294,7 @@ export function registerOperationsPlatform(
       ctx.json({ deleted: true, remote_data_deleted: false });
     }),
   );
+  router.get('/api/v1/ops/runs/:id', safe(ctx => ctx.json(store.action(ctx.params.id))));
   router.get(
     "/api/v1/ops/runs",
     safe((ctx) =>
