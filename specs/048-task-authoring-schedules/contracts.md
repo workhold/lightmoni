@@ -10,9 +10,11 @@
 - `once`：脚本手动派发（保留原含义）。
 - `interval`：`interval_seconds` 为10..2592000。
 - `at`：`run_at` 为明确带时区的 ISO 时间，规范化成 UTC；新建或改计划须是未来时间，已消费原计划允许保留和编辑其他字段。
-- `cron`：`cron` 为五段表达式，`timezone` 为有效 IANA 时区，不支持秒级 Cron；服务端预览未来5次。遵循固定解析器的 DST 规则并用测试明确实际时间。
+- `cron`：`cron` 为五段表达式，`timezone` 为有效 IANA 时区，不支持秒级 Cron；服务端预览未来5次。固定使用 cron-parser 5.10.2；America/New_York 春季不存在的02:00转为03:00，秋季重复的01:30只取第一次。每月不存在的日期跳过，预览与调度共用计算。
 
 `execution_policy={max_concurrency:1..100(default10),queue_timeout_seconds:10..86400(default3600),retry_count:0..3(default0),retry_delay_seconds:10..3600(default60)}`。重叠处理固定 skip、错过计划不补跑。字段仅作用于脚本，内置任务不接收不适用策略。
+
+中心默认每5秒扫描，允许15秒正常扫描容差；超过容差的槽位不派发，启动前已过期的槽位不补跑。新计划保存时同一事务登记下一次时间，避免在正常首次扫描时漏掉刚创建的近未来单次任务。单次消费按 task_id/run_at 去重，改名、禁用/启用和重启均不重置消费。
 
 ## API
 

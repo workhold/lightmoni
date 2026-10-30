@@ -26,6 +26,32 @@ function fixture(t: any) {
 }
 const dispatch = { operation: "task.dispatch", task_id: "fixture-task", reason: "Run the reviewed fixture" };
 
+test("AI calendar script creation uses the same reviewed definition as manual tasks and does not execute on drafting", async t => {
+  const f = fixture(t), tool = f.tools.find(tool => tool.name === "propose_task_action")!;
+  const definition = {...f.definition, name:"Daily backup", schedule:{mode:"cron",cron:"0 2 * * *",timezone:"Asia/Shanghai"},
+    script:{...f.definition.script, runtime:"shell", code:"printf '%s\\n' \"$1\"", args:["daily backup"], cwd:"/var/tmp"},
+    execution_policy:{max_concurrency:3,queue_timeout_seconds:1800,retry_count:0,retry_delay_seconds:60}};
+  const drafted = await tool.execute({operation:"task.create",task:definition,reason:"Run the user reviewed backup at 02:00"},new AbortController().signal,admin,{session_id:"calendar-session"});
+  assert.equal(drafted.proposal.status,"awaiting_approval");
+  assert.equal(f.nodes.tasks().some(task=>task.name===definition.name),false);
+  assert.equal(f.runs.list().length,0);
+  const applied=f.proposals.apply(admin,drafted.proposal.id),saved=f.nodes.getTask(applied.task_id);
+  assert.deepEqual(saved.schedule,definition.schedule);
+  assert.deepEqual(saved.script,definition.script);
+  assert.deepEqual(saved.execution_policy,definition.execution_policy);
+  assert.equal(f.runs.list().length,0);
+  assert.ok((tool.schema as any).properties.task.properties.schedule.properties.timezone);
+});
+
+test("an AI one-time plan that becomes past before approval must be rescheduled rather than silently replayed", t => {
+  const f=fixture(t);
+  const draft=f.proposals.create(admin,"session",{operation:"task.create",reason:"One future check",task:{...f.definition,name:"One-time check",schedule:{mode:"at",run_at:"2026-10-30T01:01:00Z"}}});
+  f.advance(61);
+  assert.throws(()=>f.proposals.apply(admin,draft.id),/必须晚于当前时间/);
+  assert.equal(f.nodes.tasks().some(task=>task.name==="One-time check"),false);
+  assert.equal(f.runs.list().length,0);
+});
+
 test("AI has draft and read tools but no apply or direct execution tool; draft does not queue a run", async t => {
   const f = fixture(t), tool = f.tools.find(tool => tool.name === "propose_task_action")!;
   assert.equal(tool.effect, "draft");

@@ -1,7 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { normalize as clean } from "node:path";
 import type { DB } from "../shared/types.js";
-import { validateTaskScript, SCRIPT_TASK_CAPABILITY, type TaskScript } from "../shared/task-center.js";
+import { validateTaskScript, SCRIPT_TASK_CAPABILITIES, supportsTaskScript, type TaskScript } from "../shared/task-center.js";
+import { nextTaskDates, normalizeTaskSchedule, normalizeTaskPolicy, type TaskSchedule, type TaskExecutionPolicy } from "./task-schedule.js";
+export type { TaskSchedule, TaskExecutionPolicy } from "./task-schedule.js";
 export type { TaskScript } from "../shared/task-center.js";
 import { agentLifecycle, assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
 import { createAgentHostSchema, ensureAgentHost } from "./agent-hosts.js";
@@ -28,7 +30,6 @@ const length = (value: string) => Buffer.byteLength(value);
 export const unique = (values: string[]) => [...new Set(values)].sort();
 export const validName = (name: any) =>
   typeof name === "string" && !!name.trim() && length(name.trim()) <= 128;
-export interface TaskSchedule { mode: "continuous" | "once" | "interval"; interval_seconds?: number }
 export interface Task {
   id: string;
   revision?: string;
@@ -43,6 +44,7 @@ export interface Task {
   host_ids: string[];
   schedule: TaskSchedule;
   script?: TaskScript;
+  execution_policy?: TaskExecutionPolicy;
 }
 export interface EffectiveHostTask extends Task { status: "disabled" | "waiting_config" | "waiting_agent" | "active" | "ready" | "overridden_by_custom" | "upgrade_required"; overridden: boolean }
 export interface Label {
@@ -131,28 +133,35 @@ export function normalizeTask(input: any): Task {
   if (input.enabled != null && typeof input.enabled !== "boolean" || input.target_all != null && typeof input.target_all !== "boolean") problem(400, "任务开关无效");
   const type = input.type;
   if (!["host", "probe", "log", "script"].includes(type)) problem(400, "任务类型必须是 host、probe、log 或 script");
-  const schedule: TaskSchedule = input.schedule ?? { mode: type === "script" ? "once" : "continuous" };
-  if (!record(schedule) || (type === "script" ? !["once", "interval"].includes(schedule.mode) : schedule.mode !== "continuous")) problem(400, "任务执行方式无效");
-  if (schedule.mode === "interval" && (!Number.isSafeInteger(schedule.interval_seconds) || schedule.interval_seconds! < 10 || schedule.interval_seconds! > 2_592_000)) problem(400, "定时间隔必须为 10 至 2592000 秒");
-  if (schedule.mode !== "interval" && schedule.interval_seconds != null) problem(400, "此执行方式不接受定时间隔");
+  let schedule: TaskSchedule;
+  try { schedule = normalizeTaskSchedule(input.schedule ?? { mode: type === "script" ? "once" : "continuous" }, type); }
+  catch (error) { return problem(400, (error as Error).message); }
   const t: Task = {
     id: input.id || "", name: input.name.trim(), type, enabled: input.enabled ?? false,
     label_ids: identifiers(input.label_ids ?? [], "主机标签"),
     host_ids: identifiers(input.host_ids ?? [], "目标主机", 500), target_all: input.target_all ?? false,
     origin: input.origin === "builtin" ? "builtin" : "custom", template_id: input.template_id ?? "",
-    schedule: { mode: schedule.mode, ...(schedule.mode === "interval" ? { interval_seconds: schedule.interval_seconds } : {}) },
+    schedule,
     config: remote({ revision: "validate", collect_interval_seconds: 15, host_enabled: false, host_collectors: [], logs_enabled: false }),
   };
   if (input.origin != null && !["builtin", "custom"].includes(input.origin) || typeof t.template_id !== "string" || length(t.template_id) > 128) problem(400, "任务来源无效");
   if (type === "script") {
     const script = input.script;
     if (!record(script) || !["shell", "node"].includes(script.runtime) || typeof script.code !== "string" || !script.code.trim() || length(script.code) > 64 * 1024 || script.code.includes("\0")) problem(400, "脚本须为非空 shell 或 Node.js 代码，最长 64 KiB");
+    if (Object.keys(script).some(key => !["runtime", "code", "timeout_seconds", "max_output_bytes", "args", "cwd"].includes(key))) problem(400, "脚本包含不支持的字段");
     const timeout = script.timeout_seconds ?? 60, output = script.max_output_bytes ?? 65536;
     if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 3600 || !Number.isSafeInteger(output) || output < 1024 || output > 262144) problem(400, "脚本超时或输出上限无效");
-    t.script = { runtime: script.runtime, code: script.code, timeout_seconds: timeout, max_output_bytes: output };
+    t.script = { runtime: script.runtime, code: script.code, timeout_seconds: timeout, max_output_bytes: output,
+      ...(script.args?.length ? {args:script.args} : {}), ...(script.cwd ? {cwd:script.cwd} : {}) };
     try { validateTaskScript(t.script); } catch { problem(400, "脚本配置无效"); }
+    // Validate supplied empty/invalid optional values before dropping empty defaults.
+    try { validateTaskScript({...t.script, ...(script.args != null ? {args:script.args} : {}), ...(script.cwd != null ? {cwd:script.cwd} : {})}); }
+    catch { problem(400, "脚本参数或工作目录无效"); }
+    try { t.execution_policy = normalizeTaskPolicy(input.execution_policy); }
+    catch (error) { problem(400, (error as Error).message); }
   } else {
     if (input.script != null) problem(400, "内置处理器任务不接受脚本字段");
+    if (input.execution_policy != null) problem(400, "持续采集任务不接受脚本执行策略");
     const source = remote(input.config ?? {}), c = t.config;
     if (type === "host") Object.assign(c, { collect_interval_seconds: source.collect_interval_seconds, host_table: source.host_table, host_collectors: source.host_collectors, process_names: source.process_names, host_enabled: true });
     else if (type === "probe") Object.assign(c, { probe_table: source.probe_table, probes: source.probes });
@@ -286,6 +295,7 @@ export class NodeStore {
       const task = { ...meta, id: row.id, name: row.name, type: row.type, enabled: !!row.enabled,
         origin: meta.origin ?? "custom", template_id: meta.template_id ?? "", target_all: meta.target_all ?? false,
         host_ids: meta.host_ids ?? [], schedule: meta.schedule ?? { mode: row.type === "script" ? "once" : "continuous" },
+        ...(row.type === "script" ? {execution_policy:normalizeTaskPolicy(meta.execution_policy)} : {}),
         config: wire(normalizeRemote(JSON.parse(row.config))),
         label_ids: this.db.all<{label_id:string}>("SELECT label_id FROM agent_task_targets WHERE task_id=? ORDER BY label_id", row.id).map(value => value.label_id),
       } as Task;
@@ -298,9 +308,9 @@ export class NodeStore {
   }
   saveTask(t: Task): void {
     for (const hostID of t.host_ids) this.assertHost(hostID);
-    const { origin, template_id, target_all, host_ids, schedule, script } = t;
+    const { origin, template_id, target_all, host_ids, schedule, script, execution_policy } = t;
     this.db.run("INSERT INTO agent_tasks(id,name,type,enabled,config,metadata_json,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,type=excluded.type,enabled=excluded.enabled,config=excluded.config,metadata_json=excluded.metadata_json",
-      t.id, t.name, t.type, t.enabled, goJSON(t.config), goJSON({ origin, template_id, target_all, host_ids, schedule, ...(script ? { script } : {}) }), this.timestamp());
+      t.id, t.name, t.type, t.enabled, goJSON(t.config), goJSON({ origin, template_id, target_all, host_ids, schedule, ...(script ? { script, execution_policy } : {}) }), this.timestamp());
     this.db.run("DELETE FROM agent_task_targets WHERE task_id=?", t.id);
     for (const label of t.label_ids) {
       if (!this.db.get("SELECT 1 FROM agent_task_labels WHERE id=?", label)) problem(404, "主机标签不存在：" + label);
@@ -344,7 +354,7 @@ export class NodeStore {
     return this.db.all<any>("SELECT id,name,agent_id,agent_last_seen FROM managed_machines ORDER BY name,id").map(host => {
       const ids = this.hostLabels(host.id), node = host.agent_id ? this.db.get<any>("SELECT last_seen,heartbeat FROM agents WHERE id=?", host.agent_id) : undefined;
       const removed = host.agent_id && this.db.get("SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed'", host.agent_id);
-      return { id: host.id, name: host.name, agent_id: host.agent_id, agent_status: removed ? "removed" : !host.agent_id ? "missing" : node && this.now().getTime() - Date.parse(node.last_seen) <= 90_000 ? "online" : "offline", task_capabilities: node && Array.isArray(JSON.parse(node.heartbeat || "{}").task_capabilities) && JSON.parse(node.heartbeat || "{}").task_capabilities.includes(SCRIPT_TASK_CAPABILITY) ? [SCRIPT_TASK_CAPABILITY] : [], label_ids: ids, labels: labels.filter(label => ids.includes(label.id)).map(({id,name}) => ({id,name})) };
+      return { id: host.id, name: host.name, agent_id: host.agent_id, agent_status: removed ? "removed" : !host.agent_id ? "missing" : node && this.now().getTime() - Date.parse(node.last_seen) <= 90_000 ? "online" : "offline", task_capabilities: node && Array.isArray(JSON.parse(node.heartbeat || "{}").task_capabilities) ? JSON.parse(node.heartbeat || "{}").task_capabilities.filter((capability:string) => (SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(capability)) : [], label_ids: ids, labels: labels.filter(label => ids.includes(label.id)).map(({id,name}) => ({id,name})) };
     });
   }
   setHostLabels(id: string, values: any, inTransaction = false): string[] {
@@ -365,13 +375,12 @@ export class NodeStore {
     const node = host.agent_id && this.db.get<any>("SELECT last_seen,heartbeat FROM agents WHERE id=?", host.agent_id);
     const connected = !!node && !this.db.get("SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed'", host.agent_id) && this.now().getTime() - Date.parse(node.last_seen) <= 90_000;
     const capabilities = node ? JSON.parse(node.heartbeat || "{}").task_capabilities : [];
-    const scriptsSupported = Array.isArray(capabilities) && capabilities.includes(SCRIPT_TASK_CAPABILITY);
     const matched = this.tasks().filter(task => task.target_all || task.host_ids.includes(hostID) || task.label_ids.some(id => ids.includes(id))).map(task => {
       const saved = this.db.get<{override_json:string}>("SELECT override_json FROM machine_task_overrides WHERE machine_id=? AND task_id=?", hostID, task.id);
       const override = saved ? JSON.parse(saved.override_json) : {};
       const effective = normalizeTask({ ...task, ...override, config: override.config ? { ...task.config, ...override.config } : task.config });
       const needsConfig = effective.type === "probe" && !effective.config.probes.length || effective.type === "log" && !effective.config.log_sources.length;
-      return { ...effective, overridden: !!saved, status: !effective.enabled ? "disabled" : needsConfig ? "waiting_config" : !connected ? "waiting_agent" : effective.type === "script" ? scriptsSupported ? "ready" : "upgrade_required" : "active" } as EffectiveHostTask;
+      return { ...effective, overridden: !!saved, status: !effective.enabled ? "disabled" : needsConfig ? "waiting_config" : !connected ? "waiting_agent" : effective.type === "script" ? supportsTaskScript(capabilities,effective.script) ? "ready" : "upgrade_required" : "active" } as EffectiveHostTask;
     });
     if (matched.some(task => task.enabled && task.origin === "custom" && task.type === "host"))
       for (const task of matched) if (task.enabled && task.origin === "builtin" && task.type === "host") task.status = "overridden_by_custom";
@@ -636,8 +645,17 @@ export class NodeStore {
       const previous = create ? undefined : this.getTask(id);
       if (input.origin != null && input.origin !== (previous?.origin ?? "custom")) problem(400, "不能更改任务来源");
       const t = normalizeTask({ ...previous, ...input, id, origin: previous?.origin ?? "custom" });
+      if (t.schedule.mode === "at" && t.schedule.run_at !== previous?.schedule.run_at && Date.parse(t.schedule.run_at!) <= this.now().getTime())
+        problem(400, "新的指定执行时间必须晚于当前时间");
       if (t.template_id && !taskTemplates().some(template => template.id === t.template_id && template.type === t.type)) problem(400, "任务模板无效");
       this.saveTask(t); this.validateAll();
+      // Register timed intent in the same transaction as creation/editing. A
+      // near-future deadline may pass before the next five-second scheduler scan.
+      if (["at", "cron", "interval"].includes(t.schedule.mode)
+        && this.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_schedules'")) {
+        const next = nextTaskDates(t.schedule,this.now(),1)[0];
+        if (next) this.db.run("INSERT INTO task_schedules(task_id,fingerprint,next_due) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET fingerprint=excluded.fingerprint,next_due=excluded.next_due", t.id, t.revision, next);
+      }
       return t;
     };
     return inTransaction ? work() : this.db.transaction(work);

@@ -54,7 +54,7 @@ import { FileLogReader } from "./file-logs.js";
 import { checkProbe } from "./probe.js";
 import { AgentJobRunner } from "./jobs.js";
 import { AgentTaskRunner } from "./task-runner.js";
-import { SCRIPT_TASK_CAPABILITY } from "../shared/task-center.js";
+import { SCRIPT_TASK_CAPABILITIES } from "../shared/task-center.js";
 import {
   ReceiveError,
   requestBytes,
@@ -223,7 +223,7 @@ export class Agent {
       sdk: legacyStats,
       runtime_events: [...this.runtimeEvents],
       control_interval_seconds: this.config.control_interval_seconds,
-      task_capabilities: [SCRIPT_TASK_CAPABILITY],
+      task_capabilities: [...SCRIPT_TASK_CAPABILITIES],
     };
   }
   accept(batch: Batch, owned: boolean, cursor?: LogCursor): void {
