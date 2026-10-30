@@ -15,10 +15,11 @@ import ClusterUpstreams from "./ClusterUpstreams";
 
 type Path = (string | number)[];
 export default function NginxFields({
-  resources,
+  resources, clusterIds: boundClusterIds,
   mode, locationsPath = ["spec", "locations"], watchPath = ["spec", "locations"], showSiteOptions = true, showRoutes = true,
 }: {
   resources: Resource[];
+  clusterIds?: string[];
   mode: string;
   locationsPath?: Path;
   watchPath?: Path;
@@ -28,7 +29,8 @@ export default function NginxFields({
   const { t } = useI18n();
   const form = Form.useFormInstance();
   const routing=Form.useWatch(['spec','routing_mode'],form);
-  const clusterIds: string[] = Form.useWatch(["spec","cluster_ids"],form) ?? [];
+  const available: string[] = Form.useWatch(["spec","cluster_ids"],form) ?? [];
+  const clusterIds = boundClusterIds ?? available;
   const input = (name: Path, zh: string, en: string, placeholder?: string) => (
     <Form.Item name={name} label={t(zh, en)}>
       <Input placeholder={placeholder} />

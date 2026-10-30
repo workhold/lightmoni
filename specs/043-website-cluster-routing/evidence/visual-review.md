@@ -13,3 +13,11 @@
 ## 网站主体优先复核
 
 用户指定主体突出网站、入口命名为“OpenResty 管理”后，独立评审实际打开ui-2的websites-desktop、entry-management、website-390、openresty-editor-390四张新图：桌面网站主表直出，新建为蓝色主操作、管理为次要按钮；OpenResty集群/域名集中于Drawer，命名一致；390px按钮与实际网站可见，编辑无溢出且取消/保存清晰。无阻断项或主次不符。此复核只针对静态布局，不将截图当作后端或动效证据。主流程已重新录制到motion-website-first-entry/action，实际UI保存及读回由最终三轮运行覆盖。
+
+## 多域名独立集群复核
+
+独立评审实际查看domain-ui-1的domain-assignments、domain-editor-390、traffic-editor-200、websites-desktop：域名分组和独立范围清楚，保存与主次层级没有阻断；建议修正滚动后当前域名身份不可见的问题。
+
+已用可换行的吸顶域名标题修正。评审再次实际打开domain-ui-3的domain-editor-390-context、traffic-editor-200-context、domain-cluster-overview：390px与200%域名、集群、流量控件及保存同时可辨；展开列表按域名对应不同集群、开关和权重，风险已消除，无新增阻断。390px吸顶区域下沿略裁小标题上缘，不遮字段或动作，记录为非阻断滚动边界细节。
+
+主Agent检查了动效编辑/保存帧及上述图。独立motion-domain-routing录屏未mock云目录，QA禁用外部访问导致dns-lines 400与可见错误，另有既有favicon 404；不能作为真实DNS线路加载证据。浏览器三轮的目录fixture与真实后端协议回归分别验证保存读回及云边界，不以截图替代后端隔离验收。

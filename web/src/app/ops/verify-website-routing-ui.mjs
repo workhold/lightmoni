@@ -4,7 +4,7 @@ import {resolve,relative} from 'node:path';
 import {mediaDirectory} from '../../../../scripts/qa-artifacts.mjs';
 const base=process.env.LIGHTMONI_ROUTING_UI_URL??'http://127.0.0.1:5174';
 if(!['127.0.0.1','localhost'].includes(new URL(base).hostname))throw Error('Disposable loopback fixture required');
-const run=process.env.LIGHTMONI_UI_RUN??'1',out=resolve(import.meta.dirname,'../../../../specs/043-website-cluster-routing/evidence/ui-'+run),media=mediaDirectory(out);await mkdir(out,{recursive:true});
+const run=process.env.LIGHTMONI_UI_RUN??'1',out=resolve(import.meta.dirname,'../../../../specs/043-website-cluster-routing/evidence/domain-ui-'+run),media=mediaDirectory(out);await mkdir(out,{recursive:true});
 const browser=await chromium.launch({headless:true,channel:'chrome'}),context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
 await context.addInitScript(()=>{localStorage.setItem('lightmoni.language','zh-CN');localStorage.setItem('lightmoni.appearance','light')});
 const checks=[],errors=[],created=[],suffix=Date.now().toString(36);page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(12000);
@@ -42,6 +42,35 @@ try{
  await dialog().getByText('高级：运营商与省份线路',{exact:true}).nth(0).click();await expect(dialog().getByText('南方省份',{exact:true})).toBeVisible();await expect(dialog().getByLabel('集群流量权重',{exact:true}).nth(1)).toHaveValue('3');await dialog().getByLabel('开启集群流量',{exact:true}).nth(0).click();await dialog().getByRole('button',{name:'保存流量策略',exact:true}).click();await expect(dialog()).toBeHidden();expect((await resource(site.id)).spec.cluster_policies[0].enabled).toBe(false);
  await page.locator('.ant-drawer:visible .ant-drawer-close').click();
  checks.push('托管网站一次选择服务与端口发现双集群，保存后刷新，流量设置独立关闭南方');
+
+ const siteRow=()=>page.getByRole('row').filter({has:page.getByRole('button',{name:site.name,exact:true})});
+ await siteRow().getByRole('button',{name:/^编\s*辑$/}).click();
+ const alias='alias-'+suffix+'.example.test',primary='managed-'+suffix+'.example.test';
+ await dialog().getByLabel('网站域名',{exact:true}).fill(alias);await dialog().getByLabel('网站域名',{exact:true}).press('Enter');
+ await expect(dialog().locator('.lm-ops-domain-route')).toHaveCount(2);
+ for(const [index,route]of(await dialog().locator('.lm-ops-domain-route').all()).entries()){
+  await choose('集群绑定方式','指定集群',route);
+  await route.locator('.ant-select-selection-item').filter({hasText:clusters[1-index].name}).locator('.ant-select-selection-item-remove').click();
+  await route.getByLabel('独立流量策略',{exact:true}).click();
+  const enabled=route.getByLabel('开启集群流量',{exact:true});if(!await enabled.isChecked())await enabled.click();
+  await route.getByLabel('集群流量权重',{exact:true}).fill(index?'7':'5');
+ }
+ await dialog().locator('.lm-ops-domain-route').nth(0).scrollIntoViewIfNeeded();await shot('domain-assignments');
+ await dialog().getByRole('button',{name:'保存配置',exact:true}).click();await expect(dialog()).toBeHidden();
+ site=await resource(site.id);expect(site.spec.bindings).toHaveLength(1);expect(site.spec.bindings[0].domains).toEqual([primary,alias]);expect(site.spec.bindings[0].locations).toHaveLength(1);
+ expect(site.spec.domain_routes.map(r=>r.cluster_ids)).toEqual(clusters.map(c=>[c.id]));expect(site.spec.domain_routes.map(r=>r.cluster_policies[0].weight)).toEqual([5,7]);expect(site.spec.cluster_policies.map(p=>p.lines[0].id)).toEqual(['south','north']);expect(site.spec.domain_routes.map(r=>r.cluster_policies[0].lines[0].id)).toEqual(['south','north']);
+ const southPreview=JSON.stringify(await json('/ops/resources/'+site.id+'/nginx?cluster_id='+clusters[0].id)),northPreview=JSON.stringify(await json('/ops/resources/'+site.id+'/nginx?cluster_id='+clusters[1].id));
+ expect(southPreview).toContain(primary);expect(southPreview).not.toContain(alias);expect(northPreview).toContain(alias);expect(northPreview).not.toContain(primary);
+ await page.reload();await siteRow().getByRole('button',{name:/^编\s*辑$/}).click();
+ await expect(dialog().locator('.lm-ops-domain-route').nth(0).getByLabel('集群流量权重',{exact:true})).toHaveValue('5');await expect(dialog().locator('.lm-ops-domain-route').nth(1).getByLabel('集群流量权重',{exact:true})).toHaveValue('7');
+ await dialog().getByRole('button',{name:/^取\s*消$/}).click();
+ await page.getByRole('button',{name:site.name,exact:true}).click();await page.getByRole('button',{name:'流量设置',exact:true}).click();
+ await dialog().locator('.lm-ops-domain-route').nth(0).getByLabel('开启集群流量',{exact:true}).click();
+ await dialog().getByRole('button',{name:'保存流量策略',exact:true}).click();await expect(dialog()).toBeHidden();
+ const routed=await resource(site.id);expect(routed.spec.domain_routes[0].cluster_policies[0].enabled).toBe(false);expect(routed.spec.domain_routes[1].cluster_policies[0].enabled).toBe(true);expect(routed.spec.domain_routes[1].cluster_policies[0].weight).toBe(7);expect(routed.spec.domain_routes.map(r=>r.cluster_policies[0].lines[0].id)).toEqual(['south','north']);expect(routed.spec.domain_routes.map(r=>r.cluster_ids)).toEqual(clusters.map(c=>[c.id]));
+ await page.locator('.ant-drawer:visible .ant-drawer-close').click();
+ checks.push('同一绑定组双域名独立集群/权重保存刷新，配置预览隔离，独立流量关闭不影响另一域名');
+
  const row=page.getByRole('row').filter({has:page.getByRole('button',{name:site.name,exact:true})});await row.getByRole('button',{name:/^编\s*辑$/}).click();await dialog().getByLabel('名称',{exact:true}).fill('保留输入-'+suffix);
  await page.route('**/api/v1/ops/resources/'+site.id,async route=>{if(route.request().method()==='PUT')await route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'platform_revision_conflict'})});else await route.continue()});
  await dialog().getByRole('button',{name:'保存配置',exact:true}).click();await expect(dialog().getByText('保存失败，输入已保留',{exact:true})).toBeVisible();await expect(dialog().getByText(/配置已被其他操作更新/)).toBeVisible();await expect(dialog().getByLabel('名称',{exact:true})).toHaveValue('保留输入-'+suffix);await shot('save-error');await page.unroute('**/api/v1/ops/resources/'+site.id);await dialog().getByRole('button',{name:/^取\s*消$/}).click();checks.push('保存冲突显示错误且保留输入');
@@ -52,6 +81,7 @@ try{
  await dialog().getByRole('button',{name:'保存配置',exact:true}).click();await expect(dialog()).toBeHidden();const manual=(await json('/ops/overview')).resources.find(r=>r.name==='手动网站-'+suffix);created.push(manual.id);expect(manual.spec.bindings[0].locations[0].cluster_targets.map(t=>t.upstreams[0].url)).toEqual(['http://10.0.0.1:8080','http://10.0.1.1:8080']);checks.push('手动网站按集群保存两份不同后端');
  await page.goto(base+'/applications');const appRow=page.getByRole('row').filter({has:page.getByRole('button',{name:app.name,exact:true})});await appRow.getByRole('button',{name:/^编\s*辑$/}).click();await dialog().getByLabel('每实例 CPU 核数',{exact:true}).nth(0).fill('1.5');await dialog().getByRole('button',{name:'保存配置',exact:true}).click();await expect(dialog()).toBeHidden();expect((await resource(app.id)).spec.deployments[0].cpu).toBe(1.5);checks.push('已安装普通应用可修改集群安装配置');await page.goto(base+'/websites');
  await page.setViewportSize({width:390,height:844});await expect(page.locator('.lm-shell')).toHaveClass(/is-nav-collapsed/);await page.evaluate(()=>window.scrollTo(0,0));await expect(page.getByRole('heading',{name:'网站',level:1,exact:true})).toBeInViewport();await expect(page.getByRole('button',{name:'新建网站',exact:true})).toBeInViewport();await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await shot('website-390');
+ await row.getByRole('button',{name:/^编\s*辑$/}).click();await dialog().locator('.lm-ops-domain-route').nth(0).scrollIntoViewIfNeeded();await shot('domain-editor-390');await dialog().getByRole('button',{name:/^取\s*消$/}).click();
  await editEntry();await dialog().getByLabel('集群入口域名',{exact:true}).nth(1).scrollIntoViewIfNeeded();await expect(dialog().getByRole('button',{name:'保存配置',exact:true})).toBeInViewport();await shot('openresty-editor-390');await dialog().getByRole('button',{name:/^取\s*消$/}).click();
  await page.setViewportSize({width:720,height:500});await row.getByRole('button',{name:/^编\s*辑$/}).click();await dialog().getByLabel('集群流量权重',{exact:true}).nth(1).scrollIntoViewIfNeeded();await expect(dialog().getByRole('button',{name:'保存配置',exact:true})).toBeInViewport();await shot('traffic-editor-200');await dialog().getByRole('button',{name:/^取\s*消$/}).click();
  await page.setViewportSize({width:1440,height:1000});await page.reload();await expect(page.getByRole('button',{name:'OpenResty 管理',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'调整 OpenResty 部署',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:site.name,exact:true})).toBeInViewport();await expect.poll(()=>page.locator('header').evaluate(el=>el.getBoundingClientRect().top)).toBe(0);await shot('websites-desktop');checks.push('390px页面无溢出，入口/流量表单窄屏及200%动作可见');

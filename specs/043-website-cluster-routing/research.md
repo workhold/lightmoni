@@ -12,3 +12,6 @@ Decision: 保持现有Aliyun/DNSPod连接；线路实时查可用集合，权重
 官方参考：[Aliyun权重](https://help.aliyun.com/en/dns/pubz-weight-configuration)、[DescribeDomainInfo](https://help.aliyun.com/zh/dns/api-alidns-2015-01-09-describedomaininfo)、[SetDNSSLBStatus](https://help.aliyun.com/zh/dns/api-alidns-2015-01-09-setdnsslbstatus)、[UpdateDNSSLBWeight](https://help.aliyun.com/zh/dns/api-alidns-2015-01-09-updatednsslbweight)、[DNSPod线路目录](https://cloud.tencent.com/document/product/1427/104320)、[DNSPod CreateRecord](https://cloud.tencent.com/document/api/1427/56180)、[DNSPod权重](https://docs.dnspod.cn/dns/parsing-weights/)、[DNSPod线路回退](https://docs.dnspod.cn/dns/dns-record-line/)、[Cloudflare同名CNAME限制](https://developers.cloudflare.com/dns/manage-dns-records/troubleshooting/records-with-same-name/)。
 
 Aliyun线路取域名DescribeDomainInfo.RecordLines.RecordLine，权重独立SetDNSSLBStatus+UpdateDNSSLBWeight且回读Weight/LbaStatus；DNSPod递归LineList/SubGroup，仅Useful=true，Create/ModifyRecord带Weight，读回LineId/Weight。Status统一大小写；记录索引可能延迟，已取得RecordId先记账，不盲目重复创建。
+
+## 同一绑定组的域名范围
+Decision: 使用可选domain_routes按规范域名独立记录范围和策略，不拆分或复制bindings中的证书与路径。省略范围表示跟随发现；固定范围仅取可用交集。Rationale: 同一网站别名也能分别落到南北集群，存量配置保持原语义。Alternatives: 仅给绑定组增加cluster_ids无法支持组内不同域名；仅过滤DNS仍会在错误集群暴露Host，均不满足需求。实际范围按各集群冻结修订汇总，避免分批发布时提前隐藏旧集群；流量表单保存必须显式保留未注册的范围字段。

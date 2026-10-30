@@ -16,9 +16,19 @@ import { errorText, type Resource, type Spec } from "./model";
 export default function WebsiteClusterPolicies({
   resources,
   clusterIds,
+  namePath = ["spec", "cluster_policies"],
+  valuePath = ["spec", "cluster_policies"],
+  domains,
+  title,
+  showNote = true,
 }: {
   resources: Resource[];
   clusterIds: string[];
+  namePath?: (string | number)[];
+  valuePath?: (string | number)[];
+  domains?: string[];
+  title?: string;
+  showNote?: boolean;
 }) {
   const { t } = useI18n(),
     form = Form.useFormInstance(),
@@ -30,14 +40,19 @@ export default function WebsiteClusterPolicies({
   const zones = [
     ...new Set(
       bindings
-        .filter((b) => b.dns_enabled && b.dns_zone_id)
+        .filter(
+          (b) =>
+            b.dns_enabled &&
+            b.dns_zone_id &&
+            (!domains || b.domains?.some((d: string) => domains.includes(d))),
+        )
         .map((b) => b.dns_zone_id as string),
     ),
   ]
     .sort()
     .join(",");
   useEffect(() => {
-    const old: Spec[] = form.getFieldValue(["spec", "cluster_policies"]) ?? [];
+    const old: Spec[] = form.getFieldValue(valuePath) ?? [];
     const next = clusterIds.map(
       (cluster_id) =>
         old.find((p) => p.cluster_id === cluster_id) ?? {
@@ -49,8 +64,8 @@ export default function WebsiteClusterPolicies({
         },
     );
     if (JSON.stringify(next) !== JSON.stringify(old))
-      form.setFieldValue(["spec", "cluster_policies"], next);
-  }, [clusterIds.join(","), form]);
+      form.setFieldValue(valuePath, next);
+  }, [clusterIds.join(","), valuePath.join("."), form]);
   useEffect(() => {
     let active = true;
     setLines([]);
@@ -88,13 +103,15 @@ export default function WebsiteClusterPolicies({
   }, [zones]);
   return (
     <section className="lm-ops-cluster-policies">
-      <h3>{t("集群流量", "Cluster traffic")}</h3>
-      <p className="lm-ops-note">
-        {t(
-          "默认按权重分流，关闭或故障时撤下解析。细分线路需域名套餐支持，无健康目标时回退默认。",
-          "Default traffic follows relative weights; disabled or failed entries leave DNS. Detailed lines require provider plan support and fall back to the default when no healthy target remains.",
-        )}
-      </p>
+      <h3>{title ?? t("默认集群流量", "Default cluster traffic")}</h3>
+      {showNote && (
+        <p className="lm-ops-note">
+          {t(
+            "默认按权重分流，关闭或故障时撤下解析。细分线路需域名套餐支持，无健康目标时回退默认。",
+            "Default traffic follows relative weights; disabled or failed entries leave DNS. Detailed lines require provider plan support and fall back to the default when no healthy target remains.",
+          )}
+        </p>
+      )}
       {error && (
         <Alert
           showIcon
@@ -103,7 +120,7 @@ export default function WebsiteClusterPolicies({
           description={error}
         />
       )}
-      <Form.List name={["spec", "cluster_policies"]}>
+      <Form.List name={namePath}>
         {(fields) => (
           <>
             {fields.map((f) => {

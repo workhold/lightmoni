@@ -30,8 +30,15 @@
 ## Dependencies and implementation strategy
 T001→T002→T003→US1→US2→US3→验证。MVP先完成US1再逐故事推进；共享cluster-workloads.ts顺序编辑，避免冲突。只读DNS研究按speckit-plan要求隔离派发；最终UI独立视觉评审按oil-ui要求派发。独立验证可并行运行，代码与审批保持顺序。不创建与本请求无关的服务或部署生产资源。
 
-交付：[GitHub #19](https://github.com/workhold/lightmoni/pull/19)，草稿，目标main，依赖#18，未合并。14/14任务完成，验收及真实环境边界见[validation.md](validation.md)。
+交付：[GitHub #19](https://github.com/workhold/lightmoni/pull/19)，草稿，目标main，依赖#18，未合并。19/19任务完成，验收及真实环境边界见[validation.md](validation.md)。
 
 ## 用户界面优先级修订
 - [x] T013 [US1] 在web/src/app/OperationsPage.tsx将OpenResty详情收进“OpenResty 管理”抽屉，网站主体优先用户网站，保留安装/配置与空态。
 - [x] T014 在web/src/app/ops/verify-website-routing-ui.mjs更新OpenResty 管理路径，验证主表优先及抽屉操作，更新SDD与Doca界面描述并推送同一PR。
+
+## 多域名独立集群
+- [ ] T015 补充同绑定组两个域名的独立集群、配置包/DNS隔离、发布草稿边界、健康与独立策略、旧配置和非法范围的回归。
+- [ ] T016 在runtime/src/ops/cluster-workloads.ts实现domain_routes、逐域名策略/资格、按集群域名过滤和有界实际状态；保留候选集群清理及冻结修订。
+- [ ] T017 在网站表单及流量设置提供逐域名集群选择与策略覆盖，实际集群表按域名展示；沿用OpenResty次要管理入口。
+- [ ] T018 更新UI操作验收并连续三轮运行、查看桌面/390px/200%及动效证据，完成独立视觉复核。
+- [ ] T019 同步仓库和Doca设计及原生图并回读；运行相关回归/类型检查、同步main，更新同一PR和验收记录。

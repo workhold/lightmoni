@@ -10,3 +10,5 @@
 .lm-ops-cluster-upstreams{padding-top:10px;margin-bottom:18px}.lm-ops-cluster-target{margin-top:12px;background:var(--lm-surface)}.lm-ops-cluster-target h4{margin:0 0 14px;font-size:14px}.lm-ops-deployment>.lm-ops-subheading{margin-bottom:18px}.lm-ops-cluster-target .lm-ops-mount{background:var(--lm-bg)}
 
 .lm-ops-cluster-policies .ant-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.lm-ops-domain-route>.lm-ops-subheading { position: sticky; top: 0; z-index: 2; background: var(--lm-bg); padding-block: 8px; }
+.lm-ops-domain-route>.lm-ops-subheading>strong { min-width: 0; overflow-wrap: anywhere; }

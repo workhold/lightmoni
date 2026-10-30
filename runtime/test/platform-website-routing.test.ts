@@ -197,6 +197,389 @@ async function fixture(t: any, fetcher?: typeof fetch) {
   };
 }
 
+test("domain routes validate scope and require manual backends only in bound clusters", async (t) => {
+  const f = await fixture(t),
+    a = f.createCluster(["ma"], "South"),
+    b = f.createCluster(["mb"], "North");
+  const spec = {
+    cluster_ids: [a.id, b.id],
+    domain_routes: [
+      { domain: "south.example.test", cluster_ids: [a.id] },
+      { domain: "north.example.test", cluster_ids: [b.id] },
+    ],
+    bindings: [
+      {
+        domains: ["south.example.test"],
+        locations: [
+          {
+            path: "/",
+            cluster_targets: [
+              {
+                cluster_id: a.id,
+                target: "proxy",
+                upstreams: ["http://10.0.0.1:8080"],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        domains: ["north.example.test"],
+        locations: [
+          {
+            path: "/",
+            cluster_targets: [
+              {
+                cluster_id: b.id,
+                target: "proxy",
+                upstreams: ["http://10.0.0.2:8080"],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const result = await f.req("/resources", "POST", {
+    kind: "website",
+    name: "Scoped",
+    spec,
+  });
+  assert.equal(result.status, 201);
+  const site = result.body.resource;
+  assert.deepEqual(site.spec.domain_routes, spec.domain_routes);
+  for (const [routes, error] of [
+    [
+      [
+        {
+          domain: "south.example.test",
+          cluster_ids: [a.id],
+          cluster_policies: [null],
+        },
+      ],
+      "invalid_website_cluster_policy",
+    ],
+    [
+      [
+        {
+          domain: "south.example.test",
+          cluster_ids: [a.id],
+          cluster_policies: [{ cluster_id: a.id, lines: [null] }],
+        },
+      ],
+      "invalid_dns_line",
+    ],
+    [
+      [{ domain: "unknown.example.test", cluster_ids: [a.id] }],
+      "invalid_website_domain_route",
+    ],
+    [
+      [spec.domain_routes[0], spec.domain_routes[0]],
+      "invalid_website_domain_route",
+    ],
+    [
+      [{ domain: "south.example.test", cluster_ids: [] }],
+      "website_domain_cluster_required",
+    ],
+    [
+      [{ domain: "south.example.test", cluster_ids: ["outside"] }],
+      "website_domain_cluster_mismatch",
+    ],
+    [
+      [
+        {
+          domain: "south.example.test",
+          cluster_ids: [a.id],
+          cluster_policies: [{ cluster_id: a.id, weight: 0 }],
+        },
+      ],
+      "invalid_website_cluster_weight",
+    ],
+  ] as const) {
+    const response = await f.req("/resources/" + site.id, "PUT", {
+      revision: site.revision,
+      name: site.name,
+      spec: { ...site.spec, domain_routes: routes },
+    });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error, error);
+  }
+});
+
+test("domains in one binding have isolated bundles, DNS and live policy; membership stays published", async (t) => {
+  const dns = dnsMock(),
+    f = await fixture(t, dns.fetcher),
+    a = f.createCluster(["ma"], "South"),
+    b = f.createCluster(["mb"], "North"),
+    zone = dnsZone(f);
+  const entry = f.store.create(
+    "application",
+    "Entry",
+    catalogInstallation("openresty", {
+      deployment_mode: "managed",
+      deployments: [
+        {
+          cluster_id: a.id,
+          replicas: 1,
+          gateway_domain: "south.edge.example.test",
+        },
+        {
+          cluster_id: b.id,
+          replicas: 1,
+          gateway_domain: "north.edge.example.test",
+        },
+      ],
+    }).spec,
+    "admin",
+  );
+  await f.action(entry, "deploy");
+  f.finish("a");
+  f.finish("b");
+  const site = f.store.create(
+    "website",
+    "Scoped aliases",
+    {
+      cluster_ids: [a.id, b.id],
+      dns_record_mode: "cname",
+      domain_routes: [
+        {
+          domain: "south.example.test",
+          cluster_ids: [a.id],
+          cluster_policies: [{ cluster_id: a.id, weight: 2 }],
+        },
+        {
+          domain: "north.example.test",
+          cluster_ids: [b.id],
+          cluster_policies: [{ cluster_id: b.id, weight: 3 }],
+        },
+      ],
+      bindings: [
+        {
+          domains: ["south.example.test", "north.example.test"],
+          dns_enabled: true,
+          dns_zone_id: zone.id,
+          locations: [
+            {
+              path: "/",
+              action: "return",
+              return_status: 200,
+              return_value: "shared",
+            },
+          ],
+        },
+      ],
+    },
+    "admin",
+  );
+  await f.action(site, "deploy");
+  const south = f.finish("a"),
+    north = f.finish("b");
+  assert.deepEqual(
+    south.payload.resource.config.sites.flatMap((s: any) => s.domains),
+    ["south.example.test"],
+  );
+  assert.deepEqual(
+    north.payload.resource.config.sites.flatMap((s: any) => s.domains),
+    ["north.example.test"],
+  );
+  assert.equal(
+    south.payload.resource.config.sites[0].locations[0].return_value,
+    "shared",
+  );
+  await f.platform.tick();
+  await settle();
+  const records = () =>
+    dns.records
+      .filter((r) => r.Type === "CNAME")
+      .map((r) => [r.RR, r.Value, r.Weight])
+      .sort();
+  assert.deepEqual(records(), [
+    ["north", "north.edge.example.test", 3],
+    ["south", "south.edge.example.test", 2],
+  ]);
+  const update = (change: any) => {
+    const old = f.store.get(site.id);
+    return f.store.update(
+      site.id,
+      old.revision,
+      old.name,
+      { ...old.spec, ...change },
+      "admin",
+    );
+  };
+  update({
+    domain_routes: [
+      { ...site.spec.domain_routes[0], cluster_ids: [b.id] },
+      { ...site.spec.domain_routes[1] },
+    ],
+    nginx: { ...site.spec.nginx, gzip: true },
+  });
+  await f.platform.tick();
+  await settle();
+  assert.deepEqual(
+    records(),
+    [
+      ["north", "north.edge.example.test", 3],
+      ["south", "south.edge.example.test", 2],
+    ],
+    "draft membership cannot move the live domain",
+  );
+  assert.deepEqual(
+    f.store.get(site.id).status.domain_traffic["south.example.test"]
+      .cluster_ids,
+    [a.id],
+  );
+  update({
+    domain_routes: site.spec.domain_routes.map((r: any) =>
+      r.domain.startsWith("north")
+        ? { ...r, cluster_policies: [{ cluster_id: b.id, weight: 7 }] }
+        : r,
+    ),
+  });
+  await f.platform.tick();
+  await settle();
+  assert.deepEqual(records(), [
+    ["north", "north.edge.example.test", 7],
+    ["south", "south.edge.example.test", 2],
+  ]);
+  update({
+    domain_routes: site.spec.domain_routes.map((r: any) =>
+      r.domain.startsWith("south")
+        ? { ...r, cluster_policies: [{ cluster_id: a.id, enabled: false }] }
+        : { ...r, cluster_policies: [{ cluster_id: b.id, weight: 7 }] },
+    ),
+  });
+  await f.platform.tick();
+  await settle();
+  assert.deepEqual(records(), [["north", "north.edge.example.test", 7]]);
+  update({ domain_routes: site.spec.domain_routes });
+  await f.platform.tick();
+  await settle();
+  f.advance(121000);
+  f.heartbeat("b");
+  await f.platform.tick();
+  f.finish("b");
+  await settle();
+  await f.platform.tick();
+  await settle();
+  assert.deepEqual(
+    records(),
+    [["north", "north.edge.example.test", 3]],
+    "south-only domain must not fall back to an unbound north cluster",
+  );
+  f.heartbeat("a");
+  for (let n = 0; n < 4; n++) {
+    await f.platform.tick();
+    for (const agent of ["a", "b"])
+      if (
+        f.db.get(
+          "SELECT id FROM ops_platform_runs WHERE agent_id=? AND state='queued'",
+          agent,
+        )
+      )
+        f.finish(agent);
+    await settle();
+  }
+  const moved = update({
+    domain_routes: site.spec.domain_routes.map((r: any) => ({
+      ...r,
+      cluster_ids: [b.id],
+      cluster_policies: undefined,
+    })),
+  });
+  await f.action(moved, "deploy", { cluster_id: b.id });
+  f.finish("b");
+  await f.platform.tick();
+  await settle();
+  assert.deepEqual(
+    new Set(
+      f.store.get(site.id).status.domain_traffic[
+        "south.example.test"
+      ].cluster_ids,
+    ),
+    new Set([a.id, b.id]),
+    "partial publication retains the old cluster until cleanup",
+  );
+  await f.action(moved, "deploy", { cluster_id: a.id });
+  const cleaned = f.finish("a");
+  assert.deepEqual(
+    cleaned.payload.resource.config.sites,
+    [],
+    "old cluster receives an empty bundle to remove the domain",
+  );
+  await f.platform.tick();
+  await settle();
+  assert.deepEqual(records(), [
+    ["north", "north.edge.example.test", 1],
+    ["south", "north.edge.example.test", 1],
+  ]);
+  assert.deepEqual(f.store.get(site.id).status.actual_cluster_ids, [b.id]);
+});
+
+test("managed domain follow mode discovers new clusters while explicit selections stay fixed", async (t) => {
+  const f = await fixture(t),
+    a = f.createCluster(["ma"], "South"),
+    b = f.createCluster(["mb"], "North"),
+    app = f.app(a, {
+      deployment_mode: "managed",
+      deployments: [{ cluster_id: a.id, replicas: 1 }],
+    });
+  const site = f.store.create(
+    "website",
+    "Follow or pin",
+    {
+      routing_mode: "managed",
+      service_application_id: app.id,
+      service_port_name: "http",
+      domain_routes: [{ domain: "fixed.example.test", cluster_ids: [a.id] }],
+      bindings: [
+        {
+          domains: ["follow.example.test", "fixed.example.test"],
+          locations: [{ path: "/" }],
+        },
+      ],
+    },
+    "admin",
+  );
+  await f.action(site, "deploy");
+  let service = f.store.update(
+    app.id,
+    app.revision,
+    app.name,
+    {
+      ...app.spec,
+      deployments: [...app.spec.deployments, { cluster_id: b.id, replicas: 1 }],
+    },
+    "admin",
+  );
+  await f.platform.tick();
+  let status = f.store.get(site.id).status;
+  assert.deepEqual(status.domain_traffic["follow.example.test"].cluster_ids, [
+    a.id,
+    b.id,
+  ]);
+  assert.deepEqual(status.domain_traffic["fixed.example.test"].cluster_ids, [
+    a.id,
+  ]);
+  service = f.store.update(
+    service.id,
+    service.revision,
+    service.name,
+    { ...service.spec, deployments: [{ cluster_id: b.id, replicas: 1 }] },
+    "admin",
+  );
+  await f.platform.tick();
+  status = f.store.get(site.id).status;
+  assert.deepEqual(status.domain_traffic["follow.example.test"].cluster_ids, [
+    b.id,
+  ]);
+  assert.deepEqual(
+    status.domain_traffic["fixed.example.test"].cluster_ids,
+    [],
+    "removed fixed cluster does not turn into follow-all",
+  );
+});
+
 test("OpenResty is a global singleton and deployment entry domains are editable", async (t) => {
   const f = await fixture(t),
     a = f.createCluster(["ma"], "South"),
