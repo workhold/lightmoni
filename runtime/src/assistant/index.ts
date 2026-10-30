@@ -56,6 +56,8 @@ import { AlertCapabilities, AlertCapabilityError } from "../domains/alert-capabi
 import { AlertProposalService } from "./alert-proposals.js";
 import { alertTools } from "./alert-tools.js";
 import { operationTools } from "./operation-tools.js";
+import { TaskProposalService, taskTools } from "./task-tools.js";
+import type { TaskRunStore } from "../server/task-center.js";
 import type { OperationsStore } from "../operations/types.js";
 import { InstrumentationService } from "./instrumentation.js";
 import type { ServiceDeploymentStore } from "../server/service-deployments.js";
@@ -72,6 +74,7 @@ export interface AssistantOptions {
   alerts?: AlertCapabilities;
   deployments?: ServiceDeploymentStore;
   operations?: OperationsStore;
+  taskCenter?: TaskRunStore;
   instrumentationWorkspaceRoot?: string;
 }
 const id = () => randomBytes(16).toString("hex");
@@ -272,10 +275,12 @@ export function registerAssistant(
   const alertProposals = options.alerts
     ? new AlertProposalService(deps.db, options.alerts, deps.now, deps.encrypt, deps.decrypt)
     : undefined;
+  const taskProposals = options.taskCenter ? new TaskProposalService(deps, options.taskCenter) : undefined;
   const tools =
     options.tools ??
     [
       ...(options.operations ? operationTools(options.operations) : []),
+      ...(taskProposals ? taskTools(taskProposals) : []),
       ...monitoringTools(deps, {
         ...(codeTasks
         ? {
@@ -342,6 +347,18 @@ export function registerAssistant(
     store.put(key(session.user_id, session.id), session);
   };
   const route = "/api/v1/assistant";
+  deps.router.get(route + "/task-proposals/:id", safe((ctx) => {
+    admin(ctx);
+    if (!taskProposals) throw new AssistantError(503, "任务中心尚未接入");
+    ctx.json(taskProposals.get(ctx.user, ctx.params.id));
+  }, "无法读取任务提案"));
+  deps.router.post(route + "/task-proposals/:id/apply", safe(async (ctx) => {
+    admin(ctx);
+    const input = await body(ctx, ["confirm"], 1024);
+    if (input.confirm !== true) throw new AssistantError(400, "请明确确认任务操作");
+    if (!taskProposals) throw new AssistantError(503, "任务中心尚未接入");
+    ctx.json(taskProposals.apply(ctx.user, ctx.params.id));
+  }, "无法应用任务提案"));
   const requireAlertProposals = () => {
     if (!alertProposals)
       throw new AssistantError(503, "告警业务能力尚未接入", "alert_controls_disabled");

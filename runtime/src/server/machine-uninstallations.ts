@@ -1,3 +1,4 @@
+import { hasActiveTaskRuns } from "./agent-hosts.js";
 import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler } from "../shared/types.js";
@@ -28,7 +29,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
   const { db, router } = deps;
   const at = () => deps.now().toISOString();
   const table = (name: string) => Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?", name));
-  const taskBusy = (agentID: string) => Boolean(agentID && table("agent_jobs") && db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state IN ('queued','leased','accepted','preflighting','staging','activating','verifying','unknown') LIMIT 1", agentID));
+  const taskBusy = (agentID: string) => hasActiveTaskRuns(db, agentID) || Boolean(agentID && table("agent_jobs") && db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state IN ('queued','leased','accepted','preflighting','staging','activating','verifying','unknown') LIMIT 1", agentID));
   const pending = (machineID: string) => db.get<{status: UninstallationStatus}>("SELECT status FROM machine_uninstallations WHERE machine_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", machineID);
   const assertFree = (machineID: string) => { if (pending(machineID)) fail(409, "此主机有待审批、运行中或结果未知的 Agent 卸载，请先取消或核对"); };
   const decode = (row: any) => ({ ...row, plan: JSON.parse(row.plan_json), receipt: JSON.parse(row.receipt_json), plan_json: undefined, receipt_json: undefined });

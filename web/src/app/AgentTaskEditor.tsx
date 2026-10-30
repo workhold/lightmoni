@@ -1,14 +1,14 @@
 import {useI18n} from '../shared/i18n';
-import {useState} from 'react';
+import {useRef,useState} from 'react';
 import {Link} from 'react-router-dom';
 import {DeleteOutlined,PlusOutlined} from '@ant-design/icons';
 import {Alert,Button,Checkbox,Form,Input,InputNumber,Radio,Select,Space,Switch,Typography} from '../shared/ui';
-import {agentTaskTypes,defaultTasks,hostCollectors,hostCollectorName,taskTypeName,taskFormValues,taskPayload,type AgentTaskLabel,type AgentTaskType,type LogSource,type ManagedAgentTask,type TaskForm} from './agent-model';
+import {agentTaskTypes,defaultTasks,hostCollectors,hostCollectorName,taskTypeName,taskFormValues,taskPayload,type AgentTaskLabel,type AgentTaskType,type LogSource,type ManagedAgentTask,type TaskForm,type TaskHost} from './agent-model';
 
 type TaskDraft = Omit<ManagedAgentTask,'id'>;
 
-export default function AgentTaskEditor({task,labels,onSave,onCancel,onBusyChange}: {
-  task?:ManagedAgentTask;labels:AgentTaskLabel[];onSave:(task:TaskDraft)=>Promise<void>;onCancel:()=>void;onBusyChange:(busy:boolean)=>void;
+export default function AgentTaskEditor({task,labels,hosts=[],hostOverride=false,onSave,onCancel,onBusyChange}: {
+  task?:ManagedAgentTask;labels:AgentTaskLabel[];hosts?:TaskHost[];hostOverride?:boolean;onSave:(task:TaskDraft)=>Promise<void>;onCancel:()=>void;onBusyChange:(busy:boolean)=>void;
 }) {
  const {t,language:uiLanguage}=useI18n();
 const nameRules = [{required:true,whitespace:true,message:t("请输入任务名称","Enter a task name")},{validator:(_:unknown,value?:string) => new TextEncoder().encode(value?.trim() ?? '').length <= 128 ? Promise.resolve() : Promise.reject(new Error(t("任务名称最长 128 字节","Task names may contain up to 128 bytes")))}];
@@ -16,12 +16,16 @@ const nameRules = [{required:true,whitespace:true,message:t("请输入任务名�
   const [form] = Form.useForm<TaskForm>();
   const [saving,setSaving] = useState(false);
   const [error,setError] = useState('');
-  const type = Form.useWatch('type',form) as AgentTaskType|undefined;
+  const savePending=useRef(false);
+  const type = (Form.useWatch('type',form)??task?.type??'host') as AgentTaskType;
   const enabled = Form.useWatch('enabled',form) as boolean|undefined;
   const selectedLabels = Form.useWatch('label_ids',form) as string[]|undefined;
-  const initialValues:TaskForm = {...taskFormValues(task?.config ?? defaultTasks),name:task?.name ?? '',type:task?.type ?? 'host',enabled:task?.enabled ?? true,label_ids:task?.label_ids ?? []};
+  const targetAll=Form.useWatch('target_all',form) as boolean|undefined;
+  const selectedHosts=Form.useWatch('host_ids',form) as string[]|undefined;
+  const scheduleMode=Form.useWatch(['schedule','mode'],form) as string|undefined;
+  const initialValues:TaskForm = {...taskFormValues(task?.config ?? defaultTasks),name:task?.name ?? '',type:task?.type ?? 'host',enabled:task?.enabled ?? true,label_ids:task?.label_ids ?? [],target_all:task?.target_all??false,host_ids:task?.host_ids??[],schedule:task?.schedule??{mode:task?.type==='script'?'once':'continuous'},script:task?.script??{runtime:'node',code:'console.log("Hello from LightMoni");',timeout_seconds:60,max_output_bytes:65536}};
   const save = async(values:TaskForm) => {
-    setSaving(true);onBusyChange(true);setError('');
+    if(savePending.current)return;savePending.current=true;setSaving(true);onBusyChange(true);setError('');
     try {
       const all = {...initialValues,...form.getFieldsValue(true),...values};
       const taskType = all.type ?? 'host';
@@ -31,18 +35,37 @@ const nameRules = [{required:true,whitespace:true,message:t("请输入任务名�
       if(taskType!=='probe') config.probes=[];
       if(taskType!=='log') config.log_sources=[];
       delete config.revision;delete config.group_id;
-      await onSave({name:all.name?.trim() ?? '',type:taskType,enabled:!!all.enabled,label_ids:all.label_ids ?? [],config});
+      await onSave({name:all.name?.trim() ?? '',type:taskType,enabled:!!all.enabled,label_ids:all.label_ids ?? [],config,origin:task?.id?task.origin??'custom':'custom',template_id:task?.type===taskType?task?.template_id??'':'',target_all:!!all.target_all,host_ids:all.host_ids??[],schedule:taskType==='script'?{mode:all.schedule?.mode==='interval'?'interval':'once',...(all.schedule?.mode==='interval'?{interval_seconds:all.schedule.interval_seconds}:{})}:{mode:'continuous'},...(taskType==='script'?{script:all.script}:{} )});
     } catch(error) {setError(error instanceof Error?error.message:t("保存任务失败","Unable to save task"));}
-    finally {setSaving(false);onBusyChange(false);}
+    finally {savePending.current=false;setSaving(false);onBusyChange(false);}
   };
   return <Form form={form} layout="vertical" initialValues={initialValues} disabled={saving} onFinish={save} scrollToFirstError>
-    <div className="lm-agent-form-grid">
+    {!hostOverride&&<div className="lm-agent-form-grid">
       <Form.Item name="name" label={t("任务名称","Task name")} rules={nameRules}><Input aria-label={t("任务名称","Task name")} placeholder={t("例如：生产主机指标","Example: Production host metrics")}/></Form.Item>
-      <Form.Item name="type" label={t("任务类型","Task type")} rules={[{required:true}]} extra={task?t("既有任务的类型固定；需要其他类型时请新建任务。","Existing task types cannot be changed. Create a new task for a different type."):undefined}><Select aria-label={t("任务类型","Task type")} disabled={saving || !!task} options={agentTaskTypes.map(item=>({...item,label:taskTypeName(item.value,uiLanguage)}))}/></Form.Item>
-    </div>
-    <Form.Item name="enabled" label={t("任务状态","Task status")} valuePropName="checked" extra={t("启用后，下发给标签匹配的执行节点；关闭后自动撤除。","Enabled tasks are delivered to nodes with matching labels and removed when disabled.")}><Switch aria-label={t("启用任务","Enable task")} checkedChildren={t("启用","Enabled")} unCheckedChildren={t("停用","Disabled")}/></Form.Item>
-    <Form.Item name="label_ids" label={t("任务标签","Task labels")} extra={t("任一标签匹配即下发，同一任务只执行一次。","Any matching label delivers the task. Each task runs only once per node.")}><Select mode="multiple" allowClear showSearch={{optionFilterProp:'label'}} aria-label={t("任务标签","Task labels")} placeholder={t("选择目标任务标签","Select target task labels")} options={labels.map(label=>({value:label.id,label:label.name}))}/></Form.Item>
-    {!selectedLabels?.length && <Alert type="info" showIcon title={t("未选择任务标签，此任务不会下发给任何执行节点。","No task labels selected. This task will not be delivered to any execution node.")} className="lm-agent-form-notice"/>}
+      <Form.Item name="type" label={t("任务类型","Task type")} rules={[{required:true}]} extra={task?t("既有任务的类型固定；需要其他类型时请新建任务。","Existing task types cannot be changed. Create a new task for a different type."):undefined}><Select aria-label={t("任务类型","Task type")} disabled={saving || !!task?.id} onChange={next=>form.setFieldValue('schedule',{mode:next==='script'?'once':'continuous'})} options={agentTaskTypes.map(item=>({...item,label:taskTypeName(item.value,uiLanguage)}))}/></Form.Item>
+    </div>}
+    <Form.Item name="enabled" label={t("任务状态","Task status")} valuePropName="checked" extra={t("启用后按目标范围派发；停用后停止后续派发，已有执行需单独取消。","Enabled tasks are delivered to their targets. Disabling stops future dispatch; cancel existing runs separately.")}><Switch aria-label={t("启用任务","Enable task")} checkedChildren={t("启用","Enabled")} unCheckedChildren={t("停用","Disabled")}/></Form.Item>
+    {!hostOverride&&<>
+    <Form.Item name="target_all" label={t('派发范围','Dispatch scope')} valuePropName="checked"><Checkbox aria-label={t('所有主机','All hosts')}>{t('所有已登记主机（包含后续新增主机）','All registered hosts, including future hosts')}</Checkbox></Form.Item>
+    {!targetAll&&<>
+    <Form.Item name="label_ids" label={t('主机标签','Host labels')} extra={t('匹配任一标签的主机与直接选择的主机构成目标并集。','Hosts matching any label and directly selected hosts form the target set.')}><Select mode="multiple" allowClear showSearch={{optionFilterProp:'label'}} aria-label={t('目标主机标签','Target host labels')} options={labels.map(label=>({value:label.id,label:label.name}))}/></Form.Item>
+    <Form.Item name="host_ids" label={t('指定主机','Selected hosts')}><Select mode="multiple" allowClear showSearch={{optionFilterProp:'label'}} aria-label={t('指定主机','Selected hosts')} options={hosts.map(host=>({value:host.id,label:host.name}))}/></Form.Item>
+    {!selectedLabels?.length&&!selectedHosts?.length&&<Alert type="info" showIcon title={t('尚未选择目标，此任务不会派发。','No targets selected. This task will not be dispatched.')} className="lm-agent-form-notice"/>}
+    </>}
+    </>}
+    {type==='script'&&<>
+     <div className="lm-agent-form-grid">
+      <Form.Item name={['script','runtime']} label={t('脚本运行时','Script runtime')} rules={[{required:true}]}><Select aria-label={t('脚本运行时','Script runtime')} options={[{value:'node',label:'Node.js'},{value:'shell',label:'POSIX shell'}]}/></Form.Item>
+      <Form.Item name={['schedule','mode']} label={t('执行方式','Execution mode')} rules={[{required:true}]}><Select aria-label={t('执行方式','Execution mode')} options={[{value:'once',label:t('手动派发','Manual dispatch')},{value:'interval',label:t('定时执行','Scheduled interval')}]}/></Form.Item>
+     </div>
+     {scheduleMode==='interval'&&<Form.Item name={['schedule','interval_seconds']} label={t('执行间隔（秒）','Run interval (seconds)')} rules={[{required:true,type:'number',min:10,max:2592000}]} extra={t('启用并保存后自动按间隔派发；同一主机不重叠执行。','Saving an enabled interval task authorizes scheduled dispatch. Runs on one host do not overlap.')}><InputNumber aria-label={t('执行间隔（秒）','Run interval (seconds)')} min={10} max={2592000} precision={0}/></Form.Item>}
+     <Form.Item name={['script','code']} label={t('脚本代码','Script code')} rules={[{required:true,whitespace:true,message:t('请输入脚本代码','Enter script code')},{validator:(_:unknown,value?:string)=>new TextEncoder().encode(value??'').length<=65536?Promise.resolve():Promise.reject(new Error(t('脚本最长 64 KiB','Scripts may contain up to 64 KiB')))}]}><Input.TextArea aria-label={t('脚本代码','Script code')} autoSize={{minRows:8,maxRows:20}} spellCheck={false} className="lm-task-code"/></Form.Item>
+     <div className="lm-agent-form-grid">
+      <Form.Item name={['script','timeout_seconds']} label={t('超时（秒）','Timeout (seconds)')} rules={[{required:true,type:'number',min:1,max:3600}]}><InputNumber aria-label={t('超时（秒）','Timeout (seconds)')} min={1} max={3600} precision={0}/></Form.Item>
+      <Form.Item name={['script','max_output_bytes']} label={t('输出上限（字节）','Output limit (bytes)')} rules={[{required:true,type:'number',min:1024,max:262144}]}><InputNumber aria-label={t('输出上限（字节）','Output limit (bytes)')} min={1024} max={262144} precision={0}/></Form.Item>
+     </div>
+     <Typography.Paragraph type="secondary">{t('脚本在目标主机上以 Agent 的系统用户权限运行；任务环境不会注入 Agent 的控制和数据凭据。','Scripts run as the Agent system user on the target host. Agent control and data credentials are not injected into the task environment.')}</Typography.Paragraph>
+    </>}
     {type==='host' && <>
       <Form.Item name="host_collectors" label={t("采集哪些指标","Metrics to collect")} rules={[{validator:(_:unknown,value?:string[])=>!enabled||value?.length?Promise.resolve():Promise.reject(new Error(t("至少选择一项指标","Select at least one metric")))}]}><Checkbox.Group className="lm-agent-collectors" options={hostCollectors.map(item=>({...item,label:hostCollectorName(item.value,uiLanguage)}))}/></Form.Item>
       <div className="lm-agent-form-grid">
@@ -54,8 +77,8 @@ const nameRules = [{required:true,whitespace:true,message:t("请输入任务名�
     {type==='probe' && <>
       <Form.Item label={t("拨测结果上报表","Probe reporting table")}><Typography.Text code>probe</Typography.Text></Form.Item>
       <p className="lm-agent-muted">{t("执行节点按配置检测 HTTP 或 TCP 目标，上报可用性、耗时和失败原因。","Execution nodes probe configured HTTP or TCP targets and report availability, latency, and failure reasons.")}</p>
-      <Form.List name="probes" rules={[{validator:(_:unknown,value?:TaskForm['probes'])=>{
-        if(!value?.length) return enabled?Promise.reject(new Error(t("至少添加一个拨测目标","Add at least one probe target"))):Promise.resolve();
+      <Alert className="lm-agent-form-notice" type="info" showIcon title={t("没有探测地址时，任务保持启用并显示待配置；添加地址后执行。","Without a probe target, the task stays enabled and awaits configuration. Add a target to begin execution.")}/><Form.List name="probes" rules={[{validator:(_:unknown,value?:TaskForm['probes'])=>{
+        if(!value?.length) return Promise.resolve();
         if(value.length>128) return Promise.reject(new Error(t("最多添加 128 个拨测目标","Add up to 128 probe targets")));
         const names=value.map(probe=>probe.id?.trim()).filter(Boolean);
         return new Set(names).size===names.length?Promise.resolve():Promise.reject(new Error(t("拨测名称不能重复","Probe names must be unique")));
@@ -89,8 +112,8 @@ const nameRules = [{required:true,whitespace:true,message:t("请输入任务名�
     {type==='log' && <>
       <Form.Item label={t("目录日志上报表","Directory log reporting table")}><Typography.Text code>files</Typography.Text></Form.Item>
       <p className="lm-agent-muted">{t("逐行采集文件新增内容，支持日志轮转和重启续读。目录需允许 LightMoni Agent 服务用户读取。","Collect new file contents line by line, with log rotation and resume support. The LightMoni Agent service user must have read access to the directory.")}</p>
-      <Form.List name="log_sources" rules={[{validator:(_:unknown,sources?:LogSource[])=>{
-        if(!sources?.length) return enabled?Promise.reject(new Error(t("至少添加一个日志目录","Add at least one log directory"))):Promise.resolve();
+      <Alert className="lm-agent-form-notice" type="info" showIcon title={t("未配置日志目录时等待配置，填写目录后开始采集。","Without a log directory, the task awaits configuration. Add a directory to begin collection.")}/><Form.List name="log_sources" rules={[{validator:(_:unknown,sources?:LogSource[])=>{
+        if(!sources?.length) return Promise.resolve();
         if(sources.length>32) return Promise.reject(new Error(t("最多添加 32 个日志目录","Add up to 32 log directories")));
         const paths=sources.map(source=>`${source.directory?.trim()}:${source.pattern?.trim()||'*.log*'}:${!!source.recursive}`);
         return new Set(paths).size===paths.length?Promise.resolve():Promise.reject(new Error(t("日志目录和匹配规则不能重复","Log directories and matching patterns must be unique")));
@@ -100,12 +123,12 @@ const nameRules = [{required:true,whitespace:true,message:t("请输入任务名�
           <Form.Item name={[field.name,'directory']} label={t("目录路径","Directory path")} rules={[{required:true,whitespace:true,message:t("请输入日志目录","Enter a log directory")},{validator:(_:unknown,value?:string)=>value?.trim().startsWith('/')&&value.trim().length<=4096?Promise.resolve():Promise.reject(new Error(t("填写服务器上的绝对目录路径，例如 /var/log/nginx","Enter an absolute server directory path, such as /var/log/nginx")))}]}><Input aria-label={t(`日志目录 ${field.name+1} 路径`,`Log directory ${field.name+1} path`)} placeholder="/var/log/nginx"/></Form.Item>
           <Form.Item name={[field.name,'pattern']} label={t("文件匹配规则","File pattern")} extra={t("*.log* 包含 app.log、app.log.1 等轮转文件；压缩文件不采集。","*.log* includes rotated files such as app.log and app.log.1. Compressed files are excluded.")} rules={[{required:true,message:t("请输入匹配规则","Enter a file pattern")},{max:256,message:t("匹配规则最长 256 位","File patterns may contain up to 256 characters")},{validator:(_:unknown,value?:string)=>!/[\/\\]/.test(value ?? '')?Promise.resolve():Promise.reject(new Error(t("这里只填写文件名规则，目录在上方设置","Enter only the file-name pattern; set the directory above")))}]}><Input aria-label={t(`日志目录 ${field.name+1} 文件匹配规则`,`Log directory ${field.name+1} file pattern`)} placeholder="*.log*"/></Form.Item>
           <Form.Item name={[field.name,'recursive']} valuePropName="checked"><Checkbox aria-label={t(`日志目录 ${field.name+1} 包含子目录`,`Log directory ${field.name+1} include subdirectories`)}>{t("同时采集子目录","Include subdirectories")}</Checkbox></Form.Item>
-          <Form.Item name={[field.name,'from_beginning']} label={t("首次采集","Initial collection")} extra={t("仅影响首次发现已有文件；修改任务标签不会重读已采集内容。","Applies only to existing files when first discovered. Changing task labels does not reread collected content.")}><Radio.Group aria-label={t(`日志目录 ${field.name+1} 首次采集`,`Log directory ${field.name+1} initial collection`)} options={[{value:false,label:t("仅采集新增内容","Collect only new content")},{value:true,label:t("从文件开头采集","Read from the beginning")}]}/></Form.Item>
+          <Form.Item name={[field.name,'from_beginning']} label={t("首次采集","Initial collection")} extra={t("仅影响首次发现已有文件；修改主机标签不会重读已采集内容。","Applies only to existing files when first discovered. Changing host labels does not reread collected content.")}><Radio.Group aria-label={t(`日志目录 ${field.name+1} 首次采集`,`Log directory ${field.name+1} initial collection`)} options={[{value:false,label:t("仅采集新增内容","Collect only new content")},{value:true,label:t("从文件开头采集","Read from the beginning")}]}/></Form.Item>
         </div>)}
         <Form.ErrorList errors={errors}/><Button icon={<PlusOutlined/>} disabled={saving||fields.length>=32} onClick={()=>add({directory:'',pattern:'*.log*',recursive:false,from_beginning:false})}>{t("添加日志目录","Add log directory")}</Button>
       </>}</Form.List>
     </>}
-    <Typography.Paragraph type="secondary" className="lm-agent-report-note">{t("主机指标、拨测、目录日志分别写入固定的host、probe、files表。同类任务在同一节点上的采集间隔等配置不兼容时，保存会提示冲突。","Host metrics, probes, and directory logs use the fixed host, probe, and files tables. Saving reports conflicts when tasks have incompatible collection intervals or other settings.")}<Link to="/admin?tab=credentials&section=agents">{t("管理接入凭据","Manage access credentials")}</Link></Typography.Paragraph>
+    {type!=='script'&&<Typography.Paragraph type="secondary" className="lm-agent-report-note">{t("主机指标、拨测、目录日志分别写入固定的host、probe、files表。同类任务在同一节点上的采集间隔等配置不兼容时，保存会提示冲突。","Host metrics, probes, and directory logs use the fixed host, probe, and files tables. Saving reports conflicts when tasks have incompatible collection intervals or other settings.")}<Link to="/admin?tab=credentials&section=agents">{t("管理接入凭据","Manage access credentials")}</Link></Typography.Paragraph>}
     {error&&<Alert type="error" showIcon title={error} style={{marginTop:16}}/>}
     <Space className="lm-agent-editor-actions"><Button type="primary" htmlType="submit" loading={saving}>{t("保存任务","Save task")}</Button><Button disabled={saving} onClick={onCancel}>{t("取消","Cancel")}</Button></Space>
   </Form>;

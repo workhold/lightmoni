@@ -60,8 +60,11 @@ async function fixture(
     if (req.headers.authorization !== "Bearer fixture-key") throw new HTTPError(401, "invalid control credential");
     return { credential_id: "key-id", agent_id: agentID, audience: "control", scope: "agent.control", expires_at: "", last_used_at: "" };
   } } as any;
-  const module = registerNodes(deps, { agentCredentials, ...options }),
-    server = createServer(async (req, res) => {
+  const module = registerNodes(deps, { agentCredentials, ...options });
+  // These cases isolate explicitly label-targeted user tasks. SDD 042 defaults
+  // are verified independently in task-center-model.test.ts.
+  db.run("UPDATE agent_tasks SET enabled=0 WHERE json_extract(metadata_json,'$.origin')='builtin'");
+  const server = createServer(async (req, res) => {
       if (!(await router.handle(req, res))) {
         res.writeHead(404);
         res.end();
@@ -129,6 +132,12 @@ async function node(f: any, id: string, group: string, extra: any = {}) {
   f.db.exec("CREATE TABLE IF NOT EXISTS agent_enrollments(id TEXT PRIMARY KEY,agent_id TEXT,status TEXT,machine_id TEXT,created_at TEXT)");
   f.db.run("INSERT OR IGNORE INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'deploy','direct_ssh',?,?,?)", "machine-" + id, id, id + ".example.test", id, at.toISOString(), at.toISOString());
   f.db.run("INSERT OR IGNORE INTO agent_enrollments VALUES(?,?,'active',?,'2026-10-01T00:00:00.000Z')", id, id, "machine-" + id);
+  // An administrator assigns the host; Agent control messages cannot opt in
+  // to labels which may grant script-task execution.
+  if (!f.db.get("SELECT id FROM agents WHERE id=?", id)) {
+    const assigned = await f.request(`/machines/machine-${id}/labels`, "PUT", {label_ids:[group]});
+    assert.equal(assigned.status,200,assigned.raw);
+  }
   const result = await f.request(
     "/agents/register",
     "POST",
@@ -488,7 +497,7 @@ test("legacy schema migrates exact identities/settings once and restart never re
     assert.equal(store.tasks().length, 2);
     assert.equal(
       db.get<any>("SELECT count(*) AS n FROM agent_task_migrations").n,
-      1,
+      2,
     );
     assert.deepEqual(db.all("PRAGMA foreign_key_check"), []);
   } finally {
