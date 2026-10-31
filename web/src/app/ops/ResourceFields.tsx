@@ -714,7 +714,7 @@ export default function ResourceFields({
       )}
       {kind === "application" && (
         <>
-          <ApplicationPlacement resources={resources} machines={machines} existing={existing} onQuickCreate={onQuickCreate}/>
+          <ApplicationPlacement resources={resources} machines={machines} existing={existing}/>
           <Form.Item name={["spec","source","type"]} hidden><Input/></Form.Item>
           <Form.Item name={["spec","source","template_id"]} hidden><Input/></Form.Item>
           <Form.Item name={["spec","source","template_version"]} hidden><Input/></Form.Item>
