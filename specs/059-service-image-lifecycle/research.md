@@ -34,3 +34,15 @@ catalog.ts仅有MySQL/Redis/OpenResty静态版本和安装source。cluster-workl
 ## 2026-10-31 轻量默认修订
 
 用户指出每集群增加仓库过重。修订为不自动部署、不要求配置仓库；发布时Agent经已有源准备运行机和备用机。代价是准备阶段仍可能重复消耗外网带宽，且未预热接管机可能需要冷拉；用户可扩大到全部合格候选，或在已有基础设施时接入共享内网仓库。多个集群可复用同一可达端点，权限仍隔离。优先交付无需新服务的基础路径，可选缓存不阻塞商店/自定义版本升级。
+
+## 2026-11-01 仓库应用与1Panel鉴权对齐
+
+用户将仓库作为按需安装应用纳入设计，允许内网免登录及公网网站鉴权。默认不开启的轻量基础仍保留；多集群独立存储选择唯一push origin，其他集群通过明确读取映射/缓存/复制分发。此为项目设计，不代表Distribution提供自动跨集群复制。
+
+- [1Panel官方网站配置](https://docs.fit2cloud.com/1panel/user_manual/websites/website-config-basic/)：密码访问支持全局或按路径配置。LightMoni对齐此范围，账号组、版本发布及Registry兼容为本项目扩展，不宣称1Panel具备这些相同契约。
+- [NGINX Basic Auth](https://nginx.org/en/docs/http/ngx_http_auth_basic_module.html)：支持server/location、realm、用户文件及off覆盖；IP和密码组合由satisfy控制，哈希支持依赖crypt实现，需实际OpenResty能力验证。
+- [Distribution nginx代理认证](https://distribution.github.io/distribution/recipes/nginx/)：提供TLS入口、pull/push账号组和/v2/上传代理参考，也说明免认证后端可能成为旁路。选取协议行为，不照搬旧TLS参数或命令行密码示例。
+- [Distribution pull-through](https://distribution.github.io/distribution/recipes/mirror/)：缓存单上游、首次miss/tag检查可能回源，Docker Hub mirror与通用源映射有边界；私有上游凭据可能扩大缓存可读内容，访问范围须另行约束。
+- [Distribution官方实现app.go](https://github.com/distribution/distribution/blob/main/registry/handlers/app.go)：proxy配置进入缓存模式，源码明确该模式不支持blob上传；因此本设计把可push私库和cache放在独立服务/端口/目录，不当同进程可切换双用库。
+
+代码现状：nginx.ts已规范化IP allow/deny、location和响应缓存，但无结构化auth；自定义片段拒绝auth_basic_user_file，不应通过放开任意文件路径实现鉴权。renderLocations当前有CORS OPTIONS提前return及return action，后续必须重排或拒绝受保护组合，不能只追加两条auth指令就声称无旁路。

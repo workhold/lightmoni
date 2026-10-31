@@ -1,4 +1,4 @@
-# Implementation Plan: 服务镜像生命周期
+# Implementation Plan: 服务镜像生命周期、仓库应用与网站鉴权
 
 **Branch**: `codex/059-service-image-lifecycle` | **Date**: 2026-10-31 | **Spec**: [spec.md](spec.md)
 **Delivery**: 本PR只交付设计，下述为目标行为，功能尚未实现。
@@ -8,6 +8,8 @@
 在SDD042逐集群冻结发布与Agent模型上增加不可变镜像发布、候选预热/内网缓存、商店更新检查及主机镜像源。默认运行机+至少1台独立备用，不是全商店全节点下载；默认自动检查与提示，升级逐集群执行。复用并行SDD058安装进度的阶段展示，不重复建立日志体系。
 
 根据用户对集群部署负担的反馈，默认不新增、也不要求配置共享仓库。基础路径为Agent从已有镜像源准备到候选本机；已有内网仓库仅作可选增强，可供多个集群复用，不自动每集群安装。自定义/商店升级不依赖可选缓存阶段。
+
+2026-11-01范围更新：用户主动开启时可以安装普通仓库应用，并复用为项目私库；多集群使用单写origin和读取映射。网站支持对齐1Panel的Basic密码访问。此更新覆盖此前“仓库应用安装另开SDD”的限制，仍不改变默认无新增服务。详细设计见 [registry-apps.md](registry-apps.md)、[website-auth.md](website-auth.md)。
 
 ## Technical Context
 
@@ -23,6 +25,7 @@ Node>=22.19/TypeScript、SQLite、React19/Ant Design、Linux Docker/Compose；�
 - 拟新增ops领域 `application-releases.ts`、`image-distribution.ts`、`registry-profiles.ts` 及对应store；逐集群部署挂接镜像与发布门禁。
 - 拟新增Agent `operations/images.ts`、`docker-settings.ts`；平台执行器使用固定后的清单，不接受任意shell。
 - 界面扩展 `OperationsPage.tsx`、`ops/*` 与主机Docker面板；契约/集成测试在 `runtime/test/`，真实证据在本SDD。
+- 仓库模板扩展 `ops/catalog.ts`，创建普通application；拟新增ops仓库来源/映射与网站账号组模块。鉴权扩展 `operations/nginx.ts` 的结构化规范化/编译、gateway bundle私有文件与现有网站发布验证；UI在网站/路径配置及仓库安装处，复用既有表单、抽屉和进度。
 
 ## 1. 不可变发布与旧版兼容
 
@@ -36,7 +39,7 @@ ApplicationRelease与应用草稿revision分离，冻结配置、模板revision�
 
 路径：核验本机精确effective_ref@digest → 已配置时才使用授权内网缓存 → 按策略从已有镜像源拉取。未配置缓存直接跳过，不显示缓存故障、不阻止安装/预热/升级。默认允许正常准备阶段从镜像源下载，故障优先使用已预热本机；全部合格候选都缺失时允许下载就等待拉取，禁回源就waiting_image。Docker复用本地镜像层，平台不实现层引擎。预热与启动用同一effective_ref，核对image ID和平台digest，不用同tag存在判命中。准备后启动禁止意外按tag再次更新。
 
-可选接入现有OCI registry/缓存，profile可配置有序端点，多集群可引用同一可信网络可达端点，保留逐应用/集群仓库权限。仅在镜像较大、重复下载多或公网受限且用户已有基础设施时启用；平台不负责每集群安装、维护或保证其高可用。启用时要求持久存储，避免只依赖应用运行节点。自建镜像可由外部CI推入，其他源经显式映射/受限复制，保持index/manifest/blob摘要，重写导致摘要变化即拒绝。普通机器Docker cache不直接当registry；真正P2P另行设计。
+可选接入现有OCI registry/缓存或显式安装仓库应用，profile可配置有序端点，多集群可引用同一可信网络可达端点，保留逐应用/集群仓库权限。平台不隐式每集群安装，也不承诺本地目录仓库高可用；启用时要求持久存储。自建镜像由外部CI推入选定单写origin，其他集群按明确映射缓存/复制，保持index/manifest/blob摘要，重写导致摘要变化即拒绝。普通机器Docker cache不直接当registry；真正P2P另行设计。
 
 普通pull-through首次miss或tag检查可能回源。禁回源必须使用预填充内部固定digest路径，并限制缓存端回源，不能只设registry-mirrors声称离线。缓存不可用时仅按策略回源；本机已就绪仍可启动。托管缓存自身的引导镜像、数据持久性、认证和故障恢复另评估，不作为无状态应用直接空目录换机。
 
@@ -66,6 +69,12 @@ ApplicationRelease与应用草稿revision分离，冻结配置、模板revision�
 
 ## 5. 阶段与验收
 
-P1：固定发布身份、机器源与候选预热，以及自定义版本、商店检查/提示和手动逐集群升级，无需新增仓库即可验收。可选增强：已有内网仓库/源映射和禁回源，不作为P1依赖；P2：限定自动更新。真正P2P及平台自动安装高可用缓存另开SDD。
+P1：固定发布身份、机器源与候选预热，以及自定义版本、商店检查/提示和手动逐集群升级，无需新增仓库即可验收；网站Basic鉴权为独立P1。可选增强：已有内网仓库或用户显式安装的仓库应用、单写origin/读取分发和禁回源，开启公网入口先依赖网站鉴权。P2：限定自动更新。真正P2P及多写高可用/自动数据迁移另行评估。
 
 不承诺固定恢复秒数，实测检测、队列、镜像、启动、健康阶段，记录镜像大小、链路、命中和公网字节。DinD只能证明多个独立daemon，不冒称多台物理机器。验收见 [quickstart.md](quickstart.md) 与 [tasks.md](tasks.md)。
+
+## 6. 按需仓库应用与网站鉴权
+
+仓库应用默认手动单机、持久目录，private/cache/both组合共用产品入口但后两种分离服务/端点/存储。每个应用指定一个写入origin，公网域名固定该集群；其他集群只能直拉、只读代理缓存或经受限复制任务写普通副本。可信内网免登录限定监听/网络范围、默认只读；公网HTTPS经OpenResty Basic，后端无公网旁路。跨集群存储与鉴权能力边界见registry-apps.md，不把Basic认证描述成repository级RBAC。
+
+网站全站auth及location继承/关闭/覆盖，宿主保存加密bcrypt哈希版本，网关部署冻结账号组版本/材料hash并与配置一体校验切换；失败保留旧鉴权，旧Agent不能忽略。结构化编译拥有鉴权指令，处理CORS/return/片段旁路、代理缓存及上游Authorization冲突，匿名401不误判健康。账号变更先生成版本，待每个目标确认后才显示生效，具体契约与验收见website-auth.md。
