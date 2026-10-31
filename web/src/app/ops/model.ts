@@ -60,7 +60,7 @@ export const KIND_NAMES: Record<ResourceKind, [string, string]> = {
   website: ["网站", "Websites"],
   dns_zone: ["托管域名", "DNS zones"],
   certificate: ["证书", "Certificates"],
-  certificate_target: ["证书目标", "Certificate targets"],
+  certificate_target: ["同步任务", "Sync tasks"],
   application: ["应用", "Applications"],
 
   credential: ["云平台凭据", "Cloud credentials"],
@@ -74,7 +74,7 @@ export const ACTION_NAMES: Record<string, [string, string]> = {
   issue: ["签发证书", "Issue certificate"],
   renew: ["续期证书", "Renew certificate"],
   inspect: ["检查状态", "Inspect"],
-  retry: ["重试分发", "Retry delivery"],
+  retry: ["重试同步", "Retry synchronization"],
   deploy: ["部署", "Deploy"],
   stop: ["停止", "Stop"],
   remove: ["移除容器", "Remove containers"],
@@ -218,6 +218,8 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
     },
   };
   const spec = { ...defaults[kind], ...resource?.spec };
+  if (kind === "certificate") spec.domain = spec.domains?.length === 1 ? spec.domains[0] : "";
+  if (kind === "certificate_target") spec.target_scope = spec.cluster_id ? "cluster" : "machine";
   if (kind === "application" && !spec.deployments?.length && spec.cluster_id) spec.deployments = [{cluster_id:spec.cluster_id,machine_ids:spec.machine_ids??[],replicas:spec.replicas??1,cpu:spec.cpu??1,memory_mb:spec.memory_mb??512}];
   if (kind === "website" && !spec.cluster_ids?.length && spec.cluster_id) spec.cluster_ids = [spec.cluster_id];
   spec.env_rows = mapRows(spec.environment ?? spec.env);
@@ -263,6 +265,10 @@ export function serializeDomainRoutes(rows:Spec[]=[],membershipSpec?:Spec):Spec[
 }
 export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
   const spec = { ...values };
+  if (kind === "certificate") {
+    if (typeof spec.domain === "string" && spec.domain.trim()) spec.domains = [spec.domain.trim()];
+    delete spec.domain;
+  }
   if (kind === "application") {
     spec.environment = rowsMap(spec.env_rows);
     spec.command = (spec.command_rows ?? [])
@@ -329,6 +335,7 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
     const fields: Record<string, string[]> = {
       directory: [
         "agent_id",
+        "cluster_id",
         "path",
         "certificate_file",
         "private_key_file",
@@ -349,6 +356,11 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
     };
     for (const field of Object.values(fields).flat())
       if (!fields[spec.type]?.includes(field)) delete spec[field];
+    if (spec.type === "directory") {
+      if (spec.target_scope === "cluster") delete spec.agent_id;
+      else delete spec.cluster_id;
+    }
+    delete spec.target_scope;
   }
   if (kind === "certificate") {
     if (spec.source !== "acme") {

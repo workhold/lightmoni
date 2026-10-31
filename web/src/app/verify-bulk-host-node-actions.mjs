@@ -29,6 +29,7 @@ async function harness({role='admin',language='zh-CN',width=1440,keys='one',coun
   const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();
   if(url.origin!==origin){unexpected.push(url.href);return route.abort()}
   if(path.startsWith('/api/')){
+   if(method==='GET'&&/^\/api\/v1\/machines\/[^/]+\/(agent-updates|tasks)$/.test(path))return route.fulfill({json:[]});
    const body=request.postData()?request.postDataJSON():undefined;state.requests.push({path,query:url.search,method,body});
    if(path===state.holdPath)await new Promise(resolve=>state.release=resolve);
    if(path==='/api/v1/setup')return route.fulfill({json:{required:false}});
@@ -36,9 +37,9 @@ async function harness({role='admin',language='zh-CN',width=1440,keys='one',coun
    if(path==='/api/v1/auth/me')return route.fulfill({json:{id:'fixture-user',name:'Fixture User',role}});
    if(path==='/api/v1/auth/profile')return route.fulfill({json:{}});
    if(path==='/api/v1/agents'&&method==='GET')return route.fulfill({json:state.nodes.filter(node=>url.searchParams.get('include_removed')==='true'||node.lifecycle_state!=='removed')});
-   if(path==='/api/v1/agent-task-labels')return route.fulfill({json:[{id:'fixture-label',name:'Fixture selected label',node_count:1,task_count:0}]});
+   if(['/api/v1/agent-task-labels','/api/v1/host-labels'].includes(path))return route.fulfill({json:[{id:'fixture-label',name:'Fixture selected label',node_count:1,task_count:0}]});
    if(['/api/v1/agent-tasks','/api/v1/catalog/tables','/api/v1/dashboards'].includes(path))return route.fulfill({json:[]});
-   if(path==='/api/v1/machines'&&method==='GET')return route.fulfill({json:state.machines});
+   if(['/api/v1/machines','/api/v1/task-hosts'].includes(path)&&method==='GET')return route.fulfill({json:state.machines});
    const detail=path.match(/^\/api\/v1\/machines\/([^/]+)$/);
    if(detail){
     const host=state.machines.find(host=>host.id===detail[1]);
@@ -122,7 +123,7 @@ try{
   await toolbar.getByRole('button',{name:'清除选择',exact:true}).click();await expect(toolbar).toContainText('已选择 0 项');await t.select('host-1');t.state.machines=t.state.machines.filter(host=>host.id!=='host-1');await t.page.evaluate(()=>window.dispatchEvent(new Event('focus')));await expect(t.row('host-1')).toHaveCount(0);await expect(toolbar).toContainText('已选择 0 项');mark('clear selection works and refreshed-away targets cannot remain in a hidden selection');
  }
  {
-  const t=await harness();current=t.page;await t.open();await t.select('host-1','host-2');await t.page.getByRole('combobox',{name:'按任务标签筛选',exact:true}).click();await t.page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({hasText:'Fixture selected label'}).click();await expect(t.row('host-1')).toHaveCount(0);await expect(t.page.getByRole('region',{name:'批量操作',exact:true})).toContainText('已选择 1 项');await expect(t.row('host-2').getByRole('checkbox')).toBeChecked();mark('changing the task-label filter immediately prunes hidden targets while preserving visible selection');
+  const t=await harness();current=t.page;await t.open();await t.select('host-1','host-2');await t.page.getByRole('combobox',{name:'按主机标签筛选',exact:true}).click();await t.page.locator('.ant-select-dropdown:visible .ant-select-item-option').filter({hasText:'Fixture selected label'}).click();await expect(t.row('host-1')).toHaveCount(0);await expect(t.page.getByRole('region',{name:'批量操作',exact:true})).toContainText('已选择 1 项');await expect(t.row('host-2').getByRole('checkbox')).toBeChecked();mark('changing the task-label filter immediately prunes hidden targets while preserving visible selection');
  }
  {
   const t=await harness({count:51});current=t.page;await t.open();const toolbar=t.page.getByRole('region',{name:'批量操作',exact:true});for(let pageNo=1;pageNo<=5;pageNo++){if(pageNo>1)await t.page.getByRole('listitem',{name:String(pageNo),exact:true}).click();for(let i=(pageNo-1)*10+1;i<=pageNo*10;i++)await t.select('host-'+i)}await expect(toolbar).toContainText('已选择 50 项');await t.page.getByRole('listitem',{name:'6',exact:true}).click();await t.row('host-51').getByRole('checkbox').click();await expect(t.row('host-51').getByRole('checkbox')).not.toBeChecked();await expect(toolbar).toContainText('已选择 50 项');mark('cross-page selection enforces the 50-target limit without dropping existing selections');

@@ -202,3 +202,57 @@ test("preview HTTP API validates administrator, fields and schedule without pers
   response=await request({schedule:{mode:"once"},count:100});assert.equal(response.status,400);
   f.user.role="member";response=await request({schedule:{mode:"once"}});assert.equal(response.status,403);
 });
+
+function removalFence(f:ReturnType<typeof fixture>, state:string, by:"host"|"agent") {
+  f.db.exec("CREATE TABLE machine_uninstallations(id TEXT PRIMARY KEY,machine_id TEXT,agent_id TEXT,status TEXT)");
+  f.db.run("INSERT INTO machine_uninstallations VALUES('removal',?,?,?)",by==="host"?"one":"elsewhere",by==="agent"?"agent-one":"unregistered-agent",state);
+}
+
+test("uninstall approval, running and unknown fence dispatch, retry and queued claims by host or actual Agent",()=>{
+  for(const state of ["awaiting_approval","running","unknown"])for(const by of ["host","agent"] as const){
+    const f=fixture();try{
+      f.task("queued");const queued=f.store.dispatch("queued",{confirm:true},"admin").runs[0];
+      f.task("failed");const prior=f.store.dispatch("failed",{confirm:true},"admin").runs[0];f.store.cancel(prior.id,"admin");
+      removalFence(f,state,by);
+      f.task("new");assert.throws(()=>f.store.dispatch("new",{confirm:true},"admin"),/Agent 卸载/,state+by);
+      assert.throws(()=>f.store.retry(prior.id,"admin"),/Agent 卸载/,state+by);
+      const restarted=new TaskRunStore(f.deps);assert.equal(restarted.claim("agent-one",capabilities),null,state+by);
+      assert.equal(f.store.get(queued.id).state,"queued");
+      f.db.run("UPDATE machine_uninstallations SET status='cancelled'");
+      assert.equal(restarted.claim("agent-one",capabilities)!.id,queued.id);
+    }finally{f.close();}
+  }
+});
+
+test("uninstall fence skips scheduled slots without catch-up and pauses consented retries until cancellation",()=>{
+  for(const by of ["host","agent"] as const){
+    const f=fixture();try{
+      f.task("retryable",{execution_policy:{retry_count:1,retry_delay_seconds:10}});
+      f.store.dispatch("retryable",{confirm:true},"admin");const first=f.store.claim("agent-one",capabilities)!;
+      f.finish(first,{state:"failed",code:"script_failed",exit_code:1});
+      f.task("scheduled",{schedule:{mode:"interval",interval_seconds:10}});f.store.tick();
+      removalFence(f,"unknown",by);f.advance(10);f.store.tick();
+      assert.equal(f.store.list({task_id:"scheduled"}).length,0);
+      assert.equal(f.store.list({task_id:"retryable"}).length,1);
+      assert.equal(f.db.get<any>("SELECT auto_retry_closed FROM task_runs WHERE id=?",first.id)!.auto_retry_closed,0);
+      f.db.run("UPDATE machine_uninstallations SET status='cancelled'");f.store.tick();
+      assert.equal(f.store.list({task_id:"scheduled"}).length,0);
+      assert.equal(f.store.list({task_id:"retryable"}).length,2);
+      f.advance(10);f.store.tick();assert.equal(f.store.list({task_id:"scheduled"}).length,1);
+    }finally{f.close();}
+  }
+});
+
+test("two hundred uninstall-fenced retry candidates cannot starve a later eligible host",()=>{
+  const f=fixture();try{
+    f.task("blocked",{execution_policy:{retry_count:1,retry_delay_seconds:10}});f.store.dispatch("blocked",{confirm:true},"admin");
+    const first=f.store.claim("agent-one",capabilities)!;f.finish(first,{state:"failed",code:"script_failed",exit_code:1});
+    for(let i=0;i<200;i++)f.db.run(`INSERT INTO task_runs(id,task_id,host_id,agent_id,snapshot_json,state,trigger,request_id,requested_by,created_at,expires_at,finished_at,code,automatic_attempt,auto_retry_closed)
+      SELECT ?,task_id,host_id,agent_id,snapshot_json,state,trigger,?,requested_by,created_at,expires_at,finished_at,code,automatic_attempt,auto_retry_closed FROM task_runs WHERE id=?`,"blocked-"+i,"blocked-"+i,first.id);
+    f.task("eligible",{host_ids:["two"],execution_policy:{retry_count:1,retry_delay_seconds:10}});f.store.dispatch("eligible",{confirm:true},"admin");
+    const other=f.store.claim("agent-two",capabilities)!;f.finish(other,{state:"failed",code:"script_failed",exit_code:1});
+    removalFence(f,"unknown","host");f.advance(10);f.store.tick();
+    assert.equal(f.store.list({task_id:"eligible"}).length,2);
+    assert.equal(f.db.get<any>("SELECT count(*) n FROM task_runs WHERE task_id='blocked'")!.n,201);
+  }finally{f.close();}
+});

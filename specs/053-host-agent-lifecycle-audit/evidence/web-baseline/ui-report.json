@@ -1,0 +1,46 @@
+{
+  "production_bundle": true,
+  "bundle": {
+    "index_sha256": "f532d6886925a9493707cd4b0c7d4f4898a1e118d555f439a9d50c28406eb4be",
+    "entry": "/assets/index-BHrQ8Uwn.js",
+    "entry_sha256": "204184b03f0e383160bc5e1261f4886a6e7ef1eae1da45ce5017bfdcea9323ae"
+  },
+  "fixture_only": true,
+  "production_writes": false,
+  "ssh_connections": false,
+  "installations": false,
+  "passed": 0,
+  "checked": [],
+  "failures": [
+    {
+      "name": "zh-CN: saved installation history reopens the original pinned plan without creating a new plan",
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('dialog').getByRole('button', { name: '审阅部署计划', exact: true })\u001b[22m\n"
+    },
+    {
+      "name": "zh-CN: an interrupted apply locks the original record until read-only refresh, without replay or false success",
+      "error": "Error: expect(locator).toBeDisabled() failed\n\nLocator: getByRole('dialog').getByRole('button', { name: '我已审阅，确认执行 SSH 部署', exact: true })\nExpected: disabled\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeDisabled\" getByRole('dialog').getByRole('button', { name: '我已审阅，确认执行 SSH 部署', exact: true }) with timeout 5000ms\n  - waiting for getByRole('dialog').getByRole('button', { name: '我已审阅，确认执行 SSH 部署', exact: true })\n"
+    },
+    {
+      "name": "zh-CN: a lost plan response recovers only the saved plan matching the exact SSH check and credential",
+      "error": "Error: expect(locator).toContainText(expected) failed\n\nLocator: getByRole('dialog')\nExpected substring: \"plan-a\"\nReceived string:    \"部署 LightMoni Agent · User host A连接凭据Fixture key a · SHA256:fixture-key-a · 2099/1/1 08:00:00Agent 版本架构自动检查识别初始任务标签Failed to fetch检查并生成部署计划SSH 已连接，安装检查通过预检通过后仍需审阅部署计划；只有 Agent 激活回执才能确认安装成功。linux · arm64Linux 系统通过主机网络发现尚未发现网卡地址，可稍后重新检查或等待 Agent 上报。\"\nTimeout: 5000ms\n\nCall log:\n  - Expect \"toContainText\" getByRole('dialog') with timeout 5000ms\n  - waiting for getByRole('dialog')\n    - locator resolved to <div role=\"dialog\" tabindex=\"-1\" aria-modal=\"true\" aria-labelledby=\"_r_o_\" class=\"ant-modal css-oc1rc0 ant-zoom-appear ant-zoom-appear-active ant-zoom\">…</div>\n    - unexpected value \"部署 LightMoni Agent · User host A连接凭据Fixture key a · SHA256:fixture-key-a · 2099/1/1 08:00:00Agent 版本架构自动检查识别初始任务标签检查并生成部署计划\"\n    13 × locator resolved to <div role=\"dialog\" tabindex=\"-1\" aria-modal=\"true\" aria-labelledby=\"_r_o_\" class=\"ant-modal css-oc1rc0\">…</div>\n       - unexpected value \"部署 LightMoni Agent · User host A连接凭据Fixture key a · SHA256:fixture-key-a · 2099/1/1 08:00:00Agent 版本架构自动检查识别初始任务标签Failed to fetch检查并生成部署计划SSH 已连接，安装检查通过预检通过后仍需审阅部署计划；只有 Agent 激活回执才能确认安装成功。linux · arm64Linux 系统通过主机网络发现尚未发现网卡地址，可稍后重新检查或等待 Agent 上报。\"\n"
+    },
+    {
+      "name": "en-US: saved installation history reopens the original pinned plan without creating a new plan",
+      "error": "TimeoutError: locator.click: Timeout 3000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('dialog').getByRole('button', { name: 'Review deployment plan', exact: true })\u001b[22m\n"
+    },
+    {
+      "name": "en-US: an interrupted apply locks the original record until read-only refresh, without replay or false success",
+      "error": "Error: expect(locator).toBeDisabled() failed\n\nLocator: getByRole('dialog').getByRole('button', { name: 'I have reviewed the steps; run SSH deployment', exact: true })\nExpected: disabled\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toBeDisabled\" getByRole('dialog').getByRole('button', { name: 'I have reviewed the steps; run SSH deployment', exact: true }) with timeout 5000ms\n  - waiting for getByRole('dialog').getByRole('button', { name: 'I have reviewed the steps; run SSH deployment', exact: true })\n"
+    },
+    {
+      "name": "en-US: a lost plan response recovers only the saved plan matching the exact SSH check and credential",
+      "error": "Error: expect(locator).toContainText(expected) failed\n\nLocator: getByRole('dialog')\nExpected substring: \"plan-a\"\nReceived string:    \"Deploy LightMoni Agent · User host AConnection credentialsFixture key a · SHA256:fixture-key-a · 1/1/2099, 8:00:00 AMAgent versionArchitectureDetect with SSH preflightInitial task labelFailed to fetchCheck and create deployment planSSH connected; installation checks passedReview the deployment plan next. Installation succeeds only when Agent activation is confirmed.linux · arm64Linux systemPassedHost network discoveryNo interface addresses discovered. Retry later or wait for Agent reporting.\"\nTimeout: 5000ms\n\nCall log:\n  - Expect \"toContainText\" getByRole('dialog') with timeout 5000ms\n  - waiting for getByRole('dialog')\n    - locator resolved to <div role=\"dialog\" tabindex=\"-1\" aria-modal=\"true\" aria-labelledby=\"_r_o_\" class=\"ant-modal css-oc1rc0\">…</div>\n    - unexpected value \"Deploy LightMoni Agent · User host AConnection credentialsFixture key a · SHA256:fixture-key-a · 1/1/2099, 8:00:00 AMAgent versionArchitectureDetect with SSH preflightInitial task labelCheck and create deployment plan\"\n    13 × locator resolved to <div role=\"dialog\" tabindex=\"-1\" aria-modal=\"true\" aria-labelledby=\"_r_o_\" class=\"ant-modal css-oc1rc0\">…</div>\n       - unexpected value \"Deploy LightMoni Agent · User host AConnection credentialsFixture key a · SHA256:fixture-key-a · 1/1/2099, 8:00:00 AMAgent versionArchitectureDetect with SSH preflightInitial task labelFailed to fetchCheck and create deployment planSSH connected; installation checks passedReview the deployment plan next. Installation succeeds only when Agent activation is confirmed.linux · arm64Linux systemPassedHost network discoveryNo interface addresses discovered. Retry later or wait for Agent reporting.\"\n"
+    },
+    {
+      "name": "a retired Agent link with server installation capability passes batch preflight only after the remote runtime is confirmed absent",
+      "error": "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator:  getByRole('dialog').locator('[data-batch-target=\"host-a\"]')\nExpected: \"pending\"\nReceived: \"not_applicable\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveAttribute\" getByRole('dialog').locator('[data-batch-target=\"host-a\"]') with timeout 5000ms\n  - waiting for getByRole('dialog').locator('[data-batch-target=\"host-a\"]')\n    14 × locator resolved to <section data-batch-target=\"host-a\" data-batch-status=\"not_applicable\">…</section>\n       - unexpected value \"not_applicable\"\n"
+    }
+  ],
+  "errors": [],
+  "unexpected": []
+}

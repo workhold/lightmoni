@@ -514,17 +514,17 @@ SSH 是首次接入、临时维护和故障恢复通道。登记在单一表单�
 
 SSH 预检是只读固定命令集合，检查网络、指纹、Linux、架构、systemd、权限、HTTPS 可达性及已有 Agent 安装。私钥或明确选用 temporary/managed/permanent 的可复用密码可用于预检、终端、固定身份核验和 Agent 安装/卸载；one_time 密码只用于一次预检或终端，结束即清除，无论成功、失败或取消。密码和私钥均经 ssh2 内存参数认证，不进入命令行、环境、进程 stdin、模型上下文或原始日志；enrollment token 单独经 SSH exec channel stdin 传递。密码不保存秘密摘要，历史密码指纹启动时清空；同一主机各类 SSH 操作互斥。
 
-预检通过后生成持久化部署计划；管理员明确确认后，后端先保存 enrollment 与目标主机的服务端预约，再使用固定安装模板、有效凭据、stdin enrollment token 及版本/架构白名单执行。下载脚本和包需要鉴权，0600 curl 配置暂存 token；不进入 URL、argv、环境、日志或回执。生成计划、执行前和安装锁内拒绝覆盖既有安装。计划绑定主机名称及连接 revision，执行前改名使旧计划失效。Agent 注册早于安装回执时仍通过预约关联原主机，不另建资产；确认激活后完成回执与凭据清理，清除 temporary/one_time 秘密并保留有效 managed/permanent 凭据。失败但新 enrollment 已激活时，仅撤销本次节点凭据并提示核对，不影响已有节点。日常管理优先走 Agent。
+预检通过后生成持久化部署计划；管理员明确确认后，后端先保存 enrollment 与目标主机的服务端预约，再使用固定安装模板、有效凭据、stdin enrollment token 及版本/架构白名单执行。下载脚本和包需要鉴权，0600 curl 配置暂存 token；不进入 URL、argv、环境、日志或回执。生成计划、执行前和安装锁内拒绝覆盖既有安装。计划绑定主机名称及连接 revision，执行前改名使旧计划失效，派发前再次核对实际架构。Agent 注册早于安装回执时仍通过预约关联原主机，不另建资产；确认成功后完成回执与凭据清理，清除 temporary/one_time 秘密并保留有效 managed/permanent 凭据。安装派发前的明确失败取消本次未激活 enrollment；派发后 SSH 断开或平台重启保留 unknown 和核对所需的有效凭据，不自动重放。人工结束才精确撤销本次新身份，不影响原 Agent 或其他主机；恢复边界见 13.8。日常管理优先走 Agent。
 
-卸载使用独立的持久化计划和回执。中心固定只读探测核对远端独立身份、主机关联、受管服务及未结束任务；同一节点卸载与任务按 agent_id 跨主机互斥。计划绑定主机名称、地址、端口、用户名、可信指纹、有效私钥或可复用密码、节点身份及 15 分钟预检有效期；目标或授权变化不能复用。网页提供预览、确认、取消和历史，AI 不能绕过确认执行卸载。
+卸载使用独立的持久化计划和回执，支持标准卸载及管理员明确选择的 SSH 恢复卸载，详细边界见 13.9。标准模式固定只读探测核对远端独立身份、主机关联、受管服务及未结束任务；卸载与有限任务按主机 ID 和实际 agent_id 双维互斥。计划绑定主机名称、地址、端口、用户名、可信指纹、有效私钥或可复用密码、节点身份及 15 分钟预检有效期；目标或授权变化不能复用。网页提供预览、确认、取消和历史，AI 不能绕过确认执行卸载。
 
 确认卸载后仅执行平台版本受控的固定脚本：核对标准路径受管 systemd unit，拒绝其他来源的同名服务，再停止并禁用独立服务，确认停止后移除服务文件、启动器和 Agent 运行目录；停止失败不得删除程序。默认保留 /etc/lightmoni-agent、/var/lib/lightmoni-agent、专用服务用户，以及业务部署、制品、容器和卷。保留配置与队列用于核查和数据恢复，不代表保留文件中的旧凭据仍有效，也不保证尚未送达的数据可自动补传。
 
-成功核验要求程序路径已移除、服务 not-found 且未运行、远端身份一致、两个持久目录保留并且没有未完成任务标记。中心在同一 SQLite 事务中撤销该节点全部 control/data 凭据并完成卸载记录；已登记节点不能回退为 legacy Key 认证。保留主机、节点和卸载历史，重新接入需要新的 enrollment。运行中、已派发或结果未知的节点任务必须先完成或核对。卸载的 awaiting_approval、running、succeeded、failed、unknown、cancelled 分别记录审批、执行和结果边界；SSH 断连或结果不确定进入 unknown，不报告成功且不盲目重跑。管理员可触发固定只读 reconcile，原临时私钥到期后可以添加新的有效私钥用于核对；完全移除且身份和保留数据核验通过才补做凭据撤销并成功，完整程序仍在且服务状态明确、无生命周期锁或任务标记时记录失败并保留凭据，部分移除或不确定则继续 unknown。待审批或未知结果仍允许管理员用终端人工核查，但禁止改主机、删除或新建部署；实际执行与核对期间同主机终端和检查互斥。
+标准保留数据模式的成功核验要求程序路径已移除、服务 not-found 且未运行、远端身份一致、两个持久目录保留并且没有未完成任务标记。显式清除数据及恢复模式按 13.9 验证批准策略。中心在同一 SQLite 事务中仅撤销核验归属的 control/data 凭据并完成卸载记录；已登记节点不能回退为 legacy Key 认证。保留主机、节点和卸载历史，重新接入需要新的 enrollment。运行中、已派发或结果未知的节点任务必须先完成或核对。卸载的 awaiting_approval、running、succeeded、failed、unknown、cancelled 分别记录审批、执行和结果边界；SSH 断连或结果不确定进入 unknown，不报告成功且不盲目重跑。管理员可触发固定只读 reconcile，原临时私钥到期后可以添加新的有效私钥用于核对；完全移除且身份和保留数据核验通过才补做凭据撤销并成功，完整程序仍在且服务状态明确、无生命周期锁或任务标记时记录失败并保留凭据，部分移除或不确定则继续 unknown。待审批或未知结果仍允许管理员用终端人工核查，但禁止改主机、删除或新建部署；实际执行与核对期间同主机终端和检查互斥。
 
 凭据到期或撤销时同样清空当前记录的 `secret_encrypted`，保留 ID、策略来源、有效期、清除时间/原因和不含秘密的事件。有限凭据在启动时、读取/使用前和每 30 秒统一清理；永久凭据仅在明确撤销时清除，不以空期限计算为到期。统一有效性判断要求未撤销、秘密未清除，且永久策略无固定期限或有限期限在未来；关闭模块时释放定时器；清理幂等，并取消引用失效凭据的待审批计划，不改写正在运行的计划。终端租约在到期或撤销后失效。清空当前记录不等于擦除 SQLite WAL/free pages、备份、已进入有界操作的进程副本或远端 authorized_keys。
 
-主机能力由后端按连接方式、忙状态及有效凭据计算 terminal、ssh_check、deploy_agent、uninstall_agent、update_agent、rollback_agent。active_reusable_ssh_credential_count 只统计私钥及 temporary/managed/permanent 密码，安装、卸载和升级不能用含一次性密码或手动脚本的总数推导。界面展示能力及置灰原因；所有操作后刷新状态。未记录主机身份不会置灰，首次 SSH 操作自动记录。实现契约见 SDD 031、032、034、037、038、039、040、045。
+主机能力由后端按连接方式、忙状态及有效凭据计算 terminal、ssh_check、deploy_agent、uninstall_agent、recovery_uninstall_agent、update_agent、rollback_agent。active_reusable_ssh_credential_count 只统计私钥及 temporary/managed/permanent 密码，安装、卸载和升级不能用含一次性密码或手动脚本的总数推导。界面展示能力及置灰原因；所有操作后刷新状态。未记录主机身份不会置灰，首次 SSH 操作自动记录。实现契约见 SDD 031、032、034、037、038、039、040、045。
 
 网页终端是管理员本人使用的临时 PTY：同源 Origin、登录 cookie、首次自动记录且后续比对的主机公钥、单次 WebSocket 入口、输入/输出上限、10 分钟空闲和 30 分钟总时长。终端输出不持久化、不写日志、不发送给 AI。终端不是 AI 任意 shell 工具。
 
@@ -700,6 +700,64 @@ flowchart TD
 ```
 
 规格与契约见 [SDD 051](../specs/051-ssh-host-network-discovery/spec.md)。
+
+### 13.8 首装结果未知、只读核对与人工结束（SDD 053）
+
+主机首装持久化非秘密的 enrollment ID、执行阶段和人工结束元数据。阶段区分旧记录未知、计划、预检、签发中、已签发与 bootstrap 已派发，在副作用前保存；不能把旧记录缺少关联解释为没有执行。平台启动将仍在 running 的安装改为 unknown，派发后 SSH 断连同样进入 unknown。未知结果保留原目标、身份、阶段和回执，禁止自动重试、重新 enrollment 或静默覆盖远端安装。
+
+```mermaid
+flowchart TD
+  Plan[原安装计划与审批] --> Stage[持久阶段与 enrollment 关联]
+  Stage --> Dispatch[固定 SSH bootstrap]
+  Dispatch --> Done[已确认安装成功]
+  Dispatch --> Unknown[断连或平台重启：unknown]
+  Unknown --> Probe[管理员固定目标只读核对]
+  Probe --> Done
+  Probe --> Pending[证据不足：保持 unknown]
+  Probe --> Failed[证明尚未派发：失败结束]
+  Pending --> Resolve[管理员确认远端流程已结束并说明原因]
+  Resolve --> Closed[保留 unknown 历史，记录人工结束]
+```
+
+管理员通过 `/api/v1/machines/:id/deployments/:deploymentId/reconcile` 选择当前有效 SSH 凭据，在原主机连接 revision 和身份边界内只读核对。成功需要本次 enrollment 已激活、当前主机关联同一 Agent、有效 control 凭据、远端完整且运行的受管服务、无生命周期锁，以及安装开始后的新鲜心跳；仅允许有限未来时钟容忍。确认尚未派发的阶段可取消未使用票据并失败结束。旧记录、部分安装、身份冲突或证据不足保持 unknown，不执行安装或修复脚本。
+
+无法自动证明时，管理员可通过同路径 `/resolve` 明确确认远端安装流程已结束并提供原因；中心保留 unknown 状态，记录 resolved_at/by/reason，解除该安装记录的阻塞。该操作不停止或卸载远端程序，不恢复或覆盖数据；取消本次未激活 enrollment，仅撤销该 enrollment 新 Agent 的独立 control/data 凭据，不影响原 Agent 或其他身份。有未结束有限任务时拒绝人工结束，不能借此绕过任务恢复。
+
+running 与未人工结束的 unknown 安装阻止冲突生命周期动作、目标编辑、删除、重绑定及新的有限任务派发/领取；已开始的任务按原协议完成。心跳和持续遥测保留为观测证据，SSH 终端与只读检查用于人工核查。网页始终提供原计划的审阅/历史入口，丢失创建或执行响应时先恢复持久记录或只读刷新，不盲目重放；人工结束不能显示为已成功安装或已卸载。
+
+首装失败仅清理本次创建且已为空的程序目录，不删除之前存在的配置、身份或状态。正常卸载后保留的数据仍须管理员核查，fresh 安装保护不因此放宽。卸载与维护的本地任务保护同时识别 Agent job、通用 script task 和运维锁；即使中心尚未收到任务回执，也不能直接删除程序或 purge 数据。
+
+### 13.9 Agent 恢复卸载与离线维护（SDD 058）
+
+标准卸载核对本平台登记身份；SSH 恢复卸载由管理员显式选择并填写原因，用于凭据登记丢失、未绑定、身份文件缺失或损坏、程序部分残留。恢复仍固定已登记主机的 SSH 端点、指纹、连接 revision 和有效凭据，实际有效 Agent 若已绑定其他主机则拒绝。平台记录有界远端观察，包括身份状态与文件摘要、程序摘要、受管 unit、固定目录状态和任务/生命周期锁；不读取或返回原始配置与秘密。计划前、apply 前及远端锁内复验，证据变化要求重新审阅。
+
+```mermaid
+flowchart TD
+  Host[登记主机与有效 SSH 凭据] --> Mode{选择卸载方式与数据策略}
+  Mode --> Standard[标准：核验平台登记身份]
+  Mode --> Recovery[SSH 恢复：填写原因并核对实际证据]
+  Standard --> Review[持久计划：固定目标、快照与撤销范围]
+  Recovery --> Review
+  Review --> Fence[主机 ID 与实际 Agent 双维任务屏障]
+  Fence --> Apply[管理员确认；锁内复验与停止服务]
+  Apply --> Verify[移除固定程序；核验保留或清除数据]
+  Verify --> Done[完成回执；仅撤销确属本主机的凭据]
+  Apply --> Unknown[断连或重启：unknown]
+  Unknown --> Reconcile[当前有效凭据；原目标只读核对]
+  Reconcile --> Done
+  Reconcile --> Pending[证据不足：保持 unknown]
+  Mode --> Manual[下载固定脚本与 SHA256；主机离线运行]
+```
+
+默认保留 /etc/lightmoni-agent 与 /var/lib/lightmoni-agent；生成计划前可明确选择 purge，审阅两个 Agent 目录将被清除，含身份、队列及未送达遥测。成功必须证明服务和固定程序已移除，保留策略下原数据目录状态与身份摘要不变，清除策略下两个目录均不存在；不会删除服务用户、业务目录、容器或卷。fresh 保护保持，显式清除后才能从主机登记流程重新 enrollment；保留模式不承诺直接重装。
+
+恢复不自动反向绑定实际 Agent。只有有效实际身份等于本主机原绑定且 enrollment 归属核验通过，才撤销该身份的 control/data 凭据；缺失、损坏或未绑定身份不凭旧记录猜测。回执分别记录远端移除、数据策略、撤销资格与实际撤销数量，不把外部平台凭据描述为已撤销。主机和历史记录保留；删除平台记录仍是独立操作。
+
+卸载 awaiting_approval、running、unknown 对主机 ID 与实际 Agent 建立持久屏障，覆盖有限任务提交、领取、定时派发和自动重试；已有未结束任务阻止卸载，持续遥测与心跳继续。脚本在停服务前及停后复验本地任务标记，损坏或不安全标记拒绝删除；固定 Agent 路径和关键祖先拒绝符号链接。派发后失败或平台重启进入 unknown，使用原 SSH 目标与当前显式选择的有效凭据只读核对，不重放移除；不能证明完成时继续 unknown，迟到结果不能覆盖已结束记录。
+
+管理员通过 GET /api/v1/agent-maintenance/uninstaller 获取固定无秘密脚本、文件名和 SHA256，不依赖 enrollment 下载票据。新发行包携带同一脚本并安装到 /usr/local/sbin/lightmoni-agent-uninstall，管理员可在平台不可用时以 root 本机运行；默认保留数据，显式 --purge 才清除。手动脚本使用相同固定路径、任务与服务归属保护，不调用中心，不能证明平台凭据已经撤销。网页创建计划或执行响应失联时先恢复持久记录，不盲目重复请求。旧待审批计划若缺少快照须取消重新计划；旧 unknown 仅按原标准模式的固定目标、同一有效身份、完整移除与保留目录证据只读核对，记录旧协议证据，不能伪造此前不存在的摘要快照。升级/回退保持第 28 节受管身份、固定发行与健康确认协议，不提供强制升级未知安装。新发行切换与主动回退同时同步包内离线卸载器，失败时恢复原脚本内容与权限；旧包没有卸载器则保留现有文件，并明确记录未同步。
+
+规格、接口与隔离验收见 [SDD 058](../specs/058-agent-maintenance-recovery/spec.md)。
 
 ## 14. AI 助手设计
 
@@ -1219,10 +1277,10 @@ AI 工具 list_agent_releases、propose_agent_update、get_agent_update 只返�
 flowchart TB
   ops033_admin["管理员工作台 / 五核心能力"]
   ops033_api["中心资源与策略 API / revision / 持续授权"]
-  ops033_db["SQLite + 加密版本 / 资源 / 实例 / 端口 / 执行"]
+  ops033_db["SQLite + 加密版本 / 资源 / 成员 / 逐机执行"]
   ops033_reconcile["领域独立收敛 / 部署 / 续期 / 分发"]
   ops033_cloud["中心云适配器 / DNS / ACME / 三云 CDN"]
-  ops033_job["Agent job + 有效 lease / 私有不可变载荷"]
+  ops033_job["逐机器 Agent job + lease / 私有载荷 / 成员守卫"]
   ops033_agent["独立 Agent / 本机执行 / 持久写锁"]
   ops033_app["Docker / Compose / 应用与托管服务实例"]
   ops033_gateway["OpenResty host 网关 / 多路径 / 静态 / 服务入口"]
@@ -1232,7 +1290,7 @@ flowchart TB
   ops033_api -->|加密状态| ops033_db
   ops033_api -->|授权策略| ops033_reconcile
   ops033_reconcile -->|中心签名请求| ops033_cloud
-  ops033_reconcile -->|派发| ops033_job
+  ops033_reconcile -->|逐机派发| ops033_job
   ops033_job -->|control + lease| ops033_agent
   ops033_agent -->|部署 / 探活| ops033_app
   ops033_agent -->|完整版本包| ops033_gateway
@@ -1262,11 +1320,11 @@ ops_platform_resources 保存 revision、加密 spec、脱敏 status 和授权�
 
 ### 33.5 证书版本与三类分发目标
 
-证书支持 ACME、上传、自签；公私钥匹配、SAN、有效期和指纹均校验。材料与不可变版本加密保存，普通资源接口只显示元数据和 has_*。管理员通过 GET /api/v1/ops/resources/:id/certificate 按需查看当前已保存版本的公开 PEM 与元数据；POST certificate/download 按 certificate_id 与不可变 version 精确导出 cert.pem、chain.pem、fullchain.pem 或 privkey.pem。查看 JSON 只白名单返回公开材料，缺失中间链时不伪造。下载固定版本，续期切换不改变已打开版本的下载内容；失败续期仍可查看既有版本。上传证书只能提醒到期；ACME/自签可显式启用自动续期，窗口按实际有效期计算，尚未接入 ARI；失败续期可人工重新 issue/renew，不宣称完整自动退避已实现。网站首次发布 HTTPS 时，材料缺失或过期可调用同一可追踪签发流程，内部等待（或等待已有执行）取得材料后再继续部署；管理员 HTTP 创建/签发接口不等待。上传材料也在后台校验并导入；编辑既有配置不会自动签发。证书目标分别为 Agent 目录、云 CDN、更新脚本，各自记录 desired/applied 版本与结果。
+证书支持 ACME、上传、自签；公私钥匹配、SAN、有效期和指纹均校验。材料与不可变版本加密保存，普通资源接口只显示元数据和 has_*。管理员通过 GET /api/v1/ops/resources/:id/certificate 按需查看当前已保存版本的公开 PEM 与元数据；POST certificate/download 按 certificate_id 与不可变 version 精确导出 cert.pem、chain.pem、fullchain.pem 或 privkey.pem。查看 JSON 只白名单返回公开材料，缺失中间链时不伪造。下载固定版本，续期切换不改变已打开版本的下载内容；失败续期仍可查看既有版本。上传证书只能提醒到期；ACME/自签可显式启用自动续期，窗口按实际有效期计算，尚未接入 ARI；失败续期可人工重新 issue/renew，不宣称完整自动退避已实现。网站首次发布 HTTPS 时，材料缺失或过期可调用同一可追踪签发流程，内部等待（或等待已有执行）取得材料后再继续部署；管理员 HTTP 创建/签发接口不等待。上传材料也在后台校验并导入；编辑既有配置不会自动签发。证书目标分别为 Agent 目录、云 CDN、更新脚本，各自记录 desired/applied 版本与结果。证书新建只接受单个域名或泛域名，规范化域名派生名称；历史 ID、材料、执行与引用不变，已有多域名保留原集合。同步任务归属对应域名证书展示。目录目标可选单机或集群：中心解析当前全部成员及 Agent 绑定，预检后按机器独立派发，以任务 revision、证书版本、机器和 Agent 去重；逐机回执均核对当前版本与指纹后才整体 applied。持续授权补齐新证书和新增成员，失败/unknown 不自动重放；显式 retry 保留成功成员，unknown 须先现场 inspect。
 
 ### 33.6 云服务、脚本与凭据边界
 
-首批云目标覆盖阿里云、腾讯云、火山引擎 CDN HTTPS 域名。阿里 CDN 直接部署 PEM；腾讯 SSL 上传后更新 CDN；火山证书中心上传后部署 CDN。云映射保留远端证书ID，上传/绑定/逐域回读分别核实；HTTP 200、上传成功或某一域成功不替代全部目标生效。云凭据、ACME 账号密钥只由中心加密使用。证书私钥可由有效管理员显式点击独立 POST 附件下载，按请求从加密版本解密，不进入查看 JSON、普通资源、日志、URL 或 AI/工具；复用会话及同源检查，查看和下载响应 no-store，附件文件名仅使用安全 ID/版本。目录按受管版本落盘并切换指针，私钥权限受限。更新脚本由管理员固定 Agent、解释器、正文、显式环境和超时；正文与环境加密，不在普通摘要回显，也不送 AI。脚本通过证书临时文件路径及版本元数据获得材料，具有 Agent 本机权限，无沙箱承诺。
+首批云目标覆盖阿里云、腾讯云、火山引擎 CDN HTTPS 域名。阿里 CDN 直接部署 PEM；腾讯 SSL 上传后更新 CDN；火山证书中心上传后部署 CDN。云映射保留远端证书ID，上传/绑定/逐域回读分别核实；HTTP 200、上传成功或某一域成功不替代全部目标生效。云凭据、ACME 账号密钥只由中心加密使用。证书私钥可由有效管理员显式点击独立 POST 附件下载，按请求从加密版本解密，不进入查看 JSON、普通资源、日志、URL 或 AI/工具；复用会话及同源检查，查看和下载响应 no-store，附件文件名仅使用安全 ID/版本。目录按受管版本落盘并切换指针，私钥权限受限。更新脚本由管理员固定 Agent、解释器、正文、显式环境和超时；正文与环境加密，不在普通摘要回显，也不送 AI。脚本通过证书临时文件路径及版本元数据获得材料，具有 Agent 本机权限，无沙箱承诺。集群目录私有载荷返回前，中心重查当前集群成员、机器与 Agent 绑定、Agent 未移除、证书当前版本、任务 revision 和执行授权；离群、换绑、撤权或旧版本拒绝读取。已交付节点的材料不能远程撤回，迟到的旧配置/版本/离群成员回执不覆盖当前逐机聚合。普通资源摘要不复制逐机私有材料，复用现有 control + lease 与加密快照，不新增节点协议。
 
 ### 33.7 幂等、未知结果与恢复
 

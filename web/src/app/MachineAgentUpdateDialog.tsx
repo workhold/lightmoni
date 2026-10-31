@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Modal,Select,Space,Table,Tag,Typography} from '../shared/ui';
 import {api,ApiError} from '../shared/api';
+import {sshEndpoint} from './host-request-guard';
 import {useI18n} from '../shared/i18n';
 import {defaultMachineCredential,reusableMachineCredential} from './machine-credentials';
 import {installedRelease,releaseIdentity,shortIdentity,updateIsActive,updateMessageText,updatePath,updatePlanExpired,updateStatusColor,updateStatusText,type AgentRelease,type AgentUpdate,type AgentUpdateCredential} from './agent-update-model';
@@ -25,7 +26,7 @@ export function AgentUpdatePlanSummary({record}:{record:AgentUpdate}){
  return <>
   <Descriptions size="small" column={{xs:1,sm:2}} items={[
    {key:'action',label:t('操作','Action'),span:2,children:record.action==='rollback'?t('回退到保留的上一发行','Roll back to the retained previous release'):t('升级到指定发行','Upgrade to a selected release')},
-   {key:'host',label:t('目标主机','Target host'),span:2,children:`${plan.machine.name} · ${plan.machine.username}@${plan.machine.address}:${plan.machine.port}`},
+   {key:'host',label:t('目标主机','Target host'),span:2,children:`${plan.machine.name} · ${sshEndpoint(plan.machine.address,plan.machine.port,plan.machine.username)}`},
    {key:'agent',label:t('Agent 身份','Agent identity'),span:2,children:identity(record.agent_id||plan.current?.agent_id)},
    {key:'current',label:t('当前发行','Current release'),children:`${current?.version||t('未知','Unknown')} · ${shortIdentity(current?.source_revision)}`},
    {key:'target',label:t('目标发行','Target release'),children:`${plan.target?.version||'—'} · ${shortIdentity(plan.target?.source_revision)} · ${plan.target?.arch||'—'}`},

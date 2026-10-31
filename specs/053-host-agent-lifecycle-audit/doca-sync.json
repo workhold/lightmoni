@@ -1,0 +1,25 @@
+{
+  "status": "synchronized",
+  "spec": "053-host-agent-lifecycle-audit",
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "checked_at": "2026-10-31T07:36:27.944146+00:00",
+  "repository_sections": [
+    "docs/system-design.md 13 installation paragraph",
+    "docs/system-design.md 13.8"
+  ],
+  "before_seq": 886,
+  "readback_seq": 887,
+  "updated_blocks": 1,
+  "inserted_blocks": 7,
+  "unrelated_blocks_unchanged": 561,
+  "existing_native_diagrams_unchanged": 24,
+  "new_native_diagram": {
+    "block_id": "install053-recovery-flow",
+    "nodes": 10,
+    "edges": 10
+  },
+  "full_document_order_verified": true,
+  "text_nodes_edges_and_geometry_verified": true,
+  "native_visual_render_verified": false,
+  "note": "SDD053分支的首装持久阶段、unknown、只读核对与人工结束设计；不声称该分支已合入，也未以原生结构核对代替浏览器视觉验收。"
+}

@@ -1,0 +1,37 @@
+{
+  "production_bundle": true,
+  "bundle": {
+    "index_sha256": "b8faa3073c01f8bd6ae4888ba8227900fe2568a6113977689f9a773b64f718b6",
+    "entry": "/assets/index-DR4zgX7Q.js",
+    "entry_sha256": "00a3b026da51bb4fdc0cd237045170eb42dc836b9fdf1ea32110a97aac3d22c5"
+  },
+  "fixture_only": true,
+  "production_writes": false,
+  "ssh_connections": false,
+  "installations": false,
+  "passed": 19,
+  "checked": [
+    "zh-CN: saved installation history reopens the original pinned plan without creating a new plan",
+    "zh-CN: an interrupted apply locks the original record until read-only refresh, without replay or false success",
+    "zh-CN: unknown installation only permits fixed read-only verification or explicit manual resolution",
+    "zh-CN: a lost plan response with unreadable history stays locked until its exact saved record is refreshed",
+    "zh-CN: a lost plan response recovers only the saved plan matching the exact SSH check and credential",
+    "en-US: saved installation history reopens the original pinned plan without creating a new plan",
+    "en-US: an interrupted apply locks the original record until read-only refresh, without replay or false success",
+    "en-US: unknown installation only permits fixed read-only verification or explicit manual resolution",
+    "en-US: a lost plan response with unreadable history stays locked until its exact saved record is refreshed",
+    "en-US: a lost plan response recovers only the saved plan matching the exact SSH check and credential",
+    "a creation response for another host locks and recovers only the original persisted plan",
+    "an interrupted installation before dispatch can be verified without a remaining SSH credential",
+    "lost create cannot adopt a saved plan from another SSH check",
+    "unknown installation recovery controls remain usable in a narrow host-management viewport",
+    "host and credential creates with lost responses block blind duplicate saving",
+    "a resolved unknown installation with cached online state follows explicit server deployment capability",
+    "a resolved unknown installation with cached offline state follows explicit server deployment capability",
+    "an explicit server deployment denial still blocks a cached online resolved installation before SSH",
+    "a retired Agent link with server installation capability passes batch preflight only after the remote runtime is confirmed absent"
+  ],
+  "failures": [],
+  "errors": [],
+  "unexpected": []
+}

@@ -170,10 +170,11 @@ test("orphan and revoked identities cannot receive operations resources, plans o
   assert.throws(() => f.credentials.authenticate({ headers: { authorization: "Bearer " + agent.data } } as any, agent.agentID, "data"), /registered_host_required/);
 });
 
-test("a failed activated install can safely reinstall with the same host ID after fresh absent preflight", async t => {
+test("an interrupted activated install requires explicit resolution before a fresh same-host installation", async t => {
   const f = await fixture(t), host = await f.host(), credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "managed", confirm_managed: true });
   assert.equal(credential.status, 201);
   let failInstallation = true;
+  let deploymentPath = "";
   const identities: string[] = [];
   f.setRunner(async input => {
     if (!input.enrollmentToken) return { stdout: preflight, stderr: "", stages: [] };
@@ -187,9 +188,15 @@ test("a failed activated install can safely reinstall with the same host ID afte
   const install = async () => {
     const check = await f.request(`/machines/${host.id}/ssh-check`, "POST", { credential_id: credential.data.credential_id }); assert.equal(check.status, 200);
     const plan = await f.request(`/machines/${host.id}/deployments/plan`, "POST", { check_id: check.data.id, credential_id: credential.data.credential_id, version: "0.1.0", arch: "amd64" }); assert.equal(plan.status, 201, JSON.stringify(plan.data));
-    return f.request(`/machines/${host.id}/deployments/${plan.data.id}/apply`, "POST", { confirm: true });
+    deploymentPath = `/machines/${host.id}/deployments/${plan.data.id}`;
+    return f.request(deploymentPath+"/apply", "POST", { confirm: true });
   };
   assert.equal((await install()).status, 502); assert.equal(f.machines.get(host.id).agent_id, identities[0]);
+  assert.equal((await f.request(deploymentPath)).data.status, "unknown");
+  assert.equal(f.credentials.has(identities[0], "control"), true); assert.equal(f.credentials.has(identities[0], "data"), true);
+  assert.equal((await f.request(`/machines/${host.id}/deployments/plan`, "POST", { version: "0.1.0", arch: "amd64" })).status, 409);
+  const resolved=await f.request(deploymentPath+"/resolve", "POST", { confirm: true, reason: "Remote installation reviewed before a fresh absent check" });
+  assert.equal(resolved.status, 200, JSON.stringify(resolved.data)); assert.equal(resolved.data.status, "unknown"); assert.ok(resolved.data.resolved_at);
   assert.equal(f.credentials.has(identities[0], "control"), false); assert.equal(f.credentials.has(identities[0], "data"), false);
   failInstallation = false; const retry = await install(); assert.equal(retry.status, 200, JSON.stringify(retry.data)); assert.equal(f.machines.get(host.id).agent_id, identities[1]); assert.notEqual(identities[0], identities[1]);
   assert.equal(f.machines.list().length, 1); assert.equal(f.db.get<any>("SELECT count(*) n FROM machine_deployments WHERE machine_id=?", host.id)!.n, 2);
@@ -216,4 +223,24 @@ test("retired Agent replacement retains host ID and plan snapshots reject a chan
   // The previous identity's successful uninstall is not proof that the newly
   // installed Agent is gone, even after revoking its credentials.
   assert.equal((await f.request(`/machines/${host.id}`, "DELETE")).status, 409);
+});
+
+test("approved purge revokes only the owned identity and permits a fresh same-host enrollment",async t=>{
+ const f=await fixture(t),h=await f.host("Purge then fresh"),old=await f.enroll(h.id);let purged=false,newAgent="";
+ const credential=await f.request(`/machines/${h.id}/credentials`,"POST",{method:"ssh_key",secret:fixturePrivateKey(),retention:"temporary"});assert.equal(credential.status,201);
+ f.setRunner(async input=>{
+  if(input.command.includes("LMREMOVE")){
+   if(input.command.includes("systemctl stop"))purged=true;
+   const values={LMREMOVE:"1",agent_id:purged?"-":old.agentID,identity_state:purged?"missing":"valid",identity_sha256:purged?"-":"a".repeat(64),program_sha256:(purged?"c":"b").repeat(64),installation:purged?"absent":"present",program_complete:purged?"0":"1",unit_managed:"1",service_running:purged?"0":"1",lifecycle_locked:"0",operation_lock:"0",paths_safe:"1",config_present:purged?"0":"1",data_present:purged?"0":"1"};
+   return {stdout:Object.entries(values).map(([key,value])=>`${key}=${value}`).join("\n")+"\n",stderr:"",stages:[]};
+  }
+  if(input.enrollmentToken){const pending=await f.exchange(input.enrollmentToken);assert.equal(pending.status,201);assert.equal((await f.activate(pending.data)).status,200);newAgent=pending.data.agent_id;return {stdout:"installed",stderr:"",stages:[]};}
+  return {stdout:preflight,stderr:"",stages:[]};
+ });
+ const check=await f.request(`/machines/${h.id}/ssh-check`,"POST",{});assert.equal(check.status,200);
+ const plan=await f.request(`/machines/${h.id}/uninstallations/plan`,"POST",{check_id:check.data.id,mode:"recovery",reason:"Verified before clean re-enrollment",purge:true});assert.equal(plan.status,201,JSON.stringify(plan.data));
+ const done=await f.request(`/machines/${h.id}/uninstallations/${plan.data.id}/apply`,"POST",{confirm:true});assert.equal(done.status,200,JSON.stringify(done.data));assert.equal(done.data.receipt.revoked_credentials,2);assert.equal(f.credentials.has(old.agentID,"control"),false);
+ const freshCheck=await f.request(`/machines/${h.id}/ssh-check`,"POST",{});assert.equal(freshCheck.data.ready,true);
+ const fresh=await f.request(`/machines/${h.id}/deployments/plan`,"POST",{check_id:freshCheck.data.id,version:"0.1.0",arch:"amd64"});assert.equal(fresh.status,201,JSON.stringify(fresh.data));
+ const applied=await f.request(`/machines/${h.id}/deployments/${fresh.data.id}/apply`,"POST",{confirm:true});assert.equal(applied.status,200,JSON.stringify(applied.data));assert.equal(applied.data.status,"succeeded");assert.equal(f.machines.get(h.id).agent_id,newAgent);assert.notEqual(newAgent,old.agentID);assert.equal(f.machines.list().length,1);
 });

@@ -28,6 +28,7 @@ async function harness({language='zh-CN',role='admin',width=1440}={}){
   const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();
   if(url.origin!==origin){unexpected.push(url.href);return route.abort()}
   if(path.startsWith('/api/')){
+   if(method==='GET'&&/^\/api\/v1\/machines\/[^/]+\/agent-updates$/.test(path))return route.fulfill({json:[]});
    const body=request.postData()?request.postDataJSON():undefined;state.requests.push({path,method,body});
    const common={'/api/v1/connection-credentials':[],'/api/v1/host-labels':[],'/api/v1/setup':{required:false},'/api/v1/auth/providers':[],'/api/v1/auth/me':{id:'fixture-user',name:'Fixture User',role},'/api/v1/auth/profile':{},'/api/v1/catalog/tables':[],'/api/v1/dashboards':[],'/api/v1/agents':[],'/api/v1/agent-task-labels':[]};
    if(method==='GET'&&Object.hasOwn(common,path))return route.fulfill({json:common[path]});

@@ -215,3 +215,19 @@ test('pending, running, unknown and completed node uninstallations block enqueue
   assert.ok(f.jobs.claim('agent-1',[]));
  }finally{f.jobs.close?.();f.db.close();}
 });
+
+test("recovery uninstall fences host-bound jobs even when the actual remote identity is missing or different",()=>{
+  for(const state of ["awaiting_approval","running","unknown"]){
+    const f=fixture();try{
+      const queued=f.jobs.enqueue({agentID:"agent-1",deploymentID:"before",operationID:"before",actions:[]});
+      f.db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,agent_id TEXT);CREATE TABLE machine_uninstallations(id TEXT PRIMARY KEY,machine_id TEXT,agent_id TEXT,status TEXT)");
+      f.db.run("INSERT INTO managed_machines VALUES('host','agent-1')");
+      f.db.run("INSERT INTO machine_uninstallations VALUES('removal','host','',?)",state);
+      assert.throws(()=>f.jobs.enqueue({agentID:"agent-1",deploymentID:"during",operationID:"during",actions:[]}),/uninstallation_blocks_jobs/);
+      assert.equal(f.jobs.claim("agent-1",[]),null);
+      assert.equal(f.jobs.get(queued.id).state,"queued");
+      f.db.run("UPDATE machine_uninstallations SET status='cancelled'");
+      assert.equal(f.jobs.claim("agent-1",[])!.id,queued.id);
+    }finally{f.jobs.close();f.db.close();}
+  }
+});

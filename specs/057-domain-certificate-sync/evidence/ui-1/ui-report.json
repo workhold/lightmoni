@@ -1,0 +1,38 @@
+{
+  "passed": 18,
+  "checks": [
+    "Creating an ACME certificate closes immediately while DNS propagation is blocked",
+    "Status log icon opens persisted real Router/SQLite ACME and DNS progress",
+    "Automatic polling shows the CA DNS problem and cleanup, without challenge values or credentials",
+    "Manual issuance returns immediately and opens the same execution history drawer",
+    "History selection loads the selected execution without mixing events",
+    "English and narrow-screen execution drawer render without runtime errors",
+    "Legacy generic errors explain that historical causes cannot be reconstructed",
+    "Cached invalid orders show the authorization DNS reason and HTTP status in English/Chinese without tokens or TXT values, and the order read is recorded only as failed",
+    "Real signed chain and matching private key download via the administrator UI, with immutable version filenames and no private key in the viewer",
+    "Load failure retries and download failure preserves the displayed certificate",
+    "Certificate viewer renders on a narrow dark English screen",
+    "Self-signed certificates disable missing chain downloads, explain the empty chain, and open from certificate details",
+    "Certificate controls fit a simulated 200 percent view: 720 CSS pixels at 2x device scale",
+    "Sync tasks are nested under their domain, bind the certificate, select all cluster machines, and preserve input after a failed save",
+    "Cluster progress stays pending after one success, exposes a failed member, retries only that member and becomes applied after both verified receipts",
+    "Task edits survive refresh and switching from cluster to single machine removes the inactive scope",
+    "Quick certificate creation also omits the name and returns its domain while preserving the parent website form",
+    "Domain-owned tasks render in the narrow English dark theme without the removed global task table"
+  ],
+  "errors": [],
+  "backend": "Real loopback Router + SQLite; synthetic ACME/DNS peers; no production requests",
+  "screenshots": [
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/certificate-pending.png",
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/certificate-failed.png",
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/certificate-mobile-en.png",
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/certificate-invalid-order-en.png",
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/certificate-invalid-order-zh.png",
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/certificate-download-zh.png",
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/certificate-download-mobile-en.png",
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/certificate-download-zoom-200.png",
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/domain-cluster-sync-zh.png",
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/domain-sync-mobile-en.png",
+    "artifacts/screenshots/specs/057-domain-certificate-sync/evidence/ui-1/domain-cluster-form.png"
+  ]
+}
