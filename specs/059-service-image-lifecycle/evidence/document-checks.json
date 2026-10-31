@@ -11,5 +11,12 @@
   "git_diff_check": "passed",
   "obvious_credential_patterns": "none",
   "runtime_tests_run": false,
-  "recovery_benchmark_run": false
+  "recovery_benchmark_run": false,
+  "default_no_added_registry_documented": true,
+  "cache_optional_and_not_a_core_dependency": true,
+  "latest_doca_evidence": "doca-readback-lightweight.json",
+  "latest_doca_seq": 899,
+  "diagram_nodes": 9,
+  "diagram_edges": 10,
+  "main_synchronized": "3720a5085f9fffe363e90908bbd15976a741b6ee"
 }

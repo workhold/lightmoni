@@ -14,12 +14,14 @@
 | 确认升级 | POST `/api/v1/ops/rollout-plans/:id/execute`，plan_hash/revision | 逐集群rollout；配置/版本/授权变化409，不扩大集群 |
 | 升级动作 | POST `/api/v1/ops/rollouts/:id/actions` | pause/resume/rollback/inspect+revision；unknown先核对，回退需兼容上一版本 |
 | 更新策略 | PUT `/api/v1/ops/applications/:id/clusters/:cid/update-policy` | mode/range/window/timezone/batch/failure_action+revision；自动范围需管理员确认 |
-| 镜像源 | GET/PUT `/api/v1/ops/registry-profiles/:scope/:owner` | Hub镜像、映射、代理/CA/凭据引用；unset继承、空清空；PUT只保存期望 |
+| 镜像源 | GET/PUT `/api/v1/ops/registry-profiles/:scope/:owner` | Hub镜像、映射、可选cache_endpoint_refs、代理/CA/凭据引用；unset继承、空清空；PUT只保存期望，不安装仓库 |
 | 主机实际设置 | GET `/api/v1/machines/:id/docker-settings` | 脱敏最终值/来源、期望/实际revision、能力及待维护状态 |
 | Docker维护计划 | POST `/api/v1/machines/:id/docker-settings/plans`，revision | 配置diff、全部受影响容器、重启范围、plan_hash与有效期 |
 | 应用设置 | POST `/api/v1/machines/:id/docker-settings/plans/:plan/execute`，hash/revision | run_id；CAS、互斥、受限命令与验证，不因保存自动执行 |
 
 拟议Agent能力：image.resolve（读manifest）、image.prepare、image.inspect、image.cache_copy（限定源/目的地）、docker.settings_probe/apply/inspect。载荷绑定资源/集群/机器/Agent、release/image_set/profile revision、目的地、凭据范围与有效lease。无任意shell/URL下载/全机prune。
+
+基础resolve/prepare/inspect、安装和升级不要求cache_endpoint_refs或image.cache_copy能力。无缓存返回cache_configured=false（配置状态，不是执行错误）；多个集群可引用同一已有端点，但仍逐应用/集群鉴权。image.cache_copy仅在显式启用可选缓存时使用，无平台自动安装仓库接口。
 
 Docker维护主机写锁与应用部署/启停等Docker写动作互斥；派发和领取时重验成员、授权/策略revision、凭据、目的地与能力。临时Docker认证/代理文件权限0600且到期/完成清理。禁回源同时约束节点、镜像端点和缓存上游，普通Hub mirror fallback不作为隔离措施。
 

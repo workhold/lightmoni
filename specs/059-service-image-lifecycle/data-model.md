@@ -8,7 +8,7 @@
 | cluster deployment扩展 | desired_release_id、previous_successful_release_id、policy_revision；保留application+cluster键，期望与运行版本分开 |
 | image_preparation_policies | application+cluster唯一、on_demand/standby/all_eligible、standby_count、allow_upstream、并发/保留/空间策略、revision；新托管默认standby=1，旧部署显式启用 |
 | node_image_preparations | machine/Agent、release、platform、image_set_hash、profile_revision、state、observed_image_ids、source_kind、bytes/duration、verified_at、error_code、run_id；上述身份参与去重，换Agent使旧ready失效 |
-| registry_profiles | scope(global/cluster/machine)、owner、revision、受管字段、hub_mirrors、source_mappings、proxy/CA/credential_refs、no_proxy；presence表示继承，显式空清空，数组整体覆盖 |
+| registry_profiles | scope(global/cluster/machine)、owner、revision、受管字段、hub_mirrors、source_mappings、可选cache_endpoint_refs、proxy/CA/credential_refs、no_proxy；presence表示继承，显式空清空，数组整体覆盖；缓存端点默认无配置，可跨集群复用且不创建仓库实例 |
 | registry_authorizations | registry/repository、application/cluster、credential_ref、revision、expires_at；profile继承不扩大镜像读取范围 |
 | catalog releases | template_id+revision不可变、application_version、channel、排序/semver、镜像集合、参数schema、兼容/迁移/回退声明、changelog、最低Agent能力 |
 | update_sources/checks | fixed/catalog/manifest/tracking_tag、受控endpoint、channel、credential_ref、最近检查/成功/下次时间、result、candidate、error_code；未知与无更新不同 |
