@@ -1,0 +1,15 @@
+✔ one line and many values creates distinct records, preserving meaningful value whitespace (1.87075ms)
+✔ batch edits preserve record identity, routing, TTL, priority, weight and disabled state (0.173125ms)
+✔ empty batches, oversized batches and edits with no chosen field cannot execute (0.342666ms)
+✔ HTTP success never hides failed, unknown, missing or unverified business receipts (0.109333ms)
+✔ serial execution continues after per-record failure and never retries an uncertain write (0.243542ms)
+✔ stop finishes the current request and skips remaining records (0.107208ms)
+✔ authorization/revision rejection stops subsequent writes, while validation failures remain per record (0.279958ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 319.819542
