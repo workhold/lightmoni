@@ -1500,3 +1500,71 @@ flowchart LR
 ```
 
 规格、契约、测试及 Doca 保存回读证据见 specs/053-certificate-async-issuance/。
+
+## 第59章 服务镜像生命周期、仓库应用与网站鉴权（SDD 059，目标设计）
+
+2026-10-31建立，2026-11-01扩展。本章为待实现设计，扩展第42章应用/集群部署及网站，保留第33章授权、私有载荷、租约和未知结果边界。默认无需仓库；已有源或用户明确开启时安装的仓库应用均为可选增强。设计交付不表示预热、仓库、商店更新、机器代理或网站密码访问已实现。
+
+### 59.1 发布身份与候选预热
+
+ApplicationRelease独立于应用草稿revision，固定每个Compose服务的来源引用、index/manifest摘要、OS/arch/variant及平台摘要，ready后不可变。重启与故障换机复用同一release，不重新解析可变tag。旧部署无法证明完整镜像身份时标记legacy_unresolved，不能用当前远端tag冒充原版本。新托管默认由Agent从已有镜像源准备运行机器和至少1台独立合格备用，手动默认按需，允许全部合格候选预热；只准备已发布服务的当前及上一可回退版本。无需内网仓库即可完成安装、预热和升级；全部候选缺镜像时按回源策略下载或等待。容量、端口、架构、数据与unknown约束先于镜像就绪评分；预热不预留运行资源，不足显示degraded，本地数据库不自动迁移。
+
+### 59.2 内网分发、回源与清理
+
+获取顺序为本机精确内容、仅配置时使用授权内网缓存、按策略从已有镜像源拉取。未配置直接跳过，不阻止安装/升级，不自动每集群部署。可复用已有持久化OCI仓库/缓存或明确安装的仓库应用，多个可信网络可达集群可共用端点，权限仍逐应用/集群限制；复制前后摘要与平台内容一致，预热与启动用同一effective_ref。普通机器Docker cache不直接提供集群仓库，P2P另开SDD。Hub mirror与其他源映射分开。禁回源只使用已准备内容，缓存端也限制回源，不能依赖pull-through或mirror fallback。逐机/平台记录source/bytes/duration，身份/发布/策略变化或外部清理使旧状态失效。保护运行、当前、回退、在途与unknown引用，只清理平台登记无引用过期内容，不全机prune。
+
+### 59.3 自定义发布与商店更新
+
+自定义服务先外部构建推送，再登记镜像/Compose新版本、锁定内容、审阅、选择集群、预热与升级；可配置受控发布清单或显式tag跟踪，固定镜像无来源时显示未配置检查。商店分别维护模板revision、应用版本、变更/兼容/迁移/回退声明及最低Agent能力，默认每日带抖动检查并支持立即检查；失败保留上次结果且标过期，不表示最新。旧模板、用户配置、新模板三方合并保留参数、秘密引用、卷和端口，冲突/未知迁移阻止发布。默认只提示更新，只有所选集群的成功发布改变期望版本，其他集群保持原指针。
+
+### 59.4 升级与自动策略
+
+滚动默认batch=1，额外容量及固定端口允许时先启新、健康验证、切流再停旧；单机固定端口或host80/443单例明确预览停机并使用stop-first。全部服务镜像与新鲜健康回执匹配才切换；失败暂停或按授权回退上一发布，unknown先inspect。镜像/配置回退不恢复数据库数据。P2自动更新须管理员确认应用/集群、受信源、版本范围、IANA维护窗口、批次/最大不可用和失败行为；派发与领取重验授权revision，撤销阻断未开始动作。主版本、有状态、迁移或兼容未知、冲突、能力不足及unknown不自动执行。
+
+### 59.5 机器镜像源与维护控制
+
+全局默认→集群→单机逐字段继承，unset继承、显式空清空、数组整体覆盖，展示来源及期望/实际差异。分开Hub加速、其他仓库映射、daemon HTTP(S)_PROXY/NO_PROXY、私有认证/受信CA；credential_ref按application/cluster和registry/repository单独授权，不因继承扩大权限。默认TLS、URL无userinfo，秘密由有效lease私有载荷进入0600临时配置，不进命令行、日志或AI。保存仅改期望；应用须只读预检、冻结原文件hash及全部受影响容器、管理员确认维护、CAS/备份/合并受管键、校验、原子写入、必要重启及Docker/容器验证。保留无关键，外部配置或启动参数冲突拒绝；逐机维护写锁与部署/启停互斥，维护期间避免误换机。unknown先核对；配置恢复与业务恢复分别报告，映射/认证不涉及daemon时不重启。
+
+```mermaid
+flowchart TB
+  sources["商店 / 自定义新版本"] --> release["中心：不可变发布 / 逐集群授权"]
+  release --> prepare["Agent：候选预热 / 本机核验"]
+  profiles["全局→集群→机器镜像源 / 凭据范围"] --> prepare
+  prepare --> cache["可选仓库应用 / 已有共享缓存"]
+  prepare -->|已有镜像源 / 按策略拉取| upstream["授权上游仓库"]
+  cache -->|显式允许回源| upstream
+  prepare --> rollout["逐集群升级 / 故障接管"]
+  rollout --> health["实际镜像 / 健康回执"]
+  health --> release
+  profiles --> maintenance["预检 / 确认维护 / CAS / 必要重启 / 验证"]
+```
+
+### 59.6 存储、阶段与验证边界
+
+中心SQLite增加发布、更新源/检查/策略、准备策略/逐机状态、profile/维护计划、registry origins/集群reader映射、网站账号组及不可变hash版本，扩展逐集群发布指针；仓库仍为普通application，不新增隐藏安装器。执行复用ops_platform_runs、系统日志outbox和有效Agent租约，中心无Docker socket，AI不批准。基础预热/更新P1无需仓库，网站鉴权独立P1；仓库应用为用户按需开启，公网依赖网站鉴权，P2限定自动更新。真正P2P及多写高可用/自动数据迁移不在首版。验收无仓库基础、双节点断网预热、多集群单写源/摘要分发、内网匿名边界、网站密码访问和Registry客户端；分别测恢复各阶段，不预称固定秒数。详见 specs/059-service-image-lifecycle/。
+
+### 59.7 按需仓库应用、唯一写入源与多集群读取
+
+开启仓库功能时选择已有源或从商店安装普通application，明确集群、单台宿主机、持久目录和端口，默认manual单写，不随机或故障后空目录迁移。private/cache/both分别为可push私库、单上游只读pull-through或两个独立Compose服务；进程/端口/数据分离，proxy缓存不可当可push私库。每个应用选择一个registry_origin作为写入源，公网push域名固定该源集群，不轮询独立存储；其他集群按明确reader映射直拉、缓存或受限复制到普通副本，核验完整index/平台manifest/blob摘要。改源需CAS与迁移验证，未准备或源离线不报分发成功；自身引导镜像不依赖未启动的仓库。停用/卸载保留数据并检查引用。
+
+内网免登录是显式可信模式，绑定私网/受管网络及批准来源，默认匿名只读，内网写单独开启；不依靠Host/X-Forwarded-For或“地址是私网”判断信任，不能证明隔离不标已保护。公网入口为OpenResty HTTPS+Basic，后端端口无公网旁路，支持/v2/、上传大小/分块/Location及pull/push组，DELETE默认关闭，响应代理缓存禁用。Basic和方法组仅提供端点访问控制，不宣称repository级多租户RBAC；强项目隔离用独立仓库应用，后续才考虑token授权。内部HTTP限明确可信链路及精确host:port配置，不全局放弃TLS。
+
+```mermaid
+flowchart TB
+  enable["用户开启 / 选集群与明确机器"] --> regapp["普通仓库应用 / 持久数据"]
+  regapp --> origin["A集群：唯一私库写入源"]
+  regapp --> reader["B集群：只读缓存 / 显式普通副本"]
+  ci["构建机 / 唯一push域名"] --> public["A入口：HTTPS + 网站Basic"]
+  authsets["网站账号组 / 冻结版本"] --> public
+  public --> origin
+  internal["批准的内网来源 / 默认匿名只读"] --> origin
+  origin --> nodea["A节点：固定摘要拉取"]
+  origin -->|同摘要缓存或完整复制| reader
+  reader --> nodeb["B节点：固定摘要拉取"]
+```
+
+### 59.8 网站全站与按路径密码访问
+
+对齐1Panel密码访问：website.spec.auth为off/basic、realm及账号组，location.auth为inherit/off/basic，沿用现有路径匹配，旧网站默认关闭。账号组与平台登录分离，多用户/重置/启停，密码只写，宿主生成受支持bcrypt哈希后加密版本化；发布冻结组revision/material_hash，只经确切网关Agent的有效lease私有载荷分发。受管口令文件与网站配置一体nginx -t、原子切换/reload、匿名401及有效凭据验证，失败保留旧鉴权，不退化公开；旧Agent能力不足拒绝，换机同版本，账号变更逐集群确认生效。
+
+编译器拥有auth_basic及受管用户文件路径，片段不能覆盖；IP规则与密码默认satisfy all。CORS提前return、直接响应/内部跳转、受保护内容缓存或片段不得绕过鉴权，不支持组合拒绝。前置Basic的Authorization默认不传上游，依赖业务Bearer/Basic的冲突明确处理；公网只经TLS接收密码，内部探测不暴露业务旁路。401/403不能误摘后端或网站DNS；账号文件/hash/密码不进入公开预览、日志或AI。仓库模板另有pull/push账号组兼容Docker协议；细节与验收见SDD059 registry-apps.md、website-auth.md。
