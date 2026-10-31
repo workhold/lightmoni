@@ -1,0 +1,48 @@
+{
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tags": {
+    "20261031-8386b5b": "sha256:dea2d3df4284b5ffc7b28df4c6308eeebb4aee8ed4c9adcda63758984eee2605",
+    "latest": "sha256:dea2d3df4284b5ffc7b28df4c6308eeebb4aee8ed4c9adcda63758984eee2605"
+  },
+  "revision": "8386b5ba8763f16221ad3a8b9cf511d5e7a2e644",
+  "docker_pull_verification": [
+    {
+      "platform": "linux/amd64",
+      "image_id": "sha256:40fa500568936840fd061f5a680a011514345f18ad0ff726704736907704435d",
+      "matches_tested_image": true
+    },
+    {
+      "platform": "linux/arm64",
+      "image_id": "sha256:0bd04b5d8ce8513a709db9d75d421060d93ede81977fa6b15c4f114a5aa2de51",
+      "matches_tested_image": true
+    }
+  ],
+  "local_container_checks": {
+    "amd64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "center identity and authenticated internal/public reporting settings",
+      "production bundle contains multi-value bulk DNS actions",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "AI runtime and task tools import"
+    ],
+    "arm64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "center identity and authenticated internal/public reporting settings",
+      "production bundle contains multi-value bulk DNS actions",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "AI runtime and task tools import"
+    ]
+  },
+  "architecture_sync": "not applicable: packaging and publishing unchanged main",
+  "test_resources_cleaned": true
+}
