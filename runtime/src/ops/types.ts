@@ -49,6 +49,26 @@ export interface ResourceDefinition {
   publicSpec?(spec: Record<string, any>): Record<string, any>;
   beforeDelete?(resource: PlatformResource): void;
 }
+export interface PlatformRunEvent {
+  id: string;
+  run_id: string;
+  resource_id: string;
+  sequence: number;
+  phase: string;
+  state: string;
+  created_at: string;
+  domain?: string;
+  attempt?: number;
+  code?: string;
+  message?: string;
+  error_type?: string;
+  http_status?: number;
+  request_id?: string;
+}
+export interface PlatformExecution {
+  run: PlatformRun;
+  done: Promise<PlatformRun>;
+}
 export interface PlatformStore {
   deps: Dependencies;
   jobs: AgentJobStore;
@@ -83,10 +103,21 @@ export interface PlatformStore {
     resource: PlatformResource,
     action: string,
     actor: string,
-    work: () => Promise<Record<string, any>>,
+    work: (runID: string) => Promise<Record<string, any>>,
     idempotencyKey?: string,
     input?: Record<string, any>,
   ): Promise<PlatformRun>;
+  startRun(
+    resource: PlatformResource,
+    action: string,
+    actor: string,
+    work: (runID: string) => Promise<Record<string, any>>,
+    idempotencyKey?: string,
+    input?: Record<string, any>,
+  ): PlatformExecution;
+  addRunEvent(runID: string, phase: string, state: string, detail?: Record<string, any>): void;
+  runEvents(runID: string, after?: number): PlatformRunEvent[];
+  action(runID: string): PlatformRun;
   actions(resourceID?: string): PlatformRun[];
   subscribe(
     listener: (

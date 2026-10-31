@@ -1,0 +1,183 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved": true,
+  "base_seq": 887,
+  "saved_seq": 888,
+  "checks": [
+    {
+      "id": "ops033-body-2",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "ops033-body-3",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "ops033-body-4",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "ops033-body-5",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "lm044-system-body",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "certificate053-title",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "certificate053-paragraph-1",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "certificate053-paragraph-2",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "certificate053-paragraph-3",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "certificate053-paragraph-4",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "certificate053-flow",
+      "seq": 888,
+      "match": true
+    },
+    {
+      "id": "ops033-control-plane-native",
+      "unchanged": true
+    }
+  ],
+  "native_flow": {
+    "id": "certificate053-flow",
+    "nodes": [
+      {
+        "id": "certificate053-create",
+        "label": "管理员新建证书"
+      },
+      {
+        "id": "certificate053-intent",
+        "label": "SQLite 资源与首轮意图"
+      },
+      {
+        "id": "certificate053-start",
+        "label": "后台执行句柄 / 每证书互斥"
+      },
+      {
+        "id": "certificate053-response",
+        "label": "立即返回 201 / 202 与执行 ID"
+      },
+      {
+        "id": "certificate053-acme",
+        "label": "账号 / 订单 / DNS / ACME 验证"
+      },
+      {
+        "id": "certificate053-save",
+        "label": "校验并加密保存证书版本"
+      },
+      {
+        "id": "certificate053-journal",
+        "label": "SQLite 有序安全步骤"
+      },
+      {
+        "id": "certificate053-live",
+        "label": "管理员增量日志 / 每 2 秒"
+      },
+      {
+        "id": "certificate053-outbox",
+        "label": "事务系统日志 outbox"
+      },
+      {
+        "id": "certificate053-clickhouse",
+        "label": "ClickHouse 系统日志"
+      },
+      {
+        "id": "certificate053-restart",
+        "label": "中心重启"
+      },
+      {
+        "id": "certificate053-unknown",
+        "label": "未完成执行 unknown / 不自动重放"
+      }
+    ],
+    "edges": [
+      {
+        "id": "certificate053-edge-1",
+        "source": "certificate053-create",
+        "target": "certificate053-intent"
+      },
+      {
+        "id": "certificate053-edge-2",
+        "source": "certificate053-intent",
+        "target": "certificate053-start"
+      },
+      {
+        "id": "certificate053-edge-3",
+        "source": "certificate053-start",
+        "target": "certificate053-response"
+      },
+      {
+        "id": "certificate053-edge-4",
+        "source": "certificate053-start",
+        "target": "certificate053-acme"
+      },
+      {
+        "id": "certificate053-edge-5",
+        "source": "certificate053-acme",
+        "target": "certificate053-save"
+      },
+      {
+        "id": "certificate053-edge-6",
+        "source": "certificate053-acme",
+        "target": "certificate053-journal"
+      },
+      {
+        "id": "certificate053-edge-7",
+        "source": "certificate053-save",
+        "target": "certificate053-journal"
+      },
+      {
+        "id": "certificate053-edge-8",
+        "source": "certificate053-journal",
+        "target": "certificate053-live"
+      },
+      {
+        "id": "certificate053-edge-9",
+        "source": "certificate053-journal",
+        "target": "certificate053-outbox"
+      },
+      {
+        "id": "certificate053-edge-10",
+        "source": "certificate053-outbox",
+        "target": "certificate053-clickhouse"
+      },
+      {
+        "id": "certificate053-edge-11",
+        "source": "certificate053-restart",
+        "target": "certificate053-unknown"
+      },
+      {
+        "id": "certificate053-edge-12",
+        "source": "certificate053-unknown",
+        "target": "certificate053-journal"
+      }
+    ]
+  },
+  "scope": "Only 5 affected paragraphs changed; appended chapter 53 and a native flowchart. Existing diagram ops033-control-plane-native read back unchanged; all other blocks/diagrams untouched by operations."
+}
