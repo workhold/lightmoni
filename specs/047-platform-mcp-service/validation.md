@@ -37,3 +37,13 @@
 - 本期只把首批能力接入共享 Dispatcher，任务执行索引是原生 task run 的投影；不代表其他领域已全部统一，也不改变 SDK 独立直报或 Agent 控制协议。
 
 链接、锚点、图结构与秘密扫描结果见 [document-checks.json](document-checks.json)。
+
+## 2026-10-31 主干集成复验
+
+本次以 main `0d81f40` 为基线，解决五处冲突；完整保留主干调度、参数/工作目录、并发、队列、自动重试及稳定外部授权继承。修复 MCP 关闭后助手 fallback 可能放行外部提案的问题，缺少任一授权 hook 返回 503 且不排队。移除模板工具，主机观测只读取当前 Agent，执行 review_url 打开主机执行记录。
+
+- runtime 全量 715 项：694 通过、21 跳过、0 失败；相关 132 项全通过，最终 HTTP 拒绝断言追加后相关 37 项全通过。
+- ai-runtime 71/71、TypeScript SDK 22/22 通过。SDK 首次有一个既有 fake-fetch 测试因未引用的 AbortSignal 超时而被取消；仅修正测试计时器、保留 TimeoutError 语义后全部通过，未改 SDK 运行代码。
+- 全仓类型检查、构建、差异检查通过；主干既有依赖版本不升级，合并 lockfile 在隔离目录通过 npm ci dry-run。
+- MCP 页面六组 Mock API 验收通过，页面异常 0；已查看 1440px 管理页、390px 布局截图。它不代表真实客户端 OAuth 联调。
+- [集成证据](integration-validation.json) 与 [UI 报告](evidence/main-integration/report.json) 记录实际范围。上述 seq 806→807 为此前实现的历史同步，不能代表本次已同步；本次 Doca 由主代理合并 #21 后局部更新并回读，完成前保留待办。

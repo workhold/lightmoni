@@ -1,0 +1,18 @@
+{
+  "checked": [
+    "zh-CN: one selected host uses the shared toolbar and target snapshot; review, close, and Escape cannot send an unconfirmed DELETE",
+    "zh-CN: active credentials and pending deployment/removal records block deletion before confirmation with localized explanations",
+    "zh-CN: server lifecycle and authorization rejections remain in the per-host results and preserve both host rows",
+    "zh-CN: reopening after failure and repeated synchronous confirmation send one DELETE, keep the result visible, and remove only the selected host",
+    "en-US: one selected host uses the shared toolbar and target snapshot; review, close, and Escape cannot send an unconfirmed DELETE",
+    "en-US: active credentials and pending deployment/removal records block deletion before confirmation with localized explanations",
+    "en-US: server lifecycle and authorization rejections remain in the per-host results and preserve both host rows",
+    "en-US: reopening after failure and repeated synchronous confirmation send one DELETE, keep the result visible, and remove only the selected host",
+    "Deleting alpha leaves beta details intact when its in-flight read finishes during deletion",
+    "A late detail response for a deleted host cannot reopen its stale dialog",
+    "A successful DELETE removes its row immediately even when the following list refresh fails",
+    "A stale list response arriving after deletion cannot restore the deleted row"
+  ],
+  "errors": [],
+  "unexpected": []
+}

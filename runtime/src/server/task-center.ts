@@ -2,9 +2,10 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
 import { NodeError, NodeStore, type Task } from "./nodes-model.js";
+import { nextTaskDates, normalizeTaskSchedule, normalizeTaskPolicy, SCHEDULE_GRACE_MS } from "./task-schedule.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import { assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
-import { SCRIPT_TASK_CAPABILITY, TASK_LEASE_SECONDS, validateTaskScript,
+import { SCRIPT_TASK_CAPABILITIES, supportsTaskScript, TASK_LEASE_SECONDS, validateTaskScript,
   type ClaimedTaskRun, type TaskRun, type TaskRunResult, type TaskRunSnapshot } from "../shared/task-center.js";
 
 const terminal = (s: string) => ["succeeded", "failed", "cancelled", "unknown"].includes(s);
@@ -25,9 +26,12 @@ const confirm = (v: Record<string, any>) => { if (v.confirm !== true) fail(400, 
 /** Finite script jobs deliberately do not share deployment health-verification states. */
 export class TaskRunStore {
   readonly nodes: NodeStore;
-  /** Rechecks a persisted external grant immediately before a queued run starts. */
+  /** External authorization adapters recheck stable grants here; missing guards fail closed. */
   beforeStart?: (run: {id:string;host_id:string;requested_by:string}) => boolean;
+  private lastScheduleTick?: number;
+  private readonly schedulerStartedAt: number;
   constructor(readonly deps: Dependencies, readonly credentials?: AgentCredentialStore) {
+    this.schedulerStartedAt = deps.now().getTime();
     this.nodes = new NodeStore(deps.db, deps.now);
     deps.db.exec(`CREATE TABLE IF NOT EXISTS task_runs(
       id TEXT PRIMARY KEY,task_id TEXT NOT NULL,host_id TEXT NOT NULL,agent_id TEXT NOT NULL,
@@ -41,10 +45,15 @@ export class TaskRunStore {
       UNIQUE(task_id,host_id,request_id));
       CREATE INDEX IF NOT EXISTS task_runs_agent_state ON task_runs(agent_id,state,created_at);
       CREATE INDEX IF NOT EXISTS task_runs_host_state ON task_runs(host_id,state);
-      CREATE TABLE IF NOT EXISTS task_schedules(task_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,next_due TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS task_schedules(task_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,next_due TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS task_schedule_consumptions(task_id TEXT NOT NULL,run_at TEXT NOT NULL,consumed_at TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(task_id,run_at));`);
     const columns = new Set(deps.db.all<{name:string}>("PRAGMA table_info(task_runs)").map(row => row.name));
     for (const name of ["resolved_at", "resolved_by", "resolution_reason"])
       if (!columns.has(name)) deps.db.exec(`ALTER TABLE task_runs ADD COLUMN ${name} TEXT NOT NULL DEFAULT ''`);
+    if (!columns.has("automatic_attempt")) deps.db.exec("ALTER TABLE task_runs ADD COLUMN automatic_attempt INTEGER NOT NULL DEFAULT 0");
+    // Historical failed runs predate retry consent and must never start retrying after upgrade.
+    if (!columns.has("auto_retry_closed")) deps.db.exec("ALTER TABLE task_runs ADD COLUMN auto_retry_closed INTEGER NOT NULL DEFAULT 1");
+    deps.db.exec("CREATE INDEX IF NOT EXISTS task_runs_retry_scan ON task_runs(state,auto_retry_closed,finished_at)");
   }
   private now() { return this.deps.now().toISOString(); }
   private row(id: string): any {
@@ -57,6 +66,7 @@ export class TaskRunStore {
     return { id: r.id, task_id: r.task_id, task_name: snapshot.task_name,
       host_id: r.host_id, host_name: snapshot.host_name, agent_id: r.agent_id,
       state: r.state, trigger: r.trigger, retry_of: r.retry_of, superseded_by: r.superseded_by,
+      automatic_attempt: r.automatic_attempt,
       resolved_at: r.resolved_at, resolved_by: r.resolved_by, resolution_reason: r.resolution_reason,
       requested_by: r.requested_by, created_at: r.created_at, started_at: r.started_at,
       finished_at: r.finished_at, lease_expires_at: r.lease_expires_at,
@@ -96,19 +106,21 @@ export class TaskRunStore {
   private active(taskID: string, hostID: string, includeUnknown = true) {
     return this.deps.db.get<any>("SELECT id,state FROM task_runs WHERE task_id=? AND host_id=? AND (state IN ('queued','running')" + (includeUnknown ? " OR (state='unknown' AND superseded_by='' AND resolved_at='')" : "") + ") ORDER BY created_at DESC LIMIT 1", taskID, hostID);
   }
-  private insert(task: Task, hostID: string, trigger: "manual" | "schedule" | "retry", actor: string, requestID: string, retryOf = ""): TaskRun {
+  private insert(task: Task, hostID: string, trigger: "manual" | "schedule" | "retry", actor: string, requestID: string, retryOf = "", previousSnapshot?: TaskRunSnapshot, automaticAttempt = 0): TaskRun {
     const existing = this.deps.db.get<any>("SELECT * FROM task_runs WHERE task_id=? AND host_id=? AND request_id=?", task.id, hostID, requestID);
     if (existing) return this.view(existing);
     const h = this.host(hostID);
     if (!h.agent_id || !this.validBinding(h.id, h.agent_id)) fail(409, "host requires an active enrolled Agent");
-    if (this.active(task.id, h.id, trigger !== "retry")) fail(409, "task already queued, running, or unresolved; explicitly retry an unknown run after review");
+    if (this.active(task.id, h.id, automaticAttempt > 0 || trigger !== "retry")) fail(409, "task already queued, running, or unresolved; explicitly retry an unknown run after review");
     validateTaskScript(task.script);
-    const snapshot: TaskRunSnapshot = { task_id: task.id, task_name: task.name,
-      host_id: h.id, host_name: h.name, agent_id: h.agent_id, script: structuredClone(task.script) };
+    const policy = normalizeTaskPolicy(task.execution_policy);
+    const snapshot: TaskRunSnapshot = previousSnapshot ? structuredClone(previousSnapshot) : { task_id: task.id, task_name: task.name,
+      host_id: h.id, host_name: h.name, agent_id: h.agent_id, script: structuredClone(task.script), task_revision:task.revision,
+      execution_policy:policy };
     const id = randomUUID(), at = this.now();
-    this.deps.db.run("INSERT INTO task_runs(id,task_id,host_id,agent_id,snapshot_json,state,trigger,retry_of,request_id,requested_by,created_at,expires_at) VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?)",
+    this.deps.db.run("INSERT INTO task_runs(id,task_id,host_id,agent_id,snapshot_json,state,trigger,retry_of,request_id,requested_by,created_at,expires_at,automatic_attempt,auto_retry_closed) VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?,0)",
       id, task.id, h.id, h.agent_id, JSON.stringify(snapshot), trigger, retryOf, requestID, actor, at,
-      new Date(this.deps.now().getTime() + 86400_000).toISOString());
+      new Date(this.deps.now().getTime() + policy.queue_timeout_seconds * 1000).toISOString(), automaticAttempt);
     return this.view(this.row(id));
   }
   dispatch(taskID: string, input: Record<string, any>, actor: string, inTransaction = false): { runs: TaskRun[] } {
@@ -185,23 +197,31 @@ export class TaskRunStore {
   claim(agentID: string, capabilities: string[]): ClaimedTaskRun | null {
     this.sweep(); assertAgentActive(this.deps.db, agentID, 401);
     if (!Array.isArray(capabilities) || capabilities.length > 32 || capabilities.some(x => typeof x !== "string")) fail(400, "invalid task capabilities");
-    if (!capabilities.includes(SCRIPT_TASK_CAPABILITY)) return null;
+    if (!capabilities.some(c => (SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(c))) return null;
     return this.deps.db.transaction(() => {
       if (this.deps.db.get("SELECT id FROM task_runs WHERE agent_id=? AND state='running'", agentID)) return null;
       const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE agent_id=? AND state='queued' ORDER BY created_at,rowid LIMIT 200", agentID);
       for (const r of pending) {
-        const external = this.deps.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='capability_run_authorizations'")
-          && this.deps.db.get("SELECT 1 FROM capability_run_authorizations WHERE run_id=?", r.id);
-        if (external && (!this.beforeStart || !this.beforeStart(r))) {
+        if (!this.authorizationValid(r)) {
           this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='authorization_revoked',summary='External authorization is no longer valid before Agent claim' WHERE id=? AND state='queued'", this.now(), r.id);
           continue;
         }
-        try { this.eligible(r.task_id, r.host_id); } catch (error) {
+        const snapshot = JSON.parse(r.snapshot_json) as TaskRunSnapshot;
+        let currentTask: Task;
+        try { currentTask = this.eligible(r.task_id, r.host_id); } catch (error) {
           if (!(error instanceof NodeError || error instanceof HTTPError)) throw error;
           this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='task_no_longer_eligible',summary='Task disabled, removed, or target changed before claim' WHERE id=?", this.now(), r.id);
           continue;
         }
+        if (r.automatic_attempt > 0 && currentTask.revision !== snapshot.task_revision) {
+          this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='task_revision_changed',summary='Task changed after automatic retry was queued' WHERE id=? AND state='queued'", this.now(), r.id);
+          continue;
+        }
         if (!this.validBinding(r.host_id, agentID)) continue;
+        if (!supportsTaskScript(capabilities,snapshot.script)) continue;
+        const policy = normalizeTaskPolicy(snapshot.execution_policy);
+        const running = this.deps.db.get<{n:number}>("SELECT count(*) AS n FROM task_runs WHERE task_id=? AND state='running'", r.task_id)!.n;
+        if (running >= policy.max_concurrency) continue;
         const secret = randomBytes(32).toString("hex");
         const expires = new Date(this.deps.now().getTime() + TASK_LEASE_SECONDS * 1000).toISOString();
         this.deps.db.run("UPDATE task_runs SET state='running',started_at=?,lease_hash=?,lease_expires_at=? WHERE id=? AND state='queued'", this.now(), sha(secret), expires, r.id);
@@ -241,7 +261,7 @@ export class TaskRunStore {
     return this.deps.db.transaction(() => {
       const r = this.leased(agentID, id, input.lease_token);
       if (terminal(r.state)) return this.view(r);
-      const s = JSON.parse(r.snapshot_json).script;
+      const snapshot = JSON.parse(r.snapshot_json) as TaskRunSnapshot, s = snapshot.script;
       const value = input as TaskRunResult;
       if (!["succeeded", "failed", "cancelled", "unknown"].includes(value.state)
         || typeof value.code !== "string" || Buffer.byteLength(value.code) > 128
@@ -251,36 +271,89 @@ export class TaskRunStore {
         || !(value.exit_code == null || Number.isInteger(value.exit_code) && Math.abs(value.exit_code) <= 255)
         || value.state === "succeeded" && value.exit_code !== 0) fail(400, "invalid or oversized task run result");
       if (value.state === "cancelled" && !r.cancel_requested) fail(409, "cancellation was not requested");
-      this.deps.db.run("UPDATE task_runs SET state=?,finished_at=?,code=?,summary=?,stdout=?,stderr=?,exit_code=? WHERE id=? AND state='running'",
-        value.state, this.now(), value.code, value.summary, value.stdout, value.stderr, value.exit_code, id);
+      const retryAuthorized = value.state === "failed" && !r.cancel_requested && !!snapshot.task_revision
+        && ["script_failed", "runtime_unavailable", "timeout", "output_limit"].includes(value.code)
+        && r.automatic_attempt < normalizeTaskPolicy(snapshot.execution_policy).retry_count;
+      this.deps.db.run("UPDATE task_runs SET state=?,finished_at=?,code=?,summary=?,stdout=?,stderr=?,exit_code=?,auto_retry_closed=? WHERE id=? AND state='running'",
+        value.state, this.now(), value.code, value.summary, value.stdout, value.stderr, value.exit_code, retryAuthorized ? 0 : 1, id);
       return this.view(this.row(id));
+    });
+  }
+  private externalAuthorization(runID: string): boolean {
+    return !!this.deps.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='capability_run_authorizations'")
+      && !!this.deps.db.get("SELECT 1 FROM capability_run_authorizations WHERE run_id=?", runID);
+  }
+  private authorizationValid(run: {id:string;host_id:string;requested_by:string}): boolean {
+    if (!this.externalAuthorization(run.id)) return true;
+    if (!this.beforeStart) return false;
+    try { return this.beforeStart(run); } catch { return false; }
+  }
+  private automaticRetries() {
+    // Filter due, consented attempts before the bounded batch. Long-delay failures
+    // must not starve a later task whose short retry delay has already elapsed.
+    const candidates = this.deps.db.all<{id:string}>(`SELECT id FROM task_runs WHERE state='failed' AND superseded_by='' AND auto_retry_closed=0
+      AND automatic_attempt < COALESCE(json_extract(snapshot_json,'$.execution_policy.retry_count'),0)
+      AND code IN ('script_failed','runtime_unavailable','timeout','output_limit')
+      AND strftime('%Y-%m-%dT%H:%M:%fZ',finished_at,'+' || COALESCE(json_extract(snapshot_json,'$.execution_policy.retry_delay_seconds'),60) || ' seconds') <= ?
+      ORDER BY finished_at,rowid LIMIT 200`, this.now());
+    for (const candidate of candidates) this.deps.db.transaction(() => {
+      const r = this.row(candidate.id);
+      if (r.state !== "failed" || r.superseded_by || r.auto_retry_closed) return;
+      const snapshot = JSON.parse(r.snapshot_json) as TaskRunSnapshot;
+      const policy = normalizeTaskPolicy(snapshot.execution_policy);
+      const close = () => this.deps.db.run("UPDATE task_runs SET auto_retry_closed=1 WHERE id=?", r.id);
+      if (!snapshot.task_revision || r.automatic_attempt >= policy.retry_count || r.cancel_requested
+        || !["script_failed", "runtime_unavailable", "timeout", "output_limit"].includes(r.code)) { close(); return; }
+      const due = Date.parse(r.finished_at) + policy.retry_delay_seconds * 1000;
+      if (this.deps.now().getTime() < due) return;
+      if (this.deps.now().getTime() >= due + policy.queue_timeout_seconds * 1000 || !this.authorizationValid(r)) { close(); return; }
+      let task: Task;
+      try { task = this.eligible(r.task_id, r.host_id); }
+      catch (error) { if (!(error instanceof NodeError || error instanceof HTTPError)) throw error; close(); return; }
+      if (task.revision !== snapshot.task_revision || this.host(r.host_id).agent_id !== r.agent_id
+        || !this.validBinding(r.host_id,r.agent_id) || this.active(r.task_id,r.host_id)) { close(); return; }
+      const next = this.insert(task, r.host_id, "retry", r.requested_by, "auto-retry:" + r.id, r.id, snapshot, r.automatic_attempt + 1);
+      if (this.externalAuthorization(r.id)) this.deps.db.run("INSERT INTO capability_run_authorizations(run_id,grant_id,user_id,host_id) SELECT ?,grant_id,user_id,host_id FROM capability_run_authorizations WHERE run_id=?", next.id, r.id);
+      this.deps.db.run("UPDATE task_runs SET superseded_by=?,auto_retry_closed=1 WHERE id=?", next.id, r.id);
     });
   }
   tick() {
     this.sweep();
-    for (const candidate of this.nodes.tasks().filter(t => t.type === "script" && t.schedule.mode === "interval")) {
+    this.automaticRetries();
+    const at = this.deps.now(), restarted = this.lastScheduleTick === undefined;
+    this.lastScheduleTick = at.getTime();
+    for (const candidate of this.nodes.tasks().filter(t => t.type === "script" && ["interval", "cron", "at"].includes(t.schedule.mode))) {
       this.deps.db.transaction(() => {
-        // Another centre writer can edit a definition after the outer scan.
-        // Re-read under the writer lock before deciding whether it is due.
+        // Re-read under the writer lock so stale scans cannot authorize changed definitions.
         const t = this.nodes.getTask(candidate.id);
-        if (t.type !== "script" || t.schedule.mode !== "interval") return;
-        const seconds = t.schedule.interval_seconds!;
-        if (!Number.isInteger(seconds) || seconds < 10 || seconds > 2_592_000) return;
-        const fingerprint = sha(JSON.stringify(t));
-        const at = this.deps.now(), next = new Date(at.getTime() + seconds * 1000).toISOString();
+        if (t.type !== "script" || !["interval", "cron", "at"].includes(t.schedule.mode)) return;
+        const fingerprint = t.revision!;
         const old = this.deps.db.get<any>("SELECT * FROM task_schedules WHERE task_id=?", t.id);
-        if (!t.enabled || !old || old.fingerprint !== fingerprint) {
-          this.deps.db.run("INSERT INTO task_schedules(task_id,fingerprint,next_due) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET fingerprint=excluded.fingerprint,next_due=excluded.next_due", t.id, fingerprint, next);
-          return;
+        const save = (due: string) => this.deps.db.run("INSERT INTO task_schedules(task_id,fingerprint,next_due) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET fingerprint=excluded.fingerprint,next_due=excluded.next_due", t.id, fingerprint, due);
+        let due: string;
+        if (t.schedule.mode === "at") {
+          due = t.schedule.run_at!;
+          if (this.deps.db.get("SELECT 1 FROM task_schedule_consumptions WHERE task_id=? AND run_at=?", t.id, due)) return;
+          if (due > at.toISOString()) { save(due); return; }
+          const ready = t.enabled && old?.fingerprint === fingerprint && old.next_due === due
+            && at.getTime() - Date.parse(due) <= SCHEDULE_GRACE_MS && !(restarted && Date.parse(due) < this.schedulerStartedAt);
+          this.deps.db.run("INSERT INTO task_schedule_consumptions(task_id,run_at,consumed_at,outcome) VALUES(?,?,?,?)", t.id, due, at.toISOString(), ready ? "dispatched" : "missed");
+          save("");
+          if (!ready) return;
+        } else {
+          const next = nextTaskDates(t.schedule, at, 1)[0];
+          if (!t.enabled || !old || old.fingerprint !== fingerprint || !old.next_due) { save(next); return; }
+          due = old.next_due;
+          if (due > at.toISOString()) return;
+          // Advance to a future slot before dispatch; no historical catch-up or restart replay.
+          save(next);
+          if (at.getTime() - Date.parse(due) > SCHEDULE_GRACE_MS || restarted && Date.parse(due) < this.schedulerStartedAt) return;
         }
-        if (old.next_due > at.toISOString()) return;
-        // Move directly to the next future slot, never replay missed periods.
-        this.deps.db.run("UPDATE task_schedules SET next_due=? WHERE task_id=?", next, t.id);
-        const hosts = this.deps.db.all<{ id: string; agent_id: string }>("SELECT id,agent_id FROM managed_machines WHERE agent_id<>'' ORDER BY id");
+        const hosts = this.deps.db.all<{id:string;agent_id:string}>("SELECT id,agent_id FROM managed_machines WHERE agent_id<>'' ORDER BY id");
         for (const h of hosts) {
-          if (!this.validBinding(h.id, h.agent_id) || this.active(t.id, h.id)) continue;
+          if (!this.validBinding(h.id,h.agent_id) || this.active(t.id,h.id)) continue;
           const effective = this.nodes.effectiveHostTasks(h.id).find(v => v.id === t.id && v.enabled && v.status !== "upgrade_required");
-          if (effective) this.insert(effective, h.id, "schedule", "scheduler", "schedule:" + old.next_due);
+          if (effective) this.insert(effective,h.id,"schedule","scheduler","schedule:" + due);
         }
       });
     }
@@ -302,6 +375,14 @@ export function registerTaskCenter(deps: Dependencies, options: { agentCredentia
     options.agentCredentials.authenticate(ctx.req, ctx.params.id, "control");
     assertAgentActive(deps.db, ctx.params.id, 401);
   };
+  deps.router.post("/api/v1/task-schedules/preview", safe(async ctx => {
+    admin(ctx); const value = await input(ctx); fields(value, ["schedule"]);
+    try {
+      const type = value.schedule?.mode === "continuous" ? "host" : "script";
+      const schedule = normalizeTaskSchedule(value.schedule, type);
+      ctx.json({schedule, next_runs:nextTaskDates(schedule,deps.now(),5), timezone:schedule.timezone ?? "UTC"});
+    } catch (error) { fail(400, (error as Error).message); }
+  }));
   deps.router.get("/api/v1/task-runs", safe(ctx => {
     const q = ctx.url.searchParams;
     ctx.json(store.list({ task_id: q.get("task_id") ?? undefined, host_id: q.get("host_id") ?? undefined,

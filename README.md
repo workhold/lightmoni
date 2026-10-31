@@ -2,7 +2,7 @@
 
 [GitHub 仓库](https://github.com/workhold/lightmoni) · [问题反馈](https://github.com/workhold/lightmoni/issues) · [贡献指南](CONTRIBUTING.md) · [安全反馈](SECURITY.md)
 
-面向个人和小团队的一体化监控工作台。Node.js / TypeScript主服务提供React界面，SQLite保存管理数据，ClickHouse保存遥测。业务接入提供多语言 record SDK；当前发布与 deferred 矩阵以 `/api/v1/sdk-install`、发布脚本和 [SDD 012](specs/012-sdk-reporting-choice/spec.md) 为准，支持直连中心或由独立 LightMoni Agent 持久化转发。
+面向个人和小团队的一体化监控工作台。Node.js / TypeScript主服务提供React界面，SQLite保存管理数据，ClickHouse保存遥测。业务接入提供多语言 record SDK；当前发布与 deferred 矩阵以 `/api/v1/sdk-install`、发布脚本和 [SDD 012](specs/012-sdk-reporting-choice/spec.md) 为准，业务SDK仅直连中心，SDK与Agent各自支持中心内网优先、公网备用。
 
 > **完整系统设计入口**：[LightMoni 系统设计基线](docs/system-design.md)
 >
@@ -12,11 +12,13 @@
 
 中心与LightMoni Agent均由Node.js / TypeScript实现，公共协议位于`runtime/src/shared`。SDK和中心上报采用本地通用打点与固定窗口方案，主机管理、SSH终端、Agent注册和control/data凭据、AI助手、告警与界面语言采用最新main；本次取舍见[整合说明](specs/011-aligned-metric-windows/main-integration.md)。
 
+任务中心支持上传或编写脚本、选择主机及日历执行计划；用法与执行边界见 [脚本任务创建与调度](docs/task-authoring.md)，默认任务设计见 [SDD 049](specs/049-platform-default-tasks/spec.md)。
+
 没有项目或租户概念。SDK有效启用密钥可写任意业务表，按名称创建，不绑定service或table。缺失Authorization只允许启用的豁免表，无效密钥不降级。初始化填写service/env，`record(table,metric_name,dimensions,value,count)`按调用选择业务表和指标，key1…key16为固定维度槽。每表单选10秒、30秒（默认）、1分钟、5分钟、10分钟、30分钟、1小时，查询步长须为实际窗口的整数倍。
 
 ## Docker Compose 部署
 
-根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像默认为 `docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。中心以非 root 用户运行。
+根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261031-8386b5b`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。镜像版本由仓库维护，无需在 `.env` 指定；旧 `LIGHTMONI_IMAGE` 值不再覆盖它。中心以非 root 用户运行。
 
 首次获取源码：
 
@@ -25,7 +27,7 @@ git clone https://github.com/workhold/lightmoni.git
 cd lightmoni
 ```
 
-现有预构建镜像仍由 `docker.heyphp.com` 提供，需要该注册表的访问权限；GitHub 源码公开不代表已提供公开镜像。没有镜像仓库权限时，可在完成 `.env` 配置后按下文的源码构建步骤运行。已有部署继续沿用原镜像、项目名和数据卷。
+现有预构建镜像仍由 `docker.heyphp.com` 提供，需要该注册表的访问权限；GitHub 源码公开不代表已提供公开镜像。没有镜像仓库权限时，可在完成 `.env` 配置后按下文的源码构建步骤运行。已有部署继续沿用原项目名、数据库配置和数据卷。
 
 ```sh
 cp .env.example .env
@@ -40,7 +42,6 @@ docker compose pull
 | 配置项 | 默认值 | 用途 |
 | --- | --- | --- |
 | `COMPOSE_PROJECT_NAME` | `lightmoni` | 项目名；已有实例沿用原值以匹配数据卷 |
-| `LIGHTMONI_IMAGE` | `docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880` | 中心镜像 |
 | `LIGHTMONI_BIND_ADDRESS` | `0.0.0.0` | 宿主机监听地址；仅本机反向代理访问可设为 `127.0.0.1` |
 | `LIGHTMONI_PORT` | `8080` | 宿主机 HTTP 端口，映射到容器固定端口 8080 |
 | `LIGHTMONI_EXTERNAL_URL` | `http://localhost:8080` | 用户实际访问地址，用于默认上报地址、登录回调和通知链接 |
@@ -80,7 +81,7 @@ docker compose exec lightmoni lightmoni-admin reset-password --name admin
 
 使用 Nginx 时，将 `LIGHTMONI_EXTERNAL_URL` 设为浏览器访问的 HTTPS 域名；如只允许宿主机反向代理访问，设置 `LIGHTMONI_BIND_ADDRESS=127.0.0.1`。SDK/节点默认上报地址初始使用工作台地址，也可在“管理后台 → 接入配置”保存多个入口。`sh deploy/server/start.sh` 使用根配置拉取并启动。原 [deploy/with-clickhouse](deploy/with-clickhouse/README.md) 入口继续兼容，两个服务统一继承根配置；沿用原项目名、`.env` 和卷名。
 
-更新时，在 `.env` 中设置所需固定 `LIGHTMONI_IMAGE`，执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`。仓库也提供 `latest`；生产部署建议固定标签或 digest。发布仓库需要鉴权时先执行 `docker login docker.heyphp.com`。源码构建则填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD` 的结果，并显式执行：
+更新时先执行 `git pull --ff-only origin main`，获取仓库维护的镜像版本，再执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`，无需修改 `.env` 的镜像设置。仓库也提供 `latest`；根 Compose 使用固定发布标签。数据库密码、端口和项目名仍通过 `.env` 配置。发布仓库需要鉴权时先执行 `docker login docker.heyphp.com`；指定历史版本的回滚方法见 [Docker 更新与回滚](deploy/server/README.md#回滚与已有临时配置迁移)。源码构建则填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD` 的结果，并显式执行：
 
 ```sh
 docker compose build lightmoni
@@ -103,27 +104,31 @@ docker compose up -d --no-build --pull never --wait
 
 软件统一称 **LightMoni Agent**，是登记主机上的管理通道；内部采集指标和日志的模块称采集器，网页对话能力称“AI 助手”。用户从“主机管理”统一查看主机资产、Agent 通道、任务中心与主机标签。Agent 执行内置采集、拨测、日志任务，以及管理员审阅授权的运维任务和有限脚本，不持有模型 Key。
 
-接入只有一条路径：**登记主机与 SSH 登录信息 → SSH 预检（自动记录主机公钥） → 审阅确认 → 平台部署 Agent**。登记弹窗同屏填写名称、地址、端口、用户名、登录密码或 SSH 私钥及保存时长，默认密码登录、保存 6 小时；也可只登记主机、稍后补充凭据。主机 ID 由平台生成、不可修改。主机公钥与指纹无需填写或确认，首次 SSH 握手自动记录，在详情只读展示，后续连接自动比对；指纹、主机 ID 和名称不随登录凭据到期而删除。详见 [自动主机身份](specs/040-automatic-ssh-host-identity/spec.md)。
+接入只有一条路径：**登记主机与 SSH 登录信息 → SSH 预检（自动记录主机公钥、发现网卡地址） → 审阅确认 → 平台部署 Agent**。登记弹窗同屏填写名称、SSH 连接地址、端口、用户名、登录密码或 SSH 私钥及保存时长，默认密码登录、保存 6 小时；也可只登记主机、稍后补充凭据。SSH 连接地址首次由用户提供，平台不会从私钥或浏览器所在电脑猜测远端地址。主机 ID 由平台生成、不可修改。主机公钥与指纹无需填写或确认，首次 SSH 握手自动记录，在详情只读展示，后续连接自动比对；指纹、主机 ID 和名称不随登录凭据到期而删除。详见 [自动主机身份](specs/040-automatic-ssh-host-identity/spec.md)。
 
 有限期登录凭据到期或撤销后清除；明确选择并确认“永久保存”时没有固定过期时间，直到主动撤销。两种保存方式均加密存储，Agent 激活不会提前清除；建议优先短期保存，使用结束后撤销。登记和凭据保存仍不会执行 SSH；凭据保存失败可在同一表单重试，使用已登记主机 ID，不重复创建主机。保存策略见 [SDD 039](specs/039-host-registration-credential-retention/spec.md)。
+
+“运维工具 → 连接凭据”集中管理 SSH 私钥和密码，登记主机可选已有凭据或手动新增。主机绑定默认凭据后，终端、检查和安装/卸载自动使用；同一私钥按真实公钥指纹去重复用。主机解绑只影响该主机，全局撤销影响所有关联主机，秘密不回显。详见 [SDD 050](specs/050-connection-credentials-host-addresses/spec.md)。
+
+主机栏同时展示 SSH 连接地址、SSH 预检或 Agent 发现的内网 IP 与其他网卡 IP、平台观测来源 IP，支持多网卡和 IPv6，并标明网卡采集来源与时间。SSH 网络发现是独立的只读步骤，缺少网卡工具不会改变核心安装检查结果。发现地址不改写 SSH 连接地址，IP 变化也不改变主机 ID。平台观测来源只表示 Agent 到平台的这条连接，可能是内网、NAT 或代理地址，不代表公网入口或其他连接的出口；反向代理需显式配置 `LIGHTMONI_TRUSTED_PROXIES` 的代理 IP/CIDR，才会采用可信转发链。设计与边界见 [系统设计 13.6–13.7](docs/system-design.md#136-集中连接凭据与主机默认绑定sdd-050) 与 [SDD 051](specs/051-ssh-host-network-discovery/spec.md)。
 
 enrollment 由平台内部签发并预绑定该主机，安装器通过 SSH stdin 接收，不进入 URL、命令参数、环境变量或 AI 上下文。兑换、激活、注册和心跳使用预约与独立 control/data 凭据核验，注册不会创建第二台主机；没有独立 token 签发、用户手动安装和手工主机关联入口。旧无主机预约身份和共享 SDK Key 不再兼容控制面，不自动迁移或删除历史数据。完整流程见 [Agent 部署与恢复](docs/agent-deployment.md) 和 [SDD 038](specs/038-registered-host-agent-onboarding/spec.md)。
 
 Agent 在宿主机以独立 systemd 服务运行，生命周期与业务服务分开。Linux amd64/arm64 包自带 Node 24.15.0，要求 glibc ≥ 2.28，无需另装 Node/npm；安装器验证 SHA256。持久目录保存身份、队列和日志游标，不应复制到另一台主机。主机管理首装拒绝覆盖已有安装，升级/回滚能力的验证边界见部署文档。
 
-SDK 默认独立直报中心，安装 Agent 不是 SDK 的前置条件。现有本地 Agent OTLP 接收能力可显式使用，SDK 使用本地 token，Agent 保存自己的上游 data 凭据；SDK 与主机资产无隐式绑定，不创建主机 ID/名称环境变量。Agent 可使用相同公开 TypeScript SDK 为自身打点，业务服务启停不会影响 Agent。两种上报路径的配置与边界见 [SDK 接入](sdk/README.md#选择上报方式)。
+SDK仅独立直报中心，安装Agent不是前置条件。Agent只将自身采集和任务数据通过内部持久队列上报，不提供SDK接收与配置代理。SDK与主机资产无隐式绑定；Agent内嵌同一SDK通过进程内exporter打点，业务启停不影响Agent。详见[SDK接入](sdk/README.md#中心地址与自动同步)。
 
 “SDK接入”保留“SDK样例 / SDK密钥 / 豁免表”。“管理后台 → 接入凭据”展示 SDK 上报密钥、平台部署产生的 Agent 接入会话和节点凭据；安装会话仅查看状态/撤销，创建操作统一从主机管理发起。独立 control 用于心跳/配置，data 用于遥测，不交给业务 SDK。节点凭据只展示用途、状态和时间，撤销影响该节点对应用途的全部未撤销凭据；SDK Key 不授予 Agent 控制权。数据目录和保留时长位于“数据管理”，图表模板位于“监控大盘”。
 
-任务中心提供指标采集、服务拨测和目录日志模板，也可创建 Node.js／POSIX shell 脚本任务。新平台默认启用面向所有登记主机的指标与拨测任务；未配置目标的拨测显示“待配置”。用户可修改参数、停用或从模板创建任务，以全部主机、主机 ID 或主机标签指定目标；主机可覆盖启用状态和采集参数。主机标签属于主机 ID，无 Agent 也可编辑，卸载、重装后保留。配置冲突整体拒绝并保留原有效配置。
+任务中心统一展示平台默认任务与用户任务。平台自带指标采集、服务拨测和目录日志三条默认任务，Agent 接入后自动获取适用任务；缺少地址的拨测、缺少目录的日志显示“待配置”。默认任务可编辑和停用；新建直接编写或上传 Node.js／POSIX shell 脚本，以全部主机、主机 ID 或主机标签指定目标；主机可覆盖启用状态和采集参数。主机标签属于主机 ID，无 Agent 也可编辑，卸载、重装后保留。配置冲突整体拒绝并保留原有效配置。
 
-脚本支持立即派发和固定间隔，执行记录保留代码快照、状态和有限输出，支持取消、审阅当前定义后重试及人工核对未知执行。脚本以 Agent 用户权限执行，有超时和输出限制；旧 Agent 需要升级才有脚本能力。AI 只能查询和生成提案，由用户在任务中心明确批准。完整控制协议与边界见 [系统设计第 27 节](docs/system-design.md#27-任务中心与主机标签sdd-043) 和 [SDD 043](specs/043-task-center/spec.md)。
+脚本可上传或直接编写，支持手动、指定时间一次、固定间隔和带时区的日历计划。执行记录保留代码快照、状态和有限输出，支持取消、审阅当前定义后重试及人工核对未知执行。脚本以 Agent 用户权限执行，有超时和输出限制；非空参数或自定义工作目录要求 Agent task.script.v2。AI 只能查询和生成提案，由用户在任务中心明确批准。完整控制协议与边界见 [系统设计第 27 节](docs/system-design.md#27-任务中心与主机标签sdd-043) 和 [SDD 043](specs/043-task-center/spec.md)。
 
 目录日志填写绝对目录、文件匹配规则（默认 `*.log*`）、是否包含子目录和首次从头读取。默认只采集现有文件后续新增的行，之后新建文件完整采集；读取进度与队列批次一起提交，支持重启续读、重命名轮转和截断检测。要求服务用户可读目录，采集 UTF-8 文本行，跳过压缩文件和符号链接；单行超过 64 KiB 分片，未结束的短行等待换行。事件时间使用采集时间，保留文件路径和字节位置。每个执行节点最多同时打开 256 个日志文件，每个目录单次扫描最多 10,000 个条目，超限会显示采集错误。源文件在采集前已删除或覆盖的内容无法恢复。
 
-“SDK接入”生成四语言通用record样例。初始化必填service/env，地址与密钥可使用LIGHTMONI_ENDPOINT/LIGHTMONI_KEY；可选service_version/instance_id，实例标识默认自动生成。同一客户端可记录多个表和指标。直连使用中心地址与SDK密钥；经Agent时使用Agent接收地址及其可选本地token，Agent独立保存上游data凭据。业务SDK退出前调用有截止时间的shutdown，Agent继续补传。容器通过environment/Secret注入配置，使用容器可达的地址，Docker Desktop可用host.docker.internal。
+“SDK接入”生成四语言通用record样例。初始化必填service/env，地址与密钥可使用LIGHTMONI_ENDPOINT/LIGHTMONI_KEY；可选service_version/instance_id，实例标识默认自动生成。同一客户端可记录多个表和指标。SDK仅使用中心公网引导地址和SDK密钥；运行时同步内网地址。业务SDK退出前调用有截止时间的shutdown，Agent独立补传自身采集数据。容器通过environment/Secret注入配置，使用容器可达的地址，Docker Desktop可用host.docker.internal。
 
-管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址并选择默认项，例如“公网”和“内网”；SDK 示例可选择可达入口，未配置时使用 `LIGHTMONI_EXTERNAL_URL`。这些地址应指向同一 LightMoni 实例。Agent 安装使用平台部署计划中校验过的 HTTPS 中心地址，内部下载脚本、双架构包和 SHA256 清单由 `/downloads/agent/` 提供，必须使用该主机安装会话的有效 enrollment 鉴权；control/data 凭据与 SDK Key 不能替代安装授权。修改地址列表不会自动修改运行客户端，亦不等于迁移或重新绑定主机。
+管理员可在“管理后台 → 接入配置”维护多个有名称的上报地址并选择默认项，例如“公网”和“内网”；SDK 示例可选择可达入口，未配置时使用 `LIGHTMONI_EXTERNAL_URL`。这些地址应指向同一 LightMoni 实例。Agent 安装使用平台部署计划中校验过的 HTTPS 中心地址，内部下载脚本、双架构包和 SHA256 清单由 `/downloads/agent/` 提供，必须使用该主机安装会话的有效 enrollment 鉴权；control/data 凭据与 SDK Key 不能替代安装授权。管理员标记内网/公网用途后，SDK和Agent每30秒同步地址，内网优先、公网备用；Agent控制、任务与上报共用入口。业务SDK仅直连中心，详见[中心地址同步](docs/center-endpoints.md)。
 
 ```ts
 const moni = createLightMoni({service: 'order-api', env: 'prod'});
@@ -141,7 +146,7 @@ await moni.shutdown({timeoutMs: 5000});
 node examples/sdk/traffic/index.mjs
 ```
 
-程序在 `127.0.0.1:18419` 发起真实 HTTP 请求，通过 SDK 和本机执行节点上报三个测试服务，默认运行 30 分钟。可用 `LIGHTMONI_ENDPOINT`、`LIGHTMONI_DURATION_SECONDS` 调整接收地址和时间；本次运行的验收执行节点地址为 `http://127.0.0.1:14318`。这些记录用于测试，资源属性注明 `telemetry_source=sdk-traffic-fixture`。
+程序在 `127.0.0.1:18419` 发起真实 HTTP 请求，通过SDK直报中心的三个测试服务，默认运行 30 分钟。可用 `LIGHTMONI_ENDPOINT`、`LIGHTMONI_DURATION_SECONDS` 调整接收地址和时间；历史执行节点路径已移除。这些记录用于测试，资源属性注明 `telemetry_source=sdk-traffic-fixture`。
 
 ## 工作台功能
 

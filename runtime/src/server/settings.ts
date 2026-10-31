@@ -1,3 +1,4 @@
+import { registerCenterEndpoints } from "./center-endpoints.js";
 import { metricWindows, registerMetricWindows } from './metric-windows.js';
 import {
   isLosslessNumber,
@@ -171,8 +172,8 @@ export function reportingSettings(d: Dependencies) {
     default_endpoint: defaultEndpoint,
     effective_endpoint: endpoint || defaultEndpoint,
     endpoints: endpoint
-      ? book.endpoints
-      : [{ id: "deployment", name: "部署地址", url: defaultEndpoint }],
+      ? book.endpoints.map((a: any) => ({ ...a, scope: a.scope ?? "public" }))
+      : [{ id: "deployment", name: "部署地址", url: defaultEndpoint, scope: "public" }],
     default_endpoint_id: endpoint ? book.default_endpoint_id : "deployment",
   };
 }
@@ -189,6 +190,8 @@ function validateAddresses(book: any) {
       typeof a.url !== "string"
     )
       fail(400, "上报地址 ID、名称和 URL 必须是文本");
+    a.scope ??= "public";
+    if (!["internal", "public"].includes(a.scope)) fail(400, "地址用途必须为 internal 或 public");
     a.name = a.name.trim();
     a.url = a.url.trim();
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(a.id ?? "") || ids.has(a.id))
@@ -201,6 +204,7 @@ function validateAddresses(book: any) {
         Buffer.byteLength(a.url) > 2048 ||
         !["http:", "https:"].includes(u.protocol) ||
         !u.hostname ||
+        u.port === "0" ||
         u.username ||
         u.password ||
         u.search ||
@@ -218,9 +222,11 @@ function validateAddresses(book: any) {
     ids.add(a.id);
     urls.add(a.url);
   }
+  if (book.endpoints.length && !book.endpoints.some((a: any) => a.scope === "public")) fail(400, "至少保留一个公网引导地址");
   if (!book.endpoints.length) book.default_endpoint_id = "";
   else if (!ids.has(book.default_endpoint_id))
     fail(400, "请选择列表中的默认上报地址");
+  if(book.endpoints.length && book.endpoints.find((a:any)=>a.id===book.default_endpoint_id)?.scope!=="public") fail(400,"默认引导地址必须是公网入口");
 }
 export function registerSettings(
   d: Dependencies,
@@ -232,6 +238,7 @@ export function registerSettings(
   db.exec(
     "CREATE TABLE IF NOT EXISTS instance_settings(name TEXT PRIMARY KEY,value TEXT NOT NULL)",
   );
+  registerCenterEndpoints(d, () => reportingSettings(d), agentCredentials);
   r.get("/api/v1/settings/instance", (c) =>
     c.json({ external_url: d.externalURL, version: "0.1.0" }),
   );

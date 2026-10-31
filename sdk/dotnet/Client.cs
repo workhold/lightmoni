@@ -233,7 +233,7 @@ public sealed class Client
     readonly State state;
     readonly string table;
     static string ValidTable(string value) => Regex.IsMatch(value, "^[a-z][a-z0-9_]{0,47}$") && !Regex.IsMatch(value, "^(log|metric|trace)_") ? value : throw new ArgumentException("invalid logical table");
-    public Client(string service, string table, string endpoint = "http://127.0.0.1:4318", string key = "", Limits? limits = null) { this.table = ValidTable(table); state = new(service, endpoint, key, limits ?? new()); state.SelfTable=this.table;
+    public Client(string service, string table, string endpoint = "", string key = "", Limits? limits = null) { this.table = ValidTable(table); state = new(service, endpoint, key, limits ?? new()); state.SelfTable=this.table;
         if(state.Limits.SelfTelemetry) _ = Task.Run(async () => {
             try { using var timer=new PeriodicTimer(TimeSpan.FromSeconds(30));
                 while(await timer.WaitForNextTickAsync(state.HeartbeatStop.Token)) {

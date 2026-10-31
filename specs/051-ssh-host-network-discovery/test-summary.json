@@ -1,0 +1,96 @@
+{
+  "date": "2026-10-31",
+  "base_revision": "e3d11928ed85a30d76af15e12552e01fe0712627",
+  "runtime": {
+    "command": "node --import tsx --test --test-concurrency=1 test/machine-ssh-discovery.test.ts test/machine-ssh.test.ts test/host-network.test.ts test/managed-machines.test.ts test/connection-credentials.test.ts test/machine-password-ssh.test.ts test/machine-host-identity.test.ts test/machine-agent-link.test.ts test/agent-host-admission.test.ts test/machine-terminal.test.ts",
+    "tests": 111,
+    "pass": 111,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "log_sha256": "86f99ca89d8a0b3a3e4f240fd707e7f8a8bf0bc0646334e89349755d1d92925b"
+  },
+  "ui": {
+    "network-ui": {
+      "passed": 32,
+      "errors": [],
+      "unexpected_requests": [],
+      "report": "evidence/network-ui/ui-report.json"
+    },
+    "credentials-ui": {
+      "passed": 16,
+      "errors": [],
+      "unexpected_requests": [],
+      "report": "evidence/credentials-ui/ui-report.json"
+    },
+    "onboarding-ui": {
+      "passed": 36,
+      "errors": [],
+      "unexpected_requests": [],
+      "report": "evidence/onboarding-ui/onboarding-ui-report.json"
+    },
+    "ssh-ui": {
+      "passed": 18,
+      "errors": [],
+      "unexpected_requests": [],
+      "report": "evidence/ssh-ui/ui-report.json"
+    }
+  },
+  "ui_total_passed": 102,
+  "typecheck": {
+    "command": "npm run typecheck",
+    "exit_code": 0,
+    "packages": [
+      "runtime",
+      "ai-runtime",
+      "web"
+    ]
+  },
+  "builds": {
+    "sdk/typescript": 0,
+    "runtime": 0,
+    "ai-runtime": 0,
+    "web": 0
+  },
+  "loopback_ssh": "Real ssh2 protocol, private-key and password authentication, one exec per preflight, deterministic fixture uname/ip/curl/timeout tools; not a real remote Linux host",
+  "source_sha256": {
+    "runtime/src/server/host-network.ts": "40403b6b93ef045c3da0f522373021329c271ff71b8b6a9a3ee498958ef75d73",
+    "runtime/src/server/machine-ssh.ts": "fb2b6e40e53a258e867064680e519330b5c49551ee034524f8222b33b167787b",
+    "runtime/src/server/managed-machines.ts": "582885f8db0f3ae4a63ed37ccd4663f34bfe73e2b9052d4422dbcc8c1f8669f8",
+    "runtime/src/server/nodes-model.ts": "bba9850bb6542e59af423648d144f6aaac0a2636ccb21378cc67c41e12ef82d1",
+    "runtime/test/machine-ssh-discovery.test.ts": "7c24ebbafa536d06615b766e32e9df6930e69cbabea9401308a6c23dcea9541d",
+    "web/src/app/HostNetworkSummary.tsx": "8b4e5126b54b1c1e5153cf9396d4a6c440903db3c0fc944afee9bcd6a3161f84",
+    "web/src/app/MachineRegistrationDialog.tsx": "2b16d96b6e1e9b4f00bcdf986a6e35618757785d3ecbe4d460e35353af71b9b2",
+    "web/src/app/MachineEditDialog.tsx": "5e74a2fa1afef4f086171abbf4fc0a188bcdddebf0e444ec68909346549f3983",
+    "web/src/app/MachinesPage.tsx": "54afc0a8aefdf74cde94bb6a73d2669de580e6570c9b102c8987cb92adc437ab",
+    "web/src/shared/SSHCheckSummary.tsx": "a62b5a8a2cbf2364f892f29903231eed20039ec594ade6df94339986a76d744e",
+    "web/src/app/verify-ssh-network-discovery.mjs": "c92cfc7d2c6f136631e19e8f0d5d721751f99abd84648840e5bedf49941ec1ce"
+  },
+  "architecture_sync": {
+    "saved": true,
+    "record": "doca-readback.json",
+    "seq": 885
+  },
+  "legacy_fixture": {
+    "file": "web/src/app/verify-hosts-nodes.mjs",
+    "status": "not_passed",
+    "executed_failure": "Expected old label 未接入 Agent, current main uses 未接入; missing fixture interception of GET /api/v1/host-labels",
+    "baseline_drift_verified": true,
+    "production_ui_changed_to_satisfy_fixture": false,
+    "not_included_in_pass_counts": true
+  },
+  "limits": [
+    "No production platform or vchive access",
+    "No real Linux distro/iproute2 matrix or live NAT/public-entry discovery",
+    "Production-bundle UI uses intercepted API fixtures",
+    "No Agent installation, daemon or deployment approval executed",
+    "No new image built or published in this feature task"
+  ],
+  "cleanup": {
+    "isolated_test_resources_closed": true,
+    "doca_context_closed": true,
+    "doca_worker_exit_code": 0,
+    "doca_socket_removed": true,
+    "docker_vm_started": false
+  }
+}

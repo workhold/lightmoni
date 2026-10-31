@@ -31,7 +31,7 @@ import (
 
 type Attributes map[string]any
 
-// Config has no required private Key when using the local Agent.
+// Config connects directly to a center; anonymous uploads require enabled exempt tables.
 type Config struct {
 	// DisableSelfTelemetry is for embedded collectors and protocol fixtures.
 	DisableSelfTelemetry                               bool
@@ -66,7 +66,7 @@ type FrozenBatch struct {
 
 func (b FrozenBatch) Clone() FrozenBatch { b.Payload = append([]byte(nil), b.Payload...); return b }
 
-// Exporter may write HTTP or commit directly to an Agent's durable queue.
+// Exporter supports HTTP delivery and in-process embedded collectors.
 type Exporter interface {
 	Deliver(context.Context, FrozenBatch) error
 }
@@ -143,7 +143,7 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Endpoint == "" && cfg.Exporter == nil {
 		cfg.Endpoint = os.Getenv("LIGHTMONI_ENDPOINT")
 		if cfg.Endpoint == "" {
-			cfg.Endpoint = "http://127.0.0.1:4318"
+			return nil, errors.New("center endpoint or LIGHTMONI_ENDPOINT is required")
 		}
 		if cfg.Key == "" {
 			cfg.Key = os.Getenv("LIGHTMONI_KEY")
@@ -170,8 +170,8 @@ func New(cfg Config) (*Client, error) {
 		return nil, errors.New("table must match [a-z][a-z0-9_]{0,47} without a reserved type prefix")
 	}
 	if cfg.Exporter == nil {
-		u, err := url.Parse(cfg.Endpoint)
-		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		_, err := url.Parse(cfg.Endpoint)
+		if err != nil || !validCenterURL(cfg.Endpoint) {
 			return nil, errors.New("endpoint must be an absolute http(s) URL, or provide an Exporter")
 		}
 	}
@@ -188,8 +188,8 @@ func New(cfg Config) (*Client, error) {
 		cfg.ConfigEndpoint = cfg.Endpoint
 	}
 	if cfg.ConfigEndpoint != "" {
-		u, err := url.Parse(cfg.ConfigEndpoint)
-		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		_, err := url.Parse(cfg.ConfigEndpoint)
+		if err != nil || !validCenterURL(cfg.ConfigEndpoint) {
 			return nil, errors.New("config endpoint must use HTTP or HTTPS")
 		}
 	}
@@ -263,6 +263,20 @@ func New(cfg Config) (*Client, error) {
 	c.SetReportingEnabled(!cfg.Disabled)
 	go s.run()
 	go s.configLoop()
+	go func() {
+		timer := time.NewTicker(30 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-timer.C:
+				ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+				_ = c.RefreshEndpoints(ctx)
+				cancel()
+			}
+		}
+	}()
 	return c, nil
 }
 

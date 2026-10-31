@@ -1,3 +1,4 @@
+import {CenterEndpoints} from "./endpoints.js";
 import { copyMetricWindows, metricWindow, type MetricWindows } from './windows.js';
 import { Distribution } from './distribution.js';
 import { copyLogSampling, copyExclusions, matches, sampleLog, type LogSamplingPolicy, type SDKConfig, type LogExcludeRule } from './sampling.js';
@@ -74,6 +75,8 @@ class State {
   readonly stats: Stats = { pendingBatches: 0, pendingBytes: 0, bufferBytes: 0, deliveredBatches: 0, retriedBatches: 0, droppedRecords: 0, rejectedRecords: 0, invalidRecords: 0, overflowRecords: 0, sampledOutLogs:0, unmatchedLogs:0, excludedLogs:0, disabledRecords:0, reportingDisabled:false };
   readonly changed = new Set<() => void>();
   readonly exporter: Exporter;
+  readonly endpoints?: CenterEndpoints;
+  endpointInterval?: ReturnType<typeof setInterval>;
   localSampling: Record<string, LogSamplingPolicy> = {};
   remoteSampling: Record<string, LogSamplingPolicy> = {};
   remoteDisabled = false;
@@ -122,7 +125,9 @@ class State {
       const endpoint = new URL(options.endpoint ?? "");
       if (!/^https?:$/.test(endpoint.protocol)) throw new Error("endpoint must use HTTP or HTTPS");
     }
-    this.exporter = options.exporter ?? new HTTPExporter(options.endpoint!, () => this.options.key);
+    this.endpoints = options.exporter ? undefined : new CenterEndpoints(options.endpoint!, ():HeadersInit => this.options.key ? {Authorization:`Bearer ${this.options.key}`} : {});
+    this.exporter = options.exporter ?? new HTTPExporter(options.endpoint!, () => this.options.key, this.endpoints);
+    if(this.endpoints){this.endpointInterval=setInterval(()=>{if(!this.closing)void this.endpoints!.refresh().catch(()=>{});},30000);(this.endpointInterval as unknown as {unref?:()=>void}).unref?.();}
     this.interval = setInterval(() => { if (!this.closing) { this.collect(false); this.kick(); } }, this.settings.intervalMs);
     // A library timer should not prevent an otherwise finished Node process exiting.
     const timer = this.interval as unknown as { unref?: () => void }; timer.unref?.();
@@ -148,9 +153,10 @@ class State {
   }
   private async fetchConfig():Promise<void> {
     const endpoint=this.options.configEndpoint??this.options.endpoint;if(!endpoint||this.closing)throw new Error('remote configuration is disabled or SDK closed');
-    const request=new AbortController();this.configRequest=request;const timer=setTimeout(()=>request.abort(),5000);
+    const request=new AbortController();this.configRequest=request;const timer=setTimeout(()=>request.abort(new DOMException("request timed out","TimeoutError")),5000);
     try{
-      const response=await fetch(endpoint.replace(/\/$/,'')+'/v1/sdk-config?metric_windows=1',{headers:this.options.key?{Authorization:`Bearer ${this.options.key}`}:{},signal:request.signal,redirect:'error'});
+      const init:RequestInit={headers:this.options.key?{Authorization:`Bearer ${this.options.key}`}:{},signal:request.signal,redirect:'error'};
+      const response=await (this.endpoints && endpoint===this.options.endpoint ? this.endpoints.request('/v1/sdk-config?metric_windows=1',init) : fetch(endpoint.replace(/\/$/,'')+'/v1/sdk-config?metric_windows=1',init));
       if(response.status!==200){void response.body?.cancel();throw new Error(`SDK configuration HTTP ${response.status}`);}
       if(!response.body)throw new Error('missing SDK configuration');const reader=response.body.getReader(),parts:Uint8Array[]=[];let length=0;
       while(true){const chunk=await reader.read();if(chunk.done)break;length+=chunk.value.length;if(length>1024*1024){await reader.cancel();throw new Error('SDK configuration exceeds 1 MiB');}parts.push(chunk.value);}
@@ -341,7 +347,7 @@ class State {
         this.queue.shift(); this.stats.pendingBatches--; this.stats.pendingBytes -= item.batch.payload.length; this.notify(); continue;
       }
       this.request = new AbortController();
-      const timer = setTimeout(() => this.request?.abort(), this.settings.requestTimeoutMs);
+      const timer = setTimeout(() => this.request?.abort(new DOMException("request timed out","TimeoutError")), this.settings.requestTimeoutMs);
       let failure: unknown;
       try { await this.exporter.deliver({ ...item.batch, payload: item.batch.payload.slice() }, this.request.signal); } catch (error) { failure = error; } finally { clearTimeout(timer); this.request = undefined; }
       if (this.stopped) break;
@@ -420,6 +426,8 @@ export class LightMoni {
   updateLogSampling(policies:Record<string,LogSamplingPolicy>):void{if(this.state.closing)throw new Error('SDK closed');this.state.updateLogSampling(policies);}
   setReportingEnabled(enabled:boolean):void{this.state.options.disabled=!enabled;this.state.setReportingDisabled(!enabled||this.state.remoteDisabled);}
   async refreshConfig():Promise<void>{await this.state.refreshConfig();}
+  async refreshEndpoints():Promise<void>{await this.state.endpoints?.refresh();}
+  endpointStatus(){return this.state.endpoints?.status();}
   /** Trace metadata is optional and separate from attrs; no context creates no trace. */
   log(level: string, body: string, attrs: Attributes = {}, context = this.currentTrace()): void {
     if(this.state.closing){this.state.invalid('record after shutdown');return;}if(this.state.stats.reportingDisabled){this.state.stats.disabledRecords++;return;}
@@ -443,8 +451,8 @@ export class LightMoni {
   async flush({ timeoutMs = 10_000 }: { timeoutMs?: number } = {}): Promise<void> { if (this.state.stopped) throw new Error("SDK is closed"); this.state.collect(); const target = this.state.sequence; this.state.kick(); await this.state.wait(target, timeoutMs); }
   async shutdown({ timeoutMs = 10_000 }: { timeoutMs?: number } = {}): Promise<void> {
     if (this.state.stopped) { if (this.state.failure) throw this.state.failure; return; }
-    this.state.closing = true; clearInterval(this.state.interval); clearInterval(this.state.selfInterval);clearInterval(this.state.configInterval);this.state.configRequest?.abort();
-    try { await this.flush({ timeoutMs }); } finally { this.state.stopped = true; this.state.request?.abort(); this.state.retryNow?.(); this.state.notify(); }
+    this.state.closing = true; clearInterval(this.state.interval); clearInterval(this.state.selfInterval);clearInterval(this.state.configInterval);this.state.configRequest?.abort();clearInterval(this.state.endpointInterval);
+    try { await this.flush({ timeoutMs }); } finally { this.state.stopped = true; this.state.endpoints?.close(); this.state.request?.abort(); this.state.retryNow?.(); this.state.notify(); }
   }
 }
 export function createLightMoni(options: Options): LightMoni { return LightMoni.create(options); }
@@ -479,12 +487,12 @@ export function extractTrace(headers: Headers | Record<string, string | undefine
 export function injectTrace(context: TraceContext): Record<string, string> { if (!validTrace(context)) throw new Error("invalid trace context"); return { traceparent: `00-${context.traceId}-${context.spanId}-${context.flags.toString(16).padStart(2, "0")}`, ...(context.traceState ? { tracestate: context.traceState } : {}) }; }
 
 export class HTTPExporter implements Exporter {
-  constructor(private readonly endpoint: string, private readonly key: () => string | undefined = () => undefined) {}
+  constructor(private readonly endpoint: string, private readonly key: () => string | undefined = () => undefined, private readonly endpoints?: CenterEndpoints) {}
   async deliver(batch: FrozenBatch, signal: AbortSignal): Promise<void> {
     const headers: Record<string, string> = { "Content-Type": batch.contentType, "X-Lightmoni-Table": batch.table, "X-Lightmoni-Batch-ID": batch.id, "X-Lightmoni-Batch-Created-At": batch.createdAt };
     const key = this.key(); if (key) headers.Authorization = `Bearer ${key}`;
     let response: Response;
-    try { response = await fetch(`${this.endpoint.replace(/\/$/, "")}/v1/${batch.signal}`, { method: "POST", headers, body: batch.payload.slice().buffer as ArrayBuffer, signal, redirect: "error" }); }
+    try { const init:RequestInit={method:"POST",headers,body:batch.payload.slice().buffer as ArrayBuffer,signal,redirect:"error"}; response = await (this.endpoints ? this.endpoints.request(`/v1/${batch.signal}`,init) : fetch(`${this.endpoint.replace(/\/$/, "")}/v1/${batch.signal}`,init)); }
     catch { throw new DeliveryError("telemetry network request failed", true); }
     if (response.status !== 200) {
       const retryable = [401, 403, 429, 502, 503, 504].includes(response.status), retry = response.headers.get("Retry-After");

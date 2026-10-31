@@ -22,6 +22,31 @@ function fixture() {
   return {db,runs,base,grants,dispatcher,invoke:(name:string,input:unknown,p=structuredClone(base))=>dispatcher.invoke(p,name,input,{signal:new AbortController().signal}),revoke:()=>revoked=true,close:()=>db.close()};
 }
 const intent={operation:"task.dispatch",task_id:"script-one",host_ids:["one"],reason:"Inspect service",idempotency_key:"operation-one"};
+test("the task directory exposes persistent defaults without the removed template capability",async()=>{
+  const f=fixture();try{
+    assert.equal(f.dispatcher.list(f.base).some(tool=>tool.name==="lightmoni_tasks_templates"),false);
+    await assert.rejects(f.invoke("lightmoni_tasks_templates",{}),/capability_not_found/);
+    const listed=(await f.invoke("lightmoni_tasks_list",{})).data.tasks;
+    assert.equal(listed.filter((task:any)=>task.origin==="builtin").length,3);
+  }finally{f.close();}
+});
+test("MCP host names use the current Agent observation rather than an unowned cache",async()=>{
+  const f=fixture();try{
+    f.db.run("UPDATE managed_machines SET observed_hostname='legacy-stale-cache' WHERE id='one'");
+    let listed=(await f.invoke("lightmoni_hosts_list",{})).data.hosts.find((host:any)=>host.id==="one");
+    assert.equal(listed.name,"Host one");assert.equal(listed.observed_hostname,"");
+    f.db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES('agent-one','fixture','current-system-host','0.1.0','linux','amd64','2026-10-30T00:00:00.000Z','{}')");
+    let host=(await f.invoke("lightmoni_hosts_get",{id:"one"})).data.host;
+    assert.equal(host.name,"Host one");assert.equal(host.observed_hostname,"current-system-host");
+    f.db.run("UPDATE managed_machines SET agent_id='replacement-without-heartbeat' WHERE id='one'");
+    host=(await f.invoke("lightmoni_hosts_get",{id:"one"})).data.host;
+    assert.equal(host.observed_hostname,"");
+    f.db.run("UPDATE managed_machines SET agent_id='agent-one' WHERE id='one'");
+    f.db.run("INSERT INTO agent_lifecycle(agent_id,state,removed_at) VALUES('agent-one','removed','2026-10-30T00:00:00.000Z')");
+    listed=(await f.invoke("lightmoni_hosts_list",{})).data.hosts.find((item:any)=>item.id==="one");
+    assert.equal(listed.observed_hostname,"");assert.equal(listed.agent_state,"removed");
+  }finally{f.close();}
+});
 test("scopes, strict schemas and host-scoped metadata prevent direct invocation leaks",async()=>{
   const f=fixture();try{
     const p={...structuredClone(f.base),host_ids:["one"],scopes:["hosts.read","tasks.read","executions.read"]};
@@ -53,6 +78,7 @@ test("external proposals are durable, idempotent and have no fabricated assistan
     assert.equal(run.state,"queued");assert.equal(f.runs.list().length,1);assert.ok(f.db.get("SELECT * FROM capability_run_authorizations WHERE run_id=?",run.id));
     const execution=(await f.invoke("lightmoni_executions_get",{id:"task:"+run.id})).data.execution;
     assert.equal(execution.native_state,"queued");assert.equal(Object.hasOwn(execution,"snapshot"),false);assert.equal(Object.hasOwn(execution,"stdout"),false);
+    const review=new URL(execution.review_url);assert.equal(review.pathname,"/machines");assert.equal(review.searchParams.get("tab"),"tasks");assert.equal(review.searchParams.get("task_view"),"runs");assert.equal(review.searchParams.get("host"),run.host_id);
     assert.equal((await f.invoke("lightmoni_tasks_plan",intent)).data.proposal.status,"completed");
     assert.equal(f.db.get<any>("SELECT count(*) n FROM capability_invocations WHERE decision='idempotency_hit'")!.n,2);
   }finally{f.close();}

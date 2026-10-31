@@ -146,7 +146,7 @@ impl Client {
             }
         }
         let endpoint = options.endpoint.unwrap_or_else(|| {
-            std::env::var("LIGHTMONI_ENDPOINT").unwrap_or_else(|_| "http://127.0.0.1:4318".into())
+            std::env::var("LIGHTMONI_ENDPOINT").unwrap_or_default()
         });
         let key = options
             .key

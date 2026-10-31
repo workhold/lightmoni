@@ -3,7 +3,8 @@ import type { Dependencies, User } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
 import { TaskProposalService, runMetadata, taskMetadata, taskTools, type ProposalSource } from "../assistant/task-tools.js";
 import type { TaskRunStore } from "../server/task-center.js";
-import { NodeError, taskTemplates, type Task } from "../server/nodes-model.js";
+import { NodeError, type Task } from "../server/nodes-model.js";
+import { currentAgentHostname } from "../server/agent-hosts.js";
 import type { AlertCapabilities } from "../domains/alert-capabilities.js";
 import type { AccessAuthority, CapabilityDispatcherContract, InvocationContext, Principal } from "./types.js";
 
@@ -83,7 +84,6 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         const offset=i.offset??0,limit=i.limit??50; return {hosts:rows.slice(offset,offset+limit).map(h=>this.hostView(h)),total:rows.length,truncated:offset+limit<rows.length,next_offset:offset+limit<rows.length?offset+limit:null};
       }},
       {name:"lightmoni_hosts_get",description:"Read one authorized host and observed management state.",scope:"hosts.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:(p,i)=>({host:this.hostView(this.host(p,i.id))})},
-      {name:"lightmoni_tasks_templates",description:"Read built-in task template metadata. These are templates, not execution receipts.",scope:"tasks.read",effect:"read",inputSchema:schema(),execute:()=>({templates:taskTemplates().map(t=>this.taskView(t,false))})},
       {name:"lightmoni_tasks_list",description:"List safe task metadata. A host-scoped grant must specify host_id; script bodies, collector settings and unrelated targets are omitted.",scope:"tasks.read",effect:"read",inputSchema:schema({host_id:string,type:{...string,enum:["host","probe","log","script"]}}),execute:(p,i)=>{
         if(p.host_ids!==null&&!i.host_id)fail(403,"host_id_required");
         if(i.host_id)this.host(p,i.host_id);
@@ -122,7 +122,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   private hostView(h:any) {
     const removed=h.agent_id&&this.deps.db.get("SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed'",h.agent_id);
     const seen=this.deps.db.get<{last_seen:string}>("SELECT last_seen FROM agents WHERE id=?",h.agent_id)?.last_seen||h.agent_last_seen;
-    return {...h,agent_last_seen:seen,agent_state:!h.agent_id?"not_installed":removed?"removed":seen&&this.deps.now().getTime()-Date.parse(seen)<=90000?"online":"offline"};
+    return {...h,observed_hostname:currentAgentHostname(this.deps.db,h.id,h.agent_id),agent_last_seen:seen,agent_state:!h.agent_id?"not_installed":removed?"removed":seen&&this.deps.now().getTime()-Date.parse(seen)<=90000?"online":"offline"};
   }
   private taskView(task:Task,allHosts:boolean):any {
     const v=taskMetadata(task);return allHosts?v:Object.fromEntries(Object.entries(v).filter(([k])=>!["host_ids","label_ids","target_all"].includes(k)));
@@ -138,7 +138,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   private execution(p:Principal,run:any) {
     this.authorize(p,"executions.read");
     this.host(p,run.host_id);this.index(run);
-    return {...runMetadata(run),execution_id:"task:"+run.id,native_ref:{domain:"task",id:run.id},native_state:run.state,review_url:this.review("/machines?tab=tasks&run="+encodeURIComponent(run.id))};
+    return {...runMetadata(run),execution_id:"task:"+run.id,native_ref:{domain:"task",id:run.id},native_state:run.state,review_url:this.review("/machines?tab=tasks&task_view=runs&host="+encodeURIComponent(run.host_id))};
   }
   private review(path:string) {return new URL(path,this.deps.externalURL).href;}
   private proposalView(p:Principal,id:string):any {

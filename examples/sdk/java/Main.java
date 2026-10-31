@@ -12,7 +12,7 @@ public class Main {
         limits.selfTelemetry=mode.equals("demo") || mode.equals("selfmonitor");
         if(mode.equals("overflow"))limits.cardinalityLimit=2;
         if(mode.equals("capacity")){limits.queueBytes=1024;limits.maxBatchBytes=1024;limits.bufferBytes=64;}
-        Client mon=new Client(env("LIGHTMONI_SERVICE","example-java-api"),"http",env("LIGHTMONI_ENDPOINT","http://127.0.0.1:4318"),env("LIGHTMONI_KEY",""),limits);
+        Client mon=new Client(env("LIGHTMONI_SERVICE","example-java-api"),"http",env("LIGHTMONI_ENDPOINT","https://monitor.example.com"),env("LIGHTMONI_KEY",""),limits);
         var counter=mon.counter("http.requests");
         switch(mode) {
             case "selfmonitor" -> {counter.add(-1);Thread.sleep(35000);mon.shutdown(Duration.ofSeconds(5));}

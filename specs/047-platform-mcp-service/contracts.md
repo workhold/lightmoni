@@ -15,3 +15,5 @@ MCP入口 `/api/v1/mcp`；专用Bearer认证，每请求重验。`Principal={use
 MCP默认请求体128KiB、深度16、工具输入16KiB/输出64KiB、请求15秒；每用户120请求/分钟及4并发、直接连接来源300请求/分钟。URL查询参数和批量JSON-RPC拒绝。Origin存在时精确匹配固定origin；没有协议session或独立GET事件流。
 
 集成约束：待审批的 `source=mcp` 提案若缺少 `beforeApply` 或 `afterApply` 授权 hook，应用返回 503，不修改提案、任务、执行或审计状态；内部/历史助手提案仍按原权限工作。外部执行的自动重试继承 grant 关联，并在重试创建及 Agent 领取前重验。主机投影的 `observed_hostname` 只读取当前关联且未移除的 Agent 记录，不能回退到无归属缓存。
+
+执行 `review_url` 指向 `/machines?tab=tasks&task_view=runs&host=<host_id>`，打开该主机的实际执行记录视图；精确执行详情仍通过 `execution_id` 查询，不宣称页面支持未实现的 run 深链。

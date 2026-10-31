@@ -1,0 +1,17 @@
+{
+  "checked_at": "2026-10-30T16:43:59.350Z",
+  "fixture": "Playwright intercepted HTTP API; no live cloud DNS calls",
+  "checks": [
+    "跨页选择、固定删除目标、取消零写入；仅改类型/仅改value保留TTL、线路、权重、状态及逐请求revision/confirmed",
+    "同一主机/类型/线路多value创建，忽略空行与去重，预览2条，双击只发2次请求",
+    "51条阻止提交；202失败、未知和待回读分别显示，继续后续且无自动重试",
+    "执行锁定关闭/输入，停止只跳过未发出的记录",
+    "当前页全选、批量删除、删除末页回退、搜索和同步清空选择",
+    "跨页全选限制50条，零修改字段阻止提交",
+    "单条创建/编辑保留可用，编辑保留线路ID、权重及停用状态",
+    "390px无页面横向溢出、确认按钮可达；英文完整入口；成员无批量入口"
+  ],
+  "page_errors": [],
+  "request_count": 13,
+  "media": "artifacts/screenshots/specs/051-dns-bulk-record-actions/evidence"
+}

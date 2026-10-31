@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "checks": [
+    "Personal token requires explicit scope and target consent; default finite lifetime; token only in one-time modal, absent from browser storage and reload",
+    "OAuth client registration preserves explicit redirect URIs; grant revoke sends the selected grant ID",
+    "OAuth deep link and query survive sign-in; consent shows only requested scopes; explicit host selection is required and preserved on approval",
+    "Invalid OAuth request has no approval form",
+    "Canceling authorization does not create a grant",
+    "390px layout has no page overflow; English management UI is available"
+  ],
+  "errors": [],
+  "backend": "Mock API UI checks only; backend security and client interoperability require independent runtime tests."
+}

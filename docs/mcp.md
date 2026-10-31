@@ -50,16 +50,20 @@ callback_port = 1455
 
 ## 首批工具
 
+告警模块启用时提供 10 个工具。默认任务通过任务目录读取，不另设模板目录。
+
 | 工具 | scope | 行为 |
 | --- | --- | --- |
 | `lightmoni_hosts_list/get` | `hosts.read` | 已授权主机及观测到的 Agent 状态 |
-| `lightmoni_tasks_list/get/templates` | `tasks.read` | 任务元数据与模板，默认无源码/采集配置 |
+| `lightmoni_tasks_list/get` | `tasks.read` | 平台默认与用户任务元数据，默认无源码/采集配置 |
 | `lightmoni_tasks_get` 的 `include_source` | 还需 `tasks.source.read` | 显式读取脚本源码 |
 | `lightmoni_tasks_plan` | `tasks.propose` | 已有任务派发、执行取消、重试的审阅提案 |
 | `lightmoni_proposals_get` | `tasks.read` | 提案状态；执行详情还需 `executions.read` |
 | `lightmoni_executions_list/get` | `executions.read` | 原生任务执行状态，省略源码、原始输出和租约 |
 | `lightmoni_telemetry_catalog` | `telemetry.catalog.read` | 表结构目录，仅全主机范围授权，无数据行/SQL |
 | `lightmoni_alerts_list` | `alerts.read` | 告警规则目录，仅全主机范围授权，无SQL/证据/修改 |
+
+主机的 `name` 是用户配置的资产名称，`observed_hostname` 仅来自当前关联且未移除的 Agent；新 Agent 尚未上报时为空，不回退旧缓存。
 
 有限主机授权读取任务或执行列表时必须指定 `host_id`。任务元数据不包含其他主机的目标集合。服务器会再次检查直接调用的权限，工具列表不构成授权。
 
@@ -73,7 +77,7 @@ callback_port = 1455
 
 ## 部署条件与当前边界
 
-设置 `LIGHTMONI_EXTERNAL_URL` 为可信 HTTPS origin（不带路径、查询、凭据），本机调试可用 loopback HTTP。未满足时 MCP 禁用，原平台功能继续运行。代理需保留 Authorization 与 JSON 响应，不缓存授权与工具结果。服务无协议会话，不要求粘性路由或持久 SSE。
+设置 `LIGHTMONI_EXTERNAL_URL` 为可信 HTTPS origin（不带路径、查询、凭据），本机调试可用 loopback HTTP。未满足时 MCP 禁用，原平台功能继续运行。尚未完成的 MCP 来源提案在授权适配器缺失时拒绝批准；已有外部排队项和自动重试继续绑定原稳定授权，领取前无法复验则拒绝开始。内部助手提案仍可按原人工审批流程处理。代理需保留 Authorization 与 JSON 响应，不缓存授权与工具结果。服务无协议会话，不要求粘性路由或持久 SSE。
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 

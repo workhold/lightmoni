@@ -17,7 +17,7 @@ lightmoni = { path = "/path/to/sdk/rust" }
 ~~~rust
 use lightmoni::{Client, Attributes};
 use std::time::Duration;
-let mon = Client::new("order-api", "business", "http://127.0.0.1:4318", "")?;
+let mon = Client::new("order-api", "business", "https://monitor.example.com", "")?;
 mon.counter("orders_created")?.add(1, &Attributes::from([
     ("region".into(), "cn".into())
 ]));

@@ -1,0 +1,221 @@
+{
+  "resource": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved": true,
+  "write_seq": 884,
+  "readback_seq": 884,
+  "original_blocks": 551,
+  "final_blocks": 556,
+  "unrelated_blocks_compared": 529,
+  "unrelated_order_preserved": true,
+  "new_chapter_at_end": true,
+  "native_flowcharts_preserved": 23,
+  "diagrams": [
+    {
+      "id": "f-architecture-8a1f",
+      "nodes": 10,
+      "edges": 8,
+      "labels_verified": true,
+      "geometry_styles_and_connections_preserved": true
+    },
+    {
+      "id": "f-deployment-2b7c",
+      "nodes": 8,
+      "edges": 7,
+      "labels_verified": true,
+      "geometry_styles_and_connections_preserved": true
+    }
+  ],
+  "checked": [
+    {
+      "id": "3f5ce99f-32b5-4b4d-a254-b9f91165f9d7",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "a007094f-4edc-45ee-a4b7-f5da39091d2c",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "d74e5d15-8825-409d-8653-948f5ad8e611",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "diagram-fix-relay-caption-93684c14",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "f93e9d58-7601-4142-8985-aca212aee27c",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "f9629b45-f192-477b-bc8b-56f2ad5b8354",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "c25563c6-3d9a-440f-9b2a-5e38b9d68ef4",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "12c9a27a-3c1f-409f-b4b1-2674d5058af5",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "dd7bc118-c7b2-4610-95fe-4c09caadf1ba",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "fb29c732-fdd8-445c-821e-2353e0a949a9",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "46c8178f-d4e8-4eb2-af43-6956f039bafe",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "03f8c7b3-644a-4fc4-b13d-435fbb978a61",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "diagram-fix-report-caption-e3827be0",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "a4b5bc6a-2e87-48f2-ae79-9235e18f94fe",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "279e3730-16f5-4f64-82bb-00ac7e4e393b",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "cb89ce33-28d0-4439-af03-1915a2335648",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "e4482987-eb78-4330-aa5a-1f3c5cb77932",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "d0f09978-b08e-40db-a439-d8a9fca4c8b9",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "id": "center-endpoints050-paragraph-1",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "6386e665-2281-4778-b7d2-da90fb0f094d",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "bde697b2-f490-4f96-bd26-2255956a96f0",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "69ff973e-241b-41d4-99b2-1128a31dbc65",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "efe29da8-2632-42ee-abc6-3f21ce3ba398",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "52c8f4c8-3047-42e7-9dd0-fd1e714ccdf3",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "8adf8740-3db9-4afd-888d-e06727bd5d3a",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "b7cb008c-072e-4f46-adc2-3c486301daff",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "00a1f7c0-4514-4d18-b3bf-8dd97a939f2b",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "258b181c-448a-4989-b13d-b593d04514d9",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "44a89742-4ca5-4b9e-aa20-56c90501b169",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "362e6297-9b48-413e-8aca-a8cf8044eb71",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "ef43bdaa-7f8f-4ee5-99bd-51b1f243a041",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "b7d81caa-fb28-4ef5-afd3-4054fbb8c4d2",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "d799fb10-a649-4eed-b776-2a02a5d3d3c3",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "cb4c0fda-384f-47ba-bf10-952150053c55",
+      "cell_id": "e4be2bd0-9606-479a-abde-8f51256a4d2a",
+      "seq": 884,
+      "match": true
+    },
+    {
+      "table_id": "a5b39df3-0bbc-494c-92e1-4fabe560bd13",
+      "cell_id": "2f15fdb3-57e0-40b1-aecd-9b3db5929539",
+      "seq": 884,
+      "match": true
+    }
+  ]
+}

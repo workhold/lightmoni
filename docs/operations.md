@@ -1,3 +1,5 @@
+> 网站、DNS、证书、Docker 应用与服务托管的现行使用说明见 [网站与运维平台](operations-platform.md)（SDD 033）；下文保留 SDD 026 备份/计划与历史执行恢复说明。
+
 # 运维工具管理员手册
 
 本手册对应 SDD 026 已实现的网站、证书、容器与 Compose、文件备份和计划任务。系统整体职责参阅[系统设计](system-design.md)；实现及验收边界参阅[规格](../specs/026-operations-platform/spec.md)与[网站验收](../specs/026-operations-platform/validation-websites.md)。

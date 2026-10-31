@@ -250,7 +250,7 @@ public final class Client implements AutoCloseable {
     }
     private final State s;
     private final String table;
-    public Client(String service,String table) { this(service,table,"http://127.0.0.1:4318","",new Limits()); }
+    public Client(String service,String table) { this(service,table,System.getenv().getOrDefault("LIGHTMONI_ENDPOINT",""),"",new Limits()); }
     public Client(String service,String table,String endpoint,String key) { this(service,table,endpoint,key,new Limits()); }
     public Client(String service,String table,String endpoint,String key,Limits limits) { this.table=validTable(table);this.s=new State(service,endpoint,key,limits); s.selfTable=this.table;
         if(s.limits.selfTelemetry) {

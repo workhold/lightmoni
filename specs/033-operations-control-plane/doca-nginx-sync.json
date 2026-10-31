@@ -1,0 +1,35 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "initial_seq": 775,
+  "saved_seq": 776,
+  "saved": true,
+  "readback": [
+    {
+      "blockId": "ops033-body-9",
+      "seq": 776,
+      "match": true
+    },
+    {
+      "blockId": "ops033-heading-11",
+      "seq": 776,
+      "match": true
+    },
+    {
+      "blockId": "ops033-body-11",
+      "seq": 776,
+      "match": true
+    },
+    {
+      "blockId": "ops033-control-plane-native",
+      "seq": 776,
+      "match": true
+    }
+  ],
+  "all_match": true,
+  "diagram": {
+    "nodes": 11,
+    "edges": 14,
+    "change": "仅更新ops033-gateway标签；保留节点ID/坐标/尺寸/样式与全部边"
+  },
+  "unrelated": "本批只定点修改33.9文本和SDD033图标签，在33.10后追加33.11两块，未重建其他块。"
+}

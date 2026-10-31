@@ -1,0 +1,40 @@
+{
+  "base_commit": "57e770d",
+  "date": "2026-10-31",
+  "runtime_full": {
+    "tests": 667,
+    "pass": 647,
+    "fail": 0,
+    "skipped": 20
+  },
+  "integration": {
+    "tests": 144,
+    "pass": 144,
+    "fail": 0,
+    "skipped": 0
+  },
+  "network_task_observability": {
+    "tests": 32,
+    "pass": 32,
+    "fail": 0,
+    "skipped": 0
+  },
+  "joint_heartbeat_test": {
+    "pass": 1,
+    "included_in_runtime_full": true
+  },
+  "credentials_ui": {
+    "pass": 16,
+    "page_errors": [],
+    "unexpected_requests": []
+  },
+  "root_typecheck": true,
+  "root_build": true,
+  "architecture_change": "not_applicable: merge of existing designs and conflict resolution only",
+  "deployed": false,
+  "navigation_ui": {
+    "pass": 15,
+    "page_errors": [],
+    "unexpected_requests": []
+  }
+}

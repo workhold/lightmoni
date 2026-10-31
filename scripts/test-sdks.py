@@ -234,14 +234,14 @@ def main():
     parser.add_argument("--docker", action="store_true", help="Java/.NET/PHP/Rust in isolated runtime containers")
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--cases", default="fixture,trace_scope,demo,overflow,retry,rate,auth,invalid_ack,ack_loss,permanent,partial,capacity")
-    parser.add_argument("--agent-url", help="run business demos against an actual Agent instead of fault fixtures")
+    parser.add_argument("--center-url", help="run business demos against a center-compatible OTLP sink instead of fault fixtures")
     args = parser.parse_args()
     languages = args.languages.split(",")
     if not args.skip_build:
         prepare(languages, args.docker)
-    if args.agent_url:
+    if args.center_url:
         for language in languages:
-            endpoint = args.agent_url.replace("127.0.0.1", "host.docker.internal") if args.docker and language in IMAGES else args.agent_url
+            endpoint = args.center_url.replace("127.0.0.1", "host.docker.internal") if args.docker and language in IMAGES else args.center_url
             env = dict(os.environ, LIGHTMONI_ENDPOINT=endpoint, LIGHTMONI_SERVICE="conformance-" + language,
                        LIGHTMONI_KEY="", LIGHTMONI_TEST_MODE="demo", PYTHONPATH=str(ROOT / "sdk/python"))
             subprocess.run(command(language, args.docker), cwd=ROOT, env=env, check=True, timeout=45)

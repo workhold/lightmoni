@@ -19,7 +19,7 @@ export interface InstrumentationScan {
   languages: string[];
   frameworks: string[];
   package_managers: string[];
-  sdk: { found: boolean; packages: string[]; versions: string[]; mode: "direct" | "agent" | "unknown" };
+  sdk: { found: boolean; packages: string[]; versions: string[]; mode: "direct" | "unknown"; legacy_agent_config?: boolean };
   candidates: InstrumentationFinding[];
   warnings: string[];
   files_scanned: number;
@@ -31,7 +31,7 @@ export interface InstrumentationProposalInput {
   base_revision?: string;
   service?: string;
   env?: string;
-  mode?: "direct" | "agent";
+  mode?: "direct";
   table?: string;
   metric?: string;
 }
@@ -313,7 +313,7 @@ export class InstrumentationService {
         packages.add("lightmoni");
         // Do not treat an arbitrary comment/variable containing "agent" as a
         // transport selection. Only explicit mode/endpoint settings count.
-        const agentMode = /LIGHTMONI_MODE\s*=\s*["']agent["']|process\.env\.LIGHTMONI_(?:AGENT_ENDPOINT|LOCAL_TOKEN)\b|LIGHTMONI_(?:AGENT_)?ENDPOINT\s*=\s*["'](?:https?:\/\/)?(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d{2,5})?|(?:endpoint|url)\s*[:=]\s*["']https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d{2,5})?/i.test(source);
+        const agentMode = /LIGHTMONI_MODE\s*=\s*["']agent["']|LIGHTMONI_(?:AGENT_ENDPOINT|LOCAL_TOKEN)\b|https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]):4318(?:[\/"'\s]|$)/i.test(source);
         if (agentMode) sawAgentSDK = true;
         else sawDirectSDK = true;
         const line = source.split(/\r?\n/).findIndex((value) => /lightmoni/i.test(value));
@@ -327,20 +327,19 @@ export class InstrumentationService {
       if (/systemctl|docker compose|docker-compose|uvicorn|gunicorn|node\s+|npm\s+(?:run|start)|cargo\s+run/i.test(source)) addFinding(candidates, { file: rel, kind: "deployment_entry", confidence: 0.68, summary: "发现服务启动或部署入口，部署时应由适配器接管" });
     }
     const revision = digest.digest("hex");
-    const sdkMode: "direct" | "agent" | "unknown" =
-      sawAgentSDK === sawDirectSDK ? "unknown" : sawAgentSDK ? "agent" : "direct";
+    const sdkMode: "direct" | "unknown" = sawDirectSDK && !sawAgentSDK ? "direct" : "unknown";
     return {
       plan_id: `ip_${randomBytes(12).toString("hex")}`,
       workspace,
       base_revision: revision,
       state: "scanned",
       languages: [...languages].sort(), frameworks: [...frameworks].sort(), package_managers: [...packageManagers].sort(),
-      sdk: { found: packages.size > 0, packages: [...packages].sort(), versions: [...versions].sort(), mode: sdkMode },
+      sdk: { found: packages.size > 0, packages: [...packages].sort(), versions: [...versions].sort(), mode: sdkMode, legacy_agent_config:sawAgentSDK },
       candidates,
       warnings: [
         ...(files.length >= MAX_FILES ? ["文件数量达到扫描上限，结果可能不完整"] : []),
         ...(total >= MAX_TOTAL_BYTES ? ["扫描字节数达到上限，结果可能不完整"] : []),
-        ...(sawAgentSDK && sawDirectSDK ? ["同时发现直连和 Agent SDK 配置，无法自动确定唯一上报模式"] : []),
+        ...(sawAgentSDK ? ["发现已移除的SDK→Agent配置；请迁移为中心公网引导endpoint与SDK Key"] : []),
         ...(packages.size === 0 ? ["未发现 LightMoni SDK；请确认依赖名称或手动选择插桩位置"] : []),
       ],
       files_scanned: files.length,
@@ -364,7 +363,7 @@ export class InstrumentationService {
     const intentWantsError = /error|exception|失败|错误/i.test(input.intent);
     const metric = validateProposalValue(input.metric ?? (intentWantsError ? "errors_total" : "requests_total"), "metric", VALID_METRIC)!;
     const table = validateProposalValue(input.table ?? "service", "table", VALID_TABLE)!;
-    if (input.mode !== undefined && input.mode !== "direct" && input.mode !== "agent")
+    if (input.mode !== undefined && input.mode !== "direct")
       throw Error("invalid mode");
 
     const scan = await this.scan(input.workspace, signal);
@@ -401,6 +400,7 @@ export class InstrumentationService {
     const planFiles: InstrumentationPlanFile[] = [];
     for (const [path, value] of files) {
       signal?.throwIfAborted();
+      if(scan.sdk.legacy_agent_config){addManualStep(manualSteps,"先将历史SDK→Agent配置迁移为中心直连，再重新生成插桩补丁。");break;}
       const lang = codeLanguage(path);
       if (!lang) {
         if (value.candidates.some((candidate) => candidate.kind === "request_boundary" || candidate.kind === "error_boundary" || candidate.kind === "sdk_import"))
@@ -423,10 +423,6 @@ export class InstrumentationService {
       const clientName = existingClient ?? "lightmoniClient";
       const operations: InstrumentationOperation[] = [];
       const risks: string[] = [];
-      if (existingClient && input.mode === "agent" && !/LIGHTMONI_AGENT_ENDPOINT|LIGHTMONI_LOCAL_TOKEN/.test(value.source)) {
-        addManualStep(manualSteps, `文件 ${path} 已初始化 SDK 客户端，但未明确使用 Agent 本地 endpoint/token；请先确认传输模式后再插入打点。`);
-        continue;
-      }
       const lines = value.source.split(/\r?\n/);
       if (!existingClient) {
         if (new RegExp(`\\b${clientName}\\b`).test(value.source)) {
@@ -439,15 +435,8 @@ export class InstrumentationService {
           `  service: process.env.LIGHTMONI_SERVICE ?? ${JSON.stringify(service ?? "service")},`,
           `  env: process.env.LIGHTMONI_ENV ?? process.env.NODE_ENV ?? ${JSON.stringify(env ?? "production")},`,
         ];
-        if (input.mode === "agent") {
-          optionLines.push(
-            `  endpoint: process.env.LIGHTMONI_AGENT_ENDPOINT ?? "http://127.0.0.1:4318",`,
-            `  key: process.env.LIGHTMONI_LOCAL_TOKEN,`,
-          );
-          risks.push("Agent 模式引用 LIGHTMONI_LOCAL_TOKEN；不会把中心凭据写入源码。请在运行环境注入本地令牌。");
-        } else if (input.mode === undefined) {
-          risks.push("未指定上报模式；生成代码默认沿用 SDK 的环境变量配置，请确认是直连还是 Agent 模式。");
-        }
+        optionLines.push(`  endpoint: process.env.LIGHTMONI_ENDPOINT,`, `  key: process.env.LIGHTMONI_KEY,`);
+        risks.push("请在运行环境注入中心公网引导地址与SDK Key；客户端自动同步管理员登记的内网入口。");
         optionLines.push("});");
         operations.push({ op: "insert", line: lastImport + 1, content: optionLines.join("\n") });
       }
@@ -490,7 +479,7 @@ export class InstrumentationService {
     }
 
     if (!scan.sdk.found) addManualStep(manualSteps, "先安装并初始化受支持的 LightMoni SDK，再重新扫描 workspace。");
-    if (scan.sdk.mode === "unknown" && scan.sdk.found) addManualStep(manualSteps, "同时发现直连和 Agent 配置；请明确选择一种上报模式后再应用补丁。");
+    if (scan.sdk.mode === "unknown" && scan.sdk.found) addManualStep(manualSteps, "扫描未确定中心直连配置；应用前请配置中心endpoint与SDK Key。");
     if (!planFiles.length && !manualSteps.length)
       addManualStep(manualSteps, "未找到可安全自动插桩的请求边界，请人工选择文件和插入位置。");
     const validationSteps = [...new Set(planFiles.flatMap((file) => file.validation_steps))];

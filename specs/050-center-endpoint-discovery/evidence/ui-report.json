@@ -1,0 +1,17 @@
+{
+  "saved": true,
+  "reloaded": true,
+  "internal_ip_port_update": true,
+  "public_bootstrap": true,
+  "failed_save_retains_input": true,
+  "member_write_denied": true,
+  "languages": [
+    "zh-CN",
+    "en-US"
+  ],
+  "widths": [
+    1440,
+    390
+  ],
+  "errors": []
+}

@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createLightMoni as createCore, extractTrace, injectTrace } from "./core.js";
 export * from "./core.js";
 const context = new AsyncLocalStorage();
-export function createLightMoni(options) { return createCore({ endpoint: process.env.LIGHTMONI_ENDPOINT ?? "http://127.0.0.1:4318", key: process.env.LIGHTMONI_KEY, ...options, contextProvider: () => context.getStore() ?? options.contextProvider?.(), contextRunner: options.contextRunner ?? withTrace }); }
+export function createLightMoni(options) { return createCore({ endpoint: process.env.LIGHTMONI_ENDPOINT, key: process.env.LIGHTMONI_KEY, ...options, contextProvider: () => context.getStore() ?? options.contextProvider?.(), contextRunner: options.contextRunner ?? withTrace }); }
 export function withTrace(trace, action) {
     // Validation and a snapshot prevent caller mutation from changing a scope.
     injectTrace(trace);
@@ -12,3 +12,4 @@ export function withTrace(trace, action) {
 export function traceHandler(client, name, handler, headers) {
     return (...args) => client.withSpan(name, (_scoped, span) => { span.setKind(2); return handler(...args); }, {}, extractTrace(headers(...args)) ?? null);
 }
+export { CenterEndpoints, centerURL } from "./endpoints.js";

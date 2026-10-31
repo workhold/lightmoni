@@ -1,0 +1,91 @@
+{
+  "verified_at": "2026-10-31T06:14:01.075757+00:00",
+  "base_main": "0d81f406816e1619def3925be4bfe6e05d15fcc6",
+  "preintegration_pr_head": "76dd93a3851c5c075fbf0162a7cbafaa66070d05",
+  "worktree": "/tmp/lightmoni-pr23-integration",
+  "scope": "MCP integration with main; no production, registry, remote SSH or real-client OAuth actions",
+  "checks": {
+    "runtime_full": {
+      "tests": 715,
+      "pass": 694,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 21,
+      "sha256": "5bcddefb61ec2d1c9c293e01641f1f4f014a4b46aa474bf5f913f0ed9b1ef3e5"
+    },
+    "runtime_relevant": {
+      "tests": 132,
+      "pass": 132,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "sha256": "ed3365672957173faa3599ab170e43a4ec9f9335df704224c1c73d3b224b7746"
+    },
+    "runtime_final_assertions": {
+      "tests": 37,
+      "pass": 37,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "sha256": "12cb8e3d458ed2791cd6079817d8e8449d559b91b41a7253763dd9bd74a41aa5"
+    },
+    "ai_runtime": {
+      "tests": 71,
+      "pass": 71,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "sha256": "ce3259f284f3148bee784f2b79c914470f9117e39f392db2b90e4f20a3d63415"
+    },
+    "typescript_sdk": {
+      "tests": 22,
+      "pass": 22,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "sha256": "1c6f7310e15aef68c2d754d79ca5a1dcba45ce4c85fe48f5722b9c03e45fe584"
+    },
+    "typecheck": {
+      "command": "npm run typecheck",
+      "exit_code": 0
+    },
+    "build": {
+      "command": "npm run build",
+      "exit_code": 0,
+      "warnings": "Existing third-party use-client bundler directives"
+    },
+    "lockfile": {
+      "command": "npm ci --dry-run --ignore-scripts --no-audit --no-fund",
+      "execution": "isolated manifest/lock directory",
+      "exit_code": 0,
+      "existing_main_package_versions_changed": 0
+    },
+    "mcp_ui": {
+      "passed": true,
+      "checks": [
+        "Personal token requires explicit scope and target consent; default finite lifetime; token only in one-time modal, absent from browser storage and reload",
+        "OAuth client registration preserves explicit redirect URIs; grant revoke sends the selected grant ID",
+        "OAuth deep link and query survive sign-in; consent shows only requested scopes; explicit host selection is required and preserved on approval",
+        "Invalid OAuth request has no approval form",
+        "Canceling authorization does not create a grant",
+        "390px layout has no page overflow; English management UI is available"
+      ],
+      "errors": [],
+      "backend": "Mock API UI checks only; backend security and client interoperability require independent runtime tests."
+    }
+  },
+  "regressions": [
+    "missing beforeApply and/or afterApply rejects pending MCP proposals before any mutation",
+    "real assistant HTTP fallback returns 503 for pending MCP approval; internal approval remains available",
+    "MCP host projection ignores unowned cache, replacement without heartbeat and removed Agent",
+    "task metadata lists persistent platform defaults without template capability",
+    "execution review URL opens supported runs view filtered by host",
+    "main task-network fixture includes hostname and observed_via",
+    "SDK timeout fixture retains TimeoutError without an unreferenced timer cancellation"
+  ],
+  "doca": {
+    "status": "pending_parent_sync",
+    "prior_seq_806_807_is_historical": true
+  },
+  "client_interoperability": "This run uses official SDK transport tests and mock UI only; it does not add real Codex or Claude OAuth verification."
+}

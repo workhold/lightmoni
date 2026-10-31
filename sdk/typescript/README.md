@@ -9,7 +9,7 @@ Node.js 20+，业务 API 使用标准 OTLP JSON；没有运行时 npm 依赖。�
 
 ```typescript
 import { createLightMoni } from "@lightmoni/sdk";
-const mon = createLightMoni({ service: "payment-api", table: "http", endpoint: "http://127.0.0.1:4318" });
+const mon = createLightMoni({ service: "payment-api", table: "http", endpoint: "https://monitor.example.com" });
 const count = mon.counter("http.requests");
 count.add(1, { route: "/payments", method: "POST", status: 200 });
 await mon.withTable("app").withSpan("payment.create", async () => {
@@ -44,11 +44,11 @@ createServer((req, res) => {
 
 `extractTrace` / `injectTrace` 处理 W3C header，`currentTrace()` 返回当前快照。浏览器用 `withSpan` 回调的绑定客户端：`await mon.withSpan('click', async scoped => { await scoped.fetch(url); scoped.log('info','done'); })`；或 `mon.withTrace(context)` 创建绑定客户端。浏览器异步任务不修改全局当前 trace，`withTable` 保留绑定。完整第三方框架/日志 appender 埋点尚未提供。
 
-配置与可靠性默认值同 Go SDK：10 秒 collection、有界 8 MiB 活跃缓冲和 8 MiB 待发送队列、256 批、1 MiB 单批、2000 维度、256 instruments；可按 options 调整。超限与非法输入看 `stats()`。快照冻结后重试 ID/创建时间/正文不变，读者前进 Delta 不丢掉原待发送窗口；队列丢失或永久拒绝会让该实例 flush/shutdown 持续返回错误。SDK 未获 Agent ACK 前崩溃会丢内存；持久化和服务端去重由 Agent/主服务完成。自定义 exporter 必须响应 AbortSignal，并在 durable commit 后成功返回。
+SDK仅直连中心，显式配置中心公网引导URL和SDK Key。管理员登记内网IP及端口后自动同步，内网优先、公网备用，详见[中心地址同步](../../docs/center-endpoints.md)。
 
-直连中心同时配置 `endpoint` 和 `key`，无需 Agent。每份有效启用的 Key 可上报所有业务 table，不绑定 service。Agent 路径不需要 SDK 保管中心 Key；Agent 开启本地令牌时，`key` 传该令牌。`updateKey` 可修复直连 401/403，保留冻结队列。标准 OTLP partialSuccess 不重发整批，拒绝记录可见。
+SDK仅直连中心，显式配置中心公网引导URL和SDK Key。管理员登记内网IP及端口后自动同步，内网优先、公网备用，详见[中心地址同步](../../docs/center-endpoints.md)。
 
-Node.js 容器、Serverless 等服务可用 `process.env.LIGHTMONI_ENDPOINT`、`process.env.LIGHTMONI_KEY` 传入配置，通过 environment / Secret 注入值。容器的 `localhost` 指向容器本身；同一 Docker 网络可使用 `http://lightmoni:8080`，Docker Desktop 访问宿主机可使用 `http://host.docker.internal:端口`。直连缓冲只在进程内，需要本地磁盘缓存时使用 Agent。浏览器继续使用下文的业务后端转发。
+SDK仅直连中心，显式配置中心公网引导URL和SDK Key。管理员登记内网IP及端口后自动同步，内网优先、公网备用，详见[中心地址同步](../../docs/center-endpoints.md)。
 
 ```sh
 cd sdk/typescript

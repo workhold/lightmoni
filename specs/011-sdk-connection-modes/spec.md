@@ -1,5 +1,6 @@
 # Feature Specification: SDK 连接模式与凭据边界
 
+> 历史规格：SDK→Agent路径已由[SDD 050](../../specs/050-center-endpoint-discovery/spec.md)移除，当前SDK仅直连中心。
 **Feature Branch**: `011-sdk-connection-modes`
 **Created**: 2026-10-18
 **Status**: Connection-mode baseline implemented; cross-language verification remains

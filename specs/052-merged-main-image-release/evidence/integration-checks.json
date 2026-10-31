@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-31",
+  "integration_head": "ed8925789f7e728f75d0c1577e9ba6b8030e9bfd",
+  "runtime": {
+    "tests": 668,
+    "passed": 647,
+    "skipped": 21,
+    "failed": 0
+  },
+  "typescript_sdk": {
+    "passed": 22,
+    "failed": 0
+  },
+  "python_sdk": {
+    "passed": 33,
+    "failed": 0
+  },
+  "go_sdk": "go test -race ./... passed",
+  "ai_runtime": {
+    "passed": 71,
+    "failed": 0
+  },
+  "web_model_and_examples": {
+    "passed": 11,
+    "failed": 0
+  },
+  "root_typecheck": "passed",
+  "web_build": "passed with existing dependency module-directive and large-chunk warnings",
+  "dns_browser": {
+    "scenario_groups": 8,
+    "requests": 13,
+    "page_errors": 0
+  },
+  "architecture_sync": "not applicable for packaging; feature architecture sync tracked in PR #28 / SDD050",
+  "source_revision": "8386b5ba8763f16221ad3a8b9cf511d5e7a2e644",
+  "merged_prs": {
+    "27": "c319eab1d26fed254d28756b4739a6975d349d3c",
+    "28": "8386b5ba8763f16221ad3a8b9cf511d5e7a2e644"
+  },
+  "tested_tree": "6074f6becaa66f224434deba5abac2c2c7cbf7f4",
+  "source_tree_matches_tested_tree": true
+}

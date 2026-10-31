@@ -83,7 +83,7 @@ scope 按领域和动作区分，例如 hosts.read、tasks.propose、tasks.sourc
 
 ## 8. 任务中心与统一执行记录
 
-任务定义描述“做什么”，模板固定可复用能力；执行实例固定这一次的能力/源码版本、参数、主机/Agent 与授权。自定义任务支持已有 Node.js/POSIX shell，并逐步增加参数 schema、默认值、枚举、秘密引用、超时/输出上限和一次/周期调度。用户改代码或参数生成新 revision，不能改写正在执行的快照。脚本仍具有 Agent 运行用户权限，MCP 不提供操作系统沙箱；秘密不写入源码或模型参数。秘密引用按主体、用途、目标和固定能力校验 use 权限，由受控执行器临时解析；仅持有 secret_id 不能让任意脚本取得秘密。
+任务定义描述“做什么”，平台默认任务和用户脚本共用真实任务目录，不另设任务模板目录；执行实例固定这一次的能力/源码版本、参数、主机/Agent 与授权。自定义任务支持已有 Node.js/POSIX shell，并逐步增加参数 schema、默认值、枚举、秘密引用、超时/输出上限和一次/周期调度。用户改代码或参数生成新 revision，不能改写正在执行的快照。脚本仍具有 Agent 运行用户权限，MCP 不提供操作系统沙箱；秘密不写入源码或模型参数。秘密引用按主体、用途、目标和固定能力校验 use 权限，由受控执行器临时解析；仅持有 secret_id 不能让任意脚本取得秘密。
 
 统一 execution 关联 task_run、agent_job、deployment、operation_run 或 agent_lifecycle 的真实记录，保留 native_state、phase 和回执引用。中心配置变更记录 revision 与应用状态，有限命令记录租约与退出，部署记录阶段与健康，Agent 自身维护记录独立确认/恢复。MCP 层不自行判定主机成功。
 
@@ -137,7 +137,7 @@ JSON-RPC request ID 只用于本次协议响应关联，MCP 会话只用于协�
 | 领域 | 规划工具/能力 | 首期边界 |
 | --- | --- | --- |
 | 主机 | hosts_list/get、hosts_check_propose | 安全目录；SSH 预检为有记录的只读主机操作，仍需管理员批准 |
-| 任务 | tasks_list/get/templates、tasks_plan、executions_get/list | 元数据默认不含脚本和原始输出；定义/派发/取消/重试生成提案 |
+| 任务 | tasks_list/get、tasks_plan、executions_get/list | 元数据默认不含脚本和原始输出；定义/派发/取消/重试生成提案 |
 | 监控 | telemetry_tables/describe/query | 数据权限单独授权；有界只读；资源隔离不足时拒绝任意 SQL |
 | 告警 | alerts_list/get、silences_list、alerts_plan | 修改生成带 revision 的提案 |
 | 部署 | deployments_list/get/plan | 固定已登记服务、目标和制品；不隐式构建未知代码 |
@@ -173,9 +173,11 @@ JSON-RPC request ID 只用于本次协议响应关联，MCP 会话只用于协�
 
 ## 16. 首期落地范围（SDD 047）
 
-`runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手首批任务工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。外部查询包括主机、任务/模板、执行、提案、遥测表目录和告警规则目录；遥测行、任意 SQL、告警修改、部署与运维写工具尚未开放。表和告警没有主机级数据隔离，目录工具只允许全主机范围授权。
+`runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手首批任务工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。外部查询包括主机、平台默认与用户任务、执行、提案、遥测表目录和告警规则目录；告警启用时共 10 个工具。遥测行、任意 SQL、告警修改、部署与运维写工具尚未开放。表和告警没有主机级数据隔离，目录工具只允许全主机范围授权。
 
-外部任务操作仅创建已有任务的派发、取消与重试提案。TaskProposalService 保存真实来源、凭据与稳定 grant，不伪造助手 session；既有 owner 和人工审批边界保留。审批前与 Agent 领取排队项前分别复验外部授权，撤销、过期、降权或主机范围缩小后不得开始新项。新脚本/任务定义、持续授权和服务主体不属于本期。短期 OAuth access token 到期不使已批准项失效，稳定 grant 到期/撤销才阻止尚未开始项。
+外部任务操作仅创建已有任务的派发、取消与重试提案。TaskProposalService 保存真实来源、凭据与稳定 grant，不伪造助手 session；既有 owner 和人工审批边界保留。审批前与 Agent 领取排队项前分别复验外部授权，撤销、过期、降权或主机范围缩小后不得开始新项。新脚本/任务定义、持续授权和服务主体不属于本期。短期 OAuth access token 到期不使已批准项失效，稳定 grant 到期/撤销才阻止尚未开始项。若 MCP 配置失效、Dispatcher 未创建或审批前/后的授权适配器缺少任一项，尚未完成的 MCP 来源提案拒绝应用，不能由助手 fallback 降级为内部操作。排队项和自动重试保留稳定授权，缺少领取前校验器时 fail closed；主干的计划、并发、队列及任务版本校验继续生效。
+
+主机资产名称与系统观测分别展示：`name` 由用户配置，`observed_hostname` 只读取当前绑定且未移除的 Agent；替换后尚未注册或旧缓存没有来源时返回空值。
 
 统一索引本期仅关联真实 task run，在接受和查询时投影；不声称已覆盖全部领域或实时维护所有投影。查询始终读取原生 run 状态。提案读取不隐含 executions.read：缺少该权限时仅返回执行 ID 引用。默认输出省略源码、配置、原始主机输出与租约；源码须 tasks.source.read 显式请求。
 

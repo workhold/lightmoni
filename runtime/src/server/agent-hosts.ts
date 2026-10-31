@@ -28,6 +28,16 @@ const observation = (value: unknown, max: number): string => {
 };
 const table = (db: DB, name: string) => Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?", name));
 
+/** A host's unowned legacy cache must never identify its current Agent. */
+export function currentAgentHostname(db: DB, machineID: string, agentID: string): string {
+  if (!agentID || isAgentRemoved(db, agentID) || !table(db, "agents")) return "";
+  const agent = db.get<Record<string, unknown>>(
+    "SELECT a.* FROM managed_machines m JOIN agents a ON a.id=m.agent_id WHERE m.id=? AND m.agent_id=?",
+    machineID, agentID,
+  );
+  return observation(agent?.hostname, 128);
+}
+
 /** Unknown attempts remain a barrier until explicitly retried or reviewed. */
 export function hasActiveTaskRuns(db: DB, agentID: string, hostID = ""): boolean {
   if (!table(db, "task_runs")) return false;

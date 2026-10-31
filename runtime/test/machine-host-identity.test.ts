@@ -120,6 +120,19 @@ test("atomic first-key recording rejects conflicting, stale, deleted and unautho
   } finally { db.close(); }
 });
 
+test("host-key verification ignores user labels but still rejects a different login target", () => {
+  const db=new DB(":memory:");try{
+    createAgentHostSchema(db);
+    db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,created_at,updated_at) VALUES('host','Original label','127.0.0.1',22,'root','direct_ssh','now','now')");
+    const expected=db.get<any>("SELECT * FROM managed_machines WHERE id='host'")!;
+    db.run("UPDATE managed_machines SET name='New user label' WHERE id='host'");
+    assert.equal(recordMachineHostKey(db,expected,firstKey.raw,"first"),true);
+    assert.equal(db.get<any>("SELECT name FROM managed_machines WHERE id='host'")!.name,"New user label");
+    db.run("UPDATE managed_machines SET username='different-login' WHERE id='host'");
+    assert.equal(recordMachineHostKey(db,expected,firstKey.raw,"later"),false);
+  }finally{db.close();}
+});
+
 test("revocation, expiry, cancellation and target mutation during delayed authentication cannot execute a command", async t => {
   for (const mutation of ["revoke", "endpoint", "expiry", "cancel"] as const) {
     const ssh = await sshFixture(t), f = await platform(t), h = await f.host(ssh.port, "password", ssh.password);

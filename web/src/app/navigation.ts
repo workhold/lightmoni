@@ -1,4 +1,4 @@
-import {ApiOutlined,AppstoreOutlined,BellOutlined,CloudServerOutlined,CloudUploadOutlined,DashboardOutlined,DatabaseOutlined,MessageOutlined,SafetyCertificateOutlined,SearchOutlined,SettingOutlined,ToolOutlined} from '@ant-design/icons';
+import {ApiOutlined,AppstoreOutlined,BellOutlined,CloudServerOutlined,DashboardOutlined,DatabaseOutlined,KeyOutlined,MessageOutlined,SafetyCertificateOutlined,SearchOutlined,SettingOutlined,ToolOutlined} from '@ant-design/icons';
 
 export const navigationGroups=[
  {id:'workspace',label:'工作台',english:'Workspace',items:[
@@ -12,8 +12,12 @@ export const navigationGroups=[
  ]},
  {id:'operations',label:'运维工具',english:'Operations',items:[
   {path:'/machines',label:'主机',english:'Hosts',icon:CloudServerOutlined,adminOnly:false},
-  {path:'/services',label:'服务部署',english:'Service deployments',icon:CloudUploadOutlined,adminOnly:true},
-  {path:'/operations',label:'网站与运维',english:'Websites & operations',pageLabel:'运维工具',pageEnglish:'Operations',icon:ToolOutlined,adminOnly:true},
+  {path:'/connection-credentials',label:'连接凭据',english:'Connection credentials',icon:KeyOutlined,adminOnly:true},
+  {path:'/clusters',label:'集群',english:'Clusters',icon:CloudServerOutlined,adminOnly:true},
+  {path:'/applications',label:'应用管理',english:'Applications',icon:AppstoreOutlined,adminOnly:true},
+  {path:'/websites',label:'网站',english:'Websites',icon:ToolOutlined,adminOnly:true},
+  {path:'/domains',label:'托管域名',english:'DNS zones',icon:DatabaseOutlined,adminOnly:true},
+  {path:'/certificates',label:'证书管理',english:'Certificates',icon:SafetyCertificateOutlined,adminOnly:true},
  ]},
  {id:'data',label:'数据与接入',english:'Data & ingestion',items:[
   {path:'/data',label:'数据接入',english:'Data ingestion',icon:DatabaseOutlined,adminOnly:false},
@@ -26,4 +30,4 @@ export const navigationGroups=[
  ]},
 ];
 
-export const navigationLinks=navigationGroups.flatMap(group=>group.items).map(item=>({...item,pageLabel:('pageLabel' in item?item.pageLabel:undefined)??item.label,pageEnglish:('pageEnglish' in item?item.pageEnglish:undefined)??item.english}));
+export const navigationLinks=navigationGroups.flatMap(group=>group.items).map(item=>({...item,pageLabel:item.label,pageEnglish:item.english}));

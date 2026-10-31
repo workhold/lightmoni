@@ -1,0 +1,79 @@
+{
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426",
+  "registry_digest": "sha256:5cc3dbe52b86feb5412509c2e744a10097db0b2e80e9191c626d95207fea2ef4",
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "compose_checks": [
+    {
+      "entry": "compose.yaml",
+      "mode": "unset",
+      "image": "docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426",
+      "other_fields_unchanged": true
+    },
+    {
+      "entry": "compose.yaml",
+      "mode": "old-dotenv",
+      "image": "docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426",
+      "other_fields_unchanged": true
+    },
+    {
+      "entry": "compose.yaml",
+      "mode": "old-shell",
+      "image": "docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426",
+      "other_fields_unchanged": true
+    },
+    {
+      "entry": "compose.yaml",
+      "mode": "explicit-rollback-override",
+      "image": "docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880",
+      "other_fields_unchanged": true
+    },
+    {
+      "entry": "compose.yaml",
+      "mode": "database-password-still-required",
+      "passed": true
+    },
+    {
+      "entry": "deploy/with-clickhouse/compose.yaml",
+      "mode": "unset",
+      "image": "docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426",
+      "other_fields_unchanged": true
+    },
+    {
+      "entry": "deploy/with-clickhouse/compose.yaml",
+      "mode": "old-dotenv",
+      "image": "docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426",
+      "other_fields_unchanged": true
+    },
+    {
+      "entry": "deploy/with-clickhouse/compose.yaml",
+      "mode": "old-shell",
+      "image": "docker.heyphp.com/lightmoni/lightmoni:20261030-ddd7426",
+      "other_fields_unchanged": true
+    },
+    {
+      "entry": "deploy/with-clickhouse/compose.yaml",
+      "mode": "explicit-rollback-override",
+      "image": "docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880",
+      "other_fields_unchanged": true
+    },
+    {
+      "entry": "deploy/with-clickhouse/compose.yaml",
+      "mode": "database-password-still-required",
+      "passed": true
+    },
+    {
+      "entry": ".env.example",
+      "mode": "no-image-variable-in-example",
+      "passed": true
+    },
+    {
+      "entry": "deploy/with-clickhouse/.env.example",
+      "mode": "no-image-variable-in-example",
+      "passed": true
+    }
+  ],
+  "architecture_sync": "not applicable: only deployment image selection and documentation change; topology and runtime boundaries unchanged"
+}

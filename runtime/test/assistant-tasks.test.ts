@@ -26,6 +26,69 @@ function fixture(t: any) {
 }
 const dispatch = { operation: "task.dispatch", task_id: "fixture-task", reason: "Run the reviewed fixture" };
 
+test("pending external proposals fail closed without both authorization adapters while internal approval remains available", t => {
+  const f = fixture(t);
+  const external = f.proposals.createFrom(admin, { source: "mcp", grant_id: "fixture-grant" }, dispatch);
+  for (const hooks of [{}, { beforeApply() {} }, { afterApply() {} }]) {
+    const unguarded = new TaskProposalService(f.deps, f.runs, hooks);
+    assert.throws(() => unguarded.apply(admin, external.id), error =>
+      (error as any).status === 503 && /外部授权校验不可用/.test((error as Error).message));
+    assert.equal(f.proposals.get(admin, external.id).status, "awaiting_approval");
+    assert.equal(f.runs.list().length, 0);
+    assert.equal(f.db.get<any>("SELECT count(*) n FROM assistant_task_audit")!.n, 0);
+  }
+  const internal = f.proposals.create(admin, "session", dispatch);
+  assert.equal(f.proposals.apply(admin, internal.id).status, "completed");
+  assert.equal(f.runs.list().length, 1);
+  assert.equal(f.proposals.apply(admin, internal.id).status, "completed");
+  assert.equal(f.runs.list().length, 1);
+});
+
+test("AI calendar script creation uses the same reviewed definition as manual tasks and does not execute on drafting", async t => {
+  const f = fixture(t), tool = f.tools.find(tool => tool.name === "propose_task_action")!;
+  const definition = {...f.definition, name:"Daily backup", schedule:{mode:"cron",cron:"0 2 * * *",timezone:"Asia/Shanghai"},
+    script:{...f.definition.script, runtime:"shell", code:"printf '%s\\n' \"$1\"", args:["daily backup"], cwd:"/var/tmp"},
+    execution_policy:{max_concurrency:3,queue_timeout_seconds:1800,retry_count:0,retry_delay_seconds:60}};
+  const drafted = await tool.execute({operation:"task.create",task:definition,reason:"Run the user reviewed backup at 02:00"},new AbortController().signal,admin,{session_id:"calendar-session"});
+  assert.equal(drafted.proposal.status,"awaiting_approval");
+  assert.equal(f.nodes.tasks().some(task=>task.name===definition.name),false);
+  assert.equal(f.runs.list().length,0);
+  const applied=f.proposals.apply(admin,drafted.proposal.id),saved=f.nodes.getTask(applied.task_id);
+  assert.deepEqual(saved.schedule,definition.schedule);
+  assert.deepEqual(saved.script,definition.script);
+  assert.deepEqual(saved.execution_policy,definition.execution_policy);
+  assert.equal(f.runs.list().length,0);
+  assert.ok((tool.schema as any).properties.task.properties.schedule.properties.timezone);
+});
+
+test("AI creates only scripts and edits platform-default tasks through human approval without changing origin or type", t => {
+  const f = fixture(t), defaults = f.nodes.tasks().filter(task => task.origin === "builtin");
+  assert.equal(defaults.length, 3);
+  for (const type of ["host", "probe", "log"]) {
+    assert.throws(() => f.proposals.create(admin, "session", { operation: "task.create", reason: "Cannot create another collector", task: { name: "Extra collector", type, enabled: true, target_all: true } }), /脚本|script/);
+  }
+  assert.throws(() => f.proposals.create(admin, "session", { operation: "task.create", reason: "Cannot forge a default", task: { ...f.definition, origin: "builtin" } }), /来源/);
+  assert.throws(() => f.proposals.create(admin, "session", { operation: "task.create", reason: "Removed template contract", task: { ...f.definition, template_id: "metrics" } }), /模板|template/);
+  const metrics = defaults.find(task => task.type === "host")!;
+  const disable = f.proposals.create(admin, "session", { operation: "task.update", task_id: metrics.id, reason: "Pause default collection", task: { enabled: false } });
+  assert.equal(f.nodes.getTask(metrics.id).enabled, true);
+  f.proposals.apply(admin, disable.id);
+  assert.equal(f.nodes.getTask(metrics.id).enabled, false);
+  assert.equal(f.nodes.getTask(metrics.id).origin, "builtin");
+  assert.throws(() => f.proposals.create(admin, "session", { operation: "task.update", task_id: metrics.id, reason: "Cannot convert default to script", task: { ...f.definition } }), /类型/);
+  assert.throws(() => f.proposals.create(admin, "session", { operation: "task.update", task_id: metrics.id, reason: "Cannot strip default source", task: { origin: "custom" } }), /来源/);
+  assert.equal(f.runs.list().length, 0);
+});
+
+test("an AI one-time plan that becomes past before approval must be rescheduled rather than silently replayed", t => {
+  const f=fixture(t);
+  const draft=f.proposals.create(admin,"session",{operation:"task.create",reason:"One future check",task:{...f.definition,name:"One-time check",schedule:{mode:"at",run_at:"2026-10-30T01:01:00Z"}}});
+  f.advance(61);
+  assert.throws(()=>f.proposals.apply(admin,draft.id),/必须晚于当前时间/);
+  assert.equal(f.nodes.tasks().some(task=>task.name==="One-time check"),false);
+  assert.equal(f.runs.list().length,0);
+});
+
 test("AI has draft and read tools but no apply or direct execution tool; draft does not queue a run", async t => {
   const f = fixture(t), tool = f.tools.find(tool => tool.name === "propose_task_action")!;
   assert.equal(tool.effect, "draft");
@@ -146,6 +209,14 @@ test("the real assistant HTTP approval route requires an administrator and expli
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
   try {
     const p = f.proposals.create(admin, "session", dispatch), path = base + "/api/v1/assistant/task-proposals/" + p.id;
+    const external = f.proposals.createFrom(admin, { source: "mcp", grant_id: "fixture-grant" }, dispatch);
+    const rejected = await fetch(base + "/api/v1/assistant/task-proposals/" + external.id + "/apply", {
+      method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ confirm: true }),
+    });
+    assert.equal(rejected.status, 503);
+    assert.match((await rejected.json() as any).error, /外部授权校验不可用/);
+    assert.equal(f.proposals.get(admin, external.id).status, "awaiting_approval");
+    assert.equal(f.runs.list().length, 0);
     let response = await fetch(path);
     assert.equal(response.status, 200); assert.equal((await response.json() as any).status, "awaiting_approval");
     const apply = (input: any) => fetch(path + "/apply", { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify(input) });

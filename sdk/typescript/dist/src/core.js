@@ -1,3 +1,4 @@
+import { CenterEndpoints } from "./endpoints.js";
 import { copyMetricWindows, metricWindow } from './windows.js';
 import { Distribution } from './distribution.js';
 import { copyLogSampling, copyExclusions, matches, sampleLog } from './sampling.js';
@@ -55,6 +56,8 @@ class State {
     stats = { pendingBatches: 0, pendingBytes: 0, bufferBytes: 0, deliveredBatches: 0, retriedBatches: 0, droppedRecords: 0, rejectedRecords: 0, invalidRecords: 0, overflowRecords: 0, sampledOutLogs: 0, unmatchedLogs: 0, excludedLogs: 0, disabledRecords: 0, reportingDisabled: false };
     changed = new Set();
     exporter;
+    endpoints;
+    endpointInterval;
     localSampling = {};
     remoteSampling = {};
     remoteDisabled = false;
@@ -115,7 +118,13 @@ class State {
             if (!/^https?:$/.test(endpoint.protocol))
                 throw new Error("endpoint must use HTTP or HTTPS");
         }
-        this.exporter = options.exporter ?? new HTTPExporter(options.endpoint, () => this.options.key);
+        this.endpoints = options.exporter ? undefined : new CenterEndpoints(options.endpoint, () => this.options.key ? { Authorization: `Bearer ${this.options.key}` } : {});
+        this.exporter = options.exporter ?? new HTTPExporter(options.endpoint, () => this.options.key, this.endpoints);
+        if (this.endpoints) {
+            this.endpointInterval = setInterval(() => { if (!this.closing)
+                void this.endpoints.refresh().catch(() => { }); }, 30000);
+            this.endpointInterval.unref?.();
+        }
         this.interval = setInterval(() => { if (!this.closing) {
             this.collect(false);
             this.kick();
@@ -184,9 +193,10 @@ class State {
             throw new Error('remote configuration is disabled or SDK closed');
         const request = new AbortController();
         this.configRequest = request;
-        const timer = setTimeout(() => request.abort(), 5000);
+        const timer = setTimeout(() => request.abort(new DOMException("request timed out", "TimeoutError")), 5000);
         try {
-            const response = await fetch(endpoint.replace(/\/$/, '') + '/v1/sdk-config?metric_windows=1', { headers: this.options.key ? { Authorization: `Bearer ${this.options.key}` } : {}, signal: request.signal, redirect: 'error' });
+            const init = { headers: this.options.key ? { Authorization: `Bearer ${this.options.key}` } : {}, signal: request.signal, redirect: 'error' };
+            const response = await (this.endpoints && endpoint === this.options.endpoint ? this.endpoints.request('/v1/sdk-config?metric_windows=1', init) : fetch(endpoint.replace(/\/$/, '') + '/v1/sdk-config?metric_windows=1', init));
             if (response.status !== 200) {
                 void response.body?.cancel();
                 throw new Error(`SDK configuration HTTP ${response.status}`);
@@ -602,7 +612,7 @@ class State {
                     continue;
                 }
                 this.request = new AbortController();
-                const timer = setTimeout(() => this.request?.abort(), this.settings.requestTimeoutMs);
+                const timer = setTimeout(() => this.request?.abort(new DOMException("request timed out", "TimeoutError")), this.settings.requestTimeoutMs);
                 let failure;
                 try {
                     await this.exporter.deliver({ ...item.batch, payload: item.batch.payload.slice() }, this.request.signal);
@@ -765,6 +775,8 @@ export class LightMoni {
         throw new Error('SDK closed'); this.state.updateLogSampling(policies); }
     setReportingEnabled(enabled) { this.state.options.disabled = !enabled; this.state.setReportingDisabled(!enabled || this.state.remoteDisabled); }
     async refreshConfig() { await this.state.refreshConfig(); }
+    async refreshEndpoints() { await this.state.endpoints?.refresh(); }
+    endpointStatus() { return this.state.endpoints?.status(); }
     /** Trace metadata is optional and separate from attrs; no context creates no trace. */
     log(level, body, attrs = {}, context = this.currentTrace()) {
         if (this.state.closing) {
@@ -828,11 +840,13 @@ export class LightMoni {
         clearInterval(this.state.selfInterval);
         clearInterval(this.state.configInterval);
         this.state.configRequest?.abort();
+        clearInterval(this.state.endpointInterval);
         try {
             await this.flush({ timeoutMs });
         }
         finally {
             this.state.stopped = true;
+            this.state.endpoints?.close();
             this.state.request?.abort();
             this.state.retryNow?.();
             this.state.notify();
@@ -897,9 +911,11 @@ export function injectTrace(context) { if (!validTrace(context))
 export class HTTPExporter {
     endpoint;
     key;
-    constructor(endpoint, key = () => undefined) {
+    endpoints;
+    constructor(endpoint, key = () => undefined, endpoints) {
         this.endpoint = endpoint;
         this.key = key;
+        this.endpoints = endpoints;
     }
     async deliver(batch, signal) {
         const headers = { "Content-Type": batch.contentType, "X-Lightmoni-Table": batch.table, "X-Lightmoni-Batch-ID": batch.id, "X-Lightmoni-Batch-Created-At": batch.createdAt };
@@ -908,7 +924,8 @@ export class HTTPExporter {
             headers.Authorization = `Bearer ${key}`;
         let response;
         try {
-            response = await fetch(`${this.endpoint.replace(/\/$/, "")}/v1/${batch.signal}`, { method: "POST", headers, body: batch.payload.slice().buffer, signal, redirect: "error" });
+            const init = { method: "POST", headers, body: batch.payload.slice().buffer, signal, redirect: "error" };
+            response = await (this.endpoints ? this.endpoints.request(`/v1/${batch.signal}`, init) : fetch(`${this.endpoint.replace(/\/$/, "")}/v1/${batch.signal}`, init));
         }
         catch {
             throw new DeliveryError("telemetry network request failed", true);
