@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-31",
+  "scope": "design_only",
+  "markdown_files_checked": 10,
+  "broken_local_links": [],
+  "functional_requirements": 22,
+  "user_stories": 4,
+  "unique_ordered_tasks": 25,
+  "mermaid_and_doca_node_labels_match": true,
+  "mermaid_and_doca_edges_match": true,
+  "git_diff_check": "passed",
+  "obvious_credential_patterns": "none",
+  "runtime_tests_run": false,
+  "recovery_benchmark_run": false
+}
