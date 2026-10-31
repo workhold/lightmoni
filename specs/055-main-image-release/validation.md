@@ -24,7 +24,7 @@ Docker Desktop 本机完整构建 Linux arm64/amd64，沿用 Node 24.15.0 Docker
 
 更新 latest 前核对其未并发变化；独立客户端回读双标签索引、平台 manifest/config，分别重新拉取 amd64/arm64，架构、revision、非 root 用户与镜像 ID 均匹配已验收镜像，见 [verified-release.json](evidence/verified-release.json)。历史 `20261030-ddd7426`、`20261031-e3d1192` 与 `20261031-8386b5b` 的摘要保持不变，见 [historical-tags.json](evidence/historical-tags.json)。凭据仅由 Docker credential helper 在进程内提供，未写入源码、命令参数、镜像或公开报告。
 
-[GitHub Release 20261031-c209a18](https://github.com/workhold/lightmoni/releases/tag/20261031-c209a18) 绑定构建源码提交。Compose、部署说明与验收记录通过本发布分支 PR 交付，最终合入状态以该 PR 与本次收尾回执为准。配置提交晚于镜像源码，只更新发布引用与证据，不改变镜像中的应用代码。
+[GitHub Release 20261031-c209a18](https://github.com/workhold/lightmoni/releases/tag/20261031-c209a18) 绑定构建源码提交。Compose、部署说明与验收记录通过 [发布 PR #35](https://github.com/workhold/lightmoni/pull/35) 交付，最终合入状态以该 PR 与本次收尾回执为准。配置提交晚于镜像源码，只更新发布引用与证据，不改变镜像中的应用代码。
 
 ## 架构影响
 
