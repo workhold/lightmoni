@@ -3,6 +3,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { encodeOTLP, nowNano, formatNanoTime, parseNanoTime } from '../shared/otlp.js';
 import { APPLICATION_TABLE, type ApplicationTarget, type DockerInventory } from '../shared/application-observation.js';
 import { operationCommand } from './operations.js';
+import { readDockerInventory, dockerError } from './docker.js';
 import { saveLogCursor } from './queue.js';
 import type { LogAgent } from './file-logs.js';
 import type { LightMoni } from '@lightmoni/sdk';
@@ -62,20 +63,21 @@ const str = (key: string, value: string) => ({key,value:{stringValue:value}});
 export class ApplicationObserver {
   targets: ApplicationTarget[] = [];
   inventory?: DockerInventory;
+  private inventoryPending?: Promise<DockerInventory>;
   private clients = new Map<string, ReturnType<LightMoni['gauge']>>();
   constructor(readonly agent: LogAgent & {sdk: LightMoni}, readonly command: OperationExecutionContext['command'] = operationCommand,
     readonly logs: (args:string[], signal?:AbortSignal,selected?:'stdout'|'stderr',checkpoint?:Checkpoint)=>Promise<Output> = readDockerLogs) {}
+  refreshInventory(signal?: AbortSignal): Promise<DockerInventory> {
+    if(this.inventoryPending)return this.inventoryPending;
+    this.inventoryPending=readDockerInventory(this.command,signal).then(snapshot=>this.inventory=snapshot).catch(error=>{
+      this.inventory={observed_at:this.inventory?.observed_at??new Date(0).toISOString(),attempted_at:new Date().toISOString(),state:'unavailable',error:dockerError(error),containers:this.inventory?.containers??[],truncated:this.inventory?.truncated??false};
+      throw error;
+    }).finally(()=>{this.inventoryPending=undefined;});
+    return this.inventoryPending;
+  }
   async collect(signal?: AbortSignal) {
-    const at = new Date().toISOString();
     try {
-      const result = await this.command('docker',['--context','default','ps','--all','--no-trunc','--format','{{json .}}'],{timeoutMs:15000,signal});
-      const all = result.stdout.trim().split('\n').filter(Boolean).map(l=>JSON.parse(l));
-      const containers = all.slice(0,500).map(c => {
-        if (!/^[a-f0-9]{12,64}$/.test(c.ID)) throw Error('invalid_docker_inventory');
-        const labels = Object.fromEntries(String(c.Labels??'').split(',').map((v:string)=>{const i=v.indexOf('=');return [v.slice(0,i),v.slice(i+1)];}));
-        return {id:c.ID,name:String(c.Names??'').slice(0,256),image:String(c.Image??'').slice(0,256),state:String(c.State??'').slice(0,32),ports:String(c.Ports??'').slice(0,1024),deployment_id:(labels['io.lightmoni.platform.instance']??'').slice(0,128)};
-      });
-      this.inventory = {observed_at:at,state:'ready',containers,truncated:all.length>500};
+      const {containers} = await this.refreshInventory(signal);
       const targets = new Map(this.targets.map(t=>[t.deployment_id,t]));
       const managed = containers.filter(c=>targets.has(c.deployment_id));
       const running = managed.filter(c=>c.state==='running');
@@ -102,7 +104,6 @@ export class ApplicationObserver {
       }
       if(failures.length)throw Error('application_log_collection_failed');
     } catch(error) {
-      if (!this.inventory || this.inventory.observed_at!==at) this.inventory={observed_at:this.inventory?.observed_at??at,state:'unavailable',error:'docker_collection_unavailable',containers:this.inventory?.containers??[],truncated:false};
       throw error;
     }
   }
