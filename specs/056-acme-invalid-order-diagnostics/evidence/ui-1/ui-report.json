@@ -1,0 +1,30 @@
+{
+  "passed": 13,
+  "checks": [
+    "Creating an ACME certificate closes immediately while DNS propagation is blocked",
+    "Status log icon opens persisted real Router/SQLite ACME and DNS progress",
+    "Automatic polling shows the CA DNS problem and cleanup, without challenge values or credentials",
+    "Manual issuance returns immediately and opens the same execution history drawer",
+    "History selection loads the selected execution without mixing events",
+    "English and narrow-screen execution drawer render without runtime errors",
+    "Legacy generic errors explain that historical causes cannot be reconstructed",
+    "Cached invalid orders show the authorization DNS reason and HTTP status in English/Chinese without tokens or TXT values, and the order read is recorded only as failed",
+    "Real signed chain and matching private key download via the administrator UI, with immutable version filenames and no private key in the viewer",
+    "Load failure retries and download failure preserves the displayed certificate",
+    "Certificate viewer renders on a narrow dark English screen",
+    "Self-signed certificates disable missing chain downloads, explain the empty chain, and open from certificate details",
+    "Certificate controls fit a simulated 200 percent view: 720 CSS pixels at 2x device scale"
+  ],
+  "errors": [],
+  "backend": "Real loopback Router + SQLite; synthetic ACME/DNS peers; no production requests",
+  "screenshots": [
+    "artifacts/screenshots/specs/056-acme-invalid-order-diagnostics/evidence/ui-1/certificate-pending.png",
+    "artifacts/screenshots/specs/056-acme-invalid-order-diagnostics/evidence/ui-1/certificate-failed.png",
+    "artifacts/screenshots/specs/056-acme-invalid-order-diagnostics/evidence/ui-1/certificate-mobile-en.png",
+    "artifacts/screenshots/specs/056-acme-invalid-order-diagnostics/evidence/ui-1/certificate-invalid-order-en.png",
+    "artifacts/screenshots/specs/056-acme-invalid-order-diagnostics/evidence/ui-1/certificate-invalid-order-zh.png",
+    "artifacts/screenshots/specs/056-acme-invalid-order-diagnostics/evidence/ui-1/certificate-download-zh.png",
+    "artifacts/screenshots/specs/056-acme-invalid-order-diagnostics/evidence/ui-1/certificate-download-mobile-en.png",
+    "artifacts/screenshots/specs/056-acme-invalid-order-diagnostics/evidence/ui-1/certificate-download-zoom-200.png"
+  ]
+}

@@ -27,6 +27,7 @@ export class CertificateProgress {
     for (const secret of [...this.secrets].sort((a, b) => b.length - a.length))
       result = result.split(secret).join("[redacted]");
     return result
+      .replace(/(\bTXT(?:\s+record)?\s*(?:[:=]\s*)?)(?:"[^"]*"|'[^']*')/gi, "$1[redacted]")
       .replace(/\b(Bearer|Basic)\s+[^\s,;'"]+/gi, "$1 [redacted]")
       .replace(/((?:access[_-]?key(?:[_-]?(?:id|secret))?|secret|password|token|nonce|signature|authorization|keyAuthorization|eab_hmac_key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi, "$1[redacted]")
       .replace(/https?:\/\/[^\s"'<>]+/gi, raw => {
@@ -54,6 +55,24 @@ export class CertificateProgress {
       ...(typeof errorType === "string" && /^(urn:ietf:params:acme:error:)?[a-zA-Z][\w.-]{0,100}$/.test(errorType) && this.redact(errorType) === errorType ? {error_type: errorType} : {}),
       ...(Number.isInteger(status) && status >= 100 && status <= 599 ? {http_status: status} : {}),
       ...(typeof requestID === "string" && /^[\w.-]{1,128}$/.test(requestID) && this.redact(requestID) === requestID ? {request_id: requestID} : {})};
+  }
+  problemDiagnostic(problem: unknown, phase: string, code: string, domains: string[], domain?: string): CertificateDiagnostic | undefined {
+    const entries: {message: string; type?: unknown; status?: unknown; domain?: string; depth: number}[] = [];
+    const knownDomain = (value: unknown) => typeof value === "string" && domains.includes(value) ? value : undefined;
+    const visit = (value: any, inherited: string | undefined, depth: number) => {
+      if (!value || typeof value !== "object" || depth > 2 || entries.length >= 5) return;
+      const target = knownDomain(value.identifier?.value) ?? inherited;
+      if (typeof value.detail === "string" && value.detail.trim())
+        entries.push({message: this.redact(value.detail), type: value.type, status: value.status, domain: target, depth});
+      if (Array.isArray(value.subproblems))
+        for (const child of value.subproblems.slice(0, 5)) visit(child, target, depth + 1);
+    };
+    visit(problem, knownDomain(domain), 0);
+    if (!entries.length) return;
+    const specific = entries.find(entry => entry.depth > 0) ?? entries[0];
+    const diagnostic = this.diagnostic(Object.assign(new Error(entries.map(entry => (entry.domain ? entry.domain + ": " : "") + entry.message).join("\n")),
+      {code, type: specific.type ?? (problem as any)?.type, statusCode: specific.status ?? (problem as any)?.status}), phase);
+    return {...diagnostic, ...(specific.domain ? {domain: specific.domain} : {})};
   }
   wrap(error: unknown, phase: string, fallback?: string) {
     return new CertificateIssueError(this.diagnostic(error, phase, fallback));

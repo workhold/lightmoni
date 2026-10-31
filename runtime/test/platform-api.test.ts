@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { X509Certificate, createPrivateKey } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdtemp, realpath, readFile, stat, rm } from "node:fs/promises";
@@ -11,6 +12,8 @@ import { cipher } from "../src/shared/crypto.js";
 import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { registerOperations } from "../src/server/operations.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
+import { getCertificateMaterial } from "../src/ops/certificates.js";
+import { certificateChain } from "./fixtures/certificate-material.js";
 import { AgentJobRunner } from "../src/agent/jobs.js";
 import type { Dependencies } from "../src/shared/types.js";
 async function setup(t: any, certificate?: Parameters<typeof registerOperationsPlatform>[1]["certificate"]) {
@@ -210,6 +213,7 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
     });
   };
   return {
+    base,
     root,
     db,
     jobs,
@@ -222,6 +226,60 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
     finish,
   };
 }
+test("administrators view public certificate material and download immutable versions without exposing private keys elsewhere", async t => {
+  const f = await setup(t);
+  const cert = await f.create("certificate", "download \"证书", {source:"self_signed",domains:["download.example.test"],validity_days:3});
+  for (let n=0;n<200&&!f.platform.store.get(cert.id).status.certificate_version;n++) await new Promise(resolve=>setTimeout(resolve,10));
+  const material = getCertificateMaterial(f.platform.store,cert.id);
+  const path = "/ops/resources/"+cert.id+"/certificate";
+  const response = await fetch(f.base+"/api/v1"+path), view = (await response.json() as any).certificate;
+  assert.equal(response.status,200);assert.equal(response.headers.get("cache-control"),"no-store");
+  assert.equal(view.certificate_version,material.certificate_version);
+  assert.equal(view.chain_length,1);assert.equal(view.chain_pem,"");
+  assert.equal(new X509Certificate(view.certificate_pem).fingerprint256,material.fingerprint_sha256);
+  assert.deepEqual(view.domains,["download.example.test"]);
+  assert.ok(!JSON.stringify(view).includes("PRIVATE KEY"));assert.ok(!("private_key_pem" in view));
+  const download = (version:unknown,format:unknown,role="admin",origin?:string) => fetch(f.base+"/api/v1"+path+"/download",{method:"POST",headers:{"content-type":"application/json","x-role":role,...(origin?{origin}:{})},body:JSON.stringify({version,format})});
+  for (const [format,expected,name] of [["cert",view.certificate_pem,"cert.pem"],["fullchain",view.fullchain_pem,"fullchain.pem"],["private_key",material.private_key_pem,"privkey.pem"]]) {
+    const result=await download(view.certificate_version,format);
+    assert.equal(result.status,200);assert.equal(result.headers.get("cache-control"),"no-store");assert.equal(result.headers.get("x-content-type-options"),"nosniff");
+    assert.equal(result.headers.get("content-type"),"application/x-pem-file");assert.match(result.headers.get("content-disposition")!,new RegExp('^attachment; filename="[A-Za-z0-9_-]+-'+name+'"$'));
+    assert.equal(await result.text(),expected);
+  }
+  assert.ok(new X509Certificate(view.certificate_pem).checkPrivateKey(createPrivateKey(material.private_key_pem)));
+  assert.equal((await download(view.certificate_version,"chain")).status,409);
+  assert.equal((await f.req(path,"GET",undefined,{"x-role":"member"})).status,403);
+  const denied=await download(view.certificate_version,"private_key","member");assert.equal(denied.status,403);assert.equal(denied.headers.get("cache-control"),"no-store");assert.ok(!(await denied.text()).includes("PRIVATE KEY"));
+  assert.equal((await download(view.certificate_version,"private_key","admin","https://evil.example")).status,403);
+  assert.equal((await download("../key","private_key")).status,400);
+  assert.equal((await download(view.certificate_version,"zip")).status,400);
+  assert.equal((await download(undefined,"private_key")).status,400);
+  const other=f.platform.store.create("certificate","not issued",{source:"self_signed",domains:["other.example.test"]},"admin");
+  assert.equal((await f.req("/ops/resources/"+other.id+"/certificate")).body.error,"certificate_not_issued");
+  assert.equal((await download(other.id,"private_key")).status,409);
+  assert.equal((await f.req("/ops/resources/"+f.cluster.id+"/certificate")).status,400);
+  // A renewal changes the active version; an open viewer must still download its original pair.
+  const issue=await f.action(f.platform.store.get(cert.id),"issue");let run=issue.body.run;
+  for(let n=0;n<200&&run.state==='running';n++){await new Promise(resolve=>setTimeout(resolve,10));run=(await f.req('/ops/runs/'+run.id)).body;}
+  assert.equal(run.state,"succeeded");assert.notEqual(getCertificateMaterial(f.platform.store,cert.id).certificate_version,view.certificate_version);
+  assert.equal(await(await download(view.certificate_version,"private_key")).text(),material.private_key_pem);
+  f.platform.store.patchStatus(cert.id,{state:"failed",last_error:"renew_failed"});
+  assert.equal((await f.req(path)).status,200);
+  for(const snapshot of [(await f.req('/ops/overview')).body,(await f.req('/ops/resources/'+cert.id)).body,(await f.req('/ops/runs')).body]){
+    assert.ok(!JSON.stringify(snapshot).includes("BEGIN CERTIFICATE"));assert.ok(!JSON.stringify(snapshot).includes("PRIVATE KEY"));
+  }
+});
+test("uploaded signed chains split into leaf and intermediate attachments with a matching private key",async t=>{
+ const f=await setup(t),material=await certificateChain(),cert=await f.create('certificate','chain download',{source:'uploaded',domains:['download.example.test'],...material});
+ for(let n=0;n<200&&!f.platform.store.get(cert.id).status.certificate_version;n++)await new Promise(resolve=>setTimeout(resolve,10));
+ const path='/ops/resources/'+cert.id+'/certificate',view=(await f.req(path)).body.certificate;
+ assert.equal(view.chain_length,2);assert.ok(new X509Certificate(view.certificate_pem).verify(new X509Certificate(view.chain_pem).publicKey));
+ assert.equal(view.fullchain_pem,view.certificate_pem+view.chain_pem);
+ const result=await fetch(f.base+'/api/v1'+path+'/download',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({version:view.certificate_version,format:'chain'})});
+ assert.equal(result.status,200);assert.equal(await result.text(),view.chain_pem);
+ const other=f.platform.store.create('certificate','Other',{source:'self_signed',domains:['other.example.test']},'admin');
+ const wrong=await f.req('/ops/resources/'+other.id+'/certificate/download','POST',{version:view.certificate_version,format:'private_key'});assert.equal(wrong.status,409);assert.equal(wrong.body.error,'certificate_version_missing');
+});
 test("certificate create and manual issuance return while ACME is blocked; progress, cause and secrets are handled durably", {timeout:10000}, async (t) => {
   let release!: () => void, started!: () => void;
   let gate = new Promise<void>(resolve => {release = resolve;});
