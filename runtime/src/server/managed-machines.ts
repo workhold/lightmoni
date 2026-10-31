@@ -1,10 +1,10 @@
 import { connectionCredentials } from "./connection-credentials.js";
-import { machineNetwork, type MachineNetwork } from "./host-network.js";
+import { createHostNetworkSchema, machineNetwork, recordSSHHostNetwork, type MachineNetwork } from "./host-network.js";
 import { recordMachineHostKey } from "./machine-host-keys.js";
 import { agentBootstrapCommand } from "./machine-agent-lifecycle.js";
 import { machineCredentialCurrent, machineCredentialCurrentSQL } from "./machine-credential-policy.js";
 import { createAgentLifecycleSchema } from "./agent-lifecycle.js";
-import { createAgentHostSchema, replaceableAgentBinding, hasActiveTaskRuns } from "./agent-hosts.js";
+import { createAgentHostSchema, replaceableAgentBinding, hasActiveTaskRuns, currentAgentHostname } from "./agent-hosts.js";
 import { NodeStore } from "./nodes-model.js";
 import { createUninstallationSchema, registerMachineUninstallations, type UninstallationStatus } from "./machine-uninstallations.js";
 import { id, hash } from "../shared/crypto.js";
@@ -15,7 +15,7 @@ import type {
   AgentEnrollmentIssued,
 } from "./agent-credentials.js";
 
-import { defaultSSHRunner, SSHError, preflightCommand, parsePreflight, type SSHRunner } from "./machine-ssh.js";
+import { defaultSSHRunner, SSHError, preflightCommand, parsePreflight, unavailableSSHDiscovery, type SSHDiscovery, type SSHRunner } from "./machine-ssh.js";
 export type { SSHRunInput, SSHRunner } from "./machine-ssh.js";
 
 export type ConnectionMethod = "direct_ssh";
@@ -134,6 +134,7 @@ export interface SSHCheckResult {
   platform: string; arch: string; checks: Record<string, boolean>; error_code: string;
   checked_at: string; expires_at: string;
   agent_installation: { state: "present" | "absent" | "unknown" };
+  discovery: SSHDiscovery;
 }
 export interface InstallPlanInput {
   check_id: string; credential_id?: string; version: string; arch: string; initial_label_id?: string;
@@ -173,6 +174,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const { db, router } = deps;
   createAgentLifecycleSchema(db);
   createAgentHostSchema(db);
+  createHostNetworkSchema(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS managed_machines(
       id TEXT PRIMARY KEY,
@@ -307,7 +309,9 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   }, CLEANUP_INTERVAL_MS);
   cleanupTimer.unref();
   const idle = (machineID: string) => { cleanupInvalidCredentials(); if (busy.has(machineID)) fail(409, "此主机有终端、检查或部署正在进行，请先结束后重试"); };
-  const targetRevision = (machine: any) => hash(JSON.stringify([machine.name, machine.address, machine.port, machine.username, machine.connection_method, machine.host_key_fingerprint, Number(machine.ssh_target_generation || 0), deps.externalURL]));
+  // A user label is not part of the SSH connection identity. Plans that show
+  // that label are invalidated separately when the asset is renamed.
+  const targetRevision = (machine: any) => hash(JSON.stringify([machine.address, machine.port, machine.username, machine.connection_method, machine.host_key_fingerprint, Number(machine.ssh_target_generation || 0), deps.externalURL]));
   const parameters = (input: Record<string, any>, allowed: string[]) => {
     if (Object.keys(input).some(key => !allowed.includes(key))) fail(400, "unknown request parameter");
     return input;
@@ -359,7 +363,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const deployCapability = capability(true);
     if (deployCapability.available && uninstallReason) { deployCapability.available = false; deployCapability.reason = uninstallReason; }
     return {
-      id: value.id, name: value.name, default_credential_id: value.default_credential_id || "", observed_hostname: value.observed_hostname,
+      id: value.id, name: value.name, default_credential_id: value.default_credential_id || "", observed_hostname: currentAgentHostname(db, value.id, value.agent_id),
       network: machineNetwork(db,value.id),
       ...hostLabels(value.id),
       address: value.address, port: Number(value.port), username: value.username,
@@ -469,15 +473,17 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       const existing = db.get<any>("SELECT * FROM managed_machines WHERE id=?", ctx.params.id);
       if (!existing) fail(404, "主机不存在");
       const value = validateMachine(input, existing);
-      const changed = ["name", "address", "port", "username"].some(field => existing[field] !== value[field as "name" | "address" | "port" | "username"]) || existing.connection_method !== value.connectionMethod;
+      const changed = ["address", "port", "username"].some(field => existing[field] !== value[field as "address" | "port" | "username"]) || existing.connection_method !== value.connectionMethod;
+      const renamed = existing.name !== value.name;
       db.run(
         `UPDATE managed_machines SET name=?,address=?,port=?,username=?,connection_method=?,host_key_fingerprint=?,host_key_public_key=?,host_key_observed_at=?,platform=?,arch=?,ssh_target_generation=ssh_target_generation+?,updated_at=? WHERE id=?`,
         value.name, value.address, value.port, value.username, value.connectionMethod, value.fingerprint, value.publicKey, value.observedAt, value.platform, value.arch, Number(changed), at, ctx.params.id,
       );
-      if (changed) {
-        db.run("DELETE FROM machine_ssh_checks WHERE machine_id=?", ctx.params.id);
-        db.run("UPDATE machine_deployments SET status='cancelled',finished_at=?,error=? WHERE machine_id=? AND status='awaiting_approval'", at, "主机连接已变化，请重新检查并生成计划", ctx.params.id);
-        db.run("UPDATE machine_uninstallations SET status='cancelled',finished_at=?,error=? WHERE machine_id=? AND status='awaiting_approval'", at, "主机连接已变化，请重新检查并生成计划", ctx.params.id);
+      if (changed) db.run("DELETE FROM machine_ssh_checks WHERE machine_id=?", ctx.params.id);
+      if (changed || renamed) {
+        const reason = changed ? "主机连接已变化，请重新检查并生成计划" : "主机名称已变化，请重新审阅并生成计划";
+        db.run("UPDATE machine_deployments SET status='cancelled',finished_at=?,error=? WHERE machine_id=? AND status='awaiting_approval'", at, reason, ctx.params.id);
+        db.run("UPDATE machine_uninstallations SET status='cancelled',finished_at=?,error=? WHERE machine_id=? AND status='awaiting_approval'", at, reason, ctx.params.id);
       }
     });
     ctx.json(get(ctx.params.id));
@@ -606,7 +612,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const at = now();
     const result: SSHCheckResult = { id: id(), machine_id: machineID, credential_id: credential.id,
       connected: false, ready: false, platform: "", arch: "", checks: {}, error_code: "",
-      agent_installation: { state: "unknown" }, checked_at: iso(at), expires_at: iso(new Date(at.getTime() + PLAN_SECONDS * 1000)) };
+      agent_installation: { state: "unknown" }, discovery: unavailableSSHDiscovery(), checked_at: iso(at), expires_at: iso(new Date(at.getTime() + PLAN_SECONDS * 1000)) };
     busy.add(machineID);
     const checkSignal = AbortSignal.any([signal, AbortSignal.timeout(CHECK_TIMEOUT_MS)]);
     try {
@@ -618,8 +624,23 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
         command, credentialID: credential.id, signal: checkSignal, port: machine.port, timeoutMs: CHECK_TIMEOUT_MS,
       });
       result.connected = true;
-      Object.assign(result, parsePreflight(output.stdout));
+      Object.assign(result, parsePreflight(output.stdout, iso(now())));
       if (!result.ready) result.error_code = "prerequisites_missing";
+      if (result.discovery.status === "succeeded") {
+        try {
+          const saved = recordSSHHostNetwork(db, machine, result.discovery, () => {
+            checkSignal.throwIfAborted();
+            ensureCredential(machineID, credential.id, false);
+            const current = db.get<any>("SELECT * FROM managed_machines WHERE id=?", machineID);
+            return !!current && targetRevision(current) === targetRevision(machine);
+          });
+          if (!saved) result.discovery = unavailableSSHDiscovery();
+        } catch {
+          // Optional metadata must never turn a successful installation check
+          // into a failure, or survive cancellation/revocation/target changes.
+          result.discovery = unavailableSSHDiscovery();
+        }
+      }
       db.run("UPDATE machine_credentials SET last_used_at=? WHERE id=?", iso(now()), credential.id); library.used(credential.id);
     } catch (error) {
       result.error_code = signal.aborted ? "cancelled" : checkSignal.aborted ? "timed_out" : error instanceof SSHError ? error.code : "ssh_failed";
@@ -684,7 +705,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       db.run("UPDATE machine_deployments SET status='cancelled',finished_at=?,error=? WHERE id=?", iso(now()), "部署计划已过期", deployment.id);
       fail(409, "部署计划已过期，请重新生成");
     }
-    if (!savedPlan.target_revision || savedPlan.target_revision !== targetRevision(machine)) fail(409, "主机连接已变更，请重新检查并生成部署计划");
+    if (!savedPlan.target_revision || savedPlan.target_revision !== targetRevision(machine) || savedPlan.machine?.name !== machine.name) fail(409, "主机名称或连接已变更，请重新审阅并生成部署计划");
     if (savedPlan.machine?.agent_id !== machine.agent_id) fail(409, "主机 Agent 身份已变更，请重新检查并生成部署计划");
     checked(get(machine.id), savedPlan.check_id, deployment.credential_id);
     const credential = ensureCredential(machine.id, deployment.credential_id);

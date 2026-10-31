@@ -664,19 +664,42 @@ flowchart LR
   VAULT --> BIND[主机绑定 / 默认凭据 ID]
   BIND --> SSH[SSH 预检 / 终端 / 审阅后安装卸载]
   SSH --> AGENT[已登记主机的 Agent]
-  AGENT --> NETWORK[认证心跳 / 网卡快照]
-  NETWORK --> HOST[主机 ID / 内网与其他 IP / 来源观测]
+  SSH -->|同一预检会话只读发现| NETWORK[合法 SSH 或 Agent 网卡快照]
+  AGENT -->|认证注册或心跳| NETWORK
+  NETWORK --> HOST[主机 ID / 内网与其他 IP / 平台来源观测]
 ```
 
-### 13.7 主机网络地址与可信来源观测（SDD 050）
+### 13.7 主机网络地址与可信来源观测（SDD 050、051）
 
-主机列表的“主机”栏在用户名称下标记 SSH 连接地址、内网 IP、其他网卡地址与出口/来源 IP；详情显示网卡、地址族、地址分类和最近观测时间。支持多网卡、多 IPv4/IPv6 和纯内网环境。IP 是可变观测信息，平台生成的主机 ID 才是唯一身份，不按 hostname、内网 IP 或共享 NAT 出口自动合并资产。
+主机列表的“主机”栏在用户名称下标记 SSH 连接地址、内网 IP、其他网卡地址与平台观测来源 IP；详情显示观测主机名、网卡、地址族、地址分类、发现方式和最近观测时间。支持多网卡、多 IPv4/IPv6 和纯内网环境。登记时的 SSH 连接地址仍由用户提供；平台不能从私钥、浏览器所在电脑或机器名称推导它。IP 和观测主机名是可变元数据，平台生成的主机 ID 才是唯一身份，不按 hostname、内网 IP 或共享 NAT 出口自动合并资产，也不覆盖用户名称、SSH 地址、端口和登录用户名。
 
-Agent 通过系统网卡接口采集 network_addresses，每次注册/心跳提交最多 64 条规范地址。服务端在认证、主机绑定校验通过后，与心跳事务一起更新 machine_network_observations；对非法或超量输入整体拒绝，不能部分刷新状态。地址类别由服务端确定，支持 RFC1918、CGNAT、IPv6 ULA、链路本地和回环。新的空快照表示当前未发现网卡；旧 Agent 未提交该字段时不伪造地址，保留明确观测时间，重装身份不能沿用上一 Agent 的快照。
+安装 Agent 前，管理员主动执行 SSH 安装检查即可发现网络。平台复用同一次已验证服务端主机密钥、凭据和目标的 SSH 会话，追加固定、有界的只读 hostname/网卡采集区块；不额外连接、不安装依赖、不执行用户脚本。核心安装条件与可选发现分别解析。缺少 ip 工具、非法数据或超过字节/条数上限时，发现返回 unavailable，不降低已通过的核心 ready，也不保存原始 stderr 或擦除先前成功快照。核心安装条件未通过但发现成功时仍可展示和保存结果；取消、身份变化或授权失效的过时结果不得写入。
 
-主机 summary 的 network 包含 addresses、private_ips、public_ips、observed_at、source_ip、source_observed_at 和 source_kind。网卡由 Agent 自述；source_ip 由服务端根据该 Agent 请求连接观测，不从正文接收，不调用第三方公网 IP 查询服务。出口/来源可以是内网、NAT、代理或 VPN 地址，不保证公网或可入站连接；SSH 连接地址也不由该观测自动改写。没有数据时显示“待发现”。
+Agent 通过系统网卡接口采集 network_addresses，每次注册/心跳提交最多 64 条规范地址。SSH 与 Agent 共用 IP 规范化及服务端分类，支持 RFC1918、CGNAT、IPv6 ULA、链路本地和回环；超量或非法 Agent 输入仍整体拒绝，不能部分刷新心跳状态。主机 summary 的 network 保留 addresses、private_ips、public_ips、observed_at、source_ip、source_observed_at 和 source_kind，新增 observed_via（ssh、agent 或 unavailable）及 hostname。hostname 仅表达该成功快照的观测主机名，observed_at 使用服务端接收该成功快照的采样时间，不信任远端时钟；没有合法快照时显示可执行 SSH 安装检查或等待 Agent 上报。
+
+machine_network_observations 原位保存规范快照及观测身份。SSH 快照绑定当前 ssh_target_generation 和实际服务端主机密钥指纹，提交前重新验证；修改 SSH 地址、端口或登录用户名使旧 SSH 快照失效，A→B→A 也不能复用。Agent 快照由 snapshot_agent_id 约束当前认证绑定；旧 agent_id 独立约束平台来源 IP。读取时分别验证网卡快照和平台来源的身份，不因其中一个失效而抹掉另一个仍合法的观测。Agent 重装不能沿用上一 Agent 的网卡或来源，合法 SSH 快照也不因旧 Agent 失效而丢失。
+
+同一主机按服务端采样时间保存最新合法的成功网卡/主机名快照，SSH 与 Agent 没有固定优先级。新的成功空快照清空当前网卡；失败保留先前成功数据。旧 Agent 未提交 network_addresses 时不伪造或覆盖网卡，也不擦除独立 SSH 快照，来源 IP 仍可在认证请求中单独更新。更新网卡不刷新 source_observed_at；SSH 永远不填充 source_ip。
+
+source_ip 仅由平台根据该 Agent 请求连接观测，不从正文接收，不调用第三方公网 IP 查询服务。平台观测来源可以是内网、NAT、代理或 VPN 地址，只代表 Agent 到平台这一条连接；网卡公网范围也不代表公网可达。两者都不推导 NAT 映射、全局出口或公网入站地址，不自动改写 SSH 连接配置。
 
 默认忽略 X-Forwarded-For，只采用 socket 对端。反向代理部署可通过 LIGHTMONI_TRUSTED_PROXIES 显式设置 IP/CIDR；仅在直连对端可信时，从右向左剥离可信代理链，采用第一个非可信来源。可信代理缺失或提供非法转发链时显示来源不可确定，不能将代理地址当成已发现的主机出口。未配置可信代理时显示的来源可能是代理本身，界面明确注明平台观测依据。
+
+```mermaid
+flowchart TD
+  SSH[用户主动执行 SSH 安装检查] --> SESSION[同一已验证身份与凭据的 SSH 会话]
+  SESSION --> CORE[严格解析核心安装条件]
+  SESSION --> DISCOVERY[有界只读主机名 / 网卡发现]
+  DISCOVERY -->|失败 / 不降低核心 ready| KEEP[保留先前成功快照]
+  DISCOVERY -->|成功 / 校验目标代际与主机密钥| SNAPSHOT[按采样时间保存合法快照]
+  AGENT[当前绑定 Agent 的认证注册 / 心跳] -->|规范网卡 / 校验 Agent 身份| SNAPSHOT
+  AGENT --> SOURCE[平台按请求连接独立观测来源 IP]
+  SNAPSHOT --> VIEW[按各自身份边界读取 / 主机列表与详情]
+  SOURCE --> VIEW
+  CORE --> READY[安装条件结果 / 审阅后部署]
+```
+
+规格与契约见 [SDD 051](../specs/051-ssh-host-network-discovery/spec.md)。
 
 ## 14. AI 助手设计
 

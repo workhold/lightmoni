@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-31",
+  "method": "Manual visual inspection with view_image of the final production-bundle fixture screenshots; modal entry animation settled and pointer moved off tooltips before capture.",
+  "screenshots": [
+    {
+      "path": "artifacts/screenshots/specs/051-ssh-host-network-discovery/evidence/network-ui/ssh-network-zh-CN-1440.png",
+      "result": "pass"
+    },
+    {
+      "path": "artifacts/screenshots/specs/051-ssh-host-network-discovery/evidence/network-ui/host-network-zh-CN-1440.png",
+      "result": "pass"
+    },
+    {
+      "path": "artifacts/screenshots/specs/051-ssh-host-network-discovery/evidence/network-ui/ssh-network-en-US-1440.png",
+      "result": "pass"
+    },
+    {
+      "path": "artifacts/screenshots/specs/051-ssh-host-network-discovery/evidence/network-ui/host-network-en-US-1440.png",
+      "result": "pass"
+    },
+    {
+      "path": "artifacts/screenshots/specs/051-ssh-host-network-discovery/evidence/network-ui/ssh-network-zh-CN-390.png",
+      "result": "pass"
+    },
+    {
+      "path": "artifacts/screenshots/specs/051-ssh-host-network-discovery/evidence/network-ui/host-network-zh-CN-390.png",
+      "result": "pass"
+    }
+  ],
+  "observations": [
+    "Chinese and English 1440px SSH preflight results clearly separate the failed systemd prerequisite from successfully discovered hostname, private IPv4/IPv6, interface names, SSH collection source, and sample time.",
+    "The host-details network section uses the same address table and shows SSH provenance while platform-observed source remains Not discovered; it does not turn an interface address into a public endpoint or egress.",
+    "At 390px, text and IPv6 summaries wrap inside the modal. The interface table scrolls horizontally for its remaining columns; the page has no horizontal overflow.",
+    "Final screenshots have no visible zoom transition, overlay tooltip, overlapping labels, or clipped source/time metadata."
+  ],
+  "scope": {
+    "fixture_only": true,
+    "ssh_connections": false,
+    "installations": false,
+    "production_requests": false
+  },
+  "automated_reports": {
+    "network_ui": "32/32 passed; errors=[]; unexpected=[]",
+    "credentials_ui": "16/16 passed; page_errors=[]; unexpected_requests=[]"
+  },
+  "legacy_hosts_nodes_fixture": {
+    "status": "not_passed",
+    "reason": "The parent run stopped at the first assertion, which still expects the old Agent-not-enrolled label; the run also recorded an unexpected host-labels request because the fixture does not intercept it. Static inspection additionally found stale monitoring/task-label tab labels, but the run did not reach those later steps. No claim is made about later uninstall guidance behavior. No production UI was changed to satisfy the fixture; this task’s two pure address-label edits to it were reverted.",
+    "replacement_scope": "The new network fixture verifies manual SSH connection address input in registration and editing, read-only opening of both forms, preservation of host ID/user name/SSH target after discovery, and zero mutations except the explicit intercepted SSH checks."
+  }
+}

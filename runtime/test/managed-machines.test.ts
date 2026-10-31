@@ -137,6 +137,19 @@ test('renaming a host invalidates an approved installation snapshot before ident
  const applied=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,409,applied.raw);assert.equal(f.issued,undefined);
 });
 
+test('installation rechecks the reviewed display name independently of the SSH connection revision',async t=>{
+ const f=await fixture(t),h=await host(f,'reviewed-label');
+ const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{}),plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,version:'0.1.0',arch:'amd64'});
+ assert.equal(plan.status,201,plan.raw);
+ // Simulate another trusted database writer changing metadata without using
+ // this process's mutation handler. Approval still belongs to the saved name.
+ f.db.run("UPDATE managed_machines SET name='concurrent-display-label' WHERE id=?",h.id);
+ const applied=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});
+ assert.equal(applied.status,409,applied.raw);assert.match(applied.raw,/名称/);assert.equal(f.issued,undefined);
+ const revised=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,version:'0.1.0',arch:'amd64'});
+ assert.equal(revised.status,201,revised.raw);assert.equal(revised.data.plan.machine.name,'concurrent-display-label');
+});
+
 test('installation validates the complete retained host label union before issuing an Agent identity',async t=>{
  let installations=0;const f=await fixture(t,{},async input=>{if(input.enrollmentToken)installations++;return {stdout:checkOutput,stderr:'',stages:[]};});
  const h=await host(f,'label-union'),tasks=new NodeStore(f.db,()=>now);
@@ -669,6 +682,15 @@ test('uninstall rejects members, changed identities, expired plans and revoked k
  const planned2=await uninstallPlan(f,h);clock=new Date(now.getTime()+900001);assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned2.data.id}/apply`,'POST',{confirm:true})).status,409);assert.equal(destructive,0);
  clock=now;await f.request(`/machines/${h.id}/uninstallations/${planned2.data.id}/cancel`,'POST',{});const planned3=await uninstallPlan(f,h);await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
  assert.equal(f.db.get<any>('SELECT status FROM machine_uninstallations WHERE id=?',planned3.data.id)?.status,'cancelled');assert.equal(destructive,0);
+});
+
+test('uninstallation rechecks its reviewed display name without issuing a destructive command',async t=>{
+ let destructive=0;
+ const f=await fixture(t,{},async input=>{if(input.command.includes('systemctl stop'))destructive++;return {stdout:input.command.includes('LMAGENT')?probeOutput():checkOutput,stderr:'',stages:[]};});
+ const h=await uninstallHost(f),planned=await uninstallPlan(f,h);assert.equal(planned.status,201,planned.raw);
+ f.db.run("UPDATE managed_machines SET name='changed-after-review' WHERE id=?",h.id);
+ const applied=await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true});
+ assert.equal(applied.status,409,applied.raw);assert.match(applied.raw,/名称/);assert.equal(destructive,0);
 });
 
 test('fresh installation cannot replace discovered or newly appeared Agent before signing enrollment',async t=>{

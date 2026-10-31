@@ -1,0 +1,30 @@
+{
+  "production_bundle": true,
+  "bundle": {
+    "index_sha256": "48c4e0423b0a0c3d3ff191b3d5b187a998f8aa8d30b268ecfe0a1ec4f6c2cc6c",
+    "entry": "/assets/index-Cy1jCI7p.js",
+    "entry_sha256": "065e9ea6207a2b569b53269d34976ad9bbe5fb9150c73cb7af71670967d79580"
+  },
+  "fixture_only": true,
+  "production_writes": false,
+  "ssh_connections": false,
+  "installations": false,
+  "passed": 13,
+  "checked": [
+    "user-defined host names and observed system hostnames remain distinct; IPv6 ports are bracketed",
+    "late host A response never replaces or auto-connects over the last selected host B terminal",
+    "closing B details invalidates an earlier pending A response instead of reopening A",
+    "SSH 安装检查: a late A response cannot change the selected B target",
+    "卸载 Agent: a late A response cannot change the selected B target",
+    "closing A and opening B never mixes credentials; plan stays bound to B and waits for explicit approval",
+    "a stale refresh cannot roll a completed deployment back to awaiting approval or offer another apply",
+    "late refresh snapshots cannot overwrite later host edits or a newly opened details selection",
+    "reviewed host deletion prevents stale detail responses from resurrecting the host or its dialog",
+    "late deep-link details cannot supersede a newer manual host selection",
+    "detail and editing explicitly distinguish asset name, immutable ID, system hostname and SSH endpoint",
+    "leaving a busy host view invalidates its check before it can create a deployment plan",
+    "all HTTP and terminal WebSocket traffic stays inside isolated fixtures with zero page errors"
+  ],
+  "errors": [],
+  "unexpected": []
+}
