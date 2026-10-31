@@ -96,7 +96,7 @@ async function destination(page,path){await expect(page).toHaveURL(origin+path);
 async function open(page,path){await page.goto(origin+path);await destination(page,path)}
 async function chooseHome(page,label){
  const select=page.getByRole('combobox',{name:'默认首页',exact:true});await select.click();
- const order=['概览','AI 助手','监控大盘','日志探索','告警中心','主机','连接凭据','集群','应用管理','网站','托管域名','证书管理','数据接入','数据管理','个人设置','管理后台'];
+ const order=['概览','AI 助手','监控大盘','日志探索','告警中心','主机','连接凭据','应用管理','网站','托管域名','证书管理','数据接入','数据管理','个人设置','管理后台'];
  // Traverse the real keyboard selection so offscreen virtualized options need
  // no forced clicks or DOM writes. This also exercises keyboard accessibility.
  for(let index=0;index<20;index++){
@@ -140,9 +140,9 @@ try{
  await expect(group(page,'数据与接入')).toHaveAttribute('aria-expanded','false');await screenshot(page,'navigation-multiple-open-zh-1280');
  mark('independent categories retain multi-open state across routes and whole-sidebar collapse; keyboard and aria controls work');
  await page.goto(origin+'/services');await destination(page,'/applications');await expect(page.getByRole('heading',{name:'应用',exact:true,level:1})).toBeVisible();await expect(page.locator('.lm-sidebar').getByRole('link',{name:'服务部署',exact:true})).toHaveCount(0);
- await page.goto(origin+'/operations');await destination(page,'/clusters');for(const name of ['集群','应用管理','网站','托管域名','证书管理','连接凭据'])await expect(page.locator('.lm-sidebar').getByRole('link',{name,exact:true})).toBeVisible();
+ await page.goto(origin+'/operations');await destination(page,'/applications');await expect(page.locator('.lm-sidebar a[href="/clusters"]')).toHaveCount(0);for(const name of ['应用管理','网站','托管域名','证书管理','连接凭据'])await expect(page.locator('.lm-sidebar').getByRole('link',{name,exact:true})).toBeVisible();
  await page.locator('.lm-sidebar').getByRole('link',{name:'连接凭据',exact:true}).click();await destination(page,'/connection-credentials');await expect(page.getByRole('heading',{name:'连接凭据',exact:true})).toBeVisible();
- mark('legacy service and operations routes open Applications and Clusters; current operations entries and the administrator credential library remain accessible');
+ mark('legacy service and operations routes open Applications; clusters are contextual; current operations entries and the administrator credential library remain accessible');
 
  const coldMachines=await harness();currentPage=coldMachines.page;await open(coldMachines.page,'/machines');
  await expect(group(coldMachines.page,'运维工具')).toHaveAttribute('aria-expanded','true');

@@ -7,14 +7,14 @@ export const DEFAULT_HOMEPAGE='/assistant';
 const storagePrefix='lightmoni.homepage.',changeEvent='lightmoni:homepage-change';
 
 export function homepageStorageKey(userID:string){return storagePrefix+encodeURIComponent(userID)}
-export function homepageOptions(role:User['role']){return navigationLinks.filter(link=>!link.adminOnly||role==='admin')}
+export function homepageOptions(role:User['role']){return navigationLinks.filter(link=>link.path!=='/clusters'&&(!link.adminOnly||role==='admin'))}
 export function isAllowedHomepage(value:unknown,role:User['role']):value is string{
  return typeof value==='string'&&homepageOptions(role).some(link=>link.path===value);
 }
 
 export function readDefaultHomepage(user:HomepageUser|null):string{
  if(!user?.id)return DEFAULT_HOMEPAGE;
- try{const stored=localStorage.getItem(homepageStorageKey(user.id));const value=stored==='/agents'?'/machines':stored==='/operations'?'/clusters':stored==='/services'?'/applications':stored;return isAllowedHomepage(value,user.role)?value:DEFAULT_HOMEPAGE}
+ try{const stored=localStorage.getItem(homepageStorageKey(user.id));const value=stored==='/agents'?'/machines':(stored==='/operations'||stored==='/clusters')?'/applications':stored==='/services'?'/applications':stored;return isAllowedHomepage(value,user.role)?value:DEFAULT_HOMEPAGE}
  catch{return DEFAULT_HOMEPAGE}
 }
 

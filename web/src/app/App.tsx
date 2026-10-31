@@ -66,7 +66,7 @@ export default function Root(){
     <Route path="/machines" element={<HostsNodesPage user={user}/>}/>
     <Route path="/connection-credentials" element={user.role==='admin'?<ConnectionCredentialsPage/>:<Navigate to="/settings" replace/>}/>
     <Route path="/services" element={<Navigate to={user.role==='admin'?"/applications":"/settings"} replace/>}/>
-    <Route path="/operations" element={<Navigate to="/clusters" replace/>}/>
+    <Route path="/operations" element={<Navigate to="/applications" replace/>}/>
     {["/clusters","/applications","/websites","/domains","/certificates"].map(path=><Route key={path} path={path} element={user.role==='admin'?<OperationsPage user={user}/>:<Navigate to="/settings" replace/>}/>)}
     <Route path="/applications/:id/monitoring" element={user.role==='admin'?<ApplicationMonitoring/>:<Navigate to="/settings" replace/>}/>
     <Route path="/mcp-access" element={<McpAccessPage user={user}/>}/>
