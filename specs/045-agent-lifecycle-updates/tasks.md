@@ -12,3 +12,11 @@
 - [x] 同步 main、提交并推送功能分支、创建 [GitHub PR #21](https://github.com/workhold/lightmoni/pull/21)。
 
 本轮不发布镜像、不修改真实用户主机。实际验收结果见 [validation.md](validation.md)；真实 systemd 验收仅覆盖 arm64，amd64 只完成构建及运行时摘要/架构核验。
+
+## 主干集成复核
+
+- [x] I001 先补充集成需求、设计及契约。
+- [ ] I002 合并最新 main，保留双方架构和主干身份/异步/endpoint/脚本能力。
+- [ ] I003 升级 SSH 使用记录接入集中凭据，补充独立回归。
+- [ ] I004 执行相关后端、类型/构建及界面 fixture，记录当前组合的验证结果。
+- [ ] I005 主线程核对系统设计与 Doca 合并状态并发布分支。

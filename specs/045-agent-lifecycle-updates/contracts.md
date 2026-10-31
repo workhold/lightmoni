@@ -34,3 +34,9 @@ SSH command builder 导出 probe/start/status/commit/rollback；probe 返回当�
 回退来源允许受管服务 inactive/failed，保留身份、当前程序指纹、兼容域和锁检查；普通升级来源须 active。已持久提交后的 Agent 自然重启不改写原提交 boot：只读核对重新获取当前程序/发行/boot 与新鲜健康心跳，另存 receipt.current_verification。没有精确当前证据则保持 unknown，不能通过核对补发 commit。
 
 受管发行目录及其祖先必须为 root 所有且禁止组/其他用户写入；Agent 服务仍是独立非 root 用户。指纹包含真实发行路径、manifest、安装摘要、launcher、systemd unit、实际 Node 与入口文件的 SHA；新包另校验 manifest 的 node_binary_sha256。它用于受管目录的审批一致性，不作为 root 攻击者篡改整个依赖树的证明。包的整体 SHA 在写入受管目录前核验；TAR 仅允许普通文件、目录和包内部相对软链接，拒绝绝对/穿越路径、硬链接、设备、重复覆盖和经过软链接的写入。
+
+## 主干集成契约
+
+- AgentUpdateAccess 新增内部 `markCredentialUsed(credentialID)` 回调：每次成功固定 SSH 调用复用主机管理的统一使用记录，同步主机凭据绑定和集中凭据库；不改变公开 API 或秘密可见性。
+- 用户显示名不进入 SSH 连接修订；维护计划/运行/unknown 期间仍禁止修改主机，保留审批固定目标的约束。Agent 发行元数据与网络/系统主机名观测分别保存，不能覆盖用户名称或资产 ID。
+- 维护 fence 与主干脚本能力判断、目标选择、调度、幂等和请求身份 guard 同时生效；维护结束后恢复现有任务领取逻辑。
