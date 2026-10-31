@@ -21,6 +21,7 @@ import type { AgentCredentialStore } from "./agent-credentials.js";
 import { agentLifecycle, assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
 import { hasActiveTaskRuns } from "./agent-hosts.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import { observeNetworkSource, trustedProxyMatcher } from "./host-network.js";
 export interface NodesOptions {
   internalExporter?: (
@@ -113,6 +114,7 @@ export function registerNodes(
       if (!deps.db.get("SELECT id FROM agents WHERE id=?", agentID)) throw new NodeError(404, "执行节点不存在");
       if (isAgentRemoved(deps.db, agentID)) return agentLifecycle(deps.db, agentID);
       assertNoPendingAgentUpdate(deps.db, agentID);
+      assertNoPendingMachineInstallation(deps.db,"",agentID);
       if (hasActiveTaskRuns(deps.db, agentID)) throw new NodeError(409, "节点有待执行、运行中或结果未知的任务中心记录，请先处理");
       if (table("agent_jobs") && deps.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID))
         throw new NodeError(409, "节点有待执行、运行中或结果未知的任务，请先完成或核对");

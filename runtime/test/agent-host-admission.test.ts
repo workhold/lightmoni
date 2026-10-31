@@ -170,10 +170,11 @@ test("orphan and revoked identities cannot receive operations resources, plans o
   assert.throws(() => f.credentials.authenticate({ headers: { authorization: "Bearer " + agent.data } } as any, agent.agentID, "data"), /registered_host_required/);
 });
 
-test("a failed activated install can safely reinstall with the same host ID after fresh absent preflight", async t => {
+test("an interrupted activated install requires explicit resolution before a fresh same-host installation", async t => {
   const f = await fixture(t), host = await f.host(), credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "managed", confirm_managed: true });
   assert.equal(credential.status, 201);
   let failInstallation = true;
+  let deploymentPath = "";
   const identities: string[] = [];
   f.setRunner(async input => {
     if (!input.enrollmentToken) return { stdout: preflight, stderr: "", stages: [] };
@@ -187,9 +188,15 @@ test("a failed activated install can safely reinstall with the same host ID afte
   const install = async () => {
     const check = await f.request(`/machines/${host.id}/ssh-check`, "POST", { credential_id: credential.data.credential_id }); assert.equal(check.status, 200);
     const plan = await f.request(`/machines/${host.id}/deployments/plan`, "POST", { check_id: check.data.id, credential_id: credential.data.credential_id, version: "0.1.0", arch: "amd64" }); assert.equal(plan.status, 201, JSON.stringify(plan.data));
-    return f.request(`/machines/${host.id}/deployments/${plan.data.id}/apply`, "POST", { confirm: true });
+    deploymentPath = `/machines/${host.id}/deployments/${plan.data.id}`;
+    return f.request(deploymentPath+"/apply", "POST", { confirm: true });
   };
   assert.equal((await install()).status, 502); assert.equal(f.machines.get(host.id).agent_id, identities[0]);
+  assert.equal((await f.request(deploymentPath)).data.status, "unknown");
+  assert.equal(f.credentials.has(identities[0], "control"), true); assert.equal(f.credentials.has(identities[0], "data"), true);
+  assert.equal((await f.request(`/machines/${host.id}/deployments/plan`, "POST", { version: "0.1.0", arch: "amd64" })).status, 409);
+  const resolved=await f.request(deploymentPath+"/resolve", "POST", { confirm: true, reason: "Remote installation reviewed before a fresh absent check" });
+  assert.equal(resolved.status, 200, JSON.stringify(resolved.data)); assert.equal(resolved.data.status, "unknown"); assert.ok(resolved.data.resolved_at);
   assert.equal(f.credentials.has(identities[0], "control"), false); assert.equal(f.credentials.has(identities[0], "data"), false);
   failInstallation = false; const retry = await install(); assert.equal(retry.status, 200, JSON.stringify(retry.data)); assert.equal(f.machines.get(host.id).agent_id, identities[1]); assert.notEqual(identities[0], identities[1]);
   assert.equal(f.machines.list().length, 1); assert.equal(f.db.get<any>("SELECT count(*) n FROM machine_deployments WHERE machine_id=?", host.id)!.n, 2);

@@ -26,7 +26,7 @@ async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverrid
   has:()=>true,
   authenticate:()=>({credential_id:'c',agent_id:'a',audience:'control',scope:'agent.control',expires_at:'',last_used_at:''}),
   canDownloadWithEnrollmentToken:()=>true,
-  issueEnrollment:(input:any)=>{issued={...input,enrollment_id:'enroll-1',token_display_once:'lm_enroll_secret',token_expires_at:new Date(now.getTime()+900000).toISOString(),install_command_hint:''};return issued;},
+  issueEnrollment:(input:any)=>{issued={...input,enrollment_id:'enroll-1',token_display_once:'lm_enroll_secret',token_expires_at:new Date(now.getTime()+900000).toISOString(),install_command_hint:''};if(input.deployment_id)db.run("UPDATE machine_deployments SET enrollment_id='enroll-1',execution_stage='enrollment_issued' WHERE id=? AND status='running' AND execution_stage='enrollment_issuing' AND resolved_at=''",input.deployment_id);return issued;},
   enrollmentStatus:()=>({status:'active',agent_id:'agent-1',used_at:now.toISOString()}),
   cancelEnrollment:(enrollmentID:string)=>{issued.cancelled=enrollmentID},
  } as any;
@@ -247,10 +247,11 @@ test('credential decryption failure closes a deployment as failed',async t=>{
  corrupt=true;const applied=await f.request(`/machines/${machine.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,502,applied.raw);assert.equal(f.machines.assistantDeployment(plan.data.id).status,'failed');
 });
 
-test('failed SSH deployment cancels the one-time enrollment token',async t=>{
+test('interrupted dispatched SSH installation preserves its enrollment and records an unknown outcome',async t=>{
  const f=await fixture(t,{},async input=>{if(input.enrollmentToken)throw Error('ssh unavailable');return {stdout:checkOutput,stderr:'',stages:[]}});const created=await f.request('/machines','POST',{name:'prod-ssh-fail',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});assert.equal(created.status,201,created.raw);const machine=created.data;const key=fixturePrivateKey();const credential=await f.request(`/machines/${machine.id}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
  const checked=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:credential.data.credential_id});assert.equal(checked.data.ready,true,checked.raw);const plan=await f.request(`/machines/${machine.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:credential.data.credential_id,version:'0.1.0',arch:'amd64'});assert.equal(plan.status,201,plan.raw);
- const applied=await f.request(`/machines/${machine.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,502,applied.raw);assert.equal(f.issued.cancelled,'enroll-1');
+ const applied=await f.request(`/machines/${machine.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,502,applied.raw);assert.equal(f.issued.cancelled,undefined);
+ const saved=f.machines.assistantDeployment(plan.data.id);assert.equal(saved.status,'unknown');assert.equal(saved.enrollment_id,'enroll-1');assert.equal(saved.execution_stage,'bootstrap_dispatched');
 });
 
 test('deployment plan requires host pinning and apply keeps tokens out of command/output',async t=>{
@@ -604,6 +605,19 @@ async function uninstallHost(f:Awaited<ReturnType<typeof fixture>>,linked=true){
 }
 const uninstallPlan=(f:Awaited<ReturnType<typeof fixture>>,h:{id:string;credential:string;check:string})=>f.request(`/machines/${h.id}/uninstallations/plan`,'POST',{check_id:h.check,credential_id:h.credential});
 
+test('uninstall probes and removal record use in both the host binding and shared credential library',async t=>{
+ let clock=now,removed=false;
+ const f=await fixture(t,{now:()=>clock},async input=>{if(input.command.includes('systemctl stop'))removed=true;return {stdout:input.command.includes('LMAGENT')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};});
+ const h=await uninstallHost(f);
+ const source=f.db.get<any>('SELECT connection_credential_id FROM machine_credentials WHERE id=?',h.credential)!.connection_credential_id;
+ const used=()=>({binding:f.db.get<any>('SELECT last_used_at FROM machine_credentials WHERE id=?',h.credential)!.last_used_at,source:f.db.get<any>('SELECT last_used_at FROM connection_credentials WHERE id=?',source)!.last_used_at});
+ assert.deepEqual(used(),{binding:clock.toISOString(),source:clock.toISOString()});
+ clock=new Date(clock.getTime()+1000);const planned=await uninstallPlan(f,h);assert.equal(planned.status,201,planned.raw);
+ assert.deepEqual(used(),{binding:clock.toISOString(),source:clock.toISOString()});
+ clock=new Date(clock.getTime()+1000);const applied=await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,200,applied.raw);
+ assert.deepEqual(used(),{binding:clock.toISOString(),source:clock.toISOString()});
+});
+
 test('fixed uninstall plan is reviewed, preserves data, revokes both node credentials and retains history',async t=>{
  let removed=false, destructive=0;const f=await fixture(t,{},async input=>{
   if(input.command.includes('systemctl stop')){destructive++;removed=true;return {stdout:probeOutput('node-known',removed),stderr:'',stages:[]};}
@@ -701,13 +715,21 @@ test('fresh installation cannot replace discovered or newly appeared Agent befor
  present=true;assert.equal((await f.request(`/machines/${h.id}/deployments/${planned.data.id}/apply`,'POST',{confirm:true})).status,502);assert.equal(f.issued,undefined);
 });
 
-test('failed post-activation installation revokes only the new enrollment identity',async t=>{
+test('fresh installation rejects a changed architecture before issuing enrollment or invoking bootstrap',async t=>{
+ let arch='amd64',bootstrap=0;
+ const f=await fixture(t,{},async input=>{if(input.enrollmentToken){bootstrap++;return {stdout:'installed',stderr:'',stages:[]};}return {stdout:checkOutput.replace('arch=amd64',`arch=${arch}`),stderr:'',stages:[]};}),h=await host(f,'architecture-change');
+ const check=await f.request(`/machines/${h.id}/ssh-check`,'POST',{}),planned=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:check.data.id,version:'0.1.0',arch:'amd64'});assert.equal(planned.status,201,planned.raw);
+ arch='arm64';const applied=await f.request(`/machines/${h.id}/deployments/${planned.data.id}/apply`,'POST',{confirm:true});
+ assert.equal(applied.status,502,applied.raw);assert.equal(f.issued,undefined);assert.equal(bootstrap,0);
+});
+
+test('interrupted post-activation installation preserves credentials for explicit health reconciliation',async t=>{
  const f=await fixture(t,{},async input=>{if(input.enrollmentToken)throw new SSHError('timed_out');return {stdout:checkOutput,stderr:'',stages:[]};}),h=await host(f,'failed-activated');
  f.db.exec("CREATE TABLE agent_enrollments(id TEXT PRIMARY KEY,agent_id TEXT); CREATE TABLE agent_credentials(id TEXT PRIMARY KEY,agent_id TEXT,revoked_at TEXT,revoke_reason TEXT)");
  f.db.run("INSERT INTO agent_enrollments VALUES('enroll-1','agent-1')");f.db.run("INSERT INTO agent_credentials VALUES('new','agent-1',NULL,'')");f.db.run("INSERT INTO agent_credentials VALUES('old','old-agent',NULL,'')");
  const check=await f.request(`/machines/${h.id}/ssh-check`,'POST',{}),plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:check.data.id,version:'0.1.0',arch:'amd64'});
- const result=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,502,result.raw);assert.match(result.raw,/核对远端/);
- assert.ok(f.db.get<any>("SELECT revoked_at FROM agent_credentials WHERE id='new'")?.revoked_at);assert.equal(f.db.get<any>("SELECT revoked_at FROM agent_credentials WHERE id='old'")?.revoked_at,null);
+ const result=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,502,result.raw);assert.match(result.raw,/核对/);
+ assert.equal(f.machines.assistantDeployment(plan.data.id).status,'unknown');assert.equal(f.db.get<any>("SELECT revoked_at FROM agent_credentials WHERE id='new'")?.revoked_at,null);assert.equal(f.db.get<any>("SELECT revoked_at FROM agent_credentials WHERE id='old'")?.revoked_at,null);
 });
 
 test('cluster membership prevents deleting stable machine identity until explicitly detached',async t=>{

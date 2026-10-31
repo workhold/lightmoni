@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Input,Modal,Select,Space,Tag,Typography} from '../shared/ui';
+import {sshEndpoint} from './host-request-guard';
 import {api,ApiError} from '../shared/api';
 import {defaultMachineCredential} from './machine-credentials';
 import {useI18n} from '../shared/i18n';
@@ -37,7 +38,9 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
   agent_already_installed:t('主机已关联 Agent，不能覆盖安装；请核对现有节点。','The host already has an Agent link. Verify the existing node before installation.'),
   agent_not_linked:t('主机尚未关联 Agent，无法确认要卸载的节点身份。','The host has no Agent link to identify the node to uninstall.'),
   agent_task_busy:t('节点有未结束或结果未知的任务，请先核对。','The node has unfinished or uncertain tasks. Verify them first.'),
-  deployment_pending:t('存在待确认或执行中的安装计划，请在主机历史中处理。','A pending or running installation plan exists. Resolve it in host history.'),
+  deployment_pending:t('存在待确认、执行中或结果未知的安装计划，请在主机历史中处理。','A pending, running, or uncertain installation plan exists. Resolve it in host history.'),
+  installation_pending:t('存在待确认或执行中的安装，请从部署历史继续。','A pending or running installation exists. Continue from deployment history.'),
+  installation_unknown:t('上次首装结果未知，请在部署历史中核对或人工结束。','The previous installation outcome is unknown. Verify or resolve it in deployment history.'),
   uninstallation_pending:t('存在待确认、执行中或结果未知的卸载流程，请在主机历史中处理。','A pending, running, or uncertain uninstall workflow exists. Resolve it in host history.'),
   uninstallation_unknown:t('上次卸载结果未知，请在历史中只读核对。','The previous uninstall outcome is unknown. Verify it read-only in host history.'),
   active_agent:t('主机仍有有效 Agent 身份，请先移除身份，再删除主机。','Remove the active Agent identity before deleting the host.'),
@@ -254,7 +257,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
   <div style={{marginTop:16,maxHeight:'52vh',overflowY:'auto',paddingRight:4}} aria-label={t('批量操作目标与结果','Batch targets and results')}>
    {rows.map(row=><section key={row.target.id} data-batch-target={row.target.id} data-batch-status={row.status} style={{border:'1px solid var(--lm-border-color, #d9d9d9)',borderRadius:8,padding:12,marginBottom:12,overflowWrap:'anywhere'}}>
     <Space wrap><Typography.Text strong>{row.target.name}</Typography.Text><Tag color={row.record?.status==='cancelled'?'default':row.status==='success'?'success':row.status==='failed'?'error':row.status==='unknown'?'warning':row.status==='processing'?'processing':'default'}>{statusText(row)}</Tag></Space>
-    <Typography.Paragraph type="secondary" style={{marginBottom:8}}>{row.target.machine?`${row.target.machine.address}:${row.target.machine.port}`:t('独立节点，无 SSH 主机记录','Independent node without an SSH host record')} · {row.target.agent?t(`节点 ${row.target.agent.id}`,`Node ${row.target.agent.id}`):t('仅主机','Host only')}</Typography.Paragraph>
+    <Typography.Paragraph type="secondary" style={{marginBottom:8}}>{row.target.machine?sshEndpoint(row.target.machine.address,row.target.machine.port):t('独立节点，无 SSH 主机记录','Independent node without an SSH host record')} · {row.target.agent?t(`节点 ${row.target.agent.id}`,`Node ${row.target.agent.id}`):t('仅主机','Host only')}</Typography.Paragraph>
     {row.reason&&<Alert showIcon type={row.status==='unknown'?'warning':row.status==='failed'?'error':'info'} title={reasonText(row.reason)}/>}
     {row.note&&<Typography.Paragraph type="secondary">{row.note}</Typography.Paragraph>}
     {phase==='configure'&&!busy&&row.status==='pending'&&!row.reason&&action!=='delete_host'&&action!=='remove_node'&&<div style={{marginTop:8}}><Select aria-label={t(`SSH 凭据 · ${row.target.name}`,`SSH credential · ${row.target.name}`)} style={{width:'100%'}} value={row.credentialID} placeholder={t('请选择 SSH 凭据','Select an SSH credential')} options={credentialsFor(row).map(credential=>({value:credential.id,label:credentialLabel(credential)}))} onChange={value=>update(row.target.id,{credentialID:value})}/>{credentialsFor(row).length>1&&!row.credentialID&&<Typography.Text type="warning">{t('存在多条有效凭据，请明确选择。','Multiple active credentials exist. Select one explicitly.')}</Typography.Text>}</div>}
@@ -262,7 +265,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
     {row.record&&<div style={{marginTop:8}}>
      <Descriptions size="small" column={1} items={[
       {key:'plan',label:t('计划 ID','Plan ID'),children:row.record.id},
-      {key:'target',label:t('审核目标','Reviewed target'),children:row.record.plan?.machine?`${row.record.plan.machine.username||''}@${row.record.plan.machine.address}:${row.record.plan.machine.port}`:row.target.name},
+      {key:'target',label:t('审核目标','Reviewed target'),children:row.record.plan?.machine?sshEndpoint(row.record.plan.machine.address,row.record.plan.machine.port,row.record.plan.machine.username):row.target.name},
       {key:'agent',label:t('节点身份','Node identity'),children:row.record.plan?.agent_id||row.record.plan?.machine?.agent_id||t('安装激活后生成','Created after installation activation')},
       ...(action==='install'?[{key:'version',label:t('版本 / 架构','Version / architecture'),children:`${row.record.plan?.version||version} / ${row.record.plan?.arch||row.check?.arch||''}`}]:[]),
       {key:'credential',label:t('SSH 凭据 ID','SSH credential ID'),children:row.record.plan?.credential?.id||row.credentialID},

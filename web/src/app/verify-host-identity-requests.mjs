@@ -34,7 +34,7 @@ async function harness(){
    const match=path.match(/^\/api\/v1\/machines\/([ab])(?:\/(.*))?$/u),id=match?.[1],suffix=match?.[2];
    if(method==='GET'&&Object.hasOwn(fixture,path))response=fixture[path];
    else if(id&&method==='GET'&&!suffix)response=detail(id);
-   else if(id&&method==='GET'&&suffix==='tasks')response=[];
+   else if(id&&method==='GET'&&['tasks','agent-updates'].includes(suffix))response=[];
    else if(id&&method==='PUT'&&!suffix){Object.assign(hosts.find(host=>host.id===id),body);response=hosts.find(host=>host.id===id)}
    else if(id&&method==='DELETE'&&!suffix){state.hosts=state.hosts.filter(host=>host.id!==id);response={deleted:true}}
    else if(id&&method==='POST'&&suffix==='terminal-sessions')response={id:'session-'+id,websocket_path:'/terminal-ws/'+id};

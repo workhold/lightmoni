@@ -11,11 +11,11 @@ trap 'rmdir "$lock"' EXIT
 # Systemd query failures cannot establish that a service is absent.
 load_state=$(systemctl show lightmoni-agent.service --property=LoadState --value)
 fragment=$(systemctl show lightmoni-agent.service --property=FragmentPath --value)
+if [ -e /var/lib/lightmoni-agent/operations/execution.lock ] || { [ -f /var/lib/lightmoni-agent/agent-job-state.json ] && grep -Eq '"id"[[:space:]]*:[[:space:]]*"[^"]+"' /var/lib/lightmoni-agent/agent-job-state.json; } || { [ -f /var/lib/lightmoni-agent/task-run-state.json ] && grep -Eq '"id"[[:space:]]*:[[:space:]]*"[^"]+"' /var/lib/lightmoni-agent/task-run-state.json; }; then
+  echo 'Agent has an unfinished operation; files retained.' >&2; exit 1
+fi
 if [ "$load_state" != "not-found" ]; then
   [ "$load_state" = loaded ] && [ "$fragment" = /etc/systemd/system/lightmoni-agent.service ] || { echo 'Non-managed Agent unit; files retained.' >&2; exit 1; }
-  if [ -e /var/lib/lightmoni-agent/operations/execution.lock ] || { [ -f /var/lib/lightmoni-agent/agent-job-state.json ] && grep -Eq '"id"[[:space:]]*:[[:space:]]*"[^"]+"' /var/lib/lightmoni-agent/agent-job-state.json; }; then
-    echo 'Agent has an unfinished operation; files retained.' >&2; exit 1
-  fi
   systemctl stop lightmoni-agent.service
   state=$(systemctl show lightmoni-agent.service --property=ActiveState --value)
   case "$state" in inactive|failed) ;; *) echo 'Agent did not stop; files retained.' >&2; exit 1;; esac

@@ -21,7 +21,7 @@ load_state=$(systemctl show lightmoni-agent.service --property=LoadState --value
 case "$fragment:$load_state" in /etc/systemd/system/lightmoni-agent.service:loaded|:not-found) echo unit_managed=1;; *) echo unit_managed=0;; esac
 case "$service_state" in active) echo service_running=1;; inactive|failed) echo service_running=0;; *) exit 42;; esac
 if test -e /run/lightmoni-agent-lifecycle.lock; then echo lifecycle_locked=1; else echo lifecycle_locked=0; fi
-if test -e /var/lib/lightmoni-agent/operations/execution.lock || { test -f /var/lib/lightmoni-agent/agent-job-state.json && grep -Eq '"id"[[:space:]]*:[[:space:]]*"[^"]+"' /var/lib/lightmoni-agent/agent-job-state.json; }; then echo operation_lock=1; else echo operation_lock=0; fi
+if test -e /var/lib/lightmoni-agent/operations/execution.lock || { test -f /var/lib/lightmoni-agent/agent-job-state.json && grep -Eq '"id"[[:space:]]*:[[:space:]]*"[^"]+"' /var/lib/lightmoni-agent/agent-job-state.json; } || { test -f /var/lib/lightmoni-agent/task-run-state.json && grep -Eq '"id"[[:space:]]*:[[:space:]]*"[^"]+"' /var/lib/lightmoni-agent/task-run-state.json; }; then echo operation_lock=1; else echo operation_lock=0; fi
 if test -d /etc/lightmoni-agent && test -d /var/lib/lightmoni-agent; then echo data_retained=1; else echo data_retained=0; fi`;
 export const agentProbeCommand = () => privileged(`set -eu\n${identity}\n${observation}`);
 
@@ -48,7 +48,7 @@ ${identity}
 test "$agent_id" = ${quote(expectedID)} || exit 42
 fragment=$(systemctl show lightmoni-agent.service --property=FragmentPath --value)
 test "$fragment" = /etc/systemd/system/lightmoni-agent.service || { echo 'Non-managed Agent unit; no files removed.' >&2; exit 1; }
-if test -e /var/lib/lightmoni-agent/operations/execution.lock || { test -f /var/lib/lightmoni-agent/agent-job-state.json && grep -Eq '"id"[[:space:]]*:[[:space:]]*"[^"]+"' /var/lib/lightmoni-agent/agent-job-state.json; }; then echo 'Agent has an unfinished operation.' >&2; exit 1; fi
+if test -e /var/lib/lightmoni-agent/operations/execution.lock || { test -f /var/lib/lightmoni-agent/agent-job-state.json && grep -Eq '"id"[[:space:]]*:[[:space:]]*"[^"]+"' /var/lib/lightmoni-agent/agent-job-state.json; } || { test -f /var/lib/lightmoni-agent/task-run-state.json && grep -Eq '"id"[[:space:]]*:[[:space:]]*"[^"]+"' /var/lib/lightmoni-agent/task-run-state.json; }; then echo 'Agent has an unfinished operation.' >&2; exit 1; fi
 systemctl stop lightmoni-agent.service
 service_state=$(systemctl show lightmoni-agent.service --property=ActiveState --value)
 case "$service_state" in inactive|failed) ;; *) echo 'Agent did not stop; files retained.' >&2; exit 1;; esac

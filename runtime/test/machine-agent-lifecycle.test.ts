@@ -51,6 +51,15 @@ test("remote unfinished operation and malformed identity fail closed", t => {
   assert.notEqual(f.run(agentProbeCommand()).status, 0);
   assert.throws(() => parseAgentProbe("LMAGENT=1\nagent_id=secret\n"), /invalid_response/);
 });
+test("local task-run markers block probe approval and fixed uninstall without stopping the Agent", t => {
+  const f = fixture(t);
+  writeFileSync(join(f.root, "var/lib/lightmoni-agent/task-run-state.json"), '{"id":"running-script","lease_token":"fixture"}');
+  const probed = f.run(agentProbeCommand()); assert.equal(probed.status, 0, probed.stderr);
+  assert.equal(parseAgentProbe(probed.stdout).operation_lock, true);
+  const removed = f.run(agentUninstallCommand("known-agent")); assert.notEqual(removed.status, 0);
+  assert.equal(existsSync(join(f.root, "usr/local/bin/lightmoni-agent")), true);
+  assert.equal(JSON.parse(readFileSync(f.state, "utf8")).active, true);
+});
 test("bootstrap uses protected curl config and stdin, and refuses existing install before download", t => {
   const f = fixture(t); const command = agentBootstrapCommand("https://monitor.example.com", "0.1.0");
   assert.equal(spawnSync("sh", ["-n"], { input: command, encoding: "utf8" }).status, 0);

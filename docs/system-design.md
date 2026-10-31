@@ -514,7 +514,7 @@ SSH 是首次接入、临时维护和故障恢复通道。登记在单一表单�
 
 SSH 预检是只读固定命令集合，检查网络、指纹、Linux、架构、systemd、权限、HTTPS 可达性及已有 Agent 安装。私钥或明确选用 temporary/managed/permanent 的可复用密码可用于预检、终端、固定身份核验和 Agent 安装/卸载；one_time 密码只用于一次预检或终端，结束即清除，无论成功、失败或取消。密码和私钥均经 ssh2 内存参数认证，不进入命令行、环境、进程 stdin、模型上下文或原始日志；enrollment token 单独经 SSH exec channel stdin 传递。密码不保存秘密摘要，历史密码指纹启动时清空；同一主机各类 SSH 操作互斥。
 
-预检通过后生成持久化部署计划；管理员明确确认后，后端先保存 enrollment 与目标主机的服务端预约，再使用固定安装模板、有效凭据、stdin enrollment token 及版本/架构白名单执行。下载脚本和包需要鉴权，0600 curl 配置暂存 token；不进入 URL、argv、环境、日志或回执。生成计划、执行前和安装锁内拒绝覆盖既有安装。计划绑定主机名称及连接 revision，执行前改名使旧计划失效。Agent 注册早于安装回执时仍通过预约关联原主机，不另建资产；确认激活后完成回执与凭据清理，清除 temporary/one_time 秘密并保留有效 managed/permanent 凭据。失败但新 enrollment 已激活时，仅撤销本次节点凭据并提示核对，不影响已有节点。日常管理优先走 Agent。
+预检通过后生成持久化部署计划；管理员明确确认后，后端先保存 enrollment 与目标主机的服务端预约，再使用固定安装模板、有效凭据、stdin enrollment token 及版本/架构白名单执行。下载脚本和包需要鉴权，0600 curl 配置暂存 token；不进入 URL、argv、环境、日志或回执。生成计划、执行前和安装锁内拒绝覆盖既有安装。计划绑定主机名称及连接 revision，执行前改名使旧计划失效，派发前再次核对实际架构。Agent 注册早于安装回执时仍通过预约关联原主机，不另建资产；确认成功后完成回执与凭据清理，清除 temporary/one_time 秘密并保留有效 managed/permanent 凭据。安装派发前的明确失败取消本次未激活 enrollment；派发后 SSH 断开或平台重启保留 unknown 和核对所需的有效凭据，不自动重放。人工结束才精确撤销本次新身份，不影响原 Agent 或其他主机；恢复边界见 13.8。日常管理优先走 Agent。
 
 卸载使用独立的持久化计划和回执。中心固定只读探测核对远端独立身份、主机关联、受管服务及未结束任务；同一节点卸载与任务按 agent_id 跨主机互斥。计划绑定主机名称、地址、端口、用户名、可信指纹、有效私钥或可复用密码、节点身份及 15 分钟预检有效期；目标或授权变化不能复用。网页提供预览、确认、取消和历史，AI 不能绕过确认执行卸载。
 
@@ -700,6 +700,32 @@ flowchart TD
 ```
 
 规格与契约见 [SDD 051](../specs/051-ssh-host-network-discovery/spec.md)。
+
+### 13.8 首装结果未知、只读核对与人工结束（SDD 053）
+
+主机首装持久化非秘密的 enrollment ID、执行阶段和人工结束元数据。阶段区分旧记录未知、计划、预检、签发中、已签发与 bootstrap 已派发，在副作用前保存；不能把旧记录缺少关联解释为没有执行。平台启动将仍在 running 的安装改为 unknown，派发后 SSH 断连同样进入 unknown。未知结果保留原目标、身份、阶段和回执，禁止自动重试、重新 enrollment 或静默覆盖远端安装。
+
+```mermaid
+flowchart TD
+  Plan[原安装计划与审批] --> Stage[持久阶段与 enrollment 关联]
+  Stage --> Dispatch[固定 SSH bootstrap]
+  Dispatch --> Done[已确认安装成功]
+  Dispatch --> Unknown[断连或平台重启：unknown]
+  Unknown --> Probe[管理员固定目标只读核对]
+  Probe --> Done
+  Probe --> Pending[证据不足：保持 unknown]
+  Probe --> Failed[证明尚未派发：失败结束]
+  Pending --> Resolve[管理员确认远端流程已结束并说明原因]
+  Resolve --> Closed[保留 unknown 历史，记录人工结束]
+```
+
+管理员通过 `/api/v1/machines/:id/deployments/:deploymentId/reconcile` 选择当前有效 SSH 凭据，在原主机连接 revision 和身份边界内只读核对。成功需要本次 enrollment 已激活、当前主机关联同一 Agent、有效 control 凭据、远端完整且运行的受管服务、无生命周期锁，以及安装开始后的新鲜心跳；仅允许有限未来时钟容忍。确认尚未派发的阶段可取消未使用票据并失败结束。旧记录、部分安装、身份冲突或证据不足保持 unknown，不执行安装或修复脚本。
+
+无法自动证明时，管理员可通过同路径 `/resolve` 明确确认远端安装流程已结束并提供原因；中心保留 unknown 状态，记录 resolved_at/by/reason，解除该安装记录的阻塞。该操作不停止或卸载远端程序，不恢复或覆盖数据；取消本次未激活 enrollment，仅撤销该 enrollment 新 Agent 的独立 control/data 凭据，不影响原 Agent 或其他身份。有未结束有限任务时拒绝人工结束，不能借此绕过任务恢复。
+
+running 与未人工结束的 unknown 安装阻止冲突生命周期动作、目标编辑、删除、重绑定及新的有限任务派发/领取；已开始的任务按原协议完成。心跳和持续遥测保留为观测证据，SSH 终端与只读检查用于人工核查。网页始终提供原计划的审阅/历史入口，丢失创建或执行响应时先恢复持久记录或只读刷新，不盲目重放；人工结束不能显示为已成功安装或已卸载。
+
+首装失败仅清理本次创建且已为空的程序目录，不删除之前存在的配置、身份或状态。正常卸载后保留的数据仍须管理员核查，fresh 安装保护不因此放宽。卸载与维护的本地任务保护同时识别 Agent job、通用 script task 和运维锁；即使中心尚未收到任务回执，也不能直接删除程序或 purge 数据。
 
 ## 14. AI 助手设计
 

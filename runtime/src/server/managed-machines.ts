@@ -9,6 +9,8 @@ import { NodeStore } from "./nodes-model.js";
 import { join } from "node:path";
 import { createAgentUpdatesSchema, registerMachineAgentUpdates, type AgentUpdateStore } from "./machine-agent-updates.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import { createInstallationRecoverySchema, registerInstallationRecovery } from "./machine-installation-recovery.js";
+import { assertNoPendingMachineInstallation, pendingMachineInstallation, unresolvedInstallationSQL } from "./machine-installations-guard.js";
 import { createUninstallationSchema, registerMachineUninstallations, type UninstallationStatus } from "./machine-uninstallations.js";
 import { id, hash } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
@@ -25,10 +27,10 @@ export type ConnectionMethod = "direct_ssh";
 export type CredentialMethod = "ssh_key" | "password";
 export type CredentialRetention = "temporary" | "managed" | "one_time" | "permanent";
 export type CredentialClearReason = "expired" | "revoked" | "consumed" | "agent_activated";
-export type MachineCapabilityReason = "host_busy" | "direct_ssh_required" | "ssh_credential_required" | "ssh_key_required" | "reusable_ssh_credential_required" | "agent_not_linked" | "agent_task_busy" | "agent_update_pending" | "uninstallation_pending" | "uninstallation_unknown" | "";
+export type MachineCapabilityReason = "host_busy" | "direct_ssh_required" | "ssh_credential_required" | "ssh_key_required" | "reusable_ssh_credential_required" | "agent_not_linked" | "agent_task_busy" | "agent_update_pending" | "uninstallation_pending" | "uninstallation_unknown" | "installation_pending" | "installation_unknown" | "";
 export interface MachineCapability { available: boolean; reason: MachineCapabilityReason }
 export type MachineStatus = "unknown" | "online" | "offline" | "installing" | "uninstalled" | "removed" | "error";
-export type DeploymentStatus = "awaiting_approval" | "running" | "succeeded" | "failed" | "cancelled";
+export type DeploymentStatus = "awaiting_approval" | "running" | "unknown" | "succeeded" | "failed" | "cancelled";
 
 const MACHINE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/;
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/;
@@ -250,6 +252,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     );
 
   `);
+  createInstallationRecoverySchema(deps);
   createUninstallationSchema(deps);
   createAgentUpdatesSchema(deps);
   // Adding the legacy default once marks only rows that predate this policy.
@@ -369,6 +372,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     };
     const pendingUninstall = uninstallations.pending(value.id);
     const pendingUpdate = agentUpdates.pending(value.id);
+    const pendingInstall = pendingMachineInstallation(db,value.id);
     const uninstallReason = pendingUninstall ? (pendingUninstall.status === "unknown" ? "uninstallation_unknown" : "uninstallation_pending")
       : uninstallations.taskBusy(value.agent_id) || hasActiveTaskRuns(db, value.agent_id, value.id) ? "agent_task_busy" : "";
     const uninstallCapability = capability(true);
@@ -379,6 +383,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const updateReason: MachineCapabilityReason = pendingUpdate ? "agent_update_pending" : !value.agent_id ? "agent_not_linked" : uninstallReason;
     if (updateCapability.available && updateReason) { updateCapability.available = false; updateCapability.reason = updateReason; }
     if (pendingUpdate) for (const current of [uninstallCapability, deployCapability]) { current.available = false; current.reason = "agent_update_pending"; }
+    if (pendingInstall) for (const current of [uninstallCapability,deployCapability,updateCapability]) { current.available=false; if(current.reason!=="host_busy")current.reason=pendingInstall.status==="unknown"?"installation_unknown":"installation_pending"; }
     return {
       id: value.id, name: value.name, default_credential_id: value.default_credential_id || "", observed_hostname: currentAgentHostname(db, value.id, value.agent_id),
       network: machineNetwork(db,value.id),
@@ -418,6 +423,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   };
   const ensureDeletable = (machineID: string) => {
     const machine = ensureMachine(machineID);
+    assertNoPendingMachineInstallation(db,machineID,machine.agent_id);
     assertNoPendingAgentUpdate(db, machine.agent_id, machineID);
     uninstallations.assertFree(machineID);
     // Keep the existing in-flight lease guard first so an active terminal,
@@ -490,6 +496,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     ensureMachine(ctx.params.id);
     uninstallations.assertFree(ctx.params.id);
     db.transaction(() => {
+      assertNoPendingMachineInstallation(db,ctx.params.id);
       uninstallations.assertFree(ctx.params.id);
       assertNoPendingAgentUpdate(db, "", ctx.params.id);
       const existing = db.get<any>("SELECT * FROM managed_machines WHERE id=?", ctx.params.id);
@@ -530,9 +537,13 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const warning = binding.retention === "permanent" ? "已确认无固定期限保存；建议优先短期保存，可随时撤销。" : "连接凭据按所选期限保存；建议不要长期保存。";
     ctx.json({...binding,credential_id:bindingID,reused,warning},201);
   };
-  const deployments = (machineID: string) => db.all<any>(
-    `SELECT id,machine_id,credential_id,status,version,arch,initial_label_id,plan_json,receipt_json,error,created_at,created_by,approved_at,started_at,finished_at FROM machine_deployments WHERE machine_id=? ORDER BY created_at DESC LIMIT 100`, machineID,
-  ).map((value) => ({ id: value.id, machine_id: value.machine_id, credential_id: value.credential_id, status: value.status, version: value.version, arch: value.arch, initial_label_id: value.initial_label_id, plan: parseJSON(value.plan_json, {}), receipt: parseJSON(value.receipt_json, {}), error: value.error, created_at: value.created_at, created_by: value.created_by, approved_at: value.approved_at, started_at: value.started_at, finished_at: value.finished_at }));
+  const deploymentView = (value: any) => ({ id: value.id, machine_id: value.machine_id, credential_id: value.credential_id, status: value.status, version: value.version, arch: value.arch, initial_label_id: value.initial_label_id, plan: parseJSON(value.plan_json, {}), receipt: parseJSON(value.receipt_json, {}), error: value.error, created_at: value.created_at, created_by: value.created_by, approved_at: value.approved_at, started_at: value.started_at, finished_at: value.finished_at,
+    enrollment_id:value.enrollment_id,execution_stage:value.execution_stage,resolved_at:value.resolved_at,resolved_by:value.resolved_by,resolution_reason:value.resolution_reason });
+  const deployments = (machineID: string) => db.all<any>("SELECT * FROM machine_deployments WHERE machine_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100",machineID).map(deploymentView);
+  const deploymentRecord = (machineID: string,deploymentID: string) => {
+    const value=db.get<any>("SELECT * FROM machine_deployments WHERE machine_id=? AND id=?",machineID,deploymentID);
+    if(!value)fail(404,"部署计划不存在"); return deploymentView(value);
+  };
   const sshCredential = (machineID: string, credentialID?: string, allowOneTime = false) => {
     const machine = get(machineID);
     if (machine.connection_method !== "direct_ssh") fail(400, "仅支持直接 SSH 连接，请先更新主机连接配置");
@@ -689,7 +700,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (credentialID && credentialID !== saved.credential_id) fail(409, "所选 SSH 凭据与 SSH 检查不一致，请重新检查");
     return result;
   };
-  const uninstallations = registerMachineUninstallations(deps, { get, idle, revision: targetRevision, checked, credential: sshCredential, authentication, busy, runner: runSSH, safe });
+  const uninstallations = registerMachineUninstallations(deps, { get, idle, revision: targetRevision, checked, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe });
   const agentUpdates = registerMachineAgentUpdates(deps, { get, idle, revision: targetRevision, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe }, {
     credentials: options.agentCredentials, downloadsDir: options.downloadsDir ?? join(process.cwd(), "downloads"), dataDir: options.dataDir ?? join(process.cwd(), ".local-dev"),
     pollIntervalMs: options.updatePollIntervalMs, healthTimeoutMs: options.updateHealthTimeoutMs,
@@ -697,6 +708,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const createPlan = (machineID: string, input: InstallPlanInput, actorID: string) => {
     parameters(record(input), ["check_id", "credential_id", "version", "arch", "initial_label_id"]);
     idle(machineID);
+    assertNoPendingMachineInstallation(db,machineID);
     assertNoPendingAgentUpdate(db, "", machineID);
     uninstallations.assertFree(machineID);
     const current = get(machineID), check = checked(current, input.check_id, input.credential_id);
@@ -714,7 +726,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       steps: ["自动校验主机公钥", "建立受限 SSH 连接", "下载固定版本 Agent 并校验 SHA256", "通过 stdin 注入一次性 enrollment token", "安装独立 systemd Agent", "等待 Agent 激活回执"],
       warnings: ["AI 不会读取或发送 SSH 秘密。", "用户确认后才执行固定部署流程。", "SSH 密码建议只使用一次，不要长期保存。", "Agent 激活后日常操作优先使用 Agent 通道。"],
     };
-    db.run(`INSERT INTO machine_deployments(id,machine_id,credential_id,status,version,arch,initial_label_id,plan_json,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+    db.run(`INSERT INTO machine_deployments(id,machine_id,credential_id,status,version,arch,initial_label_id,plan_json,created_at,created_by,execution_stage) VALUES(?,?,?,?,?,?,?,?,?,?,'planned')`,
       deploymentID, machine.id, credential.id, "awaiting_approval", version, arch, planBody.initial_label_id, JSON.stringify(planBody), iso(at), actorID);
     return { id: deploymentID, machine_id: machineID, status: "awaiting_approval", plan: planBody,
       review_url: `/machines?machine=${encodeURIComponent(machineID)}&deployment=${encodeURIComponent(deploymentID)}` };
@@ -728,6 +740,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const input = parameters(await machineBody(ctx), ["confirm"]);
     if (input.confirm !== true) fail(400, "必须明确确认部署计划");
     idle(ctx.params.id);
+    assertNoPendingMachineInstallation(db,ctx.params.id);
     assertNoPendingAgentUpdate(db, "", ctx.params.id);
     uninstallations.assertFree(ctx.params.id);
     const machine = ensureMachine(ctx.params.id), deployment = db.get<any>("SELECT * FROM machine_deployments WHERE id=? AND machine_id=?", ctx.params.deploymentId, machine.id);
@@ -744,10 +757,12 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const credential = ensureCredential(machine.id, deployment.credential_id);
     if (credential.method !== "ssh_key" && !(credential.method === "password" && ["temporary", "managed", "permanent"].includes(credential.retention))) fail(400, "自动部署需要 SSH 私钥或可复用密码，一次性密码不能用于部署");
     if (!options.agentCredentials) fail(503, "Agent enrollment 尚未配置");
-    const started = db.run("UPDATE machine_deployments SET status='running',approved_at=?,started_at=? WHERE id=? AND status='awaiting_approval'", iso(now()), iso(now()), deployment.id);
+    const started = db.run(`UPDATE machine_deployments SET status='running',execution_stage='preflight',approved_at=?,started_at=? WHERE id=? AND status='awaiting_approval'
+      AND NOT EXISTS (SELECT 1 FROM machine_deployments other WHERE other.machine_id=? AND other.id!=? AND ${unresolvedInstallationSQL(db,"other")})`, iso(now()), iso(now()), deployment.id,machine.id,deployment.id);
     if (!started.changes) fail(409, "部署计划已被其他请求执行");
     busy.add(machine.id);
     let enrollment: AgentEnrollmentIssued | undefined;
+    let dispatched = false;
     let privateKey = "", password = "";
     try {
       const material = authentication(machine.id, credential);
@@ -756,7 +771,10 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       const fresh = parsePreflight(observed.stdout);
       const currentTarget = get(machine.id);
       if (!fresh.ready || fresh.agent_installation.state !== "absent" || currentTarget.agent_id !== machine.agent_id || !replaceableAgentBinding(db, currentTarget.agent_id, iso(now()))) fail(409, "发现已有 Agent 或安装条件已变化，未签发新身份");
+      if (fresh.arch !== deployment.arch) fail(409, "主机架构与已审阅部署计划不一致，未签发新身份，请重新检查并生成计划");
       ensureCredential(machine.id, credential.id); checked(get(machine.id), savedPlan.check_id, credential.id);
+      const issuing=db.run("UPDATE machine_deployments SET execution_stage='enrollment_issuing' WHERE id=? AND status='running' AND execution_stage='preflight' AND resolved_at=''",deployment.id);
+      if(!issuing.changes)fail(409,"安装记录已进入恢复流程，旧请求不能签发新身份");
       if (deployment.initial_label_id && db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_host_labels'")) {
         if (!db.get("SELECT 1 FROM agent_task_labels WHERE id=?", deployment.initial_label_id)) fail(409, "初始主机标签已删除，请重新生成部署计划");
         // The host may already have labels from an earlier installation. Use
@@ -765,14 +783,18 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
         const tasks = new NodeStore(db, now);
         tasks.setHostLabels(machine.id, [...tasks.hostLabels(machine.id), deployment.initial_label_id]);
       }
-      enrollment = options.agentCredentials.issueEnrollment({ endpoint_origin: deps.externalURL, version: deployment.version, allowed_arch: [deployment.arch], initial_label_id: deployment.initial_label_id, created_by: ctx.user.id, machine_id: machine.id, previous_agent_id: machine.agent_id });
+      enrollment = options.agentCredentials.issueEnrollment({ endpoint_origin: deps.externalURL, version: deployment.version, allowed_arch: [deployment.arch], initial_label_id: deployment.initial_label_id, created_by: ctx.user.id, machine_id: machine.id, previous_agent_id: machine.agent_id, deployment_id:deployment.id });
       const command = agentBootstrapCommand(deps.externalURL.replace(/\/$/, ""), deployment.version);
+      const dispatching=db.run("UPDATE machine_deployments SET execution_stage='bootstrap_dispatched' WHERE id=? AND status='running' AND execution_stage='enrollment_issued' AND enrollment_id=? AND resolved_at=''",deployment.id,enrollment.enrollment_id);
+      if(!dispatching.changes)fail(409,"安装记录已进入恢复流程，旧请求不能派发安装");
+      dispatched = true;
       const result = await runSSH({ credentialID: credential.id, machine, privateKey, ...(password ? { password } : {}), command, enrollmentToken: enrollment.token_display_once, signal: ctx.signal, port: machine.port });
       const status = options.agentCredentials.enrollmentStatus(enrollment.enrollment_id);
       if (!status || status.status !== "active" || !status.agent_id) throw Error("Agent 未完成激活回执");
       const receipt = { stages: result.stages, stdout: redact(result.stdout, [enrollment.token_display_once, privateKey, password]), stderr: redact(result.stderr, [enrollment.token_display_once, privateKey, password]), enrollment_id: enrollment.enrollment_id, agent_id: status.agent_id };
       db.transaction(() => {
-        db.run("UPDATE machine_deployments SET status='succeeded',finished_at=?,receipt_json=?,error='' WHERE id=?", iso(now()), JSON.stringify(receipt), deployment.id);
+        const saved=db.run("UPDATE machine_deployments SET status='succeeded',finished_at=?,receipt_json=?,error='' WHERE id=? AND status='running' AND resolved_at=''", iso(now()), JSON.stringify(receipt), deployment.id);
+        if(!saved.changes)fail(409,"安装记录已进入恢复流程，请只读核对，不覆盖已保存结果");
         db.run("UPDATE managed_machines SET agent_id=?,agent_last_seen=?,last_error='',updated_at=? WHERE id=?", status.agent_id, iso(now()), iso(now()), machine.id);
         db.run("UPDATE machine_credentials SET last_used_at=? WHERE id=?", iso(now()), credential.id); library.used(credential.id);
         for (const temporary of db.all<{ id: string }>("SELECT id FROM machine_credentials WHERE machine_id=? AND retention IN ('temporary','one_time')", machine.id))
@@ -781,6 +803,12 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       ctx.json({ id: deployment.id, status: "succeeded", receipt: { ...receipt, stdout: receipt.stdout.slice(-4000), stderr: receipt.stderr.slice(-4000) } });
     } catch (error) {
       const message = redact(error instanceof Error ? error.message : "部署失败", [enrollment?.token_display_once ?? "", privateKey, password]);
+      if(dispatched){
+        const failure="Agent 安装结果未知，请只读核对远端状态或人工检查后明确结束；不会自动重试";
+        const saved=db.run("UPDATE machine_deployments SET status='unknown',error=?,receipt_json=? WHERE id=? AND status IN ('running','unknown') AND resolved_at=''",failure,JSON.stringify({stages:["bootstrap_dispatched"],enrollment_id:enrollment?.enrollment_id||"",error:failure}),deployment.id);
+        if(saved.changes)db.run("UPDATE managed_machines SET last_error=?,updated_at=? WHERE id=?",failure,iso(now()),machine.id);
+        throw new HTTPError(502,failure);
+      }
       let activatedAgent = "", revokedCredentials = 0;
       if (enrollment) {
         const observed = options.agentCredentials.enrollmentStatus(enrollment.enrollment_id);
@@ -792,8 +820,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
         options.agentCredentials.cancelEnrollment?.(enrollment.enrollment_id);
       }
       const failure = activatedAgent ? message + "；本次激活身份凭据已停用，请先核对远端安装状态后重新接入" : message;
-      db.run("UPDATE machine_deployments SET status='failed',finished_at=?,error=?,receipt_json=? WHERE id=?", iso(now()), failure.slice(0, 1000), JSON.stringify({ stages: ["failed"], error: failure.slice(0, 1000), ...(activatedAgent ? { agent_id: activatedAgent, credentials_revoked: revokedCredentials } : {}) }), deployment.id);
-      db.run("UPDATE managed_machines SET last_error=?,updated_at=? WHERE id=?", failure.slice(0, 1000), iso(now()), machine.id);
+      const failed=db.run("UPDATE machine_deployments SET status='failed',finished_at=?,error=?,receipt_json=? WHERE id=? AND status='running' AND resolved_at=''", iso(now()), failure.slice(0, 1000), JSON.stringify({ stages: ["failed"], error: failure.slice(0, 1000), ...(activatedAgent ? { agent_id: activatedAgent, credentials_revoked: revokedCredentials } : {}) }), deployment.id);
+      if(failed.changes)db.run("UPDATE managed_machines SET last_error=?,updated_at=? WHERE id=?", failure.slice(0, 1000), iso(now()), machine.id);
       throw new HTTPError(502, failure);
     } finally { privateKey = ""; password = ""; busy.delete(machine.id); }
   };
@@ -835,7 +863,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   }));
   router.get("/api/v1/machines/:id/deployments", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); ctx.json(deployments(ctx.params.id)); }));
   router.post("/api/v1/machines/:id/deployments/plan", safe(plan));
-  router.get("/api/v1/machines/:id/deployments/:deploymentId", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); const value = deployments(ctx.params.id).find((item) => item.id === ctx.params.deploymentId); if (!value) fail(404, "部署计划不存在"); ctx.json(value); }));
+  router.get("/api/v1/machines/:id/deployments/:deploymentId", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); ctx.json(deploymentRecord(ctx.params.id,ctx.params.deploymentId)); }));
   router.post("/api/v1/machines/:id/deployments/:deploymentId/cancel", safe((ctx) => {
     admin(ctx);
     ensureMachine(ctx.params.id);
@@ -847,6 +875,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     ctx.json({ id: deployment.id, machine_id: ctx.params.id, status: "cancelled" });
   }));
   router.post("/api/v1/machines/:id/deployments/:deploymentId/apply", safe(apply));
+  registerInstallationRecovery(deps,{get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,deployment:deploymentRecord,
+    activated(machineID,actorID){for(const temporary of db.all<{id:string}>("SELECT id FROM machine_credentials WHERE machine_id=? AND retention IN ('temporary','one_time')",machineID))clearCredential(temporary.id,"agent_activated",actorID,true);}},options.agentCredentials);
   const assistantSafe = (machine: MachineSummary) => ({ ...machine, host_key_fingerprint: "", host_key_public_key: "", host_key_observed_at: "" });
   const assistantList = () => list().map(assistantSafe);
   const assistantGet = (machineID: string) => ({ ...assistantSafe(get(machineID)), ssh_credentials: credentialRows(machineID)
@@ -862,7 +892,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       ...(typeof savedReceipt.agent_id === "string" && savedReceipt.agent_id ? { agent_id: savedReceipt.agent_id } : {}),
       ...(typeof savedReceipt.enrollment_id === "string" && savedReceipt.enrollment_id ? { enrollment_id: savedReceipt.enrollment_id } : {}),
     };
-    return { id: value.id, machine_id: value.machine_id, status: value.status, version: value.version, arch: value.arch, plan: parseJSON(value.plan_json, {}), receipt, error: value.error, created_at: value.created_at, started_at: value.started_at, finished_at: value.finished_at };
+    return { id: value.id, machine_id: value.machine_id, status: value.status, version: value.version, arch: value.arch, plan: parseJSON(value.plan_json, {}), receipt, error: value.error, created_at: value.created_at, started_at: value.started_at, finished_at: value.finished_at,
+      enrollment_id:value.enrollment_id,execution_stage:value.execution_stage,resolved_at:value.resolved_at,resolved_by:value.resolved_by,resolution_reason:value.resolution_reason };
   };
   return { list, get, assistantList, assistantGet, checkSSH, assistantPlan, assistantDeployment, acquireTerminal, agentUpdates,
     async close() {

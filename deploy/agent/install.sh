@@ -70,6 +70,8 @@ enable_attempted="no"
 previous_active="no"
 previous_enabled="no"
 runtime_release=""
+runtime_base_created="no"
+releases_directory_created="no"
 rollback_failed="no"
 installation_phase="install-files"
 wait_service_active() {
@@ -131,7 +133,13 @@ finish() {
       systemctl is-active --quiet lightmoni-agent.service || rollback_failed="yes"
     fi
     rm -f "/opt/lightmoni-agent/.current-$$" "/usr/local/bin/.lightmoni-agent.new-$$" "/etc/lightmoni-agent/.config.new-$$" "/var/lib/lightmoni-agent/.identity.new-$$"
-    if [ "$rollback_failed" = "no" ] && [ -n "$runtime_release" ]; then rm -rf "$runtime_release"; fi
+    if [ "$rollback_failed" = "no" ]; then
+      if [ -n "$runtime_release" ]; then rm -rf "$runtime_release"; fi
+      # Remove only empty program directories created by this attempt. Their
+      # presence otherwise makes the next --fresh attempt reject its own rollback.
+      if [ "$releases_directory_created" = "yes" ]; then rmdir /opt/lightmoni-agent/releases 2>/dev/null || :; fi
+      if [ "$runtime_base_created" = "yes" ]; then rmdir /opt/lightmoni-agent 2>/dev/null || :; fi
+    fi
   fi
   if [ "$rollback_failed" = "yes" ]; then
     echo "Automatic restoration needs attention; previous files remain in $tmp_dir" >&2
@@ -282,6 +290,8 @@ if [ "$enrollment_mode" = "yes" ]; then
   mv -f "/var/lib/lightmoni-agent/.identity.new-$$" "/var/lib/lightmoni-agent/identity.json"
 fi
 # The live queue, receipts, cursors, identity and cached tasks stay untouched.
+if [ ! -e /opt/lightmoni-agent ] && [ ! -L /opt/lightmoni-agent ]; then runtime_base_created="yes"; fi
+if [ ! -e /opt/lightmoni-agent/releases ] && [ ! -L /opt/lightmoni-agent/releases ]; then releases_directory_created="yes"; fi
 install -d -m 0755 /opt/lightmoni-agent /opt/lightmoni-agent/releases
 runtime_release="/opt/lightmoni-agent/releases/${version}-$(printf '%s' "$actual" | cut -c1-16)-$$"
 cp -R "$tmp_dir/unpacked/lightmoni-agent-runtime" "$runtime_release"
