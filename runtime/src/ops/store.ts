@@ -146,10 +146,12 @@ export class OperationsPlatformStore implements PlatformStore {
     return r;
   }
   private resource(r: any): PlatformResource {
+    const spec = JSON.parse(this.deps.decrypt(r.spec_cipher));
     return {
       ...r,
+      name: this.definitions.get(r.kind)?.resourceName?.(spec) ?? r.name,
       revision: Number(r.revision),
-      spec: JSON.parse(this.deps.decrypt(r.spec_cipher)),
+      spec,
       status: JSON.parse(r.status_json),
       spec_cipher: undefined,
       status_json: undefined,
@@ -209,12 +211,13 @@ export class OperationsPlatformStore implements PlatformStore {
         undefined,
         { id: key },
       );
-      const cipher = this.deps.encrypt(JSON.stringify(valid));
+      const cipher = this.deps.encrypt(JSON.stringify(valid)),
+        resourceName = this.definition(kind).resourceName?.(valid) ?? validateName(name);
       this.deps.db.run(
         "INSERT INTO ops_platform_resources(id,kind,name,revision,spec_cipher,status_json,created_by,authorized_by,created_at,updated_at) VALUES(?,?,?,1,?,?,?,?,?,?)",
         key,
         kind,
-        validateName(name),
+        resourceName,
         cipher,
         "{}",
         actor,
@@ -225,7 +228,7 @@ export class OperationsPlatformStore implements PlatformStore {
       this.deps.db.run(
         "INSERT INTO ops_platform_revisions VALUES(?,1,?,?,?,?)",
         key,
-        validateName(name),
+        resourceName,
         cipher,
         actor,
         at,
@@ -260,10 +263,11 @@ export class OperationsPlatformStore implements PlatformStore {
           { id: key },
         ),
         cipher = this.deps.encrypt(JSON.stringify(valid)),
+        resourceName = this.definition(previous.kind).resourceName?.(valid) ?? validateName(name),
         at = this.at();
       this.deps.db.run(
         "UPDATE ops_platform_resources SET name=?,revision=revision+1,spec_cipher=?,authorized_by=?,updated_at=? WHERE id=? AND revision=?",
-        validateName(name),
+        resourceName,
         cipher,
         actor,
         at,
@@ -274,7 +278,7 @@ export class OperationsPlatformStore implements PlatformStore {
         "INSERT INTO ops_platform_revisions VALUES(?,?,?,?,?,?)",
         key,
         revision + 1,
-        validateName(name),
+        resourceName,
         cipher,
         actor,
         at,
@@ -641,6 +645,7 @@ export class OperationsPlatformStore implements PlatformStore {
       !job.capabilities?.includes("operations.platform")
     )
       fail(403, "platform_payload_mismatch");
+    this.definition(current.kind).validatePayload?.(current, payload.resource.config, job.agent_id);
     return payload;
   }
   async close() {

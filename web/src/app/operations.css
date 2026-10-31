@@ -20,3 +20,7 @@
 .lm-ops-certificate-pem { font-family: var(--lm-font-mono, monospace); font-size: 12px; overflow-wrap: anywhere; }
 .lm-ops-certificate-metadata { overflow-wrap: anywhere; white-space: pre-wrap; }
 .lm-ops-certificate-downloads { margin: 16px 0; }
+.lm-ops-certificate-tasks { padding: 6px 0; min-width: 0; }
+.lm-ops-certificate-tasks > .lm-ops-section-heading h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.lm-ops-certificate-tasks > .lm-ops-note { margin-bottom: 0; }
+.lm-operations-page td .lm-ops-certificate-error { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

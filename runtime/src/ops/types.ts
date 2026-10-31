@@ -39,6 +39,8 @@ export interface PlatformRun {
   updated_at: string;
 }
 export interface ResourceDefinition {
+  resourceName?(spec: Record<string, any>): string;
+  validatePayload?(resource: PlatformResource, config: Record<string, any>, agentID: string): void;
   validate(
     spec: Record<string, any>,
     previous?: Record<string, any>,

@@ -83,6 +83,14 @@ function setup(
     },
   };
 }
+// Seed the prior multi-domain schema directly to prove existing accounts/orders remain compatible.
+function legacyCertificate(f: ReturnType<typeof setup>, name: string, spec: Record<string, any>) {
+  const resource=f.store.create('certificate',name,{...spec,domains:[spec.domains[0]]},'admin');
+  const valid=validateCertificate(spec,spec),encrypted=f.deps.encrypt(JSON.stringify(valid));
+  f.db.run('UPDATE ops_platform_resources SET name=?,spec_cipher=? WHERE id=?',name,encrypted,resource.id);
+  f.db.run('UPDATE ops_platform_revisions SET name=?,spec_cipher=? WHERE resource_id=?',name,encrypted,resource.id);
+  return f.store.get(resource.id);
+}
 const json = (body: any) =>
   new Response(JSON.stringify(body), {
     status: 200,
@@ -411,7 +419,7 @@ test("self signed lifecycle encrypts versions, deduplicates target delivery, rot
       "Certificate",
       {
         source: "self_signed",
-        domains: ["example.test", "*.example.test"],
+        domains: ["*.example.test"],
         validity_days: 90,
         auto_renew: true,
       },
@@ -892,7 +900,7 @@ function invalidOrderFixture(t: any, overrides: Record<string, any> = {}, names 
   const cred=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'invalid-order-key-id',access_key_secret:'invalid-order-key-secret'},'admin');
   const zone=f.store.create('dns_zone','Zone',{domain:'example.test',credential_id:cred.id},'admin');
   const account=f.store.create('acme_account','ACME',{email:'ops@example.test',directory_url:'letsencrypt-staging',terms_agreed:true},'admin');
-  const cert=f.store.create('certificate','Invalid authorization',{source:'acme',domains:names,acme_account_id:account.id,dns_zone_ids:[zone.id]},'admin');
+  const cert=names.length>1?legacyCertificate(f,'Invalid authorization',{source:'acme',domains:names,acme_account_id:account.id,dns_zone_ids:[zone.id]}):f.store.create('certificate','Invalid authorization',{source:'acme',domains:names,acme_account_id:account.id,dns_zone_ids:[zone.id]},'admin');
   f.db.run('INSERT INTO ops_acme_orders VALUES(?,?,?,?,?,?,?,?)','cached-invalid-order',cert.id,cert.revision,account.id,'pending',f.deps.encrypt(JSON.stringify({private_key_pem:'cached-private-key-secret',csr:'cached-csr-secret',order:{url:'https://ca.example.test/order/cached'}})),f.deps.now().toISOString(),f.deps.now().toISOString());
   return {...f,cert,created:()=>created,issue:()=>f.controller.perform(f.store.get(cert.id),'issue',{},'admin')};
 }
@@ -1106,8 +1114,7 @@ test("ACME account, DNS-01 order, same-label TXT cleanup and saved version form 
       },
       "admin",
     ),
-    certificate = f.store.create(
-      "certificate",
+    certificate = legacyCertificate(f,
       "ACME Certificate",
       {
         source: "acme",
@@ -1116,7 +1123,6 @@ test("ACME account, DNS-01 order, same-label TXT cleanup and saved version form 
         dns_zone_ids: [zone.id],
         auto_renew: true,
       },
-      "admin",
     );
   const run = await f.controller.perform(certificate, "issue", {}, "admin");
   assert.equal(run.state, "succeeded");
@@ -1349,7 +1355,7 @@ test("partial cloud deployment retains successful domain evidence and inspect ne
       "Cert",
       {
         source: "self_signed",
-        domains: ["one.example.test", "two.example.test"],
+        domains: ["*.example.test"],
       },
       "admin",
     );
@@ -1479,7 +1485,7 @@ test("saving an undeployed website certificate change retains the published cert
     draft = f.store.create(
       "certificate",
       "Draft",
-      { source: "self_signed", domains: ["example.test"] },
+      { source: "self_signed", domains: ["*.example.test"] },
       "admin",
     ),
     site = f.store.create(

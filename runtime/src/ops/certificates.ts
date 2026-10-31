@@ -21,6 +21,7 @@ import type { PlatformExecution, PlatformRun } from "./types.js";
 import { certificateMetadata } from "../operations/certificates.js";
 import { HTTPError } from "../shared/http.js";
 import { id } from "../shared/crypto.js";
+import { createClusterCertificateDelivery } from "./certificate-cluster-delivery.js";
 import {
   CloudError,
   clientFor,
@@ -175,6 +176,9 @@ export function validateCertificate(
       "invalid_renewal_window",
     ),
   };
+  const previousDomains: string[] = previous?.domains ?? [];
+  need(previousDomains.length > 1 ? out.domains.length === previousDomains.length && out.domains.every((domain: string) => previousDomains.includes(domain)) : out.domains.length === 1,
+    "certificate_single_domain_required");
   if (spec.source === "acme") {
     out.acme_account_id = ref(spec.acme_account_id);
     need(
@@ -263,7 +267,14 @@ export function validateCertificateTarget(
       "cdn_exact_domain_required",
     );
   } else {
-    out.agent_id = ref(spec.agent_id);
+    if (spec.type === "directory") {
+      need(Boolean(spec.agent_id) !== Boolean(spec.cluster_id), "certificate_directory_scope_required");
+      if (spec.cluster_id) out.cluster_id = ref(spec.cluster_id);
+      else out.agent_id = ref(spec.agent_id);
+    } else {
+      need(!spec.cluster_id, "certificate_hook_cluster_not_supported");
+      out.agent_id = ref(spec.agent_id);
+    }
     if (spec.type === "directory") {
       need(
         typeof spec.path === "string" &&
@@ -450,6 +461,7 @@ export function createCertificateController(
     at = () => deps.now().toISOString(),
     inFlight = new Set<string>(), activeIssues = new Map<string, PlatformExecution>(), background = new Set<Promise<unknown>>();
   initSchema(options);
+  const clusterDelivery = createClusterCertificateDelivery(options);
   const authorize = (actor: string) => {
     if (!store.authorized(actor))
       throw new HTTPError(403, "operations_authorization_revoked");
@@ -605,6 +617,7 @@ export function createCertificateController(
     beforeDelete: denyReferenced,
   });
   store.register("certificate", {
+    resourceName: spec => spec.domains.join(" · "),
     validate(spec, previous) {
       const out = validateCertificate(spec, previous);
       if (out.source === "acme") {
@@ -641,6 +654,8 @@ export function createCertificateController(
             ),
             "certificate_target_domain_mismatch",
           );
+      } else if (out.type === "directory" && out.cluster_id) {
+        store.get(out.cluster_id, "cluster");
       } else
         need(
           db.get("SELECT id FROM agents WHERE id=?", out.agent_id),
@@ -649,6 +664,11 @@ export function createCertificateController(
       return out;
     },
     publicSpec: publicCertificateTarget,
+    validatePayload: clusterDelivery.validatePayload,
+    afterSave(resource, previous) {
+      if (previous && (resource.spec.cluster_id || previous.spec.cluster_id))
+        store.patchStatus(resource.id, {state: "configured", machines: [], desired_revision: resource.revision, desired_certificate_version: null, applied_revision: null, applied_certificate_version: null, last_error: null});
+    },
   });
   deps.router.get("/api/v1/ops/resources/:id/records", (ctx) => {
     try {
@@ -1099,6 +1119,8 @@ export function createCertificateController(
         "certificate_not_currently_valid_or_domain_mismatch",
       );
     }
+    if (target.spec.type === "directory" && target.spec.cluster_id)
+      return clusterDelivery.sync(target, material, actor, retry, automatic);
     const key =
       "certificate-target:" +
       target.id +
@@ -1213,6 +1235,10 @@ export function createCertificateController(
     try {
       target = store.get(run.resource_id, "certificate_target");
     } catch {
+      return;
+    }
+    if (target.spec.type === "directory" && target.spec.cluster_id) {
+      clusterDelivery.onRun(target, run, config);
       return;
     }
     const success =
@@ -1434,6 +1460,8 @@ export function createCertificateController(
           store,
           resource.spec.certificate_id,
         );
+        if (resource.spec.type === "directory" && resource.spec.cluster_id)
+          return clusterDelivery.inspect(resource, material, actor);
         if (resource.spec.type === "cloud") {
           const run = await store.run(resource, "inspect", actor, () =>
             inspectCloudCertificate(options, resource, material, actor),
@@ -1576,11 +1604,11 @@ export function createCertificateController(
       if (
         target.spec.enabled &&
         store.authorized(target.authorized_by) &&
-        !(
+        (target.spec.cluster_id || !(
           target.status.applied_certificate_version ===
             certificate.status.certificate_version &&
           target.status.applied_revision === target.revision
-        )
+        ))
       ) {
         try {
           await syncTarget(target, target.authorized_by, false, true);
@@ -1592,12 +1620,13 @@ export function createCertificateController(
         }
       }
       const fresh = store.get(target.id, "certificate_target");
+      const {machines: _machines, ...summary} = fresh.status;
       summaries.push({
         id: fresh.id,
         name: fresh.name,
         type: fresh.spec.type,
         enabled: fresh.spec.enabled,
-        ...fresh.status,
+        ...summary,
       });
     }
     store.patchStatus(certificateID, { targets: summaries });
