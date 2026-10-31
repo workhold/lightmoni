@@ -65,9 +65,9 @@ function setup(
       ...options,
       ...controllerOverrides,
     });
-  t.after(() => {
-    controller.close?.();
-    store.close();
+  t.after(async () => {
+    await controller.close?.();
+    await store.close();
     jobs.close?.();
     db.close();
   });
@@ -491,6 +491,7 @@ test("self signed lifecycle encrypts versions, deduplicates target delivery, rot
   );
   f.advance(62);
   await f.controller.tick?.();
+  for(let attempt=0;attempt<100&&f.store.get(cert.id).status.state==='issuing';attempt++) await new Promise(resolve=>setTimeout(resolve,10));
   const renewed = getCertificateMaterial(f.store, cert.id);
   assert.notEqual(renewed.certificate_version, material.certificate_version);
   assert.equal(f.store.actions(target.id).length, 2);
@@ -806,6 +807,94 @@ test("cloud errors strip echoed secrets and ambiguous writes remain unknown", as
   );
 });
 
+test("ACME challenge errors keep the actual problem and phase even when DNS cleanup also fails",async t=>{
+  const api=providerFixture('aliyun');let failCleanup=false;
+  const f=setup(t,async(url,init)=>{
+    if(failCleanup&&new URLSearchParams(String(init?.body)).get('Action')==='DeleteDomainRecord')
+      return json({Code:'CleanupDenied',RequestId:'dns-cleanup-request'});
+    return api.fetcher(url,init);
+  },{resolveChallenge:async()=>true,acmeClientFactory:()=>({
+    createAccount:async()=>({}),getAccountUrl:()=> 'https://ca.example.test/account/one',
+    createOrder:async()=>({url:'https://ca.example.test/order/one',status:'pending'}),
+    getOrder:async()=>({url:'https://ca.example.test/order/one',status:'pending'}),
+    getAuthorizations:async()=>[{url:'https://ca.example.test/auth/one',identifier:{value:'example.test'},status:'pending',challenges:[{type:'dns-01',token:'qa-challenge-secret-053'}]}],
+    getChallengeKeyAuthorization:async()=> 'qa-txt-secret-053',completeChallenge:async()=>({}),
+    waitForValidStatus:async()=>{failCleanup=true;throw Object.assign(new Error('ignored raw response'),{response:{status:400,data:{error:{type:'urn:ietf:params:acme:error:dns',detail:'DNS problem: NXDOMAIN looking up TXT for _acme-challenge.example.test; qa-txt-secret-053'},private_key_pem:'never-copy-response'}}});},
+  })});
+  const cred=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'qa-id-053',access_key_secret:'qa-secret-053'},'admin');
+  const zone=f.store.create('dns_zone','Zone',{domain:'example.test',credential_id:cred.id},'admin');
+  const account=f.store.create('acme_account','ACME',{email:'ops@example.test',directory_url:'letsencrypt-staging',terms_agreed:true},'admin');
+  const cert=f.store.create('certificate','Certificate',{source:'acme',domains:['example.test'],acme_account_id:account.id,dns_zone_ids:[zone.id]},'admin');
+  const run=await f.controller.perform(cert,'issue',{},'admin');
+  assert.equal(run.state,'failed');assert.equal(run.result.phase,'challenge_verify');
+  assert.match(run.result.message,/NXDOMAIN/);assert.equal(run.result.error_type,'urn:ietf:params:acme:error:dns');assert.equal(run.result.http_status,400);
+  const events=f.store.runEvents(run.id);
+  assert(events.some(e=>e.phase==='dns_cleanup'&&e.state==='failed'&&e.code==='CleanupDenied'));
+  assert.doesNotMatch(JSON.stringify({run,events,status:f.store.get(cert.id).status}),/qa-txt-secret-053|qa-challenge-secret-053|never-copy-response|BEGIN/);
+  assert.equal(f.store.get(cert.id).status.challenge_cleanup,'pending');
+  assert.equal(f.store.get(cert.id).status.last_error_phase,'challenge_verify');
+});
+test("a revoked administrator cannot start a queued certificate network action",async t=>{
+  let calls=0;const f=setup(t,undefined,{acmeClientFactory:()=>{calls++;throw Error('network must not start')}});
+  const cert=f.store.create('certificate','Revoked',{source:'self_signed',domains:['example.test']},'admin');
+  const run=f.controller.startIssue(cert,'issue','admin');
+  f.db.run("UPDATE users SET active=0 WHERE id='admin'");
+  for(let attempt=0;attempt<100&&f.store.action(run.id).state==='running';attempt++)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.equal(f.store.action(run.id).state,'failed');assert.equal(f.store.action(run.id).result.code,'operations_authorization_revoked');assert.equal(calls,0);
+});
+test("a saved initial issuance intent survives restart and runs once with auto renewal disabled",async t=>{
+  const f=setup(t),cert=f.store.create('certificate','Saved before dispatch',{source:'self_signed',domains:['example.test'],auto_renew:false},'admin');
+  assert.equal(f.store.get(cert.id).status.initial_issue_pending,true);
+  await f.controller.close?.();await f.store.close();
+  const store=new OperationsPlatformStore(f.deps,f.jobs),controller=createCertificateController({...f.options,store});
+  try {
+    await controller.tick?.();
+    for(let attempt=0;attempt<100&&store.get(cert.id).status.state==='issuing';attempt++)await new Promise(resolve=>setTimeout(resolve,10));
+    assert.equal(store.get(cert.id).status.state,'issued');assert.equal(store.get(cert.id).status.initial_issue_pending,false);
+    await controller.tick?.();assert.equal(store.actions(cert.id).length,1);
+    assert(store.runEvents(store.actions(cert.id)[0].id).some(e=>e.phase==='certificate_save'&&e.state==='succeeded'));
+  }finally{await controller.close?.();await store.close();}
+});
+test("internal certificate callers await and share an active background execution",async t=>{
+  let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve});
+  const f=setup(t,undefined,{acmeClientFactory:()=>({createAccount:async()=>{await gate;throw Error('CA contact rejected')}})});
+  const cred=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'qa-id',access_key_secret:'qa-secret'},'admin');
+  const zone=f.store.create('dns_zone','Zone',{domain:'example.test',credential_id:cred.id},'admin');
+  const account=f.store.create('acme_account','ACME',{email:'ops@example.test',directory_url:'letsencrypt-staging',terms_agreed:true},'admin');
+  const cert=f.store.create('certificate','Shared',{source:'acme',domains:['example.test'],acme_account_id:account.id,dns_zone_ids:[zone.id]},'admin');
+  try {
+    const first=f.controller.startIssue(cert,'issue','admin');let done=false;
+    const waiting=f.controller.perform(f.store.get(cert.id),'issue',{},'admin').then(run=>{done=true;return run});
+    await new Promise(resolve=>setTimeout(resolve,20));assert.equal(done,false);assert.equal(f.store.actions(cert.id).length,1);
+    release();const result=await waiting;assert.equal(result.id,first.id);assert.equal(result.state,'failed');assert.match(result.result.message,/CA contact rejected/);
+  }finally{release();}
+});
+test("an invalid ACME order retains its problem detail and is retired before a manual new order",async t=>{
+  const f=setup(t,undefined,{acmeClientFactory:()=>({createAccount:async()=>({}),getAccountUrl:()=> 'https://ca.example.test/account/one',createOrder:async()=>({url:'https://ca.example.test/order/one'}),getOrder:async()=>({status:'invalid',error:{type:'urn:ietf:params:acme:error:rejectedIdentifier',detail:'CA policy rejects example.test'}})})});
+  const cred=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'qa-id',access_key_secret:'qa-secret'},'admin');
+  const zone=f.store.create('dns_zone','Zone',{domain:'example.test',credential_id:cred.id},'admin');
+  const account=f.store.create('acme_account','ACME',{email:'ops@example.test',directory_url:'letsencrypt-staging',terms_agreed:true},'admin');
+  const cert=f.store.create('certificate','Invalid order',{source:'acme',domains:['example.test'],acme_account_id:account.id,dns_zone_ids:[zone.id]},'admin');
+  const run=await f.controller.perform(cert,'issue',{},'admin');
+  assert.equal(run.state,'failed');assert.equal(run.result.code,'acme_order_invalid');assert.equal(run.result.phase,'get_order');assert.match(run.result.message,/CA policy rejects/);
+  assert.equal(run.result.error_type,'urn:ietf:params:acme:error:rejectedIdentifier');assert.equal(f.db.get<any>('SELECT state FROM ops_acme_orders')!.state,'invalid');
+});
+test("restart recovers certificate status even when its interrupted receipt is older than the history page",async t=>{
+  const f=setup(t),cert=f.store.create('certificate','Interrupted',{source:'self_signed',domains:['example.test'],auto_renew:false},'admin');
+  const run=await f.controller.perform(cert,'issue',{},'admin'),version=f.store.get(cert.id).status.certificate_version;
+  f.db.run("UPDATE ops_platform_runs SET state='running' WHERE id=?",run.id);
+  f.store.patchStatus(cert.id,{state:'issuing',last_run_id:run.id});
+  for(let i=0;i<101;i++)f.db.run("INSERT INTO ops_platform_runs SELECT ?,resource_id,resource_revision,agent_id,'inspect','succeeded',payload_cipher,'{}',job_id,actor,NULL,'2099-01-01T00:00:00Z',updated_at FROM ops_platform_runs WHERE id=?",'later-'+i,run.id);
+  assert(!f.store.actions(cert.id).some(r=>r.id===run.id));
+  await f.controller.close?.();await f.store.close();
+  const store=new OperationsPlatformStore(f.deps,f.jobs),controller=createCertificateController({...f.options,store});
+  try {
+    assert.equal(store.get(cert.id).status.state,'unknown');assert.equal(store.get(cert.id).status.last_error_phase,'interrupted');
+    assert.equal(store.get(cert.id).status.certificate_version,version);
+    await controller.tick?.();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM ops_platform_runs')!.n,102);
+    assert(store.runEvents(run.id).some(e=>e.phase==='interrupted'));
+  }finally{await controller.close?.();await store.close();}
+});
 test("ACME account, DNS-01 order, same-label TXT cleanup and saved version form a durable lifecycle", async (t) => {
   const api = providerFixture("aliyun");
   let f: ReturnType<typeof setup>,
@@ -942,6 +1031,10 @@ test("ACME account, DNS-01 order, same-label TXT cleanup and saved version form 
     );
   const run = await f.controller.perform(certificate, "issue", {}, "admin");
   assert.equal(run.state, "succeeded");
+  const steps=f.store.runEvents(run.id);
+  for(const phase of ['acme_account','create_csr','create_order','get_authorizations','dns_prepare','dns_propagation','challenge_submit','challenge_verify','order_finalize','certificate_download','dns_cleanup','certificate_save','complete'])
+    assert(steps.some(e=>e.phase===phase&&e.state==='succeeded'),phase);
+  assert.doesNotMatch(JSON.stringify(steps),/token-[01]|value-token|BEGIN|key_cipher|payload_cipher/);
   assert.equal(registrations, 1);
   assert.equal(orders, 1);
   assert.equal(api.records.filter((r) => r.type === "TXT").length, 0);
