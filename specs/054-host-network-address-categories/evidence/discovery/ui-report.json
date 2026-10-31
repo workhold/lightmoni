@@ -1,0 +1,57 @@
+{
+  "production_bundle": true,
+  "bundle": {
+    "index_sha256": "9d7b98f466bf6975acef2629069416d8e6366e229846eca86a2cbdd82252114a",
+    "entry": "/assets/index-Cc1XsCg2.js",
+    "entry_sha256": "67fa2afa8e59fbfa91b795aca5350d55be01815bf7c7ebb908eb8d48e1923a41"
+  },
+  "fixture_only": true,
+  "production_writes": false,
+  "ssh_connections": false,
+  "installations": false,
+  "languages": [
+    "zh-CN",
+    "en-US"
+  ],
+  "widths": [
+    1440,
+    390
+  ],
+  "passed": 32,
+  "checked": [
+    "zh-CN 1440px: registration, editing, and the host column identify the SSH connection address",
+    "zh-CN 1440px: preflight discovers IPv4, IPv6, hostname, interfaces, source and time without Agent even when installation prerequisites fail",
+    "zh-CN 1440px: refresh and host details retain discovered addresses and SSH provenance while keeping identity, name, SSH target, and platform source separate",
+    "zh-CN 1440px: unavailable discovery is a quiet empty result and does not erase the prior successful snapshot or fail installation checks",
+    "zh-CN 1440px: historical check results without discovery use the same empty state",
+    "zh-CN 1440px: a successful empty snapshot shows no addresses rather than an unavailable collection",
+    "zh-CN 1440px: later Agent snapshots label Agent collection separately from platform-observed connection source",
+    "zh-CN 1440px: all remote actions are explicit SSH-check fixture requests; no registration, target edits, plans, or installations are submitted",
+    "zh-CN 390px: registration, editing, and the host column identify the SSH connection address",
+    "zh-CN 390px: preflight discovers IPv4, IPv6, hostname, interfaces, source and time without Agent even when installation prerequisites fail",
+    "zh-CN 390px: refresh and host details retain discovered addresses and SSH provenance while keeping identity, name, SSH target, and platform source separate",
+    "zh-CN 390px: unavailable discovery is a quiet empty result and does not erase the prior successful snapshot or fail installation checks",
+    "zh-CN 390px: historical check results without discovery use the same empty state",
+    "zh-CN 390px: a successful empty snapshot shows no addresses rather than an unavailable collection",
+    "zh-CN 390px: later Agent snapshots label Agent collection separately from platform-observed connection source",
+    "zh-CN 390px: all remote actions are explicit SSH-check fixture requests; no registration, target edits, plans, or installations are submitted",
+    "en-US 1440px: registration, editing, and the host column identify the SSH connection address",
+    "en-US 1440px: preflight discovers IPv4, IPv6, hostname, interfaces, source and time without Agent even when installation prerequisites fail",
+    "en-US 1440px: refresh and host details retain discovered addresses and SSH provenance while keeping identity, name, SSH target, and platform source separate",
+    "en-US 1440px: unavailable discovery is a quiet empty result and does not erase the prior successful snapshot or fail installation checks",
+    "en-US 1440px: historical check results without discovery use the same empty state",
+    "en-US 1440px: a successful empty snapshot shows no addresses rather than an unavailable collection",
+    "en-US 1440px: later Agent snapshots label Agent collection separately from platform-observed connection source",
+    "en-US 1440px: all remote actions are explicit SSH-check fixture requests; no registration, target edits, plans, or installations are submitted",
+    "en-US 390px: registration, editing, and the host column identify the SSH connection address",
+    "en-US 390px: preflight discovers IPv4, IPv6, hostname, interfaces, source and time without Agent even when installation prerequisites fail",
+    "en-US 390px: refresh and host details retain discovered addresses and SSH provenance while keeping identity, name, SSH target, and platform source separate",
+    "en-US 390px: unavailable discovery is a quiet empty result and does not erase the prior successful snapshot or fail installation checks",
+    "en-US 390px: historical check results without discovery use the same empty state",
+    "en-US 390px: a successful empty snapshot shows no addresses rather than an unavailable collection",
+    "en-US 390px: later Agent snapshots label Agent collection separately from platform-observed connection source",
+    "en-US 390px: all remote actions are explicit SSH-check fixture requests; no registration, target edits, plans, or installations are submitted"
+  ],
+  "errors": [],
+  "unexpected": []
+}
