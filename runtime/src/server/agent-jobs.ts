@@ -1,4 +1,5 @@
 import { id, token } from "../shared/crypto.js";
+import { dockerJobAction, dockerReceipt, safeDockerCode } from '../shared/docker-jobs.js';
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
@@ -365,11 +366,12 @@ export function registerAgentJobs(
       fail(409, "agent job phase does not match its actions");
     const originalSummary = eventSummary(value.summary), originalCode = text(value.code ?? "", "code", 128, false), originalSnapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
     const probeJob = readOnlyPreflight(current);
-    const summary = probeJob ? (phase === "accepted" ? "Agent accepted read-only systemd preflight" : phase === "preflighting" ? "Agent inspected registered systemd target" : phase === "succeeded" ? "Read-only systemd preflight completed" : "Read-only systemd preflight state updated") : originalSummary;
-    const code = probeJob ? (originalCode ? safePreflightCode(originalCode) : "") : originalCode;
+    const dockerJob = dockerJobAction(JSON.parse(current.actions_json||'[]'));
+    const summary = dockerJob ? 'Docker task state updated' : probeJob ? (phase === "accepted" ? "Agent accepted read-only systemd preflight" : phase === "preflighting" ? "Agent inspected registered systemd target" : phase === "succeeded" ? "Read-only systemd preflight completed" : "Read-only systemd preflight state updated") : originalSummary;
+    const code = dockerJob ? (originalCode?safeDockerCode(originalCode):'') : probeJob ? (originalCode ? safePreflightCode(originalCode) : "") : originalCode;
     // A probe snapshot is accepted only from the final /result path, after the
     // strict whitelist below. Events never persist Agent-provided snapshot data.
-    const snapshot = probeJob ? {} : originalSnapshot;
+    const snapshot = probeJob || dockerJob ? {} : originalSnapshot;
     const occurred = iso(deps);
     db.transaction(() => {
       const last = db.get<any>("SELECT * FROM agent_job_events WHERE job_id=? ORDER BY sequence DESC LIMIT 1", jobID);
@@ -423,6 +425,15 @@ export function registerAgentJobs(
     let state = text(value.state, "state", 32) as AgentJobState;
     if (!["succeeded", "failed", "cancelled", "unknown"].includes(state)) fail(400, "invalid result state");
     let code = text(value.code ?? "", "code", 128, false), summary = eventSummary(value.summary), snapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
+    const dockerAction=dockerJobAction(JSON.parse(current.actions_json||'[]'));
+    if(dockerAction){
+      code=code?safeDockerCode(code):'';
+      summary=state==='succeeded'?'Docker task completed and verified':state==='unknown'?'Docker result is unknown; inspect before retrying':'Docker task did not complete';
+      if(state==='succeeded'){
+        try{snapshot=dockerReceipt(dockerAction,snapshot,current.issued_at,deps.now());}
+        catch{state=dockerAction.operation==='inventory'?'failed':'unknown';code='invalid_docker_receipt';summary='Docker receipt did not match the task';snapshot={};}
+      }else snapshot={docker:{operation:dockerAction.operation,container_id:dockerAction.container_id??'',error:code||'docker_collection_unavailable',attempted_at:iso(deps)}};
+    }
     if (readOnlyPreflight(current)) {
       code = code ? safePreflightCode(code) : "";
       summary = state === "succeeded" ? "Read-only systemd preflight completed" : state === "failed" ? "Read-only systemd preflight failed" : "Read-only systemd preflight result requires review";
