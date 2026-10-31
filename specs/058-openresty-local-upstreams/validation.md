@@ -22,4 +22,4 @@ node --import tsx --test --test-concurrency=1 test/platform-website-routing.test
 
 不新增配置字段、数据库迁移或 Agent 协议，现有 Agent 继续接收完整配置。中心升级后，旧同机内网上游与新的逐机配置签名不同，下一次调和将发布新配置；无同机后端的网关保持原配置。凭据、权限、域名范围和手工 URL 不变。
 
-提交前已同步远端 `origin/main`；集成到 `5aa5526`（主干新增内容仅为镜像发布与文档）。功能通过 GitHub PR 交付，未合并、未发布镜像或改动生产配置。
+提交前已同步远端 `origin/main`；集成到 `5aa5526`（主干新增内容仅为镜像发布与文档）。功能通过 [GitHub PR #39](https://github.com/workhold/lightmoni/pull/39) 交付，未合并、未发布镜像或改动生产配置。
