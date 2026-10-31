@@ -25,4 +25,6 @@
 
 无秘密证据见 [doca-sync.json](doca-sync.json)。未执行浏览器视觉验收，不将结构回读说成视觉通过。Doca MCP context与运行时凭据会话已关闭。
 
+代码复用补充从903保存至904，回读核对4个新增段落及2个专项设计/规格来源链接；其余662个块和全部33张原生图保持不变。新增段落明确双组合根、共享组件、运行态UID门控、独立unit/版本/状态与严格journal，未改动图拓扑。
+
 设计 PR：[#47](https://github.com/workhold/lightmoni/pull/47)，未合入；实现任务保持未完成。

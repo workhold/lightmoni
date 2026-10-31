@@ -31,5 +31,17 @@
   "text_nodes_edges_geometry_verified": true,
   "full_original_document_order_verified": true,
   "native_visual_render_verified": false,
-  "note": "仅同步SDD060目标设计，尚未实现/合入/发布。保留其他开发中章节和全部既有原生图；结构回读不冒称视觉验收。"
+  "note": "仅同步SDD060目标设计，尚未实现/合入/发布。保留其他开发中章节和全部既有原生图；结构回读不冒称视觉验收。",
+  "followup_code_reuse": {
+    "checked_at": "2026-10-31T18:05:29.113311+00:00",
+    "source_revision": "bf1be5b9fc5cc2215dcbc156d2e1071bb3db102d",
+    "before_seq": 903,
+    "readback_seq": 904,
+    "inserted_blocks": 4,
+    "updated_detail_source_links": 2,
+    "unrelated_blocks_unchanged": 662,
+    "all_native_diagrams_unchanged": 33,
+    "text_links_and_original_order_verified": true,
+    "native_visual_render_verified": false
+  }
 }
