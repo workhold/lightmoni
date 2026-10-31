@@ -63,6 +63,20 @@ flowchart TB
 
 root 执行器使用独立 audience 与自己生成的 Ed25519 私钥。它自行领取、下载、验签、取许可和提交签名回执；普通 Agent 的 control/data credential 对上述 root 接口无权。中心将 capability 作为观测，实际准入同时要求当前主机绑定、执行器身份、安装代次、服务端授权和本地策略。
 
+### 4.1 同一代码库、同一发行包、两个运行角色
+
+产品仍是一套 LightMoni Agent。一个版本化发行包提供普通 agent 与 privileged_executor 两个固定入口，分别由 systemd 以 lightmoni-agent 和系统已有 root 启动；使用相同源码、构建和发布流程，不复制出两套 Agent 实现。两种服务可独立启用、保留各自活跃版本与兼容性检查，共享的不可变代码及全部路径祖先必须由 root 拥有，不能从普通 Agent 可写目录加载 root 模块。
+
+共享模块包括协议/schema、任务状态机、幂等与 journal 实现、制品下载/摘要校验、有界进程运行组件和可复用操作适配器。独立组合根注入严格类型的 ExecutionContext（执行主体、身份提供器、策略、状态目录、时钟和允许能力）；同一动作复用实现，入口分别强制鉴权和白名单，不能因共用函数省略高权限 grant。journal代码可以复用，文件、锁与凭据实例不能共用。
+
+共享状态机机制，保留脚本退出码、部署健康验证等各自业务终态规则。共用进程组件的洁净环境、超时、输出和尽力终止机制，profile固定差异；文件写入/切换等非command副作用也必须经过路径/资源策略，不能只保护spawn。ExecutionContext类型用于防误用，真正权限边界仍是OS身份、root文件所有权及中心/本地验权，不能靠isRoot布尔值放行。
+
+操作系统权限来自进程实际 UID/GID/附加组，不来自 SSH 密码、平台 token 或 role 字符串。普通角色常驻运行（run/轮询/采集）以 UID=0 启动应在创建 Agent/runner 前拒绝；version/check/configure 等固定离线管理命令仍可由安装器以 root 执行。特权角色必须实际 UID=0、持有 root 私有执行器身份并验证本地策略，否则拒绝。改密码、改 role 参数或拿普通 control credential 都不能升级权限；使用 root 启动完整普通 Agent 也不作为支持的部署方式。复用的是代码和执行原语，各角色暴露的能力与授权边界仍明确分开。
+
+两个 systemd unit 分别声明文件写入范围、子进程和资源策略。普通 Agent 的 ProtectSystem/ReadWritePaths 不能直接只改 User 后用于 root 执行器；执行器需要按已批准 profile 明确的受管路径和运行单元管理能力，不能用 UID=0 掩盖沙箱配置不匹配。
+
+复用前先收紧公共持久化契约：root任务的journal写入/fsync失败即禁止副作用，损坏状态不能当成无任务，unknown上报失败不能自动clear或解除fence；不能直接沿用现有普通runner的宽松错误处理。两角色分别保存current/previous/fingerprint与回退兼容性，普通Agent当前路径不能充当执行器版本状态；若共享物理只读发行目录，GC/卸载必须核对双方引用和在途/unknown，不能只看Agent状态删除程序。
+
 ## 5. 登记、预检与界面
 
 登记表单用户名旁使用简短说明：**“安装 Agent 需要 root，或支持免交互提权的 sudo 账户。登录账户用于安装和恢复，Agent 使用独立账户运行。”** 不添加永久保存凭据的大段警告，不改变已有保存期限选择。

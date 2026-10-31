@@ -1540,6 +1540,14 @@ flowchart TB
 
 用户只登记一套SSH账户；安装器创建lightmoni-agent普通账户，独立执行器使用系统已有root，不创建第二套root登录账户或要求第二份密码。两种常驻运行身份与SSH引导账户分开，日常执行不依赖保存root SSH密码。
 
+代码与发行统一：同一代码库和版本化发行包提供agent/privileged_executor两个固定入口，共用协议、执行状态机、journal实现、制品下载校验及操作适配器；独立组合根通过类型化ExecutionContext注入执行主体、身份、策略与状态目录。共用代码，不共用凭据/journal/锁；两服务可独立启用并激活兼容版本，root使用的程序及路径祖先均root所有。
+
+复用状态机机制而保留脚本退出码/部署健康等业务终态规则；共用洁净环境、超时、输出和尽力终止组件。文件写入/切换等非command副作用同样校验路径与资源策略，不只保护spawn；类型化context不能替代OS身份和真实验权，不能用isRoot布尔值放行。
+
+权限由进程实际UID/GID/附加组决定，不能通过改SSH密码、平台token或role参数提权。普通角色常驻run/轮询/采集以UID=0启动应在创建runner前拒绝，version/check/configure等固定离线管理命令仍可由root安装器调用；特权角色必须UID=0并具备独立root身份和本地策略。共享适配器也必须经过主体/能力/grant校验，不把完整普通Agent直接用root运行作为支持方案。两个unit分别定义写目录/沙箱/子进程策略，不能仅修改User后复用普通Agent unit。
+
+公共journal须满足root通道严格持久化：写入/fsync失败不产生副作用，损坏不当空任务，unknown上报失败保留记录和fence。两角色current/previous/fingerprint及回退兼容性独立；物理共享只读发行时，GC/卸载同时检查双方引用和在途/unknown，不能只看普通Agent状态。
+
 ### 60.3 登记提示与实际权限
 
 登记时提示安装需要root或支持所需免交互sudo的账户；允许无提权用户先登记资产/登录终端。预检返回root/sudo_noninteractive/unavailable/unknown并绑定目标与凭据revision；引导前再核验。首期不支持交互sudo，不复用SSH密码，不自动修改sudoers。引导账户只用于安装/恢复，普通Agent仍是lightmoni-agent。容器管理与允许提权脚本默认关闭，独立审阅启用；授权开关和实际ready/unavailable/blocked/unknown分开，显示签名观察的新鲜度。

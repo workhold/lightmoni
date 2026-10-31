@@ -10,6 +10,7 @@
 - 执行协议审查确认普通脚本同 UID、control 凭据及 claim/payload/events/result 的完整迁移要求；补充显式提权脚本，不再把所有 root 脚本一概排除。
 - 独立权限审查修复：30秒许可不使用60秒请求时差容忍，采用包含挂起的单调截止；脚本/容器输出作为可能含秘密的敏感正文；封闭 named volume driver_opts/DriverConfig 和 namespace 借用。
 - 独立登记与生命周期审查修复：统一 disabling/unknown；区分首次SSH引导与既有执行器策略更新；程序回退不回滚journal/fence/已消费授权和防重状态。
+- 代码复用补充审查：统一源码/发行与双组合根；root拒绝仅限普通角色常驻运行，不破坏root安装器的check/configure；两个unit不能仅修改User；root journal不得吞错或丢unknown，双角色版本/GC/卸载分别核对。
 
 ## 文档检查
 

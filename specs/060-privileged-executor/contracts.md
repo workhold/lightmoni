@@ -2,6 +2,12 @@
 
 字段和端点名称为本 SDD 的实现约束；实现前必须以严格 schema 落入 shared 协议并新增协议版本。未知字段拒绝，不将下列示意作为现有 API。
 
+## 发行与运行角色
+
+一个发行包包含固定 agent 与 privileged_executor 入口，共用协议与执行组件。ExecutionContext的principal/身份提供器/策略/目录由对应组合根固定注入；普通角色常驻run/轮询/采集实际UID为0时，在创建Agent/runner前拒绝，version/check/configure等固定离线安装管理命令不受此限制；特权角色实际UID非0或缺root私有身份/策略时拒绝。role不提供提权，不能由任务载荷修改。代码及路径祖先root所有；两角色可独立激活兼容版本，凭据、journal、锁和防重状态不共享。各自unit单独定义写目录/沙箱/子进程策略，不能只改User复用普通Agent unit。
+
+公共journal在root通道的强制契约：写入/fsync失败拒绝副作用、损坏拒绝执行、unknown回报失败保留记录/fence。每角色独立current/previous/fingerprint与兼容性；共享物理发行时GC/卸载同时检查两角色引用及在途/unknown。
+
 ## 主机权限与计划
 
 - SSH 预检：`privilege.state=root|sudo_noninteractive|unavailable|unknown`，包含 `checked_at/expires_at/machine_revision/credential_binding_revision/endpoint_fingerprint`。失败码为 `privilege_unavailable_or_interactive` 或 `privilege_probe_failed`；不能未取证就断言密码错误。
