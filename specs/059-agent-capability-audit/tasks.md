@@ -6,4 +6,4 @@
 - [x] 完成任务、采集与生命周期隔离测试。
 - [x] 完成真实主机只读任务与维护验收，恢复在线。
 - [x] 记录能力矩阵、权限和配置限制。
-- [ ] 提交 GitHub PR。
+- [x] 提交 GitHub PR：[PR #46](https://github.com/workhold/lightmoni/pull/46)。
