@@ -13,6 +13,17 @@ import {decodeOTLP,nowNano,formatNanoTime} from '../src/shared/otlp.js';
 import {Catalog} from '../src/server/catalog.js';
 import {systemTable} from '../src/server/auth.js';
 function dbFixture(t:any){const db=new DB(':memory:');t.after(()=>db.close());return db;}
+test('certificate step journal projects ordered safe diagnostics through the transactional system log outbox',async t=>{
+ const db=dbFixture(t);db.exec('CREATE TABLE ops_platform_run_events(id TEXT PRIMARY KEY,run_id TEXT,resource_id TEXT,resource_kind TEXT,resource_revision INTEGER,sequence INTEGER,phase TEXT,state TEXT,detail_json TEXT,created_at TEXT)');
+ const rows:any[]=[],logs=new SystemLogs({db,now:()=>new Date()} as any,{internal:async(_table:string,batch:any[])=>{rows.push(...batch)}} as any);
+ const insert=()=>db.run('INSERT INTO ops_platform_run_events VALUES(?,?,?,?,?,?,?,?,?,?)','event','run','cert','certificate',2,3,'challenge_verify','failed',JSON.stringify({domain:'example.test',message:'DNS lookup failed token=synthetic-private',code:'acme_issuance_failed',error_type:'urn:ietf:params:acme:error:dns',http_status:400,request_id:'ca-request',private_key_pem:'never-copy'}),new Date().toISOString());
+ assert.throws(()=>db.transaction(()=>{insert();throw Error('rollback')}));assert.equal(db.get<any>('SELECT COUNT(*) n FROM system_log_outbox')!.n,0);
+ insert();assert.doesNotMatch(db.get<any>('SELECT payload FROM system_log_outbox')!.payload,/synthetic-private|never-copy/);
+ await logs.publish();assert.equal(rows.length,1);const attrs=rows[0].row.attributes;
+ assert.equal(attrs.run_id,'run');assert.equal(attrs.resource_kind,'certificate');assert.equal(attrs.phase,'challenge_verify');assert.equal(attrs.domain,'example.test');assert.equal(attrs.http_status,'400');assert.equal(attrs.request_id,'ca-request');assert.equal(rows[0].row.severity,'WARN');
+ assert.match(rows[0].row.body,/DNS lookup failed/);assert.doesNotMatch(JSON.stringify(rows),/synthetic-private|never-copy/);
+ await logs.publish();assert.equal(rows.length,1);
+});
 function agentFixture(t:any){const dir=mkdtempSync(join(tmpdir(),'lm-044-agent-'));const agent=createAgent({...defaultConfig(),data_dir:dir,endpoint:'http://127.0.0.1:1',control_credential:'test-control',data_credential:'test-data',listen:'127.0.0.1:0',min_free_bytes:0,collect_interval_seconds:3600});t.after(async()=>{await agent.close();rmSync(dir,{recursive:true,force:true});});return agent;}
 const target={deployment_id:'instance-a',application_id:'app-a',cluster_id:'cluster-a',machine_id:'machine-a',service_name:'orders',role:'generic'};
 const container={id:'a'.repeat(64),name:'orders-app-1',image:'orders:1',state:'running',ports:'8080',deployment_id:target.deployment_id};

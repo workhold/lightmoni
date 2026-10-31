@@ -1250,19 +1250,19 @@ flowchart TB
 
 ### 33.2 存储、版本与执行
 
-ops_platform_resources 保存 revision、加密 spec、脱敏 status 和授权者；ops_platform_revisions 保存不可变配置快照；ops_platform_runs 保存加密请求快照/输入、逻辑去重键、执行状态和脱敏结果。ops_platform_instances、ops_platform_ports 保存实例、资源与端口预留；ops_platform_nodes 保存 Agent 只读容量观察。证书版本、ACME 账号/订单/挑战、DNS 观察/归属及云证书映射分别持久保存。配置保存与应用发布分开；发布冻结 desired_revision，托管服务同时冻结 application_revision 和 node_pool_revision。新配置需显式发布才进入持续维护。
+ops_platform_resources 保存 revision、加密 spec、脱敏 status 和授权者；ops_platform_revisions 保存不可变配置快照；ops_platform_runs 保存加密请求快照/输入、逻辑去重键、执行状态和脱敏结果。ops_platform_run_events 按执行 ID 和递增 sequence 保存最多 2000 条脱敏步骤；实时日志从 SQLite 读取并通过事务 outbox 投影到系统日志。ops_platform_instances、ops_platform_ports 保存实例、资源与端口预留；ops_platform_nodes 保存 Agent 只读容量观察。证书版本、ACME 账号/订单/挑战、DNS 观察/归属及云证书映射分别持久保存。配置保存与应用发布分开；发布冻结 desired_revision，托管服务同时冻结 application_revision 和 node_pool_revision。新配置需显式发布才进入持续维护。
 
 ### 33.3 鉴权、私有载荷与调度
 
-管理员 API 为 /api/v1/ops，统一 revision、confirmed、资源引用和可用动作检查。人工动作和已启用的持续策略记录授权者，每次新派发重查管理员有效性。领域各自维护 in-flight，慢 DNS/ACME 不阻塞工作负载轮次；网站 DNS 刷新另有并发上限。新 Agent 动作使用 operations.platform，复用现有 control 身份、job lease 和 /agents/:id/jobs/:jobId/operations 私有下载；普通 job 仅含 ID。成功回执必须匹配 operation/resource/node 并有现场验证；中心拒绝陈旧或撤权载荷。关闭时拒绝新动作，等待已开始的领域/云动作再关闭存储。
+管理员 API 为 /api/v1/ops，统一 revision、confirmed、资源引用和可用动作检查。人工动作和已启用的持续策略记录授权者，每次新派发重查管理员有效性。新建证书在资源事务内保存首轮执行意图，提交后立即建立后台执行；创建返回 201、手动申请/续期返回 202 与执行 ID，不等待 ACME/DNS。首轮执行与 auto_renew 开关独立；同一证书共享活动执行。领域各自维护 in-flight，慢 DNS/ACME 不阻塞工作负载轮次；网站 DNS 刷新另有并发上限。新 Agent 动作使用 operations.platform，复用现有 control 身份、job lease 和 /agents/:id/jobs/:jobId/operations 私有下载；普通 job 仅含 ID。成功回执必须匹配 operation/resource/node 并有现场验证；中心拒绝陈旧或撤权载荷。关闭时拒绝新动作，等待已开始的领域/云动作再关闭存储。
 
 ### 33.4 DNS 与 ACME
 
-阿里 DNS 与 DNSPod 通过固定官方 HTTPS 端点签名请求，支持全量分页 CRUD/启停和管理 scope；五分钟有界只读同步观察外部修改。人工可管理授权范围内记录，网站/ACME 自动化只维护已记录归属和 Record ID 的记录。API 接受、平台回读和公网传播是不同状态。ACME 在中心使用持久账号密钥、订单、CSR 和 DNS-01 挑战，精确创建/清理本订单 TXT，支持同名多值与通配符；不把 DNS 凭据下发到网关。
+阿里 DNS 与 DNSPod 通过固定官方 HTTPS 端点签名请求，支持全量分页 CRUD/启停和管理 scope；五分钟有界只读同步观察外部修改。人工可管理授权范围内记录，网站/ACME 自动化只维护已记录归属和 Record ID 的记录。API 接受、平台回读和公网传播是不同状态。ACME 在中心使用持久账号密钥、订单、CSR 和 DNS-01 挑战，精确创建/清理本订单 TXT，支持同名多值与通配符；不把 DNS 凭据下发到网关。账号、订单、DNS 写入/传播、挑战提交/核验、证书下载/保存和 TXT 清理分别写步骤日志；失败保留阶段、可用的 CA problem 说明、类型/HTTP 状态/云 Request ID，敏感值过滤后才持久化。创建订单结果不确定或中心重启时记为 unknown，不自动重放。
 
 ### 33.5 证书版本与三类分发目标
 
-证书支持 ACME、上传、自签；公私钥匹配、SAN、有效期和指纹均校验。材料与不可变版本加密保存，公开接口只显示元数据和 has_*。上传证书只能提醒到期；ACME/自签可显式启用自动续期，窗口按实际有效期计算，尚未接入 ARI；失败续期可人工重新 issue/renew，不宣称完整自动退避已实现。网站首次发布 HTTPS 时，材料缺失或过期可调用中心证书签发后继续部署。证书目标分别为 Agent 目录、云 CDN、更新脚本，各自记录 desired/applied 版本与结果。
+证书支持 ACME、上传、自签；公私钥匹配、SAN、有效期和指纹均校验。材料与不可变版本加密保存，公开接口只显示元数据和 has_*。上传证书只能提醒到期；ACME/自签可显式启用自动续期，窗口按实际有效期计算，尚未接入 ARI；失败续期可人工重新 issue/renew，不宣称完整自动退避已实现。网站首次发布 HTTPS 时，材料缺失或过期可调用同一可追踪签发流程，内部等待（或等待已有执行）取得材料后再继续部署；管理员 HTTP 创建/签发接口不等待。上传材料也在后台校验并导入；编辑既有配置不会自动签发。证书目标分别为 Agent 目录、云 CDN、更新脚本，各自记录 desired/applied 版本与结果。
 
 ### 33.6 云服务、脚本与凭据边界
 
@@ -1382,7 +1382,7 @@ Agent 自动将访问记录写入共享应用日志表。网站 QPS（分钟均�
 
 中心运行日志、Agent runtime_events、运维执行、Agent jobs/events、任务中心执行/取消/结果核对、发布事件、主机安装/卸载/SSH检查、凭据与节点关联事件、定时运维、资源修订/删除、Key 接入、节点移除、终端连接/关闭元数据、告警/响应及 AI 告警提案应用审计统一进入平台系统日志公开视图 `lightmoni_log`，新日志写物理表 `_lm_lightmoni_log`。component 区分 center、agent、operations、auth、alerts、assistant、tasks，source、resource_id、resource_kind、cluster_id、machine_id、record_id 支持检索。旧系统日志兼容视图继续读取历史数据，不删除旧记录。
 
-SQLite 继续保存审批、配置版本、执行状态及回执，承担事务控制。system_log_outbox 通过同事务触发器记录白名单事件元数据并幂等补录已有记录；仅在 Ingest.internal 成功写入 ClickHouse 后标记已投递并清除 outbox 正文。ClickHouse 失败保留待发送项，重启和重复投递使用稳定 event_id。中心运行日志也使用该 outbox，关闭性能自监控不关闭系统日志。outbox 不记录密钥、环境、加密配置、任意脚本输出、交互终端内容、告警联系人、通知载荷、AI 对话或加密回执。任务失败解释脱敏后导出。
+SQLite 继续保存审批、配置版本、执行状态及回执，承担事务控制。system_log_outbox 通过同事务触发器记录白名单事件元数据并幂等补录已有记录；仅在 Ingest.internal 成功写入 ClickHouse 后标记已投递并清除 outbox 正文。ClickHouse 失败保留待发送项，重启和重复投递使用稳定 event_id。中心运行日志也使用该 outbox，关闭性能自监控不关闭系统日志。outbox 不记录密钥、环境、加密配置、任意脚本输出、交互终端内容、告警联系人、通知载荷、AI 对话或加密回执。任务失败解释脱敏后导出。证书步骤通过 ops_platform_run_events 的同事务触发器进入 outbox；白名单说明在投递时读取，run_id 关联回执。证书抽屉直接读取 SQLite 增量步骤，每 2 秒刷新，不依赖 ClickHouse 可用性。
 
 ```mermaid
 flowchart LR
@@ -1413,3 +1413,32 @@ GET /v1/center-endpoints使用SDK密钥、已启用豁免表匿名规则或Agent
 Go、Node/浏览器、Python、Rust共享内网优先、公网备用语义。配置和上报复用同一选择；Agent的心跳/配置、job/task轮询、operations及制品下载同样共用入口，内网可达时不将数据与控制分流到公网。当前Agent是HTTP轮询，无独立WebSocket协议。传输失败使下次原请求/批次重选，不在同次调用内重放写请求；批次ID、创建时间及正文保持，所有入口必须共用中心去重存储。30秒冷却和有效新修订控制重新探测。全部已知入口失效时由运维修复公网引导。
 
 同集群Nginx固定使用应用内网端点，按集群内网完全互通处理；无健康内网后端时503，不生成公网备用。网关public_address只用于外部入口DNS。旧中心未提供发现协议时保留显式地址直报；新SDK不再隐式默认本机4318。验收覆盖隔离HTTP/SQLite与多语言真实客户端，不等同公网/VPC、真实TLS证书或大规模生产网络验收。
+
+
+## 第53章 证书异步首轮执行与步骤诊断（SDD 053）
+
+新建 certificate 的 afterSave 在同一资源事务内保存 initial_issue_pending；HTTP 处理器在事务提交后调用 startIssue，持久化 running 执行快照、queued 步骤和 issuing 状态，并返回 201。实际工作延迟到微任务执行，网络等待不占用创建响应。定时轮次接管尚未开始的首轮意图；编辑不触发申请，auto_renew 只控制后续续期。首轮去重键绑定证书 ID/修订，同一证书的手动操作或网站材料请求共享活动执行；每个网络写入边界重新检查保存的管理员授权，保存证书前重查修订。
+
+管理员手动 issue/renew 返回 202 与执行 ID。中心内部仍可 await 执行句柄，网站 HTTPS 发布只在证书实际验证保存后继续。成功申请后的分发沿用已有授权、版本与目标去重。重启将未完成的中心执行标为 unknown，追加中断步骤，保持旧证书材料；不会因 unknown 自动重放申请。未建立执行的首轮意图可由下一轮调度接管。
+
+SQLite ops_platform_run_events 保存白名单的 phase/state、domain/attempt、时间及有界安全诊断；每次写入分配连续 sequence，单次执行保留最近 2000 条。GET /api/v1/ops/runs/:id/events?after=N 仅管理员可访问，每页最多 200 条，返回当前回执和增量游标。界面按执行 ID 隔离轮询、展示历史申请与各阶段状态；旧回执只含通用码时明确无法恢复历史原因。
+
+诊断只选择错误说明与结构化元数据，不序列化请求/响应、错误对象或栈。过滤账号密钥、凭据、EAB、CSR/私钥、DNS challenge token/TXT、Authorization 和 URL 查询内容后，才写回执、资源状态及步骤表。TXT 清理失败单独记录，保留主要失败原因；证书已签发但清理未完成时继续显示清理问题。步骤通过现有 system_log_outbox 投影到 ClickHouse lightmoni_log；实时抽屉直接读 SQLite，因此 ClickHouse 中断不妨碍定位当前阶段。未引入外部队列、Worker 服务或新凭据边界。
+
+```mermaid
+flowchart LR
+  Create[管理员新建证书] --> Intent[SQLite 资源与首轮意图]
+  Intent --> Start[后台执行句柄 / 每证书互斥]
+  Start --> Return[立即返回 201 / 202 与执行 ID]
+  Start --> ACME[账号 / 订单 / DNS / ACME 验证]
+  ACME --> Material[验证并加密保存证书版本]
+  ACME --> Journal[(SQLite 有序安全步骤)]
+  Material --> Journal
+  Journal --> Live[管理员增量日志抽屉 / 每 2 秒]
+  Journal --> Outbox[事务系统日志 outbox]
+  Outbox --> CH[(ClickHouse 系统日志)]
+  Restart[中心重启] --> Unknown[未完成执行 unknown / 禁止自动重放]
+  Unknown --> Journal
+```
+
+规格、契约、测试及 Doca 保存回读证据见 specs/053-certificate-async-issuance/。

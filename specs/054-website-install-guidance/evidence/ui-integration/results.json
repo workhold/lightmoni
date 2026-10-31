@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "加载不误报未安装；成功空快照显示安装主动作，无网站空表和集群管理横栏/侧栏项",
+    "读取失败展示重试而非安装结论；重试实际接口恢复",
+    "中英文/390px 无溢出；按钮跳转应用安装深链接直接选中 OpenResty，刷新可恢复，取消清除参数",
+    "集群字段仅保留新页管理链接；真实管理页创建集群并回读选择，父表单输入保留",
+    "模拟安装保存失败保留输入；随后真实 catalog install 创建单例和部署请求，返回网站并刷新读回",
+    "已有应用（尚无Agent成功回执）仍显示网站列表；安装深链接/商店均不重复安装；网站集群字段只有管理跳转",
+    "旧集群/运维本地首页偏好与 /operations 转至应用；成员无法进入集群、网站或安装路由"
+  ],
+  "errors": [],
+  "media": "artifacts/screenshots/specs/054-website-install-guidance/evidence/ui-integration",
+  "limitations": "Disposable HTTP/SQLite fixture; no remote Agent or public DNS execution. 200% layout checked at 720px equivalent viewport."
+}

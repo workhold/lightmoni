@@ -379,6 +379,7 @@ export default function ResourceFields({
       )}
       {kind === "certificate" && (
         <>
+          {!existing && <Alert type="info" showIcon title={t("保存后立即在后台申请或导入，进度可从状态旁的日志查看。自动续期单独控制后续申请。", "Saving starts issuance or import in the background. Open logs beside the status to follow progress. Auto renewal controls later issuances.")}/>}
           <Form.Item
             name={["spec", "source"]}
             label={t("证书来源", "Certificate source")}

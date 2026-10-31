@@ -6,7 +6,7 @@ import { OperationRejectedError } from "../operations/errors.js";
 import type { Dependencies, Handler, Module } from "../shared/types.js";
 import type { AgentJobStore } from "../server/agent-jobs.js";
 import { OperationsPlatformStore, safeObject, cleanResult } from "./store.js";
-import { createCertificateController } from "./certificates.js";
+import { createCertificateController, type CertificateControllerOptions } from "./certificates.js";
 import { createWorkloadController } from "./workloads.js";
 import type { DomainController, ResourceKind } from "./types.js";
 
@@ -18,6 +18,7 @@ export function registerOperationsPlatform(
     dataDir: string;
     fetch?: typeof fetch;
     intervalMs?: number;
+    certificate?: Pick<CertificateControllerOptions, "acmeClientFactory" | "resolveChallenge">;
   },
 ) {
   const store = new OperationsPlatformStore(deps, options.jobs);
@@ -27,7 +28,7 @@ export function registerOperationsPlatform(
     dataDir: options.dataDir,
     fetch: options.fetch,
   };
-  const certificates = createCertificateController(domainOptions);
+  const certificates = createCertificateController({...domainOptions, ...options.certificate});
   const workloads = createWorkloadController({
     ...domainOptions,
     ensureCertificateMaterial: async (certificateID, actor) => {
@@ -257,19 +258,9 @@ export function registerOperationsPlatform(
         fail(400, "website_cluster_required");
       if (b.kind === "website" && !b.spec?.bindings)
         fail(400, "website_binding_required");
-      ctx.json(
-        {
-          resource: store.public(
-            store.create(
-              kind(b.kind)!,
-              b.name,
-              safeObject(b.spec),
-              ctx.user.id,
-            ),
-          ),
-        },
-        201,
-      );
+      const resource = store.create(kind(b.kind)!, b.name, safeObject(b.spec), ctx.user.id);
+      const run = resource.kind === "certificate" ? certificates.startIssue(resource, "issue", ctx.user.id) : undefined;
+      ctx.json({resource: store.public(store.get(resource.id)), ...(run ? {run} : {})}, 201);
     }),
   );
   router.put(
@@ -300,6 +291,10 @@ export function registerOperationsPlatform(
     }),
   );
   router.get('/api/v1/ops/runs/:id', safe(ctx => ctx.json(store.action(ctx.params.id))));
+  router.get('/api/v1/ops/runs/:id/events', safe(ctx => {
+    const events = store.runEvents(ctx.params.id, Number(ctx.url.searchParams.get('after') ?? 0));
+    ctx.json({run: store.action(ctx.params.id), events, next_after: events.at(-1)?.sequence ?? Number(ctx.url.searchParams.get('after') ?? 0)});
+  }));
   router.get(
     "/api/v1/ops/resources/:id/dns-lines",
     safe(async (ctx) => {
@@ -341,12 +336,10 @@ export function registerOperationsPlatform(
         fail(409, "legacy_deployment_requires_cluster_migration");
       const domain = domains.find((d) => d.actions(r).includes(b.action));
       if (!domain) fail(400, "unsupported_platform_action");
-      const result = await domain.perform(
-        r,
-        b.action,
-        safeObject(b.input ?? {}),
-        ctx.user.id,
-      );
+      const input = safeObject(b.input ?? {});
+      const result = r.kind === "certificate" && ["issue", "renew"].includes(b.action)
+        ? certificates.startIssue(r, b.action, ctx.user.id)
+        : await domain.perform(r, b.action, input, ctx.user.id);
       ctx.json(
         cleanResult(
           result?.id && result?.state ? { run: result } : (result ?? {}),

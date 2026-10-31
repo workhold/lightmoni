@@ -16,6 +16,8 @@ import {
   SubjectAlternativeNameExtension,
   X509CertificateGenerator,
 } from "@peculiar/x509";
+import { CertificateProgress, CertificateIssueError } from "./certificate-progress.js";
+import type { PlatformExecution, PlatformRun } from "./types.js";
 import { certificateMetadata } from "../operations/certificates.js";
 import { HTTPError } from "../shared/http.js";
 import { id } from "../shared/crypto.js";
@@ -416,13 +418,16 @@ export interface CertificateControllerOptions extends PlatformOptions {
     value: string,
   ) => Promise<boolean>;
 }
+export interface CertificateController extends DomainController {
+  startIssue(resource: PlatformResource, action: string, actor: string, dedupe?: string): PlatformRun;
+}
 export function createCertificateController(
   options: CertificateControllerOptions,
-): DomainController {
+): CertificateController {
   const { store, deps } = options,
     db = deps.db,
     at = () => deps.now().toISOString(),
-    inFlight = new Set<string>();
+    inFlight = new Set<string>(), activeIssues = new Map<string, PlatformExecution>(), background = new Set<Promise<unknown>>();
   initSchema(options);
   const authorize = (actor: string) => {
     if (!store.authorized(actor))
@@ -589,6 +594,9 @@ export function createCertificateController(
       return out;
     },
     publicSpec: publicCertificate,
+    afterSave(resource, previous) {
+      if (!previous) store.patchStatus(resource.id, {state: "queued", initial_issue_pending: true});
+    },
     beforeDelete: denyReferenced,
   });
   store.register("certificate_target", {
@@ -701,6 +709,7 @@ export function createCertificateController(
   async function accountClient(
     account: PlatformResource,
     actor: string,
+    progress?: CertificateProgress,
   ): Promise<acme.Client> {
     const cacheID = account.id + ":" + digest(account.spec.directory_url);
     authorize(actor);
@@ -738,6 +747,7 @@ export function createCertificateController(
       backoffMin: 1000,
       backoffMax: 10000,
     };
+    progress?.remember(clientOptions.accountKey);
     const client = options.acmeClientFactory
       ? options.acmeClientFactory(clientOptions)
       : new acme.Client(clientOptions);
@@ -748,7 +758,8 @@ export function createCertificateController(
           termsOfServiceAgreed: true,
           contact: ["mailto:" + account.spec.email],
         });
-      } catch {
+      } catch (error) {
+        if (progress) throw progress.wrap(error, "acme_account", "acme_account_registration_failed");
         throw new CloudError("acme_account_registration_failed");
       }
       db.run(
@@ -768,6 +779,7 @@ export function createCertificateController(
   async function cleanChallenges(
     orderID: string,
     actor: string,
+    progress?: CertificateProgress,
   ): Promise<boolean> {
     let clean = true;
     for (const item of db.all<any>(
@@ -776,7 +788,13 @@ export function createCertificateController(
     )) {
       try {
         authorize(actor);
-        await ensureDnsRecords(options, item.zone_id, item.owner_id, [], actor);
+        const cleanup = async () => {
+          const result = await ensureDnsRecords(options, item.zone_id, item.owner_id, [], actor);
+          if (result.verified === false) throw new CloudError("dns_cleanup_verification_pending");
+          return result;
+        };
+        if (progress) await progress.step("dns_cleanup", cleanup);
+        else await cleanup();
         db.run(
           "UPDATE ops_acme_challenges SET state='cleaned',updated_at=? WHERE owner_id=?",
           at(),
@@ -793,160 +811,91 @@ export function createCertificateController(
     }
     return clean;
   }
-  async function issueACME(
-    certificate: PlatformResource,
-    actor: string,
-  ): Promise<{ certificate_pem: string; private_key_pem: string }> {
-    const account = store.get(certificate.spec.acme_account_id, "acme_account"),
-      client = await accountClient(account, actor);
-    let row = db.get<any>(
-        "SELECT * FROM ops_acme_orders WHERE certificate_id=? AND resource_revision=? AND state IN ('created','pending','ready','processing','complete') ORDER BY created_at DESC LIMIT 1",
-        certificate.id,
-        certificate.revision,
-      ),
-      payload: any;
+  async function issueACME(certificate: PlatformResource, actor: string, progress: CertificateProgress): Promise<{certificate_pem: string; private_key_pem: string}> {
+    const account = store.get(certificate.spec.acme_account_id, "acme_account");
+    const client = await progress.step("acme_account", () => accountClient(account, actor, progress));
+    let row = db.get<any>("SELECT * FROM ops_acme_orders WHERE certificate_id=? AND resource_revision=? AND state IN ('created','pending','ready','processing','complete') ORDER BY created_at DESC LIMIT 1", certificate.id, certificate.revision), payload: any;
     if (row) {
       payload = JSON.parse(deps.decrypt(row.payload_cipher));
-      if (!payload.order?.url)
-        throw new CloudError("acme_order_result_unknown", "", true);
+      progress.remember(payload.private_key_pem); progress.remember(payload.csr);
+      progress.event("resume_order", "running");
+      if (!payload.order?.url) throw progress.wrap(new CloudError("acme_order_result_unknown", "", true), "resume_order");
     } else {
-      const [key, csr] = await acme.crypto.createCsr({
-        altNames: certificate.spec.domains,
-      });
-      payload = { private_key_pem: key.toString(), csr: csr.toString() };
-      const id = randomUUID();
-      db.run(
-        "INSERT INTO ops_acme_orders(id,certificate_id,resource_revision,account_id,state,payload_cipher,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-        id,
-        certificate.id,
-        certificate.revision,
-        account.id,
-        "created",
-        deps.encrypt(JSON.stringify(payload)),
-        at(),
-        at(),
-      );
-      row = db.get<any>("SELECT * FROM ops_acme_orders WHERE id=?", id);
+      const [key, csr] = await progress.step("create_csr", () => acme.crypto.createCsr({altNames: certificate.spec.domains}));
+      payload = {private_key_pem: key.toString(), csr: csr.toString()};
+      progress.remember(payload.private_key_pem); progress.remember(payload.csr);
+      const orderID = randomUUID();
+      db.run("INSERT INTO ops_acme_orders(id,certificate_id,resource_revision,account_id,state,payload_cipher,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)", orderID, certificate.id, certificate.revision, account.id, "created", deps.encrypt(JSON.stringify(payload)), at(), at());
+      row = db.get<any>("SELECT * FROM ops_acme_orders WHERE id=?", orderID);
       authorize(actor);
       try {
-        payload.order = await client.createOrder({
-          identifiers: certificate.spec.domains.map((value: string) => ({
-            type: "dns",
-            value,
-          })),
+        payload.order = await progress.step("create_order", async () => {
+          try {return await client.createOrder({identifiers: certificate.spec.domains.map((value: string) => ({type: "dns", value}))});}
+          catch (error) {throw new CertificateIssueError({...progress.diagnostic(error, "create_order", "acme_order_result_unknown"), code: "acme_order_result_unknown", state: "unknown"});}
         });
-      } catch {
-        db.run(
-          "UPDATE ops_acme_orders SET state='unknown',updated_at=? WHERE id=?",
-          at(),
-          row.id,
-        );
-        throw new CloudError("acme_order_result_unknown", "", true);
+      } catch (error) {
+        db.run("UPDATE ops_acme_orders SET state='unknown',updated_at=? WHERE id=?", at(), row.id);
+        const diagnostic = progress.diagnostic(error, "create_order", "acme_order_result_unknown");
+        throw new CertificateIssueError({...diagnostic, code: "acme_order_result_unknown", state: "unknown"});
       }
-      db.run(
-        "UPDATE ops_acme_orders SET state='pending',payload_cipher=?,updated_at=? WHERE id=?",
-        deps.encrypt(JSON.stringify(payload)),
-        at(),
-        row.id,
-      );
+      db.run("UPDATE ops_acme_orders SET state='pending',payload_cipher=?,updated_at=? WHERE id=?", deps.encrypt(JSON.stringify(payload)), at(), row.id);
     }
     try {
-      if (row.state === "complete" && payload.certificate_pem)
-        return {
-          certificate_pem: payload.certificate_pem,
-          private_key_pem: payload.private_key_pem,
-        };
-      let order = await client.getOrder(payload.order);
-      if (order.status === "invalid")
-        throw new CloudError("acme_order_invalid");
+      if (row.state === "complete" && payload.certificate_pem) return {certificate_pem: payload.certificate_pem, private_key_pem: payload.private_key_pem};
+      let order = await progress.step("get_order", () => client.getOrder(payload.order));
+      if (order.status === "invalid") {
+        db.run("UPDATE ops_acme_orders SET state='invalid',updated_at=? WHERE id=?", at(), row.id);
+        const problem = (order as any).error;
+        const diagnostic = progress.diagnostic(Object.assign(new Error(typeof problem?.detail === "string" ? problem.detail : "ACME order is invalid"), {code: "acme_order_invalid", type: problem?.type}), "get_order");
+        progress.event("get_order", "failed", diagnostic);
+        throw new CertificateIssueError(diagnostic);
+      }
       if (order.status === "pending") {
-        const authorizations = await client.getAuthorizations(order);
+        const authorizations = await progress.step("get_authorizations", () => client.getAuthorizations(order));
         for (const authz of authorizations) {
           if (authz.status === "valid") continue;
           authorize(actor);
-          const challenge = authz.challenges.find((c) => c.type === "dns-01");
-          if (!challenge) throw new CloudError("acme_dns_challenge_missing");
-          const zone = selectZone(certificate.spec, authz.identifier.value),
-            value = await client.getChallengeKeyAuthorization(challenge),
-            fqdn =
-              "_acme-challenge." + authz.identifier.value.replace(/^\*\./, ""),
-            owner = "acme-" + digest(row.id + "\0" + authz.url);
-          db.run(
-            "INSERT OR IGNORE INTO ops_acme_challenges(owner_id,order_id,zone_id,state,updated_at) VALUES(?,?,?,?,?)",
-            owner,
-            row.id,
-            zone.id,
-            "pending",
-            at(),
-          );
-          await ensureDnsRecords(
-            options,
-            zone.id,
-            owner,
-            [{ name: fqdn, type: "TXT", value, ttl: 600 }],
-            actor,
-          );
-          db.run(
-            "UPDATE ops_acme_challenges SET state='created',updated_at=? WHERE owner_id=?",
-            at(),
-            owner,
-          );
-          let propagated = false;
-          for (let n = 0; n < 60; n++) {
-            authorize(actor);
-            if (
-              await (options.resolveChallenge ?? dnsPropagation)(
-                fqdn,
-                "TXT",
-                value,
-              )
-            ) {
-              propagated = true;
-              break;
+          const domain = authz.identifier.value, detail = {domain};
+          const challenge = authz.challenges.find((c: any) => c.type === "dns-01");
+          if (!challenge) throw progress.wrap(new CloudError("acme_dns_challenge_missing"), "get_authorizations");
+          progress.remember(challenge.token);
+          const zone = selectZone(certificate.spec, domain), value = await progress.step("challenge_prepare", () => client.getChallengeKeyAuthorization(challenge), detail), fqdn = "_acme-challenge." + domain.replace(/^\*\./, ""), owner = "acme-" + digest(row.id + "\0" + authz.url);
+          progress.remember(value);
+          db.run("INSERT OR IGNORE INTO ops_acme_challenges(owner_id,order_id,zone_id,state,updated_at) VALUES(?,?,?,?,?)", owner, row.id, zone.id, "pending", at());
+          await progress.step("dns_prepare", () => ensureDnsRecords(options, zone.id, owner, [{name: fqdn, type: "TXT", value, ttl: 600}], actor), detail);
+          db.run("UPDATE ops_acme_challenges SET state='created',updated_at=? WHERE owner_id=?", at(), owner);
+          await progress.step("dns_propagation", async () => {
+            for (let attempt = 1; attempt <= 60; attempt++) {
+              authorize(actor);
+              if (attempt === 1 || attempt % 10 === 0) progress.event("dns_propagation", "running", {...detail, attempt});
+              if (await (options.resolveChallenge ?? dnsPropagation)(fqdn, "TXT", value)) return;
+              await new Promise<void>(resolve => setTimeout(resolve, 2000));
             }
-            await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-          }
-          if (!propagated) throw new CloudError("acme_dns_propagation_pending");
+            throw new CloudError("acme_dns_propagation_pending");
+          }, detail);
           authorize(actor);
-          await client.completeChallenge(challenge);
-          await client.waitForValidStatus(challenge);
+          await progress.step("challenge_submit", () => client.completeChallenge(challenge), detail);
+          await progress.step("challenge_verify", () => client.waitForValidStatus(challenge), detail);
         }
-        order = await client.getOrder(order);
+        order = await progress.step("get_order", () => client.getOrder(order));
       }
       if (order.status === "ready") {
         authorize(actor);
-        order = await client.finalizeOrder(order, payload.csr);
+        order = await progress.step("order_finalize", () => client.finalizeOrder(order, payload.csr));
       }
-      if (order.status !== "valid")
-        order = await client.waitForValidStatus(order);
+      if (order.status !== "valid") order = await progress.step("order_verify", () => client.waitForValidStatus(order));
       authorize(actor);
-      const certificatePEM = await client.getCertificate(order);
-      payload.order = order;
-      payload.certificate_pem = certificatePEM;
-      db.run(
-        "UPDATE ops_acme_orders SET state='complete',payload_cipher=?,updated_at=? WHERE id=?",
-        deps.encrypt(JSON.stringify(payload)),
-        at(),
-        row.id,
-      );
-      const cleanup = await cleanChallenges(row.id, actor);
-      store.patchStatus(certificate.id, {
-        challenge_cleanup: cleanup ? "complete" : "pending",
-      });
-      return {
-        certificate_pem: certificatePEM,
-        private_key_pem: payload.private_key_pem,
-      };
+      const certificatePEM = await progress.step("certificate_download", () => client.getCertificate(order));
+      payload.order = order; payload.certificate_pem = certificatePEM;
+      db.run("UPDATE ops_acme_orders SET state='complete',payload_cipher=?,updated_at=? WHERE id=?", deps.encrypt(JSON.stringify(payload)), at(), row.id);
+      const cleanup = await cleanChallenges(row.id, actor, progress);
+      store.patchStatus(certificate.id, {challenge_cleanup: cleanup ? "complete" : "pending"});
+      return {certificate_pem: certificatePEM, private_key_pem: payload.private_key_pem};
     } catch (error) {
-      // Retain a resumable order; cleanup records independently, including after process restart.
-      const cleanup = await cleanChallenges(row.id, actor);
-      store.patchStatus(certificate.id, {
-        challenge_cleanup: cleanup ? "complete" : "pending",
-        last_error: safeError(error),
-      });
-      if (error instanceof CloudError || error instanceof HTTPError)
-        throw error;
-      throw new CloudError("acme_issuance_failed");
+      const diagnostic = progress.diagnostic(error, "acme_issuance");
+      const cleanup = await cleanChallenges(row.id, actor, progress);
+      store.patchStatus(certificate.id, {challenge_cleanup: cleanup ? "complete" : "pending"});
+      throw new CertificateIssueError(diagnostic);
     }
   }
   function saveVersion(
@@ -1018,6 +967,7 @@ export function createCertificateController(
   async function issue(
     certificate: PlatformResource,
     actor: string,
+    progress: CertificateProgress,
   ): Promise<Record<string, any>> {
     authorize(actor);
     let material: { certificate_pem: string; private_key_pem: string };
@@ -1027,17 +977,52 @@ export function createCertificateController(
         private_key_pem: certificate.spec.private_key_pem,
       };
     else if (certificate.spec.source === "self_signed")
-      material = await selfSignedCertificate(
-        certificate.spec.domains,
-        certificate.spec.validity_days,
-        deps.now(),
-      );
-    else material = await issueACME(certificate, actor);
+      material = await progress.step("generate_certificate", () => selfSignedCertificate(certificate.spec.domains, certificate.spec.validity_days, deps.now()));
+    else material = await issueACME(certificate, actor, progress);
     authorize(actor);
     const current = store.get(certificate.id, "certificate");
     if (current.revision !== certificate.revision)
       throw new HTTPError(409, "certificate_revision_changed");
-    return saveVersion(certificate, material);
+    return progress.step("certificate_save", async () => saveVersion(certificate, material));
+  }
+  function beginIssue(resource: PlatformResource, action: string, actor: string, dedupe?: string): PlatformExecution {
+    authorize(actor);
+    if (store.get(resource.id).revision !== resource.revision) throw new HTTPError(409, "platform_revision_conflict");
+    if (action === "renew") need(resource.spec.source !== "uploaded", "uploaded_certificate_cannot_auto_renew");
+    const current = activeIssues.get(resource.id);
+    if (current) return current;
+    if (inFlight.has(resource.id)) throw new HTTPError(409, "certificate_issuance_busy");
+    const initial = resource.status.initial_issue_pending === true;
+    const key = dedupe ?? (initial ? "certificate-initial:" + resource.id + ":" + resource.revision : undefined);
+    inFlight.add(resource.id);
+    let execution: PlatformExecution;
+    try {
+      execution = store.startRun(resource, action, actor, async runID => {
+        const progress = new CertificateProgress(store, runID);
+        try {
+          await progress.step("authorization", async () => {
+            authorize(actor);
+            if (store.get(resource.id).revision !== resource.revision) throw new HTTPError(409, "certificate_revision_changed");
+          });
+          const result = await issue(resource, actor, progress);
+          progress.event("complete", "succeeded");
+          return result;
+        } catch (error) {
+          const diagnostic = progress.diagnostic(error, "certificate_issuance");
+          progress.event("complete", diagnostic.state, diagnostic);
+          store.patchStatus(resource.id, {state: diagnostic.state, last_error: diagnostic.code, last_error_message: diagnostic.message, last_error_phase: diagnostic.phase});
+          return {...diagnostic, verified: false};
+        }
+      }, key);
+      const active = execution.run.state === "running";
+      store.patchStatus(resource.id, {state: active ? "issuing" : execution.run.state, initial_issue_pending: false, last_run_id: execution.run.id,
+        ...(active ? {last_error: null, last_error_message: null, last_error_phase: null} : {})});
+      if (!store.runEvents(execution.run.id).length) store.addRunEvent(execution.run.id, "queued", "pending");
+    } catch (error) {inFlight.delete(resource.id); throw error;}
+    activeIssues.set(resource.id, execution);
+    const release = () => {inFlight.delete(resource.id); activeIssues.delete(resource.id);};
+    void execution.done.then(release, release);
+    return execution;
   }
   async function syncTarget(
     target: PlatformResource,
@@ -1199,7 +1184,19 @@ export function createCertificateController(
       status.last_error = run.result.error ?? run.state;
     store.patchStatus(target.id, status);
   });
-  const controller: DomainController = {
+  const controller: CertificateController = {
+    startIssue(resource, action, actor, dedupe) {
+      authorize(actor);
+      if (store.get(resource.id).revision !== resource.revision) throw new HTTPError(409, "platform_revision_conflict");
+      const active = store.actions(resource.id).find(run => run.state === "running" && ["issue", "renew"].includes(run.action));
+      if (active) return active;
+      const execution = beginIssue(resource, action, actor, dedupe);
+      const completion = execution.done.then(async run => {if (run.state === "succeeded") await distribute(resource.id);})
+        .catch(() => {deps.logger.warn("Certificate background execution needs attention");});
+      background.add(completion);
+      void completion.finally(() => background.delete(completion));
+      return execution.run;
+    },
     actions(resource) {
       return resource.kind === "credential"
         ? ["test"]
@@ -1374,31 +1371,9 @@ export function createCertificateController(
             const current = store.get(resource.id, "certificate");
             return { verified: true, ...current.status };
           });
-        if (action === "renew")
-          need(
-            resource.spec.source !== "uploaded",
-            "uploaded_certificate_cannot_auto_renew",
-          );
-        if (inFlight.has(resource.id))
-          throw new HTTPError(409, "certificate_issuance_busy");
-        inFlight.add(resource.id);
-        try {
-          const run = await store.run(resource, action, actor, () =>
-            issue(resource, actor),
-          );
-          if (run.state === "succeeded") await distribute(resource.id);
-          else
-            store.patchStatus(resource.id, {
-              state: run.state,
-              last_error:
-                run.result.code ??
-                run.result.error ??
-                "certificate_issuance_failed",
-            });
-          return run;
-        } finally {
-          inFlight.delete(resource.id);
-        }
+        const run = await beginIssue(resource, action, actor).done;
+        if (run.state === "succeeded") await distribute(resource.id);
+        return run;
       }
       if (action === "inspect") {
         const material = getCertificateMaterial(
@@ -1461,6 +1436,10 @@ export function createCertificateController(
       return syncTarget(resource, actor, action === "retry");
     },
     async tick() {
+      for (const certificate of store.list("certificate").filter(c => c.status.initial_issue_pending)) {
+        if (store.authorized(certificate.authorized_by)) controller.startIssue(certificate, "issue", certificate.authorized_by);
+        else store.patchStatus(certificate.id, {state: "failed", initial_issue_pending: false, last_error: "operations_authorization_revoked"});
+      }
       const dueZones = store
         .list("dns_zone")
         .filter(
@@ -1498,33 +1477,8 @@ export function createCertificateController(
           store.authorized(current.authorized_by) &&
           !inFlight.has(current.id)
         ) {
-          inFlight.add(current.id);
-          try {
-            const key =
-                "certificate-renew:" +
-                current.id +
-                ":" +
-                current.revision +
-                ":" +
-                current.status.certificate_version,
-              run = await store.run(
-                current,
-                "renew",
-                current.authorized_by,
-                () => issue(current, current.authorized_by),
-                key,
-              );
-            if (run.state !== "succeeded")
-              store.patchStatus(current.id, {
-                state: run.state,
-                last_error:
-                  run.result.code ??
-                  run.result.error ??
-                  "certificate_renewal_failed",
-              });
-          } finally {
-            inFlight.delete(current.id);
-          }
+          controller.startIssue(current, "renew", current.authorized_by,
+            "certificate-renew:" + current.id + ":" + current.revision + ":" + current.status.certificate_version);
         }
         await distribute(certificate.id);
       }
@@ -1541,7 +1495,7 @@ export function createCertificateController(
           await cleanChallenges(order.id, certificate.authorized_by);
       }
     },
-    close: unsubscribe,
+    async close() {await Promise.allSettled([...background]); unsubscribe();},
   };
   function refreshExpiry(certificate: PlatformResource): void {
     const expires = Date.parse(certificate.status.expires_at ?? "");
@@ -1593,6 +1547,12 @@ export function createCertificateController(
       });
     }
     store.patchStatus(certificateID, { targets: summaries });
+  }
+  for (const certificate of store.list("certificate")) {
+    if (certificate.status.state !== "issuing" || !certificate.status.last_run_id) continue;
+    let prior: PlatformRun;
+    try {prior = store.action(certificate.status.last_run_id);} catch {continue;}
+    if (prior?.state === "unknown") store.patchStatus(certificate.id, {state: "unknown", initial_issue_pending: false, last_error: prior.result.code, last_error_message: "The center restarted. Inspect the previous execution before retrying.", last_error_phase: "interrupted"});
   }
   return controller;
 }

@@ -13,7 +13,7 @@ import { registerOperations } from "../src/server/operations.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
 import { AgentJobRunner } from "../src/agent/jobs.js";
 import type { Dependencies } from "../src/shared/types.js";
-async function setup(t: any) {
+async function setup(t: any, certificate?: Parameters<typeof registerOperationsPlatform>[1]["certificate"]) {
   const root = await realpath(
       await mkdtemp(join(tmpdir(), "lightmoni-platform-api-")),
     ),
@@ -64,7 +64,7 @@ async function setup(t: any) {
     },
   } as any;
   const jobs = registerAgentJobs(deps, { agentCredentials: credentials }),
-    platform = registerOperationsPlatform(deps, { jobs, dataDir: root });
+    platform = registerOperationsPlatform(deps, { jobs, dataDir: root, certificate });
   db.exec(
     "CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT,address TEXT,agent_id TEXT);INSERT INTO managed_machines VALUES('machine-a','Test node','127.0.0.1','node-a')",
   );
@@ -222,6 +222,52 @@ async function setup(t: any) {
     finish,
   };
 }
+test("certificate create and manual issuance return while ACME is blocked; progress, cause and secrets are handled durably", {timeout:10000}, async (t) => {
+  let release!: () => void, started!: () => void;
+  let gate = new Promise<void>(resolve => {release = resolve;});
+  const entered = new Promise<void>(resolve => {started = resolve;});
+  let registrations = 0;
+  const secret = "qa-private-cloud-secret-053", eab = "qa-private-eab-053";
+  const f = await setup(t, {acmeClientFactory: (() => ({
+    createAccount: async () => {registrations++; started(); await gate; throw Object.assign(new Error('ACME rejected account: contact domain denied; token='+eab+' secret='+secret+' https://ca.example.test/problem?token=private-query'),{code:secret,request_id:'prefix-'+secret});},
+  })) as any});
+  const credential = await f.create("credential", "DNS", {provider:"aliyun",access_key_id:"qa-cloud-id-053",access_key_secret:secret});
+  const zone = await f.create("dns_zone", "Zone", {domain:"example.test",credential_id:credential.id});
+  const account = await f.create("acme_account", "CA", {email:"ops@example.test",directory_url:"letsencrypt-staging",terms_agreed:true,eab_kid:"qa-eab-kid-053",eab_hmac_key:eab});
+  try {
+    const response = await f.req('/ops/resources','POST',{kind:'certificate',name:'Async certificate',spec:{source:'acme',domains:['example.test'],acme_account_id:account.id,dns_zone_ids:[zone.id],auto_renew:false}});
+    assert.equal(response.status,201,JSON.stringify(response));
+    const {resource,run}=response.body;
+    assert.equal(resource.status.state,'issuing'); assert.equal(run.state,'running');
+    await entered;
+    const active = await f.req('/ops/runs/'+run.id+'/events');
+    assert.equal(active.body.run.state,'running');
+    assert(active.body.events.some((e:any)=>e.phase==='acme_account'&&e.state==='running'));
+    const duplicate = await f.action(resource,'issue');
+    assert.equal(duplicate.status,202); assert.equal(duplicate.body.run.id,run.id); assert.equal(registrations,1);
+    assert.equal((await f.action(resource,'issue','invalid input')).status,400);
+    assert.equal((await f.req('/ops/runs/'+run.id+'/events','GET',undefined,{'x-role':'member'})).status,403);
+    assert.equal((await f.req('/ops/runs/'+run.id+'/events?after=-1')).status,400);
+    release();
+    let receipt:any;
+    for(let attempt=0;attempt<100;attempt++) {receipt=(await f.req('/ops/runs/'+run.id+'/events')).body;if(receipt.run.state!=='running')break;await new Promise(resolve=>setTimeout(resolve,10));}
+    assert.equal(receipt.run.state,'failed');
+    assert.equal(receipt.run.result.phase,'acme_account');
+    assert.match(receipt.run.result.message,/contact domain denied/);
+    assert.doesNotMatch(JSON.stringify(receipt),new RegExp(secret+'|'+eab+'|private-query|payload_cipher|BEGIN PRIVATE'));
+    assert.deepEqual(receipt.events.map((e:any)=>e.sequence),receipt.events.map((_:any,i:number)=>i+1));
+    assert(receipt.events.some((e:any)=>e.phase==='acme_account'&&e.state==='failed'));
+    const cursor=receipt.events.at(-2).sequence;
+    assert.equal((await f.req('/ops/runs/'+run.id+'/events?after='+cursor)).body.events.length,1);
+    const updated=await f.req('/ops/resources/'+resource.id,'PUT',{name:'Edited',revision:1,spec:{...resource.spec,auto_renew:false}});
+    assert.equal(updated.status,200,JSON.stringify(updated));
+    assert.equal(f.platform.store.actions(resource.id).length,1);
+    gate=new Promise<void>(resolve=>{release=resolve;});
+    const manual=await f.action(updated.body.resource,'issue');
+    assert.equal(manual.status,202);assert.notEqual(manual.body.run.id,run.id);assert.equal(manual.body.run.state,'running');
+    release();
+  } finally {release();}
+});
 test("historical log receipts remain readable beyond the overview limit and are redacted and admin-only", async (t) => {
   const f = await setup(t);
   const old = await f.platform.store.run(f.cluster, "inspect", "admin", async () => ({ state: "succeeded", stdout: "private-command-output" }));
@@ -301,7 +347,13 @@ test("self-signed certificate travels through real HTTP, private Agent lease, di
     });
   const issued = await f.action(cert, "issue");
   assert.equal(issued.status, 202, JSON.stringify(issued));
-  assert.equal(issued.body.run.state, "succeeded", JSON.stringify(issued));
+  assert.equal(issued.body.run.state, "running", JSON.stringify(issued));
+  let issueReceipt = issued.body.run;
+  for(let attempt=0;attempt<100&&issueReceipt.state==='running';attempt++) {
+    await new Promise(resolve=>setTimeout(resolve,10));
+    issueReceipt=(await f.req('/ops/runs/'+issueReceipt.id)).body;
+  }
+  assert.equal(issueReceipt.state,"succeeded",JSON.stringify(issueReceipt));
   const version = f.platform.store.get(cert.id).status.certificate_version;
   assert.ok(version);
   const directory = await f.create("certificate_target", "QA directory", {
@@ -366,14 +418,14 @@ test("self-signed certificate travels through real HTTP, private Agent lease, di
   );
 });
 
-test("first HTTPS website deployment automatically issues its selected certificate before queuing gateways", async (t) => {
+test("HTTPS website deployment waits for a saved certificate without material before queuing gateways", async (t) => {
   const f = await setup(t),
-    cert = await f.create("certificate", "First HTTPS certificate", {
+    cert = f.platform.store.create("certificate", "First HTTPS certificate", {
       source: "self_signed",
       domains: ["first.example.test"],
       validity_days: 3,
       auto_renew: false,
-    }),
+    }, "admin"),
     group = await f.create("gateway_group", "First HTTPS gateways", {
       agent_ids: ["node-a"],
       http_port: 18088,

@@ -1,0 +1,26 @@
+{
+  "baseline": "334df478c97621efaeae60bb0d4cf72c1a22dde9",
+  "runtime_typecheck": "passed",
+  "runtime_build": "passed",
+  "web_build": "passed",
+  "full_runtime": {
+    "tests": 775,
+    "pass": 754,
+    "fail": 0,
+    "skipped": 21,
+    "cancelled": 0
+  },
+  "targeted": {
+    "tests": 57,
+    "pass": 57,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0
+  },
+  "browser": {
+    "passed": 7,
+    "errors": []
+  },
+  "environment": "Local real Router/Auth/SQLite; synthetic ACME/DNS peers and outbox ingest; live environment suites retain their existing skip gates",
+  "production_certificate_attempted": false
+}
