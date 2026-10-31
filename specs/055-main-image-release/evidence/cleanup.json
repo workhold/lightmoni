@@ -1,0 +1,7 @@
+{
+  "test_containers_removed": true,
+  "test_network_removed": true,
+  "test_volumes_removed": true,
+  "runtime_credential_files_removed": true,
+  "existing_services_not_modified": true
+}
