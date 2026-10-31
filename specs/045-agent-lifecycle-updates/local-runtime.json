@@ -1,0 +1,15 @@
+{
+  "url": "http://127.0.0.1:18080/machines",
+  "actual_http_sqlite_clickhouse": true,
+  "release_arches": [
+    "arm64",
+    "amd64"
+  ],
+  "checks": [
+    "authenticated live host page",
+    "new Agent release column",
+    "real dual-architecture release catalog",
+    "live rollout history dialog"
+  ],
+  "production_or_ssh_actions": false
+}

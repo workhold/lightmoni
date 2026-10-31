@@ -1,0 +1,54 @@
+{
+  "status": "verified_existing_sync",
+  "spec": "045-agent-lifecycle-updates",
+  "checked_at": "2026-10-31T06:08:48.064977+00:00",
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository_sections": [
+    "docs/system-design.md 13,20.2,23,28.1–28.7"
+  ],
+  "readback_seq": 885,
+  "epoch_id": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "online_blocks": 561,
+  "native_diagrams": 24,
+  "checks": [
+    {
+      "block_id": "credentials031-8486b2ee-7e45-4f42-9ed1-1cd3b27292f0",
+      "matches_latest_read": true,
+      "sha256": "33c7e4b08136299aed3277a61206020cf20a5437eb00c7a76a15bf830067c1d2"
+    },
+    {
+      "block_id": "f53b1fab-f11e-433b-9a41-d7f0d45dd928",
+      "matches_latest_read": true,
+      "sha256": "cd7e2938d900675540c74ce3c2297e150cb31046711848ef53c85f62f75848ef"
+    },
+    {
+      "block_id": "7af844e4-16f8-4f8d-aa85-122ea8e5ab13",
+      "matches_latest_read": true,
+      "sha256": "762fbc07c0b1c717d94a14811f351cd519fc99744fc37f3742efdd56eb91ee84"
+    },
+    {
+      "block_id": "agent044-maintenance-flow",
+      "matches_latest_read": true,
+      "sha256": "24edcfd6a88b7ec112954ec76eba4f43066b750a015b02543483da7cb491dc6b",
+      "nodes": 14,
+      "edges": 14
+    },
+    {
+      "block_id": "agent044-update-states",
+      "matches_latest_read": true,
+      "sha256": "e6c968cf6a45e7dd07532c146748515fe1987ff6a824d5f6b87d9acd155a0366",
+      "nodes": 8,
+      "edges": 11
+    },
+    {
+      "block_id": "agent044-p-24",
+      "matches_latest_read": true,
+      "sha256": "64097c8f091518f17337aa8199de1d2e7516049e6c5e38964fcb73f80f4aef00"
+    }
+  ],
+  "text_verified": true,
+  "native_nodes_and_edges_preserved": true,
+  "writes_required": false,
+  "note": "原SDD045内容已在Doca存在。本轮合主干的身份、凭据last_used及UI请求代次修正不改变维护协议，局部最新回读核对；与SDD047组合的28.7范围说明随PR23更新。",
+  "native_visual_render_verified": false
+}

@@ -1,0 +1,38 @@
+{
+  "production_bundle": true,
+  "callback_failure_harness": true,
+  "api_fixtures": true,
+  "real_ssh": false,
+  "production_writes": false,
+  "checks": [
+    "same version with a different artifact shows an available update",
+    "late host details never replace the last selected upgrade target",
+    "closing the selected upgrade invalidates an earlier pending host response",
+    "late upgrade deep links never supersede a newer manual host selection",
+    "an unavailable recorded default never silently chooses another upgrade credential",
+    "single-host upgrade pins SHA256 and requires review before one apply request",
+    "unknown outcome can only be reconciled and keeps rollback distinct from success",
+    "rollback uses retained release and sends no caller-selected target digest",
+    "AI review deep link loads an existing plan without applying it",
+    "durable rollout reviews every host and supports pause, explicit resume, and cancellation",
+    "member sees version metadata without management endpoints or write controls",
+    "rollout child deep links preserve batch approval ownership",
+    "paused rollout blocks unknown hosts and resumes only untouched plans after review of known failure",
+    "saved-status network failure preserves the apply response and releases controls without retry",
+    "an earlier update poll cannot roll a later explicit refresh back to running",
+    "an earlier rollout poll cannot reopen execution after a saved pause",
+    "English mobile release view and review dialog fit without page overflow",
+    "single-host callback refresh rejection preserves success and always releases pending controls",
+    "rollout callback refresh rejection preserves the batch and releases pause/cancel controls"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "screenshots": "/private/tmp/lightmoni-pr21-integration/.local-dev/evidence/pr21-integration/ui",
+  "passed": 19,
+  "command": "LIGHTMONI_QA_OUTPUT=.local-dev/evidence/pr21-integration/ui node scripts/test-agent-update-ui.mjs",
+  "bundle": {
+    "index_sha256": "90609516c1acc1c5d7faadbbcbfb0e0c6f16e4cfe7fad11f5dfe4b74723012ed",
+    "entry": "/assets/index-SaANMkg1.js",
+    "entry_sha256": "f60e2c279800bba701380f6b964339ca16da2f452d975b8186d38d7cc92b8620"
+  }
+}

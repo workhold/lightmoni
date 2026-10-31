@@ -37,9 +37,9 @@ flowchart TB
 
 ## 3. 当前事实与待建设部分
 
-SDD 046 调研时，`assistant/types.ts` 的 Tool 只有 name/schema/effect/execute，传入登录用户和助手 session。SDD 047 新增专用外部主体、MCP 入口、OAuth/PAT 与 Dispatcher，并迁移首批任务工具及通用任务提案。其余告警、运维和源码工具尚未整体迁移，不能把原助手工具直接对外导出；中心代码工作区也没有变成用户本地工作区。
+SDD 046 调研时，`assistant/types.ts` 的 Tool 只有 name/schema/effect/execute，传入登录用户和助手 session。SDD 047 新增基于平台用户的 MCP 入口、OAuth/PAT、role/scope 与主机范围授权及 Dispatcher，并迁移首批任务工具及通用任务提案，任务提案复用平台审批；服务主体尚未支持。其余告警、运维和源码工具尚未整体迁移，不能把原助手工具直接对外导出；中心代码工作区也没有变成用户本地工作区。
 
-现有 TaskRunStore、Agent job、运维 run、部署计划和生命周期操作继续负责真实状态、租约、取消和恢复。Agent 升级闭环属于独立 [PR #21 / SDD 045](https://github.com/workhold/lightmoni/pull/21)，本设计不复制其实现或声称它已合入主干。统一执行索引是关联和投影，不是另建一个取代所有领域的队列。
+现有 TaskRunStore、Agent job、运维 run、部署计划和生命周期操作继续负责真实状态、租约、取消和恢复。Agent 升级/回退已随 [PR #21 / SDD 045](https://github.com/workhold/lightmoni/pull/21) 合入主干，维护继续使用独立审批与 SSH 生命周期协议；首期 MCP 不开放维护写工具。统一执行索引是关联和投影，不是另建一个取代所有领域的队列，跨领域完整统一执行读模型仍待后续建设。
 
 ## 4. LLD：能力描述符与调用链
 

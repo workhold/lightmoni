@@ -6,6 +6,7 @@ import type { User } from "../shared/types.js";
 import type { ManagedMachineStore } from "../server/managed-machines.js";
 import type { ServiceDeploymentStore } from "../server/service-deployments.js";
 import type { InstrumentationService } from "./instrumentation.js";
+import { agentUpdateTools } from "./agent-updates.js";
 const string = { type: "string" },
   obj = (properties: Record<string, any>, required: string[] = []) => ({
     type: "object",
@@ -390,6 +391,7 @@ export function monitoringTools(
   }
   if (options.machines) {
     const machines = options.machines;
+    if (machines.agentUpdates) tools.push(...agentUpdateTools(machines.agentUpdates));
     tools.push(
       {
         name: "list_managed_machines",

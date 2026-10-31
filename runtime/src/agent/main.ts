@@ -1,6 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { defaultConfig, loadConfig, saveConfig, VERSION } from "./config.js";
+import { defaultConfig, loadConfig, saveConfig } from "./config.js";
+import { readAgentRelease } from "./release.js";
 import { createAgent } from "./agent.js";
 import { Queue } from "./queue.js";
 import { responseBytes } from "./util.js";
@@ -52,7 +53,7 @@ export async function execute(
   if (seenFlags.has("pending-enrollment") && !["configure", "check"].includes(command))
     throw Error("--pending-enrollment is only allowed for configure and check");
   if (command === "version") {
-    io.write(VERSION + "\n");
+    io.write(readAgentRelease().version + "\n");
     return;
   }
   const validation = { pendingEnrollment: Boolean(flags["pending-enrollment"]) };

@@ -1,0 +1,46 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "status": "synchronized",
+  "spec": "045-agent-lifecycle-updates",
+  "repository_sections": [
+    "13 主机能力段",
+    "20.2 Agent",
+    "23 演进路线",
+    "28.1–28.7 Agent 版本、升级与回退"
+  ],
+  "before_seq": 798,
+  "readback_seq": 803,
+  "updated_existing_paragraphs": 3,
+  "new_blocks_verified": 27,
+  "unrelated_top_level_blocks_unchanged": 418,
+  "existing_native_diagrams_unchanged": 17,
+  "native_flowcharts": [
+    {
+      "id": "agent044-maintenance-flow",
+      "nodes": 14,
+      "edges": 14,
+      "nodes_and_edges_match": true
+    },
+    {
+      "id": "agent044-update-states",
+      "nodes": 8,
+      "edges": 11,
+      "nodes_and_edges_match": true
+    }
+  ],
+  "native_visual_render_verified": false,
+  "final_state_binding_readback": {
+    "before_seq": 801,
+    "readback_seq": 802,
+    "block_id": "agent044-p-11",
+    "text_matches_repository": true,
+    "all_other_blocks_unchanged": true
+  },
+  "task_direction_readback": {
+    "before_seq": 802,
+    "readback_seq": 803,
+    "block_id": "agent044-p-23",
+    "text_matches_repository": true,
+    "all_other_blocks_unchanged": true
+  }
+}

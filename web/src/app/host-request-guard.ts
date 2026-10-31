@@ -1,4 +1,4 @@
-export type HostRequestScope='detail'|'check'|'terminal'|'uninstall'|'plan';
+export type HostRequestScope='detail'|'check'|'terminal'|'uninstall'|'plan'|'update';
 export type HostRequestToken={scope:HostRequestScope;generation:number;target:string};
 
 /** A response belongs to the exact host selection that started it. */

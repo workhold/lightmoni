@@ -1,0 +1,161 @@
+{
+  "schema": 1,
+  "executed_at_utc": "2026-10-30T04:00:29.852974Z",
+  "environment": {
+    "isolation": "Dedicated Docker container in existing local Colima lightmoni-release; no production or vchive access",
+    "os": "Debian GNU/Linux 12 (bookworm)",
+    "architecture": "Linux arm64",
+    "service_manager": "Real systemd 252",
+    "agent_node": "Real bundled Node 24.15.0",
+    "service_user": "Non-root lightmoni-agent",
+    "centre": "Isolated HTTP fixture receiving real register, heartbeat and configuration traffic; platform API integration is covered separately"
+  },
+  "artifacts": [
+    {
+      "version": "0.1.0",
+      "source_revision": "0ab3e25b4d221a2138376c62112bf74d8ff01d88",
+      "build_id": "0.1.0-0ab3e25b4d22-193a75fd38e0",
+      "state_schema": 1,
+      "platform": "linux",
+      "arch": "amd64",
+      "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+      "sha256": "dca0bdc5663e79385a7da9e7de55a9d4e3a6dee428b28525f0751f059ec4cd89",
+      "size": 75235911,
+      "build_time": "2026-10-30T02:50:15.572Z"
+    },
+    {
+      "version": "0.1.0",
+      "source_revision": "0ab3e25b4d221a2138376c62112bf74d8ff01d88",
+      "build_id": "0.1.0-0ab3e25b4d22-193a75fd38e0",
+      "state_schema": 1,
+      "platform": "linux",
+      "arch": "arm64",
+      "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+      "sha256": "485396d019904a05b1b79264f93ddf65bbc8fbaa0a3cc7f696dc349ea0526167",
+      "size": 74920899,
+      "build_time": "2026-10-30T02:50:15.572Z"
+    }
+  ],
+  "results": [
+    {
+      "label": "legacy to protocol A",
+      "operation_id": "3d82dd2524b2f24283243cb25f730d3a",
+      "status": "succeeded",
+      "error_code": "",
+      "new_boot_id": "8d9c423e-41af-4970-870c-47c5164c0974",
+      "actual_non_root_user": "lightmoni-agent",
+      "identity_config_queue_payloads_preserved": true,
+      "independent_systemd_worker": true,
+      "centre_fresh_heartbeat_before_commit": true
+    },
+    {
+      "label": "protocol A to B",
+      "operation_id": "f97267237e60967ac4339d3b5df0da34",
+      "status": "succeeded",
+      "error_code": "",
+      "new_boot_id": "1baf2923-ecb6-4b22-b83d-37d33b6da0d3",
+      "actual_non_root_user": "lightmoni-agent",
+      "identity_config_queue_payloads_preserved": true,
+      "independent_systemd_worker": true,
+      "centre_fresh_heartbeat_before_commit": true
+    },
+    {
+      "label": "reviewed rollback B to A",
+      "operation_id": "75d62eecc48b2658c71cb101d216de23",
+      "status": "succeeded",
+      "error_code": "",
+      "new_boot_id": "0d539ab6-b4a7-4397-8f9d-fe367c1b2852",
+      "actual_non_root_user": "lightmoni-agent",
+      "identity_config_queue_payloads_preserved": true,
+      "independent_systemd_worker": true,
+      "centre_fresh_heartbeat_before_commit": true
+    },
+    {
+      "label": "failed service restores A",
+      "operation_id": "b0e1043a27cc8ebc5b38ae79659e13bb",
+      "status": "rolled_back",
+      "error_code": "local_health_failed",
+      "new_boot_id": "cd2ed822-0503-4003-acbe-d182cda0cfce",
+      "actual_non_root_user": "lightmoni-agent",
+      "identity_config_queue_payloads_preserved": true,
+      "independent_systemd_worker": true,
+      "centre_fresh_heartbeat_before_commit": false
+    },
+    {
+      "label": "confirmation timeout restores A",
+      "operation_id": "008bbcdf62992393319e13f0912de72b",
+      "status": "rolled_back",
+      "error_code": "confirmation_timeout",
+      "new_boot_id": "dc709fec-5779-4aca-b700-ee52bb07bbac",
+      "actual_non_root_user": "lightmoni-agent",
+      "identity_config_queue_payloads_preserved": true,
+      "independent_systemd_worker": true,
+      "centre_fresh_heartbeat_before_commit": false
+    },
+    {
+      "label": "failed service restores legacy",
+      "operation_id": "d78c7f189eab368b79bf47ef74508408",
+      "status": "rolled_back",
+      "error_code": "local_health_failed",
+      "new_boot_id": "",
+      "actual_non_root_user": "lightmoni-agent",
+      "identity_config_preserved": true,
+      "legacy_program_fingerprint_restored": true,
+      "independent_systemd_worker": true
+    },
+    {
+      "label": "accepted pending queue survives actual upgrade from legacy",
+      "operation_id": "71f00c1282c237c574c4acedc02b2952",
+      "status": "succeeded",
+      "error_code": "",
+      "accepted_queued_batches": 1,
+      "queue_payload_sha256": "220c3f3e9a3425675c67f832caa6d9e1678b0e52304257004dcf8a306d9d197e",
+      "identity_config_payloads_preserved": true,
+      "centre_fresh_heartbeat_before_commit": true,
+      "actual_non_root_user": "lightmoni-agent"
+    },
+    {
+      "label": "accepted pending queue survives automatic restoration",
+      "operation_id": "ff52df6471d29b6eb0fbe63bec3dca2e",
+      "status": "rolled_back",
+      "error_code": "local_health_failed",
+      "accepted_queued_batches": 1,
+      "queue_payload_sha256": "220c3f3e9a3425675c67f832caa6d9e1678b0e52304257004dcf8a306d9d197e",
+      "identity_config_payloads_preserved": true,
+      "centre_fresh_heartbeat_before_commit": false,
+      "actual_non_root_user": "lightmoni-agent"
+    },
+    {
+      "label": "reviewed source service state changes are rejected before start in both directions",
+      "status": "rejected",
+      "error_code": "service_state_changed",
+      "operation_ids": [
+        "8855ac5cc14978888eb2bf843944739e",
+        "25bb900dc4bde59aafb6969e63bf09f8"
+      ],
+      "reviewed_inactive_became_active_rejected": true,
+      "reviewed_active_became_inactive_rejected": true,
+      "no_transaction_or_lock_created": true,
+      "original_program_fingerprint_preserved": true,
+      "actual_non_root_user": "lightmoni-agent"
+    }
+  ],
+  "boundaries": [
+    "The first five maintenance cases compared an empty payload set. The final two queue cases used accepted pending batches received through real HTTP /v1/logs and compared nonempty id/signal/table/service/payload sets. The additional state-binding check rejected requests before creating transactions.",
+    "Fixture set next_ns into the future to isolate maintenance from normal data forwarding. SQLite bytes and retry attempts may change naturally.",
+    "The driver waited for a real fresh target heartbeat before calling fixed commit; production approval, tickets and orchestration have separate integration tests.",
+    "Real systemd runs cover arm64 only. Both amd64 and arm64 bundles were built, with official Node checksums and ELF architecture verified.",
+    "Legacy source was the existing real standalone 0.1.0 package. A was built from current runtime/SDK. B changes build_id and recomputes the full artifact digest; failure package uses actual ExecStart=/bin/false.",
+    "Final source service-state binding revalidation reused the already built application bundles and replaced the maintenance helper with current repository bytes. The rejection case covers changed state before start, rather than a forced race during worker preparation."
+  ],
+  "cleanup": "Nine checks completed; temporary container and Colima profile cleanup performed by the validation agent and confirmed after evidence export.",
+  "initial_run_executed_at_utc": "2026-10-30T03:44:30.226Z",
+  "maintenance_revalidation": {
+    "application_bundles_reused": true,
+    "current_repository_helper_used": true,
+    "update_runner_sha256": "01d41c9d703623ef584638193759f799e07726d3f5d7b29a924c82905d356f63",
+    "update_sh_sha256": "0e903b100eb08451ae6330eaf04a26afae0029e10233a4e4919fae65fb716bfe",
+    "expected_service_active_in_all_start_requests": true,
+    "source_service_state_change_rejected_both_directions": true
+  }
+}

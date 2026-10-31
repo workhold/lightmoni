@@ -8,7 +8,7 @@ import {
 import { hostname } from "node:os";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   createLightMoni,
   CenterEndpoints,
@@ -32,7 +32,6 @@ import {
   type Signal,
 } from "../shared/otlp.js";
 import {
-  VERSION,
   validateConfig,
   loadIdentity,
   normalizeRemote,
@@ -57,6 +56,7 @@ import { AgentJobRunner } from "./jobs.js";
 import { AgentTaskRunner } from "./task-runner.js";
 import { SCRIPT_TASK_CAPABILITIES } from "../shared/task-center.js";
 import { collectNetworkAddresses } from "./network-addresses.js";
+import { readAgentRelease } from "./release.js";
 import {
   ReceiveError,
   responseBytes,
@@ -70,6 +70,8 @@ export interface RuntimeEvent {
   body: string;
 }
 export class Agent {
+  readonly bootID = randomUUID();
+  readonly release = readAgentRelease();
   readonly identity;
   readonly endpoints: CenterEndpoints;
   readonly queue: Queue;
@@ -215,7 +217,9 @@ export class Agent {
       group_id: this.config.group_id,
       host_id: this.identity.host_id,
       hostname: hostname(),
-      version: VERSION,
+      version: this.release.version,
+      boot_id: this.bootID,
+      release: { ...this.release },
       platform: process.platform === "win32" ? "windows" : process.platform,
       arch: process.arch === "x64" ? "amd64" : process.arch,
       config_revision: this.revision,

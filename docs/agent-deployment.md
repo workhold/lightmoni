@@ -2,7 +2,9 @@
 
 本文说明当前主机管理部署流程及恢复边界。主机是唯一资产，LightMoni Agent 是主机的管理通道：必须先登记主机，再由平台通过 SSH 预检、审阅确认并安装。每台 Linux 主机最多关联一个独立 systemd Agent，使用专用非 root 用户和持久状态目录，不随业务应用启停。SDK 可以独立直报中心，安装 Agent 不是 SDK 的前置条件。当前接入契约见 [SDD 038](../specs/038-registered-host-agent-onboarding/spec.md)。
 
-以下是早期安装器的历史验收，不代表 SDD 038 主机预绑定流程已完成实机验收。2026-10-27 已用修复安装器与线上 0.1.0 包完成一次 Linux amd64 systemd 首装、真实 enrollment、非 root 运行、配置同步和主机指标入库验收，见 [实机记录](../specs/024-agent-install-startup-fix/validation.md)。2026-10-28 另在本机 Colima 的 Ubuntu arm64、glibc 2.39、systemd 255.4 隔离环境中，使用已发布 0.1.0 arm64 包和当前安装/卸载脚本完成 8 项真实验收：非 root 服务运行、OTLP 日志入队、卸载后程序及 unit 移除、配置和身份 SHA 不变、待上报批次保留，见 [SDD 032 systemd 报告](../specs/032-agent-install-uninstall/systemd-report.json)。这次 arm64 测试使用离线合成身份和不可用的本机 endpoint，不覆盖生产 enrollment 或平台凭据撤销；后两者需分别看真实平台验收与隔离 API 测试证据。真实升级/回滚、amd64 真实卸载及独立 Agent 发布容器仍未验收，其余自动 shell 回归使用命令 shim；这些结果不能等同于 Linux 双架构全场景验收。参见 [迁移验收边界](../specs/007-node-runtime-migration/agent-validation.md)。
+以下是早期安装器的历史验收，不代表 SDD 038 主机预绑定流程已完成实机验收。2026-10-27 已用修复安装器与线上 0.1.0 包完成一次 Linux amd64 systemd 首装、真实 enrollment、非 root 运行、配置同步和主机指标入库验收，见 [实机记录](../specs/024-agent-install-startup-fix/validation.md)。2026-10-28 另在本机 Colima 的 Ubuntu arm64、glibc 2.39、systemd 255.4 隔离环境中，使用已发布 0.1.0 arm64 包和当前安装/卸载脚本完成 8 项真实验收：非 root 服务运行、OTLP 日志入队、卸载后程序及 unit 移除、配置和身份 SHA 不变、待上报批次保留，见 [SDD 032 systemd 报告](../specs/032-agent-install-uninstall/systemd-report.json)。这次 arm64 测试使用离线合成身份和不可用的本机 endpoint，不覆盖生产 enrollment 或平台凭据撤销；后两者需分别看真实平台验收与隔离 API 测试证据。
+
+2026-10-30，SDD 045 在本机隔离的 Debian 12 / arm64 / systemd 252 环境完成 9 组真实升级与回退验收，覆盖旧 0.1.0 升级、同版本不同构建、主动回退、启动失败及确认超时自动恢复，非空待上报队列保留，以及审批后运行状态变化拒绝，见 [SDD 045 验收](../specs/045-agent-lifecycle-updates/validation.md)。中心为接收真实 Agent 心跳/配置的 HTTP fixture；平台审批、票据和编排另由真实 SQLite/HTTP 集成测试覆盖。双架构发行物均已构建并校验官方 Node 摘要及 ELF 架构，amd64 真实升级/回退、amd64 真实卸载及独立 Agent 发布容器仍未验收。命令 shim 测试与 arm64 隔离结果不能等同于 Linux 双架构全场景验收。参见 [迁移验收边界](../specs/007-node-runtime-migration/agent-validation.md)。
 
 ## 当前支持范围
 
@@ -109,15 +111,21 @@ sudo -u lightmoni-agent /usr/local/bin/lightmoni-agent quarantine --config /etc/
 
 ## 升级、回退和卸载
 
-升级能力仍需单独验收，当前主机管理的“部署 Agent”用于首装并拒绝覆盖已有安装；不能把首装按钮当作升级或回滚入口。内部安装器使用固定发行版本，维护现有受管安装时须保留身份与状态目录，不为升级生成另一台主机资产。先保留已知可用包，记录当前版本、配置 revision 和队列状态，确认待升级版本的状态兼容说明。
+“部署 Agent”仍只用于首装；已有受管 Agent 从主机管理的“升级 Agent”准备独立维护计划。平台镜像升级不会自动升级用户主机。发行目录缺失、目标包不可用或 SSH 凭据失效时，先发布完整发行物或添加有效主机凭据。目录显示 version、source revision、build ID 和 SHA256，同为 `0.1.0` 也可能是不同程序。
 
-当前安装器在普通错误及 HUP/INT/TERM 时恢复旧配置、launcher、unit、current 和服务原启用/运行状态；恢复失败会保留备份路径供人工处理。它不打开或重格式化 live spool，但新版服务在失败前可能已写入状态。以下边界需要在升级前理解：
+1. 选择目标发行和有效的 SSH 密码/私钥，平台只读核对远端 Agent ID、架构、当前程序指纹、受管 unit 和任务锁。
+2. 审阅固定目标 SHA、主机、影响与 15 分钟期限，明确确认执行。计划过期、主机变化或当前程序变化时重新生成计划。
+3. 平台通过受限下载票据向目标暂存已审批包和维护器。root 独立 systemd 维护单元完成验证和切换，普通 Agent 仍以专用非 root 用户运行；SSH 断开不会直接终止该维护单元。
+4. 平台观察同一 Agent 的新 boot、精确目标发行、心跳及配置应用，符合条件才确认成功。仅服务 active 或显示“已提交”不代表升级成功。
+5. 启动失败或 180 秒内未获中心确认时，维护器自动尝试恢复之前程序。平台健康观察先结束时可能暂为“结果未知”，待远端完成后使用“核对结果”。核对只读，不重新执行或偷偷提交等待中的更新。
 
-- 掉电、SIGKILL、系统崩溃可能跳过 shell trap，不能保证自动恢复。
-- 安装文件恢复不还原数据目录/schema；不能直接假定任意旧版可以读取新版状态。
-- 安装器在 restart 成功后最多观察 10 次 `systemctl is-active`，间隔 1 秒，连续两次 active 才报告成功。该观察只验证短期本机进程状态，不验证中心登记、任务或数据送达，成功后没有自动健康回滚和批量 rollout。
+主机 ID、Agent 身份、control/data 凭据、配置、实时 SQLite 队列、游标和回执保持不变。程序回退不恢复旧队列快照；跨 state_schema 不支持自动操作。本轮只接受 schema 1，未知程序及任意手改 unit/路径不能直接升级。已识别的旧受管 0.1.0 Node 包可作为升级来源和失败自动恢复目标；主动回退目标需要支持新 boot/发行证明的完整 metadata，缺失时拒绝。
 
-升级后使用上述诊断并检查中心数据。需要回退时，先确认旧版可读当前 schema；不可逆变更需采用升级前一致快照恢复。制作快照应先停服务，再按 SQLite 一致备份方法保存整个必要状态及配置；运行中只复制 `queue.sqlite` 可能遗漏 WAL。不要用未验证的旧包直接覆盖活跃状态。
+升级历史独立记录“待审阅、更新中、健康核验、成功、已自动回退、失败、结果未知、取消”。“已自动回退”表示目标程序未成功，但旧程序已恢复；回退失败仍为未知，先人工核查。平台重启会把未确认操作标为未知，不能根据时间推断成功或自动重试。掉电可能中断维护器，主机恢复后需要核对持久事务与真实服务状态。
+
+可选择多台主机创建升级批次，最多 20 台，服务端串行执行。每台计划和结果分别保存；失败、回退或未知自动暂停，明确继续只处理未启动项。取消批次不会声称已恢复正在运行的机器；已开始操作仍由其自身确认/回退流程结束。计划期限或凭据已失效的剩余主机需要重新准备。
+
+AI 工具 `list_agent_releases`、`propose_agent_update`、`get_agent_update` 可查询和准备升级/回退审阅链接，无直接执行或 commit 工具。任务中心将逐步统一外部 API、界面与 AI 的提交和记录，Agent 生命周期保持独立审批与恢复协议。规格、接口和实际验收边界见 [SDD 045](../specs/045-agent-lifecycle-updates/spec.md) 与 [系统设计第 28 节](system-design.md#28-agent-版本升级与回退sdd-045)。
 
 ### 通过主机管理安全卸载
 
@@ -148,7 +156,7 @@ Agent 容器的 `127.0.0.1`、应用容器的 `127.0.0.1` 和宿主各不相同�
 
 ## 后续设计
 
-待实现项包括凭据自动/管理员轮换与重新 enrollment、签名发行元数据、配置租约、分层健康和升级观察门槛、兼容快照/回退、真实 Linux 双架构验收，以及独立 Agent 转发容器。未来智能执行需另设默认关闭的执行器与权限、审批、隔离、取消和审计，采集 Key 和标签不授予命令执行或提权。
+待实现项包括凭据自动/管理员轮换与重新 enrollment、签名发行元数据、配置租约、业务健康观察门槛、跨 state_schema 的状态迁移与回退设计、amd64 真实升级/回退与双架构全场景验收，以及独立 Agent 转发容器。统一任务 API 仍为后续设计，不能将当前升级接口视为已完成的外部通用执行入口；采集 Key 和标签不授予命令执行或提权。
 
 完整规格与未完成清单：[规格](../specs/010-agent-deployment/spec.md) · [设计](../specs/010-agent-deployment/plan.md) · [当前/未来契约](../specs/010-agent-deployment/contracts.md) · [任务](../specs/010-agent-deployment/tasks.md)。
 
@@ -160,7 +168,7 @@ enrollment 是平台部署流程的短期内部凭据，不是独立用户接入
 
 ## 用户部署顺序
 
-业务服务与中心可以在不同机器。先在平台登记业务所在主机并配置可达的 SSH 连接，再按需部署 Agent；业务已运行时无需停机。平台只在首次安装、卸载或恢复时使用 SSH，Agent 日常主动通过 HTTPS 访问中心，中心不需要入站访问 Agent 的控制端口。多台主机使用列表复选框逐台预检并统一审阅部署计划；每台主机有自己的预约和身份，不复制 token 或身份目录。
+业务服务与中心可以在不同机器。先在平台登记业务所在主机并配置可达的 SSH 连接，再按需部署 Agent；业务已运行时无需停机。平台在首次安装、Agent 自身升级/回退、卸载或恢复时使用 SSH，Agent 日常主动通过 HTTPS 访问中心，中心不需要入站访问 Agent 的控制端口。多台主机使用列表复选框逐台预检并统一审阅部署计划；每台主机有自己的预约和身份，不复制 token 或身份目录。
 
 SDK 直接使用中心地址和 SDK Key，业务可以先启动或完全不装 Agent，不因 Agent 缺失而阻塞打点。容器业务优先由宿主机独立 systemd Agent 采集宿主指标；当前没有独立 Agent 容器发布或自动 sidecar/DaemonSet 注入能力，不将容器身份当作宿主机证明。
 

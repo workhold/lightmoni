@@ -46,4 +46,14 @@
 - ai-runtime 71/71、TypeScript SDK 22/22 通过。SDK 首次有一个既有 fake-fetch 测试因未引用的 AbortSignal 超时而被取消；仅修正测试计时器、保留 TimeoutError 语义后全部通过，未改 SDK 运行代码。
 - 全仓类型检查、构建、差异检查通过；主干既有依赖版本不升级，合并 lockfile 在隔离目录通过 npm ci dry-run。
 - MCP 页面六组 Mock API 验收通过，页面异常 0；已查看 1440px 管理页、390px 布局截图。它不代表真实客户端 OAuth 联调。
-- [集成证据](integration-validation.json) 与 [UI 报告](evidence/main-integration/report.json) 记录实际范围。上述 seq 806→807 为此前实现的历史同步，不能代表本次已同步；本次 Doca 由主代理合并 #21 后局部更新并回读，完成前保留待办。
+- [集成证据](integration-validation.json) 与 [UI 报告](evidence/main-integration/report.json) 记录实际范围。上述 seq 806→807 为此前实现的历史同步；#21 后的最终检查与本次 Doca 同步见下节。
+
+## #21 合入后的最终组合验收
+
+最终基线为 main `7f1506c`（已合入 #21 / SDD 045），无冲突合入。TaskRunStore 与该主干完全一致：维护 fence、LIMIT 前候选过滤、调度、重试和授权继承均保留；新增真实 Dispatcher 的交叉回归验证维护中保留重试资格、维护解除后的稳定授权复验、继承以及撤销后禁止开始。
+
+- runtime 全量 766 项：745 通过、21 跳过、0 失败；MCP/维护/调度/助手组合 84/84 通过。
+- 最终全仓类型检查与构建通过；#21 未改 ai-runtime 或 TypeScript SDK，保留已通过的 71/71 与 22/22 验证。
+- 最新六组 MCP UI Mock API 验收通过，页面异常 0，见 [最终 UI 报告](evidence/main-integration/final-report.json)。真实客户端 OAuth 互操作矩阵仍未完成。
+- Doca seq 885→886：7 个现有块更新、1 个主机身份段新增；最新全量回读核对文本、链接及顺序，554 个无关块与 24 幅原生图完整结构保持相同。未进行在线视觉渲染验收。见 [本次同步证据](integration-doca-sync.json)，原 doca-sync.json 保留历史。
+- 系统设计 14.4、28.7 与平台 MCP 第 3/8/12/16 节准确区分已交付的用户主体 PAT/OAuth、role/scope/主机范围与任务审批，以及尚未交付的服务主体、跨领域完整统一执行读模型和 typed action 注册表。

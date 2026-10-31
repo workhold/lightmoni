@@ -5,6 +5,7 @@ import type { Context, Dependencies, Handler } from "../shared/types.js";
 import { agentProbeCommand, agentUninstallCommand, parseAgentProbe, retainedAgentPaths, removedAgentPaths } from "./machine-agent-lifecycle.js";
 import type { MachineSummary, SSHCheckResult } from "./managed-machines.js";
 import type { SSHRunner } from "./machine-ssh.js";
+import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 export type UninstallationStatus = "awaiting_approval" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
 interface Access {
   get(id: string): MachineSummary; idle(id: string): void; revision(machine: MachineSummary): string;
@@ -46,6 +47,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     return input;
   };
   const knownAgent = (machine: MachineSummary, agentID: string) => {
+    assertNoPendingAgentUpdate(db, agentID, machine.id);
     if (machine.agent_id && machine.agent_id !== agentID) fail(409, "远端 Agent 身份与主机关联不一致");
     if (!table("agent_credentials") || !db.get("SELECT id FROM agent_credentials WHERE agent_id=? LIMIT 1", agentID)) fail(409, "远端 Agent 不是本平台已登记的独立凭据节点，不能自动卸载");
     if (db.get("SELECT id FROM managed_machines WHERE agent_id=? AND id!=? LIMIT 1", agentID, machine.id)) fail(409, "此 Agent 已关联另一主机，请先核对身份");
