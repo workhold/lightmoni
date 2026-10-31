@@ -8,4 +8,4 @@
 - [x] 检查升级/回退并记录已有能力与实际修复、验证边界。
 - [x] 相关测试、类型检查、构建、独立审查。
 - [x] 同步仓库和 Doca 设计，最新回读。
-- [ ] 同步主干并推送 GitHub PR。
+- [x] 同步主干并推送 GitHub PR：[PR #45](https://github.com/workhold/lightmoni/pull/45)，目标 main，非 Draft。
