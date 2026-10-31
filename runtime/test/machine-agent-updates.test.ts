@@ -35,7 +35,7 @@ function releaseFiles(directory: string) {
   writeFileSync(join(directory, "agent-releases.json"), JSON.stringify({ schema: 1, releases: [release] }));
   return release;
 }
-async function fixture(t: any, healthTimeout = 300) {
+async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean) {
   const directory = mkdtempSync(join(tmpdir(), "lightmoni-agent-updates-")), downloads = join(directory, "downloads"), release = releaseFiles(downloads);
   const db = new DB(":memory:"), router = new Router(), user = { id: "admin", name: "Admin", role: "admin" };
   let clock = new Date("2026-10-30T00:00:00Z"), origin = "";
@@ -95,6 +95,7 @@ async function fixture(t: any, healthTimeout = 300) {
         state.local_health = { service_active: true, identity_matches: true, release_matches: true, boot_id: mode === "same_boot" ? OLD_BOOT : NEW_BOOT };
         heartbeat(operation, state, mode);
       }
+      if (uninstallerUpdated !== undefined) state.uninstaller_updated = uninstallerUpdated;
       return { stdout: JSON.stringify(state), stderr: "", stages: ["status"] };
     }
     throw Error("unexpected fixture SSH command");
@@ -165,6 +166,16 @@ test("same-version approved upgrade commits only after new boot, exact release a
   assert.equal(f.machines.get(h.id).agent_id, h.agent); assert.equal(f.machines.get(h.id).agent_release.build_id, f.release.build_id);
   assert.equal((await f.apply(h.id, operation.id)).status, 409);
   assert.equal(f.calls.filter(input => input.command.includes(".update-bootstrap")).length, 1);
+});
+
+for (const updated of [false, true]) test(`HTTP maintenance receipt retains uninstaller_updated=${updated}`, async t => {
+  const f = await fixture(t, 300, updated), h = await f.host(), proposed = await f.plan(h.id);
+  assert.equal(proposed.status, 201, proposed.raw);
+  assert.equal((await f.apply(h.id, proposed.data.id)).status, 202);
+  const finished = await f.settle(h.id, proposed.data.id);
+  assert.equal(finished.status, "succeeded");
+  assert.equal(finished.receipt.uninstaller_updated, updated);
+  assert.equal(JSON.parse(f.db.get<any>("SELECT receipt_json FROM machine_agent_updates WHERE id=?", proposed.data.id)!.receipt_json).uninstaller_updated, updated);
 });
 
 test("maintenance records successful SSH use in both the host binding and shared credential library", async t => {
