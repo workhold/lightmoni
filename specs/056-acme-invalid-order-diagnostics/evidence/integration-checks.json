@@ -1,0 +1,30 @@
+{
+  "typecheck": [
+    "runtime",
+    "ai-runtime",
+    "web"
+  ],
+  "domain_tests": {
+    "total": 67,
+    "passed": 67,
+    "failed": 0
+  },
+  "browser_runs": [
+    {
+      "run": 1,
+      "passed": 13,
+      "errors": []
+    },
+    {
+      "run": 2,
+      "passed": 13,
+      "errors": []
+    },
+    {
+      "run": 3,
+      "passed": 13,
+      "errors": []
+    }
+  ],
+  "diff_check": "passed"
+}

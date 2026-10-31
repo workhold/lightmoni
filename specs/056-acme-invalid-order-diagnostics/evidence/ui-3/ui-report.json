@@ -13,7 +13,7 @@
     "Load failure retries and download failure preserves the displayed certificate",
     "Certificate viewer renders on a narrow dark English screen",
     "Self-signed certificates disable missing chain downloads, explain the empty chain, and open from certificate details",
-    "Certificate metadata and download controls remain readable at 200 percent CSS zoom"
+    "Certificate controls fit a simulated 200 percent view: 720 CSS pixels at 2x device scale"
   ],
   "errors": [],
   "backend": "Real loopback Router + SQLite; synthetic ACME/DNS peers; no production requests",
