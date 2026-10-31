@@ -1,0 +1,64 @@
+{
+  "feature_commit": "aed4b2ddedcd4eb446cc4097a0e205a1aa5f52a9",
+  "typecheck": {
+    "runtime": true,
+    "ai_runtime": true,
+    "web": true
+  },
+  "full_suite": {
+    "runtime": {
+      "tests": 791,
+      "passed": 769,
+      "skipped": 22,
+      "failed": 0
+    },
+    "ai_runtime": {
+      "tests": 71,
+      "passed": 71,
+      "failed": 0
+    },
+    "sdk_typescript": {
+      "tests": 22,
+      "passed": 22,
+      "failed": 0
+    }
+  },
+  "final_related_suite": {
+    "tests": 61,
+    "passed": 60,
+    "skipped": 1,
+    "failed": 0,
+    "command": "node --import tsx --test test/platform-api.test.ts test/platform-cloud-certificates.test.ts test/platform-store.test.ts"
+  },
+  "real_agent": {
+    "command": "LIGHTMONI_CERTIFICATE_DOCKER_QA=1 node --import tsx --test --test-name-pattern='two real container Agents' test/platform-api.test.ts",
+    "passed": 1,
+    "failed": 0,
+    "independent_containers": 2,
+    "protocol": "real job lease, guarded private payload and AgentJobRunner directory activation",
+    "checks": [
+      "same absolute directory in two separate filesystems",
+      "X509 fingerprint and private key match",
+      "private key mode 0600",
+      "all receipts required for aggregate applied"
+    ],
+    "cleanup": "test teardown removes its own containers"
+  },
+  "ui_runs": [
+    {
+      "report": "ui-1/ui-report.json",
+      "passed": 18,
+      "errors": 0
+    },
+    {
+      "report": "ui-2/ui-report.json",
+      "passed": 18,
+      "errors": 0
+    },
+    {
+      "report": "ui-3/ui-report.json",
+      "passed": 18,
+      "errors": 0
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tags": [
+    "20261031-aed4b2d",
+    "latest"
+  ],
+  "digest": "sha256:4fa244357b95a3dd805f552fd3a780a8fa4f5ec7dd0cb0f11e66857f6b211759",
+  "platforms": [
+    {
+      "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+      "digest": "sha256:cae7ebf9eed1d6cb39aed58cf993457c658e54fbac36d604e40ccf5e77e1af1b",
+      "size": 3248,
+      "platform": {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    },
+    {
+      "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+      "digest": "sha256:e55075aaa35a4678c78a5b0a1f058ae161e34fa8decc149b544819abe287bce9",
+      "size": 3248,
+      "platform": {
+        "os": "linux",
+        "architecture": "arm64"
+      }
+    }
+  ],
+  "revision": "aed4b2ddedcd4eb446cc4097a0e205a1aa5f52a9",
+  "verification": "all local blob SHA256, exact tested rootfs/config, remote blob HEAD, manifest/config GET and both index GETs",
+  "blobs": {
+    "checked": 31,
+    "uploaded": 20,
+    "existing": 11,
+    "uploaded_bytes": 459317308
+  }
+}

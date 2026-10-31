@@ -1,0 +1,30 @@
+[
+  {
+    "file": "compose.yaml",
+    "legacy_image_environment": false,
+    "image": "docker.heyphp.com/lightmoni/lightmoni:20261031-aed4b2d",
+    "healthy_dependency": true,
+    "volumes": 2
+  },
+  {
+    "file": "compose.yaml",
+    "legacy_image_environment": true,
+    "image": "docker.heyphp.com/lightmoni/lightmoni:20261031-aed4b2d",
+    "healthy_dependency": true,
+    "volumes": 2
+  },
+  {
+    "file": "deploy/with-clickhouse/compose.yaml",
+    "legacy_image_environment": false,
+    "image": "docker.heyphp.com/lightmoni/lightmoni:20261031-aed4b2d",
+    "healthy_dependency": true,
+    "volumes": 2
+  },
+  {
+    "file": "deploy/with-clickhouse/compose.yaml",
+    "legacy_image_environment": true,
+    "image": "docker.heyphp.com/lightmoni/lightmoni:20261031-aed4b2d",
+    "healthy_dependency": true,
+    "volumes": 2
+  }
+]
