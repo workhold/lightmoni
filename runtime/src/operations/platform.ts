@@ -1,3 +1,4 @@
+import {cachePolicy,prepareCachedImages} from './image-cache.js';
 import {
   lstat,
   readFile,
@@ -9,8 +10,11 @@ import {
   chmod,
 } from "node:fs/promises";
 import { join, dirname, resolve, posix } from "node:path";
-import { createServer, createConnection } from "node:net";
+import { createServer, createConnection, isIP } from "node:net";
 import { createSocket } from "node:dgram";
+import {randomBytes} from "node:crypto";
+import {hashSync} from "bcryptjs";
+import {authMaterial,authScopes} from "./basic-auth.js";
 import { X509Certificate } from "node:crypto";
 import { cpus, freemem, totalmem, loadavg, networkInterfaces } from "node:os";
 import { parse as parseYAML } from "yaml";
@@ -178,7 +182,7 @@ export function normalizeApplication(value: unknown): OperationConfig {
       };
       if (
         !["tcp", "udp"].includes(result.protocol) ||
-        !["127.0.0.1", "0.0.0.0", "::"].includes(result.host_ip)
+        !isIP(result.host_ip)
       )
         reject("INVALID_PORT_MAPPING");
       return result;
@@ -363,7 +367,7 @@ export const platformDefinition: OperationDefinition = {
     const c = object(v, "platform_config");
     if (!TASKS.includes(c.task)) reject("INVALID_PLATFORM_TASK");
     if (c.instance_id !== undefined) safeID(c.instance_id);
-    if (c.task === "workload.apply") normalizeApplication(c.application);
+    if (c.task === "workload.apply") {normalizeApplication(c.application);if(c.image_cache)cachePolicy(c.image_cache);}
     return structuredClone(c);
   },
   publicConfig(c) {
@@ -757,8 +761,9 @@ async function executeWorkload(
       id,
       app,
       payload.resource.revision,
-    ),
-    digest = hash(JSON.stringify(manifest)),
+    );
+  const imageSources=c.image_cache?await prepareCachedImages(manifest,c.image_cache,root,context):[];
+  const digest = hash(JSON.stringify(manifest)),
     version = join(root, "versions", digest);
   await directory(version);
   const manifestPath = join(version, "compose.json");
@@ -839,6 +844,7 @@ async function executeWorkload(
         revision: payload.resource.revision,
         digest,
         ...(await workloadSnapshot(context, id)),
+        image_sources:imageSources,
       },
     };
   } catch (error) {
@@ -1175,7 +1181,10 @@ export function renderGateway(c: any, digest: string, preview = false): string {
             },
           ]);
     const routes = normalizeLocations(rawRoutes);
-    const rendered = renderLocations(routes, siteID, settings);
+    const auth=authMaterial(site.auth), authBase=base+"/sites/"+siteID+"/auth";
+    if(authScopes(site).length&&!site.certificate&&!preview)reject('WEBSITE_AUTH_REQUIRES_TLS');
+    if(auth.mode==='basic'&&settings.server_snippet)reject("WEBSITE_AUTH_UNSAFE_COMBINATION");
+    const rendered = renderLocations(routes, siteID, settings,{auth,base:authBase});
     lines.push(...rendered.upstreams);
     lines.push(
       "  server {",
@@ -1184,6 +1193,8 @@ export function renderGateway(c: any, digest: string, preview = false): string {
       `    set $lightmoni_website_id "${siteID}";`,
       `    location = /.well-known/lightmoni-health { allow 127.0.0.1; allow ::1; deny all; access_log off; default_type text/plain; return 200 ${quote(proof)}; }`,
     );
+    if(auth.mode==='basic')lines.push(`auth_basic ${quote(auth.realm)};`,`auth_basic_user_file ${quote(authBase+"/site.htpasswd")};`,"satisfy all;");
+    for(const scope of authScopes(site))lines.push(`location = /.well-known/lightmoni-auth-${scope.key} { allow 127.0.0.1; allow ::1; deny all; satisfy all; auth_basic ${quote(scope.auth.realm)}; auth_basic_user_file ${quote(authBase+"/"+scope.key+".htpasswd")}; alias ${quote(authBase+"/proof.txt")}; access_log off; default_type text/plain; }`);
     if (site.certificate) {
       if (!preview)
         certificateMetadata(
@@ -1202,7 +1213,7 @@ export function renderGateway(c: any, digest: string, preview = false): string {
     }
     lines.push(...renderNginxOptions(settings).map(line => line === 'access_log /dev/stdout;' ? 'access_log /dev/stdout lightmoni_application;' : line));
     const redirect =
-      settings.redirect_https && site.certificate
+      (settings.redirect_https || authScopes(site).length>0) && site.certificate
         ? `if ($scheme = http) { return 308 https://$host${Number(c.https_port ?? 443) === 443 ? "" : ":" + port(c.https_port)}$request_uri; }`
         : "";
     // Redirects belong to user locations so the internal deployment proof remains reachable.
@@ -1267,7 +1278,7 @@ async function gatewayProof(
 ) {
   const gateway = await probeHTTP(
     c.http_port ?? 80,
-    "localhost",
+    "_",
     "/.well-known/lightmoni-gateway",
     false,
     context.signal,
@@ -1284,6 +1295,17 @@ async function gatewayProof(
     );
     if (proof.status !== 200 || proof.text !== hash(JSON.stringify(s)))
       throw Error("WEBSITE_VERSION_NOT_ACTIVE");
+    if(authScopes(s).length){
+      const version=join(await privateRoot(context,"platform"),"gateways",safeID(c.instance_id),"versions",digest);
+      const probe=await readJSON<any>(join(version,"auth-probe.json"),null);
+      if(!probe)throw Error("WEBSITE_AUTH_PROOF_REQUIRED");
+      for(const scope of authScopes(s)){
+        const path="/.well-known/lightmoni-auth-"+scope.key;
+        const anonymous=await probeHTTP(c.http_port??80,s.domains[0],path,false,context.signal);
+        const positive=await probeHTTP(c.http_port??80,s.domains[0],path,false,context.signal,{Authorization:"Basic "+Buffer.from(probe.username+":"+probe.password).toString("base64")});
+        if(anonymous.status!==401||positive.status!==200||positive.text!==digest)throw Error("WEBSITE_AUTH_NOT_ACTIVE");
+      }
+    }
     if (s.certificate) {
       const tls = await probeHTTP(
         c.https_port ?? 443,
@@ -1411,10 +1433,22 @@ async function executeGateway(
     await directory(path, 0o755);
     await chmod(path, 0o755);
   }
+  let authProbe=await readJSON<any>(join(version,"auth-probe.json"),null);
+  if((c.sites??[]).some((s:any)=>authScopes(s).length)&&!authProbe){
+    authProbe={username:"lm-probe-"+randomBytes(8).toString('hex'),password:randomBytes(32).toString('hex')};
+    authProbe.password_hash=hashSync(authProbe.password,10);
+    await atomicFile(join(version,"auth-probe.json"),JSON.stringify(authProbe));
+  }
   for (const s of c.sites ?? []) {
     const target = join(version, "sites", safeID(s.id));
     await directory(target, 0o755);
     await chmod(target, 0o755);
+    for(const scope of authScopes(s)){
+      const authDir=join(target,"auth");await directory(authDir,0o755);
+      // Private hashes and probe credentials never enter the static root or nginx text.
+      await atomicFile(join(authDir,scope.key+".htpasswd"),scope.auth.users.map(u=>u.username+":"+u.password_hash).concat(authProbe.username+":"+authProbe.password_hash).join("\n")+"\n",0o644);
+      await atomicFile(join(authDir,"proof.txt"),digest,0o644);
+    }
     if (s.mode === "static") {
       const publicPath = join(target, "public");
       const entries = files(

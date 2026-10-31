@@ -1501,9 +1501,9 @@ flowchart LR
 
 规格、契约、测试及 Doca 保存回读证据见 specs/053-certificate-async-issuance/。
 
-## 第59章 服务镜像生命周期、仓库应用与网站鉴权（SDD 059，目标设计）
+## 第59章 服务镜像生命周期、仓库应用与网站鉴权（SDD 059，首版实现与后续设计）
 
-2026-10-31建立，2026-11-01扩展。本章为待实现设计，扩展第42章应用/集群部署及网站，保留第33章授权、私有载荷、租约和未知结果边界。默认无需仓库；已有源或用户明确开启时安装的仓库应用均为可选增强。设计交付不表示预热、仓库、商店更新、机器代理或网站密码访问已实现。
+2026-10-31建立，2026-11-01实现私有镜像管理首版（功能分支待合入）。59.1—59.6保留完整生命周期的后续目标设计；当前已实现的仓库管理、集群缓存及网站Basic以59.7—59.9和specs/059-service-image-lifecycle/implementation-v1.md为准。扩展第42章应用/集群部署及网站，保留第33章授权、私有载荷、租约和unknown边界。仓库按需安装，不要求每集群默认安装或预下载全部镜像。发布版本、候选预热、商店自动更新、机器daemon代理仍未实现。
 
 ### 59.1 发布身份与候选预热
 
@@ -1543,28 +1543,42 @@ flowchart TB
 
 中心SQLite增加发布、更新源/检查/策略、准备策略/逐机状态、profile/维护计划、registry origins/集群reader映射、网站账号组及不可变hash版本，扩展逐集群发布指针；仓库仍为普通application，不新增隐藏安装器。执行复用ops_platform_runs、系统日志outbox和有效Agent租约，中心无Docker socket，AI不批准。基础预热/更新P1无需仓库，网站鉴权独立P1；仓库应用为用户按需开启，公网依赖网站鉴权，P2限定自动更新。真正P2P及多写高可用/自动数据迁移不在首版。验收无仓库基础、双节点断网预热、多集群单写源/摘要分发、内网匿名边界、网站密码访问和Registry客户端；分别测恢复各阶段，不预称固定秒数。详见 specs/059-service-image-lifecycle/。
 
-### 59.7 按需仓库应用、唯一写入源与多集群读取
+### 59.7 系统仓库登记、唯一写入源与集群缓存（首版）
 
-开启仓库功能时选择已有源或从商店安装普通application，明确集群、单台宿主机、持久目录和端口，默认manual单写，不随机或故障后空目录迁移。private/cache/both分别为可push私库、单上游只读pull-through或两个独立Compose服务；进程/端口/数据分离，proxy缓存不可当可push私库。每个应用选择一个registry_origin作为写入源，公网push域名固定该源集群，不轮询独立存储；其他集群按明确reader映射直拉、缓存或受限复制到普通副本，核验完整index/平台manifest/blob摘要。改源需CAS与迁移验证，未准备或源离线不报分发成功；自身引导镜像不依赖未启动的仓库。停用/卸载保留数据并检查引用。
+独立“私有镜像管理”模块为空时引导安装Docker Registry 3.0.0，明确选择集群、单台机器、与集群节点一致的私有监听IP及资源。宿主createSystemApplication和SQLite ops_system_applications登记系统身份，全局application固定sys-docker-registry，每个集群可配置一个固定部署；普通业务可部署多套Registry，但系统不会按镜像名或用户标记接管。网站网关固定sys-openresty；后端保留sys-前缀。旧OpenResty仅迁移当前名称并记录旧别名，既有引用依赖稳定应用ID，实例、卷和历史revision保持不变。
 
-内网免登录是显式可信模式，绑定私网/受管网络及批准来源，默认匿名只读，内网写单独开启；不依靠Host/X-Forwarded-For或“地址是私网”判断信任，不能证明隔离不标已保护。公网入口为OpenResty HTTPS+Basic，后端端口无公网旁路，支持/v2/、上传大小/分块/Location及pull/push组，DELETE默认关闭，响应代理缓存禁用。Basic和方法组仅提供端点访问控制，不宣称repository级多租户RBAC；强项目隔离用独立仓库应用，后续才考虑token授权。内部HTTP限明确可信链路及精确host:port配置，不全局放弃TLS。
+cluster.spec.image_cache.enabled是唯一开关，集群编辑和镜像部署页共用同步逻辑；未登记系统部署不能开启。开关更新对应仓库冻结配置并提交部署，忙碌时保存pending并由调度重试，不重启已有业务容器。每集群私库可push；缓存开启时增加Docker Hub缓存和必要的选定源缓存，独立进程/端口/持久目录，缓存TTL 168h，不预取全量镜像。Registry v3调试监听绑定容器loopback的临时端口，避免和缓存端口冲突。缓存进程初始化仍依赖其上游可访问，仓库不提供高可用或自动迁移。
+
+对外发布入口在一个已登记部署上选择写入集群，自动关联普通website并按需确认安装/扩展OpenResty，使用域名、证书和Basic账号。网站固定一个集群和registry命名端口；普通网站编辑不能关闭该入口的HTTPS/鉴权或改接其他后端。独立私库不自动复制或轮询接收push。首版拒绝更换已有仓库机器、内网IP或已选写入集群，避免把空库当成原仓库。
+
+内网监听限私有IPv4、ULA或loopback字面地址，管理员明确确认可信网络；内部匿名可读写，实际网络/防火墙隔离由部署方维护，不提供同网账号或repository级权限。公网使用HTTPS+Basic并剥离转发到上游的Authorization，上传保留URI、相对Location和流式请求，DELETE关闭。DNS由现有网站功能或外部维护，强项目隔离可使用独立业务仓库。
 
 ```mermaid
 flowchart TB
-  enable["用户开启 / 选集群与明确机器"] --> regapp["普通仓库应用 / 持久数据"]
-  regapp --> origin["A集群：唯一私库写入源"]
-  regapp --> reader["B集群：只读缓存 / 显式普通副本"]
+  enable["私有镜像模块 / 选集群与明确机器"] --> regapp["宿主登记系统仓库 / 固定名称"]
+  regapp --> origin["A集群：选定私库写入源"]
+  regapp --> reader["B集群：独立私库与源缓存"]
   ci["构建机 / 唯一push域名"] --> public["A入口：HTTPS + 网站Basic"]
-  authsets["网站账号组 / 冻结版本"] --> public
+  authsets["网站内嵌用户 / 冻结hash"] --> public
   public --> origin
-  internal["批准的内网来源 / 默认匿名只读"] --> origin
-  origin --> nodea["A节点：固定摘要拉取"]
-  origin -->|同摘要缓存或完整复制| reader
-  reader --> nodeb["B节点：固定摘要拉取"]
+  internal["可信私网免鉴权 / 含push权限"] --> origin
+  origin --> nodea["A Agent：校验并导入镜像"]
+  origin -->|同摘要pull-through缓存| reader
+  reader --> nodeb["B Agent：校验并导入镜像"]
 ```
 
-### 59.8 网站全站与按路径密码访问
+### 59.8 网站全站与路径密码访问（首版）
 
-对齐1Panel密码访问：website.spec.auth为off/basic、realm及账号组，location.auth为inherit/off/basic，沿用现有路径匹配，旧网站默认关闭。账号组与平台登录分离，多用户/重置/启停，密码只写，宿主生成受支持bcrypt哈希后加密版本化；发布冻结组revision/material_hash，只经确切网关Agent的有效lease私有载荷分发。受管口令文件与网站配置一体nginx -t、原子切换/reload、匿名401及有效凭据验证，失败保留旧鉴权，不退化公开；旧Agent能力不足拒绝，换机同版本，账号变更逐集群确认生效。
+website.spec.auth为off/basic、realm和内嵌用户，location.auth为inherit/off/basic；旧网站默认关闭。宿主用已有bcryptjs生成bcrypt哈希并加密保存在资源及不可变revision中，密码只写，留空仅保留同名用户原hash；公开资源只含has_password。首版不增加独立账号组管理或pull/push角色分权。
 
-编译器拥有auth_basic及受管用户文件路径，片段不能覆盖；IP规则与密码默认satisfy all。CORS提前return、直接响应/内部跳转、受保护内容缓存或片段不得绕过鉴权，不支持组合拒绝。前置Basic的Authorization默认不传上游，依赖业务Bearer/Basic的冲突明确处理；公网只经TLS接收密码，内部探测不暴露业务旁路。401/403不能误摘后端或网站DNS；账号文件/hash/密码不进入公开预览、日志或AI。仓库模板另有pull/push账号组兼容Docker协议；细节与验收见SDD059 registry-apps.md、website-auth.md。
+配置与htpasswd一体下发至明确网关Agent的有效lease，仅新operations.platform.website-auth.v1能力可领取。Agent在受管私有目录生成口令文件，nginx -t后原子切换、reload与验证，失败按旧指针恢复。匿名401与随机运维凭据的本机正向探测同时验证；该运维凭据只存在Agent私有文件，探测使用真实静态文件访问阶段，不用提前return替代鉴权。实际TLS证书指纹及版本仍沿用原验证。
+
+编译器拥有auth_basic、用户文件路径和satisfy all，片段不能覆盖；受保护路径与直接return、CORS、代理缓存或自定义片段组合会被拒绝。全站Basic要求所有域名绑定HTTPS，路径可显式关闭或单独设置账号，受保护代理默认清除Authorization，不影响上游健康检查或因正常401摘除服务。口令hash及密码不进入公开预览、日志或AI。
+
+### 59.9 Agent镜像导入、状态与验收边界（首版）
+
+业务workload.apply在集群开启缓存且镜像命中Docker Hub/所选发布域名时，获得宿主登记的端点映射及operations.platform.image-cache.v1能力要求。所选源集群拉取自身发布域名的镜像时，即使缓存关闭也直接使用本集群私库；其他集群须开启缓存并安装系统仓库才能使用该内部路径。未知业务仓库保持原拉取路径；系统Registry和OpenResty引导镜像跳过此桥。领取时重新比对当前集群开关、登记端点与映射，过期策略不下发。
+
+Agent以Registry V2直接读取明确私有IP的HTTP端点，不改Docker daemon mirror/insecure-registry或重启Docker，不跟随响应重定向，不消费仓库返回的任意URL。校验index/平台manifest、config、压缩blob及解压层diff ID，生成Docker导入归档，再核对导入后的平台/rootfs和Docker image ID。兼容Docker经典存储及containerd存储不同的ID语义；Compose使用实际导入ID且pull_policy=never。单镜像下载≤2GiB、解压≤4GiB、5分钟截止，保留磁盘余量并清理临时文件。缓存失败默认按策略回源且回执记录来源/错误；内部禁止回源模式失败，不偷偷走公网。该模式只限制Agent回源，pull-through服务仍可向自身上游取内容，不宣称整个集群隔离公网。
+
+新增SQLite系统登记、旧别名、单例外部入口设置；沿用资源revision、逐集群desired/applied、实例端口、加密私有载荷、Agent租约及unknown写锁。真实Docker已验证Registry push、代理缓存、停上游后digest命中、Agent导入及Compose启动；真实OpenResty验证HTTPS、匿名/错密401、正确密码200、路径关闭及Authorization剥离。浏览器三轮验证保存、刷新、缓存双入口、版本冲突保留输入与关联网站。验收为同物理Docker宿主上的隔离进程，不能当作生产多地域容灾、缓存进程断网重启、跨机数据迁移或Docker Hub限流验收。证据及未实现路线见同一SDD目录。

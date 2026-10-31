@@ -1,3 +1,5 @@
+import {createPrivateRegistryController} from './private-registry.js';
+import {migrateSystemApplications} from './system-applications.js';
 import { CloudError, zoneFor } from "./cloud.js";
 import { registerObservability } from "./observability.js";
 import { applicationCatalog, applicationCategories, catalogInstallation } from "./catalog.js";
@@ -43,6 +45,7 @@ export function registerOperationsPlatform(
         fail(409, "website_certificate_issuance_failed");
     },
   });
+  migrateSystemApplications(store);
   const domains: DomainController[] = [certificates, workloads];
   const { router } = deps;
   let timer: ReturnType<typeof setInterval> | undefined,
@@ -75,6 +78,9 @@ export function registerOperationsPlatform(
         }
       }
     };
+  const privateRegistry=createPrivateRegistryController(store,workloads);
+  domains.push({actions:()=>[],perform:async()=>fail(400,'unsupported_registry_action'),tick:privateRegistry.tick});
+  privateRegistry.register(safe);
   registerObservability(deps, store, safe);
   // Include rejection responses in the no-store boundary, before the admin guard.
   const certificateResponse = (fn: Handler): Handler => ctx => {
@@ -299,17 +305,9 @@ export function registerOperationsPlatform(
       const b = safeObject(await ctx.body());
       if (!Number.isSafeInteger(b.revision))
         fail(400, "platform_revision_required");
-      ctx.json({
-        resource: store.public(
-          store.update(
-            ctx.params.id,
-            b.revision,
-            b.name ?? store.get(ctx.params.id).name,
-            safeObject(b.spec),
-            ctx.user.id,
-          ),
-        ),
-      });
+      const resource=store.update(ctx.params.id,b.revision,b.name??store.get(ctx.params.id).name,safeObject(b.spec),ctx.user.id);
+      const result=resource.kind==='cluster'?await privateRegistry.syncClusterCache(resource,ctx.user.id):{};
+      ctx.json({resource:store.public(resource),...result});
     }),
   );
   router.delete(

@@ -1,3 +1,15 @@
+# 首版运行与验收
+
+当前已实现范围以[implementation-v1.md](implementation-v1.md)为准；通过证据见[evidence/validation.md](evidence/validation.md)。下面保留的完整生命周期步骤是后续路线，不代表已经实现。
+
+1. 更新中心与Agent到本分支版本。管理员进入“私有镜像管理”，安装Docker Registry，指定集群、机器与该机器明确私网IP；确认该端点只允许可信网络访问。安装会分配受管端口和数据目录，固定机器与IP。
+2. 在部署行或集群编辑开启内网缓存；刷新核对期望/实际状态，等待Agent执行。缓存按需填充，不预下载所有镜像。可在应用管理安装额外普通Registry，系统不会自动接管它们。
+3. 准备域名及匹配证书，在“对外发布入口”选择一个部署、填写域名/账号/密码，必要时勾选安装OpenResty。DNS使用既有网站设置或在外部维护。构建机执行Docker login后向该唯一域名push；发布源确定后禁止静默切换到其他独立空库。
+4. 源集群应用可通过登记端点直接拉取自身域名镜像；其他集群安装系统仓库并开启缓存。当前不修改Docker daemon代理或insecure-registry配置。内网匿名端点可读写，不具备多租户权限隔离。
+5. 网站编辑支持全站/路径Basic。密码只写，留空保留同名账号；网站发布与凭据一起验证，旧Agent拒绝新能力任务。安装、保存和排队不等于Agent已应用，按状态与回执核对。
+
+开发验收：先安装现有工作区依赖并构建SDK，运行runtime/web的typecheck。真实Docker验证运行`npm --prefix runtime run build`后执行`sh scripts/verify-private-registry-isolated.sh`；脚本依赖本机已缓存Registry 3.0.0、Alpine 3.23、OpenResty 1.27.1.2、Docker 27 DinD及现有cluster-demo QA执行镜像，使用隔离daemon并清理自身容器。浏览器QA启动`runtime/test/fixtures/cluster-ui-server.ts`于19959及代理到该API的web开发服务器19960，再运行`node web/src/app/ops/verify-registry-ui.mjs`。该fixture仅可用于临时本机QA，不能当作生产身份验证。
+
 # 后续功能验收步骤
 
 功能尚未实现，以下不是通过证据。

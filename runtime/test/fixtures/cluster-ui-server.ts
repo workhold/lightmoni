@@ -68,6 +68,7 @@ const deps: any = {
 };
 router.auth = deps.auth;
 const credentials: any = {
+  has: (agentID:string) => ["qa-node","qa-node-2"].includes(agentID),
   authenticate() {
     fail(403, "qa_agent_not_enrolled");
   },

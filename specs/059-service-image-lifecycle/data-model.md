@@ -27,3 +27,15 @@
 回执必须匹配release、image_set、平台、机器/Agent及profile才更新ready/运行版本。过期回执只存历史；unknown持锁等待inspect，不清理未知引用。UI只返回脱敏摘要，旧模板/发布/回退配置用秘密引用，真实材料由私有载荷按当前授权解析。
 
 仓库安装有持久idempotency_key→application_id映射，enable请求重试不重复建应用。origin切换须CAS、数据迁移验证与独占写约束；只读mirror不可充当复制写入目标。账号组更改产生新版本，website发布固定版本并逐网关记录生效，不能把账号库保存成功投影为全网生效。
+
+## 首版实际落库（2026-11-01）
+
+以上发布/账号组/profile表为后续设计。当前迁移只新增：
+
+| 表 | 实际字段与边界 |
+|---|---|
+| ops_system_applications | kind主键(openresty/registry)、application_id唯一、created_at；宿主内部创建写入 |
+| ops_system_application_aliases | service_name主键、application_id；旧OpenResty名称迁移记录，业务引用保持稳定ID |
+| ops_private_registry_settings | id=1、revision、carrier_cluster_id、website_id；全局单写入口，revision乐观锁 |
+
+cluster.spec.image_cache.enabled为唯一开关。系统application.deployments冻结registry_address及registry_cache_enabled，registry_upstream来自所选源的受管端口。网站auth内嵌bcrypt hash随既有加密资源revision保存；公开投影只显示用户名和has_password。没有新增普通用户可写system_kind字段或独立凭据明文表。

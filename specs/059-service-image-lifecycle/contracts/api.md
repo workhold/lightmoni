@@ -38,3 +38,7 @@ Docker维护主机写锁与应用部署/启停等Docker写动作互斥；派发�
 新增拒绝条件：registry_mode_conflict、registry_origin_migration_required、registry_independent_storage_round_robin、registry_internal_boundary_unverified、registry_cache_read_only、website_auth_set_required/in_use、website_auth_revision_conflict、website_auth_agent_unsupported、website_auth_bypass_combination、website_auth_upstream_conflict。网站私有载荷再验网站/集群/网关Agent、冻结账号组版本与材料hash；只有固定受管路径可读，下载与回执不接受任意密码文件路径。
 
 网站Basic与IP规则默认satisfy all，公网HTTPS生效后才开放仓库域名；未授权请求401且有正确挑战头，错误不回显密码。发布验证同时核对匿名401、有效凭据访问及上游实际健康；401/403不作为DNS摘除条件。保护内容不允许自定义片段、CORS提前return或内部跳转旁路，无法支持的组合拒绝而非静默关闭鉴权。
+
+## 首版权威契约
+
+最新实施路由与系统身份/集群开关/网站关联契约见[implementation-v1.md](../implementation-v1.md)。首版网站账号直接属于网站/路径并随发布冻结，不提前提供尚未实现的独立账号组CRUD或完整release API；这些保留为后续路线。

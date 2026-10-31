@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 import { OperationRejectedError } from "./errors.js";
+import {authMaterial,effectiveAuth} from './basic-auth.js';
 
 type Config = Record<string, any>;
 const bad = (code: string): never => {
@@ -91,7 +92,7 @@ export function nginxSnippet(value: any): string {
       (/^(include|load_module|env|daemon|master_process|pid|user|http|events|stream|server|listen|server_name|ssl_certificate|ssl_certificate_key|root|alias)$/i.test(
         token,
       ) ||
-        /lua|perl|^(js_|auth_basic_user_file)/i.test(token))
+        /lua|perl|^(js_|auth_|satisfy$)/i.test(token))
     )
       bad("NGINX_DIRECTIVE_OUTSIDE_SITE_SCOPE");
     if (token) start = false;
@@ -199,6 +200,7 @@ export function normalizeLocations(value: any): Config[] {
       path,
       match,
       action: choice(s.action, ["proxy", "return"], "proxy"),
+      auth: authMaterial(s.auth,true),
       response_headers: headers(s.response_headers),
       allow: cidrs(s.allow),
       deny: cidrs(s.deny),
@@ -374,6 +376,7 @@ export function renderLocations(
   raw: any,
   siteID: string,
   settings: Config,
+  authContext?: {auth:any;base:string},
 ): { upstreams: string[]; locations: string[] } {
   const routes = normalizeLocations(raw),
     upstreams: string[] = [],
@@ -393,6 +396,12 @@ export function renderLocations(
       `location ${modifier}${nginxQuote(s.path)} {`,
       ...aclLines(s),
     ];
+    const auth=effectiveAuth(authContext?.auth,s.auth);
+    if(auth.mode==='basic'){
+      if(s.action==='return'||s.cors||s.cache||s.custom_config||settings.server_snippet)bad('WEBSITE_AUTH_UNSAFE_COMBINATION');
+      const scope=s.auth.mode==='basic'?'route-'+index:'site';
+      lines.push('satisfy all;',`auth_basic ${nginxQuote(auth.realm)};`,`auth_basic_user_file ${nginxQuote(authContext!.base+'/'+scope+'.htpasswd')};`);
+    }else if(s.auth.mode==='off')lines.push('auth_basic off;');
     if (s.requests_per_second) {
       upstreams.push(
         `limit_req_zone $binary_remote_addr zone=req_${siteID}_${index}:1m rate=${s.requests_per_second}r/s;`,
@@ -495,6 +504,10 @@ export function renderLocations(
         },
         s.request_headers,
       );
+      if(auth.mode==='basic'){
+        for(const key of Object.keys(request))if(key.toLowerCase()==='authorization')delete request[key];
+        request.Authorization='';
+      }
       for (const [key, value] of Object.entries(request))
         lines.push(
           `proxy_set_header ${nginxQuote(key)} ${nginxQuote(String(value))};`,

@@ -24,3 +24,12 @@
 .lm-ops-certificate-tasks > .lm-ops-section-heading h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .lm-ops-certificate-tasks > .lm-ops-note { margin-bottom: 0; }
 .lm-operations-page td .lm-ops-certificate-error { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+.lm-registry-page .lm-ops-panel{padding:22px;border:1px solid var(--lm-border);border-radius:8px;background:var(--lm-surface);margin-bottom:20px;min-width:0}
+.lm-registry-page .lm-ops-install-guide{border:1px solid var(--lm-border);border-radius:8px;background:var(--lm-surface)}
+.lm-registry-page .lm-ops-subheading h3{margin:0;font-size:15px}.lm-registry-page .lm-ops-panel>.lm-ops-note{margin:16px 0 0}
+.lm-registry-entry{animation:lm-ops-enter .22s ease-out}.lm-ops-auth-fields{margin:16px 0}.lm-ops-auth-fields>.ant-alert{margin-bottom:16px}
+.lm-registry-page .lm-page-heading .ant-btn-primary:active{transform:scale(.98)}
+.lm-ops-auth-user{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) auto;gap:12px;align-items:center}
+@media(max-width:680px){.lm-registry-page .lm-page-heading{align-items:flex-start;flex-direction:column;gap:12px}.lm-registry-page .lm-ops-panel{padding:14px}.lm-ops-auth-user{grid-template-columns:minmax(0,1fr) auto}.lm-ops-auth-user>.ant-form-item:first-child{grid-column:1/-1}}
+@media(prefers-reduced-motion:reduce){.lm-registry-entry{animation:none}}

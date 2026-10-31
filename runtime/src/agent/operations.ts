@@ -9,7 +9,7 @@ import { acquireOperationLock } from "./operation-lock.js";
 import { OperationRejectedError } from "../operations/errors.js";
 import { executePlatform, platformDefinition } from "../operations/platform.js";
 
-export const operationCapabilities = ["operations.website", "operations.certificate", "operations.compose", "operations.backup", "operations.platform"];
+export const operationCapabilities = ["operations.website", "operations.certificate", "operations.compose", "operations.backup", "operations.platform", "operations.platform.website-auth.v1", "operations.platform.image-cache.v1"];
 export const operationCommand: OperationExecutionContext["command"] = (file, args, options = {}) => new Promise((resolve, reject) => {
   const allowed = ["PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot", "SSL_CERT_FILE", "SSL_CERT_DIR"];
   const env = Object.fromEntries(allowed.flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []));
