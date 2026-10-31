@@ -57,6 +57,7 @@ import { AlertProposalService } from "./alert-proposals.js";
 import { alertTools } from "./alert-tools.js";
 import { operationTools } from "./operation-tools.js";
 import { TaskProposalService, taskTools } from "./task-tools.js";
+import type { CapabilityDispatcher } from "../capabilities/index.js";
 import type { TaskRunStore } from "../server/task-center.js";
 import type { OperationsStore } from "../operations/types.js";
 import { InstrumentationService } from "./instrumentation.js";
@@ -75,6 +76,8 @@ export interface AssistantOptions {
   deployments?: ServiceDeploymentStore;
   operations?: OperationsStore;
   taskCenter?: TaskRunStore;
+  capabilities?: CapabilityDispatcher;
+  taskProposals?: TaskProposalService;
   instrumentationWorkspaceRoot?: string;
 }
 const id = () => randomBytes(16).toString("hex");
@@ -275,12 +278,12 @@ export function registerAssistant(
   const alertProposals = options.alerts
     ? new AlertProposalService(deps.db, options.alerts, deps.now, deps.encrypt, deps.decrypt)
     : undefined;
-  const taskProposals = options.taskCenter ? new TaskProposalService(deps, options.taskCenter) : undefined;
+  const taskProposals = options.taskProposals ?? (options.taskCenter ? new TaskProposalService(deps, options.taskCenter) : undefined);
   const tools =
     options.tools ??
     [
       ...(options.operations ? operationTools(options.operations) : []),
-      ...(taskProposals ? taskTools(taskProposals) : []),
+      ...(options.capabilities ? options.capabilities.assistantTools() : taskProposals ? taskTools(taskProposals) : []),
       ...monitoringTools(deps, {
         ...(codeTasks
         ? {

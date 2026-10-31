@@ -1,0 +1,33 @@
+{
+  "status": "synchronized",
+  "spec": "047-platform-mcp-service",
+  "checked_at": "2026-10-31T06:22:06.938403+00:00",
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository_sections": [
+    "docs/system-design.md 14.4,28.7",
+    "docs/platform-mcp.md 3,8,12,16"
+  ],
+  "before_seq": 885,
+  "readback_seq": 886,
+  "before_blocks": 561,
+  "after_blocks": 562,
+  "updated_blocks_verified": 7,
+  "inserted_blocks_verified": 1,
+  "updated_block_ids": [
+    "mcp046-summary-4",
+    "mcp046-detail-11",
+    "mcp046-detail-33",
+    "mcp046-detail-46",
+    "mcp047-detail-2",
+    "mcp047-detail-3",
+    "agent044-p-24"
+  ],
+  "inserted_block_id": "mcp047-host-identity-0f53d372",
+  "unrelated_blocks_unchanged": 554,
+  "existing_native_diagrams_unchanged": 24,
+  "native_nodes_and_edges_preserved": true,
+  "text_and_links_verified": true,
+  "full_document_order_verified": true,
+  "native_visual_render_verified": false,
+  "note": "局部同步主干组合后的MCP授权适配器缺失拒绝应用、默认任务共用目录、当前Agent观测来源、已合入升级与尚未实现的服务主体边界。既有24幅原生图完整保留；未声称在线视觉验收。"
+}

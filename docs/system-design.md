@@ -745,13 +745,15 @@ AI 的查询必须走目录和统一 Query，SQL 只读、有时间范围和结�
 
 ### 14.4 平台开放能力与 MCP：目标架构（SDD 046）
 
-平台对外开放完整业务能力，任务只是其中一个领域。目标采用“统一应用能力层 + MCP/Web HTTP/内置 AI 三种适配器”：外部 Codex、Claude 通过 Streamable HTTP MCP 调用，平台助手在进程内调用相同 Dispatcher，页面和普通程序通过 HTTP 复用同一领域服务。MCP 负责协议与工具发现，能力层统一真实主体、role/scope/资源交集、参数校验、审批、幂等、审计和安全结果；不直接包装助手 execute 并伪造 session/admin。首期同进程模块部署，不新增微服务或队列。此为目标设计，当前主干没有 MCP 服务或对应外部授权。
+平台开放能力的总体目标覆盖完整业务，任务只是其中一个领域。采用“统一应用能力层 + MCP/Web HTTP/内置 AI 三种适配器”：外部 Codex、Claude 通过 Streamable HTTP MCP 调用，平台助手在进程内调用相同 Dispatcher，页面和普通程序通过 HTTP 复用同一领域服务。MCP 负责协议与工具发现，能力层统一真实主体、role/scope/资源交集、参数校验、审批、幂等、审计和安全结果；不直接包装助手 execute 并伪造 session/admin。首期同进程模块部署，不新增微服务或队列。SDD 047 已实现首批主机/任务工具、专用 PAT、OAuth 与接入管理，其他领域逐步迁移，不等于全部目标已完成。
 
 用户客户端授权采用 OAuth 2.1 授权码 + PKCE，独立 PAT 只作为支持 Bearer 配置客户端的补充；二者均不复用 SDK/Agent/SSH/模型凭据。首期安全读取与提案，操作在平台审阅；客户端弹窗或模型确认不代替审批。通用提案把 owner 与来源会话分开，已有助手历史权限保持。后续自动执行仅限管理员固定能力/版本、主机、参数界限与期限的持续授权。
 
 所有主机主动操作关联统一 execution ID，复用真实 task run、Agent job、部署、运维和生命周期回执；不同领域保留真实状态与恢复策略，unknown 不自动重放。遥测查询记调用审计，持续采样不逐条建任务；交互按独立会话协议留痕。长任务返回 ID，连接中断不等于取消。远端 MCP 不读取用户本地源码，本地 AI 负责本地文件，平台部署使用明确提交的版本/制品。任意 SQL 和脚本源码须额外数据授权，不能由主机范围 token 绕过资源隔离。
 
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md) 和 [SDD 046](../specs/046-platform-mcp/spec.md)。该设计不表示 MCP/OAuth 或统一外部工具已经实现。
+SDD 047 首期只开放安全目录、任务/执行状态及已有任务派发、取消、重试提案；不开放任意 SQL、任务定义修改、直接执行或自动批准。外部提案审批和排队项领取前复验稳定授权；OAuth 短期 access token 自然过期不取消已批准项。执行索引本期仅关联真实 task run，在接受/查询时投影，状态以原生记录为准。`/mcp-access` 管理自己的令牌、OAuth 授权与预注册客户端，`/mcp/authorize` 明确授权。使用官方 SDK 1.32.2 的 2025 协议；2026 适配尚未实现。externalURL 不满足 HTTPS origin/本机 HTTP origin 时仅禁用 MCP，不阻止原平台运行。尚未完成的 MCP 来源提案在审批授权适配器缺失时拒绝应用，不能通过内部助手 fallback 绕过原授权；外部排队项和自动重试保留稳定授权，领取前无校验器时拒绝开始。首期告警启用时共 10 个工具，平台默认任务与用户任务共用 list/get，移除独立模板目录。MCP 主机名称区分用户资产 name 与当前 Agent 的 observed_hostname，替换、移除或尚未上报时不回退旧缓存。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 
@@ -936,6 +938,7 @@ docker compose up -d --no-build --wait
 - 脚本创建与日历调度：[使用与设计](task-authoring.md)、[SDD 048](../specs/048-task-authoring-schedules/spec.md)
 - Mastra 助手：[SDD 001](../specs/001-mastra-assistant/spec.md)
 - 平台开放能力与 MCP 目标架构：[HLD/LLD](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)
+- 平台 MCP 首期实现：[SDD 047](../specs/047-platform-mcp-service/spec.md)、[接入指南](mcp.md)
 - 模型发现和协议：[SDD 002](../specs/002-model-discovery/spec.md)、[SDD 003](../specs/003-multi-protocol-models/spec.md)、[SDD 005](../specs/005-model-management/spec.md)
 - Agent、迁移和凭据：[SDD 006](../specs/006-execution-nodes/spec.md)、[SDD 007](../specs/007-node-runtime-migration/spec.md)、[SDD 010](../specs/010-agent-deployment/spec.md)
 - SDK 数据与模式：[SDD 010 telemetry](../specs/010-telemetry-table-model/spec.md)、[SDD 011](../specs/011-aligned-metric-windows/spec.md)、[SDD 012](../specs/012-sdk-reporting-choice/spec.md)
@@ -1206,7 +1209,7 @@ AI 工具 list_agent_releases、propose_agent_update、get_agent_update 只返�
 
 统一入口和记录保留底层执行策略：持续采集使用配置 revision；有限脚本使用租约与退出结果；服务部署使用分阶段健康回执；Agent 首装/升级使用 SSH 生命周期与独立维护确认。主机检查等短操作可同步返回执行结果，耗时任务异步返回执行 ID，均记录来源、授权和目标；交互式能力另用会话协议，关联授权、开始、结束及退出状态，不把每次按键拆成任务，也不将终端原始输出持久化或发送给模型。高频采样不逐条创建任务执行记录。首次安装尚无 Agent 可接收任务，仍通过 SSH。周期任务与单次任务均归属明确主机，结果未知不会被幂等重试偷偷重放。
 
-本轮交付 Agent 维护自身的计划、审批和完整结果 API；跨脚本、业务运维、Agent 生命周期的统一执行读模型、外部服务身份及 scope、自定义 typed action 注册表属于后续单独 SDD，本轮不将已有分散接口声称为统一外部任务 API。
+本轮交付 Agent 维护自身的计划、审批和完整结果 API；SDD 047 已交付用户主体的 MCP 专用 PAT/OAuth、role/scope 与主机范围授权，任务提案复用平台审批。跨脚本、业务运维、Agent 生命周期的完整统一执行读模型、服务主体及自定义 typed action 注册表仍属于后续单独 SDD，不将已有分散接口声称为完整统一外部任务 API。
 
 ## 33. 网站、DNS、证书与 Docker 服务托管（SDD 033）
 

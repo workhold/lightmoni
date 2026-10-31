@@ -1,0 +1,28 @@
+{
+  "test_fixture": "local in-memory platform with a temporary read-only PAT; revoked after validation",
+  "production_modified": false,
+  "claude_code": {
+    "version": "2.1.153",
+    "mode": "natural-language tool call",
+    "successful_host_calls": 1,
+    "exit_code": 0,
+    "audit_allowed_call_verified": true
+  },
+  "codex_app_server": {
+    "version": "0.165.0-alpha.1.2",
+    "mode": "mcpServerStatus/list and mcpServer/tool/call",
+    "inventory_tools": true,
+    "successful_host_calls": 1,
+    "returned_fixture": true,
+    "is_error": false
+  },
+  "codex_natural_language_exec": {
+    "version": "0.165.0-alpha.1.2",
+    "passed": false,
+    "reason": "Model service network reset/timeout; MCP natural-language round not completed"
+  },
+  "real_client_oauth_matrix": {
+    "verified": false,
+    "server_http_flow_tests_passed": true
+  }
+}

@@ -104,8 +104,11 @@ test('request timeout invalidates internal choice and independent discovery wait
         return new Promise((_r, reject) => { init?.signal?.addEventListener('abort', () => reject(init.signal.reason)); }); return new Response(JSON.stringify(responses(url))); };
     const endpoints = new CenterEndpoints('http://public', () => ({}), fetcher);
     t.after(() => endpoints.close());
+    // The fake fetch has no socket to keep the event loop alive for an unref'ed AbortSignal.timeout.
+    const timeout = new AbortController(), timer = setTimeout(() => timeout.abort(new DOMException('fixture request timeout', 'TimeoutError')), 10);
+    t.after(() => clearTimeout(timer));
     assert.equal(await endpoints.resolve(), 'http://internal');
-    await assert.rejects(endpoints.request('/v1/logs', { method: 'POST', signal: AbortSignal.timeout(10) }));
+    await assert.rejects(endpoints.request('/v1/logs', { method: 'POST', signal: timeout.signal }), { name: 'TimeoutError' });
     assert.equal(await endpoints.resolve(), 'http://public');
     const slow = new CenterEndpoints('http://public', () => ({}), async () => { await new Promise(r => setTimeout(r, 30)); return new Response('{}', { status: 404 }); });
     t.after(() => slow.close());

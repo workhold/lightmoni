@@ -1,0 +1,19 @@
+{
+  "status": "synchronized",
+  "spec": "047-platform-mcp-service",
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository_sections": [
+    "docs/system-design.md 14.4 与 25",
+    "docs/platform-mcp.md 当前实现与第16节"
+  ],
+  "before_seq": 806,
+  "readback_seq": 807,
+  "updated_blocks_verified": 6,
+  "inserted_blocks_verified": 8,
+  "unrelated_blocks_unchanged": 516,
+  "existing_native_diagrams_unchanged": 22,
+  "native_nodes_and_edges_preserved": true,
+  "text_and_links_verified": true,
+  "full_document_order_verified": true,
+  "native_visual_render_verified": false
+}

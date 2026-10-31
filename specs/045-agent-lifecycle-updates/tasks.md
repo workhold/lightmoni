@@ -20,7 +20,7 @@
 - [x] I003 升级 SSH 使用记录接入集中凭据，补充独立回归。
 - [x] I004 执行相关后端、类型/构建及界面 fixture，记录当前组合的验证结果。
 - [x] I005 主线程核对系统设计与 Doca 合并状态，保留最新回读证据。
-- [ ] I006 主线程发布集成分支、更新 PR 并按用户授权处理合入。
+- [x] I006 主线程发布集成源 head `62a00dc`，于 2026-10-31T06:18:17Z 按用户授权合入 [PR #21](https://github.com/workhold/lightmoni/pull/21)，主干 merge 为 `7f1506ce`。
 - [x] I007 自动重试维护 fence 不阻塞其他主机调度，补回归并重跑最终后端检查。
 
 本轮集成结果见 [integration-validation.md](integration-validation.md)。

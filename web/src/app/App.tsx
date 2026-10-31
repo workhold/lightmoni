@@ -14,6 +14,8 @@ import {navigationLinks} from './navigation';
 import SidebarNavigation from './SidebarNavigation';
 import {loginDestination,useDefaultHomepage} from './default-homepage';
 import './navigation.css';
+const McpAccessPage=lazy(()=>import('./McpAccessPage'));
+const McpAuthorizationPage=lazy(()=>import('./McpAccessPage').then(module=>({default:module.McpAuthorizationPage})));
 const AdminPage=lazy(()=>import('./AdminPage'));
 const DashboardPage=lazy(()=>import('../features/dashboards/DashboardPage'));
 const LogExplorePage=lazy(()=>import('../features/logs/LogExplorePage'));
@@ -39,8 +41,8 @@ export default function Root(){
  const[publishedScope,setPublishedScope]=useState<PublishedScope>();
  const activePath=(url:string)=>location.pathname===url||(url==='/machines'&&(location.pathname==='/agents'||location.pathname.startsWith('/agents/')))||(url!=='/'&&location.pathname.startsWith(url+'/'));
  const currentLink=navigationLinks.find(link=>activePath(link.path));
- const currentPage=currentLink?t(currentLink.pageLabel,currentLink.pageEnglish):t('监控工作台','Monitoring workspace');
- const contextPageTitle=currentLink?.pageLabel??'监控工作台';
+ const currentPage=location.pathname==='/mcp/authorize'?t('授权 MCP 客户端','Authorize MCP client'):currentLink?t(currentLink.pageLabel,currentLink.pageEnglish):t('监控工作台','Monitoring workspace');
+ const contextPageTitle=location.pathname==='/mcp/authorize'?'授权 MCP 客户端':currentLink?.pageLabel??'监控工作台';
  const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:contextPageTitle}}),[publishedScope,location.pathname,location.search,contextPageTitle]);
  const[navCollapsed,setNavCollapsed]=useState(()=>{try{const saved=localStorage.getItem('lightmoni.nav.collapsed');return saved===null?window.innerWidth<1100:saved==='true'}catch{return window.innerWidth<1100}});
  useEffect(()=>{const narrow=window.matchMedia('(max-width:680px)');const adapt=()=>{if(narrow.matches){setNavCollapsed(true);return;}try{const saved=localStorage.getItem('lightmoni.nav.collapsed');setNavCollapsed(saved===null?window.innerWidth<1100:saved==='true')}catch{setNavCollapsed(window.innerWidth<1100)}};adapt();narrow.addEventListener('change',adapt);return()=>narrow.removeEventListener('change',adapt)},[]);
@@ -67,6 +69,9 @@ export default function Root(){
     <Route path="/operations" element={<Navigate to="/clusters" replace/>}/>
     {["/clusters","/applications","/websites","/domains","/certificates"].map(path=><Route key={path} path={path} element={user.role==='admin'?<OperationsPage user={user}/>:<Navigate to="/settings" replace/>}/>)}
     <Route path="/applications/:id/monitoring" element={user.role==='admin'?<ApplicationMonitoring/>:<Navigate to="/settings" replace/>}/>
+    <Route path="/mcp-access" element={<McpAccessPage user={user}/>}/>
+    <Route path="/mcp/authorize" element={<McpAuthorizationPage user={user}/>}/>
+
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>
     <Route path="/admin" element={user.role==='admin'?<AdminPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/assistant" element={<AssistantPage/>}/>
@@ -80,6 +85,6 @@ export default function Root(){
     <Route path="/login" element={<Navigate to={homepage} replace/>}/>
     <Route path="*" element={<Navigate to={homepage} replace/>}/>
    </Routes></Suspense></div></main>
-  {location.pathname!=='/assistant'&&<Tooltip title={t('AI 助手 · 分析当前页面','AI assistant · Analyze this page')} placement="left"><Button className="lm-assistant-launcher" type="primary" shape="circle" size="large" icon={<MessageOutlined/>} aria-label={t('打开 AI 助手','Open AI assistant')} aria-expanded={assistant} onClick={()=>setAssistant(true)}/></Tooltip>}
+  {location.pathname!=='/assistant'&&location.pathname!=='/mcp/authorize'&&<Tooltip title={t('AI 助手 · 分析当前页面','AI assistant · Analyze this page')} placement="left"><Button className="lm-assistant-launcher" type="primary" shape="circle" size="large" icon={<MessageOutlined/>} aria-label={t('打开 AI 助手','Open AI assistant')} aria-expanded={assistant} onClick={()=>setAssistant(true)}/></Tooltip>}
   <Drawer title={t('AI 助手','AI assistant')} size="large" open={assistant} onClose={()=>setAssistant(false)} destroyOnHidden><Suspense fallback={<Spin/>}><AssistantPanel compact initialContext={currentContext}/></Suspense></Drawer></div></MonitoringScope.Provider>;
 }

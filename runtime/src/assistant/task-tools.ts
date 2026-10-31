@@ -14,7 +14,13 @@ interface Proposal {
   preview: unknown; reason: string; created_at: string; expires_at: string;
   review_url: string; applied_at?: string; result?: unknown;
 }
-interface Stored { owner_id: string; intent: Intent; fingerprint: string; proposal: Proposal }
+export interface ProposalSource {
+  source: "assistant" | "mcp" | "web";
+  session_id?: string;
+  grant_id?: string;
+  credential_id?: string;
+}
+interface Stored { owner_id: string; intent: Intent; fingerprint: string; proposal: Proposal; source?: ProposalSource }
 const stringify = (v: any): string => JSON.stringify(v, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
 const digest = (v: unknown) => createHash("sha256").update(stringify(v)).digest("hex");
@@ -62,19 +68,22 @@ const bounded = <T>(value: T, limit = 28 << 10): T => {
   return value;
 };
 const receiptCodes = new Set(["", "timeout", "output_limit", "cancel_requested", "control_lost", "runtime_unavailable", "script_failed",
-  "agent_restarted", "cancelled", "lease_expired", "queue_expired", "agent_binding_changed", "task_no_longer_eligible"]);
-const runMetadata = (run: any) => ({ ...Object.fromEntries([
+  "agent_restarted", "cancelled", "lease_expired", "queue_expired", "agent_binding_changed", "task_no_longer_eligible", "authorization_revoked"]);
+export const runMetadata = (run: any) => ({ ...Object.fromEntries([
   "id", "task_id", "task_name", "host_id", "host_name", "agent_id", "state", "trigger", "retry_of", "superseded_by",
   "requested_by", "created_at", "started_at", "finished_at", "cancel_requested", "exit_code", "resolved_at", "resolved_by",
 ].map(key => [key, run[key]])), code: receiptCodes.has(run.code) ? run.code : "agent_report" });
-const taskMetadata = ({ script, config: _config, ...task }: Task) => ({ ...task,
+export const taskMetadata = ({ script, config: _config, ...task }: Task) => ({ ...task,
   ...(script ? { script: { runtime: script.runtime, timeout_seconds: script.timeout_seconds,
     max_output_bytes: script.max_output_bytes, code_bytes: Buffer.byteLength(script.code), code_omitted: true } } : {}) });
 
 /** Only the human-facing apply route can commit these encrypted, owner-bound proposals. */
 export class TaskProposalService {
   readonly nodes: NodeStore;
-  constructor(readonly deps: Dependencies, readonly runs: TaskRunStore) {
+  constructor(readonly deps: Dependencies, readonly runs: TaskRunStore, readonly hooks: {
+    beforeApply?: (actor: Actor, source: ProposalSource, intent: Intent, proposal: Proposal) => void;
+    afterApply?: (actor: Actor, source: ProposalSource, intent: Intent, proposal: Proposal) => void;
+  } = {}) {
     this.nodes = runs.nodes;
     deps.db.exec("CREATE TABLE IF NOT EXISTS assistant_task_proposals(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,session_id TEXT NOT NULL,body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS assistant_task_audit(proposal_id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,operation TEXT NOT NULL,applied_at TEXT NOT NULL,receipt TEXT NOT NULL);");
   }
@@ -110,9 +119,16 @@ export class TaskProposalService {
     return stored;
   }
   get(actor: Actor, proposalID: string): Proposal { return convert(() => structuredClone(this.load(actor, proposalID).proposal)); }
+  source(actor: Actor, proposalID: string): ProposalSource | undefined { return this.load(actor, proposalID).source; }
   create(actor: Actor, sessionID: string, value: any): Proposal {
+    id(sessionID);
+    return this.createFrom(actor, { source: "assistant", session_id: sessionID }, value);
+  }
+  createFrom(actor: Actor, source: ProposalSource, value: any): Proposal {
     return convert(() => {
-      requireAdmin(actor); id(sessionID);
+      requireAdmin(actor);
+      if (source.source === "assistant") id(source.session_id);
+      if (source.source === "mcp" && !source.grant_id) throw new AssistantError(403, "缺少外部授权");
       object(value, ["operation", "task_id", "run_id", "task", "host_ids", "reason"], ["operation", "reason"]);
       if (!["task.create", "task.update", "task.dispatch", "run.cancel", "run.retry"].includes(value.operation)
         || typeof value.reason !== "string" || !value.reason.trim() || value.reason.length > 1000) throw new AssistantError(400, "请提供任务操作和原因");
@@ -149,8 +165,8 @@ export class TaskProposalService {
         status: "awaiting_approval", before, after, preview: state, reason: intent.reason.trim(), created_at: now.toISOString(),
         expires_at: new Date(now.getTime() + 15 * 60_000).toISOString(), review_url: "/machines?tab=tasks&proposal=" + encodeURIComponent(proposalID) };
       bounded(proposal, 512 << 10);
-      const stored: Stored = { owner_id: actor.id, intent, fingerprint: digest(state), proposal };
-      this.deps.db.run("INSERT INTO assistant_task_proposals(id,owner_id,session_id,body) VALUES(?,?,?,?)", proposalID, actor.id, sessionID, this.deps.encrypt(JSON.stringify(stored)));
+      const stored: Stored = { owner_id: actor.id, intent, fingerprint: digest(state), proposal, source: structuredClone(source) };
+      this.deps.db.run("INSERT INTO assistant_task_proposals(id,owner_id,session_id,body) VALUES(?,?,?,?)", proposalID, actor.id, source.session_id ?? "", this.deps.encrypt(JSON.stringify(stored)));
       return structuredClone(proposal);
     });
   }
@@ -158,6 +174,9 @@ export class TaskProposalService {
     return convert(() => this.deps.db.transaction(() => {
       const saved = this.load(actor, proposalID), { intent, proposal } = saved;
       if (proposal.status === "completed") return structuredClone(proposal);
+      if (saved.source?.source === "mcp" && (!this.hooks.beforeApply || !this.hooks.afterApply))
+        throw new AssistantError(503, "外部授权校验不可用，请恢复 MCP 配置后重试");
+      if (saved.source) this.hooks.beforeApply?.(actor, saved.source, intent, proposal);
       if (Date.parse(proposal.expires_at) <= this.deps.now().getTime()) throw new AssistantError(409, "任务提案已过期，请重新生成");
       if (digest(this.state(intent, intent.task as Task)) !== saved.fingerprint) throw new AssistantError(409, "任务、目标主机或执行状态已变化，请重新生成提案");
       let result: unknown;
@@ -168,6 +187,7 @@ export class TaskProposalService {
         case "run.retry": result = runMetadata(this.runs.retry(intent.run_id!, actor.id, true)); break;
       }
       saved.proposal = { ...proposal, status: "completed", applied_at: this.deps.now().toISOString(), result };
+      if (saved.source) this.hooks.afterApply?.(actor, saved.source, intent, saved.proposal);
       this.deps.db.run("UPDATE assistant_task_proposals SET body=? WHERE id=? AND owner_id=?", this.deps.encrypt(JSON.stringify(saved)), proposalID, actor.id);
       const audit = intent.operation === "task.create" || intent.operation === "task.update" ? taskMetadata(result as Task) : result;
       this.deps.db.run("INSERT INTO assistant_task_audit(proposal_id,actor_id,operation,applied_at,receipt) VALUES(?,?,?,?,?)", proposalID, actor.id, proposal.operation, saved.proposal.applied_at, this.deps.encrypt(JSON.stringify(audit)));

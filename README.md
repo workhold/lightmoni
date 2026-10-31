@@ -8,7 +8,7 @@
 >
 > 该文档按 SDD 方式维护，集中说明驱动目标、HLD、LLD、数据流、协议、凭据安全、部署、AI/Agent 联动、当前限制和演进路线。本文 README 保留部署和快速上手，系统级设计以该基线及其关联 SDD 为准。
 
-外部 Codex/Claude 与平台 AI 共用能力的 MCP 目标架构见 [平台开放能力与 MCP](docs/platform-mcp.md)：统一能力、授权、提案与执行记录；本轮为设计提案，MCP/OAuth 服务尚未实现。
+外部 Codex/Claude 与平台 AI 共用能力的架构见 [平台开放能力与 MCP](docs/platform-mcp.md)。首批主机/任务查询与操作提案、独立令牌、OAuth 授权和接入管理已实现，使用方法及当前边界见 [MCP 接入指南](docs/mcp.md)。
 
 中心与LightMoni Agent均由Node.js / TypeScript实现，公共协议位于`runtime/src/shared`。SDK和中心上报采用本地通用打点与固定窗口方案，主机管理、SSH终端、Agent注册和control/data凭据、AI助手、告警与界面语言采用最新main；本次取舍见[整合说明](specs/011-aligned-metric-windows/main-integration.md)。
 

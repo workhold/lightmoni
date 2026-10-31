@@ -42,7 +42,7 @@ export function useDefaultHomepage(user:HomepageUser|null){
 
 export function isPageDeepLink(pathname:string):boolean{
  // Segment boundaries keep similarly named unknown paths out of login redirects.
- return pathname==='/agents'||pathname.startsWith('/agents/')||navigationLinks.some(link=>pathname===link.path||pathname.startsWith(link.path+'/'))
+ return pathname==='/mcp/authorize'||pathname==='/agents'||pathname.startsWith('/agents/')||navigationLinks.some(link=>pathname===link.path||pathname.startsWith(link.path+'/'))
   ||/^\/(a|traces)\/[^/]+\/?$/.test(pathname);
 }
 

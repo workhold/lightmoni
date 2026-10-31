@@ -51,7 +51,9 @@ test('request timeout invalidates internal choice and independent discovery wait
  const responses=(url:string)=>url.endsWith('center-endpoints')?{version:1,center_id:'one',revision:'one',endpoints:[{url:'http://internal',scope:'internal'},{url:'http://public',scope:'public'}]}:{center_id:'one'};
  const fetcher:typeof fetch=async(input,init)=>{const url=String(input);if(url.includes('/v1/logs'))return new Promise((_r,reject)=>{init?.signal?.addEventListener('abort',()=>reject(init.signal!.reason));});return new Response(JSON.stringify(responses(url)));};
  const endpoints=new CenterEndpoints('http://public',()=>({}),fetcher);t.after(()=>endpoints.close());
- assert.equal(await endpoints.resolve(),'http://internal');await assert.rejects(endpoints.request('/v1/logs',{method:'POST',signal:AbortSignal.timeout(10)}));assert.equal(await endpoints.resolve(),'http://public');
+ // The fake fetch has no socket to keep the event loop alive for an unref'ed AbortSignal.timeout.
+ const timeout=new AbortController(),timer=setTimeout(()=>timeout.abort(new DOMException('fixture request timeout','TimeoutError')),10);t.after(()=>clearTimeout(timer));
+ assert.equal(await endpoints.resolve(),'http://internal');await assert.rejects(endpoints.request('/v1/logs',{method:'POST',signal:timeout.signal}),{name:'TimeoutError'});assert.equal(await endpoints.resolve(),'http://public');
  const slow=new CenterEndpoints('http://public',()=>({}),async()=>{await new Promise(r=>setTimeout(r,30));return new Response('{}',{status:404});});t.after(()=>slow.close());
  const waiting=slow.resolve();await assert.rejects(slow.resolve(AbortSignal.timeout(5)));assert.equal(await waiting,'http://public');
 });

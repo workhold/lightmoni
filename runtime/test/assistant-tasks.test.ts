@@ -26,6 +26,24 @@ function fixture(t: any) {
 }
 const dispatch = { operation: "task.dispatch", task_id: "fixture-task", reason: "Run the reviewed fixture" };
 
+test("pending external proposals fail closed without both authorization adapters while internal approval remains available", t => {
+  const f = fixture(t);
+  const external = f.proposals.createFrom(admin, { source: "mcp", grant_id: "fixture-grant" }, dispatch);
+  for (const hooks of [{}, { beforeApply() {} }, { afterApply() {} }]) {
+    const unguarded = new TaskProposalService(f.deps, f.runs, hooks);
+    assert.throws(() => unguarded.apply(admin, external.id), error =>
+      (error as any).status === 503 && /外部授权校验不可用/.test((error as Error).message));
+    assert.equal(f.proposals.get(admin, external.id).status, "awaiting_approval");
+    assert.equal(f.runs.list().length, 0);
+    assert.equal(f.db.get<any>("SELECT count(*) n FROM assistant_task_audit")!.n, 0);
+  }
+  const internal = f.proposals.create(admin, "session", dispatch);
+  assert.equal(f.proposals.apply(admin, internal.id).status, "completed");
+  assert.equal(f.runs.list().length, 1);
+  assert.equal(f.proposals.apply(admin, internal.id).status, "completed");
+  assert.equal(f.runs.list().length, 1);
+});
+
 test("AI calendar script creation uses the same reviewed definition as manual tasks and does not execute on drafting", async t => {
   const f = fixture(t), tool = f.tools.find(tool => tool.name === "propose_task_action")!;
   const definition = {...f.definition, name:"Daily backup", schedule:{mode:"cron",cron:"0 2 * * *",timezone:"Asia/Shanghai"},
@@ -191,6 +209,14 @@ test("the real assistant HTTP approval route requires an administrator and expli
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
   try {
     const p = f.proposals.create(admin, "session", dispatch), path = base + "/api/v1/assistant/task-proposals/" + p.id;
+    const external = f.proposals.createFrom(admin, { source: "mcp", grant_id: "fixture-grant" }, dispatch);
+    const rejected = await fetch(base + "/api/v1/assistant/task-proposals/" + external.id + "/apply", {
+      method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ confirm: true }),
+    });
+    assert.equal(rejected.status, 503);
+    assert.match((await rejected.json() as any).error, /外部授权校验不可用/);
+    assert.equal(f.proposals.get(admin, external.id).status, "awaiting_approval");
+    assert.equal(f.runs.list().length, 0);
     let response = await fetch(path);
     assert.equal(response.status, 200); assert.equal((await response.json() as any).status, "awaiting_approval");
     const apply = (input: any) => fetch(path + "/apply", { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify(input) });
