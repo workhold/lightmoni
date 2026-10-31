@@ -1,0 +1,10 @@
+{
+  "revision": "6dae46ce1aeb511e2af2d3815191524cf095a6a8",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tag": "20261031-6dae46c",
+  "previous_latest": "sha256:d5961baaf8c85de05b0385d5b268debe133467b16a9b346d9f05836398278069",
+  "architecture_sync": "feature architecture synced in PR 36 / SDD 056; packaging adds no new paths",
+  "feature_prs": [
+    36
+  ]
+}

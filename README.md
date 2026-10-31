@@ -18,7 +18,7 @@
 
 ## Docker Compose 部署
 
-根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261031-c209a18`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。镜像版本由仓库维护，无需在 `.env` 指定；旧 `LIGHTMONI_IMAGE` 值不再覆盖它。中心以非 root 用户运行。
+根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261031-6dae46c`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。镜像版本由仓库维护，无需在 `.env` 指定；旧 `LIGHTMONI_IMAGE` 值不再覆盖它。中心以非 root 用户运行。
 
 首次获取源码：
 

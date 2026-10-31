@@ -1,6 +1,6 @@
 # Docker 更新与回滚
 
-根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261031-c209a18`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
+根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261031-6dae46c`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
 
 ## 更新
 
@@ -18,7 +18,7 @@ docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/
 
 通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对镜像提交；随后检查网页、原有管理员登录、只读查询和 SDK/Agent 下载。需要 `up` 重新创建容器才能切换镜像；本地 `npm run build`、`release:sdk` 和 `release:agent` 只更新本地生成物。
 
-`20261031-c209a18` 从已合入 PR #33/#34 的 `c209a1853610e951709adf8ff8053167a2aec293` 在本机完整重建：证书创建后异步申请并提供 ACME/DNS 步骤日志；网站缺少 OpenResty 时直接引导安装，应用与网站只在集群字段旁提供管理跳转。镜像同时包含该主干提交已有的全部功能。固定标签与 `latest` 指向同一双架构索引 `sha256:d5961baaf8c85de05b0385d5b268debe133467b16a9b346d9f05836398278069`。旧 `.env` 中的 `LIGHTMONI_IMAGE` 可删除，不再影响此入口；单独拉取不会更新运行实例，仍需执行 `up`。旧固定标签保留供回退，当前发布与验收见 [SDD 055](../../specs/055-main-image-release/validation.md)，[SDD 052](../../specs/052-merged-main-image-release/validation.md) 和 [SDD 028](../../specs/028-local-image-release/validation.md) 保留历史发布记录。
+`20261031-6dae46c` 从已合入 PR #36 的 `6dae46ce1aeb511e2af2d3815191524cf095a6a8` 在本机完整重建：证书行和详情可查看公开 PEM、域名、有效期和指纹，并按固定版本下载证书、中间链、完整链与私钥；失效 ACME 订单展示可用的授权挑战原因。已有异步申请日志、OpenResty 安装引导和按需集群管理入口一并保留。固定标签与 `latest` 的双架构摘要、实际容器与下载核对见 [SDD 056 发布验收](../../specs/056-acme-invalid-order-diagnostics/release-validation.md)。旧 `.env` 中的 `LIGHTMONI_IMAGE` 可删除，不再影响此入口；单独拉取不会更新运行实例，仍需执行 `up`。旧固定标签保留供回退，[SDD 055](../../specs/055-main-image-release/validation.md)、[SDD 052](../../specs/052-merged-main-image-release/validation.md) 和 [SDD 028](../../specs/028-local-image-release/validation.md) 保留历史发布记录。
 
 中心镜像更新不会自动更新已安装的 Agent。需要使用新运维能力的节点应单独升级 Agent，并按[运维手册](../../docs/operations.md)准备 Nginx、Docker/Compose 等所需依赖及目录、服务权限；不能仅凭 capability 出现就认定节点已有执行权限。公网 ACME 与真实 S3 等未验收范围仍以 [SDD 026](../../specs/026-operations-platform/validation.md)为准。
 
