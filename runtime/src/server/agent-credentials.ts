@@ -107,6 +107,8 @@ export interface AgentEnrollmentInput {
   machine_id: string;
   /** The exact retired identity reviewed in the installation plan. */
   previous_agent_id?: string;
+  /** Internal installation attempt; created and bound in the same transaction. */
+  deployment_id?: string;
 }
 
 export interface AgentEnrollmentIssued {
@@ -226,9 +228,11 @@ export function registerAgentCredentials(
     const endpointOrigin = origin(input.endpoint_origin ?? deps.externalURL);
     const machineID = asString(input.machine_id, 64, "machine_id");
     const previousAgentID = input.previous_agent_id == null || input.previous_agent_id === "" ? "" : asString(input.previous_agent_id, 256, "previous_agent_id");
+    const deploymentID = input.deployment_id == null ? "" : asString(input.deployment_id,64,"deployment_id");
     db.transaction(() => {
       const machine = db.get<{agent_id:string}>("SELECT agent_id FROM managed_machines WHERE id=?", machineID);
       if (!machine || machine.agent_id !== previousAgentID || !replaceableAgentBinding(db, machine.agent_id, iso(created))) fail(409, "安装目标主机不存在、Agent 身份已变化或尚未撤销");
+      if (deploymentID && !db.get("SELECT id FROM machine_deployments WHERE id=? AND machine_id=? AND status='running' AND execution_stage='enrollment_issuing' AND resolved_at=''",deploymentID,machineID)) fail(409,"安装记录已进入恢复流程，禁止旧请求签发身份");
       db.run(
         `INSERT INTO agent_enrollments(id,token_hash,endpoint_origin,allowed_arch_json,version,initial_label_id,scopes_json,status,expires_at,created_at,created_by,machine_id,replaces_agent_id)
          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -246,6 +250,7 @@ export function registerAgentCredentials(
         machineID,
         machine.agent_id,
       );
+      if (deploymentID) db.run("UPDATE machine_deployments SET enrollment_id=?,execution_stage='enrollment_issued' WHERE id=?",idValue,deploymentID);
     });
     return {
       enrollment_id: idValue,

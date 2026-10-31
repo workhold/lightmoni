@@ -3,7 +3,7 @@ export type BatchAction='ssh_check'|'install'|'uninstall'|'remove_node'|'delete_
 export type BatchMachine={default_credential_id?:string;id:string;name:string;address:string;port:number;agent_id:string;agent_status:string;connection_method:string;host_key_status:string;username?:string;capabilities?:Record<string,{available:boolean;reason:string}>};
 export type BatchTarget={id:string;name:string;address?:string;port?:number;machine?:BatchMachine;agent?:{id:string;hostname:string;lifecycle_state?:'active'|'removed'}};
 export type BatchCredential={is_default?:boolean;name?:string;id:string;method:string;expires_at:string;secret_fingerprint?:string;revoked_at?:string;secret_cleared_at?:string;retention?:string};
-export type BatchPlan={id:string;status:string;error?:string;plan?:{machine?:BatchMachine;agent_id?:string;credential?:{id:string;method:string;expires_at:string};check_id?:string;expires_at:string;version?:string;arch?:string;steps?:string[];warnings?:string[];retained_paths?:string[];removed_paths?:string[]};receipt?:Record<string,unknown>};
+export type BatchPlan={id:string;status:string;resolved_at?:string;error?:string;plan?:{machine?:BatchMachine;agent_id?:string;credential?:{id:string;method:string;expires_at:string};check_id?:string;expires_at:string;version?:string;arch?:string;steps?:string[];warnings?:string[];retained_paths?:string[];removed_paths?:string[]};receipt?:Record<string,unknown>};
 export type BatchDetail={machine:BatchMachine;credentials:BatchCredential[];deployments?:BatchPlan[];uninstallations?:BatchPlan[]};
 export type BatchStatus='pending'|'processing'|'success'|'failed'|'not_applicable'|'unknown';
 
@@ -28,17 +28,17 @@ export function batchUnavailableReason(action:BatchAction,target:BatchTarget,det
   if(machine.agent_id&&!['removed','uninstalled'].includes(machine.agent_status))return 'active_agent';
   if(!detail)return '';
   if(detail.credentials.some(credential=>activeBatchCredential(credential)))return 'active_credentials';
-  if(detail.deployments?.some(plan=>['awaiting_approval','running'].includes(plan.status)))return 'deployment_pending';
+  if(detail.deployments?.some(plan=>!plan.resolved_at&&['awaiting_approval','running','unknown'].includes(plan.status)))return 'deployment_pending';
   if(detail.uninstallations?.some(plan=>['awaiting_approval','running','unknown'].includes(plan.status)))return 'uninstallation_pending';
   return '';
  }
  if(machine.connection_method!=='direct_ssh')return 'direct_ssh_required';
- if(action==='install'&&machine.agent_id)return 'agent_already_installed';
+ if(action==='install'&&!machine.capabilities?.deploy_agent&&machine.agent_id&&!['removed','uninstalled'].includes(machine.agent_status))return 'agent_already_installed';
  if(action==='uninstall'&&!machine.agent_id)return 'agent_not_linked';
  const capability=machine.capabilities?.[action==='install'?'deploy_agent':action==='uninstall'?'uninstall_agent':'ssh_check'];
  if(capability&&!capability.available)return capability.reason||'unavailable';
  if(detail){
-  if(action!=='ssh_check'&&detail.deployments?.some(plan=>['awaiting_approval','running'].includes(plan.status)))return 'deployment_pending';
+  if(action!=='ssh_check'&&detail.deployments?.some(plan=>!plan.resolved_at&&['awaiting_approval','running','unknown'].includes(plan.status)))return 'deployment_pending';
   if(action!=='ssh_check'&&detail.uninstallations?.some(plan=>['awaiting_approval','running','unknown'].includes(plan.status)))return 'uninstallation_pending';
   if(!batchCredentials(action,detail.credentials).length)return action==='ssh_check'?'ssh_credential_required':'reusable_ssh_credential_required';
  }

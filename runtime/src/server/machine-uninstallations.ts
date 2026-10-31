@@ -6,12 +6,14 @@ import { agentProbeCommand, agentUninstallCommand, parseAgentProbe, retainedAgen
 import type { MachineSummary, SSHCheckResult } from "./managed-machines.js";
 import type { SSHRunner } from "./machine-ssh.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 export type UninstallationStatus = "awaiting_approval" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
 interface Access {
   get(id: string): MachineSummary; idle(id: string): void; revision(machine: MachineSummary): string;
   checked(machine: MachineSummary, checkID: string, credentialID?: string): SSHCheckResult;
   credential(machineID: string, credentialID?: string): { machine: MachineSummary; credential: any };
   authentication(machineID: string, credential: any): { privateKey: string; password?: string };
+  markCredentialUsed(credentialID: string): void;
   busy: Set<string>; runner: SSHRunner;
   safe(handler: Handler): Handler;
 }
@@ -56,7 +58,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
   };
   const probe = async (machine: MachineSummary, credential: any, signal: AbortSignal) => {
     const output = await access.runner({ machine, ...access.authentication(machine.id, credential), command: agentProbeCommand(), signal, port: machine.port, timeoutMs: 60_000 });
-    db.run("UPDATE machine_credentials SET last_used_at=? WHERE id=?", at(), credential.id);
+    access.markCredentialUsed(credential.id);
     return parseAgentProbe(output.stdout);
   };
   const assertObservation = (machine: MachineSummary, observation: ReturnType<typeof parseAgentProbe>, expectedID?: string) => {
@@ -92,7 +94,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
   router.post(base + "/plan", access.safe(async ctx => {
     deps.auth.requireAdmin(ctx); const input = await body(ctx, ["check_id", "credential_id"]);
     access.idle(ctx.params.id); assertFree(ctx.params.id);
-    if (db.get("SELECT id FROM machine_deployments WHERE machine_id=? AND status IN ('awaiting_approval','running') LIMIT 1", ctx.params.id)) fail(409, "请先完成或取消 Agent 安装计划");
+    assertNoPendingMachineInstallation(db,ctx.params.id,"",true);
     const { machine, credential } = access.credential(ctx.params.id, input.credential_id);
     const check = access.checked(machine, input.check_id, credential.id);
     access.busy.add(machine.id);
@@ -122,6 +124,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     if (input.confirm !== true) fail(400, "必须明确确认卸载计划");
     access.idle(ctx.params.id);
     const operation = row(ctx.params.id, ctx.params.uninstallationId), plan = JSON.parse(operation.plan_json);
+    assertNoPendingMachineInstallation(db,operation.machine_id,operation.agent_id,true);
     if (operation.status !== "awaiting_approval") fail(409, "卸载计划已执行或结果待核对，不能重复执行");
     if (!Number.isFinite(Date.parse(plan.expires_at)) || Date.parse(plan.expires_at) <= deps.now().getTime()) fail(409, "卸载计划已过期，请取消并重新检查");
     const machine = assertPlanTarget(operation), { credential } = access.credential(machine.id, operation.credential_id);
@@ -136,6 +139,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
       if (!changed.changes) fail(409, "卸载计划已被其他请求执行");
       destructive = true;
       const result = await access.runner({ machine, ...access.authentication(machine.id, credential), command: agentUninstallCommand(operation.agent_id), signal: ctx.signal, port: machine.port, timeoutMs: 120_000 });
+      access.markCredentialUsed(credential.id);
       const removed = parseAgentProbe(result.stdout);
       complete(operation, removed);
       ctx.json(decode(row(machine.id, operation.id)));

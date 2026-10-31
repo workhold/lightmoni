@@ -480,10 +480,9 @@ for (const old of ["node", "go"] as const)
       assert.equal(f.state().restarts, 2);
       assert(f.state().active);
       assert(f.state().enabled);
-      assert.deepEqual(
-        readdirSync(join(f.root, "opt/lightmoni-agent/releases")),
-        old === "node" ? ["old"] : [],
-      );
+      const releases = join(f.runtimeParent, "releases");
+      if (old === "node") assert.deepEqual(readdirSync(releases), ["old"]);
+      else assert.equal(existsSync(releases), false, "rollback removes only its newly created empty releases directory");
     },
   );
 test("restart rollback keeps a previously inactive service stopped", (t) => {
@@ -503,6 +502,23 @@ test("first-install restart failure removes new live files and does not claim in
   assert.equal(f.state().active, false);
   assert.equal(f.state().enabled, false);
   assert.equal(f.state().restarts, 1);
+});
+
+test("a rolled-back fresh install on an empty host can be attempted again without stale program directories", t => {
+  const f = fixture(t, { old: "none", active: false, failRestart: true });
+  // The general fixture starts with retained data; this case is a genuinely empty host.
+  rmSync(f.data, { recursive: true, force: true });
+  rmSync(f.runtimeParent, { recursive: true, force: true });
+  const first = f.run(["--fresh"]);
+  assert.notEqual(first.status, 0);
+  assert.match(first.stderr, /restart/);
+  for (const path of [f.config, join(f.data, "identity.json"), f.current, f.launcher, f.service, f.runtimeParent])
+    assert.equal(existsSync(path), false, path);
+  const again = f.run(["--fresh"]);
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Agent installed/);
+  assert.equal(f.state().activations, 2, "a safe retry must reach installation rather than reject its own empty directories");
+  assert.equal(f.state().active, true);
 });
 
 

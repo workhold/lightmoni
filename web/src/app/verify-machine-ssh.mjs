@@ -35,6 +35,7 @@ async function harness({role='admin',language='zh-CN'}={}){
   const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();
   if(url.origin!==origin){unexpected.push(url.href);return route.abort()}
   if(path.startsWith('/api/')){
+   if(method==='GET'&&/^\/api\/v1\/machines\/[^/]+\/agent-updates$/.test(path))return route.fulfill({json:[]});
    if(method==='GET'&&['/api/v1/agents','/api/v1/agent-task-labels','/api/v1/host-labels','/api/v1/connection-credentials','/api/v1/task-hosts'].includes(path))return route.fulfill({json:[]});
    if(method==='GET'&&/^\/api\/v1\/machines\/[^/]+\/tasks$/.test(path))return route.fulfill({json:[]});
    const body=request.postData()?request.postDataJSON():undefined;state.requests.push({method,path,body});

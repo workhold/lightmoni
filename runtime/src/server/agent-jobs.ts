@@ -4,6 +4,7 @@ import type { Context, Dependencies, Handler, Module } from "../shared/types.js"
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import { assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
 import { assertNoPendingAgentUpdate, hasPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import { assertNoPendingMachineInstallation, hasInstallationTable, pendingMachineInstallation, unresolvedInstallationSQL } from "./machine-installations-guard.js";
 
 /**
  * Durable, pull based execution jobs.  A job is immutable after enqueue: the
@@ -289,17 +290,20 @@ export function registerAgentJobs(
     const actionList = actions(input.actions), caps = capabilities(input.capabilities ?? []);
     const existing = db.get<any>("SELECT * FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deploymentID, operationID);
     if (existing) return view(existing);
+    assertNoPendingMachineInstallation(db,"",agentID);
     assertNoPendingAgentUpdate(db, agentID);
     if (uninstallBlocked(agentID)) fail(409, "agent_uninstallation_blocks_jobs");
     const now = deps.now(), expires = new Date(now.getTime() + Math.min(Math.max(input.expiresInSeconds ?? JOB_SECONDS, 60), 24 * 60 * 60) * 1000), idValue = id();
     const lifecycleTable = Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_uninstallations'"));
     const updateTable = Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_agent_updates'"));
+    const installationTable = hasInstallationTable(db);
     const inserted = db.run(
-      "INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,target_json,issued_at,expires_at,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed')" + (lifecycleTable ? " AND NOT EXISTS (SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown','succeeded'))" : "") + (updateTable ? " AND NOT EXISTS (SELECT id FROM machine_agent_updates WHERE agent_id=? AND status IN ('awaiting_approval','running','verifying','unknown'))" : ""),
-      idValue, agentID, deploymentID, operationID, "queued", json(caps), json(actionList), json(input.target ?? {}), iso(deps, now), iso(deps, expires), iso(deps, now), iso(deps, now), agentID, ...(lifecycleTable ? [agentID] : []), ...(updateTable ? [agentID] : []),
+      "INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,target_json,issued_at,expires_at,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed')" + (lifecycleTable ? " AND NOT EXISTS (SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown','succeeded'))" : "") + (updateTable ? " AND NOT EXISTS (SELECT id FROM machine_agent_updates WHERE agent_id=? AND status IN ('awaiting_approval','running','verifying','unknown'))" : "") + (installationTable ? ` AND NOT EXISTS (SELECT 1 FROM machine_deployments installation JOIN managed_machines installed_host ON installed_host.id=installation.machine_id WHERE installed_host.agent_id=? AND ${unresolvedInstallationSQL(db,"installation")})` : ""),
+      idValue, agentID, deploymentID, operationID, "queued", json(caps), json(actionList), json(input.target ?? {}), iso(deps, now), iso(deps, expires), iso(deps, now), iso(deps, now), agentID, ...(lifecycleTable ? [agentID] : []), ...(updateTable ? [agentID] : []), ...(installationTable ? [agentID] : []),
     );
     if (!inserted.changes) {
       assertAgentActive(db, agentID);
+      assertNoPendingMachineInstallation(db,"",agentID);
       assertNoPendingAgentUpdate(db, agentID);
       fail(409, "agent_uninstallation_blocks_jobs");
     }
@@ -313,6 +317,7 @@ export function registerAgentJobs(
     expireLeases();
     return db.transaction(() => {
     assertAgentActive(db, agentID);
+    if (pendingMachineInstallation(db,"",agentID)) return null;
     if (hasPendingAgentUpdate(db, agentID)) return null;
     const at = deps.now(), nowText = iso(deps, at);
     // A node has one execution lane, including when two runner processes poll.

@@ -5,6 +5,7 @@ import { hash, id, token } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Dependencies, Handler, Module } from "../shared/types.js";
 import { hasActiveTaskRuns } from "./agent-hosts.js";
+import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import { assertAgentActive } from "./agent-lifecycle.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import type { MachineSummary } from "./managed-machines.js";
@@ -106,6 +107,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   const taskBusy = (machineID: string, agentID: string) => hasActiveTaskRuns(db, agentID, machineID)
     || table("agent_jobs") && Boolean(db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID));
   const assertTarget = (machine: MachineSummary) => {
+    assertNoPendingMachineInstallation(db,machine.id,machine.agent_id,true);
     if (!machine.agent_id) fail(409, "主机尚未安装 Agent，请先部署");
     assertAgentActive(db, machine.agent_id);
     if (!options.credentials?.has(machine.agent_id, "control")) fail(409, "主机没有有效的 Agent 控制凭据");
