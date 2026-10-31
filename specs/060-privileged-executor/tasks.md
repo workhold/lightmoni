@@ -6,8 +6,8 @@
 - [x] 调研 Cockpit、1Panel 与 Docker socket proxy 并给出取舍。
 - [x] 完成需求、HLD/LLD、目标契约、分期与验收清单。
 - [x] 完成独立设计评审和文档检查。
-- [ ] 同步仓库系统设计与 Doca 原生图，最新版本回读并保留证据。
-- [ ] 创建 GitHub 设计 PR，明确未实现状态。
+- [x] 同步仓库系统设计与 Doca 原生图，最新版本回读并保留证据。
+- [x] 创建 GitHub 设计 PR，明确未实现状态（[#47](https://github.com/workhold/lightmoni/pull/47)）。
 
 ## 后续实现（未开始）
 

@@ -20,4 +20,8 @@
 
 ## Doca
 
-同步目标：[LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。保存及最新版本回读证据将在 `doca-sync.json` 记录；未取得回读证据前不声称同步成功。不把结构回读当成浏览器视觉验收。
+同步目标：[LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。从902保存到903，最新版本回读验证37个新增块；两张原生图分别为9节点/9连线、10节点/10连线，文字、节点、连线与几何一致。原有626个块、31张原生图和原内容顺序全部保持不变，包括其他开发中的章节。
+
+无秘密证据见 [doca-sync.json](doca-sync.json)。未执行浏览器视觉验收，不将结构回读说成视觉通过。Doca MCP context与运行时凭据会话已关闭。
+
+设计 PR：[#47](https://github.com/workhold/lightmoni/pull/47)，未合入；实现任务保持未完成。
