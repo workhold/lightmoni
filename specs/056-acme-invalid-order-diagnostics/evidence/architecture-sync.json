@@ -1,0 +1,15 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository_sections": ["docs/system-design.md#33.5", "docs/system-design.md#33.6"],
+  "impact": "Administrator browser certificate viewing and explicit immutable-version certificate/private-key export; encrypted storage, normal resource redaction and AI/tool boundary retained",
+  "save_confirmed": true,
+  "saved_seq": 889,
+  "readback_resource_version": 890,
+  "paragraphs": ["ops033-body-5", "ops033-body-6"],
+  "readback_matched": true,
+  "preserved_native_diagrams": [
+    {"id":"ops033-control-plane-native","full_block_unchanged":true,"nodes":11,"edges":14},
+    {"id":"certificate053-flow","full_block_unchanged":true,"nodes":12,"edges":12}
+  ],
+  "unrelated_blocks": "Only two existing paragraphs edited; no structural, diagram or unrelated changes"
+}

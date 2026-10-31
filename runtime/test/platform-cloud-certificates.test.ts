@@ -878,6 +878,95 @@ test("an invalid ACME order retains its problem detail and is retired before a m
   const run=await f.controller.perform(cert,'issue',{},'admin');
   assert.equal(run.state,'failed');assert.equal(run.result.code,'acme_order_invalid');assert.equal(run.result.phase,'get_order');assert.match(run.result.message,/CA policy rejects/);
   assert.equal(run.result.error_type,'urn:ietf:params:acme:error:rejectedIdentifier');assert.equal(f.db.get<any>('SELECT state FROM ops_acme_orders')!.state,'invalid');
+  assert.deepEqual(f.store.runEvents(run.id).filter(event=>event.phase==='get_order').map(event=>event.state),['running','failed']);
+});
+
+function invalidOrderFixture(t: any, overrides: Record<string, any> = {}, names = ['example.test']) {
+  let created = 0;
+  const f = setup(t, undefined, {acmeClientFactory:()=>({
+    createAccount:async()=>({}),getAccountUrl:()=> 'https://ca.example.test/account/invalid',
+    createOrder:async()=>({url:'https://ca.example.test/order/new-'+(++created),status:'pending'}),
+    getOrder:async(order:any)=>({...order,status:'invalid',authorizations:['https://ca.example.test/auth/invalid']}),
+    getAuthorizations:async()=>[],...overrides,
+  })});
+  const cred=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'invalid-order-key-id',access_key_secret:'invalid-order-key-secret'},'admin');
+  const zone=f.store.create('dns_zone','Zone',{domain:'example.test',credential_id:cred.id},'admin');
+  const account=f.store.create('acme_account','ACME',{email:'ops@example.test',directory_url:'letsencrypt-staging',terms_agreed:true},'admin');
+  const cert=f.store.create('certificate','Invalid authorization',{source:'acme',domains:names,acme_account_id:account.id,dns_zone_ids:[zone.id]},'admin');
+  f.db.run('INSERT INTO ops_acme_orders VALUES(?,?,?,?,?,?,?,?)','cached-invalid-order',cert.id,cert.revision,account.id,'pending',f.deps.encrypt(JSON.stringify({private_key_pem:'cached-private-key-secret',csr:'cached-csr-secret',order:{url:'https://ca.example.test/order/cached'}})),f.deps.now().toISOString(),f.deps.now().toISOString());
+  return {...f,cert,created:()=>created,issue:()=>f.controller.perform(f.store.get(cert.id),'issue',{},'admin')};
+}
+
+test('cached invalid orders recover DNS challenge reasons, redact TXT and tokens, and require a separate manual new order',async t=>{
+  let f:ReturnType<typeof invalidOrderFixture>,lookups=0;
+  f=invalidOrderFixture(t,{getAuthorizations:async()=>{
+    lookups++;assert.equal(f.db.get<any>('SELECT state FROM ops_acme_orders WHERE id=?','cached-invalid-order')!.state,'invalid');
+    return [{identifier:{value:'example.test'},status:'invalid',challenges:[{type:'dns-01',status:'invalid',token:'hidden-invalid-challenge-token',error:{type:'urn:ietf:params:acme:error:dns',status:400,detail:'DNS problem: NXDOMAIN for _acme-challenge.example.test; Incorrect TXT record "hidden-wrong-txt-value" found; hidden-invalid-challenge-token; https://ca.example.test/details?nonce=hidden-url-query',raw_response:'never-publish-authorizations'}}]}];
+  }});
+  const run=await f.issue(),events=f.store.runEvents(run.id);
+  assert.equal(run.state,'failed');assert.equal(run.result.code,'acme_order_invalid');assert.equal(run.result.phase,'get_order');
+  assert.match(run.result.message,/NXDOMAIN/);assert.equal(run.result.domain,'example.test');assert.equal(run.result.http_status,400);assert.equal(run.result.error_type,'urn:ietf:params:acme:error:dns');
+  assert.deepEqual(events.filter(event=>event.phase==='get_order').map(event=>event.state),['running','failed']);
+  assert.deepEqual(events.filter(event=>event.phase==='resume_order').map(event=>event.state),['running','succeeded']);
+  assert.equal(f.created(),0);assert.equal(lookups,1);
+  assert.doesNotMatch(JSON.stringify({run,events,status:f.store.get(f.cert.id).status}),/hidden-invalid-challenge-token|hidden-wrong-txt-value|hidden-url-query|never-publish-authorizations|cached-private-key-secret|cached-csr-secret|invalid-order-key-secret/);
+  const retry=await f.issue();assert.notEqual(retry.id,run.id);assert.equal(f.created(),1);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM ops_acme_orders')!.n,2);
+});
+
+test('order subproblems retain bounded domain-specific reasons without requesting authorizations or exposing raw fields',async t=>{
+  let lookups=0;
+  const f=invalidOrderFixture(t,{getOrder:async()=>({status:'invalid',error:{type:'urn:ietf:params:acme:error:compound',subproblems:[
+    {identifier:{value:'example.test'},type:'urn:ietf:params:acme:error:caa',status:400,detail:'CAA policy rejects example.test',private_key:'never-publish-order'},
+    {identifier:{value:'other.example.test'},type:'urn:ietf:params:acme:error:dns',detail:'DNS lookup timed out for other.example.test'},
+  ]}}),getAuthorizations:async()=>{lookups++;throw Error('unnecessary authorization request')}} ,['example.test','other.example.test']);
+  const run=await f.issue();assert.equal(run.result.domain,'example.test');assert.equal(run.result.error_type,'urn:ietf:params:acme:error:caa');assert.equal(run.result.http_status,400);
+  assert.match(run.result.message,/CAA policy rejects/);assert.match(run.result.message,/other.example.test: DNS lookup timed out/);assert.doesNotMatch(JSON.stringify({run,events:f.store.runEvents(run.id)}),/never-publish-order/);assert.equal(lookups,0);assert.equal(f.created(),0);
+});
+
+for(const unavailable of [false,true])test('invalid order remains the primary failure when authorization reasons are '+(unavailable?'unavailable':'absent'),async t=>{
+  const f=invalidOrderFixture(t,{getAuthorizations:async()=>{if(unavailable)throw Object.assign(Error('authorization expired token=invalid-order-key-secret'),{code:'ca_authorization_gone'});return [{identifier:{value:'example.test'},status:'expired',challenges:[]}];}});
+  const run=await f.issue();assert.equal(run.state,'failed');assert.equal(run.result.code,'acme_order_invalid');assert.equal(run.result.phase,'get_order');
+  assert.match(run.result.message,unavailable?/could not be read/:/did not provide/);assert.match(run.result.message,/retired/);assert.doesNotMatch(run.result.message,/NXDOMAIN|DNS problem/);
+  assert.equal(f.db.get<any>('SELECT state FROM ops_acme_orders')!.state,'invalid');assert.equal(f.created(),0);
+  assert.doesNotMatch(JSON.stringify({run,events:f.store.runEvents(run.id)}),/invalid-order-key-secret/);
+  if(unavailable)assert(f.store.runEvents(run.id).some(event=>event.phase==='get_authorizations'&&event.state==='failed'&&event.code==='ca_authorization_gone'));
+});
+
+test('authorization diagnostic reads recheck the actor and do not run after revocation',async t=>{
+  let calls=0,f:ReturnType<typeof invalidOrderFixture>;
+  f=invalidOrderFixture(t,{getOrder:async()=>{f.db.run("UPDATE users SET active=0 WHERE id='admin'");return {status:'invalid',authorizations:['https://ca.example.test/auth/one']};},getAuthorizations:async()=>{calls++;return []}});
+  const run=await f.issue();assert.equal(run.result.code,'acme_order_invalid');assert.equal(calls,0);
+  assert(f.store.runEvents(run.id).some(event=>event.phase==='get_authorizations'&&event.code==='operations_authorization_revoked'));
+});
+
+test('problem diagnostics redact before truncation and ignore identifiers outside the configured certificate domains',async t=>{
+  const f=invalidOrderFixture(t,{getOrder:async()=>({status:'invalid',error:{subproblems:[{identifier:{value:'invalid-order-key-secret'},type:'urn:ietf:params:acme:error:dns',detail:'A'.repeat(1190)+'invalid-order-key-secret'+'B'.repeat(2000)}]}})});
+  const run=await f.issue();assert.equal(run.result.message.length,1200);assert.equal(run.result.domain,undefined);assert.doesNotMatch(JSON.stringify({run,events:f.store.runEvents(run.id)}),/invalid-order|key-secret/);
+});
+
+test('authorization diagnostic reads stop if the certificate revision changes during the CA order request',async t=>{
+  let calls=0,f:ReturnType<typeof invalidOrderFixture>;
+  f=invalidOrderFixture(t,{getOrder:async()=>{f.db.run('UPDATE ops_platform_resources SET revision=revision+1 WHERE id=?',f.cert.id);return {status:'invalid',authorizations:['https://ca.example.test/auth/one']};},getAuthorizations:async()=>{calls++;return []}});
+  const run=await f.issue();assert.equal(run.result.code,'acme_order_invalid');assert.equal(calls,0);assert(f.store.runEvents(run.id).some(event=>event.code==='certificate_revision_changed'));
+});
+
+test('a second order read after challenge verification checks invalid state and preserves its challenge explanation',async t=>{
+  const api=providerFixture('aliyun');let reads=0,authorizations=0;
+  const f=setup(t,api.fetcher,{resolveChallenge:async()=>true,acmeClientFactory:()=>({
+    createAccount:async()=>({}),getAccountUrl:()=> 'https://ca.example.test/account/second',createOrder:async()=>({url:'https://ca.example.test/order/second'}),
+    getOrder:async()=>({url:'https://ca.example.test/order/second',status:++reads===1?'pending':'invalid',authorizations:['https://ca.example.test/auth/second']}),
+    getAuthorizations:async()=>[{url:'https://ca.example.test/auth/second',identifier:{value:'example.test'},status:++authorizations===1?'pending':'invalid',challenges:[{type:'dns-01',token:'second-read-token-secret',status:authorizations===1?'pending':'invalid',...(authorizations>1?{error:{type:'urn:ietf:params:acme:error:dns',detail:'DNS lookup failed after challenge submission'}}:{})}]}],
+    getChallengeKeyAuthorization:async()=> 'second-read-txt-secret',completeChallenge:async()=>({}),waitForValidStatus:async()=>({status:'valid'}),
+    finalizeOrder:async()=>{throw Error('invalid order must not finalize')},getCertificate:async()=>{throw Error('invalid order must not download')},
+  })});
+  const cred=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'second-id',access_key_secret:'second-secret'},'admin');
+  const zone=f.store.create('dns_zone','Zone',{domain:'example.test',credential_id:cred.id},'admin');
+  const account=f.store.create('acme_account','ACME',{email:'ops@example.test',directory_url:'letsencrypt-staging',terms_agreed:true},'admin');
+  const cert=f.store.create('certificate','Second read',{source:'acme',domains:['example.test'],acme_account_id:account.id,dns_zone_ids:[zone.id]},'admin');
+  const run=await f.controller.perform(cert,'issue',{},'admin');assert.equal(run.state,'failed');assert.equal(run.result.code,'acme_order_invalid');assert.match(run.result.message,/after challenge submission/);
+  assert.equal(reads,2);assert.equal(authorizations,2);assert.equal(f.db.get<any>('SELECT state FROM ops_acme_orders')!.state,'invalid');assert.equal(f.store.get(cert.id).status.challenge_cleanup,'complete');
+  assert.deepEqual(f.store.runEvents(run.id).filter(event=>event.phase==='get_order').map(event=>event.state),['running','succeeded','running','failed']);
+  assert.doesNotMatch(JSON.stringify({run,events:f.store.runEvents(run.id)}),/second-read-token-secret|second-read-txt-secret/);
 });
 test("restart recovers certificate status even when its interrupted receipt is older than the history page",async t=>{
   const f=setup(t),cert=f.store.create('certificate','Interrupted',{source:'self_signed',domains:['example.test'],auto_renew:false},'admin');

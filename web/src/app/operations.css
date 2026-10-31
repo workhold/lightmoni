@@ -16,3 +16,7 @@
 .lm-ops-domain-route>.lm-ops-subheading>strong { min-width: 0; overflow-wrap: anywhere; }
 
 .lm-ops-install-guide{min-height:300px;display:flex;align-items:center;justify-content:center;padding:48px 20px}.lm-ops-install-guide .ant-empty{max-width:520px;margin:0}.lm-ops-install-guide h2{font-size:18px;color:var(--lm-text);margin:16px 0 8px}.lm-ops-install-guide .lm-ops-note{margin-bottom:20px}.lm-ops-install-guide .ant-empty{animation:lm-ops-enter .18s ease-out}@media(max-width:680px){.lm-ops-install-guide{padding:36px 8px}.lm-ops-install-guide h2{font-size:17px}}@media(prefers-reduced-motion:reduce){.lm-ops-install-guide .ant-empty{animation:none}}
+
+.lm-ops-certificate-pem { font-family: var(--lm-font-mono, monospace); font-size: 12px; overflow-wrap: anywhere; }
+.lm-ops-certificate-metadata { overflow-wrap: anywhere; white-space: pre-wrap; }
+.lm-ops-certificate-downloads { margin: 16px 0; }

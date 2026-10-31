@@ -6,7 +6,7 @@ import { OperationRejectedError } from "../operations/errors.js";
 import type { Dependencies, Handler, Module } from "../shared/types.js";
 import type { AgentJobStore } from "../server/agent-jobs.js";
 import { OperationsPlatformStore, safeObject, cleanResult } from "./store.js";
-import { createCertificateController, type CertificateControllerOptions } from "./certificates.js";
+import { createCertificateController, getCertificateMaterial, publicCertificateMaterial, type CertificateControllerOptions } from "./certificates.js";
 import { createWorkloadController } from "./workloads.js";
 import type { DomainController, ResourceKind } from "./types.js";
 
@@ -76,6 +76,36 @@ export function registerOperationsPlatform(
       }
     };
   registerObservability(deps, store, safe);
+  // Include rejection responses in the no-store boundary, before the admin guard.
+  const certificateResponse = (fn: Handler): Handler => ctx => {
+    ctx.res.setHeader("Cache-Control", "no-store");
+    ctx.res.setHeader("X-Content-Type-Options", "nosniff");
+    return safe(fn)(ctx);
+  };
+  router.get("/api/v1/ops/resources/:id/certificate", certificateResponse(ctx => {
+    ctx.json({certificate: publicCertificateMaterial(getCertificateMaterial(store, ctx.params.id))});
+  }));
+  router.post("/api/v1/ops/resources/:id/certificate/download", certificateResponse(async ctx => {
+    const body = safeObject(await ctx.body());
+    if (typeof body.version !== "string" || !/^[A-Za-z0-9_-]{1,160}$/.test(body.version))
+      fail(400, "invalid_certificate_version");
+    if (!["cert", "chain", "fullchain", "private_key"].includes(body.format))
+      fail(400, "invalid_certificate_download_format");
+    const material = getCertificateMaterial(store, ctx.params.id, body.version);
+    const view = publicCertificateMaterial(material);
+    const files = {
+      cert: ["cert.pem", view.certificate_pem],
+      chain: ["chain.pem", view.chain_pem],
+      fullchain: ["fullchain.pem", view.fullchain_pem],
+      private_key: ["privkey.pem", material.private_key_pem],
+    };
+    const [name, pem] = files[body.format as keyof typeof files];
+    if (!pem) fail(409, body.format === "chain" ? "certificate_chain_unavailable" : "certificate_material_invalid");
+    const resourceID = ctx.params.id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0,160);
+    ctx.res.setHeader("Content-Type", "application/x-pem-file");
+    ctx.res.setHeader("Content-Disposition", `attachment; filename="${resourceID}-${body.version}-${name}"`);
+    ctx.res.end(pem);
+  }));
   const publicKinds = new Set([
     "credential",
     "dns_zone",

@@ -108,9 +108,10 @@ export interface CertificateMaterial {
 export function getCertificateMaterial(
   store: PlatformStore,
   certificateID: string,
+  requestedVersion?: string,
 ): CertificateMaterial {
   const resource = store.get(certificateID, "certificate"),
-    version = resource.status.certificate_version;
+    version = requestedVersion ?? resource.status.certificate_version;
   if (!version) throw new HTTPError(409, "certificate_not_issued");
   const row = store.deps.db.get<any>(
     "SELECT * FROM ops_certificate_versions WHERE id=? AND certificate_id=?",
@@ -123,6 +124,26 @@ export function getCertificateMaterial(
     ...JSON.parse(row.metadata_json),
     certificate_version: row.id,
     version: row.id,
+  };
+}
+/** Explicit public projection; never spread decrypted material into a browser response. */
+export function publicCertificateMaterial(material: CertificateMaterial) {
+  const blocks = material.certificate_pem.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g);
+  if (!blocks?.length || blocks.length > 12) throw new HTTPError(409, "certificate_material_invalid");
+  const chain = blocks.map(block => new X509Certificate(block));
+  const leaf = chain[0];
+  return {
+    certificate_version: material.certificate_version,
+    domains: material.domains,
+    not_before: new Date(leaf.validFrom).toISOString(),
+    expires_at: new Date(leaf.validTo).toISOString(),
+    fingerprint_sha256: leaf.fingerprint256,
+    subject: leaf.subject,
+    issuer: leaf.issuer,
+    chain_length: chain.length,
+    certificate_pem: blocks[0] + "\n",
+    chain_pem: blocks.length > 1 ? blocks.slice(1).join("\n") + "\n" : "",
+    fullchain_pem: blocks.join("\n") + "\n",
   };
 }
 function initSchema(options: PlatformOptions): void {
@@ -816,10 +837,12 @@ export function createCertificateController(
     const client = await progress.step("acme_account", () => accountClient(account, actor, progress));
     let row = db.get<any>("SELECT * FROM ops_acme_orders WHERE certificate_id=? AND resource_revision=? AND state IN ('created','pending','ready','processing','complete') ORDER BY created_at DESC LIMIT 1", certificate.id, certificate.revision), payload: any;
     if (row) {
-      payload = JSON.parse(deps.decrypt(row.payload_cipher));
-      progress.remember(payload.private_key_pem); progress.remember(payload.csr);
-      progress.event("resume_order", "running");
-      if (!payload.order?.url) throw progress.wrap(new CloudError("acme_order_result_unknown", "", true), "resume_order");
+      payload = await progress.step("resume_order", async () => {
+        const saved = JSON.parse(deps.decrypt(row.payload_cipher));
+        progress.remember(saved.private_key_pem); progress.remember(saved.csr);
+        if (!saved.order?.url) throw new CloudError("acme_order_result_unknown", "", true);
+        return saved;
+      });
     } else {
       const [key, csr] = await progress.step("create_csr", () => acme.crypto.createCsr({altNames: certificate.spec.domains}));
       payload = {private_key_pem: key.toString(), csr: csr.toString()};
@@ -840,16 +863,47 @@ export function createCertificateController(
       }
       db.run("UPDATE ops_acme_orders SET state='pending',payload_cipher=?,updated_at=? WHERE id=?", deps.encrypt(JSON.stringify(payload)), at(), row.id);
     }
+    const invalidOrder = async (order: acme.Order, phase: string) => {
+      // Retire the known terminal order before any optional diagnostic request.
+      db.run("UPDATE ops_acme_orders SET state='invalid',updated_at=? WHERE id=?", at(), row.id);
+      const direct = progress.problemDiagnostic(order.error, phase, "acme_order_invalid", certificate.spec.domains);
+      if (direct) return new CertificateIssueError(direct);
+      const reasons: NonNullable<ReturnType<CertificateProgress["problemDiagnostic"]>>[] = [];
+      let lookupFailed = false;
+      if (Array.isArray(order.authorizations) && order.authorizations.length) {
+        try {
+          const authorizations = await progress.step("get_authorizations", async () => {
+            authorize(actor);
+            if (store.get(certificate.id).revision !== certificate.revision) throw new HTTPError(409, "certificate_revision_changed");
+            return client.getAuthorizations({...order, authorizations: order.authorizations.slice(0, 100)});
+          });
+          // Register all tokens before extracting any explanation, including cross-domain errors.
+          for (const authz of authorizations)
+            for (const challenge of authz.challenges ?? []) progress.remember((challenge as any).token);
+          for (const authz of authorizations) {
+            const domain = authz.wildcard ? "*." + authz.identifier.value : authz.identifier.value;
+            const challenges = [...(authz.challenges ?? [])].sort((a, b) => Number(b.type === "dns-01") - Number(a.type === "dns-01"));
+            for (const challenge of challenges) {
+              if (challenge.status !== "invalid" || reasons.length >= 5) continue;
+              const diagnostic = progress.problemDiagnostic(challenge.error, phase, "acme_order_invalid", certificate.spec.domains, domain);
+              if (diagnostic) reasons.push(diagnostic);
+            }
+          }
+        } catch {lookupFailed = true;}
+      }
+      if (reasons.length) return new CertificateIssueError({...reasons[0], message: progress.redact(reasons.map(reason => reason.message).join("\n"))});
+      return progress.wrap(Object.assign(new Error(lookupFailed
+        ? "The ACME order is invalid. Its authorization details could not be read. The old order has been retired; inspect the CA and domain configuration before requesting a new order."
+        : "The ACME order is invalid. The CA did not provide an order or challenge failure reason. The old order has been retired; inspect the CA and domain configuration before requesting a new order."), {code: "acme_order_invalid"}), phase);
+    };
+    const readOrder = (order: acme.Order) => progress.step("get_order", async () => {
+      const current = await client.getOrder(order);
+      if (current.status === "invalid") throw await invalidOrder(current, "get_order");
+      return current;
+    });
     try {
       if (row.state === "complete" && payload.certificate_pem) return {certificate_pem: payload.certificate_pem, private_key_pem: payload.private_key_pem};
-      let order = await progress.step("get_order", () => client.getOrder(payload.order));
-      if (order.status === "invalid") {
-        db.run("UPDATE ops_acme_orders SET state='invalid',updated_at=? WHERE id=?", at(), row.id);
-        const problem = (order as any).error;
-        const diagnostic = progress.diagnostic(Object.assign(new Error(typeof problem?.detail === "string" ? problem.detail : "ACME order is invalid"), {code: "acme_order_invalid", type: problem?.type}), "get_order");
-        progress.event("get_order", "failed", diagnostic);
-        throw new CertificateIssueError(diagnostic);
-      }
+      let order = await readOrder(payload.order);
       if (order.status === "pending") {
         const authorizations = await progress.step("get_authorizations", () => client.getAuthorizations(order));
         for (const authz of authorizations) {
@@ -877,7 +931,7 @@ export function createCertificateController(
           await progress.step("challenge_submit", () => client.completeChallenge(challenge), detail);
           await progress.step("challenge_verify", () => client.waitForValidStatus(challenge), detail);
         }
-        order = await progress.step("get_order", () => client.getOrder(order));
+        order = await readOrder(order);
       }
       if (order.status === "ready") {
         authorize(actor);
