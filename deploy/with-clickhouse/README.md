@@ -15,7 +15,7 @@ docker compose run --rm --no-deps --entrypoint lightmoni-admin lightmoni init --
 docker compose up -d --no-build --wait
 ```
 
-初始化只用于空用户库；已有实例跳过该步。密码按无回显提示输入。中心镜像从根 Compose 直接继承 `docker.heyphp.com/lightmoni/lightmoni:20261031-8386b5b`，无需设置 `LIGHTMONI_IMAGE`，旧环境中的该值也不再覆盖镜像。支持 Linux amd64/arm64；两端共用 `LIGHTMONI_CH_USER/PASSWORD`，中心连接 `LIGHTMONI_CH_URL=http://clickhouse:8123`，数据库端口不向宿主机开放。
+初始化只用于空用户库；已有实例跳过该步。密码按无回显提示输入。中心镜像从根 Compose 直接继承 `docker.heyphp.com/lightmoni/lightmoni:20261031-c209a18`，无需设置 `LIGHTMONI_IMAGE`，旧环境中的该值也不再覆盖镜像。支持 Linux amd64/arm64；两端共用 `LIGHTMONI_CH_USER/PASSWORD`，中心连接 `LIGHTMONI_CH_URL=http://clickhouse:8123`，数据库端口不向宿主机开放。
 
 更新时先在仓库执行 `git pull --ff-only origin main`，再从本目录执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`。重置管理员执行 `docker compose exec lightmoni lightmoni-admin reset-password --name admin`。源码构建执行 `docker compose build lightmoni` 和 `docker compose up -d --no-build --pull never --wait`。
 

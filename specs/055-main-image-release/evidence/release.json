@@ -1,0 +1,11 @@
+{
+  "revision": "c209a1853610e951709adf8ff8053167a2aec293",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tag": "20261031-c209a18",
+  "previous_latest": "sha256:dea2d3df4284b5ffc7b28df4c6308eeebb4aee8ed4c9adcda63758984eee2605",
+  "architecture_sync": "not applicable: release existing merged features",
+  "feature_prs": [
+    33,
+    34
+  ]
+}
