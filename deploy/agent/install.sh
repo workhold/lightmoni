@@ -285,6 +285,8 @@ fi
 install -d -m 0755 /opt/lightmoni-agent /opt/lightmoni-agent/releases
 runtime_release="/opt/lightmoni-agent/releases/${version}-$(printf '%s' "$actual" | cut -c1-16)-$$"
 cp -R "$tmp_dir/unpacked/lightmoni-agent-runtime" "$runtime_release"
+# Public code identity only; credentials never enter an installation receipt.
+printf '{"schema":1,"artifact_sha256":"%s"}\n' "$actual" > "$runtime_release/installation.json"
 # cp under umask 077 creates root-only directories and files. The dedicated
 # service user needs read/traverse access to public code and the bundled Node;
 # credentials and persistent data retain their separate 0700/0600 permissions.

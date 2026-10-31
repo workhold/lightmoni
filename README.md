@@ -114,7 +114,7 @@ docker compose up -d --no-build --pull never --wait
 
 enrollment 由平台内部签发并预绑定该主机，安装器通过 SSH stdin 接收，不进入 URL、命令参数、环境变量或 AI 上下文。兑换、激活、注册和心跳使用预约与独立 control/data 凭据核验，注册不会创建第二台主机；没有独立 token 签发、用户手动安装和手工主机关联入口。旧无主机预约身份和共享 SDK Key 不再兼容控制面，不自动迁移或删除历史数据。完整流程见 [Agent 部署与恢复](docs/agent-deployment.md) 和 [SDD 038](specs/038-registered-host-agent-onboarding/spec.md)。
 
-Agent 在宿主机以独立 systemd 服务运行，生命周期与业务服务分开。Linux amd64/arm64 包自带 Node 24.15.0，要求 glibc ≥ 2.28，无需另装 Node/npm；安装器验证 SHA256。持久目录保存身份、队列和日志游标，不应复制到另一台主机。主机管理首装拒绝覆盖已有安装，升级/回滚能力的验证边界见部署文档。
+Agent 在宿主机以独立 systemd 服务运行，生命周期与业务服务分开。Linux amd64/arm64 包自带 Node 24.15.0，要求 glibc ≥ 2.28，无需另装 Node/npm；安装器验证 SHA256。持久目录保存身份、队列和日志游标，不应复制到另一台主机。主机管理首装拒绝覆盖已有安装；升级/回退有独立审批、固定包摘要、新启动健康确认、失败自动回退及未知结果核对，支持串行批次，仍需要有效 SSH 维护凭据。完整设计和任务中心统一演进方向见 [系统设计第 28 节](docs/system-design.md#28-agent-版本升级与回退sdd-045)，使用及兼容边界见 [部署文档](docs/agent-deployment.md#升级回退和卸载)。中心镜像更新不会自动更新用户主机上的 Agent。
 
 SDK仅独立直报中心，安装Agent不是前置条件。Agent只将自身采集和任务数据通过内部持久队列上报，不提供SDK接收与配置代理。SDK与主机资产无隐式绑定；Agent内嵌同一SDK通过进程内exporter打点，业务启停不影响Agent。详见[SDK接入](sdk/README.md#中心地址与自动同步)。
 

@@ -23,6 +23,26 @@ const repo = resolve(fileURLToPath(new URL("..", import.meta.url))),
   output = resolve(process.argv[3] ?? join(repo, "runtime/downloads")),
   nodeVersion = "24.15.0";
 if (!/^[0-9A-Za-z._-]+$/.test(version)) throw Error("Invalid fixed version");
+let sourceRevision = process.env.LIGHTMONI_BUILD_REVISION || process.env.LIGHTMONI_SOURCE_REVISION;
+if (!sourceRevision) {
+  try { sourceRevision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
+  catch { throw Error("Agent releases require LIGHTMONI_BUILD_REVISION (the full Git commit SHA)"); }
+}
+if (!/^[a-f0-9]{40}$/.test(sourceRevision)) throw Error("Invalid source revision");
+// Content identity also distinguishes an intentional dirty/source-only build
+// at the same commit. File order is stable and timestamps are excluded.
+const contentHash = createHash("sha256");
+function hashTree(location, relative = "") {
+  const info = lstatSync(location);
+  contentHash.update(relative + "\0");
+  if (info.isSymbolicLink()) contentHash.update("link\0" + readlinkSync(location));
+  else if (info.isDirectory()) for (const name of readdirSync(location).sort()) hashTree(join(location, name), relative + "/" + name);
+  else contentHash.update(readFileSync(location));
+}
+for (const file of ["runtime/dist", "runtime/package.json", "runtime/package-lock.json", "sdk/typescript/dist", "sdk/typescript/package.json", "deploy/agent", "scripts/build-agent-release.mjs"]) hashTree(join(repo, file), file);
+const buildID = process.env.LIGHTMONI_AGENT_BUILD_ID ?? `${version}-${sourceRevision.slice(0, 12)}-${contentHash.digest("hex").slice(0, 12)}`;
+if (!/^[A-Za-z0-9._-]{1,128}$/.test(buildID)) throw Error("Invalid Agent build ID");
+const buildTime = new Date().toISOString();
 const officialNodeDistribution = "https://nodejs.org/dist";
 let nodeDistribution;
 try {
@@ -91,6 +111,7 @@ try {
   );
   const checksums = (await download("SHASUMS256.txt")).toString();
   const artifacts = [];
+  const releases = [];
   for (const [arch, nodeArch] of [
     ["amd64", "x64"],
     ["arm64", "arm64"],
@@ -131,11 +152,16 @@ try {
       join(target, "release.json"),
       JSON.stringify({
         version,
+        source_revision: sourceRevision,
+        build_id: buildID,
+        build_time: buildTime,
+        state_schema: 1,
         node_version: nodeVersion,
         platform: "linux",
         arch,
         requires: "glibc >= 2.28",
         node_sha256: expected,
+        node_binary_sha256: sha(readFileSync(join(target, "node"))),
       }) + "\n",
     );
     const elf = readFileSync(join(target, "node"));
@@ -147,6 +173,8 @@ try {
     validateLinks(perArch);
     const artifact = `lightmoni-agent_${version}_linux_${arch}.tar.gz`;
     execFileSync("tar", [
+      "--no-xattrs",
+      "--no-acls",
       "-czf",
       join(output, artifact),
       "-C",
@@ -154,11 +182,14 @@ try {
       "lightmoni-agent",
       "lightmoni-agent.service",
       "lightmoni-agent-runtime",
-    ]);
+    ], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
     artifacts.push(artifact);
+    const packedArchive = readFileSync(join(output, artifact));
+    releases.push({ version, source_revision: sourceRevision, build_id: buildID, state_schema: 1, platform: "linux", arch, file: artifact, sha256: sha(packedArchive), size: packedArchive.length, build_time: buildTime });
   }
-  for (const file of ["install.sh", "uninstall.sh", "config.example.json"])
+  for (const file of ["install.sh", "uninstall.sh", "update.sh", "update-runner.mjs", "config.example.json"])
     cpSync(join(repo, "deploy/agent", file), join(output, file));
+  writeFileSync(join(output, "agent-releases.json"), JSON.stringify({ schema: 1, releases, recommended_by_arch: Object.fromEntries(releases.map(release => [release.arch, release.sha256])) }, null, 2) + "\n");
   writeFileSync(
     join(output, "SHA256SUMS"),
     artifacts

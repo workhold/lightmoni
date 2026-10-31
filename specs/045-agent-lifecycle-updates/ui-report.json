@@ -1,0 +1,25 @@
+{
+  "production_bundle": true,
+  "callback_failure_harness": true,
+  "api_fixtures": true,
+  "real_ssh": false,
+  "production_writes": false,
+  "checks": [
+    "same version with a different artifact shows an available update",
+    "single-host upgrade pins SHA256 and requires review before one apply request",
+    "unknown outcome can only be reconciled and keeps rollback distinct from success",
+    "rollback uses retained release and sends no caller-selected target digest",
+    "AI review deep link loads an existing plan without applying it",
+    "durable rollout reviews every host and supports pause, explicit resume, and cancellation",
+    "member sees version metadata without management endpoints or write controls",
+    "rollout child deep links preserve batch approval ownership",
+    "paused rollout blocks unknown hosts and resumes only untouched plans after review of known failure",
+    "saved-status network failure preserves the apply response and releases controls without retry",
+    "English mobile release view and review dialog fit without page overflow",
+    "single-host callback refresh rejection preserves success and always releases pending controls",
+    "rollout callback refresh rejection preserves the batch and releases pause/cancel controls"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "screenshots": "/Users/liminghan/Documents/lightmoni/lightmoni/.local-dev/evidence/agent-updates"
+}

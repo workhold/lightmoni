@@ -22,3 +22,10 @@
 @media(max-width:480px){.lm-machine-onboarding-steps{gap:20px;font-size:12px}}
 
 .lm-machine-credential-dialog .ant-modal-body{max-height:calc(100dvh - 132px);overflow-y:auto;padding-right:4px}
+.lm-machine-release{display:flex;flex-direction:column;gap:4px;overflow-wrap:anywhere}
+.lm-machine-release .ant-tag{align-self:flex-start;margin-inline-end:0;white-space:normal}
+.lm-machine-rollout-target{border:1px solid var(--lm-border-color,#d9d9d9);border-radius:8px;padding:12px;margin:12px 0;overflow-wrap:anywhere}
+.lm-machine-rollout-target summary{cursor:pointer;margin-bottom:10px}
+.lm-agent-update-dialog .ant-modal-container,.lm-agent-rollout-dialog .ant-modal-container{display:flex;flex-direction:column;max-height:calc(100dvh - 48px)}
+.lm-agent-update-dialog .ant-modal-header,.lm-agent-update-dialog .ant-modal-footer,.lm-agent-rollout-dialog .ant-modal-header,.lm-agent-rollout-dialog .ant-modal-footer{flex-shrink:0}
+.lm-agent-update-dialog .ant-modal-body,.lm-agent-rollout-dialog .ant-modal-body{min-height:0;overflow-y:auto;overflow-x:hidden;overflow-wrap:anywhere;padding-right:4px}

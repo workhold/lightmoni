@@ -1,6 +1,7 @@
 import type { DB } from "../shared/types.js";
 import { fail } from "../shared/http.js";
 import { isAgentRemoved } from "./agent-lifecycle.js";
+import { hasPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 
 /** Shared by node registration and host management, regardless of startup order. */
 export function createAgentHostSchema(db: DB): void {
@@ -47,6 +48,7 @@ export function hasActiveTaskRuns(db: DB, agentID: string, hostID = ""): boolean
 /** A new identity may replace a retired one only after it can no longer act. */
 export function replaceableAgentBinding(db: DB, agentID: string, at: string): boolean {
   if (!agentID) return true;
+  if (hasPendingAgentUpdate(db, agentID)) return false;
   if (hasActiveTaskRuns(db, agentID)) return false;
   if (table(db, "agent_jobs") && db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID)) return false;
   if (table(db, "machine_uninstallations") && db.get("SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", agentID)) return false;
