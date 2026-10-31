@@ -41,3 +41,7 @@ Doca [在线系统设计](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64
 - 创建未知响应的登记/凭据防重复限当前窗口；本轮没有新增服务端创建幂等协议，重新创建前仍需核查列表。
 - 人工结束不会停止远端进程，管理员必须先确认远端流程已结束；它保留 unknown 历史，不代表安装成功或已经卸载。
 - 正常卸载保留 identity/config；本轮没有放宽 fresh 覆盖保护或引入自动重装协议。
+
+## 交付
+
+提交前再次 fetch GitHub `main`，与基线一致，无需处理冲突。功能分支已推送 GitHub，创建非 Draft [PR #32](https://github.com/workhold/lightmoni/pull/32) 供审阅；本轮没有合入、发布镜像或升级生产。

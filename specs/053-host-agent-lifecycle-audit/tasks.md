@@ -6,4 +6,4 @@
 - [x] 审查 Web 用户流程并复现问题。
 - [x] 修复确认的问题并通过相关回归。
 - [x] 完成类型检查、构建、差异及架构影响核对；最后 UI 修正后已补针对性复验。
-- [ ] 更新验证记录，推送分支并创建 GitHub PR。
+- [x] 更新验证记录，推送分支并创建 GitHub [PR #32](https://github.com/workhold/lightmoni/pull/32)。
