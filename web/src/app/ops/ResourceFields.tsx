@@ -14,7 +14,7 @@ import {
 } from "../../shared/ui";
 import { useI18n } from "../../shared/i18n";
 import type { Agent, Machine, Resource, ResourceKind } from "./model";
-import ClusterFields, {ApplicationPlacement, type QuickCreate} from "./ClusterFields";
+import ClusterFields, {ApplicationPlacement, ClusterManagementLink, type QuickCreate} from "./ClusterFields";
 import WebsiteFields from "./WebsiteFields";
 
 type Props = {
@@ -25,6 +25,7 @@ type Props = {
   machines?: Machine[];
   onQuickCreate?: QuickCreate;
   onRefresh?: () => void;
+  certificateID?: string;
 };
 export function MapFields({
   name,
@@ -148,13 +149,15 @@ export default function ResourceFields({
   resources,
   agents,
   existing,
-  machines = [], onQuickCreate, onRefresh,
+  machines = [], onQuickCreate, onRefresh, certificateID,
 }: Props) {
   const { t } = useI18n(),
     form = Form.useFormInstance(),
     source = Form.useWatch(["spec", "source"], form),
     mode = Form.useWatch(["spec", "mode"], form),
     targetType = Form.useWatch(["spec", "type"], form),
+    targetScope = Form.useWatch(["spec", "target_scope"], form),
+    clusterID = Form.useWatch(["spec", "cluster_id"], form),
     provider = Form.useWatch(["spec", "provider"], form),
     healthType = Form.useWatch(["spec", "health", "type"], form),
     deploymentMode = Form.useWatch(["spec", "deployment_mode"], form),
@@ -399,12 +402,10 @@ export default function ResourceFields({
               ]}
             />
           </Form.Item>
-          {tags(
-            "domains",
-            t("证书域名", "Certificate domains"),
-            true,
-            "example.com, *.example.com",
-          )}
+          {existing&&existing.spec.domains?.length>1?<>
+            <Alert type="info" showIcon title={t("此历史证书包含多个域名，原域名与网站引用将保留。新证书每张填写一个域名或泛域名。","This existing certificate retains its domains and website references. New certificates use one domain or wildcard each.")}/>
+            <Form.Item name={["spec","domains"]} label={t("证书域名","Certificate domains")}><Select mode="multiple" disabled options={existing.spec.domains.map((domain:string)=>({value:domain,label:domain}))}/></Form.Item>
+          </>:<Form.Item name={["spec","domain"]} label={t("证书域名","Certificate domain")} rules={[...required,{validator:(_,value)=>!value||!/[\s,;，；]/.test(value.trim())?Promise.resolve():Promise.reject(Error(t("每张证书只填写一个域名或泛域名","Enter one domain or wildcard per certificate")))}]}><Input placeholder="example.com / *.example.com" autoComplete="off" maxLength={253}/></Form.Item>}
           {source === "acme" && (
             <>
               {ref(
@@ -504,7 +505,7 @@ export default function ResourceFields({
       )}
       {kind === "certificate_target" && (
         <>
-          {ref("certificate_id", t("证书", "Certificate"), "certificate")}
+          {certificateID?<><Form.Item name={["spec","certificate_id"]} hidden><Input/></Form.Item><p className="lm-ops-note">{t("证书：","Certificate: ")}{resources.find(r=>r.id===certificateID)?.name??certificateID}</p></>:ref("certificate_id", t("证书", "Certificate"), "certificate")}
           <Form.Item
             name={["spec", "type"]}
             label={t("目标类型", "Target type")}
@@ -562,7 +563,11 @@ export default function ResourceFields({
             </>
           ) : (
             <>
-              <Form.Item
+              {targetType==="directory"&&<Form.Item name={["spec","target_scope"]} label={t("同步范围","Sync scope")} rules={required}><Select options={[{value:"machine",label:t("单台机器","Single machine")},{value:"cluster",label:t("整个集群","Entire cluster")}]} onChange={value=>{form.setFieldValue(["spec",value==="cluster"?"agent_id":"cluster_id"],undefined)}}/></Form.Item>}
+              {targetType==="directory"&&targetScope==="cluster"?<>
+                <Form.Item name={["spec","cluster_id"]} label={t("同步集群","Sync cluster")} rules={required} extra={<ClusterManagementLink/>}><Select showSearch optionFilterProp="label" options={resources.filter(r=>r.kind==="cluster").map(r=>({value:r.id,label:r.name}))}/></Form.Item>
+                {clusterID&&<Alert showIcon type={machines.some(m=>resources.find(r=>r.id===clusterID)?.spec.machine_ids?.includes(m.id)&&!m.agent_id)?"warning":"info"} title={t("同步集群内全部机器","Sync every machine in this cluster")} description={(resources.find(r=>r.id===clusterID)?.spec.machine_ids??[]).map((id:string)=>{const machine=machines.find(m=>m.id===id);return (machine?.name??id)+(machine?.agent_id?"":" · "+t("未接入 Agent","No Agent"))}).join(" · ")||t("此集群暂无机器","This cluster has no machines")}/>}
+              </>:<Form.Item
                 name={["spec", "agent_id"]}
                 label={t("执行机器", "Execution machine")}
                 rules={required}
@@ -572,7 +577,7 @@ export default function ResourceFields({
                   optionFilterProp="label"
                   options={agentOptions}
                 />
-              </Form.Item>
+              </Form.Item>}
               {targetType === "directory" ? (
                 <>
                   {text(

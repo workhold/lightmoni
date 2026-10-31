@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { X509Certificate, createPrivateKey } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import { mkdtemp, realpath, readFile, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -16,7 +18,7 @@ import { getCertificateMaterial } from "../src/ops/certificates.js";
 import { certificateChain } from "./fixtures/certificate-material.js";
 import { AgentJobRunner } from "../src/agent/jobs.js";
 import type { Dependencies } from "../src/shared/types.js";
-async function setup(t: any, certificate?: Parameters<typeof registerOperationsPlatform>[1]["certificate"]) {
+async function setup(t: any, certificate?: Parameters<typeof registerOperationsPlatform>[1]["certificate"], bindAll=false) {
   const root = await realpath(
       await mkdtemp(join(tmpdir(), "lightmoni-platform-api-")),
     ),
@@ -56,10 +58,10 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
   } as unknown as Dependencies;
   router.auth = deps.auth;
   const credentials = {
-    has: (agentID: string, audience: string) => agentID === "node-a" && audience === "control",
+    has: (agentID: string, audience: string) => !!db.get('SELECT id FROM agents WHERE id=?',agentID) && audience === "control",
     authenticate(req: any, agentID: string) {
       if (
-        agentID !== "node-a" ||
+        !db.get('SELECT id FROM agents WHERE id=?',agentID) ||
         req.headers.authorization !== "Bearer qa-control"
       )
         fail(403, "invalid_agent_credential");
@@ -94,7 +96,7 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
     resolvePayload: platform.resolvePayload,
   });
   const server = createServer((req, res) => void router.handle(req, res));
-  server.listen(0, "127.0.0.1");
+  server.listen(0, bindAll?"0.0.0.0":"127.0.0.1");
   await once(server, "listening");
   const base = "http://127.0.0.1:" + (server.address() as any).port;
   t.after(async () => {
@@ -214,6 +216,7 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
   };
   return {
     base,
+    deps,
     root,
     db,
     jobs,
@@ -268,6 +271,103 @@ test("administrators view public certificate material and download immutable ver
   for(const snapshot of [(await f.req('/ops/overview')).body,(await f.req('/ops/resources/'+cert.id)).body,(await f.req('/ops/runs')).body]){
     assert.ok(!JSON.stringify(snapshot).includes("BEGIN CERTIFICATE"));assert.ok(!JSON.stringify(snapshot).includes("PRIVATE KEY"));
   }
+});
+
+async function issuedCertificate(f:Awaited<ReturnType<typeof setup>>,domain='cluster.example.test'){
+ const certificate=await f.create('certificate','ignored display name',{source:'self_signed',domains:[domain],validity_days:3});
+ for(let n=0;n<200&&!f.platform.store.get(certificate.id).status.certificate_version;n++)await new Promise(resolve=>setTimeout(resolve,10));
+ assert.ok(f.platform.store.get(certificate.id).status.certificate_version);return f.platform.store.get(certificate.id);
+}
+function clusterNode(f:Awaited<ReturnType<typeof setup>>,suffix:string,connected=true){
+ if(connected)f.db.run('INSERT INTO agents VALUES(?,?,?,?,?,?,?,?,?)','node-'+suffix,'host-'+suffix,'Node '+suffix,'test','linux','arm64',new Date().toISOString(),'default','{}');
+ f.db.run('INSERT INTO managed_machines VALUES(?,?,?,?)','machine-'+suffix,'Machine '+suffix,'127.0.0.1',connected?'node-'+suffix:null);
+ const cluster=f.platform.store.get(f.cluster.id);f.cluster=f.platform.store.update(cluster.id,cluster.revision,cluster.name,{...cluster.spec,machine_ids:[...cluster.spec.machine_ids,'machine-'+suffix]},'admin');
+}
+function certificateReceipt(f:Awaited<ReturnType<typeof setup>>,agentID:string,state='succeeded',job=f.jobs.claim(agentID,['operations.platform'])!){
+ assert.ok(job);const payload=f.platform.resolvePayload(job),config=payload.resource.config;
+ for(const [n,phase] of ['accepted','staging','activating','verifying'].entries())f.jobs.event(agentID,job.id,{lease_id:job.lease_id,sequence:n+1,phase:phase as any,summary:'certificate QA'});
+ f.jobs.result(agentID,job.id,{lease_id:job.lease_id,state:state as any,summary:'certificate QA',snapshot:{health:{healthy:state==='succeeded'},operations:{operation_id:payload.operation_id,resource_id:payload.resource.id,data:state==='succeeded'?{certificate_version:config.certificate_version,fingerprint_sha256:config.fingerprint_sha256}:{error:'qa_directory_failed'}}}});
+ return payload;
+}
+test('new certificates derive normalized single-domain names while old multi-domain records and references remain intact',async t=>{
+ const f=await setup(t),single=await issuedCertificate(f,'*.Example.TEST');assert.equal(single.name,'*.example.test');
+ const response=await f.req('/ops/resources','POST',{kind:'certificate',spec:{source:'self_signed',domains:['other.example.test']}});assert.equal(response.status,201);assert.equal(response.body.resource.name,'other.example.test');
+ const invalid=await f.req('/ops/resources','POST',{kind:'certificate',name:'anything',spec:{source:'self_signed',domains:['one.example.test','two.example.test']}});assert.equal(invalid.status,400);assert.equal(invalid.body.error,'certificate_single_domain_required');
+ const edited=f.platform.store.update(single.id,single.revision,'arbitrary alias',single.spec,'admin');assert.equal(edited.name,'*.example.test');
+ const legacy=f.platform.store.create('certificate','old',{source:'self_signed',domains:['legacy.example.test']},'admin');
+ const spec={...legacy.spec,domains:['legacy.example.test','*.legacy.example.test']},encrypted=f.deps.encrypt(JSON.stringify(spec));
+ f.db.run('UPDATE ops_platform_resources SET name=?,spec_cipher=? WHERE id=?','Historical display name',encrypted,legacy.id);f.db.run('UPDATE ops_platform_revisions SET spec_cipher=? WHERE resource_id=?',encrypted,legacy.id);
+ const read=(await f.req('/ops/resources/'+legacy.id)).body.resource;assert.equal(read.name,'legacy.example.test · *.legacy.example.test');assert.deepEqual(read.spec.domains,spec.domains);
+ const saved=f.platform.store.update(legacy.id,legacy.revision,'ignored',spec,'admin');assert.deepEqual(saved.spec.domains,spec.domains);
+ assert.throws(()=>f.platform.store.update(saved.id,saved.revision,'ignored',{...spec,domains:['legacy.example.test']},'admin'),/single_domain_required/);
+ assert.equal(f.platform.store.get(saved.id).revision,saved.revision);
+});
+test('cluster directory delivery tracks all machines, retains partial success, retries only failed members, and deduplicates beyond the history page',async t=>{
+ const f=await setup(t);clusterNode(f,'b');const certificate=await issuedCertificate(f);
+ const target=await f.create('certificate_target','Cluster TLS',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/cluster-tls',enabled:true});
+ const sync=await f.action(target,'sync');assert.equal(sync.status,202);assert.equal(sync.body.runs.length,2);
+ assert.equal((await f.action(target,'sync')).body.runs.length,2);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,2);
+ certificateReceipt(f,'node-a');let status=f.platform.store.get(target.id).status;assert.notEqual(status.state,'applied');assert.equal(status.applied_certificate_version,null);
+ certificateReceipt(f,'node-b','failed');status=f.platform.store.get(target.id).status;assert.equal(status.state,'failed');assert.equal(status.machines.find((m:any)=>m.agent_id==='node-a').state,'applied');
+ await f.platform.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,2);
+ const retry=await f.action(target,'retry');assert.equal(retry.body.runs.filter((r:any)=>r.state==='queued').length,1);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,3);certificateReceipt(f,'node-b');
+ status=f.platform.store.get(target.id).status;assert.equal(status.state,'applied');assert.equal(status.applied_certificate_version,certificate.status.certificate_version);assert.equal(status.machines.length,2);
+ for(let n=0;n<105;n++)await f.platform.store.run(f.platform.store.get(target.id),'historical_read','admin',async()=>({verified:true}));
+ await f.action(target,'sync');await f.platform.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,3);
+ clusterNode(f,'c');await f.action(target,'retry');assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,3);await f.platform.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,4);assert.notEqual(f.platform.store.get(target.id).status.state,'applied');certificateReceipt(f,'node-c');assert.equal(f.platform.store.get(target.id).status.state,'applied');
+ assert.doesNotMatch(JSON.stringify((await f.req('/ops/overview')).body),/BEGIN (?:RSA )?PRIVATE KEY|BEGIN CERTIFICATE/);
+});
+test('unknown cluster writes require successful per-machine inspection and do not replay during ordinary or automatic synchronization',async t=>{
+ const f=await setup(t);clusterNode(f,'b');const certificate=await issuedCertificate(f),target=await f.create('certificate_target','Unknown cluster',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/unknown-tls',enabled:true});
+ await f.action(target,'sync');certificateReceipt(f,'node-a');certificateReceipt(f,'node-b','unknown');
+ assert.equal(f.platform.store.get(target.id).status.state,'unknown');assert.equal((await f.action(target,'retry')).status,409);
+ await f.action(target,'sync');await f.platform.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,2);
+ const inspected=await f.action(target,'inspect');assert.equal(inspected.body.runs.length,2);certificateReceipt(f,'node-a');certificateReceipt(f,'node-b');assert.equal(f.platform.store.get(target.id).status.state,'applied');
+ await f.action(target,'retry');assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,4);
+});
+test('a cancelled cluster member stays failed until explicit retry and cannot be mistaken for applied',async t=>{
+ const f=await setup(t);clusterNode(f,'b');const certificate=await issuedCertificate(f),target=await f.create('certificate_target','Cancelled member',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/cancelled-tls',enabled:true});
+ const sync=await f.action(target,'sync'),cancelled=sync.body.runs.find((r:any)=>r.agent_id==='node-b');f.jobs.cancelQueuedDeployment('platform-'+target.id,cancelled.id,'admin');
+ assert.equal(f.platform.store.get(target.id).status.state,'failed');await f.platform.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,2);
+ await f.action(target,'retry');assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,3);certificateReceipt(f,'node-a');certificateReceipt(f,'node-b');assert.equal(f.platform.store.get(target.id).status.state,'applied');
+});
+test('cluster delivery rejects empty or unready membership before dispatch and fences leaving or rebound machines, removed Agents and stale certificate payloads',async t=>{
+ const f=await setup(t);clusterNode(f,'b',false);const certificate=await issuedCertificate(f),target=await f.create('certificate_target','Scope fence',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/fence-tls'});
+ assert.equal((await f.action(target,'sync')).status,409);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
+ f.db.run('UPDATE managed_machines SET agent_id=? WHERE id=?','node-a','machine-b');assert.equal((await f.action(target,'sync')).status,409);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
+ f.db.run('DELETE FROM managed_machines WHERE id=?','machine-b');const cluster=f.platform.store.get(f.cluster.id);f.cluster=f.platform.store.update(cluster.id,cluster.revision,cluster.name,{...cluster.spec,machine_ids:['machine-a']},'admin');
+ await f.action(target,'sync');const job=f.jobs.claim('node-a',['operations.platform'])!;assert.ok(f.platform.resolvePayload(job).resource.config.private_key_pem);
+ f.db.run('UPDATE managed_machines SET agent_id=NULL WHERE id=?','machine-a');assert.throws(()=>f.platform.resolvePayload(job),/membership_changed/);f.db.run('UPDATE managed_machines SET agent_id=? WHERE id=?','node-a','machine-a');
+ f.db.run("INSERT INTO agent_lifecycle(agent_id,state) VALUES('node-a','removed')");assert.throws(()=>f.platform.resolvePayload(job),/membership_changed/);f.db.run("DELETE FROM agent_lifecycle WHERE agent_id='node-a'");
+ f.platform.store.patchStatus(certificate.id,{certificate_version:'newer-version'});assert.throws(()=>f.platform.resolvePayload(job),/payload_version_changed/);f.platform.store.patchStatus(certificate.id,{certificate_version:certificate.status.certificate_version});
+ const current=f.platform.store.get(f.cluster.id);f.platform.store.update(current.id,current.revision,current.name,{...current.spec,machine_ids:[],nodes:[]},'admin');assert.throws(()=>f.platform.resolvePayload(job),/membership_changed/);
+ assert.equal((await f.action(target,'sync')).body.error,'certificate_cluster_empty');
+ f.db.run("UPDATE users SET active=0 WHERE id='admin'");assert.throws(()=>f.platform.resolvePayload(job),/authorization_required/);
+});
+test('new certificate versions ignore late old-version receipts and restart retains each machine delivery identity',async t=>{
+ const f=await setup(t);clusterNode(f,'b');const certificate=await issuedCertificate(f),target=await f.create('certificate_target','Version fencing',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/version-tls'});
+ await f.action(target,'sync');certificateReceipt(f,'node-a');const oldJob=f.jobs.claim('node-b',['operations.platform'])!,old=f.platform.resolvePayload(oldJob);
+ const issue=await f.action(certificate,'issue');let run=issue.body.run;for(let n=0;n<200&&run.state==='running';n++){await new Promise(resolve=>setTimeout(resolve,10));run=(await f.req('/ops/runs/'+run.id)).body;}assert.equal(run.state,'succeeded');
+ const newer=f.platform.store.get(certificate.id);assert.notEqual(newer.status.certificate_version,certificate.status.certificate_version);assert.throws(()=>f.platform.resolvePayload(oldJob),/payload_version_changed/);
+ await f.action(target,'sync');
+ for(const [n,phase] of ['accepted','staging','activating','verifying'].entries())f.jobs.event('node-b',oldJob.id,{lease_id:oldJob.lease_id,sequence:n+1,phase:phase as any,summary:'late receipt'});
+ f.jobs.result('node-b',oldJob.id,{lease_id:oldJob.lease_id,state:'succeeded',snapshot:{health:{healthy:true},operations:{operation_id:old.operation_id,resource_id:target.id,data:{certificate_version:old.resource.config.certificate_version,fingerprint_sha256:old.resource.config.fingerprint_sha256}}}});
+ assert.equal(f.platform.store.get(target.id).status.desired_certificate_version,newer.status.certificate_version);assert.notEqual(f.platform.store.get(target.id).status.state,'applied');
+ certificateReceipt(f,'node-a');certificateReceipt(f,'node-b');assert.equal(f.platform.store.get(target.id).status.applied_certificate_version,newer.status.certificate_version);
+ const enabled=f.platform.store.update(target.id,target.revision,target.name,{...target.spec,enabled:true},'admin');await f.action(enabled,'sync');certificateReceipt(f,'node-a');certificateReceipt(f,'node-b');
+ const before=f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n;await f.platform.close();const restarted=registerOperationsPlatform(f.deps,{jobs:f.jobs,dataDir:f.root,intervalMs:0});t.after(()=>restarted.close());await restarted.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,before);assert.equal(restarted.store.get(target.id).status.state,'applied');
+});
+test('cluster directory synchronization installs the same path independently on two real container Agents',{skip:process.env.LIGHTMONI_CERTIFICATE_DOCKER_QA!=='1',timeout:120000},async t=>{
+ const f=await setup(t,undefined,true);clusterNode(f,'b');const certificate=await issuedCertificate(f),path='/tmp/lightmoni-057-tls';
+ const target=await f.create('certificate_target','Real two-Agent directory',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path,enabled:true});await f.action(target,'sync');
+ const docker=promisify(execFile),image=process.env.LIGHTMONI_CERTIFICATE_AGENT_IMAGE??'docker.heyphp.com/lightmoni/lightmoni:20261031-6dae46c';
+ const endpoint=f.base.replace('127.0.0.1','host.docker.internal'),names=['a','b'].map(s=>'lm057-'+f.root.split('-').at(-1)+'-'+s);
+ t.after(async()=>{for(const name of names)await docker('docker',['--context','desktop-linux','rm','-f',name]).catch(()=>{})});
+ for(const [index,agentID] of ['node-a','node-b'].entries()){
+  const script=`import {AgentJobRunner} from '/opt/lightmoni/runtime/dist/agent/jobs.js';import {readFile,stat} from 'node:fs/promises';import {X509Certificate,createPrivateKey} from 'node:crypto';const runner=new AgentJobRunner({endpoint:${JSON.stringify(endpoint)},agentID:${JSON.stringify(agentID)},controlCredential:'qa-control',dataDir:'/tmp/agent-data'});const receipt=await runner.pollOnce();if(receipt?.state!=='succeeded')throw Error('Agent installation failed: '+JSON.stringify(receipt));const cert=new X509Certificate(await readFile('${path}/fullchain.pem'));const key=createPrivateKey(await readFile('${path}/privkey.pem'));if(!cert.checkPrivateKey(key))throw Error('Pair mismatch');if(((await stat('${path}/.lightmoni-certificate-${certificate.id}/versions/${certificate.status.certificate_version}/privkey.pem')).mode&0o777)!==0o600)throw Error('Wrong key mode');console.log(JSON.stringify({agent:${JSON.stringify(agentID)},fingerprint:cert.fingerprint256,path:'${path}',key_matches:true}));`;
+  const result=await docker('docker',['--context','desktop-linux','run','--rm','--name',names[index],'--entrypoint','node','--workdir','/opt/lightmoni',image,'--input-type=module','-e',script],{maxBuffer:1000000});const proof=JSON.parse(result.stdout.trim());assert.equal(proof.fingerprint,certificate.status.fingerprint_sha256);assert.equal(proof.key_matches,true);
+ }
+ const status=f.platform.store.get(target.id).status;assert.equal(status.state,'applied');assert.equal(status.machines.length,2);assert.ok(status.machines.every((m:any)=>m.state==='applied'));
 });
 test("uploaded signed chains split into leaf and intermediate attachments with a matching private key",async t=>{
  const f=await setup(t),material=await certificateChain(),cert=await f.create('certificate','chain download',{source:'uploaded',domains:['download.example.test'],...material});

@@ -1219,10 +1219,10 @@ AI 工具 list_agent_releases、propose_agent_update、get_agent_update 只返�
 flowchart TB
   ops033_admin["管理员工作台 / 五核心能力"]
   ops033_api["中心资源与策略 API / revision / 持续授权"]
-  ops033_db["SQLite + 加密版本 / 资源 / 实例 / 端口 / 执行"]
+  ops033_db["SQLite + 加密版本 / 资源 / 成员 / 逐机执行"]
   ops033_reconcile["领域独立收敛 / 部署 / 续期 / 分发"]
   ops033_cloud["中心云适配器 / DNS / ACME / 三云 CDN"]
-  ops033_job["Agent job + 有效 lease / 私有不可变载荷"]
+  ops033_job["逐机器 Agent job + lease / 私有载荷 / 成员守卫"]
   ops033_agent["独立 Agent / 本机执行 / 持久写锁"]
   ops033_app["Docker / Compose / 应用与托管服务实例"]
   ops033_gateway["OpenResty host 网关 / 多路径 / 静态 / 服务入口"]
@@ -1232,7 +1232,7 @@ flowchart TB
   ops033_api -->|加密状态| ops033_db
   ops033_api -->|授权策略| ops033_reconcile
   ops033_reconcile -->|中心签名请求| ops033_cloud
-  ops033_reconcile -->|派发| ops033_job
+  ops033_reconcile -->|逐机派发| ops033_job
   ops033_job -->|control + lease| ops033_agent
   ops033_agent -->|部署 / 探活| ops033_app
   ops033_agent -->|完整版本包| ops033_gateway
@@ -1262,11 +1262,11 @@ ops_platform_resources 保存 revision、加密 spec、脱敏 status 和授权�
 
 ### 33.5 证书版本与三类分发目标
 
-证书支持 ACME、上传、自签；公私钥匹配、SAN、有效期和指纹均校验。材料与不可变版本加密保存，普通资源接口只显示元数据和 has_*。管理员通过 GET /api/v1/ops/resources/:id/certificate 按需查看当前已保存版本的公开 PEM 与元数据；POST certificate/download 按 certificate_id 与不可变 version 精确导出 cert.pem、chain.pem、fullchain.pem 或 privkey.pem。查看 JSON 只白名单返回公开材料，缺失中间链时不伪造。下载固定版本，续期切换不改变已打开版本的下载内容；失败续期仍可查看既有版本。上传证书只能提醒到期；ACME/自签可显式启用自动续期，窗口按实际有效期计算，尚未接入 ARI；失败续期可人工重新 issue/renew，不宣称完整自动退避已实现。网站首次发布 HTTPS 时，材料缺失或过期可调用同一可追踪签发流程，内部等待（或等待已有执行）取得材料后再继续部署；管理员 HTTP 创建/签发接口不等待。上传材料也在后台校验并导入；编辑既有配置不会自动签发。证书目标分别为 Agent 目录、云 CDN、更新脚本，各自记录 desired/applied 版本与结果。
+证书支持 ACME、上传、自签；公私钥匹配、SAN、有效期和指纹均校验。材料与不可变版本加密保存，普通资源接口只显示元数据和 has_*。管理员通过 GET /api/v1/ops/resources/:id/certificate 按需查看当前已保存版本的公开 PEM 与元数据；POST certificate/download 按 certificate_id 与不可变 version 精确导出 cert.pem、chain.pem、fullchain.pem 或 privkey.pem。查看 JSON 只白名单返回公开材料，缺失中间链时不伪造。下载固定版本，续期切换不改变已打开版本的下载内容；失败续期仍可查看既有版本。上传证书只能提醒到期；ACME/自签可显式启用自动续期，窗口按实际有效期计算，尚未接入 ARI；失败续期可人工重新 issue/renew，不宣称完整自动退避已实现。网站首次发布 HTTPS 时，材料缺失或过期可调用同一可追踪签发流程，内部等待（或等待已有执行）取得材料后再继续部署；管理员 HTTP 创建/签发接口不等待。上传材料也在后台校验并导入；编辑既有配置不会自动签发。证书目标分别为 Agent 目录、云 CDN、更新脚本，各自记录 desired/applied 版本与结果。证书新建只接受单个域名或泛域名，规范化域名派生名称；历史 ID、材料、执行与引用不变，已有多域名保留原集合。同步任务归属对应域名证书展示。目录目标可选单机或集群：中心解析当前全部成员及 Agent 绑定，预检后按机器独立派发，以任务 revision、证书版本、机器和 Agent 去重；逐机回执均核对当前版本与指纹后才整体 applied。持续授权补齐新证书和新增成员，失败/unknown 不自动重放；显式 retry 保留成功成员，unknown 须先现场 inspect。
 
 ### 33.6 云服务、脚本与凭据边界
 
-首批云目标覆盖阿里云、腾讯云、火山引擎 CDN HTTPS 域名。阿里 CDN 直接部署 PEM；腾讯 SSL 上传后更新 CDN；火山证书中心上传后部署 CDN。云映射保留远端证书ID，上传/绑定/逐域回读分别核实；HTTP 200、上传成功或某一域成功不替代全部目标生效。云凭据、ACME 账号密钥只由中心加密使用。证书私钥可由有效管理员显式点击独立 POST 附件下载，按请求从加密版本解密，不进入查看 JSON、普通资源、日志、URL 或 AI/工具；复用会话及同源检查，查看和下载响应 no-store，附件文件名仅使用安全 ID/版本。目录按受管版本落盘并切换指针，私钥权限受限。更新脚本由管理员固定 Agent、解释器、正文、显式环境和超时；正文与环境加密，不在普通摘要回显，也不送 AI。脚本通过证书临时文件路径及版本元数据获得材料，具有 Agent 本机权限，无沙箱承诺。
+首批云目标覆盖阿里云、腾讯云、火山引擎 CDN HTTPS 域名。阿里 CDN 直接部署 PEM；腾讯 SSL 上传后更新 CDN；火山证书中心上传后部署 CDN。云映射保留远端证书ID，上传/绑定/逐域回读分别核实；HTTP 200、上传成功或某一域成功不替代全部目标生效。云凭据、ACME 账号密钥只由中心加密使用。证书私钥可由有效管理员显式点击独立 POST 附件下载，按请求从加密版本解密，不进入查看 JSON、普通资源、日志、URL 或 AI/工具；复用会话及同源检查，查看和下载响应 no-store，附件文件名仅使用安全 ID/版本。目录按受管版本落盘并切换指针，私钥权限受限。更新脚本由管理员固定 Agent、解释器、正文、显式环境和超时；正文与环境加密，不在普通摘要回显，也不送 AI。脚本通过证书临时文件路径及版本元数据获得材料，具有 Agent 本机权限，无沙箱承诺。集群目录私有载荷返回前，中心重查当前集群成员、机器与 Agent 绑定、Agent 未移除、证书当前版本、任务 revision 和执行授权；离群、换绑、撤权或旧版本拒绝读取。已交付节点的材料不能远程撤回，迟到的旧配置/版本/离群成员回执不覆盖当前逐机聚合。普通资源摘要不复制逐机私有材料，复用现有 control + lease 与加密快照，不新增节点协议。
 
 ### 33.7 幂等、未知结果与恢复
 

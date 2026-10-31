@@ -1,0 +1,44 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository_sections": [
+    "docs/system-design.md#33.5",
+    "docs/system-design.md#33.6",
+    "docs/system-design.md#33-control-plane"
+  ],
+  "saved": true,
+  "readback": [
+    {
+      "blockId": "ops033-body-5",
+      "seq": 895,
+      "version": 896,
+      "matched": true
+    },
+    {
+      "blockId": "ops033-body-6",
+      "seq": 895,
+      "version": 896,
+      "matched": true
+    },
+    {
+      "blockId": "ops033-control-plane-native",
+      "seq": 895,
+      "version": 896,
+      "matched": true,
+      "nodes": 11,
+      "edges": 14
+    }
+  ],
+  "diagram": {
+    "node_ids_preserved": true,
+    "edge_ids_and_endpoints_preserved": true,
+    "updated_node_labels": [
+      "ops033-db",
+      "ops033-job"
+    ],
+    "updated_edge_label": "ops033-edge-5",
+    "unrelated_nodes_unchanged": true,
+    "unrelated_edges_unchanged": true,
+    "geometry_and_styles_preserved": true
+  },
+  "unrelated_blocks": "Only the two target paragraphs and existing control-plane graph labels were updated."
+}
