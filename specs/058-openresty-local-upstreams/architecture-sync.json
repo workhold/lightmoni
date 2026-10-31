@@ -1,0 +1,28 @@
+{
+  "document_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository_sections": [
+    "42.4",
+    "42.5"
+  ],
+  "before_seq": 891,
+  "write_seq": 892,
+  "readback_seq": [
+    892,
+    892,
+    892
+  ],
+  "saved": true,
+  "text_matches": {
+    "gateway": true,
+    "upstream_rule": true
+  },
+  "native_diagram": {
+    "block_id": "cluster042-baseline-model",
+    "nodes": 8,
+    "edges": 6,
+    "full_block_unchanged": true,
+    "nodes_unchanged": true,
+    "edges_unchanged": true
+  },
+  "scope": "仅在42.4末尾追加逐网关配置/签名规则，并在42.5后插入同机上游规则；其余内容和原生图块未写入。"
+}

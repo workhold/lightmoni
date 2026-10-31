@@ -1687,7 +1687,12 @@ export function createClusterWorkloads(
       probe_port: p?.host_port,
     };
   }
-  function siteBundle(site: PlatformResource, cid: string, preview = false) {
+  function siteBundle(
+    site: PlatformResource,
+    cid: string,
+    preview = false,
+    gatewayMachineID?: string,
+  ) {
     return site.spec.bindings.flatMap((b: Row, n: number) => {
       const domains = b.domains.filter((domain: string) =>
         domainClusters(site.spec, domain, websiteClusters(site)).includes(cid),
@@ -1718,14 +1723,18 @@ export function createClusterWorkloads(
             (p: Row) => p.name === target.port_name,
           );
           if (!p) fail(400, "application_port_not_found");
-          out.upstreams = endpoints(app.id, p.name, cid).map(
-            (e) =>
+          out.upstreams = endpoints(app.id, p.name, cid).map((e) => {
+            // OpenResty uses host networking, so local published ports use loopback.
+            const host =
+              e.machine_id === gatewayMachineID ? "127.0.0.1" : e.ip;
+            return (
               (e.app_protocol === "https" ? "https" : "http") +
               "://" +
-              (isIP(e.ip) === 6 ? "[" + e.ip + "]" : e.ip) +
+              (isIP(host) === 6 ? "[" + host + "]" : host) +
               ":" +
-              e.port,
-          );
+              e.port
+            );
+          });
           out.unavailable = !out.upstreams.length;
         } else if (target?.target === "proxy") out.upstreams = target.upstreams;
         else {
@@ -1776,7 +1785,7 @@ export function createClusterWorkloads(
     );
     return d ? store.get(d.application_id, "application") : undefined;
   };
-  function gatewayConfig(a: PlatformResource) {
+  function gatewayConfig(a: PlatformResource, gateway: Row) {
     const sites: Row[] = [],
       revisions: Row = {},
       enabled: Row = {},
@@ -1787,7 +1796,8 @@ export function createClusterWorkloads(
       const site = desired(current, cid);
       revisions[site.id] = site.revision;
       enabled[site.id] = !!d.enabled;
-      if (d.enabled) sites.push(...siteBundle(site, cid));
+      if (d.enabled)
+        sites.push(...siteBundle(site, cid, false, gateway.machine_id));
     }
     return {
       image: a.spec.image,
@@ -1808,7 +1818,7 @@ export function createClusterWorkloads(
     force = false,
   ) {
     if (a.spec.role === "openresty") {
-      const config = gatewayConfig(a),
+      const config = gatewayConfig(a, i),
         signature = hash(JSON.stringify(config));
       if (
         !force &&

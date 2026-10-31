@@ -8,6 +8,7 @@ import { Router, fail } from "../src/shared/http.js";
 import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
 import { catalogInstallation } from "../src/ops/catalog.js";
+import { renderGateway } from "../src/operations/platform.js";
 import type { Dependencies } from "../src/shared/types.js";
 async function fixture(t: any, fetcher?: typeof fetch) {
   const db = new DB(":memory:");
@@ -713,6 +714,231 @@ test("managed website discovers service deployments and validates live traffic p
     /application_port_not_found/,
   );
 });
+
+for (const protocol of ["http", "https"]) {
+  test(`${protocol} application upstreams use loopback only on the target gateway machine`, async (t) => {
+    const f = await fixture(t),
+      c = f.createCluster();
+    f.store.update(
+      c.id,
+      c.revision,
+      c.name,
+      {
+        ...c.spec,
+        nodes: c.spec.nodes.map((n: any) => ({
+          ...n,
+          address: n.machine_id === "mb" ? "fd00::2" : n.address,
+        })),
+      },
+      "admin",
+    );
+    const app = f.app(c, {
+      machine_ids: ["ma", "mb"],
+      ports: [
+        {
+          name: "http",
+          container_port: 8080,
+          host_port: 0,
+          protocol: "tcp",
+          app_protocol: protocol,
+        },
+        {
+          name: "admin",
+          container_port: 9090,
+          host_port: 0,
+          protocol: "tcp",
+          app_protocol: "http",
+        },
+      ],
+    });
+    assert.equal((await f.action(app, "deploy")).status, 202);
+    f.finish("a");
+    f.finish("b");
+    const discovery = await f.req(
+      "/resources/" + app.id + "/endpoints?cluster_id=" + c.id,
+    );
+    assert.equal(discovery.status, 200);
+    const discovered = discovery.body.endpoints;
+    const port = (machineID: string, name: string) =>
+      discovered.find(
+        (e: any) => e.machine_id === machineID && e.port_name === name,
+      ).port;
+    assert.deepEqual(
+      discovered
+        .filter((e: any) => e.port_name === "http")
+        .map((e: any) => e.ip)
+        .sort(),
+      ["10.0.0.1", "fd00::2"],
+    );
+    const resty = f.store.create(
+      "application",
+      "Entry",
+      catalogInstallation("openresty", {
+        deployments: [{ cluster_id: c.id, machine_ids: ["ma", "mb"] }],
+      }).spec,
+      "admin",
+    );
+    await f.action(resty, "deploy");
+    f.finish("a");
+    f.finish("b");
+    const managed = f.store.create(
+      "website",
+      "Managed",
+      {
+        routing_mode: "managed",
+        service_application_id: app.id,
+        service_port_name: "http",
+        dns_record_mode: "address",
+        bindings: [
+          { domains: ["managed.example.test"], locations: [{ path: "/" }] },
+        ],
+      },
+      "admin",
+    );
+    await f.action(managed, "deploy");
+    const a = f.finish("a").payload.resource.config,
+      b = f.finish("b").payload.resource.config;
+    assert.deepEqual(
+      a.sites[0].locations[0].upstreams.sort(),
+      [
+        `${protocol}://127.0.0.1:${port("ma", "http")}`,
+        `${protocol}://[fd00::2]:${port("mb", "http")}`,
+      ].sort(),
+    );
+    assert.deepEqual(
+      b.sites[0].locations[0].upstreams.sort(),
+      [
+        `${protocol}://10.0.0.1:${port("ma", "http")}`,
+        `${protocol}://127.0.0.1:${port("mb", "http")}`,
+      ].sort(),
+    );
+    const rendered = renderGateway(a, "test");
+    assert.ok(rendered.includes(`server 127.0.0.1:${port("ma", "http")} `));
+    assert.ok(rendered.includes(`server [fd00::2]:${port("mb", "http")} `));
+    assert.ok(rendered.includes(`proxy_pass ${protocol}://`));
+    const preview = await f.req(
+      "/resources/" + managed.id + "/nginx?cluster_id=" + c.id,
+    );
+    assert.equal(preview.status, 200);
+    assert.ok(
+      preview.body.config.includes(`server 10.0.0.1:${port("ma", "http")} `),
+    );
+    assert.ok(
+      preview.body.config.includes(`server [fd00::2]:${port("mb", "http")} `),
+    );
+    assert.ok(!preview.body.config.includes("server 127.0.0.1:"));
+
+    const manual = f.store.create(
+      "website",
+      "Manual",
+      {
+        cluster_ids: [c.id],
+        dns_record_mode: "address",
+        bindings: [
+          {
+            domains: ["manual.example.test"],
+            locations: [
+              {
+                path: "/app",
+                cluster_targets: [
+                  {
+                    cluster_id: c.id,
+                    target: "application",
+                    application_id: app.id,
+                    port_name: "admin",
+                  },
+                ],
+              },
+              {
+                path: "/literal",
+                cluster_targets: [
+                  {
+                    cluster_id: c.id,
+                    target: "proxy",
+                    upstreams: ["http://10.0.0.1:9191"],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      "admin",
+    );
+    await f.action(manual, "deploy");
+    const ma = f.finish("a").payload.resource.config,
+      mb = f.finish("b").payload.resource.config;
+    const routes = (config: any) =>
+      config.sites.find((s: any) => s.domains.includes("manual.example.test"))
+        .locations;
+    assert.deepEqual(
+      routes(ma)[0].upstreams.sort(),
+      [
+        `http://127.0.0.1:${port("ma", "admin")}`,
+        `http://[fd00::2]:${port("mb", "admin")}`,
+      ].sort(),
+    );
+    assert.deepEqual(
+      routes(mb)[0].upstreams.sort(),
+      [
+        `http://10.0.0.1:${port("ma", "admin")}`,
+        `http://127.0.0.1:${port("mb", "admin")}`,
+      ].sort(),
+    );
+    for (const config of [ma, mb])
+      assert.deepEqual(
+        routes(config)[1].upstreams,
+        manual.spec.bindings[0].locations[1].cluster_targets[0].upstreams,
+      );
+    const signatures = f.db.all<any>(
+      "SELECT last_bundle_sig FROM ops_cluster_instances WHERE owner_id=?",
+      resty.id,
+    );
+    assert.equal(signatures.length, 2);
+    assert.notEqual(
+      signatures[0].last_bundle_sig,
+      signatures[1].last_bundle_sig,
+    );
+    await f.platform.tick();
+    assert.ok(!f.jobs.claim("a", ["operations.platform"]));
+    assert.ok(!f.jobs.claim("b", ["operations.platform"]));
+
+    // Health changes must refresh each gateway's own bundle, including local removal.
+    f.db.run(
+      "UPDATE ops_cluster_instances SET healthy=0 WHERE owner_id=? AND machine_id='ma'",
+      app.id,
+    );
+    await f.platform.tick();
+    const unhealthyA = f.finish("a").payload.resource.config,
+      unhealthyB = f.finish("b").payload.resource.config;
+    assert.deepEqual(
+      unhealthyA.sites.find((s: any) =>
+        s.domains.includes("managed.example.test"),
+      ).locations[0].upstreams,
+      [`${protocol}://[fd00::2]:${port("mb", "http")}`],
+    );
+    assert.deepEqual(
+      unhealthyB.sites.find((s: any) =>
+        s.domains.includes("managed.example.test"),
+      ).locations[0].upstreams,
+      [`${protocol}://127.0.0.1:${port("mb", "http")}`],
+    );
+    f.db.run(
+      "UPDATE ops_cluster_instances SET healthy=0 WHERE owner_id=?",
+      app.id,
+    );
+    await f.platform.tick();
+    for (const agent of ["a", "b"]) {
+      const config = f.finish(agent).payload.resource.config;
+      const location = config.sites.find((s: any) =>
+        s.domains.includes("managed.example.test"),
+      ).locations[0];
+      assert.deepEqual(location.upstreams, []);
+      assert.equal(location.unavailable, true);
+      assert.match(renderGateway(config, "empty"), /return 503;/);
+    }
+  });
+}
 
 function dnsMock() {
   let seq = 0;
