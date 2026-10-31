@@ -1,3 +1,4 @@
+import ApplicationMonitoring from "./ApplicationMonitoring";
 import {MonitoringScope,type PublishedScope} from '../shared/monitoring-context';
 import {lazy,Suspense,useEffect,useMemo,useState} from 'react';
 import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
@@ -23,7 +24,7 @@ const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then
 const OperationsPage=lazy(()=>import('./OperationsPage'));
 const HostsNodesPage=lazy(()=>import('./HostsNodesPage'));
 const DataManagementPage=lazy(()=>import('./DataManagementPage'));
-const ServiceDeploymentsPage=lazy(()=>import('./ServiceDeploymentsPage'));
+const ConnectionCredentialsPage=lazy(()=>import('./ConnectionCredentialsPage'));
 
 function ClaimLanding(){const {token}=useParams(),{search}=useLocation(),params=new URLSearchParams(search);params.set('claim',token??'');return <Navigate to={'/alerts?'+params} replace/>}
 
@@ -42,6 +43,7 @@ export default function Root(){
  const contextPageTitle=currentLink?.pageLabel??'监控工作台';
  const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:contextPageTitle}}),[publishedScope,location.pathname,location.search,contextPageTitle]);
  const[navCollapsed,setNavCollapsed]=useState(()=>{try{const saved=localStorage.getItem('lightmoni.nav.collapsed');return saved===null?window.innerWidth<1100:saved==='true'}catch{return window.innerWidth<1100}});
+ useEffect(()=>{const narrow=window.matchMedia('(max-width:680px)');const adapt=()=>{if(narrow.matches){setNavCollapsed(true);return;}try{const saved=localStorage.getItem('lightmoni.nav.collapsed');setNavCollapsed(saved===null?window.innerWidth<1100:saved==='true')}catch{setNavCollapsed(window.innerWidth<1100)}};adapt();narrow.addEventListener('change',adapt);return()=>narrow.removeEventListener('change',adapt)},[]);
  function toggleNavigation(){setNavCollapsed(value=>{try{localStorage.setItem('lightmoni.nav.collapsed',String(!value))}catch{}return !value})}
  useEffect(()=>{if(location.pathname==='/settings')setAssistant(false)},[location.pathname]);
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
@@ -60,8 +62,11 @@ export default function Root(){
     <Route path="/data-management" element={<DataManagementPage user={user}/>}/>
     <Route path="/agents" element={<HostsNodesPage user={user}/>}/>
     <Route path="/machines" element={<HostsNodesPage user={user}/>}/>
-    <Route path="/services" element={user.role==='admin'?<ServiceDeploymentsPage user={user}/>:<Navigate to="/settings" replace/>}/>
-    <Route path="/operations" element={user.role==='admin'?<OperationsPage user={user}/>:<Navigate to="/settings" replace/>}/>
+    <Route path="/connection-credentials" element={user.role==='admin'?<ConnectionCredentialsPage/>:<Navigate to="/settings" replace/>}/>
+    <Route path="/services" element={<Navigate to={user.role==='admin'?"/applications":"/settings"} replace/>}/>
+    <Route path="/operations" element={<Navigate to="/clusters" replace/>}/>
+    {["/clusters","/applications","/websites","/domains","/certificates"].map(path=><Route key={path} path={path} element={user.role==='admin'?<OperationsPage user={user}/>:<Navigate to="/settings" replace/>}/>)}
+    <Route path="/applications/:id/monitoring" element={user.role==='admin'?<ApplicationMonitoring/>:<Navigate to="/settings" replace/>}/>
     <Route path="/settings" element={<PersonalSettings user={user} onUserUpdated={setUser}/>}/>
     <Route path="/admin" element={user.role==='admin'?<AdminPage user={user}/>:<Navigate to="/settings" replace/>}/>
     <Route path="/assistant" element={<AssistantPage/>}/>

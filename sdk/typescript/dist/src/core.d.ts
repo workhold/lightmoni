@@ -1,3 +1,4 @@
+import { CenterEndpoints } from "./endpoints.js";
 import { Distribution } from './distribution.js';
 import { type LogSamplingPolicy } from './sampling.js';
 export type { LogSamplingPolicy, LogRule, LogCondition, LogExcludeRule, SDKConfig } from './sampling.js';
@@ -148,6 +149,8 @@ declare class State {
     readonly stats: Stats;
     readonly changed: Set<() => void>;
     readonly exporter: Exporter;
+    readonly endpoints?: CenterEndpoints;
+    endpointInterval?: ReturnType<typeof setInterval>;
     localSampling: Record<string, LogSamplingPolicy>;
     remoteSampling: Record<string, LogSamplingPolicy>;
     remoteDisabled: boolean;
@@ -250,6 +253,13 @@ export declare class LightMoni {
     updateLogSampling(policies: Record<string, LogSamplingPolicy>): void;
     setReportingEnabled(enabled: boolean): void;
     refreshConfig(): Promise<void>;
+    refreshEndpoints(): Promise<void>;
+    endpointStatus(): {
+        endpoint: string;
+        scope: "internal" | "public";
+        revision: string;
+        error: string;
+    } | undefined;
     /** Trace metadata is optional and separate from attrs; no context creates no trace. */
     log(level: string, body: string, attrs?: Attributes, context?: TraceContext | undefined): void;
     startSpan(name: string, attrs?: Attributes, parent?: TraceContext | null | undefined): Span;
@@ -279,6 +289,7 @@ export declare function injectTrace(context: TraceContext): Record<string, strin
 export declare class HTTPExporter implements Exporter {
     private readonly endpoint;
     private readonly key;
-    constructor(endpoint: string, key?: () => string | undefined);
+    private readonly endpoints?;
+    constructor(endpoint: string, key?: () => string | undefined, endpoints?: CenterEndpoints | undefined);
     deliver(batch: FrozenBatch, signal: AbortSignal): Promise<void>;
 }

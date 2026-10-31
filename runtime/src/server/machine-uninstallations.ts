@@ -82,7 +82,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
   };
   const assertPlanTarget = (operation: any) => {
     const machine = access.get(operation.machine_id), plan = JSON.parse(operation.plan_json);
-    if (plan.target_revision !== access.revision(machine) || machine.agent_id !== plan.machine.agent_id) fail(409, "主机连接或节点关联已变化，请重新核对");
+    if (plan.target_revision !== access.revision(machine) || machine.agent_id !== plan.machine.agent_id || machine.name !== plan.machine.name) fail(409, "主机名称、连接或节点关联已变化，请重新核对");
     knownAgent(machine, operation.agent_id);
     return machine;
   };

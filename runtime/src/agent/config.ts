@@ -72,7 +72,7 @@ export const validTable = (s: string) =>
   /^[a-z][a-z0-9_]{0,47}$/.test(s) &&
   !/^(log|metric|trace)_/.test(s);
 export const systemTable = (s: string) =>
-  ["lightmoni_center", "lightmoni_agent", "lightmoni_sdk"].includes(s);
+  ["lightmoni", "lightmoni_center", "lightmoni_agent", "lightmoni_sdk", "lightmoni_application"].includes(s);
 export const digest = (v: Uint8Array | string) =>
   createHash("sha256").update(v).digest("hex");
 export function defaultConfig(): Config {

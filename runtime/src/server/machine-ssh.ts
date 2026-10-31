@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Client } from "ssh2";
 import { hostKeyAlgorithms } from "./machine-host-keys.js";
+import { MAX_NETWORK_ADDRESSES, normalizeNetworkAddresses, type HostNetworkAddress } from "../shared/host-network.js";
 import type { MachineSummary } from "./managed-machines.js";
 
 export interface SSHRunInput {
@@ -133,6 +134,60 @@ async function fixedCommandSSHRunner(input: SSHRunInput) {
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 export const CHECK_NAMES = ["linux", "supported_arch", "curl", "tar", "gzip", "sha256sum", "systemd", "install_privilege", "platform_https"] as const;
 export type SSHChecks = Record<typeof CHECK_NAMES[number], boolean>;
+export interface SSHDiscovery {
+  status: "succeeded" | "unavailable";
+  hostname: string;
+  addresses: HostNetworkAddress[];
+  observed_at: string;
+}
+export const unavailableSSHDiscovery = (): SSHDiscovery => ({ status: "unavailable", hostname: "", addresses: [], observed_at: "" });
+const DISCOVERY_BEGIN = "LMNET_BEGIN=1", DISCOVERY_END = "LMNET_END=1";
+const MAX_DISCOVERY_JSON_BYTES = 8192;
+
+/** Optional, read-only metadata in the same authenticated exec channel. */
+function discoveryCommand(): string[] {
+  return [
+    `printf '${DISCOVERY_BEGIN}\\n'`,
+    // These tools are optional. Never install them, start another SSH session,
+    // or let a slow discovery command consume the main preflight deadline.
+    "if command -v ip >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 && command -v head >/dev/null 2>&1 && command -v od >/dev/null 2>&1 && command -v tr >/dev/null 2>&1; then",
+    "  LM_SSH_DISCOVERY_HOST=$(timeout 2 uname -n 2>/dev/null | head -c 129 | od -An -tx1 | tr -d ' \\n')",
+    `  LM_SSH_DISCOVERY_ADDR=$(timeout 3 ip -j -brief address show 2>/dev/null | head -c ${MAX_DISCOVERY_JSON_BYTES + 1})`,
+    "  printf 'hostname_hex=%s\\naddresses_json=%s\\n' \"$LM_SSH_DISCOVERY_HOST\" \"$LM_SSH_DISCOVERY_ADDR\"",
+    "fi",
+    `printf '${DISCOVERY_END}\\n'`,
+    ":",
+  ];
+}
+
+function parseDiscovery(lines: string[], observedAt: string): SSHDiscovery {
+  try {
+    if (lines.at(-1) !== DISCOVERY_END || Buffer.byteLength(lines.join("\n")) > MAX_DISCOVERY_JSON_BYTES + 512) return unavailableSSHDiscovery();
+    const hex = /^hostname_hex=([a-f0-9]+)$/.exec(lines[0] ?? "")?.[1];
+    if (!hex || hex.length % 2 || hex.length > 258) return unavailableSSHDiscovery();
+    const hostname = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(hex, "hex")).trim();
+    if (!hostname || Buffer.byteLength(hostname) > 128 || /[\u0000-\u001f\u007f-\u009f]/.test(hostname)) return unavailableSSHDiscovery();
+    const serialized = lines.slice(1, -1).join("\n");
+    if (!serialized.startsWith("addresses_json=")) return unavailableSSHDiscovery();
+    const json = serialized.slice("addresses_json=".length);
+    if (Buffer.byteLength(json) > MAX_DISCOVERY_JSON_BYTES) return unavailableSSHDiscovery();
+    const inventory = JSON.parse(json);
+    if (!Array.isArray(inventory) || inventory.length > 128) return unavailableSSHDiscovery();
+    const values: { interface: string; address: string; family?: "IPv4" | "IPv6" }[] = [];
+    for (const item of inventory) {
+      if (!item || typeof item !== "object" || typeof item.ifname !== "string" || !Array.isArray(item.addr_info)) return unavailableSSHDiscovery();
+      for (const address of item.addr_info) {
+        if (!address || typeof address !== "object" || address.family !== undefined && !["inet", "inet6"].includes(address.family) || typeof address.local !== "string") return unavailableSSHDiscovery();
+        values.push({ interface: item.ifname, address: address.local,
+          ...(address.family === undefined ? {} : { family: address.family === "inet" ? "IPv4" : "IPv6" }) });
+        if (values.length > MAX_NETWORK_ADDRESSES) return unavailableSSHDiscovery();
+      }
+    }
+    if (!Number.isFinite(Date.parse(observedAt))) return unavailableSSHDiscovery();
+    return { status: "succeeded", hostname, addresses: normalizeNetworkAddresses(values)!, observed_at: observedAt };
+  } catch { return unavailableSSHDiscovery(); }
+}
+
 export function preflightCommand(endpoint: string) {
   const url = new URL(endpoint);
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error("platform HTTPS URL required");
@@ -147,11 +202,13 @@ export function preflightCommand(endpoint: string) {
     "if test \"$(id -u)\" = 0 || sudo -n /bin/sh -c 'test \"$(id -u)\" = 0' </dev/null >/dev/null 2>&1; then echo 'install_privilege=1'; else echo 'install_privilege=0'; fi",
     "if test \"$(id -u)\" = 0; then sh -c 'if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json; then echo agent_installation=present; else echo agent_installation=absent; fi'; elif sudo -n /bin/sh -c 'if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json; then echo agent_installation=present; else echo agent_installation=absent; fi' </dev/null 2>/dev/null; then :; else echo agent_installation=unknown; fi",
     url.protocol === "https:" ? `if curl --fail --silent --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 10 --output /dev/null ${quote(health)} </dev/null 2>/dev/null; then echo 'platform_https=1'; else echo 'platform_https=0'; fi` : "echo 'platform_https=0'",
+    ...discoveryCommand(),
   ].join("\n");
 }
-export function parsePreflight(output: string) {
+export function parsePreflight(output: string, observedAt = new Date().toISOString()) {
+  const lines = output.trim().split(/\r?\n/), optionalAt = lines.indexOf(DISCOVERY_BEGIN);
   const values = new Map<string, string>();
-  for (const line of output.trim().split(/\r?\n/)) {
+  for (const line of optionalAt < 0 ? lines : lines.slice(0, optionalAt)) {
     const match = /^([a-zA-Z_][a-zA-Z0-9_]*)=([a-z0-9]+)$/.exec(line);
     if (!match || values.has(match[1])) throw new SSHError("invalid_response");
     values.set(match[1], match[2]);
@@ -164,5 +221,6 @@ export function parsePreflight(output: string) {
       CHECK_NAMES.some(name => !["0", "1"].includes(values.get(name) ?? ""))) throw new SSHError("invalid_response");
   const checks = Object.fromEntries(CHECK_NAMES.map(name => [name, values.get(name) === "1"])) as SSHChecks;
   if (checks.linux !== (values.get("platform") === "linux") || checks.supported_arch !== (values.get("arch") !== "unsupported")) throw new SSHError("invalid_response");
-  return { platform: values.get("platform")!, arch: values.get("arch")!, agent_installation: { state: installation as "present" | "absent" | "unknown" }, checks, ready: Object.values(checks).every(Boolean) };
+  return { platform: values.get("platform")!, arch: values.get("arch")!, agent_installation: { state: installation as "present" | "absent" | "unknown" }, checks, ready: Object.values(checks).every(Boolean),
+    discovery: optionalAt < 0 ? unavailableSSHDiscovery() : parseDiscovery(lines.slice(optionalAt + 1), observedAt) };
 }

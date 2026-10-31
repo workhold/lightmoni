@@ -432,9 +432,10 @@ export function registerAgentCredentials(
       }
       // Activation claims the reserved host in the same writer transaction.
       // Concurrent tokens cannot activate different identities on one host.
-      const claimed = db.run("UPDATE managed_machines SET agent_id=?,agent_last_seen='' WHERE id=? AND agent_id=?", row.agent_id, row.machine_id, row.replaces_agent_id);
+      const claimed = db.run("UPDATE managed_machines SET agent_id=?,agent_last_seen='',observed_hostname='' WHERE id=? AND agent_id=?", row.agent_id, row.machine_id, row.replaces_agent_id);
       if (!claimed.changes) fail(409, "registered_host_required: 安装目标身份已变化");
-      // Registration subsequently records the Agent's observed host metadata.
+      // Registration subsequently records this Agent's observed host metadata;
+      // the replaced Agent's hostname must not cross the activation boundary.
     });
     ctx.json({
       agent_id: row.agent_id,

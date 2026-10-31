@@ -1,0 +1,25 @@
+{
+  "passed": 16,
+  "checks": [
+    "central library lists names, public fingerprints, expiry and associated hosts without secrets",
+    "renaming changes metadata without requiring or resending secret material",
+    "new credentials default to six hours; closing and reopening clears secret material",
+    "the Host column shows SSH address, IPv4 and IPv6 private addresses, and platform-observed source separately",
+    "host details show per-interface addresses and allow selecting a default credential",
+    "SSH checks use the bound default rather than asking the user to choose again",
+    "opening a terminal connects automatically with the host default credential",
+    "Agent planning uses the default credential and retains explicit installation approval",
+    "registration can bind an existing library credential without copying secrets or implicitly installing Agent",
+    "manual credential names do not change host names, and switching credential source discards hidden secrets",
+    "host unlinking affects only its binding and does not revoke the central credential",
+    "global revocation names affected hosts and requires confirmation; cancelling causes no mutation",
+    "an invalid saved default does not silently fall back to another credential",
+    "English credential creation remains usable at a 390-pixel viewport",
+    "Chinese host registration with new or existing credential selection fits a 390-pixel viewport",
+    "members cannot open the credential library or load its metadata"
+  ],
+  "page_errors": [],
+  "unexpected_requests": [],
+  "screenshots": "/Users/liminghan/Documents/lightmoni/lightmoni/artifacts/screenshots/specs/051-ssh-host-network-discovery/evidence/credentials-ui/evidence",
+  "fixture_only": true
+}

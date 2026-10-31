@@ -76,7 +76,7 @@ export function registerInstall(
     );
   d.router.get("/api/v1/sdk-install", (c) => {
     const settings = reportingSettings(d),
-      base = settings.effective_endpoint;
+      base = settings.endpoints.find((e: any) => e.scope === "public" && e.id===settings.default_endpoint_id)?.url ?? settings.endpoints.find((e: any) => e.scope === "public")?.url ?? settings.effective_endpoint;
     c.json({
       version,
       endpoint: base,
@@ -90,7 +90,7 @@ export function registerInstall(
   });
   d.router.get("/api/v1/agent-install", (c) => {
     const settings = reportingSettings(d),
-      base = settings.effective_endpoint,
+      base = settings.endpoints.find((e: any) => e.scope === "public" && e.id===settings.default_endpoint_id)?.url ?? settings.endpoints.find((e: any) => e.scope === "public")?.url ?? settings.effective_endpoint,
       bundles = existsSync(directory)
         ? readdirSync(directory)
             .filter((v) => /^lightmoni-agent_.*\.tar\.gz$/.test(v))

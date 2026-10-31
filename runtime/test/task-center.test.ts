@@ -163,7 +163,7 @@ test("cancellation waits for Agent receipt, removed targets cancel before claim 
 
 test("interval scheduling persists next due, skips overlaps and missed periods, and honors host overrides", () => {
   const f = fixture(); try {
-    f.task("periodic", { schedule: { mode: "interval", interval_seconds: 10 } });
+    f.task("periodic", { schedule: { mode: "interval", interval_seconds: 10 }, execution_policy: { queue_timeout_seconds: 86400 } });
     f.store.tick(); assert.equal(f.store.list().length, 0);
     f.advance(10); f.store.tick(); assert.equal(f.store.list().length, 1);
     const queued = f.store.list()[0]; assert.equal(queued.trigger, "schedule");

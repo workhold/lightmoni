@@ -1,5 +1,6 @@
 # 04 · SDK 开发任务书
 
+> 历史规格：SDK→Agent路径已由[SDD 050](../../specs/050-center-endpoint-discovery/spec.md)移除，当前SDK仅直连中心。
 2026-10-20整合更新：用户指定SDK与中心上报采用本地实现。当前接入和发布为Go、Node.js/TypeScript、Rust、Python四语言record SDK，默认30秒、七档周期；其他历史语言保留兼容源码。以下2026-10-19发布范围为整合前记录，本次行为与验收以[SDD 011整合说明](../../specs/011-aligned-metric-windows/main-integration.md)为准。
 
 状态：2026-10-19 当前发布 TypeScript/JavaScript、Python、Ruby；PHP 原生 SDK 下线，Go/Rust 仅保留源码、后续支持，不生成本次发布包或接入页安装选项，未纳本次发布验收。以下早期 Go/Node 与多语言测试结果为历史记录，不能替代当前版本验收。以 [产品约束](../brief.md) 和 [公共契约](../contracts.md) 为准。

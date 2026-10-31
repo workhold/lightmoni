@@ -1,4 +1,4 @@
-import {reusableMachineCredential} from './machine-credentials';
+import {reusableMachineCredential,defaultMachineCredential} from './machine-credentials';
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Descriptions,Form,Modal,Popconfirm,Select,Space,Typography} from '../shared/ui';
 import {api} from '../shared/api';
@@ -12,8 +12,8 @@ export type AgentUninstallation={
  receipt?:{agent_id?:string;remote_removed?:boolean;data_retained?:boolean;credentials_revoked?:boolean;revoked_credentials?:number;verified_at?:string;stages?:string[];service_stopped?:boolean;remote_unchanged?:boolean};
  error?:string;created_at?:string;finished_at?:string;
 };
-type Credential={id:string;method:string;retention?:string;expires_at:string;secret_fingerprint:string;revoked_at?:string;secret_cleared_at?:string};
-type Props={machine:{id:string;name:string};credentials:Credential[];existing?:AgentUninstallation;onClose:()=>void;onRefresh:()=>Promise<void>};
+type Credential={name?:string;is_default?:boolean;id:string;method:string;retention?:string;expires_at:string;secret_fingerprint:string;revoked_at?:string;secret_cleared_at?:string};
+type Props={machine:{default_credential_id?:string;id:string;name:string};credentials:Credential[];existing?:AgentUninstallation;onClose:()=>void;onRefresh:()=>Promise<void>};
 
 export default function MachineAgentUninstallDialog({machine,credentials,existing,onClose,onRefresh}:Props){
  const {t,language}=useI18n();
@@ -105,8 +105,8 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
   <Alert type="warning" showIcon className="lm-machine-form-notice" title={t('仅卸载 Agent，保留数据','Remove the Agent and retain data')} description={t('停止并移除独立 Agent 服务和运行程序，保留配置、身份、缓存、服务用户及业务服务。远端移除经核实后撤销该节点 control/data 凭据；保留的旧凭据将失效，重装须先人工核查保留的旧身份，再重新 enrollment。网页不提供彻底清除数据。','Stop and remove the independent Agent service and runtime. Retain configuration, identity, cached telemetry, service user, and business services. Revoke the node control/data credentials after verified removal. Retained old credentials become invalid; reinstalling requires manual review of the retained old identity and a new enrollment. Data purging is not available here.')}/>
   {!record&&<>
    <p>{t('先使用固定只读检查核对远端身份与中心绑定，生成计划后再确认；此步骤不会卸载 Agent。','Run fixed read-only checks to match the remote identity to the platform binding, then review the saved plan. This step does not uninstall the Agent.')}</p>
-   {keys.length?<Form layout="vertical" onFinish={makePlan} disabled={busy} initialValues={{credential_id:keys.length===1?keys[0].id:undefined}}>
-    <Form.Item label={t('可复用 SSH 凭据','Reusable SSH credential')} name="credential_id" rules={[{required:true,message:t('请选择有效私钥或可复用密码','Select an active key or reusable password')}]}><Select options={keys.map(c=>({value:c.id,label:`${c.method==='password'?(c.retention==='permanent'?t('永久密码','Permanent password'):c.retention==='managed'?t('托管密码','Managed password'):t('临时密码','Temporary password')):t('SSH 私钥','SSH private key')} · ${c.secret_fingerprint||c.id} · ${c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)}`}))}/></Form.Item>
+   {keys.length?<Form layout="vertical" onFinish={makePlan} disabled={busy} initialValues={{credential_id:defaultMachineCredential(keys,machine.default_credential_id,reusableMachineCredential)}}>
+    <Form.Item label={t('可复用 SSH 凭据','Reusable SSH credential')} name="credential_id" rules={[{required:true,message:t('请选择有效私钥或可复用密码','Select an active key or reusable password')}]}><Select options={keys.map(c=>({value:c.id,label:`${c.name|| (c.method==='password'?(c.retention==='permanent'?t('永久密码','Permanent password'):c.retention==='managed'?t('托管密码','Managed password'):t('临时密码','Temporary password')):t('SSH 私钥','SSH private key'))} · ${c.secret_fingerprint||c.id} · ${c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)}`}))}/></Form.Item>
     <Button type="primary" htmlType="submit" loading={busy} block>{t('核对身份并生成卸载计划','Verify identity and create uninstall plan')}</Button>
    </Form>:<Alert type="info" showIcon title={t('卸载需要有效私钥或可复用密码','An active key or reusable password is required to uninstall')} description={t('请先添加有效私钥或临时、托管、永久密码；主机公钥由平台自动记录和校验。一次性密码不能用于自动卸载。','Add an active key or temporary, managed, or permanent password. The platform records and verifies the host public key automatically. Single-use passwords cannot be used for automatic removal.')}/>}
    {check&&<SSHCheckSummary result={check}/>}

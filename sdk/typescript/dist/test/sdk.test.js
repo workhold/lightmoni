@@ -173,7 +173,11 @@ test("cardinality overflow preserves total; SDK queue loss is visible", async ()
 });
 test("HTTP authentication can rotate global Key without losing frozen data", async () => {
     const ids = [];
-    const server = createServer((req, res) => { ids.push(String(req.headers["x-lightmoni-batch-id"])); req.resume(); if (req.headers.authorization !== "Bearer new-global-key") {
+    const server = createServer((req, res) => { if (req.url === "/v1/center-endpoints") {
+        res.writeHead(404);
+        res.end();
+        return;
+    } ids.push(String(req.headers["x-lightmoni-batch-id"])); req.resume(); if (req.headers.authorization !== "Bearer new-global-key") {
         res.writeHead(401);
         res.end();
         return;
@@ -197,7 +201,11 @@ test("HTTP authentication can rotate global Key without losing frozen data", asy
 });
 test("OTLP partial success is not retried or silently reported delivered", async () => {
     let calls = 0;
-    const server = createServer((req, res) => { calls++; req.resume(); res.setHeader("Content-Type", "application/json"); res.end('{"partialSuccess":{"rejectedDataPoints":"1"}}'); });
+    const server = createServer((req, res) => { if (req.url === "/v1/center-endpoints") {
+        res.writeHead(404);
+        res.end();
+        return;
+    } calls++; req.resume(); res.setHeader("Content-Type", "application/json"); res.end('{"partialSuccess":{"rejectedDataPoints":"1"}}'); });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     assert.ok(address && typeof address === "object");

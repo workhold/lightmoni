@@ -36,6 +36,7 @@ export interface AgentUpdateAccess {
   get(machineID: string): MachineSummary; idle(machineID: string): void; revision(machine: MachineSummary): string;
   credential(machineID: string, credentialID?: string): { machine: MachineSummary; credential: any };
   authentication(machineID: string, credential: any): { privateKey: string; password?: string };
+  markCredentialUsed(credentialID: string): void;
   busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
 }
 interface Options { downloadsDir: string; dataDir: string; credentials?: AgentCredentialStore; pollIntervalMs?: number; healthTimeoutMs?: number }
@@ -116,7 +117,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   const ssh = async (machine: MachineSummary, credential: any, command: string, signal: AbortSignal, stdin?: string, timeoutMs = 60_000) => {
     const output = await access.runner({ machine, credentialID: credential.id, ...access.authentication(machine.id, credential), command, signal: AbortSignal.any([signal, controller.signal]),
       port: machine.port, timeoutMs, ...(stdin == null ? {} : { stdin }) });
-    db.run("UPDATE machine_credentials SET last_used_at=? WHERE id=?", at(), credential.id);
+    access.markCredentialUsed(credential.id);
     return output;
   };
   const probe = async (machine: MachineSummary, credential: any, signal: AbortSignal) =>

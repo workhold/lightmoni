@@ -2,11 +2,11 @@ import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Modal,Select,Space,Table,Tag,Typography} from '../shared/ui';
 import {api,ApiError} from '../shared/api';
 import {useI18n} from '../shared/i18n';
-import {reusableMachineCredential} from './machine-credentials';
+import {defaultMachineCredential,reusableMachineCredential} from './machine-credentials';
 import {AgentUpdatePlanSummary} from './MachineAgentUpdateDialog';
 import {shortIdentity,updateIsActive,updateMessageText,updatePlanExpired,updateStatusColor,updateStatusText,type AgentRelease,type AgentRollout,type AgentUpdate,type AgentUpdateCredential} from './agent-update-model';
 
-export type AgentRolloutTarget={id:string;name:string;arch?:string};
+export type AgentRolloutTarget={id:string;name:string;arch?:string;default_credential_id?:string};
 type HostDetail={machine:AgentRolloutTarget;credentials:AgentUpdateCredential[]};
 type Props={targets?:AgentRolloutTarget[];existingID?:string;onClose:()=>void;onRefresh:()=>Promise<void>};
 const rolloutPath=(id?:string)=>`/agent-rollouts${id?`/${encodeURIComponent(id)}`:''}`;
@@ -15,18 +15,18 @@ export default function MachineAgentRolloutDialog({targets=[],existingID,onClose
  const {t,language}=useI18n(),[snapshot]=useState(()=>targets.map(target=>({...target})));
  const [records,setRecords]=useState<AgentRollout[]>([]),[record,setRecord]=useState<AgentRollout>(),[releases,setReleases]=useState<AgentRelease[]>([]),[hosts,setHosts]=useState<Record<string,HostDetail>>({}),[credentials,setCredentials]=useState<Record<string,string>>({}),[target,setTarget]=useState<string>();
  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[reviewed,setReviewed]=useState(false),[error,setError]=useState(''),[refreshNeeded,setRefreshNeeded]=useState(false),[uncertain,setUncertain]=useState(false),[historyMode,setHistoryMode]=useState(!targets.length),[itemRecords,setItemRecords]=useState<Record<string,AgentUpdate>>({}),[now,setNow]=useState(Date.now());
- const mounted=useRef(true),pending=useRef(false),recordRef=useRef(record);recordRef.current=record;
+ const mounted=useRef(true),pending=useRef(false),recordRef=useRef(record),request=useRef(0);recordRef.current=record;
  const err=(value:unknown)=>value instanceof Error?updateMessageText(value.message,t):t('操作失败','Operation failed');
  const refreshParent=async()=>{try{await onRefresh()}catch(e){if(mounted.current)setError(previous=>[previous,t('批次已保存，但主机列表刷新失败：','The rollout was saved, but the host list could not refresh: ')+err(e)].filter(Boolean).join(' '))}};
  const status=(value:string)=>({awaiting_approval:t('待审阅','Awaiting review'),running:t('正在逐台更新','Updating hosts in sequence'),paused:t('已暂停','Paused'),succeeded:t('升级完成','Rollout complete'),failed:t('升级失败','Rollout failed'),cancelled:t('已取消','Cancelled')}[value]||value);
  const color=(value:string)=>value==='succeeded'?'success':value==='failed'?'error':value==='paused'?'warning':value==='running'?'processing':'default';
- useEffect(()=>{mounted.current=true;return()=>{mounted.current=false}},[]);
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;request.current++}},[]);
  useEffect(()=>{if(!record||!['awaiting_approval','paused'].includes(record.status))return;setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer)},[record?.id,record?.status]);
- const loadItems=async(next:AgentRollout)=>{
+ const loadItems=async(next:AgentRollout,generation:number)=>{
   const results=await Promise.allSettled(next.items.filter(item=>item.update_id&&!item.update).map(async item=>[item.update_id!,await api<AgentUpdate>(`/machines/${encodeURIComponent(item.machine_id)}/agent-updates/${encodeURIComponent(item.update_id!)}`)] as const));
-  if(mounted.current&&recordRef.current?.id===next.id){const saved:Record<string,AgentUpdate>={};for(const result of results)if(result.status==='fulfilled')saved[result.value[0]]=result.value[1];setItemRecords(saved)}
+  if(mounted.current&&generation===request.current&&recordRef.current?.id===next.id){const saved:Record<string,AgentUpdate>={};for(const result of results)if(result.status==='fulfilled')saved[result.value[0]]=result.value[1];setItemRecords(saved)}
  };
- const accept=async(next:AgentRollout)=>{if(!mounted.current)return;recordRef.current=next;setRecord(next);setReviewed(false);setRefreshNeeded(false);await loadItems(next)};
+ const accept=async(next:AgentRollout,generation=request.current)=>{if(!mounted.current||generation!==request.current)return;recordRef.current=next;setRecord(next);setReviewed(false);setRefreshNeeded(false);await loadItems(next,generation)};
  const loadHistory=async()=>{const saved=await api<AgentRollout[]>(rolloutPath());if(mounted.current)setRecords(saved)};
  useEffect(()=>{
   let alive=true;setLoading(true);
@@ -36,15 +36,15 @@ export default function MachineAgentRolloutDialog({targets=[],existingID,onClose
     else if(!snapshot.length){await loadHistory()}
     else{
      const result=await api<{releases:AgentRelease[]}>('/agent-releases');if(alive)setReleases(result.releases);
-     const detailResults=await Promise.allSettled(snapshot.map(async host=>[host.id,await api<HostDetail>(`/machines/${encodeURIComponent(host.id)}`)] as const));
-     if(alive){const details:Record<string,HostDetail>={},chosen:Record<string,string>={},failures:string[]=[];for(let i=0;i<detailResults.length;i++){const entry=detailResults[i];if(entry.status==='fulfilled'){details[entry.value[0]]=entry.value[1];const keys=entry.value[1].credentials.filter(reusableMachineCredential);if(keys.length===1)chosen[entry.value[0]]=keys[0].id}else failures.push(`${snapshot[i].name}: ${err(entry.reason)}`)}setHosts(details);setCredentials(chosen);if(failures.length)setError(failures.join(' · '))}
+     const detailResults=await Promise.allSettled(snapshot.map(async host=>{const detail=await api<HostDetail>(`/machines/${encodeURIComponent(host.id)}`);if(detail.machine.id!==host.id)throw Error(t('主机详情身份不匹配，请刷新后重试','The host details do not match the selected host. Refresh and retry.'));return [host.id,detail] as const}));
+     if(alive){const details:Record<string,HostDetail>={},chosen:Record<string,string>={},failures:string[]=[];for(let i=0;i<detailResults.length;i++){const entry=detailResults[i];if(entry.status==='fulfilled'){details[entry.value[0]]=entry.value[1];const selected=defaultMachineCredential(entry.value[1].credentials,entry.value[1].machine.default_credential_id,reusableMachineCredential);if(selected)chosen[entry.value[0]]=selected}else failures.push(`${snapshot[i].name}: ${err(entry.reason)}`)}setHosts(details);setCredentials(chosen);if(failures.length)setError(failures.join(' · '))}
     }
    }catch(e){if(alive)setError(err(e))}finally{if(alive)setLoading(false)}
   };void initialize();return()=>{alive=false};
  },[existingID]);
- const begin=()=>{if(pending.current)return false;pending.current=true;setBusy(true);setError('');return true};
+ const begin=()=>{if(pending.current)return false;pending.current=true;request.current++;setBusy(true);setError('');return true};
  const finish=()=>{pending.current=false;if(mounted.current)setBusy(false)};
- const refreshRecord=async()=>{const saved=recordRef.current;if(!saved)return;const next=await api<AgentRollout>(rolloutPath(saved.id));if(mounted.current&&recordRef.current?.id===saved.id)await accept(next);return next};
+ const refreshRecord=async()=>{const saved=recordRef.current;if(!saved)return;const generation=++request.current;const next=await api<AgentRollout>(rolloutPath(saved.id));if(next.id!==saved.id)throw Error(t('升级批次身份不匹配，请刷新后重试','The rollout identity does not match. Refresh and retry.'));if(mounted.current&&generation===request.current&&recordRef.current?.id===saved.id){await accept(next,generation);return next}};
  const hasActiveItems=record?.items.some(item=>updateIsActive(item.update?.status||item.status))??false;
  useEffect(()=>{
   if(record?.status!=='running'&&!hasActiveItems)return;let stopped=false,inFlight=false;
@@ -94,7 +94,7 @@ export default function MachineAgentRolloutDialog({targets=[],existingID,onClose
    {snapshot.length>20&&<Alert showIcon type="warning" title={t('升级批次最多 20 台，请重新选择','Select no more than 20 hosts for an upgrade rollout')}/>}
    {mixedArchitectures&&<Alert showIcon type="info" className="lm-machine-form-notice" title={t('请按主机架构分批升级','Create separate rollouts for each host architecture')} description={t('每个批次固定一个发行包，不能混合 amd64 和 arm64。','Each rollout pins one artifact and cannot mix amd64 and arm64 hosts.')}/>}
    <Typography.Paragraph>{t('目标发行（版本 · 提交 · 架构 · 包摘要）','Target release (version · revision · architecture · artifact digest)')}</Typography.Paragraph><Select aria-label={t('批次目标 Agent 发行','Rollout target Agent release')} style={{width:'100%'}} loading={loading} value={target} disabled={busy||mixedArchitectures} onChange={setTarget} placeholder={t('选择固定发行包','Select a fixed release artifact')} options={matchingReleases.map(release=>({value:release.sha256,label:`${release.version} · ${shortIdentity(release.source_revision)} · ${release.arch} · ${shortIdentity(release.sha256)}`}))}/>
-   <div style={{marginTop:16,maxHeight:'45vh',overflowY:'auto'}}>{snapshot.map(host=><section key={host.id} className="lm-machine-rollout-target"><Typography.Paragraph strong>{host.name} · {host.arch||t('架构待检查','Architecture pending verification')}</Typography.Paragraph><Select aria-label={t(`升级 SSH 凭据 · ${host.name}`,`Upgrade SSH credential · ${host.name}`)} style={{width:'100%'}} disabled={busy||loading} value={credentials[host.id]} placeholder={t('选择此主机的可复用 SSH 凭据','Select this host’s reusable SSH credential')} onChange={value=>setCredentials(previous=>({...previous,[host.id]:value}))} options={hosts[host.id]?.credentials.filter(reusableMachineCredential).map(key=>({value:key.id,label:`${key.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key')} · ${key.secret_fingerprint||key.id}`}))||[]}/>{!loading&&!hosts[host.id]?.credentials.some(reusableMachineCredential)&&<Typography.Text type="warning">{t('此主机没有有效的可复用 SSH 凭据，请先添加。','Add a reusable SSH credential to this host first.')}</Typography.Text>}</section>)}</div>
+   <div style={{marginTop:16,maxHeight:'45vh',overflowY:'auto'}}>{snapshot.map(host=><section key={host.id} className="lm-machine-rollout-target"><Typography.Paragraph strong>{host.name} · {host.arch||t('架构待检查','Architecture pending verification')}</Typography.Paragraph><Select aria-label={t(`升级 SSH 凭据 · ${host.name}`,`Upgrade SSH credential · ${host.name}`)} style={{width:'100%'}} disabled={busy||loading} value={credentials[host.id]} placeholder={t('选择此主机的可复用 SSH 凭据','Select this host’s reusable SSH credential')} onChange={value=>setCredentials(previous=>({...previous,[host.id]:value}))} options={hosts[host.id]?.credentials.filter(reusableMachineCredential).map(key=>({value:key.id,label:`${key.name||(key.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key'))} · ${key.secret_fingerprint||key.id}`}))||[]}/>{!loading&&!hosts[host.id]?.credentials.some(reusableMachineCredential)&&<Typography.Text type="warning">{t('此主机没有有效的可复用 SSH 凭据，请先添加。','Add a reusable SSH credential to this host first.')}</Typography.Text>}</section>)}</div>
    {uncertain&&<Alert showIcon type="warning" title={t('批次创建结果未确认，请从批次历史核对','Rollout creation was not confirmed. Verify it in rollout history')}/>}
   </>}
   {record&&<>

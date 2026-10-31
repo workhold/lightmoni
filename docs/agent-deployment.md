@@ -12,9 +12,9 @@
 | --- | --- |
 | 主机 | Linux amd64/arm64、systemd、glibc ≥ 2.28；安装需要 root，常态运行专用用户 |
 | 运行时 | 发行包自带 Node 24.15.0、应用及生产依赖，目标机器不用另装 Node/npm |
-| 数据 | 主机/进程指标、HTTP/TCP 拨测、授权目录日志、本地 OTLP HTTP 接收转发 |
+| 数据 | 主机/进程指标、HTTP/TCP 拨测、授权目录日志、独立采集与持久上报 |
 | 中心连接 | Agent 主动注册/心跳/拉取配置与上报；不需要中心入站连接 Agent |
-| 本地 SDK | 默认 `127.0.0.1:4318`，OTLP HTTP `/v1/logs`、`/v1/metrics`、`/v1/traces`；无 gRPC 4317 |
+| 本地诊断 | 默认 `127.0.0.1:4318`，仅 `/healthz`、`/status`；不接收 SDK 遥测 |
 | 容器 | 现有 Compose 和 server Dockerfile 部署中心；尚无独立 Agent 发布镜像或已验收宿主采集容器 |
 
 不支持把 Linux glibc 发行包直接用于 Alpine/musl。采集任务使用结构化主机/拨测/日志配置；运维任务通过中心授权和审批执行已支持的受限能力，不提供 AI 任意远程 shell。
@@ -60,7 +60,9 @@
 
 ## 网络和任务权限
 
-业务 SDK 默认直报中心。显式使用已有 Agent 本地接收功能时，地址通常为 `http://127.0.0.1:4318`，`local_token` 用于本地 OTLP、状态和配置代理，不是 Agent→中心的 control/data 凭据。非 loopback 监听强制需要 `local_token`；共享主机即使只用 loopback 也建议设置，本机其他用户同样能连接 loopback。
+业务SDK仅直连中心，Agent不提供SDK接收和配置代理。本地监听只用于healthz/status诊断，local_token是本地诊断令牌，不是SDK密钥或Agent中心凭据。
+
+Agent配置公网引导endpoint，自动查询管理员登记的中心内网IP和端口，每30秒同步；内网可达时全部中心请求使用内网，包括心跳、配置、任务通道、制品下载和遥测。旧内网失效时通过公网恢复最新清单。诊断/status的center_connection显示当前入口与修订。详见[中心地址同步](center-endpoints.md)。
 
 中心建议使用受信 CA 的 HTTPS 443（本地开发常见 8080），不通过关闭证书验证解决 TLS 问题。Agent 默认每 30 秒主动取控制配置，单次请求超时 15 秒，无需开放中心→Agent 的控制端口。任务标签只决定任务分发，不授予 SSH、模型或任意命令执行权限。
 

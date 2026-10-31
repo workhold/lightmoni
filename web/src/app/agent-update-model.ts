@@ -31,7 +31,7 @@ export interface AgentRollout {
  created_at:string;started_at?:string;finished_at?:string;error?:string;review_url?:string;
 }
 export interface AgentUpdateCredential {
- id:string;method:string;retention?:string;expires_at:string;secret_fingerprint?:string;
+ id:string;name?:string;is_default?:boolean;method:string;retention?:string;expires_at:string;secret_fingerprint?:string;
  revoked_at?:string;secret_cleared_at?:string;
 }
 export const updatePath=(machineID:string,updateID?:string)=>`/machines/${encodeURIComponent(machineID)}/agent-updates${updateID?`/${encodeURIComponent(updateID)}`:''}`;

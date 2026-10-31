@@ -5,7 +5,7 @@ fn run()->lightmoni::Result<()> {
     let mode=var("LIGHTMONI_TEST_MODE","demo");let mut limits=Limits::default();limits.self_telemetry=mode=="demo" || mode=="selfmonitor";
     if mode=="overflow"{limits.cardinality_limit=2;}
     if mode=="capacity"{limits.queue_bytes=1024;limits.max_batch_bytes=1024;limits.buffer_bytes=64;}
-    let mon=Client::with_limits(&var("LIGHTMONI_SERVICE","example-rust-api"),"http",&var("LIGHTMONI_ENDPOINT","http://127.0.0.1:4318"),&var("LIGHTMONI_KEY",""),limits)?;
+    let mon=Client::with_limits(&var("LIGHTMONI_SERVICE","example-rust-api"),"http",&var("LIGHTMONI_ENDPOINT","https://monitor.example.com"),&var("LIGHTMONI_KEY",""),limits)?;
     let counter=mon.counter("http.requests")?;
     match mode.as_str() {
         "selfmonitor"=>{counter.add(-1,&Attributes::new());std::thread::sleep(Duration::from_secs(35));mon.shutdown(Duration::from_secs(5))?;}

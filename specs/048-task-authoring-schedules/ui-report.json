@@ -1,0 +1,22 @@
+{
+  "production_bundle": true,
+  "api_fixtures": true,
+  "real_scheduler_execution": false,
+  "real_agent_execution": false,
+  "production_writes": false,
+  "checks": [
+    "new task exposes script and template cards, starts with an empty editor, and saving a manual draft never dispatches",
+    "unsupported, invalid UTF-8, NUL and oversized files are rejected without overwriting; valid imports require replacement consent and remain editable",
+    "daily timezone schedule posts one canonical preview, target preview identifies v1 upgrades, and reviewed save preserves final code, argv, cwd and execution policies without duplicate writes",
+    "v2 execution options select only capable Agents for dispatch, while v1 tasks remain supported",
+    "editing only the name round-trips empty, multiline and space-sensitive arguments and a trailing-space working directory without normalization",
+    "weekly/monthly controls generate correct five-field Cron; invalid preview errors and stale preview times clear when the plan changes",
+    "one-time plans serialize an absolute UTC instant and changing modes removes inactive fields before saving an interval task",
+    "built-in tasks keep continuous collection and do not inherit script-only fields",
+    "existing per-host built-in parameter overrides still save directly without script fields",
+    "390px English drawer keeps script entry, code editor and save controls accessible without page overflow"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "screenshots": "/Users/liminghan/Documents/lightmoni/lightmoni/.local-dev/evidence/task-authoring"
+}

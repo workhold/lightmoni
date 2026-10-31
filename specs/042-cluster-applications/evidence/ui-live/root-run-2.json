@@ -1,0 +1,19 @@
+{
+  "checked_at": "2026-10-29T17:41:48.217Z",
+  "base": "http://127.0.0.1:5199",
+  "backend": "Actual SQLite + cluster/application controllers; isolated qa-admin",
+  "checks": [
+    "真实 SQLite 创建两个集群、稳定机器唯一归属和节点地址读回",
+    "已属于其他集群的机器在成员选择中禁用",
+    "全局应用跨双集群部署，2×1CPU/512MiB与3×2CPU/1GiB独立配置，托管固定端口；同名独立手动应用",
+    "刷新跨集群配置、serviceName 编辑禁用；真实 revision 冲突保留表单",
+    "DNS 账号就近快捷创建、父表单输入保持、自动回填并实际保存",
+    "ACME 账号快捷创建自动回填，证书域名和 DNS 引用保持",
+    "商店真实目录、版本、参数、数据库托管建议与安装确认入口",
+    "网站双集群公共域名/证书/DNS/Gzip配置，每路径上游按集群绑定；缺部署应用不可选，无健康实例允许保存",
+    "五个独立路由、导航去除旧入口、390px 列表和多端口表单无页面溢出"
+  ],
+  "page_errors": [],
+  "scope": "Draft configuration, real persistence and conflict/shortcut interactions. No cloud calls or container execution.",
+  "created_count": 10
+}

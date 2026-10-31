@@ -1,3 +1,4 @@
+import { applicationTargets } from "../shared/application-observation.js";
 import { createHash } from "node:crypto";
 import type {
   Context,
@@ -15,12 +16,12 @@ import {
   nodeID,
   unique,
   validName,
-  taskTemplates,
 } from "./nodes-model.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import { agentLifecycle, assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
 import { hasActiveTaskRuns } from "./agent-hosts.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import { observeNetworkSource, trustedProxyMatcher } from "./host-network.js";
 export interface NodesOptions {
   internalExporter?: (
     table: string,
@@ -30,6 +31,7 @@ export interface NodesOptions {
   ) => Promise<void>;
   telemetryInterval?: number;
   agentCredentials?: AgentCredentialStore;
+  trustedProxies?: string[];
 }
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const record = (value: any): value is Record<string, any> =>
@@ -54,6 +56,7 @@ export function registerNodes(
     base = "/api/v1",
     sent = new Map<string, string>(),
     controller = new AbortController();
+  const trustedProxy = trustedProxyMatcher(options.trustedProxies);
   let timer: NodeJS.Timeout | undefined, inflight: Promise<void> | undefined;
   const safe =
     (handler: Handler): Handler =>
@@ -126,7 +129,6 @@ export function registerNodes(
     });
     ctx.json({ agent_id: agentID, ...lifecycle, credentials_revoked: true, remote_uninstalled: false });
   }));
-  router.get(base + "/task-templates", safe(ctx => ctx.json(taskTemplates())));
   router.get(base + "/task-hosts", safe(ctx => ctx.json(store.hostDirectory())));
   router.get(base + "/host-labels", safe(ctx => ctx.json(store.labels())));
   router.post(base + "/host-labels", safe(async ctx => {
@@ -260,12 +262,12 @@ export function registerNodes(
     }
     let machine: { machine_id: string; machine_name: string };
     try {
-      machine = store.heartbeat(id, values, writeKey.id);
+      machine = store.heartbeat(id, values, writeKey.id, observeNetworkSource(ctx.req, trustedProxy));
     } catch (e) {
       if (e instanceof NodeError || e instanceof HTTPError) throw e;
       throw new NodeError(503, "执行节点记录暂不可用");
     }
-    ctx.json({ agent_id: id, ...machine, ok: true });
+    ctx.json({ agent_id: id, ...machine, ok: true, application_targets: applicationTargets(deps.db, id, deps.decrypt) });
   };
   router.post(base + "/agents/register", safe(heartbeat), { public: true });
   router.post(base + "/agents/:id/heartbeat", safe(heartbeat), {

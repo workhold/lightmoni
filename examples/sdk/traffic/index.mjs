@@ -3,7 +3,7 @@ import {createServer} from 'node:http';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createLightMoni,withTrace} from '../../../sdk/typescript/dist/src/index.js';
 
-const endpoint=process.env.LIGHTMONI_ENDPOINT??'http://127.0.0.1:4318';
+const endpoint=process.env.LIGHTMONI_ENDPOINT??'https://monitor.example.com';
 const port=Number(process.env.LIGHTMONI_TRAFFIC_PORT??18419);
 const durationSeconds=Number(process.env.LIGHTMONI_DURATION_SECONDS??1800);
 if(!Number.isInteger(port)||port<1024||port>65535||!Number.isFinite(durationSeconds)||durationSeconds<=0)throw new Error('Invalid traffic port or duration');

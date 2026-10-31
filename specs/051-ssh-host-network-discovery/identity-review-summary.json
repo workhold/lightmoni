@@ -1,0 +1,94 @@
+{
+  "date": "2026-10-31",
+  "base_revision": "5d09dca1fc43824f66b48e48cc0b4ca2ed343efa",
+  "runtime": {
+    "command": "node --import tsx --test --test-concurrency=1 test/machine-ssh-discovery.test.ts test/machine-ssh.test.ts test/host-network.test.ts test/managed-machines.test.ts test/connection-credentials.test.ts test/machine-password-ssh.test.ts test/machine-host-identity.test.ts test/machine-agent-link.test.ts test/agent-host-admission.test.ts test/machine-terminal.test.ts test/host-observed-identity.test.ts test/agent-credentials.test.ts",
+    "tests": 123,
+    "pass": 123,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "log_sha256": "8756c72e75a6a1fc8fb9c8d8c67b498dc57262235274e78bd3e19d2b57696a12"
+  },
+  "ui": {
+    "evidence/identity-ui/ui-report.json": {
+      "passed": 13,
+      "errors": [],
+      "unexpected": [],
+      "report": "evidence/identity-ui/ui-report.json",
+      "bundle": {
+        "index_sha256": "48c4e0423b0a0c3d3ff191b3d5b187a998f8aa8d30b268ecfe0a1ec4f6c2cc6c",
+        "entry": "/assets/index-Cy1jCI7p.js",
+        "entry_sha256": "065e9ea6207a2b569b53269d34976ad9bbe5fb9150c73cb7af71670967d79580"
+      }
+    },
+    "evidence/identity-regression/credentials/ui-report.json": {
+      "passed": 16,
+      "errors": [],
+      "unexpected": [],
+      "report": "evidence/identity-regression/credentials/ui-report.json",
+      "bundle": null
+    },
+    "evidence/identity-regression/network/ui-report.json": {
+      "passed": 32,
+      "errors": [],
+      "unexpected": [],
+      "report": "evidence/identity-regression/network/ui-report.json",
+      "bundle": {
+        "index_sha256": "48c4e0423b0a0c3d3ff191b3d5b187a998f8aa8d30b268ecfe0a1ec4f6c2cc6c",
+        "entry": "/assets/index-Cy1jCI7p.js",
+        "entry_sha256": "065e9ea6207a2b569b53269d34976ad9bbe5fb9150c73cb7af71670967d79580"
+      }
+    },
+    "evidence/identity-regression/onboarding/onboarding-ui-report.json": {
+      "passed": 36,
+      "errors": [],
+      "unexpected": [],
+      "report": "evidence/identity-regression/onboarding/onboarding-ui-report.json",
+      "bundle": null
+    },
+    "evidence/identity-regression/ssh/ui-report.json": {
+      "passed": 18,
+      "errors": [],
+      "unexpected": [],
+      "report": "evidence/identity-regression/ssh/ui-report.json",
+      "bundle": null
+    }
+  },
+  "ui_total_passed": 115,
+  "typecheck": {
+    "command": "npm run typecheck",
+    "exit_code": 0
+  },
+  "builds": {
+    "sdk/typescript": 0,
+    "runtime": 0,
+    "ai-runtime": 0,
+    "web": 0
+  },
+  "source_sha256": {
+    "runtime/src/server/agent-credentials.ts": "8905bd15a31653a99fd0e88582884d8008abf7b66d42ee318a41cfb43112dcdc",
+    "runtime/src/server/agent-hosts.ts": "b426d133cabe719c87aecbf007ed756e6625b99f56daf077a433dda80dec247b",
+    "runtime/src/server/machine-host-keys.ts": "4fa43f0aafd1be132dec6819671556b6685604de2722486af33ef693cd6f8f70",
+    "runtime/src/server/machine-uninstallations.ts": "592fa1e6cd61658bb2e1e393c40062993ef529aa853e9af2cfdf8facaffe5288",
+    "runtime/src/server/managed-machines.ts": "acb4ad62509c79bb5a009250849c77f872def3c92a45186475f5896890e25968",
+    "runtime/test/machine-host-identity.test.ts": "f0262605f58f1b9238ad24d04cfe375fdfc2cbb300ab35e5c422fc1ee57fff67",
+    "runtime/test/machine-ssh-discovery.test.ts": "10e8549d62d7298e54a99727dd1aa7976455ddb3360198768e1acc6eb0987fb1",
+    "runtime/test/managed-machines.test.ts": "c261dd93b56dc8ff0376485d9b4051a744f9200c4e3303e792a31071a96c6dd7",
+    "web/src/app/HostNetworkSummary.tsx": "35eaf4c9dc97bfdc7054945c9788e74ad290fc66cb13735df80c33e774dd05ca",
+    "web/src/app/MachineEditDialog.tsx": "c154ac63e73d08fce5b8815759c2b4ce18813bad3af1aa976fa67551bd60516f",
+    "web/src/app/MachineRegistrationDialog.tsx": "ad28e2ae83cf06eb87f697ef8da21fdefdad8192920a05f98ebdc515870bc2b1",
+    "web/src/app/MachineTerminalDialog.tsx": "784d8731bce9f8c05e5972102eb42ccb60475bc55e4ac107bcbdf6ed734e9b2a",
+    "web/src/app/MachinesPage.tsx": "ba18be70d2457f6a6c04c74b129e41c44c9224640f8d3fcc9b6bcf2869dcf5f3",
+    "web/src/app/verify-connection-credentials.mjs": "62bd003e31a5b065352020f19cd02724d937a0e5a304d733c66fd797adca51f0",
+    "web/src/app/verify-host-registration-onboarding.mjs": "e3b14ee6c6f84fc0062a1a273a134115044c2b2a425945ca76ee55322c2d480f",
+    "runtime/test/host-observed-identity.test.ts": "464a9e8d30cf378087fe383690a12d4d71e09c9814bfda9cf74074429acd0b24",
+    "web/src/app/host-request-guard.ts": "a95a7560057e7adf668eedafd92d3e8f841e556bf7d2b9b2ea84cd8f7c4232d9",
+    "web/src/app/verify-host-identity-requests.mjs": "c47f6fd3dfba321dcbb14cbee6788e031853821acce7a519ae6c22b4d5887b04"
+  },
+  "architecture_review": "Bug fixes restore the existing identity, hostname ownership, approval and current-host response contracts. No new architecture change; existing SDD 051 Doca readback remains historical evidence, no fresh write claimed.",
+  "production_access": false,
+  "vchive_access": false,
+  "actual_agent_installation": false,
+  "image_release": false
+}

@@ -299,7 +299,7 @@ export function monitoringTools(
           base_revision: { type: "string", maxLength: 128 },
           service: { type: "string", maxLength: 200 },
           env: { type: "string", maxLength: 200 },
-          mode: { type: "string", enum: ["direct", "agent"] },
+          mode: { type: "string", enum: ["direct"] },
           table: { type: "string", maxLength: 200 },
           metric: { type: "string", maxLength: 200 },
         },
@@ -322,7 +322,7 @@ export function monitoringTools(
           if (input[field] != null && (typeof input[field] !== "string" || input[field].length > 200))
             throw Error("invalid tool input");
         }
-        if (input.mode != null && input.mode !== "direct" && input.mode !== "agent")
+        if (input.mode != null && input.mode !== "direct")
           throw Error("invalid tool input");
         return instrumentation.propose(
           {

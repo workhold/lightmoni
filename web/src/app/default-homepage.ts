@@ -14,7 +14,7 @@ export function isAllowedHomepage(value:unknown,role:User['role']):value is stri
 
 export function readDefaultHomepage(user:HomepageUser|null):string{
  if(!user?.id)return DEFAULT_HOMEPAGE;
- try{const value=localStorage.getItem(homepageStorageKey(user.id));return value==='/agents'?'/machines':isAllowedHomepage(value,user.role)?value:DEFAULT_HOMEPAGE}
+ try{const stored=localStorage.getItem(homepageStorageKey(user.id));const value=stored==='/agents'?'/machines':stored==='/operations'?'/clusters':stored==='/services'?'/applications':stored;return isAllowedHomepage(value,user.role)?value:DEFAULT_HOMEPAGE}
  catch{return DEFAULT_HOMEPAGE}
 }
 

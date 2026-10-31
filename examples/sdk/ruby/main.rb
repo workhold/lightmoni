@@ -1,7 +1,7 @@
 require_relative '../../../sdk/ruby/lib/lightmoni'
 mode = ENV.fetch('LIGHTMONI_TEST_MODE', 'demo')
 limits = mode == 'overflow' ? { cardinality_limit: 2 } : mode == 'capacity' ? { queue_bytes: 1024, max_batch_bytes: 1024, buffer_bytes: 64 } : {}
-mon = LightMoni::Client.new(service: ENV.fetch('LIGHTMONI_SERVICE', 'example-ruby-api'), table: 'http', endpoint: ENV.fetch('LIGHTMONI_ENDPOINT', 'http://127.0.0.1:4318'), key: ENV.fetch('LIGHTMONI_KEY', ''), self_telemetry: %w[demo selfmonitor].include?(mode), **limits)
+mon = LightMoni::Client.new(service: ENV.fetch('LIGHTMONI_SERVICE', 'example-ruby-api'), table: 'http', endpoint: ENV.fetch('LIGHTMONI_ENDPOINT', 'https://monitor.example.com'), key: ENV.fetch('LIGHTMONI_KEY', ''), self_telemetry: %w[demo selfmonitor].include?(mode), **limits)
 counter = mon.counter('http.requests')
 case mode
 when 'selfmonitor'

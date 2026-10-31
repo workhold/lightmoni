@@ -1,8 +1,8 @@
 import {activeMachineCredential,reusableMachineCredential} from './machine-credentials';
 export type BatchAction='ssh_check'|'install'|'uninstall'|'remove_node'|'delete_host';
-export type BatchMachine={id:string;name:string;address:string;port:number;agent_id:string;agent_status:string;connection_method:string;host_key_status:string;username?:string;capabilities?:Record<string,{available:boolean;reason:string}>};
+export type BatchMachine={default_credential_id?:string;id:string;name:string;address:string;port:number;agent_id:string;agent_status:string;connection_method:string;host_key_status:string;username?:string;capabilities?:Record<string,{available:boolean;reason:string}>};
 export type BatchTarget={id:string;name:string;address?:string;port?:number;machine?:BatchMachine;agent?:{id:string;hostname:string;lifecycle_state?:'active'|'removed'}};
-export type BatchCredential={id:string;method:string;expires_at:string;secret_fingerprint?:string;revoked_at?:string;secret_cleared_at?:string;retention?:string};
+export type BatchCredential={is_default?:boolean;name?:string;id:string;method:string;expires_at:string;secret_fingerprint?:string;revoked_at?:string;secret_cleared_at?:string;retention?:string};
 export type BatchPlan={id:string;status:string;error?:string;plan?:{machine?:BatchMachine;agent_id?:string;credential?:{id:string;method:string;expires_at:string};check_id?:string;expires_at:string;version?:string;arch?:string;steps?:string[];warnings?:string[];retained_paths?:string[];removed_paths?:string[]};receipt?:Record<string,unknown>};
 export type BatchDetail={machine:BatchMachine;credentials:BatchCredential[];deployments?:BatchPlan[];uninstallations?:BatchPlan[]};
 export type BatchStatus='pending'|'processing'|'success'|'failed'|'not_applicable'|'unknown';

@@ -48,8 +48,8 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 
 ## 3. 设计原则
 
-1. **独立上报、路径显式**：业务 SDK 默认直连中心，Agent 独立上报自身任务数据；两者复用同一套 SDK 包，业务上报不依赖安装 Agent。已有显式 SDK 经 Agent 能力单独说明，不因网络错误自动互相改投。
-2. **Agent 是一等节点**：业务退出不会停止 Agent；Agent 不只是 SDK 的中转器，也不等同于“采集器”这个单一功能。
+1. **独立上报、路径显式**：业务 SDK 仅直连中心，Agent 独立上报自身任务数据；两者复用同一套 SDK 包，业务上报不依赖安装 Agent。SDK与Agent独立使用中心地址发现，内网优先、公网备用。
+2. **Agent 是一等节点**：业务退出不会停止 Agent；Agent承担独立采集、节点控制与任务执行，不接收业务SDK。
 3. **控制面和数据面分离**：控制凭据用于心跳和配置，数据凭据用于遥测；SDK Key、Agent local token、enrollment token 不能混用。
 4. **中心是配置权威**：任务、标签、告警、模型、密钥和部署计划在中心保存；Agent 只缓存可执行配置，SDK 只缓存端侧规则。
 5. **写入先确认边界再确认成功**：Agent 先持久化再 ACK，中心等待目标 ClickHouse 写入完成再 ACK；未知结果保留原批次。
@@ -68,7 +68,7 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 | Agent enrollment token | 绑定已登记主机的一次性短期安装凭据 | 主机部署内部签发，中心兑换 |
 | Agent control credential | 节点心跳、配置和控制通道凭据 | 中心签发，Agent 保存 |
 | Agent data credential | 节点遥测上报凭据 | 中心签发，Agent 保存 |
-| Agent local token | 可选的本机 SDK → Agent 鉴权令牌 | 目标 Agent 本地配置 |
+| Agent local token | 本机Agent诊断鉴权令牌 | 目标 Agent 本地配置 |
 | 执行节点 | 一个独立运行的 LightMoni Agent 实例 | Agent 身份与中心节点记录 |
 | 任务 | 指标采集、服务拨测或目录日志配置 | 中心任务仓储 |
 | 任务标签 | 把任务分发给节点的标签集合 | 中心标签仓储 |
@@ -118,7 +118,7 @@ flowchart LR
   Control -->|节点身份与任务配置| SQLite
 ```
 
-图中的箭头表示调用或发送方向；心跳、拉配置与部署任务的 claim/events/result 使用 control credential，响应沿原请求返回，遥测上报使用 data credential。任务配置由中心持有，节点主动拉取；这里没有新增中心主动连接 Agent 的入站要求。SDK → Agent 的现有显式转发能力见第 7.2 节，不作为当前推荐的业务主路径，也不因本次图示修正而删除。
+图中的箭头表示调用或发送方向；心跳、拉配置与部署任务的 claim/events/result 使用 control credential，响应沿原请求返回，遥测上报使用 data credential。任务配置由中心持有，节点主动拉取；这里没有新增中心主动连接 Agent 的入站要求。SDK→Agent转发已移除；两条中心连接均按第50章同步入口。
 
 **用户入口与中心内部模块：**
 
@@ -197,17 +197,11 @@ flowchart TB
 
 直连是 SDK 的默认目标，适合普通服务器、容器和 Serverless。安装 Agent 不是直连的前置条件。
 
-### 7.2 已有可选能力：业务 SDK 经 Agent
+### 7.2 SDK独立直报与中心地址选择
 
-本节记录已有的显式转发实现，供需要本地持久化和离线补传时选择。它不是总览主路径，也不是业务 SDK 的安装要求；本次系统设计图示修正不新增、删除或切换运行时能力。
+SDK仅连接中心，删除Agent接收与配置代理；默认本机4318地址和agent/auto模式均不再提供。SDK在业务进程内聚合与缓冲，中心确认后释放批次。Agent不承担业务SDK持久队列；其自身采集通过进程内exporter进入原有持久队列。
 
-1. 用户明确选择 `LIGHTMONI_MODE=agent`，SDK 使用 Agent endpoint 和可选 local token。
-2. SDK 仍在业务进程内聚合和生成 OTLP，不把中心 control/data credential 暴露给业务。
-3. Agent 接收请求，验证 table、batch ID、时间和 local token，把批次持久化到本地 SQLite 队列后 ACK SDK。
-4. Agent 使用自己的 data credential 向中心发送完全相同的批次；网络失败时从磁盘队列重试。
-5. 中心完成 ClickHouse 写入后，Agent 删除队列记录，但保留受限 receipt 去重。
-
-Agent 模式增加本地持久化和离线补传能力，同时增加一跳网络与本地队列故障面。它不会自动压缩、自动合批、替换凭据，也不代表中心已入库。Agent 不可达时，SDK 不自动改投中心。
+管理员在上报地址簿登记内网IP及端口和公网引导入口，SDK与Agent从所在网络查询清单、验证中心身份并优先使用可达内网。地址变更30秒同步；Agent心跳、配置、任务通道和上报共用入口。协议、兼容和验收见第50章。
 
 ### 7.3 Agent 节点任务流
 
@@ -216,7 +210,7 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 3. Agent 先校验并缓存完整配置，再原子替换当前有效 revision；冲突配置整体拒绝。
 4. 采集器按配置产生 host/process/probe/files 数据，使用 Agent 内嵌的同一 TypeScript SDK，经进程内 exporter 写入 Agent 队列。
 5. Agent 上报并维护心跳、队列、采集器状态和有限运行事件。
-6. 节点无匹配任务时暂停内部采集和拨测，但仍可接收业务 SDK 数据。
+6. 节点无匹配任务时暂停内部采集和拨测，继续维护自身控制通道。
 
 任务标签只负责分发，不是租户、权限或业务 service。一个节点可以有多个标签，一个任务也可以关联多个标签，命中任一标签即可下发且不会重复执行。
 
@@ -231,7 +225,7 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 
 ### 7.5 SDK 插桩与业务部署流
 
-1. 管理员为业务服务提供已授权的源码 workspace；AI 先调用只读 `scan_sdk_instrumentation`，识别语言、框架、LightMoni SDK、直连/Agent 模式和候选请求/错误边界。
+1. 管理员为业务服务提供已授权的源码 workspace；AI 先调用只读 `scan_sdk_instrumentation`，识别语言、框架、LightMoni SDK、中心直连配置及需迁移的历史Agent配置和候选请求/错误边界。
 2. 扫描不导入或执行业务代码，也不写文件。对于可以明确定位的 TypeScript/JavaScript 多行请求边界，AI 调用只读 `propose_sdk_instrumentation` 生成结构化 unified diff、风险、手动步骤和验证命令；Python、Go、Rust、Ruby 或歧义边界只给手动步骤。复杂改写才交给隔离 workspace 的 `code_task`，同样只产生可审阅 diff；所有 diff 都必须经过管理员确认后才应用。
 3. 已确认的 revision 目标上由隔离构建器生成带版本、架构、来源 revision 和 SHA-256 的 release；构建器尚未实现前，systemd MVP 允许管理员上传预构建的 `lightmoni-release-v1.tar.gz`。Manifest 至少包含 `schema_version`、`service_id`、`version`、`architecture`、`source_revision` 和固定 `entrypoint:"run"`。中心上传与 Agent 暂存都会拒绝常见私密凭据路径，以及扫描窗口内匹配到的私钥、知名 token、URL/DSN userinfo、凭据查询参数、Basic Auth 和有值凭据字段；错误不回显匹配内容。该启发式检查不能保证检测所有秘密，bundle 仍只能包含运行文件，运行凭据须由目标主机的独立秘密管理注入。中心只保存元数据与私有 digest-addressed 正文，不能从静态下载路由取到业务制品；生产 Agent 不接收源码仓库凭据或模型密钥。
 4. 管理员为 service 创建一个或多个 service target，登记 systemd unit 与受控 release directory。release 根目录由 root 持有并属于 Agent systemd unit 配置的 `lightmoni-agent` 主组（建议 `0775`，业务服务用户只读且可遍历，并且不得属于 Agent 组）；Agent 的 `ProtectSystem=strict` 沙箱需把该精确目录加入 `ReadWritePaths`。Agent 预检检查根目录 UID/GID 与 POSIX mode 位，要求 root 所有、Agent 有效主组可写、其他用户仅可读/遍历。MVP 不检查扩展 POSIX ACL，也不解析 systemd unit 的业务进程 User/Group/附加组；管理员必须确保业务用户不属于 Agent 组且无 ACL 写权限。unit 必须预先配置稳定入口 `ExecStart=<release_directory>/current/run`；LightMoni Agent 不编辑任意 unit、环境文件或服务用户。release bundle 只放运行所需文件，不能放密钥或环境凭据。MVP 的 `systemd` 适配器覆盖 Node、Python、Go、Rust、二进制和解释器服务；语言不是部署协议。Docker Compose、Kubernetes/Helm 和 CI/GitOps 作为后续适配器。
@@ -437,27 +431,29 @@ SDK 默认使用 30 秒 UTC 固定窗口；每张业务指标表可选 10、30�
 
 Go、Node/TypeScript、Python 等已接入的语言可按各自 SDD 使用动态停报、UID 排除、QA/VIP 保留比例；未接入某规则的语言必须在发布矩阵中明确标注，不能通过中心入库后补过滤来假装支持。
 
-### 10.3 两种上报模式
+### 10.3 中心直报与地址同步
 
-| 模式 | 环境变量 | 接收端 | 凭据 | 持久化 |
+| 客户端 | 引导配置 | 接收端 | 凭据 | 缓冲 |
 | --- | --- | --- | --- | --- |
-| `direct`（默认） | `LIGHTMONI_ENDPOINT`、`LIGHTMONI_DATA_KEY` 或兼容 `LIGHTMONI_KEY` | 中心 `/v1/*` | SDK data key | SDK 进程内有界缓冲 |
-| `agent` | `LIGHTMONI_AGENT_ENDPOINT`、可选 `LIGHTMONI_LOCAL_TOKEN` | Agent `/v1/*` | Agent local token（如启用） | Agent SQLite 磁盘队列 |
+| 业务SDK（仅直报） | LIGHTMONI_ENDPOINT、LIGHTMONI_KEY | 中心/v1/*（内网优先） | SDK Key / 已启用豁免表 | 进程内有界缓冲 |
+| 独立Agent | config.endpoint + 中心地址发现 | 中心控制/数据/任务API（共用入口） | 独立control/data凭据 | 自身采集SQLite队列 |
 
-模式必须由用户显式选择，不能在一条路径失败后静默改变授权或目标。两种模式都保持 OTLP、table、批次头和 shutdown 语义。SDK 不知道“业务所在机器的 Agent”是靠业务名称推断出来的；需要 agent 模式时，用户通过本机/容器可达地址或部署编排显式提供 Agent endpoint。未来可以新增服务发现，但不能把推断结果当作凭据。
+SDK仅使用中心endpoint与SDK Key；删除agent/auto模式及LIGHTMONI_AGENT_ENDPOINT、LIGHTMONI_LOCAL_TOKEN入口。SDK保留进程内有界缓冲，中心ACK后释放批次。管理员登记内网IP/端口和公网入口，客户端查询清单、验证身份、内网优先、公网备用，详见第50章。
+
+AI插桩仅允许direct，生成LIGHTMONI_ENDPOINT和LIGHTMONI_KEY环境配置。检测历史SDK→Agent设置只提示迁移，不能继续生成该模式或向未迁移客户端自动插入调用。
 
 ## 11. LightMoni Agent 设计
 
 ### 11.1 定位
 
-LightMoni Agent 是独立运行的系统级执行节点。它可以接收业务 SDK 数据，也可以使用同一套 TypeScript SDK 为自身主机采集和任务执行打点；业务 SDK 不必安装或经过 Agent。Agent 的进程由 systemd、容器编排或其他进程管理器负责，业务服务的启停不会影响 Agent。
+LightMoni Agent 是独立运行的系统级执行节点。它使用同一套TypeScript SDK为自身主机采集和任务执行打点，产物通过进程内exporter入队；业务 SDK 不必安装或经过 Agent。Agent 的进程由 systemd、容器编排或其他进程管理器负责，业务服务的启停不会影响 Agent。
 
 ### 11.2 模块
 
 | 模块 | 职责 |
 | --- | --- |
 | `config.ts` | 地址、凭据、容量、任务和本地令牌校验 |
-| `agent.ts` | HTTP 接收、上报、心跳、运行状态和 SDK exporter |
+| `agent.ts` | 本地诊断、中心统一选路、上报、心跳、运行状态和进程内SDK exporter |
 | `queue.ts` | SQLite durable queue、receipt、重试、容量和日志 cursor |
 | `collect.ts` | CPU、内存、磁盘、网络、负载和进程采集 |
 | `probe.ts` | HTTP/TCP 拨测和超时 |
@@ -496,7 +492,7 @@ stateDiagram-v2
 5. Agent 激活后取得 control/data credential，使用 fsync 和原子 rename 落盘；中心只保存摘要。
 6. 撤销立即拒绝新请求；凭据自动轮换与有限 grace 窗口仍是后续能力，当前不能声称已自动轮换。
 
-`control_credential` 只用于心跳、配置和控制；`data_credential` 只用于 Agent 遥测。Agent 不再接受旧 config.key 或共享 SDK Key 的运行/控制面降级；SDK Key 仍供业务 SDK 独立上报。原本地接收器不作为用户安装 Agent 的理由，业务 SDK 不依赖 Agent。
+`control_credential` 只用于心跳、配置和控制；`data_credential` 只用于 Agent 遥测。Agent 不再接受旧 config.key 或共享 SDK Key 的运行/控制面降级；SDK Key 仍供业务 SDK 独立上报。SDK本地接收器与配置代理已移除，业务SDK仅直连中心。
 
 ## 13. 主机、SSH 和 Agent 引导
 
@@ -510,9 +506,9 @@ Agent 接入只有“先登记主机、再由平台部署”路径。已认证 A
 
 “移除节点”是中心侧归档操作：管理员二次确认后，在同一 SQLite 事务保存移除时间、操作者和原因，撤销该身份全部 control/data 凭据，并保留身份、凭据墓碑、遥测历史和审计。移除不停止或卸载远端程序，不删除主机，不撤销共享 SDK Key。未结束、已派发或结果未知的节点任务，以及待审批、执行中或结果未知的卸载流程阻止移除；重复请求幂等。默认节点列表排除已移除身份，管理员可查询历史；控制鉴权、数据鉴权和任务派发均拒绝已移除节点，禁止回退共享 Key 或由后续心跳复活。共享 SDK Key 不用于 Agent 控制面；旧无预约身份需从主机管理重新部署，不能通过撤销全局 SDK Key 实现 Agent 移除，也不恢复旧秘密。
 
-节点承担周期指标、日志、拨测、受限运维任务和管理员授权的有限脚本。任务中心支持 Node.js/POSIX shell 的立即派发与固定间隔调度，脚本具有 Agent 用户权限，边界详见第 27 节。AI 助手通过中心工具查询或生成行动提案，用户审阅批准后才创建执行；Agent 通过出站控制通道领取并回传有界结果。SSH 保留为首次安装、固定身份核验、卸载及离线恢复通道。Agent 自卸载、Agent 本地模型决策和操作系统脚本沙箱仍是后续能力。
+节点承担周期指标、日志、拨测、受限运维任务和管理员授权的有限脚本。任务中心支持 Node.js/POSIX shell 的手动派发、指定时间一次、固定间隔和带时区的日历 Cron，脚本具有 Agent 用户权限，边界详见第 27 节与 SDD 048。AI 助手通过中心工具查询或生成行动提案，用户审阅批准后才保存或启用计划；Agent 通过出站控制通道领取并回传有界结果。SSH 保留为首次安装、固定身份核验、卸载及离线恢复通道。Agent 自卸载、Agent 本地模型决策和操作系统脚本沙箱仍是后续能力。
 
-登记须填写主机名称和 SSH 目标地址、端口及登录用户；连接凭据可稍后添加，Agent 可稍后部署。主机公钥及指纹在首次 SSH 握手时自动记录，无需用户填写或确认。观测 hostname 不自动成为可信 SSH 地址，管理员可编辑同一主机名称和目标连接。秘密提交后由服务端使用 AES-256-GCM 加密，主密钥独立于数据库保存，页面永远不回显；模型只能看到主机元数据、凭据 ID 和结构化检查结果。主机删除是管理员操作：先移除仍有效的 Agent 身份，并结束终端、检查、部署/卸载和未结束计划、撤销有效连接凭据后才可删除，避免后续心跳自动重建。移除/卸载 Agent 不删除主机资产，删除记录不等于远端程序已卸载。
+登记须填写主机名称和 SSH 目标地址、端口及登录用户；连接凭据可稍后添加，Agent 可稍后部署。主机公钥及指纹在首次 SSH 握手时自动记录，无需用户填写或确认。观测 hostname 不自动成为可信 SSH 地址，管理员可编辑同一主机名称和目标连接。秘密提交后由服务端使用 AES-256-GCM 加密，主密钥独立于数据库保存，页面永远不回显；模型只能看到主机元数据、凭据 ID 和结构化检查结果。主机删除是管理员操作：先移除仍有效的 Agent 身份，并结束终端、检查、部署/卸载和未结束计划、解绑有效连接凭据后才可删除，避免后续心跳自动重建。移除/卸载 Agent 不删除主机资产，删除记录不等于远端程序已卸载。
 
 SSH 是首次接入、临时维护和故障恢复通道。登记在单一表单中展示连接信息、登录方式、秘密输入与保存时长；登录方式为密码或 SSH 私钥。主机公钥和指纹不在表单输入，首次 SSH 握手自动记录，详情只读可见；后续连接自动核验已记录身份。密码与私钥统一默认按期限保存 6 小时（managed），到期或撤销后清空；可显式确认永久保存（permanent），无固定过期时间，直到管理员撤销。有限托管和永久凭据均不因 Agent 激活提前清除；建议优先短期保存。凭据保存失败保留原主机 ID，就地重试不重复登记。主机名称、ID、指纹是资产元数据，不随登录凭据期限过期。已有凭据期限不自动改变；显式 temporary/one_time 仍沿用短期/使用后清除语义。
 
@@ -606,7 +602,7 @@ flowchart LR
 
 登记主机的同一表单直接显示主机名称、地址、端口、用户名、密码或 SSH 私钥输入及保存时长。主机公钥/指纹由首次 SSH 握手自动记录，无需填写或确认。默认登录方式为密码，默认保存 6 小时；可选择有限期限或永久保存。公钥/指纹在详情只读显示并用于后续 SSH 服务端自动核验，既不是 SSH 登录公钥，也不能替代密码/私钥；指纹与平台 ID/用户名称作为资产元数据保留。管理员仍可明确选择仅登记、稍后添加凭据，登记本身不执行 SSH。
 
-API 有限策略为 managed，默认 expires_in_seconds=21600；永久策略为 permanent，必须显式 confirm_permanent=true，且不得同时提交有限秒数。数据库以 expires_at 空字符串表达无固定期限，仅在 retention=permanent 时有效；不使用虚构的远期时间戳。秘密仍加密绑定主机和凭据 ID，不回显、不进入 AI、日志或审计正文。
+API 有限策略为 managed，默认 expires_in_seconds=21600；永久策略为 permanent，必须显式 confirm_permanent=true，且不得同时提交有限秒数。数据库以 expires_at 空字符串表达无固定期限，仅在 retention=permanent 时有效；不使用虚构的远期时间戳。此节的早期实现将秘密加密绑定主机和凭据 ID；集中连接凭据及共享绑定以第 13.6 节为准，秘密仍不回显、不进入 AI、日志或审计正文。
 
 统一有效性用于计数、终端、SSH 检查、安装/卸载、批量及 AI 脱敏凭据选择：未撤销、秘密未清除，且永久无固定期限或有限期限晚于当前时间。Agent 激活保留 managed/permanent；撤销清空密文、终止引用终端并使待执行计划失效。永久凭据不代表终端会话或部署计划无限期；原空闲/总时长、固定目标指纹、预检 TTL 和人工审批继续生效。
 
@@ -652,6 +648,59 @@ flowchart TD
 
 规格与验收见 [SDD 040](../specs/040-automatic-ssh-host-identity/spec.md)。
 
+### 13.6 集中连接凭据与主机默认绑定（SDD 050）
+
+运维工具提供独立“连接凭据”页，统一管理 SSH 私钥和密码。主机登记可选择已有有效凭据，也可直接填写新秘密并保存到凭据库；主机自身保存名称、SSH 地址、端口和登录用户名。默认保存 6 小时，可选择其他期限或明确确认永久。页面展示名称、类型、状态、有效期、关联主机与私钥公钥指纹；服务端不返回秘密或密文。此设计更新第 13.4 节的按主机保存实现，保留原期限和主机身份语义。
+
+中央 connection_credentials 加密保存秘密；machine_credentials 保留稳定 ID 作为主机绑定并引用中央项，managed_machines.default_credential_id 指向默认绑定。SSH 检查、终端、部署和卸载省略凭据 ID 时自动使用默认项；默认过期、撤销或解绑后明确提示更新，不自动换用其他凭据。检查和审批计划始终绑定当时的凭据 ID，不因修改默认值而更换已审阅授权。
+
+SSH 私钥以实际公钥 SHA256 指纹识别，同一私钥可关联多台主机；重复提交复用已有有效项并返回其真实期限，不隐式延长或改名。密码不生成可离线猜测的秘密散列。手工新增同钥时，本主机绑定仍遵守本次请求期限并受中央期限约束；明确选择已有库项时才继承库项期限，不因去重扩大本主机授权。有效旧凭据迁移时保留绑定 ID、原期限与消费语义；无法解密或解析的旧材料隔离为不可用，保留受保护密文供核查，有限期限到期仍清除，不默认选用或重新激活。绑定的有效性同时受中央项和自身期限限制，不因合并其他主机的永久私钥而延长旧授权。
+
+解绑仅清除本主机绑定，取消对应待审批计划并关闭引用终端，不撤销其他主机共用的中央项。全局撤销需要明确确认并展示关联主机，清除中央密文并使所有绑定、终端和待审批计划失效。中央过期也统一清除秘密。临时绑定仍按 Agent 激活清除，仅影响该绑定；一次性密码仅允许单主机绑定，使用结束同时清除其独占中央秘密，不能再次绑定复用。删除主机不删除共享中央项；AI 只获得公开元数据和绑定 ID，不能读取或取回秘密。
+
+```mermaid
+flowchart LR
+  USER[连接凭据页面 / 登记主机] --> VAULT[中央加密凭据 / 期限 / 公钥指纹去重]
+  VAULT --> BIND[主机绑定 / 默认凭据 ID]
+  BIND --> SSH[SSH 预检 / 终端 / 审阅后安装卸载]
+  SSH --> AGENT[已登记主机的 Agent]
+  SSH -->|同一预检会话只读发现| NETWORK[合法 SSH 或 Agent 网卡快照]
+  AGENT -->|认证注册或心跳| NETWORK
+  NETWORK --> HOST[主机 ID / 内网与其他 IP / 平台来源观测]
+```
+
+### 13.7 主机网络地址与可信来源观测（SDD 050、051）
+
+主机列表的“主机”栏在用户名称下标记 SSH 连接地址、内网 IP、其他网卡地址与平台观测来源 IP；详情显示观测主机名、网卡、地址族、地址分类、发现方式和最近观测时间。支持多网卡、多 IPv4/IPv6 和纯内网环境。登记时的 SSH 连接地址仍由用户提供；平台不能从私钥、浏览器所在电脑或机器名称推导它。IP 和观测主机名是可变元数据，平台生成的主机 ID 才是唯一身份，不按 hostname、内网 IP 或共享 NAT 出口自动合并资产，也不覆盖用户名称、SSH 地址、端口和登录用户名。
+
+安装 Agent 前，管理员主动执行 SSH 安装检查即可发现网络。平台复用同一次已验证服务端主机密钥、凭据和目标的 SSH 会话，追加固定、有界的只读 hostname/网卡采集区块；不额外连接、不安装依赖、不执行用户脚本。核心安装条件与可选发现分别解析。缺少 ip 工具、非法数据或超过字节/条数上限时，发现返回 unavailable，不降低已通过的核心 ready，也不保存原始 stderr 或擦除先前成功快照。核心安装条件未通过但发现成功时仍可展示和保存结果；取消、身份变化或授权失效的过时结果不得写入。
+
+Agent 通过系统网卡接口采集 network_addresses，每次注册/心跳提交最多 64 条规范地址。SSH 与 Agent 共用 IP 规范化及服务端分类，支持 RFC1918、CGNAT、IPv6 ULA、链路本地和回环；超量或非法 Agent 输入仍整体拒绝，不能部分刷新心跳状态。主机 summary 的 network 保留 addresses、private_ips、public_ips、observed_at、source_ip、source_observed_at 和 source_kind，新增 observed_via（ssh、agent 或 unavailable）及 hostname。hostname 仅表达该成功快照的观测主机名，observed_at 使用服务端接收该成功快照的采样时间，不信任远端时钟；没有合法快照时显示可执行 SSH 安装检查或等待 Agent 上报。
+
+machine_network_observations 原位保存规范快照及观测身份。SSH 快照绑定当前 ssh_target_generation 和实际服务端主机密钥指纹，提交前重新验证；修改 SSH 地址、端口或登录用户名使旧 SSH 快照失效，A→B→A 也不能复用。Agent 快照由 snapshot_agent_id 约束当前认证绑定；旧 agent_id 独立约束平台来源 IP。读取时分别验证网卡快照和平台来源的身份，不因其中一个失效而抹掉另一个仍合法的观测。Agent 重装不能沿用上一 Agent 的网卡或来源，合法 SSH 快照也不因旧 Agent 失效而丢失。
+
+同一主机按服务端采样时间保存最新合法的成功网卡/主机名快照，SSH 与 Agent 没有固定优先级。新的成功空快照清空当前网卡；失败保留先前成功数据。旧 Agent 未提交 network_addresses 时不伪造或覆盖网卡，也不擦除独立 SSH 快照，来源 IP 仍可在认证请求中单独更新。更新网卡不刷新 source_observed_at；SSH 永远不填充 source_ip。
+
+source_ip 仅由平台根据该 Agent 请求连接观测，不从正文接收，不调用第三方公网 IP 查询服务。平台观测来源可以是内网、NAT、代理或 VPN 地址，只代表 Agent 到平台这一条连接；网卡公网范围也不代表公网可达。两者都不推导 NAT 映射、全局出口或公网入站地址，不自动改写 SSH 连接配置。
+
+默认忽略 X-Forwarded-For，只采用 socket 对端。反向代理部署可通过 LIGHTMONI_TRUSTED_PROXIES 显式设置 IP/CIDR；仅在直连对端可信时，从右向左剥离可信代理链，采用第一个非可信来源。可信代理缺失或提供非法转发链时显示来源不可确定，不能将代理地址当成已发现的主机出口。未配置可信代理时显示的来源可能是代理本身，界面明确注明平台观测依据。
+
+```mermaid
+flowchart TD
+  SSH[用户主动执行 SSH 安装检查] --> SESSION[同一已验证身份与凭据的 SSH 会话]
+  SESSION --> CORE[严格解析核心安装条件]
+  SESSION --> DISCOVERY[有界只读主机名 / 网卡发现]
+  DISCOVERY -->|失败 / 不降低核心 ready| KEEP[保留先前成功快照]
+  DISCOVERY -->|成功 / 校验目标代际与主机密钥| SNAPSHOT[按采样时间保存合法快照]
+  AGENT[当前绑定 Agent 的认证注册 / 心跳] -->|规范网卡 / 校验 Agent 身份| SNAPSHOT
+  AGENT --> SOURCE[平台按请求连接独立观测来源 IP]
+  SNAPSHOT --> VIEW[按各自身份边界读取 / 主机列表与详情]
+  SOURCE --> VIEW
+  CORE --> READY[安装条件结果 / 审阅后部署]
+```
+
+规格与契约见 [SDD 051](../specs/051-ssh-host-network-discovery/spec.md)。
+
 ## 14. AI 助手设计
 
 ### 14.1 运行时分层
@@ -693,6 +742,16 @@ AI 的查询必须走目录和统一 Query，SQL 只读、有时间范围和结�
 管理员在“模型管理”保存 Base URL、协议、模型和输入/输出单价。自动识别只给地址和目录依据推荐；第三方 OpenAI 兼容目录无法区分 Chat/Responses 时必须人工选择。各协议独立规范化 `/v1`、`/v1beta`、目录鉴权和生成接口；修正后的地址回填输入框并说明原因。目录刷新不产生生成费用；连接测试发送一次最小真实请求。
 
 每个真实模型请求使用稳定 request ID 幂等写入账本，记录 started、usage 和终态，区分 complete、partial、unpriced、failed、cancelled。缺失 token 不能猜成零，模型输入、Key 和回复正文不写入用量统计。
+
+### 14.4 平台开放能力与 MCP：目标架构（SDD 046）
+
+平台对外开放完整业务能力，任务只是其中一个领域。目标采用“统一应用能力层 + MCP/Web HTTP/内置 AI 三种适配器”：外部 Codex、Claude 通过 Streamable HTTP MCP 调用，平台助手在进程内调用相同 Dispatcher，页面和普通程序通过 HTTP 复用同一领域服务。MCP 负责协议与工具发现，能力层统一真实主体、role/scope/资源交集、参数校验、审批、幂等、审计和安全结果；不直接包装助手 execute 并伪造 session/admin。首期同进程模块部署，不新增微服务或队列。此为目标设计，当前主干没有 MCP 服务或对应外部授权。
+
+用户客户端授权采用 OAuth 2.1 授权码 + PKCE，独立 PAT 只作为支持 Bearer 配置客户端的补充；二者均不复用 SDK/Agent/SSH/模型凭据。首期安全读取与提案，操作在平台审阅；客户端弹窗或模型确认不代替审批。通用提案把 owner 与来源会话分开，已有助手历史权限保持。后续自动执行仅限管理员固定能力/版本、主机、参数界限与期限的持续授权。
+
+所有主机主动操作关联统一 execution ID，复用真实 task run、Agent job、部署、运维和生命周期回执；不同领域保留真实状态与恢复策略，unknown 不自动重放。遥测查询记调用审计，持续采样不逐条建任务；交互按独立会话协议留痕。长任务返回 ID，连接中断不等于取消。远端 MCP 不读取用户本地源码，本地 AI 负责本地文件，平台部署使用明确提交的版本/制品。任意 SQL 和脚本源码须额外数据授权，不能由主机范围 token 绕过资源隔离。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md) 和 [SDD 046](../specs/046-platform-mcp/spec.md)。该设计不表示 MCP/OAuth 或统一外部工具已经实现。
 
 ## 15. 告警、静默和通知
 
@@ -838,7 +897,7 @@ docker compose up -d --no-build --wait
 - SDK 远程停报、日志采样和规则配置不是每种语言都已接入；未支持的语言不能声称平台规则已生效。
 - Agent 离线时撤销不能即时停止其已缓存任务，配置租约仍是后续强化。
 - SSH 终端是管理员临时工具，不给 AI 增加任意 shell 能力。
-- SDD 043 的通用脚本使用 Agent 进程权限，独立目录、最小环境与有界子进程不构成不可信代码沙箱；不得在脚本中写入连接凭据。默认开启的拨测任务在地址未配置时为“待配置”，不产生虚构成功。有限脚本支持立即执行和固定间隔（10 秒至 30 天）；不承诺 cron、持续守护脚本、跨主机编排 DAG 或分布式 exactly-once。
+- 通用脚本使用 Agent 进程权限，私有脚本目录、最小环境与有界子进程不构成不可信代码沙箱；不得在脚本中写入连接凭据。默认开启的拨测任务在地址未配置时为“待配置”，不产生虚构成功。SDD 048 增加脚本上传/编辑、单次定时、固定间隔与五段 Cron/IANA 时区；参数和自定义工作目录需要 task.script.v2。不支持持续守护脚本、跨主机编排 DAG、任意运行时/秘密注入或分布式 exactly-once。
 - 代码任务副本不是操作系统沙箱；白名单命令只适用于受信 workspace，不能当成不可信代码隔离。
 - ClickHouse 的掉电可靠性、极端容量、Linux 实机和完整 Docker 发布需要按证据目录继续验收。
 
@@ -874,7 +933,9 @@ docker compose up -d --no-build --wait
 - UI 交互：[docs/ui-design.md](ui-design.md)
 - SDK 总览：[sdk/README.md](../sdk/README.md)
 - 任务索引：[docs/tasks/README.md](tasks/README.md)
+- 脚本创建与日历调度：[使用与设计](task-authoring.md)、[SDD 048](../specs/048-task-authoring-schedules/spec.md)
 - Mastra 助手：[SDD 001](../specs/001-mastra-assistant/spec.md)
+- 平台开放能力与 MCP 目标架构：[HLD/LLD](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)
 - 模型发现和协议：[SDD 002](../specs/002-model-discovery/spec.md)、[SDD 003](../specs/003-multi-protocol-models/spec.md)、[SDD 005](../specs/005-model-management/spec.md)
 - Agent、迁移和凭据：[SDD 006](../specs/006-execution-nodes/spec.md)、[SDD 007](../specs/007-node-runtime-migration/spec.md)、[SDD 010](../specs/010-agent-deployment/spec.md)
 - SDK 数据与模式：[SDD 010 telemetry](../specs/010-telemetry-table-model/spec.md)、[SDD 011](../specs/011-aligned-metric-windows/spec.md)、[SDD 012](../specs/012-sdk-reporting-choice/spec.md)
@@ -885,7 +946,7 @@ docker compose up -d --no-build --wait
 - 架构文档双端同步规则：[SDD 020](../specs/020-architecture-design-sync/spec.md)
 - 镜像发布与管理员运维：[SDD 023](../specs/023-registry-admin-cli/spec.md)
 
-## 26. 运维平台：网站、容器、备份与计划任务（SDD 026）
+## 26. 运维平台基础与备份恢复（SDD 026，网站/容器现行设计见第33章）
 
 ### 26.1 驱动目标与范围
 
@@ -975,7 +1036,7 @@ ACME 采用 Certbot webroot HTTP 验证，不停止已有 Web 服务。前提是
 
 任务中心统一管理平台内置能力与用户自定义任务。任务定义描述做什么，目标描述哪些主机执行，派发创建配置或执行实例，执行记录说明真实结果。内置指标采集、HTTP/TCP 拨测、目录日志使用 Agent 原生处理器；自定义 Node.js/POSIX shell 使用有限脚本处理器。两者共享任务目录、主机目标和单机覆盖，不要求把持续采集改写成重复启动的脚本。
 
-平台提供只读任务模板，用户可创建任务、复制模板、调整参数或停用自己的任务。新库默认启用面向所有已登记主机的指标和拨测任务。指标采集在 Agent 接入后开始；未配置探测目标的拨测显示 waiting_config，enabled 不等于已经执行。升级保留原有任务、参数、目标和用户停用选择；默认初始化只执行一次，不在每次启动时重新启用任务。
+平台初始化直接持久化指标采集、服务拨测、目录日志三条默认任务，默认启用并面向所有登记主机，不再提供独立模板目录。Agent 接入后自动获得适用任务；空拨测目标或空日志目录为 waiting_config，不执行空配置。用户可调整默认任务配置、目标和启停，通过停用停止默认任务；新建任务直接编写或上传脚本。升级一次性补齐缺失默认任务，保留已有 ID、参数、目标、主机覆盖和停用选择，重启不重置。
 
 主机工作台采用“主机 / 任务中心 / 主机标签”。主机列表只展示分类标签；实际任务、单机覆盖和执行记录放在详情与任务中心。原生任务用持续配置状态反映应用情况，不伪造 succeeded 脚本执行记录。
 
@@ -1005,9 +1066,9 @@ flowchart TB
 
 machine_host_labels(machine_id,label_id) 关联平台主机与标签目录；已安装 Agent 的历史标签一次性迁移到对应主机。无 Agent 的主机也可以设置标签；移除/卸载后保留，重装读取同一主机关系。Agent heartbeat.group_id 不能授予主机标签，避免持有 control credential 的节点自行扩大脚本接收范围。主机名称由用户设置，主机 ID 由平台产生；不向业务环境注入 SDK 主机变量。
 
-Task 包括 id/name/type/enabled、origin、template_id、target_all、host_ids、label_ids、config、schedule 及可选 script。内置类型为 host/probe/log，脚本为 script。目标是全部主机、明确主机 ID 或任一相同标签的并集；空目标不广播。单机 override 覆盖启用状态及内置参数，清除后恢复继承。同一主机匹配的自定义指标任务覆盖内置指标基线；多个自定义指标任务仍需通过表名与采集间隔冲突检查。
+Task 包括 id/name/type/enabled、origin、target_all、host_ids、label_ids、config、schedule 及脚本专用 script/execution_policy。原生持续任务类型为 host/probe/log，有限脚本为 script；来源仅由服务端初始化或既有记录决定，展示为平台默认/用户任务。新建仅允许 script，更新锁定类型和来源，默认任务不能删除；既有用户原生任务保留编辑能力。目标是全部主机、明确主机 ID 或任一相同标签的并集；空目标不广播。单机 override 覆盖启用状态及内置参数，清除后恢复继承。同一主机匹配的自定义指标任务覆盖内置指标基线；多个自定义指标任务仍需通过表名与采集间隔冲突检查。
 
-脚本定义包含运行时 shell/node、源码、超时和输出上限。任务定义提供稳定内容摘要 revision，手动派发和重试提交审阅时的 expected_task_revision；写事务内再次比较，代码或目标定义变化时拒绝旧预览。源码最多 64 KiB，超时 1–3600 秒，总输出配置上限 1–256 KiB。内置持续任务与有限脚本使用不同执行策略：continuous 仅用于原生采集，once/interval 用于有限脚本。任务保存时校验运行时、目标、间隔、脚本、采集冲突和模板来源，不能通过修改 origin 伪装成平台内置模板。
+脚本定义包含运行时 shell/node、源码、超时和输出上限，可选参数数组 args 和远端绝对工作目录 cwd。上传与直接编写最终保存同一份代码，上传文件不会作为可变路径在后续执行时读取。任务 revision 包括代码、目标、计划和执行策略；手动派发和显式重试携带 expected_task_revision，事务内拒绝已变化的旧预览。源码最多 64 KiB、超时 1–3600 秒、输出 1–256 KiB；args 最多32项/总8KiB，cwd 最多4096字节。continuous 仅用于原生采集；脚本 once 表示手动，at 为指定时间一次，interval 为10秒至30天固定间隔，cron 为五段表达式加 IANA 时区。保存时统一校验模式专属字段、目标、脚本、采集冲突及服务端来源/类型约束。
 
 ### 27.4 LLD：执行快照、租约与调度
 
@@ -1025,16 +1086,19 @@ stateDiagram-v2
   unknown --> queued: 人工明确重试，建立新记录
 ```
 
-图中 unknown 到 queued 表示创建新的关联执行，旧记录保持 unknown，不改写历史。领取租约有效期为 60 秒，未领取队列在 24 小时后过期取消。中心按 task/host 防止重叠；尚未解决的 unknown 不自动重放。task_schedules 持久化固定间隔 next_due 与定义摘要；每次扫描最多派发当前周期，不追赶历史遗漏，重启不重置未来到期时间。单个 Agent 只领取一个脚本任务，避免多脚本同时修改主机。
+图中 unknown 到 queued 表示经审阅创建关联新执行，旧记录保持 unknown，不改写历史。领取租约有效期为60秒；新脚本队列等待默认1小时，可配置10秒至24小时，已有排队项保留原截止时间。中心按 task/host 防止重叠，单个 Agent 只领取一个脚本；每任务全局并发默认10，可配置1–100。task_schedules 持久化定义摘要和下一次时间，task_schedule_consumptions 按 task_id/run_at 保存单次消费；中心计算日历和固定间隔，不向主机安装 crontab。默认每5秒扫描，正常容差15秒；超出容差或启动前已到期的槽位不补跑，重启不重置未来计划。at 被消费或错过后不因重启、停用/启用而重放。
 
-Agent 通过 task.script.v1 能力声明领取，旧版本不会误领新任务。control 认证、主机当前 Agent 绑定和节点生命周期在领取、续租和提交结果时检查。取消 queued 直接终止；取消 running 先置取消请求，由 Agent 杀死子进程后回执。控制连接失败或父进程关闭时终止脚本；独立监督进程保留截止时间并检测 Agent 父进程，避免主进程崩溃后任务失去超时控制。本地 0600 执行标记用于重新提交已得到的结果，不因本地重启再次执行同一领取。远端副作用是否已完成无法确认时保留 unknown；本协议不提供分布式 exactly-once。
+自动重试默认关闭，可明确设置最多3次及10秒至1小时的等待间隔；只接受 failed 且错误码为 script_failed/runtime_unavailable/timeout/output_limit 的明确回执，沿用原代码、参数及策略快照，创建独立 retry_of 记录。任务版本、有效目标、Agent 绑定或外部授权变化时停止重试；unknown、控制丢失、租约或队列过期、取消不自动重试。显式人工重试仍审阅当前定义。当前状态图只描述原运行状态，失败后允许的自动重试同样是新记录，不把 failed 改回 queued。
 
-脚本运行使用新建的私有工作目录、固定解释器和参数、最小环境变量；不继承 Agent control/data credential。Unix 下按进程组处理超时、取消和输出上限，避免只终止父 shell 后留下直接后代。任意脚本仍具有 Agent 运行用户权限，本次不提供操作系统沙箱。运行中的脚本或未核对的 unknown 会阻止相关主机删除、身份替换或 Agent 卸载，不能通过生命周期操作绕过执行边界。管理员可人工核对未知执行的实际影响后，填写原因并明确确认结束，记录 resolved_at, resolved_by, resolution_reason 后解除阻塞；旧状态仍为 unknown，不重新执行、不转成成功，也不接受晚回执覆盖。该决议不证明远端进程已停止，界面必须说明；AI 不提供代替人工核对的确认工具。
+基础脚本接受 task.script.v1 或 v2；非空 args/cwd 必须 task.script.v2，旧 Agent 显示需升级，不会静默忽略选项。control 认证、主机当前 Agent 绑定和生命周期在领取、续租和提交结果时检查。取消 queued 直接终止；取消 running 等 Agent 终止进程后回执。控制失败或父进程关闭终止脚本，独立监督进程保留截止时间并检测 Agent 父进程。本地0600标记只重交已得结果，不重执行。远端副作用不能确认时保持 unknown，不提供分布式 exactly-once。
+
+脚本文件与监督器保存在新建的私有目录，运行目录默认该目录，也可显式指定远端绝对 cwd；不存在或无权限时失败，不静默回退。解释器固定，args 原样传入而不拼接 shell，保持最小环境，不继承 Agent control/data credential。Unix 按进程组处理超时、取消和输出上限。脚本仍具有 Agent 用户权限，不是操作系统沙箱。运行中或未核对 unknown 阻止主机删除、身份替换或 Agent 卸载。管理员人工核对后填写原因并确认结束，保存 resolved_at/resolved_by/resolution_reason 后解除阻塞；历史仍为 unknown，不执行、不改成功、不接受晚回执。此决议不证明远端进程已停止，AI 不提供人工核对替代工具。
 
 ### 27.5 LLD：接口与 AI 审阅边界
 
 - /api/v1/agent-tasks：统一任务定义目录；内部旧路径不等于产品概念。
-- /api/v1/task-templates：只读内置模板；/task-hosts：不含 SSH 秘密的主机目录。
+- /api/v1/task-hosts：不含 SSH 秘密的主机目录；模板目录接口已移除。任务创建仅接受脚本，默认任务删除返回409。
+- POST /api/v1/task-schedules/preview：管理员预览计划规范化结果与未来最多五次时间，不保存或执行任务。
 - /api/v1/host-labels 与 /machines/:id/labels：主机标签目录与归属。
 - /api/v1/machines/:id/tasks 和 /task-overrides/:taskId：单机任务、覆盖与恢复继承。
 - /api/v1/agent-tasks/:id/dispatch、/task-runs、/task-runs/:id/cancel|retry|resolve：明确派发、记录、取消、重试与人工核对结束。
@@ -1046,6 +1110,19 @@ Agent 通过 task.script.v1 能力声明领取，旧版本不会误领新任务�
 ### 27.6 验证与边界
 
 验证必须覆盖真实数据库迁移与重启、未安装主机标签、重新接入继承、默认拨测待配置、成员权限、派发原子性、快照不变、领取隔离、租约失效 unknown、结果重试、取消、当前定义显式重试、周期不重叠、不追赶、真实子进程超时/输出上限/最小环境以及浏览器任务操作。仅有任务 enabled 或创建 queued 记录不能声称主机已执行成功。发布到真实用户主机需要新 Agent 包；本地受控子进程验收不等于 vchive 或生产发布验收。
+
+### 27.7 脚本创建与日历调度（SDD 048）
+
+任务宽抽屉的新建入口直接打开脚本编辑器，不再选择模板。UTF-8 .sh/.js/.mjs 文件经64KiB、编码和NUL检查后填入同一编辑器，用户可继续修改；替换已有内容前确认，不新增二进制执行或可变文件引用接口。Node.js 沿用 ESM 语义。表单依次展示执行内容、计划、目标与高级策略，实时预览实际匹配主机和 Agent 就绪状态；手动和 AI 创建共用 normalizeTask。
+
+日历计划提供每天、每周、每月控件和高级 Cron，保存同一五段表达式与 IANA 时区；后端 preview 和 scheduler 共用 cron-parser 5.10.2，返回明确UTC时间并按所选时区显示。America/New_York 春季不存在的02:00转为03:00，秋季重复的01:30只取第一次；每月不存在的日期跳过。指定时间一次保存 UTC run_at。保存草稿不执行，明确启用表示授权后续按计划派发；AI 仍先保存提案，再由用户批准。重叠固定跳过、历史错过不补跑，重试需显式配置且不会自动重放 unknown。完整设计和使用说明见 [脚本任务创建与调度](task-authoring.md) 及 [SDD 048](../specs/048-task-authoring-schedules/spec.md)。
+
+
+### 27.8 平台默认任务与统一目录（SDD 049）
+
+默认任务是持久化的真实 Task，与用户任务共用目标、启停、单机覆盖和状态目录；不再保留 template_id 或独立模板 API。新库创建三条默认任务，旧库通过 platform-default-tasks-v1 一次性事务补齐，已有默认定义和运行历史不重写。主机尚无 Agent 时等待接入，后注册或重装后按当前目标自动获取任务；停用、排除目标或单机停用后不采集。
+
+原生持续处理器使用配置 revision 与应用状态，有限脚本使用 TaskRun、快照及租约，不为每次采样生成执行记录。Agent 心跳、鉴权、配置领取和结果回传属于基础协议，不作为可停用任务。移除模板元数据可能使旧定义 revision 变化，旧预览及旧版本自动重试按现有校验拒绝；普通已排队或运行中的执行继续沿用已审阅快照，历史和单次消费记录保持，不自动重放。平台来源仅服务端生成，新建脚本或更新任务的人工/AI路径共用校验及审批。详见 [SDD 049](../specs/049-platform-default-tasks/spec.md)。
 
 ## 28. Agent 版本、升级与回退（SDD 045）
 
@@ -1130,3 +1207,206 @@ AI 工具 list_agent_releases、propose_agent_update、get_agent_update 只返�
 统一入口和记录保留底层执行策略：持续采集使用配置 revision；有限脚本使用租约与退出结果；服务部署使用分阶段健康回执；Agent 首装/升级使用 SSH 生命周期与独立维护确认。主机检查等短操作可同步返回执行结果，耗时任务异步返回执行 ID，均记录来源、授权和目标；交互式能力另用会话协议，关联授权、开始、结束及退出状态，不把每次按键拆成任务，也不将终端原始输出持久化或发送给模型。高频采样不逐条创建任务执行记录。首次安装尚无 Agent 可接收任务，仍通过 SSH。周期任务与单次任务均归属明确主机，结果未知不会被幂等重试偷偷重放。
 
 本轮交付 Agent 维护自身的计划、审批和完整结果 API；跨脚本、业务运维、Agent 生命周期的统一执行读模型、外部服务身份及 scope、自定义 typed action 注册表属于后续单独 SDD，本轮不将已有分散接口声称为统一外部任务 API。
+
+## 33. 网站、DNS、证书与 Docker 服务托管（SDD 033）
+
+2026-10-29。用户批准整体重构并明确尚未上线、无需旧模型兼容。此章描述 SDD 033 分支实现，合入和真实外部服务验收以对应 PR/validation 为准；第26章的网站、证书与容器描述由本章替代，备份/计划和恢复说明继续适用。
+
+```mermaid
+flowchart TB
+  ops033_admin["管理员工作台 / 五核心能力"]
+  ops033_api["中心资源与策略 API / revision / 持续授权"]
+  ops033_db["SQLite + 加密版本 / 资源 / 实例 / 端口 / 执行"]
+  ops033_reconcile["领域独立收敛 / 部署 / 续期 / 分发"]
+  ops033_cloud["中心云适配器 / DNS / ACME / 三云 CDN"]
+  ops033_job["Agent job + 有效 lease / 私有不可变载荷"]
+  ops033_agent["独立 Agent / 本机执行 / 持久写锁"]
+  ops033_app["Docker / Compose / 应用与托管服务实例"]
+  ops033_gateway["OpenResty host 网关 / 多路径 / 静态 / 服务入口"]
+  ops033_target["证书目录 / 更新脚本 / 版本去重 / 显式环境"]
+  ops033_receipt["现场状态与有界回执 / 健康 / 指纹 / 负载 / unknown"]
+  ops033_admin -->|配置与人工确认| ops033_api
+  ops033_api -->|加密状态| ops033_db
+  ops033_api -->|授权策略| ops033_reconcile
+  ops033_reconcile -->|中心签名请求| ops033_cloud
+  ops033_reconcile -->|派发| ops033_job
+  ops033_job -->|control + lease| ops033_agent
+  ops033_agent -->|部署 / 探活| ops033_app
+  ops033_agent -->|完整版本包| ops033_gateway
+  ops033_agent -->|材料与脚本| ops033_target
+  ops033_gateway -->|健康 IP + 端口| ops033_app
+  ops033_app -->|状态 / 负载| ops033_receipt
+  ops033_gateway -->|HTTP / TLS| ops033_receipt
+  ops033_target -->|逐目标结果| ops033_receipt
+  ops033_receipt -->|绑定回执| ops033_api
+```
+
+### 33.1 组件职责与资源模型
+
+中心仍是 Node.js/TypeScript 模块化单体，SQLite 保存管理状态，ClickHouse 保存遥测；未引入 Consul、Kubernetes、第二个中心或中心 Docker socket。runtime/src/ops 统一全局 credential、dns_zone、acme_account、certificate、certificate_target、application、service、node_pool、gateway_group、website。应用描述 Docker 单容器或 Compose 声明；部署/实例绑定机器；托管服务声明资源、副本和端口；网站声明域名、HTTPS 与静态/反代/服务目标。OpenResty 是 host Docker 系统应用，多网站共享网关组内的进程。
+
+### 33.2 存储、版本与执行
+
+ops_platform_resources 保存 revision、加密 spec、脱敏 status 和授权者；ops_platform_revisions 保存不可变配置快照；ops_platform_runs 保存加密请求快照/输入、逻辑去重键、执行状态和脱敏结果。ops_platform_instances、ops_platform_ports 保存实例、资源与端口预留；ops_platform_nodes 保存 Agent 只读容量观察。证书版本、ACME 账号/订单/挑战、DNS 观察/归属及云证书映射分别持久保存。配置保存与应用发布分开；发布冻结 desired_revision，托管服务同时冻结 application_revision 和 node_pool_revision。新配置需显式发布才进入持续维护。
+
+### 33.3 鉴权、私有载荷与调度
+
+管理员 API 为 /api/v1/ops，统一 revision、confirmed、资源引用和可用动作检查。人工动作和已启用的持续策略记录授权者，每次新派发重查管理员有效性。领域各自维护 in-flight，慢 DNS/ACME 不阻塞工作负载轮次；网站 DNS 刷新另有并发上限。新 Agent 动作使用 operations.platform，复用现有 control 身份、job lease 和 /agents/:id/jobs/:jobId/operations 私有下载；普通 job 仅含 ID。成功回执必须匹配 operation/resource/node 并有现场验证；中心拒绝陈旧或撤权载荷。关闭时拒绝新动作，等待已开始的领域/云动作再关闭存储。
+
+### 33.4 DNS 与 ACME
+
+阿里 DNS 与 DNSPod 通过固定官方 HTTPS 端点签名请求，支持全量分页 CRUD/启停和管理 scope；五分钟有界只读同步观察外部修改。人工可管理授权范围内记录，网站/ACME 自动化只维护已记录归属和 Record ID 的记录。API 接受、平台回读和公网传播是不同状态。ACME 在中心使用持久账号密钥、订单、CSR 和 DNS-01 挑战，精确创建/清理本订单 TXT，支持同名多值与通配符；不把 DNS 凭据下发到网关。
+
+### 33.5 证书版本与三类分发目标
+
+证书支持 ACME、上传、自签；公私钥匹配、SAN、有效期和指纹均校验。材料与不可变版本加密保存，公开接口只显示元数据和 has_*。上传证书只能提醒到期；ACME/自签可显式启用自动续期，窗口按实际有效期计算，尚未接入 ARI；失败续期可人工重新 issue/renew，不宣称完整自动退避已实现。网站首次发布 HTTPS 时，材料缺失或过期可调用中心证书签发后继续部署。证书目标分别为 Agent 目录、云 CDN、更新脚本，各自记录 desired/applied 版本与结果。
+
+### 33.6 云服务、脚本与凭据边界
+
+首批云目标覆盖阿里云、腾讯云、火山引擎 CDN HTTPS 域名。阿里 CDN 直接部署 PEM；腾讯 SSL 上传后更新 CDN；火山证书中心上传后部署 CDN。云映射保留远端证书ID，上传/绑定/逐域回读分别核实；HTTP 200、上传成功或某一域成功不替代全部目标生效。云凭据、ACME 密钥只由中心加密使用。目录按受管版本落盘并切换指针，私钥权限受限。更新脚本由管理员固定 Agent、解释器、正文、显式环境和超时；正文与环境加密，不在普通摘要回显，也不送 AI。脚本通过证书临时文件路径及版本元数据获得材料，具有 Agent 本机权限，无沙箱承诺。
+
+### 33.7 幂等、未知结果与恢复
+
+证书目标按目标修订＋证书版本持久去重，云上传复用已保存远端ID。unknown 不自动重放任意脚本或不确定写入；inspect 可只读核对云配置、目录指纹或脚本成功标记，未核实的 unknown 不允许 retry。核对目标不会自动清理节点持久 unknown 写锁，旧进程/daemon和现场状态仍需管理员核查。回执和错误只保存安全码、ID及有界摘要，不返回私钥、脚本环境或任意 stdout/stderr。历史中心 verifying 表示等待读回，不作为永久编辑忙锁；真正执行中的中心动作和活动 Agent lease 才阻止冲突编辑。
+
+### 33.8 Docker 应用与轻量调度
+
+Agent 使用本机固定 Docker context 执行单容器/Compose。平台管理配置文件、只首次写入的初始化文件、数据目录和 Docker volume；停止/移除容器不删除业务数据。资源和端口在 SQLite 事务预留，实际端口在节点复核。机器池可显式设置容量，也可经 node.inspect 获取 CPU/内存/IP/Docker 能力。调度基于在线机器、容量、端口与副本分散；现有副本按健康回执逐个更新，健康连续失败时有界重建。服务发现提供新鲜健康实例的机器可达 IP＋发布端口，要求机器之间已有可达网络；没有自动 overlay 或本地数据复制。
+
+### 33.9 网站、网关与流量
+
+网站支持静态文本文件、手工 HTTP(S) 反代和托管服务。网站仅在显式启用后进入网关完整版本包；域名在组内唯一。Agent 按版本暂存站点/证书/静态文件，检查 OpenResty 配置后切换、重载并实际验证 HTTP 内容与 TLS 指纹，失败恢复旧版。服务路径无健康后端时仅该路径返回503；多路径与Nginx可配置能力见33.11，端点变化重编译对应上游。网关在 Linux host 网络直接监听端口；已验证健康网关的公网地址进入平台拥有的 A/AAAA，关闭网站移除自身拥有记录。DNS TTL 不提供即时故障切换保证。Agent 失联不等于容器停止，不据此释放端口或静默迁移本地数据。
+
+### 33.10 界面、验证与支持范围
+
+网站与运维提供五核心页签和共享基础设施，应用/服务列表显示机器和现场负载，证书显示到期和逐目标结果，表单支持中英文/主题/窄屏、失败保留输入。旧 /services 用户入口转向托管服务。代码验证覆盖 SQLite/HTTP/有效 Agent 租约、真实自签/目录/脚本、协议签名/分页/ACME 生命周期及调度故障；真实 Linux Docker/Compose/OpenResty 与 UI 夹具和实际 SQLite 页面验收分别记录。真实云账号/CDN边缘传播、公网 ACME 发证和大规模生产负载未获现场验收，不由夹具代替。详见 specs/033-operations-control-plane/validation.md 和 docs/operations-platform.md。
+
+### 33.11 Nginx多路径与站点配置
+
+网站配置新增 nginx 站点设置与 locations 路径规则，作为加密不可变网站版本保存。中心与 Agent 共用 runtime/src/operations/nginx.ts 校验与编译；中心在组包时将每条托管服务路径解析成新鲜健康端点，只有无后端的对应路径返回503。支持精确、最长前缀、^~ 与有序正则匹配；独立上游及加权轮询/最少连接/IP哈希、URI保留/去前缀/替换、Host/SNI与TLS校验、WebSocket、超时/缓冲、请求与响应头、CORS及OPTIONS、访问控制、上传和速率/连接限制。站点提供HTTPS跳转/HTTP2/TLS、Gzip、静态索引/SPA/缓存和日志。反代缓存使用各站点路径独立临时区域，默认绕过Authorization、Cookie与升级请求。server/location补充片段按词法边界限制上下文，拒绝include、动态脚本和全局/文件越界指令；其他语法由真实nginx -t验证，失败保留活动版本。管理员 GET /api/v1/ops/resources/:id/nginx 提供保存修订的脱敏预览，隐藏自定义片段和敏感头值，只展示证书占位路径，不读取PEM、不部署、不声称现场已验证。控制/租约及完整版本检查、切换、HTTP/TLS回执通路不变。
+
+## 第42章 集群与应用统一部署（SDD 042）
+
+2026-10-30。本章描述codex/042-cluster-applications最终跨集群首版，替代第33章独立机器池、托管服务、网关组及单集群应用/网站模型。第33章DNS、ACME、证书、云分发、脚本和执行安全边界继续适用。分支实现与验证记录以SDD042为准，不声称已合入main。
+
+```mermaid
+flowchart TB
+  template["商店模板 / 自定义程序"] --> app["全局应用 / 唯一serviceName"]
+  app --> a["集群A部署 / 实例数与大小"]
+  app --> b["集群B部署 / 实例数与大小"]
+  site["网站公共配置 / 域名 HTTPS 超时"] --> resty["各集群OpenResty / host80+443 可托管"]
+  resty --> local["仅本集群健康服务 / 命名端口"]
+  resty --> dns["网站CNAME / 线路与权重 / 集群稳定入口域名"]
+```
+
+### 42.1 集群与稳定机器归属
+
+公开运行资源为cluster、全局application和全局website。一台稳定managed_machines.id只属于一个cluster，ops_platform_cluster_members以machine_id主键在资源保存事务内约束唯一。Agent重装不改变归属；agents.group_id继续表示采集标签。运行实例使用中的机器不能直接移出，仍属集群的主机不能从主机目录删除，非空集群不能删除。
+
+### 42.2 全局应用与集群部署
+
+商店模板或自定义镜像/Compose生成普通application，一份模板可安装多套独立应用。name为可重复展示名；service_name全局唯一且创建后不可改，默认模板英文标识加序号，小写字母/数字/短横线、首尾字母数字、最长63字符。应用共享运行配置、命名端口与manual/managed模式；deployments按cluster分别设置手动机器或托管实例数、每实例CPU/内存。持久部署状态以application_id+cluster_id为键分别冻结发布修订和授权者，一处发布不升级另一处草稿。
+
+### 42.3 实例、端口与发现
+
+ops_cluster_instances显式保存cluster_id，活跃slot按owner+cluster唯一，退役attempt保留到原节点确认清理。ops_platform_instance_ports保存每实例全部命名端口，ops_platform_ports提供宿主协议/端口排他预留。manual不自动换机或补副本；managed仅在对应集群选择满足容量和全部端口的机器。两种模式均支持固定host_port，冲突不能改号；中心排除已知占用，Agent现场复核，已知占用失败退避该候选并选择其他机器，无候选待调度。serviceName+cluster_id+port_name只返回新鲜健康端点，网站严格当前集群发现，无跨地域隐式兜底。
+
+### 42.4 OpenResty托管与完整配置
+
+OpenResty是role=openresty的全局唯一应用，可部署多个集群，每集群一项部署。已安装应用可编辑部署集群、机器、副本和资源；运行中的部署先停用清理再移除。每个入口部署保存稳定gateway_domain，可选gateway_dns_zone_id托管健康入口A/AAAA；未选择时由用户维护。manual选择机器，managed设置实例数和资源；Linux host网络固定80/443。内部gateway.apply/inspect/stop/remove复用Agent执行器，owner仍为application。每集群完整网站、证书和静态文件包逐机nginx -t、切换、重载、HTTP/TLS验证；失败保留旧版。故障换机完成配置与验证后恢复DNS资格。
+
+### 42.5 网站公共配置与集群上游
+
+website为全局对象，bindings统一域名、HTTPS、证书、DNS，nginx及locations统一路径、超时、头部、缓存、限流和其他高级选项。routing_mode=managed时选择一次service_application_id和HTTP(S)命名service_port_name，自动发现其部署集群，集群内只解析该服务的健康端点。manual保留locations.cluster_targets逐集群应用端口或代理URL；不支持公共配置覆盖。集群流量策略cluster_policies保存enabled、1–100相对weight、default及厂商线路id/name，独立于冻结网站公共修订；关闭立即退出期望解析，恢复仍需成功回执。公共草稿不能通过流量策略保存被隐式发布。同一网站的domain_routes按domain独立指定cluster_ids与可选cluster_policies；省略范围跟随全部可用集群，固定选择只保留其仍可用的交集，不自动扩大。旧网站无此字段继续继承全站范围与策略。域名范围随发布冻结，每集群完整包只包含绑定到该集群的域名；同绑定组的证书与路径仍复用。候选旧集群仍接收空站点包以清理已移走域名。
+
+### 42.6 DNS聚合、共享资源与界面
+
+DNS/ACME账号、托管域名、证书和分发目标保持中心加密共享，凭据不下发网关。新网站dns_record_mode=cname，网站以自身为owner，按默认和高级运营商/省份线路维护到各集群gateway_domain的加权CNAME；各域名分别只包含其已绑定、开启、已发布且有新鲜健康入口和成功网站回执的集群，托管服务还须有健康后端。默认在各域名绑定范围内1:1，失效集群在默认与高级线路中撤下，细分线路无目标由厂商回退该域名默认，不能越过域名绑定范围。可选集群入口A/AAAA以全局OpenResty应用为owner维护。旧address模式保留A/AAAA兼容。只修改自身归属记录；线路纳入身份，权重/TTL/状态必须回读。厂商可用线路查询后预检，拒绝不支持套餐或权重，API接受与缓存传播分开。网站页面主体展示用户网站、域名及实际集群、开关、权重、线路与错误；OpenResty部署集群和入口域名收于次要的“OpenResty 管理”抽屉。
+
+### 42.7 控制与兼容边界
+
+中心继续Node/TypeScript+SQLite；cluster-workloads由原workloads组合装配，原加密资源/修订/执行、Agent control凭据和有效job lease保持不变。配置/发布/持续策略由管理员授权，AI不批准或任意执行，生产中心无Docker socket。旧单cluster application/website规范化为deployments和cluster_targets单项，保留资源ID、serviceName、实例ID、数据路径及运行容器；legacy node_pool/service/gateway_group保留历史，不提供新建与新部署。首版商店内置MySQL/Redis/OpenResty，自定义程序通过镜像/Compose发布，源码CI与第三方商店源后续扩展。
+
+### 42.8 现场验证与范围
+
+Demo使用真实SQLite/HTTP、Agent enrollment与有效lease、生产执行器、Docker、MySQL、自定义Web双端口和OpenResty，覆盖网站读写、TLS、Web重建数据保留以及托管入口。多节点QA如使用DinD，明确其为同一物理Docker宿主上的独立daemon/网络命名空间，不冒称多地域实机。测试域Host替代公网DNS、自签证书替代公有CA；DNS聚合协议另行mock验证，不声称公网传播或ACME已验。具体通过项、未验范围和可复现命令见SDD042 validation及examples/cluster-demo/README.md。
+
+### 42.9 网站多集群入口与线路流量管理（SDD 043）
+
+2026-10-30。以上42.4至42.6按SDD043演进。托管网站跟随最近授权发布修订的服务部署新增/移除集群；公共草稿不驱动线上切换。DNS归属日志增量保存line和weight；同值不同线路独立归属，外部修改、未知写入与授权撤销保持保护。阿里云CNAME权重部分接口文档与产品说明有差异，必须实际请求接受且回读权重策略；DNSPod活动权重只使用1–100，0不表示停用。失败不静默回退或冒称成功。域名套餐、省份/运营商线路和缓存传播依赖厂商能力；当前验证用HTTP/SQLite/Agent租约与DNS协议夹具，不声称真实云套餐或公网传播已验。同一绑定组可含多个域名且分别绑定南北集群，共享路径不重复。DNS同时校验期望发布范围与成功应用回执范围；域名级策略独立即时覆盖全站默认策略，不能借保存策略发布绑定草稿。实际集群为已发布域名范围的并集，逐域名状态摘要有字节上限与截断标记。
+
+```mermaid
+flowchart LR
+  site[网站域名 / 独立集群绑定] --> default[默认线路 / 仅此域名绑定的健康集群]
+  site --> special[省份与运营商线路 / 回退此域名默认]
+  default -->|CNAME 1| south[南方集群稳定域名]
+  default -->|CNAME 1| north[北方集群稳定域名]
+  special -->|CNAME| south
+  south --> southIP[健康南方入口 A / AAAA / OpenResty 80+443]
+  north --> northIP[健康北方入口 A / AAAA / OpenResty 80+443]
+  health[中心：域名范围 / 开关 / 健康与发布回执] -->|维护| default
+  health -->|维护| special
+```
+
+具体规格、数据字段、契约、厂商官方资料与验收记录见[SDD 043](../specs/043-website-cluster-routing/spec.md)。
+
+
+## 第44章 应用自动观测与统一系统日志（SDD 044）
+
+### 44.1 运维入口与应用目录
+
+集群、应用、网站、域名、证书的操作日志通过页面及资源详情右上图标打开，正文不内嵌执行历史。商店按数据库、缓存、网站与网关分类，支持分类与关键词组合。主机可查询平台应用及全部 Docker（含停止、非平台容器），集群可查询应用；外部容器只发现，不接管。每个应用天然派生监控目录，按集群、部署实例、容器筛选，无需创建大盘或物理表。
+
+### 44.2 Agent 观测与控制归属
+
+Agent 在既有任务配置就绪后独立周期发现 Docker、采集 CPU、内存、网络/磁盘累计字节及进程数，自动读取平台容器 stdout/stderr。中心在认证心跳回包中下发本 Agent 的 application_targets；Agent 用现有实例标签匹配容器，不增加 SSH 采集路径。心跳中的 docker_inventory 仅保留容器 ID、名称、镜像、状态、端口和实例标识，最多500项，显示截断、未接入、采集失败、过期状态。观测权限不等于应用生命周期操作授权。
+
+应用遥测仅接受 Agent data 凭据。中心核对部署实例的 agent_id/owner_id/cluster_id，覆盖应用、集群、主机及 service 归属；业务 Key 不能写系统表。网站访问标识还要求来源为本集群 OpenResty 应用，且网站已配置到该集群。控制面仍使用 control 凭据，凭据不进入标签、URL、正文或文档。
+
+### 44.3 两张独立共享应用遥测表
+
+系统逻辑名 lightmoni_application 独立于平台自监控 lightmoni。全部应用自动负载观测使用同一物理表 `_lm_metric_lightmoni_application_gauge`，全部应用日志使用 `_lm_log_lightmoni_application`。公开视图为 `metric_lightmoni_application_gauge` 与 `log_lightmoni_application`，复用 Catalog、TTL、只读 AST、Query 时间和资源限制；应用数量不增加物理表。自动观测全部为 gauge，包括网络和磁盘累计字节，页面根据相邻采样计算速率并排除重置。业务进程内部指标仍由 SDK 显式打点，不修改用户代码。
+
+日志使用原始 Docker 纳秒时间，stdout/stderr 各自保存时间戳、同时间戳行计数及单调 source_seq。批次与游标原子进入已有 Agent SQLite 队列；重启、满队列、网络断连和丢 ACK 不静默越过未发送数据。每次读取有界前缀，不使用 tail 丢弃积压；大前缀拆成多个批次。超过单行读取/批次预算时保留游标并报告采集失败。轮转或外部删除已丢失的 Docker 原始日志无法恢复，首次采集受7天日志保留窗口限制。
+
+### 44.4 网站流量
+
+OpenResty 在站点 access_log 开启时输出 escape=json 格式，记录网站 ID、HTTP 状态、request_time 与 upstream_addr，不记录查询字符串或请求头。站点配置不能覆盖结构化格式；内部部署健康证明路径不计访问日志。历史运行网关需要发布新配置后产生该格式；显式关闭访问日志时不产生网站请求数据。
+
+Agent 自动将访问记录写入共享应用日志表。网站 QPS（分钟均值）与平均耗时从原始访问日志按事件时间查询，避免另造易重复的请求计数副本。后端应用仅关联保存绑定中匹配的“网站+集群”对；网站流量按集群汇总，容器负载与应用日志可细分到部署/容器。无请求数据与采集失败明确显示，不以离线推导零流量。
+
+### 44.5 全系统日志统一写入 ClickHouse
+
+中心运行日志、Agent runtime_events、运维执行、Agent jobs/events、任务中心执行/取消/结果核对、发布事件、主机安装/卸载/SSH检查、凭据与节点关联事件、定时运维、资源修订/删除、Key 接入、节点移除、终端连接/关闭元数据、告警/响应及 AI 告警提案应用审计统一进入平台系统日志公开视图 `lightmoni_log`，新日志写物理表 `_lm_lightmoni_log`。component 区分 center、agent、operations、auth、alerts、assistant、tasks，source、resource_id、resource_kind、cluster_id、machine_id、record_id 支持检索。旧系统日志兼容视图继续读取历史数据，不删除旧记录。
+
+SQLite 继续保存审批、配置版本、执行状态及回执，承担事务控制。system_log_outbox 通过同事务触发器记录白名单事件元数据并幂等补录已有记录；仅在 Ingest.internal 成功写入 ClickHouse 后标记已投递并清除 outbox 正文。ClickHouse 失败保留待发送项，重启和重复投递使用稳定 event_id。中心运行日志也使用该 outbox，关闭性能自监控不关闭系统日志。outbox 不记录密钥、环境、加密配置、任意脚本输出、交互终端内容、告警联系人、通知载荷、AI 对话或加密回执。任务失败解释脱敏后导出。
+
+```mermaid
+flowchart LR
+  Docker[全部 Docker 清单与平台容器] --> Agent[Agent 周期观测]
+  Center[中心认证与实例归属] -->|心跳授权目标| Agent
+  Agent -->|清单快照| SQLite[(SQLite 控制状态)]
+  Agent --> Queue[持久队列与日志游标]
+  Queue -->|data 凭据 / OTLP| Ingest[中心归属核验 / Ingest]
+  Ingest --> AppMetrics[(共享应用指标表)]
+  Ingest --> AppLogs[(共享应用日志表)]
+  Events[中心运行 / 运维 / 生命周期事件] --> Outbox[事务系统日志 outbox]
+  SQLite --> Outbox
+  Outbox -->|Ingest.internal / 成功后确认| SystemLogs[(共享平台系统日志表)]
+  AppMetrics --> Query[统一只读 Query]
+  AppLogs --> Query
+  SystemLogs --> Query
+  Query --> UI[应用监控目录 / 右上日志抽屉]
+```
+
+验证与 Doca 保存回读见 `specs/044-operations-observability/validation.md`。部署升级需要新中心与新 Agent；旧 Agent 无清单时显示等待采集，历史业务表和存储数据保持兼容。
+
+## 第50章 中心内外网地址同步与SDK直报（SDD 050）
+
+2026-10-31。本章为codex/050-center-endpoint-discovery分支预览，代码验证见对应SDD，合入状态以GitHub为准。管理员沿用上报地址簿登记完整内网IP+port URL与public引导入口，scope缺省public，默认引导必须为public，至少保留一个public。SQLite保存稳定center_id与地址清单修订。SDK与Agent分别直连中心，SDK→Agent的OTLP接收与配置代理全部移除；Agent自己的SDK只通过进程内exporter入持久队列，本地监听仅提供诊断。
+
+GET /v1/center-endpoints使用SDK密钥、已启用豁免表匿名规则或Agent ID+control凭据，发布version=1、center_id、revision及带scope的地址；固定30秒刷新。GET /v1/center-identity不携带凭据，仅用于同中心误配检测。客户端保留公网引导，首次请求前发现，周期及显式操作同步；从已发现入口刷新前先无凭据核对身份，失效时回公网查询新内网。候选探测有时限与64KiB响应上限，禁止跳转，不关闭TLS验证；身份ID不替代HTTPS认证，显式HTTP仅用于受信链路。
+
+Go、Node/浏览器、Python、Rust共享内网优先、公网备用语义。配置和上报复用同一选择；Agent的心跳/配置、job/task轮询、operations及制品下载同样共用入口，内网可达时不将数据与控制分流到公网。当前Agent是HTTP轮询，无独立WebSocket协议。传输失败使下次原请求/批次重选，不在同次调用内重放写请求；批次ID、创建时间及正文保持，所有入口必须共用中心去重存储。30秒冷却和有效新修订控制重新探测。全部已知入口失效时由运维修复公网引导。
+
+同集群Nginx固定使用应用内网端点，按集群内网完全互通处理；无健康内网后端时503，不生成公网备用。网关public_address只用于外部入口DNS。旧中心未提供发现协议时保留显式地址直报；新SDK不再隐式默认本机4318。验收覆盖隔离HTTP/SQLite与多语言真实客户端，不等同公网/VPC、真实TLS证书或大规模生产网络验收。

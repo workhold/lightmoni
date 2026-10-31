@@ -1,3 +1,4 @@
+import { SystemLogs } from "./system-logs.js";
 import {
   createServer,
   type IncomingMessage,
@@ -30,6 +31,7 @@ import { registerServiceDeployments } from "./service-deployments.js";
 import { registerAgentJobs } from "./agent-jobs.js";
 import { registerTaskCenter } from "./task-center.js";
 import { registerOperations } from "./operations.js";
+import { registerOperationsPlatform } from "../ops/index.js";
 import { registerOperationSchedules } from "./operation-schedules.js";
 import { websiteDefinition } from "../operations/websites.js";
 import { certificateDefinition } from "../operations/certificates.js";
@@ -50,6 +52,7 @@ export interface Config {
   publicDir?: string;
   downloadsDir?: string;
   monitor?: boolean;
+  trustedProxies?: string[];
 }
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const mime: Record<string, string> = {
@@ -66,18 +69,19 @@ export async function createApp(cfg: Config) {
   const db = new DB(join(cfg.dataDir, "lightmoni.db")),
     modules: Module[] = [];
   let monitor: RuntimeMonitor | undefined;
+  let systemLogs: SystemLogs | undefined;
   const logger = {
     info: (...args: any[]) => {
       console.info(...args);
-      monitor?.log("info", String(args[0] ?? ""));
+      systemLogs?.record("info", String(args[0] ?? ""));
     },
     warn: (...args: any[]) => {
       console.warn(...args);
-      monitor?.log("warn", String(args[0] ?? ""));
+      systemLogs?.record("warn", String(args[0] ?? ""));
     },
     error: (...args: any[]) => {
       console.error(...args);
-      monitor?.log("error", String(args[0] ?? ""));
+      systemLogs?.record("error", String(args[0] ?? ""));
     },
   };
   const router = new Router(() => logger.error("HTTP request failed"));
@@ -128,7 +132,9 @@ export async function createApp(cfg: Config) {
     const releaseArtifacts = new ReleaseArtifactStore(join(cfg.dataDir, "release-artifacts"));
     const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs, artifacts: releaseArtifacts });
     modules.push(serviceDeployments);
-    const operations = registerOperations(deps, { jobs: agentJobs, credentials: agentCredentials, definitions: [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition] });
+    const platform = registerOperationsPlatform(deps, { jobs: agentJobs, dataDir: cfg.dataDir });
+    modules.push(platform);
+    const operations = registerOperations(deps, { jobs: agentJobs, credentials: agentCredentials, resolvePayload: platform.resolvePayload, definitions: [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition] });
     modules.push(operations, registerOperationSchedules(deps, operations));
     const ingest = new Ingest(cat, auth, (...args) =>
       monitor?.accepted(...args),
@@ -145,6 +151,7 @@ export async function createApp(cfg: Config) {
       registerNodes(deps, {
         internalExporter: ingest.internal.bind(ingest),
         agentCredentials,
+        trustedProxies: cfg.trustedProxies,
       }),
     );
     modules.push(agentJobs);
@@ -255,6 +262,8 @@ export async function createApp(cfg: Config) {
     modules.push(registerMachineTerminal(deps, managedMachines, server));
     server.headersTimeout = 10000;
     server.requestTimeout = 30000;
+    systemLogs = new SystemLogs(deps, ingest, [cfg.chPassword]);
+    modules.unshift(systemLogs);
     for (const module of modules) await module.start?.();
     let closed = false;
     return {

@@ -16,6 +16,7 @@ try {
     ),
     publicDir: process.env.LIGHTMONI_PUBLIC_DIR,
     downloadsDir: process.env.LIGHTMONI_DOWNLOADS_DIR,
+    trustedProxies: (process.env.LIGHTMONI_TRUSTED_PROXIES ?? "").split(/[\s,]+/).filter(Boolean),
   });
   const server = app.server;
   await new Promise<void>((resolve, reject) => {
@@ -26,7 +27,7 @@ try {
       resolve();
     });
   });
-  console.info("LightMoni Node listening on " + at.host + ":" + at.port);
+  app.deps.logger.info("LightMoni Node listening on " + at.host + ":" + at.port);
   let stopping = false;
   const stop = async () => {
     if (stopping) return;

@@ -2,10 +2,10 @@ import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Modal,Select,Space,Table,Tag,Typography} from '../shared/ui';
 import {api,ApiError} from '../shared/api';
 import {useI18n} from '../shared/i18n';
-import {reusableMachineCredential} from './machine-credentials';
+import {defaultMachineCredential,reusableMachineCredential} from './machine-credentials';
 import {installedRelease,releaseIdentity,shortIdentity,updateIsActive,updateMessageText,updatePath,updatePlanExpired,updateStatusColor,updateStatusText,type AgentRelease,type AgentUpdate,type AgentUpdateCredential} from './agent-update-model';
 
-type Machine={id:string;name:string;arch?:string;agent_id?:string};
+type Machine={id:string;name:string;arch?:string;agent_id?:string;default_credential_id?:string};
 type Props={machine:Machine;credentials:AgentUpdateCredential[];existing?:AgentUpdate;initialAction?:'upgrade'|'rollback';onClose:()=>void;onRefresh:()=>Promise<void>};
 
 export function AgentUpdatePlanSummary({record}:{record:AgentUpdate}){
@@ -58,24 +58,24 @@ export function AgentUpdateHistory({machineID,onOpen}:{machineID:string;onOpen:(
 
 export default function MachineAgentUpdateDialog({machine,credentials,existing,initialAction='upgrade',onClose,onRefresh}:Props){
  const {t,language}=useI18n(),[record,setRecord]=useState(existing),[action,setAction]=useState<'upgrade'|'rollback'>(existing?.action??initialAction);
- const [releases,setReleases]=useState<AgentRelease[]>([]),[target,setTarget]=useState<string>(),[credential,setCredential]=useState<string>();
+ const [releases,setReleases]=useState<AgentRelease[]>([]),[target,setTarget]=useState<string>(),[credential,setCredential]=useState<string|undefined>(()=>defaultMachineCredential(credentials,machine.default_credential_id,reusableMachineCredential));
  const [busy,setBusy]=useState(false),[catalogBusy,setCatalogBusy]=useState(false),[error,setError]=useState(''),[reviewed,setReviewed]=useState(false),[refreshNeeded,setRefreshNeeded]=useState(false),[planUncertain,setPlanUncertain]=useState(false),[now,setNow]=useState(Date.now());
- const pending=useRef(false),mounted=useRef(true),recordRef=useRef(record);
+ const pending=useRef(false),mounted=useRef(true),recordRef=useRef(record),request=useRef(0);
  recordRef.current=record;
  const keys=credentials.filter(c=>reusableMachineCredential(c));
  const options=releases.filter(release=>!machine.arch||release.arch===machine.arch);
  const err=(value:unknown)=>value instanceof Error?updateMessageText(value.message,t):t('操作失败','Operation failed');
  const refreshParent=async()=>{try{await onRefresh()}catch(e){if(mounted.current)setError(previous=>[previous,t('操作已保存，但主机列表刷新失败：','The operation was saved, but the host list could not refresh: ')+err(e)].filter(Boolean).join(' '))}};
  const currentPlanExpired=updatePlanExpired(record,now);
- useEffect(()=>{mounted.current=true;return()=>{mounted.current=false}},[]);
- useEffect(()=>{if(keys.length===1)setCredential(keys[0].id)},[credentials]);
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;request.current++}},[]);
+ useEffect(()=>{setCredential(previous=>credentials.some(key=>key.id===previous&&reusableMachineCredential(key))?previous:defaultMachineCredential(credentials,machine.default_credential_id,reusableMachineCredential))},[credentials,machine.default_credential_id]);
  useEffect(()=>{let alive=true;if(record)return;setCatalogBusy(true);api<{releases:AgentRelease[]}>('/agent-releases').then(result=>{if(alive){setReleases(result.releases);setError('')}}).catch(e=>{if(alive)setError(err(e))}).finally(()=>{if(alive)setCatalogBusy(false)});return()=>{alive=false}},[machine.id,record?.id]);
  useEffect(()=>{if(!record?.plan)return;setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer)},[record?.id,record?.plan?.expires_at]);
  const refreshRecord=async()=>{
-  const saved=recordRef.current;if(!saved)return;
+  const saved=recordRef.current;if(!saved)return;const generation=++request.current;
   const next=await api<AgentUpdate>(updatePath(machine.id,saved.id));
-  if(mounted.current&&recordRef.current?.id===saved.id){setRecord(next);setRefreshNeeded(false)}
-  return next;
+  if(next.id!==saved.id||next.machine_id!==machine.id)throw Error(t('更新记录与目标主机不匹配，请刷新后重试','The update record does not match the selected host. Refresh and retry.'));
+  if(mounted.current&&generation===request.current&&recordRef.current?.id===saved.id){recordRef.current=next;setRecord(next);setRefreshNeeded(false);return next}
  };
  useEffect(()=>{
   if(!record||!updateIsActive(record.status))return;
@@ -83,21 +83,21 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
   const poll=async()=>{if(disposed||inFlight||pending.current)return;inFlight=true;try{const next=await refreshRecord();if(next&&!updateIsActive(next.status))await refreshParent()}catch{if(!disposed&&mounted.current)setRefreshNeeded(true)}finally{inFlight=false}};
   const timer=setInterval(()=>void poll(),4000);return()=>{disposed=true;clearInterval(timer)};
  },[record?.id,record?.status]);
- const begin=()=>{if(pending.current)return false;pending.current=true;setBusy(true);setError('');return true};
+ const begin=()=>{if(pending.current)return false;pending.current=true;request.current++;setBusy(true);setError('');return true};
  const finish=()=>{pending.current=false;if(mounted.current)setBusy(false)};
  const plan=async()=>{
   if(!credential||!keys.some(key=>key.id===credential)||action==='upgrade'&&!target||!begin())return;
-  try{const next=await api<AgentUpdate>(`${updatePath(machine.id)}/plan`,{method:'POST',body:JSON.stringify({action,credential_id:credential,...(action==='upgrade'?{target_sha256:target}:{})})});if(mounted.current){setRecord(next);setReviewed(false)}await refreshParent()}
+  try{const next=await api<AgentUpdate>(`${updatePath(machine.id)}/plan`,{method:'POST',body:JSON.stringify({action,credential_id:credential,...(action==='upgrade'?{target_sha256:target}:{})})});if(next.machine_id!==machine.id)throw Error(t('更新记录与目标主机不匹配，请刷新后重试','The update record does not match the selected host. Refresh and retry.'));if(mounted.current){recordRef.current=next;setRecord(next);setReviewed(false)}await refreshParent()}
   catch(e){if(mounted.current){setError(err(e));if(!(e instanceof ApiError&&e.status<500))setPlanUncertain(true)}}finally{finish()}
  };
  const mutate=async(operation:'apply'|'cancel'|'reconcile')=>{
   if(!record||record.rollout_id&&(operation==='apply'||operation==='cancel')||operation==='apply'&&(!reviewed||currentPlanExpired)||!begin())return;
-  try{const next=await api<AgentUpdate>(`${updatePath(machine.id,record.id)}/${operation}`,{method:'POST',body:JSON.stringify(operation==='apply'?{confirm:true}:operation==='reconcile'&&credential?{credential_id:credential}:{})});if(mounted.current){setRecord(next);setReviewed(false)}}
+  try{const next=await api<AgentUpdate>(`${updatePath(machine.id,record.id)}/${operation}`,{method:'POST',body:JSON.stringify(operation==='apply'?{confirm:true}:operation==='reconcile'&&credential?{credential_id:credential}:{})});if(next.id!==record.id||next.machine_id!==machine.id)throw Error(t('更新记录与目标主机不匹配，请刷新后重试','The update record does not match the selected host. Refresh and retry.'));if(mounted.current){recordRef.current=next;setRecord(next);setReviewed(false)}}
   catch(e){if(mounted.current)setError(err(e))}
   finally{try{try{await refreshRecord()}catch{if(mounted.current)setRefreshNeeded(true)}await refreshParent()}finally{finish()}}
  };
  const refresh=async()=>{if(!begin())return;try{await refreshRecord();await refreshParent()}catch(e){if(mounted.current)setError(err(e))}finally{finish()}};
- const credentialSelect=<Select aria-label={t('更新 SSH 凭据','Update SSH credential')} value={credential} style={{width:'100%'}} placeholder={t('请选择有效 SSH 凭据','Select an active SSH credential')} disabled={busy} options={keys.map(key=>({value:key.id,label:`${key.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key')} · ${key.secret_fingerprint||key.id} · ${key.retention==='permanent'?t('永久','Permanent'):new Date(key.expires_at).toLocaleString(language)}`}))} onChange={setCredential}/>;
+ const credentialSelect=<Select aria-label={t('更新 SSH 凭据','Update SSH credential')} value={credential} style={{width:'100%'}} placeholder={t('请选择有效 SSH 凭据','Select an active SSH credential')} disabled={busy} options={keys.map(key=>({value:key.id,label:`${key.name||(key.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key'))} · ${key.secret_fingerprint||key.id} · ${key.retention==='permanent'?t('永久','Permanent'):new Date(key.expires_at).toLocaleString(language)}`}))} onChange={setCredential}/>;
  return <Modal open className="lm-agent-update-dialog" style={{top:24}} title={t(`Agent 版本管理 · ${machine.name}`,`Agent releases · ${machine.name}`)} width={840} onCancel={()=>{if(!busy)onClose()}} closable={!busy} maskClosable={false} destroyOnHidden footer={<Space wrap>
   {!record&&<Button type="primary" loading={busy} disabled={!credential||action==='upgrade'&&!target||catalogBusy||planUncertain} onClick={()=>void plan()}>{t('检查并生成计划','Check and create plan')}</Button>}
   {record?.status==='awaiting_approval'&&!record.rollout_id&&<><Button aria-label={t('执行已审阅计划','Execute reviewed plan')} danger type="primary" loading={busy} disabled={!reviewed||currentPlanExpired||refreshNeeded} onClick={()=>void mutate('apply')}>{t('执行已审阅计划','Execute reviewed plan')}</Button><Button disabled={busy} onClick={()=>void mutate('cancel')}>{t('取消计划','Cancel plan')}</Button></>}

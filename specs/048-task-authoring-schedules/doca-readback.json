@@ -1,0 +1,156 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "method": "authenticated_browser_ui_and_server_reload",
+  "verified_at": "2026-10-30T06:55:51.124Z",
+  "before_blocks": 530,
+  "after_blocks": 537,
+  "reloaded_text_matches_saved_snapshot": true,
+  "unrelated_original_blocks_preserved": true,
+  "text_snapshot_sha256": "d4945a7f83f832169263cd23b10ba1350e43f8ce5aac33cbf92376b8ea2dbf8d",
+  "native_figures": 22,
+  "native_audit_comparison": "Stable cell IDs, shape, labels, node positions, edge endpoints. Ignore renderer session IDs and automatically recalculated intermediate routing pixels. Native editors were closed without saving.",
+  "native_audits": [
+    {
+      "id": "task043-control-flow",
+      "nodes": 12,
+      "edges": 13,
+      "matches": true
+    },
+    {
+      "id": "task043-execution-states",
+      "nodes": 7,
+      "edges": 7,
+      "matches": true
+    },
+    {
+      "id": "f-architecture-8a1f",
+      "nodes": 10,
+      "edges": 8,
+      "matches": true
+    },
+    {
+      "id": "f-center-modules-7d039612",
+      "nodes": 10,
+      "edges": 9,
+      "matches": true
+    },
+    {
+      "id": "f-deployment-2b7c",
+      "nodes": 8,
+      "edges": 7,
+      "matches": true
+    },
+    {
+      "id": "f-enrollment-4c9d",
+      "nodes": 10,
+      "edges": 11,
+      "matches": true
+    },
+    {
+      "id": "host-access036-native-flow",
+      "nodes": 9,
+      "edges": 9,
+      "matches": true
+    },
+    {
+      "id": "host037-merged-native-flow",
+      "nodes": 8,
+      "edges": 8,
+      "matches": true
+    },
+    {
+      "id": "host038-registered-onboarding-flow",
+      "nodes": 8,
+      "edges": 7,
+      "matches": true
+    },
+    {
+      "id": "host039-retention-flow",
+      "nodes": 8,
+      "edges": 9,
+      "matches": true
+    },
+    {
+      "id": "host040-automatic-identity-flow",
+      "nodes": 9,
+      "edges": 9,
+      "matches": true
+    },
+    {
+      "id": "f-ai-sequence-5e0f",
+      "nodes": 10,
+      "edges": 10,
+      "matches": true
+    },
+    {
+      "id": "9a7f0e0f-303b-47a8-a194-6434833a4da1",
+      "nodes": 7,
+      "edges": 6,
+      "matches": true
+    },
+    {
+      "id": "ca797620-3473-4683-b77a-58f7f968d79c",
+      "nodes": 15,
+      "edges": 17,
+      "matches": true
+    },
+    {
+      "id": "ops033-control-plane-native",
+      "nodes": 11,
+      "edges": 14,
+      "matches": true
+    },
+    {
+      "id": "cluster042-baseline-model",
+      "nodes": 8,
+      "edges": 6,
+      "matches": true
+    },
+    {
+      "id": "website043-routing-native",
+      "nodes": 8,
+      "edges": 9,
+      "matches": true
+    },
+    {
+      "id": "agent044-maintenance-flow",
+      "nodes": 14,
+      "edges": 14,
+      "matches": true
+    },
+    {
+      "id": "agent044-update-states",
+      "nodes": 8,
+      "edges": 11,
+      "matches": true
+    },
+    {
+      "id": "mcp046-overview",
+      "nodes": 15,
+      "edges": 17,
+      "matches": true
+    },
+    {
+      "id": "mcp046-approval",
+      "nodes": 10,
+      "edges": 10,
+      "matches": true
+    },
+    {
+      "id": "mcp046-idempotency",
+      "nodes": 8,
+      "edges": 9,
+      "matches": true
+    }
+  ],
+  "sections": [
+    "13",
+    "22.3",
+    "25",
+    "27.3",
+    "27.4",
+    "27.5",
+    "27.7"
+  ],
+  "screenshot": "evidence/doca-048-saved.png"
+}

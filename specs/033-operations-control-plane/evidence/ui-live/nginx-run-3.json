@@ -1,0 +1,19 @@
+{
+  "checked_at": "2026-10-29T02:26:32.463Z",
+  "base": "http://127.0.0.1:19934",
+  "backend": "Actual SQLite + platform domain controllers; isolated qa-admin environment",
+  "checks": [
+    "真实 SQLite 保存自签证书、人工确认实际签发、公私钥脱敏、指纹回读",
+    "实际容器配置、挂载文件保存和刷新；真实 revision 冲突保持输入",
+    "Compose YAML 通过真实解析/规范化并存入 SQLite",
+    "真实证书脚本目标验证、正文/环境脱敏、留空编辑保留、默认不启用自动任务",
+    "真实托管服务资源引用、资源大小、副本和 HTTP 探活配置",
+    "真实多路径反代保存/编译：URI改写、负载、缓存、每IP限流、请求头、精确重定向、Gzip和脱敏预览",
+    "静态、反向代理、托管服务三类网站真实表单、HTTPS 引用与保存",
+    "实际后端页面刷新读回、英文和 390px 响应式",
+    "390px英文双路径高级表单：缓存/限流长标签、内部滚动和固定标题/关闭/保存，无横向溢出"
+  ],
+  "page_errors": [],
+  "scope": "Actual self-signed issuance and local persistence. No cloud, public DNS, ACME or Docker deployment.",
+  "created_count": 10
+}

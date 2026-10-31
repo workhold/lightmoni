@@ -23,7 +23,7 @@ func main() {
 	defer cancel()
 	endpoint := os.Getenv("LIGHTMONI_ENDPOINT")
 	if endpoint == "" {
-		endpoint = "http://127.0.0.1:4318"
+		endpoint = "https://monitor.example.com"
 	}
 	monitor, err := telemetry.New("mac-sdk-demo", endpoint, os.Getenv("LIGHTMONI_KEY"))
 	if err != nil {

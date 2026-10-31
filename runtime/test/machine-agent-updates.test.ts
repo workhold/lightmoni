@@ -167,6 +167,40 @@ test("same-version approved upgrade commits only after new boot, exact release a
   assert.equal(f.calls.filter(input => input.command.includes(".update-bootstrap")).length, 1);
 });
 
+test("maintenance records successful SSH use in both the host binding and shared credential library", async t => {
+  const f = await fixture(t), h = await f.host(), untouched = await f.host("untouched-host");
+  const source = f.db.get<{ connection_credential_id: string }>("SELECT connection_credential_id FROM machine_credentials WHERE id=?", h.credential)!.connection_credential_id;
+  const unused = f.db.get<{ connection_credential_id: string }>("SELECT connection_credential_id FROM machine_credentials WHERE id=?", untouched.credential)!.connection_credential_id;
+  assert.ok(source); assert.notEqual(source, unused);
+  const usedAt = () => ({
+    binding: f.db.get<{ last_used_at: string }>("SELECT last_used_at FROM machine_credentials WHERE id=?", h.credential)!.last_used_at,
+    library: f.db.get<{ last_used_at: string }>("SELECT last_used_at FROM connection_credentials WHERE id=?", source)!.last_used_at,
+  });
+  assert.deepEqual(usedAt(), { binding: "", library: "" });
+  f.advance(5);
+  const operation = await f.plan(h.id); assert.equal(operation.status, 201, operation.raw);
+  assert.deepEqual(usedAt(), { binding: f.deps.now().toISOString(), library: f.deps.now().toISOString() });
+  f.advance(5);
+  assert.equal((await f.apply(h.id, operation.data.id)).status, 202);
+  assert.equal((await f.settle(h.id, operation.data.id)).status, "succeeded");
+  const expected = f.deps.now().toISOString();
+  assert.deepEqual(usedAt(), { binding: expected, library: expected });
+  const listed = await f.request("/connection-credentials"); assert.equal(listed.status, 200);
+  assert.equal(listed.data.find((credential: any) => credential.id === source).last_used_at, expected);
+  assert.equal(listed.data.find((credential: any) => credential.id === unused).last_used_at, "");
+});
+
+test("revoking a shared credential cancels its pending maintenance before any remote start", async t => {
+  const f = await fixture(t), h = await f.host();
+  const operation = await f.plan(h.id); assert.equal(operation.status, 201, operation.raw);
+  const source = f.db.get<{ connection_credential_id: string }>("SELECT connection_credential_id FROM machine_credentials WHERE id=?", h.credential)!.connection_credential_id;
+  assert.equal((await f.request(`/connection-credentials/${source}/revoke`, "POST", { confirm: true })).status, 200);
+  const saved = await f.request(`/machines/${h.id}/agent-updates/${operation.data.id}`);
+  assert.equal(saved.data.status, "cancelled");
+  assert.equal((await f.apply(h.id, operation.data.id)).status, 409);
+  assert.equal(f.calls.some(call => call.command.includes(".update-bootstrap")), false);
+});
+
 for (const mode of ["wrong_build", "same_boot", "wrong_config", "last_error"] as const) test(`health gate refuses ${mode} and never sends commit`, async t => {
   const f = await fixture(t, 45), h = await f.host(); f.modes.set(h.id, mode);
   const operation = (await f.plan(h.id)).data;
@@ -360,6 +394,54 @@ test("interval scheduling skips only the host under maintenance and never catche
   tasks.tick(); assert.equal(tasks.list({ host_id: one.id }).length, 0);
   f.advance(10); tasks.tick(); assert.equal(tasks.list({ host_id: one.id }).length, 1);
   assert.equal(tasks.list({ host_id: two.id }).length, 2);
+});
+
+test("maintenance defers automatic retries without closing consent or blocking other hosts and schedules", async t => {
+  const f = await fixture(t), one = await f.host("retry-one"), two = await f.host("retry-two"), tasks = new TaskRunStore(f.deps, f.credentials);
+  const script = { runtime: "node", code: "console.log('ok')", timeout_seconds: 5, max_output_bytes: 4096 };
+  const retryable = tasks.nodes.task({ name: "Retry task", type: "script", enabled: true, target_all: false, host_ids: [one.id, two.id], label_ids: [],
+    schedule: { mode: "once" }, script, execution_policy: { retry_count: 1, retry_delay_seconds: 10 } }, "update-fence-retry", true);
+  const scheduled = tasks.nodes.task({ name: "Other host schedule", type: "script", enabled: true, target_all: false, host_ids: [two.id], label_ids: [],
+    schedule: { mode: "interval", interval_seconds: 10 }, script }, "update-fence-other-schedule", true);
+  tasks.dispatch(retryable.id, { confirm: true }, "admin");
+  const failed = new Map<string, string>();
+  for (const host of [one, two]) {
+    const run = tasks.claim(host.agent, [SCRIPT_TASK_CAPABILITY])!; assert.ok(run);
+    tasks.result(host.agent, run.id, { lease_token: run.lease_token, state: "failed", code: "script_failed", summary: "failed", stdout: "", stderr: "", exit_code: 1 });
+    failed.set(host.id, run.id);
+  }
+  tasks.tick(); const p = await f.plan(one.id); assert.equal(p.status, 201, p.raw);
+  f.advance(10); assert.doesNotThrow(() => tasks.tick());
+  const retries = tasks.list({ task_id: retryable.id }).filter(run => run.trigger === "retry");
+  assert.equal(retries.length, 1); assert.equal(retries[0].host_id, two.id); assert.equal(retries[0].retry_of, failed.get(two.id));
+  assert.deepEqual(f.db.get<any>("SELECT auto_retry_closed,superseded_by FROM task_runs WHERE id=?", failed.get(one.id)!), { auto_retry_closed: 0, superseded_by: "" });
+  assert.equal(tasks.list({ task_id: scheduled.id })[0].host_id, two.id);
+  assert.equal((await f.request(`/machines/${one.id}/agent-updates/${p.data.id}/cancel`, "POST", {})).status, 200);
+  assert.doesNotThrow(() => tasks.tick());
+  const resumed = tasks.list({ task_id: retryable.id }).find(run => run.retry_of === failed.get(one.id));
+  assert.ok(resumed); assert.equal(resumed.host_id, one.id);
+  assert.equal(tasks.get(failed.get(one.id)!).superseded_by, resumed.id);
+});
+
+test("maintenance failures cannot fill the bounded retry scan and starve a later host", async t => {
+  const f = await fixture(t), one = await f.host("blocked-retries"), two = await f.host("eligible-retry"), tasks = new TaskRunStore(f.deps, f.credentials);
+  const task = tasks.nodes.task({ name: "Retry window", type: "script", enabled: true, target_all: false, host_ids: [one.id, two.id], label_ids: [],
+    schedule: { mode: "once" }, script: { runtime: "node", code: "console.log('ok')", timeout_seconds: 5, max_output_bytes: 4096 },
+    execution_policy: { retry_count: 1, retry_delay_seconds: 10 } }, "update-fence-retry-window", true);
+  let eligibleID = "";
+  for (let i = 0; i < 201; i++) {
+    const host = i === 200 ? two : one;
+    tasks.dispatch(task.id, { confirm: true, host_ids: [host.id] }, "admin");
+    const run = tasks.claim(host.agent, [SCRIPT_TASK_CAPABILITY])!; assert.ok(run);
+    tasks.result(host.agent, run.id, { lease_token: run.lease_token, state: "failed", code: "script_failed", summary: "failed", stdout: "", stderr: "", exit_code: 1 });
+    if (i === 200) eligibleID = run.id;
+  }
+  const planned = await f.plan(one.id); assert.equal(planned.status, 201, planned.raw);
+  f.advance(10); assert.doesNotThrow(() => tasks.tick());
+  const replacement = tasks.get(eligibleID).superseded_by;
+  assert.ok(replacement); assert.equal(tasks.get(replacement).host_id, two.id);
+  assert.equal(f.db.get<any>("SELECT count(*) AS n FROM task_runs WHERE host_id=? AND trigger='retry'", one.id)!.n, 0);
+  assert.equal(f.db.get<any>("SELECT count(*) AS n FROM task_runs WHERE host_id=? AND auto_retry_closed=0", one.id)!.n, 200);
 });
 
 test("invalid platform endpoints are rejected before SSH and never leave a running operation", async t => {

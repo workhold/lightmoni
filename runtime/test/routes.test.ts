@@ -90,6 +90,8 @@ test("every legacy public route has a Node implementation and unchanged authenti
       "/api/v1/agents/:id/activate",
       "/api/v1/agents/:id/heartbeat",
       "/api/v1/agents/:id/config",
+      "/v1/center-identity",
+      "/v1/center-endpoints",
       "/v1/sdk-config",
       "/v1/logs",
       "/v1/metrics",

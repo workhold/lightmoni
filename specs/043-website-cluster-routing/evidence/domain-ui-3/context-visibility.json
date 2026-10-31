@@ -1,0 +1,7 @@
+{
+  "viewports": ["390x844", "720x500 (200% equivalent)"],
+  "checks": {"currentDomainInViewport": true, "saveInViewport": true, "domainClusterOverview": true},
+  "media": "artifacts/screenshots/specs/043-website-cluster-routing/evidence/domain-ui-3",
+  "screenshots": ["domain-editor-390-context.png", "traffic-editor-200-context.png", "domain-cluster-overview.png"],
+  "scope": "Final sticky domain title refinement; static visual verification after three successful functional runs. DNS catalogue is a browser fixture."
+}

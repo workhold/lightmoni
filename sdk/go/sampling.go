@@ -390,6 +390,13 @@ func (c *Client) RefreshConfig(ctx context.Context) error {
 	if endpoint == "" || closed {
 		return errors.New("SDK remote configuration is disabled or closed")
 	}
+	if exporter, ok := s.cfg.Exporter.(*HTTPExporter); ok && endpoint == s.cfg.Endpoint {
+		var err error
+		endpoint, err = exporter.endpoints.resolve(ctx, exporter.Client, key, false)
+		if err != nil {
+			return err
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/v1/sdk-config?metric_windows=1", nil)
 	if err != nil {
 		return err
@@ -400,11 +407,17 @@ func (c *Client) RefreshConfig(ctx context.Context) error {
 	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
 	if err != nil {
+		if exporter, ok := s.cfg.Exporter.(*HTTPExporter); ok && centerTransportFailure(err) {
+			exporter.endpoints.failure(endpoint)
+		}
 		return errors.New("SDK configuration endpoint unreachable")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("SDK configuration HTTP %d", resp.StatusCode)
+	}
+	if exporter, ok := s.cfg.Exporter.(*HTTPExporter); ok && s.cfg.ConfigEndpoint == s.cfg.Endpoint {
+		resp.Body = &centerResponseBody{resp.Body, exporter.endpoints, endpoint}
 	}
 	config, err := DecodeSDKConfig(resp.Body)
 	if err != nil {
