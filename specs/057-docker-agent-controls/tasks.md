@@ -14,6 +14,6 @@
 ## 验收与交付
 - [x] T008 在 runtime/test/docker-controls.test.ts 覆盖认证、主机绑定、幂等、过期、诊断及执行回执；完成类型检查和相关回归。
 - [x] T009 在 docs/system-design.md 和 Doca 同步设计、回读文本及原生图，记录 specs/057-docker-agent-controls/validation.md。
-- [ ] T010 更新 specs/057-docker-agent-controls/validation.md，记录 UI/真实 Docker 验收及限制，提交功能分支和面向 main 的 GitHub PR。
+- [x] T010 更新 specs/057-docker-agent-controls/validation.md，记录 UI/真实 Docker 验收及限制，提交功能分支和面向 main 的 GitHub PR。
 
 依赖：T001→T002→T003/T004→T005→T006/T007→T008→T009→T010。单 Agent 顺序实施。

@@ -40,3 +40,5 @@
 ## 发布要求
 
 本次是功能分支交付，需要合入后发行并升级中心与目标 Agent，再现场核对 Docker CLI、daemon 和服务用户 socket 权限。旧 Agent 心跳保持兼容，即时能力明确提示升级。未知的变更不会自动重试，保留写锁，需要管理员核查现场后恢复。
+
+GitHub 交付：[PR #37](https://github.com/workhold/lightmoni/pull/37)，目标 main；未执行合并或生产部署。
