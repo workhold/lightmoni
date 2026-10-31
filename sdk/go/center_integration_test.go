@@ -21,10 +21,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// This exercises the actual Agent handler and durable spool, including Node's
+// This exercises the center-compatible OTLP protocol sink, including Node's
 // OTLP JSON special hex mapping. The core service/ClickHouse hop has its own
 // system integration checks; this test does not replace them.
-func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
+func TestSDKsDurablyAcceptedByCenterSink(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -36,8 +36,8 @@ func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(root, "sdk/typescript/dist/src/index.js")); err != nil {
 		t.Skip("build TypeScript SDK with npm ci && npm run build before cross-language integration")
 	}
-	agent := newNodeAgent(t, root, "127.0.0.1:0")
-	client, err := moni.New(moni.Config{DisableSelfTelemetry: true, Service: "example-go-api", Table: "http", Endpoint: agent.url})
+	center := newNodeCenter(t, root, "127.0.0.1:0")
+	client, err := moni.New(moni.Config{DisableSelfTelemetry: true, Service: "example-go-api", Table: "http", Endpoint: center.url})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,11 +62,11 @@ func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 			cmd.Env = append(cmd.Env, value)
 		}
 	}
-	cmd.Env = append(cmd.Env, "LIGHTMONI_ENDPOINT="+agent.url, "LIGHTMONI_SERVICE=example-node-api", "LIGHTMONI_COUNT=3", "LIGHTMONI_SELF_TELEMETRY=false")
+	cmd.Env = append(cmd.Env, "LIGHTMONI_ENDPOINT="+center.url, "LIGHTMONI_SERVICE=example-node-api", "LIGHTMONI_COUNT=3", "LIGHTMONI_SELF_TELEMETRY=false")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Node demo: %v\n%s", err, output)
 	}
-	queued := agent.stop(t)
+	queued := center.stop(t)
 	logs := map[string]map[string]bool{}
 	spans := map[string]map[string]bool{}
 	totals := map[string]int64{}
@@ -129,7 +129,7 @@ func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 		}
 	}
 	if batches != 6 || totals["example-go-api"] != 2 || totals["example-node-api"] != 3 {
-		t.Fatalf("unexpected durable batches/totals: %d %+v", batches, totals)
+		t.Fatalf("unexpected received batches/totals: %d %+v", batches, totals)
 	}
 	for service, ids := range logs {
 		for id := range ids {
@@ -140,16 +140,16 @@ func TestSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 	}
 }
 
-// nodeTestAgent runs the production TypeScript receiver with a temporary spool.
-// It never starts collectors or forwards to the real center. On stop it reopens
-// the persisted spool and returns the original frozen protobuf payloads.
+// nodeTestCenter runs the isolated center OTLP sink.
+// It never starts collectors or forwards to the real center. On stop it returns
+// the captured original frozen protobuf payloads.
 type nodeTestBatch struct {
 	ID      string `json:"id"`
 	Signal  string `json:"signal"`
 	Service string `json:"service"`
 	Payload []byte `json:"payload"`
 }
-type nodeTestAgent struct {
+type nodeTestCenter struct {
 	cmd     *exec.Cmd
 	input   io.WriteCloser
 	output  *json.Decoder
@@ -159,19 +159,19 @@ type nodeTestAgent struct {
 	stopped bool
 }
 
-func newNodeAgent(t *testing.T, root, listen string) *nodeTestAgent {
+func newNodeCenter(t *testing.T, root, listen string) *nodeTestCenter {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Skip("Node is required for Agent integration")
+		t.Skip("Node is required for center integration")
 	}
 	loader := filepath.Join(root, "runtime/node_modules/tsx/dist/loader.mjs")
 	if _, err = os.Stat(loader); err != nil {
 		t.Fatal("install runtime dependencies with npm ci --prefix runtime before SDK integration")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	a := &nodeTestAgent{cancel: cancel}
-	a.cmd = exec.CommandContext(ctx, node, "--import", loader, filepath.Join(root, "runtime/test/helpers/sdk-agent.ts"), t.TempDir(), listen)
+	a := &nodeTestCenter{cancel: cancel}
+	a.cmd = exec.CommandContext(ctx, node, "--import", loader, filepath.Join(root, "runtime/test/helpers/sdk-center.ts"), t.TempDir(), listen)
 	a.cmd.Dir = root
 	a.cmd.Stderr = &a.stderr
 	stdout, err := a.cmd.StdoutPipe()
@@ -202,15 +202,15 @@ func newNodeAgent(t *testing.T, root, listen string) *nodeTestAgent {
 		a.cancel()
 		_ = a.cmd.Wait()
 		a.stopped = true
-		t.Fatalf("Node Agent startup: %v\n%s", err, a.stderr.String())
+		t.Fatalf("Node center sink startup: %v\n%s", err, a.stderr.String())
 	}
 	a.url = ready.URL
 	return a
 }
-func (a *nodeTestAgent) stop(t *testing.T) []nodeTestBatch {
+func (a *nodeTestCenter) stop(t *testing.T) []nodeTestBatch {
 	t.Helper()
 	if a.stopped {
-		t.Fatal("Node Agent already stopped")
+		t.Fatal("Node center sink already stopped")
 	}
 	if _, err := fmt.Fprintln(a.input, "stop"); err != nil {
 		t.Fatal(err)
@@ -224,7 +224,7 @@ func (a *nodeTestAgent) stop(t *testing.T) []nodeTestBatch {
 	a.stopped = true
 	a.cancel()
 	if decodeErr != nil || waitErr != nil {
-		t.Fatalf("Node Agent snapshot: %v / %v\n%s", decodeErr, waitErr, a.stderr.String())
+		t.Fatalf("Node center sink snapshot: %v / %v\n%s", decodeErr, waitErr, a.stderr.String())
 	}
 	return result.Batches
 }

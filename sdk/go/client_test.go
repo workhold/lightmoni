@@ -306,6 +306,10 @@ func TestHTTPAuthenticationRotationPreservesBatch(t *testing.T) {
 	var mu sync.Mutex
 	ids := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/center-endpoints" {
+			w.WriteHeader(404)
+			return
+		}
 		calls.Add(1)
 		mu.Lock()
 		ids = append(ids, r.Header.Get("X-Lightmoni-Batch-ID"))
@@ -344,6 +348,10 @@ func TestHTTPAuthenticationRotationPreservesBatch(t *testing.T) {
 func TestPartialSuccessIsNotRetried(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/center-endpoints" {
+			w.WriteHeader(404)
+			return
+		}
 		calls.Add(1)
 		payload, _ := proto.Marshal(&metriccollector.ExportMetricsServiceResponse{PartialSuccess: &metriccollector.ExportMetricsPartialSuccess{RejectedDataPoints: 1}})
 		w.Header().Set("Content-Type", "application/x-protobuf")

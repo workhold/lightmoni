@@ -107,14 +107,14 @@ test("cardinality overflow preserves total; SDK queue loss is visible", async ()
 
 test("HTTP authentication can rotate global Key without losing frozen data", async () => {
   const ids: string[] = [];
-  const server = createServer((req, res) => { ids.push(String(req.headers["x-lightmoni-batch-id"])); req.resume(); if (req.headers.authorization !== "Bearer new-global-key") { res.writeHead(401); res.end(); return; } assert.equal(req.headers["x-lightmoni-table"], "http"); assert.ok(req.headers["x-lightmoni-batch-created-at"]); res.setHeader("Content-Type", "application/json"); res.end("{}"); });
+  const server = createServer((req, res) => { if(req.url==="/v1/center-endpoints"){res.writeHead(404);res.end();return;} ids.push(String(req.headers["x-lightmoni-batch-id"])); req.resume(); if (req.headers.authorization !== "Bearer new-global-key") { res.writeHead(401); res.end(); return; } assert.equal(req.headers["x-lightmoni-table"], "http"); assert.ok(req.headers["x-lightmoni-batch-created-at"]); res.setHeader("Content-Type", "application/json"); res.end("{}"); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve)); const address = server.address(); assert.ok(address && typeof address === "object");
   const mon = createLightMoni({ selfTelemetry: false, service: "test", table: "http", endpoint: `http://127.0.0.1:${address.port}`, key: "old-global-key" });
   try { mon.counter("requests").add(1); await assert.rejects(mon.flush({ timeoutMs: 40 }), /timeout/); mon.updateKey("new-global-key"); await mon.flush({ timeoutMs: 1000 }); assert.ok(ids.length >= 2); assert.equal(ids[0], ids[ids.length - 1]); } finally { await mon.shutdown(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 
 test("OTLP partial success is not retried or silently reported delivered", async () => {
-  let calls = 0; const server = createServer((req, res) => { calls++; req.resume(); res.setHeader("Content-Type", "application/json"); res.end('{"partialSuccess":{"rejectedDataPoints":"1"}}'); });
+  let calls = 0; const server = createServer((req, res) => { if(req.url==="/v1/center-endpoints"){res.writeHead(404);res.end();return;} calls++; req.resume(); res.setHeader("Content-Type", "application/json"); res.end('{"partialSuccess":{"rejectedDataPoints":"1"}}'); });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve)); const address = server.address(); assert.ok(address && typeof address === "object");
   const mon = createLightMoni({ selfTelemetry: false, service: "test", table: "http", endpoint: `http://127.0.0.1:${address.port}` });
   try { mon.counter("requests").add(1); await assert.rejects(mon.flush(), /partial/); assert.equal(calls, 1); assert.equal(mon.stats().rejectedRecords, 1); assert.equal(mon.stats().retriedBatches, 0); } finally { await assert.rejects(mon.shutdown(), /partial/); await new Promise<void>(resolve => server.close(() => resolve())); }

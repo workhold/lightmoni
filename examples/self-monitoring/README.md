@@ -4,7 +4,7 @@
 
 业务代码通过 [`telemetry/monitor.go`](telemetry/monitor.go) 统一使用 LightMoni SDK。封装提供 HTTP 请求计数、耗时、并发数、链路上下文和业务日志；SDK 的实例心跳及内部诊断自动上报。业务写入 `demo_http` / `demo_app`，自监控写入独立系统 SDK 表。
 
-示例中心地址为 [http://localhost:18380](http://localhost:18380)，本机执行节点地址为 [http://127.0.0.1:4318](http://127.0.0.1:4318)。中心 Key 只存于本机 LightMoni Agent 配置；SDK 使用执行节点的本地接入令牌。
+示例中心地址为 [http://localhost:18380](http://localhost:18380)，本机执行节点地址为 [https://monitor.example.com](https://monitor.example.com)。中心 Key 只存于本机 LightMoni Agent 配置；SDK 使用执行节点的本地接入令牌。
 
 ```sh
 # 在仓库根目录构建 Node 中心、执行节点和网页。

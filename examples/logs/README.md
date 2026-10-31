@@ -6,8 +6,8 @@
 
 ```sh
 npm run build --prefix sdk/typescript
-LIGHTMONI_ENDPOINT=http://127.0.0.1:4318 go run ./examples/logs/go -count 240
-LIGHTMONI_ENDPOINT=http://127.0.0.1:4318 node examples/logs/node.mjs
+LIGHTMONI_ENDPOINT=https://monitor.example.com go run ./examples/logs/go -count 240
+LIGHTMONI_ENDPOINT=https://monitor.example.com node examples/logs/node.mjs
 ```
 
 默认业务表 `acceptance` 自动发现为 `log_acceptance`。两份 SDK 使用 `logs-go-demo`、`logs-node-demo`，共用 Agent 的全局 Key。`LIGHTMONI_LOGS_TABLE` 修改业务表；`LIGHTMONI_LOGS_RUN` 给正文和属性添加可检索标记。样例包含中文、多行堆栈、一条长日志、数字 `status`、布尔 `retryable`、空字符串、来源序号和真实 trace/span 关联。直接主服务路径可另配 `LIGHTMONI_KEY`，Agent 路径无需业务程序保管 Key。
@@ -19,7 +19,7 @@ LIGHTMONI_LOGS_CH_URL=http://127.0.0.1:18123 go test -race ./internal/logs
 node --test web/src/features/logs/model.test.mjs
 npm run typecheck --prefix web
 
-LIGHTMONI_ENDPOINT=http://127.0.0.1:4318 \
+LIGHTMONI_ENDPOINT=https://monitor.example.com \
 LIGHTMONI_TEST_URL=http://127.0.0.1:18880 \
 LIGHTMONI_UI_URL=http://127.0.0.1:5173 \
 node examples/logs/smoke.mjs
@@ -46,7 +46,7 @@ node examples/logs/discover.mjs
 ```sh
 (cd web && node node_modules/vite/bin/vite.js build --outDir /tmp/lightmoni-logs-qa --emptyOutDir)
 node examples/logs/serve.mjs /tmp/lightmoni-logs-qa
-LIGHTMONI_UI_URL=http://127.0.0.1:15173 LIGHTMONI_ENDPOINT=http://127.0.0.1:4318 node examples/logs/smoke.mjs
+LIGHTMONI_UI_URL=http://127.0.0.1:15173 LIGHTMONI_ENDPOINT=https://monitor.example.com node examples/logs/smoke.mjs
 LIGHTMONI_UI_URL=http://127.0.0.1:15173 node examples/logs/interactions.mjs
 LIGHTMONI_UI_URL=http://127.0.0.1:15173 node examples/logs/chart.mjs
 ```

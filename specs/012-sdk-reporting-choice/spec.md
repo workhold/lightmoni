@@ -1,5 +1,6 @@
 # Feature Specification: SDK 双路径上报与节点助手独立运行
 
+> 历史规格：SDK→Agent路径已由[SDD 050](../../specs/050-center-endpoint-discovery/spec.md)移除，当前SDK仅直连中心。
 **Date**: 2026-10-19
 **Branch**: `feat/sdk-reporting-modes`
 **Status**: Implemented; native-source regression checks recorded in [validation.md](validation.md), Go/Rust release remains deferred

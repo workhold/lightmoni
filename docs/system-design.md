@@ -48,8 +48,8 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 
 ## 3. 设计原则
 
-1. **独立上报、路径显式**：业务 SDK 默认直连中心，Agent 独立上报自身任务数据；两者复用同一套 SDK 包，业务上报不依赖安装 Agent。已有显式 SDK 经 Agent 能力单独说明，不因网络错误自动互相改投。
-2. **Agent 是一等节点**：业务退出不会停止 Agent；Agent 不只是 SDK 的中转器，也不等同于“采集器”这个单一功能。
+1. **独立上报、路径显式**：业务 SDK 仅直连中心，Agent 独立上报自身任务数据；两者复用同一套 SDK 包，业务上报不依赖安装 Agent。SDK与Agent独立使用中心地址发现，内网优先、公网备用。
+2. **Agent 是一等节点**：业务退出不会停止 Agent；Agent承担独立采集、节点控制与任务执行，不接收业务SDK。
 3. **控制面和数据面分离**：控制凭据用于心跳和配置，数据凭据用于遥测；SDK Key、Agent local token、enrollment token 不能混用。
 4. **中心是配置权威**：任务、标签、告警、模型、密钥和部署计划在中心保存；Agent 只缓存可执行配置，SDK 只缓存端侧规则。
 5. **写入先确认边界再确认成功**：Agent 先持久化再 ACK，中心等待目标 ClickHouse 写入完成再 ACK；未知结果保留原批次。
@@ -68,7 +68,7 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 | Agent enrollment token | 绑定已登记主机的一次性短期安装凭据 | 主机部署内部签发，中心兑换 |
 | Agent control credential | 节点心跳、配置和控制通道凭据 | 中心签发，Agent 保存 |
 | Agent data credential | 节点遥测上报凭据 | 中心签发，Agent 保存 |
-| Agent local token | 可选的本机 SDK → Agent 鉴权令牌 | 目标 Agent 本地配置 |
+| Agent local token | 本机Agent诊断鉴权令牌 | 目标 Agent 本地配置 |
 | 执行节点 | 一个独立运行的 LightMoni Agent 实例 | Agent 身份与中心节点记录 |
 | 任务 | 指标采集、服务拨测或目录日志配置 | 中心任务仓储 |
 | 任务标签 | 把任务分发给节点的标签集合 | 中心标签仓储 |
@@ -118,7 +118,7 @@ flowchart LR
   Control -->|节点身份与任务配置| SQLite
 ```
 
-图中的箭头表示调用或发送方向；心跳、拉配置与部署任务的 claim/events/result 使用 control credential，响应沿原请求返回，遥测上报使用 data credential。任务配置由中心持有，节点主动拉取；这里没有新增中心主动连接 Agent 的入站要求。SDK → Agent 的现有显式转发能力见第 7.2 节，不作为当前推荐的业务主路径，也不因本次图示修正而删除。
+图中的箭头表示调用或发送方向；心跳、拉配置与部署任务的 claim/events/result 使用 control credential，响应沿原请求返回，遥测上报使用 data credential。任务配置由中心持有，节点主动拉取；这里没有新增中心主动连接 Agent 的入站要求。SDK→Agent转发已移除；两条中心连接均按第50章同步入口。
 
 **用户入口与中心内部模块：**
 
@@ -197,17 +197,11 @@ flowchart TB
 
 直连是 SDK 的默认目标，适合普通服务器、容器和 Serverless。安装 Agent 不是直连的前置条件。
 
-### 7.2 已有可选能力：业务 SDK 经 Agent
+### 7.2 SDK独立直报与中心地址选择
 
-本节记录已有的显式转发实现，供需要本地持久化和离线补传时选择。它不是总览主路径，也不是业务 SDK 的安装要求；本次系统设计图示修正不新增、删除或切换运行时能力。
+SDK仅连接中心，删除Agent接收与配置代理；默认本机4318地址和agent/auto模式均不再提供。SDK在业务进程内聚合与缓冲，中心确认后释放批次。Agent不承担业务SDK持久队列；其自身采集通过进程内exporter进入原有持久队列。
 
-1. 用户明确选择 `LIGHTMONI_MODE=agent`，SDK 使用 Agent endpoint 和可选 local token。
-2. SDK 仍在业务进程内聚合和生成 OTLP，不把中心 control/data credential 暴露给业务。
-3. Agent 接收请求，验证 table、batch ID、时间和 local token，把批次持久化到本地 SQLite 队列后 ACK SDK。
-4. Agent 使用自己的 data credential 向中心发送完全相同的批次；网络失败时从磁盘队列重试。
-5. 中心完成 ClickHouse 写入后，Agent 删除队列记录，但保留受限 receipt 去重。
-
-Agent 模式增加本地持久化和离线补传能力，同时增加一跳网络与本地队列故障面。它不会自动压缩、自动合批、替换凭据，也不代表中心已入库。Agent 不可达时，SDK 不自动改投中心。
+管理员在上报地址簿登记内网IP及端口和公网引导入口，SDK与Agent从所在网络查询清单、验证中心身份并优先使用可达内网。地址变更30秒同步；Agent心跳、配置、任务通道和上报共用入口。协议、兼容和验收见第50章。
 
 ### 7.3 Agent 节点任务流
 
@@ -216,7 +210,7 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 3. Agent 先校验并缓存完整配置，再原子替换当前有效 revision；冲突配置整体拒绝。
 4. 采集器按配置产生 host/process/probe/files 数据，使用 Agent 内嵌的同一 TypeScript SDK，经进程内 exporter 写入 Agent 队列。
 5. Agent 上报并维护心跳、队列、采集器状态和有限运行事件。
-6. 节点无匹配任务时暂停内部采集和拨测，但仍可接收业务 SDK 数据。
+6. 节点无匹配任务时暂停内部采集和拨测，继续维护自身控制通道。
 
 任务标签只负责分发，不是租户、权限或业务 service。一个节点可以有多个标签，一个任务也可以关联多个标签，命中任一标签即可下发且不会重复执行。
 
@@ -231,7 +225,7 @@ Agent 模式增加本地持久化和离线补传能力，同时增加一跳网�
 
 ### 7.5 SDK 插桩与业务部署流
 
-1. 管理员为业务服务提供已授权的源码 workspace；AI 先调用只读 `scan_sdk_instrumentation`，识别语言、框架、LightMoni SDK、直连/Agent 模式和候选请求/错误边界。
+1. 管理员为业务服务提供已授权的源码 workspace；AI 先调用只读 `scan_sdk_instrumentation`，识别语言、框架、LightMoni SDK、中心直连配置及需迁移的历史Agent配置和候选请求/错误边界。
 2. 扫描不导入或执行业务代码，也不写文件。对于可以明确定位的 TypeScript/JavaScript 多行请求边界，AI 调用只读 `propose_sdk_instrumentation` 生成结构化 unified diff、风险、手动步骤和验证命令；Python、Go、Rust、Ruby 或歧义边界只给手动步骤。复杂改写才交给隔离 workspace 的 `code_task`，同样只产生可审阅 diff；所有 diff 都必须经过管理员确认后才应用。
 3. 已确认的 revision 目标上由隔离构建器生成带版本、架构、来源 revision 和 SHA-256 的 release；构建器尚未实现前，systemd MVP 允许管理员上传预构建的 `lightmoni-release-v1.tar.gz`。Manifest 至少包含 `schema_version`、`service_id`、`version`、`architecture`、`source_revision` 和固定 `entrypoint:"run"`。中心上传与 Agent 暂存都会拒绝常见私密凭据路径，以及扫描窗口内匹配到的私钥、知名 token、URL/DSN userinfo、凭据查询参数、Basic Auth 和有值凭据字段；错误不回显匹配内容。该启发式检查不能保证检测所有秘密，bundle 仍只能包含运行文件，运行凭据须由目标主机的独立秘密管理注入。中心只保存元数据与私有 digest-addressed 正文，不能从静态下载路由取到业务制品；生产 Agent 不接收源码仓库凭据或模型密钥。
 4. 管理员为 service 创建一个或多个 service target，登记 systemd unit 与受控 release directory。release 根目录由 root 持有并属于 Agent systemd unit 配置的 `lightmoni-agent` 主组（建议 `0775`，业务服务用户只读且可遍历，并且不得属于 Agent 组）；Agent 的 `ProtectSystem=strict` 沙箱需把该精确目录加入 `ReadWritePaths`。Agent 预检检查根目录 UID/GID 与 POSIX mode 位，要求 root 所有、Agent 有效主组可写、其他用户仅可读/遍历。MVP 不检查扩展 POSIX ACL，也不解析 systemd unit 的业务进程 User/Group/附加组；管理员必须确保业务用户不属于 Agent 组且无 ACL 写权限。unit 必须预先配置稳定入口 `ExecStart=<release_directory>/current/run`；LightMoni Agent 不编辑任意 unit、环境文件或服务用户。release bundle 只放运行所需文件，不能放密钥或环境凭据。MVP 的 `systemd` 适配器覆盖 Node、Python、Go、Rust、二进制和解释器服务；语言不是部署协议。Docker Compose、Kubernetes/Helm 和 CI/GitOps 作为后续适配器。
@@ -437,27 +431,29 @@ SDK 默认使用 30 秒 UTC 固定窗口；每张业务指标表可选 10、30�
 
 Go、Node/TypeScript、Python 等已接入的语言可按各自 SDD 使用动态停报、UID 排除、QA/VIP 保留比例；未接入某规则的语言必须在发布矩阵中明确标注，不能通过中心入库后补过滤来假装支持。
 
-### 10.3 两种上报模式
+### 10.3 中心直报与地址同步
 
-| 模式 | 环境变量 | 接收端 | 凭据 | 持久化 |
+| 客户端 | 引导配置 | 接收端 | 凭据 | 缓冲 |
 | --- | --- | --- | --- | --- |
-| `direct`（默认） | `LIGHTMONI_ENDPOINT`、`LIGHTMONI_DATA_KEY` 或兼容 `LIGHTMONI_KEY` | 中心 `/v1/*` | SDK data key | SDK 进程内有界缓冲 |
-| `agent` | `LIGHTMONI_AGENT_ENDPOINT`、可选 `LIGHTMONI_LOCAL_TOKEN` | Agent `/v1/*` | Agent local token（如启用） | Agent SQLite 磁盘队列 |
+| 业务SDK（仅直报） | LIGHTMONI_ENDPOINT、LIGHTMONI_KEY | 中心/v1/*（内网优先） | SDK Key / 已启用豁免表 | 进程内有界缓冲 |
+| 独立Agent | config.endpoint + 中心地址发现 | 中心控制/数据/任务API（共用入口） | 独立control/data凭据 | 自身采集SQLite队列 |
 
-模式必须由用户显式选择，不能在一条路径失败后静默改变授权或目标。两种模式都保持 OTLP、table、批次头和 shutdown 语义。SDK 不知道“业务所在机器的 Agent”是靠业务名称推断出来的；需要 agent 模式时，用户通过本机/容器可达地址或部署编排显式提供 Agent endpoint。未来可以新增服务发现，但不能把推断结果当作凭据。
+SDK仅使用中心endpoint与SDK Key；删除agent/auto模式及LIGHTMONI_AGENT_ENDPOINT、LIGHTMONI_LOCAL_TOKEN入口。SDK保留进程内有界缓冲，中心ACK后释放批次。管理员登记内网IP/端口和公网入口，客户端查询清单、验证身份、内网优先、公网备用，详见第50章。
+
+AI插桩仅允许direct，生成LIGHTMONI_ENDPOINT和LIGHTMONI_KEY环境配置。检测历史SDK→Agent设置只提示迁移，不能继续生成该模式或向未迁移客户端自动插入调用。
 
 ## 11. LightMoni Agent 设计
 
 ### 11.1 定位
 
-LightMoni Agent 是独立运行的系统级执行节点。它可以接收业务 SDK 数据，也可以使用同一套 TypeScript SDK 为自身主机采集和任务执行打点；业务 SDK 不必安装或经过 Agent。Agent 的进程由 systemd、容器编排或其他进程管理器负责，业务服务的启停不会影响 Agent。
+LightMoni Agent 是独立运行的系统级执行节点。它使用同一套TypeScript SDK为自身主机采集和任务执行打点，产物通过进程内exporter入队；业务 SDK 不必安装或经过 Agent。Agent 的进程由 systemd、容器编排或其他进程管理器负责，业务服务的启停不会影响 Agent。
 
 ### 11.2 模块
 
 | 模块 | 职责 |
 | --- | --- |
 | `config.ts` | 地址、凭据、容量、任务和本地令牌校验 |
-| `agent.ts` | HTTP 接收、上报、心跳、运行状态和 SDK exporter |
+| `agent.ts` | 本地诊断、中心统一选路、上报、心跳、运行状态和进程内SDK exporter |
 | `queue.ts` | SQLite durable queue、receipt、重试、容量和日志 cursor |
 | `collect.ts` | CPU、内存、磁盘、网络、负载和进程采集 |
 | `probe.ts` | HTTP/TCP 拨测和超时 |
@@ -496,7 +492,7 @@ stateDiagram-v2
 5. Agent 激活后取得 control/data credential，使用 fsync 和原子 rename 落盘；中心只保存摘要。
 6. 撤销立即拒绝新请求；凭据自动轮换与有限 grace 窗口仍是后续能力，当前不能声称已自动轮换。
 
-`control_credential` 只用于心跳、配置和控制；`data_credential` 只用于 Agent 遥测。Agent 不再接受旧 config.key 或共享 SDK Key 的运行/控制面降级；SDK Key 仍供业务 SDK 独立上报。原本地接收器不作为用户安装 Agent 的理由，业务 SDK 不依赖 Agent。
+`control_credential` 只用于心跳、配置和控制；`data_credential` 只用于 Agent 遥测。Agent 不再接受旧 config.key 或共享 SDK Key 的运行/控制面降级；SDK Key 仍供业务 SDK 独立上报。SDK本地接收器与配置代理已移除，业务SDK仅直连中心。
 
 ## 13. 主机、SSH 和 Agent 引导
 
@@ -1320,3 +1316,13 @@ flowchart LR
 ```
 
 验证与 Doca 保存回读见 `specs/044-operations-observability/validation.md`。部署升级需要新中心与新 Agent；旧 Agent 无清单时显示等待采集，历史业务表和存储数据保持兼容。
+
+## 第50章 中心内外网地址同步与SDK直报（SDD 050）
+
+2026-10-31。本章为codex/050-center-endpoint-discovery分支预览，代码验证见对应SDD，合入状态以GitHub为准。管理员沿用上报地址簿登记完整内网IP+port URL与public引导入口，scope缺省public，默认引导必须为public，至少保留一个public。SQLite保存稳定center_id与地址清单修订。SDK与Agent分别直连中心，SDK→Agent的OTLP接收与配置代理全部移除；Agent自己的SDK只通过进程内exporter入持久队列，本地监听仅提供诊断。
+
+GET /v1/center-endpoints使用SDK密钥、已启用豁免表匿名规则或Agent ID+control凭据，发布version=1、center_id、revision及带scope的地址；固定30秒刷新。GET /v1/center-identity不携带凭据，仅用于同中心误配检测。客户端保留公网引导，首次请求前发现，周期及显式操作同步；从已发现入口刷新前先无凭据核对身份，失效时回公网查询新内网。候选探测有时限与64KiB响应上限，禁止跳转，不关闭TLS验证；身份ID不替代HTTPS认证，显式HTTP仅用于受信链路。
+
+Go、Node/浏览器、Python、Rust共享内网优先、公网备用语义。配置和上报复用同一选择；Agent的心跳/配置、job/task轮询、operations及制品下载同样共用入口，内网可达时不将数据与控制分流到公网。当前Agent是HTTP轮询，无独立WebSocket协议。传输失败使下次原请求/批次重选，不在同次调用内重放写请求；批次ID、创建时间及正文保持，所有入口必须共用中心去重存储。30秒冷却和有效新修订控制重新探测。全部已知入口失效时由运维修复公网引导。
+
+同集群Nginx固定使用应用内网端点，按集群内网完全互通处理；无健康内网后端时503，不生成公网备用。网关public_address只用于外部入口DNS。旧中心未提供发现协议时保留显式地址直报；新SDK不再隐式默认本机4318。验收覆盖隔离HTTP/SQLite与多语言真实客户端，不等同公网/VPC、真实TLS证书或大规模生产网络验收。

@@ -1,0 +1,16 @@
+[
+  {
+    "entry": "compose.yaml",
+    "image": "docker.heyphp.com/lightmoni/lightmoni:20261031-8386b5b",
+    "legacy_image_override_ignored": true,
+    "clickhouse_health_dependency_preserved": true,
+    "state_and_telemetry_volumes_preserved": true
+  },
+  {
+    "entry": "deploy/with-clickhouse/compose.yaml",
+    "image": "docker.heyphp.com/lightmoni/lightmoni:20261031-8386b5b",
+    "legacy_image_override_ignored": true,
+    "clickhouse_health_dependency_preserved": true,
+    "state_and_telemetry_volumes_preserved": true
+  }
+]

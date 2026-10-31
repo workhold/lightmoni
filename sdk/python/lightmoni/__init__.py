@@ -1,4 +1,5 @@
 import os
+import ssl
 from .distribution import Distribution
 """LightMoni native Python SDK. Recording never performs network I/O."""
 import bisect
@@ -20,6 +21,7 @@ from dataclasses import dataclass
 from .windows import window_at
 from .sampling import SYSTEM_TABLES, copy_policies, decode_config, matches, sample_log
 from .transport import Request, ResponseTooLarge
+from .endpoints import CenterEndpoints
 
 _context = contextvars.ContextVar("lightmoni_trace", default=None)
 _MAX_INT = (1 << 63) - 1
@@ -126,6 +128,7 @@ class _State:
         if not isinstance(service, str) or not service or len(service.encode()) > 128:
             raise ValueError("valid service and HTTP(S) endpoint required")
         self.endpoint, self.key, self.service = _endpoint(endpoint), key, service
+        self.endpoints = CenterEndpoints(self.endpoint)
         self.limits = dict(queue_bytes=8 << 20, queue_batches=256, buffer_bytes=8 << 20,
                            max_batch_bytes=1 << 20, cardinality_limit=2000, max_instruments=256)
         if limits.keys() - self.limits.keys():
@@ -434,7 +437,7 @@ class Client:
             raise ValueError("reporting switches require booleans")
         if type(config_interval) not in (int, float) or not math.isfinite(config_interval) or config_interval < 1:
             raise ValueError("configuration interval must be at least one second")
-        endpoint = os.environ.get("LIGHTMONI_ENDPOINT", "http://127.0.0.1:4318") if endpoint is None else endpoint
+        endpoint = os.environ.get("LIGHTMONI_ENDPOINT", "") if endpoint is None else endpoint
         key = os.environ.get("LIGHTMONI_KEY", "") if key is None else key
         resource = dict(resource or {})
         for value in (env, service_version):
@@ -462,6 +465,7 @@ class Client:
                 client = object.__new__(Client)
                 client._state, client.table = state, table
                 try:
+                    client._state.endpoints.resolve(client._state.key, time.monotonic() + 5)
                     client.flush(timeout=5, _closed_only=True)
                 except (OSError, ValueError, RuntimeError):
                     pass
@@ -637,6 +641,16 @@ class Client:
         if active is not None:
             active.cancel()
 
+    def refresh_endpoints(self, timeout=5):
+        if not isinstance(timeout, (int, float)) or timeout <= 0:
+            raise ValueError("timeout must be positive")
+        s = self._state
+        with s.lock:
+            if s.closed or s.closing:
+                raise RuntimeError("SDK is closed")
+            key = s.key
+        return s.endpoints.resolve(key, time.monotonic() + min(timeout, 5), force=True)
+
     def refresh_config(self, timeout=5):
         if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
             raise ValueError("timeout must be positive")
@@ -650,7 +664,9 @@ class Client:
                 if not s.remote_config or s.closed or s.closing:
                     raise RuntimeError("SDK configuration disabled or closed")
                 key = s.key if s.config_key is None else s.config_key
-                request = Request(s.config_endpoint + "/v1/sdk-config?metric_windows=1", deadline)
+            endpoint = s.endpoints.resolve(s.key, deadline) if s.config_endpoint == s.endpoint else s.config_endpoint
+            request = Request(endpoint + "/v1/sdk-config?metric_windows=1", deadline)
+            with s.lock:
                 s.config_request = request
             headers = {"Authorization": "Bearer " + key} if key else {}
             status, _headers, raw = request.exchange("GET", headers=headers, maximum=1 << 20)
@@ -671,6 +687,8 @@ class Client:
             if active is not None:
                 active.cancel()
         except (OSError, ValueError, RuntimeError, OverflowError, RecursionError, http.client.HTTPException) as error:
+            if isinstance(error,OSError) and not isinstance(error,ssl.SSLError) and request is not None:
+                s.endpoints.failure(endpoint)
             message = str(error) if isinstance(error, RuntimeError) and str(error).startswith("SDK configuration") else "SDK configuration unavailable or invalid"
             with s.lock:
                 if not s.closing and not s.closed:
@@ -728,7 +746,8 @@ class Client:
                 if key:
                     headers["Authorization"] = "Bearer " + key
                 status, retry_after, rejected, acknowledged = 0, 0, 0, False
-                request = Request(s.endpoint + "/v1/" + signal, min(deadline, time.monotonic() + 10))
+                endpoint = s.endpoints.resolve(key, deadline)
+                request = Request(endpoint + "/v1/" + signal, min(deadline, time.monotonic() + 10))
                 with s.lock:
                     if generation != s.reporting_generation or abort.is_set():
                         return
@@ -753,8 +772,9 @@ class Client:
                         pass
                 except ResponseTooLarge:
                     status = 413
-                except (OSError, ValueError, http.client.HTTPException):
-                    pass
+                except (OSError, ValueError, http.client.HTTPException) as error:
+                    if isinstance(error, OSError) and not isinstance(error, ssl.SSLError):
+                        s.endpoints.failure(endpoint)
                 finally:
                     with s.lock:
                         if s.active_request is request:

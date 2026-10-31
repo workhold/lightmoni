@@ -13,7 +13,7 @@ const require=createRequire(path.join(root,'web/package.json'));
 const {chromium,request}=require('playwright');const {expect}=require('@playwright/test');
 const base=process.env.LIGHTMONI_TEST_URL??'http://127.0.0.1:18880';
 const ui=process.env.LIGHTMONI_UI_URL??'http://127.0.0.1:5173';
-const endpoint=process.env.LIGHTMONI_ENDPOINT??'http://127.0.0.1:4318';
+const endpoint=process.env.LIGHTMONI_ENDPOINT??'https://monitor.example.com';
 const logicalTable=process.env.LIGHTMONI_LOGS_TABLE??'acceptance';
 const table='log_'+logicalTable;const run=process.env.LIGHTMONI_LOGS_REUSE_RUN??('logs-'+randomUUID());
 const api=await request.newContext({baseURL:base});
