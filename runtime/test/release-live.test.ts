@@ -43,6 +43,7 @@ test(
         assert.equal(metadata.arch, arch);
         assert.equal(metadata.node_version, "24.15.0");
         assert(existsSync(join(runtime, "NODE-LICENSE")));
+        assert.equal(readFileSync(join(runtime,"uninstall.sh"),"utf8"),readFileSync(new URL("../../deploy/agent/uninstall.sh",import.meta.url),"utf8"));
         const binary = readFileSync(join(runtime, "node"));
         assert.equal(binary.subarray(0, 4).toString("hex"), "7f454c46");
         assert.equal(binary.readUInt16LE(18), arch === "amd64" ? 62 : 183);
