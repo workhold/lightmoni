@@ -41,7 +41,7 @@ export function recordMachineHostKey(db: DB, expected: HostKeyTarget, key: Buffe
   const accepted = db.transaction(() => {
     if (!authorized()) return false;
     const current = db.get<HostKeyTarget>("SELECT * FROM managed_machines WHERE id=?", expected.id);
-    if (!current || ["name", "address", "port", "username", "connection_method"].some(field => current[field as keyof HostKeyTarget] !== expected[field as keyof HostKeyTarget])) return false;
+    if (!current || ["address", "port", "username", "connection_method"].some(field => current[field as keyof HostKeyTarget] !== expected[field as keyof HostKeyTarget])) return false;
     if (Number(current.ssh_target_generation || 0) !== Number(expected.ssh_target_generation || 0)) return false;
     if (expected.host_key_fingerprint && expected.host_key_fingerprint !== identity.fingerprint) return false;
     if (current.host_key_fingerprint && current.host_key_fingerprint !== identity.fingerprint) return false;

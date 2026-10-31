@@ -11,7 +11,7 @@ export default function HostNetworkSummary({network,details=false,showSource=tru
   const all=values.join('、');return <Tooltip title={values.length?`${all} · ${t('最近发现：','Last discovered: ')}${time(network?.observed_at)}`:undefined}><Typography.Text type="secondary">{label}：{values.length?<>{values.slice(0,2).join('、')}{values.length>2?` (+${values.length-2})`:''}</>:network?.observed_at?t('未发现','None discovered'):t('待发现','Not discovered')}</Typography.Text></Tooltip>;
  };
  return <div className="lm-host-addresses">
-  {network?.hostname&&<Typography.Text type="secondary">{t('观测主机名','Observed hostname')}：{network.hostname}</Typography.Text>}
+  {network?.hostname&&<Typography.Text type="secondary">{t('系统主机名','System hostname')}：{network.hostname}</Typography.Text>}
   {addresses(t('内网 IP','Private IP'),network?.private_ips??[])}
   {!!network?.public_ips?.length&&addresses(t('其他网卡 IP','Other interface IPs'),network.public_ips)}
   {!!network?.observed_at&&<Typography.Text type="secondary">{t('网卡采集','Interface discovery')}：{observedVia} · {time(network.observed_at)}</Typography.Text>}

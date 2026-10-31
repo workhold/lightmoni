@@ -10,7 +10,7 @@ export default function MachineEditDialog({machine,onClose,onSaved}:{machine:Hos
  const [configureSSH,setConfigureSSH]=useState(machine.connection_method==='direct_ssh'),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const pending=useRef(false);
  return <Modal title={t(`编辑主机 · ${machine.name}`,`Edit host · ${machine.name}`)} open onCancel={()=>{if(!pending.current)onClose()}} closable={!busy} keyboard={!busy} maskClosable={false} footer={null} width={620} destroyOnHidden>
-  <Descriptions size="small" column={1} items={[{key:'id',label:t('主机 ID（平台生成，不可修改）','Host ID (platform-generated, immutable)'),children:<Typography.Text code copyable={{text:machine.id}}>{machine.id}</Typography.Text>},...((machine.network?.hostname||machine.observed_hostname)?[{key:'observed',label:t('观测主机名','Observed hostname'),children:machine.network?.hostname||machine.observed_hostname}]:[])]}/>
+  <Descriptions size="small" column={1} items={[{key:'id',label:t('主机 ID（平台生成，不可修改）','Host ID (platform-generated, immutable)'),children:<Typography.Text code copyable={{text:machine.id}}>{machine.id}</Typography.Text>},...((machine.network?.hostname||machine.observed_hostname)?[{key:'observed',label:t('系统主机名','System hostname'),children:machine.network?.hostname||machine.observed_hostname}]:[])]}/>
   <Form layout="vertical" className="lm-machine-form-notice" disabled={busy} initialValues={{name:machine.name,address:machine.address,port:machine.port||22,username:machine.username}} onFinish={async values=>{
    if(pending.current)return;pending.current=true;setBusy(true);setError('');
    try{
@@ -18,7 +18,7 @@ export default function MachineEditDialog({machine,onClose,onSaved}:{machine:Hos
     await onSaved();onClose();
    }catch(e){setError(e instanceof Error?e.message:t('保存主机失败','Unable to save host'))}finally{pending.current=false;setBusy(false)}
   }}>
-   <Form.Item label={t('主机名称','Host name')} name="name" rules={[{required:true,message:t('请输入主机名称','Enter a host name')},{validator:(_,value)=>typeof value==='string'&&(/\p{Cc}/u.test(value)||new TextEncoder().encode(value).length>128)?Promise.reject(new Error(t('名称不能包含控制字符，且最多 128 字节','Names cannot contain control characters and must fit within 128 bytes'))):Promise.resolve()}]}><Input/></Form.Item>
+   <Form.Item label={t('主机名称（用户自定义）','Host name (user-defined)')} name="name" rules={[{required:true,message:t('请输入主机名称','Enter a host name')},{validator:(_,value)=>typeof value==='string'&&(/\p{Cc}/u.test(value)||new TextEncoder().encode(value).length>128)?Promise.reject(new Error(t('名称不能包含控制字符，且最多 128 字节','Names cannot contain control characters and must fit within 128 bytes'))):Promise.resolve()}]}><Input/></Form.Item>
    <Checkbox checked={configureSSH} disabled={busy} onChange={event=>setConfigureSSH(event.target.checked)}>{t('配置 SSH 连接','Configure SSH connection')}</Checkbox>
    {configureSSH?<>
     <Alert className="lm-machine-form-notice" type="info" showIcon title={t('请核对 SSH 连接信息','Verify SSH connection details')} description={t('发现的主机名和网卡 IP 仅用于展示，不会自动替换 SSH 连接地址。保存不会连接或安装程序；随后可添加凭据。','Discovered hostnames and interface IPs are display metadata and do not replace the SSH connection address. Saving does not connect or install software. Add credentials afterward.')}/>

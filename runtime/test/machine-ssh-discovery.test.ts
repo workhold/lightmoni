@@ -231,6 +231,42 @@ test("target mutation, cancellation and credential invalidation cannot persist S
   }
 });
 
+test("user rename preserves SSH identity, discovery and reusable preflight while plans require review under the new name",async t=>{
+  const f=await machineFixture(t,async()=>({stdout:core+block(),stderr:"",stages:[]}));
+  const host=await f.create(), other=await f.create();
+  const checked=await f.request(`/machines/${host.id}/ssh-check`,"POST",{});
+  const plan=await f.request(`/machines/${host.id}/deployments/plan`,"POST",{check_id:checked.id,version:"0.1.0",arch:"amd64"});
+  const before=f.machines.get(host.id), beforeCheck=f.db.get("SELECT * FROM machine_ssh_checks WHERE id=?",checked.id);
+  const renamed=await f.request(`/machines/${host.id}`,"PUT",{name:"Custom production label"});
+  assert.equal(renamed.id,host.id);assert.equal(renamed.name,"Custom production label");
+  for(const field of ["address","port","username","host_key_fingerprint","ssh_target_generation"] as const)assert.equal(renamed[field],before[field],field);
+  assert.deepEqual(renamed.network,before.network);assert.equal(renamed.network.hostname,"fixture-db");
+  assert.deepEqual(f.db.get("SELECT * FROM machine_ssh_checks WHERE id=?",checked.id),beforeCheck);
+  assert.equal(f.db.get<any>("SELECT status FROM machine_deployments WHERE id=?",plan.id)!.status,"cancelled");
+  const revised=await f.request(`/machines/${host.id}/deployments/plan`,"POST",{check_id:checked.id,version:"0.1.0",arch:"amd64"});
+  assert.equal(revised.plan.machine.name,"Custom production label");assert.equal(revised.plan.machine.id,host.id);
+  // Matching names, SSH endpoints, fingerprints or system hostnames are never
+  // asset identity: another registered record must stay separate.
+  const otherChecked=await f.request(`/machines/${other.id}/ssh-check`,"POST",{});
+  assert.equal(otherChecked.discovery.hostname,renamed.network.hostname);
+  assert.equal(f.machines.get(other.id).name,"User configured name");
+  assert.notEqual(host.id,other.id);assert.equal(f.db.all("SELECT machine_id FROM machine_network_observations").length,2);
+});
+
+test("connection edits invalidate only the changed host and returning to the old target does not resurrect an SSH snapshot",async t=>{
+  for(const [field,value] of [["address","next.fixture"],["port",2222],["username","otherlogin"]] as const){
+    const f=await machineFixture(t,async()=>({stdout:core+block(),stderr:"",stages:[]})),host=await f.create();
+    const checked=await f.request(`/machines/${host.id}/ssh-check`,"POST",{}),before=f.machines.get(host.id);
+    const changed=await f.request(`/machines/${host.id}`,"PUT",{[field]:value});
+    assert.equal(changed.id,host.id);assert.equal(changed.name,before.name);assert.equal(changed.ssh_target_generation,before.ssh_target_generation+1);
+    assert.equal(changed.network.observed_via,"unavailable");assert.equal(changed.network.hostname,"");assert.deepEqual(changed.network.private_ips,[]);
+    assert.equal(f.db.get("SELECT id FROM machine_ssh_checks WHERE id=?",checked.id),undefined);
+    assert.equal(changed.host_key_fingerprint,field==="username"?before.host_key_fingerprint:"");
+    const returned=await f.request(`/machines/${host.id}`,"PUT",{[field]:before[field]});
+    assert.equal(returned.network.observed_via,"unavailable",field);assert.equal(returned.network.hostname,"");
+  }
+});
+
 test("real loopback SSH uses one authenticated exec and bounded fixed discovery, with private key and password",async t=>{
   const key=fixturePrivateKey(),parsed=ssh2.utils.parseKey(key);
   if(parsed instanceof Error||Array.isArray(parsed))throw Error("fixture key invalid");
