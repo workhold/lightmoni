@@ -227,7 +227,7 @@ final class Span {
 final class Client {
     private State $s;
     private string $table;
-    public function __construct(string $service,string $table,string $endpoint='http://127.0.0.1:4318',string $key='',array $limits=[]) { $this->table=Protocol::table($table);$this->s=new State($service,$endpoint,$key,$limits);$this->s->selfTable=$this->table; }
+    public function __construct(string $service,string $table,string $endpoint='',string $key='',array $limits=[]) { $this->table=Protocol::table($table);$this->s=new State($service,$endpoint,$key,$limits);$this->s->selfTable=$this->table; }
     public function withTable(string $table): self { $child=clone $this; $child->table=Protocol::table($table); return $child; }
     public function counter(string $name,string $unit=''): Metric { return $this->instrument($name,'counter',$unit,[]); }
     public function gauge(string $name,string $unit=''): Metric { return $this->instrument($name,'gauge',$unit,[]); }

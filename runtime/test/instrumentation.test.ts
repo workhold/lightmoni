@@ -74,7 +74,7 @@ test("instrumentation proposal returns a structured TypeScript diff without writ
   assert.ok(plan.validation_steps.length > 0);
 });
 
-test("instrumentation proposal uses agent-local credentials only and reports unsupported files as manual work", async () => {
+test("instrumentation only generates center direct configuration and rejects removed Agent mode", async () => {
   const root = await mkdtemp(join(tmpdir(), "lightmoni-instrumentation-agent-plan-"));
   await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { "@lightmoni/sdk": "^0.3.0" } }));
   await mkdir(join(root, "src"));
@@ -86,9 +86,12 @@ test("instrumentation proposal uses agent-local credentials only and reports uns
     "});",
   ].join("\n"));
   await writeFile(join(root, "worker.py"), "from lightmoni import Client\ndef get_jobs(request):\n    return 'ok'\n");
-  const plan = await new InstrumentationService(root).propose({ workspace: ".", intent: "记录请求", mode: "agent" });
+  const service=new InstrumentationService(root);
+  await assert.rejects(()=>service.propose({workspace:".",intent:"记录请求",mode:"agent"} as any),/invalid mode/);
+  const plan = await service.propose({ workspace: ".", intent: "记录请求", mode: "direct" });
   assert.equal(plan.files.length, 1);
-  assert.match(plan.files[0]?.patch ?? "", /LIGHTMONI_LOCAL_TOKEN/);
+  assert.match(plan.files[0]?.patch ?? "", /LIGHTMONI_ENDPOINT/);
+  assert.doesNotMatch(plan.files[0]?.patch ?? "", /LIGHTMONI_LOCAL_TOKEN|LIGHTMONI_AGENT_ENDPOINT|4318/);
   assert.doesNotMatch(plan.files[0]?.patch ?? "", /control_credential|data_credential|api_key/i);
   assert.ok(plan.manual_steps.some((step) => step.includes("worker.py")));
 });

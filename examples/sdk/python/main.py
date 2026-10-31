@@ -2,7 +2,7 @@ import json
 import os
 from lightmoni import Client, TraceContext, with_trace
 
-endpoint = os.getenv("LIGHTMONI_ENDPOINT", "http://127.0.0.1:4318")
+endpoint = os.getenv("LIGHTMONI_ENDPOINT", "https://monitor.example.com")
 mode = os.getenv("LIGHTMONI_TEST_MODE", "demo")
 limits = {"cardinality_limit": 2} if mode == "overflow" else {"queue_bytes": 1024, "max_batch_bytes": 1024, "buffer_bytes": 64} if mode == "capacity" else {}
 mon = Client(os.getenv("LIGHTMONI_SERVICE", "example-python-api"), "http", endpoint, os.getenv("LIGHTMONI_KEY", ""), self_telemetry=mode in ("demo", "selfmonitor"), **limits)

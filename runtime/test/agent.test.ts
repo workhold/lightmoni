@@ -108,7 +108,7 @@ async function mock(
   t: any,
   handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>,
 ): Promise<{ url: string; server: Server }> {
-  const server = createServer((req, res) => void handler(req, res));
+  const server = createServer((req, res) => {if(req.url==="/v1/center-endpoints"){res.writeHead(404);res.end();return;}void handler(req, res);});
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(
     () =>
@@ -226,70 +226,25 @@ test("legacy Go golden spool preserves identity, frozen bytes, retry state, exac
   await a.close();
 });
 
-test("receiver authenticates, persists before ACK and enforces compressed and plain limits", async (t) => {
-  const a = make(t, { local_token: "test-local-token", max_batch_bytes: 4096 }),
-    url = await listen(a),
-    b = batch();
-  let r = await send(url, b);
-  assert.equal(r.status, 401);
-  await r.text();
-  r = await send(
-    url,
-    b,
-    { Authorization: "Bearer test-local-token", "Content-Encoding": "gzip" },
-    gzipSync(b.payload),
-  );
-  assert.equal(r.status, 200);
-  await r.text();
-  const queued = a.queue.next()!;
-  assert(queued);
-  assert.equal(
-    resourceString(
-      resources(
-        "logs",
-        decodeOTLP("logs", queued.payload, queued.content_type),
-      )[0],
-      "host.id",
-    ),
-    a.identity.host_id,
-  );
-  r = await send(url, b, { Authorization: "Bearer test-local-token" });
-  assert.equal(r.status, 200);
-  await r.text();
-  const changed = batch("orders", "changed");
-  changed.id = b.id;
-  changed.created_at = b.created_at;
-  r = await send(url, changed, { Authorization: "Bearer test-local-token" });
-  assert.equal(r.status, 409);
-  await r.text();
-  for (const compressed of [false, true]) {
-    const large = batch("orders", "x".repeat(10000));
-    r = await send(
-      url,
-      large,
-      {
-        Authorization: "Bearer test-local-token",
-        ...(compressed ? { "Content-Encoding": "gzip" } : {}),
-      },
-      compressed ? gzipSync(large.payload) : large.payload,
-    );
-    assert.equal(r.status, 413);
-    await r.text();
+test("Agent rejects removed SDK relay routes and keeps authenticated diagnostics", async (t) => {
+  const a = make(t, {local_token:"test-local-token"}), url = await listen(a);
+  for(const path of ["/v1/logs","/v1/metrics","/v1/traces","/v1/sdk-config"]){
+    const r=await fetch(url+path,{method:path.endsWith("sdk-config")?"GET":"POST",headers:{Authorization:"Bearer test-local-token"},body:path.endsWith("sdk-config")?undefined:"{}"});
+    assert.equal(r.status,404);await r.text();
   }
-  assert.equal((await fetch(url + "/healthz")).status, 200);
-  assert.equal((await fetch(url + "/status")).status, 401);
+  assert.equal(a.queue.stats().queue_batches,0);
+  assert.equal((await fetch(url+"/healthz")).status,200);
+  assert.equal((await fetch(url+"/status")).status,401);
+  const status=await fetch(url+"/status",{headers:{Authorization:"Bearer test-local-token"}});assert.equal(status.status,200);
 });
 
 test("capacity and failed SQLite transactions do not acknowledge or advance log cursors", async (t) => {
   const a = make(t, { max_queue_batches: 1 }),
     url = await listen(a),
     first = batch();
-  assert.equal((await send(url, first)).status, 200);
+  a.accept(first, true);
   const second = batch();
-  const r = await send(url, second);
-  assert.equal(r.status, 503);
-  assert.equal(r.headers.get("Retry-After"), "2");
-  await r.text();
+  assert.throws(() => a.accept(second, true), /capacity|queue/i);
   assert.equal(a.queue.stats().queue_batches, 1);
   assert.equal(a.queue.receipt(second.id), undefined);
   a.queue.complete(first.id);
@@ -297,9 +252,7 @@ test("capacity and failed SQLite transactions do not acknowledge or advance log 
     "CREATE TRIGGER reject_batches BEFORE INSERT ON batches BEGIN SELECT RAISE(ABORT,'injected storage failure'); END;",
   );
   const failed = batch();
-  const response = await send(url, failed);
-  assert.equal(response.status, 503);
-  await response.text();
+  assert.throws(() => a.accept(failed, true));
   assert.equal(a.queue.receipt(failed.id), undefined);
   assert.equal(a.queue.stats().queue_batches, 0);
 });
@@ -474,70 +427,6 @@ test("file log checkpoint and queue commit together under storage failure", asyn
     drain(a).map((r) => r.body.stringValue),
     ["one"],
   );
-});
-
-test("SDK configuration relays local auth and keeps validated offline cache without exposing center key", async (t) => {
-  let online = true;
-  const policy = {
-    revision: "one",
-    log_sampling: {
-      web: {
-        key: "event_id",
-        rules: [{ name: "all", rate: 1, conditions: [] }],
-        exclude: [],
-      },
-    },
-    disable_rules: [],
-  };
-  const center = await mock(t, (req, res) => {
-    assert.equal(req.headers.authorization, "Bearer test-control-credential");
-    assert.ok(req.headers["x-lightmoni-agent-id"]);
-    if (!online) {
-      req.socket.destroy();
-      return;
-    }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(policy));
-  });
-  const a = make(t, { endpoint: center.url, local_token: "test-local-token" }),
-    url = await listen(a);
-  assert.equal((await fetch(url + "/v1/sdk-config")).status, 401);
-  const headers = { Authorization: "Bearer test-local-token" },
-    first = await fetch(url + "/v1/sdk-config", { headers });
-  assert.equal(first.status, 200);
-  assert.deepEqual(await first.json(), policy);
-  online = false;
-  const cached = await fetch(url + "/v1/sdk-config", { headers });
-  assert.deepEqual(await cached.json(), policy);
-  assert(
-    !readFileSync(join(a.config.data_dir, "sdk-config.json"), "utf8").includes(
-      "test-control-credential",
-    ),
-  );
-  for (const rule of [
-    { conditions: [] },
-    { rate: null, conditions: [] },
-    { rate: 1 },
-    { rate: 1, conditions: null },
-  ]) {
-    writeFileSync(
-      join(a.config.data_dir, "sdk-config.json"),
-      JSON.stringify({
-        ...policy,
-        log_sampling: {
-          web: { key: "event_id", rules: [rule], exclude: [] },
-        },
-      }),
-    );
-    const invalid = await fetch(url + "/v1/sdk-config", { headers });
-    assert.equal(invalid.status, 503);
-    await invalid.text();
-  }
-  writeFileSync(
-    join(a.config.data_dir, "sdk-config.json"),
-    '{"revision":"bad","log_sampling":{},"unknown":true}',
-  );
-  assert.equal((await fetch(url + "/v1/sdk-config", { headers })).status, 503);
 });
 
 test("control registers, acknowledges runtime events and persists tasks for offline recovery", async (t) => {

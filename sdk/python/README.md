@@ -33,12 +33,12 @@ HTTP/消息入口提取一次 `parent = TraceContext.extract(headers)`，用 `wi
 
 ## 远程停报与日志采样
 
-默认独立线程每 30 秒从中心或 Agent 的 `/v1/sdk-config` 拉取规则，使用当前 key 认证。平台“SDK 停报规则”和业务日志表的“上报规则”可直接控制 Python SDK，无需重新部署业务代码。关闭自监控或命中停报后，配置拉取仍继续。
+SDK仅直连中心，显式配置中心公网引导URL和SDK Key。管理员登记内网IP及端口后自动同步，内网优先、公网备用，详见[中心地址同步](../../docs/center-endpoints.md)。
 
 ```python
 from lightmoni import Client
 
-mon = Client("order-api", "business", endpoint="http://127.0.0.1:4318",
+mon = Client("order-api", "business", endpoint="https://monitor.example.com",
              resource={"deployment.environment": "production"})
 # 要求首条数据就执行平台规则时，启动业务之前等待刷新成功。
 mon.refresh_config(timeout=5)

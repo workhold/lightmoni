@@ -24,11 +24,11 @@ Agent 只能从登记主机的平台部署流程接入：中心内部签发 enro
 
 中心签发绑定 `agent_id` 的 `control_credential` 与 `data_credential`，control 仅用于心跳/配置等控制请求，data 仅用于遥测，二者不能互换。Agent 上报带 `X-Lightmoni-Agent-ID` 和 data Bearer，允许合法业务逻辑表；机器指标、拨测和目录日志固定逻辑表为 `host`、`probe`、`files`。`/downloads/agent/*` 仅使用该主机安装会话的有效 enrollment 下载授权，SDK Key 和节点 control/data 不代替安装令牌。
 
-SDK 默认直连中心，不要求主机登记或 Agent。显式使用本机 Agent OTLP 接收能力时不持有中心秘密，使用由目标 Agent 本地配置管理的 `local_token`，非 loopback 监听必须启用。Agent 向中心拉取配置强制使用独立 control；SDK 直连 `/v1/sdk-config` 使用 SDK Key，不因 Agent 控制凭据收敛改变 SDK 数据权限。
+SDK仅直连中心，显式配置中心公网引导URL与SDK Key。Agent独立采集上报；两者查询管理员登记的内外网endpoint，30秒同步，内网优先、公网备用。协议见[中心地址同步](center-endpoints.md)。
 
 所有记录的 key_id 由主服务认证取得，不信任采集正文；Agent 记录 data credential ID，SDK 记录 SDK Key ID。凭据轮换不改变已有批次 ID/记录 ID，同批重试保留首次接收的 first_key_id，传输尝试另记实际凭据 ID。
 
-成功响应遵循对应 OTLP ExportResponse；自有链路整批校验、整批确认，不能用 partial_success 丢掉未知子集。Agent 先提交可恢复磁盘记录再 ACK；主服务等所有目标 ClickHouse 写入完成再 ACK。失败重试可能遇到部分已写行，但公开查询仍只计一次。兼容路径按 OTLP partial_success 规则处理。网络未知及 429/502/503/504 可重试；400 为永久协议拒绝；401/403 暂停等待修复凭证；其他状态按 OTLP 规范分类，不能所有 5xx 都盲目重试。
+成功响应遵循对应 OTLP ExportResponse；自有链路整批校验、整批确认，不能用 partial_success 丢掉未知子集。Agent自身采集先提交可恢复磁盘记录；业务SDK仅等待中心ACK；主服务等所有目标 ClickHouse 写入完成再 ACK。失败重试可能遇到部分已写行，但公开查询仍只计一次。兼容路径按 OTLP partial_success 规则处理。网络未知及 429/502/503/504 可重试；400 为永久协议拒绝；401/403 暂停等待修复凭证；其他状态按 OTLP 规范分类，不能所有 5xx 都盲目重试。
 
 建议初始解压后每批不超过 4 MiB；最大补传年龄 24 小时，Agent receipt 与主服务批次元信息保留至少 48 小时，均为可统一调整配置。receipt 达到容量时背压，不能提前忘记仍在保证窗口的记录。同一批次首次 enrichment、摘要、created_at、first_received_at 持久化，已回收 spool 后重试仍保持相同转发正文；过去最大补传年龄后明确 expired，不宣称无限期重放。SDK 内存满的丢弃有诊断，已 ACK 的 Agent 数据不能默默删除。
 
@@ -99,7 +99,7 @@ AI参考Doca骨架移植会话、时间线、可取消SSE、工具loop与草稿�
 
 ## LightMoni Agent、执行节点与任务标签（2026-10-17）
 
-LightMoni Agent 是主机上的管理通道，一个运行实例内部称“执行节点”，统一从主机管理接入和查看；Collector/采集器是内部功能。“任务”是独立配置和启停的指标采集、服务拨测或目录日志工作，“任务标签”用于分发。节点和任务均可关联多个标签，任一标签相交即可命中，同一任务只下发一次。空目标不广播；节点无匹配任务时关闭内部采集和拨测，仍可接收业务 OTLP，并按独立节点 data 凭据授权转发；共享 SDK Key 不授予 Agent 控制权。现有网页对话继续称“AI 助手”；本功能未增加节点智能执行或任意命令能力。
+LightMoni Agent 是主机上的管理通道，一个运行实例内部称“执行节点”，统一从主机管理接入和查看；Collector/采集器是内部功能。“任务”是独立配置和启停的指标采集、服务拨测或目录日志工作，“任务标签”用于分发。节点和任务均可关联多个标签，任一标签相交即可命中，同一任务只下发一次。空目标不广播；节点无匹配任务时关闭内部采集和拨测，仅按独立节点data凭据上报自身采集数据，不接收业务SDK请求；共享 SDK Key 不授予 Agent 控制权。现有网页对话继续称“AI 助手”；本功能未增加节点智能执行或任意命令能力。
 
 登录用户通过 `GET /api/v1/agent-task-labels`、`GET /api/v1/agent-tasks` 读取标签和任务；管理员使用各资源的 POST、PUT/DELETE `/{id}` 管理，使用 `PUT /api/v1/agents/{id}/labels` 的 `{label_ids:[]}` 设置节点标签。默认标签和仍被引用的标签不能删除。节点列表增加 `label_ids/labels/task_ids/tasks`，`config` 是最终有效配置。写入在事务内验证所有实际受影响节点；上报表、采集间隔或同 ID 拨测等配置冲突返回 409，整个更新回滚，旧配置保持。读取需登录，变更需管理员。
 
@@ -147,3 +147,5 @@ AI 通过 `list_alert_rules/get_alert_rule`、`list_alert_silences/get_alert_sil
 ## 通用record与固定窗口（2026-10-20整合）
 
 业务初始化service/env，record(table,metric_name,dimensions,value,count)五参数必填；value是count个样本总和。固定身份、key1…key16维度及统计/分布字段遵循[SDD 010](../specs/010-telemetry-table-model/contracts/runtime.md)。每表从10/30/60/300/600/1800/3600秒中选择一个周期，默认30秒；UTC固定边界、配置历史、查询整数倍与公倍数校验遵循[SDD 011](../specs/011-aligned-metric-windows/contracts/runtime.md)。数据管理增加管理员聚合周期入口；本次整合取舍见[main整合说明](../specs/011-aligned-metric-windows/main-integration.md)。
+
+中心地址发现协议与SDK→Agent移除契约见[SDD 050](../specs/050-center-endpoint-discovery/contracts/endpoints.md)。AI插桩仅允许direct，历史Agent配置只提示迁移。

@@ -1,7 +1,5 @@
 import type {ReportingAddress} from './reporting-addresses';
-export type SDKConnectionMode='agent'|'direct';
 export type SDKAuthMode='key'|'anonymous';
-export const SDK_AGENT_ENDPOINT='http://127.0.0.1:4318';
 export const SDK_LANGUAGES=[{value:'go',label:'Go'},{value:'typescript',label:'Node.js'},{value:'rust',label:'Rust'},{value:'python',label:'Python'}];
 export interface SDKSampleOptions {service?:string;env?:string;service_version?:string;instance_id?:string;authMode?:SDKAuthMode;key?:string;keyName?:string}
 export const validSDKTable=(name:string)=>/^[a-z][a-z0-9_]{0,47}$/.test(name)&&!/^(log|metric|trace)_/.test(name)&&!['lightmoni','lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(name);
@@ -9,8 +7,8 @@ export function recommendedExemptTables(){
  const suffix=Array.from(crypto.getRandomValues(new Uint8Array(8)),value=>value.toString(16).padStart(2,'0')).join('');
  return [{name:`app_logs_${suffix}`,description:'应用日志'},{name:`app_metrics_${suffix}`,description:'业务指标'},{name:`browser_events_${suffix}`,description:'前端事件'}];
 }
-export function sdkSampleFor(language:string,mode:SDKConnectionMode='agent',endpoint?:string,options:SDKSampleOptions={}):string {
- const address=endpoint?.trim().replace(/\/+$/,'')||(mode==='agent'?SDK_AGENT_ENDPOINT:'');
+export function sdkSampleFor(language:string,endpoint?:string,options:SDKSampleOptions={}):string {
+ const address=endpoint?.trim().replace(/\/+$/,'')||'';
  const fallback=JSON.stringify(address),service=JSON.stringify(options.service??'order-api'),env=JSON.stringify(options.env??'test'),anonymous=options.authMode==='anonymous';
  const jsIdentity=(options.service_version?`\n  service_version: ${JSON.stringify(options.service_version)},`:'')+(options.instance_id?`\n  instance_id: ${JSON.stringify(options.instance_id)},`:'');
  const pyIdentity=(options.service_version?`\n    service_version=${JSON.stringify(options.service_version)},`:'')+(options.instance_id?`\n    instance_id=${JSON.stringify(options.instance_id)},`:'');
@@ -112,11 +110,11 @@ export function sdkEndpointError(endpoint:string,language='zh-CN'):string {
 export function sdkEndpointIsLoopback(endpoint:string):boolean {
  try {const hostname=new URL(endpoint.trim()).hostname.toLowerCase();return hostname==='localhost'||hostname.endsWith('.localhost')||/^127\./.test(hostname)||hostname==='[::1]';}catch{return false;}
 }
-export function sdkEnvironment(mode:SDKConnectionMode,endpoint:string,options:SDKSampleOptions={}):string {
+export function sdkEnvironment(endpoint:string,options:SDKSampleOptions={}):string {
  const quote=(value:string)=>"'"+value.replaceAll("'", "'\\''")+"'";
  const base=endpoint.trim().replace(/\/+$/,'');
  const key=options.key??`填写 SDK 密钥「${options.keyName??'所选密钥'}」的完整值`;
- return `export LIGHTMONI_ENDPOINT=${quote(base)}\n`+(options.authMode==='anonymous'?'unset LIGHTMONI_KEY':mode==='direct'?`export LIGHTMONI_KEY=${quote(key)}`:'unset LIGHTMONI_KEY\n# 执行节点开启本地访问令牌时，将 LIGHTMONI_KEY 设为该令牌');
+ return `export LIGHTMONI_ENDPOINT=${quote(base)}\n`+(options.authMode==='anonymous'?'unset LIGHTMONI_KEY':`export LIGHTMONI_KEY=${quote(key)}`);
 }
 export interface SDKPackage {id:string;language:string;runtime:string;file:string;url:string;available:boolean}
 export interface SDKInstall {endpoint?:string;endpoints?:ReportingAddress[];default_endpoint_id?:string;version:string;node_url:string;go_url:string;packages:SDKPackage[];checksums_url:string}

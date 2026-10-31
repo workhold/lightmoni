@@ -23,7 +23,7 @@ export default function SDKSetup({install,keys,secrets,exempt,admin,ready,onCrea
  const serviceValid=!!service.trim()&&service.length<=128&&!/[\u0000-\u001f]/.test(service);
  const canGenerate=ready&&(anonymous||!!selectedKey)&&serviceValid&&identityValid&&!endpointError;
  const sampleOptions={service:service.trim(),env:env.trim(),service_version:version.trim()||undefined,instance_id:instanceID.trim()||undefined,authMode,key:keyID?secrets[keyID]:undefined,keyName:selectedKey?.name};
- const environment=sdkEnvironment('direct',endpoint,sampleOptions),sample=sdkSampleFor(language,'direct',endpoint,sampleOptions);
+ const environment=sdkEnvironment(endpoint,sampleOptions),sample=sdkSampleFor(language,endpoint,sampleOptions);
  const pkg=install?.packages.find(item=>item.id===language),example=sdkExamples[language];
  useEffect(()=>{if(ready&&keyID&&!activeKeys.some(key=>key.id===keyID))setKeyID(undefined);},[keys,ready,keyID]);
  const selectKey=(id:string)=>setKeyID(id);

@@ -3,7 +3,7 @@ import { createLightMoni } from "../../../sdk/typescript/dist/src/index.js";
 const service = process.env.LIGHTMONI_SERVICE ?? "example-node-api";
 const mon = createLightMoni({ selfTelemetry: process.env.LIGHTMONI_SELF_TELEMETRY !== "false",
   service, table: "http",
-  endpoint: process.env.LIGHTMONI_ENDPOINT ?? "http://127.0.0.1:4318",
+  endpoint: process.env.LIGHTMONI_ENDPOINT ?? "https://monitor.example.com",
   key: process.env.LIGHTMONI_KEY,
 });
 const requests = mon.counter("http.requests", { unit: "{request}" });

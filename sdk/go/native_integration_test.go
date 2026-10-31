@@ -13,7 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
+func TestNativeSDKsAcceptedByCenterSink(t *testing.T) {
 	if os.Getenv("LIGHTMONI_NATIVE_SDK_TEST") != "1" {
 		t.Skip("enable with LIGHTMONI_NATIVE_SDK_TEST=1 after scripts/test-sdks.py --docker")
 	}
@@ -22,13 +22,13 @@ func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Docker Desktop reaches this isolated receiver through its host gateway.
-	agent := newNodeAgent(t, root, "0.0.0.0:0")
-	command := exec.Command("python3", "scripts/test-sdks.py", "--docker", "--skip-build", "--agent-url", agent.url)
+	center := newNodeCenter(t, root, "0.0.0.0:0")
+	command := exec.Command("python3", "scripts/test-sdks.py", "--docker", "--skip-build", "--center-url", center.url)
 	command.Dir = root
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("native SDK demos: %v\n%s", err, output)
 	}
-	queued := agent.stop(t)
+	queued := center.stop(t)
 	totals := map[string]int64{}
 	logs, spans := map[string]map[string]bool{}, map[string]map[string]bool{}
 	batches := 0
@@ -80,7 +80,7 @@ func TestNativeSDKsDurablyAcceptedByActualAgent(t *testing.T) {
 		}
 	}
 	if batches != 18 || len(totals) != 6 {
-		t.Fatalf("expected 18 durable batches for six languages: batches=%d totals=%v", batches, totals)
+		t.Fatalf("expected 18 received batches for six languages: batches=%d totals=%v", batches, totals)
 	}
 	for _, language := range []string{"python", "java", "dotnet", "php", "ruby", "rust"} {
 		service := "conformance-" + language

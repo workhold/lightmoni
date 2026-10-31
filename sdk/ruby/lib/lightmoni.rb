@@ -235,7 +235,7 @@ module LightMoni
   end
   class Client
     attr_reader :state, :table
-    def initialize(service:, table:, endpoint: 'http://127.0.0.1:4318', key: '', self_telemetry: true, **limits)
+    def initialize(service:, table:, endpoint: ENV.fetch('LIGHTMONI_ENDPOINT'), key: '', self_telemetry: true, **limits)
       @table, @state = LightMoni.table(table).dup.freeze, State.new(service, endpoint, key, limits)
       @state.self_enabled, @state.self_table = self_telemetry, @table
       @state.heartbeat_stop = Queue.new

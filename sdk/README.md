@@ -17,27 +17,22 @@ value 是 count 个样本的总值。count=1 提供单个观察；count>1 提供
 SDK 接入页提供完整代码和可复制的统计/P值 SQL；各语言新样例分别位于 examples/sdk/go/record、sdk/typescript/examples/record.mjs、examples/sdk/python/record.py、sdk/rust/examples/record.rs。以下旧 instrument/默认表 API 保留兼容；其他历史语言仍使用旧接口。
 
 
-所有原生 SDK 支持指标、日志和链路，可通过执行节点（LightMoni Agent）上报，也可带 Key 直连中心，容器和未部署执行节点的服务同样可以接入。旧接口配置业务 service、默认 table；有效中心密钥可上报全部业务表。withTable / with_table 共享根客户端生命周期。
+业务SDK仅直连中心，支持指标、日志和链路；缓冲和重试位于进程内。Agent独立上报自身采集数据，不接收业务SDK请求。`withTable` / `with_table` 共享根客户端生命周期。
 
-## 选择上报方式
+## 中心地址与自动同步
 
-左侧“SDK 接入”提供 Go、Node.js、Rust、Python 的中心直连样例，以及 SDK 密钥、豁免表管理。四种语言的新初始化入口支持 `LIGHTMONI_ENDPOINT`、`LIGHTMONI_KEY` 环境配置；浏览器入口需显式传连接配置。已有执行节点接收与旧接口仍可使用下表配置。
+设置 `LIGHTMONI_ENDPOINT` 为中心公网引导URL，设置 `LIGHTMONI_KEY` 为有效SDK密钥；匿名方式仅允许管理员启用的豁免表。地址必须显式提供，不再默认连接本机4318。
 
-| 方式 | endpoint | key | 缓存 |
-| --- | --- | --- | --- |
-| 通过执行节点 | 节点接收地址，默认 `http://127.0.0.1:4318` | 通常留空；执行节点开启本地令牌时传该令牌 | SDK 进程内缓冲，执行节点持久化磁盘队列 |
-| 直连中心 | 业务进程可访问的中心基础地址 | 有效启用的中心 SDK 密钥 | SDK 进程内缓冲与重试 |
+管理员登记中心内网IP+端口后，四种发布SDK自动发现并每30秒同步，内网优先、公网备用。支持主动查询：Go `RefreshEndpoints(ctx)`、Node/浏览器 `refreshEndpoints()`、Python `refresh_endpoints()`、Rust `refresh_endpoints()`。地址变更不需要重新部署；所有入口必须连接同一中心。配置查询与遥测共用选择结果。详见[中心地址同步](../docs/center-endpoints.md)。
 
-直连示例的环境配置：
-
-~~~sh
+```sh
 export LIGHTMONI_ENDPOINT='https://monitor.example.com'
-export LIGHTMONI_KEY='替换为有效启用的 SDK 密钥'
-~~~
+export LIGHTMONI_KEY='从受保护运行时注入'
+```
 
-容器中通过 environment / Secret 配置这两个变量。容器的 `localhost` 指向容器本身；与中心位于同一个 Docker 网络时，可用 Compose 服务地址 `http://lightmoni:8080`；Docker Desktop 访问宿主机上的中心可用 `http://host.docker.internal:端口`。实际填写中心可达的域名或服务地址，SDK 自动追加 `/v1/metrics`、`/v1/logs`、`/v1/traces`，无需执行节点中转。
+容器中的localhost只表示当前容器；引导URL必须可从业务容器访问。SDK追加 `/v1/metrics`、`/v1/logs`、`/v1/traces`。只有中心确认批次后释放内存；退出时带截止时间shutdown，失败保留错误诊断。
 
-通过执行节点时，中心 Key 保存在 LightMoni Agent，可以写入所有业务表。不同服务可共享同一个执行节点；使用 `withTable` / `with_table` 切换表时，有效启用的中心 Key 可写任意业务 table。SDK 缓冲不写磁盘；需要本地磁盘缓存时选择通过执行节点上报。
+当前发布Go、Node/浏览器、Python、Rust；其余语言仅保留历史源码，不提供本次地址同步功能或发布包。
 
 | 语言 | 运行环境 | 安装与示例 |
 | --- | --- | --- |
@@ -64,7 +59,7 @@ export LIGHTMONI_KEY='替换为有效启用的 SDK 密钥'
 | 日志存储与查询 | `trace_id String`、`span_id String` | 固定列保留，值为空字符串 |
 | 业务正文与 attributes | 业务自定义内容 | 不承担 trace 关联；同名属性不自动提升为 trace 字段 |
 
-trace 元数据在调用日志 API 时从上下文复制，与记录一起冻结。批量发送、Agent 转发和失败重试沿用原值，不能在发送时读取另一请求的上下文，也不能为每条无上下文日志生成随机 trace。trace 的 sampled 标记不决定日志是否可关联，日志保留仍遵循其自身上报规则。trace ID 不默认加入指标维度。
+trace 元数据在调用日志 API 时从上下文复制，与记录一起冻结。批量发送和失败重试沿用原值，不能在发送时读取另一请求的上下文，也不能为每条无上下文日志生成随机 trace。trace 的 sampled 标记不决定日志是否可关联，日志保留仍遵循其自身上报规则。trace ID 不默认加入指标维度。
 
 | SDK | 当前可选上下文入口 |
 | --- | --- |
@@ -87,7 +82,7 @@ trace 元数据在调用日志 API 时从上下文复制，与记录一起冻结
 1. 发送业务 HTTP 请求或消息时，从当前作用域导出 header；保留业务原有 header。Go 使用 `http.Client{Transport: moni.TraceTransport{}}` 和带 `r.Context()` 的请求；Node/浏览器使用 SDK 的 `client.fetch`；.NET 使用 `new HttpClient(new TraceHttpHandler())`。
 2. 下游提取 header，作为请求/消费 span 的 parent：沿用同一 trace ID，生成自己的 span ID，并保留 flags / tracestate。Go 的 `TraceHandler`、Node 的 `traceHandler` 自动处理 HTTP 入口；没有或非法 traceparent 时在入口创建一次新 trace。
 3. 其余语言可用已有 `extract` / `inject` 及当前上下文导出入口：Python `TraceContext.inject_current()`，Java/.NET/PHP `TraceContext.injectCurrent()` / `InjectCurrent()`，Ruby `LightMoni.trace_headers`，Rust `client.trace_headers()`。消费入口用提取结果创建作用域，不需逐条修改日志代码。
-4. 服务 A → B → C 的日志保持同一 `trace_id`，各服务的 span 指向上游发送时的 span。已有 OpenTelemetry 可通过 Go / Node provider 或各语言作用域桥接；Key、service、table 与 trace 身份独立。Agent/中心保留日志 payload 的关联字段，上报请求本身不替代业务上下文。
+4. 服务 A → B → C 的日志保持同一 `trace_id`，各服务的 span 指向上游发送时的 span。已有 OpenTelemetry 可通过 Go / Node provider 或各语言作用域桥接；Key、service、table 与 trace 身份独立。中心保留日志 payload 的关联字段，上报请求本身不替代业务上下文。
 
 代理需转发这两个 header；浏览器跨域业务接口需在 CORS 中允许 `traceparent` / `tracestate`。消息中间件可将同一组字符串写入消息 metadata，再在消费者恢复；具体消息框架、第三方日志 appender 和完整 HTTP client span 埋点尚未提供。Go `TraceTransport`、SDK `fetch` 和 .NET handler 当前负责传播已有作用域，不自动记录额外的 HTTP client span。
 
@@ -103,7 +98,7 @@ flush 冻结当前待发送增量，等待调用边界内所有批次得到 ACK�
 
 按完整、有类型的属性元组聚合，整数与字符串不混合，记录时复制属性。维度超限生成 otel.metric.overflow=true；Gauge overflow 是 overflow 来源最后观测。同 table 同名指标类型/单位/边界冲突会报错。stats 包含队列字节/批次、活跃缓冲、交付、重试、无效输入、overflow、丢弃、拒绝及最近错误。
 
-SDK 不写磁盘；Agent SQLite 提交 ACK 后才释放 SDK 批次。ACK 前进程崩溃可能丢内存数据；服务端去重由既有采集链路保证。退出时先停止业务生产，再带截止时间 shutdown；失败报告错误并关闭实例。新进程/客户端生成独立的 service.instance.id。
+SDK 不写磁盘；中心确认写入后才释放 SDK 批次。ACK 前进程崩溃可能丢内存数据；服务端去重由既有采集链路保证。退出时先停止业务生产，再带截止时间 shutdown；失败报告错误并关闭实例。新进程/客户端生成独立的 service.instance.id。
 
 ## 验收
 
@@ -115,13 +110,13 @@ go test -race ./sdk/go
 npm --prefix sdk/typescript test
 ~~~
 
-共享 HTTP 测试检查聚合、Int64 精度、Gauge 不补零、Histogram 桶、W3C 父上下文、日志/span 关联、跨 table、overflow、503/429/401/损坏 ACK/连接断开丢 ACK、冻结重试与下一窗口、永久拒绝、partialSuccess 和容量损失。真实 Agent 和隔离 ClickHouse 验收见 [验收证据](../docs/evidence/multilang-sdk/README.md)。`scripts/sdk-smoke.py --mode direct` 验证八种 SDK 直连中心；容器可用 `--container-endpoint` 和 `--docker-network` 指定中心地址与网络。
+共享 HTTP 测试检查聚合、Int64 精度、Gauge 不补零、Histogram 桶、W3C 父上下文、日志/span 关联、跨 table、overflow、503/429/401/损坏 ACK/连接断开丢 ACK、冻结重试与下一窗口、永久拒绝、partialSuccess 和容量损失。真实 Agent 和隔离 ClickHouse 验收见 [验收证据](../docs/evidence/multilang-sdk/README.md)。`scripts/sdk-smoke.py` 验证八种 SDK 直连中心；容器可用 `--container-endpoint` 和 `--docker-network` 指定中心地址与网络。
 
 ## 内部监控
 
 SDK 默认每 30 秒报告一次实例心跳、待发送批次/字节和累计重试、丢弃、拒绝、无效输入、维度溢出等诊断；启动及诊断变化会生成内部日志。原始心跳时间随冻结批次保留，断网补传不会把过期实例算作在线。中心按最近 90 秒的心跳统计在线 SDK 实例。
 
-当前四种 SDK 自监控使用固定 SDK 通道和 Key 经 Agent 或直连上报；中心验证记录后统一归入 `lightmoni_metric_gauge` / `lightmoni_log`（component=sdk），并保留 `source_table`、service、instance_id、agent_id、key_id。无需给 Key 添加系统表写入权限。WithTable 子客户端共享一次心跳生命周期。
+当前四种 SDK 自监控使用固定 SDK 通道和 Key 直连中心上报；中心验证记录后统一归入 `lightmoni_metric_gauge` / `lightmoni_log`（component=sdk），并保留 `source_table`、service、instance_id、agent_id、key_id。无需给 Key 添加系统表写入权限。WithTable 子客户端共享一次心跳生命周期。
 
 内部快照排在业务批次之后，受同一队列容量限制；满队列时跳过自监控快照，下一周期重试。内部诊断只记录固定事件和计数，不复制网络请求、Key 或任意异常文本，也不会从上报失败处理器递归写入队列。后台发送是尽力上报；应用退出前仍需调用有截止时间的 Shutdown。
 
@@ -133,7 +128,7 @@ Go / Node.js 有独立的心跳定时器；Python / Rust 的后台收集检查�
 
 Go、JavaScript / TypeScript（Node 和浏览器）、Python 支持以下动态配置。Java、.NET、PHP、Ruby、Rust 当前仍按既有方式全量记录，尚未接入这一规则协议。
 
-- **SDK 整体停报**：在“数据接入 → SDK 接入 → SDK 停报规则”按 service、instance_id、sdk.language 或 resource:资源属性选择实例。命中任一规则后停止该根 SDK 与所有 WithTable 子客户端的日志、指标、链路和自监控，清空未发送数据。配置拉取继续运行，删除规则后自动恢复，不补传停报期间的数据。已经得到 Agent 持久化 ACK 或已经在网络上提交的数据不能撤回。
+- **SDK 整体停报**：在“数据接入 → SDK 接入 → SDK 停报规则”按 service、instance_id、sdk.language 或 resource:资源属性选择实例。命中任一规则后停止该根 SDK 与所有 WithTable 子客户端的日志、指标、链路和自监控，清空未发送数据。配置拉取继续运行，删除规则后自动恢复，不补传停报期间的数据。已经在网络上提交的数据不能撤回。
 - **部分 UID 日志不上报**：在“数据接入 → 数据表 → 业务日志表 → 上报规则”的排除规则中配置 attr:user_id 等实际字段。命中任一排除规则即忽略日志，优先于 QA、VIP 和普通上报规则。metric 和 trace 不受日志排除或降采样影响。
 - **命中才上报**：每条上报规则有条件和保留比例；同一规则内条件全部命中，多条规则之间任意命中即可，重叠时取最高保留比例。QA / VIP 可设 100%，普通点击可设 10%。未命中任何规则的业务日志不入队。conditions=[] 显式匹配全部日志；rules=[] 显式忽略全部业务日志。未配置策略的表保持全量。错误日志需要配置 severity=ERROR/FATAL 的上报规则，没有隐式兜底。
 
@@ -141,7 +136,7 @@ Go、JavaScript / TypeScript（Node 和浏览器）、Python 支持以下动态�
 
 保留的日志增加 lightmoni.sampling.rate、lightmoni.sampling.weight 和 lightmoni.sampling.rule 属性。日志查询的原始 count 仍是实际保留数量；weight 可用于估算总体数量，但不能保证还原完整用户、漏斗或会话。明确被规则忽略的日志不会计入 dropped_records，不会令 Flush 报数据损失。
 
-中心只存储和下发规则，不再次过滤或采样入库数据。`GET /v1/sdk-config` 使用现有上报 Key，有效密钥可读取全部业务表策略，无密钥仅包含启用的豁免表。Agent 同路径转发配置，使用本地令牌认证并由 Agent 保管中心 Key，中心暂时不可达时可返回已验证的磁盘缓存。浏览器业务后端同时转发配置与 OTLP，演示见 examples/sdk/browser/server.mjs。
+中心只存储和下发规则，不再次过滤或采样入库数据。`GET /v1/sdk-config` 使用现有上报 Key，有效密钥可读取全部业务表策略，无密钥仅包含启用的豁免表。配置直接从中心读取，暂时不可用时保留进程内最近有效规则。浏览器业务后端同时转发配置与 OTLP，演示见 examples/sdk/browser/server.mjs。
 
 HTTP SDK 默认每 30 秒拉取一次，配置经过完整验证后原子替换；失败或非法配置保留上一份有效策略。SDK 刚启动、首次配置尚未到达时沿用本地配置（未配置则全量），需要从第一条日志就执行远程 UID 排除/停报规则时，务必在业务生产前显式等待 RefreshConfig / refreshConfig 成功。自定义 Exporter 可另设配置地址。配置变更只影响后续 Log；已缓冲/冻结的日志与重试正文不重筛。整体停报是单独的强开关，会取消正在发送的请求并清空 SDK 的缓冲与队列。
 

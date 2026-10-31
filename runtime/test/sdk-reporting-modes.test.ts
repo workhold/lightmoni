@@ -19,7 +19,7 @@ import { createAgentHostSchema } from "../src/server/agent-hosts.js";
 
 // Real HTTP, Auth, Ingest and Agent SQLite queue; only ClickHouse storage is
 // replaced with a receipt sink, so this test does not claim live DB coverage.
-test("SDK direct and Agent routes coexist; Agent ACK survives restart before platform delivery", { timeout: 15000 }, async () => {
+test("SDK reports directly; Agent rejects SDK relay and queues only its own collection", { timeout: 15000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), "lightmoni-dual-route-"));
   const db = new DB(":memory:"), router = new Router();
   const auth = new Auth(db, directory, "http://127.0.0.1", router);
@@ -43,6 +43,7 @@ test("SDK direct and Agent routes coexist; Agent ACK survives restart before pla
   }
   let available = true;
   const server = createServer(async (req, res) => {
+    if(req.url==="/v1/center-endpoints"){res.writeHead(404);res.end();return;}
     receipts.push({ batch: String(req.headers["x-lightmoni-batch-id"] ?? ""), authorization: String(req.headers.authorization ?? "") });
     if (!available) { req.resume(); res.writeHead(503); res.end(); return; }
     if (!(await router.handle(req, res))) { res.writeHead(404); res.end(); }
@@ -83,40 +84,14 @@ test("SDK direct and Agent routes coexist; Agent ACK survives restart before pla
     assert.equal(directRows.length, 3);
     assert(directRows.every(r => r.row.key_id === "business-key" && !r.row.agent_id));
 
-    // The center is unavailable. A local durable ACK still lets the SDK finish.
-    available = false;
-    const relayed = createLightMoni({ ...common, service: "agent-orders", endpoint:agentEndpoint, key:"test-local-token" });
-    clients.push(relayed);
-    await record(relayed, "agent-orders");
-    assert.equal(receipts.length, 3, "SDK Agent route must not contact the platform directly");
-    assert.equal(agent.queue.stats().queue_batches, 3);
-    await relayed.shutdown({ timeoutMs: 1000 });
-    const identity = { ...agent.identity };
-    const queuedIDs = agent.queue.db.all<{ id: string }>("SELECT id FROM batches ORDER BY id").map(b => b.id);
-    await agent.close();
-    agent = createAgent(config);
-    assert.deepEqual(agent.identity, identity);
-    assert.equal(agent.queue.stats().queue_batches, 3);
-    await agent.forwardOnce();
-    assert.equal(agent.queue.stats().queue_batches, 3, "failed upstream send must retain all batches");
-    assert.equal(receipts.at(-1)?.authorization, "Bearer test-node-data");
-
-    available = true;
-    // Advance the retry eligibility without sleeping through the backoff.
-    agent.queue.db.run("UPDATE batches SET next_ns=0");
-    for (let n = 0; n < 3; n++) await agent.forwardOnce();
-    assert.equal(agent.queue.stats().queue_batches, 0, agent.lastError);
-    assert.deepEqual(receipts.slice(-3).map(r => r.batch).sort(), queuedIDs);
-    assert(receipts.slice(-3).every(r => r.authorization === "Bearer test-node-data"));
-    const agentRows = rows.filter(r => r.row.service === "agent-orders");
-    assert.equal(agentRows.length, 3);
-    assert(agentRows.every(r => r.row.key_id === "agent-data" && r.row.agent_id === identity.agent_id && r.row.host_id === identity.host_id));
-    for (const service of ["direct-orders", "agent-orders"]) {
-      const log = rows.find(r => r.table === "_lm_log_business" && r.row.service === service)!.row;
-      const span = rows.find(r => r.table === "_lm_trace_business" && r.row.service === service)!.row;
-      assert.equal(log.trace_id, span.trace_id);
-      assert.equal(log.span_id, span.span_id);
-    }
+    const rejected=await fetch(agentEndpoint+"/v1/logs",{method:"POST",body:"{}",headers:{Authorization:"Bearer test-local-token"}});
+    assert.equal(rejected.status,404);assert.equal(agent.queue.stats().queue_batches,0);
+    available=false;
+    agent.sdk.withTable("host").log("info","own collector");await agent.sdk.flush();
+    assert.equal(agent.queue.stats().queue_batches,1);
+    await agent.forwardOnce();assert.equal(agent.queue.stats().queue_batches,1);
+    available=true;agent.queue.db.run("UPDATE batches SET next_ns=0");await agent.forwardOnce();
+    assert.equal(agent.queue.stats().queue_batches,0);assert(rows.some(r=>r.row.service==="lightmoni-agent"));
   } finally {
     for (const client of clients) await client.shutdown({ timeoutMs: 100 }).catch(() => {});
     await agent.close();

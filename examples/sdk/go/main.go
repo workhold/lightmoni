@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	endpoint := flag.String("endpoint", env("LIGHTMONI_ENDPOINT", "http://127.0.0.1:4318"), "Agent or main service HTTP base URL")
+	endpoint := flag.String("endpoint", env("LIGHTMONI_ENDPOINT", "https://monitor.example.com"), "Agent or main service HTTP base URL")
 	service := flag.String("service", env("LIGHTMONI_SERVICE", "example-go-api"), "service name")
 	count := flag.Int("count", 20, "number of sample requests")
 	flag.Parse()

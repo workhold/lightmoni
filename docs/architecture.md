@@ -34,7 +34,7 @@ flowchart LR
     M --> N[机器人 / 公众号推送 / 短信与手机推送 / 电话语音 / 邮件 / Webhook]
 ```
 
-SDK 和接入页默认 direct，直接连接平台；用户也可明确选择 agent，经 LightMoni Agent 的磁盘队列转发。两种显式路径不自动互相改投；direct 使用进程内缓冲，agent 收到持久化 ACK 后由独立 Agent 补传。Agent 的主机采集、拨测和目录日志独立于业务路由，安装 Agent 不是 direct 的前置条件。两种方式仍分别需要连接地址及对应凭据，中转不等于免配置或已减少请求数。完整边界见 [SDD 012](../specs/012-sdk-reporting-choice/spec.md)。浏览器通过业务后端转发采集，业务后端持有同一套SDK密钥；不额外引入公开凭证类型。
+SDK仅直连中心，Agent独立采集上报；两者共用管理员登记的中心内外网地址清单，内网优先、公网备用。Agent控制、任务及上报请求共用所选入口。详见[中心地址同步](center-endpoints.md)。
 
 主服务内部为模块化单体：统一 HTTP server、认证、SQLite、ClickHouse writer、查询执行器和后台任务生命周期。大盘、日志、告警是模块；不拆成独立微服务。中心端不需要 Redis、Kafka、Grafana 或 Kibana。ClickHouse 是整体资源占用的主要候选，需要实测后发布小机器的推荐配置，不能把“小团队”直接等同于固定的内存承诺。
 
@@ -49,7 +49,7 @@ moni.record('business', 'db.query.duration_ms', {key1: 'mysql', key2: 'select'},
 await moni.shutdown({timeoutMs: 5000});
 ```
 
-主机是唯一受管资产，每台主机最多关联一个 Agent。新接入由主机部署流程内部签发预绑定主机的 enrollment，兑换/激活后使用独立 control/data 凭据，分别承担控制与遥测；内部安装器从 SSH stdin 接收 token，不进入 URL、argv、环境或日志。注册/心跳只关联已有预约，不创建资产，也不回退共享 SDK Key。业务 SDK 可独立直报中心；显式使用 Agent 本地接收时，local token 由目标 Agent 管理，不是平台主机或中心控制身份。
+主机是唯一受管资产，每台主机最多关联一个 Agent。新接入由主机部署流程内部签发预绑定主机的 enrollment，兑换/激活后使用独立 control/data 凭据，分别承担控制与遥测；内部安装器从 SSH stdin 接收 token，不进入 URL、argv、环境或日志。注册/心跳只关联已有预约，不创建资产，也不回退共享 SDK Key。业务 SDK 可独立直报中心；Agent本地监听仅提供诊断，不再接收业务SDK数据。
 
 主服务SDK密钥只按名称创建，所有有效启用密钥可写任意业务表；缺失Authorization只允许管理员启用的豁免表。SDK 使用上报 Key，Agent 强制独立 control/data 用途隔离并记录实际凭据 ID。业务指标用key1…key16固定槽，默认30秒UTC窗口；每表可选择七档周期，查询按实际窗口对齐。主机、拨测、目录日志使用固定host/probe/files表，任务标签与主机管理逻辑采用main版本。
 
