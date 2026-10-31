@@ -6,4 +6,6 @@
 - [x] 实现申请中状态、旁侧日志图标、历史步骤及实时错误展示。
 - [x] 完成针对性 API/控制器/脱敏/系统日志和浏览器验收，记录证据。
 - [x] 同步仓库与 Doca 架构，回读文本、原生图节点/连线并保存证据。
-- [ ] 同步 main、审阅差异、检查并提交 GitHub PR。
+- [x] 同步 main、审阅差异、检查并提交 GitHub PR。
+
+交付：[GitHub PR #33](https://github.com/workhold/lightmoni/pull/33)，目标 main。

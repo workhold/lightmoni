@@ -24,3 +24,5 @@
 架构影响适用。仓库 33.2–33.5、44.5、第 53 章与 Doca 同步；Doca 已保存并用最新版本回读全部目标文本和原生图（12 节点/12 连线），原有第 33 章图完整结构保持一致，其他图块未编辑。详情见 [doca-sync.md](doca-sync.md) 和 [doca-readback.json](doca-readback.json)。
 
 测试未操作用户的生产域名、实际 CA 订单或 DNS。截图中的旧执行只保存 acme_issuance_failed，无法从旧回执恢复实际原因；本次修复后续执行的诊断保留，不声称已经确认或解决该生产域名的 CA/DNS 配置原因。需要更新中心和 Web 才生效；不要求更新 Agent。
+
+交付：[GitHub PR #33](https://github.com/workhold/lightmoni/pull/33)，功能分支提交，目标 main。
