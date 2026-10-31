@@ -282,7 +282,19 @@ export function registerAgentJobs(
       });
     }
   };
-  const uninstallBlocked = (agentID: string) => Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_uninstallations'") && db.get("SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown','succeeded') LIMIT 1", agentID));
+  const uninstallFence = () => {
+    if (!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_uninstallations'")) return null;
+    const hosts = !!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='managed_machines'");
+    return {
+      sql: "((agent_id=? AND status IN ('awaiting_approval','running','unknown','succeeded'))" +
+        (hosts ? " OR (machine_id IN (SELECT id FROM managed_machines WHERE agent_id=?) AND status IN ('awaiting_approval','running','unknown'))" : "") + ")",
+      hosts,
+    };
+  };
+  const uninstallBlocked = (agentID: string) => {
+    const fence = uninstallFence();
+    return !!fence && !!db.get("SELECT id FROM machine_uninstallations WHERE " + fence.sql + " LIMIT 1", agentID, ...(fence.hosts ? [agentID] : []));
+  };
   const enqueue = (input: AgentJobInput) => {
     const agentID = ensureAgent(input.agentID), deploymentID = text(input.deploymentID, "deployment_id"), operationID = text(input.operationID, "operation_id");
     assertAgentActive(db, agentID);
@@ -294,12 +306,12 @@ export function registerAgentJobs(
     assertNoPendingAgentUpdate(db, agentID);
     if (uninstallBlocked(agentID)) fail(409, "agent_uninstallation_blocks_jobs");
     const now = deps.now(), expires = new Date(now.getTime() + Math.min(Math.max(input.expiresInSeconds ?? JOB_SECONDS, 60), 24 * 60 * 60) * 1000), idValue = id();
-    const lifecycleTable = Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_uninstallations'"));
+    const removalFence = uninstallFence();
     const updateTable = Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_agent_updates'"));
     const installationTable = hasInstallationTable(db);
     const inserted = db.run(
-      "INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,target_json,issued_at,expires_at,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed')" + (lifecycleTable ? " AND NOT EXISTS (SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown','succeeded'))" : "") + (updateTable ? " AND NOT EXISTS (SELECT id FROM machine_agent_updates WHERE agent_id=? AND status IN ('awaiting_approval','running','verifying','unknown'))" : "") + (installationTable ? ` AND NOT EXISTS (SELECT 1 FROM machine_deployments installation JOIN managed_machines installed_host ON installed_host.id=installation.machine_id WHERE installed_host.agent_id=? AND ${unresolvedInstallationSQL(db,"installation")})` : ""),
-      idValue, agentID, deploymentID, operationID, "queued", json(caps), json(actionList), json(input.target ?? {}), iso(deps, now), iso(deps, expires), iso(deps, now), iso(deps, now), agentID, ...(lifecycleTable ? [agentID] : []), ...(updateTable ? [agentID] : []), ...(installationTable ? [agentID] : []),
+      "INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,target_json,issued_at,expires_at,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed')" + (removalFence ? " AND NOT EXISTS (SELECT id FROM machine_uninstallations WHERE " + removalFence.sql + ")" : "") + (updateTable ? " AND NOT EXISTS (SELECT id FROM machine_agent_updates WHERE agent_id=? AND status IN ('awaiting_approval','running','verifying','unknown'))" : "") + (installationTable ? ` AND NOT EXISTS (SELECT 1 FROM machine_deployments installation JOIN managed_machines installed_host ON installed_host.id=installation.machine_id WHERE installed_host.agent_id=? AND ${unresolvedInstallationSQL(db,"installation")})` : ""),
+      idValue, agentID, deploymentID, operationID, "queued", json(caps), json(actionList), json(input.target ?? {}), iso(deps, now), iso(deps, expires), iso(deps, now), iso(deps, now), agentID, ...(removalFence ? removalFence.hosts ? [agentID, agentID] : [agentID] : []), ...(updateTable ? [agentID] : []), ...(installationTable ? [agentID] : []),
     );
     if (!inserted.changes) {
       assertAgentActive(db, agentID);
@@ -317,6 +329,7 @@ export function registerAgentJobs(
     expireLeases();
     return db.transaction(() => {
     assertAgentActive(db, agentID);
+    if (uninstallBlocked(agentID)) return null;
     if (pendingMachineInstallation(db,"",agentID)) return null;
     if (hasPendingAgentUpdate(db, agentID)) return null;
     const at = deps.now(), nowText = iso(deps, at);

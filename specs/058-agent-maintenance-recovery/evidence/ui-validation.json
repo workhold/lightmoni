@@ -1,0 +1,56 @@
+{
+  "bundle": {
+    "index_sha256": "b8faa3073c01f8bd6ae4888ba8227900fe2568a6113977689f9a773b64f718b6",
+    "entry": "/assets/index-DR4zgX7Q.js",
+    "entry_sha256": "00a3b026da51bb4fdc0cd237045170eb42dc836b9fdf1ea32110a97aac3d22c5",
+    "all_javascript_sha256": "aef3ecce9a2ffb903339a23b03e8f387d19084b15dc13d0c6e42626bcbd42c35"
+  },
+  "passed": 87,
+  "suites": [
+    {
+      "suite": "recovery-ui",
+      "passed": 17,
+      "report": "specs/058-agent-maintenance-recovery/evidence/recovery-ui/recovery-ui-report.json",
+      "errors": [],
+      "unexpected": [],
+      "same_production_bundle": true
+    },
+    {
+      "suite": "uninstall-ui",
+      "passed": 14,
+      "report": "specs/058-agent-maintenance-recovery/evidence/uninstall-ui/uninstall-ui-report.json",
+      "errors": [],
+      "unexpected": [],
+      "same_production_bundle": true
+    },
+    {
+      "suite": "host-agent-lifecycle",
+      "passed": 19,
+      "report": "specs/058-agent-maintenance-recovery/evidence/host-agent-lifecycle/ui-report.json",
+      "errors": [],
+      "unexpected": [],
+      "same_production_bundle": true
+    },
+    {
+      "suite": "host-identity-requests",
+      "passed": 13,
+      "report": "specs/058-agent-maintenance-recovery/evidence/host-identity-requests/ui-report.json",
+      "errors": [],
+      "unexpected": [],
+      "same_production_bundle": true
+    },
+    {
+      "suite": "bulk-host-node",
+      "passed": 24,
+      "report": "specs/058-agent-maintenance-recovery/evidence/bulk-host-node/bulk-host-node-ui-report.json",
+      "errors": [],
+      "unexpected": [],
+      "same_production_bundle": true
+    }
+  ],
+  "scope": "All five suites copied the same unchanged final production bundle. Every HTTP/WebSocket request was intercepted. No SSH, host installation, or production write occurred.",
+  "build": "npm run build --prefix web: passed (TypeScript and Vite); existing dependency use-client directives/chunk-size warnings only.",
+  "screenshots": "Ignored artifacts/screenshots/specs/058-agent-maintenance-recovery/evidence, per suite. Recovery plans visually checked in Chinese/English at 1440px and 390px with top/bottom viewport screenshots.",
+  "typecheck": "npm run typecheck --prefix web: passed",
+  "diff_check": "git diff --check: passed"
+}

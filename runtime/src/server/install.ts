@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, statSync, createReadStream } from "node:fs";
+import { existsSync, readdirSync, statSync, lstatSync, readFileSync, createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { Dependencies } from "../shared/types.js";
@@ -74,6 +75,17 @@ export function registerInstall(
       },
       { public: true },
     );
+  d.router.get("/api/v1/agent-maintenance/uninstaller", (c) => {
+    d.auth.requireAdmin(c);
+    c.res.setHeader("cache-control", "private, no-store");
+    const path = join(directory, "uninstall.sh");
+    if (!existsSync(path)) fail(404, "Agent uninstaller is not available in this platform release");
+    const info = lstatSync(path);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 262144)
+      fail(503, "Agent uninstaller is not available in this platform release");
+    const bytes = readFileSync(path);
+    c.json({ filename: "lightmoni-agent-uninstall.sh", sha256: createHash("sha256").update(bytes).digest("hex"), script: bytes.toString("utf8") });
+  });
   d.router.get("/api/v1/sdk-install", (c) => {
     const settings = reportingSettings(d),
       base = settings.endpoints.find((e: any) => e.scope === "public" && e.id===settings.default_endpoint_id)?.url ?? settings.endpoints.find((e: any) => e.scope === "public")?.url ?? settings.effective_endpoint;

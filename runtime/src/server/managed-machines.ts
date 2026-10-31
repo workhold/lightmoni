@@ -127,7 +127,7 @@ export interface MachineSummary {
   active_ssh_key_count: number;
   active_reusable_ssh_credential_count: number;
   ssh_recovery_available: boolean;
-  capabilities: { terminal: MachineCapability; ssh_check: MachineCapability; deploy_agent: MachineCapability; uninstall_agent: MachineCapability; update_agent: MachineCapability; rollback_agent: MachineCapability };
+  capabilities: { terminal: MachineCapability; ssh_check: MachineCapability; deploy_agent: MachineCapability; uninstall_agent: MachineCapability; recovery_uninstall_agent: MachineCapability; update_agent: MachineCapability; rollback_agent: MachineCapability };
   agent_release: any;
   agent_update: any;
   last_deployment_status: DeploymentStatus | "";
@@ -398,7 +398,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       active_ssh_credential_count: activeSSH, active_ssh_key_count: activeKeys,
       active_reusable_ssh_credential_count: reusableSSH,
       ssh_recovery_available: value.connection_method === "direct_ssh" && activeSSH > 0,
-      capabilities: { terminal: pendingUpdate ? { available: false, reason: "agent_update_pending" } : capability(), ssh_check: capability(), deploy_agent: deployCapability, uninstall_agent: uninstallCapability, update_agent: updateCapability, rollback_agent: { ...updateCapability } },
+      capabilities: { terminal: pendingUpdate ? { available: false, reason: "agent_update_pending" } : capability(), ssh_check: capability(), deploy_agent: deployCapability, uninstall_agent: uninstallCapability, recovery_uninstall_agent: { ...uninstallCapability }, update_agent: updateCapability, rollback_agent: { ...updateCapability } },
       ...agentUpdates.machineState(value.id, value.agent_id),
       last_deployment_status: value.last_deployment_status || "", last_uninstallation_status: value.last_uninstallation_status || "", updated_at: value.updated_at, created_at: value.created_at,
     };

@@ -1,0 +1,30 @@
+{
+  "status": "synchronized",
+  "spec": "058-agent-maintenance-recovery",
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "checked_at": "2026-10-31T15:08:01.541104+00:00",
+  "repository_sections": [
+    "docs/system-design.md 13 uninstall and capability overview",
+    "docs/system-design.md 13.9"
+  ],
+  "before_seq": 896,
+  "readback_seq": 898,
+  "updated_blocks": 3,
+  "inserted_blocks": 8,
+  "unrelated_blocks_unchanged": 601,
+  "existing_native_diagrams_unchanged": 29,
+  "new_native_diagram": {
+    "block_id": "maintenance058-flow",
+    "nodes": 13,
+    "edges": 14
+  },
+  "full_document_order_verified": true,
+  "text_nodes_edges_and_geometry_verified": true,
+  "native_visual_render_verified": false,
+  "note": "SDD058 分支设计同步；不表示代码已合入或发布。结构回读不冒称浏览器视觉验收。",
+  "followup": {
+    "updated_block": "maintenance058-paragraph-6",
+    "legacy_reconcile_and_uninstaller_version_transaction_verified": true,
+    "all_other_blocks_unchanged": 611
+  }
+}
