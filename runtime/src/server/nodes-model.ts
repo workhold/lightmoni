@@ -8,6 +8,8 @@ export type { TaskSchedule, TaskExecutionPolicy } from "./task-schedule.js";
 export type { TaskScript } from "../shared/task-center.js";
 import { agentLifecycle, assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
 import { createAgentHostSchema, ensureAgentHost } from "./agent-hosts.js";
+import { normalizeNetworkAddresses } from "../shared/host-network.js";
+import { createHostNetworkSchema, machineNetwork, recordHostNetwork, type NetworkSource } from "./host-network.js";
 import {
   normalizeRemote,
   validateRemote,
@@ -193,6 +195,7 @@ export class NodeStore {
       `CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY,host_id TEXT NOT NULL,hostname TEXT NOT NULL,version TEXT NOT NULL,platform TEXT NOT NULL,arch TEXT NOT NULL,last_seen TEXT NOT NULL,heartbeat TEXT NOT NULL,group_id TEXT NOT NULL DEFAULT 'default'); CREATE TABLE IF NOT EXISTS agent_runtime_events(agent_id TEXT NOT NULL,event_id TEXT NOT NULL,key_id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(agent_id,event_id)); CREATE TABLE IF NOT EXISTS agent_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,config TEXT NOT NULL,created_at TEXT NOT NULL);`,
     );
     createAgentHostSchema(this.db);
+    createHostNetworkSchema(this.db);
     if (
       !this.db
         .all<any>("PRAGMA table_info('agents')")
@@ -351,7 +354,7 @@ export class NodeStore {
     return this.db.all<any>("SELECT id,name,agent_id,agent_last_seen FROM managed_machines ORDER BY name,id").map(host => {
       const ids = this.hostLabels(host.id), node = host.agent_id ? this.db.get<any>("SELECT last_seen,heartbeat FROM agents WHERE id=?", host.agent_id) : undefined;
       const removed = host.agent_id && this.db.get("SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed'", host.agent_id);
-      return { id: host.id, name: host.name, agent_id: host.agent_id, agent_status: removed ? "removed" : !host.agent_id ? "missing" : node && this.now().getTime() - Date.parse(node.last_seen) <= 90_000 ? "online" : "offline", task_capabilities: node && Array.isArray(JSON.parse(node.heartbeat || "{}").task_capabilities) ? JSON.parse(node.heartbeat || "{}").task_capabilities.filter((capability:string) => (SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(capability)) : [], label_ids: ids, labels: labels.filter(label => ids.includes(label.id)).map(({id,name}) => ({id,name})) };
+      return { id: host.id, name: host.name, agent_id: host.agent_id, network: machineNetwork(this.db, host.id), agent_status: removed ? "removed" : !host.agent_id ? "missing" : node && this.now().getTime() - Date.parse(node.last_seen) <= 90_000 ? "online" : "offline", task_capabilities: node && Array.isArray(JSON.parse(node.heartbeat || "{}").task_capabilities) ? JSON.parse(node.heartbeat || "{}").task_capabilities.filter((capability:string) => (SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(capability)) : [], label_ids: ids, labels: labels.filter(label => ids.includes(label.id)).map(({id,name}) => ({id,name})) };
     });
   }
   setHostLabels(id: string, values: any, inTransaction = false): string[] {
@@ -727,13 +730,16 @@ export class NodeStore {
       label,
     )!.n;
   }
-  heartbeat(id: string, values: any, writeKey: string): { machine_id: string; machine_name: string } {
+  heartbeat(id: string, values: any, writeKey: string, source?: NetworkSource): { machine_id: string; machine_name: string } {
     const text = (field: string) =>
       values[field] == null ? "" : String(values[field]).trim();
     return this.db.transaction(() => {
       // Recheck under the same writer lock as removal: authentication may have
       // happened before an asynchronous request body or a second centre writer.
       assertAgentActive(this.db, id, 401);
+      let addresses;
+      try { addresses = normalizeNetworkAddresses(values.network_addresses); }
+      catch { problem(400, "主机网络地址无效，最多支持 64 个网卡地址"); }
       const old = this.db.get<{ group_id: string }>(
           "SELECT group_id FROM agents WHERE id=?",
           id,
@@ -751,6 +757,7 @@ export class NodeStore {
           throw e;
         }
       values = { ...values, runtime_key_id: writeKey, docker_inventory: dockerInventory(values.docker_inventory) };
+      if (addresses !== undefined) values.network_addresses = addresses;
       delete values.runtime_events;
       this.db.run(
         `INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat,group_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET hostname=excluded.hostname,version=excluded.version,platform=excluded.platform,arch=excluded.arch,last_seen=excluded.last_seen,heartbeat=excluded.heartbeat`,
@@ -764,7 +771,9 @@ export class NodeStore {
         goJSON(values),
         group,
       );
-      return ensureAgentHost(this.db, id, values, this.timestamp());
+      const machine = ensureAgentHost(this.db, id, values, this.timestamp());
+      recordHostNetwork(this.db, machine.machine_id, id, addresses, source, this.timestamp());
+      return machine;
     });
   }
   events(id: string, writeKey: string, values: any): void {

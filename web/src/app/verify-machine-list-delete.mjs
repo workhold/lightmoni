@@ -12,10 +12,10 @@ const media=mediaDirectory(output),checked=[],errors=[],unexpected=[],contexts=[
 const mark=value=>{checked.push(value);console.log('PASS '+value)};
 let browser;try{browser=await chromium.launch({headless:true})}catch{browser=await chromium.launch({headless:true,channel:'chrome'})}
 const copies={
- 'zh-CN':{remove:'删除主机',dialog:'删除主机',confirm:'确认删除主机',close:'关闭',review:'我已逐项审阅目标、步骤和影响',details:/详\s*情/,alphaDetail:'主机详情 · Fixture alpha',betaDetail:'主机详情 · Fixture beta',scope:'永久删除平台中的主机记录',running:'停止后续',credentialGuard:'请先撤销有效连接凭据',deploymentGuard:'存在待确认或执行中的安装计划',uninstallGuard:'存在待确认、执行中或结果未知的卸载流程'},
- 'en-US':{remove:'Delete hosts',dialog:'Delete hosts',confirm:'Confirm host deletion',close:'Close',review:'I have reviewed each target, step, and impact',details:'Details',alphaDetail:'Host details · Fixture alpha',betaDetail:'Host details · Fixture beta',scope:'Permanently delete platform host records',running:'Stop subsequent operations',credentialGuard:'Revoke active connection credentials',deploymentGuard:'A pending or running installation plan exists',uninstallGuard:'A pending, running, or uncertain uninstall workflow exists'},
+ 'zh-CN':{remove:'删除主机',dialog:'删除主机',confirm:'确认删除主机',close:'关闭',review:'我已逐项审阅目标、步骤和影响',details:/详\s*情/,alphaDetail:'主机详情 · Fixture alpha',betaDetail:'主机详情 · Fixture beta',sharedScope:'中央凭据库和其他主机的共享凭据不受影响',scope:'永久删除平台中的主机记录',running:'停止后续',credentialGuard:'请先解绑本主机的有效连接凭据',deploymentGuard:'存在待确认或执行中的安装计划',uninstallGuard:'存在待确认、执行中或结果未知的卸载流程'},
+ 'en-US':{remove:'Delete hosts',dialog:'Delete hosts',confirm:'Confirm host deletion',close:'Close',review:'I have reviewed each target, step, and impact',details:'Details',alphaDetail:'Host details · Fixture alpha',betaDetail:'Host details · Fixture beta',sharedScope:'The central credential library and other hosts’ shared credentials are unaffected.',scope:'Permanently delete platform host records',running:'Stop subsequent operations',credentialGuard:'Unlink this host’s active connection credentials',deploymentGuard:'A pending or running installation plan exists',uninstallGuard:'A pending, running, or uncertain uninstall workflow exists'},
 };
-const rawGuards=['请先撤销或等待所有有效连接凭据失效后再删除主机','该主机有未结束的部署任务，请先完成或取消后再删除','此主机有待审批、运行中或结果未知的 Agent 卸载，请先取消或核对','此主机有终端、检查或部署正在进行，请先结束后重试'];
+const rawGuards=['请先解绑本主机的有效连接凭据后再删除主机','该主机有未结束的部署任务，请先完成或取消后再删除','此主机有待审批、运行中或结果未知的 Agent 卸载，请先取消或核对','此主机有终端、检查或部署正在进行，请先结束后重试'];
 async function harness(language='zh-CN',width=1440){
  const at=new Date().toISOString(),available={available:true,reason:''};
  const base={port:22,username:'deploy',connection_method:'direct_ssh',host_key_fingerprint:'SHA256:fixtureconfirmedfingerprint',host_key_status:'confirmed',agent_id:'',agent_status:'unknown',active_credential_count:0,active_ssh_credential_count:0,active_ssh_key_count:0,ssh_recovery_available:false,capabilities:{terminal:available,ssh_check:available,deploy_agent:available,uninstall_agent:available},credential_count:0,arch:'',platform:'',updated_at:at,created_at:at};
@@ -28,7 +28,8 @@ async function harness(language='zh-CN',width=1440){
   const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();
   if(url.origin!==origin){unexpected.push(url.href);return route.abort()}
   if(path.startsWith('/api/')){
-   if(method==='GET'&&['/api/v1/agents','/api/v1/agent-task-labels'].includes(path))return route.fulfill({json:[]});
+   if(method==='GET'&&['/api/v1/agents','/api/v1/agent-task-labels','/api/v1/host-labels','/api/v1/connection-credentials','/api/v1/task-hosts'].includes(path))return route.fulfill({json:[]});
+   if(method==='GET'&&/^\/api\/v1\/machines\/[^/]+\/tasks$/.test(path))return route.fulfill({json:[]});
    state.requests.push({method,path});
    if(path==='/api/v1/machines'&&method==='GET'){
     if(state.holdNextList){const snapshot=[...state.machines];state.holdNextList=false;await new Promise(resolve=>{state.releaseList=resolve});return route.fulfill({json:snapshot})}
@@ -74,7 +75,7 @@ try{
   await expect(row('machine-alpha').getByRole('button',{name:language==='zh-CN'?'删除主机':'Delete host',exact:true})).toHaveCount(0);
   await expect(page.getByRole('button',{name:c.remove,exact:true})).toBeDisabled();
   let dialog=await openDeletion(test,language);
-  await expect(target(dialog,'machine-alpha')).toContainText('Fixture alpha');await expect(target(dialog,'machine-alpha')).toContainText('alpha.example.test:22');await expect(target(dialog,'machine-beta')).toHaveCount(0);await expect(dialog).toContainText(c.scope);await expect(dialog.getByRole('button',{name:c.confirm,exact:true})).toBeDisabled();expect(deletes()).toHaveLength(0);
+  await expect(target(dialog,'machine-alpha')).toContainText('Fixture alpha');await expect(target(dialog,'machine-alpha')).toContainText('alpha.example.test:22');await expect(target(dialog,'machine-beta')).toHaveCount(0);await expect(dialog).toContainText(c.scope);await expect(dialog).toContainText(c.sharedScope);await expect(dialog.getByRole('button',{name:c.confirm,exact:true})).toBeDisabled();expect(deletes()).toHaveLength(0);
   await expect.poll(()=>dialog.evaluate(element=>{const style=getComputedStyle(element);return style.opacity==='1'&&style.transform==='none'})).toBe(true);
   await page.screenshot({path:resolve(media,'delete-confirmation-'+language+'.png'),fullPage:true});const bounds=await dialog.boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(page.viewportSize().width+1);
   await close(dialog,language);expect(deletes()).toHaveLength(0);dialog=await openDeletion(test,language);await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);expect(deletes()).toHaveLength(0);mark(language+': one selected host uses the shared toolbar and target snapshot; review, close, and Escape cannot send an unconfirmed DELETE');
