@@ -187,7 +187,9 @@ export function catalogInstallation(id: string, input: Input) {
     };
   }
   if (id === "redis") spec.environment.REDIS_PASSWORD = p.password;
-  if (p.port !== undefined) spec.ports[0].host_port = p.port;
+  if (spec.ports.length && id !== 'openresty')
+    spec.ports[0].host_port = p.port !== undefined && p.port !== null && p.port !== ''
+      ? p.port : input.deployment_mode === 'managed' ? 0 : spec.ports[0].container_port;
   return {
     template,
     name: input.name ?? template.name,

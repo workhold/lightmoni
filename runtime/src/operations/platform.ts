@@ -22,6 +22,7 @@ import type {
   OperationPayload,
 } from "./types.js";
 import { OperationRejectedError } from "./errors.js";
+import { installCause } from "./install-progress.js";
 import {
   atomicFile,
   directory,
@@ -718,7 +719,7 @@ async function executeWorkload(
       before = await inventory(context, id);
     } catch (error) {
       if (error instanceof OperationRejectedError) throw error;
-      throw new OperationRejectedError("DOCKER_PREREQUISITE_FAILED");
+      throw Object.assign(new OperationRejectedError("DOCKER_PREREQUISITE_FAILED"), {diagnosticCode: installCause(error)});
     }
     if (before.length) {
       if (!state?.manifest) reject("WORKLOAD_STATE_REQUIRED");
@@ -764,11 +765,12 @@ async function executeWorkload(
   const manifestPath = join(version, "compose.json");
   await atomicFile(manifestPath, JSON.stringify(manifest));
   let prior: any[];
+  await context.progress?.("checking_docker");
   try {
     prior = await inventory(context, id);
   } catch (error) {
     if (error instanceof OperationRejectedError) throw error;
-    throw new OperationRejectedError("DOCKER_PREREQUISITE_FAILED");
+    throw Object.assign(new OperationRejectedError("DOCKER_PREREQUISITE_FAILED"), {diagnosticCode: installCause(error)});
   }
   // Check explicit mappings before Docker mutates anything; existing owned mappings are already reserved locally.
   const ownPorts = new Set(
@@ -780,17 +782,20 @@ async function executeWorkload(
           .map((x: any) => String(x.HostPort)),
       ),
   );
+  await context.progress?.("checking_ports");
   for (const p of applicationPorts(app))
     if (!ownPorts.has(String(p.host_port))) await availablePort(p, context);
+  await context.progress?.("validating_config");
   try {
     await context.command(
       "docker",
       [...composeArgs(id, manifestPath), "config", "--quiet"],
       { timeoutMs: 20000 },
     );
-  } catch {
-    throw new OperationRejectedError("COMPOSE_PREFLIGHT_FAILED");
+  } catch (error) {
+    throw Object.assign(new OperationRejectedError("COMPOSE_PREFLIGHT_FAILED"), {diagnosticCode:installCause(error)});
   }
+  await context.progress?.("starting_containers");
   try {
     await context.command(
       "docker",
@@ -806,6 +811,7 @@ async function executeWorkload(
       ],
       { timeoutMs: 120000 },
     );
+    await context.progress?.("checking_health");
     const cs = await inventory(context, id);
     if (!ready(cs, Object.keys(manifest.services).length))
       throw Error("WORKLOAD_HEALTH_NOT_VERIFIED");
@@ -842,6 +848,7 @@ async function executeWorkload(
       },
     };
   } catch (error) {
+    await context.progress?.("restoring_previous", installCause(error));
     try {
       if (state?.manifest && prior.length) {
         await context.command(
@@ -875,9 +882,9 @@ async function executeWorkload(
           throw Error("REMOVE_NOT_VERIFIED");
       }
     } catch {
-      throw Error("WORKLOAD_APPLY_RECOVERY_FAILED");
+      throw Object.assign(Error("WORKLOAD_APPLY_RECOVERY_FAILED"), {diagnosticCode:installCause(error)});
     }
-    throw new OperationRejectedError("WORKLOAD_APPLY_FAILED_RESTORED");
+    throw Object.assign(new OperationRejectedError("WORKLOAD_APPLY_FAILED_RESTORED"), {diagnosticCode:installCause(error)});
   }
 }
 
@@ -1313,11 +1320,12 @@ async function executeGateway(
   const statePath = join(root, "state.json"),
     state = await readJSON<any>(statePath, null);
   let existing: any;
+  await context.progress?.("checking_docker");
   try {
     existing = await gatewayContainer(context, id);
   } catch (error) {
     if (error instanceof OperationRejectedError) throw error;
-    throw new OperationRejectedError("DOCKER_PREREQUISITE_FAILED");
+    throw Object.assign(new OperationRejectedError("DOCKER_PREREQUISITE_FAILED"), {diagnosticCode: installCause(error)});
   }
   if (c.task === "gateway.inspect") {
     let healthy = existing?.State?.Running === true && !!state;
@@ -1450,6 +1458,7 @@ async function executeGateway(
   }
   await atomicFile(join(version, "nginx.conf"), renderGateway(c, digest));
   const mount = "type=bind,src=" + root + ",dst=/etc/lightmoni,readonly";
+  await context.progress?.("validating_gateway");
   try {
     await context.command(
       "docker",
@@ -1468,14 +1477,15 @@ async function executeGateway(
       ],
       { timeoutMs: 120000 },
     );
-  } catch {
-    throw new OperationRejectedError("GATEWAY_PREFLIGHT_FAILED");
+  } catch (error) {
+    throw Object.assign(new OperationRejectedError("GATEWAY_PREFLIGHT_FAILED"), {diagnosticCode:installCause(error)});
   }
   const previous = await pointer(
     join(root, "current"),
     join("versions", digest),
   );
   let recreated = false;
+  await context.progress?.("starting_gateway");
   try {
     if (existing && existing.Config.Image !== image) {
       await context.command("docker", ["rm", "--force", name], {
@@ -1564,7 +1574,8 @@ async function executeGateway(
         observed_at: context.now().toISOString(),
       },
     };
-  } catch {
+  } catch (error) {
+    await context.progress?.("restoring_previous", installCause(error));
     try {
       if (previous && state) {
         await pointer(join(root, "current"), previous);
@@ -1620,9 +1631,9 @@ async function executeGateway(
         await unlink(join(root, "current")).catch(() => {});
       }
     } catch {
-      throw Error("GATEWAY_APPLY_RECOVERY_FAILED");
+      throw Object.assign(Error("GATEWAY_APPLY_RECOVERY_FAILED"), {diagnosticCode:installCause(error)});
     }
-    throw new OperationRejectedError("GATEWAY_APPLY_FAILED_RESTORED");
+    throw Object.assign(new OperationRejectedError("GATEWAY_APPLY_FAILED_RESTORED"), {diagnosticCode:installCause(error)});
   }
 }
 export async function executePlatform(

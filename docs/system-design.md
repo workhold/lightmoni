@@ -1404,6 +1404,27 @@ flowchart LR
 
 验证与 Doca 保存回读见 `specs/044-operations-observability/validation.md`。部署升级需要新中心与新 Agent；旧 Agent 无清单时显示等待采集，历史业务表和存储数据保持兼容。
 
+### 44.6 应用安装进度与故障诊断（SDD 058）
+
+应用商店采用基本参数与折叠高级设置：模板默认资源和推荐部署模式保持，单一集群及唯一在线目标可预选，serviceName、资源限制及多集群按需展开。安装响应沿用资源与执行结果；资源创建成功后立即打开进度，部署拒绝仍保留应用并展示原因。关闭进度不取消执行，列表可重新打开逐机历史。手动模式默认建议宿主端口等于模板容器端口；托管模式端口留空由平台分配，显式填写则使用填写值。切换模式保留主动填写的端口，未修改的建议值跟随模式变化；OpenResty 固定 80/443。
+
+控制路径继续管理员确认 → 平台部署 / Agent jobs → 有效 lease → Agent 平台执行器。执行器通过可选内部 progress 回调报告 Docker 检查、端口检查、配置校验、镜像拉取与启动、健康验证、恢复/清理等白名单阶段；使用既有 job activating 阶段与 snapshot.operations.progress 传输，不改变 job phase 排序或最终 /result 权威。
+
+中心将排队和 Agent 阶段按序投影至现有 ops_platform_run_events，同一 job 更新事务内保存，重复心跳不追加相同步骤；最多保留 2000 条，沿用事务 outbox。实时安装抽屉每 2 秒直接读取 SQLite 资源、逐机执行和增量步骤，不依赖 ClickHouse。多集群错误、调度等待、旧记录和未知回执分别呈现，不能用提交成功或单次 inspect 成功替代整体安装完成。
+
+故障只根据命令输出在 Agent 内部识别有限诊断码，如端口占用、Docker 不可用或无权限、镜像不存在/鉴权/网络、磁盘不足和容器不健康；原始 stdout/stderr、命令、环境和自由错误文本均不进入安装日志。恢复/清理保留起因，恢复失败继续 unknown；未知结果必须先核对实际状态，界面不自动重复执行。无新增表、网络端点、凭据、Docker socket 或 AI 写入能力；旧 Agent 继续显示通用执行阶段，升级后提供细阶段和分类原因。
+
+```mermaid
+flowchart LR
+  UI[管理员安装 / 查看进度] --> Jobs[平台部署 / 有效 job lease]
+  Jobs --> Agent[Agent 白名单阶段 / 诊断]
+  Agent -->|既有 job events| Steps[(SQLite 执行 / 有序步骤)]
+  Agent --> Receipt[最终回执 / 未知需核对]
+  Receipt --> Steps
+  Steps -->|每 2 秒增量读取| UI
+  Steps --> Outbox[(事务 outbox / 系统日志)]
+```
+
 ## 第50章 中心内外网地址同步与SDK直报（SDD 050）
 
 2026-10-31。本章为codex/050-center-endpoint-discovery分支预览，代码验证见对应SDD，合入状态以GitHub为准。管理员沿用上报地址簿登记完整内网IP+port URL与public引导入口，scope缺省public，默认引导必须为public，至少保留一个public。SQLite保存稳定center_id与地址清单修订。SDK与Agent分别直连中心，SDK→Agent的OTLP接收与配置代理全部移除；Agent自己的SDK只通过进程内exporter入持久队列，本地监听仅提供诊断。
