@@ -30,3 +30,5 @@
 ## 集成
 
 实现后已同步最新 `origin/main`，保留主工作区原有发布文档，功能修改全部位于独立工作区。提交前 `git diff --check` 通过。GitHub PR 目标 `main`，合并与发布另行授权。
+
+交付 PR：[GitHub #40](https://github.com/workhold/lightmoni/pull/40)，draft、目标 main。

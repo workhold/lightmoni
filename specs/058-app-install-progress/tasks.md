@@ -6,4 +6,6 @@
 - [x] T004 安装后直接打开进度，支持列表重开、逐机历史、错误说明与轮询恢复。
 - [x] T005 同步仓库/Doca 设计，保存回读与原生图保留证据。
 - [x] T006 定向测试、类型检查、三轮浏览器与实际截图自检，记录限制。
-- [ ] T007 同步 origin/main，提交功能分支及面向 main 的 GitHub PR，记录验证和兼容影响。
+- [x] T007 同步 origin/main，提交功能分支及面向 main 的 GitHub PR，记录验证和兼容影响。
+
+交付：[GitHub PR #40](https://github.com/workhold/lightmoni/pull/40)，目标 main，草稿待评审，未合并。验收见 [validation.md](validation.md)。
