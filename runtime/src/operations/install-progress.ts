@@ -37,6 +37,7 @@ export const installCauses: Record<string, string> = {
   image_access_denied: 'The registry denied access to the image.',
   image_network_failed: 'The registry could not be reached or the image transfer timed out.',
   host_port_occupied: 'A required host port is already occupied.',
+  host_port_check_failed: 'The host port could not be checked; inspect the Agent permissions and bind address.',
   disk_full: 'The host has insufficient disk space.',
   container_unhealthy: 'A container failed its health check.',
   compose_unavailable: 'The Docker Compose plugin is unavailable.',
