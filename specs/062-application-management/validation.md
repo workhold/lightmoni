@@ -55,3 +55,5 @@ runtime/web类型检查、两份浏览器脚本语法检查及git diff --check�
 ## 交付
 
 已同步 origin/main（c088bb4，无需冲突处理），通过功能分支提交 [GitHub 草稿 PR #49](https://github.com/workhold/lightmoni/pull/49)，目标 main。未合并或发布；独立 QA API 与 Vite 进程已停止。
+
+后续：用户明确授权合入并更新 Docker，PR #49 已合入 main；镜像构建、发布、默认引用及验收见 [SDD 063](../063-application-image-release/validation.md)。前述“尚未发布”描述为功能开发交付时状态，既有线上容器不随镜像发布自动重建。
