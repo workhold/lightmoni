@@ -1,0 +1,8 @@
+{
+  "temporary_containers_removed": true,
+  "temporary_volumes_removed": true,
+  "temporary_network_removed": true,
+  "runtime_credential_files_removed": true,
+  "pre_existing_running_containers_unchanged": true,
+  "pre_existing_running_container_count": 15
+}

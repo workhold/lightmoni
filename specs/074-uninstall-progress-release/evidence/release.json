@@ -1,0 +1,10 @@
+{
+  "revision": "1c82e6b64e8432bd449b957eebf8141aa08e04e6",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tag": "20261101-1c82e6b",
+  "feature_prs": [
+    60
+  ],
+  "architecture_sync": "Not applicable: packaging existing SDD073 UI fixes; no responsibility, server control path, API, storage, credential or deployment change.",
+  "previous_latest": "sha256:ea9998e9f44f4867814eb10780947bea7e66bcf2e52fd848cd9488cdcc474ae1"
+}
