@@ -1,3 +1,4 @@
+import {machineServiceAddresses} from "../server/host-network.js";
 import {createPrivateRegistryController} from './private-registry.js';
 import {migrateSystemApplications} from './system-applications.js';
 import { CloudError, zoneFor } from "./cloud.js";
@@ -159,6 +160,8 @@ export function registerOperationsPlatform(
       )
       .map((m) => ({
         ...m,
+        ssh_address: m.address,
+        ...machineServiceAddresses(deps.db,m.id),
         agent_status:
           m.agent_id &&
           deps.db.get(

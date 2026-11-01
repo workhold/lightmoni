@@ -1,3 +1,5 @@
+import {createHostNetworkSchema,recordHostNetwork} from "../src/server/host-network.js";
+import {normalizeNetworkAddresses} from "../src/shared/host-network.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -13,8 +15,10 @@ import type { Dependencies } from "../src/shared/types.js";
 async function fixture(t: any, fetcher?: typeof fetch) {
   const db = new DB(":memory:");
   db.exec(
-    `CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT,active INTEGER);INSERT INTO users VALUES('admin','admin',1),('member','member',1);CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT,hostname TEXT,version TEXT,platform TEXT,arch TEXT,last_seen TEXT,group_id TEXT,heartbeat TEXT);INSERT INTO agents VALUES('a','ha','A','1','linux','amd64','2026-10-29T02:00:00.000Z','default','{}'),('b','hb','B','1','linux','amd64','2026-10-29T02:00:00.000Z','default','{}');CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT,address TEXT,agent_id TEXT);INSERT INTO managed_machines VALUES('ma','Machine A','10.0.0.1','a'),('mb','Machine B','10.0.0.2','b');`,
+    `CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT,active INTEGER);INSERT INTO users VALUES('admin','admin',1),('member','member',1);CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT,hostname TEXT,version TEXT,platform TEXT,arch TEXT,last_seen TEXT,group_id TEXT,heartbeat TEXT);INSERT INTO agents VALUES('a','ha','A','1','linux','amd64','2026-10-29T02:00:00.000Z','default','{}'),('b','hb','B','1','linux','amd64','2026-10-29T02:00:00.000Z','default','{}');CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT,address TEXT,agent_id TEXT);INSERT INTO managed_machines(id,name,address,agent_id) VALUES('ma','Machine A','10.0.0.1','a'),('mb','Machine B','10.0.0.2','b');`,
   );
+  db.exec("ALTER TABLE managed_machines ADD COLUMN ssh_target_generation INTEGER NOT NULL DEFAULT 0; ALTER TABLE managed_machines ADD COLUMN host_key_fingerprint TEXT NOT NULL DEFAULT ''");
+  createHostNetworkSchema(db);
   let now = new Date("2026-10-29T02:00:00Z");
   const router = new Router();
   const deps = {
@@ -63,8 +67,12 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     });
     return { status: r.status, body: (await r.json()) as any };
   };
-  const createCluster = (ids = ["ma", "mb"], name = "Cluster") =>
-    store.create(
+  const createCluster = (ids = ["ma", "mb"], name = "Cluster") => {
+    for(const machineID of ids){
+      const machine=db.get<any>('SELECT * FROM managed_machines WHERE id=?',machineID);
+      if(machine&&!db.get('SELECT machine_id FROM machine_network_observations WHERE machine_id=?',machineID))recordHostNetwork(db,machineID,machine.agent_id,normalizeNetworkAddresses([{interface:'eth0',address:machine.address},{interface:'eth0',address:'203.0.113.'+({ma:1,mb:2,mc:3}[machineID]??4)}]),undefined,now.toISOString());
+    }
+    return store.create(
       "cluster",
       name,
       {
@@ -81,6 +89,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
       },
       "admin",
     );
+  };
   const app = (c: any, overrides: any = {}) =>
     store.create(
       "application",
@@ -719,19 +728,7 @@ for (const protocol of ["http", "https"]) {
   test(`${protocol} application upstreams use loopback only on the target gateway machine`, async (t) => {
     const f = await fixture(t),
       c = f.createCluster();
-    f.store.update(
-      c.id,
-      c.revision,
-      c.name,
-      {
-        ...c.spec,
-        nodes: c.spec.nodes.map((n: any) => ({
-          ...n,
-          address: n.machine_id === "mb" ? "fd00::2" : n.address,
-        })),
-      },
-      "admin",
-    );
+    recordHostNetwork(f.db,'mb','b',normalizeNetworkAddresses([{interface:'eth0',address:'fd00::2'},{interface:'eth0',address:'203.0.113.2'}]),undefined,'2026-10-29T02:00:00Z');
     const app = f.app(c, {
       machine_ids: ["ma", "mb"],
       ports: [
@@ -936,6 +933,23 @@ for (const protocol of ["http", "https"]) {
       assert.deepEqual(location.upstreams, []);
       assert.equal(location.unavailable, true);
       assert.match(renderGateway(config, "empty"), /return 503;/);
+    }
+    // A specific registry-style bind is used even by the local host-network gateway.
+    f.db.run("UPDATE ops_cluster_instances SET healthy=1 WHERE owner_id=? AND machine_id='ma'",app.id);
+    const bound=f.db.get<any>("SELECT id FROM ops_cluster_instances WHERE owner_id=? AND machine_id='ma'",app.id)!;
+    f.db.run("UPDATE ops_platform_instance_ports SET host_ip='10.55.0.1' WHERE instance_id=? AND name='http'",bound.id);
+    await f.platform.tick();
+    for(const agent of ['a','b']){
+      const config=f.finish(agent).payload.resource.config;
+      assert.deepEqual(config.sites.find((s:any)=>s.domains.includes('managed.example.test')).locations[0].upstreams,[`${protocol}://10.55.0.1:${port('ma','http')}`]);
+    }
+    // A loopback-only service remains local; a peer gateway must return unavailable.
+    f.db.run("UPDATE ops_platform_instance_ports SET host_ip='127.0.0.1' WHERE instance_id=? AND name='http'",bound.id);
+    await f.platform.tick();
+    for(const agent of ['a','b']){
+      const config=f.finish(agent).payload.resource.config,location=config.sites.find((s:any)=>s.domains.includes('managed.example.test')).locations[0];
+      assert.deepEqual(location.upstreams,agent==='a'?[`${protocol}://127.0.0.1:${port('ma','http')}`]:[]);
+      assert.equal(location.unavailable,agent!=='a');
     }
   });
 }

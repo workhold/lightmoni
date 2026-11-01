@@ -1,3 +1,5 @@
+import {machineServiceAddresses} from "../server/host-network.js";
+import {networkScope} from "../shared/host-network.js";
 import { effectiveAuth } from "../operations/basic-auth.js";
 import { normalizeWebsiteAuth } from "./website-auth.js";
 import { catalogTemplate } from "./catalog.js";
@@ -63,16 +65,6 @@ const num = (v: any, fallback: number, min: number, max: number) => {
   if (typeof n !== "number" || !Number.isFinite(n) || n < min || n > max)
     fail(400, "invalid_application_number");
   return n;
-};
-const address = (v: any) => {
-  if (
-    typeof v !== "string" ||
-    !v ||
-    v.length > 253 ||
-    /[^a-zA-Z0-9.:[\]_-]/.test(v)
-  )
-    fail(400, "invalid_node_address");
-  return v;
 };
 const names = (value: any) =>
   list(value, "domains").map((v) => {
@@ -425,7 +417,6 @@ export function createClusterWorkloads(
     return {
       machine_id: key,
       agent_id: m.agent_id,
-      address: m.address,
       cpu: Number(heart.cpu_count ?? heart.cpu?.cores ?? 0),
       memory_mb: Number(
         heart.memory_total_mb ??
@@ -433,6 +424,7 @@ export function createClusterWorkloads(
       ),
       ...(cached ? JSON.parse(cached.node_json) : {}),
       ...override,
+      ...machineServiceAddresses(db,key),
     };
   };
   const busy = (i: Row) =>
@@ -462,7 +454,8 @@ export function createClusterWorkloads(
             instance_id: i.id,
             agent_id: i.agent_id,
             machine_id: i.machine_id,
-            ip: i.address,
+            ip: p.host_ip && !['0.0.0.0','::'].includes(p.host_ip) ? p.host_ip : machineServiceAddresses(db,i.machine_id).address,
+            host_ip: p.host_ip,
             port: p.host_port,
             port_name: p.name,
             protocol: p.protocol,
@@ -573,10 +566,6 @@ export function createClusterWorkloads(
         if (!ids.includes(n.machine_id)) fail(409, "cluster_resource_mismatch");
         return {
           machine_id: n.machine_id,
-          address: address(n.address),
-          ...(n.public_address
-            ? { public_address: address(n.public_address) }
-            : {}),
           ...(n.cpu !== undefined ? { cpu: num(n.cpu, 0, 0.01, 1024) } : {}),
           ...(n.memory_mb !== undefined
             ? { memory_mb: num(n.memory_mb, 0, 4, 4194304) }
@@ -593,11 +582,7 @@ export function createClusterWorkloads(
         : undefined;
       if (
         registryDeployment &&
-        !nodes.some(
-          (n: Row) =>
-            n.machine_id === registryDeployment.machine_ids[0] &&
-            n.address === registryDeployment.registry_address,
-        )
+        !ids.includes(registryDeployment.machine_ids[0])
       )
         fail(409, "registry_data_migration_required");
       if (
@@ -826,17 +811,10 @@ export function createClusterWorkloads(
         );
         if (
           prior &&
-          (prior.machine_ids[0] !== targets[0] ||
-            prior.registry_address !== d.registry_address)
+          prior.machine_ids[0] !== targets[0]
         )
           fail(409, "registry_data_migration_required");
-        if (
-          !c.spec.nodes.some(
-            (n: Row) =>
-              n.machine_id === targets[0] && n.address === d.registry_address,
-          )
-        )
-          fail(400, "registry_address_must_match_cluster_node");
+
       }
       const replicas = num(d.replicas, 1, 0, 100);
       if (!Number.isInteger(replicas)) fail(400, "invalid_replicas");
@@ -1919,10 +1897,12 @@ export function createClusterWorkloads(
             (p: Row) => p.name === target.port_name,
           );
           if (!p) fail(400, "application_port_not_found");
-          out.upstreams = endpoints(app.id, p.name, cid).map((e) => {
-            // OpenResty uses host networking, so local published ports use loopback.
+          out.upstreams = endpoints(app.id, p.name, cid)
+            .filter(e => e.ip && (e.machine_id === gatewayMachineID || networkScope(e.ip) !== 'loopback'))
+            .map((e) => {
+            // OpenResty uses host networking; preserve a specific bind IP, otherwise use loopback.
             const host =
-              e.machine_id === gatewayMachineID ? "127.0.0.1" : e.ip;
+              e.machine_id === gatewayMachineID ? (e.host_ip && !['0.0.0.0','::'].includes(e.host_ip) ? e.host_ip : "127.0.0.1") : e.ip;
             return (
               (e.app_protocol === "https" ? "https" : "http") +
               "://" +
@@ -2039,8 +2019,8 @@ export function createClusterWorkloads(
       "workload.apply",
       {
         application: effective(a, i),
-        ...(registryCacheFor(store, a)
-          ? { image_cache: registryCacheFor(store, a) }
+        ...(registryCacheFor(store, a, i.machine_id)
+          ? { image_cache: registryCacheFor(store, a, i.machine_id) }
           : {}),
         application_id: a.id,
         application_revision: a.revision,

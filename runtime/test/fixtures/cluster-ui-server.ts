@@ -1,3 +1,5 @@
+import {createHostNetworkSchema,recordHostNetwork} from "../../src/server/host-network.js";
+import {normalizeNetworkAddresses} from "../../src/shared/host-network.js";
 /** Disposable loopback harness for web/src/app/ops/verify-cluster-ui.mjs.
  * Uses real SQLite, encryption, HTTP routes and domain controllers. Authentication
  * is an explicit QA administrator; remote Agents and external cloud calls are disabled.
@@ -25,9 +27,9 @@ db.exec(`CREATE TABLE users(id TEXT PRIMARY KEY,name TEXT,role TEXT,active INTEG
   INSERT INTO users VALUES('qa-admin','QA Administrator','admin',1);
   CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT,hostname TEXT,version TEXT,platform TEXT,arch TEXT,last_seen TEXT,group_id TEXT,heartbeat TEXT);
   CREATE TABLE services(id TEXT PRIMARY KEY);
-  CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,agent_id TEXT NOT NULL);
-  INSERT INTO managed_machines VALUES('qa-machine','QA Docker 节点','127.0.0.1','qa-node');
-  INSERT INTO managed_machines VALUES('qa-machine-2','QA 备用节点','127.0.0.2','qa-node-2');`);
+  CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,agent_id TEXT NOT NULL,ssh_target_generation INTEGER NOT NULL DEFAULT 0,host_key_fingerprint TEXT NOT NULL DEFAULT '');
+  INSERT INTO managed_machines(id,name,address,agent_id) VALUES('qa-machine','QA Docker 节点','ssh.qa.example.test','qa-node');
+  INSERT INTO managed_machines(id,name,address,agent_id) VALUES('qa-machine-2','QA 备用节点','127.0.0.2','qa-node-2');`);
 db.run(
   "INSERT INTO agents VALUES(?,?,?,?,?,?,?,?,?)",
   "qa-node",
@@ -40,6 +42,10 @@ db.run(
   "default",
   "{}",
 );
+createHostNetworkSchema(db);
+for(const [machineID,agentID,addresses] of [
+ ['qa-machine','qa-node',[{interface:'eth0',address:'10.0.0.7'},{interface:'eth0',address:'198.51.100.7'},{interface:'docker0',address:'172.17.0.1'}]],
+] as const)recordHostNetwork(db,machineID,agentID,normalizeNetworkAddresses([...addresses]),undefined,new Date().toISOString());
 const user = {
   id: "qa-admin",
   name: "QA Administrator",
@@ -47,6 +53,7 @@ const user = {
   preferences: { default_homepage: "/operations" },
 };
 db.run("INSERT INTO agents SELECT 'qa-node-2','qa-host-2','QA 备用节点',version,platform,arch,last_seen,group_id,heartbeat FROM agents WHERE id='qa-node'");
+recordHostNetwork(db,'qa-machine-2','qa-node-2',normalizeNetworkAddresses([{interface:'eth0',address:'198.51.100.42'},{interface:'br-docker',address:'172.23.0.1'}]),undefined,new Date().toISOString());
 const deps: any = {
   db,
   router,

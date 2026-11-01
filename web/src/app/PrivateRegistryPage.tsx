@@ -47,8 +47,7 @@ export default function PrivateRegistryPage() {
     [formError, setFormError] = useState(""),
     [defaults, setDefaults] = useState<Spec>({}),
     [form] = Form.useForm();
-  const clusterID = Form.useWatch("cluster_id", form),
-    machineID = Form.useWatch("machine_id", form);
+  const clusterID = Form.useWatch("cluster_id", form);
   const clusters = overview.resources.filter((r) => r.kind === "cluster"),
     site = data?.external?.website;
   const load = useCallback(async (quiet = false) => {
@@ -81,8 +80,8 @@ export default function PrivateRegistryPage() {
         "Configuration changed. Refresh and retry; your input is retained.",
       ],
       registry_data_migration_required: [
-        "仓库已有固定数据位置，首版不支持直接更换机器、内网地址或对外写入集群。",
-        "This registry has a fixed data location. Changing its machine, private address or publishing cluster requires migration.",
+        "仓库数据保存在固定机器，切换机器或对外写入集群需要迁移数据。",
+        "This registry has a fixed data location. Changing its machine or publishing cluster requires migration.",
       ],
       registry_confirmation_required: [
         "请确认此地址处于受信任的隔离内网。",
@@ -115,7 +114,6 @@ export default function PrivateRegistryPage() {
         ? {
             cluster_id: row?.cluster_id,
             machine_id: row?.machine_id,
-            address: row?.address,
             host_ports:row?.host_ports??Object.fromEntries(registryPorts.map((p:Spec)=>[p.name,0])),
             cpu:
               data?.application?.spec.deployments?.find(
@@ -126,7 +124,6 @@ export default function PrivateRegistryPage() {
                 (d: Spec) => d.cluster_id === row?.cluster_id,
               )?.memory_mb ?? 256,
             cache_enabled: row?.cache_enabled ?? false,
-            trusted_network_acknowledged: false,
           }
         : {
             carrier_cluster_id:
@@ -225,13 +222,6 @@ export default function PrivateRegistryPage() {
   const members = (overview.machines ?? []).filter((m) =>
     cluster?.spec.machine_ids.includes(m.id),
   );
-  useEffect(() => {
-    if (dialog !== "deploy" || !machineID) return;
-    const node = cluster?.spec.nodes?.find(
-      (n: Spec) => n.machine_id === machineID,
-    );
-    if (node) form.setFieldValue("address", node.address);
-  }, [machineID, cluster, form, dialog]);
   return (
     <div className="lm-page lm-operations-page lm-registry-page">
       <div className="lm-page-heading">
@@ -336,10 +326,9 @@ export default function PrivateRegistryPage() {
                   title: t("内网仓库地址", "Private registry endpoint"),
                   key: "endpoint",
                   render: (_, r: Spec) => (
-                    <Typography.Text copyable={!!r.endpoint}>
-                      {r.endpoint ||
-                        t("等待端口分配", "Waiting for port allocation")}
-                    </Typography.Text>
+                    <><Typography.Text copyable={!!r.endpoint}>
+                      {r.endpoint || t("等待端口分配", "Waiting for port allocation")}
+                    </Typography.Text>{r.cache_scope === 'machine' && <div className="lm-ops-note">{t("仅本机可用；其他机器未发现可达内网地址时使用原镜像源。", "Available on this machine; other machines use the original source when no private endpoint is available.")}</div>}</>
                   ),
                 },
                 {
@@ -499,7 +488,6 @@ export default function PrivateRegistryPage() {
                     );
                     form.setFieldsValue({
                       machine_id: d?.machine_id,
-                      address: d?.address,
                       host_ports:d?.host_ports??Object.fromEntries(registryPorts.map((p:Spec)=>[p.name,0])),
                       cache_enabled: d?.cache_enabled ?? false,
                     });
@@ -517,17 +505,6 @@ export default function PrivateRegistryPage() {
                     .filter((m) => m.agent_id)
                     .map((m) => ({ value: m.id, label: m.name }))}
                 />
-              </Form.Item>
-              <Form.Item
-                name="address"
-                label={t("内网监听 IP", "Private listen IP")}
-                rules={[{ required: true }]}
-                extra={t(
-                  "使用集群内可达的私有 IP；不允许公网 IP 或通配地址。",
-                  "Use a private IP reachable inside the cluster. Public and wildcard addresses are rejected.",
-                )}
-              >
-                <Input readOnly={!!deployment} />
               </Form.Item>
               <ApplicationPortFields ports={registryPorts}/>
               <Collapse items={[{key:'resources',label:t('资源限制（高级）','Resource limits (advanced)'),forceRender:true,children:<div className="lm-ops-grid">
@@ -547,32 +524,6 @@ export default function PrivateRegistryPage() {
                 valuePropName="checked"
               >
                 <Switch />
-              </Form.Item>
-              <Form.Item
-                name="trusted_network_acknowledged"
-                valuePropName="checked"
-                rules={[
-                  {
-                    validator: (_, v) =>
-                      v
-                        ? Promise.resolve()
-                        : Promise.reject(
-                            Error(
-                              t(
-                                "请确认内网访问边界",
-                                "Confirm the internal network boundary",
-                              ),
-                            ),
-                          ),
-                  },
-                ]}
-              >
-                <Checkbox>
-                  {t(
-                    "此地址仅在受信任内网可达；内网仓库不鉴权，网络隔离由我维护。",
-                    "This address is reachable only on a trusted internal network. I maintain network isolation for the anonymous registry.",
-                  )}
-                </Checkbox>
               </Form.Item>
             </>
           ) : (

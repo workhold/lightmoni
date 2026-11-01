@@ -1,3 +1,5 @@
+import {createHostNetworkSchema,recordHostNetwork} from "../src/server/host-network.js";
+import {normalizeNetworkAddresses} from "../src/shared/host-network.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -15,8 +17,10 @@ import { createPrivateRegistryController } from "../src/ops/private-registry.js"
 async function fixture(t: any, fetcher?: typeof fetch) {
   const db = new DB(":memory:");
   db.exec(
-    `CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT,active INTEGER);INSERT INTO users VALUES('admin','admin',1),('member','member',1);CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT,hostname TEXT,version TEXT,platform TEXT,arch TEXT,last_seen TEXT,group_id TEXT,heartbeat TEXT);INSERT INTO agents VALUES('a','ha','A','1','linux','amd64','2026-10-29T02:00:00.000Z','default','{}'),('b','hb','B','1','linux','amd64','2026-10-29T02:00:00.000Z','default','{}');CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT,address TEXT,agent_id TEXT);INSERT INTO managed_machines VALUES('ma','Machine A','10.0.0.1','a'),('mb','Machine B','10.0.0.2','b');`,
+    `CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT,active INTEGER);INSERT INTO users VALUES('admin','admin',1),('member','member',1);CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT,hostname TEXT,version TEXT,platform TEXT,arch TEXT,last_seen TEXT,group_id TEXT,heartbeat TEXT);INSERT INTO agents VALUES('a','ha','A','1','linux','amd64','2026-10-29T02:00:00.000Z','default','{}'),('b','hb','B','1','linux','amd64','2026-10-29T02:00:00.000Z','default','{}');CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT,address TEXT,agent_id TEXT);INSERT INTO managed_machines(id,name,address,agent_id) VALUES('ma','Machine A','10.0.0.1','a'),('mb','Machine B','10.0.0.2','b');`,
   );
+  db.exec("ALTER TABLE managed_machines ADD COLUMN ssh_target_generation INTEGER NOT NULL DEFAULT 0; ALTER TABLE managed_machines ADD COLUMN host_key_fingerprint TEXT NOT NULL DEFAULT ''");
+  createHostNetworkSchema(db);
   let now = new Date("2026-10-29T02:00:00Z");
   const router = new Router();
   const deps = {
@@ -65,8 +69,12 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     });
     return { status: r.status, body: (await r.json()) as any };
   };
-  const createCluster = (ids = ["ma", "mb"], name = "Cluster") =>
-    store.create(
+  const createCluster = (ids = ["ma", "mb"], name = "Cluster") => {
+    for(const machineID of ids){
+      const machine=db.get<any>('SELECT * FROM managed_machines WHERE id=?',machineID);
+      if(machine&&!db.get('SELECT machine_id FROM machine_network_observations WHERE machine_id=?',machineID))recordHostNetwork(db,machineID,machine.agent_id,normalizeNetworkAddresses([{interface:'eth0',address:machine.address},{interface:'eth0',address:'203.0.113.'+({ma:1,mb:2,mc:3}[machineID]??4)}]),undefined,now.toISOString());
+    }
+    return store.create(
       "cluster",
       name,
       {
@@ -83,6 +91,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
       },
       "admin",
     );
+  };
   const app = (c: any, overrides: any = {}) =>
     store.create(
       "application",
@@ -142,7 +151,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     },
     state = "succeeded",
   ) => {
-    const job = jobs.claim(agentID, ["operations.platform"]);
+    const job = jobs.claim(agentID, ["operations.platform","operations.platform.image-cache.v1"]);
     assert.ok(job);
     const payload = platform.resolvePayload(job);
     for (const [n, phase] of [
@@ -1336,7 +1345,7 @@ test("website DNS aggregates all ready cluster gateways and follows managed fail
   };
   const f = await fixture(t, fetcher);
   f.db.exec(
-    "INSERT INTO agents SELECT 'c','hc','C',version,platform,arch,last_seen,group_id,heartbeat FROM agents WHERE id='a';INSERT INTO managed_machines VALUES('mc','Machine C','10.0.0.3','c')",
+    "INSERT INTO agents SELECT 'c','hc','C',version,platform,arch,last_seen,group_id,heartbeat FROM agents WHERE id='a';INSERT INTO managed_machines(id,name,address,agent_id) VALUES('mc','Machine C','10.0.0.3','c')",
   );
   const a = f.createCluster(["ma", "mc"], "A"),
     b = f.createCluster(["mb"], "B"),
@@ -1567,4 +1576,26 @@ test("leases for one logical application remain bound to the correct cluster Age
     )!.healthy,
     0,
   );
+});
+
+test('system registry installs with ordinary fields, follows machine inventory and decouples cluster route names',async t=>{
+ const f=await fixture(t),c=f.createCluster();
+ f.db.run("UPDATE managed_machines SET address='ssh.example.test' WHERE id='ma'");
+ recordHostNetwork(f.db,'ma','a',normalizeNetworkAddresses([{interface:'docker0',address:'172.17.0.1'},{interface:'eth0',address:'10.55.0.9'},{interface:'eth0',address:'198.51.100.9'}]),undefined,f.deps.now().toISOString());
+ const r=await f.req('/private-registry/deployments','POST',{confirmed:true,revision:0,cluster_id:c.id,machine_id:'ma',host_ports:{registry:15000,'hub-cache':15001,'origin-cache':15002},cache_enabled:true});
+ assert.equal(r.status,201,JSON.stringify(r.body));const view=(await f.req('/private-registry')).body;assert.equal(view.deployments[0].address,'10.55.0.9');assert.equal(view.deployments[0].cache_scope,'cluster');
+ const {payload}=f.finish('a');assert.equal(payload.resource.config.application.compose.services.registry.ports[0].host_ip,'10.55.0.9');
+ const saved=await f.req('/resources/'+c.id,'PUT',{revision:f.store.get(c.id).revision,spec:{...f.store.get(c.id).spec,nodes:c.spec.nodes.map((n:any)=>({...n,address:'another-ssh.example.test',public_address:'203.0.113.99'}))}});
+ assert.equal(saved.status,200,JSON.stringify(saved.body));assert(!saved.body.resource.spec.nodes[0].address);
+ const workload=f.app(c,{image:'alpine:3.23',machine_ids:['mb']});assert.equal((await f.action(workload,'deploy')).status,202);
+ assert.equal(f.finish('b').payload.resource.config.image_cache.hub_endpoint,'http://10.55.0.9:15001');
+});
+test('public-only host installs a local registry without IP gates and never sends loopback cache to a peer',async t=>{
+ const f=await fixture(t),c=f.createCluster();
+ f.db.run("UPDATE managed_machines SET address='ssh.example.test' WHERE id='ma'");
+ recordHostNetwork(f.db,'ma','a',normalizeNetworkAddresses([{interface:'eth0',address:'198.51.100.42'},{interface:'br-docker',address:'172.17.0.1'}]),undefined,f.deps.now().toISOString());
+ const r=await f.req('/private-registry/deployments','POST',{confirmed:true,revision:0,cluster_id:c.id,machine_id:'ma',address:'198.51.100.42',cache_enabled:true});
+ assert.equal(r.status,201,JSON.stringify(r.body));const view=(await f.req('/private-registry')).body;assert.equal(view.deployments[0].address,'127.0.0.1');assert.equal(view.deployments[0].cache_scope,'machine');f.finish('a');
+ const local=f.app(c,{image:'alpine:3.23',machine_ids:['ma']});assert.equal((await f.action(local,'deploy')).status,202);assert.match(f.finish('a').payload.resource.config.image_cache.hub_endpoint,/127\.0\.0\.1/);
+ const peer=f.app(c,{image:'alpine:3.23',machine_ids:['mb']});assert.equal((await f.action(peer,'deploy')).status,202);assert.equal(f.finish('b').payload.resource.config.image_cache,undefined);
 });

@@ -1,7 +1,7 @@
 import { BlockList, isIP } from "node:net";
 import type { IncomingMessage } from "node:http";
 import type { DB } from "../shared/sqlite.js";
-import { normalizeIPAddress, normalizeNetworkAddresses, type HostNetworkAddress } from "../shared/host-network.js";
+import { normalizeIPAddress, normalizeNetworkAddresses, networkScope, type HostNetworkAddress } from "../shared/host-network.js";
 
 export type SourceKind = "direct" | "trusted_proxy" | "unavailable";
 export interface NetworkSource { source_ip: string; source_kind: SourceKind }
@@ -148,4 +148,19 @@ export function machineNetwork(db: DB, machineID: string): MachineNetwork {
     source_observed_at: sourceCurrent ? row.source_observed_at : "",
     source_kind: sourceCurrent ? row.source_kind : "unavailable",
   };
+}
+
+/** The shared source for service/DNS addresses of a managed machine. SSH DNS names and observed proxy peers are never service addresses. */
+export function machineServiceAddresses(db: DB, machineID: string) {
+  const network = machineNetwork(db, machineID);
+  const usable = network.addresses.filter(n => !/^(?:lo$|docker|br-|veth|virbr|cni|flannel|cali|kube)/i.test(n.interface));
+  const private_ips = [...new Set(usable.filter(n => n.scope === 'private').map(n => n.address))];
+  const public_ips = [...new Set(usable.filter(n => n.scope === 'public').map(n => n.address))];
+  const ipv4First = (a:string,b:string) => Number(isIP(b)===4)-Number(isIP(a)===4);
+  private_ips.sort(ipv4First);public_ips.sort(ipv4First);
+  let legacy = '';
+  if (!network.addresses.length) legacy = normalizeIPAddress(db.get<{address:string}>('SELECT address FROM managed_machines WHERE id=?',machineID)?.address);
+  if (legacy && networkScope(legacy) === 'private') private_ips.push(legacy);
+  if (legacy && networkScope(legacy) === 'public') public_ips.push(legacy);
+  return {address:private_ips[0] ?? public_ips[0] ?? (legacy && networkScope(legacy)==='loopback' ? legacy : ''),public_address:public_ips[0] ?? '',private_ips,public_ips};
 }
