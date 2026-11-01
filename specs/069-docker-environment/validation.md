@@ -14,6 +14,7 @@
 - runtime 定向 HTTP/SQLite/Agent lease/SSH fixture 回归：122 项，120 通过，2 项真实 Docker 条件测试跳过，0 失败。覆盖角色、确认、幂等、主机绑定、秘密脱敏、错误分类、观测新鲜度、恢复、持久闸门、作业领取、SSH 生命周期与任务中心。日志见 evidence/runtime-tests.txt。
 - runtime/web TypeScript 类型检查通过；web 生产构建通过。构建保留现有第三方 Ant Design use client 指令告警，不影响产物。
 - 真实 Chrome + loopback HTTP/SQLite 浏览器：六种状态、确认安装、关窗重开、SSH 成功不掩盖旧 Agent 观测、权限诊断、OpenResty 缺失失败与补装目标、390px、中英文；0 页面异常。见 evidence/ui-report.json。SSH 结果为受控 fixture。
+- 新增 Compose 探测涉及的应用观测回归另行运行 13 项全部通过，见 evidence/observability-tests.txt。
 - shell 语法检查通过；校验拒绝非法操作 ID、静态回执白名单、无卸载/用户组/socket 宽权限命令、核验 Agent 身份与固定补充组配置。
 - git diff --check 通过，提交前 fetch origin/main，落后提交数为 0。
 
@@ -24,3 +25,7 @@
 ## 限制
 
 本机未执行远端 apt 软件包安装、真实 systemd/SSH 连接或真实 Linux Agent 权限重启验收；不能把 fixture 当作实际主机安装成功。未发布镜像、部署生产、合并 main。自动安装暂限 Ubuntu/Debian，其他系统通过官方手动指南。
+
+## 交付
+
+[GitHub PR #55](https://github.com/workhold/lightmoni/pull/55)，目标 main，草稿待评审；未合并或部署。

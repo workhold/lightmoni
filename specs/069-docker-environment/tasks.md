@@ -6,4 +6,6 @@
 - [x] T004 主机列表/清单/应用失败的统一 Docker 安装面板。
 - [x] T005 同步仓库和 Doca 设计并回读保留图块。
 - [x] T006 定向测试、类型检查和浏览器证据。
-- [ ] T007 同步 origin/main，推送功能分支并创建面向 main 的 GitHub PR。
+- [x] T007 同步 origin/main，推送功能分支并创建面向 main 的 GitHub PR。
+
+交付：[GitHub PR #55](https://github.com/workhold/lightmoni/pull/55)，目标 main，草稿待评审，未合并。
