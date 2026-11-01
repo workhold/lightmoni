@@ -1,0 +1,26 @@
+{
+  "platform": "linux/arm64",
+  "revision": "e3a527697c6718ee1e423a6341a48d313d4f193e",
+  "image_id": "sha256:929122450230d56fbfd6793861a6e735c52c6b70336b7e669db98c36669e97c8",
+  "checks": [
+    "non-root image, platform, revision, real ClickHouse and HTTP health",
+    "administrator CLI, login and session",
+    "center identity and authenticated internal/public reporting settings",
+    "production bundle contains multi-value bulk DNS actions",
+    "production bundle includes website guidance, domain sync tasks, cluster selection and certificate export",
+    "production application management/store cards, host-to-container mapping, narrow actions hint, and named-port runtime module",
+    "production private-image and installation UI, authenticated empty registry API, and ordinary Registry catalog template",
+    "authenticated production install API rejects unknown port names before creating an application",
+    "real image derives a single-domain certificate name without name input, issues it and exposes persistent execution steps",
+    "administrator certificate view and fixed-version private-key attachment match, with no-store and public JSON redaction",
+    "operations, task and telemetry catalog API",
+    "production web entry",
+    "four SDK HTTP downloads and checksums",
+    "both Agent archives and all SDK checksums",
+    "matching-platform bundled Agent version command",
+    "downloaded matching-platform Agent contains Docker controls, image-cache/auth capability guards and installation progress",
+    "AI runtime and task tools import"
+  ],
+  "errors": [],
+  "execution": "native ARM64 or local Docker AMD64 emulation; isolated ARM64 ClickHouse"
+}

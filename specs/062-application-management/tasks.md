@@ -8,4 +8,4 @@
 - [x] T006 定向检查、三轮浏览器与独立视觉评审，记录验收限制。
 - [x] T007 同步origin/main，提交分支与GitHub PR，记录兼容影响和验证。
 
-交付：[GitHub 草稿 PR #49](https://github.com/workhold/lightmoni/pull/49)，目标 main；未合并、未发布。
+交付：[GitHub PR #49](https://github.com/workhold/lightmoni/pull/49)。用户后续授权后已合入 main；镜像发行见 [SDD 063](../063-application-image-release/validation.md)。
