@@ -19,4 +19,4 @@
 
 真实 Linux 普通用户、组/capability/只读根、真实 Nginx 网站下发、反向代理、80/443、配置重载、失败及版本恢复、HTTPS证书轮换、私钥0600 的验收见 [SDD071](../071-agent-deployment-permissions/validation.md)。Docker CLI/socket 权限采用只读 Engine API fixture，不能冒称已执行全部第三方业务或真实远端 apt 安装；一键补装暂支持 Ubuntu/Debian。
 
-本轮发布没有重建线上中心、升级 xiangxiaojia 或修改其业务。现有部署需沿用原 Compose 项目、环境与数据卷执行 pull/up，再通过平台升级目标 Agent 并重新部署原应用，权限修复才生效。默认引用与本证据通过发布 PR 交付 main，合入状态以 GitHub 最终回执核对。
+本轮发布没有重建线上中心、升级 xiangxiaojia 或修改其业务。现有部署需沿用原 Compose 项目、环境与数据卷执行 pull/up，再通过平台升级目标 Agent 并重新部署原应用，权限修复才生效。默认引用与本证据通过 [发布 PR #59](https://github.com/workhold/lightmoni/pull/59) 交付 main，按用户授权合入，实际状态以 GitHub 最终回执核对。
