@@ -1,3 +1,4 @@
+import AuthFields from './AuthFields';
 import { useEffect } from 'react';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { Alert, Button, Form, Input, Select, Switch } from '../../shared/ui';
@@ -29,6 +30,7 @@ export default function WebsiteFields({resources,existing,onQuickCreate}:{resour
   <Form.Item name={['spec','dns_record_mode']} label={t('网站解析方式','Website DNS mode')}><Select options={[{value:'cname',label:t('CNAME 到集群入口域名','CNAME to cluster entry domains')},{value:'address',label:t('直接解析入口 IP（兼容模式）','Entry IP addresses (compatibility mode)')}]}/></Form.Item>
   <WebsiteDomainRoutes resources={resources} clusterIds={clusterIds}/>
   <WebsiteClusterPolicies resources={resources} clusterIds={clusterIds}/>
+  <AuthFields name={['spec','auth']} watchPath={['spec','auth']}/>
   <NginxFields resources={resources} mode={mode} showRoutes={false}/>
  </>;
 }

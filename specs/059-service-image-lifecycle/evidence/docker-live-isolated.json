@@ -1,0 +1,14 @@
+{
+  "scope": "Dedicated isolated Docker 27 daemon plus Linux executor, no production socket or public network; separate shared-host run covers Docker 29 containerd image ID compatibility",
+  "checks": [
+    "Real Registry v3 accepts a Docker push over its isolated internal endpoint",
+    "The publishing cluster imports its own private image directly without enabling a proxy cache or Docker login",
+    "Agent imports a real cached image after manifest/config/blob/diff-id verification",
+    "A cached digest remains readable after the upstream registry stops",
+    "Real workload executor starts Compose from the verified image ID without a daemon mirror change",
+    "Real OpenResty TLS: anonymous/wrong password 401, correct password 200, path opt-out works, upstream Authorization stripped; deployment includes positive/negative proof",
+    "Bounded image import removes its temporary download/archive directories",
+    "Dedicated Docker daemon trusts only the QA CA: wrong login denied; correct TLS login and Docker push through OpenResty succeed; HTTP redirects to HTTPS"
+  ],
+  "ok": true
+}

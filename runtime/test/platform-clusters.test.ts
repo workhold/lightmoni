@@ -9,6 +9,9 @@ import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
 import { catalogInstallation } from "../src/ops/catalog.js";
 import type { Dependencies } from "../src/shared/types.js";
+import { registryCacheFor } from "../src/ops/registry-runtime.js";
+import { migrateSystemApplications } from "../src/ops/system-applications.js";
+import { createPrivateRegistryController } from "../src/ops/private-registry.js";
 async function fixture(t: any, fetcher?: typeof fetch) {
   const db = new DB(":memory:");
   db.exec(
@@ -196,6 +199,408 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     },
   };
 }
+test("private registry registration is host owned, coexists with business registries and shares the cluster cache switch", async (t) => {
+  const f = await fixture(t),
+    c = f.createCluster();
+  assert.equal(
+    (await f.req("/private-registry", "GET", undefined, "member")).status,
+    403,
+  );
+  assert.equal((await f.req("/private-registry")).body.application, null);
+  assert.throws(
+    () => f.app(c, { service_name: "sys-stolen" }),
+    /system_service_name_reserved/,
+  );
+  assert.throws(
+    () => f.app(c, { role: "registry" }),
+    /system_registry_management_required/,
+  );
+  assert.equal(
+    (
+      await f.req("/private-registry/clusters/" + c.id + "/cache", "PUT", {
+        revision: c.revision,
+        enabled: true,
+      })
+    ).status,
+    409,
+  );
+  for (let n = 0; n < 2; n++)
+    f.store.create(
+      "application",
+      "Business registry",
+      catalogInstallation("registry", {
+        deployments: [{ cluster_id: c.id, machine_ids: ["ma"] }],
+      }).spec,
+      "admin",
+    );
+  assert.equal((await f.req("/private-registry")).body.application, null);
+  const installed = await f.req("/private-registry/deployments", "POST", {
+    confirmed: true,
+    trusted_network_acknowledged: true,
+    revision: 0,
+    cluster_id: c.id,
+    machine_id: "ma",
+    address: "10.0.0.1",
+    cache_enabled: true,
+  });
+  assert.equal(installed.status, 201, JSON.stringify(installed.body));
+  let view = (await f.req("/private-registry")).body;
+  assert.equal(view.application.spec.service_name, "sys-docker-registry");
+  assert.equal(view.deployments[0].cache_enabled, true);
+  const { payload } = f.finish("a");
+  assert.equal(
+    payload.resource.config.application.compose.services.hub_cache.environment
+      .REGISTRY_PROXY_REMOTEURL,
+    "https://registry-1.docker.io",
+  );
+  assert(!payload.resource.config.application.compose.services.origin_cache);
+  assert.equal(
+    payload.resource.config.application.compose.services.registry.ports[0]
+      .host_ip,
+    "10.0.0.1",
+  );
+  // The ordinary cluster editor uses the same cache setting and publishes the new runtime.
+  const cluster = f.store.get(c.id),
+    saved = await f.req("/resources/" + c.id, "PUT", {
+      revision: cluster.revision,
+      spec: { ...cluster.spec, image_cache: { enabled: false } },
+    });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  view = (await f.req("/private-registry")).body;
+  assert.equal(view.deployments[0].cache_enabled, false);
+  assert.equal(
+    view.application.spec.deployments[0].registry_cache_enabled,
+    false,
+  );
+  assert.equal(
+    (
+      await f.req("/resources/" + view.application.id, "PUT", {
+        revision: view.application.revision,
+        spec: view.application.spec,
+      })
+    ).status,
+    403,
+  );
+  f.finish("a");
+  assert.throws(
+    () => f.store.remove(view.application.id, view.application.revision),
+    /system_registry_in_use/,
+  );
+});
+test("registry external entry owns one HTTPS/Basic website and cannot silently switch storage or remove its protection", async (t) => {
+  const f = await fixture(t),
+    c = f.createCluster(["ma"], "Source"),
+    other = f.createCluster(["mb"], "Other");
+  const install = () =>
+    f.req("/private-registry/deployments", "POST", {
+      confirmed: true,
+      trusted_network_acknowledged: true,
+      revision: 0,
+      cluster_id: c.id,
+      machine_id: "ma",
+      address: "10.0.0.1",
+    });
+  assert.equal((await install()).status, 201);
+  f.finish("a");
+  const cert = f.store.create(
+    "certificate",
+    "TLS",
+    {
+      source: "self_signed",
+      domains: ["registry.example.test"],
+      validity_days: 3,
+    },
+    "admin",
+  );
+  const input = {
+    confirmed: true,
+    revision: 0,
+    carrier_cluster_id: c.id,
+    domain: "registry.example.test",
+    certificate_id: cert.id,
+    username: "builder",
+    password: "qa-strong-password",
+    install_openresty: true,
+  };
+  const configured = await f.req("/private-registry/external", "PUT", input);
+  assert.equal(configured.status, 200, JSON.stringify(configured.body));
+  let view = (await f.req("/private-registry")).body,
+    site = view.external.website;
+  assert.equal(view.external.carrier_cluster_id, c.id);
+  assert.equal(site.spec.auth.mode, "basic");
+  assert.equal(site.spec.bindings[0].https, true);
+  assert(!JSON.stringify(view).includes("password_hash"));
+  assert(!JSON.stringify(view).includes(input.password));
+  assert.equal(
+    f.store.list("application").find((a) => a.spec.role === "openresty")!.spec
+      .service_name,
+    "sys-openresty",
+  );
+  const consumer = f.app(c, { image: "registry.example.test/team/private:v1" });
+  const direct = registryCacheFor(f.store, {
+    ...consumer,
+    spec: { ...consumer.spec, cluster_id: c.id },
+  });
+  assert.equal(direct?.origin_mode, "direct");
+  assert.equal(direct?.origin_endpoint, "http://10.0.0.1:21000");
+  assert.equal(direct?.hub_endpoint, undefined);
+  const unmatched = f.app(c, { image: "nginx:alpine" });
+  assert.equal(
+    registryCacheFor(f.store, {
+      ...unmatched,
+      spec: { ...unmatched.spec, cluster_id: c.id },
+    }),
+    undefined,
+  );
+  const tampered = await f.req("/resources/" + site.id, "PUT", {
+    revision: site.revision,
+    spec: { ...site.spec, auth: { mode: "off" } },
+  });
+  assert.equal(tampered.status, 409);
+  assert.throws(
+    () => f.store.remove(site.id, site.revision),
+    /registry_website_in_use|platform_resource_busy/,
+  );
+  const hash = f.store.get(site.id).spec.auth.users[0].password_hash;
+  const updated = await f.req("/private-registry/external", "PUT", {
+    ...input,
+    revision: view.external.revision,
+    website_revision: site.revision,
+    password: "",
+  });
+  assert.equal(updated.status, 200, JSON.stringify(updated.body));
+  assert.equal(f.store.get(site.id).spec.auth.users[0].password_hash, hash);
+  view = (await f.req("/private-registry")).body;
+  assert.equal(
+    (
+      await f.req("/private-registry/deployments", "POST", {
+        confirmed: true,
+        trusted_network_acknowledged: true,
+        revision: view.revision,
+        cluster_id: c.id,
+        machine_id: "mb",
+        address: "10.0.0.2",
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await f.req("/private-registry/external", "PUT", {
+        ...input,
+        revision: view.external.revision,
+        website_revision: view.external.website.revision,
+        carrier_cluster_id: other.id,
+      })
+    ).status,
+    400,
+  );
+  const added = await f.req("/private-registry/deployments", "POST", {
+    confirmed: true,
+    trusted_network_acknowledged: true,
+    revision: view.revision,
+    cluster_id: other.id,
+    machine_id: "mb",
+    address: "10.0.0.2",
+  });
+  assert.equal(added.status, 201);
+  view = (await f.req("/private-registry")).body;
+  assert.equal(view.deployments.length, 2);
+  assert.equal(
+    (
+      await f.req("/private-registry/external", "PUT", {
+        ...input,
+        revision: view.external.revision,
+        website_revision: view.external.website.revision,
+        carrier_cluster_id: other.id,
+      })
+    ).status,
+    409,
+  );
+});
+test("cache payloads require the new Agent capability and revalidate the current cluster policy at delivery", async (t) => {
+  const f = await fixture(t),
+    c = f.createCluster();
+  await f.req("/private-registry/deployments", "POST", {
+    confirmed: true,
+    trusted_network_acknowledged: true,
+    revision: 0,
+    cluster_id: c.id,
+    machine_id: "ma",
+    address: "10.0.0.1",
+    cache_enabled: true,
+  });
+  f.finish("a");
+  const a = f.app(c);
+  assert.equal((await f.action(a, "deploy")).status, 202);
+  assert.equal(f.jobs.claim("a", ["operations.platform"]), null);
+  const job = f.jobs.claim("a", [
+    "operations.platform",
+    "operations.platform.image-cache.v1",
+  ]);
+  assert(job);
+  const payload = f.platform.resolvePayload(job);
+  assert.equal(
+    payload.resource.config.image_cache.hub_endpoint,
+    "http://10.0.0.1:21001",
+  );
+  const current = f.store.get(c.id);
+  assert.equal(
+    (
+      await f.req("/private-registry/clusters/" + c.id + "/cache", "PUT", {
+        revision: current.revision,
+        enabled: false,
+      })
+    ).status,
+    200,
+  );
+  assert.throws(
+    () => f.platform.resolvePayload(job),
+    /private_registry_cache_policy_changed/,
+  );
+});
+test("a cache switch saved during a leased registry operation stays pending and reconciles after the writer completes", async (t) => {
+  const f = await fixture(t),
+    c = f.createCluster();
+  await f.req("/private-registry/deployments", "POST", {
+    confirmed: true,
+    trusted_network_acknowledged: true,
+    revision: 0,
+    cluster_id: c.id,
+    machine_id: "ma",
+    address: "10.0.0.1",
+  });
+  const job = f.jobs.claim("a", ["operations.platform"]);
+  assert(job);
+  const payload = f.platform.resolvePayload(job);
+  const saved = await f.req(
+    "/private-registry/clusters/" + c.id + "/cache",
+    "PUT",
+    { revision: c.revision, enabled: true },
+  );
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.cache_pending, "platform_resource_busy");
+  assert.equal(
+    (await f.req("/private-registry")).body.deployments[0].status.cache_pending,
+    true,
+  );
+  for (const [n, phase] of [
+    "accepted",
+    "staging",
+    "activating",
+    "verifying",
+  ].entries())
+    f.jobs.event("a", job.id, {
+      lease_id: job.lease_id,
+      sequence: n + 1,
+      phase,
+      summary: "test",
+    });
+  f.jobs.result("a", job.id, {
+    lease_id: job.lease_id,
+    state: "succeeded",
+    summary: "test",
+    snapshot: {
+      health: { healthy: true },
+      operations: {
+        operation_id: payload.operation_id,
+        resource_id: payload.resource.id,
+        data: { healthy: true, running: true },
+      },
+    },
+  });
+  await f.platform.tick();
+  const view = (await f.req("/private-registry")).body;
+  assert.equal(
+    view.application.spec.deployments[0].registry_cache_enabled,
+    true,
+  );
+  assert.equal(view.deployments[0].status.cache_pending, false);
+});
+test("cache publication failures after saving a snapshot remain pending and retry without another application revision", async (t) => {
+  const f = await fixture(t),
+    c = f.createCluster();
+  await f.req("/private-registry/deployments", "POST", {
+    confirmed: true,
+    trusted_network_acknowledged: true,
+    revision: 0,
+    cluster_id: c.id,
+    machine_id: "ma",
+    address: "10.0.0.1",
+  });
+  f.finish("a");
+  const cluster = f.store.update(
+    c.id,
+    c.revision,
+    c.name,
+    { ...c.spec, image_cache: { enabled: true } },
+    "admin",
+  );
+  let calls = 0;
+  const controller = createPrivateRegistryController(f.store, {
+    perform: async () => {
+      if (++calls === 1) fail(409, "injected_dispatch_failure");
+      return {};
+    },
+  } as any);
+  await controller.syncClusterCache(cluster, "admin");
+  const pending = controller.overview();
+  assert.equal(pending.deployments[0].status.cache_pending, true);
+  const revision = pending.application!.revision;
+  await controller.tick();
+  assert.equal(calls, 2);
+  assert.equal(controller.overview().application!.revision, revision);
+  assert.equal(
+    controller.overview().deployments[0].status.cache_pending,
+    false,
+  );
+});
+test("OpenResty identity migration preserves immutable revisions and creates no deployment jobs", async (t) => {
+  const f = await fixture(t),
+    c = f.createCluster(),
+    gateway = f.store.create(
+      "application",
+      "Gateway",
+      catalogInstallation("openresty", {
+        deployments: [{ cluster_id: c.id, machine_ids: ["ma"] }],
+      }).spec,
+      "admin",
+    );
+  const legacy = { ...gateway.spec, service_name: "openresty-legacy" };
+  f.db.run(
+    "UPDATE ops_platform_resources SET spec_cipher=? WHERE id=?",
+    f.deps.encrypt(JSON.stringify(legacy)),
+    gateway.id,
+  );
+  f.db.run(
+    "UPDATE ops_platform_application_keys SET service_name=? WHERE resource_id=?",
+    "openresty-legacy",
+    gateway.id,
+  );
+  const history = f.db.all(
+      "SELECT * FROM ops_platform_revisions WHERE resource_id=?",
+      gateway.id,
+    ),
+    jobs = f.db.all("SELECT * FROM agent_jobs");
+  migrateSystemApplications(f.store);
+  assert.equal(f.store.get(gateway.id).spec.service_name, "sys-openresty");
+  assert.equal(f.store.get(gateway.id).revision, gateway.revision);
+  assert.deepEqual(
+    f.db.all(
+      "SELECT * FROM ops_platform_revisions WHERE resource_id=?",
+      gateway.id,
+    ),
+    history,
+  );
+  assert.deepEqual(f.db.all("SELECT * FROM agent_jobs"), jobs);
+  assert.equal(
+    f.db.get<any>(
+      "SELECT application_id FROM ops_system_application_aliases WHERE service_name=?",
+      "openresty-legacy",
+    ).application_id,
+    gateway.id,
+  );
+});
 test("stable membership is unique, survives Agent identity changes and rejects moving active machines", async (t) => {
   const f = await fixture(t),
     c = f.createCluster();
@@ -379,7 +784,7 @@ test("unknown execution keeps port ownership and never creates a duplicate manag
 test("catalog installs multiple ordinary MySQL applications with healthcheck and redacts secrets", async (t) => {
   const f = await fixture(t),
     c = f.createCluster();
-  assert.equal((await f.req("/catalog")).body.templates.length, 3);
+  assert.equal((await f.req("/catalog")).body.templates.length, 4);
   for (let n = 0; n < 2; n++) {
     const r = await f.req("/catalog/mysql/install", "POST", {
       deployments: [{ cluster_id: c.id, machine_ids: ["ma"] }],

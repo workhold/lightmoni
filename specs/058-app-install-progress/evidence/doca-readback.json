@@ -1,0 +1,83 @@
+{
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "section": "44.6 应用安装进度与故障诊断（SDD 058）",
+  "saved": true,
+  "readbackSequences": [
+    893,
+    894
+  ],
+  "textBlocksMatch": true,
+  "portRulesMatch": true,
+  "nativeDiagram": {
+    "nodes": [
+      {
+        "id": "install058-ui",
+        "label": "管理员安装 / 查看进度"
+      },
+      {
+        "id": "install058-jobs",
+        "label": "平台部署 / 有效 job lease"
+      },
+      {
+        "id": "install058-agent",
+        "label": "Agent 白名单阶段 / 诊断"
+      },
+      {
+        "id": "install058-db",
+        "label": "SQLite 执行 / 有序步骤"
+      },
+      {
+        "id": "install058-receipt",
+        "label": "最终回执 / 未知需核对"
+      },
+      {
+        "id": "install058-outbox",
+        "label": "事务 outbox / 系统日志"
+      }
+    ],
+    "edges": [
+      {
+        "id": "install058-e1",
+        "source": "install058-ui",
+        "target": "install058-jobs"
+      },
+      {
+        "id": "install058-e2",
+        "source": "install058-jobs",
+        "target": "install058-agent"
+      },
+      {
+        "id": "install058-e3",
+        "source": "install058-agent",
+        "target": "install058-db"
+      },
+      {
+        "id": "install058-e4",
+        "source": "install058-agent",
+        "target": "install058-receipt"
+      },
+      {
+        "id": "install058-e5",
+        "source": "install058-receipt",
+        "target": "install058-db"
+      },
+      {
+        "id": "install058-e6",
+        "source": "install058-db",
+        "target": "install058-ui"
+      },
+      {
+        "id": "install058-e7",
+        "source": "install058-db",
+        "target": "install058-outbox"
+      }
+    ],
+    "nodesMatch": true,
+    "connectionsMatch": true
+  },
+  "preserved": {
+    "systemLogSectionUnchanged": true,
+    "concurrentDockerNativeDiagramUnchanged": true
+  },
+  "note": "Only inserted the installation subsection and native diagram, then appended the user’s port rule to its form paragraph. Unrelated blocks were not rewritten."
+}

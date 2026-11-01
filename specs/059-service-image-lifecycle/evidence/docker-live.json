@@ -1,0 +1,12 @@
+{
+  "scope": "One isolated Linux QA executor on a shared Docker host; not a production multi-region failover certification",
+  "checks": [
+    "Real Registry v3 accepts a Docker push over its isolated internal endpoint",
+    "Agent imports a real cached image after manifest/config/blob/diff-id verification",
+    "A cached digest remains readable after the upstream registry stops",
+    "Real workload executor starts Compose from the verified image ID without a daemon mirror change",
+    "Real OpenResty TLS: anonymous/wrong password 401, correct password 200, path opt-out works, upstream Authorization stripped; deployment includes positive/negative proof",
+    "Bounded image import removes its temporary download/archive directories"
+  ],
+  "ok": true
+}

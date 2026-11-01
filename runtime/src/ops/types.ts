@@ -44,7 +44,7 @@ export interface ResourceDefinition {
   validate(
     spec: Record<string, any>,
     previous?: Record<string, any>,
-    context?: { id: string },
+    context?: { id: string; systemKind?: 'openresty' | 'registry' },
   ): Record<string, any>;
   afterSave?(resource: PlatformResource, previous?: PlatformResource): void;
   afterDelete?(resource: PlatformResource): void;
@@ -84,6 +84,8 @@ export interface PlatformStore {
     spec: Record<string, any>,
     actor: string,
   ): PlatformResource;
+  createSystemApplication(kind: 'openresty' | 'registry', name: string, spec: Record<string, any>, actor: string): PlatformResource;
+  updateSystemApplication(id: string, revision: number, name: string, spec: Record<string, any>, actor: string): PlatformResource;
   update(
     id: string,
     revision: number,

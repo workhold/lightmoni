@@ -1,7 +1,9 @@
 import { fail } from "../shared/http.js";
+import {registryTemplateSpec} from './registry-runtime.js';
 
 type Input = Record<string, any>;
 export const applicationCatalog = [
+  {id:'registry',name:'Docker Registry',description:'独立持久数据的私有镜像仓库；系统镜像缓存请从私有镜像管理安装。',category:'tools',version:'3.0.0',versions:['3.0.0'],managed_recommended:false,managed_reason:'本地仓库数据不会自动跨机迁移，建议明确指定机器。',parameters:[],spec:{...registryTemplateSpec(),compose:{services:{registry:registryTemplateSpec().compose.services.registry}},ports:registryTemplateSpec().ports.slice(0,1),mounts:registryTemplateSpec().mounts.slice(0,1)}},
   {
     id: "mysql",
     name: "MySQL",
@@ -187,7 +189,9 @@ export function catalogInstallation(id: string, input: Input) {
     };
   }
   if (id === "redis") spec.environment.REDIS_PASSWORD = p.password;
-  if (p.port !== undefined) spec.ports[0].host_port = p.port;
+  if (spec.ports.length && id !== 'openresty')
+    spec.ports[0].host_port = p.port !== undefined && p.port !== null && p.port !== ''
+      ? p.port : input.deployment_mode === 'managed' ? 0 : spec.ports[0].container_port;
   return {
     template,
     name: input.name ?? template.name,
@@ -210,5 +214,6 @@ export function catalogInstallation(id: string, input: Input) {
 export const applicationCategories = [
   {id:'database',name:'数据库',name_en:'Databases'},
   {id:'cache',name:'缓存',name_en:'Caching'},
+  {id:'tools',name:'工具',name_en:'Tools'},
   {id:'web',name:'网站与网关',name_en:'Web & gateways'},
 ].map(c=>({...c,count:applicationCatalog.filter(t=>t.category===c.id).length}));
