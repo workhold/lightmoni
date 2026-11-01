@@ -76,5 +76,11 @@
     "all_native_diagrams_unchanged": 33,
     "text_and_order_verified": true,
     "note": "新Agent本地拒绝与旧中心claim/payload尚未停派分别说明，未宣称中心只读保证。"
+  },
+  "implementation_repository_evidence": {
+    "source_base_main": "c088bb4",
+    "section_60_10_sha256": "8de87edee652e10e55495a631cbe70244c7dc0661d8b03375a38e3ad9dc4df18",
+    "legacy_boundary_sha256": "ad730bceb92b89b89f8b05a608f145b9be392d1f6787953f693bdc6093555a83",
+    "scope": "Only the updated implementation paragraphs; unrelated merged main content was retained."
   }
 }

@@ -11,17 +11,17 @@
 ## 自动化与独立复核
 
 - 执行器核心 runner/scripts/Docker/journal/协议/安全测试 76/76 通过。
-- SSH bootstrap 集成与实际固定 shell 探测 85/85 通过；维护 API 48/48、独立安装/卸载 shell 28/28 通过。
+- SSH bootstrap 集成与实际固定 shell 探测 85/85 通过；维护 API 48/48、维护缺席实际 shell 75/75、独立安装/卸载实际 shell 59/59 通过。
 - 主机执行权限/维护浏览器 UI 16/16、提权任务浏览器 UI 24/24 通过，截图已核对。
 - runtime 类型检查与构建、web 类型检查与生产构建通过。
 - 独立复核许可启动时限、日志写入顺序、unknown/fence、防重、输出加密及主体门控，未发现新的阻断问题。
-- 完整 runtime 回归在同步最新 main 后记录最终结果；中间一次旧证书写通道测试仍期待普通 Agent 执行，已按新的拒绝行为更新，不据此恢复旧权限路径。
+- 已同步主干 `c088bb4`；合并后完整 runtime 回归共1288项：1259通过、7失败、22跳过。5项单独复跑通过；另2项安装测试因夹具每次 stat 都冷启动 Node 而在本机超时。夹具改用原生 stat 读取普通路径的实际 mode/dev/inode，FD 仍用 fstat，保留合成 UID、错配注入、20秒上限及全部断言；两项对照复跑通过（约5.37秒和5.82秒），修改后整个安装/卸载文件59/59通过。不能将这次完整回归称为一次全绿。中间旧证书写通道测试已改为验证普通 Agent 拒绝，不据此恢复旧权限路径。
 
 ## 真实 Linux 验收
 
 本机隔离 Colima Linux arm64/systemd 252、Node 24.15.0 中，通过同包安装与独立注册、中心签名计划及在线许可、真实 UID 0/root 脚本、普通主体隔离、敏感正文隔离、签名策略关闭、离线卸载和精确中心撤权。测试 CA 显式受信，未关闭 TLS 校验。
 
-真实签名超时负例将 `sleep 20` 限为 1 秒，以 `failed/timeout` 结束且不留下 unknown fence；system bus 停止时 readiness 拒绝就绪。Docker 验证脱敏 list、外部资源拒绝、固定 digest/架构的受管 create/remove，没有启动测试容器或修改已有容器。
+真实签名超时负例将 `sleep 20` 限为 1 秒，以 `failed/timeout` 结束且不留下 unknown fence；system bus 停止时 readiness 拒绝就绪。Docker 验证脱敏 list、外部资源拒绝、固定 digest/架构的受管 create/remove，没有启动受管测试容器或修改已有业务容器。另验证未知 unit drop-in 导致卸载拒绝且身份/journal 保留，移除精确 QA override 后原样卸载器经 FD/inode 锁及停止后 writer 锁成功。
 
 发现并修复 systemctl 私有 socket 不能替代 system bus 就绪判断、RemainAfterExit 保留管道 FD、运行超时与租约丢失混淆三处实际接缝。停止或观察不确定时仍为 unknown。
 

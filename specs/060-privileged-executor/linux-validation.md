@@ -4,7 +4,7 @@
 
 ## 已验证
 
-2026-11-01，在本地 Colima Linux arm64/systemd 252、Node 24.15.0 环境：同包安装、独立注册、签名计划、在线许可、真实 UID 0 脚本、任务主体隔离、敏感正文隔离、签名策略关闭、本地卸载与中心身份精确撤销通过。一次性测试 CA 经 `NODE_EXTRA_CA_CERTS` 显式信任，没有关闭 TLS 校验。
+2026-11-01，在本地 Colima Linux arm64/systemd 252、Node 24.15.0 环境：同包安装、独立注册、签名计划、在线许可、真实 UID 0 脚本、任务主体隔离、敏感正文隔离、签名策略关闭、本地卸载与中心身份精确撤销通过。最终加固版安装/卸载使用追加模式 FD 锁与 inode 绑定，卸载核验固定 unit、有效 DropInPaths、停止后 inactive 和 writer 锁；这些实际生产路径已在全新容器重新通过。一次性测试 CA 经 `NODE_EXTRA_CA_CERTS` 显式信任，没有关闭 TLS 校验。
 
 负例：关闭 system bus 后 `scriptDependenciesReady()` 为 false，恢复后为 true；真实 `sleep 20` 配置 1 秒超时，以 `failed/timeout` 结束，约 1.02 秒返回。核心单元/协议/恢复测试另有独立记录。
 
@@ -40,6 +40,6 @@ docker --context colima-lightmoni-release exec lightmoni-executor-qa-new sh -c '
 
 amd64 测试时将 fixture manifest 的 `arch` 改为 `amd64`。本 fixture 的安装摘要为固定测试摘要，验证的是安装/身份/执行协议；真实发行包下载与 SHA-256 检查由发行/安装验收覆盖。
 
-harness 成功时输出 `pass: true`，同一份无秘密 JSON 写入容器 `/run/lm060/report.json`。测试身份、私钥和 CA 留在容器内，不应导出或提交；仅导出报告。测试失败时保留该容器和 journal 排查，重新验收使用新容器，不能删除未知结果后继续当新任务执行。
+harness 成功时输出 `pass: true`，同一份无秘密 JSON 写入容器 `/run/lm060/report.json`。harness 会先证明生产卸载器拒绝自身测试 CA drop-in 且保留身份和 journal，再仅删除本 harness 创建的精确 `qa.conf` 与空目录、重载 systemd 后调用未修改的生产卸载器。测试身份、私钥和 CA 留在容器内，不应导出或提交；仅导出报告。测试失败时保留该容器和 journal 排查，重新验收使用新容器，不能删除未知结果后继续当新任务执行。
 
 可选 Docker 验收：仅在隔离测试 VM 上给**新容器**增加 `-v /var/run/docker.sock:/var/run/docker.sock`，并给 harness 设置 `LIGHTMONI_QA_DOCKER_IMAGE=repository@sha256:...`。该 image 必须已经在测试 daemon 中，Linux/原生架构固定、不含 image Config.Volumes。harness 经同一签名任务通道测试脱敏 list、外部资源拒绝、受管 create/remove，不启动创建的容器，不操作已有容器。失败时不执行 prune 或按名称模糊清理。

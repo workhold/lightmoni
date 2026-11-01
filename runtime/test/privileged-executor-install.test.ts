@@ -31,7 +31,23 @@ function fixture(t: TestContext, installed = true) {
   command("flock", 'process.exit(process.argv.at(-1)==="7"&&process.env.FIXTURE_WRITER_BUSY?1:0);');
   command("sleep", "process.exit(0);");
   command("systemd-run", "process.exit(0);");
-  command("stat", `const fs=require("node:fs"),args=process.argv.slice(2),path=args.at(-1),fd=/^\\/dev\\/fd\\/(\\d+)$/.exec(path),s=fd?fs.fstatSync(Number(fd[1])):fs.lstatSync(path),format=args[1],mode=(s.mode&0o7777).toString(8);if(format==="%u")console.log("0");else if(format==="%a")console.log(mode);else if(format==="%d:%i:%u:%a")console.log([s.dev,s.ino+(fd&&process.env.FIXTURE_FD_MISMATCH?1:0),0,mode].join(":"));else process.exit(90);`);
+  // check_path inspects every ancestor repeatedly. Use native stat for ordinary
+  // paths so this shell fixture does not cold-start Node hundreds of times.
+  // Keep fstat for inherited FDs: BSD stat sees /dev/fd's synthetic metadata.
+  command("stat-fd", `const fs=require("node:fs"),args=process.argv.slice(2),path=args.at(-1),fd=/^\\/dev\\/fd\\/(\\d+)$/.exec(path),s=fs.fstatSync(Number(fd[1])),format=args[1],mode=(s.mode&0o7777).toString(8);if(format==="%u")console.log("0");else if(format==="%a")console.log(mode);else if(format==="%d:%i:%u:%a")console.log([s.dev,s.ino+(process.env.FIXTURE_FD_MISMATCH?1:0),0,mode].join(":"));else process.exit(90);`);
+  const nativeStat = process.platform === "darwin" ? { flag: "-f", mode: "%Lp", identity: "%d:%i:0:%Lp" } : { flag: "-c", mode: "%a", identity: "%d:%i:0:%a" };
+  const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+  writeFileSync(join(commands, "stat"), `#!/bin/sh
+format=$2
+for path do :; done
+case "$path" in /dev/fd/*) exec ${shellQuote(join(commands, "stat-fd"))} "$@" ;; esac
+case "$format" in
+  %u) exec /usr/bin/stat ${nativeStat.flag} 0 -- "$path" ;;
+  %a) exec /usr/bin/stat ${nativeStat.flag} '${nativeStat.mode}' -- "$path" ;;
+  %d:%i:%u:%a) exec /usr/bin/stat ${nativeStat.flag} '${nativeStat.identity}' -- "$path" ;;
+  *) exit 90 ;;
+esac
+`, { mode: 0o755 });
   command("readlink", 'try{process.stdout.write(require("node:fs").realpathSync(process.argv.at(-1))+"\\n")}catch{process.exit(1)}');
   command("systemctl", `const fs=require("node:fs"),args=process.argv.slice(2),calls=${JSON.stringify(calls)},history=JSON.parse(fs.readFileSync(calls,"utf8"));history.push(args);fs.writeFileSync(calls,JSON.stringify(history));if(args[0]==="show"){if(args.includes("--property=FragmentPath")){console.log(process.env.FIXTURE_FRAGMENT||${JSON.stringify(unit)});process.exit(Number(process.env.FIXTURE_FRAGMENT_EXIT||0))}if(args.includes("--property=DropInPaths")){console.log(process.env.FIXTURE_DROPINS||"");process.exit(Number(process.env.FIXTURE_DROPINS_EXIT||0))}if(args.includes("--property=ActiveState")){console.log(process.env.FIXTURE_ACTIVE_STATE||"inactive");process.exit(Number(process.env.FIXTURE_ACTIVE_EXIT||0))}process.exit(91)}if(args[0]==="stop"&&process.env.FIXTURE_STATUS_AFTER_STOP)fs.copyFileSync(process.env.FIXTURE_STATUS_AFTER_STOP,${JSON.stringify(status)});`);
   command("install", `const cp=require("node:child_process"),input=process.argv.slice(2),args=[];for(let i=0;i<input.length;i++){if(input[i]==="-o"||input[i]==="-g"){i++;continue}args.push(input[i])}const result=cp.spawnSync("/usr/bin/install",args,{stdio:"inherit"});process.exit(result.status??1);`);
