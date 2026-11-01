@@ -40,6 +40,7 @@ export function agentUninstallCommand(expectedID: string) {
   return privileged(`set -eu
 umask 077
 ${agentMaintenanceShellGuards}
+if [ -e /etc/lightmoni-executor ] || [ -L /etc/lightmoni-executor ] || [ -e /opt/lightmoni-executor ] || [ -L /opt/lightmoni-executor ]; then lm_refuse 'Remove the privileged executor before removing the ordinary Agent'; fi
 lm_assert_paths
 lm_assert_no_operations
 lock=/run/lightmoni-agent-lifecycle.lock
@@ -195,6 +196,7 @@ export function agentRemovalCommand(expected: AgentRemovalObservation, purge=fal
   const script=`set -eu
 umask 077
 ${agentMaintenanceShellGuards}
+if [ -e /etc/lightmoni-executor ] || [ -L /etc/lightmoni-executor ] || [ -e /opt/lightmoni-executor ] || [ -L /opt/lightmoni-executor ]; then lm_refuse 'Remove the privileged executor before removing the ordinary Agent'; fi
 lm_assert_paths
 lm_assert_no_operations
 lock=/run/lightmoni-agent-lifecycle.lock

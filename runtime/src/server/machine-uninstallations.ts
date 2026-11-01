@@ -49,6 +49,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     return input;
   };
   const relation = (machine: MachineSummary, agentID: string, mode: string) => {
+    if(table("privileged_executors") && db.get("SELECT id FROM privileged_executors WHERE machine_id=? AND state!='revoked' LIMIT 1",machine.id)) fail(409,"请先卸载并撤销 root 执行器，再卸载普通 Agent");
     assertNoPendingAgentUpdate(db, agentID, machine.id);
     assertNoPendingMachineInstallation(db,machine.id,agentID,true);
     if (mode==="standard" && machine.agent_id && machine.agent_id!==agentID) fail(409,"远端 Agent 身份与主机关联不一致");

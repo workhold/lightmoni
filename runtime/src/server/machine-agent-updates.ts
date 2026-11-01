@@ -164,8 +164,8 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         credential: { id: credential.id, method: credential.method, retention: credential.retention, expires_at: credential.expires_at },
         action: input.action, current: { ...observed.current, service_active: observed.service_active, release: { ...observed.current } }, target, files,
         target_revision: access.revision(machine), expires_at: expires,
-        steps: ["核对主机、Agent 身份与当前程序指纹", "下载并校验审批固定的维护器和发行包", "通过独立 systemd 维护器切换程序", "确认目标构建的新进程已同步平台配置", "确认成功；启动或健康失败则恢复原程序"],
-        warnings: ["维护期间暂停该主机的新任务派发和领取。", "保留主机 ID、Agent 身份、配置、队列和游标；不会重新接入。", "结果未知时只读核对；远端确认期限到达后自动回退，不自动重试。"] };
+        steps: ["核对主机、Agent 身份与当前程序指纹", "下载并校验审批固定的维护器和发行包", "移除本平台旧 Docker 权限；程序回退不恢复该权限", "通过独立 systemd 维护器切换程序", "确认目标构建的新进程已同步平台配置", "确认成功；失败时仅恢复已验证的普通 Agent 程序"],
+        warnings: ["维护期间暂停该主机的新任务派发和领取。", "保留主机 ID、Agent 身份、配置、队列和游标；不会重新接入。", "旧高权限版本不能回退；无法安全恢复时停服并保留证据。", "结果未知时只读核对；确认超时仅回退到已验证的普通 Agent，不自动重试。"] };
       db.transaction(() => {
         assertFree(machine.id); assertTarget(access.get(machine.id));
         db.run("INSERT INTO machine_agent_updates(id,machine_id,agent_id,credential_id,action,status,plan_json,created_at,created_by) VALUES(?,?,?,?,?,'awaiting_approval',?,?,?)",

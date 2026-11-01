@@ -1,0 +1,37 @@
+{
+  "environment": "local isolated Linux arm64 systemd container",
+  "results": [
+    "fresh same-package installation and Ed25519 enrollment",
+    "real signed plan + start permit + transient systemd process executes as UID 0/root",
+    "ordinary task control rejects executor lineage and omits code/env/output",
+    "real signed runtime limit stops sleep 20 at 1 second with failed/timeout and no unknown writer fence",
+    "signed policy disable reaches independent executor",
+    "production uninstaller refuses the explicit QA unit drop-in and preserves identity/journal",
+    "production root lifecycle shell downloads a real SHA-256 fixture archive, upgrades and exact-rolls back with distinct activation receipts; identity and complete logical journal retained",
+    "real stop-to-writer contention remains durable unknown; read-only status does not mutate journal; a new exact explicit repair request starts without re-enrollment or old operation replay",
+    "offline uninstall clears local executor state; exact center identity separately revoked"
+  ],
+  "lifecycle_fixture_artifact_sha256": "7fc5ba0d2b275d7da846cc15665ef425700f901509cb665bab5474467122c175",
+  "pass": true,
+  "tested_at": "2026-11-02",
+  "node_version": "24.15.0",
+  "systemd_version": "252.39-1~deb12u2",
+  "architecture": "arm64",
+  "tls": "explicit ephemeral test CA; certificate verification enabled",
+  "scope": "Local isolated systemd program/lock/state lifecycle; center receipt + new activation heartbeat joining separately covered by signed HTTP integration fixtures.",
+  "initial_install_manifest": "Synthetic QA source revision and initial artifact digest; not a published release.",
+  "not_exercised": [
+    "real amd64 execution",
+    "real SSH or user host",
+    "production release archive",
+    "Docker daemon operations in this completion run",
+    "real center end-to-end upgrade confirmation under the fixed production unit"
+  ],
+  "production_source_sha256": {
+    "deploy/executor/install.sh": "313eb33225efad2a17e8e9c494d7ad5f28112e8ba44f6ad7d421ae9631d6251a",
+    "deploy/executor/uninstall.sh": "40375051d25e7a4d839d8abc93d4f68ef162344f90e595f83a4e0b64c4762ced",
+    "deploy/executor/maintenance.mjs": "8badc089282ea5dade9dfdfa9a9d58421dd7e97fce83b0db9ffc659f15823dc6",
+    "runtime/src/server/machine-executor-maintenance.ts": "098eefcaf2d85f16159b45b125e83ed0363b3e0eae880a6d918bfed4a99b8c90",
+    "scripts/test-privileged-executor-linux.mjs": "ab08a7e73d9ed8f625b96cd8004ad9746cc9ee710733b15432d9c38d6f2f4c18"
+  }
+}

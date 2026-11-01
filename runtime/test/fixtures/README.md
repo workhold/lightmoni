@@ -26,3 +26,11 @@ using the public Go SDK structs and `UseNumber`. It covers exact int64/numeric
 lexemes, default fields, map ordering, HTML escaping, null/empty collections and
 rounding ties. These expected values were generated with Go, not by the Node
 implementation under test.
+
+## Historical privileged Agent unit
+
+`legacy-privileged-agent.service` preserves the exact unit shipped at commit
+`fd3685e5011c7762ef491cd8fca0ec493b8c555e`. It is an inert regression fixture,
+never installed into the host systemd. Isolated installer/maintenance tests use
+it to prove that Docker supplementary groups, capabilities and the former web
+write path cannot return through automatic restoration or retained rollback.

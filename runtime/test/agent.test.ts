@@ -735,3 +735,10 @@ test("running Agent waits for assigned tasks, withdraws probes/logs and stops in
   await a.close();
   assert.equal(a.server?.listening, false);
 });
+
+
+test("ordinary Agent heartbeat does not advertise privileged daemon access",async t=>{
+  const agent=make(t);
+  assert.equal("docker_capabilities" in agent.status(),false);
+  assert.equal("docker_inventory" in agent.status(),false);
+});

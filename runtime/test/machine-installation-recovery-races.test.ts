@@ -8,7 +8,7 @@ import { cipher } from "../src/shared/crypto.js";
 import { registerManagedMachines, type SSHRunner } from "../src/server/managed-machines.js";
 import type { Dependencies } from "../src/shared/types.js";
 
-const checkOutput = "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
+const checkOutput = "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
 const now = new Date("2026-10-31T00:00:00.000Z");
 function deferred<T = any>() {
   let resolve!: (value: T) => void, reject!: (error: Error) => void;

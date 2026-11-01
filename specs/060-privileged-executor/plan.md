@@ -1,6 +1,6 @@
 # HLD/LLD 计划与决策
 
-本轮为设计交付；设计不等于实现许可或线上授权。
+用户已授权按设计开发。首批实现覆盖独立执行身份、一次性脚本及安装/卸载垂直链路；保留分期目标，未完成项目见 tasks。开发与本机隔离验收不构成修改线上主机权限的授权。
 
 1. 参考 Cockpit 普通/特权 bridge 的进程与 UID 隔离，参考 1Panel 的运维覆盖；不复制整个 Agent 常驻 root 的权限模型。
 2. root 执行器独立出站 HTTPS，使用 root 持有的 Ed25519 身份。中心 root job 的所有数据和结果接口强制 `execution_principal=privileged_executor`，不经普通 control 通道或本地 socket 授权。
@@ -13,3 +13,8 @@
 9. 同一源码/构建/发行包，普通与特权两个组合根，复用协议、执行状态机、journal代码、下载校验和适配器；通过类型化ExecutionContext注入隔离的身份/策略/目录。禁止把整个普通Agent用root启动作为提权捷径，禁止root加载Agent可写代码。
 
 架构影响：新增宿主机 root 执行主体、独立控制身份、签名与在线授权、权限状态和 root 存储，必须同步 `docs/system-design.md` 第 6、13.10、17、60 节及 Doca。SDK 直报和遥测链路不变。
+
+最新主干集成：以 fd3685e 为本轮集成快照，保留应用管理/地址/Logo/YAML/卸载进度功能；普通 unit 不继承 SDD071 的 Docker/cap 自动授权，helper 与 runtime run 进行实际权限核验。Docker安装、执行器安装/维护与两类任务全向互斥，异步请求后复验管理员会话。该调整不恢复旧写适配器，也不发布镜像。
+
+
+#64完成收口先落[completion.md](completion.md)：删除中心旧写通道而非保留旧Agent兼容；唯一维护API补upgrade/rollback/repair，程序与安全状态分离回退。Docker补装只供依赖，不授普通Agent权限。历史适配器库可供新profile复用，但旧写API停用，完整业务profile和定时root不混入基础闭环。

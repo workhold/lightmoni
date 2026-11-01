@@ -10,7 +10,7 @@ import {registerManagedMachines} from "../src/server/managed-machines.js";
 import type {Dependencies} from "../src/shared/types.js";
 import {fixturePrivateKey} from "./helpers/ssh-key.js";
 
-const output="LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
+const output="LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
 async function fixture(t:any) {
   const db=new DB(":memory:"),router=new Router(),encryption=cipher(Buffer.alloc(32,71));
   let clock=new Date("2026-10-30T00:00:00.000Z"),calls:any[]=[];

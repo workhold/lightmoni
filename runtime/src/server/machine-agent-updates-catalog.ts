@@ -88,10 +88,14 @@ export class AgentReleaseCatalog {
     this.verify({ sha256, size: stat.size });
     return { sha256, size: stat.size };
   }
-  pin(sha: string): PinnedAgentRelease {
+  pinBundle(sha: string): {release:AgentRelease;file:PinnedAgentFile} {
     const release = this.get(sha);
     const bundle = this.pinFile(join(this.downloads, release.file));
     if (bundle.sha256 !== release.sha256 || bundle.size !== release.size) fail(409, "发行包在生成计划时变化，请重试");
+    return {release,file:bundle};
+  }
+  pin(sha: string): PinnedAgentRelease {
+    const {release,file:bundle}=this.pinBundle(sha);
     return { release, files: { "bundle.tar.gz": bundle, "update.sh": this.pinFile(join(this.downloads, "update.sh")), "update-runner.mjs": this.pinFile(join(this.downloads, "update-runner.mjs")) } };
   }
   /** Rollback uses the retained host release, but its maintenance scripts still need immutable approval. */

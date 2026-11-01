@@ -11,11 +11,10 @@ export function inventory(deps: Dependencies, store: OperationsPlatformStore, ma
   if(machineID&&!machines.length)fail(404,'machine_not_found');
   const hosts=machines.map(m=>{
     const agent=m.agent_id?deps.db.get<any>('SELECT heartbeat,last_seen FROM agents WHERE id=?',m.agent_id):undefined;
-    let snapshot,collector,activeID='',capabilities:string[]=[];try{const heartbeat=JSON.parse(agent?.heartbeat??'{}');({snapshot,activeID}=dockerObservation(deps.db,m.agent_id??'',heartbeat));collector=heartbeat.collectors_status?.applications;capabilities=['docker.inventory','docker.control'].filter(c=>heartbeat.docker_capabilities?.includes(c));}catch{}
+    let snapshot,activeID='';try{const heartbeat=JSON.parse(agent?.heartbeat??'{}');({snapshot,activeID}=dockerObservation(deps.db,m.agent_id??'',heartbeat));}catch{}
     const online=!!agent&&Number.isFinite(Date.parse(agent.last_seen))&&deps.now().getTime()-Date.parse(agent.last_seen)<=120000;
-    const stale=!online||!snapshot||deps.now().getTime()-Date.parse(snapshot.observed_at)>120000;
     const targets=new Map(applicationTargets(deps.db,m.agent_id??'').map(t=>[t.deployment_id,t]));
-    return {...m,online,docker_capabilities:capabilities,active_job:activeID,state:!m.agent_id?'not_connected':!snapshot?'waiting':snapshot.state==='unavailable'?'unavailable':stale?'stale':snapshot.state==='ready'&&collector&&collector!=='ok'?'degraded':snapshot.state,error:snapshot?.error??'',attempted_at:snapshot?.attempted_at??'',observed_at:snapshot?.observed_at??'',truncated:snapshot?.truncated??false,
+    return {...m,online,docker_capabilities:[],active_job:'',historical_job:activeID,historical:!!snapshot,management_blocker:'privileged_executor_required',state:!m.agent_id?'not_connected':snapshot?'stale':'waiting',error:snapshot?.error??'',attempted_at:snapshot?.attempted_at??'',observed_at:snapshot?.observed_at??'',truncated:snapshot?.truncated??false,
       containers:(snapshot?.containers??[]).map(c=>({...c,application_id:targets.get(c.deployment_id)?.application_id??'',cluster_id:m.cluster_id??''}))};
   });
   const instanceRows=deps.db.all<any>('SELECT id,owner_id,machine_id,agent_id,cluster_id,state,healthy,retired FROM ops_cluster_instances WHERE retired=0').filter(i=>(!machineID||i.machine_id===machineID)&&(!clusterID||i.cluster_id===clusterID));

@@ -14,7 +14,8 @@ export interface SSHRunInput {
   /** Synchronous, atomic host identity check from this exact SSH handshake. */
   verifyHostKey?: (key: Buffer) => boolean;
   enrollmentToken?: string;
-  /** Non-secret fixed script input, never used for a password. */
+  /** Protected exec-channel input for fixed maintenance/enrollment; never log
+   * this field or use it as an SSH password, argv, or environment variable. */
   stdin?: string;
   signal: AbortSignal;
   port: number;
@@ -134,6 +135,12 @@ async function fixedCommandSSHRunner(input: SSHRunInput) {
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 export const CHECK_NAMES = ["linux", "supported_arch", "curl", "tar", "gzip", "sha256sum", "systemd", "install_privilege", "platform_https"] as const;
 export type SSHChecks = Record<typeof CHECK_NAMES[number], boolean>;
+export type SSHPrivilegeState = "root" | "sudo_noninteractive" | "unavailable" | "unknown";
+export interface SSHPrivilegeProbe {
+  state: SSHPrivilegeState;
+  reason_code: "" | "privilege_unavailable_or_interactive" | "privilege_probe_failed";
+}
+export const unknownSSHPrivilege = (): SSHPrivilegeProbe => ({ state: "unknown", reason_code: "privilege_probe_failed" });
 export interface SSHDiscovery {
   status: "succeeded" | "unavailable";
   hostname: string;
@@ -199,7 +206,7 @@ export function preflightCommand(endpoint: string) {
     "case $(uname -m) in x86_64) printf 'arch=amd64\\nsupported_arch=1\\n';; aarch64|arm64) printf 'arch=arm64\\nsupported_arch=1\\n';; *) printf 'arch=unsupported\\nsupported_arch=0\\n';; esac",
     ...["curl", "tar", "gzip", "sha256sum"].map(name => `if command -v ${name} >/dev/null 2>&1; then echo '${name}=1'; else echo '${name}=0'; fi`),
     "if command -v systemctl >/dev/null 2>&1 && test -d /run/systemd/system; then echo 'systemd=1'; else echo 'systemd=0'; fi",
-    "if test \"$(id -u)\" = 0 || sudo -n /bin/sh -c 'test \"$(id -u)\" = 0' </dev/null >/dev/null 2>&1; then echo 'install_privilege=1'; else echo 'install_privilege=0'; fi",
+    "LM_SSH_UID=$(id -u 2>/dev/null) || LM_SSH_UID=unknown; case \"$LM_SSH_UID\" in 0) printf 'privilege_state=root\\ninstall_privilege=1\\n';; ''|*[!0-9]*) printf 'privilege_state=unknown\\ninstall_privilege=0\\n';; *) if sudo -n /bin/sh -c 'test \"$(id -u)\" = 0' </dev/null >/dev/null 2>&1; then printf 'privilege_state=sudo_noninteractive\\ninstall_privilege=1\\n'; else printf 'privilege_state=unavailable\\ninstall_privilege=0\\n'; fi;; esac",
     "if test \"$(id -u)\" = 0; then sh -c 'if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json; then echo agent_installation=present; else echo agent_installation=absent; fi'; elif sudo -n /bin/sh -c 'if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json; then echo agent_installation=present; else echo agent_installation=absent; fi' </dev/null 2>/dev/null; then :; else echo agent_installation=unknown; fi",
     url.protocol === "https:" ? `if curl --fail --silent --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 10 --output /dev/null ${quote(health)} </dev/null 2>/dev/null; then echo 'platform_https=1'; else echo 'platform_https=0'; fi` : "echo 'platform_https=0'",
     ...discoveryCommand(),
@@ -209,18 +216,22 @@ export function parsePreflight(output: string, observedAt = new Date().toISOStri
   const lines = output.trim().split(/\r?\n/), optionalAt = lines.indexOf(DISCOVERY_BEGIN);
   const values = new Map<string, string>();
   for (const line of optionalAt < 0 ? lines : lines.slice(0, optionalAt)) {
-    const match = /^([a-zA-Z_][a-zA-Z0-9_]*)=([a-z0-9]+)$/.exec(line);
+    const match = /^([a-zA-Z_][a-zA-Z0-9_]*)=([a-z0-9_]+)$/.exec(line);
     if (!match || values.has(match[1])) throw new SSHError("invalid_response");
     values.set(match[1], match[2]);
   }
   const installation = values.get("agent_installation") ?? "unknown";
   if (!["present", "absent", "unknown"].includes(installation)) throw new SSHError("invalid_response");
-  if (values.size !== CHECK_NAMES.length + 3 + Number(values.has("agent_installation")) || values.get("LMSSH") !== "1" ||
+  if (values.size !== CHECK_NAMES.length + 4 + Number(values.has("agent_installation")) || values.get("LMSSH") !== "1" ||
       !["linux", "unsupported"].includes(values.get("platform") ?? "") ||
       !["amd64", "arm64", "unsupported"].includes(values.get("arch") ?? "") ||
       CHECK_NAMES.some(name => !["0", "1"].includes(values.get(name) ?? ""))) throw new SSHError("invalid_response");
   const checks = Object.fromEntries(CHECK_NAMES.map(name => [name, values.get(name) === "1"])) as SSHChecks;
+  const privilegeState = values.get("privilege_state") as SSHPrivilegeState;
+  if (!["root", "sudo_noninteractive", "unavailable", "unknown"].includes(privilegeState) ||
+      checks.install_privilege !== ["root", "sudo_noninteractive"].includes(privilegeState)) throw new SSHError("invalid_response");
+  const privilege: SSHPrivilegeProbe = { state: privilegeState, reason_code: privilegeState === "unknown" ? "privilege_probe_failed" : privilegeState === "unavailable" ? "privilege_unavailable_or_interactive" : "" };
   if (checks.linux !== (values.get("platform") === "linux") || checks.supported_arch !== (values.get("arch") !== "unsupported")) throw new SSHError("invalid_response");
-  return { platform: values.get("platform")!, arch: values.get("arch")!, agent_installation: { state: installation as "present" | "absent" | "unknown" }, checks, ready: Object.values(checks).every(Boolean),
+  return { platform: values.get("platform")!, arch: values.get("arch")!, privilege, agent_installation: { state: installation as "present" | "absent" | "unknown" }, checks, ready: Object.values(checks).every(Boolean),
     discovery: optionalAt < 0 ? unavailableSSHDiscovery() : parseDiscovery(lines.slice(optionalAt + 1), observedAt) };
 }

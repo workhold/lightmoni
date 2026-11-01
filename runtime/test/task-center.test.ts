@@ -41,6 +41,24 @@ function fixture() {
 const capabilities = [SCRIPT_TASK_CAPABILITY];
 const result = (lease: string, overrides: any = {}) => ({ lease_token: lease, state: "succeeded", code: "", summary: "done", stdout: "ok", stderr: "", exit_code: 0, ...overrides });
 
+test("ordinary routes cannot claim, mutate, expire or retry a root executor lineage",()=>{
+  const f=fixture();try{
+    f.task();const run=f.store.dispatch("script-one",{confirm:true},"admin").runs[0];
+    const claim=f.store.claim("agent-one",capabilities)!;
+    f.db.run("UPDATE task_runs SET execution_principal='privileged_executor',executor_id='root-executor' WHERE id=?",run.id);
+    assert.equal(f.store.claim("agent-one",capabilities),null);
+    assert.throws(()=>f.store.heartbeat("agent-one",run.id,{lease_token:claim.lease_token}),/principal_mismatch/);
+    assert.throws(()=>f.store.result("agent-one",run.id,result(claim.lease_token)),/principal_mismatch/);
+    assert.throws(()=>f.store.cancel(run.id,"admin"),/principal_mismatch/);
+    f.advance(1000);f.store.sweep();assert.equal(f.store.get(run.id).state,"running");
+    f.db.run("UPDATE task_runs SET state='unknown' WHERE id=?",run.id);
+    assert.throws(()=>f.store.resolve(run.id,"admin","checked process stopped"),/principal_mismatch/);
+    assert.throws(()=>f.store.retry(run.id,"admin"),/principal_mismatch/);
+    assert.equal(f.store.get(run.id).execution_principal,"privileged_executor");
+    assert.throws(()=>f.store.dispatch("script-one",{confirm:true,request_id:"new-root-fence"},"admin"),/privileged_execution_pending|unresolved/);
+  }finally{f.close();}
+});
+
 test("manual dispatch validates confirmation and targets atomically, snapshots code and hides lease tokens", () => {
   const f = fixture(); try {
     f.task();

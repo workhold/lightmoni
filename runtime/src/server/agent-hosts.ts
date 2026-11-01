@@ -42,6 +42,7 @@ export function currentAgentHostname(db: DB, machineID: string, agentID: string)
 
 /** Unknown attempts remain a barrier until explicitly retried or reviewed. */
 export function hasActiveTaskRuns(db: DB, agentID: string, hostID = ""): boolean {
+  if (table(db,"machine_executor_bootstraps") && db.get("SELECT id FROM machine_executor_bootstraps WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND status IN ('running','verifying','unknown') LIMIT 1",agentID,hostID,hostID)) return true;
   if (!table(db, "task_runs")) return false;
   return !!db.get("SELECT id FROM task_runs WHERE (agent_id=? OR (?<>'' AND host_id=?)) AND (state IN ('queued','running') OR (state='unknown' AND superseded_by='' AND resolved_at='')) LIMIT 1", agentID, hostID, hostID);
 }

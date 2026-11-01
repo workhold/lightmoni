@@ -13,10 +13,11 @@ import {SSHError} from '../src/server/machine-ssh.js';
 import {NodeStore,normalizeTask} from '../src/server/nodes-model.js';
 import type {Dependencies} from '../src/shared/types.js';
 
-const checkOutput='LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n';
+const checkOutput='LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n';
 const master=Buffer.alloc(32,9), now=new Date('2026-10-19T00:00:00.000Z');
-async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverride?:SSHRunner){
+async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverride?:SSHRunner,humanAdminSession=false){
  const db=new DB(':memory:'), router=new Router(), encryption=cipher(master), user={id:'admin',name:'Admin',role:'admin'};
+ if(humanAdminSession){db.exec("CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT NOT NULL,active INTEGER NOT NULL)");db.run("INSERT INTO users VALUES('admin','admin',1)");}
  // managed-machines joins the node registry to derive the linked Agent status.
  // Keep this fixture self-contained instead of relying on the full app
  // bootstrap, which registers the nodes module before managed machines.
@@ -37,7 +38,7 @@ async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverrid
  const machines=registerManagedMachines(deps,{agentCredentials,sshRunner:sshRunnerOverride??sshRunner});
  const server=createServer(async(req,res)=>{if(!(await router.handle(req,res))){res.writeHead(404);res.end()}});server.listen(0,'127.0.0.1');await once(server,'listening');const url=`http://127.0.0.1:${(server.address() as any).port}`;
  t.after(()=>{machines.close?.();server.close();db.close()});
- const rawRequest=async(path:string,method='GET',body?:any)=>{const response=await fetch(url+'/api/v1'+path,{method,headers:body?{'content-type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const raw=await response.text();return {status:response.status,raw,data:parseJSON(raw)};};
+ const rawRequest=async(path:string,method='GET',body?:any)=>{const response=await fetch(url+'/api/v1'+path,{method,headers:{...(humanAdminSession?{cookie:'lm_session=fixture'}:{}),...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const raw=await response.text();return {status:response.status,raw,data:parseJSON(raw)};};
  // Legacy-pin scenarios are seeded directly into the isolated database; the
  // production API deliberately rejects all client-supplied host identity.
  const request=async(path:string,method='GET',body?:any)=>{
@@ -77,6 +78,23 @@ test('password credential preserves intentional leading/trailing whitespace duri
  const created=await f.request('/machines','POST',{name:'password-space',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});
  const original='  password with spaces \t';const password=await f.request(`/machines/${created.data.id}/credentials`,'POST',{method:'password',secret:original,retention:'one_time'});assert.equal(password.status,201);
  const checked=await f.request(`/machines/${created.data.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(checked.status,200,checked.raw);assert.equal(received,original);
+});
+
+test('SSH privilege evidence binds the checked target and credential without confusing the login name with UID',async t=>{
+ for(const state of ['root','sudo_noninteractive','unavailable','unknown']){
+  const output=checkOutput.replace('privilege_state=root','privilege_state='+state).replace('install_privilege=1','install_privilege='+(['root','sudo_noninteractive'].includes(state)?'1':'0'));
+  const f=await fixture(t,{},async()=>({stdout:output,stderr:'',stages:[]})),h=await host(f,'privilege-'+state);
+  const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});assert.equal(checked.status,200,checked.raw);
+  const evidence=checked.data.privilege;
+  assert.equal(evidence.state,state);assert.equal(checked.data.connected,true);
+  assert.equal(checked.data.ready,['root','sudo_noninteractive'].includes(state));
+  assert.equal(evidence.checked_at,checked.data.checked_at);assert.equal(evidence.expires_at,checked.data.expires_at);
+  for(const field of ['machine_revision','credential_binding_revision','endpoint_fingerprint'])assert.match(evidence[field],/^[a-f0-9]{64}$/);
+  assert.equal(evidence.reason_code,state==='unavailable'?'privilege_unavailable_or_interactive':state==='unknown'?'privilege_probe_failed':'');
+  const saved=f.db.get<any>('SELECT result_json,target_revision FROM machine_ssh_checks WHERE id=?',checked.data.id)!;
+  assert.deepEqual(JSON.parse(saved.result_json).privilege,evidence);assert.equal(evidence.machine_revision,saved.target_revision);
+  assert.ok(!JSON.stringify(evidence).includes(h.key));
+ }
 });
 
 test('registration assigns immutable platform IDs while user names remain editable and need not be unique',async t=>{
@@ -815,7 +833,7 @@ test('unknown uninstall after stop can release its fence with unchanged complete
 
 test('Docker environment installation is admin-confirmed, durable, idempotent and scoped to the host',async t=>{
  const calls:any[]=[];
- const f=await fixture(t,{},async input=>{calls.push(input);return {stdout:JSON.stringify({state:'succeeded',phase:'verified',code:''}),stderr:'private package output',stages:[]};});
+ const f=await fixture(t,{},async input=>{calls.push(input);return {stdout:JSON.stringify({state:'succeeded',phase:'verified',code:''}),stderr:'private package output',stages:[]};},true);
  const m=(await f.request('/machines','POST',{name:'docker-host',address:'host.example.com',username:'root',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
  const c=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'docker-password',retention:'temporary'})).data;
  const path=`/machines/${m.id}/docker-installations`,body={request_id:'docker-fixture-request-001',credential_id:c.credential_id,confirmed:true};
@@ -832,7 +850,7 @@ test('Docker environment installation is admin-confirmed, durable, idempotent an
 
 test('Docker installation rejects one-time credentials and unsafe remote results, and recovers through read-only verification',async t=>{
  let output='private raw output token=hidden',failSSH=false;
- const f=await fixture(t,{},async()=>{if(failSSH)throw new SSHError('host_key_mismatch');return {stdout:output,stderr:'secret stderr',stages:[]};});
+ const f=await fixture(t,{},async()=>{if(failSSH)throw new SSHError('host_key_mismatch');return {stdout:output,stderr:'secret stderr',stages:[]};},true);
  const m=(await f.request('/machines','POST',{name:'docker-recovery',address:'host.example.com',username:'root',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
  const one=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'one-time-secret',retention:'one_time'})).data;
  const path=`/machines/${m.id}/docker-installations`,body={request_id:'docker-fixture-request-002',confirmed:true};

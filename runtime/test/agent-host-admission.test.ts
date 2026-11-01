@@ -20,7 +20,7 @@ import { registerInstall } from "../src/server/install.js";
 import type { Dependencies } from "../src/shared/types.js";
 
 const at = new Date("2026-10-29T08:00:00.000Z");
-const preflight = "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
+const preflight = "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
 async function fixture(t: any) {
   const db = new DB(":memory:"), router = new Router(), user = { id: "admin", name: "Admin", role: "admin" };
   const deps = { db, router, ...cipher(Buffer.alloc(32, 8)), now: () => at, externalURL: "https://monitor.example.test",
@@ -163,7 +163,8 @@ test("orphan and revoked identities cannot receive operations resources, plans o
   assert.equal((await f.request(`/agents/${agent.agentID}/credentials/revoke`, "POST", { audience: "control" })).status, 200);
   assert.deepEqual((await f.request("/operations/agents")).data.agents, []);
   assert.equal((await makeResource(agent.agentID)).status, 409);
-  assert.throws(() => f.ops.plan(resource.data.resource.id, "inspect", {}, "admin"), /registered_host_required/);
+  assert.throws(() => f.ops.plan(resource.data.resource.id, "inspect", {}, "admin"), /privileged_profile_not_implemented/);
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM ops_runs")!.n,0,"removed profiles cannot create a run for a revoked identity");
   assert.throws(() => f.jobs.enqueue({ agentID: agent.agentID, deploymentID: "revoked", operationID: "revoked", actions: [] }), /registered_host_required/);
   f.db.run("UPDATE agent_enrollments SET machine_id='' WHERE id=?", agent.token.enrollment_id);
   assert.equal(f.credentials.has(agent.agentID, "data"), false);

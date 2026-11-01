@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { DB } from "../src/shared/sqlite.js";
 import { Router } from "../src/shared/http.js";
 import { registerAgentJobs } from "../src/server/agent-jobs.js";
@@ -27,11 +29,11 @@ function fixture(expirySweepIntervalMs?: number) {
 
 test("Agent job lease protocol is idempotent and records bounded receipts", () => {
   const f = fixture();
-  const created = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-1", operationID: "op-1", capabilities: ["systemd.restart"], actions: [{ kind: "systemd", operation: "restart", unit: "checkout.service" }] });
-  const repeated = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-1", operationID: "op-1", capabilities: ["systemd.restart"], actions: [{ kind: "systemd", operation: "restart", unit: "checkout.service" }] });
+  const created = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-1", operationID: "op-1", capabilities: ["health.systemd"], actions: [{ kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } }] });
+  const repeated = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-1", operationID: "op-1", capabilities: ["health.systemd"], actions: [{ kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } }] });
   assert.equal(repeated.id, created.id);
-  assert.equal(f.jobs.claim("agent-1", ["artifact.stage"]), null);
-  const leased = f.jobs.claim("agent-1", ["systemd.restart"]);
+  assert.equal(f.jobs.claim("agent-1", ["health.http"]), null);
+  const leased = f.jobs.claim("agent-1", ["health.systemd"]);
   assert.ok(leased);
   assert.equal(leased.state, "leased");
   assert.throws(() => f.jobs.event("other-agent", leased!.id, { lease_id: leased!.lease_id, sequence: 1, phase: "accepted" }), /does not belong/);
@@ -53,54 +55,45 @@ test("Agent job lease protocol is idempotent and records bounded receipts", () =
   f.db.close();
 });
 
-test("only typed rollback jobs may skip artifact staging", () => {
+test("ordinary queue rejects legacy writes, daemon reads and read capability spoofing before persistence", () => {
   const f = fixture();
-  const deployment = f.jobs.enqueue({
-    agentID: "agent-1", deploymentID: "dep-deploy", operationID: "op-deploy",
-    actions: [
-      { kind: "stage_artifact", digest: "a".repeat(64) },
-      { kind: "activate_release", version: "v2", expectedCurrentVersion: "v1" },
-      { kind: "systemd", operation: "restart", unit: "checkout.service" },
-      { kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } },
-    ],
-  });
-  const deploymentLease = f.jobs.claim("agent-1", []);
-  assert.ok(deploymentLease);
-  f.jobs.event("agent-1", deployment.id, { lease_id: deploymentLease!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
-  assert.throws(() => f.jobs.event("agent-1", deployment.id, { lease_id: deploymentLease!.lease_id, sequence: 2, phase: "activating", summary: "must stage first" }), /valid next step/);
-  f.jobs.result("agent-1", deployment.id, { lease_id: deploymentLease!.lease_id, state: "failed", summary: "preparation failed" });
-
-  const rollback = f.jobs.enqueue({
-    agentID: "agent-1", deploymentID: "dep-rollback", operationID: "op-rollback",
-    actions: [
-      { kind: "activate_release", version: "v1", expectedCurrentVersion: "v2" },
-      { kind: "systemd", operation: "restart", unit: "checkout.service" },
-      { kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } },
-    ],
-  });
-  const rollbackLease = f.jobs.claim("agent-1", []);
-  assert.ok(rollbackLease);
-  f.jobs.event("agent-1", rollback.id, { lease_id: rollbackLease!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
-  assert.equal(f.jobs.event("agent-1", rollback.id, { lease_id: rollbackLease!.lease_id, sequence: 2, phase: "activating", summary: "restore previous release" }).state, "activating");
-  f.db.close();
+  const forbidden = [
+    { capabilities: ["systemd.restart"], actions: [{kind:"systemd", operation:"restart", unit:"app.service"}] },
+    { capabilities: ["artifact.stage"], actions: [{kind:"stage_artifact", digest:"a".repeat(64)}] },
+    { capabilities: ["artifact.activate_release"], actions: [{kind:"activate_release", version:"v2"}] },
+    { capabilities: ["docker.inventory"], actions: [{kind:"docker", operation:"inventory"}] },
+    { capabilities: ["docker.control"], actions: [{kind:"docker", operation:"restart"}] },
+    ...["website","certificate","compose","backup","platform"].map(domain=>({capabilities:["operations."+domain],actions:[{kind:"operations",domain,operation_id:"private"}]})),
+    { capabilities: ["health.systemd"], actions: [{kind:"systemd", operation:"restart", unit:"app.service"}] },
+    { capabilities: ["health.systemd"], actions: [{kind:"health_check", check:{kind:"systemd-active",unit:"app.service"}, command:"touch /etc/unsafe"}] },
+    { capabilities: ["health.systemd"], actions: [{kind:"health_check", check:{kind:"systemd-active",unit:"app.service",operation:"restart"}}] },
+    { capabilities: ["health.http"], actions: [{kind:"health_check", check:{kind:"http",url:"https://user:secret@example.com"}}] },
+    { capabilities: ["health.http","systemd.restart"], actions: [{kind:"health_check", check:{kind:"http",url:"https://example.com"}}] },
+    { capabilities: ["health.http"], actions: [{kind:"health_check", check:{kind:"http",url:"https://example.com",timeoutMs:30001}}] },
+  ];
+  try {
+    forbidden.forEach((job,i)=>assert.throws(()=>f.jobs.enqueue({agentID:"agent-1",deploymentID:"denied-"+i,operationID:"denied-"+i,...job}),/privileged_executor_required/));
+    assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_jobs")!.n,0);
+    assert.throws(()=>f.jobs.claim("agent-1",["health.http","systemd.restart"]),/privileged_executor_required/);
+  } finally { f.db.close(); }
 });
 
 test("one node cannot claim another job while a previous lease is active", () => {
   const f = fixture();
-  f.jobs.enqueue({agentID:"agent-1",deploymentID:"one",operationID:"one",actions:[]});
-  f.jobs.enqueue({agentID:"agent-1",deploymentID:"two",operationID:"two",actions:[]});
-  const first=f.jobs.claim("agent-1",[])!;
-  assert.ok(first); assert.equal(f.jobs.claim("agent-1",[]),null);
+  f.jobs.enqueue({agentID:"agent-1",deploymentID:"one",operationID:"one",capabilities:["health.systemd"],actions:[{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}]});
+  f.jobs.enqueue({agentID:"agent-1",deploymentID:"two",operationID:"two",capabilities:["health.systemd"],actions:[{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}]});
+  const first=f.jobs.claim("agent-1",["health.systemd"])!;
+  assert.ok(first); assert.equal(f.jobs.claim("agent-1",["health.systemd"]),null);
   f.jobs.result("agent-1",first.id,{lease_id:first.lease_id,state:"failed",summary:"closed"});
-  assert.ok(f.jobs.claim("agent-1",[])); f.db.close();
+  assert.ok(f.jobs.claim("agent-1",["health.systemd"])); f.db.close();
 });
 
 test("success without verified health evidence becomes unknown and cancellation reports prior state", () => {
   const f = fixture();
   const updates: any[] = [];
   f.jobs.onUpdate((update) => updates.push(update));
-  const malformed = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-malformed", operationID: "op-malformed", actions: [{ kind: "health_check" }] });
-  const leased = f.jobs.claim("agent-1", []);
+  const malformed = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-malformed", operationID: "op-malformed", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] });
+  const leased = f.jobs.claim("agent-1", ["health.systemd"]);
   assert.ok(leased);
   const invalid = f.jobs.result("agent-1", malformed.id, { lease_id: leased!.lease_id, state: "succeeded", summary: "claimed success", snapshot: { health: { healthy: true } } });
   assert.equal(invalid.state, "unknown");
@@ -108,21 +101,21 @@ test("success without verified health evidence becomes unknown and cancellation 
   assert.equal(updates.at(-1).previousState, "leased");
   assert.equal(updates.at(-1).healthVerified, false);
 
-  const queued = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-queued", operationID: "op-queued", actions: [] });
+  const queued = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-queued", operationID: "op-queued", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] });
   f.jobs.cancel(queued.id, "admin");
   assert.equal(updates.at(-1).phase, "cancelled");
   assert.equal(updates.at(-1).previousState, "queued");
-  const claimed = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-claimed-cancel", operationID: "op-claimed-cancel", actions: [] });
-  const claimedLease = f.jobs.claim("agent-1", []);
+  const claimed = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-claimed-cancel", operationID: "op-claimed-cancel", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] });
+  const claimedLease = f.jobs.claim("agent-1", ["health.systemd"]);
   assert.ok(claimedLease);
   f.jobs.cancel(claimed.id, "admin");
   assert.equal(f.jobs.get(claimed.id).state, "unknown");
   assert.equal(f.jobs.get(claimed.id).receipt.code, "unknown_execution_result");
   assert.equal(updates.at(-1).phase, "unknown");
   assert.equal(updates.at(-1).previousState, "leased");
-  const expired = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-expired", operationID: "op-expired", actions: [], expiresInSeconds: 60 });
+  const expired = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-expired", operationID: "op-expired", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}], expiresInSeconds: 60 });
   f.advance(61);
-  assert.equal(f.jobs.claim("agent-1", []), null);
+  assert.equal(f.jobs.claim("agent-1", ["health.systemd"]), null);
   assert.equal(f.jobs.get(expired.id).state, "cancelled");
   assert.equal(f.jobs.get(expired.id).receipt.code, "job_expired");
   assert.equal(updates.at(-1).previousState, "queued");
@@ -131,8 +124,8 @@ test("success without verified health evidence becomes unknown and cancellation 
 
 test("centre sweep expires lost Agent leases without waiting for another Agent request", async () => {
   const f = fixture(10);
-  const job = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-offline", operationID: "op-offline", actions: [] });
-  const leased = f.jobs.claim("agent-1", []);
+  const job = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-offline", operationID: "op-offline", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] });
+  const leased = f.jobs.claim("agent-1", ["health.systemd"]);
   assert.ok(leased);
   f.advance(46);
   f.jobs.start();
@@ -147,11 +140,11 @@ test("centre sweep expires lost Agent leases without waiting for another Agent r
 
 test("expired Agent leases become unknown and cannot be completed", () => {
   const f = fixture();
-  const job = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-2", operationID: "op-2", actions: [] });
-  const leased = f.jobs.claim("agent-1", []);
+  const job = f.jobs.enqueue({ agentID: "agent-1", deploymentID: "dep-2", operationID: "op-2", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] });
+  const leased = f.jobs.claim("agent-1", ["health.systemd"]);
   assert.ok(leased);
   f.advance(46);
-  assert.equal(f.jobs.claim("agent-1", []), null);
+  assert.equal(f.jobs.claim("agent-1", ["health.systemd"]), null);
   const unknown = f.jobs.get(job.id);
   assert.equal(unknown.state, "unknown");
   assert.equal(unknown.receipt.code, "unknown_execution_result");
@@ -205,29 +198,84 @@ test("read-only systemd preflight jobs reject deployment phases and snapshots fr
 test('pending, running, unknown and completed node uninstallations block enqueue and claim',()=>{
  const f=fixture();try{
   f.db.exec('CREATE TABLE machine_uninstallations(id TEXT,agent_id TEXT,status TEXT)');
-  f.jobs.enqueue({agentID:'agent-1',deploymentID:'prior',operationID:'prior',actions:[]});
+  f.jobs.enqueue({agentID:'agent-1',deploymentID:'prior',operationID:'prior',capabilities:["health.systemd"],actions:[{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}]});
   for(const state of ['awaiting_approval','running','unknown','succeeded']){
    f.db.run('INSERT INTO machine_uninstallations VALUES(?,?,?)','u','agent-1',state);
-   assert.throws(()=>f.jobs.enqueue({agentID:'agent-1',deploymentID:state,operationID:state,actions:[]}),/uninstallation_blocks_jobs/);
-   assert.equal(f.jobs.claim('agent-1',[]),null);
+   assert.throws(()=>f.jobs.enqueue({agentID:'agent-1',deploymentID:state,operationID:state,capabilities:["health.systemd"],actions:[{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}]}),/uninstallation_blocks_jobs/);
+   assert.equal(f.jobs.claim('agent-1',['health.systemd']),null);
    f.db.run('DELETE FROM machine_uninstallations');
   }
-  assert.ok(f.jobs.claim('agent-1',[]));
+  assert.ok(f.jobs.claim('agent-1',['health.systemd']));
  }finally{f.jobs.close?.();f.db.close();}
 });
 
 test("recovery uninstall fences host-bound jobs even when the actual remote identity is missing or different",()=>{
   for(const state of ["awaiting_approval","running","unknown"]){
     const f=fixture();try{
-      const queued=f.jobs.enqueue({agentID:"agent-1",deploymentID:"before",operationID:"before",actions:[]});
+      const queued=f.jobs.enqueue({agentID:"agent-1",deploymentID:"before",operationID:"before",capabilities:["health.systemd"],actions:[{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}]});
       f.db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,agent_id TEXT);CREATE TABLE machine_uninstallations(id TEXT PRIMARY KEY,machine_id TEXT,agent_id TEXT,status TEXT)");
       f.db.run("INSERT INTO managed_machines VALUES('host','agent-1')");
       f.db.run("INSERT INTO machine_uninstallations VALUES('removal','host','',?)",state);
-      assert.throws(()=>f.jobs.enqueue({agentID:"agent-1",deploymentID:"during",operationID:"during",actions:[]}),/uninstallation_blocks_jobs/);
-      assert.equal(f.jobs.claim("agent-1",[]),null);
+      assert.throws(()=>f.jobs.enqueue({agentID:"agent-1",deploymentID:"during",operationID:"during",capabilities:["health.systemd"],actions:[{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}]}),/uninstallation_blocks_jobs/);
+      assert.equal(f.jobs.claim("agent-1",["health.systemd"]),null);
       assert.equal(f.jobs.get(queued.id).state,"queued");
       f.db.run("UPDATE machine_uninstallations SET status='cancelled'");
-      assert.equal(f.jobs.claim("agent-1",[])!.id,queued.id);
+      assert.equal(f.jobs.claim("agent-1",["health.systemd"])!.id,queued.id);
     }finally{f.jobs.close();f.db.close();}
   }
+});
+
+function insertLegacy(f: ReturnType<typeof fixture>, id: string, state: string, attempts: number) {
+  const at=f.deps.now().toISOString();
+  f.db.run("INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,issued_at,expires_at,created_at,updated_at,attempts,lease_id,lease_expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    id,"agent-1","legacy-deployment-"+id,"legacy-operation-"+id,state,JSON.stringify(["systemd.restart"]),JSON.stringify([{kind:"systemd",operation:"restart",unit:"app.service"}]),at,"2099-01-01T00:00:00.000Z",at,at,attempts,"old-lease","2099-01-01T00:00:00.000Z");
+}
+
+test("startup quarantines old writes and replays durable outcomes to business stores registered later", () => {
+  const f=fixture();
+  try {
+    insertLegacy(f,"queued","queued",0);insertLegacy(f,"claimed","leased",1);insertLegacy(f,"running","activating",1);insertLegacy(f,"retried","queued",1);
+    const restarted=registerAgentJobs({...f.deps,router:new Router()},{agentCredentials:{has:()=>true} as any});
+    const updates:any[]=[];restarted.onUpdate(update=>updates.push(update));
+    assert.equal(updates.length,4);
+    for(const id of ["queued","claimed","running","retried"]) {
+      const job=restarted.get(id);assert.equal(job.state,id==="queued"?"cancelled":"unknown");assert.equal(job.receipt.code,"legacy_agent_write_removed");assert.equal(job.lease_id,"");assert.equal(job.lease_expires_at,"");
+      assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_job_events WHERE job_id=?",id)!.n,1);
+      assert.equal(restarted.cancel(id,"admin").state,job.state,"cancellation cannot release an unresolved write fence");
+      assert.throws(()=>restarted.event("agent-1",id,{lease_id:"old-lease",sequence:2,phase:"succeeded"}),/privileged_executor_required/);
+      assert.throws(()=>restarted.result("agent-1",id,{lease_id:"old-lease",state:"succeeded",snapshot:{health:{healthy:true}}}),/privileged_executor_required/);
+      assert.equal(restarted.get(id).state,job.state);
+    }
+    assert.equal(updates.find(update=>update.jobID==="running").previousState,"activating");
+    assert.equal(restarted.claim("agent-1",["health.systemd"]),null);
+    const second:any[]=[];restarted.onUpdate(update=>second.push(update));assert.equal(second.length,4);
+    assert.equal(updates.length,4,"new subscriptions do not notify old observers twice");
+    assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_job_events")!.n,4,"replay never appends a second canonical event");
+    restarted.close();
+  } finally {f.jobs.close();f.db.close();}
+});
+
+test("claim quarantines a legacy row inserted after startup and cannot lease it through self-reported capability", () => {
+  const f=fixture();try {
+    const updates:any[]=[];f.jobs.onUpdate(update=>updates.push(update));insertLegacy(f,"after-startup","accepted",1);
+    assert.throws(()=>f.jobs.claim("agent-1",["systemd.restart"]),/privileged_executor_required/);
+    assert.equal(f.jobs.get("after-startup").state,"unknown");assert.equal(updates[0].code,"legacy_agent_write_removed");
+    assert.equal(f.jobs.claim("agent-1",["health.systemd"]),null);
+  } finally {f.db.close();}
+});
+
+
+test("ordinary control HTTP cannot renew, finish or cancel an old write lease",async t=>{
+  const f=fixture();insertLegacy(f,"legacy-http","activating",1);
+  const server=createServer((req,res)=>{void f.deps.router.handle(req,res);});server.listen(0,"127.0.0.1");await once(server,"listening");
+  t.after(()=>{server.closeAllConnections();server.close();f.db.close();});
+  const base=`http://127.0.0.1:${(server.address() as any).port}/api/v1/agents/agent-1/jobs`;
+  for(const endpoint of ["events","result","cancel"]) {
+    const response=await fetch(base+"/legacy-http/"+endpoint,{method:"POST",headers:{authorization:"Bearer ordinary-control","content-type":"application/json"},body:JSON.stringify({lease_id:"old-lease",sequence:1,phase:"verifying",state:"succeeded",snapshot:{health:{healthy:true}}})});
+    assert.equal(response.status,409);assert.deepEqual(await response.json(),{error:"privileged_executor_required"});
+    assert.equal(f.jobs.get("legacy-http").state,"activating","a refused old lease must not report success or release its fence");
+  }
+  const claim=await fetch(base+"/claim",{method:"POST",headers:{authorization:"Bearer ordinary-control","content-type":"application/json"},body:JSON.stringify({capabilities:["systemd.restart"]})});
+  assert.equal(claim.status,409);assert.deepEqual(await claim.json(),{error:"privileged_executor_required"});
+  assert.equal(f.jobs.get("legacy-http").state,"unknown");
 });

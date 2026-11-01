@@ -383,7 +383,7 @@ test("maintenance fencing prevents conflicting tasks, jobs, deletion, SSH termin
   const p = (await f.plan(h.id)).data;
   assert.throws(() => tasks.dispatch(task.id, { confirm: true }, "admin"), /升级|维护/);
   assert.equal(tasks.claim(h.agent, [SCRIPT_TASK_CAPABILITY]), null);
-  assert.throws(() => jobs.enqueue({ agentID: h.agent, deploymentID: "deployment-one", operationID: "operation-one", actions: [{ kind: "test" }] }), /升级|维护/);
+  assert.throws(() => jobs.enqueue({ agentID: h.agent, deploymentID: "deployment-one", operationID: "operation-one", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] }), /升级|维护/);
   assert.equal(jobs.claim(h.agent, []), null);
   assert.throws(() => assertNoPendingAgentUpdate(f.db, h.agent), /升级|维护/);
   assert.throws(() => f.machines.acquireTerminal(h.id, h.credential, () => {}), /升级|维护/);

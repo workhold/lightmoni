@@ -16,7 +16,7 @@ import {fixturePrivateKey} from "./helpers/ssh-key.js";
 import {pendingMachineInstallation} from "../src/server/machine-installations-guard.js";
 import {SCRIPT_TASK_CAPABILITY} from "../src/shared/task-center.js";
 
-const preflight="LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
+const preflight="LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
 const probe=(id:string,extra:Record<string,string>={})=>Object.entries({LMAGENT:"1",agent_id:id,installation:"present",program_complete:"1",unit_managed:"1",service_running:"1",lifecycle_locked:"0",operation_lock:"0",data_retained:"1",...extra}).map(([key,value])=>`${key}=${value}`).join("\n")+"\n";
 async function fixture(t:any){
  const db=new DB(":memory:"),user={id:"admin",name:"Admin",role:"admin"};let clock=new Date("2026-10-31T08:00:00Z"),router=new Router();
@@ -136,7 +136,7 @@ test("unknown installation fences lifecycle edits and finite task APIs, with no 
  for(const [path,method,input] of [[`/machines/${h.id}`,"PUT",{name:"changed"}],[`/machines/${h.id}`,"DELETE",undefined],[`/machines/${h.id}/deployments/plan`,"POST",{check_id:h.check,arch:"amd64",version:"0.1.0"}],[`/machines/${h.id}/uninstallations/plan`,"POST",{check_id:h.check}],[`/machines/${h.id}/agent-updates/plan`,"POST",{action:"upgrade",target_sha256:"a".repeat(64)}]] as const)assert.equal((await f.request(path,method,input)).status,409,path);
  const tasks=new TaskRunStore(f.deps,f.credentials),task=tasks.nodes.task({name:"Script",type:"script",enabled:true,target_all:false,host_ids:[h.id],label_ids:[],schedule:{mode:"once"},script:{runtime:"node",code:"console.log('ok')",timeout_seconds:5,max_output_bytes:1024}},"recovery-script",true);
  assert.throws(()=>tasks.dispatch(task.id,{confirm:true},"admin"),/安装/);assert.equal(tasks.claim(active.id,[SCRIPT_TASK_CAPABILITY]),null);
- const jobs=registerAgentJobs(f.deps,{agentCredentials:f.credentials});assert.throws(()=>jobs.enqueue({agentID:active.id,deploymentID:"service",operationID:"inspect",actions:[{kind:"test"}]}),/安装/);assert.equal(jobs.claim(active.id,[]),null);jobs.close?.();
+ const jobs=registerAgentJobs(f.deps,{agentCredentials:f.credentials});assert.throws(()=>jobs.enqueue({agentID:active.id,deploymentID:"service",operationID:"inspect",capabilities:["health.systemd"],actions:[{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}]}),/安装/);assert.equal(jobs.claim(active.id,[]),null);jobs.close?.();
  assert.equal(f.machines.get(h.id).capabilities.deploy_agent.reason,"installation_unknown");
  const independent=new DB(":memory:");assert.equal(pendingMachineInstallation(independent,"host","agent"),undefined);independent.close();
 });

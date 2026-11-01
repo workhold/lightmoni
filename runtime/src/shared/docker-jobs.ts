@@ -1,6 +1,6 @@
 import { dockerInventory } from './application-observation.js';
 
-export const DOCKER_ERROR_CODES=['docker_cli_missing','docker_permission_denied','docker_daemon_unavailable','docker_command_timeout','docker_collection_unavailable','operations_node_locked','invalid_docker_receipt','job_expired','unknown_execution_result'];
+export const DOCKER_ERROR_CODES=['docker_cli_missing','docker_permission_denied','docker_daemon_unavailable','docker_command_timeout','docker_collection_unavailable','operations_node_locked','invalid_docker_receipt','job_expired','unknown_execution_result','privileged_executor_required'];
 export const safeDockerCode=(code:unknown)=>DOCKER_ERROR_CODES.includes(String(code))?String(code):'docker_collection_unavailable';
 export const dockerJobAction=(actions:any[])=>actions.length===1&&actions[0]?.kind==='docker'?actions[0]:undefined;
 

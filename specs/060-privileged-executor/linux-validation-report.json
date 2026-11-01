@@ -1,0 +1,48 @@
+{
+  "environment": "local isolated Linux arm64 systemd container",
+  "results": [
+    "fresh same-package installation and Ed25519 enrollment",
+    "real signed plan + start permit + transient systemd process executes as UID 0/root",
+    "ordinary task control rejects executor lineage and omits code/env/output",
+    "real signed runtime limit stops sleep 20 at 1 second with failed/timeout and no unknown writer fence",
+    "real Docker fixed Unix socket: sanitized list, external-resource refusal, digest/architecture-pinned managed create and remove; no existing container changed",
+    "signed policy disable reaches independent executor",
+    "production uninstaller refuses the explicit QA unit drop-in and preserves identity/journal",
+    "offline uninstall clears local executor state; exact center identity separately revoked"
+  ],
+  "pass": true,
+  "tested_at": "2026-11-01",
+  "node_version": "24.15.0",
+  "systemd_version": "252",
+  "architecture": "arm64",
+  "tls": "explicit ephemeral test CA; certificate verification enabled",
+  "docker_image": "local/lightmoni-executor-systemd-qa@sha256:11062cb6b46a29a39a99131dff8ca38b15191d7fa854f8611dfc664a2c45adf5",
+  "docker_operations_verified": [
+    "list",
+    "create",
+    "remove"
+  ],
+  "separate_probes": [
+    "system bus stopped: script readiness false; restored: true",
+    "direct production ScriptHost sleep 20 / 1 second limit: failed/timeout, 1021ms"
+  ],
+  "not_exercised": [
+    "amd64 real Linux execution",
+    "Docker pull/start/stop/restart and registry authentication",
+    "Compose and log tail profiles"
+  ],
+  "hardened_lifecycle_verified": true,
+  "standalone_sha256": {
+    "deploy/executor/install.sh": "d886937011db64e3a6718089a33a1a2bbc4ed0352b5b158da9959b43f4d05eae",
+    "deploy/executor/uninstall.sh": "40375051d25e7a4d839d8abc93d4f68ef162344f90e595f83a4e0b64c4762ced"
+  },
+  "hardened_lifecycle": [
+    "pre-open root-owned non-symlink lock validation",
+    "append FD/path device+inode+owner+mode identity",
+    "fixed unit bytes and zero effective DropInPaths",
+    "explicit systemctl stop and inactive observation",
+    "post-stop writer lock with clean exact identity/status",
+    "QA drop-in correctly refused with identity/journal retained",
+    "precise QA override removed before unmodified production uninstall"
+  ]
+}

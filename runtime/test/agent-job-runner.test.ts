@@ -1,38 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gzipSync } from "node:zlib";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { digest } from "../src/agent/config.js";
-import { AgentJobRunner } from "../src/agent/jobs.js";
-
-function releaseBundle(serviceID: string, version: string, architecture: "any" | "linux-amd64" | "linux-arm64") {
-  const entries = [
-    { name: "manifest.json", content: Buffer.from(JSON.stringify({ schema_version: 1, service_id: serviceID, version, architecture, source_revision: "test", entrypoint: "run" })), mode: 0o644 },
-    { name: "run", content: Buffer.from("#!/bin/sh\n"), mode: 0o755 },
-  ];
-  const blocks = entries.map(({ name, content, mode }) => {
-    const header = Buffer.alloc(512);
-    header.write(name, 0, "utf8");
-    header.write(mode.toString(8).padStart(7, "0") + "\0", 100, "ascii");
-    header.write("0000000\0", 108, "ascii");
-    header.write("0000000\0", 116, "ascii");
-    header.write(content.length.toString(8).padStart(11, "0") + "\0", 124, "ascii");
-    header.write("00000000000\0", 136, "ascii");
-    header.fill(0x20, 148, 156);
-    header[156] = 0x30;
-    Buffer.from("ustar\0", "binary").copy(header, 257);
-    header.write("00", 263, "ascii");
-    const sum = header.reduce((total, byte) => total + byte, 0);
-    header.write(sum.toString(8).padStart(6, "0") + "\0 ", 148, "ascii");
-    return [header, content, Buffer.alloc((512 - content.length % 512) % 512)];
-  });
-  return gzipSync(Buffer.concat([...blocks.flat(), Buffer.alloc(1024)]));
-}
+import { AgentJobRunner, ORDINARY_JOB_CAPABILITIES } from "../src/agent/jobs.js";
 
 test("Agent job runner reports an in-flight marker as unknown after restart", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "lightmoni-job-restart-"));
@@ -53,93 +27,55 @@ test("Agent job runner reports an in-flight marker as unknown after restart", as
   assert.equal(existsSync(join(dataDir, "agent-job-state.json")), true);
 });
 
-test("Agent job runner downloads release only with control credential and current job lease", { skip: process.platform !== "linux" }, async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "lightmoni-job-artifact-"));
-  const releaseDirectory = join(dataDir, "service");
-  mkdirSync(releaseDirectory);
-  const serviceID = "a".repeat(32), version = "v1";
-  const architecture = process.arch === "arm64" ? "linux-arm64" as const : "linux-amd64" as const;
-  const bytes = releaseBundle(serviceID, version, architecture), sha256 = digest(bytes);
-  const action = { kind: "stage_artifact", release_id: "release_1", service_id: serviceID, version, architecture, destination: "releases/v1", sha256, size: bytes.length };
-  const calls: Array<{ url: string; init: RequestInit }> = [];
-  const runner = new AgentJobRunner({ endpoint: "https://center", agentID: "agent-1", controlCredential: "control-secret", dataDir, now: () => new Date("2026-10-22T00:00:00Z") }, {
-    fetch: (async (url: any, init: RequestInit) => {
-      const value = { url: String(url), init };
-      calls.push(value);
-      if (value.url.endsWith("/jobs/claim")) return new Response(JSON.stringify({ job: {
-        id: "job-1", lease_id: "lease-1", expires_at: "2026-10-22T00:10:00Z", capabilities: ["artifact.stage"], actions: [action],
-        target: { config: { release_directory: releaseDirectory, unit: "checkout.service" } }, next_sequence: 0,
-      } }), { status: 200 });
-      if (value.url.endsWith("/artifacts/release_1")) return new Response(bytes, { status: 200, headers: {
-        "content-length": String(bytes.length), "x-artifact-sha256": sha256, "x-artifact-format": "lightmoni-release-v1.tar.gz",
-      } });
-      return new Response("{}", { status: 200 });
-    }) as typeof fetch,
+test("ordinary Agent advertises only fixed read-only job capabilities", async t => {
+  const dataDir = mkdtempSync(join(tmpdir(), "lightmoni-readonly-caps-"));
+  t.after(() => rmSync(dataDir, {recursive:true,force:true}));
+  let advertised: any;
+  const runner = new AgentJobRunner({endpoint:"https://center",agentID:"agent",controlCredential:"ordinary-control",dataDir}, {
+    fetch: (async (_url:any, init:RequestInit) => { advertised=JSON.parse(String(init.body)).capabilities; return Response.json({job:null}); }) as typeof fetch,
   });
-  const result = await runner.pollOnce();
-  assert.equal(result?.state, "succeeded");
-  const download = calls.find((call) => call.url.endsWith("/artifacts/release_1"));
-  assert.ok(download);
-  assert.equal(download.url, "https://center/api/v1/agents/agent-1/jobs/job-1/artifacts/release_1");
-  assert.equal(new Headers(download.init.headers).get("authorization"), "Bearer control-secret");
-  assert.equal(new Headers(download.init.headers).get("x-lightmoni-job-lease"), "lease-1");
-  assert.equal(existsSync(join(releaseDirectory, "releases", version, "run")), true);
+  assert.equal(await runner.pollOnce(),null);
+  assert.deepEqual(advertised,["health.systemd","health.http","health.tcp","systemd.probe"]);
+  assert.equal(Object.isFrozen(ORDINARY_JOB_CAPABILITIES),true);
 });
 
-test("Agent job runner rejects artifact response metadata mismatch without staging", { skip: process.platform !== "linux" }, async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "lightmoni-job-artifact-invalid-"));
-  const releaseDirectory = join(dataDir, "service");
-  mkdirSync(releaseDirectory);
-  const serviceID = "a".repeat(32), bytes = releaseBundle(serviceID, "v1", process.arch === "arm64" ? "linux-arm64" : "linux-amd64"), sha256 = digest(bytes);
-  const action = { kind: "stage_artifact", release_id: "release_1", service_id: serviceID, version: "v1", architecture: process.arch === "arm64" ? "linux-arm64" as const : "linux-amd64" as const, destination: "releases/v1", sha256, size: bytes.length };
-  const runner = new AgentJobRunner({ endpoint: "https://center", agentID: "agent-1", controlCredential: "secret", dataDir, now: () => new Date("2026-10-22T00:00:00Z") }, {
-    fetch: (async (url: any) => {
-      const target = String(url);
-      if (target.endsWith("/jobs/claim")) return new Response(JSON.stringify({ job: {
-        id: "job-1", lease_id: "lease-1", expires_at: "2026-10-22T00:10:00Z", capabilities: ["artifact.stage"], actions: [action],
-        target: { config: { release_directory: releaseDirectory, unit: "checkout.service" } }, next_sequence: 0,
-      } }), { status: 200 });
-      if (target.endsWith("/artifacts/release_1")) return new Response(bytes, { status: 200, headers: {
-        "content-length": String(bytes.length), "x-artifact-sha256": "0".repeat(64), "x-artifact-format": "lightmoni-release-v1.tar.gz",
-      } });
-      return new Response("{}", { status: 200 });
-    }) as typeof fetch,
+test("ordinary Agent rejects legacy write actions before payload download or host command", async t => {
+  const cases = [
+    {name:"artifact stage",cap:"artifact.stage",action:{kind:"stage_artifact",release_id:"private-release",sha256:"a".repeat(64),size:32}},
+    {name:"artifact activate",cap:"artifact.activate_release",action:{kind:"activate_release",releaseDirectory:"/srv/app",version:"v2",expectedCurrentVersion:"v1"}},
+    ...["daemon-reload","enable","disable","start","restart","stop"].map(operation => ({name:"systemd "+operation,cap:"systemd."+operation.replace("-","_"),action:{kind:"systemd",operation,unit:"app.service"}})),
+    ...["website","certificate","compose","backup","platform"].map(domain => ({name:"operations "+domain,cap:"operations."+domain,action:{kind:"operations",domain,operation_id:"private-operation"}})),
+    ...["start","stop","restart"].map(operation => ({name:"docker "+operation,cap:"docker.control",action:{kind:"docker",operation,container_id:"a".repeat(64)}})),
+    {name:"write action spoofing read-only capability",cap:"health.http",action:{kind:"systemd",operation:"restart",unit:"app.service"}},
+  ];
+  for (const scenario of cases) await t.test(scenario.name,async sub => {
+    const dataDir=mkdtempSync(join(tmpdir(),"lightmoni-write-denied-"));sub.after(()=>rmSync(dataDir,{recursive:true,force:true}));
+    const requests:any[]=[],commands:any[]=[],payloadDownloads:any[]=[];
+    const runner=new AgentJobRunner({endpoint:"https://center",agentID:"agent",controlCredential:"ordinary-control",dataDir},{
+      command:async(file,args)=>{commands.push({file,args});throw Error("must not execute");},
+      fetch:(async(url:any,init:RequestInit)=>{const path=String(url);requests.push({path,body:JSON.parse(String(init.body))});
+        if(path.endsWith("/jobs/claim"))return Response.json({job:{id:"legacy-write",lease_id:"lease",expires_at:new Date(Date.now()+60000).toISOString(),capabilities:[scenario.cap],actions:[scenario.action]}});
+        if(!path.endsWith("/result")){payloadDownloads.push(path);throw Error("must not download");}return Response.json({});}) as typeof fetch,
+    });
+    const receipt=await runner.pollOnce();assert.equal(receipt?.state,"failed");assert.equal(receipt?.code,"privileged_executor_required");assert.deepEqual(commands,[]);assert.deepEqual(payloadDownloads,[]);assert.equal(requests.length,2);assert.equal(requests[1].body.code,"privileged_executor_required");assert.deepEqual(JSON.parse(readFileSync(join(dataDir,"agent-job-state.json"),"utf8")),{});
   });
-  const result = await runner.pollOnce();
-  assert.equal(result?.state, "failed");
-  assert.equal(result?.code, "invalid_artifact");
-  assert.equal(existsSync(join(releaseDirectory, "releases", "v1")), false);
 });
 
-test("Agent lease artifact download streams only the declared digest, size, and archive format", async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "lightmoni-job-artifact-stream-"));
-  const serviceID = "a".repeat(32), bytes = releaseBundle(serviceID, "v1", "any"), sha256 = digest(bytes);
-  const action = { kind: "stage_artifact" as const, release_id: "release_1", service_id: serviceID, version: "v1", architecture: "any" as const, destination: "releases/v1", sha256, size: bytes.length };
-  const seen: Array<{ url: string; init: RequestInit }> = [];
-  const runner = new AgentJobRunner({ endpoint: "https://center/", agentID: "agent-1", controlCredential: "credential", dataDir }, {
-    fetch: (async (url: any, init: RequestInit) => {
-      seen.push({ url: String(url), init });
-      return new Response(bytes, { status: 200, headers: {
-        "content-length": String(bytes.length), "x-artifact-sha256": sha256, "x-artifact-format": "lightmoni-release-v1.tar.gz",
-      } });
-    }) as typeof fetch,
-  });
-  const downloaded = await (runner as any).downloadArtifact({ id: "job-1", lease_id: "lease-1" }, action, new AbortController().signal) as Buffer;
-  assert.deepEqual(downloaded, bytes);
-  assert.equal(seen[0]?.url, "https://center/api/v1/agents/agent-1/jobs/job-1/artifacts/release_1");
-  assert.equal(new Headers(seen[0]?.init.headers).get("authorization"), "Bearer credential");
-  assert.equal(new Headers(seen[0]?.init.headers).get("x-lightmoni-job-lease"), "lease-1");
-  assert.equal(seen[0]?.init.redirect, "error");
+test("ordinary Agent refuses Docker inventory before contacting the privileged daemon",async t=>{
+ const dataDir=mkdtempSync(join(tmpdir(),"lightmoni-docker-inventory-"));t.after(()=>rmSync(dataDir,{recursive:true,force:true}));const commands:any[]=[];
+ const runner=new AgentJobRunner({endpoint:"https://center",agentID:"agent",controlCredential:"ordinary-control",dataDir},{command:async(file,args)=>{commands.push({file,args});return{stdout:"",stderr:""}},fetch:(async(url:any)=>String(url).endsWith("/jobs/claim")?Response.json({job:{id:"inventory",lease_id:"lease",expires_at:new Date(Date.now()+60000).toISOString(),capabilities:["docker.inventory"],actions:[{kind:"docker",operation:"inventory"}]}}):Response.json({})) as typeof fetch});
+ const receipt=await runner.pollOnce();assert.equal(receipt?.state,"failed");assert.equal(receipt?.code,"privileged_executor_required");assert.deepEqual(commands,[]);
+});
 
-  const badRunner = new AgentJobRunner({ endpoint: "https://center", agentID: "agent-1", controlCredential: "credential", dataDir }, {
-    fetch: (async () => new Response(bytes, { status: 200, headers: {
-      "content-length": String(bytes.length), "x-artifact-sha256": "0".repeat(64), "x-artifact-format": "lightmoni-release-v1.tar.gz",
-    } })) as typeof fetch,
-  });
-  await assert.rejects(
-    () => (badRunner as any).downloadArtifact({ id: "job-1", lease_id: "lease-1" }, action, new AbortController().signal),
-    /metadata does not match/,
-  );
+test("Agent startup never resumes cached legacy website gateway writes",async t=>{
+ const dataDir=mkdtempSync(join(tmpdir(),"lightmoni-no-legacy-recovery-"));t.after(()=>rmSync(dataDir,{recursive:true,force:true}));
+ // An unsafe cached website tree would trigger the old automatic recovery path.
+ // The ordinary runner must ignore it and preserve it for explicit review.
+ mkdirSync(join(dataDir,"operations"));writeFileSync(join(dataDir,"cached-gateway"),"private cached gateway");symlinkSync(join(dataDir,"cached-gateway"),join(dataDir,"operations","websites"));
+ writeFileSync(join(dataDir,"agent-job-state.json"),JSON.stringify({id:"interrupted-write",lease_id:"old-lease",started_at:"2026-01-01T00:00:00Z"}));
+ const events:any[]=[],requests:any[]=[];const signal=AbortSignal.abort();
+ const runner=new AgentJobRunner({endpoint:"https://center",agentID:"agent",controlCredential:"ordinary-control",dataDir},{command:async()=>{throw Error("must not execute")},emit:e=>{events.push(e)},fetch:(async(url:any,init:RequestInit)=>{requests.push({url:String(url),body:JSON.parse(String(init.body))});return Response.json({});}) as typeof fetch});
+ await runner.run(signal);assert.equal(requests.length,1);assert.equal(requests[0].body.state,"unknown");assert.deepEqual(events,[]);assert.equal(readFileSync(join(dataDir,"cached-gateway"),"utf8"),"private cached gateway");
 });
 
 test("Agent renews the active job lease while a long health check runs", async (t) => {

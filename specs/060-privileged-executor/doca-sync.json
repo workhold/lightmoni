@@ -9,7 +9,10 @@
     "docs/system-design.md 13.10",
     "docs/system-design.md 17 target note",
     "docs/system-design.md 33.8 target note",
-    "docs/system-design.md 60.1–60.9"
+    "docs/system-design.md 60.1–60.9",
+    "docs/system-design.md 60.10",
+    "docs/system-design.md 57 historical write boundary",
+    "docs/system-design.md 71 implementation override"
   ],
   "before_seq": 902,
   "readback_seq": 903,
@@ -31,7 +34,7 @@
   "text_nodes_edges_geometry_verified": true,
   "full_original_document_order_verified": true,
   "native_visual_render_verified": false,
-  "note": "仅同步SDD060目标设计，尚未实现/合入/发布。保留其他开发中章节和全部既有原生图；结构回读不冒称视觉验收。",
+  "note": "目标设计与首批实际实现边界均已同步回读；未合入/发布，不将未完成阶段说成已可用。原生图及其他内容保留，结构回读不冒称视觉验收。",
   "followup_code_reuse": {
     "checked_at": "2026-10-31T18:05:29.113311+00:00",
     "source_revision": "bf1be5b9fc5cc2215dcbc156d2e1071bb3db102d",
@@ -42,6 +45,85 @@
     "unrelated_blocks_unchanged": 662,
     "all_native_diagrams_unchanged": 33,
     "text_links_and_original_order_verified": true,
+    "native_visual_render_verified": false
+  },
+  "implementation_boundary": {
+    "checked_at": "2026-11-01T03:03:27.810482+00:00",
+    "before_seq": 904,
+    "readback_seq": 905,
+    "inserted_blocks": 6,
+    "updated_intro": "privileged060-p-2",
+    "unrelated_blocks_unchanged": 666,
+    "native_diagrams_unchanged": 33,
+    "text_and_original_order_verified": true,
+    "native_visual_render_verified": false
+  },
+  "implementation_cross_references": {
+    "checked_at": "2026-11-01T03:10:13.420088+00:00",
+    "before_seq": 905,
+    "readback_seq": 906,
+    "updated_cross_references": 4,
+    "legacy_write_boundary_inserted": true,
+    "unrelated_blocks_unchanged": 669,
+    "all_native_diagrams_unchanged": 33,
+    "text_verified": true
+  },
+  "ordinary_control_scope": {
+    "checked_at": "2026-11-01T03:15:42.795072+00:00",
+    "before_seq": 906,
+    "readback_seq": 907,
+    "updated_paragraphs": 2,
+    "unrelated_blocks_unchanged": 672,
+    "all_native_diagrams_unchanged": 33,
+    "text_and_order_verified": true,
+    "note": "新Agent本地拒绝与旧中心claim/payload尚未停派分别说明，未宣称中心只读保证。"
+  },
+  "implementation_repository_evidence": {
+    "source_base_main": "fe99013",
+    "section_60_10_sha256": "3588c5fdf4fb69f25818c025101226fe1d3897fe89991b906ab363cc10286e9b",
+    "legacy_boundary_sha256": "ad730bceb92b89b89f8b05a608f145b9be392d1f6787953f693bdc6093555a83",
+    "scope": "Only the updated implementation paragraphs; unrelated merged main content was retained."
+  },
+  "latest_main_integration": {
+    "checked_at": "2026-11-01T15:02:21.517085+00:00",
+    "before_seq": 923,
+    "readback_seq": 924,
+    "updated_paragraphs": 1,
+    "inserted_sdd071_boundary": true,
+    "unrelated_blocks_unchanged": 732,
+    "all_native_diagrams_unchanged": 37,
+    "text_and_original_order_verified": true
+  },
+  "completion_cleanup": {
+    "checked_at": "2026-11-01T15:45:12.061288+00:00",
+    "before_seq": 924,
+    "readback_seq": 925,
+    "updated_blocks": 23,
+    "removed_obsolete_related_text_blocks": 6,
+    "inserted_blocks": 4,
+    "unrelated_blocks_unchanged": 705,
+    "existing_native_diagrams_retained": 37,
+    "related_native_diagrams_updated": 3,
+    "text_nodes_edges_and_original_order_verified": true,
+    "native_visual_render_verified": false
+  },
+  "completion_recovery_and_legacy_permissions": {
+    "checked_at": "2026-11-01T16:02:53.434514+00:00",
+    "before_seq": 925,
+    "readback_seq": 926,
+    "updated_paragraphs": 3,
+    "scope": "Explicit read-only interruption evidence and retirement of platform-owned legacy Docker permissions",
+    "latest_target_text_verified": true,
+    "all_native_diagrams_untouched": true
+  },
+  "final_current_contract": {
+    "checked_at": "2026-11-01T16:11:25.970841+00:00",
+    "before_seq": 926,
+    "readback_seq": 927,
+    "inserted_current_contract_paragraphs": 1,
+    "latest_target_text_verified": true,
+    "native_diagrams_modified": 0,
+    "scope": "Single inserted current-contract paragraph; no changes to other existing blocks.",
     "native_visual_render_verified": false
   }
 }
