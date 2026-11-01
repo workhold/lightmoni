@@ -7,6 +7,7 @@ import type { AgentCredentialStore } from "./agent-credentials.js";
 import { assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
 import { assertNoPendingAgentUpdate, hasPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoPendingMachineInstallation, hasInstallationTable, pendingMachineInstallation, unresolvedInstallationSQL } from "./machine-installations-guard.js";
+import { assertNoPrivilegedExecution, hasPrivilegedExecution } from "./privileged-execution-guard.js";
 
 /**
  * Durable, pull based execution jobs.  A job is immutable after enqueue: the
@@ -305,6 +306,7 @@ export function registerAgentJobs(
     const existing = db.get<any>("SELECT * FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deploymentID, operationID);
     if (existing) return view(existing);
     assertNoPendingMachineInstallation(db,"",agentID);
+    assertNoPrivilegedExecution(db,"",agentID);
     assertNoPendingAgentUpdate(db, agentID);
     assertNoDockerInstallation(db,"",agentID);
     if (uninstallBlocked(agentID)) fail(409, "agent_uninstallation_blocks_jobs");
@@ -330,12 +332,15 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     const caps = new Set(capabilities(offered));
     if (uninstallBlocked(agentID)) return null;
+    if (hasPrivilegedExecution(db,"",agentID)) return null;
     expireLeases();
     return db.transaction(() => {
     assertAgentActive(db, agentID);
     if (uninstallBlocked(agentID)) return null;
     if (pendingMachineInstallation(db,"",agentID)) return null;
-    if (hasPendingAgentUpdate(db, agentID) || pendingDockerInstallation(db,"",agentID)) return null;
+    if (hasPendingAgentUpdate(db, agentID)) return null;
+    if (pendingDockerInstallation(db,"",agentID)) return null;
+    if (hasPrivilegedExecution(db,"",agentID)) return null;
     const at = deps.now(), nowText = iso(deps, at);
     // A node has one execution lane, including when two runner processes poll.
     // Shared Nginx state and project registries must never mutate concurrently.

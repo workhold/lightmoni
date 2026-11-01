@@ -8,9 +8,9 @@ Type=simple
 User=lightmoni-agent
 Group=lightmoni-agent
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-SupplementaryGroups=docker
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+SupplementaryGroups=
+AmbientCapabilities=
+CapabilityBoundingSet=
 ExecStartPre=/opt/lightmoni-agent/current/node /opt/lightmoni-agent/current/deployment-permissions.mjs check
 ExecStart=/usr/local/bin/lightmoni-agent run --config /etc/lightmoni-agent/config.json
 Restart=on-failure
@@ -20,7 +20,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
-ReadWritePaths=/var/lib/lightmoni-agent /var/lib/lightmoni-web
+ReadWritePaths=/var/lib/lightmoni-agent
 UMask=0077
 
 [Install]

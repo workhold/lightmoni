@@ -85,6 +85,9 @@ lm_purge_agent_state() {
   fi
 }
 # END SHARED MAINTENANCE GUARDS
+if [ -e /etc/lightmoni-executor ] || [ -L /etc/lightmoni-executor ] || [ -e /opt/lightmoni-executor ] || [ -L /opt/lightmoni-executor ]; then
+  lm_refuse 'Remove the privileged executor before removing the ordinary Agent'
+fi
 lm_assert_paths
 lock=/run/lightmoni-agent-lifecycle.lock
 mkdir "$lock" || { echo 'Agent lifecycle operation already in progress.' >&2; exit 1; }

@@ -398,7 +398,7 @@ test("verified release switches atomically, configures and restarts while preser
   assert.equal(statSync(f.uninstaller).mode & 0o777,0o755);
   f.unchangedData();
 });
-test('permission preparation failure restores the previous installation before attempting a new service start', t=>{
+test('ordinary permission validation failure restores the previous installation before a new service start', t=>{
   const f=fixture(t,{failPermissionPreparation:true}),result=f.run();
   assert.notEqual(result.status,0);
   assert.match(result.stderr,/deployment-permissions/);

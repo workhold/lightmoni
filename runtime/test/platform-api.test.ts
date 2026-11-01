@@ -495,7 +495,7 @@ test("removed nodes disappear from deployment candidates and cannot become new d
   assert.equal(saved.body.error, "registered_agent_required");
   assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0);
 });
-test("self-signed certificate travels through real HTTP, private Agent lease, directory and update script", async (t) => {
+test("ordinary Agent refuses legacy certificate directory and hook writes without fetching private material", async (t) => {
   const f = await setup(t),
     cert = await f.create("certificate", "QA certificate", {
       source: "self_signed",
@@ -503,43 +503,31 @@ test("self-signed certificate travels through real HTTP, private Agent lease, di
       validity_days: 3,
       auto_renew: false,
     });
+  // Issuing a self-signed certificate is still a center operation. Delivering
+  // its private key or running a hook is no longer an ordinary Agent authority.
   const issued = await f.action(cert, "issue");
   assert.equal(issued.status, 202, JSON.stringify(issued));
   assert.equal(issued.body.run.state, "running", JSON.stringify(issued));
   let issueReceipt = issued.body.run;
-  for(let attempt=0;attempt<100&&issueReceipt.state==='running';attempt++) {
+  for (let attempt=0;attempt<100&&issueReceipt.state==='running';attempt++) {
     await new Promise(resolve=>setTimeout(resolve,10));
     issueReceipt=(await f.req('/ops/runs/'+issueReceipt.id)).body;
   }
   assert.equal(issueReceipt.state,"succeeded",JSON.stringify(issueReceipt));
   const version = f.platform.store.get(cert.id).status.certificate_version;
   assert.ok(version);
+  const material = getCertificateMaterial(f.platform.store, cert.id);
+  assert.match(material.private_key_pem, /BEGIN PRIVATE KEY/);
+  const certificateDirectory = join(f.root, "certificates"), marker = join(f.root, "hook-version");
   const directory = await f.create("certificate_target", "QA directory", {
     certificate_id: cert.id,
     type: "directory",
     enabled: true,
     agent_id: "node-a",
-    path: join(f.root, "certificates"),
+    path: certificateDirectory,
     mode: "0644",
     private_key_mode: "0600",
   });
-  const sync = await f.action(directory, "sync");
-  assert.equal(sync.status, 202, JSON.stringify(sync));
-  const receipt = await f.runner.pollOnce();
-  assert.equal(receipt?.state, "succeeded", JSON.stringify(receipt));
-  assert.match(
-    await readFile(join(f.root, "certificates", "fullchain.pem"), "utf8"),
-    /BEGIN CERTIFICATE/,
-  );
-  assert.equal(
-    (await stat(join(f.root, "certificates", "privkey.pem"))).mode & 0o777,
-    0o600,
-  );
-  assert.equal(
-    f.platform.store.get(directory.id).status.applied_certificate_version,
-    version,
-  );
-  const marker = join(f.root, "hook-version");
   const target = await f.create("certificate_target", "QA script", {
     certificate_id: cert.id,
     type: "hook",
@@ -552,28 +540,63 @@ test("self-signed certificate travels through real HTTP, private Agent lease, di
   });
   assert.equal(JSON.stringify(target).includes("fixture-secret"), false);
   assert.equal(target.spec.env, undefined);
-  await f.action(target, "sync");
-  const hook = await f.runner.pollOnce();
-  assert.equal(hook?.state, "succeeded", JSON.stringify(hook));
-  assert.equal(await readFile(marker, "utf8"), version);
+  for (const resource of [directory, target]) {
+    const sync = await f.action(resource, "sync");
+    assert.equal(sync.status, 202, JSON.stringify(sync));
+  }
+  const calls: Array<{url: string; method: string; body: any}> = [], commands: string[] = [];
+  const observeFetch = async (url: any, init: RequestInit) => {
+    calls.push({url: String(url), method: init.method ?? "GET", body: init.body ? JSON.parse(String(init.body)) : undefined});
+    return fetch(url, init);
+  };
+  const runner = new AgentJobRunner({endpoint:f.base,agentID:"node-a",controlCredential:"qa-control",dataDir:join(f.root,"ordinary-agent")}, {
+    fetch: observeFetch as typeof fetch,
+    command: async (file) => { commands.push(file); throw Error("ordinary Agent must not execute certificate writes"); },
+  });
+  assert.equal(await runner.pollOnce(), null);
+  assert.equal(await runner.pollOnce(), null);
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(call => call.url.endsWith("/jobs/claim") && call.method === "POST"));
+  assert.ok(calls.every(call => !call.body.capabilities.includes("operations.platform")));
+  for (const resource of [directory, target]) {
+    const job = f.db.get<any>("SELECT j.* FROM agent_jobs j JOIN ops_platform_runs r ON r.job_id=j.id WHERE r.resource_id=?", resource.id)!;
+    assert.equal(job.state, "queued");
+    assert.equal(job.attempts, 0);
+    assert.equal(job.lease_id, "");
+    assert.notEqual(f.platform.store.get(resource.id).status.applied_certificate_version, version);
+  }
+  // Even an incorrect center returning a legacy task outside the advertised
+  // capabilities must be refused before downloading /operations private data.
+  for (let n=0;n<2;n++) {
+    const legacy = f.jobs.claim("node-a", ["operations.platform"])!;
+    assert.ok(legacy);
+    const forced = new AgentJobRunner({endpoint:f.base,agentID:"node-a",controlCredential:"qa-control",dataDir:join(f.root,"ordinary-agent")}, {
+      command: async (file) => { commands.push(file); throw Error("legacy write must remain denied"); },
+      fetch: (async (url: any, init: RequestInit) => String(url).endsWith("/jobs/claim") ? Response.json({job:legacy}) : observeFetch(url, init)) as typeof fetch,
+    });
+    const receipt = await forced.pollOnce();
+    assert.equal(receipt?.state, "failed");
+    assert.equal(receipt?.code, "privileged_executor_required");
+    const saved = f.jobs.get(legacy.id);
+    assert.equal(saved.state, "failed");
+    assert.equal(saved.receipt.code, "privileged_executor_required");
+  }
+  assert.deepEqual(commands, []);
+  assert.ok(calls.every(call => !/\/operations$|\/artifacts\//.test(call.url)));
+  await assert.rejects(stat(certificateDirectory), {code:"ENOENT"});
+  await assert.rejects(stat(marker), {code:"ENOENT"});
   const before = f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n;
   await f.platform.tick();
   await f.platform.tick();
   assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, before);
-  assert.equal(
-    f.platform.store.get(target.id).status.applied_certificate_version,
-    version,
-  );
-  assert.equal(
-    JSON.stringify(f.db.all("SELECT * FROM ops_platform_runs")).includes(
-      "fixture-secret",
-    ),
-    false,
-  );
-  assert.equal(
-    JSON.stringify((await f.req("/ops/runs")).body).includes("fixture-secret"),
-    false,
-  );
+  for (const resource of [directory, target])
+    assert.notEqual(f.platform.store.get(resource.id).status.applied_certificate_version, version);
+  for (const publicValue of [calls, f.db.all("SELECT * FROM ops_platform_runs"), (await f.req("/ops/runs")).body]) {
+    const encoded = JSON.stringify(publicValue);
+    assert.ok(!encoded.includes("fixture-secret"));
+    assert.ok(!encoded.includes(material.private_key_pem));
+    assert.ok(!encoded.includes("BEGIN PRIVATE KEY"));
+  }
 });
 
 test("HTTPS website deployment waits for a saved certificate without material before queuing gateways", async (t) => {

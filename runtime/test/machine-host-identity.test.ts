@@ -18,7 +18,7 @@ import { createAgentHostSchema } from "../src/server/agent-hosts.js";
 import { recordMachineHostKey, sshHostIdentity } from "../src/server/machine-host-keys.js";
 import { defaultSSHRunner } from "../src/server/machine-ssh.js";
 
-const output = "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
+const output = "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
 const newKey = () => {
   const pair = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { format: "pem", type: "pkcs1" }, publicKeyEncoding: { format: "pem", type: "pkcs1" } });
   const parsed = ssh2.utils.parseKey(pair.privateKey);

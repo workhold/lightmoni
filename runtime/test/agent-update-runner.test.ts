@@ -120,7 +120,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   return { root, p, old, runtime, packageDir, archive, manifest, maintenance, request, calls, repack, preserve, setActive: (value: boolean) => { active = value; }, onSleep: (callback: () => void) => { onSleep = callback; } };
 }
 
-test('upgrades prepare the new deployment permissions before stopping the old Agent',async t=>{
+test('upgrades validate ordinary account permissions before stopping the old Agent',async t=>{
   const f=fixture(t,{targetPermissions:true}),request=f.request();
   await f.maintenance.start(request);
   f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==='waiting_confirmation')f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});
@@ -131,7 +131,7 @@ test('upgrades prepare the new deployment permissions before stopping the old Ag
   f.preserve();
 });
 
-test('failed deployment permission preparation leaves the old Agent and its state running',async t=>{
+test('failed ordinary permission validation leaves the old Agent and its state running',async t=>{
   const f=fixture(t,{targetPermissions:true,failPermissionPreparation:true}),request=f.request();
   await f.maintenance.start(request);
   const result=await f.maintenance.worker(request.operation_id);

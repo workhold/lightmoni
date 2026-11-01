@@ -29,6 +29,8 @@ export interface TaskRunSnapshot {
   execution_policy?: TaskExecutionPolicy;
 }
 export interface TaskRun {
+  execution_principal?: "agent" | "privileged_executor";
+  executor_id?: string;
   id: string;
   task_id: string;
   task_name: string;

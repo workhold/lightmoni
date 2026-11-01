@@ -5,6 +5,7 @@ import {dockerFixture,containerID} from './fixtures/docker-control-fixture.js';
 import {ApplicationObserver} from '../src/agent/application-observer.js';
 import {executeDocker,readDockerInventory} from '../src/agent/docker.js';
 import {operationCommand} from '../src/agent/operations.js';
+import {AgentJobRunner} from '../src/agent/jobs.js';
 
 const path='/ops/machines/machine-a/docker-jobs';
 const inventory=()=>({operation:'inventory',request_id:randomUUID()});
@@ -27,7 +28,7 @@ test('Docker immediate collection crosses HTTP, authenticated Agent lease and du
  assert(f.calls.every(args=>args[0]==='--context'&&args[1]==='default'));
 });
 
-test('Docker writes require confirmation, fresh same-host full ID, execute once and refresh the inventory',async t=>{
+test('legacy Docker writes require review but are never claimed or executed by the ordinary Agent',async t=>{
  const f=await dockerFixture();t.after(()=>f.close());
  const body={operation:'stop',container_id:containerID,request_id:randomUUID()};
  assert.equal((await f.req(path,'POST',body)).body.error,'docker_confirmation_required');
@@ -37,11 +38,23 @@ test('Docker writes require confirmation, fresh same-host full ID, execute once 
  assert.equal((await f.req(path,'POST',{...body,container_id:'f'.repeat(64),confirmed:true})).status,409);
  const created=await f.req(path,'POST',{...body,confirmed:true});assert.equal(created.status,202);
  assert.equal((await f.req(path,'POST',{...body,confirmed:true})).body.id,created.body.id);
- const receipt=await f.runner.pollOnce();assert.equal(receipt?.state,'succeeded');
+ const receipt=await f.runner.pollOnce();assert.equal(receipt,null);
  assert.equal((await f.req(path,'POST',{...body,confirmed:true})).body.id,created.body.id);
- assert.equal((await f.req('/ops/inventory?machine_id=machine-a')).body.hosts[0].containers[0].state,'exited');
- assert.equal(await f.runner.pollOnce(),null);assert.equal(f.calls.filter(args=>args[2]==='stop').length,1);
- const stored=f.jobs.get(created.body.id);assert.equal(stored.target.actor,'admin');assert.equal(stored.target.docker_machine_id,'machine-a');
+ assert.equal((await f.req('/ops/inventory?machine_id=machine-a')).body.hosts[0].containers[0].state,'running');
+ assert.equal(await f.runner.pollOnce(),null);assert.equal(f.calls.filter(args=>args[2]==='stop').length,0);
+ const stored=f.jobs.get(created.body.id);assert.equal(stored.target.actor,'admin');assert.equal(stored.target.docker_machine_id,'machine-a');assert.equal(stored.state,'queued');
+ assert.equal(f.db.get<any>('SELECT attempts FROM agent_jobs WHERE id=?',created.body.id)!.attempts,0);
+});
+
+test('a forced legacy Docker write is refused locally and its durable receipt preserves the executor requirement',async t=>{
+ const f=await dockerFixture();t.after(()=>f.close());await f.req(path,'POST',inventory());await f.runner.pollOnce();
+ const created=await f.req(path,'POST',{operation:'stop',container_id:containerID,confirmed:true,request_id:randomUUID()});assert.equal(created.status,202);
+ // Model an old or incorrect center responding outside the offered capabilities.
+ const leased=f.jobs.claim('node-a',['docker.control'])!;assert.equal(leased.id,created.body.id);const before=f.calls.length;
+ const runner=new AgentJobRunner({endpoint:f.base,agentID:'node-a',controlCredential:'fixture-control',dataDir:f.root},{command:f.command,
+   fetch:(async(url:any,init:RequestInit)=>String(url).endsWith('/jobs/claim')?Response.json({job:leased}):fetch(url,init)) as typeof fetch});
+ assert.equal((await runner.pollOnce())?.code,'privileged_executor_required');assert.equal(f.calls.length,before);
+ const saved=f.jobs.get(leased.id);assert.equal(saved.state,'failed');assert.equal(saved.receipt.code,'privileged_executor_required');assert.equal(saved.receipt.snapshot.docker.error,'privileged_executor_required');
 });
 
 test('offline/old Agents fail explicitly and old cached observations do not supersede newer immediate results',async t=>{

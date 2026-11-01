@@ -1,34 +1,64 @@
-# 设计验证记录
+# SDD060 验证记录
 
-日期：2026-11-01（Asia/Shanghai）。代码基线 `f2fd1d54d8ba384c5007bcb4b3f8e8e2a80fd53b`。
+日期：2026-11-01（Asia/Shanghai）。设计 PR：[#47](https://github.com/workhold/lightmoni/pull/47) 已合入；本轮实现见 Draft [PR #64](https://github.com/workhold/lightmoni/pull/64)，未合入或发布。
 
-本次仅交付 SDD/HLD/LLD 与目标契约；没有实现 root 执行器、修改主机权限、执行 SSH、构建镜像或部署。
+## 本轮实现与验收范围
 
-## 研究与独立评审
+同一发行包增加独立 root 执行器入口；普通 Agent 和普通任务继续以 `lightmoni-agent` 运行，获批提权脚本明确以 root 账户（UID/GID 0）运行。已实现独立身份/策略/防重、签名计划和短期在线许可、持久 journal 与 unknown fence、加密输出、root 一次性脚本、最小结构化 Docker 操作、SSH 首次引导、独立卸载和缺席核对。
 
-- 核对 1Panel 安装器/Agent unit/Docker client 与 Cockpit bridge/提权入口的官方源码；引用固定提交。Socket Proxy 仅作为 API 过滤边界对照，不当成参数授权实现。
-- 执行协议审查确认普通脚本同 UID、control 凭据及 claim/payload/events/result 的完整迁移要求；补充显式提权脚本，不再把所有 root 脚本一概排除。
-- 独立权限审查修复：30秒许可不使用60秒请求时差容忍，采用包含挂起的单调截止；脚本/容器输出作为可能含秘密的敏感正文；封闭 named volume driver_opts/DriverConfig 和 namespace 借用。
-- 独立登记与生命周期审查修复：统一 disabling/unknown；区分首次SSH引导与既有执行器策略更新；程序回退不回滚journal/fence/已消费授权和防重状态。
-- 代码复用补充审查：统一源码/发行与双组合根；root拒绝仅限普通角色常驻运行，不破坏root安装器的check/configure；两个unit不能仅修改User；root journal不得吞错或丢unknown，双角色版本/GC/卸载分别核对。
+普通 Agent 的旧 operations/systemd/制品/Docker 写操作已停止领取；即使中心返回旧写任务，本地仍拒绝执行、下载私有 payload 或制品。只读健康检查和 Docker 清单继续使用普通通道。中心旧 claim/payload 尚未停派，旧 Agent 或自定义调用方仍可能领取旧写任务；新客户端拒绝不等于中心只读保证。旧中心适配器尚未迁移，未领取任务需要取消或等待过期；不能把本 PR 当作既有运维功能的完整迁移版本。
 
-## 文档检查
+## 自动化与独立复核
 
-- 专项设计与系统设计第60章共四张 Mermaid，通过 Mermaid 11 解析器语法检查；临时依赖仅安装在本机 `/tmp`，未修改项目依赖。
-- 新增文档的相对链接和章节锚点检查通过；README 指向系统基线及专项设计。
-- `git diff --check` 通过；变更不包含凭据、机器身份、实机日志或用户网络地址。
-- 纯文档变更未运行代码单元测试；后续 root/sudo/Docker/提权脚本实机测试仍在 tasks 中未完成。
+- 执行器核心 runner/scripts/Docker/journal/协议/安全测试 76/76 通过。
+- SSH bootstrap 集成与实际固定 shell 探测 85/85 通过；维护 API 48/48、维护缺席实际 shell 75/75、独立安装/卸载实际 shell 59/59 通过。
+- 主机执行权限/维护浏览器 UI 16/16、提权任务浏览器 UI 24/24 通过，截图已核对。
+- runtime 类型检查与构建、web 类型检查与生产构建通过。
+- 独立复核许可启动时限、日志写入顺序、unknown/fence、防重、输出加密及主体门控，未发现新的阻断问题。
+- 已同步主干 `c088bb4`；合并后完整 runtime 回归共1288项：1259通过、7失败、22跳过。5项单独复跑通过；另2项安装测试因夹具每次 stat 都冷启动 Node 而在本机超时。夹具改用原生 stat 读取普通路径的实际 mode/dev/inode，FD 仍用 fstat，保留合成 UID、错配注入、20秒上限及全部断言；两项对照复跑通过（约5.37秒和5.82秒），修改后整个安装/卸载文件59/59通过。不能将这次完整回归称为一次全绿。中间旧证书写通道测试已改为验证普通 Agent 拒绝，不据此恢复旧权限路径。
 
-## Doca
+## 真实 Linux 验收
 
-同步目标：[LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。从902保存到903，最新版本回读验证37个新增块；两张原生图分别为9节点/9连线、10节点/10连线，文字、节点、连线与几何一致。原有626个块、31张原生图和原内容顺序全部保持不变，包括其他开发中的章节。
+本机隔离 Colima Linux arm64/systemd 252、Node 24.15.0 中，通过同包安装与独立注册、中心签名计划及在线许可、真实 UID 0/root 脚本、普通主体隔离、敏感正文隔离、签名策略关闭、离线卸载和精确中心撤权。测试 CA 显式受信，未关闭 TLS 校验。
 
-无秘密证据见 [doca-sync.json](doca-sync.json)。未执行浏览器视觉验收，不将结构回读说成视觉通过。Doca MCP context与运行时凭据会话已关闭。
+真实签名超时负例将 `sleep 20` 限为 1 秒，以 `failed/timeout` 结束且不留下 unknown fence；system bus 停止时 readiness 拒绝就绪。Docker 验证脱敏 list、外部资源拒绝、固定 digest/架构的受管 create/remove，没有启动受管测试容器或修改已有业务容器。另验证未知 unit drop-in 导致卸载拒绝且身份/journal 保留，移除精确 QA override 后原样卸载器经 FD/inode 锁及停止后 writer 锁成功。
 
-代码复用补充从903保存至904，回读核对4个新增段落及2个专项设计/规格来源链接；其余662个块和全部33张原生图保持不变。新增段落明确双组合根、共享组件、运行态UID门控、独立unit/版本/状态与严格journal，未改动图拓扑。
+发现并修复 systemctl 私有 socket 不能替代 system bus 就绪判断、RemainAfterExit 保留管道 FD、运行超时与租约丢失混淆三处实际接缝。停止或观察不确定时仍为 unknown。
 
-设计 PR：[#47](https://github.com/workhold/lightmoni/pull/47)，未合入；实现任务保持未完成。
+复现步骤、fixture 摘要局限与无秘密报告见 [linux-validation.md](linux-validation.md) 和 [linux-validation-report.json](linux-validation-report.json)。所有本轮 QA 容器已停止并保留状态；没有 SSH 访问用户主机、改变生产权限、发布镜像或部署。
+
+## 明确未完成
+
+独立执行器自动升级/回退、部分安装残留修复、旧运维/网站/证书/systemd/备份适配器迁移、定时提权授权、完整业务容器部署及发行灰度尚未完成。真实 amd64、完整 root/sudo 矩阵和 Docker pull/start/stop/restart/仓库鉴权尚未验收。任意获批 root 脚本具有整机权限；不宣称它是沙箱，也不保证恶意 root 脚本执行后的主机可信。
+
+## Doca 架构同步
+
+[LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 已同步仓库系统设计第6、13.10、17、33.8、57与60章。
+
+- 初始目标设计：902→903，回读37个新增块及两张原生图（9节点/9连线、10节点/10连线）；626个原有块和31张图保持不变。
+- 代码复用设计：903→904，回读4个新增段落与2个来源链接，其余662个块及33张原生图保持不变。
+- 实现边界：904→905，回读60.10的6个新增块和引言，666个无关块及33张图保持不变。
+- 实现交叉引用与历史通道说明：905→906，回读4处引用和57章的拒绝写入说明，669个无关块及33张图保持不变。
+- 普通 control 边界说明：906→907，回读2处段落，明确新 Agent 的本地拒绝和旧中心接口尚未停派，672个无关块及33张图保持不变。
+
+证据见 [doca-sync.json](doca-sync.json)。结构回读不等于浏览器视觉验收。凭据代理会话已关闭，token 未写入仓库。
+
+## 设计阶段历史
+
+最初设计基线为 `f2fd1d54d8ba384c5007bcb4b3f8e8e2a80fd53b`，当时只交付 SDD/HLD/LLD。研究核对 Cockpit、1Panel 与 Docker Socket Proxy 的官方源码/文档；四张 Mermaid 通过解析，文档链接与锚点检查通过。此历史设计检查不替代上述实现及 Linux 验收，也不代表未完成阶段已可用。
+
+## 第二次主干集成与独立实施 PR
+
+远端设计 PR #47 在本轮开发期间已被其他开发者合入，仅含设计。运行代码改在 `feat/privileged-executor-implementation` 分支交付，以 main `fe99013` 为本次集成快照。保留新增应用管理、地址、Logo/YAML、Docker环境及卸载进度变更；设计第60章去重，保留其他章节。此前1288项全回归属于 c088bb4 集成快照，不冒称已覆盖新增主干全部代码。
+
+本次合并接缝定向6文件178/178、普通权限及安装更新4文件66/66、主机权限浏览器16/16与Docker环境浏览器6/6通过；runtime类型及构建、Web类型检查及生产构建通过。Docker安装与两类任务/执行器安装维护双向互斥，写前重新核对当前管理员会话。原 main 的 Docker verify 只读探测仍存在凭据绑定/过时状态覆盖竞态，未在本轮扩大修改，不将其称为已解决。
+
+SDD071为普通Agent授予Docker组和低端口capabilities的主干行为被本实施分支覆盖。新unit清空授权，prepare只读核查；普通启动和手工run检查实际权限，发现外部既有权限则拒绝且不自动移除。旧网站/容器适配器仍未迁移，不能把此PR当作既有服务完整可用版本。
+
+Doca 最新923→924回读核对60.10权限边界和第71章覆盖说明；732个无关块、全部37张原生图与原顺序保持不变。该回读保留其他开发者新增章节。
+
+设计 PR：[#47](https://github.com/workhold/lightmoni/pull/47) 已由其他开发者合入，仅包含设计；本轮实现另开 PR。
 
 ## 汇总合入说明（2026-11-01）
 
-用户已授权汇总其他会话的变更经 PR 合入 main 并发布。同步最新主干并完整保留新增的其他设计章节。本 SDD 仍是独立执行器目标设计，任务未实施；SDD 071 对标准服务的 Docker 组/低端口及网站目录提供当前部署契约，Doca 第71章 seq917 已区分这两者。本章“当前”描述以 SDD060 建立时为基线，不代表发布包未具备后续 SDD071 权限。发布记录不得把目标执行器当作已上线能力。
+用户已授权汇总其他会话的变更经 PR 合入 main 并发布。同步最新主干并完整保留新增的其他设计章节。上述汇总合入时本 SDD 仅有独立执行器目标设计，未包括本轮实现；SDD 071 对标准服务的 Docker 组/低端口及网站目录提供当前部署契约，Doca 第71章 seq917 已区分这两者。本章“当前”描述以 SDD060 建立时为基线，不代表发布包未具备后续 SDD071 权限。发布记录不得把目标执行器当作已上线能力。
