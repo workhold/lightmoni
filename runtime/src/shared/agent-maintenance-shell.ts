@@ -60,4 +60,15 @@ lm_assert_no_operations() {
       ' "$lm_marker" || lm_refuse 'Agent has an unfinished operation or invalid operation marker'
     fi
   done
+}
+lm_purge_agent_state() {
+  lm_assert_paths
+  lm_assert_no_operations
+  rm -rf /etc/lightmoni-agent
+  if [ -d /var/lib/lightmoni-agent ]; then
+    # Operations contain persistent application data and configuration, not Agent identity.
+    find /var/lib/lightmoni-agent -mindepth 1 -maxdepth 1 ! -name operations -exec rm -rf -- {} +
+    if [ -d /var/lib/lightmoni-agent/operations ]; then rmdir /var/lib/lightmoni-agent/operations 2>/dev/null || :; fi
+    rmdir /var/lib/lightmoni-agent 2>/dev/null || :
+  fi
 }`;

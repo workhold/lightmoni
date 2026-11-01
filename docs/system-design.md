@@ -1835,3 +1835,44 @@ flowchart LR
   Private --> Nginx
   Public --> Nginx
 ```
+
+## 75. Agent 重装收尾与按来源镜像代理（SDD 075，功能分支待合入）
+
+### 75.1 身份清理与业务数据保留
+
+受管 SSH 卸载成功且原审批证明远端身份、主机绑定与 enrollment 归属一致时，除撤销旧 Agent control/data 凭据，还写入 agent_lifecycle 移除墓碑和审计事件，旧身份不能恢复连接。未证明归属的恢复卸载不注销其他身份。默认仍保留 Agent 配置；明确 purge 清理配置、身份、遥测队列及其他 Agent 状态，但保留 `/var/lib/lightmoni-agent/operations` 中的应用运行目录与持久数据。标准 fresh 保护依旧检查程序、配置与身份，不因保留业务目录拒绝全新身份接入。卸载程序不代表业务容器已停止，平台历史、容器与卷不会自动删除。
+
+### 75.2 当前 Agent 核验旧实例
+
+新 Agent 通过心跳声明 operations.platform.instance-recovery.v1。调度器按稳定机器绑定寻找旧 Agent 的实例，冻结实例代际、旧执行 ID、当前/旧 Agent、SSH 目标代次和主机指纹摘要，以既有加密平台载荷和有效 lease 派发 instance.recovery.inspect；领取与回执均重验绑定。只读检查 Docker 的实例标签、Compose project 与固定网关名，包括停止容器，不依赖已清除的本地状态文件。旧 Agent 在线、活动或 unknown 执行、核验失败或绑定变化时不释放占用；有状态或当前/冻结版本含持久挂载的应用保留人工核对边界，不自动迁移或创建空数据副本。
+
+只有成功回执明确 container_count=0、absent=true 且时间匹配当前执行时，在 AgentJob 回执原事务中退休旧实例、置 stopped、释放仅该实例的端口预留、保存核验 run/新旧身份及当前机器范围的审计，并清空旧 current_run_id，阻止迟到旧回执覆盖。历史实例、端口映射和执行记录保留。ops_instance_recoveries 持久保存当前核验 run、快照、状态与重试时间；失败或仍有容器时至少间隔30秒再只读检查。核验仅证明当前机器绑定内未发现旧实例，不证明已迁移的旧物理机器被删除。阻塞按机器作用，其他可用机器仍可承担无关应用；手动部署在核验后显式部署，托管无状态应用继续既有期望。
+
+### 75.3 全局按来源规则
+
+私有镜像管理增加独立的镜像来源代理表单，无需安装系统 Registry。ops_image_sources 单例持久保存 revision、规则、操作者和时间；管理员 GET/PUT /ops/image-sources，保存使用 revision CAS。规则 source 精确匹配 registry host[:port]，Hub 别名归一 docker.io；target 仅 HTTPS 仓库及可选 repository 前缀，拒绝凭据、查询、片段、重复来源和自身映射。每条 allow_upstream 默认关闭，代理失败时仅明确开启才回原源。没有规则的来源保持原流程，不递归代理。此首版为全局规则，不实现第59.5节的层级继承、daemon HTTP(S)_PROXY、CA 或新增认证管理。
+
+apply 作业冻结命中的规则及 revision；新 operations.platform.image-sources.v1 能力通过认证心跳和领取能力双重约束，旧 Agent 明确报需升级。领取时重算策略，拒绝旧规则；规则变化不使已领取的批准快照自动扩大范围。保存配置不重启 Docker 或既有业务，后续显式部署/重试采用新规则。
+
+### 75.4 统一镜像准备与启动
+
+普通容器、Compose、系统 Registry 引导与 OpenResty 共用准备器：本机可核验镜像→既有授权集群缓存→命中来源的代理→仅明确允许时由原流程回源。严格缓存禁止回源仍优先阻断，不能通过新代理绕过。代理采用 Docker image pull 的 host/prefix/repository:tag 或 @sha256 引用，来源认证不复制到代理；目标认证由目标机器既有 Docker 配置按目标仓库独立处理，中心不接收秘密。Docker 校验传输与 digest，准备器核对本机平台、RepoDigest 与 image ID；可变 tag 仅表示管理员信任代理返回，不声称与不可达原源同 tag 一致。
+
+准备成功后 Compose 使用实际 image ID 和 pull_policy=never；OpenResty nginx 预检与容器启动共用同一实际 ID 并禁用隐式拉取，原始来源和网站配置仍用于版本摘要。回执记录来源、固定 ID 和静态失败原因；默认空规则维持旧行为。新增准备镜像阶段，以及 Docker Hub Client.Timeout/awaiting headers 的网络诊断，不暴露 stderr。真实验收使用独立 Docker-in-Docker 引擎核对代理 digest 拉取、同 ID 网关启动、停止容器阻塞与删除后空清单；不等同生产中心/Agent 已升级。
+
+```mermaid
+flowchart TB
+  old[已核验卸载 / 旧身份墓碑] --> fresh[新 Agent / 稳定机器绑定]
+  fresh --> inspect[只读核验旧实例 / 快照与 lease]
+  inspect --> empty{旧容器为零且无未决执行?}
+  empty -->|是| release[原事务退休旧行 / 释放占用 / 留审计]
+  empty -->|否| hold[保留容器与数据 / 展示阻塞]
+  release --> deploy[既有托管期望 / 手动重部署]
+  rules[管理员 / 来源代理规则 CAS] --> lease[冻结规则 / 新能力 / 领取重验]
+  deploy --> lease
+  lease --> prepare[本机 / 集群缓存 / 指定来源代理]
+  prepare --> pinned[平台与 digest 核验 / 固定 image ID]
+  pinned --> start[Compose / Registry / OpenResty 预检与启动]
+```
+
+契约、实施与验收见 `specs/075-agent-reinstall-image-sources/`。本节与 Doca 设计基线的 SDD075 章节在同一 PR 同步；原生图块保留并回读新增章节与连线。

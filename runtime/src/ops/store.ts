@@ -1,4 +1,6 @@
 import {oneShotServices} from '../operations/workload-readiness.js';
+import {createImageSourcesSchema,imageSourcesFor,validateImageSourcesPayload} from './image-sources.js';
+import {validateInstanceRecoveryPayload} from './instance-recovery.js';
 import { applicationLogo } from './application-logos.js';
 import { id } from "../shared/crypto.js";
 import { fail } from "../shared/http.js";
@@ -92,6 +94,7 @@ export class OperationsPlatformStore implements PlatformStore {
     readonly jobs: AgentJobStore,
   ) {
     ensureSystemTables(this);
+    createImageSourcesSchema(this);
     deps.db.exec(`CREATE TABLE IF NOT EXISTS ops_platform_resources(
    id TEXT PRIMARY KEY,kind TEXT NOT NULL,name TEXT NOT NULL,revision INTEGER NOT NULL,spec_cipher TEXT NOT NULL,
    status_json TEXT NOT NULL,created_by TEXT NOT NULL,authorized_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
@@ -544,6 +547,12 @@ export class OperationsPlatformStore implements PlatformStore {
         operation = String(config.task ?? action)
           .split(".")
           .at(-1)!;
+      const sourcePolicy=imageSourcesFor(this,config);
+      if(sourcePolicy) {
+        let capabilities:unknown;
+        try{capabilities=JSON.parse(this.deps.db.get<any>('SELECT heartbeat FROM agents WHERE id=?',agentID)?.heartbeat??'{}').operations_capabilities;}catch{}
+        if(!Array.isArray(capabilities)||!capabilities.includes('operations.platform.image-sources.v1'))fail(409,'image_sources_agent_upgrade_required');
+      }
       const payload: OperationPayload = {
         version: 1,
         operation_id: key,
@@ -554,7 +563,7 @@ export class OperationsPlatformStore implements PlatformStore {
           name: resource.name,
           agent_id: agentID,
           revision: resource.revision,
-          config: safeObject(config),
+          config: safeObject({...config,...(sourcePolicy?{image_sources:sourcePolicy}:{})}),
           created_at: at,
           updated_at: at,
         },
@@ -580,6 +589,8 @@ export class OperationsPlatformStore implements PlatformStore {
             ? ["operations.platform.website-auth.v1"]
             : []),
           ...(config.image_cache ? ["operations.platform.image-cache.v1"] : []),
+          ...(payload.resource.config.image_sources ? ["operations.platform.image-sources.v1"] : []),
+          ...(config.task === 'instance.recovery.inspect' ? ['operations.platform.instance-recovery.v1'] : []),
           ...(oneShotServices(config.application?.compose?.services).length ? ["operations.platform.oneshot.v1"] : []),
         ],
         target: { operations_resource_id: resource.id },
@@ -830,6 +841,8 @@ export class OperationsPlatformStore implements PlatformStore {
       !job.capabilities?.includes("operations.platform")
     )
       fail(403, "platform_payload_mismatch");
+    validateImageSourcesPayload(this,payload.resource.config);
+    validateInstanceRecoveryPayload(this,payload.resource.config,job.agent_id);
     this.definition(current.kind).validatePayload?.(
       current,
       payload.resource.config,

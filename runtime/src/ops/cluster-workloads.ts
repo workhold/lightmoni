@@ -1,4 +1,5 @@
 import {machineServiceAddresses} from "../server/host-network.js";
+import {createInstanceRecoverySchema,recoverReinstalledInstances,recordInstanceRecovery} from './instance-recovery.js';
 import {networkScope} from "../shared/host-network.js";
 import { effectiveAuth } from "../operations/basic-auth.js";
 import { normalizeWebsiteAuth } from "./website-auth.js";
@@ -113,6 +114,7 @@ export function createClusterWorkloads(
   const { store, deps } = options,
     { db } = deps;
   const at = () => deps.now().toISOString();
+  createInstanceRecoverySchema(store);
   let closed = false;
   const dnsPending = new Map<string, Promise<void>>();
   db.exec(`CREATE TABLE IF NOT EXISTS ops_platform_cluster_members(machine_id TEXT PRIMARY KEY,cluster_id TEXT NOT NULL);
@@ -2093,6 +2095,14 @@ export function createClusterWorkloads(
     const a = desired(current, cid),
       c = cluster(cid),
       runs: PlatformRun[] = [];
+    const recovery=recoverReinstalledInstances(store,c.spec.machine_ids,actor);
+    runs.push(...recovery.runs);
+    if(recovery.pending && (a.spec.deployment_mode==='manual'&&a.spec.machine_ids.some((key:string)=>recovery.blockedMachines.has(key)) || rows(a.id,false,cid).some(i=>recovery.blockedMachines.has(i.machine_id)))) {
+      patchDeployment('application',a.id,cid,{pending:recovery.pending,last_error:''});
+      publish(a.id);
+      return {cluster_id:cid,runs,endpoints:endpoints(a.id,undefined,cid),pending:recovery.pending};
+    }
+    if(String(deploymentRow('application',a.id,cid)?.pending??'').startsWith('agent_reinstall_'))patchDeployment('application',a.id,cid,{pending:'',last_error:''});
     for (const old of rows(a.id, true, cid).filter(
       (i) =>
         (i.retired || i.desired_state !== "running") &&
@@ -2235,6 +2245,7 @@ export function createClusterWorkloads(
                 online(n.agent_id) &&
                 n.address &&
                 n.docker_available !== false &&
+                !recovery.blockedMachines.has(n.machine_id) &&
                 !db.get(
                   "SELECT id FROM ops_cluster_instances WHERE machine_id=? AND retired=1 AND state NOT IN ('stopped','removed')",
                   n.machine_id,
@@ -2268,9 +2279,9 @@ export function createClusterWorkloads(
             }
           }
           if (!i) {
-            const pending = a.spec.ports.some((p: Row) => p.host_port)
+            const pending = recovery.pending || (a.spec.ports.some((p: Row) => p.host_port)
               ? "fixed_port_or_capacity_unavailable"
-              : "insufficient_node_capacity_or_ports";
+              : "insufficient_node_capacity_or_ports");
             patchDeployment("application", a.id, cid, {
               pending,
               last_error: last instanceof Error ? last.message : pending,
@@ -2424,6 +2435,7 @@ export function createClusterWorkloads(
     publishWebsite(siteID);
   }
   const unsubscribe = store.subscribe((run, config, update) => {
+    if(recordInstanceRecovery(store,run,config))return;
     if (config.modern_cluster && config.task === "node.inspect") {
       if (run.state === "succeeded" && run.result.node) {
         db.run(
@@ -2502,6 +2514,7 @@ export function createClusterWorkloads(
                       "instance_id",
                       "modern_instance",
                       "generation",
+                      "image_sources",
                     ].includes(k),
                 ),
               ),

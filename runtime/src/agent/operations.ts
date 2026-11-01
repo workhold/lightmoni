@@ -10,7 +10,7 @@ import { OperationRejectedError } from "../operations/errors.js";
 import { commandDiagnostic, installCause, installCauses, installPhases } from "../operations/install-progress.js";
 import { executePlatform, platformDefinition } from "../operations/platform.js";
 
-export const operationCapabilities = ["operations.website", "operations.certificate", "operations.compose", "operations.backup", "operations.platform", "operations.platform.website-auth.v1", "operations.platform.image-cache.v1", "operations.platform.oneshot.v1"];
+export const operationCapabilities = ["operations.website", "operations.certificate", "operations.compose", "operations.backup", "operations.platform", "operations.platform.website-auth.v1", "operations.platform.image-cache.v1", "operations.platform.oneshot.v1", "operations.platform.image-sources.v1", "operations.platform.instance-recovery.v1"];
 export const operationCommand: OperationExecutionContext["command"] = (file, args, options = {}) => new Promise((resolve, reject) => {
   const allowed = ["PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot", "SSL_CERT_FILE", "SSL_CERT_DIR"];
   const env = Object.fromEntries(allowed.flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []));

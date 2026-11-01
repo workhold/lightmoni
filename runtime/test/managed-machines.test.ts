@@ -631,7 +631,9 @@ test('fixed uninstall plan is reviewed, preserves data, revokes both node creden
  assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{})).status,400);
  const result=await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,200,result.raw);assert.equal(result.data.status,'succeeded');assert.equal(result.data.receipt.revoked_credentials,2);assert.equal(result.data.receipt.data_retained,true);assert.equal(destructive,1);
  assert.equal(f.db.all<any>("SELECT * FROM agent_credentials WHERE revoked_at IS NOT NULL").length,2);
- const detail=await f.request(`/machines/${h.id}`);assert.equal(detail.data.machine.agent_status,'uninstalled');assert.equal(detail.data.uninstallations.length,1);
+ assert.equal(f.db.get<any>("SELECT state FROM agent_lifecycle WHERE agent_id='node-known'")?.state,'removed');
+ assert.equal(f.db.all("SELECT * FROM agent_lifecycle_events WHERE agent_id='node-known'").length,1);
+ const detail=await f.request(`/machines/${h.id}`);assert.equal(detail.data.machine.agent_status,'removed');assert.equal(detail.data.uninstallations.length,1);
  assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true})).status,409);assert.equal(destructive,1);
 });
 

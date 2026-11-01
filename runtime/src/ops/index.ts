@@ -1,4 +1,5 @@
 import {machineServiceAddresses} from "../server/host-network.js";
+import {registerImageSources} from './image-sources.js';
 import {createPrivateRegistryController} from './private-registry.js';
 import {migrateSystemApplications} from './system-applications.js';
 import { CloudError, zoneFor } from "./cloud.js";
@@ -82,6 +83,7 @@ export function registerOperationsPlatform(
   const privateRegistry=createPrivateRegistryController(store,workloads);
   domains.push({actions:()=>[],perform:async()=>fail(400,'unsupported_registry_action'),tick:privateRegistry.tick});
   privateRegistry.register(safe);
+  registerImageSources(store,safe);
   registerObservability(deps, store, safe, options.jobs);
   // Include rejection responses in the no-store boundary, before the admin guard.
   const certificateResponse = (fn: Handler): Handler => ctx => {

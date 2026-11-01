@@ -1,0 +1,15 @@
+{
+  "checks": [
+    "isolated engine pulled pinned official OpenResty through the configured proxy",
+    "OpenResty nginx preflight and live startup used the same verified image ID, with pulling disabled",
+    "read-only recovery found the running gateway",
+    "stopped containers still prevent automatic cleanup",
+    "read-only recovery confirmed zero containers after explicit removal",
+    "verified proxy image reused without another network pull"
+  ],
+  "image": "openresty/openresty@sha256:acbf6c163eef0312e624dc8c24edc7e2f1d33bca77a9e4793714d8e4affab5c5",
+  "proxy": "https://m.daocloud.io/docker.io",
+  "image_id": "sha256:15a42e8586b15a9442f603a5b6dfac0d2d52e4d3e03497744291829b651ea9cc",
+  "platform": "linux/aarch64",
+  "scope": "disposable Docker-in-Docker engine; no production host modified"
+}

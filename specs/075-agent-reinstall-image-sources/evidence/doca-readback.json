@@ -1,0 +1,75 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "seq": 920,
+  "paragraphs": [
+    {
+      "id": "sdd075-design-0",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-1",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-2",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-3",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-4",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-5",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-6",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-7",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-8",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-9",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-10",
+      "text_matches": true,
+      "seq": 920
+    },
+    {
+      "id": "sdd075-design-11",
+      "text_matches": true,
+      "seq": 920
+    }
+  ],
+  "diagram": {
+    "id": "sdd075-control-flow",
+    "nodes": 12,
+    "edges": 11,
+    "nodes_and_edges_match": true
+  },
+  "existing_diagram_outlines_unchanged": true,
+  "scope": "Native structure and full new paragraph readback; no visual rendering claim",
+  "existing_root_blocks_preserved": 200
+}

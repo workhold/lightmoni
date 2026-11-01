@@ -27,6 +27,7 @@ import { errorText, type Overview, type Spec } from "./ops/model";
 import "./operations.css";
 import ApplicationPortFields from "./ops/ApplicationPortFields";
 import ApplicationInstallDrawer from "./ops/ApplicationInstallDrawer";
+import ImageSourcesPanel from './ops/ImageSourcesPanel';
 
 export default function PrivateRegistryPage() {
   const { t } = useI18n(),
@@ -441,6 +442,7 @@ export default function PrivateRegistryPage() {
         </>
       )}
       <ApplicationInstallDrawer resourceId={installID} resources={overview.resources} machines={overview.machines??[]} onClose={()=>setInstallID(undefined)} onManage={()=>{setInstallID(undefined);open("deploy",data?.deployments?.[0])}}/>
+      <ImageSourcesPanel />
       <Modal
         title={
           dialog === "deploy"
