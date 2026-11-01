@@ -18,7 +18,9 @@ function setup(t: any) {
     now: () => new Date("2026-10-29T02:00:00Z"),
     logger: { info() {}, warn() {}, error() {} },
   } as unknown as Dependencies;
-  const jobs = registerAgentJobs(deps, { agentCredentials: { has: () => true } as any }),
+  const jobs = registerAgentJobs(deps, {
+      agentCredentials: { has: () => true } as any,
+    }),
     store = new OperationsPlatformStore(deps, jobs);
   store.register("application", {
     validate: (s) => s,
@@ -31,20 +33,52 @@ function setup(t: any) {
   });
   return { db, deps, jobs, store };
 }
-test("center restart preserves ordered execution steps, marks an interrupted run unknown and does not replay work", async t => {
-  const f=setup(t),resource=f.store.create('application','Restart fixture',{},'admin');
-  const old=await f.store.run(resource,'inspect','admin',async()=>({verified:true}));
-  f.store.addRunEvent(old.id,'dns_prepare','succeeded',{domain:'example.test',attempt:1,private_key_pem:'never-persist'});
-  f.db.run("UPDATE ops_platform_runs SET state='running' WHERE id=?",old.id);
-  const restarted=new OperationsPlatformStore(f.deps,f.jobs);
-  t.after(()=>restarted.close());
-  assert.equal(restarted.action(old.id).state,'unknown');
-  const events=restarted.runEvents(old.id);
-  assert.deepEqual(events.map(e=>e.sequence),[1,2]);
-  assert.equal(events[1].phase,'interrupted');assert.equal(events[1].state,'unknown');
-  assert.equal(events[0].domain,'example.test');
-  assert.doesNotMatch(JSON.stringify(f.db.all('SELECT * FROM ops_platform_run_events')),/never-persist/);
-  assert.equal(restarted.actions(resource.id).length,1);
+test('installation steps project lease events atomically, ignore heartbeats and reject arbitrary diagnostic text', t => {
+ const {db,store,jobs}=setup(t),resource=store.create('application','Installation',{},'admin');
+ const run=store.queue(resource,'node-a','apply',{task:'workload.apply'},'admin'),job=jobs.claim('node-a',['operations.platform'])!;
+ assert.deepEqual(store.runEvents(run.id).map(e=>e.phase),['queued']);
+ const event=(sequence:number,phase:string,snapshot?:any)=>jobs.event('node-a',job.id,{lease_id:job.lease_id,sequence,phase,summary:'qa-hidden-summary',snapshot:snapshot??{}});
+ event(1,'accepted');event(2,'staging');event(3,'activating',{operations:{progress:{phase:'starting_containers'}}});
+ event(4,'activating');event(5,'activating',{operations:{progress:{phase:'starting_containers'}}});
+ assert.deepEqual(store.runEvents(run.id).map(e=>e.phase),['queued','accepted','staging','starting_containers']);
+ event(6,'activating',{operations:{progress:{phase:'qa-hidden-step',code:'qa-hidden-code',message:'qa-hidden-message'}}});
+ assert.doesNotMatch(JSON.stringify(db.all('SELECT * FROM ops_platform_run_events')),/qa-hidden/);
+ jobs.result('node-a',job.id,{lease_id:job.lease_id,state:'failed',code:'workload_apply_failed_restored',summary:'qa-hidden-result',snapshot:{operations:{operation_id:run.id,resource_id:resource.id,data:{phase:'starting_containers',cause_code:'image_network_failed'}}},started_at:run.created_at,finished_at:run.created_at});
+ const done=store.action(run.id),steps=store.runEvents(run.id);
+ assert.equal(done.state,'failed');assert.equal(done.result.cause_code,'image_network_failed');
+ assert.equal(steps.at(-1)!.state,'failed');assert.equal(steps.at(-1)!.code,'image_network_failed');
+ assert.match(steps.at(-1)!.message!,/registry/);
+ assert.deepEqual(steps.map(e=>e.sequence),steps.map((_,i)=>i+1));
+ assert.doesNotMatch(JSON.stringify(steps),/qa-hidden/);
+});
+test("center restart preserves ordered execution steps, marks an interrupted run unknown and does not replay work", async (t) => {
+  const f = setup(t),
+    resource = f.store.create("application", "Restart fixture", {}, "admin");
+  const old = await f.store.run(resource, "inspect", "admin", async () => ({
+    verified: true,
+  }));
+  f.store.addRunEvent(old.id, "dns_prepare", "succeeded", {
+    domain: "example.test",
+    attempt: 1,
+    private_key_pem: "never-persist",
+  });
+  f.db.run("UPDATE ops_platform_runs SET state='running' WHERE id=?", old.id);
+  const restarted = new OperationsPlatformStore(f.deps, f.jobs);
+  t.after(() => restarted.close());
+  assert.equal(restarted.action(old.id).state, "unknown");
+  const events = restarted.runEvents(old.id);
+  assert.deepEqual(
+    events.map((e) => e.sequence),
+    [1, 2],
+  );
+  assert.equal(events[1].phase, "interrupted");
+  assert.equal(events[1].state, "unknown");
+  assert.equal(events[0].domain, "example.test");
+  assert.doesNotMatch(
+    JSON.stringify(f.db.all("SELECT * FROM ops_platform_run_events")),
+    /never-persist/,
+  );
+  assert.equal(restarted.actions(resource.id).length, 1);
 });
 test("global revisions encrypt secrets and recheck actor and revision", (t) => {
   const { db, store } = setup(t);
@@ -100,6 +134,23 @@ test("job and encrypted payload commit atomically with persistent dispatch dedup
   );
   db.run("UPDATE users SET active=0 WHERE id='admin'");
   assert.throws(() => store.resolvePayload(job), /authorization/);
+});
+test("new gateway authentication apply and inspect jobs cannot be claimed by an older Agent", (t) => {
+  for (const config of [
+    { task: "gateway.apply", sites: [{ auth: { mode: "basic" } }] },
+    { task: "gateway.inspect", auth_required: true },
+  ]) {
+    const { store, jobs } = setup(t);
+    const resource = store.create("application", "Gateway", {}, "admin");
+    store.queue(resource, "node-a", "inspect", config, "admin");
+    assert.equal(jobs.claim("node-a", ["operations.platform"]), null);
+    assert.ok(
+      jobs.claim("node-a", [
+        "operations.platform",
+        "operations.platform.website-auth.v1",
+      ]),
+    );
+  }
 });
 test("failed storage allocation rolls back its job rather than leaving an orphan", (t) => {
   const { db, store } = setup(t),

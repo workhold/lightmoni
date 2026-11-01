@@ -24,3 +24,13 @@
 .lm-ops-certificate-tasks > .lm-ops-section-heading h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .lm-ops-certificate-tasks > .lm-ops-note { margin-bottom: 0; }
 .lm-operations-page td .lm-ops-certificate-error { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+.lm-registry-page .lm-ops-panel{padding:22px;border:1px solid var(--lm-border);border-radius:8px;background:var(--lm-surface);margin-bottom:20px;min-width:0}
+.lm-registry-page .lm-ops-install-guide{border:1px solid var(--lm-border);border-radius:8px;background:var(--lm-surface)}
+.lm-registry-page .lm-ops-subheading h3{margin:0;font-size:15px}.lm-registry-page .lm-ops-panel>.lm-ops-note{margin:16px 0 0}
+.lm-registry-entry{animation:lm-ops-enter .22s ease-out}.lm-ops-auth-fields{margin:16px 0}.lm-ops-auth-fields>.ant-alert{margin-bottom:16px}
+.lm-registry-page .lm-page-heading .ant-btn-primary:active{transform:scale(.98)}
+.lm-ops-auth-user{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) auto;gap:12px;align-items:center}
+@media(max-width:680px){.lm-registry-page .lm-page-heading{align-items:flex-start;flex-direction:column;gap:12px}.lm-registry-page .lm-ops-panel{padding:14px}.lm-ops-auth-user{grid-template-columns:minmax(0,1fr) auto}.lm-ops-auth-user>.ant-form-item:first-child{grid-column:1/-1}}
+@media(prefers-reduced-motion:reduce){.lm-registry-entry{animation:none}}
+.lm-ops-catalog .ant-drawer-body,.lm-install-progress .ant-drawer-body{min-width:0}.lm-ops-catalog h2{margin-top:18px;font-size:22px}.lm-install-target{margin-bottom:8px}.lm-install-advanced{margin-top:8px}.lm-install-progress h3{font-size:15px;margin:24px 0 12px}.lm-install-progress .ant-alert{overflow-wrap:anywhere}.lm-install-progress small{display:block;overflow-wrap:anywhere;margin-top:5px}.lm-install-progress .ant-descriptions-item-content{overflow-wrap:anywhere}.lm-install-summary{animation:lm-ops-enter .18s ease-out}.lm-ops-catalog .ant-btn-primary:active{transform:scale(.98);transition:transform 80ms ease-out}@media(max-width:680px){.lm-ops-catalog .ant-drawer-body,.lm-install-progress .ant-drawer-body{padding:18px 14px}.lm-install-progress .ant-descriptions-item-content{max-width:250px}}@media(prefers-reduced-motion:reduce){.lm-install-summary{animation:none}.lm-ops-catalog .ant-btn-primary:active{transform:none;transition:none}}

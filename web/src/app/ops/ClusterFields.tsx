@@ -1,5 +1,5 @@
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
-import { Alert, Button, Checkbox, Form, Input, InputNumber, Select } from '../../shared/ui';
+import { Alert, Button, Checkbox, Form, Input, InputNumber, Select, Switch } from '../../shared/ui';
 import { useI18n } from '../../shared/i18n';
 import type { Machine, Resource, ResourceKind, Spec } from './model';
 export type QuickCreate = (kind: ResourceKind, onCreated: (resource: Resource) => void, defaults?: Spec) => void;
@@ -12,6 +12,7 @@ export default function ClusterFields({machines, resources, existing, onRefresh}
    <Select mode="multiple" showSearch optionFilterProp="label" options={machines.map(m=>{const owner=m.cluster_id??resources.find(r=>r.kind==='cluster'&&r.spec.machine_ids?.includes(m.id))?.id;return {value:m.id,disabled:!!owner&&owner!==existing?.id,label:m.name+(owner&&owner!==existing?.id?' · '+t('已属于其他集群','In another cluster'):'')+(m.agent_id?'':' · '+t('未接入 Agent','No Agent'))}})} onChange={(ids:string[])=>{const old=form.getFieldValue(['spec','nodes'])??[];form.setFieldValue(['spec','nodes'],ids.map(id=>old.find((n:Spec)=>n.machine_id===id)??{machine_id:id,address:machines.find(m=>m.id===id)?.address??'',cpu:2,memory_mb:2048}))}}/>
   </Form.Item>
   <div className="lm-ops-grid"><Form.Item name={['spec','port_start']} label={t('自动分配端口起始值','Automatic port range start')} rules={[{required:true}]}><InputNumber min={1024} max={65535}/></Form.Item><Form.Item name={['spec','port_end']} label={t('自动分配端口结束值','Automatic port range end')} rules={[{required:true}]}><InputNumber min={1024} max={65535}/></Form.Item></div>
+  <Form.Item name={['spec','image_cache','enabled']} label={t('集群内网镜像缓存','Cluster internal image cache')} valuePropName="checked" extra={<a href="/private-images">{t('在私有镜像管理中部署系统仓库','Deploy the system registry in Private images')}</a>}><Switch disabled={!existing||!resources.some(r=>r.kind==='application'&&r.spec.role==='registry'&&r.spec.deployments?.some((d:Spec)=>d.cluster_id===existing.id))}/></Form.Item>
   <Form.List name={['spec','nodes']}>{fields=><>{fields.map((f,index)=><div className="lm-ops-mount" key={f.key}><h4>{machines.find(m=>m.id===members[index])?.name??members[index]}</h4><Form.Item name={[f.name,'machine_id']} hidden><Input/></Form.Item><div className="lm-ops-grid"><Form.Item name={[f.name,'address']} label={t('机器可达 IP','Reachable IP')} rules={[{required:true}]}><Input/></Form.Item><Form.Item name={[f.name,'public_address']} label={t('公网 IP（用于域名解析）','Public IP (for DNS)')}><Input/></Form.Item><Form.Item name={[f.name,'cpu']} label={t('可分配 CPU','Allocatable CPU')}><InputNumber min={0.1}/></Form.Item><Form.Item name={[f.name,'memory_mb']} label={t('可分配内存（MiB）','Allocatable memory (MiB)')}><InputNumber min={16}/></Form.Item></div></div>)}</>}</Form.List>
  </>;
 }

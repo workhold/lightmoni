@@ -1,3 +1,5 @@
+import { effectiveAuth } from "../operations/basic-auth.js";
+import { normalizeWebsiteAuth } from "./website-auth.js";
 import { catalogTemplate } from "./catalog.js";
 import { isIP } from "node:net";
 import { domainToASCII } from "node:url";
@@ -14,6 +16,13 @@ import {
 } from "../operations/platform.js";
 import { normalizeLocations, normalizeNginx } from "../operations/nginx.js";
 import { getCertificateMaterial } from "./certificates.js";
+import {
+  SYSTEM_SERVICE_NAMES,
+  systemApplicationID,
+  systemApplicationKind,
+} from "./system-applications.js";
+import { privateRegistryAddress } from "../operations/registry-address.js";
+import { registryRuntime, registryCacheFor } from "./registry-runtime.js";
 import { ensureDnsRecords, normalizeDomain, CloudError } from "./cloud.js";
 import type {
   PlatformOptions,
@@ -301,7 +310,14 @@ export function createClusterWorkloads(
     if (!d) fail(400, "application_not_deployed_in_cluster");
     return {
       ...r,
-      spec: { ...r.spec, ...d, cluster_id: cid },
+      spec: {
+        ...r.spec,
+        ...d,
+        ...(r.spec.role === "openresty"
+          ? { service_name: SYSTEM_SERVICE_NAMES.openresty }
+          : {}),
+        cluster_id: cid,
+      },
       status: deploymentRow(r.kind, r.id, cid)
         ? deploymentStatus(deploymentRow(r.kind, r.id, cid)!)
         : {},
@@ -567,7 +583,43 @@ export function createClusterWorkloads(
       });
       if (new Set(nodes.map((n: Row) => n.machine_id)).size !== nodes.length)
         fail(400, "duplicate_cluster_node");
-      return { machine_ids: ids, port_start: start, port_end: end, nodes };
+      const registered = systemApplicationID(store, "registry");
+      const registryDeployment = registered
+        ? store
+            .get(registered, "application")
+            .spec.deployments?.find((d: Row) => d.cluster_id === context?.id)
+        : undefined;
+      if (
+        registryDeployment &&
+        !nodes.some(
+          (n: Row) =>
+            n.machine_id === registryDeployment.machine_ids[0] &&
+            n.address === registryDeployment.registry_address,
+        )
+      )
+        fail(409, "registry_data_migration_required");
+      if (
+        s.image_cache?.enabled !== undefined &&
+        typeof s.image_cache.enabled !== "boolean"
+      )
+        fail(400, "invalid_cluster_image_cache");
+      if (s.image_cache?.enabled === true) {
+        const rid = systemApplicationID(store, "registry");
+        if (
+          !rid ||
+          !store
+            .get(rid, "application")
+            .spec.deployments?.some((d: Row) => d.cluster_id === context?.id)
+        )
+          fail(409, "private_registry_install_required");
+      }
+      return {
+        machine_ids: ids,
+        port_start: start,
+        port_end: end,
+        nodes,
+        image_cache: { enabled: s.image_cache?.enabled === true },
+      };
     },
     afterSave(r) {
       db.run(
@@ -605,7 +657,7 @@ export function createClusterWorkloads(
   function validateApplication(
     input: Row,
     old?: Row,
-    context?: { id: string },
+    context?: { id: string; systemKind?: "openresty" | "registry" },
   ) {
     const s = normalizeLegacy("application", input),
       previous = old ? normalizeLegacy("application", old) : undefined;
@@ -616,8 +668,12 @@ export function createClusterWorkloads(
       fail(400, "invalid_deployment_mode");
     if (!["store", "custom"].includes(source.type))
       fail(400, "invalid_application_source");
-    if (!["generic", "openresty"].includes(role))
+    if (!["generic", "openresty", "registry"].includes(role))
       fail(400, "invalid_application_role");
+    if (role === "registry" && context?.systemKind !== "registry")
+      fail(403, "system_registry_management_required");
+    if (s.system_kind !== undefined || s.system_managed !== undefined)
+      fail(400, "system_identity_host_owned");
     if (
       role === "openresty" &&
       store
@@ -646,6 +702,10 @@ export function createClusterWorkloads(
     )
       fail(409, "stop_before_changing_deployment_mode");
     let serviceName = s.service_name;
+    if (role === "openresty" || role === "registry")
+      serviceName = SYSTEM_SERVICE_NAMES[role as "openresty" | "registry"];
+    else if (typeof serviceName === "string" && serviceName.startsWith("sys-"))
+      fail(409, "system_service_name_reserved");
     if (previous && serviceName !== previous.service_name)
       fail(409, "service_name_immutable");
     if (!serviceName) {
@@ -688,7 +748,7 @@ export function createClusterWorkloads(
       if (
         !["tcp", "udp"].includes(p.protocol) ||
         !["", "http", "https", "tcp", "udp"].includes(p.app_protocol) ||
-        !["0.0.0.0", "127.0.0.1", "::"].includes(p.host_ip)
+        !isIP(p.host_ip)
       )
         fail(400, "invalid_port_mapping");
     const runtime = normalizeApplication({
@@ -754,6 +814,26 @@ export function createClusterWorkloads(
       });
       if (mode === "manual" && !targets.length)
         fail(400, "target_machines_required");
+      if (role === "registry") {
+        if (mode !== "manual" || targets.length !== 1)
+          fail(400, "registry_requires_one_fixed_machine");
+        const prior = previous?.deployments.find(
+          (p: Row) => p.cluster_id === c.id,
+        );
+        if (
+          prior &&
+          (prior.machine_ids[0] !== targets[0] ||
+            prior.registry_address !== d.registry_address)
+        )
+          fail(409, "registry_data_migration_required");
+        if (
+          !c.spec.nodes.some(
+            (n: Row) =>
+              n.machine_id === targets[0] && n.address === d.registry_address,
+          )
+        )
+          fail(400, "registry_address_must_match_cluster_node");
+      }
       const replicas = num(d.replicas, 1, 0, 100);
       if (!Number.isInteger(replicas)) fail(400, "invalid_replicas");
       if (mode === "managed" && stateful && d.stateful_acknowledged !== true)
@@ -783,11 +863,17 @@ export function createClusterWorkloads(
         fail(400, "openresty_cluster_domain_required");
       return {
         ...gateway,
+        ...(role === "registry"
+          ? {
+              registry_address: privateRegistryAddress(d.registry_address),
+              registry_cache_enabled: c.spec.image_cache?.enabled === true,
+            }
+          : {}),
         cluster_id: c.id,
         machine_ids: targets,
         replicas,
-        cpu: num(d.cpu, 0.25, 0.01, 1024),
-        memory_mb: num(d.memory_mb, 256, 4, 4194304),
+        cpu: num(d.cpu, 0.25, role === "registry" ? 0.03 : 0.01, 1024),
+        memory_mb: num(d.memory_mb, 256, role === "registry" ? 64 : 4, 4194304),
         stateful_acknowledged: d.stateful_acknowledged === true,
       };
     });
@@ -894,6 +980,14 @@ export function createClusterWorkloads(
       deployment_mode: mode,
       deployments,
       stateful,
+      ...(role === "registry"
+        ? {
+            registry_upstream:
+              typeof s.registry_upstream === "string"
+                ? s.registry_upstream
+                : "",
+          }
+        : {}),
       ...(s.health
         ? {
             health: {
@@ -955,6 +1049,8 @@ export function createClusterWorkloads(
       );
   }
   function beforeDeleteApplication(r: PlatformResource) {
+    if (systemApplicationKind(store, r.id) === "registry")
+      fail(409, "system_registry_in_use");
     if (dnsPending.has(r.id)) fail(409, "application_dns_refresh_in_progress");
     if (
       tableExists("ops_dns_owned") &&
@@ -1028,9 +1124,15 @@ export function createClusterWorkloads(
   function validateWebsite(
     input: Row,
     previous?: Row,
-    context?: { id: string },
+    context?: { id: string; stored?: boolean },
   ) {
     const s = normalizeLegacy("website", input);
+    const siteAuth = normalizeWebsiteAuth(
+      s.auth,
+      previous?.auth,
+      false,
+      context?.stored,
+    );
     if (s.cluster_overrides || s.scope || s.openresty_application_id)
       fail(400, "website_cluster_override_not_supported");
     const routing = s.routing_mode ?? "manual",
@@ -1123,7 +1225,23 @@ export function createClusterWorkloads(
           raw.action === "return" ||
           raw.action === "deny";
         const normalized = normalizeLocations([
-          { ...raw, target: "upstream", upstreams: [], unavailable: true },
+          {
+            ...raw,
+            auth: normalizeWebsiteAuth(
+              raw.auth,
+              previous?.bindings
+                ?.find((p: Row) => p.domains.join() === b.domains.join())
+                ?.locations?.find(
+                  (p: Row) =>
+                    p.path === raw.path && p.match === (raw.match ?? "prefix"),
+                )?.auth,
+              true,
+              context?.stored,
+            ),
+            target: "upstream",
+            upstreams: [],
+            unavailable: true,
+          },
         ])[0];
         delete normalized.target;
         delete normalized.upstreams;
@@ -1244,8 +1362,52 @@ export function createClusterWorkloads(
           fail(400, "website_domain_outside_dns_scope");
         out.dns_zone_id = zone.id;
       }
+      for (const l of locations) {
+        if (
+          effectiveAuth(siteAuth, l.auth).mode === "basic" &&
+          (l.action === "return" ||
+            l.cors ||
+            l.cache ||
+            l.custom_config ||
+            s.nginx?.server_snippet)
+        )
+          fail(400, "website_auth_unsafe_combination");
+      }
       return out;
     });
+    const registryWebsite = db.get<Row>(
+      "SELECT * FROM ops_private_registry_settings WHERE id=1",
+    );
+    if (
+      registryWebsite?.website_id &&
+      registryWebsite.website_id === context?.id
+    ) {
+      const rid = systemApplicationID(store, "registry");
+      if (
+        siteAuth.mode !== "basic" ||
+        ids.length !== 1 ||
+        ids[0] !== registryWebsite.carrier_cluster_id ||
+        bindings.some(
+          (b: Row) =>
+            !b.https ||
+            b.locations.length !== 1 ||
+            b.locations[0].path !== "/" ||
+            effectiveAuth(siteAuth, b.locations[0].auth).mode !== "basic" ||
+            b.locations[0].cluster_targets.some(
+              (t: Row) =>
+                t.application_id !== rid || t.port_name !== "registry",
+            ),
+        )
+      )
+        fail(409, "registry_website_security_required");
+    }
+    const protectedSite =
+      siteAuth.mode === "basic" ||
+      bindings.some((b: Row) =>
+        b.locations.some((l: Row) => l.auth.mode === "basic"),
+      );
+    if (protectedSite && bindings.some((b: Row) => !b.https))
+      fail(400, "website_auth_requires_https");
     for (const other of store.list("website"))
       if (
         other.id !== context?.id &&
@@ -1330,6 +1492,7 @@ export function createClusterWorkloads(
       cluster_ids: ids,
       bindings,
       nginx: normalizeNginx(s.nginx),
+      auth: siteAuth,
       mode: s.mode ?? "proxy",
       ...(s.static_files || s.mode === "static"
         ? {
@@ -1457,6 +1620,12 @@ export function createClusterWorkloads(
       );
   }
   function beforeDeleteWebsite(r: PlatformResource) {
+    if (
+      db.get<Row>(
+        "SELECT website_id FROM ops_private_registry_settings WHERE id=1",
+      )?.website_id === r.id
+    )
+      fail(409, "registry_website_in_use");
     if (dnsPending.has(r.id)) fail(409, "website_dns_refresh_in_progress");
     if (
       tableExists("ops_dns_owned") &&
@@ -1495,7 +1664,7 @@ export function createClusterWorkloads(
             protocol: p.protocol,
             host_ip: p.host_ip,
           }));
-    return app;
+    return registryRuntime(a, app);
   };
   const usage = (agentID: string) => {
     const a = db.get<Row>(
@@ -1576,7 +1745,9 @@ export function createClusterWorkloads(
     // Old mappings remain reserved until a verified replacement receipt.
   }
   function prepare(a: PlatformResource, i: Row, c: PlatformResource) {
-    const resources = applicationResources(a.spec),
+    const resources = applicationResources(
+        registryRuntime(a, structuredClone(a.spec)),
+      ),
       node = capacity(c, i.machine_id),
       use = usage(i.agent_id),
       active = !["stopped", "removed"].includes(i.state);
@@ -1591,16 +1762,27 @@ export function createClusterWorkloads(
       "UPDATE ops_cluster_instances SET cpu=?,memory_mb=?,address=? WHERE id=?",
       resources.cpu,
       resources.memory_mb,
-      node.address,
+      a.spec.role === "registry" ? a.spec.registry_address : node.address,
       i.id,
     );
-    reserve(i, a.spec.ports, c);
+    reserve(
+      i,
+      a.spec.role === "registry"
+        ? a.spec.ports.map((p: Row) => ({
+            ...p,
+            host_ip: a.spec.registry_address,
+          }))
+        : a.spec.ports,
+      c,
+    );
   }
   function create(a: PlatformResource, key: string, slot: string) {
     const m = member(a.spec.cluster_id, key),
       c = cluster(a.spec.cluster_id),
       node = capacity(c, key),
-      resources = applicationResources(a.spec);
+      resources = applicationResources(
+        registryRuntime(a, structuredClone(a.spec)),
+      );
     if (!m.agent_id || !agent(m.agent_id)) fail(400, "machine_agent_required");
     const use = usage(m.agent_id);
     if (
@@ -1628,13 +1810,22 @@ export function createClusterWorkloads(
       attempt,
       resources.cpu,
       resources.memory_mb,
-      node.address,
+      a.spec.role === "registry" ? a.spec.registry_address : node.address,
       at(),
       at(),
       a.spec.cluster_id,
     );
     const i = row(keyID);
-    reserve(i, a.spec.ports, c);
+    reserve(
+      i,
+      a.spec.role === "registry"
+        ? a.spec.ports.map((p: Row) => ({
+            ...p,
+            host_ip: a.spec.registry_address,
+          }))
+        : a.spec.ports,
+      c,
+    );
     return i;
   }
   function dispatch(
@@ -1765,6 +1956,7 @@ export function createClusterWorkloads(
         mode: site.spec.mode === "static" ? "static" : "proxy",
         locations: routes,
         nginx,
+        auth: site.spec.auth,
         ...(site.spec.static_files
           ? { static_files: site.spec.static_files }
           : {}),
@@ -1842,6 +2034,9 @@ export function createClusterWorkloads(
       "workload.apply",
       {
         application: effective(a, i),
+        ...(registryCacheFor(store, a)
+          ? { image_cache: registryCacheFor(store, a) }
+          : {}),
         application_id: a.id,
         application_revision: a.revision,
         ...health(a, i),
@@ -1852,11 +2047,25 @@ export function createClusterWorkloads(
     );
   }
   function inspect(a: PlatformResource, i: Row, actor: string) {
+    const authRequired =
+      a.spec.role === "openresty" &&
+      store
+        .list("website")
+        .some((site) =>
+          snapshots(site).some(
+            (spec) =>
+              spec.cluster_ids?.includes(i.cluster_id) &&
+              (spec.auth?.mode === "basic" ||
+                spec.bindings?.some((b: Row) =>
+                  b.locations?.some((l: Row) => l.auth?.mode === "basic"),
+                )),
+          ),
+        );
     return dispatch(
       store.get(a.id),
       i,
       a.spec.role === "openresty" ? "gateway.inspect" : "workload.inspect",
-      health(a, i),
+      { ...health(a, i), ...(authRequired ? { auth_required: true } : {}) },
       i.desired_generation,
       actor,
     );
@@ -1910,6 +2119,7 @@ export function createClusterWorkloads(
             online(n.agent_id) && (!n.cpu || !n.memory_mb || !n.address),
         );
       if (unknown.length) {
+        patchDeployment('application', a.id, cid, {pending:'node_capacity_discovery'});
         for (const n of unknown)
           if (
             !db.get(
@@ -2775,7 +2985,7 @@ export function createClusterWorkloads(
       try {
         if (r.kind === "website") {
           if (action === "deploy")
-            validateWebsite(r.spec, undefined, { id: r.id });
+            validateWebsite(r.spec, undefined, { id: r.id, stored: true });
           if (action === "deploy")
             for (const b of r.spec.bindings.filter((b: Row) => b.https)) {
               let available = false;

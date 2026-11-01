@@ -1,0 +1,122 @@
+{
+  "resource": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved": true,
+  "seq": 902,
+  "epochId": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "readbackPages": 11,
+  "blockCount": 626,
+  "targetParagraphs": 15,
+  "textMismatches": [],
+  "unrelatedBlocks": 597,
+  "unrelatedPreserved": true,
+  "otherNativeDiagrams": 29,
+  "registryDiagram": {
+    "id": "images059-registry-flow",
+    "type": "flowchart",
+    "nodeCount": 10,
+    "edgeCount": 10,
+    "nodesMatch": true,
+    "edgesMatch": true,
+    "nodes": [
+      {
+        "id": "enable",
+        "label": "私有镜像模块 / 选集群与明确机器"
+      },
+      {
+        "id": "regapp",
+        "label": "宿主登记系统仓库 / 固定名称"
+      },
+      {
+        "id": "ci",
+        "label": "构建机 / 唯一push域名"
+      },
+      {
+        "id": "public",
+        "label": "A入口：HTTPS + 网站Basic"
+      },
+      {
+        "id": "authsets",
+        "label": "网站内嵌用户 / 冻结hash"
+      },
+      {
+        "id": "internal",
+        "label": "可信私网免鉴权 / 含push权限"
+      },
+      {
+        "id": "origin",
+        "label": "A集群：选定私库写入源"
+      },
+      {
+        "id": "reader",
+        "label": "B集群：独立私库与源缓存"
+      },
+      {
+        "id": "nodea",
+        "label": "A Agent：校验并导入镜像"
+      },
+      {
+        "id": "nodeb",
+        "label": "B Agent：校验并导入镜像"
+      }
+    ],
+    "edges": [
+      {
+        "id": "images059-registry-e1",
+        "source": "enable",
+        "target": "regapp"
+      },
+      {
+        "id": "images059-registry-e2",
+        "source": "regapp",
+        "target": "origin"
+      },
+      {
+        "id": "images059-registry-e3",
+        "source": "regapp",
+        "target": "reader"
+      },
+      {
+        "id": "images059-registry-e4",
+        "source": "ci",
+        "target": "public"
+      },
+      {
+        "id": "images059-registry-e5",
+        "source": "authsets",
+        "target": "public"
+      },
+      {
+        "id": "images059-registry-e6",
+        "source": "public",
+        "target": "origin"
+      },
+      {
+        "id": "images059-registry-e7",
+        "source": "internal",
+        "target": "origin"
+      },
+      {
+        "id": "images059-registry-e8",
+        "source": "origin",
+        "target": "nodea"
+      },
+      {
+        "id": "images059-registry-e9",
+        "source": "origin",
+        "target": "reader",
+        "label": "同摘要pull-through缓存"
+      },
+      {
+        "id": "images059-registry-e10",
+        "source": "reader",
+        "target": "nodeb"
+      }
+    ]
+  },
+  "futureDiagramPreserved": true,
+  "lastDelta": {
+    "blockId": "images059-v1-bridge-0",
+    "textMatches": true,
+    "diagramUnchanged": true
+  }
+}

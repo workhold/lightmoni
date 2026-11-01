@@ -1,3 +1,5 @@
+import {publicWebsiteSpec} from './website-auth.js';
+import {registryCacheFor} from './registry-runtime.js';
 import { createClusterWorkloads } from "./cluster-workloads.js";
 import { isIP } from "node:net";
 import { domainToASCII } from "node:url";
@@ -357,6 +359,11 @@ export function createWorkloadController(
       fail(409, "platform_resource_in_use");
   };
   store.register("application", {
+    validatePayload(resource,config){
+      if(!config.image_cache)return;
+      const expected=registryCacheFor(store,{...resource,spec:{...resource.spec,cluster_id:config.cluster_id}});
+      if(JSON.stringify(expected)!==JSON.stringify(config.image_cache))fail(409,'private_registry_cache_policy_changed');
+    },
     validate(spec, previous, context) {
       if (
         spec.deployments ||
@@ -496,6 +503,7 @@ export function createWorkloadController(
     },
   });
   store.register("website", {
+    publicSpec: publicWebsiteSpec,
     afterSave(r) {
       if (r.spec.cluster_ids) modern.afterSaveWebsite(r);
     },

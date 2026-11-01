@@ -1,0 +1,13 @@
+{
+  "revision": "07bf306873e63a0219ad682c71e40589854afa42",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tag": "20261101-07bf306",
+  "previous_latest": "sha256:d818b9d72ec6eb702a91fa1bac158e47aacef27cc7b897762ac4db5d0c9eb2de",
+  "architecture_sync": "original feature SDDs / PRs 37,39,40,41 preserve synchronized Doca text and native diagrams; integration and packaging add no architecture",
+  "feature_prs": [
+    37,
+    39,
+    40,
+    41
+  ]
+}

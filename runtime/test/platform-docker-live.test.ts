@@ -44,6 +44,7 @@ async function setup(t: any) {
       await rm(root, { recursive: true, force: true });
     }
   });
+  const progressEvents:any[]=[];
   let revision = 0;
   const run = (config: any, operation = "apply") => {
     revision++;
@@ -63,9 +64,9 @@ async function setup(t: any) {
       },
       input: {},
     };
-    return executeOperation(payload, context, async () => {});
+    return executeOperation(payload, context, async event => {progressEvents.push(event)});
   };
-  return { root, dataDir, instance, context, run };
+  return { root, dataDir, instance, context, run, progressEvents };
 }
 test(
   "real Docker single-container and Compose versions preserve initial and data files",
@@ -89,6 +90,8 @@ test(
       };
     let receipt = await f.run({ task: "workload.apply", application });
     assert.equal(receipt.state, "succeeded", JSON.stringify(receipt));
+    assert.ok(f.progressEvents.some(event=>event.snapshot?.operations?.progress?.phase==='starting_containers'));
+    assert.ok(f.progressEvents.some(event=>event.snapshot?.operations?.progress?.phase==='checking_health'));
     let container = receipt.snapshot.operations.data.containers[0].id;
     assert.equal(
       (

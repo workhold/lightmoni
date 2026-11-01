@@ -1,5 +1,11 @@
 import { id } from "../shared/crypto.js";
 import { fail } from "../shared/http.js";
+import {
+  ensureSystemTables,
+  systemApplicationKind,
+  type SystemApplicationKind,
+} from "./system-applications.js";
+import { installCauses, installPhases } from "../operations/install-progress.js";
 import type { Dependencies } from "../shared/types.js";
 import type { AgentJobStore, AgentJobUpdate } from "../server/agent-jobs.js";
 import type { OperationPayload } from "../operations/types.js";
@@ -45,7 +51,7 @@ export const cleanResult = (value: any, depth = 0): any => {
     return Object.fromEntries(
       Object.entries(value).map(([k, v]) => [
         k,
-        /^(private_key|private_key_pem|certificate_pem|certificate_chain|secret|secret_key|access_key_secret|secret_access_key|session_token|password|token|credentials|environment|env|script|stdout|stderr)$/i.test(
+        /^(private_key|private_key_pem|certificate_pem|certificate_chain|secret|secret_key|access_key_secret|secret_access_key|session_token|password|password_hash|htpasswd|token|credentials|environment|env|script|stdout|stderr)$/i.test(
           k,
         )
           ? "[redacted]"
@@ -83,6 +89,7 @@ export class OperationsPlatformStore implements PlatformStore {
     readonly deps: Dependencies,
     readonly jobs: AgentJobStore,
   ) {
+    ensureSystemTables(this);
     deps.db.exec(`CREATE TABLE IF NOT EXISTS ops_platform_resources(
    id TEXT PRIMARY KEY,kind TEXT NOT NULL,name TEXT NOT NULL,revision INTEGER NOT NULL,spec_cipher TEXT NOT NULL,
    status_json TEXT NOT NULL,created_by TEXT NOT NULL,authorized_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
@@ -114,14 +121,21 @@ export class OperationsPlatformStore implements PlatformStore {
       .exec(`CREATE UNIQUE INDEX IF NOT EXISTS ops_platform_named_resource ON ops_platform_resources(kind,name) WHERE kind!='application';
       CREATE TABLE IF NOT EXISTS ops_platform_application_keys(resource_id TEXT PRIMARY KEY,service_name TEXT NOT NULL UNIQUE,cluster_id TEXT NOT NULL,role TEXT NOT NULL);
       DROP INDEX IF EXISTS ops_platform_openresty_cluster;`);
-    const interrupted = deps.db.all<{id: string}>("SELECT id FROM ops_platform_runs WHERE state='running' AND job_id=''");
+    const interrupted = deps.db.all<{ id: string }>(
+      "SELECT id FROM ops_platform_runs WHERE state='running' AND job_id=''",
+    );
     // A previous process may have completed a cloud request before persisting its receipt.
     deps.db.run(
       "UPDATE ops_platform_runs SET state='unknown',result_json=?,updated_at=? WHERE state='running' AND job_id=''",
       JSON.stringify({ code: "center_restarted_during_execution" }),
       this.at(),
     );
-    for (const run of interrupted) this.addRunEvent(run.id, "interrupted", "unknown", {code: "center_restarted_during_execution", message: "The center restarted. Inspect the previous execution before retrying."});
+    for (const run of interrupted)
+      this.addRunEvent(run.id, "interrupted", "unknown", {
+        code: "center_restarted_during_execution",
+        message:
+          "The center restarted. Inspect the previous execution before retrying.",
+      });
     this.unsubscribe = jobs.onUpdate((update) => this.onJob(update));
   }
   private at() {
@@ -132,7 +146,7 @@ export class OperationsPlatformStore implements PlatformStore {
       throw Error("duplicate_platform_resource_kind");
     this.definitions.set(kind, definition);
   }
-  private definition(kind: ResourceKind) {
+  definition(kind: ResourceKind) {
     const d = this.definitions.get(kind);
     if (!d) fail(400, "unsupported_platform_resource_kind");
     return d;
@@ -202,6 +216,29 @@ export class OperationsPlatformStore implements PlatformStore {
     spec: Record<string, any>,
     actor: string,
   ) {
+    return this.createResource(kind, name, spec, actor);
+  }
+  createSystemApplication(
+    kind: SystemApplicationKind,
+    name: string,
+    spec: Record<string, any>,
+    actor: string,
+  ) {
+    return this.createResource(
+      "application",
+      name,
+      { ...spec, role: kind },
+      actor,
+      kind,
+    );
+  }
+  private createResource(
+    kind: ResourceKind,
+    name: string,
+    spec: Record<string, any>,
+    actor: string,
+    systemKind?: SystemApplicationKind,
+  ) {
     this.requireActor(actor);
     const key = id(),
       at = this.at();
@@ -209,10 +246,11 @@ export class OperationsPlatformStore implements PlatformStore {
       const valid = this.definition(kind).validate(
         safeObject(spec),
         undefined,
-        { id: key },
+        { id: key, systemKind },
       );
       const cipher = this.deps.encrypt(JSON.stringify(valid)),
-        resourceName = this.definition(kind).resourceName?.(valid) ?? validateName(name);
+        resourceName =
+          this.definition(kind).resourceName?.(valid) ?? validateName(name);
       this.deps.db.run(
         "INSERT INTO ops_platform_resources(id,kind,name,revision,spec_cipher,status_json,created_by,authorized_by,created_at,updated_at) VALUES(?,?,?,1,?,?,?,?,?,?)",
         key,
@@ -234,6 +272,13 @@ export class OperationsPlatformStore implements PlatformStore {
         at,
       );
       this.syncKeys(this.get(key));
+      if (systemKind || (kind === "application" && valid.role === "openresty"))
+        this.deps.db.run(
+          "INSERT INTO ops_system_applications VALUES(?,?,?)",
+          systemKind ?? "openresty",
+          key,
+          at,
+        );
       this.definition(kind).afterSave?.(this.get(key));
     });
     return this.get(key);
@@ -244,6 +289,27 @@ export class OperationsPlatformStore implements PlatformStore {
     name: string,
     spec: Record<string, any>,
     actor: string,
+  ) {
+    return this.updateResource(key, revision, name, spec, actor);
+  }
+  updateSystemApplication(
+    key: string,
+    revision: number,
+    name: string,
+    spec: Record<string, any>,
+    actor: string,
+  ) {
+    const kind = systemApplicationKind(this, key);
+    if (!kind) fail(409, "system_application_required");
+    return this.updateResource(key, revision, name, spec, actor, kind);
+  }
+  private updateResource(
+    key: string,
+    revision: number,
+    name: string,
+    spec: Record<string, any>,
+    actor: string,
+    systemKind?: SystemApplicationKind,
   ) {
     this.requireActor(actor);
     this.deps.db.transaction(() => {
@@ -260,10 +326,12 @@ export class OperationsPlatformStore implements PlatformStore {
       const valid = this.definition(previous.kind).validate(
           safeObject(spec),
           previous.spec,
-          { id: key },
+          { id: key, systemKind },
         ),
         cipher = this.deps.encrypt(JSON.stringify(valid)),
-        resourceName = this.definition(previous.kind).resourceName?.(valid) ?? validateName(name),
+        resourceName =
+          this.definition(previous.kind).resourceName?.(valid) ??
+          validateName(name),
         at = this.at();
       this.deps.db.run(
         "UPDATE ops_platform_resources SET name=?,revision=revision+1,spec_cipher=?,authorized_by=?,updated_at=? WHERE id=? AND revision=?",
@@ -345,6 +413,14 @@ export class OperationsPlatformStore implements PlatformStore {
       this.deps.db.run("DELETE FROM ops_platform_resources WHERE id=?", key);
       this.deps.db.run(
         "DELETE FROM ops_platform_application_keys WHERE resource_id=?",
+        key,
+      );
+      this.deps.db.run(
+        "DELETE FROM ops_system_applications WHERE application_id=?",
+        key,
+      );
+      this.deps.db.run(
+        "DELETE FROM ops_system_application_aliases WHERE application_id=?",
         key,
       );
       this.definition(r.kind).afterDelete?.(r);
@@ -459,7 +535,18 @@ export class OperationsPlatformStore implements PlatformStore {
         actions: [
           { kind: "operations", operation_id: key, domain: "platform" },
         ],
-        capabilities: ["operations.platform"],
+        capabilities: [
+          "operations.platform",
+          ...(config.auth_required ||
+          config.sites?.some(
+            (s: any) =>
+              s.auth?.mode === "basic" ||
+              s.locations?.some((l: any) => l.auth?.mode === "basic"),
+          )
+            ? ["operations.platform.website-auth.v1"]
+            : []),
+          ...(config.image_cache ? ["operations.platform.image-cache.v1"] : []),
+        ],
         target: { operations_resource_id: resource.id },
         expiresInSeconds: 900,
       });
@@ -479,32 +566,69 @@ export class OperationsPlatformStore implements PlatformStore {
         at,
         at,
       );
+      this.addRunEvent(key, 'queued', 'pending', {message:installPhases.queued});
       return this.runView(this.runRow(key));
     });
   }
-  async run(resource: PlatformResource, action: string, actor: string,
-    work: (runID: string) => Promise<Record<string, any>>, idempotencyKey?: string,
-    input: Record<string, any> = {}) {
-    return this.startRun(resource, action, actor, work, idempotencyKey, input).done;
+  async run(
+    resource: PlatformResource,
+    action: string,
+    actor: string,
+    work: (runID: string) => Promise<Record<string, any>>,
+    idempotencyKey?: string,
+    input: Record<string, any> = {},
+  ) {
+    return this.startRun(resource, action, actor, work, idempotencyKey, input)
+      .done;
   }
-  addRunEvent(runID: string, phase: string, state: string, detail: Record<string, any> = {}) {
-    if (!/^[a-z][a-z0-9_]{0,79}$/.test(phase) || !["pending", "running", "succeeded", "failed", "unknown", "warning"].includes(state))
+  addRunEvent(
+    runID: string,
+    phase: string,
+    state: string,
+    detail: Record<string, any> = {},
+  ) {
+    if (
+      !/^[a-z][a-z0-9_]{0,79}$/.test(phase) ||
+      ![
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "unknown",
+        "warning",
+      ].includes(state)
+    )
       fail(400, "invalid_platform_run_event");
     const run = this.runRow(runID);
     const resource = this.deps.db.get<{kind: string}>("SELECT kind FROM ops_platform_resources WHERE id=?", run.resource_id);
     const safe = cleanResult(Object.fromEntries(["domain", "attempt", "code", "message", "error_type", "http_status", "request_id"]
       .filter(key => detail[key] !== undefined).map(key => [key, typeof detail[key] === "string" ? detail[key].slice(0, 1200) : detail[key]])));
-    this.deps.db.transaction(() => {
+    const write = () => {
       const sequence = Number(this.deps.db.get<{n: number}>("SELECT COALESCE(MAX(sequence),0)+1 n FROM ops_platform_run_events WHERE run_id=?", runID)!.n);
       this.deps.db.run("INSERT INTO ops_platform_run_events VALUES(?,?,?,?,?,?,?,?,?,?)", id(), runID, run.resource_id, resource?.kind ?? "", run.resource_revision, sequence, phase, state, JSON.stringify(safe), this.at());
       this.deps.db.run("DELETE FROM ops_platform_run_events WHERE run_id=? AND sequence<=?", runID, sequence - 2000);
-    });
+    };
+    if (this.deps.db.native.isTransaction) write();
+    else this.deps.db.transaction(write);
   }
   runEvents(runID: string, after = 0): PlatformRunEvent[] {
     this.runRow(runID);
-    if (!Number.isSafeInteger(after) || after < 0) fail(400, "invalid_platform_event_cursor");
-    return this.deps.db.all<any>("SELECT * FROM ops_platform_run_events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT 200", runID, after)
-      .map(({detail_json, resource_kind: _kind, resource_revision: _revision, ...event}) => ({...event, ...cleanResult(JSON.parse(detail_json))}));
+    if (!Number.isSafeInteger(after) || after < 0)
+      fail(400, "invalid_platform_event_cursor");
+    return this.deps.db
+      .all<any>(
+        "SELECT * FROM ops_platform_run_events WHERE run_id=? AND sequence>? ORDER BY sequence LIMIT 200",
+        runID,
+        after,
+      )
+      .map(
+        ({
+          detail_json,
+          resource_kind: _kind,
+          resource_revision: _revision,
+          ...event
+        }) => ({ ...event, ...cleanResult(JSON.parse(detail_json)) }),
+      );
   }
   startRun(
     resource: PlatformResource,
@@ -516,7 +640,11 @@ export class OperationsPlatformStore implements PlatformStore {
   ): PlatformExecution {
     this.requireActor(actor);
     const duplicate = this.duplicate(idempotencyKey);
-    if (duplicate) return {run: duplicate, done: this.executions.get(duplicate.id) ?? Promise.resolve(duplicate)};
+    if (duplicate)
+      return {
+        run: duplicate,
+        done: this.executions.get(duplicate.id) ?? Promise.resolve(duplicate),
+      };
     if (this.get(resource.id).revision !== resource.revision)
       fail(409, "platform_revision_conflict");
     const key = id(),
@@ -578,9 +706,12 @@ export class OperationsPlatformStore implements PlatformStore {
     });
     this.pending.add(execution);
     this.executions.set(key, execution);
-    const release = () => {this.pending.delete(execution); this.executions.delete(key);};
+    const release = () => {
+      this.pending.delete(execution);
+      this.executions.delete(key);
+    };
     void execution.then(release, release);
-    return {run: this.action(key), done: execution};
+    return { run: this.action(key), done: execution };
   }
   subscribe(
     listener: (
@@ -606,6 +737,12 @@ export class OperationsPlatformStore implements PlatformStore {
         update.snapshot?.operations ??
         {},
     );
+    if (result.progress) {
+      const p = result.progress;
+      result.progress = typeof p.phase === 'string' && Object.hasOwn(installPhases, p.phase)
+        ? {phase:p.phase,...(typeof p.code === 'string' && Object.hasOwn(installCauses,p.code)?{code:p.code}:{})} : {};
+    }
+    if (result.cause_code && !Object.hasOwn(installCauses, result.cause_code)) delete result.cause_code;
     this.deps.db.run(
       "UPDATE ops_platform_runs SET state=?,result_json=?,updated_at=? WHERE id=?",
       update.phase,
@@ -617,6 +754,19 @@ export class OperationsPlatformStore implements PlatformStore {
       row.id,
     );
     const payload = JSON.parse(this.deps.decrypt(row.payload_cipher));
+    // Project only static, bounded diagnostics. Agent summaries and command output
+    // are deliberately excluded from the administrator installation log.
+    const progress = update.snapshot?.operations as Record<string, any> | undefined;
+    const detail = progress?.progress;
+    const phase = typeof detail?.phase === 'string' && Object.hasOwn(installPhases, detail.phase) ? detail.phase : update.phase;
+    const cause = [detail?.code, result.cause_code].find(code => typeof code === 'string' && Object.hasOwn(installCauses, code));
+    const state = update.phase === 'cancelled' ? 'warning' : ['succeeded','failed','unknown'].includes(update.phase) ? update.phase : 'running';
+    const message = (installPhases[phase] ?? 'Operation state updated') + (cause ? ' · '+installCauses[cause] : '');
+    const last = this.deps.db.get<any>('SELECT phase,state,detail_json FROM ops_platform_run_events WHERE run_id=? ORDER BY sequence DESC LIMIT 1', row.id);
+    const code = cause ?? (update.code ? Object.hasOwn(installCauses, update.code) ? update.code : 'operation_failed' : undefined);
+    const heartbeat = !detail && update.phase === row.state && !['succeeded','failed','unknown','cancelled'].includes(update.phase);
+    if (!heartbeat && (!last || last.phase !== phase || last.state !== state || JSON.parse(last.detail_json).code !== (code || undefined)))
+      this.addRunEvent(row.id, phase, state, {message,...(code?{code}:{} )});
     for (const listener of this.listeners)
       listener(
         this.runView(this.runRow(row.id)),
@@ -645,7 +795,11 @@ export class OperationsPlatformStore implements PlatformStore {
       !job.capabilities?.includes("operations.platform")
     )
       fail(403, "platform_payload_mismatch");
-    this.definition(current.kind).validatePayload?.(current, payload.resource.config, job.agent_id);
+    this.definition(current.kind).validatePayload?.(
+      current,
+      payload.resource.config,
+      job.agent_id,
+    );
     return payload;
   }
   async close() {
