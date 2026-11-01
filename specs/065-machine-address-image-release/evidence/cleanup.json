@@ -1,0 +1,8 @@
+{
+  "prefix": "lightmoni-release-eb62ca6",
+  "containers_remaining": [],
+  "volumes_remaining": [],
+  "networks_remaining": [],
+  "temporary_credential_files_absent": true,
+  "scope": "only disposable release services; existing shared containers and volumes unchanged"
+}
