@@ -1,0 +1,8 @@
+{
+  "checks": [
+    "旧页面与入口管理基线截图"
+  ],
+  "errors": [],
+  "media": "artifacts/screenshots/specs/077-website-management-flow/evidence/baseline",
+  "scope": "Real disposable SQLite/API. Health, publication and DNS observation are explicit browser response fixtures; no external DNS or Agent actions."
+}

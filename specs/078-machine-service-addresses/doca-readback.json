@@ -1,0 +1,189 @@
+{
+  "date": "2026-11-01",
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "architecture": "新增主机独立地址设置存储、管理员GET/PUT接口及DNS取址资格路径；仓库系统设计64/78节与Doca同一SDD/PR同步。",
+  "saved": true,
+  "readback_seq": 922,
+  "epoch": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "title": "LightMoni 系统设计基线",
+  "blocks_before": 727,
+  "blocks_after": 733,
+  "readback_blocks": [
+    {
+      "id": "machine064-design-1",
+      "seq": 922,
+      "text": "所有受管机器的服务私网与公网地址统一由机器管理提供。machineServiceAddresses 读取当前主机与 Agent 身份匹配的网卡快照，排除 loopback、Docker/容器桥、veth、隧道等接口，自动选择优先 IPv4 再 IPv6；内外网均支持独立人工修正（SDD078），服务连接优先私网，DNS 只选公网。SSH 目标域名只用于连接，不推导服务 IP；数字 SSH 目标与到平台的公网来源只作待确认候选，代理内网来源不参与服务取址。无网卡快照的历史数字 IP 可兼容，未纳管的旧 Agent 保持原路径。"
+    },
+    {
+      "id": "e54fa85e-047f-4243-a3cb-6dcae6ba05b2",
+      "seq": 922,
+      "text": "内外网服务地址候选与人工修正（SDD078）"
+    },
+    {
+      "id": "machine078-design-1",
+      "seq": 922,
+      "text": "机器管理把身份匹配的网卡私网/公网地址、数字 SSH 目标和到平台的公网来源列为候选，保留来源、网卡与观测时间；排除容器桥、回环和隧道。仅网卡地址用于自动选择；NAT 公网可能不在网卡中，SSH/平台来源必须由管理员采用或修正。候选不证明 NAT 入站映射、端口或防火墙可达，不使用第三方 IP 回显、云元数据凭据或 DNS 解析 SSH 域名。"
+    },
+    {
+      "id": "machine078-design-2",
+      "seq": 922,
+      "text": "中心 SQLite 新增 machine_service_address_settings，按稳定 machine_id 保存 revision、内网/公网 mode 与 address、target_generation、updated_by/updated_at；GET/PUT /api/v1/machines/:id/service-addresses 仅管理员可用。PUT 原子核对设置版本与 SSH 目标代次；范围错误定位内网/公网字段，冲突保留输入。人工设置不覆盖网络观测，不受心跳和 Agent 重装影响；SSH 目标变化后原人工设置失效，需重新确认；删除主机级联清理设置。"
+    },
+    {
+      "id": "machine078-design-3",
+      "seq": 922,
+      "text": "machineServiceAddresses 优先采用有效人工地址，否则自动使用当前普通网卡地址，并保留无网卡历史数字地址兼容。集群容量、服务发现和网站网关共用该来源；内部端点保留私网语义，入口托管 A/AAAA 只用公网服务地址。健康入口缺少公网地址时，gateway_dns 标明受影响机器，托管入口的网站 CNAME 暂不获得该入口流量资格；其他健康入口继续维护。自行维护入口域名仍由用户管理 DNS。已部署的指定 IP 监听不被提前改写，需重新部署生效。"
+    },
+    {
+      "id": "machine078-design-4",
+      "seq": 922,
+      "text": "网站管理分别呈现保存、按集群发布和 DNS 厂商回读；保存不触发发布。入口域名/托管域名短表单只修改对应集群的入口解析配置，保留高级部署设置和既有乐观锁。最近回读成功不代表公网缓存传播或端口连通已经验证。SDD076 记录字段级上游 URL 反馈，SDD077 为交互整理且无独立架构变化，SDD078 记录本节存储与取址控制路径变更。"
+    },
+    {
+      "id": "machine078-address-flow",
+      "seq": 922,
+      "text": "",
+      "nodes": [
+        {
+          "id": "m078-observe",
+          "label": "当前身份网卡观测\n自动选择 / 候选",
+          "shape": "process",
+          "x": 20,
+          "y": 25,
+          "width": 220,
+          "height": 75
+        },
+        {
+          "id": "m078-other",
+          "label": "SSH 数字目标 / 公网来源\n仅待确认候选",
+          "shape": "process",
+          "x": 20,
+          "y": 160,
+          "width": 220,
+          "height": 75
+        },
+        {
+          "id": "m078-admin",
+          "label": "管理员采用 / 人工修正\n内网与公网独立设置",
+          "shape": "process",
+          "x": 310,
+          "y": 160,
+          "width": 230,
+          "height": 75
+        },
+        {
+          "id": "m078-settings",
+          "label": "稳定主机设置\nrevision + SSH 目标代次",
+          "shape": "database",
+          "x": 310,
+          "y": 300,
+          "width": 230,
+          "height": 75
+        },
+        {
+          "id": "m078-resolve",
+          "label": "统一服务地址解析\n人工优先 / 自动网卡",
+          "shape": "process",
+          "x": 600,
+          "y": 30,
+          "width": 220,
+          "height": 75
+        },
+        {
+          "id": "m078-internal",
+          "label": "内网服务端点\n集群内部连接",
+          "shape": "process",
+          "x": 870,
+          "y": 30,
+          "width": 170,
+          "height": 75
+        },
+        {
+          "id": "m078-dns",
+          "label": "公网服务地址\n入口 A / AAAA",
+          "shape": "process",
+          "x": 600,
+          "y": 300,
+          "width": 220,
+          "height": 75
+        },
+        {
+          "id": "m078-cname",
+          "label": "健康入口资格\n网站 CNAME",
+          "shape": "process",
+          "x": 870,
+          "y": 300,
+          "width": 170,
+          "height": 75
+        }
+      ],
+      "edges": [
+        {
+          "id": "m078-edge-0",
+          "source": "m078-observe",
+          "target": "m078-resolve",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "m078-edge-1",
+          "source": "m078-observe",
+          "target": "m078-admin",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "m078-edge-2",
+          "source": "m078-other",
+          "target": "m078-admin",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "m078-edge-3",
+          "source": "m078-admin",
+          "target": "m078-settings",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "m078-edge-4",
+          "source": "m078-settings",
+          "target": "m078-resolve",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "m078-edge-5",
+          "source": "m078-resolve",
+          "target": "m078-internal",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "m078-edge-6",
+          "source": "m078-resolve",
+          "target": "m078-dns",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "m078-edge-7",
+          "source": "m078-dns",
+          "target": "m078-cname",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        }
+      ]
+    }
+  ],
+  "preservation": {
+    "operations": "仅替换SDD064首段、新增SDD078标题/4段/原生流程图并移动新增块到末尾。未重写全文或其他图块。",
+    "existing_diagram_checked": "agent071-permissions-flow",
+    "existing_diagram_unchanged": true,
+    "first_heading_unchanged": true,
+    "native_code_issues": []
+  },
+  "normalization": "首次编号标题被文档工具规范化为有序列表并变更ID；已读取真实ID、修正为原生h2并移动新增块，最终根标题和章节顺序已回读确认。",
+  "scope": "设计同步已确认；不是生产主机设置、网站发布、DNS写入或部署回执。"
+}

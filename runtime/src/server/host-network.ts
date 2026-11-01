@@ -1,6 +1,7 @@
 import { BlockList, isIP } from "node:net";
 import type { IncomingMessage } from "node:http";
 import type { DB } from "../shared/sqlite.js";
+import { fail } from "../shared/http.js";
 import { normalizeIPAddress, normalizeNetworkAddresses, networkScope, type HostNetworkAddress } from "../shared/host-network.js";
 
 export type SourceKind = "direct" | "trusted_proxy" | "unavailable";
@@ -15,6 +16,7 @@ export interface MachineNetwork {
   source_ip: string;
   source_observed_at: string;
   source_kind: SourceKind;
+  service_addresses?: MachineServiceAddressSettings;
 }
 
 export function createHostNetworkSchema(db: DB): void {
@@ -35,6 +37,14 @@ export function createHostNetworkSchema(db: DB): void {
       snapshot_ssh_generation INTEGER NOT NULL DEFAULT -1,
       snapshot_host_key_fingerprint TEXT NOT NULL DEFAULT '',
       hostname TEXT NOT NULL DEFAULT ''
+    )`);
+    db.exec(`CREATE TABLE IF NOT EXISTS machine_service_address_settings(
+      machine_id TEXT PRIMARY KEY REFERENCES managed_machines(id) ON DELETE CASCADE,
+      revision INTEGER NOT NULL,
+      private_mode TEXT NOT NULL,private_address TEXT NOT NULL DEFAULT '',
+      public_mode TEXT NOT NULL,public_address TEXT NOT NULL DEFAULT '',
+      target_generation INTEGER NOT NULL DEFAULT 0,
+      updated_by TEXT NOT NULL,updated_at TEXT NOT NULL
     )`);
     const columns = new Set(db.all<{name:string}>("PRAGMA table_info(machine_network_observations)").map(row => row.name));
     for (const [name, definition] of [
@@ -152,15 +162,79 @@ export function machineNetwork(db: DB, machineID: string): MachineNetwork {
 
 /** The shared source for service/DNS addresses of a managed machine. SSH DNS names and observed proxy peers are never service addresses. */
 export function machineServiceAddresses(db: DB, machineID: string) {
-  const network = machineNetwork(db, machineID);
-  const usable = network.addresses.filter(n => !/^(?:lo$|docker|br-|veth|virbr|cni|flannel|cali|kube)/i.test(n.interface));
-  const private_ips = [...new Set(usable.filter(n => n.scope === 'private').map(n => n.address))];
-  const public_ips = [...new Set(usable.filter(n => n.scope === 'public').map(n => n.address))];
-  const ipv4First = (a:string,b:string) => Number(isIP(b)===4)-Number(isIP(a)===4);
-  private_ips.sort(ipv4First);public_ips.sort(ipv4First);
-  let legacy = '';
-  if (!network.addresses.length) legacy = normalizeIPAddress(db.get<{address:string}>('SELECT address FROM managed_machines WHERE id=?',machineID)?.address);
-  if (legacy && networkScope(legacy) === 'private') private_ips.push(legacy);
-  if (legacy && networkScope(legacy) === 'public') public_ips.push(legacy);
-  return {address:private_ips[0] ?? public_ips[0] ?? (legacy && networkScope(legacy)==='loopback' ? legacy : ''),public_address:public_ips[0] ?? '',private_ips,public_ips};
+  const value = machineServiceAddressSettings(db, machineID);
+  const private_ips = value.private.effective_addresses, public_ips = value.public.effective_addresses;
+  const legacy = !machineNetwork(db,machineID).addresses.length ? normalizeIPAddress(db.get<{address:string}>('SELECT address FROM managed_machines WHERE id=?',machineID)?.address) : '';
+  return {address:value.private.needs_confirmation?'':private_ips[0] ?? public_ips[0] ?? (legacy && networkScope(legacy)==='loopback' ? legacy : ''),public_address:public_ips[0] ?? '',private_ips,public_ips};
+}
+
+type AddressScope = 'private'|'public';
+type AddressMode = 'auto'|'manual';
+export type ServiceAddressCandidate = {address:string;scope:AddressScope;source:'interface'|'ssh_target'|'platform_source';interface?:string;observed_at:string;requires_confirmation:boolean};
+type ServiceAddressChoice = {mode:AddressMode;address:string;effective:string;effective_addresses:string[];source:'interface'|'manual'|'legacy'|'unavailable';needs_confirmation:boolean};
+export type MachineServiceAddressSettings = {revision:number;target_generation:number;private:ServiceAddressChoice;public:ServiceAddressChoice;candidates:ServiceAddressCandidate[];updated_by:string;updated_at:string};
+const ordinaryInterface = (name:string) => !/^(?:lo$|docker|br-|veth|virbr|cni|flannel|cali|kube|tun\d|tap\d|utun\d|wg\d|tailscale|zt[0-9a-f])/i.test(name);
+const tablePresent = (db:DB,name:string) => !!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?",name);
+
+/** A conservative public range check, matching the host network display. It is not a reachability probe. */
+export function validServiceAddress(value:unknown,scope:AddressScope):string {
+  const ip=normalizeIPAddress(value),family=isIP(ip);
+  if(!ip)return '';
+  if(scope==='private')return networkScope(ip)==='private'?ip:'';
+  if(networkScope(ip)!=='public')return '';
+  if(family===4){
+    const [a,b,c]=ip.split('.').map(Number);
+    if(a===0||a>=224||a===192&&(b===0&&(c===0||c===2)||b===88&&c===99)||a===198&&(b===18||b===19||b===51&&c===100)||a===203&&b===0&&c===113)return '';
+  }else{
+    const words=ip.split(':').slice(0,2).map(v=>parseInt(v||'0',16)),[a,b]=words;
+    if((a&0xe000)!==0x2000||a===0x2001&&((b&0xfe00)===0||b===0x0db8)||a===0x2002||a===0x3ffe||a===0x3fff&&(b&0xf000)===0)return '';
+  }
+  return ip;
+}
+
+export function machineServiceAddressSettings(db:DB,machineID:string):MachineServiceAddressSettings {
+  const host=tablePresent(db,'managed_machines')?db.get<any>('SELECT * FROM managed_machines WHERE id=?',machineID):undefined;
+  const network=machineNetwork(db,machineID),row=tablePresent(db,'machine_service_address_settings')?db.get<any>('SELECT * FROM machine_service_address_settings WHERE machine_id=?',machineID):undefined;
+  const candidates:ServiceAddressCandidate[]=network.addresses.filter(n=>ordinaryInterface(n.interface)&&['private','public'].includes(n.scope)).map(n=>({address:n.address,scope:n.scope as AddressScope,source:'interface',interface:n.interface,observed_at:network.observed_at,requires_confirmation:false}));
+  const appendCandidate=(raw:string,source:'ssh_target'|'platform_source')=>{
+    const ip=normalizeIPAddress(raw);if(!ip)return;
+    const scope=networkScope(ip);
+    if(scope!=='private'&&scope!=='public'||source==='platform_source'&&scope!=='public')return;
+    if(!validServiceAddress(ip,scope))return;
+    candidates.push({address:ip,scope,source,observed_at:source==='platform_source'?network.source_observed_at:'',requires_confirmation:true});
+  };
+  appendCandidate(host?.address??'','ssh_target');appendCandidate(network.source_ip,'platform_source');
+  const target_generation=Number(host?.ssh_target_generation??0);
+  const choice=(scope:AddressScope):ServiceAddressChoice=>{
+    const mode:AddressMode=row?.[scope+'_mode']==='manual'?'manual':'auto',address=mode==='manual'?String(row?.[scope+'_address']??''):'';
+    const needs_confirmation=mode==='manual'&&(Number(row.target_generation)!==target_generation||!validServiceAddress(address,scope));
+    const auto=[...new Set(candidates.filter(c=>c.scope===scope&&c.source==='interface').map(c=>c.address))].sort((a,b)=>Number(isIP(b)===4)-Number(isIP(a)===4));
+    const legacy=!network.addresses.length?normalizeIPAddress(host?.address):'';
+    const legacyValues=legacy&&networkScope(legacy)===scope?[legacy]:[];
+    const effective_addresses=mode==='manual'?(needs_confirmation?[]:[address]):auto.length?auto:legacyValues;
+    return {mode,address,effective:effective_addresses[0]??'',effective_addresses,source:effective_addresses.length?(mode==='manual'?'manual':auto.length?'interface':'legacy'):'unavailable',needs_confirmation};
+  };
+  return {revision:Number(row?.revision??0),target_generation,private:choice('private'),public:choice('public'),candidates,updated_by:row?.updated_by??'',updated_at:row?.updated_at??''};
+}
+
+export function saveMachineServiceAddresses(db:DB,machineID:string,input:any,actor:string,at:string):MachineServiceAddressSettings {
+  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!['revision','target_generation','private','public'].includes(k)))fail(400,'invalid_service_address_settings');
+  if(!Number.isSafeInteger(input.revision)||input.revision<0||!Number.isSafeInteger(input.target_generation)||input.target_generation<0)fail(400,'invalid_service_address_revision');
+  const parse=(scope:AddressScope)=>{
+    const value=input[scope];
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!['mode','address'].includes(k))||!['auto','manual'].includes(value.mode)||typeof value.address!=='string')fail(400,'invalid_'+scope+'_service_address');
+    if(value.mode==='auto'){if(value.address!=='')fail(400,'invalid_'+scope+'_service_address');return{mode:'auto',address:''};}
+    const address=validServiceAddress(value.address,scope);if(!address)fail(400,'invalid_'+scope+'_service_address');return{mode:'manual',address};
+  };
+  const privateValue=parse('private'),publicValue=parse('public');
+  return db.transaction(()=>{
+    const host=db.get<any>('SELECT * FROM managed_machines WHERE id=?',machineID);if(!host)fail(404,'主机不存在');
+    const current=db.get<any>('SELECT revision FROM machine_service_address_settings WHERE machine_id=?',machineID);
+    if(Number(current?.revision??0)!==input.revision)fail(409,'machine_service_address_revision_conflict');
+    if(Number(host.ssh_target_generation??0)!==input.target_generation)fail(409,'machine_network_target_changed');
+    db.run(`INSERT INTO machine_service_address_settings(machine_id,revision,private_mode,private_address,public_mode,public_address,target_generation,updated_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(machine_id) DO UPDATE SET revision=excluded.revision,private_mode=excluded.private_mode,private_address=excluded.private_address,public_mode=excluded.public_mode,public_address=excluded.public_address,target_generation=excluded.target_generation,updated_by=excluded.updated_by,updated_at=excluded.updated_at`,
+      machineID,input.revision+1,privateValue.mode,privateValue.address,publicValue.mode,publicValue.address,input.target_generation,actor,at);
+    return machineServiceAddressSettings(db,machineID);
+  });
 }
