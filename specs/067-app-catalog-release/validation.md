@@ -26,4 +26,4 @@
 
 本次是生产中心镜像验收，不等于全部第三方应用业务运行通过。完整 Harbor、NVIDIA 推理及 Dify/FastGPT 模型/插件仍保留 [SDD 066 已记录限制](../066-app-catalog-expansion/validation.md)。Harbor 仅 amd64 且需要 Engine 26 / Compose 2.26，FastGPT 需已有 S3，依赖初始化的新模板需先升级目标 Agent。
 
-发布镜像不自动重建既有中心或升级 Agent；更新沿用原 Compose 项目、环境和卷执行 pull/up。[GitHub Release 20261101-a1292cf](https://github.com/workhold/lightmoni/releases/tag/20261101-a1292cf) 已发布并指向同一源码，见 [github-release.json](evidence/github-release.json)。默认引用与本证据通过发布 PR 交付 main；实际合入状态以 GitHub 回执核对。
+发布镜像不自动重建既有中心或升级 Agent；更新沿用原 Compose 项目、环境和卷执行 pull/up。[GitHub Release 20261101-a1292cf](https://github.com/workhold/lightmoni/releases/tag/20261101-a1292cf) 已发布并指向同一源码，见 [github-release.json](evidence/github-release.json)。默认引用与本证据通过 [GitHub PR #54](https://github.com/workhold/lightmoni/pull/54) 交付 main，按用户授权合入；实际合入状态以 GitHub 回执核对。
