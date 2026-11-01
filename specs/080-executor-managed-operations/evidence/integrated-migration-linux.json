@@ -1,0 +1,13 @@
+{
+  "pass": true,
+  "checks": [
+    "root offline plan freezes Agent-owned state through protected descriptors",
+    "nonempty destination refuses without changing existing data",
+    "exact reviewed digest applies with original source retained",
+    "non-root application data UID/GID and bytes preserved",
+    "persistent website serves after path handoff",
+    "Redis RDB value survives stop, copy and remount",
+    "same root domain adapter accepts reviewed migrated state and returns verified Docker node inspection"
+  ],
+  "reviewed_files": 68
+}

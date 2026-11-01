@@ -17,7 +17,7 @@ import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { rewriteMaintenancePaths, writeMaintenanceStatShim } from "./helpers/maintenance-shell.js";
+import { rewriteMaintenancePaths, writeMaintenanceStatShim,inlineFixtureCommands } from "./helpers/maintenance-shell.js";
 const repo = resolve(import.meta.dirname, "../.."),
   artifact = "lightmoni-agent_0.1.0_linux_amd64.tar.gz";
 /** Execute the real shell installer with every writable absolute destination
@@ -243,8 +243,9 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     .update(readFileSync(join(release, artifact)))
     .digest("hex");
   writeFileSync(join(release, "SHA256SUMS"), checksum + "  " + artifact + "\n");
-  const run = (extraArgs: string[] = []) =>
-    spawnSync(
+  const run = (extraArgs: string[] = []) => {
+    writeFileSync(script,inlineFixtureCommands(bin)+installer);
+    return spawnSync(
       "/bin/sh",
       [
         script,
@@ -271,6 +272,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
         timeout: 20000,
       },
     );
+  };
   const state = () => JSON.parse(readFileSync(system, "utf8"));
   const unchangedData = () => {
     assert.deepEqual(

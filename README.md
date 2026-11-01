@@ -10,7 +10,7 @@
 
 外部 Codex/Claude 与平台 AI 共用能力的架构见 [平台开放能力与 MCP](docs/platform-mcp.md)。首批主机/任务查询与操作提案、独立令牌、OAuth 授权和接入管理已实现，使用方法及当前边界见 [MCP 接入指南](docs/mcp.md)。
 
-主机 root/sudo 引导、普通 Agent 与独立运维执行器、容器权限开关和显式提权脚本见 [主机执行权限设计](docs/privileged-executor.md)（SDD060，分期实现；实际边界见系统设计60.10）。
+主机 root/sudo 引导、普通 Agent 与独立运维执行器、三类独立权限和统一维护见 [主机执行权限](docs/privileged-executor.md)。应用、网站等主机写操作需批准默认关闭的受管运维能力；已有业务先按[旧数据接管步骤](specs/080-executor-managed-operations/migration-runbook.md)迁移，升级镜像不会自动授予主机权限。
 
 中心与LightMoni Agent均由Node.js / TypeScript实现，公共协议位于`runtime/src/shared`。SDK和中心上报采用本地通用打点与固定窗口方案，主机管理、SSH终端、Agent注册和control/data凭据、AI助手、告警与界面语言采用最新main；本次取舍见[整合说明](specs/011-aligned-metric-windows/main-integration.md)。
 

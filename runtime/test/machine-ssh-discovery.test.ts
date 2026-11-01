@@ -73,7 +73,10 @@ test("fixed shell bounds optional stdout beneath the runner 12KB window even whe
   write("ip", `#!/bin/sh\nprintf '%s' '${"x".repeat(30_000)}'\n`);
   const command = preflightCommand("https://platform.example"), optional = command.slice(command.indexOf("printf 'LMNET_BEGIN=1"));
   assert.match(optional, /ip -j -brief address show/);
-  const stdout = execFileSync("sh", ["-c",optional], {env:{...process.env,PATH:directory+":/usr/bin:/bin"},encoding:"utf8",timeout:5000});
+  // Keep fake producers inside this shell; macOS may gate each newly written
+  // executable independently. The production pipelines and byte limits remain.
+  const producers = `timeout(){ shift; "$@"; }; uname(){ printf 'fixture-db\\n'; }; ip(){ printf '%s' '${"x".repeat(30_000)}'; };\n`;
+  const stdout = execFileSync("sh", ["-c",producers+optional], {env:{...process.env,PATH:"/usr/bin:/bin"},encoding:"utf8",timeout:5000});
   assert.ok(Buffer.byteLength(core+stdout) < 12_000);
   assert.equal(parsePreflight(core+stdout, at).ready, true);
   assert.equal(parsePreflight(core+stdout, at).discovery.status, "unavailable");

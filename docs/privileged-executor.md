@@ -1,6 +1,6 @@
 # 主机执行权限：普通 Agent 与独立运维执行器
 
-> SDD060 首批实现与后续设计基线。已实现独立身份、一次性 root 脚本、最小受管容器能力和完整维护入口；当前交付边界见系统设计60.10与规格任务清单，实际验收范围见[验收记录](../specs/060-privileged-executor/validation.md)，仓库实现不代表线上已升级。
+> SDD060 基础权限与统一维护已由 SDD080 扩展到受管主机运维。应用、网站、Compose、证书、备份和制品发布需要单独批准默认关闭的 `operations.managed.v1`；批准的程序和挂载可控制整台主机。旧业务数据必须先按[离线接管步骤](../specs/080-executor-managed-operations/migration-runbook.md)审阅迁移。当前边界见系统设计第80章与 [SDD080 验收](../specs/080-executor-managed-operations/validation.md)，仓库实现不代表线上已升级。
 
 规格、接口与实施顺序分别见 [spec](../specs/060-privileged-executor/spec.md)、[contracts](../specs/060-privileged-executor/contracts.md)、[tasks](../specs/060-privileged-executor/tasks.md)；系统联动入口见 [系统设计第 60 章](system-design.md#第60章-主机执行权限与独立运维执行器sdd-060)。
 
@@ -8,7 +8,7 @@
 
 保留普通 Agent，新增按需安装的 `lightmoni-executor` root 服务。前者负责监控、拨测、日志、普通脚本和遥测；后者用独立身份接收中心授权的高权限任务。两者都主动出站，不要求主机开放入站端口。
 
-高权限任务分成两种：受限结构化操作（例如受管容器重启）和显式提权脚本。结构化操作由执行器限定参数、资源和路径；首批提权脚本由管理员审阅确切代码与 root 身份后，立即执行一次。其他系统账户和持续定时提权属于后续独立功能。任意 root 脚本有整机权限，不能把它包装成安全的容器管理动作。
+高权限能力分为受限容器、显式提权脚本和高信任受管运维，分别授权且默认关闭。受限容器仍不开放挂载、端口或任意 command；受管运维按既有管理员批准的应用、网站等资源配置运行固定适配器；一次性提权脚本审阅确切代码与 root 身份。其他系统账户和持续定时提权属于后续独立功能。任意 root 脚本与受管运维可控制整机，不能当作沙箱。
 
 需要 root 的是引导安装和特权执行器。登记主机不必强制 root 用户名；实际 UID 为 0，或具备所需免交互 sudo 权限的 SSH 账户均可。SSH 账户不会成为普通 Agent 的日常运行账户。
 

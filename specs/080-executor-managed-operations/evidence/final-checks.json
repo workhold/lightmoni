@@ -1,0 +1,81 @@
+{
+  "node": "24.15.0",
+  "full_runtime": {
+    "tests": 1550,
+    "passed": 1513,
+    "failed": 15,
+    "skipped": 22,
+    "concurrency": 4,
+    "single_green_run": false,
+    "note": "Five obsolete fixture expectations and ten temporary-command execution timeouts; all affected files were corrected or rerun without weakening production guards."
+  },
+  "final_reruns": [
+    {
+      "files": [
+        "docker-controls",
+        "agent-host-admission"
+      ],
+      "tests": 20,
+      "passed": 18,
+      "skipped": 2,
+      "failed": 0
+    },
+    {
+      "files": [
+        "install-release",
+        "machine-executor-bootstrap-probe"
+      ],
+      "tests": 48,
+      "passed": 48,
+      "failed": 0
+    },
+    {
+      "files": [
+        "machine-ssh-discovery",
+        "machine-executor-bootstrap-probe"
+      ],
+      "tests": 35,
+      "passed": 35,
+      "failed": 0
+    },
+    {
+      "files": [
+        "machine-executor-program-maintenance",
+        "privileged-executors",
+        "managed-executor-jobs",
+        "machine-ssh-discovery"
+      ],
+      "tests": 72,
+      "passed": 71,
+      "failed": 1,
+      "note": "Only the repeated optional-discovery fixture timeout; fixed and covered by the final 35-test rerun."
+    }
+  ],
+  "ai": {
+    "tests": 71,
+    "passed": 71,
+    "failed": 0
+  },
+  "builds": {
+    "runtime": true,
+    "ai_runtime": true,
+    "web": true
+  },
+  "browser": {
+    "host_policy_and_unified_maintenance": 23,
+    "restricted_container": 23,
+    "elevated_script": 39,
+    "passed": 85
+  },
+  "production_modified_after_full_run": [
+    "managed worker retains a bounded safe diagnostic in encrypted stderr",
+    "maintenance rechecks current active administrator role after awaited probes",
+    "Docker environment projects actual signed managed-profile inventory even when the restricted container capability is disabled"
+  ],
+  "verification_of_late_changes": "real integrated Linux worker chain and current maintenance/managed API rerun passed; types/builds passed",
+  "final_authority_docker_and_managed_rerun": {
+    "tests": 79,
+    "passed": 79,
+    "failed": 0
+  }
+}
