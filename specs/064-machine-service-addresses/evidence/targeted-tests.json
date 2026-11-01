@@ -1,0 +1,11 @@
+{
+  "command": "node --import tsx --test --test-concurrency=1 test/host-network.test.ts test/application-install.test.ts test/platform-clusters.test.ts test/platform-executor.test.ts test/platform-image-cache.test.ts test/platform-workloads.test.ts test/platform-website-routing.test.ts test/platform-reconcile.test.ts",
+  "cwd": "runtime",
+  "tests": 85,
+  "passed": 85,
+  "failed": 0,
+  "scope": "Host network identity/source, installation, modern and legacy scheduling/discovery, cache policy, Docker local identity, HTTP/HTTPS gateway binding and DNS, reconciliation",
+  "runtime_typecheck": "passed",
+  "web_typecheck": "passed",
+  "full_suite": "not run"
+}

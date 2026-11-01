@@ -4,8 +4,9 @@ import { atomicJSON } from "../shared/io.js";
 import { CapabilityExecutor, type ExecutorJob, type ExecutionReceipt } from "./executor.js";
 import type { DeploymentAction } from "../deployment/types.js";
 import { executeOperation, operationCapabilities, operationCommand } from "./operations.js";
-import type { OperationPayload } from "../operations/types.js";
+import type { OperationPayload, OperationExecutionContext } from "../operations/types.js";
 import { recoverWebsiteGateway } from "../operations/websites.js";
+import { DOCKER_CAPABILITIES, executeDocker } from './docker.js';
 
 const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
 const ARTIFACT_FORMAT = "lightmoni-release-v1.tar.gz";
@@ -22,6 +23,7 @@ export interface JobClientConfig {
 }
 export interface JobClientIO {
   fetch?: typeof fetch;
+  command?: OperationExecutionContext['command'];
   emit?: (event: { phase: string; code?: string; summary: string; snapshot?: Record<string, unknown> }) => Promise<void> | void;
 }
 
@@ -135,6 +137,7 @@ export class AgentJobRunner {
         "artifact.stage", "artifact.activate_release", "systemd.daemon_reload", "systemd.enable", "systemd.disable", "systemd.start", "systemd.restart", "systemd.stop",
         "health.systemd", "health.http", "health.tcp", "systemd.probe",
         ...operationCapabilities,
+        ...DOCKER_CAPABILITIES,
       ],
       receipt_cursor: this.cursor,
     });
@@ -197,7 +200,11 @@ export class AgentJobRunner {
     };
     let result: ExecutionReceipt;
     try {
-      if (job.actions?.length === 1 && job.actions[0]?.kind === "operations") {
+      if (job.actions?.length === 1 && job.actions[0]?.kind === 'docker') {
+        const action=job.actions[0];
+        if(!job.capabilities?.includes(action.operation==='inventory'?'docker.inventory':'docker.control')||Date.parse(job.expires_at)<=this.now().getTime())throw Error('docker_job_mismatch');
+        result=await executeDocker(action,job.id,{dataDir:this.config.dataDir,signal:controller.signal,now:this.now,command:this.io.command??operationCommand},enqueueEvent);
+      } else if (job.actions?.length === 1 && job.actions[0]?.kind === "operations") {
         const response = await this.fetcher(this.config.endpoint.replace(/\/$/, "") + `/api/v1/agents/${encodeURIComponent(this.config.agentID)}/jobs/${encodeURIComponent(job.id)}/operations`, {
           headers: { authorization: "Bearer " + this.config.controlCredential, "X-LightMoni-Job-Lease": job.lease_id },
           redirect: "error", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),

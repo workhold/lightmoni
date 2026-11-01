@@ -1386,11 +1386,13 @@ ops_cluster_instances显式保存cluster_id，活跃slot按owner+cluster唯一�
 
 ### 42.4 OpenResty托管与完整配置
 
-OpenResty是role=openresty的全局唯一应用，可部署多个集群，每集群一项部署。已安装应用可编辑部署集群、机器、副本和资源；运行中的部署先停用清理再移除。每个入口部署保存稳定gateway_domain，可选gateway_dns_zone_id托管健康入口A/AAAA；未选择时由用户维护。manual选择机器，managed设置实例数和资源；Linux host网络固定80/443。内部gateway.apply/inspect/stop/remove复用Agent执行器，owner仍为application。每集群完整网站、证书和静态文件包逐机nginx -t、切换、重载、HTTP/TLS验证；失败保留旧版。故障换机完成配置与验证后恢复DNS资格。
+OpenResty是role=openresty的全局唯一应用，可部署多个集群，每集群一项部署。已安装应用可编辑部署集群、机器、副本和资源；运行中的部署先停用清理再移除。每个入口部署保存稳定gateway_domain，可选gateway_dns_zone_id托管健康入口A/AAAA；未选择时由用户维护。manual选择机器，managed设置实例数和资源；Linux host网络固定80/443。内部gateway.apply/inspect/stop/remove复用Agent执行器，owner仍为application。每集群完整网站、证书和静态文件包逐机nginx -t、切换、重载、HTTP/TLS验证；失败保留旧版。故障换机完成配置与验证后恢复DNS资格。中心按目标网关实例逐机解析应用上游并计算完整包签名；同集群不同机器的配置可以不同，拓扑或健康变化后沿用调和流程重新发布。
 
 ### 42.5 网站公共配置与集群上游
 
 website为全局对象，bindings统一域名、HTTPS、证书、DNS，nginx及locations统一路径、超时、头部、缓存、限流和其他高级选项。routing_mode=managed时选择一次service_application_id和HTTP(S)命名service_port_name，自动发现其部署集群，集群内只解析该服务的健康端点。manual保留locations.cluster_targets逐集群应用端口或代理URL；不支持公共配置覆盖。集群流量策略cluster_policies保存enabled、1–100相对weight、default及厂商线路id/name，独立于冻结网站公共修订；关闭立即退出期望解析，恢复仍需成功回执。公共草稿不能通过流量策略保存被隐式发布。同一网站的domain_routes按domain独立指定cluster_ids与可选cluster_policies；省略范围跟随全部可用集群，固定选择只保留其仍可用的交集，不自动扩大。旧网站无此字段继续继承全站范围与策略。域名范围随发布冻结，每集群完整包只包含绑定到该集群的域名；同绑定组的证书与路径仍复用。候选旧集群仍接收空站点包以清理已移走域名。
+
+平台发现的应用端点与目标 OpenResty 实例 machine_id 相同时，上游 host 使用127.0.0.1；异机继续使用发现的内网地址，IPv6保留方括号。此规则适用于managed托管服务及manual应用端口目标，保留HTTP(S)、命名端口对应的宿主端口、健康过滤与集群范围；用户显式填写的代理URL不改写。发现接口与仅有集群上下文的预览仍显示实际发现地址。依据为现有Linux host网络网关与应用宿主端口模型，无新Agent协议或存储迁移（SDD 058）。
 
 ### 42.6 DNS聚合、共享资源与界面
 
@@ -1474,6 +1476,27 @@ flowchart LR
 
 验证与 Doca 保存回读见 `specs/044-operations-observability/validation.md`。部署升级需要新中心与新 Agent；旧 Agent 无清单时显示等待采集，历史业务表和存储数据保持兼容。
 
+### 44.6 应用安装进度与故障诊断（SDD 058）
+
+应用商店采用基本参数与折叠高级设置：模板默认资源和推荐部署模式保持，单一集群及唯一在线目标可预选，serviceName、资源限制及多集群按需展开。安装响应沿用资源与执行结果；资源创建成功后立即打开进度，部署拒绝仍保留应用并展示原因。关闭进度不取消执行，列表可重新打开逐机历史。手动模式默认建议宿主端口等于模板容器端口；托管模式端口留空由平台分配，显式填写则使用填写值。切换模式保留主动填写的端口，未修改的建议值跟随模式变化；OpenResty 固定 80/443。
+
+控制路径继续管理员确认 → 平台部署 / Agent jobs → 有效 lease → Agent 平台执行器。执行器通过可选内部 progress 回调报告 Docker 检查、端口检查、配置校验、镜像拉取与启动、健康验证、恢复/清理等白名单阶段；使用既有 job activating 阶段与 snapshot.operations.progress 传输，不改变 job phase 排序或最终 /result 权威。
+
+中心将排队和 Agent 阶段按序投影至现有 ops_platform_run_events，同一 job 更新事务内保存，重复心跳不追加相同步骤；最多保留 2000 条，沿用事务 outbox。实时安装抽屉每 2 秒直接读取 SQLite 资源、逐机执行和增量步骤，不依赖 ClickHouse。多集群错误、调度等待、旧记录和未知回执分别呈现，不能用提交成功或单次 inspect 成功替代整体安装完成。
+
+故障只根据命令输出在 Agent 内部识别有限诊断码，如端口占用、Docker 不可用或无权限、镜像不存在/鉴权/网络、磁盘不足和容器不健康；原始 stdout/stderr、命令、环境和自由错误文本均不进入安装日志。恢复/清理保留起因，恢复失败继续 unknown；未知结果必须先核对实际状态，界面不自动重复执行。无新增表、网络端点、凭据、Docker socket 或 AI 写入能力；旧 Agent 继续显示通用执行阶段，升级后提供细阶段和分类原因。
+
+```mermaid
+flowchart LR
+  UI[管理员安装 / 查看进度] --> Jobs[平台部署 / 有效 job lease]
+  Jobs --> Agent[Agent 白名单阶段 / 诊断]
+  Agent -->|既有 job events| Steps[(SQLite 执行 / 有序步骤)]
+  Agent --> Receipt[最终回执 / 未知需核对]
+  Receipt --> Steps
+  Steps -->|每 2 秒增量读取| UI
+  Steps --> Outbox[(事务 outbox / 系统日志)]
+```
+
 ## 第50章 中心内外网地址同步与SDK直报（SDD 050）
 
 2026-10-31。本章为codex/050-center-endpoint-discovery分支预览，代码验证见对应SDD，合入状态以GitHub为准。管理员沿用上报地址簿登记完整内网IP+port URL与public引导入口，scope缺省public，默认引导必须为public，至少保留一个public。SQLite保存稳定center_id与地址清单修订。SDK与Agent分别直连中心，SDK→Agent的OTLP接收与配置代理全部移除；Agent自己的SDK只通过进程内exporter入持久队列，本地监听仅提供诊断。
@@ -1512,6 +1535,166 @@ flowchart LR
 ```
 
 规格、契约、测试及 Doca 保存回读证据见 specs/053-certificate-async-issuance/。
+
+## 第59章 服务镜像生命周期、仓库应用与网站鉴权（SDD 059，首版实现与后续设计）
+
+2026-10-31建立，2026-11-01实现私有镜像管理首版（功能分支待合入）。59.1—59.6保留完整生命周期的后续目标设计；当前已实现的仓库管理、集群缓存及网站Basic以59.7—59.9和specs/059-service-image-lifecycle/implementation-v1.md为准。扩展第42章应用/集群部署及网站，保留第33章授权、私有载荷、租约和unknown边界。仓库按需安装，不要求每集群默认安装或预下载全部镜像。发布版本、候选预热、商店自动更新、机器daemon代理仍未实现。
+
+### 59.1 发布身份与候选预热
+
+ApplicationRelease独立于应用草稿revision，固定每个Compose服务的来源引用、index/manifest摘要、OS/arch/variant及平台摘要，ready后不可变。重启与故障换机复用同一release，不重新解析可变tag。旧部署无法证明完整镜像身份时标记legacy_unresolved，不能用当前远端tag冒充原版本。新托管默认由Agent从已有镜像源准备运行机器和至少1台独立合格备用，手动默认按需，允许全部合格候选预热；只准备已发布服务的当前及上一可回退版本。无需内网仓库即可完成安装、预热和升级；全部候选缺镜像时按回源策略下载或等待。容量、端口、架构、数据与unknown约束先于镜像就绪评分；预热不预留运行资源，不足显示degraded，本地数据库不自动迁移。
+
+### 59.2 内网分发、回源与清理
+
+获取顺序为本机精确内容、仅配置时使用授权内网缓存、按策略从已有镜像源拉取。未配置直接跳过，不阻止安装/升级，不自动每集群部署。可复用已有持久化OCI仓库/缓存或明确安装的仓库应用，多个可信网络可达集群可共用端点，权限仍逐应用/集群限制；复制前后摘要与平台内容一致，预热与启动用同一effective_ref。普通机器Docker cache不直接提供集群仓库，P2P另开SDD。Hub mirror与其他源映射分开。禁回源只使用已准备内容，缓存端也限制回源，不能依赖pull-through或mirror fallback。逐机/平台记录source/bytes/duration，身份/发布/策略变化或外部清理使旧状态失效。保护运行、当前、回退、在途与unknown引用，只清理平台登记无引用过期内容，不全机prune。
+
+### 59.3 自定义发布与商店更新
+
+自定义服务先外部构建推送，再登记镜像/Compose新版本、锁定内容、审阅、选择集群、预热与升级；可配置受控发布清单或显式tag跟踪，固定镜像无来源时显示未配置检查。商店分别维护模板revision、应用版本、变更/兼容/迁移/回退声明及最低Agent能力，默认每日带抖动检查并支持立即检查；失败保留上次结果且标过期，不表示最新。旧模板、用户配置、新模板三方合并保留参数、秘密引用、卷和端口，冲突/未知迁移阻止发布。默认只提示更新，只有所选集群的成功发布改变期望版本，其他集群保持原指针。
+
+### 59.4 升级与自动策略
+
+滚动默认batch=1，额外容量及固定端口允许时先启新、健康验证、切流再停旧；单机固定端口或host80/443单例明确预览停机并使用stop-first。全部服务镜像与新鲜健康回执匹配才切换；失败暂停或按授权回退上一发布，unknown先inspect。镜像/配置回退不恢复数据库数据。P2自动更新须管理员确认应用/集群、受信源、版本范围、IANA维护窗口、批次/最大不可用和失败行为；派发与领取重验授权revision，撤销阻断未开始动作。主版本、有状态、迁移或兼容未知、冲突、能力不足及unknown不自动执行。
+
+### 59.5 机器镜像源与维护控制
+
+全局默认→集群→单机逐字段继承，unset继承、显式空清空、数组整体覆盖，展示来源及期望/实际差异。分开Hub加速、其他仓库映射、daemon HTTP(S)_PROXY/NO_PROXY、私有认证/受信CA；credential_ref按application/cluster和registry/repository单独授权，不因继承扩大权限。默认TLS、URL无userinfo，秘密由有效lease私有载荷进入0600临时配置，不进命令行、日志或AI。保存仅改期望；应用须只读预检、冻结原文件hash及全部受影响容器、管理员确认维护、CAS/备份/合并受管键、校验、原子写入、必要重启及Docker/容器验证。保留无关键，外部配置或启动参数冲突拒绝；逐机维护写锁与部署/启停互斥，维护期间避免误换机。unknown先核对；配置恢复与业务恢复分别报告，映射/认证不涉及daemon时不重启。
+
+```mermaid
+flowchart TB
+  sources["商店 / 自定义新版本"] --> release["中心：不可变发布 / 逐集群授权"]
+  release --> prepare["Agent：候选预热 / 本机核验"]
+  profiles["全局→集群→机器镜像源 / 凭据范围"] --> prepare
+  prepare --> cache["可选仓库应用 / 已有共享缓存"]
+  prepare -->|已有镜像源 / 按策略拉取| upstream["授权上游仓库"]
+  cache -->|显式允许回源| upstream
+  prepare --> rollout["逐集群升级 / 故障接管"]
+  rollout --> health["实际镜像 / 健康回执"]
+  health --> release
+  profiles --> maintenance["预检 / 确认维护 / CAS / 必要重启 / 验证"]
+```
+
+### 59.6 存储、阶段与验证边界
+
+中心SQLite增加发布、更新源/检查/策略、准备策略/逐机状态、profile/维护计划、registry origins/集群reader映射、网站账号组及不可变hash版本，扩展逐集群发布指针；仓库仍为普通application，不新增隐藏安装器。执行复用ops_platform_runs、系统日志outbox和有效Agent租约，中心无Docker socket，AI不批准。基础预热/更新P1无需仓库，网站鉴权独立P1；仓库应用为用户按需开启，公网依赖网站鉴权，P2限定自动更新。真正P2P及多写高可用/自动数据迁移不在首版。验收无仓库基础、双节点断网预热、多集群单写源/摘要分发、内网匿名边界、网站密码访问和Registry客户端；分别测恢复各阶段，不预称固定秒数。详见 specs/059-service-image-lifecycle/。
+
+### 59.7 系统仓库登记、唯一写入源与集群缓存（首版）
+
+独立“私有镜像管理”模块为空时引导安装Docker Registry 3.0.0，明确选择集群、单台机器、与集群节点一致的私有监听IP及资源。宿主createSystemApplication和SQLite ops_system_applications登记系统身份，全局application固定sys-docker-registry，每个集群可配置一个固定部署；普通业务可部署多套Registry，但系统不会按镜像名或用户标记接管。网站网关固定sys-openresty；后端保留sys-前缀。旧OpenResty仅迁移当前名称并记录旧别名，既有引用依赖稳定应用ID，实例、卷和历史revision保持不变。
+
+cluster.spec.image_cache.enabled是唯一开关，集群编辑和镜像部署页共用同步逻辑；未登记系统部署不能开启。开关更新对应仓库冻结配置并提交部署，忙碌时保存pending并由调度重试，不重启已有业务容器。每集群私库可push；缓存开启时增加Docker Hub缓存和必要的选定源缓存，独立进程/端口/持久目录，缓存TTL 168h，不预取全量镜像。Registry v3调试监听绑定容器loopback的临时端口，避免和缓存端口冲突。缓存进程初始化仍依赖其上游可访问，仓库不提供高可用或自动迁移。
+
+对外发布入口在一个已登记部署上选择写入集群，自动关联普通website并按需确认安装/扩展OpenResty，使用域名、证书和Basic账号。网站固定一个集群和registry命名端口；普通网站编辑不能关闭该入口的HTTPS/鉴权或改接其他后端。独立私库不自动复制或轮询接收push。首版拒绝更换已有仓库机器、内网IP或已选写入集群，避免把空库当成原仓库。
+
+内网监听限私有IPv4、ULA或loopback字面地址，管理员明确确认可信网络；内部匿名可读写，实际网络/防火墙隔离由部署方维护，不提供同网账号或repository级权限。公网使用HTTPS+Basic并剥离转发到上游的Authorization，上传保留URI、相对Location和流式请求，DELETE关闭。DNS由现有网站功能或外部维护，强项目隔离可使用独立业务仓库。
+
+```mermaid
+flowchart TB
+  enable["私有镜像模块 / 选集群与明确机器"] --> regapp["宿主登记系统仓库 / 固定名称"]
+  regapp --> origin["A集群：选定私库写入源"]
+  regapp --> reader["B集群：独立私库与源缓存"]
+  ci["构建机 / 唯一push域名"] --> public["A入口：HTTPS + 网站Basic"]
+  authsets["网站内嵌用户 / 冻结hash"] --> public
+  public --> origin
+  internal["可信私网免鉴权 / 含push权限"] --> origin
+  origin --> nodea["A Agent：校验并导入镜像"]
+  origin -->|同摘要pull-through缓存| reader
+  reader --> nodeb["B Agent：校验并导入镜像"]
+```
+
+### 59.8 网站全站与路径密码访问（首版）
+
+website.spec.auth为off/basic、realm和内嵌用户，location.auth为inherit/off/basic；旧网站默认关闭。宿主用已有bcryptjs生成bcrypt哈希并加密保存在资源及不可变revision中，密码只写，留空仅保留同名用户原hash；公开资源只含has_password。首版不增加独立账号组管理或pull/push角色分权。
+
+配置与htpasswd一体下发至明确网关Agent的有效lease，仅新operations.platform.website-auth.v1能力可领取。Agent在受管私有目录生成口令文件，nginx -t后原子切换、reload与验证，失败按旧指针恢复。匿名401与随机运维凭据的本机正向探测同时验证；该运维凭据只存在Agent私有文件，探测使用真实静态文件访问阶段，不用提前return替代鉴权。实际TLS证书指纹及版本仍沿用原验证。
+
+编译器拥有auth_basic、用户文件路径和satisfy all，片段不能覆盖；受保护路径与直接return、CORS、代理缓存或自定义片段组合会被拒绝。全站Basic要求所有域名绑定HTTPS，路径可显式关闭或单独设置账号，受保护代理默认清除Authorization，不影响上游健康检查或因正常401摘除服务。口令hash及密码不进入公开预览、日志或AI。
+
+### 59.9 Agent镜像导入、状态与验收边界（首版）
+
+业务workload.apply在集群开启缓存且镜像命中Docker Hub/所选发布域名时，获得宿主登记的端点映射及operations.platform.image-cache.v1能力要求。所选源集群拉取自身发布域名的镜像时，即使缓存关闭也直接使用本集群私库；其他集群须开启缓存并安装系统仓库才能使用该内部路径。未知业务仓库保持原拉取路径；系统Registry和OpenResty引导镜像跳过此桥。领取时重新比对当前集群开关、登记端点与映射，过期策略不下发。
+
+Agent以Registry V2直接读取明确私有IP的HTTP端点，不改Docker daemon mirror/insecure-registry或重启Docker，不跟随响应重定向，不消费仓库返回的任意URL。校验index/平台manifest、config、压缩blob及解压层diff ID，生成Docker导入归档，再核对导入后的平台/rootfs和Docker image ID。兼容Docker经典存储及containerd存储不同的ID语义；Compose使用实际导入ID且pull_policy=never。单镜像下载≤2GiB、解压≤4GiB、5分钟截止，保留磁盘余量并清理临时文件。缓存失败默认按策略回源且回执记录来源/错误；内部禁止回源模式失败，不偷偷走公网。该模式只限制Agent回源，pull-through服务仍可向自身上游取内容，不宣称整个集群隔离公网。
+
+新增SQLite系统登记、旧别名、单例外部入口设置；沿用资源revision、逐集群desired/applied、实例端口、加密私有载荷、Agent租约及unknown写锁。真实Docker已验证Registry push、代理缓存、停上游后digest命中、Agent导入及Compose启动；真实OpenResty验证HTTPS、匿名/错密401、正确密码200、路径关闭及Authorization剥离。浏览器三轮验证保存、刷新、缓存双入口、版本冲突保留输入与关联网站。验收为同物理Docker宿主上的隔离进程，不能当作生产多地域容灾、缓存进程断网重启、跨机数据迁移或Docker Hub限流验收。证据及未实现路线见同一SDD目录。
+
+## 57. Agent Docker 即时清单与容器操作（SDD 057）
+
+主机 Docker 清单独立周期采集，不等待平台应用日志积压。失败保留最近成功清单及最近尝试时间，区分 CLI 缺失、socket 权限不足、daemon 不可达、命令超时与通用失败；失败原因优先于过期提示。平台应用与全部 Docker 仍分开显示，外部容器不会自动成为平台部署。
+
+管理员点击立即采集后，中心按稳定主机 ID 解析当前 Agent，验证在线状态和 docker.inventory 能力，使用原 AgentJobStore 下发单动作 Docker 任务。页面定期读取缓存，只有手动采集才创建任务；界面展示任务进度与终态。任务回执中的新清单和认证心跳按观测时间合并，旧心跳不能覆盖更新的即时结果。
+
+启动、停止、重启要求管理员明确确认主机、完整容器 ID 和影响；目标必须存在于新鲜清单。中心保存 actor 与幂等 request_id，同主机活动任务互斥。Agent 通过既有 control 凭据拉取任务，使用 shell=false、固定 default context、有界输出和超时执行，复用节点写锁，并在变更前后核对容器 ID 和状态，再读取完整清单。
+
+回执只保存白名单状态、诊断和清单，绑定原动作、容器和任务时间，丢弃原始 CLI 输出与其他字段；页面响应不包含 lease。未领取超时取消，领取后中断或验证失败保留 unknown 和写锁，禁止自动重放。平台调度器可能恢复平台应用期望状态；不增加容器删除、任意 shell、中心 Docker socket、SSH 回退或 AI 执行权限。
+
+本节对应 SDD 057，需升级中心和 Agent 才启用即时能力；旧 Agent 周期心跳兼容，页面明确提示升级。实现与验证见 specs/057-docker-agent-controls/；是否已发布以发行记录为准。
+
+```mermaid
+flowchart LR
+  User[管理员 / 确认操作] --> Center[主机绑定 / 能力 / 幂等]
+  Center --> Jobs[(SQLite 任务 / 有效租约)]
+  Jobs --> Agent[Agent / 节点写锁]
+  Agent --> Docker[本机 Docker / 状态验证]
+  Docker --> Receipt[安全回执 / 最新清单]
+  Receipt --> Center
+  Docker --> Periodic[独立周期清单 / 认证心跳]
+  Periodic --> Center
+```
+
+Doca 已保存并回读，原有 575 个块完整保留；新图 7 节点、8 连线与正文核对见 `specs/057-docker-agent-controls/evidence/doca-readback.json`。
+
+## 62. 应用管理与命名端口配置（SDD 062）
+
+应用管理按“已安装 / 应用商店”组织。已安装应用集中展示版本、部署目标、状态与已分配端口，配置、部署、停止、移除容器、安装记录和监控日志映射既有授权动作。未知结果先核对；停止与移除展示对象和影响，持久化数据继续保留。商店的基础安装参数包含全部命名端口的宿主到容器映射，资源及多集群配置收入高级设置。界面不提供未实现的升级、备份或数据删除能力。
+
+商店安装API可接收host_ports命名宿主端口覆盖和普通应用listen_ip（全部网卡或仅本机），旧parameters.port兼容。application.deployments可选host_ports仅覆盖已声明端口名的宿主端口；容器端口、服务与协议仍由应用声明。各集群独立保存和冻结修订，经原project合成有效端口，再进入原有事务预留、Agent现场冲突检查、Compose及就绪回执。0表示自动分配，显式固定端口冲突失败；非法名称、非整数、范围外及同协议重复固定端口在保存前拒绝。无新表、Agent协议、任意命令或凭据权限。
+
+系统镜像仓库的registry、hub-cache和origin-cache分别映射容器5000、5001和5002，宿主端口按集群可配置。专用控制器返回配置供回显；省略覆盖字段继承该集群旧配置，新部署继续默认自动分配，缓存开关或资源更新不丢失固定端口。固定机器与私网监听IP、系统应用登记身份、外部网站与缓存命名端点路径保持。实际可用状态仍以执行和健康回执为准，不把配置保存或端口预留当成安装成功。
+
+实现与验收见specs/062-application-management/；此设计不代表已发布或已更新线上平台。
+
+## 64. 机器地址统一来源与本机镜像复用（SDD 064）
+
+所有受管机器的服务私网与公网地址统一由机器管理提供。machineServiceAddresses 读取当前主机与 Agent 身份匹配的网卡快照，排除 loopback、Docker/容器桥、veth 等接口，优先 IPv4 再 IPv6；服务连接优先私网，DNS 只选公网。SSH 目标域名只用于连接，不推导服务 IP；平台观察到的代理来源 IP 也不参与服务取址。无网卡快照的历史数字 IP 可兼容，未纳管的旧 Agent 保持原路径。
+
+现代集群仅保存机器选择与 CPU/内存覆盖，不再保存地址副本，表单只读展示机器管理地址。应用容量、调度、服务发现、网站网关与 DNS，以及有受管机器绑定的旧 node_pool/gateway_group 路径共用该来源；历史 nodes.address/public_address 不覆盖当前机器地址。具体端口绑定和部署回执仍代表已部署事实，指定 IP 变更经重新部署生效。
+
+系统镜像仓库与普通应用一样选择集群、机器、宿主端口、资源与缓存开关，取消手工内网 IP 和网络确认项。部署从机器管理选择真实私网 IP，未发现可供其他机器使用的私网则监听 127.0.0.1，安装仍可执行且页面说明仅本机可用。仓库固定原机器和持久目录，地址变化不等于数据迁移；实际实例绑定 IP 与分配端口组成端点，同机 OpenResty 访问指定绑定 IP，通配绑定才使用 loopback。
+
+中心为每个消费机器投影缓存策略，loopback 缓存只下发给仓库所在机器，跨机缺少可达私网端点时继续使用原镜像源；领取租约时重新核对机器与当前策略。已登记绑定不会因机器管理更新而被提前替换，重新部署后才登记新端点。公网访问继续通过已有 HTTPS/Basic 网站入口，不自动开放匿名公网 HTTP 仓库。
+
+Agent 在缓存准备阶段先检查本机 Docker 所需镜像引用、平台和不可变 digest，命中则固定本地 image ID 与 pull_policy=never，零远程请求；未命中才访问缓存。仓库名称不同而内容相同，可通过 RepoDigest 或已验证 config 身份复用本机镜像，至多读取 manifest/config，无需重复下载层和导入。缓存缺失和失败沿用既有回源规则；Registry 与 Docker 各自持久化，不共用数据目录、不修改 Docker daemon 全局配置。
+
+实现与验收见 specs/064-machine-service-addresses/。本节更新 SDD 059/062 的手工仓库地址和集群地址副本规则，无新增表、凭据或 Agent 任务类型；部署状态仍以执行和健康回执为准。真实 Docker 本机复用、HTTP/SQLite 定向回归和浏览器验收仅说明本次验证范围，不代表线上容器已更新。
+
+## 66. 应用商店扩展与 DBX（SDD 066）
+
+应用商店由中心维护本地固定目录，包含原有4个应用与新增27个应用，共31个，分类为数据库、中间件、DevOps、AI、工具、网站与网关；工具仅DBX。模板公开元数据、安装参数校验与服务端配方构建分离，列表不访问外部市场。安装仍经管理员确认、加密资源及不可变修订、逐集群部署、端口预留和Agent真实回执，不新增市场服务或数据库表。
+
+新模板声明固定镜像、官方文档、中英文说明、参数类型及边界、默认资源和运行前提。Kafka广播地址与固定宿主端口一致；Nacos gRPC端口为API端口+1000；RocketMQ固定Broker相关端口。依赖稳定地址或GPU的模板限制手动指定机器；Harbor仅支持amd64并在服务端核对目标架构。桌面使用分类标签，窄屏使用可访问的分类选择。
+
+每套安装的Compose网络与命名卷由实例项目隔离，不使用全局卷名、宿主Docker socket或特权容器。Dify包含数据库、缓存、向量库、插件及经代理联网的代码沙箱；FastGPT包含Mongo副本集、向量库和模型网关，需提供已有S3兼容存储、两个不同且权限正确的Bucket；Harbor由官方prepare生成配置和共享密钥，依赖Engine26及Compose2.26的卷子路径。GPU推理显式声明NVIDIA设备；模型及业务账号按应用引导另行配置。多容器资源按每容器设定，集群预留总和。
+
+一次性初始化通过授权Compose清单中的io.lightmoni.platform.oneshot标签声明，只有对应容器正常退出0且未OOM才完成；仍须全部常驻服务存在、运行且健康。领取这些任务要求operations.platform.oneshot.v1，旧Agent不能领取；应用启动等待有界延长至300秒。后续inspect从受管有效清单核对初始化身份，不把任意退出容器当成功；失败恢复及unknown写锁沿用原规则。
+
+密码和API Key只经安装请求进入受保护环境与加密修订，公开回读脱敏；命令和受管源码不插入实际秘密。Harbor在容器内生成权限受限的配置和密钥，凭据按字面值导出，避免shell求值。DBX使用独立数据卷与必填访问密码，不自动连接LightMoni内部数据；第三方AI应用不自动取得平台凭据、MCP或控制权限。
+
+本节对应SDD066；配置验证、真实DBX与初始化冒烟、浏览器和上游源码验证分别记录。完整Harbor平台、GPU推理及全部第三方应用的真实业务验收不因模板上架而视为完成；本轮不自动发布镜像、更新线上容器或合并主干。
+
+## 68. 应用 Logo 与高级 YAML（SDD 068）
+
+应用商店、已安装应用与详情共用品牌图形，31个固定模板的图形随网页打包并按稳定template_id或系统role关联；旧安装自动使用对应图形。素材来源、固定提交、摘要及许可随源码保留，网页提供素材归属入口，不在运行时访问第三方图片CDN。自定义应用默认通用图标，可上传PNG/JPEG/WebP并预览、替换或移除。
+
+Logo是中心展示元数据，独立存于既有SQLite的ops_application_logos，包含应用标识、图片内容、独立版本、摘要与更新主体。创建应用和可选Logo使用同一事务，失败整体回滚；替换和移除按独立版本比较，移除保留版本防止并发覆盖，删除应用登记时清理图片。公共资源仅投影Logo版本与受保护URL，不返回正文；Logo不进入应用spec、配置修订、部署快照或Agent任务，单独修改不改变配置revision或触发部署。
+
+浏览器限制原图5MiB及4096像素边长，等比缩至256像素PNG；中心限制256KiB和512像素，核对PNG签名、块结构、CRC、有界解压、行数据和过滤类型，并重新编码去除附加元数据。用户SVG、远端URL、伪造或损坏图片不接受。图片读写沿用管理员权限，固定image/png、nosniff、沙箱CSP、私有缓存及内容ETag，先鉴权再响应304；版本摘要不符或图片已移除返回404。
+
+创建与修改应用均提供高级YAML。Compose对象以规范YAML展示；单容器高级文档使用services.app并反解已有支持字段，保持container类型、受管挂载、健康与部署信息，多服务继续使用Compose类型。保存后从规范对象生成YAML，不另外保存可旁路脱敏的原始文本；解析和字面环境规范化先于脱敏占位恢复，原服务与键的[redacted]恢复旧值，新键占位拒绝，模板扩展锚点在解析后移除。
+
+高级YAML从services各自的ports提取容器端口与协议，expose仍仅为内部端口。托管模式忽略YAML的published并经既有预留和有效配置投影分配宿主端口，相同端口保留旧或表单的监听范围；手动模式采用YAML发布端口。按服务、容器端口和协议保持既有端口名称及应用协议，新端口生成稳定名称；网站和健康检查引用继续受原校验约束。普通表单与商店安装保持原顶层端口规则。
+
+本节对应SDD068。管理员和Agent的既有权限、镜像执行、持久数据及失败语义不变；Logo不新增对象存储、宿主文件通道或Agent能力，YAML不能绕过既有环境、文件、挂载、资源与端口边界。验收区分真实HTTP/SQLite和浏览器交互、受控网络失败与远端Agent执行，不把前端预览或配置验证称为所有第三方应用实际运行。
 
 ## 第60章 主机执行权限与独立运维执行器（SDD 060，目标）
 

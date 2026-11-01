@@ -1,0 +1,35 @@
+{
+  "date": "2026-11-01",
+  "scope": "design_only",
+  "markdown_files_checked": 12,
+  "broken_local_links": [],
+  "functional_requirements": 35,
+  "user_stories": 7,
+  "unique_ordered_tasks": 37,
+  "mermaid_and_doca_node_labels_match": true,
+  "mermaid_and_doca_edges_match": true,
+  "git_diff_check": "passed",
+  "obvious_credential_patterns": "none",
+  "runtime_tests_run": false,
+  "recovery_benchmark_run": false,
+  "default_no_added_registry_documented": true,
+  "cache_optional_and_not_a_core_dependency": true,
+  "latest_doca_evidence": "doca-readback-registry-auth.json",
+  "latest_doca_seq": 900,
+  "main_synchronized": "3720a5085f9fffe363e90908bbd15976a741b6ee",
+  "success_criteria": 11,
+  "diagrams": [
+    {
+      "nodes": 9,
+      "edges": 10
+    },
+    {
+      "nodes": 10,
+      "edges": 10
+    }
+  ],
+  "optional_registry_app_documented": true,
+  "single_write_origin_and_cluster_readers": true,
+  "website_global_and_path_basic_auth": true,
+  "registry_modes_and_trusted_network_boundaries": true
+}

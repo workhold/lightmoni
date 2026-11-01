@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "应用商店加载失败可见且可原位重试",
+    "基本表单自动选择唯一集群/在线机器；手动容器端口/托管自动分配0/显式端口跨模式保留；高级资源折叠提交；保存失败保留输入",
+    "真实 Agent job 阶段持久化；日志503不误报成功，恢复去重；失败原因与建议刷新后回读",
+    "最终成功仅由健康回执和整体应用状态确认",
+    "已安装卡片显示版本、机器和端口，直接停止继承筛选集群、展示影响并可取消",
+    "unknown 独立展示且不自动重新安装",
+    "中文/英文390px、200%等效布局与减少动效检查"
+  ],
+  "errors": [],
+  "media": "artifacts/screenshots/specs/062-application-management/evidence/install-2",
+  "limits": "Real HTTP/SQLite/job controller with controlled Agent receipts. No external Docker or registry executed. 200% checked at equivalent viewport."
+}

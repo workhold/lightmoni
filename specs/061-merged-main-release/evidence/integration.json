@@ -1,0 +1,39 @@
+{
+  "related_runtime": {
+    "tests": 150,
+    "passed": 136,
+    "failed": 0,
+    "skipped": 14
+  },
+  "ai_runtime": {
+    "tests": 71,
+    "passed": 71
+  },
+  "typescript_sdk": {
+    "tests": 22,
+    "passed": 22
+  },
+  "typechecks": [
+    "runtime",
+    "web",
+    "ai-runtime"
+  ],
+  "builds": [
+    "runtime",
+    "web"
+  ],
+  "full_runtime_suite": "Interrupted at unchanged agent-uninstall-script.test.ts after no progress on macOS; not claimed passed",
+  "conflict_resolution": [
+    "retain Docker job registration with private registry controller",
+    "preserve Docker public diagnostic code plus install diagnosticCode",
+    "project install events inside existing database transactions",
+    "preserve certificate nested tasks alongside installation drawer",
+    "retain all gateway/cache Agent capabilities and both CSS additions"
+  ],
+  "architecture": "No new architecture beyond original feature SDDs; preserve original Doca text and native diagrams",
+  "real_docker_controls": {
+    "tests": 9,
+    "passed": 9,
+    "skipped": 0
+  }
+}
