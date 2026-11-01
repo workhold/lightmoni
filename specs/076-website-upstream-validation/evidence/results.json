@@ -1,0 +1,17 @@
+{
+  "checks": [
+    "原始127.0.0.1:5000及其他无协议/路径/查询/片段/凭据/非HTTP地址：字段提示、首错聚焦滚动、零保存请求",
+    "空URL、删除全部后端、第二集群错误均拦截并保留另一集群输入",
+    "三个服务端上游错误显示中文原因且保留所有输入",
+    "纠正协议后真实SQLite/API创建成功，IPv6/根斜杠规范化、权重/失败参数回读正确",
+    "有URL错误时切到应用命名端口可保存，隐藏的无效手动后端不会提交",
+    "托管服务分支保存成功",
+    "有URL错误时切到返回/重定向可保存",
+    "静态网站不受隐藏上游校验影响",
+    "英文提示、390px无页面横向溢出且保存按钮可见"
+  ],
+  "errors": [],
+  "saves": 8,
+  "media": "artifacts/screenshots/specs/076-website-upstream-validation/evidence",
+  "scope": "Production web build, real disposable SQLite/API; server error translation uses injected 400 responses. No Agent execution or production update."
+}
