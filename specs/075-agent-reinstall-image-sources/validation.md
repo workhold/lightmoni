@@ -25,3 +25,6 @@
 - web 类型检查、生产构建与 diff 检查通过；复用原代理表单与接口，后端和 Agent 没有变更，不重复运行之前163项后端/固定 shell 回归或 Docker 验收。
 - Chrome 操作生产构建及 loopback 真实内存平台 API，验证独立导航/标题、无私库安装引导、规则保存与回源默认关闭、私有镜像页不再含代理表单、切换返回与刷新保留配置、英文导航及标题。截图：`artifacts/screenshots/agent-reinstall-image-sources-075/independent-page.png`；见 [入口验收](evidence/ui-relocation.json)。
 - 同步仓库第75.3节与 Doca `sdd075-design-7`，保存后以最新版本923回读正文完全一致；同一原生流程图12节点/11连线未变化。见 [架构入口回读](evidence/doca-relocation-readback.json)。原版本920的回读记录作为前一轮历史证据保留。
+
+
+全会话发行整合：与 PR #62 的网站流程及主机服务地址修复合并，冲突仅为设计文档追加章节，保留双方内容。整合提交 a3d5ea4 的完整 runtime 测试1007通过、24项外部环境跳过、零失败；AI runtime 71/71通过，runtime类型/构建、web生产构建、AI构建及diff检查通过。详见 evidence/merged-session-checks.json。
