@@ -83,7 +83,7 @@ const server = createServer(async (req, res) => {
 });
 server.listen(19875, "127.0.0.1", () =>
   console.log(
-    "Disposable image source QA: http://127.0.0.1:19875/private-images",
+    "Disposable image source QA: http://127.0.0.1:19875/image-sources",
   ),
 );
 process.on("SIGTERM", async () => {

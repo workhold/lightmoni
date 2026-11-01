@@ -8,5 +8,6 @@
 - [x] T06 运行相关检查和真实 Docker 验证，记录验收边界。
 - [x] T07 同步本地/Doca 设计，回读正文及原生图块并记录证据。
 - [x] T08 同步 main、提交功能分支并创建面向 main 的 GitHub PR。
+- [x] T09 按用户反馈将全局代理移至独立“镜像源”页面，同步本地/Doca 入口说明，验证保存、导航与私库页边界并更新原 PR。
 
 交付 PR：https://github.com/workhold/lightmoni/pull/63（目标 main；未合并、未发布）。

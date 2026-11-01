@@ -1850,7 +1850,7 @@ flowchart LR
 
 ### 75.3 全局按来源规则
 
-私有镜像管理增加独立的镜像来源代理表单，无需安装系统 Registry。ops_image_sources 单例持久保存 revision、规则、操作者和时间；管理员 GET/PUT /ops/image-sources，保存使用 revision CAS。规则 source 精确匹配 registry host[:port]，Hub 别名归一 docker.io；target 仅 HTTPS 仓库及可选 repository 前缀，拒绝凭据、查询、片段、重复来源和自身映射。每条 allow_upstream 默认关闭，代理失败时仅明确开启才回原源。没有规则的来源保持原流程，不递归代理。此首版为全局规则，不实现第59.5节的层级继承、daemon HTTP(S)_PROXY、CA 或新增认证管理。
+管理员从“运维工具 → 镜像源”独立页面（/image-sources）配置全局镜像来源代理；私有镜像管理仅负责系统仓库、集群缓存与对外发布。ops_image_sources 单例持久保存 revision、规则、操作者和时间；管理员 GET/PUT /ops/image-sources，保存使用 revision CAS。规则 source 精确匹配 registry host[:port]，Hub 别名归一 docker.io；target 仅 HTTPS 仓库及可选 repository 前缀，拒绝凭据、查询、片段、重复来源和自身映射。每条 allow_upstream 默认关闭，代理失败时仅明确开启才回原源。没有规则的来源保持原流程，不递归代理。此首版为全局规则，不实现第59.5节的层级继承、daemon HTTP(S)_PROXY、CA 或新增认证管理。
 
 apply 作业冻结命中的规则及 revision；新 operations.platform.image-sources.v1 能力通过认证心跳和领取能力双重约束，旧 Agent 明确报需升级。领取时重算策略，拒绝旧规则；规则变化不使已领取的批准快照自动扩大范围。保存配置不重启 Docker 或既有业务，后续显式部署/重试采用新规则。
 

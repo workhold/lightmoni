@@ -5,7 +5,7 @@
 3. 成功受管卸载仅在原审批凭据归属已证明时写 Agent removed 墓碑与事件。不把程序卸载当作 Docker 容器已停止；旧应用占用等新 Agent 核验。明确 purge 仅清除 Agent 身份/配置/遥测与运行状态，保留 operations 内的业务目录和持久数据。
 4. ops_image_sources 单例持久 revision/rules/actor/time；共享规范化解析源 registry、repository、tag/digest。全局 GET/PUT /ops/image-sources 经管理员守卫。空数组关闭；CAS 不丢失其他编辑。
 5. apply 作业冻结命中应用镜像的规则与策略 revision，要求 operations.platform.image-sources.v1；领取时重算并拒绝过时规则。Agent 共用 preparePlatformImages，遵循本机→集群缓存→指定代理→明确允许的原源。docker image pull mapped-ref，inspect 平台/ID，服务 image=实际 ID、pull_policy=never。网关预检与启动使用相同 ID，配置摘要仍基于原始镜像与网站配置，状态保存实际 image。
-6. 网页沿用私有镜像页表单组件，添加独立镜像来源代理区，动态规则和回源开关；不要求仓库部署。应用安装记录增加拉取阶段与重装阻塞诊断。
+6. 网页通过管理员专用 `/image-sources` 页面和“运维工具 → 镜像源”导航入口展示动态来源规则和回源开关，复用 ImageSourcesPanel；私有镜像页仅保留系统仓库、集群缓存与对外发布，移除代理表单。接口与持久配置保持不变，刷新或切换入口不丢失规则。应用安装记录增加拉取阶段与重装阻塞诊断。
 7. 相关单元/集成、类型检查、网页构建与真实 Docker 验证后记录结果，更新本地/Doca 架构并回读，功能分支提交 PR。
 
 架构同步适用，详见 spec.md。Doca 仅追加本特性章节及原生流程图，不重建现有文档。

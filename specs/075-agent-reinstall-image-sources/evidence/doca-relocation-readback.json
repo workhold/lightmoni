@@ -1,0 +1,11 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "seq": 923,
+  "updated_block": "sdd075-design-7",
+  "text_matches": true,
+  "entry": "运维工具 → 镜像源 (/image-sources)",
+  "registry_scope": "系统仓库、集群缓存与对外发布",
+  "native_diagram_unchanged": true,
+  "nodes": 12,
+  "edges": 11
+}
