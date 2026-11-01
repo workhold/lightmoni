@@ -1,3 +1,4 @@
+import { registerMachineExecutorUpdates } from "./machine-executor-updates.js";
 import { registerMachineDocker } from './machine-docker.js';
 import { machineDockerEnvironment, type DockerEnvironment } from './docker-environment.js';
 import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
@@ -923,7 +924,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
         downloadsDir:options.downloadsDir ?? join(process.cwd(),"downloads"),dataDir:options.dataDir ?? join(process.cwd(),".local-dev"),
       });
       const maintenance=registerMachineExecutorMaintenance(deps,access,store);
-      return {async close(){await Promise.allSettled([bootstrap.close?.(),maintenance.close?.()]);}};
+      const executorUpdates=registerMachineExecutorUpdates(deps,access,store,{downloadsDir:options.downloadsDir ?? join(process.cwd(),"downloads"),dataDir:options.dataDir ?? join(process.cwd(),".local-dev")});
+      return {async close(){await Promise.allSettled([bootstrap.close?.(),maintenance.close?.(),executorUpdates.close?.()]);}};
     },
     async close() {
       clearInterval(cleanupTimer);

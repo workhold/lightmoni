@@ -1,3 +1,5 @@
+import { connectManagedExecutorJobs } from "./managed-executor-jobs.js";
+import { connectExecutorObservations } from './executor-observation.js';
 import { SystemLogs } from "./system-logs.js";
 import {
   createServer,
@@ -127,7 +129,7 @@ export async function createApp(cfg: Config) {
     // Agent jobs are registered before service deployments so an approved
     // deployment can enqueue its immutable pull-based job atomically with the
     // centre state transition. The job module itself never executes commands.
-    const agentJobs = registerAgentJobs(deps, { agentCredentials });
+    const agentJobs = registerAgentJobs(deps, { agentCredentials, separateExecutor:true });
     const managedMachines = registerManagedMachines(deps, { agentCredentials, dataDir: cfg.dataDir, downloadsDir: cfg.downloadsDir ?? join(root, "downloads") });
     modules.push(managedMachines);
     registerSettings(deps, agentCredentials);
@@ -163,6 +165,8 @@ export async function createApp(cfg: Config) {
     modules.push(taskCenter);
     const privilegedExecutors = registerPrivilegedExecutors(deps,{dataDir:cfg.dataDir});
     modules.push(privilegedExecutors,managedMachines.registerExecutorBootstrap(privilegedExecutors));
+    connectManagedExecutorJobs(deps,{jobs:agentJobs,executors:privilegedExecutors,artifacts:releaseArtifacts,resolvePlatform:platform.resolvePayload});
+    modules.push(connectExecutorObservations(deps,privilegedExecutors,ingest.internal.bind(ingest)));
     // Enrollment credentials are a separate migration boundary. Legacy
     // config.key based nodes keep working until they explicitly re-enroll.
     modules.push(agentCredentials);

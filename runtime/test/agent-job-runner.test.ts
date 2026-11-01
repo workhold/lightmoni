@@ -64,7 +64,7 @@ test("ordinary Agent rejects legacy write actions before payload download or hos
 test("read-only Docker inventory still executes without exposing container controls",async t=>{
  const dataDir=mkdtempSync(join(tmpdir(),"lightmoni-docker-inventory-"));t.after(()=>rmSync(dataDir,{recursive:true,force:true}));const commands:any[]=[];
  const runner=new AgentJobRunner({endpoint:"https://center",agentID:"agent",controlCredential:"ordinary-control",dataDir},{command:async(file,args)=>{commands.push({file,args});return{stdout:"",stderr:""}},fetch:(async(url:any)=>String(url).endsWith("/jobs/claim")?Response.json({job:{id:"inventory",lease_id:"lease",expires_at:new Date(Date.now()+60000).toISOString(),capabilities:["docker.inventory"],actions:[{kind:"docker",operation:"inventory"}]}}):Response.json({})) as typeof fetch});
- assert.equal((await runner.pollOnce())?.state,"succeeded");assert.equal(commands.length,1);assert.equal(commands[0].file,"docker");assert.deepEqual(commands[0].args.slice(0,3),["--context","default","ps"]);
+ assert.equal((await runner.pollOnce())?.state,"succeeded");assert.equal(commands.length,2);assert.ok(commands.every(c=>c.file==='docker'));assert.deepEqual(commands[0].args.slice(0,3),["--context","default","ps"]);assert.deepEqual(commands[1].args,['--context','default','compose','version','--short']);
 });
 
 test("Agent startup never resumes cached legacy website gateway writes",async t=>{

@@ -17,7 +17,7 @@ function tree(path: string): void {
 async function main(): Promise<void> {
   if (process.platform !== "linux" || process.getuid?.() !== 0 || process.geteuid?.() !== 0) throw Error("executor_requires_linux_root");
   trusted(realpathSync(process.execPath));
-  const directory = dirname(fileURLToPath(import.meta.url)); tree(directory); tree(join(dirname(directory), "shared"));
+  const directory = dirname(fileURLToPath(import.meta.url)); tree(dirname(directory));
   const { execute } = await import("./cli.js"); await execute(process.argv.slice(2));
 }
 main().catch(error => { const code = error instanceof Error && /^[a-z0-9_]{1,64}$/.test(error.message) ? error.message : "executor_refused"; process.stderr.write(code + "\n"); process.exitCode = 1; });

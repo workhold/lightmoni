@@ -55,7 +55,7 @@ export function registerMachineExecutorMaintenance(deps:Dependencies,access:Agen
   db.run("UPDATE machine_executor_maintenance SET status='unknown',error='平台在卸载期间重启，请通过原记录只读核对' WHERE status='running'");
   const human=(c:Context)=>{
     deps.auth.requireAdmin(c);
-    if(c.req.headers.authorization||!c.req.headers.cookie?.split(";").some(p=>p.trim().startsWith("lm_session="))||deps.auth.user(c.req)?.id!==c.user.id)fail(403,"human_admin_session_required");
+    if(c.req.headers.authorization||!c.req.headers.cookie?.split(";").some(p=>p.trim().startsWith("lm_session="))||(deps.auth.user(c.req)?.id!==c.user.id||deps.auth.user(c.req)?.role!=="admin"||!deps.db.get("SELECT id FROM users WHERE id=? AND active=1 AND role='admin'",c.user.id)))fail(403,"human_admin_session_required");
   };
   const input=(v:unknown,keys:string[],required=keys)=>{try{return strictRecord(v,keys,required);}catch{fail(400,"invalid_executor_maintenance_request");}};
   const body=async(c:Context)=>{try{return parseStrictJSON(await c.raw(65536),65536);}catch{fail(400,"invalid_executor_maintenance_request");}};
@@ -123,6 +123,7 @@ export function registerMachineExecutorMaintenance(deps:Dependencies,access:Agen
   }));
   router.post("/api/v1/machines/:id/executor-maintenance/plans/:planId/apply",access.safe(async c=>{
     human(c);const v=input(await body(c),["confirm","expected_revision","request_id"]),r=row(c.params.id,c.params.planId),p=JSON.parse(r.plan_json);
+    if(p.action!=="uninstall")fail(409,"executor_maintenance_action_mismatch");
     if(v.confirm!==true||typeof v.request_id!=="string"||!/^[a-f0-9-]{36}$/.test(v.request_id))fail(400,"explicit_confirmation_required");
     if(v.expected_revision!==r.revision||sha256(canonicalJSON(p))!==r.revision)fail(409,"executor_maintenance_plan_changed");
     if(r.request_id){if(r.request_id!==v.request_id)fail(409,"executor_maintenance_already_applied");c.json(view(r));return;}
@@ -148,11 +149,12 @@ export function registerMachineExecutorMaintenance(deps:Dependencies,access:Agen
     }catch{db.run("UPDATE machine_executor_maintenance SET status='unknown',error='卸载结果未知，请只读核对；不会自动重试' WHERE id=? AND status='running'",r.id);}finally{access.busy.delete(machine.id);}})();
     workers.add(work);void work.finally(()=>workers.delete(work));c.json(view(row(machine.id,r.id)));
   }));
-  router.get("/api/v1/machines/:id/executor-maintenance/plans",access.safe(c=>{human(c);c.json(db.all<Row>("SELECT * FROM machine_executor_maintenance WHERE machine_id=? ORDER BY created_at DESC LIMIT 30",c.params.id).map(view));}));
+  router.get("/api/v1/machines/:id/executor-maintenance/plans",access.safe(c=>{human(c);c.json(db.all<Row>("SELECT * FROM machine_executor_maintenance WHERE machine_id=? AND json_extract(plan_json,'$.action')='uninstall' ORDER BY created_at DESC LIMIT 30",c.params.id).map(view));}));
   router.get("/api/v1/machines/:id/executor-maintenance/plans/:planId",access.safe(c=>{human(c);c.json(view(row(c.params.id,c.params.planId)));}));
   router.post("/api/v1/machines/:id/executor-maintenance/plans/:planId/cancel",access.safe(c=>{human(c);const r=row(c.params.id,c.params.planId);if(r.status!=="awaiting_approval")fail(409,"only_unstarted_maintenance_can_be_cancelled");db.run("UPDATE machine_executor_maintenance SET status='cancelled',finished_at=? WHERE id=?",now(),r.id);c.json(view(row(r.machine_id,r.id)));}));
   router.post("/api/v1/machines/:id/executor-maintenance/plans/:planId/reconcile",access.safe(async c=>{
     human(c);const v=input(await body(c),["credential_id"],[]),r=row(c.params.id,c.params.planId),p=JSON.parse(r.plan_json);
+    if(p.action!=="uninstall")fail(409,"executor_maintenance_action_mismatch");
     if(v.credential_id!==undefined&&(typeof v.credential_id!=="string"||!v.credential_id))fail(400,"invalid_credential_id");
     if(r.status!=="unknown")fail(409,"only_unknown_maintenance_can_be_reconciled");
     access.idle(r.machine_id);checkBinding(p,r);

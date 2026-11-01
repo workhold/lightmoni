@@ -13,9 +13,9 @@ type Output = {stdout: string; stderr: string; complete?: boolean; skipped?: str
 type Checkpoint = {time: bigint; count: bigint};
 // Read a bounded prefix, never tail away an unsent backlog. Each stream has its
 // own checkpoint: stdout/stderr ordering is not guaranteed by the Docker CLI.
-export function readDockerLogs(args: string[], signal?: AbortSignal, selected?: 'stdout'|'stderr', checkpoint?: Checkpoint): Promise<Output> {
+export function readDockerLogs(args: string[], signal?: AbortSignal, selected?: 'stdout'|'stderr', checkpoint?: Checkpoint, fixed?:{executable:string;prefix:string[]}): Promise<Output> {
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', ['--context','default',...args], {shell:false, stdio:['ignore','pipe','pipe'], signal,
+    const child = spawn(fixed?.executable??'docker', [...(fixed?.prefix??['--context','default']),...args], {shell:false, stdio:['ignore','pipe','pipe'], signal,
       env: {PATH: process.env.PATH, HOME: process.env.HOME, LC_ALL:'C'}});
     const output = {stdout: Buffer.alloc(0), stderr: Buffer.alloc(0)};
     let bounded = false, skipped = 0n, prefix = Buffer.alloc(0), skipping = !!checkpoint?.count;

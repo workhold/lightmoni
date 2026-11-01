@@ -106,7 +106,7 @@ const openAbsoluteDirectory = async (path: string, create = false, protectReleas
         const isReleaseRoot = index === components.length - 1;
         const safeStickyAncestor = !isReleaseRoot && (info.mode & 0o1000) !== 0 && ownerTrusted;
         const protectedDirectory = isReleaseRoot
-          ? info.uid === 0 && info.gid === agentPrimaryGid && groupWritable && groupCanWrite(info) && !otherWritable && otherReadableTraversable
+          ? uid === 0 ? info.uid === 0 && (info.mode & 0o022) === 0 : info.uid === 0 && info.gid === agentPrimaryGid && groupWritable && groupCanWrite(info) && !otherWritable && otherReadableTraversable
           : ownerTrusted && ((!otherWritable && groupWriteTrusted) || safeStickyAncestor);
         if (!info.isDirectory() || !protectedDirectory) {
           await next.close().catch(() => {});

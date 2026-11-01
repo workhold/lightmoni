@@ -1,3 +1,4 @@
+import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
 import {oneShotServices} from '../operations/workload-readiness.js';
 import {createImageSourcesSchema,imageSourcesFor,validateImageSourcesPayload} from './image-sources.js';
 import {validateInstanceRecoveryPayload} from './instance-recovery.js';
@@ -550,7 +551,7 @@ export class OperationsPlatformStore implements PlatformStore {
       const sourcePolicy=imageSourcesFor(this,config);
       if(sourcePolicy) {
         let capabilities:unknown;
-        try{capabilities=JSON.parse(this.deps.db.get<any>('SELECT heartbeat FROM agents WHERE id=?',agentID)?.heartbeat??'{}').operations_capabilities;}catch{}
+        capabilities=operationExecutionCapabilities(this.deps,agentID);
         if(!Array.isArray(capabilities)||!capabilities.includes('operations.platform.image-sources.v1'))fail(409,'image_sources_agent_upgrade_required');
       }
       const payload: OperationPayload = {

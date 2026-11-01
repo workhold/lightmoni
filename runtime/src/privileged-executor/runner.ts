@@ -1,3 +1,11 @@
+import { realpathSync,existsSync } from "node:fs";
+import { rootPath } from "./security.js";
+import { ExecutorApplicationObserver } from './observation.js';
+import { readDockerInventory } from "../agent/docker.js";
+import { operationCommand } from "../agent/operations.js";
+import { runManaged,type ManagedRunContext } from "./managed.js";
+import type { ManagedExecutionPayload } from "../shared/managed-execution.js";
+import { operationCapabilities } from "../agent/operations.js";
 import { randomBytes } from "node:crypto";
 import { canonicalJSON, strictRecord, type PrivilegedPlan, type PrivilegedPayload } from "../shared/privileged-executor.js";
 import { ExecutorClient } from "./client.js";
@@ -10,11 +18,17 @@ import { refuse, sha256, linuxBootClock, type BootClock } from "./security.js";
 export interface ExecutorRelease { version: string; release: { build_id: string; source_revision: string; artifact_sha256: string; state_schema: 1 } }
 export interface RunnerHost {
   scripts: ScriptHost;
+  inventory?:()=>Promise<unknown>;
+  managed?:(payload:ManagedExecutionPayload,context:ManagedRunContext)=>Promise<ScriptOutcome>;
   docker: Pick<ManagedDockerExecutor, "execute">;
   profiles(config: ExecutorConfig): Promise<{ capabilities: string[]; account_profiles: ReturnType<typeof localAccount>[]; interpreter_profiles: {runtime: string; sha256: string}[] }>;
 }
 export function productionRunnerHost(config: ExecutorConfig): RunnerHost {
-  return { scripts: productionScriptHost(), docker: new ManagedDockerExecutor({ daemon_id: config.daemon_id || "not-configured" }),
+  return { inventory:async()=>{
+      if(!config.daemon_id||(await inspectManagedDockerDaemon()).daemon_id!==config.daemon_id)refuse('docker_daemon_changed');
+      const docker=['/usr/local/bin/docker','/usr/bin/docker'].find(path=>existsSync(path));if(!docker)refuse('docker_cli_missing');const executable=rootPath(realpathSync(docker!));
+      return readDockerInventory((_file,args,options)=>operationCommand(executable,['--host=unix:///var/run/docker.sock',...(args[0]==='--context'&&args[1]==='default'?args.slice(2):args)],options));
+    },managed:runManaged,scripts: productionScriptHost(), docker: new ManagedDockerExecutor({ daemon_id: config.daemon_id || "not-configured" }),
     async profiles() {
       const accounts = config.accounts.filter(account => { try { return sameAccount(localAccount(account.name), account); } catch { return false; } });
       const interpreters: { runtime: string; sha256: string }[] = [];
@@ -22,6 +36,7 @@ export function productionRunnerHost(config: ExecutorConfig): RunnerHost {
       const capabilities: string[] = [];
       if (accounts.length && interpreters.length && scriptDependenciesReady()) capabilities.push("script.elevated.v1");
       if (config.daemon_id) { try { if ((await inspectManagedDockerDaemon()).daemon_id === config.daemon_id) capabilities.push("container.managed.v1"); } catch {} }
+      if(scriptDependenciesReady())capabilities.push("operations.managed.v1");
       return { capabilities, account_profiles: accounts, interpreter_profiles: interpreters };
     },
   };
@@ -30,17 +45,25 @@ const safeCode = (error: unknown) => error instanceof Error && /^[a-z0-9_]{1,64}
 const failure = (state: "failed" | "unknown", code: string): ScriptOutcome => ({ state, code, summary: state === "unknown" ? "Execution outcome requires read-only reconciliation" : "Approved execution refused", exit_code: null, stdout: "", stderr: "" });
 
 export class PrivilegedExecutorRunner {
+  private observations?:ExecutorApplicationObserver;
+  close(){this.observations?.close();}
   constructor(readonly config: ExecutorConfig, readonly journal: ExecutorJournal, readonly client: ExecutorClient,
     readonly release: ExecutorRelease, private readonly host: RunnerHost = productionRunnerHost(config), private readonly clock: BootClock = linuxBootClock) {}
   async heartbeat(): Promise<void> {
     const profiles = await this.host.profiles(this.config), current = this.journal.policy();
+    let inventory:unknown;
+    if(current.capabilities.includes('operations.managed.v1')&&this.host.inventory)try{inventory=await this.host.inventory();}catch{}
     const response = await this.client.request("heartbeat", { ...this.release, boot_id: this.clock.bootID(), policy_generation: current.generation,
-      capabilities: profiles.capabilities.filter(c => current.capabilities.includes(c)), account_profiles: profiles.account_profiles, interpreter_profiles: profiles.interpreter_profiles });
+      ...(inventory?{docker_inventory:inventory}:{}),capabilities: profiles.capabilities.filter(c => current.capabilities.includes(c)), operations_capabilities:profiles.capabilities.includes("operations.managed.v1")?[...operationCapabilities]:[],account_profiles: profiles.account_profiles, interpreter_profiles: profiles.interpreter_profiles });
     if (response.center_instance_id !== this.config.center_instance_id) refuse("principal_mismatch");
     this.client.applyPolicy(response.policy);
   }
   async once(signal: AbortSignal = new AbortController().signal): Promise<void> {
     await this.heartbeat();
+    if(this.host.managed===runManaged&&this.config.daemon_id&&this.journal.policy().capabilities.includes('operations.managed.v1')){
+      this.observations??=new ExecutorApplicationObserver(this.config);
+      try{await this.observations.collect(signal);}catch{/* retained outbox/cursors retry; no ordinary principal fallback */}
+    }
     // A previous process may have submitted an intent. Never resume its script,
     // even when no PID exists, or replace its start nonce after a reboot.
     for (const row of this.journal.all()) {
@@ -99,7 +122,7 @@ export class PrivilegedExecutorRunner {
       } catch { leaseLost = true; controller.abort(); }
     }, 250); timer.unref();
     const before = async (step: string) => {
-      if (permitUsed || step !== (payload.kind === "script" ? "execute" : "docker." + payload.operation)) refuse("unexpected_execution_step");
+      if (permitUsed || step !== (payload.kind === "script" ? "execute" : payload.kind === "managed" ? "managed.execute" : "docker." + payload.operation)) refuse("unexpected_execution_step");
       if (controller.signal.aborted || leaseLost) refuse("lease_unavailable");
       const nonce = randomBytes(32).toString("hex"); this.journal.nonce(plan.job_id, nonce);
       const result = await this.client.permit(plan, nonce);
@@ -119,6 +142,10 @@ export class PrivilegedExecutorRunner {
         if (!this.config.accounts.some(account => sameAccount(account, payload.account)) || !sameAccount(this.host.scripts.account(payload.account.name), payload.account)) refuse("account_changed");
         await before("execute");
         result = await executeScript(payload, unit, this.config.accounts, this.host.scripts, controller.signal, startGuard);
+      } else if(payload.kind==='managed') {
+        const managed=this.host.managed;if(!managed)refuse('managed_adapter_unavailable');
+        await before('managed.execute');
+        result=await managed!(payload,{config:this.config,plan,unit,signal:controller.signal,guard:startGuard!});
       } else {
         const action = payload.operation, body: any = action === "list" ? { operation: action } : action === "pull" ? { operation: action, image: payload.image, platform: payload.platform }
           : action === "create" ? { operation: action, resource_id: payload.resource_id, revision: payload.resource_revision, image: payload.image, platform: payload.platform }

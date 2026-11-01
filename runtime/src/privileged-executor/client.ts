@@ -1,3 +1,4 @@
+import { getCACertificates,setDefaultCACertificates } from "node:tls";
 import { randomBytes } from "node:crypto";
 import {
   canonicalJSON, EXECUTOR_SIGNATURE_HEADER, parseStrictJSON, planClaims, permitClaims, sha256, signExecutorRequest, signJWS,
@@ -8,14 +9,25 @@ import { ExecutorJournal } from "./journal.js";
 import { refuse, StartDeadline, linuxBootClock, type BootClock } from "./security.js";
 
 export type ExecutorTransport = (url: string, options: { body: string; headers: Record<string,string>; signal: AbortSignal }) => Promise<unknown>;
+let systemTrustLoaded=false;
+function loadSystemTrust(){if(!systemTrustLoaded){setDefaultCACertificates([...new Set([...getCACertificates("default"),...getCACertificates("system")])]);systemTrustLoaded=true;}}
 async function productionTransport(url: string, options: { body: string; headers: Record<string,string>; signal: AbortSignal }): Promise<unknown> {
+  loadSystemTrust();
   const response = await fetch(url, { method: "POST", redirect: "error", headers: options.headers, body: options.body, signal: options.signal });
   if (!response.ok) { await response.body?.cancel(); return refuse("executor_http_" + response.status); }
   if (!response.body) return refuse("empty_response");
   const reader = response.body.getReader(), chunks: Buffer[] = []; let size = 0;
-  try { for (;;) { const next = await reader.read(); if (next.done) break; size += next.value.byteLength; if (size > 1 << 20) refuse("response_too_large"); chunks.push(Buffer.from(next.value)); } }
+  try { for (;;) { const next = await reader.read(); if (next.done) break; size += next.value.byteLength; if (size > 2 << 20) refuse("response_too_large"); chunks.push(Buffer.from(next.value)); } }
   finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-  return parseStrictJSON(Buffer.concat(chunks), 1 << 20);
+  return parseStrictJSON(Buffer.concat(chunks), 2 << 20);
+}
+/** Stateless signed requests for a fixed per-job worker. It never opens or
+ * recovers the runner journal, and cannot lease another job. */
+export async function requestExecutor(config:ExecutorConfig,route:string,value:unknown,requestID=randomBytes(24).toString("base64url"),wall:()=>number=Date.now,transport:ExecutorTransport=productionTransport):Promise<any> {
+  if(!/^[A-Za-z0-9_/-]+$/.test(route)||route.includes("//")||route.endsWith("/"))refuse("invalid_request_path");
+  const body=canonicalJSON(value),path="/api/v1/privileged-executors/"+config.executor_id+"/"+route,now=Math.floor(wall()/1000);
+  const signature=signExecutorRequest({center_instance_id:config.center_instance_id,executor_id:config.executor_id,install_generation:config.install_generation,method:"POST",path,body,request_id:requestID,iat:now,exp:now+60},config.private_key);
+  return transport(config.endpoint+path,{body,headers:{"Content-Type":"application/json",Accept:"application/json",[EXECUTOR_SIGNATURE_HEADER]:signature},signal:AbortSignal.timeout(10000)});
 }
 export class ExecutorClient {
   constructor(readonly config: ExecutorConfig, readonly journal: ExecutorJournal, private readonly transport: ExecutorTransport = productionTransport,
@@ -36,8 +48,7 @@ export class ExecutorClient {
     if (!/^[A-Za-z0-9_/-]+$/.test(route) || route.includes("//") || route.endsWith("/")) refuse("invalid_request_path");
     const body = canonicalJSON(value), path = "/api/v1/privileged-executors/" + this.config.executor_id + "/" + route;
     const requestID = slot ? this.journal.request(slot, sha256(path + "\n" + body)) : randomBytes(24).toString("base64url"), now = Math.floor(this.wall() / 1000);
-    const signature = signExecutorRequest({ center_instance_id: this.config.center_instance_id, executor_id: this.config.executor_id, install_generation: this.config.install_generation, method: "POST", path, body, request_id: requestID, iat: now, exp: now + 60 }, this.config.private_key);
-    return this.transport(this.config.endpoint + path, { body, headers: { "Content-Type": "application/json", Accept: "application/json", [EXECUTOR_SIGNATURE_HEADER]: signature }, signal: AbortSignal.timeout(10_000) });
+    return requestExecutor(this.config,route,value,requestID,this.wall,this.transport);
   }
   verify<T>(signed: unknown, max = 1 << 20): T {
     // Never use kid from an untrusted JWS to load files/URLs or new keys.
@@ -66,8 +77,8 @@ export class ExecutorClient {
     this.identity(p);
     const value = payload as PrivilegedPayload;
     if (sha256(canonicalJSON(payload)) !== p.request_sha256 || p.max_runtime_ms !== value.timeout_ms || p.action !== (value.kind === "script" ? "execute" : value.operation)
-      || p.capability !== (value.kind === "script" ? "script.elevated.v1" : "container.managed.v1")
-      || value.kind === "container" && (p.resource_id !== value.resource_id || p.resource_revision !== String(value.resource_revision))) refuse("plan_payload_mismatch");
+      || p.capability !== (value.kind === "script" ? "script.elevated.v1" : value.kind === "managed" ? "operations.managed.v1" : "container.managed.v1")
+      || value.kind !== "script" && (p.resource_id !== value.resource_id || p.resource_revision !== String(value.resource_revision))) refuse("plan_payload_mismatch");
     if (p.exp - p.iat > 45) refuse("invalid_plan_lifetime");
     return p;
   }
@@ -84,7 +95,7 @@ export class ExecutorClient {
     // This deadline begins BEFORE the network request. A delayed reply cannot
     // start a fresh 30s clock, even when wall time is skewed or the host suspends.
     const deadline = new StartDeadline(this.clock);
-    const step = plan.capability === "script.elevated.v1" ? "execute" : "docker." + plan.action;
+    const step = plan.capability === "script.elevated.v1" ? "execute" : plan.capability === "operations.managed.v1" ? "managed.execute" : "docker." + plan.action;
     const response = await this.request("jobs/" + plan.job_id + "/start-permits", { lease_id: plan.lease_id, step_id: step, executor_nonce: executorNonce }, "permit:" + plan.job_id);
     strictRecord(response, ["permit"]); const p = permitClaims(this.verify(response.permit)); this.target(p);
     for (const key of ["center_instance_id", "machine_id", "agent_id", "executor_id", "install_generation", "job_id", "task_run_id", "operation_id", "lease_id", "policy_generation", "authorization_id", "authorization_revision", "capability", "action", "resource_id", "resource_revision", "request_sha256", "max_runtime_ms"] as const)

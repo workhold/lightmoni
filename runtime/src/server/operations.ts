@@ -177,6 +177,7 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
   router.get("/api/v1/agents/:id/jobs/:jobId/operations", safe(ctx => {
     options.credentials.authenticate(ctx.req, ctx.params.id, "control");
     const job = options.jobs.get(ctx.params.jobId), lease = ctx.req.headers["x-lightmoni-job-lease"];
+    if (job.execution_principal === "privileged_executor") fail(403,"principal_mismatch");
     if (job.agent_id !== ctx.params.id || !lease || lease !== job.lease_id || !ACTIVE.has(job.state) || Date.parse(job.lease_expires_at) <= deps.now().getTime() || Date.parse(job.expires_at) <= deps.now().getTime()) fail(403, "operations_job_lease_required");
     if (job.actions?.length !== 1 || job.actions[0]?.kind !== "operations") fail(403, "not_an_operations_job");
     if (job.actions[0].domain === "platform") {

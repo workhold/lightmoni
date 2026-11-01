@@ -1,3 +1,4 @@
+import { managedExecutorObservation } from "../server/managed-executor-status.js";
 import type { Dependencies, Handler } from '../shared/types.js';
 import { fail } from '../shared/http.js';
 import { APPLICATION_METRICS, APPLICATION_LOGS, applicationTargets } from '../shared/application-observation.js';
@@ -12,6 +13,8 @@ export function inventory(deps: Dependencies, store: OperationsPlatformStore, ma
   const hosts=machines.map(m=>{
     const agent=m.agent_id?deps.db.get<any>('SELECT heartbeat,last_seen FROM agents WHERE id=?',m.agent_id):undefined;
     let snapshot,collector,activeID='',capabilities:string[]=[];try{const heartbeat=JSON.parse(agent?.heartbeat??'{}');({snapshot,activeID}=dockerObservation(deps.db,m.agent_id??'',heartbeat));collector=heartbeat.collectors_status?.applications;capabilities=['docker.inventory','docker.control'].filter(c=>heartbeat.docker_capabilities?.includes(c));}catch{}
+    const executor=managedExecutorObservation(deps,m.agent_id??'');
+    if(executor) {capabilities=['docker.inventory','docker.control'];collector='ok';const observed=dockerObservation(deps.db,m.agent_id,{docker_inventory:executor.docker_inventory});snapshot=observed.snapshot;activeID=observed.activeID;}
     const online=!!agent&&Number.isFinite(Date.parse(agent.last_seen))&&deps.now().getTime()-Date.parse(agent.last_seen)<=120000;
     const stale=!online||!snapshot||deps.now().getTime()-Date.parse(snapshot.observed_at)>120000;
     const targets=new Map(applicationTargets(deps.db,m.agent_id??'').map(t=>[t.deployment_id,t]));

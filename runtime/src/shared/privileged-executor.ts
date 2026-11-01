@@ -1,3 +1,4 @@
+import { managedExecutionPayload, type ManagedExecutionPayload } from "./managed-execution.js";
 import { createHash, createPrivateKey, createPublicKey, sign, verify, type KeyObject } from "node:crypto";
 
 export const EXECUTOR_PROTOCOL = 1 as const;
@@ -5,7 +6,7 @@ export const EXECUTOR_SIGNATURE_HEADER = "x-lightmoni-executor-signature";
 export const EXECUTOR_JWS_TYPE = "lightmoni-executor-v1";
 export const EXECUTOR_LEASE_SECONDS = 45;
 export const EXECUTOR_PERMIT_SECONDS = 30;
-export const PRIVILEGED_CAPABILITIES = ["script.elevated.v1", "container.managed.v1"] as const;
+export const PRIVILEGED_CAPABILITIES = ["script.elevated.v1", "container.managed.v1", "operations.managed.v1"] as const;
 export type PrivilegedCapability = typeof PRIVILEGED_CAPABILITIES[number];
 export type PrivilegedState = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
 export interface ExecutorAccount { name: string; uid: number; gid: number; groups: number[] }
@@ -20,7 +21,7 @@ export interface ContainerPayload {
   resource_id: string; resource_revision: number; image?: string; platform?: "linux/amd64" | "linux/arm64";
   timeout_ms: number; max_output_bytes: number;
 }
-export type PrivilegedPayload = ScriptPayload | ContainerPayload;
+export type PrivilegedPayload = ScriptPayload | ContainerPayload | ManagedExecutionPayload;
 export interface ExecutorRequestClaims {
   version: 1; purpose: "request"; center_instance_id: string; executor_id: string;
   install_generation: number; method: "POST"; path: string; body_sha256: string;
@@ -163,6 +164,7 @@ export function validateAccount(value: unknown): ExecutorAccount {
 }
 export function normalizePrivilegedPayload(value: unknown): PrivilegedPayload {
   const source = value as any;
+  if(source?.kind==='managed')return managedExecutionPayload(value);
   if (source?.kind === "container") {
     const keys = ["kind", "operation", "resource_id", "resource_revision", "image", "platform", "timeout_ms", "max_output_bytes"];
     const v = strictRecord(value, keys, keys.filter(k => !["image", "platform"].includes(k)));

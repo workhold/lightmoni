@@ -948,7 +948,7 @@ export function registerServiceDeployments(
         agentID: String(machine.agent_id), deploymentID: `preflight:${preflightID}`, operationID,
         actions: [{ kind: "systemd_probe", unit: config.unit, releaseDirectory: config.release_directory, preflightID, targetRevision: revision }],
         capabilities: ["systemd.probe"],
-        target: { config: { unit: config.unit, release_directory: config.release_directory } },
+        target: { config: { unit: config.unit, release_directory: config.release_directory },actor:ctx.user.id,preflight_id:preflightID },
         expiresInSeconds: 10 * 60,
       });
       db.run("UPDATE service_target_preflights SET job_id=? WHERE id=?", String(job.id), preflightID);
