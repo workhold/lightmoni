@@ -188,12 +188,12 @@ async function archive(
     { signal },
   );
 }
-async function dockerPlatform(context: OperationExecutionContext) {
+export async function dockerPlatform(context: OperationExecutionContext) {
   const result = await context.command('docker', ['info','--format','{{.OSType}}/{{.Architecture}}'], {timeoutMs:15000,signal:context.signal});
   const [os, rawArch] = result.stdout.trim().split('/');
   return {os, arch:rawArch === 'aarch64' ? 'arm64' : rawArch === 'x86_64' ? 'amd64' : rawArch};
 }
-async function localDockerImage(image: string, platform: {os:string;arch:string}, context: OperationExecutionContext) {
+export async function localDockerImage(image: string, platform: {os:string;arch:string}, context: OperationExecutionContext) {
   try {
     const result = await context.command('docker',['image','inspect','--format','{{json .}}',image],{timeoutMs:15000,signal:context.signal});
     const local = JSON.parse(result.stdout);

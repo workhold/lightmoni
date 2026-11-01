@@ -1,0 +1,15 @@
+{
+  "environment": "Chrome; production web bundle; loopback real operations API; in-memory SQLite",
+  "production_modified": false,
+  "route": "/image-sources",
+  "checks": [
+    "independent Operations navigation and page heading",
+    "source proxy form has no system Registry installation guide",
+    "source rule save succeeds with fallback off",
+    "private images page contains no source proxy form",
+    "saved rules retained after navigating away and back",
+    "saved rules retained after page reload",
+    "English navigation and page heading displayed"
+  ],
+  "screenshot": "artifacts/screenshots/agent-reinstall-image-sources-075/independent-page.png"
+}

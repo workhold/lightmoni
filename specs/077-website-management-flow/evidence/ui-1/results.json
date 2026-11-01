@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "未发布/全部发布/部分失败与DNS最近回读分开显示",
+    "显式发布确认：取消零请求，确认携带当前版本/集群/confirmed；不触发真实Agent",
+    "真实网站保存后打开配置/发布/解析详情，保存不隐式发布",
+    "入口短表单必填/域名错误位于字段下；并发冲突保留输入；真实PUT只改变所选集群DNS字段",
+    "未知发布结果先检查；DNS错误提供具体下一步",
+    "390px与200%无页面横向溢出；英文/明暗主题/减少动态效果",
+    "出场/入口编辑状态转换的实际180ms CSS时间轴三帧，以及发布按钮按下/释放三帧；默认动效非新增长动画"
+  ],
+  "errors": [],
+  "media": "artifacts/screenshots/specs/077-website-management-flow/evidence/ui-1",
+  "scope": "Real disposable SQLite/API. Health, publication and DNS observation are explicit browser response fixtures; no external DNS or Agent actions."
+}

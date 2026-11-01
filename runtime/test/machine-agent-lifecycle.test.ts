@@ -117,6 +117,16 @@ test("approved recovery removal can purge damaged identity while preserving busi
  assert.equal(f.run(freshAgentGuard).status,0,"approved purge makes the same fixed paths eligible for fresh installation");
 });
 
+test('fresh Agent purge preserves application data stored inside the Agent operations directory',t=>{
+ const f=fixture(t),data=join(f.root,'var/lib/lightmoni-agent/operations/platform/workloads/old/data/0');mkdirSync(data,{recursive:true});writeFileSync(join(data,'database'),'persistent business data');
+ const observed=parseAgentRemovalProbe(f.run(agentRemovalProbeCommand()).stdout);
+ assert.equal(observed.business_data_retained,true);
+ const result=f.run(agentRemovalCommand(observed,true));assert.equal(result.status,0,result.stderr);
+ const after=parseAgentRemovalProbe(result.stdout);assert.equal(after.identity_state,'missing');assert.equal(after.agent_state_present,false);assert.equal(after.business_data_retained,true);
+ assert.equal(readFileSync(join(data,'database'),'utf8'),'persistent business data');assert.equal(existsSync(join(f.root,'var/lib/lightmoni-agent/queue.sqlite')),false);
+ assert.equal(f.run(freshAgentGuard).status,0);
+});
+
 test("approved current release changes are detected even when identity, launcher and unit are unchanged",t=>{
  const f=fixture(t),base=join(f.root,"opt/lightmoni-agent"),releases=join(base,"releases");mkdirSync(releases);
  for(const name of ["one","two"]){mkdirSync(join(releases,name));writeFileSync(join(releases,name,"release.json"),JSON.stringify({version:name}));}

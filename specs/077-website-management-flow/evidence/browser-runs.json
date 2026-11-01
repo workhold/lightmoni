@@ -1,0 +1,69 @@
+{
+  "date": "2026-11-01",
+  "runs": [
+    {
+      "script": "upstream",
+      "run": 1,
+      "groups": 9,
+      "page_errors": 0,
+      "passed": true
+    },
+    {
+      "script": "upstream",
+      "run": 2,
+      "groups": 9,
+      "page_errors": 0,
+      "passed": true
+    },
+    {
+      "script": "upstream",
+      "run": 3,
+      "groups": 9,
+      "page_errors": 0,
+      "passed": true
+    },
+    {
+      "script": "website",
+      "run": 1,
+      "groups": 7,
+      "page_errors": 0,
+      "passed": true
+    },
+    {
+      "script": "website",
+      "run": 2,
+      "groups": 7,
+      "page_errors": 0,
+      "passed": true
+    },
+    {
+      "script": "website",
+      "run": 3,
+      "groups": 7,
+      "page_errors": 0,
+      "passed": true
+    },
+    {
+      "script": "addresses",
+      "run": 1,
+      "groups": 5,
+      "page_errors": 0,
+      "passed": true
+    },
+    {
+      "script": "addresses",
+      "run": 2,
+      "groups": 5,
+      "page_errors": 0,
+      "passed": true
+    },
+    {
+      "script": "addresses",
+      "run": 3,
+      "groups": 5,
+      "page_errors": 0,
+      "passed": true
+    }
+  ],
+  "scope": "Loopback SQLite/HTTP fixtures only. Network address and website production settings were not changed."
+}

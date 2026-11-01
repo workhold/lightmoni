@@ -1,5 +1,6 @@
 import {workloadContainersReady as ready} from './workload-readiness.js';
-import {cachePolicy,prepareCachedImages} from './image-cache.js';
+import {cachePolicy} from './image-cache.js';
+import {imageSourcePolicy,preparePlatformImages} from './image-sources.js';
 import {
   lstat,
   readFile,
@@ -51,6 +52,7 @@ const INSTANCE_LABEL = "io.lightmoni.platform.instance";
 const OWNER_LABEL = "io.lightmoni.platform.owner";
 const TASKS = [
   "node.inspect",
+  "instance.recovery.inspect",
   "workload.apply",
   "workload.inspect",
   "workload.stop",
@@ -369,7 +371,9 @@ export const platformDefinition: OperationDefinition = {
     const c = object(v, "platform_config");
     if (!TASKS.includes(c.task)) reject("INVALID_PLATFORM_TASK");
     if (c.instance_id !== undefined) safeID(c.instance_id);
-    if (c.task === "workload.apply") {normalizeApplication(c.application);if(c.image_cache)cachePolicy(c.image_cache);}
+    if (c.task === "workload.apply") normalizeApplication(c.application);
+    if (['workload.apply','gateway.apply'].includes(c.task)) {if(c.image_cache)cachePolicy(c.image_cache);if(c.image_sources)imageSourcePolicy(c.image_sources);}
+    if(c.task==='instance.recovery.inspect')safeID(c.instance_id);
     return structuredClone(c);
   },
   publicConfig(c) {
@@ -737,7 +741,7 @@ async function executeWorkload(
       app,
       payload.resource.revision,
     );
-  const imageSources=c.image_cache?await prepareCachedImages(manifest,c.image_cache,root,context):[];
+  const imageSources=await preparePlatformImages(manifest,c,root,context);
   const digest = hash(JSON.stringify(manifest)),
     version = join(root, "versions", digest);
   await directory(version);
@@ -1393,20 +1397,23 @@ async function executeGateway(
         context.signal,
       );
   }
-  const image = text(
+  const sourceImage = text(
       c.image ?? "openresty/openresty:1.27.1.2-0-alpine",
       "image",
       512,
     ),
     digest = hash(
       JSON.stringify({
-        image,
+        image:sourceImage,
         sites: c.sites ?? [],
         http_port: c.http_port ?? 80,
         https_port: c.https_port ?? 443,
       }),
     ),
     version = join(root, "versions", digest);
+  const imageManifest={services:{gateway:{image:sourceImage}}};
+  const imageSources=await preparePlatformImages(imageManifest,c,root,context);
+  const image=imageManifest.services.gateway.image;
   await directory(version);
   for (const path of [
     root,
@@ -1475,6 +1482,7 @@ async function executeGateway(
       [
         "run",
         "--rm",
+        ...(/^sha256:[a-f0-9]{64}$/.test(image)?['--pull','never']:[]),
         "--network",
         "host",
         "--mount",
@@ -1497,7 +1505,7 @@ async function executeGateway(
   let recreated = false;
   await context.progress?.("starting_gateway");
   try {
-    if (existing && existing.Config.Image !== image) {
+    if (existing && existing.Config.Image !== image && existing.Image !== image) {
       await context.command("docker", ["rm", "--force", name], {
         timeoutMs: 30000,
       });
@@ -1509,6 +1517,7 @@ async function executeGateway(
         [
           "run",
           "--detach",
+          ...(/^sha256:[a-f0-9]{64}$/.test(image)?['--pull','never']:[]),
           "--name",
           name,
           "--network",
@@ -1576,6 +1585,7 @@ async function executeGateway(
         healthy: true,
         running: true,
         network_mode: "host",
+        image_sources:imageSources,
         websites: (c.sites ?? []).map((s: any) => ({
           id: s.id,
           domains: s.domains,
@@ -1652,6 +1662,17 @@ export async function executePlatform(
 ): Promise<OperationExecutionResult> {
   const c = platformDefinition.validate(payload.resource.config);
   payload = { ...payload, resource: { ...payload.resource, config: c } };
+  if(c.task==='instance.recovery.inspect') {
+    // Check all supported ownership selectors, including stopped containers and legacy gateway names.
+    const ids=new Set<string>();
+    for(const filter of ['label='+INSTANCE_LABEL+'='+c.instance_id,'label=com.docker.compose.project=lm-'+c.instance_id,'name=^lm-gateway-'+c.instance_id+'$']) {
+      const result=await context.command('docker',['ps','-aq','--filter',filter],{timeoutMs:15000,signal:context.signal});
+      const found=result.stdout.trim().split(/\s+/).filter(Boolean);
+      if(found.length>100||found.some(id=>!/^[a-f0-9]{12,64}$/.test(id)))reject('INVALID_DOCKER_INVENTORY');
+      found.forEach(id=>ids.add(id));
+    }
+    return {verified:true,data:{instance_id:c.instance_id,absent:ids.size===0,container_count:ids.size,observed_at:context.now().toISOString()}};
+  }
   if (c.task === "node.inspect") {
     const addresses = Object.values(networkInterfaces()).flatMap((entries) =>
       (entries ?? [])

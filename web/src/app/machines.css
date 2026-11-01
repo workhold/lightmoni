@@ -34,3 +34,14 @@
 .lm-agent-update-dialog .ant-modal-container,.lm-agent-rollout-dialog .ant-modal-container{display:flex;flex-direction:column;max-height:calc(100dvh - 48px)}
 .lm-agent-update-dialog .ant-modal-header,.lm-agent-update-dialog .ant-modal-footer,.lm-agent-rollout-dialog .ant-modal-header,.lm-agent-rollout-dialog .ant-modal-footer{flex-shrink:0}
 .lm-agent-update-dialog .ant-modal-body,.lm-agent-rollout-dialog .ant-modal-body{min-height:0;overflow-y:auto;overflow-x:hidden;overflow-wrap:anywhere;padding-right:4px}
+.lm-machine-address-dialog .ant-modal-body{overflow-wrap:anywhere;overscroll-behavior:contain}.lm-machine-address-dialog .lm-ops-modal-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}.lm-machine-address-dialog .lm-ops-note{color:var(--lm-muted);font-size:13px;line-height:1.7}
+.lm-machine-address-section{padding:20px 0;border-top:1px solid var(--lm-border);animation:lm-machine-address-enter .18s ease-out}.lm-machine-address-section h3{margin:0 0 12px;font-size:16px}.lm-machine-address-effective{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px}.lm-machine-address-effective strong{overflow-wrap:anywhere;min-width:0}
+.lm-machine-address-candidates{font-size:13px;margin:16px 0}.lm-machine-address-candidates>span{color:var(--lm-muted)}.lm-machine-address-candidates>div{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--lm-border)}.lm-machine-address-candidates>div>div{min-width:0}.lm-machine-address-candidates small{display:block;color:var(--lm-muted);font-size:12px;margin-top:4px}.lm-machine-address-candidates .ant-btn{flex-shrink:0}
+.lm-host-service-addresses{display:flex;flex-wrap:wrap;gap:4px 12px;margin-bottom:6px}.lm-host-service-addresses>span{overflow-wrap:anywhere}
+.lm-machine-address-dialog .ant-btn-primary:active{transform:scale(.98);transition:transform 80ms ease-out}.lm-machine-address-dialog .ant-alert{margin-bottom:16px}
+@keyframes lm-machine-address-enter{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.lm-machine-address-section{animation:none}.lm-machine-address-dialog .ant-btn-primary:active{transform:none;transition:none}}
+
+.lm-machine-manual-address{animation:lm-machine-address-enter .18s ease-out}@media(prefers-reduced-motion:reduce){.lm-machine-manual-address{animation:none}}
+.lm-machine-address-dialog.ant-modal{max-width:calc(100% - 32px);height:calc(100% - 48px);max-height:calc(100% - 48px);padding-bottom:0}
+.lm-machine-address-dialog .ant-modal-container{display:flex;flex-direction:column;max-height:100%}.lm-machine-address-dialog .ant-modal-header,.lm-machine-address-dialog .ant-modal-footer{flex-shrink:0}.lm-machine-address-dialog .ant-modal-body{min-height:0;flex:1 1 auto;overflow-x:hidden}

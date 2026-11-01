@@ -73,6 +73,17 @@ lm_assert_no_operations() {
     fi
   done
 }
+lm_purge_agent_state() {
+  lm_assert_paths
+  lm_assert_no_operations
+  rm -rf /etc/lightmoni-agent
+  if [ -d /var/lib/lightmoni-agent ]; then
+    # Operations contain persistent application data and configuration, not Agent identity.
+    find /var/lib/lightmoni-agent -mindepth 1 -maxdepth 1 ! -name operations -exec rm -rf -- {} +
+    if [ -d /var/lib/lightmoni-agent/operations ]; then rmdir /var/lib/lightmoni-agent/operations 2>/dev/null || :; fi
+    rmdir /var/lib/lightmoni-agent 2>/dev/null || :
+  fi
+}
 # END SHARED MAINTENANCE GUARDS
 if [ -e /etc/lightmoni-executor ] || [ -L /etc/lightmoni-executor ] || [ -e /opt/lightmoni-executor ] || [ -L /opt/lightmoni-executor ]; then
   lm_refuse 'Remove the privileged executor before removing the ordinary Agent'
@@ -109,8 +120,8 @@ systemctl daemon-reload
 load_state=$(systemctl show lightmoni-agent.service --property=LoadState --value)
 [ "$load_state" = not-found ] || { echo 'Agent unit still exists; inspect locally.' >&2; exit 1; }
 if [ "$purge" = "true" ]; then
-  rm -rf /etc/lightmoni-agent /var/lib/lightmoni-agent
-  echo 'LightMoni Agent removed; configuration and accepted cached telemetry deleted by explicit --purge.'
+  lm_purge_agent_state
+  echo 'LightMoni Agent removed; identity, configuration and cached telemetry deleted by explicit --purge; application operations and persistent data retained.'
 else
   echo 'LightMoni Agent removed; configuration, identity and cached telemetry retained.'
 fi

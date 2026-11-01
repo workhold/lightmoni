@@ -6,6 +6,7 @@ export const installPhases: Record<string, string> = {
   activating: 'Applying the approved configuration',
   checking_docker: 'Checking Docker availability',
   checking_ports: 'Checking host port availability',
+  preparing_images: 'Preparing images through the configured source',
   validating_config: 'Validating Docker Compose configuration',
   starting_containers: 'Pulling images and starting containers',
   checking_health: 'Checking container health and service readiness',
@@ -38,6 +39,7 @@ export const installCauses: Record<string, string> = {
   image_not_found: 'The image or tag could not be found in the registry.',
   image_access_denied: 'The registry denied access to the image.',
   image_network_failed: 'The registry could not be reached or the image transfer timed out.',
+  image_proxy_failed: 'The configured image proxy failed; origin fallback is disabled.',
   host_port_occupied: 'A required host port is already occupied.',
   host_port_check_failed: 'The host port could not be checked; inspect the Agent permissions and bind address.',
   disk_full: 'The host has insufficient disk space.',
@@ -60,7 +62,7 @@ export function commandDiagnostic(stderr: string, docker: boolean): string {
   if (/address already in use|port is already allocated|ports are not available/i.test(stderr)) return 'host_port_occupied';
   if (/manifest unknown|manifest.*not found|no matching manifest|not found: manifest|not found.*manifest/i.test(stderr)) return 'image_not_found';
   if (/pull access denied|unauthorized|authentication required|denied: requested access/i.test(stderr)) return 'image_access_denied';
-  if (/i\/o timeout|tls handshake timeout|context deadline exceeded|no such host|network is unreachable|connection refused|failed to resolve/i.test(stderr)) return 'image_network_failed';
+  if (/i\/o timeout|tls handshake timeout|context deadline exceeded|no such host|network is unreachable|connection refused|failed to resolve|Client.Timeout|awaiting headers|net\/http: request canceled/i.test(stderr)) return 'image_network_failed';
   if (/unhealthy|dependency failed to start/i.test(stderr)) return 'container_unhealthy';
   if (/compose.*not a docker command|unknown command.*compose/i.test(stderr)) return 'compose_unavailable';
   return 'operation_command_failed';

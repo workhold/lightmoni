@@ -7,6 +7,7 @@ import type { MachineSummary, SSHCheckResult } from "./managed-machines.js";
 import type { SSHRunner } from "./machine-ssh.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
+import {createAgentLifecycleSchema} from './agent-lifecycle.js';
 export type UninstallationStatus = "awaiting_approval" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
 interface Access {
   get(id: string): MachineSummary; idle(id: string): void; revision(machine: MachineSummary): string;
@@ -17,6 +18,7 @@ interface Access {
   busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
 }
 export function createUninstallationSchema(deps: Dependencies) {
+  createAgentLifecycleSchema(deps.db);
   deps.db.exec(`CREATE TABLE IF NOT EXISTS machine_uninstallations(
     id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES managed_machines(id) ON DELETE CASCADE,
     agent_id TEXT NOT NULL,credential_id TEXT NOT NULL,status TEXT NOT NULL,plan_json TEXT NOT NULL,
@@ -89,7 +91,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     if(legacy && (expectedState!=="unknown" || observed.identity_state!=="valid" || observed.agent_id!==operation.agent_id || !observed.config_present || !observed.data_present)) fail(409,"旧卸载记录需核对原身份、完整移除及保留目录，结果保持未知");
     const before=(plan.observation || observed) as AgentRemovalObservation;
     if (observed.installation!=="absent" || observed.service_running || !observed.unit_managed || !observed.paths_safe || observed.lifecycle_locked || observed.operation_lock) fail(409,"尚未确认 Agent 服务和固定程序已安全移除");
-    if (plan.purge ? observed.config_present || observed.data_present || observed.identity_state!=="missing" : observed.config_present!==before.config_present || observed.data_present!==before.data_present || observed.identity_state!==before.identity_state || observed.identity_sha256!==before.identity_sha256 || observed.agent_id!==before.agent_id) fail(409,"Agent 数据保留或清除策略尚未核实");
+    if (plan.purge ? observed.config_present || (observed.agent_state_present??observed.data_present) || observed.identity_state!=="missing" : observed.config_present!==before.config_present || observed.data_present!==before.data_present || observed.identity_state!==before.identity_state || observed.identity_sha256!==before.identity_sha256 || observed.agent_id!==before.agent_id) fail(409,"Agent 数据保留或清除策略尚未核实");
     db.transaction(()=>{
       const current=row(machine.id,operation.id); if(current.status!==expectedState) fail(409,"卸载记录状态已变化，请刷新");
       const live=db.get<MachineSummary>("SELECT * FROM managed_machines WHERE id=?",machine.id);
@@ -98,7 +100,11 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
       const scope=revocationScope(live,before), approved=plan.credential_revocation_scope;
       const eligible=scope.eligible && (legacy || approved?.eligible && scope.agent_id===approved.agent_id);
       const revoked=eligible && table("agent_credentials")?db.run("UPDATE agent_credentials SET revoked_at=?,revoke_reason=? WHERE agent_id=? AND audience IN ('control','data') AND revoked_at IS NULL",at(),"Agent uninstalled through managed host",scope.agent_id).changes:0;
-      const receipt={mode:plan.mode||"standard",purge:!!plan.purge,agent_id:before.agent_id,remote_removed:true,data_removed:!!plan.purge,data_retained:!plan.purge,credentials_revoked:!!eligible,revoked_credentials:revoked,credential_revocation_scope:eligible?scope:{...scope,eligible:false,agent_id:"",audiences:[],reason:scope.eligible?"可撤销范围未纳入原审批，不撤销任何平台身份":scope.reason},legacy_evidence:legacy,approved_snapshot_available:!legacy,verified_at:at(),stages:["ssh_target_verified",legacy?"legacy_identity_verified":"approved_evidence_verified","service_stopped","program_removed",plan.purge?"data_removed":"retained_data_verified",eligible?"owned_credentials_revoked":"credential_revocation_skipped"]};
+      if(eligible) {
+        db.run("INSERT INTO agent_lifecycle VALUES(?,'removed',?,?,?) ON CONFLICT(agent_id) DO UPDATE SET state='removed',removed_at=excluded.removed_at,removed_by=excluded.removed_by,removal_reason=excluded.removal_reason",scope.agent_id,at(),operation.created_by,'Managed Agent uninstallation verified');
+        db.run('INSERT INTO agent_lifecycle_events VALUES(?,?,?,?,?,?,?)',id(),scope.agent_id,'removed',operation.created_by,at(),'Managed Agent uninstallation verified',revoked);
+      }
+      const receipt={mode:plan.mode||"standard",purge:!!plan.purge,agent_id:before.agent_id,remote_removed:true,data_removed:!!plan.purge,data_retained:!plan.purge,business_data_retained:observed.business_data_retained===true,identity_retired:!!eligible,credentials_revoked:!!eligible,revoked_credentials:revoked,credential_revocation_scope:eligible?scope:{...scope,eligible:false,agent_id:"",audiences:[],reason:scope.eligible?"可撤销范围未纳入原审批，不撤销任何平台身份":scope.reason},legacy_evidence:legacy,approved_snapshot_available:!legacy,verified_at:at(),stages:["ssh_target_verified",legacy?"legacy_identity_verified":"approved_evidence_verified","service_stopped","program_removed",plan.purge?"data_removed":"retained_data_verified",eligible?"owned_credentials_revoked":"credential_revocation_skipped"]};
       const changed=db.run("UPDATE machine_uninstallations SET status='succeeded',finished_at=?,receipt_json=?,error='' WHERE id=? AND status=?",at(),JSON.stringify(receipt),operation.id,expectedState); if(!changed.changes) fail(409,"卸载记录状态已变化");
       // An SSH observation never creates or replaces a platform Agent binding.
       db.run("UPDATE managed_machines SET agent_last_seen='',last_error='',updated_at=? WHERE id=?",at(),machine.id);
@@ -121,7 +127,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
       const current=access.get(machine.id);access.credential(machine.id,credential.id);access.checked(current,input.check_id,credential.id);assertFree(machine.id);
       if(access.revision(current)!==access.revision(machine)||current.agent_id!==machine.agent_id||current.name!==machine.name)fail(409,"主机在检查期间变化，请重新计划");
       const operationID=id(),plan={mode,reason:reason.trim(),purge,machine:{id:machine.id,name:machine.name,address:machine.address,port:machine.port,username:machine.username,agent_id:machine.agent_id},agent_id:observed.agent_id,observation:observed,credential_revocation_scope:revocationScope(current,observed),credential:{id:credential.id,method:credential.method,retention:credential.retention,expires_at:credential.expires_at},check_id:check.id,target_revision:access.revision(machine),expires_at:check.expires_at,
-        steps:["核对固定 SSH 目标和已审阅的远端证据","停止并禁用受管 Agent 服务","复验任务标记后移除固定程序",purge?"明确清除 Agent 配置、身份和缓存":"保留 Agent 配置、身份和缓存","核验结果并仅撤销确属本主机的凭据"],retained_paths:purge?[]:retainedAgentPaths,removed_paths:purge?[...removedAgentPaths,...retainedAgentPaths]:removedAgentPaths,warnings:["不会删除业务数据、系统账户或平台主机记录。",purge?"Agent 配置、身份及缓存将清除；完成后可进行全新接入。":"保留数据会继续触发 fresh 保护，重新接入前需明确清除。","派发后中断进入未知结果，仅可只读核对，不自动重放。"]};
+        steps:["核对固定 SSH 目标和已审阅的远端证据","停止并禁用受管 Agent 服务","复验任务标记后移除固定程序",purge?"明确清除 Agent 配置、身份和缓存":"保留 Agent 配置、身份和缓存","核验结果并仅撤销确属本主机的凭据"],retained_paths:purge?["/var/lib/lightmoni-agent/operations"]:retainedAgentPaths,removed_paths:purge?[...removedAgentPaths,"/etc/lightmoni-agent","/var/lib/lightmoni-agent/identity.json"]:removedAgentPaths,warnings:["不会删除业务数据、系统账户或平台主机记录。",purge?"Agent 配置、身份及缓存将清除；应用运行目录和持久数据保留，完成后可全新接入。":"保留数据会继续触发 fresh 保护，重新接入前需明确清除。","派发后中断进入未知结果，仅可只读核对，不自动重放。"]};
       db.transaction(()=>{assertFree(machine.id);relation(current,observed.agent_id,mode);db.run("INSERT INTO machine_uninstallations(id,machine_id,agent_id,credential_id,status,plan_json,created_at,created_by) VALUES(?,?,?,?,? ,?,?,?)",operationID,machine.id,observed.agent_id,credential.id,"awaiting_approval",JSON.stringify(plan),at(),ctx.user.id);});
       ctx.json({...decode(row(machine.id,operationID)),review_url:`/machines?machine=${machine.id}&uninstallation=${operationID}`},201);
     }finally{access.busy.delete(machine.id);}

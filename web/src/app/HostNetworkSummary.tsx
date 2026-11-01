@@ -2,9 +2,10 @@ import {Collapse,Table,Tag,Tooltip,Typography} from '../shared/ui';
 import {useI18n} from '../shared/i18n';
 import {classifyNetworkAddresses,interfaceRole,ipAddressCategory,sshAddressCategory} from './host-network-view';
 import './connection-credentials.css';
+import type {MachineServiceAddressSettings} from './machine-service-addresses';
 
 export type HostNetworkAddress={interface:string;address:string;family:'IPv4'|'IPv6';scope:'private'|'public'|'link_local'|'loopback'};
-export type HostNetwork={hostname:string;addresses:HostNetworkAddress[];private_ips:string[];public_ips:string[];observed_at:string;observed_via:'ssh'|'agent'|'unavailable';source_ip:string;source_observed_at:string;source_kind:'direct'|'trusted_proxy'|'unavailable'};
+export type HostNetwork={hostname:string;addresses:HostNetworkAddress[];private_ips:string[];public_ips:string[];observed_at:string;observed_via:'ssh'|'agent'|'unavailable';source_ip:string;source_observed_at:string;source_kind:'direct'|'trusted_proxy'|'unavailable';service_addresses?:MachineServiceAddressSettings};
 export function SSHAddressCategoryTag({address}:{address?:string}){
  const {t}=useI18n(),category=sshAddressCategory(address||'');
  const labels={public:t('公网范围入口','Public-range entry'),private:t('内网入口','Private entry'),shared:t('共享地址入口','Shared-address entry'),hostname:t('域名入口','Hostname entry'),loopback:t('回环入口','Loopback entry'),link_local:t('链路本地入口','Link-local entry'),special:t('特殊范围入口','Special-range entry'),invalid:t('地址待核对','Address needs verification'),unconfigured:t('入口未配置','Entry not configured')};
@@ -31,6 +32,7 @@ export default function HostNetworkSummary({network,details=false,showSource=tru
  const privateAddresses=groups.privateAddresses.filter(entry=>ipAddressCategory(entry.address)==='private'),sharedAddresses=groups.privateAddresses.filter(entry=>ipAddressCategory(entry.address)==='shared');
  const primaryCount=groups.privateAddresses.length+groups.publicAddresses.length+groups.tunnelAddresses.length;
  return <div className="lm-host-addresses">
+  {network?.service_addresses&&<div className="lm-host-service-addresses">{(['private','public'] as const).map(scope=>{const choice=network.service_addresses![scope];return <Typography.Text key={scope} type="secondary">{scope==='private'?t('内网服务 IP','Private service IP'):t('公网服务 IP','Public service IP')}：{choice.effective||t('未配置可用地址','No usable address')}{choice.mode==='manual'?' · '+t('手动','Manual'):''}{choice.needs_confirmation?' · '+t('目标变化，待确认','Target changed; confirm again'):''}</Typography.Text>})}</div>}
   {network?.hostname&&<Typography.Text type="secondary">{t('系统主机名','System hostname')}：{network.hostname}</Typography.Text>}
   {addresses(t('内网 IP','Private IP'),privateAddresses)}
   {addresses(t('共享地址 IP','Shared-address IP'),sharedAddresses)}
@@ -42,7 +44,7 @@ export default function HostNetworkSummary({network,details=false,showSource=tru
   {details&&<>
    {showSource&&source&&!publicSource&&<Tooltip title={sourceHint}><Typography.Text type="secondary">{sourceLabels[sourceCategory]}：{source}</Typography.Text></Tooltip>}
    {showSource&&source&&<Typography.Text type="secondary">{t('平台来源观测时间','Source address observed at')}：{time(network?.source_observed_at)} · {network?.source_kind==='trusted_proxy'?t('可信代理','Trusted proxy'):t('TCP 对端（可能含代理）','TCP peer (may be a proxy)')}</Typography.Text>}
-   {showSource&&<Typography.Text type="secondary">{t('公网服务入口（NAT/映射）：待确认；公网/内网出口：待确认','Public service entry (NAT/mapping): unconfirmed; Public/private egress: unconfirmed')}</Typography.Text>}
+   {showSource&&<Typography.Text type="secondary">{t('网卡地址与到平台的来源不代表 NAT 入站映射；服务地址可独立指定。','Interface addresses and platform connection sources do not establish NAT ingress mappings. Service addresses can be specified separately.')}</Typography.Text>}
    <Typography.Text type="secondary">{t('接口类型仅根据名称分类，未探测系统设备类型。','Interface roles are inferred from names; OS device types were not inspected.')}</Typography.Text>
    {!!groups.otherAddresses.length&&<Collapse ghost className="lm-network-collapse" items={[{key:'other',label:t('其他地址（容器、回环及特殊范围）','Other addresses (container, local, and special ranges)')+` · ${groups.otherAddresses.length}`,children:addressTable(groups.otherAddresses)}]}/>}
    <Collapse ghost className="lm-network-collapse" items={[{key:'raw',label:t('全部原始网卡地址','All raw interface addresses')+` · ${raw.length}`,children:<>{!!network?.observed_at&&<Typography.Paragraph type="secondary">{observedVia} · {time(network.observed_at)}</Typography.Paragraph>}{addressTable(raw)}</>}]}/>

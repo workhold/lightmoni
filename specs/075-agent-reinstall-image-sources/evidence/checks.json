@@ -1,0 +1,21 @@
+{
+  "runtime_related": {
+    "tests": 116,
+    "pass": 116,
+    "fail": 0
+  },
+  "maintenance_shell": {
+    "tests": 47,
+    "pass": 47,
+    "fail": 0
+  },
+  "runtime_typecheck": "passed",
+  "runtime_build": "passed",
+  "web_typecheck": "passed",
+  "web_production_build": "passed",
+  "diff_check": "passed",
+  "docker_live_checks": 6,
+  "browser_checks": 7,
+  "production_feature_deployed": false,
+  "scope": "targeted related regressions, disposable Docker-in-Docker, loopback browser QA; no production update"
+}

@@ -2,7 +2,7 @@ import { registerMachineDocker } from './machine-docker.js';
 import { machineDockerEnvironment, type DockerEnvironment } from './docker-environment.js';
 import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { connectionCredentials } from "./connection-credentials.js";
-import { createHostNetworkSchema, machineNetwork, recordSSHHostNetwork, type MachineNetwork } from "./host-network.js";
+import { createHostNetworkSchema, machineNetwork, machineServiceAddressSettings, saveMachineServiceAddresses, recordSSHHostNetwork, type MachineNetwork } from "./host-network.js";
 import { recordMachineHostKey } from "./machine-host-keys.js";
 import { agentBootstrapCommand } from "./machine-agent-lifecycle.js";
 import { machineCredentialCurrent, machineCredentialCurrentSQL } from "./machine-credential-policy.js";
@@ -395,7 +395,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (pendingInstall) for (const current of [uninstallCapability,deployCapability,updateCapability]) { current.available=false; if(current.reason!=="host_busy")current.reason=pendingInstall.status==="unknown"?"installation_unknown":"installation_pending"; }
     return {
       id: value.id, name: value.name, default_credential_id: value.default_credential_id || "", observed_hostname: currentAgentHostname(db, value.id, value.agent_id),
-      network: machineNetwork(db,value.id),
+      network: {...machineNetwork(db,value.id),service_addresses:machineServiceAddressSettings(db,value.id)},
       docker_environment: machineDockerEnvironment(db,value.agent_id,now()),
       ...hostLabels(value.id),
       address: value.address, port: Number(value.port), username: value.username,
@@ -847,6 +847,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   router.post("/api/v1/machines", safe(createMachine));
   router.get("/api/v1/machines/:id", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); ctx.json({ machine: get(ctx.params.id), credentials: credentialRows(ctx.params.id), deployments: deployments(ctx.params.id), uninstallations: uninstallations.list(ctx.params.id), agent_updates: agentUpdates.list(ctx.params.id) }); }));
   router.put("/api/v1/machines/:id", safe(updateMachine));
+  router.get("/api/v1/machines/:id/service-addresses",safe(ctx=>{admin(ctx);ensureMachine(ctx.params.id);ctx.json(machineServiceAddressSettings(db,ctx.params.id));}));
+  router.put("/api/v1/machines/:id/service-addresses",safe(async ctx=>{admin(ctx);ensureMachine(ctx.params.id);const input=await machineBody(ctx);admin(ctx);ctx.json(saveMachineServiceAddresses(db,ctx.params.id,input,ctx.user.id,iso(now())));}));
   router.delete("/api/v1/machines/:id", safe((ctx) => {
     admin(ctx); ensureDeletable(ctx.params.id);
     db.transaction(() => {
