@@ -1,0 +1,13 @@
+{
+  "checks": [
+    "内网网卡自动选择；NAT公网SSH候选仅供确认；代理与容器内网不混入",
+    "采用候选不隐式保存；内外网范围错误定位字段；冲突保留输入；真实SQLite/API保存并回读来源/操作者",
+    "内外网独立恢复自动，不改写原始网卡；390px/200%可操作且无页面溢出",
+    "表单出场与采用候选180ms原生CSS时间轴三帧，保存按钮按下/释放反馈三帧",
+    "英文/浅色主题与减少动态效果"
+  ],
+  "errors": [],
+  "writes": 4,
+  "media": "artifacts/screenshots/specs/078-machine-service-addresses/evidence/ui-3",
+  "scope": "Real disposable SQLite/HTTP host APIs. Only conflict response injected; no SSH, production hosts or external DNS writes."
+}

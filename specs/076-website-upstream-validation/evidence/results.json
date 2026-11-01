@@ -13,5 +13,5 @@
   "errors": [],
   "saves": 8,
   "media": "artifacts/screenshots/specs/076-website-upstream-validation/evidence",
-  "scope": "Production web build, real disposable SQLite/API; server error translation uses injected 400 responses. No Agent execution or production update."
+  "scope": "Current web app, real disposable SQLite/API; server error translation uses injected 400 responses. No Agent execution or production update."
 }

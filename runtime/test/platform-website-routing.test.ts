@@ -1,4 +1,4 @@
-import {createHostNetworkSchema,recordHostNetwork} from "../src/server/host-network.js";
+import {createHostNetworkSchema,recordHostNetwork,saveMachineServiceAddresses} from "../src/server/host-network.js";
 import {normalizeNetworkAddresses} from "../src/shared/host-network.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -1093,6 +1093,27 @@ function dnsZone(f: any) {
     "admin",
   );
 }
+
+test("NAT hosts require confirmed public service addresses for entry DNS while internal endpoints stay private",async t=>{
+ const dns=dnsMock(),f=await fixture(t,dns.fetcher),c=f.createCluster(['ma']),zone=dnsZone(f);
+ recordHostNetwork(f.db,'ma','a',normalizeNetworkAddresses([{interface:'eth0',address:'10.0.0.1'}]),{source_ip:'172.24.0.1',source_kind:'direct'},'2026-10-29T02:00:01Z');
+ const entry=f.store.create('application','NAT entry',catalogInstallation('openresty',{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:1,gateway_domain:'nat.edge.example.test',gateway_dns_zone_id:zone.id}]}).spec,'admin');
+ await f.action(entry,'deploy');f.finish('a',{healthy:true,running:true,digest:'nat'});
+ const site=f.store.create('website','NAT site',{mode:'proxy',cluster_ids:[c.id],dns_record_mode:'cname',bindings:[{domains:['nat.example.test'],dns_enabled:true,dns_zone_id:zone.id,locations:[{path:'/',action:'return',return_status:200,return_value:'ready'}]}]},'admin');
+ await f.action(site,'deploy');f.finish('a',{healthy:true,running:true,digest:'nat-site'});
+ await f.platform.tick();await settle();
+ assert.equal(f.store.get(entry.id).status.gateway_dns[c.id].state,'public_ip_required');
+ assert.deepEqual(f.store.get(entry.id).status.gateway_dns[c.id].missing_public_machine_ids,['ma']);
+ assert.equal(f.store.get(site.id).status.cluster_traffic[c.id].error,'machine_public_service_address_required');
+ assert.ok(!dns.records.some(r=>r.RR==='nat.edge'||r.RR==='nat'));
+ saveMachineServiceAddresses(f.db,'ma',{revision:0,target_generation:0,private:{mode:'auto',address:''},public:{mode:'manual',address:'8.8.4.4'}},'admin','2026-10-29T02:00:02Z');
+ await f.platform.tick();await settle();
+ assert.ok(dns.records.some(r=>r.RR==='nat.edge'&&r.Type==='A'&&r.Value==='8.8.4.4'));
+ assert.ok(dns.records.some(r=>r.RR==='nat'&&r.Type==='CNAME'&&r.Value==='nat.edge.example.test'));
+ const endpoints=await f.req('/resources/'+entry.id+'/endpoints?cluster_id='+c.id);
+ assert.equal(endpoints.status,200);assert.equal(endpoints.body.endpoints.find((p:any)=>p.port_name==='http').ip,'10.0.0.1');
+ assert.ok(!dns.records.some(r=>['10.0.0.1','172.24.0.1'].includes(r.Value)));
+});
 
 test("weighted CNAME defaults/provinces, immediate policies, health fallback and entry DNS", async (t) => {
   const dns = dnsMock(),

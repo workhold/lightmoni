@@ -47,7 +47,7 @@ async function shot(name) {
 try {
   const user = await context.request.get(base + '/api/v1/auth/me');
   expect((await user.json()).id).toBe('qa-admin');
-  if ((await json('/overview')).resources.length) throw Error('Use a clean disposable fixture');
+  if ((await json('/overview')).resources.some(r=>r.kind==='application'&&r.spec.role==='openresty')) throw Error('Use a clean disposable fixture');
   const suffix = Date.now().toString(36);
   const clusters = [
     await seed('cluster', '上游验证一-' + suffix, { machine_ids: [], nodes: [] }),
@@ -138,8 +138,9 @@ try {
   expect(savedTargets[0].upstreams[0]).toMatchObject({ weight: 1, max_fails: 3, fail_timeout_seconds: 5 });
   checks.push('纠正协议后真实SQLite/API创建成功，IPv6/根斜杠规范化、权重/失败参数回读正确');
   const edit = async () => {
-    await page.getByRole('row').filter({ has: page.getByRole('button', { name: siteName, exact: true }) })
-      .getByRole('button', { name: /^编\s*辑$/ }).click();
+    const detail=page.locator('.ant-drawer:visible');
+    if(await detail.count())await detail.last().locator('.ant-drawer-close').click();
+    await page.getByRole('article',{name:siteName,exact:true}).getByRole('button',{name:'编辑配置',exact:true}).click();
   };
   await edit();
   await url(0).fill('127.0.0.1:5000');
@@ -206,7 +207,7 @@ try {
   await shot('missing-scheme-390');
   checks.push('英文提示、390px无页面横向溢出且保存按钮可见');
   expect(errors).toEqual([]);
-  const results = { checks, errors, saves, media: relative(root, media), scope: 'Production web build, real disposable SQLite/API; server error translation uses injected 400 responses. No Agent execution or production update.' };
+  const results = { checks, errors, saves, media: relative(root, media), scope: 'Current web app, real disposable SQLite/API; server error translation uses injected 400 responses. No Agent execution or production update.' };
   await writeFile(resolve(out, 'results.json'), JSON.stringify(results, null, 2) + '\n');
   console.log(JSON.stringify(results));
 } catch (error) {
@@ -214,11 +215,11 @@ try {
   await writeFile(resolve(out, 'failure.txt'), await page.locator('body').innerText());
   throw error;
 } finally {
-  await browser.close();
   for (const id of created.reverse()) {
     try {
       const { resource } = await json('/resources/' + id);
       await json('/resources/' + id, { method: 'DELETE', data: { revision: resource.revision } });
     } catch {}
   }
+  await browser.close();
 }
