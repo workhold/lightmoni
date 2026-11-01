@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync,randomUUID } from "node:crypto";
 import { ExecutorJournal } from "../src/privileged-executor/journal.js";
 import { ExecutorClient } from "../src/privileged-executor/client.js";
 import { PrivilegedExecutorRunner, type RunnerHost } from "../src/privileged-executor/runner.js";
@@ -48,7 +48,7 @@ function fixture() {
   let client = new ExecutorClient(config, journal, transport, () => wall, clock);
   const host: RunnerHost = { scripts: { interpreter: () => "/trusted/sh", account: () => account, async run(_unit, _interpreter, _payload, signal, guard) { mono += delayStart; guard!.assert(); runCalls++; assert.equal(journal.get("job")?.state, "running"); if (runAdvance) { mono += runAdvance; await new Promise(r => setTimeout(r, 300)); assert.equal(signal.aborted, true); return { state: "failed", code: "cancel_requested", summary: "Proven stopped", exit_code: null, stdout: "", stderr: "" }; } return { state: "succeeded", code: "script_succeeded", summary: "Approved script completed", exit_code: 0, stdout: "sensitive-output", stderr: "" }; } }, docker: { async execute() { throw Error("not_expected"); } },
     async profiles() { return { capabilities: ["script.elevated.v1", "container.managed.v1"], account_profiles: [account], interpreter_profiles: [{ runtime: "shell", sha256: "a".repeat(64) }] }; } };
-  const release = { version: "test", release: { build_id: "test", source_revision: "a".repeat(40), artifact_sha256: "b".repeat(64), state_schema: 1 as const } };
+  const release = { version: "test", activation_id:randomUUID(), release: { build_id: "test", source_revision: "a".repeat(40), artifact_sha256: "b".repeat(64), state_schema: 1 as const } };
   let runner = new PrivilegedExecutorRunner(config, journal, client, release, host, clock);
   return { config, center, payload, requests, plan, get client() { return client; }, get journal() { return journal; }, get runner() { return runner; }, get runCalls() { return runCalls; }, get reports() { return reports; },
     setDelay(ms: number) { delayPermit = ms; }, setStartDelay(ms: number) { delayStart = ms; }, duringRunAdvance(ms: number) { runAdvance = ms; }, loseClaim() { loseClaim = true; }, loseResult() { loseResult = true; }, wrongPermit() { forgedPermit = true; }, wrongPolicy() { wrongPolicy = true; }, advance(ms: number) { wall += ms; mono += ms; },

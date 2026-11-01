@@ -15,8 +15,9 @@ import type {Dependencies} from '../src/shared/types.js';
 
 const checkOutput='LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n';
 const master=Buffer.alloc(32,9), now=new Date('2026-10-19T00:00:00.000Z');
-async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverride?:SSHRunner){
+async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverride?:SSHRunner,humanAdminSession=false){
  const db=new DB(':memory:'), router=new Router(), encryption=cipher(master), user={id:'admin',name:'Admin',role:'admin'};
+ if(humanAdminSession){db.exec("CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT NOT NULL,active INTEGER NOT NULL)");db.run("INSERT INTO users VALUES('admin','admin',1)");}
  // managed-machines joins the node registry to derive the linked Agent status.
  // Keep this fixture self-contained instead of relying on the full app
  // bootstrap, which registers the nodes module before managed machines.
@@ -37,7 +38,7 @@ async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverrid
  const machines=registerManagedMachines(deps,{agentCredentials,sshRunner:sshRunnerOverride??sshRunner});
  const server=createServer(async(req,res)=>{if(!(await router.handle(req,res))){res.writeHead(404);res.end()}});server.listen(0,'127.0.0.1');await once(server,'listening');const url=`http://127.0.0.1:${(server.address() as any).port}`;
  t.after(()=>{machines.close?.();server.close();db.close()});
- const rawRequest=async(path:string,method='GET',body?:any)=>{const response=await fetch(url+'/api/v1'+path,{method,headers:body?{'content-type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const raw=await response.text();return {status:response.status,raw,data:parseJSON(raw)};};
+ const rawRequest=async(path:string,method='GET',body?:any)=>{const response=await fetch(url+'/api/v1'+path,{method,headers:{...(humanAdminSession?{cookie:'lm_session=fixture'}:{}),...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const raw=await response.text();return {status:response.status,raw,data:parseJSON(raw)};};
  // Legacy-pin scenarios are seeded directly into the isolated database; the
  // production API deliberately rejects all client-supplied host identity.
  const request=async(path:string,method='GET',body?:any)=>{
@@ -832,7 +833,7 @@ test('unknown uninstall after stop can release its fence with unchanged complete
 
 test('Docker environment installation is admin-confirmed, durable, idempotent and scoped to the host',async t=>{
  const calls:any[]=[];
- const f=await fixture(t,{},async input=>{calls.push(input);return {stdout:JSON.stringify({state:'succeeded',phase:'verified',code:''}),stderr:'private package output',stages:[]};});
+ const f=await fixture(t,{},async input=>{calls.push(input);return {stdout:JSON.stringify({state:'succeeded',phase:'verified',code:''}),stderr:'private package output',stages:[]};},true);
  const m=(await f.request('/machines','POST',{name:'docker-host',address:'host.example.com',username:'root',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
  const c=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'docker-password',retention:'temporary'})).data;
  const path=`/machines/${m.id}/docker-installations`,body={request_id:'docker-fixture-request-001',credential_id:c.credential_id,confirmed:true};
@@ -849,7 +850,7 @@ test('Docker environment installation is admin-confirmed, durable, idempotent an
 
 test('Docker installation rejects one-time credentials and unsafe remote results, and recovers through read-only verification',async t=>{
  let output='private raw output token=hidden',failSSH=false;
- const f=await fixture(t,{},async()=>{if(failSSH)throw new SSHError('host_key_mismatch');return {stdout:output,stderr:'secret stderr',stages:[]};});
+ const f=await fixture(t,{},async()=>{if(failSSH)throw new SSHError('host_key_mismatch');return {stdout:output,stderr:'secret stderr',stages:[]};},true);
  const m=(await f.request('/machines','POST',{name:'docker-recovery',address:'host.example.com',username:'root',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
  const one=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'one-time-secret',retention:'one_time'})).data;
  const path=`/machines/${m.id}/docker-installations`,body={request_id:'docker-fixture-request-002',confirmed:true};

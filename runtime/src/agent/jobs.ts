@@ -2,32 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicJSON } from "../shared/io.js";
 import { CapabilityExecutor, type ExecutorJob, type ExecutionReceipt } from "./executor.js";
-import { operationCommand } from "./operations.js";
 import type { OperationExecutionContext } from "../operations/types.js";
-import { executeDocker } from './docker.js';
 
-// This production entry has no configuration switch for legacy host writes.
-// Domain adapters remain reusable, but only the independent executor may gain
-// authority for a migrated privileged action.
-export const ORDINARY_JOB_CAPABILITIES = Object.freeze([
-  "health.systemd", "health.http", "health.tcp", "systemd.probe", "docker.inventory",
-]);
-const ordinaryReadOnlyJob = (job: any): boolean => {
-  if (!Array.isArray(job?.capabilities) || !Array.isArray(job.actions) || !job.actions.length
-    || job.capabilities.some((cap: unknown) => typeof cap !== "string" || !ORDINARY_JOB_CAPABILITIES.includes(cap))) return false;
-  return job.actions.every((action: any) => {
-    if (!action || typeof action !== "object" || Array.isArray(action)) return false;
-    if (action.kind === "docker") return job.actions.length === 1 && action.operation === "inventory"
-      && Object.keys(action).every(key => ["kind", "operation"].includes(key)) && job.capabilities.includes("docker.inventory");
-    if (action.kind === "systemd_probe") return job.capabilities.includes("systemd.probe");
-    if (action.kind === "health_check") {
-      const capability = action.check?.kind === "systemd-active" ? "health.systemd"
-        : action.check?.kind === "http" ? "health.http" : action.check?.kind === "tcp" ? "health.tcp" : "";
-      return !!capability && job.capabilities.includes(capability);
-    }
-    return false;
-  });
-};
+import { ORDINARY_JOB_CAPABILITIES, ordinaryReadOnlyJob } from "../shared/ordinary-agent-jobs.js";
+export { ORDINARY_JOB_CAPABILITIES } from "../shared/ordinary-agent-jobs.js";
 
 export interface JobClientConfig {
   endpoint: string;
@@ -174,13 +152,7 @@ export class AgentJobRunner {
     };
     let result: ExecutionReceipt;
     try {
-      if (job.actions?.length === 1 && job.actions[0]?.kind === 'docker') {
-        const action=job.actions[0];
-        if(!job.capabilities?.includes('docker.inventory')||action.operation!=='inventory'||Date.parse(job.expires_at)<=this.now().getTime())throw Error('docker_job_mismatch');
-        result=await executeDocker(action,job.id,{dataDir:this.config.dataDir,signal:controller.signal,now:this.now,command:this.io.command??operationCommand},enqueueEvent);
-      } else {
-        result = await executor.execute({ id: job.id, expires_at: job.expires_at, capabilities: job.capabilities, actions: job.actions, target } as ExecutorJob, controller.signal);
-      }
+      result = await executor.execute({ id: job.id, expires_at: job.expires_at, capabilities: job.capabilities, actions: job.actions, target } as ExecutorJob, controller.signal);
     } finally {
       clearInterval(heartbeatTimer);
       await eventTail;

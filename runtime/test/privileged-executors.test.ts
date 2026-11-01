@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes,randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { DB } from "../src/shared/sqlite.js";
@@ -8,6 +8,7 @@ import { Router, fail } from "../src/shared/http.js";
 import { cipher } from "../src/shared/crypto.js";
 import type { Dependencies } from "../src/shared/types.js";
 import { registerTaskCenter } from "../src/server/task-center.js";
+import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { registerPrivilegedExecutors } from "../src/server/privileged-executors.js";
 import { PrivilegedExecutorStore } from "../src/server/privileged-executors.js";
 import { canonicalJSON, signExecutorRequest, signJWS, verifyJWS, sha256, planClaims, permitClaims, policyClaims } from "../src/shared/privileged-executor.js";
@@ -40,7 +41,7 @@ function fixture() {
     const signature = signExecutorRequest({ body: raw, center_instance_id: store.centerInstanceID, executor_id: enrolled.executor_id, install_generation: enrolled.install_generation, method: "POST", path, request_id: requestID, iat: Math.floor(clock.getTime() / 1000), exp: Math.floor(clock.getTime() / 1000) + 60 }, keys.privateKey);
     return { path, raw, signature, invoke(action: (e: any, v: any) => unknown) { return store.signedRequest(enrolled.executor_id, "POST", path, Buffer.from(raw), signature, action) as any; } };
   };
-  const heartbeat = () => request("heartbeat", { version: "test", boot_id: "boot_1234567890123456789", policy_generation: policy.generation, capabilities: ["script.elevated.v1", "container.managed.v1"], account_profiles: [account], interpreter_profiles: [{ runtime: "shell", sha256: interpreter }] }).invoke((e, v) => store.heartbeat(e, v));
+  const heartbeat = () => request("heartbeat", { version: "test", activation_id:randomUUID(), release:{build_id:"test",source_revision:"a".repeat(40),artifact_sha256:"b".repeat(64),state_schema:1}, boot_id: "boot_1234567890123456789", policy_generation: policy.generation, capabilities: ["script.elevated.v1", "container.managed.v1"], account_profiles: [account], interpreter_profiles: [{ runtime: "shell", sha256: interpreter }] }).invoke((e, v) => store.heartbeat(e, v));
   heartbeat();
   const makePlan = (extra: any = {}) => store.plan({ host_ids: ["host"], capability: "script.elevated.v1", payload: { kind: "script", runtime: "shell", code: "printf secret-from-script", args: [], cwd_profile: "private", environment: {}, account, interpreter_sha256: interpreter, timeout_ms: 5000, max_output_bytes: 4096 }, ...extra }, "admin");
   const apply = () => { const plan = makePlan(); return store.apply(plan.id, { confirm: true, expected_revision: plan.revision, request_id: randomBytes(24).toString("base64url") }, "admin").jobs[0]; };
@@ -201,4 +202,25 @@ test("active and unknown Docker installations block privileged review approval c
    assert.equal(waiting.store.get(job.id).state,"cancelled");
   }finally{waiting.close();}
  }
+});
+
+
+test("quarantined legacy writes keep the root execution fence across restarts, cancellation and late receipts", () => {
+  const f=fixture();try {
+    const deps={...f.deps,router:new Router()},credentials={has:()=>true} as any;
+    const first=registerAgentJobs(deps,{agentCredentials:credentials}),at=f.deps.now().toISOString();
+    f.db.run("INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,issued_at,expires_at,created_at,updated_at,attempts,lease_id,lease_expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      "legacy-writing","agent-host","legacy-deployment","legacy-operation","activating",JSON.stringify(["systemd.restart"]),JSON.stringify([{kind:"systemd",operation:"restart",unit:"app.service"}]),at,"2099-01-01T00:00:00Z",at,at,1,"old-lease","2099-01-01T00:00:00Z");
+    first.close();
+    const jobs=registerAgentJobs({...deps,router:new Router()},{agentCredentials:credentials});
+    assert.equal(jobs.get("legacy-writing").state,"unknown");
+    const plansBefore=f.db.get<any>("SELECT count(*) n FROM privileged_execution_plans")!.n;
+    assert.throws(()=>f.makePlan(),/machine_execution_locked/);
+    assert.equal(jobs.cancel("legacy-writing","admin").state,"unknown");
+    assert.throws(()=>jobs.result("agent-host","legacy-writing",{lease_id:"old-lease",state:"succeeded",snapshot:{health:{healthy:true}}}),/privileged_executor_required/);
+    assert.throws(()=>f.makePlan(),/machine_execution_locked/);
+    assert.equal(f.db.get<any>("SELECT count(*) n FROM privileged_execution_plans")!.n,plansBefore);
+    assert.equal(f.db.get<any>("SELECT count(*) n FROM privileged_jobs")!.n,0,"old tasks are never converted into new root jobs");
+    jobs.close();
+  } finally {f.close();}
 });

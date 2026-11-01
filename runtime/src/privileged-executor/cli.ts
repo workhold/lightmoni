@@ -10,6 +10,7 @@ import { inspectManagedDockerDaemon } from "./docker.js";
 import { PrivilegedExecutorRunner } from "./runner.js";
 import { readExecutorRelease } from "./release.js";
 import { executorStatus } from "./status.js";
+import { readExecutorActivation } from "./activation.js";
 import { assertRoot, refuse, rootPath } from "./security.js";
 
 export interface ExecutorCLIIO { input: AsyncIterable<Uint8Array | string>; write(value: string): void; signal?: AbortSignal }
@@ -26,10 +27,11 @@ export async function execute(args: string[], io: ExecutorCLIIO = { input: proce
     const bootstrap = parseBootstrap(parseStrictJSON(Buffer.concat(chunks), 64 << 10));
     let daemonID = ""; try { daemonID = (await inspectManagedDockerDaemon()).daemon_id; } catch { /* unavailable is reported; never change the identity during run */ }
     const config = newConfig(bootstrap, daemonID); saveInitialConfig(filename, config);
+    const activation_id=readExecutorActivation(config,release,true);
     const journal = new ExecutorJournal(config.data_dir, Buffer.from(config.output_key, "hex"));
     try {
       const client = new ExecutorClient(config, journal); await client.enroll(bootstrap);
-      const runner = new PrivilegedExecutorRunner(config, journal, client, release); await runner.heartbeat();
+      const runner = new PrivilegedExecutorRunner(config, journal, client, { ...release,activation_id }); await runner.heartbeat();
       io.write(JSON.stringify({ executor_id: config.executor_id, machine_id: config.machine_id, install_generation: config.install_generation, enrolled: true }) + "\n");
     } finally { journal.close(); }
     return;
@@ -55,8 +57,9 @@ export async function execute(args: string[], io: ExecutorCLIIO = { input: proce
   }
   // worker is an internal, Linux-root-only entry invoked by the flock wrapper.
   // It has the same root/private-policy checks and no identity bypass switches.
+  const activation_id=readExecutorActivation(config,release);
   const journal = new ExecutorJournal(config.data_dir, Buffer.from(config.output_key, "hex"));
-  const client = new ExecutorClient(config, journal), runner = new PrivilegedExecutorRunner(config, journal, client, release);
+  const client = new ExecutorClient(config, journal), runner = new PrivilegedExecutorRunner(config, journal, client, { ...release,activation_id });
   const controller = new AbortController(), stop = () => controller.abort();
   process.once("SIGTERM", stop); process.once("SIGINT", stop); io.signal?.addEventListener("abort", stop, { once: true });
   try {

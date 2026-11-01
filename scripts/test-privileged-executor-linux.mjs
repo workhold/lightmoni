@@ -6,8 +6,8 @@
  */
 import {createServer} from 'node:https';
 import {once} from 'node:events';
-import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
-import {randomBytes,randomUUID} from 'node:crypto';
+import {readFileSync,writeFileSync,mkdirSync,existsSync,cpSync} from 'node:fs';
+import {createHash,randomBytes,randomUUID} from 'node:crypto';
 import {spawn,execFileSync} from 'node:child_process';
 import assert from 'node:assert/strict';
 import {DB} from '/opt/lightmoni/runtime/dist/shared/sqlite.js';
@@ -15,8 +15,11 @@ import {Router,fail} from '/opt/lightmoni/runtime/dist/shared/http.js';
 import {cipher} from '/opt/lightmoni/runtime/dist/shared/crypto.js';
 import {registerTaskCenter} from '/opt/lightmoni/runtime/dist/server/task-center.js';
 import {registerPrivilegedExecutors} from '/opt/lightmoni/runtime/dist/server/privileged-executors.js';
+import {executorProgramApplyCommand,executorProgramProbeCommand,executorProgramStatusCommand} from '/opt/lightmoni/runtime/dist/server/machine-executor-maintenance.js';
+import {DatabaseSync} from 'node:sqlite';
 
 if(process.platform!=='linux'||process.getuid?.()!==0||!existsSync('/.dockerenv')||!process.argv.includes('--isolated-systemd-container'))throw Error('explicit_disposable_linux_container_required');
+if(!existsSync('/usr/bin/curl'))throw Error('disposable_fixture_requires_curl');
 if(existsSync('/etc/lightmoni-executor/config.json')||existsSync('/var/lib/lightmoni-executor/journal.sqlite'))throw Error('fresh_container_required_do_not_overwrite_state');
 const dockerImage=process.env.LIGHTMONI_QA_DOCKER_IMAGE||'';
 if(dockerImage&&!/^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$/.test(dockerImage))throw Error('digest_pinned_test_image_required');
@@ -31,6 +34,13 @@ db.exec('CREATE TABLE users(id TEXT PRIMARY KEY,name TEXT,role TEXT,active INTEG
 db.run("INSERT INTO users VALUES('test-admin','Test admin','admin',1)");
 db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('qa-host','QA','localhost',22,'root','direct_ssh','qa-agent',?,?)",new Date().toISOString(),new Date().toISOString());
 const store=registerPrivilegedExecutors(deps,{dataDir:'/run/lm060'});
+// Disposable fixture artifacts only: no production URL, token or release is used.
+const maintenanceArchives=new Map();
+router.get('/downloads/executor-maintenance/:operation/bundle.tar.gz',c=>{
+  const artifact=maintenanceArchives.get(c.params.operation);
+  if(!artifact||c.req.headers.authorization!=='Bearer qa-maintenance-ticket')fail(403,'fixture_download_denied');
+  c.res.writeHead(200,{'Content-Type':'application/gzip'});c.res.end(readFileSync(artifact));
+},{public:true});
 const server=createServer({key:readFileSync(dir+'/tls.key'),cert:readFileSync(dir+'/tls.crt')},(req,res)=>void router.handle(req,res));
 server.listen(19443,'127.0.0.1');await once(server,'listening');
 const wait=async(fn,ms=30000)=>{const end=Date.now()+ms;while(Date.now()<end){const v=fn();if(v)return v;await new Promise(r=>setTimeout(r,200));}throw Error('timeout')};
@@ -96,6 +106,60 @@ execFileSync('systemctl',['stop','lightmoni-executor.service']);
 execFileSync('/bin/rm',['/etc/systemd/system/lightmoni-executor.service.d/qa.conf']);
 execFileSync('/bin/rmdir',['/etc/systemd/system/lightmoni-executor.service.d']);
 execFileSync('systemctl',['daemon-reload']);
+// Run the unmodified production lifecycle shell and standalone root supervisor.
+// The fixed production unit does not inherit the fixture CA: this portion proves
+// local program/lock/state lifecycle. Center receipt+activation-heartbeat joining
+// is covered separately by the real-signed HTTP integration tests.
+execFileSync('systemctl',['start','lightmoni-executor.service']);
+const probeProgram=async()=>JSON.parse(await child('/bin/sh',['-c',executorProgramProbeCommand()]));
+const initialProgram=await probeProgram();
+const identityBytes=readFileSync('/etc/lightmoni-executor/config.json');
+const journalSnapshot=()=>{const connection=new DatabaseSync('/var/lib/lightmoni-executor/journal.sqlite',{readOnly:true});try{return JSON.stringify({metadata:connection.prepare('SELECT * FROM metadata ORDER BY key').all(),jobs:connection.prepare('SELECT * FROM jobs ORDER BY job_id').all()});}finally{connection.close();}};
+const initialJournal=journalSnapshot();
+const work='/run/lightmoni-executor-maintenance.qacompletion';mkdirSync(work,{mode:0o700});
+const pack=work+'/package';mkdirSync(pack,{mode:0o700});
+cpSync('/opt/lm060-package',pack+'/lightmoni-agent-runtime',{recursive:true});
+const nextManifest={...JSON.parse(readFileSync(pack+'/lightmoni-agent-runtime/release.json','utf8')),version:'0.1.1',build_id:'sdd060-linux-qa-next',source_revision:'b'.repeat(40)};
+writeFileSync(pack+'/lightmoni-agent-runtime/release.json',JSON.stringify(nextManifest));
+const archive=work+'/bundle.tar.gz';execFileSync('/usr/bin/tar',['-czf',archive,'-C',pack,'lightmoni-agent-runtime']);
+const archiveSHA=createHash('sha256').update(readFileSync(archive)).digest('hex');
+const target={version:nextManifest.version,build_id:nextManifest.build_id,source_revision:nextManifest.source_revision,artifact_sha256:archiveSHA,state_schema:1,arch:nextManifest.arch};
+const applyProgram=async(action,target)=>{
+  const before=await probeProgram(),operation=randomUUID();
+  if(action==='upgrade')maintenanceArchives.set(operation,archive);
+  const request={operation_id:operation,action,executor_id:before.executor_id,machine_id:before.machine_id,agent_id:before.agent_id,center_instance_id:before.center_instance_id,public_key_sha256:before.public_key_sha256,install_generation:before.install_generation,expected_fingerprint:before.current.fingerprint,expected_policy_generation:before.policy_generation,target,start_deadline:new Date(Date.now()+240000).toISOString()};
+  const result=JSON.parse(await child('/bin/sh',['-c',executorProgramApplyCommand('https://localhost:19443',operation,action==='upgrade')],'qa-maintenance-ticket\n'+JSON.stringify(request),{CURL_CA_BUNDLE:dir+'/tls.crt'}));
+  return {operation,result};
+};
+const upgraded=await applyProgram('upgrade',target);
+assert.equal(upgraded.result.receipt.status,'started',JSON.stringify(upgraded.result));assert.equal(upgraded.result.observation.current.artifact_sha256,archiveSHA);
+assert.deepEqual(upgraded.result.observation.previous,initialProgram.current);
+assert.equal(upgraded.result.receipt.activation_id,upgraded.operation);
+const upgradedRead=JSON.parse(await child('/bin/sh',['-c',executorProgramStatusCommand()],JSON.stringify({operation_id:upgraded.operation})));
+assert.equal(upgradedRead.receipt.operation_id,upgraded.operation);assert.equal(upgradedRead.receipt.status,'started');
+const rolled=await applyProgram('rollback',upgraded.result.observation.previous);
+assert.equal(rolled.result.receipt.status,'started',JSON.stringify(rolled.result));assert.deepEqual(rolled.result.observation.current,initialProgram.current);
+assert.equal(rolled.result.receipt.activation_id,rolled.operation);
+assert.deepEqual(readFileSync('/etc/lightmoni-executor/config.json'),identityBytes);assert.equal(journalSnapshot(),initialJournal);
+report.results.push('production root lifecycle shell downloads a real SHA-256 fixture archive, upgrades and exact-rolls back with distinct activation receipts; identity and complete logical journal retained');
+// Queue a second writer behind the active worker: once maintenance stops the
+// service this competing process wins. The supervisor must retain unknown and
+// provide a new reviewed repair, never silently restart/replay the old request.
+const contender=spawn('/usr/bin/flock',['--exclusive','/var/lib/lightmoni-executor/writer.lock','/bin/sh','-c','printf "qa-writer-held\\n"; cat >/dev/null'],{stdio:['pipe','pipe','pipe']});
+let held='';contender.stdout.on('data',value=>held+=value);
+await new Promise(resolve=>setTimeout(resolve,150));
+const interrupted=await applyProgram('upgrade',target);
+assert.equal(interrupted.result.receipt.status,'unknown',JSON.stringify(interrupted.result));assert.equal(interrupted.result.observation.service_active,false);
+assert.equal(interrupted.result.observation.repairable,true);assert(held.includes('qa-writer-held'));
+contender.stdin.end();await once(contender,'exit');
+const beforeReadonly=journalSnapshot();
+const interruptedRead=JSON.parse(await child('/bin/sh',['-c',executorProgramStatusCommand()],JSON.stringify({operation_id:interrupted.operation})));
+assert.equal(interruptedRead.receipt.status,'unknown');assert.equal(journalSnapshot(),beforeReadonly);
+const repaired=await applyProgram('repair',interruptedRead.observation.current);
+assert.equal(repaired.result.receipt.status,'started',JSON.stringify(repaired.result));assert.equal(repaired.result.receipt.activation_id,repaired.operation);
+assert.deepEqual(readFileSync('/etc/lightmoni-executor/config.json'),identityBytes);assert.equal(journalSnapshot(),initialJournal);
+report.results.push('real stop-to-writer contention remains durable unknown; read-only status does not mutate journal; a new exact explicit repair request starts without re-enrollment or old operation replay');
+report.lifecycle_fixture_artifact_sha256=archiveSHA;
 await child('/usr/local/sbin/lightmoni-executor-uninstall',['--confirm-remove-executor']);
 store.revokeExecutor('qa-host',bootstrap.executor_id,user.id);
 assert.equal(store.getStatus('qa-host').executor.state,'revoked');

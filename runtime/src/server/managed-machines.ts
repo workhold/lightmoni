@@ -288,6 +288,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   db.run("UPDATE machine_credentials SET secret_fingerprint='' WHERE method='password' AND secret_fingerprint!=''");
   const now = () => deps.now();
   const busy = new Set<string>();
+  let executorStore: PrivilegedExecutorStore | undefined;
   const terminals = new Map<string, { credentialID: string; invalidate: () => void }>();
   const library = connectionCredentials(deps, (bindingID, reason, actorID) => clearCredential(bindingID, reason, actorID));
   const clearCredential = (credentialID: string, reason: CredentialClearReason, actorID = "system", withinTransaction = false) => {
@@ -396,7 +397,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     return {
       id: value.id, name: value.name, default_credential_id: value.default_credential_id || "", observed_hostname: currentAgentHostname(db, value.id, value.agent_id),
       network: {...machineNetwork(db,value.id),service_addresses:machineServiceAddressSettings(db,value.id)},
-      docker_environment: machineDockerEnvironment(db,value.agent_id,now()),
+      docker_environment: machineDockerEnvironment(executorStore?.getStatus(value.id),now()),
       ...hostLabels(value.id),
       address: value.address, port: Number(value.port), username: value.username,
       connection_method: value.connection_method, host_key_fingerprint: value.host_key_fingerprint, ssh_target_generation: Number(value.ssh_target_generation || 0),
@@ -918,11 +919,14 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   };
   return { list, get, assistantList, assistantGet, checkSSH, assistantPlan, assistantDeployment, acquireTerminal, agentUpdates,
     registerExecutorBootstrap(store) {
+      executorStore=store;
       const access={get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,check:checkSSH};
       const bootstrap=registerMachineExecutorBootstrap(deps,access,store,{
         downloadsDir:options.downloadsDir ?? join(process.cwd(),"downloads"),dataDir:options.dataDir ?? join(process.cwd(),".local-dev"),
       });
-      const maintenance=registerMachineExecutorMaintenance(deps,access,store);
+      const maintenance=registerMachineExecutorMaintenance(deps,access,store,{
+        downloadsDir:options.downloadsDir ?? join(process.cwd(),"downloads"),dataDir:options.dataDir ?? join(process.cwd(),".local-dev"),
+      });
       return {async close(){await Promise.allSettled([bootstrap.close?.(),maintenance.close?.()]);}};
     },
     async close() {

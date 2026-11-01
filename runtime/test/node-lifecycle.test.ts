@@ -88,7 +88,7 @@ test("removed node cannot heartbeat, fetch config, claim jobs, send data or down
   assert.equal((await f.request(`/api/v1/agents/${node.id}/labels`, "PUT", { label_ids: [] })).status, 409);
   const store = new NodeStore(f.db, () => new Date());
   assert.throws(() => store.heartbeat(node.id, {}, "stale-auth"), /已移除/); assert.throws(() => store.events(node.id, "stale-auth", {}), /已移除/);
-  assert.throws(() => f.jobs.enqueue({ agentID: node.id, deploymentID: "new", operationID: "new", actions: [] }), /已移除/); assert.throws(() => f.jobs.claim(node.id, []), /已移除/); assert.equal(f.credentials.has(node.id, "control"), false);
+  assert.throws(() => f.jobs.enqueue({ agentID: node.id, deploymentID: "new", operationID: "new", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] }), /已移除/); assert.throws(() => f.jobs.claim(node.id, []), /已移除/); assert.equal(f.credentials.has(node.id, "control"), false);
   f.db.run("DELETE FROM agent_credentials WHERE agent_id=?", node.id); f.db.run("DELETE FROM agent_enrollments WHERE agent_id=?", node.id);
   assert.equal(f.credentials.registered?.(node.id), true); assert.equal((await f.request(`/api/v1/agents/${node.id}/heartbeat`, "POST", {}, { authorization: "Bearer shared-sdk-key" })).status, 401);
 });
@@ -102,7 +102,7 @@ test("shared SDK keys cannot register or control Agent identities", async t => {
 });
 
 test("queued, executing and unknown jobs plus pending uninstalls prevent partial node removal", async t => {
-  const f = await fixture(t), node = await f.enroll(), job = f.jobs.enqueue({ agentID: node.id, deploymentID: "deployment", operationID: "op", actions: [] });
+  const f = await fixture(t), node = await f.enroll(), job = f.jobs.enqueue({ agentID: node.id, deploymentID: "deployment", operationID: "op", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] });
   for (const state of ["queued", "leased", "accepted", "preflighting", "staging", "activating", "verifying", "unknown"]) {
     f.db.run("UPDATE agent_jobs SET state=? WHERE id=?", state, job.id); assert.equal((await remove(f, node.id)).status, 409, state);
     assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_credentials WHERE agent_id=? AND revoked_at IS NULL", node.id).n, 2); assert.equal(isAgentRemoved(f.db, node.id), false);
@@ -136,8 +136,8 @@ test("node tombstone and job enqueue remain mutually exclusive across SQLite wri
     }
     return originalRun(sql, ...params);
   };
-  assert.throws(() => otherJobs.enqueue({ agentID: node.id, deploymentID: "raced", operationID: "raced", actions: [] })); assert.equal(raced, true); assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_jobs WHERE agent_id=?", node.id).n, 0);
-  const another = await f.enroll(); f.jobs.enqueue({ agentID: another.id, deploymentID: "first", operationID: "first", actions: [] }); assert.equal((await remove(f, another.id)).status, 409); assert.equal(isAgentRemoved(f.db, another.id), false);
+  assert.throws(() => otherJobs.enqueue({ agentID: node.id, deploymentID: "raced", operationID: "raced", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] })); assert.equal(raced, true); assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_jobs WHERE agent_id=?", node.id).n, 0);
+  const another = await f.enroll(); f.jobs.enqueue({ agentID: another.id, deploymentID: "first", operationID: "first", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] }); assert.equal((await remove(f, another.id)).status, 409); assert.equal(isAgentRemoved(f.db, another.id), false);
 });
 
 test("failed archival audit rolls back tombstone and credential revocation together", async t => {
@@ -153,7 +153,7 @@ test("failed archival audit rolls back tombstone and credential revocation toget
 
 test("removal during asynchronous catalog setup prevents a data insert and old terminal job receipts", async t => {
   const f = await fixture(t), node = await f.enroll();
-  const job = f.jobs.enqueue({ agentID: node.id, deploymentID: "terminal", operationID: "terminal", actions: [] });
+  const job = f.jobs.enqueue({ agentID: node.id, deploymentID: "terminal", operationID: "terminal", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] });
   f.jobs.cancel(job.id, "admin");
   const ensure = f.cat.ensure.bind(f.cat); let removed = false;
   f.cat.ensure = async (...args) => {

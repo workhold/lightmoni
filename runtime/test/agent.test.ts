@@ -737,7 +737,8 @@ test("running Agent waits for assigned tasks, withdraws probes/logs and stops in
 });
 
 
-test("ordinary Agent heartbeat exposes Docker inventory without legacy write capability",async t=>{
+test("ordinary Agent heartbeat does not advertise privileged daemon access",async t=>{
   const agent=make(t);
-  assert.deepEqual(agent.status().docker_capabilities,["docker.inventory"]);
+  assert.equal("docker_capabilities" in agent.status(),false);
+  assert.equal("docker_inventory" in agent.status(),false);
 });

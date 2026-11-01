@@ -13,11 +13,6 @@ import type { OperationDefinition } from "../src/operations/types.js";
 import { backupDefinition } from "../src/operations/backups.js";
 import { composeDefinition } from "../src/operations/containers.js";
 import { websiteDefinition } from "../src/operations/websites.js";
-import { AgentJobRunner } from "../src/agent/jobs.js";
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, realpath } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 async function fixture(t: any) {
   const db = new DB(":memory:"), router = new Router(), crypto = cipher(Buffer.alloc(32, 7));
   let now = new Date("2026-10-27T00:00:00Z");
@@ -30,104 +25,93 @@ async function fixture(t: any) {
   const credentials = { has: () => true, authenticate(req: any, agentID: string) { if (agentID !== "agent-1" || req.headers.authorization !== "Bearer control-secret") fail(403, "invalid agent credential"); return { agent_id: agentID }; } } as any;
   const jobs = registerAgentJobs(deps, { agentCredentials: credentials });
   const definition: OperationDefinition = { kind: "certificate", operations: ["inspect", "install"], readOnly: ["inspect"], validate: v => v as any, publicConfig: v => ({domains:v.domains,has_private_key:!!v.private_key_pem}), validateInput: (_op,v) => v as any };
-  const ops = registerOperations(deps, { jobs, credentials, definitions: [definition, backupDefinition, composeDefinition, websiteDefinition] });
+  let resolved = 0;
+  const ops = registerOperations(deps, { jobs, credentials, definitions: [definition, backupDefinition, composeDefinition, websiteDefinition], resolvePayload() { resolved++; throw Error("private payload resolver must not run"); } });
   const server = createServer((req, res) => void router.handle(req, res)); server.listen(0,"127.0.0.1"); await once(server,"listening");
   t.after(() => { ops.close?.(); jobs.close?.(); server.close(); db.close(); });
   const base = "http://127.0.0.1:" + (server.address() as any).port;
   const req = async (path: string, method="GET", body?: any, headers: Record<string,string> = {}) => { const r = await fetch(base + "/api/v1" + path,{method,headers:{"content-type":"application/json",...headers},body:body === undefined ? undefined : JSON.stringify(body)}); return {status:r.status,body:await r.json(),headers:r.headers}; };
   const create = () => req("/operations/resources","POST",{kind:"certificate",name:"HTTPS",agent_id:"agent-1",config:{domains:["example.com"],private_key_pem:"SECRET-PRIVATE-MATERIAL"}});
-  return { db, ops, jobs, req, create, base, advance: (ms:number) => { now=new Date(now.getTime()+ms); } };
+  return { db, deps, ops, jobs, req, create, base, resolved: () => resolved, advance: (ms:number) => { now=new Date(now.getTime()+ms); } };
 }
 
-test("operations encrypt configuration and payload; only an approved job lease can read private material",async t=>{
-  const f=await fixture(t), created=await f.create(); assert.equal(created.status,201); assert.equal(JSON.stringify(created.body).includes("SECRET-PRIVATE"),false);
+test("legacy resource configuration stays encrypted while unimplemented plans create no runs or jobs",async t=>{
+  const f=await fixture(t),created=await f.create();assert.equal(created.status,201);
   const resource=created.body.resource;
-  assert.equal(JSON.stringify(f.db.all("SELECT * FROM ops_resources")).includes("SECRET-PRIVATE"),false);
-  const draft=await f.req(`/operations/resources/${resource.id}/plans`,"POST",{operation:"install"}); assert.equal(draft.status,201);
-  assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_jobs")?.n,0);
-  assert.equal(JSON.stringify(f.db.all("SELECT * FROM ops_runs")).includes("SECRET-PRIVATE"),false);
-  const approve=await f.req(`/operations/runs/${draft.body.run.id}/approve`,"POST",{revision:1}); assert.equal(approve.status,200);
-  const repeated=await f.req(`/operations/runs/${draft.body.run.id}/approve`,"POST",{revision:1}); assert.equal(repeated.body.run.job_id,approve.body.run.job_id);
-  const j=f.jobs.claim("agent-1",["operations.certificate"]); assert.ok(j); assert.equal(JSON.stringify(j).includes("SECRET-PRIVATE"),false);
-  const path=`/agents/agent-1/jobs/${j.id}/operations`;
-  assert.equal((await f.req(path,"GET",undefined,{"x-role":"agent",authorization:"Bearer control-secret"})).status,403);
-  const privateReply=await f.req(path,"GET",undefined,{"x-role":"agent",authorization:"Bearer control-secret","X-LightMoni-Job-Lease":j.lease_id});
-  assert.equal(privateReply.status,200); assert.equal(privateReply.headers.get("cache-control"),"no-store"); assert.equal(privateReply.body.payload.resource.config.private_key_pem,"SECRET-PRIVATE-MATERIAL");
-  f.advance(46_000); assert.equal((await f.req(path,"GET",undefined,{"x-role":"agent",authorization:"Bearer control-secret","X-LightMoni-Job-Lease":j.lease_id})).status,403);
+  assert.doesNotMatch(JSON.stringify(created.body),/SECRET-PRIVATE/);
+  assert.doesNotMatch(JSON.stringify(f.db.all("SELECT * FROM ops_resources")),/SECRET-PRIVATE/);
+  f.deps.decrypt=()=>{throw Error("unimplemented plans must not decrypt configuration");};
+  for(const operation of ["install","inspect"]){
+    const response=await f.req(`/operations/resources/${resource.id}/plans`,"POST",{operation});
+    assert.equal(response.status,409);assert.equal(response.body.error,"privileged_profile_not_implemented");
+    assert.throws(()=>f.ops.plan(resource.id,operation,{},"admin"),/privileged_profile_not_implemented/);
+  }
+  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM ops_runs")!.n,0);
+  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n,0);
 });
 
-test("ordinary Agent runner does not claim or download an approved backup write operation",async t=>{
- const f=await fixture(t), root=await realpath(await mkdtemp(join(tmpdir(),"lightmoni-operations-api-")));
- t.after(()=>rm(root,{recursive:true,force:true}));
- for(const dir of ["source","backups","agent"])await mkdir(join(root,dir),{mode:0o700});
- const original="<h1>Backup source remains untouched</h1>";
- await writeFile(join(root,"source","index.html"),original,{mode:0o600});
- const created=await f.req("/operations/resources","POST",{kind:"backup",name:"Website backup",agent_id:"agent-1",config:{source_path:join(root,"source"),storage:{type:"local",path:join(root,"backups")}}});
- assert.equal(created.status,201);const resource=created.body.resource;
- const planned=await f.req(`/operations/resources/${resource.id}/plans`,"POST",{operation:"create"});assert.equal(planned.status,201);
- const plan=planned.body.run;
- const approved=await f.req(`/operations/runs/${plan.id}/approve`,"POST",{revision:resource.revision});assert.equal(approved.status,200);
- assert.equal(approved.body.run.state,"queued");
- const jobID=approved.body.run.job_id;assert.ok(jobID);
- assert.deepEqual(f.jobs.get(jobID).capabilities,["operations.backup"]);
- const requests:Array<{path:string;method:string;body:any}>=[];
- const runner=new AgentJobRunner({endpoint:f.base,agentID:"agent-1",controlCredential:"control-secret",dataDir:join(root,"agent"),now:()=>new Date("2026-10-27T00:00:00Z")},{
-   fetch:async(input,init)=>{
-     const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;
-     requests.push({path:new URL(url).pathname,method:init?.method??"GET",body:typeof init?.body==="string"?JSON.parse(init.body):undefined});
-     return fetch(input,init);
-   },
- });
- assert.equal(await runner.pollOnce(),null);
- assert.equal(await runner.pollOnce(),null);
- assert.equal(requests.length,2);
- for(const request of requests){
-   assert.equal(request.path,"/api/v1/agents/agent-1/jobs/claim");assert.equal(request.method,"POST");
-   assert.ok(request.body.capabilities.length>0);
-   assert.ok(request.body.capabilities.every((cap:string)=>cap==="systemd.probe"||cap==="docker.inventory"||cap.startsWith("health.")),"ordinary Agent must advertise only read-only capabilities");
- }
- assert.ok(!requests.some(request=>request.path.endsWith("/operations")),"private operation payload must not be downloaded");
- const saved=f.ops.getRun(plan.id);assert.equal(saved.state,"queued");assert.deepEqual(saved.receipt,{});
- const queued=f.jobs.get(jobID);assert.equal(queued.state,"queued");assert.equal(queued.lease_id,"");assert.equal(queued.attempts,0);assert.deepEqual(queued.receipt,{});
- assert.equal(JSON.stringify(saved).includes("control-secret"),false);
- assert.deepEqual(await readdir(join(root,"backups")),[],"ordinary Agent must not create a backup");
- assert.deepEqual(await readdir(join(root,"agent")),[],"unclaimed writes must not create a local execution marker");
- assert.equal(await readFile(join(root,"source","index.html"),"utf8"),original);
+test("all legacy operation kinds reject planning without leaving queued or awaiting approval records",async t=>{
+  const f=await fixture(t);
+  const cases=[
+    {kind:"website",config:{domains:["example.test"],mode:"static"},operation:"apply"},
+    {kind:"certificate",config:{domains:["example.test"],private_key_pem:"secret"},operation:"install"},
+    {kind:"compose",config:{project_name:"denied",compose:{services:{web:{image:"nginx:1.27.5"}}}},operation:"apply"},
+    {kind:"backup",config:{source_path:"/srv/source",storage:{type:"local",path:"/srv/backups"}},operation:"create"},
+  ];
+  for(const value of cases){
+    const created=await f.req("/operations/resources","POST",{...value,name:value.kind,agent_id:"agent-1"});
+    assert.equal(created.status,201,JSON.stringify(created));
+    const planned=await f.req(`/operations/resources/${created.body.resource.id}/plans`,"POST",{operation:value.operation});
+    assert.equal(planned.status,409);assert.equal(planned.body.error,"privileged_profile_not_implemented");
+  }
+  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM ops_runs")!.n,0);
+  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n,0);
 });
 
-test("new operations do not block legacy Agent capabilities and mismatched operation receipts cannot succeed",async t=>{
- const f=await fixture(t),r=(await f.create()).body.resource,p=f.ops.plan(r.id,"inspect",{},"admin");f.ops.approve(p.id,"admin",1);
- const old=f.jobs.enqueue({agentID:"agent-1",deploymentID:"old",operationID:"old",actions:[],capabilities:["systemd.restart"]});
- const legacyLease=f.jobs.claim("agent-1",["systemd.restart"])!; assert.equal(legacyLease.id,old.id);
- assert.equal(f.jobs.claim("agent-1",["operations.certificate"]),null);
- f.jobs.result("agent-1",old.id,{lease_id:legacyLease.lease_id,state:"failed",summary:"legacy task complete"});
- const j=f.jobs.claim("agent-1",["operations.certificate"])!;
- for(const [i,phase]of["accepted","staging","activating","verifying"].entries())f.jobs.event("agent-1",j.id,{lease_id:j.lease_id,sequence:i+1,phase,summary:"step"});
- f.jobs.result("agent-1",j.id,{lease_id:j.lease_id,state:"succeeded",summary:"claimed",snapshot:{health:{healthy:true},operations:{operation_id:"wrong",resource_id:r.id}}});
- assert.equal(f.ops.getRun(p.id).state,"unknown");
+test("historical operation approvals cannot enqueue, decrypt, replay or change saved records",async t=>{
+  const f=await fixture(t),resource=(await f.create()).body.resource;
+  const before="2026-10-27T00:00:00Z";
+  f.db.run("INSERT INTO ops_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)","historical",resource.id,1,"install","awaiting_approval","unreadable-cipher",JSON.stringify({operation:"install"}),"",before,"2099-01-01T00:00:00Z","admin","",before);
+  f.deps.decrypt=()=>{throw Error("old approvals must not decrypt private data");};
+  f.jobs.enqueue=()=>{throw Error("old approvals must not enqueue");};
+  const row=f.db.get<any>("SELECT * FROM ops_runs WHERE id='historical'");
+  for(const id of ["historical","missing"]){
+    const response=await f.req(`/operations/runs/${id}/approve`,"POST",{revision:1});
+    assert.equal(response.status,409);assert.equal(response.body.error,"privileged_profile_not_implemented");
+  }
+  assert.deepEqual(f.db.get("SELECT * FROM ops_runs WHERE id='historical'"),row);
+  const historical=await f.req("/operations/runs/historical");assert.equal(historical.status,200);
+  assert.equal(historical.body.run.state,"awaiting_approval");
+  assert.doesNotMatch(JSON.stringify(historical.body),/unreadable-cipher|payload_cipher/);
+  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n,0);
 });
 
-test("operations reject member actions, stale approvals, busy edits and expired plans",async t=>{
- const f=await fixture(t);assert.equal((await f.req("/operations/resources","GET",undefined,{"x-role":"member"})).status,403);
- const r=(await f.create()).body.resource;
- const draft=(await f.req(`/operations/resources/${r.id}/plans`,"POST",{operation:"install"})).body.run;
- assert.equal((await f.req(`/operations/resources/${r.id}`,"PUT",{revision:1,config:{domains:["example.org"]}})).status,200);
- assert.equal((await f.req(`/operations/runs/${draft.id}/approve`,"POST",{revision:1})).status,409);
- const fresh=(await f.req(`/operations/resources/${r.id}/plans`,"POST",{operation:"inspect"})).body.run;
- f.advance(31*60_000);assert.equal((await f.req(`/operations/runs/${fresh.id}/approve`,"POST",{revision:2})).status,409);
- const active=(await f.req(`/operations/resources/${r.id}/plans`,"POST",{operation:"inspect"})).body.run;
- assert.equal((await f.req(`/operations/runs/${active.id}/approve`,"POST",{revision:2})).status,200);
- assert.equal((await f.req(`/operations/resources/${r.id}`,"PUT",{revision:2,config:{domains:["x.com"]}})).status,409);
- const tools=operationTools(f.ops);assert.equal(tools.some(x=>/approve|execute/.test(x.name)),false);
- await assert.rejects(()=>tools[0].execute({},new AbortController().signal,{id:"member",role:"member"} as any),/administrator/);
+test("ordinary Agent private operations payload endpoint is permanently removed without resolving jobs or secrets",async t=>{
+  const f=await fixture(t);
+  f.deps.decrypt=()=>{throw Error("removed endpoint must not decrypt");};
+  f.jobs.get=()=>{throw Error("removed endpoint must not load jobs");};
+  for(const lease of [undefined,"old-lease"]){
+    const headers:Record<string,string>={"x-role":"agent",authorization:"Bearer control-secret"};
+    if(lease)headers["X-LightMoni-Job-Lease"]=lease;
+    const response=await f.req("/agents/agent-1/jobs/nonexistent/operations","GET",undefined,headers);
+    assert.equal(response.status,410);assert.equal(response.body.error,"legacy_agent_payload_removed");
+    assert.equal(response.headers.get("cache-control"),"no-store");
+    assert.equal(response.body.payload,undefined);
+  }
+  assert.equal(f.resolved(),0);
+  assert.equal((await f.req("/agents/agent-1/jobs/missing/operations","GET",undefined,{"x-role":"agent",authorization:"Bearer wrong"})).status,403);
 });
 
-test("operations lifecycle updates only from actual verified Agent receipts",async t=>{
- const f=await fixture(t),r=(await f.create()).body.resource;
- const p=f.ops.plan(r.id,"inspect",{},"admin");f.ops.approve(p.id,"admin",1); const j=f.jobs.claim("agent-1",["operations.certificate"])!;
- for(const [i,phase] of ["accepted","staging","activating","verifying"].entries())f.jobs.event("agent-1",j.id,{lease_id:j.lease_id,sequence:i+1,phase,summary:"registered step"});
- f.jobs.result("agent-1",j.id,{lease_id:j.lease_id,state:"succeeded",summary:"verified",snapshot:{health:{healthy:true},operations:{operation_id:p.id,resource_id:r.id,data:{installed:false}}}});
- assert.equal(f.ops.getRun(p.id).state,"succeeded");
+test("legacy operation actions remain administrator-only and AI tools cannot approve execution",async t=>{
+  const f=await fixture(t),resource=(await f.create()).body.resource;
+  for(const [path,body] of [
+    [`/operations/resources/${resource.id}/plans`,{operation:"install"}],
+    ["/operations/runs/historical/approve",{revision:1}],
+  ] as const)assert.equal((await f.req(path,"POST",body,{"x-role":"member"})).status,403);
+  const tools=operationTools(f.ops);assert.equal(tools.some(x=>/approve|execute/.test(x.name)),false);
+  await assert.rejects(()=>tools[0].execute({},new AbortController().signal,{id:"member",role:"member"} as any),/administrator/);
+  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM ops_runs")!.n,0);
+  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n,0);
 });
 
 test("S3 edits reuse credentials only for the same target; service association can be cleared explicitly",async t=>{

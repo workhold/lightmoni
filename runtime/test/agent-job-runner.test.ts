@@ -35,7 +35,7 @@ test("ordinary Agent advertises only fixed read-only job capabilities", async t 
     fetch: (async (_url:any, init:RequestInit) => { advertised=JSON.parse(String(init.body)).capabilities; return Response.json({job:null}); }) as typeof fetch,
   });
   assert.equal(await runner.pollOnce(),null);
-  assert.deepEqual(advertised,["health.systemd","health.http","health.tcp","systemd.probe","docker.inventory"]);
+  assert.deepEqual(advertised,["health.systemd","health.http","health.tcp","systemd.probe"]);
   assert.equal(Object.isFrozen(ORDINARY_JOB_CAPABILITIES),true);
 });
 
@@ -61,10 +61,10 @@ test("ordinary Agent rejects legacy write actions before payload download or hos
   });
 });
 
-test("read-only Docker inventory still executes without exposing container controls",async t=>{
+test("ordinary Agent refuses Docker inventory before contacting the privileged daemon",async t=>{
  const dataDir=mkdtempSync(join(tmpdir(),"lightmoni-docker-inventory-"));t.after(()=>rmSync(dataDir,{recursive:true,force:true}));const commands:any[]=[];
  const runner=new AgentJobRunner({endpoint:"https://center",agentID:"agent",controlCredential:"ordinary-control",dataDir},{command:async(file,args)=>{commands.push({file,args});return{stdout:"",stderr:""}},fetch:(async(url:any)=>String(url).endsWith("/jobs/claim")?Response.json({job:{id:"inventory",lease_id:"lease",expires_at:new Date(Date.now()+60000).toISOString(),capabilities:["docker.inventory"],actions:[{kind:"docker",operation:"inventory"}]}}):Response.json({})) as typeof fetch});
- assert.equal((await runner.pollOnce())?.state,"succeeded");assert.equal(commands.length,1);assert.equal(commands[0].file,"docker");assert.deepEqual(commands[0].args.slice(0,3),["--context","default","ps"]);
+ const receipt=await runner.pollOnce();assert.equal(receipt?.state,"failed");assert.equal(receipt?.code,"privileged_executor_required");assert.deepEqual(commands,[]);
 });
 
 test("Agent startup never resumes cached legacy website gateway writes",async t=>{

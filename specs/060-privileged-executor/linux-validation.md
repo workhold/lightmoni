@@ -19,7 +19,7 @@ Docker 的真实执行范围以 harness 回执为准；即使 create/remove 通�
 ```dockerfile
 FROM your-local-platform-image
 USER root
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssl curl && rm -rf /var/lib/apt/lists/*
 ENTRYPOINT ["/sbin/init"]
 ```
 
@@ -38,8 +38,21 @@ docker --context colima-lightmoni-release cp scripts/test-privileged-executor-li
 docker --context colima-lightmoni-release exec lightmoni-executor-qa-new sh -c 'mkdir -p /run/lm060; cp /usr/local/bin/node /opt/lm060-package/node; printf "{\"version\":\"0.1.0\",\"source_revision\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"build_id\":\"sdd060-linux-qa\",\"state_schema\":1,\"platform\":\"linux\",\"arch\":\"arm64\"}\n" > /opt/lm060-package/release.json; chown -R root:root /opt/lm060-package /opt/lightmoni/runtime/dist; chmod -R go-w /opt/lm060-package /opt/lightmoni/runtime/dist; openssl req -x509 -newkey rsa:2048 -nodes -keyout /run/lm060/tls.key -out /run/lm060/tls.crt -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost; systemctl start dbus; node /opt/lm060-harness.mjs --isolated-systemd-container'
 ```
 
-amd64 测试时将 fixture manifest 的 `arch` 改为 `amd64`。本 fixture 的安装摘要为固定测试摘要，验证的是安装/身份/执行协议；真实发行包下载与 SHA-256 检查由发行/安装验收覆盖。
+amd64 测试时将 fixture manifest 的 `arch` 改为 `amd64`。本 fixture 的首次安装摘要与源码版本为固定测试值，验证安装/身份/执行协议；后续维护由 harness 现场生成真实 archive 并校验其真实 SHA-256，不代表正式发行包已验收。
 
 harness 成功时输出 `pass: true`，同一份无秘密 JSON 写入容器 `/run/lm060/report.json`。harness 会先证明生产卸载器拒绝自身测试 CA drop-in 且保留身份和 journal，再仅删除本 harness 创建的精确 `qa.conf` 与空目录、重载 systemd 后调用未修改的生产卸载器。测试身份、私钥和 CA 留在容器内，不应导出或提交；仅导出报告。测试失败时保留该容器和 journal 排查，重新验收使用新容器，不能删除未知结果后继续当新任务执行。
 
 可选 Docker 验收：仅在隔离测试 VM 上给**新容器**增加 `-v /var/run/docker.sock:/var/run/docker.sock`，并给 harness 设置 `LIGHTMONI_QA_DOCKER_IMAGE=repository@sha256:...`。该 image 必须已经在测试 daemon 中，Linux/原生架构固定、不含 image Config.Volumes。harness 经同一签名任务通道测试脱敏 list、外部资源拒绝、受管 create/remove，不启动创建的容器，不操作已有容器。失败时不执行 prune 或按名称模糊清理。
+
+
+## #64 完成收口的新增验收（2026-11-02）
+
+最终代码在全新隔离 Linux arm64/systemd 252.39/Node 24.15.0 容器中再次通过。无秘密报告见 [linux-completion-report.json](linux-completion-report.json)，原始首次 Docker 验收报告保留于 [linux-validation-report.json](linux-validation-report.json)，两者对应不同运行，不混用结果。
+
+本轮使用未修改的生产维护 shell、独立 root 监督器、固定生产 unit 与真实下载的 fixture archive，验证 upgrade、精确 previous rollback、独立 activation 回执、实际 stop→writer 锁竞争后的持久 unknown、只读状态不改变 journal、由新明确请求执行 repair、身份与完整逻辑 journal 保持，以及最终离线卸载和中心精确撤权。整个过程没有重新 enrollment 或重放旧操作。实际发现 Linux 的 umask 077 会改变复制后的目录 mode；修复为经无跟随 FD/inode/owner/type 核验后恢复已验证源权限、fsync 再校验指纹，回归与最终全新容器均通过。
+
+维护 fixture archive 的真实摘要为 `7fc5ba0d2b275d7da846cc15665ef425700f901509cb665bab5474467122c175`；生产源文件及 harness 摘要记录在报告中。首次安装 manifest 的源码版本及初始摘要仍是 synthetic fixture，不能据此宣称正式发行完成。
+
+固定生产 unit 不继承 harness 的测试 CA，因此本段证明本地程序、锁与状态生命周期；中心 started receipt 与本次 activation 签名心跳联合确认，由另外的 HTTP/SQLite 真实签名集成 fixture 验证，未声称本轮完成真实中心的端到端升级。首次安装、签名 root 脚本、1 秒超时、主体/敏感正文隔离与签名策略关闭也在此新容器复验。本轮未挂 Docker socket，没有新的真实 Docker 操作结果；此前 list/create/remove 只属于首次报告。
+
+失败尝试各自保留独立容器与现场，不清除 unknown 后重跑。最终验收后停止本轮容器，不删除失败 journal，不连接用户主机，不发布镜像。

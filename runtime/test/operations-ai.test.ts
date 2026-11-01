@@ -4,8 +4,9 @@ import { operationTools } from "../src/assistant/operation-tools.js";
 import { websiteDefinition } from "../src/operations/websites.js";
 import { composeDefinition } from "../src/operations/containers.js";
 import { registerOperations } from "../src/server/operations.js";
+import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { DB } from "../src/shared/sqlite.js";
-import { Router } from "../src/shared/http.js";
+import { HTTPError, Router } from "../src/shared/http.js";
 import { cipher } from "../src/shared/crypto.js";
 import type { Dependencies } from "../src/shared/types.js";
 import type { OperationResource, OperationsStore } from "../src/operations/types.js";
@@ -75,20 +76,24 @@ test("AI truncates known receipt lists explicitly while preserving current CAS e
   assert.equal(backups.length, 100);
 });
 
-test("AI returns a persisted large-site proposal ID and review URL without a post-insert size failure", async t => {
+test("AI rejects a legacy large-site proposal before persisting a run or ordinary Agent job", async t => {
   const db = new DB(":memory:"), crypto = cipher(Buffer.alloc(32, 9));
   const deps = { db, router: new Router(), ...crypto, now: () => new Date("2026-10-27T00:00:00Z") } as unknown as Dependencies;
-  const ops = registerOperations(deps, { definitions: [websiteDefinition], credentials: { has: () => true } as any, jobs: { onUpdate: () => () => {} } as any });
-  t.after(() => { ops.close?.(); db.close(); });
+  const credentials = { has: () => true } as any, jobs = registerAgentJobs(deps, { agentCredentials: credentials });
+  const ops = registerOperations(deps, { definitions: [websiteDefinition], credentials, jobs });
+  t.after(() => { ops.close?.(); jobs.close?.(); db.close(); });
   const config = websiteDefinition.validate({ domains: ["example.test"], mode: "static", static_files: { "index.html": "x".repeat(512 * 1024) } });
   db.run("INSERT INTO ops_resources(id,kind,name,agent_id,revision,config_cipher,created_at,updated_at,created_by) VALUES(?,?,?,?,1,?,?,?,?)", "site-one", "website", "Site", "agent-one", crypto.encrypt(JSON.stringify(config)), "", "", "admin");
-  const result = await tool(ops, "propose_operations_action").execute({ resource_id: "site-one", operation: "apply" }, signal, admin);
-  assert.equal(db.get<any>("SELECT count(*) n FROM ops_runs").n, 1);
-  assert.equal(result.run.state, "awaiting_approval");
-  assert.equal(result.run.review_url, `/operations?run=${result.run.id}`);
-  assert.equal(result.run.preview, undefined);
-  assert.ok(Buffer.byteLength(JSON.stringify(result)) < 1024);
-  assert.equal(ops.getRun(result.run.id).preview.resource.config.static_files["index.html"].length, 512 * 1024);
+  const saved = db.get<any>("SELECT * FROM ops_resources WHERE id='site-one'");
+  deps.decrypt = () => { throw Error("retired proposals must not decrypt saved website bodies"); };
+  await assert.rejects(
+    tool(ops, "propose_operations_action").execute({ resource_id: "site-one", operation: "apply" }, signal, admin),
+    error => error instanceof HTTPError && error.status === 409 && error.message === "privileged_profile_not_implemented",
+  );
+  assert.equal(db.get<any>("SELECT count(*) n FROM ops_runs").n, 0);
+  assert.equal(db.get<any>("SELECT count(*) n FROM agent_jobs").n, 0);
+  assert.deepEqual(db.get("SELECT * FROM ops_resources WHERE id='site-one'"), saved);
+  assert.equal(JSON.parse(crypto.decrypt(saved.config_cipher)).static_files["index.html"].length, 512 * 1024);
 });
 
 test("AI omits whole sensitive log receipts and rejects members before reading or drafting", async () => {

@@ -2,7 +2,7 @@ import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import type { Context, Dependencies, Module } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
 import {
-  PRIVILEGED_CAPABILITIES, EXECUTOR_SIGNATURE_HEADER, EXECUTOR_LEASE_SECONDS,
+  PRIVILEGED_CAPABILITIES, EXECUTOR_SIGNATURE_HEADER, EXECUTOR_LEASE_SECONDS, executorActivationID,
   canonicalJSON, parseStrictJSON, strictRecord, boundedText, digest, nonce, sha256,
   normalizePrivilegedPayload, validateAccount, validatePublicKey, validateRequestClaims,
   signJWS, verifyJWS, type PrivilegedCapability, type PrivilegedPayload, type PrivilegedPlan,
@@ -221,7 +221,7 @@ export class PrivilegedExecutorStore {
     const binding = !!row && row.agent_id === host?.agent_id && !isAgentRemoved(this.deps.db, row.agent_id);
     const online = binding && row.state === "active" && !!row.last_seen && Date.parse(row.last_seen) > this.deps.now().getTime() - 60_000;
     const authorized = JSON.parse(policy.capabilities_json) as string[];
-    return { machine_id: machineID, policy_generation: policy.generation, executor: row ? { id: row.id, state: row.state, install_generation: row.install_generation, online, last_seen: row.last_seen, version: observation.version ?? "", boot_id: observation.boot_id ?? "",release:observation.release ?? null } : null,
+    return { machine_id: machineID, policy_generation: policy.generation, executor: row ? { id: row.id, state: row.state, install_generation: row.install_generation, online, last_seen: row.last_seen, version: observation.version ?? "", boot_id: observation.boot_id ?? "",activation_id:observation.activation_id??"",release:observation.release ?? null } : null,
       capabilities: Object.fromEntries(PRIVILEGED_CAPABILITIES.map(capability => [capability, { authorized: authorized.includes(capability), effective: !authorized.includes(capability) ? "disabled" : !row ? "pending" : !binding ? "blocked" : online && observation.policy_generation === policy.generation && observation.capabilities?.includes(capability) ? "ready" : "unavailable", policy_generation: policy.generation }])),
       account_profiles: online && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreter_profiles: online && observation.policy_generation === policy.generation ? observation.interpreter_profiles ?? [] : [],
       script_profiles: { accounts: online && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreters: online && observation.policy_generation === policy.generation ? Object.fromEntries((observation.interpreter_profiles ?? []).map((p: Row) => [p.runtime, p.sha256])) : {} } };
@@ -245,8 +245,9 @@ export class PrivilegedExecutorStore {
     });
   }
   heartbeat(executor: Row, value: unknown) {
-    const keys = ["version", "boot_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release"];
-    const v = object(value, keys,keys.filter(k=>k!=="release")); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
+    const keys = ["version", "boot_id", "activation_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release"];
+    const v = object(value, keys); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
+    if(!executorActivationID(v.activation_id))fail(400,"invalid_executor_activation");
     if (v.release!==undefined) {
       const release=object(v.release,["build_id","source_revision","artifact_sha256","state_schema"]);
       validate(()=>boundedText(release.build_id));

@@ -14,4 +14,7 @@
 
 架构影响：新增宿主机 root 执行主体、独立控制身份、签名与在线授权、权限状态和 root 存储，必须同步 `docs/system-design.md` 第 6、13.10、17、60 节及 Doca。SDK 直报和遥测链路不变。
 
-最新主干集成：以 fe99013 为集成快照，保留应用管理/地址/Logo/YAML/卸载进度功能；普通 unit 不继承 SDD071 的 Docker/cap 自动授权，helper 与 runtime run 进行实际权限核验。Docker安装、执行器安装/维护与两类任务全向互斥，异步请求后复验管理员会话。该调整不恢复旧写适配器，也不发布镜像。
+最新主干集成：以 fd3685e 为本轮集成快照，保留应用管理/地址/Logo/YAML/卸载进度功能；普通 unit 不继承 SDD071 的 Docker/cap 自动授权，helper 与 runtime run 进行实际权限核验。Docker安装、执行器安装/维护与两类任务全向互斥，异步请求后复验管理员会话。该调整不恢复旧写适配器，也不发布镜像。
+
+
+#64完成收口先落[completion.md](completion.md)：删除中心旧写通道而非保留旧Agent兼容；唯一维护API补upgrade/rollback/repair，程序与安全状态分离回退。Docker补装只供依赖，不授普通Agent权限。历史适配器库可供新profile复用，但旧写API停用，完整业务profile和定时root不混入基础闭环。

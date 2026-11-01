@@ -124,15 +124,15 @@ export async function createApp(cfg: Config) {
         logger,
       };
     const agentCredentials = registerAgentCredentials(deps);
-    // Agent jobs are registered before service deployments so an approved
-    // deployment can enqueue its immutable pull-based job atomically with the
-    // centre state transition. The job module itself never executes commands.
+    // Ordinary jobs expose only fixed read-only capabilities. Registration
+    // quarantines old writes; later business subscribers replay that durable
+    // outcome so their histories cannot remain stuck in a queued state.
     const agentJobs = registerAgentJobs(deps, { agentCredentials });
     const managedMachines = registerManagedMachines(deps, { agentCredentials, dataDir: cfg.dataDir, downloadsDir: cfg.downloadsDir ?? join(root, "downloads") });
     modules.push(managedMachines);
     registerSettings(deps, agentCredentials);
-    // Service delivery metadata is intentionally separate from Agent bootstrap
-    // records: plans can be reviewed before an Agent executes them.
+    // Service/release metadata and read-only preflight remain independent of
+    // bootstrap. Host deployment profiles require a separate privileged path.
     const releaseArtifacts = new ReleaseArtifactStore(join(cfg.dataDir, "release-artifacts"));
     const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs, artifacts: releaseArtifacts });
     modules.push(serviceDeployments);

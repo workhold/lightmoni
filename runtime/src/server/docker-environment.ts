@@ -1,20 +1,16 @@
-import type { DB } from '../shared/sqlite.js';
-import { dockerObservation } from '../ops/docker.js';
-export interface DockerEnvironment { state:string; code:string; observed_at:string }
-export function machineDockerEnvironment(db:DB,agentID:string,now:Date):DockerEnvironment {
-  const unknown={state:'unknown',code:'',observed_at:''};
-  if(!agentID)return unknown;
-  try {
-    const agent=db.get<any>('SELECT * FROM agents WHERE id=?',agentID);
-    if(!agent)return unknown;
-    const {snapshot}=dockerObservation(db,agentID,JSON.parse(agent.heartbeat||'{}'));
-    if(!snapshot)return unknown;
-    const observed=snapshot.attempted_at||snapshot.observed_at;
-    const recent=Number.isFinite(Date.parse(observed))&&now.getTime()-Date.parse(observed)<=120000&&Date.parse(observed)<=now.getTime()+60000;
-    const online=Number.isFinite(Date.parse(agent.last_seen))&&now.getTime()-Date.parse(agent.last_seen)<=120000;
-    if(!recent||!online)return {state:'stale',code:snapshot.error??'',observed_at:observed};
-    const state=snapshot.state==='ready'?(snapshot.compose_available===false?'compose_missing':'ready'):
-      ({docker_cli_missing:'missing',docker_daemon_unavailable:'daemon_unavailable',docker_permission_denied:'permission_denied'} as Record<string,string>)[snapshot.error??'']??'unavailable';
-    return {state,code:state==='compose_missing'?'compose_unavailable':snapshot.error??'',observed_at:observed};
-  } catch {return unknown;}
+export interface DockerEnvironment { state:string; code:string; observed_at:string; source:'executor'|'none' }
+export interface ExecutorDockerObservation {
+ executor:{state:string;online:boolean;last_seen:string}|null;
+ capabilities:Record<string,{effective:string}>;
+}
+/** A control heartbeat is never evidence of access to the privileged daemon. */
+export function machineDockerEnvironment(status:ExecutorDockerObservation|undefined,now:Date):DockerEnvironment {
+ const unknown:DockerEnvironment={state:'unknown',code:'executor_observation_required',observed_at:'',source:'none'};
+ const executor=status?.executor;
+ if(!executor||executor.state!=='active')return unknown;
+ const at=Date.parse(executor.last_seen),recent=Number.isFinite(at)&&at>now.getTime()-60000&&at<=now.getTime()+60000;
+ if(!executor.online||!recent)return {state:'stale',code:'executor_observation_required',observed_at:executor.last_seen,source:'executor'};
+ return status!.capabilities['container.managed.v1']?.effective==='ready'
+  ?{state:'ready',code:'',observed_at:executor.last_seen,source:'executor'}
+  :{state:'unavailable',code:'executor_capability_unavailable',observed_at:executor.last_seen,source:'executor'};
 }

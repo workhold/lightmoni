@@ -35,6 +35,7 @@ function fixture(
     failShow?: boolean;
     legacyPackage?: boolean;
     failPermissionPreparation?: boolean;
+    privilegedService?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lightmoni-install-")),
@@ -99,7 +100,7 @@ function fixture(
       "#!/bin/sh\necho synthetic old " + old + " agent\n",
       { mode: 0o750 },
     );
-    writeFileSync(service, "synthetic previous service\n", { mode: 0o640 });
+    writeFileSync(service, readFileSync(join(repo, options.privilegedService ? "runtime/test/fixtures/legacy-privileged-agent.service" : "deploy/agent/lightmoni-agent.service")), { mode: 0o640 });
     if (old === "node") {
       const oldRuntime = join(root, "opt/lightmoni-agent/releases/old");
       mkdirSync(oldRuntime, { recursive: true });
@@ -187,7 +188,9 @@ else if(op==='restart'){
   else if(s.restarts===1){s.runtimeAccessible=accessibleRuntime();s.active=s.runtimeAccessible;}
   else s.active=true;
 }else if(op==='show'){
-  if(process.env.TEST_FAIL_SHOW==='yes')status=1;
+  if(process.env.TEST_FAIL_SHOW==='yes'&&!args.includes('--property=DropInPaths'))status=1;
+  else if(args.includes('--property=DropInPaths')){const d=path.join(path.dirname(file),'etc/systemd/system/lightmoni-agent.service.d/20-lightmoni-docker.conf');console.log(s.dropInPaths??(fs.existsSync(d)?d:''));}
+  else if(args.includes('--property=ActiveState')&&args.includes('--value'))console.log(s.active?'active':'inactive');
   else console.log('LoadState=loaded\\nActiveState='+ (s.active?'active':'failed')+'\\nSubState='+ (s.active?'running':'failed')+'\\nResult=exit-code\\nExecMainCode=exited\\nExecMainStatus=1');
 }
 fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
@@ -225,7 +228,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
   js(join(bin, "curl"), `const fs=require('fs'),args=process.argv.slice(2),get=flag=>args[args.indexOf(flag)+1],url=args.find(v=>v.startsWith('http://')),output=get('--output'),auth=fs.readFileSync(get('--config'),'utf8'),body=JSON.parse(fs.readFileSync(0,'utf8')),state=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE));let response;if(url.endsWith('/agents/enroll')){if(!auth.includes('test-enrollment')||body.enrollment_token!=='test-enrollment')throw Error('invalid enrollment fixture');state.enrollments=(state.enrollments||0)+1;response={agent_id:'synthetic-agent',bootstrap_credential:'test-bootstrap'};}else if(url.endsWith('/synthetic-agent/activate')){if(!auth.includes('test-bootstrap')||body.health.config_checked!==true)throw Error('invalid activation fixture');state.activations=(state.activations||0)+1;response={control_credential:'test-new-control',data_credential:'test-new-data'};}else throw Error('unexpected fixture request');fs.writeFileSync(process.env.TEST_SYSTEM_STATE,JSON.stringify(state));fs.writeFileSync(output,JSON.stringify(response));`);
   writeFileSync(
     join(packageDir, "lightmoni-agent.service"),
-    "synthetic new service\n",
+    readFileSync(join(repo,"deploy/agent/lightmoni-agent.service")),
   );
   execFileSync("tar", [
     "-czf",
@@ -347,7 +350,7 @@ function assertSafeStartupDiagnostics(
   assert.match(result.stderr, new RegExp(phase));
   assert.match(result.stderr, /journalctl\s+-u\s+lightmoni-agent\.service/);
   const calls: string[] = f.state().calls,
-    showIndex = calls.findIndex((call) => call.startsWith("show ")),
+    showIndex = calls.findIndex((call) => call.startsWith("show ")&&call.includes("--property=Result")),
     stopIndex = calls.findIndex((call) => call.startsWith("stop "));
   assert(showIndex >= 0, "systemd state is inspected before rollback");
   assert(stopIndex > showIndex, "diagnostics precede stopping the failed service");
@@ -381,7 +384,7 @@ test("verified release switches atomically, configures and restarts while preser
   assert.match(result.stdout, /Agent installed/);
   assert.notEqual(readlinkSync(f.current), f.before.current);
   assert(existsSync(f.before.current!));
-  assert.match(readFileSync(f.service, "utf8"), /new service/);
+  assert.deepEqual(readFileSync(f.service),readFileSync(join(repo,"deploy/agent/lightmoni-agent.service")));
   assert.equal(
     JSON.parse(readFileSync(f.config, "utf8")).endpoint,
     "http://old.example",
@@ -428,7 +431,7 @@ test("startup observation tolerates delayed activation and requires two consecut
   assert.equal(f.state().startupChecks, 4);
   assert.equal(f.state().sleeps.length, 3);
   assert(f.state().sleeps.every((args: string[]) => args.length === 1 && args[0] === "1"));
-  assert(!f.state().calls.some((call: string) => call.startsWith("show ")));
+  assert(f.state().calls.filter((call: string) => call.startsWith("show ")).every((call: string) => call.includes("--property=DropInPaths")));
   assertRuntimePermissions(f);
   f.unchangedData();
 });
@@ -550,4 +553,44 @@ test("fresh installer refuses retained identity and releases lifecycle lock with
 test("installer rejects the removed shared-key flag before changing installed state", t => {
   const f=fixture(t), result=f.run(["--key-stdin"]);
   assert.notEqual(result.status,0);f.restored();assert.deepEqual(f.state().calls,[]);
+});
+
+
+for(const failRestart of [false,true])test(`installer retires exact legacy Docker grant and never restores it after ${failRestart?'program rollback':'successful install'}`,t=>{
+  const f=fixture(t,{failRestart}),directory=join(f.root,'etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,'20-lightmoni-docker.conf');
+  mkdirSync(directory,{mode:0o755});writeFileSync(file,'[Service]\nSupplementaryGroups=docker\n',{mode:0o644});
+  const result=f.run();assert.equal(result.status===0,!failRestart,result.stderr);
+  assert.equal(existsSync(file),false);assert.match(result.stdout,/legacy_docker_access_removed/);
+  const calls=f.state().calls,stop=calls.findIndex((v:string)=>v==='stop lightmoni-agent.service'),reload=calls.findIndex((v:string)=>v==='daemon-reload');assert.ok(stop>=0&&reload>stop);
+  if(failRestart)f.restored();else f.unchangedData();
+});
+
+for(const kind of ['unknown','changed-known','symlink','writable','effective-external'])test(`installer preserves and rejects ${kind} systemd overrides before stopping Agent`,t=>{
+  const f=fixture(t),directory=join(f.root,'etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,kind==='unknown'?'10-administrator.conf':'20-lightmoni-docker.conf');mkdirSync(directory,{mode:0o755});
+  const bytes='[Service]\nSupplementaryGroups=docker\n';
+  if(kind==='symlink')symlinkSync(f.config,file);else writeFileSync(file,kind==='changed-known'?bytes+'# administrator change\n':bytes,{mode:0o644});
+  if(kind==='writable')chmodSync(file,0o666);
+  if(kind==='effective-external'){const system=join(f.root,'system.json'),state=f.state();state.dropInPaths='/run/systemd/system/lightmoni-agent.service.d/external.conf';writeFileSync(system,JSON.stringify(state));}
+  const result=f.run();assert.notEqual(result.status,0);assert.equal(existsSync(file),true);assert.equal(f.state().calls.some((v:string)=>v==='stop lightmoni-agent.service'),false);f.restored();
+});
+
+
+for(const failBeforePublish of [false,true])test(`installer failure while migrating the shipped privileged unit never re-enables it ${failBeforePublish?'before service publication':'after target restart'}`,t=>{
+  const f=fixture(t,{privilegedService:true,failRestart:!failBeforePublish,failPermissionPreparation:failBeforePublish});
+  const directory=join(f.root,'etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,'20-lightmoni-docker.conf');mkdirSync(directory,{mode:0o755});writeFileSync(file,'[Service]\nSupplementaryGroups=docker\n',{mode:0o644});
+  const result=f.run();assert.notEqual(result.status,0);assert.match(result.stderr,/Automatic restoration needs attention/);
+  assert.equal(f.state().active,false);assert.equal(f.state().enabled,false);assert.equal(f.state().restarts,failBeforePublish?0:1);
+  assert.equal(existsSync(file),false);assert.deepEqual(readFileSync(f.service),readFileSync(join(repo,'deploy/agent/lightmoni-agent.service')));
+  assert.equal(existsSync(join(f.root,'run/lightmoni-agent-lifecycle.lock')),true);
+  const evidence=result.stderr.match(/previous files remain in ([^\n]+)/)?.[1];assert.ok(evidence);t.after(()=>rmSync(evidence,{recursive:true,force:true}));
+  assert.deepEqual(readFileSync(join(evidence,'previous-service')),f.before.service);f.unchangedData();
+});
+
+test('installer rejects a shipped privileged candidate before old permission preparation or service mutation',t=>{
+  const f=fixture(t),packageDir=join(f.root,'package');
+  writeFileSync(join(packageDir,'lightmoni-agent.service'),readFileSync(join(repo,'runtime/test/fixtures/legacy-privileged-agent.service')));
+  execFileSync('tar',['-czf',join(f.release,artifact),'-C',packageDir,'lightmoni-agent','lightmoni-agent.service','lightmoni-agent-runtime']);
+  writeFileSync(join(f.release,'SHA256SUMS'),createHash('sha256').update(readFileSync(join(f.release,artifact))).digest('hex')+'  '+artifact+'\n');
+  const result=f.run();assert.notEqual(result.status,0);assert.match(result.stderr,/agent_privilege_migration_required/);
+  assert.equal(f.state().permissionPreparations,undefined);assert.equal(f.state().restarts,0);assert.deepEqual(f.state().calls,[]);f.restored();
 });

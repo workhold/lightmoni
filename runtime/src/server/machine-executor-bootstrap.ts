@@ -135,10 +135,10 @@ export function registerMachineExecutorBootstrap(deps: Dependencies, access: Acc
     if (executors.getStatus(machineID).executor && executors.getStatus(machineID).executor?.state!=="revoked") fail(409,"执行器已有身份，请核对原安装或明确卸载后恢复");
     const release = catalog.list().find(r=>r.arch===check.arch);
     if (!release) fail(409,"没有与目标架构匹配的 Agent 发行包，请先构建并发布");
-    const pinned = catalog.pin(release.sha256), id = randomUUID(), expires = new Date(deps.now().getTime()+300_000).toISOString();
+    const pinned = catalog.pinBundle(release.sha256), id = randomUUID(), expires = new Date(deps.now().getTime()+300_000).toISOString();
     const policy = executors.preparePolicyPlan(machineID,{capabilities:input.capabilities},actor);
     const plan = {machine:{id:refreshed.id,name:refreshed.name,address:refreshed.address,port:refreshed.port,username:refreshed.username,agent_id:refreshed.agent_id},
-      capabilities:[...input.capabilities].sort(),release:pinned.release,file:pinned.files["bundle.tar.gz"],
+      capabilities:[...input.capabilities].sort(),release:pinned.release,file:pinned.file,
       target_revision:access.revision(refreshed),credential_id:selected.credential.id,check_id:check.id,privilege:check.privilege,
       policy_plan:{id:policy.id,revision:policy.revision},steps:["复核 SSH 安装权限及主机身份","校验审批固定的同一 Agent 发行包","安装独立 root 执行器与身份","验证独立签名心跳和程序构建身份"],expires_at:expires};
     const revision = sha256(canonicalJSON(plan));

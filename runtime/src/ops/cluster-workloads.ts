@@ -1,3 +1,4 @@
+import { assertImplementedHostProfile } from './host-profiles.js';
 import {machineServiceAddresses} from "../server/host-network.js";
 import {createInstanceRecoverySchema,recoverReinstalledInstances,recordInstanceRecovery} from './instance-recovery.js';
 import {networkScope} from "../shared/host-network.js";
@@ -2934,6 +2935,7 @@ export function createClusterWorkloads(
     actor: string,
   ): Promise<any> {
     if (!actions(r).includes(action)) fail(400, "unsupported_workload_action");
+    assertImplementedHostProfile(r, action);
     if (r.kind === "cluster") {
       const runs = r.spec.machine_ids.flatMap((key: string) => {
         const m = machine(key);
@@ -3131,47 +3133,6 @@ export function createClusterWorkloads(
   async function tick() {
     if (closed) return;
     for (const r of store.list().filter(handles)) {
-      if (r.kind === "application")
-        for (const d of db.all<Row>(
-          "SELECT * FROM ops_platform_application_deployments WHERE application_id=?",
-          r.id,
-        )) {
-          const actor = d.policy_actor || r.authorized_by;
-          if (!store.authorized(actor)) continue;
-          try {
-            if (d.enabled) {
-              reconcile(r, d.cluster_id, actor);
-              for (const i of rows(r.id, false, d.cluster_id).filter(
-                (i) =>
-                  !busy(i) &&
-                  i.desired_state === "running" &&
-                  online(i.agent_id) &&
-                  deps.now().getTime() -
-                    Date.parse(i.last_seen || i.created_at) >=
-                    30000,
-              ))
-                inspect(desired(r, d.cluster_id), i, actor);
-            } else
-              for (const i of rows(r.id, true, d.cluster_id).filter(
-                (i) =>
-                  i.desired_state !== "running" &&
-                  !["stopped", "removed", "unknown"].includes(i.state) &&
-                  !busy(i) &&
-                  online(i.agent_id),
-              ))
-                stop(
-                  desired(r, d.cluster_id),
-                  i,
-                  actor,
-                  i.desired_state === "removed",
-                );
-          } catch (error) {
-            patchDeployment("application", r.id, d.cluster_id, {
-              last_error: errorCode(error),
-            });
-          }
-          publish(r.id);
-        }
       if (r.kind === "application" && r.spec.role === "openresty")
         startGatewayDNS(r);
       if (r.kind === "website") {

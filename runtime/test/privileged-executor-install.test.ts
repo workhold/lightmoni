@@ -56,18 +56,39 @@ esac
   // a recorded status subprocess. Real lstat modes and symlink decisions remain.
   const nodeSource = `#!${process.execPath}
 const fs=require("node:fs"),vm=require("node:vm"),source=process.argv[3];
+if(process.argv[2]?.endsWith("/maintenance.mjs")&&process.argv[3]==="install-phase"){
+  import(require("node:url").pathToFileURL(process.argv[2]).href).then(({ExecutorMaintenance})=>new ExecutorMaintenance({root:${JSON.stringify(root)},uid:process.getuid?.()??0,arch:"arm64"}).recordInstallPhase(process.argv[4],process.argv[5],process.argv[6])).catch(()=>{process.stderr.write("fixture_phase_failed\\n");process.exitCode=1;});
+}else if(process.argv[2]?.endsWith("/app/runtime/dist/privileged-executor/main.js")){
+  const crypto=require("node:crypto"),args=process.argv.slice(3),file=${JSON.stringify(p("enrollment-observation.json"))},calls=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,"utf8")):[],record={args,env:process.env};
+  if(args[0]==="enroll"){
+    record.stdin_sha256=crypto.createHash("sha256").update(fs.readFileSync(0)).digest("hex");
+    const key=crypto.generateKeyPairSync("ed25519").privateKey.export({type:"pkcs8",format:"pem"}).toString();
+    const config={version:1,executor_id:"fixture-executor",machine_id:"fixture-machine",agent_id:"fixture-agent",center_instance_id:"fixture-center",install_generation:7,private_key:key,output_key:"f".repeat(64),data_dir:"/var/lib/lightmoni-executor",local_policy:{generation:1}};
+    fs.writeFileSync(args[args.indexOf("--config")+1],JSON.stringify(config),{mode:0o600});
+    const journal=${JSON.stringify(p("var/lib/lightmoni-executor/journal.sqlite"))},db=new(require("node:sqlite").DatabaseSync)(journal);
+    db.exec("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE jobs(job_id TEXT PRIMARY KEY,digest TEXT NOT NULL DEFAULT '',grant_id TEXT NOT NULL DEFAULT '',lease_id TEXT NOT NULL DEFAULT '',state TEXT,plan_json TEXT NOT NULL DEFAULT '{}',payload_json TEXT NOT NULL DEFAULT '{}',unit TEXT NOT NULL DEFAULT '',nonce TEXT NOT NULL DEFAULT '',permit_id TEXT NOT NULL DEFAULT '',result_json TEXT NOT NULL DEFAULT '{}'); CREATE TABLE consumed_grants(grant_id TEXT PRIMARY KEY,job_id TEXT NOT NULL UNIQUE,digest TEXT NOT NULL); CREATE TABLE requests(slot TEXT PRIMARY KEY,id TEXT NOT NULL,digest TEXT NOT NULL); CREATE TABLE resources(resource_id TEXT PRIMARY KEY,value_json TEXT NOT NULL); INSERT INTO metadata VALUES('schema','1'),('initialized','1'),('policy_generation','1');");db.close();fs.chmodSync(journal,0o600);
+  }
+  calls.push(record);fs.writeFileSync(file,JSON.stringify(calls),{mode:0o600});
+}else{
 if(process.argv[2]!=="-e")process.exit(90);
 const syntheticFs={...fs,lstatSync(file){const s=fs.lstatSync(file);return Object.defineProperty(Object.create(s),"uid",{value:0});}};
 const syntheticCp={spawnSync(command,args,options){const file=${JSON.stringify(statusCalls)},calls=JSON.parse(fs.readFileSync(file,"utf8"));calls.push({command,args,options});fs.writeFileSync(file,JSON.stringify(calls));return {...JSON.parse(fs.readFileSync(${JSON.stringify(status)},"utf8")),stderr:""};}};
 vm.runInNewContext(source,{require(name){if(name==="node:fs")return syntheticFs;if(name==="node:child_process")return syntheticCp;return require(name);},process:{argv:[process.execPath,...process.argv.slice(4)],stdout:process.stdout,stderr:process.stderr,exit:process.exit.bind(process)}});
+}
 `;
   const writeRelease = (dir: string) => {
     for (const path of ["app/runtime/dist/privileged-executor", "executor"]) mkdirSync(join(dir, path), { recursive: true, mode: 0o755 });
     writeFileSync(join(dir, "node"), nodeSource, { mode: 0o755 });
     writeFileSync(join(dir, "app/runtime/dist/privileged-executor/main.js"), "fixture executor entrypoint\n", { mode: 0o644 });
-    writeFileSync(join(dir, "release.json"), JSON.stringify({ state_schema: 1, build_id: "fixture-build", version: "1.0.0" }));
+    writeFileSync(join(dir, "release.json"), JSON.stringify({ state_schema: 1, build_id: "fixture-build", version: "1.0.0", source_revision: "a".repeat(40), platform: "linux", arch: "arm64" }));
     for (const path of ["launcher.sh", "uninstall.sh", "lightmoni-executor.service"])
       writeFileSync(join(dir, "executor", path), rewriteMaintenancePaths(readFileSync(new URL(`../../deploy/executor/${path}`, import.meta.url), "utf8"), root), { mode: path.endsWith(".sh") ? 0o755 : 0o644 });
+    // Match only the two managed executable constants to this sandbox. All
+    // supervisor checks, complete-tree hashing, fsync and SQLite reads execute.
+    const supervisor = readFileSync(new URL("../../deploy/executor/maintenance.mjs", import.meta.url), "utf8")
+      .replace(/^const LAUNCHER = .*;$/m, `const LAUNCHER = ${JSON.stringify(readFileSync(join(dir, "executor/launcher.sh"), "utf8"))};`)
+      .replace(/^const SERVICE = .*;$/m, `const SERVICE = ${JSON.stringify(readFileSync(join(dir, "executor/lightmoni-executor.service"), "utf8"))};`);
+    writeFileSync(join(dir, "executor/maintenance.mjs"), supervisor);
   };
   const release = installed ? p("opt/lightmoni-executor/releases/fixture-build") : p("release");
   writeRelease(release);
@@ -294,14 +315,8 @@ test("install refuses to overwrite an existing executor identity", t => {
 test("successful install supplies bootstrap only to enrollment stdin", t => {
   const f = fixture(t, false), observation = f.p("enrollment-observation.json");
   const bootstrap = '{"bootstrap_token":"test-only-enrollment-value-not-a-real-secret"}\n';
-  // Store a digest of observed stdin, never the bootstrap itself. The launcher is
-  // a fixture executable, so no network enrollment or daemon is performed.
-  writeFileSync(join(f.release, "executor/launcher.sh"), `#!${process.execPath}
-const fs=require("node:fs"),crypto=require("node:crypto"),args=process.argv.slice(2),file=${JSON.stringify(observation)},calls=fs.existsSync(file)?JSON.parse(fs.readFileSync(file,"utf8")):[];
-const record={args,env:process.env};
-if(args[0]==="enroll"){record.stdin_sha256=crypto.createHash("sha256").update(fs.readFileSync(0)).digest("hex");fs.writeFileSync(args[args.indexOf("--config")+1],JSON.stringify({executor_id:"fixture-executor"}),{mode:0o600});}
-calls.push(record);fs.writeFileSync(file,JSON.stringify(calls),{mode:0o600});
-`, { mode: 0o755 });
+  // The actual managed launcher invokes a fixture Node which records only the
+  // stdin digest and creates a complete local identity/journal without network.
   const result = f.run("install", { input: bootstrap });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /executor_installation=ready/);
@@ -324,6 +339,8 @@ calls.push(record);fs.writeFileSync(file,JSON.stringify(calls),{mode:0o600});
   verifyNoSavedToken(f.p(""));
   assert.equal(f.history().filter(call => call[0] === "is-active").length, 3);
   assert.equal(existsSync(f.p("opt/lightmoni-executor/current/installation.json")), true);
+  const phase = JSON.parse(readFileSync(f.p("opt/lightmoni-executor/install-state.json"), "utf8"));
+  assert.equal(phase.maintenance_protocol, 1); assert.equal(phase.phase, "ready"); assert.match(phase.activation_id, /^[a-f0-9-]{36}$/); assert.equal(phase.release_name, "fixture-build"); assert.equal(phase.identity.executor_id, "fixture-executor"); assert.equal(phase.identity.agent_id, "fixture-agent"); assert.match(phase.identity.public_key_sha256, /^[a-f0-9]{64}$/); assert.match(phase.release.fingerprint, /^[a-f0-9]{64}$/);
 });
 
 for (const scriptName of ["install", "uninstall"] as const) {

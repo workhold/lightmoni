@@ -1,6 +1,6 @@
 import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { id, token } from "../shared/crypto.js";
-import { dockerJobAction, dockerReceipt, safeDockerCode } from '../shared/docker-jobs.js';
+import { ORDINARY_JOB_CAPABILITIES, ordinaryReadOnlyJob } from "../shared/ordinary-agent-jobs.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
@@ -61,8 +61,6 @@ export interface AgentJobStore {
   /** Cancel only an unclaimed job belonging to this deployment operation. */
   cancelQueuedDeployment(deploymentID: string, operationID: string, actor: string): Record<string, any>;
   get(jobID: string): Record<string, any>;
-  /** Authorize one private release read against the live Agent lease and immutable deployment action. */
-  authorizeArtifact(ctx: Context, agentID: string, jobID: string, releaseID: string): { sha256: string; size: number };
   /** Internal synchronous observer; invoked inside the job's SQLite transaction. */
   onUpdate(listener: (update: AgentJobUpdate) => void): () => void;
 }
@@ -244,6 +242,24 @@ export function registerAgentJobs(
     if (!options.agentCredentials) fail(503, "agent credentials unavailable");
     return options.agentCredentials.authenticate(ctx.req, ensureAgent(agentID), "control");
   };
+  const ordinaryRow = (value: any) => {
+    try { return ordinaryReadOnlyJob({ capabilities: JSON.parse(value.capabilities_json), actions: JSON.parse(value.actions_json) }); }
+    catch { return false; }
+  };
+  const assertOrdinary = (value: any) => { if (!ordinaryRow(value)) fail(409, "privileged_executor_required"); };
+  const quarantineLegacyWrites = () => db.transaction(() => {
+    for (const current of db.all<any>("SELECT * FROM agent_jobs WHERE state NOT IN ('succeeded','failed','cancelled','unknown')")) {
+      if (ordinaryRow(current)) continue;
+      const state = current.state === "queued" && Number(current.attempts) === 0 ? "cancelled" : "unknown", at = iso(deps), code = "legacy_agent_write_removed";
+      const receipt = { state, code, previous_state: current.state, summary: state === "cancelled" ? "Legacy write job cancelled before claim" : "Legacy write outcome requires host reconciliation" };
+      const changed = db.run("UPDATE agent_jobs SET state=?,receipt_json=?,lease_id='',lease_expires_at='',updated_at=? WHERE id=? AND state=?", state, json(receipt), at, current.id, current.state);
+      if (!changed.changes) continue;
+      const next = Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 sequence FROM agent_job_events WHERE job_id=?", current.id)!.sequence);
+      db.run("INSERT INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)", current.id, next, state, code, receipt.summary, at);
+      notify(row(current.id), state, code, { previousState: current.state });
+    }
+  });
+  quarantineLegacyWrites();
   const expireLeases = () => {
     const at = iso(deps);
     for (const queued of db.all<any>(
@@ -303,8 +319,9 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     if (!options.agentCredentials?.has(agentID, "control")) fail(409, "registered_host_required: 主机没有有效的 Agent 控制通道");
     const actionList = actions(input.actions), caps = capabilities(input.capabilities ?? []);
+    if (!ordinaryReadOnlyJob({ actions: actionList, capabilities: caps })) fail(409, "privileged_executor_required");
     const existing = db.get<any>("SELECT * FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deploymentID, operationID);
-    if (existing) return view(existing);
+    if (existing) { assertOrdinary(existing); return view(existing); }
     assertNoPendingMachineInstallation(db,"",agentID);
     assertNoPrivilegedExecution(db,"",agentID);
     assertNoPendingAgentUpdate(db, agentID);
@@ -330,7 +347,10 @@ export function registerAgentJobs(
   const claim = (agentID: string, offered: string[], _cursor = "") => {
     ensureAgent(agentID);
     assertAgentActive(db, agentID);
-    const caps = new Set(capabilities(offered));
+    quarantineLegacyWrites();
+    const offeredCapabilities = capabilities(offered);
+    if (offeredCapabilities.some(cap => !ORDINARY_JOB_CAPABILITIES.includes(cap))) fail(409, "privileged_executor_required");
+    const caps = new Set(offeredCapabilities);
     if (uninstallBlocked(agentID)) return null;
     if (hasPrivilegedExecution(db,"",agentID)) return null;
     expireLeases();
@@ -350,6 +370,7 @@ export function registerAgentJobs(
       agentID, nowText, JSON.stringify([...caps]),
     );
     if (!candidate) return null;
+    assertOrdinary(candidate);
     const required = JSON.parse(candidate.capabilities_json || "[]") as string[];
     if (required.some((cap) => !caps.has(cap))) return null;
     const lease = token(), leaseExpires = new Date(at.getTime() + LEASE_SECONDS * 1000), changed = db.run(
@@ -364,6 +385,7 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     const value = row(jobID);
     if (value.agent_id !== agentID) fail(403, "agent job does not belong to agent");
+    assertOrdinary(value);
     if (!leaseID || value.lease_id !== leaseID) fail(409, "agent job lease is invalid");
     if (value.lease_expires_at && Date.parse(value.lease_expires_at) <= deps.now().getTime()) {
       expireLeases();
@@ -375,6 +397,7 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     const value = object(input, "event"), lease = text(value.lease_id, "lease_id", 256), stored = row(jobID);
     if (stored.agent_id !== agentID) fail(403, "agent job does not belong to agent");
+    assertOrdinary(stored);
     // Unknown is intentionally a hard boundary: a late completion after a
     // lease timeout must not overwrite the centre's need to re-probe. Other
     // terminal receipts are safe to return for idempotent retries.
@@ -392,12 +415,11 @@ export function registerAgentJobs(
       fail(409, "agent job phase does not match its actions");
     const originalSummary = eventSummary(value.summary), originalCode = text(value.code ?? "", "code", 128, false), originalSnapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
     const probeJob = readOnlyPreflight(current);
-    const dockerJob = dockerJobAction(JSON.parse(current.actions_json||'[]'));
-    const summary = dockerJob ? 'Docker task state updated' : probeJob ? (phase === "accepted" ? "Agent accepted read-only systemd preflight" : phase === "preflighting" ? "Agent inspected registered systemd target" : phase === "succeeded" ? "Read-only systemd preflight completed" : "Read-only systemd preflight state updated") : originalSummary;
-    const code = dockerJob ? (originalCode?safeDockerCode(originalCode):'') : probeJob ? (originalCode ? safePreflightCode(originalCode) : "") : originalCode;
+    const summary = probeJob ? (phase === "accepted" ? "Agent accepted read-only systemd preflight" : phase === "preflighting" ? "Agent inspected registered systemd target" : phase === "succeeded" ? "Read-only systemd preflight completed" : "Read-only systemd preflight state updated") : originalSummary;
+    const code = probeJob ? (originalCode ? safePreflightCode(originalCode) : "") : originalCode;
     // A probe snapshot is accepted only from the final /result path, after the
     // strict whitelist below. Events never persist Agent-provided snapshot data.
-    const snapshot = probeJob || dockerJob ? {} : originalSnapshot;
+    const snapshot = probeJob ? {} : originalSnapshot;
     const occurred = iso(deps);
     db.transaction(() => {
       const last = db.get<any>("SELECT * FROM agent_job_events WHERE job_id=? ORDER BY sequence DESC LIMIT 1", jobID);
@@ -418,18 +440,7 @@ export function registerAgentJobs(
       if (!allowed.includes(current.state as AgentJobState)) fail(409, "agent job is no longer running");
       const previousRank = current.state === "leased" ? -1 : EVENT_ORDER[current.state as AgentJobEventPhase];
       const nextRank = EVENT_ORDER[phase];
-      // A rollback job restores an already-staged release and therefore moves
-      // directly from accepted to activating; it must not invent a staging
-      // phase or download/replace an artifact. Restrict the exception to that
-      // typed action shape so a normal deployment cannot skip artifact staging.
-      let actions: any[] = [];
-      try { actions = JSON.parse(current.actions_json || "[]"); } catch {}
-      const isRollbackJob = actions.length === 3
-        && actions[0]?.kind === "activate_release"
-        && actions[1]?.kind === "systemd" && actions[1]?.operation === "restart"
-        && actions[2]?.kind === "health_check";
-      const rollbackStageSkip = isRollbackJob && current.state === "accepted" && phase === "activating";
-      if (previousRank == null || nextRank == null || nextRank < previousRank || (nextRank > previousRank + 1 && !rollbackStageSkip))
+      if (previousRank == null || nextRank == null || nextRank < previousRank || nextRank > previousRank + 1)
         fail(409, "agent event phase is not a valid next step");
       db.run("UPDATE agent_jobs SET state=?,updated_at=?,lease_expires_at=? WHERE id=? AND lease_id=?", phase, occurred, iso(deps, new Date(deps.now().getTime() + LEASE_SECONDS * 1000)), jobID, lease);
       notify(row(jobID), phase, code, { previousState: current.state as AgentJobState, snapshot });
@@ -440,6 +451,7 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     const value = object(input, "result"), lease = text(value.lease_id, "lease_id", 256), stored = row(jobID);
     if (stored.agent_id !== agentID) fail(403, "agent job does not belong to agent");
+    assertOrdinary(stored);
     // A lost HTTP response may cause the Agent to retry its final receipt.
     // Return the durable terminal receipt instead of requiring a lease that
     // was deliberately cleared after the first commit.
@@ -451,15 +463,6 @@ export function registerAgentJobs(
     let state = text(value.state, "state", 32) as AgentJobState;
     if (!["succeeded", "failed", "cancelled", "unknown"].includes(state)) fail(400, "invalid result state");
     let code = text(value.code ?? "", "code", 128, false), summary = eventSummary(value.summary), snapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
-    const dockerAction=dockerJobAction(JSON.parse(current.actions_json||'[]'));
-    if(dockerAction){
-      code=code?safeDockerCode(code):'';
-      summary=state==='succeeded'?'Docker task completed and verified':state==='unknown'?'Docker result is unknown; inspect before retrying':'Docker task did not complete';
-      if(state==='succeeded'){
-        try{snapshot=dockerReceipt(dockerAction,snapshot,current.issued_at,deps.now());}
-        catch{state=dockerAction.operation==='inventory'?'failed':'unknown';code='invalid_docker_receipt';summary='Docker receipt did not match the task';snapshot={};}
-      }else snapshot={docker:{operation:dockerAction.operation,container_id:dockerAction.container_id??'',error:code||'docker_collection_unavailable',attempted_at:iso(deps)}};
-    }
     if (readOnlyPreflight(current)) {
       code = code ? safePreflightCode(code) : "";
       summary = state === "succeeded" ? "Read-only systemd preflight completed" : state === "failed" ? "Read-only systemd preflight failed" : "Read-only systemd preflight result requires review";
@@ -474,10 +477,6 @@ export function registerAgentJobs(
       } else snapshot = {};
     }
     const validSuccessPhase = readOnlyPreflight(current) ? current.state === "preflighting" : current.state === "verifying";
-    const operationAction = JSON.parse(current.actions_json || "[]").find((action: any) => action?.kind === "operations");
-    if (operationAction && state === "succeeded" && (snapshot.operations?.operation_id !== operationAction.operation_id || snapshot.operations?.resource_id !== JSON.parse(current.target_json || "{}").operations_resource_id)) {
-      state = "unknown"; code = "invalid_operations_receipt"; summary = "Operation receipt did not match the approved resource and operation"; snapshot = {};
-    }
     if (state === "succeeded" && (!validSuccessPhase || (snapshot as any).health?.healthy !== true)) {
       state = "unknown";
       code = "invalid_agent_sequence";
@@ -507,6 +506,7 @@ export function registerAgentJobs(
     return view(row(jobID));
   };
   const cancel = (jobID: string, actor: string) => {
+    quarantineLegacyWrites();
     const current = row(jobID);
     if (terminal(current.state as AgentJobState)) return view(current);
     const at = iso(deps);
@@ -550,41 +550,6 @@ export function registerAgentJobs(
     });
     return view(row(current.id));
   };
-  const authorizeArtifact = (ctx: Context, agentID: string, jobID: string, releaseID: string) => {
-    authenticate(ctx, agentID);
-    const leaseID = String(ctx.req.headers["x-lightmoni-job-lease"] ?? "").trim();
-    if (!leaseID) fail(401, "agent job lease is required");
-    const current = leaseRow(agentID, jobID, leaseID);
-    if (current.state !== "staging" || Date.parse(current.expires_at) <= deps.now().getTime())
-      fail(409, "agent job is not staging an artifact");
-    let actionList: any[];
-    let caps: string[];
-    try {
-      actionList = JSON.parse(current.actions_json || "[]");
-      caps = JSON.parse(current.capabilities_json || "[]");
-    } catch {
-      fail(409, "agent job artifact action is invalid");
-    }
-    const action = actionList.find((candidate) => candidate?.kind === "stage_artifact" && candidate?.release_id === releaseID);
-    if (!action || !caps.includes("artifact.stage")
-      || typeof action.service_id !== "string" || typeof action.sha256 !== "string"
-      || !/^[a-f0-9]{64}$/i.test(action.sha256) || !Number.isSafeInteger(action.size) || action.size < 1)
-      fail(403, "agent job does not authorize this artifact");
-    const binding = db.get<any>(
-      `SELECT d.service_id,d.release_id,t.machine_id,m.agent_id,r.artifact_digest,r.artifact_size,r.status
-       FROM deployments d
-       JOIN service_targets t ON t.id=d.target_id AND t.service_id=d.service_id
-       JOIN managed_machines m ON m.id=t.machine_id
-       JOIN releases r ON r.id=d.release_id AND r.service_id=d.service_id
-       WHERE d.id=?`,
-      current.deployment_id,
-    );
-    if (!binding || binding.agent_id !== agentID || binding.service_id !== action.service_id
-      || binding.release_id !== releaseID || binding.status !== "ready"
-      || binding.artifact_digest !== action.sha256.toLowerCase() || Number(binding.artifact_size) !== action.size)
-      fail(403, "agent job artifact binding is invalid");
-    return { sha256: binding.artifact_digest, size: Number(binding.artifact_size) };
-  };
   const safe = (handler: Handler): Handler => async (ctx) => {
     try { await handler(ctx); } catch (error) {
       if (error instanceof HTTPError) ctx.json({ error: error.message }, error.status);
@@ -616,7 +581,7 @@ export function registerAgentJobs(
     ctx.json(cancel(ctx.params.jobId, ctx.user.id + (value.reason ? ": " + text(value.reason, "reason", 256, false) : "")));
   }));
   return {
-    enqueue, claim, event, result, cancel, cancelQueuedDeployment, get: (jobID: string) => view(row(jobID)), authorizeArtifact,
+    enqueue, claim, event, result, cancel, cancelQueuedDeployment, get: (jobID: string) => view(row(jobID)),
     start() {
       if (sweepTimer) return;
       sweepTimer = setInterval(() => {
@@ -629,6 +594,17 @@ export function registerAgentJobs(
       sweepTimer = undefined;
     },
     onUpdate(listener: (update: AgentJobUpdate) => void) {
+      // The queue is registered before its business stores. Replay only the
+      // durable quarantine outcome so a restart cannot leave their old runs
+      // looking queued after the canonical job was cancelled or fenced unknown.
+      db.transaction(() => {
+        for (const current of db.all<any>("SELECT * FROM agent_jobs WHERE state IN ('cancelled','unknown') AND json_extract(receipt_json,'$.code')='legacy_agent_write_removed'")) {
+          const receipt = JSON.parse(current.receipt_json);
+          listener({ agentID: current.agent_id, deploymentID: current.deployment_id, operationID: current.operation_id,
+            jobID: current.id, phase: current.state, code: "legacy_agent_write_removed",
+            previousState: receipt.previous_state ?? (current.state === "cancelled" ? "queued" : "leased") });
+        }
+      });
       updateListeners.add(listener);
       return () => updateListeners.delete(listener);
     },

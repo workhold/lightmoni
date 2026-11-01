@@ -178,3 +178,9 @@ test('resource manifest replacement is transactional when a duplicate resource I
   assert.deepEqual(journal.resources(), original); journal.close();
   assert.deepEqual(f.open().resources(), original);
 });
+
+test('missing durable v1 columns are rejected without repairing tables or resetting stored state',async t=>{
+ for(const [table,column] of [['jobs','result_json'],['consumed_grants','digest'],['requests','digest'],['resources','value_json']])await t.test(table,sub=>{
+  const f=fixture(sub),journal=f.open(true);journal.policyGeneration(9);journal.close();const database=new DatabaseSync(f.filename);database.exec(`ALTER TABLE ${table} DROP COLUMN ${column}`);database.close();assert.throws(()=>f.open(),/journal_corrupt/);const observed=new DatabaseSync(f.filename,{readOnly:true});try{assert.equal((observed.prepare(`PRAGMA table_info(${table})`).all() as any[]).some(c=>c.name===column),false);assert.equal((observed.prepare("SELECT value FROM metadata WHERE key='policy_generation'").get() as any).value,'9')}finally{observed.close()}
+ });
+});

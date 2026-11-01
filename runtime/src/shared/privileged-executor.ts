@@ -5,6 +5,14 @@ export const EXECUTOR_SIGNATURE_HEADER = "x-lightmoni-executor-signature";
 export const EXECUTOR_JWS_TYPE = "lightmoni-executor-v1";
 export const EXECUTOR_LEASE_SECONDS = 45;
 export const EXECUTOR_PERMIT_SECONDS = 30;
+export const executorActivationID=(value:unknown):value is string=>typeof value==="string"&&/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
+/** Required v1 durable state. Readers may preserve extra columns, but never
+ * repair an incomplete schema by creating tables or guessing default values. */
+export const EXECUTOR_JOURNAL_COLUMNS={
+  metadata:["key","value"],
+  jobs:["job_id","digest","grant_id","lease_id","state","plan_json","payload_json","unit","nonce","permit_id","result_json"],
+  consumed_grants:["grant_id","job_id","digest"],requests:["slot","id","digest"],resources:["resource_id","value_json"],
+} as const;
 export const PRIVILEGED_CAPABILITIES = ["script.elevated.v1", "container.managed.v1"] as const;
 export type PrivilegedCapability = typeof PRIVILEGED_CAPABILITIES[number];
 export type PrivilegedState = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
