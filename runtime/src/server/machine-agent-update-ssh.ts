@@ -21,7 +21,7 @@ export interface AgentUpdateRemoteStatus {
   from: AgentUpdateRemoteRelease & { boot_id: string }; target: AgentUpdateStartRequest["target"];
   local_health: { service_active: boolean; identity_matches: boolean; release_matches: boolean; boot_id: string };
   started_at: string; updated_at: string; finished_at?: string; confirmation_deadline?: string;
-  error_code?: string; restored_fingerprint?: string;
+  error_code?: string; restored_fingerprint?: string; uninstaller_updated?: boolean;
 }
 const sha = /^[a-f0-9]{64}$/, op = /^[a-f0-9]{32}$/;
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
@@ -58,27 +58,29 @@ export function parseAgentUpdateStatus(output: string): AgentUpdateRemoteStatus 
     || ["service_active", "identity_matches", "release_matches"].some(key => typeof v.local_health[key] !== "boolean") || !boot(v.local_health.boot_id)
     || ["started_at", "updated_at"].some(key => typeof v[key] !== "string" || !Number.isFinite(Date.parse(v[key])))
     || ["finished_at", "confirmation_deadline"].some(key => v[key] !== undefined && (typeof v[key] !== "string" || !Number.isFinite(Date.parse(v[key]))))
-    || v.error_code !== undefined && !/^[a-z_]{1,80}$/.test(v.error_code) || v.restored_fingerprint !== undefined && !sha.test(v.restored_fingerprint)) throw new SSHError("invalid_response");
+    || v.error_code !== undefined && !/^[a-z_]{1,80}$/.test(v.error_code) || v.restored_fingerprint !== undefined && !sha.test(v.restored_fingerprint)
+    || v.uninstaller_updated !== undefined && typeof v.uninstaller_updated !== "boolean") throw new SSHError("invalid_response");
   return { schema: 1, operation_id: v.operation_id, agent_id: v.agent_id, status: v.status, from: { ...safeRelease(v.from), boot_id: v.from.boot_id }, target: safeRelease(v.target, false),
     local_health: { service_active: v.local_health.service_active, identity_matches: v.local_health.identity_matches, release_matches: v.local_health.release_matches, boot_id: v.local_health.boot_id },
     started_at: v.started_at, updated_at: v.updated_at,
     ...(v.finished_at ? { finished_at: v.finished_at } : {}), ...(v.confirmation_deadline ? { confirmation_deadline: v.confirmation_deadline } : {}),
-    ...(v.error_code ? { error_code: v.error_code } : {}), ...(v.restored_fingerprint ? { restored_fingerprint: v.restored_fingerprint } : {}) };
+    ...(v.error_code ? { error_code: v.error_code } : {}), ...(v.restored_fingerprint ? { restored_fingerprint: v.restored_fingerprint } : {}),
+    ...(v.uninstaller_updated !== undefined ? { uninstaller_updated: v.uninstaller_updated } : {}) };
 }
 
 // This self-contained probe runs with the already installed bundled Node even
 // before a host has a maintenance helper. Keep fingerprint construction equal
 // to AgentMaintenance.fingerprint (tested by the executor fixtures).
-const probeSource = String.raw`const fs=require('node:fs'),p=require('node:path'),c=require('node:crypto'),cp=require('node:child_process');
+export const agentUpdateProbeSource = String.raw`const fs=require('node:fs'),p=require('node:path'),c=require('node:crypto'),cp=require('node:child_process');
 const sha=v=>c.createHash('sha256').update(v).digest('hex'),SHA=/^[a-f0-9]{64}$/,OP=/^[a-f0-9]{32}$/;
 function safe(f,dir=false){let q=p.resolve(f);for(;;){const s=fs.lstatSync(q);if(s.isSymbolicLink()||s.uid!==0||(s.mode&18)!==0||q===f&&(dir?!s.isDirectory():!s.isFile()))throw Error();if(q==='/')break;q=p.dirname(q);}return f;}
 function json(f,max=65536){const s=fs.lstatSync(f);if(s.isSymbolicLink()||!s.isFile()||s.size>max)throw Error();return JSON.parse(fs.readFileSync(f,'utf8'));}
 function meta(r){safe(r,true);const m=json(safe(p.join(r,'release.json')),16384);if(!/^[A-Za-z0-9._-]{1,128}$/.test(m.version||'')||m.platform!=='linux'||!['amd64','arm64'].includes(m.arch))throw Error();const n=m.state_schema===1&&/^[a-f0-9]{40}$/.test(m.source_revision||'')&&/^[A-Za-z0-9._-]{1,128}$/.test(m.build_id||'');const old=m.state_schema===undefined&&m.version==='0.1.0'&&m.node_version==='24.15.0'&&m.requires==='glibc >= 2.28'&&SHA.test(m.node_sha256||'');if(!n&&!old)throw Error();if(m.node_binary_sha256!==undefined&&(!SHA.test(m.node_binary_sha256)||sha(fs.readFileSync(safe(p.join(r,'node'))))!==m.node_binary_sha256))throw Error();let a='';try{const x=json(safe(p.join(r,'installation.json')),4096);if(x.schema!==1||!SHA.test(x.artifact_sha256||''))throw Error();a=x.artifact_sha256;}catch(e){if(e.code!=='ENOENT')throw e;}return {version:m.version,source_revision:n?m.source_revision:'',build_id:n?m.build_id:'',state_schema:1,artifact_sha256:a,arch:m.arch};}
-function fp(r,l='/usr/local/bin/lightmoni-agent',s='/etc/systemd/system/lightmoni-agent.service'){const release=meta(r),launcher=fs.readFileSync(safe(l)),service=fs.readFileSync(safe(s)),manifest=fs.readFileSync(safe(p.join(r,'release.json'))),node=sha(fs.readFileSync(safe(p.join(r,'node')))),entrypoint=sha(fs.readFileSync(safe(p.join(r,'app/runtime/dist/agent/main.js'))));return {...release,fingerprint:sha(JSON.stringify({release_path:r,release,manifest:sha(manifest),launcher:sha(launcher),service:sha(service),node,entrypoint}))};}
+function fp(r,l='/usr/local/bin/lightmoni-agent',s='/etc/systemd/system/lightmoni-agent.service'){const release=meta(r),launcher=fs.readFileSync(safe(l)),service=fs.readFileSync(safe(s)),manifest=fs.readFileSync(safe(p.join(r,'release.json'))),node=sha(fs.readFileSync(safe(p.join(r,'node')))),entrypoint=sha(fs.readFileSync(safe(p.join(r,'app/runtime/dist/agent/main.js'))));let uninstaller;try{uninstaller=sha(fs.readFileSync(safe(p.join(r,'uninstall.sh'))));}catch(e){if(e.code!=='ENOENT')throw e;}return {...release,fingerprint:sha(JSON.stringify({release_path:r,release,manifest:sha(manifest),launcher:sha(launcher),service:sha(service),node,entrypoint,uninstaller}))};}
 function run(f,a){return cp.execFileSync(f,a,{encoding:'utf8',timeout:10000,maxBuffer:4194304,stdio:['ignore','pipe','ignore']}).trim();}
 function sys(v){return run('systemctl',['show','lightmoni-agent.service','--property='+v,'--value']);}
 try{safe('/opt/lightmoni-agent',true);const id=json('/var/lib/lightmoni-agent/identity.json',4096);if(!/^[A-Za-z0-9._:-]{1,128}$/.test(id.agent_id||''))throw Error();const sy=fs.lstatSync('/opt/lightmoni-agent/current'),r=fs.realpathSync('/opt/lightmoni-agent/current');if(!sy.isSymbolicLink()||sy.uid!==0||p.dirname(r)!=='/opt/lightmoni-agent/releases')throw Error();const current=fp(r),state=sys('ActiveState');if(sys('LoadState')!=='loaded'||sys('FragmentPath')!=='/etc/systemd/system/lightmoni-agent.service'||!['active','inactive','failed'].includes(state))throw Error();let local={};try{local=JSON.parse(run('/usr/local/bin/lightmoni-agent',['status','--config','/etc/lightmoni-agent/config.json']));}catch{}current.boot_id=local.agent_id===id.agent_id&&/^[a-f0-9-]{36}$/.test(local.boot_id||'')?local.boot_id:'';let previous=null;try{const x=json(safe('/opt/lightmoni-agent/previous.json'));if(x.schema!==1||!OP.test(x.operation_id||''))throw Error();const d='/opt/lightmoni-agent/updates/'+x.operation_id;safe(d,true);previous=fp(x.release_path,p.join(d,'previous-launcher'),p.join(d,'previous-service'));if(previous.fingerprint!==x.fingerprint)throw Error();}catch(e){if(e.code!=='ENOENT')throw e;}let busy=fs.existsSync('/var/lib/lightmoni-agent/operations/execution.lock');for(const f of ['agent-job-state.json','task-run-state.json'])try{const x=json('/var/lib/lightmoni-agent/'+f);busy ||=typeof x.id==='string'&&!!x.id;}catch(e){if(e.code!=='ENOENT')busy=true;}const arch=process.arch==='x64'?'amd64':process.arch;process.stdout.write(JSON.stringify({schema:1,ready:current.arch===arch,agent_id:id.agent_id,arch,service_active:state==='active',lifecycle_locked:fs.existsSync('/run/lightmoni-agent-lifecycle.lock'),operation_lock:busy,current,previous})+'\n');}catch{process.stdout.write('{"error_code":"unmanaged_installation"}\n');process.exitCode=1;}`;
-export function agentUpdateProbeCommand() { return privileged(`set -eu\n/opt/lightmoni-agent/current/node -e ${quote(probeSource)}`); }
+export function agentUpdateProbeCommand() { return privileged(`set -eu\n/opt/lightmoni-agent/current/node -e ${quote(agentUpdateProbeSource)}`); }
 
 export function agentUpdateStartCommand(input: {
   endpoint: string; machineID: string; operationID: string;
