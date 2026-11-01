@@ -1,5 +1,6 @@
 import { fail } from "../shared/http.js";
 import {registryTemplateSpec} from './registry-runtime.js';
+import { hostPortOverrides } from './application-ports.js';
 
 type Input = Record<string, any>;
 export const applicationCatalog = [
@@ -192,6 +193,10 @@ export function catalogInstallation(id: string, input: Input) {
   if (spec.ports.length && id !== 'openresty')
     spec.ports[0].host_port = p.port !== undefined && p.port !== null && p.port !== ''
       ? p.port : input.deployment_mode === 'managed' ? 0 : spec.ports[0].container_port;
+  const overrides=hostPortOverrides(input.host_ports,spec.ports);
+  if(id==='openresty'&&(overrides&&Object.keys(overrides).some(name=>overrides[name]!==spec.ports.find((p:Input)=>p.name===name)?.host_port)||input.listen_ip!==undefined))fail(400,'openresty_fixed_host_ports');
+  if(input.listen_ip!==undefined&&!['0.0.0.0','127.0.0.1'].includes(input.listen_ip))fail(400,'invalid_listen_ip');
+  spec.ports=spec.ports.map((port:Input)=>({...port,...(overrides&&Object.hasOwn(overrides,port.name)?{host_port:overrides[port.name]}:{}),...(input.listen_ip!==undefined?{host_ip:input.listen_ip}:{})}));
   return {
     template,
     name: input.name ?? template.name,

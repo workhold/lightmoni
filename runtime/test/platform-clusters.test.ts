@@ -287,6 +287,37 @@ test("private registry registration is host owned, coexists with business regist
     /system_registry_in_use/,
   );
 });
+test('registry ports are independently persisted per cluster and survive resource-only redeployment',async t=>{
+ const f=await fixture(t),a=f.createCluster(['ma'],'A'),b=f.createCluster(['mb'],'B');
+ const deploy=async(c:any,m:string,address:string,host_ports:any,revision:number)=>f.req('/private-registry/deployments','POST',{confirmed:true,trusted_network_acknowledged:true,revision,cluster_id:c.id,machine_id:m,address,...(host_ports===undefined?{}:{host_ports})});
+ let r=await deploy(a,'ma','10.0.0.1',{registry:15000,'hub-cache':15001,'origin-cache':15002},0);assert.equal(r.status,201,JSON.stringify(r.body));
+ let payload=f.finish('a').payload;assert.equal(payload.resource.config.application.compose.services.registry.ports[0].published,'15000');
+ r=await deploy(b,'mb','10.0.0.2',{registry:16000,'hub-cache':16001,'origin-cache':16002},r.body.revision);assert.equal(r.status,201,JSON.stringify(r.body));f.finish('b');
+ r=await deploy(a,'ma','10.0.0.1',undefined,r.body.revision);assert.equal(r.status,201,JSON.stringify(r.body));payload=f.finish('a').payload;assert.equal(payload.resource.config.application.compose.services.registry.ports[0].published,'15000');
+ const view=(await f.req('/private-registry')).body;
+ assert.equal(view.deployments.find((d:any)=>d.cluster_id===a.id).host_ports.registry,15000);
+ assert.equal(view.deployments.find((d:any)=>d.cluster_id===b.id).host_ports.registry,16000);
+ assert.equal(view.deployments.find((d:any)=>d.cluster_id===a.id).endpoint,'http://10.0.0.1:15000');
+ for(const ports of [{registry:5000,'hub-cache':5000},{registry:'5000'},{unknown:5000}]){
+  const bad=await deploy(a,'ma','10.0.0.1',ports,view.revision);assert.equal(bad.status,400,JSON.stringify(bad.body));
+ }
+ assert.equal((await f.req('/private-registry')).body.revision,view.revision);
+ const changed=await deploy(a,'ma','10.0.0.1',{registry:15005,'hub-cache':15001,'origin-cache':15002},view.revision);
+ assert.equal(changed.status,201);
+ assert(f.db.get('SELECT * FROM ops_platform_ports WHERE agent_id=? AND port=?','a',15000),'previous binding remains reserved while replacement is in flight');
+ const next=f.finish('a').payload;
+ assert.equal(next.resource.config.application.compose.services.registry.ports[0].published,'15005');
+ assert.equal(f.db.get('SELECT * FROM ops_platform_ports WHERE agent_id=? AND port=?','a',15000),undefined,'verified replacement releases previous binding');
+ assert.equal((await f.req('/private-registry')).body.deployments.find((d:any)=>d.cluster_id===b.id).host_ports.registry,16000);
+});
+test('generic cluster port overrides reach the immutable Agent payload without changing other clusters',async t=>{
+ const f=await fixture(t),a=f.createCluster(['ma'],'A'),b=f.createCluster(['mb'],'B');
+ const app=f.app(a,{deployments:[{cluster_id:a.id,machine_ids:['ma'],host_ports:{http:18080,admin:19090}},{cluster_id:b.id,machine_ids:['mb'],host_ports:{http:28080,admin:29090}}]});
+ assert.equal((await f.action(app,'deploy',{cluster_id:a.id})).status,202);
+ assert.equal((await f.action(app,'deploy',{cluster_id:b.id})).status,202);
+ assert.equal(f.finish('a').payload.resource.config.application.ports.find((p:any)=>p.container_port===8080).host_port,18080);
+ assert.equal(f.finish('b').payload.resource.config.application.ports.find((p:any)=>p.container_port===8080).host_port,28080);
+});
 test("registry external entry owns one HTTPS/Basic website and cannot silently switch storage or remove its protection", async (t) => {
   const f = await fixture(t),
     c = f.createCluster(["ma"], "Source"),

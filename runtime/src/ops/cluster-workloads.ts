@@ -23,6 +23,7 @@ import {
 } from "./system-applications.js";
 import { privateRegistryAddress } from "../operations/registry-address.js";
 import { registryRuntime, registryCacheFor } from "./registry-runtime.js";
+import { hostPortOverrides } from './application-ports.js';
 import { ensureDnsRecords, normalizeDomain, CloudError } from "./cloud.js";
 import type {
   PlatformOptions,
@@ -313,6 +314,7 @@ export function createClusterWorkloads(
       spec: {
         ...r.spec,
         ...d,
+        ports: (r.spec.ports??[]).map((p:Row)=>({...p,host_port:d.host_ports&&Object.hasOwn(d.host_ports,p.name)?d.host_ports[p.name]:p.host_port})),
         ...(r.spec.role === "openresty"
           ? { service_name: SYSTEM_SERVICE_NAMES.openresty }
           : {}),
@@ -805,6 +807,8 @@ export function createClusterWorkloads(
     )
       fail(400, "application_deployment_required");
     const deployments = s.deployments.map((d: Row) => {
+      const hostPorts=hostPortOverrides(d.host_ports,declared);
+      if(role==='openresty'&&hostPorts&&Object.keys(hostPorts).length)fail(400,'openresty_fixed_host_ports');
       const c = cluster(d.cluster_id),
         targets = list(d.machine_ids ?? [], "machine_ids");
       targets.forEach((key) => {
@@ -863,6 +867,7 @@ export function createClusterWorkloads(
         fail(400, "openresty_cluster_domain_required");
       return {
         ...gateway,
+        ...(hostPorts?{host_ports:hostPorts}:{}),
         ...(role === "registry"
           ? {
               registry_address: privateRegistryAddress(d.registry_address),

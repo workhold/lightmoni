@@ -6,6 +6,7 @@ import {
   App,
   Button,
   Checkbox,
+  Collapse,
   Descriptions,
   Empty,
   Form,
@@ -24,6 +25,8 @@ import { api } from "../shared/api";
 import { useI18n } from "../shared/i18n";
 import { errorText, type Overview, type Spec } from "./ops/model";
 import "./operations.css";
+import ApplicationPortFields from "./ops/ApplicationPortFields";
+import ApplicationInstallDrawer from "./ops/ApplicationInstallDrawer";
 
 export default function PrivateRegistryPage() {
   const { t } = useI18n(),
@@ -36,6 +39,8 @@ export default function PrivateRegistryPage() {
     }),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
+  const [installID,setInstallID]=useState<string>();
+  const registryPorts=data?.application?.spec.ports??[{name:"registry",container_port:5000},{name:"hub-cache",container_port:5001},{name:"origin-cache",container_port:5002}];
   const [dialog, setDialog] = useState<"deploy" | "external">(),
     [busy, setBusy] = useState(false),
     [switching, setSwitching] = useState(""),
@@ -69,6 +74,8 @@ export default function PrivateRegistryPage() {
   }, [load]);
   const explain = (code: string) => {
     const messages: Record<string, [string, string]> = {
+      invalid_host_ports: ["端口必须是 0～65535 的整数，并对应已声明的服务。", "Ports must be integers from 0 to 65535 for declared services."],
+      duplicate_host_port: ["宿主端口不能重复；使用不同端口，或填 0 自动分配。", "Host ports must be unique. Choose different ports, or 0 for automatic allocation."],
       platform_revision_conflict: [
         "配置已更新，请刷新后重试。输入已保留。",
         "Configuration changed. Refresh and retry; your input is retained.",
@@ -109,6 +116,7 @@ export default function PrivateRegistryPage() {
             cluster_id: row?.cluster_id,
             machine_id: row?.machine_id,
             address: row?.address,
+            host_ports:row?.host_ports??Object.fromEntries(registryPorts.map((p:Spec)=>[p.name,0])),
             cpu:
               data?.application?.spec.deployments?.find(
                 (d: Spec) => d.cluster_id === row?.cluster_id,
@@ -148,7 +156,7 @@ export default function PrivateRegistryPage() {
     setBusy(true);
     setFormError("");
     try {
-      await api(
+      const saved=await api<Spec>(
         "/ops/private-registry/" +
           (dialog === "deploy" ? "deployments" : "external"),
         {
@@ -167,7 +175,9 @@ export default function PrivateRegistryPage() {
         },
       );
       setDialog(undefined);
-      void message.success(
+      if(dialog==="deploy")setInstallID(saved.application?.id);
+      if(dialog==="deploy"&&!saved.runs?.length)void message.warning(t("配置已保存，但尚未生成新执行；请核对安装记录后重试。","Configuration saved, but no new execution was created. Inspect the history before retrying."));
+      else void message.success(
         t(
           "配置已保存，部署任务已提交。",
           "Configuration saved; deployment submitted.",
@@ -377,9 +387,7 @@ export default function PrivateRegistryPage() {
                   title: t("操作", "Actions"),
                   key: "actions",
                   render: (_, r: Spec) => (
-                    <Button size="small" onClick={() => open("deploy", r)}>
-                      {t("重新部署", "Redeploy")}
-                    </Button>
+                    <Space wrap><Button size="small" onClick={() => open("deploy", r)}>{t("配置 / 重新部署", "Configure / redeploy")}</Button><Button size="small" onClick={()=>setInstallID(data.application.id)}>{t("安装记录", "Installation history")}</Button></Space>
                   ),
                 },
               ]}
@@ -442,6 +450,7 @@ export default function PrivateRegistryPage() {
           </div>
         </>
       )}
+      <ApplicationInstallDrawer resourceId={installID} resources={overview.resources} machines={overview.machines??[]} onClose={()=>setInstallID(undefined)} onManage={()=>{setInstallID(undefined);open("deploy",data?.deployments?.[0])}}/>
       <Modal
         title={
           dialog === "deploy"
@@ -457,6 +466,8 @@ export default function PrivateRegistryPage() {
         okText={t("保存并部署", "Save and deploy")}
         cancelText={t("取消", "Cancel")}
         width={640}
+        style={{top:24}}
+        styles={{body:{maxHeight:'calc(100dvh - 200px)',overflowY:'auto',overscrollBehavior:'contain'}}}
         forceRender
       >
         {formError && <Alert type="error" showIcon title={formError} />}
@@ -487,6 +498,7 @@ export default function PrivateRegistryPage() {
                     form.setFieldsValue({
                       machine_id: d?.machine_id,
                       address: d?.address,
+                      host_ports:d?.host_ports??Object.fromEntries(registryPorts.map((p:Spec)=>[p.name,0])),
                       cache_enabled: d?.cache_enabled ?? false,
                     });
                   }}
@@ -515,7 +527,8 @@ export default function PrivateRegistryPage() {
               >
                 <Input readOnly={!!deployment} />
               </Form.Item>
-              <div className="lm-ops-grid">
+              <ApplicationPortFields ports={registryPorts}/>
+              <Collapse items={[{key:'resources',label:t('资源限制（高级）','Resource limits (advanced)'),forceRender:true,children:<div className="lm-ops-grid">
                 <Form.Item name="cpu" label={t("CPU（核）", "CPU (cores)")}>
                   <InputNumber min={0.01} max={1024} />
                 </Form.Item>
@@ -525,7 +538,7 @@ export default function PrivateRegistryPage() {
                 >
                   <InputNumber min={64} max={1048576} />
                 </Form.Item>
-              </div>
+              </div>}]}/>
               <Form.Item
                 name="cache_enabled"
                 label={t("开启内网镜像缓存", "Enable internal image cache")}
