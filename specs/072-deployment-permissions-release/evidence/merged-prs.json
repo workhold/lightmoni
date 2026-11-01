@@ -1,0 +1,46 @@
+[
+  {
+    "headRefOid": "12966aca5661d7e0f46afd4e9473bb3f5a729f34",
+    "mergeCommit": {
+      "oid": "286c8ba3e0faf0766678de1c55e10c6d9bbd212b"
+    },
+    "mergedAt": "2026-11-01T09:08:11Z",
+    "number": 44,
+    "state": "MERGED",
+    "title": "优化主机 IP 分类与网络地址摘要",
+    "url": "https://github.com/workhold/lightmoni/pull/44"
+  },
+  {
+    "headRefOid": "61a5fb1a8f6181f8f0447114bd01ea3a2d4f5a93",
+    "mergeCommit": {
+      "oid": "5e12103a17186bc6bfbdb9faa1aab3390db3a7e5"
+    },
+    "mergedAt": "2026-11-01T09:05:55Z",
+    "number": 47,
+    "state": "MERGED",
+    "title": "设计：Agent 执行权限与显式提权脚本（SDD060）",
+    "url": "https://github.com/workhold/lightmoni/pull/47"
+  },
+  {
+    "headRefOid": "cabd6be35f1d2b2dbef88a6c84dfd983ae721268",
+    "mergeCommit": {
+      "oid": "a33cca861b4be730105aa59b32754f2c53f4147b"
+    },
+    "mergedAt": "2026-11-01T09:05:18Z",
+    "number": 55,
+    "state": "MERGED",
+    "title": "feat: 主机 Docker 环境状态与一键补装",
+    "url": "https://github.com/workhold/lightmoni/pull/55"
+  },
+  {
+    "headRefOid": "906cb892e9bd0661fd3898b5efb269a868edf89b",
+    "mergeCommit": {
+      "oid": "6642bd019917b4c469960a068b60870afa56e970"
+    },
+    "mergedAt": "2026-11-01T09:09:37Z",
+    "number": 58,
+    "state": "MERGED",
+    "title": "fix(agent): 完善部署与网站权限，修复低端口误报",
+    "url": "https://github.com/workhold/lightmoni/pull/58"
+  }
+]
