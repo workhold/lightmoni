@@ -1386,11 +1386,13 @@ ops_cluster_instances显式保存cluster_id，活跃slot按owner+cluster唯一�
 
 ### 42.4 OpenResty托管与完整配置
 
-OpenResty是role=openresty的全局唯一应用，可部署多个集群，每集群一项部署。已安装应用可编辑部署集群、机器、副本和资源；运行中的部署先停用清理再移除。每个入口部署保存稳定gateway_domain，可选gateway_dns_zone_id托管健康入口A/AAAA；未选择时由用户维护。manual选择机器，managed设置实例数和资源；Linux host网络固定80/443。内部gateway.apply/inspect/stop/remove复用Agent执行器，owner仍为application。每集群完整网站、证书和静态文件包逐机nginx -t、切换、重载、HTTP/TLS验证；失败保留旧版。故障换机完成配置与验证后恢复DNS资格。
+OpenResty是role=openresty的全局唯一应用，可部署多个集群，每集群一项部署。已安装应用可编辑部署集群、机器、副本和资源；运行中的部署先停用清理再移除。每个入口部署保存稳定gateway_domain，可选gateway_dns_zone_id托管健康入口A/AAAA；未选择时由用户维护。manual选择机器，managed设置实例数和资源；Linux host网络固定80/443。内部gateway.apply/inspect/stop/remove复用Agent执行器，owner仍为application。每集群完整网站、证书和静态文件包逐机nginx -t、切换、重载、HTTP/TLS验证；失败保留旧版。故障换机完成配置与验证后恢复DNS资格。中心按目标网关实例逐机解析应用上游并计算完整包签名；同集群不同机器的配置可以不同，拓扑或健康变化后沿用调和流程重新发布。
 
 ### 42.5 网站公共配置与集群上游
 
 website为全局对象，bindings统一域名、HTTPS、证书、DNS，nginx及locations统一路径、超时、头部、缓存、限流和其他高级选项。routing_mode=managed时选择一次service_application_id和HTTP(S)命名service_port_name，自动发现其部署集群，集群内只解析该服务的健康端点。manual保留locations.cluster_targets逐集群应用端口或代理URL；不支持公共配置覆盖。集群流量策略cluster_policies保存enabled、1–100相对weight、default及厂商线路id/name，独立于冻结网站公共修订；关闭立即退出期望解析，恢复仍需成功回执。公共草稿不能通过流量策略保存被隐式发布。同一网站的domain_routes按domain独立指定cluster_ids与可选cluster_policies；省略范围跟随全部可用集群，固定选择只保留其仍可用的交集，不自动扩大。旧网站无此字段继续继承全站范围与策略。域名范围随发布冻结，每集群完整包只包含绑定到该集群的域名；同绑定组的证书与路径仍复用。候选旧集群仍接收空站点包以清理已移走域名。
+
+平台发现的应用端点与目标 OpenResty 实例 machine_id 相同时，上游 host 使用127.0.0.1；异机继续使用发现的内网地址，IPv6保留方括号。此规则适用于managed托管服务及manual应用端口目标，保留HTTP(S)、命名端口对应的宿主端口、健康过滤与集群范围；用户显式填写的代理URL不改写。发现接口与仅有集群上下文的预览仍显示实际发现地址。依据为现有Linux host网络网关与应用宿主端口模型，无新Agent协议或存储迁移（SDD 058）。
 
 ### 42.6 DNS聚合、共享资源与界面
 
@@ -1605,3 +1607,30 @@ root自有staging与专用运行单元启动固定解释器，清理继承环境
 先落独立身份、授权与全接口分流、预检/状态和生命周期，再分别交付受限容器及一次性提权脚本，最后迁移网站/证书/systemd/备份/自动协调和有期限定时提权。所有旧高级入口未迁移时拒绝特权执行，不能保留普通control读取root私有payload的旁路。任务记录统一，现有hook不能顺带root；更新不自动开启新权限。
 
 实现验收覆盖root/sudo/无提权、默认关闭、主体冒充、计划/上下文篡改、重放、危险Compose、账号组变化、未知结果、撤权和生命周期。真实Linux/Docker验收另记；本轮设计审查与Doca结构读回不代表这些能力已上线。
+
+
+## 57. Agent Docker 即时清单与容器操作（SDD 057）
+
+主机 Docker 清单独立周期采集，不等待平台应用日志积压。失败保留最近成功清单及最近尝试时间，区分 CLI 缺失、socket 权限不足、daemon 不可达、命令超时与通用失败；失败原因优先于过期提示。平台应用与全部 Docker 仍分开显示，外部容器不会自动成为平台部署。
+
+管理员点击立即采集后，中心按稳定主机 ID 解析当前 Agent，验证在线状态和 docker.inventory 能力，使用原 AgentJobStore 下发单动作 Docker 任务。页面定期读取缓存，只有手动采集才创建任务；界面展示任务进度与终态。任务回执中的新清单和认证心跳按观测时间合并，旧心跳不能覆盖更新的即时结果。
+
+启动、停止、重启要求管理员明确确认主机、完整容器 ID 和影响；目标必须存在于新鲜清单。中心保存 actor 与幂等 request_id，同主机活动任务互斥。Agent 通过既有 control 凭据拉取任务，使用 shell=false、固定 default context、有界输出和超时执行，复用节点写锁，并在变更前后核对容器 ID 和状态，再读取完整清单。
+
+回执只保存白名单状态、诊断和清单，绑定原动作、容器和任务时间，丢弃原始 CLI 输出与其他字段；页面响应不包含 lease。未领取超时取消，领取后中断或验证失败保留 unknown 和写锁，禁止自动重放。平台调度器可能恢复平台应用期望状态；不增加容器删除、任意 shell、中心 Docker socket、SSH 回退或 AI 执行权限。
+
+本节对应 SDD 057，需升级中心和 Agent 才启用即时能力；旧 Agent 周期心跳兼容，页面明确提示升级。实现与验证见 specs/057-docker-agent-controls/；是否已发布以发行记录为准。
+
+```mermaid
+flowchart LR
+  User[管理员 / 确认操作] --> Center[主机绑定 / 能力 / 幂等]
+  Center --> Jobs[(SQLite 任务 / 有效租约)]
+  Jobs --> Agent[Agent / 节点写锁]
+  Agent --> Docker[本机 Docker / 状态验证]
+  Docker --> Receipt[安全回执 / 最新清单]
+  Receipt --> Center
+  Docker --> Periodic[独立周期清单 / 认证心跳]
+  Periodic --> Center
+```
+
+Doca 已保存并回读，原有 575 个块完整保留；新图 7 节点、8 连线与正文核对见 `specs/057-docker-agent-controls/evidence/doca-readback.json`。

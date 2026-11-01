@@ -1,0 +1,15 @@
+{
+  "environment": "Real local Router, SQLite, administrator routes and Agent lease runner; synthetic Docker command state machine",
+  "production_writes": false,
+  "checks": [
+    "Missing Docker CLI diagnostic includes latest attempted time without false successful inventory",
+    "Collect now creates a queued Agent task and waits for a verified receipt",
+    "Inventory count updates from zero to two and offers a Docker tab link",
+    "External stopped and running containers are listed with state-dependent actions",
+    "Stop confirmation identifies host, full container ID and service interruption",
+    "Confirmed stop updates running to exited and replaces actions with Start",
+    "Start confirmation submits through the same bounded task path"
+  ],
+  "screenshot": "docker-after-stop.jpg",
+  "limits": "No production mutation, mobile viewport or full theme matrix acceptance claimed; real Docker integration is recorded separately in validation.md"
+}

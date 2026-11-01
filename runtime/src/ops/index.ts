@@ -75,7 +75,7 @@ export function registerOperationsPlatform(
         }
       }
     };
-  registerObservability(deps, store, safe);
+  registerObservability(deps, store, safe, options.jobs);
   // Include rejection responses in the no-store boundary, before the admin guard.
   const certificateResponse = (fn: Handler): Handler => ctx => {
     ctx.res.setHeader("Cache-Control", "no-store");

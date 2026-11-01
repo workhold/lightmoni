@@ -198,3 +198,22 @@ SDK 直接使用中心地址和 SDK Key，业务可以先启动或完全不装 A
 平台在登记时自动生成不可变主机 ID，由用户设置主机名称。名称可修改，同名资产以 ID 区分；详情展示 ID 供核对。主机资产 ID 与 Agent 安装身份分开，关系只由中心主机预约与认证接入建立，不支持用户手工配对。
 
 当前不为业务或 Agent 创建主机 ID/名称环境变量，也不新增 SDK 读取能力。SDK 保持独立直报；登记主机不修改已有业务启动环境。
+
+
+## Docker 清单与即时操作（SDD 057）
+
+主机的“应用与 Docker”显示平台部署及本机全部容器，包含停止的和非平台创建的容器。定期采集之外，“立即采集”通过已认证 Agent 的持久任务查询 Docker，不等待下次指标采集。管理员可确认后启动、停止、重启已有容器；任务完成后验证状态并更新清单。操作外部容器不会创建平台应用；平台应用容器可能被调度器恢复到期望状态。
+
+需要同时升级中心与 Agent。旧 Agent 未声明 `docker.inventory` / `docker.control` 时只显示已有快照并提示升级。中心不连接 Docker socket；Agent 使用本机固定 `default` context，不继承交互终端的 `DOCKER_HOST` 或其他 context。
+
+标准安装以 `lightmoni-agent` 用户运行，安装器不会自动授予 Docker 管理权限。主机必须有 Docker CLI、运行中的 daemon，并显式允许该服务用户访问目标 socket。在主机管理员核对授权后，按该主机的 Docker 安全策略配置组或 ACL，并重启 Agent 服务使新权限生效；Docker 管理权限可控制宿主机，不能通过将 socket 设为全员可写来解决。
+
+只读排查可在主机执行：
+
+```sh
+id lightmoni-agent
+ls -l /var/run/docker.sock
+sudo -u lightmoni-agent docker --context default ps --all --no-trunc
+```
+
+页面区分 CLI 缺失、socket 权限不足、daemon 不可达和命令超时，显示最近尝试并保留旧清单。排队超时说明 Agent 未领取任务；`unknown` 说明可能已产生效果，先立即采集并检查容器，不直接重复操作。节点写锁在未知结果时保留，管理员需核对原执行已终止及现场状态后处理恢复。
