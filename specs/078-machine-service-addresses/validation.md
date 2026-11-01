@@ -29,3 +29,5 @@ Runtime/Web 类型检查通过；`git diff --check` 通过。
 有架构影响：中心新增 `machine_service_address_settings`、管理员 GET/PUT 接口与服务地址优先级，并增加托管入口缺公网地址的 DNS 资格原因。Agent 网卡协议、凭据、AI 权限、DNS 归属与部署拓扑不变；无网卡快照的历史数字地址兼容保留。
 
 仓库 `docs/system-design.md` 的第64/78节与 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 在同一 SDD/PR 同步。Doca 保存确认且最新 seq=922 回读第64段、SDD078 标题/4段/原生图：8节点、8连线与提交内容逐项相同。原第71节原生图的8节点/10连线保持逐项相同，根标题不变，块数由727增至733，未对无关块执行替换。详见 `doca-readback.json`。首次编号标题规范化问题已按真实块ID修正，最终标题、章节与图块回读确认；不以保存回执代替回读。
+
+交付：[GitHub PR #62](https://github.com/workhold/lightmoni/pull/62)，目标 `main`，实现提交 `c2f313c`；已同步远端主干 `fe99013`，未合入或部署。PR 描述覆盖最终行为、兼容边界、架构章节、Doca 回读与验证范围。
