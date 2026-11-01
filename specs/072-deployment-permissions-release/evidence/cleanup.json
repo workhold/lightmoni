@@ -1,0 +1,8 @@
+{
+  "test_prefix": "lightmoni-release-6642bd0",
+  "remaining_test_containers": [],
+  "remaining_test_volumes": [],
+  "remaining_test_networks": [],
+  "runtime_credentials_removed": true,
+  "unrelated_resources_modified": false
+}

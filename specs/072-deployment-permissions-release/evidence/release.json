@@ -1,0 +1,13 @@
+{
+  "revision": "6642bd019917b4c469960a068b60870afa56e970",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tag": "20261101-6642bd0",
+  "architecture_sync": "Packaging only; SDD071 repository section71 and Doca seq917 readback retained (707 original blocks and34 native diagrams preserved). Independent executor SDD060 remains target design.",
+  "feature_prs": [
+    44,
+    47,
+    55,
+    58
+  ],
+  "previous_latest": "sha256:7006119fd48e287f6834c921eeef44a87edc47667180cb315f238e42aec9fbc0"
+}
