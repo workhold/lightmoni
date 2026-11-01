@@ -1,6 +1,6 @@
 # Docker 更新与回滚
 
-根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261101-a1292cf`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
+根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261101-46a4ac1`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
 
 ## 更新
 
@@ -18,7 +18,7 @@ docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/
 
 通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对镜像提交；随后检查网页、原有管理员登录、只读查询和 SDK/Agent 下载。需要 `up` 重新创建容器才能切换镜像；本地 `npm run build`、`release:sdk` 和 `release:agent` 只更新本地生成物。
 
-`20261101-a1292cf` 从已合入 PR #53 的 `a1292cf5085d77f8f3eef74d9999c02652764c15` 完整构建：商店共 31 个应用，新增数据库、中间件、DevOps 与 AI 项目，工具仅 DBX。安装表单提供中英文参数和运行前提；依赖初始化的应用需要新版 Agent 的 `operations.platform.oneshot.v1` 能力。Harbor 仅 amd64 且要求 Engine 26 / Compose 2.26，FastGPT 需要已有 S3 存储，vLLM 需要 NVIDIA GPU。双平台摘要与真实生产镜像验收见 [SDD 067 发布验收](../../specs/067-app-catalog-release/validation.md)。此前机器地址统一与本机镜像复用行为继续保留，见 [SDD 065](../../specs/065-machine-address-image-release/validation.md)。公网入口继续使用 HTTPS 和网站鉴权。中心换镜像不会自动升级既有 Agent 或业务容器，依赖初始化的新模板需先升级目标 Agent。旧 `.env` 的 `LIGHTMONI_IMAGE` 不影响此入口；拉取后仍需执行 `up` 更新中心。旧固定标签保留供回退。
+`20261101-46a4ac1` 从已合入 PR #56 的 `46a4ac11c50de7fc48790744a462c871d8172df5` 完整构建：31 个商店应用均有本地品牌 Logo，自定义应用支持上传、替换和移除；修改 Logo 不触发重新部署。应用创建与修改支持高级 YAML，历史 Compose 以 YAML 展示；托管模式自动发现容器端口并忽略 YAML 宿主端口映射，手动模式采用 YAML 映射。保存后显示规范化 YAML，原注释和排版不保留。双平台摘要与生产镜像验收见 [SDD 069 发布验收](../../specs/069-application-logos-release/validation.md)。应用商店仍为 31 项，工具仅 DBX；Harbor 仅 amd64 且要求 Engine 26 / Compose 2.26，FastGPT 需要已有 S3，vLLM 需要 NVIDIA GPU，依赖初始化的模板需 Agent 支持 `operations.platform.oneshot.v1`，详见 [SDD 066](../../specs/066-app-catalog-expansion/validation.md)。中心换镜像不会自动升级既有 Agent 或业务容器。沿用原 Compose 项目、环境和卷执行 pull/up；旧 `.env` 的 `LIGHTMONI_IMAGE` 不影响此入口，旧固定标签保留供回退。
 
 中心镜像更新不会自动更新已安装的 Agent。需要使用新运维能力的节点应单独升级 Agent，并按[运维手册](../../docs/operations.md)准备 Nginx、Docker/Compose 等所需依赖及目录、服务权限；不能仅凭 capability 出现就认定节点已有执行权限。公网 ACME 与真实 S3 等未验收范围仍以 [SDD 026](../../specs/026-operations-platform/validation.md)为准。
 

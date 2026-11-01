@@ -1,0 +1,10 @@
+{
+  "prefix": "lightmoni-release-46a4ac1",
+  "remaining_owned_resources": {
+    "container": [],
+    "volume": [],
+    "network": []
+  },
+  "temporary_runtime_credentials_removed": true,
+  "unrelated_services_unchanged": true
+}

@@ -1,3 +1,4 @@
+import {prepareApplicationYAML,stripComposeExtensions} from './application-yaml.js';
 import {machineServiceAddresses} from "../server/host-network.js";
 import {publicWebsiteSpec} from './website-auth.js';
 import {registryCacheFor} from './registry-runtime.js';
@@ -108,6 +109,7 @@ const domains = (v: unknown) =>
   });
 const sanitizeEnvironment = (spec: any) => {
   const out = structuredClone(spec);
+  if(out.compose&&typeof out.compose==='object')stripComposeExtensions(out.compose);
   if (out.environment)
     out.environment = Object.fromEntries(
       Object.keys(out.environment).map((k) => [k, "[redacted]"]),
@@ -131,9 +133,10 @@ function preserveEnvironment(input: any, previous: any) {
   if (c.environment)
     for (const [k, v] of Object.entries(c.environment))
       if (v === "[redacted]") {
-        if (typeof previous?.environment?.[k] !== "string")
+        const prior = previous?.environment?.[k] ?? (previous?.mode === 'compose' ? previous?.compose?.services?.app?.environment?.[k] : undefined);
+        if (typeof prior !== "string")
           fail(400, "environment_value_required");
-        c.environment[k] = previous.environment[k];
+        c.environment[k] = prior;
       }
   if (c.compose && typeof c.compose === "object")
     for (const [name, s] of Object.entries(c.compose.services ?? {}) as Array<
@@ -142,7 +145,7 @@ function preserveEnvironment(input: any, previous: any) {
       if (s.environment && !Array.isArray(s.environment))
         for (const [k, v] of Object.entries(s.environment))
           if (v === "[redacted]") {
-            const old = previous?.compose?.services?.[name]?.environment?.[k];
+            const old = previous?.compose?.services?.[name]?.environment?.[k] ?? (name === 'app' && previous?.mode === 'container' ? previous?.environment?.[k] : undefined);
             if (typeof old !== "string")
               fail(400, "environment_value_required");
             s.environment[k] = old;
@@ -378,6 +381,7 @@ export function createWorkloadController(
       if(JSON.stringify(expected)!==JSON.stringify(config.image_cache))fail(409,'private_registry_cache_policy_changed');
     },
     validate(spec, previous, context) {
+      spec = prepareApplicationYAML(spec, previous);
       if (
         spec.deployments ||
         previous?.deployments ||

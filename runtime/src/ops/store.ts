@@ -1,4 +1,5 @@
 import {oneShotServices} from '../operations/workload-readiness.js';
+import { applicationLogo } from './application-logos.js';
 import { id } from "../shared/crypto.js";
 import { fail } from "../shared/http.js";
 import {
@@ -104,6 +105,7 @@ export class OperationsPlatformStore implements PlatformStore {
    CREATE INDEX IF NOT EXISTS ops_platform_run_job ON ops_platform_runs(job_id);
    CREATE TABLE IF NOT EXISTS ops_platform_run_events(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,resource_id TEXT NOT NULL,resource_kind TEXT NOT NULL,resource_revision INTEGER NOT NULL,sequence INTEGER NOT NULL,phase TEXT NOT NULL,state TEXT NOT NULL,detail_json TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(run_id,sequence));
    CREATE INDEX IF NOT EXISTS ops_platform_run_event_sequence ON ops_platform_run_events(run_id,sequence);`);
+    deps.db.exec(`CREATE TABLE IF NOT EXISTS ops_application_logos(resource_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,content_base64 TEXT NOT NULL,sha256 TEXT NOT NULL,updated_by TEXT NOT NULL,updated_at TEXT NOT NULL);`);
     // Display names of deployments are labels; service_name is their unique identity.
     const original =
       deps.db.get<any>(
@@ -195,11 +197,37 @@ export class OperationsPlatformStore implements PlatformStore {
     const { spec_cipher: _, status_json: __, ...rest } = resource as any;
     return {
       ...rest,
+      ...(resource.kind === 'application' ? this.logoMetadata(resource.id) : {}),
       spec: d.publicSpec
         ? d.publicSpec(structuredClone(resource.spec))
         : cleanResult(resource.spec),
       status: cleanResult(resource.status),
     };
+  }
+  private logoMetadata(key: string) {
+    const logo = this.deps.db.get<{revision:number;sha256:string}>('SELECT revision,sha256 FROM ops_application_logos WHERE resource_id=?', key);
+    return {logo_revision: logo?.revision ?? 0, logo_url:logo?.sha256 ? '/api/v1/ops/resources/'+encodeURIComponent(key)+'/logo?v='+logo.sha256 : undefined};
+  }
+  readApplicationLogo(key: string) {
+    this.get(key, 'application');
+    const row = this.deps.db.get<{content_base64:string;sha256:string}>('SELECT content_base64,sha256 FROM ops_application_logos WHERE resource_id=?', key);
+    if (!row?.content_base64) fail(404, 'application_logo_not_found');
+    return {content:Buffer.from(row.content_base64,'base64'),sha256:row.sha256};
+  }
+  private writeApplicationLogo(key: string, revision: number, input: unknown, actor: string) {
+    if (!Number.isSafeInteger(revision) || revision < 0) fail(400, 'application_logo_revision_required');
+    const old = this.deps.db.get<{revision:number}>('SELECT revision FROM ops_application_logos WHERE resource_id=?', key);
+    if ((old?.revision ?? 0) !== revision) fail(409, 'application_logo_conflict');
+    const value = input === null ? null : applicationLogo(input);
+    this.deps.db.run('INSERT INTO ops_application_logos VALUES(?,?,?,?,?,?) ON CONFLICT(resource_id) DO UPDATE SET revision=excluded.revision,content_base64=excluded.content_base64,sha256=excluded.sha256,updated_by=excluded.updated_by,updated_at=excluded.updated_at', key, revision+1, value?.base64 ?? '', value?.sha256 ?? '', actor, this.at());
+  }
+  setApplicationLogo(key: string, revision: number, input: unknown, actor: string) {
+    this.requireActor(actor);
+    this.deps.db.transaction(() => {
+      this.get(key, 'application');
+      this.writeApplicationLogo(key, revision, input, actor);
+    });
+    return this.get(key);
   }
   authorized(actor: string) {
     return !!this.deps.db.get(
@@ -216,8 +244,9 @@ export class OperationsPlatformStore implements PlatformStore {
     name: string,
     spec: Record<string, any>,
     actor: string,
+    logo?: unknown,
   ) {
-    return this.createResource(kind, name, spec, actor);
+    return this.createResource(kind, name, spec, actor, undefined, logo);
   }
   createSystemApplication(
     kind: SystemApplicationKind,
@@ -239,8 +268,10 @@ export class OperationsPlatformStore implements PlatformStore {
     spec: Record<string, any>,
     actor: string,
     systemKind?: SystemApplicationKind,
+    logo?: unknown,
   ) {
     this.requireActor(actor);
+    if (logo !== undefined && kind !== 'application') fail(400, 'application_logo_kind_required');
     const key = id(),
       at = this.at();
     this.deps.db.transaction(() => {
@@ -273,6 +304,7 @@ export class OperationsPlatformStore implements PlatformStore {
         at,
       );
       this.syncKeys(this.get(key));
+      if (logo !== undefined) this.writeApplicationLogo(key, 0, logo, actor);
       if (systemKind || (kind === "application" && valid.role === "openresty"))
         this.deps.db.run(
           "INSERT INTO ops_system_applications VALUES(?,?,?)",
@@ -412,6 +444,7 @@ export class OperationsPlatformStore implements PlatformStore {
           fail(409, "platform_resource_in_use");
       if (r.status.active === true) fail(409, "platform_stop_before_delete");
       this.deps.db.run("DELETE FROM ops_platform_resources WHERE id=?", key);
+      this.deps.db.run('DELETE FROM ops_application_logos WHERE resource_id=?', key);
       this.deps.db.run(
         "DELETE FROM ops_platform_application_keys WHERE resource_id=?",
         key,

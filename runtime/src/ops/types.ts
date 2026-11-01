@@ -23,6 +23,8 @@ export interface PlatformResource {
   authorized_by: string;
   created_at: string;
   updated_at: string;
+  logo_url?: string;
+  logo_revision?: number;
 }
 export interface PlatformRun {
   id: string;

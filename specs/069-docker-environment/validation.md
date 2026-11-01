@@ -29,3 +29,7 @@
 ## 交付
 
 [GitHub PR #55](https://github.com/workhold/lightmoni/pull/55)，目标 main，草稿待评审；未合并或部署。
+
+## 汇总合入
+
+2026-11-01 用户授权包含其他会话的全部变更经 PR 合入 main 并发布。同步最新 main，保留 SDD 068 与 069 两个设计章节；SDD 071 将标准 Agent 的 Docker/网站权限纳入安装发行包，与本流程的固定服务附加组配置兼容。最终发布与实机边界由汇总发布记录说明。
