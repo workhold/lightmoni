@@ -13,6 +13,7 @@ export interface DockerContainer {
   deployment_id: string;
 }
 export interface DockerInventory {
+  compose_available?: boolean;
   observed_at: string; state: 'ready' | 'unavailable'; error?: string;
   attempted_at?: string;
   truncated: boolean; containers: DockerContainer[];
@@ -28,7 +29,7 @@ export function dockerInventory(value: any): DockerInventory | undefined {
   if (value === undefined) return undefined;
   if (!value || !Array.isArray(value.containers) || value.containers.length > 500 || !['ready','unavailable'].includes(value.state) || !Number.isFinite(Date.parse(value.observed_at))) fail(400, 'invalid_docker_inventory');
   const errors=['docker_cli_missing','docker_permission_denied','docker_daemon_unavailable','docker_command_timeout','docker_collection_unavailable'];
-  return {observed_at: new Date(value.observed_at).toISOString(), state: value.state, truncated: value.truncated === true,
+  return {observed_at: new Date(value.observed_at).toISOString(), state: value.state, ...(typeof value.compose_available==='boolean'?{compose_available:value.compose_available}:{}), truncated: value.truncated === true,
     ...(Number.isFinite(Date.parse(value.attempted_at))?{attempted_at:new Date(value.attempted_at).toISOString()}:{}),
     ...(value.state === 'unavailable' ? {error: errors.includes(value.error)?value.error:'docker_collection_unavailable'} : {}),
     containers: value.containers.map((c: any) => {

@@ -1,0 +1,19 @@
+{
+  "document_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "write_saved": true,
+  "before_seq": 912,
+  "after_seq": 914,
+  "original_blocks": 700,
+  "current_blocks": 707,
+  "original_outline_preserved": true,
+  "original_outline_checked": 200,
+  "note": "Doca outline is capped at 200 blocks; all 200 pre-change entries match after relocation. The pre-existing credential graph was separately read in full. Added heading auto-normalization was repaired using its returned native ID; original title restored.",
+  "original_native_diagrams": 10,
+  "new_graph": {
+    "nodes": 6,
+    "edges": 5,
+    "verified": true
+  },
+  "existing_credential_graph_unchanged": true,
+  "paragraphs_verified": true
+}
