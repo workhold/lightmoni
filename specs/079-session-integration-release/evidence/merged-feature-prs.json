@@ -1,0 +1,62 @@
+[
+  {
+    "baseRefName": "main",
+    "headRefOid": "b582d41154ca757d75a1fae4efbc66882fa81161",
+    "mergeCommit": {
+      "oid": "48c9774b755aa38755646585a8a716123cc13cec"
+    },
+    "mergedAt": "2026-11-01T15:10:51Z",
+    "number": 62,
+    "state": "MERGED",
+    "title": "fix(ops): 完善网站发布解析与主机内外网地址管理",
+    "url": "https://github.com/workhold/lightmoni/pull/62"
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "5e5f9f8c0eff73e4f33f9d9eaea7200340999acc",
+    "mergeCommit": {
+      "oid": "fd3685e5011c7762ef491cd8fca0ec493b8c555e"
+    },
+    "mergedAt": "2026-11-01T15:11:00Z",
+    "number": 63,
+    "state": "MERGED",
+    "title": "修复 Agent 重装残留占用并增加按来源镜像代理",
+    "url": "https://github.com/workhold/lightmoni/pull/63"
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "1b1fcf1865e68689356103640d344e951c75c75b",
+    "mergeCommit": {
+      "oid": "b4cf37d6896709388ff231a8feef81ae397fb88b"
+    },
+    "mergedAt": "2026-11-01T16:38:03Z",
+    "number": 64,
+    "state": "MERGED",
+    "title": "完成独立 root 执行器与维护闭环，移除旧特权通道",
+    "url": "https://github.com/workhold/lightmoni/pull/64"
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "caa96790cd3e40fd407472963573d3ee41a38bf2",
+    "mergeCommit": {
+      "oid": "0437669d45530173447f44493c53bcffc457fb4f"
+    },
+    "mergedAt": "2026-11-01T17:04:49Z",
+    "number": 65,
+    "state": "MERGED",
+    "title": "完成受管主机运维迁移并整合独立执行器维护",
+    "url": "https://github.com/workhold/lightmoni/pull/65"
+  },
+  {
+    "baseRefName": "main",
+    "headRefOid": "7934c7a4d8e75a35bcbeb45c31af7f0def25d229",
+    "mergeCommit": {
+      "oid": "ccbb85d3156f428c297422dc679cab3cc215b5dd"
+    },
+    "mergedAt": "2026-11-01T17:08:00Z",
+    "number": 66,
+    "state": "MERGED",
+    "title": "修复统一执行器维护的共享发行打包清单",
+    "url": "https://github.com/workhold/lightmoni/pull/66"
+  }
+]

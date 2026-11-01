@@ -1,0 +1,14 @@
+{
+  "revision": "ccbb85d3156f428c297422dc679cab3cc215b5dd",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tag": "20261102-ccbb85d",
+  "feature_prs": [
+    62,
+    63,
+    64,
+    65,
+    66
+  ],
+  "architecture_sync": "Not applicable to release packaging. Feature PRs synchronize docs/system-design.md and Doca; final SDD080 latest readback 930 preserves native diagrams. This release changes no responsibilities, protocols, storage, credentials or topology.",
+  "previous_latest": "sha256:063672bf82dca4834a1f9c4b12feb2964fb57d8393dab11157df313c3079c688"
+}

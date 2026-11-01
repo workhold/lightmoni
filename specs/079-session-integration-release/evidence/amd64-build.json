@@ -1,0 +1,63 @@
+{
+  "buildx.build.provenance": {
+    "builder": {
+      "id": ""
+    },
+    "buildType": "https://mobyproject.org/buildkit@v1",
+    "materials": [
+      {
+        "uri": "pkg:docker/node@24.15.0-bookworm?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+        }
+      },
+      {
+        "uri": "pkg:docker/node@24.15.0-bookworm-slim?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+        }
+      },
+      {
+        "uri": "http://buildkit-session/w2zdym45qwh3ml1wh2ugnzpaf",
+        "digest": {
+          "sha256": "2c074434e4f5073e3e396d41f20c609758bfe2643fa92c9f58381df22205da77"
+        }
+      }
+    ],
+    "invocation": {
+      "configSource": {
+        "uri": "http://buildkit-session/w2zdym45qwh3ml1wh2ugnzpaf",
+        "digest": {
+          "sha256": "2c074434e4f5073e3e396d41f20c609758bfe2643fa92c9f58381df22205da77"
+        },
+        "entryPoint": "deploy/server/Dockerfile"
+      },
+      "parameters": {
+        "frontend": "dockerfile.v0",
+        "args": {
+          "build-arg:BUILD_REVISION": "ccbb85d3156f428c297422dc679cab3cc215b5dd",
+          "build-arg:DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+          "build-arg:DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+          "build-arg:NODE_DIST_URL": "https://npmmirror.com/mirrors/node",
+          "build-arg:NPM_REGISTRY": "https://registry.npmmirror.com"
+        }
+      },
+      "environment": {
+        "platform": "linux/arm64"
+      }
+    }
+  },
+  "buildx.build.ref": "desktop-linux/desktop-linux/fqeymmggv29d15olfz2krf4j5",
+  "containerimage.config.digest": "sha256:7101731794282546c795babf77b01a7e34599fc6b72b8f29001126a4c1f3f64d",
+  "containerimage.descriptor": {
+    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+    "digest": "sha256:43b5b0a1688dec8b9e6d5b2ffa03df2e2aca104be43b9c1bb19350ed5b152a53",
+    "size": 3248,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  },
+  "containerimage.digest": "sha256:43b5b0a1688dec8b9e6d5b2ffa03df2e2aca104be43b9c1bb19350ed5b152a53",
+  "image.name": "docker.io/library/lightmoni:20261102-ccbb85d-amd64"
+}
