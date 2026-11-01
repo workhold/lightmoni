@@ -30,5 +30,10 @@
     "preserve certificate nested tasks alongside installation drawer",
     "retain all gateway/cache Agent capabilities and both CSS additions"
   ],
-  "architecture": "No new architecture beyond original feature SDDs; preserve original Doca text and native diagrams"
+  "architecture": "No new architecture beyond original feature SDDs; preserve original Doca text and native diagrams",
+  "real_docker_controls": {
+    "tests": 9,
+    "passed": 9,
+    "skipped": 0
+  }
 }

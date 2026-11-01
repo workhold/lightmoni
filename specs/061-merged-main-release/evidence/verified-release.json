@@ -1,0 +1,64 @@
+{
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tags": {
+    "20261101-07bf306": "sha256:0900cab572819da309270ec02b49975d710ae9261464140bb29d8d1609f2d768",
+    "latest": "sha256:0900cab572819da309270ec02b49975d710ae9261464140bb29d8d1609f2d768"
+  },
+  "revision": "07bf306873e63a0219ad682c71e40589854afa42",
+  "docker_pull_verification": [
+    {
+      "platform": "linux/amd64",
+      "image_id": "sha256:2dbf561e42373b1e25a1aed55b6f4cd17daa5a1131b237b9b2cfc5f022fd67bf",
+      "tested_image_id": "sha256:e00a534b007e2b3917762870247a4cb913fd69648600317243760ec25deb5e0d",
+      "platform_manifest": "sha256:2dbf561e42373b1e25a1aed55b6f4cd17daa5a1131b237b9b2cfc5f022fd67bf",
+      "config_digest": "sha256:12d6d1888aeb7680cc6a9919fa6d389362252553adb5688cd0d544afce6f3a86",
+      "rootfs_and_config_match_tested_image": true
+    },
+    {
+      "platform": "linux/arm64",
+      "image_id": "sha256:11f67fcb304aed0a8c306cdf2000d57a014db944e2fc5ded2a8dbea863baa334",
+      "tested_image_id": "sha256:16dc66270e81b991ef1ff1f6b57f8db854e0154e56ec4a43398b26eecf106214",
+      "platform_manifest": "sha256:11f67fcb304aed0a8c306cdf2000d57a014db944e2fc5ded2a8dbea863baa334",
+      "config_digest": "sha256:c9e73209264cd7a9f7cebaa44e7085db64cbdc1ec635aa2c892c7f4f5bc7a6f2",
+      "rootfs_and_config_match_tested_image": true
+    }
+  ],
+  "local_container_checks": {
+    "amd64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "center identity and authenticated internal/public reporting settings",
+      "production bundle contains multi-value bulk DNS actions",
+      "production bundle includes website guidance, domain sync tasks, cluster selection and certificate export",
+      "production private-image and installation UI, authenticated empty registry API, and ordinary Registry catalog template",
+      "real image derives a single-domain certificate name without name input, issues it and exposes persistent execution steps",
+      "administrator certificate view and fixed-version private-key attachment match, with no-store and public JSON redaction",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "downloaded matching-platform Agent contains Docker controls, image-cache/auth capability guards and installation progress",
+      "AI runtime and task tools import"
+    ],
+    "arm64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "center identity and authenticated internal/public reporting settings",
+      "production bundle contains multi-value bulk DNS actions",
+      "production bundle includes website guidance, domain sync tasks, cluster selection and certificate export",
+      "production private-image and installation UI, authenticated empty registry API, and ordinary Registry catalog template",
+      "real image derives a single-domain certificate name without name input, issues it and exposes persistent execution steps",
+      "administrator certificate view and fixed-version private-key attachment match, with no-store and public JSON redaction",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "downloaded matching-platform Agent contains Docker controls, image-cache/auth capability guards and installation progress",
+      "AI runtime and task tools import"
+    ]
+  },
+  "architecture_sync": "original feature SDDs / PRs 37,39,40,41 preserve synchronized Doca text and native diagrams; integration and packaging add no architecture",
+  "test_resources_cleaned": true
+}
