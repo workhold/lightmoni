@@ -1,0 +1,10 @@
+# 实现设计
+
+- registry-runtime复用machineNetwork读取当前主机/Agent身份匹配的网卡快照，选择非容器虚拟网卡的私网IP；优先保留仍存在的旧地址，找不到私网则loopback。未取得新Agent快照时保留既有部署/旧客户端明确私网地址，新的无地址请求落到本机。
+- private-registry部署API不再要求address/trusted_network_acknowledged；confirmed保持普通部署确认。冻结resolved registry_address，固定机器不变；集群路由地址与registry_address取消相等约束，允许同机地址更新而不假称数据迁移。
+- registeredRegistryEndpoint从实例端口及绑定地址回读。registryCacheFor获得消费machine ID，loopback仅发给同机；领取时按Agent映射的同一machine重新核对，保留既有缓存开关和端点一致性检查。
+- prepareCachedImages先本地inspect并核对Docker平台与不可变digest，命中固定image ID和never；缓存导入在获取manifest/config后尝试内容身份复用，避免相同内容的别名重复下载层。缓存miss/失败的原回源规则保持。
+- 仓库UI去掉地址/网络确认，展示实际服务端点及本机范围；通用端口/资源不变。主机管理负责地址来源，不扩展成另一套IP配置页。
+- 定向检查和隔离Docker/浏览器验收后记录限制；同步设计与Doca，再通过GitHub功能PR交付。按用户“全部推送到github，合并到主分支，更新docker”的持续授权，经PR合入后固定源码发布双平台镜像，独立验收并更新默认引用。不得把测试回执当成生产发布。
+
+- machineServiceAddresses作为受管机器唯一服务取址入口，复用machineNetwork的归属校验；概览区分ssh_address与服务address。现代cluster.nodes仅保存机器/资源覆盖，不再保存地址副本；容量、发现和DNS读取当前主机管理数据。兼容旧运维资源在有managed_machine绑定时同样覆盖其旧地址配置；未纳管旧Agent保持原路径。实际绑定端口仍以已部署实例为准，特定IP变更经重新部署生效。

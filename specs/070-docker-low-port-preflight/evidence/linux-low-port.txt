@@ -1,0 +1,15 @@
+Linux arm64; uid=65534; capabilities=0; privileged threshold=1024
+PASS tcp 127.0.0.1:80: real EACCES defers to Docker
+PASS tcp 127.0.0.1:443: real EACCES defers to Docker
+PASS tcp 127.0.0.1: real occupied port rejected; released port reusable
+PASS tcp ::1:80: real EACCES defers to Docker
+PASS tcp ::1:443: real EACCES defers to Docker
+PASS tcp ::1: real occupied port rejected; released port reusable
+PASS udp 127.0.0.1:80: real EACCES defers to Docker
+PASS udp 127.0.0.1:443: real EACCES defers to Docker
+PASS udp 127.0.0.1: real occupied port rejected; released port reusable
+PASS udp ::1:80: real EACCES defers to Docker
+PASS udp ::1:443: real EACCES defers to Docker
+PASS udp ::1: real occupied port rejected; released port reusable
+PASS non-local bind address has its own failure cause
+PASS 13 real Linux socket checks

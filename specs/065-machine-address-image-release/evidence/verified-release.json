@@ -1,0 +1,72 @@
+{
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tags": {
+    "20261101-eb62ca6": "sha256:dd4e1465e93ad6ed09c233b503c5f95caa265d2bb28dfd752c96a30335d1d1b7",
+    "latest": "sha256:dd4e1465e93ad6ed09c233b503c5f95caa265d2bb28dfd752c96a30335d1d1b7"
+  },
+  "revision": "eb62ca6c1945a78726402d0949c1e258ce9f0638",
+  "docker_pull_verification": [
+    {
+      "platform": "linux/amd64",
+      "image_id": "sha256:dda6e0c3c4f401b7cab0655a41f98479a57efc18cd13638ad4ca0b11830af789",
+      "tested_image_id": "sha256:43c41b8defd8e4d7c4c627a79b75e2a8af370a60c21cf92c93fa1faa653caa6a",
+      "platform_manifest": "sha256:dda6e0c3c4f401b7cab0655a41f98479a57efc18cd13638ad4ca0b11830af789",
+      "config_digest": "sha256:7350446f82b536f01f615ecc73311557b7d4f57ac20b45160e9134fdc0945721",
+      "rootfs_and_config_match_tested_image": true
+    },
+    {
+      "platform": "linux/arm64",
+      "image_id": "sha256:a3c6cde14940c74772c1578faf4890124c061c0deff66e4bb18e1cf4cd319286",
+      "tested_image_id": "sha256:17ffc73ce35c72362029719ee5681702c311f9f5be872735e5ecd39d1424ba49",
+      "platform_manifest": "sha256:a3c6cde14940c74772c1578faf4890124c061c0deff66e4bb18e1cf4cd319286",
+      "config_digest": "sha256:17258929710986925744696aa0c929e99c4d51762f05fd03d9beb646a0e1fead",
+      "rootfs_and_config_match_tested_image": true
+    }
+  ],
+  "local_container_checks": {
+    "amd64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "center identity and authenticated internal/public reporting settings",
+      "production bundle contains multi-value bulk DNS actions",
+      "production bundle includes website guidance, domain sync tasks, cluster selection and certificate export",
+      "production application management/store cards, host-to-container mapping, narrow actions hint, and named-port runtime module",
+      "production shared machine-address provider, automatic registry binding and read-only cluster addresses",
+      "production private-image and installation UI, authenticated empty registry API, and ordinary Registry catalog template",
+      "authenticated production install API rejects unknown port names before creating an application",
+      "real image derives a single-domain certificate name without name input, issues it and exposes persistent execution steps",
+      "administrator certificate view and fixed-version private-key attachment match, with no-store and public JSON redaction",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "downloaded matching-platform Agent contains Docker controls, image-cache/auth capability guards and installation progress",
+      "both platform Agent bundles contain local-reference and immutable-content reuse with never-pull pinning",
+      "AI runtime and task tools import"
+    ],
+    "arm64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "center identity and authenticated internal/public reporting settings",
+      "production bundle contains multi-value bulk DNS actions",
+      "production bundle includes website guidance, domain sync tasks, cluster selection and certificate export",
+      "production application management/store cards, host-to-container mapping, narrow actions hint, and named-port runtime module",
+      "production shared machine-address provider, automatic registry binding and read-only cluster addresses",
+      "production private-image and installation UI, authenticated empty registry API, and ordinary Registry catalog template",
+      "authenticated production install API rejects unknown port names before creating an application",
+      "real image derives a single-domain certificate name without name input, issues it and exposes persistent execution steps",
+      "administrator certificate view and fixed-version private-key attachment match, with no-store and public JSON redaction",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "downloaded matching-platform Agent contains Docker controls, image-cache/auth capability guards and installation progress",
+      "both platform Agent bundles contain local-reference and immutable-content reuse with never-pull pinning",
+      "AI runtime and task tools import"
+    ]
+  },
+  "architecture_sync": "Packaging only. SDD 064 system-design section 64 and Doca complete native-block readback retained.",
+  "test_resources_cleaned": true
+}

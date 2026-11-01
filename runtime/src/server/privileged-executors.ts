@@ -12,6 +12,7 @@ import { isAgentRemoved } from "./agent-lifecycle.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import { assertNoPendingMachineUninstallation } from "./machine-uninstallations-guard.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import { assertNoDockerInstallation } from "./machine-docker-guard.js";
 import { hasPendingExecutorLifecycle } from "./privileged-execution-guard.js";
 
 type Row = Record<string, any>;
@@ -90,6 +91,7 @@ export class PrivilegedExecutorStore {
     assertNoPendingMachineInstallation(this.deps.db, machine, agent);
     assertNoPendingMachineUninstallation(this.deps.db, machine, agent);
     assertNoPendingAgentUpdate(this.deps.db, agent, machine);
+    assertNoDockerInstallation(this.deps.db, machine, agent);
     if (this.deps.db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND id<>? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at=''))", machine, excludingJob)) fail(409, "machine_execution_locked");
     if (this.hasTable("agent_jobs") && this.deps.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state IN ('queued','leased','accepted','preflighting','staging','activating','verifying','unknown') LIMIT 1", agent)) fail(409, "machine_execution_locked");
     if (this.hasTable("task_runs") && this.deps.db.get("SELECT id FROM task_runs WHERE host_id=? AND id<>? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='' AND superseded_by='')) LIMIT 1", machine, excludingJob)) fail(409, "machine_execution_locked");

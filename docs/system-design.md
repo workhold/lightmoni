@@ -1721,7 +1721,7 @@ root自有staging与专用运行单元启动固定解释器，清理继承环境
 
 首批提权脚本只允许立即一次性、root账户、固定代码/解释器摘要/参数/环境/附加组及超时上限；独立systemd运行单元在实际启动前再次检查原始单调时钟许可。stdout/stderr在主机与中心分别加密，用户主动查看时才读取，不进入普通遥测或AI/MCP自动上下文。任意获批root脚本仍可控制整机，不能将它称为root沙箱。
 
-受管容器首批只开放结构化list/pull/create/start/stop/restart/remove，固定本地daemon、digest与架构，root清单绑定Docker不可变ID和资源revision。create固定65532账户、只读根、无网络/挂载/端口/附加权限，并拒绝镜像VOLUME；不支持Compose、任意command、卷或用户服务完整部署。新普通Agent在本地拒绝旧高级写操作，普通control不能访问独立执行器接口；中心旧claim/payload接口尚未完成停派与迁移，不能将客户端拒绝视为中心强制只读保证。执行器自动升级/回退、部分安装的SSH修复、既有网站/证书/systemd/备份适配器迁移、定时提权与完整容器部署仍是后续工作；普通Agent升级不会连带切换独立执行器程序。
+受管容器首批只开放结构化list/pull/create/start/stop/restart/remove，固定本地daemon、digest与架构，root清单绑定Docker不可变ID和资源revision。create固定65532账户、只读根、无网络/挂载/端口/附加权限，并拒绝镜像VOLUME；不支持Compose、任意command、卷或用户服务完整部署。新普通Agent在本地拒绝旧高级写操作，普通control不能访问独立执行器接口；中心旧claim/payload接口尚未完成停派与迁移，不能将客户端拒绝视为中心强制只读保证。本分支取消SDD071为普通Agent自动授予Docker组/低端口capabilities，既有额外权限需显式迁移，普通run拒绝不满足隔离要求的账户；Docker SSH安装与普通任务、执行器任务和生命周期互斥并在执行前复验管理员。执行器自动升级/回退、部分安装的SSH修复、既有网站/证书/systemd/备份适配器迁移、定时提权与完整容器部署仍是后续工作；普通Agent升级不会连带切换独立执行器程序。
 
 ## 57. Agent Docker 即时清单与容器操作（SDD 057）
 
@@ -1750,3 +1750,104 @@ flowchart LR
 ```
 
 Doca 已保存并回读，原有 575 个块完整保留；新图 7 节点、8 连线与正文核对见 `specs/057-docker-agent-controls/evidence/doca-readback.json`。
+
+## 62. 应用管理与命名端口配置（SDD 062）
+
+应用管理按“已安装 / 应用商店”组织。已安装应用集中展示版本、部署目标、状态与已分配端口，配置、部署、停止、移除容器、安装记录和监控日志映射既有授权动作。未知结果先核对；停止与移除展示对象和影响，持久化数据继续保留。商店的基础安装参数包含全部命名端口的宿主到容器映射，资源及多集群配置收入高级设置。界面不提供未实现的升级、备份或数据删除能力。
+
+商店安装API可接收host_ports命名宿主端口覆盖和普通应用listen_ip（全部网卡或仅本机），旧parameters.port兼容。application.deployments可选host_ports仅覆盖已声明端口名的宿主端口；容器端口、服务与协议仍由应用声明。各集群独立保存和冻结修订，经原project合成有效端口，再进入原有事务预留、Agent现场冲突检查、Compose及就绪回执。0表示自动分配，显式固定端口冲突失败；非法名称、非整数、范围外及同协议重复固定端口在保存前拒绝。无新表、Agent协议、任意命令或凭据权限。
+
+系统镜像仓库的registry、hub-cache和origin-cache分别映射容器5000、5001和5002，宿主端口按集群可配置。专用控制器返回配置供回显；省略覆盖字段继承该集群旧配置，新部署继续默认自动分配，缓存开关或资源更新不丢失固定端口。固定机器与私网监听IP、系统应用登记身份、外部网站与缓存命名端点路径保持。实际可用状态仍以执行和健康回执为准，不把配置保存或端口预留当成安装成功。
+
+实现与验收见specs/062-application-management/；此设计不代表已发布或已更新线上平台。
+
+## 64. 机器地址统一来源与本机镜像复用（SDD 064）
+
+所有受管机器的服务私网与公网地址统一由机器管理提供。machineServiceAddresses 读取当前主机与 Agent 身份匹配的网卡快照，排除 loopback、Docker/容器桥、veth 等接口，优先 IPv4 再 IPv6；服务连接优先私网，DNS 只选公网。SSH 目标域名只用于连接，不推导服务 IP；平台观察到的代理来源 IP 也不参与服务取址。无网卡快照的历史数字 IP 可兼容，未纳管的旧 Agent 保持原路径。
+
+现代集群仅保存机器选择与 CPU/内存覆盖，不再保存地址副本，表单只读展示机器管理地址。应用容量、调度、服务发现、网站网关与 DNS，以及有受管机器绑定的旧 node_pool/gateway_group 路径共用该来源；历史 nodes.address/public_address 不覆盖当前机器地址。具体端口绑定和部署回执仍代表已部署事实，指定 IP 变更经重新部署生效。
+
+系统镜像仓库与普通应用一样选择集群、机器、宿主端口、资源与缓存开关，取消手工内网 IP 和网络确认项。部署从机器管理选择真实私网 IP，未发现可供其他机器使用的私网则监听 127.0.0.1，安装仍可执行且页面说明仅本机可用。仓库固定原机器和持久目录，地址变化不等于数据迁移；实际实例绑定 IP 与分配端口组成端点，同机 OpenResty 访问指定绑定 IP，通配绑定才使用 loopback。
+
+中心为每个消费机器投影缓存策略，loopback 缓存只下发给仓库所在机器，跨机缺少可达私网端点时继续使用原镜像源；领取租约时重新核对机器与当前策略。已登记绑定不会因机器管理更新而被提前替换，重新部署后才登记新端点。公网访问继续通过已有 HTTPS/Basic 网站入口，不自动开放匿名公网 HTTP 仓库。
+
+Agent 在缓存准备阶段先检查本机 Docker 所需镜像引用、平台和不可变 digest，命中则固定本地 image ID 与 pull_policy=never，零远程请求；未命中才访问缓存。仓库名称不同而内容相同，可通过 RepoDigest 或已验证 config 身份复用本机镜像，至多读取 manifest/config，无需重复下载层和导入。缓存缺失和失败沿用既有回源规则；Registry 与 Docker 各自持久化，不共用数据目录、不修改 Docker daemon 全局配置。
+
+实现与验收见 specs/064-machine-service-addresses/。本节更新 SDD 059/062 的手工仓库地址和集群地址副本规则，无新增表、凭据或 Agent 任务类型；部署状态仍以执行和健康回执为准。真实 Docker 本机复用、HTTP/SQLite 定向回归和浏览器验收仅说明本次验证范围，不代表线上容器已更新。
+
+## 66. 应用商店扩展与 DBX（SDD 066）
+
+应用商店由中心维护本地固定目录，包含原有4个应用与新增27个应用，共31个，分类为数据库、中间件、DevOps、AI、工具、网站与网关；工具仅DBX。模板公开元数据、安装参数校验与服务端配方构建分离，列表不访问外部市场。安装仍经管理员确认、加密资源及不可变修订、逐集群部署、端口预留和Agent真实回执，不新增市场服务或数据库表。
+
+新模板声明固定镜像、官方文档、中英文说明、参数类型及边界、默认资源和运行前提。Kafka广播地址与固定宿主端口一致；Nacos gRPC端口为API端口+1000；RocketMQ固定Broker相关端口。依赖稳定地址或GPU的模板限制手动指定机器；Harbor仅支持amd64并在服务端核对目标架构。桌面使用分类标签，窄屏使用可访问的分类选择。
+
+每套安装的Compose网络与命名卷由实例项目隔离，不使用全局卷名、宿主Docker socket或特权容器。Dify包含数据库、缓存、向量库、插件及经代理联网的代码沙箱；FastGPT包含Mongo副本集、向量库和模型网关，需提供已有S3兼容存储、两个不同且权限正确的Bucket；Harbor由官方prepare生成配置和共享密钥，依赖Engine26及Compose2.26的卷子路径。GPU推理显式声明NVIDIA设备；模型及业务账号按应用引导另行配置。多容器资源按每容器设定，集群预留总和。
+
+一次性初始化通过授权Compose清单中的io.lightmoni.platform.oneshot标签声明，只有对应容器正常退出0且未OOM才完成；仍须全部常驻服务存在、运行且健康。领取这些任务要求operations.platform.oneshot.v1，旧Agent不能领取；应用启动等待有界延长至300秒。后续inspect从受管有效清单核对初始化身份，不把任意退出容器当成功；失败恢复及unknown写锁沿用原规则。
+
+密码和API Key只经安装请求进入受保护环境与加密修订，公开回读脱敏；命令和受管源码不插入实际秘密。Harbor在容器内生成权限受限的配置和密钥，凭据按字面值导出，避免shell求值。DBX使用独立数据卷与必填访问密码，不自动连接LightMoni内部数据；第三方AI应用不自动取得平台凭据、MCP或控制权限。
+
+本节对应SDD066；配置验证、真实DBX与初始化冒烟、浏览器和上游源码验证分别记录。完整Harbor平台、GPU推理及全部第三方应用的真实业务验收不因模板上架而视为完成；本轮不自动发布镜像、更新线上容器或合并主干。
+
+## 68. 应用 Logo 与高级 YAML（SDD 068）
+
+应用商店、已安装应用与详情共用品牌图形，31个固定模板的图形随网页打包并按稳定template_id或系统role关联；旧安装自动使用对应图形。素材来源、固定提交、摘要及许可随源码保留，网页提供素材归属入口，不在运行时访问第三方图片CDN。自定义应用默认通用图标，可上传PNG/JPEG/WebP并预览、替换或移除。
+
+Logo是中心展示元数据，独立存于既有SQLite的ops_application_logos，包含应用标识、图片内容、独立版本、摘要与更新主体。创建应用和可选Logo使用同一事务，失败整体回滚；替换和移除按独立版本比较，移除保留版本防止并发覆盖，删除应用登记时清理图片。公共资源仅投影Logo版本与受保护URL，不返回正文；Logo不进入应用spec、配置修订、部署快照或Agent任务，单独修改不改变配置revision或触发部署。
+
+浏览器限制原图5MiB及4096像素边长，等比缩至256像素PNG；中心限制256KiB和512像素，核对PNG签名、块结构、CRC、有界解压、行数据和过滤类型，并重新编码去除附加元数据。用户SVG、远端URL、伪造或损坏图片不接受。图片读写沿用管理员权限，固定image/png、nosniff、沙箱CSP、私有缓存及内容ETag，先鉴权再响应304；版本摘要不符或图片已移除返回404。
+
+创建与修改应用均提供高级YAML。Compose对象以规范YAML展示；单容器高级文档使用services.app并反解已有支持字段，保持container类型、受管挂载、健康与部署信息，多服务继续使用Compose类型。保存后从规范对象生成YAML，不另外保存可旁路脱敏的原始文本；解析和字面环境规范化先于脱敏占位恢复，原服务与键的[redacted]恢复旧值，新键占位拒绝，模板扩展锚点在解析后移除。
+
+高级YAML从services各自的ports提取容器端口与协议，expose仍仅为内部端口。托管模式忽略YAML的published并经既有预留和有效配置投影分配宿主端口，相同端口保留旧或表单的监听范围；手动模式采用YAML发布端口。按服务、容器端口和协议保持既有端口名称及应用协议，新端口生成稳定名称；网站和健康检查引用继续受原校验约束。普通表单与商店安装保持原顶层端口规则。
+
+本节对应SDD068。管理员和Agent的既有权限、镜像执行、持久数据及失败语义不变；Logo不新增对象存储、宿主文件通道或Agent能力，YAML不能绕过既有环境、文件、挂载、资源与端口边界。验收区分真实HTTP/SQLite和浏览器交互、受控网络失败与远端Agent执行，不把前端预览或配置验证称为所有第三方应用实际运行。
+
+## 69. 主机 Docker 环境与补装（SDD 069）
+
+主机列表从已认证 Agent 的 Docker inventory 与即时采集回执投影环境状态，区分可用、未安装、Compose 缺失、服务不可用、权限不足、待检测及过期。判断新鲜度使用最近尝试时间和 Agent 在线状态；无观测或过期不能判为未安装。应用检查 Docker 时的命令不存在错误新增白名单 docker_cli_missing，旧记录只提供检查入口。
+
+管理员从主机列表、应用与 Docker 清单、应用安装失败抽屉进入同一环境面板。补装目标绑定所选执行的 Agent 对应平台主机，明确确认后复用有效可复用 SSH 凭据与同一握手主机公钥校验；凭据仅运行时解密。新增 machine_docker_installations 保存请求幂等标识、主机/Agent/凭据绑定、操作者、状态、阶段、静态错误码和时间，不保存命令输出或秘密。
+
+中心通过固定 SSH 命令交给 root 持有的 systemd transient unit 执行有界安装，进度保存在 root 专属目录。自动安装限 Ubuntu/Debian、amd64/arm64、systemd：使用 Docker 官方签名 apt 仓库安装缺失 Engine/Compose，拒绝冲突包，不主动覆盖升级已有 Engine，不删除容器或数据，对绑定身份匹配的标准受管 Agent 通过固定 systemd drop-in 授予 docker 补充组并重启 Agent；确认面板说明该影响，不更改系统用户组或 socket 权限，不重启已有 Docker daemon。其他系统给官方手动指南。
+
+安装期间中心 busy 和持久化状态阻止并发 SSH 生命周期、Agent 作业与主机任务领取；远端安装以 flock 排斥。关闭面板不取消独立后台安装，平台重启或连接结果不确定时保留 unknown 闸门；管理员可只读核对该操作的远端状态，不能自动重新安装。成功表示主机验证 Engine/Compose，Agent 能否访问由后续真实采集独立核对。
+
+补装不会重新创建应用或自动重部署。安装面板提示采集并验证 Agent 权限后，回到原应用显式重新部署，旧失败记录保留；权限不足独立显示权限修复建议，不能误判为缺失。新增路由仅管理员可写，AI 工具权限不变，Agent Docker 访问配置只通过管理员确认的固定 SSH 流程进行。SDD 069 的验证分别记录 HTTP/SQLite/SSH fixture、浏览器与真实 Linux 安装范围。
+
+```mermaid
+flowchart LR
+  A[主机列表 / 应用失败记录] --> B[环境状态与明确确认]
+  B --> C[受保护 SSH / 主机身份校验]
+  C --> D[root systemd 安装 / 持久结果]
+  D --> E[Engine + Compose 验证]
+  E --> F[Agent 采集 / 显式重新部署]
+```
+
+契约与验收见 `specs/069-docker-environment/`；Doca 同步保留现有图块与无关内容，新增本节原生流程图后回读节点、连线及目标段落。未执行真实 Linux 软件包安装时，不能将受控 SSH fixture 当作真实安装证据。
+
+## 71. 标准 Agent 部署与网站权限（SDD 071，待发布）
+
+SDD060实施分支覆盖本节普通Agent权限路径：新普通unit清空Docker附加组和Linux capabilities，安装/更新helper不再自动授予Docker或低端口能力；普通run实际检查UID/组/capabilities及Docker socket访问，发现既有额外权限时拒绝启动并报告需迁移，不擅自移除外部组或ACL。下文与图保留SDD071历史部署契约；需要这些权限的旧网站/容器适配器尚未迁移，不能因本节旧契约绕过独立root授权。
+
+用户安装标准 Agent 即授权其执行平台托管的 Docker/Compose/OpenResty 与受管网站操作。服务仍以 `lightmoni-agent` 运行，unit 配置 Docker 附加组与 `CAP_NET_BIND_SERVICE`，保留 `NoNewPrivileges`、只读系统/家目录及私有临时目录。Docker socket 访问接近宿主 root；普通脚本会继承实际服务权限，因此仅允许受信管理员授权脚本，不能把非 root 用户描述为宿主级安全沙箱。
+
+root 安装/升级流程执行固定包内权限准备器，确保非零 GID 的 Docker 系统组和独立公开目录存在，不改 socket mode 或全局用户组成员。每次启动的 `ExecStartPre` 在真实 unit 身份、附加组、capability 和挂载沙箱中验证私有配置读取、私有/公开目录写入和原子 rename、低端口绑定及已存在的 Docker socket/CLI。权限不足阻止 ready，只输出固定诊断；CLI/daemon 缺少属于依赖未就绪，不假报可部署。
+
+私有配置、证书私钥、网站版本、PID、日志及 Nginx 各类临时文件位于 `/var/lib/lightmoni-agent`，公开静态内容单独位于 `/var/lib/lightmoni-web/<data-dir-hash>`。unit 的 `ReadWritePaths` 精确覆盖这两个根；私有目录/私钥保持 0700/0600，公开目录/文件为 0755/0644。网站先校验候选配置，再切换、重载与 HTTP/TLS 读回，失败恢复旧版本；Docker OpenResty 读取既有固定受管挂载。任意外部备份、证书导出和 systemd 目标仍需独立精确授权。
+
+升级先准备目标权限再停止旧服务；失败或主动回退使用原 unit，保持配置、身份和 live queue。旧包没有检查器则保留旧契约；该兼容不等于其已具备新权限。后续独立特权执行器的身份、授权、策略及迁移另行实现，本次不声称已迁移。发布验收必须区分真实 Linux 服务权限/网站测试与生产发行、Agent 升级和现场部署。
+
+```mermaid
+flowchart LR
+  Install[root 安装 / 升级准备] --> Check[真实 unit 启动前检查]
+  Check --> Agent[非 root Agent / Docker 组 / 低端口 capability]
+  Center[中心授权的网站配置] --> Agent
+  Agent --> Docker[本机 Docker daemon]
+  Agent --> Private[私有配置 / 证书 / 版本 / PID / 日志 / temp]
+  Agent --> Public[独立公开静态目录]
+  Private --> Docker
+  Agent --> Nginx[同用户 Nginx / 校验与重载]
+  Private --> Nginx
+  Public --> Nginx
+```

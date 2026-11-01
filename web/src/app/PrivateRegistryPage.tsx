@@ -6,6 +6,7 @@ import {
   App,
   Button,
   Checkbox,
+  Collapse,
   Descriptions,
   Empty,
   Form,
@@ -24,6 +25,8 @@ import { api } from "../shared/api";
 import { useI18n } from "../shared/i18n";
 import { errorText, type Overview, type Spec } from "./ops/model";
 import "./operations.css";
+import ApplicationPortFields from "./ops/ApplicationPortFields";
+import ApplicationInstallDrawer from "./ops/ApplicationInstallDrawer";
 
 export default function PrivateRegistryPage() {
   const { t } = useI18n(),
@@ -36,14 +39,15 @@ export default function PrivateRegistryPage() {
     }),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
+  const [installID,setInstallID]=useState<string>();
+  const registryPorts=data?.application?.spec.ports??[{name:"registry",container_port:5000},{name:"hub-cache",container_port:5001},{name:"origin-cache",container_port:5002}];
   const [dialog, setDialog] = useState<"deploy" | "external">(),
     [busy, setBusy] = useState(false),
     [switching, setSwitching] = useState(""),
     [formError, setFormError] = useState(""),
     [defaults, setDefaults] = useState<Spec>({}),
     [form] = Form.useForm();
-  const clusterID = Form.useWatch("cluster_id", form),
-    machineID = Form.useWatch("machine_id", form);
+  const clusterID = Form.useWatch("cluster_id", form);
   const clusters = overview.resources.filter((r) => r.kind === "cluster"),
     site = data?.external?.website;
   const load = useCallback(async (quiet = false) => {
@@ -69,13 +73,15 @@ export default function PrivateRegistryPage() {
   }, [load]);
   const explain = (code: string) => {
     const messages: Record<string, [string, string]> = {
+      invalid_host_ports: ["端口必须是 0～65535 的整数，并对应已声明的服务。", "Ports must be integers from 0 to 65535 for declared services."],
+      duplicate_host_port: ["宿主端口不能重复；使用不同端口，或填 0 自动分配。", "Host ports must be unique. Choose different ports, or 0 for automatic allocation."],
       platform_revision_conflict: [
         "配置已更新，请刷新后重试。输入已保留。",
         "Configuration changed. Refresh and retry; your input is retained.",
       ],
       registry_data_migration_required: [
-        "仓库已有固定数据位置，首版不支持直接更换机器、内网地址或对外写入集群。",
-        "This registry has a fixed data location. Changing its machine, private address or publishing cluster requires migration.",
+        "仓库数据保存在固定机器，切换机器或对外写入集群需要迁移数据。",
+        "This registry has a fixed data location. Changing its machine or publishing cluster requires migration.",
       ],
       registry_confirmation_required: [
         "请确认此地址处于受信任的隔离内网。",
@@ -108,7 +114,7 @@ export default function PrivateRegistryPage() {
         ? {
             cluster_id: row?.cluster_id,
             machine_id: row?.machine_id,
-            address: row?.address,
+            host_ports:row?.host_ports??Object.fromEntries(registryPorts.map((p:Spec)=>[p.name,0])),
             cpu:
               data?.application?.spec.deployments?.find(
                 (d: Spec) => d.cluster_id === row?.cluster_id,
@@ -118,7 +124,6 @@ export default function PrivateRegistryPage() {
                 (d: Spec) => d.cluster_id === row?.cluster_id,
               )?.memory_mb ?? 256,
             cache_enabled: row?.cache_enabled ?? false,
-            trusted_network_acknowledged: false,
           }
         : {
             carrier_cluster_id:
@@ -148,7 +153,7 @@ export default function PrivateRegistryPage() {
     setBusy(true);
     setFormError("");
     try {
-      await api(
+      const saved=await api<Spec>(
         "/ops/private-registry/" +
           (dialog === "deploy" ? "deployments" : "external"),
         {
@@ -167,7 +172,9 @@ export default function PrivateRegistryPage() {
         },
       );
       setDialog(undefined);
-      void message.success(
+      if(dialog==="deploy")setInstallID(saved.application?.id);
+      if(dialog==="deploy"&&!saved.runs?.length)void message.warning(t("配置已保存，但尚未生成新执行；请核对安装记录后重试。","Configuration saved, but no new execution was created. Inspect the history before retrying."));
+      else void message.success(
         t(
           "配置已保存，部署任务已提交。",
           "Configuration saved; deployment submitted.",
@@ -215,13 +222,6 @@ export default function PrivateRegistryPage() {
   const members = (overview.machines ?? []).filter((m) =>
     cluster?.spec.machine_ids.includes(m.id),
   );
-  useEffect(() => {
-    if (dialog !== "deploy" || !machineID) return;
-    const node = cluster?.spec.nodes?.find(
-      (n: Spec) => n.machine_id === machineID,
-    );
-    if (node) form.setFieldValue("address", node.address);
-  }, [machineID, cluster, form, dialog]);
   return (
     <div className="lm-page lm-operations-page lm-registry-page">
       <div className="lm-page-heading">
@@ -295,6 +295,7 @@ export default function PrivateRegistryPage() {
                 </Typography.Text>
               </div>
             </div>
+            <p className="lm-ops-table-hint">{t("左右滑动查看仓库地址和操作。","Scroll horizontally to view registry addresses and actions.")}</p>
             <Table
               rowKey="cluster_id"
               pagination={false}
@@ -325,10 +326,9 @@ export default function PrivateRegistryPage() {
                   title: t("内网仓库地址", "Private registry endpoint"),
                   key: "endpoint",
                   render: (_, r: Spec) => (
-                    <Typography.Text copyable={!!r.endpoint}>
-                      {r.endpoint ||
-                        t("等待端口分配", "Waiting for port allocation")}
-                    </Typography.Text>
+                    <><Typography.Text copyable={!!r.endpoint}>
+                      {r.endpoint || t("等待端口分配", "Waiting for port allocation")}
+                    </Typography.Text>{r.cache_scope === 'machine' && <div className="lm-ops-note">{t("仅本机可用；其他机器未发现可达内网地址时使用原镜像源。", "Available on this machine; other machines use the original source when no private endpoint is available.")}</div>}</>
                   ),
                 },
                 {
@@ -377,9 +377,7 @@ export default function PrivateRegistryPage() {
                   title: t("操作", "Actions"),
                   key: "actions",
                   render: (_, r: Spec) => (
-                    <Button size="small" onClick={() => open("deploy", r)}>
-                      {t("重新部署", "Redeploy")}
-                    </Button>
+                    <Space wrap><Button size="small" onClick={() => open("deploy", r)}>{t("配置 / 重新部署", "Configure / redeploy")}</Button><Button size="small" onClick={()=>setInstallID(data.application.id)}>{t("安装记录", "Installation history")}</Button></Space>
                   ),
                 },
               ]}
@@ -442,6 +440,7 @@ export default function PrivateRegistryPage() {
           </div>
         </>
       )}
+      <ApplicationInstallDrawer resourceId={installID} resources={overview.resources} machines={overview.machines??[]} onClose={()=>setInstallID(undefined)} onManage={()=>{setInstallID(undefined);open("deploy",data?.deployments?.[0])}}/>
       <Modal
         title={
           dialog === "deploy"
@@ -457,10 +456,13 @@ export default function PrivateRegistryPage() {
         okText={t("保存并部署", "Save and deploy")}
         cancelText={t("取消", "Cancel")}
         width={640}
+        className="lm-registry-dialog"
+        style={{top:24}}
+        styles={{body:{maxHeight:'calc(100dvh - 200px)',overflowY:'auto',overscrollBehavior:'contain'}}}
         forceRender
       >
         {formError && <Alert type="error" showIcon title={formError} />}
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" onValuesChange={()=>setFormError("")}>
           {dialog === "deploy" ? (
             <>
               <Form.Item
@@ -486,7 +488,7 @@ export default function PrivateRegistryPage() {
                     );
                     form.setFieldsValue({
                       machine_id: d?.machine_id,
-                      address: d?.address,
+                      host_ports:d?.host_ports??Object.fromEntries(registryPorts.map((p:Spec)=>[p.name,0])),
                       cache_enabled: d?.cache_enabled ?? false,
                     });
                   }}
@@ -504,18 +506,8 @@ export default function PrivateRegistryPage() {
                     .map((m) => ({ value: m.id, label: m.name }))}
                 />
               </Form.Item>
-              <Form.Item
-                name="address"
-                label={t("内网监听 IP", "Private listen IP")}
-                rules={[{ required: true }]}
-                extra={t(
-                  "使用集群内可达的私有 IP；不允许公网 IP 或通配地址。",
-                  "Use a private IP reachable inside the cluster. Public and wildcard addresses are rejected.",
-                )}
-              >
-                <Input readOnly={!!deployment} />
-              </Form.Item>
-              <div className="lm-ops-grid">
+              <ApplicationPortFields ports={registryPorts}/>
+              <Collapse items={[{key:'resources',label:t('资源限制（高级）','Resource limits (advanced)'),forceRender:true,children:<div className="lm-ops-grid">
                 <Form.Item name="cpu" label={t("CPU（核）", "CPU (cores)")}>
                   <InputNumber min={0.01} max={1024} />
                 </Form.Item>
@@ -525,39 +517,13 @@ export default function PrivateRegistryPage() {
                 >
                   <InputNumber min={64} max={1048576} />
                 </Form.Item>
-              </div>
+              </div>}]}/>
               <Form.Item
                 name="cache_enabled"
                 label={t("开启内网镜像缓存", "Enable internal image cache")}
                 valuePropName="checked"
               >
                 <Switch />
-              </Form.Item>
-              <Form.Item
-                name="trusted_network_acknowledged"
-                valuePropName="checked"
-                rules={[
-                  {
-                    validator: (_, v) =>
-                      v
-                        ? Promise.resolve()
-                        : Promise.reject(
-                            Error(
-                              t(
-                                "请确认内网访问边界",
-                                "Confirm the internal network boundary",
-                              ),
-                            ),
-                          ),
-                  },
-                ]}
-              >
-                <Checkbox>
-                  {t(
-                    "此地址仅在受信任内网可达；内网仓库不鉴权，网络隔离由我维护。",
-                    "This address is reachable only on a trusted internal network. I maintain network isolation for the anonymous registry.",
-                  )}
-                </Checkbox>
               </Form.Item>
             </>
           ) : (

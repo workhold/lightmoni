@@ -11,7 +11,8 @@
     "docs/system-design.md 33.8 target note",
     "docs/system-design.md 60.1–60.9",
     "docs/system-design.md 60.10",
-    "docs/system-design.md 57 historical write boundary"
+    "docs/system-design.md 57 historical write boundary",
+    "docs/system-design.md 71 implementation override"
   ],
   "before_seq": 902,
   "readback_seq": 903,
@@ -78,9 +79,19 @@
     "note": "新Agent本地拒绝与旧中心claim/payload尚未停派分别说明，未宣称中心只读保证。"
   },
   "implementation_repository_evidence": {
-    "source_base_main": "c088bb4",
-    "section_60_10_sha256": "8de87edee652e10e55495a631cbe70244c7dc0661d8b03375a38e3ad9dc4df18",
+    "source_base_main": "fe99013",
+    "section_60_10_sha256": "3588c5fdf4fb69f25818c025101226fe1d3897fe89991b906ab363cc10286e9b",
     "legacy_boundary_sha256": "ad730bceb92b89b89f8b05a608f145b9be392d1f6787953f693bdc6093555a83",
     "scope": "Only the updated implementation paragraphs; unrelated merged main content was retained."
+  },
+  "latest_main_integration": {
+    "checked_at": "2026-11-01T15:02:21.517085+00:00",
+    "before_seq": 923,
+    "readback_seq": 924,
+    "updated_paragraphs": 1,
+    "inserted_sdd071_boundary": true,
+    "unrelated_blocks_unchanged": 732,
+    "all_native_diagrams_unchanged": 37,
+    "text_and_original_order_verified": true
   }
 }

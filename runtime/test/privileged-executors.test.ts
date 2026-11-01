@@ -179,3 +179,26 @@ test("public root endpoints reject ordinary control and output/apply require exp
     assert.equal(ok.status, 200); assert.equal((await ok.json()).job, null);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
 });
+
+test("active and unknown Docker installations block privileged review approval claim and start permits",()=>{
+ for(const state of ["running","unknown"]){
+  const f=fixture();try{
+   const reviewed=f.makePlan(),job=f.apply();
+   const claimed=f.request("jobs/claim",{}).invoke((e,v)=>f.store.claim(e,v));
+   const claims=planClaims(verifyJWS(claimed.job.plan,f.store.centerPublicKey,f.store.centerKeyID));
+   f.db.exec("CREATE TABLE machine_docker_installations(id TEXT,machine_id TEXT,agent_id TEXT,state TEXT)");
+   f.db.run("INSERT INTO machine_docker_installations VALUES('docker','host','agent-host',?)",state);
+   assert.throws(()=>f.makePlan(),/docker_installation_pending/);
+   assert.throws(()=>f.store.apply(reviewed.id,{confirm:true,expected_revision:reviewed.revision,request_id:randomBytes(24).toString('base64url')},"admin"),/docker_installation_pending/);
+   assert.throws(()=>f.request("jobs/"+job.id+"/start-permits",{lease_id:claims.lease_id,step_id:"execute",executor_nonce:"dockerblocked_123456789012345"}).invoke((e,v)=>f.store.startPermit(e,job.id,v)),/docker_installation_pending/);
+   assert.equal(f.db.get<any>("SELECT count(*) n FROM privileged_grants WHERE state='consumed'")!.n,0);
+  }finally{f.close();}
+  const waiting=fixture();try{
+   const job=waiting.apply();
+   waiting.db.exec("CREATE TABLE machine_docker_installations(id TEXT,machine_id TEXT,agent_id TEXT,state TEXT)");
+   waiting.db.run("INSERT INTO machine_docker_installations VALUES('docker','host','agent-host',?)",state);
+   assert.equal(waiting.request("jobs/claim",{}).invoke((e,v)=>waiting.store.claim(e,v)).job,null);
+   assert.equal(waiting.store.get(job.id).state,"cancelled");
+  }finally{waiting.close();}
+ }
+});

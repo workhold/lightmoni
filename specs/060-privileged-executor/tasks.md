@@ -32,3 +32,9 @@
 - B3 已在本机隔离Linux/systemd中验证真实root脚本及安装/撤权/卸载，测试与限制见linux-validation；root/sudo及全部Docker动作的实机矩阵未完成。
 - C1 普通Agent已经固定拒绝旧operations/systemd/制品/Docker写操作，新执行器不接受ordinary control；适配器与中心停派的全量迁移尚未完成。中心旧claim/payload仍存在，旧Agent或自定义调用方仍可能领取写任务；新Agent本地拒绝，未领取任务需要取消或等待过期；不能将旧发布功能视为已迁移。
 - C2—C4 保持目标阶段，未实现部分不作为已可用功能；本PR保持Draft，不发布到线上主机。
+
+## 最新主干实施衔接
+
+- [x] 合并 fe99013 并保留双方主机/Docker/执行器入口，修复双方任务与生命周期互斥。
+- [x] 取消普通 unit 自动 Docker/cap 授予，helper 与普通 run 实际核验、旧权限拒绝迁移，不擅改外部权限。
+- [ ] 运行集成范围回归并更新新实施 PR、Doca 与验收证据。

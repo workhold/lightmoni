@@ -1,0 +1,22 @@
+[
+  {
+    "platform": "linux/amd64",
+    "passed": true,
+    "checks": [
+      "production bundle includes Docker installation panel, address categories and independent bind diagnostics",
+      "production Docker projection preserves unknown without fabricated state",
+      "fixed Docker SSH installer module exported"
+    ],
+    "stdout": "Integrated Docker environment, network categories and bind diagnostics are packaged"
+  },
+  {
+    "platform": "linux/arm64",
+    "passed": true,
+    "checks": [
+      "production bundle includes Docker installation panel, address categories and independent bind diagnostics",
+      "production Docker projection preserves unknown without fabricated state",
+      "fixed Docker SSH installer module exported"
+    ],
+    "stdout": "Integrated Docker environment, network categories and bind diagnostics are packaged"
+  }
+]

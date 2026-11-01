@@ -15,7 +15,7 @@ import {
   registryTemplateSpec,
   registeredRegistryEndpoint,
 } from "./registry-runtime.js";
-import { privateRegistryAddress } from "../operations/registry-address.js";
+import { automaticRegistryAddress, registryCacheScope } from "./registry-runtime.js";
 import { catalogInstallation } from "./catalog.js";
 type Row = Record<string, any>;
 /** Only this host controller can register the system's image source. Business registries remain ordinary apps. */
@@ -49,6 +49,8 @@ export function createPrivateRegistryController(
         cluster_id: d.cluster_id,
         machine_id: d.machine_ids[0],
         address: d.registry_address,
+        cache_scope: registryCacheScope(d.registry_address),
+        host_ports: Object.fromEntries((app?.spec.ports??[]).map((p:Row)=>[p.name,d.host_ports?.[p.name]??p.host_port])),
         cache_enabled:
           store.get(d.cluster_id, "cluster").spec.image_cache?.enabled === true,
         endpoint: registeredRegistryEndpoint(store, d.cluster_id) ?? "",
@@ -103,15 +105,14 @@ export function createPrivateRegistryController(
     }
   }
   async function deploy(b: Row, actor: string) {
-    if (b.confirmed !== true || b.trusted_network_acknowledged !== true)
+    if (b.confirmed !== true)
       fail(400, "registry_confirmation_required");
     if (b.cache_enabled !== undefined && typeof b.cache_enabled !== "boolean")
       fail(400, "invalid_cluster_image_cache");
     const key = systemApplicationID(store, "registry");
     let app = key ? store.get(key, "application") : undefined;
     revision(b.revision, app?.revision ?? 0);
-    const cluster = store.get(b.cluster_id, "cluster"),
-      ip = privateRegistryAddress(b.address);
+    const cluster = store.get(b.cluster_id, "cluster");
     if (
       typeof b.machine_id !== "string" ||
       !cluster.spec.machine_ids.includes(b.machine_id)
@@ -120,10 +121,12 @@ export function createPrivateRegistryController(
     const prior = app?.spec.deployments.find(
       (d: Row) => d.cluster_id === cluster.id,
     );
+    const ip = automaticRegistryAddress(store, b.machine_id, prior?.registry_address ?? b.address);
     const deployment = {
       cluster_id: cluster.id,
       machine_ids: [b.machine_id],
       registry_address: ip,
+      host_ports: b.host_ports === undefined ? prior?.host_ports : b.host_ports,
       cpu: b.cpu ?? 0.25,
       memory_mb: b.memory_mb ?? 256,
     };

@@ -6,6 +6,7 @@ import { createAgent } from "./agent.js";
 import { Queue } from "./queue.js";
 import { responseBytes } from "./util.js";
 import { assertOrdinaryAgentIdentity } from "../shared/execution-role.js";
+import { assertOrdinaryAgentLinuxPermissions } from "../shared/ordinary-agent-permissions.js";
 export { createAgent } from "./agent.js";
 export interface CLIIO {
   input: AsyncIterable<Uint8Array | string>;
@@ -58,7 +59,10 @@ export async function execute(
     return;
   }
   // Check before reading runtime credentials or initializing any task runner.
-  if (command === "run") assertOrdinaryAgentIdentity(process.getuid?.(), process.geteuid?.());
+  if (command === "run") {
+    assertOrdinaryAgentIdentity(process.getuid?.(), process.geteuid?.());
+    assertOrdinaryAgentLinuxPermissions();
+  }
   const validation = { pendingEnrollment: Boolean(flags["pending-enrollment"]) };
   const path = String(flags.config),
     requireDir = String(flags["require-data-dir"]);

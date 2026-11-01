@@ -1,3 +1,4 @@
+import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { id, token } from "../shared/crypto.js";
 import { dockerJobAction, dockerReceipt, safeDockerCode } from '../shared/docker-jobs.js';
 import { fail, HTTPError } from "../shared/http.js";
@@ -307,6 +308,7 @@ export function registerAgentJobs(
     assertNoPendingMachineInstallation(db,"",agentID);
     assertNoPrivilegedExecution(db,"",agentID);
     assertNoPendingAgentUpdate(db, agentID);
+    assertNoDockerInstallation(db,"",agentID);
     if (uninstallBlocked(agentID)) fail(409, "agent_uninstallation_blocks_jobs");
     const now = deps.now(), expires = new Date(now.getTime() + Math.min(Math.max(input.expiresInSeconds ?? JOB_SECONDS, 60), 24 * 60 * 60) * 1000), idValue = id();
     const removalFence = uninstallFence();
@@ -320,6 +322,7 @@ export function registerAgentJobs(
       assertAgentActive(db, agentID);
       assertNoPendingMachineInstallation(db,"",agentID);
       assertNoPendingAgentUpdate(db, agentID);
+    assertNoDockerInstallation(db,"",agentID);
       fail(409, "agent_uninstallation_blocks_jobs");
     }
     return view(row(idValue));
@@ -336,6 +339,7 @@ export function registerAgentJobs(
     if (uninstallBlocked(agentID)) return null;
     if (pendingMachineInstallation(db,"",agentID)) return null;
     if (hasPendingAgentUpdate(db, agentID)) return null;
+    if (pendingDockerInstallation(db,"",agentID)) return null;
     if (hasPrivilegedExecution(db,"",agentID)) return null;
     const at = deps.now(), nowText = iso(deps, at);
     // A node has one execution lane, including when two runner processes poll.

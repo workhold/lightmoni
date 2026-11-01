@@ -7,6 +7,8 @@ import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { OperationsPlatformStore } from "../src/ops/store.js";
 import { createWorkloadController } from "../src/ops/workloads.js";
 import type { Dependencies } from "../src/shared/types.js";
+import {createHostNetworkSchema,recordHostNetwork} from "../src/server/host-network.js";
+import {normalizeNetworkAddresses} from "../src/shared/host-network.js";
 
 function setup(t: any, fetcher?: typeof fetch) {
   const db = new DB(":memory:");
@@ -157,6 +159,20 @@ test("hosted replicas reserve distinct machine ports and publish only verified f
     "admin",
   );
   assert.equal(endpoints.result.endpoints.length, 0);
+});
+test("legacy managed services discover current machine addresses instead of stored pool or instance copies", async t => {
+  const f=setup(t),pool=f.pool(),app=f.app();
+  f.db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,address TEXT,agent_id TEXT,ssh_target_generation INTEGER,host_key_fingerprint TEXT);INSERT INTO managed_machines VALUES('managed-a','ssh.example.test','node-a',0,'')");
+  createHostNetworkSchema(f.db);
+  const network=(ip:string)=>recordHostNetwork(f.db,'managed-a','node-a',normalizeNetworkAddresses([{interface:'eth0',address:ip}]),undefined,'2026-10-29T02:00:00.000Z');
+  network('10.55.0.8');
+  const service=f.store.create('service','Managed API',{application_id:app.id,node_pool_id:pool.id,replicas:1,container_port:8080,cpu:1,memory_mb:512},'admin');
+  await f.controller.perform(service,'deploy',{},'admin');f.finish('node-a',{healthy:true,containers:[{running:true}]});
+  assert.equal(f.store.get(service.id).status.endpoints[0].ip,'10.55.0.8');
+  network('10.55.0.9');
+  const discovered=await f.controller.perform(f.store.get(service.id),'endpoints',{},'admin');
+  assert.equal(discovered.result.endpoints[0].ip,'10.55.0.9');
+  assert.equal(f.db.get<any>('SELECT address FROM ops_platform_instances WHERE owner_id=?',service.id)!.address,'10.55.0.8','historical deployment receipt stays unchanged');
 });
 test("a removed node with a fresh heartbeat cannot receive a hosted service replica", async (t) => {
   const f = setup(t), pool = f.pool(), app = f.app();

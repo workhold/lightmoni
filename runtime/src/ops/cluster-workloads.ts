@@ -1,3 +1,5 @@
+import {machineServiceAddresses} from "../server/host-network.js";
+import {networkScope} from "../shared/host-network.js";
 import { effectiveAuth } from "../operations/basic-auth.js";
 import { normalizeWebsiteAuth } from "./website-auth.js";
 import { catalogTemplate } from "./catalog.js";
@@ -23,6 +25,7 @@ import {
 } from "./system-applications.js";
 import { privateRegistryAddress } from "../operations/registry-address.js";
 import { registryRuntime, registryCacheFor } from "./registry-runtime.js";
+import { hostPortOverrides } from './application-ports.js';
 import { ensureDnsRecords, normalizeDomain, CloudError } from "./cloud.js";
 import type {
   PlatformOptions,
@@ -62,16 +65,6 @@ const num = (v: any, fallback: number, min: number, max: number) => {
   if (typeof n !== "number" || !Number.isFinite(n) || n < min || n > max)
     fail(400, "invalid_application_number");
   return n;
-};
-const address = (v: any) => {
-  if (
-    typeof v !== "string" ||
-    !v ||
-    v.length > 253 ||
-    /[^a-zA-Z0-9.:[\]_-]/.test(v)
-  )
-    fail(400, "invalid_node_address");
-  return v;
 };
 const names = (value: any) =>
   list(value, "domains").map((v) => {
@@ -313,6 +306,7 @@ export function createClusterWorkloads(
       spec: {
         ...r.spec,
         ...d,
+        ports: (r.spec.ports??[]).map((p:Row)=>({...p,host_port:d.host_ports&&Object.hasOwn(d.host_ports,p.name)?d.host_ports[p.name]:p.host_port})),
         ...(r.spec.role === "openresty"
           ? { service_name: SYSTEM_SERVICE_NAMES.openresty }
           : {}),
@@ -423,7 +417,6 @@ export function createClusterWorkloads(
     return {
       machine_id: key,
       agent_id: m.agent_id,
-      address: m.address,
       cpu: Number(heart.cpu_count ?? heart.cpu?.cores ?? 0),
       memory_mb: Number(
         heart.memory_total_mb ??
@@ -431,6 +424,7 @@ export function createClusterWorkloads(
       ),
       ...(cached ? JSON.parse(cached.node_json) : {}),
       ...override,
+      ...machineServiceAddresses(db,key),
     };
   };
   const busy = (i: Row) =>
@@ -460,7 +454,8 @@ export function createClusterWorkloads(
             instance_id: i.id,
             agent_id: i.agent_id,
             machine_id: i.machine_id,
-            ip: i.address,
+            ip: p.host_ip && !['0.0.0.0','::'].includes(p.host_ip) ? p.host_ip : machineServiceAddresses(db,i.machine_id).address,
+            host_ip: p.host_ip,
             port: p.host_port,
             port_name: p.name,
             protocol: p.protocol,
@@ -571,10 +566,6 @@ export function createClusterWorkloads(
         if (!ids.includes(n.machine_id)) fail(409, "cluster_resource_mismatch");
         return {
           machine_id: n.machine_id,
-          address: address(n.address),
-          ...(n.public_address
-            ? { public_address: address(n.public_address) }
-            : {}),
           ...(n.cpu !== undefined ? { cpu: num(n.cpu, 0, 0.01, 1024) } : {}),
           ...(n.memory_mb !== undefined
             ? { memory_mb: num(n.memory_mb, 0, 4, 4194304) }
@@ -591,11 +582,7 @@ export function createClusterWorkloads(
         : undefined;
       if (
         registryDeployment &&
-        !nodes.some(
-          (n: Row) =>
-            n.machine_id === registryDeployment.machine_ids[0] &&
-            n.address === registryDeployment.registry_address,
-        )
+        !ids.includes(registryDeployment.machine_ids[0])
       )
         fail(409, "registry_data_migration_required");
       if (
@@ -805,8 +792,16 @@ export function createClusterWorkloads(
     )
       fail(400, "application_deployment_required");
     const deployments = s.deployments.map((d: Row) => {
+      const hostPorts=hostPortOverrides(d.host_ports,declared);
+      if(role==='openresty'&&hostPorts&&Object.keys(hostPorts).length)fail(400,'openresty_fixed_host_ports');
       const c = cluster(d.cluster_id),
         targets = list(d.machine_ids ?? [], "machine_ids");
+      const template = source.type === 'store' ? catalogTemplate(source.template_id) : undefined;
+      if (template?.deployment_modes && !template.deployment_modes.includes(mode)) fail(400, 'catalog_deployment_mode_unsupported');
+      if (template?.architectures) for (const key of targets) {
+        const machine = member(c.id, key), arch = agent(machine.agent_id)?.arch;
+        if (arch && !template.architectures.includes(arch === 'x86_64' ? 'amd64' : arch === 'aarch64' ? 'arm64' : arch)) fail(400, 'catalog_architecture_unsupported');
+      }
       targets.forEach((key) => {
         const m = member(c.id, key);
         if (!m.agent_id || !agent(m.agent_id))
@@ -822,17 +817,10 @@ export function createClusterWorkloads(
         );
         if (
           prior &&
-          (prior.machine_ids[0] !== targets[0] ||
-            prior.registry_address !== d.registry_address)
+          prior.machine_ids[0] !== targets[0]
         )
           fail(409, "registry_data_migration_required");
-        if (
-          !c.spec.nodes.some(
-            (n: Row) =>
-              n.machine_id === targets[0] && n.address === d.registry_address,
-          )
-        )
-          fail(400, "registry_address_must_match_cluster_node");
+
       }
       const replicas = num(d.replicas, 1, 0, 100);
       if (!Number.isInteger(replicas)) fail(400, "invalid_replicas");
@@ -863,6 +851,7 @@ export function createClusterWorkloads(
         fail(400, "openresty_cluster_domain_required");
       return {
         ...gateway,
+        ...(hostPorts?{host_ports:hostPorts}:{}),
         ...(role === "registry"
           ? {
               registry_address: privateRegistryAddress(d.registry_address),
@@ -965,6 +954,7 @@ export function createClusterWorkloads(
     delete runtime.memory_mb;
     return {
       ...runtime,
+      ...(s.configuration_mode ? {configuration_mode:s.configuration_mode} : {}),
       ports: declared,
       service_name: serviceName,
       source: {
@@ -1914,10 +1904,12 @@ export function createClusterWorkloads(
             (p: Row) => p.name === target.port_name,
           );
           if (!p) fail(400, "application_port_not_found");
-          out.upstreams = endpoints(app.id, p.name, cid).map((e) => {
-            // OpenResty uses host networking, so local published ports use loopback.
+          out.upstreams = endpoints(app.id, p.name, cid)
+            .filter(e => e.ip && (e.machine_id === gatewayMachineID || networkScope(e.ip) !== 'loopback'))
+            .map((e) => {
+            // OpenResty uses host networking; preserve a specific bind IP, otherwise use loopback.
             const host =
-              e.machine_id === gatewayMachineID ? "127.0.0.1" : e.ip;
+              e.machine_id === gatewayMachineID ? (e.host_ip && !['0.0.0.0','::'].includes(e.host_ip) ? e.host_ip : "127.0.0.1") : e.ip;
             return (
               (e.app_protocol === "https" ? "https" : "http") +
               "://" +
@@ -2034,8 +2026,8 @@ export function createClusterWorkloads(
       "workload.apply",
       {
         application: effective(a, i),
-        ...(registryCacheFor(store, a)
-          ? { image_cache: registryCacheFor(store, a) }
+        ...(registryCacheFor(store, a, i.machine_id)
+          ? { image_cache: registryCacheFor(store, a, i.machine_id) }
           : {}),
         application_id: a.id,
         application_revision: a.revision,

@@ -45,3 +45,7 @@
 | AC10 | 仓库系统设计与 Doca 文本、原生图及读回证据一致；明确区分首批实现、未完成目标和实际发行状态 |
 
 详细方案：[主机执行权限设计](../../docs/privileged-executor.md)。
+
+## 最新主干集成约束（2026-11-01）
+
+主干 SDD071 曾通过普通 unit 的 Docker supplementary group 与 CAP_NET_BIND_SERVICE 支撑旧部署。本实施分支遵循本 SDD 的普通/特权隔离：停止自动创建或授予该组/能力，普通 run 在 Linux 验证实际组、capability 及 Docker socket 可访问性；发现既有额外权限时拒绝启动并报告需要迁移，不擅自移除外部组或 ACL。root安装器的check/configure不因此被当成普通run。旧网站/容器/低端口适配器仍需迁移，本PR保持Draft。Docker SSH补装与普通/root任务及执行器引导/维护共用主机互斥，批准执行前复验当前人类管理员会话。

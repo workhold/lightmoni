@@ -7,6 +7,11 @@ Wants=network-online.target
 Type=simple
 User=lightmoni-agent
 Group=lightmoni-agent
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+SupplementaryGroups=
+AmbientCapabilities=
+CapabilityBoundingSet=
+ExecStartPre=/opt/lightmoni-agent/current/node /opt/lightmoni-agent/current/deployment-permissions.mjs check
 ExecStart=/usr/local/bin/lightmoni-agent run --config /etc/lightmoni-agent/config.json
 Restart=on-failure
 RestartSec=5s

@@ -188,6 +188,35 @@ async function archive(
     { signal },
   );
 }
+async function dockerPlatform(context: OperationExecutionContext) {
+  const result = await context.command('docker', ['info','--format','{{.OSType}}/{{.Architecture}}'], {timeoutMs:15000,signal:context.signal});
+  const [os, rawArch] = result.stdout.trim().split('/');
+  return {os, arch:rawArch === 'aarch64' ? 'arm64' : rawArch === 'x86_64' ? 'amd64' : rawArch};
+}
+async function localDockerImage(image: string, platform: {os:string;arch:string}, context: OperationExecutionContext) {
+  try {
+    const result = await context.command('docker',['image','inspect','--format','{{json .}}',image],{timeoutMs:15000,signal:context.signal});
+    const local = JSON.parse(result.stdout);
+    if (!/^sha256:[a-f0-9]{64}$/.test(local.Id) || local.Os !== platform.os || local.Architecture !== platform.arch) return;
+    const requested = image.match(/@(sha256:[a-f0-9]{64})$/)?.[1];
+    if (requested && local.Id !== requested && !(local.RepoDigests ?? []).some((d:string) => d.endsWith('@'+requested))) return;
+    return {image,image_id:local.Id,source:'local',downloaded_bytes:0};
+  } catch {
+    context.signal.throwIfAborted();
+    return;
+  }
+}
+async function localManifest(digests: string[], platform: {os:string;arch:string}, context: OperationExecutionContext) {
+  try {
+    const list = await context.command('docker',['image','ls','--digests','--format','{{json .}}'],{timeoutMs:15000,signal:context.signal});
+    for (const line of list.stdout.trim().split('\n').filter(Boolean)) {
+      const row = JSON.parse(line);
+      if (!digests.includes(row.Digest) || !row.Repository || row.Repository === '<none>') continue;
+      const local = await localDockerImage(row.Repository+'@'+row.Digest,platform,context);
+      if (local) return local;
+    }
+  } catch { context.signal.throwIfAborted(); }
+}
 /** Downloads through a registered private endpoint, verifies every content address, then imports into Docker.
  * No daemon configuration, ambient credentials, redirects or registry-selected URLs are used.
  */
@@ -247,22 +276,12 @@ export async function importCachedImage(
     const disk = await statfs(tmp);
     if (Number(disk.bavail) * Number(disk.bsize) < 512 * 1024 ** 2)
       reject("CACHE_DISK_SPACE_REQUIRED");
-    const platform = await context.command(
-      "docker",
-      ["info", "--format", "{{.OSType}}/{{.Architecture}}"],
-      { timeoutMs: 15000, signal },
-    );
-    const [os, rawArch] = platform.stdout.trim().split("/"),
-      arch =
-        rawArch === "aarch64"
-          ? "arm64"
-          : rawArch === "x86_64"
-            ? "amd64"
-            : rawArch;
+    const platform = await dockerPlatform(context), {os, arch} = platform;
     let manifest = await json(
       "manifests/" + ref.reference,
       ref.reference.startsWith("sha256:") ? ref.reference : undefined,
     );
+    const knownDigests = [manifest.digest];
     if (Array.isArray(manifest.value.manifests)) {
       const descriptor = manifest.value.manifests.find(
         (d: any) =>
@@ -276,6 +295,9 @@ export async function importCachedImage(
         descriptor.digest,
       );
     }
+    knownDigests.push(manifest.digest);
+    const reusable = await localManifest(knownDigests, platform, context);
+    if (reusable) return {...reusable,image,manifest_digest:manifest.digest,downloaded_bytes:downloaded};
     const m = manifest.value;
     if (
       m.schemaVersion !== 2 ||
@@ -292,6 +314,8 @@ export async function importCachedImage(
       config.value.rootfs.diff_ids.length !== m.layers.length
     )
       reject("CACHE_PLATFORM_MISMATCH");
+    const byConfig = await localDockerImage(config.digest,platform,context);
+    if (byConfig) return {...byConfig,image,config_digest:config.digest,manifest_digest:manifest.digest,downloaded_bytes:downloaded};
     const entries = [{ name: "config.json", file: config.file }],
       layers = [];
     for (const [i, layer] of m.layers.entries()) {
@@ -419,12 +443,13 @@ export async function prepareCachedImages(
 ) {
   cachePolicy(policy);
   const sources: any[] = [];
+  const platform = await dockerPlatform(context);
   for (const image of new Set<string>(
     Object.values<any>(manifest.services).map((s) => s.image),
   )) {
     let result;
     try {
-      result = await importCachedImage(image, policy, root, context);
+      result = await localDockerImage(image,platform,context) ?? await importCachedImage(image, policy, root, context);
     } catch (error) {
       context.signal.throwIfAborted();
       if (!policy.allow_upstream) throw error;

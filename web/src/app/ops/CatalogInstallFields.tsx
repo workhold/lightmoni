@@ -3,16 +3,18 @@ import {PlusOutlined,DeleteOutlined} from '@ant-design/icons';
 import {Alert,Button,Checkbox,Collapse,Form,Input,InputNumber,Select} from '../../shared/ui';
 import {useI18n} from '../../shared/i18n';
 import {ClusterManagementLink} from './ClusterFields';
+import ApplicationPortFields from './ApplicationPortFields';
 import type {CatalogTemplate,Machine,Resource,Spec} from './model';
 
 export default function CatalogInstallFields({template,resources,machines,advanced,onAdvanced}:{template:CatalogTemplate;resources:Resource[];machines:Machine[];advanced:boolean;onAdvanced:(open:boolean)=>void}){
  const {t}=useI18n(),form=Form.useFormInstance();
  const placements:Spec[]=Form.useWatch(['spec','deployments'],form)??[];
  const mode=Form.useWatch(['spec','deployment_mode'],form);
- const portEdited=useRef(false),containerPort=template.spec?.ports?.[0]?.container_port;
- const gateway=template.id==='openresty';
+ const portEdited=useRef(new Set<string>()),declared=template.spec?.ports??[],containerPort=declared[0]?.container_port;
+ const gateway=template.id==='openresty',serviceCount=Object.keys(template.spec?.compose?.services??{}).length;
+ const multiContainer=serviceCount>1;
  useEffect(()=>{
-  if(!portEdited.current&&containerPort&&!gateway)form.setFieldValue(['parameters','port'],mode==='managed'?undefined:containerPort);
+  if(!gateway)for(const p of declared)if(!portEdited.current.has(p.name))form.setFieldValue(['host_ports',p.name],mode==='managed'?0:p.container_port);
  },[mode,containerPort,form,gateway]);
  const clusters=resources.filter(r=>r.kind==='cluster');
  useEffect(()=>{
@@ -30,7 +32,13 @@ export default function CatalogInstallFields({template,resources,machines,advanc
  },[resources,machines,form,mode]);
  function parameter(p:NonNullable<CatalogTemplate['parameters']>[number]){
   const labels:Record<string,[string,string]>={password:[gateway?'密码':template.id==='mysql'?'Root 密码':'访问密码','Password'],user_password:['应用用户密码','Application user password'],database:['数据库','Database'],user:['应用用户','Application user'],port:['端口','Port']};
-  return <Form.Item key={p.key} name={['parameters',p.key]} label={labels[p.key]?t(...labels[p.key]):p.label} rules={p.required?[{required:true,message:t('请填写此参数','Enter this parameter')}]:[]} extra={p.key==='port'?(mode==='managed'?t('留空由平台分配，填写后使用指定端口','Leave blank for platform allocation; enter a value to use that port'):t('默认使用容器端口，可修改；0 表示自动分配','Defaults to the container port; change it or use 0 for automatic allocation')):undefined}>{p.type==='number'?<InputNumber min={0} max={65535} placeholder={mode==='managed'?t('平台自动分配','Assigned by platform'):String(containerPort??'')} onChange={()=>{if(p.key==='port')portEdited.current=true}}/>:p.type==='password'||p.type==='secret'?<Input.Password autoComplete="new-password"/>:<Input/>}</Form.Item>;
+  const label=p.label_en?t(p.label,p.label_en):labels[p.key]?t(...labels[p.key]):p.label;
+  const extra=p.description?t(p.description,p.description_en??p.description):p.type==='password'&&p.min?t(`至少 ${p.min} 个字符`,`At least ${p.min} characters`):undefined;
+  return <Form.Item key={p.key} name={['parameters',p.key]} label={label} rules={[{required:p.required,message:t('请填写此参数','Enter this parameter')},{validator:(_,v)=>{
+   if(v===undefined||v===null||v==='')return Promise.resolve();
+   const invalid=p.type==='number'?(typeof v!=='number'||!Number.isInteger(v)||v<(p.min??0)||v>(p.max??65535)):(typeof v!=='string'||v.length<(p.min??0)||v.length>(p.max??4096)||!!p.pattern&&!new RegExp(p.pattern).test(v));
+   return invalid?Promise.reject(Error(t('请检查参数长度或格式','Check the parameter length or format'))):Promise.resolve();
+  }}]} extra={extra}>{p.type==='number'?<InputNumber min={p.min??0} max={p.max??65535}/>:p.options?<Select options={p.options.map(o=>({value:o.value,label:t(o.label,o.label_en??o.label)}))}/>:p.type==='password'||p.type==='secret'?<Input.Password autoComplete="new-password" maxLength={p.max??4096}/>:<Input maxLength={p.max??4096}/>}</Form.Item>;
  }
  return <><Form.List name={['spec','deployments']} rules={[{validator:(_,rows)=>rows?.length?Promise.resolve():Promise.reject(Error(t('请选择安装位置','Choose an installation target')))}]}>{(fields,{remove},meta)=><>
   {fields.map(f=>{
@@ -46,14 +54,15 @@ export default function CatalogInstallFields({template,resources,machines,advanc
   })}
   <Form.ErrorList errors={meta.errors}/>
  </>}</Form.List>
-  <div className="lm-ops-grid">{(template.parameters??[]).filter(p=>p.required||p.key==='port').map(parameter)}</div>
+  <div className="lm-ops-grid">{(template.parameters??[]).filter(p=>p.required&&p.key!=='port').map(parameter)}</div>
+  {!gateway&&declared.length>0&&<><ApplicationPortFields ports={declared} onChange={name=>portEdited.current.add(name)}/><Form.Item name="listen_ip" label={t('监听范围','Listen scope')}><Select options={[{value:'0.0.0.0',label:t('全部网卡','All interfaces')},{value:'127.0.0.1',label:t('仅本机','Localhost only')}]}/></Form.Item></>}
   {gateway&&<p className="lm-ops-note">{t('使用宿主机 80 / 443 端口，请确保端口空闲。','Uses host ports 80 / 443. Ensure they are available.')}</p>}
   <Collapse className="lm-install-advanced" activeKey={advanced?['advanced']:[]} onChange={keys=>onAdvanced(keys.includes('advanced'))} items={[{key:'advanced',label:t('高级设置','Advanced settings'),forceRender:true,children:<>
-   <div className="lm-ops-grid"><Form.Item name={['spec','service_name']} label={t('服务标识','Service name')} rules={[{pattern:/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,message:t('使用小写字母、数字和短横线，最长 63 字符','Use lowercase letters, numbers and hyphens, up to 63 characters')}]} extra={t('留空自动生成，创建后不可修改','Generated when blank; cannot be changed after creation')}><Input maxLength={63}/></Form.Item><Form.Item name={['spec','deployment_mode']} label={t('部署模式','Deployment mode')}><Select options={[{value:'manual',label:t('手动指定机器','Choose machines')},{value:'managed',label:t('自动调度','Automatic scheduling')}]}/></Form.Item></div>
+   <div className="lm-ops-grid"><Form.Item name={['spec','service_name']} label={t('服务标识','Service name')} rules={[{pattern:/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,message:t('使用小写字母、数字和短横线，最长 63 字符','Use lowercase letters, numbers and hyphens, up to 63 characters')}]} extra={t('留空自动生成，创建后不可修改','Generated when blank; cannot be changed after creation')}><Input maxLength={63}/></Form.Item><Form.Item name={['spec','deployment_mode']} label={t('部署模式','Deployment mode')}><Select options={[{value:'manual',label:t('手动指定机器','Choose machines')},{value:'managed',label:t('自动调度','Automatic scheduling'),disabled:!!template.deployment_modes&&!template.deployment_modes.includes('managed')}]}/></Form.Item></div>
    {mode==='managed'&&<Alert type={template.spec?.stateful?'warning':'info'} showIcon title={t('自动维护实例数量，故障时可更换机器','Maintains instance counts and can reschedule failures')} description={t('不会迁移本地数据或建立数据库复制。','Local data is not migrated and database replication is not configured.')}/>}
    <div className="lm-ops-grid">{(template.parameters??[]).filter(p=>!p.required&&p.key!=='port').map(parameter)}</div>
-   {placements.map((_,index)=><div key={index}><h4>{placements.length>1?(clusters.find(c=>c.id===placements[index]?.cluster_id)?.name??t('安装位置','Installation target')):t('资源限制','Resource limits')}</h4><div className="lm-ops-grid"><Form.Item name={['spec','deployments',index,'cpu']} label={t('每实例 CPU 核数','CPU cores per instance')} rules={[{required:true}]}><InputNumber min={.01} max={1024}/></Form.Item><Form.Item name={['spec','deployments',index,'memory_mb']} label={t('每实例内存（MiB）','Memory per instance (MiB)')} rules={[{required:true}]}><InputNumber min={16} max={1048576}/></Form.Item></div>{gateway&&<Form.Item name={['spec','deployments',index,'gateway_dns_zone_id']} label={t('入口域名托管（可选）','Manage entry domain DNS (optional)')}><Select allowClear options={resources.filter(r=>r.kind==='dns_zone').map(r=>({value:r.id,label:r.name}))}/></Form.Item>}</div>)}
-   <Button icon={<PlusOutlined/>} onClick={()=>form.setFieldValue(['spec','deployments'],[...(form.getFieldValue(['spec','deployments'])??[]),{machine_ids:[],replicas:1,cpu:template.id==='mysql'?1:.25,memory_mb:template.id==='mysql'?512:128}])}>{t('添加集群部署','Add cluster deployment')}</Button>
+   {placements.map((_,index)=><div key={index}><h4>{placements.length>1?(clusters.find(c=>c.id===placements[index]?.cluster_id)?.name??t('安装位置','Installation target')):t('资源限制','Resource limits')}</h4><div className="lm-ops-grid"><Form.Item name={['spec','deployments',index,'cpu']} label={multiContainer?t('每容器 CPU 核数','CPU cores per container'):t('每实例 CPU 核数','CPU cores per instance')} rules={[{required:true}]}><InputNumber min={.01} max={1024}/></Form.Item><Form.Item name={['spec','deployments',index,'memory_mb']} label={multiContainer?t('每容器内存（MiB）','Memory per container (MiB)'):t('每实例内存（MiB）','Memory per instance (MiB)')} rules={[{required:true}]}><InputNumber min={16} max={1048576}/></Form.Item></div>{multiContainer&&<p className="lm-ops-note">{t(`此应用包含 ${serviceCount} 个容器，集群会预留各容器资源的总和。`,`This application includes ${serviceCount} containers. The cluster reserves the sum of their resources.`)}</p>}{gateway&&<Form.Item name={['spec','deployments',index,'gateway_dns_zone_id']} label={t('入口域名托管（可选）','Manage entry domain DNS (optional)')}><Select allowClear options={resources.filter(r=>r.kind==='dns_zone').map(r=>({value:r.id,label:r.name}))}/></Form.Item>}</div>)}
+   <Button icon={<PlusOutlined/>} onClick={()=>form.setFieldValue(['spec','deployments'],[...(form.getFieldValue(['spec','deployments'])??[]),{machine_ids:[],replicas:1,cpu:template.resources?.cpu??(template.id==='mysql'?1:.25),memory_mb:template.resources?.memory_mb??(template.id==='mysql'?512:128)}])}>{t('添加集群部署','Add cluster deployment')}</Button>
   </>}]} />
  </>;
 }

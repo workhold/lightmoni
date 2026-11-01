@@ -1,9 +1,12 @@
 import { fail } from "../shared/http.js";
 import {registryTemplateSpec} from './registry-runtime.js';
+import {extendedCatalog,extendedInstallation} from './catalog/index.js';
+import type {CatalogTemplate} from './catalog/types.js';
+import { hostPortOverrides } from './application-ports.js';
 
 type Input = Record<string, any>;
-export const applicationCatalog = [
-  {id:'registry',name:'Docker Registry',description:'独立持久数据的私有镜像仓库；系统镜像缓存请从私有镜像管理安装。',category:'tools',version:'3.0.0',versions:['3.0.0'],managed_recommended:false,managed_reason:'本地仓库数据不会自动跨机迁移，建议明确指定机器。',parameters:[],spec:{...registryTemplateSpec(),compose:{services:{registry:registryTemplateSpec().compose.services.registry}},ports:registryTemplateSpec().ports.slice(0,1),mounts:registryTemplateSpec().mounts.slice(0,1)}},
+export const applicationCatalog: CatalogTemplate[] = [
+  {id:'registry',name:'Docker Registry',description:'独立持久数据的私有镜像仓库；系统镜像缓存请从私有镜像管理安装。',category:'devops',version:'3.0.0',versions:['3.0.0'],managed_recommended:false,managed_reason:'本地仓库数据不会自动跨机迁移，建议明确指定机器。',parameters:[],spec:{...registryTemplateSpec(),compose:{services:{registry:registryTemplateSpec().compose.services.registry}},ports:registryTemplateSpec().ports.slice(0,1),mounts:registryTemplateSpec().mounts.slice(0,1)}},
   {
     id: "mysql",
     name: "MySQL",
@@ -100,7 +103,7 @@ export const applicationCatalog = [
     id: "redis",
     name: "Redis",
     description: "可独立安装多套 Redis，默认启用 AOF 并保留本机数据。",
-    category: "cache",
+    category: "middleware",
     version: "7.4-alpine",
     versions: ["7.4-alpine"],
     managed_recommended: false,
@@ -137,6 +140,7 @@ export const applicationCatalog = [
       mounts: [{ type: "data", target: "/data" }],
     },
   },
+  ...extendedCatalog,
 ];
 export function catalogTemplate(id: string) {
   const template = applicationCatalog.find((t) => t.id === id);
@@ -148,7 +152,8 @@ export function catalogInstallation(id: string, input: Input) {
     p = input.parameters ?? {};
   if (!p || typeof p !== "object" || Array.isArray(p))
     fail(400, "invalid_catalog_parameters");
-  for (const parameter of template.parameters)
+  const extended = extendedInstallation(id,input);
+  for (const parameter of extended ? [] : template.parameters)
     if (
       parameter.required &&
       (typeof p[parameter.key] !== "string" ||
@@ -159,7 +164,7 @@ export function catalogInstallation(id: string, input: Input) {
   const version = input.version ?? template.version;
   if (!template.versions.includes(version))
     fail(400, "unsupported_template_version");
-  const spec: Input = structuredClone(template.spec);
+  const spec: Input = extended ?? structuredClone(template.spec);
   if (id === "mysql") {
     const database = p.database ?? "app",
       user = p.user ?? "lightmoni";
@@ -189,9 +194,13 @@ export function catalogInstallation(id: string, input: Input) {
     };
   }
   if (id === "redis") spec.environment.REDIS_PASSWORD = p.password;
-  if (spec.ports.length && id !== 'openresty')
+  if (!extended && spec.ports.length && id !== 'openresty')
     spec.ports[0].host_port = p.port !== undefined && p.port !== null && p.port !== ''
       ? p.port : input.deployment_mode === 'managed' ? 0 : spec.ports[0].container_port;
+  const overrides=hostPortOverrides(input.host_ports,spec.ports);
+  if(id==='openresty'&&(overrides&&Object.keys(overrides).some(name=>overrides[name]!==spec.ports.find((p:Input)=>p.name===name)?.host_port)||input.listen_ip!==undefined))fail(400,'openresty_fixed_host_ports');
+  if(input.listen_ip!==undefined&&!['0.0.0.0','127.0.0.1'].includes(input.listen_ip))fail(400,'invalid_listen_ip');
+  spec.ports=spec.ports.map((port:Input)=>({...port,...(overrides&&Object.hasOwn(overrides,port.name)?{host_port:overrides[port.name]}:{}),...(input.listen_ip!==undefined?{host_ip:input.listen_ip}:{})}));
   return {
     template,
     name: input.name ?? template.name,
@@ -206,14 +215,16 @@ export function catalogInstallation(id: string, input: Input) {
       role: id === "openresty" ? "openresty" : "generic",
       deployment_mode: input.deployment_mode ?? "manual",
       deployments: input.deployments ?? [],
-      stateful: id !== "openresty",
+      stateful: extended ? Boolean(spec.stateful) : id !== "openresty",
     },
   };
 }
 
 export const applicationCategories = [
   {id:'database',name:'数据库',name_en:'Databases'},
-  {id:'cache',name:'缓存',name_en:'Caching'},
+  {id:'middleware',name:'中间件',name_en:'Middleware'},
+  {id:'devops',name:'DevOps',name_en:'DevOps'},
+  {id:'ai',name:'AI 项目',name_en:'AI projects'},
   {id:'tools',name:'工具',name_en:'Tools'},
   {id:'web',name:'网站与网关',name_en:'Web & gateways'},
 ].map(c=>({...c,count:applicationCatalog.filter(t=>t.category===c.id).length}));

@@ -128,3 +128,16 @@ test("maintenance requires strict human admin input and never accepts a bearer c
  assert.equal((await f.request(`${f.path}/plans/${p.id}/apply`,"POST",{confirm:true,expected_revision:p.revision,request_id:randomUUID(),arbitrary:true})).status,400);
  assert.equal((await f.request(`${f.path}/plans/${p.id}/reconcile`,"POST",{credential_id:"credential",arbitrary:true})).status,400);assert.equal(removes(f).length,0);
 });
+
+test("Docker installation acquired during maintenance probe blocks plan and apply",async t=>{
+ for(const stage of ["plan","apply"])for(const state of ["running","unknown"])await t.test(stage+" "+state,async sub=>{
+  const f=await fixture(sub);
+  f.db.exec("CREATE TABLE machine_docker_installations(id TEXT,machine_id TEXT,agent_id TEXT,state TEXT)");
+  const p=stage==="apply"?await f.plan():undefined;
+  f.onProbe(()=>f.db.run("INSERT INTO machine_docker_installations VALUES('docker','host','agent-host',?)",state));
+  const r=p?await f.apply(p):await f.request(f.path+"/plan","POST",{action:"uninstall",credential_id:"credential"});
+  assert.equal(r.status,409,r.raw);assert.match(r.raw,/docker_installation_pending/);
+  assert.equal(removes(f).length,0);
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM machine_executor_maintenance WHERE status='running'")!.n,0);
+ });
+});

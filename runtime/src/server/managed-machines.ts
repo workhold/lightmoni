@@ -1,3 +1,6 @@
+import { registerMachineDocker } from './machine-docker.js';
+import { machineDockerEnvironment, type DockerEnvironment } from './docker-environment.js';
+import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { connectionCredentials } from "./connection-credentials.js";
 import { createHostNetworkSchema, machineNetwork, recordSSHHostNetwork, type MachineNetwork } from "./host-network.js";
 import { recordMachineHostKey } from "./machine-host-keys.js";
@@ -104,6 +107,7 @@ const statusOf = (row: any, now: Date): MachineStatus => {
 };
 
 export interface MachineSummary {
+  docker_environment?: DockerEnvironment;
   id: string;
   name: string;
   observed_hostname: string;
@@ -328,7 +332,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     try { cleanupInvalidCredentials(); } catch (error) { deps.logger.error(error); }
   }, CLEANUP_INTERVAL_MS);
   cleanupTimer.unref();
-  const idle = (machineID: string) => { cleanupInvalidCredentials(); if (busy.has(machineID)) fail(409, "此主机有终端、检查或部署正在进行，请先结束后重试"); };
+  const idle = (machineID: string) => { cleanupInvalidCredentials(); assertNoDockerInstallation(db,machineID); if (busy.has(machineID)) fail(409, "此主机有终端、检查或部署正在进行，请先结束后重试"); };
   // A user label is not part of the SSH connection identity. Plans that show
   // that label are invalidated separately when the asset is renamed.
   const targetRevision = (machine: any) => hash(JSON.stringify([machine.address, machine.port, machine.username, machine.connection_method, machine.host_key_fingerprint, Number(machine.ssh_target_generation || 0), deps.externalURL]));
@@ -370,7 +374,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const activeSSH = Number(value.active_ssh_credential_count ?? 0), activeKeys = Number(value.active_ssh_key_count ?? 0);
     const reusableSSH = Number(value.active_reusable_ssh_credential_count ?? 0);
     const capability = (reusableRequired = false): MachineCapability => {
-      const reason: MachineCapabilityReason = busy.has(value.id) ? "host_busy"
+      const reason: MachineCapabilityReason = (busy.has(value.id) || pendingDockerInstallation(db,value.id,value.agent_id)) ? "host_busy"
         : value.connection_method !== "direct_ssh" ? "direct_ssh_required"
         : (reusableRequired ? !reusableSSH : !activeSSH) ? (reusableRequired ? "reusable_ssh_credential_required" : "ssh_credential_required") : "";
       return { available: !reason, reason };
@@ -392,6 +396,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     return {
       id: value.id, name: value.name, default_credential_id: value.default_credential_id || "", observed_hostname: currentAgentHostname(db, value.id, value.agent_id),
       network: machineNetwork(db,value.id),
+      docker_environment: machineDockerEnvironment(db,value.agent_id,now()),
       ...hostLabels(value.id),
       address: value.address, port: Number(value.port), username: value.username,
       connection_method: value.connection_method, host_key_fingerprint: value.host_key_fingerprint, ssh_target_generation: Number(value.ssh_target_generation || 0),
@@ -888,6 +893,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     ctx.json({ id: deployment.id, machine_id: ctx.params.id, status: "cancelled" });
   }));
   router.post("/api/v1/machines/:id/deployments/:deploymentId/apply", safe(apply));
+  const dockerInstallations = registerMachineDocker(deps,{get,idle,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe});
   registerInstallationRecovery(deps,{get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,deployment:deploymentRecord,
     activated(machineID,actorID){for(const temporary of db.all<{id:string}>("SELECT id FROM machine_credentials WHERE machine_id=? AND retention IN ('temporary','one_time')",machineID))clearCredential(temporary.id,"agent_activated",actorID,true);}},options.agentCredentials);
   const assistantSafe = (machine: MachineSummary) => ({ ...machine, host_key_fingerprint: "", host_key_public_key: "", host_key_observed_at: "" });
@@ -920,6 +926,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     async close() {
       clearInterval(cleanupTimer);
       for (const terminal of [...terminals.values()]) terminal.invalidate();
+      await dockerInstallations.close();
       await agentUpdates.close?.();
     },
   };

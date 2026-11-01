@@ -12,6 +12,7 @@ import { hasActiveTaskRuns } from "./agent-hosts.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import { assertNoPendingMachineUninstallation } from "./machine-uninstallations-guard.js";
+import { assertNoDockerInstallation } from "./machine-docker-guard.js";
 import type { PrivilegedExecutorStore } from "./privileged-executors.js";
 import { executorHostLockShell, executorAbsenceProofShell } from "./executor-absence-shell.js";
 
@@ -111,6 +112,7 @@ export function registerMachineExecutorBootstrap(deps: Dependencies, access: Acc
     assertNoPendingAgentUpdate(db,machine.agent_id,machine.id);
     assertNoPendingMachineInstallation(db,machine.id,machine.agent_id,true);
     assertNoPendingMachineUninstallation(db,machine.id,machine.agent_id);
+    assertNoDockerInstallation(db,machine.id,machine.agent_id);
     if (hasActiveTaskRuns(db,machine.agent_id,machine.id) || db.get("SELECT 1 FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",machine.agent_id))
       fail(409,"主机存在未结束或待核对的任务");
   };

@@ -1,0 +1,29 @@
+{
+  "source": "6642bd019917b4c469960a068b60870afa56e970",
+  "pending_prs_in_source": [
+    44,
+    47,
+    55,
+    58
+  ],
+  "all_merge_commits_are_ancestors": true,
+  "linked_feature_worktrees_clean": true,
+  "legacy_local_branches_equivalent_to_squash_merged_main": [
+    "codex/057-domain-certificate-sync",
+    "codex/057-domain-sync-release"
+  ],
+  "web_unit_tests": {
+    "passed": 146,
+    "failed": 0
+  },
+  "runtime_permission_website_certificate_final": {
+    "passed": 18,
+    "failed": 0
+  },
+  "runtime_merged_docker_port_validation": {
+    "passed": 73,
+    "failed": 0
+  },
+  "typecheck": "runtime and web passed; both production builds passed",
+  "architecture": "SDD071 Doca seq917; SDD060 independent executor is design only"
+}

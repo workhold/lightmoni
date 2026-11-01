@@ -10,7 +10,7 @@ import { OperationRejectedError } from "../operations/errors.js";
 import { commandDiagnostic, installCause, installCauses, installPhases } from "../operations/install-progress.js";
 import { executePlatform, platformDefinition } from "../operations/platform.js";
 
-export const operationCapabilities = ["operations.website", "operations.certificate", "operations.compose", "operations.backup", "operations.platform", "operations.platform.website-auth.v1", "operations.platform.image-cache.v1"];
+export const operationCapabilities = ["operations.website", "operations.certificate", "operations.compose", "operations.backup", "operations.platform", "operations.platform.website-auth.v1", "operations.platform.image-cache.v1", "operations.platform.oneshot.v1"];
 export const operationCommand: OperationExecutionContext["command"] = (file, args, options = {}) => new Promise((resolve, reject) => {
   const allowed = ["PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot", "SSL_CERT_FILE", "SSL_CERT_DIR"];
   const env = Object.fromEntries(allowed.flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []));
@@ -21,7 +21,7 @@ export const operationCommand: OperationExecutionContext["command"] = (file, arg
   const timer = setTimeout(() => finish(Object.assign(Error("operation_command_timeout"), { code: "operation_command_timeout" })), Math.min(600_000, options.timeoutMs ?? 30_000));
   const append = (chunk: Buffer, out: boolean) => { if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) + chunk.length > 1 << 20) finish(Object.assign(Error("operation_output_limit"), { code: "operation_output_limit" })); else if (out) stdout += chunk; else stderr += chunk; };
   child.stdout.on("data", x => append(x, true)); child.stderr.on("data", x => append(x, false));
-  child.on("error", () => finish(Object.assign(Error("operation_dependency_unavailable"), { code: "operation_dependency_unavailable" })));
+  child.on("error", (error: NodeJS.ErrnoException) => finish(Object.assign(Error("operation_dependency_unavailable"), { code: "operation_dependency_unavailable", ...(file === "docker" && error.code === "ENOENT" ? {diagnosticCode:"docker_cli_missing"} : {}) })));
   child.on("close", code => {
     const diagnostic = file === 'docker' && /permission denied|access is denied/i.test(stderr) ? 'docker_permission_denied'
       : file === 'docker' && /cannot connect|is the docker daemon running|error during connect|connection refused/i.test(stderr) ? 'docker_daemon_unavailable' : 'operation_command_failed';

@@ -26,7 +26,7 @@ export async function privateRoot(context:OperationExecutionContext,domain:strin
 }
 export async function publicRoot(context:OperationExecutionContext):Promise<string>{
   const identity=hash(resolve(context.dataDir)).slice(0,20);
-  const root=resolve(context.publicDir?join(await realpath(dirname(resolve(context.publicDir))),basename(context.publicDir)):(process.getuid?.()===0?join('/var/lib/lightmoni-web',identity):join(await realpath(dirname(resolve(context.dataDir))),`lightmoni-web-public-${identity}`)));
+  const root=resolve(context.publicDir?join(await realpath(dirname(resolve(context.publicDir))),basename(context.publicDir)):(process.getuid?.()===0||resolve(context.dataDir)==='/var/lib/lightmoni-agent'?join('/var/lib/lightmoni-web',identity):join(await realpath(dirname(resolve(context.dataDir))),`lightmoni-web-public-${identity}`)));
   const privatePath=resolve(context.dataDir);if(root===privatePath||root.startsWith(privatePath+sep))throw new Error('PUBLIC_ROOT_MUST_BE_SEPARATE');
   await directory(root,0o755);const marker=join(root,'.lightmoni-web-owner.json');const owner=await readJSON<any>(marker,null);
   if(owner){if(owner.dataDir!==privatePath||owner.version!==1)throw new Error('PUBLIC_DIRECTORY_OWNERSHIP_MISMATCH');}
@@ -34,7 +34,7 @@ export async function publicRoot(context:OperationExecutionContext):Promise<stri
   await chmod(root,0o755);return root;
 }
 export const quote=(text:string)=>{if(/[\r\n\0]/.test(text))throw new Error('UNSAFE_NGINX_VALUE');return '"'+text.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\$/g,'\\$')+'"';};
-export async function nginxPaths(context:OperationExecutionContext){const root=await privateRoot(context,'websites');for(const dir of ['active','versions','logs'])await directory(join(root,dir));return{root,config:join(root,'nginx.conf'),pid:join(root,'nginx.pid')};}
+export async function nginxPaths(context:OperationExecutionContext){const root=await privateRoot(context,'websites');for(const dir of ['active','versions','logs','temp/client-body','temp/proxy','temp/fastcgi','temp/uwsgi','temp/scgi'])await directory(join(root,dir));return{root,config:join(root,'nginx.conf'),pid:join(root,'nginx.pid')};}
 export async function running(context:OperationExecutionContext):Promise<boolean>{
  const{pid,root,config}=await nginxPaths(context);await safeFile(pid);let value:string;
  try{value=(await readFile(pid,'utf8')).trim();}catch(e:any){if(e.code==='ENOENT')return false;throw e;}

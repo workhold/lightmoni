@@ -155,3 +155,14 @@ test('absence reconciliation rechecks credential target actor and exact identity
 test('concurrent unknown reconciliation performs one probe and cannot cancel a replacement identity',{timeout:5000},async t=>{
  const f=await fixture(t),h=await f.host(),p=await unknownBootstrap(f,h),held=f.gate();f.onAbsence(async()=>{held.start();await held.promise});const pending=reconcile(f,h,p);await held.waiting;const duplicate=await reconcile(f,h,p);assert.equal(duplicate.status,409,duplicate.raw);assert.equal(absenceCalls(f).length,1);held.release();const accepted=await pending;assert.equal(accepted.status,200,accepted.raw);assert.equal(accepted.data.status,'failed');assert.equal(bootstrapCalls(f).length,1);assert.equal((await reconcile(f,h,p)).status,409);assert.equal(absenceCalls(f).length,1);
 });
+
+test('Docker installation acquired during bootstrap preflight blocks plan and apply',async t=>{
+ for(const stage of ['plan','apply'])for(const state of ['running','unknown'])await t.test(stage+' '+state,async sub=>{
+  const f=await fixture(sub),h=await f.host(),p=stage==='apply'?await f.plan(h):undefined;
+  f.onCheck(()=>f.db.run('INSERT INTO machine_docker_installations VALUES(?,?,?,?,?,?,?,?,?,?,?)','d'.repeat(32),h.id,h.agentID,'docker-preflight-race',h.cid,state,'unknown','','admin',f.clock.toISOString(),f.clock.toISOString()));
+  const r=p?await f.apply(h,p):await f.request(h.path+'/plan','POST',{credential_id:h.cid,capabilities:['script.elevated.v1']});
+  assert.equal(r.status,409,r.raw);assert.match(r.raw,/docker_installation_pending/);
+  assert.equal(f.db.get<any>('SELECT count(*) n FROM privileged_enrollments')!.n,0);
+  assert.equal(bootstrapCalls(f).length,0);
+ });
+});

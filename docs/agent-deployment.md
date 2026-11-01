@@ -68,7 +68,7 @@ Agent配置公网引导endpoint，自动查询管理员登记的中心内网IP�
 
 每个 Agent 使用绑定 `agent_id` 与登记主机的独立 control/data credential：control 用于心跳和配置，data 用于遥测；中心保存摘要并按 audience、scope、有效期和撤销状态校验。SDK Key 不可替代控制凭据，注册/心跳不得创建或抢占主机资产。撤销不会在断网时即时停止缓存任务，配置租约仍待实现。
 
-日志目录应明确授予服务用户文件读取及父目录遍历权限，可按业务组或 ACL 配置，不要为了读取日志默认改为 root。服务启用 `ProtectSystem=strict`、`ProtectHome=read-only`、`PrivateTmp=true`，只允许写状态目录。应用宿主 `/tmp` 日志不一定在该服务视图中可见，优先使用稳定日志目录；调整数据目录时也要同步审视 unit 的 `ReadWritePaths`。
+日志目录应明确授予服务用户文件读取及父目录遍历权限，可按业务组或 ACL 配置。服务启用 `ProtectSystem=strict`、`ProtectHome=read-only`、`PrivateTmp=true`，允许写私有状态目录 `/var/lib/lightmoni-agent` 与独立公开网站目录 `/var/lib/lightmoni-web`。标准服务配置 Docker 附加组及 `CAP_NET_BIND_SERVICE`，安装与升级负责准备组和目录，每次启动在实际服务身份及沙箱中检查读写、原子切换、低端口和 Docker 访问。应用宿主 `/tmp` 日志不一定在该服务视图中可见，优先使用稳定日志目录；外部路径仍需精确授权。
 
 ## 检查与诊断
 
@@ -206,14 +206,25 @@ SDK 直接使用中心地址和 SDK Key，业务可以先启动或完全不装 A
 
 需要同时升级中心与 Agent。旧 Agent 未声明 `docker.inventory` / `docker.control` 时只显示已有快照并提示升级。中心不连接 Docker socket；Agent 使用本机固定 `default` context，不继承交互终端的 `DOCKER_HOST` 或其他 context。
 
-标准安装以 `lightmoni-agent` 用户运行，安装器不会自动授予 Docker 管理权限。主机必须有 Docker CLI、运行中的 daemon，并显式允许该服务用户访问目标 socket。在主机管理员核对授权后，按该主机的 Docker 安全策略配置组或 ACL，并重启 Agent 服务使新权限生效；Docker 管理权限可控制宿主机，不能通过将 socket 设为全员可写来解决。
+标准安装以 `lightmoni-agent` 用户运行。SDD 071 的发行包由安装器/维护器确保 Docker 系统组存在，unit 通过 `SupplementaryGroups=docker` 自动获得标准本机 socket 访问权，并用 `CAP_NET_BIND_SERVICE` 支持低端口；不会修改 socket 权限或系统全局用户组成员。Docker 管理权限接近宿主 root，普通脚本继承服务的实际权限，部署和脚本均须来自受信管理员。后续独立特权执行器属于另一套权限协议，本次不声称已迁移。
+
+启动前固定检查器以实际 unit 的 UID、附加组、capability 与文件系统沙箱验证私有配置可读、私有/公开目录的写入及原子 rename、低端口绑定和已有 Docker socket 的访问。权限错误使服务启动检查失败，只记录固定错误码。没有安装 Docker 或 daemon 未就绪时监控 Agent 仍可运行，但输出依赖待就绪，不能据此显示应用可部署；之后安装使用标准 docker 组的 Docker 无需手工补组。非标准 socket/组策略若不符合该部署契约，必须明确配置后验证，不能伪造就绪。
 
 只读排查可在主机执行：
 
 ```sh
 id lightmoni-agent
 ls -l /var/run/docker.sock
-sudo -u lightmoni-agent docker --context default ps --all --no-trunc
+sudo systemctl show lightmoni-agent --no-pager -p User -p Group -p SupplementaryGroups -p AmbientCapabilities -p ReadWritePaths
+sudo runuser -u lightmoni-agent -g lightmoni-agent -G docker -- docker --context default ps --all --no-trunc
 ```
 
 页面区分 CLI 缺失、socket 权限不足、daemon 不可达和命令超时，显示最近尝试并保留旧清单。排队超时说明 Agent 未领取任务；`unknown` 说明可能已产生效果，先立即采集并检查容器，不直接重复操作。节点写锁在未知结果时保留，管理员需核对原执行已终止及现场状态后处理恢复。
+
+## 网站配置与文件权限（SDD 071，需发布并升级）
+
+网站配置、版本、PID、日志、临时文件和证书私钥保存在私有状态目录中，服务用户拥有目录 0700、私钥 0600 的读写权限。Nginx 的 client body、proxy、FastCGI、uWSGI、SCGI 临时路径显式放在同一受管树，避免隐式写系统目录。配置先 `nginx -t`，再切换、重载及 HTTP/TLS 回读，失败恢复旧配置；所有步骤使用同一服务身份。
+
+标准安装的公开内容使用 `/var/lib/lightmoni-web/<data-dir-hash>`，与私有配置及凭据分离。安装器准备父目录，unit 精确开放其写入；静态文件使用 0644、公开目录 0755。Docker OpenResty 继续由已授权 Docker 路径读取固定受管挂载，不能把私钥放进静态根目录。外部证书导出、备份或 systemd 发布路径须通过对应目标的精确授权，不根据任意任务参数扩大系统可写范围。
+
+升级先准备目标版本要求的权限，再停止旧服务；权限准备失败保留原服务，启动失败按原维护事务恢复。回退使用原 unit，保留身份、配置和队列；不会恢复旧队列快照。离线卸载默认保留网站/业务数据，不能将保留数据描述为仍有运行中的服务权限。

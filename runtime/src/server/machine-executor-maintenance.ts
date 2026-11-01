@@ -8,6 +8,7 @@ import { hasActiveTaskRuns } from "./agent-hosts.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import { assertNoPendingMachineUninstallation } from "./machine-uninstallations-guard.js";
+import { assertNoDockerInstallation } from "./machine-docker-guard.js";
 import { agentMaintenanceShellGuards } from "../shared/agent-maintenance-shell.js";
 import { executorHostLockShell, executorAbsenceProofShell } from "./executor-absence-shell.js";
 
@@ -63,6 +64,7 @@ export function registerMachineExecutorMaintenance(deps:Dependencies,access:Agen
   const view=(r:Row)=>({id:r.id,status:r.status,revision:r.revision,plan:JSON.parse(r.plan_json),executor_id:r.executor_id,expires_at:r.expires_at,started_at:r.started_at,finished_at:r.finished_at,error:r.error});
   const checkOther=(host:string,agent:string,own="")=>{
     assertNoPendingAgentUpdate(db,agent,host);assertNoPendingMachineInstallation(db,host,agent,true);assertNoPendingMachineUninstallation(db,host,agent);
+    assertNoDockerInstallation(db,host,agent);
     if(hasActiveTaskRuns(db,agent,host)||db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",agent))fail(409,"executor_maintenance_tasks_pending");
     if(db.get("SELECT id FROM machine_executor_maintenance WHERE machine_id=? AND id!=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1",host,own))fail(409,"executor_maintenance_pending");
   };

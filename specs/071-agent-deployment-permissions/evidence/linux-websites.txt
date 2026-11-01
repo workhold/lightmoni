@@ -1,0 +1,10 @@
+PASS Docker socket access is denied without its service group
+PASS startup checks under the real non-root UID, Docker group, capability and read-only root
+PASS 80/443 bind with CAP_NET_BIND_SERVICE
+PASS real static website on port 80; config, PID, logs and all temporary paths stay in managed directories
+PASS failed website update restores the live previous configuration
+PASS configuration reload and explicit version restore under the Agent user
+PASS real reverse proxy deployment
+PASS HTTPS on port 443, uploaded certificate and verified certificate rotation; private key stays 0600
+PASS managed log reading and website disable/reload
+PASS all deployment and website permission checks; Engine API calls=2

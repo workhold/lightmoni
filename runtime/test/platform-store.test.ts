@@ -374,3 +374,10 @@ test("shutdown rejects newly arriving work and waits for work already in progres
   await closing;
   assert.equal(closed, true);
 });
+test('one-shot workload jobs require an updated Agent capability',t=>{
+ const {store,jobs}=setup(t),resource=store.create('application','Initializer',{},'admin');
+ const config={task:'workload.apply',application:{mode:'compose',compose:{services:{init:{image:'busybox:1.37.0',labels:{'io.lightmoni.platform.oneshot':'true'}}}}}};
+ store.queue(resource,'node-a','deploy',config,'admin');
+ assert.equal(jobs.claim('node-a',['operations.platform']),null);
+ assert.ok(jobs.claim('node-a',['operations.platform','operations.platform.oneshot.v1']));
+});

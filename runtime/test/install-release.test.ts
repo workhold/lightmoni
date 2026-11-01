@@ -34,6 +34,7 @@ function fixture(
     startupStates?: boolean[];
     failShow?: boolean;
     legacyPackage?: boolean;
+    failPermissionPreparation?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lightmoni-install-")),
@@ -199,6 +200,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
   for (const path of ["app/agent", "node_modules/synthetic", "bin"])
     mkdirSync(join(packagedRuntime, path), { recursive: true, mode: 0o755 });
   if (!options.legacyPackage) writeFileSync(join(packagedRuntime, "uninstall.sh"), rewriteMaintenancePaths(readFileSync(join(repo,"deploy/agent/uninstall.sh"),"utf8"),root), {mode:0o755});
+  if (!options.legacyPackage) js(join(packagedRuntime, "deployment-permissions.mjs"), `import fs from 'node:fs';const file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file));if(process.argv[2]!=='prepare')process.exit(1);s.permissionPreparations=(s.permissionPreparations||0)+1;fs.writeFileSync(file,JSON.stringify(s));if(process.env.TEST_FAIL_PERMISSION_PREPARATION==='yes'){console.error('agent_permission_prepare_failed');process.exit(1);}`);
   writeFileSync(
     join(packagedRuntime, "node"),
     "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " \"$@\"\n",
@@ -261,6 +263,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
           TEST_FAIL_RESTART_STATUS: String(options.failRestartStatus ?? 1),
           TEST_FAIL_SHOW: options.failShow ? "yes" : "no",
           TEST_RUNTIME_PARENT: runtimeParent,
+          TEST_FAIL_PERMISSION_PREPARATION: options.failPermissionPreparation ? 'yes' : 'no',
         },
         timeout: 20000,
       },
@@ -387,12 +390,21 @@ test("verified release switches atomically, configures and restarts while preser
   assert.equal(saved.control_credential,"test-old-control"); assert.equal(saved.data_credential,"test-old-data"); assert.equal(saved.group_id,"new"); assert.equal(Object.hasOwn(saved,"key"),false);
   assert.equal(statSync(f.config).mode & 0o777, 0o600);
   assert.equal(f.state().restarts, 1);
+  assert.equal(f.state().permissionPreparations, 1);
   assert(f.state().active);
   assert.equal(f.state().startupChecks, 2);
   assertRuntimePermissions(f);
   assert.match(readFileSync(f.uninstaller,"utf8"), /BEGIN SHARED MAINTENANCE GUARDS/);
   assert.equal(statSync(f.uninstaller).mode & 0o777,0o755);
   f.unchangedData();
+});
+test('ordinary permission validation failure restores the previous installation before a new service start', t=>{
+  const f=fixture(t,{failPermissionPreparation:true}),result=f.run();
+  assert.notEqual(result.status,0);
+  assert.match(result.stderr,/deployment-permissions/);
+  assert.equal(f.state().permissionPreparations,1);
+  assert.equal(f.state().restarts,0);
+  f.restored();
 });
 test("older checked packages preserve an existing standalone uninstaller",t=>{
   const f=fixture(t,{legacyPackage:true}),result=f.run();

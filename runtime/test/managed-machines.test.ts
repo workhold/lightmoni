@@ -827,3 +827,38 @@ test('unknown uninstall after stop can release its fence with unchanged complete
  const checked=await f.request(path+'/reconcile','POST',{});assert.equal(checked.status,200,checked.raw);assert.equal(checked.data.status,'failed');assert.equal(checked.data.receipt.remote_removed,false);assert.equal(checked.data.receipt.service_stopped,true);assert.equal(checked.data.receipt.credentials_revoked,false);assert.equal(destructive,1);
  assert.equal(f.db.all('SELECT id FROM agent_credentials WHERE revoked_at IS NOT NULL').length,0);assert.equal((await uninstallPlan(f,h)).status,201);
 });
+
+test('Docker environment installation is admin-confirmed, durable, idempotent and scoped to the host',async t=>{
+ const calls:any[]=[];
+ const f=await fixture(t,{},async input=>{calls.push(input);return {stdout:JSON.stringify({state:'succeeded',phase:'verified',code:''}),stderr:'private package output',stages:[]};});
+ const m=(await f.request('/machines','POST',{name:'docker-host',address:'host.example.com',username:'root',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
+ const c=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'docker-password',retention:'temporary'})).data;
+ const path=`/machines/${m.id}/docker-installations`,body={request_id:'docker-fixture-request-001',credential_id:c.credential_id,confirmed:true};
+ assert.equal((await f.request(path,'POST',{...body,confirmed:false})).status,400);
+ f.user.role='member';assert.equal((await f.request(path,'POST',body)).status,403);f.user.role='admin';
+ const created=await f.request(path,'POST',body);assert.equal(created.status,202,created.raw);
+ for(let n=0;n<10;n++){const state=(await f.request(`/machines/${m.id}/docker-environment`)).data;if(state.installation?.state==='succeeded')break;await new Promise(resolve=>setTimeout(resolve,10));}
+ const state=await f.request(`/machines/${m.id}/docker-environment`);assert.equal(state.data.installation.state,'succeeded',state.raw);assert.equal(state.data.machine.docker_environment.state,'unknown');
+ const replay=await f.request(path,'POST',body);assert.equal(replay.data.id,created.data.id);assert.equal(calls.length,1);assert.equal(calls[0].password,'docker-password');assert.match(calls[0].command,/systemd-run/);assert.doesNotMatch(calls[0].command,/docker-password/);
+ assert.doesNotMatch(state.raw,/docker-password|private package|secret_encrypted|stdout|stderr/);
+ const stored=f.db.get<any>('SELECT * FROM machine_docker_installations WHERE id=?',created.data.id);assert.equal(stored.created_by,'admin');assert.equal(stored.credential_id,c.credential_id);
+ assert.equal((await f.request('/machines/not-this-host/docker-installations/'+created.data.id+'/verify','POST',{})).status,404);
+});
+
+test('Docker installation rejects one-time credentials and unsafe remote results, and recovers through read-only verification',async t=>{
+ let output='private raw output token=hidden',failSSH=false;
+ const f=await fixture(t,{},async()=>{if(failSSH)throw new SSHError('host_key_mismatch');return {stdout:output,stderr:'secret stderr',stages:[]};});
+ const m=(await f.request('/machines','POST',{name:'docker-recovery',address:'host.example.com',username:'root',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
+ const one=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'one-time-secret',retention:'one_time'})).data;
+ const path=`/machines/${m.id}/docker-installations`,body={request_id:'docker-fixture-request-002',confirmed:true};
+ assert.equal((await f.request(path,'POST',{...body,credential_id:one.credential_id})).status,409);
+ const c=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'reusable-secret',retention:'temporary'})).data;
+ const created=await f.request(path,'POST',{...body,credential_id:c.credential_id});assert.equal(created.status,202,created.raw);
+ for(let n=0;n<20;n++){if(f.db.get<any>('SELECT state FROM machine_docker_installations WHERE id=?',created.data.id)?.state==='unknown')break;await new Promise(resolve=>setTimeout(resolve,10));}
+ assert.equal((await f.request(path,'POST',{...body,request_id:'docker-fixture-request-003',credential_id:c.credential_id})).status,409);
+ assert.equal((await f.request(`/machines/${m.id}`,'PUT',{name:'changed'})).status,409);
+ output=JSON.stringify({state:'succeeded',phase:'verified',code:''});
+ const verified=await f.request(path+'/'+created.data.id+'/verify','POST',{credential_id:c.credential_id});assert.equal(verified.data.state,'succeeded',verified.raw);assert.doesNotMatch(verified.raw,/token=|secret|stdout|stderr/);
+ failSSH=true;
+ const mismatch=await f.request(path+'/'+created.data.id+'/verify','POST',{});assert.equal(mismatch.data.state,'unknown');assert.equal(mismatch.data.code,'host_key_mismatch');
+});
