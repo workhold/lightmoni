@@ -22,6 +22,6 @@ amd64使用本机Docker仿真，arm64为原生；独立ClickHouse为arm64。未�
 
 ## 发布与架构
 
-[GitHub Release 20261101-e3a5276](https://github.com/workhold/lightmoni/releases/tag/20261101-e3a5276)绑定相同镜像源码。默认Compose、部署文档和证据由本次发行PR交付。已有部署仍需在原项目/环境/卷下执行pull和up，镜像发布不表示线上容器已经重建。
+[GitHub Release 20261101-e3a5276](https://github.com/workhold/lightmoni/releases/tag/20261101-e3a5276)绑定相同镜像源码。默认Compose、部署文档和证据由 [GitHub PR #50](https://github.com/workhold/lightmoni/pull/50) 交付，按本次用户授权经PR合入。已有部署仍需在原项目/环境/卷下执行pull和up，镜像发布不表示线上容器已经重建。
 
 架构同步不适用：本次仅打包已合入实现和更新默认镜像，不新增组件职责、数据/控制路径、存储、协议、凭据边界或部署拓扑。原功能 `docs/system-design.md` 第62节、[Doca系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)及SDD 062原生图/正文回读证据保留，不重复改写。
