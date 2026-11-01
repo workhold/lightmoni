@@ -954,6 +954,7 @@ export function createClusterWorkloads(
     delete runtime.memory_mb;
     return {
       ...runtime,
+      ...(s.configuration_mode ? {configuration_mode:s.configuration_mode} : {}),
       ports: declared,
       service_name: serviceName,
       source: {
