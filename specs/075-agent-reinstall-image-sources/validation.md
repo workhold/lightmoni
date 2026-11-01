@@ -1,6 +1,6 @@
 # 验收记录
 
-日期：2026-11-01。功能分支 `codex/075-agent-reinstall-image-sources`，尚未发布到生产。
+日期：2026-11-01。功能分支 `codex/075-agent-reinstall-image-sources`，[PR #63](https://github.com/workhold/lightmoni/pull/63) 目标 main，尚未合并、未发布到生产。
 
 ## 已验证
 

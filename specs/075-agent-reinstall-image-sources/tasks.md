@@ -7,4 +7,6 @@
 - [x] T05 实现中英文配置表单和阻塞/拉取状态，验证浏览器。
 - [x] T06 运行相关检查和真实 Docker 验证，记录验收边界。
 - [x] T07 同步本地/Doca 设计，回读正文及原生图块并记录证据。
-- [ ] T08 同步 main、提交功能分支并创建面向 main 的 GitHub PR。
+- [x] T08 同步 main、提交功能分支并创建面向 main 的 GitHub PR。
+
+交付 PR：https://github.com/workhold/lightmoni/pull/63（目标 main；未合并、未发布）。
