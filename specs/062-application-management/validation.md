@@ -51,3 +51,7 @@ runtime/web类型检查、两份浏览器脚本语法检查及git diff --check�
 - 第3轮：artifacts/screenshots/specs/062-application-management/evidence/install-3/page@db7d98050159123c545462c963fe600b.webm。
 
 界面减法：移除重复“已安装应用”标题和重复数量说明，合并筛选工具栏；资源限制归入高级设置；保留应用名、实际状态、目标、端口和操作后果。未加入备份恢复与模板迁移入口，因为现有后端尚无对应能力。
+
+## 交付
+
+已同步 origin/main（c088bb4，无需冲突处理），通过功能分支提交 [GitHub 草稿 PR #49](https://github.com/workhold/lightmoni/pull/49)，目标 main。未合并或发布；独立 QA API 与 Vite 进程已停止。

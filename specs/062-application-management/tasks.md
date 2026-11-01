@@ -6,4 +6,6 @@
 - [x] T004 系统仓库端口配置、原值回显和安装记录入口。
 - [x] T005 同步仓库/Doca设计并回读原生图与新增章节。
 - [x] T006 定向检查、三轮浏览器与独立视觉评审，记录验收限制。
-- [ ] T007 同步origin/main，提交分支与GitHub PR，记录兼容影响和验证。
+- [x] T007 同步origin/main，提交分支与GitHub PR，记录兼容影响和验证。
+
+交付：[GitHub 草稿 PR #49](https://github.com/workhold/lightmoni/pull/49)，目标 main；未合并、未发布。
