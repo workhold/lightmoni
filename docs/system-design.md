@@ -1500,3 +1500,30 @@ flowchart LR
 ```
 
 规格、契约、测试及 Doca 保存回读证据见 specs/053-certificate-async-issuance/。
+
+
+## 57. Agent Docker 即时清单与容器操作（SDD 057）
+
+主机 Docker 清单独立周期采集，不等待平台应用日志积压。失败保留最近成功清单及最近尝试时间，区分 CLI 缺失、socket 权限不足、daemon 不可达、命令超时与通用失败；失败原因优先于过期提示。平台应用与全部 Docker 仍分开显示，外部容器不会自动成为平台部署。
+
+管理员点击立即采集后，中心按稳定主机 ID 解析当前 Agent，验证在线状态和 docker.inventory 能力，使用原 AgentJobStore 下发单动作 Docker 任务。页面定期读取缓存，只有手动采集才创建任务；界面展示任务进度与终态。任务回执中的新清单和认证心跳按观测时间合并，旧心跳不能覆盖更新的即时结果。
+
+启动、停止、重启要求管理员明确确认主机、完整容器 ID 和影响；目标必须存在于新鲜清单。中心保存 actor 与幂等 request_id，同主机活动任务互斥。Agent 通过既有 control 凭据拉取任务，使用 shell=false、固定 default context、有界输出和超时执行，复用节点写锁，并在变更前后核对容器 ID 和状态，再读取完整清单。
+
+回执只保存白名单状态、诊断和清单，绑定原动作、容器和任务时间，丢弃原始 CLI 输出与其他字段；页面响应不包含 lease。未领取超时取消，领取后中断或验证失败保留 unknown 和写锁，禁止自动重放。平台调度器可能恢复平台应用期望状态；不增加容器删除、任意 shell、中心 Docker socket、SSH 回退或 AI 执行权限。
+
+本节对应 SDD 057，需升级中心和 Agent 才启用即时能力；旧 Agent 周期心跳兼容，页面明确提示升级。实现与验证见 specs/057-docker-agent-controls/；是否已发布以发行记录为准。
+
+```mermaid
+flowchart LR
+  User[管理员 / 确认操作] --> Center[主机绑定 / 能力 / 幂等]
+  Center --> Jobs[(SQLite 任务 / 有效租约)]
+  Jobs --> Agent[Agent / 节点写锁]
+  Agent --> Docker[本机 Docker / 状态验证]
+  Docker --> Receipt[安全回执 / 最新清单]
+  Receipt --> Center
+  Docker --> Periodic[独立周期清单 / 认证心跳]
+  Periodic --> Center
+```
+
+Doca 已保存并回读，原有 575 个块完整保留；新图 7 节点、8 连线与正文核对见 `specs/057-docker-agent-controls/evidence/doca-readback.json`。

@@ -14,6 +14,7 @@ export interface DockerContainer {
 }
 export interface DockerInventory {
   observed_at: string; state: 'ready' | 'unavailable'; error?: string;
+  attempted_at?: string;
   truncated: boolean; containers: DockerContainer[];
 }
 const has = (db: DB, name: string) => !!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?", name);
@@ -26,8 +27,10 @@ const text = (v: unknown, max = 256) => typeof v === 'string' ? v.replace(/[\x00
 export function dockerInventory(value: any): DockerInventory | undefined {
   if (value === undefined) return undefined;
   if (!value || !Array.isArray(value.containers) || value.containers.length > 500 || !['ready','unavailable'].includes(value.state) || !Number.isFinite(Date.parse(value.observed_at))) fail(400, 'invalid_docker_inventory');
+  const errors=['docker_cli_missing','docker_permission_denied','docker_daemon_unavailable','docker_command_timeout','docker_collection_unavailable'];
   return {observed_at: new Date(value.observed_at).toISOString(), state: value.state, truncated: value.truncated === true,
-    ...(value.state === 'unavailable' ? {error: 'docker_collection_unavailable'} : {}),
+    ...(Number.isFinite(Date.parse(value.attempted_at))?{attempted_at:new Date(value.attempted_at).toISOString()}:{}),
+    ...(value.state === 'unavailable' ? {error: errors.includes(value.error)?value.error:'docker_collection_unavailable'} : {}),
     containers: value.containers.map((c: any) => {
       if (!/^[a-f0-9]{12,64}$/.test(c?.id)) fail(400, 'invalid_docker_container');
       return {id: c.id, name: text(c.name), image: text(c.image), state: text(c.state,32), ports: text(c.ports,1024), deployment_id: text(c.deployment_id,128)};
