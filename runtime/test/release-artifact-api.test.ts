@@ -306,4 +306,3 @@ test("admin uploads a validated private release and an active job lease gates Ag
   const wrongRelease = await fetch(`${base}/api/v1/agents/agent-1/jobs/${job.id}/artifacts/${"b".repeat(32)}`, { headers: { authorization: "Bearer control-secret", "X-LightMoni-Job-Lease": leased!.lease_id } });
   assert.equal(wrongRelease.status, 403);
 });
-

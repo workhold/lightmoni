@@ -1,1 +1,1 @@
-{"pass":true,"checks":["Linux root removes exact platform-owned Docker drop-in","unknown external drop-in retained and blocks migration","modified legacy grant retained and blocks migration","ordinary account global groups unchanged"]}
+{"pass":true,"checks":["actual Linux root/systemd stopped canonical ordinary service before exact owned drop-in cleanup","permission prepare remains read-only","unknown effective external policy remains and blocks migration","modified old grant remains and blocks migration","ordinary global group membership unchanged"]}
