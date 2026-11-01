@@ -27,4 +27,4 @@
 
 架构同步：本发行打包不适用，不改变职责、协议、凭据、存储或拓扑。功能PR已同步仓库系统设计第80章及 [Doca基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)，SDD080最新930回读确认文字、原生图及10节点/10连线；发行不重复改写设计。
 
-[GitHub Release](https://github.com/workhold/lightmoni/releases/tag/20261102-ccbb85d) 指向同一实测源码；发布回执见 `evidence/github-release.json`。默认镜像、部署说明和本验收通过后续发行PR交付main。
+[GitHub Release](https://github.com/workhold/lightmoni/releases/tag/20261102-ccbb85d) 指向同一实测源码；发布回执见 `evidence/github-release.json`。默认镜像、部署说明和本验收由[发行PR #67](https://github.com/workhold/lightmoni/pull/67)交付main，最终合入状态以GitHub回执核对。
