@@ -15,7 +15,7 @@ Docker 固定标签 `docker.heyphp.com/lightmoni/lightmoni:20261101-1c82e6b` 和
 - 两个平台全部 44 个网页 JS/CSS 资源文件名及内容组合 SHA256 均为 `282d0e7f08aa74cc9c8c6350d27b2e16eae8fb74eeb2da2a62109a818cc26c2e`；两个平台分别通过本次卸载入口、状态提示及固定布局打包核对，因此同一组浏览器验证覆盖两平台相同资源。见[平台资源核对](evidence/feature-smoke.json)。
 - 根 Compose 与兼容入口、有/无历史 `LIGHTMONI_IMAGE` 共四种组合均解析为新固定镜像，服务、健康依赖及原命名卷不变。见[Compose 检查](evidence/compose-checks.json)。
 - 临时测试容器、卷、网络和 0600 运行凭据文件已清理；此前运行的 15 个容器保持原 ID 和镜像。见[清理记录](evidence/cleanup.json)。原始日志、构建上下文及验证工具在被忽略目录 `.local-dev/image-release-074/`；截图在被忽略目录 `artifacts/screenshots/specs/074-uninstall-progress-release/`。
-- [GitHub Release](https://github.com/workhold/lightmoni/releases/tag/20261101-1c82e6b) 指向同一固定源码，已核对 tag commit 和 Latest 发布回执（见 [Release 回执](evidence/github-release.json)）；根 Compose、部署说明和本验收通过发布 PR 交付 main。
+- [GitHub Release](https://github.com/workhold/lightmoni/releases/tag/20261101-1c82e6b) 指向同一固定源码，已核对 tag commit 和 Latest 发布回执（见 [Release 回执](evidence/github-release.json)）；根 Compose、部署说明和本验收通过 [发布 PR #61](https://github.com/workhold/lightmoni/pull/61) 交付 main，按用户授权合入，最终状态以 GitHub 回执核对。
 
 ## 兼容性、架构与生效
 
