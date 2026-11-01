@@ -1,0 +1,111 @@
+{
+  "checked": 21,
+  "all_unchanged": true,
+  "tags": [
+    {
+      "tag": "20261026-admin",
+      "digest": "sha256:51ebf2093ec5e604dc0a6e0f5b6a231caed9e85a2476edb05d37adb00cd72826",
+      "unchanged": true
+    },
+    {
+      "tag": "20261027-agent-install",
+      "digest": "sha256:1a7c231eb2e2c7981369dcff21a5d8239a2b45d7ee56318c2008d17387ad977e",
+      "unchanged": true
+    },
+    {
+      "tag": "20261027-agent-install-amd64",
+      "digest": "sha256:71fb939648cb609e7132720eb30e82093941873a06064a68c8fee99986638a1d",
+      "unchanged": true
+    },
+    {
+      "tag": "20261027-agent-install-arm64",
+      "digest": "sha256:2aa9ee26916efd35d54e1456f22f939699e84b5b9483073e7943c2611ac7124d",
+      "unchanged": true
+    },
+    {
+      "tag": "20261027-ec30880",
+      "digest": "sha256:4c6fc6e044de40da75a37f8f03e12c076cc90060e9b4f7125f734c682de1b4fb",
+      "unchanged": true
+    },
+    {
+      "tag": "20261027-operations",
+      "digest": "sha256:0c314e78da2243d9e2aba641d9bab460f3dd24a78a0c4dcf2abbc389c5defeff",
+      "unchanged": true
+    },
+    {
+      "tag": "20261028-7872b17",
+      "digest": "sha256:b26e0fe07f604d9bae68d7c2d16081ff4f25ec7f98ba4a0ab7dbe64305987d69",
+      "unchanged": true
+    },
+    {
+      "tag": "20261028-ad86318",
+      "digest": "sha256:1ccbba73ee16b1e7712fde3d52562448186feb4ab27e568119dd553af0bb108e",
+      "unchanged": true
+    },
+    {
+      "tag": "20261028-dd1279b",
+      "digest": "sha256:e60020f6afddbe635d21955f81d89a5aa06960c82f4032ddbb6863a31eebeb9e",
+      "unchanged": true
+    },
+    {
+      "tag": "20261029-ba892c4",
+      "digest": "sha256:c7cddf656973bfcc9af0a95e8b7f5761388265f5991672f7a93763e3568b9108",
+      "unchanged": true
+    },
+    {
+      "tag": "20261030-4022039",
+      "digest": "sha256:10914ea92b70dd7cb5340eb0e1d3e69e159033f782b4b5d412a00dc6fa4b7fc1",
+      "unchanged": true
+    },
+    {
+      "tag": "20261030-a11ae1f",
+      "digest": "sha256:ae2e94d6014d25fe818d15c525566b25afc6c24e0724ec42592568d4071af62c",
+      "unchanged": true
+    },
+    {
+      "tag": "20261030-ddd7426",
+      "digest": "sha256:5cc3dbe52b86feb5412509c2e744a10097db0b2e80e9191c626d95207fea2ef4",
+      "unchanged": true
+    },
+    {
+      "tag": "20261031-3720a50",
+      "digest": "sha256:d818b9d72ec6eb702a91fa1bac158e47aacef27cc7b897762ac4db5d0c9eb2de",
+      "unchanged": true
+    },
+    {
+      "tag": "20261031-6dae46c",
+      "digest": "sha256:3ca38080daef556ab28c7b1fa35600885fd01a868b3fd4d6112b941b215ed2ed",
+      "unchanged": true
+    },
+    {
+      "tag": "20261031-8386b5b",
+      "digest": "sha256:dea2d3df4284b5ffc7b28df4c6308eeebb4aee8ed4c9adcda63758984eee2605",
+      "unchanged": true
+    },
+    {
+      "tag": "20261031-aed4b2d",
+      "digest": "sha256:4fa244357b95a3dd805f552fd3a780a8fa4f5ec7dd0cb0f11e66857f6b211759",
+      "unchanged": true
+    },
+    {
+      "tag": "20261031-c209a18",
+      "digest": "sha256:d5961baaf8c85de05b0385d5b268debe133467b16a9b346d9f05836398278069",
+      "unchanged": true
+    },
+    {
+      "tag": "20261031-e3d1192",
+      "digest": "sha256:85cdbacc6bf4e97b6947b694f88224e86624a367db8342ca1f294042b2e824ae",
+      "unchanged": true
+    },
+    {
+      "tag": "20261101-07bf306",
+      "digest": "sha256:0900cab572819da309270ec02b49975d710ae9261464140bb29d8d1609f2d768",
+      "unchanged": true
+    },
+    {
+      "tag": "20261101-e3a5276",
+      "digest": "sha256:579c48f5bf9d835ded279e71b938576530861c6cd4f71b708e8df963bf536be9",
+      "unchanged": true
+    }
+  ]
+}

@@ -6,6 +6,8 @@
 - [x] T004 普通部署表单与端点范围展示。
 - [x] T005 定向检查、真实Docker与三轮浏览器验收。
 - [x] T006 仓库/Doca架构同步并回读原生内容。
-- [ ] T007 同步main、推送分支、创建GitHub PR。
+- [x] T007 同步main、推送分支、创建GitHub PR。
 
-- [ ] T008 按用户已有授权经 PR 合入、发布双平台 Docker 与 GitHub Release，更新默认镜像并验证。
+- [x] T008 按用户已有授权经 PR 合入、发布双平台 Docker 与 GitHub Release，更新默认镜像并验证。
+
+[GitHub PR #51](https://github.com/workhold/lightmoni/pull/51) 已合入 main；镜像交付由 SDD 065 记录。

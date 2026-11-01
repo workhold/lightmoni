@@ -1,0 +1,10 @@
+{
+  "revision": "eb62ca6c1945a78726402d0949c1e258ce9f0638",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tag": "20261101-eb62ca6",
+  "architecture_sync": "Packaging only. SDD 064 system-design section 64 and Doca complete native-block readback retained.",
+  "feature_prs": [
+    51
+  ],
+  "previous_latest": "sha256:579c48f5bf9d835ded279e71b938576530861c6cd4f71b708e8df963bf536be9"
+}
