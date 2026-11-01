@@ -1,5 +1,6 @@
 import { ApplicationObserver } from "./application-observer.js";
 import { DOCKER_CAPABILITIES } from './docker.js';
+import { operationCapabilities } from './operations.js';
 import {
   createServer,
   type Server,
@@ -231,6 +232,7 @@ export class Agent {
       collectors_status: { ...this.collectors },
       docker_inventory: this.applications?.inventory,
       docker_capabilities: [...DOCKER_CAPABILITIES],
+      operations_capabilities: [...operationCapabilities],
       sdk: legacyStats,
       runtime_events: [...this.runtimeEvents],
       control_interval_seconds: this.config.control_interval_seconds,

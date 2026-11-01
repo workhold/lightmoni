@@ -153,7 +153,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     },
     state = "succeeded",
   ) => {
-    const job = jobs.claim(agentID, ["operations.platform","operations.platform.image-cache.v1"]);
+    const job = jobs.claim(agentID, ["operations.platform","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1"]);
     assert.ok(job);
     const payload = platform.resolvePayload(job);
     for (const [n, phase] of [
@@ -1650,4 +1650,85 @@ test('single-container advanced YAML keeps runtime type and managed mounts; manu
  const saved=await f.req('/resources/'+r.id,'PUT',{revision:r.revision,spec:{...r.spec,configuration_mode:'yaml',configuration_yaml:yaml}});assert.equal(saved.status,200);const spec=f.store.get(r.id).spec;assert.equal(spec.mode,'container');assert.equal(spec.environment.TOKEN,'qa-single-secret');assert.equal(spec.ports[0].name,'http');assert.equal(spec.ports[0].host_port,23456);assert.equal(spec.ports[0].host_ip,'127.0.0.1');assert.equal(spec.mounts[0].target,'/data');assert.equal(spec.configuration_yaml,undefined);
  const bad=await f.req('/resources/'+r.id,'PUT',{revision:saved.body.resource.revision,spec:{...spec,configuration_yaml:'services:\n  app:\n    image: nginx:alpine\n    volumes: ["/etc:/escape"]\n'}});assert.equal(bad.status,400);assert.equal(bad.body.error,'single_container_yaml_unsupported_field');
  const malformed=await f.req('/resources/'+r.id,'PUT',{revision:saved.body.resource.revision,spec:{...spec,configuration_yaml:'services: ['}});assert.equal(malformed.status,400);assert.equal(f.store.get(r.id).revision,saved.body.resource.revision);
+});
+
+function rebindForRecovery(f:any) {
+  f.db.run("UPDATE agents SET last_seen='2020-01-01T00:00:00Z' WHERE id='a'");
+  f.db.run("INSERT INTO agents SELECT 'c','hc','C',version,platform,arch,'2026-10-29T02:00:00.000Z',group_id,? FROM agents WHERE id='b'",JSON.stringify({operations_capabilities:['operations.platform.instance-recovery.v1']}));
+  f.db.run("UPDATE managed_machines SET agent_id='c' WHERE id='ma'");
+}
+test('reinstalled Agent proves old containers absent, releases only old reservations and rebuilds cleanly',async t=>{
+  for(const mode of ['manual','managed']) {
+    const f=await fixture(t),c=f.createCluster(['ma']),a=f.app(c,{deployment_mode:mode});
+    await f.action(a,'deploy');f.finish('a');const old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;
+    rebindForRecovery(f);
+    const requested=await f.action(a,'deploy');assert.equal(requested.status,202);assert.equal(requested.body.pending,'agent_reinstall_inspecting');
+    assert.equal(f.db.get<any>('SELECT state FROM ops_cluster_instances WHERE id=?',old.id)?.state,'running');
+    const proof=f.finish('c',{instance_id:old.id,absent:true,container_count:0,observed_at:'2026-10-29T02:00:00.000Z'});
+    assert.equal(proof.payload.resource.config.task,'instance.recovery.inspect');
+    const retired=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id=?',old.id)!;assert.equal(retired.retired,1);assert.equal(retired.state,'stopped');assert.equal(retired.current_run_id,'');
+    assert.equal(f.db.all('SELECT * FROM ops_platform_ports WHERE instance_id=?',old.id).length,0);assert.equal(JSON.parse(retired.observed_json).agent_recovery.current_agent_id,'c');
+    const retry=await f.action(a,'deploy');assert.equal(retry.status,202,JSON.stringify(retry));
+    const current=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0',a.id)!;assert.notEqual(current.id,old.id);assert.equal(current.agent_id,'c');
+  }
+});
+test('recovery retains stopped containers, unknown execution and stateful data instead of clearing rows',async t=>{
+  for(const block of ['containers','unknown','job_unknown','stateful']) {
+    const f=await fixture(t),c=f.createCluster(['ma']),a=f.app(c,{stateful:block==='stateful'});
+    await f.action(a,'deploy');f.finish('a');const old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;rebindForRecovery(f);
+    if(block==='job_unknown')f.db.run("UPDATE agent_jobs SET state='unknown' WHERE agent_id='a'");
+    if(block==='unknown')f.db.run("UPDATE ops_platform_runs SET state='unknown' WHERE id=?",old.current_run_id);
+    const requested=await f.action(a,'deploy');assert.equal(requested.status,202);
+    if(block==='containers') {f.finish('c',{instance_id:old.id,absent:false,container_count:1,observed_at:'2026-10-29T02:00:00.000Z'});const next=await f.action(a,'deploy');assert.equal(next.body.pending,'agent_reinstall_containers_remain');}
+    else assert.equal(requested.body.pending,['unknown','job_unknown'].includes(block)?'agent_reinstall_execution_unresolved':'agent_reinstall_stateful_review_required');
+    assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',old.id)?.retired,0);assert(f.db.get('SELECT instance_id FROM ops_platform_ports WHERE instance_id=?',old.id));
+  }
+});
+test('queued recovery revalidates machine target and rejects stale absent receipts',async t=>{
+  const f=await fixture(t),c=f.createCluster(['ma']),a=f.app(c);
+  await f.action(a,'deploy');f.finish('a');const old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;rebindForRecovery(f);await f.action(a,'deploy');
+  const job=f.jobs.claim('c',['operations.platform','operations.platform.instance-recovery.v1']);assert(job);const payload=f.platform.resolvePayload(job);
+  f.db.run("UPDATE managed_machines SET address='10.0.0.99' WHERE id='ma'");
+  assert.throws(()=>f.platform.resolvePayload(job),/instance_recovery_target_changed/);
+  f.jobs.result('c',job.id,{lease_id:job.lease_id,state:'succeeded',summary:'empty',snapshot:{operations:{operation_id:payload.operation_id,resource_id:a.id,data:{instance_id:old.id,absent:true,container_count:0,observed_at:'2026-10-29T02:00:00.000Z'}}}});
+  assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',old.id)?.retired,0);
+});
+test('global image source settings have admin CAS and queued payload policy revalidation',async t=>{
+  const f=await fixture(t);assert.equal((await f.req('/image-sources','GET',undefined,'member')).status,403);
+  const settings=await f.req('/image-sources');assert.deepEqual(settings.body.rules,[]);
+  const rule={source:'docker.io',target:'https://mirror.example.test/docker.io',allow_upstream:false};
+  const saved=await f.req('/image-sources','PUT',{revision:0,rules:[rule]});assert.equal(saved.status,200);assert.equal(saved.body.revision,1);
+  assert.equal((await f.req('/image-sources','PUT',{revision:0,rules:[]})).status,409);
+  assert.equal((await f.req('/image-sources','PUT',{revision:1,rules:[{...rule,target:'http://bad.test'}]})).status,400);
+  const c=f.createCluster(['ma']),a=f.app(c);
+  const outdated=await f.action(a,'deploy');assert.match(JSON.stringify(outdated.body),/image_sources_agent_upgrade_required/);
+  f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'",JSON.stringify({operations_capabilities:['operations.platform.image-sources.v1']}));
+  await f.action(a,'deploy');
+  assert.equal(f.jobs.claim('a',['operations.platform']),null);
+  const job=f.jobs.claim('a',['operations.platform','operations.platform.image-sources.v1']);assert(job);
+  assert.equal(f.platform.resolvePayload(job).resource.config.image_sources.rules[0].source,'docker.io');
+  await f.req('/image-sources','PUT',{revision:1,rules:[]});assert.throws(()=>f.platform.resolvePayload(job),/image_sources_policy_changed/);
+});
+
+test('persistent mounts require review after reinstallation even if stateful was not selected',async t=>{
+ const f=await fixture(t),c=f.createCluster(['ma']),a=f.app(c,{mounts:[{type:'data',target:'/data'}]});
+ await f.action(a,'deploy');f.finish('a');rebindForRecovery(f);
+ const result=await f.action(a,'deploy');assert.equal(result.body.pending,'agent_reinstall_stateful_review_required');
+ assert.equal(f.db.all('SELECT * FROM ops_instance_recoveries').length,0);
+});
+test('a recovery-blocked machine does not stall unrelated placement on healthy cluster peers',async t=>{
+ const f=await fixture(t),c=f.createCluster(),old=f.app(c,{machine_ids:['ma'],stateful:true});
+ await f.action(old,'deploy');f.finish('a');rebindForRecovery(f);
+ const healthy=f.app(c,{service_name:'healthy-peer',deployment_mode:'managed'});
+ const result=await f.action(healthy,'deploy');assert.equal(result.status,202,JSON.stringify(result.body));
+ const instance=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',healthy.id)!;assert.equal(instance.machine_id,'mb');assert.equal(instance.agent_id,'b');
+});
+
+test('a storage failure rolls back both instance retirement and reservation release with the receipt',async t=>{
+ const f=await fixture(t),c=f.createCluster(['ma']),a=f.app(c);
+ await f.action(a,'deploy');f.finish('a');const old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;rebindForRecovery(f);await f.action(a,'deploy');
+ f.db.exec("CREATE TRIGGER qa_fail_release BEFORE DELETE ON ops_platform_ports BEGIN SELECT RAISE(ABORT,'qa_storage_failure'); END;");
+ assert.throws(()=>f.finish('c',{instance_id:old.id,absent:true,container_count:0,observed_at:'2026-10-29T02:00:00.000Z'}),/qa_storage_failure/);
+ assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',old.id)?.retired,0);assert(f.db.get('SELECT instance_id FROM ops_platform_ports WHERE instance_id=?',old.id));
+ assert.equal(f.db.get<any>('SELECT status FROM ops_instance_recoveries WHERE instance_id=?',old.id)?.status,'agent_reinstall_inspecting');
 });

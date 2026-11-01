@@ -13,6 +13,7 @@ export const navigationGroups=[
  {id:'operations',label:'运维工具',english:'Operations',items:[
   {path:'/machines',label:'主机',english:'Hosts',icon:CloudServerOutlined,adminOnly:false},
   {path:'/connection-credentials',label:'连接凭据',english:'Connection credentials',icon:KeyOutlined,adminOnly:true},
+  {path:'/image-sources',label:'镜像源',english:'Image sources',icon:CloudServerOutlined,adminOnly:true},
   {path:'/private-images',label:'私有镜像管理',english:'Private images',icon:DatabaseOutlined,adminOnly:true},
   {path:'/applications',label:'应用管理',english:'Applications',icon:AppstoreOutlined,adminOnly:true},
   {path:'/websites',label:'网站',english:'Websites',icon:ToolOutlined,adminOnly:true},

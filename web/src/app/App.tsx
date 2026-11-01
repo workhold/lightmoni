@@ -24,6 +24,7 @@ const TracePage=lazy(()=>import('../features/alerts/TracePage'));
 const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
 const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
 const PrivateRegistryPage=lazy(()=>import('./PrivateRegistryPage'));
+const ImageSourcesPage=lazy(()=>import('./ImageSourcesPage'));
 const OperationsPage=lazy(()=>import('./OperationsPage'));
 const HostsNodesPage=lazy(()=>import('./HostsNodesPage'));
 const DataManagementPage=lazy(()=>import('./DataManagementPage'));
@@ -70,6 +71,7 @@ export default function Root(){
     <Route path="/operations" element={<Navigate to="/applications" replace/>}/>
     {["/clusters","/applications","/websites","/domains","/certificates"].map(path=><Route key={path} path={path} element={user.role==='admin'?<OperationsPage user={user}/>:<Navigate to="/settings" replace/>}/>)}
     <Route path="/private-images" element={user.role==='admin'?<PrivateRegistryPage/>:<Navigate to="/settings" replace/>}/>
+    <Route path="/image-sources" element={user.role==='admin'?<ImageSourcesPage/>:<Navigate to="/settings" replace/>}/>
     <Route path="/applications/:id/monitoring" element={user.role==='admin'?<ApplicationMonitoring/>:<Navigate to="/settings" replace/>}/>
     <Route path="/mcp-access" element={<McpAccessPage user={user}/>}/>
     <Route path="/mcp/authorize" element={<McpAuthorizationPage user={user}/>}/>

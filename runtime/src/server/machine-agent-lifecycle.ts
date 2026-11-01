@@ -90,7 +90,7 @@ printf '%s\\n' "$enrollment_token" | sh "$tmp_dir/install.sh" --fresh --endpoint
 export interface AgentRemovalObservation {
   agent_id: string; identity_state: "valid" | "missing" | "invalid" | "unsafe"; identity_sha256: string; program_sha256: string;
   installation: "present" | "absent"; program_complete: boolean; unit_managed: boolean; service_running: boolean;
-  lifecycle_locked: boolean; operation_lock: boolean; paths_safe: boolean; config_present: boolean; data_present: boolean;
+  lifecycle_locked: boolean; operation_lock: boolean; paths_safe: boolean; config_present: boolean; data_present: boolean; agent_state_present?: boolean; business_data_retained?: boolean;
 }
 const removalObservation = `identity=/var/lib/lightmoni-agent/identity.json
 agent_id=-
@@ -162,22 +162,29 @@ case "$service_state" in active) echo service_running=1;; inactive|failed) echo 
 if test -e /run/lightmoni-agent-lifecycle.lock || test -L /run/lightmoni-agent-lifecycle.lock; then echo lifecycle_locked=1; else echo lifecycle_locked=0; fi
 printf 'operation_lock=%s\\npaths_safe=%s\\n' "$operation_lock" "$paths_safe"
 if test -d /etc/lightmoni-agent && ! test -L /etc/lightmoni-agent; then echo config_present=1; else echo config_present=0; fi
-if test -d /var/lib/lightmoni-agent && ! test -L /var/lib/lightmoni-agent; then echo data_present=1; else echo data_present=0; fi`;
+if test -d /var/lib/lightmoni-agent && ! test -L /var/lib/lightmoni-agent; then echo data_present=1; else echo data_present=0; fi
+agent_state_present=0
+business_data_retained=0
+if test -d /var/lib/lightmoni-agent && ! test -L /var/lib/lightmoni-agent; then
+  if test -n "$(find /var/lib/lightmoni-agent -mindepth 1 -maxdepth 1 ! -name operations -print -quit)"; then agent_state_present=1; fi
+  if test -d /var/lib/lightmoni-agent/operations && ! test -L /var/lib/lightmoni-agent/operations && test -n "$(find /var/lib/lightmoni-agent/operations -mindepth 1 -maxdepth 1 -print -quit)"; then business_data_retained=1; fi
+fi
+printf 'agent_state_present=%s\\nbusiness_data_retained=%s\\n' "$agent_state_present" "$business_data_retained"`;
 
 export const agentRemovalProbeCommand = () => privileged(`set -eu\n# LMAGENT removal observation\n${agentMaintenanceShellGuards}\n${removalObservation}`);
 export function parseAgentRemovalProbe(output: string): AgentRemovalObservation {
   if (Buffer.byteLength(output)>8192) throw new SSHError("invalid_response");
   const pairs=output.trim().split(/\r?\n/).map(line=>/^([a-z_0-9]+|LMREMOVE)=([A-Za-z0-9._:-]+)$/.exec(line));
-  if(pairs.length!==14 || pairs.some(pair=>!pair)) throw new SSHError("invalid_response");
+  if(![14,16].includes(pairs.length) || pairs.some(pair=>!pair)) throw new SSHError("invalid_response");
   const v=new Map(pairs.map(pair=>[pair![1],pair![2]]));
   const bools=["program_complete","unit_managed","service_running","lifecycle_locked","operation_lock","paths_safe","config_present","data_present"];
-  if(v.size!==14 || v.get("LMREMOVE")!=="1" || !["valid","missing","invalid","unsafe"].includes(v.get("identity_state")||"")
-    || !["present","absent"].includes(v.get("installation")||"") || bools.some(key=>!["0","1"].includes(v.get(key)||""))
+  if(v.size!==pairs.length || v.get("LMREMOVE")!=="1" || !["valid","missing","invalid","unsafe"].includes(v.get("identity_state")||"")
+    || !["present","absent"].includes(v.get("installation")||"") || [...bools,...(pairs.length===16?["agent_state_present","business_data_retained"]:[])].some(key=>!["0","1"].includes(v.get(key)||""))
     || !/^[a-f0-9]{64}$/.test(v.get("program_sha256")||"") || !/^(?:-|[a-f0-9]{64})$/.test(v.get("identity_sha256")||"")) throw new SSHError("invalid_response");
   const valid=v.get("identity_state")==="valid",agentID=v.get("agent_id")||"";
   if(valid ? !/^[A-Za-z0-9._:-]{1,256}$/.test(agentID) || !/^[a-f0-9]{64}$/.test(v.get("identity_sha256")||"") : agentID!=="-") throw new SSHError("invalid_response");
   return {agent_id:valid?agentID:"",identity_state:v.get("identity_state") as AgentRemovalObservation["identity_state"],identity_sha256:v.get("identity_sha256")!,program_sha256:v.get("program_sha256")!,installation:v.get("installation") as "present"|"absent",
-    program_complete:v.get("program_complete")==="1",unit_managed:v.get("unit_managed")==="1",service_running:v.get("service_running")==="1",lifecycle_locked:v.get("lifecycle_locked")==="1",operation_lock:v.get("operation_lock")==="1",paths_safe:v.get("paths_safe")==="1",config_present:v.get("config_present")==="1",data_present:v.get("data_present")==="1"};
+    program_complete:v.get("program_complete")==="1",unit_managed:v.get("unit_managed")==="1",service_running:v.get("service_running")==="1",lifecycle_locked:v.get("lifecycle_locked")==="1",operation_lock:v.get("operation_lock")==="1",paths_safe:v.get("paths_safe")==="1",config_present:v.get("config_present")==="1",data_present:v.get("data_present")==="1",...(pairs.length===16?{agent_state_present:v.get("agent_state_present")==="1",business_data_retained:v.get("business_data_retained")==="1"}:{})};
 }
 export function removalSnapshot(value: AgentRemovalObservation) {
   const {lifecycle_locked,operation_lock,...snapshot}=value;
@@ -215,7 +222,7 @@ rm -f /etc/systemd/system/lightmoni-agent.service /usr/local/bin/lightmoni-agent
 rm -rf /opt/lightmoni-agent
 systemctl daemon-reload
 test "$(systemctl show lightmoni-agent.service --property=LoadState --value)" = not-found || exit 42
-${purge?"lm_assert_paths\nlm_assert_no_operations\nrm -rf /etc/lightmoni-agent /var/lib/lightmoni-agent":""}
+${purge?"lm_assert_paths\nlm_assert_no_operations\nlm_purge_agent_state":""}
 rmdir "$lock"
 trap - EXIT HUP INT TERM
 ${removalObservation}`;

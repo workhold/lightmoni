@@ -1,0 +1,14 @@
+{
+  "environment": "Chrome; production web bundle; loopback real operations API; in-memory SQLite",
+  "production_modified": false,
+  "checks": [
+    "proxy form available without installed system Registry",
+    "Docker Hub source and HTTPS path-prefix target saved",
+    "origin fallback defaults off",
+    "revision conflict leaves edited fallback switch intact",
+    "explicit reload restores current saved configuration",
+    "English labels, descriptions and actions displayed",
+    "Chinese save success verified after language switch"
+  ],
+  "screenshot": "artifacts/screenshots/agent-reinstall-image-sources-075/configured.png"
+}
