@@ -1,0 +1,66 @@
+{
+  "source": "1c82e6b64e8432bd449b957eebf8141aa08e04e6",
+  "context": "git archive of merged GitHub main; no workspace or runtime credentials",
+  "context_sha256": "1fd32e45b15bb9710b98af5e60a5f31a4990f2583f583d7892261e21b785d376",
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "tag": "20261101-1c82e6b",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "builder": "local Docker Desktop desktop-linux",
+  "build_arguments": {
+    "NPM_REGISTRY": "https://registry.npmmirror.com",
+    "NODE_DIST_URL": "https://npmmirror.com/mirrors/node",
+    "DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+    "DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security"
+  },
+  "platform_metadata": {
+    "amd64": {
+      "containerimage.digest": "sha256:1c32d61502409f973ee5731ec4c0b60f0c48f495e114b467e9759d1ff3969874",
+      "materials": [
+        {
+          "uri": "pkg:docker/node@24.15.0-bookworm?platform=linux%2Famd64",
+          "digest": {
+            "sha256": "f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+          }
+        },
+        {
+          "uri": "pkg:docker/node@24.15.0-bookworm-slim?platform=linux%2Famd64",
+          "digest": {
+            "sha256": "4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+          }
+        }
+      ]
+    },
+    "arm64": {
+      "containerimage.digest": "sha256:f7871c006054006dbf5091866a2e66bd9484adb8ac948a83ecbe3d4799b44d14",
+      "materials": [
+        {
+          "uri": "pkg:docker/node@24.15.0-bookworm?platform=linux%2Farm64",
+          "digest": {
+            "sha256": "f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+          }
+        },
+        {
+          "uri": "pkg:docker/node@24.15.0-bookworm-slim?platform=linux%2Farm64",
+          "digest": {
+            "sha256": "4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+          }
+        }
+      ]
+    }
+  },
+  "tools": {
+    "verify-compose.py": "70bca2727b910967f8904138748c817d2a8272fc5ac4a3d68fd549b72c9fe9c9",
+    "feature-smoke.py": "c9c811f8f133b8bdc4b28e4f4a9a922f437fe42e46d6b510008c916d7523b76e",
+    "capture-tags.py": "22a0cb55a3d3e07387016e3ff8b8ba6667a3531f04a82a64b5bb7cb06e1a3582",
+    "verify-tags.py": "3d7068c00c4ddaa035ea7041ce6351789596068813f0eedc962230430de5f555",
+    "verify.py": "3eee549cfdf32445cfbf8da7d92ee3e7689e9378b29b4e871607618f2e9357fe",
+    "publish.py": "5ed7029a5888fd31ad866691df2b9bda72c6b2ba3fc61bd2120c989b1e6ba92a",
+    "smoke.py": "fbf4e13718a438ca755a1da399d3708af589b51398aab03fce0209468fcc2dd7",
+    "verify-image-uninstall.mjs": "bb92846c71b4e013f0b4cca7806b8c790e2f7768ca037674b6fc8423fd9a6dfc"
+  },
+  "original_ui_harness_sha256": "f74fcf4cd143c174f7f23897f1cb1ab0350fe5b15c3009f741d05aa05c28d40c",
+  "ui_harness_adaptation": "Only dependency import locations and production-public source path changed; original assertions retained."
+}
