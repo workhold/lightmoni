@@ -18,6 +18,7 @@ export interface OperationPayload {
 }
 export interface OperationExecutionContext {
   dataDir: string; signal: AbortSignal; now: () => Date;
+  progress?: (phase: string, code?: string) => Promise<void>;
   publicDir?: string;
   command(file: string, args: string[], options?: { cwd?: string; stdin?: string | Buffer; timeoutMs?: number; signal?: AbortSignal; env?: Record<string,string> }): Promise<{ stdout: string; stderr: string }>;
 }

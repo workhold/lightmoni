@@ -5,6 +5,7 @@ import {
   systemApplicationKind,
   type SystemApplicationKind,
 } from "./system-applications.js";
+import { installCauses, installPhases } from "../operations/install-progress.js";
 import type { Dependencies } from "../shared/types.js";
 import type { AgentJobStore, AgentJobUpdate } from "../server/agent-jobs.js";
 import type { OperationPayload } from "../operations/types.js";
@@ -565,6 +566,7 @@ export class OperationsPlatformStore implements PlatformStore {
         at,
         at,
       );
+      this.addRunEvent(key, 'queued', 'pending', {message:installPhases.queued});
       return this.runView(this.runRow(key));
     });
   }
@@ -598,56 +600,16 @@ export class OperationsPlatformStore implements PlatformStore {
     )
       fail(400, "invalid_platform_run_event");
     const run = this.runRow(runID);
-    const resource = this.deps.db.get<{ kind: string }>(
-      "SELECT kind FROM ops_platform_resources WHERE id=?",
-      run.resource_id,
-    );
-    const safe = cleanResult(
-      Object.fromEntries(
-        [
-          "domain",
-          "attempt",
-          "code",
-          "message",
-          "error_type",
-          "http_status",
-          "request_id",
-        ]
-          .filter((key) => detail[key] !== undefined)
-          .map((key) => [
-            key,
-            typeof detail[key] === "string"
-              ? detail[key].slice(0, 1200)
-              : detail[key],
-          ]),
-      ),
-    );
-    this.deps.db.transaction(() => {
-      const sequence = Number(
-        this.deps.db.get<{ n: number }>(
-          "SELECT COALESCE(MAX(sequence),0)+1 n FROM ops_platform_run_events WHERE run_id=?",
-          runID,
-        )!.n,
-      );
-      this.deps.db.run(
-        "INSERT INTO ops_platform_run_events VALUES(?,?,?,?,?,?,?,?,?,?)",
-        id(),
-        runID,
-        run.resource_id,
-        resource?.kind ?? "",
-        run.resource_revision,
-        sequence,
-        phase,
-        state,
-        JSON.stringify(safe),
-        this.at(),
-      );
-      this.deps.db.run(
-        "DELETE FROM ops_platform_run_events WHERE run_id=? AND sequence<=?",
-        runID,
-        sequence - 2000,
-      );
-    });
+    const resource = this.deps.db.get<{kind: string}>("SELECT kind FROM ops_platform_resources WHERE id=?", run.resource_id);
+    const safe = cleanResult(Object.fromEntries(["domain", "attempt", "code", "message", "error_type", "http_status", "request_id"]
+      .filter(key => detail[key] !== undefined).map(key => [key, typeof detail[key] === "string" ? detail[key].slice(0, 1200) : detail[key]])));
+    const write = () => {
+      const sequence = Number(this.deps.db.get<{n: number}>("SELECT COALESCE(MAX(sequence),0)+1 n FROM ops_platform_run_events WHERE run_id=?", runID)!.n);
+      this.deps.db.run("INSERT INTO ops_platform_run_events VALUES(?,?,?,?,?,?,?,?,?,?)", id(), runID, run.resource_id, resource?.kind ?? "", run.resource_revision, sequence, phase, state, JSON.stringify(safe), this.at());
+      this.deps.db.run("DELETE FROM ops_platform_run_events WHERE run_id=? AND sequence<=?", runID, sequence - 2000);
+    };
+    if (this.deps.db.native.isTransaction) write();
+    else this.deps.db.transaction(write);
   }
   runEvents(runID: string, after = 0): PlatformRunEvent[] {
     this.runRow(runID);
@@ -775,6 +737,12 @@ export class OperationsPlatformStore implements PlatformStore {
         update.snapshot?.operations ??
         {},
     );
+    if (result.progress) {
+      const p = result.progress;
+      result.progress = typeof p.phase === 'string' && Object.hasOwn(installPhases, p.phase)
+        ? {phase:p.phase,...(typeof p.code === 'string' && Object.hasOwn(installCauses,p.code)?{code:p.code}:{})} : {};
+    }
+    if (result.cause_code && !Object.hasOwn(installCauses, result.cause_code)) delete result.cause_code;
     this.deps.db.run(
       "UPDATE ops_platform_runs SET state=?,result_json=?,updated_at=? WHERE id=?",
       update.phase,
@@ -786,6 +754,19 @@ export class OperationsPlatformStore implements PlatformStore {
       row.id,
     );
     const payload = JSON.parse(this.deps.decrypt(row.payload_cipher));
+    // Project only static, bounded diagnostics. Agent summaries and command output
+    // are deliberately excluded from the administrator installation log.
+    const progress = update.snapshot?.operations as Record<string, any> | undefined;
+    const detail = progress?.progress;
+    const phase = typeof detail?.phase === 'string' && Object.hasOwn(installPhases, detail.phase) ? detail.phase : update.phase;
+    const cause = [detail?.code, result.cause_code].find(code => typeof code === 'string' && Object.hasOwn(installCauses, code));
+    const state = update.phase === 'cancelled' ? 'warning' : ['succeeded','failed','unknown'].includes(update.phase) ? update.phase : 'running';
+    const message = (installPhases[phase] ?? 'Operation state updated') + (cause ? ' · '+installCauses[cause] : '');
+    const last = this.deps.db.get<any>('SELECT phase,state,detail_json FROM ops_platform_run_events WHERE run_id=? ORDER BY sequence DESC LIMIT 1', row.id);
+    const code = cause ?? (update.code ? Object.hasOwn(installCauses, update.code) ? update.code : 'operation_failed' : undefined);
+    const heartbeat = !detail && update.phase === row.state && !['succeeded','failed','unknown','cancelled'].includes(update.phase);
+    if (!heartbeat && (!last || last.phase !== phase || last.state !== state || JSON.parse(last.detail_json).code !== (code || undefined)))
+      this.addRunEvent(row.id, phase, state, {message,...(code?{code}:{} )});
     for (const listener of this.listeners)
       listener(
         this.runView(this.runRow(row.id)),

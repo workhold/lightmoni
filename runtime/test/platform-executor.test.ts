@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { executeOperation, operationCommand } from "../src/agent/operations.js";
 import { normalizeApplication } from "../src/operations/platform.js";
+import {commandDiagnostic} from '../src/operations/install-progress.js';
 import { selfSignedCertificate } from "../src/ops/certificates.js";
 import { certificateMetadata } from "../src/operations/certificates.js";
 import type {
@@ -21,6 +22,18 @@ import type {
   OperationExecutionContext,
 } from "../src/operations/types.js";
 const resourceID = "a".repeat(32);
+test('Docker failure diagnostics classify causes without returning raw output or secrets', () => {
+ for(const [text,code] of [
+  ['Error response: manifest unknown: qa-hidden-image','image_not_found'],
+  ['pull access denied for qa-hidden-image, authorization failed token=qa-hidden-token','image_access_denied'],
+  ['dial tcp registry: i/o timeout password=qa-hidden','image_network_failed'],
+  ['no space left on device qa-hidden-path','disk_full'],
+  ['permission denied while trying to connect to the Docker daemon','docker_permission_denied'],
+  ['ports are not available: address already in use','host_port_occupied'],
+  ['container qa-hidden is unhealthy','container_unhealthy'],
+ ]){assert.equal(commandDiagnostic(text,true),code);assert.doesNotMatch(commandDiagnostic(text,true),/qa-hidden/)}
+ assert.equal(commandDiagnostic('arbitrary upstream error qa-hidden',true),'operation_command_failed');
+});
 async function setup(t: any) {
   const root = await realpath(
     await mkdtemp(join(tmpdir(), "lightmoni-platform-executor-")),
@@ -285,7 +298,7 @@ test("node discovery reads real OS capacity and reports Docker capability withou
 });
 test("Docker configuration preflight failures retain the active state and release the writer fence", async (t) => {
   const f = await setup(t),
-    calls: string[][] = [];
+    calls: string[][] = [], events: any[] = [];
   const context = {
     ...f.context,
     command: async (_file: string, args: string[]) => {
@@ -293,6 +306,7 @@ test("Docker configuration preflight failures retain the active state and releas
       if (args[0] === "ps") return { stdout: "", stderr: "" };
       throw Object.assign(Error("fixture failed read-only preflight"), {
         code: "operation_command_failed",
+        diagnosticCode: 'image_network_failed',
       });
     },
   };
@@ -303,10 +317,14 @@ test("Docker configuration preflight failures retain the active state and releas
       application: { mode: "container", image: "alpine:3.23", mounts: [] },
     }),
     context,
-    async () => {},
+    async event => {events.push(event)},
   );
   assert.equal(app.state, "failed");
   assert.equal(app.code, "compose_preflight_failed");
+  assert.equal(app.snapshot.operations.data.cause_code,'image_network_failed');
+  assert.equal(app.snapshot.operations.data.phase,'validating_config');
+  assert.ok(events.some(e=>e.snapshot?.operations?.progress?.phase==='checking_docker'));
+  assert.ok(events.some(e=>e.snapshot?.operations?.progress?.phase==='validating_config'));
   const gateway = await executeOperation(
     payload({
       task: "gateway.apply",

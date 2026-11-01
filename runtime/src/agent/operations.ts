@@ -7,6 +7,7 @@ import { executeCompose, composeDefinition } from "../operations/containers.js";
 import { executeBackup, backupDefinition } from "../operations/backups.js";
 import { acquireOperationLock } from "./operation-lock.js";
 import { OperationRejectedError } from "../operations/errors.js";
+import { commandDiagnostic, installCause, installCauses, installPhases } from "../operations/install-progress.js";
 import { executePlatform, platformDefinition } from "../operations/platform.js";
 
 export const operationCapabilities = ["operations.website", "operations.certificate", "operations.compose", "operations.backup", "operations.platform", "operations.platform.website-auth.v1", "operations.platform.image-cache.v1"];
@@ -24,7 +25,7 @@ export const operationCommand: OperationExecutionContext["command"] = (file, arg
   child.on("close", code => {
     const diagnostic = file === 'docker' && /permission denied|access is denied/i.test(stderr) ? 'docker_permission_denied'
       : file === 'docker' && /cannot connect|is the docker daemon running|error during connect|connection refused/i.test(stderr) ? 'docker_daemon_unavailable' : 'operation_command_failed';
-    finish(code === 0 ? undefined : Object.assign(Error(diagnostic), {code:diagnostic}));
+    finish(code === 0 ? undefined : Object.assign(Error(diagnostic), {code:diagnostic, diagnosticCode:commandDiagnostic(stderr, file === 'docker')}));
   });
   child.stdin.on("error", () => {}); child.stdin.end(options.stdin);
 });
@@ -33,9 +34,10 @@ function secrets(config: any, all = false): string[] {
   if (!config || typeof config !== "object") return all && typeof config === "string" && config.length >= 4 ? [config] : [];
   return Object.entries(config).flatMap(([key, value]) => secrets(value, all || /private|password|secret|token|credential|environment/i.test(key)));
 }
-export async function executeOperation(payload: OperationPayload, context: OperationExecutionContext, emit: (event: {phase: string; summary: string}) => Promise<void>): Promise<ExecutionReceipt> {
+export async function executeOperation(payload: OperationPayload, context: OperationExecutionContext, emit: (event: {phase: string; summary: string; snapshot?: Record<string, unknown>}) => Promise<void>): Promise<ExecutionReceipt> {
   const started = context.now().toISOString();
   let begun = false;
+  let executionPhase = 'staging';
   let lock: Awaited<ReturnType<typeof acquireOperationLock>> | undefined, keepLock = false;
   const clean = (v: any): any => {
     if (typeof v === "string") { for (const secret of secrets(payload.resource.config)) v = v.split(secret).join("[redacted]"); return v.replace(/-----BEGIN[\s\S]*?PRIVATE KEY-----[\s\S]*?-----END[\s\S]*?PRIVATE KEY-----/g, "[redacted]"); }
@@ -58,7 +60,12 @@ export async function executeOperation(payload: OperationPayload, context: Opera
     const executors: Record<string, (p: OperationPayload, c: OperationExecutionContext) => Promise<OperationExecutionResult>> = { website: executeWebsite, certificate: executeCertificate, compose: executeCompose, backup: executeBackup, platform: executePlatform };
     const executor = executors[payload.resource.kind];
     if (!executor) throw Error("unsupported_operations_kind");
-    const result = await executor(payload, context);
+    const result = await executor(payload, {...context, progress: async (phase, code) => {
+      if (!Object.hasOwn(installPhases, phase)) return;
+      executionPhase = phase;
+      const cause = code && Object.hasOwn(installCauses, code) ? code : undefined;
+      await emit({phase:'activating', summary:installPhases[phase], snapshot:{operations:{progress:{phase,...(cause?{code:cause}:{})}}}});
+    }});
     context.signal.throwIfAborted();
     await emit({ phase: "verifying", summary: "Recording the operation verification evidence" });
     const data = clean(result.data);
@@ -79,6 +86,7 @@ export async function executeOperation(payload: OperationPayload, context: Opera
     const unknown = begun && (context.signal.aborted || /RECOVERY_FAILED$/.test(message) || !domainFailure);
     keepLock = unknown;
     const code = typeof (e as any)?.code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test((e as any).code) ? (e as any).code : /^[A-Z][A-Z0-9_]{0,63}$/.test(message) ? message.toLowerCase() : "operation_failed";
-    return { state: unknown ? "unknown" : "failed", code, summary: unknown ? "Operation interrupted; inspect target before retrying" : "Registered operation failed; review prerequisites and configuration", snapshot: {}, started_at: started, finished_at: context.now().toISOString() };
+    const cause = installCause(e);
+    return { state: unknown ? "unknown" : "failed", code, summary: unknown ? "Operation interrupted; inspect target before retrying" : "Registered operation failed; review prerequisites and configuration", snapshot: payload.resource.kind === 'platform' ? {operations:{operation_id:payload.operation_id,resource_id:payload.resource.id,data:{phase:executionPhase,...(cause?{cause_code:cause}:{})}}} : {}, started_at: started, finished_at: context.now().toISOString() };
   } finally { await lock?.finish(keepLock).catch(() => {}); }
 }

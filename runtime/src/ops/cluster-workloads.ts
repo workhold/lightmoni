@@ -2119,6 +2119,7 @@ export function createClusterWorkloads(
             online(n.agent_id) && (!n.cpu || !n.memory_mb || !n.address),
         );
       if (unknown.length) {
+        patchDeployment('application', a.id, cid, {pending:'node_capacity_discovery'});
         for (const n of unknown)
           if (
             !db.get(
