@@ -1,0 +1,16 @@
+{
+  "pass": true,
+  "uid": 996,
+  "groups": [
+    "lightmoni-agent"
+  ],
+  "capabilities": {
+    "inheritable": "0000000000000000",
+    "permitted": "0000000000000000",
+    "effective": "0000000000000000",
+    "ambient": "0000000000000000"
+  },
+  "root_keys_readable": false,
+  "docker_socket_writable": false,
+  "root_directory_writable": false
+}

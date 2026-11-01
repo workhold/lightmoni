@@ -1,0 +1,1 @@
+{"pass":true,"checks":["Linux root removes exact platform-owned Docker drop-in","unknown external drop-in retained and blocks migration","modified legacy grant retained and blocks migration","ordinary account global groups unchanged"]}

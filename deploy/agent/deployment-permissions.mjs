@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-/** Ordinary Agent permission observation. Never grants or removes host powers.
- * Legacy/external authority requires explicit migration to the root executor. */
+/** Ordinary Agent permission observation and exact platform-owned grant cleanup.
+ * External authority requires separate administrator remediation. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -15,6 +15,18 @@ const groupSnapshot = (ids, names) => {
   if (!Array.isArray(ids) || !ids.length || ids.some(g=>!Number.isSafeInteger(g)||g<0)||!Array.isArray(names)||!names.length||names.some(n=>typeof n!=='string'||!/^[A-Za-z_][A-Za-z0-9_.-]*\$?$/.test(n))) fail('agent_permission_observation_failed');
   if (ids.includes(0)||names.some(name=>blockedGroups.has(name))) fail('agent_privilege_migration_required');
 };
+/** Only the exact legacy platform-owned grant is removed by an already
+ * approved installation/update. Administrator-owned policy is never guessed. */
+export function migrateOwnedDockerDropin(options={}) {
+  if(!options.root&&(process.platform!=='linux'||process.getuid()!==0))return;
+  const root=options.root??'/',directory=path.join(root,'etc/systemd/system/lightmoni-agent.service.d'),file=path.join(directory,'20-lightmoni-docker.conf'),uid=options.uid??0;
+  try{const dir=fs.lstatSync(directory);if(dir.isSymbolicLink()||!dir.isDirectory()||dir.uid!==uid||dir.mode&0o022||fs.readdirSync(directory).some(name=>name!=='20-lightmoni-docker.conf'))fail('agent_privilege_migration_required');}catch(e){if(e.code==='ENOENT')return;throw e;}
+  let info;try{info=fs.lstatSync(file);}catch(e){if(e.code==='ENOENT')return;throw e;}
+  let at=file;
+  for(;;){const s=fs.lstatSync(at);if(s.isSymbolicLink()||s.uid!==uid||s.mode&0o022)fail('agent_privilege_migration_required');if(at===path.resolve(root))break;at=path.dirname(at);}
+  if(!info.isFile()||info.nlink!==1||fs.readFileSync(file,'utf8')!=='[Service]\nSupplementaryGroups=docker\n')fail('agent_privilege_migration_required');
+  fs.unlinkSync(file);const fd=fs.openSync(directory,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY);try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+}
 
 export function prepareDeploymentPermissions(options = {}) {
   const run = options.command ?? command;
@@ -22,6 +34,7 @@ export function prepareDeploymentPermissions(options = {}) {
   const ids = run('id', ['-G', 'lightmoni-agent']).split(/\s+/).map(value=>/^\d+$/.test(value)?Number(value):NaN);
   const names = run('id', ['-Gn', 'lightmoni-agent']).split(/\s+/);
   groupSnapshot(ids,names);
+  if(!options.command||options.root)migrateOwnedDockerDropin(options);
   // No groupadd/usermod/setcap, socket ACL/mode, sysctl or public-path chown.
   // Existing privileges are left intact and are never called "removed".
   return 'ordinary_permissions_verified';

@@ -3,7 +3,7 @@ import { rootPath } from "./security.js";
 import { ExecutorApplicationObserver } from './observation.js';
 import { readDockerInventory } from "../agent/docker.js";
 import { operationCommand } from "../agent/operations.js";
-import { runManaged,type ManagedRunContext } from "./managed.js";
+import { runManaged,releaseManagedOperationLock,type ManagedRunContext } from "./managed.js";
 import type { ManagedExecutionPayload } from "../shared/managed-execution.js";
 import { operationCapabilities } from "../agent/operations.js";
 import { randomBytes } from "node:crypto";
@@ -15,7 +15,7 @@ import { ManagedDockerExecutor, inspectManagedDockerDaemon, type ManagedDockerRe
 import { executeScript, interpreterDigest, interpreterPath, localAccount, sameAccount, productionScriptHost, scriptDependenciesReady, type ExecutionStartGuard, type ScriptHost, type ScriptOutcome } from "./scripts.js";
 import { refuse, sha256, linuxBootClock, type BootClock } from "./security.js";
 
-export interface ExecutorRelease { version: string; release: { build_id: string; source_revision: string; artifact_sha256: string; state_schema: 1 } }
+export interface ExecutorRelease { version: string; release: { build_id: string; source_revision: string; artifact_sha256: string; state_schema: 1;activation_id?:string } }
 export interface RunnerHost {
   scripts: ScriptHost;
   inventory?:()=>Promise<unknown>;
@@ -181,12 +181,12 @@ export class PrivilegedExecutorRunner {
       const response = await this.client.request("jobs/" + row.job_id + "/reconcile", { lease_id: row.lease_id });
       if (!response.job || response.job.id !== row.job_id) throw error;
       if (["succeeded", "failed", "cancelled", "unknown"].includes(response.job.state)) this.journal.acknowledge(row.job_id); else throw error;
-      if (row.state === "unknown" && response.release_fence === true) this.journal.releaseFence(row.job_id);
+      if (row.state === "unknown" && response.release_fence === true) {if(this.host.managed===runManaged)releaseManagedOperationLock(row);this.journal.releaseFence(row.job_id);}
     }
   }
   private async reconcile(row: JournalJob): Promise<void> {
     const response = await this.client.request("jobs/" + row.job_id + "/reconcile", { lease_id: row.lease_id });
     if (!response.job || response.job.id !== row.job_id || typeof response.release_fence !== "boolean") refuse("invalid_reconciliation");
-    if (row.state === "unknown" && response.release_fence) this.journal.releaseFence(row.job_id);
+    if (row.state === "unknown" && response.release_fence) {if(this.host.managed===runManaged)releaseManagedOperationLock(row);this.journal.releaseFence(row.job_id);}
   }
 }

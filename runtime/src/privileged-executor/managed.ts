@@ -3,7 +3,7 @@ import { assertLegacyMigration } from './migration.js';
 import { startManagedGateway } from "./managed-gateway.js";
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { unlinkSync,existsSync,realpathSync } from 'node:fs';
+import { unlinkSync,existsSync,realpathSync,openSync,fstatSync,closeSync,constants,fsyncSync } from 'node:fs';
 import { canonicalJSON,normalizePrivilegedPayload,parseStrictJSON,planClaims,sha256,type PrivilegedPlan } from '../shared/privileged-executor.js';
 import { managedExecutionPayload,type ManagedExecutionPayload } from '../shared/managed-execution.js';
 import { executeOperation,operationCommand } from '../agent/operations.js';
@@ -16,6 +16,17 @@ import { assertRoot,boundedFile,durableWrite,rootPath,secureDirectory,refuse } f
 import { executeScript,interpreterDigest,interpreterPath,localAccount,productionScriptHost,type ExecutionStartGuard,type ScriptOutcome } from './scripts.js';
 
 export const MANAGED_DATA_DIR='/var/lib/lightmoni-managed';
+/** Only after explicit center reconciliation of this exact root journal row. */
+export function releaseManagedOperationLock(row:{payload:any}){
+  if(row.payload?.kind!=='managed'||!row.payload.operation_payload)return;
+  const path=join(MANAGED_DATA_DIR,'operations/execution.lock');if(!existsSync(path))return;
+  const stamp=parseStrictJSON(boundedFile(path,4096,true));
+  if(stamp.operation_id!==row.payload.operation_payload.operation_id||stamp.state!=='unknown'||!Number.isSafeInteger(stamp.pid)||stamp.pid<2)refuse('managed_lock_requires_local_review');
+  try{process.kill(stamp.pid,0);refuse('managed_worker_still_present');}catch(error){if((error as NodeJS.ErrnoException).code!=='ESRCH')throw error;}
+  const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);
+  try{const own=fstatSync(fd),current=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const now=fstatSync(current);if(own.ino!==now.ino||own.dev!==now.dev)refuse('managed_lock_changed');unlinkSync(path);}finally{closeSync(current);}}finally{closeSync(fd);}
+  const directory=openSync(join(MANAGED_DATA_DIR,'operations'),constants.O_RDONLY|constants.O_DIRECTORY);try{fsyncSync(directory);}finally{closeSync(directory);}
+}
 export interface ManagedRunContext {config:ExecutorConfig;plan:PrivilegedPlan;unit:string;signal:AbortSignal;guard:ExecutionStartGuard}
 /** The same fixed systemd launcher/monotonic guard as reviewed scripts, with a
  * generated constant adapter entry. User input can never supply this code. */

@@ -66,7 +66,17 @@ function copyTree(source:string,destination:string,publicFiles:boolean,entries:E
  };
  walk(source,destination,'');
 }
-function emptyTarget(path:string){if(!fs.existsSync(path))return;rootPath(path,'directory');if(fs.readdirSync(path).length)refuse('migration_target_not_empty');}
+function emptyTarget(path:string){
+ if(!fs.existsSync(path))return;rootPath(path,'directory');
+ for(const name of fs.readdirSync(path)){
+  const child=join(path,name),stat=fs.lstatSync(child);
+  if(stat.isDirectory()&&!stat.isSymbolicLink())emptyTarget(child);
+  else if(name==='.lightmoni-owner.json'||name==='.lightmoni-web-owner.json'){
+   const marker=JSON.parse(boundedFile(child,4096).toString());
+   if(marker.version!==1||(name==='.lightmoni-owner.json'?marker.root!==MANAGED_DATA||marker.domain!==path.split('/').at(-1):marker.dataDir!==MANAGED_DATA))refuse('migration_target_not_empty');
+  }else refuse('migration_target_not_empty');
+ }
+}
 function sync(path:string){const fd=fs.openSync(path,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY);try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}
 export function migrationCommand(args:string[]):Record<string,unknown>{
  assertRoot();offline();const config=loadConfig(EXECUTOR_CONFIG),base=join(config.data_dir,'migration-review');
@@ -85,8 +95,8 @@ export function migrationCommand(args:string[]):Record<string,unknown>{
  secureDirectory(MANAGED_DATA);emptyTarget(join(MANAGED_DATA,'operations'));emptyTarget(NEW_PUBLIC);offline();
  let publicMoved=false;
  try{
-  if(fs.existsSync(join(base,'public'))){rootPath(dirname(NEW_PUBLIC),'directory');if(fs.existsSync(NEW_PUBLIC))fs.rmdirSync(NEW_PUBLIC);fs.renameSync(join(base,'public'),NEW_PUBLIC);publicMoved=true;}
-  if(fs.existsSync(join(MANAGED_DATA,'operations')))fs.rmdirSync(join(MANAGED_DATA,'operations'));
+  if(fs.existsSync(join(base,'public'))){rootPath(dirname(NEW_PUBLIC),'directory');if(fs.existsSync(NEW_PUBLIC))fs.renameSync(NEW_PUBLIC,join(base,'empty-public-before-migration'));fs.renameSync(join(base,'public'),NEW_PUBLIC);publicMoved=true;}
+  if(fs.existsSync(join(MANAGED_DATA,'operations')))fs.renameSync(join(MANAGED_DATA,'operations'),join(base,'empty-operations-before-migration'));
   fs.renameSync(join(base,'operations'),join(MANAGED_DATA,'operations'));sync(MANAGED_DATA);
   durableWrite(join(MANAGED_DATA,'migration-receipt.json'),JSON.stringify({version:1,plan_sha256:args[2],executor_id:config.executor_id,applied_at:new Date().toISOString(),source_retained:true}));
  }catch(error){if(publicMoved&&!fs.existsSync(join(base,'public')))try{fs.renameSync(NEW_PUBLIC,join(base,'public'));}catch{}throw error;}

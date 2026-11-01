@@ -120,17 +120,26 @@ finish() {
     restore_file /etc/lightmoni-agent/config.json "$tmp_dir/previous-config"
     restore_file /usr/local/bin/lightmoni-agent "$tmp_dir/previous-launcher"
     restore_file /usr/local/sbin/lightmoni-agent-uninstall "$tmp_dir/previous-uninstaller"
-    restore_file /etc/systemd/system/lightmoni-agent.service "$tmp_dir/previous-service"
+    legacy_authority="no"
+    if [ -f "$tmp_dir/previous-service" ] && [ "$(sha256sum "$tmp_dir/previous-service" | awk '{print $1}')" != 651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf ]; then legacy_authority="yes"; fi
+    if [ "$legacy_authority" = yes ]; then
+      # Never restore the old Docker group/capability grant after migration.
+      systemctl stop lightmoni-agent.service
+      if [ "$(sha256sum "$tmp_dir/unpacked/lightmoni-agent.service" | awk '{print $1}')" = 651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf ]; then install -m 0644 "$tmp_dir/unpacked/lightmoni-agent.service" /etc/systemd/system/lightmoni-agent.service; fi
+      systemctl daemon-reload
+      systemctl disable lightmoni-agent.service
+      rollback_failed="yes"
+    else restore_file /etc/systemd/system/lightmoni-agent.service "$tmp_dir/previous-service"; fi
     restore_file /opt/lightmoni-agent/current "$tmp_dir/previous-current"
     if [ "$enrollment_mode" = "yes" ]; then
       restore_file /var/lib/lightmoni-agent/identity.json "$tmp_dir/previous-identity"
     fi
     if [ "$service_changed" = "yes" ]; then systemctl daemon-reload || rollback_failed="yes"; fi
-    if [ "$enable_attempted" = "yes" ]; then
+    if [ "$enable_attempted" = "yes" ] && [ "$legacy_authority" = no ]; then
       if [ "$previous_enabled" = "yes" ]; then systemctl enable lightmoni-agent.service || rollback_failed="yes"
       else systemctl disable lightmoni-agent.service || rollback_failed="yes"; fi
     fi
-    if [ "$restart_attempted" = "yes" ] && [ "$previous_active" = "yes" ]; then
+    if [ "$restart_attempted" = "yes" ] && [ "$previous_active" = "yes" ] && [ "$legacy_authority" = no ]; then
       systemctl restart lightmoni-agent.service || rollback_failed="yes"
       systemctl is-active --quiet lightmoni-agent.service || rollback_failed="yes"
     fi
@@ -291,6 +300,11 @@ for item in config launcher uninstaller service current identity; do
 done
 if systemctl is-active --quiet lightmoni-agent.service; then previous_active="yes"; fi
 if systemctl is-enabled --quiet lightmoni-agent.service; then previous_enabled="yes"; fi
+target_unit_sha=$(sha256sum "$tmp_dir/unpacked/lightmoni-agent.service" | awk '{print $1}')
+[ "$target_unit_sha" != 4675858cde321756562338d086b304447828370573576a5a5f686c006b24811e ] || { echo 'agent_unit_requires_review' >&2; exit 1; }
+if [ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ]; then
+  [ "$target_unit_sha" = 651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf ] || { echo 'agent_unit_requires_review' >&2; exit 1; }
+fi
 transaction_started="yes"
 if id lightmoni-agent >/dev/null 2>&1; then :; else
   command -v useradd >/dev/null || { echo 'useradd is required.' >&2; exit 1; }
@@ -300,6 +314,7 @@ install -d -m 0700 -o lightmoni-agent -g lightmoni-agent /etc/lightmoni-agent /v
 if [ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ]; then
   [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] || { echo 'Invalid deployment permission helper.' >&2; exit 1; }
   installation_phase="deployment-permissions"
+  [ "$(sha256sum "$tmp_dir/unpacked/lightmoni-agent.service" | awk '{print $1}')" = 651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf ] || { echo 'agent_unit_requires_review' >&2; exit 1; }
   "$node" "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" prepare
 fi
 install -m 0600 -o lightmoni-agent -g lightmoni-agent "$staged_config" "/etc/lightmoni-agent/.config.new-$$"

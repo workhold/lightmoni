@@ -99,7 +99,7 @@ function fixture(
       "#!/bin/sh\necho synthetic old " + old + " agent\n",
       { mode: 0o750 },
     );
-    writeFileSync(service, "synthetic previous service\n", { mode: 0o640 });
+    writeFileSync(service, readFileSync(resolve(import.meta.dirname,"../../deploy/agent/lightmoni-agent.service")), { mode: 0o640 });
     if (old === "node") {
       const oldRuntime = join(root, "opt/lightmoni-agent/releases/old");
       mkdirSync(oldRuntime, { recursive: true });
@@ -225,7 +225,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
   js(join(bin, "curl"), `const fs=require('fs'),args=process.argv.slice(2),get=flag=>args[args.indexOf(flag)+1],url=args.find(v=>v.startsWith('http://')),output=get('--output'),auth=fs.readFileSync(get('--config'),'utf8'),body=JSON.parse(fs.readFileSync(0,'utf8')),state=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE));let response;if(url.endsWith('/agents/enroll')){if(!auth.includes('test-enrollment')||body.enrollment_token!=='test-enrollment')throw Error('invalid enrollment fixture');state.enrollments=(state.enrollments||0)+1;response={agent_id:'synthetic-agent',bootstrap_credential:'test-bootstrap'};}else if(url.endsWith('/synthetic-agent/activate')){if(!auth.includes('test-bootstrap')||body.health.config_checked!==true)throw Error('invalid activation fixture');state.activations=(state.activations||0)+1;response={control_credential:'test-new-control',data_credential:'test-new-data'};}else throw Error('unexpected fixture request');fs.writeFileSync(process.env.TEST_SYSTEM_STATE,JSON.stringify(state));fs.writeFileSync(output,JSON.stringify(response));`);
   writeFileSync(
     join(packageDir, "lightmoni-agent.service"),
-    "synthetic new service\n",
+    readFileSync(resolve(import.meta.dirname,"../../deploy/agent/lightmoni-agent.service")),
   );
   execFileSync("tar", [
     "-czf",
@@ -381,7 +381,7 @@ test("verified release switches atomically, configures and restarts while preser
   assert.match(result.stdout, /Agent installed/);
   assert.notEqual(readlinkSync(f.current), f.before.current);
   assert(existsSync(f.before.current!));
-  assert.match(readFileSync(f.service, "utf8"), /new service/);
+  assert.match(readFileSync(f.service, "utf8"), /Description=LightMoni Agent/);
   assert.equal(
     JSON.parse(readFileSync(f.config, "utf8")).endpoint,
     "http://old.example",

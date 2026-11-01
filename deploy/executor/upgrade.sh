@@ -4,12 +4,12 @@ set -eu
 PATH=/usr/sbin:/usr/bin:/sbin:/bin;export PATH
 umask 077
 [ "$(id -u)" = 0 ] && [ "$(uname -s)" = Linux ] || exit 1
-release_dir='';artifact='';action='';expected_id='';expected_generation='';expected_current=''
+release_dir='';artifact='';action='';expected_id='';expected_generation='';expected_current='';activation=''
 while [ "$#" -gt 0 ]; do
  [ "$#" -ge 2 ] || exit 2
  case "$1" in
  --release-dir) release_dir="$2";; --artifact-sha256) artifact="$2";; --action) action="$2";;
- --expected-executor-id) expected_id="$2";; --expected-install-generation) expected_generation="$2";; --expected-current-sha) expected_current="$2";; *) exit 2;; esac
+ --expected-executor-id) expected_id="$2";; --expected-install-generation) expected_generation="$2";; --expected-current-sha) expected_current="$2";; --activation-id) activation="$2";; *) exit 2;; esac
  shift 2
 done
 case "$release_dir" in /*) ;; *) exit 2;; esac
@@ -45,4 +45,4 @@ done
 printf '{"schema":1,"artifact_sha256":"%s"}\n' "$artifact" > "$release_dir/installation.json"
 chmod 0644 "$release_dir/installation.json"
 LIGHTMONI_EXECUTOR_UPGRADE_LOCK=held;export LIGHTMONI_EXECUTOR_UPGRADE_LOCK
-exec "$release_dir/node" "$release_dir/app/runtime/dist/privileged-executor/main.js" upgrade --action "$action" --expected-executor-id "$expected_id" --expected-install-generation "$expected_generation" --expected-current-sha "$expected_current" --target-sha "$artifact"
+exec "$release_dir/node" "$release_dir/app/runtime/dist/privileged-executor/main.js" upgrade --action "$action" --expected-executor-id "$expected_id" --expected-install-generation "$expected_generation" --expected-current-sha "$expected_current" --target-sha "$artifact" --activation-id "$activation"

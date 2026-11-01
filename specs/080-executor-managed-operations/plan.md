@@ -14,3 +14,11 @@
 ## 应用观测迁移
 
 Docker 采集与日志游标转移到独立执行器的 root 私有队列，复用现有 ApplicationObserver 解析、断点和去重。仅签名的 observations targets/batches 接口读取中心绑定目标、提交受限 OTLP；当前策略、批准人、执行器代次及领域归属再次核验。中心先加密持久化 outbox 后应答，在事务之外以稳定批次/事件 ID 写 ClickHouse；普通 Agent 无须获得 Docker socket 或 root 数据凭据。队列分别限制 32 MiB，撤权不采集也不发送，不能无限堆积。生命周期停止保留游标，程序切换不恢复已撤销策略。
+
+## 程序启动证明与维护锁
+
+SDD060 在线基线的维护契约要求本次启动证明：root updater 停止服务后通过独立 flock 子进程取得 journal writer 锁，复验未决状态、身份和原发行，再切换程序/控制文件并持久固定 activation_id。子进程退出释放 writer 后才启动服务。worker 在启动时只读冻结 activation 与发行/身份，签名心跳携带该 ID；中心同时核对 SSH 成功回执与同次 activation 的目标构建。旧进程心跳不提供新启动证明，未知核对不重派。失败恢复旧程序及启动标识，绝不回滚策略、身份或 journal。更新暂使用独立 executor-updates 路径，与卸载共用账本/互斥；第60章单一维护路由仍是后续接口收敛目标，不冒称该自动 repair 已实现。
+
+## 已有平台权限的显式迁移
+
+已批准的 Agent 安装/升级只清理本平台旧 Docker 安装器写入、root 拥有且字节精确等于 [Service]/SupplementaryGroups=docker 的 20-lightmoni-docker.conf；其他 drop-in、用户全局组、ACL 和 socket 权限保留并拒绝，不扩大普通账户权限。目标 ordinary unit 使用已知完整 SHA 白名单，在执行权限 helper 前验证。高权限旧 unit 保留作审计但不能主动回退；从该版本升级若切换后失败，保留已验证的新普通 unit、停止并禁用服务，保持维护锁，不能恢复旧权限或修改旧 fingerprint 冒称完整回退。无旧权限的既有回退契约保持。

@@ -30,12 +30,23 @@ function metadata(directory:string) {
 export function retainedExecutorReleases(){assertRoot();const current=linkTarget(CURRENT)!,previous=linkTarget(PREVIOUS,false);return{current:metadata(current),previous:previous?metadata(previous):null};}
 function atomicLink(target:string,path:string){const temp=path+'.new-'+process.pid;try{fs.symlinkSync(target,temp);fs.renameSync(temp,path);const fd=fs.openSync(BASE,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY);try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}finally{try{fs.unlinkSync(temp);}catch{}}}
 function publishControls(directory:string){for(const [source,destination,mode] of controlFiles){rootPath(dirname(destination),'directory');if(fs.existsSync(destination))rootPath(destination);durableWrite(destination,boundedFile(join(directory,source),65536),mode);}}
+/** Fixed subprocess entry, invoked while the stopped executor writer is held
+ * by flock. It never starts a worker until that lock has been released. */
+export function switchExecutorProgram(args:string[]){
+ assertRoot();if(process.env.LIGHTMONI_EXECUTOR_UPGRADE_LOCK!=='held'||args.length!==10)refuse('executor_upgrade_lock_required');
+ const [target,id,generation,oldSHA,newSHA,activation,oldBuild,newBuild,oldSource,newSource]=args;
+ if(dirname(target)!==RELEASES||!/^[a-f0-9-]{36}$/.test(activation))refuse('invalid_executor_upgrade_arguments');tree(target);
+ const current=metadata(linkTarget(CURRENT)!),next=metadata(target),config=loadConfig(EXECUTOR_CONFIG),status=executorStatus(config);
+ if(active()||status.fenced||status.pending_results||config.executor_id!==id||String(config.install_generation)!==generation||current.artifact_sha256!==oldSHA||next.artifact_sha256!==newSHA||current.build_id!==oldBuild||next.build_id!==newBuild||current.source_revision!==oldSource||next.source_revision!==newSource)refuse('executor_state_changed_while_stopping');
+ atomicLink(target,CURRENT);publishControls(target);
+ durableWrite(join(config.data_dir,'activation.json'),JSON.stringify({id:activation,executor_id:id,install_generation:config.install_generation,artifact_sha256:newSHA,stage:'ready'}));
+}
 /** Called only by the fixed upgrade shell while its kernel lifecycle lock is
  * held. No identity, journal, policy or business-data snapshot is ever restored. */
 export function upgradeExecutor(args:string[]):void {
  assertRoot();if(process.env.LIGHTMONI_EXECUTOR_UPGRADE_LOCK!=='held')refuse('executor_upgrade_lock_required');
- const values:Record<string,string>={};for(let n=0;n<args.length;n+=2){const key=args[n],value=args[n+1];if(!['--action','--expected-executor-id','--expected-install-generation','--expected-current-sha','--target-sha'].includes(key)||values[key]!==undefined||!value)refuse('invalid_executor_upgrade_arguments');values[key]=value;}
- if(!['upgrade','rollback'].includes(values['--action'])||!/^[a-f0-9]{64}$/.test(values['--target-sha']??'')||!/^[a-f0-9]{64}$/.test(values['--expected-current-sha']??''))refuse('invalid_executor_upgrade_arguments');
+ const values:Record<string,string>={};for(let n=0;n<args.length;n+=2){const key=args[n],value=args[n+1];if(!['--action','--expected-executor-id','--expected-install-generation','--expected-current-sha','--target-sha','--activation-id'].includes(key)||values[key]!==undefined||!value)refuse('invalid_executor_upgrade_arguments');values[key]=value;}
+ if(!['upgrade','rollback'].includes(values['--action'])||!/^[a-f0-9]{64}$/.test(values['--target-sha']??'')||!/^[a-f0-9]{64}$/.test(values['--expected-current-sha']??'')||!/^[a-f0-9-]{36}$/.test(values['--activation-id']??''))refuse('invalid_executor_upgrade_arguments');
  const config=loadConfig(EXECUTOR_CONFIG),status=executorStatus(config);
  if(status.executor_id!==values['--expected-executor-id']||String(status.install_generation)!==values['--expected-install-generation']||status.fenced||status.pending_results)refuse('executor_has_unresolved_local_state');
  const old=linkTarget(CURRENT)!,oldMetadata=metadata(old),prior=linkTarget(PREVIOUS,false);
@@ -45,19 +56,23 @@ export function upgradeExecutor(args:string[]):void {
  const source=resolve(fileURLToPath(new URL('../../../../',import.meta.url)));tree(source);const next=metadata(source);
  if(next.artifact_sha256!==values['--target-sha']||next.arch!==oldMetadata.arch||next.build_id===oldMetadata.build_id)refuse('executor_target_release_mismatch');
  if(values['--action']==='rollback'&&(!prior||metadata(prior).artifact_sha256!==next.artifact_sha256))refuse('executor_rollback_target_changed');
- const target=join(RELEASES,next.build_id),wasActive=active();
+ const target=join(RELEASES,next.build_id),wasActive=active(),activationPath=join(config.data_dir,'activation.json'),oldActivation=fs.existsSync(activationPath)?boundedFile(activationPath,4096,true):undefined;
  if(fs.existsSync(target)){tree(target);if(metadata(target).artifact_sha256!==next.artifact_sha256)refuse('executor_release_conflict');}
  else{fs.cpSync(source,target,{recursive:true,dereference:false,verbatimSymlinks:true,force:false,errorOnExist:true});tree(target);}
  let switched=false;
  try{
    command('stop','lightmoni-executor.service');
    const stopped=executorStatus(loadConfig(EXECUTOR_CONFIG));if(stopped.fenced||stopped.pending_results||stopped.executor_id!==status.executor_id||stopped.install_generation!==status.install_generation)refuse('executor_state_changed_while_stopping');
-   atomicLink(target,CURRENT);switched=true;publishControls(target);command('daemon-reload');command('start','lightmoni-executor.service');
+   if(active())refuse('executor_stop_not_verified');
+   const writer=join(config.data_dir,'writer.lock');rootPath(writer,'file',true);rootPath('/usr/bin/flock');switched=true;
+   execFileSync('/usr/bin/flock',['--exclusive','--nonblock',writer,join(target,'node'),join(target,'app/runtime/dist/privileged-executor/main.js'),'upgrade-switch',target,config.executor_id,String(config.install_generation),oldMetadata.artifact_sha256,next.artifact_sha256,values['--activation-id'],oldMetadata.build_id,next.build_id,oldMetadata.source_revision,next.source_revision],{env:{PATH:'/usr/bin:/bin',LANG:'C',LIGHTMONI_EXECUTOR_UPGRADE_LOCK:'held'},stdio:'ignore',timeout:60000});
+   command('daemon-reload');command('start','lightmoni-executor.service');
    let good=0;for(let n=0;n<15;n++){good=active()?good+1:0;if(good>=3)break;Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1000);}if(good<3)refuse('executor_new_service_unavailable');
    const after=executorStatus(loadConfig(EXECUTOR_CONFIG));if(after.executor_id!==status.executor_id||after.install_generation!==status.install_generation||after.policy_generation<status.policy_generation)refuse('executor_identity_or_policy_changed');
+   durableWrite(activationPath,JSON.stringify({id:values['--activation-id'],executor_id:config.executor_id,install_generation:config.install_generation,artifact_sha256:next.artifact_sha256,stage:'started'}));
    atomicLink(old,PREVIOUS);process.stdout.write('executor_upgrade=ready\n');
  }catch{
-   if(switched){try{command('stop','lightmoni-executor.service');atomicLink(old,CURRENT);publishControls(old);command('daemon-reload');if(wasActive)command('start','lightmoni-executor.service');}catch{refuse('executor_update_restore_unknown');}}
+   if(switched){try{command('stop','lightmoni-executor.service');atomicLink(old,CURRENT);publishControls(old);if(oldActivation)durableWrite(activationPath,oldActivation);else if(fs.existsSync(activationPath))fs.unlinkSync(activationPath);command('daemon-reload');if(wasActive)command('start','lightmoni-executor.service');}catch{refuse('executor_update_restore_unknown');}}
    refuse('executor_update_failed_restored');
  }
 }

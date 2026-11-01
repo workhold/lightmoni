@@ -15,6 +15,8 @@ const VERSION = /^[A-Za-z0-9._-]{1,128}$/;
 const REVISION = /^[a-f0-9]{40}$/;
 const TERMINAL = new Set(["succeeded", "rolled_back", "failed", "rollback_failed"]);
 const digest = value => createHash("sha256").update(value).digest("hex");
+const ORDINARY_UNIT_SHA='651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf';
+const LEGACY_PRIVILEGED_UNIT_SHA='4675858cde321756562338d086b304447828370573576a5a5f686c006b24811e';
 const fail = code => { throw Object.assign(Error(code), { safeCode: code }); };
 const safeCode = error => typeof error?.safeCode === "string" ? error.safeCode : "maintenance_failed";
 const absent = error => error?.code === "ENOENT";
@@ -149,6 +151,7 @@ export class AgentMaintenance {
       const retained = boundedJSON(this.checkManaged(path.join(this.base, "previous.json")));
       if (retained.schema !== 1 || !OP.test(retained.operation_id ?? "")) fail("invalid_previous_release");
       const source = this.checkManaged(this.opDir(retained.operation_id), "directory");
+      if(digest(fs.readFileSync(this.checkManaged(path.join(source,'previous-service'))))!==ORDINARY_UNIT_SHA)return null;
       const value = this.fingerprint(retained.release_path, path.join(source, "previous-launcher"), path.join(source, "previous-service"));
       if (value.fingerprint !== retained.fingerprint) fail("previous_release_changed");
       return { ...value, release_path: retained.release_path, operation_id: retained.operation_id };
@@ -353,6 +356,11 @@ export class AgentMaintenance {
     const request = this.request(id), directory = this.opDir(id);
     this.command("systemctl", ["stop", "lightmoni-agent.service"]);
     if (!["inactive", "failed"].includes(this.system("ActiveState"))) fail("service_stop_failed");
+    if(digest(fs.readFileSync(this.checkManaged(path.join(directory,'previous-service'))))!==ORDINARY_UNIT_SHA){
+      this.command('systemctl',['disable','lightmoni-agent.service']);
+      const safe=fs.readFileSync(this.checkManaged(path.join(directory,'safe-ordinary-service')));if(digest(safe)!==ORDINARY_UNIT_SHA)fail('agent_unit_requires_review');
+      this.atomic(this.p('/etc/systemd/system/lightmoni-agent.service'),safe,0o644);this.command('systemctl',['daemon-reload']);this.command('systemctl',['disable','lightmoni-agent.service']);fail('legacy_privileges_not_restored');
+    }
     this.switchCurrent(request.previous_path);
     this.atomic(this.p("/usr/local/bin/lightmoni-agent"), fs.readFileSync(this.checkManaged(path.join(directory, "previous-launcher"))), 0o755);
     this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(this.checkManaged(path.join(directory, "previous-service"))), 0o644);
@@ -413,6 +421,11 @@ export class AgentMaintenance {
       } catch (error) {
         if (!absent(error)) throw error;
       }
+      const serviceBytes=fs.readFileSync(this.checkManaged(service)),serviceSHA=digest(serviceBytes);
+      if(serviceSHA===LEGACY_PRIVILEGED_UNIT_SHA||hasPermissions&&serviceSHA!==ORDINARY_UNIT_SHA)fail('agent_unit_requires_review');
+      if(serviceSHA===ORDINARY_UNIT_SHA)this.atomic(path.join(directory,'safe-ordinary-service'),serviceBytes,0o644);
+      const sourceUnitSHA=digest(fs.readFileSync(this.checkManaged(this.p('/etc/systemd/system/lightmoni-agent.service'))));
+      if(![ORDINARY_UNIT_SHA,LEGACY_PRIVILEGED_UNIT_SHA].includes(sourceUnitSHA))fail('agent_unit_requires_review');
       if (hasPermissions) this.command(path.join(candidate, "node"), [permissions, "prepare"]);
       this.atomic(path.join(directory, "previous-launcher"), fs.readFileSync(this.checkManaged(this.p("/usr/local/bin/lightmoni-agent"))), 0o755);
       this.atomic(path.join(directory, "previous-service"), fs.readFileSync(this.checkManaged(this.p("/etc/systemd/system/lightmoni-agent.service"))), 0o644);

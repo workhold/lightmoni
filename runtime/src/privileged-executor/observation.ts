@@ -27,9 +27,13 @@ export class ExecutorApplicationObserver {
  async collect(signal:AbortSignal){
   if(Date.now()-this.last<15000)return;this.last=Date.now();
   const policy=await requestExecutor(this.config,'observations/targets',{});this.observer.targets=policy.targets;
+  await this.flush(signal);
   if((await inspectManagedDockerDaemon()).daemon_id!==this.config.daemon_id)refuse('docker_daemon_changed');
   this.metrics=[];await this.observer.collect(signal);
-  if(this.metrics.length){const payload=encodeOTLP('metrics',{resourceMetrics:[{resource:{attributes:[{key:'service.name',value:{stringValue:'lightmoni-executor'}}]},scopeMetrics:[{scope:{name:'lightmoni.application'},metrics:this.metrics}]}]});if(payload.length<=256<<10)this.db.run('INSERT INTO batches VALUES(?,?,?,?)',randomUUID(),'metrics',payload,new Date().toISOString());}
+  if(this.metrics.length){const payload=encodeOTLP('metrics',{resourceMetrics:[{resource:{attributes:[{key:'service.name',value:{stringValue:'lightmoni-executor'}}]},scopeMetrics:[{scope:{name:'lightmoni.application'},metrics:this.metrics}]}]});if(payload.length<=256<<10&&this.db.get<{n:number}>('SELECT coalesce(sum(length(payload)),0) n FROM batches')!.n+payload.length<=32<<20)this.db.run('INSERT INTO batches VALUES(?,?,?,?)',randomUUID(),'metrics',payload,new Date().toISOString());}
+  await this.flush(signal);
+ }
+ private async flush(signal:AbortSignal){
   for(const batch of this.db.all<any>('SELECT * FROM batches ORDER BY created_at,id LIMIT 20')){signal.throwIfAborted();await requestExecutor(this.config,'observations/batches',{id:batch.id,signal:batch.signal,payload:Buffer.from(batch.payload).toString('base64')});this.db.run('DELETE FROM batches WHERE id=?',batch.id);}
  }
  close(){this.db.close();}

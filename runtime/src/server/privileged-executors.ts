@@ -277,7 +277,8 @@ export class PrivilegedExecutorStore {
     const keys = ["version", "boot_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release","operations_capabilities","docker_inventory"];
     const v = object(value, keys,keys.filter(k=>!["release","operations_capabilities","docker_inventory"].includes(k))); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
     if (v.release!==undefined) {
-      const release=object(v.release,["build_id","source_revision","artifact_sha256","state_schema"]);
+      const release=object(v.release,["build_id","source_revision","artifact_sha256","state_schema","activation_id"],["build_id","source_revision","artifact_sha256","state_schema"]);
+      if(release.activation_id!==undefined&&release.activation_id!==''&&!/^[a-f0-9-]{36}$/.test(release.activation_id))fail(400,'invalid_executor_activation');
       validate(()=>boundedText(release.build_id));
       if (!/^[a-f0-9]{40}$/.test(release.source_revision) || release.state_schema!==1) fail(400,"invalid_executor_release");
       validate(()=>digest(release.artifact_sha256));

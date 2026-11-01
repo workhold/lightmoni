@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { rootPath, refuse } from "./security.js";
 import type { ExecutorConfig } from "./config.js";
+import {readActivation} from './activation.js';
 
 /** Read-only lifecycle inspection. Unlike starting a runner this never converts
  * in-flight journal entries or initializes a missing database. */
@@ -14,6 +15,6 @@ export function executorStatus(config: ExecutorConfig) {
     if (!Number.isSafeInteger(generation) || generation < 1) refuse("journal_corrupt");
     const rows = db.prepare("SELECT job_id,state FROM jobs WHERE state IN ('prepared','intent','running','unknown') AND NOT EXISTS (SELECT 1 FROM metadata WHERE key='released:'||jobs.job_id)").all();
     const pending = (db.prepare("SELECT COUNT(*) n FROM jobs WHERE state IN ('succeeded','failed','unknown') AND NOT EXISTS (SELECT 1 FROM metadata WHERE key='reported:'||jobs.job_id)").get() as any)?.n;
-    return { executor_id: config.executor_id, machine_id: config.machine_id, install_generation: config.install_generation, policy_generation: generation, fenced: rows[0] ?? null, pending_results: pending };
+    return { executor_id: config.executor_id, machine_id: config.machine_id, install_generation: config.install_generation, policy_generation: generation, activation_id:readActivation(config.data_dir,config.executor_id,config.install_generation),fenced: rows[0] ?? null, pending_results: pending };
   } finally { db.close(); }
 }

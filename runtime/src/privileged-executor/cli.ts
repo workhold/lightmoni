@@ -11,6 +11,7 @@ import { PrivilegedExecutorRunner } from "./runner.js";
 import { readExecutorRelease } from "./release.js";
 import { executorStatus } from "./status.js";
 import { assertRoot, refuse, rootPath } from "./security.js";
+import {readActivation} from './activation.js';
 
 export interface ExecutorCLIIO { input: AsyncIterable<Uint8Array | string>; write(value: string): void; signal?: AbortSignal }
 export async function execute(args: string[], io: ExecutorCLIIO = { input: process.stdin, write: v => { process.stdout.write(v); } }): Promise<void> {
@@ -22,6 +23,7 @@ export async function execute(args: string[], io: ExecutorCLIIO = { input: proce
   }
   if(command==='migration-worker'){const {migrationCommand}=await import('./migration.js');io.write(JSON.stringify(migrationCommand(args.slice(1)))+'\n');return;}
   if(command==='upgrade'){const {upgradeExecutor}=await import('./upgrade.js');upgradeExecutor(args.slice(1));return;}
+  if(command==='upgrade-switch'){const {switchExecutorProgram}=await import('./upgrade.js');switchExecutorProgram(args.slice(1));return;}
   if(command==='releases'&&args.length===1){const {retainedExecutorReleases}=await import('./upgrade.js');io.write(JSON.stringify(retainedExecutorReleases())+"\n");return;}
   if (!["enroll", "run", "check", "status", "worker"].includes(command)) refuse("unknown_executor_command");
   let filename = EXECUTOR_CONFIG;
@@ -42,6 +44,7 @@ export async function execute(args: string[], io: ExecutorCLIIO = { input: proce
     return;
   }
   const config = loadConfig(filename);
+  Object.assign(release.release,{activation_id:readActivation(config.data_dir,config.executor_id,config.install_generation,release.release.artifact_sha256)});
   if (command === "check" || command === "status") {
     const status = executorStatus(config);
     if (command === "check") io.write("executor configuration valid\n"); else io.write(JSON.stringify(status) + "\n");

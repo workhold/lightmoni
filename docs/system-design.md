@@ -1994,3 +1994,33 @@ flowchart LR
 ```
 
 实现与验收见 `specs/078-machine-service-addresses/`，网站流程见 `specs/077-website-management-flow/`；本节是架构增量，不代表线上 Agent、主机设置或 DNS 已更新。
+
+## 80. 独立执行器承接受管主机运维（SDD 080）
+
+本节取代第57、60.10、69、71及75节中普通 Agent 领取 Docker/operations 写任务的历史路径。普通 Agent 保持非 root、无 Docker 组/socket/capabilities；生产中心以 execution_principal 分流，旧未领取写任务取消，已领取或 unknown 保留审计与互斥。受管作业的领取、私有载荷、制品、事件与结果都只能走独立签名主体，不能凭 ordinary control 或获知 lease 访问。任务、AgentJob、运维 run 与原领域验证沿用同一 ID，结构化 root 回执在同一 SQLite 事务更新原领域状态。
+
+operations.managed.v1 为第三个独立默认关闭的高信任能力，涵盖管理员批准的容器/Compose/Registry/OpenResty、网站、证书、备份、systemd 与制品发布。它不扩展无网络/端口/挂载的 container.managed.v1，也不允许任意 shell 转发。批准的程序和挂载可能控制整台主机，界面须明确该信任边界。中心冻结既有已批准资源、当前版本、actor、机器/执行器/策略代次及完整 payload 摘要，在 claim、managed.execute 单次在线许可、续租、制品读取和结果处重新核对；固定 root worker 只加载 root 自有发行代码，命令前核对权威和固定 daemon，复用已审计适配器的输入、归属、健康和失败恢复校验。
+
+执行器身份、密钥、journal、观测队列与迁移审阅目录保存在 /var/lib/lightmoni-executor；业务状态独立位于 /var/lib/lightmoni-managed，静态公开文件位于独立 /var/lib/lightmoni-web 哈希目录。网站主进程使用固定持久 systemd unit，不随一次性作业退出；worker 使用独立无登录、无 Docker 组的 lightmoni-web，私钥与配置仍为 root 私有，HTTP 临时目录单独授权。卸载/程序回退不删除业务数据、容器或卷，不恢复已撤销策略。
+
+旧 Agent 可写业务目录默认阻断新写入，避免改为新路径后静默生成空数据。root 离线 migration plan 在旧写入者停止、无未决执行时，通过 nofollow 描述符冻结有界快照；拒绝符号/硬链接、设备和竞争写入。管理员独立审阅 Compose/Nginx/状态正文并用精确计划摘要 apply 后，才将该快照明确授权为 root 意图。数据字节与数字 UID/GID 保留，控制文本内部路径重写，旧目录保留；目标非空不合并覆盖。该命令不是普通 Agent 可调用的在线接口，也不替代大规模数据搬迁或未知业务状态的人工核对。
+
+SSH 更新/回退与卸载共享 machine_executor_maintenance 账本和主机互斥；升级入口为 executor-updates，原卸载入口仍为 executor-maintenance，不能交叉提交动作。计划绑定主机、凭据、当前/目标不可变发行和状态，短期一次性下载票据只在 header 与受保护 stdin 中使用。固定 root updater 核对控制文件、停止服务，在 writer 锁内只读复验并切换程序，释放 writer 后启动；activation_id 在启动前固定，worker 启动时冻结并签名回报。中心只在精确发行、安装身份及本次 activation 的心跳和 SSH 回执一致后成功，失确认保留 unknown，只读核对不重派。程序启动失败只恢复旧代码/控制文件及其启动标识，不恢复配置、策略、journal 或业务快照。部分安装的自动 repair、有期限定时任意 root 脚本和跨主机发行灰度仍不在此受管运维首版范围。
+
+应用 Docker 指标/日志由 root 自有有界队列和持久游标采集，复用 ApplicationObserver 的解析和去重；中心签名接口提供绑定目标，并校验当前策略、身份与应用归属。签名批次先进入加密 SQLite outbox 再应答，独立后台以稳定批次/事件 ID 写 ClickHouse；普通 data 凭据不参与 root 上报。两端各限32 MiB，撤权停止采集/发送，不回退到普通 Agent socket 权限。
+
+```mermaid
+flowchart LR
+  Human[管理员审阅资源和主机策略] --> Domain[中心领域批准 / 当前版本]
+  Domain --> Job[同一 Job ID / root 主体 / 摘要]
+  Job --> Gate[签名 claim / 单次许可 / 短租约]
+  Gate --> Root[独立 root 固定 worker]
+  Root --> Adapter[共享受管适配器 / 固定 daemon]
+  Adapter --> Business[独立业务数据 / 持久网关]
+  Adapter --> Receipt[结构化回执 / 原事务领域核验]
+  Receipt --> Domain
+  Root --> Observe[签名观测 / 持久 outbox / ClickHouse]
+  Root --> Journal[私有 journal / unknown 栅栏]
+```
+
+架构影响为组件职责、控制/观测协议、凭据边界、存储和部署拓扑。在线基线同步及真实验收证据见 specs/080-executor-managed-operations/；发行与目标主机现场升级分开验收。

@@ -66,7 +66,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   if (!options.legacy) fs.writeFileSync(join(old, "installation.json"), JSON.stringify({ schema: 1, artifact_sha256: "1".repeat(64) }));
   fs.symlinkSync(old, p("opt/lightmoni-agent/current"));
   fs.writeFileSync(p("usr/local/bin/lightmoni-agent"), "#!/bin/sh\n# old launcher\n", { mode: 0o755 });
-  fs.writeFileSync(p("etc/systemd/system/lightmoni-agent.service"), "old unit\n");
+  fs.writeFileSync(p("etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(join(repo,"deploy/agent/lightmoni-agent.service")));
   fs.writeFileSync(p("etc/lightmoni-agent/config.json"), '{"control_credential":"test-private-control","data_credential":"test-private-data"}\n', { mode: 0o600 });
   fs.writeFileSync(p("var/lib/lightmoni-agent/identity.json"), '{"agent_id":"fixture-agent","host_id":"fixture-host"}\n', { mode: 0o600 });
   fs.writeFileSync(p("var/lib/lightmoni-agent/queue.sqlite"), randomBytes(128), { mode: 0o600 });
@@ -81,7 +81,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   if(options.targetPermissions)fs.writeFileSync(join(runtime,"deployment-permissions.mjs"),"// trusted permission helper fixture\n");
   fs.writeFileSync(join(runtime, "padding"), randomBytes(4096));
   fs.writeFileSync(join(packageDir, "lightmoni-agent"), "#!/bin/sh\n# new launcher\n", { mode: 0o755 });
-  fs.writeFileSync(join(packageDir, "lightmoni-agent.service"), "new unit\n");
+  fs.writeFileSync(join(packageDir, "lightmoni-agent.service"), fs.readFileSync(join(repo,"deploy/agent/lightmoni-agent.service")));
   const archive = p("staging/bundle.tar.gz");
   const repack = () => execFileSync("tar", ["-czf", archive, "-C", packageDir, "lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-runtime"], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
   repack();
@@ -396,4 +396,16 @@ test("maintenance receipt preserves absent helper evidence and rejects non-boole
   for (const value of [null, 0, "false", {}])
     assert.throws(() => parseAgentUpdateStatus(JSON.stringify({ ...accepted, uninstaller_updated: value })), /invalid_response/);
   f.preserve();
+});
+
+test('a migrated privileged unit is retained as evidence but never restored after target failure',async t=>{
+ const f=fixture(t,{failTarget:true}),legacy=fs.readFileSync(join(repo,'runtime/test/fixtures/legacy-agent-privileged.service'));
+ fs.writeFileSync(f.p('etc/systemd/system/lightmoni-agent.service'),legacy);const request=f.request();await f.maintenance.start(request);const result=await f.maintenance.worker(request.operation_id);
+ assert.equal(result.status,'rollback_failed');assert.equal(f.maintenance.probe().service_active,false);assert.equal(f.maintenance.probe().lifecycle_locked,true);assert.equal(sha(fs.readFileSync(f.p('etc/systemd/system/lightmoni-agent.service'))),'651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf');assert.deepEqual(fs.readFileSync(join(f.maintenance.opDir(request.operation_id),'previous-service')),legacy);assert.notEqual(f.maintenance.currentPath(),f.old);f.preserve();
+});
+test('an old privileged previous program is not offered as an approved rollback target',async t=>{
+ const f=fixture(t),legacy=fs.readFileSync(join(repo,'runtime/test/fixtures/legacy-agent-privileged.service'));fs.writeFileSync(f.p('etc/systemd/system/lightmoni-agent.service'),legacy);const request=f.request();await f.maintenance.start(request);f.onSleep(()=>{const state=f.maintenance.state(request.operation_id);if(state.status==='waiting_confirmation')f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:state.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});assert.equal((await f.maintenance.worker(request.operation_id)).status,'succeeded');assert.equal(f.maintenance.probe().previous,null);assert.equal(sshProbe(f).previous,null);f.preserve();
+});
+test('unreviewed target unit refuses before its privileged permission helper',async t=>{
+ const f=fixture(t,{targetPermissions:true});fs.appendFileSync(join(f.packageDir,'lightmoni-agent.service'),'\n[Service]\nUser=root\n');f.repack();const request=f.request();await f.maintenance.start(request);const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,'failed');assert.equal(result.error_code,'agent_unit_requires_review');assert.ok(!f.calls.some(([,args])=>args[0]?.endsWith('/deployment-permissions.mjs')&&args[1]==='prepare'));assert.equal(f.maintenance.currentPath(),f.old);f.preserve();
 });

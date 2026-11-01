@@ -444,16 +444,16 @@ export async function executeCompose(payload: OperationPayload, context: Operati
     await write(join(dir, "pending.json"), { operation_id: payload.operation_id, generation: next, operation: payload.operation, candidate, sha256: sha(document), adopted_volumes, adopted_networks } satisfies Pending);
     try {
       if (["apply", "adopt", "rollback"].includes(payload.operation)) await docker(context, [...prefix, "up", "--detach", "--wait", "--wait-timeout", "60", "--remove-orphans"], { cwd: dir });
-      else await docker(context, [...prefix, payload.operation, ...(payload.operation === "start" ? ["--wait", "--wait-timeout", "60"] : ["--timeout", "30"]), ...(input.service ? [input.service] : [])], { cwd: dir });
+      else await docker(context, [...prefix, payload.operation, ...(payload.operation === "start" ? [] : ["--timeout", "30"]), ...(input.service ? [input.service] : [])], { cwd: dir });
       const activeDoc = JSON.parse(document), services = input.service ? [input.service] : Object.keys(activeDoc.services);
       let after = await inventory(config, context);
       const verified = () => services.every((service) => {
         const matches = after.containers.filter((c) => c.Config?.Labels?.["com.docker.compose.service"] === service);
         return matches.length === 1 && (payload.operation === "stop" ? matches.every((c) => !c.State?.Running) : matches.every((c) => c.State?.Running && (!c.State?.Health || c.State.Health.Status === "healthy")));
       });
-      // restart has no Compose --wait option. Its process returning does not
+      // Older supported Compose versions have no start --wait option. Returning does not
       // mean container health checks have left the starting state.
-      const deadline = Date.now() + (payload.operation === "restart" ? 60_000 : 0);
+      const deadline = Date.now() + (["start","restart"].includes(payload.operation) ? 60_000 : 0);
       while (!verified() && Date.now() < deadline) {
         context.signal.throwIfAborted();
         await new Promise<void>((resolve, reject) => {

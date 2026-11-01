@@ -21,6 +21,7 @@ async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverrid
  // Keep this fixture self-contained instead of relying on the full app
  // bootstrap, which registers the nodes module before managed machines.
  db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL DEFAULT '')");
+ db.exec("CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT,active INTEGER);INSERT INTO users VALUES('admin','admin',1)");
  let issued:any;
  const agentCredentials={
   has:()=>true,
@@ -37,7 +38,7 @@ async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverrid
  const machines=registerManagedMachines(deps,{agentCredentials,sshRunner:sshRunnerOverride??sshRunner});
  const server=createServer(async(req,res)=>{if(!(await router.handle(req,res))){res.writeHead(404);res.end()}});server.listen(0,'127.0.0.1');await once(server,'listening');const url=`http://127.0.0.1:${(server.address() as any).port}`;
  t.after(()=>{machines.close?.();server.close();db.close()});
- const rawRequest=async(path:string,method='GET',body?:any)=>{const response=await fetch(url+'/api/v1'+path,{method,headers:body?{'content-type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});const raw=await response.text();return {status:response.status,raw,data:parseJSON(raw)};};
+ const rawRequest=async(path:string,method='GET',body?:any)=>{const response=await fetch(url+'/api/v1'+path,{method,headers:{cookie:'lm_session=fixture',...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const raw=await response.text();return {status:response.status,raw,data:parseJSON(raw)};};
  // Legacy-pin scenarios are seeded directly into the isolated database; the
  // production API deliberately rejects all client-supplied host identity.
  const request=async(path:string,method='GET',body?:any)=>{
