@@ -184,6 +184,8 @@ flowchart TB
 
 中心是模块化单体，不拆为运行时微服务。模块通过 `Dependencies` 使用共享 DB、目录、查询、认证、路由、加密、时钟和日志；启动和关闭由 `runtime/src/server/app.ts` 管理。
 
+目标权限拆分见第60章（SDD060，未实现）：普通 Agent 保持非 root，按需新增独立出站的 root 执行器。后者具有独立身份、root 自有策略/journal和完整任务授权；受限容器操作与用户明确批准的提权脚本分别授权，普通 control 不授予这些能力。
+
 ## 7. 端到端数据流
 
 ### 7.1 业务 SDK 直连中心
@@ -759,6 +761,12 @@ flowchart TD
 
 规格、接口与隔离验收见 [SDD 058](../specs/058-agent-maintenance-recovery/spec.md)。
 
+### 13.10 目标：安装权限提示与独立运维执行器（SDD060，未实现）
+
+登记 SSH 用户名旁提前说明：“安装 Agent 需要 root，或支持免交互提权的 sudo 账户。登录账户用于安装和恢复，Agent 使用独立账户运行。”普通账户仍可登记和登录终端；预检按真实 UID/所需 sudo 能力返回 root、sudo_noninteractive、unavailable 或 unknown，不按用户名猜测，不把 SSH 密码自动当 sudo 密码。
+
+基础监控仍用普通 Agent；容器管理与允许提权脚本默认关闭、独立审批，启用时按计划引导独立 root 执行器。主机分别显示普通 Agent、执行器及能力授权/实际就绪状态。保存凭据、root 安装成功或开关打开都不等于能力已就绪；日常不自动回退到 SSH。详细权限、任务和生命周期见第60章与 [专项设计](privileged-executor.md)。
+
 ## 14. AI 助手设计
 
 ### 14.1 运行时分层
@@ -848,6 +856,8 @@ AI 可以读取规则、静默和责任组的脱敏信息，也可以创建待�
 - AI 工具 schema 使用 `additionalProperties:false`；未知参数、任意 command、任意 host 和任意 key 直接拒绝。
 - 凭据撤销和会话降权应在受限时间内断开终端；离线 Agent 的缓存任务不能被文档宣称为即时停止，直到配置租约实现。
 - 日志、审计和错误只记录固定错误码、资源 ID、操作者、时间和脱敏摘要。
+
+SDD060 目标另设 executor audience 与 root 私有身份，不复用 Agent control/data/local token。普通脚本与 Agent 同 UID 的现状不构成沙箱，不能按 peer UID 或自报 capability 授予 root。用户明确批准的任意 root 脚本属于受信整机管理代码，能够改变执行器与主机；不能承诺其执行后的身份、日志或主机仍可信。完整边界见第60章（未实现）。
 
 ## 18. LLD：关键接口与状态机
 
@@ -1334,6 +1344,8 @@ ops_platform_resources 保存 revision、加密 spec、脱敏 status 和授权�
 
 Agent 使用本机固定 Docker context 执行单容器/Compose。平台管理配置文件、只首次写入的初始化文件、数据目录和 Docker volume；停止/移除容器不删除业务数据。资源和端口在 SQLite 事务预留，实际端口在节点复核。机器池可显式设置容量，也可经 node.inspect 获取 CPU/内存/IP/Docker 能力。调度基于在线机器、容量、端口与副本分散；现有副本按健康回执逐个更新，健康连续失败时有界重建。服务发现提供新鲜健康实例的机器可达 IP＋发布端口，要求机器之间已有可达网络；没有自动 overlay 或本地数据复制。
 
+目标权限迁移采用第60章的独立执行器（SDD060，未实现）：普通 Agent 不获得 Docker 组/socket，受限容器计划由 root 执行器二次校验。host network 网关、任意 hook、受保护证书/目录和 systemd 不能整体继承容器权限；未迁移入口应拒绝特权操作，不能隐式提权。
+
 ### 33.9 网站、网关与流量
 
 网站支持静态文本文件、手工 HTTP(S) 反代和托管服务。网站仅在显式启用后进入网关完整版本包；域名在组内唯一。Agent 按版本暂存站点/证书/静态文件，检查 OpenResty 配置后切换、重载并实际验证 HTTP 内容与 TLS 指纹，失败恢复旧版。服务路径无健康后端时仅该路径返回503；多路径与Nginx可配置能力见33.11，端点变化重编译对应上游。网关在 Linux host 网络直接监听端口；已验证健康网关的公网地址进入平台拥有的 A/AAAA，关闭网站移除自身拥有记录。DNS TTL 不提供即时故障切换保证。Agent 失联不等于容器停止，不据此释放端口或静默迁移本地数据。
@@ -1683,6 +1695,99 @@ Logo是中心展示元数据，独立存于既有SQLite的ops_application_logos�
 高级YAML从services各自的ports提取容器端口与协议，expose仍仅为内部端口。托管模式忽略YAML的published并经既有预留和有效配置投影分配宿主端口，相同端口保留旧或表单的监听范围；手动模式采用YAML发布端口。按服务、容器端口和协议保持既有端口名称及应用协议，新端口生成稳定名称；网站和健康检查引用继续受原校验约束。普通表单与商店安装保持原顶层端口规则。
 
 本节对应SDD068。管理员和Agent的既有权限、镜像执行、持久数据及失败语义不变；Logo不新增对象存储、宿主文件通道或Agent能力，YAML不能绕过既有环境、文件、挂载、资源与端口边界。验收区分真实HTTP/SQLite和浏览器交互、受控网络失败与远端Agent执行，不把前端预览或配置验证称为所有第三方应用实际运行。
+
+## 第60章 主机执行权限与独立运维执行器（SDD 060，目标）
+
+本章为尚未实现的目标设计；当前普通 Agent 没有默认 Docker 或 root 权限。本轮只交付设计，详细研究与 HLD/LLD 见 [主机执行权限设计](privileged-executor.md)，规格和目标契约见 [SDD060](../specs/060-privileged-executor/spec.md)。
+
+### 60.1 驱动目标与方案取舍
+
+基础监控和普通脚本保持非 root，同时支持受控容器运维，以及管理员明确批准的 root/指定账户脚本。参考 Cockpit 的普通/特权进程隔离和 1Panel 的主机运维覆盖；不把整个 Agent 改成 root，也不加入 Docker 组。Docker socket 权限近似宿主 root，同 UID 的普通脚本也会继承，按 API 方法过滤不足以校验危险挂载与容器参数。
+
+### 60.2 HLD：独立身份、统一任务记录
+
+```mermaid
+flowchart TB
+  Entry[人工 / 平台AI / 外部MCP] --> Plan[中心提案与任务授权]
+  Plan --> Jobs[统一task run / job / ops记录]
+  Agent[普通Agent] -->|control：仅普通任务| Jobs
+  Executor[root执行器] -->|独立签名出站请求| Jobs
+  Jobs -->|签名计划和在线许可，响应返回| Executor
+  Agent --> Normal[采集 / 普通脚本 / 遥测]
+  Executor --> Policy[root私有策略 / journal / fence]
+  Policy --> Container[受限结构化容器操作]
+  Policy --> Script[明确批准的提权脚本]
+```
+
+新增 lightmoni-executor root 服务；独立出站 HTTPS，无通用本地命令 socket，不开放入站端口。task run 为统一根追踪，job/ops run/deployment记录执行主体、安装与策略代次。普通 Agent control不能claim、下载payload/制品或提交root job的events/result。执行器持有root私钥并独立签名请求/回执，普通Agent不持有该身份。SDK直报和Agent遥测链路不变。
+
+用户只登记一套SSH账户；安装器创建lightmoni-agent普通账户，独立执行器使用系统已有root，不创建第二套root登录账户或要求第二份密码。两种常驻运行身份与SSH引导账户分开，日常执行不依赖保存root SSH密码。
+
+代码与发行统一：同一代码库和版本化发行包提供agent/privileged_executor两个固定入口，共用协议、执行状态机、journal实现、制品下载校验及操作适配器；独立组合根通过类型化ExecutionContext注入执行主体、身份、策略与状态目录。共用代码，不共用凭据/journal/锁；两服务可独立启用并激活兼容版本，root使用的程序及路径祖先均root所有。
+
+复用状态机机制而保留脚本退出码/部署健康等业务终态规则；共用洁净环境、超时、输出和尽力终止组件。文件写入/切换等非command副作用同样校验路径与资源策略，不只保护spawn；类型化context不能替代OS身份和真实验权，不能用isRoot布尔值放行。
+
+权限由进程实际UID/GID/附加组决定，不能通过改SSH密码、平台token或role参数提权。普通角色常驻run/轮询/采集以UID=0启动应在创建runner前拒绝，version/check/configure等固定离线管理命令仍可由root安装器调用；特权角色必须UID=0并具备独立root身份和本地策略。共享适配器也必须经过主体/能力/grant校验，不把完整普通Agent直接用root运行作为支持方案。两个unit分别定义写目录/沙箱/子进程策略，不能仅修改User后复用普通Agent unit。
+
+公共journal须满足root通道严格持久化：写入/fsync失败不产生副作用，损坏不当空任务，unknown上报失败保留记录和fence。两角色current/previous/fingerprint及回退兼容性独立；物理共享只读发行时，GC/卸载同时检查双方引用和在途/unknown，不能只看普通Agent状态。
+
+### 60.3 登记提示与实际权限
+
+登记时提示安装需要root或支持所需免交互sudo的账户；允许无提权用户先登记资产/登录终端。预检返回root/sudo_noninteractive/unavailable/unknown并绑定目标与凭据revision；引导前再核验。首期不支持交互sudo，不复用SSH密码，不自动修改sudoers。引导账户只用于安装/恢复，普通Agent仍是lightmoni-agent。容器管理与允许提权脚本默认关闭，独立审阅启用；授权开关和实际ready/unavailable/blocked/unknown分开，显示签名观察的新鲜度。
+
+### 60.4 LLD：root所有权与信任
+
+代码、unit、信任公钥、executor私钥、本地策略、最高策略代次、防重水位、journal/fence及受管资源清单全部root所有。配置和状态目录0700、秘密文件0600，不复用Agent可写数据目录、锁、Compose/Nginx/证书或暂存输入。经批准的SSH引导用独立一次性enrollment绑定machine/Agent安装代次与executor公钥；普通control不能注册或替换root身份。中心实例与HTTPS origin固定，拒绝跳转、任意Docker context和调用者下载URL。
+
+### 60.5 LLD：签名与在线执行许可
+
+```mermaid
+flowchart TB
+  Claim[执行器独立签名claim] --> Signed[中心签名完整不可变计划]
+  Signed --> Verify[验签 / 绑定 / 本地策略检查]
+  Verify --> Intent[持久step摘要与nonce]
+  Intent --> Permit[在线重验授权 / 获取30秒单次许可]
+  Permit --> Consume[持久消费许可 / 写入intent]
+  Consume --> Effect[固定操作或已批准脚本]
+  Effect --> Journal[持久结果 / 独立签名回执]
+  Effect --> Unknown[断网 / 重启 / 结果不明：unknown]
+  Unknown --> Inspect[保留锁 / 显式只读核对]
+  Inspect --> Journal
+```
+
+固定Ed25519签名绑定center/machine/agent/executor、job/task/operation、租约、请求/制品摘要、资源revision、授权与策略代次、有效期和运行上限。请求另签method/path/body摘要与有期request_id；持久去重，不能重放claim取得新lease。每个新副作用步骤在线取得最长30秒单次permit，45秒租约每15秒续租。已签permit存在最多30秒撤权启动窗口；失联不开始新步骤，已开始外部动作可能继续，不能声称即时撤权。
+
+请求签名时差容忍不用于permit。执行器在nonce请求发出前以包含系统挂起的单调时钟固定最长30秒deadline，响应只能缩短、不重新计时；重启/新boot、过迟响应或时间不可证时废弃许可，墙钟慢钟/回拨不得扩窗。
+
+副作用前fsync intent/消费许可，后持久回执；重复任务返回原journal。执行中重启或daemon超时进入unknown，保留资源/lifecycle写锁，不因PID消失、lease到期或普通Agent报空闲自动重跑。提权脚本首期占整机写锁；普通脚本不是可信沙箱。晚到回执不覆盖unknown或新revision，显式核对后才解除。
+
+### 60.6 容器管理能力
+
+container.managed.v1要求中心授权和本地策略同时开启，固定本机Docker Engine endpoint。首期仅受管资源的有限生命周期、状态/有界日志和受限Compose；镜像固定digest，配置在root端再次验证。禁止privileged、host namespace、任意设备/cap_add、安全绕过、宿主socket、任意宿主路径、外部未归属资源、build/include/extends/env_file和未知字段。路径祖先/绑定入口root拥有且不可替换；资源归属以root清单+daemon/Docker不可变ID为准，不只看标签。已有外部容器只读观察；网关host network等需后续独立profile，不能偷渡为普通容器权限。
+
+卷固定由root以受信local driver创建，禁止用户driver_opts/plugin/DriverConfig把任意宿主bind伪装成named volume；禁止container:/service: namespace借用，禁止关闭默认seccomp/AppArmor/userns隔离。能力依赖不满足时阻塞，不以宽松配置降级。
+
+### 60.7 提权脚本能力
+
+script.elevated.v1独立默认关闭。普通脚本不自动sudo或升级身份；用户选择root/允许的系统账户后，审阅完整代码、解释器、参数、cwd、环境/秘密版本引用、明确主机集合、实际UID/GID/补充组、超时与输出上限。每主机一次性授权绑定精确快照、执行器与安装/策略代次；修改或重试重新批准，unknown先核对，账户变化拒绝、不回退root。AI/MCP只能提案，不能自行批准。
+
+root自有staging与专用运行单元启动固定解释器，清理继承环境/FD，避免泄露执行器秘密。批准root脚本等同信任其整机权限，它能改动执行器、密钥与日志；签名只绑定批准内容，不构成root沙箱。取消/超时尽力停止，exit 0不证明业务健康或主机可信。首期仅立即一次性执行，禁止at/interval/cron和自动重试；后续定时提权需固定版本、固定主机与账户、有限有效期和每次在线重验，标签新增主机不自动纳入。
+
+每主机grant在中心事务reserved(run_id)到consumed，禁止复制授权到新尝试；所有派发、领取、启动与续租均硬性验权。脚本文本摘要不保证所调用依赖或网络内容固定。stdout/stderr及容器日志按可能含未知秘密的敏感正文单独加密、每运行合计最多256 KiB，仅显式授权管理员读取，不进普通日志/遥测/AI/MCP响应；已知秘密仅尽力脱敏。
+
+### 60.8 撤权、升级、回退与卸载
+
+关闭先提高中心策略代次、停止新派发，再由执行器持久确认和处理在途状态；未确认显示disabling/unknown。关闭容器权限不停止业务容器、不重启Docker；关闭脚本权限不代表其已发生副作用被撤回。执行器可仅保留身份/策略/状态循环；重新启用需新审批。
+
+首次安装或失去可信执行器时通过有效SSH引导；已有可信执行器可按批准的固定策略管理动作应用更高代次策略、重新验收，无需重新enrollment或保存SSH凭据。修复失信安装仍走SSH，不能用普通control恢复root信任。
+
+执行器文件、身份、策略及持久journal纳入安装/升级/回退/SSH恢复保护。切换前冻结/核对在途与unknown；程序回退仅恢复程序/unit及兼容静态配置，绝不恢复旧journal/fence、防重、已完成运行、已消费授权、身份/密钥撤销水位或最高策略代次。状态丢失/恢复旧备份须重新建立中心fencing代次并核对现场，不理解当前状态则停止执行。标准/恢复/离线卸载清理平台拥有的root服务、入口、授权和密钥；保留Agent数据不保留宿主权限。业务容器/卷/发布数据默认保留，外部组/ACL不擅自清理；手动离线卸载不能冒称中心身份已撤销。
+
+### 60.9 实施顺序与验证
+
+先落独立身份、授权与全接口分流、预检/状态和生命周期，再分别交付受限容器及一次性提权脚本，最后迁移网站/证书/systemd/备份/自动协调和有期限定时提权。所有旧高级入口未迁移时拒绝特权执行，不能保留普通control读取root私有payload的旁路。任务记录统一，现有hook不能顺带root；更新不自动开启新权限。
+
+实现验收覆盖root/sudo/无提权、默认关闭、主体冒充、计划/上下文篡改、重放、危险Compose、账号组变化、未知结果、撤权和生命周期。真实Linux/Docker验收另记；本轮设计审查与Doca结构读回不代表这些能力已上线。
 
 ## 69. 主机 Docker 环境与补装（SDD 069）
 
