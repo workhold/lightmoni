@@ -1,0 +1,30 @@
+{
+  "source": "ccbb85d3156f428c297422dc679cab3cc215b5dd",
+  "context": "git archive of merged GitHub main; excludes workspace and runtime credentials",
+  "context_sha256": "2c074434e4f5073e3e396d41f20c609758bfe2643fa92c9f58381df22205da77",
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "tag": "20261102-ccbb85d",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "builder": "local Docker Desktop desktop-linux",
+  "build_arguments": {
+    "NPM_REGISTRY": "https://registry.npmmirror.com",
+    "NODE_DIST_URL": "https://npmmirror.com/mirrors/node",
+    "DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+    "DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security"
+  },
+  "dockerfile": "deploy/server/Dockerfile",
+  "verification_tools_sha256": {
+    "build.py": "d9146573d9ab3eda12db568b63e18c26e71543897d616baeb1f071da2f28b5d6",
+    "capture-tags.py": "22a0cb55a3d3e07387016e3ff8b8ba6667a3531f04a82a64b5bb7cb06e1a3582",
+    "feature-smoke.py": "80a48256da0ae539fdac7209c06029457630b6e2b9a2e5307643b9633c8a60a6",
+    "publish.py": "5ed7029a5888fd31ad866691df2b9bda72c6b2ba3fc61bd2120c989b1e6ba92a",
+    "smoke.py": "377ddf951ffceb54fc24d9936033a3c3ce197059812bb0f066923237bfe0602b",
+    "verify-compose.py": "ac541375d22da7b58d8f22a0d85f9e97f7149de16b070a8f3526e027b8b96d8f",
+    "verify-tags.py": "3d7068c00c4ddaa035ea7041ce6351789596068813f0eedc962230430de5f555",
+    "verify.py": "3eee549cfdf32445cfbf8da7d92ee3e7689e9378b29b4e871607618f2e9357fe"
+  },
+  "observation_harness_sha256": "bb35f92bef8c5d10e2a93e9fdea49ed03e2feabeac42ee6b4429099374caab43"
+}

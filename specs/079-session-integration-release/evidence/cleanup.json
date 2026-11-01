@@ -1,0 +1,9 @@
+{
+  "baseline_containers": 31,
+  "baseline_running": 15,
+  "all_original_ids_names_images_states_unchanged": true,
+  "release_containers_volumes_network_removed": true,
+  "protected_runtime_env_files_removed": true,
+  "stopped_owned_080_QA_journals_preserved": true,
+  "docker_context": "desktop-linux"
+}

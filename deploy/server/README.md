@@ -1,6 +1,6 @@
 # Docker 更新与回滚
 
-根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261101-1c82e6b`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
+根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261102-ccbb85d`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
 
 ## 更新
 
@@ -18,9 +18,9 @@ docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/
 
 通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对镜像提交；随后检查网页、原有管理员登录、只读查询和 SDK/Agent 下载。需要 `up` 重新创建容器才能切换镜像；本地 `npm run build`、`release:sdk` 和 `release:agent` 只更新本地生成物。
 
-`20261101-1c82e6b` 从已合入 [PR #60](https://github.com/workhold/lightmoni/pull/60) 的 `1c82e6b64e8432bd449b957eebf8141aa08e04e6` 完整构建，修复 Agent 卸载计划阻塞后缺少继续入口、执行期间状态不刷新及失败后无法取消的问题。主机列表可以直接继续/取消原计划、查看进展或只读核对未知结果；对话框状态和操作固定可见。此次界面修复只需更新中心镜像，既有 Agent 无须为此升级；远端卸载仍需管理员审阅确认，查看进展不会自动重放。双平台摘要及实际生产镜像验收见 [SDD 074 发布验收](../../specs/074-uninstall-progress-release/validation.md)。
+`20261102-ccbb85d` 从 `ccbb85d3156f428c297422dc679cab3cc215b5dd` 完整构建，整合 PR #62–#66：网站发布/DNS与服务地址、Agent 卸载续办/干净重装、独立镜像来源规则，以及独立执行器的受管运维、观测、统一维护和旧数据接管。镜像代理在独立“镜像来源”页按指定 registry 配置，与私有仓库管理分开。双平台摘要、下载包维护解析、真实 ClickHouse 入库及远端仓库核验见 [SDD079 发布验收](../../specs/079-session-integration-release/validation.md)。
 
-此前应用 Logo、高级 YAML、部署权限和网站/低端口修复均保留。应用商店仍为 31 项，工具仅 DBX；Harbor 仅 amd64 且要求 Engine 26 / Compose 2.26，FastGPT 需要已有 S3，vLLM 需要 NVIDIA GPU，依赖初始化的模板需 Agent 支持 `operations.platform.oneshot.v1`，详见 [SDD 066](../../specs/066-app-catalog-expansion/validation.md)。中心换镜像不会自动升级既有 Agent 或业务容器。沿用原 Compose 项目、环境和卷执行 pull/up；旧 `.env` 的 `LIGHTMONI_IMAGE` 不影响此入口，旧固定标签保留供回退。
+普通 Agent 保持非 root、无 Docker 权限。现有应用、网站、Compose、证书和备份写操作需安装独立执行器，并由管理员审阅启用默认关闭的 `operations.managed.v1`；旧业务目录先按[接管步骤](../../specs/080-executor-managed-operations/migration-runbook.md)停机审阅迁移。执行器升级/回退/repair/卸载使用统一维护入口，unknown 先只读核对，不重放。中心换镜像不会自动升级既有 Agent、授权主机能力或迁移业务。沿用原 Compose 项目、环境和卷执行 pull/up；旧 `.env` 的 `LIGHTMONI_IMAGE` 不影响此入口，历史固定标签保持原摘要。程序回退不恢复旧高权限 Agent 或已撤销策略。
 
 中心镜像更新不会自动更新已安装的 Agent。需要使用新运维能力的节点应单独升级 Agent，并按[运维手册](../../docs/operations.md)准备 Nginx、Docker/Compose 等所需依赖及目录、服务权限；不能仅凭 capability 出现就认定节点已有执行权限。公网 ACME 与真实 S3 等未验收范围仍以 [SDD 026](../../specs/026-operations-platform/validation.md)为准。
 
