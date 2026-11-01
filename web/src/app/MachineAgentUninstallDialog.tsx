@@ -25,7 +25,8 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
  const {t,language}=useI18n();
  const [record,setRecord]=useState(existing),[check,setCheck]=useState<SSHCheckResult>(),[busy,setBusy]=useState(false),[error,setError]=useState(''),[now,setNow]=useState(Date.now()),[refreshNeeded,setRefreshNeeded]=useState(false),[planUncertain,setPlanUncertain]=useState(false),[applyAttempted,setApplyAttempted]=useState(false);
  const [mode,setMode]=useState<RemovalMode|'manual'>(initialMode),[reason,setReason]=useState(''),[purge,setPurge]=useState(false),[credential,setCredential]=useState<string|undefined>(()=>defaultMachineCredential(credentials,machine.default_credential_id,reusableMachineCredential));
- const pending=useRef(false),mounted=useRef(true),recordRef=useRef(record),recovery=useRef<PlanRecovery|undefined>(undefined);
+ const [pollError,setPollError]=useState('');
+ const pending=useRef(false),mounted=useRef(true),recordRef=useRef(record),recovery=useRef<PlanRecovery|undefined>(undefined),readVersion=useRef(0);
  recordRef.current=record;
  const prefix=`/machines/${encodeURIComponent(machine.id)}/uninstallations`;
  const keys=credentials.filter(c=>reusableMachineCredential(c));
@@ -101,8 +102,8 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
  }[warning]||warning);
  const identityError=()=>Error(t('卸载记录与目标主机或原计划不匹配，请只读核对','The uninstall record does not match this host or original plan. Verify it read-only.'));
  const validate=(next:AgentUninstallation,id?:string)=>{if(!next?.id||next.machine_id!==machine.id||id&&next.id!==id||next.plan?.machine.id&&next.plan.machine.id!==machine.id)throw identityError();return next};
- const save=(next:AgentUninstallation)=>{if(mounted.current){recordRef.current=next;setRecord(next)}};
- const begin=()=>{if(pending.current)return false;pending.current=true;setBusy(true);setError('');return true};
+ const save=(next:AgentUninstallation)=>{if(mounted.current){readVersion.current++;recordRef.current=next;setRecord(next);setPollError('')}};
+ const begin=()=>{if(pending.current)return false;pending.current=true;readVersion.current++;setBusy(true);setError('');return true};
  const finish=()=>{pending.current=false;if(mounted.current)setBusy(false)};
  const refreshParent=async()=>{try{await onRefresh()}catch{if(mounted.current)setError(previous=>[previous,t('主机列表刷新失败，请稍后刷新。','The host list could not refresh. Refresh it later.')].filter(Boolean).join(' '))}};
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false}},[]);
@@ -110,7 +111,7 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
  useEffect(()=>{setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer)},[record?.plan?.expires_at]);
  const expired=!Number.isFinite(Date.parse(record?.plan?.expires_at||''))||Date.parse(record?.plan?.expires_at||'')<=now;
  const reasonValid=!!reason.trim()&&new TextEncoder().encode(reason.trim()).length<=1000&&!/[\u0000-\u001f\u007f]/u.test(reason.trim());
- const readRecord=async()=>{const saved=recordRef.current;if(!saved)throw identityError();const next=validate(await api<AgentUninstallation>(`${prefix}/${encodeURIComponent(saved.id)}`),saved.id);save(next);setRefreshNeeded(false);return next};
+ const readRecord=async()=>{const saved=recordRef.current;if(!saved)throw identityError();const version=readVersion.current;const next=validate(await api<AgentUninstallation>(`${prefix}/${encodeURIComponent(saved.id)}`),saved.id);if(mounted.current&&version===readVersion.current){save(next);setRefreshNeeded(false)}return next};
  const recoverPlan=async()=>{
   const attempt=recovery.current;if(!attempt)throw identityError();
   const history=await api<AgentUninstallation[]>(prefix);
@@ -135,18 +136,45 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
  };
  const action=async(operation:'apply'|'cancel'|'reconcile')=>{
   const saved=recordRef.current;
-  if(!saved||saved.machine_id!==machine.id||refreshNeeded||operation==='apply'&&(saved.status!=='awaiting_approval'||expired||applyAttempted)||operation==='reconcile'&&(saved.status!=='unknown'||!credential||!keys.some(key=>key.id===credential))||!begin())return;
+  if(!saved||saved.machine_id!==machine.id||refreshNeeded||operation==='cancel'&&saved.status!=='awaiting_approval'||operation==='apply'&&(saved.status!=='awaiting_approval'||expired||applyAttempted)||operation==='reconcile'&&(saved.status!=='unknown'||!credential||!keys.some(key=>key.id===credential))||!begin())return;
   if(operation==='apply')setApplyAttempted(true);
   try{const next=validate(await api<AgentUninstallation>(`${prefix}/${encodeURIComponent(saved.id)}/${operation}`,{method:'POST',body:JSON.stringify(operation==='apply'?{confirm:true}:operation==='reconcile'?{credential_id:credential}:{})}),saved.id);save(next)}
   catch(e){if(mounted.current)setError(errorText(e))}
   finally{try{await readRecord()}catch{if(mounted.current){setRefreshNeeded(true);setError(previous=>[previous,t('暂时无法刷新已保存的操作，请刷新状态后再继续；不要重复执行卸载。','The saved operation could not be refreshed. Refresh its status before continuing; do not repeat removal.')].filter(Boolean).join(' '))}}await refreshParent();finish()}
  };
- useEffect(()=>{if(record?.status!=='running')return;let active=true;const timer=setInterval(()=>{if(!pending.current&&active)void refresh()},4000);return()=>{active=false;clearInterval(timer)}},[record?.id,record?.status]);
+ useEffect(()=>{
+  if(!record||!['awaiting_approval','running'].includes(record.status))return;
+  let active=true,timer:ReturnType<typeof setTimeout>;const controller=new AbortController();
+  const poll=async()=>{
+   const version=readVersion.current;
+   try{
+    const next=validate(await api<AgentUninstallation>(`${prefix}/${encodeURIComponent(record.id)}`,{signal:controller.signal}),record.id);
+    if(active&&mounted.current&&version===readVersion.current){
+     const changed=recordRef.current?.status!==next.status;save(next);setRefreshNeeded(false);
+     if(changed)await refreshParent();
+    }
+   }catch{if(active&&mounted.current&&version===readVersion.current)setPollError(t('自动刷新暂时失败，正在重试；也可手动刷新操作状态。','Automatic refresh failed temporarily and will retry. You can also refresh the operation status manually.'))}
+   finally{if(active)timer=setTimeout(poll,4000)}
+  };
+  timer=setTimeout(poll,4000);
+  return()=>{active=false;clearTimeout(timer);controller.abort()};
+ },[record?.id,record?.status]);
  const succeeded=record?.status==='succeeded',scope=record?.plan?.credential_revocation_scope,observation=record?.plan?.observation;
  const dataPolicy=(remove:boolean)=>remove?t('清除 Agent 配置、身份与缓存','Purge Agent configuration, identity, and cache'):t('保留 Agent 配置、身份与缓存','Retain Agent configuration, identity, and cache');
  const scopeText=(value?:RevocationScope)=>!value?t('仅按远端身份与本主机关联核验后处理','Only after verifying remote identity and ownership by this host'):value.eligible?t(`仅撤销 ${value.agent_id} 的 ${value.audiences.join(' / ')} 凭据`,`Revoke only ${value.agent_id} ${value.audiences.join(' / ')} credentials`):t('无已证明属于本主机的可撤销身份；不撤销其他凭据','No revocable identity is proven to belong to this host; other credentials will not be revoked');
  const credentialSelect=<Select aria-label={t('卸载 SSH 凭据','Uninstall SSH credential')} value={credential} disabled={busy||planUncertain} style={{width:'100%'}} onChange={setCredential} options={keys.map(c=>({value:c.id,label:`${c.name||(c.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key'))} · ${c.secret_fingerprint||c.id} · ${c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)}`}))}/>;
- return <Modal title={t(`卸载 LightMoni Agent · ${machine.name}`,`Uninstall LightMoni Agent · ${machine.name}`)} open style={{top:24}} onCancel={()=>{if(!busy)onClose()}} closable={!busy} maskClosable={false} footer={null} width={820} destroyOnHidden>
+ const status=record?.status==='awaiting_approval'&&applyAttempted?t('卸载请求已发送，正在等待执行结果','Uninstall request sent; waiting for the execution result'):record?statusLabel(record.status):'';
+ const statusDescription=record?.status==='awaiting_approval'?applyAttempted?t('正在核验远端状态，尚未确认移除。状态会自动刷新，请勿重复执行。','Remote verification is pending; removal is not confirmed. Status refreshes automatically. Do not repeat removal.'):t('计划已生成，尚未执行。请审阅后确认卸载，或取消计划以恢复后续操作。','The plan is ready and has not run. Review and confirm removal, or cancel the plan to resume other operations.'):record?.status==='running'?t('正在通过 SSH 卸载并核验结果，最长约 2 分钟。状态会自动刷新。','Removing Agent over SSH and verifying the result; this can take about two minutes. Status refreshes automatically.'):record?.status==='unknown'?t('远端可能已经改变。只读核对检查原操作，不会重放卸载；可选择当前有效 SSH 凭据。','The host may already have changed. Read-only verification checks the original operation without replaying removal. Select a currently active SSH credential.'):record?.error?localizeMessage(record.error):undefined;
+ const actions=record?<>
+  {error&&<Alert role="alert" className="lm-machine-form-notice" type="error" showIcon title={error}/>}
+  {pollError&&<Alert type="warning" showIcon title={pollError}/>}
+   <Space wrap className="lm-machine-uninstall-actions">
+    {record.status==='awaiting_approval'&&!refreshNeeded&&<><Popconfirm title={t('确认按此固定计划卸载 Agent？','Uninstall Agent using this fixed plan?')} description={<>{dataPolicy(!!record.plan?.purge)}。{scopeText(scope)}。</>} okText={t('确认卸载','Confirm uninstall')} cancelText={t('返回审阅','Back to review')} okButtonProps={{danger:true}} onConfirm={()=>action('apply')} disabled={busy||expired||applyAttempted}><Button type="primary" danger disabled={busy||expired||applyAttempted}>{t('我已审阅，卸载 Agent','I have reviewed the plan; uninstall Agent')}</Button></Popconfirm><Button disabled={busy} onClick={()=>void action('cancel')}>{t('取消卸载计划','Cancel uninstall plan')}</Button></>}
+    {record.status==='unknown'&&!refreshNeeded&&<Button type="primary" aria-label={t('只读核对远端状态','Verify remote state (read-only)')} loading={busy} disabled={!credential||!keys.some(key=>key.id===credential)} onClick={()=>void action('reconcile')}>{t('只读核对远端状态','Verify remote state (read-only)')}</Button>}
+    <Button aria-label={t('刷新操作状态','Refresh operation status')} disabled={busy} onClick={()=>void refresh()}>{t('刷新操作状态','Refresh operation status')}</Button>
+   </Space>
+ </>:null;
+ return <Modal className="lm-agent-uninstall-dialog" title={<><span>{t(`卸载 LightMoni Agent · ${machine.name}`,`Uninstall LightMoni Agent · ${machine.name}`)}</span>{record&&<Alert className="lm-machine-form-notice" showIcon type={succeeded?'success':record.status==='unknown'?'warning':record.status==='failed'?'error':'info'} title={status} description={statusDescription}/>}</>} open style={{top:24}} onCancel={()=>{if(!busy)onClose()}} closable={!busy} maskClosable={false} footer={actions} width={820} destroyOnHidden>
   {!record&&<>
    <Radio.Group aria-label={t('卸载方式','Uninstall method')} value={mode} disabled={busy||planUncertain} onChange={event=>{setMode(event.target.value);setError('');setCheck(undefined)}} className="lm-machine-form-notice">
     <Radio.Button value="standard" disabled={!standardAllowed}>{t('标准卸载','Standard uninstall')}</Radio.Button><Radio.Button value="recovery" disabled={!recoveryAllowed}>{t('SSH 恢复卸载（强制）','SSH recovery uninstall (forced)')}</Radio.Button><Radio.Button value="manual">{t('离线脚本','Offline script')}</Radio.Button>
@@ -166,7 +194,6 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
    {(planUncertain||refreshNeeded)&&<Button disabled={busy} onClick={()=>void refresh()}>{t('刷新并恢复原计划','Refresh and recover original plan')}</Button>}
   </>}
   {record&&<>
-   <Alert className="lm-machine-form-notice" showIcon type={succeeded?'success':record.status==='unknown'?'warning':record.status==='failed'?'error':'info'} title={statusLabel(record.status)} description={record.status==='unknown'?t('远端可能已经改变。只读核对检查原操作，不会重放卸载；可选择当前有效 SSH 凭据。','The host may already have changed. Read-only verification checks the original operation without replaying removal. Select a currently active SSH credential.'):record.error?localizeMessage(record.error):undefined}/>
    {record.plan&&<>
     <Descriptions size="small" layout="vertical" column={1} items={[
      {key:'target',label:t('目标主机','Target host'),children:sshEndpoint(record.plan.machine.address,record.plan.machine.port,record.plan.machine.username)},
@@ -210,12 +237,7 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
    {record.status==='awaiting_approval'&&expired&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('卸载计划已过期，请先取消再重新检查','Uninstall plan expired. Cancel it before running a new check.')}/>}
    {record.status==='awaiting_approval'&&applyAttempted&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('原计划执行请求已发送，请只读刷新确认结果','The original execution request was sent. Refresh read-only to confirm its outcome')}/>}
    {record.status==='unknown'&&<div className="lm-machine-form-notice"><Typography.Paragraph>{t('核对使用当前有效 SSH 凭据','Use a currently active SSH credential for verification')}</Typography.Paragraph>{credentialSelect}{!keys.length&&<Typography.Paragraph>{t('请先为此主机添加有效 SSH 凭据，再打开原记录核对。','Add an active SSH credential to this host, then reopen the original record for verification.')}</Typography.Paragraph>}</div>}
-   <Space wrap className="lm-machine-uninstall-actions">
-    {record.status==='awaiting_approval'&&!refreshNeeded&&<><Popconfirm title={t('确认按此固定计划卸载 Agent？','Uninstall Agent using this fixed plan?')} description={<>{dataPolicy(!!record.plan?.purge)}。{scopeText(scope)}。</>} okText={t('确认卸载','Confirm uninstall')} cancelText={t('返回审阅','Back to review')} okButtonProps={{danger:true}} onConfirm={()=>action('apply')} disabled={busy||expired||applyAttempted}><Button type="primary" danger disabled={busy||expired||applyAttempted}>{t('我已审阅，卸载 Agent','I have reviewed the plan; uninstall Agent')}</Button></Popconfirm><Button disabled={busy||applyAttempted} onClick={()=>void action('cancel')}>{t('取消卸载计划','Cancel uninstall plan')}</Button></>}
-    {record.status==='unknown'&&!refreshNeeded&&<Button type="primary" aria-label={t('只读核对远端状态','Verify remote state (read-only)')} loading={busy} disabled={!credential||!keys.some(key=>key.id===credential)} onClick={()=>void action('reconcile')}>{t('只读核对远端状态','Verify remote state (read-only)')}</Button>}
-    <Button aria-label={t('刷新操作状态','Refresh operation status')} disabled={busy} onClick={()=>void refresh()}>{t('刷新操作状态','Refresh operation status')}</Button>
-   </Space>
   </>}
-  {error&&<Alert role="alert" className="lm-machine-form-notice" type="error" showIcon title={error}/>}
+  {!record&&error&&<Alert role="alert" className="lm-machine-form-notice" type="error" showIcon title={error}/>}
  </Modal>;
 }

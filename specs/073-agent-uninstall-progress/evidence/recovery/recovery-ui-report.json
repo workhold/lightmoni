@@ -1,0 +1,25 @@
+{
+  "scope": "Copied production web bundle; all HTTP intercepted; no host, SSH, Agent or production execution.",
+  "bundle_sha256": "c87c9e8ffbcefadb94cc7f58897d58698d58935d639bba6ce63e1273fb551768",
+  "checked": [
+    "Standard identity rejection requires explicit recovery selection and a reason; actual snapshot, IPv6 endpoint, retain policy and exact revocation scope are reviewed",
+    "Recovery mode, reason and purge choice are immutable once the plan exists",
+    "Unbound host recovery supports explicit purge; missing identity succeeds with no unrelated credential revocation and an accurate receipt",
+    "Corrupt identity and partial runtime are explicitly visible in the actual remote snapshot",
+    "Recovery remains gated by the independent server capability",
+    "Synchronous double clicks issue one preflight, one plan and one apply",
+    "A lost plan response locks creation and recovers the persisted original by check, credential, mode, reason, purge and prior IDs",
+    "GET records with another host or operation ID are rejected and cannot enable a mutation",
+    "Ambiguous apply never replays even if GET still says awaiting approval; unknown reconciliation uses the current replacement credential explicitly",
+    "Mutation responses with a different operation ID cannot replace the original persisted record",
+    "Admin downloads a SHA256-verified fixed script using Blob without enrollment token or remote execution; purge command is opt-in",
+    "Script digest mismatch blocks download",
+    "Recovery plan rendered without page overflow at 1440px in zh-CN",
+    "Recovery plan rendered without page overflow at 390px in zh-CN",
+    "Recovery plan rendered without page overflow at 1440px in en-US",
+    "Recovery plan rendered without page overflow at 390px in en-US",
+    "Members do not expose maintenance controls or request uninstall/script APIs"
+  ],
+  "errors": [],
+  "unexpected": []
+}
