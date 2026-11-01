@@ -1,3 +1,4 @@
+import { pendingDockerInstallation } from './machine-docker-guard.js';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
@@ -207,7 +208,7 @@ export class TaskRunStore {
     return this.deps.db.transaction(() => {
       if (pendingMachineInstallation(this.deps.db,"",agentID)) return null;
       if (pendingMachineUninstallation(this.deps.db,"",agentID)) return null;
-      if (hasPendingAgentUpdate(this.deps.db, agentID)) return null;
+      if (hasPendingAgentUpdate(this.deps.db, agentID) || pendingDockerInstallation(this.deps.db,"",agentID)) return null;
       if (this.deps.db.get("SELECT id FROM task_runs WHERE agent_id=? AND state='running'", agentID)) return null;
       const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE agent_id=? AND state='queued' ORDER BY created_at,rowid LIMIT 200", agentID);
       for (const r of pending) {
@@ -335,7 +336,7 @@ export class TaskRunStore {
       catch (error) { if (!(error instanceof NodeError || error instanceof HTTPError)) throw error; close(); return; }
       if (task.revision !== snapshot.task_revision || this.host(r.host_id).agent_id !== r.agent_id
         || !this.validBinding(r.host_id,r.agent_id) || this.active(r.task_id,r.host_id)) { close(); return; }
-      if (hasPendingAgentUpdate(this.deps.db, r.agent_id, r.host_id)) return;
+      if (hasPendingAgentUpdate(this.deps.db, r.agent_id, r.host_id) || pendingDockerInstallation(this.deps.db,r.host_id,r.agent_id)) return;
       if (pendingMachineInstallation(this.deps.db,r.host_id,r.agent_id)) return;
       if (pendingMachineUninstallation(this.deps.db,r.host_id,r.agent_id)) return;
       const next = this.insert(task, r.host_id, "retry", r.requested_by, "auto-retry:" + r.id, r.id, snapshot, r.automatic_attempt + 1);
@@ -377,7 +378,7 @@ export class TaskRunStore {
         }
         const hosts = this.deps.db.all<{id:string;agent_id:string}>("SELECT id,agent_id FROM managed_machines WHERE agent_id<>'' ORDER BY id");
         for (const h of hosts) {
-          if (!this.validBinding(h.id, h.agent_id) || this.active(t.id, h.id) || hasPendingAgentUpdate(this.deps.db, h.agent_id, h.id) || pendingMachineInstallation(this.deps.db,h.id,h.agent_id) || pendingMachineUninstallation(this.deps.db,h.id,h.agent_id)) continue;
+          if (!this.validBinding(h.id, h.agent_id) || this.active(t.id, h.id) || hasPendingAgentUpdate(this.deps.db, h.agent_id, h.id) || pendingDockerInstallation(this.deps.db,h.id,h.agent_id) || pendingMachineInstallation(this.deps.db,h.id,h.agent_id) || pendingMachineUninstallation(this.deps.db,h.id,h.agent_id)) continue;
           const effective = this.nodes.effectiveHostTasks(h.id).find(v => v.id === t.id && v.enabled && v.status !== "upgrade_required");
           if (effective) this.insert(effective,h.id,"schedule","scheduler","schedule:" + due);
         }

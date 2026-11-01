@@ -1683,3 +1683,26 @@ Logo是中心展示元数据，独立存于既有SQLite的ops_application_logos�
 高级YAML从services各自的ports提取容器端口与协议，expose仍仅为内部端口。托管模式忽略YAML的published并经既有预留和有效配置投影分配宿主端口，相同端口保留旧或表单的监听范围；手动模式采用YAML发布端口。按服务、容器端口和协议保持既有端口名称及应用协议，新端口生成稳定名称；网站和健康检查引用继续受原校验约束。普通表单与商店安装保持原顶层端口规则。
 
 本节对应SDD068。管理员和Agent的既有权限、镜像执行、持久数据及失败语义不变；Logo不新增对象存储、宿主文件通道或Agent能力，YAML不能绕过既有环境、文件、挂载、资源与端口边界。验收区分真实HTTP/SQLite和浏览器交互、受控网络失败与远端Agent执行，不把前端预览或配置验证称为所有第三方应用实际运行。
+
+## 69. 主机 Docker 环境与补装（SDD 069）
+
+主机列表从已认证 Agent 的 Docker inventory 与即时采集回执投影环境状态，区分可用、未安装、Compose 缺失、服务不可用、权限不足、待检测及过期。判断新鲜度使用最近尝试时间和 Agent 在线状态；无观测或过期不能判为未安装。应用检查 Docker 时的命令不存在错误新增白名单 docker_cli_missing，旧记录只提供检查入口。
+
+管理员从主机列表、应用与 Docker 清单、应用安装失败抽屉进入同一环境面板。补装目标绑定所选执行的 Agent 对应平台主机，明确确认后复用有效可复用 SSH 凭据与同一握手主机公钥校验；凭据仅运行时解密。新增 machine_docker_installations 保存请求幂等标识、主机/Agent/凭据绑定、操作者、状态、阶段、静态错误码和时间，不保存命令输出或秘密。
+
+中心通过固定 SSH 命令交给 root 持有的 systemd transient unit 执行有界安装，进度保存在 root 专属目录。自动安装限 Ubuntu/Debian、amd64/arm64、systemd：使用 Docker 官方签名 apt 仓库安装缺失 Engine/Compose，拒绝冲突包，不主动覆盖升级已有 Engine，不删除容器或数据，对绑定身份匹配的标准受管 Agent 通过固定 systemd drop-in 授予 docker 补充组并重启 Agent；确认面板说明该影响，不更改系统用户组或 socket 权限，不重启已有 Docker daemon。其他系统给官方手动指南。
+
+安装期间中心 busy 和持久化状态阻止并发 SSH 生命周期、Agent 作业与主机任务领取；远端安装以 flock 排斥。关闭面板不取消独立后台安装，平台重启或连接结果不确定时保留 unknown 闸门；管理员可只读核对该操作的远端状态，不能自动重新安装。成功表示主机验证 Engine/Compose，Agent 能否访问由后续真实采集独立核对。
+
+补装不会重新创建应用或自动重部署。安装面板提示采集并验证 Agent 权限后，回到原应用显式重新部署，旧失败记录保留；权限不足独立显示权限修复建议，不能误判为缺失。新增路由仅管理员可写，AI 工具权限不变，Agent Docker 访问配置只通过管理员确认的固定 SSH 流程进行。SDD 069 的验证分别记录 HTTP/SQLite/SSH fixture、浏览器与真实 Linux 安装范围。
+
+```mermaid
+flowchart LR
+  A[主机列表 / 应用失败记录] --> B[环境状态与明确确认]
+  B --> C[受保护 SSH / 主机身份校验]
+  C --> D[root systemd 安装 / 持久结果]
+  D --> E[Engine + Compose 验证]
+  E --> F[Agent 采集 / 显式重新部署]
+```
+
+契约与验收见 `specs/069-docker-environment/`；Doca 同步保留现有图块与无关内容，新增本节原生流程图后回读节点、连线及目标段落。未执行真实 Linux 软件包安装时，不能将受控 SSH fixture 当作真实安装证据。

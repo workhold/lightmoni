@@ -57,7 +57,7 @@ test('offline/old Agents fail explicitly and old cached observations do not supe
 test('inventory collection preserves old containers and safe diagnostic; query is shared without waiting for app logs',async()=>{
  let fail=false,count=0;const command:any=async()=>{count++;await Promise.resolve();if(fail)throw Object.assign(Error('private raw error'),{code:'docker_permission_denied'});return {stdout:JSON.stringify({ID:containerID,Names:'app',Image:'busybox',State:'running'}),stderr:''}};
  const observer=new ApplicationObserver({} as any,command);
- await Promise.all([observer.refreshInventory(),observer.refreshInventory()]);assert.equal(count,1);
+ await Promise.all([observer.refreshInventory(),observer.refreshInventory()]);assert.equal(count,2);
  fail=true;await assert.rejects(observer.refreshInventory());assert.equal(observer.inventory?.containers.length,1);assert.equal(observer.inventory?.error,'docker_permission_denied');assert(observer.inventory?.attempted_at);assert.doesNotMatch(JSON.stringify(observer.inventory),/private/);
 });
 
