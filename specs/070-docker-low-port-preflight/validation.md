@@ -2,6 +2,8 @@
 
 日期：2026-11-01。基线：`origin/main` 的 `290d41c`。
 
+交付：[GitHub PR #58](https://github.com/workhold/lightmoni/pull/58)，目标 `main`，未合并、未发布。
+
 ## 用户指定机器的只读排查
 
 通过 LightMoni 已认证的网页 SSH 终端连接用户指定的 CentOS 目标，核对系统主机名。未读取、导出或记录 SSH 密码、Agent 配置和运行时凭据。
