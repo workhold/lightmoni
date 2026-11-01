@@ -1,3 +1,4 @@
+import {workloadContainersReady as ready} from './workload-readiness.js';
 import {cachePolicy,prepareCachedImages} from './image-cache.js';
 import {
   lstat,
@@ -463,17 +464,13 @@ const summarize = (containers: any[]) =>
     restart_count: c.RestartCount ?? 0,
     ports: c.NetworkSettings?.Ports ?? {},
   }));
-const ready = (cs: any[], count: number) =>
-  cs.length >= count &&
-  cs.every(
-    (c) =>
-      c.State?.Running === true &&
-      (!c.State?.Health || c.State.Health.Status === "healthy"),
-  );
 async function workloadSnapshot(
   context: OperationExecutionContext,
   instanceID: string,
 ) {
+  const root = join(await privateRoot(context, 'platform'), 'workloads', instanceID);
+  const state = await readJSON<any>(join(root, 'state.json'), null);
+  const manifest = state?.manifest ? await readJSON<any>(state.manifest, null) : null;
   const raw = await inventory(context, instanceID);
   let stats: any[] = [];
   if (raw.some((c) => c.State?.Running)) {
@@ -501,7 +498,7 @@ async function workloadSnapshot(
   return {
     containers: summarize(raw),
     stats,
-    healthy: raw.length > 0 && ready(raw, 1),
+    healthy: ready(raw, Object.keys(manifest?.services ?? {}).length || 1, manifest?.services),
     observed_at: context.now().toISOString(),
   };
 }
@@ -566,7 +563,7 @@ async function availablePort(p: any, context: OperationExecutionContext) {
       );
   });
 }
-async function renderManifest(
+export async function renderManifest(
   context: OperationExecutionContext,
   id: string,
   app: OperationConfig,
@@ -812,13 +809,13 @@ async function executeWorkload(
         ...(c.force_recreate ? ["--force-recreate"] : []),
         "--wait",
         "--wait-timeout",
-        "60",
+        "300",
       ],
-      { timeoutMs: 120000 },
+      { timeoutMs: 600000 },
     );
     await context.progress?.("checking_health");
     const cs = await inventory(context, id);
-    if (!ready(cs, Object.keys(manifest.services).length))
+    if (!ready(cs, Object.keys(manifest.services).length, manifest.services))
       throw Error("WORKLOAD_HEALTH_NOT_VERIFIED");
     let healthy = false;
     for (let attempt = 0; attempt < 30; attempt++) {
@@ -870,7 +867,7 @@ async function executeWorkload(
           ],
           { timeoutMs: 120000 },
         );
-        if (!ready(await inventory(context, id), prior.length))
+        if (!ready(await inventory(context, id), prior.length, (await readJSON<any>(state.manifest, null))?.services))
           throw Error("RESTORE_NOT_HEALTHY");
       } else {
         await context.command(

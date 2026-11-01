@@ -38,7 +38,13 @@ export type Run = {
   job_id?: string;
 };
 export type Machine = { id: string; name: string; address?: string; ssh_address?:string; private_ips?:string[]; public_ips?:string[]; agent_id?: string; agent_status?: string; cluster_id?: string };
-export type CatalogTemplate = { id: string; name: string; description?: string; category?: string; version: string; versions?: string[]; managed_recommended: boolean; managed_reason?: string; parameters?: {key: string; label: string; type: string; required?: boolean; default?: unknown}[]; spec?: Spec };
+export type CatalogTemplate = {
+ id:string; name:string; description?:string; description_en?:string; category?:string;
+ version:string; versions?:string[]; managed_recommended:boolean; managed_reason?:string;
+ homepage?:string; notes?:string; notes_en?:string; resources?:{cpu:number;memory_mb:number}; deployment_modes?:string[]; architectures?:string[];
+ parameters?:{key:string;label:string;label_en?:string;type:string;required?:boolean;default?:unknown;description?:string;description_en?:string;min?:number;max?:number;pattern?:string;format?:string;options?:{value:string;label:string;label_en?:string}[]}[];
+ spec?:Spec;
+};
 export type Overview = {
   machines?: Machine[];
   resources: Resource[];

@@ -1,0 +1,761 @@
+{
+  "verified_on": "2026-11-01",
+  "source": "Official OCI registries; manifest/config metadata only",
+  "images": [
+    {
+      "image": "postgres:18.6-bookworm",
+      "digest": "sha256:5c4783a8cc3f0074912164f94dfa1be4e043438f0f707cf968d7af9a0d31a2c8",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v7"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        },
+        {
+          "architecture": "386",
+          "os": "linux"
+        },
+        {
+          "architecture": "ppc64le",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "mariadb:11.8.9",
+      "digest": "sha256:c4124d1afa875e47f2892edf26b482fa54f796e2f342d3717a04ca091a22a9bd",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        },
+        {
+          "architecture": "ppc64le",
+          "os": "linux"
+        },
+        {
+          "architecture": "s390x",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "mongo:8.0.34",
+      "digest": "sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        }
+      ]
+    },
+    {
+      "image": "clickhouse/clickhouse-server:26.8.36.3",
+      "digest": "sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "qdrant/qdrant:v1.20.0",
+      "digest": "sha256:9bfc89f9914fc14876a88c05270685921a55b8877b254a98bcc1cc2f0a424cd2",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "influxdb:2.9.1",
+      "digest": "sha256:a450f6faf9573e6c2e96a0f575885ae8b7387cc87e4de94599e247ebfa3ac417",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        }
+      ]
+    },
+    {
+      "image": "rabbitmq:4.3.7-management-alpine",
+      "digest": "sha256:1528a88eebf2bc4d0ab7e9d5d9bc542e9bdf5e1b105e65848fcf8de5c2186528",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v6"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v7"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        },
+        {
+          "architecture": "386",
+          "os": "linux"
+        },
+        {
+          "architecture": "ppc64le",
+          "os": "linux"
+        },
+        {
+          "architecture": "riscv64",
+          "os": "linux"
+        },
+        {
+          "architecture": "s390x",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "apache/kafka:4.4.0",
+      "digest": "sha256:833b867a9585a141da455dc2b57431c65cbccb27f11c91f694444cca9f777e0f",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "apache/rocketmq:5.5.0",
+      "digest": "sha256:7e8f6c9dbd9df742ed26ba69c00d4ad69e2f86a56f3ca7782ff8144dd0798132",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "nacos/nacos-server:v2.5.5",
+      "digest": "sha256:b481c7aaec43c07536b304bb16039d2cd6de8ee45348ce4095be391bc1ccdf4f",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "emqx/emqx:6.3.2",
+      "digest": "sha256:135116400e11b25224350b2e55c874f4e224d357b593fb554ca1b1f398c631ac",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "memcached:1.6.45-alpine",
+      "digest": "sha256:6a089e37cbb8acd75c80c6c0667fe57ec54db68782fb1b3afb1d0eb265e50070",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v6"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v7"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        },
+        {
+          "architecture": "386",
+          "os": "linux"
+        },
+        {
+          "architecture": "ppc64le",
+          "os": "linux"
+        },
+        {
+          "architecture": "riscv64",
+          "os": "linux"
+        },
+        {
+          "architecture": "s390x",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "gitea/gitea:28.2.0",
+      "digest": "sha256:30777c91280d973fa02be48b1ade735bd6859e8f6f7af3b4444d519437852504",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        },
+        {
+          "architecture": "riscv64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "jenkins/jenkins:2.580.2-jdk21",
+      "digest": "sha256:74401de6a6f92e1afe1b02d1c8e3d0c33f263bfb5275dd8813f9150355f2367b",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        },
+        {
+          "architecture": "s390x",
+          "os": "linux"
+        },
+        {
+          "architecture": "ppc64le",
+          "os": "linux"
+        },
+        {
+          "architecture": "riscv64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "gitlab/gitlab-ce:19.4.5-ce.0",
+      "digest": "sha256:fba34b11069b23bd4a7e77093b6e4c3fb99c06c56bc6d758b1bd07aabd6f1b88",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "sonatype/nexus3:3.96.5",
+      "digest": "sha256:d70482a3d5d44c8733fb244742fef5ca8ac967da56ccb97398f807bb8d3e585e",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "sonarqube:26.10.0.133078-community",
+      "digest": "sha256:f95aaa9016dd4e92c7d70691167a6d96dbb5d8acffd61eba1cb4335d364a7840",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        }
+      ]
+    },
+    {
+      "image": "ollama/ollama:0.40.13",
+      "digest": "sha256:b2f0122c476bc9fe7ce679d8bb4bd555351e25e2554eefb156f61cb0a89cf429",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "ghcr.io/open-webui/open-webui:v0.12.5",
+      "digest": "sha256:03443b8de6b617da9d900edd09b4bf1cb0ddbfdcba6afb42c548336a0b821ded",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "1panel/maxkb:v2.10.8-lts",
+      "digest": "sha256:027fdb79e4ef9cd9579418e900ea94cf9521ee4ddc4dd0fc1b65af0245357d54",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "mintplexlabs/anythingllm:1.19.0",
+      "digest": "sha256:daf5a6ae9d363ed578e7d41e2d0668c7eaa604bd90b0ff27435f893b0906833e",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "vllm/vllm-openai:v0.32.0",
+      "digest": "sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34",
+      "platforms": [
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        },
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "t8y2/dbx:0.6.62",
+      "digest": "sha256:c38a167b350c6268278c8f1a26f09c85be85dc2021277446aa5d5c75b56b6263",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    {
+      "image": "docker.elastic.co/elasticsearch/elasticsearch:9.5.5"
+    },
+    {
+      "image": "nginx:1.30.6-alpine",
+      "digest": "sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6094767ac30e97949",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v6"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v7"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        },
+        {
+          "architecture": "386",
+          "os": "linux"
+        },
+        {
+          "architecture": "ppc64le",
+          "os": "linux"
+        },
+        {
+          "architecture": "riscv64",
+          "os": "linux"
+        },
+        {
+          "architecture": "s390x",
+          "os": "linux"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "busybox:1.37.0",
+      "digest": "sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v5"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v6"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v7"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        },
+        {
+          "architecture": "386",
+          "os": "linux"
+        },
+        {
+          "architecture": "ppc64le",
+          "os": "linux"
+        },
+        {
+          "architecture": "riscv64",
+          "os": "linux"
+        },
+        {
+          "architecture": "s390x",
+          "os": "linux"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "ubuntu/squid:latest",
+      "digest": "sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029",
+      "platforms": [
+        {
+          "os": "linux",
+          "architecture": "ppc64le"
+        },
+        {
+          "os": "linux",
+          "architecture": "amd64"
+        },
+        {
+          "os": "linux",
+          "architecture": "arm64",
+          "variant": "v8"
+        },
+        {
+          "os": "linux",
+          "architecture": "s390x"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "pgvector/pgvector:0.8.0-pg15",
+      "digest": "sha256:1dec32aaba982ea73c51e93bee0319abf54150110321e24101c3d9de0b88db98",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "minio/minio:RELEASE.2025-09-07T16-13-09Z"
+    },
+    {
+      "image": "ghcr.io/labring/aiproxy:v0.7.3",
+      "digest": "sha256:da8d8394634eacdcf72533953c77c1e0ca3e28920545354dd20bdaa0aaa9ee4b",
+      "platforms": [
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        },
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "ghcr.io/labring/fastgpt:v4.17.2",
+      "digest": "sha256:242993020e13f69a3e3f6dc104a68597a5a6d9a030c919c77de61e33276a90f9",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "ghcr.io/labring/fastgpt-plugin:v1.1.4",
+      "digest": "sha256:5e4a37b956ead70800df367896d652a96dda8083904c88c523f3180c060f52ed",
+      "platforms": [
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        },
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "ghcr.io/labring/fastgpt-code-sandbox:v4.17.1"
+    },
+    {
+      "image": "langgenius/dify-api:1.14.2",
+      "digest": "sha256:062815df8ed6fcf82285e55f3cb5586241b2828e6695a3fb8114bfb99b5e8517",
+      "platforms": [
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        },
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "langgenius/dify-web:1.14.2",
+      "digest": "sha256:db73434e185ac778f31f4cc1adcce0dbe84b41a95ea5af58216acf095eed5f67",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "langgenius/dify-sandbox:0.2.15",
+      "digest": "sha256:750e1111426ef31a9217b81c98cccfb750f17b182af3221102e420afa9f0928e",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "langgenius/dify-plugin-daemon:0.6.1-local",
+      "digest": "sha256:fa7ad45e1b2a777cd243b902609abecb4fd924adcd13d21ef4258b5090a09be5",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/prepare:v2.14.6",
+      "digest": "sha256:42393b1f0ae645b0f69ab48540ca4819cbd4999d34cc5cf5380fe4c9e9dc18e1",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/harbor-log:v2.14.6",
+      "digest": "sha256:2fbff03b10d28acf62ffa9eca2174ab110ecc790a066d8d9780562244f37de3c",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/registry-photon:v2.14.6",
+      "digest": "sha256:49e0d97f52efb707ac5302d3f4ba14fa84c57fdb4b5ea1ceb8e0b9a932318354",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/harbor-registryctl:v2.14.6",
+      "digest": "sha256:56a27c7747cc040922840652d8ae8afc02646aa430b538e23bb07a43a373b865",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/harbor-db:v2.14.6",
+      "digest": "sha256:5e6e49d9bdd1057f2e846e263a11cc27e1ee3e2b543e48b8bea7df795f06ca4b",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/redis-photon:v2.14.6",
+      "digest": "sha256:253c249589189b1f2b858023c92bced1dc15cd3a507943557295c7ff8e7e2f19",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/harbor-core:v2.14.6",
+      "digest": "sha256:9b6735cee07efda12f4970988da8d79ee0053dad6048b032b04e7d7f27813f92",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/harbor-portal:v2.14.6",
+      "digest": "sha256:b2dbb334d9227763a7b0190de787257fe91f51c28a606014209e3a9746ab62df",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/harbor-jobservice:v2.14.6",
+      "digest": "sha256:294ee9356b7fbc0a02ea08431a9fe3a19e10bf65c10cbab54e217ff5c3884109",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/nginx-photon:v2.14.6",
+      "digest": "sha256:87f30853bbeb18de7d26e2c3463da42dafe072aa96b27b289410f03654cdcb03",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/trivy-adapter-photon:v2.14.6",
+      "digest": "sha256:8aa39c95aa2666750a3512f60cbdec7f2664e6ed4f5ec8c8d05d2fc5336832c3",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    },
+    {
+      "image": "goharbor/harbor-exporter:v2.14.6",
+      "digest": "sha256:8b52a906922efd3adbae6b44b010eb1133fc370d5cf788155032f3416a4b982d",
+      "platforms": [],
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  ]
+}

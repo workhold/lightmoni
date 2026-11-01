@@ -1,0 +1,141 @@
+{
+  "checks": [
+    {
+      "id": "postgresql",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "mariadb",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "mongodb",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "clickhouse",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "elasticsearch",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "qdrant",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "influxdb",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "rabbitmq",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "nacos",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "emqx",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "memcached",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "kafka",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "rocketmq",
+      "services": 3,
+      "result": "passed"
+    },
+    {
+      "id": "gitea",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "jenkins",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "gitlab",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "nexus",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "sonarqube",
+      "services": 2,
+      "result": "passed"
+    },
+    {
+      "id": "harbor",
+      "services": 9,
+      "result": "passed"
+    },
+    {
+      "id": "ollama",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "openwebui",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "maxkb",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "anythingllm",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "vllm",
+      "services": 1,
+      "result": "passed"
+    },
+    {
+      "id": "dify",
+      "services": 12,
+      "result": "passed"
+    },
+    {
+      "id": "fastgpt",
+      "services": 9,
+      "result": "passed"
+    },
+    {
+      "id": "dbx",
+      "services": 1,
+      "result": "passed"
+    }
+  ],
+  "images_pulled": false,
+  "containers_started": false
+}

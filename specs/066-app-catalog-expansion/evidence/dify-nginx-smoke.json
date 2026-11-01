@@ -1,0 +1,15 @@
+{
+  "validation": "Dify catalog Nginx gateway configuration",
+  "result": "passed",
+  "image": "nginx:1.30.6-alpine",
+  "input": "runtime/src/ops/catalog/dify.ts nginxConfig",
+  "command": "nginx -t",
+  "mocked_dns_only": {
+    "api": "127.0.0.2",
+    "web": "127.0.0.3",
+    "plugin_daemon": "127.0.0.4"
+  },
+  "output": "nginx configuration syntax is ok; test is successful",
+  "containers_cleaned_up": true,
+  "limitation": "Syntax and service DNS only; upstream Dify API/plugin/web behavior not exercised"
+}

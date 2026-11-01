@@ -9,6 +9,7 @@ import { cipher } from "../src/shared/crypto.js";
 import { Router, fail } from "../src/shared/http.js";
 import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
+import { extendedDefinitions } from "../src/ops/catalog/index.js";
 import { catalogInstallation } from "../src/ops/catalog.js";
 import type { Dependencies } from "../src/shared/types.js";
 import { registryCacheFor } from "../src/ops/registry-runtime.js";
@@ -824,7 +825,7 @@ test("unknown execution keeps port ownership and never creates a duplicate manag
 test("catalog installs multiple ordinary MySQL applications with healthcheck and redacts secrets", async (t) => {
   const f = await fixture(t),
     c = f.createCluster();
-  assert.equal((await f.req("/catalog")).body.templates.length, 4);
+  assert.equal((await f.req("/catalog")).body.templates.length, 31);
   for (let n = 0; n < 2; n++) {
     const r = await f.req("/catalog/mysql/install", "POST", {
       deployments: [{ cluster_id: c.id, machine_ids: ["ma"] }],
@@ -1598,4 +1599,22 @@ test('public-only host installs a local registry without IP gates and never send
  assert.equal(r.status,201,JSON.stringify(r.body));const view=(await f.req('/private-registry')).body;assert.equal(view.deployments[0].address,'127.0.0.1');assert.equal(view.deployments[0].cache_scope,'machine');f.finish('a');
  const local=f.app(c,{image:'alpine:3.23',machine_ids:['ma']});assert.equal((await f.action(local,'deploy')).status,202);assert.match(f.finish('a').payload.resource.config.image_cache.hub_endpoint,/127\.0\.0\.1/);
  const peer=f.app(c,{image:'alpine:3.23',machine_ids:['mb']});assert.equal((await f.action(peer,'deploy')).status,202);assert.equal(f.finish('b').payload.resource.config.image_cache,undefined);
+});
+
+test('all approved catalog applications save through HTTP, isolate identity and redact secrets', async t => {
+ const f=await fixture(t),c=f.createCluster(['ma']);
+ const list=await f.req('/catalog');assert.equal(list.body.templates.length,31);
+ for(const {template} of extendedDefinitions){
+  const parameters=Object.fromEntries(template.parameters.filter(p=>p.required||p.default!==undefined).map(p=>[p.key,p.default??p.example??(p.type==='password'?'qa_secret_2026':p.format==='url'?'http://app.example.test':p.format==='ip'?'192.0.2.10':p.format==='host'?'broker.example.test':'app')]));
+  const result=await f.req('/catalog/'+template.id+'/install','POST',{parameters,deployments:[{cluster_id:c.id,machine_ids:['ma'],cpu:.25,memory_mb:128}],confirmed:false});
+  assert.equal(result.status,201,template.id+':'+JSON.stringify(result.body));
+  assert.equal(result.body.resource.spec.source.template_id,template.id);
+  assert.doesNotMatch(JSON.stringify(result.body),/qa_secret_2026/);
+  assert.doesNotMatch(JSON.stringify(f.db.get<any>('SELECT spec_cipher FROM ops_platform_resources WHERE id=?',result.body.resource.id)),/qa_secret_2026/);
+  assert.equal(f.store.get(result.body.resource.id).spec.deployment_mode,'manual');
+ }
+ const bad=await f.req('/catalog/dbx/install','POST',{parameters:{password:'short'},deployments:[{cluster_id:c.id,machine_ids:['ma']}]});assert.equal(bad.status,400);
+ f.db.run("UPDATE agents SET arch='arm64' WHERE id='a'");
+ const badArch=await f.req('/catalog/harbor/install','POST',{parameters:{external_url:'https://registry.example.test',password:'qa_secret_2026'},deployments:[{cluster_id:c.id,machine_ids:['ma']}]});
+ assert.equal(badArch.status,400);assert.equal(badArch.body.error,'catalog_architecture_unsupported');
 });
