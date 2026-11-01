@@ -21,3 +21,7 @@
 ## 发布边界
 
 当前验收没有修改 xiangxiaojia 的服务、业务或配置。生产机器仍需安装含本改动的新 Agent；镜像发布不会自动升级已有 Agent。本轮后续按用户授权汇总其他会话，通过 PR 合入 main 并发布 Docker/GitHub，最终版本与结果由发布 SDD 另行记录。
+
+## 汇总合入
+
+已同步最新 origin/main 286c8ba（包含其他会话 PR #44/#47/#55），保留全部章节和诊断分支；本次更新 [PR #58](https://github.com/workhold/lightmoni/pull/58) 的最终行为、Docker 信任边界和真实验收限制。旧设计中 SDD060 建立时的“当前”描述是历史基线，发布运行契约以本 SDD071 为准，独立执行器任务仍未实施。
