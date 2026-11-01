@@ -1,0 +1,80 @@
+{
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tags": {
+    "20261101-a1292cf": "sha256:bbe6a9aa0757dfe76c47d9dc8f4c8017ccc617ddbda7672fa617f70ce7b67a7c",
+    "latest": "sha256:bbe6a9aa0757dfe76c47d9dc8f4c8017ccc617ddbda7672fa617f70ce7b67a7c"
+  },
+  "revision": "a1292cf5085d77f8f3eef74d9999c02652764c15",
+  "docker_pull_verification": [
+    {
+      "platform": "linux/amd64",
+      "image_id": "sha256:18b3ef499647907334d8b9d649208e39693cbd5b9d32172cd5e5dd28972eb3b3",
+      "tested_image_id": "sha256:d9c90c1b59093a2b9fa6475e1ef8c4f8078f3ea9e2b3589adca2d711587b4fed",
+      "platform_manifest": "sha256:18b3ef499647907334d8b9d649208e39693cbd5b9d32172cd5e5dd28972eb3b3",
+      "config_digest": "sha256:a44499e68dfb749f9471f95da6440495e24f696235c3e52b35a9a063ce5de432",
+      "rootfs_and_config_match_tested_image": true
+    },
+    {
+      "platform": "linux/arm64",
+      "image_id": "sha256:1859250f6a491e37abb98ae4dbe150ab6e8c2a07f2b58f9848fa8cbe2af6810d",
+      "tested_image_id": "sha256:424ab5cf6b0d511a27bd67075721cb7b161880f869093d0e931f0b8160e24d71",
+      "platform_manifest": "sha256:1859250f6a491e37abb98ae4dbe150ab6e8c2a07f2b58f9848fa8cbe2af6810d",
+      "config_digest": "sha256:8ca3b2f0b8afd4bc111a1178711820a24b445137d1b1661b33f4c58e6f29aff6",
+      "rootfs_and_config_match_tested_image": true
+    }
+  ],
+  "local_container_checks": {
+    "amd64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "center identity and authenticated internal/public reporting settings",
+      "production bundle contains multi-value bulk DNS actions",
+      "production bundle includes website guidance, domain sync tasks, cluster selection and certificate export",
+      "production application management/store cards, host-to-container mapping, narrow actions hint, and named-port runtime module",
+      "production shared machine-address provider, automatic registry binding and read-only cluster addresses",
+      "authenticated production catalog has 31 unique apps, six exact category counts and DBX-only tools",
+      "production DBX install rejects missing password before creating an application",
+      "production bundle contains expanded catalog, responsive categories, install requirements and per-container resource labels",
+      "production private-image and installation UI, authenticated empty registry API, and ordinary Registry catalog template",
+      "authenticated production install API rejects unknown port names before creating an application",
+      "real image derives a single-domain certificate name without name input, issues it and exposes persistent execution steps",
+      "administrator certificate view and fixed-version private-key attachment match, with no-store and public JSON redaction",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "downloaded matching-platform Agent contains Docker controls, image-cache/auth capability guards and installation progress",
+      "both platform Agent bundles contain local-reference and immutable-content reuse with never-pull pinning",
+      "downloaded matching-platform Agent advertises one-shot capability and enforces authorized normal-exit readiness",
+      "AI runtime and task tools import"
+    ],
+    "arm64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "center identity and authenticated internal/public reporting settings",
+      "production bundle contains multi-value bulk DNS actions",
+      "production bundle includes website guidance, domain sync tasks, cluster selection and certificate export",
+      "production application management/store cards, host-to-container mapping, narrow actions hint, and named-port runtime module",
+      "production shared machine-address provider, automatic registry binding and read-only cluster addresses",
+      "authenticated production catalog has 31 unique apps, six exact category counts and DBX-only tools",
+      "production DBX install rejects missing password before creating an application",
+      "production bundle contains expanded catalog, responsive categories, install requirements and per-container resource labels",
+      "production private-image and installation UI, authenticated empty registry API, and ordinary Registry catalog template",
+      "authenticated production install API rejects unknown port names before creating an application",
+      "real image derives a single-domain certificate name without name input, issues it and exposes persistent execution steps",
+      "administrator certificate view and fixed-version private-key attachment match, with no-store and public JSON redaction",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "downloaded matching-platform Agent contains Docker controls, image-cache/auth capability guards and installation progress",
+      "both platform Agent bundles contain local-reference and immutable-content reuse with never-pull pinning",
+      "downloaded matching-platform Agent advertises one-shot capability and enforces authorized normal-exit readiness",
+      "AI runtime and task tools import"
+    ]
+  },
+  "architecture_sync": "Packaging only. SDD 066 system-design section 66 and Doca seq911 native-block readback retained.",
+  "test_resources_cleaned": true
+}

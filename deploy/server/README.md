@@ -1,6 +1,6 @@
 # Docker 更新与回滚
 
-根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261101-eb62ca6`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
+根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261101-a1292cf`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
 
 ## 更新
 
@@ -18,7 +18,7 @@ docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/
 
 通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对镜像提交；随后检查网页、原有管理员登录、只读查询和 SDK/Agent 下载。需要 `up` 重新创建容器才能切换镜像；本地 `npm run build`、`release:sdk` 和 `release:agent` 只更新本地生成物。
 
-`20261101-eb62ca6` 从已合入 PR #51 的 `eb62ca6c1945a78726402d0949c1e258ce9f0638` 完整构建：所有受管机器的应用、网站、DNS、仓库与缓存统一读取机器管理地址；仓库按普通应用配置机器/端口/资源，无需再填内网 IP。真实私网地址用于跨机缓存，只有公网网卡时仓库仍可安装为本机范围。新版 Agent 先复用本机镜像，缺少时再取缓存；无需共享 Docker/Registry 目录。固定标签与 `latest` 的双平台摘要和真实容器验收见 [SDD 065 发布验收](../../specs/065-machine-address-image-release/validation.md)。公网入口继续使用 HTTPS 和网站鉴权。中心换镜像不会自动升级既有 Agent 或业务容器，本机镜像优化需升级 Agent。旧 `.env` 的 `LIGHTMONI_IMAGE` 不影响此入口；拉取后仍需执行 `up` 更新中心。旧固定标签保留供回退，历史 [SDD 063](../../specs/063-application-image-release/validation.md) 发布证据保持。
+`20261101-a1292cf` 从已合入 PR #53 的 `a1292cf5085d77f8f3eef74d9999c02652764c15` 完整构建：商店共 31 个应用，新增数据库、中间件、DevOps 与 AI 项目，工具仅 DBX。安装表单提供中英文参数和运行前提；依赖初始化的应用需要新版 Agent 的 `operations.platform.oneshot.v1` 能力。Harbor 仅 amd64 且要求 Engine 26 / Compose 2.26，FastGPT 需要已有 S3 存储，vLLM 需要 NVIDIA GPU。双平台摘要与真实生产镜像验收见 [SDD 067 发布验收](../../specs/067-app-catalog-release/validation.md)。此前机器地址统一与本机镜像复用行为继续保留，见 [SDD 065](../../specs/065-machine-address-image-release/validation.md)。公网入口继续使用 HTTPS 和网站鉴权。中心换镜像不会自动升级既有 Agent 或业务容器，依赖初始化的新模板需先升级目标 Agent。旧 `.env` 的 `LIGHTMONI_IMAGE` 不影响此入口；拉取后仍需执行 `up` 更新中心。旧固定标签保留供回退。
 
 中心镜像更新不会自动更新已安装的 Agent。需要使用新运维能力的节点应单独升级 Agent，并按[运维手册](../../docs/operations.md)准备 Nginx、Docker/Compose 等所需依赖及目录、服务权限；不能仅凭 capability 出现就认定节点已有执行权限。公网 ACME 与真实 S3 等未验收范围仍以 [SDD 026](../../specs/026-operations-platform/validation.md)为准。
 
