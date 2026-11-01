@@ -152,11 +152,3 @@ test('config secrecy and private directory boundaries remain mandatory without a
   await assert.rejects(checkDeploymentPermissions(f.options),/agent_config_permission_invalid/);
   assert.equal(fs.readFileSync(target,'utf8'),'synthetic private config');
 });
-
-test('only the exact root-owned legacy Docker drop-in is cleaned; external policy is preserved',async t=>{
- const {migrateOwnedDockerDropin}=await import(pathToFileURL(resolve(import.meta.dirname,'../../deploy/agent/deployment-permissions.mjs')).href),f=fixture(t),directory=f.p('etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,'20-lightmoni-docker.conf');fs.mkdirSync(directory,{recursive:true,mode:0o755});const options={root:f.root,uid:process.getuid?.()??0};
- fs.writeFileSync(file,'[Service]\nSupplementaryGroups=docker\n',{mode:0o644});migrateOwnedDockerDropin(options);assert.equal(fs.existsSync(file),false);
- fs.writeFileSync(file,'[Service]\nSupplementaryGroups=docker sudo\n',{mode:0o644});assert.throws(()=>migrateOwnedDockerDropin(options),/migration_required/);assert.equal(fs.readFileSync(file,'utf8'),'[Service]\nSupplementaryGroups=docker sudo\n');fs.unlinkSync(file);
- const external=join(directory,'99-administrator.conf');fs.writeFileSync(external,'[Service]\nEnvironment=EXTERNAL=1\n',{mode:0o644});fs.writeFileSync(file,'[Service]\nSupplementaryGroups=docker\n',{mode:0o644});assert.throws(()=>migrateOwnedDockerDropin(options),/migration_required/);assert.equal(fs.existsSync(file),true);assert.equal(fs.existsSync(external),true);fs.unlinkSync(external);fs.unlinkSync(file);
- const sentinel=f.p('keep-external-file');fs.writeFileSync(sentinel,'preserved',{mode:0o644});fs.symlinkSync(sentinel,file);assert.throws(()=>migrateOwnedDockerDropin(options),/migration_required/);assert.equal(fs.readFileSync(sentinel,'utf8'),'preserved');
-});

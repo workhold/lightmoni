@@ -164,6 +164,7 @@ test("orphan and revoked identities cannot receive operations resources, plans o
   assert.deepEqual((await f.request("/operations/agents")).data.agents, []);
   assert.equal((await makeResource(agent.agentID)).status, 409);
   assert.throws(() => f.ops.plan(resource.data.resource.id, "inspect", {}, "admin"), /registered_host_required/);
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM ops_runs")!.n,0,"revoked identities cannot create a managed run");
   assert.throws(() => f.jobs.enqueue({ agentID: agent.agentID, deploymentID: "revoked", operationID: "revoked", actions: [] }), /registered_host_required/);
   f.db.run("UPDATE agent_enrollments SET machine_id='' WHERE id=?", agent.token.enrollment_id);
   assert.equal(f.credentials.has(agent.agentID, "data"), false);

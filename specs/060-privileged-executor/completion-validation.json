@@ -1,0 +1,94 @@
+{
+  "spec": "060-privileged-executor",
+  "tested_at": "2026-11-02",
+  "integrated_main": "fd3685e5011c7762ef491cd8fca0ec493b8c555e",
+  "source_snapshot": {
+    "algorithm": "sha256(sorted relative path + NUL + sha256(file bytes))",
+    "changed_source_and_test_files": 88,
+    "sha256": "ce1dcd95c931cd9bfbf0b2e3d5d2e1ae849d389730e2ad90f94084ac8aaacc02"
+  },
+  "runtime_full_regression": {
+    "command": "npm run build && npm test",
+    "exit_code": 0,
+    "tests": 1537,
+    "pass": 1518,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 19,
+    "todo": 0,
+    "duration_ms": 464962.884209,
+    "skipped_tests": [
+      "capability executor stages matching digest and atomically activates release # SKIP",
+      "capability executor rejects bad digest, path escape, unit mismatch and unknown capability # SKIP",
+      "release staging checks size, manifest binding and immutability before publishing # SKIP",
+      "release staging rejects path ancestors and roots with unsafe ownership permissions # SKIP",
+      "protected release path permits a root-owned sticky shared ancestor such as /tmp # SKIP",
+      "bundle paths reserved for credentials are rejected while runtime payloads stay read-only to host users # SKIP",
+      "release activation compares the prior symlink and leaves a changed current untouched # SKIP",
+      "systemd preflight is read-only, target-bound, structured, and redacts command output # SKIP",
+      "systemd preflight accepts a missing current symlink for first deployment # SKIP",
+      "systemd preflight does not block when current is a FIFO # SKIP",
+      "artifact staging refuses symlinked target ancestors # SKIP",
+      "live Node Agent persists SDK batches, reopens identity and forwards to real ClickHouse exactly once # SKIP LIGHTMONI_DOMAINS_URL is not set",
+      "live ClickHouse: OTLP, logs, trace, dashboard and alert response lifecycle # SKIP",
+      "Linux Nginx: static, proxy, version recovery, uploaded TLS and certificate rotation # SKIP",
+      "three OTLP signals and receipt input hashes match Go deterministic marshal # SKIP Go baseline toolchain unavailable",
+      "real Docker single-container and Compose versions preserve initial and data files # SKIP",
+      "real host OpenResty serves static HTML and TLS, reloads a full bundle, and returns 503 for empty service discovery # SKIP requires an opted-in Linux executor sharing the Docker host network",
+      "real host OpenResty applies multi-path URI routing, CORS, headers, WebSocket and rejects a bad reload # SKIP",
+      "Linux release bundles contain checked architecture, portable dependencies and a working launcher # SKIP"
+    ]
+  },
+  "browser_ui": {
+    "passed": 115,
+    "suites": [
+      {
+        "suite": "privileged-executor/host-ui/results.json",
+        "passed": 23,
+        "api_fixtures": true,
+        "real_ssh": false,
+        "production_writes": false
+      },
+      {
+        "suite": "managed-container-ui/report.json",
+        "passed": 23,
+        "api_fixtures": true,
+        "real_ssh": false,
+        "production_writes": false
+      },
+      {
+        "suite": "elevated-task-ui/report.json",
+        "passed": 39,
+        "api_fixtures": true,
+        "real_ssh": false,
+        "production_writes": false
+      },
+      {
+        "suite": "docker-executor-copy-ui/report.json",
+        "passed": 12,
+        "api_fixtures": true,
+        "real_ssh": false,
+        "production_writes": false
+      },
+      {
+        "suite": "legacy-host-gates-ui/report.json",
+        "passed": 18,
+        "api_fixtures": true,
+        "real_ssh": false,
+        "production_writes": false
+      }
+    ],
+    "scope": "Production components with API fixtures; no real SSH/Docker or production writes."
+  },
+  "builds": {
+    "runtime_typecheck": "passed",
+    "runtime_build": "passed",
+    "web_typecheck": "passed",
+    "web_production_build": "passed"
+  },
+  "linux_completion_report": "linux-completion-report.json",
+  "prior_linux_docker_report": "linux-validation-report.json",
+  "doca_latest_readback_seq": 927,
+  "user_hosts_modified": false,
+  "image_published": false
+}

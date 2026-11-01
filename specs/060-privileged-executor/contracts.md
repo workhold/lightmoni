@@ -1,10 +1,10 @@
 # 目标契约与首批实现
 
-本文件保留完整目标契约；首批实际实现受系统设计60.10与任务清单约束，不能将未迁移适配器视为已可用。提权脚本当前只允许立即一次性root账户执行，容器只支持最小无挂载/端口的结构化操作，执行器升级/回退尚未实现。
+本文件保留完整目标契约；首批实际实现受系统设计60.10与任务清单约束，不能将未迁移适配器视为已可用。提权脚本当前只允许立即一次性root账户执行，容器只支持最小无挂载/端口的结构化操作，执行器生命周期按completion.md统一收口，业务profile范围保持分期。
 
 首批固定入口为 `privileged-executor/main.js enroll|run|check|status --config /etc/lightmoni-executor/config.json`；`enroll`仅从受保护stdin读取预绑定bootstrap，`status`为只读，返回 `executor_id/machine_id/install_generation/policy_generation/fenced/pending_results`，其中pending_results是未确认回执数量，安全卸载要求fenced为null且数量为0。
 
-主机UI使用 `POST /api/v1/machines/:id/executor-bootstrap/plan`、`POST .../executor-bootstrap/plans/:planId/apply` 与对应GET列表/详情；apply明确confirm、expected_revision与稳定request_id，秘密不进入响应。未知安装的reconcile仅在同一远端flock内证明固定安装路径和服务缺席后结束原记录，不能重放安装。独立卸载通过 `executor-maintenance/plan`，首批action仅uninstall；apply同样审批快照，cancel仅未开始，reconcile仅unknown且只读。核对时可显式选择新的有效credential_id，不能修改原审批秘密快照或重放卸载。
+主机UI使用 `POST /api/v1/machines/:id/executor-bootstrap/plan`、`POST .../executor-bootstrap/plans/:planId/apply` 与对应GET列表/详情；apply明确confirm、expected_revision与稳定request_id，秘密不进入响应。未知安装的reconcile仅在同一远端flock内证明固定安装路径和服务缺席后结束原记录，不能重放安装。独立维护通过 `executor-maintenance/plan`，action为upgrade/rollback/repair/uninstall；apply同样审批快照，cancel仅未开始，reconcile仅unknown且只读。核对时可显式选择新的有效credential_id，不能修改原审批秘密快照或重放卸载。
 
 字段和端点名称为本 SDD 的实现约束；实现前必须以严格 schema 落入 shared 协议并新增协议版本。未知字段拒绝，不将下列示意作为现有 API。
 
@@ -50,3 +50,17 @@ start permit 另含 `step_id/permit_id`，最长 30 秒，绑定 executor 为该
 - 持久 fence 按 machine/lifecycle/资源冲突域协调两类执行主体；普通 Agent 自报“空闲”不能解除 root 锁。提权脚本首期独占整机写 fence；普通脚本不构成可信沙箱，不能保证其外部副作用遵守锁。
 - 程序回退不恢复旧 journal/fence、防重、完成运行、已消费 grant、身份/密钥撤销水位或策略最高代次；状态丢失/旧备份恢复需新 fencing 代次及现场核对，不能自动初始化继续写。
 - 实现错误码至少含 `principal_mismatch, stale_install_generation, policy_disabled, stale_policy, invalid_signature, expired_permit, replay_conflict, dependency_unavailable, unsafe_container_spec, account_changed, privileged_script_not_authorized, execution_unknown`。
+
+## #64 收口：中心边界与生命周期
+
+普通Agent固定只读 capability/action 配对由中心统一校验，拒绝写任务返回409 privileged_executor_required。未迁移业务写入口在创建前返回409 privileged_profile_not_implemented。旧operations私有正文与release artifact下载固定410 legacy_agent_payload_removed，不解密；旧Docker jobs接口410。旧queued写任务cancelled，曾领取写任务unknown，审计code legacy_agent_write_removed，不转root、不重放。
+
+唯一维护接口：GET /machines/:id/executor-maintenance/releases返回{releases:AgentRelease[]}；GET .../probe?credential_id=...只读返回schema=1、完整身份与策略代次、current/previous构建、fenced、pending_results、service_active、repairable与phase。POST .../plan接受action、可选credential_id与仅upgrade使用的target_sha256。current/target包含version、build_id、source_revision、artifact_sha256、state_schema=1、arch；可信本机元数据另含fingerprint。upgrade固定catalog完整SHA，rollback只选previous，repair只选原current与证明阶段；apply/history/cancel/reconcile沿用原路径与幂等形状。
+
+维护计划冻结上述现场、主机revision、凭据revision、executor/install_generation、policy_generation与steps，apply复验并持互斥。固定root监督器stop后取得writer锁、只读核验clean状态并切换；start前释放writer锁。程序回退不动身份、输出密钥、journal、防重、授权、清单、fence与最高策略代次。repair要求active中心身份、完整相同config/key/journal和有效root阶段记录；不支持猜测兼容、重新注册或重建状态。持久started回执和之后exact签名heartbeat共同证明成功，失确认unknown，reconcile只读。
+
+
+启动确认契约：安装root阶段记录维护activation_id。首次安装生成UUID并在各阶段保持；每次维护在start前持久写本次operation_id。worker启动一次性读取并验证root记录、身份与release，将activation_id纳入独立签名heartbeat必填字段，中心严格解析且保存至executor投影。维护完成要求started receipt.activation_id与heartbeat.activation_id均精确等于维护计划id，并匹配executor/安装代次/程序指纹。旧进程不能在每次heartbeat重读activation而伪装新启动；不兼容缺activation的旧执行器协议。
+
+
+显式只读核对允许两种持久中断证据：stop未完成且source/current/原activation/active服务与clean journal均精确匹配时，本维护记failed，供新审批repair；ready阶段/target/本operation activation与独立签名heartbeat精确匹配时，即使最后receipt仍switching/unknown，也可保留原始receipt并记录read_only_activation确认成功。自动刷新仍只接受正常started receipt，不通过读操作重放写或删除root执行fence。

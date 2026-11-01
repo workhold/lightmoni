@@ -239,7 +239,7 @@ export class PrivilegedExecutorStore {
     const binding = !!row && row.agent_id === host?.agent_id && !isAgentRemoved(this.deps.db, row.agent_id);
     const online = binding && row.state === "active" && !!row.last_seen && Date.parse(row.last_seen) > this.deps.now().getTime() - 60_000;
     const authorized = JSON.parse(policy.capabilities_json) as string[];
-    return { machine_id: machineID, policy_generation: policy.generation, executor: row ? { id: row.id, state: row.state, install_generation: row.install_generation, online, last_seen: row.last_seen, version: observation.version ?? "", boot_id: observation.boot_id ?? "",release:observation.release ?? null } : null,
+    return { machine_id: machineID, policy_generation: policy.generation, executor: row ? { id: row.id, state: row.state, install_generation: row.install_generation, online, last_seen: row.last_seen, version: observation.version ?? "", boot_id: observation.boot_id ?? "",activation_id:observation.activation_id??"",release:observation.release ?? null } : null,
       capabilities: Object.fromEntries(PRIVILEGED_CAPABILITIES.map(capability => [capability, { authorized: authorized.includes(capability), effective: !authorized.includes(capability) ? "disabled" : !row ? "pending" : !binding ? "blocked" : online && observation.policy_generation === policy.generation && observation.capabilities?.includes(capability) ? "ready" : "unavailable", policy_generation: policy.generation }])),
       operations_capabilities:online && observation.policy_generation===policy.generation && observation.capabilities?.includes("operations.managed.v1")?observation.operations_capabilities??[]:[],
       account_profiles: online && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreter_profiles: online && observation.policy_generation === policy.generation ? observation.interpreter_profiles ?? [] : [],
@@ -274,11 +274,11 @@ export class PrivilegedExecutorStore {
     });
   }
   heartbeat(executor: Row, value: unknown) {
-    const keys = ["version", "boot_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release","operations_capabilities","docker_inventory"];
+    const keys = ["version", "boot_id", "activation_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release","operations_capabilities","docker_inventory"];
     const v = object(value, keys,keys.filter(k=>!["release","operations_capabilities","docker_inventory"].includes(k))); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
+    if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(v.activation_id))fail(400,"invalid_executor_activation");
     if (v.release!==undefined) {
-      const release=object(v.release,["build_id","source_revision","artifact_sha256","state_schema","activation_id"],["build_id","source_revision","artifact_sha256","state_schema"]);
-      if(release.activation_id!==undefined&&release.activation_id!==''&&!/^[a-f0-9-]{36}$/.test(release.activation_id))fail(400,'invalid_executor_activation');
+      const release=object(v.release,["build_id","source_revision","artifact_sha256","state_schema"]);
       validate(()=>boundedText(release.build_id));
       if (!/^[a-f0-9]{40}$/.test(release.source_revision) || release.state_schema!==1) fail(400,"invalid_executor_release");
       validate(()=>digest(release.artifact_sha256));

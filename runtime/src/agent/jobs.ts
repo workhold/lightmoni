@@ -2,15 +2,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicJSON } from "../shared/io.js";
 import { CapabilityExecutor, type ExecutorJob, type ExecutionReceipt } from "./executor.js";
-import { operationCommand } from "./operations.js";
 import type { OperationExecutionContext } from "../operations/types.js";
-import { executeDocker } from './docker.js';
 
-// This production entry has no configuration switch for legacy host writes.
-// Domain adapters remain reusable, but only the independent executor may gain
-// authority for a migrated privileged action.
-export { ORDINARY_JOB_CAPABILITIES } from "../shared/ordinary-jobs.js";
-import { ORDINARY_JOB_CAPABILITIES, ordinaryReadOnlyJob } from "../shared/ordinary-jobs.js";
+import { ORDINARY_JOB_CAPABILITIES, ordinaryReadOnlyJob } from "../shared/ordinary-agent-jobs.js";
+export { ORDINARY_JOB_CAPABILITIES } from "../shared/ordinary-agent-jobs.js";
 
 export interface JobClientConfig {
   endpoint: string;
@@ -157,13 +152,7 @@ export class AgentJobRunner {
     };
     let result: ExecutionReceipt;
     try {
-      if (job.actions?.length === 1 && job.actions[0]?.kind === 'docker') {
-        const action=job.actions[0];
-        if(!job.capabilities?.includes('docker.inventory')||action.operation!=='inventory'||Date.parse(job.expires_at)<=this.now().getTime())throw Error('docker_job_mismatch');
-        result=await executeDocker(action,job.id,{dataDir:this.config.dataDir,signal:controller.signal,now:this.now,command:this.io.command??operationCommand},enqueueEvent);
-      } else {
-        result = await executor.execute({ id: job.id, expires_at: job.expires_at, capabilities: job.capabilities, actions: job.actions, target } as ExecutorJob, controller.signal);
-      }
+      result = await executor.execute({ id: job.id, expires_at: job.expires_at, capabilities: job.capabilities, actions: job.actions, target } as ExecutorJob, controller.signal);
     } finally {
       clearInterval(heartbeatTimer);
       await eventTail;

@@ -17,7 +17,7 @@ Docker 采集与日志游标转移到独立执行器的 root 私有队列，复�
 
 ## 程序启动证明与维护锁
 
-SDD060 在线基线的维护契约要求本次启动证明：root updater 停止服务后通过独立 flock 子进程取得 journal writer 锁，复验未决状态、身份和原发行，再切换程序/控制文件并持久固定 activation_id。子进程退出释放 writer 后才启动服务。worker 在启动时只读冻结 activation 与发行/身份，签名心跳携带该 ID；中心同时核对 SSH 成功回执与同次 activation 的目标构建。旧进程心跳不提供新启动证明，未知核对不重派。失败恢复旧程序及启动标识，绝不回滚策略、身份或 journal。更新暂使用独立 executor-updates 路径，与卸载共用账本/互斥；第60章单一维护路由仍是后续接口收敛目标，不冒称该自动 repair 已实现。
+整合远端 #64 的唯一 executor-maintenance 路径和 root 自有 maintenance.mjs，删除本轮重复的 executor-updates/upgrade.sh。升级、回退、repair、卸载共用账本、主机锁与 writer 锁；worker 启动只读冻结 install-state.json 的完整身份、发行和 activation_id。中心要求持久 started 回执与本次精确 activation 的签名心跳共同成立；失败或失确认保留 unknown，显式只读核对不重派、不自动回切。repair 不重新 enrollment 或重建 journal。受管业务独立目录和观测队列在程序生命周期中保留，不恢复已撤销策略。
 
 ## 已有平台权限的显式迁移
 

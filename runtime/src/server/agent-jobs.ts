@@ -231,11 +231,14 @@ export function registerAgentJobs(
     db.exec("ALTER TABLE agent_jobs ADD COLUMN execution_principal TEXT NOT NULL DEFAULT 'ordinary_agent'");
   let privilegedCancel: ((jobID:string,actor:string)=>void) | undefined;
   let privilegedReady: ((agentID:string)=>void) | undefined;
-  // Old unclaimed writes have no root authorization. Keep leased/unknown work
-  // fenced for reconciliation instead of replaying it through a new principal.
-  if (options.separateExecutor) for (const old of db.all<any>("SELECT * FROM agent_jobs WHERE state='queued' AND execution_principal='ordinary_agent'")) {
-    if (JSON.parse(old.actions_json).some((a:any)=>['docker','systemd_probe'].includes(a.kind))||!ordinaryReadOnlyJob({actions:JSON.parse(old.actions_json),capabilities:JSON.parse(old.capabilities_json)}))
-      db.run("UPDATE agent_jobs SET state='cancelled',receipt_json=?,updated_at=? WHERE id=?",JSON.stringify({state:'cancelled',code:'execution_principal_migrated',summary:'Resubmit the approved operation through the separate executor',snapshot:{}}),iso(deps),old.id);
+  // Never reinterpret old ordinary write authority as root authorization.
+  if (options.separateExecutor) for (const old of db.all<any>("SELECT * FROM agent_jobs WHERE state NOT IN ('succeeded','failed','cancelled','unknown') AND execution_principal='ordinary_agent'")) {
+    let readonly=false;try{const actions=JSON.parse(old.actions_json);readonly=!actions.some((a:any)=>['docker','systemd_probe'].includes(a.kind))&&ordinaryReadOnlyJob({actions,capabilities:JSON.parse(old.capabilities_json)});}catch{}
+    if(readonly)continue;
+    const state=old.state==='queued'&&Number(old.attempts)===0?'cancelled':'unknown',code='legacy_agent_write_removed',at=iso(deps),summary=state==='cancelled'?'Legacy write job cancelled before claim':'Legacy write outcome requires host reconciliation';
+    db.run("UPDATE agent_jobs SET state=?,execution_principal='retired_legacy',receipt_json=?,lease_id='',lease_expires_at='',updated_at=? WHERE id=?",state,json({state,code,previous_state:old.state,summary,snapshot:{}}),at,old.id);
+    const next=Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 sequence FROM agent_job_events WHERE job_id=?",old.id)!.sequence);
+    db.run("INSERT INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)",old.id,next,state,code,summary,at);
   }
   const row = (jobID: string) => {
     const value = db.get<any>("SELECT * FROM agent_jobs WHERE id=?", jobID);
@@ -665,6 +668,17 @@ export function registerAgentJobs(
       sweepTimer = undefined;
     },
     onUpdate(listener: (update: AgentJobUpdate) => void) {
+      // The queue is registered before its business stores. Replay only the
+      // durable quarantine outcome so a restart cannot leave their old runs
+      // looking queued after the canonical job was cancelled or fenced unknown.
+      db.transaction(() => {
+        for (const current of db.all<any>("SELECT * FROM agent_jobs WHERE state IN ('cancelled','unknown') AND json_extract(receipt_json,'$.code')='legacy_agent_write_removed'")) {
+          const receipt = JSON.parse(current.receipt_json);
+          listener({ agentID: current.agent_id, deploymentID: current.deployment_id, operationID: current.operation_id,
+            jobID: current.id, phase: current.state, code: "legacy_agent_write_removed",
+            previousState: receipt.previous_state ?? (current.state === "cancelled" ? "queued" : "leased") });
+        }
+      });
       updateListeners.add(listener);
       return () => updateListeners.delete(listener);
     },

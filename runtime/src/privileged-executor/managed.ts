@@ -37,10 +37,10 @@ export async function runManaged(payload:ManagedExecutionPayload,c:ManagedRunCon
   durableWrite(filename,snapshot);
   try{
     const moduleURL=new URL('./managed.js',import.meta.url).href;rootPath(fileURLToPath(moduleURL));
-    const code='import('+JSON.stringify(moduleURL)+').then(m=>m.runManagedSnapshot(process.argv[2],process.argv[3])).catch(()=>{process.stderr.write("managed_worker_refused\\n");process.exitCode=125})';
+    const code='import('+JSON.stringify(moduleURL)+').then(m=>m.runManagedSnapshot(process.argv[2],process.argv[3])).catch(e=>{process.stderr.write((/^[a-z0-9_]{1,64}$/.test(e?.message)?e.message:"managed_worker_refused")+"\\n");process.exitCode=125})';
     const script=normalizePrivilegedPayload({kind:'script',runtime:'node',code,interpreter_sha256:interpreterDigest(interpreterPath('node')),args:[filename,sha256(snapshot)],cwd_profile:'private',environment:{},account:localAccount('root'),timeout_ms:payload.timeout_ms,max_output_bytes:payload.max_output_bytes});
     const outcome=await executeScript(script,c.unit,[localAccount('root')],productionScriptHost(),c.signal,c.guard);
-    if(outcome.state!=='succeeded')return{...outcome,state:'unknown',code:'managed_worker_unknown',stdout:'',stderr:''};
+    if(outcome.state!=='succeeded')return{...outcome,state:'unknown',code:'managed_worker_unknown',stdout:'',stderr:outcome.stderr||outcome.code};
     const receipt=parseStrictJSON(outcome.stdout,128<<10) as ExecutionReceipt;
     if(!['succeeded','failed','unknown'].includes(receipt.state)||!receipt.snapshot)refuse('invalid_managed_receipt');
     return{state:receipt.state,code:receipt.code??'',summary:'Approved managed operation completed',exit_code:receipt.state==='succeeded'?0:null,stdout:canonicalJSON(receipt),stderr:''};

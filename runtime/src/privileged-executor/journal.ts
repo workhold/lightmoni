@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { refuse, sha256 } from "./security.js";
-import { canonicalJSON } from "../shared/privileged-executor.js";
+import { canonicalJSON, EXECUTOR_JOURNAL_COLUMNS } from "../shared/privileged-executor.js";
 
 export type JournalState = "prepared" | "intent" | "running" | "succeeded" | "failed" | "unknown";
 export interface JournalJob {
@@ -38,7 +38,11 @@ export class ExecutorJournal {
       if (initialize) { this.db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('initialized','1')").run(); this.db.prepare("INSERT OR IGNORE INTO metadata(key,value) VALUES('schema','1')").run(); }
       if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'").get()) refuse("journal_missing_requires_recovery");
       if ((this.db.prepare("SELECT value FROM metadata WHERE key='initialized'").get() as any)?.value !== "1" || (this.db.prepare("SELECT value FROM metadata WHERE key='schema'").get() as any)?.value !== "1") refuse("journal_missing_requires_recovery");
-      for (const table of ["metadata", "jobs", "consumed_grants", "requests", "resources"]) if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) refuse("journal_corrupt");
+      for (const [table,required] of Object.entries(EXECUTOR_JOURNAL_COLUMNS)) {
+        if(!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))refuse("journal_corrupt");
+        const columns=new Set((this.db.prepare(`PRAGMA table_info(${table})`).all() as {name:string}[]).map(c=>c.name));
+        if(required.some(column=>!columns.has(column)))refuse("journal_corrupt");
+      }
       this.db.prepare("UPDATE jobs SET state='unknown',result_json=? WHERE state IN ('intent','running')").run(JSON.stringify({ state: "unknown", code: "executor_restarted", summary: "Execution outcome requires read-only reconciliation", exit_code: null, stdout: "", stderr: "" }));
       // Prepared work has no side effect and may only be resumed after obtaining
       // a new online lease/permit. A previous boot's nonce is never reusable.

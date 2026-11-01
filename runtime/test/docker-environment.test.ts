@@ -8,22 +8,22 @@ import {dockerInstallCommand,parseDockerInstallStatus} from '../src/server/machi
 import {operationCommand} from '../src/agent/operations.js';
 import {installCause} from '../src/operations/install-progress.js';
 
-test('Docker host projection distinguishes missing, daemon, permissions, unknown and stale observations',()=>{
- const db=new DB(':memory:');try{
- db.exec('CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT,heartbeat TEXT)');const now=new Date();
- const put=(v:any,last=now.toISOString())=>db.run('INSERT OR REPLACE INTO agents VALUES(?,?,?)','a',last,JSON.stringify(v));
- const inventory={observed_at:now.toISOString(),attempted_at:now.toISOString(),state:'unavailable',containers:[],truncated:false};
- assert.equal(machineDockerEnvironment(db,'',now).state,'unknown');put({});assert.equal(machineDockerEnvironment(db,'a',now).state,'unknown');
- for(const [code,state] of [['docker_cli_missing','missing'],['docker_permission_denied','permission_denied'],['docker_daemon_unavailable','daemon_unavailable'],['docker_collection_unavailable','unavailable']]){put({docker_inventory:{...inventory,error:code}});assert.equal(machineDockerEnvironment(db,'a',now).state,state);}
- put({docker_inventory:{...inventory,state:'ready'}});assert.equal(machineDockerEnvironment(db,'a',now).state,'ready');
- put({docker_inventory:{...inventory,state:'ready',compose_available:false}});assert.equal(machineDockerEnvironment(db,'a',now).state,'compose_missing');
- put({docker_inventory:{...inventory,error:'docker_cli_missing'}},new Date(0).toISOString());assert.equal(machineDockerEnvironment(db,'a',now).state,'stale');
- put({docker_inventory:{...inventory,observed_at:new Date(0).toISOString(),attempted_at:new Date(0).toISOString(),error:'docker_cli_missing'}});assert.equal(machineDockerEnvironment(db,'a',now).state,'stale');
- }finally{db.close();}
+test('Docker projection accepts only fresh signed executor capability observations',()=>{
+ const now=new Date('2026-11-01T00:00:00Z');
+ const snapshot=(overrides:any={})=>({executor:{state:'active',online:true,last_seen:now.toISOString(),...overrides},capabilities:{'container.managed.v1':{effective:'ready'}}});
+ assert.deepEqual(machineDockerEnvironment(undefined,now),{state:'unknown',code:'executor_observation_required',observed_at:'',source:'none'});
+ assert.equal(machineDockerEnvironment({executor:null,capabilities:{}},now).state,'unknown');
+ assert.equal(machineDockerEnvironment(snapshot({state:'revoked'}),now).state,'unknown');
+ assert.equal(machineDockerEnvironment(snapshot({online:false}),now).state,'stale');
+ assert.equal(machineDockerEnvironment(snapshot({last_seen:new Date(0).toISOString()}),now).state,'stale');
+ assert.equal(machineDockerEnvironment(snapshot({last_seen:new Date(now.getTime()+61000).toISOString()}),now).state,'stale');
+ const ready=machineDockerEnvironment(snapshot(),now);assert.equal(ready.state,'ready');assert.equal(ready.source,'executor');
+ assert.equal('containers' in ready,false,'do not fabricate daemon inventory or Compose status');
+ assert.deepEqual(machineDockerEnvironment({...snapshot(),capabilities:{}},now),{state:'unavailable',code:'executor_capability_unavailable',observed_at:now.toISOString(),source:'executor'});
 });
 
 test('fixed installer has valid shell syntax and bounded, sanitized receipts',()=>{
- execFileSync('/bin/sh',['-n'],{input:dockerInstallScript});assert.match(dockerInstallScript,/flock -n/);assert.match(dockerInstallScript,/docker-compose-plugin/);assert.match(dockerInstallScript,/SupplementaryGroups=docker/);assert.match(dockerInstallScript,/v.agent_id!==process.argv/);assert.doesNotMatch(dockerInstallScript,/apt-get[^\n]*(?:remove|purge)|usermod|chmod 666|curl[^\n]*\|.*sh/);
+ execFileSync('/bin/sh',['-n'],{input:dockerInstallScript});assert.match(dockerInstallScript,/flock -n/);assert.match(dockerInstallScript,/docker-compose-plugin/);assert.doesNotMatch(dockerInstallScript,/SupplementaryGroups|configuring_agent|identity\.json|lightmoni-agent|usermod|daemon-reload/);assert.doesNotMatch(dockerInstallScript,/apt-get[^\n]*(?:remove|purge)|usermod|chmod 666|curl[^\n]*\|.*sh/);
  assert.throws(()=>dockerInstallCommand('id;touch /tmp/unsafe'));assert.throws(()=>parseDockerInstallStatus('{"state":"succeeded","phase":"verified","code":"private-secret"}'));
  assert.throws(()=>parseDockerInstallStatus('{"state":"succeeded","phase":"installing_packages","code":""}'));
  assert.deepEqual(parseDockerInstallStatus('{"state":"failed","phase":"installing_packages","code":"docker_install_package_failed","stderr":"secret"}'),{state:'failed',phase:'installing_packages',code:'docker_install_package_failed'});
@@ -35,14 +35,15 @@ test('Docker ENOENT records a specific safe installation cause',async()=>{
  finally{process.env.PATH=previous;}
 });
 
-test('active and unresolved Docker installations fence Agent job enqueue and claim across restarts',async t=>{
+test('active and unresolved Docker installations fence readonly Agent jobs across restarts',async t=>{
  const {dockerFixture}=await import('./fixtures/docker-control-fixture.js');const f=await dockerFixture();t.after(()=>f.close());
- const created=await f.req('/ops/machines/machine-a/docker-jobs','POST',{operation:'inventory',request_id:'docker-fence-inventory-001'});assert.equal(created.status,202);
+ const input={agentID:'node-a',deploymentID:'readonly-health',operationID:'health',actions:[{kind:'health_check',check:{kind:'systemd-active',unit:'app.service'}}],capabilities:['health.systemd']};
+ const created=f.jobs.enqueue(input);
  f.db.exec("CREATE TABLE machine_docker_installations(id TEXT,machine_id TEXT,agent_id TEXT,state TEXT);INSERT INTO machine_docker_installations VALUES('install','machine-a','node-a','running')");
- assert.equal(f.jobs.claim('node-a',['docker.inventory']),null);
- assert.throws(()=>f.jobs.enqueue({agentID:'node-a',deploymentID:'docker-machine-a',operationID:'other-inventory',actions:[{kind:'docker',operation:'inventory'}],capabilities:['docker.inventory'],target:{docker_machine_id:'machine-a'}}),/docker_installation_pending/);
- f.db.run("UPDATE machine_docker_installations SET state='unknown'");assert.equal(f.jobs.claim('node-a',['docker.inventory']),null);
- f.db.run("UPDATE machine_docker_installations SET state='failed'");assert.equal(f.jobs.claim('node-a',['docker.inventory'])?.id,created.body.id);
+ assert.equal(f.jobs.claim('node-a',['health.systemd']),null);
+ assert.throws(()=>f.jobs.enqueue({...input,operationID:'other-health'}),/docker_installation_pending/);
+ f.db.run("UPDATE machine_docker_installations SET state='unknown'");assert.equal(f.jobs.claim('node-a',['health.systemd']),null);
+ f.db.run("UPDATE machine_docker_installations SET state='failed'");assert.equal(f.jobs.claim('node-a',['health.systemd'])?.id,created.id);
 });
 
 test('platform restart retains the durable Docker installation fence and status verification never reinstalls',async()=>{

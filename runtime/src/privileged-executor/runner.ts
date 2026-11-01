@@ -15,7 +15,7 @@ import { ManagedDockerExecutor, inspectManagedDockerDaemon, type ManagedDockerRe
 import { executeScript, interpreterDigest, interpreterPath, localAccount, sameAccount, productionScriptHost, scriptDependenciesReady, type ExecutionStartGuard, type ScriptHost, type ScriptOutcome } from "./scripts.js";
 import { refuse, sha256, linuxBootClock, type BootClock } from "./security.js";
 
-export interface ExecutorRelease { version: string; release: { build_id: string; source_revision: string; artifact_sha256: string; state_schema: 1;activation_id?:string } }
+export interface ExecutorRelease { version: string; activation_id:string; release: { build_id: string; source_revision: string; artifact_sha256: string; state_schema: 1 } }
 export interface RunnerHost {
   scripts: ScriptHost;
   inventory?:()=>Promise<unknown>;

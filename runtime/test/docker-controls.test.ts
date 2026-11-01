@@ -10,61 +10,14 @@ import {AgentJobRunner} from '../src/agent/jobs.js';
 const path='/ops/machines/machine-a/docker-jobs';
 const inventory=()=>({operation:'inventory',request_id:randomUUID()});
 
-test('Docker immediate collection crosses HTTP, authenticated Agent lease and durable receipt, without lease disclosure',async t=>{
+for(const operation of ['inventory','start','stop','restart'])test('ordinary Agent refuses legacy Docker '+operation+' before any daemon or payload request',async t=>{
  const f=await dockerFixture();t.after(()=>f.close());
- assert.equal((await f.req('/ops/inventory?machine_id=machine-a')).body.hosts[0].error,'docker_cli_missing');
- assert.equal((await f.req(path,'POST',inventory(),{'x-role':'member'})).status,403);
- const body=inventory(),created=await f.req(path,'POST',body);assert.equal(created.status,202);assert.equal(created.body.state,'queued');assert.equal(created.body.lease_id,undefined);
- assert.equal((await f.req(path,'POST',inventory())).body.id,created.body.id);
- assert.equal((await f.req(path,'POST',body)).body.id,created.body.id);
- assert.equal((await f.req(path,'POST',{...body,operation:'stop',container_id:containerID,confirmed:true})).status,409);
- assert.equal((await f.req('/agents/node-a/jobs/claim','POST',{capabilities:['docker.inventory']})).status,403);
- assert.equal((await f.req('/ops/machines/machine-b/docker-jobs/'+created.body.id)).status,404);
- assert.equal((await f.req(path+'/'+created.body.id,'GET',undefined,{'x-role':'member'})).status,403);
- assert.equal((await f.runner.pollOnce())?.state,'succeeded');
- const job=await f.req(path+'/'+created.body.id);assert.equal(job.body.state,'succeeded');assert.doesNotMatch(JSON.stringify(job),/fixture-control|lease_id|stdout|stderr/);
- const host=(await f.req('/ops/inventory?machine_id=machine-a')).body.hosts[0];assert.equal(host.state,'ready');assert.equal(host.containers.length,2);assert.equal(host.containers[1].state,'exited');assert.equal(host.error,'');
- assert.equal((await f.req(path,'POST',body)).body.id,created.body.id);
- assert(f.calls.every(args=>args[0]==='--context'&&args[1]==='default'));
-});
-
-test('legacy Docker writes require review but are never claimed or executed by the ordinary Agent',async t=>{
- const f=await dockerFixture();t.after(()=>f.close());
- const body={operation:'stop',container_id:containerID,request_id:randomUUID()};
- assert.equal((await f.req(path,'POST',body)).body.error,'docker_confirmation_required');
- assert.equal((await f.req(path,'POST',{...body,confirmed:true})).body.error,'docker_fresh_inventory_required');
- await f.req(path,'POST',inventory());await f.runner.pollOnce();
- assert.equal((await f.req(path,'POST',{...body,container_id:'--all',confirmed:true})).status,400);
- assert.equal((await f.req(path,'POST',{...body,container_id:'f'.repeat(64),confirmed:true})).status,409);
- const created=await f.req(path,'POST',{...body,confirmed:true});assert.equal(created.status,202);
- assert.equal((await f.req(path,'POST',{...body,confirmed:true})).body.id,created.body.id);
- const receipt=await f.runner.pollOnce();assert.equal(receipt,null);
- assert.equal((await f.req(path,'POST',{...body,confirmed:true})).body.id,created.body.id);
- assert.equal((await f.req('/ops/inventory?machine_id=machine-a')).body.hosts[0].containers[0].state,'running');
- assert.equal(await f.runner.pollOnce(),null);assert.equal(f.calls.filter(args=>args[2]==='stop').length,0);
- const stored=f.jobs.get(created.body.id);assert.equal(stored.target.actor,'admin');assert.equal(stored.target.docker_machine_id,'machine-a');assert.equal(stored.state,'queued');
- assert.equal(f.db.get<any>('SELECT attempts FROM agent_jobs WHERE id=?',created.body.id)!.attempts,0);
-});
-
-test('a forced legacy Docker write is refused locally and its durable receipt preserves the executor requirement',async t=>{
- const f=await dockerFixture();t.after(()=>f.close());await f.req(path,'POST',inventory());await f.runner.pollOnce();
- const created=await f.req(path,'POST',{operation:'stop',container_id:containerID,confirmed:true,request_id:randomUUID()});assert.equal(created.status,202);
- // Model an old or incorrect center responding outside the offered capabilities.
- const leased=f.jobs.claim('node-a',['docker.control'])!;assert.equal(leased.id,created.body.id);const before=f.calls.length;
- const runner=new AgentJobRunner({endpoint:f.base,agentID:'node-a',controlCredential:'fixture-control',dataDir:f.root},{command:f.command,
-   fetch:(async(url:any,init:RequestInit)=>String(url).endsWith('/jobs/claim')?Response.json({job:leased}):fetch(url,init)) as typeof fetch});
- assert.equal((await runner.pollOnce())?.code,'privileged_executor_required');assert.equal(f.calls.length,before);
- const saved=f.jobs.get(leased.id);assert.equal(saved.state,'failed');assert.equal(saved.receipt.code,'privileged_executor_required');assert.equal(saved.receipt.snapshot.docker.error,'privileged_executor_required');
-});
-
-test('offline/old Agents fail explicitly and old cached observations do not supersede newer immediate results',async t=>{
- const f=await dockerFixture();t.after(()=>f.close());
- f.db.run("UPDATE agents SET heartbeat='{}'");assert.equal((await f.req(path,'POST',inventory())).body.error,'docker_agent_upgrade_required');
- f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify(f.heartbeat));
- await f.req(path,'POST',inventory());await f.runner.pollOnce();
- f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({...f.heartbeat,docker_inventory:{...f.heartbeat.docker_inventory,attempted_at:undefined,observed_at:new Date(0).toISOString(),state:'ready'}}));
- assert.equal((await f.req('/ops/inventory?machine_id=machine-a')).body.hosts[0].containers.length,2);
- f.advance(121000);assert.equal((await f.req(path,'POST',inventory())).body.error,'docker_agent_offline');
+ const created=f.jobs.enqueue({agentID:'node-a',deploymentID:'legacy-docker',operationID:randomUUID(),actions:[{kind:'docker',operation,...(operation==='inventory'?{}:{container_id:containerID})}],capabilities:[operation==='inventory'?'docker.inventory':'docker.control'],target:{docker_machine_id:'machine-a'}});
+ const leased=f.jobs.claim('node-a',[operation==='inventory'?'docker.inventory':'docker.control']);assert.equal(leased.id,created.id);const requests=[];
+ const runner=new AgentJobRunner({endpoint:f.base,agentID:'node-a',controlCredential:'fixture-control',dataDir:f.root},{command:f.command,fetch:(async(url:any,init:RequestInit)=>{requests.push(String(url));return String(url).endsWith('/jobs/claim')?Response.json({job:leased}):fetch(url,init)}) as typeof fetch});
+ assert.equal((await runner.pollOnce())?.code,'privileged_executor_required');assert.equal(f.calls.length,0);
+ assert.equal(requests.some(url=>url.includes('/operations')||url.includes('/artifact')),false);
+ assert.equal(f.jobs.get(created.id).state,'failed');assert.equal(f.jobs.get(created.id).receipt.code,'privileged_executor_required');
 });
 
 test('inventory collection preserves old containers and safe diagnostic; query is shared without waiting for app logs',async()=>{

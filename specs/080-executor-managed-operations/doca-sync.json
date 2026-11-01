@@ -46,5 +46,32 @@
     "edges": 10,
     "exact_match": true
   },
-  "visual_verification": false
+  "visual_verification": false,
+  "final_integration": {
+    "saved_seq": 930,
+    "latest_readback_seq": 930,
+    "readback": [
+      {
+        "id": "privileged060-current-contract",
+        "seq": 930,
+        "complete": true,
+        "text_matches": true
+      },
+      {
+        "id": "executor080-lifecycle",
+        "seq": 930,
+        "complete": true,
+        "text_matches": true
+      },
+      {
+        "id": "executor080-control-flow",
+        "seq": 930,
+        "complete": true,
+        "nodes": 10,
+        "edges": 10
+      }
+    ],
+    "original_diagrams_preserved": true,
+    "changes": "Two text blocks only: SDD080 unified maintenance plus current contract; original graph unchanged"
+  }
 }

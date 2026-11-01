@@ -72,7 +72,7 @@ const fs=require("node:fs"),p=require("node:path");
 const base=process.argv[1];
 if(p.resolve(base)!==base)process.exit(1);
 function walk(file){const s=fs.lstatSync(file);if(s.uid!==0)throw Error();if(s.isSymbolicLink()){const real=fs.realpathSync(file);if(!real.startsWith(base+"/"))throw Error();return;}if(s.mode&18)throw Error();if(s.isDirectory()){for(const name of fs.readdirSync(file))walk(p.join(file,name));}else if(!s.isFile())throw Error();}
-try{walk(base);for(const f of ["app/runtime/dist/privileged-executor/main.js","executor/launcher.sh","executor/lightmoni-executor.service","executor/uninstall.sh"]){if(!fs.statSync(p.join(base,f)).isFile())throw Error();}const m=JSON.parse(fs.readFileSync(p.join(base,"release.json"),"utf8"));if(m.state_schema!==1||!/^[-A-Za-z0-9._]{1,128}$/.test(m.build_id||"")||!/^[-A-Za-z0-9._]{1,128}$/.test(m.version||""))throw Error();}catch{process.stderr.write("executor_invalid_release\n");process.exit(1);}' "$release_dir"
+try{walk(base);for(const f of ["app/runtime/dist/privileged-executor/main.js","executor/launcher.sh","executor/lightmoni-executor.service","executor/maintenance.mjs","executor/uninstall.sh"]){if(!fs.statSync(p.join(base,f)).isFile())throw Error();}const m=JSON.parse(fs.readFileSync(p.join(base,"release.json"),"utf8"));if(m.state_schema!==1||!/^[-A-Za-z0-9._]{1,128}$/.test(m.build_id||"")||[".",".."].includes(m.build_id)||!/^[-A-Za-z0-9._]{1,128}$/.test(m.version||"")||! /^[a-f0-9]{40}$/.test(m.source_revision||"")||m.platform!=="linux"||!["amd64","arm64"].includes(m.arch))throw Error();}catch{process.stderr.write("executor_invalid_release\n");process.exit(1);}' "$release_dir"
 phase=prepare
 completed=no
 cleanup() {
@@ -96,6 +96,12 @@ cp -R "$release_dir" "$target"
 chmod -R u=rwX,go=rX "$target"
 printf '{"schema":1,"artifact_sha256":"%s"}\n' "$artifact_sha256" > "$target/installation.json"
 chmod 0644 "$target/installation.json"
+# The bundled standalone supervisor fsyncs the full release receipt and each
+# installation phase. It never reads or persists enrollment stdin.
+record_phase() {
+  "$target/node" "$target/executor/maintenance.mjs" install-phase "$1" "$target" "$artifact_sha256" >/dev/null 2>&1 || { echo 'executor_install_phase_not_durable' >&2; exit 1; }
+}
+record_phase enrollment_pending
 ln -s "$target" /opt/lightmoni-executor/current
 install -m 0755 -o root -g root "$target/executor/launcher.sh" /usr/local/bin/lightmoni-executor
 install -d -m 0755 -o root -g root /usr/local/sbin
@@ -106,10 +112,15 @@ if ! /usr/local/bin/lightmoni-executor enroll --config /etc/lightmoni-executor/c
   echo 'executor_enrollment_failed_or_unknown' >&2
   exit 1
 fi
+phase=program
+record_phase program
 phase=configuration_check
 /usr/local/bin/lightmoni-executor check --config /etc/lightmoni-executor/config.json >/dev/null 2>&1 || { echo 'executor_configuration_invalid' >&2; exit 1; }
+phase=unit
+record_phase unit
 phase=service_start
 install -m 0644 -o root -g root "$target/executor/lightmoni-executor.service" /etc/systemd/system/lightmoni-executor.service
+record_phase start
 systemctl daemon-reload
 systemctl enable lightmoni-executor.service >/dev/null
 systemctl restart lightmoni-executor.service
@@ -120,6 +131,7 @@ while [ "$count" -lt 10 ]; do
     active_count=$((active_count + 1))
     if [ "$active_count" -ge 3 ]; then
       phase=ready
+      record_phase ready
       completed=yes
       echo 'executor_installation=ready'
       exit 0
