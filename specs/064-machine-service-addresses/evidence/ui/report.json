@@ -1,0 +1,50 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "ok": true,
+      "checks": [
+        "Navigation, private placement, three named host port mappings, duplicate rejection with input retention, fixed-port saved readback",
+        "Both cache editors share one cluster setting and survive refresh",
+        "Real revision conflict retains form input and retry reuses the same registered service",
+        "Publishing form links a real HTTPS/Basic website and returns no password/hash",
+        "Linked website editor exposes site/path auth; write-only password stays empty",
+        "200% view and reduced-motion modal open/close",
+        "Narrow layout contains overflow; scrolling reaches actions and reopens saved port configuration",
+        "Cluster IPs are read-only host inventory; SSH domain/public-only machine installs without IP/ack fields, with isolated local-only scope"
+      ],
+      "errors": []
+    },
+    {
+      "round": 2,
+      "ok": true,
+      "checks": [
+        "Navigation, private placement, three named host port mappings, duplicate rejection with input retention, fixed-port saved readback",
+        "Both cache editors share one cluster setting and survive refresh",
+        "Real revision conflict retains form input and retry reuses the same registered service",
+        "Publishing form links a real HTTPS/Basic website and returns no password/hash",
+        "Linked website editor exposes site/path auth; write-only password stays empty",
+        "200% view and reduced-motion modal open/close",
+        "Narrow layout contains overflow; scrolling reaches actions and reopens saved port configuration",
+        "Cluster IPs are read-only host inventory; SSH domain/public-only machine installs without IP/ack fields, with isolated local-only scope"
+      ],
+      "errors": []
+    },
+    {
+      "round": 3,
+      "ok": true,
+      "checks": [
+        "Navigation, private placement, three named host port mappings, duplicate rejection with input retention, fixed-port saved readback",
+        "Both cache editors share one cluster setting and survive refresh",
+        "Real revision conflict retains form input and retry reuses the same registered service",
+        "Publishing form links a real HTTPS/Basic website and returns no password/hash",
+        "Linked website editor exposes site/path auth; write-only password stays empty",
+        "200% view and reduced-motion modal open/close",
+        "Narrow layout contains overflow; scrolling reaches actions and reopens saved port configuration",
+        "Cluster IPs are read-only host inventory; SSH domain/public-only machine installs without IP/ack fields, with isolated local-only scope"
+      ],
+      "errors": []
+    }
+  ],
+  "media": "/Users/zhangsiwen/dev/lightmoni/lightmoni/artifacts/screenshots/specs/064-machine-service-addresses/evidence/ui"
+}

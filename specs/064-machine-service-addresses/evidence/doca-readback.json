@@ -1,0 +1,223 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "title": "LightMoni 系统设计基线",
+  "saved": true,
+  "seq_before": 909,
+  "seq_after": 910,
+  "blocks_before": 679,
+  "blocks_after": 686,
+  "all_prior_blocks_exactly_preserved": true,
+  "prior_native_diagrams": [
+    {
+      "id": "f-architecture-8a1f",
+      "nodes": 10,
+      "edges": 8,
+      "unchanged": true
+    },
+    {
+      "id": "f-center-modules-7d039612",
+      "nodes": 10,
+      "edges": 9,
+      "unchanged": true
+    },
+    {
+      "id": "f-deployment-2b7c",
+      "nodes": 8,
+      "edges": 7,
+      "unchanged": true
+    },
+    {
+      "id": "f-enrollment-4c9d",
+      "nodes": 10,
+      "edges": 11,
+      "unchanged": true
+    },
+    {
+      "id": "host-access036-native-flow",
+      "nodes": 9,
+      "edges": 9,
+      "unchanged": true
+    },
+    {
+      "id": "host037-merged-native-flow",
+      "nodes": 8,
+      "edges": 8,
+      "unchanged": true
+    },
+    {
+      "id": "host038-registered-onboarding-flow",
+      "nodes": 8,
+      "edges": 7,
+      "unchanged": true
+    },
+    {
+      "id": "host039-retention-flow",
+      "nodes": 8,
+      "edges": 9,
+      "unchanged": true
+    },
+    {
+      "id": "host040-automatic-identity-flow",
+      "nodes": 9,
+      "edges": 9,
+      "unchanged": true
+    },
+    {
+      "id": "host050-design-6",
+      "nodes": 7,
+      "edges": 7,
+      "unchanged": true
+    },
+    {
+      "id": "host051-network-discovery-flow",
+      "nodes": 10,
+      "edges": 10,
+      "unchanged": true
+    },
+    {
+      "id": "install053-recovery-flow",
+      "nodes": 10,
+      "edges": 10,
+      "unchanged": true
+    },
+    {
+      "id": "maintenance058-flow",
+      "nodes": 13,
+      "edges": 14,
+      "unchanged": true
+    },
+    {
+      "id": "f-ai-sequence-5e0f",
+      "nodes": 10,
+      "edges": 10,
+      "unchanged": true
+    },
+    {
+      "id": "9a7f0e0f-303b-47a8-a194-6434833a4da1",
+      "nodes": 7,
+      "edges": 6,
+      "unchanged": true
+    },
+    {
+      "id": "ca797620-3473-4683-b77a-58f7f968d79c",
+      "nodes": 15,
+      "edges": 17,
+      "unchanged": true
+    },
+    {
+      "id": "ops033-control-plane-native",
+      "nodes": 11,
+      "edges": 14,
+      "unchanged": true
+    },
+    {
+      "id": "cluster042-baseline-model",
+      "nodes": 8,
+      "edges": 6,
+      "unchanged": true
+    },
+    {
+      "id": "website043-routing-native",
+      "nodes": 8,
+      "edges": 9,
+      "unchanged": true
+    },
+    {
+      "id": "task043-control-flow",
+      "nodes": 12,
+      "edges": 13,
+      "unchanged": true
+    },
+    {
+      "id": "task043-execution-states",
+      "nodes": 7,
+      "edges": 7,
+      "unchanged": true
+    },
+    {
+      "id": "appinstall058-flow",
+      "nodes": 6,
+      "edges": 7,
+      "unchanged": true
+    },
+    {
+      "id": "agent044-maintenance-flow",
+      "nodes": 14,
+      "edges": 14,
+      "unchanged": true
+    },
+    {
+      "id": "agent044-update-states",
+      "nodes": 8,
+      "edges": 11,
+      "unchanged": true
+    },
+    {
+      "id": "mcp046-overview",
+      "nodes": 15,
+      "edges": 17,
+      "unchanged": true
+    },
+    {
+      "id": "mcp046-approval",
+      "nodes": 10,
+      "edges": 10,
+      "unchanged": true
+    },
+    {
+      "id": "mcp046-idempotency",
+      "nodes": 8,
+      "edges": 9,
+      "unchanged": true
+    },
+    {
+      "id": "certificate053-flow",
+      "nodes": 12,
+      "edges": 12,
+      "unchanged": true
+    },
+    {
+      "id": "docker057-control-flow",
+      "nodes": 7,
+      "edges": 8,
+      "unchanged": true
+    },
+    {
+      "id": "images059-flow",
+      "nodes": 9,
+      "edges": 10,
+      "unchanged": true
+    },
+    {
+      "id": "images059-registry-flow",
+      "nodes": 10,
+      "edges": 10,
+      "unchanged": true
+    },
+    {
+      "id": "privileged060-hld",
+      "nodes": 9,
+      "edges": 9,
+      "unchanged": true
+    },
+    {
+      "id": "privileged060-permit",
+      "nodes": 10,
+      "edges": 10,
+      "unchanged": true
+    }
+  ],
+  "new_section": {
+    "heading": "机器地址统一来源与本机镜像复用（SDD 064）",
+    "paragraphs": [
+      "所有受管机器的服务私网与公网地址统一由机器管理提供。machineServiceAddresses 读取当前主机与 Agent 身份匹配的网卡快照，排除 loopback、Docker/容器桥、veth 等接口，优先 IPv4 再 IPv6；服务连接优先私网，DNS 只选公网。SSH 目标域名只用于连接，不推导服务 IP；平台观察到的代理来源 IP 也不参与服务取址。无网卡快照的历史数字 IP 可兼容，未纳管的旧 Agent 保持原路径。",
+      "现代集群仅保存机器选择与 CPU/内存覆盖，不再保存地址副本，表单只读展示机器管理地址。应用容量、调度、服务发现、网站网关与 DNS，以及有受管机器绑定的旧 node_pool/gateway_group 路径共用该来源；历史 nodes.address/public_address 不覆盖当前机器地址。具体端口绑定和部署回执仍代表已部署事实，指定 IP 变更经重新部署生效。",
+      "系统镜像仓库与普通应用一样选择集群、机器、宿主端口、资源与缓存开关，取消手工内网 IP 和网络确认项。部署从机器管理选择真实私网 IP，未发现可供其他机器使用的私网则监听 127.0.0.1，安装仍可执行且页面说明仅本机可用。仓库固定原机器和持久目录，地址变化不等于数据迁移；实际实例绑定 IP 与分配端口组成端点，同机 OpenResty 访问指定绑定 IP，通配绑定才使用 loopback。",
+      "中心为每个消费机器投影缓存策略，loopback 缓存只下发给仓库所在机器，跨机缺少可达私网端点时继续使用原镜像源；领取租约时重新核对机器与当前策略。已登记绑定不会因机器管理更新而被提前替换，重新部署后才登记新端点。公网访问继续通过已有 HTTPS/Basic 网站入口，不自动开放匿名公网 HTTP 仓库。",
+      "Agent 在缓存准备阶段先检查本机 Docker 所需镜像引用、平台和不可变 digest，命中则固定本地 image ID 与 pull_policy=never，零远程请求；未命中才访问缓存。仓库名称不同而内容相同，可通过 RepoDigest 或已验证 config 身份复用本机镜像，至多读取 manifest/config，无需重复下载层和导入。缓存缺失和失败沿用既有回源规则；Registry 与 Docker 各自持久化，不共用数据目录、不修改 Docker daemon 全局配置。",
+      "实现与验收见 specs/064-machine-service-addresses/。本节更新 SDD 059/062 的手工仓库地址和集群地址副本规则，无新增表、凭据或 Agent 任务类型；部署状态仍以执行和健康回执为准。真实 Docker 本机复用、HTTP/SQLite 定向回归和浏览器验收仅说明本次验证范围，不代表线上容器已更新。"
+    ],
+    "order_and_text_verified": true
+  },
+  "check": "Read all content pages at one latest saved seq; compared complete native block structures, node and edge properties, and order."
+}

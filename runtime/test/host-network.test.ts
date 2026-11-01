@@ -10,7 +10,7 @@ import { normalizeIPAddress, normalizeNetworkAddresses, networkScope } from "../
 import { collectNetworkAddresses } from "../src/agent/network-addresses.js";
 import { NodeStore } from "../src/server/nodes-model.js";
 import { registerNodes, type NodesOptions } from "../src/server/nodes.js";
-import { machineNetwork, observeNetworkSource, trustedProxyMatcher } from "../src/server/host-network.js";
+import { machineNetwork, machineServiceAddresses, observeNetworkSource, trustedProxyMatcher } from "../src/server/host-network.js";
 
 const nic = (address: string): NetworkInterfaceInfo => ({ address, netmask: "", family: address.includes(":") ? "IPv6" : "IPv4", mac: "secret-mac-should-not-be-sent", internal: false, cidr: null });
 const entry = (address: string, name = "eth0") => ({ interface: name, address });
@@ -151,4 +151,15 @@ test("trusted-proxy HTTP path persists a private observed source and marks missi
   assert.equal(machineNetwork(f.db,"host-1").source_ip,"192.168.2.4");assert.equal(machineNetwork(f.db,"host-1").source_kind,"trusted_proxy");
   assert.equal((await f.post("/agents/agent-1/heartbeat",{})).status,200);
   assert.equal(machineNetwork(f.db,"host-1").source_ip,"");assert.equal(machineNetwork(f.db,"host-1").source_kind,"unavailable");
+});
+
+test('managed service addresses follow host inventory rather than SSH DNS, proxy source or container bridges',async t=>{
+ const f=await fixture(t);f.enroll();
+ f.db.run("UPDATE managed_machines SET address='ssh.example.test' WHERE id='host-1'");
+ assert.equal((await f.post('/agents/register',{agent_id:'agent-1',network_addresses:[entry('172.17.0.1','docker0'),entry('172.24.0.1','br-container'),entry('10.20.0.7','eth0'),entry('203.0.113.7','eth0'),entry('2001:db8::7','eth0'),entry('127.0.0.1','lo')]})).status,200);
+ assert.deepEqual(machineServiceAddresses(f.db,'host-1'),{address:'10.20.0.7',public_address:'203.0.113.7',private_ips:['10.20.0.7'],public_ips:['203.0.113.7','2001:db8::7']});
+ f.advance();assert.equal((await f.post('/agents/agent-1/heartbeat',{network_addresses:[entry('10.20.0.9'),entry('203.0.113.9')]})).status,200);
+ assert.equal(machineServiceAddresses(f.db,'host-1').address,'10.20.0.9');assert.equal(machineServiceAddresses(f.db,'host-1').public_address,'203.0.113.9');
+ f.db.run("UPDATE managed_machines SET agent_id='replacement' WHERE id='host-1'");
+ assert.deepEqual(machineServiceAddresses(f.db,'host-1'),{address:'',public_address:'',private_ips:[],public_ips:[]});
 });

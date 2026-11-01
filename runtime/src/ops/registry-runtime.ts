@@ -1,9 +1,25 @@
 import type { PlatformResource, PlatformStore } from "./types.js";
 import { systemApplicationID } from "./system-applications.js";
-import { registryEndpoint } from "../operations/registry-address.js";
+import { machineNetwork, machineServiceAddresses } from "../server/host-network.js";
+import { networkScope } from "../shared/host-network.js";
+import { privateRegistryAddress, registryEndpoint } from "../operations/registry-address.js";
 import { cacheReference } from "../operations/image-cache.js";
 type Row = Record<string, any>;
 export const REGISTRY_IMAGE = "registry:3.0.0";
+/** Service addresses come from host inventory, never the SSH connection target. */
+export function automaticRegistryAddress(store: PlatformStore, machineID: string, legacy?: unknown): string {
+  const network = machineNetwork(store.deps.db, machineID);
+  const candidates = machineServiceAddresses(store.deps.db,machineID).private_ips;
+  if (candidates.length) return candidates.includes(String(legacy)) ? String(legacy) : candidates[0];
+  if (!network.addresses.length && legacy !== undefined) {
+    try { return privateRegistryAddress(legacy); } catch {}
+  }
+  return '127.0.0.1';
+}
+export function registryCacheScope(address: string): 'machine' | 'cluster' {
+  return networkScope(address) === 'loopback' ? 'machine' : 'cluster';
+}
+
 export function registryTemplateSpec() {
   const service = (port: number) => ({
     image: REGISTRY_IMAGE,
@@ -89,16 +105,17 @@ export function registeredRegistryEndpoint(
   const d = app.spec.deployments?.find((d: Row) => d.cluster_id === cid);
   if (!d) return;
   const p = store.deps.db.get<Row>(
-    `SELECT p.host_port FROM ops_cluster_instances i JOIN ops_platform_instance_ports p ON p.instance_id=i.id WHERE i.owner_id=? AND i.cluster_id=? AND i.retired=0 AND i.desired_state='running' AND p.name=? ORDER BY i.created_at DESC LIMIT 1`,
+    `SELECT p.host_port,p.host_ip,i.address FROM ops_cluster_instances i JOIN ops_platform_instance_ports p ON p.instance_id=i.id WHERE i.owner_id=? AND i.cluster_id=? AND i.retired=0 AND i.desired_state='running' AND p.name=? ORDER BY i.created_at DESC LIMIT 1`,
     appID,
     cid,
     portName,
   );
-  return p ? registryEndpoint(d.registry_address, p.host_port) : undefined;
+  return p ? registryEndpoint(p.host_ip || p.address || d.registry_address, p.host_port) : undefined;
 }
 export function registryCacheFor(
   store: PlatformStore,
   a: PlatformResource,
+  consumerMachineID?: string,
 ): Row | undefined {
   if (["registry", "openresty"].includes(a.spec.role)) return;
   const c = store.get(a.spec.cluster_id, "cluster");
@@ -117,14 +134,18 @@ export function registryCacheFor(
     const site = store.get(cfg.website_id, "website");
     originHost = site.spec.bindings?.[0]?.domains?.[0] ?? "";
   }
-  const hub_endpoint = enabled
-    ? registeredRegistryEndpoint(store, c.id, "hub-cache")
-    : undefined;
+  const endpointFor = (portName = 'registry') => {
+    const endpoint = registeredRegistryEndpoint(store, c.id, portName);
+    if (!endpoint) return;
+    const address = new URL(endpoint).hostname.replace(/^\[|\]$/g, '');
+    return registryCacheScope(address) === 'cluster' || consumerMachineID === d.machine_ids[0] ? endpoint : undefined;
+  };
+  const hub_endpoint = enabled ? endpointFor('hub-cache') : undefined;
   const origin_endpoint =
     originHost && cfg?.carrier_cluster_id === c.id
-      ? registeredRegistryEndpoint(store, c.id)
+      ? endpointFor()
       : originHost && enabled
-        ? registeredRegistryEndpoint(store, c.id, "origin-cache")
+        ? endpointFor('origin-cache')
         : undefined;
   if (!hub_endpoint && !origin_endpoint) return;
   const policy = {

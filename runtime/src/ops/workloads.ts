@@ -1,3 +1,4 @@
+import {machineServiceAddresses} from "../server/host-network.js";
 import {publicWebsiteSpec} from './website-auth.js';
 import {registryCacheFor} from './registry-runtime.js';
 import { createClusterWorkloads } from "./cluster-workloads.js";
@@ -217,18 +218,27 @@ export function createWorkloadController(
       if (!agent(key)) fail(400, "registered_agent_required");
     return ids;
   };
+  const managedAddresses = (agentID: string) => {
+    if (!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='managed_machines'")) return;
+    const machine = db.get<{id:string}>('SELECT id FROM managed_machines WHERE agent_id=?',agentID);
+    return machine ? machineServiceAddresses(db,machine.id) : undefined;
+  };
+  const gatewayAddress = (agentID: string, fallback?: string) => {
+    const managed = managedAddresses(agentID);
+    return managed ? managed.public_address : fallback ?? capacity(agentID).public_address ?? capacity(agentID).address ?? '';
+  };
   const capacity = (agentID: string) => {
     for (const p of store.list("node_pool")) {
       const node = (p.spec.nodes ?? []).find(
         (n: any) => n.agent_id === agentID,
       );
-      if (node) return node;
+      if (node) return {...node,...managedAddresses(agentID)};
     }
     const cached = db.get<any>(
       "SELECT node_json FROM ops_platform_nodes WHERE agent_id=?",
       agentID,
     );
-    if (cached) return { agent_id: agentID, ...JSON.parse(cached.node_json) };
+    if (cached) return { agent_id: agentID, ...JSON.parse(cached.node_json),...managedAddresses(agentID) };
     const a = agent(agentID);
     let h: any = {};
     try {
@@ -248,6 +258,7 @@ export function createWorkloadController(
     return {
       agent_id: agentID,
       address: address || h.address || h.ip || "",
+      ...managedAddresses(agentID),
       cpu: Number(h.cpu_count ?? h.cpu?.cores ?? 0),
       memory_mb: Number(
         h.memory_total_mb ??
@@ -274,6 +285,7 @@ export function createWorkloadController(
   const endpoints = (resourceID: string) =>
     instances(resourceID)
       .map(result)
+      .map(i => ({...i,address:managedAddresses(i.agent_id)?.address ?? i.address}))
       .filter(
         (i) =>
           i.healthy && i.address && i.port && i.desired_state === "running",
@@ -359,9 +371,10 @@ export function createWorkloadController(
       fail(409, "platform_resource_in_use");
   };
   store.register("application", {
-    validatePayload(resource,config){
+    validatePayload(resource,config,agentID){
       if(!config.image_cache)return;
-      const expected=registryCacheFor(store,{...resource,spec:{...resource.spec,cluster_id:config.cluster_id}});
+      const machineID=store.deps.db.get<{id:string}>("SELECT id FROM managed_machines WHERE agent_id=?",agentID)?.id;
+      const expected=registryCacheFor(store,{...resource,spec:{...resource.spec,cluster_id:config.cluster_id}},machineID);
       if(JSON.stringify(expected)!==JSON.stringify(config.image_cache))fail(409,'private_registry_cache_policy_changed');
     },
     validate(spec, previous, context) {
@@ -879,9 +892,7 @@ export function createWorkloadController(
             .filter((key: string) => online(key))
             .map((key: string) => ({
               key,
-              node:
-                (pool.spec.nodes ?? []).find((n: any) => n.agent_id === key) ??
-                capacity(key),
+              node: capacity(key),
               use: usage(key),
               count: current.filter(
                 (i) => i.agent_id === key && i.desired_state === "running",
@@ -1013,9 +1024,7 @@ export function createWorkloadController(
           agentID,
           undefined,
           { cpu: 0, memory_mb: 0 },
-          group.spec.public_addresses?.[agentID] ??
-            capacity(agentID).address ??
-            "",
+          gatewayAddress(agentID,group.spec.public_addresses?.[agentID]),
           group.spec.http_port,
           false,
         );
@@ -1024,9 +1033,7 @@ export function createWorkloadController(
       db.run(
         "UPDATE ops_platform_instances SET desired_state='running',port=?,address=? WHERE id=?",
         group.spec.http_port,
-        group.spec.public_addresses?.[agentID] ??
-          capacity(agentID).address ??
-          "",
+        gatewayAddress(agentID,group.spec.public_addresses?.[agentID]),
         i!.id,
       );
     });
@@ -1370,8 +1377,7 @@ export function createWorkloadController(
           });
     const records = healthyAgents.flatMap((key: string) => {
       const address =
-        group.spec.public_addresses?.[key] ??
-        instances(group.id).find((i) => i.agent_id === key)?.address;
+        gatewayAddress(key,group.spec.public_addresses?.[key] ?? instances(group.id).find((i) => i.agent_id === key)?.address);
       if (!address || !isIP(address))
         fail(400, "gateway_public_ip_required_for_dns");
       return site.spec.domains.map((name: string) => ({

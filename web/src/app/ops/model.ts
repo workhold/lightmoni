@@ -37,7 +37,7 @@ export type Run = {
   updated_at: string;
   job_id?: string;
 };
-export type Machine = { id: string; name: string; address?: string; agent_id?: string; agent_status?: string; cluster_id?: string };
+export type Machine = { id: string; name: string; address?: string; ssh_address?:string; private_ips?:string[]; public_ips?:string[]; agent_id?: string; agent_status?: string; cluster_id?: string };
 export type CatalogTemplate = { id: string; name: string; description?: string; category?: string; version: string; versions?: string[]; managed_recommended: boolean; managed_reason?: string; parameters?: {key: string; label: string; type: string; required?: boolean; default?: unknown}[]; spec?: Spec };
 export type Overview = {
   machines?: Machine[];

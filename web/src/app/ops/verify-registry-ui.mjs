@@ -112,20 +112,15 @@ try {
           .getByRole("button", { name: "安装 Docker Registry", exact: true })
           .click();
       } else
-        await page
-          .getByRole("button", { name: "配置 / 重新部署", exact: true })
-          .first()
-          .click();
+        await page.getByRole("row").filter({hasText:"Registry QA"}).filter({hasNotText:"Public Registry QA"}).getByRole("button",{name:"配置 / 重新部署",exact:true}).click();
       await expect(dialog()).toBeVisible();
       await choose("部署集群", c.name);
       if (!view.application) await choose("部署机器", machine.name);
-      await expect(
-        dialog().getByLabel("内网监听 IP", { exact: true }),
-      ).toHaveValue("127.0.0.1");
+      await expect(dialog().getByLabel('内网监听 IP',{exact:true})).toHaveCount(0);
+      await expect(dialog().getByRole('checkbox')).toHaveCount(0);
       await dialog()
         .getByRole("switch", { name: "开启内网镜像缓存", exact: true })
         .setChecked(true);
-      await dialog().getByRole("checkbox").check();
       await dialog().getByLabel('宿主端口 · 私有仓库',{exact:true}).fill('24500');
       await dialog().getByLabel('宿主端口 · Docker Hub 缓存',{exact:true}).fill('24501');
       await expect(dialog().getByText('宿主端口不能重复；使用不同端口，或填 0 自动分配。',{exact:true})).toHaveCount(0);
@@ -142,7 +137,7 @@ try {
         .click();
       await expect(dialog()).toBeHidden();await closeProgress();
       view = await json("/ops/private-registry");
-      expect(view.deployments[0].cache_enabled).toBe(true);expect(view.deployments[0].host_ports.registry).toBe(24500);
+      expect(view.deployments.find(d=>d.cluster_id===c.id).cache_enabled).toBe(true);expect(view.deployments.find(d=>d.cluster_id===c.id).host_ports.registry).toBe(24500);expect(view.deployments.find(d=>d.cluster_id===c.id).address).toBe('10.0.0.7');expect(view.deployments.find(d=>d.cluster_id===c.id).cache_scope).toBe('cluster');
       expect(view.application.spec.service_name).toBe("sys-docker-registry");
       checks.push(
         "Navigation, private placement, three named host port mappings, duplicate rejection with input retention, fixed-port saved readback",
@@ -168,6 +163,8 @@ try {
         .filter({ hasText: "Registry QA" })
         .first();
       await row.getByRole("button", { name: /^编\s*辑$/ }).click();
+      await expect(dialog().getByLabel('机器可达 IP',{exact:true})).toHaveCount(0);await expect(dialog().getByLabel('公网 IP（用于域名解析）',{exact:true})).toHaveCount(0);
+      await expect(dialog().getByText(/10\.0\.0\.7/)).toBeVisible();await expect(dialog().getByText(/198\.51\.100\.7/)).toBeVisible();
       await expect(
         dialog().getByRole("switch", { name: "集群内网镜像缓存", exact: true }),
       ).not.toBeChecked();
@@ -185,12 +182,8 @@ try {
       checks.push(
         "Both cache editors share one cluster setting and survive refresh",
       );
-      await page
-        .getByRole("button", { name: "配置 / 重新部署", exact: true })
-        .first()
-        .click();
+      await page.getByRole("row").filter({hasText:"Registry QA"}).filter({hasNotText:"Public Registry QA"}).getByRole("button",{name:"配置 / 重新部署",exact:true}).click();
       await expect(dialog().getByLabel('宿主端口 · 私有仓库',{exact:true})).toHaveValue('24500');
-      await dialog().getByRole("checkbox").check();
       view = await json("/ops/private-registry");
       await json("/ops/private-registry/deployments", "POST", {
         confirmed: true,
@@ -209,9 +202,8 @@ try {
           exact: true,
         }),
       ).toBeVisible();
-      await expect(
-        dialog().getByLabel("内网监听 IP", { exact: true }),
-      ).toHaveValue("127.0.0.1");
+      await expect(dialog().getByLabel('内网监听 IP',{exact:true})).toHaveCount(0);
+      await expect(dialog().getByRole('checkbox')).toHaveCount(0);
       await shot("revision-error");
       await dialog()
         .getByRole("button", { name: "保存并部署", exact: true })
@@ -255,8 +247,8 @@ try {
         await dialog()
           .getByLabel("登录密码", { exact: true })
           .fill("synthetic-qa-password");
-      await dialog().getByRole("checkbox").check();
       await shot("publishing");
+      await dialog().getByRole('checkbox').check();
       await dialog()
         .getByRole("button", { name: "保存并部署", exact: true })
         .click();
@@ -330,11 +322,25 @@ try {
       ).toBe(true);
       const table=page.locator('.lm-registry-entry .ant-table-content');
       await table.evaluate(el=>{el.scrollLeft=el.scrollWidth});
-      const configure=page.getByRole('button',{name:'配置 / 重新部署',exact:true}).first();
+      const configure=page.getByRole('row').filter({hasText:'Registry QA'}).filter({hasNotText:'Public Registry QA'}).getByRole('button',{name:'配置 / 重新部署',exact:true}).first();
       await expect(configure).toBeInViewport();await shot('mobile-actions');await configure.click();
       await expect(dialog().getByLabel('宿主端口 · 私有仓库',{exact:true})).toHaveValue('24500');
+      await expect(dialog().getByLabel('内网监听 IP',{exact:true})).toHaveCount(0);
       await dialog().getByRole('button',{name:/^取\s*消$/}).click();await expect(dialog()).toBeHidden();
       checks.push("Narrow layout contains overflow; scrolling reaches actions and reopens saved port configuration");
+      let publicCluster=(await json('/ops/overview')).resources.find(r=>r.kind==='cluster'&&r.name==='Public Registry QA');
+      const spare=(await json('/ops/overview')).machines.find(m=>m.id!==machine.id);
+      if(!publicCluster)publicCluster=(await json('/ops/resources','POST',{kind:'cluster',name:'Public Registry QA',spec:{machine_ids:[spare.id],port_start:22200,port_end:22240,nodes:[{machine_id:spare.id,cpu:4,memory_mb:4096}]}})).resource;
+      await page.reload();await page.getByRole('button',{name:'添加集群部署',exact:true}).click();await choose('部署集群',publicCluster.name);
+      if(!(await json('/ops/private-registry')).deployments.some(d=>d.cluster_id===publicCluster.id))await choose('部署机器',spare.name);
+      await expect(dialog().getByLabel('内网监听 IP',{exact:true})).toHaveCount(0);await expect(dialog().getByRole('checkbox')).toHaveCount(0);
+      for(const [label,port] of [['私有仓库','24600'],['Docker Hub 缓存','24601'],['发布源缓存','24602']])await dialog().getByLabel('宿主端口 · '+label,{exact:true}).fill(port);
+      await dialog().getByRole('switch',{name:'开启内网镜像缓存',exact:true}).setChecked(true);await shot('public-machine-install');
+      await dialog().getByRole('button',{name:'保存并部署',exact:true}).click();await expect(dialog()).toBeHidden();await closeProgress();
+      const publicView=(await json('/ops/private-registry')).deployments.find(d=>d.cluster_id===publicCluster.id);
+      expect(publicView.address).toBe('127.0.0.1');expect(publicView.cache_scope).toBe('machine');expect(publicView.host_ports.registry).toBe(24600);
+      await expect(page.getByText('仅本机可用；其他机器未发现可达内网地址时使用原镜像源。',{exact:true})).toBeVisible();
+      checks.push('Cluster IPs are read-only host inventory; SSH domain/public-only machine installs without IP/ack fields, with isolated local-only scope');
       expect(errors).toEqual([]);
       rounds.push({ round, ok: true, checks, errors });
     } catch (e) {
