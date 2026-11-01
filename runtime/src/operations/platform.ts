@@ -11,8 +11,8 @@ import {
   chmod,
 } from "node:fs/promises";
 import { join, dirname, resolve, posix } from "node:path";
-import { createServer, createConnection, isIP } from "node:net";
-import { createSocket } from "node:dgram";
+import { createConnection, isIP } from "node:net";
+import { availablePort } from "./host-ports.js";
 import {randomBytes} from "node:crypto";
 import {hashSync} from "bcryptjs";
 import {authMaterial,authScopes} from "./basic-auth.js";
@@ -540,29 +540,6 @@ async function checkReadiness(
     context.signal.addEventListener("abort", () => done(false), { once: true });
   });
 }
-async function availablePort(p: any, context: OperationExecutionContext) {
-  context.signal.throwIfAborted();
-  await new Promise<void>((resolve, rejectPromise) => {
-    const listener =
-      p.protocol === "udp"
-        ? createSocket(p.host_ip === "::" ? "udp6" : "udp4")
-        : createServer();
-    listener.once("error", () =>
-      rejectPromise(new OperationRejectedError("HOST_PORT_OCCUPIED")),
-    );
-    listener.once("listening", () => listener.close(() => resolve()));
-    if (p.protocol === "udp")
-      (listener as ReturnType<typeof createSocket>).bind(
-        p.host_port,
-        p.host_ip,
-      );
-    else
-      (listener as ReturnType<typeof createServer>).listen(
-        p.host_port,
-        p.host_ip,
-      );
-  });
-}
 export async function renderManifest(
   context: OperationExecutionContext,
   id: string,
@@ -786,7 +763,7 @@ async function executeWorkload(
   );
   await context.progress?.("checking_ports");
   for (const p of applicationPorts(app))
-    if (!ownPorts.has(String(p.host_port))) await availablePort(p, context);
+    if (!ownPorts.has(String(p.host_port))) await availablePort(p, context.signal);
   await context.progress?.("validating_config");
   try {
     await context.command(
@@ -1408,12 +1385,14 @@ async function executeGateway(
       data: { instance_id: id, stopped: true, healthy: false },
     };
   }
-  if (!existing?.State?.Running)
+  if (!existing?.State?.Running) {
+    await context.progress?.("checking_ports");
     for (const p of [c.http_port ?? 80, c.https_port ?? 443])
       await availablePort(
         { host_port: p, protocol: "tcp", host_ip: "0.0.0.0" },
-        context,
+        context.signal,
       );
+  }
   const image = text(
       c.image ?? "openresty/openresty:1.27.1.2-0-alpine",
       "image",

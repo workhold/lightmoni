@@ -113,6 +113,7 @@ try {
   // It requires neither the platform nor a working bundled Node executable.
   cpSync(join(repo, "deploy/agent/uninstall.sh"), join(common, "lightmoni-agent-runtime/uninstall.sh"));
   chmodSync(join(common, "lightmoni-agent-runtime/uninstall.sh"), 0o755);
+  cpSync(join(repo, "deploy/agent/deployment-permissions.mjs"), join(common, "lightmoni-agent-runtime/deployment-permissions.mjs"));
   const checksums = (await download("SHASUMS256.txt")).toString();
   const artifacts = [];
   const releases = [];

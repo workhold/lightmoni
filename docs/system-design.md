@@ -1811,3 +1811,27 @@ flowchart LR
 ```
 
 契约与验收见 `specs/069-docker-environment/`；Doca 同步保留现有图块与无关内容，新增本节原生流程图后回读节点、连线及目标段落。未执行真实 Linux 软件包安装时，不能将受控 SSH fixture 当作真实安装证据。
+
+## 71. 标准 Agent 部署与网站权限（SDD 071，待发布）
+
+用户安装标准 Agent 即授权其执行平台托管的 Docker/Compose/OpenResty 与受管网站操作。服务仍以 `lightmoni-agent` 运行，unit 配置 Docker 附加组与 `CAP_NET_BIND_SERVICE`，保留 `NoNewPrivileges`、只读系统/家目录及私有临时目录。Docker socket 访问接近宿主 root；普通脚本会继承实际服务权限，因此仅允许受信管理员授权脚本，不能把非 root 用户描述为宿主级安全沙箱。
+
+root 安装/升级流程执行固定包内权限准备器，确保非零 GID 的 Docker 系统组和独立公开目录存在，不改 socket mode 或全局用户组成员。每次启动的 `ExecStartPre` 在真实 unit 身份、附加组、capability 和挂载沙箱中验证私有配置读取、私有/公开目录写入和原子 rename、低端口绑定及已存在的 Docker socket/CLI。权限不足阻止 ready，只输出固定诊断；CLI/daemon 缺少属于依赖未就绪，不假报可部署。
+
+私有配置、证书私钥、网站版本、PID、日志及 Nginx 各类临时文件位于 `/var/lib/lightmoni-agent`，公开静态内容单独位于 `/var/lib/lightmoni-web/<data-dir-hash>`。unit 的 `ReadWritePaths` 精确覆盖这两个根；私有目录/私钥保持 0700/0600，公开目录/文件为 0755/0644。网站先校验候选配置，再切换、重载与 HTTP/TLS 读回，失败恢复旧版本；Docker OpenResty 读取既有固定受管挂载。任意外部备份、证书导出和 systemd 目标仍需独立精确授权。
+
+升级先准备目标权限再停止旧服务；失败或主动回退使用原 unit，保持配置、身份和 live queue。旧包没有检查器则保留旧契约；该兼容不等于其已具备新权限。后续独立特权执行器的身份、授权、策略及迁移另行实现，本次不声称已迁移。发布验收必须区分真实 Linux 服务权限/网站测试与生产发行、Agent 升级和现场部署。
+
+```mermaid
+flowchart LR
+  Install[root 安装 / 升级准备] --> Check[真实 unit 启动前检查]
+  Check --> Agent[非 root Agent / Docker 组 / 低端口 capability]
+  Center[中心授权的网站配置] --> Agent
+  Agent --> Docker[本机 Docker daemon]
+  Agent --> Private[私有配置 / 证书 / 版本 / PID / 日志 / temp]
+  Agent --> Public[独立公开静态目录]
+  Private --> Docker
+  Agent --> Nginx[同用户 Nginx / 校验与重载]
+  Private --> Nginx
+  Public --> Nginx
+```

@@ -1,0 +1,36 @@
+{
+  "resource": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "seq": 917,
+  "title": "LightMoni 系统设计基线",
+  "original_blocks": 707,
+  "final_blocks": 714,
+  "preserved_original_blocks": 707,
+  "changed_original_blocks": [],
+  "original_native_blocks": 34,
+  "preserved_original_native_blocks": 34,
+  "changed_original_native_blocks": [],
+  "new_section_at_end": [
+    "498969d4-1d33-426b-8f83-db02a1e1a4f0",
+    "agent071-scope",
+    "agent071-boundary",
+    "agent071-startup",
+    "agent071-files",
+    "agent071-lifecycle",
+    "agent071-permissions-flow"
+  ],
+  "new_text_verified": true,
+  "new_native_nodes": 8,
+  "new_native_edges": 10,
+  "new_native_graph_verified": true,
+  "heading": {
+    "type": "paragraph",
+    "id": "498969d4-1d33-426b-8f83-db02a1e1a4f0",
+    "children": [
+      {
+        "text": "第71章 标准 Agent 部署与网站权限（SDD 071，待发布）"
+      }
+    ],
+    "title": "h2"
+  },
+  "original_content_readback_seq": 916
+}

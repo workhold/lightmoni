@@ -405,6 +405,15 @@ export class AgentMaintenance {
       if (!["active", "inactive", "failed"].includes(activeState) || (activeState === "active") !== request.expected_service_active) fail("service_state_changed");
       if (this.hasOperation()) fail("operation_conflict");
       const uninstaller = this.prepareUninstaller(candidate, directory);
+      const permissions = path.join(candidate, "deployment-permissions.mjs");
+      let hasPermissions = false;
+      try {
+        this.checkManaged(permissions);
+        hasPermissions = true;
+      } catch (error) {
+        if (!absent(error)) throw error;
+      }
+      if (hasPermissions) this.command(path.join(candidate, "node"), [permissions, "prepare"]);
       this.atomic(path.join(directory, "previous-launcher"), fs.readFileSync(this.checkManaged(this.p("/usr/local/bin/lightmoni-agent"))), 0o755);
       this.atomic(path.join(directory, "previous-service"), fs.readFileSync(this.checkManaged(this.p("/etc/systemd/system/lightmoni-agent.service"))), 0o644);
       this.save(id, { status: "switching" });

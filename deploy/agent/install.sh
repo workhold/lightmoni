@@ -297,6 +297,11 @@ if id lightmoni-agent >/dev/null 2>&1; then :; else
   useradd --system --no-create-home --home-dir /var/lib/lightmoni-agent --shell /usr/sbin/nologin lightmoni-agent
 fi
 install -d -m 0700 -o lightmoni-agent -g lightmoni-agent /etc/lightmoni-agent /var/lib/lightmoni-agent
+if [ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ]; then
+  [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] || { echo 'Invalid deployment permission helper.' >&2; exit 1; }
+  installation_phase="deployment-permissions"
+  "$node" "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" prepare
+fi
 install -m 0600 -o lightmoni-agent -g lightmoni-agent "$staged_config" "/etc/lightmoni-agent/.config.new-$$"
 mv -f "/etc/lightmoni-agent/.config.new-$$" "$config_path"
 if [ "$enrollment_mode" = "yes" ]; then

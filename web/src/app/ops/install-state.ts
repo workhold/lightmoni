@@ -5,6 +5,8 @@ const DIAGNOSTICS:Record<string,[string,string,string,string]>={
  docker_cli_missing:['目标机器未安装 Docker','Docker is not installed on the target','补装 Docker 环境并确认 Agent 可访问后，重新部署此应用。','Install Docker and verify Agent access, then redeploy this application.'],
  docker_daemon_unavailable:['Docker 服务不可用','Docker service unavailable','检查并启动本机 Docker 服务后再部署。','Check and start the local Docker service before redeploying.'],
  operation_dependency_unavailable:['安装依赖不可用','Installation dependency unavailable','检查当前阶段所需的 Docker 和 Compose；旧记录未区分具体依赖。','Check Docker and Compose prerequisites for this stage; older records did not identify the dependency.'],
+
+ host_port_check_failed:['宿主端口检查失败','Host port check failed','检查 Agent 的网络权限和应用监听地址后再部署。','Check the Agent’s network permissions and the application bind address before deploying again.'],
  docker_unavailable:['无法连接 Docker','Cannot connect to Docker','检查目标机器的 Docker 服务是否已安装并启动。','Check that Docker is installed and running on the target.'],
  docker_prerequisite_failed:['Docker 检查失败','Docker prerequisite check failed','检查目标机器的 Docker 服务和 Agent 访问权限。','Check Docker and the Agent’s permissions on the target.'],
  docker_permission_denied:['Agent 无权访问 Docker','Agent cannot access Docker','为 Agent 配置访问 Docker 的权限后再部署。','Grant the Agent access to Docker before deploying again.'],

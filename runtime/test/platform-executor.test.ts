@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { Server } from "node:net";
 import { executeOperation, operationCommand } from "../src/agent/operations.js";
 import { normalizeApplication } from "../src/operations/platform.js";
 import {commandDiagnostic} from '../src/operations/install-progress.js';
@@ -345,4 +346,41 @@ test("Docker configuration preflight failures retain the active state and releas
     readFile(join(f.dataDir, "operations", "execution.lock"), "utf8"),
     { code: "ENOENT" },
   );
+});
+test("low-port EACCES reaches Docker validation for workloads and OpenResty and reports the port phase", async (t) => {
+  t.mock.method(Server.prototype, "listen", function (this: Server) {
+    queueMicrotask(() => this.emit("error", Object.assign(Error("listen denied"), { code: "EACCES" })));
+    return this;
+  });
+  for (const task of ["workload.apply", "gateway.apply"]) {
+    const f = await setup(t), calls: string[][] = [], events: any[] = [];
+    const result = await executeOperation(payload({
+      task,
+      instance_id: resourceID,
+      ...(task === "workload.apply"
+        ? { application: { mode: "container", image: "alpine:3.23", ports: [{ host_port: 80, container_port: 80 }] } }
+        : { image: "openresty/openresty:1.27.1.2-0-alpine", sites: [] }),
+    }), {
+      ...f.context,
+      command: async (_file, args) => {
+        calls.push(args);
+        if (args[0] === "ps") return { stdout: "", stderr: "" };
+        // Docker's later failure must still reject the operation after the local probe was skipped.
+        throw Object.assign(Error("hidden Docker details"), {
+          code: "operation_command_failed", diagnosticCode: "host_port_occupied",
+        });
+      },
+    }, async event => { events.push(event); });
+    const phase = task === "workload.apply" ? "validating_config" : "validating_gateway";
+    assert.equal(result.state, "failed");
+    assert.equal(result.code, task === "workload.apply" ? "compose_preflight_failed" : "gateway_preflight_failed");
+    assert.equal(result.snapshot.operations.data.cause_code, "host_port_occupied");
+    assert.equal(result.snapshot.operations.data.phase, phase);
+    const phases = events.flatMap(e => e.snapshot?.operations?.progress?.phase ?? []);
+    assert.ok(phases.indexOf("checking_ports") > phases.indexOf("checking_docker"));
+    assert.ok(phases.indexOf(phase) > phases.indexOf("checking_ports"));
+    assert.ok(calls.some(args => args[0] === (task === "workload.apply" ? "compose" : "run")));
+    assert.doesNotMatch(JSON.stringify(result), /hidden Docker details/);
+    await assert.rejects(readFile(join(f.dataDir, "operations", "execution.lock"), "utf8"), { code: "ENOENT" });
+  }
 });
