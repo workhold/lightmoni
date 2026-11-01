@@ -19,4 +19,4 @@
 
 ## 交付
 
-用户已授权全部本次提交通过 PR 合入 main、推 GitHub、发布 Docker。功能 PR 完成后从合入主干固定源码构建，发布与独立容器验收、镜像摘要、PR/Release 回执将记录在 SDD 069。
+用户已授权全部本次提交通过 PR 合入 main、推 GitHub、发布 Docker。功能已由 [PR #56](https://github.com/workhold/lightmoni/pull/56) 合入 main。从固定源码 46a4ac11c50de7fc48790744a462c871d8172df5 构建的双平台 Docker 与 GitHub Release 已发布，生产容器验收、摘要及回执见 [SDD 069 发布验收](../069-application-logos-release/validation.md)。
