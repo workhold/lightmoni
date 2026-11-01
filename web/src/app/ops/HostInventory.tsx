@@ -1,3 +1,4 @@
+import DockerEnvironmentPanel from './DockerEnvironmentPanel';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {ReloadOutlined} from '@ant-design/icons';
@@ -9,6 +10,7 @@ import {errorText,time,type Spec} from './model';
 const terminal=(state:string)=>['succeeded','failed','cancelled','unknown'].includes(state);
 export default function HostInventory({machine,onClose}:{machine?:{id:string;name:string};onClose:()=>void}){
  const {t}=useI18n(),navigate=useNavigate(),[modal,contextHolder]=Modal.useModal();
+ const [dockerOpen,setDockerOpen]=useState(false);
  const [activeTab,setActiveTab]=useState('applications'),[data,setData]=useState<Spec>({hosts:[],applications:[]});
  const [loading,setLoading]=useState(false),[submitting,setSubmitting]=useState(false),[error,setError]=useState(''),[search,setSearch]=useState('');
  const [job,setJob]=useState<Spec>(),[retry,setRetry]=useState<Spec>();
@@ -21,7 +23,7 @@ export default function HostInventory({machine,onClose}:{machine?:{id:string;nam
   finally{if(current===request.current)setLoading(false)}
  },[machine?.id]);
  useEffect(()=>{
-  scope.current++;setActiveTab('applications');setData({hosts:[],applications:[]});setSearch('');setJob(undefined);setRetry(undefined);setError('');setSubmitting(false);
+  scope.current++;setDockerOpen(false);setActiveTab('applications');setData({hosts:[],applications:[]});setSearch('');setJob(undefined);setRetry(undefined);setError('');setSubmitting(false);
   if(!machine)return;
   void load();const timer=setInterval(()=>void load(),10000);
   return()=>{request.current++;scope.current++;clearInterval(timer);confirm.current?.destroy()};
@@ -80,7 +82,8 @@ export default function HostInventory({machine,onClose}:{machine?:{id:string;nam
  const labels:Record<string,string>={not_connected:t('主机尚未接入 Agent','Host has no Agent'),waiting:t('等待 Agent 采集 Docker','Waiting for Docker collection'),stale:t('观测已过期，下面保留最近一次清单','Observation is stale; showing the last inventory'),degraded:t('应用指标或日志采集失败；Docker 清单可单独刷新','Application telemetry failed; Docker inventory can be refreshed separately'),unavailable:explain(host?.error||'docker_collection_unavailable')};
  const jobStates:Record<string,string>={queued:t('等待 Agent 领取','Waiting for Agent'),leased:t('Agent 已领取','Claimed by Agent'),accepted:t('Agent 已接受','Accepted'),staging:t('检查 Docker','Checking Docker'),activating:t('正在执行','Executing'),verifying:t('正在核对结果','Verifying'),succeeded:t('已完成，清单已更新','Completed; inventory updated'),failed:t('任务失败','Task failed'),cancelled:t('任务已取消或过期','Task cancelled or expired'),unknown:t('结果未知，请立即采集并检查，勿直接重试操作','Result unknown; collect and inspect before retrying')};
  const capabilities=host?.docker_capabilities??[],canControl=host?.online&&capabilities.includes('docker.control')&&['ready','degraded'].includes(host?.state);
- return <Drawer title={t('主机应用与 Docker','Host applications & Docker')+' · '+(machine?.name??'')} open={!!machine} size={1100} onClose={onClose} destroyOnHidden>
+ return <><DockerEnvironmentPanel machine={dockerOpen?machine:undefined} onClose={()=>{setDockerOpen(false);void load();}}/>
+ <Drawer title={t('主机应用与 Docker','Host applications & Docker')+' · '+(machine?.name??'')} open={!!machine} size={1100} onClose={onClose} destroyOnHidden>
   {contextHolder}
   <div className="lm-ops-section-heading"><span className="lm-ops-note">{host?.observed_at&&Date.parse(host.observed_at)>0?t('最近清单','Last inventory')+' · '+time(host.observed_at):t('尚无成功采集的清单','No successful inventory yet')}{host?.attempted_at&&host?.state==='unavailable'?' · '+t('最近尝试','Last attempt')+' '+time(host.attempted_at):''}</span><Button loading={busy} disabled={!host?.online||!capabilities.includes('docker.inventory')||!!retry} icon={<ReloadOutlined/>} onClick={refresh}>{t('立即采集','Collect now')}</Button></div>
   {error&&<Alert showIcon type="error" title={error}/>}
@@ -90,6 +93,7 @@ export default function HostInventory({machine,onClose}:{machine?:{id:string;nam
   {host&&host.state!=='ready'&&<Alert showIcon type="warning" title={labels[host.state]??host.state}/>}
   {job&&<Alert showIcon type={job.state==='succeeded'?'success':['failed','unknown','cancelled'].includes(job.state)?'warning':'info'} title={(job.operation?actionNames[job.operation]??t('采集清单','Collect inventory'):'Docker')+' · '+(jobStates[job.state]??job.state)} description={job.code?explain(job.code):undefined}/>}
   {host?.truncated&&<Alert showIcon type="warning" title={t('清单达到容器数量或大小上限，部分容器未显示','Inventory reached its count or size limit; some containers are omitted')}/>}
+  <Button style={{marginBottom:12}} onClick={()=>setDockerOpen(true)}>{t('检查 / 安装 Docker 环境','Check / install Docker environment')}</Button>
   <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
    {key:'applications',label:t('平台应用','Platform applications')+` (${data.applications?.length??0})`,children:<Table<Spec> loading={loading} size="small" rowKey="id" dataSource={data.applications??[]} pagination={{pageSize:10}} locale={{emptyText:<Empty description={<>{t('此主机暂无平台应用','No platform applications on this host')}{host?.containers?.length>0&&<p><Button type="link" onClick={()=>setActiveTab('docker')}>{t('查看此主机的 Docker 容器','View Docker containers on this host')}</Button></p>}</>}/>}} columns={[
     {title:t('应用','Application'),render:(_,a)=><><strong>{a.name}</strong><small>{a.spec.service_name}</small></>},
@@ -108,5 +112,5 @@ export default function HostInventory({machine,onClose}:{machine?:{id:string;nam
     ]}/>
    </>},
   ]}/>
- </Drawer>;
+ </Drawer></>;
 }

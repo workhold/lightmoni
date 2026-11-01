@@ -17,8 +17,11 @@ export const dockerError = (error: any): string => {
 export async function readDockerInventory(command: OperationExecutionContext['command'], signal?: AbortSignal): Promise<DockerInventory> {
   const result = await command('docker',['--context','default','ps','--all','--no-trunc','--format','{{json .}}'],{timeoutMs:15000,signal});
   const rows = result.stdout.trim().split('\n').filter(Boolean).map(l=>JSON.parse(l));
+  let composeAvailable:boolean|undefined;
+  try {await command('docker',['--context','default','compose','version','--short'],{timeoutMs:15000,signal});composeAvailable=true;}
+  catch(error:any){if(error?.diagnosticCode==='compose_unavailable')composeAvailable=false;}
   const at = new Date().toISOString();
-  const snapshot = dockerInventory({observed_at:at,attempted_at:at,state:'ready',truncated:rows.length>500,containers:rows.slice(0,500).map(c=>{
+  const snapshot = dockerInventory({observed_at:at,attempted_at:at,compose_available:composeAvailable,state:'ready',truncated:rows.length>500,containers:rows.slice(0,500).map(c=>{
     if(!/^[a-f0-9]{64}$/.test(c.ID))throw Error('invalid_docker_inventory');
     const label = String(c.Labels??'').split(',').find(v=>v.startsWith('io.lightmoni.platform.instance='));
     return {id:c.ID,name:c.Names,image:c.Image,state:c.State,ports:c.Ports,deployment_id:label?.slice('io.lightmoni.platform.instance='.length)??''};
