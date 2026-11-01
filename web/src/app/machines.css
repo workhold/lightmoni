@@ -6,6 +6,11 @@
 .lm-machine-actions .lm-machine-blocked .ant-btn-link{height:auto;padding:2px 0;font-size:12px;white-space:normal}
 .lm-machine-uninstall-steps{padding-left:22px;line-height:1.9}
 .lm-machine-uninstall-actions{margin:12px 0}
+.lm-machine-uninstall-resume{margin-top:8px}
+.lm-agent-uninstall-dialog .ant-modal-container{display:flex;flex-direction:column;max-height:calc(100dvh - 48px)}
+.lm-agent-uninstall-dialog .ant-modal-header,.lm-agent-uninstall-dialog .ant-modal-footer{flex-shrink:0}
+.lm-agent-uninstall-dialog .ant-modal-body{min-height:0;overflow-y:auto;overflow-x:hidden;overflow-wrap:anywhere;padding-right:4px}
+.lm-agent-uninstall-dialog .ant-modal-footer{text-align:start}
 .lm-machine-path{display:block;overflow-wrap:anywhere}
 .lm-hosts-nodes-page>.lm-machine-notice{margin-bottom:18px}
 .lm-hosts-nodes-page .lm-node-actions{margin-bottom:10px}

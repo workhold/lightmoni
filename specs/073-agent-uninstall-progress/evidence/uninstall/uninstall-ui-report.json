@@ -1,0 +1,29 @@
+{
+  "scope": "Isolated production web bundle with intercepted requests; no remote execution.",
+  "checked": [
+    "Identity check creates a saved uninstall plan without applying; retained data and enrollment warning are visible",
+    "The destructive action requires a separate administrator confirmation",
+    "Successful receipt separately confirms remote removal, data retention, and credential revocation",
+    "Host details retain uninstall history and open the saved operation",
+    "Cancelling a pending plan never runs removal",
+    "Unknown outcomes expose fixed read-only reconciliation and never repeat apply",
+    "Read-only reconciliation can report incomplete removal and a stopped service without replaying the old plan",
+    "A failed refresh after a transport error blocks blind retries until the saved state is retrieved",
+    "Deep links reopen the same expired plan, prevent apply, and allow cancellation",
+    "Locked host resumes the exact pending plan without creating or applying; status and cancel stay in viewport, and cancellation refreshes capabilities",
+    "Capability reason alone exposes recovery and unfinished history takes precedence over a newer finished record",
+    "A history record for another host is rejected before a dialog or mutation is enabled",
+    "An expired blocking plan can be opened from the list and cancelled without attempting removal",
+    "A failed apply whose durable state remains awaiting approval allows cancellation while blocking duplicate apply",
+    "A pending apply shows dispatch immediately, polls running while busy, and ignores a delayed running read after success",
+    "Existing running workflow retries read failures, observes unknown, reopens verification from the list, and stops polling on close",
+    "English resume controls and status remain visible in a shorter 800px viewport",
+    "Detecting an existing Agent stops fresh-install planning before any identity can be replaced",
+    "Unknown Agent presence also blocks fresh-install planning",
+    "Unavailable uninstall capability shows an actionable task-busy reason",
+    "English preview localizes identity verification, data retention, and confirmation controls",
+    "Members never load host data or uninstall controls"
+  ],
+  "errors": [],
+  "unexpected": []
+}
