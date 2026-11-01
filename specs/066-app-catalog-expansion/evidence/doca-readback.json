@@ -1,0 +1,321 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "before_seq": 910,
+  "saved_seq": 911,
+  "readback_seq": 911,
+  "before_blocks": 686,
+  "after_blocks": 693,
+  "write_operations": "7 insertBlock only; no existing blocks edited",
+  "new_section_blocks": 7,
+  "new_section_matches": true,
+  "original_native_diagrams_verified": 33,
+  "diagram_nodes_edges_and_properties_unchanged": true,
+  "regions": [
+    {
+      "id": "catalog066-design-heading",
+      "type": "paragraph",
+      "seq": 911,
+      "identical": true
+    },
+    {
+      "id": "catalog066-design-1",
+      "type": "paragraph",
+      "seq": 911,
+      "identical": true
+    },
+    {
+      "id": "catalog066-design-2",
+      "type": "paragraph",
+      "seq": 911,
+      "identical": true
+    },
+    {
+      "id": "catalog066-design-3",
+      "type": "paragraph",
+      "seq": 911,
+      "identical": true
+    },
+    {
+      "id": "catalog066-design-4",
+      "type": "paragraph",
+      "seq": 911,
+      "identical": true
+    },
+    {
+      "id": "catalog066-design-5",
+      "type": "paragraph",
+      "seq": 911,
+      "identical": true
+    },
+    {
+      "id": "catalog066-design-6",
+      "type": "paragraph",
+      "seq": 911,
+      "identical": true
+    },
+    {
+      "id": "f-architecture-8a1f",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 10,
+      "edges": 8
+    },
+    {
+      "id": "f-center-modules-7d039612",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 10,
+      "edges": 9
+    },
+    {
+      "id": "f-deployment-2b7c",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 8,
+      "edges": 7
+    },
+    {
+      "id": "f-enrollment-4c9d",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 10,
+      "edges": 11
+    },
+    {
+      "id": "host-access036-native-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 9,
+      "edges": 9
+    },
+    {
+      "id": "host037-merged-native-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 8,
+      "edges": 8
+    },
+    {
+      "id": "host038-registered-onboarding-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 8,
+      "edges": 7
+    },
+    {
+      "id": "host039-retention-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 8,
+      "edges": 9
+    },
+    {
+      "id": "host040-automatic-identity-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 9,
+      "edges": 9
+    },
+    {
+      "id": "host050-design-6",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 7,
+      "edges": 7
+    },
+    {
+      "id": "host051-network-discovery-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 10,
+      "edges": 10
+    },
+    {
+      "id": "install053-recovery-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 10,
+      "edges": 10
+    },
+    {
+      "id": "maintenance058-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 13,
+      "edges": 14
+    },
+    {
+      "id": "f-ai-sequence-5e0f",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 10,
+      "edges": 10
+    },
+    {
+      "id": "9a7f0e0f-303b-47a8-a194-6434833a4da1",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 7,
+      "edges": 6
+    },
+    {
+      "id": "ca797620-3473-4683-b77a-58f7f968d79c",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 15,
+      "edges": 17
+    },
+    {
+      "id": "ops033-control-plane-native",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 11,
+      "edges": 14
+    },
+    {
+      "id": "cluster042-baseline-model",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 8,
+      "edges": 6
+    },
+    {
+      "id": "website043-routing-native",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 8,
+      "edges": 9
+    },
+    {
+      "id": "task043-control-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 12,
+      "edges": 13
+    },
+    {
+      "id": "task043-execution-states",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 7,
+      "edges": 7
+    },
+    {
+      "id": "appinstall058-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 6,
+      "edges": 7
+    },
+    {
+      "id": "agent044-maintenance-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 14,
+      "edges": 14
+    },
+    {
+      "id": "agent044-update-states",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 8,
+      "edges": 11
+    },
+    {
+      "id": "mcp046-overview",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 15,
+      "edges": 17
+    },
+    {
+      "id": "mcp046-approval",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 10,
+      "edges": 10
+    },
+    {
+      "id": "mcp046-idempotency",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 8,
+      "edges": 9
+    },
+    {
+      "id": "certificate053-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 12,
+      "edges": 12
+    },
+    {
+      "id": "docker057-control-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 7,
+      "edges": 8
+    },
+    {
+      "id": "images059-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 9,
+      "edges": 10
+    },
+    {
+      "id": "images059-registry-flow",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 10,
+      "edges": 10
+    },
+    {
+      "id": "privileged060-hld",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 9,
+      "edges": 9
+    },
+    {
+      "id": "privileged060-permit",
+      "type": "flowchart",
+      "seq": 911,
+      "identical": true,
+      "nodes": 10,
+      "edges": 10
+    }
+  ]
+}

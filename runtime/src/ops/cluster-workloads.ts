@@ -796,6 +796,12 @@ export function createClusterWorkloads(
       if(role==='openresty'&&hostPorts&&Object.keys(hostPorts).length)fail(400,'openresty_fixed_host_ports');
       const c = cluster(d.cluster_id),
         targets = list(d.machine_ids ?? [], "machine_ids");
+      const template = source.type === 'store' ? catalogTemplate(source.template_id) : undefined;
+      if (template?.deployment_modes && !template.deployment_modes.includes(mode)) fail(400, 'catalog_deployment_mode_unsupported');
+      if (template?.architectures) for (const key of targets) {
+        const machine = member(c.id, key), arch = agent(machine.agent_id)?.arch;
+        if (arch && !template.architectures.includes(arch === 'x86_64' ? 'amd64' : arch === 'aarch64' ? 'arm64' : arch)) fail(400, 'catalog_architecture_unsupported');
+      }
       targets.forEach((key) => {
         const m = member(c.id, key);
         if (!m.agent_id || !agent(m.agent_id))

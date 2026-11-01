@@ -1,0 +1,25 @@
+{
+  "checks": [
+    {
+      "application": "dbx",
+      "image": "t8y2/dbx:0.6.62",
+      "source": "official CNB, platform manifest/config/layers equal to Hub",
+      "architecture": "arm64",
+      "platform_config_digest": "sha256:64def6b1262ff92a75645e3cdba6da9ecc4ebbcf5cff3ebe59e6bcdbe5e17f12",
+      "index_digest": "sha256:baa67c973db2146b013b44558484df6070b9cb818f2779c5669bd49b28af6a46",
+      "receipt": "succeeded",
+      "login_required": true,
+      "wrong_password_rejected": true,
+      "login_succeeded": true,
+      "data_and_connection_survive_recreate": true
+    },
+    {
+      "application": "one-shot plus nginx",
+      "actual_agent_apply": true,
+      "init_exited_zero": true,
+      "apply_healthy": true,
+      "subsequent_inspect_healthy": true
+    }
+  ],
+  "remaining_owned_resources": 0
+}

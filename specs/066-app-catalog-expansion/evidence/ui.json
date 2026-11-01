@@ -1,0 +1,11 @@
+{
+  "checks": [
+    "DBX real HTTP install saves encrypted resource and creates pending QA Agent work; no fabricated completion",
+    "zh-CN/dark/1440: six category counts, only DBX tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow",
+    "en-US/light/1440: six category counts, only DBX tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow",
+    "zh-CN/light/390: six category counts, only DBX tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow",
+    "en-US/dark/390: six category counts, only DBX tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow"
+  ],
+  "errors": [],
+  "media": "/Users/zhangsiwen/dev/lightmoni/lightmoni/artifacts/screenshots/specs/066-app-catalog-expansion/evidence"
+}

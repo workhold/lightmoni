@@ -1,0 +1,21 @@
+{
+  "validation": "Harbor official prepare image run",
+  "result": "blocked",
+  "reason": "Official Docker Hub and digest-identical mirror image layer downloads did not complete. Fallback dependency installation/download also stalled. No Harbor startup or configuration failure was observed.",
+  "official_image": "goharbor/prepare:v2.14.6",
+  "official_manifest_digest": "sha256:42393b1f0ae645b0f69ab48540ca4819cbd4999d34cc5cf5380fe4c9e9dc18e1",
+  "official_platform": "linux/amd64",
+  "source_layer_digest": "sha256:39a2553c3d137cc25ebc16296d613089073e91439c3d3f58df2191418a2c7567",
+  "source_layer_sha256_verified": true,
+  "source_verified": "120 files/directories extracted from official image source layer",
+  "findings": [
+    "env files generated root:root mode0640 must be changed to uid/gid10000 mode0600 for in-container envloader",
+    "official prepare required config keys confirmed by source review",
+    "core/registry signing paths and registryctl/jobservice config paths confirmed"
+  ],
+  "cleanup_exit_code": 0,
+  "temporary_containers_remaining": 0,
+  "temporary_volumes_remaining": 0,
+  "temporary_networks_remaining": 0,
+  "runtime_credentials_logged": false
+}

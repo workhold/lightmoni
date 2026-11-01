@@ -1,3 +1,4 @@
+import {oneShotServices} from '../operations/workload-readiness.js';
 import { id } from "../shared/crypto.js";
 import { fail } from "../shared/http.js";
 import {
@@ -546,6 +547,7 @@ export class OperationsPlatformStore implements PlatformStore {
             ? ["operations.platform.website-auth.v1"]
             : []),
           ...(config.image_cache ? ["operations.platform.image-cache.v1"] : []),
+          ...(oneShotServices(config.application?.compose?.services).length ? ["operations.platform.oneshot.v1"] : []),
         ],
         target: { operations_resource_id: resource.id },
         expiresInSeconds: 900,
