@@ -39,7 +39,7 @@ DBX Docker Hub 层下载超时，实际使用项目官方 CNB 镜像；已核对
 
 ## 架构影响与在线同步
 
-适用。新增模板元数据/构建职责、一次性服务健康语义、第三方 AI/外部 S3 拓扑与凭据边界。仓库更新 [docs/system-design.md 第 66 节](../../docs/system-design.md#66-应用商店扩展与-dbxsdd-066)。Doca [LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 新增对应章节。
+适用。新增模板元数据/构建职责、一次性服务健康语义、第三方 AI/外部 S3 拓扑与凭据边界。仓库更新 [docs/system-design.md 第 66 节](../../docs/system-design.md)。Doca [LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 新增对应章节。
 
 保存 seq 911 后按最新版本回读：新增 7 个块与目标文本一致；文档块数 686 → 693；原有 33 个原生图的节点、连线与全部属性均保持一致。只插入新块，未改写已有块；[doca-readback.json](evidence/doca-readback.json) 保留逐区域结果。运行时凭据未进入仓库、文档或证据。
 
@@ -47,4 +47,4 @@ DBX Docker Hub 层下载超时，实际使用项目官方 CNB 镜像；已核对
 
 本机未验证 NVIDIA 推理，也未逐一启动全部 27 个第三方应用进行业务验收。Harbor 官方完整镜像的大层下载未完成，见 [harbor-prepare-blocked-evidence.json](evidence/harbor-prepare-blocked-evidence.json)，因此其完整组件互通、推拉与线上重启仍需 amd64 环境验收。Dify/FastGPT 完整模型与插件业务未实测。上述限制不以 Compose 校验或源码验证替代。
 
-代码通过功能分支交付 GitHub Draft PR，目标 main；不自动合并、发布镜像或更新线上容器。PR 链接在创建后补记。
+代码通过功能分支交付 GitHub Draft PR，目标 main；不自动合并、发布镜像或更新线上容器。交付：[GitHub Draft PR #53](https://github.com/workhold/lightmoni/pull/53)，实现提交 `78501fc`。
