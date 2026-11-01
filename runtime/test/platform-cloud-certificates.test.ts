@@ -13,7 +13,7 @@ import {
 import { createServer } from "node:http";
 import { DB } from "../src/shared/sqlite.js";
 import { cipher } from "../src/shared/crypto.js";
-import { HTTPError, Router } from "../src/shared/http.js";
+import { Router } from "../src/shared/http.js";
 import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { OperationsPlatformStore } from "../src/ops/store.js";
 import {
@@ -32,7 +32,7 @@ import {
   validateCertificateTarget,
 } from "../src/ops/certificates.js";
 import type { Dependencies } from "../src/shared/types.js";
-import type { PlatformOptions, PlatformResource } from "../src/ops/types.js";
+import type { PlatformOptions } from "../src/ops/types.js";
 
 function setup(
   t: any,
@@ -90,23 +90,6 @@ function legacyCertificate(f: ReturnType<typeof setup>, name: string, spec: Reco
   f.db.run('UPDATE ops_platform_resources SET name=?,spec_cipher=? WHERE id=?',name,encrypted,resource.id);
   f.db.run('UPDATE ops_platform_revisions SET name=?,spec_cipher=? WHERE resource_id=?',name,encrypted,resource.id);
   return f.store.get(resource.id);
-}
-async function assertHostCertificateDeliveryRejected(f: ReturnType<typeof setup>, target: PlatformResource) {
-  const runs = f.db.get<any>("SELECT COUNT(*) n FROM ops_platform_runs")!.n,
-    jobs = f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n;
-  for (const action of ["sync", "retry"])
-    await assert.rejects(
-      f.controller.perform(f.store.get(target.id), action, {}, "admin"),
-      error => error instanceof HTTPError && error.status === 409 && error.message === "privileged_profile_not_implemented",
-    );
-  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM ops_platform_runs")!.n, runs);
-  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, jobs);
-  assert.equal(f.store.actions(target.id).length, 0);
-  assert.throws(() => f.jobs.claim("node-a", ["operations.platform"]), error => error instanceof HTTPError && error.status === 409 && error.message === "privileged_executor_required");
-  assert.equal(f.jobs.claim("node-a", ["health.http"]), null);
-  assert.equal(f.store.get(target.id).status.applied_certificate_version, undefined);
-  assert.equal(f.store.get(target.id).status.last_error, "privileged_profile_not_implemented");
-  assert.doesNotMatch(JSON.stringify({ target: f.store.public(f.store.get(target.id)), runs: f.store.actions() }), /BEGIN (?:PRIVATE KEY|CERTIFICATE)|private-hook-token|printf hello/);
 }
 const json = (body: any) =>
   new Response(JSON.stringify(body), {
@@ -429,7 +412,7 @@ test("a timed out DNS create is journalled unknown and never automatically repla
   );
 });
 
-test("self signed issuance stays encrypted, rejects retired host delivery, rotates and exposes expiry", async (t) => {
+test("self signed lifecycle encrypts versions, deduplicates target delivery, rotates and exposes expiry", async (t) => {
   const f = setup(t),
     cert = f.store.create(
       "certificate",
@@ -477,17 +460,49 @@ test("self signed issuance stays encrypted, rejects retired host delivery, rotat
   );
   await f.controller.tick?.();
   await f.controller.tick?.();
-  await assertHostCertificateDeliveryRejected(f, target);
-  assert.equal(f.store.get(target.id).status.desired_certificate_version, material.certificate_version);
-  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0);
+  assert.equal(f.store.actions(target.id).length, 1);
+  const run = f.store.actions(target.id)[0],
+    job = f.jobs.claim("node-a", ["operations.platform"])!;
+  const config = f.store.resolvePayload(job).resource.config;
+  assert.equal(config.task, "certificate.install");
+  assert.equal(config.certificate_version, material.certificate_version);
+  for (const [i, phase] of [
+    "accepted",
+    "staging",
+    "activating",
+    "verifying",
+  ].entries())
+    f.jobs.event("node-a", job.id, {
+      lease_id: job.lease_id,
+      sequence: i + 1,
+      phase,
+      summary: "step",
+    });
+  f.jobs.result("node-a", job.id, {
+    lease_id: job.lease_id,
+    state: "succeeded",
+    snapshot: {
+      health: { healthy: true },
+      operations: {
+        operation_id: run.id,
+        resource_id: target.id,
+        data: {
+          fingerprint_sha256: material.fingerprint_sha256,
+          certificate_version: material.certificate_version,
+        },
+      },
+    },
+  });
+  assert.equal(
+    f.store.get(target.id).status.applied_certificate_version,
+    material.certificate_version,
+  );
   f.advance(62);
   await f.controller.tick?.();
   for(let attempt=0;attempt<100&&f.store.get(cert.id).status.state==='issuing';attempt++) await new Promise(resolve=>setTimeout(resolve,10));
   const renewed = getCertificateMaterial(f.store, cert.id);
   assert.notEqual(renewed.certificate_version, material.certificate_version);
-  await assertHostCertificateDeliveryRejected(f, target);
-  assert.equal(f.store.get(target.id).status.desired_certificate_version, renewed.certificate_version);
-  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0);
+  assert.equal(f.store.actions(target.id).length, 2);
   f.db.run("UPDATE users SET role='member' WHERE id='admin'");
   f.advance(100);
   await f.controller.tick?.();
@@ -527,7 +542,7 @@ test("uploaded material is preserved through blank controls and never auto renew
   assert.equal(f.db.all("SELECT * FROM ops_certificate_versions").length, 1);
 });
 
-test("hook secret environment stays encrypted while automatic and explicit legacy delivery create no host jobs", async (t) => {
+test("hook secret environment is encrypted and new certificate versions trigger one authorized job", async (t) => {
   const f = setup(t),
     cert = f.store.create(
       "certificate",
@@ -561,11 +576,12 @@ test("hook secret environment stays encrypted while automatic and explicit legac
   await f.controller.perform(cert, "issue", {}, "admin");
   await f.controller.tick?.();
   await f.controller.tick?.();
-  await assertHostCertificateDeliveryRejected(f, hook);
-  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0);
-  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM ops_platform_runs")!.n, 1, "issuance remains a genuine center execution; delivery has no run");
-  const saved = f.db.get<any>("SELECT spec_cipher FROM ops_platform_resources WHERE id=?", hook.id);
-  assert.equal(JSON.parse(f.deps.decrypt(saved.spec_cipher)).env.CUSTOM_TOKEN, "private-hook-token");
+  assert.equal(f.store.actions(hook.id).length, 1);
+  const job = f.jobs.claim("node-a", ["operations.platform"])!,
+    config = f.store.resolvePayload(job).resource.config;
+  assert.equal(config.task, "hook.run");
+  assert.equal(config.env.CUSTOM_TOKEN, "private-hook-token");
+  assert.ok(config.certificate.private_key_pem.includes("BEGIN"));
   assert.equal(
     JSON.stringify(f.db.all("SELECT * FROM ops_platform_runs")).includes(
       "private-hook-token",
@@ -580,37 +596,6 @@ test("hook secret environment stays encrypted while automatic and explicit legac
       }),
     /environment_key/,
   );
-});
-
-test("historical certificate delivery evidence stays readable while private payload retrieval is removed without decryption", async t => {
-  const f = setup(t), cert = f.store.create("certificate", "Historical certificate", { source: "self_signed", domains: ["history.example.test"] }, "admin"),
-    target = f.store.create("certificate_target", "Historical files", { certificate_id: cert.id, type: "directory", agent_id: "node-a", path: "/etc/history/tls", enabled: false }, "admin");
-  await f.controller.perform(cert, "issue", {}, "admin");
-  const material = getCertificateMaterial(f.store, cert.id), runID = "historical-certificate-delivery", jobID = "historical-certificate-job", at = f.deps.now().toISOString(),
-    payload = f.deps.encrypt(JSON.stringify({ resource: { config: { task: "certificate.install", certificate_pem: material.certificate_pem, private_key_pem: material.private_key_pem } } })),
-    result = { verified: true, fingerprint_sha256: material.fingerprint_sha256, certificate_version: material.certificate_version };
-  // Seed a completed pre-removal receipt as historical evidence, never through an executable legacy enqueue path.
-  f.db.run("INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,target_json,issued_at,expires_at,receipt_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    jobID, "node-a", target.id, runID, "succeeded", '["operations.platform"]', JSON.stringify([{ kind: "operations", operation_id: runID, domain: "platform" }]), "{}", at, at,
-    JSON.stringify({ state: "succeeded", snapshot: { health: { healthy: true }, operations: { operation_id: runID, resource_id: target.id, data: result } } }), at, at);
-  f.db.run("INSERT INTO ops_platform_runs(id,resource_id,resource_revision,agent_id,action,state,payload_cipher,result_json,job_id,actor,dedupe_key,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    runID, target.id, target.revision, "node-a", "sync", "succeeded", payload, JSON.stringify(result), jobID, "admin", "historical-certificate-delivery-once", at, at);
-  const beforeRun = f.db.get("SELECT * FROM ops_platform_runs WHERE id=?", runID), beforeJob = f.db.get("SELECT * FROM agent_jobs WHERE id=?", jobID),
-    evidence = f.store.action(runID), job = f.jobs.get(jobID);
-  assert.equal(evidence.state, "succeeded");
-  assert.deepEqual(evidence.result, result);
-  assert.throws(() => f.jobs.claim("node-a", ["operations.platform"]), error => error instanceof HTTPError && error.status === 409 && error.message === "privileged_executor_required");
-  assert.equal(f.jobs.claim("node-a", ["health.http"]), null);
-  let decryptions = 0;
-  f.deps.decrypt = () => { decryptions++; throw Error("removed payload retrieval must not decrypt historical secrets"); };
-  for (const value of [job, { id: "missing", agent_id: "node-a" }])
-    assert.throws(() => f.store.resolvePayload(value), error => error instanceof HTTPError && error.status === 410 && error.message === "legacy_agent_payload_removed");
-  assert.equal(decryptions, 0);
-  assert.deepEqual(f.db.get("SELECT * FROM ops_platform_runs WHERE id=?", runID), beforeRun);
-  assert.deepEqual(f.db.get("SELECT * FROM agent_jobs WHERE id=?", jobID), beforeJob);
-  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 1);
-  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM ops_platform_runs")!.n, 2);
-  assert.doesNotMatch(JSON.stringify({ evidence, job, runs: f.db.all("SELECT * FROM ops_platform_runs") }), /BEGIN (?:PRIVATE KEY|CERTIFICATE)|payload_cipher.*BEGIN/);
 });
 
 for (const provider of ["aliyun", "tencent", "volcengine"] as const)

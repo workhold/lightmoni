@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, normalize } from "node:path";
+import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import { createAgentLifecycleSchema, isAgentRemoved } from "./agent-lifecycle.js";
@@ -618,17 +620,6 @@ export function registerServiceDeployments(
       );
       appendEvent(update.deploymentID, phase, state, actor, summary, observedCode);
     };
-    if (update.code === "legacy_agent_write_removed") {
-      const previous = JSON.parse(deployment.receipt_json || "{}");
-      if (previous.job_id === update.jobID && previous.code === update.code && previous.state === update.phase) return;
-      const phase = update.phase === "cancelled" ? "cancelled" : "unknown";
-      const summary = phase === "cancelled" ? "旧普通 Agent 写任务未领取，已取消" : "旧普通 Agent 写任务执行结果未知，需人工核对主机";
-      db.run("UPDATE deployments SET status=?,phase=?,error_code=?,error=?,receipt_json=? WHERE id=? AND operation_id=?",
-        phase === "cancelled" && ["agent_ready", "rollback_pending"].includes(state) ? "cancelled" : state,
-        phase, update.code, summary, JSON.stringify(receipt(phase, update.code, summary)), deployment.id, update.operationID);
-      appendEvent(deployment.id, phase, phase === "cancelled" ? "cancelled" : state, actor, summary, update.code);
-      return;
-    }
     if (update.phase === "accepted") {
       appendObserved("accepted", "LightMoni Agent 已接收部署任务");
       return;
@@ -766,17 +757,83 @@ export function registerServiceDeployments(
     const machine = ensureMachine(target.machine_id), at = nowISO(deps), deploymentID = id();
     const preflight = latestPreflight(serviceID, targetID);
     const observed = preflight.view?.snapshot?.preflight;
+    let providerPlanStatus = "generic";
+    let providerPlanReason = !release.artifact_digest || Number(release.artifact_size || 0) < 1
+      ? "artifact_missing"
+      : !preflight.view?.current || !preflight.view.ready ? "agent_preflight_required" : "deployment_adapter_required";
+    let actions: Record<string, unknown>[] = [];
+    let capabilities: string[] = [];
+    let rollbackActions: Record<string, unknown>[] = [];
+    let rollbackCapabilities: string[] = [];
     const previousVersion = typeof observed?.current_version === "string" ? observed.current_version : "";
     const previousRelease = previousVersion
       ? db.get<any>("SELECT id,version,status FROM releases WHERE service_id=? AND version=?", serviceID, previousVersion)
       : undefined;
-    // Metadata/preflight can be reviewed, but the former ordinary-Agent apply
-    // actions are no longer an executable deployment profile.
+    const manifest = parse<Record<string, any>>(release.manifest_json, {});
+    if (providerPlanReason === "deployment_adapter_required") {
+      const agent = db.get<any>("SELECT platform,arch FROM agents WHERE id=?", machine.agent_id);
+      const targetArchitecture = agent?.platform === "linux" && agent.arch === "amd64" ? "linux-amd64"
+        : agent?.platform === "linux" && agent.arch === "arm64" ? "linux-arm64" : "";
+      if (release.status !== "ready" || release.artifact_format !== "lightmoni-release-v1.tar.gz"
+        || !SHA256.test(String(release.artifact_digest)) || !Number.isSafeInteger(Number(release.artifact_size))
+        || Number(release.artifact_size) < 1 || manifest.service_id !== serviceID || manifest.version !== release.version
+        || !new Set(["any", "linux-amd64", "linux-arm64"]).has(manifest.architecture)) {
+        providerPlanReason = "artifact_invalid";
+      } else if (manifest.architecture !== "any" && manifest.architecture !== targetArchitecture) {
+        providerPlanReason = targetArchitecture ? "artifact_architecture_mismatch" : "agent_architecture_unknown";
+      } else if (!observed?.entrypoint_matches || !observed?.current_pointer_valid) {
+        providerPlanReason = "unit_entrypoint_mismatch";
+      } else {
+        try {
+          const adapter = deploymentAdapters.require("systemd");
+          const targetSnapshot = {
+            available: observed.systemd_available === true,
+            unitExists: observed.unit_exists === true,
+            activeState: observed.active_state,
+            enabled: observed.enabled,
+            currentVersion: observed.current_version,
+          };
+          const serviceTarget = { id: target.id, provider: "systemd" as const, unit: preflight.current.config.unit, releaseDirectory: preflight.current.config.release_directory };
+          const probe = adapter.probe({ target: serviceTarget, snapshot: targetSnapshot });
+          const providerPlan = adapter.plan({
+            id: deploymentID,
+            spec: {
+              serviceId: serviceID,
+              target: serviceTarget,
+              artifact: {
+                release_id: release.id, service_id: serviceID, version: release.version,
+                architecture: manifest.architecture, sha256: release.artifact_digest,
+                size: Number(release.artifact_size),
+              },
+              healthChecks: [{ kind: "systemd-active", unit: serviceTarget.unit }],
+            },
+            probe,
+          });
+          actions = [...providerPlan.apply, ...providerPlan.verify];
+          capabilities = [...new Set(actions.map((action: any) => action.kind === "stage_artifact" ? "artifact.stage"
+            : action.kind === "activate_release" ? "artifact.activate_release"
+              : action.kind === "systemd" ? `systemd.${action.operation.replace(/-/g, "_")}`
+                : action.kind === "health_check" ? `health.${action.check.kind === "systemd-active" ? "systemd" : action.check.kind}` : ""))].filter(Boolean).sort();
+          providerPlanStatus = "ready";
+          providerPlanReason = "";
+          if (previousVersion && previousRelease?.status === "ready") {
+            rollbackActions = [
+              { kind: "activate_release", releaseDirectory: serviceTarget.releaseDirectory, version: previousVersion, expectedCurrentVersion: release.version },
+              { kind: "systemd", operation: "restart", unit: serviceTarget.unit },
+              { kind: "health_check", check: { kind: "systemd-active", unit: serviceTarget.unit } },
+            ];
+            rollbackCapabilities = ["artifact.activate_release", "health.systemd", "systemd.restart"];
+          }
+        } catch {
+          providerPlanReason = "deployment_adapter_rejected";
+        }
+      }
+    }
     const plan = {
       version: "service-deployment/v1",
       adapter: target.adapter,
-      provider_plan_status: "blocked",
-      provider_plan_reason: "privileged_profile_not_implemented",
+      provider_plan_status: providerPlanStatus,
+      provider_plan_reason: providerPlanReason,
       service_id: serviceID,
       target_id: target.id,
       target_revision: preflight.current.revision,
@@ -785,18 +842,18 @@ export function registerServiceDeployments(
       release_id: release.id,
       machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, username: machine.username },
       release: { version: release.version, source_type: release.source_type, source_ref: release.source_ref, artifact_digest: release.artifact_digest, artifact_size: Number(release.artifact_size || 0), artifact_format: release.artifact_format || "" },
-      actions: [],
-      capabilities: [],
+      actions,
+      capabilities,
       rollback: {
-        available: false,
-        reason: "privileged_profile_not_implemented",
+        available: rollbackActions.length === 3,
+        reason: rollbackActions.length === 3 ? "" : previousVersion ? "previous_release_not_registered" : "no_previous_release",
         previous_version: previousVersion,
         previous_release_id: previousRelease?.status === "ready" ? String(previousRelease.id) : "",
-        actions: [],
-        capabilities: [],
+        actions: rollbackActions,
+        capabilities: rollbackCapabilities,
       },
-      steps: ["登记服务、制品与部署目标", "执行只读 systemd 预检", "部署执行需等待新的受管提权 profile"],
-      safety: ["当前计划仅供查看，不授权主机写入", "普通 Agent 仅执行固定只读任务"],
+      steps: ["校验制品与部署目标", "由 Agent 暂存不可变制品", "切换服务版本", "执行健康检查", "验证 LightMoni 遥测", "失败时回滚到上一版本"],
+      safety: ["仅在管理员确认后执行", "Agent 只接受签名任务和能力白名单", "AI 不直接执行生产 Shell 或读取凭据"],
     };
     const previous = {
       desired_release_id: target.desired_release_id || "",
@@ -891,7 +948,7 @@ export function registerServiceDeployments(
         agentID: String(machine.agent_id), deploymentID: `preflight:${preflightID}`, operationID,
         actions: [{ kind: "systemd_probe", unit: config.unit, releaseDirectory: config.release_directory, preflightID, targetRevision: revision }],
         capabilities: ["systemd.probe"],
-        target: { config: { unit: config.unit, release_directory: config.release_directory } },
+        target: { config: { unit: config.unit, release_directory: config.release_directory },actor:ctx.user.id,preflight_id:preflightID },
         expiresInSeconds: 10 * 60,
       });
       db.run("UPDATE service_target_preflights SET job_id=? WHERE id=?", String(job.id), preflightID);
@@ -1024,8 +1081,24 @@ export function registerServiceDeployments(
     }
   }));
 
-  router.get("/api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId", safe(deps, () => {
-    fail(410, "legacy_agent_payload_removed");
+  router.get("/api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId", safe(deps, async (ctx) => {
+    if (!options.jobs?.authorizeArtifact) fail(503, "agent artifact authorization unavailable");
+    if (!options.artifacts) fail(503, "release artifact storage unavailable");
+    const access = options.jobs.authorizeArtifact(ctx, ctx.params.agentId, ctx.params.jobId, ctx.params.releaseId);
+    const artifact = await options.artifacts.inspect(access.sha256);
+    if (!artifact || artifact.size !== access.size) fail(404, "artifact not found");
+    ctx.res.writeHead(200, {
+      "cache-control": "private, no-store",
+      "content-type": RELEASE_BUNDLE_CONTENT_TYPE,
+      "content-length": artifact.size,
+      "content-disposition": 'attachment; filename="lightmoni-release-v1.tar.gz"',
+      "x-artifact-sha256": artifact.sha256,
+      "x-artifact-format": "lightmoni-release-v1.tar.gz",
+      "x-content-type-options": "nosniff",
+      vary: "Authorization, X-LightMoni-Job-Lease",
+    });
+    if (ctx.req.method === "HEAD") { ctx.res.end(); return; }
+    await pipeline(createReadStream(artifact.path), ctx.res, { signal: ctx.signal });
   }), { public: true });
 
   router.get("/api/v1/services/:id/deployments", safe(deps, (ctx) => { admin(deps, ctx); ctx.json(deployments(ctx.params.id)); }));
@@ -1093,11 +1166,60 @@ export function registerServiceDeployments(
       telemetryWork = false;
     }
   }));
-  router.post("/api/v1/deployments/:deploymentId/approve", safe(deps, (ctx) => {
+  router.post("/api/v1/deployments/:deploymentId/approve", safe(deps, async (ctx) => {
     admin(deps, ctx);
-    fail(409, "privileged_profile_not_implemented");
+    const input = await body(ctx), deployment = deploymentRow(ctx.params.deploymentId);
+    if (input.confirm !== true) fail(400, "必须明确确认部署计划");
+    const expected = input.expected_state == null ? "awaiting_approval" : text(input.expected_state, "expected_state", 32);
+    if (deployment.status !== expected) fail(409, "部署计划状态已变化，请重新查看");
+    // Approval does not start a service. It only authorizes a reviewed typed
+    // action list to run through the Agent's capability allow-list.
+    if (!options.jobs) fail(503, "agent_jobs_unavailable");
+    const operationID = deployment.operation_id || id();
+    // Enqueue the immutable job and advance the approval state in one SQLite
+    // transaction. A partial approval can neither strand a job nor leave the
+    // deployment approved without a corresponding job.
+    const result = db.transaction(() => {
+      const plan = parse<any>(deployment.plan_json, {});
+      const current = currentTarget(deployment.service_id, deployment.target_id);
+      if (current.target.status === "disabled" || plan.target_revision !== current.revision
+        || plan.service_id !== deployment.service_id || plan.target_id !== current.target.id)
+        fail(409, "deployment_target_changed");
+      const currentPreflight = latestPreflight(deployment.service_id, deployment.target_id);
+      if (!currentPreflight.view?.current || !currentPreflight.view.ready
+        || !plan.preflight_id || plan.preflight_id !== currentPreflight.view.id)
+        fail(409, "deployment_preflight_stale");
+      const stagesArtifact = Array.isArray(plan.actions) && plan.actions.some((action: any) => action?.kind === "stage_artifact");
+      if (deployment.release_id !== plan.release_id || (stagesArtifact && plan.provider_plan_status !== "ready"))
+        fail(409, "deployment_plan_not_executable");
+      const targetRow = db.get<any>("SELECT * FROM service_targets WHERE id=? AND service_id=?", deployment.target_id, deployment.service_id);
+      if (!targetRow || !machineAgentReady(String(current.target.machine_id))) fail(409, "agent_not_ready");
+      const release = db.get<any>("SELECT * FROM releases WHERE id=? AND service_id=?", deployment.release_id, deployment.service_id);
+      const plannedRelease = plan.release ?? {};
+      if (!release || (stagesArtifact && (release.status !== "ready" || release.artifact_digest !== plannedRelease.artifact_digest
+        || Number(release.artifact_size) !== Number(plannedRelease.artifact_size)
+        || release.artifact_format !== plannedRelease.artifact_format)))
+        fail(409, "deployment_release_changed");
+      const healthActions = Array.isArray(plan.actions) ? plan.actions.filter((action: any) => action?.kind === "health_check") : [];
+      const hasAuthorizedHealthCheck = healthActions.some((action: any) => {
+        const kind = action.check?.kind;
+        const capability = kind === "systemd-active" ? "health.systemd" : kind === "http" ? "health.http" : kind === "tcp" ? "health.tcp" : "";
+        return capability && Array.isArray(plan.capabilities) && plan.capabilities.includes(capability);
+      });
+      if (!Array.isArray(plan.actions) || plan.actions.length === 0 || !Array.isArray(plan.capabilities) || plan.capabilities.length === 0 || !hasAuthorizedHealthCheck)
+        fail(409, "deployment_plan_not_executable");
+      options.jobs!.enqueue({
+        agentID: String(current.machine.agent_id || ""),
+        deploymentID: deployment.id,
+        operationID,
+        actions: plan.actions,
+        capabilities: plan.capabilities,
+        target: targetRow ? { id: targetRow.id, config: parse(targetRow.config_json, {}) } : {},
+      });
+      return transitionInTransaction(deployment.id, "agent_ready", ctx.user.id, "管理员已批准部署计划，等待 Agent 执行", "", { operationID, operationKind: "deploy", approvedBy: ctx.user.id });
+    });
+    ctx.json({ ...result, operation_id: operationID });
   }));
-
   router.post("/api/v1/deployments/:deploymentId/cancel", safe(deps, async (ctx) => {
     admin(deps, ctx);
     const input = await body(ctx), deployment = deploymentRow(ctx.params.deploymentId);
@@ -1118,9 +1240,75 @@ export function registerServiceDeployments(
     options.jobs.cancelQueuedDeployment(deployment.id, String(deployment.operation_id || ""), ctx.user.id);
     ctx.json(deploymentView(deploymentRow(deployment.id)));
   }));
-  router.post("/api/v1/deployments/:deploymentId/rollback", safe(deps, (ctx) => {
+  router.post("/api/v1/deployments/:deploymentId/rollback", safe(deps, async (ctx) => {
     admin(deps, ctx);
-    fail(409, "privileged_profile_not_implemented");
+    const input = await body(ctx), deployment = deploymentRow(ctx.params.deploymentId);
+    if (input.confirm !== true) fail(400, "必须明确确认回滚");
+    const reason = text(input.reason ?? "管理员请求回滚", "reason", 1000, false) || "管理员请求回滚";
+    const expected = input.expected_state == null ? deployment.status : text(input.expected_state, "expected_state", 32);
+    if (deployment.status !== expected) fail(409, "部署计划状态已变化，请重新查看");
+    if (deployment.status === "rollback_pending" || deployment.status === "rolling_back" || deployment.status === "rolled_back") {
+      const existingJob = deployment.operation_id
+        ? db.get<any>("SELECT id,state FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deployment.id, deployment.operation_id)
+        : undefined;
+      ctx.json({ ...deploymentView(deployment), ...(existingJob ? { job_id: existingJob.id, job_state: existingJob.state } : {}) });
+      return;
+    }
+    if (!(["succeeded", "failed"] as string[]).includes(deployment.status)
+      || !(DEPLOYMENT_TRANSITIONS[deployment.status as DeploymentStatus] ?? []).includes("rollback_pending"))
+      fail(409, "当前部署状态不允许回滚");
+    if (!options.jobs) fail(503, "agent_jobs_unavailable");
+    const plan = parse<any>(deployment.plan_json, {});
+    const rollbackPlan = plan.rollback ?? {};
+    const previousVersion = String(rollbackPlan.previous_version || "");
+    const previousReleaseID = String(rollbackPlan.previous_release_id || "");
+    if (!previousVersion) fail(409, "rollback_unavailable_no_previous_release");
+    if (!previousReleaseID || rollbackPlan.available !== true) fail(409, "rollback_previous_release_not_registered");
+    const current = currentTarget(deployment.service_id, deployment.target_id);
+    if (current.target.status === "disabled" || current.revision !== plan.target_revision
+      || current.target.adapter !== "systemd") fail(409, "deployment_target_changed");
+    const latest = latestPreflight(deployment.service_id, deployment.target_id);
+    const probe = latest.view?.snapshot?.preflight;
+    const safeRollbackProbe = probe?.provider === "systemd" && probe.systemd_available === true && probe.unit_exists === true
+      && probe.filesystem_check_supported === true && probe.release_directory_exists === true && probe.release_directory_writable === true
+      && probe.entrypoint_matches === true && probe.current_pointer_valid === true
+      && ["active", "inactive", "failed"].includes(String(probe.active_state))
+      && !["masked", "masked-runtime"].includes(String(probe.unit_file_state));
+    if (!latest.view?.current || !safeRollbackProbe || latest.result?.target_revision !== current.revision || latest.view.id === plan.preflight_id)
+      fail(409, "rollback_preflight_required");
+    if (deployment.operation_kind === "rollback" && deployment.status === "failed"
+      && Date.parse(String(latest.view.snapshot?.preflight?.observed_at || "")) <= Date.parse(String(deployment.finished_at || "")))
+      fail(409, "rollback_preflight_required");
+    const currentVersion = String(latest.view.snapshot?.preflight?.current_version ?? "");
+    if (currentVersion !== String(plan.release?.version || "")) fail(409, "rollback_target_changed");
+    const previousRelease = db.get<any>("SELECT id,version,status FROM releases WHERE id=? AND service_id=?", previousReleaseID, deployment.service_id);
+    if (!previousRelease || previousRelease.status !== "ready" || previousRelease.version !== previousVersion)
+      fail(409, "rollback_previous_release_not_registered");
+    const deployedRelease = db.get<any>("SELECT id,version,status FROM releases WHERE id=? AND service_id=?", deployment.release_id, deployment.service_id);
+    if (!deployedRelease || deployedRelease.status !== "ready" || deployedRelease.version !== currentVersion)
+      fail(409, "rollback_target_changed");
+    if (!current.machine.agent_id || !machineAgentReady(String(current.target.machine_id))) fail(409, "agent_not_ready");
+    const actions: Record<string, unknown>[] = [
+      { kind: "activate_release", releaseDirectory: current.config.release_directory, version: previousVersion, expectedCurrentVersion: currentVersion },
+      { kind: "systemd", operation: "restart", unit: current.config.unit },
+      { kind: "health_check", check: { kind: "systemd-active", unit: current.config.unit } },
+    ];
+    const capabilities = ["artifact.activate_release", "health.systemd", "systemd.restart"];
+    const result = db.transaction(() => {
+      const fresh = deploymentRow(deployment.id);
+      if (fresh.status !== expected) fail(409, "部署计划状态已变化，请重新查看");
+      const operationID = id();
+      const job = options.jobs!.enqueue({
+        agentID: String(current.machine.agent_id), deploymentID: deployment.id, operationID,
+        actions, capabilities,
+        target: { id: current.target.id, config: current.config },
+      });
+      const value = transitionInTransaction(deployment.id, "rollback_pending", ctx.user.id, reason, "rollback_requested", {
+        operationID, operationKind: "rollback", receipt: { state: "queued", code: "", summary: "回滚任务已进入 Agent 队列" },
+      });
+      return { ...value, operation_id: operationID, job_id: job.id, job_state: job.state };
+    });
+    ctx.json(result, 202);
   }));
 
   const assistantServices = () => db.all<any>("SELECT * FROM services ORDER BY updated_at DESC,id").map(serviceView);

@@ -116,7 +116,7 @@ try {
   // One immutable release carries both fixed roles. Installing the ordinary
   // Agent does not enroll or enable the privileged executor.
   cpSync(join(repo, "deploy/executor"), join(common, "lightmoni-agent-runtime/executor"), { recursive: true });
-  for (const script of ["install.sh", "launcher.sh", "uninstall.sh"])
+  for (const script of ["install.sh", "launcher.sh", "uninstall.sh", "upgrade.sh"])
     chmodSync(join(common, "lightmoni-agent-runtime/executor", script), 0o755);
   cpSync(join(repo, "deploy/agent/deployment-permissions.mjs"), join(common, "lightmoni-agent-runtime/deployment-permissions.mjs"));
   const checksums = (await download("SHASUMS256.txt")).toString();

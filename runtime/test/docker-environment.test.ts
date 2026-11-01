@@ -22,6 +22,15 @@ test('Docker projection accepts only fresh signed executor capability observatio
  assert.deepEqual(machineDockerEnvironment({...snapshot(),capabilities:{}},now),{state:'unavailable',code:'executor_capability_unavailable',observed_at:now.toISOString(),source:'executor'});
 });
 
+test('managed operations alone project signed Engine and Compose readiness without enabling restricted containers',()=>{
+ const now=new Date('2026-11-01T00:00:00Z'),status={executor:{state:'active',online:true,last_seen:now.toISOString()},capabilities:{'operations.managed.v1':{effective:'ready'}},docker_inventory:{state:'ready',compose_available:true}};
+ assert.equal(machineDockerEnvironment(status,now).state,'ready');
+ assert.equal(machineDockerEnvironment({...status,docker_inventory:{state:'ready',compose_available:false}},now).state,'compose_missing');
+ assert.equal(machineDockerEnvironment({...status,docker_inventory:{state:'unavailable',error:'docker_cli_missing'}},now).state,'missing');
+ assert.equal(machineDockerEnvironment({...status,capabilities:{}},now).state,'unavailable');
+ assert.equal(machineDockerEnvironment({...status,executor:{...status.executor,online:false}},now).state,'stale');
+});
+
 test('fixed installer has valid shell syntax and bounded, sanitized receipts',()=>{
  execFileSync('/bin/sh',['-n'],{input:dockerInstallScript});assert.match(dockerInstallScript,/flock -n/);assert.match(dockerInstallScript,/docker-compose-plugin/);assert.doesNotMatch(dockerInstallScript,/SupplementaryGroups|configuring_agent|identity\.json|lightmoni-agent|usermod|daemon-reload/);assert.doesNotMatch(dockerInstallScript,/apt-get[^\n]*(?:remove|purge)|usermod|chmod 666|curl[^\n]*\|.*sh/);
  assert.throws(()=>dockerInstallCommand('id;touch /tmp/unsafe'));assert.throws(()=>parseDockerInstallStatus('{"state":"succeeded","phase":"verified","code":"private-secret"}'));

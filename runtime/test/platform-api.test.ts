@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { X509Certificate, createPrivateKey } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import { mkdtemp, realpath, readFile, stat, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DB } from "../src/shared/sqlite.js";
@@ -183,6 +185,35 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
     controlCredential: "qa-control",
     dataDir: join(root, "agent"),
   });
+  const finish = () => {
+    const job = jobs.claim("node-a", ["operations.platform"])!;
+    const payload = platform.resolvePayload(job);
+    for (const [n, phase] of [
+      "accepted",
+      "staging",
+      "activating",
+      "verifying",
+    ].entries())
+      jobs.event("node-a", job.id, {
+        lease_id: job.lease_id,
+        sequence: n + 1,
+        phase,
+        summary: "fixture",
+      });
+    jobs.result("node-a", job.id, {
+      lease_id: job.lease_id,
+      state: "succeeded",
+      summary: "fixture",
+      snapshot: {
+        health: { healthy: true },
+        operations: {
+          operation_id: payload.operation_id,
+          resource_id: payload.resource.id,
+          data: { healthy: true, running: true },
+        },
+      },
+    });
+  };
   return {
     base,
     deps,
@@ -195,6 +226,7 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
     action,
     runner,
     cluster,
+    finish,
   };
 }
 test("administrators view public certificate material and download immutable versions without exposing private keys elsewhere", async t => {
@@ -246,6 +278,17 @@ async function issuedCertificate(f:Awaited<ReturnType<typeof setup>>,domain='clu
  for(let n=0;n<200&&!f.platform.store.get(certificate.id).status.certificate_version;n++)await new Promise(resolve=>setTimeout(resolve,10));
  assert.ok(f.platform.store.get(certificate.id).status.certificate_version);return f.platform.store.get(certificate.id);
 }
+function clusterNode(f:Awaited<ReturnType<typeof setup>>,suffix:string,connected=true){
+ if(connected)f.db.run('INSERT INTO agents VALUES(?,?,?,?,?,?,?,?,?)','node-'+suffix,'host-'+suffix,'Node '+suffix,'test','linux','arm64',new Date().toISOString(),'default','{}');
+ f.db.run('INSERT INTO managed_machines VALUES(?,?,?,?)','machine-'+suffix,'Machine '+suffix,'127.0.0.1',connected?'node-'+suffix:null);
+ const cluster=f.platform.store.get(f.cluster.id);f.cluster=f.platform.store.update(cluster.id,cluster.revision,cluster.name,{...cluster.spec,machine_ids:[...cluster.spec.machine_ids,'machine-'+suffix]},'admin');
+}
+function certificateReceipt(f:Awaited<ReturnType<typeof setup>>,agentID:string,state='succeeded',job=f.jobs.claim(agentID,['operations.platform'])!){
+ assert.ok(job);const payload=f.platform.resolvePayload(job),config=payload.resource.config;
+ for(const [n,phase] of ['accepted','staging','activating','verifying'].entries())f.jobs.event(agentID,job.id,{lease_id:job.lease_id,sequence:n+1,phase:phase as any,summary:'certificate QA'});
+ f.jobs.result(agentID,job.id,{lease_id:job.lease_id,state:state as any,summary:'certificate QA',snapshot:{health:{healthy:state==='succeeded'},operations:{operation_id:payload.operation_id,resource_id:payload.resource.id,data:state==='succeeded'?{certificate_version:config.certificate_version,fingerprint_sha256:config.fingerprint_sha256}:{error:'qa_directory_failed'}}}});
+ return payload;
+}
 test('new certificates derive normalized single-domain names while old multi-domain records and references remain intact',async t=>{
  const f=await setup(t),single=await issuedCertificate(f,'*.Example.TEST');assert.equal(single.name,'*.example.test');
  const response=await f.req('/ops/resources','POST',{kind:'certificate',spec:{source:'self_signed',domains:['other.example.test']}});assert.equal(response.status,201);assert.equal(response.body.resource.name,'other.example.test');
@@ -259,58 +302,73 @@ test('new certificates derive normalized single-domain names while old multi-dom
  assert.throws(()=>f.platform.store.update(saved.id,saved.revision,'ignored',{...spec,domains:['legacy.example.test']},'admin'),/single_domain_required/);
  assert.equal(f.platform.store.get(saved.id).revision,saved.revision);
 });
-test("unimplemented host actions reject before changing desired deployments, instances, runs or jobs",async t=>{
- const f=await setup(t),app=await f.create('application','Guarded app',{mode:'container',image:'nginx:1.27.5'});
- const website=await f.create('website','Guarded website',{mode:'static',domains:['guarded.example.test'],static_files:{'index.html':'hello'}});
- const saved=()=>({resources:f.db.all('SELECT * FROM ops_platform_resources ORDER BY id'),applications:f.db.all('SELECT * FROM ops_platform_application_deployments'),websites:f.db.all('SELECT * FROM ops_platform_website_deployments'),instances:f.db.all('SELECT * FROM ops_cluster_instances'),runs:f.db.all('SELECT * FROM ops_platform_runs'),jobs:f.db.all('SELECT * FROM agent_jobs')});
- const before=saved();
- for(const [resource,actions] of [[app,['deploy','inspect','stop','remove','logs','reconcile']],[website,['deploy','disable']],[f.cluster,['inspect']]] as const)
-  for(const action of actions){const response=await f.action(resource,action);assert.equal(response.status,409,JSON.stringify({action,response}));assert.equal(response.body.error,'privileged_profile_not_implemented');}
- assert.deepEqual(saved(),before);
- assert.equal((await f.req('/ops/resources/'+app.id+'/actions','POST',{revision:app.revision,action:'deploy',confirmed:true},{'x-role':'member'})).status,403);
- assert.deepEqual(saved(),before);
+test('cluster directory delivery tracks all machines, retains partial success, retries only failed members, and deduplicates beyond the history page',async t=>{
+ const f=await setup(t);clusterNode(f,'b');const certificate=await issuedCertificate(f);
+ const target=await f.create('certificate_target','Cluster TLS',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/cluster-tls',enabled:true});
+ const sync=await f.action(target,'sync');assert.equal(sync.status,202);assert.equal(sync.body.runs.length,2);
+ assert.equal((await f.action(target,'sync')).body.runs.length,2);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,2);
+ certificateReceipt(f,'node-a');let status=f.platform.store.get(target.id).status;assert.notEqual(status.state,'applied');assert.equal(status.applied_certificate_version,null);
+ certificateReceipt(f,'node-b','failed');status=f.platform.store.get(target.id).status;assert.equal(status.state,'failed');assert.equal(status.machines.find((m:any)=>m.agent_id==='node-a').state,'applied');
+ await f.platform.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,2);
+ const retry=await f.action(target,'retry');assert.equal(retry.body.runs.filter((r:any)=>r.state==='queued').length,1);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,3);certificateReceipt(f,'node-b');
+ status=f.platform.store.get(target.id).status;assert.equal(status.state,'applied');assert.equal(status.applied_certificate_version,certificate.status.certificate_version);assert.equal(status.machines.length,2);
+ for(let n=0;n<105;n++)await f.platform.store.run(f.platform.store.get(target.id),'historical_read','admin',async()=>({verified:true}));
+ await f.action(target,'sync');await f.platform.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,3);
+ clusterNode(f,'c');await f.action(target,'retry');assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,3);await f.platform.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,4);assert.notEqual(f.platform.store.get(target.id).status.state,'applied');certificateReceipt(f,'node-c');assert.equal(f.platform.store.get(target.id).status.state,'applied');
+ assert.doesNotMatch(JSON.stringify((await f.req('/ops/overview')).body),/BEGIN (?:RSA )?PRIVATE KEY|BEGIN CERTIFICATE/);
 });
-
-test("platform queue and private payload resolver reject before inspecting arguments or decrypting",async t=>{
- const f=await setup(t);
- f.deps.decrypt=()=>{throw Error('removed channel decrypted data');};f.jobs.enqueue=()=>{throw Error('removed channel enqueued a job');};
- const poisoned=new Proxy({}, {get(){throw Error('removed channel inspected arguments');}});
- assert.throws(()=>f.platform.store.queue(poisoned as any,'node-a','deploy',poisoned,'admin'),/privileged_profile_not_implemented/);
- assert.throws(()=>f.platform.resolvePayload(poisoned),/legacy_agent_payload_removed/);
- assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM ops_platform_runs')!.n,0);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
+test('unknown cluster writes require successful per-machine inspection and do not replay during ordinary or automatic synchronization',async t=>{
+ const f=await setup(t);clusterNode(f,'b');const certificate=await issuedCertificate(f),target=await f.create('certificate_target','Unknown cluster',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/unknown-tls',enabled:true});
+ await f.action(target,'sync');certificateReceipt(f,'node-a');certificateReceipt(f,'node-b','unknown');
+ assert.equal(f.platform.store.get(target.id).status.state,'unknown');assert.equal((await f.action(target,'retry')).status,409);
+ await f.action(target,'sync');await f.platform.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,2);
+ const inspected=await f.action(target,'inspect');assert.equal(inspected.body.runs.length,2);certificateReceipt(f,'node-a');certificateReceipt(f,'node-b');assert.equal(f.platform.store.get(target.id).status.state,'applied');
+ await f.action(target,'retry');assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,4);
 });
-
-test("catalog confirmed installation rejects before resource creation while draft registration remains available",async t=>{
- const f=await setup(t),before=f.db.get<any>('SELECT COUNT(*) n FROM ops_platform_resources')!.n;
- const input={name:'Catalog draft',deployment_mode:'manual',deployments:[{cluster_id:f.cluster.id,machine_ids:['machine-a']}],parameters:{},confirmed:true};
- const denied=await f.req('/ops/catalog/openresty/install','POST',input);assert.equal(denied.status,409);assert.equal(denied.body.error,'privileged_profile_not_implemented');
- assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM ops_platform_resources')!.n,before);
- assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM ops_cluster_instances')!.n,0);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM ops_platform_runs')!.n,0);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
- const draft=await f.req('/ops/catalog/openresty/install','POST',{...input,confirmed:false});assert.equal(draft.status,201,JSON.stringify(draft));assert.ok(draft.body.resource.id);
- assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
+test('a cancelled cluster member stays failed until explicit retry and cannot be mistaken for applied',async t=>{
+ const f=await setup(t);clusterNode(f,'b');const certificate=await issuedCertificate(f),target=await f.create('certificate_target','Cancelled member',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/cancelled-tls',enabled:true});
+ const sync=await f.action(target,'sync'),cancelled=sync.body.runs.find((r:any)=>r.agent_id==='node-b');f.jobs.cancelQueuedDeployment('platform-'+target.id,cancelled.id,'admin');
+ assert.equal(f.platform.store.get(target.id).status.state,'failed');await f.platform.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,2);
+ await f.action(target,'retry');assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,3);certificateReceipt(f,'node-a');certificateReceipt(f,'node-b');assert.equal(f.platform.store.get(target.id).status.state,'applied');
 });
-
-test("all host certificate targets reject before requiring, issuing or delivering private material",async t=>{
- const f=await setup(t),certificate=f.platform.store.create('certificate','Unissued',{source:'self_signed',domains:['unissued.example.test']},'admin');
- const targets=[
-  await f.create('certificate_target','Cluster directory',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/guarded-cluster-tls',enabled:true}),
-  await f.create('certificate_target','Host directory',{certificate_id:certificate.id,type:'directory',agent_id:'node-a',path:'/tmp/guarded-host-tls',enabled:true}),
-  await f.create('certificate_target','Host hook',{certificate_id:certificate.id,type:'hook',agent_id:'node-a',script:'exit 0',interpreter:'/bin/sh',enabled:true}),
- ];
- const before=f.db.all('SELECT * FROM ops_platform_resources ORDER BY id');
- for(const target of targets)for(const action of ['sync','inspect','retry']){const response=await f.action(target,action);assert.equal(response.status,409);assert.equal(response.body.error,'privileged_profile_not_implemented');}
- assert.deepEqual(f.db.all('SELECT * FROM ops_platform_resources ORDER BY id'),before);
- assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM ops_platform_runs')!.n,0);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);assert.equal(f.platform.store.get(certificate.id).status.certificate_version,undefined);
+test('cluster delivery rejects empty or unready membership before dispatch and fences leaving or rebound machines, removed Agents and stale certificate payloads',async t=>{
+ const f=await setup(t);clusterNode(f,'b',false);const certificate=await issuedCertificate(f),target=await f.create('certificate_target','Scope fence',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/fence-tls'});
+ assert.equal((await f.action(target,'sync')).status,409);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
+ f.db.run('UPDATE managed_machines SET agent_id=? WHERE id=?','node-a','machine-b');assert.equal((await f.action(target,'sync')).status,409);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
+ f.db.run('DELETE FROM managed_machines WHERE id=?','machine-b');const cluster=f.platform.store.get(f.cluster.id);f.cluster=f.platform.store.update(cluster.id,cluster.revision,cluster.name,{...cluster.spec,machine_ids:['machine-a']},'admin');
+ await f.action(target,'sync');const job=f.jobs.claim('node-a',['operations.platform'])!;assert.ok(f.platform.resolvePayload(job).resource.config.private_key_pem);
+ f.db.run('UPDATE managed_machines SET agent_id=NULL WHERE id=?','machine-a');assert.throws(()=>f.platform.resolvePayload(job),/membership_changed/);f.db.run('UPDATE managed_machines SET agent_id=? WHERE id=?','node-a','machine-a');
+ f.db.run("INSERT INTO agent_lifecycle(agent_id,state) VALUES('node-a','removed')");assert.throws(()=>f.platform.resolvePayload(job),/membership_changed/);f.db.run("DELETE FROM agent_lifecycle WHERE agent_id='node-a'");
+ f.platform.store.patchStatus(certificate.id,{certificate_version:'newer-version'});assert.throws(()=>f.platform.resolvePayload(job),/payload_version_changed/);f.platform.store.patchStatus(certificate.id,{certificate_version:certificate.status.certificate_version});
+ const current=f.platform.store.get(f.cluster.id);f.platform.store.update(current.id,current.revision,current.name,{...current.spec,machine_ids:[],nodes:[]},'admin');assert.throws(()=>f.platform.resolvePayload(job),/membership_changed/);
+ assert.equal((await f.action(target,'sync')).body.error,'certificate_cluster_empty');
+ f.db.run("UPDATE users SET active=0 WHERE id='admin'");assert.throws(()=>f.platform.resolvePayload(job),/authorization_required/);
 });
-
-test("private registry host writes reject before creating system resources or changing cache settings",async t=>{
- const f=await setup(t),saved=()=>({resources:f.db.all('SELECT * FROM ops_platform_resources'),settings:f.db.all('SELECT * FROM ops_private_registry_settings'),systems:f.db.all('SELECT * FROM ops_system_applications')});const before=saved();
- for(const [path,method] of [['/ops/private-registry/deployments','POST'],['/ops/private-registry/external','PUT'],['/ops/private-registry/clusters/'+f.cluster.id+'/cache','PUT']]){
-  const response=await f.req(path,method,{confirmed:true,revision:f.cluster.revision,cluster_id:f.cluster.id,machine_id:'machine-a',enabled:true});assert.equal(response.status,409);assert.equal(response.body.error,'privileged_profile_not_implemented');
+test('new certificate versions ignore late old-version receipts and restart retains each machine delivery identity',async t=>{
+ const f=await setup(t);clusterNode(f,'b');const certificate=await issuedCertificate(f),target=await f.create('certificate_target','Version fencing',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/version-tls'});
+ await f.action(target,'sync');certificateReceipt(f,'node-a');const oldJob=f.jobs.claim('node-b',['operations.platform'])!,old=f.platform.resolvePayload(oldJob);
+ const issue=await f.action(certificate,'issue');let run=issue.body.run;for(let n=0;n<200&&run.state==='running';n++){await new Promise(resolve=>setTimeout(resolve,10));run=(await f.req('/ops/runs/'+run.id)).body;}assert.equal(run.state,'succeeded');
+ const newer=f.platform.store.get(certificate.id);assert.notEqual(newer.status.certificate_version,certificate.status.certificate_version);assert.throws(()=>f.platform.resolvePayload(oldJob),/payload_version_changed/);
+ await f.action(target,'sync');
+ for(const [n,phase] of ['accepted','staging','activating','verifying'].entries())f.jobs.event('node-b',oldJob.id,{lease_id:oldJob.lease_id,sequence:n+1,phase:phase as any,summary:'late receipt'});
+ f.jobs.result('node-b',oldJob.id,{lease_id:oldJob.lease_id,state:'succeeded',snapshot:{health:{healthy:true},operations:{operation_id:old.operation_id,resource_id:target.id,data:{certificate_version:old.resource.config.certificate_version,fingerprint_sha256:old.resource.config.fingerprint_sha256}}}});
+ assert.equal(f.platform.store.get(target.id).status.desired_certificate_version,newer.status.certificate_version);assert.notEqual(f.platform.store.get(target.id).status.state,'applied');
+ certificateReceipt(f,'node-a');certificateReceipt(f,'node-b');assert.equal(f.platform.store.get(target.id).status.applied_certificate_version,newer.status.certificate_version);
+ const enabled=f.platform.store.update(target.id,target.revision,target.name,{...target.spec,enabled:true},'admin');await f.action(enabled,'sync');certificateReceipt(f,'node-a');certificateReceipt(f,'node-b');
+ const before=f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n;await f.platform.close();const restarted=registerOperationsPlatform(f.deps,{jobs:f.jobs,dataDir:f.root,intervalMs:0});t.after(()=>restarted.close());await restarted.tick();assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,before);assert.equal(restarted.store.get(target.id).status.state,'applied');
+});
+test('cluster directory synchronization installs the same path independently on two real container Agents',{skip:process.env.LIGHTMONI_CERTIFICATE_DOCKER_QA!=='1',timeout:120000},async t=>{
+ const f=await setup(t,undefined,true);clusterNode(f,'b');const certificate=await issuedCertificate(f),path='/tmp/lightmoni-057-tls';
+ const target=await f.create('certificate_target','Real two-Agent directory',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path,enabled:true});await f.action(target,'sync');
+ const docker=promisify(execFile),image=process.env.LIGHTMONI_CERTIFICATE_AGENT_IMAGE??'docker.heyphp.com/lightmoni/lightmoni:20261031-6dae46c';
+ const endpoint=f.base.replace('127.0.0.1','host.docker.internal'),names=['a','b'].map(s=>'lm057-'+f.root.split('-').at(-1)+'-'+s);
+ t.after(async()=>{for(const name of names)await docker('docker',['--context','desktop-linux','rm','-f',name]).catch(()=>{})});
+ for(const [index,agentID] of ['node-a','node-b'].entries()){
+  const script=`import {AgentJobRunner} from '/opt/lightmoni/runtime/dist/agent/jobs.js';import {readFile,stat} from 'node:fs/promises';import {X509Certificate,createPrivateKey} from 'node:crypto';const runner=new AgentJobRunner({endpoint:${JSON.stringify(endpoint)},agentID:${JSON.stringify(agentID)},controlCredential:'qa-control',dataDir:'/tmp/agent-data'});const receipt=await runner.pollOnce();if(receipt?.state!=='succeeded')throw Error('Agent installation failed: '+JSON.stringify(receipt));const cert=new X509Certificate(await readFile('${path}/fullchain.pem'));const key=createPrivateKey(await readFile('${path}/privkey.pem'));if(!cert.checkPrivateKey(key))throw Error('Pair mismatch');if(((await stat('${path}/.lightmoni-certificate-${certificate.id}/versions/${certificate.status.certificate_version}/privkey.pem')).mode&0o777)!==0o600)throw Error('Wrong key mode');console.log(JSON.stringify({agent:${JSON.stringify(agentID)},fingerprint:cert.fingerprint256,path:'${path}',key_matches:true}));`;
+  const result=await docker('docker',['--context','desktop-linux','run','--rm','--name',names[index],'--entrypoint','node','--workdir','/opt/lightmoni',image,'--input-type=module','-e',script],{maxBuffer:1000000});const proof=JSON.parse(result.stdout.trim());assert.equal(proof.fingerprint,certificate.status.fingerprint_sha256);assert.equal(proof.key_matches,true);
  }
- assert.deepEqual(saved(),before);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM ops_platform_runs')!.n,0);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);assert.equal((await f.req('/ops/private-registry')).status,200);
+ const status=f.platform.store.get(target.id).status;assert.equal(status.state,'applied');assert.equal(status.machines.length,2);assert.ok(status.machines.every((m:any)=>m.state==='applied'));
 });
-
 test("uploaded signed chains split into leaf and intermediate attachments with a matching private key",async t=>{
  const f=await setup(t),material=await certificateChain(),cert=await f.create('certificate','chain download',{source:'uploaded',domains:['download.example.test'],...material});
  for(let n=0;n<200&&!f.platform.store.get(cert.id).status.certificate_version;n++)await new Promise(resolve=>setTimeout(resolve,10));
@@ -437,21 +495,149 @@ test("removed nodes disappear from deployment candidates and cannot become new d
   assert.equal(saved.body.error, "registered_agent_required");
   assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0);
 });
-test("center certificate issuance and state inspection stay available without host execution",async t=>{
- const f=await setup(t),certificate=await issuedCertificate(f);
- const inspected=await f.action(certificate,'inspect');assert.equal(inspected.status,202);assert.equal(inspected.body.run.state,'succeeded');
- const website=await f.create('website','State only',{mode:'static',domains:['state.example.test'],static_files:{'index.html':'state'}});
- const state=await f.action(website,'inspect');assert.equal(state.status,202);assert.equal(state.body.run.state,'succeeded');
- assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);assert.ok(getCertificateMaterial(f.platform.store,certificate.id).certificate_pem.includes('BEGIN CERTIFICATE'));
+test("ordinary Agent refuses legacy certificate directory and hook writes without fetching private material", async (t) => {
+  const f = await setup(t),
+    cert = await f.create("certificate", "QA certificate", {
+      source: "self_signed",
+      domains: ["example.test"],
+      validity_days: 3,
+      auto_renew: false,
+    });
+  // Issuing a self-signed certificate is still a center operation. Delivering
+  // its private key or running a hook is no longer an ordinary Agent authority.
+  const issued = await f.action(cert, "issue");
+  assert.equal(issued.status, 202, JSON.stringify(issued));
+  assert.equal(issued.body.run.state, "running", JSON.stringify(issued));
+  let issueReceipt = issued.body.run;
+  for (let attempt=0;attempt<100&&issueReceipt.state==='running';attempt++) {
+    await new Promise(resolve=>setTimeout(resolve,10));
+    issueReceipt=(await f.req('/ops/runs/'+issueReceipt.id)).body;
+  }
+  assert.equal(issueReceipt.state,"succeeded",JSON.stringify(issueReceipt));
+  const version = f.platform.store.get(cert.id).status.certificate_version;
+  assert.ok(version);
+  const material = getCertificateMaterial(f.platform.store, cert.id);
+  assert.match(material.private_key_pem, /BEGIN PRIVATE KEY/);
+  const certificateDirectory = join(f.root, "certificates"), marker = join(f.root, "hook-version");
+  const directory = await f.create("certificate_target", "QA directory", {
+    certificate_id: cert.id,
+    type: "directory",
+    enabled: true,
+    agent_id: "node-a",
+    path: certificateDirectory,
+    mode: "0644",
+    private_key_mode: "0600",
+  });
+  const target = await f.create("certificate_target", "QA script", {
+    certificate_id: cert.id,
+    type: "hook",
+    enabled: true,
+    agent_id: "node-a",
+    interpreter: "/bin/sh",
+    timeout_ms: 10000,
+    env: { QA_PRIVATE: "fixture-secret" },
+    script: `test -s "$LIGHTMONI_CERTIFICATE_PATH" && test -s "$LIGHTMONI_PRIVATE_KEY_PATH" && test -n "$QA_PRIVATE" && printf '%s' "$LIGHTMONI_CERTIFICATE_VERSION" > '${marker}'`,
+  });
+  assert.equal(JSON.stringify(target).includes("fixture-secret"), false);
+  assert.equal(target.spec.env, undefined);
+  for (const resource of [directory, target]) {
+    const sync = await f.action(resource, "sync");
+    assert.equal(sync.status, 202, JSON.stringify(sync));
+  }
+  const calls: Array<{url: string; method: string; body: any}> = [], commands: string[] = [];
+  const observeFetch = async (url: any, init: RequestInit) => {
+    calls.push({url: String(url), method: init.method ?? "GET", body: init.body ? JSON.parse(String(init.body)) : undefined});
+    return fetch(url, init);
+  };
+  const runner = new AgentJobRunner({endpoint:f.base,agentID:"node-a",controlCredential:"qa-control",dataDir:join(f.root,"ordinary-agent")}, {
+    fetch: observeFetch as typeof fetch,
+    command: async (file) => { commands.push(file); throw Error("ordinary Agent must not execute certificate writes"); },
+  });
+  assert.equal(await runner.pollOnce(), null);
+  assert.equal(await runner.pollOnce(), null);
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(call => call.url.endsWith("/jobs/claim") && call.method === "POST"));
+  assert.ok(calls.every(call => !call.body.capabilities.includes("operations.platform")));
+  for (const resource of [directory, target]) {
+    const job = f.db.get<any>("SELECT j.* FROM agent_jobs j JOIN ops_platform_runs r ON r.job_id=j.id WHERE r.resource_id=?", resource.id)!;
+    assert.equal(job.state, "queued");
+    assert.equal(job.attempts, 0);
+    assert.equal(job.lease_id, "");
+    assert.notEqual(f.platform.store.get(resource.id).status.applied_certificate_version, version);
+  }
+  // Even an incorrect center returning a legacy task outside the advertised
+  // capabilities must be refused before downloading /operations private data.
+  for (let n=0;n<2;n++) {
+    const legacy = f.jobs.claim("node-a", ["operations.platform"])!;
+    assert.ok(legacy);
+    const forced = new AgentJobRunner({endpoint:f.base,agentID:"node-a",controlCredential:"qa-control",dataDir:join(f.root,"ordinary-agent")}, {
+      command: async (file) => { commands.push(file); throw Error("legacy write must remain denied"); },
+      fetch: (async (url: any, init: RequestInit) => String(url).endsWith("/jobs/claim") ? Response.json({job:legacy}) : observeFetch(url, init)) as typeof fetch,
+    });
+    const receipt = await forced.pollOnce();
+    assert.equal(receipt?.state, "failed");
+    assert.equal(receipt?.code, "privileged_executor_required");
+    const saved = f.jobs.get(legacy.id);
+    assert.equal(saved.state, "failed");
+    assert.equal(saved.receipt.code, "privileged_executor_required");
+  }
+  assert.deepEqual(commands, []);
+  assert.ok(calls.every(call => !/\/operations$|\/artifacts\//.test(call.url)));
+  await assert.rejects(stat(certificateDirectory), {code:"ENOENT"});
+  await assert.rejects(stat(marker), {code:"ENOENT"});
+  const before = f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n;
+  await f.platform.tick();
+  await f.platform.tick();
+  assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, before);
+  for (const resource of [directory, target])
+    assert.notEqual(f.platform.store.get(resource.id).status.applied_certificate_version, version);
+  for (const publicValue of [calls, f.db.all("SELECT * FROM ops_platform_runs"), (await f.req("/ops/runs")).body]) {
+    const encoded = JSON.stringify(publicValue);
+    assert.ok(!encoded.includes("fixture-secret"));
+    assert.ok(!encoded.includes(material.private_key_pem));
+    assert.ok(!encoded.includes("BEGIN PRIVATE KEY"));
+  }
 });
 
-test("unimplemented HTTPS deployment neither issues a certificate nor changes desired gateway state",async t=>{
- const f=await setup(t),certificate=f.platform.store.create('certificate','First certificate',{source:'self_signed',domains:['first.example.test'],auto_renew:false},'admin');
- const website=await f.create('website','First HTTPS',{mode:'static',domains:['first.example.test'],static_files:{'index.html':'first'},https:true,certificate_id:certificate.id});
- const before=f.db.all('SELECT * FROM ops_platform_website_deployments');
- const response=await f.action(website,'deploy');assert.equal(response.status,409);assert.equal(response.body.error,'privileged_profile_not_implemented');
- assert.equal(f.platform.store.get(certificate.id).status.certificate_version,undefined);assert.deepEqual(f.db.all('SELECT * FROM ops_platform_website_deployments'),before);
- assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM ops_platform_runs')!.n,0);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
+test("HTTPS website deployment waits for a saved certificate without material before queuing gateways", async (t) => {
+  const f = await setup(t),
+    cert = f.platform.store.create("certificate", "First HTTPS certificate", {
+      source: "self_signed",
+      domains: ["first.example.test"],
+      validity_days: 3,
+      auto_renew: false,
+    }, "admin"),
+    group = await f.create("gateway_group", "First HTTPS gateways", {
+      agent_ids: ["node-a"],
+      http_port: 18088,
+      https_port: 18488,
+    });
+  await f.action(group, "deploy");
+  f.finish();
+  const website = await f.create("website", "First HTTPS website", {
+    mode: "static",
+    domains: ["first.example.test"],
+    static_files: { "index.html": "<h1>First HTTPS</h1>" },
+    gateway_group_id: group.id,
+    https: true,
+    certificate_id: cert.id,
+  });
+  assert.equal(
+    f.platform.store.get(cert.id).status.certificate_version,
+    undefined,
+  );
+  const deployed = await f.action(website, "deploy");
+  assert.equal(deployed.status, 202, JSON.stringify(deployed));
+  assert.equal(deployed.body.runs.length, 1);
+  assert.ok(f.platform.store.get(cert.id).status.certificate_version);
+  const job = f.jobs.claim("node-a", ["operations.platform"])!,
+    payload = f.platform.resolvePayload(job);
+  assert.equal(payload.resource.config.task, "gateway.apply");
+  assert.match(
+    payload.resource.config.sites[0].certificate.certificate_pem,
+    /BEGIN CERTIFICATE/,
+  );
+  assert.equal(JSON.stringify(job).includes("BEGIN CERTIFICATE"), false);
 });
 
 test("saved multi-path Nginx preview is administrator-only, redacted and does not deploy", async (t) => {
@@ -532,35 +718,4 @@ test("saved multi-path Nginx preview is administrator-only, redacted and does no
     },
   });
   assert.equal(invalid.status, 400);
-});
-
-test('late operations observers project quarantined legacy jobs without decrypting or replaying and stay idempotent',async t=>{
- const f=await setup(t),at=f.deps.now().toISOString();
- for(const [name,state,attempts] of [['unclaimed','queued',0],['started','activating',1]] as const){
-  const runID='legacy-'+name,jobID='job-'+name;
-  f.db.run(`INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,target_json,issued_at,expires_at,attempts,created_at,updated_at)
-   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,jobID,'node-a','legacy-'+name,runID,state,JSON.stringify(['operations.platform']),JSON.stringify([{kind:'operations',operation_id:runID,domain:'platform'}]),JSON.stringify({operations_resource_id:f.cluster.id}),at,'2099-01-01T00:00:00Z',attempts,at,at);
-  f.db.run('INSERT INTO ops_platform_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',runID,f.cluster.id,f.cluster.revision,'node-a','deploy',state,'unreadable-private-payload','{}',jobID,'admin',null,at,at);
-  f.db.run('INSERT INTO ops_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',runID,f.cluster.id,f.cluster.revision,'apply',state,'unreadable-private-payload','{}',jobID,at,'2099-01-01T00:00:00Z','admin','admin',at);
- }
- await f.platform.close();f.jobs.close?.();
- let privateReads=0;const decrypt=f.deps.decrypt;
- f.deps.decrypt=(value:string)=>{if(value==='unreadable-private-payload'){privateReads++;throw Error('removed payload was decrypted');}return decrypt(value);};
- const credentials={has:()=>true,authenticate(){}} as any;
- const jobs=registerAgentJobs(f.deps,{agentCredentials:credentials});t.after(()=>jobs.close?.());
- const platform=registerOperationsPlatform(f.deps,{jobs,dataDir:f.root,intervalMs:0});t.after(()=>platform.close());
- const legacy=registerOperations(f.deps,{jobs,credentials,definitions:[]});t.after(()=>legacy.close?.());
- for(const [name,state] of [['unclaimed','cancelled'],['started','unknown']] as const){
-  const runID='legacy-'+name,run=platform.store.action(runID);
-  assert.equal(run.state,state);assert.deepEqual(run.result,{code:'legacy_agent_write_removed'});
-  assert.equal(f.db.get<any>('SELECT state FROM ops_runs WHERE id=?',runID)!.state,state);
-  assert.equal(jobs.get('job-'+name).attempts,name==='unclaimed'?0:1);
-  assert.equal(platform.store.runEvents(runID).length,1);
- }
- assert.equal(privateReads,0);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,2);
- const eventCount=f.db.get<any>('SELECT COUNT(*) n FROM ops_platform_run_events')!.n;
- await platform.close();
- const again=registerOperationsPlatform(f.deps,{jobs,dataDir:f.root,intervalMs:0});t.after(()=>again.close());
- assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM ops_platform_run_events')!.n,eventCount);
- assert.equal(privateReads,0);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_job_events')!.n,2);
 });

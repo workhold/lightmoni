@@ -73,7 +73,7 @@ function beginSlowArtifactPut(url: string, bytes: Buffer, sha256: string) {
   return { request, response, firstChunkLength };
 }
 
-test("admin uploads a validated private release while removed ordinary Agent downloads never open artifacts", async (t) => {
+test("admin uploads a validated private release and an active job lease gates Agent downloads", async (t) => {
   const db = new DB(":memory:"), router = new Router();
   const user = { id: "admin", name: "Admin", role: "admin" };
   db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,port INTEGER NOT NULL,username TEXT NOT NULL,agent_id TEXT NOT NULL DEFAULT '')");
@@ -288,16 +288,21 @@ test("admin uploads a validated private release while removed ordinary Agent dow
     { kind: "activate_release", releaseDirectory: "/opt/lightmoni/checkout", version: "v1", expectedCurrentVersion: "" },
     { kind: "health_check", check: { kind: "systemd-active", unit: "checkout.service" } },
   ];
-  const jobsBefore=db.get<any>("SELECT count(*) n FROM agent_jobs")!.n;
-  assert.throws(()=>jobs.enqueue({ agentID:"agent-1",deploymentID:plan.data.id,operationID:"operation-1",actions,capabilities:["artifact.stage","artifact.activate_release","health.systemd"]}),/privileged_executor_required/);
-  assert.equal(db.get<any>("SELECT count(*) n FROM agent_jobs")!.n,jobsBefore);
-  // Route removal is unconditional, including valid control credentials.
-  // A throwing store proves the old endpoint cannot inspect/open file data.
-  artifacts.inspect=async()=>{throw Error("removed control download inspected private artifact");};
-  artifacts.open=async()=>{throw Error("removed control download opened private artifact");};
-  for(const agent of ["agent-1","agent-2"])for(const releaseID of [release.data.id,"b".repeat(32)]) {
-    const endpoint=`${base}/api/v1/agents/${agent}/jobs/legacy-job/artifacts/${releaseID}`;
-    const download=await fetch(endpoint,{headers:{authorization:"Bearer control-secret","X-LightMoni-Job-Lease":"old-lease"}});
-    assert.equal(download.status,410);assert.deepEqual(await download.json(),{error:"legacy_agent_payload_removed"});
-  }
+  const job = jobs.enqueue({ agentID: "agent-1", deploymentID: plan.data.id, operationID: "operation-1", actions, capabilities: ["artifact.stage", "artifact.activate_release", "health.systemd"], target: { config: { unit: "checkout.service", release_directory: "/opt/lightmoni/checkout" } } });
+  const leased = jobs.claim("agent-1", ["artifact.stage", "artifact.activate_release", "health.systemd"]);
+  assert.equal(leased?.id, job.id);
+  jobs.event("agent-1", job.id, { lease_id: leased!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
+  jobs.event("agent-1", job.id, { lease_id: leased!.lease_id, sequence: 2, phase: "staging", summary: "staging" });
+  const endpoint = `${base}/api/v1/agents/agent-1/jobs/${job.id}/artifacts/${release.data.id}`;
+  const download = await fetch(endpoint, { headers: { authorization: "Bearer control-secret", "X-LightMoni-Job-Lease": leased!.lease_id } });
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get("x-artifact-sha256"), digest);
+  assert.equal(download.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
+  const wrongLease = await fetch(endpoint, { headers: { authorization: "Bearer control-secret", "X-LightMoni-Job-Lease": "wrong" } });
+  assert.equal(wrongLease.status, 409);
+  const wrongAgent = await fetch(endpoint.replace("agent-1", "agent-2"), { headers: { authorization: "Bearer control-secret", "X-LightMoni-Job-Lease": leased!.lease_id } });
+  assert.equal(wrongAgent.status, 401);
+  const wrongRelease = await fetch(`${base}/api/v1/agents/agent-1/jobs/${job.id}/artifacts/${"b".repeat(32)}`, { headers: { authorization: "Bearer control-secret", "X-LightMoni-Job-Lease": leased!.lease_id } });
+  assert.equal(wrongRelease.status, 403);
 });

@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {executorBootstrapAbsentCommand} from '../src/server/machine-executor-bootstrap.js';
+import {inlineFixtureCommands} from './helpers/maintenance-shell.js';
 
 /** Execute the exported fixed shell against isolated paths. Only UID, flock and
  * systemd replies are simulated; directory types, modes and symlinks are real.
@@ -26,7 +27,8 @@ function fixture(t:TestContext){
   .replaceAll(`PATH=${p('usr/sbin')}:${p('usr/bin')}:/sbin:/bin`,`PATH=${bin}`);
  assert.ok(shell.includes(`PATH=${bin}`));
  assert.ok(!/(?:^|[\s="'])\/(?:run|opt|etc|var|usr)(?:\/|\b)/.test(shell.replaceAll(root,'FIXTURE')),'fixed Linux roots must be isolated');
- const run=(env:Record<string,string>={})=>spawnSync('/bin/sh',['-c',shell],{encoding:'utf8',timeout:10_000,env:{PATH:bin,PROBE_HISTORY:history,...env}});
+ const interpreted=shell.replaceAll('set -eu\n','set -eu\n'+inlineFixtureCommands(bin).replaceAll("'","'\\''"));
+ const run=(env:Record<string,string>={})=>spawnSync('/bin/sh',['-c',interpreted],{encoding:'utf8',timeout:10_000,env:{PATH:bin,PROBE_HISTORY:history,...env}});
  const calls=()=>JSON.parse(readFileSync(history,'utf8')) as {command:string;args:string[]}[];
  const refused=(env:Record<string,string>={})=>{const result=run(env);assert.ok(!result.error,result.error?.message);assert.notEqual(result.status,0,result.stdout+result.stderr);assert.ok(!result.stdout.includes('executor_bootstrap_absent=verified'),result.stdout);return result};
  return {root,p,run,refused,calls};

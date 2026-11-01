@@ -15,7 +15,7 @@ await build({root:source,configFile:false,base:'/',logLevel:'silent',build:{outD
 const server=createServer(async(req,res)=>{try{let file=resolve(bundle,decodeURIComponent(new URL(req.url,'http://fixture').pathname).replace(/^\//,''));if(!file.startsWith(bundle+'/'))file=join(bundle,'index.html');try{if(!(await stat(file)).isFile())file=join(bundle,'index.html')}catch{file=join(bundle,'index.html')}res.setHeader('content-type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'}[extname(file)]||'application/octet-stream'));res.end(await readFile(file))}catch{res.writeHead(404);res.end()}});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}`;
 const browser=await chromium.launch({headless:true,channel:'chrome'}),checks=[],unexpected=[];
-const capabilities=['container.managed.v1','script.elevated.v1'];
+const capabilities=['container.managed.v1','script.elevated.v1','operations.managed.v1'];
 const status=(id='h1',enabled=[],executor=null,effective='disabled')=>({machine_id:id,policy_generation:0,executor,capabilities:Object.fromEntries(capabilities.map(key=>[key,{authorized:enabled.includes(key),effective:enabled.includes(key)?effective:'disabled'}]))});
 const bootstrap=(selected)=>({id:'bootstrap-1',status:'awaiting_approval',revision:'a'.repeat(64),expires_at:new Date(Date.now()+300000).toISOString(),plan:{credential_id:'primary',machine:{id:'h1',name:'主机 h1',agent_id:'agent-h1',address:'192.0.2.1',username:'deploy'},capabilities:selected,release:{sha256:'b'.repeat(64),build_id:'fixture-build'},steps:['安装独立 root 运维执行器'],privilege:{state:'sudo_noninteractive'}}});
 const run=async(name,fn)=>{const page=await browser.newPage();page.on('pageerror',error=>unexpected.push(name+': '+error.message));try{await fn(page);checks.push({name,passed:true})}catch(error){checks.push({name,passed:false,error:error.message});await page.screenshot({path:join(output,`failure-${checks.length}.png`),fullPage:true});throw error}finally{await page.close()}};
@@ -47,11 +47,11 @@ try{
    if(path.endsWith('/apply')){expect(body).toEqual({confirm:true,expected_revision:'c'.repeat(64)});current={...status('h1',[],{id:'executor-1',online:false}),policy_generation:1};return route.fulfill({json:current})}
    throw Error('Unexpected '+path);
   });
-  await page.goto(base);await expect(page.getByText('中心已授权')).toHaveCount(2);await expect(page.getByText('依赖不可用')).toHaveCount(2);await expect(page.getByText('离线',{exact:true})).toBeVisible();
-  await page.getByRole('switch',{name:'容器管理'}).click();await page.getByRole('switch',{name:'允许提权脚本'}).click();
+  await page.goto(base);await expect(page.getByText('中心已授权')).toHaveCount(3);await expect(page.getByText('依赖不可用')).toHaveCount(3);await expect(page.getByText('离线',{exact:true})).toBeVisible();
+  await page.getByRole('switch',{name:'容器管理'}).click();await page.getByRole('switch',{name:'允许提权脚本'}).click();await page.getByRole('switch',{name:'受管主机运维（整机高信任）'}).click();
   await page.getByRole('button',{name:'生成权限变更计划'}).click();await expect(page.getByText('全部关闭',{exact:true})).toBeVisible();
   await page.getByRole('checkbox',{name:'我已审阅此主机、发行包和精确权限变更'}).check();await page.getByRole('button',{name:'确认执行此权限计划'}).click();
-  await expect(page.getByText('中心授权已更新，实际状态见上方')).toBeVisible();await expect(page.getByText('中心未授权')).toHaveCount(2);expect(calls.some(call=>call.path.includes('bootstrap'))).toBe(false);
+  await expect(page.getByText('中心授权已更新，实际状态见上方')).toBeVisible();await expect(page.getByText('中心未授权')).toHaveCount(3);expect(calls.some(call=>call.path.includes('bootstrap'))).toBe(false);
  });
  await run('plan failures preserve choices and editing invalidates prior approval',async page=>{
   let attempts=0;
@@ -62,7 +62,7 @@ try{
  await run('lost policy approval recovers only the original applied plan without replay',async page=>{
   let applies=0;const policy={id:'policy-1',revision:'c'.repeat(64),expires_at:new Date(Date.now()+300000).toISOString(),machine_id:'h1',agent_id:'agent-h1',previous_generation:0,generation:1,capabilities:[]};
   await page.route('**/api/v1/**',async route=>{const path=new URL(route.request().url()).pathname,method=route.request().method();if(path.endsWith('/execution-status'))return route.fulfill({json:status('h1',capabilities,{id:'executor-1',online:true},'ready')});if(path.endsWith('/execution-policy/plan'))return route.fulfill({json:policy});if(path.endsWith('/apply')){applies++;return route.abort('failed')}if(path.endsWith('/execution-policy/plans/policy-1')&&method==='GET')return route.fulfill({json:{...policy,applied_at:new Date().toISOString()}});throw Error('Unexpected '+path)});
-  await page.goto(base);await expect(page.getByRole('switch',{name:'容器管理'})).toBeEnabled();await page.getByRole('switch',{name:'容器管理'}).click();await page.getByRole('switch',{name:'允许提权脚本'}).click();await page.getByRole('button',{name:'生成权限变更计划'}).click();await page.getByRole('checkbox',{name:'我已审阅此主机、发行包和精确权限变更'}).check();await page.getByRole('button',{name:'确认执行此权限计划'}).click();await expect(page.getByText('提交结果未知，请回读原计划')).toBeVisible();await page.getByRole('button',{name:'刷新中心授权与执行状态'}).click();await expect(page.getByText('中心授权已更新，实际状态见上方')).toBeVisible();expect(applies).toBe(1);
+  await page.goto(base);await expect(page.getByRole('switch',{name:'容器管理'})).toBeEnabled();await page.getByRole('switch',{name:'容器管理'}).click();await page.getByRole('switch',{name:'允许提权脚本'}).click();await page.getByRole('switch',{name:'受管主机运维（整机高信任）'}).click();await page.getByRole('button',{name:'生成权限变更计划'}).click();await page.getByRole('checkbox',{name:'我已审阅此主机、发行包和精确权限变更'}).check();await page.getByRole('button',{name:'确认执行此权限计划'}).click();await expect(page.getByText('提交结果未知，请回读原计划')).toBeVisible();await page.getByRole('button',{name:'刷新中心授权与执行状态'}).click();await expect(page.getByText('中心授权已更新，实际状态见上方')).toBeVisible();expect(applies).toBe(1);
  });
  await run('lost prepare response finds a new exact matching record read-only, without duplicate creation',async page=>{
   let saved,creates=0;

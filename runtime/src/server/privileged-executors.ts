@@ -1,8 +1,9 @@
+import { dockerInventory } from "../shared/application-observation.js";
 import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import type { Context, Dependencies, Module } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
 import {
-  PRIVILEGED_CAPABILITIES, EXECUTOR_SIGNATURE_HEADER, EXECUTOR_LEASE_SECONDS, executorActivationID,
+  PRIVILEGED_CAPABILITIES, EXECUTOR_SIGNATURE_HEADER, EXECUTOR_LEASE_SECONDS,
   canonicalJSON, parseStrictJSON, strictRecord, boundedText, digest, nonce, sha256,
   normalizePrivilegedPayload, validateAccount, validatePublicKey, validateRequestClaims,
   signJWS, verifyJWS, type PrivilegedCapability, type PrivilegedPayload, type PrivilegedPlan,
@@ -31,7 +32,20 @@ export interface ExecutorBootstrap {
 }
 
 /** Independent execution principal. No ordinary Agent credential is accepted in this module. */
+export interface ManagedExecutorBridge {
+  prepare(executor:Row):void;
+  validate(job:Row):void;
+  claim(job:Row):void;
+  sync(job:Row):void;
+  event(job:Row,value:Row):void;
+  result(job:Row,value:Row):void;
+  artifact(job:Row,value:Row):Row;
+}
 export class PrivilegedExecutorStore {
+  managed?:ManagedExecutorBridge;
+  observations?:{targets:(executor:Row)=>unknown;accept:(executor:Row,value:Row)=>unknown};
+  observationAuthority(id:string){const e=this.executor(id),p=this.policy(e.machine_id);if(p.agent_id!==e.agent_id||!JSON.parse(p.capabilities_json).includes('operations.managed.v1'))fail(403,'policy_disabled');this.actor(p.approved_by);return e;}
+
   private sweepTimer?: ReturnType<typeof setInterval>;
   readonly centerInstanceID: string;
   readonly centerKeyID: string;
@@ -93,7 +107,11 @@ export class PrivilegedExecutorStore {
     assertNoPendingAgentUpdate(this.deps.db, agent, machine);
     assertNoDockerInstallation(this.deps.db, machine, agent);
     if (this.deps.db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND id<>? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at=''))", machine, excludingJob)) fail(409, "machine_execution_locked");
-    if (this.hasTable("agent_jobs") && this.deps.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state IN ('queued','leased','accepted','preflighting','staging','activating','verifying','unknown') LIMIT 1", agent)) fail(409, "machine_execution_locked");
+    if(this.hasTable("agent_jobs")) {
+      const principal=this.deps.db.all<{name:string}>("PRAGMA table_info(agent_jobs)").some(c=>c.name==='execution_principal');
+      const queued=principal?"(state='queued' AND execution_principal='ordinary_agent')":"state='queued'";
+      if(this.deps.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND id<>? AND (state IN ('leased','accepted','preflighting','staging','activating','verifying','unknown') OR "+queued+") LIMIT 1",agent,excludingJob))fail(409,"machine_execution_locked");
+    }
     if (this.hasTable("task_runs") && this.deps.db.get("SELECT id FROM task_runs WHERE host_id=? AND id<>? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='' AND superseded_by='')) LIMIT 1", machine, excludingJob)) fail(409, "machine_execution_locked");
   }
   private policy(machine: string): Row {
@@ -109,7 +127,7 @@ export class PrivilegedExecutorStore {
     return row;
   }
   private capabilities(value: unknown): PrivilegedCapability[] {
-    if (!Array.isArray(value) || value.length > 2 || value.some(x => !(PRIVILEGED_CAPABILITIES as readonly unknown[]).includes(x)) || new Set(value).size !== value.length) fail(400, "invalid_capabilities");
+    if (!Array.isArray(value) || value.length > PRIVILEGED_CAPABILITIES.length || value.some(x => !(PRIVILEGED_CAPABILITIES as readonly unknown[]).includes(x)) || new Set(value).size !== value.length) fail(400, "invalid_capabilities");
     return [...value].sort() as PrivilegedCapability[];
   }
   preparePolicyPlan(machineID: string, input: ExecutorPolicyInput, actor: string) {
@@ -223,6 +241,8 @@ export class PrivilegedExecutorStore {
     const authorized = JSON.parse(policy.capabilities_json) as string[];
     return { machine_id: machineID, policy_generation: policy.generation, executor: row ? { id: row.id, state: row.state, install_generation: row.install_generation, online, last_seen: row.last_seen, version: observation.version ?? "", boot_id: observation.boot_id ?? "",activation_id:observation.activation_id??"",release:observation.release ?? null } : null,
       capabilities: Object.fromEntries(PRIVILEGED_CAPABILITIES.map(capability => [capability, { authorized: authorized.includes(capability), effective: !authorized.includes(capability) ? "disabled" : !row ? "pending" : !binding ? "blocked" : online && observation.policy_generation === policy.generation && observation.capabilities?.includes(capability) ? "ready" : "unavailable", policy_generation: policy.generation }])),
+      ...(online && authorized.includes('operations.managed.v1') && observation.policy_generation===policy.generation && observation.capabilities?.includes('operations.managed.v1') && observation.docker_inventory?{docker_inventory:observation.docker_inventory}:{}),
+      operations_capabilities:online && observation.policy_generation===policy.generation && observation.capabilities?.includes("operations.managed.v1")?observation.operations_capabilities??[]:[],
       account_profiles: online && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreter_profiles: online && observation.policy_generation === policy.generation ? observation.interpreter_profiles ?? [] : [],
       script_profiles: { accounts: online && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreters: online && observation.policy_generation === policy.generation ? Object.fromEntries((observation.interpreter_profiles ?? []).map((p: Row) => [p.runtime, p.sha256])) : {} } };
   }
@@ -238,16 +258,26 @@ export class PrivilegedExecutorStore {
     return this.deps.db.transaction(() => {
       this.executor(executorID);
       const seen = this.deps.db.get<Row>("SELECT * FROM privileged_request_nonces WHERE executor_id=? AND request_id=?", executorID, claims.request_id);
-      if (seen) { if (seen.request_sha256 !== requestHash) fail(409, "replay_conflict"); return parseStrictJSON(this.deps.decrypt(seen.response_enc)); }
+      if (seen) {
+        if (seen.request_sha256 !== requestHash) fail(409, "replay_conflict");
+        // Acknowledgment recovery must not revive expired/revoked authority.
+        // Claim snapshots retain their old lease solely for journal recovery;
+        // every route that can start work or disclose additional bytes checks
+        // current authority again, even for an identical signed request.
+        const jobRoute=path.match(/\/jobs\/([a-f0-9]{32})\/(payload|artifacts|renew|start-permits)$/);
+        if(jobRoute)this.leased(this.executor(executorID),jobRoute[1],input.lease_id,jobRoute[2]==='renew');
+        if(jobRoute&&jobRoute[2]==='start-permits')return action(this.executor(executorID),input);
+        return parseStrictJSON(this.deps.decrypt(seen.response_enc),2<<20);
+      }
       const response = action(row, input);
       this.deps.db.run("INSERT INTO privileged_request_nonces(executor_id,request_id,request_sha256,response_enc,created_at) VALUES(?,?,?,?,?)", executorID, claims.request_id, requestHash, this.deps.encrypt(canonicalJSON(response)), this.now());
       return response;
     });
   }
   heartbeat(executor: Row, value: unknown) {
-    const keys = ["version", "boot_id", "activation_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release"];
-    const v = object(value, keys); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
-    if(!executorActivationID(v.activation_id))fail(400,"invalid_executor_activation");
+    const keys = ["version", "boot_id", "activation_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release","operations_capabilities","docker_inventory"];
+    const v = object(value, keys,keys.filter(k=>!["release","operations_capabilities","docker_inventory"].includes(k))); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
+    if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(v.activation_id))fail(400,"invalid_executor_activation");
     if (v.release!==undefined) {
       const release=object(v.release,["build_id","source_revision","artifact_sha256","state_schema"]);
       validate(()=>boundedText(release.build_id));
@@ -255,7 +285,9 @@ export class PrivilegedExecutorStore {
       validate(()=>digest(release.artifact_sha256));
     }
     if (!Number.isSafeInteger(v.policy_generation) || v.policy_generation < 1) fail(400, "invalid_policy_generation");
+    if(v.docker_inventory!==undefined&&!dockerInventory(v.docker_inventory))fail(400,"invalid_docker_inventory");
     const capabilities = this.capabilities(v.capabilities);
+    if(v.operations_capabilities!==undefined&&(!Array.isArray(v.operations_capabilities)||v.operations_capabilities.length>30||v.operations_capabilities.some((c:unknown)=>typeof c!=="string"||!/^operations\.[a-z0-9_.-]{1,64}$/.test(c))))fail(400,"invalid_operations_capabilities");
     if (!Array.isArray(v.account_profiles) || v.account_profiles.length > 32 || !Array.isArray(v.interpreter_profiles) || v.interpreter_profiles.length > 8) fail(400, "invalid_profiles");
     v.account_profiles.forEach((p: unknown) => validate(() => validateAccount(p)));
     v.interpreter_profiles.forEach((p: unknown) => { const profile = object(p, ["runtime", "sha256"]); if (!["shell", "node"].includes(profile.runtime)) fail(400, "invalid_runtime"); validate(() => digest(profile.sha256)); });
@@ -266,12 +298,29 @@ export class PrivilegedExecutorStore {
     const claims = { version: 1, purpose: "policy", center_instance_id: this.centerInstanceID, executor_id: executor.id, machine_id: executor.machine_id, agent_id: executor.agent_id, install_generation: executor.install_generation, policy_generation: policy.generation, capabilities: authorized, iat, exp: iat + 60 };
     return { center_instance_id: this.centerInstanceID, policy_generation: policy.generation, capabilities: authorized, policy: signJWS(claims, this.centerPrivateKey, this.centerKeyID), lease_seconds: EXECUTOR_LEASE_SECONDS, server_time: this.now() };
   }
+  requireManagedReady(agentID:string) {
+    const host=this.deps.db.get<Row>("SELECT id FROM managed_machines WHERE agent_id=?",agentID);
+    if(!host||this.getStatus(host.id).capabilities['operations.managed.v1'].effective!=='ready')fail(409,'managed_operations_executor_required');
+  }
+  enqueueManaged(job:Row,payload:PrivilegedPayload,actor:string) {
+    this.actor(actor);this.requireManagedReady(job.agent_id);
+    if(payload.kind!=='managed'||payload.job.id!==job.id)fail(400,'managed_job_mismatch');
+    const h=this.deps.db.get<Row>("SELECT id,name,agent_id FROM managed_machines WHERE agent_id=?",job.agent_id)!;
+    this.idle(h.id,h.agent_id,job.id);
+    const executor=this.getStatus(h.id).executor!,policy=this.policy(h.id),revision=sha256(canonicalJSON(payload)),authorization=randomUUID();
+    this.deps.db.run("INSERT INTO privileged_grants(id,job_id,revision,approved_by,state,expires_at) VALUES(?,?,?,?,'reserved',?)",authorization,job.id,revision,actor,job.expires_at);
+    this.deps.db.run("INSERT INTO privileged_jobs(id,task_run_id,machine_id,agent_id,executor_id,install_generation,policy_generation,capability,payload_enc,payload_sha256,authorization_id,state,created_at,expires_at) VALUES(?,?,?,?,?,?,?,'operations.managed.v1',?,?,?,'queued',?,?)",job.id,job.id,h.id,h.agent_id,executor.id,executor.install_generation,policy.generation,this.deps.encrypt(canonicalJSON(payload)),revision,authorization,this.now(),job.expires_at);
+    const metadata={task_id:'managed:'+job.deployment_id,task_name:'受管主机运维',host_id:h.id,host_name:h.name,agent_id:h.agent_id,execution_principal:'privileged_executor',executor_id:executor.id,capability:'operations.managed.v1',request_sha256:revision,authorization_id:authorization,operation_id:job.operation_id};
+    this.deps.db.run("INSERT INTO task_runs(id,task_id,host_id,agent_id,snapshot_json,state,trigger,request_id,requested_by,created_at,expires_at,execution_principal,executor_id,auto_retry_closed) VALUES(?,?,?,?,?,'queued','manual',?,?,?,?,'privileged_executor',?,1)",job.id,metadata.task_id,h.id,h.agent_id,canonicalJSON(metadata),job.id,actor,this.now(),job.expires_at,executor.id);
+    this.audit(h.id,actor,'managed_execution_approved',job.id,{request_sha256:revision,operation_id:job.operation_id});
+  }
   plan(value: unknown, actor: string) {
     this.actor(actor); this.sweep();
     const v = object(value, ["host_ids", "capability", "payload"]);
     if (!Array.isArray(v.host_ids) || !v.host_ids.length || v.host_ids.length > 50 || new Set(v.host_ids).size !== v.host_ids.length) fail(400, "explicit_host_ids_required");
     const payload = validate(() => normalizePrivilegedPayload(v.payload)), expected = payload.kind === "script" ? "script.elevated.v1" : "container.managed.v1";
     if (v.capability !== expected) fail(400, "principal_mismatch");
+    if(payload.kind==='managed')fail(400,'managed_jobs_require_registered_operation');
     const targets = v.host_ids.map((id: unknown) => {
       validate(() => boundedText(id)); const h = this.host(id as string), policy = this.policy(h.id), status = this.getStatus(h.id);
       if (status.capabilities[expected].effective !== "ready") fail(409, "execution_capability_not_ready");
@@ -327,11 +376,13 @@ export class PrivilegedExecutorStore {
     this.actor(policy.approved_by);
     if (!allowTerminal && (job.cancel_requested || terminal(job.state))) fail(409, "execution_not_active");
     if (job.state === "queued" && grant.expires_at <= this.now()) fail(403, "expired_authorization");
+    if(job.capability==='operations.managed.v1')this.managed?.validate(job);
     return grant;
   }
   private sync(job: Row) {
     const summary = ({ queued: "等待执行器领取", running: "执行器正在运行", succeeded: "执行器报告完成", failed: "执行器报告失败", cancelled: "执行已取消", unknown: "执行结果未知，请核对主机" } as Row)[job.state];
     this.deps.db.run("UPDATE task_runs SET state=?,started_at=?,finished_at=?,lease_expires_at=?,cancel_requested=?,code=?,summary=?,resolved_at=?,resolved_by=?,resolution_reason=?,auto_retry_closed=1 WHERE id=? AND execution_principal='privileged_executor'", job.state, job.started_at, job.finished_at, job.lease_expires_at, job.cancel_requested, job.code, summary, job.resolved_at, job.resolved_by, job.resolution_reason, job.task_run_id);
+    if(job.capability==='operations.managed.v1')this.managed?.sync(job);
   }
   sweep() {
     const rows = this.deps.db.all<Row>("SELECT * FROM privileged_jobs WHERE (state='queued' AND expires_at<=?) OR (state='running' AND lease_expires_at<=?)", this.now(), this.now());
@@ -342,6 +393,7 @@ export class PrivilegedExecutorStore {
   claim(executor: Row, value: unknown) {
     object(value, []); this.sweep();
     if (this.deps.db.get("SELECT id FROM privileged_jobs WHERE executor_id=? AND (state='running' OR (state='unknown' AND resolved_at=''))", executor.id)) return { job: null };
+    this.managed?.prepare(executor);
     const jobs = this.deps.db.all<Row>("SELECT * FROM privileged_jobs WHERE executor_id=? AND state='queued' ORDER BY created_at,id LIMIT 50", executor.id);
     for (const job of jobs) {
       try { this.authority(job, executor); this.idle(job.machine_id, job.agent_id, job.id); }
@@ -351,7 +403,7 @@ export class PrivilegedExecutorStore {
       }
       const lease = randomBytes(32).toString("base64url"), expiry = plus(this.deps.now(), EXECUTOR_LEASE_SECONDS);
       this.deps.db.run("UPDATE privileged_jobs SET state='running',phase='accepted',lease_id=?,lease_expires_at=?,started_at=? WHERE id=?", lease, expiry, this.now(), job.id);
-      const active = this.row(job.id); this.sync(active);
+      const active = this.row(job.id); if(active.capability==='operations.managed.v1')this.managed?.claim(active); this.sync(active);
       return { job: { plan: signJWS(this.planClaims(active), this.centerPrivateKey, this.centerKeyID), payload: parseStrictJSON(this.deps.decrypt(active.payload_enc)) } };
     } return { job: null };
   }
@@ -384,7 +436,7 @@ export class PrivilegedExecutorStore {
   startPermit(executor: Row, id: string, value: unknown) {
     const v = object(value, ["lease_id", "step_id", "executor_nonce"]), job = this.leased(executor, id, v.lease_id);
     const payload = parseStrictJSON(this.deps.decrypt(job.payload_enc)) as PrivilegedPayload;
-    const expectedStep = payload.kind === "script" ? "execute" : "docker." + payload.operation;
+    const expectedStep = payload.kind === "script" ? "execute" : payload.kind==='managed' ? 'managed.execute' : "docker." + payload.operation;
     validate(() => nonce(v.executor_nonce)); if (v.step_id !== expectedStep) fail(400, "unsupported_execution_step");
     this.idle(job.machine_id, job.agent_id, job.id);
     const previous = this.deps.db.get<Row>("SELECT * FROM privileged_start_permits WHERE job_id=? AND step_id=?", id, v.step_id);
@@ -399,15 +451,17 @@ export class PrivilegedExecutorStore {
     const signed = signJWS(permit, this.centerPrivateKey, this.centerKeyID);
     this.deps.db.run("UPDATE privileged_grants SET state='consumed' WHERE id=? AND state='reserved'", grant.id);
     this.deps.db.run("INSERT INTO privileged_start_permits(job_id,step_id,executor_nonce,permit_id,permit_jws,created_at) VALUES(?,?,?,?,?,?)", id, expectedStep, v.executor_nonce, permit.permit_id, signed, this.now());
-    this.deps.db.run("UPDATE privileged_jobs SET phase='activating' WHERE id=?", id);
+    if(payload.kind!=='managed')this.deps.db.run("UPDATE privileged_jobs SET phase='activating' WHERE id=?", id);
     return { permit: signed };
   }
   events(executor: Row, id: string, value: unknown) {
-    const v = object(value, ["lease_id", "sequence", "phase", "code"]), job = this.leased(executor, id, v.lease_id, true);
-    if (!Number.isSafeInteger(v.sequence) || v.sequence !== job.event_sequence + 1 || !["accepted", "staging", "activating", "verifying"].includes(v.phase) || typeof v.code !== "string" || !/^[a-z0-9_]{0,64}$/.test(v.code)) fail(409, "invalid_execution_event");
-    const phases = ["accepted", "staging", "activating", "verifying"];
+    const v = object(value, ["lease_id", "sequence", "phase", "code", "detail"],["lease_id", "sequence", "phase", "code"]), job = this.leased(executor, id, v.lease_id, true);
+    if(v.detail!==undefined&&(job.capability!=='operations.managed.v1'||!v.detail||typeof v.detail!=='object'||Buffer.byteLength(canonicalJSON(v.detail))>65536))fail(400,'invalid_managed_event');
+    if (!Number.isSafeInteger(v.sequence) || v.sequence !== job.event_sequence + 1 || !["accepted", "preflighting", "staging", "activating", "verifying"].includes(v.phase) || typeof v.code !== "string" || !/^[a-z0-9_]{0,64}$/.test(v.code)) fail(409, "invalid_execution_event");
+    const phases = ["accepted", "preflighting", "staging", "activating", "verifying"];
     if (phases.indexOf(v.phase) < phases.indexOf(job.phase) || terminal(job.state)) fail(409, "invalid_execution_phase");
     this.deps.db.run("UPDATE privileged_jobs SET event_sequence=?,phase=? WHERE id=?", v.sequence, v.phase, id);
+    if(job.capability==='operations.managed.v1')this.managed?.event(job,v);
     return { sequence: v.sequence };
   }
   result(executor: Row, id: string, value: unknown) {
@@ -418,8 +472,14 @@ export class PrivilegedExecutorStore {
     if (v.state === "succeeded" && !this.deps.db.get("SELECT job_id FROM privileged_start_permits WHERE job_id=?", id)) fail(409, "execution_not_started");
     if (v.state === "cancelled" && !job.cancel_requested) fail(409, "cancellation_not_requested");
     this.deps.db.run("UPDATE privileged_jobs SET state=?,phase=?,finished_at=?,code=?,output_enc=? WHERE id=?", v.state, v.state, this.now(), v.code, this.deps.encrypt(canonicalJSON({ stdout: v.stdout, stderr: v.stderr, exit_code: v.exit_code })), id);
+    if(payload.kind==='managed')this.managed?.result(job,v);
     this.sync(this.row(id)); this.audit(job.machine_id, executor.id, "executor_result", id, { state: v.state, code: v.code });
     return { job: this.get(id) };
+  }
+  managedArtifact(executor:Row,id:string,value:unknown) {
+    const v=object(value,['lease_id','release_id','offset']),job=this.leased(executor,id,v.lease_id);
+    if(job.capability!=='operations.managed.v1'||!this.managed)fail(403,'principal_mismatch');
+    return this.managed.artifact(job,v);
   }
   get(id: string) {
     this.sweep(); const row = this.row(id);
@@ -451,7 +511,7 @@ export function registerPrivilegedExecutors(deps: Dependencies, options: { dataD
   const store = new PrivilegedExecutorStore(deps, options), r = deps.router;
   const human = (c: Context) => {
     deps.auth.requireAdmin(c);
-    if (c.req.headers.authorization || !c.req.headers.cookie?.split(";").some(p => p.trim().startsWith("lm_session=")) || deps.auth.user(c.req)?.id !== c.user.id) fail(403, "human_admin_session_required");
+    if (c.req.headers.authorization || !c.req.headers.cookie?.split(";").some(p => p.trim().startsWith("lm_session=")) || (deps.auth.user(c.req)?.id !== c.user.id || deps.auth.user(c.req)?.role !== "admin" || !deps.db.get("SELECT id FROM users WHERE id=? AND active=1 AND role='admin'",c.user.id))) fail(403, "human_admin_session_required");
   };
   const readBody = async (c: Context) => { const raw = await c.raw(1 << 20); return validate(() => parseStrictJSON(raw)); };
   // All privileged machine requests are public only to the session middleware;
@@ -470,6 +530,9 @@ export function registerPrivilegedExecutors(deps: Dependencies, options: { dataD
   signed("jobs/:jobId/start-permits", (e, v, c) => store.startPermit(e, c.params.jobId, v));
   signed("jobs/:jobId/events", (e, v, c) => store.events(e, c.params.jobId, v));
   signed("jobs/:jobId/result", (e, v, c) => store.result(e, c.params.jobId, v));
+  signed("jobs/:jobId/artifacts", (e,v,c)=>store.managedArtifact(e,c.params.jobId,v));
+  signed('observations/targets',(e,v)=>{object(v,[]);store.observationAuthority(e.id);if(!store.observations)fail(503,'executor_observation_unavailable');return store.observations!.targets(e);});
+  signed('observations/batches',(e,v)=>{store.observationAuthority(e.id);if(!store.observations)fail(503,'executor_observation_unavailable');return store.observations!.accept(e,v);});
   r.get("/api/v1/machines/:id/execution-status", c => { deps.auth.requireAdmin(c); c.json(store.getStatus(c.params.id)); });
   r.post("/api/v1/machines/:id/execution-policy/plan", async c => { human(c); c.json(store.preparePolicyPlan(c.params.id, await readBody(c), c.user.id)); });
   r.get("/api/v1/machines/:id/execution-policy/plans/:planId", c => { deps.auth.requireAdmin(c); c.json(store.getPolicyPlan(c.params.id, c.params.planId)); });

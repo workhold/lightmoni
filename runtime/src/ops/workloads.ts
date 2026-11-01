@@ -1,4 +1,3 @@
-import { assertImplementedHostProfile } from './host-profiles.js';
 import {prepareApplicationYAML,stripComposeExtensions} from './application-yaml.js';
 import {machineServiceAddresses} from "../server/host-network.js";
 import {publicWebsiteSpec} from './website-auth.js';
@@ -1467,10 +1466,9 @@ export function createWorkloadController(
       return [];
     },
     async perform(r, action, input, actor) {
+      if (modern.handles(r)) return modern.perform(r, action, input, actor);
       if (!this.actions(r).includes(action))
         fail(400, "unsupported_workload_action");
-      assertImplementedHostProfile(r, action);
-      if (modern.handles(r)) return modern.perform(r, action, input, actor);
       if (r.kind === "node_pool")
         return {
           runs: discoverNodes(r, actor, true),
@@ -1616,6 +1614,40 @@ export function createWorkloadController(
         )) {
         const actor = r.status.policy_actor ?? r.authorized_by;
         try {
+          if (r.kind === "service" && r.status.enabled === true)
+            serviceReconcile(r, actor);
+          if (r.kind === "gateway_group" && r.status.enabled === true)
+            gatewayDeploy(r, r, actor);
+          if (
+            ["application", "service", "gateway_group"].includes(r.kind) &&
+            r.status.enabled === true
+          ) {
+            for (const i of instances(r.id)) {
+              if (
+                i.desired_state !== "running" ||
+                busy(i) ||
+                deps.now().getTime() - Date.parse(i.last_seen || i.created_at) <
+                  30000 ||
+                !online(i.agent_id)
+              )
+                continue;
+              dispatch(
+                r,
+                i,
+                "inspect",
+                {
+                  task:
+                    r.kind === "gateway_group"
+                      ? "gateway.inspect"
+                      : "workload.inspect",
+                  health: desired(r).spec.health,
+                  probe_port: i.port,
+                },
+                actor,
+                i.desired_generation,
+              );
+            }
+          }
           if (r.kind === "website") startDNS(r, actor);
         } catch (e) {
           store.patchStatus(r.id, {

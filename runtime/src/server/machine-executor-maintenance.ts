@@ -121,7 +121,8 @@ export function registerMachineExecutorMaintenance(deps:Dependencies,access:Agen
   const catalog=new AgentReleaseCatalog(options.downloadsDir,join(options.dataDir,"executor-maintenance-cache"));
   const human=(c:Context)=>{
     deps.auth.requireAdmin(c);
-    if(c.req.headers.authorization||!c.req.headers.cookie?.split(";").some(p=>p.trim().startsWith("lm_session="))||deps.auth.user(c.req)?.id!==c.user.id)fail(403,"human_admin_session_required");
+    const current=deps.auth.user(c.req);
+    if(c.req.headers.authorization||!c.req.headers.cookie?.split(";").some(p=>p.trim().startsWith("lm_session="))||current?.id!==c.user.id||current?.role!=="admin"||!db.get("SELECT id FROM users WHERE id=? AND role='admin' AND active=1",c.user.id))fail(403,"human_admin_session_required");
   };
   const input=(v:unknown,keys:string[],required=keys)=>{try{return strictRecord(v,keys,required);}catch{fail(400,"invalid_executor_maintenance_request");}};
   const body=async(c:Context)=>{try{return parseStrictJSON(await c.raw(65536),65536);}catch{fail(400,"invalid_executor_maintenance_request");}};

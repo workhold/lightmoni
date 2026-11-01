@@ -12,7 +12,7 @@ export const hash=(value:string|Buffer)=>createHash('sha256').update(value).dige
 export async function directory(path:string,mode=0o700):Promise<void>{
   const parent=dirname(path);if(parent!==path)await directory(parent,mode);
   try { const s=await lstat(path);if(s.isSymbolicLink()||!s.isDirectory())throw new Error('UNSAFE_MANAGED_PATH'); }
-  catch(error:any){if(error.code!=='ENOENT')throw error;await directory(dirname(path),mode);try{await mkdir(path,{mode});}catch(e:any){if(e.code!=='EEXIST')throw e;}const s=await lstat(path);if(s.isSymbolicLink()||!s.isDirectory())throw new Error('UNSAFE_MANAGED_PATH');}
+  catch(error:any){if(error.code!=='ENOENT')throw error;await directory(dirname(path),mode);try{await mkdir(path,{mode});await chmod(path,mode);}catch(e:any){if(e.code!=='EEXIST')throw e;}const s=await lstat(path);if(s.isSymbolicLink()||!s.isDirectory())throw new Error('UNSAFE_MANAGED_PATH');}
 }
 export async function safeFile(path:string):Promise<void>{try{const s=await lstat(path);if(s.isSymbolicLink()||!s.isFile())throw new Error('UNSAFE_MANAGED_PATH');}catch(error:any){if(error.code!=='ENOENT')throw error;}}
 export async function atomicFile(path:string,body:string|Buffer,mode=0o600):Promise<void>{await directory(dirname(path));await safeFile(path);const tmp=`${path}.${process.pid}.${crypto.randomUUID()}.tmp`;try{await writeFile(tmp,body,{flag:'wx',mode});await rename(tmp,path);await chmod(path,mode);}finally{await unlink(tmp).catch(()=>{});}}
@@ -28,13 +28,14 @@ export async function publicRoot(context:OperationExecutionContext):Promise<stri
   const identity=hash(resolve(context.dataDir)).slice(0,20);
   const root=resolve(context.publicDir?join(await realpath(dirname(resolve(context.publicDir))),basename(context.publicDir)):(process.getuid?.()===0||resolve(context.dataDir)==='/var/lib/lightmoni-agent'?join('/var/lib/lightmoni-web',identity):join(await realpath(dirname(resolve(context.dataDir))),`lightmoni-web-public-${identity}`)));
   const privatePath=resolve(context.dataDir);if(root===privatePath||root.startsWith(privatePath+sep))throw new Error('PUBLIC_ROOT_MUST_BE_SEPARATE');
+  if(process.getuid?.()===0&&!context.publicDir){const base=dirname(root);await directory(base,0o755);const stat=await lstat(base);if(stat.uid!==0||stat.isSymbolicLink()||stat.mode&0o022)throw Error('UNSAFE_PUBLIC_DIRECTORY');await chmod(base,0o755);}
   await directory(root,0o755);const marker=join(root,'.lightmoni-web-owner.json');const owner=await readJSON<any>(marker,null);
   if(owner){if(owner.dataDir!==privatePath||owner.version!==1)throw new Error('PUBLIC_DIRECTORY_OWNERSHIP_MISMATCH');}
   else {if((await readdir(root)).length)throw new Error('PUBLIC_DIRECTORY_UNOWNED');await atomicFile(marker,JSON.stringify({version:1,dataDir:privatePath}));}
   await chmod(root,0o755);return root;
 }
 export const quote=(text:string)=>{if(/[\r\n\0]/.test(text))throw new Error('UNSAFE_NGINX_VALUE');return '"'+text.replace(/\\/g,'\\\\').replace(/"/g,'\\"').replace(/\$/g,'\\$')+'"';};
-export async function nginxPaths(context:OperationExecutionContext){const root=await privateRoot(context,'websites');for(const dir of ['active','versions','logs','temp/client-body','temp/proxy','temp/fastcgi','temp/uwsgi','temp/scgi'])await directory(join(root,dir));return{root,config:join(root,'nginx.conf'),pid:join(root,'nginx.pid')};}
+export async function nginxPaths(context:OperationExecutionContext){const root=await privateRoot(context,'websites');for(const dir of ['active','versions','logs','temp/client-body','temp/proxy','temp/fastcgi','temp/uwsgi','temp/scgi'])await directory(join(root,dir));return{root,config:join(root,'nginx.conf'),pid:join(root,'nginx.pid'),temp:context.nginxTempDir??join(root,'temp')};}
 export async function running(context:OperationExecutionContext):Promise<boolean>{
  const{pid,root,config}=await nginxPaths(context);await safeFile(pid);let value:string;
  try{value=(await readFile(pid,'utf8')).trim();}catch(e:any){if(e.code==='ENOENT')return false;throw e;}
@@ -48,7 +49,7 @@ export async function running(context:OperationExecutionContext):Promise<boolean
 export async function preflight(context:OperationExecutionContext,config:string){const{root}=await nginxPaths(context);try{await context.command('nginx',['-t','-p',root+sep,'-c',config],{timeoutMs:20000});}catch{throw new Error('NGINX_PREFLIGHT_FAILED');}}
 export async function reloadGateway(context:OperationExecutionContext){const{root,config}=await nginxPaths(context);await preflight(context,config);try{if(await running(context))await context.command('nginx',['-p',root+sep,'-c',config,'-s','reload'],{timeoutMs:20000});else await context.command('nginx',['-p',root+sep,'-c',config],{timeoutMs:20000});}catch{throw new Error('NGINX_ACTIVATION_FAILED');}if(!await running(context))throw new Error('NGINX_PROCESS_NOT_RUNNING');}
 export async function workerDirective(context:OperationExecutionContext):Promise<string>{
- if(process.getuid?.()===0){let group:string;try{group=(await context.command('id',['-gn','nobody'],{timeoutMs:5000})).stdout.trim();}catch{throw new Error('UNPRIVILEGED_NGINX_WORKER_REQUIRED');}if(!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(group))throw new Error('UNPRIVILEGED_NGINX_WORKER_REQUIRED');return `user nobody ${group};\n`;}
+ if(process.getuid?.()===0){if(context.nginxWorker){if(!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(context.nginxWorker.name)||!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(context.nginxWorker.group))throw Error('INVALID_NGINX_WORKER');return 'user '+context.nginxWorker.name+' '+context.nginxWorker.group+';\n';}let group:string;try{group=(await context.command('id',['-gn','nobody'],{timeoutMs:5000})).stdout.trim();}catch{throw new Error('UNPRIVILEGED_NGINX_WORKER_REQUIRED');}if(!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(group))throw new Error('UNPRIVILEGED_NGINX_WORKER_REQUIRED');return `user nobody ${group};\n`;}
  const name=userInfo().username;if(!/^[A-Za-z_][A-Za-z0-9_-]*\$?$/.test(name))throw new Error('UNSUPPORTED_WORKER_ACCOUNT');return '';
 }
 export async function probeHTTP(port:number,domain:string,path='/',tls=false,signal?:AbortSignal,headers:Record<string,string>={}):Promise<{status:number,text:string,peer_fingerprint_sha256?:string}>{

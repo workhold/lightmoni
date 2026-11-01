@@ -4,7 +4,7 @@
 >
 > 配套变更：[SDD 019：系统设计基线](../specs/019-system-design-baseline/spec.md)。
 
-本次 #64 实施后的主机执行契约以第60.10、57、69、71章为准：普通Agent不访问Docker daemon，中心已关闭普通control的旧写任务、operations私有正文及制品入口。第26、33、42、44、56、59、62、64、75章中依赖旧Agent租约执行Docker/Compose、宿主发布或受保护载荷的流程与验收均属历史方案；资源元数据、中心/云操作和历史审计保留，相关主机业务profile尚未迁移时在创建前明确拒绝。它们不构成现行可执行协议，也不表示最小执行器已支持完整业务部署、应用Docker观测、日志尾读、卷或端口管理。SDK直报与普通非特权采集不受影响。
+当前受管主机运维以第80章（SDD080）覆盖第60.10章业务profile未迁移的阶段限制。普通Agent仍不能访问Docker daemon或旧写入协议；网站、证书、Compose、备份与业务制品由独立默认关闭的 operations.managed.v1 承接，原批准与领域核验保留。执行器维护沿用第60章唯一维护接口与 activation 证明；新业务数据与离线接管规则见第80章。
 
 ## 1. 文档定位与事实来源
 
@@ -1908,3 +1908,33 @@ flowchart LR
 ```
 
 实现与验收见 `specs/078-machine-service-addresses/`，网站流程见 `specs/077-website-management-flow/`；本节是架构增量，不代表线上 Agent、主机设置或 DNS 已更新。
+
+## 80. 独立执行器承接受管主机运维（SDD 080）
+
+本节取代第57、60.10、69、71及75节中普通 Agent 领取 Docker/operations 写任务的历史路径。普通 Agent 保持非 root、无 Docker 组/socket/capabilities；生产中心以 execution_principal 分流，旧未领取写任务取消，已领取或 unknown 保留审计与互斥。受管作业的领取、私有载荷、制品、事件与结果都只能走独立签名主体，不能凭 ordinary control 或获知 lease 访问。任务、AgentJob、运维 run 与原领域验证沿用同一 ID，结构化 root 回执在同一 SQLite 事务更新原领域状态。
+
+operations.managed.v1 为第三个独立默认关闭的高信任能力，涵盖管理员批准的容器/Compose/Registry/OpenResty、网站、证书、备份、systemd 与制品发布。它不扩展无网络/端口/挂载的 container.managed.v1，也不允许任意 shell 转发。批准的程序和挂载可能控制整台主机，界面须明确该信任边界。中心冻结既有已批准资源、当前版本、actor、机器/执行器/策略代次及完整 payload 摘要，在 claim、managed.execute 单次在线许可、续租、制品读取和结果处重新核对；固定 root worker 只加载 root 自有发行代码，命令前核对权威和固定 daemon，复用已审计适配器的输入、归属、健康和失败恢复校验。
+
+执行器身份、密钥、journal、观测队列与迁移审阅目录保存在 /var/lib/lightmoni-executor；业务状态独立位于 /var/lib/lightmoni-managed，静态公开文件位于独立 /var/lib/lightmoni-web 哈希目录。网站主进程使用固定持久 systemd unit，不随一次性作业退出；worker 使用独立无登录、无 Docker 组的 lightmoni-web，私钥与配置仍为 root 私有，HTTP 临时目录单独授权。卸载/程序回退不删除业务数据、容器或卷，不恢复已撤销策略。
+
+旧 Agent 可写业务目录默认阻断新写入，避免改为新路径后静默生成空数据。root 离线 migration plan 在旧写入者停止、无未决执行时，通过 nofollow 描述符冻结有界快照；拒绝符号/硬链接、设备和竞争写入。管理员独立审阅 Compose/Nginx/状态正文并用精确计划摘要 apply 后，才将该快照明确授权为 root 意图。数据字节与数字 UID/GID 保留，控制文本内部路径重写，旧目录保留；目标非空不合并覆盖。该命令不是普通 Agent 可调用的在线接口，也不替代大规模数据搬迁或未知业务状态的人工核对。
+
+SSH 更新、回退、repair 与卸载统一使用 executor-maintenance 和 machine_executor_maintenance 账本、主机互斥，不保留第二套更新入口。计划冻结主机/凭据、源和目标不可变发行、策略代次与完整现场，一次性下载票据只经 header/受保护 stdin。固定 root supervisor 停服后持 writer 锁只读复验、切换程序并固定 activation_id，释放 writer 后启动；worker 启动时冻结 activation 并独立签名回报，中心要求持久 started 回执和同次精确启动证明共同成立。失败或失确认保留 unknown，显式只读核对不重派、不自动回切；repair 仅接受完整同一身份、有效 clean journal 与可证明的本平台中断，不能重新 enrollment 或重建状态。程序回退不恢复策略、身份、journal 或业务快照。有期限定时任意 root 脚本与跨主机发行灰度仍为后续范围。
+
+应用 Docker 指标/日志由 root 自有有界队列和持久游标采集，复用 ApplicationObserver 的解析和去重；中心签名接口提供绑定目标，并校验当前策略、身份与应用归属。签名批次先进入加密 SQLite outbox 再应答，独立后台以稳定批次/事件 ID 写 ClickHouse；普通 data 凭据不参与 root 上报。两端各限32 MiB，撤权停止采集/发送，不回退到普通 Agent socket 权限。
+
+```mermaid
+flowchart LR
+  Human[管理员审阅资源和主机策略] --> Domain[中心领域批准 / 当前版本]
+  Domain --> Job[同一 Job ID / root 主体 / 摘要]
+  Job --> Gate[签名 claim / 单次许可 / 短租约]
+  Gate --> Root[独立 root 固定 worker]
+  Root --> Adapter[共享受管适配器 / 固定 daemon]
+  Adapter --> Business[独立业务数据 / 持久网关]
+  Adapter --> Receipt[结构化回执 / 原事务领域核验]
+  Receipt --> Domain
+  Root --> Observe[签名观测 / 持久 outbox / ClickHouse]
+  Root --> Journal[私有 journal / unknown 栅栏]
+```
+
+架构影响为组件职责、控制/观测协议、凭据边界、存储和部署拓扑。在线基线同步及真实验收证据见 specs/080-executor-managed-operations/；发行与目标主机现场升级分开验收。

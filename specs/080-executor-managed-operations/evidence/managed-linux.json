@@ -1,0 +1,16 @@
+{
+  "checks": [
+    "real root-owned shared-package installation, registration, signed policy/heartbeat and managed capability ready",
+    "real platform node.inspect travels signed root lane and updates original domain receipt",
+    "real website adapter applies via signed root worker and remains available after its transient job unit exits",
+    "real signed Compose apply, persistent Redis named volume, stop/start and bounded logs",
+    "real signed root backup create and archive verification",
+    "real signed certificate key/chain/domain validation and private installation",
+    "real modern application deploy uses signed root adapter and original cluster/resource health receipt",
+    "real root Docker metrics/log collector reaches signed durable center observation outbox",
+    "real pinned SSH upgrade with signed build readback, stable identity and uninterrupted business HTTP",
+    "real pinned SSH upgrade with signed build readback, stable identity and uninterrupted business HTTP",
+    "real pinned SSH rollback with signed build readback, stable identity and uninterrupted business HTTP"
+  ],
+  "status": "partial"
+}

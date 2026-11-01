@@ -1,4 +1,7 @@
-import {createImageSourcesSchema} from './image-sources.js';
+import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
+import {oneShotServices} from '../operations/workload-readiness.js';
+import {createImageSourcesSchema,imageSourcesFor,validateImageSourcesPayload} from './image-sources.js';
+import {validateInstanceRecoveryPayload} from './instance-recovery.js';
 import { applicationLogo } from './application-logos.js';
 import { id } from "../shared/crypto.js";
 import { fail } from "../shared/http.js";
@@ -524,16 +527,95 @@ export class OperationsPlatformStore implements PlatformStore {
     return r ? this.runView(r) : undefined;
   }
   queue(
-    _resource: PlatformResource,
-    _agentID: string,
-    _action: string,
-    _config: Record<string, any>,
-    _actor: string,
-    _idempotencyKey?: string,
-  ): PlatformRun {
-    // Business profiles must define a typed privileged plan before dispatch.
-    // Never create a run that an ordinary Agent cannot safely execute.
-    fail(409, "privileged_profile_not_implemented");
+    resource: PlatformResource,
+    agentID: string,
+    action: string,
+    config: Record<string, any>,
+    actor: string,
+    idempotencyKey?: string,
+  ) {
+    this.requireActor(actor);
+    return this.deps.db.transaction(() => {
+      const duplicate = this.duplicate(idempotencyKey);
+      if (duplicate) return duplicate;
+      const current = this.get(resource.id);
+      if (current.revision !== resource.revision)
+        fail(409, "platform_revision_conflict");
+      if (!this.deps.db.get("SELECT id FROM agents WHERE id=?", agentID))
+        fail(400, "platform_agent_required");
+      const key = id(),
+        at = this.at(),
+        operation = String(config.task ?? action)
+          .split(".")
+          .at(-1)!;
+      const sourcePolicy=imageSourcesFor(this,config);
+      if(sourcePolicy) {
+        let capabilities:unknown;
+        capabilities=operationExecutionCapabilities(this.deps,agentID);
+        if(!Array.isArray(capabilities)||!capabilities.includes('operations.platform.image-sources.v1'))fail(409,'image_sources_agent_upgrade_required');
+      }
+      const payload: OperationPayload = {
+        version: 1,
+        operation_id: key,
+        operation,
+        resource: {
+          id: resource.id,
+          kind: "platform",
+          name: resource.name,
+          agent_id: agentID,
+          revision: resource.revision,
+          config: safeObject({...config,...(sourcePolicy?{image_sources:sourcePolicy}:{})}),
+          created_at: at,
+          updated_at: at,
+        },
+        input: {},
+      };
+      if (Buffer.byteLength(JSON.stringify(payload)) > 1_100_000)
+        fail(400, "platform_payload_limit");
+      const job = this.jobs.enqueue({
+        agentID,
+        deploymentID: "platform-" + resource.id,
+        operationID: key,
+        actions: [
+          { kind: "operations", operation_id: key, domain: "platform" },
+        ],
+        capabilities: [
+          "operations.platform",
+          ...(config.auth_required ||
+          config.sites?.some(
+            (s: any) =>
+              s.auth?.mode === "basic" ||
+              s.locations?.some((l: any) => l.auth?.mode === "basic"),
+          )
+            ? ["operations.platform.website-auth.v1"]
+            : []),
+          ...(config.image_cache ? ["operations.platform.image-cache.v1"] : []),
+          ...(payload.resource.config.image_sources ? ["operations.platform.image-sources.v1"] : []),
+          ...(config.task === 'instance.recovery.inspect' ? ['operations.platform.instance-recovery.v1'] : []),
+          ...(oneShotServices(config.application?.compose?.services).length ? ["operations.platform.oneshot.v1"] : []),
+        ],
+        target: { operations_resource_id: resource.id },
+        expiresInSeconds: 900,
+      });
+      this.deps.db.run(
+        "INSERT INTO ops_platform_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        key,
+        resource.id,
+        resource.revision,
+        agentID,
+        action,
+        "queued",
+        this.deps.encrypt(JSON.stringify(payload)),
+        "{}",
+        job.id,
+        actor,
+        idempotencyKey ?? null,
+        at,
+        at,
+      );
+      this.addRunEvent(key, 'queued', 'pending', {message:installPhases.queued});
+      return this.runView(this.runRow(key));
+    });
   }
   async run(
     resource: PlatformResource,
@@ -696,17 +778,6 @@ export class OperationsPlatformStore implements PlatformStore {
       update.agentID,
     );
     if (!row) return;
-    if (update.code === "legacy_agent_write_removed") {
-      const state = update.phase === "cancelled" ? "cancelled" : "unknown";
-      if (row.state === state && row.result_json === JSON.stringify({code: update.code})) return;
-      this.deps.db.run("UPDATE ops_platform_runs SET state=?,result_json=?,updated_at=? WHERE id=?",
-        state, JSON.stringify({code: update.code}), this.at(), row.id);
-      this.addRunEvent(row.id, "legacy_agent_write_removed", state === "cancelled" ? "warning" : "unknown", {
-        code: update.code,
-        message: state === "cancelled" ? "Legacy operation cancelled before claim" : "Legacy operation outcome requires host reconciliation",
-      });
-      return;
-    }
     const job = this.jobs.get(update.jobID);
     const result = cleanResult(
       job.receipt?.snapshot?.operations?.data ??
@@ -750,8 +821,35 @@ export class OperationsPlatformStore implements PlatformStore {
         update,
       );
   }
-  resolvePayload(_job: Record<string, any>): OperationPayload {
-    fail(410, "legacy_agent_payload_removed");
+  resolvePayload(job: Record<string, any>): OperationPayload {
+    const row = this.deps.db.get<any>(
+      "SELECT * FROM ops_platform_runs WHERE id=? AND job_id=? AND agent_id=?",
+      job.actions?.[0]?.operation_id,
+      job.id,
+      job.agent_id,
+    );
+    if (!row || !this.authorized(row.actor) || !ACTIVE.includes(row.state))
+      fail(403, "platform_payload_authorization_required");
+    const current = this.get(row.resource_id);
+    if (Number(row.resource_revision) !== current.revision)
+      fail(403, "platform_payload_revision_changed");
+    const payload = JSON.parse(this.deps.decrypt(row.payload_cipher));
+    if (
+      payload.resource.kind !== "platform" ||
+      payload.resource.agent_id !== job.agent_id ||
+      payload.resource.id !== job.target?.operations_resource_id ||
+      payload.operation_id !== job.actions[0].operation_id ||
+      !job.capabilities?.includes("operations.platform")
+    )
+      fail(403, "platform_payload_mismatch");
+    validateImageSourcesPayload(this,payload.resource.config);
+    validateInstanceRecoveryPayload(this,payload.resource.config,job.agent_id);
+    this.definition(current.kind).validatePayload?.(
+      current,
+      payload.resource.config,
+      job.agent_id,
+    );
+    return payload;
   }
   async close() {
     if (this.closed) return;

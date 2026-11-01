@@ -1,12 +1,13 @@
 import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
-import type { Dependencies, Handler, Module } from "../shared/types.js";
+import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import type { AgentJobStore } from "./agent-jobs.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import type { OperationDefinition, OperationPayload, OperationResource, OperationsStore } from "../operations/types.js";
 import { assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
 
 const KINDS = new Set(["website", "certificate", "compose", "backup"]);
+const ACTIVE = new Set(["queued", "leased", "accepted", "staging", "activating", "verifying"]);
 const obj = (v: unknown): Record<string, any> => {
   if (!v || typeof v !== "object" || Array.isArray(v) || Buffer.byteLength(JSON.stringify(v)) > 1_200_000) fail(400, "invalid_operations_input");
   return v as Record<string, any>;
@@ -79,11 +80,31 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
     list(kind) { if (kind && !KINDS.has(kind)) fail(400, "unsupported_operations_kind"); return (kind ? db.all("SELECT * FROM ops_resources WHERE kind=? ORDER BY updated_at DESC,id LIMIT 1000", kind) : db.all("SELECT * FROM ops_resources ORDER BY updated_at DESC,id LIMIT 1000")).map(view); },
     get(key) { return view(raw(key)); },
     validateOperation,
-    plan() {
-      fail(409, "privileged_profile_not_implemented");
+    plan(resourceID, operation, input, actor) {
+      const r = raw(resourceID), validated = validateOperation(resourceID, operation, input), key = id();
+      availableAgent(r.agent_id);
+      referenceCheck(r.kind, configOf(r), r.agent_id, r.id);
+      const payload: OperationPayload = { version: 1, operation_id: key, operation, resource: { ...view(r), config: configOf(r) }, input: validated };
+      const preview = { resource: view(r), operation, input: redact(validated), read_only: definition(r.kind).readOnly.includes(operation), warning: "Review the target, action and configuration before approving. Remote actions may interrupt service. Rollback does not revert data migrations." };
+      const expiry = new Date(deps.now().getTime() + 30 * 60_000).toISOString();
+      db.run("INSERT INTO ops_runs(id,resource_id,resource_revision,operation,state,payload_cipher,preview_json,created_at,expires_at,created_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", key, r.id, r.revision, operation, "awaiting_approval", deps.encrypt(JSON.stringify(payload)), JSON.stringify(preview), at(), expiry, text(actor), at());
+      return runView(runRow(key));
     },
-    approve() {
-      fail(409, "privileged_profile_not_implemented");
+    approve(key, actor, revision) {
+      return db.transaction(() => {
+        const r = runRow(key), resource = raw(r.resource_id);
+        if (r.job_id) return runView(r);
+        if (r.state !== "awaiting_approval" || Date.parse(r.expires_at) <= deps.now().getTime()) fail(409, "operations_plan_expired_or_closed");
+        if (revision !== Number(r.resource_revision) || revision !== Number(resource.revision)) fail(409, "operations_revision_conflict");
+        const pending = db.get<any>("SELECT id FROM ops_runs WHERE resource_id=? AND id<>? AND state IN ('queued','leased','accepted','staging','activating','verifying')", resource.id, key);
+        if (pending) fail(409, "operations_resource_busy");
+        const payload = JSON.parse(deps.decrypt(r.payload_cipher)) as OperationPayload;
+        referenceCheck(resource.kind, payload.resource.config, resource.agent_id, resource.id);
+        const job = options.jobs.enqueue({ agentID: resource.agent_id, deploymentID: "operations-" + resource.id, operationID: key,
+          actions: [{ kind: "operations", operation_id: key, domain: resource.kind }], capabilities: ["operations." + resource.kind], target: { operations_resource_id: resource.id }, expiresInSeconds: 900 });
+        db.run("UPDATE ops_runs SET state='queued',job_id=?,approved_by=?,updated_at=? WHERE id=?", job.id, text(actor), at(), key);
+        return runView(runRow(key));
+      });
     },
     getRun(key) { return runView(runRow(key)); },
     runs(resourceID) { return (resourceID ? db.all("SELECT * FROM ops_runs WHERE resource_id=? ORDER BY created_at DESC,id DESC LIMIT 100", resourceID) : db.all("SELECT * FROM ops_runs ORDER BY created_at DESC,id DESC LIMIT 100")).map(runView); },
@@ -155,8 +176,20 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
   }));
   router.get("/api/v1/agents/:id/jobs/:jobId/operations", safe(ctx => {
     options.credentials.authenticate(ctx.req, ctx.params.id, "control");
+    const job = options.jobs.get(ctx.params.jobId), lease = ctx.req.headers["x-lightmoni-job-lease"];
+    if (job.execution_principal === "privileged_executor") fail(403,"principal_mismatch");
+    if (job.agent_id !== ctx.params.id || !lease || lease !== job.lease_id || !ACTIVE.has(job.state) || Date.parse(job.lease_expires_at) <= deps.now().getTime() || Date.parse(job.expires_at) <= deps.now().getTime()) fail(403, "operations_job_lease_required");
+    if (job.actions?.length !== 1 || job.actions[0]?.kind !== "operations") fail(403, "not_an_operations_job");
+    if (job.actions[0].domain === "platform") {
+      if (!options.resolvePayload) fail(403, "platform_payload_unavailable");
+      ctx.res.setHeader("cache-control", "no-store");
+      ctx.json({ payload: options.resolvePayload(job) });
+      return;
+    }
+    const r = runRow(job.actions[0].operation_id);
+    if (r.job_id !== job.id || r.state === "awaiting_approval" || !r.approved_by) fail(403, "operations_approval_required");
     ctx.res.setHeader("cache-control", "no-store");
-    fail(410, "legacy_agent_payload_removed");
+    ctx.json({ payload: JSON.parse(deps.decrypt(r.payload_cipher)) });
   }), { public: true });
   return store;
 }

@@ -1,0 +1,25 @@
+{
+  "pass": true,
+  "results": [
+    {
+      "user": "root",
+      "state": "root"
+    },
+    {
+      "user": "lm080-sudo",
+      "state": "sudo_noninteractive"
+    },
+    {
+      "user": "lm080-denied",
+      "state": "unavailable"
+    },
+    {
+      "inherited_privilege": "cap",
+      "blocked": true
+    },
+    {
+      "inherited_privilege": "group",
+      "blocked": true
+    }
+  ]
+}

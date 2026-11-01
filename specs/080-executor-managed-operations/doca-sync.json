@@ -1,0 +1,77 @@
+{
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "before_seq": 927,
+  "saved_seq": 928,
+  "latest_readback_seq": 929,
+  "before_blocks": 733,
+  "after_blocks": 741,
+  "existing_blocks_unchanged_at_full_readback_928": true,
+  "final_repair_operations_only_new_blocks": true,
+  "existing_native_diagrams": 37,
+  "result_native_diagrams": 38,
+  "heading": {
+    "id": "3fbd8e90-eb6b-445d-bcef-cb6e332f952d",
+    "type": "h2",
+    "text": "独立执行器承接受管主机运维（SDD080）"
+  },
+  "new_body_sections": [
+    {
+      "id": "executor080-boundary",
+      "text_matches": true
+    },
+    {
+      "id": "executor080-authority",
+      "text_matches": true
+    },
+    {
+      "id": "executor080-storage",
+      "text_matches": true
+    },
+    {
+      "id": "executor080-migration",
+      "text_matches": true
+    },
+    {
+      "id": "executor080-lifecycle",
+      "text_matches": true
+    },
+    {
+      "id": "executor080-observation",
+      "text_matches": true
+    }
+  ],
+  "graph": {
+    "id": "executor080-control-flow",
+    "nodes": 10,
+    "edges": 10,
+    "exact_match": true
+  },
+  "visual_verification": false,
+  "final_integration": {
+    "saved_seq": 930,
+    "latest_readback_seq": 930,
+    "readback": [
+      {
+        "id": "privileged060-current-contract",
+        "seq": 930,
+        "complete": true,
+        "text_matches": true
+      },
+      {
+        "id": "executor080-lifecycle",
+        "seq": 930,
+        "complete": true,
+        "text_matches": true
+      },
+      {
+        "id": "executor080-control-flow",
+        "seq": 930,
+        "complete": true,
+        "nodes": 10,
+        "edges": 10
+      }
+    ],
+    "original_diagrams_preserved": true,
+    "changes": "Two text blocks only: SDD080 unified maintenance plus current contract; original graph unchanged"
+  }
+}

@@ -25,7 +25,6 @@ import { api } from "../shared/api";
 import { useI18n } from "../shared/i18n";
 import { errorText, type Overview, type Spec } from "./ops/model";
 import "./operations.css";
-import {HOST_PROFILE_UNAVAILABLE} from "./ops/host-execution-availability";
 import ApplicationPortFields from "./ops/ApplicationPortFields";
 import ApplicationInstallDrawer from "./ops/ApplicationInstallDrawer";
 
@@ -145,7 +144,6 @@ export default function PrivateRegistryPage() {
     }
   }, [dialog, defaults, form]);
   const save = async () => {
-    if(dialog === "deploy"){setFormError(t(...HOST_PROFILE_UNAVAILABLE));return;}
     let values: Spec;
     try {
       values = await form.validateFields();
@@ -155,11 +153,33 @@ export default function PrivateRegistryPage() {
     setBusy(true);
     setFormError("");
     try {
-      await api<Spec>("/ops/private-registry/external",{
-        method:"PUT",body:JSON.stringify({...values,confirmed:true,revision:data?.external?.revision??0,...(site?{website_revision:site.revision}:{})}),
-      });
+      const saved=await api<Spec>(
+        "/ops/private-registry/" +
+          (dialog === "deploy" ? "deployments" : "external"),
+        {
+          method: dialog === "deploy" ? "POST" : "PUT",
+          body: JSON.stringify({
+            ...values,
+            confirmed: true,
+            revision:
+              dialog === "deploy"
+                ? (data?.revision ?? 0)
+                : (data?.external?.revision ?? 0),
+            ...(dialog === "external" && site
+              ? { website_revision: site.revision }
+              : {}),
+          }),
+        },
+      );
       setDialog(undefined);
-      void message.success(t("配置已保存并读回。","Configuration saved and read back."));
+      if(dialog==="deploy")setInstallID(saved.application?.id);
+      if(dialog==="deploy"&&!saved.runs?.length)void message.warning(t("配置已保存，但尚未生成新执行；请核对安装记录后重试。","Configuration saved, but no new execution was created. Inspect the history before retrying."));
+      else void message.success(
+        t(
+          "配置已保存，部署任务已提交。",
+          "Configuration saved; deployment submitted.",
+        ),
+      );
       await load(true);
     } catch (e) {
       setFormError(explain(errorText(e)));
@@ -433,8 +453,7 @@ export default function PrivateRegistryPage() {
         }}
         onOk={() => void save()}
         confirmLoading={busy}
-        okButtonProps={{disabled:dialog === "deploy"}}
-        okText={dialog === "deploy" ? t("保存并部署", "Save and deploy") : t("保存配置", "Save configuration")}
+        okText={t("保存并部署", "Save and deploy")}
         cancelText={t("取消", "Cancel")}
         width={640}
         className="lm-registry-dialog"
@@ -442,7 +461,6 @@ export default function PrivateRegistryPage() {
         styles={{body:{maxHeight:'calc(100dvh - 200px)',overflowY:'auto',overscrollBehavior:'contain'}}}
         forceRender
       >
-        {dialog === "deploy" && <Alert type="info" showIcon title={t("镜像仓库部署能力未就绪","Registry deployment is unavailable")} description={t(...HOST_PROFILE_UNAVAILABLE)}/>}
         {formError && <Alert type="error" showIcon title={formError} />}
         <Form form={form} layout="vertical" onValuesChange={()=>setFormError("")}>
           {dialog === "deploy" ? (

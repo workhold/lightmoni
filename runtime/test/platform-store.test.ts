@@ -33,7 +33,24 @@ function setup(t: any) {
   });
   return { db, deps, jobs, store };
 }
-
+test('installation steps project lease events atomically, ignore heartbeats and reject arbitrary diagnostic text', t => {
+ const {db,store,jobs}=setup(t),resource=store.create('application','Installation',{},'admin');
+ const run=store.queue(resource,'node-a','apply',{task:'workload.apply'},'admin'),job=jobs.claim('node-a',['operations.platform'])!;
+ assert.deepEqual(store.runEvents(run.id).map(e=>e.phase),['queued']);
+ const event=(sequence:number,phase:string,snapshot?:any)=>jobs.event('node-a',job.id,{lease_id:job.lease_id,sequence,phase,summary:'qa-hidden-summary',snapshot:snapshot??{}});
+ event(1,'accepted');event(2,'staging');event(3,'activating',{operations:{progress:{phase:'starting_containers'}}});
+ event(4,'activating');event(5,'activating',{operations:{progress:{phase:'starting_containers'}}});
+ assert.deepEqual(store.runEvents(run.id).map(e=>e.phase),['queued','accepted','staging','starting_containers']);
+ event(6,'activating',{operations:{progress:{phase:'qa-hidden-step',code:'qa-hidden-code',message:'qa-hidden-message'}}});
+ assert.doesNotMatch(JSON.stringify(db.all('SELECT * FROM ops_platform_run_events')),/qa-hidden/);
+ jobs.result('node-a',job.id,{lease_id:job.lease_id,state:'failed',code:'workload_apply_failed_restored',summary:'qa-hidden-result',snapshot:{operations:{operation_id:run.id,resource_id:resource.id,data:{phase:'starting_containers',cause_code:'image_network_failed'}}},started_at:run.created_at,finished_at:run.created_at});
+ const done=store.action(run.id),steps=store.runEvents(run.id);
+ assert.equal(done.state,'failed');assert.equal(done.result.cause_code,'image_network_failed');
+ assert.equal(steps.at(-1)!.state,'failed');assert.equal(steps.at(-1)!.code,'image_network_failed');
+ assert.match(steps.at(-1)!.message!,/registry/);
+ assert.deepEqual(steps.map(e=>e.sequence),steps.map((_,i)=>i+1));
+ assert.doesNotMatch(JSON.stringify(steps),/qa-hidden/);
+});
 test("center restart preserves ordered execution steps, marks an interrupted run unknown and does not replay work", async (t) => {
   const f = setup(t),
     resource = f.store.create("application", "Restart fixture", {}, "admin");
@@ -89,11 +106,157 @@ test("global revisions encrypt secrets and recheck actor and revision", (t) => {
   assert.throws(() => store.update(r.id, 1, "App", {}, "admin"), /revision/);
   assert.equal(db.all("SELECT * FROM ops_platform_revisions").length, 2);
 });
-
-
-
-
-
+test("job and encrypted payload commit atomically with persistent dispatch deduplication", (t) => {
+  const { db, store, jobs } = setup(t),
+    r = store.create("application", "App", {}, "admin"),
+    config = {
+      task: "workload.apply",
+      environment: { PASSWORD: "payload-private" },
+    };
+  const first = store.queue(r, "node-a", "deploy", config, "admin", "app-v1"),
+    second = store.queue(r, "node-a", "deploy", config, "admin", "app-v1");
+  assert.equal(first.id, second.id);
+  assert.equal(db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 1);
+  assert.equal(
+    JSON.stringify(jobs.get(first.job_id)).includes("payload-private"),
+    false,
+  );
+  assert.equal(
+    JSON.stringify(db.all("SELECT * FROM ops_platform_runs")).includes(
+      "payload-private",
+    ),
+    false,
+  );
+  const job = jobs.claim("node-a", ["operations.platform"])!;
+  assert.equal(
+    store.resolvePayload(job).resource.config.environment.PASSWORD,
+    "payload-private",
+  );
+  db.run("UPDATE users SET active=0 WHERE id='admin'");
+  assert.throws(() => store.resolvePayload(job), /authorization/);
+});
+test("new gateway authentication apply and inspect jobs cannot be claimed by an older Agent", (t) => {
+  for (const config of [
+    { task: "gateway.apply", sites: [{ auth: { mode: "basic" } }] },
+    { task: "gateway.inspect", auth_required: true },
+  ]) {
+    const { store, jobs } = setup(t);
+    const resource = store.create("application", "Gateway", {}, "admin");
+    store.queue(resource, "node-a", "inspect", config, "admin");
+    assert.equal(jobs.claim("node-a", ["operations.platform"]), null);
+    assert.ok(
+      jobs.claim("node-a", [
+        "operations.platform",
+        "operations.platform.website-auth.v1",
+      ]),
+    );
+  }
+});
+test("failed storage allocation rolls back its job rather than leaving an orphan", (t) => {
+  const { db, store } = setup(t),
+    r = store.create("application", "App", {}, "admin");
+  db.exec(
+    "CREATE TRIGGER reject_platform_run BEFORE INSERT ON ops_platform_runs BEGIN SELECT RAISE(ABORT, 'simulated storage failure'); END;",
+  );
+  assert.throws(
+    () =>
+      store.queue(r, "node-a", "deploy", { task: "workload.apply" }, "admin"),
+    /storage failure/,
+  );
+  assert.equal(db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0);
+});
+test("unclaimed old revisions are cancelled and mismatched receipts cannot succeed", (t) => {
+  const { store, jobs } = setup(t),
+    r = store.create("application", "App", {}, "admin");
+  const old = store.queue(
+    r,
+    "node-a",
+    "deploy",
+    { task: "workload.apply" },
+    "admin",
+  );
+  const updated = store.update(r.id, 1, "App", {}, "admin");
+  assert.equal(jobs.get(old.job_id).state, "cancelled");
+  assert.equal(jobs.claim("node-a", ["operations.platform"]), null);
+  const run = store.queue(
+      updated,
+      "node-a",
+      "deploy",
+      { task: "workload.apply" },
+      "admin",
+    ),
+    job = jobs.claim("node-a", ["operations.platform"])!;
+  for (const [i, phase] of [
+    "accepted",
+    "staging",
+    "activating",
+    "verifying",
+  ].entries())
+    jobs.event("node-a", job.id, {
+      lease_id: job.lease_id,
+      sequence: i + 1,
+      phase,
+      summary: "phase",
+    });
+  jobs.result("node-a", job.id, {
+    lease_id: job.lease_id,
+    state: "succeeded",
+    summary: "bad receipt",
+    snapshot: {
+      health: { healthy: true },
+      operations: { operation_id: run.id, resource_id: "wrong" },
+    },
+  });
+  assert.equal(store.actions()[0].state, "unknown");
+});
+test("verified receipts update runs and observers retain private execution identity", (t) => {
+  const { store, jobs } = setup(t),
+    r = store.create("application", "App", {}, "admin");
+  let observed: any;
+  store.subscribe((run, config) => {
+    observed = { run, config };
+  });
+  const run = store.queue(
+      r,
+      "node-a",
+      "inspect",
+      { task: "workload.inspect", instance_id: "instance-1" },
+      "admin",
+    ),
+    job = jobs.claim("node-a", ["operations.platform"])!;
+  for (const [i, phase] of [
+    "accepted",
+    "staging",
+    "activating",
+    "verifying",
+  ].entries())
+    jobs.event("node-a", job.id, {
+      lease_id: job.lease_id,
+      sequence: i + 1,
+      phase,
+      summary: "phase",
+    });
+  jobs.result("node-a", job.id, {
+    lease_id: job.lease_id,
+    state: "succeeded",
+    summary: "verified",
+    snapshot: {
+      health: { healthy: true },
+      operations: {
+        operation_id: run.id,
+        resource_id: r.id,
+        data: { healthy: true, environment: { secret: "should-not-return" } },
+      },
+    },
+  });
+  assert.equal(store.actions()[0].state, "succeeded");
+  assert.equal(observed.config.instance_id, "instance-1");
+  assert.equal(observed.run.result.healthy, true);
+  assert.equal(
+    JSON.stringify(store.actions()).includes("should-not-return"),
+    false,
+  );
+});
 test("unknown cloud writes persist without replay or raw errors", async (t) => {
   const { store } = setup(t),
     r = store.create("application", "App", {}, "admin");
@@ -138,6 +301,13 @@ test("resource references block deletion while audit revisions remain", (t) => {
   assert.equal(db.all("SELECT * FROM ops_platform_revisions").length, 2);
 });
 
+test("claimed jobs block editing even before the first Agent phase event", (t) => {
+  const { store, jobs } = setup(t),
+    r = store.create("application", "App", {}, "admin");
+  store.queue(r, "node-a", "deploy", { task: "workload.apply" }, "admin");
+  jobs.claim("node-a", ["operations.platform"]);
+  assert.throws(() => store.update(r.id, 1, "App", {}, "admin"), /busy/);
+});
 
 test("internal references and reconciliation inventory are not truncated by UI limits", (t) => {
   const { db, store } = setup(t),
@@ -204,48 +374,10 @@ test("shutdown rejects newly arriving work and waits for work already in progres
   await closing;
   assert.equal(closed, true);
 });
-
-
-for(const task of ['node.inspect','instance.recovery.inspect','workload.apply','workload.inspect','workload.stop','workload.remove','workload.logs','gateway.apply','gateway.inspect','gateway.stop','gateway.remove','gateway.logs','certificate.install','certificate.inspect','hook.run','hook.inspect']) {
- test(`removed platform queue rejects ${task} before creating runs, payloads or jobs`,t=>{
-  const {db,store}=setup(t),r=store.create('application','App',{},'admin');
-  const before=db.all('SELECT * FROM ops_platform_resources');
-  db.exec("CREATE TRIGGER qa_no_run BEFORE INSERT ON ops_platform_runs BEGIN SELECT RAISE(ABORT,'run inserted before refusal'); END;");
-  assert.throws(()=>store.queue(r,'node-a','deploy',{task,environment:{SECRET:'must-not-persist'}},'admin','stable-request'),e=>(e as any).status===409&&(e as Error).message==='privileged_profile_not_implemented');
-  assert.equal(db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
-  assert.equal(db.get<any>('SELECT COUNT(*) n FROM ops_platform_runs')!.n,0);
-  assert.deepEqual(db.all('SELECT * FROM ops_platform_resources'),before);
- });
-}
-
-test('removed private payload lookup does not access jobs, decrypt secrets or notify observers',t=>{
- const {deps,store,jobs}=setup(t);let observed=0;
- store.subscribe(()=>{observed++;});
- deps.decrypt=()=>{throw Error('private payload decrypted');};
- jobs.get=()=>{throw Error('legacy job loaded');};
- assert.throws(()=>store.resolvePayload({id:'untrusted',operation_id:'old'} as any),e=>(e as any).status===410&&(e as Error).message==='legacy_agent_payload_removed');
- assert.equal(observed,0);
-});
-
-test('historical ordinary operations retire without private reads or domain callbacks and preserve unknown evidence',async t=>{
- const f=setup(t),r=f.store.create('application','Historical',{},'admin'),at=f.deps.now().toISOString();
- for(const [state,attempts] of [['queued',0],['leased',1],['activating',1]] as const){
-  f.db.run(`INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,target_json,issued_at,expires_at,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,'job-'+state,'node-a','legacy-'+state,'run-'+state,state,'["operations.platform"]',JSON.stringify([{kind:'operations',operation_id:'run-'+state,domain:'platform'}]),'{}',at,'2099-01-01T00:00:00Z',attempts,at,at);
-  f.db.run('INSERT INTO ops_platform_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)','run-'+state,r.id,1,'node-a','deploy',state,'unreadable-payload','{}','job-'+state,'admin',null,at,at);
- }
- await f.store.close();f.jobs.close?.();
- let reads=0;const decrypt=f.deps.decrypt;
- f.deps.decrypt=value=>{if(value==='unreadable-payload'){reads++;throw Error('private read');}return decrypt(value);};
- const jobs=registerAgentJobs(f.deps,{agentCredentials:{has:()=>true} as any});t.after(()=>jobs.close?.());
- const store=new OperationsPlatformStore(f.deps,jobs);t.after(()=>store.close());
- let notified=0;store.subscribe(()=>{notified++;});
- for(const [previous,state] of [['queued','cancelled'],['leased','unknown'],['activating','unknown']]){
-  const run=store.action('run-'+previous);assert.equal(run.state,state);assert.deepEqual(run.result,{code:'legacy_agent_write_removed'});
-  assert.equal(store.runEvents(run.id).length,1);assert.equal(jobs.get('job-'+previous).attempts,previous==='queued'?0:1);
- }
- assert.equal(reads,0);assert.equal(notified,0);
- const events=f.db.all('SELECT * FROM ops_platform_run_events');
- await store.close();const again=new OperationsPlatformStore(f.deps,jobs);t.after(()=>again.close());
- assert.deepEqual(f.db.all('SELECT * FROM ops_platform_run_events'),events);
- assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,3);assert.equal(reads,0);
+test('one-shot workload jobs require an updated Agent capability',t=>{
+ const {store,jobs}=setup(t),resource=store.create('application','Initializer',{},'admin');
+ const config={task:'workload.apply',application:{mode:'compose',compose:{services:{init:{image:'busybox:1.37.0',labels:{'io.lightmoni.platform.oneshot':'true'}}}}}};
+ store.queue(resource,'node-a','deploy',config,'admin');
+ assert.equal(jobs.claim('node-a',['operations.platform']),null);
+ assert.ok(jobs.claim('node-a',['operations.platform','operations.platform.oneshot.v1']));
 });

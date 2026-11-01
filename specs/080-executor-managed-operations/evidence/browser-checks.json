@@ -1,0 +1,8 @@
+{
+  "host_permissions_and_unified_maintenance": 23,
+  "restricted_containers": 23,
+  "elevated_scripts": 39,
+  "passed": 85,
+  "unexpected_browser_errors": [],
+  "type": "production components with API fixtures; real SSH/Docker validated separately"
+}

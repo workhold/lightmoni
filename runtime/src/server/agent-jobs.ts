@@ -1,6 +1,7 @@
+import { ordinaryReadOnlyJob } from "../shared/ordinary-jobs.js";
 import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { id, token } from "../shared/crypto.js";
-import { ORDINARY_JOB_CAPABILITIES, ordinaryReadOnlyJob } from "../shared/ordinary-agent-jobs.js";
+import { dockerJobAction, dockerReceipt, safeDockerCode } from '../shared/docker-jobs.js';
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
@@ -54,6 +55,10 @@ export interface AgentJobUpdate {
 
 export interface AgentJobStore {
   enqueue(input: AgentJobInput): Record<string, any>;
+  setPrivilegedReadiness?(check: (agentID: string) => void): void;
+  expireLeases?():void;
+  setPrivilegedCancellation?(cancel: (jobID:string,actor:string)=>void):void;
+  leasePrivileged?(jobID: string, leaseID: string, expiresAt: string): Record<string, any>;
   claim(agentID: string, capabilities: string[], receiptCursor?: string): Record<string, any> | null;
   event(agentID: string, jobID: string, input: Record<string, any>): Record<string, any>;
   result(agentID: string, jobID: string, input: Record<string, any>): Record<string, any>;
@@ -61,6 +66,8 @@ export interface AgentJobStore {
   /** Cancel only an unclaimed job belonging to this deployment operation. */
   cancelQueuedDeployment(deploymentID: string, operationID: string, actor: string): Record<string, any>;
   get(jobID: string): Record<string, any>;
+  /** Authorize one private release read against the live Agent lease and immutable deployment action. */
+  authorizeArtifact(ctx: Context, agentID: string, jobID: string, releaseID: string): { sha256: string; size: number };
   /** Internal synchronous observer; invoked inside the job's SQLite transaction. */
   onUpdate(listener: (update: AgentJobUpdate) => void): () => void;
 }
@@ -150,6 +157,7 @@ function view(row: any): Record<string, any> {
   return {
     id: row.id,
     agent_id: row.agent_id,
+    execution_principal: row.execution_principal ?? "ordinary_agent",
     deployment_id: row.deployment_id,
     operation_id: row.operation_id,
     state: row.state,
@@ -167,9 +175,10 @@ function view(row: any): Record<string, any> {
 
 export function registerAgentJobs(
   deps: Dependencies,
-  options: { agentCredentials?: AgentCredentialStore; expirySweepIntervalMs?: number } = {},
+  options: { agentCredentials?: AgentCredentialStore; expirySweepIntervalMs?: number; separateExecutor?: boolean } = {},
 ): Module & AgentJobStore {
   const { db, router } = deps;
+  const transact = <T>(work:()=>T):T => db.native.isTransaction ? work() : db.transaction(work);
   createAgentLifecycleSchema(db);
   const updateListeners = new Set<(update: AgentJobUpdate) => void>();
   let sweepTimer: ReturnType<typeof setInterval> | undefined;
@@ -218,6 +227,19 @@ export function registerAgentJobs(
     );
   `);
 
+  if (!db.all<{name:string}>("PRAGMA table_info(agent_jobs)").some(c=>c.name==='execution_principal'))
+    db.exec("ALTER TABLE agent_jobs ADD COLUMN execution_principal TEXT NOT NULL DEFAULT 'ordinary_agent'");
+  let privilegedCancel: ((jobID:string,actor:string)=>void) | undefined;
+  let privilegedReady: ((agentID:string)=>void) | undefined;
+  // Never reinterpret old ordinary write authority as root authorization.
+  if (options.separateExecutor) for (const old of db.all<any>("SELECT * FROM agent_jobs WHERE state NOT IN ('succeeded','failed','cancelled','unknown') AND execution_principal='ordinary_agent'")) {
+    let readonly=false;try{const actions=JSON.parse(old.actions_json);readonly=!actions.some((a:any)=>['docker','systemd_probe'].includes(a.kind))&&ordinaryReadOnlyJob({actions,capabilities:JSON.parse(old.capabilities_json)});}catch{}
+    if(readonly)continue;
+    const state=old.state==='queued'&&Number(old.attempts)===0?'cancelled':'unknown',code='legacy_agent_write_removed',at=iso(deps),summary=state==='cancelled'?'Legacy write job cancelled before claim':'Legacy write outcome requires host reconciliation';
+    db.run("UPDATE agent_jobs SET state=?,execution_principal='retired_legacy',receipt_json=?,lease_id='',lease_expires_at='',updated_at=? WHERE id=?",state,json({state,code,previous_state:old.state,summary,snapshot:{}}),at,old.id);
+    const next=Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 sequence FROM agent_job_events WHERE job_id=?",old.id)!.sequence);
+    db.run("INSERT INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)",old.id,next,state,code,summary,at);
+  }
   const row = (jobID: string) => {
     const value = db.get<any>("SELECT * FROM agent_jobs WHERE id=?", jobID);
     if (!value) fail(404, "agent job not found");
@@ -242,31 +264,13 @@ export function registerAgentJobs(
     if (!options.agentCredentials) fail(503, "agent credentials unavailable");
     return options.agentCredentials.authenticate(ctx.req, ensureAgent(agentID), "control");
   };
-  const ordinaryRow = (value: any) => {
-    try { return ordinaryReadOnlyJob({ capabilities: JSON.parse(value.capabilities_json), actions: JSON.parse(value.actions_json) }); }
-    catch { return false; }
-  };
-  const assertOrdinary = (value: any) => { if (!ordinaryRow(value)) fail(409, "privileged_executor_required"); };
-  const quarantineLegacyWrites = () => db.transaction(() => {
-    for (const current of db.all<any>("SELECT * FROM agent_jobs WHERE state NOT IN ('succeeded','failed','cancelled','unknown')")) {
-      if (ordinaryRow(current)) continue;
-      const state = current.state === "queued" && Number(current.attempts) === 0 ? "cancelled" : "unknown", at = iso(deps), code = "legacy_agent_write_removed";
-      const receipt = { state, code, previous_state: current.state, summary: state === "cancelled" ? "Legacy write job cancelled before claim" : "Legacy write outcome requires host reconciliation" };
-      const changed = db.run("UPDATE agent_jobs SET state=?,receipt_json=?,lease_id='',lease_expires_at='',updated_at=? WHERE id=? AND state=?", state, json(receipt), at, current.id, current.state);
-      if (!changed.changes) continue;
-      const next = Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 sequence FROM agent_job_events WHERE job_id=?", current.id)!.sequence);
-      db.run("INSERT INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)", current.id, next, state, code, receipt.summary, at);
-      notify(row(current.id), state, code, { previousState: current.state });
-    }
-  });
-  quarantineLegacyWrites();
   const expireLeases = () => {
     const at = iso(deps);
     for (const queued of db.all<any>(
       "SELECT id,state FROM agent_jobs WHERE state='queued' AND expires_at<=?",
       at,
     )) {
-      db.transaction(() => {
+      transact(() => {
         const changed = db.run(
           "UPDATE agent_jobs SET state='cancelled',receipt_json=?,updated_at=? WHERE id=? AND state='queued' AND expires_at<=?",
           json({ state: "cancelled", code: "job_expired", summary: "Agent job expired before it was claimed" }), at, queued.id, at,
@@ -285,7 +289,7 @@ export function registerAgentJobs(
       "SELECT id,state FROM agent_jobs WHERE state IN ('leased','accepted','preflighting','staging','activating','verifying') AND lease_expires_at<>'' AND lease_expires_at<=?",
       at,
     )) {
-      db.transaction(() => {
+      transact(() => {
         const changed = db.run(
           "UPDATE agent_jobs SET state='unknown',receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND state IN ('leased','accepted','preflighting','staging','activating','verifying')",
           json({ state: "unknown", code: "unknown_execution_result", summary: "Agent lease expired; execution result is unknown" }), at, old.id,
@@ -319,9 +323,10 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     if (!options.agentCredentials?.has(agentID, "control")) fail(409, "registered_host_required: 主机没有有效的 Agent 控制通道");
     const actionList = actions(input.actions), caps = capabilities(input.capabilities ?? []);
-    if (!ordinaryReadOnlyJob({ actions: actionList, capabilities: caps })) fail(409, "privileged_executor_required");
+    const privileged = !!options.separateExecutor && (actionList.some((a:any)=>['docker','systemd_probe'].includes(a.kind))||!ordinaryReadOnlyJob({actions:actionList,capabilities:caps}));
     const existing = db.get<any>("SELECT * FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deploymentID, operationID);
-    if (existing) { assertOrdinary(existing); return view(existing); }
+    if (existing) return view(existing);
+    if (privileged) { if (!privilegedReady) fail(409,"privileged_executor_required"); privilegedReady(agentID); }
     assertNoPendingMachineInstallation(db,"",agentID);
     assertNoPrivilegedExecution(db,"",agentID);
     assertNoPendingAgentUpdate(db, agentID);
@@ -342,19 +347,17 @@ export function registerAgentJobs(
     assertNoDockerInstallation(db,"",agentID);
       fail(409, "agent_uninstallation_blocks_jobs");
     }
+    if (privileged) db.run("UPDATE agent_jobs SET execution_principal='privileged_executor' WHERE id=?",idValue);
     return view(row(idValue));
   };
   const claim = (agentID: string, offered: string[], _cursor = "") => {
     ensureAgent(agentID);
     assertAgentActive(db, agentID);
-    quarantineLegacyWrites();
-    const offeredCapabilities = capabilities(offered);
-    if (offeredCapabilities.some(cap => !ORDINARY_JOB_CAPABILITIES.includes(cap))) fail(409, "privileged_executor_required");
-    const caps = new Set(offeredCapabilities);
+    const caps = new Set(capabilities(offered));
     if (uninstallBlocked(agentID)) return null;
     if (hasPrivilegedExecution(db,"",agentID)) return null;
     expireLeases();
-    return db.transaction(() => {
+    return transact(() => {
     assertAgentActive(db, agentID);
     if (uninstallBlocked(agentID)) return null;
     if (pendingMachineInstallation(db,"",agentID)) return null;
@@ -366,11 +369,11 @@ export function registerAgentJobs(
     // Shared Nginx state and project registries must never mutate concurrently.
     if (db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state IN ('leased','accepted','preflighting','staging','activating','verifying') AND lease_expires_at>?", agentID, nowText)) return null;
     const candidate = db.get<any>(
-      "SELECT * FROM agent_jobs WHERE agent_id=? AND state='queued' AND expires_at>? AND NOT EXISTS (SELECT 1 FROM json_each(agent_jobs.capabilities_json) required WHERE required.value NOT IN (SELECT value FROM json_each(?))) ORDER BY created_at,id LIMIT 1",
+      "SELECT * FROM agent_jobs WHERE agent_id=? AND state='queued' AND execution_principal='ordinary_agent' AND expires_at>? AND NOT EXISTS (SELECT 1 FROM json_each(agent_jobs.capabilities_json) required WHERE required.value NOT IN (SELECT value FROM json_each(?))) ORDER BY created_at,id LIMIT 1",
       agentID, nowText, JSON.stringify([...caps]),
     );
     if (!candidate) return null;
-    assertOrdinary(candidate);
+    if (options.separateExecutor && !ordinaryReadOnlyJob({actions:JSON.parse(candidate.actions_json),capabilities:JSON.parse(candidate.capabilities_json)})) return null;
     const required = JSON.parse(candidate.capabilities_json || "[]") as string[];
     if (required.some((cap) => !caps.has(cap))) return null;
     const lease = token(), leaseExpires = new Date(at.getTime() + LEASE_SECONDS * 1000), changed = db.run(
@@ -385,7 +388,6 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     const value = row(jobID);
     if (value.agent_id !== agentID) fail(403, "agent job does not belong to agent");
-    assertOrdinary(value);
     if (!leaseID || value.lease_id !== leaseID) fail(409, "agent job lease is invalid");
     if (value.lease_expires_at && Date.parse(value.lease_expires_at) <= deps.now().getTime()) {
       expireLeases();
@@ -397,7 +399,6 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     const value = object(input, "event"), lease = text(value.lease_id, "lease_id", 256), stored = row(jobID);
     if (stored.agent_id !== agentID) fail(403, "agent job does not belong to agent");
-    assertOrdinary(stored);
     // Unknown is intentionally a hard boundary: a late completion after a
     // lease timeout must not overwrite the centre's need to re-probe. Other
     // terminal receipts are safe to return for idempotent retries.
@@ -415,13 +416,14 @@ export function registerAgentJobs(
       fail(409, "agent job phase does not match its actions");
     const originalSummary = eventSummary(value.summary), originalCode = text(value.code ?? "", "code", 128, false), originalSnapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
     const probeJob = readOnlyPreflight(current);
-    const summary = probeJob ? (phase === "accepted" ? "Agent accepted read-only systemd preflight" : phase === "preflighting" ? "Agent inspected registered systemd target" : phase === "succeeded" ? "Read-only systemd preflight completed" : "Read-only systemd preflight state updated") : originalSummary;
-    const code = probeJob ? (originalCode ? safePreflightCode(originalCode) : "") : originalCode;
+    const dockerJob = dockerJobAction(JSON.parse(current.actions_json||'[]'));
+    const summary = dockerJob ? 'Docker task state updated' : probeJob ? (phase === "accepted" ? "Agent accepted read-only systemd preflight" : phase === "preflighting" ? "Agent inspected registered systemd target" : phase === "succeeded" ? "Read-only systemd preflight completed" : "Read-only systemd preflight state updated") : originalSummary;
+    const code = dockerJob ? (originalCode?safeDockerCode(originalCode):'') : probeJob ? (originalCode ? safePreflightCode(originalCode) : "") : originalCode;
     // A probe snapshot is accepted only from the final /result path, after the
     // strict whitelist below. Events never persist Agent-provided snapshot data.
-    const snapshot = probeJob ? {} : originalSnapshot;
+    const snapshot = probeJob || dockerJob ? {} : originalSnapshot;
     const occurred = iso(deps);
-    db.transaction(() => {
+    transact(() => {
       const last = db.get<any>("SELECT * FROM agent_job_events WHERE job_id=? ORDER BY sequence DESC LIMIT 1", jobID);
       if (sequence <= Number(last?.sequence ?? 0)) {
         const duplicate = db.get<any>("SELECT * FROM agent_job_events WHERE job_id=? AND sequence=?", jobID, sequence);
@@ -440,7 +442,18 @@ export function registerAgentJobs(
       if (!allowed.includes(current.state as AgentJobState)) fail(409, "agent job is no longer running");
       const previousRank = current.state === "leased" ? -1 : EVENT_ORDER[current.state as AgentJobEventPhase];
       const nextRank = EVENT_ORDER[phase];
-      if (previousRank == null || nextRank == null || nextRank < previousRank || nextRank > previousRank + 1)
+      // A rollback job restores an already-staged release and therefore moves
+      // directly from accepted to activating; it must not invent a staging
+      // phase or download/replace an artifact. Restrict the exception to that
+      // typed action shape so a normal deployment cannot skip artifact staging.
+      let actions: any[] = [];
+      try { actions = JSON.parse(current.actions_json || "[]"); } catch {}
+      const isRollbackJob = actions.length === 3
+        && actions[0]?.kind === "activate_release"
+        && actions[1]?.kind === "systemd" && actions[1]?.operation === "restart"
+        && actions[2]?.kind === "health_check";
+      const rollbackStageSkip = isRollbackJob && current.state === "accepted" && phase === "activating";
+      if (previousRank == null || nextRank == null || nextRank < previousRank || (nextRank > previousRank + 1 && !rollbackStageSkip))
         fail(409, "agent event phase is not a valid next step");
       db.run("UPDATE agent_jobs SET state=?,updated_at=?,lease_expires_at=? WHERE id=? AND lease_id=?", phase, occurred, iso(deps, new Date(deps.now().getTime() + LEASE_SECONDS * 1000)), jobID, lease);
       notify(row(jobID), phase, code, { previousState: current.state as AgentJobState, snapshot });
@@ -451,7 +464,6 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     const value = object(input, "result"), lease = text(value.lease_id, "lease_id", 256), stored = row(jobID);
     if (stored.agent_id !== agentID) fail(403, "agent job does not belong to agent");
-    assertOrdinary(stored);
     // A lost HTTP response may cause the Agent to retry its final receipt.
     // Return the durable terminal receipt instead of requiring a lease that
     // was deliberately cleared after the first commit.
@@ -463,6 +475,15 @@ export function registerAgentJobs(
     let state = text(value.state, "state", 32) as AgentJobState;
     if (!["succeeded", "failed", "cancelled", "unknown"].includes(state)) fail(400, "invalid result state");
     let code = text(value.code ?? "", "code", 128, false), summary = eventSummary(value.summary), snapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
+    const dockerAction=dockerJobAction(JSON.parse(current.actions_json||'[]'));
+    if(dockerAction){
+      code=code?safeDockerCode(code):'';
+      summary=state==='succeeded'?'Docker task completed and verified':state==='unknown'?'Docker result is unknown; inspect before retrying':'Docker task did not complete';
+      if(state==='succeeded'){
+        try{snapshot=dockerReceipt(dockerAction,snapshot,current.issued_at,deps.now());}
+        catch{state=dockerAction.operation==='inventory'?'failed':'unknown';code='invalid_docker_receipt';summary='Docker receipt did not match the task';snapshot={};}
+      }else snapshot={docker:{operation:dockerAction.operation,container_id:dockerAction.container_id??'',error:code||'docker_collection_unavailable',attempted_at:iso(deps)}};
+    }
     if (readOnlyPreflight(current)) {
       code = code ? safePreflightCode(code) : "";
       summary = state === "succeeded" ? "Read-only systemd preflight completed" : state === "failed" ? "Read-only systemd preflight failed" : "Read-only systemd preflight result requires review";
@@ -477,6 +498,10 @@ export function registerAgentJobs(
       } else snapshot = {};
     }
     const validSuccessPhase = readOnlyPreflight(current) ? current.state === "preflighting" : current.state === "verifying";
+    const operationAction = JSON.parse(current.actions_json || "[]").find((action: any) => action?.kind === "operations");
+    if (operationAction && state === "succeeded" && (snapshot.operations?.operation_id !== operationAction.operation_id || snapshot.operations?.resource_id !== JSON.parse(current.target_json || "{}").operations_resource_id)) {
+      state = "unknown"; code = "invalid_operations_receipt"; summary = "Operation receipt did not match the approved resource and operation"; snapshot = {};
+    }
     if (state === "succeeded" && (!validSuccessPhase || (snapshot as any).health?.healthy !== true)) {
       state = "unknown";
       code = "invalid_agent_sequence";
@@ -492,7 +517,7 @@ export function registerAgentJobs(
       state, code, summary, snapshot, started_at: text(value.started_at ?? "", "started_at", 64, false), finished_at: text(value.finished_at ?? iso(deps), "finished_at", 64, false),
     };
     const occurred = iso(deps);
-    db.transaction(() => {
+    transact(() => {
       const changed = db.run("UPDATE agent_jobs SET state=?,receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND lease_id=? AND state NOT IN ('succeeded','failed','cancelled','unknown')", state, json(receipt), occurred, jobID, lease);
       if (!changed.changes) return;
       const next = Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM agent_job_events WHERE job_id=?", jobID)?.sequence ?? 1);
@@ -506,7 +531,8 @@ export function registerAgentJobs(
     return view(row(jobID));
   };
   const cancel = (jobID: string, actor: string) => {
-    quarantineLegacyWrites();
+    const root=db.get<any>("SELECT 1 FROM sqlite_master WHERE type='table' AND name='privileged_jobs'") && db.get<any>("SELECT state FROM privileged_jobs WHERE id=?",jobID);
+    if(root && ['queued','running'].includes(root.state) && privilegedCancel) {privilegedCancel(jobID,actor);return view(row(jobID));}
     const current = row(jobID);
     if (terminal(current.state as AgentJobState)) return view(current);
     const at = iso(deps);
@@ -516,7 +542,7 @@ export function registerAgentJobs(
     const summary = safelyQueued
       ? `cancelled by ${actor}`
       : `Cancellation requested by ${actor} after Agent claim; target state requires re-check`;
-    db.transaction(() => {
+    transact(() => {
       const changed = db.run("UPDATE agent_jobs SET state=?,receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND state NOT IN ('succeeded','failed','cancelled','unknown')", state, json({ state, code, summary }), at, jobID);
       if (!changed.changes) return;
       const next = Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM agent_job_events WHERE job_id=?", jobID)?.sequence ?? 1);
@@ -534,7 +560,7 @@ export function registerAgentJobs(
     if (!current) fail(409, "deployment_job_not_found");
     if (current.state !== "queued") fail(409, "deployment_job_already_claimed");
     const at = iso(deps);
-    db.transaction(() => {
+    transact(() => {
       const receipt = { state: "cancelled", code: "cancelled", summary: `cancelled by ${actor}` };
       const changed = db.run(
         "UPDATE agent_jobs SET state='cancelled',receipt_json=?,updated_at=? WHERE id=? AND state='queued'",
@@ -550,6 +576,42 @@ export function registerAgentJobs(
     });
     return view(row(current.id));
   };
+  const authorizeArtifact = (ctx: Context, agentID: string, jobID: string, releaseID: string) => {
+    authenticate(ctx, agentID);
+    const leaseID = String(ctx.req.headers["x-lightmoni-job-lease"] ?? "").trim();
+    if (!leaseID) fail(401, "agent job lease is required");
+    const current = leaseRow(agentID, jobID, leaseID);
+    if (current.execution_principal!=="ordinary_agent") fail(403,"principal_mismatch");
+    if (current.state !== "staging" || Date.parse(current.expires_at) <= deps.now().getTime())
+      fail(409, "agent job is not staging an artifact");
+    let actionList: any[];
+    let caps: string[];
+    try {
+      actionList = JSON.parse(current.actions_json || "[]");
+      caps = JSON.parse(current.capabilities_json || "[]");
+    } catch {
+      fail(409, "agent job artifact action is invalid");
+    }
+    const action = actionList.find((candidate) => candidate?.kind === "stage_artifact" && candidate?.release_id === releaseID);
+    if (!action || !caps.includes("artifact.stage")
+      || typeof action.service_id !== "string" || typeof action.sha256 !== "string"
+      || !/^[a-f0-9]{64}$/i.test(action.sha256) || !Number.isSafeInteger(action.size) || action.size < 1)
+      fail(403, "agent job does not authorize this artifact");
+    const binding = db.get<any>(
+      `SELECT d.service_id,d.release_id,t.machine_id,m.agent_id,r.artifact_digest,r.artifact_size,r.status
+       FROM deployments d
+       JOIN service_targets t ON t.id=d.target_id AND t.service_id=d.service_id
+       JOIN managed_machines m ON m.id=t.machine_id
+       JOIN releases r ON r.id=d.release_id AND r.service_id=d.service_id
+       WHERE d.id=?`,
+      current.deployment_id,
+    );
+    if (!binding || binding.agent_id !== agentID || binding.service_id !== action.service_id
+      || binding.release_id !== releaseID || binding.status !== "ready"
+      || binding.artifact_digest !== action.sha256.toLowerCase() || Number(binding.artifact_size) !== action.size)
+      fail(403, "agent job artifact binding is invalid");
+    return { sha256: binding.artifact_digest, size: Number(binding.artifact_size) };
+  };
   const safe = (handler: Handler): Handler => async (ctx) => {
     try { await handler(ctx); } catch (error) {
       if (error instanceof HTTPError) ctx.json({ error: error.message }, error.status);
@@ -563,14 +625,17 @@ export function registerAgentJobs(
   }), { public: true });
   router.post("/api/v1/agents/:id/jobs/:jobId/events", safe(async (ctx) => {
     authenticate(ctx, ctx.params.id);
+    if (row(ctx.params.jobId).execution_principal!=="ordinary_agent") fail(403,"principal_mismatch");
     ctx.json(event(ctx.params.id, ctx.params.jobId, await body(ctx)));
   }), { public: true });
   router.post("/api/v1/agents/:id/jobs/:jobId/result", safe(async (ctx) => {
     authenticate(ctx, ctx.params.id);
+    if (row(ctx.params.jobId).execution_principal!=="ordinary_agent") fail(403,"principal_mismatch");
     ctx.json(result(ctx.params.id, ctx.params.jobId, await body(ctx)));
   }), { public: true });
   router.post("/api/v1/agents/:id/jobs/:jobId/cancel", safe(async (ctx) => {
     authenticate(ctx, ctx.params.id);
+    if (row(ctx.params.jobId).execution_principal!=="ordinary_agent") fail(403,"principal_mismatch");
     const value = await body(ctx), lease = text(value.lease_id, "lease_id", 256);
     leaseRow(ctx.params.id, ctx.params.jobId, lease);
     ctx.json(cancel(ctx.params.jobId, "agent:" + ctx.params.id));
@@ -581,7 +646,16 @@ export function registerAgentJobs(
     ctx.json(cancel(ctx.params.jobId, ctx.user.id + (value.reason ? ": " + text(value.reason, "reason", 256, false) : "")));
   }));
   return {
-    enqueue, claim, event, result, cancel, cancelQueuedDeployment, get: (jobID: string) => view(row(jobID)),
+    expireLeases,
+    setPrivilegedReadiness(check) { privilegedReady=check; },
+    setPrivilegedCancellation(cancel) { privilegedCancel=cancel; },
+    leasePrivileged(jobID,leaseID,expiresAt) {
+      const current=row(jobID);
+      if(current.execution_principal!=='privileged_executor'||current.state!=='queued'||current.expires_at<=iso(deps))fail(409,'managed_job_not_queued');
+      db.run("UPDATE agent_jobs SET state='leased',lease_id=?,lease_expires_at=?,attempts=attempts+1,updated_at=? WHERE id=?",leaseID,expiresAt,iso(deps),jobID);
+      return view(row(jobID));
+    },
+    enqueue, claim, event, result, cancel, cancelQueuedDeployment, get: (jobID: string) => view(row(jobID)), authorizeArtifact,
     start() {
       if (sweepTimer) return;
       sweepTimer = setInterval(() => {

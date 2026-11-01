@@ -1,3 +1,5 @@
+> 后续 SDD080 已承接本记录中待迁移的业务 profile、应用 Docker 观测与离线数据接管，见 [SDD080 验收](../080-executor-managed-operations/validation.md)。本文件保留 #64 原始切片证据；最终发行须同时包含 SDD080。
+
 # SDD060 验证记录
 
 日期：2026-11-02（Asia/Shanghai）。实施 [PR #64](https://github.com/workhold/lightmoni/pull/64) 在功能分支交付，已合并 main `fd3685e5011c7762ef491cd8fca0ec493b8c555e`；未合入、未发布镜像、未部署生产。设计 PR #47 已合入，其设计检查不替代本轮实现验收。

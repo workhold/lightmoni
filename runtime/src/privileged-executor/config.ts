@@ -29,7 +29,7 @@ export function httpsOrigin(value: unknown): string {
 }
 export function policy(value: unknown): ExecutorPolicy {
   const p = strictRecord(value, ["generation", "capabilities"]);
-  if (!Number.isSafeInteger(p.generation) || p.generation < 1 || !Array.isArray(p.capabilities) || p.capabilities.length > 2
+  if (!Number.isSafeInteger(p.generation) || p.generation < 1 || !Array.isArray(p.capabilities) || p.capabilities.length > PRIVILEGED_CAPABILITIES.length
     || new Set(p.capabilities).size !== p.capabilities.length || p.capabilities.some((c: unknown) => !(PRIVILEGED_CAPABILITIES as readonly unknown[]).includes(c))) refuse("invalid_policy");
   return { generation: p.generation, capabilities: [...p.capabilities].sort() };
 }

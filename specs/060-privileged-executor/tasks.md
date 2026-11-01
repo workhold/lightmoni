@@ -37,3 +37,7 @@
 - [x] 删除 Docker 补装的普通 Agent 提权、重启与相关 UI 误导。
 - [x] 完成唯一维护入口的 upgrade/rollback/repair 审批与未知结果核对。
 - [x] 补齐维护与最小受管容器 UI、测试、真实 Linux 验证和架构同步，更新 #64。
+
+## SDD080 发行整合
+
+网站、证书、完整 Compose、受管 systemd/制品及备份通过独立 operations.managed.v1 承接；采用固定 root worker、原批准/领域校验、逐命令权威复验和单次启动许可。最小 container.managed.v1 的范围不扩大，普通控制通道保持关闭。以 SDD080 的任务和实机报告为准，以上 C2 未完成描述保留为 #64 原始切片历史。统一维护入口、repair 与 activation 契约已合并保留。

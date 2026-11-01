@@ -7,7 +7,7 @@ import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
 import type { Dependencies } from "../src/shared/types.js";
 
-test("center DNS reconciliation continues without reviving historical workload execution", async (t) => {
+test("two workload reconciliation rounds continue while a DNS observation remains in flight", async (t) => {
   const db = new DB(":memory:");
   db.exec(
     "CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT,active INTEGER);INSERT INTO users VALUES('admin','admin',1);CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT,hostname TEXT,version TEXT,platform TEXT,arch TEXT,last_seen TEXT,group_id TEXT,heartbeat TEXT);INSERT INTO agents VALUES('node-a','host-a','Test','1','linux','amd64','2026-10-29T02:00:00Z','default','{}')",
@@ -88,19 +88,54 @@ test("center DNS reconciliation continues without reviving historical workload e
     for (let i = 0; i < 5; i++)
       await new Promise<void>((resolve) => setImmediate(resolve));
   };
-  const instanceBefore=db.all('SELECT * FROM ops_platform_instances');
   const first = platform.tick();
   await settle();
-  assert.equal(dnsRequests,1);
-  assert.equal(platform.store.actions(app.id).length,0);
-  assert.equal(db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
-  now=new Date(now.getTime()+35000);
-  const second=platform.tick();
+  assert.equal(dnsRequests, 1);
+  assert.equal(
+    platform.store.actions(app.id).length,
+    1,
+    "DNS must not block the first workload inspection",
+  );
+  const job = jobs.claim("node-a", ["operations.platform"])!,
+    payload = platform.resolvePayload(job);
+  for (const [i, phase] of [
+    "accepted",
+    "staging",
+    "activating",
+    "verifying",
+  ].entries())
+    jobs.event("node-a", job.id, {
+      lease_id: job.lease_id,
+      sequence: i + 1,
+      phase,
+      summary: "inspection",
+    });
+  jobs.result("node-a", job.id, {
+    lease_id: job.lease_id,
+    state: "succeeded",
+    summary: "healthy",
+    snapshot: {
+      health: { healthy: true },
+      operations: {
+        operation_id: payload.operation_id,
+        resource_id: app.id,
+        data: { healthy: true, containers: [{ running: true }] },
+      },
+    },
+  });
+  now = new Date(now.getTime() + 35000);
+  const second = platform.tick();
   await settle();
-  assert.equal(dnsRequests,1,'unfinished DNS reads cannot overlap');
-  assert.equal(platform.store.actions(app.id).length,0,'historical running instances never dispatch operations on tick');
-  assert.deepEqual(db.all('SELECT * FROM ops_platform_instances'),instanceBefore);
-  assert.equal(db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
+  assert.equal(
+    dnsRequests,
+    1,
+    "the same DNS domain must not overlap its own unfinished tick",
+  );
+  assert.equal(
+    platform.store.actions(app.id).length,
+    2,
+    "the next workload round must run before the first DNS request finishes",
+  );
   release();
-  await Promise.all([first,second]);
+  await Promise.all([first, second]);
 });

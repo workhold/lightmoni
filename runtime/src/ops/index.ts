@@ -14,8 +14,6 @@ import { createCertificateController, getCertificateMaterial, publicCertificateM
 import { createWorkloadController } from "./workloads.js";
 import type { DomainController, ResourceKind } from "./types.js";
 
-import { assertImplementedHostProfile } from './host-profiles.js';
-
 /** One host-owned control plane; every domain shares authentication, revisions and Agent jobs. */
 export function registerOperationsPlatform(
   deps: Dependencies,
@@ -188,16 +186,34 @@ export function registerOperationsPlatform(
       if (b.confirmed !== undefined && typeof b.confirmed !== "boolean")
         fail(400, "platform_confirmation_required");
       const installation = catalogInstallation(ctx.params.id, b);
-      if (b.confirmed === true)
-        assertImplementedHostProfile({kind: "application", spec: installation.spec}, "deploy");
       const resource = store.create(
         "application",
         installation.name,
         installation.spec,
         ctx.user.id,
       );
+      let result: Record<string, any> = {};
+      if (b.confirmed === true) {
+        try {
+          result = await workloads.perform(resource, "deploy", {}, ctx.user.id);
+        } catch (error) {
+          const candidate =
+            error instanceof HTTPError ||
+            error instanceof OperationRejectedError
+              ? error.message.split(":", 1)[0]
+              : "platform_deployment_failed";
+          const code = /^[a-zA-Z][a-zA-Z0-9_.-]{0,179}$/.test(candidate)
+            ? candidate
+            : "platform_deployment_failed";
+          store.patchStatus(resource.id, {
+            last_error: code,
+            last_error_at: deps.now().toISOString(),
+          });
+          result = { runs: store.actions(resource.id), deployment_error: code };
+        }
+      }
       ctx.json(
-        { resource: store.public(store.get(resource.id)) },
+        { resource: store.public(store.get(resource.id)), ...result },
         201,
       );
     }),
@@ -362,9 +378,14 @@ export function registerOperationsPlatform(
       if (b.revision !== r.revision) fail(409, "platform_revision_conflict");
       if (b.confirmed !== true) fail(400, "platform_confirmation_required");
       if (typeof b.action !== "string") fail(400, "platform_action_required");
+      if (
+        (["service", "node_pool", "gateway_group"].includes(r.kind) ||
+          (r.kind === "application" && !r.spec.deployments)) &&
+        ["deploy", "reconcile"].includes(b.action)
+      )
+        fail(409, "legacy_deployment_requires_cluster_migration");
       const domain = domains.find((d) => d.actions(r).includes(b.action));
       if (!domain) fail(400, "unsupported_platform_action");
-      assertImplementedHostProfile(r, b.action);
       const input = safeObject(b.input ?? {});
       const result = r.kind === "certificate" && ["issue", "renew"].includes(b.action)
         ? certificates.startIssue(r, b.action, ctx.user.id)

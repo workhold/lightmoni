@@ -121,20 +121,18 @@ async function fixture(t: TestContext, configured = true) {
   await preflight("v1");
   const deploymentID = await plan();
   const approved = await request(`/api/v1/deployments/${deploymentID}/approve`, "POST", { confirm: true });
-  assert.equal(approved.status,409);assert.equal(approved.data.error,"privileged_profile_not_implemented");
-  // Historical succeeded receipts remain queryable. Seed the pre-upgrade
-  // durable evidence directly; no test reopens the removed write channel.
-  const jobID="historical-job-"+deploymentID,operationID="historical-operation-"+deploymentID;
-  const at=clock.toISOString();
-  db.run("INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,issued_at,expires_at,created_at,updated_at,attempts,receipt_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-    jobID,"agent-a",deploymentID,operationID,"succeeded",JSON.stringify(["systemd.restart","health.systemd"]),JSON.stringify([{kind:"systemd",operation:"restart",unit:TARGET_CONFIG.unit}]),at,at,at,at,1,JSON.stringify({state:"succeeded",snapshot:{health:{healthy:true}}}));
-  db.run("UPDATE deployments SET status='succeeded',phase='succeeded',operation_id=?,approved_at=?,finished_at=?,receipt_json=? WHERE id=?",operationID,at,at,JSON.stringify({state:"succeeded",job_id:jobID}),deploymentID);
+  assert.equal(approved.status, 200);
+  const job = jobs.claim("agent-a", ["systemd.restart", "health.systemd"]);
+  assert.ok(job);
+  for (const [index, phase] of ["accepted", "staging", "activating", "verifying"].entries())
+    jobs.event("agent-a", job.id, { lease_id: job.lease_id, sequence: index + 1, phase, summary: "untrusted host output" });
+  jobs.result("agent-a", job.id, { lease_id: job.lease_id, state: "succeeded", summary: "host token must not escape", snapshot: { health: { healthy: true } } });
   const initial = await request(`/api/v1/deployments/${deploymentID}`);
   assert.equal(initial.data.status, "succeeded");
   clock = new Date("2026-10-23T00:01:00.000Z");
   const verify = (body: unknown = {}, role = "admin") => request(`/api/v1/deployments/${deploymentID}/verify-telemetry`, "POST", body, role);
   return {
-    db, jobs, services, request, verify, preflight, plan, serviceID, targetID, deploymentID, releaseID, jobID,
+    db, jobs, services, request, verify, preflight, plan, serviceID, targetID, deploymentID, releaseID, jobID: job.id as string,
     get reads() { return reads; }, get catalogReads() { return catalogReads; },
     setQuery(fn: ClickHouse["query"]) { readerQuery = fn; }, setCatalog(fn: typeof catalogList) { catalogList = fn; },
     setClock(iso: string) { clock = new Date(iso); },
@@ -169,7 +167,7 @@ test("telemetry binding is explicit, strict and snapshotted with the deployment"
   assert.equal(f.reads, 0);
 });
 
-test("historical healthy deployment persists an independent bounded telemetry summary for UI and AI", async (t) => {
+test("real healthy deployment persists an independent bounded telemetry summary for UI and AI", async (t) => {
   const f = await fixture(t);
   const verified = await f.verify();
   assert.equal(verified.status, 200);
@@ -285,18 +283,13 @@ test("verification discards in-flight evidence after target/release edits, rollb
       } else if (race === "rollback") {
         await f.preflight("v2");
         const rollback = await f.request(`/api/v1/deployments/${f.deploymentID}/rollback`, "POST", { confirm: true, expected_state: "succeeded" });
-        assert.equal(rollback.status,409);assert.equal(rollback.data.error,"privileged_profile_not_implemented");
-        // A concurrent recovery/import of historical state must invalidate
-        // telemetry evidence even though new rollback dispatch is disabled.
-        f.db.run("UPDATE deployments SET operation_kind='rollback',status='rollback_pending' WHERE id=?",f.deploymentID);
+        assert.equal(rollback.status, 202);
+        assert.equal(rollback.data.operation_kind, "rollback");
       } else {
         await f.preflight("v2");
         const nextID = await f.plan();
         const approved = await f.request(`/api/v1/deployments/${nextID}/approve`, "POST", { confirm: true });
-        assert.equal(approved.status,409);assert.equal(approved.data.error,"privileged_profile_not_implemented");
-        const at="2026-10-23T00:01:00.000Z";
-        f.db.run("INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,issued_at,expires_at,created_at,updated_at,receipt_json) VALUES(?,?,?,?,?,?,?,?,?,?)",
-          "later-historical-job","agent-a",nextID,"later-historical-operation","succeeded",at,at,at,at,JSON.stringify({state:"succeeded",snapshot:{health:{healthy:true}}}));
+        assert.equal(approved.status, 200);
       }
       response.resolve(matchingResponse());
       const rejected = await pending;

@@ -1,3 +1,4 @@
+import { id } from '../shared/crypto.js';
 import { fail } from '../shared/http.js';
 import { dockerInventory, type DockerInventory } from '../shared/application-observation.js';
 import { safeDockerCode } from '../shared/docker-jobs.js';
@@ -30,7 +31,32 @@ export function registerDockerJobs(deps:Dependencies,jobs:AgentJobStore,safe:(fn
     if(job.target?.docker_machine_id!==machine.id||job.agent_id!==machine.agent_id)fail(404,'docker_job_not_found');
     ctx.json(publicJob(job));
   }));
-  deps.router.post(path,safe(() => {
-    fail(410, 'legacy_agent_payload_removed');
+  deps.router.post(path,safe(async ctx=>{
+    const body=await ctx.body<any>();
+    if(!body||typeof body!=='object'||Array.isArray(body))fail(400,'invalid_docker_action');
+    const response=deps.db.transaction(()=>{
+    const machine=host(ctx.params.id);
+    const operation=body.operation,containerID=body.container_id,requestID=body.request_id;
+    if(!['inventory','start','stop','restart'].includes(operation)||typeof requestID!=='string'||!/^[a-zA-Z0-9-]{16,64}$/.test(requestID))fail(400,'invalid_docker_action');
+    if(operation==='inventory'?containerID!==undefined:!(/^[a-f0-9]{64}$/.test(containerID??'')))fail(400,'invalid_docker_container');
+    if(operation!=='inventory'&&body.confirmed!==true)fail(400,'docker_confirmation_required');
+    const previous=deps.db.get<any>("SELECT id,agent_id,actions_json FROM agent_jobs WHERE deployment_id=? AND operation_id=?",'docker-'+machine.id,requestID);
+    if(previous){
+      const action=JSON.parse(previous.actions_json)[0];
+      if(previous.agent_id!==machine.agent_id||action.operation!==operation||action.container_id!==containerID)fail(409,'docker_request_conflict');
+      return {body:publicJob(jobs.get(previous.id)),status:200};
+    }
+    if(!machine.online)fail(409,'docker_agent_offline');
+    if(!machine.docker_capabilities.includes(operation==='inventory'?'docker.inventory':'docker.control'))fail(409,'docker_agent_upgrade_required');
+    if(machine.active_job){
+      const active=jobs.get(machine.active_job);
+      if(operation==='inventory'&&active.actions[0]?.operation==='inventory')return {body:publicJob(active),status:200};
+      fail(409,'docker_job_in_progress');
+    }
+    if(operation!=='inventory'&&(!['ready','degraded'].includes(machine.state)||!machine.containers.some((c:any)=>c.id===containerID)))fail(409,'docker_fresh_inventory_required');
+    const job=jobs.enqueue({agentID:machine.agent_id,deploymentID:'docker-'+machine.id,operationID:requestID,actions:[{kind:'docker',operation,...(containerID?{container_id:containerID}:{})}],capabilities:[operation==='inventory'?'docker.inventory':'docker.control'],target:{docker_machine_id:machine.id,actor:ctx.user.id,audit_id:id()},expiresInSeconds:120});
+    return {body:publicJob(job),status:202};
+    });
+    ctx.json(response.body,response.status);
   }));
 }

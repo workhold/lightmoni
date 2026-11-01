@@ -208,16 +208,16 @@ test("active and unknown Docker installations block privileged review approval c
 test("quarantined legacy writes keep the root execution fence across restarts, cancellation and late receipts", () => {
   const f=fixture();try {
     const deps={...f.deps,router:new Router()},credentials={has:()=>true} as any;
-    const first=registerAgentJobs(deps,{agentCredentials:credentials}),at=f.deps.now().toISOString();
+    const first=registerAgentJobs(deps,{agentCredentials:credentials,separateExecutor:true}),at=f.deps.now().toISOString();
     f.db.run("INSERT INTO agent_jobs(id,agent_id,deployment_id,operation_id,state,capabilities_json,actions_json,issued_at,expires_at,created_at,updated_at,attempts,lease_id,lease_expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
       "legacy-writing","agent-host","legacy-deployment","legacy-operation","activating",JSON.stringify(["systemd.restart"]),JSON.stringify([{kind:"systemd",operation:"restart",unit:"app.service"}]),at,"2099-01-01T00:00:00Z",at,at,1,"old-lease","2099-01-01T00:00:00Z");
     first.close();
-    const jobs=registerAgentJobs({...deps,router:new Router()},{agentCredentials:credentials});
+    const jobs=registerAgentJobs({...deps,router:new Router()},{agentCredentials:credentials,separateExecutor:true});
     assert.equal(jobs.get("legacy-writing").state,"unknown");
     const plansBefore=f.db.get<any>("SELECT count(*) n FROM privileged_execution_plans")!.n;
     assert.throws(()=>f.makePlan(),/machine_execution_locked/);
     assert.equal(jobs.cancel("legacy-writing","admin").state,"unknown");
-    assert.throws(()=>jobs.result("agent-host","legacy-writing",{lease_id:"old-lease",state:"succeeded",snapshot:{health:{healthy:true}}}),/privileged_executor_required/);
+    assert.throws(()=>jobs.result("agent-host","legacy-writing",{lease_id:"old-lease",state:"succeeded",snapshot:{health:{healthy:true}}}),/lease/);
     assert.throws(()=>f.makePlan(),/machine_execution_locked/);
     assert.equal(f.db.get<any>("SELECT count(*) n FROM privileged_execution_plans")!.n,plansBefore);
     assert.equal(f.db.get<any>("SELECT count(*) n FROM privileged_jobs")!.n,0,"old tasks are never converted into new root jobs");

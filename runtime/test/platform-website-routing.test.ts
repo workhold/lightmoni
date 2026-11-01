@@ -140,60 +140,52 @@ async function fixture(t: any, fetcher?: typeof fetch) {
       action: name,
       input,
     });
-  const hostSnapshot = () => ["ops_platform_resources", "ops_platform_revisions", "ops_cluster_instances", "ops_platform_instance_ports", "ops_platform_ports", "agent_jobs", "ops_platform_runs", "ops_platform_application_deployments", "ops_platform_website_deployments"]
-    .map(table => ({ table, rows: db.all('SELECT * FROM "' + table + '"') }));
-  const rejectAction = async (resource: any, name = "deploy", input: any = {}) => {
-    const before = hostSnapshot(), response = await action(resource, name, input);
-    assert.equal(response.status, 409);
-    assert.equal(response.body.error, "privileged_profile_not_implemented");
-    assert.deepEqual(hostSnapshot(), before, "the removed host action cannot create runs, reserve ports, or change publication");
-  };
-  // Historical rows describe publication that happened before removal of ordinary Agent writes.
-  // They are not produced through an API response, enqueue, claim, or result compatibility path.
-  const seedApplication = (application: any) => {
-    for (const d of application.spec.deployments) {
-      db.run("UPDATE ops_platform_application_deployments SET desired_revision=?,enabled=1,policy_actor='admin',status_json=? WHERE application_id=? AND cluster_id=?",
-        application.revision, JSON.stringify({ phase: "running" }), application.id, d.cluster_id);
-      const cluster = store.get(d.cluster_id, "cluster"),
-        ids = application.spec.deployment_mode === "managed" ? cluster.spec.machine_ids.slice(0, d.replicas ?? 1) : d.machine_ids;
-      for (const machineID of ids) {
-        const machine = db.get<any>("SELECT * FROM managed_machines WHERE id=?", machineID)!, instanceID = application.id + ":" + d.cluster_id + ":" + machineID;
-        db.run("INSERT INTO ops_cluster_instances(id,owner_id,cluster_id,machine_id,agent_id,slot,address,state,healthy,last_seen,desired_generation,observed_generation,observed_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-          instanceID, application.id, d.cluster_id, machineID, machine.agent_id, machineID, machine.address, "running", 1, now.toISOString(), "historical-" + application.revision, "historical-" + application.revision,
-          JSON.stringify({ healthy: true, running: true, containers: [{ running: true }] }), now.toISOString(), now.toISOString());
-        for (const p of application.spec.ports) {
-          let hostPort = p.host_port || 21000;
-          while (db.get("SELECT port FROM ops_platform_ports WHERE agent_id=? AND protocol=? AND port=?", machine.agent_id, p.protocol, hostPort)) hostPort++;
-          db.run("INSERT INTO ops_platform_instance_ports(instance_id,name,service,container_port,host_port,protocol,app_protocol,host_ip) VALUES(?,?,?,?,?,?,?,?)",
-            instanceID, p.name, p.service ?? "", p.container_port, hostPort, p.protocol, p.app_protocol ?? "", p.host_ip ?? "0.0.0.0");
-          db.run("INSERT INTO ops_platform_ports(agent_id,protocol,port,instance_id) VALUES(?,?,?,?)", machine.agent_id, p.protocol, hostPort, instanceID);
-        }
-      }
-    }
-  };
-  const seedWebsite = (site: any, ids: string[] = site.spec.cluster_ids, enabled = true) => {
-    for (const cid of ids) {
-      const gateways = db.all<any>("SELECT i.* FROM ops_cluster_instances i JOIN ops_platform_application_deployments d ON d.application_id=i.owner_id AND d.cluster_id=i.cluster_id WHERE i.cluster_id=? AND d.role='openresty'", cid),
-        instances = Object.fromEntries(gateways.map(i => [i.id, { machine_id: i.machine_id, agent_id: i.agent_id, run_id: "historical-" + i.id, state: "succeeded", revision: site.revision, enabled, digest: "historical", updated_at: now.toISOString() }]));
-      db.run("INSERT INTO ops_platform_website_deployments(website_id,cluster_id,desired_revision,enabled,policy_actor,status_json) VALUES(?,?,?,?,?,?) ON CONFLICT(website_id,cluster_id) DO UPDATE SET desired_revision=excluded.desired_revision,enabled=excluded.enabled,policy_actor=excluded.policy_actor,status_json=excluded.status_json",
-        site.id, cid, site.revision, enabled ? 1 : 0, "admin", JSON.stringify({ active: enabled, synchronized: true, phase: enabled ? "active" : "disabled", instances }));
-    }
-  };
-  const refreshHistorical = (application: any, agentID: string, healthy = true) => {
-    db.run("UPDATE agents SET last_seen=? WHERE id=?", now.toISOString(), agentID);
-    db.run("UPDATE ops_cluster_instances SET last_seen=?,healthy=?,state='running' WHERE owner_id=? AND agent_id=?", now.toISOString(), healthy ? 1 : 0, application.id, agentID);
+  const finish = (
+    agentID: string,
+    data: any = {
+      healthy: true,
+      running: true,
+      containers: [{ running: true }],
+    },
+    state = "succeeded",
+  ) => {
+    const job = jobs.claim(agentID, ["operations.platform"]);
+    assert.ok(job);
+    const payload = platform.resolvePayload(job);
+    for (const [n, phase] of [
+      "accepted",
+      "staging",
+      "activating",
+      "verifying",
+    ].entries())
+      jobs.event(agentID, job.id, {
+        lease_id: job.lease_id,
+        sequence: n + 1,
+        phase,
+        summary: "test",
+      });
+    jobs.result(agentID, job.id, {
+      lease_id: job.lease_id,
+      state,
+      ...(data.code ? { code: data.code } : {}),
+      summary: "test",
+      snapshot: {
+        health: { healthy: state === "succeeded" },
+        operations: {
+          operation_id: payload.operation_id,
+          resource_id: payload.resource.id,
+          data,
+        },
+      },
+    });
+    return { job, payload };
   };
   t.after(async () => {
-    try {
-      assert.equal(db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0, "routing, preview and cloud DNS must never enqueue an ordinary Agent host action");
-      assert.equal(db.get<any>("SELECT COUNT(*) n FROM ops_platform_runs WHERE agent_id<>'' OR job_id<>''")!.n, 0, "historical publication cannot create new host execution records");
-    } finally {
-      await platform.close();
-      jobs.close?.();
-      server.close();
-      server.closeAllConnections();
-      db.close();
-    }
+    await platform.close();
+    jobs.close?.();
+    server.close();
+    server.closeAllConnections();
+    db.close();
   });
   return {
     db,
@@ -205,11 +197,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     createCluster,
     app,
     action,
-    rejectAction,
-    seedApplication,
-    seedWebsite,
-    refreshHistorical,
-    hostSnapshot,
+    finish,
     advance(ms: number) {
       now = new Date(now.getTime() + ms);
     },
@@ -375,7 +363,7 @@ test("domain routes validate scope and require manual backends only in bound clu
   }
 });
 
-test("historical domain publication preserves isolated previews, DNS and live policies", async (t) => {
+test("domains in one binding have isolated bundles, DNS and live policy; membership stays published", async (t) => {
   const dns = dnsMock(),
     f = await fixture(t, dns.fetcher),
     a = f.createCluster(["ma"], "South"),
@@ -401,8 +389,9 @@ test("historical domain publication preserves isolated previews, DNS and live po
     }).spec,
     "admin",
   );
-  await f.rejectAction(entry);
-  f.seedApplication(entry);
+  await f.action(entry, "deploy");
+  f.finish("a");
+  f.finish("b");
   const site = f.store.create(
     "website",
     "Scoped aliases",
@@ -439,16 +428,21 @@ test("historical domain publication preserves isolated previews, DNS and live po
     },
     "admin",
   );
-  await f.rejectAction(site);
-  f.seedWebsite(site);
-  const south = await f.req("/resources/" + site.id + "/nginx?cluster_id=" + a.id),
-    north = await f.req("/resources/" + site.id + "/nginx?cluster_id=" + b.id);
-  assert.equal(south.status, 200); assert.equal(north.status, 200);
-  assert.match(south.body.config, /server_name south\.example\.test;/);
-  assert.doesNotMatch(south.body.config, /north\.example\.test/);
-  assert.match(north.body.config, /server_name north\.example\.test;/);
-  assert.doesNotMatch(north.body.config, /south\.example\.test/);
-  assert.match(south.body.config, /return 200 "shared";/);
+  await f.action(site, "deploy");
+  const south = f.finish("a"),
+    north = f.finish("b");
+  assert.deepEqual(
+    south.payload.resource.config.sites.flatMap((s: any) => s.domains),
+    ["south.example.test"],
+  );
+  assert.deepEqual(
+    north.payload.resource.config.sites.flatMap((s: any) => s.domains),
+    ["north.example.test"],
+  );
+  assert.equal(
+    south.payload.resource.config.sites[0].locations[0].return_value,
+    "shared",
+  );
   await f.platform.tick();
   await settle();
   const records = () =>
@@ -519,8 +513,9 @@ test("historical domain publication preserves isolated previews, DNS and live po
   await f.platform.tick();
   await settle();
   f.advance(121000);
-  f.refreshHistorical(entry, "b");
+  f.heartbeat("b");
   await f.platform.tick();
+  f.finish("b");
   await settle();
   await f.platform.tick();
   await settle();
@@ -529,9 +524,19 @@ test("historical domain publication preserves isolated previews, DNS and live po
     [["north", "north.edge.example.test", 3]],
     "south-only domain must not fall back to an unbound north cluster",
   );
-  f.refreshHistorical(entry, "a");
-  await f.platform.tick();
-  await settle();
+  f.heartbeat("a");
+  for (let n = 0; n < 4; n++) {
+    await f.platform.tick();
+    for (const agent of ["a", "b"])
+      if (
+        f.db.get(
+          "SELECT id FROM ops_platform_runs WHERE agent_id=? AND state='queued'",
+          agent,
+        )
+      )
+        f.finish(agent);
+    await settle();
+  }
   const moved = update({
     domain_routes: site.spec.domain_routes.map((r: any) => ({
       ...r,
@@ -539,8 +544,8 @@ test("historical domain publication preserves isolated previews, DNS and live po
       cluster_policies: undefined,
     })),
   });
-  await f.rejectAction(moved, "deploy", { cluster_id: b.id });
-  f.seedWebsite(moved, [b.id]);
+  await f.action(moved, "deploy", { cluster_id: b.id });
+  f.finish("b");
   await f.platform.tick();
   await settle();
   assert.deepEqual(
@@ -552,11 +557,13 @@ test("historical domain publication preserves isolated previews, DNS and live po
     new Set([a.id, b.id]),
     "partial publication retains the old cluster until cleanup",
   );
-  await f.rejectAction(moved, "deploy", { cluster_id: a.id });
-  f.seedWebsite(moved, [a.id], false);
-  const cleaned = await f.req("/resources/" + moved.id + "/nginx?cluster_id=" + a.id);
-  assert.equal(cleaned.status, 200);
-  assert.doesNotMatch(cleaned.body.config, /south\.example\.test|north\.example\.test/);
+  await f.action(moved, "deploy", { cluster_id: a.id });
+  const cleaned = f.finish("a");
+  assert.deepEqual(
+    cleaned.payload.resource.config.sites,
+    [],
+    "old cluster receives an empty bundle to remove the domain",
+  );
   await f.platform.tick();
   await settle();
   assert.deepEqual(records(), [
@@ -591,8 +598,7 @@ test("managed domain follow mode discovers new clusters while explicit selection
     },
     "admin",
   );
-  await f.rejectAction(site);
-  f.seedWebsite(site);
+  await f.action(site, "deploy");
   let service = f.store.update(
     app.id,
     app.revision,
@@ -766,66 +772,232 @@ test("managed website discovers service deployments and validates live traffic p
 });
 
 for (const protocol of ["http", "https"]) {
-  test(`${protocol} upstream previews preserve address scope, explicit binds and unavailable routes without host jobs`, async t => {
-    const f = await fixture(t), c = f.createCluster();
-    recordHostNetwork(f.db, "mb", "b", normalizeNetworkAddresses([{ interface: "eth0", address: "fd00::2" }, { interface: "eth0", address: "203.0.113.2" }]), undefined, f.deps.now().toISOString());
-    const app = f.app(c, { machine_ids: ["ma", "mb"], ports: [
-      { name: "http", container_port: 8080, host_port: 0, protocol: "tcp", app_protocol: protocol },
-      { name: "admin", container_port: 9090, host_port: 0, protocol: "tcp", app_protocol: "http" },
-    ] });
-    await f.rejectAction(app);
-    f.seedApplication(app);
-    const before = f.hostSnapshot(), discovery = await f.req("/resources/" + app.id + "/endpoints?cluster_id=" + c.id);
+  test(`${protocol} application upstreams use loopback only on the target gateway machine`, async (t) => {
+    const f = await fixture(t),
+      c = f.createCluster();
+    recordHostNetwork(f.db,'mb','b',normalizeNetworkAddresses([{interface:'eth0',address:'fd00::2'},{interface:'eth0',address:'203.0.113.2'}]),undefined,'2026-10-29T02:00:00Z');
+    const app = f.app(c, {
+      machine_ids: ["ma", "mb"],
+      ports: [
+        {
+          name: "http",
+          container_port: 8080,
+          host_port: 0,
+          protocol: "tcp",
+          app_protocol: protocol,
+        },
+        {
+          name: "admin",
+          container_port: 9090,
+          host_port: 0,
+          protocol: "tcp",
+          app_protocol: "http",
+        },
+      ],
+    });
+    assert.equal((await f.action(app, "deploy")).status, 202);
+    f.finish("a");
+    f.finish("b");
+    const discovery = await f.req(
+      "/resources/" + app.id + "/endpoints?cluster_id=" + c.id,
+    );
     assert.equal(discovery.status, 200);
-    assert.deepEqual(f.hostSnapshot(), before, "endpoint discovery is a pure stored-state read");
-    const endpoints = discovery.body.endpoints,
-      port = (machineID: string, name: string) => endpoints.find((e: any) => e.machine_id === machineID && e.port_name === name).port;
-    assert.deepEqual(endpoints.filter((e: any) => e.port_name === "http").map((e: any) => e.ip).sort(), ["10.0.0.1", "fd00::2"]);
-    const managed = f.store.create("website", "Managed preview", { routing_mode: "managed", service_application_id: app.id, service_port_name: "http", dns_record_mode: "address",
-      bindings: [{ domains: ["managed.example.test"], locations: [{ path: "/" }] }] }, "admin");
-    await f.rejectAction(managed);
-    const preview = async (site = managed) => {
-      const state = f.hostSnapshot(), result = await f.req("/resources/" + site.id + "/nginx?cluster_id=" + c.id);
-      assert.equal(result.status, 200); assert.equal(result.body.redacted, true); assert.equal(result.body.validated, false);
-      assert.deepEqual(f.hostSnapshot(), state);
-      return result.body.config as string;
-    };
-    const initial = await preview();
-    assert.ok(initial.includes(`server 10.0.0.1:${port("ma", "http")} `));
-    assert.ok(initial.includes(`server [fd00::2]:${port("mb", "http")} `));
-    assert.ok(initial.includes(`proxy_pass ${protocol}://`));
-    assert.doesNotMatch(initial, /server 127\.0\.0\.1:/, "a general preview must not present a host-local optimization as cross-machine routing");
-    const manual = f.store.create("website", "Manual preview", { cluster_ids: [c.id], dns_record_mode: "address", bindings: [{ domains: ["manual.example.test"], locations: [
-      { path: "/app", cluster_targets: [{ cluster_id: c.id, target: "application", application_id: app.id, port_name: "admin" }] },
-      { path: "/literal", cluster_targets: [{ cluster_id: c.id, target: "proxy", upstreams: ["http://10.0.0.1:9191"] }] },
-    ] }] }, "admin");
-    const manualConfig = await preview(manual);
-    assert.ok(manualConfig.includes(`server 10.0.0.1:${port("ma", "admin")} `));
-    assert.ok(manualConfig.includes(`server [fd00::2]:${port("mb", "admin")} `));
-    assert.match(manualConfig, /server 10\.0\.0\.1:9191 /);
-    assert.match(manualConfig, /proxy_pass http:\/\//);
-    f.db.run("UPDATE ops_cluster_instances SET healthy=0 WHERE owner_id=? AND machine_id='ma'", app.id);
-    const unhealthy = await preview();
-    assert.doesNotMatch(unhealthy, /server 10\.0\.0\.1:/);
-    assert.ok(unhealthy.includes(`server [fd00::2]:${port("mb", "http")} `));
-    f.db.run("UPDATE ops_cluster_instances SET healthy=0 WHERE owner_id=?", app.id);
-    assert.match(await preview(), /return 503;/);
-    f.db.run("UPDATE ops_cluster_instances SET healthy=1 WHERE owner_id=? AND machine_id='ma'", app.id);
-    const bound = f.db.get<any>("SELECT id FROM ops_cluster_instances WHERE owner_id=? AND machine_id='ma'", app.id)!;
-    f.db.run("UPDATE ops_platform_instance_ports SET host_ip='10.55.0.1' WHERE instance_id=? AND name='http'", bound.id);
-    const specific = await preview();
-    assert.ok(specific.includes(`server 10.55.0.1:${port("ma", "http")} `));
-    assert.doesNotMatch(specific, /server 10\.0\.0\.1:|server 127\.0\.0\.1:/);
-    f.db.run("UPDATE ops_platform_instance_ports SET host_ip='127.0.0.1' WHERE instance_id=? AND name='http'", bound.id);
-    const loopback = await preview();
-    assert.match(loopback, /return 503;/);
-    assert.doesNotMatch(loopback, /server 127\.0\.0\.1:/, "automatic loopback endpoints are never offered to a peer gateway");
-    const localRenderer = renderGateway({ http_port: 80, https_port: 443, sites: [{ id: "local", domains: ["local.example.test"], mode: "proxy", locations: [{ path: "/", upstreams: [`${protocol}://127.0.0.1:${port("ma", "http")}`] }] }] }, "local-renderer");
-    assert.ok(localRenderer.includes(`server 127.0.0.1:${port("ma", "http")} `));
-    assert.ok(localRenderer.includes(`proxy_pass ${protocol}://`));
+    const discovered = discovery.body.endpoints;
+    const port = (machineID: string, name: string) =>
+      discovered.find(
+        (e: any) => e.machine_id === machineID && e.port_name === name,
+      ).port;
+    assert.deepEqual(
+      discovered
+        .filter((e: any) => e.port_name === "http")
+        .map((e: any) => e.ip)
+        .sort(),
+      ["10.0.0.1", "fd00::2"],
+    );
+    const resty = f.store.create(
+      "application",
+      "Entry",
+      catalogInstallation("openresty", {
+        deployments: [{ cluster_id: c.id, machine_ids: ["ma", "mb"] }],
+      }).spec,
+      "admin",
+    );
+    await f.action(resty, "deploy");
+    f.finish("a");
+    f.finish("b");
+    const managed = f.store.create(
+      "website",
+      "Managed",
+      {
+        routing_mode: "managed",
+        service_application_id: app.id,
+        service_port_name: "http",
+        dns_record_mode: "address",
+        bindings: [
+          { domains: ["managed.example.test"], locations: [{ path: "/" }] },
+        ],
+      },
+      "admin",
+    );
+    await f.action(managed, "deploy");
+    const a = f.finish("a").payload.resource.config,
+      b = f.finish("b").payload.resource.config;
+    assert.deepEqual(
+      a.sites[0].locations[0].upstreams.sort(),
+      [
+        `${protocol}://127.0.0.1:${port("ma", "http")}`,
+        `${protocol}://[fd00::2]:${port("mb", "http")}`,
+      ].sort(),
+    );
+    assert.deepEqual(
+      b.sites[0].locations[0].upstreams.sort(),
+      [
+        `${protocol}://10.0.0.1:${port("ma", "http")}`,
+        `${protocol}://127.0.0.1:${port("mb", "http")}`,
+      ].sort(),
+    );
+    const rendered = renderGateway(a, "test");
+    assert.ok(rendered.includes(`server 127.0.0.1:${port("ma", "http")} `));
+    assert.ok(rendered.includes(`server [fd00::2]:${port("mb", "http")} `));
+    assert.ok(rendered.includes(`proxy_pass ${protocol}://`));
+    const preview = await f.req(
+      "/resources/" + managed.id + "/nginx?cluster_id=" + c.id,
+    );
+    assert.equal(preview.status, 200);
+    assert.ok(
+      preview.body.config.includes(`server 10.0.0.1:${port("ma", "http")} `),
+    );
+    assert.ok(
+      preview.body.config.includes(`server [fd00::2]:${port("mb", "http")} `),
+    );
+    assert.ok(!preview.body.config.includes("server 127.0.0.1:"));
+
+    const manual = f.store.create(
+      "website",
+      "Manual",
+      {
+        cluster_ids: [c.id],
+        dns_record_mode: "address",
+        bindings: [
+          {
+            domains: ["manual.example.test"],
+            locations: [
+              {
+                path: "/app",
+                cluster_targets: [
+                  {
+                    cluster_id: c.id,
+                    target: "application",
+                    application_id: app.id,
+                    port_name: "admin",
+                  },
+                ],
+              },
+              {
+                path: "/literal",
+                cluster_targets: [
+                  {
+                    cluster_id: c.id,
+                    target: "proxy",
+                    upstreams: ["http://10.0.0.1:9191"],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      "admin",
+    );
+    await f.action(manual, "deploy");
+    const ma = f.finish("a").payload.resource.config,
+      mb = f.finish("b").payload.resource.config;
+    const routes = (config: any) =>
+      config.sites.find((s: any) => s.domains.includes("manual.example.test"))
+        .locations;
+    assert.deepEqual(
+      routes(ma)[0].upstreams.sort(),
+      [
+        `http://127.0.0.1:${port("ma", "admin")}`,
+        `http://[fd00::2]:${port("mb", "admin")}`,
+      ].sort(),
+    );
+    assert.deepEqual(
+      routes(mb)[0].upstreams.sort(),
+      [
+        `http://10.0.0.1:${port("ma", "admin")}`,
+        `http://127.0.0.1:${port("mb", "admin")}`,
+      ].sort(),
+    );
+    for (const config of [ma, mb])
+      assert.deepEqual(
+        routes(config)[1].upstreams,
+        manual.spec.bindings[0].locations[1].cluster_targets[0].upstreams,
+      );
+    const signatures = f.db.all<any>(
+      "SELECT last_bundle_sig FROM ops_cluster_instances WHERE owner_id=?",
+      resty.id,
+    );
+    assert.equal(signatures.length, 2);
+    assert.notEqual(
+      signatures[0].last_bundle_sig,
+      signatures[1].last_bundle_sig,
+    );
     await f.platform.tick();
-    assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM agent_jobs")!.n, 0);
-    assert.equal(f.db.get<any>("SELECT COUNT(*) n FROM ops_platform_runs")!.n, 0);
+    assert.ok(!f.jobs.claim("a", ["operations.platform"]));
+    assert.ok(!f.jobs.claim("b", ["operations.platform"]));
+
+    // Health changes must refresh each gateway's own bundle, including local removal.
+    f.db.run(
+      "UPDATE ops_cluster_instances SET healthy=0 WHERE owner_id=? AND machine_id='ma'",
+      app.id,
+    );
+    await f.platform.tick();
+    const unhealthyA = f.finish("a").payload.resource.config,
+      unhealthyB = f.finish("b").payload.resource.config;
+    assert.deepEqual(
+      unhealthyA.sites.find((s: any) =>
+        s.domains.includes("managed.example.test"),
+      ).locations[0].upstreams,
+      [`${protocol}://[fd00::2]:${port("mb", "http")}`],
+    );
+    assert.deepEqual(
+      unhealthyB.sites.find((s: any) =>
+        s.domains.includes("managed.example.test"),
+      ).locations[0].upstreams,
+      [`${protocol}://127.0.0.1:${port("mb", "http")}`],
+    );
+    f.db.run(
+      "UPDATE ops_cluster_instances SET healthy=0 WHERE owner_id=?",
+      app.id,
+    );
+    await f.platform.tick();
+    for (const agent of ["a", "b"]) {
+      const config = f.finish(agent).payload.resource.config;
+      const location = config.sites.find((s: any) =>
+        s.domains.includes("managed.example.test"),
+      ).locations[0];
+      assert.deepEqual(location.upstreams, []);
+      assert.equal(location.unavailable, true);
+      assert.match(renderGateway(config, "empty"), /return 503;/);
+    }
+    // A specific registry-style bind is used even by the local host-network gateway.
+    f.db.run("UPDATE ops_cluster_instances SET healthy=1 WHERE owner_id=? AND machine_id='ma'",app.id);
+    const bound=f.db.get<any>("SELECT id FROM ops_cluster_instances WHERE owner_id=? AND machine_id='ma'",app.id)!;
+    f.db.run("UPDATE ops_platform_instance_ports SET host_ip='10.55.0.1' WHERE instance_id=? AND name='http'",bound.id);
+    await f.platform.tick();
+    for(const agent of ['a','b']){
+      const config=f.finish(agent).payload.resource.config;
+      assert.deepEqual(config.sites.find((s:any)=>s.domains.includes('managed.example.test')).locations[0].upstreams,[`${protocol}://10.55.0.1:${port('ma','http')}`]);
+    }
+    // A loopback-only service remains local; a peer gateway must return unavailable.
+    f.db.run("UPDATE ops_platform_instance_ports SET host_ip='127.0.0.1' WHERE instance_id=? AND name='http'",bound.id);
+    await f.platform.tick();
+    for(const agent of ['a','b']){
+      const config=f.finish(agent).payload.resource.config,location=config.sites.find((s:any)=>s.domains.includes('managed.example.test')).locations[0];
+      assert.deepEqual(location.upstreams,agent==='a'?[`${protocol}://127.0.0.1:${port('ma','http')}`]:[]);
+      assert.equal(location.unavailable,agent!=='a');
+    }
   });
 }
 
@@ -926,9 +1098,9 @@ test("NAT hosts require confirmed public service addresses for entry DNS while i
  const dns=dnsMock(),f=await fixture(t,dns.fetcher),c=f.createCluster(['ma']),zone=dnsZone(f);
  recordHostNetwork(f.db,'ma','a',normalizeNetworkAddresses([{interface:'eth0',address:'10.0.0.1'}]),{source_ip:'172.24.0.1',source_kind:'direct'},'2026-10-29T02:00:01Z');
  const entry=f.store.create('application','NAT entry',catalogInstallation('openresty',{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:1,gateway_domain:'nat.edge.example.test',gateway_dns_zone_id:zone.id}]}).spec,'admin');
- await f.rejectAction(entry);f.seedApplication(entry);
+ await f.action(entry,'deploy');f.finish('a',{healthy:true,running:true,digest:'nat'});
  const site=f.store.create('website','NAT site',{mode:'proxy',cluster_ids:[c.id],dns_record_mode:'cname',bindings:[{domains:['nat.example.test'],dns_enabled:true,dns_zone_id:zone.id,locations:[{path:'/',action:'return',return_status:200,return_value:'ready'}]}]},'admin');
- await f.rejectAction(site);f.seedWebsite(site);
+ await f.action(site,'deploy');f.finish('a',{healthy:true,running:true,digest:'nat-site'});
  await f.platform.tick();await settle();
  assert.equal(f.store.get(entry.id).status.gateway_dns[c.id].state,'public_ip_required');
  assert.deepEqual(f.store.get(entry.id).status.gateway_dns[c.id].missing_public_machine_ids,['ma']);
@@ -971,8 +1143,9 @@ test("weighted CNAME defaults/provinces, immediate policies, health fallback and
     }).spec,
     "admin",
   );
-  await f.rejectAction(entry);
-  f.seedApplication(entry);
+  await f.action(entry, "deploy");
+  f.finish("a", { healthy: true, running: true, digest: "a" });
+  f.finish("b", { healthy: true, running: true, digest: "b" });
   const site = f.store.create(
     "website",
     "Traffic",
@@ -1010,8 +1183,9 @@ test("weighted CNAME defaults/provinces, immediate policies, health fallback and
     },
     "admin",
   );
-  await f.rejectAction(site);
-  f.seedWebsite(site);
+  await f.action(site, "deploy");
+  f.finish("a", { healthy: true, running: true, digest: "site-a" });
+  f.finish("b", { healthy: true, running: true, digest: "site-b" });
   await f.platform.tick();
   await settle();
   assert.equal(f.store.get(site.id).status.dns_error, "");
@@ -1067,8 +1241,9 @@ test("weighted CNAME defaults/provinces, immediate policies, health fallback and
       .every((r) => r.Weight === 3),
   );
   f.advance(121000);
-  f.refreshHistorical(entry, "b");
+  f.heartbeat("b");
   await f.platform.tick();
+  f.finish("b");
   await settle();
   await f.platform.tick();
   await settle();
@@ -1078,9 +1253,11 @@ test("weighted CNAME defaults/provinces, immediate policies, health fallback and
     dns.records.some((r) => r.RR === "south.edge"),
     false,
   );
-  f.refreshHistorical(entry, "a", false);
+  f.heartbeat("a");
   await f.platform.tick();
-  f.refreshHistorical(entry, "a");
+  f.finish("a", { healthy: true, running: false });
+  await f.platform.tick();
+  f.finish("a", { healthy: true, running: true, digest: "recovered" });
   await f.platform.tick();
   await settle();
   assert.equal(cname().length, 4);
@@ -1166,8 +1343,7 @@ test("managed website follows new service clusters with the published revision",
     },
     "admin",
   );
-  await f.rejectAction(site);
-  f.seedWebsite(site);
+  await f.action(site, "deploy");
   f.store.update(
     site.id,
     site.revision,
@@ -1451,8 +1627,7 @@ test("draft service changes retain published discovery and its disabled traffic 
     },
     "admin",
   );
-  await f.rejectAction(site);
-  f.seedWebsite(site);
+  await f.action(site, "deploy");
   const draft = f.store.update(
     site.id,
     site.revision,

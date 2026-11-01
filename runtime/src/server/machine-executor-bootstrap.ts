@@ -30,7 +30,7 @@ const fields = (value: unknown, keys: string[], required = keys) => {
 };
 const human = (deps: Dependencies, ctx: Context) => {
   deps.auth.requireAdmin(ctx);
-  if (ctx.req.headers.authorization || !ctx.req.headers.cookie?.split(";").some(p => p.trim().startsWith("lm_session=")) || deps.auth.user(ctx.req)?.id !== ctx.user.id)
+  if (ctx.req.headers.authorization || !ctx.req.headers.cookie?.split(";").some(p => p.trim().startsWith("lm_session=")) || (deps.auth.user(ctx.req)?.id !== ctx.user.id || deps.auth.user(ctx.req)?.role !== "admin" || !deps.db.get("SELECT id FROM users WHERE id=? AND active=1 AND role='admin'",ctx.user.id)))
     fail(403, "human_admin_session_required");
 };
 // Held by the SSH parent throughout installation and by absence probes. It is
@@ -67,7 +67,7 @@ for p in /run /opt /etc /var /var/lib; do
   stat -c '%u:%a' "$p" | awk -F: '$1==0 && $2 ~ /^([0-7])?[0-7][0145][0145]$/ {ok=1} END {exit !ok}' || exit 1
 done
 ${bootstrapLock}
-work=$(mktemp -d /run/lightmoni-executor-bootstrap.XXXXXXXX)
+work=$(mktemp -d /opt/lightmoni-executor-bootstrap.XXXXXXXX)
 trap 'rm -rf -- "$work"' EXIT HUP INT TERM
 IFS= read -r enrollment
 case "$enrollment" in lm_executor_enroll_*) ;; *) exit 1;; esac
@@ -119,7 +119,7 @@ export function registerMachineExecutorBootstrap(deps: Dependencies, access: Acc
   const prepare = async (machineID:string, value:unknown, actor:string, signal:AbortSignal) => {
     const input = fields(value,["credential_id","capabilities"],["capabilities"]);
     if (input.credential_id !== undefined && (typeof input.credential_id !== "string" || !input.credential_id)) fail(400,"invalid_credential_id");
-    if (!Array.isArray(input.capabilities) || !input.capabilities.length || input.capabilities.length>2 || input.capabilities.some(x=>!PRIVILEGED_CAPABILITIES.includes(x)) || new Set(input.capabilities).size!==input.capabilities.length) fail(400,"invalid_capabilities");
+    if (!Array.isArray(input.capabilities) || !input.capabilities.length || input.capabilities.length>PRIVILEGED_CAPABILITIES.length || input.capabilities.some(x=>!PRIVILEGED_CAPABILITIES.includes(x)) || new Set(input.capabilities).size!==input.capabilities.length) fail(400,"invalid_capabilities");
     let endpoint: URL; try { endpoint = new URL(deps.externalURL); } catch { fail(409,"https_center_origin_required"); }
     if (endpoint.protocol!=="https:" || endpoint.pathname!=="/" || endpoint.search || endpoint.hash || endpoint.username || endpoint.password) fail(409,"https_center_origin_required");
     access.idle(machineID); const machine = access.get(machineID); target(machine);

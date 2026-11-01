@@ -1,3 +1,4 @@
+import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
 import { hash } from "../operations/website-files.js";
 import { fail } from "../shared/http.js";
 import { hasActiveTaskRuns } from "../server/agent-hosts.js";
@@ -147,14 +148,7 @@ export function recoverReinstalledInstances(
         pending = "agent_reinstall_execution_unresolved";
         continue;
       }
-      let caps: string[] = [];
-      try {
-        caps =
-          JSON.parse(
-            db.get<Row>("SELECT heartbeat FROM agents WHERE id=?", m.agent_id)
-              ?.heartbeat ?? "{}",
-          ).operations_capabilities ?? [];
-      } catch {}
+      const caps=operationExecutionCapabilities(store.deps,m.agent_id);
       if (
         !Array.isArray(caps) ||
         !caps.includes(INSTANCE_RECOVERY_CAPABILITY)
