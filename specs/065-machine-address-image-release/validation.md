@@ -10,6 +10,6 @@
 
 根 Compose 与兼容目录、有/无旧 LIGHTMONI_IMAGE 共四种组合通过，固定镜像、服务/卷和健康依赖保持，见 [Compose检查](evidence/compose-checks.json)。diff检查通过。本次隔离测试容器/网络/卷和权限0600临时环境凭据已清理，见 [清理回执](evidence/cleanup.json)；既有共享服务未改动，原始归档/无凭据日志位于忽略目录 .local-dev/image-release-065/。
 
-[GitHub Release 20261101-eb62ca6](https://github.com/workhold/lightmoni/releases/tag/20261101-eb62ca6) 指向同一源码，见 [发行回执](evidence/github-release.json)。默认 Compose、部署文档与本证据通过 GitHub 功能 PR 交付并按已有授权合入。镜像发布不等于线上容器已重建，仍需沿用原项目、环境和卷执行 pull/up；既有 Agent 不会自动升级，本机镜像优化需升级 Agent。
+[GitHub Release 20261101-eb62ca6](https://github.com/workhold/lightmoni/releases/tag/20261101-eb62ca6) 指向同一源码，见 [发行回执](evidence/github-release.json)。默认 Compose、部署文档与本证据通过 [GitHub PR #52](https://github.com/workhold/lightmoni/pull/52) 交付并按已有授权合入。镜像发布不等于线上容器已重建，仍需沿用原项目、环境和卷执行 pull/up；既有 Agent 不会自动升级，本机镜像优化需升级 Agent。
 
 架构同步不适用：本次只打包已合入的功能并更新默认引用，不新增职责、数据/控制路径、协议、存储、凭据边界或拓扑。保留 SDD 064 同一功能PR中的 [系统设计第64节](../../docs/system-design.md)、[Doca基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 和 [完整原生块回读](../064-machine-service-addresses/evidence/doca-readback.json)，不重复改写在线设计。
