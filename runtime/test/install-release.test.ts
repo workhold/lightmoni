@@ -17,6 +17,7 @@ import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { rewriteMaintenancePaths, writeMaintenanceStatShim } from "./helpers/maintenance-shell.js";
 const repo = resolve(import.meta.dirname, "../.."),
   artifact = "lightmoni-agent_0.1.0_linux_amd64.tar.gz";
 /** Execute the real shell installer with every writable absolute destination
@@ -32,6 +33,7 @@ function fixture(
     failRestartStatus?: number;
     startupStates?: boolean[];
     failShow?: boolean;
+    legacyPackage?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lightmoni-install-")),
@@ -50,17 +52,7 @@ function fixture(
     join(root, "usr/local/bin"),
   ])
     mkdirSync(path, { recursive: true });
-  const locations = [
-    "/run/lightmoni-agent-lifecycle.lock",
-    "/etc/lightmoni-agent",
-    "/var/lib/lightmoni-agent",
-    "/opt/lightmoni-agent",
-    "/usr/local/bin",
-    "/etc/systemd/system",
-  ];
-  let installer = readFileSync(join(repo, "deploy/agent/install.sh"), "utf8");
-  for (const path of locations)
-    installer = installer.replaceAll(path, join(root, path.slice(1)));
+  const installer = rewriteMaintenancePaths(readFileSync(join(repo, "deploy/agent/install.sh"), "utf8"), root);
   const script = join(root, "install.sh");
   writeFileSync(script, installer);
   const js = (path: string, source: string) =>
@@ -71,6 +63,7 @@ function fixture(
     data = join(root, "var/lib/lightmoni-agent"),
     current = join(root, "opt/lightmoni-agent/current"),
     launcher = join(root, "usr/local/bin/lightmoni-agent"),
+    uninstaller = join(root, "usr/local/sbin/lightmoni-agent-uninstall"),
     service = join(root, "etc/systemd/system/lightmoni-agent.service");
   mkdirSync(data, { recursive: true, mode: 0o700 });
   chmodSync(data, 0o700);
@@ -96,6 +89,8 @@ function fixture(
       group_id: "old",
     };
   if (old !== "none") {
+    mkdirSync(dirname(uninstaller), { recursive: true });
+    writeFileSync(uninstaller, "#!/bin/sh\necho original offline uninstaller\n", { mode: 0o750 });
     mkdirSync(dirname(config), { recursive: true, mode: 0o700 });
     writeFileSync(config, JSON.stringify(oldConfig), { mode: 0o600 });
     writeFileSync(
@@ -117,6 +112,7 @@ function fixture(
   chmodSync(runtimeParent, 0o700);
   const before = {
     launcher: old === "none" ? undefined : readFileSync(launcher),
+    uninstaller: old === "none" ? undefined : readFileSync(uninstaller),
     service: old === "none" ? undefined : readFileSync(service),
     config: old === "none" ? undefined : readFileSync(config),
     current: old === "node" ? readlinkSync(current) : undefined,
@@ -142,6 +138,7 @@ function fixture(
     '#!/bin/sh\nif [ "$1" = "-u" ]; then echo 0; fi\nexit 0\n',
     { mode: 0o755 },
   );
+  writeMaintenanceStatShim(bin);
   writeFileSync(
     join(bin, "uname"),
     '#!/bin/sh\nif [ "$1" = "-s" ]; then echo Linux; else echo x86_64; fi\n',
@@ -201,6 +198,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
   const packagedRuntime = join(packageDir, "lightmoni-agent-runtime");
   for (const path of ["app/agent", "node_modules/synthetic", "bin"])
     mkdirSync(join(packagedRuntime, path), { recursive: true, mode: 0o755 });
+  if (!options.legacyPackage) writeFileSync(join(packagedRuntime, "uninstall.sh"), rewriteMaintenancePaths(readFileSync(join(repo,"deploy/agent/uninstall.sh"),"utf8"),root), {mode:0o755});
   writeFileSync(
     join(packagedRuntime, "node"),
     "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " \"$@\"\n",
@@ -287,6 +285,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     for (const [path, saved] of [
       [config, before.config],
       [launcher, before.launcher],
+      [uninstaller, before.uninstaller],
       [service, before.service],
     ] as const) {
       if (saved) assert.deepEqual(readFileSync(path), saved);
@@ -305,6 +304,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     config,
     current,
     launcher,
+    uninstaller,
     service,
     data,
     runtimeParent,
@@ -390,7 +390,13 @@ test("verified release switches atomically, configures and restarts while preser
   assert(f.state().active);
   assert.equal(f.state().startupChecks, 2);
   assertRuntimePermissions(f);
+  assert.match(readFileSync(f.uninstaller,"utf8"), /BEGIN SHARED MAINTENANCE GUARDS/);
+  assert.equal(statSync(f.uninstaller).mode & 0o777,0o755);
   f.unchangedData();
+});
+test("older checked packages preserve an existing standalone uninstaller",t=>{
+  const f=fixture(t,{legacyPackage:true}),result=f.run();
+  assert.equal(result.status,0,result.stderr);assert.deepEqual(readFileSync(f.uninstaller),f.before.uninstaller);f.unchangedData();
 });
 test("first installation publishes readable runtime and executable helpers without exposing config or persisted state", (t) => {
   const f = fixture(t, { old: "none", active: false }),
@@ -512,7 +518,7 @@ test("a rolled-back fresh install on an empty host can be attempted again withou
   const first = f.run(["--fresh"]);
   assert.notEqual(first.status, 0);
   assert.match(first.stderr, /restart/);
-  for (const path of [f.config, join(f.data, "identity.json"), f.current, f.launcher, f.service, f.runtimeParent])
+  for (const path of [f.config, join(f.data, "identity.json"), f.current, f.launcher, f.uninstaller, dirname(f.uninstaller), f.service, f.runtimeParent])
     assert.equal(existsSync(path), false, path);
   const again = f.run(["--fresh"]);
   assert.equal(again.status, 0, again.stderr);

@@ -1,0 +1,140 @@
+{
+  "date": "2026-10-31",
+  "scope": "design_only",
+  "revision_reason": "默认无新增仓库，Agent候选预热为基础；已有共享内网缓存可选，不按集群安装，不阻塞安装或升级",
+  "document": {
+    "title": "LightMoni 系统设计基线",
+    "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+    "before_seq": 898,
+    "write_seq": 899,
+    "readback_seq": 899,
+    "saved": true
+  },
+  "repository_section": "docs/system-design.md 第59章",
+  "before_blocks": 612,
+  "after_blocks": 612,
+  "updated_target_block_ids": [
+    "images059-block-1",
+    "images059-block-3",
+    "images059-block-5",
+    "images059-flow",
+    "images059-block-14"
+  ],
+  "target_section_blocks": 15,
+  "unrelated_blocks_preserved": 597,
+  "unrelated_native_diagrams_preserved": 29,
+  "changed_or_missing_unrelated_block_ids": [],
+  "mismatched_target_ids": [],
+  "diagram": {
+    "block_id": "images059-flow",
+    "nodes": [
+      {
+        "id": "sources",
+        "label": "商店 / 自定义新版本"
+      },
+      {
+        "id": "release",
+        "label": "中心：不可变发布 / 逐集群授权"
+      },
+      {
+        "id": "profiles",
+        "label": "全局→集群→机器镜像源 / 凭据范围"
+      },
+      {
+        "id": "prepare",
+        "label": "Agent：候选预热 / 本机核验"
+      },
+      {
+        "id": "cache",
+        "label": "可选：已有共享 OCI 仓库 / 缓存"
+      },
+      {
+        "id": "upstream",
+        "label": "授权上游仓库"
+      },
+      {
+        "id": "rollout",
+        "label": "逐集群升级 / 故障接管"
+      },
+      {
+        "id": "health",
+        "label": "实际镜像 / 健康回执"
+      },
+      {
+        "id": "maintenance",
+        "label": "预检 / 确认维护 / CAS / 必要重启 / 验证"
+      }
+    ],
+    "edges": [
+      {
+        "id": "images059-e1",
+        "source": "sources",
+        "target": "release",
+        "label": ""
+      },
+      {
+        "id": "images059-e2",
+        "source": "release",
+        "target": "prepare",
+        "label": ""
+      },
+      {
+        "id": "images059-e3",
+        "source": "profiles",
+        "target": "prepare",
+        "label": ""
+      },
+      {
+        "id": "images059-e4",
+        "source": "prepare",
+        "target": "cache",
+        "label": ""
+      },
+      {
+        "id": "images059-e5",
+        "source": "cache",
+        "target": "upstream",
+        "label": "显式允许回源"
+      },
+      {
+        "id": "images059-e6",
+        "source": "prepare",
+        "target": "rollout",
+        "label": ""
+      },
+      {
+        "id": "images059-e7",
+        "source": "rollout",
+        "target": "health",
+        "label": ""
+      },
+      {
+        "id": "images059-e8",
+        "source": "health",
+        "target": "release",
+        "label": ""
+      },
+      {
+        "id": "images059-e9",
+        "source": "profiles",
+        "target": "maintenance",
+        "label": ""
+      },
+      {
+        "id": "images059-e10",
+        "source": "prepare",
+        "target": "upstream",
+        "label": "已有镜像源 / 按策略拉取"
+      }
+    ]
+  },
+  "checks": {
+    "all_expected_texts_match": true,
+    "all_unrelated_blocks_unchanged": true,
+    "existing_diagram_node_ids_preserved": true,
+    "existing_diagram_edges_preserved": true,
+    "diagram_nodes_and_edges_match": true,
+    "visual_rendering_checked": false,
+    "runtime_functionality_tested": false
+  }
+}

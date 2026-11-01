@@ -1,0 +1,63 @@
+{
+  "source": "46a4ac11c50de7fc48790744a462c871d8172df5",
+  "context": "git archive of merged origin/main; no working tree or runtime credentials",
+  "context_sha256": "1a2db63c56e23ab90896b6081480d9567efec12deeb03a464fcae8a960774738",
+  "builder": "local Docker Desktop desktop-linux",
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "tag": "20261101-46a4ac1",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "build_arguments": {
+    "NPM_REGISTRY": "https://registry.npmmirror.com",
+    "NODE_DIST_URL": "https://npmmirror.com/mirrors/node",
+    "DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+    "DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security"
+  },
+  "integrity": "npm lockfile integrity, Debian signatures and pinned Node SHA256 retained",
+  "tools": {
+    "smoke.py": "e2ae707468fd71817b7fe0be32bc3a16584196e306b9ea3eb113458bd9bb691b",
+    "publish.py": "5ed7029a5888fd31ad866691df2b9bda72c6b2ba3fc61bd2120c989b1e6ba92a",
+    "verify.py": "3eee549cfdf32445cfbf8da7d92ee3e7689e9378b29b4e871607618f2e9357fe",
+    "verify-compose.py": "da51e708ddeb59e736acef211c6e5c5eb58571bdd90fcc7a46ade22c4ef9c28e",
+    "capture-tags.py": "22a0cb55a3d3e07387016e3ff8b8ba6667a3531f04a82a64b5bb7cb06e1a3582",
+    "verify-tags.py": "3d7068c00c4ddaa035ea7041ce6351789596068813f0eedc962230430de5f555"
+  },
+  "platform_metadata": {
+    "arm64": {
+      "containerimage.digest": "sha256:b02a743b99a2625233a14c01a61b924354554eba53c6ad946dd601f71a445389",
+      "materials": [
+        {
+          "uri": "pkg:docker/node@24.15.0-bookworm?platform=linux%2Farm64",
+          "digest": {
+            "sha256": "f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+          }
+        },
+        {
+          "uri": "pkg:docker/node@24.15.0-bookworm-slim?platform=linux%2Farm64",
+          "digest": {
+            "sha256": "4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+          }
+        }
+      ]
+    },
+    "amd64": {
+      "containerimage.digest": "sha256:2ffbe76191dbcbd0aa4e6a4ca96c91d4b37c48ec6abdcdd0f985e45517734095",
+      "materials": [
+        {
+          "uri": "pkg:docker/node@24.15.0-bookworm?platform=linux%2Famd64",
+          "digest": {
+            "sha256": "f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+          }
+        },
+        {
+          "uri": "pkg:docker/node@24.15.0-bookworm-slim?platform=linux%2Famd64",
+          "digest": {
+            "sha256": "4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+          }
+        }
+      ]
+    }
+  }
+}

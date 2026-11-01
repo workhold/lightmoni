@@ -1,0 +1,47 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "ok": true,
+      "checks": [
+        "Navigation, installation/redeployment, private machine/address, saved readback",
+        "Both cache editors share one cluster setting and survive refresh",
+        "Real revision conflict retains form input and retry reuses the same registered service",
+        "Publishing form links a real HTTPS/Basic website and returns no password/hash",
+        "Linked website editor exposes site/path auth; write-only password stays empty",
+        "200% view and reduced-motion modal open/close",
+        "Narrow layout keeps horizontal overflow inside the table"
+      ],
+      "errors": []
+    },
+    {
+      "round": 2,
+      "ok": true,
+      "checks": [
+        "Navigation, installation/redeployment, private machine/address, saved readback",
+        "Both cache editors share one cluster setting and survive refresh",
+        "Real revision conflict retains form input and retry reuses the same registered service",
+        "Publishing form links a real HTTPS/Basic website and returns no password/hash",
+        "Linked website editor exposes site/path auth; write-only password stays empty",
+        "200% view and reduced-motion modal open/close",
+        "Narrow layout keeps horizontal overflow inside the table"
+      ],
+      "errors": []
+    },
+    {
+      "round": 3,
+      "ok": true,
+      "checks": [
+        "Navigation, installation/redeployment, private machine/address, saved readback",
+        "Both cache editors share one cluster setting and survive refresh",
+        "Real revision conflict retains form input and retry reuses the same registered service",
+        "Publishing form links a real HTTPS/Basic website and returns no password/hash",
+        "Linked website editor exposes site/path auth; write-only password stays empty",
+        "200% view and reduced-motion modal open/close",
+        "Narrow layout keeps horizontal overflow inside the table"
+      ],
+      "errors": []
+    }
+  ],
+  "media": "/Users/zhangsiwen/.codex/worktrees/service-image-lifecycle/lightmoni/artifacts/screenshots/specs/059-service-image-lifecycle/evidence/ui"
+}

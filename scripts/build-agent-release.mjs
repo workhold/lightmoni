@@ -109,6 +109,10 @@ try {
     join(repo, "deploy/agent/lightmoni-agent.service"),
     join(common, "lightmoni-agent.service"),
   );
+  // Keep an offline maintenance entry point inside the checked runtime bundle.
+  // It requires neither the platform nor a working bundled Node executable.
+  cpSync(join(repo, "deploy/agent/uninstall.sh"), join(common, "lightmoni-agent-runtime/uninstall.sh"));
+  chmodSync(join(common, "lightmoni-agent-runtime/uninstall.sh"), 0o755);
   const checksums = (await download("SHASUMS256.txt")).toString();
   const artifacts = [];
   const releases = [];

@@ -1,3 +1,4 @@
+import { pendingDockerInstallation } from './machine-docker-guard.js';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
@@ -7,6 +8,7 @@ import type { AgentCredentialStore } from "./agent-credentials.js";
 import { assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
 import { assertNoPendingAgentUpdate, hasPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoPendingMachineInstallation, hasInstallationTable, pendingMachineInstallation, unresolvedInstallationSQL } from "./machine-installations-guard.js";
+import { assertNoPendingMachineUninstallation, hasUninstallationTable, pendingMachineUninstallation } from "./machine-uninstallations-guard.js";
 import { SCRIPT_TASK_CAPABILITIES, supportsTaskScript, TASK_LEASE_SECONDS, validateTaskScript,
   type ClaimedTaskRun, type TaskRun, type TaskRunResult, type TaskRunSnapshot } from "../shared/task-center.js";
 
@@ -113,6 +115,7 @@ export class TaskRunStore {
     if (existing) return this.view(existing);
     const h = this.host(hostID);
     assertNoPendingMachineInstallation(this.deps.db,h.id,h.agent_id);
+    assertNoPendingMachineUninstallation(this.deps.db,h.id,h.agent_id);
     assertNoPendingAgentUpdate(this.deps.db, h.agent_id, h.id);
     if (!h.agent_id || !this.validBinding(h.id, h.agent_id)) fail(409, "host requires an active enrolled Agent");
     if (this.active(task.id, h.id, automaticAttempt > 0 || trigger !== "retry")) fail(409, "task already queued, running, or unresolved; explicitly retry an unknown run after review");
@@ -204,10 +207,12 @@ export class TaskRunStore {
     if (!capabilities.some(c => (SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(c))) return null;
     return this.deps.db.transaction(() => {
       if (pendingMachineInstallation(this.deps.db,"",agentID)) return null;
-      if (hasPendingAgentUpdate(this.deps.db, agentID)) return null;
+      if (pendingMachineUninstallation(this.deps.db,"",agentID)) return null;
+      if (hasPendingAgentUpdate(this.deps.db, agentID) || pendingDockerInstallation(this.deps.db,"",agentID)) return null;
       if (this.deps.db.get("SELECT id FROM task_runs WHERE agent_id=? AND state='running'", agentID)) return null;
       const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE agent_id=? AND state='queued' ORDER BY created_at,rowid LIMIT 200", agentID);
       for (const r of pending) {
+        if (pendingMachineUninstallation(this.deps.db,r.host_id,agentID)) continue;
         if (!this.authorizationValid(r)) {
           this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='authorization_revoked',summary='External authorization is no longer valid before Agent claim' WHERE id=? AND state='queued'", this.now(), r.id);
           continue;
@@ -303,12 +308,17 @@ export class TaskRunStore {
           AND maintenance.status IN ('awaiting_approval','running','verifying','unknown'))` : "";
     const installationFilter = hasInstallationTable(this.deps.db)
       ? `AND NOT EXISTS (SELECT 1 FROM machine_deployments installation WHERE installation.machine_id=task_runs.host_id AND ${unresolvedInstallationSQL(this.deps.db,"installation")})` : "";
+    const uninstallationFilter = hasUninstallationTable(this.deps.db)
+      ? `AND NOT EXISTS (SELECT 1 FROM machine_uninstallations removal
+          WHERE (removal.agent_id=task_runs.agent_id OR removal.machine_id=task_runs.host_id)
+          AND removal.status IN ('awaiting_approval','running','unknown'))` : "";
     const candidates = this.deps.db.all<{id:string}>(`SELECT id FROM task_runs WHERE state='failed' AND superseded_by='' AND auto_retry_closed=0
       AND automatic_attempt < COALESCE(json_extract(snapshot_json,'$.execution_policy.retry_count'),0)
       AND code IN ('script_failed','runtime_unavailable','timeout','output_limit')
       AND strftime('%Y-%m-%dT%H:%M:%fZ',finished_at,'+' || COALESCE(json_extract(snapshot_json,'$.execution_policy.retry_delay_seconds'),60) || ' seconds') <= ?
       ${maintenanceFilter}
       ${installationFilter}
+      ${uninstallationFilter}
       ORDER BY finished_at,rowid LIMIT 200`, this.now());
     for (const candidate of candidates) this.deps.db.transaction(() => {
       const r = this.row(candidate.id);
@@ -326,8 +336,9 @@ export class TaskRunStore {
       catch (error) { if (!(error instanceof NodeError || error instanceof HTTPError)) throw error; close(); return; }
       if (task.revision !== snapshot.task_revision || this.host(r.host_id).agent_id !== r.agent_id
         || !this.validBinding(r.host_id,r.agent_id) || this.active(r.task_id,r.host_id)) { close(); return; }
-      if (hasPendingAgentUpdate(this.deps.db, r.agent_id, r.host_id)) return;
+      if (hasPendingAgentUpdate(this.deps.db, r.agent_id, r.host_id) || pendingDockerInstallation(this.deps.db,r.host_id,r.agent_id)) return;
       if (pendingMachineInstallation(this.deps.db,r.host_id,r.agent_id)) return;
+      if (pendingMachineUninstallation(this.deps.db,r.host_id,r.agent_id)) return;
       const next = this.insert(task, r.host_id, "retry", r.requested_by, "auto-retry:" + r.id, r.id, snapshot, r.automatic_attempt + 1);
       if (this.externalAuthorization(r.id)) this.deps.db.run("INSERT INTO capability_run_authorizations(run_id,grant_id,user_id,host_id) SELECT ?,grant_id,user_id,host_id FROM capability_run_authorizations WHERE run_id=?", next.id, r.id);
       this.deps.db.run("UPDATE task_runs SET superseded_by=?,auto_retry_closed=1 WHERE id=?", next.id, r.id);
@@ -367,7 +378,7 @@ export class TaskRunStore {
         }
         const hosts = this.deps.db.all<{id:string;agent_id:string}>("SELECT id,agent_id FROM managed_machines WHERE agent_id<>'' ORDER BY id");
         for (const h of hosts) {
-          if (!this.validBinding(h.id, h.agent_id) || this.active(t.id, h.id) || hasPendingAgentUpdate(this.deps.db, h.agent_id, h.id) || pendingMachineInstallation(this.deps.db,h.id,h.agent_id)) continue;
+          if (!this.validBinding(h.id, h.agent_id) || this.active(t.id, h.id) || hasPendingAgentUpdate(this.deps.db, h.agent_id, h.id) || pendingDockerInstallation(this.deps.db,h.id,h.agent_id) || pendingMachineInstallation(this.deps.db,h.id,h.agent_id) || pendingMachineUninstallation(this.deps.db,h.id,h.agent_id)) continue;
           const effective = this.nodes.effectiveHostTasks(h.id).find(v => v.id === t.id && v.enabled && v.status !== "upgrade_required");
           if (effective) this.insert(effective,h.id,"schedule","scheduler","schedule:" + due);
         }

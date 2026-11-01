@@ -1,3 +1,4 @@
+import {yamlText,containerYAML} from './application-yaml';
 export type ResourceKind =
   | "credential"
   | "dns_zone"
@@ -9,6 +10,8 @@ export type ResourceKind =
   | "website";
 export type Spec = Record<string, any>;
 export type Resource = {
+  logo_url?: string;
+  logo_revision?: number;
   id: string;
   kind: ResourceKind;
   name: string;
@@ -37,8 +40,14 @@ export type Run = {
   updated_at: string;
   job_id?: string;
 };
-export type Machine = { id: string; name: string; address?: string; agent_id?: string; agent_status?: string; cluster_id?: string };
-export type CatalogTemplate = { id: string; name: string; description?: string; category?: string; version: string; versions?: string[]; managed_recommended: boolean; managed_reason?: string; parameters?: {key: string; label: string; type: string; required?: boolean; default?: unknown}[]; spec?: Spec };
+export type Machine = { id: string; name: string; address?: string; ssh_address?:string; private_ips?:string[]; public_ips?:string[]; agent_id?: string; agent_status?: string; cluster_id?: string };
+export type CatalogTemplate = {
+ id:string; name:string; description?:string; description_en?:string; category?:string;
+ version:string; versions?:string[]; managed_recommended:boolean; managed_reason?:string;
+ homepage?:string; notes?:string; notes_en?:string; resources?:{cpu:number;memory_mb:number}; deployment_modes?:string[]; architectures?:string[];
+ parameters?:{key:string;label:string;label_en?:string;type:string;required?:boolean;default?:unknown;description?:string;description_en?:string;min?:number;max?:number;pattern?:string;format?:string;options?:{value:string;label:string;label_en?:string}[]}[];
+ spec?:Spec;
+};
 export type Overview = {
   machines?: Machine[];
   resources: Resource[];
@@ -186,7 +195,7 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
       role: "generic",
       deployments: [{machine_ids: [], replicas: 1, cpu: 1, memory_mb: 512}],
       stateful: false,
-      health: { type: "tcp", interval_seconds: 10 },
+      health: {},
       ports: [],
       mounts: [],
     },
@@ -242,7 +251,8 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
     file_rows: mapRows(mount.files),
   }));
   if (typeof spec.compose === "object")
-    spec.compose = JSON.stringify(spec.compose, null, 2);
+    spec.compose = yamlText(spec.compose);
+  if(kind==='application'){spec.configuration_mode=spec.mode==='compose'?'yaml':spec.configuration_mode??'form';if(spec.mode==='container')spec.configuration_yaml=containerYAML(spec);}
   return { name: resource?.name ?? "", spec };
 }
 export function websiteDomainClusters(spec:Spec,domain:string,available:string[]):string[]{
@@ -287,11 +297,7 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
       delete spec.environment;
       delete spec.networks;
       delete spec.network_mode;
-      try {
-        spec.compose = JSON.parse(spec.compose);
-      } catch {
-        /* New Compose YAML is parsed and validated by the controller. */
-      }
+      // Compose YAML is parsed and validated by the controller.
     } else delete spec.compose;
   }
   if (kind === "website") {

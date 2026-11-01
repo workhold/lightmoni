@@ -1,3 +1,4 @@
+import AuthFields from './AuthFields';
 import { PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import {
   Alert,
@@ -167,6 +168,7 @@ export default function NginxFields({
                     ["return", "返回 / 重定向", "Return / redirect"],
                   ])}
                 </div>
+                <AuthFields location name={[f.name,'auth']} watchPath={[...watchPath,f.name,'auth']}/>
                 <Form.Item
                   noStyle
                   shouldUpdate={(a, b) =>

@@ -233,40 +233,40 @@ export class Collector {
             unknown++;
             continue;
           }
-          const p = matchers.find((x) => x.regex.test(name));
-          if (!p || (matched.get(p.name) ?? 0) >= 8) continue;
-          matched.set(p.name, (matched.get(p.name) ?? 0) + 1);
+          const matching = matchers.filter((p) => p.regex.test(name) && (matched.get(p.name) ?? 0) < 8);
+          if (!matching.length) continue;
+          for (const p of matching) matched.set(p.name, (matched.get(p.name) ?? 0) + 1);
           try {
             const raw = readFileSync(`/proc/${pid}/stat`, "utf8"),
               s = raw.slice(raw.lastIndexOf(")") + 2).split(/\s+/),
               birth = btime * 1000n + (BigInt(s[19]) * 1000n) / hz,
               id = `${pid}:${birth}`,
-              attr = { process_name: name, process_id: id, matcher: p.name };
-            active.add("processcpu:" + id);
-            this.gauge("process.running", "1", 1, attr);
-            const status = readFileSync(`/proc/${pid}/status`, "utf8");
-            this.gauge(
-              "process.memory.rss",
-              "By",
-              Number(/^VmRSS:\s+(\d+)/m.exec(status)?.[1] ?? 0) * 1024,
-              attr,
-            );
-            this.gauge("process.threads", "1", Number(s[17]), attr);
+              attributes = matching.map(p => ({ process_name: name, process_id: id, matcher: p.name }));
+            for (const attr of attributes) {
+              active.add(`processcpu:${id}\0${attr.matcher}`);
+              this.gauge("process.running", "1", 1, attr);
+            }
+            const status = readFileSync(`/proc/${pid}/status`, "utf8"),
+              rss = Number(/^VmRSS:\s+(\d+)/m.exec(status)?.[1] ?? 0) * 1024;
+            let descriptors: number | undefined;
             try {
-              this.gauge(
-                "process.file_descriptors",
-                "1",
-                readdirSync(`/proc/${pid}/fd`).length,
+              descriptors = readdirSync(`/proc/${pid}/fd`).length;
+            } catch {
+              failures++;
+            }
+            const cpu = ((BigInt(s[11]) + BigInt(s[12])) * 1000000000n) / hz;
+            for (const attr of attributes) {
+              this.gauge("process.memory.rss", "By", rss, attr);
+              this.gauge("process.threads", "1", Number(s[17]), attr);
+              if (descriptors !== undefined) this.gauge("process.file_descriptors", "1", descriptors, attr);
+              this.delta(
+                "process.cpu.time",
+                "ns",
+                `processcpu:${id}\0${attr.matcher}`,
+                cpu,
                 attr,
               );
-            } catch {}
-            this.delta(
-              "process.cpu.time",
-              "ns",
-              "processcpu:" + id,
-              ((BigInt(s[11]) + BigInt(s[12])) * 1000000000n) / hz,
-              attr,
-            );
+            }
           } catch {
             failures++;
           }
@@ -275,29 +275,32 @@ export class Collector {
         const ps = await si.processes();
         if (signal?.aborted) return;
         for (const proc of ps.list) {
-          const p = matchers.find((x) => x.regex.test(proc.name));
-          if (!p || (matched.get(p.name) ?? 0) >= 8) continue;
-          matched.set(p.name, (matched.get(p.name) ?? 0) + 1);
+          const matching = matchers.filter((p) => p.regex.test(proc.name) && (matched.get(p.name) ?? 0) < 8);
+          if (!matching.length) continue;
+          for (const p of matching) matched.set(p.name, (matched.get(p.name) ?? 0) + 1);
           const id = `${proc.pid}:${Date.parse(proc.started) || 0}`,
-            attr = { process_name: proc.name, process_id: id, matcher: p.name };
-          active.add("processcpu:" + id);
-          this.gauge("process.running", "1", 1, attr);
-          this.gauge("process.memory.rss", "By", proc.memRss * 1024, attr);
-          if (proc.pid === process.pid) {
-            this.gauge(
-              "process.file_descriptors",
-              "1",
-              Number((process as any)._getActiveHandles?.().length ?? 0),
-              attr,
-            );
-            const cpu = process.cpuUsage();
-            this.delta(
-              "process.cpu.time",
-              "ns",
-              "processcpu:" + id,
-              BigInt(cpu.user + cpu.system) * 1000n,
-              attr,
-            );
+            usage = proc.pid === process.pid ? process.cpuUsage() : undefined;
+          for (const p of matching) {
+            const attr = { process_name: proc.name, process_id: id, matcher: p.name },
+              source = `processcpu:${id}\0${p.name}`;
+            active.add(source);
+            this.gauge("process.running", "1", 1, attr);
+            this.gauge("process.memory.rss", "By", proc.memRss * 1024, attr);
+            if (usage) {
+              this.gauge(
+                "process.file_descriptors",
+                "1",
+                Number((process as any)._getActiveHandles?.().length ?? 0),
+                attr,
+              );
+              this.delta(
+                "process.cpu.time",
+                "ns",
+                source,
+                BigInt(usage.user + usage.system) * 1000n,
+                attr,
+              );
+            }
           }
         }
       }

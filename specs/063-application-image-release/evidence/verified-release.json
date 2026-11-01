@@ -1,0 +1,68 @@
+{
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tags": {
+    "20261101-e3a5276": "sha256:579c48f5bf9d835ded279e71b938576530861c6cd4f71b708e8df963bf536be9",
+    "latest": "sha256:579c48f5bf9d835ded279e71b938576530861c6cd4f71b708e8df963bf536be9"
+  },
+  "revision": "e3a527697c6718ee1e423a6341a48d313d4f193e",
+  "docker_pull_verification": [
+    {
+      "platform": "linux/amd64",
+      "image_id": "sha256:a0209d72009f698344010efc6a403539ecd12a69f10e5ce039c8ca676a7a3939",
+      "tested_image_id": "sha256:e85a343b16bafe1cd00d2066b09c16ab1423f9b8188a1552bc805ed0c70c2853",
+      "platform_manifest": "sha256:a0209d72009f698344010efc6a403539ecd12a69f10e5ce039c8ca676a7a3939",
+      "config_digest": "sha256:51bb25170a9b4755c69d43f8073f015fc77ac81e5262882ddf4a9954961b6d0e",
+      "rootfs_and_config_match_tested_image": true
+    },
+    {
+      "platform": "linux/arm64",
+      "image_id": "sha256:dc7ccd69b9218194ef8f8ff9e8bbcd4abc83bd9dbd896e527b0181080d66352e",
+      "tested_image_id": "sha256:929122450230d56fbfd6793861a6e735c52c6b70336b7e669db98c36669e97c8",
+      "platform_manifest": "sha256:dc7ccd69b9218194ef8f8ff9e8bbcd4abc83bd9dbd896e527b0181080d66352e",
+      "config_digest": "sha256:819e37bab4eb99a5c077d9b16bb9df72e3bd3b7b4939f4212fe6a8d3358c2789",
+      "rootfs_and_config_match_tested_image": true
+    }
+  ],
+  "local_container_checks": {
+    "amd64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "center identity and authenticated internal/public reporting settings",
+      "production bundle contains multi-value bulk DNS actions",
+      "production bundle includes website guidance, domain sync tasks, cluster selection and certificate export",
+      "production application management/store cards, host-to-container mapping, narrow actions hint, and named-port runtime module",
+      "production private-image and installation UI, authenticated empty registry API, and ordinary Registry catalog template",
+      "authenticated production install API rejects unknown port names before creating an application",
+      "real image derives a single-domain certificate name without name input, issues it and exposes persistent execution steps",
+      "administrator certificate view and fixed-version private-key attachment match, with no-store and public JSON redaction",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "downloaded matching-platform Agent contains Docker controls, image-cache/auth capability guards and installation progress",
+      "AI runtime and task tools import"
+    ],
+    "arm64": [
+      "non-root image, platform, revision, real ClickHouse and HTTP health",
+      "administrator CLI, login and session",
+      "center identity and authenticated internal/public reporting settings",
+      "production bundle contains multi-value bulk DNS actions",
+      "production bundle includes website guidance, domain sync tasks, cluster selection and certificate export",
+      "production application management/store cards, host-to-container mapping, narrow actions hint, and named-port runtime module",
+      "production private-image and installation UI, authenticated empty registry API, and ordinary Registry catalog template",
+      "authenticated production install API rejects unknown port names before creating an application",
+      "real image derives a single-domain certificate name without name input, issues it and exposes persistent execution steps",
+      "administrator certificate view and fixed-version private-key attachment match, with no-store and public JSON redaction",
+      "operations, task and telemetry catalog API",
+      "production web entry",
+      "four SDK HTTP downloads and checksums",
+      "both Agent archives and all SDK checksums",
+      "matching-platform bundled Agent version command",
+      "downloaded matching-platform Agent contains Docker controls, image-cache/auth capability guards and installation progress",
+      "AI runtime and task tools import"
+    ]
+  },
+  "architecture_sync": "Packaging only: no new architecture. SDD 062 system-design section 62 and Doca native-block readback retained.",
+  "test_resources_cleaned": true
+}

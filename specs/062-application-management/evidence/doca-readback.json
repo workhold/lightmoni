@@ -1,0 +1,227 @@
+{
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "seq": 909,
+  "original_blocks": 674,
+  "original_blocks_unchanged": true,
+  "heading": "应用管理与命名端口配置（SDD 062）",
+  "heading_readback": true,
+  "paragraphs": [
+    {
+      "id": "application062-workflow",
+      "exact": true
+    },
+    {
+      "id": "application062-contract",
+      "exact": true
+    },
+    {
+      "id": "application062-registry",
+      "exact": true
+    },
+    {
+      "id": "application062-validation",
+      "exact": true
+    }
+  ],
+  "diagrams": [
+    {
+      "id": "f-architecture-8a1f",
+      "nodes": 10,
+      "edges": 8,
+      "exact": true
+    },
+    {
+      "id": "f-center-modules-7d039612",
+      "nodes": 10,
+      "edges": 9,
+      "exact": true
+    },
+    {
+      "id": "f-deployment-2b7c",
+      "nodes": 8,
+      "edges": 7,
+      "exact": true
+    },
+    {
+      "id": "f-enrollment-4c9d",
+      "nodes": 10,
+      "edges": 11,
+      "exact": true
+    },
+    {
+      "id": "host-access036-native-flow",
+      "nodes": 9,
+      "edges": 9,
+      "exact": true
+    },
+    {
+      "id": "host037-merged-native-flow",
+      "nodes": 8,
+      "edges": 8,
+      "exact": true
+    },
+    {
+      "id": "host038-registered-onboarding-flow",
+      "nodes": 8,
+      "edges": 7,
+      "exact": true
+    },
+    {
+      "id": "host039-retention-flow",
+      "nodes": 8,
+      "edges": 9,
+      "exact": true
+    },
+    {
+      "id": "host040-automatic-identity-flow",
+      "nodes": 9,
+      "edges": 9,
+      "exact": true
+    },
+    {
+      "id": "host050-design-6",
+      "nodes": 7,
+      "edges": 7,
+      "exact": true
+    },
+    {
+      "id": "host051-network-discovery-flow",
+      "nodes": 10,
+      "edges": 10,
+      "exact": true
+    },
+    {
+      "id": "install053-recovery-flow",
+      "nodes": 10,
+      "edges": 10,
+      "exact": true
+    },
+    {
+      "id": "maintenance058-flow",
+      "nodes": 13,
+      "edges": 14,
+      "exact": true
+    },
+    {
+      "id": "f-ai-sequence-5e0f",
+      "nodes": 10,
+      "edges": 10,
+      "exact": true
+    },
+    {
+      "id": "9a7f0e0f-303b-47a8-a194-6434833a4da1",
+      "nodes": 7,
+      "edges": 6,
+      "exact": true
+    },
+    {
+      "id": "ca797620-3473-4683-b77a-58f7f968d79c",
+      "nodes": 15,
+      "edges": 17,
+      "exact": true
+    },
+    {
+      "id": "ops033-control-plane-native",
+      "nodes": 11,
+      "edges": 14,
+      "exact": true
+    },
+    {
+      "id": "cluster042-baseline-model",
+      "nodes": 8,
+      "edges": 6,
+      "exact": true
+    },
+    {
+      "id": "website043-routing-native",
+      "nodes": 8,
+      "edges": 9,
+      "exact": true
+    },
+    {
+      "id": "task043-control-flow",
+      "nodes": 12,
+      "edges": 13,
+      "exact": true
+    },
+    {
+      "id": "task043-execution-states",
+      "nodes": 7,
+      "edges": 7,
+      "exact": true
+    },
+    {
+      "id": "appinstall058-flow",
+      "nodes": 6,
+      "edges": 7,
+      "exact": true
+    },
+    {
+      "id": "agent044-maintenance-flow",
+      "nodes": 14,
+      "edges": 14,
+      "exact": true
+    },
+    {
+      "id": "agent044-update-states",
+      "nodes": 8,
+      "edges": 11,
+      "exact": true
+    },
+    {
+      "id": "mcp046-overview",
+      "nodes": 15,
+      "edges": 17,
+      "exact": true
+    },
+    {
+      "id": "mcp046-approval",
+      "nodes": 10,
+      "edges": 10,
+      "exact": true
+    },
+    {
+      "id": "mcp046-idempotency",
+      "nodes": 8,
+      "edges": 9,
+      "exact": true
+    },
+    {
+      "id": "certificate053-flow",
+      "nodes": 12,
+      "edges": 12,
+      "exact": true
+    },
+    {
+      "id": "docker057-control-flow",
+      "nodes": 7,
+      "edges": 8,
+      "exact": true
+    },
+    {
+      "id": "images059-flow",
+      "nodes": 9,
+      "edges": 10,
+      "exact": true
+    },
+    {
+      "id": "images059-registry-flow",
+      "nodes": 10,
+      "edges": 10,
+      "exact": true
+    },
+    {
+      "id": "privileged060-hld",
+      "nodes": 9,
+      "edges": 9,
+      "exact": true
+    },
+    {
+      "id": "privileged060-permit",
+      "nodes": 10,
+      "edges": 10,
+      "exact": true
+    }
+  ],
+  "note": "标题中的数字前缀曾被宿主规范化为编号列表；已按真实块 ID 修复标题属性与新段落位置，最终标题及正文回读成功，原文和原生图逐项一致。"
+}

@@ -1,0 +1,293 @@
+{
+  "date": "2026-11-01",
+  "scope": "design_only",
+  "revision_reason": "按需仓库应用、唯一push origin/多集群读取、可信内网匿名与公网HTTPS Basic、1Panel全站/按路径网站密码访问",
+  "document": {
+    "title": "LightMoni 系统设计基线",
+    "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+    "before_seq": 899,
+    "write_seq": 900,
+    "readback_seq": 900,
+    "saved": true
+  },
+  "repository_section": "docs/system-design.md 第59章（含59.7和59.8）",
+  "before_blocks": 612,
+  "after_blocks": 619,
+  "target_section_blocks": 22,
+  "added_blocks": 7,
+  "unrelated_blocks_preserved": 597,
+  "unrelated_native_diagrams_preserved": 29,
+  "changed_or_missing_unrelated_ids": [],
+  "mismatched_target_ids": [],
+  "mutations": [
+    {
+      "type": "text",
+      "id": "images059-heading"
+    },
+    {
+      "type": "text",
+      "id": "images059-block-1"
+    },
+    {
+      "type": "text",
+      "id": "images059-block-5"
+    },
+    {
+      "type": "setBlock",
+      "id": "images059-flow"
+    },
+    {
+      "type": "text",
+      "id": "images059-block-14"
+    },
+    {
+      "type": "insertBlock",
+      "id": "images059-block-15"
+    },
+    {
+      "type": "insertBlock",
+      "id": "images059-block-16"
+    },
+    {
+      "type": "insertBlock",
+      "id": "images059-block-17"
+    },
+    {
+      "type": "insertBlock",
+      "id": "images059-registry-flow"
+    },
+    {
+      "type": "insertBlock",
+      "id": "images059-block-19"
+    },
+    {
+      "type": "insertBlock",
+      "id": "images059-block-20"
+    },
+    {
+      "type": "insertBlock",
+      "id": "images059-block-21"
+    }
+  ],
+  "diagrams": [
+    {
+      "block_id": "images059-flow",
+      "nodes": [
+        {
+          "id": "sources",
+          "label": "商店 / 自定义新版本"
+        },
+        {
+          "id": "release",
+          "label": "中心：不可变发布 / 逐集群授权"
+        },
+        {
+          "id": "profiles",
+          "label": "全局→集群→机器镜像源 / 凭据范围"
+        },
+        {
+          "id": "prepare",
+          "label": "Agent：候选预热 / 本机核验"
+        },
+        {
+          "id": "cache",
+          "label": "可选仓库应用 / 已有共享缓存"
+        },
+        {
+          "id": "upstream",
+          "label": "授权上游仓库"
+        },
+        {
+          "id": "rollout",
+          "label": "逐集群升级 / 故障接管"
+        },
+        {
+          "id": "health",
+          "label": "实际镜像 / 健康回执"
+        },
+        {
+          "id": "maintenance",
+          "label": "预检 / 确认维护 / CAS / 必要重启 / 验证"
+        }
+      ],
+      "edges": [
+        {
+          "id": "images059-e1",
+          "source": "sources",
+          "target": "release",
+          "label": ""
+        },
+        {
+          "id": "images059-e2",
+          "source": "release",
+          "target": "prepare",
+          "label": ""
+        },
+        {
+          "id": "images059-e3",
+          "source": "profiles",
+          "target": "prepare",
+          "label": ""
+        },
+        {
+          "id": "images059-e4",
+          "source": "prepare",
+          "target": "cache",
+          "label": ""
+        },
+        {
+          "id": "images059-e5",
+          "source": "cache",
+          "target": "upstream",
+          "label": "显式允许回源"
+        },
+        {
+          "id": "images059-e6",
+          "source": "prepare",
+          "target": "rollout",
+          "label": ""
+        },
+        {
+          "id": "images059-e7",
+          "source": "rollout",
+          "target": "health",
+          "label": ""
+        },
+        {
+          "id": "images059-e8",
+          "source": "health",
+          "target": "release",
+          "label": ""
+        },
+        {
+          "id": "images059-e9",
+          "source": "profiles",
+          "target": "maintenance",
+          "label": ""
+        },
+        {
+          "id": "images059-e10",
+          "source": "prepare",
+          "target": "upstream",
+          "label": "已有镜像源 / 按策略拉取"
+        }
+      ]
+    },
+    {
+      "block_id": "images059-registry-flow",
+      "nodes": [
+        {
+          "id": "enable",
+          "label": "用户开启 / 选集群与明确机器"
+        },
+        {
+          "id": "regapp",
+          "label": "普通仓库应用 / 持久数据"
+        },
+        {
+          "id": "ci",
+          "label": "构建机 / 唯一push域名"
+        },
+        {
+          "id": "public",
+          "label": "A入口：HTTPS + 网站Basic"
+        },
+        {
+          "id": "authsets",
+          "label": "网站账号组 / 冻结版本"
+        },
+        {
+          "id": "internal",
+          "label": "批准的内网来源 / 默认匿名只读"
+        },
+        {
+          "id": "origin",
+          "label": "A集群：唯一私库写入源"
+        },
+        {
+          "id": "reader",
+          "label": "B集群：只读缓存 / 显式普通副本"
+        },
+        {
+          "id": "nodea",
+          "label": "A节点：固定摘要拉取"
+        },
+        {
+          "id": "nodeb",
+          "label": "B节点：固定摘要拉取"
+        }
+      ],
+      "edges": [
+        {
+          "id": "images059-registry-e1",
+          "source": "enable",
+          "target": "regapp",
+          "label": ""
+        },
+        {
+          "id": "images059-registry-e2",
+          "source": "regapp",
+          "target": "origin",
+          "label": ""
+        },
+        {
+          "id": "images059-registry-e3",
+          "source": "regapp",
+          "target": "reader",
+          "label": ""
+        },
+        {
+          "id": "images059-registry-e4",
+          "source": "ci",
+          "target": "public",
+          "label": ""
+        },
+        {
+          "id": "images059-registry-e5",
+          "source": "authsets",
+          "target": "public",
+          "label": ""
+        },
+        {
+          "id": "images059-registry-e6",
+          "source": "public",
+          "target": "origin",
+          "label": ""
+        },
+        {
+          "id": "images059-registry-e7",
+          "source": "internal",
+          "target": "origin",
+          "label": ""
+        },
+        {
+          "id": "images059-registry-e8",
+          "source": "origin",
+          "target": "nodea",
+          "label": ""
+        },
+        {
+          "id": "images059-registry-e9",
+          "source": "origin",
+          "target": "reader",
+          "label": "同摘要缓存或完整复制"
+        },
+        {
+          "id": "images059-registry-e10",
+          "source": "reader",
+          "target": "nodeb",
+          "label": ""
+        }
+      ]
+    }
+  ],
+  "checks": {
+    "all_expected_texts_match": true,
+    "all_unrelated_blocks_unchanged": true,
+    "existing_section_block_ids_preserved": true,
+    "existing_flow_node_ids_and_edges_preserved": true,
+    "diagrams_match": true,
+    "visual_rendering_checked": false,
+    "runtime_functionality_tested": false
+  }
+}

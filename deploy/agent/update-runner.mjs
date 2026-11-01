@@ -108,7 +108,12 @@ export class AgentMaintenance {
     const manifest = fs.readFileSync(this.checkManaged(path.join(releasePath, "release.json")));
     const node = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "node"))));
     const entrypoint = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "app/runtime/dist/agent/main.js"))));
-    return { ...release, fingerprint: digest(JSON.stringify({ release_path: releasePath, release, manifest: digest(manifest), launcher: digest(launcher), service: digest(service), node, entrypoint })) };
+    let uninstaller;
+    try { uninstaller = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "uninstall.sh")))); }
+    catch (error) { if (!absent(error)) throw error; }
+    // Omitting an absent helper preserves existing legacy fingerprints. A new
+    // release's offline script is immutable rollback evidence like its entrypoint.
+    return { ...release, fingerprint: digest(JSON.stringify({ release_path: releasePath, release, manifest: digest(manifest), launcher: digest(launcher), service: digest(service), node, entrypoint, uninstaller })) };
   }
   currentPath() {
     this.checkManaged(this.base, "directory");
@@ -122,9 +127,15 @@ export class AgentMaintenance {
   }
   system(property) { return this.command("systemctl", ["show", "lightmoni-agent.service", "--property=" + property, "--value"]); }
   hasOperation() {
-    if (fs.existsSync(this.p("/var/lib/lightmoni-agent/operations/execution.lock"))) return true;
+    try { fs.lstatSync(this.p("/var/lib/lightmoni-agent/operations/execution.lock")); return true; }
+    catch (error) { if (!absent(error)) return true; }
     for (const filename of ["agent-job-state.json", "task-run-state.json"]) {
-      try { const state = boundedJSON(this.p("/var/lib/lightmoni-agent/" + filename)); if (typeof state.id === "string" && state.id) return true; }
+      try {
+        const state = boundedJSON(this.p("/var/lib/lightmoni-agent/" + filename));
+        if (!state || typeof state !== "object" || Array.isArray(state)) return true;
+        const keys = Object.keys(state);
+        if (keys.length !== 0 && !(keys.length === 1 && keys[0] === "id" && state.id === "")) return true;
+      }
       catch (error) { if (!absent(error)) return true; }
     }
     return false;
@@ -302,6 +313,42 @@ export class AgentMaintenance {
     const temporary = path.join(this.base, ".current-update-" + randomUUID());
     fs.symlinkSync(directory, temporary); fs.renameSync(temporary, path.join(this.base, "current"));
   }
+  prepareUninstaller(candidate, directory) {
+    const source = path.join(candidate, "uninstall.sh");
+    let script;
+    try {
+      this.checkManaged(source);
+      if (fs.statSync(source).size > 262144) fail("invalid_uninstaller");
+      script = fs.readFileSync(source);
+    } catch (error) { if (absent(error)) return null; throw error; }
+    const destination = this.p("/usr/local/sbin/lightmoni-agent-uninstall"), parent = path.dirname(destination);
+    let directoryPresent = true;
+    try { this.checkManaged(parent, "directory"); }
+    catch (error) { if (!absent(error)) throw error; directoryPresent = false; this.checkManaged(path.dirname(parent), "directory"); }
+    let previous = null;
+    try { this.checkManaged(destination); previous = fs.readFileSync(destination); }
+    catch (error) { if (!absent(error)) throw error; }
+    if (previous) this.atomic(path.join(directory, "previous-uninstaller"), previous);
+    this.atomic(path.join(directory, "previous-uninstaller.json"), { present: previous !== null, mode: previous !== null ? fs.statSync(destination).mode & 0o777 : 0, sha256: previous !== null ? digest(previous) : "", directory_present: directoryPresent });
+    return script;
+  }
+  restoreUninstaller(directory) {
+    let previous;
+    try { previous = boundedJSON(this.checkManaged(path.join(directory, "previous-uninstaller.json"))); }
+    catch (error) { if (absent(error)) return; throw error; }
+    const destination = this.p("/usr/local/sbin/lightmoni-agent-uninstall"), parent = path.dirname(destination);
+    try { this.checkManaged(parent, "directory"); }
+    catch (error) { if (absent(error) && previous.present === false) return; throw error; }
+    try { this.checkManaged(destination); } catch (error) { if (!absent(error)) throw error; }
+    if (previous.present === true) {
+      const bytes = fs.readFileSync(this.checkManaged(path.join(directory, "previous-uninstaller")));
+      if (!SHA.test(previous.sha256 ?? "") || digest(bytes) !== previous.sha256 || !Number.isInteger(previous.mode) || previous.mode < 0 || previous.mode > 0o777 || (previous.mode & 0o022)) fail("invalid_uninstaller_snapshot");
+      this.atomic(destination, bytes, previous.mode);
+    } else if (previous.present === false) {
+      fs.rmSync(destination, { force: true });
+      if (previous.directory_present === false && fs.readdirSync(parent).length === 0) fs.rmdirSync(parent);
+    } else fail("invalid_uninstaller_snapshot");
+  }
   async restore(id, reason) {
     const request = this.request(id), directory = this.opDir(id);
     this.command("systemctl", ["stop", "lightmoni-agent.service"]);
@@ -309,6 +356,7 @@ export class AgentMaintenance {
     this.switchCurrent(request.previous_path);
     this.atomic(this.p("/usr/local/bin/lightmoni-agent"), fs.readFileSync(this.checkManaged(path.join(directory, "previous-launcher"))), 0o755);
     this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(this.checkManaged(path.join(directory, "previous-service"))), 0o644);
+    this.restoreUninstaller(directory);
     this.command("systemctl", ["daemon-reload"]);
     if (request.previous_active) {
       this.command("systemctl", ["restart", "lightmoni-agent.service"]);
@@ -356,6 +404,7 @@ export class AgentMaintenance {
       const activeState = this.system("ActiveState");
       if (!["active", "inactive", "failed"].includes(activeState) || (activeState === "active") !== request.expected_service_active) fail("service_state_changed");
       if (this.hasOperation()) fail("operation_conflict");
+      const uninstaller = this.prepareUninstaller(candidate, directory);
       this.atomic(path.join(directory, "previous-launcher"), fs.readFileSync(this.checkManaged(this.p("/usr/local/bin/lightmoni-agent"))), 0o755);
       this.atomic(path.join(directory, "previous-service"), fs.readFileSync(this.checkManaged(this.p("/etc/systemd/system/lightmoni-agent.service"))), 0o644);
       this.save(id, { status: "switching" });
@@ -366,6 +415,13 @@ export class AgentMaintenance {
       this.switchCurrent(candidate);
       this.atomic(this.p("/usr/local/bin/lightmoni-agent"), fs.readFileSync(launcher), 0o755);
       this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(service), 0o644);
+      if (uninstaller) {
+        const parent = this.p("/usr/local/sbin");
+        try { this.checkManaged(parent, "directory"); }
+        catch (error) { if (!absent(error)) throw error; fs.mkdirSync(parent, { mode: 0o755 }); this.checkManaged(parent, "directory"); }
+        this.atomic(path.join(parent, "lightmoni-agent-uninstall"), uninstaller, 0o755);
+      }
+      this.save(id, { uninstaller_updated: uninstaller !== null });
       this.command("systemctl", ["daemon-reload"]);
       this.command("systemctl", ["restart", "lightmoni-agent.service"]);
       const deadline = this.now() + (request.confirm_timeout_seconds ?? 180) * 1000;

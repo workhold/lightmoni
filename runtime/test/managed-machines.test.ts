@@ -593,12 +593,14 @@ test('expiry clears database secrets but leaves a bounded running install intact
  finish();const completed=await application;assert.equal(completed.status,200,completed.raw);assert.equal(f.db.get<any>('SELECT status FROM machine_deployments WHERE id=?',running.data.id)?.status,'succeeded');assert.equal(credentialRow(f,h.credential).clear_reason,'expired');
 });
 
-const probeOutput=(agentID='node-known',removed=false,options:{running?:boolean;lock?:boolean;complete?:boolean;managed?:boolean}={})=>`LMAGENT=1\nagent_id=${agentID}\ninstallation=${removed?'absent':'present'}\nprogram_complete=${options.complete??!removed?1:0}\nunit_managed=${options.managed===false?0:1}\nservice_running=${options.running??!removed?1:0}\nlifecycle_locked=${options.lock?1:0}\noperation_lock=0\ndata_retained=1\n`;
+const probeOutput=(agentID='node-known',removed=false,options:{running?:boolean;lock?:boolean;complete?:boolean;managed?:boolean;identity?:string;purged?:boolean;unsafe?:boolean;operation?:boolean;digest?:string}={})=>`LMREMOVE=1\nagent_id=${options.purged||options.identity&&options.identity!=='valid'?'-':agentID}\nidentity_state=${options.purged?'missing':options.identity||'valid'}\nidentity_sha256=${options.purged||options.identity==='missing'?'-':'c'.repeat(64)}\nprogram_sha256=${options.digest||(removed?'b':'a').repeat(64)}\ninstallation=${removed?'absent':'present'}\nprogram_complete=${options.complete??!removed?1:0}\nunit_managed=${options.managed===false?0:1}\nservice_running=${options.running??!removed?1:0}\nlifecycle_locked=${options.lock?1:0}\noperation_lock=${options.operation?1:0}\npaths_safe=${options.unsafe?0:1}\nconfig_present=${options.purged?0:1}\ndata_present=${options.purged?0:1}\n`;
 async function uninstallHost(f:Awaited<ReturnType<typeof fixture>>,linked=true){
  const h=await host(f,'uninstall-'+Math.random().toString(36).slice(2));
  f.db.exec("CREATE TABLE IF NOT EXISTS agent_credentials(id TEXT PRIMARY KEY,agent_id TEXT,audience TEXT,revoked_at TEXT,revoke_reason TEXT DEFAULT '')");
  f.db.run("INSERT INTO agent_credentials(id,agent_id,audience) VALUES(?,?,?)",'node-control','node-known','control');
  f.db.run("INSERT INTO agent_credentials(id,agent_id,audience) VALUES(?,?,?)",'node-data','node-known','data');
+ f.db.exec("CREATE TABLE IF NOT EXISTS agent_enrollments(id TEXT PRIMARY KEY,agent_id TEXT,machine_id TEXT,status TEXT)");
+ f.db.run("INSERT INTO agent_enrollments VALUES('known-enrollment','node-known',?,'active')",h.id);
  if(linked)f.db.run("UPDATE managed_machines SET agent_id='node-known' WHERE id=?",h.id);
  const check=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential});assert.equal(check.status,200,check.raw);
  return {...h,check:check.data.id};
@@ -607,7 +609,7 @@ const uninstallPlan=(f:Awaited<ReturnType<typeof fixture>>,h:{id:string;credenti
 
 test('uninstall probes and removal record use in both the host binding and shared credential library',async t=>{
  let clock=now,removed=false;
- const f=await fixture(t,{now:()=>clock},async input=>{if(input.command.includes('systemctl stop'))removed=true;return {stdout:input.command.includes('LMAGENT')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};});
+ const f=await fixture(t,{now:()=>clock},async input=>{if(input.command.includes('systemctl stop'))removed=true;return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};});
  const h=await uninstallHost(f);
  const source=f.db.get<any>('SELECT connection_credential_id FROM machine_credentials WHERE id=?',h.credential)!.connection_credential_id;
  const used=()=>({binding:f.db.get<any>('SELECT last_used_at FROM machine_credentials WHERE id=?',h.credential)!.last_used_at,source:f.db.get<any>('SELECT last_used_at FROM connection_credentials WHERE id=?',source)!.last_used_at});
@@ -621,7 +623,7 @@ test('uninstall probes and removal record use in both the host binding and share
 test('fixed uninstall plan is reviewed, preserves data, revokes both node credentials and retains history',async t=>{
  let removed=false, destructive=0;const f=await fixture(t,{},async input=>{
   if(input.command.includes('systemctl stop')){destructive++;removed=true;return {stdout:probeOutput('node-known',removed),stderr:'',stages:[]};}
-  return {stdout:input.command.includes('LMAGENT')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};
+  return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};
  });
  const h=await uninstallHost(f),planned=await uninstallPlan(f,h);assert.equal(planned.status,201,planned.raw);assert.equal(destructive,0);assert.equal(planned.data.plan.agent_id,'node-known');
  assert.equal((await f.request(`/machines/${h.id}`,'PUT',{name:'blocked'})).status,409);
@@ -636,7 +638,7 @@ test('fixed uninstall plan is reviewed, preserves data, revokes both node creden
 test('managed and permanent logins authenticate fixed uninstall probes and removal without consuming secrets',async t=>{
  for(const retention of ['managed','permanent']) for(const method of ['password','ssh_key']) {
   const calls:any[]=[];let removed=false;
-  const f=await fixture(t,{},async input=>{calls.push(input);if(input.command.includes('systemctl stop'))removed=true;return {stdout:input.command.includes('LMAGENT')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]}});
+  const f=await fixture(t,{},async input=>{calls.push(input);if(input.command.includes('systemctl stop'))removed=true;return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]}});
   const h=await uninstallHost(f);await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
   const secret=method==='ssh_key'?h.key:'retained-uninstall-password';
   const added=await f.request(`/machines/${h.id}/credentials`,'POST',{method,secret,retention,...retention==='permanent'?{confirm_permanent:true}:{confirm_managed:true}});assert.equal(added.status,201,added.raw);
@@ -650,7 +652,7 @@ test('managed and permanent logins authenticate fixed uninstall probes and remov
 });
 
 test('unbound host must prove registered remote node and cannot uninstall a different or busy node',async t=>{
- let observed='node-known';const f=await fixture(t,{},async input=>({stdout:input.command.includes('LMAGENT')?probeOutput(observed):checkOutput,stderr:'',stages:[]}));
+ let observed='node-known';const f=await fixture(t,{},async input=>({stdout:input.command.includes('LMREMOVE')?probeOutput(observed):checkOutput,stderr:'',stages:[]}));
  const h=await uninstallHost(f,false);observed='unregistered';assert.equal((await uninstallPlan(f,h)).status,409);
  observed='node-known';const good=await uninstallPlan(f,h);assert.equal(good.status,201,good.raw);assert.equal(f.machines.get(h.id).agent_id,'');
  await f.request(`/machines/${h.id}/uninstallations/${good.data.id}/cancel`,'POST',{});
@@ -664,7 +666,7 @@ test('unbound host must prove registered remote node and cannot uninstall a diff
 test('unknown uninstall never blindly retries and read-only reconcile can complete actual removal',async t=>{
  let removed=false,destructive=0;const f=await fixture(t,{},async input=>{
   if(input.command.includes('systemctl stop')){destructive++;removed=true;throw new SSHError('timed_out');}
-  return {stdout:input.command.includes('LMAGENT')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};
+  return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};
  });
  const h=await uninstallHost(f),planned=await uninstallPlan(f,h);
  const apply=()=>f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true});
@@ -678,7 +680,7 @@ test('reconcile fails closed on lock or partial state and can release a verified
  let state:{removed:boolean;running:boolean;lock:boolean;complete:boolean}={removed:false,running:true,lock:false,complete:true};
  const f=await fixture(t,{},async input=>{
   if(input.command.includes('systemctl stop'))throw new SSHError('timed_out');
-  return {stdout:input.command.includes('LMAGENT')?probeOutput('node-known',state.removed,state):checkOutput,stderr:'',stages:[]};
+  return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',state.removed,state):checkOutput,stderr:'',stages:[]};
  });
  const h=await uninstallHost(f),planned=await uninstallPlan(f,h);
  await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true});
@@ -690,7 +692,7 @@ test('reconcile fails closed on lock or partial state and can release a verified
 });
 
 test('uninstall rejects members, changed identities, expired plans and revoked keys without destructive calls',async t=>{
- let clock=now,observed='node-known',destructive=0;const f=await fixture(t,{now:()=>clock},async input=>{if(input.command.includes('systemctl stop'))destructive++;return {stdout:input.command.includes('LMAGENT')?probeOutput(observed):checkOutput,stderr:'',stages:[]};});
+ let clock=now,observed='node-known',destructive=0;const f=await fixture(t,{now:()=>clock},async input=>{if(input.command.includes('systemctl stop'))destructive++;return {stdout:input.command.includes('LMREMOVE')?probeOutput(observed):checkOutput,stderr:'',stages:[]};});
  const h=await uninstallHost(f);f.user.role='member';assert.equal((await uninstallPlan(f,h)).status,403);f.user.role='admin';
  const planned=await uninstallPlan(f,h);observed='other-node';assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true})).status,409);assert.equal(destructive,0);observed='node-known';
  const planned2=await uninstallPlan(f,h);clock=new Date(now.getTime()+900001);assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned2.data.id}/apply`,'POST',{confirm:true})).status,409);assert.equal(destructive,0);
@@ -700,7 +702,7 @@ test('uninstall rejects members, changed identities, expired plans and revoked k
 
 test('uninstallation rechecks its reviewed display name without issuing a destructive command',async t=>{
  let destructive=0;
- const f=await fixture(t,{},async input=>{if(input.command.includes('systemctl stop'))destructive++;return {stdout:input.command.includes('LMAGENT')?probeOutput():checkOutput,stderr:'',stages:[]};});
+ const f=await fixture(t,{},async input=>{if(input.command.includes('systemctl stop'))destructive++;return {stdout:input.command.includes('LMREMOVE')?probeOutput():checkOutput,stderr:'',stages:[]};});
  const h=await uninstallHost(f),planned=await uninstallPlan(f,h);assert.equal(planned.status,201,planned.raw);
  f.db.run("UPDATE managed_machines SET name='changed-after-review' WHERE id=?",h.id);
  const applied=await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true});
@@ -745,4 +747,101 @@ test('cluster membership prevents deleting stable machine identity until explici
  assert.ok(f.db.get('SELECT id FROM managed_machines WHERE id=?',machineID));
  f.db.run('DELETE FROM ops_platform_cluster_members WHERE machine_id=?',machineID);
  assert.equal((await f.request('/machines/'+machineID,'DELETE')).status,200);
+});
+
+async function recoveryHost(f:Awaited<ReturnType<typeof fixture>>,name='recovery'){
+ const h=await host(f,name),checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});assert.equal(checked.status,200,checked.raw);return {...h,check:checked.data.id};
+}
+const recoveryPlan=(f:Awaited<ReturnType<typeof fixture>>,h:{id:string;check:string;credential:string},extra:any={})=>f.request(`/machines/${h.id}/uninstallations/plan`,'POST',{check_id:h.check,credential_id:h.credential,mode:'recovery',reason:'已核对 SSH 主机，仅恢复卸载固定 Agent 路径',...extra});
+
+test('recovery handles an unregistered actual Agent without rebinding or revoking an unrelated prior identity',async t=>{
+ let removed=false,purged=false;const f=await fixture(t,{},async input=>{if(input.command.includes('systemctl stop')){removed=true;purged=true;}return {stdout:input.command.includes('LMREMOVE')?probeOutput('foreign-agent',removed,{purged}):checkOutput,stderr:'',stages:[]};}),h=await recoveryHost(f);
+ f.db.exec("CREATE TABLE agent_credentials(id TEXT PRIMARY KEY,agent_id TEXT,audience TEXT,revoked_at TEXT,revoke_reason TEXT)");f.db.run("INSERT INTO agent_credentials VALUES('prior-control','prior-agent','control',NULL,'')");f.db.run("UPDATE managed_machines SET agent_id='prior-agent' WHERE id=?",h.id);
+ assert.equal((await uninstallPlan(f,h)).status,409);assert.equal((await recoveryPlan(f,h,{reason:''})).status,400);assert.equal((await recoveryPlan(f,h,{purge:'true'})).status,400);
+ const plan=await recoveryPlan(f,h,{purge:true});assert.equal(plan.status,201,plan.raw);assert.equal(plan.data.plan.observation.agent_id,'foreign-agent');assert.equal(plan.data.plan.credential_revocation_scope.eligible,false);
+ const result=await f.request(`/machines/${h.id}/uninstallations/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,200,result.raw);assert.equal(result.data.receipt.data_removed,true);assert.equal(result.data.receipt.credentials_revoked,false);assert.equal(result.data.receipt.revoked_credentials,0);assert.equal(f.machines.get(h.id).agent_id,'prior-agent');assert.equal(f.db.get<any>("SELECT revoked_at FROM agent_credentials WHERE id='prior-control'")!.revoked_at,null);
+});
+
+test('recovery accepts missing and damaged identity with partial programs and retains existing data by default',async t=>{
+ for(const identity of ['missing','invalid']){let removed=false;const f=await fixture(t,{},async input=>{if(input.command.includes('systemctl stop'))removed=true;return {stdout:input.command.includes('LMREMOVE')?probeOutput('',removed,{identity,complete:false}):checkOutput,stderr:'',stages:[]};}),h=await recoveryHost(f,identity);
+  const plan=await recoveryPlan(f,h);assert.equal(plan.status,201,plan.raw);assert.equal(plan.data.agent_id,'');assert.equal(plan.data.plan.purge,false);
+  const result=await f.request(`/machines/${h.id}/uninstallations/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,200,result.raw);assert.equal(result.data.receipt.data_retained,true);assert.equal(result.data.receipt.credentials_revoked,false);assert.equal(f.machines.get(h.id).agent_id,'');
+ }
+});
+
+test('recovery refuses another host actual identity, unsafe paths, operation locks and changed approved evidence',async t=>{
+ let options:any={},observed='node-known',destructive=0;const f=await fixture(t,{},async input=>{if(input.command.includes('systemctl stop'))destructive++;return {stdout:input.command.includes('LMREMOVE')?probeOutput(observed,false,options):checkOutput,stderr:'',stages:[]};}),h=await uninstallHost(f);
+ const another=await f.request('/machines','POST',{name:'Another host',address:'another.example.test',username:'root'});f.db.run("UPDATE managed_machines SET agent_id='foreign-owned' WHERE id=?",another.data.id);observed='foreign-owned';assert.equal((await recoveryPlan(f,h)).status,409);
+ observed='node-known';for(const bad of [{unsafe:true},{operation:true},{lock:true},{managed:false},{identity:'unsafe'}]){options=bad;assert.equal((await recoveryPlan(f,h)).status,409,JSON.stringify(bad));}
+ options={};const plan=await recoveryPlan(f,h);assert.equal(plan.status,201,plan.raw);options={digest:'d'.repeat(64)};
+ const result=await f.request(`/machines/${h.id}/uninstallations/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,409,result.raw);assert.equal(destructive,0);
+});
+
+test('revocation requires current binding, actual identity and enrollment ownership and only affects control/data',async t=>{
+ for(const owned of [true,false]){let removed=false;const f=await fixture(t,{},async input=>{if(input.command.includes('systemctl stop'))removed=true;return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};}),h=await uninstallHost(f);
+  f.db.run("INSERT INTO agent_credentials(id,agent_id,audience) VALUES('other-audience','node-known','other')");
+  if(!owned)f.db.run("UPDATE agent_enrollments SET machine_id='another-host'");
+  const plan=await recoveryPlan(f,h);assert.equal(plan.status,201,plan.raw);assert.equal(plan.data.plan.credential_revocation_scope.eligible,owned);
+  const result=await f.request(`/machines/${h.id}/uninstallations/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,200,result.raw);assert.equal(result.data.receipt.credentials_revoked,owned);assert.equal(result.data.receipt.revoked_credentials,owned?2:0);assert.equal(f.db.get<any>("SELECT revoked_at FROM agent_credentials WHERE id='other-audience'")!.revoked_at,null);
+ }
+});
+
+test('purge unknown reconciliation selects an explicit new credential and never repeats remote removal',async t=>{
+ let removed=false,destructive=0;const used:string[]=[];const f=await fixture(t,{},async input=>{used.push(input.credentialID||'');if(input.command.includes('systemctl stop')){destructive++;removed=true;throw new SSHError('timed_out');}return {stdout:input.command.includes('LMREMOVE')?probeOutput('',removed,{identity:'missing',purged:removed}):checkOutput,stderr:'',stages:[]};}),h=await recoveryHost(f);
+ const plan=await recoveryPlan(f,h,{purge:true});assert.equal(plan.status,201,plan.raw);const path=`/machines/${h.id}/uninstallations/${plan.data.id}`;assert.equal((await f.request(path+'/apply','POST',{confirm:true})).status,502);assert.equal((await f.request(path)).data.status,'unknown');
+ assert.equal((await f.request(path+'/reconcile','POST',{credential_id:'not-a-credential'})).status,404);assert.equal((await f.request(path+'/apply','POST',{confirm:true})).status,409);
+ const fresh=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'recovery-only-secret',retention:'temporary'});assert.equal(fresh.status,201,fresh.raw);
+ const reconciled=await f.request(path+'/reconcile','POST',{credential_id:fresh.data.id});assert.equal(reconciled.status,200,reconciled.raw);assert.equal(reconciled.data.status,'succeeded');assert.equal(reconciled.data.receipt.data_removed,true);assert.equal(used.at(-1),fresh.data.id);assert.equal(destructive,1);assert.ok(!reconciled.raw.includes('recovery-only-secret'));
+});
+
+test('legacy unknown uninstall can be read-only verified while old approvals require a fresh plan',async t=>{
+ const f=await fixture(t,{},async input=>({stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',true):checkOutput,stderr:'',stages:[]})),h=await uninstallHost(f);
+ const plan=await uninstallPlan(f,h);assert.equal(plan.status,409); // already removed has no new standard plan
+ const machine=f.machines.get(h.id),targetRevision=(await import('../src/shared/crypto.js')).hash(JSON.stringify([machine.address,machine.port,machine.username,machine.connection_method,machine.host_key_fingerprint,machine.ssh_target_generation,f.deps.externalURL]));
+ const old={machine:{...machine,agent_id:'node-known'},agent_id:'node-known',target_revision:targetRevision,expires_at:new Date(now.getTime()+60000).toISOString()};
+ f.db.run("INSERT INTO machine_uninstallations(id,machine_id,agent_id,credential_id,status,plan_json,created_at,created_by) VALUES('legacy',?,'node-known',?,'awaiting_approval',?,?,'admin')",h.id,h.credential,JSON.stringify(old),now.toISOString());
+ const path=`/machines/${h.id}/uninstallations/legacy`;assert.equal((await f.request(path+'/apply','POST',{confirm:true})).status,409);assert.equal((await f.request(path)).data.status,'awaiting_approval');
+ f.db.run("UPDATE machine_uninstallations SET status='unknown' WHERE id='legacy'");const result=await f.request(path+'/reconcile','POST',{});assert.equal(result.status,200,result.raw);assert.equal(result.data.receipt.legacy_evidence,true);assert.equal(result.data.receipt.approved_snapshot_available,false);assert.equal(result.data.receipt.revoked_credentials,2);
+});
+
+test('unknown uninstall after stop can release its fence with unchanged complete programs without replay',async t=>{
+ let running=true,destructive=0;const f=await fixture(t,{},async input=>{if(input.command.includes('systemctl stop')){destructive++;running=false;throw new SSHError('timed_out');}return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',false,{running}):checkOutput,stderr:'',stages:[]};}),h=await uninstallHost(f),plan=await uninstallPlan(f,h);assert.equal(plan.status,201,plan.raw);
+ const path=`/machines/${h.id}/uninstallations/${plan.data.id}`;assert.equal((await f.request(path+'/apply','POST',{confirm:true})).status,502);
+ const checked=await f.request(path+'/reconcile','POST',{});assert.equal(checked.status,200,checked.raw);assert.equal(checked.data.status,'failed');assert.equal(checked.data.receipt.remote_removed,false);assert.equal(checked.data.receipt.service_stopped,true);assert.equal(checked.data.receipt.credentials_revoked,false);assert.equal(destructive,1);
+ assert.equal(f.db.all('SELECT id FROM agent_credentials WHERE revoked_at IS NOT NULL').length,0);assert.equal((await uninstallPlan(f,h)).status,201);
+});
+
+test('Docker environment installation is admin-confirmed, durable, idempotent and scoped to the host',async t=>{
+ const calls:any[]=[];
+ const f=await fixture(t,{},async input=>{calls.push(input);return {stdout:JSON.stringify({state:'succeeded',phase:'verified',code:''}),stderr:'private package output',stages:[]};});
+ const m=(await f.request('/machines','POST',{name:'docker-host',address:'host.example.com',username:'root',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
+ const c=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'docker-password',retention:'temporary'})).data;
+ const path=`/machines/${m.id}/docker-installations`,body={request_id:'docker-fixture-request-001',credential_id:c.credential_id,confirmed:true};
+ assert.equal((await f.request(path,'POST',{...body,confirmed:false})).status,400);
+ f.user.role='member';assert.equal((await f.request(path,'POST',body)).status,403);f.user.role='admin';
+ const created=await f.request(path,'POST',body);assert.equal(created.status,202,created.raw);
+ for(let n=0;n<10;n++){const state=(await f.request(`/machines/${m.id}/docker-environment`)).data;if(state.installation?.state==='succeeded')break;await new Promise(resolve=>setTimeout(resolve,10));}
+ const state=await f.request(`/machines/${m.id}/docker-environment`);assert.equal(state.data.installation.state,'succeeded',state.raw);assert.equal(state.data.machine.docker_environment.state,'unknown');
+ const replay=await f.request(path,'POST',body);assert.equal(replay.data.id,created.data.id);assert.equal(calls.length,1);assert.equal(calls[0].password,'docker-password');assert.match(calls[0].command,/systemd-run/);assert.doesNotMatch(calls[0].command,/docker-password/);
+ assert.doesNotMatch(state.raw,/docker-password|private package|secret_encrypted|stdout|stderr/);
+ const stored=f.db.get<any>('SELECT * FROM machine_docker_installations WHERE id=?',created.data.id);assert.equal(stored.created_by,'admin');assert.equal(stored.credential_id,c.credential_id);
+ assert.equal((await f.request('/machines/not-this-host/docker-installations/'+created.data.id+'/verify','POST',{})).status,404);
+});
+
+test('Docker installation rejects one-time credentials and unsafe remote results, and recovers through read-only verification',async t=>{
+ let output='private raw output token=hidden',failSSH=false;
+ const f=await fixture(t,{},async()=>{if(failSSH)throw new SSHError('host_key_mismatch');return {stdout:output,stderr:'secret stderr',stages:[]};});
+ const m=(await f.request('/machines','POST',{name:'docker-recovery',address:'host.example.com',username:'root',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
+ const one=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'one-time-secret',retention:'one_time'})).data;
+ const path=`/machines/${m.id}/docker-installations`,body={request_id:'docker-fixture-request-002',confirmed:true};
+ assert.equal((await f.request(path,'POST',{...body,credential_id:one.credential_id})).status,409);
+ const c=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'reusable-secret',retention:'temporary'})).data;
+ const created=await f.request(path,'POST',{...body,credential_id:c.credential_id});assert.equal(created.status,202,created.raw);
+ for(let n=0;n<20;n++){if(f.db.get<any>('SELECT state FROM machine_docker_installations WHERE id=?',created.data.id)?.state==='unknown')break;await new Promise(resolve=>setTimeout(resolve,10));}
+ assert.equal((await f.request(path,'POST',{...body,request_id:'docker-fixture-request-003',credential_id:c.credential_id})).status,409);
+ assert.equal((await f.request(`/machines/${m.id}`,'PUT',{name:'changed'})).status,409);
+ output=JSON.stringify({state:'succeeded',phase:'verified',code:''});
+ const verified=await f.request(path+'/'+created.data.id+'/verify','POST',{credential_id:c.credential_id});assert.equal(verified.data.state,'succeeded',verified.raw);assert.doesNotMatch(verified.raw,/token=|secret|stdout|stderr/);
+ failSSH=true;
+ const mismatch=await f.request(path+'/'+created.data.id+'/verify','POST',{});assert.equal(mismatch.data.state,'unknown');assert.equal(mismatch.data.code,'host_key_mismatch');
 });

@@ -1,0 +1,6 @@
+> lightmoni-web@0.1.0 build
+> tsc -b && vite build
+vite v8.3.4 building client environment for production...
+✓ 6241 modules transformed.
+✓ built in 536ms
+Build succeeded. Existing Ant Design module-level use client warnings were emitted.

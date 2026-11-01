@@ -1,0 +1,23 @@
+{
+  "local_reference": {
+    "source": "local",
+    "downloaded_bytes": 0,
+    "remote_requests": 0,
+    "pinned_image_id": "sha256:929122450230d56fbfd6793861a6e735c52c6b70336b7e669db98c36669e97c8",
+    "pull_policy": "never",
+    "network_none_execution": "verified local image"
+  },
+  "alias_reference": {
+    "image": "registry.alias.test/lightmoni/lightmoni:v1",
+    "image_id": "sha256:579c48f5bf9d835ded279e71b938576530861c6cd4f71b708e8df963bf536be9",
+    "source": "local",
+    "downloaded_bytes": 3635,
+    "manifest_digest": "sha256:dc7ccd69b9218194ef8f8ff9e8bbcd4abc83bd9dbd896e527b0181080d66352e",
+    "requests": [
+      "/v2/lightmoni/lightmoni/manifests/v1",
+      "/v2/lightmoni/lightmoni/manifests/sha256:dc7ccd69b9218194ef8f8ff9e8bbcd4abc83bd9dbd896e527b0181080d66352e"
+    ],
+    "network_none_execution": "verified alias reuse"
+  },
+  "limits": "Real local ARM64 Docker and locally served verified OCI manifests from the prior release. No production container or volume changed; cache-miss integrity is covered by HTTP/import tests."
+}

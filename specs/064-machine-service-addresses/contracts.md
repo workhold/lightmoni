@@ -1,0 +1,9 @@
+# 契约
+
+POST /ops/private-registry/deployments：confirmed、revision、cluster_id、machine_id、host_ports及资源/cache_enabled；address与trusted_network_acknowledged不再必需。旧address仅在未取得当前Agent快照时作为合法私网兼容值，不能覆盖已识别真实地址；公网/SSH域名不会作为内部服务绑定地址。
+
+GET deployments保留address/端点/host_ports，增加cache_scope=machine|cluster说明loopback可达范围。现有部署JSON registry_address保存实际绑定，固定机器身份和旧端口继承保持，无新表。
+
+image_cache仍为v1策略，无新凭据或Agent任务类型。中心按目标机器隔离loopback端点；Agent回执image_sources可返回source=local、downloaded_bytes=0，本地引用命中时不请求缓存服务。别名复用只在验证内容身份后发生。
+
+集群nodes.address/public_address作为兼容输入不再保存或决定受管机器取址；nodes可省略地址。GET概览machines.address为服务地址、ssh_address为连接目标，private_ips/public_ips为主机管理派生。未纳管旧Agent资源维持既有兼容路径。

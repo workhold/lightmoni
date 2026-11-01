@@ -10,6 +10,8 @@
 
 外部 Codex/Claude 与平台 AI 共用能力的架构见 [平台开放能力与 MCP](docs/platform-mcp.md)。首批主机/任务查询与操作提案、独立令牌、OAuth 授权和接入管理已实现，使用方法及当前边界见 [MCP 接入指南](docs/mcp.md)。
 
+主机 root/sudo 引导、普通 Agent 与独立运维执行器、容器权限开关和显式提权脚本的目标方案见 [主机执行权限设计](docs/privileged-executor.md)（SDD060，尚未实现）。
+
 中心与LightMoni Agent均由Node.js / TypeScript实现，公共协议位于`runtime/src/shared`。SDK和中心上报采用本地通用打点与固定窗口方案，主机管理、SSH终端、Agent注册和control/data凭据、AI助手、告警与界面语言采用最新main；本次取舍见[整合说明](specs/011-aligned-metric-windows/main-integration.md)。
 
 任务中心支持上传或编写脚本、选择主机及日历执行计划；用法与执行边界见 [脚本任务创建与调度](docs/task-authoring.md)，默认任务设计见 [SDD 049](specs/049-platform-default-tasks/spec.md)。
@@ -18,7 +20,7 @@
 
 ## Docker Compose 部署
 
-根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261031-aed4b2d`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。镜像版本由仓库维护，无需在 `.env` 指定；旧 `LIGHTMONI_IMAGE` 值不再覆盖它。中心以非 root 用户运行。
+根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261101-46a4ac1`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。镜像版本由仓库维护，无需在 `.env` 指定；旧 `LIGHTMONI_IMAGE` 值不再覆盖它。中心以非 root 用户运行。
 
 首次获取源码：
 

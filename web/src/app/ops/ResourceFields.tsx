@@ -1,3 +1,5 @@
+import {useState} from 'react';
+import {containerYAML,containerForm} from './application-yaml';
 import { MinusCircleOutlined, PlusOutlined } from "@ant-design/icons";
 import {
   Alert,
@@ -151,10 +153,12 @@ export default function ResourceFields({
   existing,
   machines = [], onQuickCreate, onRefresh, certificateID,
 }: Props) {
+  const [yamlError,setYamlError]=useState('');
   const { t } = useI18n(),
     form = Form.useFormInstance(),
     source = Form.useWatch(["spec", "source"], form),
     mode = Form.useWatch(["spec", "mode"], form),
+    configurationMode = Form.useWatch(["spec", "configuration_mode"], form),
     targetType = Form.useWatch(["spec", "type"], form),
     targetScope = Form.useWatch(["spec", "target_scope"], form),
     clusterID = Form.useWatch(["spec", "cluster_id"], form),
@@ -732,15 +736,23 @@ export default function ResourceFields({
             rules={required}
           >
             <Select
+              onChange={value=>{const spec=form.getFieldValue('spec');setYamlError('');if(value==='compose'){form.setFieldValue(['spec','compose'],spec.configuration_mode==='yaml'?spec.configuration_yaml:containerYAML(spec));form.setFieldValue(['spec','configuration_mode'],'yaml')}else if(spec.compose){form.setFieldValue(['spec','configuration_yaml'],spec.compose);form.setFieldValue(['spec','configuration_mode'],'yaml')}}}
               options={[
                 { value: "container", label: t("单容器", "Single container") },
                 { value: "compose", label: "Docker Compose" },
               ]}
             />
           </Form.Item>
-          {mode === "compose" ? (
+          <Form.Item name={["spec","configuration_mode"]} label={t("配置方式","Configuration mode")}><Select options={[{value:'form',label:t('表单配置','Form'),disabled:mode==='compose'},{value:'yaml',label:t('高级 YAML','Advanced YAML')}]} onChange={value=>{setYamlError('');if(mode==='container'){
+            const spec=form.getFieldValue('spec');
+            if(value==='yaml')form.setFieldValue(['spec','configuration_yaml'],containerYAML(spec));
+            else try{const parsed=containerForm(spec.configuration_yaml,spec.ports);form.setFieldsValue({spec:{...spec,...parsed,configuration_mode:'form'}})}catch{form.setFieldValue(['spec','configuration_mode'],'yaml');setYamlError(t('当前 YAML 无法转换成单容器表单，请继续编辑 YAML。','This document cannot be represented by the single-container form. Continue editing YAML.'))}
+          }}}/></Form.Item>
+          {yamlError&&<Alert type="error" title={yamlError}/>}
+          {configurationMode==='yaml'&&<Alert type="info" showIcon title={deploymentMode==='managed'?t('从 YAML 自动识别容器端口；宿主端口由平台分配，YAML 宿主映射不生效。','Container ports are discovered from YAML. The platform assigns host ports; YAML host mappings are ignored.'):t('使用 YAML 中的发布端口；expose 端口仅供容器内部访问。','Published ports follow YAML. Ports under expose remain internal.')}/>}
+          {(mode === "compose"||configurationMode==='yaml') ? (
             <Form.Item
-              name={["spec", "compose"]}
+              name={["spec", mode==='compose'?"compose":"configuration_yaml"]}
               label={t("Compose 配置（YAML）", "Compose configuration (YAML)")}
               rules={required}
             >
@@ -826,7 +838,7 @@ export default function ResourceFields({
               </div>
             </>
           )}
-              {(
+              {(configurationMode!=='yaml'&&
                 <Form.List name={["spec", "ports"]}>
                   {(fields, { add, remove }) => (
                     <div className="lm-ops-repeater">
@@ -904,7 +916,7 @@ export default function ResourceFields({
                   )}
                 </Form.List>
               )}
-          {deploymentMode==='managed'&&role!=='openresty'&&<><div className="lm-ops-grid"><Form.Item name={["spec","health","type"]} label={t("探活方式","Health check")}><Select options={[{value:"tcp",label:"TCP"},{value:"http",label:"HTTP"}]}/></Form.Item><Form.Item name={["spec","health","port_name"]} label={t("探活端口名称","Health port name")} rules={required}><Input placeholder="api"/></Form.Item><Form.Item name={["spec","health","interval_seconds"]} label={t("探活间隔（秒）","Health interval (seconds)")}><InputNumber min={1} max={3600}/></Form.Item>{healthType==='http'&&<Form.Item name={["spec","health","path"]} label={t("健康检查路径","Health path")} rules={required}><Input placeholder="/health"/></Form.Item>}</div></>}
+          {deploymentMode==='managed'&&role!=='openresty'&&<div className="lm-ops-grid"><Form.Item name={["spec","health","type"]} label={t("探活方式（可选）","Health check (optional)")}><Select allowClear placeholder={t('使用容器健康状态','Use container health')} options={[{value:'tcp',label:'TCP'},{value:'http',label:'HTTP'}]}/></Form.Item>{healthType&&<><Form.Item name={["spec","health","port_name"]} label={t("探活端口名称","Health port name")} rules={required}><Input placeholder="api"/></Form.Item><Form.Item name={["spec","health","interval_seconds"]} label={t("探活间隔（秒）","Health interval (seconds)")}><InputNumber min={5} max={3600}/></Form.Item>{healthType==='http'&&<Form.Item name={["spec","health","path"]} label={t("健康检查路径","Health path")} rules={required}><Input placeholder="/health"/></Form.Item>}</>}</div>}
           <Form.Item name={["spec","stateful"]} label={t("有状态 / 本地业务数据","Stateful / local business data")} valuePropName="checked"><Switch/></Form.Item>
           <Form.List name={["spec", "mounts"]}>
             {(fields, { add, remove }) => (

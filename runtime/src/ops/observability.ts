@@ -1,7 +1,9 @@
 import type { Dependencies, Handler } from '../shared/types.js';
 import { fail } from '../shared/http.js';
-import { APPLICATION_METRICS, APPLICATION_LOGS, applicationTargets, dockerInventory } from '../shared/application-observation.js';
+import { APPLICATION_METRICS, APPLICATION_LOGS, applicationTargets } from '../shared/application-observation.js';
 import type { OperationsPlatformStore } from './store.js';
+import type { AgentJobStore } from '../server/agent-jobs.js';
+import { dockerObservation, registerDockerJobs } from './docker.js';
 const literal=(v:string)=>"'"+v.replaceAll('\\','\\\\').replaceAll("'","''")+"'";
 const exists=(deps:Dependencies,name:string)=>deps.db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?",name);
 export function inventory(deps: Dependencies, store: OperationsPlatformStore, machineID='',clusterID='') {
@@ -9,10 +11,11 @@ export function inventory(deps: Dependencies, store: OperationsPlatformStore, ma
   if(machineID&&!machines.length)fail(404,'machine_not_found');
   const hosts=machines.map(m=>{
     const agent=m.agent_id?deps.db.get<any>('SELECT heartbeat,last_seen FROM agents WHERE id=?',m.agent_id):undefined;
-    let snapshot,collector;try{const heartbeat=JSON.parse(agent?.heartbeat??'{}');snapshot=dockerInventory(heartbeat.docker_inventory);collector=heartbeat.collectors_status?.applications;}catch{}
-    const stale=!agent||deps.now().getTime()-Date.parse(agent.last_seen)>120000||!snapshot||deps.now().getTime()-Date.parse(snapshot.observed_at)>120000;
+    let snapshot,collector,activeID='',capabilities:string[]=[];try{const heartbeat=JSON.parse(agent?.heartbeat??'{}');({snapshot,activeID}=dockerObservation(deps.db,m.agent_id??'',heartbeat));collector=heartbeat.collectors_status?.applications;capabilities=['docker.inventory','docker.control'].filter(c=>heartbeat.docker_capabilities?.includes(c));}catch{}
+    const online=!!agent&&Number.isFinite(Date.parse(agent.last_seen))&&deps.now().getTime()-Date.parse(agent.last_seen)<=120000;
+    const stale=!online||!snapshot||deps.now().getTime()-Date.parse(snapshot.observed_at)>120000;
     const targets=new Map(applicationTargets(deps.db,m.agent_id??'').map(t=>[t.deployment_id,t]));
-    return {...m,state:!m.agent_id?'not_connected':!snapshot?'waiting':stale?'stale':snapshot.state==='ready'&&collector&&collector!=='ok'?'degraded':snapshot.state,observed_at:snapshot?.observed_at??'',truncated:snapshot?.truncated??false,
+    return {...m,online,docker_capabilities:capabilities,active_job:activeID,state:!m.agent_id?'not_connected':!snapshot?'waiting':snapshot.state==='unavailable'?'unavailable':stale?'stale':snapshot.state==='ready'&&collector&&collector!=='ok'?'degraded':snapshot.state,error:snapshot?.error??'',attempted_at:snapshot?.attempted_at??'',observed_at:snapshot?.observed_at??'',truncated:snapshot?.truncated??false,
       containers:(snapshot?.containers??[]).map(c=>({...c,application_id:targets.get(c.deployment_id)?.application_id??'',cluster_id:m.cluster_id??''}))};
   });
   const instanceRows=deps.db.all<any>('SELECT id,owner_id,machine_id,agent_id,cluster_id,state,healthy,retired FROM ops_cluster_instances WHERE retired=0').filter(i=>(!machineID||i.machine_id===machineID)&&(!clusterID||i.cluster_id===clusterID));
@@ -29,8 +32,9 @@ function range(deps:Dependencies, params:URLSearchParams) {
   return {from:new Date(from).toISOString(),to:new Date(to).toISOString()};
 }
 const frameRows=(response:any)=>Object.fromEntries((response.results??[]).map((r:any)=>[r.refId,{...r,rows:(r.frames??[]).flatMap((f:any)=>f.rows.map((row:any[])=>Object.fromEntries(f.columns.map((c:any,i:number)=>[c.name,row[i]]))))}]));
-export function registerObservability(deps:Dependencies,store:OperationsPlatformStore,safe:(fn:Handler)=>Handler) {
+export function registerObservability(deps:Dependencies,store:OperationsPlatformStore,safe:(fn:Handler)=>Handler,jobs:AgentJobStore) {
   const router=deps.router;
+  registerDockerJobs(deps,jobs,safe,id=>inventory(deps,store,id).hosts[0]);
   router.get('/api/v1/ops/inventory',safe(ctx=>ctx.json(inventory(deps,store,ctx.url.searchParams.get('machine_id')??'',ctx.url.searchParams.get('cluster_id')??''))));
   router.get('/api/v1/ops/resources/:id/monitoring',safe(ctx=>{
     const application=store.get(ctx.params.id,'application');

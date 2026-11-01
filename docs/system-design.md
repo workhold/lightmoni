@@ -184,6 +184,8 @@ flowchart TB
 
 中心是模块化单体，不拆为运行时微服务。模块通过 `Dependencies` 使用共享 DB、目录、查询、认证、路由、加密、时钟和日志；启动和关闭由 `runtime/src/server/app.ts` 管理。
 
+目标权限拆分见第60章（SDD060，未实现）：普通 Agent 保持非 root，按需新增独立出站的 root 执行器。后者具有独立身份、root 自有策略/journal和完整任务授权；受限容器操作与用户明确批准的提权脚本分别授权，普通 control 不授予这些能力。
+
 ## 7. 端到端数据流
 
 ### 7.1 业务 SDK 直连中心
@@ -516,15 +518,15 @@ SSH 预检是只读固定命令集合，检查网络、指纹、Linux、架构�
 
 预检通过后生成持久化部署计划；管理员明确确认后，后端先保存 enrollment 与目标主机的服务端预约，再使用固定安装模板、有效凭据、stdin enrollment token 及版本/架构白名单执行。下载脚本和包需要鉴权，0600 curl 配置暂存 token；不进入 URL、argv、环境、日志或回执。生成计划、执行前和安装锁内拒绝覆盖既有安装。计划绑定主机名称及连接 revision，执行前改名使旧计划失效，派发前再次核对实际架构。Agent 注册早于安装回执时仍通过预约关联原主机，不另建资产；确认成功后完成回执与凭据清理，清除 temporary/one_time 秘密并保留有效 managed/permanent 凭据。安装派发前的明确失败取消本次未激活 enrollment；派发后 SSH 断开或平台重启保留 unknown 和核对所需的有效凭据，不自动重放。人工结束才精确撤销本次新身份，不影响原 Agent 或其他主机；恢复边界见 13.8。日常管理优先走 Agent。
 
-卸载使用独立的持久化计划和回执。中心固定只读探测核对远端独立身份、主机关联、受管服务及未结束任务；同一节点卸载与任务按 agent_id 跨主机互斥。计划绑定主机名称、地址、端口、用户名、可信指纹、有效私钥或可复用密码、节点身份及 15 分钟预检有效期；目标或授权变化不能复用。网页提供预览、确认、取消和历史，AI 不能绕过确认执行卸载。
+卸载使用独立的持久化计划和回执，支持标准卸载及管理员明确选择的 SSH 恢复卸载，详细边界见 13.9。标准模式固定只读探测核对远端独立身份、主机关联、受管服务及未结束任务；卸载与有限任务按主机 ID 和实际 agent_id 双维互斥。计划绑定主机名称、地址、端口、用户名、可信指纹、有效私钥或可复用密码、节点身份及 15 分钟预检有效期；目标或授权变化不能复用。网页提供预览、确认、取消和历史，AI 不能绕过确认执行卸载。
 
 确认卸载后仅执行平台版本受控的固定脚本：核对标准路径受管 systemd unit，拒绝其他来源的同名服务，再停止并禁用独立服务，确认停止后移除服务文件、启动器和 Agent 运行目录；停止失败不得删除程序。默认保留 /etc/lightmoni-agent、/var/lib/lightmoni-agent、专用服务用户，以及业务部署、制品、容器和卷。保留配置与队列用于核查和数据恢复，不代表保留文件中的旧凭据仍有效，也不保证尚未送达的数据可自动补传。
 
-成功核验要求程序路径已移除、服务 not-found 且未运行、远端身份一致、两个持久目录保留并且没有未完成任务标记。中心在同一 SQLite 事务中撤销该节点全部 control/data 凭据并完成卸载记录；已登记节点不能回退为 legacy Key 认证。保留主机、节点和卸载历史，重新接入需要新的 enrollment。运行中、已派发或结果未知的节点任务必须先完成或核对。卸载的 awaiting_approval、running、succeeded、failed、unknown、cancelled 分别记录审批、执行和结果边界；SSH 断连或结果不确定进入 unknown，不报告成功且不盲目重跑。管理员可触发固定只读 reconcile，原临时私钥到期后可以添加新的有效私钥用于核对；完全移除且身份和保留数据核验通过才补做凭据撤销并成功，完整程序仍在且服务状态明确、无生命周期锁或任务标记时记录失败并保留凭据，部分移除或不确定则继续 unknown。待审批或未知结果仍允许管理员用终端人工核查，但禁止改主机、删除或新建部署；实际执行与核对期间同主机终端和检查互斥。
+标准保留数据模式的成功核验要求程序路径已移除、服务 not-found 且未运行、远端身份一致、两个持久目录保留并且没有未完成任务标记。显式清除数据及恢复模式按 13.9 验证批准策略。中心在同一 SQLite 事务中仅撤销核验归属的 control/data 凭据并完成卸载记录；已登记节点不能回退为 legacy Key 认证。保留主机、节点和卸载历史，重新接入需要新的 enrollment。运行中、已派发或结果未知的节点任务必须先完成或核对。卸载的 awaiting_approval、running、succeeded、failed、unknown、cancelled 分别记录审批、执行和结果边界；SSH 断连或结果不确定进入 unknown，不报告成功且不盲目重跑。管理员可触发固定只读 reconcile，原临时私钥到期后可以添加新的有效私钥用于核对；完全移除且身份和保留数据核验通过才补做凭据撤销并成功，完整程序仍在且服务状态明确、无生命周期锁或任务标记时记录失败并保留凭据，部分移除或不确定则继续 unknown。待审批或未知结果仍允许管理员用终端人工核查，但禁止改主机、删除或新建部署；实际执行与核对期间同主机终端和检查互斥。
 
 凭据到期或撤销时同样清空当前记录的 `secret_encrypted`，保留 ID、策略来源、有效期、清除时间/原因和不含秘密的事件。有限凭据在启动时、读取/使用前和每 30 秒统一清理；永久凭据仅在明确撤销时清除，不以空期限计算为到期。统一有效性判断要求未撤销、秘密未清除，且永久策略无固定期限或有限期限在未来；关闭模块时释放定时器；清理幂等，并取消引用失效凭据的待审批计划，不改写正在运行的计划。终端租约在到期或撤销后失效。清空当前记录不等于擦除 SQLite WAL/free pages、备份、已进入有界操作的进程副本或远端 authorized_keys。
 
-主机能力由后端按连接方式、忙状态及有效凭据计算 terminal、ssh_check、deploy_agent、uninstall_agent、update_agent、rollback_agent。active_reusable_ssh_credential_count 只统计私钥及 temporary/managed/permanent 密码，安装、卸载和升级不能用含一次性密码或手动脚本的总数推导。界面展示能力及置灰原因；所有操作后刷新状态。未记录主机身份不会置灰，首次 SSH 操作自动记录。实现契约见 SDD 031、032、034、037、038、039、040、045。
+主机能力由后端按连接方式、忙状态及有效凭据计算 terminal、ssh_check、deploy_agent、uninstall_agent、recovery_uninstall_agent、update_agent、rollback_agent。active_reusable_ssh_credential_count 只统计私钥及 temporary/managed/permanent 密码，安装、卸载和升级不能用含一次性密码或手动脚本的总数推导。界面展示能力及置灰原因；所有操作后刷新状态。未记录主机身份不会置灰，首次 SSH 操作自动记录。实现契约见 SDD 031、032、034、037、038、039、040、045。
 
 网页终端是管理员本人使用的临时 PTY：同源 Origin、登录 cookie、首次自动记录且后续比对的主机公钥、单次 WebSocket 入口、输入/输出上限、10 分钟空闲和 30 分钟总时长。终端输出不持久化、不写日志、不发送给 AI。终端不是 AI 任意 shell 工具。
 
@@ -727,6 +729,44 @@ running 与未人工结束的 unknown 安装阻止冲突生命周期动作、目
 
 首装失败仅清理本次创建且已为空的程序目录，不删除之前存在的配置、身份或状态。正常卸载后保留的数据仍须管理员核查，fresh 安装保护不因此放宽。卸载与维护的本地任务保护同时识别 Agent job、通用 script task 和运维锁；即使中心尚未收到任务回执，也不能直接删除程序或 purge 数据。
 
+### 13.9 Agent 恢复卸载与离线维护（SDD 058）
+
+标准卸载核对本平台登记身份；SSH 恢复卸载由管理员显式选择并填写原因，用于凭据登记丢失、未绑定、身份文件缺失或损坏、程序部分残留。恢复仍固定已登记主机的 SSH 端点、指纹、连接 revision 和有效凭据，实际有效 Agent 若已绑定其他主机则拒绝。平台记录有界远端观察，包括身份状态与文件摘要、程序摘要、受管 unit、固定目录状态和任务/生命周期锁；不读取或返回原始配置与秘密。计划前、apply 前及远端锁内复验，证据变化要求重新审阅。
+
+```mermaid
+flowchart TD
+  Host[登记主机与有效 SSH 凭据] --> Mode{选择卸载方式与数据策略}
+  Mode --> Standard[标准：核验平台登记身份]
+  Mode --> Recovery[SSH 恢复：填写原因并核对实际证据]
+  Standard --> Review[持久计划：固定目标、快照与撤销范围]
+  Recovery --> Review
+  Review --> Fence[主机 ID 与实际 Agent 双维任务屏障]
+  Fence --> Apply[管理员确认；锁内复验与停止服务]
+  Apply --> Verify[移除固定程序；核验保留或清除数据]
+  Verify --> Done[完成回执；仅撤销确属本主机的凭据]
+  Apply --> Unknown[断连或重启：unknown]
+  Unknown --> Reconcile[当前有效凭据；原目标只读核对]
+  Reconcile --> Done
+  Reconcile --> Pending[证据不足：保持 unknown]
+  Mode --> Manual[下载固定脚本与 SHA256；主机离线运行]
+```
+
+默认保留 /etc/lightmoni-agent 与 /var/lib/lightmoni-agent；生成计划前可明确选择 purge，审阅两个 Agent 目录将被清除，含身份、队列及未送达遥测。成功必须证明服务和固定程序已移除，保留策略下原数据目录状态与身份摘要不变，清除策略下两个目录均不存在；不会删除服务用户、业务目录、容器或卷。fresh 保护保持，显式清除后才能从主机登记流程重新 enrollment；保留模式不承诺直接重装。
+
+恢复不自动反向绑定实际 Agent。只有有效实际身份等于本主机原绑定且 enrollment 归属核验通过，才撤销该身份的 control/data 凭据；缺失、损坏或未绑定身份不凭旧记录猜测。回执分别记录远端移除、数据策略、撤销资格与实际撤销数量，不把外部平台凭据描述为已撤销。主机和历史记录保留；删除平台记录仍是独立操作。
+
+卸载 awaiting_approval、running、unknown 对主机 ID 与实际 Agent 建立持久屏障，覆盖有限任务提交、领取、定时派发和自动重试；已有未结束任务阻止卸载，持续遥测与心跳继续。脚本在停服务前及停后复验本地任务标记，损坏或不安全标记拒绝删除；固定 Agent 路径和关键祖先拒绝符号链接。派发后失败或平台重启进入 unknown，使用原 SSH 目标与当前显式选择的有效凭据只读核对，不重放移除；不能证明完成时继续 unknown，迟到结果不能覆盖已结束记录。
+
+管理员通过 GET /api/v1/agent-maintenance/uninstaller 获取固定无秘密脚本、文件名和 SHA256，不依赖 enrollment 下载票据。新发行包携带同一脚本并安装到 /usr/local/sbin/lightmoni-agent-uninstall，管理员可在平台不可用时以 root 本机运行；默认保留数据，显式 --purge 才清除。手动脚本使用相同固定路径、任务与服务归属保护，不调用中心，不能证明平台凭据已经撤销。网页创建计划或执行响应失联时先恢复持久记录，不盲目重复请求。旧待审批计划若缺少快照须取消重新计划；旧 unknown 仅按原标准模式的固定目标、同一有效身份、完整移除与保留目录证据只读核对，记录旧协议证据，不能伪造此前不存在的摘要快照。升级/回退保持第 28 节受管身份、固定发行与健康确认协议，不提供强制升级未知安装。新发行切换与主动回退同时同步包内离线卸载器，失败时恢复原脚本内容与权限；旧包没有卸载器则保留现有文件，并明确记录未同步。
+
+规格、接口与隔离验收见 [SDD 058](../specs/058-agent-maintenance-recovery/spec.md)。
+
+### 13.10 目标：安装权限提示与独立运维执行器（SDD060，未实现）
+
+登记 SSH 用户名旁提前说明：“安装 Agent 需要 root，或支持免交互提权的 sudo 账户。登录账户用于安装和恢复，Agent 使用独立账户运行。”普通账户仍可登记和登录终端；预检按真实 UID/所需 sudo 能力返回 root、sudo_noninteractive、unavailable 或 unknown，不按用户名猜测，不把 SSH 密码自动当 sudo 密码。
+
+基础监控仍用普通 Agent；容器管理与允许提权脚本默认关闭、独立审批，启用时按计划引导独立 root 执行器。主机分别显示普通 Agent、执行器及能力授权/实际就绪状态。保存凭据、root 安装成功或开关打开都不等于能力已就绪；日常不自动回退到 SSH。详细权限、任务和生命周期见第60章与 [专项设计](privileged-executor.md)。
+
 ## 14. AI 助手设计
 
 ### 14.1 运行时分层
@@ -816,6 +856,8 @@ AI 可以读取规则、静默和责任组的脱敏信息，也可以创建待�
 - AI 工具 schema 使用 `additionalProperties:false`；未知参数、任意 command、任意 host 和任意 key 直接拒绝。
 - 凭据撤销和会话降权应在受限时间内断开终端；离线 Agent 的缓存任务不能被文档宣称为即时停止，直到配置租约实现。
 - 日志、审计和错误只记录固定错误码、资源 ID、操作者、时间和脱敏摘要。
+
+SDD060 目标另设 executor audience 与 root 私有身份，不复用 Agent control/data/local token。普通脚本与 Agent 同 UID 的现状不构成沙箱，不能按 peer UID 或自报 capability 授予 root。用户明确批准的任意 root 脚本属于受信整机管理代码，能够改变执行器与主机；不能承诺其执行后的身份、日志或主机仍可信。完整边界见第60章（未实现）。
 
 ## 18. LLD：关键接口与状态机
 
@@ -1302,6 +1344,8 @@ ops_platform_resources 保存 revision、加密 spec、脱敏 status 和授权�
 
 Agent 使用本机固定 Docker context 执行单容器/Compose。平台管理配置文件、只首次写入的初始化文件、数据目录和 Docker volume；停止/移除容器不删除业务数据。资源和端口在 SQLite 事务预留，实际端口在节点复核。机器池可显式设置容量，也可经 node.inspect 获取 CPU/内存/IP/Docker 能力。调度基于在线机器、容量、端口与副本分散；现有副本按健康回执逐个更新，健康连续失败时有界重建。服务发现提供新鲜健康实例的机器可达 IP＋发布端口，要求机器之间已有可达网络；没有自动 overlay 或本地数据复制。
 
+目标权限迁移采用第60章的独立执行器（SDD060，未实现）：普通 Agent 不获得 Docker 组/socket，受限容器计划由 root 执行器二次校验。host network 网关、任意 hook、受保护证书/目录和 systemd 不能整体继承容器权限；未迁移入口应拒绝特权操作，不能隐式提权。
+
 ### 33.9 网站、网关与流量
 
 网站支持静态文本文件、手工 HTTP(S) 反代和托管服务。网站仅在显式启用后进入网关完整版本包；域名在组内唯一。Agent 按版本暂存站点/证书/静态文件，检查 OpenResty 配置后切换、重载并实际验证 HTTP 内容与 TLS 指纹，失败恢复旧版。服务路径无健康后端时仅该路径返回503；多路径与Nginx可配置能力见33.11，端点变化重编译对应上游。网关在 Linux host 网络直接监听端口；已验证健康网关的公网地址进入平台拥有的 A/AAAA，关闭网站移除自身拥有记录。DNS TTL 不提供即时故障切换保证。Agent 失联不等于容器停止，不据此释放端口或静默迁移本地数据。
@@ -1342,11 +1386,13 @@ ops_cluster_instances显式保存cluster_id，活跃slot按owner+cluster唯一�
 
 ### 42.4 OpenResty托管与完整配置
 
-OpenResty是role=openresty的全局唯一应用，可部署多个集群，每集群一项部署。已安装应用可编辑部署集群、机器、副本和资源；运行中的部署先停用清理再移除。每个入口部署保存稳定gateway_domain，可选gateway_dns_zone_id托管健康入口A/AAAA；未选择时由用户维护。manual选择机器，managed设置实例数和资源；Linux host网络固定80/443。内部gateway.apply/inspect/stop/remove复用Agent执行器，owner仍为application。每集群完整网站、证书和静态文件包逐机nginx -t、切换、重载、HTTP/TLS验证；失败保留旧版。故障换机完成配置与验证后恢复DNS资格。
+OpenResty是role=openresty的全局唯一应用，可部署多个集群，每集群一项部署。已安装应用可编辑部署集群、机器、副本和资源；运行中的部署先停用清理再移除。每个入口部署保存稳定gateway_domain，可选gateway_dns_zone_id托管健康入口A/AAAA；未选择时由用户维护。manual选择机器，managed设置实例数和资源；Linux host网络固定80/443。内部gateway.apply/inspect/stop/remove复用Agent执行器，owner仍为application。每集群完整网站、证书和静态文件包逐机nginx -t、切换、重载、HTTP/TLS验证；失败保留旧版。故障换机完成配置与验证后恢复DNS资格。中心按目标网关实例逐机解析应用上游并计算完整包签名；同集群不同机器的配置可以不同，拓扑或健康变化后沿用调和流程重新发布。
 
 ### 42.5 网站公共配置与集群上游
 
 website为全局对象，bindings统一域名、HTTPS、证书、DNS，nginx及locations统一路径、超时、头部、缓存、限流和其他高级选项。routing_mode=managed时选择一次service_application_id和HTTP(S)命名service_port_name，自动发现其部署集群，集群内只解析该服务的健康端点。manual保留locations.cluster_targets逐集群应用端口或代理URL；不支持公共配置覆盖。集群流量策略cluster_policies保存enabled、1–100相对weight、default及厂商线路id/name，独立于冻结网站公共修订；关闭立即退出期望解析，恢复仍需成功回执。公共草稿不能通过流量策略保存被隐式发布。同一网站的domain_routes按domain独立指定cluster_ids与可选cluster_policies；省略范围跟随全部可用集群，固定选择只保留其仍可用的交集，不自动扩大。旧网站无此字段继续继承全站范围与策略。域名范围随发布冻结，每集群完整包只包含绑定到该集群的域名；同绑定组的证书与路径仍复用。候选旧集群仍接收空站点包以清理已移走域名。
+
+平台发现的应用端点与目标 OpenResty 实例 machine_id 相同时，上游 host 使用127.0.0.1；异机继续使用发现的内网地址，IPv6保留方括号。此规则适用于managed托管服务及manual应用端口目标，保留HTTP(S)、命名端口对应的宿主端口、健康过滤与集群范围；用户显式填写的代理URL不改写。发现接口与仅有集群上下文的预览仍显示实际发现地址。依据为现有Linux host网络网关与应用宿主端口模型，无新Agent协议或存储迁移（SDD 058）。
 
 ### 42.6 DNS聚合、共享资源与界面
 
@@ -1430,6 +1476,27 @@ flowchart LR
 
 验证与 Doca 保存回读见 `specs/044-operations-observability/validation.md`。部署升级需要新中心与新 Agent；旧 Agent 无清单时显示等待采集，历史业务表和存储数据保持兼容。
 
+### 44.6 应用安装进度与故障诊断（SDD 058）
+
+应用商店采用基本参数与折叠高级设置：模板默认资源和推荐部署模式保持，单一集群及唯一在线目标可预选，serviceName、资源限制及多集群按需展开。安装响应沿用资源与执行结果；资源创建成功后立即打开进度，部署拒绝仍保留应用并展示原因。关闭进度不取消执行，列表可重新打开逐机历史。手动模式默认建议宿主端口等于模板容器端口；托管模式端口留空由平台分配，显式填写则使用填写值。切换模式保留主动填写的端口，未修改的建议值跟随模式变化；OpenResty 固定 80/443。
+
+控制路径继续管理员确认 → 平台部署 / Agent jobs → 有效 lease → Agent 平台执行器。执行器通过可选内部 progress 回调报告 Docker 检查、端口检查、配置校验、镜像拉取与启动、健康验证、恢复/清理等白名单阶段；使用既有 job activating 阶段与 snapshot.operations.progress 传输，不改变 job phase 排序或最终 /result 权威。
+
+中心将排队和 Agent 阶段按序投影至现有 ops_platform_run_events，同一 job 更新事务内保存，重复心跳不追加相同步骤；最多保留 2000 条，沿用事务 outbox。实时安装抽屉每 2 秒直接读取 SQLite 资源、逐机执行和增量步骤，不依赖 ClickHouse。多集群错误、调度等待、旧记录和未知回执分别呈现，不能用提交成功或单次 inspect 成功替代整体安装完成。
+
+故障只根据命令输出在 Agent 内部识别有限诊断码，如端口占用、Docker 不可用或无权限、镜像不存在/鉴权/网络、磁盘不足和容器不健康；原始 stdout/stderr、命令、环境和自由错误文本均不进入安装日志。恢复/清理保留起因，恢复失败继续 unknown；未知结果必须先核对实际状态，界面不自动重复执行。无新增表、网络端点、凭据、Docker socket 或 AI 写入能力；旧 Agent 继续显示通用执行阶段，升级后提供细阶段和分类原因。
+
+```mermaid
+flowchart LR
+  UI[管理员安装 / 查看进度] --> Jobs[平台部署 / 有效 job lease]
+  Jobs --> Agent[Agent 白名单阶段 / 诊断]
+  Agent -->|既有 job events| Steps[(SQLite 执行 / 有序步骤)]
+  Agent --> Receipt[最终回执 / 未知需核对]
+  Receipt --> Steps
+  Steps -->|每 2 秒增量读取| UI
+  Steps --> Outbox[(事务 outbox / 系统日志)]
+```
+
 ## 第50章 中心内外网地址同步与SDK直报（SDD 050）
 
 2026-10-31。本章为codex/050-center-endpoint-discovery分支预览，代码验证见对应SDD，合入状态以GitHub为准。管理员沿用上报地址簿登记完整内网IP+port URL与public引导入口，scope缺省public，默认引导必须为public，至少保留一个public。SQLite保存稳定center_id与地址清单修订。SDK与Agent分别直连中心，SDK→Agent的OTLP接收与配置代理全部移除；Agent自己的SDK只通过进程内exporter入持久队列，本地监听仅提供诊断。
@@ -1468,3 +1535,279 @@ flowchart LR
 ```
 
 规格、契约、测试及 Doca 保存回读证据见 specs/053-certificate-async-issuance/。
+
+## 第59章 服务镜像生命周期、仓库应用与网站鉴权（SDD 059，首版实现与后续设计）
+
+2026-10-31建立，2026-11-01实现私有镜像管理首版（功能分支待合入）。59.1—59.6保留完整生命周期的后续目标设计；当前已实现的仓库管理、集群缓存及网站Basic以59.7—59.9和specs/059-service-image-lifecycle/implementation-v1.md为准。扩展第42章应用/集群部署及网站，保留第33章授权、私有载荷、租约和unknown边界。仓库按需安装，不要求每集群默认安装或预下载全部镜像。发布版本、候选预热、商店自动更新、机器daemon代理仍未实现。
+
+### 59.1 发布身份与候选预热
+
+ApplicationRelease独立于应用草稿revision，固定每个Compose服务的来源引用、index/manifest摘要、OS/arch/variant及平台摘要，ready后不可变。重启与故障换机复用同一release，不重新解析可变tag。旧部署无法证明完整镜像身份时标记legacy_unresolved，不能用当前远端tag冒充原版本。新托管默认由Agent从已有镜像源准备运行机器和至少1台独立合格备用，手动默认按需，允许全部合格候选预热；只准备已发布服务的当前及上一可回退版本。无需内网仓库即可完成安装、预热和升级；全部候选缺镜像时按回源策略下载或等待。容量、端口、架构、数据与unknown约束先于镜像就绪评分；预热不预留运行资源，不足显示degraded，本地数据库不自动迁移。
+
+### 59.2 内网分发、回源与清理
+
+获取顺序为本机精确内容、仅配置时使用授权内网缓存、按策略从已有镜像源拉取。未配置直接跳过，不阻止安装/升级，不自动每集群部署。可复用已有持久化OCI仓库/缓存或明确安装的仓库应用，多个可信网络可达集群可共用端点，权限仍逐应用/集群限制；复制前后摘要与平台内容一致，预热与启动用同一effective_ref。普通机器Docker cache不直接提供集群仓库，P2P另开SDD。Hub mirror与其他源映射分开。禁回源只使用已准备内容，缓存端也限制回源，不能依赖pull-through或mirror fallback。逐机/平台记录source/bytes/duration，身份/发布/策略变化或外部清理使旧状态失效。保护运行、当前、回退、在途与unknown引用，只清理平台登记无引用过期内容，不全机prune。
+
+### 59.3 自定义发布与商店更新
+
+自定义服务先外部构建推送，再登记镜像/Compose新版本、锁定内容、审阅、选择集群、预热与升级；可配置受控发布清单或显式tag跟踪，固定镜像无来源时显示未配置检查。商店分别维护模板revision、应用版本、变更/兼容/迁移/回退声明及最低Agent能力，默认每日带抖动检查并支持立即检查；失败保留上次结果且标过期，不表示最新。旧模板、用户配置、新模板三方合并保留参数、秘密引用、卷和端口，冲突/未知迁移阻止发布。默认只提示更新，只有所选集群的成功发布改变期望版本，其他集群保持原指针。
+
+### 59.4 升级与自动策略
+
+滚动默认batch=1，额外容量及固定端口允许时先启新、健康验证、切流再停旧；单机固定端口或host80/443单例明确预览停机并使用stop-first。全部服务镜像与新鲜健康回执匹配才切换；失败暂停或按授权回退上一发布，unknown先inspect。镜像/配置回退不恢复数据库数据。P2自动更新须管理员确认应用/集群、受信源、版本范围、IANA维护窗口、批次/最大不可用和失败行为；派发与领取重验授权revision，撤销阻断未开始动作。主版本、有状态、迁移或兼容未知、冲突、能力不足及unknown不自动执行。
+
+### 59.5 机器镜像源与维护控制
+
+全局默认→集群→单机逐字段继承，unset继承、显式空清空、数组整体覆盖，展示来源及期望/实际差异。分开Hub加速、其他仓库映射、daemon HTTP(S)_PROXY/NO_PROXY、私有认证/受信CA；credential_ref按application/cluster和registry/repository单独授权，不因继承扩大权限。默认TLS、URL无userinfo，秘密由有效lease私有载荷进入0600临时配置，不进命令行、日志或AI。保存仅改期望；应用须只读预检、冻结原文件hash及全部受影响容器、管理员确认维护、CAS/备份/合并受管键、校验、原子写入、必要重启及Docker/容器验证。保留无关键，外部配置或启动参数冲突拒绝；逐机维护写锁与部署/启停互斥，维护期间避免误换机。unknown先核对；配置恢复与业务恢复分别报告，映射/认证不涉及daemon时不重启。
+
+```mermaid
+flowchart TB
+  sources["商店 / 自定义新版本"] --> release["中心：不可变发布 / 逐集群授权"]
+  release --> prepare["Agent：候选预热 / 本机核验"]
+  profiles["全局→集群→机器镜像源 / 凭据范围"] --> prepare
+  prepare --> cache["可选仓库应用 / 已有共享缓存"]
+  prepare -->|已有镜像源 / 按策略拉取| upstream["授权上游仓库"]
+  cache -->|显式允许回源| upstream
+  prepare --> rollout["逐集群升级 / 故障接管"]
+  rollout --> health["实际镜像 / 健康回执"]
+  health --> release
+  profiles --> maintenance["预检 / 确认维护 / CAS / 必要重启 / 验证"]
+```
+
+### 59.6 存储、阶段与验证边界
+
+中心SQLite增加发布、更新源/检查/策略、准备策略/逐机状态、profile/维护计划、registry origins/集群reader映射、网站账号组及不可变hash版本，扩展逐集群发布指针；仓库仍为普通application，不新增隐藏安装器。执行复用ops_platform_runs、系统日志outbox和有效Agent租约，中心无Docker socket，AI不批准。基础预热/更新P1无需仓库，网站鉴权独立P1；仓库应用为用户按需开启，公网依赖网站鉴权，P2限定自动更新。真正P2P及多写高可用/自动数据迁移不在首版。验收无仓库基础、双节点断网预热、多集群单写源/摘要分发、内网匿名边界、网站密码访问和Registry客户端；分别测恢复各阶段，不预称固定秒数。详见 specs/059-service-image-lifecycle/。
+
+### 59.7 系统仓库登记、唯一写入源与集群缓存（首版）
+
+独立“私有镜像管理”模块为空时引导安装Docker Registry 3.0.0，明确选择集群、单台机器、与集群节点一致的私有监听IP及资源。宿主createSystemApplication和SQLite ops_system_applications登记系统身份，全局application固定sys-docker-registry，每个集群可配置一个固定部署；普通业务可部署多套Registry，但系统不会按镜像名或用户标记接管。网站网关固定sys-openresty；后端保留sys-前缀。旧OpenResty仅迁移当前名称并记录旧别名，既有引用依赖稳定应用ID，实例、卷和历史revision保持不变。
+
+cluster.spec.image_cache.enabled是唯一开关，集群编辑和镜像部署页共用同步逻辑；未登记系统部署不能开启。开关更新对应仓库冻结配置并提交部署，忙碌时保存pending并由调度重试，不重启已有业务容器。每集群私库可push；缓存开启时增加Docker Hub缓存和必要的选定源缓存，独立进程/端口/持久目录，缓存TTL 168h，不预取全量镜像。Registry v3调试监听绑定容器loopback的临时端口，避免和缓存端口冲突。缓存进程初始化仍依赖其上游可访问，仓库不提供高可用或自动迁移。
+
+对外发布入口在一个已登记部署上选择写入集群，自动关联普通website并按需确认安装/扩展OpenResty，使用域名、证书和Basic账号。网站固定一个集群和registry命名端口；普通网站编辑不能关闭该入口的HTTPS/鉴权或改接其他后端。独立私库不自动复制或轮询接收push。首版拒绝更换已有仓库机器、内网IP或已选写入集群，避免把空库当成原仓库。
+
+内网监听限私有IPv4、ULA或loopback字面地址，管理员明确确认可信网络；内部匿名可读写，实际网络/防火墙隔离由部署方维护，不提供同网账号或repository级权限。公网使用HTTPS+Basic并剥离转发到上游的Authorization，上传保留URI、相对Location和流式请求，DELETE关闭。DNS由现有网站功能或外部维护，强项目隔离可使用独立业务仓库。
+
+```mermaid
+flowchart TB
+  enable["私有镜像模块 / 选集群与明确机器"] --> regapp["宿主登记系统仓库 / 固定名称"]
+  regapp --> origin["A集群：选定私库写入源"]
+  regapp --> reader["B集群：独立私库与源缓存"]
+  ci["构建机 / 唯一push域名"] --> public["A入口：HTTPS + 网站Basic"]
+  authsets["网站内嵌用户 / 冻结hash"] --> public
+  public --> origin
+  internal["可信私网免鉴权 / 含push权限"] --> origin
+  origin --> nodea["A Agent：校验并导入镜像"]
+  origin -->|同摘要pull-through缓存| reader
+  reader --> nodeb["B Agent：校验并导入镜像"]
+```
+
+### 59.8 网站全站与路径密码访问（首版）
+
+website.spec.auth为off/basic、realm和内嵌用户，location.auth为inherit/off/basic；旧网站默认关闭。宿主用已有bcryptjs生成bcrypt哈希并加密保存在资源及不可变revision中，密码只写，留空仅保留同名用户原hash；公开资源只含has_password。首版不增加独立账号组管理或pull/push角色分权。
+
+配置与htpasswd一体下发至明确网关Agent的有效lease，仅新operations.platform.website-auth.v1能力可领取。Agent在受管私有目录生成口令文件，nginx -t后原子切换、reload与验证，失败按旧指针恢复。匿名401与随机运维凭据的本机正向探测同时验证；该运维凭据只存在Agent私有文件，探测使用真实静态文件访问阶段，不用提前return替代鉴权。实际TLS证书指纹及版本仍沿用原验证。
+
+编译器拥有auth_basic、用户文件路径和satisfy all，片段不能覆盖；受保护路径与直接return、CORS、代理缓存或自定义片段组合会被拒绝。全站Basic要求所有域名绑定HTTPS，路径可显式关闭或单独设置账号，受保护代理默认清除Authorization，不影响上游健康检查或因正常401摘除服务。口令hash及密码不进入公开预览、日志或AI。
+
+### 59.9 Agent镜像导入、状态与验收边界（首版）
+
+业务workload.apply在集群开启缓存且镜像命中Docker Hub/所选发布域名时，获得宿主登记的端点映射及operations.platform.image-cache.v1能力要求。所选源集群拉取自身发布域名的镜像时，即使缓存关闭也直接使用本集群私库；其他集群须开启缓存并安装系统仓库才能使用该内部路径。未知业务仓库保持原拉取路径；系统Registry和OpenResty引导镜像跳过此桥。领取时重新比对当前集群开关、登记端点与映射，过期策略不下发。
+
+Agent以Registry V2直接读取明确私有IP的HTTP端点，不改Docker daemon mirror/insecure-registry或重启Docker，不跟随响应重定向，不消费仓库返回的任意URL。校验index/平台manifest、config、压缩blob及解压层diff ID，生成Docker导入归档，再核对导入后的平台/rootfs和Docker image ID。兼容Docker经典存储及containerd存储不同的ID语义；Compose使用实际导入ID且pull_policy=never。单镜像下载≤2GiB、解压≤4GiB、5分钟截止，保留磁盘余量并清理临时文件。缓存失败默认按策略回源且回执记录来源/错误；内部禁止回源模式失败，不偷偷走公网。该模式只限制Agent回源，pull-through服务仍可向自身上游取内容，不宣称整个集群隔离公网。
+
+新增SQLite系统登记、旧别名、单例外部入口设置；沿用资源revision、逐集群desired/applied、实例端口、加密私有载荷、Agent租约及unknown写锁。真实Docker已验证Registry push、代理缓存、停上游后digest命中、Agent导入及Compose启动；真实OpenResty验证HTTPS、匿名/错密401、正确密码200、路径关闭及Authorization剥离。浏览器三轮验证保存、刷新、缓存双入口、版本冲突保留输入与关联网站。验收为同物理Docker宿主上的隔离进程，不能当作生产多地域容灾、缓存进程断网重启、跨机数据迁移或Docker Hub限流验收。证据及未实现路线见同一SDD目录。
+
+## 57. Agent Docker 即时清单与容器操作（SDD 057）
+
+主机 Docker 清单独立周期采集，不等待平台应用日志积压。失败保留最近成功清单及最近尝试时间，区分 CLI 缺失、socket 权限不足、daemon 不可达、命令超时与通用失败；失败原因优先于过期提示。平台应用与全部 Docker 仍分开显示，外部容器不会自动成为平台部署。
+
+管理员点击立即采集后，中心按稳定主机 ID 解析当前 Agent，验证在线状态和 docker.inventory 能力，使用原 AgentJobStore 下发单动作 Docker 任务。页面定期读取缓存，只有手动采集才创建任务；界面展示任务进度与终态。任务回执中的新清单和认证心跳按观测时间合并，旧心跳不能覆盖更新的即时结果。
+
+启动、停止、重启要求管理员明确确认主机、完整容器 ID 和影响；目标必须存在于新鲜清单。中心保存 actor 与幂等 request_id，同主机活动任务互斥。Agent 通过既有 control 凭据拉取任务，使用 shell=false、固定 default context、有界输出和超时执行，复用节点写锁，并在变更前后核对容器 ID 和状态，再读取完整清单。
+
+回执只保存白名单状态、诊断和清单，绑定原动作、容器和任务时间，丢弃原始 CLI 输出与其他字段；页面响应不包含 lease。未领取超时取消，领取后中断或验证失败保留 unknown 和写锁，禁止自动重放。平台调度器可能恢复平台应用期望状态；不增加容器删除、任意 shell、中心 Docker socket、SSH 回退或 AI 执行权限。
+
+本节对应 SDD 057，需升级中心和 Agent 才启用即时能力；旧 Agent 周期心跳兼容，页面明确提示升级。实现与验证见 specs/057-docker-agent-controls/；是否已发布以发行记录为准。
+
+```mermaid
+flowchart LR
+  User[管理员 / 确认操作] --> Center[主机绑定 / 能力 / 幂等]
+  Center --> Jobs[(SQLite 任务 / 有效租约)]
+  Jobs --> Agent[Agent / 节点写锁]
+  Agent --> Docker[本机 Docker / 状态验证]
+  Docker --> Receipt[安全回执 / 最新清单]
+  Receipt --> Center
+  Docker --> Periodic[独立周期清单 / 认证心跳]
+  Periodic --> Center
+```
+
+Doca 已保存并回读，原有 575 个块完整保留；新图 7 节点、8 连线与正文核对见 `specs/057-docker-agent-controls/evidence/doca-readback.json`。
+
+## 62. 应用管理与命名端口配置（SDD 062）
+
+应用管理按“已安装 / 应用商店”组织。已安装应用集中展示版本、部署目标、状态与已分配端口，配置、部署、停止、移除容器、安装记录和监控日志映射既有授权动作。未知结果先核对；停止与移除展示对象和影响，持久化数据继续保留。商店的基础安装参数包含全部命名端口的宿主到容器映射，资源及多集群配置收入高级设置。界面不提供未实现的升级、备份或数据删除能力。
+
+商店安装API可接收host_ports命名宿主端口覆盖和普通应用listen_ip（全部网卡或仅本机），旧parameters.port兼容。application.deployments可选host_ports仅覆盖已声明端口名的宿主端口；容器端口、服务与协议仍由应用声明。各集群独立保存和冻结修订，经原project合成有效端口，再进入原有事务预留、Agent现场冲突检查、Compose及就绪回执。0表示自动分配，显式固定端口冲突失败；非法名称、非整数、范围外及同协议重复固定端口在保存前拒绝。无新表、Agent协议、任意命令或凭据权限。
+
+系统镜像仓库的registry、hub-cache和origin-cache分别映射容器5000、5001和5002，宿主端口按集群可配置。专用控制器返回配置供回显；省略覆盖字段继承该集群旧配置，新部署继续默认自动分配，缓存开关或资源更新不丢失固定端口。固定机器与私网监听IP、系统应用登记身份、外部网站与缓存命名端点路径保持。实际可用状态仍以执行和健康回执为准，不把配置保存或端口预留当成安装成功。
+
+实现与验收见specs/062-application-management/；此设计不代表已发布或已更新线上平台。
+
+## 64. 机器地址统一来源与本机镜像复用（SDD 064）
+
+所有受管机器的服务私网与公网地址统一由机器管理提供。machineServiceAddresses 读取当前主机与 Agent 身份匹配的网卡快照，排除 loopback、Docker/容器桥、veth 等接口，优先 IPv4 再 IPv6；服务连接优先私网，DNS 只选公网。SSH 目标域名只用于连接，不推导服务 IP；平台观察到的代理来源 IP 也不参与服务取址。无网卡快照的历史数字 IP 可兼容，未纳管的旧 Agent 保持原路径。
+
+现代集群仅保存机器选择与 CPU/内存覆盖，不再保存地址副本，表单只读展示机器管理地址。应用容量、调度、服务发现、网站网关与 DNS，以及有受管机器绑定的旧 node_pool/gateway_group 路径共用该来源；历史 nodes.address/public_address 不覆盖当前机器地址。具体端口绑定和部署回执仍代表已部署事实，指定 IP 变更经重新部署生效。
+
+系统镜像仓库与普通应用一样选择集群、机器、宿主端口、资源与缓存开关，取消手工内网 IP 和网络确认项。部署从机器管理选择真实私网 IP，未发现可供其他机器使用的私网则监听 127.0.0.1，安装仍可执行且页面说明仅本机可用。仓库固定原机器和持久目录，地址变化不等于数据迁移；实际实例绑定 IP 与分配端口组成端点，同机 OpenResty 访问指定绑定 IP，通配绑定才使用 loopback。
+
+中心为每个消费机器投影缓存策略，loopback 缓存只下发给仓库所在机器，跨机缺少可达私网端点时继续使用原镜像源；领取租约时重新核对机器与当前策略。已登记绑定不会因机器管理更新而被提前替换，重新部署后才登记新端点。公网访问继续通过已有 HTTPS/Basic 网站入口，不自动开放匿名公网 HTTP 仓库。
+
+Agent 在缓存准备阶段先检查本机 Docker 所需镜像引用、平台和不可变 digest，命中则固定本地 image ID 与 pull_policy=never，零远程请求；未命中才访问缓存。仓库名称不同而内容相同，可通过 RepoDigest 或已验证 config 身份复用本机镜像，至多读取 manifest/config，无需重复下载层和导入。缓存缺失和失败沿用既有回源规则；Registry 与 Docker 各自持久化，不共用数据目录、不修改 Docker daemon 全局配置。
+
+实现与验收见 specs/064-machine-service-addresses/。本节更新 SDD 059/062 的手工仓库地址和集群地址副本规则，无新增表、凭据或 Agent 任务类型；部署状态仍以执行和健康回执为准。真实 Docker 本机复用、HTTP/SQLite 定向回归和浏览器验收仅说明本次验证范围，不代表线上容器已更新。
+
+## 66. 应用商店扩展与 DBX（SDD 066）
+
+应用商店由中心维护本地固定目录，包含原有4个应用与新增27个应用，共31个，分类为数据库、中间件、DevOps、AI、工具、网站与网关；工具仅DBX。模板公开元数据、安装参数校验与服务端配方构建分离，列表不访问外部市场。安装仍经管理员确认、加密资源及不可变修订、逐集群部署、端口预留和Agent真实回执，不新增市场服务或数据库表。
+
+新模板声明固定镜像、官方文档、中英文说明、参数类型及边界、默认资源和运行前提。Kafka广播地址与固定宿主端口一致；Nacos gRPC端口为API端口+1000；RocketMQ固定Broker相关端口。依赖稳定地址或GPU的模板限制手动指定机器；Harbor仅支持amd64并在服务端核对目标架构。桌面使用分类标签，窄屏使用可访问的分类选择。
+
+每套安装的Compose网络与命名卷由实例项目隔离，不使用全局卷名、宿主Docker socket或特权容器。Dify包含数据库、缓存、向量库、插件及经代理联网的代码沙箱；FastGPT包含Mongo副本集、向量库和模型网关，需提供已有S3兼容存储、两个不同且权限正确的Bucket；Harbor由官方prepare生成配置和共享密钥，依赖Engine26及Compose2.26的卷子路径。GPU推理显式声明NVIDIA设备；模型及业务账号按应用引导另行配置。多容器资源按每容器设定，集群预留总和。
+
+一次性初始化通过授权Compose清单中的io.lightmoni.platform.oneshot标签声明，只有对应容器正常退出0且未OOM才完成；仍须全部常驻服务存在、运行且健康。领取这些任务要求operations.platform.oneshot.v1，旧Agent不能领取；应用启动等待有界延长至300秒。后续inspect从受管有效清单核对初始化身份，不把任意退出容器当成功；失败恢复及unknown写锁沿用原规则。
+
+密码和API Key只经安装请求进入受保护环境与加密修订，公开回读脱敏；命令和受管源码不插入实际秘密。Harbor在容器内生成权限受限的配置和密钥，凭据按字面值导出，避免shell求值。DBX使用独立数据卷与必填访问密码，不自动连接LightMoni内部数据；第三方AI应用不自动取得平台凭据、MCP或控制权限。
+
+本节对应SDD066；配置验证、真实DBX与初始化冒烟、浏览器和上游源码验证分别记录。完整Harbor平台、GPU推理及全部第三方应用的真实业务验收不因模板上架而视为完成；本轮不自动发布镜像、更新线上容器或合并主干。
+
+## 68. 应用 Logo 与高级 YAML（SDD 068）
+
+应用商店、已安装应用与详情共用品牌图形，31个固定模板的图形随网页打包并按稳定template_id或系统role关联；旧安装自动使用对应图形。素材来源、固定提交、摘要及许可随源码保留，网页提供素材归属入口，不在运行时访问第三方图片CDN。自定义应用默认通用图标，可上传PNG/JPEG/WebP并预览、替换或移除。
+
+Logo是中心展示元数据，独立存于既有SQLite的ops_application_logos，包含应用标识、图片内容、独立版本、摘要与更新主体。创建应用和可选Logo使用同一事务，失败整体回滚；替换和移除按独立版本比较，移除保留版本防止并发覆盖，删除应用登记时清理图片。公共资源仅投影Logo版本与受保护URL，不返回正文；Logo不进入应用spec、配置修订、部署快照或Agent任务，单独修改不改变配置revision或触发部署。
+
+浏览器限制原图5MiB及4096像素边长，等比缩至256像素PNG；中心限制256KiB和512像素，核对PNG签名、块结构、CRC、有界解压、行数据和过滤类型，并重新编码去除附加元数据。用户SVG、远端URL、伪造或损坏图片不接受。图片读写沿用管理员权限，固定image/png、nosniff、沙箱CSP、私有缓存及内容ETag，先鉴权再响应304；版本摘要不符或图片已移除返回404。
+
+创建与修改应用均提供高级YAML。Compose对象以规范YAML展示；单容器高级文档使用services.app并反解已有支持字段，保持container类型、受管挂载、健康与部署信息，多服务继续使用Compose类型。保存后从规范对象生成YAML，不另外保存可旁路脱敏的原始文本；解析和字面环境规范化先于脱敏占位恢复，原服务与键的[redacted]恢复旧值，新键占位拒绝，模板扩展锚点在解析后移除。
+
+高级YAML从services各自的ports提取容器端口与协议，expose仍仅为内部端口。托管模式忽略YAML的published并经既有预留和有效配置投影分配宿主端口，相同端口保留旧或表单的监听范围；手动模式采用YAML发布端口。按服务、容器端口和协议保持既有端口名称及应用协议，新端口生成稳定名称；网站和健康检查引用继续受原校验约束。普通表单与商店安装保持原顶层端口规则。
+
+本节对应SDD068。管理员和Agent的既有权限、镜像执行、持久数据及失败语义不变；Logo不新增对象存储、宿主文件通道或Agent能力，YAML不能绕过既有环境、文件、挂载、资源与端口边界。验收区分真实HTTP/SQLite和浏览器交互、受控网络失败与远端Agent执行，不把前端预览或配置验证称为所有第三方应用实际运行。
+
+## 第60章 主机执行权限与独立运维执行器（SDD 060，目标）
+
+本章为尚未实现的目标设计；当前普通 Agent 没有默认 Docker 或 root 权限。本轮只交付设计，详细研究与 HLD/LLD 见 [主机执行权限设计](privileged-executor.md)，规格和目标契约见 [SDD060](../specs/060-privileged-executor/spec.md)。
+
+### 60.1 驱动目标与方案取舍
+
+基础监控和普通脚本保持非 root，同时支持受控容器运维，以及管理员明确批准的 root/指定账户脚本。参考 Cockpit 的普通/特权进程隔离和 1Panel 的主机运维覆盖；不把整个 Agent 改成 root，也不加入 Docker 组。Docker socket 权限近似宿主 root，同 UID 的普通脚本也会继承，按 API 方法过滤不足以校验危险挂载与容器参数。
+
+### 60.2 HLD：独立身份、统一任务记录
+
+```mermaid
+flowchart TB
+  Entry[人工 / 平台AI / 外部MCP] --> Plan[中心提案与任务授权]
+  Plan --> Jobs[统一task run / job / ops记录]
+  Agent[普通Agent] -->|control：仅普通任务| Jobs
+  Executor[root执行器] -->|独立签名出站请求| Jobs
+  Jobs -->|签名计划和在线许可，响应返回| Executor
+  Agent --> Normal[采集 / 普通脚本 / 遥测]
+  Executor --> Policy[root私有策略 / journal / fence]
+  Policy --> Container[受限结构化容器操作]
+  Policy --> Script[明确批准的提权脚本]
+```
+
+新增 lightmoni-executor root 服务；独立出站 HTTPS，无通用本地命令 socket，不开放入站端口。task run 为统一根追踪，job/ops run/deployment记录执行主体、安装与策略代次。普通 Agent control不能claim、下载payload/制品或提交root job的events/result。执行器持有root私钥并独立签名请求/回执，普通Agent不持有该身份。SDK直报和Agent遥测链路不变。
+
+用户只登记一套SSH账户；安装器创建lightmoni-agent普通账户，独立执行器使用系统已有root，不创建第二套root登录账户或要求第二份密码。两种常驻运行身份与SSH引导账户分开，日常执行不依赖保存root SSH密码。
+
+代码与发行统一：同一代码库和版本化发行包提供agent/privileged_executor两个固定入口，共用协议、执行状态机、journal实现、制品下载校验及操作适配器；独立组合根通过类型化ExecutionContext注入执行主体、身份、策略与状态目录。共用代码，不共用凭据/journal/锁；两服务可独立启用并激活兼容版本，root使用的程序及路径祖先均root所有。
+
+复用状态机机制而保留脚本退出码/部署健康等业务终态规则；共用洁净环境、超时、输出和尽力终止组件。文件写入/切换等非command副作用同样校验路径与资源策略，不只保护spawn；类型化context不能替代OS身份和真实验权，不能用isRoot布尔值放行。
+
+权限由进程实际UID/GID/附加组决定，不能通过改SSH密码、平台token或role参数提权。普通角色常驻run/轮询/采集以UID=0启动应在创建runner前拒绝，version/check/configure等固定离线管理命令仍可由root安装器调用；特权角色必须UID=0并具备独立root身份和本地策略。共享适配器也必须经过主体/能力/grant校验，不把完整普通Agent直接用root运行作为支持方案。两个unit分别定义写目录/沙箱/子进程策略，不能仅修改User后复用普通Agent unit。
+
+公共journal须满足root通道严格持久化：写入/fsync失败不产生副作用，损坏不当空任务，unknown上报失败保留记录和fence。两角色current/previous/fingerprint及回退兼容性独立；物理共享只读发行时，GC/卸载同时检查双方引用和在途/unknown，不能只看普通Agent状态。
+
+### 60.3 登记提示与实际权限
+
+登记时提示安装需要root或支持所需免交互sudo的账户；允许无提权用户先登记资产/登录终端。预检返回root/sudo_noninteractive/unavailable/unknown并绑定目标与凭据revision；引导前再核验。首期不支持交互sudo，不复用SSH密码，不自动修改sudoers。引导账户只用于安装/恢复，普通Agent仍是lightmoni-agent。容器管理与允许提权脚本默认关闭，独立审阅启用；授权开关和实际ready/unavailable/blocked/unknown分开，显示签名观察的新鲜度。
+
+### 60.4 LLD：root所有权与信任
+
+代码、unit、信任公钥、executor私钥、本地策略、最高策略代次、防重水位、journal/fence及受管资源清单全部root所有。配置和状态目录0700、秘密文件0600，不复用Agent可写数据目录、锁、Compose/Nginx/证书或暂存输入。经批准的SSH引导用独立一次性enrollment绑定machine/Agent安装代次与executor公钥；普通control不能注册或替换root身份。中心实例与HTTPS origin固定，拒绝跳转、任意Docker context和调用者下载URL。
+
+### 60.5 LLD：签名与在线执行许可
+
+```mermaid
+flowchart TB
+  Claim[执行器独立签名claim] --> Signed[中心签名完整不可变计划]
+  Signed --> Verify[验签 / 绑定 / 本地策略检查]
+  Verify --> Intent[持久step摘要与nonce]
+  Intent --> Permit[在线重验授权 / 获取30秒单次许可]
+  Permit --> Consume[持久消费许可 / 写入intent]
+  Consume --> Effect[固定操作或已批准脚本]
+  Effect --> Journal[持久结果 / 独立签名回执]
+  Effect --> Unknown[断网 / 重启 / 结果不明：unknown]
+  Unknown --> Inspect[保留锁 / 显式只读核对]
+  Inspect --> Journal
+```
+
+固定Ed25519签名绑定center/machine/agent/executor、job/task/operation、租约、请求/制品摘要、资源revision、授权与策略代次、有效期和运行上限。请求另签method/path/body摘要与有期request_id；持久去重，不能重放claim取得新lease。每个新副作用步骤在线取得最长30秒单次permit，45秒租约每15秒续租。已签permit存在最多30秒撤权启动窗口；失联不开始新步骤，已开始外部动作可能继续，不能声称即时撤权。
+
+请求签名时差容忍不用于permit。执行器在nonce请求发出前以包含系统挂起的单调时钟固定最长30秒deadline，响应只能缩短、不重新计时；重启/新boot、过迟响应或时间不可证时废弃许可，墙钟慢钟/回拨不得扩窗。
+
+副作用前fsync intent/消费许可，后持久回执；重复任务返回原journal。执行中重启或daemon超时进入unknown，保留资源/lifecycle写锁，不因PID消失、lease到期或普通Agent报空闲自动重跑。提权脚本首期占整机写锁；普通脚本不是可信沙箱。晚到回执不覆盖unknown或新revision，显式核对后才解除。
+
+### 60.6 容器管理能力
+
+container.managed.v1要求中心授权和本地策略同时开启，固定本机Docker Engine endpoint。首期仅受管资源的有限生命周期、状态/有界日志和受限Compose；镜像固定digest，配置在root端再次验证。禁止privileged、host namespace、任意设备/cap_add、安全绕过、宿主socket、任意宿主路径、外部未归属资源、build/include/extends/env_file和未知字段。路径祖先/绑定入口root拥有且不可替换；资源归属以root清单+daemon/Docker不可变ID为准，不只看标签。已有外部容器只读观察；网关host network等需后续独立profile，不能偷渡为普通容器权限。
+
+卷固定由root以受信local driver创建，禁止用户driver_opts/plugin/DriverConfig把任意宿主bind伪装成named volume；禁止container:/service: namespace借用，禁止关闭默认seccomp/AppArmor/userns隔离。能力依赖不满足时阻塞，不以宽松配置降级。
+
+### 60.7 提权脚本能力
+
+script.elevated.v1独立默认关闭。普通脚本不自动sudo或升级身份；用户选择root/允许的系统账户后，审阅完整代码、解释器、参数、cwd、环境/秘密版本引用、明确主机集合、实际UID/GID/补充组、超时与输出上限。每主机一次性授权绑定精确快照、执行器与安装/策略代次；修改或重试重新批准，unknown先核对，账户变化拒绝、不回退root。AI/MCP只能提案，不能自行批准。
+
+root自有staging与专用运行单元启动固定解释器，清理继承环境/FD，避免泄露执行器秘密。批准root脚本等同信任其整机权限，它能改动执行器、密钥与日志；签名只绑定批准内容，不构成root沙箱。取消/超时尽力停止，exit 0不证明业务健康或主机可信。首期仅立即一次性执行，禁止at/interval/cron和自动重试；后续定时提权需固定版本、固定主机与账户、有限有效期和每次在线重验，标签新增主机不自动纳入。
+
+每主机grant在中心事务reserved(run_id)到consumed，禁止复制授权到新尝试；所有派发、领取、启动与续租均硬性验权。脚本文本摘要不保证所调用依赖或网络内容固定。stdout/stderr及容器日志按可能含未知秘密的敏感正文单独加密、每运行合计最多256 KiB，仅显式授权管理员读取，不进普通日志/遥测/AI/MCP响应；已知秘密仅尽力脱敏。
+
+### 60.8 撤权、升级、回退与卸载
+
+关闭先提高中心策略代次、停止新派发，再由执行器持久确认和处理在途状态；未确认显示disabling/unknown。关闭容器权限不停止业务容器、不重启Docker；关闭脚本权限不代表其已发生副作用被撤回。执行器可仅保留身份/策略/状态循环；重新启用需新审批。
+
+首次安装或失去可信执行器时通过有效SSH引导；已有可信执行器可按批准的固定策略管理动作应用更高代次策略、重新验收，无需重新enrollment或保存SSH凭据。修复失信安装仍走SSH，不能用普通control恢复root信任。
+
+执行器文件、身份、策略及持久journal纳入安装/升级/回退/SSH恢复保护。切换前冻结/核对在途与unknown；程序回退仅恢复程序/unit及兼容静态配置，绝不恢复旧journal/fence、防重、已完成运行、已消费授权、身份/密钥撤销水位或最高策略代次。状态丢失/恢复旧备份须重新建立中心fencing代次并核对现场，不理解当前状态则停止执行。标准/恢复/离线卸载清理平台拥有的root服务、入口、授权和密钥；保留Agent数据不保留宿主权限。业务容器/卷/发布数据默认保留，外部组/ACL不擅自清理；手动离线卸载不能冒称中心身份已撤销。
+
+### 60.9 实施顺序与验证
+
+先落独立身份、授权与全接口分流、预检/状态和生命周期，再分别交付受限容器及一次性提权脚本，最后迁移网站/证书/systemd/备份/自动协调和有期限定时提权。所有旧高级入口未迁移时拒绝特权执行，不能保留普通control读取root私有payload的旁路。任务记录统一，现有hook不能顺带root；更新不自动开启新权限。
+
+实现验收覆盖root/sudo/无提权、默认关闭、主体冒充、计划/上下文篡改、重放、危险Compose、账号组变化、未知结果、撤权和生命周期。真实Linux/Docker验收另记；本轮设计审查与Doca结构读回不代表这些能力已上线。
+
+## 69. 主机 Docker 环境与补装（SDD 069）
+
+主机列表从已认证 Agent 的 Docker inventory 与即时采集回执投影环境状态，区分可用、未安装、Compose 缺失、服务不可用、权限不足、待检测及过期。判断新鲜度使用最近尝试时间和 Agent 在线状态；无观测或过期不能判为未安装。应用检查 Docker 时的命令不存在错误新增白名单 docker_cli_missing，旧记录只提供检查入口。
+
+管理员从主机列表、应用与 Docker 清单、应用安装失败抽屉进入同一环境面板。补装目标绑定所选执行的 Agent 对应平台主机，明确确认后复用有效可复用 SSH 凭据与同一握手主机公钥校验；凭据仅运行时解密。新增 machine_docker_installations 保存请求幂等标识、主机/Agent/凭据绑定、操作者、状态、阶段、静态错误码和时间，不保存命令输出或秘密。
+
+中心通过固定 SSH 命令交给 root 持有的 systemd transient unit 执行有界安装，进度保存在 root 专属目录。自动安装限 Ubuntu/Debian、amd64/arm64、systemd：使用 Docker 官方签名 apt 仓库安装缺失 Engine/Compose，拒绝冲突包，不主动覆盖升级已有 Engine，不删除容器或数据，对绑定身份匹配的标准受管 Agent 通过固定 systemd drop-in 授予 docker 补充组并重启 Agent；确认面板说明该影响，不更改系统用户组或 socket 权限，不重启已有 Docker daemon。其他系统给官方手动指南。
+
+安装期间中心 busy 和持久化状态阻止并发 SSH 生命周期、Agent 作业与主机任务领取；远端安装以 flock 排斥。关闭面板不取消独立后台安装，平台重启或连接结果不确定时保留 unknown 闸门；管理员可只读核对该操作的远端状态，不能自动重新安装。成功表示主机验证 Engine/Compose，Agent 能否访问由后续真实采集独立核对。
+
+补装不会重新创建应用或自动重部署。安装面板提示采集并验证 Agent 权限后，回到原应用显式重新部署，旧失败记录保留；权限不足独立显示权限修复建议，不能误判为缺失。新增路由仅管理员可写，AI 工具权限不变，Agent Docker 访问配置只通过管理员确认的固定 SSH 流程进行。SDD 069 的验证分别记录 HTTP/SQLite/SSH fixture、浏览器与真实 Linux 安装范围。
+
+```mermaid
+flowchart LR
+  A[主机列表 / 应用失败记录] --> B[环境状态与明确确认]
+  B --> C[受保护 SSH / 主机身份校验]
+  C --> D[root systemd 安装 / 持久结果]
+  D --> E[Engine + Compose 验证]
+  E --> F[Agent 采集 / 显式重新部署]
+```
+
+契约与验收见 `specs/069-docker-environment/`；Doca 同步保留现有图块与无关内容，新增本节原生流程图后回读节点、连线及目标段落。未执行真实 Linux 软件包安装时，不能将受控 SSH fixture 当作真实安装证据。

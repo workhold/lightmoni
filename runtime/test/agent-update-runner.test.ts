@@ -1,18 +1,54 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { runInNewContext } from "node:vm";
 import { readAgentRelease } from "../src/agent/release.js";
-import { agentUpdateStartCommand, parseAgentUpdateProbe, parseAgentUpdateStatus } from "../src/server/machine-agent-update-ssh.js";
+import { agentUpdateProbeSource, agentUpdateStartCommand, parseAgentUpdateProbe, parseAgentUpdateStatus } from "../src/server/machine-agent-update-ssh.js";
 const repo = resolve(import.meta.dirname, "../..");
 const { AgentMaintenance } = await import(pathToFileURL(join(repo, "deploy/agent/update-runner.mjs")).href);
 const sha = (v: string | Buffer) => createHash("sha256").update(v).digest("hex");
 
-function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; failRollback?: boolean } = {}) {
+/** Execute the production SSH probe against the same isolated installation as
+ * the executor. Only fixed paths, root ownership and command effects are mapped;
+ * the fingerprint implementation itself is not reimplemented or replaced. */
+function sshProbe(f: ReturnType<typeof fixture>) {
+  let source = agentUpdateProbeSource;
+  for (const name of ["/opt/lightmoni-agent", "/etc/systemd/system/lightmoni-agent.service", "/usr/local/bin/lightmoni-agent", "/var/lib/lightmoni-agent", "/run/lightmoni-agent-lifecycle.lock"])
+    source = source.replaceAll(name, f.p(name));
+  const fixturePath = (filename: string) => {
+    if (filename !== f.root && !filename.startsWith(f.root + "/")) throw Error("probe attempted a non-fixture read");
+    return filename;
+  };
+  let stdout = "";
+  const process = { arch: "arm64", stdout: { write(value: string) { stdout += value; } }, exitCode: 0 };
+  runInNewContext(source, { process, require(name: string) {
+    if (name === "node:path") return path;
+    if (name === "node:crypto") return { createHash };
+    if (name === "node:child_process") return { execFileSync: f.maintenance.command };
+    if (name === "node:fs") return {
+      readFileSync: (filename: string, options?: any) => fs.readFileSync(fixturePath(filename), options),
+      realpathSync: (filename: string) => fs.realpathSync(fixturePath(filename)),
+      existsSync: (filename: string) => fs.existsSync(fixturePath(filename)),
+      lstatSync(filename: string) {
+        if (filename === "/" || f.root.startsWith(filename + "/"))
+          return { uid: 0, mode: 0o755, isSymbolicLink: () => false, isDirectory: () => true, isFile: () => false };
+        const info = fs.lstatSync(fixturePath(filename));
+        info.uid = 0; // Production paths are root owned; fixtures use the test user.
+        return info;
+      },
+    };
+    throw Error("unexpected probe module " + name);
+  } }, { timeout: 1000 });
+  return parseAgentUpdateProbe(stdout);
+}
+
+function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; failRollback?: boolean; oldHelper?:boolean; targetHelper?:boolean } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "lm-update-")));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const p = (name: string) => join(root, name);
@@ -21,6 +57,11 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   const old = p("opt/lightmoni-agent/releases/old"), arch = "arm64";
   fs.writeFileSync(join(old, "node"), "synthetic trusted Node\n", { mode: 0o755 });
   fs.writeFileSync(join(old, "app/runtime/dist/agent/main.js"), "// old code\n");
+  if(options.oldHelper??!options.legacy){
+    fs.mkdirSync(p("usr/local/sbin"),{recursive:true,mode:0o755});
+    fs.writeFileSync(join(old,"uninstall.sh"),"#!/bin/sh\n# old offline helper\n",{mode:0o755});
+    fs.writeFileSync(p("usr/local/sbin/lightmoni-agent-uninstall"),"#!/bin/sh\n# old offline helper\n",{mode:0o750});
+  }
   fs.writeFileSync(join(old, "release.json"), JSON.stringify(options.legacy ? { version: "0.1.0", platform: "linux", arch, node_version: "24.15.0", requires: "glibc >= 2.28", node_sha256: "e".repeat(64) } : { version: "0.1.0", platform: "linux", arch, source_revision: "a".repeat(40), build_id: "old-build", state_schema: 1 }));
   if (!options.legacy) fs.writeFileSync(join(old, "installation.json"), JSON.stringify({ schema: 1, artifact_sha256: "1".repeat(64) }));
   fs.symlinkSync(old, p("opt/lightmoni-agent/current"));
@@ -36,6 +77,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   fs.writeFileSync(join(runtime, "release.json"), JSON.stringify(manifest));
   fs.writeFileSync(join(runtime, "node"), "synthetic new Node\n", { mode: 0o755 });
   fs.writeFileSync(join(runtime, "app/runtime/dist/agent/main.js"), "// new code\n");
+  if(options.targetHelper!==false)fs.writeFileSync(join(runtime,"uninstall.sh"),"#!/bin/sh\n# new offline helper\n",{mode:0o755});
   fs.writeFileSync(join(runtime, "padding"), randomBytes(4096));
   fs.writeFileSync(join(packageDir, "lightmoni-agent"), "#!/bin/sh\n# new launcher\n", { mode: 0o755 });
   fs.writeFileSync(join(packageDir, "lightmoni-agent.service"), "new unit\n");
@@ -78,6 +120,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
 
 test("same-version upgrade is bound to source/build/digest and commits only a new boot; identity, credentials and live queue survive", async t => {
   const f = fixture(t), request = f.request(), before = f.maintenance.probe();
+  request.expected_fingerprint = sshProbe(f).current.fingerprint;
   const accepted = await f.maintenance.start(request);
   assert.equal(accepted.status, "accepted");
   assert.equal(fs.statSync(f.p("opt/lightmoni-agent/updates/" + request.operation_id)).mode & 0o777, 0o700);
@@ -92,10 +135,16 @@ test("same-version upgrade is bound to source/build/digest and commits only a ne
   const probe = f.maintenance.probe();
   assert.equal(probe.current.artifact_sha256, request.target.artifact_sha256);
   assert.equal(probe.previous.fingerprint, before.current.fingerprint);
+  const ssh = sshProbe(f);
+  assert.equal(ssh.current.fingerprint, probe.current.fingerprint);
+  assert.equal(ssh.previous!.fingerprint, probe.previous.fingerprint);
   assert.equal(probe.lifecycle_locked, false);
   assert.equal(fs.statSync(join(fs.realpathSync(f.p("opt/lightmoni-agent/current")), "installation.json")).mode & 0o777, 0o644);
   assert.equal(parseAgentUpdateProbe(JSON.stringify(probe)).current.build_id, "new-build");
   assert.equal(parseAgentUpdateStatus(JSON.stringify(result)).status, "succeeded");
+  assert.equal(parseAgentUpdateStatus(JSON.stringify(result)).uninstaller_updated, true);
+  assert.equal(result.uninstaller_updated,true);
+  assert.match(fs.readFileSync(f.p("usr/local/sbin/lightmoni-agent-uninstall"),"utf8"),/new offline helper/);
   f.preserve();
 });
 test("unconfirmed upgrade automatically restores legacy program without restoring or losing live state", async t => {
@@ -118,6 +167,8 @@ test("failed new service restores previous files and service", async t => {
   assert.equal(result.local_health.service_active, true);
   assert.equal(fs.realpathSync(f.p("opt/lightmoni-agent/current")), f.old);
   assert.match(fs.readFileSync(f.p("usr/local/bin/lightmoni-agent"), "utf8"), /old launcher/);
+  assert.match(fs.readFileSync(f.p("usr/local/sbin/lightmoni-agent-uninstall"),"utf8"),/old offline helper/);
+  assert.equal(fs.statSync(f.p("usr/local/sbin/lightmoni-agent-uninstall")).mode&0o777,0o750);
   f.preserve();
 });
 test("failed restoration keeps lifecycle fence and durable rollback_failed receipt", async t => {
@@ -246,5 +297,79 @@ test("source service state is required and cannot be omitted or coerced", async 
   }
   assert.equal(fs.existsSync(f.p("opt/lightmoni-agent/updates/" + request.operation_id)), false);
   assert.equal(f.maintenance.probe().lifecycle_locked, false);
+  f.preserve();
+});
+
+test("an old target package retains the current offline helper without claiming synchronization",async t=>{
+  const f=fixture(t,{targetHelper:false}),request=f.request(),helper=f.p("usr/local/sbin/lightmoni-agent-uninstall"),before=fs.readFileSync(helper);
+  await f.maintenance.start(request);f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==="waiting_confirmation")f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});
+  const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,"succeeded");assert.equal(result.uninstaller_updated,false);assert.equal(parseAgentUpdateStatus(JSON.stringify(result)).uninstaller_updated,false);assert.deepEqual(fs.readFileSync(helper),before);f.preserve();
+});
+test("automatic restoration removes a newly introduced helper and its empty parent",async t=>{
+  const f=fixture(t,{oldHelper:false,failTarget:true}),request=f.request();
+  await f.maintenance.start(request);const result=await f.maintenance.worker(request.operation_id);
+  assert.equal(result.status,"rolled_back");assert.equal(fs.existsSync(f.p("usr/local/sbin/lightmoni-agent-uninstall")),false);assert.equal(fs.existsSync(f.p("usr/local/sbin")),false);f.preserve();
+});
+test("explicit rollback selects the retained program's offline helper",async t=>{
+  const f=fixture(t),first=f.request();
+  const complete=async(request:any)=>{await f.maintenance.start(request);f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==="waiting_confirmation")f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});return f.maintenance.worker(request.operation_id);};
+  assert.equal((await complete(first)).status,"succeeded");
+  const observed=sshProbe(f),rollback={...f.request(),expected_fingerprint:observed.current.fingerprint,action:"rollback",target:{...observed.previous},archive_path:undefined};
+  assert.equal((await complete(rollback)).status,"succeeded");assert.equal(fs.realpathSync(f.p("opt/lightmoni-agent/current")),f.old);assert.match(fs.readFileSync(f.p("usr/local/sbin/lightmoni-agent-uninstall"),"utf8"),/old offline helper/);f.preserve();
+});
+test("a redirected helper is refused before stopping the current program",async t=>{
+  const f=fixture(t),request=f.request(),helper=f.p("usr/local/sbin/lightmoni-agent-uninstall"),outside=f.p("business-script");
+  fs.writeFileSync(outside,"business preserved");fs.unlinkSync(helper);fs.symlinkSync(outside,helper);
+  await f.maintenance.start(request);const result=await f.maintenance.worker(request.operation_id);
+  assert.equal(result.status,"failed");assert.equal(result.error_code,"unsafe_managed_path");assert.equal(f.calls.some(([,args])=>args[0]==="stop"),false);assert.equal(fs.readFileSync(outside,"utf8"),"business preserved");f.preserve();
+});
+for(const marker of ['{"id":null}','{"id":1}','[]','null','{"id":"","receipt":{}}'])test("uncertain task state also blocks upgrades: "+marker,async t=>{
+  const f=fixture(t),request=f.request();fs.writeFileSync(f.p("var/lib/lightmoni-agent/task-run-state.json"),marker);
+  await assert.rejects(f.maintenance.start(request),/operation_conflict/);assert.equal(f.calls.some(([,args])=>args[0]==="stop"),false);f.preserve();
+});
+test("a dangling operation lock remains a maintenance barrier",async t=>{
+  const f=fixture(t),request=f.request();fs.mkdirSync(f.p("var/lib/lightmoni-agent/operations"));fs.symlinkSync(f.p("missing-operation"),f.p("var/lib/lightmoni-agent/operations/execution.lock"));
+  await assert.rejects(f.maintenance.start(request),/operation_conflict/);f.preserve();
+});
+test("changing a retained offline helper invalidates the approved rollback source",async t=>{
+  const f=fixture(t),request=f.request();await f.maintenance.start(request);
+  f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==="waiting_confirmation")f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});
+  assert.equal((await f.maintenance.worker(request.operation_id)).status,"succeeded");
+  fs.appendFileSync(join(f.old,"uninstall.sh"),"# unreviewed change\n");assert.throws(()=>f.maintenance.probe(),/previous_release_changed/);f.preserve();
+});
+
+for (const oldHelper of [false, true]) test(`SSH and executor fingerprints agree with ${oldHelper ? "an installed" : "no"} offline helper`, t => {
+  const f = fixture(t, { oldHelper });
+  assert.deepEqual(sshProbe(f).current, f.maintenance.probe().current);
+  if (!oldHelper) {
+    const release = f.maintenance.metadata(f.old);
+    const expected = sha(JSON.stringify({ release_path: f.old, release,
+      manifest: sha(fs.readFileSync(join(f.old, "release.json"))), launcher: sha(fs.readFileSync(f.p("usr/local/bin/lightmoni-agent"))),
+      service: sha(fs.readFileSync(f.p("etc/systemd/system/lightmoni-agent.service"))), node: sha(fs.readFileSync(join(f.old, "node"))),
+      entrypoint: sha(fs.readFileSync(join(f.old, "app/runtime/dist/agent/main.js"))) }));
+    assert.equal(sshProbe(f).current.fingerprint, expected, "pre-helper approval fingerprints stay compatible");
+  }
+  f.preserve();
+});
+
+test("both probes bind offline helper bytes and refuse a redirected release helper", t => {
+  const f = fixture(t), original = sshProbe(f).current.fingerprint;
+  fs.appendFileSync(join(f.old, "uninstall.sh"), "# changed helper\n");
+  const changed = sshProbe(f).current.fingerprint;
+  assert.notEqual(changed, original);
+  assert.equal(changed, f.maintenance.probe().current.fingerprint);
+  fs.unlinkSync(join(f.old, "uninstall.sh"));
+  fs.symlinkSync(f.p("etc/lightmoni-agent/config.json"), join(f.old, "uninstall.sh"));
+  assert.throws(() => sshProbe(f), /invalid_response/);
+  assert.throws(() => f.maintenance.probe(), /unsafe_managed_path/);
+  assert.equal(f.calls.some(([, args]) => args[0] === "stop"), false);
+  f.preserve();
+});
+
+test("maintenance receipt preserves absent helper evidence and rejects non-boolean synchronization flags", async t => {
+  const f = fixture(t), request = f.request(), accepted = await f.maintenance.start(request);
+  assert.equal(parseAgentUpdateStatus(JSON.stringify(accepted)).uninstaller_updated, undefined);
+  for (const value of [null, 0, "false", {}])
+    assert.throws(() => parseAgentUpdateStatus(JSON.stringify({ ...accepted, uninstaller_updated: value })), /invalid_response/);
   f.preserve();
 });

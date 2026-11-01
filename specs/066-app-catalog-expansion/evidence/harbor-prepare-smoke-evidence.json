@@ -1,0 +1,22 @@
+{
+  "validation": "Harbor official prepare minimal config + env loader + volume subpaths",
+  "image": "node:24.15.0-bookworm",
+  "official_source_layer_digest": "sha256:39a2553c3d137cc25ebc16296d613089073e91439c3d3f58df2191418a2c7567",
+  "limitation": "official image large layers could not download; exact verified source layer tested in a dependency-equivalent container with bcrypt-compatible htpasswd harness",
+  "protected_env_used": true,
+  "docker_sock": false,
+  "privileged": false,
+  "hostfs": false,
+  "exit_code": 0,
+  "result": "passed",
+  "idempotent_prepare_exit_code": 0,
+  "idempotent_config_and_signing_keys_unchanged": true,
+  "credentials_logged": false,
+  "cleanup_exit_code": 0,
+  "elapsed_seconds": 6.73,
+  "tested_actual_repository_prepare_script": true,
+  "repository_env_loader_matches_tested_loader": true,
+  "remaining_containers": 0,
+  "remaining_volumes": 0,
+  "remaining_networks": 0
+}

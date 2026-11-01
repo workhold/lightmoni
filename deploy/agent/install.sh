@@ -72,6 +72,7 @@ previous_enabled="no"
 runtime_release=""
 runtime_base_created="no"
 releases_directory_created="no"
+uninstaller_directory_created="no"
 rollback_failed="no"
 installation_phase="install-files"
 wait_service_active() {
@@ -118,6 +119,7 @@ finish() {
     if [ "$restart_attempted" = "yes" ]; then systemctl stop lightmoni-agent.service || rollback_failed="yes"; fi
     restore_file /etc/lightmoni-agent/config.json "$tmp_dir/previous-config"
     restore_file /usr/local/bin/lightmoni-agent "$tmp_dir/previous-launcher"
+    restore_file /usr/local/sbin/lightmoni-agent-uninstall "$tmp_dir/previous-uninstaller"
     restore_file /etc/systemd/system/lightmoni-agent.service "$tmp_dir/previous-service"
     restore_file /opt/lightmoni-agent/current "$tmp_dir/previous-current"
     if [ "$enrollment_mode" = "yes" ]; then
@@ -132,13 +134,14 @@ finish() {
       systemctl restart lightmoni-agent.service || rollback_failed="yes"
       systemctl is-active --quiet lightmoni-agent.service || rollback_failed="yes"
     fi
-    rm -f "/opt/lightmoni-agent/.current-$$" "/usr/local/bin/.lightmoni-agent.new-$$" "/etc/lightmoni-agent/.config.new-$$" "/var/lib/lightmoni-agent/.identity.new-$$"
+    rm -f "/opt/lightmoni-agent/.current-$$" "/usr/local/bin/.lightmoni-agent.new-$$" "/usr/local/sbin/.lightmoni-agent-uninstall.new-$$" "/etc/lightmoni-agent/.config.new-$$" "/var/lib/lightmoni-agent/.identity.new-$$"
     if [ "$rollback_failed" = "no" ]; then
       if [ -n "$runtime_release" ]; then rm -rf "$runtime_release"; fi
       # Remove only empty program directories created by this attempt. Their
       # presence otherwise makes the next --fresh attempt reject its own rollback.
       if [ "$releases_directory_created" = "yes" ]; then rmdir /opt/lightmoni-agent/releases 2>/dev/null || :; fi
       if [ "$runtime_base_created" = "yes" ]; then rmdir /opt/lightmoni-agent 2>/dev/null || :; fi
+      if [ "$uninstaller_directory_created" = "yes" ]; then rmdir /usr/local/sbin 2>/dev/null || :; fi
     fi
   fi
   if [ "$rollback_failed" = "yes" ]; then
@@ -188,6 +191,16 @@ actual="$(sha256sum "$tmp_dir/$artifact" | awk '{ print $1 }')"
 mkdir "$tmp_dir/unpacked"
 tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir/unpacked" lightmoni-agent lightmoni-agent.service lightmoni-agent-runtime
 [ -f "$tmp_dir/unpacked/lightmoni-agent" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent" ] || { echo 'Invalid release binary.' >&2; exit 1; }
+has_uninstaller="no"
+if [ -e "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" ] || [ -L "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" ]; then
+  [ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" ] || { echo 'Invalid offline uninstaller in the release.' >&2; exit 1; }
+  has_uninstaller="yes"
+# Source only the shared, side-effect-free guards from the checksum-verified
+# standalone script. Never execute the uninstaller during installation.
+sed -n '/^# BEGIN SHARED MAINTENANCE GUARDS$/,/^# END SHARED MAINTENANCE GUARDS$/p' "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" > "$tmp_dir/maintenance-guards.sh"
+. "$tmp_dir/maintenance-guards.sh"
+lm_assert_paths
+fi
 [ -x "$tmp_dir/unpacked/lightmoni-agent-runtime/node" ] || { echo 'Bundled Node runtime is missing.' >&2; exit 1; }
 "$tmp_dir/unpacked/lightmoni-agent-runtime/node" --version >/dev/null || { echo 'The release requires Linux with glibc 2.28 or newer.' >&2; exit 1; }
 node="$tmp_dir/unpacked/lightmoni-agent-runtime/node"
@@ -262,10 +275,11 @@ fi
 
 # Preserve old Go binaries as well as the Node launcher's current symlink.
 # Backups retain modes, ownership and symlink identity for an atomic rollback.
-for item in config launcher service current identity; do
+for item in config launcher uninstaller service current identity; do
   case "$item" in
     config) installed="$config_path" ;;
     launcher) installed="/usr/local/bin/lightmoni-agent" ;;
+    uninstaller) installed="/usr/local/sbin/lightmoni-agent-uninstall" ;;
     service) installed="/etc/systemd/system/lightmoni-agent.service" ;;
     current) installed="/opt/lightmoni-agent/current" ;;
     identity) installed="/var/lib/lightmoni-agent/identity.json" ;;
@@ -305,6 +319,12 @@ ln -s "$runtime_release" "/opt/lightmoni-agent/.current-$$"
 mv -Tf "/opt/lightmoni-agent/.current-$$" /opt/lightmoni-agent/current
 install -m 0755 "$tmp_dir/unpacked/lightmoni-agent" "/usr/local/bin/.lightmoni-agent.new-$$"
 mv -f "/usr/local/bin/.lightmoni-agent.new-$$" /usr/local/bin/lightmoni-agent
+if [ "$has_uninstaller" = "yes" ]; then
+  if [ ! -e /usr/local/sbin ] && [ ! -L /usr/local/sbin ]; then uninstaller_directory_created="yes"; fi
+  install -d -m 0755 /usr/local/sbin
+  install -m 0755 "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" "/usr/local/sbin/.lightmoni-agent-uninstall.new-$$"
+  mv -f "/usr/local/sbin/.lightmoni-agent-uninstall.new-$$" /usr/local/sbin/lightmoni-agent-uninstall
+fi
 service_changed="yes"
 install -m 0644 "$tmp_dir/unpacked/lightmoni-agent.service" /etc/systemd/system/lightmoni-agent.service
 installation_phase="daemon-reload"

@@ -1,0 +1,11 @@
+✔ real Docker single-container and Compose versions preserve initial and data files (31030.073708ms)
+﹣ real host OpenResty serves static HTML and TLS, reloads a full bundle, and returns 503 for empty service discovery (0.097708ms) # requires an opted-in Linux executor sharing the Docker host network
+﹣ real host OpenResty applies multi-path URI routing, CORS, headers, WebSocket and rejects a bad reload (0.033667ms) # SKIP
+ℹ tests 3
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 31278.883583
