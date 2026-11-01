@@ -37,4 +37,4 @@
 
 - [x] 合并 fe99013 并保留双方主机/Docker/执行器入口，修复双方任务与生命周期互斥。
 - [x] 取消普通 unit 自动 Docker/cap 授予，helper 与普通 run 实际核验、旧权限拒绝迁移，不擅改外部权限。
-- [ ] 运行集成范围回归并更新新实施 PR、Doca 与验收证据。
+- [x] 运行集成范围回归并更新实施 [PR #64](https://github.com/workhold/lightmoni/pull/64)、Doca924 与验收证据。

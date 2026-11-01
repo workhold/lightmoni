@@ -1,6 +1,6 @@
 # SDD060 验证记录
 
-日期：2026-11-01（Asia/Shanghai）。设计 PR：[#47](https://github.com/workhold/lightmoni/pull/47) 已合入；本轮实现另开 Draft PR，未合入或发布。
+日期：2026-11-01（Asia/Shanghai）。设计 PR：[#47](https://github.com/workhold/lightmoni/pull/47) 已合入；本轮实现见 Draft [PR #64](https://github.com/workhold/lightmoni/pull/64)，未合入或发布。
 
 ## 本轮实现与验收范围
 
@@ -51,7 +51,7 @@
 
 远端设计 PR #47 在本轮开发期间已被其他开发者合入，仅含设计。运行代码改在 `feat/privileged-executor-implementation` 分支交付，以 main `fe99013` 为本次集成快照。保留新增应用管理、地址、Logo/YAML、Docker环境及卸载进度变更；设计第60章去重，保留其他章节。此前1288项全回归属于 c088bb4 集成快照，不冒称已覆盖新增主干全部代码。
 
-本次合并接缝定向6文件178/178、普通权限及安装更新4文件66/66、主机权限浏览器16/16与Docker环境浏览器6/6通过；runtime类型及构建、Web类型检查通过。Docker安装与两类任务/执行器安装维护双向互斥，写前重新核对当前管理员会话。原 main 的 Docker verify 只读探测仍存在凭据绑定/过时状态覆盖竞态，未在本轮扩大修改，不将其称为已解决。
+本次合并接缝定向6文件178/178、普通权限及安装更新4文件66/66、主机权限浏览器16/16与Docker环境浏览器6/6通过；runtime类型及构建、Web类型检查及生产构建通过。Docker安装与两类任务/执行器安装维护双向互斥，写前重新核对当前管理员会话。原 main 的 Docker verify 只读探测仍存在凭据绑定/过时状态覆盖竞态，未在本轮扩大修改，不将其称为已解决。
 
 SDD071为普通Agent授予Docker组和低端口capabilities的主干行为被本实施分支覆盖。新unit清空授权，prepare只读核查；普通启动和手工run检查实际权限，发现外部既有权限则拒绝且不自动移除。旧网站/容器适配器仍未迁移，不能把此PR当作既有服务完整可用版本。
 
