@@ -1683,3 +1683,27 @@ Logo是中心展示元数据，独立存于既有SQLite的ops_application_logos�
 高级YAML从services各自的ports提取容器端口与协议，expose仍仅为内部端口。托管模式忽略YAML的published并经既有预留和有效配置投影分配宿主端口，相同端口保留旧或表单的监听范围；手动模式采用YAML发布端口。按服务、容器端口和协议保持既有端口名称及应用协议，新端口生成稳定名称；网站和健康检查引用继续受原校验约束。普通表单与商店安装保持原顶层端口规则。
 
 本节对应SDD068。管理员和Agent的既有权限、镜像执行、持久数据及失败语义不变；Logo不新增对象存储、宿主文件通道或Agent能力，YAML不能绕过既有环境、文件、挂载、资源与端口边界。验收区分真实HTTP/SQLite和浏览器交互、受控网络失败与远端Agent执行，不把前端预览或配置验证称为所有第三方应用实际运行。
+
+## 71. 标准 Agent 部署与网站权限（SDD 071，待发布）
+
+用户安装标准 Agent 即授权其执行平台托管的 Docker/Compose/OpenResty 与受管网站操作。服务仍以 `lightmoni-agent` 运行，unit 配置 Docker 附加组与 `CAP_NET_BIND_SERVICE`，保留 `NoNewPrivileges`、只读系统/家目录及私有临时目录。Docker socket 访问接近宿主 root；普通脚本会继承实际服务权限，因此仅允许受信管理员授权脚本，不能把非 root 用户描述为宿主级安全沙箱。
+
+root 安装/升级流程执行固定包内权限准备器，确保非零 GID 的 Docker 系统组和独立公开目录存在，不改 socket mode 或全局用户组成员。每次启动的 `ExecStartPre` 在真实 unit 身份、附加组、capability 和挂载沙箱中验证私有配置读取、私有/公开目录写入和原子 rename、低端口绑定及已存在的 Docker socket/CLI。权限不足阻止 ready，只输出固定诊断；CLI/daemon 缺少属于依赖未就绪，不假报可部署。
+
+私有配置、证书私钥、网站版本、PID、日志及 Nginx 各类临时文件位于 `/var/lib/lightmoni-agent`，公开静态内容单独位于 `/var/lib/lightmoni-web/<data-dir-hash>`。unit 的 `ReadWritePaths` 精确覆盖这两个根；私有目录/私钥保持 0700/0600，公开目录/文件为 0755/0644。网站先校验候选配置，再切换、重载与 HTTP/TLS 读回，失败恢复旧版本；Docker OpenResty 读取既有固定受管挂载。任意外部备份、证书导出和 systemd 目标仍需独立精确授权。
+
+升级先准备目标权限再停止旧服务；失败或主动回退使用原 unit，保持配置、身份和 live queue。旧包没有检查器则保留旧契约；该兼容不等于其已具备新权限。后续独立特权执行器的身份、授权、策略及迁移另行实现，本次不声称已迁移。发布验收必须区分真实 Linux 服务权限/网站测试与生产发行、Agent 升级和现场部署。
+
+```mermaid
+flowchart LR
+  Install[root 安装 / 升级准备] --> Check[真实 unit 启动前检查]
+  Check --> Agent[非 root Agent / Docker 组 / 低端口 capability]
+  Center[中心授权的网站配置] --> Agent
+  Agent --> Docker[本机 Docker daemon]
+  Agent --> Private[私有配置 / 证书 / 版本 / PID / 日志 / temp]
+  Agent --> Public[独立公开静态目录]
+  Private --> Docker
+  Agent --> Nginx[同用户 Nginx / 校验与重载]
+  Private --> Nginx
+  Public --> Nginx
+```

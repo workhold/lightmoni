@@ -48,7 +48,7 @@ function sshProbe(f: ReturnType<typeof fixture>) {
   return parseAgentUpdateProbe(stdout);
 }
 
-function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; failRollback?: boolean; oldHelper?:boolean; targetHelper?:boolean } = {}) {
+function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; failRollback?: boolean; oldHelper?:boolean; targetHelper?:boolean; targetPermissions?:boolean; failPermissionPreparation?:boolean } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "lm-update-")));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const p = (name: string) => join(root, name);
@@ -78,6 +78,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   fs.writeFileSync(join(runtime, "node"), "synthetic new Node\n", { mode: 0o755 });
   fs.writeFileSync(join(runtime, "app/runtime/dist/agent/main.js"), "// new code\n");
   if(options.targetHelper!==false)fs.writeFileSync(join(runtime,"uninstall.sh"),"#!/bin/sh\n# new offline helper\n",{mode:0o755});
+  if(options.targetPermissions)fs.writeFileSync(join(runtime,"deployment-permissions.mjs"),"// trusted permission helper fixture\n");
   fs.writeFileSync(join(runtime, "padding"), randomBytes(4096));
   fs.writeFileSync(join(packageDir, "lightmoni-agent"), "#!/bin/sh\n# new launcher\n", { mode: 0o755 });
   fs.writeFileSync(join(packageDir, "lightmoni-agent.service"), "new unit\n");
@@ -90,6 +91,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   const maintenance = new AgentMaintenance({ root, arch, uid: process.getuid?.() ?? 0, now: () => now, sleep: async (ms: number) => { now += ms; onSleep?.(); }, launch: () => {},
     command: (file: string, args: string[]) => {
       calls.push([file, args]);
+      if(args[0]?.endsWith('/deployment-permissions.mjs')&&args[1]==='prepare'&&options.failPermissionPreparation)throw Error('private permission setup failure');
       if (file === "systemctl") {
         if (args[0] === "show") {
           if (args.includes("--property=ActiveState")) return active ? "active" : "inactive";
@@ -117,6 +119,28 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   const preserve = () => { for (const [name, bytes] of Object.entries(saved)) assert.deepEqual(fs.readFileSync(p(name)), bytes, name + " retained"); };
   return { root, p, old, runtime, packageDir, archive, manifest, maintenance, request, calls, repack, preserve, setActive: (value: boolean) => { active = value; }, onSleep: (callback: () => void) => { onSleep = callback; } };
 }
+
+test('upgrades prepare the new deployment permissions before stopping the old Agent',async t=>{
+  const f=fixture(t,{targetPermissions:true}),request=f.request();
+  await f.maintenance.start(request);
+  f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==='waiting_confirmation')f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});
+  assert.equal((await f.maintenance.worker(request.operation_id)).status,'succeeded');
+  const prepare=f.calls.findIndex(([,args])=>args[0]?.endsWith('/deployment-permissions.mjs')&&args[1]==='prepare');
+  const stop=f.calls.findIndex(([file,args])=>file==='systemctl'&&args[0]==='stop');
+  assert.ok(prepare>=0&&stop>prepare);
+  f.preserve();
+});
+
+test('failed deployment permission preparation leaves the old Agent and its state running',async t=>{
+  const f=fixture(t,{targetPermissions:true,failPermissionPreparation:true}),request=f.request();
+  await f.maintenance.start(request);
+  const result=await f.maintenance.worker(request.operation_id);
+  assert.equal(result.status,'failed');
+  assert.equal(f.maintenance.currentPath(),f.old);
+  assert(!f.calls.some(([file,args])=>file==='systemctl'&&args[0]==='stop'));
+  assert.doesNotMatch(JSON.stringify(result),/private permission setup failure/);
+  f.preserve();
+});
 
 test("same-version upgrade is bound to source/build/digest and commits only a new boot; identity, credentials and live queue survive", async t => {
   const f = fixture(t), request = f.request(), before = f.maintenance.probe();
