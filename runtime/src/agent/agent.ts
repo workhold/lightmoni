@@ -1,4 +1,5 @@
 import { ApplicationObserver } from "./application-observer.js";
+import { DOCKER_CAPABILITIES } from './docker.js';
 import {
   createServer,
   type Server,
@@ -229,6 +230,7 @@ export class Agent {
       last_success_at: this.lastSuccess,
       collectors_status: { ...this.collectors },
       docker_inventory: this.applications?.inventory,
+      docker_capabilities: [...DOCKER_CAPABILITIES],
       sdk: legacyStats,
       runtime_events: [...this.runtimeEvents],
       control_interval_seconds: this.config.control_interval_seconds,
@@ -641,6 +643,13 @@ export class Agent {
       await delay(Math.max(10, this.tasks.collect_interval_seconds) * 1000, this.controller.signal);
     }
   }
+  private async dockerInventoryLoop() {
+    while(!this.controller.signal.aborted){
+      try{await this.applications.refreshInventory(this.controller.signal);this.collectorStatus('docker','ok');}
+      catch{this.collectorStatus('docker',this.applications.inventory?.error??'docker_collection_unavailable');}
+      await delay(Math.max(10,this.tasks.collect_interval_seconds)*1000,this.controller.signal);
+    }
+  }
   private async fileLogLoop() {
     if (!(await this.waitTasks())) return;
     try {
@@ -765,6 +774,7 @@ export class Agent {
       this.probeLoop(),
       this.fileLogLoop(),
       this.applicationLoop(),
+      this.dockerInventoryLoop(),
       this.jobLoop(),
       this.taskRunner?.run(this.controller.signal) ?? Promise.resolve(),
     ];

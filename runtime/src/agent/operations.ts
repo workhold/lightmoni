@@ -21,7 +21,11 @@ export const operationCommand: OperationExecutionContext["command"] = (file, arg
   const append = (chunk: Buffer, out: boolean) => { if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) + chunk.length > 1 << 20) finish(Object.assign(Error("operation_output_limit"), { code: "operation_output_limit" })); else if (out) stdout += chunk; else stderr += chunk; };
   child.stdout.on("data", x => append(x, true)); child.stderr.on("data", x => append(x, false));
   child.on("error", () => finish(Object.assign(Error("operation_dependency_unavailable"), { code: "operation_dependency_unavailable" })));
-  child.on("close", code => finish(code === 0 ? undefined : Object.assign(Error("operation_command_failed"), { code: "operation_command_failed" })));
+  child.on("close", code => {
+    const diagnostic = file === 'docker' && /permission denied|access is denied/i.test(stderr) ? 'docker_permission_denied'
+      : file === 'docker' && /cannot connect|is the docker daemon running|error during connect|connection refused/i.test(stderr) ? 'docker_daemon_unavailable' : 'operation_command_failed';
+    finish(code === 0 ? undefined : Object.assign(Error(diagnostic), {code:diagnostic}));
+  });
   child.stdin.on("error", () => {}); child.stdin.end(options.stdin);
 });
 

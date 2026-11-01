@@ -1,0 +1,23 @@
+{
+  "saved": true,
+  "seq": 891,
+  "resource_version": 892,
+  "title": "LightMoni 系统设计基线",
+  "original_blocks": 575,
+  "preserved_blocks": 575,
+  "all_original_blocks_unchanged": true,
+  "paragraphs_match": true,
+  "nodes_match": true,
+  "edges_match": true,
+  "nodes": 7,
+  "edges": 8,
+  "final_order": [
+    "fd6da938-4d9e-4e43-b51e-e64f0daa5190",
+    "docker057-paragraph-1",
+    "docker057-paragraph-2",
+    "docker057-paragraph-3",
+    "docker057-paragraph-4",
+    "docker057-paragraph-5",
+    "docker057-control-flow"
+  ]
+}

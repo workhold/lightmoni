@@ -81,7 +81,7 @@ export function registerOperationsPlatform(
   const privateRegistry=createPrivateRegistryController(store,workloads);
   domains.push({actions:()=>[],perform:async()=>fail(400,'unsupported_registry_action'),tick:privateRegistry.tick});
   privateRegistry.register(safe);
-  registerObservability(deps, store, safe);
+  registerObservability(deps, store, safe, options.jobs);
   // Include rejection responses in the no-store boundary, before the admin guard.
   const certificateResponse = (fn: Handler): Handler => ctx => {
     ctx.res.setHeader("Cache-Control", "no-store");
