@@ -1,0 +1,39 @@
+{
+  "production_bundle": true,
+  "bundle": {
+    "index_sha256": "9d7b98f466bf6975acef2629069416d8e6366e229846eca86a2cbdd82252114a",
+    "entry": "/assets/index-Cc1XsCg2.js",
+    "entry_sha256": "67fa2afa8e59fbfa91b795aca5350d55be01815bf7c7ebb908eb8d48e1923a41"
+  },
+  "fixture_only": true,
+  "production_writes": false,
+  "ssh_connections": false,
+  "languages": [
+    "zh-CN",
+    "en-US"
+  ],
+  "widths": [
+    1440,
+    390
+  ],
+  "passed": 14,
+  "checked": [
+    "zh-CN 1440px: summary prioritizes host addresses and tunnel addresses without container bridges or private platform peers",
+    "zh-CN 1440px: public source and interface ranges stay separate from configured SSH entry and unknown egress",
+    "zh-CN 1440px: SSH preflight shares category projection and keeps raw observations collapsed",
+    "zh-CN 390px: summary prioritizes host addresses and tunnel addresses without container bridges or private platform peers",
+    "zh-CN 390px: public source and interface ranges stay separate from configured SSH entry and unknown egress",
+    "zh-CN 390px: SSH preflight shares category projection and keeps raw observations collapsed",
+    "en-US 1440px: summary prioritizes host addresses and tunnel addresses without container bridges or private platform peers",
+    "en-US 1440px: public source and interface ranges stay separate from configured SSH entry and unknown egress",
+    "en-US 1440px: SSH preflight shares category projection and keeps raw observations collapsed",
+    "en-US 390px: summary prioritizes host addresses and tunnel addresses without container bridges or private platform peers",
+    "en-US 390px: public source and interface ranges stay separate from configured SSH entry and unknown egress",
+    "en-US 390px: SSH preflight shares category projection and keeps raw observations collapsed",
+    "legacy aggregate arrays and empty observations do not invent host addresses or produce repeated missing-IP rows",
+    "members cannot see configured SSH targets while retaining observed network summaries"
+  ],
+  "failures": [],
+  "errors": [],
+  "unexpected": []
+}
