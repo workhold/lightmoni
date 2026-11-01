@@ -49,3 +49,5 @@
 
 .lm-catalog-category-select{display:none;width:100%;margin-top:12px}
 @media(max-width:760px){.lm-catalog-category-tabs{display:none}.lm-catalog-category-select{display:flex}}
+
+.lm-application-logo{display:inline-flex;flex-shrink:0;align-items:center;justify-content:center;background:#fff;color:#526171;overflow:hidden}.lm-application-logo img{display:block;width:32px;height:32px;object-fit:contain}.lm-app-logo-title{display:flex;align-items:center;gap:12px}.lm-app-logo-title h2{margin:16px 0}.lm-logo-upload{padding:12px 0}.lm-logo-upload .lm-ops-note{margin:10px 0}

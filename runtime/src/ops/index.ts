@@ -297,7 +297,7 @@ export function registerOperationsPlatform(
         fail(400, "website_cluster_required");
       if (b.kind === "website" && !b.spec?.bindings)
         fail(400, "website_binding_required");
-      const resource = store.create(kind(b.kind)!, b.name, safeObject(b.spec), ctx.user.id);
+      const resource = store.create(kind(b.kind)!, b.name, safeObject(b.spec), ctx.user.id, b.logo);
       const run = resource.kind === "certificate" ? certificates.startIssue(resource, "issue", ctx.user.id) : undefined;
       ctx.json({resource: store.public(store.get(resource.id)), ...(run ? {run} : {})}, 201);
     }),
@@ -313,6 +313,23 @@ export function registerOperationsPlatform(
       ctx.json({resource:store.public(resource),...result});
     }),
   );
+  router.get('/api/v1/ops/resources/:id/logo', safe(ctx => {
+    const logo = store.readApplicationLogo(ctx.params.id);
+    if (ctx.url.searchParams.has('v') && ctx.url.searchParams.get('v') !== logo.sha256) fail(404, 'application_logo_not_found');
+    const etag = '"' + logo.sha256 + '"';
+    ctx.res.setHeader('Content-Type','image/png');
+    ctx.res.setHeader('X-Content-Type-Options','nosniff');
+    ctx.res.setHeader('Content-Security-Policy',"default-src 'none'; sandbox");
+    ctx.res.setHeader('Cache-Control','private, no-cache');
+    ctx.res.setHeader('ETag',etag);
+    if (ctx.req.headers['if-none-match'] === etag) { ctx.res.statusCode=304;ctx.res.end();return; }
+    ctx.res.setHeader('Content-Length',logo.content.length);
+    ctx.res.end(logo.content);
+  }));
+  router.put('/api/v1/ops/resources/:id/logo', safe(async ctx => {
+    const b = safeObject(await ctx.body());
+    ctx.json({resource:store.public(store.setApplicationLogo(ctx.params.id,b.revision,b.data_url,ctx.user.id))});
+  }));
   router.delete(
     "/api/v1/ops/resources/:id",
     safe(async (ctx) => {

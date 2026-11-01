@@ -1,0 +1,13 @@
+{
+  "checks": [
+    "Real create with PNG, failure retry without duplicate, refresh, YAML create/edit preserving masked environment and runtime type, JPEG/WebP conversion, cancel, failed replacement, conflict/reload, remove/default and re-upload",
+    "zh-CN/dark/1440: all 31 brand images decoded locally, persisted logo and editor, historical Compose displays YAML, managed-port guidance, no page overflow",
+    "en-US/light/1440: all 31 brand images decoded locally, persisted logo and editor, historical Compose displays YAML, managed-port guidance, no page overflow",
+    "zh-CN/light/390: all 31 brand images decoded locally, persisted logo and editor, historical Compose displays YAML, managed-port guidance, no page overflow",
+    "en-US/dark/390: all 31 brand images decoded locally, persisted logo and editor, historical Compose displays YAML, managed-port guidance, no page overflow"
+  ],
+  "errors": [],
+  "media": "artifacts/screenshots/specs/068-application-logos/evidence",
+  "backend": "Real HTTP/SQLite fixture; no remote Agent execution",
+  "network_failures": "Browser-injected 503 only for retry cases"
+}

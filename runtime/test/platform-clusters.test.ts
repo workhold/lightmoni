@@ -1,3 +1,4 @@
+import {pngData,pngFixture} from './fixtures/application-logo.js';
 import {createHostNetworkSchema,recordHostNetwork} from "../src/server/host-network.js";
 import {normalizeNetworkAddresses} from "../src/shared/host-network.js";
 import { test } from "node:test";
@@ -191,6 +192,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     db.close();
   });
   return {
+    base,
     db,
     deps,
     store,
@@ -1617,4 +1619,35 @@ test('all approved catalog applications save through HTTP, isolate identity and 
  f.db.run("UPDATE agents SET arch='arm64' WHERE id='a'");
  const badArch=await f.req('/catalog/harbor/install','POST',{parameters:{external_url:'https://registry.example.test',password:'qa_secret_2026'},deployments:[{cluster_id:c.id,machine_ids:['ma']}]});
  assert.equal(badArch.status,400);assert.equal(badArch.body.error,'catalog_architecture_unsupported');
+});
+
+test('application logos save atomically through HTTP and remain independent of configuration and Agent jobs',async t=>{
+ const f=await fixture(t),c=f.createCluster(),original=f.app(c);const {service_name,...spec}=original.spec;
+ const created=await f.req('/resources','POST',{kind:'application',name:'Custom logo',spec,logo:pngData()});assert.equal(created.status,201);let r=created.body.resource;assert.equal(r.logo_revision,1);assert.equal(r.revision,1);assert.equal(r.spec.logo,undefined);
+ const url=r.logo_url,raw=await fetch(f.base+url);assert.equal(raw.status,200);assert.equal(raw.headers.get('content-type'),'image/png');assert.equal(raw.headers.get('x-content-type-options'),'nosniff');assert.match(raw.headers.get('content-security-policy')!,/sandbox/);assert.deepEqual(Buffer.from(await raw.arrayBuffer()),pngFixture());
+ assert.equal((await fetch(f.base+url,{headers:{'if-none-match':raw.headers.get('etag')!}})).status,304);assert.equal((await fetch(f.base+url,{headers:{'x-role':'member','if-none-match':raw.headers.get('etag')!}})).status,403);
+ const jobsBefore=f.db.get<any>('SELECT count(*) AS n FROM agent_jobs')!.n,revisionsBefore=f.db.get<any>('SELECT count(*) AS n FROM ops_platform_revisions')!.n;
+ const updated=await f.req('/resources/'+r.id+'/logo','PUT',{revision:1,data_url:pngData(pngFixture(2,2,20))});assert.equal(updated.status,200);r=updated.body.resource;assert.equal(r.logo_revision,2);assert.equal(r.revision,1);assert.notEqual(r.logo_url,url);assert.equal((await fetch(f.base+url)).status,404);
+ assert.equal(f.db.get<any>('SELECT count(*) AS n FROM agent_jobs')!.n,jobsBefore);assert.equal(f.db.get<any>('SELECT count(*) AS n FROM ops_platform_revisions')!.n,revisionsBefore);
+ assert.equal((await f.req('/resources/'+r.id+'/logo','PUT',{revision:1,data_url:null})).status,409);assert.equal((await f.req('/resources/'+r.id+'/logo','PUT',{revision:2,data_url:null},'member')).status,403);
+ const count=f.store.list('application').length;assert.equal((await f.req('/resources','POST',{kind:'application',name:'Invalid logo',spec,logo:'data:image/svg+xml;base64,PHN2Zy8+'})).status,400);assert.equal(f.store.list('application').length,count);
+ assert.equal((await f.req('/resources/'+r.id+'/logo','PUT',{revision:2,data_url:null})).body.resource.logo_revision,3);assert.equal((await fetch(f.base+r.logo_url)).status,404);
+});
+
+test('advanced YAML preserves secrets and port identities while managed scheduling ignores published ports',async t=>{
+ const f=await fixture(t),c=f.createCluster(),r=f.app(c,{mode:'compose',deployment_mode:'managed',compose:{services:{web:{image:'nginx:alpine',environment:{TOKEN:'qa-yaml-password'},ports:['8080:8080']}}},ports:[{name:'http',service:'web',container_port:8080,host_port:0,host_ip:'127.0.0.1',protocol:'tcp',app_protocol:'http'}]});
+ const legacy=structuredClone(r.spec);legacy.compose['x-private-env']=legacy.compose.services.web.environment;f.db.run('UPDATE ops_platform_resources SET spec_cipher=? WHERE id=?',f.deps.encrypt(JSON.stringify(legacy)),r.id);const legacyRead=await f.req('/resources/'+r.id);assert.doesNotMatch(JSON.stringify(legacyRead.body),/qa-yaml-password/);assert.equal(legacyRead.body.resource.spec.compose['x-private-env'],undefined);
+ const text='x-env: &shared\n  TOKEN: "[redacted]"\nservices:\n  web:\n    image: nginx:alpine\n    environment: *shared\n    ports:\n      - "12345:8080"\n      - "5123:5555/udp"\n    expose: [6379]\n';
+ const saved=await f.req('/resources/'+r.id,'PUT',{revision:r.revision,spec:{...r.spec,configuration_mode:'yaml',compose:text}});assert.equal(saved.status,200);const result=saved.body.resource,actual=f.store.get(r.id).spec;
+ assert.equal(actual.compose.services.web.environment.TOKEN,'qa-yaml-password');assert.doesNotMatch(JSON.stringify(result),/qa-yaml-password/);assert.equal(actual.compose['x-env'],undefined);
+ assert.equal(actual.ports.length,2);assert.equal(actual.ports[0].name,'http');assert.equal(actual.ports[0].host_ip,'127.0.0.1');assert.ok(actual.ports.every((p:any)=>p.host_port===0));assert.equal(actual.ports[1].container_port,5555);assert.equal(actual.ports[1].protocol,'udp');assert.ok(!actual.ports.some((p:any)=>p.container_port===6379));assert.ok(!JSON.stringify(actual.compose.services.web.ports).includes('12345'));
+ const bad=await f.req('/resources/'+r.id,'PUT',{revision:result.revision,spec:{...actual,compose:'services:\n  web:\n    image: nginx:alpine\n    environment:\n      NEW_TOKEN: "[redacted]"\n'}});assert.equal(bad.status,400);assert.equal(bad.body.error,'environment_value_required');assert.equal(f.store.get(r.id).revision,result.revision);
+});
+
+test('single-container advanced YAML keeps runtime type and managed mounts; manual YAML mappings take effect',async t=>{
+ const f=await fixture(t),c=f.createCluster(),r=f.app(c,{environment:{TOKEN:'qa-single-secret'},mounts:[{type:'data',target:'/data'}]});
+ const yaml='services:\n  app:\n    image: nginx:alpine\n    environment:\n      TOKEN: "[redacted]"\n    ports:\n      - "127.0.0.1:23456:8080"\n';
+ const saved=await f.req('/resources/'+r.id,'PUT',{revision:r.revision,spec:{...r.spec,configuration_mode:'yaml',configuration_yaml:yaml}});assert.equal(saved.status,200);const spec=f.store.get(r.id).spec;assert.equal(spec.mode,'container');assert.equal(spec.environment.TOKEN,'qa-single-secret');assert.equal(spec.ports[0].name,'http');assert.equal(spec.ports[0].host_port,23456);assert.equal(spec.ports[0].host_ip,'127.0.0.1');assert.equal(spec.mounts[0].target,'/data');assert.equal(spec.configuration_yaml,undefined);
+ const bad=await f.req('/resources/'+r.id,'PUT',{revision:saved.body.resource.revision,spec:{...spec,configuration_yaml:'services:\n  app:\n    image: nginx:alpine\n    volumes: ["/etc:/escape"]\n'}});assert.equal(bad.status,400);assert.equal(bad.body.error,'single_container_yaml_unsupported_field');
+ const malformed=await f.req('/resources/'+r.id,'PUT',{revision:saved.body.resource.revision,spec:{...spec,configuration_yaml:'services: ['}});assert.equal(malformed.status,400);assert.equal(f.store.get(r.id).revision,saved.body.resource.revision);
 });
