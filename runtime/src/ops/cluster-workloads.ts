@@ -2641,25 +2641,31 @@ export function createClusterWorkloads(
   }
   function startGatewayDNS(app: PlatformResource) {
     const grouped = new Map<string, Row[]>();
+    const gatewayDNS: Row = {};
     for (const d of app.spec.deployments) {
+      const summary: Row = gatewayDNS[d.cluster_id] = {domain:d.gateway_domain??'',zone_id:d.gateway_dns_zone_id??'',state:!d.gateway_domain?'domain_required':!d.gateway_dns_zone_id?'external':'awaiting_entry',missing_public_machine_ids:[]};
       if (!d.gateway_domain || !d.gateway_dns_zone_id) continue;
       if (!grouped.has(d.gateway_dns_zone_id))
         grouped.set(d.gateway_dns_zone_id, []);
       const deployment = deploymentRow("application", app.id, d.cluster_id);
-      if (!deployment?.enabled) continue;
+      if (!deployment?.enabled) {summary.state='not_deployed';continue;}
       for (const i of rows(app.id, false, d.cluster_id).filter(
         servingGateway,
       )) {
         const ip = capacity(cluster(d.cluster_id), i.machine_id).public_address;
-        if (ip && isIP(ip))
+        if (ip && isIP(ip)) {
+          summary.state='eligible';
           grouped.get(d.gateway_dns_zone_id)!.push({
             name: d.gateway_domain,
             type: isIP(ip) === 6 ? "AAAA" : "A",
             value: ip,
             ttl: 600,
           });
+        } else summary.missing_public_machine_ids.push(i.machine_id);
       }
+      if(summary.missing_public_machine_ids.length)summary.state=summary.state==='eligible'?'partial_public_ip_required':'public_ip_required';
     }
+    store.patchStatus(app.id,{gateway_dns:gatewayDNS});
     syncDNS(app, grouped, app.authorized_by);
   }
   function startDNS(current: PlatformResource) {
@@ -2756,8 +2762,8 @@ export function createClusterWorkloads(
           continue;
         }
         const ip = capacity(cluster(d.cluster_id), i.machine_id).public_address;
-        if (!cname && (!ip || !isIP(ip))) {
-          traffic[d.cluster_id].error = "openresty_public_ip_required_for_dns";
+        if ((!cname || deployment?.gateway_dns_zone_id) && (!ip || !isIP(ip))) {
+          traffic[d.cluster_id].error = cname ? "machine_public_service_address_required" : "openresty_public_ip_required_for_dns";
           continue;
         }
         for (const binding of applied.bindings.filter(
