@@ -49,6 +49,7 @@ export function createPrivateRegistryController(
         cluster_id: d.cluster_id,
         machine_id: d.machine_ids[0],
         address: d.registry_address,
+        host_ports: Object.fromEntries((app?.spec.ports??[]).map((p:Row)=>[p.name,d.host_ports?.[p.name]??p.host_port])),
         cache_enabled:
           store.get(d.cluster_id, "cluster").spec.image_cache?.enabled === true,
         endpoint: registeredRegistryEndpoint(store, d.cluster_id) ?? "",
@@ -124,6 +125,7 @@ export function createPrivateRegistryController(
       cluster_id: cluster.id,
       machine_ids: [b.machine_id],
       registry_address: ip,
+      host_ports: b.host_ports === undefined ? prior?.host_ports : b.host_ports,
       cpu: b.cpu ?? 0.25,
       memory_mb: b.memory_mb ?? 256,
     };

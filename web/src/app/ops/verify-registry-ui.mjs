@@ -5,7 +5,7 @@ import { mediaDirectory } from "../../../../scripts/qa-artifacts.mjs";
 const base = process.env.LIGHTMONI_REGISTRY_UI_URL ?? "http://127.0.0.1:19960";
 if (!["localhost", "127.0.0.1"].includes(new URL(base).hostname))
   throw Error("Disposable loopback QA server required");
-const out = resolve("specs/059-service-image-lifecycle/evidence/ui"),
+const out = resolve(process.env.LIGHTMONI_REGISTRY_UI_OUT ?? "specs/059-service-image-lifecycle/evidence/ui"),
   media = mediaDirectory(out);
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: true, channel: "chrome" }),
@@ -34,6 +34,7 @@ try {
         throw Error(path + " " + r.status() + ": " + (await r.text()));
       return r.json();
     };
+    const closeProgress=async()=>{const p=page.locator('.lm-install-progress:visible');if(await p.count()){await p.getByRole('button',{name:'关闭',exact:true}).click();await expect(p).toHaveCount(0)}};
     const dialog = () => page.locator(".ant-modal:visible").last();
     const choose = async (label, value) => {
       await dialog().getByLabel(label, { exact: true }).click();
@@ -112,7 +113,7 @@ try {
           .click();
       } else
         await page
-          .getByRole("button", { name: "重新部署", exact: true })
+          .getByRole("button", { name: "配置 / 重新部署", exact: true })
           .first()
           .click();
       await expect(dialog()).toBeVisible();
@@ -125,16 +126,26 @@ try {
         .getByRole("switch", { name: "开启内网镜像缓存", exact: true })
         .setChecked(true);
       await dialog().getByRole("checkbox").check();
+      await dialog().getByLabel('宿主端口 · 私有仓库',{exact:true}).fill('24500');
+      await dialog().getByLabel('宿主端口 · Docker Hub 缓存',{exact:true}).fill('24501');
+      await expect(dialog().getByText('宿主端口不能重复；使用不同端口，或填 0 自动分配。',{exact:true})).toHaveCount(0);
+      await dialog().getByLabel('宿主端口 · 发布源缓存',{exact:true}).fill('24502');
       await shot("installation");
+      await dialog().getByLabel('宿主端口 · Docker Hub 缓存',{exact:true}).fill('24500');
+      await dialog().getByRole('button',{name:'保存并部署',exact:true}).click();
+      await expect(dialog().getByText('宿主端口不能重复；使用不同端口，或填 0 自动分配。',{exact:true})).toBeVisible();
+      await expect(dialog().getByLabel('宿主端口 · 私有仓库',{exact:true})).toHaveValue('24500');
+      await dialog().getByLabel('宿主端口 · Docker Hub 缓存',{exact:true}).fill('24501');
+      await expect(dialog().getByText('宿主端口不能重复；使用不同端口，或填 0 自动分配。',{exact:true})).toHaveCount(0);
       await dialog()
         .getByRole("button", { name: "保存并部署", exact: true })
         .click();
-      await expect(dialog()).toBeHidden();
+      await expect(dialog()).toBeHidden();await closeProgress();
       view = await json("/ops/private-registry");
-      expect(view.deployments[0].cache_enabled).toBe(true);
+      expect(view.deployments[0].cache_enabled).toBe(true);expect(view.deployments[0].host_ports.registry).toBe(24500);
       expect(view.application.spec.service_name).toBe("sys-docker-registry");
       checks.push(
-        "Navigation, installation/redeployment, private machine/address, saved readback",
+        "Navigation, private placement, three named host port mappings, duplicate rejection with input retention, fixed-port saved readback",
       );
       await page.reload();
       await expect(
@@ -166,7 +177,7 @@ try {
       await dialog()
         .getByRole("button", { name: "保存配置", exact: true })
         .click();
-      await expect(dialog()).toBeHidden();
+      await expect(dialog()).toBeHidden();await closeProgress();
       await page.goto(base + "/private-images");
       await expect(
         page.getByRole("switch", { name: "内网缓存 Registry QA", exact: true }),
@@ -175,9 +186,10 @@ try {
         "Both cache editors share one cluster setting and survive refresh",
       );
       await page
-        .getByRole("button", { name: "重新部署", exact: true })
+        .getByRole("button", { name: "配置 / 重新部署", exact: true })
         .first()
         .click();
+      await expect(dialog().getByLabel('宿主端口 · 私有仓库',{exact:true})).toHaveValue('24500');
       await dialog().getByRole("checkbox").check();
       view = await json("/ops/private-registry");
       await json("/ops/private-registry/deployments", "POST", {
@@ -204,7 +216,7 @@ try {
       await dialog()
         .getByRole("button", { name: "保存并部署", exact: true })
         .click();
-      await expect(dialog()).toBeHidden();
+      await expect(dialog()).toBeHidden();await closeProgress();
       checks.push(
         "Real revision conflict retains form input and retry reuses the same registered service",
       );
@@ -248,7 +260,7 @@ try {
       await dialog()
         .getByRole("button", { name: "保存并部署", exact: true })
         .click();
-      await expect(dialog()).toBeHidden();
+      await expect(dialog()).toBeHidden();await closeProgress();
       view = await json("/ops/private-registry");
       expect(view.external.website.spec.auth.mode).toBe("basic");
       expect(JSON.stringify(view)).not.toContain("password_hash");
@@ -307,7 +319,7 @@ try {
       await dialog()
         .getByRole("button", { name: /^取\s*消$/ })
         .click();
-      await expect(dialog()).toBeHidden();
+      await expect(dialog()).toBeHidden();await closeProgress();
       checks.push("200% view and reduced-motion modal open/close");
       await page.setViewportSize({ width: 390, height: 844 });
       await shot("mobile");
@@ -316,7 +328,13 @@ try {
           () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
       ).toBe(true);
-      checks.push("Narrow layout keeps horizontal overflow inside the table");
+      const table=page.locator('.lm-registry-entry .ant-table-content');
+      await table.evaluate(el=>{el.scrollLeft=el.scrollWidth});
+      const configure=page.getByRole('button',{name:'配置 / 重新部署',exact:true}).first();
+      await expect(configure).toBeInViewport();await shot('mobile-actions');await configure.click();
+      await expect(dialog().getByLabel('宿主端口 · 私有仓库',{exact:true})).toHaveValue('24500');
+      await dialog().getByRole('button',{name:/^取\s*消$/}).click();await expect(dialog()).toBeHidden();
+      checks.push("Narrow layout contains overflow; scrolling reaches actions and reopens saved port configuration");
       expect(errors).toEqual([]);
       rounds.push({ round, ok: true, checks, errors });
     } catch (e) {

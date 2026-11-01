@@ -12,6 +12,15 @@ test('catalog manual ports match the container, managed ports allocate automatic
  }
  assert.equal(catalogInstallation('openresty',{deployment_mode:'managed',parameters:{port:1234}}).spec.ports[0].host_port,80);
 });
+test('catalog named mappings validate the full port contract and retain the legacy port parameter',()=>{
+ const install=(input:any)=>catalogInstallation('registry',input).spec;
+ assert.equal(install({host_ports:{registry:15000},listen_ip:'127.0.0.1'}).ports[0].host_port,15000);
+ assert.equal(install({parameters:{port:15001},host_ports:{registry:0}}).ports[0].host_port,0);
+ assert.equal(install({parameters:{port:15001}}).ports[0].host_port,15001);
+ for(const host_ports of [null,[],{unknown:1},{registry:-1},{registry:65536},{registry:1.5},{registry:'5000'}])assert.throws(()=>install({host_ports}),/invalid_host_ports/);
+ assert.throws(()=>install({listen_ip:'8.8.8.8'}),/invalid_listen_ip/);
+ assert.throws(()=>catalogInstallation('openresty',{host_ports:{http:8080}}),/openresty_fixed_host_ports/);
+});
 test('installation completion requires all published deployments and healthy instances, without hiding partial or unknown outcomes',()=>{
  const resource:any={spec:{deployments:[{cluster_id:'a'},{cluster_id:'b'}]},status:{deployments:{a:{enabled:true,desired_revision:1,applied_revision:1},b:{enabled:true,desired_revision:1,applied_revision:0,pending:'capacity'}},instances:[{id:'a',cluster_id:'a',state:'running',healthy:true},{id:'b',cluster_id:'b',state:'queued',healthy:false}]}};
  assert.equal(installationState(resource),'pending');
