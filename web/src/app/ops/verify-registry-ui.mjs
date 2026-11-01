@@ -128,6 +128,7 @@ try {
       await dialog().getByRole("checkbox").check();
       await dialog().getByLabel('宿主端口 · 私有仓库',{exact:true}).fill('24500');
       await dialog().getByLabel('宿主端口 · Docker Hub 缓存',{exact:true}).fill('24501');
+      await expect(dialog().getByText('宿主端口不能重复；使用不同端口，或填 0 自动分配。',{exact:true})).toHaveCount(0);
       await dialog().getByLabel('宿主端口 · 发布源缓存',{exact:true}).fill('24502');
       await shot("installation");
       await dialog().getByLabel('宿主端口 · Docker Hub 缓存',{exact:true}).fill('24500');
@@ -135,6 +136,7 @@ try {
       await expect(dialog().getByText('宿主端口不能重复；使用不同端口，或填 0 自动分配。',{exact:true})).toBeVisible();
       await expect(dialog().getByLabel('宿主端口 · 私有仓库',{exact:true})).toHaveValue('24500');
       await dialog().getByLabel('宿主端口 · Docker Hub 缓存',{exact:true}).fill('24501');
+      await expect(dialog().getByText('宿主端口不能重复；使用不同端口，或填 0 自动分配。',{exact:true})).toHaveCount(0);
       await dialog()
         .getByRole("button", { name: "保存并部署", exact: true })
         .click();
@@ -326,7 +328,13 @@ try {
           () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
       ).toBe(true);
-      checks.push("Narrow layout keeps horizontal overflow inside the table");
+      const table=page.locator('.lm-registry-entry .ant-table-content');
+      await table.evaluate(el=>{el.scrollLeft=el.scrollWidth});
+      const configure=page.getByRole('button',{name:'配置 / 重新部署',exact:true}).first();
+      await expect(configure).toBeInViewport();await shot('mobile-actions');await configure.click();
+      await expect(dialog().getByLabel('宿主端口 · 私有仓库',{exact:true})).toHaveValue('24500');
+      await dialog().getByRole('button',{name:/^取\s*消$/}).click();await expect(dialog()).toBeHidden();
+      checks.push("Narrow layout contains overflow; scrolling reaches actions and reopens saved port configuration");
       expect(errors).toEqual([]);
       rounds.push({ round, ok: true, checks, errors });
     } catch (e) {

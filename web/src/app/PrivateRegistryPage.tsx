@@ -305,6 +305,7 @@ export default function PrivateRegistryPage() {
                 </Typography.Text>
               </div>
             </div>
+            <p className="lm-ops-table-hint">{t("左右滑动查看仓库地址和操作。","Scroll horizontally to view registry addresses and actions.")}</p>
             <Table
               rowKey="cluster_id"
               pagination={false}
@@ -466,12 +467,13 @@ export default function PrivateRegistryPage() {
         okText={t("保存并部署", "Save and deploy")}
         cancelText={t("取消", "Cancel")}
         width={640}
+        className="lm-registry-dialog"
         style={{top:24}}
         styles={{body:{maxHeight:'calc(100dvh - 200px)',overflowY:'auto',overscrollBehavior:'contain'}}}
         forceRender
       >
         {formError && <Alert type="error" showIcon title={formError} />}
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" onValuesChange={()=>setFormError("")}>
           {dialog === "deploy" ? (
             <>
               <Form.Item

@@ -10,7 +10,7 @@
         "Publishing form links a real HTTPS/Basic website and returns no password/hash",
         "Linked website editor exposes site/path auth; write-only password stays empty",
         "200% view and reduced-motion modal open/close",
-        "Narrow layout keeps horizontal overflow inside the table"
+        "Narrow layout contains overflow; scrolling reaches actions and reopens saved port configuration"
       ],
       "errors": []
     },
@@ -24,7 +24,7 @@
         "Publishing form links a real HTTPS/Basic website and returns no password/hash",
         "Linked website editor exposes site/path auth; write-only password stays empty",
         "200% view and reduced-motion modal open/close",
-        "Narrow layout keeps horizontal overflow inside the table"
+        "Narrow layout contains overflow; scrolling reaches actions and reopens saved port configuration"
       ],
       "errors": []
     },
@@ -38,7 +38,7 @@
         "Publishing form links a real HTTPS/Basic website and returns no password/hash",
         "Linked website editor exposes site/path auth; write-only password stays empty",
         "200% view and reduced-motion modal open/close",
-        "Narrow layout keeps horizontal overflow inside the table"
+        "Narrow layout contains overflow; scrolling reaches actions and reopens saved port configuration"
       ],
       "errors": []
     }
