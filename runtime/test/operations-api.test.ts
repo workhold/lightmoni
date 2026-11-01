@@ -14,7 +14,7 @@ import { backupDefinition } from "../src/operations/backups.js";
 import { composeDefinition } from "../src/operations/containers.js";
 import { websiteDefinition } from "../src/operations/websites.js";
 import { AgentJobRunner } from "../src/agent/jobs.js";
-import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -56,19 +56,43 @@ test("operations encrypt configuration and payload; only an approved job lease c
   f.advance(46_000); assert.equal((await f.req(path,"GET",undefined,{"x-role":"agent",authorization:"Bearer control-secret","X-LightMoni-Job-Lease":j.lease_id})).status,403);
 });
 
-test("real backup travels through HTTP approval, control lease, Agent runner and verified receipt",async t=>{
+test("ordinary Agent runner does not claim or download an approved backup write operation",async t=>{
  const f=await fixture(t), root=await realpath(await mkdtemp(join(tmpdir(),"lightmoni-operations-api-")));
  t.after(()=>rm(root,{recursive:true,force:true}));
  for(const dir of ["source","backups","agent"])await mkdir(join(root,dir),{mode:0o700});
- await writeFile(join(root,"source","index.html"),"<h1>Verified backup</h1>",{mode:0o600});
+ const original="<h1>Backup source remains untouched</h1>";
+ await writeFile(join(root,"source","index.html"),original,{mode:0o600});
  const created=await f.req("/operations/resources","POST",{kind:"backup",name:"Website backup",agent_id:"agent-1",config:{source_path:join(root,"source"),storage:{type:"local",path:join(root,"backups")}}});
  assert.equal(created.status,201);const resource=created.body.resource;
- const plan=f.ops.plan(resource.id,"create",{},"admin");f.ops.approve(plan.id,"admin",resource.revision);
- const runner=new AgentJobRunner({endpoint:f.base,agentID:"agent-1",controlCredential:"control-secret",dataDir:join(root,"agent"),now:()=>new Date("2026-10-27T00:00:00Z")});
- const receipt=await runner.pollOnce();assert.equal(receipt?.state,"succeeded",JSON.stringify(receipt));
- const saved=f.ops.getRun(plan.id);assert.equal(saved.state,"succeeded");assert.equal(saved.receipt.snapshot.operations.resource_id,resource.id);
+ const planned=await f.req(`/operations/resources/${resource.id}/plans`,"POST",{operation:"create"});assert.equal(planned.status,201);
+ const plan=planned.body.run;
+ const approved=await f.req(`/operations/runs/${plan.id}/approve`,"POST",{revision:resource.revision});assert.equal(approved.status,200);
+ assert.equal(approved.body.run.state,"queued");
+ const jobID=approved.body.run.job_id;assert.ok(jobID);
+ assert.deepEqual(f.jobs.get(jobID).capabilities,["operations.backup"]);
+ const requests:Array<{path:string;method:string;body:any}>=[];
+ const runner=new AgentJobRunner({endpoint:f.base,agentID:"agent-1",controlCredential:"control-secret",dataDir:join(root,"agent"),now:()=>new Date("2026-10-27T00:00:00Z")},{
+   fetch:async(input,init)=>{
+     const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;
+     requests.push({path:new URL(url).pathname,method:init?.method??"GET",body:typeof init?.body==="string"?JSON.parse(init.body):undefined});
+     return fetch(input,init);
+   },
+ });
+ assert.equal(await runner.pollOnce(),null);
+ assert.equal(await runner.pollOnce(),null);
+ assert.equal(requests.length,2);
+ for(const request of requests){
+   assert.equal(request.path,"/api/v1/agents/agent-1/jobs/claim");assert.equal(request.method,"POST");
+   assert.ok(request.body.capabilities.length>0);
+   assert.ok(request.body.capabilities.every((cap:string)=>cap==="systemd.probe"||cap==="docker.inventory"||cap.startsWith("health.")),"ordinary Agent must advertise only read-only capabilities");
+ }
+ assert.ok(!requests.some(request=>request.path.endsWith("/operations")),"private operation payload must not be downloaded");
+ const saved=f.ops.getRun(plan.id);assert.equal(saved.state,"queued");assert.deepEqual(saved.receipt,{});
+ const queued=f.jobs.get(jobID);assert.equal(queued.state,"queued");assert.equal(queued.lease_id,"");assert.equal(queued.attempts,0);assert.deepEqual(queued.receipt,{});
  assert.equal(JSON.stringify(saved).includes("control-secret"),false);
- assert.ok((JSON.parse(await readFile(join(root,"agent","agent-job-state.json"),"utf8"))).id===undefined);
+ assert.deepEqual(await readdir(join(root,"backups")),[],"ordinary Agent must not create a backup");
+ assert.deepEqual(await readdir(join(root,"agent")),[],"unclaimed writes must not create a local execution marker");
+ assert.equal(await readFile(join(root,"source","index.html"),"utf8"),original);
 });
 
 test("new operations do not block legacy Agent capabilities and mismatched operation receipts cannot succeed",async t=>{

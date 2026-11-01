@@ -735,3 +735,9 @@ test("running Agent waits for assigned tasks, withdraws probes/logs and stops in
   await a.close();
   assert.equal(a.server?.listening, false);
 });
+
+
+test("ordinary Agent heartbeat exposes Docker inventory without legacy write capability",async t=>{
+  const agent=make(t);
+  assert.deepEqual(agent.status().docker_capabilities,["docker.inventory"]);
+});

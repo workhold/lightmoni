@@ -2,14 +2,32 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicJSON } from "../shared/io.js";
 import { CapabilityExecutor, type ExecutorJob, type ExecutionReceipt } from "./executor.js";
-import type { DeploymentAction } from "../deployment/types.js";
-import { executeOperation, operationCapabilities, operationCommand } from "./operations.js";
-import type { OperationPayload, OperationExecutionContext } from "../operations/types.js";
-import { recoverWebsiteGateway } from "../operations/websites.js";
-import { DOCKER_CAPABILITIES, executeDocker } from './docker.js';
+import { operationCommand } from "./operations.js";
+import type { OperationExecutionContext } from "../operations/types.js";
+import { executeDocker } from './docker.js';
 
-const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
-const ARTIFACT_FORMAT = "lightmoni-release-v1.tar.gz";
+// This production entry has no configuration switch for legacy host writes.
+// Domain adapters remain reusable, but only the independent executor may gain
+// authority for a migrated privileged action.
+export const ORDINARY_JOB_CAPABILITIES = Object.freeze([
+  "health.systemd", "health.http", "health.tcp", "systemd.probe", "docker.inventory",
+]);
+const ordinaryReadOnlyJob = (job: any): boolean => {
+  if (!Array.isArray(job?.capabilities) || !Array.isArray(job.actions) || !job.actions.length
+    || job.capabilities.some((cap: unknown) => typeof cap !== "string" || !ORDINARY_JOB_CAPABILITIES.includes(cap))) return false;
+  return job.actions.every((action: any) => {
+    if (!action || typeof action !== "object" || Array.isArray(action)) return false;
+    if (action.kind === "docker") return job.actions.length === 1 && action.operation === "inventory"
+      && Object.keys(action).every(key => ["kind", "operation"].includes(key)) && job.capabilities.includes("docker.inventory");
+    if (action.kind === "systemd_probe") return job.capabilities.includes("systemd.probe");
+    if (action.kind === "health_check") {
+      const capability = action.check?.kind === "systemd-active" ? "health.systemd"
+        : action.check?.kind === "http" ? "health.http" : action.check?.kind === "tcp" ? "health.tcp" : "";
+      return !!capability && job.capabilities.includes(capability);
+    }
+    return false;
+  });
+};
 
 export interface JobClientConfig {
   endpoint: string;
@@ -52,55 +70,6 @@ export class AgentJobRunner {
     if (!response.ok) throw Error(value.error || `agent job HTTP ${response.status}`);
     return value;
   }
-  private async downloadArtifact(job: any, action: Extract<DeploymentAction, { kind: "stage_artifact" }>, signal: AbortSignal): Promise<Buffer> {
-    if (typeof job?.lease_id !== "string" || !job.lease_id || typeof job.id !== "string" || !job.id)
-      throw Object.assign(Error("artifact download requires the active job lease"), { code: "artifact_unavailable" });
-    if (!Number.isSafeInteger(action.size) || action.size < 1 || action.size > MAX_ARTIFACT_BYTES)
-      throw Object.assign(Error("artifact size is invalid"), { code: "invalid_artifact" });
-    const path = `/api/v1/agents/${encodeURIComponent(this.config.agentID)}/jobs/${encodeURIComponent(job.id)}/artifacts/${encodeURIComponent(action.release_id)}`;
-    const response = await this.fetcher(this.config.endpoint.replace(/\/$/, "") + path, {
-      method: "GET",
-      headers: {
-        authorization: "Bearer " + this.config.controlCredential,
-        "X-LightMoni-Job-Lease": job.lease_id,
-      },
-      redirect: "error",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(120000)]),
-    });
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => {});
-      throw Object.assign(Error(`artifact download HTTP ${response.status}`), { code: "artifact_unavailable" });
-    }
-    const contentLength = response.headers.get("content-length");
-    const expectedDigest = response.headers.get("x-artifact-sha256");
-    const format = response.headers.get("x-artifact-format");
-    if (!contentLength || !/^\d+$/.test(contentLength) || Number(contentLength) !== action.size
-      || !expectedDigest || expectedDigest.toLowerCase() !== action.sha256.toLowerCase()
-      || format !== ARTIFACT_FORMAT) {
-      await response.body?.cancel().catch(() => {});
-      throw Object.assign(Error("artifact response metadata does not match the approved release"), { code: "invalid_artifact" });
-    }
-    if (!response.body) throw Object.assign(Error("artifact response body is empty"), { code: "invalid_artifact" });
-    const reader = response.body.getReader();
-    const chunks: Buffer[] = [];
-    let total = 0;
-    try {
-      while (true) {
-        if (signal.aborted) throw signal.reason ?? Object.assign(Error("artifact download cancelled"), { code: "execution_cancelled" });
-        const { done, value } = await reader.read();
-        if (done) break;
-        total += value.byteLength;
-        if (total > action.size || total > MAX_ARTIFACT_BYTES)
-          throw Object.assign(Error("artifact response exceeds the approved size"), { code: "invalid_artifact" });
-        chunks.push(Buffer.from(value));
-      }
-    } catch (error) {
-      await reader.cancel().catch(() => {});
-      throw error;
-    } finally { reader.releaseLock(); }
-    if (total !== action.size) throw Object.assign(Error("artifact response size mismatch"), { code: "size_mismatch" });
-    return Buffer.concat(chunks, total);
-  }
   private persist(job: any) {
     try { atomicJSON(this.statePath, job); } catch { /* queue telemetry reports storage failure elsewhere */ }
   }
@@ -133,18 +102,23 @@ export class AgentJobRunner {
   async pollOnce(): Promise<ExecutionReceipt | null> {
     if (!this.config.controlCredential) return null;
     const reply = await this.request(`/api/v1/agents/${encodeURIComponent(this.config.agentID)}/jobs/claim`, {
-      capabilities: [
-        "artifact.stage", "artifact.activate_release", "systemd.daemon_reload", "systemd.enable", "systemd.disable", "systemd.start", "systemd.restart", "systemd.stop",
-        "health.systemd", "health.http", "health.tcp", "systemd.probe",
-        ...operationCapabilities,
-        ...DOCKER_CAPABILITIES,
-      ],
+      capabilities: [...ORDINARY_JOB_CAPABILITIES],
       receipt_cursor: this.cursor,
     });
     const job = reply.job;
     if (!job) return null;
     this.cursor = job.id;
     this.persist({ id: job.id, lease_id: job.lease_id, started_at: this.now().toISOString() });
+    // A stale or compromised control response cannot re-enable removed write
+    // capabilities, even if this account accidentally has Docker/sudo access.
+    if (!ordinaryReadOnlyJob(job)) {
+      const result: ExecutionReceipt = { state: "failed", code: "privileged_executor_required",
+        summary: "This action requires a separately authorized privileged executor",
+        snapshot: {}, started_at: this.now().toISOString(), finished_at: this.now().toISOString() };
+      await this.request(`/api/v1/agents/${encodeURIComponent(this.config.agentID)}/jobs/${encodeURIComponent(job.id)}/result`, { lease_id: job.lease_id, ...result });
+      this.clear();
+      return result;
+    }
     const controller = new AbortController();
     let sequence = Number(job.next_sequence ?? 0);
     let activePhase = "accepted";
@@ -190,7 +164,7 @@ export class AgentJobRunner {
     heartbeatTimer.unref?.();
     const executor = new CapabilityExecutor({
       now: this.now,
-      downloadArtifact: (action, signal) => this.downloadArtifact(job, action, signal),
+      command: this.io.command ? (file, args, timeoutMs, signal) => this.io.command!(file, args, { timeoutMs, signal }) : undefined,
       emit: enqueueEvent,
     });
     const targetConfig = job.target?.config ?? {};
@@ -202,19 +176,8 @@ export class AgentJobRunner {
     try {
       if (job.actions?.length === 1 && job.actions[0]?.kind === 'docker') {
         const action=job.actions[0];
-        if(!job.capabilities?.includes(action.operation==='inventory'?'docker.inventory':'docker.control')||Date.parse(job.expires_at)<=this.now().getTime())throw Error('docker_job_mismatch');
+        if(!job.capabilities?.includes('docker.inventory')||action.operation!=='inventory'||Date.parse(job.expires_at)<=this.now().getTime())throw Error('docker_job_mismatch');
         result=await executeDocker(action,job.id,{dataDir:this.config.dataDir,signal:controller.signal,now:this.now,command:this.io.command??operationCommand},enqueueEvent);
-      } else if (job.actions?.length === 1 && job.actions[0]?.kind === "operations") {
-        const response = await this.fetcher(this.config.endpoint.replace(/\/$/, "") + `/api/v1/agents/${encodeURIComponent(this.config.agentID)}/jobs/${encodeURIComponent(job.id)}/operations`, {
-          headers: { authorization: "Bearer " + this.config.controlCredential, "X-LightMoni-Job-Lease": job.lease_id },
-          redirect: "error", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
-        });
-        if (!response.ok || !response.body) { await response.body?.cancel(); throw Error("operations_payload_unavailable"); }
-        const reader = response.body.getReader(), chunks: Buffer[] = []; let bytes = 0;
-        try { while (true) { const part = await reader.read(); if (part.done) break; bytes += part.value.length; if (bytes > 1_200_000) { await reader.cancel(); throw Error("operations_payload_too_large"); } chunks.push(Buffer.from(part.value)); } } finally { reader.releaseLock(); }
-        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")).payload as OperationPayload;
-        if (payload.operation_id !== job.actions[0].operation_id || payload.resource.agent_id !== this.config.agentID || payload.resource.kind !== job.actions[0].domain || !job.capabilities?.includes("operations." + payload.resource.kind) || Date.parse(job.expires_at) <= this.now().getTime()) throw Error("operations_payload_mismatch");
-        result = await executeOperation(payload, { dataDir: this.config.dataDir, signal: controller.signal, now: this.now, command: (file, args, opts) => operationCommand(file, args, { ...opts, signal: controller.signal }) }, enqueueEvent);
       } else {
         result = await executor.execute({ id: job.id, expires_at: job.expires_at, capabilities: job.capabilities, actions: job.actions, target } as ExecutorJob, controller.signal);
       }
@@ -232,11 +195,8 @@ export class AgentJobRunner {
   }
   async run(signal: AbortSignal): Promise<void> {
     await this.recoverUnknown();
-    try {
-      await recoverWebsiteGateway({ dataDir: this.config.dataDir, signal, now: this.now, command: (file, args, opts) => operationCommand(file, args, { ...opts, signal }) });
-    } catch {
-      await this.io.emit?.({ phase: "failed", code: "website_gateway_recovery_failed", summary: "Managed website gateway recovery failed; inspect dependencies and configuration" });
-    }
+    // No website/Docker reconciliation runs here. A cached legacy marker must
+    // never become fresh authority to mutate a host after an Agent restart.
     const delay = Math.max(1000, this.config.pollIntervalMs ?? 5000);
     while (!signal.aborted && !this.stopped) {
       try { await this.pollOnce(); } catch { /* next poll retries; centre retains the lease */ }

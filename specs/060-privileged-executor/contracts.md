@@ -1,4 +1,10 @@
-# 目标契约（未实现）
+# 目标契约与首批实现
+
+本文件保留完整目标契约；首批实际实现受系统设计60.10与任务清单约束，不能将未迁移适配器视为已可用。提权脚本当前只允许立即一次性root账户执行，容器只支持最小无挂载/端口的结构化操作，执行器升级/回退尚未实现。
+
+首批固定入口为 `privileged-executor/main.js enroll|run|check|status --config /etc/lightmoni-executor/config.json`；`enroll`仅从受保护stdin读取预绑定bootstrap，`status`为只读，返回 `executor_id/machine_id/install_generation/policy_generation/fenced/pending_results`，其中pending_results是未确认回执数量，安全卸载要求fenced为null且数量为0。
+
+主机UI使用 `POST /api/v1/machines/:id/executor-bootstrap/plan`、`POST .../executor-bootstrap/plans/:planId/apply` 与对应GET列表/详情；apply明确confirm、expected_revision与稳定request_id，秘密不进入响应。未知安装的reconcile仅在同一远端flock内证明固定安装路径和服务缺席后结束原记录，不能重放安装。独立卸载通过 `executor-maintenance/plan`，首批action仅uninstall；apply同样审批快照，cancel仅未开始，reconcile仅unknown且只读。核对时可显式选择新的有效credential_id，不能修改原审批秘密快照或重放卸载。
 
 字段和端点名称为本 SDD 的实现约束；实现前必须以严格 schema 落入 shared 协议并新增协议版本。未知字段拒绝，不将下列示意作为现有 API。
 

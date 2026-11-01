@@ -9,6 +9,9 @@ import { NodeStore } from "./nodes-model.js";
 import { join } from "node:path";
 import { createAgentUpdatesSchema, registerMachineAgentUpdates, type AgentUpdateStore } from "./machine-agent-updates.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import { registerMachineExecutorBootstrap } from "./machine-executor-bootstrap.js";
+import type { PrivilegedExecutorStore } from "./privileged-executors.js";
+import { registerMachineExecutorMaintenance } from "./machine-executor-maintenance.js";
 import { createInstallationRecoverySchema, registerInstallationRecovery } from "./machine-installation-recovery.js";
 import { assertNoPendingMachineInstallation, pendingMachineInstallation, unresolvedInstallationSQL } from "./machine-installations-guard.js";
 import { createUninstallationSchema, registerMachineUninstallations, type UninstallationStatus } from "./machine-uninstallations.js";
@@ -20,7 +23,7 @@ import type {
   AgentEnrollmentIssued,
 } from "./agent-credentials.js";
 
-import { defaultSSHRunner, SSHError, preflightCommand, parsePreflight, unavailableSSHDiscovery, type SSHDiscovery, type SSHRunner } from "./machine-ssh.js";
+import { defaultSSHRunner, SSHError, preflightCommand, parsePreflight, unavailableSSHDiscovery, unknownSSHPrivilege, type SSHPrivilegeProbe, type SSHDiscovery, type SSHRunner } from "./machine-ssh.js";
 export type { SSHRunInput, SSHRunner } from "./machine-ssh.js";
 
 export type ConnectionMethod = "direct_ssh";
@@ -140,6 +143,7 @@ export interface SSHCheckResult {
   id: string; machine_id: string; credential_id: string; connected: boolean; ready: boolean;
   platform: string; arch: string; checks: Record<string, boolean>; error_code: string;
   checked_at: string; expires_at: string;
+  privilege: SSHPrivilegeProbe & { checked_at: string; expires_at: string; machine_revision: string; credential_binding_revision: string; endpoint_fingerprint: string };
   agent_installation: { state: "present" | "absent" | "unknown" };
   discovery: SSHDiscovery;
 }
@@ -149,6 +153,7 @@ export interface InstallPlanInput {
 
 export interface ManagedMachineStore {
   agentUpdates?: AgentUpdateStore;
+  registerExecutorBootstrap(store: PrivilegedExecutorStore): Module;
   list(): MachineSummary[];
   get(machineID: string): MachineSummary;
   assistantList(): MachineSummary[];
@@ -437,6 +442,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   };
   const assertAgentDeletionSafe = (machineID: string, agentID: string) => {
     assertNoPendingAgentUpdate(db, agentID, machineID);
+    if (db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='privileged_executors'") && db.get("SELECT id FROM privileged_executors WHERE machine_id=? AND state!='revoked' LIMIT 1",machineID))
+      fail(409,"请先卸载并撤销该主机的 root 执行器身份，再删除主机");
     if (hasActiveTaskRuns(db, agentID, machineID)) fail(409, "主机有待执行、运行中或结果未知的任务中心记录，请先处理");
     if (!agentID || db.get("SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed'", agentID)) return;
     const installed = db.get<{status:string}>("SELECT status FROM machine_uninstallations WHERE machine_id=? AND agent_id=? ORDER BY created_at DESC,id DESC LIMIT 1", machineID, agentID);
@@ -648,8 +655,13 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     let command: string;
     try { command = preflightCommand(deps.externalURL); } catch { fail(400, "请先将平台外部地址配置为目标机器可访问的 HTTPS 地址"); }
     const at = now();
+    const privilegeBinding = () => ({ checked_at: iso(at), expires_at: iso(new Date(at.getTime() + PLAN_SECONDS * 1000)),
+      machine_revision: targetRevision(machine),
+      credential_binding_revision: hash(JSON.stringify([credential.id, credential.connection_credential_id ?? "", credential.method, credential.secret_fingerprint, credential.retention, credential.expires_at, credential.revoked_at ?? "", credential.secret_cleared_at ?? ""])),
+      endpoint_fingerprint: hash(JSON.stringify([machine.address, machine.port, machine.username, machine.host_key_fingerprint, deps.externalURL])) });
     const result: SSHCheckResult = { id: id(), machine_id: machineID, credential_id: credential.id,
       connected: false, ready: false, platform: "", arch: "", checks: {}, error_code: "",
+      privilege: { ...unknownSSHPrivilege(), ...privilegeBinding() },
       agent_installation: { state: "unknown" }, discovery: unavailableSSHDiscovery(), checked_at: iso(at), expires_at: iso(new Date(at.getTime() + PLAN_SECONDS * 1000)) };
     busy.add(machineID);
     const checkSignal = AbortSignal.any([signal, AbortSignal.timeout(CHECK_TIMEOUT_MS)]);
@@ -662,7 +674,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
         command, credentialID: credential.id, signal: checkSignal, port: machine.port, timeoutMs: CHECK_TIMEOUT_MS,
       });
       result.connected = true;
-      Object.assign(result, parsePreflight(output.stdout, iso(now())));
+      const parsed = parsePreflight(output.stdout, iso(now()));
+      Object.assign(result, parsed, { privilege: { ...parsed.privilege, ...privilegeBinding() } });
       if (!result.ready) result.error_code = "prerequisites_missing";
       if (result.discovery.status === "succeeded") {
         try {
@@ -896,6 +909,14 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       enrollment_id:value.enrollment_id,execution_stage:value.execution_stage,resolved_at:value.resolved_at,resolved_by:value.resolved_by,resolution_reason:value.resolution_reason };
   };
   return { list, get, assistantList, assistantGet, checkSSH, assistantPlan, assistantDeployment, acquireTerminal, agentUpdates,
+    registerExecutorBootstrap(store) {
+      const access={get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,check:checkSSH};
+      const bootstrap=registerMachineExecutorBootstrap(deps,access,store,{
+        downloadsDir:options.downloadsDir ?? join(process.cwd(),"downloads"),dataDir:options.dataDir ?? join(process.cwd(),".local-dev"),
+      });
+      const maintenance=registerMachineExecutorMaintenance(deps,access,store);
+      return {async close(){await Promise.allSettled([bootstrap.close?.(),maintenance.close?.()]);}};
+    },
     async close() {
       clearInterval(cleanupTimer);
       for (const terminal of [...terminals.values()]) terminal.invalidate();

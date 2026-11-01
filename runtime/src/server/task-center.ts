@@ -8,6 +8,7 @@ import { assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
 import { assertNoPendingAgentUpdate, hasPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoPendingMachineInstallation, hasInstallationTable, pendingMachineInstallation, unresolvedInstallationSQL } from "./machine-installations-guard.js";
 import { assertNoPendingMachineUninstallation, hasUninstallationTable, pendingMachineUninstallation } from "./machine-uninstallations-guard.js";
+import { assertNoPrivilegedExecution, hasPrivilegedExecution } from "./privileged-execution-guard.js";
 import { SCRIPT_TASK_CAPABILITIES, supportsTaskScript, TASK_LEASE_SECONDS, validateTaskScript,
   type ClaimedTaskRun, type TaskRun, type TaskRunResult, type TaskRunSnapshot } from "../shared/task-center.js";
 
@@ -56,9 +57,15 @@ export class TaskRunStore {
     if (!columns.has("automatic_attempt")) deps.db.exec("ALTER TABLE task_runs ADD COLUMN automatic_attempt INTEGER NOT NULL DEFAULT 0");
     // Historical failed runs predate retry consent and must never start retrying after upgrade.
     if (!columns.has("auto_retry_closed")) deps.db.exec("ALTER TABLE task_runs ADD COLUMN auto_retry_closed INTEGER NOT NULL DEFAULT 1");
+    if (!columns.has("execution_principal")) deps.db.exec("ALTER TABLE task_runs ADD COLUMN execution_principal TEXT NOT NULL DEFAULT 'agent'");
+    if (!columns.has("executor_id")) deps.db.exec("ALTER TABLE task_runs ADD COLUMN executor_id TEXT NOT NULL DEFAULT ''");
     deps.db.exec("CREATE INDEX IF NOT EXISTS task_runs_retry_scan ON task_runs(state,auto_retry_closed,finished_at)");
   }
   private now() { return this.deps.now().toISOString(); }
+  private ordinary(row: any) {
+    if (row.execution_principal !== "agent") fail(403, "principal_mismatch: use the privileged execution review and control endpoints");
+    return row;
+  }
   private row(id: string): any {
     const r = this.deps.db.get<any>("SELECT * FROM task_runs WHERE id=?", id);
     if (!r) fail(404, "task run not found");
@@ -67,6 +74,7 @@ export class TaskRunStore {
   private view(r: any): TaskRun {
     const snapshot = JSON.parse(r.snapshot_json) as TaskRunSnapshot;
     return { id: r.id, task_id: r.task_id, task_name: snapshot.task_name,
+      execution_principal:r.execution_principal,executor_id:r.executor_id,
       host_id: r.host_id, host_name: snapshot.host_name, agent_id: r.agent_id,
       state: r.state, trigger: r.trigger, retry_of: r.retry_of, superseded_by: r.superseded_by,
       automatic_attempt: r.automatic_attempt,
@@ -113,6 +121,7 @@ export class TaskRunStore {
     const existing = this.deps.db.get<any>("SELECT * FROM task_runs WHERE task_id=? AND host_id=? AND request_id=?", task.id, hostID, requestID);
     if (existing) return this.view(existing);
     const h = this.host(hostID);
+    assertNoPrivilegedExecution(this.deps.db, h.id, h.agent_id);
     assertNoPendingMachineInstallation(this.deps.db,h.id,h.agent_id);
     assertNoPendingMachineUninstallation(this.deps.db,h.id,h.agent_id);
     assertNoPendingAgentUpdate(this.deps.db, h.agent_id, h.id);
@@ -153,7 +162,7 @@ export class TaskRunStore {
   cancel(id: string, actor: string, inTransaction = false): TaskRun {
     this.sweep();
     const write = () => {
-      const r = this.row(id);
+      const r = this.ordinary(this.row(id));
       if (!terminal(r.state)) {
         if (r.state === "queued") this.deps.db.run("UPDATE task_runs SET state='cancelled',cancel_requested=1,finished_at=?,code='cancelled',summary=? WHERE id=?", this.now(), "Cancelled before Agent claim by " + actor, id);
         else this.deps.db.run("UPDATE task_runs SET cancel_requested=1,summary=? WHERE id=?", "Cancellation requested by " + actor, id);
@@ -165,7 +174,7 @@ export class TaskRunStore {
   retry(id: string, actor: string, inTransaction = false, expectedRevision?: string): TaskRun {
     this.sweep();
     const write = () => {
-      const r = this.row(id);
+      const r = this.ordinary(this.row(id));
       if (!terminal(r.state)) fail(409, "only terminal task runs can be retried");
       if (r.resolved_at) fail(409, "manually resolved task runs cannot be retried; dispatch a new reviewed task instead");
       if (r.superseded_by) fail(409, "this run already has a retry");
@@ -184,7 +193,7 @@ export class TaskRunStore {
       fail(400, "manual resolution requires a reason of 1–512 bytes");
     this.sweep();
     const write = () => {
-      const r = this.row(id);
+      const r = this.ordinary(this.row(id));
       if (r.state !== "unknown") fail(409, "only an unknown task run can be manually resolved");
       if (r.superseded_by) fail(409, "task run was already superseded by an explicit retry");
       if (r.resolved_at) return this.view(r);
@@ -196,9 +205,9 @@ export class TaskRunStore {
   }
   sweep() {
     const now = this.now();
-    this.deps.db.run("UPDATE task_runs SET state='unknown',finished_at=?,code='lease_expired',summary='Agent lease expired; execution outcome requires review' WHERE state='running' AND lease_expires_at<=?", now, now);
-    this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='queue_expired',summary='Task expired before Agent claim' WHERE state='queued' AND expires_at<=?", now, now);
-    this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='agent_binding_changed',summary='Host Agent binding changed before claim' WHERE state='queued' AND (NOT EXISTS (SELECT 1 FROM managed_machines m WHERE m.id=task_runs.host_id AND m.agent_id=task_runs.agent_id) OR EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=task_runs.agent_id AND l.state='removed'))", now);
+    this.deps.db.run("UPDATE task_runs SET state='unknown',finished_at=?,code='lease_expired',summary='Agent lease expired; execution outcome requires review' WHERE execution_principal='agent' AND state='running' AND lease_expires_at<=?", now, now);
+    this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='queue_expired',summary='Task expired before Agent claim' WHERE execution_principal='agent' AND state='queued' AND expires_at<=?", now, now);
+    this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='agent_binding_changed',summary='Host Agent binding changed before claim' WHERE execution_principal='agent' AND state='queued' AND (NOT EXISTS (SELECT 1 FROM managed_machines m WHERE m.id=task_runs.host_id AND m.agent_id=task_runs.agent_id) OR EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=task_runs.agent_id AND l.state='removed'))", now);
   }
   claim(agentID: string, capabilities: string[]): ClaimedTaskRun | null {
     this.sweep(); assertAgentActive(this.deps.db, agentID, 401);
@@ -208,8 +217,9 @@ export class TaskRunStore {
       if (pendingMachineInstallation(this.deps.db,"",agentID)) return null;
       if (pendingMachineUninstallation(this.deps.db,"",agentID)) return null;
       if (hasPendingAgentUpdate(this.deps.db, agentID)) return null;
+      if (hasPrivilegedExecution(this.deps.db, "", agentID)) return null;
       if (this.deps.db.get("SELECT id FROM task_runs WHERE agent_id=? AND state='running'", agentID)) return null;
-      const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE agent_id=? AND state='queued' ORDER BY created_at,rowid LIMIT 200", agentID);
+      const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE execution_principal='agent' AND agent_id=? AND state='queued' ORDER BY created_at,rowid LIMIT 200", agentID);
       for (const r of pending) {
         if (pendingMachineUninstallation(this.deps.db,r.host_id,agentID)) continue;
         if (!this.authorizationValid(r)) {
@@ -242,7 +252,7 @@ export class TaskRunStore {
   }
   private leased(agentID: string, id: string, secret: unknown): any {
     this.sweep(); assertAgentActive(this.deps.db, agentID, 401);
-    const r = this.row(id);
+    const r = this.ordinary(this.row(id));
     if (r.agent_id !== agentID) fail(403, "task run belongs to another Agent");
     if (!this.validBinding(r.host_id, agentID)) fail(409, "host Agent binding changed");
     if (r.resolved_at) fail(409, "task run was manually resolved; late Agent receipts are rejected");
@@ -311,7 +321,7 @@ export class TaskRunStore {
       ? `AND NOT EXISTS (SELECT 1 FROM machine_uninstallations removal
           WHERE (removal.agent_id=task_runs.agent_id OR removal.machine_id=task_runs.host_id)
           AND removal.status IN ('awaiting_approval','running','unknown'))` : "";
-    const candidates = this.deps.db.all<{id:string}>(`SELECT id FROM task_runs WHERE state='failed' AND superseded_by='' AND auto_retry_closed=0
+    const candidates = this.deps.db.all<{id:string}>(`SELECT id FROM task_runs WHERE execution_principal='agent' AND state='failed' AND superseded_by='' AND auto_retry_closed=0
       AND automatic_attempt < COALESCE(json_extract(snapshot_json,'$.execution_policy.retry_count'),0)
       AND code IN ('script_failed','runtime_unavailable','timeout','output_limit')
       AND strftime('%Y-%m-%dT%H:%M:%fZ',finished_at,'+' || COALESCE(json_extract(snapshot_json,'$.execution_policy.retry_delay_seconds'),60) || ' seconds') <= ?

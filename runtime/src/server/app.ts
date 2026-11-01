@@ -30,6 +30,7 @@ import { registerManagedMachines } from "./managed-machines.js";
 import { registerServiceDeployments } from "./service-deployments.js";
 import { registerAgentJobs } from "./agent-jobs.js";
 import { registerTaskCenter } from "./task-center.js";
+import { registerPrivilegedExecutors } from "./privileged-executors.js";
 import { registerOperations } from "./operations.js";
 import { registerOperationsPlatform } from "../ops/index.js";
 import { registerOperationSchedules } from "./operation-schedules.js";
@@ -160,6 +161,8 @@ export async function createApp(cfg: Config) {
     modules.push(agentJobs);
     const taskCenter = registerTaskCenter(deps, { agentCredentials });
     modules.push(taskCenter);
+    const privilegedExecutors = registerPrivilegedExecutors(deps,{dataDir:cfg.dataDir});
+    modules.push(privilegedExecutors,managedMachines.registerExecutorBootstrap(privilegedExecutors));
     // Enrollment credentials are a separate migration boundary. Legacy
     // config.key based nodes keep working until they explicitly re-enroll.
     modules.push(agentCredentials);

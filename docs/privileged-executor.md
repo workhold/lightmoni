@@ -1,6 +1,6 @@
 # 主机执行权限：普通 Agent 与独立运维执行器
 
-> SDD060 设计提案，尚未实现。当前发行仍以普通 `lightmoni-agent` 用户运行，没有 root 执行器，默认不能管理 Docker。本文不表示已修改线上权限。
+> SDD060 目标设计与实施基线。首批代码正在开发、审查和本机 Linux 验收；当前交付边界见系统设计60.10与规格任务清单，不能将目标设计视为完整实现或已上线。
 
 规格、接口与实施顺序分别见 [spec](../specs/060-privileged-executor/spec.md)、[contracts](../specs/060-privileged-executor/contracts.md)、[tasks](../specs/060-privileged-executor/tasks.md)；系统联动入口见 [系统设计第 60 章](system-design.md#第60章-主机执行权限与独立运维执行器sdd-060目标)。
 
@@ -13,6 +13,8 @@
 需要 root 的是引导安装和特权执行器。登记主机不必强制 root 用户名；实际 UID 为 0，或具备所需免交互 sudo 权限的 SSH 账户均可。SSH 账户不会成为普通 Agent 的日常运行账户。
 
 用户只登记一套 SSH 登录账户。安装器自动创建普通 `lightmoni-agent` 系统账户；独立执行器使用系统已有的 root，不创建另一套 root 登录账户，也不要求用户登记第二份密码。它通过独立平台身份工作，日常运行不依赖保存的 root SSH 密码。
+
+提权任务进程就是以操作系统 root 账户运行（UID/GID 0）。“进程”表示程序，“root账户”表示运行身份；这不是两个互斥方案。普通 Agent 与普通任务继续以 `lightmoni-agent` 运行。
 
 ## 2. 开源参考与 ADR
 
@@ -195,6 +197,8 @@ stdout/stderr 和容器日志可能包含未知秘密，按独立敏感正文加
 
 第一阶段完成 root/sudo 预检、独立身份、全接口主体隔离、计划/许可/防重、root journal/fence和完整 lifecycle。第二阶段分别交付受限 Docker 与一次性提权脚本的完整链路；每台主机只有实际验收通过才显示 ready。第三阶段逐一迁移网站、证书、systemd发布、备份、自动协调和有期限的定时提权授权。
 
-中心升级不能让旧 Agent 自动获得权限。已有主机显式启用/升级后才能进入新 lane；未迁移旧高级操作 fail closed，不保留普通 control 领取特权 payload 的旁路。普通监控继续运行。
+目标迁移要求：中心升级不能让旧 Agent 自动获得权限。已有主机显式启用/升级后才能进入新 lane；未迁移旧高级操作 fail closed，不保留普通 control 领取特权 payload 的旁路。普通监控继续运行。
 
-验收包括 root/免交互sudo/交互sudo/无提权、凭据期限、默认关闭、伪造普通control/UID/capability、请求/签名重放、计划篡改、旧代次、危险Compose、外部容器、脚本身份与快照变化、断网/重启/daemon超时、关闭/升级/回退/保留数据卸载。真实 Linux 与 Docker 实测独立记录；本轮只有设计评审和文档结构检查。
+当前首批仅由新普通 Agent 在本地拒绝旧写任务；中心旧 claim/payload 尚未停派，旧 Agent 或自定义调用方仍可能领取旧写任务。独立执行器接口已与 ordinary control 隔离；旧通道停派和适配器迁移属于 C1，未完成前本 PR 保持 Draft。
+
+验收包括 root/免交互sudo/交互sudo/无提权、凭据期限、默认关闭、伪造普通control/UID/capability、请求/签名重放、计划篡改、旧代次、危险Compose、外部容器、脚本身份与快照变化、断网/重启/daemon超时、关闭/升级/回退/保留数据卸载。真实 Linux 与 Docker 实测独立记录；已完成与未完成项目分别记录在 SDD060 tasks 和 validation，不用设计检查替代实际功能验收。

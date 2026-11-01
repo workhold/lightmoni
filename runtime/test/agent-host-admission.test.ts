@@ -20,7 +20,7 @@ import { registerInstall } from "../src/server/install.js";
 import type { Dependencies } from "../src/shared/types.js";
 
 const at = new Date("2026-10-29T08:00:00.000Z");
-const preflight = "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
+const preflight = "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
 async function fixture(t: any) {
   const db = new DB(":memory:"), router = new Router(), user = { id: "admin", name: "Admin", role: "admin" };
   const deps = { db, router, ...cipher(Buffer.alloc(32, 8)), now: () => at, externalURL: "https://monitor.example.test",

@@ -19,7 +19,7 @@ import { registerManagedMachines } from "../src/server/managed-machines.js";
 import { fixturePrivateKey } from "./helpers/ssh-key.js";
 
 const at = "2026-10-31T10:00:00.000Z", pin = "SHA256:isolated-fixture";
-const core = "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
+const core = "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
 // iproute2 `ip -j -brief address show`: family is normally absent in brief mode.
 const brief = [
   {ifname:"lo",operstate:"UNKNOWN",addr_info:[{local:"127.0.0.1",prefixlen:8},{local:"::1",prefixlen:128}]},

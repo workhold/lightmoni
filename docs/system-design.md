@@ -184,7 +184,7 @@ flowchart TB
 
 中心是模块化单体，不拆为运行时微服务。模块通过 `Dependencies` 使用共享 DB、目录、查询、认证、路由、加密、时钟和日志；启动和关闭由 `runtime/src/server/app.ts` 管理。
 
-目标权限拆分见第60章（SDD060，未实现）：普通 Agent 保持非 root，按需新增独立出站的 root 执行器。后者具有独立身份、root 自有策略/journal和完整任务授权；受限容器操作与用户明确批准的提权脚本分别授权，普通 control 不授予这些能力。
+目标权限拆分见第60章（SDD060，分期实现）：普通 Agent 保持非 root，按需新增独立出站的 root 执行器。后者具有独立身份、root 自有策略/journal和完整任务授权；受限容器操作与用户明确批准的提权脚本分别授权，普通 control 不授予这些能力。
 
 ## 7. 端到端数据流
 
@@ -761,7 +761,7 @@ flowchart TD
 
 规格、接口与隔离验收见 [SDD 058](../specs/058-agent-maintenance-recovery/spec.md)。
 
-### 13.10 目标：安装权限提示与独立运维执行器（SDD060，未实现）
+### 13.10 目标：安装权限提示与独立运维执行器（SDD060，分期实现）
 
 登记 SSH 用户名旁提前说明：“安装 Agent 需要 root，或支持免交互提权的 sudo 账户。登录账户用于安装和恢复，Agent 使用独立账户运行。”普通账户仍可登记和登录终端；预检按真实 UID/所需 sudo 能力返回 root、sudo_noninteractive、unavailable 或 unknown，不按用户名猜测，不把 SSH 密码自动当 sudo 密码。
 
@@ -857,7 +857,7 @@ AI 可以读取规则、静默和责任组的脱敏信息，也可以创建待�
 - 凭据撤销和会话降权应在受限时间内断开终端；离线 Agent 的缓存任务不能被文档宣称为即时停止，直到配置租约实现。
 - 日志、审计和错误只记录固定错误码、资源 ID、操作者、时间和脱敏摘要。
 
-SDD060 目标另设 executor audience 与 root 私有身份，不复用 Agent control/data/local token。普通脚本与 Agent 同 UID 的现状不构成沙箱，不能按 peer UID 或自报 capability 授予 root。用户明确批准的任意 root 脚本属于受信整机管理代码，能够改变执行器与主机；不能承诺其执行后的身份、日志或主机仍可信。完整边界见第60章（未实现）。
+SDD060 目标另设 executor audience 与 root 私有身份，不复用 Agent control/data/local token。普通脚本与 Agent 同 UID 的现状不构成沙箱，不能按 peer UID 或自报 capability 授予 root。用户明确批准的任意 root 脚本属于受信整机管理代码，能够改变执行器与主机；不能承诺其执行后的身份、日志或主机仍可信。完整边界见第60章，首批实际范围见60.10。
 
 ## 18. LLD：关键接口与状态机
 
@@ -1344,7 +1344,7 @@ ops_platform_resources 保存 revision、加密 spec、脱敏 status 和授权�
 
 Agent 使用本机固定 Docker context 执行单容器/Compose。平台管理配置文件、只首次写入的初始化文件、数据目录和 Docker volume；停止/移除容器不删除业务数据。资源和端口在 SQLite 事务预留，实际端口在节点复核。机器池可显式设置容量，也可经 node.inspect 获取 CPU/内存/IP/Docker 能力。调度基于在线机器、容量、端口与副本分散；现有副本按健康回执逐个更新，健康连续失败时有界重建。服务发现提供新鲜健康实例的机器可达 IP＋发布端口，要求机器之间已有可达网络；没有自动 overlay 或本地数据复制。
 
-目标权限迁移采用第60章的独立执行器（SDD060，未实现）：普通 Agent 不获得 Docker 组/socket，受限容器计划由 root 执行器二次校验。host network 网关、任意 hook、受保护证书/目录和 systemd 不能整体继承容器权限；未迁移入口应拒绝特权操作，不能隐式提权。
+目标权限迁移采用第60章的独立执行器（SDD060，分期实现）：普通 Agent 不获得 Docker 组/socket，受限容器计划由 root 执行器二次校验。host network 网关、任意 hook、受保护证书/目录和 systemd 不能整体继承容器权限；未迁移入口应拒绝特权操作，不能隐式提权。
 
 ### 33.9 网站、网关与流量
 
@@ -1517,7 +1517,7 @@ flowchart LR
 
 ## 第60章 主机执行权限与独立运维执行器（SDD 060，目标）
 
-本章为尚未实现的目标设计；当前普通 Agent 没有默认 Docker 或 root 权限。本轮只交付设计，详细研究与 HLD/LLD 见 [主机执行权限设计](privileged-executor.md)，规格和目标契约见 [SDD060](../specs/060-privileged-executor/spec.md)。
+本章描述 SDD060 的目标架构；首批代码正在实现和验收，实际交付边界见60.10。详细研究与 HLD/LLD 见 [主机执行权限设计](privileged-executor.md)，规格和目标契约见 [SDD060](../specs/060-privileged-executor/spec.md)。未发布的目标能力不能据此视为线上已可用。
 
 ### 60.1 驱动目标与方案取舍
 
@@ -1608,8 +1608,22 @@ root自有staging与专用运行单元启动固定解释器，清理继承环境
 
 实现验收覆盖root/sudo/无提权、默认关闭、主体冒充、计划/上下文篡改、重放、危险Compose、账号组变化、未知结果、撤权和生命周期。真实Linux/Docker验收另记；本轮设计审查与Doca结构读回不代表这些能力已上线。
 
+### 60.10 首批实现与剩余边界
+
+账户语义明确：提权任务的进程以操作系统 root 账户（UID/GID 0）运行。“执行器/进程”是程序，“root账户”是它的运行身份；不是另一种不属于root账户的权限。普通 Agent 与普通任务仍使用 lightmoni-agent。用户登记的一套SSH账户只用于引导与恢复，不需要登记第二个root密码。
+
+同一源码、同一发行包包含普通 Agent 和 privileged-executor 两个固定入口；root程序、配置、Ed25519身份、加密输出密钥、SQLite journal及锁分别保存在root拥有的独立目录。普通入口run拒绝真实或有效UID0。独立执行器通过HTTPS签名请求领取计划、取得单步许可、续租和提交回执；中心签名策略单调更新，普通control/data身份不能调用这些接口。task_runs保留执行主体和安全元数据，普通任务的领取、取消、重试、核对、结果及超时扫描不能操作root记录。
+
+首次开启需要管理员审阅SSH预检、主机/凭据绑定、固定发行SHA256与能力计划。bootstrap全程持有独立root文件锁，一次性注册秘密只经受保护SSH stdin与临时0600下载配置传递；页面与Agent拿不到该秘密。安装成功以独立签名新鲜心跳中的构建身份核实。结果未知时不重试；仅在取得同一远端锁并证明程序、配置、状态及服务均不存在后，才可显式结束失败记录。单独卸载也先检查本地fence和未回传结果、停止后再检查，确认固定路径删除后才撤销精确平台身份。离线卸载不能代替中心撤权，普通Agent卸载必须先处理执行器。
+
+首批提权脚本只允许立即一次性、root账户、固定代码/解释器摘要/参数/环境/附加组及超时上限；独立systemd运行单元在实际启动前再次检查原始单调时钟许可。stdout/stderr在主机与中心分别加密，用户主动查看时才读取，不进入普通遥测或AI/MCP自动上下文。任意获批root脚本仍可控制整机，不能将它称为root沙箱。
+
+受管容器首批只开放结构化list/pull/create/start/stop/restart/remove，固定本地daemon、digest与架构，root清单绑定Docker不可变ID和资源revision。create固定65532账户、只读根、无网络/挂载/端口/附加权限，并拒绝镜像VOLUME；不支持Compose、任意command、卷或用户服务完整部署。新普通Agent在本地拒绝旧高级写操作，普通control不能访问独立执行器接口；中心旧claim/payload接口尚未完成停派与迁移，不能将客户端拒绝视为中心强制只读保证。执行器自动升级/回退、部分安装的SSH修复、既有网站/证书/systemd/备份适配器迁移、定时提权与完整容器部署仍是后续工作；普通Agent升级不会连带切换独立执行器程序。
+
 
 ## 57. Agent Docker 即时清单与容器操作（SDD 057）
+
+SDD060实施覆盖本节写通道：普通Agent目前仅领取docker.inventory等只读任务，旧docker.control及operations/systemd/制品写任务暂不执行。下文与图保留SDD057原始方案用于说明历史，新的特权写通道以第60章为准；中心旧claim/payload接口尚未停派，旧Agent或自定义调用方仍可能领取旧写任务；新Agent本地拒绝，未领取任务需取消或等待过期，不能认为开启执行器后旧适配器已自动迁移。
 
 主机 Docker 清单独立周期采集，不等待平台应用日志积压。失败保留最近成功清单及最近尝试时间，区分 CLI 缺失、socket 权限不足、daemon 不可达、命令超时与通用失败；失败原因优先于过期提示。平台应用与全部 Docker 仍分开显示，外部容器不会自动成为平台部署。
 

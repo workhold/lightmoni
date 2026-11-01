@@ -39,7 +39,7 @@ function hashTree(location, relative = "") {
   else if (info.isDirectory()) for (const name of readdirSync(location).sort()) hashTree(join(location, name), relative + "/" + name);
   else contentHash.update(readFileSync(location));
 }
-for (const file of ["runtime/dist", "runtime/package.json", "runtime/package-lock.json", "sdk/typescript/dist", "sdk/typescript/package.json", "deploy/agent", "scripts/build-agent-release.mjs"]) hashTree(join(repo, file), file);
+for (const file of ["runtime/dist", "runtime/package.json", "runtime/package-lock.json", "sdk/typescript/dist", "sdk/typescript/package.json", "deploy/agent", "deploy/executor", "scripts/build-agent-release.mjs"]) hashTree(join(repo, file), file);
 const buildID = process.env.LIGHTMONI_AGENT_BUILD_ID ?? `${version}-${sourceRevision.slice(0, 12)}-${contentHash.digest("hex").slice(0, 12)}`;
 if (!/^[A-Za-z0-9._-]{1,128}$/.test(buildID)) throw Error("Invalid Agent build ID");
 const buildTime = new Date().toISOString();
@@ -53,7 +53,7 @@ try {
 } catch {
   throw Error("Node distribution URL must use HTTPS without credentials, query or fragment");
 }
-if (!existsSync(join(repo, "runtime/dist/agent/main.js")))
+if (!existsSync(join(repo, "runtime/dist/agent/main.js")) || !existsSync(join(repo, "runtime/dist/privileged-executor/main.js")))
   throw Error("Build the TypeScript SDK and runtime first");
 mkdirSync(output, { recursive: true });
 const staging = mkdtempSync(join(tmpdir(), "lightmoni-release-")),
@@ -113,6 +113,11 @@ try {
   // It requires neither the platform nor a working bundled Node executable.
   cpSync(join(repo, "deploy/agent/uninstall.sh"), join(common, "lightmoni-agent-runtime/uninstall.sh"));
   chmodSync(join(common, "lightmoni-agent-runtime/uninstall.sh"), 0o755);
+  // One immutable release carries both fixed roles. Installing the ordinary
+  // Agent does not enroll or enable the privileged executor.
+  cpSync(join(repo, "deploy/executor"), join(common, "lightmoni-agent-runtime/executor"), { recursive: true });
+  for (const script of ["install.sh", "launcher.sh", "uninstall.sh"])
+    chmodSync(join(common, "lightmoni-agent-runtime/executor", script), 0o755);
   const checksums = (await download("SHASUMS256.txt")).toString();
   const artifacts = [];
   const releases = [];

@@ -1,0 +1,33 @@
+{
+  "environment": "local isolated Linux arm64 systemd container",
+  "results": [
+    "fresh same-package installation and Ed25519 enrollment",
+    "real signed plan + start permit + transient systemd process executes as UID 0/root",
+    "ordinary task control rejects executor lineage and omits code/env/output",
+    "real signed runtime limit stops sleep 20 at 1 second with failed/timeout and no unknown writer fence",
+    "real Docker fixed Unix socket: sanitized list, external-resource refusal, digest/architecture-pinned managed create and remove; no existing container changed",
+    "signed policy disable reaches independent executor",
+    "offline uninstall clears local executor state; exact center identity separately revoked"
+  ],
+  "pass": true,
+  "tested_at": "2026-11-01",
+  "node_version": "24.15.0",
+  "systemd_version": "252",
+  "architecture": "arm64",
+  "tls": "explicit ephemeral test CA; certificate verification enabled",
+  "docker_image": "local/lightmoni-executor-systemd-qa@sha256:11062cb6b46a29a39a99131dff8ca38b15191d7fa854f8611dfc664a2c45adf5",
+  "docker_operations_verified": [
+    "list",
+    "create",
+    "remove"
+  ],
+  "separate_probes": [
+    "system bus stopped: script readiness false; restored: true",
+    "direct production ScriptHost sleep 20 / 1 second limit: failed/timeout, 1021ms"
+  ],
+  "not_exercised": [
+    "amd64 real Linux execution",
+    "Docker pull/start/stop/restart and registry authentication",
+    "Compose and log tail profiles"
+  ]
+}

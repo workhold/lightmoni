@@ -1,6 +1,6 @@
 # HLD/LLD 计划与决策
 
-本轮为设计交付；设计不等于实现许可或线上授权。
+用户已授权按设计开发。首批实现覆盖独立执行身份、一次性脚本及安装/卸载垂直链路；保留分期目标，未完成项目见 tasks。开发与本机隔离验收不构成修改线上主机权限的授权。
 
 1. 参考 Cockpit 普通/特权 bridge 的进程与 UID 隔离，参考 1Panel 的运维覆盖；不复制整个 Agent 常驻 root 的权限模型。
 2. root 执行器独立出站 HTTPS，使用 root 持有的 Ed25519 身份。中心 root job 的所有数据和结果接口强制 `execution_principal=privileged_executor`，不经普通 control 通道或本地 socket 授权。
