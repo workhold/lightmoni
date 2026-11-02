@@ -1,0 +1,13 @@
+{
+  "production_assets": {
+    "arm64": {
+      "files": 66,
+      "sha256": "2d6b5185da3f97f8277d5b6dd948edcbc27e33156e30c7f141ced4f691c7e7a6"
+    },
+    "amd64": {
+      "files": 66,
+      "sha256": "2d6b5185da3f97f8277d5b6dd948edcbc27e33156e30c7f141ced4f691c7e7a6"
+    }
+  },
+  "all_assets_identical": true
+}

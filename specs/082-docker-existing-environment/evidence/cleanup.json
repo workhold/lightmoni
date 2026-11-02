@@ -1,0 +1,6 @@
+{
+  "task_owned_containers_volumes_network_and_runtime_credentials_removed": true,
+  "original_running_containers_preserved": true,
+  "original_running_count": 15,
+  "remaining_task_containers": []
+}
