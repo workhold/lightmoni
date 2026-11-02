@@ -55,4 +55,4 @@ Runtime 跳过主要依赖 Linux/root/systemd、可用 Docker、ClickHouse、显
 
 ## 交付边界
 
-本分支包含尚未合并的 [PR #72](https://github.com/workhold/lightmoni/pull/72) 统一 Agent 生命周期实现及本次 SDD084 多账户变更，最终 PR 面向 main。未自动合并 PR、关闭其他 PR、发布镜像或部署生产。
+已提交 [PR #73](https://github.com/workhold/lightmoni/pull/73)，面向 main，非 Draft；创建后 GitHub 显示 MERGEABLE/CLEAN，无配置检查回执。本分支包含尚未合并的 [PR #72](https://github.com/workhold/lightmoni/pull/72) 统一 Agent 生命周期实现及本次 SDD084 多账户变更。未自动合并 PR、关闭其他 PR、发布镜像或部署生产。
