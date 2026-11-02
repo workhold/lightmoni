@@ -2,6 +2,7 @@ import { registerMachineDocker } from './machine-docker.js';
 import { machineDockerEnvironment, type DockerEnvironment } from './docker-environment.js';
 import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { connectionCredentials } from "./connection-credentials.js";
+import { createMachineSSHAccountsSchema,validateSSHUsername,type MachineSSHAccount,type InstallationSSHSelection,type InstallationSSHAttempt } from './machine-ssh-accounts.js';
 import { createHostNetworkSchema, machineNetwork, machineServiceAddressSettings, saveMachineServiceAddresses, recordSSHHostNetwork, type MachineNetwork } from "./host-network.js";
 import { recordMachineHostKey } from "./machine-host-keys.js";
 import { agentBootstrapCommand } from "./machine-agent-lifecycle.js";
@@ -12,9 +13,10 @@ import { NodeStore } from "./nodes-model.js";
 import { join } from "node:path";
 import { createAgentUpdatesSchema, registerMachineAgentUpdates, type AgentUpdateStore } from "./machine-agent-updates.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
-import { registerMachineExecutorBootstrap } from "./machine-executor-bootstrap.js";
 import type { PrivilegedExecutorStore } from "./privileged-executors.js";
-import { registerMachineExecutorMaintenance } from "./machine-executor-maintenance.js";
+import { createAgentRuntimeSchema, recordAgentRuntime, registerMachineAgentRuntime, validAgentRuntimeMode, validAgentRuntimeObservation } from './machine-agent-runtime.js';
+import { assertNoPendingAgentRuntime } from './machine-agent-runtime-guard.js';
+import { PRIVILEGED_CAPABILITIES } from '../shared/privileged-executor.js';
 import { createInstallationRecoverySchema, registerInstallationRecovery } from "./machine-installation-recovery.js";
 import { assertNoPendingMachineInstallation, pendingMachineInstallation, unresolvedInstallationSQL } from "./machine-installations-guard.js";
 import { createUninstallationSchema, registerMachineUninstallations, type UninstallationStatus } from "./machine-uninstallations.js";
@@ -26,7 +28,7 @@ import type {
   AgentEnrollmentIssued,
 } from "./agent-credentials.js";
 
-import { defaultSSHRunner, SSHError, preflightCommand, parsePreflight, unavailableSSHDiscovery, unknownSSHPrivilege, type SSHPrivilegeProbe, type SSHDiscovery, type SSHRunner } from "./machine-ssh.js";
+import { defaultSSHRunner, SSHError, preflightCommand, parsePreflight, unavailableSSHDiscovery, unknownSSHPrivilege, sshAccountSnapshot,sshCredentialRevision,assertSSHAccount,type SSHPrivilegeProbe, type SSHDiscovery, type SSHRunner } from "./machine-ssh.js";
 export type { SSHRunInput, SSHRunner } from "./machine-ssh.js";
 
 export type ConnectionMethod = "direct_ssh";
@@ -37,6 +39,18 @@ export type MachineCapabilityReason = "host_busy" | "direct_ssh_required" | "ssh
 export interface MachineCapability { available: boolean; reason: MachineCapabilityReason }
 export type MachineStatus = "unknown" | "online" | "offline" | "installing" | "uninstalled" | "removed" | "error";
 export type DeploymentStatus = "awaiting_approval" | "running" | "unknown" | "succeeded" | "failed" | "cancelled";
+export interface MachineAgentOperation {
+  id: string;
+  machine_id: string;
+  kind: "install" | "uninstall";
+  status: DeploymentStatus | UninstallationStatus;
+  execution_stage: string;
+  created_at: string;
+  started_at: string;
+  finished_at: string;
+  error: string;
+  resolved_at: string;
+}
 
 const MACHINE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/;
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/;
@@ -82,11 +96,6 @@ const safeAddress = (value: unknown) => {
   if (!/^[A-Za-z0-9._:[\]-]+$/.test(address)) fail(400, "invalid address");
   return address;
 };
-const safeUsername = (value: unknown) => {
-  const username = text(value, "username", 64);
-  if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/.test(username)) fail(400, "invalid username");
-  return username;
-};
 const redact = (value: string, secrets: string[] = []) => {
   let output = value.slice(0, OUTPUT_LIMIT);
   for (const secret of secrets.filter(Boolean)) output = output.split(secret).join("[redacted]");
@@ -116,7 +125,6 @@ export interface MachineSummary {
   labels: {id:string;name:string}[];
   address: string;
   port: number;
-  username: string;
   connection_method: ConnectionMethod;
   host_key_fingerprint: string;
   ssh_target_generation: number;
@@ -127,7 +135,8 @@ export interface MachineSummary {
   arch: string;
   agent_id: string;
   agent_status: MachineStatus;
-  default_credential_id: string;
+  default_account_id: string;
+  accounts: MachineSSHAccount[];
   credential_count: number;
   active_credential_count: number;
   active_ssh_credential_count: number;
@@ -137,14 +146,19 @@ export interface MachineSummary {
   capabilities: { terminal: MachineCapability; ssh_check: MachineCapability; deploy_agent: MachineCapability; uninstall_agent: MachineCapability; recovery_uninstall_agent: MachineCapability; update_agent: MachineCapability; rollback_agent: MachineCapability };
   agent_release: any;
   agent_update: any;
+  agent_operation: MachineAgentOperation | null;
   last_deployment_status: DeploymentStatus | "";
   last_uninstallation_status: UninstallationStatus | "";
   updated_at: string;
   created_at: string;
 }
+export type SSHMachineTarget = MachineSummary & {account_id:string;username:string;account_revision:number};
 
 export interface SSHCheckResult {
   id: string; machine_id: string; credential_id: string; connected: boolean; ready: boolean;
+  account_id:string;username:string;account_revision:number;
+  permission_recovery?:{reason:'ssh_privilege_required';accounts:MachineSSHAccount[]};
+  installation_selection?:InstallationSSHSelection;
   platform: string; arch: string; checks: Record<string, boolean>; error_code: string;
   checked_at: string; expires_at: string;
   privilege: SSHPrivilegeProbe & { checked_at: string; expires_at: string; machine_revision: string; credential_binding_revision: string; endpoint_fingerprint: string };
@@ -152,7 +166,7 @@ export interface SSHCheckResult {
   discovery: SSHDiscovery;
 }
 export interface InstallPlanInput {
-  check_id: string; credential_id?: string; version: string; arch: string; initial_label_id?: string;
+  check_id: string; credential_id?: string; version: string; arch: string; initial_label_id?: string; runtime_mode?: 'root'|'user';
 }
 
 export interface ManagedMachineStore {
@@ -163,6 +177,7 @@ export interface ManagedMachineStore {
   assistantList(): MachineSummary[];
   assistantGet(machineID: string): MachineSummary & { ssh_credentials: { id: string; method: string; expires_at: string }[] };
   checkSSH(machineID: string, input: { credential_id?: string }, actorID: string, signal: AbortSignal): Promise<SSHCheckResult>;
+  installationPreflight(machineID:string,input:{selection:'auto'|'manual';credential_id?:string},actorID:string,signal?:AbortSignal):Promise<SSHCheckResult>;
   assistantPlan(machineID: string, input: InstallPlanInput, actorID: string): Record<string, any>;
   assistantDeployment(deploymentID: string): Record<string, any>;
 }
@@ -177,7 +192,7 @@ export interface ManagedMachinesOptions {
 }
 
 export interface TerminalLease {
-  machine: MachineSummary;
+  machine: SSHMachineTarget;
   credentialID: string;
   credentialMethod: "ssh_key" | "password";
   privateKey: string;
@@ -195,11 +210,13 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const { db, router } = deps;
   createAgentLifecycleSchema(db);
   createAgentHostSchema(db);
+  createMachineSSHAccountsSchema(db);
   createHostNetworkSchema(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS machine_credentials(
       id TEXT PRIMARY KEY,
       machine_id TEXT NOT NULL REFERENCES managed_machines(id) ON DELETE CASCADE,
+      account_id TEXT NOT NULL CHECK(account_id!='') REFERENCES machine_ssh_accounts(id),
       method TEXT NOT NULL,
       retention TEXT NOT NULL,
       policy_source TEXT NOT NULL DEFAULT 'explicit',
@@ -259,6 +276,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     CREATE INDEX IF NOT EXISTS machine_credential_events_credential ON machine_credential_events(credential_id,created_at);
   `);
   const now = () => deps.now();
+  createAgentRuntimeSchema(deps);
   const busy = new Set<string>();
   let executorStore: PrivilegedExecutorStore | undefined;
   const terminals = new Map<string, { credentialID: string; invalidate: () => void }>();
@@ -306,7 +324,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const idle = (machineID: string) => { cleanupInvalidCredentials(); assertNoDockerInstallation(db,machineID); if (busy.has(machineID)) fail(409, "此主机有终端、检查或部署正在进行，请先结束后重试"); };
   // A user label is not part of the SSH connection identity. Plans that show
   // that label are invalidated separately when the asset is renamed.
-  const targetRevision = (machine: any) => hash(JSON.stringify([machine.address, machine.port, machine.username, machine.connection_method, machine.host_key_fingerprint, Number(machine.ssh_target_generation || 0), deps.externalURL]));
+  const targetRevision = (machine: any) => hash(JSON.stringify([machine.address, machine.port, machine.connection_method, machine.host_key_fingerprint, Number(machine.ssh_target_generation || 0), deps.externalURL]));
   const parameters = (input: Record<string, any>, allowed: string[]) => {
     if (Object.keys(input).some(key => !allowed.includes(key))) fail(400, "unknown request parameter");
     return input;
@@ -340,6 +358,21 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const labels = available ? db.all<{id:string;name:string}>("SELECT l.id,l.name FROM machine_host_labels h JOIN agent_task_labels l ON l.id=h.label_id WHERE h.machine_id=? ORDER BY l.id", machineID) : [];
     return { label_ids: labels.map(label => label.id), labels };
   };
+  const agentOperation = (machineID: string): MachineAgentOperation | null => {
+    // Read only the progress fields: plans, credentials and command output never
+    // enter this projection. Active records remain visible ahead of newer history.
+    const operation = db.get<MachineAgentOperation>(`
+      SELECT id,machine_id,kind,status,execution_stage,created_at,started_at,finished_at,error,resolved_at FROM (
+        SELECT id,machine_id,'install' kind,status,execution_stage,created_at,started_at,finished_at,error,resolved_at,
+          CASE WHEN status IN ('awaiting_approval','running','unknown') AND resolved_at='' THEN 1 ELSE 0 END operation_active
+          FROM machine_deployments WHERE machine_id=?
+        UNION ALL
+        SELECT id,machine_id,'uninstall' kind,status,'' execution_stage,created_at,started_at,finished_at,error,'' resolved_at,
+          CASE WHEN status IN ('awaiting_approval','running','unknown') THEN 1 ELSE 0 END operation_active
+          FROM machine_uninstallations WHERE machine_id=?
+      ) ORDER BY operation_active DESC,created_at DESC,id DESC,kind ASC LIMIT 1`, machineID, machineID);
+    return operation ? { ...operation, error: redact(operation.error) } : null;
+  };
   const summary = (value: any): MachineSummary => {
     if (!value) fail(404, "主机不存在");
     const activeSSH = Number(value.active_ssh_credential_count ?? 0), activeKeys = Number(value.active_ssh_key_count ?? 0);
@@ -365,11 +398,11 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (pendingUpdate) for (const current of [uninstallCapability, deployCapability]) { current.available = false; current.reason = "agent_update_pending"; }
     if (pendingInstall) for (const current of [uninstallCapability,deployCapability,updateCapability]) { current.available=false; if(current.reason!=="host_busy")current.reason=pendingInstall.status==="unknown"?"installation_unknown":"installation_pending"; }
     return {
-      id: value.id, name: value.name, default_credential_id: value.default_credential_id || "", observed_hostname: currentAgentHostname(db, value.id, value.agent_id),
+      id: value.id, name: value.name, default_account_id: value.default_account_id || "", accounts:accountRows(value.id), observed_hostname: currentAgentHostname(db, value.id, value.agent_id),
       network: {...machineNetwork(db,value.id),service_addresses:machineServiceAddressSettings(db,value.id)},
       docker_environment: machineDockerEnvironment(executorStore?.getStatus(value.id),now()),
       ...hostLabels(value.id),
-      address: value.address, port: Number(value.port), username: value.username,
+      address: value.address, port: Number(value.port),
       connection_method: value.connection_method, host_key_fingerprint: value.host_key_fingerprint, ssh_target_generation: Number(value.ssh_target_generation || 0),
       host_key_public_key: value.host_key_public_key || "", host_key_observed_at: value.host_key_observed_at || "",
       host_key_status: value.host_key_public_key ? "observed" : value.host_key_fingerprint ? "confirmed" : "unconfigured",
@@ -381,6 +414,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       ssh_recovery_available: value.connection_method === "direct_ssh" && activeSSH > 0,
       capabilities: { terminal: pendingUpdate ? { available: false, reason: "agent_update_pending" } : capability(), ssh_check: capability(), deploy_agent: deployCapability, uninstall_agent: uninstallCapability, recovery_uninstall_agent: { ...uninstallCapability }, update_agent: updateCapability, rollback_agent: { ...updateCapability } },
       ...agentUpdates.machineState(value.id, value.agent_id),
+      agent_operation: agentOperation(value.id),
       last_deployment_status: value.last_deployment_status || "", last_uninstallation_status: value.last_uninstallation_status || "", updated_at: value.updated_at, created_at: value.created_at,
     };
   };
@@ -393,11 +427,28 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const credentialRows = (machineID: string) => {
     cleanupInvalidCredentials();
     return db.all<any>(
-      `SELECT id,connection_credential_id,name,method,secret_fingerprint,retention,policy_source,secret_cleared_at,clear_reason,created_at,expires_at,revoked_at,last_used_at,created_by,
-       CASE WHEN id=(SELECT default_credential_id FROM managed_machines WHERE id=?) THEN 1 ELSE 0 END AS is_default
-       FROM effective_machine_credentials WHERE machine_id=? ORDER BY created_at DESC`, machineID, machineID,
+      `SELECT id,account_id,username,account_revision,connection_credential_id,name,method,secret_fingerprint,retention,policy_source,secret_cleared_at,clear_reason,created_at,expires_at,revoked_at,last_used_at,created_by,
+       CASE WHEN id=(SELECT default_credential_id FROM machine_ssh_accounts WHERE id=account_id) THEN 1 ELSE 0 END AS is_default
+       FROM effective_machine_credentials WHERE machine_id=? ORDER BY created_at DESC`, machineID,
     );
   };
+  const accountRows = (machineID:string):MachineSSHAccount[] => {
+    const credentials=credentialRows(machineID),machine=db.get<any>('SELECT * FROM managed_machines WHERE id=?',machineID);
+    return db.all<any>("SELECT id,machine_id,username,revision,default_credential_id,created_at,created_by,updated_at FROM machine_ssh_accounts WHERE machine_id=? AND deleted_at='' ORDER BY created_at,id",machineID).map(account=>{
+      const own=credentials.filter(c=>c.account_id===account.id);
+      const saved=db.get<any>('SELECT c.* FROM machine_ssh_checks c JOIN machine_credentials b ON b.id=c.credential_id WHERE c.machine_id=? AND b.account_id=? ORDER BY c.created_at DESC,c.rowid DESC LIMIT 1',machineID,account.id);
+      const last_check=saved?parseJSON<SSHCheckResult|null>(saved.result_json,null):null;
+      const current=last_check?db.get<any>('SELECT * FROM effective_machine_credentials WHERE id=? AND machine_id=? AND account_id=?',last_check.credential_id,machineID,account.id):null;
+      const check_fresh=!!(last_check&&current&&!current.revoked_at&&!current.secret_cleared_at&&current.secret_encrypted&&machineCredentialCurrent(current,now())&&Date.parse(last_check.expires_at)>now().getTime()&&saved.target_revision===targetRevision(machine)&&last_check.account_id===account.id&&last_check.username===account.username&&last_check.account_revision===account.revision&&last_check.privilege?.credential_binding_revision===sshCredentialRevision(current));
+      const recommended=check_fresh&&last_check!.connected&&['root','sudo_noninteractive'].includes(last_check!.privilege.state);
+      return {...account,credentials:own,last_check,check_fresh,recommended,recommended_credential_id:recommended?last_check!.credential_id:''};
+    });
+  };
+  const ensureAccount = (machineID:string,accountID:string) => {
+    const account=db.get<any>("SELECT * FROM machine_ssh_accounts WHERE machine_id=? AND id=? AND deleted_at=''",machineID,accountID);
+    if(!account)fail(404,'SSH 登录账户不存在');return account;
+  };
+  const accountEvent=(machineID:string,accountID:string,event:string,actorID:string,details:Record<string,any>={})=>db.run('INSERT INTO machine_ssh_account_events(id,machine_id,account_id,event,actor_id,details_json,created_at) VALUES(?,?,?,?,?,?,?)',id(),machineID,accountID,event,actorID,JSON.stringify(details),iso(now()));
   const ensureMachine = (machineID: string) => {
     if (!MACHINE_ID.test(machineID) || !db.get("SELECT id FROM managed_machines WHERE id=?", machineID)) fail(404, "主机不存在");
     return row(machineID)!;
@@ -440,13 +491,14 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     return value;
   };
   const validateMachine = (input: Record<string, any>, existing?: any) => {
+    if(Object.hasOwn(input,'username'))fail(400,'登录用户名属于 SSH 账户，请先登记主机再添加账户');
+    parameters(input,['id','name','address','port','connection_method','platform','arch','host_key_fingerprint','host_key_public_key','host_key_observed_at','host_key_status','ssh_target_generation']);
     if (Object.hasOwn(input, "id")) fail(400, "主机 ID 由平台自动生成，不能指定或修改");
     if (["host_key_fingerprint", "host_key_public_key", "host_key_observed_at", "host_key_status", "ssh_target_generation"].some(field => Object.hasOwn(input, field))) fail(400, "主机身份由 SSH 连接自动记录，不能手动指定或修改");
     const name = text(input.name ?? existing?.name, "name", 128);
     if (/[\u0000-\u001f\u007f-\u009f]/.test(input.name ?? existing?.name)) fail(400, "主机名称不能包含控制字符");
     const address = safeAddress(input.address ?? existing?.address);
     const port = integer(input.port ?? existing?.port, "port", 1, 65535, 22);
-    const username = safeUsername(input.username ?? existing?.username);
     const connectionMethod = String(input.connection_method ?? existing?.connection_method ?? "direct_ssh") as ConnectionMethod;
     if (!CONNECTIONS.has(connectionMethod)) fail(400, "invalid connection_method");
     const endpointChanged = existing && (existing.address !== address || Number(existing.port) !== port);
@@ -456,21 +508,22 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const platform = text(input.platform ?? existing?.platform ?? "", "platform", 64, false);
     const arch = text(input.arch ?? existing?.arch ?? "", "arch", 16, false);
     if (arch && !ARCHES.has(arch)) fail(400, "invalid arch");
-    return { name, address, port, username, connectionMethod, fingerprint, publicKey, observedAt, platform, arch };
+    return { name, address, port, connectionMethod, fingerprint, publicKey, observedAt, platform, arch };
   };
   const machineBody = async (ctx: Context) => record(await ctx.body());
   const createMachine = async (ctx: Context) => {
     admin(ctx);
     const input = await machineBody(ctx), value = validateMachine(input), at = iso(now()), machineID = id().slice(0, 16);
     db.run(
-      `INSERT INTO managed_machines(id,name,address,port,username,connection_method,host_key_fingerprint,platform,arch,created_at,updated_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?)`, machineID, value.name, value.address, value.port, value.username, value.connectionMethod,
+      `INSERT INTO managed_machines(id,name,address,port,connection_method,host_key_fingerprint,platform,arch,created_at,updated_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?)`, machineID, value.name, value.address, value.port, value.connectionMethod,
       value.fingerprint, value.platform, value.arch, at, at,
     );
     ctx.json(get(machineID), 201);
   };
   const updateMachine = async (ctx: Context) => {
     admin(ctx);
+    assertNoPendingAgentRuntime(db, ctx.params.id);
     assertNoPendingAgentUpdate(db, "", ctx.params.id);
     idle(ctx.params.id);
     uninstallations.assertFree(ctx.params.id);
@@ -479,17 +532,18 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     ensureMachine(ctx.params.id);
     uninstallations.assertFree(ctx.params.id);
     db.transaction(() => {
+      const existing = db.get<any>("SELECT * FROM managed_machines WHERE id=?", ctx.params.id);
+      if (!existing) fail(404, "主机不存在");
+      assertNoPendingAgentRuntime(db, ctx.params.id, existing.agent_id);
       assertNoPendingMachineInstallation(db,ctx.params.id);
       uninstallations.assertFree(ctx.params.id);
       assertNoPendingAgentUpdate(db, "", ctx.params.id);
-      const existing = db.get<any>("SELECT * FROM managed_machines WHERE id=?", ctx.params.id);
-      if (!existing) fail(404, "主机不存在");
       const value = validateMachine(input, existing);
-      const changed = ["address", "port", "username"].some(field => existing[field] !== value[field as "address" | "port" | "username"]) || existing.connection_method !== value.connectionMethod;
+      const changed = ["address", "port"].some(field => existing[field] !== value[field as "address" | "port"]) || existing.connection_method !== value.connectionMethod;
       const renamed = existing.name !== value.name;
       db.run(
-        `UPDATE managed_machines SET name=?,address=?,port=?,username=?,connection_method=?,host_key_fingerprint=?,host_key_public_key=?,host_key_observed_at=?,platform=?,arch=?,ssh_target_generation=ssh_target_generation+?,updated_at=? WHERE id=?`,
-        value.name, value.address, value.port, value.username, value.connectionMethod, value.fingerprint, value.publicKey, value.observedAt, value.platform, value.arch, Number(changed), at, ctx.params.id,
+        `UPDATE managed_machines SET name=?,address=?,port=?,connection_method=?,host_key_fingerprint=?,host_key_public_key=?,host_key_observed_at=?,platform=?,arch=?,ssh_target_generation=ssh_target_generation+?,updated_at=? WHERE id=?`,
+        value.name, value.address, value.port, value.connectionMethod, value.fingerprint, value.publicKey, value.observedAt, value.platform, value.arch, Number(changed), at, ctx.params.id,
       );
       if (changed) db.run("DELETE FROM machine_ssh_checks WHERE machine_id=?", ctx.params.id);
       if (changed || renamed) {
@@ -503,6 +557,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const addCredential = async (ctx: Context) => {
     admin(ctx);
     ensureMachine(ctx.params.id);
+    ensureAccount(ctx.params.id,ctx.params.accountId);
     const input = parameters(await machineBody(ctx), ["name", "connection_credential_id", "make_default", "method", "secret", "expires_in_seconds", "retention", "confirm_managed", "confirm_permanent"]);
     if (input.make_default !== undefined && typeof input.make_default !== "boolean") fail(400, "invalid make_default");
     if (input.connection_credential_id !== undefined && Object.keys(input).some(key => !["connection_credential_id", "make_default"].includes(key))) fail(400, "选择已有凭据时不能同时提交新秘密或保存期限");
@@ -513,7 +568,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       if(!db.get("SELECT id FROM managed_machines WHERE id=?",ctx.params.id))fail(404,"主机不存在");
       const source = material ? library.create(material,ctx.user.id) : library.ensure(text(input.connection_credential_id,"connection_credential_id",64));
       reused=source.reused ?? false;
-      bindingID = library.bind(ctx.params.id,source.id,ctx.user.id,input.make_default !== false,requested);
+      bindingID = library.bind(ctx.params.id,ctx.params.accountId,source.id,ctx.user.id,input.make_default !== false,requested);
       if (input.connection_credential_id === undefined) db.run("UPDATE machine_credentials SET policy_source=? WHERE id=?",input.retention === undefined ? "default" : "explicit",bindingID);
     });
     const binding = credentialRows(ctx.params.id).find(value => value.id === bindingID)!;
@@ -532,19 +587,15 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (machine.connection_method !== "direct_ssh") fail(400, "仅支持直接 SSH 连接，请先更新主机连接配置");
     let selected = credentialID;
     if (!selected) {
-      const keys = credentialRows(machineID).filter(c => (c.method === "ssh_key" || c.method === "password" && (allowOneTime || ["temporary", "managed", "permanent"].includes(c.retention))) && !c.revoked_at && !c.secret_cleared_at && machineCredentialCurrent(c, now()));
-      if (machine.default_credential_id) {
-        const preferred = keys.find(c => c.id === machine.default_credential_id);
-        if (!preferred) fail(409, "主机默认连接凭据已失效，请更新默认凭据");
-        selected = preferred.id;
-      }
-      if (!selected && !keys.length) fail(400, allowOneTime ? "请先添加有效的 SSH 私钥或密码凭据" : "请先添加有效的 SSH 私钥或可复用密码；一次性密码不能用于自动安装或卸载");
-      if (!selected && keys.length > 1) fail(409, "存在多个有效 SSH 凭据，请明确选择 credential_id");
-      selected ??= keys[0].id;
+      if(!machine.default_account_id)fail(409,'请明确选择 SSH 账户凭据，或设置默认账户及默认凭据');
+      const account=ensureAccount(machineID,machine.default_account_id);
+      if(!account.default_credential_id)fail(409,'默认 SSH 账户尚未设置默认凭据');
+      selected=account.default_credential_id;
     }
     const credential = ensureCredential(machineID, text(selected, "credential_id", 64));
     if (credential.method !== "ssh_key" && !(credential.method === "password" && (allowOneTime || ["temporary", "managed", "permanent"].includes(credential.retention)))) fail(400, "自动 SSH 安装和卸载需要私钥或可复用密码；一次性密码仅用于单次检查或终端");
-    return { machine, credential };
+    const target:SSHMachineTarget={...machine,account_id:credential.account_id,username:credential.username,account_revision:credential.account_revision};
+    return { machine:target, credential };
   };
   const decryptKey = (machineID: string, credential: any) => {
     try {
@@ -557,6 +608,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     idle(machineID);
     assertNoPendingAgentUpdate(db, "", machineID);
     const { machine, credential } = sshCredential(machineID, credentialID, true);
+    const bindingRevision=sshCredentialRevision(credential);
     const lease: TerminalLease = {
       machine, credentialID: credential.id, credentialMethod: credential.method,
       privateKey: credential.method === "ssh_key" ? decryptKey(machineID, credential) : "",
@@ -564,8 +616,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       valid() {
         if (released) return false;
         try {
-          ensureCredential(machineID, credential.id);
-          return targetRevision(get(machineID)) === revision;
+          const current=ensureCredential(machineID, credential.id);
+          return targetRevision(get(machineID)) === revision&&sshCredentialRevision(current)===bindingRevision;
         } catch { return false; }
       },
       verifyHostKey(key) {
@@ -608,34 +660,43 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     library.used(credentialID);
   };
   const runSSH: SSHRunner = async input => {
-    const target = input.machine;
+    if(!input.credentialID)fail(400,'explicit_ssh_credential_required');
+    const resolved=sshCredential(input.machine.id,input.credentialID,true);
+    const target=resolved.machine,credentialRevision=sshCredentialRevision(resolved.credential);
+    assertSSHAccount(target,sshAccountSnapshot(input.machine));
+    if(targetRevision(target)!==targetRevision(input.machine))fail(409,'ssh_target_changed');
     const verifyHostKey = (key: Buffer) => {
       if (input.signal.aborted) return false;
       try {
-        if (input.credentialID) ensureCredential(target.id, input.credentialID);
+        if (sshCredentialRevision(ensureCredential(target.id,input.credentialID!))!==credentialRevision)fail(409,'ssh_credential_changed');
         return recordMachineHostKey(db, target, key, iso(now()), () => {
           if (input.signal.aborted) return false;
-          try { if (input.credentialID) ensureCredential(target.id, input.credentialID, false); return true; } catch { return false; }
+          try { return sshCredentialRevision(ensureCredential(target.id,input.credentialID!,false))===credentialRevision; } catch { return false; }
         });
       } catch { return false; }
     };
-    const output = await (options.sshRunner ?? defaultSSHRunner)({ ...input, verifyHostKey });
+    let output:Awaited<ReturnType<SSHRunner>>;
+    try{output=await (options.sshRunner ?? defaultSSHRunner)({ ...input,machine:target,verifyHostKey });}
+    finally{Object.assign(input.machine,{host_key_fingerprint:target.host_key_fingerprint,host_key_public_key:target.host_key_public_key,host_key_observed_at:target.host_key_observed_at});}
     input.signal.throwIfAborted();
     if (targetRevision(get(target.id)) !== targetRevision(target) || !target.host_key_fingerprint) throw new SSHError("host_key_mismatch");
+    // Authentication was frozen and verified before dispatch. Expiry or
+    // revocation while a bounded command runs must not erase its actual result.
     return output;
   };
-  const checkSSH = async (machineID: string, input: { credential_id?: string }, actorID: string, signal: AbortSignal): Promise<SSHCheckResult> => {
+  const checkSSH = async (machineID: string, input: { credential_id?: string }, actorID: string, signal: AbortSignal,selectionOwnsLock=false): Promise<SSHCheckResult> => {
     parameters(record(input), ["credential_id"]);
-    idle(machineID);
+    if(!selectionOwnsLock)idle(machineID);
     const { machine, credential } = sshCredential(machineID, input.credential_id, true);
     let command: string;
     try { command = preflightCommand(deps.externalURL); } catch { fail(400, "请先将平台外部地址配置为目标机器可访问的 HTTPS 地址"); }
     const at = now();
     const privilegeBinding = () => ({ checked_at: iso(at), expires_at: iso(new Date(at.getTime() + PLAN_SECONDS * 1000)),
       machine_revision: targetRevision(machine),
-      credential_binding_revision: hash(JSON.stringify([credential.id, credential.connection_credential_id ?? "", credential.method, credential.secret_fingerprint, credential.retention, credential.expires_at, credential.revoked_at ?? "", credential.secret_cleared_at ?? ""])),
+      credential_binding_revision: sshCredentialRevision(credential),
       endpoint_fingerprint: hash(JSON.stringify([machine.address, machine.port, machine.username, machine.host_key_fingerprint, deps.externalURL])) });
     const result: SSHCheckResult = { id: id(), machine_id: machineID, credential_id: credential.id,
+      account_id:machine.account_id,username:machine.username,account_revision:machine.account_revision,
       connected: false, ready: false, platform: "", arch: "", checks: {}, error_code: "",
       privilege: { ...unknownSSHPrivilege(), ...privilegeBinding() },
       agent_installation: { state: "unknown" }, discovery: unavailableSSHDiscovery(), checked_at: iso(at), expires_at: iso(new Date(at.getTime() + PLAN_SECONDS * 1000)) };
@@ -675,11 +736,71 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       // Preserve explicitly selected reusable policies; one-time
       // passwords are consumed even after a failed or cancelled attempt.
       if (credential.method === "password" && credential.retention === "one_time") clearCredential(credential.id, "consumed", actorID);
-      busy.delete(machineID);
+      if(!selectionOwnsLock)busy.delete(machineID);
     }
     db.run("INSERT INTO machine_ssh_checks(id,machine_id,credential_id,target_revision,result_json,created_by,created_at) VALUES(?,?,?,?,?,?,?)",
       result.id, machineID, credential.id, targetRevision(machine), JSON.stringify(result), actorID, iso(at));
+    if(result.connected&&!['root','sudo_noninteractive'].includes(result.privilege.state))result.permission_recovery={reason:'ssh_privilege_required',accounts:accountRows(machineID)};
     return result;
+  };
+  const installationPreflight = async (machineID:string,input:Record<string,any>,actorID:string,signal:AbortSignal=new AbortController().signal) => {
+    parameters(record(input),['selection','credential_id']);
+    if(input.selection!=='auto'&&input.selection!=='manual')fail(400,'invalid installation selection');
+    const mode=input.selection as 'auto'|'manual';
+    if(mode==='auto'&&Object.hasOwn(input,'credential_id'))fail(400,'自动选择不能同时指定 credential_id');
+    if(mode==='manual'&&!input.credential_id)fail(400,'手动选择需要 credential_id');
+    idle(machineID);ensureMachine(machineID);
+    const selectionTarget=get(machineID);
+    const assertSelectionTarget=(allowFirstPin=false)=>{const current=get(machineID);
+      if(targetRevision(current)===targetRevision(selectionTarget))return;
+      const sameEndpoint=['address','port','connection_method','ssh_target_generation'].every(field=>(current as any)[field]===(selectionTarget as any)[field]);
+      if(allowFirstPin&&!selectionTarget.host_key_fingerprint&&sameEndpoint&&current.host_key_fingerprint){selectionTarget.host_key_fingerprint=current.host_key_fingerprint;return;}
+      fail(409,'ssh_target_changed');
+    };
+    let candidates:any[];
+    if(mode==='manual')candidates=[sshCredential(machineID,text(input.credential_id,'credential_id',64)).credential];
+    else {
+      const accounts=accountRows(machineID),priorities=new Map(accounts.map(account=>[account.id,account.username==='root'?0:account.recommended?1:2]));
+      candidates=db.all<any>('SELECT * FROM effective_machine_credentials WHERE machine_id=? ORDER BY created_at,id',machineID)
+        .filter(c=>!c.revoked_at&&!c.secret_cleared_at&&c.secret_encrypted&&machineCredentialCurrent(c,now())&&(c.method==='ssh_key'||c.method==='password'&&['temporary','managed','permanent'].includes(c.retention)))
+        .sort((a,b)=>(priorities.get(a.account_id)??3)-(priorities.get(b.account_id)??3)||a.account_id.localeCompare(b.account_id)||Number(accounts.find(v=>v.id===b.account_id)?.default_credential_id===b.id)-Number(accounts.find(v=>v.id===a.account_id)?.default_credential_id===a.id)||a.created_at.localeCompare(b.created_at)||a.id.localeCompare(b.id));
+    }
+    if(!candidates.length)fail(409,'没有可用于安装检查的有效 SSH 账户凭据');
+    const selection:InstallationSSHSelection={id:id(),mode,selected_credential_id:'',attempts:[]};
+    db.run("INSERT INTO machine_installation_selections(id,machine_id,mode,status,created_by,created_at) VALUES(?,?,?,'running',?,?)",selection.id,machineID,mode,actorID,iso(now()));
+    busy.add(machineID);
+    let last:SSHCheckResult|undefined;
+    const bounded=AbortSignal.any([signal,AbortSignal.timeout(5*60_000)]);
+    try {
+      for(const candidate of candidates){
+        bounded.throwIfAborted();
+        const attemptID=id(),ordinal=selection.attempts.length+1;
+        db.run("INSERT INTO machine_installation_selection_attempts(id,selection_id,ordinal,credential_id,account_id,username,account_revision,status,created_at) VALUES(?,?,?,?,?,?,?,'running',?)",attemptID,selection.id,ordinal,candidate.id,candidate.account_id,candidate.username,candidate.account_revision,iso(now()));
+        try {
+          assertSelectionTarget();
+          const current=ensureCredential(machineID,candidate.id);
+          if(sshCredentialRevision(current)!==sshCredentialRevision(candidate))fail(409,'ssh_credential_changed');
+          last=await checkSSH(machineID,{credential_id:candidate.id},actorID,bounded,true);
+          assertSelectionTarget(true);
+          const attempt:InstallationSSHAttempt={check_id:last.id,credential_id:candidate.id,account_id:candidate.account_id,username:candidate.username,account_revision:candidate.account_revision,connected:last.connected,ready:last.ready,error_code:last.error_code,privilege_state:last.privilege.state,checked_at:last.checked_at};
+          selection.attempts.push(attempt);
+          db.run("UPDATE machine_installation_selection_attempts SET status='completed',check_id=?,result_json=?,finished_at=? WHERE id=?",last.id,JSON.stringify(attempt),iso(now()),attemptID);
+          if(last.ready){selection.selected_credential_id=candidate.id;break;}
+          // Identity failures and non-permission prerequisites are properties
+          // of the host. Trying another login must never bypass that evidence.
+          if(mode==='manual'||['host_key_mismatch','cancelled','timed_out','invalid_response'].includes(last.error_code)||(last.connected&&Object.entries(last.checks).some(([key,value])=>key!=='install_privilege'&&!value)))break;
+        }catch(error){
+          const attempt:InstallationSSHAttempt={check_id:'',credential_id:candidate.id,account_id:candidate.account_id,username:candidate.username,account_revision:candidate.account_revision,connected:false,ready:false,error_code:bounded.aborted?'cancelled':error instanceof HTTPError&&error.message==='ssh_target_changed'?'ssh_target_changed':'credential_unavailable',privilege_state:'unknown',checked_at:iso(now())};
+          selection.attempts.push(attempt);
+          db.run("UPDATE machine_installation_selection_attempts SET status='failed',result_json=?,finished_at=? WHERE id=?",JSON.stringify(attempt),iso(now()),attemptID);
+          if(mode==='manual'||bounded.aborted||error instanceof HTTPError&&error.message==='ssh_target_changed')throw error;
+        }
+      }
+      if(!last)fail(409,'安装检查候选账户已失效，请更新凭据后重试');
+      db.run('UPDATE machine_installation_selections SET status=?,selected_credential_id=?,finished_at=? WHERE id=?',selection.selected_credential_id?'succeeded':'failed',selection.selected_credential_id,iso(now()),selection.id);
+      return {...last,installation_selection:selection};
+    }catch(error){db.run("UPDATE machine_installation_selections SET status='failed',finished_at=? WHERE id=?",iso(now()),selection.id);throw error;}
+    finally{busy.delete(machineID);}
   };
   const checked = (machine: MachineSummary, checkID: string, credentialID?: string) => {
     const saved = db.get<any>("SELECT * FROM machine_ssh_checks WHERE id=? AND machine_id=?", text(checkID, "check_id", 64), machine.id);
@@ -687,15 +808,19 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const result = parseJSON<SSHCheckResult | undefined>(saved.result_json, undefined);
     if (result?.ready !== true || !Number.isFinite(Date.parse(result.expires_at)) || Date.parse(result.expires_at) <= now().getTime() || saved.target_revision !== targetRevision(machine)) fail(409, "SSH 检查未通过、已过期或主机连接已变更，请重新检查");
     if (credentialID && credentialID !== saved.credential_id) fail(409, "所选 SSH 凭据与 SSH 检查不一致，请重新检查");
+    const credential=ensureCredential(machine.id,saved.credential_id);
+    assertSSHAccount(credential,{id:result.account_id,username:result.username,revision:result.account_revision});
+    if(result.privilege.credential_binding_revision!==sshCredentialRevision(credential))fail(409,'SSH 检查的账户或凭据已变化，请重新检查');
     return result;
   };
-  const uninstallations = registerMachineUninstallations(deps, { get, idle, revision: targetRevision, checked, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe });
+  const uninstallations = registerMachineUninstallations(deps, { get, idle, revision: targetRevision, checked, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe, revokeUnifiedRuntime(machineID,actor,operationID){if(!executorStore)fail(409,'agent_execution_store_unavailable');executorStore.revokeUnifiedRuntime(machineID,actor,operationID,true);} });
   const agentUpdates = registerMachineAgentUpdates(deps, { get, idle, revision: targetRevision, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe }, {
     credentials: options.agentCredentials, downloadsDir: options.downloadsDir ?? join(process.cwd(), "downloads"), dataDir: options.dataDir ?? join(process.cwd(), ".local-dev"),
     pollIntervalMs: options.updatePollIntervalMs, healthTimeoutMs: options.updateHealthTimeoutMs,
   });
   const createPlan = (machineID: string, input: InstallPlanInput, actorID: string) => {
-    parameters(record(input), ["check_id", "credential_id", "version", "arch", "initial_label_id"]);
+    parameters(record(input), ["check_id", "credential_id", "version", "arch", "initial_label_id", "runtime_mode"]);
+    const runtimeMode=input.runtime_mode??'root';if(!validAgentRuntimeMode(runtimeMode))fail(400,'invalid_agent_runtime_mode');
     idle(machineID);
     assertNoPendingMachineInstallation(db,machineID);
     assertNoPendingAgentUpdate(db, "", machineID);
@@ -708,10 +833,12 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (arch !== check.arch) fail(409, "所选架构与 SSH 检查结果不一致");
     const at = now(), deploymentID = id();
     const planBody = {
+      ssh_account:sshAccountSnapshot(machine),credential_revision:sshCredentialRevision(credential),
       machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, username: machine.username, agent_id: machine.agent_id },
       credential: { id: credential.id, method: credential.method, retention: credential.retention, expires_at: credential.expires_at },
       check_id: check.id, target_revision: targetRevision(machine), preflight: check,
       version, arch, initial_label_id: text(input.initial_label_id ?? "", "initial_label_id", 128, false), expires_at: check.expires_at,
+      runtime_mode:runtimeMode,permission_generation:1,capabilities:runtimeMode==='root'?[...PRIVILEGED_CAPABILITIES]:[],
       steps: ["自动校验主机公钥", "建立受限 SSH 连接", "下载固定版本 Agent 并校验 SHA256", "通过 stdin 注入一次性 enrollment token", "安装独立 systemd Agent", "等待 Agent 激活回执"],
       warnings: ["AI 不会读取或发送 SSH 秘密。", "用户确认后才执行固定部署流程。", "SSH 密码建议只使用一次，不要长期保存。", "Agent 激活后日常操作优先使用 Agent 通道。"],
     };
@@ -743,7 +870,9 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (!savedPlan.target_revision || savedPlan.target_revision !== targetRevision(machine) || savedPlan.machine?.name !== machine.name) fail(409, "主机名称或连接已变更，请重新审阅并生成部署计划");
     if (savedPlan.machine?.agent_id !== machine.agent_id) fail(409, "主机 Agent 身份已变更，请重新检查并生成部署计划");
     checked(get(machine.id), savedPlan.check_id, deployment.credential_id);
-    const credential = ensureCredential(machine.id, deployment.credential_id);
+    const resolved=sshCredential(machine.id,deployment.credential_id),credential=resolved.credential;
+    assertSSHAccount(resolved.machine,savedPlan.ssh_account);
+    if(savedPlan.credential_revision!==sshCredentialRevision(credential))fail(409,'ssh_credential_changed');
     if (credential.method !== "ssh_key" && !(credential.method === "password" && ["temporary", "managed", "permanent"].includes(credential.retention))) fail(400, "自动部署需要 SSH 私钥或可复用密码，一次性密码不能用于部署");
     if (!options.agentCredentials) fail(503, "Agent enrollment 尚未配置");
     const started = db.run(`UPDATE machine_deployments SET status='running',execution_stage='preflight',approved_at=?,started_at=? WHERE id=? AND status='awaiting_approval'
@@ -756,7 +885,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     try {
       const material = authentication(machine.id, credential);
       privateKey = material.privateKey; password = material.password ?? "";
-      const observed = await runSSH({ credentialID: credential.id, machine: get(machine.id), privateKey, ...(password ? { password } : {}), command: preflightCommand(deps.externalURL), signal: ctx.signal, port: machine.port, timeoutMs: CHECK_TIMEOUT_MS });
+      const observed = await runSSH({ credentialID: credential.id, machine:resolved.machine, privateKey, ...(password ? { password } : {}), command: preflightCommand(deps.externalURL), signal: ctx.signal, port: machine.port, timeoutMs: CHECK_TIMEOUT_MS });
       const fresh = parsePreflight(observed.stdout);
       const currentTarget = get(machine.id);
       if (!fresh.ready || fresh.agent_installation.state !== "absent" || currentTarget.agent_id !== machine.agent_id || !replaceableAgentBinding(db, currentTarget.agent_id, iso(now()))) fail(409, "发现已有 Agent 或安装条件已变化，未签发新身份");
@@ -773,13 +902,15 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
         tasks.setHostLabels(machine.id, [...tasks.hostLabels(machine.id), deployment.initial_label_id]);
       }
       enrollment = options.agentCredentials.issueEnrollment({ endpoint_origin: deps.externalURL, version: deployment.version, allowed_arch: [deployment.arch], initial_label_id: deployment.initial_label_id, created_by: ctx.user.id, machine_id: machine.id, previous_agent_id: machine.agent_id, deployment_id:deployment.id });
-      const command = agentBootstrapCommand(deps.externalURL.replace(/\/$/, ""), deployment.version);
+      const command = agentBootstrapCommand(deps.externalURL.replace(/\/$/, ""), deployment.version,savedPlan.runtime_mode??'user');
       const dispatching=db.run("UPDATE machine_deployments SET execution_stage='bootstrap_dispatched' WHERE id=? AND status='running' AND execution_stage='enrollment_issued' AND enrollment_id=? AND resolved_at=''",deployment.id,enrollment.enrollment_id);
       if(!dispatching.changes)fail(409,"安装记录已进入恢复流程，旧请求不能派发安装");
       dispatched = true;
-      const result = await runSSH({ credentialID: credential.id, machine, privateKey, ...(password ? { password } : {}), command, enrollmentToken: enrollment.token_display_once, signal: ctx.signal, port: machine.port });
+      const result = await runSSH({ credentialID: credential.id, machine:resolved.machine, privateKey, ...(password ? { password } : {}), command, enrollmentToken: enrollment.token_display_once, signal: ctx.signal, port: machine.port });
       const status = options.agentCredentials.enrollmentStatus(enrollment.enrollment_id);
       if (!status || status.status !== "active" || !status.agent_id) throw Error("Agent 未完成激活回执");
+      const installedRuntime=db.get<any>('SELECT * FROM machine_agent_runtime WHERE machine_id=? AND agent_id=?',machine.id,status.agent_id);
+      if(installedRuntime){const node=db.get<any>('SELECT heartbeat,last_seen FROM agents WHERE id=?',status.agent_id),beat=parseJSON<any>(node?.heartbeat??'{}',{}),r=beat.runtime,seen=Date.parse(node?.last_seen??''),started=Date.parse(db.get<any>('SELECT started_at FROM machine_deployments WHERE id=?',deployment.id)?.started_at??'');if(!validAgentRuntimeObservation(r)||r.mode!==installedRuntime.runtime_mode||r.permission_generation!==installedRuntime.permission_generation||!Number.isFinite(seen)||!Number.isFinite(started)||seen<started||seen<now().getTime()-90000||installedRuntime.runtime_mode==='root'&&!executorStore?.getStatus(machine.id).executor?.online)throw Error('Agent 运行账户或签名执行通道尚未完成新鲜心跳确认');}
       const receipt = { stages: result.stages, stdout: redact(result.stdout, [enrollment.token_display_once, privateKey, password]), stderr: redact(result.stderr, [enrollment.token_display_once, privateKey, password]), enrollment_id: enrollment.enrollment_id, agent_id: status.agent_id };
       db.transaction(() => {
         const saved=db.run("UPDATE machine_deployments SET status='succeeded',finished_at=?,receipt_json=?,error='' WHERE id=? AND status='running' AND resolved_at=''", iso(now()), JSON.stringify(receipt), deployment.id);
@@ -793,8 +924,11 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     } catch (error) {
       const message = redact(error instanceof Error ? error.message : "部署失败", [enrollment?.token_display_once ?? "", privateKey, password]);
       if(dispatched){
-        const failure="Agent 安装结果未知，请只读核对远端状态或人工检查后明确结束；不会自动重试";
-        const saved=db.run("UPDATE machine_deployments SET status='unknown',error=?,receipt_json=? WHERE id=? AND status IN ('running','unknown') AND resolved_at=''",failure,JSON.stringify({stages:["bootstrap_dispatched"],enrollment_id:enrollment?.enrollment_id||"",error:failure}),deployment.id);
+        const diagnostic=error instanceof SSHError?error.remoteFailure:undefined;
+        const reasons={ordinary_agent_privilege_violation:"远端检测到普通 Agent 账户拥有禁止的高权限，请检查其附加组、capabilities 和 Docker socket 访问",agent_account_invalid:"远端检测到 Agent 运行账户不符合安装要求",remote_command_failed:"远端安装命令非零退出"};
+        const detail=diagnostic?`；${reasons[diagnostic.remote_reason_code]}（SSH 退出码：${diagnostic.remote_exit_code??"未知"}）`:"";
+        const failure="Agent 安装结果未知，请只读核对远端状态或人工检查后明确结束；不会自动重试"+detail;
+        const saved=db.run("UPDATE machine_deployments SET status='unknown',error=?,receipt_json=? WHERE id=? AND status IN ('running','unknown') AND resolved_at=''",failure,JSON.stringify({stages:["bootstrap_dispatched"],enrollment_id:enrollment?.enrollment_id||"",error:failure,...(diagnostic?{diagnostic}:{})}),deployment.id);
         if(saved.changes)db.run("UPDATE managed_machines SET last_error=?,updated_at=? WHERE id=?",failure,iso(now()),machine.id);
         throw new HTTPError(502,failure);
       }
@@ -834,20 +968,47 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     ctx.json({ ok: true });
   }));
   router.post("/api/v1/machines/:id/ssh-check", safe(async ctx => { admin(ctx); ctx.json(await checkSSH(ctx.params.id, await machineBody(ctx), ctx.user.id, ctx.signal)); }));
+  router.post('/api/v1/machines/:id/installation-preflight',safe(async ctx=>{admin(ctx);ctx.json(await installationPreflight(ctx.params.id,await machineBody(ctx),ctx.user.id,ctx.signal));}));
+  router.get('/api/v1/machines/:id/installation-preflights',safe(ctx=>{admin(ctx);ensureMachine(ctx.params.id);ctx.json(db.all<any>('SELECT * FROM machine_installation_selections WHERE machine_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100',ctx.params.id).map(value=>({...value,attempts:db.all<any>('SELECT ordinal,credential_id,account_id,username,account_revision,status,check_id,result_json,created_at,finished_at FROM machine_installation_selection_attempts WHERE selection_id=? ORDER BY ordinal',value.id).map(attempt=>({...attempt,result:parseJSON(attempt.result_json,{}) ,result_json:undefined}))})));}));
   router.post("/api/v1/machines/:id/agent-link", safe(ctx => { admin(ctx); fail(410, "手工关联 Agent 已移除；请从已登记主机部署 Agent"); }));
-  router.get("/api/v1/machines/:id/credentials", safe((ctx) => { admin(ctx); ensureMachine(ctx.params.id); ctx.json(credentialRows(ctx.params.id)); }));
-  router.post("/api/v1/machines/:id/credentials", safe(addCredential));
-  router.put("/api/v1/machines/:id/default-credential", safe(async ctx => {
+  router.get('/api/v1/machines/:id/accounts',safe(ctx=>{admin(ctx);ensureMachine(ctx.params.id);ctx.json(accountRows(ctx.params.id));}));
+  router.post('/api/v1/machines/:id/accounts',safe(async ctx=>{
+    admin(ctx);ensureMachine(ctx.params.id);const input=parameters(await machineBody(ctx),['username','make_default']);
+    const username=validateSSHUsername(input.username);if(input.make_default!==undefined&&typeof input.make_default!=='boolean')fail(400,'invalid make_default');
+    const accountID=id(),at=iso(now());db.transaction(()=>{
+      if(db.get("SELECT id FROM machine_ssh_accounts WHERE machine_id=? AND username=? AND deleted_at=''",ctx.params.id,username))fail(409,'此主机已存在相同 SSH 登录账户');
+      db.run('INSERT INTO machine_ssh_accounts(id,machine_id,username,created_at,created_by,updated_at) VALUES(?,?,?,?,?,?)',accountID,ctx.params.id,username,at,ctx.user.id,at);
+      accountEvent(ctx.params.id,accountID,'created',ctx.user.id,{username});
+      if(input.make_default===true)db.run('UPDATE managed_machines SET default_account_id=? WHERE id=?',accountID,ctx.params.id);
+    });ctx.json(accountRows(ctx.params.id).find(a=>a.id===accountID),201);
+  }));
+  router.put('/api/v1/machines/:id/default-account',safe(async ctx=>{admin(ctx);ensureMachine(ctx.params.id);const input=parameters(await machineBody(ctx),['account_id']);const account=ensureAccount(ctx.params.id,text(input.account_id,'account_id',64));db.transaction(()=>{db.run('UPDATE managed_machines SET default_account_id=? WHERE id=?',account.id,ctx.params.id);accountEvent(ctx.params.id,account.id,'default_account_selected',ctx.user.id);});ctx.json(get(ctx.params.id));}));
+  router.delete('/api/v1/machines/:id/accounts/:accountId',safe(ctx=>{
+    admin(ctx);const machine=ensureMachine(ctx.params.id);const account=ensureAccount(ctx.params.id,ctx.params.accountId);
+    idle(machine.id);
+    const assertAccountDeletable=()=>{assertNoDockerInstallation(db,machine.id);if(busy.has(machine.id))fail(409,'主机有正在进行的 SSH 操作');assertNoPendingMachineInstallation(db,machine.id,machine.agent_id);assertNoPendingAgentUpdate(db,machine.agent_id,machine.id);assertNoPendingAgentRuntime(db,machine.id,machine.agent_id);uninstallations.assertFree(machine.id);if(hasActiveTaskRuns(db,machine.agent_id,machine.id))fail(409,'主机存在未决任务，请先核对执行结果');};
+    assertAccountDeletable();
+    db.transaction(()=>{assertAccountDeletable();ensureAccount(machine.id,account.id);for(const binding of db.all<{id:string}>('SELECT id FROM machine_credentials WHERE account_id=?',account.id))clearCredential(binding.id,'revoked',ctx.user.id,true);
+      db.run("UPDATE machine_ssh_accounts SET deleted_at=?,updated_at=?,revision=revision+1 WHERE id=? AND deleted_at=''",iso(now()),iso(now()),account.id);
+      db.run("UPDATE managed_machines SET default_account_id='' WHERE id=? AND default_account_id=?",machine.id,account.id);
+      accountEvent(machine.id,account.id,'deleted',ctx.user.id,{username:account.username,revision:account.revision});
+    });ctx.json({ok:true});
+  }));
+  router.post('/api/v1/machines/:id/accounts/:accountId/credentials',safe(addCredential));
+  router.put("/api/v1/machines/:id/accounts/:accountId/default-credential", safe(async ctx => {
     admin(ctx); ensureMachine(ctx.params.id);
     const input = parameters(await machineBody(ctx),["credential_id"]);
     const credential = ensureCredential(ctx.params.id,text(input.credential_id,"credential_id",64));
-    db.run("UPDATE managed_machines SET default_credential_id=? WHERE id=?",credential.id,ctx.params.id);
+    ensureAccount(ctx.params.id,ctx.params.accountId);if(credential.account_id!==ctx.params.accountId)fail(404,'连接凭据不属于此 SSH 账户');
+    db.run("UPDATE machine_ssh_accounts SET default_credential_id=? WHERE id=?",credential.id,ctx.params.accountId);
+    accountEvent(ctx.params.id,ctx.params.accountId,'default_credential_selected',ctx.user.id,{credential_id:credential.id});
     ctx.json(get(ctx.params.id));
   }));
-  router.delete("/api/v1/machines/:id/credentials/:credentialId", safe((ctx) => {
+  router.delete("/api/v1/machines/:id/accounts/:accountId/credentials/:credentialId", safe((ctx) => {
     admin(ctx);
     ensureMachine(ctx.params.id);
-    const credential = db.get<any>("SELECT id FROM machine_credentials WHERE id=? AND machine_id=?", ctx.params.credentialId, ctx.params.id);
+    ensureAccount(ctx.params.id,ctx.params.accountId);
+    const credential = db.get<any>("SELECT id FROM machine_credentials WHERE id=? AND machine_id=? AND account_id=?", ctx.params.credentialId, ctx.params.id,ctx.params.accountId);
     if (!credential) fail(404, "连接凭据不存在");
     clearCredential(credential.id, "revoked", ctx.user.id);
     ctx.json({ ok: true, warning: "已解除此主机的凭据绑定；凭据库中的共享凭据保持不变。" });
@@ -866,14 +1027,15 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     ctx.json({ id: deployment.id, machine_id: ctx.params.id, status: "cancelled" });
   }));
   router.post("/api/v1/machines/:id/deployments/:deploymentId/apply", safe(apply));
-  const dockerInstallations = registerMachineDocker(deps,{get,idle,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe});
-  registerInstallationRecovery(deps,{get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,deployment:deploymentRecord,
+  const dockerInstallations = registerMachineDocker(deps,{get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe});
+  registerInstallationRecovery(deps,{get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,deployment:deploymentRecord,runtimeHealthy(operation,heartbeat){const plan=parseJSON<any>(operation.plan_json,{}),runtime=db.get<any>('SELECT * FROM machine_agent_runtime WHERE machine_id=?',operation.machine_id);if(!runtime)return true;const r=heartbeat.runtime;if(!validAgentRuntimeObservation(r)||r.mode!==runtime.runtime_mode||r.permission_generation!==runtime.permission_generation)return false;return runtime.runtime_mode!=='root'||!!executorStore?.getStatus(operation.machine_id).executor?.online;},
+    resolveRuntime(operation,actor){return executorStore?.resolveUnifiedInstallation(operation.machine_id,actor,operation.id)??null;},
     activated(machineID,actorID){for(const temporary of db.all<{id:string}>("SELECT id FROM machine_credentials WHERE machine_id=? AND retention IN ('temporary','one_time')",machineID))clearCredential(temporary.id,"agent_activated",actorID,true);}},options.agentCredentials);
   const assistantSafe = (machine: MachineSummary) => ({ ...machine, host_key_fingerprint: "", host_key_public_key: "", host_key_observed_at: "" });
   const assistantList = () => list().map(assistantSafe);
   const assistantGet = (machineID: string) => ({ ...assistantSafe(get(machineID)), ssh_credentials: credentialRows(machineID)
     .filter(c => (c.method === "ssh_key" || c.method === "password" && ["temporary", "managed", "permanent"].includes(c.retention)) && !c.revoked_at && !c.secret_cleared_at && machineCredentialCurrent(c, now()))
-    .map(c => ({ id: c.id, method: c.method, expires_at: c.expires_at })) });
+    .map(c => ({ id: c.id,account_id:c.account_id,username:c.username,account_revision:c.account_revision, method: c.method, expires_at: c.expires_at })) });
   const assistantPlan = createPlan;
   const assistantDeployment = (deploymentID: string) => {
     const value = db.get<any>("SELECT * FROM machine_deployments WHERE id=?", deploymentID);
@@ -887,17 +1049,20 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     return { id: value.id, machine_id: value.machine_id, status: value.status, version: value.version, arch: value.arch, plan: parseJSON(value.plan_json, {}), receipt, error: value.error, created_at: value.created_at, started_at: value.started_at, finished_at: value.finished_at,
       enrollment_id:value.enrollment_id,execution_stage:value.execution_stage,resolved_at:value.resolved_at,resolved_by:value.resolved_by,resolution_reason:value.resolution_reason };
   };
-  return { list, get, assistantList, assistantGet, checkSSH, assistantPlan, assistantDeployment, acquireTerminal, agentUpdates,
+  return { list, get, assistantList, assistantGet, checkSSH,installationPreflight, assistantPlan, assistantDeployment, acquireTerminal, agentUpdates,
     registerExecutorBootstrap(store) {
       executorStore=store;
       const access={get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,check:checkSSH};
-      const bootstrap=registerMachineExecutorBootstrap(deps,access,store,{
-        downloadsDir:options.downloadsDir ?? join(process.cwd(),"downloads"),dataDir:options.dataDir ?? join(process.cwd(),".local-dev"),
+      options.agentCredentials?.setActivationHook?.(input=>{
+        const deployment=db.get<any>("SELECT * FROM machine_deployments WHERE enrollment_id=? AND machine_id=? AND status='running' AND execution_stage='bootstrap_dispatched' AND resolved_at=''",input.enrollment_id,input.machine_id);
+        if(!deployment)fail(409,'approved_agent_deployment_required');
+        const plan=parseJSON<any>(deployment.plan_json,{}),mode=plan.runtime_mode??'user';
+        if(!validAgentRuntimeMode(mode)||deployment.created_by!==input.created_by)fail(409,'approved_agent_runtime_required');
+        recordAgentRuntime(deps,input.machine_id,input.agent_id,mode,1);
+        return {runtime_mode:mode,permission_generation:1,...(mode==='root'?{managed_bootstrap:store.issueUnifiedBootstrap(input.machine_id,input.created_by,{deployment_id:deployment.id})}:{})};
       });
-      const maintenance=registerMachineExecutorMaintenance(deps,access,store,{
-        downloadsDir:options.downloadsDir ?? join(process.cwd(),"downloads"),dataDir:options.dataDir ?? join(process.cwd(),".local-dev"),
-      });
-      return {async close(){await Promise.allSettled([bootstrap.close?.(),maintenance.close?.()]);}};
+      const runtime=registerMachineAgentRuntime(deps,access,store);
+      return runtime;
     },
     async close() {
       clearInterval(cleanupTimer);

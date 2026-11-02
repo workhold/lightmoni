@@ -19,6 +19,7 @@ export interface TaskExecutionPolicy {
   retry_delay_seconds: number;
 }
 export interface TaskRunSnapshot {
+  execution_identity?: {account: "lightmoni-agent"; permission_generation: number; privilege: "user"};
   task_id: string;
   task_name: string;
   host_id: string;

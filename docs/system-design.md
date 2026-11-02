@@ -4,7 +4,7 @@
 >
 > 配套变更：[SDD 019：系统设计基线](../specs/019-system-design-baseline/spec.md)。
 
-当前受管主机运维以第80章（SDD080）覆盖第60.10章业务profile未迁移的阶段限制。普通Agent仍不能访问Docker daemon或旧写入协议；网站、证书、Compose、备份与业务制品由独立默认关闭的 operations.managed.v1 承接，原批准与领域核验保留。执行器维护沿用第60章唯一维护接口与 activation 证明；新业务数据与离线接管规则见第80章。
+当前主机登录账户以第84章（SDD084）为准，运行权限与生命周期以第83章（SDD083）为准：一台主机安装一套 Agent、运行一个 lightmoni-agent.service，按 root/user 配置实际运行账户，统一安装、权限切换、升级、回退和卸载。root 首装或切换计划显式列出三类受审计运维能力，管理员审阅后启用；每次作业仍须独立授权。普通脚本始终以专用普通账户运行。第60、71、80章的双常驻服务和分开维护拓扑保留为历史设计，已由第83章取代；签名身份、逐步许可、审计和领域核验继续复用。
 
 ## 1. 文档定位与事实来源
 
@@ -589,7 +589,7 @@ flowchart LR
 
 注册/心跳不建档、不修改归属，不回填旧独立 Agent，不支持手工关联与历史协议降级；无主机预约的 token/身份拒绝接入，不能通过 SDK Key 控制面 fallback。旧数据库记录保留，不自动删除用户资产。重新部署保留原主机 ID：旧身份须已移除或全部凭据失效、没有未完成任务，新的有效 SSH 预检确认远端无 Agent，再由新安装预约的旧身份快照完成原子替换，保留旧身份历史。移除或卸载 Agent 后保留主机，主机有有效 Agent 身份时不可直接删除；旧身份卸载回执不能决定新身份的状态或删除权限。
 
-用户名称与 observed_hostname 分离，心跳不覆盖名称或 SSH 配置。登记须填写名称与 SSH 目标地址、端口、登录用户，凭据可稍后添加，主机公钥与指纹首次 SSH 握手自动记录；管理员可编辑名称及目标连接，凭据按用户选择的期限保存。Agent 本地 host_id 保留遥测资源含义，不作为平台主机 ID；同名、共享出口或容器身份不能自动识别同一物理宿主机。成员只获取主机 ID/名称与原有 Agent 可见信息，不获 SSH 元数据。SDK 独立直报，不增加 SDK 环境变量、主机发现或 Agent 依赖。
+用户名称与 observed_hostname 分离，心跳不覆盖名称或 SSH 配置。登记须填写名称与 SSH 目标地址、端口；登录用户在主机的 SSH 账户中独立管理，可稍后添加账户及凭据，详见第84章。主机公钥与指纹首次 SSH 握手自动记录；管理员可编辑名称及目标连接，凭据按用户选择的期限保存。Agent 本地 host_id 保留遥测资源含义，不作为平台主机 ID；同名、共享出口或容器身份不能自动识别同一物理宿主机。成员只获取主机 ID/名称与原有 Agent 可见信息，不获 SSH 元数据。SDK 独立直报，不增加 SDK 环境变量、主机发现或 Agent 依赖。
 
 ```mermaid
 flowchart LR
@@ -604,7 +604,7 @@ flowchart LR
 
 ### 13.4 当前：单屏登记与统一凭据保存时长（SDD 039）
 
-登记主机的同一表单直接显示主机名称、地址、端口、用户名、密码或 SSH 私钥输入及保存时长。主机公钥/指纹由首次 SSH 握手自动记录，无需填写或确认。默认登录方式为密码，默认保存 6 小时；可选择有限期限或永久保存。公钥/指纹在详情只读显示并用于后续 SSH 服务端自动核验，既不是 SSH 登录公钥，也不能替代密码/私钥；指纹与平台 ID/用户名称作为资产元数据保留。管理员仍可明确选择仅登记、稍后添加凭据，登记本身不执行 SSH。
+登记界面展示主机名称、地址、端口，可接着创建第一个 SSH 登录账户，填写密码或私钥及保存时长；后端分别保存资产、账户和账户凭据授权，登录用户名不再是主机字段。后续可在同一主机添加多个账户，详见第84章。主机公钥/指纹由首次 SSH 握手自动记录，无需填写或确认。默认登录方式为密码，默认保存 6 小时；可选择有限期限或永久保存。公钥/指纹在详情只读显示并用于后续 SSH 服务端自动核验，既不是 SSH 登录公钥，也不能替代密码/私钥；指纹与平台 ID/用户名称作为资产元数据保留。管理员仍可明确选择仅登记、稍后添加账户及凭据，登记本身不执行 SSH。
 
 API 有限策略为 managed，默认 expires_in_seconds=21600；永久策略为 permanent，必须显式 confirm_permanent=true，且不得同时提交有限秒数。数据库以 expires_at 空字符串表达无固定期限，仅在 retention=permanent 时有效；不使用虚构的远期时间戳。此节的早期实现将秘密加密绑定主机和凭据 ID；集中连接凭据及共享绑定以第 13.6 节为准，秘密仍不回显、不进入 AI、日志或审计正文。
 
@@ -654,11 +654,11 @@ flowchart TD
 
 ### 13.6 集中连接凭据与主机默认绑定（SDD 050）
 
-运维工具提供独立“连接凭据”页，统一管理 SSH 私钥和密码。主机登记可选择已有有效凭据，也可直接填写新秘密并保存到凭据库；主机自身保存名称、SSH 地址、端口和登录用户名。默认保存 6 小时，可选择其他期限或明确确认永久。页面展示名称、类型、状态、有效期、关联主机与私钥公钥指纹；服务端不返回秘密或密文。此设计更新第 13.4 节的按主机保存实现，保留原期限和主机身份语义。
+运维工具提供独立“连接凭据”页，统一管理 SSH 私钥和密码。主机登记可选择已有有效凭据，也可直接填写新秘密并保存到凭据库；主机自身保存名称、SSH 地址和端口；登录用户名属于主机下的 SSH 账户，账户可绑定多个独立授权的凭据（当前模型见第84章）。默认保存 6 小时，可选择其他期限或明确确认永久。页面展示名称、类型、状态、有效期、关联主机与私钥公钥指纹；服务端不返回秘密或密文。此设计更新第 13.4 节的按主机保存实现，保留原期限和主机身份语义。
 
-中央 connection_credentials 加密保存秘密；machine_credentials 保留稳定 ID 作为主机绑定并引用中央项，managed_machines.default_credential_id 指向默认绑定。SSH 检查、终端、部署和卸载省略凭据 ID 时自动使用默认项；默认过期、撤销或解绑后明确提示更新，不自动换用其他凭据。检查和审批计划始终绑定当时的凭据 ID，不因修改默认值而更换已审阅授权。
+中央 connection_credentials 加密保存秘密；machine_credentials 保留稳定 ID 作为 SSH 账户绑定并引用中央项。managed_machines.default_account_id 指向默认账户，machine_ssh_accounts.default_credential_id 指向该账户的默认绑定。SSH 检查、终端、部署和卸载省略凭据 ID 时只使用这两个显式默认项；默认过期、撤销或解绑后明确提示更新，不自动换用其他凭据。检查和审批计划始终绑定当时的凭据 ID，不因修改默认值而更换已审阅授权。
 
-SSH 私钥以实际公钥 SHA256 指纹识别，同一私钥可关联多台主机；重复提交复用已有有效项并返回其真实期限，不隐式延长或改名。密码不生成可离线猜测的秘密散列。手工新增同钥时，本主机绑定仍遵守本次请求期限并受中央期限约束；明确选择已有库项时才继承库项期限，不因去重扩大本主机授权。有效旧凭据迁移时保留绑定 ID、原期限与消费语义；无法解密或解析的旧材料隔离为不可用，保留受保护密文供核查，有限期限到期仍清除，不默认选用或重新激活。绑定的有效性同时受中央项和自身期限限制，不因合并其他主机的永久私钥而延长旧授权。
+SSH 私钥以实际公钥 SHA256 指纹识别，同一私钥可关联多台主机；重复提交复用已有有效项并返回其真实期限，不隐式延长或改名。密码不生成可离线猜测的秘密散列。手工新增同钥时，本主机绑定仍遵守本次请求期限并受中央期限约束；明确选择已有库项时才继承库项期限，不因去重扩大本主机授权。旧单用户名和主机级绑定已移除；旧开发数据库明确拒绝启动，不迁移秘密、不提供旧字段回退。绑定的有效性同时受中央项和自身期限限制，不因合并其他主机的永久私钥而延长旧授权。
 
 解绑仅清除本主机绑定，取消对应待审批计划并关闭引用终端，不撤销其他主机共用的中央项。全局撤销需要明确确认并展示关联主机，清除中央密文并使所有绑定、终端和待审批计划失效。中央过期也统一清除秘密。临时绑定仍按 Agent 激活清除，仅影响该绑定；一次性密码仅允许单主机绑定，使用结束同时清除其独占中央秘密，不能再次绑定复用。删除主机不删除共享中央项；AI 只获得公开元数据和绑定 ID，不能读取或取回秘密。
 
@@ -1693,6 +1693,8 @@ Logo是中心展示元数据，独立存于既有SQLite的ops_application_logos�
 
 ## 第60章 主机执行权限与独立运维执行器（SDD 060）
 
+> 历史架构：本章的双常驻服务、分别安装与维护拓扑已被[第83章：统一 Agent 运行权限](#83-统一-agent-与运行权限模式sdd-083)取代。独立签名主体、权限边界、逐任务审计、在线许可和业务领域校验继续适用；不要根据本章恢复第二套服务或普通 control 写通道。
+
 本章描述 SDD060 的架构与实现契约，实际交付范围和后续业务 profile 见60.10。详细研究与 HLD/LLD 见 [主机执行权限设计](privileged-executor.md)，规格和目标契约见 [SDD060](../specs/060-privileged-executor/spec.md)。未发布的目标能力不能据此视为线上已可用。
 
 ### 60.1 驱动目标与方案取舍
@@ -1827,6 +1829,8 @@ flowchart LR
 
 ## 71. 标准 Agent 部署与权限隔离（SDD 071，由 SDD060 收口）
 
+> 历史架构：本章的双常驻服务、分别安装与维护拓扑已被[第83章：统一 Agent 运行权限](#83-统一-agent-与运行权限模式sdd-083)取代。独立签名主体、权限边界、逐任务审计、在线许可和业务领域校验继续适用；不要根据本章恢复第二套服务或普通 control 写通道。
+
 标准Agent及普通脚本以lightmoni-agent账户运行，unit清空Docker附加组、AmbientCapabilities和CapabilityBoundingSet。普通run真实核验UID、附加组、capabilities及Docker socket访问；发现外部高权限则拒绝启动并提示迁移，不擅自改组、ACL或socket。安装/更新helper只验证普通运行前提，不授予Docker、低端口或宿主发布目录权限。用户批准安装/升级/回退时，仅精确清理root拥有且字节匹配的本平台旧20-lightmoni-docker.conf；未知drop-in或外部组/ACL保留并拒绝，不随程序回退恢复旧授权。
 
 root安装器只执行固定引导和文件所有权准备；独立运维能力由另一个root服务及私有身份提供。两角色共用发行包和基础组件，各自unit、目录、身份、journal及维护锁独立。普通Agent待启动或恢复的主unit按完整SHA白名单验证，先于任何root权限准备器。高权旧previous-service保留作证据但标记不可回退；失败保留已验证普通unit、停服/disable并保锁，报告rollback_failed/unknown，不恢复旧权限或修改原fingerprint冒称完整回退。旧operations网站/容器写入口不保留兼容分支，未迁移业务profile明确拒绝。
@@ -1911,6 +1915,8 @@ flowchart LR
 
 ## 80. 独立执行器承接受管主机运维（SDD 080）
 
+> 历史架构：本章的双常驻服务、分别安装与维护拓扑已被[第83章：统一 Agent 运行权限](#83-统一-agent-与运行权限模式sdd-083)取代。独立签名主体、权限边界、逐任务审计、在线许可和业务领域校验继续适用；不要根据本章恢复第二套服务或普通 control 写通道。
+
 本节取代第57、60.10、69、71及75节中普通 Agent 领取 Docker/operations 写任务的历史路径。普通 Agent 保持非 root、无 Docker 组/socket/capabilities；生产中心以 execution_principal 分流，写任务固定进入独立执行器，不执行历史任务搬运；unknown 保留审计与互斥。受管作业的领取、私有载荷、制品、事件与结果都只能走独立签名主体，不能凭 ordinary control 或获知 lease 访问。任务、AgentJob、运维 run 与原领域验证沿用同一 ID，结构化 root 回执在同一 SQLite 事务更新原领域状态。
 
 operations.managed.v1 为第三个独立默认关闭的高信任能力，涵盖管理员批准的容器/Compose/Registry/OpenResty、网站、证书、备份、systemd 与制品发布。它不扩展无网络/端口/挂载的 container.managed.v1，也不允许任意 shell 转发。批准的程序和挂载可能控制整台主机，界面须明确该信任边界。中心冻结既有已批准资源、当前版本、actor、机器/执行器/策略代次及完整 payload 摘要，在 claim、managed.execute 单次在线许可、续租、制品读取和结果处重新核对；固定 root worker 只加载 root 自有发行代码，命令前核对权威和固定 daemon，复用已审计适配器的输入、归属、健康和失败恢复校验。
@@ -1942,10 +1948,196 @@ flowchart LR
 
 ## 81. 首次正式发布前单一基线（SDD081）
 
-SQLite直接创建最终字段与索引，中心在业务初始化前检查center_schema=1；无标记的历史开发数据库明确拒绝，不自动清空或升级。ClickHouse直接创建最终列，系统自监控统一lightmoni_log/lightmoni_metric_*，按component区分；所有SDK和内置仪表盘使用当前名称，不保留旧系统视图与启动补列。管理员CLI与中心共用基线验证，空库先建管理员后可直接启动中心。
+SQLite直接创建最终字段与索引，中心在业务初始化前检查center_schema=2（SDD084多账户基线）；无标记的历史开发数据库明确拒绝，不自动清空或升级。ClickHouse直接创建最终列，系统自监控统一lightmoni_log/lightmoni_metric_*，按component区分；所有SDK和内置仪表盘使用当前名称，不保留旧系统视图与启动补列。管理员CLI与中心共用基线验证，空库先建管理员后可直接启动中心。
 
 任务仅使用主机标签和独立任务，默认标签/平台任务初始化一次；修改、停用或删除后重启不重置。删除旧分组接口、旧单集群字段转换及node_pool/service/gateway_group控制器和旧实例表。应用使用deployments，网站使用cluster_ids/cluster_targets；系统身份从创建时固定。应用端口仅使用host_ports命名映射，拒绝旧parameters.port；部署统一根Compose，移除重复部署入口。
 
 SDK Key仅管理名称与启停，可写所有业务表；删除逐表范围数据库及公开API字段，匿名豁免表仍按当前授权执行。中央凭据库为SSH秘密唯一来源；旧凭据搬运、主机密文回退、无网卡地址回退、告警旧策略填补及模型费用回填均移除。当前权限拒绝、签名、短租约、unknown栅栏和同基线维护/回退继续有效。
 
 本轮用户明确授权完成清理后通过GitHub PR合入main并发布Docker。构建固定已合入源码，发布linux/amd64与linux/arm64镜像，隔离验收空库、重复启动及下载包；发布后读回固定标签/latest和每个平台摘要。验证结果与边界见同一SDD081，不把历史兼容验收当成本次证明。
+
+
+## 83. 统一 Agent 与运行权限模式（SDD 083）
+
+### 83.1 驱动目标与架构决策
+
+用户只登记一台主机、安装一套 Agent、维护一个服务，不再分别操作普通 Agent 和独立 root 执行器。Agent 的程序身份与操作系统运行账户分开表达：相同发行包按 `runtime_mode: root | user` 运行，`permission_generation` 单调递增，心跳同时上报实际 UID/GID。配置验证系统身份，不能凭配置给普通进程提权。
+
+新安装默认选中 root，可取消后以 `lightmoni-agent` 普通账户运行。root 首装或账户切换计划明确列出 `container.managed.v1`、`script.elevated.v1` 和 `operations.managed.v1` 三类能力，管理员审阅后启用；这仅开启可用能力，每次 root 脚本、容器动作和受管业务作业仍必须按原完整目标和载荷单独批准、鉴权和审计。普通任务同样保留来源、发起人、目标、执行状态与结果。用户可在主机详情中分别关闭能力。
+
+参考 Salt minion 的单进程运行账户配置、systemd 的真实 User/Group 和 NoNewPrivileges 语义。选择单一服务及内部执行模块，保留按用途区分的控制/数据/签名凭据；不保留第二套 root 安装入口，也不采用普通脚本自动 sudo。方案比较与资料见 [SDD083 研究](../specs/083-unified-agent-runtime/research.md)。
+
+### 83.2 HLD：单一服务、两种系统身份、统一任务记录
+
+```mermaid
+flowchart TB
+  User[管理员 / Web / AI提案 / 外部MCP] --> Center[中心权限与任务中心]
+  Center --> Review[固定目标与载荷计划 / 人工批准]
+  Review --> Audit[(任务记录 / 审计 / unknown门禁)]
+  Center --> Control[控制与遥测接口]
+  Review --> Signed[签名领取 / 单步许可 / 租约]
+  subgraph Host[一台已登记主机 / 一个Agent ID]
+    Service[lightmoni-agent.service / 单一发行与current]
+    Mode{runtime_mode}
+    Service --> Mode
+    Mode -->|user| Ordinary[lightmoni-agent普通账户]
+    Mode -->|root| Root[root账户 / 内嵌受管执行模块]
+    Ordinary --> Standard[普通任务 / 有界采集]
+    Root --> Drop[固定降权 / 清空附加组 / NoNewPrivileges]
+    Drop --> Standard
+    Root --> Managed[受管动作 / root脚本 / 私有journal]
+  end
+  Control --> Service
+  Signed --> Managed
+  Managed --> Receipt[结构化回执 / 原领域核验]
+  Standard --> Receipt
+  Receipt --> Audit
+```
+
+Agent 在 root 模式组合既有签名执行模块，与控制/遥测循环共享进程和生命周期。内部签名执行 ID、密钥、journal、policy generation 和 activation 证明继续使用原协议，用于区分批准上下文，不作为第二台节点或第二个常驻服务对外展示。user 模式不启动内部 root 模块，不访问 Docker daemon、root 私有载荷或高权限写通道。业务 SDK 继续独立直连中心，不依赖 Agent；SDK 和 Agent 关系不因本次拓扑变化而改变。
+
+普通脚本无论 Agent 本身是否 root，都以专用普通账户运行，清空附加组并启用 NoNewPrivileges；不能继承 root Agent 的权限。受管 root 进程继续只执行批准的固定动作或精确脚本快照，签名、start permit、租约、资源归属和结果事务校验继续有效。root 本身具有整机权限，不能把逐任务批准称为 root 沙箱。
+
+### 83.3 LLD：发行、配置和状态边界
+
+| 对象 | 当前路径与约束 |
+| --- | --- |
+| 唯一常驻服务 | `lightmoni-agent.service`，使用 root 或 lightmoni-agent 的固定 unit 模板，未知 drop-in/覆写拒绝维护 |
+| 唯一程序发行 | `/opt/lightmoni-agent/releases` 与 `current`；root 拥有且不可由任务账户写入，按发行 SHA256 校验 |
+| 公共配置 | `/etc/lightmoni-agent/config.json`，含 runtime_mode 和 permission_generation；root 自有，按模式授予读取权限 |
+| 内部签名配置 | `/etc/lightmoni-agent/managed.json` 和 `managed-activation.json`，root 私有，不向普通任务或 AI 暴露 |
+| Agent 状态 | `/var/lib/lightmoni-agent`；身份与缓存按当前模式拥有，内部签名状态在 `managed` 子目录 |
+| 运维业务数据 | `/var/lib/lightmoni-managed`、`/var/lib/lightmoni-web` 及既有受管业务路径，账户切换不递归 chown 或删除 |
+| 账户切换证据 | `/opt/lightmoni-agent/runtime-plans` 固定操作回执；旧缓存隔离到 root 自有 `/var/lib/lightmoni-agent-maintenance/<operation_id>` |
+| 中心账本 | SQLite `machine_agent_runtime`、`machine_agent_runtime_plans`、`machine_agent_runtime_audit`；保留源/目标代次、计划摘要和操作者 |
+
+root 启动验证实际 UID/EUID/GID、可信配置和发行所有权。普通账户验证无 Docker 组/socket/capability 权限；用户配置 root 字段不能让非 root 进程获得权限。root 模式复用受管适配器的参数与资源校验，user 模式仍拒绝旧写协议，不为历史开发安装自动补兼容。发现旧独立服务或无法证明的安装，要求先通过受管清理重新接入，不默默并行两套服务。
+
+### 83.4 LLD：安装与权限切换
+
+SSH 登记账户用于引导和恢复，需要 root 或支持免交互 sudo 的账户；它不必与 Agent 的运行账户相同，也不需要用户登记第二套 root 密码。首装计划显式冻结 runtime_mode，默认 root，取消后 user；安装、升级和卸载继续使用同一 Agent 生命周期入口。升级保留已批准的运行模式，不从首装默认值推断或自动提权。
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /api/v1/machines/:id/agent-runtime` | 返回期望模式、实际 UID/GID、权限代次、在线状态和当前维护记录 |
+| `POST /api/v1/machines/:id/agent-runtime/plans` | 检查有效 SSH 凭据和现场，创建 root/user 双向切换计划，绑定主机、Agent ID、目标/凭据修订、源目标模式、代次和固定发行 |
+| `GET /api/v1/machines/:id/agent-runtime/plans` 及 `/:planId` | 回读历史和原始冻结计划，不派发副作用 |
+| `POST .../:planId/apply` | 要求 confirm、expected_revision 与 request_id；再次核验账户、凭据、版本和互斥，执行固定 SSH 维护程序 |
+| `POST .../:planId/cancel` | 仅取消未执行计划，保留审计；不把已派发或未知结果解释为未执行 |
+| `POST .../:planId/reconcile` | 使用有效 SSH 凭据只读核对固定回执；成功回执与同 boot 的目标心跳匹配后完成切换，或失败恢复回执与原账户新鲜心跳共同证明已回滚；不重放切换 |
+
+账户切换维护先核验当前活动 unit、可信发行、实际账户、Agent/主机 ID、空的待发送队列以及无在途/未知任务；计划固定原 boot_id。停止服务后再次检查本地锁和内部未回传结果；切换不与 SSH 终端、其他安装/升级/卸载并发。原账户的遥测队列和配置缓存移入 root 维护备份，新账户从中心获取新配置；只复制经验证的稳定身份，不把普通账户可写缓存、SQLite、脚本或秘密当作 root 可信状态。运维业务数据保持原归属和内容。成功后清除旧签名材料；旧遥测诊断缓存不混入新执行身份。operations 控制锁目录仅在空目录时调整目录自身归属，不递归更改业务数据。失败恢复须由新的 SSH probe boot_id 和同 boot、UID/GID、权限代次及发行摘要的中心心跳共同证明；原进程旧心跳不能释放维护门禁。
+
+```mermaid
+stateDiagram-v2
+  [*] --> awaiting_approval: SSH预检 / 冻结计划
+  awaiting_approval --> cancelled: 取消未执行计划
+  awaiting_approval --> running: 人工确认 / 摘要与凭据重验
+  running --> verifying: 固定维护 / 同一服务重启
+  running --> unknown: 派发后失联或结果不可证
+  running --> failed: 派发前失败 / 明确失败
+  verifying --> succeeded: 完整成功回执与同boot目标心跳双确认
+  verifying --> unknown: 缺少有效确认
+  unknown --> succeeded: 只读成功回执与同boot目标心跳
+  succeeded --> [*]
+  cancelled --> [*]
+  failed --> [*]
+```
+
+SSH 返回成功不足以完成切换：固定维护程序以单次原子写入提交完整成功回执，绑定操作、Agent、目标模式和权限代次、发行 SHA、UID/GID 与 boot_id。中心持久化该回执后，还要求同一 Agent 的新鲜目标心跳与全部字段及同一 boot_id 匹配；root 模式另外确认内嵌签名身份在线。成功回执之后的诊断缓存清理失败不触发回滚。user→root 新建内部批准身份，root→user 只在双重确认后撤销原内部授权。短暂目标心跳不能单独证明切换成功。丢失或不匹配回执保持 unknown 和主机维护门禁；界面可使用有效 SSH 凭据只读核对原操作回执，不自动重新派发、回切或恢复旧 root 授权。
+
+### 83.5 统一升级、回退、卸载与审计
+
+安装包携带两种模式和受管执行模块，统一升级保留 runtime_mode、权限代次、主机及 Agent ID、journal、策略与业务数据。root 模式的重启生成并核验新的 activation 证明；不能凭旧进程的新鲜心跳判断目标程序已启动。原独立执行器安装/维护 Web 入口删除，账户模式和任务能力在主机详情管理，程序维护仅从统一 Agent 入口执行。
+
+旧普通服务模板不接受统一生命周期升级或回退；预检明确要求先受管卸载再重装。已有 root 安装的安装脚本只允许相同制品重装；不同制品必须通过平台升级计划与 update-runner 的 activation、确认和回退协议，不能绕过受管程序激活。
+
+标准/恢复/离线卸载共同检查普通和内部受管任务的未决状态，移除唯一服务、程序和内部签名状态；中心在远端移除验证后撤销关联执行身份和策略。卸载与降权不停止或删除业务容器、卷、网站、证书和应用数据，也不删除审计。离线脚本无法替代中心撤权；结果未确认时保留原证据和 unknown，不提供静默绕过。
+
+root 首装失败后，人工只读核对恢复流程按部署、enrollment、Agent 和本次签发来源审计的精确绑定撤销内部身份及授权；未决受管作业仍阻止恢复。不能撤销其他主机或后续安装的身份。
+
+UI、平台 AI、外部 MCP 和调度器复用现有领域 API、任务与批准路径。普通任务和 root 任务都必须持久记录发起人、来源、目标、批准、实际账户、代次、派发和结果；运行模式切换及凭据使用也单独审计。客户端或 AI 不能自行批准 root 计划，普通 control/data 身份不能访问签名私有载荷、制品或结果。
+
+### 83.6 验证范围与交付证据
+
+规格、契约、研究、实现和验收见 [SDD083](../specs/083-unified-agent-runtime/spec.md)。本地隔离 UI 检查覆盖单个/批量默认 root 与取消 user、冻结计划审阅、凭据过期、待审阅恢复/取消、回读失配禁批、失联不重放、角色边界和中英文界面；不能替代真实 Linux/systemd、Docker 和远端主机验收。部署验证、Doca 最新版本回读、GitHub PR 与线上升级分别记录，不根据文档或前端测试声称用户环境已升级。
+
+## 84. 主机与多个 SSH 登录账户（SDD 084）
+
+### 84.1 驱动目标与职责
+
+一台主机的资产身份稳定，SSH登录账户可以有多个。主机不再保存唯一username或默认凭据；部署程序在Agent尚未安装时由中心解析明确的账户凭据授权。安装默认自动选择已登记的合适账户，可取消并指定账户；只读预检连接、鉴权或权限不足时可换账户继续，执行远端变更后先核对结果，不重复安装。SSH登录权限、Agent常驻运行模式与单次任务执行权限分别审阅和审计。
+
+```mermaid
+flowchart TD
+  H[主机资产：ID、名称、地址、Agent身份] --> A[SSH账户 deploy]
+  H --> B[SSH账户 root 或其他运维用户]
+  A --> C[账户凭据授权：私钥或密码]
+  B --> D[账户凭据授权：私钥或密码]
+  C --> V[统一加密凭据库]
+  D --> V
+  C --> P[中心只读预检：真实UID和sudo权限]
+  D --> P
+  P --> R[用户选择账户并审阅固定计划]
+  R --> E[中心SSH执行：安装、恢复或维护]
+  E --> G[同一Agent：root或普通模式]
+```
+
+### 84.2 LLD：账户、凭据与主机身份
+
+| 对象 | 约束 |
+| --- | --- |
+| managed_machines | 主机ID、用户名称、地址、端口、默认账户default_account_id、Agent身份；无username/default_credential_id |
+| machine_ssh_accounts | 平台账户ID、主机ID、immutable username、revision、默认凭据、创建人和时间；存活账户用户名在主机内唯一 |
+| machine_credentials | 非空account_id与中央凭据ID；绑定有效期、撤销和消费状态独立 |
+| connection_credentials | 唯一加密秘密库，私钥以公钥指纹去重；不携带登录用户名，不向UI、AI返回秘密或密文 |
+| SSH执行目标 | 主机资产加所选账户的ID、username、revision，必须由服务器从明确凭据授权解析 |
+
+账户用户名创建后不可改，换用户名通过新增账户完成。删除采用deleted_at归档并撤销本账户授权，保留审计；重建同名账户产生新ID，不继承旧授权。共享同一私钥的其他账户不随局部解绑而撤销。主机密钥指纹证明同一服务器端点，不绑定登录用户名，也不作为客户端登录凭据。
+
+默认选择只沿主机default_account_id到该账户default_credential_id查找；任一项失效即要求用户明确选择，不根据唯一剩余凭据、root用户名或其他账户自动回退。同一主机各账户的绑定身份在终端、检查、计划和回执中明确展示。
+
+### 84.3 权限不足、推荐与重新审阅
+
+```mermaid
+flowchart TD
+  S[默认自动选择账户 / 可手选] --> P[优先root再检查其他有效账户]
+  P -->|权限足够| N[冻结所选账户与凭据的新计划]
+  P -->|权限不足或未知| L[展示当前账户与不足原因]
+  L --> C[自动模式尝试下个候选 / 手动显示账户]
+  C -->|自动继续或用户选择| P
+  C -->|没有可用账户| A[添加root或具备免交互sudo的账户及凭据]
+  A --> P
+  N --> R[人工审阅并批准]
+  R --> E[重验固定身份后执行]
+  E --> U[持久结果或unknown只读核对]
+```
+
+安装默认勾选“自动选择合适账户安装”：优先已登记root账户，其次新鲜检查具有权限的账户，再顺序检查其他有效授权；取消后只使用指定账户。账户名称只影响顺序，实际权限必须经只读检查证明。每次候选检查持久记录账户、绑定、检查ID和结果。连接、鉴权或权限不足可自动换账户；主机指纹变化、取消/超时或非权限系统前置失败停止。最终成功检查才生成固定计划，已开始远端变更或结果unknown时只读核对，不跨账户重放。
+
+最近检查的推荐仅在目标、账户修订、凭据绑定修订和有效期均匹配时成立；账户名root不能证明实际UID0。没有新鲜检查时标记未确认，用户可显式选择账户执行新检查；推荐列表不主动遍历SSH，只有用户发起安装自动预检时才顺序检查候选。需要输入sudo密码的方式仍不支持，也不复用SSH登录密码。公钥用于配置服务器授权，不能替代密码或私钥登录。
+
+检查和保存不会安装、切换模式或执行root任务。使用高权限账户安装也可选择普通Agent运行模式；root模式下普通脚本仍降权，root作业独立批准。
+
+### 84.4 接口、冻结计划与恢复
+
+自动安装预检使用 POST /api/v1/machines/:id/installation-preflight，selection明确为auto或manual；自动模式返回每次attempts与最终选中身份，手动模式要求credential_id。登录账户通过 /api/v1/machines/:id/accounts 管理；默认账户使用 /default-account，账户凭据通过 /accounts/:accountId/credentials 管理，默认绑定通过 /accounts/:accountId/default-credential 管理。旧主机级凭据路由删除。主机POST/PUT不接受username；中央凭据库接口继续管理共享秘密。
+
+终端、预检和维护API的credential_id唯一标识账户授权。每次操作冻结账户ID、username、revision与凭据修订，修改默认账户不会替换已审阅计划。执行前再次验证主机/账户/凭据与审批快照，撤销、过期或绑定变化均拒绝。终端与权限切换、安装、更新、卸载保持互斥。
+
+未决维护阻止删除相关账户或修改主机端点。unknown只允许回读原记录或以用户明确选择的同主机有效账户执行固定只读检查；原批准身份保持不变，核对账户独立记录，不重新派发、不自动换root恢复权限。
+
+### 84.5 无兼容交付与验收
+
+中心新基线为center_schema=2。旧单用户名列、主机级默认凭据、旧绑定路由及客户端回退全部删除，不双写、不运行旧数据迁移；旧开发数据库明确拒绝启动，要求先备份并使用新数据目录，不静默清空现存记录。新鲜数据库直接创建最终结构，版本拒绝必须在任何业务写入之前发生。
+
+规格和验证见 [SDD084](../specs/084-host-ssh-accounts/spec.md)。验收分别记录HTTP/数据库集成、浏览器交互、真实SSH权限边界与Linux生命周期，不能把模拟SSH通过描述为真实线上全链路完成。
+
+
+## 86. 统一 Agent 集成发布与主机容器入口（SDD 086）
+
+主机列表的“容器管理”直接打开已有受管容器计划与执行记录界面，绑定同一 machine/agent 身份，沿用 /machines/:id/execution-status 与 /privileged-execution 的精确审批、签名领取和回执。移除仍依赖普通 Agent Docker 能力的旧主机界面；Docker 环境面板仅验证依赖并刷新现有签名状态，不通过旧 Docker 作业路由采集。
+
+容器能力未就绪时引导主机执行权限，检查统一 Agent 的 root/user 运行模式、容器管理授权与新鲜签名状态；不会因为进入页面、SSH 验证成功或点击刷新而自动提权。CentOS 上已有完整 Engine/Compose 仍可直接验证，缺失组件的自动补装继续仅限 Ubuntu/Debian。
+
+SSH 安装非零退出仅保存退出码和有限固定原因，不持久化原始远端输出或凭据。已派发安装即使有已知诊断仍保持 unknown 与原互斥，必须只读核对或明确结束，不据退出码自动撤销身份、重放安装或推定远端未发生改变。

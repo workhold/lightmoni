@@ -30,7 +30,7 @@ function fixture() {
   const tasks = registerTaskCenter(deps);
   db.exec("CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name TEXT,role TEXT,active INTEGER)");
   db.run("INSERT INTO users(id,name,role,active) VALUES('admin','Admin','admin',1)");
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('host','Host','host.test',22,'root','direct_ssh','agent-host',?,?)", clock.toISOString(), clock.toISOString());
+  db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES('host','Host','host.test',22,'direct_ssh','agent-host',?,?)", clock.toISOString(), clock.toISOString());
   db.exec("CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY,last_seen TEXT,heartbeat TEXT);CREATE TABLE ops_platform_runs(id TEXT PRIMARY KEY,job_id TEXT,actor TEXT)");
   db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES('agent-host','host','Host','test','linux','arm64',?,'{}')",clock.toISOString());
   const credentials:any={has:()=>true,authenticate:(req:any)=>{if(req.headers.authorization!=='Bearer ordinary-control')fail(401,'control_required')}};

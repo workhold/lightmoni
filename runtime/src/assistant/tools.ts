@@ -420,13 +420,17 @@ export function monitoringTools(
       {
         name: "check_managed_machine_ssh",
         description:
-          "Log in to a registered host through pinned SSH and run a fixed read-only Agent installation preflight. Returns only connection status, Linux/architecture, dependency, systemd, root/sudo and platform HTTPS checks. Use before proposing installation. No arbitrary commands or secrets. One valid private key is selected automatically; with multiple keys use an ID from get_managed_machine.",
+          "Run fixed read-only Agent installation checks over pinned SSH. By default, selection=auto checks registered root accounts first, then other valid accounts, continuing after connection, authentication or insufficient-privilege failures and recording every attempt. A username never proves privileges. Use selection=manual with one explicit credential_id to check only that account. Auto mode forbids credential_id. Returns the selected account, attempts, actual root/sudo state and Linux/systemd/dependency/platform checks. No arbitrary commands or secrets. This never installs anything, changes the default account or retries a dispatched installation. Use the successful fresh check_id to propose a pinned installation for human review.",
         effect: "read",
-        schema: obj({ machine_id: string, credential_id: string }, ["machine_id"]),
+        schema: obj({ machine_id: string, selection: { type: "string", enum: ["auto", "manual"], default: "auto" }, credential_id: string }, ["machine_id"]),
         execute: async (input, signal, user) => {
           if (!user || user.role !== "admin") throw Error("administrator required");
-          object(input, ["machine_id", "credential_id"]);
-          return machines.checkSSH(text(input.machine_id), {
+          object(input, ["machine_id", "selection", "credential_id"]);
+          const selection = input.selection == null ? "auto" : text(input.selection);
+          if (selection !== "auto" && selection !== "manual") throw Error("invalid installation account selection");
+          if ((selection === "auto" && input.credential_id != null) || (selection === "manual" && input.credential_id == null)) throw Error("manual selection requires credential_id; auto selection forbids it");
+          return machines.installationPreflight(text(input.machine_id), {
+            selection,
             ...(input.credential_id == null ? {} : { credential_id: text(input.credential_id) }),
           }, user.id, signal);
         },
@@ -434,7 +438,7 @@ export function monitoringTools(
       {
         name: "propose_agent_install",
         description:
-          "Persist a reviewable LightMoni Agent installation plan using a successful fresh check_id from check_managed_machine_ssh and its observed architecture. Return the review_url to the administrator. This only drafts a fixed plan; it does not connect by SSH, execute commands, reveal credentials, or install anything. The administrator must confirm in the host management page.",
+          "Persist a reviewable LightMoni Agent installation plan using a successful fresh check_id from check_managed_machine_ssh and its observed architecture. runtime_mode defaults to root; use user when the user requests an Agent running as the standard lightmoni-agent account without root capabilities. SSH login identity is separate from Agent runtime mode. Return the review_url to the administrator. This only drafts a fixed plan; it does not connect by SSH, execute commands, reveal credentials, or install anything. The administrator must confirm in the host management page.",
         effect: "draft",
         schema: obj(
           {
@@ -442,17 +446,21 @@ export function monitoringTools(
             check_id: string,
             version: string,
             arch: { type: "string", enum: ["amd64", "arm64"] },
+            runtime_mode: { type: "string", enum: ["root", "user"], default: "root" },
             initial_label_id: string,
           },
           ["machine_id", "check_id", "version", "arch"],
         ),
         execute: async (input, _signal, user) => {
           if (!user || user.role !== "admin") throw Error("administrator required");
-          object(input, ["machine_id", "check_id", "version", "arch", "initial_label_id"]);
+          object(input, ["machine_id", "check_id", "version", "arch", "runtime_mode", "initial_label_id"]);
+          const runtimeMode = input.runtime_mode === undefined ? "root" : input.runtime_mode;
+          if (runtimeMode !== "root" && runtimeMode !== "user") throw Error("invalid_agent_runtime_mode");
           return machines.assistantPlan(text(input.machine_id), {
             check_id: text(input.check_id),
             version: text(input.version),
             arch: text(input.arch),
+            runtime_mode: runtimeMode,
             initial_label_id: input.initial_label_id == null ? "" : text(input.initial_label_id),
           }, user.id);
         },

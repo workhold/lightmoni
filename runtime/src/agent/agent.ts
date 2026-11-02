@@ -56,6 +56,7 @@ import { AgentTaskRunner } from "./task-runner.js";
 import { SCRIPT_TASK_CAPABILITIES } from "../shared/task-center.js";
 import { collectNetworkAddresses } from "./network-addresses.js";
 import { readAgentRelease } from "./release.js";
+import { runManagedAgent } from "./managed.js";
 import {
   ReceiveError,
   responseBytes,
@@ -148,7 +149,7 @@ export class Agent {
     }
     this.files = new FileLogReader(this);
     if (config.control_credential) {
-      this.jobs = new AgentJobRunner({
+      if (config.runtime_mode !== "root") this.jobs = new AgentJobRunner({
         endpoint: config.endpoint,
         agentID: this.identity.agent_id,
         controlCredential: config.control_credential,
@@ -162,6 +163,8 @@ export class Agent {
         dataCredential: config.data_credential,
         dataDir: config.data_dir,
         pollIntervalMs: Math.max(5000, config.control_interval_seconds * 1000),
+        runtimeMode: config.runtime_mode,
+        permissionGeneration: config.permission_generation,
       }, {fetch: this.endpoints.fetch});
     }
   }
@@ -209,6 +212,7 @@ export class Agent {
       hostname: hostname(),
       version: this.release.version,
       boot_id: this.bootID,
+      runtime: { mode: this.config.runtime_mode, permission_generation: this.config.permission_generation, uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 },
       release: { ...this.release },
       platform: process.platform === "win32" ? "windows" : process.platform,
       arch: process.arch === "x64" ? "amd64" : process.arch,
@@ -745,6 +749,7 @@ export class Agent {
       this.fileLogLoop(),
       this.jobLoop(),
       this.taskRunner?.run(this.controller.signal) ?? Promise.resolve(),
+      runManagedAgent(this.config, this.controller.signal, message => this.setError("managed Agent: " + message)).catch(error => { this.setError("managed Agent initialization refused"); this.controller.abort(error); }),
     ];
   }
   async run(parent?: AbortSignal) {

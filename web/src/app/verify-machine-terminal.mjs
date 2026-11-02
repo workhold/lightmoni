@@ -1,5 +1,6 @@
 import {chromium,expect} from '@playwright/test';
 import {spawn} from 'node:child_process';
+import {generateKeyPairSync} from 'node:crypto';
 import {once} from 'node:events';
 import {writeFile,mkdir} from 'node:fs/promises';
 import {resolve} from 'node:path';
@@ -7,7 +8,7 @@ import {mediaDirectory} from '../../../scripts/qa-artifacts.mjs';
 
 // Real production UI -> HTTP/WebSocket -> disposable sshd with temporary keys.
 // No user platform DB, accounts, hosts or private keys are used.
-const root=resolve(import.meta.dirname,'../../..'),output=resolve(root,'specs/018-machine-web-terminal'),media=mediaDirectory(output);
+const root=resolve(import.meta.dirname,'../../..'),output=resolve(process.env.LIGHTMONI_QA_OUTPUT??resolve(root,'specs/018-machine-web-terminal')),media=mediaDirectory(output);
 await mkdir(output,{recursive:true});
 const fixture=spawn(process.execPath,['--import','tsx','test/helpers/terminal-ui-server.ts'],{cwd:resolve(root,'runtime'),stdio:['ignore','pipe','pipe']});
 let fixtureErrors='';fixture.stderr.on('data',b=>{fixtureErrors+=b.toString()});
@@ -48,10 +49,12 @@ try{
  await page.locator('.ant-modal-close').click();await page.close();
  page=await pageFor('en-US');await page.getByRole('button',{name:'Open terminal',exact:true}).click();await expect(page.getByRole('status').filter({hasText:'Connected'})).toBeVisible();await expect(page.getByRole('button',{name:'Toggle fullscreen',exact:true})).toBeVisible();mark('English terminal controls and status are localized');
  await page.getByRole('button',{name:'Disconnect',exact:true}).click();
- // Add a second metadata-bound key to verify explicit selection; the private
- // key is intentionally invalid and never used to connect in this scenario.
- await page.request.post(ready.origin+`/api/v1/machines/${ready.machineID}/credentials`,{data:{method:'ssh_key',secret:'-----BEGIN OPENSSH PRIVATE KEY-----\ninvalid-fixture-only\n-----END OPENSSH PRIVATE KEY-----'}});
- await page.locator('.ant-modal-close').click();await page.getByRole('button',{name:'Open terminal',exact:true}).click();await expect(page.getByRole('combobox',{name:'Terminal SSH credential'})).toBeVisible();await expect(page.getByRole('button',{name:'Connect',exact:true})).toBeDisabled();mark('Multiple private keys require explicit selection without silently using the first');
+ // A registered account without its own default must not borrow another
+ // account’s key or silently pick an active binding. All keys are disposable.
+ const account=await page.request.post(ready.origin+`/api/v1/machines/${ready.machineID}/accounts`,{data:{username:'fixture_other',make_default:true}});expect(account.status()).toBe(201);const accountRow=await account.json();
+ const ephemeral=generateKeyPairSync('rsa',{modulusLength:2048,privateKeyEncoding:{format:'pem',type:'pkcs1'},publicKeyEncoding:{format:'pem',type:'spki'}});
+ const added=await page.request.post(ready.origin+`/api/v1/machines/${ready.machineID}/accounts/${accountRow.id}/credentials`,{data:{method:'ssh_key',secret:ephemeral.privateKey,retention:'temporary',make_default:false}});expect(added.status()).toBe(201);const binding=await added.json();expect(binding.account_id).toBe(accountRow.id);expect(binding.username).toBe('fixture_other');
+ await page.locator('.ant-modal-close').click();await page.getByRole('button',{name:'Open terminal',exact:true}).click();await expect(page.getByRole('combobox',{name:'Terminal SSH credential'})).toBeVisible();await expect(page.getByRole('button',{name:'Connect',exact:true})).toBeDisabled();await expect(page.getByRole('status').filter({hasText:'Ready'})).toBeVisible();mark('An account without a default credential requires explicit selection and cannot borrow another account’s key');
  expect(errors).toEqual([]);expect(unexpected).toEqual([]);
  await writeFile(resolve(output,'ui-report.json'),JSON.stringify({checked,errors,unexpected},null,2)+'\n');
 }catch(error){if(page)await page.screenshot({path:resolve(media,'terminal-failure.png'),fullPage:true}).catch(()=>{});console.error({errors,unexpected,fixtureErrors});throw error}

@@ -1,0 +1,9 @@
+{
+  "checked": [
+    "new account key defaults to managed six-hour storage",
+    "permanent password requires confirmation and sends no finite expiry",
+    "lost response clears secrets and blocks duplicate mutation until readback"
+  ],
+  "errors": [],
+  "unexpected": []
+}

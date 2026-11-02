@@ -17,7 +17,7 @@ function fixture() {
   const deps = {db,router,now:()=>clock,auth:{user:()=>user,requireAdmin(c:any){if(c.user.role!=="admin")fail(403,"admin");}},logger:{info(){},warn(){},error(){}}} as unknown as Dependencies;
   router.auth = deps.auth;
   const store = registerTaskCenter(deps);
-  for(const id of ["one","two"]) db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'root','direct_ssh',?,?,?)",id,id,id+".example.test","agent-"+id,clock.toISOString(),clock.toISOString());
+  for(const id of ["one","two"]) db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)",id,id,id+".example.test","agent-"+id,clock.toISOString(),clock.toISOString());
   const task = (id="task", extra:any={}) => store.nodes.task({name:"Backup",type:"script",enabled:true,target_all:false,host_ids:["one"],label_ids:[],schedule:{mode:"once"},script:{runtime:"node",code:"console.log('backup')",timeout_seconds:5,max_output_bytes:1024},...extra},id,true);
   const finish = (run:any, extra:any={}) => store.result(run.agent_id,run.id,{lease_token:run.lease_token,state:"succeeded",code:"",summary:"done",stdout:"",stderr:"",exit_code:0,...extra});
   return {db,router,user,store,deps,task,finish,now:()=>clock,advance(s:number){clock=new Date(clock.getTime()+s*1000);},close(){store.close();db.close();}};
@@ -145,7 +145,7 @@ test("a queued automatic retry rechecks its approved definition again at Agent c
 test("two hundred long-delay failures do not starve a later short-delay retry",()=>{
   const f=fixture();try{
     const targets=Array.from({length:200},(_,i)=>"slow-"+i);
-    for(const id of targets)f.db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'root','direct_ssh',?,?,?)",id,id,id+".example.test","agent-"+id,f.now().toISOString(),f.now().toISOString());
+    for(const id of targets)f.db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)",id,id,id+".example.test","agent-"+id,f.now().toISOString(),f.now().toISOString());
     f.task("slow",{host_ids:targets,execution_policy:{retry_count:1,retry_delay_seconds:3600}});f.store.dispatch("slow",{confirm:true},"admin");
     for(const id of targets){const run=f.store.claim("agent-"+id,capabilities)!;f.finish(run,{state:"failed",code:"script_failed",exit_code:1});}
     f.task("fast",{execution_policy:{retry_count:1,retry_delay_seconds:10,queue_timeout_seconds:10}});f.store.dispatch("fast",{confirm:true},"admin");

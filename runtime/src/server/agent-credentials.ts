@@ -74,6 +74,8 @@ export interface AgentCredential {
 }
 
 export interface AgentCredentialStore {
+  /** Trusted composition callback; bootstrap material is returned only to the authenticated installer activation. */
+  setActivationHook?(hook:(input:{machine_id:string;agent_id:string;created_by:string;enrollment_id:string})=>Record<string,unknown>|undefined):void;
   has(agentID: string, audience: CredentialAudience): boolean;
   /** Registered identities never fall back to a shared legacy reporting key. */
   registered?(agentID: string): boolean;
@@ -123,6 +125,7 @@ export function registerAgentCredentials(
   deps: Dependencies,
 ): Module & AgentCredentialStore {
   const { db, router } = deps;
+  let activationHook:((input:{machine_id:string;agent_id:string;created_by:string;enrollment_id:string})=>Record<string,unknown>|undefined)|undefined;
   createAgentLifecycleSchema(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_enrollments(
@@ -402,6 +405,7 @@ export function registerAgentCredentials(
     const credentials: Record<string, string> = {};
     const at = now();
     const expiry = new Date(at.getTime() + 90 * 24 * 60 * 60 * 1000);
+    let runtimeActivation:Record<string,unknown>|undefined;
     db.transaction(() => {
       assertAgentActive(db, row.agent_id, 401);
       requireHostReservation(row);
@@ -435,6 +439,7 @@ export function registerAgentCredentials(
       // Concurrent tokens cannot activate different identities on one host.
       const claimed = db.run("UPDATE managed_machines SET agent_id=?,agent_last_seen='',observed_hostname='' WHERE id=? AND agent_id=?", row.agent_id, row.machine_id, row.replaces_agent_id);
       if (!claimed.changes) fail(409, "registered_host_required: 安装目标身份已变化");
+      runtimeActivation=activationHook?.({machine_id:row.machine_id,agent_id:row.agent_id,created_by:row.created_by,enrollment_id:row.id});
       // Registration subsequently records this Agent's observed host metadata;
       // the replaced Agent's hostname must not cross the activation boundary.
     });
@@ -442,6 +447,7 @@ export function registerAgentCredentials(
       agent_id: row.agent_id,
       ...credentials,
       credential_expires_at: iso(expiry),
+      ...runtimeActivation,
     });
   }, { public: true });
 
@@ -541,6 +547,7 @@ export function registerAgentCredentials(
     authenticate,
     canDownloadWithEnrollmentToken,
     issueEnrollment,
+    setActivationHook(hook){activationHook=hook;},
     enrollmentStatus,
     cancelEnrollment,
   };

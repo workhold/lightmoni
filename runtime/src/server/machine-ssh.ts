@@ -2,10 +2,27 @@ import { createHash } from "node:crypto";
 import { Client } from "ssh2";
 import { hostKeyAlgorithms } from "./machine-host-keys.js";
 import { MAX_NETWORK_ADDRESSES, normalizeNetworkAddresses, type HostNetworkAddress } from "../shared/host-network.js";
-import type { MachineSummary } from "./managed-machines.js";
+import type { SSHMachineTarget } from "./managed-machines.js";
+import { canonicalJSON, sha256 } from "../shared/privileged-executor.js";
+import { fail } from "../shared/http.js";
+
+/** Immutable SSH login identity, separate from the host asset revision. */
+export const sshAccountSnapshot = (value: { account_id: string; username: string; account_revision: number }) => ({
+  id: value.account_id, username: value.username, revision: value.account_revision,
+});
+export const sshCredentialRevision = (value: Record<string, any>) => sha256(canonicalJSON([
+  value.id, value.account_id, value.username, value.account_revision,
+  value.connection_credential_id ?? "", value.method ?? "", value.secret_fingerprint,
+  value.retention ?? "", value.expires_at, value.revoked_at ?? "", value.secret_cleared_at ?? "",
+]));
+export function assertSSHAccount(value: { account_id: string; username: string; account_revision: number }, expected: unknown) {
+  const frozen = expected as Record<string, any> | undefined;
+  if (!frozen || !value.account_id || frozen.id !== value.account_id || frozen.username !== value.username
+    || frozen.revision !== value.account_revision) fail(409, "ssh_account_changed");
+}
 
 export interface SSHRunInput {
-  machine: MachineSummary;
+  machine: SSHMachineTarget;
   privateKey: string;
   /** SSH password stays in this in-memory connection input, never argv/env/stdin. */
   password?: string;
@@ -22,10 +39,24 @@ export interface SSHRunInput {
   timeoutMs?: number;
 }
 export type SSHRunner = (input: SSHRunInput) => Promise<{ stdout: string; stderr: string; stages: string[] }>;
+const REMOTE_REASONS = ["ordinary_agent_privilege_violation", "agent_account_invalid"] as const;
+export interface SSHRemoteFailure { remote_exit_code: number | null; remote_reason_code: typeof REMOTE_REASONS[number] | "remote_command_failed" }
 export class SSHError extends Error {
-  constructor(readonly code: "ssh_failed" | "host_key_mismatch" | "timed_out" | "cancelled" | "invalid_response") {
+  readonly remoteFailure?: SSHRemoteFailure;
+  constructor(readonly code: "ssh_failed" | "host_key_mismatch" | "timed_out" | "cancelled" | "invalid_response", remoteFailure?: SSHRemoteFailure) {
     super(code);
+    if (code === "ssh_failed" && remoteFailure) this.remoteFailure = {
+      remote_exit_code: Number.isSafeInteger(remoteFailure.remote_exit_code) && remoteFailure.remote_exit_code! >= 0 && remoteFailure.remote_exit_code! <= 255 ? remoteFailure.remote_exit_code : null,
+      remote_reason_code: REMOTE_REASONS.some(value => value === remoteFailure.remote_reason_code) ? remoteFailure.remote_reason_code : "remote_command_failed",
+    };
   }
+}
+
+/** Keep only fixed diagnostics. Raw remote output can contain credentials. */
+export function remoteSSHFailure(exitCode: number | null, stdout: string, stderr: string): SSHError {
+  const lines = (stderr + "\n" + stdout).slice(-24_000).split(/\r?\n/);
+  const reason = REMOTE_REASONS.find(value => lines.some(line => line === value || line === "Error: " + value));
+  return new SSHError("ssh_failed", { remote_exit_code: exitCode, remote_reason_code: reason ?? "remote_command_failed" });
 }
 
 // Match a fixed pin; kept as a pure parser for existing tooling and tests.
@@ -88,7 +119,7 @@ async function fixedCommandSSHRunner(input: SSHRunInput) {
   timer = setTimeout(() => finish(new SSHError("timed_out")), timeoutMs);
   signal.addEventListener("abort", abort, { once: true });
   client.on("error", (error: Error & { level?: string }) => {
-    finish(new SSHError(mismatch ? "host_key_mismatch" : error.level === "client-authentication" ? "ssh_failed" : "ssh_failed"));
+    finish(new SSHError(mismatch ? "host_key_mismatch" : error.level === "client-timeout" ? "timed_out" : "ssh_failed"));
   });
   client.on("close", () => { if (!settled) finish(new SSHError("ssh_failed")); });
   const stillVerified = () => {
@@ -105,7 +136,7 @@ async function fixedCommandSSHRunner(input: SSHRunInput) {
       stream.stderr.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-12_000); });
       stream.on("error", () => finish(new SSHError("ssh_failed")));
       stream.on("close", (code: number | null) => {
-        if (code !== 0) return finish(new SSHError("ssh_failed"));
+        if (code !== 0) return finish(remoteSSHFailure(code, stdout, stderr));
         finish(undefined, { stdout, stderr, stages: ["checking_host_key", "host_key_confirmed", "connecting_ssh", "remote_command_completed"] });
       });
       // Only the fixed command's input is sent here. Password authentication

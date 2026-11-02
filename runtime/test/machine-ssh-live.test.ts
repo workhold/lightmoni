@@ -9,7 +9,7 @@ import {createServer,connect} from 'node:net';
 import {once} from 'node:events';
 import {createHash} from 'node:crypto';
 import {defaultSSHRunner,parsePreflight,preflightCommand} from '../src/server/machine-ssh.js';
-import type {MachineSummary} from '../src/server/managed-machines.js';
+import type {SSHMachineTarget} from '../src/server/managed-machines.js';
 
 // Optional only on hosts without an SSH daemon. Uses disposable keys, a high
 // loopback port and no platform or user SSH configuration.
@@ -34,7 +34,7 @@ test('real SSH handshake, exact host pin, private-key authentication, timeout an
  }
  const publicKey=(await readFile(join(dir,'host.pub'),'utf8')).trim().split(/\s+/)[1];
  const pin='SHA256:'+createHash('sha256').update(Buffer.from(publicKey,'base64')).digest('base64').replace(/=+$/,'');
- const machine={address:'127.0.0.1',username:userInfo().username,host_key_fingerprint:pin} as MachineSummary;
+ const machine={account_id:'live-account',account_revision:1,address:'127.0.0.1',username:userInfo().username,host_key_fingerprint:pin} as SSHMachineTarget;
  const input={machine,privateKey:await readFile(join(dir,'client'),'utf8'),command:preflightCommand('https://127.0.0.1:1'),signal:new AbortController().signal,port,timeoutMs:10_000};
  const result=await defaultSSHRunner(input),preflight=parsePreflight(result.stdout);
  assert.equal(preflight.checks.platform_https,false);assert.equal(preflight.ready,false);assert.ok(result.stages.includes('host_key_confirmed'));

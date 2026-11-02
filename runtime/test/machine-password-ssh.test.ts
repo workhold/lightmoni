@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import ssh2 from "ssh2";
-import { defaultSSHRunner, passwordSSHRunner } from "../src/server/machine-ssh.js";
+import { defaultSSHRunner, passwordSSHRunner, SSHError } from "../src/server/machine-ssh.js";
 import type { MachineSummary } from "../src/server/managed-machines.js";
 
 // A real SSH protocol fixture on loopback verifies password authentication
@@ -35,6 +35,12 @@ test("password SSH runner pins the host, separates token stdin and handles timeo
           channel.on("end", () => { inputs.push(received); channel.write("accepted-input\n"); channel.exit(0); channel.end(); });
           return;
         }
+        if (info.command === "fixture-fail") {
+          channel.write(password + "\n"); channel.stderr.write("Error: ordinary_agent_privilege_violation\n" + password + "\n"); channel.exit(23); channel.end(); return;
+        }
+        if (info.command === "fixture-unknown-failure") {
+          channel.stderr.write("untrusted remote text: " + password); channel.exit(17); channel.end(); return;
+        }
         channel.write("LMSSH=1\n"); channel.stderr.write("fixture bounded warning\n"); channel.exit(0); channel.end();
       });
     }));
@@ -56,6 +62,17 @@ test("password SSH runner pins the host, separates token stdin and handles timeo
   await passwordSSHRunner({ ...input, command: "fixture-enroll", stdin: "fixed-script-input\n", enrollmentToken: "unused-token" });
   assert.deepEqual(inputs, [token + "\n", "fixed-script-input\n"]);assert.ok(commands.every(command=>!command.includes(token)&&!command.includes(password)));
   assert.ok(!JSON.stringify(enrolled).includes(token));assert.ok(inputs.every(value=>!value.includes(password)));
+  for (const [command, exit, reason] of [["fixture-fail", 23, "ordinary_agent_privilege_violation"], ["fixture-unknown-failure", 17, "remote_command_failed"]] as const) {
+    await assert.rejects(() => passwordSSHRunner({...input, command}), error => {
+      assert.ok(error instanceof SSHError);
+      assert.equal(error.code, "ssh_failed");
+      assert.deepEqual(error.remoteFailure, {remote_exit_code:exit,remote_reason_code:reason});
+      assert.ok(!JSON.stringify(error).includes(password));
+      assert.equal(error.message,"ssh_failed");
+      assert.ok(!("stdout" in error) && !("stderr" in error));
+      return true;
+    });
+  }
   await assert.rejects(() => passwordSSHRunner({ ...input, command: "fixture-wait", timeoutMs: 250 }), /timed_out/);
   const controller = new AbortController(); controller.abort();
   await assert.rejects(() => passwordSSHRunner({ ...input, signal: controller.signal }), /cancelled/);
@@ -63,6 +80,6 @@ test("password SSH runner pins the host, separates token stdin and handles timeo
   const pending = passwordSSHRunner({ ...input, command: "fixture-wait", signal: during.signal });
   await entered; during.abort();
   await assert.rejects(() => pending, /cancelled/);
-  assert.deepEqual(commands, ["fixture-preflight", "fixture-enroll", "fixture-enroll", "fixture-wait", "fixture-wait"]);
+  assert.deepEqual(commands, ["fixture-preflight", "fixture-enroll", "fixture-enroll", "fixture-fail", "fixture-unknown-failure", "fixture-wait", "fixture-wait"]);
   assert.ok(!JSON.stringify(result).includes(password), "runner output must not contain a credential");
 });

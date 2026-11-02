@@ -36,7 +36,7 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
   );`);
   db.exec(`CREATE INDEX IF NOT EXISTS machine_credentials_connection ON machine_credentials(connection_credential_id);
     CREATE VIEW IF NOT EXISTS effective_machine_credentials AS SELECT
-      b.id,b.machine_id,b.method,b.connection_credential_id,COALESCE(g.name,'') AS name,
+      b.id,b.machine_id,b.account_id,a.username,a.revision AS account_revision,b.method,b.connection_credential_id,COALESCE(g.name,'') AS name,
       CASE WHEN b.revoked_at IS NOT NULL OR b.secret_cleared_at!='' THEN '' ELSE COALESCE(g.secret_encrypted,'') END AS secret_encrypted,
       COALESCE(g.secret_fingerprint,'') AS secret_fingerprint,
       CASE WHEN b.retention='permanent' AND b.expires_at!='' THEN b.retention WHEN g.id IS NOT NULL AND b.retention='permanent' AND g.retention!='permanent' THEN g.retention ELSE b.retention END AS retention,
@@ -46,7 +46,7 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
       CASE WHEN b.secret_cleared_at!='' THEN b.secret_cleared_at ELSE COALESCE(g.secret_cleared_at,'') END AS secret_cleared_at,
       CASE WHEN b.clear_reason!='' THEN b.clear_reason ELSE COALESCE(g.clear_reason,'') END AS clear_reason,
       b.created_at,b.created_by,b.last_used_at
-    FROM machine_credentials b LEFT JOIN connection_credentials g ON g.id=b.connection_credential_id;`);
+    FROM machine_credentials b JOIN machine_ssh_accounts a ON a.id=b.account_id AND a.machine_id=b.machine_id AND a.deleted_at='' LEFT JOIN connection_credentials g ON g.id=b.connection_credential_id;`);
   const row = (credentialID: string) => {
     const value = db.get<Row>("SELECT * FROM connection_credentials WHERE id=?", credentialID);
     if (!value) fail(404, "连接凭据不存在");
@@ -117,10 +117,11 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
     for (const value of db.all<Row>("SELECT * FROM connection_credentials WHERE secret_encrypted!='' OR secret_cleared_at=''")) if (!current(value)) clear(value.id,value.revoked_at?"revoked":"expired");
   };
   const lifetime = (input: Row) => { const value=validate(input); return {retention:value.retention,expiresAt:value.expiresAt}; };
-  const bind = (machineID: string, credentialID: string, actorID: string, makeDefault = true, requested?: {retention:string;expiresAt:string}) => {
-    const value = ensure(credentialID), existing = db.get<Row>(`SELECT * FROM effective_machine_credentials WHERE machine_id=? AND connection_credential_id=?
-      AND revoked_at IS NULL AND secret_cleared_at='' ORDER BY created_at DESC,id DESC`,machineID,credentialID);
-    if (value.retention === "one_time" && db.get("SELECT id FROM machine_credentials WHERE connection_credential_id=? AND (machine_id!=? OR revoked_at IS NOT NULL OR secret_cleared_at!='') LIMIT 1",credentialID,machineID)) fail(409,"一次性密码只允许绑定一台主机并使用一次，请添加新凭据");
+  const bind = (machineID: string, accountID:string, credentialID: string, actorID: string, makeDefault = true, requested?: {retention:string;expiresAt:string}) => {
+    if(!db.get("SELECT id FROM machine_ssh_accounts WHERE id=? AND machine_id=? AND deleted_at=''",accountID,machineID))fail(404,'SSH 登录账户不存在');
+    const value = ensure(credentialID), existing = db.get<Row>(`SELECT * FROM effective_machine_credentials WHERE machine_id=? AND account_id=? AND connection_credential_id=?
+      AND revoked_at IS NULL AND secret_cleared_at='' ORDER BY created_at DESC,id DESC`,machineID,accountID,credentialID);
+    if (value.retention === "one_time" && db.get("SELECT id FROM machine_credentials WHERE connection_credential_id=? AND (account_id!=? OR revoked_at IS NOT NULL OR secret_cleared_at!='') LIMIT 1",credentialID,accountID)) fail(409,"一次性密码只允许授权一个账户并使用一次，请添加新凭据");
     let bindingID = existing && machineCredentialCurrent(existing as any,deps.now()) ? existing.id : "";
     const policy={retention:requested?.retention ?? value.retention,expiresAt:requested?.expiresAt ?? value.expires_at};
     if (value.retention!=="permanent" && (policy.retention==="permanent" || Date.parse(policy.expiresAt)>Date.parse(value.expires_at))) {
@@ -129,15 +130,15 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
     }
     if (!bindingID) {
       bindingID = id();
-      db.run(`INSERT INTO machine_credentials(id,machine_id,connection_credential_id,method,retention,policy_source,created_at,expires_at,created_by)
-        VALUES(?,?,?,?,?,?,?,?,?)`,bindingID,machineID,value.id,value.method,policy.retention,"explicit",at(),policy.expiresAt,actorID);
+      db.run(`INSERT INTO machine_credentials(id,machine_id,account_id,connection_credential_id,method,retention,policy_source,created_at,expires_at,created_by)
+        VALUES(?,?,?,?,?,?,?,?,?,?)`,bindingID,machineID,accountID,value.id,value.method,policy.retention,"explicit",at(),policy.expiresAt,actorID);
       db.run("INSERT INTO machine_credential_events(id,machine_id,credential_id,event,actor_id,created_at) VALUES(?,?,?,?,?,?)",id(),machineID,bindingID,"bound",actorID,at());
     } else if (requested && policy.retention!=="permanent" && (existing!.retention==="permanent" || Date.parse(policy.expiresAt)<Date.parse(existing!.expires_at))) {
       // Re-entering the same key must honor a shorter requested lifetime,
       // without silently renewing an existing binding's deadline.
       db.run("UPDATE machine_credentials SET retention=?,expires_at=? WHERE id=?",policy.retention,policy.expiresAt,bindingID);
     }
-    if (makeDefault) db.run("UPDATE managed_machines SET default_credential_id=? WHERE id=?",bindingID,machineID);
+    if (makeDefault) db.run("UPDATE machine_ssh_accounts SET default_credential_id=? WHERE id=?",bindingID,accountID);
     return bindingID;
   };
   const used = (bindingID: string) => {

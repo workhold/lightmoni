@@ -36,7 +36,7 @@ async function fixture(t: any) {
     });
     return { status: response.status, data: await response.json() as any };
   };
-  const hostResponse = await request("/machines", "POST", { name: "用户设置的开发机", address: "ssh.fixture", username: "deploy" });
+  const hostResponse = await request("/machines", "POST", { name: "用户设置的开发机", address: "ssh.fixture" });
   assert.equal(hostResponse.status, 201);
   const host = hostResponse.data;
   const enroll = async () => {
@@ -64,8 +64,8 @@ test("replacement activation clears the prior hostname before registration and k
   assert.equal((await f.register(retired, { hostname: "late-retired-name" })).status, 401);
   assert.equal((await f.register(replacement, { hostname: "new-system-host", machine_id: "other-host", name: "replace-user-name", address: "other.fixture", username: "root", host_id: "client-resource-id" })).status, 200);
   const current = f.machines.get(f.host.id);
-  assert.deepEqual({ id: current.id, name: current.name, address: current.address, username: current.username, hostname: current.observed_hostname },
-    { id: f.host.id, name: "用户设置的开发机", address: "ssh.fixture", username: "deploy", hostname: "new-system-host" });
+  assert.deepEqual({ id: current.id, name: current.name, address: current.address, hostname: current.observed_hostname },
+    { id: f.host.id, name: "用户设置的开发机", address: "ssh.fixture", hostname: "new-system-host" });
   assert.equal(f.machines.list().length, 1);
 });
 

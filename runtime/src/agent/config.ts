@@ -28,6 +28,9 @@ export interface LogSource {
   from_beginning: boolean;
 }
 export interface Config {
+  /** The service manager supplies OS privileges; this value only verifies them. */
+  runtime_mode: "root" | "user";
+  permission_generation: number;
   listen: string;
   endpoint: string;
   /** Node-bound control credential issued by Agent enrollment. */
@@ -75,6 +78,8 @@ export const digest = (v: Uint8Array | string) =>
   createHash("sha256").update(v).digest("hex");
 export function defaultConfig(): Config {
   return {
+    runtime_mode: "user",
+    permission_generation: 1,
     listen: "127.0.0.1:4318",
     endpoint: "",
     control_credential: "",
@@ -180,6 +185,8 @@ export function validateProbes(probes: Probe[]): void {
 }
 export interface ConfigValidation { pendingEnrollment?: boolean }
 export function validateConfig(c: Config, options: ConfigValidation = {}): void {
+  if (!["root", "user"].includes(c.runtime_mode) || !Number.isSafeInteger(c.permission_generation) || c.permission_generation < 1)
+    throw Error("invalid Agent runtime mode or permission generation");
   let u: URL;
   try {
     u = new URL(c.endpoint);

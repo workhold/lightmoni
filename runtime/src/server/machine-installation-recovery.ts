@@ -4,8 +4,8 @@ import type { AgentCredentialStore } from "./agent-credentials.js";
 import { hasActiveTaskRuns } from "./agent-hosts.js";
 import { agentProbeCommand, parseAgentProbe } from "./machine-agent-lifecycle.js";
 import { machineCredentialCurrent } from "./machine-credential-policy.js";
-import type { MachineSummary } from "./managed-machines.js";
-import type { SSHRunner } from "./machine-ssh.js";
+import type { MachineSummary, SSHMachineTarget } from "./managed-machines.js";
+import { assertSSHAccount, sshAccountSnapshot, sshCredentialRevision, type SSHRunner } from "./machine-ssh.js";
 
 type Row = Record<string, any>;
 const decode = (value: string) => { try { return JSON.parse(value); } catch { return {}; } };
@@ -14,9 +14,11 @@ export function createInstallationRecoverySchema(deps: Dependencies) {
 }
 interface Access {
   get(id: string): MachineSummary; idle(id: string): void; revision(machine: any): string;
-  credential(machineID: string, credentialID?: string): { machine: MachineSummary; credential: any };
+  credential(machineID: string, credentialID?: string): { machine: SSHMachineTarget; credential: any };
   authentication(machineID: string, credential: any): { privateKey: string; password?: string };
   markCredentialUsed(credentialID: string): void;
+  runtimeHealthy?(operation:Record<string,any>,heartbeat:Record<string,any>):boolean;
+  resolveRuntime?(operation:Record<string,any>,actor:string):Record<string,unknown>|null;
   activated(machineID: string, actorID: string): void;
   deployment(machineID: string, deploymentID: string): any;
   busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
@@ -67,6 +69,7 @@ export function registerInstallationRecovery(deps: Dependencies, access: Access,
     const node = table("agents") ? db.get<Row>("SELECT * FROM agents WHERE id=?",enrollment.agent_id) : undefined;
     const seen = Date.parse(node?.last_seen || ""), started = Date.parse(operation.started_at || ""), now = deps.now().getTime();
     const heartbeat = decode(node?.heartbeat || "{}");
+    if(access.runtimeHealthy&&!access.runtimeHealthy(operation,heartbeat))return false;
     return Number.isFinite(seen) && Number.isFinite(started) && seen >= started && now-seen < 180_000 && seen-now <= 30_000
       && node?.version === operation.version && node?.arch === operation.arch && heartbeat.last_error === "";
   };
@@ -95,19 +98,20 @@ export function registerInstallationRecovery(deps: Dependencies, access: Access,
     if (!operation.enrollment_id) fail(409,"缺少可核验的安装预约，保留未知结果；请人工检查后明确结束");
     let selected: ReturnType<Access["credential"]>;
     if (input.credential_id) selected=access.credential(machine.id,input.credential_id);
-    else { try { selected=access.credential(machine.id,operation.credential_id); } catch { selected=access.credential(machine.id); } }
+    else selected=access.credential(machine.id,operation.credential_id);
+    const verificationAccount=sshAccountSnapshot(selected.machine),verificationRevision=sshCredentialRevision(selected.credential);
     access.busy.add(machine.id);
     try {
-      const output = await access.runner({machine,...access.authentication(machine.id,selected.credential),credentialID:selected.credential.id,
+      const output = await access.runner({machine:selected.machine,...access.authentication(machine.id,selected.credential),credentialID:selected.credential.id,
         command:agentProbeCommand(),signal:ctx.signal,port:machine.port,timeoutMs:60_000});
       access.markCredentialUsed(selected.credential.id);
       const observed = parseAgentProbe(output.stdout);
-      access.credential(machine.id,selected.credential.id);
+      const live=access.credential(machine.id,selected.credential.id);assertSSHAccount(live.machine,verificationAccount);if(sshCredentialRevision(live.credential)!==verificationRevision)fail(409,"reconciliation_credential_changed");
       db.transaction(() => {
         const current = row(machine.id,operation.id), currentMachine = db.get<Row>("SELECT * FROM managed_machines WHERE id=?",machine.id)!;
         target(current,currentMachine); assertCredential(machine.id,selected.credential.id);
         if (current.enrollment_id !== operation.enrollment_id || !healthy(current,currentMachine,observed)) fail(409,"尚无同一安装预约、受管程序和新鲜 Agent 健康证据，结果保持未知");
-        const receipt = {...decode(current.receipt_json),agent_id:observed.agent_id,enrollment_id:current.enrollment_id,reconciled:true,verified_at:at(),remote_healthy:true};
+        const receipt = {...decode(current.receipt_json),approved_ssh_account:decode(current.plan_json).ssh_account,verification_ssh_account:verificationAccount,verification_credential_id:selected.credential.id,verification_credential_revision:verificationRevision,agent_id:observed.agent_id,enrollment_id:current.enrollment_id,reconciled:true,verified_at:at(),remote_healthy:true};
         db.run("UPDATE machine_deployments SET status='succeeded',finished_at=?,error='',receipt_json=? WHERE id=? AND status='unknown' AND resolved_at=''",at(),JSON.stringify(receipt),operation.id);
         db.run("UPDATE managed_machines SET agent_last_seen=?,last_error='',updated_at=? WHERE id=?",at(),at(),machine.id);
         access.activated(machine.id,ctx.user.id);
@@ -130,8 +134,9 @@ export function registerInstallationRecovery(deps: Dependencies, access: Access,
       const bound = db.get<Row>("SELECT agent_id FROM managed_machines WHERE id=?",current.machine_id)?.agent_id || "";
       if (hasActiveTaskRuns(db,agentID || bound,current.machine_id) || table("agent_jobs") && db.get("SELECT id FROM agent_jobs WHERE agent_id IN (?,?) AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",agentID,bound)) fail(409,"主机仍有未结束的任务，请先处理后再结束安装记录");
       const cancelled=cancelOwnEnrollment(current);
+      const runtime=access.resolveRuntime?.(current,ctx.user.id);
       const revoked = agentID && table("agent_credentials") ? db.run("UPDATE agent_credentials SET revoked_at=?,revoke_reason=? WHERE agent_id=? AND audience IN ('control','data') AND revoked_at IS NULL",at(),"Administrator resolved an unknown Agent installation",agentID).changes : 0;
-      const receipt = {...decode(current.receipt_json),manual_resolution:{at:at(),actor_id:ctx.user.id,reason:input.reason.trim(),enrollment_cancelled:cancelled,revoked_agent_id:agentID,revoked_credentials:revoked}};
+      const receipt = {...decode(current.receipt_json),manual_resolution:{at:at(),actor_id:ctx.user.id,reason:input.reason.trim(),enrollment_cancelled:cancelled,revoked_agent_id:agentID,revoked_credentials:revoked,...(runtime?{revoked_internal_identity:runtime}:{})}};
       db.run("UPDATE machine_deployments SET resolved_at=?,resolved_by=?,resolution_reason=?,receipt_json=? WHERE id=? AND status='unknown' AND resolved_at=''",at(),ctx.user.id,input.reason.trim(),JSON.stringify(receipt),current.id);
     });
     ctx.json(access.deployment(operation.machine_id,operation.id));

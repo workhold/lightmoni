@@ -59,6 +59,7 @@ service_state=$(systemctl show lightmoni-agent.service --property=ActiveState --
 case "$service_state" in inactive|failed) ;; *) echo 'Agent did not stop; files retained.' >&2; exit 1;; esac
 lm_assert_paths
 lm_assert_no_operations
+lm_remove_managed_state
 systemctl disable lightmoni-agent.service
 rm -f /etc/systemd/system/lightmoni-agent.service /usr/local/bin/lightmoni-agent
 rm -rf /opt/lightmoni-agent
@@ -72,7 +73,8 @@ ${observation}`);
 }
 
 /** Token arrives only through SSH stdin. curl's credential file is mode 0600. */
-export function agentBootstrapCommand(endpoint: string, version: string) {
+export function agentBootstrapCommand(endpoint: string, version: string, runtimeMode:'root'|'user'='user') {
+  if(!['root','user'].includes(runtimeMode))throw Error('invalid_agent_runtime_mode');
   const script = `set -eu
 ${freshAgentGuard}
 umask 077
@@ -84,7 +86,7 @@ trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 printf 'header = "Authorization: Bearer %s"\\n' "$enrollment_token" > "$tmp_dir/curl.conf"
 curl --fail --silent --show-error --proto '=https' --tlsv1.2 --max-time 120 --config "$tmp_dir/curl.conf" -o "$tmp_dir/install.sh" ${quote(endpoint.replace(/\/$/, "") + "/downloads/agent/install.sh")}
 chmod 700 "$tmp_dir/install.sh"
-printf '%s\\n' "$enrollment_token" | sh "$tmp_dir/install.sh" --fresh --endpoint ${quote(endpoint)} --version ${quote(version)} --enrollment-token-stdin`;
+printf '%s\\n' "$enrollment_token" | sh "$tmp_dir/install.sh" --fresh --endpoint ${quote(endpoint)} --version ${quote(version)} --runtime-mode ${quote(runtimeMode)} --enrollment-token-stdin`;
   return privileged(script);
 }
 
@@ -219,6 +221,7 @@ service_state=$(systemctl show lightmoni-agent.service --property=ActiveState --
 case "$service_state" in inactive|failed) ;; *) exit 42;; esac
 lm_assert_paths
 lm_assert_no_operations
+lm_remove_managed_state
 if test "$load_state" = loaded; then systemctl disable lightmoni-agent.service; fi
 rm -f /etc/systemd/system/lightmoni-agent.service /usr/local/bin/lightmoni-agent /usr/local/sbin/lightmoni-agent-uninstall
 rm -rf /opt/lightmoni-agent

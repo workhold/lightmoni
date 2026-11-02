@@ -12,6 +12,7 @@ import {
 import { isAgentRemoved } from "./agent-lifecycle.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import { assertNoPendingMachineUninstallation } from "./machine-uninstallations-guard.js";
+import { assertNoPendingAgentRuntime } from './machine-agent-runtime-guard.js';
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoDockerInstallation } from "./machine-docker-guard.js";
 import { hasPendingExecutorLifecycle } from "./privileged-execution-guard.js";
@@ -166,6 +167,9 @@ export class PrivilegedExecutorStore {
     this.actor(actor); const h = this.host(machineID), p = this.policy(machineID), capabilities = this.capabilities(input.capabilities);
     if (!capabilities.length || p.agent_id !== h.agent_id || canonicalJSON(capabilities) !== p.capabilities_json) fail(409, "approved_execution_policy_required");
     this.idle(machineID, h.agent_id);
+    return this.bootstrapIdentity(machineID,h,p,capabilities,actor,inTransaction);
+  }
+  private bootstrapIdentity(machineID:string,h:Row,p:Row,capabilities:PrivilegedCapability[],actor:string,inTransaction:boolean):ExecutorBootstrap {
     const write = (): ExecutorBootstrap => {
       const generation = (this.deps.db.get<Row>("SELECT MAX(install_generation) generation FROM privileged_executors WHERE machine_id=?", machineID)?.generation ?? 0) + 1;
       const id = randomUUID(), enrollmentID = randomUUID(), token = "lm_executor_enroll_" + randomBytes(32).toString("base64url"), expires = plus(this.deps.now(), 300);
@@ -179,6 +183,57 @@ export class PrivilegedExecutorStore {
     return inTransaction ? write() : this.deps.db.transaction(write);
   }
   issueBootstrap(machineID: string, capabilities: PrivilegedCapability[], actor: string, inTransaction = false) { return this.bootstrap(machineID, { capabilities }, actor, inTransaction); }
+  /** Only an already approved Agent installation/account transition may enroll
+   * the embedded execution identity while its own lifecycle fence is held. */
+  issueUnifiedBootstrap(machineID:string,actor:string,source:{deployment_id?:string;runtime_plan_id?:string}):ExecutorBootstrap {
+    this.actor(actor);const h=this.host(machineID);let approved:Row|undefined;
+    if(source.deployment_id&&!source.runtime_plan_id) {
+      const r=this.deps.db.get<Row>("SELECT * FROM machine_deployments WHERE id=? AND machine_id=? AND status='running' AND execution_stage='bootstrap_dispatched' AND resolved_at=''",source.deployment_id,machineID);
+      const p=r&&parseStrictJSON(r.plan_json);if(r&&r.created_by===actor&&p.runtime_mode==='root'&&this.deps.db.get("SELECT id FROM agent_enrollments WHERE id=? AND agent_id=? AND status='active'",r.enrollment_id,h.agent_id))approved=r;
+    } else if(source.runtime_plan_id&&!source.deployment_id) {
+      const r=this.deps.db.get<Row>("SELECT * FROM machine_agent_runtime_plans WHERE id=? AND machine_id=? AND agent_id=? AND created_by=? AND status='running' AND request_id!=''",source.runtime_plan_id,machineID,h.agent_id,actor);
+      if(r&&parseStrictJSON(r.plan_json).runtime_mode==='root')approved=r;
+    }
+    if(!approved)fail(409,'approved_agent_runtime_lifecycle_required');
+    if(this.deps.db.get("SELECT id FROM privileged_executors WHERE machine_id=? AND state!='revoked' LIMIT 1",machineID))fail(409,'existing_execution_identity_requires_removal');
+    if(this.deps.db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='')) LIMIT 1",machineID))fail(409,'machine_execution_locked');
+    const capabilities=[...PRIVILEGED_CAPABILITIES] as PrivilegedCapability[];
+    const policyPlan=this.preparePolicyPlan(machineID,{capabilities},actor);this.applyPolicy(machineID,policyPlan.id,{confirm:true,expected_revision:policyPlan.revision},actor,true);
+    const bootstrap=this.bootstrapIdentity(machineID,h,this.policy(machineID),capabilities,actor,true);
+    this.audit(machineID,actor,'agent_runtime_bootstrap_bound','',{executor_id:bootstrap.executor_id,deployment_id:source.deployment_id??'',runtime_plan_id:source.runtime_plan_id??''});
+    return bootstrap;
+  }
+  /** Remote removal/account downgrade was verified by the unified lifecycle. */
+  revokeUnifiedRuntime(machineID:string,actor:string,operationID:string,uninstallation=false):void {
+    this.actor(actor);const h=this.registeredHost(machineID),table=uninstallation?'machine_uninstallations':'machine_agent_runtime_plans';
+    const r=this.deps.db.get<Row>(`SELECT * FROM ${table} WHERE id=? AND machine_id=?`,operationID,machineID);
+    if(!r||r.agent_id!==h.agent_id||!['running','verifying','unknown'].includes(r.status)||!uninstallation&&parseStrictJSON(r.plan_json).runtime_mode!=='user')fail(409,'verified_agent_runtime_lifecycle_required');
+    if(this.deps.db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='')) LIMIT 1",machineID))fail(409,'machine_execution_locked');
+    this.deps.db.run("UPDATE privileged_executors SET state='revoked' WHERE machine_id=? AND agent_id=?",machineID,h.agent_id);
+    this.deps.db.run("UPDATE privileged_enrollments SET state='revoked' WHERE executor_id IN (SELECT id FROM privileged_executors WHERE machine_id=?) AND state='issued'",machineID);
+    this.deps.db.run("UPDATE privileged_machine_policies SET generation=generation+1,capabilities_json='[]',approved_by=?,updated_at=? WHERE machine_id=?",actor,this.now(),machineID);
+    this.audit(machineID,actor,'agent_runtime_execution_revoked','',{operation_id:operationID,reason:uninstallation?'agent_uninstalled':'account_downgraded'});
+  }
+  revokeFailedUnifiedBootstrap(machineID:string,actor:string,operationID:string):void {
+    this.actor(actor);const h=this.registeredHost(machineID),r=this.deps.db.get<Row>("SELECT * FROM machine_agent_runtime_plans WHERE id=? AND machine_id=? AND agent_id=? AND created_by=? AND status='unknown'",operationID,machineID,h.agent_id,actor);
+    if(!r||parseStrictJSON(r.plan_json).runtime_mode!=='root'||!r.executor_id)fail(409,'verified_failed_runtime_lifecycle_required');
+    if(this.deps.db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='')) LIMIT 1",machineID))fail(409,'machine_execution_locked');
+    const e=this.deps.db.get<Row>('SELECT * FROM privileged_executors WHERE id=? AND machine_id=? AND agent_id=?',r.executor_id,machineID,h.agent_id);if(!e)fail(409,'agent_runtime_identity_changed');
+    this.deps.db.run("UPDATE privileged_executors SET state='revoked' WHERE id=?",e.id);this.deps.db.run("UPDATE privileged_enrollments SET state='revoked' WHERE executor_id=? AND state='issued'",e.id);
+    this.deps.db.run("UPDATE privileged_machine_policies SET generation=generation+1,capabilities_json='[]',approved_by=?,updated_at=? WHERE machine_id=?",actor,this.now(),machineID);this.audit(machineID,actor,'agent_runtime_failed_bootstrap_revoked','',{operation_id:operationID,executor_id:e.id});
+  }
+  resolveUnifiedInstallation(machineID:string,actor:string,deploymentID:string):{executor_id:string}|null {
+    this.actor(actor);const h=this.registeredHost(machineID),r=this.deps.db.get<Row>("SELECT * FROM machine_deployments WHERE id=? AND machine_id=? AND status='unknown' AND resolved_at=''",deploymentID,machineID);if(!r)fail(409,'unknown_installation_required');
+    const plan=parseStrictJSON(r.plan_json);if(plan.runtime_mode!=='root')return null;
+    const identity=this.deps.db.get<Row>("SELECT * FROM privileged_executors WHERE machine_id=? AND state!='revoked' ORDER BY install_generation DESC LIMIT 1",machineID);if(!identity)return null;
+    const enrollment=this.deps.db.get<Row>("SELECT * FROM agent_enrollments WHERE id=? AND machine_id=?",r.enrollment_id,machineID),runtime=this.deps.db.get<Row>("SELECT * FROM machine_agent_runtime WHERE machine_id=?",machineID);
+    if(!enrollment||!enrollment.agent_id||!runtime||runtime.agent_id!==enrollment.agent_id||runtime.runtime_mode!=='root'||h.agent_id!==enrollment.agent_id)fail(409,'installation_execution_binding_changed');
+    const issuedHere=this.deps.db.all<Row>("SELECT detail_json FROM privileged_audit WHERE machine_id=? AND event='agent_runtime_bootstrap_bound'",machineID).some(a=>{const source=parseStrictJSON(a.detail_json);return source.executor_id===identity.id&&source.deployment_id===r.id&&source.runtime_plan_id==='';});
+    if(!issuedHere)fail(409,'installation_execution_binding_changed');
+    if(this.deps.db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='')) LIMIT 1",machineID))fail(409,'machine_execution_locked');
+    if(identity.agent_id!==enrollment.agent_id)fail(409,'installation_execution_binding_changed');
+    this.deps.db.run("UPDATE privileged_executors SET state='revoked' WHERE id=?",identity.id);this.deps.db.run("UPDATE privileged_enrollments SET state='revoked' WHERE executor_id=? AND state='issued'",identity.id);this.deps.db.run("UPDATE privileged_machine_policies SET generation=generation+1,capabilities_json='[]',approved_by=?,updated_at=? WHERE machine_id=? AND agent_id=?",actor,this.now(),machineID,enrollment.agent_id);this.audit(machineID,actor,'installation_execution_identity_resolved','',{deployment_id:deploymentID,executor_id:identity.id,agent_id:enrollment.agent_id});return{executor_id:identity.id};
+  }
   private endpoint() {
     let url: URL; try { url = new URL(this.deps.externalURL); } catch { fail(409, "https_center_origin_required"); }
     if (url!.protocol !== "https:" || url!.username || url!.password || url!.pathname !== "/" || url!.search || url!.hash) fail(409, "https_center_origin_required");
@@ -533,9 +588,9 @@ export function registerPrivilegedExecutors(deps: Dependencies, options: { dataD
   signed('observations/targets',(e,v)=>{object(v,[]);store.observationAuthority(e.id);if(!store.observations)fail(503,'executor_observation_unavailable');return store.observations!.targets(e);});
   signed('observations/batches',(e,v)=>{store.observationAuthority(e.id);if(!store.observations)fail(503,'executor_observation_unavailable');return store.observations!.accept(e,v);});
   r.get("/api/v1/machines/:id/execution-status", c => { deps.auth.requireAdmin(c); c.json(store.getStatus(c.params.id)); });
-  r.post("/api/v1/machines/:id/execution-policy/plan", async c => { human(c); c.json(store.preparePolicyPlan(c.params.id, await readBody(c), c.user.id)); });
+  r.post("/api/v1/machines/:id/execution-policy/plan", async c => { human(c); assertNoPendingAgentRuntime(deps.db,c.params.id); c.json(store.preparePolicyPlan(c.params.id, await readBody(c), c.user.id)); });
   r.get("/api/v1/machines/:id/execution-policy/plans/:planId", c => { deps.auth.requireAdmin(c); c.json(store.getPolicyPlan(c.params.id, c.params.planId)); });
-  r.post("/api/v1/machines/:id/execution-policy/plans/:planId/apply", async c => { human(c); c.json(store.applyPolicy(c.params.id, c.params.planId, await readBody(c), c.user.id)); });
+  r.post("/api/v1/machines/:id/execution-policy/plans/:planId/apply", async c => { human(c); assertNoPendingAgentRuntime(deps.db,c.params.id); c.json(store.applyPolicy(c.params.id, c.params.planId, await readBody(c), c.user.id)); });
   r.post("/api/v1/privileged-execution/plans", async c => { human(c); c.json(store.plan(await readBody(c), c.user.id)); });
   r.post("/api/v1/privileged-execution/plans/:id/apply", async c => { human(c); c.json(store.apply(c.params.id, await readBody(c), c.user.id)); });
   r.get("/api/v1/privileged-execution/jobs", c => { deps.auth.requireAdmin(c); c.json({ jobs: store.list(c.url.searchParams.get("host_id") ?? undefined) }); });

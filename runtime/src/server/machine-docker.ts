@@ -1,8 +1,8 @@
 import { id } from '../shared/crypto.js';
 import { fail } from '../shared/http.js';
 import type { Context, Dependencies, Handler } from '../shared/types.js';
-import type { MachineSummary } from './managed-machines.js';
-import { SSHError, type SSHRunner } from './machine-ssh.js';
+import type { MachineSummary, SSHMachineTarget } from './managed-machines.js';
+import { SSHError, assertSSHAccount, sshAccountSnapshot, sshCredentialRevision, type SSHRunner } from './machine-ssh.js';
 import { dockerInstallScript } from './docker-install-script.js';
 import { assertNoDockerInstallation } from './machine-docker-guard.js';
 import { hasActiveTaskRuns } from './agent-hosts.js';
@@ -10,8 +10,8 @@ import { assertNoPendingAgentUpdate } from './machine-agent-updates-guard.js';
 import { assertNoPendingMachineInstallation } from './machine-installations-guard.js';
 import { assertNoPrivilegedExecution } from './privileged-execution-guard.js';
 interface Access {
- get(id:string):MachineSummary; idle(id:string):void; busy:Set<string>;
- credential(id:string,credentialID?:string):{machine:MachineSummary;credential:any};
+ get(id:string):MachineSummary; revision(machine:MachineSummary):string; idle(id:string):void; busy:Set<string>;
+ credential(id:string,credentialID?:string):{machine:SSHMachineTarget;credential:any};
  authentication(id:string,credential:any):{privateKey:string;password?:string};
  markCredentialUsed(id:string):void;runner:SSHRunner;safe(fn:Handler):Handler;
 }
@@ -39,11 +39,11 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
  db.exec(`CREATE TABLE IF NOT EXISTS machine_docker_installations(
  id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES managed_machines(id) ON DELETE CASCADE,agent_id TEXT NOT NULL,
  request_id TEXT NOT NULL,credential_id TEXT NOT NULL,state TEXT NOT NULL,phase TEXT NOT NULL,code TEXT NOT NULL,
- created_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+ created_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,ssh_account_json TEXT NOT NULL,credential_revision TEXT NOT NULL,target_revision TEXT NOT NULL,verification_json TEXT NOT NULL DEFAULT '{}',
  UNIQUE(machine_id,request_id));
  CREATE UNIQUE INDEX IF NOT EXISTS machine_docker_install_lane ON machine_docker_installations(machine_id) WHERE state IN ('running','unknown');`);
  db.run("UPDATE machine_docker_installations SET state='unknown',phase='unknown',code='docker_install_result_unavailable' WHERE state='running'");
- const view=(r:any)=>r?{id:r.id,machine_id:r.machine_id,state:r.state,phase:r.phase,code:r.code,created_by:r.created_by,created_at:r.created_at,updated_at:r.updated_at}:undefined;
+ const view=(r:any)=>r?{id:r.id,machine_id:r.machine_id,ssh_account:JSON.parse(r.ssh_account_json),credential_id:r.credential_id,verification:JSON.parse(r.verification_json),state:r.state,phase:r.phase,code:r.code,created_by:r.created_by,created_at:r.created_at,updated_at:r.updated_at}:undefined;
  const human=(ctx:Context)=>{
   deps.auth.requireAdmin(ctx);
   const current=deps.auth.user(ctx.req);
@@ -51,11 +51,13 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
  };
  const row=(mid:string,op:string)=>{const r=db.get<any>('SELECT * FROM machine_docker_installations WHERE machine_id=? AND id=?',mid,op);if(!r)fail(404,'docker_installation_not_found');return r;};
  const update=(op:string,v:{state:string;phase:string;code:string})=>db.run('UPDATE machine_docker_installations SET state=?,phase=?,code=?,updated_at=? WHERE id=?',v.state,v.phase,v.code,now(),op);
- const read=async(r:any,start=false)=>{
-   const {machine,credential}=access.credential(r.machine_id,r.credential_id);
-   if(machine.agent_id!==r.agent_id)fail(409,'docker_install_target_changed');
+ const read=async(r:any,start=false,verificationCredentialID?:string)=>{
+   const {machine,credential}=access.credential(r.machine_id,verificationCredentialID??r.credential_id);
+   if(!verificationCredentialID){assertSSHAccount(machine,JSON.parse(r.ssh_account_json));if(sshCredentialRevision(credential)!==r.credential_revision)fail(409,"ssh_credential_changed");}
+   const selectedAccount=sshAccountSnapshot(machine),selectedRevision=sshCredentialRevision(credential);
+   if(access.revision(machine)!==r.target_revision||machine.agent_id!==r.agent_id)fail(409,'docker_install_target_changed');
    const output=await access.runner({machine,credentialID:credential.id,...access.authentication(machine.id,credential),command:remote(r.id,start),signal:controller.signal,port:machine.port,timeoutMs:60000});
-   access.markCredentialUsed(credential.id);const status=parseDockerInstallStatus(output.stdout);update(r.id,status);return status;
+   access.markCredentialUsed(credential.id);const live=access.credential(r.machine_id,credential.id);assertSSHAccount(live.machine,selectedAccount);if(sshCredentialRevision(live.credential)!==selectedRevision||access.revision(live.machine)!==r.target_revision)fail(409,"ssh_credential_changed");if(verificationCredentialID)db.run("UPDATE machine_docker_installations SET verification_json=? WHERE id=?",JSON.stringify({approved_ssh_account:JSON.parse(r.ssh_account_json),verification_ssh_account:selectedAccount,verification_credential_id:credential.id,verification_credential_revision:selectedRevision,verified_at:now()}),r.id);const status=parseDockerInstallStatus(output.stdout);update(r.id,status);return status;
  };
  const launch=(r:any,start=true)=>{
   access.busy.add(r.machine_id);
@@ -86,8 +88,8 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
    if(!machine.capabilities.update_agent.available&&machine.capabilities.update_agent.reason!=='agent_not_linked')fail(409,'docker_install_host_unavailable');
    if(hasActiveTaskRuns(db,machine.agent_id,machine.id))fail(409,'docker_install_host_busy');
    if(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_jobs'")&&machine.agent_id&&db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",machine.agent_id))fail(409,'docker_install_host_busy');
-   const {credential}=access.credential(machine.id,body.credential_id),op=id();
-   db.run('INSERT INTO machine_docker_installations VALUES(?,?,?,?,?,?,?,?,?,?,?)',op,machine.id,machine.agent_id,body.request_id,credential.id,'running','connecting','',ctx.user.id,now(),now());
+   const selected=access.credential(machine.id,body.credential_id),{credential}=selected,op=id();
+   db.run('INSERT INTO machine_docker_installations(id,machine_id,agent_id,request_id,credential_id,state,phase,code,created_by,created_at,updated_at,ssh_account_json,credential_revision,target_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',op,machine.id,machine.agent_id,body.request_id,credential.id,'running','connecting','',ctx.user.id,now(),now(),JSON.stringify(sshAccountSnapshot(selected.machine)),sshCredentialRevision(credential),access.revision(machine));
    return {record:row(machine.id,op),created:true};
   });
   if(result.created)launch(result.record);ctx.json(view(result.record),result.created?202:200);
@@ -97,10 +99,10 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
   if(workers.has(r.id)){ctx.json(view(r));return;}
   // Recovery is strictly read-only and may replace an expired credential.
   const body=await ctx.body<any>();if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='credential_id')||body.credential_id!==undefined&&typeof body.credential_id!=='string')fail(400,'invalid_docker_verification');
-  if(body.credential_id){access.credential(r.machine_id,body.credential_id);r.credential_id=body.credential_id;db.run('UPDATE machine_docker_installations SET credential_id=? WHERE id=?',r.credential_id,r.id);}
+  const verificationCredentialID=body.credential_id??r.credential_id;access.credential(r.machine_id,verificationCredentialID);
   if(access.busy.has(r.machine_id))fail(409,'docker_install_host_busy');access.busy.add(r.machine_id);
-  try{await read(r);}catch(error){update(r.id,{state:'unknown',phase:'unknown',code:error instanceof SSHError?error.code:'docker_install_result_unavailable'});}finally{access.busy.delete(r.machine_id);}
-  const latest=row(r.machine_id,r.id);if(latest.state==='running')launch(latest,false);
+  try{await read(r,false,body.credential_id);}catch(error){update(r.id,{state:'unknown',phase:'unknown',code:error instanceof SSHError?error.code:'docker_install_result_unavailable'});}finally{access.busy.delete(r.machine_id);}
+  const latest=row(r.machine_id,r.id);
   ctx.json(view(latest));
  }));
  return {async close(){controller.abort();await Promise.allSettled([...workers.values()]);}};

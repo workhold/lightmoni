@@ -7,7 +7,7 @@ import type { AgentCredentialStore, AgentEnrollmentInput } from "../../src/serve
 export function issueHostEnrollment(db: DB, store: AgentCredentialStore, input: Omit<AgentEnrollmentInput, "machine_id">) {
   createAgentHostSchema(db);
   const machineID = id().slice(0, 16), at = new Date().toISOString();
-  db.run(`INSERT INTO managed_machines(id,name,address,port,username,connection_method,created_at,updated_at)
-    VALUES(?,?,'fixture.example.test',22,'deploy','direct_ssh',?,?)`, machineID, "fixture " + machineID, at, at);
+  db.run(`INSERT INTO managed_machines(id,name,address,port,connection_method,created_at,updated_at)
+    VALUES(?,?,'fixture.example.test',22,'direct_ssh',?,?)`, machineID, "fixture " + machineID, at, at);
   return store.issueEnrollment({ ...input, machine_id: machineID });
 }

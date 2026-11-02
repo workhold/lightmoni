@@ -78,7 +78,7 @@ async function fixture(t: any, options: NodesOptions = {}) {
   t.after(async()=>{await module.close?.();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));db.close();});
   const url = `http://127.0.0.1:${(server.address() as any).port}/api/v1`;
   return {db,store,advance(){at=new Date(at.getTime()+30_000);},enroll(agent="agent-1",machine="host-1"){
-    db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'root','direct_ssh',?,?,?)",machine,machine,"ssh.fixture.test",agent,at.toISOString(),at.toISOString());
+    db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)",machine,machine,"ssh.fixture.test",agent,at.toISOString(),at.toISOString());
     db.run("INSERT INTO agent_enrollments VALUES(?,?,'active',?,?)",agent,agent,machine,at.toISOString());
   },async post(path:string,body:any,headers:Record<string,string>={}){const response=await fetch(url+path,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer fixture-control",...headers},body:JSON.stringify(body)});return {status:response.status,body:await response.json() as any};}};
 }

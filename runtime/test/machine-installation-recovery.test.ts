@@ -11,20 +11,20 @@ import {registerManagedMachines,type SSHRunner} from "../src/server/managed-mach
 import {NodeStore} from "../src/server/nodes-model.js";
 import {TaskRunStore} from "../src/server/task-center.js";
 import {registerAgentJobs} from "./helpers/domain-jobs.js";
-import {SSHError} from "../src/server/machine-ssh.js";
+import {SSHError,remoteSSHFailure} from "../src/server/machine-ssh.js";
 import {fixturePrivateKey} from "./helpers/ssh-key.js";
 import {pendingMachineInstallation} from "../src/server/machine-installations-guard.js";
 import {SCRIPT_TASK_CAPABILITY} from "../src/shared/task-center.js";
 
 const preflight="LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
 const probe=(id:string,extra:Record<string,string>={})=>Object.entries({LMAGENT:"1",agent_id:id,installation:"present",program_complete:"1",unit_managed:"1",service_running:"1",lifecycle_locked:"0",operation_lock:"0",data_retained:"1",...extra}).map(([key,value])=>`${key}=${value}`).join("\n")+"\n";
-async function fixture(t:any){
+async function fixture(t:any,nonzero=false){
  const db=new DB(":memory:"),user={id:"admin",name:"Admin",role:"admin"};let clock=new Date("2026-10-31T08:00:00Z"),router=new Router();
  const deps={db,...cipher(Buffer.alloc(32,4)),now:()=>clock,externalURL:"https://platform.example.test",auth:{user:()=>user,requireAdmin(ctx:any){if(ctx.user.role!=="admin")fail(403,"administrator required");}},logger:{info(){},warn(){},error(){}}} as unknown as Dependencies;
  new NodeStore(db,deps.now);
  let bootstraps=0,probes=0,enrollmentToken="",observedID="unknown-agent",observation:Record<string,string>={};
  const runner:SSHRunner=async input=>{
-  if(input.enrollmentToken){bootstraps++;enrollmentToken=input.enrollmentToken;throw new SSHError("timed_out");}
+  if(input.enrollmentToken){bootstraps++;enrollmentToken=input.enrollmentToken;throw nonzero?remoteSSHFailure(1,input.enrollmentToken,"Error: ordinary_agent_privilege_violation\n"+input.privateKey):new SSHError("timed_out");}
   if(input.command.includes("LMAGENT")){probes++;return {stdout:probe(observedID,observation),stderr:"",stages:[]};}
   return {stdout:preflight,stderr:"",stages:[]};
  };
@@ -36,12 +36,13 @@ async function fixture(t:any){
  t.after(async()=>{for(const instance of instances)await instance.close?.();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));db.close();});
  const request=async(path:string,method="GET",body?:any,bearer?:string)=>{const result=await fetch(base+"/api/v1"+path,{method,headers:{"content-type":"application/json",...(bearer?{authorization:"Bearer "+bearer}:{})},body:body===undefined?undefined:JSON.stringify(body)});const raw=await result.text();return {status:result.status,raw,data:JSON.parse(raw)};};
  const host=async(name="Recovery host")=>{
-  const made=await request("/machines","POST",{name,address:"ssh.example.test",username:"root"});assert.equal(made.status,201,made.raw);
+  const made=await request("/machines","POST",{name,address:"ssh.example.test"});assert.equal(made.status,201,made.raw);
   db.run("UPDATE managed_machines SET host_key_fingerprint='SHA256:fixture-pin' WHERE id=?",made.data.id);
-  const credential=await request(`/machines/${made.data.id}/credentials`,"POST",{method:"ssh_key",secret:fixturePrivateKey(),confirm_managed:true});assert.equal(credential.status,201,credential.raw);
+  const account=await request(`/machines/${made.data.id}/accounts`,"POST",{username:"root",make_default:true});assert.equal(account.status,201,account.raw);
+  const credential=await request(`/machines/${made.data.id}/accounts/${account.data.id}/credentials`,"POST",{method:"ssh_key",secret:fixturePrivateKey(),confirm_managed:true});assert.equal(credential.status,201,credential.raw);
   const check=await request(`/machines/${made.data.id}/ssh-check`,"POST",{});assert.equal(check.data.ready,true,check.raw);
   const plan=await request(`/machines/${made.data.id}/deployments/plan`,"POST",{check_id:check.data.id,version:"0.1.0",arch:"amd64"});assert.equal(plan.status,201,plan.raw);
-  return {id:made.data.id,cid:credential.data.id,check:check.data.id,plan:plan.data.id,path:`/machines/${made.data.id}/deployments/${plan.data.id}`};
+  return {id:made.data.id,account:account.data.id,cid:credential.data.id,check:check.data.id,plan:plan.data.id,path:`/machines/${made.data.id}/deployments/${plan.data.id}`};
  };
  const activate=async(token=enrollmentToken)=>{
   const exchanged=await request("/agents/enroll","POST",{enrollment_token:token,install_nonce:"recovery-fixture",agent_public_key:"fixture-public",version:"0.1.0",arch:"amd64"});assert.equal(exchanged.status,201,exchanged.raw);
@@ -107,14 +108,14 @@ test("recovery fixes the reviewed SSH target and accepts a newly selected valid 
  const before=f.probes;f.db.run("UPDATE managed_machines SET address='different.example.test' WHERE id=?",h.id);
  assert.equal((await f.request(h.path+"/reconcile","POST",{})).status,409);assert.equal(f.probes,before);
  f.db.run("UPDATE managed_machines SET address='ssh.example.test' WHERE id=?",h.id);
- assert.equal((await f.request(`/machines/${h.id}/credentials/${h.cid}`,"DELETE")).status,200);
- const added=await f.request(`/machines/${h.id}/credentials`,"POST",{method:"password",secret:"new-recovery-password",confirm_managed:true});assert.equal(added.status,201,added.raw);
+ assert.equal((await f.request(`/machines/${h.id}/accounts/${h.account}/credentials/${h.cid}`,"DELETE")).status,200);
+ const added=await f.request(`/machines/${h.id}/accounts/${h.account}/credentials`,"POST",{method:"password",secret:"new-recovery-password",confirm_managed:true});assert.equal(added.status,201,added.raw);
  const result=await f.request(h.path+"/reconcile","POST",{credential_id:added.data.id});assert.equal(result.status,200,result.raw);assert.equal(result.data.status,"succeeded");assert.ok(!result.raw.includes("new-recovery-password"));
 });
 
 test("manual resolution retains unknown history, revokes only this new identity and releases its fence",async t=>{
  const f=await fixture(t),h=await f.host();const saved=await f.interrupt(h);const active=await f.activate();
- const otherHost=await f.request("/machines","POST",{name:"Other",address:"other.example.test",username:"root"});assert.equal(otherHost.status,201);
+ const otherHost=await f.request("/machines","POST",{name:"Other",address:"other.example.test"});assert.equal(otherHost.status,201);
  const otherEnrollment=f.credentials.issueEnrollment({endpoint_origin:f.deps.externalURL,version:"0.1.0",created_by:"admin",machine_id:otherHost.data.id});const other=await f.activate(otherEnrollment.token_display_once);
  const taskStore=new TaskRunStore(f.deps,f.credentials);f.db.run("INSERT INTO task_runs(id,task_id,host_id,agent_id,snapshot_json,state,trigger,request_id,requested_by,created_at,expires_at) VALUES('existing','task',?,?, '{}','queued','manual','before-install','admin',?,?)",h.id,active.id,f.clock.toISOString(),new Date(f.clock.getTime()+60000).toISOString());
  assert.equal((await f.request(h.path+"/resolve","POST",{confirm:true,reason:"Already checked"})).status,409);
@@ -148,9 +149,26 @@ test("internal enrollment reservation refuses a finished installation attempt wi
 
 test("a mismatched persisted enrollment never cancels or revokes another host's reservation",async t=>{
  const f=await fixture(t),h=await f.host();await f.interrupt(h);
- const other=await f.request("/machines","POST",{name:"Other reservation",address:"other.example.test",username:"root"});
+ const other=await f.request("/machines","POST",{name:"Other reservation",address:"other.example.test"});
  const foreign=f.credentials.issueEnrollment({endpoint_origin:f.deps.externalURL,version:"0.1.0",created_by:"admin",machine_id:other.data.id});
  f.db.run("UPDATE machine_deployments SET enrollment_id=?,execution_stage='enrollment_issued' WHERE id=?",foreign.enrollment_id,h.plan);
  assert.equal((await f.request(h.path+"/reconcile","POST",{})).status,409);assert.equal(f.credentials.enrollmentStatus(foreign.enrollment_id)?.status,"issued");
  const resolved=await f.request(h.path+"/resolve","POST",{confirm:true,reason:"Confirmed local installation history is inconsistent"});assert.equal(resolved.status,200,resolved.raw);assert.equal(resolved.data.receipt.manual_resolution.enrollment_cancelled,false);assert.equal(resolved.data.receipt.manual_resolution.revoked_agent_id,"");assert.equal(f.credentials.enrollmentStatus(foreign.enrollment_id)?.status,"issued");
+});
+
+
+test("nonzero installation diagnostics remain safe and preserve unknown enrollment and lifecycle fences",async t=>{
+ const f=await fixture(t,true),h=await f.host();
+ const failed=await f.interrupt(h);
+ assert.deepEqual(failed.receipt.diagnostic,{remote_exit_code:1,remote_reason_code:"ordinary_agent_privilege_violation"});
+ assert.match(failed.error,/附加组.*Docker socket/);
+ assert.equal(failed.status,"unknown");
+ assert.ok(pendingMachineInstallation(f.db,h.id));
+ assert.equal(f.credentials.enrollmentStatus(failed.enrollment_id)?.status,"issued");
+ const detail=await f.request(h.path);
+ assert.ok(!detail.raw.includes(f.enrollmentToken));
+ assert.ok(!detail.raw.includes(fixturePrivateKey()));
+ assert.ok(!detail.raw.includes("BEGIN PRIVATE KEY"));
+ assert.equal((await f.request(h.path+"/apply","POST",{confirm:true})).status,409);
+ assert.equal(f.bootstraps,1);
 });

@@ -12,9 +12,9 @@ import type { Dependencies } from "../src/shared/types.js";
 test("service inventory creates an approval-ready deployment plan", async (t) => {
   const db = new DB(":memory:"), router = new Router(), user = { id: "admin", name: "Admin", role: "admin" };
   let clock = new Date("2026-10-21T00:00:00.000Z");
-  db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,port INTEGER NOT NULL,username TEXT NOT NULL,agent_id TEXT NOT NULL DEFAULT '')");
+  db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,port INTEGER NOT NULL,agent_id TEXT NOT NULL DEFAULT '')");
   const machineID = "machine-1";
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,agent_id) VALUES(?,?,?,?,?,?)", machineID, "app-1", "10.0.0.9", 22, "deploy", "agent-1");
+  db.run("INSERT INTO managed_machines(id,name,address,port,agent_id) VALUES(?,?,?,?,?)", machineID, "app-1", "10.0.0.9", 22, "agent-1");
   const deps = {
     db,
     router,

@@ -28,7 +28,7 @@ function fixture() {
   } } as any;
   const store = registerTaskCenter(deps, { agentCredentials: credentials });
   const host = (id: string, agent = "agent-" + id) => {
-    db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'root','direct_ssh',?,?,?)", id, "Host " + id, id + ".example.test", agent, clock.toISOString(), clock.toISOString());
+    db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)", id, "Host " + id, id + ".example.test", agent, clock.toISOString(), clock.toISOString());
     return id;
   };
   host("one"); host("two"); host("empty", "");

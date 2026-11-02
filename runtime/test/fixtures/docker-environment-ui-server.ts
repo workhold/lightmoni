@@ -28,8 +28,9 @@ async function post(path:string,body:any){const response=await fetch(base+'/api/
 const names=['缺少 Docker','Docker 可用','Docker 权限不足','Docker 服务异常','Docker 待检测','Docker 观测过期'],codes=['docker_cli_missing','','docker_permission_denied','docker_daemon_unavailable','','docker_cli_missing'];
 const ids:string[]=[];
 for(let i=0;i<names.length;i++){
- const m=await post('/machines',{name:names[i],address:'127.0.0.'+(i+1),username:'root',connection_method:'direct_ssh'});ids.push(m.id);
- await post('/machines/'+m.id+'/credentials',{method:'password',secret:'isolated-qa-password',retention:'temporary'});
+ const m=await post('/machines',{name:names[i],address:'127.0.0.'+(i+1),connection_method:'direct_ssh'});ids.push(m.id);
+ const account=await post('/machines/'+m.id+'/accounts',{username:'root',make_default:true});
+ await post('/machines/'+m.id+'/accounts/'+account.id+'/credentials',{method:'password',secret:'isolated-qa-password',retention:'temporary'});
  const at=(i===5?new Date(0):new Date()).toISOString(),heartbeat=i===4?{}:{docker_capabilities:['docker.inventory','docker.control'],docker_inventory:{observed_at:at,attempted_at:at,state:i===1?'ready':'unavailable',error:codes[i],compose_available:i===1?true:undefined,containers:[],truncated:false}};
  db.run('INSERT INTO agents VALUES(?,?,?,?,?,?,?,?,?)','qa-node-'+i,'qa-host-'+i,names[i],'qa-069','linux','amd64',new Date().toISOString(),'default',JSON.stringify(heartbeat));
  db.run('UPDATE managed_machines SET agent_id=?,host_key_fingerprint=? WHERE id=?','qa-node-'+i,'SHA256:fixtureDockerHostIdentity',m.id);

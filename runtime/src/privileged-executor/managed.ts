@@ -8,7 +8,7 @@ import { managedExecutionPayload,type ManagedExecutionPayload } from '../shared/
 import { executeOperation,operationCommand } from '../agent/operations.js';
 import { executeDocker } from '../agent/docker.js';
 import { CapabilityExecutor,type ExecutionReceipt } from '../agent/executor.js';
-import { loadConfig,EXECUTOR_CONFIG,type ExecutorConfig } from './config.js';
+import { loadConfig,EXECUTOR_CONFIG,MANAGED_AGENT_CONFIG,MANAGED_AGENT_DATA_DIR,type ExecutorConfig } from './config.js';
 import { requestExecutor } from './client.js';
 import { inspectManagedDockerDaemon } from './docker.js';
 import { assertRoot,boundedFile,durableWrite,rootPath,secureDirectory,refuse } from './security.js';
@@ -48,7 +48,7 @@ export async function runManaged(payload:ManagedExecutionPayload,c:ManagedRunCon
 /** Only invoked by the fixed root-owned per-job program above. */
 export async function runManagedSnapshot(filename:string,expectedDigest:string):Promise<void> {
   assertRoot();
-  const config=loadConfig(EXECUTOR_CONFIG);
+  const config=loadConfig(managedSnapshotConfig(filename));
   if(!new RegExp('^'+config.data_dir+'/managed-jobs/[a-f0-9]{32}\\.json$').test(filename)||!/^[a-f0-9]{64}$/.test(expectedDigest))refuse('invalid_managed_snapshot');
   const raw=boundedFile(filename,1400000,true);if(sha256(raw)!==expectedDigest)refuse('managed_snapshot_changed');
   const input=parseStrictJSON(raw,1400000),payload=managedExecutionPayload(input.payload),plan=planClaims(input.plan);
@@ -100,4 +100,10 @@ export async function runManagedSnapshot(filename:string,expectedDigest:string):
     }
     process.stdout.write(canonicalJSON(receipt));
   }finally{process.removeListener('SIGTERM',stop);process.removeListener('SIGINT',stop);}
+}
+/** Select only one of two fixed root-owned configurations, never a caller path. */
+export function managedSnapshotConfig(filename:string):string {
+  if(filename.startsWith(MANAGED_AGENT_DATA_DIR+'/managed-jobs/'))return MANAGED_AGENT_CONFIG;
+  if(filename.startsWith('/var/lib/lightmoni-executor/managed-jobs/'))return EXECUTOR_CONFIG;
+  return refuse('invalid_managed_snapshot');
 }
