@@ -112,6 +112,36 @@ test("queued, executing and unknown jobs plus pending uninstalls prevent partial
   f.db.run("UPDATE machine_uninstallations SET status='cancelled'"); assert.equal((await remove(f, node.id)).status, 200); assert.equal(f.db.get<any>("SELECT state FROM agent_jobs WHERE id=?", job.id).state, "failed");
 });
 
+test("unrevoked root executors prevent Agent removal without revoking either principal", async t => {
+  const f = await fixture(t), node = await f.enroll(), other = await f.enroll();
+  const machineID = f.db.get<any>("SELECT id FROM managed_machines WHERE agent_id=?", node.id)!.id;
+  const otherMachineID = f.db.get<any>("SELECT id FROM managed_machines WHERE agent_id=?", other.id)!.id;
+  f.db.exec("CREATE TABLE privileged_executors(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,state TEXT NOT NULL)");
+  f.db.run("INSERT INTO privileged_executors VALUES('executor',?,?,'pending')", machineID, node.id);
+  f.db.run("INSERT INTO privileged_executors VALUES('other-executor',?,?,'active')", otherMachineID, other.id);
+  for (const state of ["pending", "active", "bootstrap_unknown", "unknown"]) {
+    f.db.run("UPDATE privileged_executors SET state=? WHERE id='executor'", state);
+    const result = await remove(f, node.id);
+    assert.equal(result.status, 409, state);
+    assert.match(result.data.error, /先卸载并撤销.*root 执行器/);
+    assert.equal(isAgentRemoved(f.db, node.id), false);
+    assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_lifecycle_events WHERE agent_id=?", node.id).n, 0);
+    assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_credentials WHERE agent_id=? AND revoked_at IS NULL", node.id).n, 2);
+    assert.equal(f.db.get<any>("SELECT state FROM privileged_executors WHERE id='executor'").state, state);
+    assert.equal((await f.request(`/api/v1/agents/${node.id}/heartbeat`, "POST", {}, node.control)).status, 200);
+  }
+  f.db.run("UPDATE privileged_executors SET state='revoked' WHERE id='executor'");
+  const result = await remove(f, node.id);
+  assert.equal(result.status, 200);
+  assert.equal(result.data.lifecycle_state, "removed");
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_lifecycle_events WHERE agent_id=?", node.id).n, 1);
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_credentials WHERE agent_id=? AND revoked_at IS NOT NULL", node.id).n, 2);
+  assert.equal(f.db.get<any>("SELECT state FROM privileged_executors WHERE id='other-executor'").state, "active");
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_credentials WHERE agent_id=? AND revoked_at IS NULL", other.id).n, 2);
+  assert.deepEqual((await remove(f, node.id)).data, result.data);
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_lifecycle_events WHERE agent_id=?", node.id).n, 1);
+});
+
 test("an upload authenticated before removal is rejected when its body completes afterwards", async t => {
   const f = await fixture(t), node = await f.enroll(), payload = Buffer.from(JSON.stringify(metric()));
   const req = httpRequest(f.base + "/v1/metrics", { method: "POST", headers: { ...node.data, "x-lightmoni-table": "business", "content-type": "application/json", "content-length": payload.length } });
