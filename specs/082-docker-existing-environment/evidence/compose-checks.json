@@ -1,0 +1,7 @@
+{
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261102-e3b5f75",
+  "compose_syntax": "passed",
+  "configuration_source": ".env.example and synthetic process-only password",
+  "secret_configuration_saved": false,
+  "state_volumes_and_healthy_dependency": "unchanged"
+}

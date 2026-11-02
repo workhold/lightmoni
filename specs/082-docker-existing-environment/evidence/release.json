@@ -1,0 +1,10 @@
+{
+  "revision": "e3b5f75f68be37a7f15eea496218098ff3cf98b4",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tag": "20261102-e3b5f75",
+  "feature_prs": [
+    75
+  ],
+  "architecture_sync": "N/A: existing fixed SSH installer validation ordering and explanatory UI only; no component/storage/credential/protocol/topology or cross-component data/control path change. See SDD082 plan.md.",
+  "previous_latest": "sha256:36663e3f3039511daac30ebc190370dc81e66626cb82c265ebfbadca2d172a8a"
+}

@@ -21,4 +21,12 @@
 
 ## 交付
 
-功能分支与 PR、发布状态在交付时补充。线上中心尚未替换，不把本地验收称为线上修复完成。
+修复已通过 [GitHub PR #75](https://github.com/workhold/lightmoni/pull/75) 合入 main，源码提交 `e3b5f75f68be37a7f15eea496218098ff3cf98b4`。双平台镜像已发布：`docker.heyphp.com/lightmoni/lightmoni:20261102-e3b5f75` 与 `latest`，索引摘要 `sha256:9d907f840b17058ad752e73eabcef7a3d36a431d792fbb62cee6cc95c46b81f2`。根 Compose 固定到新标签，配置解析通过。
+
+- linux/arm64 与 linux/amd64 各 41 项真实镜像检查通过，0 错误。两平台镜像内均用生产编译安装器执行 5 项隔离 shell 回归；另检查生产前端确实包含新的依赖与执行器说明。
+- 两平台生产前端共 66 个资源 SHA256 相同：`2d6b5185da3f97f8277d5b6dd948edcbc27e33156e30c7f141ced4f691c7e7a6`。
+- 发布前逐 blob 校验与已验收镜像 rootfs/config 比对；发布后远端索引、manifest/config 回读及实际双平台 Docker pull 比对通过。32 个历史固定标签保持不变。
+- 本次临时 ClickHouse、中心容器、卷、网络与运行时凭据已清理；原有 15 个运行容器保持原样。回环 UI 服务与临时页面已关闭。
+- 本任务仅发布镜像，未替换线上中心容器、重装 Agent 或启用独立执行器。中心使用新镜像后，新的验证流程与说明才生效。
+
+见 evidence/verified-release.json、历史标签、清理、资源校验和 Compose 证据。

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/082-docker-existing-environment`
 **Created**: 2026-11-02
-**Status**: In progress
+**Status**: Accepted
 **Input**: Docker 环境安装也有问题。
 
 ## 问题与验收场景
