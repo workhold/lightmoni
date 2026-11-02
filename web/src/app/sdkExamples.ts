@@ -2,7 +2,7 @@ import type {ReportingAddress} from './reporting-addresses';
 export type SDKAuthMode='key'|'anonymous';
 export const SDK_LANGUAGES=[{value:'go',label:'Go'},{value:'typescript',label:'Node.js'},{value:'rust',label:'Rust'},{value:'python',label:'Python'}];
 export interface SDKSampleOptions {service?:string;env?:string;service_version?:string;instance_id?:string;authMode?:SDKAuthMode;key?:string;keyName?:string}
-export const validSDKTable=(name:string)=>/^[a-z][a-z0-9_]{0,47}$/.test(name)&&!/^(log|metric|trace)_/.test(name)&&!['lightmoni','lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(name);
+export const validSDKTable=(name:string)=>/^[a-z][a-z0-9_]{0,47}$/.test(name)&&!/^(log|metric|trace)_/.test(name)&&!['lightmoni'].includes(name);
 export function recommendedExemptTables(){
  const suffix=Array.from(crypto.getRandomValues(new Uint8Array(8)),value=>value.toString(16).padStart(2,'0')).join('');
  return [{name:`app_logs_${suffix}`,description:'应用日志'},{name:`app_metrics_${suffix}`,description:'业务指标'},{name:`browser_events_${suffix}`,description:'前端事件'}];

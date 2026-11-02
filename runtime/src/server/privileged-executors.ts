@@ -108,8 +108,7 @@ export class PrivilegedExecutorStore {
     assertNoDockerInstallation(this.deps.db, machine, agent);
     if (this.deps.db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND id<>? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at=''))", machine, excludingJob)) fail(409, "machine_execution_locked");
     if(this.hasTable("agent_jobs")) {
-      const principal=this.deps.db.all<{name:string}>("PRAGMA table_info(agent_jobs)").some(c=>c.name==='execution_principal');
-      const queued=principal?"(state='queued' AND execution_principal='ordinary_agent')":"state='queued'";
+      const queued="(state='queued' AND execution_principal='ordinary_agent')";
       if(this.deps.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND id<>? AND (state IN ('leased','accepted','preflighting','staging','activating','verifying','unknown') OR "+queued+") LIMIT 1",agent,excludingJob))fail(409,"machine_execution_locked");
     }
     if (this.hasTable("task_runs") && this.deps.db.get("SELECT id FROM task_runs WHERE host_id=? AND id<>? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='' AND superseded_by='')) LIMIT 1", machine, excludingJob)) fail(409, "machine_execution_locked");

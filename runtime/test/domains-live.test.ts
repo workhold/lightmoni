@@ -49,7 +49,7 @@ test(
     const key = await request(
       "/api/v1/keys",
       "POST",
-      { name, allowed_tables: [name] },
+      { name },
       {},
       201,
     );

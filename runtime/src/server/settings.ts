@@ -10,7 +10,7 @@ import { hash } from "../shared/crypto.js";
 import { parseJSON, stringifyJSON } from "../shared/json.js";
 import type { Dependencies, Context } from "../shared/types.js";
 import type { Catalog } from "./catalog.js";
-import { goJSON } from "../shared/otlp.js";
+import { stableJSON } from "../shared/otlp.js";
 import { systemTable } from "./auth.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 export const defaultSampling = () => ({
@@ -81,7 +81,7 @@ export function exclusions(rules: any, sdk = false): any[] {
       fail(400, "exclusions require a condition");
     return { name: r.name ?? "", conditions: conditions(r.conditions, sdk) };
   });
-  if (Buffer.byteLength(goJSON(out)) > 64 << 10)
+  if (Buffer.byteLength(stableJSON(out)) > 64 << 10)
     fail(400, "rules exceed 64 KiB");
   return out;
 }
@@ -123,7 +123,7 @@ export function sampling(v: any): any {
         ? []
         : exclusions(v.exclude),
   };
-  if (Buffer.byteLength(goJSON(out)) > 64 << 10)
+  if (Buffer.byteLength(stableJSON(out)) > 64 << 10)
     fail(400, "policy exceeds 64 KiB");
   return out;
 }
@@ -144,7 +144,7 @@ export function sdkConfiguration(
     disable_rules:
       disableRules === null ? null : exclusions(disableRules, true),
   };
-  config.revision = hash(goJSON(config));
+  config.revision = hash(stableJSON(config));
   return config;
 }
 export function reportingSettings(d: Dependencies) {
@@ -339,10 +339,8 @@ export function registerSettings(
           if (!key.allow_all_tables && !key.allowed_tables.includes(table))
             delete all[table];
         const config: any = sdkConfiguration(all, disable());
-        if (c.url.searchParams.get('metric_windows') === '1') {
-          config.metric_windows = metricWindows(db, table => key.allow_all_tables || key.allowed_tables.includes(table));
-          config.revision = hash(goJSON(config));
-        }
+        config.metric_windows = metricWindows(db, table => key.allow_all_tables || key.allowed_tables.includes(table));
+        config.revision = hash(stableJSON(config));
         c.res.setHeader("cache-control", "no-store");
         c.json(config);
       } catch {
@@ -361,7 +359,7 @@ export function registerSettings(
     const rules = exclusions(v.disable_rules, true);
     db.run(
       "UPDATE sdk_reporting SET disable_rules=? WHERE id=1",
-      goJSON(rules),
+      stableJSON(rules),
     );
     c.json({ disable_rules: rules });
   });
@@ -388,12 +386,12 @@ export function registerSettings(
     const policy = sampling(await c.body()),
       table = samplingTable(c.params.id),
       all = { ...policies(), [table]: policy };
-    if (Buffer.byteLength(goJSON(all)) > 900 << 10)
+    if (Buffer.byteLength(stableJSON(all)) > 900 << 10)
       fail(400, "所有日志上报配置合计最多 900 KiB");
     db.run(
       "INSERT INTO log_sampling(logical_name,policy_json) VALUES(?,?) ON CONFLICT(logical_name) DO UPDATE SET policy_json=excluded.policy_json,revision=revision+1",
       table,
-      goJSON(policy),
+      stableJSON(policy),
     );
     c.json(policy);
   });

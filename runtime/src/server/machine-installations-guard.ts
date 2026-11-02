@@ -4,8 +4,7 @@ import { fail } from "../shared/http.js";
 export const hasInstallationTable = (db: DB) => !!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_deployments'");
 export function unresolvedInstallationSQL(db: DB, alias = "", approval = false): string {
   const prefix = alias ? alias + "." : "";
-  const resolved = db.all<{name:string}>("PRAGMA table_info(machine_deployments)").some(column => column.name === "resolved_at");
-  return `(${prefix}status IN (${approval ? "'awaiting_approval'," : ""}'running','unknown')${resolved ? ` AND ${prefix}resolved_at=''` : ""})`;
+  return `(${prefix}status IN (${approval ? "'awaiting_approval'," : ""}'running','unknown') AND ${prefix}resolved_at='')`;
 }
 export function pendingMachineInstallation(db: DB, machineID: string, agentID = "", approval = false, excludeID = "") {
   if (!hasInstallationTable(db)) return undefined;

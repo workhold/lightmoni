@@ -31,9 +31,7 @@ async function fixture() {
     join(dir, "master.key"),
     Buffer.from(Array.from({ length: 32 }, (_, i) => i)),
   );
-  db.exec(
-    `CREATE TABLE ingest_keys(id TEXT PRIMARY KEY,name TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,last_used TEXT,upload_batches INTEGER NOT NULL DEFAULT 0,error_count INTEGER NOT NULL DEFAULT 0);`,
-  );
+  new Auth(db, dir, "http://127.0.0.1", new Router());
   db.run(
     "INSERT INTO ingest_keys(id,name,token_hash,created_at) VALUES(?,?,?,?)",
     "old-key",
@@ -130,7 +128,7 @@ async function fixture() {
     },
   };
 }
-test("original Go master, AES-GCM, bcrypt and session hashes work; old keys adopt all business tables while retaining identity", async () => {
+test("AES-GCM, bcrypt and session vectors work and SDK keys retain identity across reopen", async () => {
   const f = await fixture();
   try {
     assert.equal(f.a.decrypt(legacyCipher), "legacy-oauth-secret");
@@ -164,80 +162,11 @@ test("original Go master, AES-GCM, bcrypt and session hashes work; old keys adop
     const old = (await f.request("/api/v1/keys")).data.find(
       (k: any) => k.id === "old-key",
     );
-    assert.deepEqual(old.allowed_tables, []);
-    assert.equal(old.allow_all_tables, true);
+    assert.equal(Object.hasOwn(old,"allowed_tables"), false);
+    assert.equal(Object.hasOwn(old,"allow_all_tables"), false);
     assert.equal(f.a.validateKey({req:{headers:{authorization:"Bearer legacy-write-key"}}} as any,"app").id,"old-key");
     const reopened = new Auth(f.db, f.dir, f.base, new Router());
     assert.equal(reopened.decrypt(legacyCipher), "legacy-oauth-secret");
-  } finally {
-    await f.close();
-  }
-});
-test("typed key permissions reject truthy strings and invalid updates atomically; legacy scopes are ignored", async () => {
-  const f = await fixture();
-  try {
-    for (const body of [
-      null,
-      [],
-      { name: "bad", allow_all_tables: "false" },
-      { name: "bad", allow_all_tables: 1 },
-      { name: "bad", allow_all_tables: true, allowed_tables: [42] },
-    ])
-      assert.equal((await f.request("/api/v1/keys", "POST", body)).status, 400);
-    assert.equal(f.db.all("SELECT id FROM ingest_keys").length, 1);
-    const key = (
-      await f.request("/api/v1/keys", "POST", {
-        name: "scoped",
-        allowed_tables: ["app"],
-      })
-    ).data;
-    const before = f.db.get("SELECT * FROM ingest_keys WHERE id=?", key.id);
-    for (const body of [
-      { allow_all_tables: "false" },
-      { active: 1 },
-      { name: {} },
-      { allowed_tables: ["app", {}] },
-    ])
-      assert.equal(
-        (await f.request("/api/v1/keys/" + key.id, "PUT", body)).status,
-        400,
-      );
-    assert.deepEqual(
-      f.db.get("SELECT * FROM ingest_keys WHERE id=?", key.id),
-      before,
-    );
-    f.db.run(
-      "UPDATE ingest_keys SET allowed_tables_json=? WHERE id=?",
-      "{broken",
-      key.id,
-    );
-    assert.deepEqual(
-      (await f.request("/api/v1/keys")).data.find((k: any) => k.id === key.id)
-        .allowed_tables,
-      [],
-    );
-    assert.equal(f.a.validateKey({req:{headers:{authorization:key.key}}} as any,"other").allow_all_tables,true);
-    assert.equal(
-      (await f.request("/api/v1/keys/" + key.id, "PUT", { active: true }))
-        .status,
-      200,
-    );
-    assert.equal(
-      (
-        await f.request("/api/v1/keys/" + key.id, "PUT", {
-          allowed_tables: ["app"],
-          active: true,
-        })
-      ).status,
-      200,
-    );
-    assert.equal(
-      f.a.validateKey(
-        { req: { headers: { authorization: key.key } } } as any,
-        "app",
-      ).allow_all_tables,
-      true,
-    );
   } finally {
     await f.close();
   }
@@ -912,4 +841,19 @@ test("query executor sends only checked canonical SQL, macro parameters and exac
   });
   assert(rejected.results.every((r) => r.status === "error"));
   assert.equal(seen.length, 1);
+});
+
+test('SDK key API rejects retired scope fields and applies valid name and activation updates atomically',async()=>{
+ const f=await fixture();try{
+  const created=await f.request('/api/v1/keys','POST',{name:'current'});assert.equal(created.status,201);
+  const key=created.data,before=f.db.get('SELECT * FROM ingest_keys WHERE id=?',key.id);
+  for(const body of [{allowed_tables:['app']},{allow_all_tables:true},{active:1},{name:{}}]){
+   assert.equal((await f.request('/api/v1/keys/'+key.id,'PUT',body)).status,400);
+   assert.deepEqual(f.db.get('SELECT * FROM ingest_keys WHERE id=?',key.id),before);
+  }
+  assert.equal((await f.request('/api/v1/keys/'+key.id,'PUT',{name:'renamed',active:false})).status,200);
+  assert.throws(()=>f.a.validateKey({req:{headers:{authorization:'Bearer '+key.key}}} as any,'business'));
+  assert.equal((await f.request('/api/v1/keys/'+key.id,'PUT',{active:true})).status,200);
+  assert.equal(f.a.validateKey({req:{headers:{authorization:'Bearer '+key.key}}} as any,'business').id,key.id);
+ }finally{await f.close();}
 });

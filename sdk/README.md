@@ -12,9 +12,9 @@
 
 value 是 count 个样本的总值。count=1 提供单个观察；count>1 提供已有汇总，例金额100/人数5，平均20。已有汇总不包含个体分布，中心会保留sum/count/avg，在覆盖不完整时min/max/P值为NULL并标识incomplete_distribution，不把平均数伪装成个人样本。
 
-中心指标视图包含实际存储列 env/service_version/key1…key16，规范查询字段 metric_name/sample_count/value_sum/value_min/value_max/bucket_values/bucket_counts/distribution_count/quantile_error。分位数需合并压缩分布后计算，不平均实例或窗口的P95。系统日志为 lightmoni_log、系统指标为 lightmoni_metric_*，component区分center/agent/sdk。原系统查询入口保留兼容。
+中心指标视图包含实际存储列 env/service_version/key1…key16，规范查询字段 metric_name/sample_count/value_sum/value_min/value_max/bucket_values/bucket_counts/distribution_count/quantile_error。分位数需合并压缩分布后计算，不平均实例或窗口的P95。系统日志为 lightmoni_log、系统指标为 lightmoni_metric_*，component区分center/agent/sdk。
 
-SDK 接入页提供完整代码和可复制的统计/P值 SQL；各语言新样例分别位于 examples/sdk/go/record、sdk/typescript/examples/record.mjs、examples/sdk/python/record.py、sdk/rust/examples/record.rs。以下旧 instrument/默认表 API 保留兼容；其他历史语言仍使用旧接口。
+SDK 接入页提供完整代码和可复制的统计/P值 SQL；各语言新样例分别位于 examples/sdk/go/record、sdk/typescript/examples/record.mjs、examples/sdk/python/record.py、sdk/rust/examples/record.rs。以下 instrument API 用于低层指标与自监控采集；Java、.NET、Ruby、PHP 提供 instrument API。
 
 
 业务SDK仅直连中心，支持指标、日志和链路；缓冲和重试位于进程内。Agent独立上报自身采集数据，不接收业务SDK请求。`withTable` / `with_table` 共享根客户端生命周期。
@@ -32,7 +32,7 @@ export LIGHTMONI_KEY='从受保护运行时注入'
 
 容器中的localhost只表示当前容器；引导URL必须可从业务容器访问。SDK追加 `/v1/metrics`、`/v1/logs`、`/v1/traces`。只有中心确认批次后释放内存；退出时带截止时间shutdown，失败保留错误诊断。
 
-当前发布Go、Node/浏览器、Python、Rust；其余语言仅保留历史源码，不提供本次地址同步功能或发布包。
+当前发布Go、Node/浏览器、Python、Rust；其余语言提供源码，不提供本次地址同步功能或发布包。
 
 | 语言 | 运行环境 | 安装与示例 |
 | --- | --- | --- |

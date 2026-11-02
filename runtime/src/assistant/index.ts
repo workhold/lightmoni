@@ -557,11 +557,7 @@ export function registerAssistant(
         bounds = usageWindow(deps.now(), opts.days, opts.timezone),
         records = store.list(bounds.from, bounds.to, opts.limit + 1);
       ctx.json({
-        records: records.slice(0, opts.limit).map((r) => ({
-          ...r,
-          cost_status:
-            r.cost_status || (r.estimated_cost != null ? "legacy" : "unpriced"),
-        })),
+        records: records.slice(0, opts.limit),
         limit: opts.limit,
         has_more: records.length > opts.limit,
         from: bounds.from,

@@ -15,7 +15,7 @@ async function fixture(t:any){
  const deps:any={db,router,...cipher(Buffer.alloc(32,31)),now:()=>now,externalURL:'https://qa.example.test',logger:{info(){},warn(){},error(){}},cat:{list:async()=>[]},auth:{master:Buffer.alloc(32,31),user:(req:any)=>({id:'qa-admin',name:'QA',role:req.headers['x-role']??'admin'}),requireAdmin:(ctx:any)=>{if(ctx.user.role!=='admin')fail(403,'administrator_required')}}};
  router.auth=deps.auth;
  const machines=registerManagedMachines(deps,{agentCredentials:{has:()=>false} as any,sshRunner:async()=>{throw Error('qa_ssh_disabled')}});
- const server=createServer((req,res)=>void router.handle(req,res));server.listen(0,'127.0.0.1');await once(server,'listening');
+ const server=createServer((req,res)=>void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));server.listen(0,'127.0.0.1');await once(server,'listening');
  t.after(async()=>{machines.close?.();await new Promise<void>(resolve=>server.close(()=>resolve()));db.close()});
  const req=async(path:string,method='GET',body?:any,role='admin')=>{const response=await fetch('http://127.0.0.1:'+(server.address() as any).port+'/api/v1'+path,{method,headers:{'content-type':'application/json','x-role':role},body:body===undefined?undefined:JSON.stringify(body)});return{status:response.status,body:await response.json() as any}};
  const host=(await req('/machines','POST',{name:'NAT host',address:'8.8.4.4',username:'root'})).body;

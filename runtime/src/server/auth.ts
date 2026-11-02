@@ -19,23 +19,15 @@ export const validTable = (s: unknown): s is string =>
   /^[a-z][a-z0-9_]{0,47}$/.test(s) &&
   !/^(log_|metric_|trace_)/.test(s);
 export const systemTable = (s: string) =>
-  ["lightmoni", "lightmoni_agent", "lightmoni_center", "lightmoni_sdk", "lightmoni_application"].includes(s);
+  /^lightmoni(?:_|$)/.test(s);
 const record = (v: any): Record<string, any> => {
   if (!v || typeof v !== "object" || Array.isArray(v))
     fail(400, "invalid request");
   return v;
 };
-const keyFields = (v: Record<string, any>) => {
-  for (const field of ["active", "allow_all_tables"])
-    if (v[field] != null && typeof v[field] !== "boolean")
-      fail(400, "invalid key");
-  if (
-    (v.name != null && typeof v.name !== "string") ||
-    (v.allowed_tables != null &&
-      (!Array.isArray(v.allowed_tables) ||
-        v.allowed_tables.some((t: any) => typeof t !== "string")))
-  )
-    fail(400, "invalid key");
+const keyFields = (v: Record<string, any>, allowed: string[]) => {
+  if(Object.keys(v).some(key=>!allowed.includes(key)))fail(400,'invalid key field');
+  if(v.active!=null&&typeof v.active!=='boolean'||v.name!=null&&typeof v.name!=='string')fail(400,'invalid key');
 };
 export const cookie = (req: IncomingMessage, name: string) => {
   const part = req.headers.cookie
@@ -58,7 +50,7 @@ export class Auth implements AuthContract {
     readonly router: Router,
   ) {
     accountSchema(db);
-    db.exec(`CREATE TABLE IF NOT EXISTS ingest_keys(id TEXT PRIMARY KEY,name TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,last_used TEXT,upload_batches INTEGER NOT NULL DEFAULT 0,error_count INTEGER NOT NULL DEFAULT 0,allowed_tables_json TEXT NOT NULL DEFAULT '[]',allow_all_tables INTEGER NOT NULL DEFAULT 0);
+    db.exec(`CREATE TABLE IF NOT EXISTS ingest_keys(id TEXT PRIMARY KEY,name TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,last_used TEXT,upload_batches INTEGER NOT NULL DEFAULT 0,error_count INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS key_events(id INTEGER PRIMARY KEY AUTOINCREMENT,key_id TEXT NOT NULL,at TEXT NOT NULL,service TEXT NOT NULL DEFAULT '',status TEXT NOT NULL,detail TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS sdk_exempt_tables(name TEXT PRIMARY KEY,description TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS oauth_providers(id TEXT PRIMARY KEY,config TEXT NOT NULL);
@@ -67,19 +59,6 @@ CREATE TABLE IF NOT EXISTS oauth_states(state TEXT PRIMARY KEY,provider_id TEXT 
 CREATE TABLE IF NOT EXISTS user_profiles(user_id TEXT PRIMARY KEY,nickname TEXT NOT NULL DEFAULT '',avatar_url TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS user_notification_profiles(user_id TEXT PRIMARY KEY,body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to TEXT NOT NULL);`);
-    const columns = db
-      .all<any>("PRAGMA table_info(ingest_keys)")
-      .map((c) => c.name);
-    for (const [name, definition] of [
-      ["allowed_tables_json", "TEXT NOT NULL DEFAULT '[]'"],
-      ["allow_all_tables", "INTEGER NOT NULL DEFAULT 0"],
-    ])
-      if (!columns.includes(name))
-        db.exec(
-          "ALTER TABLE ingest_keys ADD COLUMN " + name + " " + definition,
-        );
-    // SDK keys authenticate business uploads; historical table scopes no longer restrict them.
-    db.run("UPDATE ingest_keys SET allowed_tables_json='[]',allow_all_tables=1 WHERE allow_all_tables<>1 OR allowed_tables_json<>'[]'");
     this.master = masterKey(dir);
     const c = cipher(this.master);
     this.encrypt = c.encrypt;
@@ -108,7 +87,7 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
     }
     const value = ctx.req.headers.authorization?.replace(/^Bearer /, "") ?? "";
     const row = this.db.get<any>(
-      "SELECT id,name,allowed_tables_json,allow_all_tables FROM ingest_keys WHERE token_hash=? AND active=1",
+      "SELECT id,name FROM ingest_keys WHERE token_hash=? AND active=1",
       hash(value),
     );
     if (!row) fail(401, "invalid write key");
@@ -350,42 +329,35 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
       c.json(
         db
           .all<any>(
-            "SELECT id,name,active,created_at,COALESCE(last_used,'') last_used,upload_batches,error_count,allowed_tables_json,allow_all_tables FROM ingest_keys ORDER BY created_at DESC",
+            "SELECT id,name,active,created_at,COALESCE(last_used,'') last_used,upload_batches,error_count FROM ingest_keys ORDER BY created_at DESC",
           )
-          .map(({ allowed_tables_json, ...row }) => ({
+          .map(row => ({
             ...row,
             active: !!row.active,
-            allow_all_tables: true,
-            allowed_tables: [],
           })),
       );
     });
     r.post("/api/v1/keys", async (c) => {
       this.requireAdmin(c);
       const v = record(await c.body());
-      keyFields(v);
+      keyFields(v, ['name']);
       if (typeof v.name !== "string" || !v.name.trim())
         fail(400, "Key 名称必填");
-      const tables: string[] = [],
-        uid = id(),
+      const uid = id(),
         key = "lm_" + token(),
         name = v.name.trim();
       db.run(
-        "INSERT INTO ingest_keys(id,name,token_hash,created_at,allowed_tables_json,allow_all_tables) VALUES(?,?,?,?,?,?)",
+        "INSERT INTO ingest_keys(id,name,token_hash,created_at) VALUES(?,?,?,?)",
         uid,
         name,
         hash(key),
         new Date().toISOString(),
-        JSON.stringify(tables),
-        true,
       );
       c.json(
         {
           id: uid,
           key,
           name,
-          allowed_tables: tables,
-          allow_all_tables: true,
         },
         201,
       );
@@ -393,7 +365,7 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
     r.put("/api/v1/keys/:id", async (c) => {
       this.requireAdmin(c);
       const v = record(await c.body());
-      keyFields(v);
+      keyFields(v, ['name','active']);
       db.transaction(() => {
         const old = db.get<any>(
           "SELECT * FROM ingest_keys WHERE id=?",
@@ -404,11 +376,9 @@ CREATE TABLE IF NOT EXISTS oauth_return_targets(state TEXT PRIMARY KEY,return_to
           active = v.active ?? !!old.active;
         if (!name) fail(400, "Key 名称必填");
         db.run(
-          "UPDATE ingest_keys SET name=?,active=?,allowed_tables_json=?,allow_all_tables=? WHERE id=?",
+          "UPDATE ingest_keys SET name=?,active=? WHERE id=?",
           name,
           active,
-          "[]",
-          true,
           c.params.id,
         );
       });

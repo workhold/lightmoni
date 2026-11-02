@@ -32,7 +32,6 @@ export async function execute(
     "confirm-data-loss": false,
     "require-data-dir": "",
     endpoint: "",
-    "group-id": "",
     "pending-enrollment": false,
   };
   const seenFlags = new Set<string>();
@@ -69,7 +68,6 @@ export async function execute(
   if (command === "configure") {
     const config = existsSync(path) ? loadConfig(path, validation) : defaultConfig();
     if (flags.endpoint) config.endpoint = String(flags.endpoint);
-    if (flags["group-id"]) config.group_id = String(flags["group-id"]);
     if (requireDir) config.data_dir = requireDir;
     saveConfig(path, config, validation);
     io.write("reporting configuration saved\n");

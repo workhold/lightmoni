@@ -50,7 +50,7 @@ export default function AgentTaskEditor({task,labels,hosts=[],hostOverride=false
   } as TaskForm,taskType=type,config=taskPayload(all);
   config.host_enabled=taskType==='host';config.logs_enabled=taskType==='log';
   if(taskType!=='host'){config.host_collectors=[];config.process_names=[]}if(taskType!=='probe')config.probes=[];if(taskType!=='log')config.log_sources=[];
-  delete config.revision;delete config.group_id;
+  delete config.revision;
   const args=taskType==='script'?argsFrom(all.script_args_text):[],directory=all.script?.cwd;
   const script=all.script?{runtime:all.script.runtime,code:all.script.code,timeout_seconds:all.script.timeout_seconds,max_output_bytes:all.script.max_output_bytes,...(args.length?{args}:{}),...(directory?{cwd:directory}:{})}:undefined;
   return {name:all.name?.trim()??'',type:taskType,enabled:enabledOverride??!!all.enabled,label_ids:all.label_ids??[],config,origin:task?.id?task.origin??'custom':'custom',target_all:!!all.target_all,host_ids:all.host_ids??[],schedule:taskType==='script'?cleanTaskSchedule(all.schedule):{mode:'continuous'},...(taskType==='script'?{script,execution_policy:{...defaultExecutionPolicy,...all.execution_policy}}:{})};

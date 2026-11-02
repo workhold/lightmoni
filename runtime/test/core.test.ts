@@ -231,7 +231,6 @@ test("existing master key ciphertext, bcrypt sessions and key grants survive reo
     );
     const key = await f.request("/api/v1/keys", "POST", {
       name: "test",
-      allowed_tables: ["app"],
     });
     assert.equal(key.status, 201);
     assert(
@@ -355,7 +354,6 @@ test("OTLP ingest retains exact fields, freezes retry ids, permits any business 
     const key = (
       await f.request("/api/v1/keys", "POST", {
         name: "test",
-        allowed_tables: ["app"],
       })
     ).data.key;
     const at = nowNano().toString(),
@@ -515,7 +513,6 @@ test("remote reporting settings preserve scalar types and exact values, scope by
     const key = (
       await f.request("/api/v1/keys", "POST", {
         name: "k",
-        allowed_tables: ["app"],
       })
     ).data.key;
     const config = await f.request("/v1/sdk-config", "GET", undefined, {
@@ -570,15 +567,12 @@ test('metric period HTTP API persists independent tables, scopes SDK configurati
   try {assert.equal(reopened.get<any>('SELECT window_seconds FROM metric_window_config WHERE logical_name=?','business')?.window_seconds,10);}finally{reopened.close();}
   const key=(await f.request('/api/v1/keys','POST',{name:'windows'})).data.key;
   const headers={Authorization:'Bearer '+key};
-  const legacy=await f.request('/v1/sdk-config','GET',undefined,headers);
-  assert.equal(legacy.status,200);assert.equal(legacy.data.metric_windows,undefined);
-  const modern=await f.request('/v1/sdk-config?metric_windows=1','GET',undefined,headers);
-  assert.equal(modern.status,200);assert.equal(modern.data.metric_windows.business.at(-1).seconds,10);assert.equal(modern.data.metric_windows.private.at(-1).seconds,300);
-  assert.notEqual(modern.data.revision,legacy.data.revision);
+  const current=await f.request('/v1/sdk-config','GET',undefined,headers);
+  assert.equal(current.status,200);assert.equal(current.data.metric_windows.business.at(-1).seconds,10);assert.equal(current.data.metric_windows.private.at(-1).seconds,300);
   await f.request('/api/v1/sdk-exempt-tables','POST',{name:'business'});
-  const anonymous=await f.request('/v1/sdk-config?metric_windows=1');
+  const anonymous=await f.request('/v1/sdk-config');
   assert.deepEqual(Object.keys(anonymous.data.metric_windows),['business']);
-  assert.equal((await f.request('/v1/sdk-config?metric_windows=1','GET',undefined,{Authorization:'Bearer invalid'})).status,401);
+  assert.equal((await f.request('/v1/sdk-config','GET',undefined,{Authorization:'Bearer invalid'})).status,401);
   await f.request('/api/v1/users','POST',{name:'member',password:'password123',role:'member'});
   await f.request('/api/v1/auth/login','POST',{name:'member',password:'password123'});
   assert.equal((await f.request('/api/v1/metric-windows/business','GET')).status,200);
@@ -591,7 +585,7 @@ test("SDK exemptions require admin, exact names, typed fields and persist after 
   assert.equal((await fetch(f.base+'/api/v1/sdk-exempt-tables')).status,401);
   await f.request('/api/v1/setup','POST',{name:'admin',password:'password123'});
   assert.deepEqual((await f.request('/api/v1/sdk-exempt-tables')).data,[]);
-  for(const name of ['*','log_app','metric_app','trace_app','lightmoni_sdk','lightmoni_agent','lightmoni_center','a'.repeat(49),'UPPER'])assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',{name})).status,400,name);
+  for(const name of ['*','log_app','metric_app','trace_app','lightmoni','lightmoni','lightmoni','a'.repeat(49),'UPPER'])assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',{name})).status,400,name);
   for(const body of [{name:'app',active:'true'},{name:'app',description:1},{name:'app',unknown:true}])assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',body)).status,400);
   const created=await f.request('/api/v1/sdk-exempt-tables','POST',{name:'app_logs_18aca241',description:'应用日志'});assert.equal(created.status,201);assert.equal(created.data.active,true);
   assert.equal((await f.request('/api/v1/sdk-exempt-tables','POST',{name:'app_logs_18aca241'})).status,409);
@@ -609,7 +603,7 @@ test("anonymous OTLP enforces exemptions for all signals, isolates retries and n
   await f.request('/api/v1/setup','POST',{name:'admin',password:'password123'});
   assert.equal((await f.request('/v1/logs','POST',{}, {'X-Lightmoni-Table':'public_logs_123'})).status,401);
   await f.request('/api/v1/sdk-exempt-tables','POST',{name:'public_logs_123'});
-  const key=(await f.request('/api/v1/keys','POST',{name:'named',allowed_tables:['public_logs_123']})).data;
+  const key=(await f.request('/api/v1/keys','POST',{name:'named'})).data;
   const at=nowNano().toString(),resource={attributes:[{key:'service.name',value:{stringValue:'anonymous-qa'}}]};
   const payloads:any={logs:{resourceLogs:[{resource,scopeLogs:[{logRecords:[{timeUnixNano:at,body:{stringValue:'anonymous'}}]}]}]},metrics:{resourceMetrics:[{resource,scopeMetrics:[{metrics:[{name:'requests',gauge:{dataPoints:[{timeUnixNano:at,asInt:'1'}]}}]}]}]},traces:{resourceSpans:[{resource,scopeSpans:[{spans:[{traceId:'a'.repeat(32),spanId:'b'.repeat(16),name:'anonymous',startTimeUnixNano:at,endTimeUnixNano:at}]}]}]}};
   for(const signal of ['logs','metrics','traces']){
@@ -618,11 +612,11 @@ test("anonymous OTLP enforces exemptions for all signals, isolates retries and n
    assert.equal((await f.request('/v1/'+signal,'POST',payload,headers)).status,200);assert.equal(f.inserts.length,before+1);
    assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,Authorization:'Bearer '+key.key})).status,200);assert.equal(f.inserts.length,before+2);assert.equal(f.inserts.at(-1).rows[0].key_id,key.id);
    for(const Authorization of ['Bearer bad-key','Bearer ','Basic invalid'])assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,Authorization})).status,401);
-   for(const table of ['private','lightmoni_sdk'])assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,'X-Lightmoni-Table':table})).status,403);
+   for(const table of ['private','lightmoni'])assert.equal((await f.request('/v1/'+signal,'POST',payload,{...headers,'X-Lightmoni-Table':table})).status,403);
   }
   const runtime={resourceLogs:[{resource,scopeLogs:[{logRecords:[{timeUnixNano:at,body:{stringValue:'started'},attributes:[{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'typescript'}},{key:'event',value:{stringValue:'started'}}]}]}]}]};
   const beforeRuntime=f.inserts.length;
-  assert.equal((await f.request('/v1/logs','POST',runtime,{'X-Lightmoni-Table':'public_logs_123'})).status,200);assert.equal(f.inserts.length,beforeRuntime);
+  assert.equal((await f.request('/v1/logs','POST',runtime,{'X-Lightmoni-Table':'public_logs_123'})).status,200);assert.equal(f.inserts.length,beforeRuntime+1);
   f.db.run("INSERT INTO log_sampling VALUES(?,?,?)",'public_logs_123',JSON.stringify({key:'event_id',rules:[],exclude:[]}),1);
   f.db.run("INSERT INTO log_sampling VALUES(?,?,?)",'private',JSON.stringify({key:'event_id',rules:[],exclude:[]}),1);
   const publicConfig=await f.request('/v1/sdk-config');assert.equal(publicConfig.status,200);assert.deepEqual(Object.keys(publicConfig.data.log_sampling),['public_logs_123']);assert.throws(()=>f.a.validateKey({req:{headers:{}}} as any));
@@ -638,19 +632,18 @@ test("SDK keys cover every business table; shared self stream validates all reco
  const f=await fixture();try{
   await f.request('/api/v1/setup','POST',{name:'admin',password:'password123'});
   const key=(await f.request('/api/v1/keys','POST',{name:'all-business'})).data;
-  assert.equal(key.allow_all_tables,true);assert.deepEqual(key.allowed_tables,[]);
+  assert.equal(Object.hasOwn(key,"allowed_tables"),false);assert.equal(Object.hasOwn(key,"allow_all_tables"),false);
   const at=nowNano().toString(),resource={attributes:[{key:'service.name',value:{stringValue:'sdk-model'}}]},row={timeUnixNano:at,body:{stringValue:'business'}};
   const payload=(records:any[])=>({resourceLogs:[{resource,scopeLogs:[{logRecords:records}]}]});
   const send=(table:string,records:any[])=>f.request('/v1/logs','POST',payload(records),{Authorization:'Bearer '+key.key,'X-Lightmoni-Table':table});
   for(const table of ['arbitrary_a','arbitrary_b'])assert.equal((await send(table,[row])).status,200);
   const self={...row,attributes:[{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'python'}},{key:'event',value:{stringValue:'started'}}]};
-  assert.equal((await send('lightmoni_sdk',[self])).status,200);assert.equal(f.inserts.at(-1).table,'_lm_lightmoni_log');
+  assert.equal((await send('lightmoni',[self])).status,200);assert.equal(f.inserts.at(-1).table,'_lm_lightmoni_log');
   const count=f.inserts.length;
-  assert.equal((await send('lightmoni_sdk',[self,row])).status,403);assert.equal(f.inserts.length,count);
+  assert.equal((await send('lightmoni',[self,row])).status,403);assert.equal(f.inserts.length,count);
   for(const table of ['lightmoni_agent','lightmoni_center'])assert.equal((await send(table,[self])).status,403);
   await f.request('/api/v1/sdk-exempt-tables','POST',{name:'public_a'});await f.request('/api/v1/sdk-exempt-tables','POST',{name:'public_b'});
-  for(const table of ['public_a','public_b']){assert.equal((await f.request('/v1/logs','POST',payload([self,row]),{'X-Lightmoni-Table':table})).status,200);assert.equal(f.inserts.at(-1).rows.length,1);assert.equal(f.inserts.at(-1).rows[0].body,'business');}
-  f.db.run("UPDATE ingest_keys SET allowed_tables_json='[\"obsolete\"]',allow_all_tables=0 WHERE id=?",key.id);
+  for(const table of ['public_a','public_b']){assert.equal((await f.request('/v1/logs','POST',payload([self,row]),{'X-Lightmoni-Table':table})).status,200);assert.equal(f.inserts.at(-1).rows.length,2);}
   assert.equal((await send('another_business',[row])).status,200);
   await f.request('/api/v1/keys/'+key.id,'PUT',{active:false});new Auth(f.db,f.dir,f.base,new Router());assert.equal((await send('arbitrary_a',[row])).status,401);
  }finally{await f.close();}

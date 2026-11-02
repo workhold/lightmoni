@@ -33,3 +33,7 @@ runtime/dist/
 
 # Local QA screenshots, reference images and recordings (mirrors source paths).
 /artifacts/screenshots/
+
+# Generated SDK JavaScript and TypeScript incremental build state.
+/sdk/typescript/dist/
+*.tsbuildinfo

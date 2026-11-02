@@ -73,10 +73,6 @@ export function createAgentUpdatesSchema(deps: Dependencies) {
     machine_id TEXT NOT NULL,update_id TEXT NOT NULL,position INTEGER NOT NULL,
     PRIMARY KEY(rollout_id,machine_id),UNIQUE(update_id)
   );`);
-  if (!deps.db.all<{name:string}>("PRAGMA table_info(machine_agent_updates)").some(column => column.name === "approved_by"))
-    deps.db.exec("ALTER TABLE machine_agent_updates ADD COLUMN approved_by TEXT NOT NULL DEFAULT ''");
-  if (!deps.db.all<{name:string}>("PRAGMA table_info(agent_update_rollouts)").some(column => column.name === "acknowledged_json"))
-    deps.db.exec("ALTER TABLE agent_update_rollouts ADD COLUMN acknowledged_json TEXT NOT NULL DEFAULT '[]'");
   deps.db.run("UPDATE machine_agent_updates SET status='unknown',ticket_hash='',error=? WHERE status IN ('running','verifying')", "平台在 Agent 维护期间重启，远端会按确认期限回退；请只读核对");
   deps.db.run("UPDATE agent_update_rollouts SET status='paused',error=? WHERE status='running'", "平台重启，批次已暂停；核对已启动主机后明确继续");
 }

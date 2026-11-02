@@ -3,7 +3,7 @@ import { createAgentLifecycleSchema } from "./agent-lifecycle.js";
 export function registerCore(deps: Dependencies) {
   const { router, db, cat } = deps;
   createAgentLifecycleSchema(db);
-  const visible=async(signal?:AbortSignal)=>(await cat.list(signal)).filter(t=>!["lightmoni_center","lightmoni_agent","lightmoni_sdk"].includes(t.logical_name)).map(t=>t.kind==='metric'&&t.metric_type==='histogram'&&!t.system?{...t,name:t.logical_name}:t);
+  const visible=async(signal?:AbortSignal)=>(await cat.list(signal)).filter(t=>!["lightmoni","lightmoni","lightmoni"].includes(t.logical_name)).map(t=>t.kind==='metric'&&t.metric_type==='histogram'&&!t.system?{...t,name:t.logical_name}:t);
   router.get("/healthz", (c) => c.json({ status: "ok" }), { public: true });
   router.get("/api/v1/catalog/tables", async (c) =>
     c.json(await visible(c.signal)),

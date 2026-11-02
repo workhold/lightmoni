@@ -32,8 +32,8 @@ try {
       logical,
     );
   app.deps.db.run(
-    "INSERT INTO ingest_keys(id,name,token_hash,created_at) VALUES('qa-legacy','旧 Key 待配置',?,'2026-10-10')",
-    createHash("sha256").update("qa-legacy-secret").digest("hex"),
+    "INSERT INTO ingest_keys(id,name,token_hash,created_at) VALUES('qa-key','QA SDK Key',?,'2026-10-10')",
+    createHash("sha256").update("qa-fixture-secret").digest("hex"),
   );
   app.server.listen(18882, "127.0.0.1");
   await once(app.server, "listening");

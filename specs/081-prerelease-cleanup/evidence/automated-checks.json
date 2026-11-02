@@ -1,0 +1,85 @@
+{
+  "runtime_linux_nonroot": {
+    "sha256": "7f4764ae36c5e824197ec14de9a92cf23f9cda64fef94571a1fd1cd166c4e97b",
+    "tests": 1496,
+    "pass": 1461,
+    "fail": 0,
+    "skipped": 35,
+    "cancelled": 0
+  },
+  "runtime_linux_root": {
+    "sha256": "0a2d2f70f0db7ef44f80bf72403b426c7f09d62811dbf59444159c970d08fbcd",
+    "tests": 32,
+    "pass": 32,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0
+  },
+  "ai_runtime": {
+    "sha256": "1c984a63488b18dc7e820f6484847081b859ee4a333182660444cadb36a14c84",
+    "tests": 71,
+    "pass": 71,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0
+  },
+  "typescript_sdk": {
+    "sha256": "57152185861b3b33a94b879bb87fba6e7d1e50b70fa535ccfe5bdfd84eab5a92",
+    "tests": 22,
+    "pass": 22,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0
+  },
+  "web_models": {
+    "sha256": "2cb7cf2268840231a6d074db33a898b51ba5453787ba7f5d6ce068650c4c00f6",
+    "tests": 131,
+    "pass": 131,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0
+  },
+  "metric_baseline_final": {
+    "sha256": "0a6994bae98c2c54dbe9e580b4bdadf86c0aa4c1a14589f10a80391f39c1d300",
+    "tests": 33,
+    "pass": 33,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0
+  },
+  "go_sdk": {
+    "result": "all packages passed",
+    "command": "cd sdk/go && go test ./..."
+  },
+  "python_sdk": {
+    "tests": 33,
+    "fail": 0,
+    "command": "PYTHONPATH=sdk/python python3 -m unittest discover -s sdk/python/tests -v"
+  },
+  "rust_sdk": {
+    "tests": 4,
+    "fail": 0,
+    "toolchain": "rustc/cargo 1.99.0 aarch64 Linux",
+    "command": "cargo test --locked --offline",
+    "image_id": "sha256:114c7a4425406451c2866b6aafe69fe29b1b298832db1277d411ac73c82d04d6"
+  },
+  "checks": {
+    "typecheck": [
+      "runtime",
+      "ai-runtime",
+      "web"
+    ],
+    "build": [
+      "typescript SDK",
+      "runtime",
+      "ai-runtime",
+      "web"
+    ],
+    "syntax": [
+      "agent install.sh",
+      "deployment-permissions.mjs",
+      "update-runner.mjs"
+    ],
+    "diff_check": true
+  }
+}

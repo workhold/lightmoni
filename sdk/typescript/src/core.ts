@@ -139,7 +139,7 @@ class State {
     }
   }
   updateLogSampling(policies:Record<string,LogSamplingPolicy>):void {
-    const snapshot:Record<string,LogSamplingPolicy>={};for(const [table,p]of Object.entries(policies)){if(!validTable(table)||['lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(table))throw new Error('invalid log policy table');snapshot[table]=copyLogSampling(p);}this.localSampling=snapshot;
+    const snapshot:Record<string,LogSamplingPolicy>={};for(const [table,p]of Object.entries(policies)){if(!validTable(table)||['lightmoni'].includes(table))throw new Error('invalid log policy table');snapshot[table]=copyLogSampling(p);}this.localSampling=snapshot;
   }
   setReportingDisabled(disabled:boolean):void {
     if(this.stats.reportingDisabled===disabled)return;this.stats.reportingDisabled=disabled;
@@ -156,14 +156,14 @@ class State {
     const request=new AbortController();this.configRequest=request;const timer=setTimeout(()=>request.abort(new DOMException("request timed out","TimeoutError")),5000);
     try{
       const init:RequestInit={headers:this.options.key?{Authorization:`Bearer ${this.options.key}`}:{},signal:request.signal,redirect:'error'};
-      const response=await (this.endpoints && endpoint===this.options.endpoint ? this.endpoints.request('/v1/sdk-config?metric_windows=1',init) : fetch(endpoint.replace(/\/$/,'')+'/v1/sdk-config?metric_windows=1',init));
+      const response=await (this.endpoints && endpoint===this.options.endpoint ? this.endpoints.request('/v1/sdk-config',init) : fetch(endpoint.replace(/\/$/,'')+'/v1/sdk-config',init));
       if(response.status!==200){void response.body?.cancel();throw new Error(`SDK configuration HTTP ${response.status}`);}
       if(!response.body)throw new Error('missing SDK configuration');const reader=response.body.getReader(),parts:Uint8Array[]=[];let length=0;
       while(true){const chunk=await reader.read();if(chunk.done)break;length+=chunk.value.length;if(length>1024*1024){await reader.cancel();throw new Error('SDK configuration exceeds 1 MiB');}parts.push(chunk.value);}
       const raw=new Uint8Array(length);let offset=0;for(const part of parts){raw.set(part,offset);offset+=part.length;}
       const config=JSON.parse(new TextDecoder().decode(raw)) as SDKConfig;
       if(!config||typeof config.revision!=='string'||!config.revision||config.revision.length>128||!config.log_sampling||Array.isArray(config.log_sampling)||typeof config.log_sampling!=='object'||Object.keys(config.log_sampling).length>200||Object.keys(config).some(k=>!['revision','log_sampling','disable_rules','metric_windows'].includes(k)))throw new Error('invalid SDK configuration');
-      const policies:Record<string,LogSamplingPolicy>={};for(const[table,p]of Object.entries(config.log_sampling)){if(!validTable(table)||['lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(table))throw new Error('invalid log policy table');policies[table]=copyLogSampling(p);}
+      const policies:Record<string,LogSamplingPolicy>={};for(const[table,p]of Object.entries(config.log_sampling)){if(!validTable(table)||['lightmoni'].includes(table))throw new Error('invalid log policy table');policies[table]=copyLogSampling(p);}
       const windows=copyMetricWindows(config.metric_windows);
       const disable=copyExclusions(config.disable_rules??[],true);
       if(this.closing)return;this.metricWindows=windows;this.remoteSampling=policies;this.remoteDisabled=disable.some(rule=>matches(rule.conditions,this.samplingRecord()));this.setReportingDisabled(!!this.options.disabled||this.remoteDisabled);this.stats.configRevision=config.revision;this.stats.configError=undefined;
@@ -232,7 +232,7 @@ class State {
   observe(table:string,name:string,dimensions:Record<string,string>,value:number,count:number|bigint):void {
     if(this.closing){this.invalid("record after shutdown");return;}
     if(this.stats.reportingDisabled){this.stats.disabledRecords++;return;}
-    if(!this.options.env?.trim() || !validTable(table) || ['lightmoni','lightmoni_center','lightmoni_agent','lightmoni_sdk'].includes(table) || !name || encoder.encode(name).length>255 || !Number.isFinite(value) || !dimensions || typeof dimensions!=='object' || Array.isArray(dimensions)) {this.invalid("record requires env, business table, metric name, dimensions and finite value");return;}
+    if(!this.options.env?.trim() || !validTable(table) || ['lightmoni'].includes(table) || !name || encoder.encode(name).length>255 || !Number.isFinite(value) || !dimensions || typeof dimensions!=='object' || Array.isArray(dimensions)) {this.invalid("record requires env, business table, metric name, dimensions and finite value");return;}
     let weight:bigint;try{if(typeof count==='number'&&(!Number.isSafeInteger(count)||count<1))throw new Error();weight=BigInt(count);if(weight<1n||weight>maxUint64)throw new Error();}catch{this.invalid("count must be a positive integer");return;}
     let attributes:Attribute[];
     try {for(const [key,val] of Object.entries(dimensions))if(!/^key([1-9]|1[0-6])$/.test(key)||typeof val!=='string')throw new Error("dimensions must be key1..key16 strings");attributes=this.attributes(Object.fromEntries(Object.entries(dimensions).filter(([,v])=>v!=='')));}catch(error){this.invalid(error);return;}
@@ -297,7 +297,7 @@ class State {
   enqueueSelf(signal: Signal, rows: RecordValue[], at: string): boolean {
     const bytes = this.payload(signal, rows).length;
     if (bytes > this.settings.maxBatchBytes || this.queue.length >= this.settings.queueBatches || this.stats.pendingBytes + bytes > this.settings.queueBytes) return false;
-    this.enqueue(signal, "lightmoni_sdk", rows, at); return true;
+    this.enqueue(signal, "lightmoni", rows, at); return true;
   }
   payload(signal: Signal, records: RecordValue[]): Uint8Array {
     const scope = { name: "lightmoni/sdk/typescript" };
@@ -343,7 +343,7 @@ class State {
     this.working = true; let backoff = this.settings.retryMinMs;
     try { while (this.queue.length && !this.stopped) {
       const item = this.queue[0];
-      if (item.batch.table === "lightmoni_sdk" && !this.options.key) {
+      if (item.batch.table === "lightmoni" && !this.options.key) {
         this.queue.shift(); this.stats.pendingBatches--; this.stats.pendingBytes -= item.batch.payload.length; this.notify(); continue;
       }
       this.request = new AbortController();

@@ -696,15 +696,8 @@ export function visibleRecords(
 }
 export function initDNSSchema(options: PlatformOptions): void {
   options.deps.db
-    .exec(`CREATE TABLE IF NOT EXISTS ops_dns_owned(id TEXT PRIMARY KEY,zone_id TEXT NOT NULL,owner_id TEXT NOT NULL,record_id TEXT NOT NULL DEFAULT '',name TEXT NOT NULL,type TEXT NOT NULL,value TEXT NOT NULL,ttl INTEGER NOT NULL,state TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS ops_dns_owned_owner ON ops_dns_owned(zone_id,owner_id);
+    .exec(`CREATE TABLE IF NOT EXISTS ops_dns_owned(id TEXT PRIMARY KEY,zone_id TEXT NOT NULL,owner_id TEXT NOT NULL,record_id TEXT NOT NULL DEFAULT '',name TEXT NOT NULL,type TEXT NOT NULL,value TEXT NOT NULL,ttl INTEGER NOT NULL,state TEXT NOT NULL,updated_at TEXT NOT NULL,line TEXT NOT NULL DEFAULT '',weight INTEGER); CREATE INDEX IF NOT EXISTS ops_dns_owned_owner ON ops_dns_owned(zone_id,owner_id);
     CREATE TABLE IF NOT EXISTS ops_dns_observed(zone_id TEXT NOT NULL,record_id TEXT NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL,value TEXT NOT NULL,record_json TEXT NOT NULL,PRIMARY KEY(zone_id,record_id));`);
-  const fields = options.deps.db.all<any>("PRAGMA table_info(ops_dns_owned)");
-  if (!fields.some((f) => f.name === "line"))
-    options.deps.db.exec(
-      "ALTER TABLE ops_dns_owned ADD COLUMN line TEXT NOT NULL DEFAULT ''",
-    );
-  if (!fields.some((f) => f.name === "weight"))
-    options.deps.db.exec("ALTER TABLE ops_dns_owned ADD COLUMN weight INTEGER");
 }
 export function publishDNSRecords(
   options: PlatformOptions,

@@ -239,7 +239,7 @@ func DecodeSDKConfig(reader io.Reader) (SDKConfig, error) {
 	return config, nil
 }
 func systemSamplingTable(table string) bool {
-	return table == "lightmoni_center" || table == "lightmoni_agent" || table == "lightmoni_sdk"
+	return table == "lightmoni"
 }
 
 func logField(field string, record, attrs, resource Attributes) (any, bool) {
@@ -397,7 +397,7 @@ func (c *Client) RefreshConfig(ctx context.Context) error {
 			return err
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/v1/sdk-config?metric_windows=1", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/v1/sdk-config", nil)
 	if err != nil {
 		return err
 	}

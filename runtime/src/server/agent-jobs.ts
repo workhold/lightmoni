@@ -1,4 +1,4 @@
-import { ordinaryReadOnlyJob } from "../shared/ordinary-jobs.js";
+import { ordinaryReadOnlyJob } from "../shared/ordinary-agent-jobs.js";
 import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { id, token } from "../shared/crypto.js";
 import { dockerJobAction, dockerReceipt, safeDockerCode } from '../shared/docker-jobs.js';
@@ -66,8 +66,6 @@ export interface AgentJobStore {
   /** Cancel only an unclaimed job belonging to this deployment operation. */
   cancelQueuedDeployment(deploymentID: string, operationID: string, actor: string): Record<string, any>;
   get(jobID: string): Record<string, any>;
-  /** Authorize one private release read against the live Agent lease and immutable deployment action. */
-  authorizeArtifact(ctx: Context, agentID: string, jobID: string, releaseID: string): { sha256: string; size: number };
   /** Internal synchronous observer; invoked inside the job's SQLite transaction. */
   onUpdate(listener: (update: AgentJobUpdate) => void): () => void;
 }
@@ -157,7 +155,7 @@ function view(row: any): Record<string, any> {
   return {
     id: row.id,
     agent_id: row.agent_id,
-    execution_principal: row.execution_principal ?? "ordinary_agent",
+    execution_principal: row.execution_principal,
     deployment_id: row.deployment_id,
     operation_id: row.operation_id,
     state: row.state,
@@ -175,7 +173,7 @@ function view(row: any): Record<string, any> {
 
 export function registerAgentJobs(
   deps: Dependencies,
-  options: { agentCredentials?: AgentCredentialStore; expirySweepIntervalMs?: number; separateExecutor?: boolean } = {},
+  options: { agentCredentials?: AgentCredentialStore; expirySweepIntervalMs?: number } = {},
 ): Module & AgentJobStore {
   const { db, router } = deps;
   const transact = <T>(work:()=>T):T => db.native.isTransaction ? work() : db.transaction(work);
@@ -198,6 +196,7 @@ export function registerAgentJobs(
     CREATE TABLE IF NOT EXISTS agent_jobs(
       id TEXT PRIMARY KEY,
       agent_id TEXT NOT NULL,
+      execution_principal TEXT NOT NULL DEFAULT 'ordinary_agent',
       deployment_id TEXT NOT NULL,
       operation_id TEXT NOT NULL,
       state TEXT NOT NULL,
@@ -227,19 +226,8 @@ export function registerAgentJobs(
     );
   `);
 
-  if (!db.all<{name:string}>("PRAGMA table_info(agent_jobs)").some(c=>c.name==='execution_principal'))
-    db.exec("ALTER TABLE agent_jobs ADD COLUMN execution_principal TEXT NOT NULL DEFAULT 'ordinary_agent'");
   let privilegedCancel: ((jobID:string,actor:string)=>void) | undefined;
   let privilegedReady: ((agentID:string)=>void) | undefined;
-  // Never reinterpret old ordinary write authority as root authorization.
-  if (options.separateExecutor) for (const old of db.all<any>("SELECT * FROM agent_jobs WHERE state NOT IN ('succeeded','failed','cancelled','unknown') AND execution_principal='ordinary_agent'")) {
-    let readonly=false;try{const actions=JSON.parse(old.actions_json);readonly=!actions.some((a:any)=>['docker','systemd_probe'].includes(a.kind))&&ordinaryReadOnlyJob({actions,capabilities:JSON.parse(old.capabilities_json)});}catch{}
-    if(readonly)continue;
-    const state=old.state==='queued'&&Number(old.attempts)===0?'cancelled':'unknown',code='legacy_agent_write_removed',at=iso(deps),summary=state==='cancelled'?'Legacy write job cancelled before claim':'Legacy write outcome requires host reconciliation';
-    db.run("UPDATE agent_jobs SET state=?,execution_principal='retired_legacy',receipt_json=?,lease_id='',lease_expires_at='',updated_at=? WHERE id=?",state,json({state,code,previous_state:old.state,summary,snapshot:{}}),at,old.id);
-    const next=Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 sequence FROM agent_job_events WHERE job_id=?",old.id)!.sequence);
-    db.run("INSERT INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)",old.id,next,state,code,summary,at);
-  }
   const row = (jobID: string) => {
     const value = db.get<any>("SELECT * FROM agent_jobs WHERE id=?", jobID);
     if (!value) fail(404, "agent job not found");
@@ -323,7 +311,7 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     if (!options.agentCredentials?.has(agentID, "control")) fail(409, "registered_host_required: 主机没有有效的 Agent 控制通道");
     const actionList = actions(input.actions), caps = capabilities(input.capabilities ?? []);
-    const privileged = !!options.separateExecutor && (actionList.some((a:any)=>['docker','systemd_probe'].includes(a.kind))||!ordinaryReadOnlyJob({actions:actionList,capabilities:caps}));
+    const privileged = (actionList.some((a:any)=>['docker','systemd_probe'].includes(a.kind))||!ordinaryReadOnlyJob({actions:actionList,capabilities:caps}));
     const existing = db.get<any>("SELECT * FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deploymentID, operationID);
     if (existing) return view(existing);
     if (privileged) { if (!privilegedReady) fail(409,"privileged_executor_required"); privilegedReady(agentID); }
@@ -373,7 +361,7 @@ export function registerAgentJobs(
       agentID, nowText, JSON.stringify([...caps]),
     );
     if (!candidate) return null;
-    if (options.separateExecutor && !ordinaryReadOnlyJob({actions:JSON.parse(candidate.actions_json),capabilities:JSON.parse(candidate.capabilities_json)})) return null;
+    if (!ordinaryReadOnlyJob({actions:JSON.parse(candidate.actions_json),capabilities:JSON.parse(candidate.capabilities_json)})) return null;
     const required = JSON.parse(candidate.capabilities_json || "[]") as string[];
     if (required.some((cap) => !caps.has(cap))) return null;
     const lease = token(), leaseExpires = new Date(at.getTime() + LEASE_SECONDS * 1000), changed = db.run(
@@ -576,42 +564,6 @@ export function registerAgentJobs(
     });
     return view(row(current.id));
   };
-  const authorizeArtifact = (ctx: Context, agentID: string, jobID: string, releaseID: string) => {
-    authenticate(ctx, agentID);
-    const leaseID = String(ctx.req.headers["x-lightmoni-job-lease"] ?? "").trim();
-    if (!leaseID) fail(401, "agent job lease is required");
-    const current = leaseRow(agentID, jobID, leaseID);
-    if (current.execution_principal!=="ordinary_agent") fail(403,"principal_mismatch");
-    if (current.state !== "staging" || Date.parse(current.expires_at) <= deps.now().getTime())
-      fail(409, "agent job is not staging an artifact");
-    let actionList: any[];
-    let caps: string[];
-    try {
-      actionList = JSON.parse(current.actions_json || "[]");
-      caps = JSON.parse(current.capabilities_json || "[]");
-    } catch {
-      fail(409, "agent job artifact action is invalid");
-    }
-    const action = actionList.find((candidate) => candidate?.kind === "stage_artifact" && candidate?.release_id === releaseID);
-    if (!action || !caps.includes("artifact.stage")
-      || typeof action.service_id !== "string" || typeof action.sha256 !== "string"
-      || !/^[a-f0-9]{64}$/i.test(action.sha256) || !Number.isSafeInteger(action.size) || action.size < 1)
-      fail(403, "agent job does not authorize this artifact");
-    const binding = db.get<any>(
-      `SELECT d.service_id,d.release_id,t.machine_id,m.agent_id,r.artifact_digest,r.artifact_size,r.status
-       FROM deployments d
-       JOIN service_targets t ON t.id=d.target_id AND t.service_id=d.service_id
-       JOIN managed_machines m ON m.id=t.machine_id
-       JOIN releases r ON r.id=d.release_id AND r.service_id=d.service_id
-       WHERE d.id=?`,
-      current.deployment_id,
-    );
-    if (!binding || binding.agent_id !== agentID || binding.service_id !== action.service_id
-      || binding.release_id !== releaseID || binding.status !== "ready"
-      || binding.artifact_digest !== action.sha256.toLowerCase() || Number(binding.artifact_size) !== action.size)
-      fail(403, "agent job artifact binding is invalid");
-    return { sha256: binding.artifact_digest, size: Number(binding.artifact_size) };
-  };
   const safe = (handler: Handler): Handler => async (ctx) => {
     try { await handler(ctx); } catch (error) {
       if (error instanceof HTTPError) ctx.json({ error: error.message }, error.status);
@@ -655,7 +607,7 @@ export function registerAgentJobs(
       db.run("UPDATE agent_jobs SET state='leased',lease_id=?,lease_expires_at=?,attempts=attempts+1,updated_at=? WHERE id=?",leaseID,expiresAt,iso(deps),jobID);
       return view(row(jobID));
     },
-    enqueue, claim, event, result, cancel, cancelQueuedDeployment, get: (jobID: string) => view(row(jobID)), authorizeArtifact,
+    enqueue, claim, event, result, cancel, cancelQueuedDeployment, get: (jobID: string) => view(row(jobID)),
     start() {
       if (sweepTimer) return;
       sweepTimer = setInterval(() => {
@@ -668,17 +620,6 @@ export function registerAgentJobs(
       sweepTimer = undefined;
     },
     onUpdate(listener: (update: AgentJobUpdate) => void) {
-      // The queue is registered before its business stores. Replay only the
-      // durable quarantine outcome so a restart cannot leave their old runs
-      // looking queued after the canonical job was cancelled or fenced unknown.
-      db.transaction(() => {
-        for (const current of db.all<any>("SELECT * FROM agent_jobs WHERE state IN ('cancelled','unknown') AND json_extract(receipt_json,'$.code')='legacy_agent_write_removed'")) {
-          const receipt = JSON.parse(current.receipt_json);
-          listener({ agentID: current.agent_id, deploymentID: current.deployment_id, operationID: current.operation_id,
-            jobID: current.id, phase: current.state, code: "legacy_agent_write_removed",
-            previousState: receipt.previous_state ?? (current.state === "cancelled" ? "queued" : "leased") });
-        }
-      });
       updateListeners.add(listener);
       return () => updateListeners.delete(listener);
     },

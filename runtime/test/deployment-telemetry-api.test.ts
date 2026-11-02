@@ -2,7 +2,7 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { registerServiceDeployments } from "../src/server/service-deployments.js";
 import { DB } from "../src/shared/sqlite.js";
 import { fail, Router } from "../src/shared/http.js";

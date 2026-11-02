@@ -12,7 +12,7 @@ const at = new Date("2026-10-30T01:00:00.000Z");
 const fixture = (t: any) => { const db = new DB(":memory:"); t.after(() => db.close()); return {db, store:new NodeStore(db, () => at)}; };
 const machine = (db: DB, id: string, agent = "") => {
   db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'root','direct_ssh',?,?,?)", id, `Host ${id}`, `${id}.invalid`, agent, at.toISOString(), at.toISOString());
-  if (agent) db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat,group_id) VALUES(?,?,?,'1','linux','amd64',?,'{}','default')", agent, id, id, at.toISOString());
+  if (agent) db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES(?,?,?,'1','linux','amd64',?,'{}')", agent, id, id, at.toISOString());
 };
 const script = (more: Record<string,unknown> = {}) => ({ name:"Test script", type:"script", enabled:true, label_ids:[], host_ids:[], target_all:false, schedule:{mode:"once"}, script:{runtime:"node",code:"console.log('ok')",timeout_seconds:10,max_output_bytes:4096}, ...more });
 const code = (status: number) => (error: unknown) => error instanceof NodeError && error.status === status;
@@ -47,27 +47,6 @@ test("labels belong to offline hosts, survive Agent replacement and empty labels
   assert.equal(reopened.hostDirectory()[0].address,undefined);
   assert.deepEqual(Object.keys(reopened.hostDirectory()[0]).sort(),["agent_id","agent_status","id","label_ids","labels","name","network","task_capabilities"]);
   assert.deepEqual(reopened.hostDirectory()[0].network,{hostname:"",observed_via:"unavailable",addresses:[],private_ips:[],public_ips:[],observed_at:"",source_ip:"",source_observed_at:"",source_kind:"unavailable"});
-});
-
-test("legacy linked labels migrate once without resetting user-disabled tasks or reviving removed labels", t => {
-  const db=new DB(":memory:"); t.after(()=>db.close());
-  // Initial state produced by the previous independent-task schema.
-  db.exec(`CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT NOT NULL,hostname TEXT NOT NULL,version TEXT NOT NULL,platform TEXT NOT NULL,arch TEXT NOT NULL,last_seen TEXT NOT NULL,heartbeat TEXT NOT NULL,group_id TEXT NOT NULL);
-  CREATE TABLE agent_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,config TEXT NOT NULL,created_at TEXT NOT NULL);
-  CREATE TABLE agent_task_migrations(version TEXT PRIMARY KEY,completed_at TEXT NOT NULL);
-  CREATE TABLE agent_task_labels(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL);
-  CREATE TABLE agent_tasks(id TEXT PRIMARY KEY,name TEXT NOT NULL,type TEXT NOT NULL,enabled INTEGER NOT NULL,config TEXT NOT NULL,created_at TEXT NOT NULL);
-  CREATE TABLE agent_task_targets(task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,label_id TEXT NOT NULL REFERENCES agent_task_labels(id),PRIMARY KEY(task_id,label_id));
-  CREATE TABLE agent_node_labels(agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,label_id TEXT NOT NULL REFERENCES agent_task_labels(id),PRIMARY KEY(agent_id,label_id));
-  INSERT INTO agent_task_migrations VALUES('independent-tasks-v1','2026-01-01');
-  INSERT INTO agent_task_labels VALUES('production','Production','2026-01-01');`);
-  let store=new NodeStore(db,()=>at); machine(db,"host","old");
-  db.run("INSERT INTO agent_node_labels VALUES('old','production')");
-  const previous=normalizeTask({id:"existing",name:"Existing probe",type:"probe",enabled:false,label_ids:["production"],config:{}}); store.saveTask(previous);
-  db.run("DELETE FROM agent_task_migrations WHERE version='host-task-center-v1'");
-  store=new NodeStore(db,()=>at); assert.deepEqual(store.hostLabels("host"),["production"]);
-  assert.equal(store.getTask(previous.id).enabled,false); assert.equal(store.tasks().length,4);
-  store.setHostLabels("host",[]); store=new NodeStore(db,()=>at); assert.deepEqual(store.hostLabels("host"),[]);
 });
 
 test("script targets are all, any-label or explicit-host union; empty target never broadcasts", t => {
@@ -156,20 +135,6 @@ test("host labels and task directory expose read-only host identity; members can
   assert.equal((await request("/machines/offline/labels","PUT",{label_ids:[label.data.id]})).status,200);
   assert.deepEqual(store.hostLabels("offline"),[label.data.id]);
   assert.equal((await fetch(url+"/task-templates")).status,404);
-});
-
-test("existing custom native tasks keep their source and targets when new defaults are filled once", t => {
-  const {db}=fixture(t);
-  db.run("UPDATE agent_tasks SET metadata_json='{}',enabled=0");
-  db.run("INSERT INTO agent_task_targets(task_id,label_id) SELECT id,'default' FROM agent_tasks");
-  db.run("DELETE FROM agent_task_migrations WHERE version IN ('host-task-center-v1','platform-default-tasks-v1')");
-  let store=new NodeStore(db,()=>at);
-  const custom=store.tasks().filter(task=>task.origin==="custom"), builtin=store.tasks().filter(task=>task.origin==="builtin");
-  assert.equal(custom.length,3); assert.equal(builtin.length,3);
-  for(const task of custom){assert.equal(task.target_all,false);assert.equal(task.enabled,false);assert.deepEqual(task.label_ids,["default"]);}
-  assert.ok(builtin.every(task=>task.enabled&&task.target_all));
-  store=new NodeStore(db,()=>at); assert.equal(store.tasks().length,6);
-  machine(db,"later"); assert.equal(store.effectiveHostTasks("later").length,3);
 });
 
 test("task revisions bind scripts, schedules and targets while ignoring supplied hashes and view state", t => {

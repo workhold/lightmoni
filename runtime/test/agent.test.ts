@@ -152,80 +152,6 @@ function drain(agent: Agent): any[] {
   }
 }
 
-test("legacy Go golden spool preserves identity, frozen bytes, retry state, exact cursors and completed receipts", async (t) => {
-  const fixture = JSON.parse(
-    readFileSync(
-      resolve(import.meta.dirname, "fixtures/go-agent-spool.json"),
-      "utf8",
-    ),
-  );
-  t.mock.method(Date, "now", () => Date.parse(fixture.generated_at));
-  const cfg = config(t),
-    db = new DB(join(cfg.data_dir, "queue.sqlite"));
-  db.transaction(() => {
-    db.exec("PRAGMA defer_foreign_keys=ON");
-    for (const table of fixture.tables) db.exec(table.schema);
-    for (const table of fixture.tables) {
-      for (const row of table.rows) {
-        const values = Object.values(row).map((v: any) =>
-          v && typeof v === "object"
-            ? "integer" in v
-              ? BigInt(v.integer)
-              : Buffer.from(v.base64, "base64")
-            : v,
-        );
-        db.run(
-          "INSERT INTO " +
-            table.name +
-            "(" +
-            Object.keys(row).join(",") +
-            ") VALUES(" +
-            values.map(() => "?").join(",") +
-            ")",
-          ...values,
-        );
-      }
-    }
-  });
-  db.close();
-  writeFileSync(
-    join(cfg.data_dir, "identity.json"),
-    JSON.stringify(fixture.identity),
-  );
-  const inputs = fixture.inputs.map((v: any) => ({
-    ...v,
-    payload: Buffer.from(v.payload, "base64"),
-  }));
-  let a = createAgent(cfg);
-  const old = a.queue.next()!,
-    frozen = Buffer.from(old.payload);
-  assert.deepEqual(a.identity, fixture.identity);
-  assert.equal(old.created_at, inputs[0].created_at);
-  assert.equal(old.attempts, 2);
-  assert.equal(old.last_error, "upstream unavailable");
-  assert.equal(
-    a.queue.db.get<any>("SELECT offset FROM log_cursors")!.offset,
-    "9007199254740993",
-  );
-  assert.deepEqual(
-    a.queue.db.get<any>("SELECT prefix FROM log_cursors")!.prefix,
-    Buffer.from([0, 255, 97]),
-  );
-  a.accept(inputs[0], true);
-  a.accept(inputs[1], true);
-  assert.equal(a.queue.stats().queue_batches, 1);
-  assert.deepEqual(a.queue.next()!.payload, frozen);
-  a.queue.complete(old.id);
-  a.accept(inputs[0], true);
-  assert.equal(a.queue.stats().queue_batches, 0);
-  await a.close();
-  a = createAgent(cfg);
-  assert.deepEqual(a.identity, fixture.identity);
-  for (const input of inputs) a.accept(input, true);
-  assert.equal(a.queue.stats().queue_batches, 0);
-  await a.close();
-});
-
 test("Agent rejects removed SDK relay routes and keeps authenticated diagnostics", async (t) => {
   const a = make(t, {local_token:"test-local-token"}), url = await listen(a);
   for(const path of ["/v1/logs","/v1/metrics","/v1/traces","/v1/sdk-config"]){
@@ -567,8 +493,6 @@ test("CLI config preserves identity/spool, protects files and requires explicit 
       path,
       "--endpoint",
       cfg.endpoint,
-      "--group-id",
-      "production",
       "--require-data-dir",
       cfg.data_dir,
     ],
@@ -584,7 +508,7 @@ test("CLI config preserves identity/spool, protects files and requires explicit 
   a.accept(b, true);
   a.queue.quarantine(b.id, "rejected");
   await a.close();
-  await execute(["configure", "--config", path, "--group-id", "updated"], io);
+  await execute(["configure", "--config", path], io);
   assert.equal(
     JSON.parse(readFileSync(join(cfg.data_dir, "identity.json"), "utf8"))
       .agent_id,
@@ -635,8 +559,8 @@ test("remote task validation and Go glob semantics reject malformed and reserved
   assert(glob("[^a]*").test("worker"));
   assert(!glob("*").test("path/name"));
   assert.throws(() => glob("["));
-  assert.equal(normalizeRemote({host_table:"lightmoni_sdk",probe_table:"custom",log_table:"custom"}).host_table,"host");
-  assert.throws(() => validateRemote({...normalizeRemote({revision:"x",collect_interval_seconds:15}),host_table:"lightmoni_sdk"}));
+  assert.equal(normalizeRemote({host_table:"lightmoni",probe_table:"custom",log_table:"custom"}).host_table,"host");
+  assert.throws(() => validateRemote({...normalizeRemote({revision:"x",collect_interval_seconds:15}),host_table:"lightmoni"}));
   assert.throws(() =>
     validateRemote(
       normalizeRemote({

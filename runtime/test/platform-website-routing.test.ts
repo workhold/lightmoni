@@ -7,7 +7,7 @@ import { once } from "node:events";
 import { DB } from "../src/shared/sqlite.js";
 import { cipher } from "../src/shared/crypto.js";
 import { Router, fail } from "../src/shared/http.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
 import { catalogInstallation } from "../src/ops/catalog.js";
 import { renderGateway } from "../src/operations/platform.js";
@@ -50,7 +50,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
       intervalMs: 1000000,
     }),
     store = platform.store;
-  const server = createServer((req, res) => void router.handle(req, res));
+  const server = createServer((req, res) => void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = "http://127.0.0.1:" + (server.address() as any).port;

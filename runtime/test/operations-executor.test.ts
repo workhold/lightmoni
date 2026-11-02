@@ -116,7 +116,7 @@ test('a rejected Compose generation cannot poison the node writer lock before an
  await assert.rejects(access(join(root,'operations','execution.lock')));
 });
 
-test('a backup source limit rejected before storage write releases the node writer lock',async t=>{
+test('a backup source limit rejected before storage write releases the node writer lock',{skip:process.platform!=='linux'||process.geteuid?.()!==0},async t=>{
  const root=await realpath(await mkdtemp(join(tmpdir(),'lightmoni-ops-backup-rejected-')));t.after(()=>rm(root,{recursive:true,force:true}));
  const source=join(root,'source'),storage=join(root,'storage'),id='f'.repeat(32);
  await mkdir(source,{mode:0o700});await mkdir(storage,{mode:0o700});await writeFile(join(source,'data.txt'),'too big',{mode:0o600});

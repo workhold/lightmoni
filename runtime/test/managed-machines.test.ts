@@ -546,31 +546,6 @@ test('capabilities allow automatic identity discovery and distinguish credential
  await f.request(`/machines/${mid}/credentials/${key.data.credential_id}`,'DELETE');assert.equal(f.machines.get(mid).ssh_recovery_available,false);
 });
 
-test('startup migrates legacy keys without shortening them, clears invalid history, and never relabels new credentials', async t => {
- const f=await fixture(t),h=await host(f,'legacy-policy');
- const expired=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'temporary'});
- const revoked=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'historical-password',retention:'one_time'});
- const longExpiry=new Date(now.getTime()+90*86_400_000).toISOString();
- f.db.run("UPDATE machine_credentials SET retention='managed',expires_at=? WHERE id=?",longExpiry,h.credential);
- f.db.run('UPDATE machine_credentials SET expires_at=? WHERE id=?',now.toISOString(),expired.data.credential_id);
- f.db.run('UPDATE machine_credentials SET revoked_at=?,secret_fingerprint=? WHERE id=?',now.toISOString(),'historical-password-hash',revoked.data.credential_id);
- f.machines.close?.();
- for (const saved of f.db.all<any>('SELECT * FROM machine_credentials')) {const secret=saved.method==='password'?'historical-password':fixturePrivateKey();f.db.run('UPDATE machine_credentials SET secret_encrypted=? WHERE id=?',f.deps.encrypt(JSON.stringify({machine_id:saved.machine_id,credential_id:saved.id,secret})),saved.id)}
- f.db.run('DELETE FROM connection_credential_migrations');
- // Reconstruct the schema present before SDD031, including nonempty expired
- // and revoked envelopes, then run the real module registration migration.
- f.db.exec(`DROP VIEW effective_machine_credentials; CREATE TABLE old_machine_credentials AS SELECT id,machine_id,method,secret_encrypted,secret_fingerprint,retention,created_at,expires_at,revoked_at,last_used_at,created_by FROM machine_credentials;
-   DROP TABLE machine_credentials; ALTER TABLE old_machine_credentials RENAME TO machine_credentials;`);
- const restarted=registerManagedMachines({...f.deps,router:new Router()});t.after(()=>restarted.close?.());
- assert.equal(credentialRow(f,revoked.data.credential_id).secret_fingerprint,'');
- const old=credentialRow(f,h.credential);assert.equal(old.policy_source,'legacy');assert.equal(old.retention,'managed');assert.equal(old.expires_at,longExpiry);assert.notEqual(old.secret_encrypted,'');
- for(const [cid,reason] of [[expired.data.credential_id,'expired'],[revoked.data.credential_id,'revoked']]){assert.equal(credentialRow(f,cid).secret_encrypted,'');assert.equal(credentialRow(f,cid).clear_reason,reason);assert.equal(credentialRow(f,cid).policy_source,'legacy');}
- const added=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),confirm_managed:true});assert.equal(added.status,201,added.raw);assert.equal(credentialRow(f,added.data.credential_id).policy_source,'default');
- restarted.close?.();const secondRestart=registerManagedMachines({...f.deps,router:new Router()});t.after(()=>secondRestart.close?.());
- assert.equal(credentialRow(f,added.data.credential_id).policy_source,'default');assert.equal(credentialRow(f,added.data.credential_id).retention,'managed');assert.equal(credentialRow(f,h.credential).policy_source,'legacy');
- assert.equal(credentialEvents(f,expired.data.credential_id).filter(e=>e.event==='expired').length,1);
-});
-
 test('Agent activation clears only its own temporary secrets, preserves managed and permanent logins, and cancels spare plans', async t => {
  const f=await fixture(t),h=await host(f,'activated-policy'),other=await host(f,'activation-other');
  const managed=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'managed',confirm_managed:true});
@@ -812,16 +787,6 @@ test('purge unknown reconciliation selects an explicit new credential and never 
  assert.equal((await f.request(path+'/reconcile','POST',{credential_id:'not-a-credential'})).status,404);assert.equal((await f.request(path+'/apply','POST',{confirm:true})).status,409);
  const fresh=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'recovery-only-secret',retention:'temporary'});assert.equal(fresh.status,201,fresh.raw);
  const reconciled=await f.request(path+'/reconcile','POST',{credential_id:fresh.data.id});assert.equal(reconciled.status,200,reconciled.raw);assert.equal(reconciled.data.status,'succeeded');assert.equal(reconciled.data.receipt.data_removed,true);assert.equal(used.at(-1),fresh.data.id);assert.equal(destructive,1);assert.ok(!reconciled.raw.includes('recovery-only-secret'));
-});
-
-test('legacy unknown uninstall can be read-only verified while old approvals require a fresh plan',async t=>{
- const f=await fixture(t,{},async input=>({stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',true):checkOutput,stderr:'',stages:[]})),h=await uninstallHost(f);
- const plan=await uninstallPlan(f,h);assert.equal(plan.status,409); // already removed has no new standard plan
- const machine=f.machines.get(h.id),targetRevision=(await import('../src/shared/crypto.js')).hash(JSON.stringify([machine.address,machine.port,machine.username,machine.connection_method,machine.host_key_fingerprint,machine.ssh_target_generation,f.deps.externalURL]));
- const old={machine:{...machine,agent_id:'node-known'},agent_id:'node-known',target_revision:targetRevision,expires_at:new Date(now.getTime()+60000).toISOString()};
- f.db.run("INSERT INTO machine_uninstallations(id,machine_id,agent_id,credential_id,status,plan_json,created_at,created_by) VALUES('legacy',?,'node-known',?,'awaiting_approval',?,?,'admin')",h.id,h.credential,JSON.stringify(old),now.toISOString());
- const path=`/machines/${h.id}/uninstallations/legacy`;assert.equal((await f.request(path+'/apply','POST',{confirm:true})).status,409);assert.equal((await f.request(path)).data.status,'awaiting_approval');
- f.db.run("UPDATE machine_uninstallations SET status='unknown' WHERE id='legacy'");const result=await f.request(path+'/reconcile','POST',{});assert.equal(result.status,200,result.raw);assert.equal(result.data.receipt.legacy_evidence,true);assert.equal(result.data.receipt.approved_snapshot_available,false);assert.equal(result.data.receipt.revoked_credentials,2);
 });
 
 test('unknown uninstall after stop can release its fence with unchanged complete programs without replay',async t=>{

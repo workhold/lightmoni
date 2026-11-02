@@ -6,7 +6,7 @@ impl Client{
  pub fn refresh_metric_windows(&self)->Result<()>{
   let(http,_bootstrap,key)={let s=self.state.lock().unwrap();if s.closed{return Err("SDK is closed".into());}(s.http.clone(),s.endpoint.clone(),s.key.clone())};
   let deadline=Instant::now()+Duration::from_secs(5);let endpoint=self.resolve_endpoint(false,deadline)?;
-  let mut request=http.get(format!("{endpoint}/v1/sdk-config?metric_windows=1")).timeout(deadline.saturating_duration_since(Instant::now()));if !key.is_empty(){request=request.bearer_auth(key);}
+  let mut request=http.get(format!("{endpoint}/v1/sdk-config")).timeout(deadline.saturating_duration_since(Instant::now()));if !key.is_empty(){request=request.bearer_auth(key);}
   let response=request.send().map_err(|error|{if endpoints::transport_failure(&error){self.mark_endpoint_failure(&endpoint);}"SDK configuration unavailable"})?;if response.status().as_u16()!=200{return Err("SDK configuration rejected".into());}
   use std::io::Read;let mut bytes=Vec::new();response.take((1<<20)+1).read_to_end(&mut bytes).map_err(|_|{self.mark_endpoint_failure(&endpoint);"SDK configuration unavailable"})?;if bytes.len()>1<<20{return Err("SDK configuration too large".into());}
   let value:Value=serde_json::from_slice(&bytes).map_err(|_|"invalid SDK configuration")?;
@@ -48,7 +48,7 @@ mod tests {
     let mut request=Vec::new();let mut buffer=[0;1024];
     while !request.windows(4).any(|part|part==b"\r\n\r\n") {let n=stream.read(&mut buffer).unwrap();assert!(n>0);request.extend_from_slice(&buffer[..n]);}
     if String::from_utf8_lossy(&request).starts_with("GET /v1/center-endpoints "){write!(stream,"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();continue;}
-    assert!(String::from_utf8_lossy(&request).starts_with("GET /v1/sdk-config?metric_windows=1 "));
+    assert!(String::from_utf8_lossy(&request).starts_with("GET /v1/sdk-config "));
     let body=body.to_string();
     write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
    }

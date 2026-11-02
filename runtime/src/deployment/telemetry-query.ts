@@ -39,8 +39,7 @@ const timeType = /^DateTime64\([0-9],\s*'UTC'\)$/;
 
 function usableTable(table: Table, binding: TelemetryBinding): boolean {
   if (table.name !== binding.table || table.system !== false ||
-      !validTable(table.logical_name) || systemTable(table.logical_name) ||
-      (table as Table & { is_compat_alias?: number | boolean }).is_compat_alias) return false;
+      !validTable(table.logical_name) || systemTable(table.logical_name)) return false;
   if (table.kind === "metric" ? !["sum", "gauge", "histogram"].includes(table.metric_type ?? "") :
       !["log", "trace"].includes(table.kind) || !!table.metric_type) return false;
   if (publicTableName(table.logical_name, table.kind, table.metric_type) !== table.name) return false;

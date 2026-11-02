@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, normalize } from "node:path";
-import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { pipeline } from "node:stream/promises";
 import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import { createAgentLifecycleSchema, isAgentRemoved } from "./agent-lifecycle.js";
@@ -328,30 +326,6 @@ export function registerServiceDeployments(
     CREATE INDEX IF NOT EXISTS deployment_events_deployment ON deployment_events(deployment_id,created_at,id);
   `);
 
-  const releaseColumns = new Set(db.all<{ name: string }>("PRAGMA table_info(releases)").map((column) => column.name));
-  if (!releaseColumns.has("artifact_size")) db.exec("ALTER TABLE releases ADD COLUMN artifact_size INTEGER NOT NULL DEFAULT 0");
-  if (!releaseColumns.has("artifact_format")) db.exec("ALTER TABLE releases ADD COLUMN artifact_format TEXT NOT NULL DEFAULT ''");
-
-  // Existing installations created before the approval slice need the new
-  // metadata columns without a destructive migration. SQLite permits adding
-  // these NOT NULL columns because every one has a constant default.
-  const columns = new Set(db.all<{ name: string }>("PRAGMA table_info(deployments)").map((column) => column.name));
-  for (const [name, definition] of [
-    ["previous_json", "TEXT NOT NULL DEFAULT '{}'"],
-    ["target_snapshot_json", "TEXT NOT NULL DEFAULT '{}'"],
-    ["error_code", "TEXT NOT NULL DEFAULT ''"],
-    ["phase", "TEXT NOT NULL DEFAULT 'awaiting_approval'"],
-    ["operation_id", "TEXT NOT NULL DEFAULT ''"],
-    ["operation_kind", "TEXT NOT NULL DEFAULT 'deploy'"],
-    ["approved_by", "TEXT NOT NULL DEFAULT ''"],
-    ["telemetry_json", "TEXT NOT NULL DEFAULT '{}'"],
-  ] as const) {
-    if (!columns.has(name)) db.exec(`ALTER TABLE deployments ADD COLUMN ${name} ${definition}`);
-  }
-  // The default is useful for new plans, but an older completed row must not
-  // be reported as if it were still awaiting approval after migration.
-  db.run("UPDATE deployments SET phase=status WHERE phase='awaiting_approval' AND status<>'awaiting_approval'");
-
   const ensureService = (serviceID: string) => {
     if (!SERVICE_ID.test(serviceID)) fail(400, "invalid service_id");
     const row = db.get<any>("SELECT * FROM services WHERE id=?", serviceID);
@@ -463,10 +437,8 @@ export function registerServiceDeployments(
     const machine = ensureMachine(machineID);
     if (!machine.agent_id) return false;
     if (isAgentRemoved(db, machine.agent_id)) return false;
-    // Test fixtures and older databases may not have the agents table yet;
-    // an explicit machine binding is sufficient in that compatibility mode.
     const hasAgents = db.get<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='agents'");
-    if (!hasAgents) return true;
+    if (!hasAgents) return false;
     const agent = db.get<any>("SELECT id,last_seen FROM agents WHERE id=?", machine.agent_id);
     if (!agent) return false;
     const seen = Date.parse(agent.last_seen || "");
@@ -1080,26 +1052,6 @@ export function registerServiceDeployments(
       artifactWork = undefined;
     }
   }));
-
-  router.get("/api/v1/agents/:agentId/jobs/:jobId/artifacts/:releaseId", safe(deps, async (ctx) => {
-    if (!options.jobs?.authorizeArtifact) fail(503, "agent artifact authorization unavailable");
-    if (!options.artifacts) fail(503, "release artifact storage unavailable");
-    const access = options.jobs.authorizeArtifact(ctx, ctx.params.agentId, ctx.params.jobId, ctx.params.releaseId);
-    const artifact = await options.artifacts.inspect(access.sha256);
-    if (!artifact || artifact.size !== access.size) fail(404, "artifact not found");
-    ctx.res.writeHead(200, {
-      "cache-control": "private, no-store",
-      "content-type": RELEASE_BUNDLE_CONTENT_TYPE,
-      "content-length": artifact.size,
-      "content-disposition": 'attachment; filename="lightmoni-release-v1.tar.gz"',
-      "x-artifact-sha256": artifact.sha256,
-      "x-artifact-format": "lightmoni-release-v1.tar.gz",
-      "x-content-type-options": "nosniff",
-      vary: "Authorization, X-LightMoni-Job-Lease",
-    });
-    if (ctx.req.method === "HEAD") { ctx.res.end(); return; }
-    await pipeline(createReadStream(artifact.path), ctx.res, { signal: ctx.signal });
-  }), { public: true });
 
   router.get("/api/v1/services/:id/deployments", safe(deps, (ctx) => { admin(deps, ctx); ctx.json(deployments(ctx.params.id)); }));
   router.post("/api/v1/services/:id/deployments/plan", safe(deps, async (ctx) => {

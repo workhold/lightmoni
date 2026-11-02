@@ -104,7 +104,7 @@ export function parameters(def: CatalogDefinition, input: unknown): Input {
     fail(400, "invalid_catalog_parameters");
   const source = input as Input,
     out: Input = {};
-  const known = new Set([...def.template.parameters.map((p) => p.key), "port"]); // legacy first-port override
+  const known = new Set(def.template.parameters.map((p) => p.key));
   if (Object.keys(source).some((k) => !known.has(k)))
     fail(400, "invalid_catalog_parameter");
   for (const p of def.template.parameters) {
@@ -166,15 +166,6 @@ export function parameters(def: CatalogDefinition, input: unknown): Input {
         fail(400, "invalid_catalog_parameter");
     }
     out[p.key] = v;
-  }
-  if (source.port !== undefined && source.port !== null && source.port !== "") {
-    if (
-      !Number.isInteger(source.port) ||
-      source.port < 0 ||
-      source.port > 65535
-    )
-      fail(400, "invalid_catalog_parameter");
-    out.port = source.port;
   }
   return out;
 }

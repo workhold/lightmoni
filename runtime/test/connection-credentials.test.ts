@@ -43,7 +43,7 @@ test("vault deduplicates actual SSH public keys, never extends retention, and ne
 test("one vault secret binds multiple hosts with automatic default selection; detaching and deleting a host preserve the shared source",async t=>{
   const f=await fixture(t),a=await f.host("first"),b=await f.host("second"),secret=fixturePrivateKey(),key=await f.key(secret),one=await f.bind(a,key.id),two=await f.bind(b,key.id);
   assert.notEqual(one.credential_id,two.credential_id);assert.equal(f.machines.get(a).default_credential_id,one.credential_id);
-  const bindings=f.db.all<any>("SELECT * FROM machine_credentials");assert.ok(bindings.every(value=>value.secret_encrypted===""));assert.equal(f.db.all("SELECT * FROM connection_credentials").length,1);
+  const bindings=f.db.all<any>("SELECT * FROM machine_credentials");assert.ok(bindings.every(value=>!("secret_encrypted" in value)));assert.equal(f.db.all("SELECT * FROM connection_credentials").length,1);
   const checked=await f.request(`/machines/${a}/ssh-check`,"POST",{});assert.equal(checked.status,200,checked.raw);assert.equal(checked.data.credential_id,one.credential_id);assert.equal(f.calls[0].privateKey,secret.trim());
   const detail=await f.request(`/machines/${a}`);assert.equal(detail.data.credentials[0].connection_credential_id,key.id);assert.equal(detail.data.credentials[0].is_default,1);
   assert.equal((await f.request(`/machines/${a}/credentials/${one.credential_id}`,"DELETE")).status,200);
@@ -101,30 +101,4 @@ test("one-time password sources cannot be shared or rebound after consumption",a
   assert.equal((await f.request(`/machines/${a}/ssh-check`,"POST",{})).data.ready,true);
   for(const mid of [a,b])assert.equal((await f.request(`/machines/${mid}/credentials`,"POST",{connection_credential_id:created.data.id})).status,409);
   assert.equal(f.db.get<any>("SELECT secret_encrypted FROM connection_credentials WHERE id=?",created.data.id)?.secret_encrypted,"");
-});
-
-test("upgrade preserves binding IDs and each deadline while deduplicating real keys and never storing password fingerprints",async t=>{
-  const f=await fixture(t),a=await f.host("old-a"),b=await f.host("old-b"),secret=fixturePrivateKey(),created="2026-10-30T00:00:00.000Z";
-  const seed=(mid:string,cid:string,method:string,value:string,expires:string)=>f.db.run(`INSERT INTO machine_credentials(id,machine_id,method,secret_encrypted,secret_fingerprint,retention,policy_source,created_at,expires_at,created_by) VALUES(?,?,?,?,?,'managed','legacy',?,?,?)`,cid,mid,method,f.deps.encrypt(JSON.stringify({machine_id:mid,credential_id:cid,secret:value})),method==="password"?"old-password-hash":"old-private-hash",created,expires,"admin");
-  seed(a,"old-short","ssh_key",secret,"2026-10-30T01:00:00.000Z");seed(b,"old-long","ssh_key",secret,"2026-10-30T02:00:00.000Z");seed(a,"old-password","password"," old pass ","2026-10-30T01:00:00.000Z");
-  f.machines.close?.();f.db.run("DELETE FROM connection_credential_migrations");
-  const restarted=registerManagedMachines({...f.deps,router:new Router()});t.after(()=>restarted.close?.());
-  const short=f.db.get<any>("SELECT * FROM effective_machine_credentials WHERE id='old-short'")!,long=f.db.get<any>("SELECT * FROM effective_machine_credentials WHERE id='old-long'")!;
-  assert.equal(short.connection_credential_id,long.connection_credential_id);assert.equal(short.expires_at,"2026-10-30T01:00:00.000Z");assert.equal(long.expires_at,"2026-10-30T02:00:00.000Z");assert.match(short.secret_fingerprint,/^SHA256:/);
-  assert.ok(f.db.all<any>("SELECT secret_encrypted FROM machine_credentials").every(value=>value.secret_encrypted===""));assert.equal(f.db.get<any>("SELECT secret_fingerprint FROM machine_credentials WHERE id='old-password'")?.secret_fingerprint,"");
-  f.advance(61*60_000);assert.equal(restarted.get(a).active_credential_count,0);assert.equal(restarted.get(b).active_credential_count,1);
-});
-
-test("unreadable legacy envelopes are quarantined without exposing, selecting, or destroying encrypted recovery material",async t=>{
-  const f=await fixture(t),mid=await f.host("invalid-legacy"),created="2026-10-30T00:00:00.000Z";
-  for(const [cid,encrypted] of [["malformed",f.deps.encrypt(JSON.stringify({machine_id:mid,credential_id:"malformed",secret:"not a private key"}))],["undecryptable","encrypted-with-an-unavailable-old-key"]])f.db.run(`INSERT INTO machine_credentials(id,machine_id,method,secret_encrypted,retention,created_at,expires_at,created_by) VALUES(?,?,'ssh_key',?,'permanent',?,'','admin')`,cid,mid,encrypted,created);
-  f.db.run("UPDATE machine_credentials SET retention='managed',expires_at='2026-10-30T01:00:00.000Z' WHERE id='malformed'");
-  f.machines.close?.();f.db.run("DELETE FROM connection_credential_migrations");
-  const restarted=registerManagedMachines({...f.deps,router:new Router()});t.after(()=>restarted.close?.());
-  assert.equal(restarted.get(mid).active_credential_count,0);assert.equal(restarted.get(mid).default_credential_id,"");assert.equal(restarted.get(mid).capabilities.terminal.available,false);
-  const history=f.db.all<any>("SELECT * FROM machine_credentials WHERE machine_id=?",mid);assert.equal(history.length,2);assert.ok(history.every(value=>value.quarantined_at&&value.secret_encrypted));
-  assert.ok(f.db.all<any>("SELECT * FROM effective_machine_credentials WHERE machine_id=?",mid).every(value=>value.secret_encrypted===""&&value.secret_cleared_at&&value.clear_reason==="invalid"));
-  f.advance(3_600_001);restarted.get(mid);
-  assert.equal(f.db.get<any>("SELECT secret_encrypted FROM machine_credentials WHERE id='malformed'")?.secret_encrypted,"");
-  assert.ok(f.db.get<any>("SELECT secret_encrypted FROM machine_credentials WHERE id='undecryptable'")?.secret_encrypted);
 });

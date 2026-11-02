@@ -1,4 +1,5 @@
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
+const test = (name:string, work:(t:any)=>any) => nodeTest(name,{skip:process.platform!=='linux'||process.geteuid?.()!==0},work);
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, symlink, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

@@ -10,7 +10,7 @@ import {registerAgentCredentials} from "../src/server/agent-credentials.js";
 import {registerManagedMachines,type SSHRunner} from "../src/server/managed-machines.js";
 import {NodeStore} from "../src/server/nodes-model.js";
 import {TaskRunStore} from "../src/server/task-center.js";
-import {registerAgentJobs} from "../src/server/agent-jobs.js";
+import {registerAgentJobs} from "./helpers/domain-jobs.js";
 import {SSHError} from "../src/server/machine-ssh.js";
 import {fixturePrivateKey} from "./helpers/ssh-key.js";
 import {pendingMachineInstallation} from "../src/server/machine-installations-guard.js";

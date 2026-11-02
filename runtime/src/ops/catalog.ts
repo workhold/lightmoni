@@ -27,12 +27,6 @@ export const applicationCatalog: CatalogTemplate[] = [
         type: "password",
         required: true,
       },
-      {
-        key: "port",
-        label: "宿主端口（0 自动分配）",
-        type: "number",
-        default: 0,
-      },
     ],
     spec: {
       mode: "compose",
@@ -111,12 +105,6 @@ export const applicationCatalog: CatalogTemplate[] = [
       "默认启用本机持久化；故障调度不会复制数据或建立 Redis 主从。",
     parameters: [
       { key: "password", label: "访问密码", type: "password", required: true },
-      {
-        key: "port",
-        label: "宿主端口（0 自动分配）",
-        type: "number",
-        default: 0,
-      },
     ],
     spec: {
       mode: "container",
@@ -152,6 +140,8 @@ export function catalogInstallation(id: string, input: Input) {
     p = input.parameters ?? {};
   if (!p || typeof p !== "object" || Array.isArray(p))
     fail(400, "invalid_catalog_parameters");
+  if (Object.keys(p).some(key => !template.parameters.some(parameter => parameter.key === key)))
+    fail(400, "invalid_catalog_parameter");
   const extended = extendedInstallation(id,input);
   for (const parameter of extended ? [] : template.parameters)
     if (
@@ -195,8 +185,7 @@ export function catalogInstallation(id: string, input: Input) {
   }
   if (id === "redis") spec.environment.REDIS_PASSWORD = p.password;
   if (!extended && spec.ports.length && id !== 'openresty')
-    spec.ports[0].host_port = p.port !== undefined && p.port !== null && p.port !== ''
-      ? p.port : input.deployment_mode === 'managed' ? 0 : spec.ports[0].container_port;
+    spec.ports[0].host_port = input.deployment_mode === 'managed' ? 0 : spec.ports[0].container_port;
   const overrides=hostPortOverrides(input.host_ports,spec.ports);
   if(id==='openresty'&&(overrides&&Object.keys(overrides).some(name=>overrides[name]!==spec.ports.find((p:Input)=>p.name===name)?.host_port)||input.listen_ip!==undefined))fail(400,'openresty_fixed_host_ports');
   if(input.listen_ip!==undefined&&!['0.0.0.0','127.0.0.1'].includes(input.listen_ip))fail(400,'invalid_listen_ip');

@@ -1,3 +1,4 @@
+import {inlineFixtureCommands} from './helpers/maintenance-shell.js';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
@@ -22,7 +23,7 @@ function fixture(t: any, failStop = false) {
   const rewrite = (script: string) => {
     return rewriteMaintenancePaths(script,root).replaceAll("/tmp/lightmoni-agent-bootstrap.XXXXXX", join(root, "tmp/lightmoni-agent-bootstrap.XXXXXX"));
   };
-  const run = (command: string, input?: string) => spawnSync("sh", ["-c", rewrite(command)], { encoding: "utf8", input, env: { ...process.env, PATH: commandDir + ":" + process.env.PATH } });
+  const run = (command: string, input?: string) => spawnSync("sh", ["-c", inlineFixtureCommands(commandDir)+rewrite(command)], { encoding: "utf8", input, env: { ...process.env, PATH: commandDir + ":" + process.env.PATH } });
   return { root, run, commandDir, state };
 }
 test("fixed Agent probe and uninstall preserve identity, configuration and accepted queue", t => {

@@ -15,7 +15,7 @@ import { createAgentUpdatesSchema } from "../src/server/machine-agent-updates.js
 import { AgentReleaseCatalog } from "../src/server/machine-agent-updates-catalog.js";
 import { assertNoPendingAgentUpdate } from "../src/server/machine-agent-updates-guard.js";
 import { TaskRunStore } from "../src/server/task-center.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { SCRIPT_TASK_CAPABILITY } from "../src/shared/task-center.js";
 
 const OLD_BOOT = "11111111-1111-4111-8111-111111111111", NEW_BOOT = "22222222-2222-4222-8222-222222222222";
@@ -116,7 +116,7 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     const credential = await request(`/machines/${mid}/credentials`, "POST", { method: "password", secret: "  actual-login-secret\t", retention: "managed", confirm_managed: true });
     assert.equal(credential.status, 201, credential.raw);
     db.run("UPDATE managed_machines SET agent_id=?,platform='linux',arch='amd64',host_key_fingerprint=? WHERE id=?", agent, "SHA256:fixture-server-identity", mid);
-    db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat,group_id) VALUES(?,?,?,'0.1.0','linux','amd64',?,?,'default')", agent, "identity-" + mid, name, clock.toISOString(), JSON.stringify({ version: "0.1.0", boot_id: OLD_BOOT, release: oldRelease, task_capabilities: [SCRIPT_TASK_CAPABILITY] }));
+    db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES(?,?,?,'0.1.0','linux','amd64',?,?)", agent, "identity-" + mid, name, clock.toISOString(), JSON.stringify({ version: "0.1.0", boot_id: OLD_BOOT, release: oldRelease, task_capabilities: [SCRIPT_TASK_CAPABILITY] }));
     observations.set(mid, { schema: 1, ready: true, agent_id: agent, arch: "amd64", service_active: true, lifecycle_locked: false, operation_lock: false,
       current: { ...oldRelease }, previous: { ...previousRelease } });
     return { id: mid, agent, credential: credential.data.credential_id };

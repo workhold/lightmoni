@@ -51,7 +51,7 @@ function systemdOutput(releaseDirectory: string, options: { loadState?: string; 
 
 function makeReleaseRoot(path: string) {
   mkdirSync(path, { recursive: true });
-  chmodSync(path, 0o775);
+  chmodSync(path, 0o755);
 }
 
 test("capability executor stages matching digest and atomically activates release", { skip: !linuxRoot }, async () => {
@@ -96,7 +96,7 @@ test("capability executor rejects bad digest, path escape, unit mismatch and unk
   const digestFailure = await executor.execute({ id: "bad", expires_at: "2026-10-22T00:10:00Z", capabilities: ["artifact.stage"], target: { releaseDirectory: release, unit: "checkout.service" }, actions: [base] });
   assert.equal(digestFailure.code, "digest_mismatch");
   const pathFailure = await executor.execute({ id: "bad", expires_at: "2026-10-22T00:10:00Z", capabilities: ["artifact.stage"], target: { releaseDirectory: release, unit: "checkout.service" }, actions: [{ ...base, destination: "../../outside" }] });
-  assert.equal(pathFailure.code, "invalid_target");
+  assert.equal(pathFailure.code, "invalid_artifact");
   const arbitrarySource = await executor.execute({ id: "bad", expires_at: "2026-10-22T00:10:00Z", capabilities: ["artifact.stage"], target: { releaseDirectory: release, unit: "checkout.service" }, actions: [{ ...base, source: "https://example.invalid/artifact" } as any] });
   assert.equal(arbitrarySource.code, "invalid_artifact");
   const unitFailure = await executor.execute({ id: "bad", expires_at: "2026-10-22T00:10:00Z", capabilities: ["systemd.restart"], target: { releaseDirectory: release, unit: "checkout.service" }, actions: [{ kind: "systemd", operation: "restart", unit: "other.service" }] });
@@ -165,7 +165,7 @@ test("protected release path permits a root-owned sticky shared ancestor such as
   const base = mkdtempSync(join(shared, "lightmoni-sticky-release-"));
   const release = join(base, "service");
   mkdirSync(join(release, "releases", "v1"), { recursive: true });
-  chmodSync(release, 0o775);
+  chmodSync(release, 0o755);
   writeFileSync(join(release, "releases", "v1", "run"), "#!/bin/sh\n", { mode: 0o555 });
   symlinkSync("releases/v1", join(release, "current"));
   const result = await new CapabilityExecutor({
@@ -192,7 +192,7 @@ test("bundle paths reserved for credentials are rejected while runtime payloads 
     architecture: process.arch === "arm64" ? "linux-arm64" as const : "linux-amd64" as const,
     destination: "releases/v1", sha256: digest(privateBundle), size: privateBundle.length,
   };
-  const result = await new CapabilityExecutor({ downloadArtifact: async () => privateBundle }).execute({
+  const result = await new CapabilityExecutor({ now: () => new Date("2026-10-22T00:00:00Z"), downloadArtifact: async () => privateBundle }).execute({
     id: "job", expires_at: "2026-10-22T00:10:00Z", capabilities: ["artifact.stage"],
     target: { releaseDirectory: release, unit: "checkout.service" }, actions: [action],
   });
@@ -203,7 +203,7 @@ test("bundle paths reserved for credentials are rejected while runtime payloads 
 test("release activation compares the prior symlink and leaves a changed current untouched", { skip: !linuxRoot }, async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "lightmoni-activate-cas-")), release = join(root, "service");
   mkdirSync(join(release, "releases", "v0"), { recursive: true });
-  chmodSync(release, 0o775);
+  chmodSync(release, 0o755);
   writeFileSync(join(release, "releases", "v0", "run"), "#!/bin/sh\n", { mode: 0o550 });
   symlinkSync("releases/v0", join(release, "current"));
   const bytes = releaseBundle({ service_id: "a".repeat(32), version: "v1", architecture: process.arch === "arm64" ? "linux-arm64" : "linux-amd64" });
@@ -232,7 +232,7 @@ test("release activation compares the prior symlink and leaves a changed current
 test("systemd preflight is read-only, target-bound, structured, and redacts command output", { skip: !linuxRoot }, async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "lightmoni-preflight-")), release = join(root, "service");
   mkdirSync(join(release, "releases", "v1"), { recursive: true });
-  chmodSync(release, 0o775);
+  chmodSync(release, 0o755);
   symlinkSync("releases/v1", join(release, "current"));
   const calls: string[][] = [];
   const executor = new CapabilityExecutor({

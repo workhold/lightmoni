@@ -8,9 +8,6 @@ export type ResourceKind =
   | "certificate_target"
   | "cluster"
   | "application"
-  | "service"
-  | "node_pool"
-  | "gateway_group"
   | "website";
 export interface PlatformResource {
   id: string;

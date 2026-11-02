@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { DB } from "../src/shared/sqlite.js";
 import { Router, fail } from "../src/shared/http.js";
 import { cipher } from "../src/shared/crypto.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { registerOperations } from "../src/server/operations.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
 import { getCertificateMaterial } from "../src/ops/certificates.js";
@@ -93,9 +93,8 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
     jobs,
     credentials,
     definitions: [],
-    resolvePayload: platform.resolvePayload,
   });
-  const server = createServer((req, res) => void router.handle(req, res));
+  const server = createServer((req, res) => void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));
   server.listen(0, bindAll?"0.0.0.0":"127.0.0.1");
   await once(server, "listening");
   const base = "http://127.0.0.1:" + (server.address() as any).port;
@@ -572,14 +571,14 @@ test("ordinary Agent refuses legacy certificate directory and hook writes withou
     assert.ok(legacy);
     const forced = new AgentJobRunner({endpoint:f.base,agentID:"node-a",controlCredential:"qa-control",dataDir:join(f.root,"ordinary-agent")}, {
       command: async (file) => { commands.push(file); throw Error("legacy write must remain denied"); },
-      fetch: (async (url: any, init: RequestInit) => String(url).endsWith("/jobs/claim") ? Response.json({job:legacy}) : observeFetch(url, init)) as typeof fetch,
+      fetch: (async (url: any, init: RequestInit) => String(url).endsWith("/jobs/claim") ? Response.json({job:legacy}) : Response.json({})) as typeof fetch,
     });
     const receipt = await forced.pollOnce();
     assert.equal(receipt?.state, "failed");
     assert.equal(receipt?.code, "privileged_executor_required");
     const saved = f.jobs.get(legacy.id);
-    assert.equal(saved.state, "failed");
-    assert.equal(saved.receipt.code, "privileged_executor_required");
+    assert.equal(saved.state, "leased");
+    f.jobs.cancel(legacy.id,"admin");
   }
   assert.deepEqual(commands, []);
   assert.ok(calls.every(call => !/\/operations$|\/artifacts\//.test(call.url)));

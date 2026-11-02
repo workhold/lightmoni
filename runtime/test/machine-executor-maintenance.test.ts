@@ -22,7 +22,7 @@ async function fixture(t:any){
   auth:{user(req:any){return req.headers.cookie==="lm_session=fixture"&&db.get("SELECT id FROM users WHERE id=? AND active=1",user.id)?user:undefined;},requireAdmin(c:any){if(c.user.role!=="admin")fail(403,"admin_required");}},
   logger:{info(...v:any[]){logs.push(v)},warn(...v:any[]){logs.push(v)},error(...v:any[]){logs.push(v)}}} as unknown as Dependencies;
  router.auth=deps.auth;const tasks=registerTaskCenter(deps);
- db.exec("CREATE TABLE users(id TEXT PRIMARY KEY,name TEXT,role TEXT,active INTEGER);CREATE TABLE agent_jobs(id TEXT PRIMARY KEY,agent_id TEXT,state TEXT)");
+ db.exec("CREATE TABLE users(id TEXT PRIMARY KEY,name TEXT,role TEXT,active INTEGER);CREATE TABLE agent_jobs(id TEXT PRIMARY KEY,agent_id TEXT,state TEXT,execution_principal TEXT NOT NULL DEFAULT 'ordinary_agent')");
  db.run("INSERT INTO users VALUES('admin','Admin','admin',1)");
  db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('host','Reviewed host','host.example.test',22,'root','direct_ssh','agent-host',?,?)",clock.toISOString(),clock.toISOString());
  const executors=registerPrivilegedExecutors(deps,{dataDir:"/unused"});

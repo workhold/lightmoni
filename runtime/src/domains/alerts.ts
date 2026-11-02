@@ -15,7 +15,6 @@ import {
 } from "./common.js";
 import {
   allowedResponse,
-  fillLegacyPolicies,
   notificationMethods,
   onCall,
   policy,
@@ -292,13 +291,11 @@ export class Alerts implements Module {
     return row ? parseJSON(row.body) : undefined;
   }
   groups(): any[] {
-    return this.list("SELECT body FROM alert_groups ORDER BY name").map(
-      fillLegacyPolicies,
-    );
+    return this.list("SELECT body FROM alert_groups ORDER BY name");
   }
   group(key: string): any {
     const g = this.body("alert_groups", key);
-    return g && fillLegacyPolicies(g);
+    return g;
   }
   rules(): any[] {
     return this.list("SELECT body FROM alert_rules ORDER BY id");

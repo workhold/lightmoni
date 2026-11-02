@@ -455,7 +455,7 @@ class Client:
         self._state.set_disabled(disabled)
         self._state.remote_config, self._state.config_endpoint = remote_config, config_url
         self._state.config_key, self._state.config_interval = config_key, config_interval
-        self._state.self_enabled, self._state.self_table = bool(self_telemetry), "lightmoni_sdk"
+        self._state.self_enabled, self._state.self_table = bool(self_telemetry), "lightmoni"
         reference, stop, table = weakref.ref(self._state), self._state.stop, self.table
         def collect():
             while not stop.wait(10):
@@ -665,7 +665,7 @@ class Client:
                     raise RuntimeError("SDK configuration disabled or closed")
                 key = s.key if s.config_key is None else s.config_key
             endpoint = s.endpoints.resolve(s.key, deadline) if s.config_endpoint == s.endpoint else s.config_endpoint
-            request = Request(endpoint + "/v1/sdk-config?metric_windows=1", deadline)
+            request = Request(endpoint + "/v1/sdk-config", deadline)
             with s.lock:
                 s.config_request = request
             headers = {"Authorization": "Bearer " + key} if key else {}
@@ -734,7 +734,7 @@ class Client:
                 if remaining <= 0:
                     raise TimeoutError("flush deadline exceeded; batches retained")
                 seq, identity, created, table, signal, payload, count = item
-                if table == "lightmoni_sdk" and not key:
+                if table == "lightmoni" and not key:
                     with s.lock:
                         if s.queue and s.queue[0] is item:
                             s.queue.pop(0)

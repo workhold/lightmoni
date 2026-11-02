@@ -15,7 +15,7 @@ const oneTimeKey='fixture_sdk_secret_displayed_only_once';
 const catalog=[
   {id:'log_web',name:'log_web',logical_name:'web',kind:'log',columns:[],services:['web-prod'],retention_days:null,effective_retention_days:7},
   {id:'metric_web_count',name:'metric_web_count',logical_name:'web',kind:'metric',columns:[],services:['web-prod'],retention_days:30,effective_retention_days:30},
-  {id:'log_lightmoni_center',name:'log_lightmoni_center',logical_name:'lightmoni_center',kind:'log',columns:[],services:['lightmoni'],system:true,retention_days:null,effective_retention_days:7},
+  {id:'lightmoni_log',name:'lightmoni_log',logical_name:'lightmoni',kind:'log',columns:[],services:['lightmoni'],system:true,retention_days:null,effective_retention_days:7},
 ];
 const packages=[['typescript','TypeScript / Node.js'],['python','Python'],['ruby','Ruby']].map(([id,language])=>({id,language,runtime:language,file:id+'.tar.gz',url:origin+'/downloads/'+id+'.tar.gz',available:true}));
 const install={endpoint:'https://platform.example',endpoints:[],version:'0.1.0',packages,deferred:[{id:'go',language:'Go'},{id:'rust',language:'Rust'}],checksums_url:''};
@@ -213,7 +213,7 @@ try {
   await dialog.getByRole('spinbutton',{name:'单表保留天数',exact:true}).fill('14');await dialog.getByRole('button',{name:buttonName('保存时长')}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(row(page,'log_web')).toContainText('14 天');expect(requestBody('PUT','/api/v1/catalog/tables/log_web/retention')).toEqual({retention_days:14});
   await row(page,'log_web').getByRole('button',{name:buttonName('上报规则')}).click();dialog=page.getByRole('dialog');await expect(dialog).toContainText('日志上报规则');await expect(dialog.getByRole('button',{name:buttonName('保存并下发')})).toBeEnabled();await modalClose(page);
-  await expect(row(page,'log_lightmoni_center').getByRole('button',{name:buttonName('上报规则')})).toHaveCount(0);
+  await expect(row(page,'lightmoni_log').getByRole('button',{name:buttonName('上报规则')})).toHaveCount(0);
   failOnce('/catalog/tables');await page.getByRole('button',{name:buttonName('刷新数据表')}).click();await expect(page.getByText('数据表目录加载失败',{exact:true})).toBeVisible();
   await expect(row(page,'log_web')).toContainText('14 天');await expect(page.getByText('当前显示上次成功加载的目录，请刷新后确认最新设置。',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:buttonName('重试')}).click();await expect(page.getByText('数据表目录加载失败',{exact:true})).toHaveCount(0);

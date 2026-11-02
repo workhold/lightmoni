@@ -183,12 +183,7 @@ export function fromEvent(
     output_tokens: output,
     total_tokens: total,
     currency: s("currency"),
-    estimated_cost:
-      typeof d.estimated_cost === "number" &&
-      Number.isFinite(d.estimated_cost) &&
-      d.estimated_cost >= 0
-        ? d.estimated_cost
-        : null,
+    estimated_cost: null,
     input_price_per_million: null,
     output_price_per_million: null,
     input_estimated_cost: null,
@@ -199,7 +194,7 @@ export function fromEvent(
     if (terminal(s("status")) || s("status") === "pending")
       record.status = s("status");
   }
-  if (record.estimated_cost != null) record.cost_status = "legacy";
+  record.cost_status = "unpriced";
   return record;
 }
 export function merge(
@@ -226,7 +221,7 @@ export function merge(
     r.total_tokens = sumCount(r.input_tokens, r.output_tokens);
   return price(r, existing);
 }
-// RFC3339 nanoseconds are indexed separately so imported Go timestamps retain ordering.
+// Index nanoseconds separately to retain exact ordering.
 function instant(value: string): [number, number] {
   if (
     typeof value !== "string" ||
@@ -306,45 +301,6 @@ export class Store {
     });
   }
   recover(): void {
-    for (const row of this.db.all<{ id: string; value: any }>(
-      `SELECT id,value FROM assistant_records WHERE substr(id,1,8)='session/'`,
-    )) {
-      let session: Session;
-      try {
-        session = decode(row.value);
-      } catch {
-        continue;
-      }
-      const parts = row.id.split("/");
-      for (const event of session.events ?? []) {
-        const r = fromEvent(
-          {
-            ...event,
-            session_id:
-              event.session_id || session.id || parts.slice(2).join("/"),
-          },
-          "assistant",
-        );
-        if (!r) continue;
-        r.user_id = session.user_id || parts[1];
-        const timestamp = [
-          r.timestamp,
-          session.updated_at,
-          session.created_at,
-        ].find((t) => {
-          try {
-            instant(t);
-            return true;
-          } catch {
-            return false;
-          }
-        });
-        if (timestamp) {
-          r.timestamp = timestamp;
-          this.record(r);
-        }
-      }
-    }
     for (const row of this.db.all<{ value: any }>(
       `SELECT value FROM assistant_usage WHERE json_extract(CAST(value AS TEXT),'$.status')='pending'`,
     )) {

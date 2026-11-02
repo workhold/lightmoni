@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DB } from "../src/shared/sqlite.js";
 import { Router } from "../src/shared/http.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import type { Dependencies } from "../src/shared/types.js";
 
 function fixture(expirySweepIntervalMs?: number) {

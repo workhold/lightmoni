@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {DB} from '../../src/shared/sqlite.js';
 import {Router,fail} from '../../src/shared/http.js';
 import {cipher} from '../../src/shared/crypto.js';
-import {registerAgentJobs} from '../../src/server/agent-jobs.js';
+import {registerAgentJobs} from '../helpers/domain-jobs.js';
 import {registerOperationsPlatform} from '../../src/ops/index.js';
 import {AgentJobRunner} from '../../src/agent/jobs.js';
 import type {OperationExecutionContext} from '../../src/operations/types.js';

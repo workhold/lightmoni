@@ -4,21 +4,21 @@ import {catalogInstallation} from '../src/ops/catalog.js';
 import {installationState} from '../../web/src/app/ops/install-state.js';
 test('catalog manual ports match the container, managed ports allocate automatically, explicit ports survive both modes',()=>{
  for(const [id,port] of [['redis',6379],['mysql',3306]] as const){
-  const parameters={password:'qa-hidden',user_password:'qa-hidden'};
-  const install=(mode:string,p:unknown={})=>catalogInstallation(id,{deployment_mode:mode,parameters:{...parameters,...p as object}}).spec.ports[0].host_port;
+  const parameters=id==='mysql'?{password:'qa-hidden',user_password:'qa-hidden'}:{password:'qa-hidden'};
+  const install=(mode:string,mapping?:number)=>catalogInstallation(id,{deployment_mode:mode,parameters,host_ports:mapping===undefined?undefined:{[id]:mapping}}).spec.ports[0].host_port;
   assert.equal(install('manual'),port);assert.equal(install('managed'),0);
-  for(const mode of ['manual','managed']){assert.equal(install(mode,{port:16379}),16379);assert.equal(install(mode,{port:0}),0)}
-  assert.equal(install('manual',{port:null}),port);assert.equal(install('managed',{port:''}),0);
+  for(const mode of ['manual','managed']){assert.equal(install(mode,16379),16379);assert.equal(install(mode,0),0)}
  }
- assert.equal(catalogInstallation('openresty',{deployment_mode:'managed',parameters:{port:1234}}).spec.ports[0].host_port,80);
+ assert.equal(catalogInstallation('openresty',{deployment_mode:'managed',parameters:{}}).spec.ports[0].host_port,80);
 });
-test('catalog named mappings validate the full port contract and retain the legacy port parameter',()=>{
+test('catalog named mappings validate the full port contract and use named port mappings',()=>{
  const install=(input:any)=>catalogInstallation('registry',input).spec;
  assert.equal(install({host_ports:{registry:15000},listen_ip:'127.0.0.1'}).ports[0].host_port,15000);
- assert.equal(install({parameters:{port:15001},host_ports:{registry:0}}).ports[0].host_port,0);
- assert.equal(install({parameters:{port:15001}}).ports[0].host_port,15001);
+ assert.equal(install({host_ports:{registry:0}}).ports[0].host_port,0);
+ assert.equal(install({host_ports:{registry:15001}}).ports[0].host_port,15001);
  for(const host_ports of [null,[],{unknown:1},{registry:-1},{registry:65536},{registry:1.5},{registry:'5000'}])assert.throws(()=>install({host_ports}),/invalid_host_ports/);
  assert.throws(()=>install({listen_ip:'8.8.8.8'}),/invalid_listen_ip/);
+ for (const id of ['registry','redis','mysql','postgresql']) assert.throws(()=>catalogInstallation(id,{parameters:{port:15000}}),/invalid_catalog_parameter/);
  assert.throws(()=>catalogInstallation('openresty',{host_ports:{http:8080}}),/openresty_fixed_host_ports/);
 });
 test('installation completion requires all published deployments and healthy instances, without hiding partial or unknown outcomes',()=>{

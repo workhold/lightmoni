@@ -13,72 +13,10 @@ import { Catalog } from "../src/server/catalog.js";
 import {
   Ingest,
   normalize,
-  legacyDecimal,
   stamp,
 } from "../src/server/ingest.js";
 import { sdkConfiguration, sampling } from "../src/server/settings.js";
-import { goJSON, nowNano } from "../src/shared/otlp.js";
-const golden = JSON.parse(
-  readFileSync(
-    resolve(import.meta.dirname, "fixtures/go-center-compat.json"),
-    "utf8",
-  ),
-);
-test("historical Go trace event/link JSON and decimal half-even rounding retain exact stored representation", () => {
-  const row = normalize(
-    "traces",
-    golden.trace,
-    "2026-10-17 00:00:00.000000000",
-    "fake-key",
-  )[0].row;
-  assert.equal(row.events_json, golden.events_json);
-  assert.equal(row.links_json, golden.links_json);
-  for (const [index, value] of golden.doubles.entries())
-    assert.equal(legacyDecimal(value), golden.decimals[index]);
-  assert.equal(legacyDecimal(-0), "-0.000000000");
-  assert.equal(stamp("18446744073709551615"), "1969-12-31 23:59:59.999999999");
-  const empty = structuredClone(golden.trace);
-  empty.resourceSpans[0].scopeSpans[0].spans[0].events = [];
-  empty.resourceSpans[0].scopeSpans[0].spans[0].links = [];
-  const missing = normalize(
-    "traces",
-    empty,
-    "2026-10-17 00:00:00.000000000",
-    "fake-key",
-  )[0].row;
-  assert.equal(missing.events_json, "null");
-  assert.equal(missing.links_json, "null");
-  assert.equal(
-    goJSON(
-      { z: "<>&\u2028\u2029", a: new LosslessNumber("9223372036854775807") },
-      true,
-    ),
-    '{"a":9223372036854775807,"z":"\\u003c\\u003e\\u0026\\u2028\\u2029"}',
-  );
-});
-test("SDK revision hashes match Go struct ordering, defaults, exact number tokens and HTML escapes", () => {
-  for (const [index, raw] of golden.config_raw.entries()) {
-    const input: any = parseLossless(
-        raw,
-        undefined,
-        (value) => new LosslessNumber(value),
-      ),
-      config = sdkConfiguration(input.log_sampling, input.disable_rules);
-    assert.equal(config.revision, golden.configs[index].revision);
-    assert.deepEqual(
-      Object.keys(config.log_sampling),
-      Object.keys(input.log_sampling).sort(),
-    );
-  }
-  assert.deepEqual(sampling({ rules: [] }), {
-    key: "event_id",
-    rules: [],
-    exclude: [],
-  });
-  for (const rate of [undefined, null, "1", true])
-    assert.throws(() => sampling({ rules: [{ rate, conditions: [] }] }));
-  assert.throws(() => sampling({ key: "sdkXlanguage", rules: [] }));
-});
+import { stableJSON, nowNano } from "../src/shared/otlp.js";
 async function fixture(t: any) {
   const dir = mkdtempSync(join(tmpdir(), "lightmoni-ingest-compat-")),
     db = new DB(join(dir, "state.db")),
@@ -97,7 +35,7 @@ async function fixture(t: any) {
     },
     catalog = new Catalog(db, ch, { ...ch, user: "reader" });
   new Ingest(catalog, auth).register();
-  const server = createServer((req, res) => void router.handle(req, res));
+  const server = createServer((req, res) => void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const base = "http://127.0.0.1:" + (server.address() as any).port;
   router.externalURL = base;
@@ -120,7 +58,7 @@ async function fixture(t: any) {
       "Content-Type": "application/json",
       cookie: setup.headers.get("set-cookie")!.split(";")[0],
     },
-    body: JSON.stringify({ name: "fake key", allowed_tables: ["app"] }),
+    body: JSON.stringify({ name: "fake key", }),
   });
   assert.equal(keyResponse.status, 201);
   const key = ((await keyResponse.json()) as any).key;

@@ -55,12 +55,12 @@ test('dangerous external account groups are rejected without removing membership
   for(const name of ['root','docker','lxd','libvirt','disk']) {
     const f=fixture(t);f.identity.groups=[1001,998];f.identity.names=['lightmoni-agent',name];
     const prior=structuredClone(f.identity);
-    assert.throws(()=>prepareDeploymentPermissions(f.options),/agent_privilege_migration_required/);
+    assert.throws(()=>prepareDeploymentPermissions(f.options),/ordinary_agent_privilege_violation/);
     assert.deepEqual(f.identity,prior);assert(f.calls.every(call=>call.file==='id'));
     assert.equal(fs.existsSync(f.p('var/lib/lightmoni-web')),false);
   }
   const f=fixture(t);f.identity.gid=0;f.identity.groups=[0];f.identity.names=['alias-for-gid-zero'];
-  assert.throws(()=>prepareDeploymentPermissions(f.options),/agent_account_invalid|agent_privilege_migration_required/);
+  assert.throws(()=>prepareDeploymentPermissions(f.options),/agent_account_invalid|ordinary_agent_privilege_violation/);
 });
 
 test('root identities and failed or malformed account queries never turn into implicit permission grants',t=>{
@@ -93,7 +93,7 @@ test('runtime actual identity rejects root, privileged groups and every Linux ca
     {capabilities:{...ordinaryIdentity().capabilities,ambient:'0000000000000400'}},
   ]) {
     const f=fixture(t),identity={...ordinaryIdentity(),...changed};
-    await assert.rejects(checkDeploymentPermissions({...f.options,identity}),/agent_privilege_migration_required/);
+    await assert.rejects(checkDeploymentPermissions({...f.options,identity}),/ordinary_agent_privilege_violation/);
     assert.deepEqual(fs.readdirSync(f.p('var/lib/lightmoni-agent')),[]);
   }
 });
@@ -111,7 +111,7 @@ test('Docker socket connection permission blocks ordinary startup; denied write 
     const checks:number[]=[];
     await assert.rejects(checkDeploymentPermissions({...f.options,access:(path:string,mode:number)=>{
       assert.equal(path,filename);checks.push(mode);assert.equal(mode,fs.constants.W_OK);
-    }}),/agent_privilege_migration_required/);
+    }}),/ordinary_agent_privilege_violation/);
     assert.deepEqual(checks,[fs.constants.W_OK]);
     // A read mode bit does not grant Unix socket connect permission. Only
     // denied W_OK is relevant; the helper must not send a Docker command.
@@ -124,13 +124,13 @@ test('socket symlinks, non-sockets and unprovable access errors fail closed with
   const f=fixture(t),filename=f.p('var/run/docker.sock'),external=f.p('external-socket'),server=await socketAt(external);
   try {
     fs.symlinkSync(external,filename);
-    await assert.rejects(checkDeploymentPermissions(f.options),/agent_privilege_migration_required/);
+    await assert.rejects(checkDeploymentPermissions(f.options),/ordinary_agent_privilege_violation/);
     assert.equal(fs.lstatSync(filename).isSymbolicLink(),true);assert.equal(server.listening,true);
     fs.unlinkSync(filename);fs.writeFileSync(filename,'external non-socket');
-    await assert.rejects(checkDeploymentPermissions(f.options),/agent_privilege_migration_required/);
+    await assert.rejects(checkDeploymentPermissions(f.options),/ordinary_agent_privilege_violation/);
     assert.equal(fs.readFileSync(filename,'utf8'),'external non-socket');fs.unlinkSync(filename);
     fs.symlinkSync(f.p('absent-target'),filename);
-    await assert.rejects(checkDeploymentPermissions(f.options),/agent_privilege_migration_required/);
+    await assert.rejects(checkDeploymentPermissions(f.options),/ordinary_agent_privilege_violation/);
     fs.unlinkSync(filename);
   } finally {await close(server);}
   const actual=await socketAt(filename);

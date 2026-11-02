@@ -52,7 +52,7 @@ func TestRemoteMetricWindowsDriveExportedPeriodsAndKeepValidSnapshot(t *testing.
 	}
 	raw += "}}"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.String() != "/v1/sdk-config?metric_windows=1" || r.Header.Get("Authorization") != "Bearer windows" {
+		if r.URL.String() != "/v1/sdk-config" || r.Header.Get("Authorization") != "Bearer windows" {
 			t.Error("invalid config negotiation")
 		}
 		mu.Lock()

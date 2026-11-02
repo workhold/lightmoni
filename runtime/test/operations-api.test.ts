@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { DB } from "../src/shared/sqlite.js";
 import { Router, fail } from "../src/shared/http.js";
 import { cipher } from "../src/shared/crypto.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { registerOperations } from "../src/server/operations.js";
 import { operationTools } from "../src/assistant/operation-tools.js";
 import type { Dependencies } from "../src/shared/types.js";
@@ -31,15 +31,15 @@ async function fixture(t: any) {
   const jobs = registerAgentJobs(deps, { agentCredentials: credentials });
   const definition: OperationDefinition = { kind: "certificate", operations: ["inspect", "install"], readOnly: ["inspect"], validate: v => v as any, publicConfig: v => ({domains:v.domains,has_private_key:!!v.private_key_pem}), validateInput: (_op,v) => v as any };
   const ops = registerOperations(deps, { jobs, credentials, definitions: [definition, backupDefinition, composeDefinition, websiteDefinition] });
-  const server = createServer((req, res) => void router.handle(req, res)); server.listen(0,"127.0.0.1"); await once(server,"listening");
+  const server = createServer((req, res) => void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}})); server.listen(0,"127.0.0.1"); await once(server,"listening");
   t.after(() => { ops.close?.(); jobs.close?.(); server.close(); db.close(); });
   const base = "http://127.0.0.1:" + (server.address() as any).port;
-  const req = async (path: string, method="GET", body?: any, headers: Record<string,string> = {}) => { const r = await fetch(base + "/api/v1" + path,{method,headers:{"content-type":"application/json",...headers},body:body === undefined ? undefined : JSON.stringify(body)}); return {status:r.status,body:await r.json(),headers:r.headers}; };
+  const req = async (path: string, method="GET", body?: any, headers: Record<string,string> = {}) => { const r = await fetch(base + "/api/v1" + path,{method,headers:{"content-type":"application/json",...headers},body:body === undefined ? undefined : JSON.stringify(body)}); return {status:r.status,body:await r.text().then(text=>text?JSON.parse(text):{}),headers:r.headers}; };
   const create = () => req("/operations/resources","POST",{kind:"certificate",name:"HTTPS",agent_id:"agent-1",config:{domains:["example.com"],private_key_pem:"SECRET-PRIVATE-MATERIAL"}});
   return { db, ops, jobs, req, create, base, advance: (ms:number) => { now=new Date(now.getTime()+ms); } };
 }
 
-test("operations encrypt configuration and payload; only an approved job lease can read private material",async t=>{
+test("operations encrypt configuration and payload; ordinary control never reads private material",async t=>{
   const f=await fixture(t), created=await f.create(); assert.equal(created.status,201); assert.equal(JSON.stringify(created.body).includes("SECRET-PRIVATE"),false);
   const resource=created.body.resource;
   assert.equal(JSON.stringify(f.db.all("SELECT * FROM ops_resources")).includes("SECRET-PRIVATE"),false);
@@ -50,10 +50,10 @@ test("operations encrypt configuration and payload; only an approved job lease c
   const repeated=await f.req(`/operations/runs/${draft.body.run.id}/approve`,"POST",{revision:1}); assert.equal(repeated.body.run.job_id,approve.body.run.job_id);
   const j=f.jobs.claim("agent-1",["operations.certificate"]); assert.ok(j); assert.equal(JSON.stringify(j).includes("SECRET-PRIVATE"),false);
   const path=`/agents/agent-1/jobs/${j.id}/operations`;
-  assert.equal((await f.req(path,"GET",undefined,{"x-role":"agent",authorization:"Bearer control-secret"})).status,403);
+  assert.equal((await f.req(path,"GET",undefined,{"x-role":"agent",authorization:"Bearer control-secret"})).status,404);
   const privateReply=await f.req(path,"GET",undefined,{"x-role":"agent",authorization:"Bearer control-secret","X-LightMoni-Job-Lease":j.lease_id});
-  assert.equal(privateReply.status,200); assert.equal(privateReply.headers.get("cache-control"),"no-store"); assert.equal(privateReply.body.payload.resource.config.private_key_pem,"SECRET-PRIVATE-MATERIAL");
-  f.advance(46_000); assert.equal((await f.req(path,"GET",undefined,{"x-role":"agent",authorization:"Bearer control-secret","X-LightMoni-Job-Lease":j.lease_id})).status,403);
+  assert.equal(privateReply.status,404); assert.equal(JSON.stringify(privateReply.body).includes("SECRET-PRIVATE"),false);
+  f.advance(46_000); assert.equal((await f.req(path,"GET",undefined,{"x-role":"agent",authorization:"Bearer control-secret","X-LightMoni-Job-Lease":j.lease_id})).status,404);
 });
 
 test("ordinary Agent runner does not claim or download an approved backup write operation",async t=>{
@@ -95,12 +95,12 @@ test("ordinary Agent runner does not claim or download an approved backup write 
  assert.equal(await readFile(join(root,"source","index.html"),"utf8"),original);
 });
 
-test("new operations do not block legacy Agent capabilities and mismatched operation receipts cannot succeed",async t=>{
+test("read-only jobs serialize domain work and mismatched receipts cannot succeed",async t=>{
  const f=await fixture(t),r=(await f.create()).body.resource,p=f.ops.plan(r.id,"inspect",{},"admin");f.ops.approve(p.id,"admin",1);
- const old=f.jobs.enqueue({agentID:"agent-1",deploymentID:"old",operationID:"old",actions:[],capabilities:["systemd.restart"]});
- const legacyLease=f.jobs.claim("agent-1",["systemd.restart"])!; assert.equal(legacyLease.id,old.id);
+ const old=f.jobs.enqueue({agentID:"agent-1",deploymentID:"old",operationID:"old",actions:[],capabilities:["health.tcp"]});
+ const readLease=f.jobs.claim("agent-1",["health.tcp"])!; assert.equal(readLease.id,old.id);
  assert.equal(f.jobs.claim("agent-1",["operations.certificate"]),null);
- f.jobs.result("agent-1",old.id,{lease_id:legacyLease.lease_id,state:"failed",summary:"legacy task complete"});
+ f.jobs.result("agent-1",old.id,{lease_id:readLease.lease_id,state:"failed",summary:"read-only task complete"});
  const j=f.jobs.claim("agent-1",["operations.certificate"])!;
  for(const [i,phase]of["accepted","staging","activating","verifying"].entries())f.jobs.event("agent-1",j.id,{lease_id:j.lease_id,sequence:i+1,phase,summary:"step"});
  f.jobs.result("agent-1",j.id,{lease_id:j.lease_id,state:"succeeded",summary:"claimed",snapshot:{health:{healthy:true},operations:{operation_id:"wrong",resource_id:r.id}}});

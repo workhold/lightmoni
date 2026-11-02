@@ -1,5 +1,4 @@
 import { prepareManagedWeb } from "./managed-web-permissions.js";
-import { assertLegacyMigration } from './migration.js';
 import { startManagedGateway } from "./managed-gateway.js";
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -85,11 +84,6 @@ export async function runManagedSnapshot(filename:string,expectedDigest:string):
   try{
     await authority();rootPath(config.data_dir,'directory',true);
     let receipt:ExecutionReceipt;
-    if(payload.operation_payload){
-      const kind=payload.operation_payload.resource.kind;
-      try{assertLegacyMigration(({website:'websites',certificate:'certificates',backup:'backups'} as Record<string,string>)[kind]??kind);}
-      catch(error){if((error as Error).message!=='legacy_managed_state_requires_review')throw error;process.stdout.write(canonicalJSON({state:'failed',code:'legacy_managed_state_requires_review',summary:'Review the fixed offline migration plan before changing existing business state',snapshot:{},started_at:new Date().toISOString(),finished_at:new Date().toISOString()}));return;}
-    }
     const webProfile=payload.operation_payload&&['website','certificate'].includes(payload.operation_payload.resource.kind)?await prepareManagedWeb(MANAGED_DATA_DIR,command):{};
     const context={dataDir:MANAGED_DATA_DIR,signal:controller.signal,now:()=>new Date(),command,...webProfile};
     if(payload.operation_payload)receipt=await executeOperation(payload.operation_payload,context,emit);

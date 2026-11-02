@@ -70,13 +70,6 @@ export function taskRevision(task: Task): string {
     ? Object.fromEntries(Object.keys(value).sort().filter(key => value[key] !== undefined).map(key => [key, canonical(value[key])])) : value;
   return createHash("sha256").update(JSON.stringify(canonical(definition))).digest("hex");
 }
-const goJSON = (value: any) =>
-  JSON.stringify(value)
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/&/g, "\\u0026")
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029");
 export function wire(c: RemoteConfig): RemoteConfig {
   return {
     revision: c.revision,
@@ -96,7 +89,6 @@ export function wire(c: RemoteConfig): RemoteConfig {
     host_table: c.host_table,
     probe_table: c.probe_table,
     process_names: c.process_names ?? [],
-    ...(c.group_id ? { group_id: c.group_id } : {}),
     logs_enabled: c.logs_enabled,
     log_table: c.log_table,
     log_sources: (c.log_sources ?? []).map((s) => ({
@@ -172,7 +164,7 @@ export function normalizeTask(input: any): Task {
     if (type === "host" && !c.host_collectors.length && !t.enabled) c.host_enabled = false;
     try { validateRemote(c); } catch (error) { problem(400, "任务配置无效：" + (error instanceof Error ? error.message : "invalid config")); }
   }
-  t.config.revision = ""; delete (t.config as any).group_id;
+  t.config.revision = "";
   t.config = wire(t.config);
   t.revision = taskRevision(t);
   return t;
@@ -189,99 +181,28 @@ export class NodeStore {
     return this.now().toISOString();
   }
   init(): void {
-    const fresh = !this.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name IN ('agent_groups','agent_tasks') LIMIT 1");
     createAgentLifecycleSchema(this.db);
-    this.db.exec(
-      `CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY,host_id TEXT NOT NULL,hostname TEXT NOT NULL,version TEXT NOT NULL,platform TEXT NOT NULL,arch TEXT NOT NULL,last_seen TEXT NOT NULL,heartbeat TEXT NOT NULL,group_id TEXT NOT NULL DEFAULT 'default'); CREATE TABLE IF NOT EXISTS agent_runtime_events(agent_id TEXT NOT NULL,event_id TEXT NOT NULL,key_id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(agent_id,event_id)); CREATE TABLE IF NOT EXISTS agent_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,config TEXT NOT NULL,created_at TEXT NOT NULL);`,
-    );
+    this.db.exec(`CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY,host_id TEXT NOT NULL,hostname TEXT NOT NULL,version TEXT NOT NULL,platform TEXT NOT NULL,arch TEXT NOT NULL,last_seen TEXT NOT NULL,heartbeat TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS agent_runtime_events(agent_id TEXT NOT NULL,event_id TEXT NOT NULL,key_id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(agent_id,event_id));
+      CREATE TABLE IF NOT EXISTS agent_task_labels(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS agent_tasks(id TEXT PRIMARY KEY,name TEXT NOT NULL,type TEXT NOT NULL,enabled INTEGER NOT NULL,config TEXT NOT NULL,created_at TEXT NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}');
+      CREATE TABLE IF NOT EXISTS agent_task_targets(task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,label_id TEXT NOT NULL REFERENCES agent_task_labels(id),PRIMARY KEY(task_id,label_id));
+      CREATE INDEX IF NOT EXISTS agent_task_targets_label ON agent_task_targets(label_id);
+      CREATE TABLE IF NOT EXISTS machine_host_labels(machine_id TEXT NOT NULL REFERENCES managed_machines(id) ON DELETE CASCADE,label_id TEXT NOT NULL REFERENCES agent_task_labels(id),PRIMARY KEY(machine_id,label_id));
+      CREATE INDEX IF NOT EXISTS machine_host_labels_label ON machine_host_labels(label_id);
+      CREATE TABLE IF NOT EXISTS machine_task_overrides(machine_id TEXT NOT NULL REFERENCES managed_machines(id) ON DELETE CASCADE,task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,override_json TEXT NOT NULL,PRIMARY KEY(machine_id,task_id));
+      CREATE TABLE IF NOT EXISTS node_defaults(id INTEGER PRIMARY KEY CHECK(id=1));`);
     createAgentHostSchema(this.db);
     createHostNetworkSchema(this.db);
-    if (
-      !this.db
-        .all<any>("PRAGMA table_info('agents')")
-        .some((row) => row.name === "group_id")
-    )
-      this.db.exec(
-        "ALTER TABLE agents ADD COLUMN group_id TEXT NOT NULL DEFAULT 'default'",
-      );
-    const initial = remote({
-      revision: nodeID(),
-      collect_interval_seconds: 15,
-    });
-    this.db.run(
-      "INSERT OR IGNORE INTO agent_groups(id,name,config,created_at) VALUES('default','默认分组',?,?)",
-      goJSON(initial),
-      this.timestamp(),
-    );
     this.db.transaction(() => {
-      this.db.exec(
-        `CREATE TABLE IF NOT EXISTS agent_task_migrations(version TEXT PRIMARY KEY,completed_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS agent_task_labels(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS agent_tasks(id TEXT PRIMARY KEY,name TEXT NOT NULL,type TEXT NOT NULL,enabled INTEGER NOT NULL,config TEXT NOT NULL,created_at TEXT NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}'); CREATE TABLE IF NOT EXISTS agent_task_targets(task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,label_id TEXT NOT NULL REFERENCES agent_task_labels(id),PRIMARY KEY(task_id,label_id)); CREATE TABLE IF NOT EXISTS agent_node_labels(agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,label_id TEXT NOT NULL REFERENCES agent_task_labels(id),PRIMARY KEY(agent_id,label_id)); CREATE INDEX IF NOT EXISTS agent_task_targets_label ON agent_task_targets(label_id); CREATE INDEX IF NOT EXISTS agent_node_labels_label ON agent_node_labels(label_id);`,
-      );
-      if (!this.db.all<{name:string}>("PRAGMA table_info(agent_tasks)").some(column => column.name === "metadata_json")) this.db.exec("ALTER TABLE agent_tasks ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'");
-      this.db.exec(`CREATE TABLE IF NOT EXISTS machine_host_labels(machine_id TEXT NOT NULL REFERENCES managed_machines(id) ON DELETE CASCADE,label_id TEXT NOT NULL REFERENCES agent_task_labels(id),PRIMARY KEY(machine_id,label_id)); CREATE INDEX IF NOT EXISTS machine_host_labels_label ON machine_host_labels(label_id); CREATE TABLE IF NOT EXISTS machine_task_overrides(machine_id TEXT NOT NULL REFERENCES managed_machines(id) ON DELETE CASCADE,task_id TEXT NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,override_json TEXT NOT NULL,PRIMARY KEY(machine_id,task_id));`);
-      if (
-        this.db.get(
-          "SELECT 1 FROM agent_task_migrations WHERE version='independent-tasks-v1'",
-        )
-      )
-        return;
-      for (const group of this.db.all<any>(
-        "SELECT * FROM agent_groups ORDER BY id",
-      )) {
-        let name =
-          group.id === "default" && group.name === "默认分组"
-            ? "默认标签"
-            : group.name;
-        if (
-          this.db.get(
-            "SELECT 1 FROM agent_groups WHERE id<>? AND name=?",
-            group.id,
-            name,
-          )
-        )
-          name = group.name;
-        this.db.run(
-          "INSERT INTO agent_task_labels(id,name,created_at) VALUES(?,?,?)",
-          group.id,
-          name,
-          group.created_at,
-        );
-        // A fresh installation starts from persisted platform tasks below.
-        // Existing group definitions remain user tasks during upgrade.
-        if (!fresh) this.legacyTasks(group.id, name, remote(JSON.parse(group.config)));
-      }
-      this.db.run(
-        "INSERT INTO agent_node_labels(agent_id,label_id) SELECT id,group_id FROM agents",
-      );
-      this.db.run(
-        "INSERT INTO agent_task_migrations(version,completed_at) VALUES('independent-tasks-v1',?)",
-        this.timestamp(),
-      );
-    });
-    this.db.transaction(() => {
-      if (this.db.get("SELECT 1 FROM agent_task_migrations WHERE version='host-task-center-v1'")) return;
-      this.db.run("INSERT OR IGNORE INTO machine_host_labels(machine_id,label_id) SELECT m.id,n.label_id FROM managed_machines m JOIN agent_node_labels n ON n.agent_id=m.agent_id");
-      this.db.run("INSERT INTO agent_task_migrations(version,completed_at) VALUES('host-task-center-v1',?)", this.timestamp());
-    });
-    this.db.transaction(() => {
-      if (this.db.get("SELECT 1 FROM agent_task_migrations WHERE version='platform-default-tasks-v1'")) return;
-      // Definition metadata is retired, never historical execution snapshots.
-      this.db.run("UPDATE agent_tasks SET metadata_json=json_remove(metadata_json,'$.template_id')");
-      const existing = this.tasks();
+      if (this.db.get('SELECT id FROM node_defaults WHERE id=1')) return;
+      this.db.run("INSERT INTO agent_task_labels(id,name,created_at) VALUES('default','默认标签',?)", this.timestamp());
       for (const definition of [
-        { type: "host", name: "指标采集", config: { collect_interval_seconds: 15 } },
-        { type: "probe", name: "服务拨测", config: {} },
-        { type: "log", name: "目录日志", config: {} },
-      ]) {
-        if (existing.some(task => task.origin === "builtin" && task.type === definition.type)) continue;
-        // IDs from a prior release may already belong to user definitions or
-        // a builtin whose type was changed. Never overwrite either identity.
-        const base = `platform-default:${definition.type}`;
-        let id = base, suffix = 1;
-        while (this.db.get("SELECT 1 FROM agent_tasks WHERE id=?", id)) id = `${base}:${suffix++}`;
-        this.saveTask(normalizeTask({ ...definition, id, origin: "builtin", enabled: true, target_all: true }));
-      }
-      this.db.run("INSERT INTO agent_task_migrations(version,completed_at) VALUES('platform-default-tasks-v1',?)", this.timestamp());
+        { type: 'host', name: '指标采集', config: { collect_interval_seconds: 15 } },
+        { type: 'probe', name: '服务拨测', config: {} },
+        { type: 'log', name: '目录日志', config: {} },
+      ]) this.saveTask(normalizeTask({ ...definition, id: `platform-default:${definition.type}`, origin: 'builtin', enabled: true, target_all: true }));
+      this.db.run('INSERT INTO node_defaults(id) VALUES(1)');
     });
   }
   labels(): Label[] {
@@ -291,7 +212,7 @@ export class NodeStore {
   }
   tasks(): Task[] {
     return this.db.all<any>("SELECT id,name,type,enabled,config,metadata_json FROM agent_tasks ORDER BY created_at,id").map(row => {
-      const {template_id: _removedTemplate, ...meta} = JSON.parse(row.metadata_json || "{}");
+      const meta = JSON.parse(row.metadata_json);
       const task = { ...meta, id: row.id, name: row.name, type: row.type, enabled: !!row.enabled,
         origin: meta.origin ?? "custom", target_all: meta.target_all ?? false,
         host_ids: meta.host_ids ?? [], schedule: meta.schedule ?? { mode: row.type === "script" ? "once" : "continuous" },
@@ -310,36 +231,11 @@ export class NodeStore {
     for (const hostID of t.host_ids) this.assertHost(hostID);
     const { origin, target_all, host_ids, schedule, script, execution_policy } = t;
     this.db.run("INSERT INTO agent_tasks(id,name,type,enabled,config,metadata_json,created_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,type=excluded.type,enabled=excluded.enabled,config=excluded.config,metadata_json=excluded.metadata_json",
-      t.id, t.name, t.type, t.enabled, goJSON(t.config), goJSON({ origin, target_all, host_ids, schedule, ...(script ? { script, execution_policy } : {}) }), this.timestamp());
+      t.id, t.name, t.type, t.enabled, JSON.stringify(t.config), JSON.stringify({ origin, target_all, host_ids, schedule, ...(script ? { script, execution_policy } : {}) }), this.timestamp());
     this.db.run("DELETE FROM agent_task_targets WHERE task_id=?", t.id);
     for (const label of t.label_ids) {
       if (!this.db.get("SELECT 1 FROM agent_task_labels WHERE id=?", label)) problem(404, "主机标签不存在：" + label);
       this.db.run("INSERT INTO agent_task_targets(task_id,label_id) VALUES(?,?)", t.id, label);
-    }
-  }
-  legacyTasks(label: string, name: string, c: RemoteConfig): void {
-    for (const kind of ["host", "probe", "log"]) {
-      const suffix = (
-        { host: " · 指标采集", probe: " · 服务拨测", log: " · 目录日志" } as any
-      )[kind];
-      let prefix = Array.from(name);
-      while (length(prefix.join("") + suffix) > 128) prefix.pop();
-      const enabled =
-        kind === "host"
-          ? c.host_enabled
-          : kind === "probe"
-            ? c.probes.length > 0
-            : c.logs_enabled;
-      this.saveTask(
-        normalizeTask({
-          id: `legacy:${label}:${kind}`,
-          name: prefix.join("") + suffix,
-          type: kind,
-          enabled,
-          label_ids: [label],
-          config: c,
-        }),
-      );
     }
   }
   assertHost(id: string): any {
@@ -364,7 +260,7 @@ export class NodeStore {
       for (const label of ids) if (!this.db.get("SELECT 1 FROM agent_task_labels WHERE id=?", label)) problem(404, "主机标签不存在");
       this.db.run("DELETE FROM machine_host_labels WHERE machine_id=?", id);
       for (const label of ids) this.db.run("INSERT INTO machine_host_labels(machine_id,label_id) VALUES(?,?)", id, label);
-      this.compile(ids, ids[0] || "default", id);
+      this.compile(ids, id);
       this.db.run("UPDATE managed_machines SET updated_at=? WHERE id=?", this.timestamp(), id);
       return ids;
     };
@@ -396,8 +292,8 @@ export class NodeStore {
       const override = { ...(old ? JSON.parse(old.override_json) : {}), ...input };
       const normalized = normalizeTask({ ...task, ...override, config: override.config ? { ...task.config, ...override.config } : task.config });
       if (override.config) override.config = normalized.config;
-      this.db.run("INSERT INTO machine_task_overrides(machine_id,task_id,override_json) VALUES(?,?,?) ON CONFLICT(machine_id,task_id) DO UPDATE SET override_json=excluded.override_json", hostID, taskID, goJSON(override));
-      this.compile(this.hostLabels(hostID), "", hostID);
+      this.db.run("INSERT INTO machine_task_overrides(machine_id,task_id,override_json) VALUES(?,?,?) ON CONFLICT(machine_id,task_id) DO UPDATE SET override_json=excluded.override_json", hostID, taskID, JSON.stringify(override));
+      this.compile(this.hostLabels(hostID), hostID);
       return this.effectiveHostTasks(hostID);
     });
   }
@@ -405,15 +301,15 @@ export class NodeStore {
     return this.db.transaction(() => {
       this.assertHost(hostID); this.getTask(taskID);
       this.db.run("DELETE FROM machine_task_overrides WHERE machine_id=? AND task_id=?", hostID, taskID);
-      this.compile(this.hostLabels(hostID), "", hostID);
+      this.compile(this.hostLabels(hostID), hostID);
       return this.effectiveHostTasks(hostID);
     });
   }
   nodeLabels(id: string): string[] {
     const host = this.db.get<{id:string}>("SELECT id FROM managed_machines WHERE agent_id=? ORDER BY created_at,id LIMIT 1", id);
-    return host ? this.hostLabels(host.id) : this.db.all<{label_id:string}>("SELECT label_id FROM agent_node_labels WHERE agent_id=? ORDER BY label_id", id).map(row => row.label_id);
+    return host ? this.hostLabels(host.id) : [];
   }
-  compile(ids: string[], group = "", hostID = ""): Compiled {
+  compile(ids: string[], hostID = ""): Compiled {
     const labels = this.labels()
       .filter((label) => ids.includes(label.id))
       .map(({ id, name }) => ({ id, name }))
@@ -425,7 +321,6 @@ export class NodeStore {
           host_enabled: false,
           host_collectors: [],
           logs_enabled: false,
-          group_id: group,
         }),
         labels,
         tasks: [],
@@ -433,20 +328,6 @@ export class NodeStore {
         task_ids: [],
       },
       c = result.config;
-    const old = this.db.get<any>(
-      "SELECT config FROM agent_groups WHERE id=?",
-      group,
-    );
-    if (old) {
-      const previous = remote(JSON.parse(old.config));
-      for (const field of [
-        "host_table",
-        "probe_table",
-        "log_table",
-        "collect_interval_seconds",
-      ] as const)
-        (c as any)[field] = previous[field];
-    }
     let host = "",
       probe = "",
       log = "";
@@ -486,7 +367,7 @@ export class NodeStore {
         for (const p of t.config.probes) {
           const previous = probes.get(p.id);
           if (previous) {
-            if (goJSON(previous.value) !== goJSON(p))
+            if (JSON.stringify(previous.value) !== JSON.stringify(p))
               conflict(previous.owner, `拨测 ID “${p.id}”重复且参数不同`);
             continue;
           }
@@ -517,7 +398,7 @@ export class NodeStore {
     c.process_names = unique(c.process_names);
     c.probes.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     c.log_sources.sort((a, b) =>
-      goJSON(a) < goJSON(b) ? -1 : goJSON(a) > goJSON(b) ? 1 : 0,
+      JSON.stringify(a) < JSON.stringify(b) ? -1 : JSON.stringify(a) > JSON.stringify(b) ? 1 : 0,
     );
     c.revision = "validate";
     try {
@@ -532,7 +413,7 @@ export class NodeStore {
     c.revision = "";
     const hash = createHash("sha256")
       .update(
-        goJSON({
+        JSON.stringify({
           Config: wire(c),
           Labels: result.labels,
           Tasks: included.map((t) => ({
@@ -552,34 +433,33 @@ export class NodeStore {
   }
   validateAll(): void {
     for (const host of this.db.all<{id:string;name:string}>("SELECT id,name FROM managed_machines ORDER BY id")) {
-      try { this.compile(this.hostLabels(host.id), "", host.id); }
+      try { this.compile(this.hostLabels(host.id), host.id); }
       catch (error) { if (error instanceof NodeError) problem(error.status, `主机“${host.name}”：${error.message}`); throw error; }
     }
   }
-  setLabels(id: string, ids: string[], legacy = ""): void {
+  setLabels(id: string, ids: string[]): void {
     this.db.transaction(() => {
       assertAgentActive(this.db, id);
       const host = this.db.get<{id:string}>("SELECT id FROM managed_machines WHERE agent_id=?", id);
       if (!host || !this.db.get("SELECT 1 FROM agents WHERE id=?", id)) problem(404, "执行节点不存在");
       this.setHostLabels(host!.id, ids, true);
-      this.db.run("UPDATE agents SET group_id=? WHERE id=?", legacy || ids[0] || "default", id);
     });
   }
   effective(id: string): Compiled {
     assertAgentActive(this.db, id);
-    const node = this.db.get<{ group_id: string }>(
-      "SELECT group_id FROM agents WHERE id=?",
+    const node = this.db.get<{ id: string }>(
+      "SELECT id FROM agents WHERE id=?",
       id,
     );
     if (!node) problem(404, "执行节点或任务标签不存在");
     const host = this.db.get<{id:string}>("SELECT id FROM managed_machines WHERE agent_id=?", id);
     if (!host) problem(409, "执行节点未绑定主机");
-    return this.compile(this.hostLabels(host!.id), node!.group_id, host!.id);
+    return this.compile(this.hostLabels(host!.id), host!.id);
   }
   nodes(includeRemoved = false): any[] {
     return this.db
       .all<any>(
-        "SELECT id,hostname,version,platform,arch,last_seen,heartbeat,group_id,(SELECT m.id FROM managed_machines m WHERE m.agent_id=agents.id ORDER BY m.created_at,m.id LIMIT 1) AS machine_id,(SELECT m.name FROM managed_machines m WHERE m.agent_id=agents.id ORDER BY m.created_at,m.id LIMIT 1) AS machine_name FROM agents WHERE EXISTS (SELECT 1 FROM managed_machines m WHERE m.agent_id=agents.id)" + (includeRemoved ? "" : " AND NOT EXISTS (SELECT 1 FROM agent_lifecycle x WHERE x.agent_id=agents.id AND x.state='removed')") + " ORDER BY last_seen DESC,id",
+        "SELECT id,hostname,version,platform,arch,last_seen,heartbeat,(SELECT m.id FROM managed_machines m WHERE m.agent_id=agents.id ORDER BY m.created_at,m.id LIMIT 1) AS machine_id,(SELECT m.name FROM managed_machines m WHERE m.agent_id=agents.id ORDER BY m.created_at,m.id LIMIT 1) AS machine_name FROM agents WHERE EXISTS (SELECT 1 FROM managed_machines m WHERE m.agent_id=agents.id)" + (includeRemoved ? "" : " AND NOT EXISTS (SELECT 1 FROM agent_lifecycle x WHERE x.agent_id=agents.id AND x.state='removed')") + " ORDER BY last_seen DESC,id",
       )
       .map((node) => {
         node.heartbeat = JSON.parse(node.heartbeat);
@@ -588,41 +468,18 @@ export class NodeStore {
         // Later task edits must not make the history view fail compilation.
         const labelIDs = this.nodeLabels(node.id);
         const compiled: Compiled = lifecycle.lifecycle_state === "removed" ? {
-          config: remote({ revision: "", collect_interval_seconds: 15, host_enabled: false, host_collectors: [], logs_enabled: false, group_id: node.group_id }),
+          config: remote({ revision: "", collect_interval_seconds: 15, host_enabled: false, host_collectors: [], logs_enabled: false }),
           label_ids: labelIDs,
           labels: this.labels().filter(label => labelIDs.includes(label.id)).map(({id,name}) => ({id,name})),
           task_ids: [],
           tasks: [],
-        } : this.compile(labelIDs, node.group_id, node.machine_id);
+        } : this.compile(labelIDs, node.machine_id);
         return {
           ...node,
           ...lifecycle,
           ...compiled,
-          group_name:
-            compiled.labels.find((l) => l.id === node.group_id)?.name || "",
         };
       });
-  }
-  group(id: string): any {
-    const group = this.db.get<any>(
-      "SELECT id,name FROM agent_groups WHERE id=?",
-      id,
-    );
-    if (!group) problem(404, "执行节点或任务标签不存在");
-    const label = this.labels().find((l) => l.id === id);
-    return {
-      id: group.id,
-      name: label?.name ?? group.name,
-      config: this.compile([id], id).config,
-      agent_count: label?.node_count ?? 0,
-    };
-  }
-  groups(): any[] {
-    return this.db
-      .all<{
-        id: string;
-      }>("SELECT id FROM agent_groups ORDER BY CASE WHEN id='default' THEN 0 ELSE 1 END,created_at,id")
-      .map((row) => this.group(row.id));
   }
   task(input: any, id: string, create: boolean, inTransaction = false): Task {
     const work = () => {
@@ -666,19 +523,6 @@ export class NodeStore {
           name,
           this.timestamp(),
         );
-        const initial = remote({
-          revision: "initial",
-          collect_interval_seconds: 15,
-          host_enabled: false,
-          host_collectors: [],
-        });
-        this.db.run(
-          "INSERT INTO agent_groups(id,name,config,created_at) VALUES(?,?,?,?)",
-          id,
-          name,
-          goJSON(initial),
-          this.timestamp(),
-        );
       } else {
         if (
           !this.db.run(
@@ -688,7 +532,6 @@ export class NodeStore {
           ).changes
         )
           problem(404, "任务标签不存在");
-        this.db.run("UPDATE agent_groups SET name=? WHERE id=?", name, id);
       }
       this.validateAll();
       return this.labels().find((label) => label.id === id)!;
@@ -700,9 +543,7 @@ export class NodeStore {
       const label = this.labels().find((l) => l.id === id);
       if (!label) problem(404, "任务标签不存在");
       if (label!.host_count + label!.task_count > 0) problem(409, "请先解除主机和任务对该标签的关联");
-      this.db.run("DELETE FROM agent_node_labels WHERE label_id=?", id);
       this.db.run("DELETE FROM agent_task_labels WHERE id=?", id);
-      this.db.run("DELETE FROM agent_groups WHERE id=?", id);
     });
   }
   deleteTask(id: string): void {
@@ -713,16 +554,6 @@ export class NodeStore {
         problem(404, "任务不存在");
       this.validateAll();
     });
-  }
-  legacyGroup(input: any, id: string, create: boolean): any {
-    // The old group endpoint is a label-directory alias only. Native task
-    // creation/configuration goes through the persisted task directory.
-    if (Object.hasOwn(input, "config")) problem(410, "分组配置写入已移除，请使用任务中心编辑已有任务");
-    this.label(input.name, id, create);
-    return this.group(id);
-  }
-  deleteGroup(id: string): void {
-    this.deleteLabel(id);
   }
   nodeCount(label: string): number {
     return this.db.get<{ n: number }>(
@@ -740,27 +571,11 @@ export class NodeStore {
       let addresses;
       try { addresses = normalizeNetworkAddresses(values.network_addresses); }
       catch { problem(400, "主机网络地址无效，最多支持 64 个网卡地址"); }
-      const old = this.db.get<{ group_id: string }>(
-          "SELECT group_id FROM agents WHERE id=?",
-          id,
-        ),
-        group = old?.group_id || text("group_id") || "default";
-      if (!old)
-        try {
-          this.compile([group], group);
-        } catch (e) {
-          if (e instanceof NodeError)
-            problem(
-              e.status === 404 ? 400 : e.status,
-              "初始任务标签无效或任务冲突，请重新选择标签：" + e.message,
-            );
-          throw e;
-        }
       values = { ...values, runtime_key_id: writeKey, docker_inventory: dockerInventory(values.docker_inventory) };
       if (addresses !== undefined) values.network_addresses = addresses;
       delete values.runtime_events;
       this.db.run(
-        `INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat,group_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET hostname=excluded.hostname,version=excluded.version,platform=excluded.platform,arch=excluded.arch,last_seen=excluded.last_seen,heartbeat=excluded.heartbeat`,
+        `INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET hostname=excluded.hostname,version=excluded.version,platform=excluded.platform,arch=excluded.arch,last_seen=excluded.last_seen,heartbeat=excluded.heartbeat`,
         id,
         text("host_id"),
         text("hostname"),
@@ -768,8 +583,7 @@ export class NodeStore {
         text("platform"),
         text("arch"),
         this.timestamp(),
-        goJSON(values),
-        group,
+        JSON.stringify(values),
       );
       const machine = ensureAgentHost(this.db, id, values, this.timestamp());
       recordHostNetwork(this.db, machine.machine_id, id, addresses, source, this.timestamp(), values.hostname);
@@ -816,7 +630,7 @@ export class NodeStore {
           id,
           event.id,
           writeKey,
-          goJSON({
+          JSON.stringify({
             id: event.id,
             time: event.time,
             severity: event.severity,

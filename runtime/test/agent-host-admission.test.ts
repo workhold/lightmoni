@@ -13,7 +13,7 @@ import { registerAgentCredentials } from "../src/server/agent-credentials.js";
 import { registerManagedMachines, type SSHRunner } from "../src/server/managed-machines.js";
 import { registerNodes } from "../src/server/nodes.js";
 import { NodeStore } from "../src/server/nodes-model.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { registerOperations } from "../src/server/operations.js";
 import type { OperationDefinition } from "../src/operations/types.js";
 import { registerInstall } from "../src/server/install.js";
@@ -95,7 +95,7 @@ test("unbound tokens, unknown shared-key nodes and persisted orphans cannot crea
   assert.equal((await f.activate(pending.data)).status, 409);
   assert.equal((await f.exchange(token.token_display_once)).status, 409);
   const unknown = await f.request("/agents/register", "POST", { agent_id: "unknown", machine_id: host.id }, "shared-sdk-key"); assert.equal(unknown.status, 401);
-  f.db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat,group_id) VALUES('orphan','resource','old-host','','linux','amd64',?,'{}','default')", at.toISOString());
+  f.db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES('orphan','resource','old-host','','linux','amd64',?,'{}')", at.toISOString());
   new NodeStore(f.db, () => at);
   assert.equal(f.machines.list().length, 1); assert.deepEqual((await f.request("/agents")).data, []);
   const store = new NodeStore(f.db, () => at);
@@ -154,7 +154,7 @@ test("changed or deleted reservations cannot activate or register and concurrent
 
 test("orphan and revoked identities cannot receive operations resources, plans or queued jobs", async t => {
   const f = await fixture(t), host = await f.host(), agent = await f.enroll(host.id); assert.equal((await f.register(agent)).status, 200);
-  f.db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat,group_id) VALUES('orphan','same','orphan','','linux','amd64',?,'{}','default')", at.toISOString());
+  f.db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES('orphan','same','orphan','','linux','amd64',?,'{}')", at.toISOString());
   const agents = await f.request("/operations/agents"); assert.equal(agents.status, 200); assert.deepEqual(agents.data.agents.map((value: any) => value.id), [agent.agentID]);
   const makeResource = (agentID: string) => f.request("/operations/resources", "POST", { kind: "certificate", name: "Cert", agent_id: agentID, config: {} });
   assert.equal((await makeResource("orphan")).status, 409);

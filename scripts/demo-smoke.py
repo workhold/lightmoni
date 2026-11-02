@@ -9,7 +9,7 @@ def request(path,body=None):
     with client.open(req,timeout=30) as r: return json.load(r)
 if request('/setup')['required']: request('/setup',{'name':'local-admin','password':'local-demo-password'})
 else: request('/auth/login',{'name':'local-admin','password':'local-demo-password'})
-if endpoint==base: key=request('/keys',{'name':'acceptance-scoped','allowed_tables':['http','app']})
+if endpoint==base: key=request('/keys',{'name':'acceptance-scoped'})
 else:
     import sqlite3,hashlib
     token=json.load(open('.lightmoni/agent-smoke.json'))['key']

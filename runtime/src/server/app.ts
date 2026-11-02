@@ -1,3 +1,4 @@
+import { initializeCenterSchema } from './schema.js';
 import { connectManagedExecutorJobs } from "./managed-executor-jobs.js";
 import { connectExecutorObservations } from './executor-observation.js';
 import { SystemLogs } from "./system-logs.js";
@@ -93,6 +94,7 @@ export async function createApp(cfg: Config) {
   const router = new Router(() => logger.error("HTTP request failed"));
   router.externalURL = cfg.externalURL;
   try {
+    initializeCenterSchema(db);
     const auth = new Auth(db, cfg.dataDir, cfg.externalURL, router);
     router.auth = auth;
     auth.register();
@@ -108,7 +110,6 @@ export async function createApp(cfg: Config) {
     );
     await ch.exec("ALTER USER lightmoni_reader SETTINGS readonly=2");
     const cat = new Catalog(db, ch, reader);
-    await cat.migrate();
     const executor = new Executor(reader, cat),
       deps: Dependencies = {
         db,
@@ -129,7 +130,7 @@ export async function createApp(cfg: Config) {
     // Agent jobs are registered before service deployments so an approved
     // deployment can enqueue its immutable pull-based job atomically with the
     // centre state transition. The job module itself never executes commands.
-    const agentJobs = registerAgentJobs(deps, { agentCredentials, separateExecutor:true });
+    const agentJobs = registerAgentJobs(deps, { agentCredentials });
     const managedMachines = registerManagedMachines(deps, { agentCredentials, dataDir: cfg.dataDir, downloadsDir: cfg.downloadsDir ?? join(root, "downloads") });
     modules.push(managedMachines);
     registerSettings(deps, agentCredentials);
@@ -140,7 +141,7 @@ export async function createApp(cfg: Config) {
     modules.push(serviceDeployments);
     const platform = registerOperationsPlatform(deps, { jobs: agentJobs, dataDir: cfg.dataDir });
     modules.push(platform);
-    const operations = registerOperations(deps, { jobs: agentJobs, credentials: agentCredentials, resolvePayload: platform.resolvePayload, definitions: [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition] });
+    const operations = registerOperations(deps, { jobs: agentJobs, credentials: agentCredentials, definitions: [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition] });
     modules.push(operations, registerOperationSchedules(deps, operations));
     const ingest = new Ingest(cat, auth, (...args) =>
       monitor?.accepted(...args),
@@ -167,8 +168,6 @@ export async function createApp(cfg: Config) {
     modules.push(privilegedExecutors,managedMachines.registerExecutorBootstrap(privilegedExecutors));
     connectManagedExecutorJobs(deps,{jobs:agentJobs,executors:privilegedExecutors,artifacts:releaseArtifacts,resolvePlatform:platform.resolvePayload});
     modules.push(connectExecutorObservations(deps,privilegedExecutors,ingest.internal.bind(ingest)));
-    // Enrollment credentials are a separate migration boundary. Legacy
-    // config.key based nodes keep working until they explicitly re-enroll.
     modules.push(agentCredentials);
     modules.push(registerDashboards(deps));
     modules.push(registerLogs(deps));

@@ -8,7 +8,7 @@ import {
   formatNanoTime,
   parseNanoTime,
   nowNano,
-  goJSON,
+  stableJSON,
   type Signal,
 } from "../shared/otlp.js";
 import { stringifyJSON } from "../shared/json.js";
@@ -49,7 +49,7 @@ const attrText = (values: Record<string, any>) =>
   Object.fromEntries(
     Object.entries(values).map(([k, v]) => [
       k,
-      typeof v === "string" ? v : goJSON(v, true),
+      typeof v === "string" ? v : stableJSON(v, true),
     ]),
   );
 const temporality = (v: any) =>
@@ -70,9 +70,9 @@ function base(
     host_id: text(resource["host.id"]),
     agent_id: text(resource["lightmoni.agent_id"]),
     key_id: key,
-    resource_json: goJSON(resource, true),
+    resource_json: stableJSON(resource, true),
     attributes: attrText(a),
-    attributes_json: goJSON(a, true),
+    attributes_json: stableJSON(a, true),
   };
 }
 export function normalize(
@@ -112,8 +112,8 @@ export function normalize(
                 )
               ],
             severity_number: Number(log.severityNumber ?? 0),
-            body: typeof body === "string" ? body : goJSON(body, true),
-            body_json: goJSON(body, true),
+            body: typeof body === "string" ? body : stableJSON(body, true),
+            body_json: stableJSON(body, true),
             trace_id: log.traceId ?? "",
             span_id: log.spanId ?? "",
             source_id:
@@ -205,17 +205,12 @@ export function normalize(
             } else {
               if (p.asInt !== undefined)
                 Object.assign(row, {
-                  value: String(p.asInt),
                   value_type: "int",
                   value_int: String(p.asInt),
                   value_float: Number(p.asInt),
                 });
               else if (p.asDouble !== undefined && Number.isFinite(p.asDouble))
                 Object.assign(row, {
-                  value:
-                    Math.abs(p.asDouble) < 1e29
-                      ? legacyDecimal(p.asDouble)
-                      : "0",
                   value_type: "double",
                   value_int: null,
                   value_float: p.asDouble,
@@ -273,11 +268,11 @@ export function normalize(
               ["STATUS_CODE_UNSET", "STATUS_CODE_OK", "STATUS_CODE_ERROR"][
                 Number(span.status?.code ?? 0)
               ] ?? String(span.status?.code),
-            events_json: goJSON(
-              span.events?.length ? span.events.map(legacyEvent) : null,
+            events_json: stableJSON(
+              span.events ?? [],
             ),
-            links_json: goJSON(
-              span.links?.length ? span.links.map(legacyLink) : null,
+            links_json: stableJSON(
+              span.links ?? [],
             ),
           });
           out.push({ kind: "trace", subtype: "", row });
@@ -286,83 +281,6 @@ export function normalize(
   if (out.some((n) => !n.row.service))
     throw Error("service.name resource is required");
   return out;
-}
-// Preserve the historical encoding/json shape inside trace event/link text.
-function legacyKV(a: any): any {
-  const out: any = {};
-  if (a.key) out.key = a.key;
-  if (a.value) out.value = legacyAny(a.value);
-  return out;
-}
-function legacyAny(value: any): any {
-  const fields = [
-    "stringValue",
-    "boolValue",
-    "intValue",
-    "doubleValue",
-    "arrayValue",
-    "kvlistValue",
-    "bytesValue",
-    "stringValueStrindex",
-  ];
-  for (const key of fields)
-    if (value[key] !== undefined) {
-      let v = value[key];
-      if (key === "intValue") v = new LosslessNumber(String(v));
-      else if (key === "arrayValue")
-        v = v.values?.length ? { values: v.values.map(legacyAny) } : {};
-      else if (key === "kvlistValue")
-        v = v.values?.length ? { values: v.values.map(legacyKV) } : {};
-      const label = key[0].toUpperCase() + key.slice(1);
-      return { Value: { [label]: v } };
-    }
-  return { Value: null };
-}
-function legacyEvent(event: any): any {
-  const out: any = {};
-  if (BigInt(event.timeUnixNano ?? 0))
-    out.time_unix_nano = new LosslessNumber(String(event.timeUnixNano));
-  if (event.name) out.name = event.name;
-  if (event.attributes?.length) out.attributes = event.attributes.map(legacyKV);
-  if (event.droppedAttributesCount)
-    out.dropped_attributes_count = event.droppedAttributesCount;
-  return out;
-}
-function legacyLink(link: any): any {
-  const out: any = {};
-  if (link.traceId) out.trace_id = link.traceId;
-  if (link.spanId) out.span_id = link.spanId;
-  if (link.traceState) out.trace_state = link.traceState;
-  if (link.attributes?.length) out.attributes = link.attributes.map(legacyKV);
-  if (link.droppedAttributesCount)
-    out.dropped_attributes_count = link.droppedAttributesCount;
-  if (link.flags) out.flags = link.flags;
-  return out;
-}
-// strconv.FormatFloat(...,'f',9,64) rounds the exact binary value, ties to even.
-export function legacyDecimal(value: number): string {
-  const bytes = Buffer.alloc(8);
-  bytes.writeDoubleLE(value);
-  const bits = bytes.readBigUInt64LE(),
-    negative = bits >> 63n !== 0n,
-    exponent = Number((bits >> 52n) & 2047n),
-    mantissa = (bits & ((1n << 52n) - 1n)) + (exponent ? 1n << 52n : 0n),
-    power = (exponent || 1) - 1023 - 52;
-  let n = mantissa * 1000000000n;
-  if (power >= 0) n <<= BigInt(power);
-  else {
-    const denominator = 1n << BigInt(-power),
-      q = n / denominator,
-      remainder = n % denominator;
-    n =
-      q +
-      (remainder * 2n > denominator ||
-      (remainder * 2n === denominator && q % 2n === 1n)
-        ? 1n
-        : 0n);
-  }
-  const digits = n.toString().padStart(10, "0");
-  return (negative ? "-" : "") + digits.slice(0, -9) + "." + digits.slice(-9);
 }
 export function sdkRuntime(n: Normalized, source: string) {
   const a = n.row.attributes;
@@ -391,7 +309,7 @@ export function sdkRuntime(n: Normalized, source: string) {
     if (!["started", "diagnostics_changed"].includes(a.event)) return false;
   } else return false;
   a.source_table = source;
-  n.row.attributes_json = goJSON(a, true);
+  n.row.attributes_json = stableJSON(a, true);
   return true;
 }
 export class Ingest {
@@ -418,12 +336,12 @@ export class Ingest {
     batch = id(),
     signal?: AbortSignal,
   ) {
-    if (!systemTable(table))
+    if (!["lightmoni", APPLICATION_TABLE].includes(table))
       throw Error("internal telemetry requires a system table");
-    const component=table==="lightmoni"?"":table===APPLICATION_TABLE?"application":table.slice(10);
+    const component=table===APPLICATION_TABLE?"application":"";
     const grouped = new Map<string, any[]>();
     for (const [i, n] of rows.entries()) {
-      if(component){n.row.attributes["lightmoni.component"]=component;n.row.attributes_json=goJSON(n.row.attributes,true);}
+      if(component){n.row.attributes["lightmoni.component"]=component;n.row.attributes_json=stableJSON(n.row.attributes,true);}
       const target =
         "_lm_" +
         (await this.cat.ensure(
@@ -460,7 +378,7 @@ export class Ingest {
       table = String(c.req.headers["x-lightmoni-table"] ?? "");
     if (!validTable(table))
       fail(400, "X-Lightmoni-Table requires a logical business name");
-    if (systemTable(table) && !(key.id && table === "lightmoni_sdk") && !(agentID && table === APPLICATION_TABLE)) fail(403, "系统内置表由内部监控链路写入");
+    if (systemTable(table) && !(key.id && table === "lightmoni") && !(agentID && table === APPLICATION_TABLE)) fail(403, "系统内置表由内部监控链路写入");
     if (!key.allow_all_tables && !key.allowed_tables.includes(table)) {
       this.auth.recordKey(
         key.id,
@@ -557,10 +475,8 @@ export class Ingest {
         fail(400, e instanceof Error ? e.message : "invalid OTLP");
       }
       if (table === APPLICATION_TABLE) bindApplicationRows(this.cat.db, agentID, rows, this.auth.decrypt);
-      if (table === "lightmoni_sdk" && rows.some(n => !sdkRuntime(n, table)))
+      if (table === "lightmoni" && rows.some(n => !sdkRuntime(n, table)))
         fail(403, "SDK 系统表只接收 SDK 自身指标和事件");
-      // Older anonymous SDKs may mix diagnostics into a business stream.
-      if (!key.id) rows = rows.filter(n => n.row.attributes["lightmoni.component"] !== "sdk");
       try{rows=mergeMetricWindows(rows);}catch(error){fail(400,error instanceof Error?error.message:'invalid metric window');}
       for(const n of rows)if(n.row.window_seconds&&!windowHistory(this.cat.db,table).some(p=>p.seconds===n.row.window_seconds))fail(400,'metric window period has not been configured');
       const now = nowNano();
@@ -652,7 +568,7 @@ export class Ingest {
 export function mergeMetricWindows(rows:Normalized[]):Normalized[]{
  const output:Normalized[]=[],groups=new Map<string,{n:Normalized;kinds:Set<string>}>();
  for(const n of rows){const r=n.row;if(!r.window_seconds){output.push(n);continue;}
- const key=goJSON([r.resource_json,r.name,r.unit,r.attributes_json,r.window_start,r.window_seconds],true),kind=r.distribution_kind;
+ const key=stableJSON([r.resource_json,r.name,r.unit,r.attributes_json,r.window_start,r.window_seconds],true),kind=r.distribution_kind;
  const old=groups.get(key);if(!old){groups.set(key,{n,kinds:new Set([kind])});output.push(n);continue;}
  if(old.kinds.has(kind))throw Error('duplicate metric kind in one window');old.kinds.add(kind);
  const previous=old.n.row,complete=kind==='exponential'?r:previous,total=BigInt(previous.count)+BigInt(r.count),sum=Number(previous.sum)+Number(r.sum);

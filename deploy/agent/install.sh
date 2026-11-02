@@ -8,7 +8,6 @@ release_url=""
 release_dir=""
 config_source=""
 endpoint=""
-group_id=""
 enrollment_token_stdin=""
 enrollment_token=""
 bootstrap_credential=""
@@ -18,7 +17,7 @@ agent_public_key=""
 enrollment_mode="no"
 
 usage() {
-  echo 'Usage: install.sh (--release-url URL --enrollment-token-stdin | --release-dir DIR) [--fresh] [--version VERSION] [--config FILE | --endpoint URL --enrollment-token-stdin] [--group-id GROUP]'
+  echo 'Usage: install.sh (--release-url URL --enrollment-token-stdin | --release-dir DIR) [--fresh] [--version VERSION] [--config FILE | --endpoint URL --enrollment-token-stdin]'
   echo 'The reporting configuration is generated automatically. Existing identity and cached data are preserved.'
 }
 
@@ -30,7 +29,6 @@ while [ "$#" -gt 0 ]; do
     --release-dir) release_dir="$2"; shift 2 ;;
     --config) config_source="$2"; shift 2 ;;
     --endpoint) endpoint="$2"; shift 2 ;;
-    --group-id) group_id="$2"; shift 2 ;;
     --enrollment-token-stdin) enrollment_token_stdin="yes"; shift ;;
     --help) usage; exit 0 ;;
     *) usage >&2; exit 1 ;;
@@ -74,7 +72,6 @@ runtime_base_created="no"
 releases_directory_created="no"
 uninstaller_directory_created="no"
 rollback_failed="no"
-permission_retirement_started="no"
 installation_phase="install-files"
 wait_service_active() {
   startup_attempt=0
@@ -121,27 +118,12 @@ finish() {
     restore_file /etc/lightmoni-agent/config.json "$tmp_dir/previous-config"
     restore_file /usr/local/bin/lightmoni-agent "$tmp_dir/previous-launcher"
     restore_file /usr/local/sbin/lightmoni-agent-uninstall "$tmp_dir/previous-uninstaller"
-    if [ -e "$tmp_dir/previous-service" ] && ! ordinary_service "$tmp_dir/previous-service"; then
-      # Keep the exact old unit in the transaction evidence. Never restore its
-      # group/capability grant or leave it enabled after a failed migration.
-      systemctl stop lightmoni-agent.service || rollback_failed=yes
-      if ordinary_service "$tmp_dir/unpacked/lightmoni-agent.service"; then
-        install -m 0644 "$tmp_dir/unpacked/lightmoni-agent.service" /etc/systemd/system/lightmoni-agent.service || rollback_failed=yes
-        service_changed=yes
-      fi
-      systemctl disable lightmoni-agent.service || rollback_failed=yes
-      rollback_failed=yes
-    else
-      restore_file /etc/systemd/system/lightmoni-agent.service "$tmp_dir/previous-service"
-    fi
+    restore_file /etc/systemd/system/lightmoni-agent.service "$tmp_dir/previous-service"
     restore_file /opt/lightmoni-agent/current "$tmp_dir/previous-current"
     if [ "$enrollment_mode" = "yes" ]; then
       restore_file /var/lib/lightmoni-agent/identity.json "$tmp_dir/previous-identity"
     fi
     if [ "$service_changed" = "yes" ]; then systemctl daemon-reload || rollback_failed="yes"; fi
-    if [ "$permission_retirement_started" = yes ]; then
-      if ! inspect_legacy_docker_access || [ "$legacy_docker_present" = yes ]; then rollback_failed=yes; fi
-    fi
     if [ "$enable_attempted" = "yes" ] && [ "$rollback_failed" = no ]; then
       if [ "$previous_enabled" = "yes" ]; then systemctl enable lightmoni-agent.service || rollback_failed="yes"
       else systemctl disable lightmoni-agent.service || rollback_failed="yes"; fi
@@ -207,56 +189,33 @@ actual="$(sha256sum "$tmp_dir/$artifact" | awk '{ print $1 }')"
 mkdir "$tmp_dir/unpacked"
 tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir/unpacked" lightmoni-agent lightmoni-agent.service lightmoni-agent-runtime
 [ -f "$tmp_dir/unpacked/lightmoni-agent" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent" ] || { echo 'Invalid release binary.' >&2; exit 1; }
-has_uninstaller="no"
-if [ -e "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" ] || [ -L "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" ]; then
   [ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" ] || { echo 'Invalid offline uninstaller in the release.' >&2; exit 1; }
-  has_uninstaller="yes"
 # Source only the shared, side-effect-free guards from the checksum-verified
 # standalone script. Never execute the uninstaller during installation.
 sed -n '/^# BEGIN SHARED MAINTENANCE GUARDS$/,/^# END SHARED MAINTENANCE GUARDS$/p' "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" > "$tmp_dir/maintenance-guards.sh"
 . "$tmp_dir/maintenance-guards.sh"
 lm_assert_paths
-fi
 [ -x "$tmp_dir/unpacked/lightmoni-agent-runtime/node" ] || { echo 'Bundled Node runtime is missing.' >&2; exit 1; }
 "$tmp_dir/unpacked/lightmoni-agent-runtime/node" --version >/dev/null || { echo 'The release requires Linux with glibc 2.28 or newer.' >&2; exit 1; }
 node="$tmp_dir/unpacked/lightmoni-agent-runtime/node"
 ordinary_service() {
   "$node" -e 'const fs=require("node:fs"),c=require("node:crypto"),p=process.argv[1],s=fs.lstatSync(p);if(!s.isFile()||s.isSymbolicLink()||s.size>8192||c.createHash("sha256").update(fs.readFileSync(p)).digest("hex")!=="651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf")process.exit(1);' "$1"
 }
-ordinary_service "$tmp_dir/unpacked/lightmoni-agent.service" || { echo 'agent_privilege_migration_required' >&2; exit 1; }
-# Only this exact platform-owned legacy grant may be retired. Other systemd
-# overrides remain administrator evidence and require explicit local migration.
-inspect_legacy_docker_access() {
-  legacy_docker_dir=/etc/systemd/system/lightmoni-agent.service.d
-  legacy_docker_file="$legacy_docker_dir/20-lightmoni-docker.conf"
-  for legacy_path in /etc /etc/systemd /etc/systemd/system "$legacy_docker_dir"; do
-    [ ! -L "$legacy_path" ] || { echo 'agent_dropin_migration_required' >&2; return 1; }
-    if [ -e "$legacy_path" ]; then
-      [ -d "$legacy_path" ] || return 1
-      stat -c '%u:%a' -- "$legacy_path" | LC_ALL=C awk -F: '$1=="0" && $2 ~ /^([0-7])?[0-7][0145][0145]$/ {safe=1} END {exit !safe}' || return 1
-    fi
+ordinary_service "$tmp_dir/unpacked/lightmoni-agent.service" || { echo 'ordinary_agent_privilege_violation' >&2; exit 1; }
+assert_ordinary_service() {
+  if [ -e /etc/systemd/system/lightmoni-agent.service ]; then
+    ordinary_service /etc/systemd/system/lightmoni-agent.service || { echo 'ordinary_agent_privilege_violation' >&2; return 1; }
+    [ -z "$(systemctl show lightmoni-agent.service --property=DropInPaths --value)" ] || { echo 'agent_service_override_not_allowed' >&2; return 1; }
+  fi
+  for override in /etc/systemd/system/lightmoni-agent.service.d/* /etc/systemd/system/lightmoni-agent.service.d/.[!.]* /etc/systemd/system/lightmoni-agent.service.d/..?*; do
+    if [ -e "$override" ] || [ -L "$override" ]; then echo 'agent_service_override_not_allowed' >&2; return 1; fi
   done
-  legacy_effective=$(systemctl show lightmoni-agent.service --property=DropInPaths --value) || return 1
-  case "$legacy_effective" in ""|"$legacy_docker_file") ;; *) echo 'agent_dropin_migration_required' >&2; return 1;; esac
-  if [ -d "$legacy_docker_dir" ]; then
-    for legacy_path in "$legacy_docker_dir"/* "$legacy_docker_dir"/.[!.]* "$legacy_docker_dir"/..?*; do
-      if [ -e "$legacy_path" ] || [ -L "$legacy_path" ]; then
-        [ "$legacy_path" = "$legacy_docker_file" ] || { echo 'agent_dropin_migration_required' >&2; return 1; }
-      fi
-    done
-  fi
-  legacy_docker_present=no
-  if [ -e "$legacy_docker_file" ] || [ -L "$legacy_docker_file" ]; then
-    [ ! -L "$legacy_docker_file" ] && [ -f "$legacy_docker_file" ] || return 1
-    stat -c '%u:%a' -- "$legacy_docker_file" | LC_ALL=C awk -F: '$1=="0" && $2 ~ /^([0-7])?[0-7][0145][0145]$/ {safe=1} END {exit !safe}' || return 1
-    printf '[Service]\nSupplementaryGroups=docker\n' > "$tmp_dir/legacy-docker-expected"
-    cmp -s "$legacy_docker_file" "$tmp_dir/legacy-docker-expected" || { echo 'agent_dropin_migration_required' >&2; return 1; }
-    legacy_docker_present=yes
-  else
-    [ -z "$legacy_effective" ] || return 1
-  fi
 }
-inspect_legacy_docker_access
+assert_ordinary_service
+if [ -e /usr/local/bin/lightmoni-agent ] && [ ! -L /opt/lightmoni-agent/current ]; then
+  echo 'Unsupported Agent installation; use host management to inspect and reinstall.' >&2
+  exit 1
+fi
 write_curl_auth() {
   curl_auth="$tmp_dir/curl-auth.conf"
   printf 'header = "Authorization: Bearer %s"\n' "$1" > "$curl_auth"
@@ -301,12 +260,9 @@ staged_config="$tmp_dir/config.json"
 if [ -f "$config_path" ]; then cp -p "$config_path" "$staged_config"
 elif [ -n "$config_source" ]; then cp "$config_source" "$staged_config"; fi
 if [ "$enrollment_mode" = "yes" ]; then
-  "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --endpoint "$endpoint" --group-id "$group_id" --pending-enrollment --require-data-dir /var/lib/lightmoni-agent
+  "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --endpoint "$endpoint" --pending-enrollment --require-data-dir /var/lib/lightmoni-agent
   "$tmp_dir/unpacked/lightmoni-agent" check --config "$staged_config" --pending-enrollment --require-data-dir /var/lib/lightmoni-agent
 else
-  if [ -n "$group_id" ]; then
-    "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --group-id "$group_id" --require-data-dir /var/lib/lightmoni-agent
-  fi
   "$tmp_dir/unpacked/lightmoni-agent" check --config "$staged_config" --require-data-dir /var/lib/lightmoni-agent
 fi
 
@@ -326,7 +282,7 @@ if [ "$enrollment_mode" = "yes" ]; then
   "$tmp_dir/unpacked/lightmoni-agent" check --config "$staged_config" --require-data-dir /var/lib/lightmoni-agent
 fi
 
-# Preserve old Go binaries as well as the Node launcher's current symlink.
+# Preserve the current launcher and runtime symlink.
 # Backups retain modes, ownership and symlink identity for an atomic rollback.
 for item in config launcher uninstaller service current identity; do
   case "$item" in
@@ -345,34 +301,14 @@ done
 if systemctl is-active --quiet lightmoni-agent.service; then previous_active="yes"; fi
 if systemctl is-enabled --quiet lightmoni-agent.service; then previous_enabled="yes"; fi
 transaction_started="yes"
-inspect_legacy_docker_access
-if [ "$legacy_docker_present" = yes ]; then
-  installation_phase="retire-legacy-docker-access"
-  restart_attempted=yes
-  permission_retirement_started=yes
-  service_changed=yes
-  systemctl stop lightmoni-agent.service
-  legacy_active=$(systemctl show lightmoni-agent.service --property=ActiveState --value)
-  case "$legacy_active" in inactive|failed) ;; *) echo 'service_stop_failed' >&2; exit 1;; esac
-  inspect_legacy_docker_access
-  [ "$legacy_docker_present" = yes ] || { echo 'agent_dropin_migration_required' >&2; exit 1; }
-  rm "$legacy_docker_file"
-  "$node" -e 'const fs=require("node:fs"),fd=fs.openSync(process.argv[1],"r");try{fs.fsyncSync(fd)}finally{fs.closeSync(fd)}' "$legacy_docker_dir"
-  service_changed=yes
-  # This permission grant is not a program backup. Failure rollback cannot
-  # reintroduce Docker access into the restored ordinary Agent.
-  echo 'legacy_docker_access_removed'
-fi
 if id lightmoni-agent >/dev/null 2>&1; then :; else
   command -v useradd >/dev/null || { echo 'useradd is required.' >&2; exit 1; }
   useradd --system --no-create-home --home-dir /var/lib/lightmoni-agent --shell /usr/sbin/nologin lightmoni-agent
 fi
 install -d -m 0700 -o lightmoni-agent -g lightmoni-agent /etc/lightmoni-agent /var/lib/lightmoni-agent
-if [ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ]; then
-  [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] || { echo 'Invalid deployment permission helper.' >&2; exit 1; }
+[ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] || { echo 'Invalid deployment permission helper.' >&2; exit 1; }
   installation_phase="deployment-permissions"
   "$node" "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" prepare
-fi
 install -m 0600 -o lightmoni-agent -g lightmoni-agent "$staged_config" "/etc/lightmoni-agent/.config.new-$$"
 mv -f "/etc/lightmoni-agent/.config.new-$$" "$config_path"
 if [ "$enrollment_mode" = "yes" ]; then
@@ -395,12 +331,10 @@ ln -s "$runtime_release" "/opt/lightmoni-agent/.current-$$"
 mv -Tf "/opt/lightmoni-agent/.current-$$" /opt/lightmoni-agent/current
 install -m 0755 "$tmp_dir/unpacked/lightmoni-agent" "/usr/local/bin/.lightmoni-agent.new-$$"
 mv -f "/usr/local/bin/.lightmoni-agent.new-$$" /usr/local/bin/lightmoni-agent
-if [ "$has_uninstaller" = "yes" ]; then
   if [ ! -e /usr/local/sbin ] && [ ! -L /usr/local/sbin ]; then uninstaller_directory_created="yes"; fi
   install -d -m 0755 /usr/local/sbin
   install -m 0755 "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" "/usr/local/sbin/.lightmoni-agent-uninstall.new-$$"
   mv -f "/usr/local/sbin/.lightmoni-agent-uninstall.new-$$" /usr/local/sbin/lightmoni-agent-uninstall
-fi
 service_changed="yes"
 install -m 0644 "$tmp_dir/unpacked/lightmoni-agent.service" /etc/systemd/system/lightmoni-agent.service
 installation_phase="daemon-reload"

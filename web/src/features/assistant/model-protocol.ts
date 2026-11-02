@@ -33,7 +33,7 @@ export function protocolLabel(protocol: ModelProtocolSelection, language:Languag
 
 export function initialProtocol(config?: Pick<AssistantConfig, 'base_url' | 'protocol'>): ModelProtocolSelection {
   if (!config?.base_url?.trim()) return 'auto';
-  return isModelProtocol(config.protocol) ? config.protocol : 'openai-chat-completions';
+  return isModelProtocol(config.protocol) ? config.protocol : 'auto';
 }
 
 // Only a current, unambiguous directory recommendation can resolve "auto".
@@ -61,7 +61,7 @@ export function protocolSourceLabel(source: string, language:Language='zh-CN'): 
 }
 
 // Provider responses and arbitrary exception text never become UI messages.
-// Match only fixed server codes or legacy safe error markers.
+// Match only fixed server codes or safe server error markers.
 export function modelConnectionError(problem: unknown, language:Language='zh-CN'): string {
  const t=translator(language);
   const issue = problem && typeof problem === 'object' ? problem as { status?: number; details?: { code?: unknown }; message?: unknown } : {};

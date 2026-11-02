@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Ordinary Agent permission observation. Never grants or removes host powers.
- * Legacy/external authority requires explicit migration to the root executor. */
+ * External Docker authority is refused; use the separate root executor. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -13,7 +13,7 @@ const blockedGroups = new Set(['root','docker','lxd','lxc','incus-admin','libvir
 const numericID = value => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : fail('agent_account_invalid');
 const groupSnapshot = (ids, names) => {
   if (!Array.isArray(ids) || !ids.length || ids.some(g=>!Number.isSafeInteger(g)||g<0)||!Array.isArray(names)||!names.length||names.some(n=>typeof n!=='string'||!/^[A-Za-z_][A-Za-z0-9_.-]*\$?$/.test(n))) fail('agent_permission_observation_failed');
-  if (ids.includes(0)||names.some(name=>blockedGroups.has(name))) fail('agent_privilege_migration_required');
+  if (ids.includes(0)||names.some(name=>blockedGroups.has(name))) fail('ordinary_agent_privilege_violation');
 };
 
 export function prepareDeploymentPermissions(options = {}) {
@@ -49,18 +49,18 @@ function actualIdentity() {
 }
 export async function checkDeploymentPermissions(options = {}) {
   const identity=options.identity??actualIdentity(), p=value=>path.join(options.root??'/',value);
-  if(!Number.isSafeInteger(identity.uid)||identity.uid<=0||!Number.isSafeInteger(identity.euid)||identity.euid<=0||!Number.isSafeInteger(identity.gid)||identity.gid<=0)fail('agent_privilege_migration_required');
+  if(!Number.isSafeInteger(identity.uid)||identity.uid<=0||!Number.isSafeInteger(identity.euid)||identity.euid<=0||!Number.isSafeInteger(identity.gid)||identity.gid<=0)fail('ordinary_agent_privilege_violation');
   groupSnapshot([identity.gid,...identity.groups],identity.names);
   if(!identity.capabilities||Object.keys(identity.capabilities).sort().join(',')!=='ambient,effective,inheritable,permitted')fail('agent_permission_observation_failed');
   for(const value of Object.values(identity.capabilities)){
     if(typeof value!=='string'||!/^[a-fA-F0-9]{1,32}$/.test(value))fail('agent_permission_observation_failed');
-    if(BigInt('0x'+value)!==0n)fail('agent_privilege_migration_required');
+    if(BigInt('0x'+value)!==0n)fail('ordinary_agent_privilege_violation');
   }
   const socket=p('/var/run/docker.sock'); let socketInfo;
   try{socketInfo=fs.lstatSync(socket);}catch(error){if(error.code!=='ENOENT')fail('agent_permission_observation_failed');}
   if(socketInfo){
-    if(socketInfo.isSymbolicLink()||!socketInfo.isSocket())fail('agent_privilege_migration_required');
-    try{(options.access??fs.accessSync)(socket,fs.constants.W_OK);fail('agent_privilege_migration_required');}
+    if(socketInfo.isSymbolicLink()||!socketInfo.isSocket())fail('ordinary_agent_privilege_violation');
+    try{(options.access??fs.accessSync)(socket,fs.constants.W_OK);fail('ordinary_agent_privilege_violation');}
     catch(error){if(!['EACCES','EPERM'].includes(error.code))throw error;}
   }
   const config=p('/etc/lightmoni-agent/config.json'), info=fs.lstatSync(config);

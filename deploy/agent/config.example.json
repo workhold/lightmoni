@@ -14,6 +14,5 @@
   "collect_interval_seconds": 15,
   "control_interval_seconds": 30,
   "process_names": [],
-  "probes": [],
-  "group_id": "default"
+  "probes": []
 }

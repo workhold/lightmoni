@@ -38,7 +38,7 @@ func TestRuntimeHeartbeatDiagnosticsAndSharedLifecycle(t *testing.T) {
 	}
 	logs := 0
 	for _, batch := range sink.snapshot() {
-		if batch.Table != "lightmoni_sdk" {
+		if batch.Table != "lightmoni" {
 			t.Fatal("runtime did not use the shared SDK stream")
 		}
 		if batch.Signal == "logs" {

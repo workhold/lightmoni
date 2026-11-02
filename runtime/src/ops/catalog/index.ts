@@ -53,14 +53,10 @@ export function extendedInstallation(
     preview: false,
     deployment_mode: mode,
     host_ports: Object.fromEntries(
-      ports.map((v, i) => [
+      ports.map(v => [
         v.name,
         overrides[v.name] ??
-          (i === 0 && p.port !== undefined
-            ? p.port
-            : mode === "managed"
-              ? 0
-              : v.container_port),
+          (mode === "managed" ? 0 : v.container_port),
       ]),
     ),
   };

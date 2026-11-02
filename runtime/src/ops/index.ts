@@ -1,7 +1,6 @@
 import {machineServiceAddresses} from "../server/host-network.js";
 import {registerImageSources} from './image-sources.js';
 import {createPrivateRegistryController} from './private-registry.js';
-import {migrateSystemApplications} from './system-applications.js';
 import { CloudError, zoneFor } from "./cloud.js";
 import { registerObservability } from "./observability.js";
 import { applicationCatalog, applicationCategories, catalogInstallation } from "./catalog.js";
@@ -33,21 +32,10 @@ export function registerOperationsPlatform(
     fetch: options.fetch,
   };
   const certificates = createCertificateController({...domainOptions, ...options.certificate});
-  const workloads = createWorkloadController({
-    ...domainOptions,
-    ensureCertificateMaterial: async (certificateID, actor) => {
-      const certificate = store.get(certificateID, "certificate");
-      const result = await certificates.perform(
-        certificate,
-        "issue",
-        {},
-        actor,
-      );
-      if (result.state !== "succeeded")
-        fail(409, "website_certificate_issuance_failed");
-    },
-  });
-  migrateSystemApplications(store);
+  const workloads = createWorkloadController({...domainOptions,ensureCertificateMaterial:async(certificateID,actor)=>{
+    const result=await certificates.perform(store.get(certificateID,'certificate'),'issue',{},actor);
+    if(result.state!=='succeeded')fail(409,'website_certificate_issuance_failed');
+  }});
   const domains: DomainController[] = [certificates, workloads];
   const { router } = deps;
   let timer: ReturnType<typeof setInterval> | undefined,
@@ -147,7 +135,7 @@ export function registerOperationsPlatform(
   };
   const agents = () =>
     deps.db.all<any>(
-      "SELECT id,host_id,hostname,version,platform,arch,last_seen,group_id FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed') ORDER BY last_seen DESC,id LIMIT 1000",
+      "SELECT id,host_id,hostname,version,platform,arch,last_seen FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed') ORDER BY last_seen DESC,id LIMIT 1000",
     );
   const machines = () => {
     if (
@@ -378,12 +366,6 @@ export function registerOperationsPlatform(
       if (b.revision !== r.revision) fail(409, "platform_revision_conflict");
       if (b.confirmed !== true) fail(400, "platform_confirmation_required");
       if (typeof b.action !== "string") fail(400, "platform_action_required");
-      if (
-        (["service", "node_pool", "gateway_group"].includes(r.kind) ||
-          (r.kind === "application" && !r.spec.deployments)) &&
-        ["deploy", "reconcile"].includes(b.action)
-      )
-        fail(409, "legacy_deployment_requires_cluster_migration");
       const domain = domains.find((d) => d.actions(r).includes(b.action));
       if (!domain) fail(400, "unsupported_platform_action");
       const input = safeObject(b.input ?? {});

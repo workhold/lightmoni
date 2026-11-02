@@ -9,6 +9,7 @@ import { createServer } from "node:http";
 import { compare } from "bcryptjs";
 import { DB } from "../src/shared/sqlite.js";
 import { Router } from "../src/shared/http.js";
+import { initializeCenterSchema } from "../src/server/schema.js";
 import { Auth } from "../src/server/auth.js";
 
 const cli = fileURLToPath(new URL("../src/server/admin-cli.ts", import.meta.url));
@@ -33,6 +34,7 @@ test("admin CLI initializes once and reset works with HTTP login while invalidat
   assert.equal(existsSync(join(dir, "master.key")), false);
   const db = new DB(join(dir, "lightmoni.db"));
   t.after(() => db.close());
+  assert.doesNotThrow(() => initializeCenterSchema(db));
   const user = db.get<any>("SELECT * FROM users")!;
   assert.equal(user.role, "admin");
   assert.equal(user.active, 1);
@@ -41,7 +43,7 @@ test("admin CLI initializes once and reset works with HTTP login while invalidat
   assert.deepEqual(db.get("SELECT * FROM users"), user);
   const router = new Router(() => {}), auth = new Auth(db, dir, "http://127.0.0.1", router);
   router.auth = auth; auth.register();
-  const server = createServer((req, res) => void router.handle(req, res));
+  const server = createServer((req, res) => void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
   const base = "http://127.0.0.1:" + (server.address() as any).port;

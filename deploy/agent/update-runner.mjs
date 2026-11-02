@@ -88,11 +88,7 @@ export class AgentMaintenance {
     const manifest = boundedJSON(this.checkManaged(path.join(releasePath, "release.json")), 16384);
     if (!VERSION.test(manifest.version ?? "") || manifest.platform !== "linux" || !["amd64", "arm64"].includes(manifest.arch)) fail("unsupported_release");
     const current = manifest.state_schema === 1 && REVISION.test(manifest.source_revision ?? "") && VERSION.test(manifest.build_id ?? "");
-    // Explicitly recognize the only legacy standalone Node bundle emitted by
-    // the old builder; unknown runtimes/schema are never guessed compatible.
-    const legacy = manifest.state_schema === undefined && manifest.version === "0.1.0" && manifest.node_version === "24.15.0"
-      && manifest.requires === "glibc >= 2.28" && SHA.test(manifest.node_sha256 ?? "");
-    if (!current && !legacy) fail("unsupported_state_schema");
+    if (!current) fail("unsupported_state_schema");
     if (manifest.node_binary_sha256 !== undefined && (!SHA.test(manifest.node_binary_sha256) || digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "node")))) !== manifest.node_binary_sha256)) fail("runtime_checksum_mismatch");
     let artifact = "";
     try {
@@ -100,11 +96,11 @@ export class AgentMaintenance {
       if (receipt.schema !== 1 || !SHA.test(receipt.artifact_sha256 ?? "")) fail("invalid_installation_receipt");
       artifact = receipt.artifact_sha256;
     } catch (error) { if (!absent(error)) throw error; }
-    return { version: manifest.version, source_revision: current ? manifest.source_revision : "", build_id: current ? manifest.build_id : "", state_schema: 1, artifact_sha256: artifact, arch: manifest.arch };
+    return { version: manifest.version, source_revision: manifest.source_revision, build_id: manifest.build_id, state_schema: 1, artifact_sha256: artifact, arch: manifest.arch };
   }
   ordinaryService(filename) {
     const file=this.checkManaged(filename),info=fs.statSync(file);
-    if(info.size>8192||digest(fs.readFileSync(file))!==ORDINARY_AGENT_SERVICE_SHA256)fail("agent_privilege_migration_required");
+    if(info.size>8192||digest(fs.readFileSync(file))!==ORDINARY_AGENT_SERVICE_SHA256)fail("ordinary_agent_privilege_violation");
     return fs.readFileSync(file);
   }
   fingerprint(releasePath, launcherPath = this.p("/usr/local/bin/lightmoni-agent"), servicePath = this.p("/etc/systemd/system/lightmoni-agent.service")) {
@@ -114,11 +110,7 @@ export class AgentMaintenance {
     const manifest = fs.readFileSync(this.checkManaged(path.join(releasePath, "release.json")));
     const node = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "node"))));
     const entrypoint = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "app/runtime/dist/agent/main.js"))));
-    let uninstaller;
-    try { uninstaller = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "uninstall.sh")))); }
-    catch (error) { if (!absent(error)) throw error; }
-    // Omitting an absent helper preserves existing legacy fingerprints. A new
-    // release's offline script is immutable rollback evidence like its entrypoint.
+    const uninstaller = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "uninstall.sh"))));
     return { ...release, fingerprint: digest(JSON.stringify({ release_path: releasePath, release, manifest: digest(manifest), launcher: digest(launcher), service: digest(service), node, entrypoint, uninstaller })) };
   }
   currentPath() {
@@ -132,26 +124,13 @@ export class AgentMaintenance {
     return destination;
   }
   system(property) { return this.command("systemctl", ["show", "lightmoni-agent.service", "--property=" + property, "--value"]); }
-  inspectLegacyDockerAccess(allowRetired=false) {
-    const directory=this.p("/etc/systemd/system/lightmoni-agent.service.d"),file=path.join(directory,"20-lightmoni-docker.conf");
-    const effective=this.system("DropInPaths").split(/\s+/).filter(Boolean);
-    if(effective.some(value=>value!==file))fail("agent_dropin_migration_required");
-    try {this.checkManaged(directory,"directory");} catch(error) {if(absent(error)&&effective.length===0)return false;throw error;}
-    if(fs.readdirSync(directory).some(name=>name!=="20-lightmoni-docker.conf"))fail("agent_dropin_migration_required");
-    try {this.checkManaged(file);} catch(error) {if(absent(error)&&(effective.length===0||allowRetired))return false;throw error;}
-    const expected=Buffer.from("[Service]\nSupplementaryGroups=docker\n");
-    if(fs.statSync(file).size!==expected.length||!fs.readFileSync(file).equals(expected))fail("agent_dropin_migration_required");
-    return true;
+  assertOrdinaryService() {
+    this.ordinaryService(this.p('/etc/systemd/system/lightmoni-agent.service'));
+    if (this.system('DropInPaths').trim()) fail('agent_service_override_not_allowed');
+    const directory = this.p('/etc/systemd/system/lightmoni-agent.service.d');
+    try { this.checkManaged(directory,'directory'); if (fs.readdirSync(directory).length) fail('agent_service_override_not_allowed'); }
+    catch (error) { if (!absent(error)) throw error; }
   }
-  retireLegacyDockerAccess(allowRetired=false) {
-    if(!this.inspectLegacyDockerAccess(allowRetired))return false;
-    const directory=this.p("/etc/systemd/system/lightmoni-agent.service.d");
-    fs.unlinkSync(path.join(directory,"20-lightmoni-docker.conf"));
-    const fd=fs.openSync(directory,"r");try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
-    // Permission retirement is monotonic. Program rollback never restores it.
-    return true;
-  }
-
   hasOperation() {
     try { fs.lstatSync(this.p("/var/lib/lightmoni-agent/operations/execution.lock")); return true; }
     catch (error) { if (!absent(error)) return true; }
@@ -181,7 +160,7 @@ export class AgentMaintenance {
       // former host powers as a retained program rollback target.
       if(digest(fs.readFileSync(this.checkManaged(path.join(source,"previous-service"))))!==ORDINARY_AGENT_SERVICE_SHA256)return null;
       return { ...value, release_path: retained.release_path, operation_id: retained.operation_id };
-    } catch (error) { if (absent(error)) return null; throw error; }
+    } catch (error) { if(absent(error))return null;throw error; }
   }
   probe() {
     const agent = this.identity();
@@ -219,7 +198,7 @@ export class AgentMaintenance {
     const id = request.operation_id, directory = this.opDir(id);
     if (fs.existsSync(directory)) fail("operation_already_exists");
     const before = this.probe();
-    this.inspectLegacyDockerAccess();
+    this.assertOrdinaryService();
     if (!before.ready || before.agent_id !== request.expected_agent_id || before.current.fingerprint !== request.expected_fingerprint) fail("installation_changed");
     if (before.service_active !== request.expected_service_active) fail("service_state_changed");
     if (before.lifecycle_locked || before.operation_lock) fail("operation_conflict");
@@ -350,7 +329,7 @@ export class AgentMaintenance {
       this.checkManaged(source);
       if (fs.statSync(source).size > 262144) fail("invalid_uninstaller");
       script = fs.readFileSync(source);
-    } catch (error) { if (absent(error)) return null; throw error; }
+    } catch (error) { throw error; }
     const destination = this.p("/usr/local/sbin/lightmoni-agent-uninstall"), parent = path.dirname(destination);
     let directoryPresent = true;
     try { this.checkManaged(parent, "directory"); }
@@ -383,17 +362,8 @@ export class AgentMaintenance {
     const request = this.request(id), directory = this.opDir(id);
     this.command("systemctl", ["stop", "lightmoni-agent.service"]);
     if (!["inactive", "failed"].includes(this.system("ActiveState"))) fail("service_stop_failed");
-    const previousService=fs.readFileSync(this.checkManaged(path.join(directory,"previous-service")));
-    if(digest(previousService)!==ORDINARY_AGENT_SERVICE_SHA256) {
-      // A failure before publishing the target must not leave the old enabled
-      // privileged unit capable of returning after a host reboot.
-      this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"),this.ordinaryService(path.join(directory,"approved-service")),0o644);
-      this.command("systemctl",["disable","lightmoni-agent.service"]);
-      this.command("systemctl",["daemon-reload"]);
-      fail("agent_privilege_migration_required");
-    }
-    const retired=this.retireLegacyDockerAccess(this.state(id).legacy_docker_access_removed===true);
-    if(retired)this.save(id,{legacy_docker_access_removed:true});
+    this.ordinaryService(path.join(directory,"previous-service"));
+    this.assertOrdinaryService();
     this.switchCurrent(request.previous_path);
     this.atomic(this.p("/usr/local/bin/lightmoni-agent"), fs.readFileSync(this.checkManaged(path.join(directory, "previous-launcher"))), 0o755);
     this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(this.checkManaged(path.join(directory, "previous-service"))), 0o644);
@@ -446,17 +416,11 @@ export class AgentMaintenance {
       const activeState = this.system("ActiveState");
       if (!["active", "inactive", "failed"].includes(activeState) || (activeState === "active") !== request.expected_service_active) fail("service_state_changed");
       if (this.hasOperation()) fail("operation_conflict");
-      this.inspectLegacyDockerAccess();
+      this.assertOrdinaryService();
       const uninstaller = this.prepareUninstaller(candidate, directory);
       const permissions = path.join(candidate, "deployment-permissions.mjs");
-      let hasPermissions = false;
-      try {
-        this.checkManaged(permissions);
-        hasPermissions = true;
-      } catch (error) {
-        if (!absent(error)) throw error;
-      }
-      if (hasPermissions) this.command(path.join(candidate, "node"), [permissions, "prepare"]);
+      this.checkManaged(permissions);
+      this.command(path.join(candidate, "node"), [permissions, "prepare"]);
       this.atomic(path.join(directory, "previous-launcher"), fs.readFileSync(this.checkManaged(this.p("/usr/local/bin/lightmoni-agent"))), 0o755);
       this.atomic(path.join(directory, "previous-service"), fs.readFileSync(this.checkManaged(this.p("/etc/systemd/system/lightmoni-agent.service"))), 0o644);
       this.atomic(path.join(directory,"approved-service"),approvedService,0o644);
@@ -465,7 +429,6 @@ export class AgentMaintenance {
       this.command("systemctl", ["stop", "lightmoni-agent.service"]);
       if (!["inactive", "failed"].includes(this.system("ActiveState"))) fail("service_stop_failed");
       if (this.hasOperation()) fail("operation_conflict");
-      if(this.retireLegacyDockerAccess())this.save(id,{legacy_docker_access_removed:true});
       this.switchCurrent(candidate);
       this.atomic(this.p("/usr/local/bin/lightmoni-agent"), fs.readFileSync(launcher), 0o755);
       this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(service), 0o644);

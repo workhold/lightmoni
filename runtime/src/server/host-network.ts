@@ -20,10 +20,6 @@ export interface MachineNetwork {
 }
 
 export function createHostNetworkSchema(db: DB): void {
-  // DDL and the one-time ownership backfill must commit together. SAVEPOINT
-  // also works when schema setup runs inside a caller's write transaction.
-  db.exec("SAVEPOINT lightmoni_host_network_schema");
-  try {
     db.exec(`CREATE TABLE IF NOT EXISTS machine_network_observations(
       machine_id TEXT PRIMARY KEY REFERENCES managed_machines(id) ON DELETE CASCADE,
       agent_id TEXT NOT NULL,
@@ -46,23 +42,7 @@ export function createHostNetworkSchema(db: DB): void {
       target_generation INTEGER NOT NULL DEFAULT 0,
       updated_by TEXT NOT NULL,updated_at TEXT NOT NULL
     )`);
-    const columns = new Set(db.all<{name:string}>("PRAGMA table_info(machine_network_observations)").map(row => row.name));
-    for (const [name, definition] of [
-      ["observed_via", "TEXT NOT NULL DEFAULT 'agent'"],
-      ["snapshot_agent_id", "TEXT NOT NULL DEFAULT ''"],
-      ["snapshot_ssh_generation", "INTEGER NOT NULL DEFAULT -1"],
-      ["snapshot_host_key_fingerprint", "TEXT NOT NULL DEFAULT ''"],
-      ["hostname", "TEXT NOT NULL DEFAULT ''"],
-    ]) if (!columns.has(name)) db.exec(`ALTER TABLE machine_network_observations ADD COLUMN ${name} ${definition}`);
-    // Only the migration that introduces snapshot_agent_id may backfill it.
-    // Later source owners must never become an earlier snapshot's identity.
-    if (!columns.has("snapshot_agent_id")) db.run("UPDATE machine_network_observations SET snapshot_agent_id=agent_id WHERE observed_via='agent'");
-    db.exec("RELEASE lightmoni_host_network_schema");
-  } catch (error) {
-    try { db.exec("ROLLBACK TO lightmoni_host_network_schema"); }
-    finally { db.exec("RELEASE lightmoni_host_network_schema"); }
-    throw error;
-  }
+
 }
 
 export function trustedProxyMatcher(ranges: string[] = []): (address: string) => boolean {
@@ -164,14 +144,13 @@ export function machineNetwork(db: DB, machineID: string): MachineNetwork {
 export function machineServiceAddresses(db: DB, machineID: string) {
   const value = machineServiceAddressSettings(db, machineID);
   const private_ips = value.private.effective_addresses, public_ips = value.public.effective_addresses;
-  const legacy = !machineNetwork(db,machineID).addresses.length ? normalizeIPAddress(db.get<{address:string}>('SELECT address FROM managed_machines WHERE id=?',machineID)?.address) : '';
-  return {address:value.private.needs_confirmation?'':private_ips[0] ?? public_ips[0] ?? (legacy && networkScope(legacy)==='loopback' ? legacy : ''),public_address:public_ips[0] ?? '',private_ips,public_ips};
+  return {address:value.private.needs_confirmation?'':private_ips[0] ?? public_ips[0] ?? '',public_address:public_ips[0] ?? '',private_ips,public_ips};
 }
 
 type AddressScope = 'private'|'public';
 type AddressMode = 'auto'|'manual';
 export type ServiceAddressCandidate = {address:string;scope:AddressScope;source:'interface'|'ssh_target'|'platform_source';interface?:string;observed_at:string;requires_confirmation:boolean};
-type ServiceAddressChoice = {mode:AddressMode;address:string;effective:string;effective_addresses:string[];source:'interface'|'manual'|'legacy'|'unavailable';needs_confirmation:boolean};
+type ServiceAddressChoice = {mode:AddressMode;address:string;effective:string;effective_addresses:string[];source:'interface'|'manual'|'unavailable';needs_confirmation:boolean};
 export type MachineServiceAddressSettings = {revision:number;target_generation:number;private:ServiceAddressChoice;public:ServiceAddressChoice;candidates:ServiceAddressCandidate[];updated_by:string;updated_at:string};
 const ordinaryInterface = (name:string) => !/^(?:lo$|docker|br-|veth|virbr|cni|flannel|cali|kube|tun\d|tap\d|utun\d|wg\d|tailscale|zt[0-9a-f])/i.test(name);
 const tablePresent = (db:DB,name:string) => !!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?",name);
@@ -209,10 +188,8 @@ export function machineServiceAddressSettings(db:DB,machineID:string):MachineSer
     const mode:AddressMode=row?.[scope+'_mode']==='manual'?'manual':'auto',address=mode==='manual'?String(row?.[scope+'_address']??''):'';
     const needs_confirmation=mode==='manual'&&(Number(row.target_generation)!==target_generation||!validServiceAddress(address,scope));
     const auto=[...new Set(candidates.filter(c=>c.scope===scope&&c.source==='interface').map(c=>c.address))].sort((a,b)=>Number(isIP(b)===4)-Number(isIP(a)===4));
-    const legacy=!network.addresses.length?normalizeIPAddress(host?.address):'';
-    const legacyValues=legacy&&networkScope(legacy)===scope?[legacy]:[];
-    const effective_addresses=mode==='manual'?(needs_confirmation?[]:[address]):auto.length?auto:legacyValues;
-    return {mode,address,effective:effective_addresses[0]??'',effective_addresses,source:effective_addresses.length?(mode==='manual'?'manual':auto.length?'interface':'legacy'):'unavailable',needs_confirmation};
+    const effective_addresses=mode==='manual'?(needs_confirmation?[]:[address]):auto;
+    return {mode,address,effective:effective_addresses[0]??'',effective_addresses,source:effective_addresses.length?(mode==='manual'?'manual':'interface'):'unavailable',needs_confirmation};
   };
   return {revision:Number(row?.revision??0),target_generation,private:choice('private'),public:choice('public'),candidates,updated_by:row?.updated_by??'',updated_at:row?.updated_at??''};
 }

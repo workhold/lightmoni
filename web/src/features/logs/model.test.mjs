@@ -43,20 +43,20 @@ test('CSV preserves newlines and quotes, and neutralizes spreadsheet formulas',(
  assert.equal(csv([{event_id:'1',body:'=HYPERLINK("evil")\n第二行'}],['body']),'"body"\r\n"\'=HYPERLINK(""evil"")\n第二行"');
 });
 
-test('saved Go specs with omitted empty fields remain usable after reload',()=>{
+test('partial form input receives current query defaults',()=>{
  const spec=normalizeSpec({table_id:'log_app',range:{from:'2026-10-10T00:00:00Z',to:'2026-10-10T01:00:00Z'},interval_ms:60000});assert.deepEqual(spec.services,[]);assert.deepEqual(spec.filters,[]);assert.equal(spec.keyword,'');assert.equal(spec.sql,'');assert.equal(spec.interval_ms,60000);
 });
 
 test('shared query links preserve typed filters, multiple services and absolute display settings',async()=>{
  const {initialSpec,initialView,logURL,readLogURL}=await import('./model.ts');
  const spec={...initialSpec('log_app'),range:{from:'2026-10-10T00:00:00.123456789Z',to:'2026-10-10T01:00:00Z'},services:['支付 api','worker'],keyword:'https://api:443 错误 *',filters:[{scope:'attribute',field:'seq',type:'number',op:'gte',value:'18446744073709551615'},{scope:'column',field:'severity',type:'string',op:'in',value:['ERROR','WARN'],disabled:true}],interval_ms:60000,sort:'asc'};
- const view={...initialView,columns:['body','attr:seq'],pinned:['body'],widths:{body:700},query_syntax:'literal',row_lines:3,fields_collapsed:true,refresh_seconds:10};
+ const view={...initialView,columns:['body','attr:seq'],widths:{body:700},query_syntax:'literal',row_lines:3,fields_collapsed:true,refresh_seconds:10};
  const link=logURL(spec,'event-42',undefined,view),p=new URLSearchParams(link.split('?')[1]);
  const parsed=readLogURL(p.toString(),initialSpec(p.get('table')));
  assert.deepEqual(parsed.spec,spec);assert.equal(parsed.view.row_lines,3);assert.equal(parsed.view.refresh_seconds,0);assert.equal(parsed.view.lookback,0);assert.equal(p.get('event'),'event-42');assert.deepEqual(parsed.view.columns,view.columns);
  assert.equal(p.has('session'),false);assert.equal(p.has('key'),false);
 });
-test('old links remain usable and malformed sharing payloads never silently broaden a query',async()=>{
+test('simple query links work and malformed sharing payloads never silently broaden a query',async()=>{
  const {initialSpec,logURL,readLogURL}=await import('./model.ts');
  const fallback=initialSpec('log_app');const old=readLogURL('?service=api&from=2026-10-10T00%3A00%3A00Z&to=2026-10-10T01%3A00%3A00Z',fallback);
  assert.deepEqual(old.spec.services,['api']);assert.equal(old.spec.range.from,'2026-10-10T00:00:00Z');

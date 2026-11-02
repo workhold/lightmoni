@@ -39,7 +39,7 @@ docker compose config --quiet
 docker compose pull
 ```
 
-完整示例见 [根目录 `.env.example`](.env.example)；兼容部署目录也提供 [`.env.example`](deploy/with-clickhouse/.env.example)。启动相关配置如下：
+完整示例见 [根目录 `.env.example`](.env.example)。启动相关配置如下：
 
 | 配置项 | 默认值 | 用途 |
 | --- | --- | --- |
@@ -81,9 +81,9 @@ docker compose exec lightmoni lightmoni-admin reset-password --name admin
 
 重置只修改指定管理员密码并撤销该用户旧登录会话，保留账号角色和启用状态。中心停止时可用 `docker compose run --rm --no-deps --entrypoint lightmoni-admin lightmoni reset-password --name admin`。自动化标准输入及源码运行用法见 [管理员操作](deploy/server/README.md#管理员初始化与密码恢复)。
 
-使用 Nginx 时，将 `LIGHTMONI_EXTERNAL_URL` 设为浏览器访问的 HTTPS 域名；如只允许宿主机反向代理访问，设置 `LIGHTMONI_BIND_ADDRESS=127.0.0.1`。SDK/节点默认上报地址初始使用工作台地址，也可在“管理后台 → 接入配置”保存多个入口。`sh deploy/server/start.sh` 使用根配置拉取并启动。原 [deploy/with-clickhouse](deploy/with-clickhouse/README.md) 入口继续兼容，两个服务统一继承根配置；沿用原项目名、`.env` 和卷名。
+使用 Nginx 时，将 `LIGHTMONI_EXTERNAL_URL` 设为浏览器访问的 HTTPS 域名；如只允许宿主机反向代理访问，设置 `LIGHTMONI_BIND_ADDRESS=127.0.0.1`。SDK/节点默认上报地址初始使用工作台地址，也可在“管理后台 → 接入配置”保存多个入口。`sh deploy/server/start.sh` 使用根配置拉取并启动。部署统一使用根目录 `compose.yaml`。
 
-更新时先执行 `git pull --ff-only origin main`，获取仓库维护的镜像版本，再执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`，无需修改 `.env` 的镜像设置。仓库也提供 `latest`；根 Compose 使用固定发布标签。数据库密码、端口和项目名仍通过 `.env` 配置。发布仓库需要鉴权时先执行 `docker login docker.heyphp.com`；指定历史版本的回滚方法见 [Docker 更新与回滚](deploy/server/README.md#回滚与已有临时配置迁移)。源码构建则填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD` 的结果，并显式执行：
+更新时先执行 `git pull --ff-only origin main`，获取仓库维护的镜像版本，再执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`，无需修改 `.env` 的镜像设置。仓库也提供 `latest`；根 Compose 使用固定发布标签。数据库密码、端口和项目名仍通过 `.env` 配置。发布仓库需要鉴权时先执行 `docker login docker.heyphp.com`；指定历史版本的回滚方法见 [Docker 更新与回滚](deploy/server/README.md#同基线程序回滚)。源码构建则填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD` 的结果，并显式执行：
 
 ```sh
 docker compose build lightmoni
@@ -114,9 +114,9 @@ docker compose up -d --no-build --pull never --wait
 
 主机栏同时展示 SSH 连接地址、SSH 预检或 Agent 发现的内网 IP 与其他网卡 IP、平台观测来源 IP，支持多网卡和 IPv6，并标明网卡采集来源与时间。SSH 网络发现是独立的只读步骤，缺少网卡工具不会改变核心安装检查结果。发现地址不改写 SSH 连接地址，IP 变化也不改变主机 ID。平台观测来源只表示 Agent 到平台的这条连接，可能是内网、NAT 或代理地址，不代表公网入口或其他连接的出口；反向代理需显式配置 `LIGHTMONI_TRUSTED_PROXIES` 的代理 IP/CIDR，才会采用可信转发链。设计与边界见 [系统设计 13.6–13.7](docs/system-design.md#136-集中连接凭据与主机默认绑定sdd-050) 与 [SDD 051](specs/051-ssh-host-network-discovery/spec.md)。
 
-enrollment 由平台内部签发并预绑定该主机，安装器通过 SSH stdin 接收，不进入 URL、命令参数、环境变量或 AI 上下文。兑换、激活、注册和心跳使用预约与独立 control/data 凭据核验，注册不会创建第二台主机；没有独立 token 签发、用户手动安装和手工主机关联入口。旧无主机预约身份和共享 SDK Key 不再兼容控制面，不自动迁移或删除历史数据。完整流程见 [Agent 部署与恢复](docs/agent-deployment.md) 和 [SDD 038](specs/038-registered-host-agent-onboarding/spec.md)。
+enrollment 由平台内部签发并预绑定该主机，安装器通过 SSH stdin 接收，不进入 URL、命令参数、环境变量或 AI 上下文。兑换、激活、注册和心跳使用预约与独立 control/data 凭据核验，注册不会创建第二台主机；没有独立 token 签发、用户手动安装和手工主机关联入口。完整流程见 [Agent 部署与恢复](docs/agent-deployment.md) 和 [SDD 038](specs/038-registered-host-agent-onboarding/spec.md)。
 
-Agent 在宿主机以独立 systemd 服务运行，生命周期与业务服务分开。Linux amd64/arm64 包自带 Node 24.15.0，要求 glibc ≥ 2.28，无需另装 Node/npm；安装器验证 SHA256。持久目录保存身份、队列和日志游标，不应复制到另一台主机。主机管理首装拒绝覆盖已有安装；升级/回退有独立审批、固定包摘要、新启动健康确认、失败自动回退及未知结果核对，支持串行批次，仍需要有效 SSH 维护凭据。完整设计和任务中心统一演进方向见 [系统设计第 28 节](docs/system-design.md#28-agent-版本升级与回退sdd-045)，使用及兼容边界见 [部署文档](docs/agent-deployment.md#升级回退和卸载)。中心镜像更新不会自动更新用户主机上的 Agent。
+Agent 在宿主机以独立 systemd 服务运行，生命周期与业务服务分开。Linux amd64/arm64 包自带 Node 24.15.0，要求 glibc ≥ 2.28，无需另装 Node/npm；安装器验证 SHA256。持久目录保存身份、队列和日志游标，不应复制到另一台主机。主机管理首装拒绝覆盖已有安装；升级/回退有独立审批、固定包摘要、新启动健康确认、失败自动回退及未知结果核对，支持串行批次，仍需要有效 SSH 维护凭据。完整设计和任务中心统一演进方向见 [系统设计第 28 节](docs/system-design.md#28-agent-版本升级与回退sdd-045)，使用边界见 [部署文档](docs/agent-deployment.md#升级回退和卸载)。中心镜像更新不会自动更新用户主机上的 Agent。
 
 SDK仅独立直报中心，安装Agent不是前置条件。Agent只将自身采集和任务数据通过内部持久队列上报，不提供SDK接收与配置代理。SDK与主机资产无隐式绑定；Agent内嵌同一SDK通过进程内exporter打点，业务启停不影响Agent。详见[SDK接入](sdk/README.md#中心地址与自动同步)。
 
@@ -138,7 +138,7 @@ moni.record('business', 'db.query.duration_ms', {key1: 'mysql', key2: 'select'},
 await moni.shutdown({timeoutMs: 5000});
 ```
 
-服务内接入页提供Go、Node.js、Rust、Python四种SDK包、安装命令、业务样例和校验。其他历史SDK源码保留兼容，未接入本次record周期协议。SDK业务窗口默认30秒，中心按表下发七档周期；显式flush可提交当前窗口增量，后台自动提交已结束窗口。
+服务内接入页提供Go、Node.js、Rust、Python四种SDK包、安装命令、业务样例和校验。Java、.NET、Ruby、PHP 源码提供 instrument API，未发布 record 协议包。SDK业务窗口默认30秒，中心按表下发七档周期；显式flush可提交当前窗口增量，后台自动提交已结束窗口。
 
 安装、API和可靠性边界见[sdk/README.md](sdk/README.md)。四语言record均有独立自动聚合，退出前仍需shutdown；可运行样例见[examples/sdk](examples/sdk)。浏览器通过业务后端转发，后端保管中心密钥；匿名仅使用启用的豁免表。
 
@@ -225,7 +225,7 @@ Node 主服务为每轮对话启动一个 Mastra Node worker，使用私有 stdi
 
 本地从仓库根启动，先执行 `npm --prefix ai-runtime ci && npm --prefix ai-runtime run build`。默认通过 PATH 中的 `node` 运行 `ai-runtime/dist/runner.js`；可用 `LIGHTMONI_AI_NODE` 指定 Node 可执行文件，用 `LIGHTMONI_AI_RUNNER` 指定编译后的入口绝对路径。缺少运行时会在对话中明确报错，其他监控服务保持可用。
 
-在 AI 助手的模型连接设置中填写服务地址和 Key，系统会自动获取可选模型，也可点击「获取模型」重试或手动填写模型名称。支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Google Gemini 四种协议，分别使用原生 SDK 接入 Mastra；旧配置缺少协议时默认 Chat Completions。「自动识别」依据官方地址、完整接口路径和目录格式给出建议；第三方 OpenAI 兼容目录不能区分 Chat 与 Responses 时，须选择具体协议再保存。模型名称不能用于推断协议，获取列表也不能证明生成、工具调用能力或上下文容量。
+在 AI 助手的模型连接设置中填写服务地址和 Key，系统会自动获取可选模型，也可点击「获取模型」重试或手动填写模型名称。支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Google Gemini 四种协议，分别使用原生 SDK 接入 Mastra；新连接表单默认 Chat Completions。「自动识别」依据官方地址、完整接口路径和目录格式给出建议；第三方 OpenAI 兼容目录不能区分 Chat 与 Responses 时，须选择具体协议再保存。模型名称不能用于推断协议，获取列表也不能证明生成、工具调用能力或上下文容量。
 
 支持 API 基地址、根地址，以及完整 `/chat/completions`、`/responses`、`/messages` 或 Gemini 生成接口地址。使用新填写的 Key 或无需 Key 时，根地址按协议优先尝试 `/v1`；Gemini 可回退到 `/v1beta`，最后尝试无版本目录。OpenAI/Anthropic 的独立末段 `/v1beta` 会修正为 `/v1`；Gemini 明确填写的版本和自定义路径保留。各协议的版本修正、目录鉴权及查询参数集中维护，获取模型、测试连接和保存共用地址规范化；修正后在输入框回填并显示原因。已保存 Key 只可在原规范 API 基地址复用，改地址须重新填写或明确清除；同地址切换协议可保留 Key。目录查询不会保存配置或发起生成请求，401 表示供应商未接受凭证。
 
@@ -245,13 +245,13 @@ SDD 规格和验收入口：[Mastra 助手](specs/001-mastra-assistant/spec.md)�
 
 ## SDK密钥与豁免表
 
-SDK密钥按名称创建，启用后可写所有合法业务表。旧权限字段经类型校验后忽略，现有密钥保留身份并使用同一规则；禁用后所有后续请求与重试仍被拒绝。无Authorization仅能写入当前启用的豁免表，错误或空凭据不会降级。SDK接入页管理密钥、豁免表，管理后台保留SDK凭据入口；Agent enrollment/control/data凭据继续按节点和用途隔离。
+SDK密钥按名称创建，启用后可写所有合法业务表。请求仅接受名称和启停字段，其他字段明确拒绝；禁用后所有后续请求与重试仍被拒绝。无Authorization仅能写入当前启用的豁免表，错误或空凭据不会降级。SDK接入页管理密钥、豁免表，管理后台保留SDK凭据入口；Agent enrollment/control/data凭据继续按节点和用途隔离。
 
 ## 数据与可靠性边界
 
 自有 SDK 批次在冻结后保持内容和 ID 不变。执行节点在 SQLite WAL 持久化后 ACK，主服务在 ClickHouse 写入及批次确认后 ACK。内部 ReplacingMergeTree 配合公共 `FINAL` 视图去重，避免丢 ACK 重试造成计数翻倍。普通 OTLP 未提供稳定批次 ID 时遵循至少一次交付。SDK 缓存有界且只在进程内；执行节点磁盘队列有容量、重放时间和保留期限制，不承诺无限离线缓存。
 
-只读 SQL 通过 AST 校验和独立查询账号；禁止私有表、跨库、外部表函数和自行设置资源限额。默认每次最多 8 个查询、10 秒执行、10,000 行展示。时间范围为 `[from,to)`，`UInt64` / `Int64` / Decimal 结果保留字符串。指标 `value_float` 保存原始浮点，`value_int` 保存精确整数，公开 `value` 为浮点；整数汇总使用 `sum(toDecimal256(value_int,0))`；图表超出安全精度时要求明确选择近似展示。日志/链路默认保留 7 天，指标 30 天。
+只读 SQL 通过 AST 校验和独立查询账号；禁止私有表、跨库、外部表函数和自行设置资源限额。默认每次最多 8 个查询、10 秒执行、10,000 行展示。时间范围为 `[from,to)`，`UInt64` / `Int64` / Decimal 结果保留字符串。指标 `value_float` 保存原始浮点，`value_int` 保存精确整数，公开 `value` 为浮点；整数汇总使用 `sum(toDecimal256(value_int,0))`；图表超出安全精度时要求明确选择近似展示。数据默认保留 7 天，可在数据管理中调整全局或逐表保留期。
 
 详细方案：[docs/architecture.md](docs/architecture.md)、[docs/contracts.md](docs/contracts.md)。验收证据和未验收项：[docs/acceptance.md](docs/acceptance.md)。没有真实账号凭证的第三方登录、通知和 AI 供应商只能标注协议测试，不能视为真实供应商验收。Grafana / Kibana 核心交互以任务矩阵逐项验证；不作未经对比测试的性能或完整功能等同承诺。
 
@@ -267,6 +267,8 @@ LightMoni 自有代码使用 [Apache-2.0](LICENSE) 许可证。第三方代码�
 
 ### 系统自监控
 
-初始化会建立 `lightmoni_center`、`lightmoni_agent`、`lightmoni_sdk` 三个历史兼容入口；新系统遥测统一写入lightmoni_log/lightmoni_metric_*，以component区分center/agent/sdk，并创建「系统监控 · 上报中心 / 执行节点 / SDK」大盘。系统表通过标准查询、日志浏览和图表告警使用；首次初始化之后保留大盘编辑，也不会在重启时重新创建用户主动删除的大盘。Node 迁移仅将未编辑的旧 Go 运行指标面板一次性更新为活跃资源和事件循环延迟，并保留版本记录。
+系统遥测统一写入 `lightmoni_log` / `lightmoni_metric_*`，以 component 区分 center/agent/sdk，并创建「系统监控 · 上报中心 / 执行节点 / SDK」大盘。系统表通过标准查询、日志浏览和图表告警使用；首次初始化之后保留大盘编辑，也不会在重启时重新创建用户主动删除的大盘。
+
+当前为首次正式发布基线，SQLite 直接创建最终结构，不包含历史迁移 SQL；无基线标记的开发数据库会明确拒绝启动。旧开发数据由管理员备份后使用新数据目录重建，程序不会自动删除。清理范围与验收见 [SDD081](specs/081-prerelease-cleanup/validation.md)。
 
 中心记录上报接口 QPS / 响应状态 / 耗时、首次成功确认的记录数与 OTLP 字节数、Node 堆内存、活跃资源、事件循环延迟和自监控队列；重复批次只增加接口请求次数，不重复计算接收量。执行节点控制心跳转换成在线状态、队列和采集诊断；启动、配置变更与执行失败日志在中心 SQLite 暂存，写入 ClickHouse 成功后清除。SDK 自监控在原有业务权限验证后自动分流到系统 SDK 表。见 [SDK 内部监控](sdk/README.md#内部监控) 和 [本机封装 SDK 示例](examples/self-monitoring/README.md)。

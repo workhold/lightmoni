@@ -367,7 +367,7 @@ class ReportingTests(unittest.TestCase):
             tables = [request['headers']['X-Lightmoni-Table'] for request in requests]
             self.assertIn('first', tables)
             self.assertIn('second', tables)
-            self.assertEqual('lightmoni_sdk' in tables, bool(key))
+            self.assertEqual('lightmoni' in tables, bool(key))
             if not key:
                 self.assertEqual(len(requests), 2)
             with self.receiver.lock:
@@ -524,7 +524,7 @@ class ReportingTests(unittest.TestCase):
         client.refresh_config()
         requests = self.receiver.observed("GET")
         self.assertEqual([request["headers"]["Authorization"] for request in requests], ["Bearer first-secret", "Bearer second-secret"])
-        self.receiver.get_action = lambda request: (302, b"response-secret", {"Location": redirect.url + "/v1/sdk-config?metric_windows=1"})
+        self.receiver.get_action = lambda request: (302, b"response-secret", {"Location": redirect.url + "/v1/sdk-config"})
         with self.assertRaises(Exception) as raised:
             client.refresh_config()
         self.assertEqual(redirect.observed(), [])
@@ -554,7 +554,7 @@ class ReportingTests(unittest.TestCase):
             client.flush(timeout=1)
             requests = proxy.observed()
             self.assertEqual([(request["method"], request["path"]) for request in requests], [
-                ("GET", target + "/v1/sdk-config?metric_windows=1"), ("POST", target + "/v1/logs"),
+                ("GET", target + "/v1/sdk-config"), ("POST", target + "/v1/logs"),
             ])
             for request in requests:
                 self.assertEqual(request["headers"]["Authorization"], "Bearer telemetry-secret")
@@ -569,7 +569,7 @@ class ReportingTests(unittest.TestCase):
                 direct.flush(timeout=1)
                 self.assertEqual(len(proxy.observed()), 2)
                 self.assertEqual([(request["method"], request["path"]) for request in self.receiver.observed()], [
-                    ("GET", "/v1/sdk-config?metric_windows=1"), ("POST", "/v1/logs"),
+                    ("GET", "/v1/sdk-config"), ("POST", "/v1/logs"),
                 ])
                 self.assertNotIn("Proxy-Authorization", self.receiver.observed()[0]["headers"])
                 self.assertNotIn("Proxy-Authorization", self.receiver.observed()[1]["headers"])
@@ -623,7 +623,7 @@ class ReportingTests(unittest.TestCase):
                 direct.flush(timeout=2)
                 self.assertEqual(direct.stats()["config_revision"], "secure")
                 self.assertEqual([(request["method"], request["path"]) for request in origin.observed()], [
-                    ("GET", "/v1/sdk-config?metric_windows=1"), ("POST", "/v1/logs"),
+                    ("GET", "/v1/sdk-config"), ("POST", "/v1/logs"),
                 ])
             with self.subTest(mode="HTTPS through HTTP CONNECT"):
                 proxy_address = connect_proxy.url.replace("http://", "http://proxy-user:proxy-secret@")
@@ -653,7 +653,7 @@ class ReportingTests(unittest.TestCase):
                     proxied.flush(timeout=2)
                 self.assertEqual(proxied.stats()["config_revision"], "TLS proxy")
                 self.assertEqual([(request["method"], request["path"]) for request in tls_proxy.observed()], [
-                    ("GET", target + "/v1/sdk-config?metric_windows=1"), ("POST", target + "/v1/logs"),
+                    ("GET", target + "/v1/sdk-config"), ("POST", target + "/v1/logs"),
                 ])
                 for request in tls_proxy.observed():
                     self.assertEqual(request["headers"]["Proxy-Authorization"], "Basic cHJveHktdXNlcjpwcm94eS1zZWNyZXQ=")

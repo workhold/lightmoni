@@ -98,8 +98,7 @@ export class OperationsPlatformStore implements PlatformStore {
     createImageSourcesSchema(this);
     deps.db.exec(`CREATE TABLE IF NOT EXISTS ops_platform_resources(
    id TEXT PRIMARY KEY,kind TEXT NOT NULL,name TEXT NOT NULL,revision INTEGER NOT NULL,spec_cipher TEXT NOT NULL,
-   status_json TEXT NOT NULL,created_by TEXT NOT NULL,authorized_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
-   UNIQUE(kind,name));
+   status_json TEXT NOT NULL,created_by TEXT NOT NULL,authorized_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS ops_platform_revisions(resource_id TEXT NOT NULL,revision INTEGER NOT NULL,name TEXT NOT NULL,
    spec_cipher TEXT NOT NULL,actor TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(resource_id,revision));
    CREATE TABLE IF NOT EXISTS ops_platform_runs(id TEXT PRIMARY KEY,resource_id TEXT NOT NULL,resource_revision INTEGER NOT NULL,
@@ -110,24 +109,9 @@ export class OperationsPlatformStore implements PlatformStore {
    CREATE TABLE IF NOT EXISTS ops_platform_run_events(id TEXT PRIMARY KEY,run_id TEXT NOT NULL,resource_id TEXT NOT NULL,resource_kind TEXT NOT NULL,resource_revision INTEGER NOT NULL,sequence INTEGER NOT NULL,phase TEXT NOT NULL,state TEXT NOT NULL,detail_json TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(run_id,sequence));
    CREATE INDEX IF NOT EXISTS ops_platform_run_event_sequence ON ops_platform_run_events(run_id,sequence);`);
     deps.db.exec(`CREATE TABLE IF NOT EXISTS ops_application_logos(resource_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,content_base64 TEXT NOT NULL,sha256 TEXT NOT NULL,updated_by TEXT NOT NULL,updated_at TEXT NOT NULL);`);
-    // Display names of deployments are labels; service_name is their unique identity.
-    const original =
-      deps.db.get<any>(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='ops_platform_resources'",
-      )?.sql ?? "";
-    if (/UNIQUE\s*\(kind\s*,\s*name\)/i.test(original)) {
-      deps.db.transaction(() => {
-        deps.db
-          .exec(`ALTER TABLE ops_platform_resources RENAME TO ops_platform_resources_legacy_names;
-          CREATE TABLE ops_platform_resources(id TEXT PRIMARY KEY,kind TEXT NOT NULL,name TEXT NOT NULL,revision INTEGER NOT NULL,spec_cipher TEXT NOT NULL,status_json TEXT NOT NULL,created_by TEXT NOT NULL,authorized_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
-          INSERT INTO ops_platform_resources SELECT * FROM ops_platform_resources_legacy_names;
-          DROP TABLE ops_platform_resources_legacy_names;`);
-      });
-    }
     deps.db
       .exec(`CREATE UNIQUE INDEX IF NOT EXISTS ops_platform_named_resource ON ops_platform_resources(kind,name) WHERE kind!='application';
-      CREATE TABLE IF NOT EXISTS ops_platform_application_keys(resource_id TEXT PRIMARY KEY,service_name TEXT NOT NULL UNIQUE,cluster_id TEXT NOT NULL,role TEXT NOT NULL);
-      DROP INDEX IF EXISTS ops_platform_openresty_cluster;`);
+      CREATE TABLE IF NOT EXISTS ops_platform_application_keys(resource_id TEXT PRIMARY KEY,service_name TEXT NOT NULL UNIQUE,cluster_id TEXT NOT NULL,role TEXT NOT NULL);`);
     const interrupted = deps.db.all<{ id: string }>(
       "SELECT id FROM ops_platform_runs WHERE state='running' AND job_id=''",
     );
@@ -455,10 +439,6 @@ export class OperationsPlatformStore implements PlatformStore {
       );
       this.deps.db.run(
         "DELETE FROM ops_system_applications WHERE application_id=?",
-        key,
-      );
-      this.deps.db.run(
-        "DELETE FROM ops_system_application_aliases WHERE application_id=?",
         key,
       );
       this.definition(r.kind).afterDelete?.(r);
