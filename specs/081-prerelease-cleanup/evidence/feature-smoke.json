@@ -1,0 +1,29 @@
+{
+  "same_production_assets_on_both_platforms": true,
+  "results": [
+    {
+      "platform": "linux/amd64",
+      "revision": "9c50a99826d87ebeb7b6d4ed5f50d9b727653ceb",
+      "assets_sha256": "6ba2660e99d5dea1e0e73e66c6e4d23180be8f72292fa50fb830d7f55dd6d431",
+      "asset_count": 47,
+      "checks": [
+        "production UI includes direct resume, progress and unknown verification actions",
+        "production UI includes dispatch-wait, true-state refresh error and pending-plan guidance",
+        "production CSS includes fixed header/actions and scrollable plan body",
+        "independent image sources route/chunk, website publication and private/public service address UI present"
+      ]
+    },
+    {
+      "platform": "linux/arm64",
+      "revision": "9c50a99826d87ebeb7b6d4ed5f50d9b727653ceb",
+      "assets_sha256": "6ba2660e99d5dea1e0e73e66c6e4d23180be8f72292fa50fb830d7f55dd6d431",
+      "asset_count": 47,
+      "checks": [
+        "production UI includes direct resume, progress and unknown verification actions",
+        "production UI includes dispatch-wait, true-state refresh error and pending-plan guidance",
+        "production CSS includes fixed header/actions and scrollable plan body",
+        "independent image sources route/chunk, website publication and private/public service address UI present"
+      ]
+    }
+  ]
+}

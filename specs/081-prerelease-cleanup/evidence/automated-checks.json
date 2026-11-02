@@ -81,5 +81,13 @@
       "update-runner.mjs"
     ],
     "diff_check": true
+  },
+  "agent_metric_contract": {
+    "tests": 19,
+    "pass": 19,
+    "fail": 0,
+    "skipped": 0,
+    "sha256": "6caa2774251312d1a762c860ae16122b8555755930758ec16b84fc1bb99a7f34",
+    "source_fix_pr": 70
   }
 }

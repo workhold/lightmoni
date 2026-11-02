@@ -38,3 +38,22 @@ Linux测试使用隔离 Node 24.15.0 容器，所有路径为临时目录，外�
 发布镜像从最终合入源码构建，固定 OCI revision；双架构完成后记录标签、摘要、真实 ClickHouse/下载包验证和远端回读。发布不等于升级任何已有环境。
 
 发布前交叉检查补充：Agent心跳生产者移除已退役的value字段，仅发送当前value_type/value_int/value_float；新增领域回归校验与最终ClickHouse列保持一致。这是对本SDD已同步基线的实现修正，无新增架构变化（Doca同步不适用，沿用seq934模型）。
+
+## Docker 发布完成
+
+源码来自已合入 main 的 PR #69 与 #70，固定提交 `9c50a99826d87ebeb7b6d4ed5f50d9b727653ceb`。构建上下文由 git archive 生成，含完整 tree、archive 和 Dockerfile SHA256 的输入记录见 evidence/build-inputs.json。
+
+发布 `docker.heyphp.com/lightmoni/lightmoni:20261102-9c50a99` 与 `latest`，二者索引摘要均为 `sha256:36663e3f3039511daac30ebc190370dc81e66626cb82c265ebfbadca2d172a8a`。
+
+| 平台 | manifest digest |
+| --- | --- |
+| linux/amd64 | `sha256:0fcfd3be5fc1e7348c18db66abefcb35014d9e1c9033247008eda48809746839` |
+| linux/arm64 | `sha256:453b764d2f3702fd0bf5cac7536cfec0005e2e0e10095ca586c9dda5cd247b0a` |
+
+两平台各39项真实镜像验收全部通过：非root中心、CLI先初始化后启动、最终SQLite结构、严格SDK字段、配置周期、SDK Counter/Gauge/record Histogram真实ClickHouse入库、Agent心跳指标无旧Decimal列、签名应用观测的持久ACK与真实导出、证书生成/导出、两种Agent及四种SDK下载和完整校验、执行器维护解析、普通与root权限隔离、重启后会话及种子数量。AMD64在本机Docker仿真执行，ClickHouse为隔离ARM64实例；这不代表生产主机systemd或真实公网ACME/S3验证。
+
+两平台47个生产前端产物SHA256完全相同。仓库根Compose固定新标签，只有中心与ClickHouse两个服务，保留健康依赖与原状态/遥测卷，重复部署入口已删除。
+
+远端GET核验索引/平台manifest/config及blob HEAD，并执行Docker按平台pull，rootfs和完整配置均与已验收镜像一致。发布前28个历史固定标签摘要全部不变。测试容器、卷、网络与运行时凭据已清理，原15个运行容器完整保留。最终回读、镜像验收、前端、Compose和清理证据均在 evidence/。
+
+发布打包与说明修正不新增架构变化（不适用）：沿用PR #69已同步的单一基线，Doca seq934保存和回读结果保持有效。发布不自动升级用户环境；旧无标记开发库仍需管理员备份后以新目录重建。

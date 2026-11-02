@@ -68,7 +68,7 @@ Agent配置公网引导endpoint，自动查询管理员登记的中心内网IP�
 
 每个 Agent 使用绑定 `agent_id` 与登记主机的独立 control/data credential：control 用于心跳和配置，data 用于遥测；中心保存摘要并按 audience、scope、有效期和撤销状态校验。SDK Key 不可替代控制凭据，注册/心跳不得创建或抢占主机资产。撤销不会在断网时即时停止缓存任务，配置租约仍待实现。
 
-日志目录应明确授予服务用户文件读取及父目录遍历权限，可按业务组或 ACL 配置。服务启用 `ProtectSystem=strict`、`ProtectHome=read-only`、`PrivateTmp=true`，允许写私有状态目录 `/var/lib/lightmoni-agent` 与独立公开网站目录 `/var/lib/lightmoni-web`。标准服务配置 Docker 附加组及 `CAP_NET_BIND_SERVICE`，安装与升级负责准备组和目录，每次启动在实际服务身份及沙箱中检查读写、原子切换、低端口和 Docker 访问。应用宿主 `/tmp` 日志不一定在该服务视图中可见，优先使用稳定日志目录；外部路径仍需精确授权。
+日志目录应明确授予服务用户读取及父目录遍历权限，可按业务组或 ACL 配置。普通服务启用 `ProtectSystem=strict`、`ProtectHome=read-only`、`PrivateTmp=true`，只写私有状态目录 `/var/lib/lightmoni-agent`，不持有 Docker 组或 Linux capabilities；每次启动核验非 root 身份、配置保密及目录读写。应用宿主 `/tmp` 日志不一定在该服务视图中可见，优先使用稳定日志目录。网站与其他主机写操作由独立 root 执行器承接，业务状态使用 `/var/lib/lightmoni-managed`。
 
 ## 检查与诊断
 
@@ -206,7 +206,7 @@ SDK 直接使用中心地址和 SDK Key，业务可以先启动或完全不装 A
 
 需要同时升级中心与 Agent。旧 Agent 未声明 `docker.inventory` / `docker.control` 时只显示已有快照并提示升级。中心不连接 Docker socket；Agent 使用本机固定 `default` context，不继承交互终端的 `DOCKER_HOST` 或其他 context。
 
-标准安装以 `lightmoni-agent` 用户运行。SDD 071 的发行包由安装器/维护器确保 Docker 系统组存在，unit 通过 `SupplementaryGroups=docker` 自动获得标准本机 socket 访问权，并用 `CAP_NET_BIND_SERVICE` 支持低端口；不会修改 socket 权限或系统全局用户组成员。Docker 管理权限接近宿主 root，普通脚本继承服务的实际权限，部署和脚本均须来自受信管理员。后续独立特权执行器属于另一套权限协议，本次不声称已迁移。
+标准安装以 `lightmoni-agent` 用户运行，Docker 附加组与 capabilities 均为空。安装和维护只接受当前普通 unit，遇到特权 unit、drop-in 或外部 Docker 授权会拒绝，不自动清理或恢复旧授权。主机写操作需单独安装并批准独立 root 运维执行器；首次发布不接管普通 Agent 的历史业务目录。
 
 启动前固定检查器以实际 unit 的 UID、附加组、capability 与文件系统沙箱验证私有配置可读、私有/公开目录的写入及原子 rename、低端口绑定和已有 Docker socket 的访问。权限错误使服务启动检查失败，只记录固定错误码。没有安装 Docker 或 daemon 未就绪时监控 Agent 仍可运行，但输出依赖待就绪，不能据此显示应用可部署；之后安装使用标准 docker 组的 Docker 无需手工补组。非标准 socket/组策略若不符合该部署契约，必须明确配置后验证，不能伪造就绪。
 

@@ -1,6 +1,6 @@
 # Docker 部署与更新
 
-部署统一使用仓库根目录 `compose.yaml`，同时管理中心与 ClickHouse。中心使用固定发布镜像 `docker.heyphp.com/lightmoni/lightmoni:20261102-ccbb85d`，支持 Linux amd64/arm64。两端账号密码由 `.env` 的 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认连接 `http://clickhouse:8123`；数据库不映射宿主端口。
+部署统一使用仓库根目录 `compose.yaml`，同时管理中心与 ClickHouse。中心使用固定发布镜像 `docker.heyphp.com/lightmoni/lightmoni:20261102-9c50a99`，支持 Linux amd64/arm64。两端账号密码由 `.env` 的 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认连接 `http://clickhouse:8123`；数据库不映射宿主端口。
 
 ## 初始化与更新
 
