@@ -23,15 +23,17 @@ exec 9>/run/lightmoni-docker-install.lock
 flock -n 9 || { code=docker_install_busy; exit 1; }
 [ "$(uname -s)" = Linux ] || { code=docker_install_unsupported; exit 1; }
 case "$(uname -m)" in x86_64|aarch64) ;; *) code=docker_install_unsupported; exit 1;; esac
-[ -f /etc/os-release ] || { code=docker_install_unsupported; exit 1; }
-. /etc/os-release
-case "$ID" in ubuntu|debian) ;; *) code=docker_install_unsupported; exit 1;; esac
 [ -d /run/systemd/system ] || { code=docker_install_unsupported; exit 1; }
 need_engine=0
 need_compose=0
 command -v docker >/dev/null || need_engine=1
 if [ "$need_engine" = 1 ] || ! docker --context default compose version --short >/dev/null 2>&1; then need_compose=1; fi
 if [ "$need_engine" = 1 ] || [ "$need_compose" = 1 ]; then
+  # The distribution restriction belongs to package installation. An existing
+  # Engine and Compose can be verified without touching any package manager.
+  [ -f /etc/os-release ] || { code=docker_install_unsupported; exit 1; }
+  . /etc/os-release
+  case "$ID" in ubuntu|debian) ;; *) code=docker_install_unsupported; exit 1;; esac
   # Never uninstall competing packages or replace another runtime implicitly.
   for pkg in docker.io docker-compose docker-compose-v2 docker-doc docker-buildx podman-docker containerd runc; do
     if dpkg-query -W -f='$'"{Status}" "$pkg" 2>/dev/null | grep -q '^install ok installed$'; then code=docker_install_package_conflict; exit 1; fi

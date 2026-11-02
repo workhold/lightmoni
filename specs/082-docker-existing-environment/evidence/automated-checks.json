@@ -1,0 +1,20 @@
+{
+  "production_shell_red_before_fix": {
+    "passed": 3,
+    "failed": 2
+  },
+  "related_tests_after_fix": {
+    "total": 26,
+    "passed": 26,
+    "failed": 0,
+    "skipped": 0
+  },
+  "runtime_typecheck": "passed",
+  "runtime_build": "passed",
+  "web_typecheck": "passed",
+  "web_build": "passed",
+  "shell_syntax": "passed in regression",
+  "qa_server_syntax": "passed",
+  "diff_check": "passed",
+  "scope": "No live package installation, Docker restart, executor installation or access expansion performed."
+}

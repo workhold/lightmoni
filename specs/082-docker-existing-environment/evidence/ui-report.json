@@ -1,0 +1,15 @@
+{
+  "checks": [
+    "Chinese no-executor explanation, dependency verification scope and host permission link",
+    "No-executor environment collection disabled",
+    "One explicitly confirmed synthetic SSH dependency verification",
+    "Successful dependencies retain unknown executor state and block duplicate installation",
+    "English explanation and verified dependencies",
+    "Fresh executor readiness disables installation and enables inventory",
+    "Unsupported package-installation message remains explicit"
+  ],
+  "synthetic_install_requests": 1,
+  "inventory_requests": 0,
+  "real_host_mutations": false,
+  "screenshots": ".local-dev/docker-existing-environment-082/"
+}
