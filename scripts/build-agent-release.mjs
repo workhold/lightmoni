@@ -113,11 +113,9 @@ try {
   // It requires neither the platform nor a working bundled Node executable.
   cpSync(join(repo, "deploy/agent/uninstall.sh"), join(common, "lightmoni-agent-runtime/uninstall.sh"));
   chmodSync(join(common, "lightmoni-agent-runtime/uninstall.sh"), 0o755);
-  // One immutable release carries both fixed roles. Installing the ordinary
-  // Agent does not enroll or enable the privileged executor.
-  cpSync(join(repo, "deploy/executor"), join(common, "lightmoni-agent-runtime/executor"), { recursive: true });
-  for (const script of ["install.sh", "launcher.sh", "uninstall.sh", "maintenance.mjs"])
-    chmodSync(join(common, "lightmoni-agent-runtime/executor", script), 0o755);
+  // One Agent release includes its internal signed task module, no second service.
+  for (const file of ["service-unit.mjs", "runtime-mode.mjs"])
+    cpSync(join(repo, "deploy/agent", file), join(common, "lightmoni-agent-runtime", file));
   cpSync(join(repo, "deploy/agent/deployment-permissions.mjs"), join(common, "lightmoni-agent-runtime/deployment-permissions.mjs"));
   const checksums = (await download("SHASUMS256.txt")).toString();
   const artifacts = [];

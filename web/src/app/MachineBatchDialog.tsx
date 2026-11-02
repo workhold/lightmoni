@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Input,Modal,Select,Space,Tag,Typography} from '../shared/ui';
+import {runtimeCapabilityText} from './agent-runtime-model';
 import {sshEndpoint} from './host-request-guard';
 import {api,ApiError} from '../shared/api';
 import {defaultMachineCredential} from './machine-credentials';
@@ -19,6 +20,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
  const [rows,setRows]=useState<Row[]>(()=>{const seen=new Set<string>();return snapshot.map(target=>{const id=action==='remove_node'?target.agent?.id:target.machine?.id;if(id&&seen.has(id))return {target,status:'not_applicable',reason:'duplicate_target'};if(id)seen.add(id);return {target,status:'pending'}})});
  const rowsRef=useRef(rows),pending=useRef(false),stop=useRef(false),initialized=useRef(false),mounted=useRef(true);
  const [busy,setBusy]=useState(false),[stopping,setStopping]=useState(false),[phase,setPhase]=useState<Phase>('configure');
+ const [runtimeMode,setRuntimeMode]=useState<'root'|'user'>('root');
  const [version,setVersion]=useState('0.1.0'),[reason,setReason]=useState(''),[reviewed,setReviewed]=useState(false),[notice,setNotice]=useState(''),[now,setNow]=useState(Date.now());
  const isPlan=needsBatchPlan(action),limitExceeded=snapshot.length>MAX_BATCH_TARGETS;
  const title=({ssh_check:t('批量 SSH 安装检查','Batch SSH installation checks'),install:t('批量部署 LightMoni Agent','Batch deploy LightMoni Agent'),uninstall:t('卸载 Agent','Uninstall Agent'),remove_node:t('移除节点','Remove nodes'),delete_host:t('删除主机','Delete hosts')})[action];
@@ -144,7 +146,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
      if(action==='install'&&check.agent_installation?.state!=='absent'){update(row.target.id,{status:'not_applicable',reason:'existing_remote_agent'});continue}
      if(action==='install'&&!['amd64','arm64'].includes(check.arch)){update(row.target.id,{status:'failed',reason:'invalid_arch'});continue}
      creating=true;
-     const body={credential_id:credential.id,check_id:check.id,...(action==='install'?{version,arch:check.arch}:{})};
+     const body={credential_id:credential.id,check_id:check.id,...(action==='install'?{version,arch:check.arch,runtime_mode:runtimeMode}:{})};
      const record=await api<BatchPlan>(`${batchPlanPath(action,row.target.machine!.id)}/plan`,{method:'POST',body:JSON.stringify(body)});
      update(row.target.id,{record,status:batchPlanStatus(record),reason:undefined});
     }catch(error){
@@ -252,7 +254,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
  </Space>}>
   <Alert showIcon type={action==='ssh_check'?'info':'warning'} title={t(`本批次固定 ${snapshot.length} 个目标，逐台执行`,`This batch has ${snapshot.length} fixed targets and runs one host at a time`)} description={<>{impact}<br/>{t('单台失败不影响后续目标，不自动重试。“停止后续”仅停止未开始的目标，当前请求会继续完成。关闭页面后请从各主机历史核对已保存计划。','One failure does not block other targets, and operations are not retried automatically. Stopping affects only targets not started; the current request continues. After leaving the page, check saved plans in each host’s history.')}</>}/>
   {notice&&<Alert role="alert" style={{marginTop:12}} type="warning" showIcon title={notice}/>}
-  {phase==='configure'&&action==='install'&&<div style={{marginTop:16}}><Typography.Text>{t('Agent 版本','Agent version')}</Typography.Text><Input aria-label={t('批量 Agent 版本','Batch Agent version')} value={version} maxLength={64} disabled={busy} onChange={event=>setVersion(event.target.value)} status={validVersion?undefined:'error'}/><Typography.Text type="secondary">{t('架构由每台主机的 SSH 预检自动识别，不统一指定。','Architecture is detected separately by each host’s SSH preflight.')}</Typography.Text></div>}
+  {phase==='configure'&&action==='install'&&<div style={{marginTop:16}}><Typography.Text>{t('Agent 版本','Agent version')}</Typography.Text><Input aria-label={t('批量 Agent 版本','Batch Agent version')} value={version} maxLength={64} disabled={busy} onChange={event=>setVersion(event.target.value)} status={validVersion?undefined:'error'}/><Typography.Text type="secondary">{t('架构由每台主机的 SSH 预检自动识别，不统一指定。','Architecture is detected separately by each host’s SSH preflight.')}</Typography.Text><div style={{marginTop:12}}><Checkbox checked={runtimeMode==='root'} disabled={busy} onChange={event=>setRuntimeMode(event.target.checked?'root':'user')}>{t('启用完整主机管理（以 root 运行）','Enable full host management (run as root)')}</Checkbox><Typography.Paragraph type="secondary">{t('取消后所有目标 Agent 均以 lightmoni-agent 普通账户运行。root 模式启用容器管理、root 脚本和受管主机运维，每次作业仍需单独批准并记录审计。','Clear this option to run every target Agent as the standard lightmoni-agent account. Root enables container management, root scripts, and managed host operations; every job still requires approval and audit.')}</Typography.Paragraph></div></div>}
   {phase==='configure'&&action==='remove_node'&&<div style={{marginTop:16}}><Input.TextArea aria-label={t('移除原因（可选）','Removal reason (optional)')} placeholder={t('移除原因（可选，最多 512 字节）','Removal reason (optional, up to 512 bytes)')} value={reason} disabled={busy} onChange={event=>setReason(event.target.value)} status={validReason?undefined:'error'}/>{!validReason&&<Typography.Text type="danger">{t('原因超过 512 字节，请缩短。','The reason exceeds 512 bytes. Shorten it.')}</Typography.Text>}</div>}
   <div style={{marginTop:16,maxHeight:'52vh',overflowY:'auto',paddingRight:4}} aria-label={t('批量操作目标与结果','Batch targets and results')}>
    {rows.map(row=><section key={row.target.id} data-batch-target={row.target.id} data-batch-status={row.status} style={{border:'1px solid var(--lm-border-color, #d9d9d9)',borderRadius:8,padding:12,marginBottom:12,overflowWrap:'anywhere'}}>
@@ -267,7 +269,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
       {key:'plan',label:t('计划 ID','Plan ID'),children:row.record.id},
       {key:'target',label:t('审核目标','Reviewed target'),children:row.record.plan?.machine?sshEndpoint(row.record.plan.machine.address,row.record.plan.machine.port,row.record.plan.machine.username):row.target.name},
       {key:'agent',label:t('节点身份','Node identity'),children:row.record.plan?.agent_id||row.record.plan?.machine?.agent_id||t('安装激活后生成','Created after installation activation')},
-      ...(action==='install'?[{key:'version',label:t('版本 / 架构','Version / architecture'),children:`${row.record.plan?.version||version} / ${row.record.plan?.arch||row.check?.arch||''}`}]:[]),
+      ...(action==='install'?[{key:'capabilities',label:t('此计划开启的任务能力','Task capabilities enabled by this plan'),children:row.record.plan?.capabilities?(row.record.plan.capabilities.length?row.record.plan.capabilities.map(v=>runtimeCapabilityText(v,t)).join('、'):t('全部关闭','All disabled')):t('尚未记录','Not recorded')},{key:'runtime',label:t('运行账户','Runtime account'),children:row.record.plan?.runtime_mode==='root'?'root':row.record.plan?.runtime_mode==='user'?'lightmoni-agent':t('尚未记录','Not recorded')},{key:'version',label:t('版本 / 架构','Version / architecture'),children:`${row.record.plan?.version||version} / ${row.record.plan?.arch||row.check?.arch||''}`}]:[]),
       {key:'credential',label:t('SSH 凭据 ID','SSH credential ID'),children:row.record.plan?.credential?.id||row.credentialID},
       {key:'expires',label:t('计划有效期','Plan expires at'),children:time(row.record.plan?.expires_at)},
      ]}/>

@@ -5,8 +5,10 @@ import { readAgentRelease } from "./release.js";
 import { createAgent } from "./agent.js";
 import { Queue } from "./queue.js";
 import { responseBytes } from "./util.js";
-import { assertOrdinaryAgentIdentity } from "../shared/execution-role.js";
+import { assertAgentRuntimeIdentity } from "../shared/execution-role.js";
 import { assertOrdinaryAgentLinuxPermissions } from "../shared/ordinary-agent-permissions.js";
+import { rootPath } from "../privileged-executor/security.js";
+import { assertRootAgentProgram, managedAgentCommand } from "./managed.js";
 export { createAgent } from "./agent.js";
 export interface CLIIO {
   input: AsyncIterable<Uint8Array | string>;
@@ -57,10 +59,10 @@ export async function execute(
     io.write(readAgentRelease().version + "\n");
     return;
   }
-  // Check before reading runtime credentials or initializing any task runner.
-  if (command === "run") {
-    assertOrdinaryAgentIdentity(process.getuid?.(), process.geteuid?.());
-    assertOrdinaryAgentLinuxPermissions();
+  // Root must trust the code and configuration before reading credentials.
+  const privilegedCommand = command === "run" || command.startsWith("managed-");
+  if (privilegedCommand && (process.getuid?.() === 0 || process.geteuid?.() === 0)) {
+    assertRootAgentProgram(); rootPath(String(flags.config), "file", true);
   }
   const validation = { pendingEnrollment: Boolean(flags["pending-enrollment"]) };
   const path = String(flags.config),
@@ -74,6 +76,7 @@ export async function execute(
     return;
   }
   const config = loadConfig(path, validation);
+  if (command.startsWith("managed-")) { await managedAgentCommand(command, config, io); return; }
   if (command === "check") {
     if (requireDir && config.data_dir !== requireDir)
       throw Error("this system service requires data_dir=" + requireDir);
@@ -114,6 +117,9 @@ export async function execute(
     return;
   }
   if (command === "run") {
+    assertAgentRuntimeIdentity(config.runtime_mode, config.permission_generation, process.getuid?.(), process.geteuid?.(), process.getgid?.());
+    if (config.runtime_mode === "user") assertOrdinaryAgentLinuxPermissions();
+    else { rootPath(config.data_dir, "directory", true); }
     const agent = createAgent(config),
       controller = new AbortController(),
       stop = () => controller.abort();
@@ -133,7 +139,7 @@ export async function execute(
     return;
   }
   throw Error(
-    `unknown command ${JSON.stringify(command)}; use run, configure, check, status, quarantine or version`,
+    `unknown command ${JSON.stringify(command)}; use run, configure, check, status, quarantine, version or managed-enroll/check/status/activate`,
   );
 }
 if (

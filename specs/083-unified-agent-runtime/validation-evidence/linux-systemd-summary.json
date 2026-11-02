@@ -1,0 +1,132 @@
+{
+  "schema": 1,
+  "environment": "local isolated Linux arm64 systemd container, network none, loopback TLS mock center",
+  "agent": {
+    "agent_id": "f076d88e-9e0f-4b46-b062-4f97d1cbf086",
+    "runtime": {
+      "mode": "root",
+      "permission_generation": 4,
+      "uid": 0,
+      "gid": 0
+    },
+    "boot_id": "059ce3bc-d40b-4c75-b571-cdf59eba229c",
+    "release": {
+      "version": "0.1.0",
+      "source_revision": "e2f19db9d8f9f08a6fcdf0d47d49780b911a2d42",
+      "build_id": "0.1.0-e2f19db9d8f9-793a618de01a",
+      "state_schema": 1,
+      "artifact_sha256": "f42c3c1487b5c573a567786a46fc1dba00786aeb7b66fda0fd330d9780df4f3f"
+    },
+    "queue_batches": 0
+  },
+  "service": "MainPID=3743\nUser=root\nGroup=root\nActiveState=active\n",
+  "managed": {
+    "executor_id": "qa_internal",
+    "machine_id": "qa_machine",
+    "install_generation": 1,
+    "policy_generation": 1,
+    "fenced": null,
+    "pending_results": 0
+  },
+  "switches": [
+    {
+      "schema": 1,
+      "operation_id": "08a769cb-3708-4c57-8490-1af533af58a9",
+      "agent_id": "f076d88e-9e0f-4b46-b062-4f97d1cbf086",
+      "runtime_mode": "root",
+      "permission_generation": 2,
+      "status": "succeeded",
+      "restored": false,
+      "error": "",
+      "uid": 0,
+      "gid": 0,
+      "boot_id": "13b5b96d-a1a7-4960-a559-ca0e564f965b",
+      "artifact_sha256": "71d49d32e53472a7ed95f27c6fad6f90dfc477183d5d2a308a7d0bcaff474958"
+    },
+    {
+      "schema": 1,
+      "operation_id": "1d6c168a-a422-4429-82d5-4139f14a313f",
+      "agent_id": "f076d88e-9e0f-4b46-b062-4f97d1cbf086",
+      "runtime_mode": "user",
+      "permission_generation": 3,
+      "status": "succeeded",
+      "restored": false,
+      "error": "",
+      "uid": 997,
+      "gid": 997,
+      "boot_id": "e023b2d0-3ee9-44ac-8471-f3860735fd2d",
+      "artifact_sha256": "71d49d32e53472a7ed95f27c6fad6f90dfc477183d5d2a308a7d0bcaff474958"
+    },
+    {
+      "schema": 1,
+      "operation_id": "5aef48ad-d6b1-495c-a1bf-705af73f330f",
+      "agent_id": "f076d88e-9e0f-4b46-b062-4f97d1cbf086",
+      "runtime_mode": "root",
+      "permission_generation": 4,
+      "status": "succeeded",
+      "restored": false,
+      "error": "",
+      "uid": 0,
+      "gid": 0,
+      "boot_id": "0cb8d24f-97c1-4be7-be17-a0c21dc966bf",
+      "artifact_sha256": "71d49d32e53472a7ed95f27c6fad6f90dfc477183d5d2a308a7d0bcaff474958"
+    }
+  ],
+  "upgrade": {
+    "schema": 1,
+    "operation_id": "61f298442ec6608a336a1191aaee1f83",
+    "agent_id": "f076d88e-9e0f-4b46-b062-4f97d1cbf086",
+    "status": "succeeded",
+    "from": {
+      "version": "0.1.0",
+      "source_revision": "e2f19db9d8f9f08a6fcdf0d47d49780b911a2d42",
+      "build_id": "0.1.0-e2f19db9d8f9-793a618de01a",
+      "state_schema": 1,
+      "artifact_sha256": "71d49d32e53472a7ed95f27c6fad6f90dfc477183d5d2a308a7d0bcaff474958",
+      "arch": "arm64",
+      "fingerprint": "61b370e2df171b052cc780f48579355d1505f4d6ff4ebbefd84399de5a567da5",
+      "boot_id": "0cb8d24f-97c1-4be7-be17-a0c21dc966bf"
+    },
+    "target": {
+      "version": "0.1.0",
+      "source_revision": "e2f19db9d8f9f08a6fcdf0d47d49780b911a2d42",
+      "build_id": "0.1.0-e2f19db9d8f9-793a618de01a",
+      "state_schema": 1,
+      "arch": "arm64",
+      "artifact_sha256": "f42c3c1487b5c573a567786a46fc1dba00786aeb7b66fda0fd330d9780df4f3f"
+    },
+    "local_health": {
+      "service_active": true,
+      "identity_matches": true,
+      "release_matches": true,
+      "boot_id": "059ce3bc-d40b-4c75-b571-cdf59eba229c"
+    },
+    "started_at": "2026-11-02T04:48:39.566Z",
+    "updated_at": "2026-11-02T04:49:14.382Z",
+    "uninstaller_updated": true,
+    "confirmation_deadline": "2026-11-02T04:51:41.416Z",
+    "finished_at": "2026-11-02T04:49:14.382Z"
+  },
+  "center_counts": {
+    "ordinary": 67,
+    "managed": 27
+  },
+  "limitations": [
+    "no real platform or SSH target",
+    "same build repackaged with a different SHA for upgrade; no functional version delta",
+    "no fresh root registration installation against actual platform",
+    "no full privileged job or Docker operation dispatched in this systemd fixture"
+  ],
+  "manual_uninstall": {
+    "command": "lightmoni-agent-uninstall --purge",
+    "exit_code": 0,
+    "verified_absent": [
+      "/usr/local/bin/lightmoni-agent",
+      "/opt/lightmoni-agent",
+      "/etc/lightmoni-agent/managed.json",
+      "/etc/lightmoni-agent/managed-activation.json",
+      "/var/lib/lightmoni-agent/managed",
+      "/etc/systemd/system/lightmoni-agent.service"
+    ]
+  }
+}

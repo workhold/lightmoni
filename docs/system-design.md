@@ -4,7 +4,7 @@
 >
 > 配套变更：[SDD 019：系统设计基线](../specs/019-system-design-baseline/spec.md)。
 
-当前受管主机运维以第80章（SDD080）覆盖第60.10章业务profile未迁移的阶段限制。普通Agent仍不能访问Docker daemon或旧写入协议；网站、证书、Compose、备份与业务制品由独立默认关闭的 operations.managed.v1 承接，原批准与领域核验保留。执行器维护沿用第60章唯一维护接口与 activation 证明；新业务数据与离线接管规则见第80章。
+当前受管主机架构以第83章（SDD083）为准：一台主机安装一套 Agent、运行一个 lightmoni-agent.service，按 root/user 配置实际运行账户，统一安装、权限切换、升级、回退和卸载。root 首装或切换计划显式列出三类受审计运维能力，管理员审阅后启用；每次作业仍须独立授权。普通脚本始终以专用普通账户运行。第60、71、80章的双常驻服务和分开维护拓扑保留为历史设计，已由第83章取代；签名身份、逐步许可、审计和领域核验继续复用。
 
 ## 1. 文档定位与事实来源
 
@@ -1693,6 +1693,8 @@ Logo是中心展示元数据，独立存于既有SQLite的ops_application_logos�
 
 ## 第60章 主机执行权限与独立运维执行器（SDD 060）
 
+> 历史架构：本章的双常驻服务、分别安装与维护拓扑已被[第83章：统一 Agent 运行权限](#83-统一-agent-与运行权限模式sdd-083)取代。独立签名主体、权限边界、逐任务审计、在线许可和业务领域校验继续适用；不要根据本章恢复第二套服务或普通 control 写通道。
+
 本章描述 SDD060 的架构与实现契约，实际交付范围和后续业务 profile 见60.10。详细研究与 HLD/LLD 见 [主机执行权限设计](privileged-executor.md)，规格和目标契约见 [SDD060](../specs/060-privileged-executor/spec.md)。未发布的目标能力不能据此视为线上已可用。
 
 ### 60.1 驱动目标与方案取舍
@@ -1827,6 +1829,8 @@ flowchart LR
 
 ## 71. 标准 Agent 部署与权限隔离（SDD 071，由 SDD060 收口）
 
+> 历史架构：本章的双常驻服务、分别安装与维护拓扑已被[第83章：统一 Agent 运行权限](#83-统一-agent-与运行权限模式sdd-083)取代。独立签名主体、权限边界、逐任务审计、在线许可和业务领域校验继续适用；不要根据本章恢复第二套服务或普通 control 写通道。
+
 标准Agent及普通脚本以lightmoni-agent账户运行，unit清空Docker附加组、AmbientCapabilities和CapabilityBoundingSet。普通run真实核验UID、附加组、capabilities及Docker socket访问；发现外部高权限则拒绝启动并提示迁移，不擅自改组、ACL或socket。安装/更新helper只验证普通运行前提，不授予Docker、低端口或宿主发布目录权限。用户批准安装/升级/回退时，仅精确清理root拥有且字节匹配的本平台旧20-lightmoni-docker.conf；未知drop-in或外部组/ACL保留并拒绝，不随程序回退恢复旧授权。
 
 root安装器只执行固定引导和文件所有权准备；独立运维能力由另一个root服务及私有身份提供。两角色共用发行包和基础组件，各自unit、目录、身份、journal及维护锁独立。普通Agent待启动或恢复的主unit按完整SHA白名单验证，先于任何root权限准备器。高权旧previous-service保留作证据但标记不可回退；失败保留已验证普通unit、停服/disable并保锁，报告rollback_failed/unknown，不恢复旧权限或修改原fingerprint冒称完整回退。旧operations网站/容器写入口不保留兼容分支，未迁移业务profile明确拒绝。
@@ -1911,6 +1915,8 @@ flowchart LR
 
 ## 80. 独立执行器承接受管主机运维（SDD 080）
 
+> 历史架构：本章的双常驻服务、分别安装与维护拓扑已被[第83章：统一 Agent 运行权限](#83-统一-agent-与运行权限模式sdd-083)取代。独立签名主体、权限边界、逐任务审计、在线许可和业务领域校验继续适用；不要根据本章恢复第二套服务或普通 control 写通道。
+
 本节取代第57、60.10、69、71及75节中普通 Agent 领取 Docker/operations 写任务的历史路径。普通 Agent 保持非 root、无 Docker 组/socket/capabilities；生产中心以 execution_principal 分流，写任务固定进入独立执行器，不执行历史任务搬运；unknown 保留审计与互斥。受管作业的领取、私有载荷、制品、事件与结果都只能走独立签名主体，不能凭 ordinary control 或获知 lease 访问。任务、AgentJob、运维 run 与原领域验证沿用同一 ID，结构化 root 回执在同一 SQLite 事务更新原领域状态。
 
 operations.managed.v1 为第三个独立默认关闭的高信任能力，涵盖管理员批准的容器/Compose/Registry/OpenResty、网站、证书、备份、systemd 与制品发布。它不扩展无网络/端口/挂载的 container.managed.v1，也不允许任意 shell 转发。批准的程序和挂载可能控制整台主机，界面须明确该信任边界。中心冻结既有已批准资源、当前版本、actor、机器/执行器/策略代次及完整 payload 摘要，在 claim、managed.execute 单次在线许可、续租、制品读取和结果处重新核对；固定 root worker 只加载 root 自有发行代码，命令前核对权威和固定 daemon，复用已审计适配器的输入、归属、健康和失败恢复校验。
@@ -1949,3 +1955,109 @@ SQLite直接创建最终字段与索引，中心在业务初始化前检查cente
 SDK Key仅管理名称与启停，可写所有业务表；删除逐表范围数据库及公开API字段，匿名豁免表仍按当前授权执行。中央凭据库为SSH秘密唯一来源；旧凭据搬运、主机密文回退、无网卡地址回退、告警旧策略填补及模型费用回填均移除。当前权限拒绝、签名、短租约、unknown栅栏和同基线维护/回退继续有效。
 
 本轮用户明确授权完成清理后通过GitHub PR合入main并发布Docker。构建固定已合入源码，发布linux/amd64与linux/arm64镜像，隔离验收空库、重复启动及下载包；发布后读回固定标签/latest和每个平台摘要。验证结果与边界见同一SDD081，不把历史兼容验收当成本次证明。
+
+
+## 83. 统一 Agent 与运行权限模式（SDD 083）
+
+### 83.1 驱动目标与架构决策
+
+用户只登记一台主机、安装一套 Agent、维护一个服务，不再分别操作普通 Agent 和独立 root 执行器。Agent 的程序身份与操作系统运行账户分开表达：相同发行包按 `runtime_mode: root | user` 运行，`permission_generation` 单调递增，心跳同时上报实际 UID/GID。配置验证系统身份，不能凭配置给普通进程提权。
+
+新安装默认选中 root，可取消后以 `lightmoni-agent` 普通账户运行。root 首装或账户切换计划明确列出 `container.managed.v1`、`script.elevated.v1` 和 `operations.managed.v1` 三类能力，管理员审阅后启用；这仅开启可用能力，每次 root 脚本、容器动作和受管业务作业仍必须按原完整目标和载荷单独批准、鉴权和审计。普通任务同样保留来源、发起人、目标、执行状态与结果。用户可在主机详情中分别关闭能力。
+
+参考 Salt minion 的单进程运行账户配置、systemd 的真实 User/Group 和 NoNewPrivileges 语义。选择单一服务及内部执行模块，保留按用途区分的控制/数据/签名凭据；不保留第二套 root 安装入口，也不采用普通脚本自动 sudo。方案比较与资料见 [SDD083 研究](../specs/083-unified-agent-runtime/research.md)。
+
+### 83.2 HLD：单一服务、两种系统身份、统一任务记录
+
+```mermaid
+flowchart TB
+  User[管理员 / Web / AI提案 / 外部MCP] --> Center[中心权限与任务中心]
+  Center --> Review[固定目标与载荷计划 / 人工批准]
+  Review --> Audit[(任务记录 / 审计 / unknown门禁)]
+  Center --> Control[控制与遥测接口]
+  Review --> Signed[签名领取 / 单步许可 / 租约]
+  subgraph Host[一台已登记主机 / 一个Agent ID]
+    Service[lightmoni-agent.service / 单一发行与current]
+    Mode{runtime_mode}
+    Service --> Mode
+    Mode -->|user| Ordinary[lightmoni-agent普通账户]
+    Mode -->|root| Root[root账户 / 内嵌受管执行模块]
+    Ordinary --> Standard[普通任务 / 有界采集]
+    Root --> Drop[固定降权 / 清空附加组 / NoNewPrivileges]
+    Drop --> Standard
+    Root --> Managed[受管动作 / root脚本 / 私有journal]
+  end
+  Control --> Service
+  Signed --> Managed
+  Managed --> Receipt[结构化回执 / 原领域核验]
+  Standard --> Receipt
+  Receipt --> Audit
+```
+
+Agent 在 root 模式组合既有签名执行模块，与控制/遥测循环共享进程和生命周期。内部签名执行 ID、密钥、journal、policy generation 和 activation 证明继续使用原协议，用于区分批准上下文，不作为第二台节点或第二个常驻服务对外展示。user 模式不启动内部 root 模块，不访问 Docker daemon、root 私有载荷或高权限写通道。业务 SDK 继续独立直连中心，不依赖 Agent；SDK 和 Agent 关系不因本次拓扑变化而改变。
+
+普通脚本无论 Agent 本身是否 root，都以专用普通账户运行，清空附加组并启用 NoNewPrivileges；不能继承 root Agent 的权限。受管 root 进程继续只执行批准的固定动作或精确脚本快照，签名、start permit、租约、资源归属和结果事务校验继续有效。root 本身具有整机权限，不能把逐任务批准称为 root 沙箱。
+
+### 83.3 LLD：发行、配置和状态边界
+
+| 对象 | 当前路径与约束 |
+| --- | --- |
+| 唯一常驻服务 | `lightmoni-agent.service`，使用 root 或 lightmoni-agent 的固定 unit 模板，未知 drop-in/覆写拒绝维护 |
+| 唯一程序发行 | `/opt/lightmoni-agent/releases` 与 `current`；root 拥有且不可由任务账户写入，按发行 SHA256 校验 |
+| 公共配置 | `/etc/lightmoni-agent/config.json`，含 runtime_mode 和 permission_generation；root 自有，按模式授予读取权限 |
+| 内部签名配置 | `/etc/lightmoni-agent/managed.json` 和 `managed-activation.json`，root 私有，不向普通任务或 AI 暴露 |
+| Agent 状态 | `/var/lib/lightmoni-agent`；身份与缓存按当前模式拥有，内部签名状态在 `managed` 子目录 |
+| 运维业务数据 | `/var/lib/lightmoni-managed`、`/var/lib/lightmoni-web` 及既有受管业务路径，账户切换不递归 chown 或删除 |
+| 账户切换证据 | `/opt/lightmoni-agent/runtime-plans` 固定操作回执；旧缓存隔离到 root 自有 `/var/lib/lightmoni-agent-maintenance/<operation_id>` |
+| 中心账本 | SQLite `machine_agent_runtime`、`machine_agent_runtime_plans`、`machine_agent_runtime_audit`；保留源/目标代次、计划摘要和操作者 |
+
+root 启动验证实际 UID/EUID/GID、可信配置和发行所有权。普通账户验证无 Docker 组/socket/capability 权限；用户配置 root 字段不能让非 root 进程获得权限。root 模式复用受管适配器的参数与资源校验，user 模式仍拒绝旧写协议，不为历史开发安装自动补兼容。发现旧独立服务或无法证明的安装，要求先通过受管清理重新接入，不默默并行两套服务。
+
+### 83.4 LLD：安装与权限切换
+
+SSH 登记账户用于引导和恢复，需要 root 或支持免交互 sudo 的账户；它不必与 Agent 的运行账户相同，也不需要用户登记第二套 root 密码。首装计划显式冻结 runtime_mode，默认 root，取消后 user；安装、升级和卸载继续使用同一 Agent 生命周期入口。升级保留已批准的运行模式，不从首装默认值推断或自动提权。
+
+| 接口 | 行为 |
+| --- | --- |
+| `GET /api/v1/machines/:id/agent-runtime` | 返回期望模式、实际 UID/GID、权限代次、在线状态和当前维护记录 |
+| `POST /api/v1/machines/:id/agent-runtime/plans` | 检查有效 SSH 凭据和现场，创建 root/user 双向切换计划，绑定主机、Agent ID、目标/凭据修订、源目标模式、代次和固定发行 |
+| `GET /api/v1/machines/:id/agent-runtime/plans` 及 `/:planId` | 回读历史和原始冻结计划，不派发副作用 |
+| `POST .../:planId/apply` | 要求 confirm、expected_revision 与 request_id；再次核验账户、凭据、版本和互斥，执行固定 SSH 维护程序 |
+| `POST .../:planId/cancel` | 仅取消未执行计划，保留审计；不把已派发或未知结果解释为未执行 |
+| `POST .../:planId/reconcile` | 使用有效 SSH 凭据只读核对固定回执；成功回执与同 boot 的目标心跳匹配后完成切换，或失败恢复回执与原账户新鲜心跳共同证明已回滚；不重放切换 |
+
+账户切换维护先核验当前活动 unit、可信发行、实际账户、Agent/主机 ID、空的待发送队列以及无在途/未知任务；计划固定原 boot_id。停止服务后再次检查本地锁和内部未回传结果；切换不与 SSH 终端、其他安装/升级/卸载并发。原账户的遥测队列和配置缓存移入 root 维护备份，新账户从中心获取新配置；只复制经验证的稳定身份，不把普通账户可写缓存、SQLite、脚本或秘密当作 root 可信状态。运维业务数据保持原归属和内容。成功后清除旧签名材料；旧遥测诊断缓存不混入新执行身份。operations 控制锁目录仅在空目录时调整目录自身归属，不递归更改业务数据。失败恢复须由新的 SSH probe boot_id 和同 boot、UID/GID、权限代次及发行摘要的中心心跳共同证明；原进程旧心跳不能释放维护门禁。
+
+```mermaid
+stateDiagram-v2
+  [*] --> awaiting_approval: SSH预检 / 冻结计划
+  awaiting_approval --> cancelled: 取消未执行计划
+  awaiting_approval --> running: 人工确认 / 摘要与凭据重验
+  running --> verifying: 固定维护 / 同一服务重启
+  running --> unknown: 派发后失联或结果不可证
+  running --> failed: 派发前失败 / 明确失败
+  verifying --> succeeded: 完整成功回执与同boot目标心跳双确认
+  verifying --> unknown: 缺少有效确认
+  unknown --> succeeded: 只读成功回执与同boot目标心跳
+  succeeded --> [*]
+  cancelled --> [*]
+  failed --> [*]
+```
+
+SSH 返回成功不足以完成切换：固定维护程序以单次原子写入提交完整成功回执，绑定操作、Agent、目标模式和权限代次、发行 SHA、UID/GID 与 boot_id。中心持久化该回执后，还要求同一 Agent 的新鲜目标心跳与全部字段及同一 boot_id 匹配；root 模式另外确认内嵌签名身份在线。成功回执之后的诊断缓存清理失败不触发回滚。user→root 新建内部批准身份，root→user 只在双重确认后撤销原内部授权。短暂目标心跳不能单独证明切换成功。丢失或不匹配回执保持 unknown 和主机维护门禁；界面可使用有效 SSH 凭据只读核对原操作回执，不自动重新派发、回切或恢复旧 root 授权。
+
+### 83.5 统一升级、回退、卸载与审计
+
+安装包携带两种模式和受管执行模块，统一升级保留 runtime_mode、权限代次、主机及 Agent ID、journal、策略与业务数据。root 模式的重启生成并核验新的 activation 证明；不能凭旧进程的新鲜心跳判断目标程序已启动。原独立执行器安装/维护 Web 入口删除，账户模式和任务能力在主机详情管理，程序维护仅从统一 Agent 入口执行。
+
+旧普通服务模板不接受统一生命周期升级或回退；预检明确要求先受管卸载再重装。已有 root 安装的安装脚本只允许相同制品重装；不同制品必须通过平台升级计划与 update-runner 的 activation、确认和回退协议，不能绕过受管程序激活。
+
+标准/恢复/离线卸载共同检查普通和内部受管任务的未决状态，移除唯一服务、程序和内部签名状态；中心在远端移除验证后撤销关联执行身份和策略。卸载与降权不停止或删除业务容器、卷、网站、证书和应用数据，也不删除审计。离线脚本无法替代中心撤权；结果未确认时保留原证据和 unknown，不提供静默绕过。
+
+root 首装失败后，人工只读核对恢复流程按部署、enrollment、Agent 和本次签发来源审计的精确绑定撤销内部身份及授权；未决受管作业仍阻止恢复。不能撤销其他主机或后续安装的身份。
+
+UI、平台 AI、外部 MCP 和调度器复用现有领域 API、任务与批准路径。普通任务和 root 任务都必须持久记录发起人、来源、目标、批准、实际账户、代次、派发和结果；运行模式切换及凭据使用也单独审计。客户端或 AI 不能自行批准 root 计划，普通 control/data 身份不能访问签名私有载荷、制品或结果。
+
+### 83.6 验证范围与交付证据
+
+规格、契约、研究、实现和验收见 [SDD083](../specs/083-unified-agent-runtime/spec.md)。本地隔离 UI 检查覆盖单个/批量默认 root 与取消 user、冻结计划审阅、凭据过期、待审阅恢复/取消、回读失配禁批、失联不重放、角色边界和中英文界面；不能替代真实 Linux/systemd、Docker 和远端主机验收。部署验证、Doca 最新版本回读、GitHub PR 与线上升级分别记录，不根据文档或前端测试声称用户环境已升级。

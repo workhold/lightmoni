@@ -17,6 +17,8 @@ interface Access {
   credential(machineID: string, credentialID?: string): { machine: MachineSummary; credential: any };
   authentication(machineID: string, credential: any): { privateKey: string; password?: string };
   markCredentialUsed(credentialID: string): void;
+  runtimeHealthy?(operation:Record<string,any>,heartbeat:Record<string,any>):boolean;
+  resolveRuntime?(operation:Record<string,any>,actor:string):Record<string,unknown>|null;
   activated(machineID: string, actorID: string): void;
   deployment(machineID: string, deploymentID: string): any;
   busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
@@ -67,6 +69,7 @@ export function registerInstallationRecovery(deps: Dependencies, access: Access,
     const node = table("agents") ? db.get<Row>("SELECT * FROM agents WHERE id=?",enrollment.agent_id) : undefined;
     const seen = Date.parse(node?.last_seen || ""), started = Date.parse(operation.started_at || ""), now = deps.now().getTime();
     const heartbeat = decode(node?.heartbeat || "{}");
+    if(access.runtimeHealthy&&!access.runtimeHealthy(operation,heartbeat))return false;
     return Number.isFinite(seen) && Number.isFinite(started) && seen >= started && now-seen < 180_000 && seen-now <= 30_000
       && node?.version === operation.version && node?.arch === operation.arch && heartbeat.last_error === "";
   };
@@ -130,8 +133,9 @@ export function registerInstallationRecovery(deps: Dependencies, access: Access,
       const bound = db.get<Row>("SELECT agent_id FROM managed_machines WHERE id=?",current.machine_id)?.agent_id || "";
       if (hasActiveTaskRuns(db,agentID || bound,current.machine_id) || table("agent_jobs") && db.get("SELECT id FROM agent_jobs WHERE agent_id IN (?,?) AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",agentID,bound)) fail(409,"主机仍有未结束的任务，请先处理后再结束安装记录");
       const cancelled=cancelOwnEnrollment(current);
+      const runtime=access.resolveRuntime?.(current,ctx.user.id);
       const revoked = agentID && table("agent_credentials") ? db.run("UPDATE agent_credentials SET revoked_at=?,revoke_reason=? WHERE agent_id=? AND audience IN ('control','data') AND revoked_at IS NULL",at(),"Administrator resolved an unknown Agent installation",agentID).changes : 0;
-      const receipt = {...decode(current.receipt_json),manual_resolution:{at:at(),actor_id:ctx.user.id,reason:input.reason.trim(),enrollment_cancelled:cancelled,revoked_agent_id:agentID,revoked_credentials:revoked}};
+      const receipt = {...decode(current.receipt_json),manual_resolution:{at:at(),actor_id:ctx.user.id,reason:input.reason.trim(),enrollment_cancelled:cancelled,revoked_agent_id:agentID,revoked_credentials:revoked,...(runtime?{revoked_internal_identity:runtime}:{})}};
       db.run("UPDATE machine_deployments SET resolved_at=?,resolved_by=?,resolution_reason=?,receipt_json=? WHERE id=? AND status='unknown' AND resolved_at=''",at(),ctx.user.id,input.reason.trim(),JSON.stringify(receipt),current.id);
     });
     ctx.json(access.deployment(operation.machine_id,operation.id));

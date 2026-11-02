@@ -22,7 +22,7 @@ const OLD_BOOT = "11111111-1111-4111-8111-111111111111", NEW_BOOT = "22222222-22
 const oldRelease = { version: "0.1.0", source_revision: "1".repeat(40), build_id: "0.1.0-before", state_schema: 1,
   artifact_sha256: "1".repeat(64), arch: "amd64", fingerprint: "a".repeat(64), boot_id: OLD_BOOT };
 const previousRelease = { ...oldRelease, artifact_sha256: "2".repeat(64), build_id: "0.1.0-previous", fingerprint: "b".repeat(64) };
-type Mode = "success" | "rollback" | "wrong_build" | "same_boot" | "wrong_config" | "last_error" | "disconnect" | "missing_receipt" | "hold" | "failed" | "service_state_changed";
+type Mode = "success" | "rollback" | "wrong_build" | "same_boot" | "wrong_config" | "last_error" | "disconnect" | "missing_receipt" | "hold" | "failed" | "service_state_changed" | "wrong_uid" | "string_uid" | "missing_uid";
 
 function releaseFiles(directory: string) {
   mkdirSync(directory, { recursive: true });
@@ -49,10 +49,11 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
   let downloadHook: ((input: any, operation: any) => Promise<void>) | undefined;
   const heartbeat = (operation: any, status: any, mode: Mode) => {
     const revision = nodes.effective(operation.agent_id).config.revision;
-    const value = { agent_id: operation.agent_id, version: status.target.version, release: { ...status.target },
+    const value: any = { agent_id: operation.agent_id, version: status.target.version, release: { ...status.target },
       boot_id: mode === "same_boot" ? OLD_BOOT : NEW_BOOT, last_error: mode === "last_error" ? "report temporarily failed" : "",
       config_revision: mode === "wrong_config" ? "outdated" : revision, task_capabilities: [SCRIPT_TASK_CAPABILITY] };
     if (mode === "wrong_build") value.release.build_id = "unapproved-build";
+    if (["wrong_uid","string_uid","missing_uid"].includes(mode)) value.runtime={mode:"user",permission_generation:1,gid:995,...(mode==="missing_uid"?{}:{uid:mode==="string_uid"?"995":0})};
     db.run("UPDATE agents SET version=?,heartbeat=?,last_seen=? WHERE id=?", status.target.version, JSON.stringify(value), clock.toISOString(), operation.agent_id);
   };
   const runner: SSHRunner = async input => {
@@ -167,6 +168,7 @@ test("same-version approved upgrade commits only after new boot, exact release a
   assert.equal((await f.apply(h.id, operation.id)).status, 409);
   assert.equal(f.calls.filter(input => input.command.includes(".update-bootstrap")).length, 1);
 });
+test('legacy user installation cannot create a maintenance plan and receives the reinstall guidance',async t=>{const f=await fixture(t),h=await f.host();f.observations.set(h.id,{error_code:'legacy_agent_installation'});const r=await f.plan(h.id);assert.equal(r.status,409,r.raw);assert.equal(r.data.error,'旧安装不支持统一生命周期，请先受管卸载再重装');assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_agent_updates')!.n,0);assert.equal(f.calls.some(c=>c.command.includes('.update-bootstrap')),false);});
 
 for (const updated of [false, true]) test(`HTTP maintenance receipt retains uninstaller_updated=${updated}`, async t => {
   const f = await fixture(t, 300, updated), h = await f.host(), proposed = await f.plan(h.id);
@@ -212,7 +214,7 @@ test("revoking a shared credential cancels its pending maintenance before any re
   assert.equal(f.calls.some(call => call.command.includes(".update-bootstrap")), false);
 });
 
-for (const mode of ["wrong_build", "same_boot", "wrong_config", "last_error"] as const) test(`health gate refuses ${mode} and never sends commit`, async t => {
+for (const mode of ["wrong_build", "same_boot", "wrong_config", "last_error", "wrong_uid", "string_uid", "missing_uid"] as const) test(`health gate refuses ${mode} and never sends commit`, async t => {
   const f = await fixture(t, 45), h = await f.host(); f.modes.set(h.id, mode);
   const operation = (await f.plan(h.id)).data;
   assert.equal((await f.apply(h.id, operation.id)).status, 202);

@@ -54,6 +54,16 @@ lm_assert_no_operations() {
   if [ -e /var/lib/lightmoni-agent/operations/execution.lock ] || [ -L /var/lib/lightmoni-agent/operations/execution.lock ]; then
     lm_refuse 'Agent has an unfinished operation'
   fi
+  if [ -e /etc/lightmoni-agent/managed.json ] || [ -L /etc/lightmoni-agent/managed.json ] || [ -e /var/lib/lightmoni-agent/managed ] || [ -L /var/lib/lightmoni-agent/managed ]; then
+    lm_root_entry /etc/lightmoni-agent directory
+    lm_root_entry /etc/lightmoni-agent/managed.json file
+    lm_root_entry /var/lib/lightmoni-agent/managed directory
+    lm_root_entry /usr/local/bin/lightmoni-agent file
+    [ -f /etc/lightmoni-agent/managed.json ] && [ -x /usr/local/bin/lightmoni-agent ] || lm_refuse 'Managed Agent state requires recovery before removal'
+    lm_managed=$(/usr/local/bin/lightmoni-agent managed-status) || lm_refuse 'Managed Agent journal cannot be verified'
+    printf '%s' "$lm_managed" | LC_ALL=C grep -Eq '"fenced"[[:space:]]*:[[:space:]]*null' || lm_refuse 'Managed Agent has an unfinished operation'
+    printf '%s' "$lm_managed" | LC_ALL=C grep -Eq '"pending_results"[[:space:]]*:[[:space:]]*0([,}[:space:]])' || lm_refuse 'Managed Agent has unreported results'
+  fi
   for lm_marker in /var/lib/lightmoni-agent/agent-job-state.json /var/lib/lightmoni-agent/task-run-state.json; do
     [ ! -L "$lm_marker" ] || lm_refuse 'Agent has an unsafe unfinished operation marker'
     if [ -e "$lm_marker" ]; then
@@ -73,6 +83,11 @@ lm_assert_no_operations() {
     fi
   done
 }
+lm_remove_managed_state() {
+  # Only after the stopped-service and journal checks, before deleting code.
+  rm -f /etc/lightmoni-agent/managed.json /etc/lightmoni-agent/managed-activation.json
+  rm -rf /var/lib/lightmoni-agent/managed
+}
 lm_purge_agent_state() {
   lm_assert_paths
   lm_assert_no_operations
@@ -86,7 +101,7 @@ lm_purge_agent_state() {
 }
 # END SHARED MAINTENANCE GUARDS
 if [ -e /etc/lightmoni-executor ] || [ -L /etc/lightmoni-executor ] || [ -e /opt/lightmoni-executor ] || [ -L /opt/lightmoni-executor ]; then
-  lm_refuse 'Remove the privileged executor before removing the ordinary Agent'
+  lm_refuse 'Legacy separate root service detected; remove it through its managed cleanup before removing this Agent'
 fi
 lm_assert_paths
 lock=/run/lightmoni-agent-lifecycle.lock
@@ -113,6 +128,7 @@ fi
 # Recheck before disabling or removing any program or retained evidence.
 lm_assert_paths
 lm_assert_no_operations
+lm_remove_managed_state
 if [ "$load_state" = loaded ]; then systemctl disable lightmoni-agent.service; fi
 rm -f /etc/systemd/system/lightmoni-agent.service /usr/local/bin/lightmoni-agent /usr/local/sbin/lightmoni-agent-uninstall
 rm -rf /opt/lightmoni-agent

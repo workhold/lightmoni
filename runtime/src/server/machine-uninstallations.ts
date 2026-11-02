@@ -16,6 +16,7 @@ interface Access {
   authentication(machineID: string, credential: any): { privateKey: string; password?: string };
   markCredentialUsed(credentialID: string): void;
   busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
+  revokeUnifiedRuntime?(machineID:string,actor:string,operationID:string):void;
 }
 export function createUninstallationSchema(deps: Dependencies) {
   createAgentLifecycleSchema(deps.db);
@@ -47,8 +48,11 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !fields.includes(key))) fail(400, "invalid request");
     return input;
   };
+  const executionIdentity=(machineID:string)=>table('privileged_executors')?db.get<any>("SELECT id,agent_id,install_generation FROM privileged_executors WHERE machine_id=? AND state!='revoked' ORDER BY install_generation DESC LIMIT 1",machineID)??null:null;
   const relation = (machine: MachineSummary, agentID: string, mode: string) => {
-    if(table("privileged_executors") && db.get("SELECT id FROM privileged_executors WHERE machine_id=? AND state!='revoked' LIMIT 1",machine.id)) fail(409,"请先卸载并撤销 root 执行器，再卸载普通 Agent");
+    const executionIdentity=table("privileged_executors") && db.get<any>("SELECT id,agent_id FROM privileged_executors WHERE machine_id=? AND state!='revoked' LIMIT 1",machine.id);
+    if(executionIdentity && (!table("machine_agent_runtime") || !db.get("SELECT machine_id FROM machine_agent_runtime WHERE machine_id=? AND agent_id=? AND runtime_mode='root'",machine.id,executionIdentity.agent_id) || executionIdentity.agent_id!==machine.agent_id || !access.revokeUnifiedRuntime)) fail(409,"此主机仍有独立高权限服务，请先卸载并撤销该服务，再卸载 Agent");
+    if(table("privileged_jobs") && db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='')) LIMIT 1",machine.id)) fail(409,"主机有未结束的高权限任务，请先完成或核对");
     assertNoPendingAgentUpdate(db, agentID, machine.id);
     assertNoPendingMachineInstallation(db,machine.id,agentID,true);
     if (mode==="standard" && machine.agent_id && machine.agent_id!==agentID) fail(409,"远端 Agent 身份与主机关联不一致");
@@ -78,6 +82,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
   const assertPlanTarget = (operation: any) => {
     const machine=access.get(operation.machine_id),plan=JSON.parse(operation.plan_json);
     if (plan.target_revision!==access.revision(machine) || machine.agent_id!==plan.machine.agent_id || machine.name!==plan.machine.name) fail(409,"主机名称、连接或节点关联已变化，请重新核对");
+    if(JSON.stringify(executionIdentity(machine.id))!==JSON.stringify(plan.execution_identity??null))fail(409,'Agent 内部执行身份已变化，请重新审阅');
     relation(machine,operation.agent_id,plan.mode||"standard"); return machine;
   };
   const same = (left: AgentRemovalObservation, right: AgentRemovalObservation) => JSON.stringify(removalSnapshot(left))===JSON.stringify(removalSnapshot(right));
@@ -97,6 +102,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
       relation(live,operation.agent_id,plan.mode||"standard");
       const scope=revocationScope(live,before), approved=plan.credential_revocation_scope;
       const eligible=scope.eligible && (approved?.eligible && scope.agent_id===approved.agent_id);
+      if(eligible && table("machine_agent_runtime") && db.get("SELECT machine_id FROM machine_agent_runtime WHERE machine_id=? AND agent_id=? AND runtime_mode='root'",machine.id,scope.agent_id)) access.revokeUnifiedRuntime?.(machine.id,operation.created_by,operation.id);
       const revoked=eligible && table("agent_credentials")?db.run("UPDATE agent_credentials SET revoked_at=?,revoke_reason=? WHERE agent_id=? AND audience IN ('control','data') AND revoked_at IS NULL",at(),"Agent uninstalled through managed host",scope.agent_id).changes:0;
       if(eligible) {
         db.run("INSERT INTO agent_lifecycle VALUES(?,'removed',?,?,?) ON CONFLICT(agent_id) DO UPDATE SET state='removed',removed_at=excluded.removed_at,removed_by=excluded.removed_by,removal_reason=excluded.removal_reason",scope.agent_id,at(),operation.created_by,'Managed Agent uninstallation verified');
@@ -124,7 +130,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
       if(mode==="standard"&&observed.installation!=="present" || mode==="recovery"&&observed.installation==="absent"&&!observed.config_present&&!observed.data_present) fail(409,"远端 Agent 已移除，没有待卸载内容");
       const current=access.get(machine.id);access.credential(machine.id,credential.id);access.checked(current,input.check_id,credential.id);assertFree(machine.id);
       if(access.revision(current)!==access.revision(machine)||current.agent_id!==machine.agent_id||current.name!==machine.name)fail(409,"主机在检查期间变化，请重新计划");
-      const operationID=id(),plan={mode,reason:reason.trim(),purge,machine:{id:machine.id,name:machine.name,address:machine.address,port:machine.port,username:machine.username,agent_id:machine.agent_id},agent_id:observed.agent_id,observation:observed,credential_revocation_scope:revocationScope(current,observed),credential:{id:credential.id,method:credential.method,retention:credential.retention,expires_at:credential.expires_at},check_id:check.id,target_revision:access.revision(machine),expires_at:check.expires_at,
+      const operationID=id(),plan={mode,reason:reason.trim(),purge,machine:{id:machine.id,name:machine.name,address:machine.address,port:machine.port,username:machine.username,agent_id:machine.agent_id},agent_id:observed.agent_id,observation:observed,execution_identity:executionIdentity(machine.id),credential_revocation_scope:revocationScope(current,observed),credential:{id:credential.id,method:credential.method,retention:credential.retention,expires_at:credential.expires_at},check_id:check.id,target_revision:access.revision(machine),expires_at:check.expires_at,
         steps:["核对固定 SSH 目标和已审阅的远端证据","停止并禁用受管 Agent 服务","复验任务标记后移除固定程序",purge?"明确清除 Agent 配置、身份和缓存":"保留 Agent 配置、身份和缓存","核验结果并仅撤销确属本主机的凭据"],retained_paths:purge?["/var/lib/lightmoni-agent/operations"]:retainedAgentPaths,removed_paths:purge?[...removedAgentPaths,"/etc/lightmoni-agent","/var/lib/lightmoni-agent/identity.json"]:removedAgentPaths,warnings:["不会删除业务数据、系统账户或平台主机记录。",purge?"Agent 配置、身份及缓存将清除；应用运行目录和持久数据保留，完成后可全新接入。":"保留数据会继续触发 fresh 保护，重新接入前需明确清除。","派发后中断进入未知结果，仅可只读核对，不自动重放。"]};
       db.transaction(()=>{assertFree(machine.id);relation(current,observed.agent_id,mode);db.run("INSERT INTO machine_uninstallations(id,machine_id,agent_id,credential_id,status,plan_json,created_at,created_by) VALUES(?,?,?,?,? ,?,?,?)",operationID,machine.id,observed.agent_id,credential.id,"awaiting_approval",JSON.stringify(plan),at(),ctx.user.id);});
       ctx.json({...decode(row(machine.id,operationID)),review_url:`/machines?machine=${machine.id}&uninstallation=${operationID}`},201);

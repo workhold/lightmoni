@@ -1,8 +1,23 @@
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chownSync, lstatSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { atomicJSON } from "../shared/io.js";
 import { SCRIPT_TASK_CAPABILITIES, requiredTaskScriptCapability, validateTaskScript, type ClaimedTaskRun, type TaskRunResult, type TaskScript } from "../shared/task-center.js";
+import { rootPath } from "../privileged-executor/security.js";
+
+export interface OrdinaryTaskAccount { uid: number; gid: number }
+export function ordinaryTaskAccount(): OrdinaryTaskAccount {
+  rootPath("/usr/bin/id");
+  const value = (flag: string) => execFileSync("/usr/bin/id", [flag, "lightmoni-agent"], {encoding: "utf8", timeout: 5000, maxBuffer: 1024, env: {PATH: "/usr/bin:/bin", LANG: "C"}}).trim();
+  const uid = Number(value("-u")), gid = Number(value("-g"));
+  if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid) || uid <= 0 || gid <= 0 || value("-gn") !== "lightmoni-agent") throw Error("ordinary_task_account_unavailable");
+  return {uid, gid};
+}
+export function ordinaryTaskCommand(node: string, args: string[], account?: OrdinaryTaskAccount): {file: string; args: string[]} {
+  if (!account) return {file: node, args};
+  if (!Number.isSafeInteger(account.uid) || !Number.isSafeInteger(account.gid) || account.uid <= 0 || account.gid <= 0) throw Error("invalid_ordinary_task_account");
+  return {file: "/usr/bin/setpriv", args: ["--reuid=" + account.uid, "--regid=" + account.gid, "--clear-groups", "--no-new-privs", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--", node, ...args]};
+}
 
 export interface ScriptOutcome {
   state: "succeeded" | "failed" | "cancelled" | "unknown";
@@ -42,12 +57,22 @@ export async function executeTaskScript(script: TaskScript, options: {
   }
   if (script.runtime === "shell" && process.platform === "win32")
     return { state: "failed", code: "runtime_unavailable", summary: "POSIX shell is unavailable", stdout: "", stderr: "", exit_code: null };
-  const root = resolve(options.dataDir, "task-work"); mkdirSync(root, { recursive: true, mode: 0o700 });
-  const work = mkdtempSync(join(root, "run-"));
+  // A root-mode Agent never grants its identity to an ordinary task. The work
+  // directory is outside root-private state; only the downgraded child reads it.
+  let account: OrdinaryTaskAccount | undefined;
+  if (process.getuid?.() === 0 || process.geteuid?.() === 0) {
+    if (process.platform !== "linux" || process.getuid?.() !== 0 || process.geteuid?.() !== 0) throw Error("ordinary_task_demotion_unavailable");
+    rootPath("/usr/bin/setpriv"); account = ordinaryTaskAccount();
+  }
+  const root = account ? "/var/tmp" : resolve(options.dataDir, "task-work");
+  if (account) { const info = lstatSync(root); if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== 0) throw Error("unsafe_task_temporary_directory"); }
+  else mkdirSync(root, { recursive: true, mode: 0o700 });
+  const work = mkdtempSync(join(root, account ? "lightmoni-task-" : "run-"));
   const file = join(work, script.runtime === "node" ? "task.mjs" : "task.sh");
   writeFileSync(file, script.code, { mode: 0o600 });
   const supervisor = join(work, "supervisor.mjs");
   writeFileSync(supervisor, SUPERVISOR, { mode: 0o600 });
+  if (account) { chownSync(file, account.uid, account.gid); chownSync(supervisor, account.uid, account.gid); chownSync(work, account.uid, account.gid); }
   const secrets = (options.secrets ?? []).filter(Boolean).sort((a, b) => b.length - a.length);
   const scrub = (value: string) => { for (const secret of secrets) value = value.split(secret).join("[redacted]"); return value; };
   try {
@@ -55,7 +80,8 @@ export async function executeTaskScript(script: TaskScript, options: {
       let stdout = Buffer.alloc(0), stderr = Buffer.alloc(0), received = 0, reason = "", done = false;
       let timeout: NodeJS.Timeout | undefined, force: NodeJS.Timeout | undefined;
       let scriptExit: number | null | undefined, spawnError = false;
-      const child = spawn(process.execPath, [supervisor, script.runtime, file, String(script.timeout_seconds), String(process.pid), ...(script.args ?? [])], {
+      const command = ordinaryTaskCommand(process.execPath, [supervisor, script.runtime, file, String(script.timeout_seconds), String(process.pid), ...(script.args ?? [])], account);
+      const child = spawn(command.file, command.args, {
         cwd: script.cwd || work, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe", "ipc"],
         env: { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: work, TMPDIR: work, LANG: "C.UTF-8", LIGHTMONI_TASK_RUN_ID: options.runID },
       });
@@ -110,6 +136,7 @@ export async function executeTaskScript(script: TaskScript, options: {
 export interface TaskRunnerConfig {
   endpoint: string; agentID: string; controlCredential: string; dataCredential?: string;
   dataDir: string; pollIntervalMs?: number; heartbeatIntervalMs?: number;
+  runtimeMode?: "root" | "user"; permissionGeneration?: number;
 }
 class TaskHTTPError extends Error { constructor(readonly status: number) { super("task control HTTP " + status); } }
 interface Recovery { id: string; lease_token: string; receipt?: TaskRunResult }
@@ -168,6 +195,10 @@ export class AgentTaskRunner {
         || run.snapshot?.agent_id !== this.config.agentID || run.snapshot?.host_id !== run.host_id || run.snapshot?.task_id !== run.task_id)
         throw Error("invalid claimed task binding");
       validateTaskScript(run.snapshot.script);
+      const identity = run.snapshot.execution_identity;
+      if (identity && (identity.account !== "lightmoni-agent" || identity.privilege !== "user" || !Number.isSafeInteger(identity.permission_generation) || identity.permission_generation < 1
+        || this.config.permissionGeneration !== undefined && identity.permission_generation > this.config.permissionGeneration))
+        throw Error("ordinary_task_identity_mismatch");
       if (!(SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(requiredTaskScriptCapability(run.snapshot.script)))
         throw Error("unsupported claimed script capability");
       this.save({ id: run.id, lease_token: run.lease_token });

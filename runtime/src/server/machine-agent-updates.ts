@@ -6,6 +6,8 @@ import { fail, HTTPError } from "../shared/http.js";
 import type { Dependencies, Handler, Module } from "../shared/types.js";
 import { hasActiveTaskRuns } from "./agent-hosts.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
+import { assertNoPendingAgentRuntime } from "./machine-agent-runtime-guard.js";
+import { validAgentRuntimeObservation } from "./machine-agent-runtime.js";
 import { assertAgentActive } from "./agent-lifecycle.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import type { MachineSummary } from "./managed-machines.js";
@@ -103,6 +105,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   const taskBusy = (machineID: string, agentID: string) => hasActiveTaskRuns(db, agentID, machineID)
     || table("agent_jobs") && Boolean(db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID));
   const assertTarget = (machine: MachineSummary) => {
+    assertNoPendingAgentRuntime(db,machine.id,machine.agent_id);
     assertNoPendingMachineInstallation(db,machine.id,machine.agent_id,true);
     if (!machine.agent_id) fail(409, "主机尚未安装 Agent，请先部署");
     assertAgentActive(db, machine.agent_id);
@@ -158,10 +161,10 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       const operationID = id(), expires = new Date(deps.now().getTime() + 15 * 60_000).toISOString();
       const planBody = { machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, username: machine.username, agent_id: machine.agent_id },
         credential: { id: credential.id, method: credential.method, retention: credential.retention, expires_at: credential.expires_at },
-        action: input.action, current: { ...observed.current, service_active: observed.service_active, release: { ...observed.current } }, target, files,
+        action: input.action, runtime_mode:observed.runtime_mode??'user',permission_generation:observed.permission_generation??1, current: { ...observed.current, service_active: observed.service_active, release: { ...observed.current } }, target, files,
         target_revision: access.revision(machine), expires_at: expires,
-        steps: ["核对主机、Agent 身份与当前程序指纹", "下载并校验审批固定的维护器和发行包", "移除本平台旧 Docker 权限；程序回退不恢复该权限", "通过独立 systemd 维护器切换程序", "确认目标构建的新进程已同步平台配置", "确认成功；失败时仅恢复已验证的普通 Agent 程序"],
-        warnings: ["维护期间暂停该主机的新任务派发和领取。", "保留主机 ID、Agent 身份、配置、队列和游标；不会重新接入。", "旧高权限版本不能回退；无法安全恢复时停服并保留证据。", "结果未知时只读核对；确认超时仅回退到已验证的普通 Agent，不自动重试。"] };
+        steps: ["核对主机、Agent 身份与当前程序指纹", "下载并校验审批固定的维护器和发行包", "保留已审批的运行账户、权限代次和内部执行身份", "通过独立 systemd 维护器切换同一 Agent 程序", "确认目标构建的新进程已同步平台配置", "确认成功；失败时仅恢复已验证的同账户程序"],
+        warnings: ["维护期间暂停该主机的新任务派发和领取。", "保留主机 ID、Agent 身份、配置、队列和游标；不会重新接入。", "升级不会提升运行权限；账户切换需要独立审阅。", "结果未知时只读核对；确认超时仅回退到已验证的同账户程序，不自动重试。"] };
       db.transaction(() => {
         assertFree(machine.id); assertTarget(access.get(machine.id));
         db.run("INSERT INTO machine_agent_updates(id,machine_id,agent_id,credential_id,action,status,plan_json,created_at,created_by) VALUES(?,?,?,?,?,'awaiting_approval',?,?,?)",
@@ -186,6 +189,8 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     let value: any;
     try { value = JSON.parse(node.heartbeat); } catch { return false; }
     const planBody = JSON.parse(operation.plan_json), expected = target ? planBody.target : planBody.current;
+    if((planBody.runtime_mode==='root'||planBody.permission_generation>1)&&!value.runtime)return false;
+    if(value.runtime && (!validAgentRuntimeObservation(value.runtime) || value.runtime.mode!==(planBody.runtime_mode??'user') || value.runtime.permission_generation!==(planBody.permission_generation??1)))return false;
     const boot = observedBootID ?? remote.local_health?.boot_id;
     if (!boot || value.boot_id !== boot || value.boot_id === planBody.current.boot_id || value.last_error !== "") return false;
     if (target) {
@@ -286,6 +291,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       const observed = await probe(machine, credential, signal); validateProbe(machine, observed, operation.action !== "rollback");
       if (observed.current.fingerprint !== body.current.fingerprint) fail(409, "当前 Agent 程序已变化，请取消旧计划并重新审阅");
       if (observed.service_active !== body.current.service_active) fail(409, "当前 Agent 服务运行状态已变化，请取消旧计划并重新审阅");
+      if((observed.runtime_mode??'user')!==(body.runtime_mode??'user')||(observed.permission_generation??1)!==(body.permission_generation??1))fail(409,'Agent 运行账户或权限代次已变化，请重新审阅');
       if (operation.action === "rollback" && observed.previous?.fingerprint !== body.target.fingerprint) fail(409, "保留的回退发行已变化，请重新审阅");
       assertPlan(operation, true); access.credential(machineID, credential.id);
       const downloadToken = "lm_update_" + token();

@@ -12,9 +12,10 @@ import { NodeStore } from "./nodes-model.js";
 import { join } from "node:path";
 import { createAgentUpdatesSchema, registerMachineAgentUpdates, type AgentUpdateStore } from "./machine-agent-updates.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
-import { registerMachineExecutorBootstrap } from "./machine-executor-bootstrap.js";
 import type { PrivilegedExecutorStore } from "./privileged-executors.js";
-import { registerMachineExecutorMaintenance } from "./machine-executor-maintenance.js";
+import { createAgentRuntimeSchema, recordAgentRuntime, registerMachineAgentRuntime, validAgentRuntimeMode, validAgentRuntimeObservation } from './machine-agent-runtime.js';
+import { assertNoPendingAgentRuntime } from './machine-agent-runtime-guard.js';
+import { PRIVILEGED_CAPABILITIES } from '../shared/privileged-executor.js';
 import { createInstallationRecoverySchema, registerInstallationRecovery } from "./machine-installation-recovery.js";
 import { assertNoPendingMachineInstallation, pendingMachineInstallation, unresolvedInstallationSQL } from "./machine-installations-guard.js";
 import { createUninstallationSchema, registerMachineUninstallations, type UninstallationStatus } from "./machine-uninstallations.js";
@@ -152,7 +153,7 @@ export interface SSHCheckResult {
   discovery: SSHDiscovery;
 }
 export interface InstallPlanInput {
-  check_id: string; credential_id?: string; version: string; arch: string; initial_label_id?: string;
+  check_id: string; credential_id?: string; version: string; arch: string; initial_label_id?: string; runtime_mode?: 'root'|'user';
 }
 
 export interface ManagedMachineStore {
@@ -259,6 +260,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     CREATE INDEX IF NOT EXISTS machine_credential_events_credential ON machine_credential_events(credential_id,created_at);
   `);
   const now = () => deps.now();
+  createAgentRuntimeSchema(deps);
   const busy = new Set<string>();
   let executorStore: PrivilegedExecutorStore | undefined;
   const terminals = new Map<string, { credentialID: string; invalidate: () => void }>();
@@ -689,13 +691,14 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (credentialID && credentialID !== saved.credential_id) fail(409, "所选 SSH 凭据与 SSH 检查不一致，请重新检查");
     return result;
   };
-  const uninstallations = registerMachineUninstallations(deps, { get, idle, revision: targetRevision, checked, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe });
+  const uninstallations = registerMachineUninstallations(deps, { get, idle, revision: targetRevision, checked, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe, revokeUnifiedRuntime(machineID,actor,operationID){if(!executorStore)fail(409,'agent_execution_store_unavailable');executorStore.revokeUnifiedRuntime(machineID,actor,operationID,true);} });
   const agentUpdates = registerMachineAgentUpdates(deps, { get, idle, revision: targetRevision, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe }, {
     credentials: options.agentCredentials, downloadsDir: options.downloadsDir ?? join(process.cwd(), "downloads"), dataDir: options.dataDir ?? join(process.cwd(), ".local-dev"),
     pollIntervalMs: options.updatePollIntervalMs, healthTimeoutMs: options.updateHealthTimeoutMs,
   });
   const createPlan = (machineID: string, input: InstallPlanInput, actorID: string) => {
-    parameters(record(input), ["check_id", "credential_id", "version", "arch", "initial_label_id"]);
+    parameters(record(input), ["check_id", "credential_id", "version", "arch", "initial_label_id", "runtime_mode"]);
+    const runtimeMode=input.runtime_mode??'root';if(!validAgentRuntimeMode(runtimeMode))fail(400,'invalid_agent_runtime_mode');
     idle(machineID);
     assertNoPendingMachineInstallation(db,machineID);
     assertNoPendingAgentUpdate(db, "", machineID);
@@ -712,6 +715,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       credential: { id: credential.id, method: credential.method, retention: credential.retention, expires_at: credential.expires_at },
       check_id: check.id, target_revision: targetRevision(machine), preflight: check,
       version, arch, initial_label_id: text(input.initial_label_id ?? "", "initial_label_id", 128, false), expires_at: check.expires_at,
+      runtime_mode:runtimeMode,permission_generation:1,capabilities:runtimeMode==='root'?[...PRIVILEGED_CAPABILITIES]:[],
       steps: ["自动校验主机公钥", "建立受限 SSH 连接", "下载固定版本 Agent 并校验 SHA256", "通过 stdin 注入一次性 enrollment token", "安装独立 systemd Agent", "等待 Agent 激活回执"],
       warnings: ["AI 不会读取或发送 SSH 秘密。", "用户确认后才执行固定部署流程。", "SSH 密码建议只使用一次，不要长期保存。", "Agent 激活后日常操作优先使用 Agent 通道。"],
     };
@@ -773,13 +777,15 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
         tasks.setHostLabels(machine.id, [...tasks.hostLabels(machine.id), deployment.initial_label_id]);
       }
       enrollment = options.agentCredentials.issueEnrollment({ endpoint_origin: deps.externalURL, version: deployment.version, allowed_arch: [deployment.arch], initial_label_id: deployment.initial_label_id, created_by: ctx.user.id, machine_id: machine.id, previous_agent_id: machine.agent_id, deployment_id:deployment.id });
-      const command = agentBootstrapCommand(deps.externalURL.replace(/\/$/, ""), deployment.version);
+      const command = agentBootstrapCommand(deps.externalURL.replace(/\/$/, ""), deployment.version,savedPlan.runtime_mode??'user');
       const dispatching=db.run("UPDATE machine_deployments SET execution_stage='bootstrap_dispatched' WHERE id=? AND status='running' AND execution_stage='enrollment_issued' AND enrollment_id=? AND resolved_at=''",deployment.id,enrollment.enrollment_id);
       if(!dispatching.changes)fail(409,"安装记录已进入恢复流程，旧请求不能派发安装");
       dispatched = true;
       const result = await runSSH({ credentialID: credential.id, machine, privateKey, ...(password ? { password } : {}), command, enrollmentToken: enrollment.token_display_once, signal: ctx.signal, port: machine.port });
       const status = options.agentCredentials.enrollmentStatus(enrollment.enrollment_id);
       if (!status || status.status !== "active" || !status.agent_id) throw Error("Agent 未完成激活回执");
+      const installedRuntime=db.get<any>('SELECT * FROM machine_agent_runtime WHERE machine_id=? AND agent_id=?',machine.id,status.agent_id);
+      if(installedRuntime){const node=db.get<any>('SELECT heartbeat,last_seen FROM agents WHERE id=?',status.agent_id),beat=parseJSON<any>(node?.heartbeat??'{}',{}),r=beat.runtime,seen=Date.parse(node?.last_seen??''),started=Date.parse(db.get<any>('SELECT started_at FROM machine_deployments WHERE id=?',deployment.id)?.started_at??'');if(!validAgentRuntimeObservation(r)||r.mode!==installedRuntime.runtime_mode||r.permission_generation!==installedRuntime.permission_generation||!Number.isFinite(seen)||!Number.isFinite(started)||seen<started||seen<now().getTime()-90000||installedRuntime.runtime_mode==='root'&&!executorStore?.getStatus(machine.id).executor?.online)throw Error('Agent 运行账户或签名执行通道尚未完成新鲜心跳确认');}
       const receipt = { stages: result.stages, stdout: redact(result.stdout, [enrollment.token_display_once, privateKey, password]), stderr: redact(result.stderr, [enrollment.token_display_once, privateKey, password]), enrollment_id: enrollment.enrollment_id, agent_id: status.agent_id };
       db.transaction(() => {
         const saved=db.run("UPDATE machine_deployments SET status='succeeded',finished_at=?,receipt_json=?,error='' WHERE id=? AND status='running' AND resolved_at=''", iso(now()), JSON.stringify(receipt), deployment.id);
@@ -867,7 +873,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   }));
   router.post("/api/v1/machines/:id/deployments/:deploymentId/apply", safe(apply));
   const dockerInstallations = registerMachineDocker(deps,{get,idle,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe});
-  registerInstallationRecovery(deps,{get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,deployment:deploymentRecord,
+  registerInstallationRecovery(deps,{get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,deployment:deploymentRecord,runtimeHealthy(operation,heartbeat){const plan=parseJSON<any>(operation.plan_json,{}),runtime=db.get<any>('SELECT * FROM machine_agent_runtime WHERE machine_id=?',operation.machine_id);if(!runtime)return true;const r=heartbeat.runtime;if(!validAgentRuntimeObservation(r)||r.mode!==runtime.runtime_mode||r.permission_generation!==runtime.permission_generation)return false;return runtime.runtime_mode!=='root'||!!executorStore?.getStatus(operation.machine_id).executor?.online;},
+    resolveRuntime(operation,actor){return executorStore?.resolveUnifiedInstallation(operation.machine_id,actor,operation.id)??null;},
     activated(machineID,actorID){for(const temporary of db.all<{id:string}>("SELECT id FROM machine_credentials WHERE machine_id=? AND retention IN ('temporary','one_time')",machineID))clearCredential(temporary.id,"agent_activated",actorID,true);}},options.agentCredentials);
   const assistantSafe = (machine: MachineSummary) => ({ ...machine, host_key_fingerprint: "", host_key_public_key: "", host_key_observed_at: "" });
   const assistantList = () => list().map(assistantSafe);
@@ -891,13 +898,16 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     registerExecutorBootstrap(store) {
       executorStore=store;
       const access={get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,check:checkSSH};
-      const bootstrap=registerMachineExecutorBootstrap(deps,access,store,{
-        downloadsDir:options.downloadsDir ?? join(process.cwd(),"downloads"),dataDir:options.dataDir ?? join(process.cwd(),".local-dev"),
+      options.agentCredentials?.setActivationHook?.(input=>{
+        const deployment=db.get<any>("SELECT * FROM machine_deployments WHERE enrollment_id=? AND machine_id=? AND status='running' AND execution_stage='bootstrap_dispatched' AND resolved_at=''",input.enrollment_id,input.machine_id);
+        if(!deployment)fail(409,'approved_agent_deployment_required');
+        const plan=parseJSON<any>(deployment.plan_json,{}),mode=plan.runtime_mode??'user';
+        if(!validAgentRuntimeMode(mode)||deployment.created_by!==input.created_by)fail(409,'approved_agent_runtime_required');
+        recordAgentRuntime(deps,input.machine_id,input.agent_id,mode,1);
+        return {runtime_mode:mode,permission_generation:1,...(mode==='root'?{managed_bootstrap:store.issueUnifiedBootstrap(input.machine_id,input.created_by,{deployment_id:deployment.id})}:{})};
       });
-      const maintenance=registerMachineExecutorMaintenance(deps,access,store,{
-        downloadsDir:options.downloadsDir ?? join(process.cwd(),"downloads"),dataDir:options.dataDir ?? join(process.cwd(),".local-dev"),
-      });
-      return {async close(){await Promise.allSettled([bootstrap.close?.(),maintenance.close?.()]);}};
+      const runtime=registerMachineAgentRuntime(deps,access,store);
+      return runtime;
     },
     async close() {
       clearInterval(cleanupTimer);

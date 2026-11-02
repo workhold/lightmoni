@@ -8,7 +8,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { gunzipSync } from "node:zlib";
 
-export const ORDINARY_AGENT_SERVICE_SHA256 = "651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf";
+export const ORDINARY_AGENT_SERVICE_SHA256 = "e40409fb295ff646cf016a05c2571d2004202454bdeb742dc88d4aff29391a12";
+export const ROOT_AGENT_SERVICE_SHA256 = "19f0b122cfff85f5397b5cc4afeeb6342df36634a35f981c562a1ab6f3ef826e";
+const SERVICE_MODES=new Map([[ORDINARY_AGENT_SERVICE_SHA256,'user'],[ROOT_AGENT_SERVICE_SHA256,'root']]);
 const SHA = /^[a-f0-9]{64}$/;
 const ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const OP = /^[a-f0-9]{32}$/;
@@ -100,7 +102,7 @@ export class AgentMaintenance {
   }
   ordinaryService(filename) {
     const file=this.checkManaged(filename),info=fs.statSync(file);
-    if(info.size>8192||digest(fs.readFileSync(file))!==ORDINARY_AGENT_SERVICE_SHA256)fail("ordinary_agent_privilege_violation");
+    if(info.size>8192||!SERVICE_MODES.has(digest(fs.readFileSync(file))))fail("agent_service_override_not_allowed");
     return fs.readFileSync(file);
   }
   fingerprint(releasePath, launcherPath = this.p("/usr/local/bin/lightmoni-agent"), servicePath = this.p("/etc/systemd/system/lightmoni-agent.service")) {
@@ -132,6 +134,8 @@ export class AgentMaintenance {
     catch (error) { if (!absent(error)) throw error; }
   }
   hasOperation() {
+    try { if(fs.existsSync(this.p('/etc/lightmoni-agent/managed.json'))){const s=JSON.parse(this.command(this.p('/usr/local/bin/lightmoni-agent'),['managed-status']));if(s.fenced||s.pending_results!==0)return true;} }
+    catch { return true; }
     try { fs.lstatSync(this.p("/var/lib/lightmoni-agent/operations/execution.lock")); return true; }
     catch (error) { if (!absent(error)) return true; }
     for (const filename of ["agent-job-state.json", "task-run-state.json"]) {
@@ -158,7 +162,9 @@ export class AgentMaintenance {
       if (value.fingerprint !== retained.fingerprint) fail("previous_release_changed");
       // Preserve the immutable old unit as evidence, but never offer its
       // former host powers as a retained program rollback target.
-      if(digest(fs.readFileSync(this.checkManaged(path.join(source,"previous-service"))))!==ORDINARY_AGENT_SERVICE_SHA256)return null;
+      const mode=SERVICE_MODES.get(digest(fs.readFileSync(this.checkManaged(path.join(source,"previous-service")))));
+      const currentMode=SERVICE_MODES.get(digest(fs.readFileSync(this.checkManaged(this.p('/etc/systemd/system/lightmoni-agent.service')))));
+      if(!mode||mode!==currentMode)return null;
       return { ...value, release_path: retained.release_path, operation_id: retained.operation_id };
     } catch (error) { if(absent(error))return null;throw error; }
   }
@@ -368,6 +374,7 @@ export class AgentMaintenance {
     this.atomic(this.p("/usr/local/bin/lightmoni-agent"), fs.readFileSync(this.checkManaged(path.join(directory, "previous-launcher"))), 0o755);
     this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(this.checkManaged(path.join(directory, "previous-service"))), 0o644);
     this.restoreUninstaller(directory);
+    if(fs.existsSync(this.p("/etc/lightmoni-agent/managed.json")))this.command(this.p("/usr/local/bin/lightmoni-agent"),["managed-activate"]);
     this.command("systemctl", ["daemon-reload"]);
     if (request.previous_active) {
       this.command("systemctl", ["restart", "lightmoni-agent.service"]);
@@ -411,7 +418,13 @@ export class AgentMaintenance {
         launcher = path.join(this.opDir(retained.operation_id), "previous-launcher"); service = path.join(this.opDir(retained.operation_id), "previous-service");
         this.command(path.join(candidate, "node"), [path.join(candidate, "app/runtime/dist/agent/main.js"), "check", "--config", this.p("/etc/lightmoni-agent/config.json"), "--require-data-dir", this.p("/var/lib/lightmoni-agent")]);
       }
+      const currentService=this.ordinaryService(this.p('/etc/systemd/system/lightmoni-agent.service'));
+      const currentMode=SERVICE_MODES.get(digest(currentService));
+      // A package contains a user template; upgrading never changes authority.
+      // Root and user share immutable code and keep the installed mode.
+      if(request.action==='upgrade'&&currentMode==='root')service=this.p('/etc/systemd/system/lightmoni-agent.service');
       const approvedService=this.ordinaryService(service);
+      if(SERVICE_MODES.get(digest(approvedService))!==currentMode)fail('runtime_mode_changed');
       if (this.fingerprint(this.currentPath()).fingerprint !== request.expected_fingerprint || this.identity() !== request.expected_agent_id) fail("installation_changed");
       const activeState = this.system("ActiveState");
       if (!["active", "inactive", "failed"].includes(activeState) || (activeState === "active") !== request.expected_service_active) fail("service_state_changed");
@@ -431,7 +444,7 @@ export class AgentMaintenance {
       if (this.hasOperation()) fail("operation_conflict");
       this.switchCurrent(candidate);
       this.atomic(this.p("/usr/local/bin/lightmoni-agent"), fs.readFileSync(launcher), 0o755);
-      this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(service), 0o644);
+      this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"), approvedService, 0o644);
       if (uninstaller) {
         const parent = this.p("/usr/local/sbin");
         try { this.checkManaged(parent, "directory"); }
@@ -440,6 +453,7 @@ export class AgentMaintenance {
       }
       this.save(id, { uninstaller_updated: uninstaller !== null });
       this.command("systemctl", ["daemon-reload"]);
+      if(currentMode==='root'&&fs.existsSync(this.p('/etc/lightmoni-agent/managed.json')))this.command(this.p('/usr/local/bin/lightmoni-agent'),['managed-activate']);
       this.command("systemctl", ["restart", "lightmoni-agent.service"]);
       const deadline = this.now() + (request.confirm_timeout_seconds ?? 180) * 1000;
       let healthy = false;
