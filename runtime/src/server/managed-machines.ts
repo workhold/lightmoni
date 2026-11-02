@@ -473,6 +473,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   };
   const updateMachine = async (ctx: Context) => {
     admin(ctx);
+    assertNoPendingAgentRuntime(db, ctx.params.id);
     assertNoPendingAgentUpdate(db, "", ctx.params.id);
     idle(ctx.params.id);
     uninstallations.assertFree(ctx.params.id);
@@ -481,11 +482,12 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     ensureMachine(ctx.params.id);
     uninstallations.assertFree(ctx.params.id);
     db.transaction(() => {
+      const existing = db.get<any>("SELECT * FROM managed_machines WHERE id=?", ctx.params.id);
+      if (!existing) fail(404, "主机不存在");
+      assertNoPendingAgentRuntime(db, ctx.params.id, existing.agent_id);
       assertNoPendingMachineInstallation(db,ctx.params.id);
       uninstallations.assertFree(ctx.params.id);
       assertNoPendingAgentUpdate(db, "", ctx.params.id);
-      const existing = db.get<any>("SELECT * FROM managed_machines WHERE id=?", ctx.params.id);
-      if (!existing) fail(404, "主机不存在");
       const value = validateMachine(input, existing);
       const changed = ["address", "port", "username"].some(field => existing[field] !== value[field as "address" | "port" | "username"]) || existing.connection_method !== value.connectionMethod;
       const renamed = existing.name !== value.name;

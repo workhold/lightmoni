@@ -44,6 +44,8 @@ root 同版本重装保留模式和内部身份；官方 update-runner 通过真
 
 本轮追加仅涉及测试与验收证据，架构同步不适用：运行账户、SSH 权限和任务审计契约未变，既有仓库第83章与 Doca seq937 保持有效。
 
+追加主机编辑互斥修复：运行账户切换为 awaiting_approval、running、verifying 或 unknown 时，编辑主机在请求开始及写事务内均检查维护门禁，避免名称或 SSH 目标变化使原计划无法只读核对。取消待审阅计划后可编辑；unknown 期间仍可添加同登录账户的新凭据供只读核对。包含请求体读取后的并发维护状态变更回归，相关服务端126项通过，runtime typecheck 与 diff-check 通过。此修复只落实已有维护互斥契约，不新增账户模型或权限路径。
+
 ## 设计与 Doca
 
 仓库 docs/system-design.md 更新当前基线及第83章，旧分离进程拓扑明确标注历史。Doca [LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 同步正文和两张原生可编辑图。
