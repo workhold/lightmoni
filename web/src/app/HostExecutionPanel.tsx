@@ -1,3 +1,5 @@
+import type {SSHCheckResult} from '../shared/SSHCheckSummary';
+import {type SSHAccount,type SSHAccountHost,sshCredentialLabel} from './machine-credentials';
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Space,Switch,Tag,Typography} from '../shared/ui';
 import {api,ApiError} from '../shared/api';
@@ -9,14 +11,14 @@ type Capability='container.managed.v1'|'script.elevated.v1'|'operations.managed.
 type Effective='disabled'|'pending'|'ready'|'unavailable'|'blocked'|'disabling'|'unknown';
 type CapabilityStatus={requested?:boolean;authorized:boolean;effective:Effective;reason_code?:string;observed_at?:string};
 export type HostExecutionStatus={machine_id:string;policy_generation:number;executor?:{id:string;online:boolean;state?:string;last_seen?:string;install_generation?:number};capabilities:Record<Capability,CapabilityStatus>};
-type Credential={id:string;name?:string;method:string;retention?:string;expires_at?:string;revoked_at?:string;secret_cleared_at?:string;is_default?:boolean;secret_fingerprint?:string};
-type Host={id:string;name:string;agent_id?:string;agent_status?:string;default_credential_id?:string};
+type Credential={id:string;account_id:string;username:string;account_revision:number;name?:string;method:string;retention?:string;expires_at?:string;revoked_at?:string;secret_cleared_at?:string;is_default?:boolean;secret_fingerprint?:string};
+type Host={id:string;name:string;agent_id?:string;agent_status?:string;default_account_id?:string;accounts?:SSHAccount[]};
 type PolicyPlan={id:string;revision:string;expires_at:string;machine_id:string;agent_id:string;generation:number;capabilities:Capability[];applied_at?:string};
 const capabilities:Capability[]=['container.managed.v1','script.elevated.v1','operations.managed.v1'];
 const hostPath=(id:string)=>`/machines/${encodeURIComponent(id)}`;
 
 /** Runtime account and capability policy are separate, explicitly reviewed changes. */
-export default function HostExecutionPanel({machine,credentials,admin,onChanged}:{machine:Host;credentials:Credential[];admin:boolean;onChanged?:()=>Promise<void>}){
+export default function HostExecutionPanel({machine,credentials,admin,onChanged,onManageAccounts}:{machine:Host;credentials:Credential[];admin:boolean;onChanged?:()=>Promise<void>;onManageAccounts?:(onVerified?:(result:SSHCheckResult)=>void)=>void}){
  const {t,language}=useI18n();
  const [status,setStatus]=useState<HostExecutionStatus>(),[runtime,setRuntime]=useState<AgentRuntimeStatus>(),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const [desired,setDesired]=useState<Capability[]>([]),[record,setRecord]=useState<PolicyPlan>(),[reviewed,setReviewed]=useState(false),[now,setNow]=useState(Date.now()),[uncertain,setUncertain]=useState(false),[recordVerified,setRecordVerified]=useState(true),[containers,setContainers]=useState(false);
@@ -39,7 +41,7 @@ export default function HostExecutionPanel({machine,credentials,admin,onChanged}
  if(!admin)return null;
  const expired=!record||!Number.isFinite(Date.parse(record.expires_at))||Date.parse(record.expires_at)<=now;
  return <section className="lm-machine-form-notice" aria-label={t('主机执行权限','Host execution permissions')}>
-  <AgentRuntimePanel key={machine.id} machine={machine} credentials={credentials} onStatus={setRuntime} onChanged={async()=>{invalidate();await load(true);await onChanged?.()}}/>
+  <AgentRuntimePanel onManageAccounts={onManageAccounts} key={machine.id} machine={machine} credentials={credentials} onStatus={setRuntime} onChanged={async()=>{invalidate();await load(true);await onChanged?.()}}/>
   <Space wrap><h3>{t('任务能力授权','Task capability authorization')}</h3>{machine.agent_id&&<Button size="small" loading={loading} disabled={busy} onClick={()=>void load(!record)}>{t('刷新执行状态','Refresh execution status')}</Button>}</Space>
   <Typography.Paragraph type="secondary">{t('运行账户与任务授权分别管理。root 模式不会自动批准操作；普通与 root 任务均记录发起人、批准和执行结果。','Runtime account and task authorization are managed separately. Root mode does not approve actions automatically; both standard and root tasks record their requester, approval, and result.')}</Typography.Paragraph>
   {machine.agent_id&&!enabled&&<Alert type="info" showIcon title={t('高权限能力需要已验证的 root 运行模式','Privileged capabilities require a verified root runtime')} description={t('可先切换 Agent 运行账户，计划会列明 root 模式开启的能力。升级和卸载统一通过 Agent 维护入口完成。','Switch the Agent runtime account first; the plan lists capabilities enabled in root mode. Upgrade and uninstall use the unified Agent maintenance actions.')}/>}

@@ -20,13 +20,13 @@ export type AgentRuntimePlan = {
       name: string;
       agent_id: string;
       address?: string;
-      username?: string;
     };
     from_mode: AgentRuntimeMode;
     runtime_mode: AgentRuntimeMode;
     previous_generation: number;
     permission_generation: number;
     credential_id: string;
+    ssh_account: {id:string;username:string;revision:number};
     capabilities?: string[];
     release?: {
       version?: string;
@@ -89,6 +89,9 @@ export function runtimePlanMatches(
       "cancelled",
     ].includes(record.status) &&
     !!p?.credential_id &&
+    !!p.ssh_account?.id &&
+    typeof p.ssh_account.username === "string" && !!p.ssh_account.username &&
+    Number.isSafeInteger(p.ssh_account.revision) && p.ssh_account.revision >= 1 &&
     p.machine?.id === machine.id &&
     p.machine.agent_id === machine.agent_id &&
     ["root", "user"].includes(p.from_mode) &&

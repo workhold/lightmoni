@@ -1,3 +1,4 @@
+import {type SSHAccount,type SSHAccountHost,sshCredentialLabel} from './machine-credentials';
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Modal,Select,Space,Table,Tag,Typography} from '../shared/ui';
 import {api,ApiError} from '../shared/api';
@@ -6,7 +7,7 @@ import {useI18n} from '../shared/i18n';
 import {defaultMachineCredential,reusableMachineCredential} from './machine-credentials';
 import {installedRelease,releaseIdentity,shortIdentity,updateIsActive,updateMessageText,updatePath,updatePlanExpired,updateStatusColor,updateStatusText,type AgentRelease,type AgentUpdate,type AgentUpdateCredential} from './agent-update-model';
 
-type Machine={id:string;name:string;arch?:string;agent_id?:string;default_credential_id?:string};
+type Machine={id:string;name:string;arch?:string;agent_id?:string;default_account_id?:string;accounts?:SSHAccount[]};
 type Props={machine:Machine;credentials:AgentUpdateCredential[];existing?:AgentUpdate;initialAction?:'upgrade'|'rollback';onClose:()=>void;onRefresh:()=>Promise<void>};
 
 export function AgentUpdatePlanSummary({record}:{record:AgentUpdate}){
@@ -26,7 +27,7 @@ export function AgentUpdatePlanSummary({record}:{record:AgentUpdate}){
  return <>
   <Descriptions size="small" column={{xs:1,sm:2}} items={[
    {key:'action',label:t('操作','Action'),span:2,children:record.action==='rollback'?t('回退到保留的上一发行','Roll back to the retained previous release'):t('升级到指定发行','Upgrade to a selected release')},
-   {key:'host',label:t('目标主机','Target host'),span:2,children:`${plan.machine.name} · ${sshEndpoint(plan.machine.address,plan.machine.port,plan.machine.username)}`},
+   {key:'host',label:t('目标主机','Target host'),span:2,children:`${plan.machine.name} · ${sshEndpoint(plan.machine.address,plan.machine.port,plan.ssh_account.username)}`},
    {key:'agent',label:t('Agent 身份','Agent identity'),span:2,children:identity(record.agent_id||plan.current?.agent_id)},
    {key:'current',label:t('当前发行','Current release'),children:`${current?.version||t('未知','Unknown')} · ${shortIdentity(current?.source_revision)}`},
    {key:'target',label:t('目标发行','Target release'),children:`${plan.target?.version||'—'} · ${shortIdentity(plan.target?.source_revision)} · ${plan.target?.arch||'—'}`},
@@ -59,7 +60,7 @@ export function AgentUpdateHistory({machineID,onOpen}:{machineID:string;onOpen:(
 
 export default function MachineAgentUpdateDialog({machine,credentials,existing,initialAction='upgrade',onClose,onRefresh}:Props){
  const {t,language}=useI18n(),[record,setRecord]=useState(existing),[action,setAction]=useState<'upgrade'|'rollback'>(existing?.action??initialAction);
- const [releases,setReleases]=useState<AgentRelease[]>([]),[target,setTarget]=useState<string>(),[credential,setCredential]=useState<string|undefined>(()=>defaultMachineCredential(credentials,machine.default_credential_id,reusableMachineCredential));
+ const [releases,setReleases]=useState<AgentRelease[]>([]),[target,setTarget]=useState<string>(),[credential,setCredential]=useState<string|undefined>(()=>defaultMachineCredential(credentials,machine,reusableMachineCredential));
  const [busy,setBusy]=useState(false),[catalogBusy,setCatalogBusy]=useState(false),[error,setError]=useState(''),[reviewed,setReviewed]=useState(false),[refreshNeeded,setRefreshNeeded]=useState(false),[planUncertain,setPlanUncertain]=useState(false),[now,setNow]=useState(Date.now());
  const pending=useRef(false),mounted=useRef(true),recordRef=useRef(record),request=useRef(0);
  recordRef.current=record;
@@ -69,7 +70,7 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
  const refreshParent=async()=>{try{await onRefresh()}catch(e){if(mounted.current)setError(previous=>[previous,t('操作已保存，但主机列表刷新失败：','The operation was saved, but the host list could not refresh: ')+err(e)].filter(Boolean).join(' '))}};
  const currentPlanExpired=updatePlanExpired(record,now);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;request.current++}},[]);
- useEffect(()=>{setCredential(previous=>credentials.some(key=>key.id===previous&&reusableMachineCredential(key))?previous:defaultMachineCredential(credentials,machine.default_credential_id,reusableMachineCredential))},[credentials,machine.default_credential_id]);
+ useEffect(()=>{setCredential(previous=>credentials.some(key=>key.id===previous&&reusableMachineCredential(key))?previous:undefined)},[credentials,machine]);
  useEffect(()=>{let alive=true;if(record)return;setCatalogBusy(true);api<{releases:AgentRelease[]}>('/agent-releases').then(result=>{if(alive){setReleases(result.releases);setError('')}}).catch(e=>{if(alive)setError(err(e))}).finally(()=>{if(alive)setCatalogBusy(false)});return()=>{alive=false}},[machine.id,record?.id]);
  useEffect(()=>{if(!record?.plan)return;setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer)},[record?.id,record?.plan?.expires_at]);
  const refreshRecord=async()=>{
@@ -98,7 +99,7 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
   finally{try{try{await refreshRecord()}catch{if(mounted.current)setRefreshNeeded(true)}await refreshParent()}finally{finish()}}
  };
  const refresh=async()=>{if(!begin())return;try{await refreshRecord();await refreshParent()}catch(e){if(mounted.current)setError(err(e))}finally{finish()}};
- const credentialSelect=<Select aria-label={t('更新 SSH 凭据','Update SSH credential')} value={credential} style={{width:'100%'}} placeholder={t('请选择有效 SSH 凭据','Select an active SSH credential')} disabled={busy} options={keys.map(key=>({value:key.id,label:`${key.name||(key.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key'))} · ${key.secret_fingerprint||key.id} · ${key.retention==='permanent'?t('永久','Permanent'):new Date(key.expires_at).toLocaleString(language)}`}))} onChange={setCredential}/>;
+ const credentialSelect=<Select aria-label={t('更新 SSH 凭据','Update SSH credential')} value={credential} style={{width:'100%'}} placeholder={t('请选择有效 SSH 凭据','Select an active SSH credential')} disabled={busy} options={keys.map(key=>({value:key.id,label:`${key.username} · ${key.name||(key.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key'))} · ${key.secret_fingerprint||key.id} · ${key.retention==='permanent'?t('永久','Permanent'):new Date(key.expires_at).toLocaleString(language)}`}))} onChange={setCredential}/>;
  return <Modal open className="lm-agent-update-dialog" style={{top:24}} title={t(`Agent 版本管理 · ${machine.name}`,`Agent releases · ${machine.name}`)} width={840} onCancel={()=>{if(!busy)onClose()}} closable={!busy} maskClosable={false} destroyOnHidden footer={<Space wrap>
   {!record&&<Button type="primary" loading={busy} disabled={!credential||action==='upgrade'&&!target||catalogBusy||planUncertain} onClick={()=>void plan()}>{t('检查并生成计划','Check and create plan')}</Button>}
   {record?.status==='awaiting_approval'&&!record.rollout_id&&<><Button aria-label={t('执行已审阅计划','Execute reviewed plan')} danger type="primary" loading={busy} disabled={!reviewed||currentPlanExpired||refreshNeeded} onClick={()=>void mutate('apply')}>{t('执行已审阅计划','Execute reviewed plan')}</Button><Button disabled={busy} onClick={()=>void mutate('cancel')}>{t('取消计划','Cancel plan')}</Button></>}

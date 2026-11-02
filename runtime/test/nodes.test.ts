@@ -125,7 +125,7 @@ async function task(
 async function node(f: any, id: string, group: string, extra: any = {}) {
   // Task tests use a trusted, server-reserved installation identity.
   f.db.exec("CREATE TABLE IF NOT EXISTS agent_enrollments(id TEXT PRIMARY KEY,agent_id TEXT,status TEXT,machine_id TEXT,created_at TEXT)");
-  f.db.run("INSERT OR IGNORE INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'deploy','direct_ssh',?,?,?)", "machine-" + id, id, id + ".example.test", id, at.toISOString(), at.toISOString());
+  f.db.run("INSERT OR IGNORE INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)", "machine-" + id, id, id + ".example.test", id, at.toISOString(), at.toISOString());
   f.db.run("INSERT OR IGNORE INTO agent_enrollments VALUES(?,?,'active',?,'2026-10-01T00:00:00.000Z')", id, id, "machine-" + id);
   // An administrator assigns the host; Agent control messages cannot opt in
   // to labels which may grant script-task execution.

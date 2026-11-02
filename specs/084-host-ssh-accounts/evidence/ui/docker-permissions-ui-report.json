@@ -1,0 +1,196 @@
+{
+  "source_bundle": true,
+  "api_fixtures": true,
+  "real_ssh": false,
+  "production_writes": false,
+  "checks": [
+    "zh-CN install review describes dependencies and unified Agent permissions without implicit runtime changes",
+    "zh-CN permission failure points to exact host Agent execution settings and cannot reinstall dependencies",
+    "zh-CN success proves Engine and Compose dependencies without claiming container operations are ready",
+    "zh-CN unknown historical stages remain neutral and cannot imply changing Agent permissions",
+    "zh-CN daemon diagnostics do not instruct changing ordinary Agent permissions",
+    "zh-CN mobile dark permission guidance and navigation stay visible without horizontal page overflow",
+    "en-US install review describes dependencies and unified Agent permissions without implicit runtime changes",
+    "en-US permission failure points to exact host Agent execution settings and cannot reinstall dependencies",
+    "en-US success proves Engine and Compose dependencies without claiming container operations are ready",
+    "en-US unknown historical stages remain neutral and cannot imply changing Agent permissions",
+    "en-US daemon diagnostics do not instruct changing ordinary Agent permissions",
+    "en-US mobile dark permission guidance and navigation stay visible without horizontal page overflow"
+  ],
+  "errors": [],
+  "unexpected": [],
+  "calls": [
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-installations",
+      "method": "POST",
+      "body": {
+        "confirmed": true,
+        "request_id": "62fe069c-c0e1-490a-96fc-f90fb6ba6429",
+        "credential_id": "credential-fixture"
+      }
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-installations/install-fixture/verify",
+      "method": "POST",
+      "body": {
+        "credential_id": "credential-fixture"
+      }
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-installations",
+      "method": "POST",
+      "body": {
+        "confirmed": true,
+        "request_id": "66d1e5ae-bfcf-43b0-9052-ccc8034f1c3b",
+        "credential_id": "credential-fixture"
+      }
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-installations/install-fixture/verify",
+      "method": "POST",
+      "body": {
+        "credential_id": "credential-fixture"
+      }
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1/docker-environment",
+      "method": "GET",
+      "body": null
+    },
+    {
+      "path": "/machines/h1",
+      "method": "GET",
+      "body": null
+    }
+  ]
+}

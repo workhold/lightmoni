@@ -48,8 +48,8 @@ async function fixture(t: any) {
     return { status: result.status, data: await result.json() as any };
   };
   const host = async (name = "用户主机") => {
-    const result = await request("/machines", "POST", { name, address: "ssh.example.test", username: "deploy", connection_method: "direct_ssh" });
-    assert.equal(result.status, 201); db.run("UPDATE managed_machines SET host_key_fingerprint=? WHERE id=?", "SHA256:abcdefghijklmnop", result.data.id); return machines.get(result.data.id);
+    const result = await request("/machines", "POST", { name, address: "ssh.example.test", connection_method: "direct_ssh" });
+    assert.equal(result.status, 201); const account=await request(`/machines/${result.data.id}/accounts`,"POST",{username:"deploy",make_default:true});assert.equal(account.status,201);db.run("UPDATE managed_machines SET host_key_fingerprint=? WHERE id=?", "SHA256:abcdefghijklmnop", result.data.id); return {...machines.get(result.data.id),accountID:account.data.id};
   };
   const issue = (machineID: string) => credentials.issueEnrollment({ endpoint_origin: deps.externalURL, version: "0.1.0", created_by: user.id, machine_id: machineID, previous_agent_id: machines.get(machineID).agent_id });
   const exchange = async (token: string, nonce = "fixture-nonce") => request("/agents/enroll", "POST", { enrollment_token: token, install_nonce: nonce, agent_public_key: "fixture-key", version: "0.1.0", arch: "amd64" });
@@ -60,7 +60,7 @@ async function fixture(t: any) {
     return { agentID: pending.data.agent_id, token, control: active.data.control_credential, data: active.data.data_credential };
   };
   const register = (agent: {agentID:string;control:string}, body: any = {}) => request("/agents/register", "POST", { agent_id: agent.agentID, hostname: "same-hostname", host_id: "client-resource-id", platform: "linux", arch: "amd64", ...body }, agent.control);
-  return { db, user, credentials, machines, jobs, ops, request, host, issue, exchange, activate, enroll, register, base, setRunner(value: SSHRunner) { runner = value; } };
+  return { db, user, credentials, machines, jobs, ops, request, host,accountID:(mid:string)=>machines.get(mid).default_account_id, issue, exchange, activate, enroll, register, base, setRunner(value: SSHRunner) { runner = value; } };
 }
 
 test("host-bound enrollment claims only its server target and repeated registration never duplicates assets", async t => {
@@ -74,7 +74,7 @@ test("host-bound enrollment claims only its server target and repeated registrat
   assert.equal(f.machines.get(a.id).observed_hostname, "same-hostname");
   assert.equal((await f.request(`/machines/${a.id}`, "PUT", { name: "改名后" })).status, 200);
   assert.equal((await f.register(agentA, { hostname: "new-observed-name", address: "attacker.example.test", username: "root" })).status, 200);
-  assert.equal(f.machines.get(a.id).name, "改名后"); assert.equal(f.machines.get(a.id).address, "ssh.example.test"); assert.equal(f.machines.get(a.id).username, "deploy");
+  assert.equal(f.machines.get(a.id).name, "改名后"); assert.equal(f.machines.get(a.id).address, "ssh.example.test"); assert.equal(Object.hasOwn(f.machines.get(a.id), "username"), false);
   new NodeStore(f.db, () => at); assert.equal(f.machines.list().length, 2);
   f.user.role = "member"; assert.equal((await f.request("/machines")).status, 403);
   const rows = (await f.request("/agents")).data;
@@ -115,7 +115,7 @@ test("Agent downloads require a valid server-reserved host token and never accep
 
 test("Agent registration before SSH installation receipt remains bound to the originally registered host", async t => {
   const f = await fixture(t), host = await f.host("SSH 安装目标");
-  const credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "temporary" });
+  const credential = await f.request(`/machines/${host.id}/accounts/${host.accountID}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "temporary" });
   assert.equal(credential.status, 201);
   let installedID = "";
   f.setRunner(async input => {
@@ -172,7 +172,7 @@ test("orphan and revoked identities cannot receive operations resources, plans o
 });
 
 test("an interrupted activated install requires explicit resolution before a fresh same-host installation", async t => {
-  const f = await fixture(t), host = await f.host(), credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "managed", confirm_managed: true });
+  const f = await fixture(t), host = await f.host(), credential = await f.request(`/machines/${host.id}/accounts/${host.accountID}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "managed", confirm_managed: true });
   assert.equal(credential.status, 201);
   let failInstallation = true;
   let deploymentPath = "";
@@ -209,7 +209,7 @@ test("retired Agent replacement retains host ID and plan snapshots reject a chan
   // A verified successful uninstall is historical evidence; a fresh preflight
   // must still prove that retained files were reviewed and the install is absent.
   f.db.run("INSERT INTO machine_uninstallations(id,machine_id,agent_id,credential_id,status,plan_json,created_at,created_by) VALUES('uninstalled',?,?,'old','succeeded','{}',?,'admin')", host.id, old.agentID, at.toISOString());
-  const credential = await f.request(`/machines/${host.id}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "temporary" });
+  const credential = await f.request(`/machines/${host.id}/accounts/${host.accountID}/credentials`, "POST", { method: "ssh_key", secret: fixturePrivateKey(), retention: "temporary" });
   const check = await f.request(`/machines/${host.id}/ssh-check`, "POST", { credential_id: credential.data.credential_id }); assert.equal(check.status, 200);
   const plan = await f.request(`/machines/${host.id}/deployments/plan`, "POST", { check_id: check.data.id, credential_id: credential.data.credential_id, version: "0.1.0", arch: "amd64" }); assert.equal(plan.status, 201, JSON.stringify(plan.data));
   f.db.run("UPDATE managed_machines SET agent_id='changed-agent' WHERE id=?", host.id);
@@ -219,7 +219,7 @@ test("retired Agent replacement retains host ID and plan snapshots reject a chan
   assert.equal(f.machines.get(host.id).agent_id, replacement.agentID); assert.equal(f.machines.list().length, 1);
   assert.equal(f.machines.get(host.id).agent_status, "online"); assert.equal(f.machines.get(host.id).last_uninstallation_status, "");
   assert.equal((await f.register(old)).status, 401); assert.equal(f.db.get<any>("SELECT count(*) n FROM machine_uninstallations WHERE machine_id=?", host.id)!.n, 1);
-  assert.equal((await f.request(`/machines/${host.id}/credentials/${credential.data.credential_id}`, "DELETE")).status, 200);
+  assert.equal((await f.request(`/machines/${host.id}/accounts/${host.accountID}/credentials/${credential.data.credential_id}`, "DELETE")).status, 200);
   assert.equal((await f.request(`/agents/${replacement.agentID}/credentials/revoke`, "POST", {})).status, 200);
   // The previous identity's successful uninstall is not proof that the newly
   // installed Agent is gone, even after revoking its credentials.
@@ -228,7 +228,7 @@ test("retired Agent replacement retains host ID and plan snapshots reject a chan
 
 test("approved purge revokes only the owned identity and permits a fresh same-host enrollment",async t=>{
  const f=await fixture(t),h=await f.host("Purge then fresh"),old=await f.enroll(h.id);let purged=false,newAgent="";
- const credential=await f.request(`/machines/${h.id}/credentials`,"POST",{method:"ssh_key",secret:fixturePrivateKey(),retention:"temporary"});assert.equal(credential.status,201);
+ const credential=await f.request(`/machines/${h.id}/accounts/${h.accountID}/credentials`,"POST",{method:"ssh_key",secret:fixturePrivateKey(),retention:"temporary"});assert.equal(credential.status,201);
  f.setRunner(async input=>{
   if(input.command.includes("LMREMOVE")){
    if(input.command.includes("systemctl stop"))purged=true;

@@ -84,7 +84,7 @@ test("fixed shell bounds optional stdout beneath the runner 12KB window even whe
 
 function networkDB(t:any) {
   const db = new DB(":memory:"); createAgentHostSchema(db); createHostNetworkSchema(db);
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,host_key_fingerprint,created_at,updated_at) VALUES('host','User name','ssh.fixture',22,'root','direct_ssh',?,?,?)", pin,at,at);
+  db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,host_key_fingerprint,created_at,updated_at) VALUES('host','User name','ssh.fixture',22,'direct_ssh',?,?,?)", pin,at,at);
   t.after(() => db.close());
   return db;
 }
@@ -158,11 +158,12 @@ async function machineFixture(t:any, runner:SSHRunner=defaultSSHRunner) {
   const url=`http://127.0.0.1:${(server.address() as any).port}/api/v1`;
   const request=async(path:string,method="GET",body?:unknown)=>{const response=await fetch(url+path,{method,headers:body?{"Content-Type":"application/json"}:undefined,body:body?JSON.stringify(body):undefined});assert.ok(response.ok,`fixture API ${path} returned ${response.status}`);return await response.json() as any;};
   return {db,machines,request,advance(){time=new Date(time.getTime()+30_000);},async create(options:{address?:string;port?:number;pin?:string;password?:string;method?:"password"|"ssh_key"}={}){
-    const host=await request("/machines","POST",{name:"User configured name",address:options.address??"ssh.fixture",port:options.port??22,username:"fixture"});
+    const host=await request("/machines","POST",{name:"User configured name",address:options.address??"ssh.fixture",port:options.port??22});
     db.run("UPDATE managed_machines SET host_key_fingerprint=? WHERE id=?",options.pin??pin,host.id);
+    const account=await request(`/machines/${host.id}/accounts`,"POST",{username:"fixture",make_default:true});
     const method=options.method??"password";
-    const binding=await request(`/machines/${host.id}/credentials`,"POST",{method,secret:method==="password"?options.password??"fixture-only-password":fixturePrivateKey(),retention:"managed",confirm_managed:true});
-    return {id:host.id,credentialID:binding.credential_id};
+    const binding=await request(`/machines/${host.id}/accounts/${account.id}/credentials`,"POST",{method,secret:method==="password"?options.password??"fixture-only-password":fixturePrivateKey(),retention:"managed",confirm_managed:true});
+    return {id:host.id,accountID:account.id,credentialID:binding.credential_id};
   }};
 }
 
@@ -208,7 +209,7 @@ test("user rename preserves SSH identity, discovery and reusable preflight while
   const before=f.machines.get(host.id), beforeCheck=f.db.get("SELECT * FROM machine_ssh_checks WHERE id=?",checked.id);
   const renamed=await f.request(`/machines/${host.id}`,"PUT",{name:"Custom production label"});
   assert.equal(renamed.id,host.id);assert.equal(renamed.name,"Custom production label");
-  for(const field of ["address","port","username","host_key_fingerprint","ssh_target_generation"] as const)assert.equal(renamed[field],before[field],field);
+  for(const field of ["address","port","host_key_fingerprint","ssh_target_generation"] as const)assert.equal(renamed[field],before[field],field);
   assert.deepEqual(renamed.network,before.network);assert.equal(renamed.network.hostname,"fixture-db");
   assert.deepEqual(f.db.get("SELECT * FROM machine_ssh_checks WHERE id=?",checked.id),beforeCheck);
   assert.equal(f.db.get<any>("SELECT status FROM machine_deployments WHERE id=?",plan.id)!.status,"cancelled");
@@ -223,14 +224,14 @@ test("user rename preserves SSH identity, discovery and reusable preflight while
 });
 
 test("connection edits invalidate only the changed host and returning to the old target does not resurrect an SSH snapshot",async t=>{
-  for(const [field,value] of [["address","next.fixture"],["port",2222],["username","otherlogin"]] as const){
+  for(const [field,value] of [["address","next.fixture"],["port",2222]] as const){
     const f=await machineFixture(t,async()=>({stdout:core+block(),stderr:"",stages:[]})),host=await f.create();
     const checked=await f.request(`/machines/${host.id}/ssh-check`,"POST",{}),before=f.machines.get(host.id);
     const changed=await f.request(`/machines/${host.id}`,"PUT",{[field]:value});
     assert.equal(changed.id,host.id);assert.equal(changed.name,before.name);assert.equal(changed.ssh_target_generation,before.ssh_target_generation+1);
     assert.equal(changed.network.observed_via,"unavailable");assert.equal(changed.network.hostname,"");assert.deepEqual(changed.network.private_ips,[]);
     assert.equal(f.db.get("SELECT id FROM machine_ssh_checks WHERE id=?",checked.id),undefined);
-    assert.equal(changed.host_key_fingerprint,field==="username"?before.host_key_fingerprint:"");
+    assert.equal(changed.host_key_fingerprint,"");
     const returned=await f.request(`/machines/${host.id}`,"PUT",{[field]:before[field]});
     assert.equal(returned.network.observed_via,"unavailable",field);assert.equal(returned.network.hostname,"");
   }

@@ -2,7 +2,22 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {CHECK_NAMES,parsePreflight,pinnedHostKeys,preflightCommand} from '../src/server/machine-ssh.js';
+import {createServer, type Socket} from 'node:net';
+import {once} from 'node:events';
+import {Client, type ConnectConfig} from 'ssh2';
+import {CHECK_NAMES,defaultSSHRunner,parsePreflight,pinnedHostKeys,preflightCommand,SSHError} from '../src/server/machine-ssh.js';
+import type {SSHMachineTarget} from '../src/server/managed-machines.js';
+
+test('SSH handshake deadline remains timed_out before the fixed command deadline',async t=>{
+ const sockets=new Set<Socket>(),server=createServer(socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('data',()=>{});});
+ server.listen(0,'127.0.0.1');await once(server,'listening');
+ t.after(async()=>{for(const socket of sockets)socket.destroy();await new Promise<void>(resolve=>server.close(()=>resolve()));});
+ const connect=Client.prototype.connect;
+ // Exercise ssh2's actual readyTimeout error on a silent loopback endpoint,
+ // shortening only the library's handshake deadline in this isolated test.
+ t.mock.method(Client.prototype,'connect',function(this:Client,options:ConnectConfig){assert.equal(options.readyTimeout,3000);return connect.call(this,{...options,readyTimeout:30});});
+ await assert.rejects(()=>defaultSSHRunner({machine:{address:'127.0.0.1',username:'fixture',host_key_fingerprint:''} as SSHMachineTarget,password:'isolated-loopback-password',privateKey:'',command:'must-not-run',signal:new AbortController().signal,port:(server.address() as {port:number}).port,timeoutMs:3000}),error=>error instanceof SSHError&&error.code==='timed_out');
+});
 
 test('host key pin matches the exact key even when another algorithm appears first',()=>{
  const first=Buffer.from('untrusted-algorithm-key').toString('base64'),second=Buffer.from('confirmed-key').toString('base64');

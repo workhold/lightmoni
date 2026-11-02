@@ -26,7 +26,7 @@ db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL DEFAULT
 const deps={db,router,auth,encrypt:auth.encrypt,decrypt:auth.decrypt,now:()=>new Date(),externalURL:'',logger:{info(){},warn(){},error(){console.error('Fixture operation failed')}}} as Dependencies;
 const machines=registerManagedMachines(deps),publicDir=resolve('public');
 await machines.start?.();
-for(const [path,value] of Object.entries({'/api/v1/catalog/tables':[],'/api/v1/dashboards':[],'/api/v1/assistant/config':{enabled:false,has_key:false}}))router.get(path,ctx=>ctx.json(value));
+for(const [path,value] of Object.entries({'/api/v1/catalog/tables':[],'/api/v1/dashboards':[],'/api/v1/agents':[],'/api/v1/host-labels':[],'/api/v1/assistant/config':{enabled:false,has_key:false}}))router.get(path,ctx=>ctx.json(value));
 const server=createServer(async(req,res)=>{
  if(await router.handle(req,res))return;
  const path=new URL(req.url??'/','http://localhost').pathname;
@@ -38,11 +38,12 @@ server.listen(0,'127.0.0.1');await once(server,'listening');
 const origin=`http://127.0.0.1:${(server.address() as any).port}`;deps.externalURL=router.externalURL=origin;
 const terminal=registerMachineTerminal(deps,machines,server);
 const request=async(path:string,body:unknown)=>{const res=await fetch(origin+'/api/v1'+path,{method:'POST',headers:{cookie:'lm_session=fixture-browser-login','content-type':'application/json',origin},body:JSON.stringify(body)});if(!res.ok)throw Error('Fixture setup failed');return res.json() as any};
-const machine=await request('/machines',{name:'Terminal fixture',address:ssh.address,port:ssh.port,username:ssh.username,connection_method:'direct_ssh'});
-await request(`/machines/${machine.id}/credentials`,passwordMode?{method:'password',secret:(ssh as Awaited<ReturnType<typeof passwordSSHServer>>).password,retention:'one_time'}:{method:'ssh_key',secret:(ssh as Awaited<ReturnType<typeof isolatedSSHD>>).privateKey,retention:'temporary'});
+const machine=await request('/machines',{name:'Terminal fixture',address:ssh.address,port:ssh.port,connection_method:'direct_ssh'});
+const account=await request(`/machines/${machine.id}/accounts`,{username:ssh.username,make_default:true});
+await request(`/machines/${machine.id}/accounts/${account.id}/credentials`,passwordMode?{method:'password',secret:(ssh as Awaited<ReturnType<typeof passwordSSHServer>>).password,retention:'one_time'}:{method:'ssh_key',secret:(ssh as Awaited<ReturnType<typeof isolatedSSHD>>).privateKey,retention:'temporary'});
 // A test-only seed route avoids sending generated fixture passwords through
 // browser script arguments or reports. It never returns the secret.
-if(passwordMode)router.post('/api/v1/fixtures/password-credential',async ctx=>{deps.auth.requireAdmin(ctx);ctx.json(await request(`/machines/${machine.id}/credentials`,{method:'password',secret:(ssh as Awaited<ReturnType<typeof passwordSSHServer>>).password,retention:'one_time'}));});
+if(passwordMode)router.post('/api/v1/fixtures/password-credential',async ctx=>{deps.auth.requireAdmin(ctx);ctx.json(await request(`/machines/${machine.id}/accounts/${account.id}/credentials`,{method:'password',secret:(ssh as Awaited<ReturnType<typeof passwordSSHServer>>).password,retention:'one_time'}));});
 console.log(JSON.stringify({origin,machineID:machine.id}));
 let stopped=false;
 const close=async()=>{if(stopped)return;stopped=true;await terminal.close?.();await machines.close?.();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));db.close();await rm(dir,{recursive:true,force:true});for(const fn of [...cleanups].reverse())await fn();process.exit(0)};

@@ -1,0 +1,39 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "seq": 942,
+  "epoch_id": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "original_blocks_preserved": 783,
+  "original_diagrams_preserved": 40,
+  "new_native_diagrams": 2,
+  "target_blocks_read_back": 30,
+  "readback_matches": true,
+  "original_diagrams_sha256": "b6128f9da3af8b083ff8f3993ce34c951380eb63c7ef0444a733aaf016b87218",
+  "new_diagrams": [
+    {
+      "id": "accounts084-selection",
+      "nodes": 9,
+      "edges": 10,
+      "sha256": "d8663be3a3fc2c7f36412c8fb33febb50beef7a948d977208f04b6b81f8e3344"
+    },
+    {
+      "id": "accounts084-model",
+      "nodes": 9,
+      "edges": 10,
+      "sha256": "356804611430c45688c728099c8049b16a708cbcf2efea6b1f04db6eae05648b"
+    }
+  ],
+  "changed_sections": [
+    "current baseline",
+    "13 SSH registration",
+    "13.3 host enrollment",
+    "13.4 registration",
+    "13.6 shared credentials",
+    "81 storage baseline",
+    "84 HLD/LLD multi-account installation"
+  ],
+  "notes": [
+    "Full document verification at seq941 preserved all 783 existing blocks and all 40 original diagram nodes/edges.",
+    "Final seq942 changed only known paragraph properties/text, moved the section subheading and removed one newly generated duplicate paragraph. All 30 target blocks including both native diagrams were read back at seq942.",
+    "Native diagram structure verified; no claim of a separate rendered Doca visual test."
+  ]
+}

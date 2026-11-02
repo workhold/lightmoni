@@ -27,7 +27,7 @@ function fixture() {
   db.run("INSERT INTO users(id,name,role,active) VALUES('admin','Admin','admin',1)");
   for (const [name, def] of [["execution_principal", "TEXT NOT NULL DEFAULT 'agent'"], ["executor_id", "TEXT NOT NULL DEFAULT ''"]])
     if (!db.all<any>("PRAGMA table_info(task_runs)").some(c => c.name === name)) db.exec("ALTER TABLE task_runs ADD COLUMN " + name + " " + def);
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('host','Host','host.test',22,'root','direct_ssh','agent-host',?,?)", clock.toISOString(), clock.toISOString());
+  db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES('host','Host','host.test',22,'direct_ssh','agent-host',?,?)", clock.toISOString(), clock.toISOString());
   const store = registerPrivilegedExecutors(deps, { dataDir: "/unused" });
   const keys = generateKeyPairSync("ed25519"), pub = keys.publicKey.export({ type: "spki", format: "pem" }).toString();
   const policy = store.preparePolicyPlan("host", { capabilities: ["script.elevated.v1", "container.managed.v1"] }, "admin");

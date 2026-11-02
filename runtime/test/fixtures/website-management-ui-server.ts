@@ -106,7 +106,7 @@ server.listen(port, "127.0.0.1", () =>
   process.stdout.write(`Disposable QA API: http://127.0.0.1:${port}\n`),
 );
 await new Promise<void>(resolve=>server.on('listening',resolve));
-const response=await fetch('http://127.0.0.1:'+port+'/api/v1/machines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'NAT 入口主机',address:'8.8.4.4',username:'root'})});
+const response=await fetch('http://127.0.0.1:'+port+'/api/v1/machines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'NAT 入口主机',address:'8.8.4.4'})});
 const host:any=await response.json();if(!response.ok)throw Error(JSON.stringify(host));
 db.run("UPDATE managed_machines SET agent_id='qa-node' WHERE id=?",host.id);
 recordHostNetwork(db,host.id,'qa-node',normalizeNetworkAddresses([{interface:'eth0',address:'10.0.0.16'},{interface:'docker0',address:'172.17.0.1'}]),{source_ip:'172.24.0.1',source_kind:'direct'},new Date().toISOString());

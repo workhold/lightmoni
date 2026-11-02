@@ -1,3 +1,4 @@
+import {type SSHAccount,type SSHAccountHost,sshCredentialLabel} from './machine-credentials';
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -11,6 +12,7 @@ import {
   Typography,
 } from "../shared/ui";
 import { api, ApiError } from "../shared/api";
+import SSHCheckSummary, {type SSHCheckResult} from "../shared/SSHCheckSummary";
 import { useI18n } from "../shared/i18n";
 import {
   defaultMachineCredential,
@@ -31,6 +33,10 @@ import {
 } from "./agent-runtime-model";
 type Credential = {
   id: string;
+  account_id: string;
+  username: string;
+  account_revision: number;
+  secret_fingerprint?: string;
   name?: string;
   method: string;
   retention?: string;
@@ -44,7 +50,8 @@ type Host = {
   name: string;
   agent_id?: string;
   agent_status?: string;
-  default_credential_id?: string;
+  default_account_id?: string;
+  accounts?: SSHAccount[];
 };
 
 export default function AgentRuntimePanel({
@@ -52,11 +59,13 @@ export default function AgentRuntimePanel({
   credentials,
   onChanged,
   onStatus,
+  onManageAccounts,
 }: {
   machine: Host;
   credentials: Credential[];
   onChanged?: () => Promise<void>;
   onStatus?: (status: AgentRuntimeStatus | undefined) => void;
+  onManageAccounts?: (onVerified?:(result:SSHCheckResult)=>void) => void;
 }) {
   const { t, language } = useI18n();
   const [status, setStatus] = useState<AgentRuntimeStatus>(),
@@ -64,6 +73,7 @@ export default function AgentRuntimePanel({
     [error, setError] = useState(""),
     [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false);
+  const [preflight,setPreflight]=useState<SSHCheckResult>();
   const [credential, setCredential] = useState<string>(),
     [reconcileCredential, setReconcileCredential] = useState<string>(),
     [target, setTarget] = useState<AgentRuntimeMode>("root"),
@@ -94,7 +104,7 @@ export default function AgentRuntimePanel({
   const keys = credentials.filter((value) => reusableMachineCredential(value));
   const base = agentRuntimePath(machine.id),
     failure = (e: unknown) =>
-      e instanceof Error ? e.message : t("操作失败", "Operation failed");
+      e instanceof Error ? e.message === "root_or_sudo_ssh_required" ? t("当前 SSH 账户没有安装或切换 Agent 所需权限，请选择其他已登记账户重新检查，或添加登录账户。", "The current SSH account lacks installation or runtime-switch privileges. Select another registered account and check again, or add a login account.") : e.message : t("操作失败", "Operation failed");
   const modeName = (mode?: AgentRuntimeMode | null) =>
     mode === "root"
       ? t("root · 完整主机管理", "root · Full host management")
@@ -185,11 +195,7 @@ export default function AgentRuntimePanel({
       setReconcileCredential(
         keys.some((v) => v.id === record.plan.credential_id)
           ? record.plan.credential_id
-          : defaultMachineCredential(
-              credentials,
-              machine.default_credential_id,
-              reusableMachineCredential,
-            ),
+          : undefined,
       );
     else setReconcileCredential(undefined);
   }, [record?.id, record?.status]);
@@ -231,6 +237,7 @@ export default function AgentRuntimePanel({
     if (pending.current) return;
     setOpen(true);
     setError("");
+    setPreflight(undefined);
     setReviewed(false);
     setRecord(undefined);
     setRecordVerified(true);
@@ -240,7 +247,7 @@ export default function AgentRuntimePanel({
     setCredential(
       defaultMachineCredential(
         credentials,
-        machine.default_credential_id,
+        machine,
         reusableMachineCredential,
       ),
     );
@@ -340,6 +347,7 @@ export default function AgentRuntimePanel({
     pending.current = true;
     setBusy(true);
     setError("");
+    setPreflight(undefined);
     setReviewed(false);
     attempted.current = false;
     const id = ++generation.current;
@@ -393,6 +401,7 @@ export default function AgentRuntimePanel({
     } catch (e) {
       if (valid(id)) {
         setError(failure(e));
+        if(e instanceof ApiError&&e.details.preflight){const checked=e.details.preflight as SSHCheckResult;const selected=keys.find(c=>c.id===credential);if(checked.machine_id===machine.id&&checked.credential_id===credential&&selected&&checked.account_id===selected.account_id&&checked.username===selected.username&&checked.account_revision===selected.account_revision)setPreflight(checked)}
         if (sent && !(e instanceof ApiError && e.status < 500))
           setUncertain(true);
         else preparing.current = undefined;
@@ -693,6 +702,8 @@ export default function AgentRuntimePanel({
           )}
           {!record ? (
             <>
+              {onManageAccounts&&<Button disabled={busy||uncertain} onClick={()=>{setOpen(false);onManageAccounts(result=>{setReconcileCredential(result.credential_id);setCredential(result.credential_id);setPreflight(undefined);setError("");setOpen(true)})}}>{t("管理或添加登录账户","Manage or add login accounts")}</Button>}
+              {preflight&&<SSHCheckSummary result={preflight} onChooseAccount={id=>{if(keys.some(c=>c.id===id)){setCredential(id);setPreflight(undefined);setError("")}}} onManageAccounts={onManageAccounts?()=>{setOpen(false);onManageAccounts(result=>{setReconcileCredential(result.credential_id);setCredential(result.credential_id);setPreflight(undefined);setError("");setOpen(true)})}:undefined}/>}
               <Descriptions
                 column={1}
                 size="small"
@@ -720,7 +731,7 @@ export default function AgentRuntimePanel({
                 onChange={setCredential}
                 options={keys.map((v) => ({
                   value: v.id,
-                  label: v.name || v.id,
+                  label: sshCredentialLabel(v),
                 }))}
                 placeholder={t(
                   "选择有效 root / sudo SSH 凭据",
@@ -770,6 +781,7 @@ export default function AgentRuntimePanel({
                     label: t("Agent ID", "Agent ID"),
                     children: record.plan.machine.agent_id,
                   },
+                  {key:"ssh-account",label:t("此计划的 SSH 登录账户","SSH login account frozen in this plan"),children:record.plan.ssh_account.username+" · "+record.plan.ssh_account.id},
                   {
                     key: "from",
                     label: t("原运行账户", "Previous account"),
@@ -926,13 +938,14 @@ export default function AgentRuntimePanel({
                     onChange={setReconcileCredential}
                     options={keys.map((v) => ({
                       value: v.id,
-                      label: v.name || v.id,
+                      label: sshCredentialLabel(v),
                     }))}
                     placeholder={t(
                       "选择有效 root / sudo SSH 凭据",
                       "Select an active root / sudo SSH credential",
                     )}
                   />
+                  {onManageAccounts&&<Button className="lm-machine-form-notice" disabled={busy} onClick={()=>{setOpen(false);onManageAccounts(result=>{setReconcileCredential(result.credential_id);setCredential(result.credential_id);setPreflight(undefined);setError("");setOpen(true)})}}>{t("管理或添加登录账户","Manage or add login accounts")}</Button>}
                   {!keys.some((v) => v.id === reconcileCredential) && (
                     <Alert
                       className="lm-machine-form-notice"

@@ -16,7 +16,7 @@ function fixture(t:any) {
   const deps={db,router,now:()=>now,auth:{user:()=>({id:"admin",name:"Admin",role:"admin"})},logger:{info(){},warn(){},error(){}}} as unknown as Dependencies;
   router.auth=deps.auth; const store=new NodeStore(db,deps.now);
   for(const id of ["one","two","three"]) {
-    db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'root','direct_ssh',?,?,?)",id,id,id+".invalid","agent-"+id,at.toISOString(),at.toISOString());
+    db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)",id,id,id+".invalid","agent-"+id,at.toISOString(),at.toISOString());
     db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES(?,?,?,'1','linux','x64',?,?)","agent-"+id,id,id,at.toISOString(),JSON.stringify({task_capabilities:["task.script.v2"]}));
   }
   t.after(()=>db.close()); return {db,store,deps,advance(seconds:number){now=new Date(now.getTime()+seconds*1000);}};

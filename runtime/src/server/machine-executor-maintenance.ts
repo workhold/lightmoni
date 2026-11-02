@@ -265,7 +265,7 @@ export function registerMachineExecutorMaintenance(deps:Dependencies,access:Agen
       if(v.action==="rollback"&&target.fingerprint===s.current.fingerprint)fail(409,"executor_previous_release_unavailable");
     }
     const expires=new Date(deps.now().getTime()+300_000).toISOString(),id=randomUUID();
-    const p={action:v.action,machine:{id:machine.id,name:machine.name,agent_id:machine.agent_id,address:machine.address,port:machine.port,username:machine.username},executor_id:e.id,install_generation:e.install_generation,
+    const p={action:v.action,machine:{id:machine.id,name:machine.name,agent_id:machine.agent_id,address:machine.address,port:machine.port},executor_id:e.id,install_generation:e.install_generation,
       target_revision:access.revision(machine),observation:s,current:s.current,target,policy_generation:s.policy_generation,source_bootstrap_id:source,
       credential_id:selected.credential.id,credential_revision:credentialRevision(selected.credential),...(file?{file}:{}),expires_at:expires,
       steps:["复核独立执行器身份、策略水位与完整本地日志","停止固定服务并取得唯一 writer 锁，拒绝未决副作用",v.action==="rollback"?"切回精确保留的旧程序；不恢复身份或执行日志":v.action==="repair"?"仅修复已证明中断的程序入口、固定服务与启动阶段":"验证固定发行摘要并原子切换程序；不恢复身份或执行日志","核对持久维护回执与新鲜独立签名心跳"]};
@@ -354,7 +354,7 @@ export function registerMachineExecutorMaintenance(deps:Dependencies,access:Agen
     const selected=access.credential(machine.id,v.credential_id),observation=await probe(machine.id,selected.credential.id,c.signal);
     if(observation.executor_id!==executor.id||observation.install_generation!==executor.install_generation)fail(409,"executor_identity_mismatch");
     if(access.revision(access.get(machine.id))!==access.revision(machine))fail(409,"executor_maintenance_target_changed");
-    const expires=new Date(deps.now().getTime()+300000).toISOString(),id=randomUUID(),p={action:"uninstall",machine:{id:machine.id,name:machine.name,agent_id:machine.agent_id,address:machine.address,username:machine.username},
+    const expires=new Date(deps.now().getTime()+300000).toISOString(),id=randomUUID(),p={action:"uninstall",machine:{id:machine.id,name:machine.name,agent_id:machine.agent_id,address:machine.address},
       executor_id:executor.id,install_generation:executor.install_generation,target_revision:access.revision(machine),observation,
       credential_id:selected.credential.id,credential_revision:credentialRevision(selected.credential),
       expires_at:expires,steps:["复核原执行器身份与本地未结束任务","停止 root 执行器并再次核对执行状态","删除执行器程序及独立身份、授权与日志","核实远端移除后撤销平台执行器身份"]};

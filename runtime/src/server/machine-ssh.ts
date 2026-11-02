@@ -2,10 +2,27 @@ import { createHash } from "node:crypto";
 import { Client } from "ssh2";
 import { hostKeyAlgorithms } from "./machine-host-keys.js";
 import { MAX_NETWORK_ADDRESSES, normalizeNetworkAddresses, type HostNetworkAddress } from "../shared/host-network.js";
-import type { MachineSummary } from "./managed-machines.js";
+import type { SSHMachineTarget } from "./managed-machines.js";
+import { canonicalJSON, sha256 } from "../shared/privileged-executor.js";
+import { fail } from "../shared/http.js";
+
+/** Immutable SSH login identity, separate from the host asset revision. */
+export const sshAccountSnapshot = (value: { account_id: string; username: string; account_revision: number }) => ({
+  id: value.account_id, username: value.username, revision: value.account_revision,
+});
+export const sshCredentialRevision = (value: Record<string, any>) => sha256(canonicalJSON([
+  value.id, value.account_id, value.username, value.account_revision,
+  value.connection_credential_id ?? "", value.method ?? "", value.secret_fingerprint,
+  value.retention ?? "", value.expires_at, value.revoked_at ?? "", value.secret_cleared_at ?? "",
+]));
+export function assertSSHAccount(value: { account_id: string; username: string; account_revision: number }, expected: unknown) {
+  const frozen = expected as Record<string, any> | undefined;
+  if (!frozen || !value.account_id || frozen.id !== value.account_id || frozen.username !== value.username
+    || frozen.revision !== value.account_revision) fail(409, "ssh_account_changed");
+}
 
 export interface SSHRunInput {
-  machine: MachineSummary;
+  machine: SSHMachineTarget;
   privateKey: string;
   /** SSH password stays in this in-memory connection input, never argv/env/stdin. */
   password?: string;
@@ -88,7 +105,7 @@ async function fixedCommandSSHRunner(input: SSHRunInput) {
   timer = setTimeout(() => finish(new SSHError("timed_out")), timeoutMs);
   signal.addEventListener("abort", abort, { once: true });
   client.on("error", (error: Error & { level?: string }) => {
-    finish(new SSHError(mismatch ? "host_key_mismatch" : error.level === "client-authentication" ? "ssh_failed" : "ssh_failed"));
+    finish(new SSHError(mismatch ? "host_key_mismatch" : error.level === "client-timeout" ? "timed_out" : "ssh_failed"));
   });
   client.on("close", () => { if (!settled) finish(new SSHError("ssh_failed")); });
   const stillVerified = () => {

@@ -4,7 +4,7 @@ const { utils } = ssh2;
 import type { DB } from "../shared/types.js";
 
 export interface HostKeyTarget {
-  id: string; name: string; address: string; port: number; username: string; connection_method: string;
+  id: string; name: string; address: string; port: number; connection_method: string;
   host_key_fingerprint: string; host_key_public_key?: string; host_key_observed_at?: string; ssh_target_generation?: number;
 }
 
@@ -41,16 +41,16 @@ export function recordMachineHostKey(db: DB, expected: HostKeyTarget, key: Buffe
   const accepted = db.transaction(() => {
     if (!authorized()) return false;
     const current = db.get<HostKeyTarget>("SELECT * FROM managed_machines WHERE id=?", expected.id);
-    if (!current || ["address", "port", "username", "connection_method"].some(field => current[field as keyof HostKeyTarget] !== expected[field as keyof HostKeyTarget])) return false;
+    if (!current || ["address", "port", "connection_method"].some(field => current[field as keyof HostKeyTarget] !== expected[field as keyof HostKeyTarget])) return false;
     if (Number(current.ssh_target_generation || 0) !== Number(expected.ssh_target_generation || 0)) return false;
     if (expected.host_key_fingerprint && expected.host_key_fingerprint !== identity.fingerprint) return false;
     if (current.host_key_fingerprint && current.host_key_fingerprint !== identity.fingerprint) return false;
     if (current.host_key_public_key && current.host_key_public_key !== identity.publicKey) return false;
     if (!current.host_key_fingerprint || !current.host_key_public_key) {
       const changed = db.run(`UPDATE managed_machines SET host_key_fingerprint=?,host_key_public_key=?,host_key_observed_at=?,updated_at=?
-        WHERE id=? AND address=? AND port=? AND username=? AND connection_method=? AND host_key_fingerprint=? AND ssh_target_generation=?`,
+        WHERE id=? AND address=? AND port=? AND connection_method=? AND host_key_fingerprint=? AND ssh_target_generation=?`,
         identity.fingerprint, identity.publicKey, current.host_key_observed_at || at, at,
-        expected.id, expected.address, expected.port, expected.username, expected.connection_method, current.host_key_fingerprint, Number(current.ssh_target_generation || 0));
+        expected.id, expected.address, expected.port, expected.connection_method, current.host_key_fingerprint, Number(current.ssh_target_generation || 0));
       if (!changed.changes) return false;
     }
     recorded = { host_key_fingerprint: identity.fingerprint, host_key_public_key: identity.publicKey, host_key_observed_at: current.host_key_observed_at || at };

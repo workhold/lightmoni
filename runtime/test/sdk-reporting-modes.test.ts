@@ -60,7 +60,7 @@ test("SDK reports directly; Agent rejects SDK relay and queues only its own coll
   const at = new Date().toISOString(), expires = new Date(Date.now() + 3600_000).toISOString();
   // A trusted platform installation has already activated this host-bound
   // identity. This test exercises data delivery, rather than enrollment.
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('delivery-host','Delivery host','delivery.example.test',22,'deploy','direct_ssh',?,?,?)", agent.identity.agent_id, at, at);
+  db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES('delivery-host','Delivery host','delivery.example.test',22,'direct_ssh',?,?,?)", agent.identity.agent_id, at, at);
   db.run("INSERT INTO agent_enrollments(id,token_hash,endpoint_origin,allowed_arch_json,version,scopes_json,status,expires_at,created_at,created_by,agent_id,machine_id) VALUES('delivery-enrollment',?,'http://127.0.0.1','[]','0.1.0','[]','active',?,?,'fixture',?,'delivery-host')", hash("delivery-enrollment-token"), expires, at, agent.identity.agent_id);
   for (const [audience, secret] of [["control", "test-node-control"], ["data", "test-node-data"]])
     db.run("INSERT INTO agent_credentials(id,agent_id,audience,scope,token_hash,created_at,expires_at) VALUES(?,?,?,?,?,?,?)", "agent-" + audience, agent.identity.agent_id, audience, "agent." + audience, hash(secret), at, expires);

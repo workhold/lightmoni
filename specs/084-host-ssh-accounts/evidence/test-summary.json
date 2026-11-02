@@ -1,0 +1,134 @@
+{
+  "date": "2026-11-02",
+  "scope": "Local isolated verification; no production or vchive writes",
+  "suites": {
+    "runtime": {
+      "tests": 1622,
+      "pass": 1590,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 32,
+      "todo": 0,
+      "log_sha256": "a1e5dc9426b82944291f79b735023011205ab1346072457b55ce8142b087b467",
+      "skipped_cases": [
+        "ok 37 - capability executor stages matching digest and atomically activates release # SKIP",
+        "ok 38 - capability executor rejects bad digest, path escape, unit mismatch and unknown capability # SKIP",
+        "ok 39 - release staging checks size, manifest binding and immutability before publishing # SKIP",
+        "ok 40 - release staging rejects path ancestors and roots with unsafe ownership permissions # SKIP",
+        "ok 41 - protected release path permits a root-owned sticky shared ancestor such as /tmp # SKIP",
+        "ok 42 - bundle paths reserved for credentials are rejected while runtime payloads stay read-only to host users # SKIP",
+        "ok 43 - release activation compares the prior symlink and leaves a changed current untouched # SKIP",
+        "ok 44 - systemd preflight is read-only, target-bound, structured, and redacts command output # SKIP",
+        "ok 45 - systemd preflight accepts a missing current symlink for first deployment # SKIP",
+        "ok 49 - systemd preflight does not block when current is a FIFO # SKIP",
+        "ok 50 - artifact staging refuses symlinked target ancestors # SKIP",
+        "ok 77 - live Node Agent persists SDK batches, reopens identity and forwards to real ClickHouse exactly once # SKIP LIGHTMONI_DOMAINS_URL is not set",
+        "ok 346 - real local Docker inventory reads public fields through the production bounded command # SKIP",
+        "ok 347 - real Docker start, restart and stop verify state on an isolated disposable container # SKIP",
+        "ok 369 - live ClickHouse: OTLP, logs, trace, dashboard and alert response lifecycle # SKIP",
+        "ok 892 - backup creates verified manifest, refuses changed restore target, and preserves pre-restore copy # SKIP",
+        "ok 893 - backup rejects symbolic links and local storage within source # SKIP",
+        "ok 894 - backup validates limits and checksum corruption # SKIP",
+        "ok 895 - S3 credentials are hidden and invalid endpoints rejected # SKIP",
+        "ok 896 - S3 uses signed path-style HTTP operations, verifies readback and lists only resource prefix # SKIP",
+        "ok 897 - restore rejects a malicious archive path before changing source or creating recovery backup # SKIP",
+        "ok 898 - retention never prunes the recovery copy produced before restore # SKIP",
+        "ok 899 - backup listing and retention receipts stay bounded without limiting actual cleanup # SKIP",
+        "ok 900 - uncertain S3 upload reports unknown when the server accepted bytes but dropped its response # SKIP",
+        "ok 925 - a backup source limit rejected before storage write releases the node writer lock # SKIP",
+        "ok 933 - Linux Nginx: static, proxy, version recovery, uploaded TLS and certificate rotation # SKIP",
+        "ok 946 - three OTLP signals and receipt input hashes match Go deterministic marshal # SKIP Go baseline toolchain unavailable",
+        "ok 961 - cluster directory synchronization installs the same path independently on two real container Agents # SKIP",
+        "ok 1042 - real Docker single-container and Compose versions preserve initial and data files # SKIP",
+        "ok 1043 - real host OpenResty serves static HTML and TLS, reloads a full bundle, and returns 503 for empty service discovery # SKIP requires an opted-in Linux executor sharing the Docker host network",
+        "ok 1044 - real host OpenResty applies multi-path URI routing, CORS, headers, WebSocket and rejects a bad reload # SKIP",
+        "ok 1262 - Linux release bundles contain checked architecture, portable dependencies and a working launcher # SKIP"
+      ]
+    },
+    "ai_runtime": {
+      "tests": 71,
+      "pass": 71,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "log_sha256": "c77956467672d763de5cbc30ac3fd31e35002c592fb9fd877bb1a7eec8aee1cf",
+      "skipped_cases": []
+    },
+    "typescript_sdk": {
+      "tests": 22,
+      "pass": 22,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "log_sha256": "2ab3dfac3bc4f3410d40767ce19e2f90c436ad38b0effbc3b514dab98013878e",
+      "skipped_cases": []
+    }
+  },
+  "ui": {
+    "total_checks": 94,
+    "reports": [
+      {
+        "report": "evidence/ui/connection-ui-report.json",
+        "checks": 7,
+        "sha256": "a4787f2a78492b95ceadc8efacd863f47b1753b304075b03bce045328280cef1"
+      },
+      {
+        "report": "evidence/ui/docker-permissions-ui-report.json",
+        "checks": 12,
+        "sha256": "6e637bf4d146036cb799ee2c90c509ab1f17aedeb2fc2edc107885fae22bc605"
+      },
+      {
+        "report": "evidence/ui/host-execution-ui-report.json",
+        "checks": 23,
+        "sha256": "782b70f7524a2b121f3cd45802cff82e38337b9bd288f98a0b13742f27b0a9d6"
+      },
+      {
+        "report": "evidence/ui/host-lifecycle-ui-report.json",
+        "checks": 19,
+        "sha256": "981dedb485ebcab7aa206216d31d8026373b980c9e2188c86dda9c4f1e23cb19"
+      },
+      {
+        "report": "evidence/ui/machine-ssh-ui-report.json",
+        "checks": 18,
+        "sha256": "b479b7eb8d3bc8762475c62a1694926577aab1d335983466c4095904c8a8fba2"
+      },
+      {
+        "report": "evidence/ui/registration-ui-report.json",
+        "checks": 3,
+        "sha256": "05668d94c130c54980dd1f2a3d23a677de850b748dd395965df0aaa9e3b02729"
+      },
+      {
+        "report": "evidence/ui/retention-ui-report.json",
+        "checks": 3,
+        "sha256": "145afc7bb483b0e7066e7c7b41f434718ae3a2d7d18b8eefd23d9e9ea0676c1c"
+      },
+      {
+        "report": "evidence/ui/terminal-ui-report.json",
+        "checks": 9,
+        "sha256": "e2950d04aa7e68dcbf6d740dd9f3ec8c19bd41601724da33bdd5c97c1765a8f8"
+      }
+    ],
+    "boundary": "Terminal uses temporary local sshd; remaining UI requests use isolated API fixtures."
+  },
+  "final_ai_mode_fix": {
+    "tests": 81,
+    "pass": 81,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "log_sha256": "9628f26a00529b211e7781aecd8a3f2812e1a3aa7ab6e713be12ce9ce96e249c"
+  },
+  "final_builds": {
+    "root_typecheck": {
+      "passed": true,
+      "log_sha256": "3a3e2e223f846eb83608240bbdfb194a0a61faa0b9201af69025716600aa6471"
+    },
+    "root_build": {
+      "passed": true,
+      "log_sha256": "d186ea20eac937c4bf1193eb9fb4b678bb84d8262931f66974a51b9a5a8938bf"
+    }
+  }
+}

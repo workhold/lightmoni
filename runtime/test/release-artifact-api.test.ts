@@ -76,8 +76,8 @@ function beginSlowArtifactPut(url: string, bytes: Buffer, sha256: string) {
 test("admin uploads a validated private release and ordinary credentials cannot download privileged artifacts", async (t) => {
   const db = new DB(":memory:"), router = new Router();
   const user = { id: "admin", name: "Admin", role: "admin" };
-  db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,port INTEGER NOT NULL,username TEXT NOT NULL,agent_id TEXT NOT NULL DEFAULT '')");
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,agent_id) VALUES(?,?,?,?,?,?)", "machine-1", "app-1", "10.0.0.1", 22, "deploy", "agent-1");
+  db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,port INTEGER NOT NULL,agent_id TEXT NOT NULL DEFAULT '')");
+  db.run("INSERT INTO managed_machines(id,name,address,port,agent_id) VALUES(?,?,?,?,?)", "machine-1", "app-1", "10.0.0.1", 22, "agent-1");
   db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL)");
   db.run("INSERT INTO agents(id,last_seen) VALUES(?,?)", "agent-1", new Date().toISOString());
   const auth = {

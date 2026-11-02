@@ -245,16 +245,21 @@ async function fixture(
   const host = await request("/machines", "POST", {
     name: "Reviewed host",
     address: "host.example.test",
-    username: loginName,
     connection_method: "direct_ssh",
   });
   assert.equal(host.status, 201, host.raw);
+  const account = await request(
+    "/machines/" + host.data.id + "/accounts",
+    "POST",
+    { username: loginName, make_default: true },
+  );
+  assert.equal(account.status, 201, account.raw);
   db.run(
     "UPDATE managed_machines SET host_key_fingerprint='SHA256:abcdefghijklmnop' WHERE id=?",
     host.data.id,
   );
   const login = await request(
-    "/machines/" + host.data.id + "/credentials",
+    "/machines/" + host.data.id + "/accounts/" + account.data.id + "/credentials",
     "POST",
     {
       method: "password",
@@ -302,6 +307,7 @@ async function fixture(
     machines,
     executors,
     hostID: host.data.id,
+    accountID: account.data.id,
     credentialID: login.data.credential_id,
     agentID,
     activation,
@@ -317,7 +323,7 @@ test("non-root SSH login with noninteractive sudo completes reviewed installatio
       assert.equal(f.applied.data.status, "succeeded");
       assert.equal(
         f.db.get<any>(
-          "SELECT count(*) n FROM managed_machines WHERE username='root'",
+          "SELECT count(*) n FROM machine_ssh_accounts WHERE username='root'",
         )!.n,
         0,
       );
@@ -541,7 +547,7 @@ test("every pending runtime state freezes host identity and SSH target edits wit
     const f = await fixture(sub, "user"), checked = await f.request("/machines/" + f.hostID + "/ssh-check", "POST", {credential_id: f.credentialID});
     assert.equal(checked.status, 200, checked.raw);
     const id = pendingRuntimePlan(f, status), original = f.db.get<any>("SELECT * FROM managed_machines WHERE id=?", f.hostID), reviewed = f.db.get<any>("SELECT * FROM machine_agent_runtime_plans WHERE id=?", id), checks = f.db.all<any>("SELECT * FROM machine_ssh_checks WHERE machine_id=? ORDER BY id", f.hostID), calls = f.calls.length;
-    for (const input of [{name: "Renamed"}, {address: "replacement.example.test"}, {port: 2222}, {username: "deploy"}, {connection_method: "agent_only"}, {platform: "other"}]) {
+    for (const input of [{name: "Renamed"}, {address: "replacement.example.test"}, {port: 2222}, {connection_method: "agent_only"}, {platform: "other"}]) {
       const r = await f.request("/machines/" + f.hostID, "PUT", input);
       assert.equal(r.status, 409, r.raw);
       assert.match(r.data.error, /^agent_runtime_maintenance_pending:/);
@@ -558,24 +564,24 @@ test("cancelling a runtime plan restores host editing and target change invalida
   const cancelled = await f.request(path + "/agent-runtime/plans/" + id + "/cancel", "POST", {confirm: true});
   assert.equal(cancelled.status, 200, cancelled.raw);
   assert.equal(cancelled.data.status, "cancelled");
-  const updated = await f.request(path, "PUT", {name: "New reviewed host", address: "replacement.example.test", username: "deploy"});
+  const updated = await f.request(path, "PUT", {name: "New reviewed host", address: "replacement.example.test"});
   assert.equal(updated.status, 200, updated.raw);
   assert.equal(updated.data.name, "New reviewed host");
   const saved = f.db.get<any>("SELECT * FROM managed_machines WHERE id=?", f.hostID)!;
   assert.equal(saved.address, "replacement.example.test");
-  assert.equal(saved.username, "deploy");
+  assert.equal(f.db.get<any>("SELECT username FROM machine_ssh_accounts WHERE id=?", f.accountID)!.username, "root");
   assert.equal(saved.agent_id, f.agentID);
   assert.equal(saved.ssh_target_generation, generation + 1);
   assert.equal(f.db.get<any>("SELECT count(*) n FROM machine_ssh_checks WHERE machine_id=?", f.hostID)!.n, 0);
 });
 test("unknown runtime maintenance still permits a new same-account credential without rewriting its approval", async t => {
   const f = await fixture(t, "user"), id = pendingRuntimePlan(f, "unknown"), reviewed = f.db.get<any>("SELECT * FROM machine_agent_runtime_plans WHERE id=?", id), original = f.db.get<any>("SELECT * FROM managed_machines WHERE id=?", f.hostID)!;
-  const added = await f.request("/machines/" + f.hostID + "/credentials", "POST", {method: "password", secret: "isolated-reconciliation-secret", retention: "temporary", make_default: false});
+  const added = await f.request("/machines/" + f.hostID + "/accounts/" + f.accountID + "/credentials", "POST", {method: "password", secret: "isolated-reconciliation-secret", retention: "temporary", make_default: false});
   assert.equal(added.status, 201, added.raw);
   assert.notEqual(added.data.credential_id, f.credentialID);
   assert.ok(!added.raw.includes("isolated-reconciliation-secret"));
   const current = f.db.get<any>("SELECT * FROM managed_machines WHERE id=?", f.hostID)!;
-  for (const key of ["name", "address", "port", "username", "connection_method", "agent_id", "ssh_target_generation", "default_credential_id"]) assert.equal(current[key], original[key]);
+  for (const key of ["name", "address", "port", "connection_method", "agent_id", "ssh_target_generation", "default_account_id"]) assert.equal(current[key], original[key]);
   assert.deepEqual(f.db.get<any>("SELECT * FROM machine_agent_runtime_plans WHERE id=?", id), reviewed);
   assert.ok(f.db.get<any>("SELECT secret_encrypted FROM effective_machine_credentials WHERE id=?", added.data.credential_id)!.secret_encrypted);
 });

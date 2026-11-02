@@ -9,6 +9,7 @@ import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Module } from "../shared/types.js";
 import type { AgentUpdateAccess } from "./machine-agent-updates.js";
 import type { SSHCheckResult } from "./managed-machines.js";
+import { assertSSHAccount, sshAccountSnapshot, sshCredentialRevision } from "./machine-ssh.js";
 import type { PrivilegedExecutorStore } from "./privileged-executors.js";
 import { hasActiveTaskRuns } from "./agent-hosts.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
@@ -43,19 +44,7 @@ export function validAgentRuntimeObservation(
   );
 }
 const q = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
-const credentialRevision = (c: Row) =>
-  sha256(
-    canonicalJSON([
-      c.id,
-      c.connection_credential_id ?? "",
-      c.method,
-      c.secret_fingerprint,
-      c.retention,
-      c.expires_at,
-      c.revoked_at ?? "",
-      c.secret_cleared_at ?? "",
-    ]),
-  );
+const credentialRevision = sshCredentialRevision;
 const table = (d: Dependencies, n: string) =>
   !!d.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", n);
 export function createAgentRuntimeSchema(d: Dependencies) {
@@ -391,8 +380,11 @@ export function registerMachineAgentRuntime(
     signal: AbortSignal,
     stdin?: string,
   ) => {
+    const selected = access.credential(machine.id, credential.id);
+    if (machine.account_id) assertSSHAccount(selected.machine, sshAccountSnapshot(machine as any));
+    if (credentialRevision(selected.credential) !== credentialRevision(credential)) fail(409, "ssh_credential_changed");
     const out = await access.runner({
-      machine: machine as any,
+      machine: selected.machine,
       credentialID: credential.id,
       ...access.authentication(machine.id, credential),
       command,
@@ -402,16 +394,19 @@ export function registerMachineAgentRuntime(
       ...(stdin ? { stdin } : {}),
     });
     access.markCredentialUsed(credential.id);
+    const verified = access.credential(machine.id, credential.id);
+    assertSSHAccount(verified.machine, sshAccountSnapshot(selected.machine));
+    if (credentialRevision(verified.credential) !== credentialRevision(credential)) fail(409, "ssh_credential_changed");
     return out;
   };
   const assertTarget = (r: Row, requireCredential = true) => {
     const p = JSON.parse(r.plan_json),
       m = access.get(r.machine_id),
-      c = requireCredential
-        ? access.credential(r.machine_id, r.credential_id).credential
-        : {},
+      selected = requireCredential ? access.credential(r.machine_id, r.credential_id) : undefined,
+      c = selected?.credential ?? {},
       s = agentRuntimeState(d, m.id);
     actor(r.created_by);
+    if (selected) assertSSHAccount(selected.machine, p.ssh_account);
     if (
       access.revision(m) !== p.target_revision ||
       m.name !== p.machine.name ||
@@ -432,7 +427,7 @@ export function registerMachineAgentRuntime(
       )
         fail(409, "agent_runtime_execution_identity_changed");
     }
-    return { m, c, p };
+    return { m: selected?.machine ?? m, c, p };
   };
   const refresh = (r: Row) => {
     if (!["verifying", "unknown"].includes(r.status)) return r;
@@ -566,7 +561,7 @@ export function registerMachineAgentRuntime(
         !check.ready ||
         !["root", "sudo_noninteractive"].includes(check.privilege.state)
       )
-        fail(409, "root_or_sudo_ssh_required");
+        { c.json({ error:"root_or_sudo_ssh_required",preflight:check },409); return; }
       const selected = access.credential(machine.id, check.credential_id);
       idle(machine.id, machine.agent_id);
       if (
@@ -580,7 +575,7 @@ export function registerMachineAgentRuntime(
         const observed = parseRuntimeProbe(
           (
             await ssh(
-              machine,
+              selected.machine,
               selected.credential,
               agentRuntimeCommand("probe"),
               c.signal,
@@ -637,6 +632,7 @@ export function registerMachineAgentRuntime(
             permission_generation: state.permission_generation + 1,
             release: { artifact_sha256: observed.artifact_sha256 },
             target_revision: access.revision(machine),
+            ssh_account: sshAccountSnapshot(selected.machine),
             credential_id: selected.credential.id,
             credential_revision: credentialRevision(selected.credential),
             capabilities:
@@ -683,6 +679,7 @@ export function registerMachineAgentRuntime(
             from_mode: plan.from_mode,
             runtime_mode: plan.runtime_mode,
             permission_generation: plan.permission_generation,
+            ssh_account: plan.ssh_account,
           });
         });
         c.json(view(row(machine.id, id)), 201);
@@ -727,20 +724,14 @@ export function registerMachineAgentRuntime(
       if (r.status !== "unknown") fail(409, "unknown_agent_runtime_required");
       access.idle(r.machine_id);
       const target = assertTarget(r, false);
-      let selected: ReturnType<Access["credential"]>;
-      if (input.credential_id)
-        selected = access.credential(r.machine_id, input.credential_id);
-      else {
-        try {
-          selected = access.credential(r.machine_id, r.credential_id);
-        } catch {
-          selected = access.credential(r.machine_id);
-        }
-      }
+      const selected = access.credential(r.machine_id, input.credential_id ?? r.credential_id);
+      target.m = selected.machine;
       target.c = selected.credential;
+      const verifyingAccount = sshAccountSnapshot(selected.machine);
       const selectedRevision = credentialRevision(selected.credential),
         recheck = () => {
           assertTarget(r, false);
+          assertSSHAccount(access.credential(r.machine_id, selected.credential.id).machine, verifyingAccount);
           if (
             credentialRevision(
               access.credential(r.machine_id, selected.credential.id)
@@ -751,6 +742,7 @@ export function registerMachineAgentRuntime(
           idle(r.machine_id, r.agent_id, r.id);
         };
       recheck();
+      audit(r.machine_id, r.id, c.user.id, "runtime_reconciliation_started", { approved_ssh_account: target.p.ssh_account, verification_ssh_account: verifyingAccount, credential_id: selected.credential.id, credential_revision: selectedRevision });
       access.busy.add(r.machine_id);
       try {
         const receipt = parseRuntimeReceipt(
@@ -890,7 +882,7 @@ export function registerMachineAgentRuntime(
         !check.ready ||
         !["root", "sudo_noninteractive"].includes(check.privilege.state)
       )
-        fail(409, "root_or_sudo_ssh_required");
+        { c.json({ error:"root_or_sudo_ssh_required",preflight:check },409); return; }
       target = assertTarget(r);
       idle(r.machine_id, r.agent_id, r.id);
       access.busy.add(r.machine_id);
@@ -948,6 +940,7 @@ export function registerMachineAgentRuntime(
             runtime_mode: target.p.runtime_mode,
             permission_generation: target.p.permission_generation,
             capabilities: target.p.capabilities,
+            ssh_account: target.p.ssh_account,
           });
         });
         const payload = {

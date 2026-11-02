@@ -41,8 +41,8 @@ async function fixture(t: TestContext, configured = true) {
   let clock = new Date(FINISHED_AT), reads = 0, catalogReads = 0;
   let readerQuery: ClickHouse["query"] = async () => matchingResponse();
   let catalogList = async (): Promise<Table[]> => [TABLE];
-  db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,port INTEGER NOT NULL,username TEXT NOT NULL,agent_id TEXT NOT NULL DEFAULT '')");
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,agent_id) VALUES(?,?,?,?,?,?)", "machine-a", "app-a", "10.0.0.9", 22, "deploy", "agent-a");
+  db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,port INTEGER NOT NULL,agent_id TEXT NOT NULL DEFAULT '')");
+  db.run("INSERT INTO managed_machines(id,name,address,port,agent_id) VALUES(?,?,?,?,?)", "machine-a", "app-a", "10.0.0.9", 22, "agent-a");
   db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL,platform TEXT NOT NULL,arch TEXT NOT NULL)");
   db.run("INSERT INTO agents(id,last_seen,platform,arch) VALUES(?,?,?,?)", "agent-a", FINISHED_AT, "linux", "amd64");
   const deps = {

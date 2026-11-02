@@ -66,12 +66,13 @@ async function fixture(t: any, sshRunner: SSHRunner) {
   };
   t.after(() => { for (const module of modules) module.close?.(); for (const server of servers) server.close(); db.close(); });
   const request = await start();
-  const host = await request("/machines", "POST", { name: "race-host", address: "race.example.test", username: "root" });
+  const host = await request("/machines", "POST", { name: "race-host", address: "race.example.test" });
   assert.equal(host.status, 201);
   const mid = host.data.id;
   // Synthetic runner bypasses real SSH host-key observation.
   db.run("UPDATE managed_machines SET host_key_fingerprint=? WHERE id=?", "SHA256:abcdefghijklmnop", mid);
-  const key = await request(`/machines/${mid}/credentials`, "POST", { method: "password", secret: "fixture-test-password", retention: "permanent", confirm_permanent: true });
+  const account=await request(`/machines/${mid}/accounts`,"POST",{username:"root",make_default:true});assert.equal(account.status,201);
+  const key = await request(`/machines/${mid}/accounts/${account.data.id}/credentials`, "POST", { method: "password", secret: "fixture-test-password", retention: "permanent", confirm_permanent: true });
   assert.equal(key.status, 201);
   const check = await request(`/machines/${mid}/ssh-check`, "POST", {});
   assert.equal(check.status, 200);

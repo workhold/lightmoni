@@ -112,15 +112,16 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     return { status: response.status, raw, data };
   };
   const host = async (name = "test-host") => {
-    const created = await request("/machines", "POST", { name, address: name + ".example.test", username: "root" }); assert.equal(created.status, 201, created.raw);
+    const created = await request("/machines", "POST", { name, address: name + ".example.test" }); assert.equal(created.status, 201, created.raw);
     const mid = created.data.id, agent = "agent-" + mid;
-    const credential = await request(`/machines/${mid}/credentials`, "POST", { method: "password", secret: "  actual-login-secret\t", retention: "managed", confirm_managed: true });
+    const account=await request(`/machines/${mid}/accounts`,"POST",{username:"root",make_default:true});assert.equal(account.status,201,account.raw);
+    const credential = await request(`/machines/${mid}/accounts/${account.data.id}/credentials`, "POST", { method: "password", secret: "  actual-login-secret\t", retention: "managed", confirm_managed: true });
     assert.equal(credential.status, 201, credential.raw);
     db.run("UPDATE managed_machines SET agent_id=?,platform='linux',arch='amd64',host_key_fingerprint=? WHERE id=?", agent, "SHA256:fixture-server-identity", mid);
     db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES(?,?,?,'0.1.0','linux','amd64',?,?)", agent, "identity-" + mid, name, clock.toISOString(), JSON.stringify({ version: "0.1.0", boot_id: OLD_BOOT, release: oldRelease, task_capabilities: [SCRIPT_TASK_CAPABILITY] }));
     observations.set(mid, { schema: 1, ready: true, agent_id: agent, arch: "amd64", service_active: true, lifecycle_locked: false, operation_lock: false,
       current: { ...oldRelease }, previous: { ...previousRelease } });
-    return { id: mid, agent, credential: credential.data.credential_id };
+    return { id: mid, agent, account:account.data.id, credential: credential.data.credential_id };
   };
   const plan = (mid: string, action = "upgrade") => request(`/machines/${mid}/agent-updates/plan`, "POST", { action, ...(action === "upgrade" ? { target_sha256: release.sha256 } : {}) });
   const apply = (mid: string, operationID: string) => request(`/machines/${mid}/agent-updates/${operationID}/apply`, "POST", { confirm: true });
@@ -136,6 +137,40 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     advance(seconds: number) { clock = new Date(clock.getTime() + seconds * 1000); },
     setDownloadHook(hook: typeof downloadHook) { downloadHook = hook; }, origin };
 }
+
+test("changing host defaults never replaces an approved SSH login account", async t => {
+  const f = await fixture(t), h = await f.host();
+  const proposed = await f.plan(h.id); assert.equal(proposed.status,201,proposed.raw);
+  const account = await f.request(`/machines/${h.id}/accounts`, "POST", {username:"deploy",make_default:true});
+  assert.equal(account.status,201,account.raw);
+  const replacement = await f.request(`/machines/${h.id}/accounts/${account.data.id}/credentials`, "POST", {method:"password",secret:"unused-different-login",retention:"permanent",confirm_permanent:true});
+  assert.equal(replacement.status,201,replacement.raw);
+  assert.deepEqual(proposed.data.plan.ssh_account,{id:h.account,username:"root",revision:1});
+  assert.equal((await f.apply(h.id,proposed.data.id)).status,202);
+  assert.equal((await f.settle(h.id,proposed.data.id)).status,"succeeded");
+  assert.ok(f.calls.every(c=>c.machine.account_id===h.account&&c.machine.username==="root"&&c.credentialID===h.credential));
+});
+
+test("unknown maintenance uses a new account only when explicitly selected and preserves approval evidence", async t => {
+  const f = await fixture(t), h = await f.host(); f.modes.set(h.id,"disconnect");
+  const proposed = await f.plan(h.id); assert.equal((await f.apply(h.id,proposed.data.id)).status,202);
+  assert.equal((await f.settle(h.id,proposed.data.id)).status,"unknown");
+  const approved = f.db.get<any>("SELECT plan_json FROM machine_agent_updates WHERE id=?",proposed.data.id)!.plan_json;
+  const account = await f.request(`/machines/${h.id}/accounts`,"POST",{username:"recovery",make_default:true});
+  const replacement = await f.request(`/machines/${h.id}/accounts/${account.data.id}/credentials`,"POST",{method:"password",secret:"unused-recovery-password",retention:"permanent",confirm_permanent:true});
+  assert.equal(replacement.status,201,replacement.raw);
+  f.db.run("UPDATE machine_credentials SET revoked_at=? WHERE id=?",f.deps.now().toISOString(),h.credential);
+  const count = f.calls.length;
+  assert.equal((await f.request(`/machines/${h.id}/agent-updates/${proposed.data.id}/reconcile`,"POST",{})).status,409);
+  assert.equal(f.calls.length,count);
+  const result = await f.request(`/machines/${h.id}/agent-updates/${proposed.data.id}/reconcile`,"POST",{credential_id:replacement.data.id});
+  assert.equal(result.status,200,result.raw);
+  assert.ok(f.calls.slice(count).every(c=>c.machine.account_id===account.data.id&&c.machine.username==="recovery"&&!c.command.includes(".update-bootstrap")&&!c.command.includes("update-runner.mjs commit")));
+  const stored = f.db.get<any>("SELECT credential_id,plan_json,receipt_json FROM machine_agent_updates WHERE id=?",proposed.data.id)!;
+  assert.equal(stored.credential_id,h.credential); assert.equal(stored.plan_json,approved);
+  const receipt = JSON.parse(stored.receipt_json);
+  assert.equal(receipt.approved_ssh_account.id,h.account); assert.equal(receipt.verification_ssh_account.id,account.data.id);
+});
 
 test("catalog distinguishes a new build at the same version and pins archive plus maintenance scripts", t => {
   const root = mkdtempSync(join(tmpdir(), "lm-update-catalog-")); t.after(() => rmSync(root, { recursive: true, force: true }));

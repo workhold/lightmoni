@@ -38,25 +38,26 @@ async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverrid
  const machines=registerManagedMachines(deps,{agentCredentials,sshRunner:sshRunnerOverride??sshRunner});
  const server=createServer(async(req,res)=>{if(!(await router.handle(req,res))){res.writeHead(404);res.end()}});server.listen(0,'127.0.0.1');await once(server,'listening');const url=`http://127.0.0.1:${(server.address() as any).port}`;
  t.after(()=>{machines.close?.();server.close();db.close()});
- const rawRequest=async(path:string,method='GET',body?:any)=>{const response=await fetch(url+'/api/v1'+path,{method,headers:{...(humanAdminSession?{cookie:'lm_session=fixture'}:{}),...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const raw=await response.text();return {status:response.status,raw,data:parseJSON(raw)};};
+ const rawRequest=async(path:string,method='GET',body?:any)=>{const response=await fetch(url+'/api/v1'+path,{method,headers:{...(humanAdminSession?{cookie:'lm_session=fixture'}:{}),...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const raw=await response.text();return {status:response.status,raw,data:raw?parseJSON(raw):undefined};};
  // Legacy-pin scenarios are seeded directly into the isolated database; the
  // production API deliberately rejects all client-supplied host identity.
  const request=async(path:string,method='GET',body?:any)=>{
   const pin=body?.fixture_host_pin;const input=body&&Object.hasOwn(body,'fixture_host_pin')?Object.fromEntries(Object.entries(body).filter(([key])=>key!=='fixture_host_pin')):body;
   const result=await rawRequest(path,method,input);
+  if(path==='/machines'&&method==='POST'&&result.status===201){const account=await rawRequest('/machines/'+result.data.id+'/accounts','POST',{username:'deploy',make_default:true});assert.equal(account.status,201,account.raw);result.data=machines.get(result.data.id);}
   if(pin!==undefined&&result.status<300){const mid=method==='POST'?result.data.id:path.split('/')[2];db.run("UPDATE managed_machines SET host_key_fingerprint=?,host_key_public_key='',host_key_observed_at='' WHERE id=?",pin,mid);result.data=machines.get(mid);result.raw=JSON.stringify(result.data)}
   return result;
  };
- return {db,request,rawRequest,machines,user,deps,agentCredentials,get issued(){return issued},get sshInput(){return sshInput}};
+ return {db,request,rawRequest,machines,user,deps,agentCredentials,accountID:(mid:string)=>machines.get(mid).default_account_id,get issued(){return issued},get sshInput(){return sshInput}};
 }
 
 test('managed machines validate host input and never return credential secrets',async t=>{
  const f=await fixture(t);
- assert.equal((await f.request('/machines','POST',{name:'bad',address:'http://evil',username:'root'})).status,400);
- const created=await f.request('/machines','POST',{name:'prod-1',address:'10.0.0.12',port:22,username:'deploy',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});
+ assert.equal((await f.request('/machines','POST',{name:'bad',address:'http://evil'})).status,400);
+ const created=await f.request('/machines','POST',{name:'prod-1',address:'10.0.0.12',port:22,connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});
  assert.equal(created.status,201,created.raw);const machine=created.data;
  const key=fixturePrivateKey();
- const credential=await f.request(`/machines/${machine.id}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
+ const credential=await f.request(`/machines/${machine.id}/accounts/${f.accountID(machine.id)}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
  assert.equal(credential.status,201,credential.raw);assert.ok(!credential.raw.includes('PRIVATE KEY'));assert.ok(credential.data.secret_fingerprint);assert.equal(credential.data.retention,'temporary');
  const detail=await f.request(`/machines/${machine.id}`);assert.equal(detail.status,200);assert.ok(!detail.raw.includes('PRIVATE KEY'));assert.equal(detail.data.credentials.length,1);
  const assistant=f.machines.assistantGet(machine.id);assert.equal(assistant.host_key_fingerprint,'');
@@ -65,8 +66,8 @@ test('managed machines validate host input and never return credential secrets',
 test('password credentials can run one fixed SSH check once, then are revoked and cannot deploy',async t=>{
  let sshInput:any;
  const f=await fixture(t,{},async input=>{sshInput=input;return {stdout:checkOutput,stderr:'',stages:['checking_host_key','remote_command_completed']}});
- const created=await f.request('/machines','POST',{name:'prod-2',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});const machine=created.data;
- const password=await f.request(`/machines/${machine.id}/credentials`,'POST',{method:'password',secret:'temporary-password',retention:'one_time'});assert.equal(password.status,201);assert.equal(password.data.retention,'one_time');assert.match(password.data.warning,/不要长期保存/);
+ const created=await f.request('/machines','POST',{name:'prod-2',address:'host.example.com',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});const machine=created.data;
+ const password=await f.request(`/machines/${machine.id}/accounts/${f.accountID(machine.id)}/credentials`,'POST',{method:'password',secret:'temporary-password',retention:'one_time'});assert.equal(password.status,201);assert.equal(password.data.retention,'one_time');assert.match(password.data.warning,/不要长期保存/);
  const checked=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(checked.status,200,checked.raw);assert.equal(checked.data.connected,true);assert.equal(checked.data.ready,true);assert.equal(sshInput.password,'temporary-password');assert.equal(sshInput.privateKey,'');
  const detail=await f.request(`/machines/${machine.id}`);assert.equal(detail.data.credentials[0].revoked_at!==null,true);assert.equal(detail.data.credentials[0].last_used_at!==null,true);
  const reused=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(reused.status,409);assert.match(reused.raw,/撤销/);
@@ -75,8 +76,8 @@ test('password credentials can run one fixed SSH check once, then are revoked an
 
 test('password credential preserves intentional leading/trailing whitespace during SSH check',async t=>{
  let received='';const f=await fixture(t,{},async input=>{received=input.password??'';return {stdout:checkOutput,stderr:'',stages:[]}});
- const created=await f.request('/machines','POST',{name:'password-space',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});
- const original='  password with spaces \t';const password=await f.request(`/machines/${created.data.id}/credentials`,'POST',{method:'password',secret:original,retention:'one_time'});assert.equal(password.status,201);
+ const created=await f.request('/machines','POST',{name:'password-space',address:'host.example.com',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});
+ const original='  password with spaces \t';const password=await f.request(`/machines/${created.data.id}/accounts/${f.accountID(created.data.id)}/credentials`,'POST',{method:'password',secret:original,retention:'one_time'});assert.equal(password.status,201);
  const checked=await f.request(`/machines/${created.data.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(checked.status,200,checked.raw);assert.equal(received,original);
 });
 
@@ -99,19 +100,19 @@ test('SSH privilege evidence binds the checked target and credential without con
 
 test('registration assigns immutable platform IDs while user names remain editable and need not be unique',async t=>{
  const f=await fixture(t),name="生产主机 'one' $(printf ignored)";
- const created=await f.request('/machines','POST',{name,address:'host.example.com',username:'deploy'});assert.equal(created.status,201,created.raw);
+ const created=await f.request('/machines','POST',{name,address:'host.example.com'});assert.equal(created.status,201,created.raw);
  const mid=created.data.id;assert.match(mid,/^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/);assert.equal(created.data.name,name);assert.equal(f.machines.get(mid).name,name);
  assert.equal(Object.hasOwn(created.data,'sdk_environment'),false);assert.equal(Object.hasOwn(f.machines.get(mid),'sdk_environment'),false);
- const sameName=await f.request('/machines','POST',{name,address:'other.example.com',username:'deploy'});assert.equal(sameName.status,201,sameName.raw);assert.equal(sameName.data.name,name);assert.notEqual(sameName.data.id,mid);
+ const sameName=await f.request('/machines','POST',{name,address:'other.example.com'});assert.equal(sameName.status,201,sameName.raw);assert.equal(sameName.data.name,name);assert.notEqual(sameName.data.id,mid);
  const listed=await f.request('/machines');assert.equal(listed.status,200);assert.deepEqual(new Set(listed.data.map((machine:any)=>machine.id)),new Set([mid,sameName.data.id]));assert.ok(listed.data.every((machine:any)=>!Object.hasOwn(machine,'sdk_environment')));
  const renamed=await f.request(`/machines/${mid}`,'PUT',{name:'新名称'});assert.equal(renamed.status,200,renamed.raw);assert.equal(renamed.data.id,mid);assert.equal(renamed.data.name,'新名称');assert.equal(f.machines.get(sameName.data.id).name,name);
  for(const requestedID of ['user-selected-id',mid,null]) {
-  assert.equal((await f.request('/machines','POST',{id:requestedID,name:'manual-id',address:'manual.example.com',username:'deploy'})).status,400);
+  assert.equal((await f.request('/machines','POST',{id:requestedID,name:'manual-id',address:'manual.example.com'})).status,400);
   assert.equal((await f.request(`/machines/${mid}`,'PUT',{id:requestedID,name:'ignored-new-name'})).status,400);
  }
  assert.equal(f.machines.get(mid).id,mid);assert.equal(f.machines.get(mid).name,'新名称');
  for(const bad of ['line\nbreak','\tleading','trailing\r','control\u0000','delete\u007f','c1\u0085']) {
-  assert.equal((await f.request('/machines','POST',{name:bad,address:'other.example.com',username:'deploy'})).status,400,JSON.stringify(bad));
+  assert.equal((await f.request('/machines','POST',{name:bad,address:'other.example.com'})).status,400,JSON.stringify(bad));
   assert.equal((await f.request(`/machines/${mid}`,'PUT',{name:bad})).status,400,JSON.stringify(bad));
  }
  f.user.role='member';assert.equal((await f.request('/machines')).status,403);assert.equal((await f.request(`/machines/${mid}`)).status,403);
@@ -120,13 +121,13 @@ test('registration assigns immutable platform IDs while user names remain editab
 test('explicit reusable passwords survive checks and terminal release, then follow expiry or revocation',async t=>{
  for(const retention of ['temporary','managed','permanent']) {
   let clock=now;const f=await fixture(t,{now:()=>clock}),h=await host(f,'reusable-'+retention);
-  const created=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'  reusable '+retention+' \t',retention,...retention==='permanent'?{confirm_permanent:true}:{expires_in_seconds:60,...retention==='managed'?{confirm_managed:true}:{}}});assert.equal(created.status,201,created.raw);const cid=created.data.credential_id;
+  const created=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'password',secret:'  reusable '+retention+' \t',retention,...retention==='permanent'?{confirm_permanent:true}:{expires_in_seconds:60,...retention==='managed'?{confirm_managed:true}:{}}});assert.equal(created.status,201,created.raw);const cid=created.data.credential_id;
   assert.equal(f.machines.get(h.id).active_reusable_ssh_credential_count,2);
   const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:cid});assert.equal(checked.status,200,checked.raw);assert.equal(checked.data.ready,true);assert.equal(f.sshInput.password,'  reusable '+retention+' \t');assert.notEqual(credentialRow(f,cid).secret_encrypted,'');
   const lease=f.machines.acquireTerminal(h.id,cid,()=>{});assert.equal(lease.password,'  reusable '+retention+' \t');lease.release();assert.equal(lease.password,'');assert.notEqual(credentialRow(f,cid).secret_encrypted,'');
   assert.ok(f.machines.assistantGet(h.id).ssh_credentials.some(c=>c.id===cid));
   if(retention==='temporary') {clock=new Date(now.getTime()+60_000);assert.equal((await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:cid})).status,409);assert.equal(credentialRow(f,cid).clear_reason,'expired');}
-  else {assert.equal((await f.request(`/machines/${h.id}/credentials/${cid}`,'DELETE')).status,200);assert.equal(credentialRow(f,cid).clear_reason,'revoked');}
+  else {assert.equal((await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${cid}`,'DELETE')).status,200);assert.equal(credentialRow(f,cid).clear_reason,'revoked');}
   assert.equal(credentialRow(f,cid).secret_encrypted,'');assert.equal(credentialRow(f,cid).secret_fingerprint,'');
  }
 });
@@ -135,8 +136,8 @@ test('reusable password installs through the fixed approved plan, redacts secret
  for(const retention of ['temporary','managed','permanent']) {
   const calls:any[]=[],secret='  deploy-secret '+retention+' \t';
   const f=await fixture(t,{},async input=>{calls.push(input);return {stdout:input.enrollmentToken?`installed ${input.enrollmentToken} ${input.password}`:checkOutput,stderr:input.enrollmentToken?`echo ${input.password}`:'',stages:['remote_command_completed']}});
-  const made=await f.request('/machines','POST',{name:"主机 'user name'",address:'host.example.com',username:'deploy',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});const mid=made.data.id;
-  const added=await f.request(`/machines/${mid}/credentials`,'POST',{method:'password',secret,retention,...retention==='permanent'?{confirm_permanent:true}:retention==='managed'?{confirm_managed:true}:{}});assert.equal(added.status,201,added.raw);const cid=added.data.credential_id;
+  const made=await f.request('/machines','POST',{name:"主机 'user name'",address:'host.example.com',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});const mid=made.data.id;
+  const added=await f.request(`/machines/${mid}/accounts/${f.accountID(mid)}/credentials`,'POST',{method:'password',secret,retention,...retention==='permanent'?{confirm_permanent:true}:retention==='managed'?{confirm_managed:true}:{}});assert.equal(added.status,201,added.raw);const cid=added.data.credential_id;
   const machine=f.machines.get(mid);assert.equal(machine.active_ssh_key_count,0);assert.equal(machine.active_reusable_ssh_credential_count,1);assert.equal(machine.capabilities.deploy_agent.available,true);assert.equal(machine.capabilities.uninstall_agent.available,true);
   const checked=await f.request(`/machines/${mid}/ssh-check`,'POST',{credential_id:cid});assert.equal(checked.status,200,checked.raw);
   const plan=await f.request(`/machines/${mid}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:cid,version:'0.1.0',arch:'amd64'});assert.equal(plan.status,201,plan.raw);assert.equal(plan.data.plan.credential.method,'password');assert.ok(!plan.raw.includes(secret));
@@ -194,7 +195,7 @@ test('host deletion requires credentials and pending deployments to be cleared f
  const f=await fixture(t),h=await host(f,'delete-guard');
  const blockedByCredential=await f.request(`/machines/${h.id}`,'DELETE');
  assert.equal(blockedByCredential.status,409,blockedByCredential.raw);assert.match(blockedByCredential.raw,/解绑本主机的有效连接凭据/);
- await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE');
  const deleted=await f.request(`/machines/${h.id}`,'DELETE');
  assert.equal(deleted.status,200,deleted.raw);assert.deepEqual(deleted.data,{ok:true});
  assert.equal((await f.request(`/machines/${h.id}`)).status,404);
@@ -206,7 +207,7 @@ test('unlinking a host credential cancels its pending plan and permits host dele
  const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});assert.equal(checked.status,200,checked.raw);
  const plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:h.credential,version:'0.1.0',arch:'amd64'});
  assert.equal(plan.status,201,plan.raw);assert.equal(plan.data.status,'awaiting_approval');
- await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE');
  assert.equal(f.db.get<any>('SELECT status FROM machine_deployments WHERE id=?',plan.data.id)?.status,'cancelled');
  const deleted=await f.request(`/machines/${h.id}`,'DELETE');
  assert.equal(deleted.status,200,deleted.raw);
@@ -226,7 +227,7 @@ test('cancelled plans are idempotent, block members and permit complete host cle
  assert.equal(cancelled.status,200,cancelled.raw);assert.equal(cancelled.data.status,'cancelled');
  const repeated=await f.request(`/machines/${h.id}/deployments/${plan.data.id}/cancel`,'POST',{});
  assert.equal(repeated.status,200,repeated.raw);assert.equal(repeated.data.status,'cancelled');
- await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE');
  const deleted=await f.request(`/machines/${h.id}`,'DELETE');
  assert.equal(deleted.status,200,deleted.raw);
  for(const table of ['managed_machines','machine_credentials','machine_ssh_checks','machine_deployments']){
@@ -249,31 +250,31 @@ test('completed deployment plans cannot be cancelled and an active terminal bloc
 });
 
 test('host APIs accept only direct SSH and credentials require an explicit supported method',async t=>{
- const f=await fixture(t),input={name:'prod-direct',address:'host.example.com',username:'deploy'};
+ const f=await fixture(t),input={name:'prod-direct',address:'host.example.com'};
  const created=await f.request('/machines','POST',input);assert.equal(created.status,201,created.raw);const machine=created.data;assert.equal(machine.connection_method,'direct_ssh');
  for(const connection_method of ['manual_script','bastion','ssm','unknown','']) {
   assert.equal((await f.request('/machines','POST',{...input,connection_method})).status,400,connection_method);
   assert.equal((await f.request(`/machines/${machine.id}`,'PUT',{connection_method})).status,400,connection_method);
  }
- for(const body of [{},{secret:'not-a-method'},{method:'manual_script'},{method:'unknown',secret:'unused'}])assert.equal((await f.request(`/machines/${machine.id}/credentials`,'POST',body)).status,400,JSON.stringify(body));
+ for(const body of [{},{secret:'not-a-method'},{method:'manual_script'},{method:'unknown',secret:'unused'}])assert.equal((await f.request(`/machines/${machine.id}/accounts/${f.accountID(machine.id)}/credentials`,'POST',body)).status,400,JSON.stringify(body));
  assert.equal(f.machines.get(machine.id).connection_method,'direct_ssh');assert.equal(f.machines.get(machine.id).credential_count,0);assert.equal(f.sshInput,undefined);
 });
 
 test('credential decryption failure closes a deployment as failed',async t=>{
- let corrupt=false;const f=await fixture(t,{decrypt:value=>{if(corrupt)throw Error('corrupt credential envelope');return cipher(master).decrypt(value)}});const created=await f.request('/machines','POST',{name:'prod-broken',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});assert.equal(created.status,201,created.raw);const machine=created.data;const key=fixturePrivateKey();const credential=await f.request(`/machines/${machine.id}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
+ let corrupt=false;const f=await fixture(t,{decrypt:value=>{if(corrupt)throw Error('corrupt credential envelope');return cipher(master).decrypt(value)}});const created=await f.request('/machines','POST',{name:'prod-broken',address:'host.example.com',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});assert.equal(created.status,201,created.raw);const machine=created.data;const key=fixturePrivateKey();const credential=await f.request(`/machines/${machine.id}/accounts/${f.accountID(machine.id)}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
  const checked=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:credential.data.credential_id});assert.equal(checked.data.ready,true,checked.raw);const plan=await f.request(`/machines/${machine.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:credential.data.credential_id,version:'0.1.0',arch:'amd64'});assert.equal(plan.status,201,plan.raw);
  corrupt=true;const applied=await f.request(`/machines/${machine.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,502,applied.raw);assert.equal(f.machines.assistantDeployment(plan.data.id).status,'failed');
 });
 
 test('interrupted dispatched SSH installation preserves its enrollment and records an unknown outcome',async t=>{
- const f=await fixture(t,{},async input=>{if(input.enrollmentToken)throw Error('ssh unavailable');return {stdout:checkOutput,stderr:'',stages:[]}});const created=await f.request('/machines','POST',{name:'prod-ssh-fail',address:'host.example.com',username:'deploy',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});assert.equal(created.status,201,created.raw);const machine=created.data;const key=fixturePrivateKey();const credential=await f.request(`/machines/${machine.id}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
+ const f=await fixture(t,{},async input=>{if(input.enrollmentToken)throw Error('ssh unavailable');return {stdout:checkOutput,stderr:'',stages:[]}});const created=await f.request('/machines','POST',{name:'prod-ssh-fail',address:'host.example.com',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});assert.equal(created.status,201,created.raw);const machine=created.data;const key=fixturePrivateKey();const credential=await f.request(`/machines/${machine.id}/accounts/${f.accountID(machine.id)}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
  const checked=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:credential.data.credential_id});assert.equal(checked.data.ready,true,checked.raw);const plan=await f.request(`/machines/${machine.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:credential.data.credential_id,version:'0.1.0',arch:'amd64'});assert.equal(plan.status,201,plan.raw);
  const applied=await f.request(`/machines/${machine.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,502,applied.raw);assert.equal(f.issued.cancelled,undefined);
  const saved=f.machines.assistantDeployment(plan.data.id);assert.equal(saved.status,'unknown');assert.equal(saved.enrollment_id,'enroll-1');assert.equal(saved.execution_stage,'bootstrap_dispatched');
 });
 
 test('deployment plan requires host pinning and apply keeps tokens out of command/output',async t=>{
- const f=await fixture(t);const created=await f.request('/machines','POST',{name:'prod-3',address:'host.example.com',username:'deploy',connection_method:'direct_ssh'});const machine=created.data;const key=fixturePrivateKey();const credential=await f.request(`/machines/${machine.id}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
+ const f=await fixture(t);const created=await f.request('/machines','POST',{name:'prod-3',address:'host.example.com',connection_method:'direct_ssh'});const machine=created.data;const key=fixturePrivateKey();const credential=await f.request(`/machines/${machine.id}/accounts/${f.accountID(machine.id)}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
  const unpinned=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:credential.data.credential_id});assert.equal(unpinned.status,200);assert.equal(unpinned.data.ready,false);assert.equal(unpinned.data.error_code,'host_key_mismatch');
  await f.request(`/machines/${machine.id}`,'PUT',{fixture_host_pin:'SHA256:abcdefghijklmnop'});
  const checked=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:credential.data.credential_id});assert.equal(checked.data.ready,true,checked.raw);const plan=await f.request(`/machines/${machine.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:credential.data.credential_id,version:'0.1.0',arch:'amd64'});assert.equal(plan.status,201,plan.raw);assert.equal(plan.data.status,'awaiting_approval');assert.match(plan.raw,/密码建议只使用一次/);
@@ -283,10 +284,10 @@ test('deployment plan requires host pinning and apply keeps tokens out of comman
 });
 
 async function host(f:Awaited<ReturnType<typeof fixture>>,name='fixture'){
- const created=await f.request('/machines','POST',{name,address:'host.example.com',username:'deploy',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});
+ const created=await f.request('/machines','POST',{name,address:'host.example.com',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});
  assert.equal(created.status,201,created.raw);
  const key=fixturePrivateKey();
- const credential=await f.request(`/machines/${created.data.id}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
+ const credential=await f.request(`/machines/${created.data.id}/accounts/${f.accountID(created.data.id)}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
  assert.equal(credential.status,201,credential.raw);
  return {id:created.data.id,credential:credential.data.credential_id,key};
 }
@@ -348,10 +349,10 @@ test('preflight errors and malformed host output return fixed codes without leak
 
 test('default selection and revoked, expired, cross-host and unsupported SSH credentials',async t=>{
  const f=await fixture(t),h=await host(f),other=await host(f,'other');
- const second=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'temporary'});
- assert.equal(f.machines.get(h.id).default_credential_id,second.data.credential_id);
+ const second=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'temporary'});
+ assert.equal(f.machines.get(h.id).accounts[0].default_credential_id,second.data.credential_id);
  assert.equal((await f.request(`/machines/${other.id}/ssh-check`,'POST',{credential_id:h.credential})).status,404);
- await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE');
  assert.equal((await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential})).status,409);
  f.db.run('UPDATE machine_credentials SET expires_at=? WHERE id=?',now.toISOString(),second.data.credential_id);
  assert.equal((await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:second.data.credential_id})).status,409);
@@ -371,10 +372,10 @@ test('checks and plans bind target, architecture, credential and expiry before e
  const plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',input);assert.equal(plan.status,201,plan.raw);
  assert.equal((await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true,command:'arbitrary command'})).status,400);
  assert.equal((await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:false})).status,400);
- await f.request(`/machines/${h.id}`,'PUT',{username:'different-user'});
+ await f.request(`/machines/${h.id}`,'PUT',{address:'changed.example.test'});
  assert.equal((await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true})).status,409);
  assert.equal((await f.request(`/machines/${h.id}/deployments/plan`,'POST',input)).status,404);
- await f.request(`/machines/${h.id}`,'PUT',{username:'deploy'});
+ await f.request(`/machines/${h.id}`,'PUT',{address:'host.example.com'});
  clock=new Date(now.getTime()+900_000);
  assert.equal((await f.request(`/machines/${h.id}/deployments/plan`,'POST',input)).status,404);
  assert.equal((await f.request(`/machines/${h.id}/deployments/${plan.data.id}/apply`,'POST',{confirm:true})).status,409);
@@ -387,16 +388,110 @@ test('in-flight check is exclusive per host and cancellation releases its lock',
  const f=await fixture(t,{},async input=>{entered();await new Promise((_,reject)=>input.signal.addEventListener('abort',()=>reject(new SSHError('cancelled')),{once:true}));throw Error('unreachable')}),h=await host(f);
  const controller=new AbortController();const pending=f.machines.checkSSH(h.id,{},f.user.id,controller.signal);await started;
  assert.equal((await f.request(`/machines/${h.id}/ssh-check`,'POST',{})).status,409);
- assert.equal((await f.request(`/machines/${h.id}`,'PUT',{username:'different'})).status,409);
+ assert.equal((await f.request(`/machines/${h.id}`,'PUT',{address:'changed.example.test'})).status,409);
  assert.equal((await f.request(`/machines/${h.id}`,'DELETE')).status,409);
- assert.equal((await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE')).status,200);
+ assert.equal((await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE')).status,200);
  controller.abort();assert.equal((await pending).error_code,'cancelled');
- assert.equal((await f.request(`/machines/${h.id}`,'PUT',{username:'deploy'})).status,200);
+ assert.equal((await f.request(`/machines/${h.id}`,'PUT',{address:'host.example.com'})).status,200);
 });
 
 
 const credentialRow = (f: Awaited<ReturnType<typeof fixture>>, credentialID: string) => f.db.get<any>('SELECT * FROM effective_machine_credentials WHERE id=?', credentialID)!;
 const credentialEvents = (f: Awaited<ReturnType<typeof fixture>>, credentialID: string) => f.db.all<any>('SELECT * FROM machine_credential_events WHERE credential_id=? ORDER BY created_at,id', credentialID);
+
+test('SSH accounts isolate login identity and never fall back across defaults or shared secrets',async t=>{
+ const f=await fixture(t),h=await host(f,'account-defaults');
+ const mid=h.id,deploy=f.accountID(mid);
+ assert.equal(Object.hasOwn(f.machines.get(mid),'username'),false);assert.equal(Object.hasOwn(f.machines.get(mid),'default_credential_id'),false);
+ assert.equal((await f.rawRequest('/machines','POST',{name:'old-input',address:'old.example.test',username:'root'})).status,400);
+ for(const [path,method] of [[`/machines/${mid}/credentials`,'GET'],[`/machines/${mid}/credentials`,'POST'],[`/machines/${mid}/default-credential`,'PUT']] as const)assert.equal((await f.rawRequest(path,method,method==='GET'?undefined:{})).status,404);
+ const root=await f.rawRequest(`/machines/${mid}/accounts`,'POST',{username:'root'});assert.equal(root.status,201,root.raw);
+ const source=credentialRow(f,h.credential).connection_credential_id;
+ const bound=await f.rawRequest(`/machines/${mid}/accounts/${root.data.id}/credentials`,'POST',{connection_credential_id:source});assert.equal(bound.status,201,bound.raw);assert.notEqual(bound.data.id,h.credential);assert.equal(bound.data.username,'root');
+ assert.equal((await f.rawRequest(`/machines/${mid}/accounts/${root.data.id}/default-credential`,'PUT',{credential_id:h.credential})).status,404);
+ assert.equal((await f.rawRequest(`/machines/${mid}/accounts/${root.data.id}/credentials/${h.credential}`,'DELETE')).status,404);
+ assert.equal((await f.rawRequest(`/machines/${mid}/accounts/${root.data.id}`,'PUT',{username:'admin'})).status,404);
+ const checked=await f.rawRequest(`/machines/${mid}/ssh-check`,'POST',{credential_id:bound.data.id});assert.equal(checked.data.username,'root');assert.equal(f.sshInput.machine.username,'root');assert.equal(f.sshInput.machine.account_id,root.data.id);
+ assert.equal(f.machines.get(mid).default_account_id,deploy);
+ await f.rawRequest(`/machines/${mid}/accounts/${deploy}/credentials/${h.credential}`,'DELETE');
+ assert.equal((await f.rawRequest(`/machines/${mid}/ssh-check`,'POST',{})).status,409);
+ assert.equal((await f.rawRequest(`/machines/${mid}/ssh-check`,'POST',{credential_id:bound.data.id})).status,200);
+ await f.rawRequest(`/machines/${mid}/default-account`,'PUT',{account_id:root.data.id});
+ assert.equal((await f.rawRequest(`/machines/${mid}/ssh-check`,'POST',{})).data.username,'root');
+});
+
+test('deleted SSH accounts retain history and a recreated username inherits no credentials or checks',async t=>{
+ const f=await fixture(t),h=await host(f,'account-removal'),old=f.accountID(h.id);
+ assert.equal((await f.rawRequest(`/machines/${h.id}/ssh-check`,'POST',{})).status,200);
+ const lease=f.machines.acquireTerminal(h.id,h.credential,()=>{});
+ assert.equal((await f.rawRequest(`/machines/${h.id}/accounts/${old}`,'DELETE')).status,409);lease.release();
+ assert.equal((await f.rawRequest(`/machines/${h.id}/accounts/${old}`,'DELETE')).status,200);
+ assert.equal((await f.rawRequest(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential})).status,404);
+ assert.equal(f.machines.get(h.id).default_account_id,'');assert.equal(f.machines.get(h.id).accounts.length,0);
+ assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_credential_events WHERE credential_id=?',h.credential)?.n,2);
+ assert.ok(f.db.get<any>('SELECT deleted_at FROM machine_ssh_accounts WHERE id=?',old)?.deleted_at);
+ const recreated=await f.rawRequest(`/machines/${h.id}/accounts`,'POST',{username:'deploy',make_default:true});assert.equal(recreated.status,201,recreated.raw);assert.notEqual(recreated.data.id,old);assert.equal(recreated.data.credentials.length,0);assert.equal(recreated.data.last_check,null);assert.equal(recreated.data.recommended,false);
+ assert.equal((await f.rawRequest(`/machines/${h.id}/ssh-check`,'POST',{})).status,409);
+ assert.equal((await f.rawRequest(`/machines/${h.id}/accounts`,'POST',{username:'deploy'})).status,409);
+});
+
+test('account permission recommendations require actual fresh privilege evidence and exact credential revision',async t=>{
+ let clock=now,state='unavailable';const f=await fixture(t,{now:()=>clock},async input=>({stdout:checkOutput.replace('privilege_state=root','privilege_state='+state).replace('install_privilege=1','install_privilege='+(state==='unavailable'?'0':'1')),stderr:'',stages:[]})),h=await host(f,'account-recommendations');
+ const checked=await f.rawRequest(`/machines/${h.id}/ssh-check`,'POST',{});assert.equal(checked.status,200);assert.equal(checked.data.permission_recovery.reason,'ssh_privilege_required');assert.equal(checked.data.permission_recovery.accounts[0].recommended,false);
+ state='sudo_noninteractive';const ready=await f.rawRequest(`/machines/${h.id}/ssh-check`,'POST',{});assert.equal(ready.data.ready,true);
+ let account=f.machines.get(h.id).accounts[0];assert.equal(account.check_fresh,true);assert.equal(account.recommended,true);assert.equal(account.recommended_credential_id,h.credential);
+ f.db.run('UPDATE machine_credentials SET expires_at=? WHERE id=?',new Date(clock.getTime()+120000).toISOString(),h.credential);
+ account=f.machines.get(h.id).accounts[0];assert.equal(account.check_fresh,false);assert.equal(account.recommended,false);assert.equal(account.recommended_credential_id,'');
+ assert.equal((await f.rawRequest(`/machines/${h.id}/deployments/plan`,'POST',{check_id:ready.data.id,credential_id:h.credential,version:'0.1.0',arch:'amd64'})).status,409);
+ clock=new Date(clock.getTime()+16*60000);assert.equal(f.machines.get(h.id).accounts[0].recommended,false);
+});
+
+test('AI install proposals and approved installs keep the checked account when defaults change',async t=>{
+ const f=await fixture(t),h=await host(f,'frozen-account'),checked=await f.rawRequest(`/machines/${h.id}/ssh-check`,'POST',{});assert.equal(checked.data.ready,true);
+ const root=await f.rawRequest(`/machines/${h.id}/accounts`,'POST',{username:'root',make_default:true});assert.equal(root.status,201);
+ const rootCredential=await f.rawRequest(`/machines/${h.id}/accounts/${root.data.id}/credentials`,'POST',{method:'password',secret:'other-account-secret',retention:'temporary'});assert.equal(rootCredential.status,201);
+ const proposed=f.machines.assistantPlan(h.id,{check_id:checked.data.id,version:'0.1.0',arch:'amd64'},f.user.id) as any;
+ assert.equal(proposed.plan.ssh_account.id,checked.data.account_id);assert.equal(proposed.plan.ssh_account.username,'deploy');assert.equal(proposed.plan.credential.id,h.credential);
+ assert.equal((await f.rawRequest(`/machines/${h.id}/deployments/${proposed.id}/apply`,'POST',{confirm:true})).status,200);assert.equal(f.sshInput.machine.username,'deploy');assert.equal(f.sshInput.credentialID,h.credential);
+});
+
+test('unknown maintenance prevents account deletion but permits explicit new credentials for readonly recovery',async t=>{
+ const f=await fixture(t),h=await host(f,'unknown-account'),account=f.accountID(h.id);
+ f.db.run("INSERT INTO machine_deployments(id,machine_id,credential_id,status,version,arch,plan_json,created_at,created_by,execution_stage) VALUES('unknown-operation',?,?,'unknown','0.1.0','amd64','{}',?,'admin','bootstrap_dispatched')",h.id,h.credential,now.toISOString());
+ assert.equal((await f.rawRequest(`/machines/${h.id}/accounts/${account}`,'DELETE')).status,409);
+ const recovery=await f.rawRequest(`/machines/${h.id}/accounts`,'POST',{username:'rescue'});assert.equal(recovery.status,201);
+ const added=await f.rawRequest(`/machines/${h.id}/accounts/${recovery.data.id}/credentials`,'POST',{method:'password',secret:'rescue-secret',retention:'temporary'});assert.equal(added.status,201,added.raw);
+ assert.equal((await f.rawRequest(`/machines/${h.id}/ssh-check`,'POST',{credential_id:added.data.id})).data.username,'rescue');
+ assert.equal(f.db.get<any>("SELECT credential_id FROM machine_deployments WHERE id='unknown-operation'")?.credential_id,h.credential);
+});
+
+test('automatic installation checks root first, records every failed account and freezes the successful account',async t=>{
+ const attempted:string[]=[];const f=await fixture(t,{},async input=>{attempted.push(input.machine.username);return {stdout:input.machine.username==='root'?checkOutput.replace('privilege_state=root','privilege_state=unavailable').replace('install_privilege=1','install_privilege=0'):checkOutput.replace('privilege_state=root','privilege_state=sudo_noninteractive'),stderr:'',stages:[]}}),h=await host(f,'auto-install');
+ const root=await f.rawRequest(`/machines/${h.id}/accounts`,'POST',{username:'root'});const key=await f.rawRequest(`/machines/${h.id}/accounts/${root.data.id}/credentials`,'POST',{method:'password',secret:'root-login-secret',retention:'temporary'});assert.equal(key.status,201);
+ const checked=await f.rawRequest(`/machines/${h.id}/installation-preflight`,'POST',{selection:'auto'});assert.equal(checked.status,200,checked.raw);assert.equal(checked.data.ready,true);assert.deepEqual(attempted,['root','deploy']);
+ const selection=checked.data.installation_selection;assert.equal(selection.mode,'auto');assert.equal(selection.selected_credential_id,h.credential);assert.equal(selection.attempts.length,2);assert.equal(selection.attempts[0].privilege_state,'unavailable');assert.equal(selection.attempts[1].privilege_state,'sudo_noninteractive');
+ assert.equal(f.machines.get(h.id).default_account_id,f.accountID(h.id));assert.ok(!checked.raw.includes('root-login-secret'));
+ const audit=await f.rawRequest(`/machines/${h.id}/installation-preflights`);assert.equal(audit.data[0].status,'succeeded');assert.equal(audit.data[0].attempts.length,2);assert.ok(audit.data[0].attempts.every((attempt:any)=>attempt.status==='completed'));
+ await f.rawRequest(`/machines/${h.id}/default-account`,'PUT',{account_id:root.data.id});
+ const plan=f.machines.assistantPlan(h.id,{check_id:checked.data.id,version:'0.1.0',arch:'amd64'},f.user.id) as any;assert.equal(plan.plan.ssh_account.username,'deploy');assert.equal(plan.plan.credential.id,h.credential);
+});
+
+test('manual installation checks never switch accounts, while automatic checks stop on identity and host prerequisite failure',async t=>{
+ for(const scenario of ['manual','host_key_mismatch','timed_out','missing-curl','ssh_failed']){
+  const attempted:string[]=[];const f=await fixture(t,{},async input=>{attempted.push(input.machine.username);if(input.machine.username==='root'&&scenario!=='manual'&&scenario!=='missing-curl')throw new SSHError(scenario as 'ssh_failed'|'host_key_mismatch'|'timed_out');return {stdout:input.machine.username==='root'?checkOutput.replace('privilege_state=root','privilege_state=unavailable').replace('install_privilege=1','install_privilege=0').replace('curl=1',scenario==='missing-curl'?'curl=0':'curl=1'):checkOutput,stderr:'',stages:[]}}),h=await host(f,'auto-'+scenario);
+  const root=await f.rawRequest(`/machines/${h.id}/accounts`,'POST',{username:'root'}),key=await f.rawRequest(`/machines/${h.id}/accounts/${root.data.id}/credentials`,'POST',{method:'password',secret:'root-login',retention:'temporary'});
+  const result=await f.rawRequest(`/machines/${h.id}/installation-preflight`,'POST',scenario==='manual'?{selection:'manual',credential_id:key.data.id}:{selection:'auto'});assert.equal(result.status,200,result.raw);
+  assert.deepEqual(attempted,scenario==='ssh_failed'?['root','deploy']:['root']);assert.equal(result.data.ready,scenario==='ssh_failed');
+  if(scenario==='timed_out'){assert.equal(result.data.error_code,'timed_out');assert.equal(result.data.installation_selection.attempts.length,1);assert.equal(result.data.installation_selection.selected_credential_id,'');}
+  assert.equal((await f.rawRequest(`/machines/${h.id}/installation-preflight`,'POST',{selection:'auto',credential_id:key.data.id})).status,400);assert.equal((await f.rawRequest(`/machines/${h.id}/installation-preflight`,'POST',{selection:'manual'})).status,400);
+ }
+});
+
+test('automatic installation selection refuses a changed endpoint instead of testing another account against it',async t=>{
+ let f:any;const attempted:string[]=[];f=await fixture(t,{},async input=>{attempted.push(input.machine.username);f.db.run("UPDATE managed_machines SET address='changed.example.test',ssh_target_generation=ssh_target_generation+1 WHERE id=?",input.machine.id);throw new SSHError('ssh_failed');});const h=await host(f,'auto-target-change');
+ const root=await f.rawRequest(`/machines/${h.id}/accounts`,'POST',{username:'root'});await f.rawRequest(`/machines/${h.id}/accounts/${root.data.id}/credentials`,'POST',{method:'password',secret:'root-login',retention:'temporary'});
+ const result=await f.rawRequest(`/machines/${h.id}/installation-preflight`,'POST',{selection:'auto'});assert.equal(result.status,409,result.raw);assert.equal(attempted.length,1);assert.equal(f.db.get<any>('SELECT status FROM machine_installation_selections')?.status,'failed');
+});
 
 test('credential policies default both login methods to six hours with explicit consent and enforce finite limits', async t => {
  const f=await fixture(t), h=await host(f,'retention-policy');
@@ -405,7 +500,7 @@ test('credential policies default both login methods to six hours with explicit 
  assert.equal(Date.parse(original.expires_at)-Date.parse(original.created_at),3_600_000);
  for(const method of ['ssh_key','password']) {
   const secret=method==='ssh_key'?h.key:'managed-password';
-  const add=(body:any)=>f.request(`/machines/${h.id}/credentials`,'POST',{method,secret:method==='ssh_key'?fixturePrivateKey():secret,...body});
+  const add=(body:any)=>f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method,secret:method==='ssh_key'?fixturePrivateKey():secret,...body});
   for(const body of [
    {},{retention:'managed'},{confirm_managed:false},{confirm_managed:'true'},
    {retention:'managed',confirm_managed:true,expires_in_seconds:31_536_001},
@@ -423,14 +518,14 @@ test('credential policies default both login methods to six hours with explicit 
   if(method==='password') {const oneTime=await add({retention:'one_time'});assert.equal(oneTime.status,201,oneTime.raw);assert.equal(Date.parse(oneTime.data.expires_at)-now.getTime(),900_000);assert.equal(oneTime.data.secret_fingerprint,'')}
   else assert.equal((await add({retention:'one_time'})).status,400);
  }
- for(const body of [{method:'manual_script'},{method:'manual_script',secret:'must-not-be-saved'},{method:'manual_script',retention:'managed',confirm_managed:true}]) assert.equal((await f.request(`/machines/${h.id}/credentials`,'POST',body)).status,400);
+ for(const body of [{method:'manual_script'},{method:'manual_script',secret:'must-not-be-saved'},{method:'manual_script',retention:'managed',confirm_managed:true}]) assert.equal((await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',body)).status,400);
 });
 
 test('permanent passwords and keys require distinct explicit consent and never accept a finite deadline',async t=>{
  const f=await fixture(t),h=await host(f,'permanent-consent');
  for(const method of ['ssh_key','password']) {
   const secret=method==='ssh_key'?h.key:'permanent-password';
-  const add=(body:any)=>f.request(`/machines/${h.id}/credentials`,'POST',{method,secret:method==='ssh_key'?fixturePrivateKey():secret,retention:'permanent',...body});
+  const add=(body:any)=>f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method,secret:method==='ssh_key'?fixturePrivateKey():secret,retention:'permanent',...body});
   for(const body of [{},{confirm_permanent:false},{confirm_permanent:'true'},{confirm_managed:true},{confirm_permanent:true,confirm_managed:true},{confirm_permanent:true,expires_in_seconds:21600},{confirm_permanent:true,expires_in_seconds:null}]) assert.equal((await add(body)).status,400,method+JSON.stringify(body));
   const added=await add({confirm_permanent:true});assert.equal(added.status,201,added.raw);assert.equal(added.data.retention,'permanent');assert.equal(added.data.expires_at,'');assert.match(added.data.warning,/无固定期限/);assert.match(added.data.warning,/短期保存/);
   const stored=credentialRow(f,added.data.credential_id);assert.equal(stored.expires_at,'');assert.notEqual(stored.secret_encrypted,'');assert.ok(!added.raw.includes(secret));
@@ -442,20 +537,20 @@ test('permanent credentials survive years of cleanup and restart, then revocatio
  t.mock.timers.enable({apis:['setInterval']});
  for(const method of ['ssh_key','password']) {
   let clock=now;const f=await fixture(t,{now:()=>clock}),h=await host(f,'permanent-lifecycle-'+method);
-  await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+  await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE');
   const secret=method==='ssh_key'?fixturePrivateKey():'permanent-lifecycle-password';
-  const added=await f.request(`/machines/${h.id}/credentials`,'POST',{method,secret,retention:'permanent',confirm_permanent:true});assert.equal(added.status,201,added.raw);const cid=added.data.credential_id;
+  const added=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method,secret,retention:'permanent',confirm_permanent:true});assert.equal(added.status,201,added.raw);const cid=added.data.credential_id;
   clock=new Date('2036-10-19T00:00:00.000Z');t.mock.timers.tick(30_000);
   const restarted=registerManagedMachines({...f.deps,router:new Router()});t.after(()=>restarted.close?.());
   assert.notEqual(credentialRow(f,cid).secret_encrypted,'');assert.equal(credentialRow(f,cid).clear_reason,'');
   const summary=f.machines.get(h.id);assert.equal(summary.active_credential_count,1);assert.equal(summary.active_reusable_ssh_credential_count,1);assert.equal(summary.capabilities.deploy_agent.available,true);
-  assert.deepEqual(f.machines.assistantGet(h.id).ssh_credentials,[{id:cid,method,expires_at:''}]);
+  assert.deepEqual(f.machines.assistantGet(h.id).ssh_credentials,[{id:cid,account_id:f.accountID(h.id),username:'deploy',account_revision:1,method,expires_at:''}]);
   assert.equal((await f.request(`/machines/${h.id}`,'DELETE')).status,409);
   const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});assert.equal(checked.status,200,checked.raw);
   const planned=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:cid,version:'0.1.0',arch:'amd64'});assert.equal(planned.status,201,planned.raw);assert.equal(planned.data.plan.credential.expires_at,'');
   let invalidated=0;const lease=f.machines.acquireTerminal(h.id,cid,()=>{invalidated++;lease.release()});assert.equal(lease.valid(),true);
   t.mock.timers.tick(30_000);assert.equal(lease.valid(),true);assert.equal(invalidated,0);
-  assert.equal((await f.request(`/machines/${h.id}/credentials/${cid}`,'DELETE')).status,200);
+  assert.equal((await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${cid}`,'DELETE')).status,200);
   assert.equal(invalidated,1);assert.equal(lease.valid(),false);assert.equal(lease.privateKey,'');assert.equal(lease.password,'');
   assert.equal(credentialRow(f,cid).secret_encrypted,'');assert.equal(credentialRow(f,cid).clear_reason,'revoked');
   assert.equal(f.db.get<any>('SELECT status FROM machine_deployments WHERE id=?',planned.data.id)?.status,'cancelled');
@@ -483,13 +578,13 @@ test('revocation clears the envelope idempotently, closes a lease and keeps secr
  const other=await host(f,'revoke-other');let invalidated=0;
  const lease=f.machines.acquireTerminal(h.id,h.credential,()=>{invalidated++;lease.release()});
  assert.equal(lease.valid(),true);assert.equal(f.machines.get(h.id).capabilities.terminal.reason,'host_busy');
- f.user.role='member';assert.equal((await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE')).status,403);assert.notEqual(credentialRow(f,h.credential).secret_encrypted,'');
- for(const path of [`/machines/${h.id}`,`/machines/${h.id}/credentials`]) assert.equal((await f.request(path)).status,403);
- f.user.role='admin';assert.equal((await f.request(`/machines/${other.id}/credentials/${h.credential}`,'DELETE')).status,404);
- assert.equal((await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE')).status,200);
+ f.user.role='member';assert.equal((await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE')).status,403);assert.notEqual(credentialRow(f,h.credential).secret_encrypted,'');
+ for(const path of [`/machines/${h.id}`,`/machines/${h.id}/accounts`]) assert.equal((await f.request(path)).status,403);
+ f.user.role='admin';assert.equal((await f.request(`/machines/${other.id}/accounts/${f.accountID(other.id)}/credentials/${h.credential}`,'DELETE')).status,404);
+ assert.equal((await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE')).status,200);
  assert.equal(lease.valid(),false);assert.equal(lease.privateKey,'');assert.equal(invalidated,1);
  const cleared=credentialRow(f,h.credential);assert.equal(cleared.secret_encrypted,'');assert.equal(cleared.clear_reason,'revoked');assert.equal(cleared.secret_cleared_at,now.toISOString());
- clock=new Date(now.getTime()+2000);assert.equal((await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE')).status,200);
+ clock=new Date(now.getTime()+2000);assert.equal((await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE')).status,200);
  assert.equal(credentialRow(f,h.credential).secret_cleared_at,cleared.secret_cleared_at);assert.equal(credentialEvents(f,h.credential).filter(e=>e.event==='revoked').length,1);
  const exposed=(await f.request(`/machines/${h.id}`)).raw+JSON.stringify(credentialEvents(f,h.credential))+JSON.stringify(f.machines.assistantGet(h.id));
  assert.ok(!exposed.includes(h.key));assert.ok(!exposed.includes('secret_encrypted'));assert.ok(!JSON.stringify(credentialEvents(f,h.credential)).includes('secret_fingerprint'));
@@ -508,7 +603,7 @@ test('timer clears expired secrets and pending plans without reads, invalidates 
  assert.equal(credentialRow(f,h.credential).secret_encrypted,'');assert.equal(credentialRow(f,h.credential).clear_reason,'expired');assert.equal(invalidated,1);assert.equal(lease.valid(),false);
  assert.equal(f.db.get<any>('SELECT status FROM machine_deployments WHERE id=?',planned.data.id)?.status,'cancelled');
  assert.equal(credentialEvents(f,h.credential).filter(e=>e.event==='expired').length,1);
- const later=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),expires_in_seconds:60,retention:'temporary'});assert.equal(later.status,201);
+ const later=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),expires_in_seconds:60,retention:'temporary'});assert.equal(later.status,201);
  f.machines.close?.();clock=new Date(clock.getTime()+60_000);t.mock.timers.tick(60_000);
  assert.notEqual(credentialRow(f,later.data.credential_id).secret_encrypted,'','closed module no longer runs cleanup');
 });
@@ -524,7 +619,7 @@ test('using an expired credential clears it immediately before any SSH attempt',
 test('password failures, cancellation and unused terminal closure consume and erase the password', async t => {
  for(const outcome of ['failed','cancelled','terminal']){
   const f=await fixture(t,{},async()=>{throw new SSHError('authentication_failed')}),h=await host(f,'password-'+outcome);
-  const added=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'one-use-'+outcome,retention:'one_time'});const cid=added.data.credential_id;
+  const added=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'password',secret:'one-use-'+outcome,retention:'one_time'});const cid=added.data.credential_id;
   if(outcome==='terminal') { const lease=f.machines.acquireTerminal(h.id,cid,()=>{});assert.equal(lease.valid(),true);lease.release();assert.equal(lease.password,'');assert.equal(lease.valid(),false); }
   else { const abort=new AbortController();if(outcome==='cancelled')abort.abort();const result=await f.machines.checkSSH(h.id,{credential_id:cid},f.user.id,abort.signal);assert.equal(result.error_code,outcome==='cancelled'?'cancelled':'authentication_failed'); }
   const saved=credentialRow(f,cid);assert.equal(saved.secret_encrypted,'');assert.equal(saved.clear_reason,'consumed');assert.ok(saved.revoked_at);assert.equal(credentialEvents(f,cid).filter(e=>e.event==='consumed').length,1);
@@ -532,29 +627,29 @@ test('password failures, cancellation and unused terminal closure consume and er
 });
 
 test('capabilities allow automatic identity discovery and distinguish credentials and busy state', async t => {
- const f=await fixture(t);const made=await f.request('/machines','POST',{name:'capabilities',address:'host.example.com',username:'deploy'}),mid=made.data.id;
+ const f=await fixture(t);const made=await f.request('/machines','POST',{name:'capabilities',address:'host.example.com'}),mid=made.data.id;
  let machine=f.machines.get(mid);assert.equal(machine.connection_method,'direct_ssh');assert.equal(machine.capabilities.terminal.reason,'ssh_credential_required');assert.equal(machine.ssh_recovery_available,false);
  await f.request(`/machines/${mid}`,'PUT',{connection_method:'direct_ssh'});assert.equal(f.machines.get(mid).capabilities.ssh_check.reason,'ssh_credential_required');
  await f.request(`/machines/${mid}`,'PUT',{fixture_host_pin:'SHA256:abcdefghijklmnop'});
- const script=await f.request(`/machines/${mid}/credentials`,'POST',{method:'manual_script'});assert.equal(script.status,400);
+ const script=await f.request(`/machines/${mid}/accounts/${f.accountID(mid)}/credentials`,'POST',{method:'manual_script'});assert.equal(script.status,400);
  machine=f.machines.get(mid);assert.equal(machine.active_credential_count,0);assert.equal(machine.active_ssh_credential_count,0);assert.equal(machine.capabilities.terminal.reason,'ssh_credential_required');assert.equal(machine.capabilities.deploy_agent.reason,'reusable_ssh_credential_required');
- const password=await f.request(`/machines/${mid}/credentials`,'POST',{method:'password',secret:'temporary',retention:'one_time'});const pid=password.data.credential_id;
+ const password=await f.request(`/machines/${mid}/accounts/${f.accountID(mid)}/credentials`,'POST',{method:'password',secret:'temporary',retention:'one_time'});const pid=password.data.credential_id;
  machine=f.machines.get(mid);assert.equal(machine.active_ssh_credential_count,1);assert.equal(machine.active_ssh_key_count,0);assert.equal(machine.active_reusable_ssh_credential_count,0);assert.equal(machine.ssh_recovery_available,true);assert.equal(machine.capabilities.terminal.available,true);assert.equal(machine.capabilities.ssh_check.available,true);assert.equal(machine.capabilities.deploy_agent.reason,'reusable_ssh_credential_required');
  const lease=f.machines.acquireTerminal(mid,pid,()=>{});for(const value of Object.values(f.machines.get(mid).capabilities)) assert.equal(value.reason,'host_busy');lease.release();
- const key=await f.request(`/machines/${mid}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'temporary'});
+ const key=await f.request(`/machines/${mid}/accounts/${f.accountID(mid)}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'temporary'});
  machine=f.machines.get(mid);assert.equal(machine.active_ssh_key_count,1);assert.equal(machine.capabilities.deploy_agent.available,true);
- await f.request(`/machines/${mid}/credentials/${key.data.credential_id}`,'DELETE');assert.equal(f.machines.get(mid).ssh_recovery_available,false);
+ await f.request(`/machines/${mid}/accounts/${f.accountID(mid)}/credentials/${key.data.credential_id}`,'DELETE');assert.equal(f.machines.get(mid).ssh_recovery_available,false);
 });
 
 test('Agent activation clears only its own temporary secrets, preserves managed and permanent logins, and cancels spare plans', async t => {
  const f=await fixture(t),h=await host(f,'activated-policy'),other=await host(f,'activation-other');
- const managed=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'managed',confirm_managed:true});
- const legacy=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'managed',confirm_managed:true});f.db.run("UPDATE machine_credentials SET policy_source='legacy' WHERE id=?",legacy.data.credential_id);
- const permanentKey=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'permanent',confirm_permanent:true});assert.equal(permanentKey.status,201,permanentKey.raw);
- const permanentPassword=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'permanent-activation-password',retention:'permanent',confirm_permanent:true});assert.equal(permanentPassword.status,201,permanentPassword.raw);
- const managedPassword=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'managed-activation-password',confirm_managed:true});assert.equal(managedPassword.status,201,managedPassword.raw);
- const temporary=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'temporary'});
- const password=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'activation-password',retention:'one_time'});
+ const managed=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'managed',confirm_managed:true});
+ const legacy=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'managed',confirm_managed:true});f.db.run("UPDATE machine_credentials SET policy_source='legacy' WHERE id=?",legacy.data.credential_id);
+ const permanentKey=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'permanent',confirm_permanent:true});assert.equal(permanentKey.status,201,permanentKey.raw);
+ const permanentPassword=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'password',secret:'permanent-activation-password',retention:'permanent',confirm_permanent:true});assert.equal(permanentPassword.status,201,permanentPassword.raw);
+ const managedPassword=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'password',secret:'managed-activation-password',confirm_managed:true});assert.equal(managedPassword.status,201,managedPassword.raw);
+ const temporary=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'ssh_key',secret:fixturePrivateKey(),retention:'temporary'});
+ const password=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'password',secret:'activation-password',retention:'one_time'});
  const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential});
  const input={check_id:checked.data.id,credential_id:h.credential,version:'0.1.0',arch:'amd64'};
  const first=await f.request(`/machines/${h.id}/deployments/plan`,'POST',input),second=await f.request(`/machines/${h.id}/deployments/plan`,'POST',input);
@@ -634,9 +729,9 @@ test('managed and permanent logins authenticate fixed uninstall probes and remov
  for(const retention of ['managed','permanent']) for(const method of ['password','ssh_key']) {
   const calls:any[]=[];let removed=false;
   const f=await fixture(t,{},async input=>{calls.push(input);if(input.command.includes('systemctl stop'))removed=true;return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]}});
-  const h=await uninstallHost(f);await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+  const h=await uninstallHost(f);await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE');
   const secret=method==='ssh_key'?h.key:'retained-uninstall-password';
-  const added=await f.request(`/machines/${h.id}/credentials`,'POST',{method,secret,retention,...retention==='permanent'?{confirm_permanent:true}:{confirm_managed:true}});assert.equal(added.status,201,added.raw);
+  const added=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method,secret,retention,...retention==='permanent'?{confirm_permanent:true}:{confirm_managed:true}});assert.equal(added.status,201,added.raw);
   const cid=added.data.credential_id,checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:cid});assert.equal(checked.status,200,checked.raw);
   assert.equal(f.machines.get(h.id).active_ssh_key_count,method==='ssh_key'?1:0);assert.equal(f.machines.get(h.id).capabilities.uninstall_agent.available,true);
   const planned=await uninstallPlan(f,{...h,credential:cid,check:checked.data.id});assert.equal(planned.status,201,planned.raw);
@@ -691,7 +786,7 @@ test('uninstall rejects members, changed identities, expired plans and revoked k
  const h=await uninstallHost(f);f.user.role='member';assert.equal((await uninstallPlan(f,h)).status,403);f.user.role='admin';
  const planned=await uninstallPlan(f,h);observed='other-node';assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned.data.id}/apply`,'POST',{confirm:true})).status,409);assert.equal(destructive,0);observed='node-known';
  const planned2=await uninstallPlan(f,h);clock=new Date(now.getTime()+900001);assert.equal((await f.request(`/machines/${h.id}/uninstallations/${planned2.data.id}/apply`,'POST',{confirm:true})).status,409);assert.equal(destructive,0);
- clock=now;await f.request(`/machines/${h.id}/uninstallations/${planned2.data.id}/cancel`,'POST',{});const planned3=await uninstallPlan(f,h);await f.request(`/machines/${h.id}/credentials/${h.credential}`,'DELETE');
+ clock=now;await f.request(`/machines/${h.id}/uninstallations/${planned2.data.id}/cancel`,'POST',{});const planned3=await uninstallPlan(f,h);await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${h.credential}`,'DELETE');
  assert.equal(f.db.get<any>('SELECT status FROM machine_uninstallations WHERE id=?',planned3.data.id)?.status,'cancelled');assert.equal(destructive,0);
 });
 
@@ -731,7 +826,7 @@ test('interrupted post-activation installation preserves credentials for explici
 
 test('cluster membership prevents deleting stable machine identity until explicitly detached',async t=>{
  const f=await fixture(t);
- const created=await f.request('/machines','POST',{name:'cluster-host',address:'10.0.0.30',port:22,username:'deploy',connection_method:'direct_ssh'});
+ const created=await f.request('/machines','POST',{name:'cluster-host',address:'10.0.0.30',port:22,connection_method:'direct_ssh'});
  assert.equal(created.status,201,created.raw);
  const machineID=created.data.id;
  f.db.exec('CREATE TABLE ops_platform_cluster_members(machine_id TEXT PRIMARY KEY,cluster_id TEXT NOT NULL)');
@@ -766,7 +861,7 @@ test('recovery accepts missing and damaged identity with partial programs and re
 
 test('recovery refuses another host actual identity, unsafe paths, operation locks and changed approved evidence',async t=>{
  let options:any={},observed='node-known',destructive=0;const f=await fixture(t,{},async input=>{if(input.command.includes('systemctl stop'))destructive++;return {stdout:input.command.includes('LMREMOVE')?probeOutput(observed,false,options):checkOutput,stderr:'',stages:[]};}),h=await uninstallHost(f);
- const another=await f.request('/machines','POST',{name:'Another host',address:'another.example.test',username:'root'});f.db.run("UPDATE managed_machines SET agent_id='foreign-owned' WHERE id=?",another.data.id);observed='foreign-owned';assert.equal((await recoveryPlan(f,h)).status,409);
+ const another=await f.request('/machines','POST',{name:'Another host',address:'another.example.test'});f.db.run("UPDATE managed_machines SET agent_id='foreign-owned' WHERE id=?",another.data.id);observed='foreign-owned';assert.equal((await recoveryPlan(f,h)).status,409);
  observed='node-known';for(const bad of [{unsafe:true},{operation:true},{lock:true},{managed:false},{identity:'unsafe'}]){options=bad;assert.equal((await recoveryPlan(f,h)).status,409,JSON.stringify(bad));}
  options={};const plan=await recoveryPlan(f,h);assert.equal(plan.status,201,plan.raw);options={digest:'d'.repeat(64)};
  const result=await f.request(`/machines/${h.id}/uninstallations/${plan.data.id}/apply`,'POST',{confirm:true});assert.equal(result.status,409,result.raw);assert.equal(destructive,0);
@@ -785,7 +880,7 @@ test('purge unknown reconciliation selects an explicit new credential and never 
  let removed=false,destructive=0;const used:string[]=[];const f=await fixture(t,{},async input=>{used.push(input.credentialID||'');if(input.command.includes('systemctl stop')){destructive++;removed=true;throw new SSHError('timed_out');}return {stdout:input.command.includes('LMREMOVE')?probeOutput('',removed,{identity:'missing',purged:removed}):checkOutput,stderr:'',stages:[]};}),h=await recoveryHost(f);
  const plan=await recoveryPlan(f,h,{purge:true});assert.equal(plan.status,201,plan.raw);const path=`/machines/${h.id}/uninstallations/${plan.data.id}`;assert.equal((await f.request(path+'/apply','POST',{confirm:true})).status,502);assert.equal((await f.request(path)).data.status,'unknown');
  assert.equal((await f.request(path+'/reconcile','POST',{credential_id:'not-a-credential'})).status,404);assert.equal((await f.request(path+'/apply','POST',{confirm:true})).status,409);
- const fresh=await f.request(`/machines/${h.id}/credentials`,'POST',{method:'password',secret:'recovery-only-secret',retention:'temporary'});assert.equal(fresh.status,201,fresh.raw);
+ const fresh=await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'password',secret:'recovery-only-secret',retention:'temporary'});assert.equal(fresh.status,201,fresh.raw);
  const reconciled=await f.request(path+'/reconcile','POST',{credential_id:fresh.data.id});assert.equal(reconciled.status,200,reconciled.raw);assert.equal(reconciled.data.status,'succeeded');assert.equal(reconciled.data.receipt.data_removed,true);assert.equal(used.at(-1),fresh.data.id);assert.equal(destructive,1);assert.ok(!reconciled.raw.includes('recovery-only-secret'));
 });
 
@@ -799,8 +894,8 @@ test('unknown uninstall after stop can release its fence with unchanged complete
 test('Docker environment installation is admin-confirmed, durable, idempotent and scoped to the host',async t=>{
  const calls:any[]=[];
  const f=await fixture(t,{},async input=>{calls.push(input);return {stdout:JSON.stringify({state:'succeeded',phase:'verified',code:''}),stderr:'private package output',stages:[]};},true);
- const m=(await f.request('/machines','POST',{name:'docker-host',address:'host.example.com',username:'root',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
- const c=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'docker-password',retention:'temporary'})).data;
+ const m=(await f.request('/machines','POST',{name:'docker-host',address:'host.example.com',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
+ const c=(await f.request(`/machines/${m.id}/accounts/${f.accountID(m.id)}/credentials`,'POST',{method:'password',secret:'docker-password',retention:'temporary'})).data;
  const path=`/machines/${m.id}/docker-installations`,body={request_id:'docker-fixture-request-001',credential_id:c.credential_id,confirmed:true};
  assert.equal((await f.request(path,'POST',{...body,confirmed:false})).status,400);
  f.user.role='member';assert.equal((await f.request(path,'POST',body)).status,403);f.user.role='admin';
@@ -816,11 +911,11 @@ test('Docker environment installation is admin-confirmed, durable, idempotent an
 test('Docker installation rejects one-time credentials and unsafe remote results, and recovers through read-only verification',async t=>{
  let output='private raw output token=hidden',failSSH=false;
  const f=await fixture(t,{},async()=>{if(failSSH)throw new SSHError('host_key_mismatch');return {stdout:output,stderr:'secret stderr',stages:[]};},true);
- const m=(await f.request('/machines','POST',{name:'docker-recovery',address:'host.example.com',username:'root',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
- const one=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'one-time-secret',retention:'one_time'})).data;
+ const m=(await f.request('/machines','POST',{name:'docker-recovery',address:'host.example.com',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'})).data;
+ const one=(await f.request(`/machines/${m.id}/accounts/${f.accountID(m.id)}/credentials`,'POST',{method:'password',secret:'one-time-secret',retention:'one_time'})).data;
  const path=`/machines/${m.id}/docker-installations`,body={request_id:'docker-fixture-request-002',confirmed:true};
  assert.equal((await f.request(path,'POST',{...body,credential_id:one.credential_id})).status,409);
- const c=(await f.request(`/machines/${m.id}/credentials`,'POST',{method:'password',secret:'reusable-secret',retention:'temporary'})).data;
+ const c=(await f.request(`/machines/${m.id}/accounts/${f.accountID(m.id)}/credentials`,'POST',{method:'password',secret:'reusable-secret',retention:'temporary'})).data;
  const created=await f.request(path,'POST',{...body,credential_id:c.credential_id});assert.equal(created.status,202,created.raw);
  for(let n=0;n<20;n++){if(f.db.get<any>('SELECT state FROM machine_docker_installations WHERE id=?',created.data.id)?.state==='unknown')break;await new Promise(resolve=>setTimeout(resolve,10));}
  assert.equal((await f.request(path,'POST',{...body,request_id:'docker-fixture-request-003',credential_id:c.credential_id})).status,409);

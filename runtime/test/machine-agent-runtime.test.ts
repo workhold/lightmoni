@@ -17,6 +17,7 @@ import {
 } from "../src/server/machine-agent-runtime.js";
 import { canonicalJSON, sha256 } from "../src/shared/privileged-executor.js";
 import { hasPendingAgentUpdate } from "../src/server/machine-agent-updates-guard.js";
+import { createMachineSSHAccountsSchema } from "../src/server/machine-ssh-accounts.js";
 import { registerAgentJobs } from "../src/server/agent-jobs.js";
 
 const SECRET = "isolated-runtime-secret",
@@ -70,11 +71,12 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
     agentCredentials: { has: () => true } as any,
   });
   db.run(
-    "INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('host','Reviewed host','host.example.test',22,?,'direct_ssh','agent-host',?,?)",
-    login,
+    "INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES('host','Reviewed host','host.example.test',22,'direct_ssh','agent-host',?,?)",
     clock.toISOString(),
     clock.toISOString(),
   );
+  createMachineSSHAccountsSchema(db);
+  db.run("INSERT INTO machine_ssh_accounts(id,machine_id,username,created_at,created_by,updated_at) VALUES('account','host',?, ?,'admin',?)",login,clock.toISOString(),clock.toISOString());
   const executors = registerPrivilegedExecutors(deps, { dataDir: "/unused" });
   createAgentRuntimeSchema(deps);
   recordAgentRuntime(deps, "host", "agent-host", mode, 1);
@@ -147,7 +149,7 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
     [
       "credential",
       {
-        id: "credential",
+        id: "credential",account_id:"account",username:login,account_revision:1,
         method: "password",
         secret: SECRET,
         secret_fingerprint: sha256(SECRET),
@@ -172,7 +174,7 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
       (c.expires_at && Date.parse(c.expires_at) <= clock.getTime())
     )
       fail(409, "credential_unavailable");
-    return { machine: get(id), credential: { ...c } };
+    return { machine: {...get(id),account_id:c.account_id,username:c.username,account_revision:c.account_revision}, credential: { ...c } };
   };
   let privilege = { state: "root", reason_code: "" },
     applyMode = "success",
@@ -185,7 +187,7 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
     },
     revision(m: any) {
       return sha256(
-        canonicalJSON([m.address, m.port, m.username, m.connection_method]),
+        canonicalJSON([m.address, m.port, m.connection_method]),
       );
     },
     credential,
@@ -369,7 +371,7 @@ test("a non-root SSH login with passwordless sudo switches the ordinary Agent to
   assert.equal(f.credentials.size, 1);
   assert.equal(
     f.db.get<any>(
-      "SELECT count(*) n FROM managed_machines WHERE username='root'",
+      "SELECT count(*) n FROM machine_ssh_accounts WHERE username='root'",
     )!.n,
     0,
   );
@@ -389,7 +391,7 @@ test("a non-root SSH login with passwordless sudo switches the ordinary Agent to
   assert.equal(f.executors.getStatus("host").executor?.state, "active");
   assert.equal(f.credentials.size, 1);
   assert.equal(
-    f.db.get<any>("SELECT username FROM managed_machines WHERE id='host'")!
+    f.db.get<any>("SELECT username FROM machine_ssh_accounts WHERE id='account'")!
       .username,
     "deploy",
   );
@@ -618,13 +620,15 @@ test("read-only mode reconciliation accepts a new credential without changing th
   f.credentials.get("credential").revoked_at = "revoked";
   f.credentials.set("new-credential", {
     ...f.credentials.get("credential"),
-    id: "new-credential",
+    id: "new-credential",account_id:"recovery-account",username:"recovery",account_revision:1,
     revoked_at: "",
     secret: "isolated-new-secret",
     secret_fingerprint: sha256("isolated-new-secret"),
   });
   f.advance();
   f.beat("user", 1);
+  const rejected = await f.request("/plans/" + p.id + "/reconcile", "POST", {});
+  assert.equal(rejected.status, 409, "an expired approval credential must not silently switch to the host default");
   const r = await f.request("/plans/" + p.id + "/reconcile", "POST", {
     credential_id: "new-credential",
   });
@@ -636,6 +640,13 @@ test("read-only mode reconciliation accepts a new credential without changing th
     1,
   );
   assert.ok(!r.raw.includes("isolated-new-secret"));
+  const inspection = f.calls.filter(c => c.machine.username === "recovery");
+  assert.ok(inspection.length > 0);
+  assert.ok(inspection.every(c => !c.command.includes("runtime-mode.mjs apply")));
+  const audit = f.db.get<any>("SELECT detail_json FROM machine_agent_runtime_audit WHERE event='runtime_reconciliation_started'")!;
+  const detail = JSON.parse(audit.detail_json);
+  assert.equal(detail.approved_ssh_account.id, "account");
+  assert.equal(detail.verification_ssh_account.id, "recovery-account");
 });
 test("a transient downgraded heartbeat cannot complete a switch without the helper success receipt", async (t) => {
   const f = await fixture(t, "root"),

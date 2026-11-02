@@ -5,6 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { fail, HTTPError } from "../shared/http.js";
 import { canonicalJSON, sha256, strictRecord, PRIVILEGED_CAPABILITIES, type PrivilegedCapability } from "../shared/privileged-executor.js";
 import type { Context, Dependencies, Module } from "../shared/types.js";
+import { assertSSHAccount, sshAccountSnapshot, sshCredentialRevision } from "./machine-ssh.js";
 import type { MachineSummary, SSHCheckResult } from "./managed-machines.js";
 import type { AgentUpdateAccess } from "./machine-agent-updates.js";
 import { AgentReleaseCatalog } from "./machine-agent-updates-catalog.js";
@@ -24,7 +25,7 @@ const q = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 const WORKING = "('running','verifying','unknown')";
 // Must match the non-secret binding evidence recorded by checkSSH. Usage times
 // are deliberately excluded: a check must not invalidate itself by using a key.
-const credentialRevision = (value: Row) => sha256(JSON.stringify([value.id,value.connection_credential_id ?? "",value.method,value.secret_fingerprint,value.retention,value.expires_at,value.revoked_at ?? "",value.secret_cleared_at ?? ""]));
+const credentialRevision = sshCredentialRevision;
 const fields = (value: unknown, keys: string[], required = keys) => {
   try { return strictRecord(value, keys, required); } catch { fail(400, "invalid_executor_bootstrap_request"); }
 };
@@ -124,6 +125,7 @@ export function registerMachineExecutorBootstrap(deps: Dependencies, access: Acc
     if (pending(machineID)) fail(409,"executor_bootstrap_pending");
     if (executors.getStatus(machineID).executor && executors.getStatus(machineID).executor?.state!=="revoked") fail(409,"执行器已有身份，请核对原安装或明确卸载后恢复");
     const check = await access.check(machineID,{credential_id:input.credential_id},actor,signal);
+    target(access.get(machineID));
     if (!check.ready || !["root","sudo_noninteractive"].includes(check.privilege.state)) fail(409,"SSH 账户需要 root 或无交互 sudo 安装权限");
     const refreshed = access.get(machineID), selected = access.credential(machineID,check.credential_id);
     target(refreshed); if (pending(machineID)) fail(409,"executor_bootstrap_pending");
@@ -135,8 +137,8 @@ export function registerMachineExecutorBootstrap(deps: Dependencies, access: Acc
     if (!release) fail(409,"没有与目标架构匹配的 Agent 发行包，请先构建并发布");
     const pinned = catalog.pinBundle(release.sha256), id = randomUUID(), expires = new Date(deps.now().getTime()+300_000).toISOString();
     const policy = executors.preparePolicyPlan(machineID,{capabilities:input.capabilities},actor);
-    const plan = {machine:{id:refreshed.id,name:refreshed.name,address:refreshed.address,port:refreshed.port,username:refreshed.username,agent_id:refreshed.agent_id},
-      capabilities:[...input.capabilities].sort(),release:pinned.release,file:pinned.file,
+    const plan = {machine:{id:refreshed.id,name:refreshed.name,address:refreshed.address,port:refreshed.port,agent_id:refreshed.agent_id},
+      ssh_account:sshAccountSnapshot(selected.machine),capabilities:[...input.capabilities].sort(),release:pinned.release,file:pinned.file,
       target_revision:access.revision(refreshed),credential_id:selected.credential.id,check_id:check.id,privilege:check.privilege,
       policy_plan:{id:policy.id,revision:policy.revision},steps:["复核 SSH 安装权限及主机身份","校验审批固定的同一 Agent 发行包","安装独立 root 执行器与身份","验证独立签名心跳和程序构建身份"],expires_at:expires};
     const revision = sha256(canonicalJSON(plan));
@@ -173,6 +175,7 @@ export function registerMachineExecutorBootstrap(deps: Dependencies, access: Acc
     if (credentialRevision(credential)!==plan.privilege?.credential_binding_revision) fail(409,"executor_bootstrap_credential_changed");
     // Fresh preflight repeats actual identity/UID/sudo checks before approval is committed.
     const check=await access.check(machineID,{credential_id:credential.id},actor,signal);
+    target(access.get(machineID));
     if (!check.ready || check.arch!==plan.release.arch || !["root","sudo_noninteractive"].includes(check.privilege.state)
       || check.privilege.state!==plan.privilege.state) fail(409,"executor_bootstrap_privilege_changed");
     const assertCurrent=()=>{
@@ -202,7 +205,7 @@ export function registerMachineExecutorBootstrap(deps: Dependencies, access: Acc
     } catch (e) {access.busy.delete(machineID);throw e;}
     const worker=(async()=>{
       try {
-        await access.runner({machine,credentialID:credential.id,...access.authentication(machineID,credential),
+        await access.runner({machine:access.credential(machine.id,credential.id).machine,credentialID:credential.id,...access.authentication(machineID,credential),
           command:executorBootstrapCommand(new URL(deps.externalURL).origin,operationID,plan.release.sha256),
           stdin:bootstrap.enrollment_token+"\n"+canonicalJSON(bootstrap),signal:AbortSignal.any([abort.signal,AbortSignal.timeout(240_000)]),port:machine.port,timeoutMs:240_000});
         access.markCredentialUsed(credential.id);
@@ -244,7 +247,7 @@ export function registerMachineExecutorBootstrap(deps: Dependencies, access: Acc
     try {
       let output:string;
       try {
-        const result=await access.runner({machine,credentialID:credential.id,...access.authentication(saved.machine_id,credential),
+        const result=await access.runner({machine:access.credential(machine.id,credential.id).machine,credentialID:credential.id,...access.authentication(saved.machine_id,credential),
           command:executorBootstrapAbsentCommand(),signal:AbortSignal.any([ctx.signal,abort.signal,AbortSignal.timeout(60_000)]),port:machine.port,timeoutMs:60_000});
         output=result.stdout;
       } catch { fail(409,"executor_bootstrap_absence_unverified"); }
