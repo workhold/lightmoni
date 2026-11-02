@@ -15,6 +15,8 @@ agent_id=""
 install_nonce=""
 agent_public_key=""
 enrollment_mode="no"
+runtime_mode=""
+managed_changed="no"
 
 usage() {
   echo 'Usage: install.sh (--release-url URL --enrollment-token-stdin | --release-dir DIR) [--fresh] [--version VERSION] [--config FILE | --endpoint URL --enrollment-token-stdin]'
@@ -24,6 +26,7 @@ usage() {
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --fresh) fresh="yes"; shift ;;
+    --runtime-mode) runtime_mode="$2"; shift 2 ;;
     --version) version="$2"; shift 2 ;;
     --release-url) release_url="$2"; shift 2 ;;
     --release-dir) release_dir="$2"; shift 2 ;;
@@ -41,6 +44,7 @@ command -v systemctl >/dev/null || { echo 'systemd is required.' >&2; exit 1; }
 command -v sha256sum >/dev/null || { echo 'sha256sum is required.' >&2; exit 1; }
 case "$(uname -m)" in x86_64) arch="amd64" ;; aarch64|arm64) arch="arm64" ;; *) echo 'Unsupported architecture.' >&2; exit 1 ;; esac
 case "$version" in *[!0-9A-Za-z._-]*|'') echo 'Invalid fixed version.' >&2; exit 1 ;; esac
+case "$runtime_mode" in root|user|'') ;; *) echo 'Invalid Agent runtime mode.' >&2; exit 1 ;; esac
 [ -n "$release_url" ] || [ -z "$endpoint" ] || release_url="${endpoint%/}/downloads/agent"
 [ -n "$release_dir" ] || [ -n "$release_url" ] || { usage >&2; exit 1; }
 
@@ -115,6 +119,10 @@ finish() {
     report_service_failure
     echo 'Installation failed; restoring the previous Agent installation and configuration.' >&2
     if [ "$restart_attempted" = "yes" ]; then systemctl stop lightmoni-agent.service || rollback_failed="yes"; fi
+    if [ "$managed_changed" = yes ]; then
+      rm -f /etc/lightmoni-agent/managed.json /etc/lightmoni-agent/managed-activation.json
+      rm -rf /var/lib/lightmoni-agent/managed
+    fi
     restore_file /etc/lightmoni-agent/config.json "$tmp_dir/previous-config"
     restore_file /usr/local/bin/lightmoni-agent "$tmp_dir/previous-launcher"
     restore_file /usr/local/sbin/lightmoni-agent-uninstall "$tmp_dir/previous-uninstaller"
@@ -198,8 +206,10 @@ lm_assert_paths
 [ -x "$tmp_dir/unpacked/lightmoni-agent-runtime/node" ] || { echo 'Bundled Node runtime is missing.' >&2; exit 1; }
 "$tmp_dir/unpacked/lightmoni-agent-runtime/node" --version >/dev/null || { echo 'The release requires Linux with glibc 2.28 or newer.' >&2; exit 1; }
 node="$tmp_dir/unpacked/lightmoni-agent-runtime/node"
+service_helper="$tmp_dir/unpacked/lightmoni-agent-runtime/service-unit.mjs"
+[ -f "$service_helper" ] && [ ! -L "$service_helper" ] || { echo 'Agent service helper missing.' >&2; exit 1; }
 ordinary_service() {
-  "$node" -e 'const fs=require("node:fs"),c=require("node:crypto"),p=process.argv[1],s=fs.lstatSync(p);if(!s.isFile()||s.isSymbolicLink()||s.size>8192||c.createHash("sha256").update(fs.readFileSync(p)).digest("hex")!=="651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf")process.exit(1);' "$1"
+  "$node" "$service_helper" check "$1" >/dev/null
 }
 ordinary_service "$tmp_dir/unpacked/lightmoni-agent.service" || { echo 'ordinary_agent_privilege_violation' >&2; exit 1; }
 assert_ordinary_service() {
@@ -237,6 +247,10 @@ stage_identity() {
 }
 
 if [ "$enrollment_mode" = "yes" ]; then
+  if [ -e /etc/lightmoni-agent/managed.json ] || [ -L /etc/lightmoni-agent/managed.json ] || [ -e /etc/lightmoni-agent/managed-activation.json ] || [ -L /etc/lightmoni-agent/managed-activation.json ] || [ -e /var/lib/lightmoni-agent/managed ] || [ -L /var/lib/lightmoni-agent/managed ]; then
+    echo 'Managed Agent identity already exists; use an approved runtime switch or lifecycle plan.' >&2
+    exit 1
+  fi
   command -v curl >/dev/null || { echo 'curl is required for enrollment.' >&2; exit 1; }
   install_nonce="$($node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
   agent_public_key="ed25519:$($node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
@@ -259,10 +273,26 @@ fi
 staged_config="$tmp_dir/config.json"
 if [ -f "$config_path" ]; then cp -p "$config_path" "$staged_config"
 elif [ -n "$config_source" ]; then cp "$config_source" "$staged_config"; fi
+if [ -z "$runtime_mode" ]; then
+  if [ -f "$staged_config" ]; then runtime_mode="$($node -e 'const fs=require("node:fs"),c=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(c.runtime_mode||"user")' "$staged_config")"; else runtime_mode="root"; fi
+fi
+case "$runtime_mode" in root|user) ;; *) echo 'Invalid Agent runtime mode.' >&2; exit 1 ;; esac
+if [ -f "$config_path" ]; then
+  original_mode="$($node -e 'const c=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(c.runtime_mode||"user")' "$config_path")"
+  [ "$runtime_mode" = "$original_mode" ] || { echo 'Use an approved Agent runtime switch plan to change the service account.' >&2; exit 1; }
+fi
+if [ "$runtime_mode" = root ] && [ "$enrollment_mode" != yes ]; then
+  [ -f /etc/lightmoni-agent/managed.json ] || { echo 'Root Agent requires an approved registered-host enrollment.' >&2; exit 1; }
+  # The installer may repair the same release; changing an enrolled root
+  # program requires the approved updater's activation and rollback protocol.
+  "$node" -e 'const fs=require("node:fs"),p="/opt/lightmoni-agent/current/installation.json",s=fs.lstatSync(p);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1||s.uid!==0||(s.mode&0o022)||s.size>4096)process.exit(1);const m=JSON.parse(fs.readFileSync(p,"utf8"));if(m.schema!==1||m.artifact_sha256!==process.argv[1])process.exit(1);' "$actual" || { echo 'Use an approved Agent update plan to change an existing root release.' >&2; exit 1; }
+fi
 if [ "$enrollment_mode" = "yes" ]; then
   "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --endpoint "$endpoint" --pending-enrollment --require-data-dir /var/lib/lightmoni-agent
+  "$node" -e 'const fs=require("node:fs"),p=process.argv[1],c=JSON.parse(fs.readFileSync(p,"utf8"));c.runtime_mode=process.argv[2];c.permission_generation=c.permission_generation||1;fs.writeFileSync(p,JSON.stringify(c)+"\n",{mode:0o600});' "$staged_config" "$runtime_mode"
   "$tmp_dir/unpacked/lightmoni-agent" check --config "$staged_config" --pending-enrollment --require-data-dir /var/lib/lightmoni-agent
 else
+  "$node" -e 'const fs=require("node:fs"),p=process.argv[1],c=JSON.parse(fs.readFileSync(p,"utf8"));c.runtime_mode=process.argv[2];c.permission_generation=c.permission_generation||1;fs.writeFileSync(p,JSON.stringify(c)+"\n",{mode:0o600});' "$staged_config" "$runtime_mode"
   "$tmp_dir/unpacked/lightmoni-agent" check --config "$staged_config" --require-data-dir /var/lib/lightmoni-agent
 fi
 
@@ -275,6 +305,7 @@ if [ "$enrollment_mode" = "yes" ]; then
     curl --fail --silent --show-error --location --config "$curl_auth" \
       --header 'Content-Type: application/json' --data-binary @- \
       "${endpoint%/}/api/v1/agents/$agent_id/activate" --output "$activation_response"
+  "$node" -e 'const fs=require("node:fs"),a=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(a.runtime_mode!==process.argv[2]||a.permission_generation!==1)throw Error("approved_runtime_mismatch");' "$activation_response" "$runtime_mode"
   control_credential="$(json_value "$activation_response" control_credential)"
   data_credential="$(json_value "$activation_response" data_credential)"
   rewrite_credentials
@@ -305,14 +336,21 @@ if id lightmoni-agent >/dev/null 2>&1; then :; else
   command -v useradd >/dev/null || { echo 'useradd is required.' >&2; exit 1; }
   useradd --system --no-create-home --home-dir /var/lib/lightmoni-agent --shell /usr/sbin/nologin lightmoni-agent
 fi
-install -d -m 0700 -o lightmoni-agent -g lightmoni-agent /etc/lightmoni-agent /var/lib/lightmoni-agent
+service_user="lightmoni-agent"
+[ "$runtime_mode" != root ] || service_user="root"
+config_directory_mode=0750
+[ "$runtime_mode" != root ] || config_directory_mode=0700
+install -d -m "$config_directory_mode" -o root -g lightmoni-agent /etc/lightmoni-agent
+install -d -m 0700 -o "$service_user" -g "$service_user" /var/lib/lightmoni-agent
 [ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] || { echo 'Invalid deployment permission helper.' >&2; exit 1; }
   installation_phase="deployment-permissions"
   "$node" "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" prepare
-install -m 0600 -o lightmoni-agent -g lightmoni-agent "$staged_config" "/etc/lightmoni-agent/.config.new-$$"
+config_mode="0640"
+[ "$runtime_mode" != root ] || config_mode="0600"
+install -m "$config_mode" -o root -g lightmoni-agent "$staged_config" "/etc/lightmoni-agent/.config.new-$$"
 mv -f "/etc/lightmoni-agent/.config.new-$$" "$config_path"
 if [ "$enrollment_mode" = "yes" ]; then
-  install -m 0600 -o lightmoni-agent -g lightmoni-agent "$staged_identity" "/var/lib/lightmoni-agent/.identity.new-$$"
+  install -m 0600 -o "$service_user" -g "$service_user" "$staged_identity" "/var/lib/lightmoni-agent/.identity.new-$$"
   mv -f "/var/lib/lightmoni-agent/.identity.new-$$" "/var/lib/lightmoni-agent/identity.json"
 fi
 # The live queue, receipts, cursors, identity and cached tasks stay untouched.
@@ -336,7 +374,13 @@ mv -f "/usr/local/bin/.lightmoni-agent.new-$$" /usr/local/bin/lightmoni-agent
   install -m 0755 "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" "/usr/local/sbin/.lightmoni-agent-uninstall.new-$$"
   mv -f "/usr/local/sbin/.lightmoni-agent-uninstall.new-$$" /usr/local/sbin/lightmoni-agent-uninstall
 service_changed="yes"
-install -m 0644 "$tmp_dir/unpacked/lightmoni-agent.service" /etc/systemd/system/lightmoni-agent.service
+"$node" "$service_helper" render "$runtime_mode" > "$tmp_dir/runtime.service"
+install -m 0644 "$tmp_dir/runtime.service" /etc/systemd/system/lightmoni-agent.service
+if [ "$runtime_mode" = root ] && [ "$enrollment_mode" = yes ]; then
+  "$node" -e 'const fs=require("node:fs"),c=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(!c.managed_bootstrap||typeof c.managed_bootstrap!=="object")throw Error("managed_enrollment_required");fs.writeFileSync(process.argv[2],JSON.stringify(c.managed_bootstrap),{mode:0o600});' "$activation_response" "$tmp_dir/managed-bootstrap.json"
+  managed_changed="yes"
+  /usr/local/bin/lightmoni-agent managed-enroll < "$tmp_dir/managed-bootstrap.json"
+fi
 installation_phase="daemon-reload"
 systemctl daemon-reload
 installation_phase="enable"

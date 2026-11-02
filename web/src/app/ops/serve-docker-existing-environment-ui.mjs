@@ -11,9 +11,9 @@ await mkdir(output,{recursive:true});
 await writeFile(join(source,'index.html'),'<div id="root"></div><script type="module" src="./main.tsx"></script>');
 await writeFile(join(source,'main.tsx'),`
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';import{BrowserRouter}from'react-router-dom';
-import{App,ConfigProvider}from'../src/shared/ui';import{I18nProvider}from'../src/shared/i18n';import Panel from'../src/app/ops/DockerEnvironmentPanel';import'../src/app/style.css';
+import{App,ConfigProvider}from'../src/shared/ui';import{I18nProvider}from'../src/shared/i18n';import Panel from'../src/app/ops/DockerEnvironmentPanel';import Containers from'../src/app/ManagedContainerDialog';import'../src/app/style.css';
 const query=new URLSearchParams(location.search);localStorage.setItem('lightmoni.language',query.get('language')==='en-US'?'en-US':'zh-CN');
-function Harness(){const[open,setOpen]=useState(true);return <><h1>Docker environment QA (synthetic)</h1><Panel machine={open?{id:'qa-'+(query.get('scenario')||'unknown'),name:'Synthetic host'}:undefined} onClose={()=>setOpen(false)}/></>}
+function Harness(){const[open,setOpen]=useState(true);return <><h1>Docker environment QA (synthetic)</h1>{query.get('view')==='containers'?<Containers machine={{id:'qa-'+(query.get('scenario')||'unknown'),name:'Synthetic host',agent_id:'qa-agent'}} onClose={()=>setOpen(false)}/>:<Panel machine={open?{id:'qa-'+(query.get('scenario')||'unknown'),name:'Synthetic host'}:undefined} onClose={()=>setOpen(false)}/>}</>}
 createRoot(document.getElementById('root')!).render(<I18nProvider><BrowserRouter><ConfigProvider><App><Harness/></App></ConfigProvider></BrowserRouter></I18nProvider>);
 `);
 try {
@@ -29,9 +29,11 @@ const server=createServer(async(req,res)=>{
   if(path.startsWith('/api/')){
    const parts=path.split('/'),id=parts[4],scenario=id?.replace(/^qa-/,'');
    const environment=scenario==='ready'?{state:'ready',code:'',source:'executor',observed_at:new Date().toISOString()}:{state:'unknown',code:'executor_observation_required',source:'none',observed_at:''};
-   const machine={id,name:'Synthetic host',agent_id:'qa-agent',docker_environment:environment};
+   const machine={id,name:'Synthetic host',agent_id:'qa-agent',default_account_id:'qa-account',accounts:[{id:'qa-account',username:'deploy',revision:1,default_credential_id:'qa-credential'}],docker_environment:environment};
+   if(req.method==='GET'&&path==='/api/v1/privileged-execution/jobs')return json({jobs:[]});
+   if(req.method==='GET'&&path.endsWith('/execution-status'))return json({machine_id:id,runtime_mode:'root',policy_generation:1,executor:{id:'qa-internal',state:'active',online:true,install_generation:1,last_seen:new Date().toISOString()},capabilities:{'container.managed.v1':{authorized:scenario==='ready',effective:scenario==='ready'?'ready':'disabled'}}});
    if(req.method==='GET'&&path.endsWith('/docker-environment'))return json({machine,installation:installed.has(id)||scenario==='verified'?{id:'qa-installation',state:'succeeded',phase:'verified',code:'',updated_at:new Date().toISOString()}:scenario==='unsupported'?{id:'qa-installation',state:'failed',phase:'checking_system',code:'docker_install_unsupported',updated_at:new Date().toISOString()}:undefined});
-   if(req.method==='GET'&&parts.length===5)return json({machine,credentials:[{id:'qa-credential',name:'Synthetic SSH credential',method:'ssh_key',retention:'permanent',is_default:true}]});
+   if(req.method==='GET'&&parts.length===5)return json({machine,credentials:[{id:'qa-credential',account_id:'qa-account',username:'deploy',account_revision:1,name:'Synthetic SSH credential',method:'ssh_key',retention:'permanent',expires_at:'',is_default:true}]});
    if(req.method==='POST'&&path.endsWith('/docker-installations')){
     let body='';for await(const chunk of req)body+=chunk;const value=JSON.parse(body);calls.push({path,body:value});
     if(value.confirmed!==true||value.credential_id!=='qa-credential')return json({error:'invalid_fixture_request'},400);

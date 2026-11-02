@@ -334,7 +334,7 @@ export function registerServiceDeployments(
   };
   const ensureMachine = (machineID: string) => {
     if (typeof machineID !== "string" || !machineID.trim()) fail(400, "invalid machine_id");
-    const row = db.get<any>("SELECT id,name,address,port,username,agent_id FROM managed_machines WHERE id=?", machineID);
+    const row = db.get<any>("SELECT id,name,address,port,agent_id FROM managed_machines WHERE id=?", machineID);
     if (!row) fail(404, "主机不存在");
     return row;
   };
@@ -459,7 +459,7 @@ export function registerServiceDeployments(
     const revision = createHash("sha256").update(JSON.stringify({
       target_id: target.id, service_id: target.service_id, machine_id: target.machine_id,
       adapter: target.adapter, status: target.status, updated_at: target.updated_at, config, agent_id: machine.agent_id, address: machine.address,
-      port: machine.port, username: machine.username,
+      port: machine.port,
     })).digest("hex");
     return { target, machine, config, revision };
   };
@@ -812,7 +812,7 @@ export function registerServiceDeployments(
       preflight_id: preflight.view?.id ?? "",
       preflight: preflight.view,
       release_id: release.id,
-      machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, username: machine.username },
+      machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port },
       release: { version: release.version, source_type: release.source_type, source_ref: release.source_ref, artifact_digest: release.artifact_digest, artifact_size: Number(release.artifact_size || 0), artifact_format: release.artifact_format || "" },
       actions,
       capabilities,

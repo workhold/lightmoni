@@ -20,7 +20,7 @@ test('fresh center creates the final schema and restart preserves edits without 
   const config={dataDir:directory,chURL:'http://127.0.0.1:'+(ch.address() as any).port,chUser:'writer',chPassword:'fixture-only',externalURL:'http://127.0.0.1:8080',monitor:false};
   let app=await createApp(config);
   try {
-    assert.deepEqual(app.deps.db.all('SELECT version FROM center_schema'),[{version:1}]);
+    assert.deepEqual(app.deps.db.all('SELECT version FROM center_schema'),[{version:2}]);
     for(const table of ['catalog','machine_credentials','machine_deployments','agent_jobs','task_runs','ops_platform_resources','ops_cluster_instances'])
       assert.ok(app.deps.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",table),table);
     const tables=app.deps.db.all<{name:string}>("SELECT name FROM sqlite_master WHERE type='table'").map(row=>row.name);
@@ -49,4 +49,9 @@ test('pre-release center is rejected without rewriting development records',()=>
     assert.deepEqual(db.all('SELECT id FROM catalog'),[{id:'development-record'}]);
     assert.equal(db.get("SELECT 1 FROM sqlite_master WHERE name='center_schema'"),undefined);
   } finally {db.close();}
+});
+
+
+test('baseline 1 is rejected without deleting prior records',()=>{
+ const db=new DB(':memory:');try {db.exec("CREATE TABLE center_schema(id INTEGER PRIMARY KEY,version INTEGER NOT NULL); INSERT INTO center_schema VALUES(1,1); CREATE TABLE development_data(id TEXT); INSERT INTO development_data VALUES('keep');");assert.throws(()=>initializeCenterSchema(db),/baseline 2/);assert.deepEqual(db.all('SELECT * FROM development_data'),[{id:'keep'}]);assert.deepEqual(db.all('SELECT version FROM center_schema'),[{version:1}]);}finally{db.close();}
 });

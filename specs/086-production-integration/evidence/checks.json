@@ -1,0 +1,27 @@
+{
+  "runtime": {
+    "tests": 1641,
+    "pass": 1609,
+    "skip": 32,
+    "fail": 0
+  },
+  "aiRuntime": {
+    "pass": 71,
+    "fail": 0
+  },
+  "typescriptSdk": {
+    "pass": 22,
+    "fail": 0
+  },
+  "sshDiagnosticAndRecovery": {
+    "pass": 12,
+    "fail": 0
+  },
+  "demoHttp": {
+    "pass": 1,
+    "fail": 0
+  },
+  "typecheck": "pass",
+  "build": "pass",
+  "arm64ImageChecks": 41
+}

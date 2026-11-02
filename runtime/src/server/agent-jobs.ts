@@ -312,6 +312,8 @@ export function registerAgentJobs(
     if (!options.agentCredentials?.has(agentID, "control")) fail(409, "registered_host_required: 主机没有有效的 Agent 控制通道");
     const actionList = actions(input.actions), caps = capabilities(input.capabilities ?? []);
     const privileged = (actionList.some((a:any)=>['docker','systemd_probe'].includes(a.kind))||!ordinaryReadOnlyJob({actions:actionList,capabilities:caps}));
+    const rootRuntime=!!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_agent_runtime'")&&!!db.get("SELECT machine_id FROM machine_agent_runtime WHERE agent_id=? AND runtime_mode='root'",agentID);
+    if(rootRuntime&&!privileged)fail(409,'root_agent_requires_signed_task: root Agent 的主机操作必须使用签名任务，请使用任务中心或受管运维入口');
     const existing = db.get<any>("SELECT * FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deploymentID, operationID);
     if (existing) return view(existing);
     if (privileged) { if (!privilegedReady) fail(409,"privileged_executor_required"); privilegedReady(agentID); }
@@ -341,6 +343,7 @@ export function registerAgentJobs(
   const claim = (agentID: string, offered: string[], _cursor = "") => {
     ensureAgent(agentID);
     assertAgentActive(db, agentID);
+    if(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_agent_runtime'")&&db.get("SELECT machine_id FROM machine_agent_runtime WHERE agent_id=? AND runtime_mode='root'",agentID))return null;
     const caps = new Set(capabilities(offered));
     if (uninstallBlocked(agentID)) return null;
     if (hasPrivilegedExecution(db,"",agentID)) return null;

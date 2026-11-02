@@ -58,9 +58,10 @@ async function platform(t: TestContext) {
   const origin = `http://127.0.0.1:${(server.address() as {port:number}).port}/api/v1`;
   const request = async (path: string, method = "GET", body?: unknown) => { const response = await fetch(origin + path, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: response.status, data: await response.json() as any }; };
   const host = async (port: number, method: "password" | "ssh_key" = "password", password = "fixture-password") => {
-    const made = await request("/machines", "POST", { name: "Fixture", address: "127.0.0.1", port, username: "fixture" }); assert.equal(made.status, 201);
-    const credential = await request(`/machines/${made.data.id}/credentials`, "POST", { method, secret: method === "password" ? password : userKey.secret, confirm_managed: true }); assert.equal(credential.status, 201);
-    return { id: made.data.id, cid: credential.data.credential_id, initial: made.data };
+    const made = await request("/machines", "POST", { name: "Fixture", address: "127.0.0.1", port }); assert.equal(made.status, 201);
+    const account=await request(`/machines/${made.data.id}/accounts`,"POST",{username:"fixture",make_default:true});assert.equal(account.status,201);
+    const credential = await request(`/machines/${made.data.id}/accounts/${account.data.id}/credentials`, "POST", { method, secret: method === "password" ? password : userKey.secret, confirm_managed: true }); assert.equal(credential.status, 201);
+    return { id: made.data.id, account:account.data.id,cid: credential.data.credential_id, initial: made.data };
   };
   return { db, machines, request, host };
 }
@@ -83,14 +84,14 @@ test("password and private-key first preflights record their handshake key and k
 test("identity is server-owned; endpoint edits reset identity and permanently invalidate old checks and plans", async t => {
   const ssh = await sshFixture(t), f = await platform(t), h = await f.host(ssh.port, "password", ssh.password);
   for (const field of ["host_key_fingerprint", "host_key_public_key", "host_key_observed_at", "host_key_status", "ssh_target_generation"]) {
-    assert.equal((await f.request("/machines", "POST", { name: "bad", address: "127.0.0.1", username: "fixture", [field]: "injected" })).status, 400);
+    assert.equal((await f.request("/machines", "POST", { name: "bad", address: "127.0.0.1", [field]: "injected" })).status, 400);
     assert.equal((await f.request(`/machines/${h.id}`, "PUT", { [field]: "injected" })).status, 400);
   }
   const check = await f.request(`/machines/${h.id}/ssh-check`, "POST", { credential_id: h.cid });
   const plan = await f.request(`/machines/${h.id}/deployments/plan`, "POST", { check_id: check.data.id, credential_id: h.cid, version: "0.1.0", arch: "amd64" }); assert.equal(plan.status, 201);
   const learned = f.machines.get(h.id), lease = f.machines.acquireTerminal(h.id, h.cid, () => {}); lease.release();
-  assert.equal((await f.request(`/machines/${h.id}`, "PUT", { username: "another-account" })).status, 200); assert.equal(f.machines.get(h.id).host_key_public_key, firstKey.publicKey);
-  assert.equal((await f.request(`/machines/${h.id}`, "PUT", { username: "fixture", port: ssh.port + 1 })).status, 200); assert.equal(f.machines.get(h.id).host_key_public_key, ""); assert.equal(f.machines.get(h.id).host_key_fingerprint, "");
+  const another=await f.request(`/machines/${h.id}/accounts`,"POST",{username:"another-account",make_default:true});assert.equal(another.status,201);assert.equal(f.machines.get(h.id).host_key_public_key,firstKey.publicKey);
+  assert.equal((await f.request(`/machines/${h.id}`, "PUT", { port: ssh.port + 1 })).status, 200); assert.equal(f.machines.get(h.id).host_key_public_key, ""); assert.equal(f.machines.get(h.id).host_key_fingerprint, "");
   assert.equal((await f.request(`/machines/${h.id}`, "PUT", { port: ssh.port })).status, 200);
   const fresh = await f.request(`/machines/${h.id}/ssh-check`, "POST", { credential_id: h.cid }); assert.equal(fresh.data.ready, true);
   assert.notEqual(f.machines.get(h.id).ssh_target_generation, learned.ssh_target_generation);
@@ -109,7 +110,7 @@ test("existing matching pins are completed, mismatch preserves them and sends no
 
 test("atomic first-key recording rejects conflicting, stale, deleted and unauthorized targets", () => {
   const db = new DB(":memory:"); try {
-    createAgentHostSchema(db); db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,created_at,updated_at) VALUES('host','Host','127.0.0.1',22,'root','direct_ssh','now','now')");
+    createAgentHostSchema(db); db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,created_at,updated_at) VALUES('host','Host','127.0.0.1',22,'direct_ssh','now','now')");
     const original = db.get<any>("SELECT * FROM managed_machines WHERE id='host'")!, contender = {...original};
     assert.equal(recordMachineHostKey(db, original, firstKey.raw, "first"), true); assert.equal(recordMachineHostKey(db, contender, otherKey.raw, "second"), false);
     assert.equal(recordMachineHostKey(db, {...contender}, firstKey.raw, "second"), true);
@@ -123,12 +124,14 @@ test("atomic first-key recording rejects conflicting, stale, deleted and unautho
 test("host-key verification ignores user labels but still rejects a different login target", () => {
   const db=new DB(":memory:");try{
     createAgentHostSchema(db);
-    db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,created_at,updated_at) VALUES('host','Original label','127.0.0.1',22,'root','direct_ssh','now','now')");
+    db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,created_at,updated_at) VALUES('host','Original label','127.0.0.1',22,'direct_ssh','now','now')");
     const expected=db.get<any>("SELECT * FROM managed_machines WHERE id='host'")!;
     db.run("UPDATE managed_machines SET name='New user label' WHERE id='host'");
     assert.equal(recordMachineHostKey(db,expected,firstKey.raw,"first"),true);
     assert.equal(db.get<any>("SELECT name FROM managed_machines WHERE id='host'")!.name,"New user label");
-    db.run("UPDATE managed_machines SET username='different-login' WHERE id='host'");
+    const differentAccount={...expected,username:"different-login",account_id:"other-account",account_revision:1};
+    assert.equal(recordMachineHostKey(db,differentAccount,firstKey.raw,"later"),true);
+    db.run("UPDATE managed_machines SET address='other-host.test' WHERE id='host'");
     assert.equal(recordMachineHostKey(db,expected,firstKey.raw,"later"),false);
   }finally{db.close();}
 });
@@ -139,7 +142,7 @@ test("revocation, expiry, cancellation and target mutation during delayed authen
     let release!: () => void; const held = new Promise<void>(resolve => ssh.setHold(accept => { release = accept; resolve(); }));
     const controller = new AbortController();
     const pending = f.machines.checkSSH(h.id, { credential_id: h.cid }, "admin", controller.signal); await held;
-    if (mutation === "revoke") await f.request(`/machines/${h.id}/credentials/${h.cid}`, "DELETE");
+    if (mutation === "revoke") await f.request(`/machines/${h.id}/accounts/${h.account}/credentials/${h.cid}`, "DELETE");
     else if (mutation === "expiry") f.db.run("UPDATE machine_credentials SET expires_at=? WHERE id=?", new Date(Date.now() - 1000).toISOString(), h.cid);
     else if (mutation === "cancel") controller.abort();
     else f.db.run("UPDATE managed_machines SET address='changed.example.test',ssh_target_generation=ssh_target_generation+1 WHERE id=?", h.id);
@@ -151,7 +154,7 @@ test("cancelled first connection and invalid login cannot execute a command", as
   const ssh = await sshFixture(t), f = await platform(t), h = await f.host(ssh.port, "password", "incorrect-password");
   const bad = await f.request(`/machines/${h.id}/ssh-check`, "POST", { credential_id: h.cid }); assert.equal(bad.data.ready, false); assert.equal(ssh.commands.length, 0);
   const cancel = new AbortController(); cancel.abort();
-  await assert.rejects(() => defaultSSHRunner({ machine: f.machines.get(h.id), privateKey: "", password: ssh.password, command: "unused", signal: cancel.signal, port: ssh.port }), /cancelled/);
+  await assert.rejects(() => defaultSSHRunner({ machine: {...f.machines.get(h.id),account_id:h.account,username:"fixture",account_revision:1}, privateKey: "", password: ssh.password, command: "unused", signal: cancel.signal, port: ssh.port }), /cancelled/);
   assert.equal(ssh.commands.length, 0);
 });
 
@@ -160,7 +163,7 @@ test("separate processes race to one first identity and recheck authorization af
   const directory = await mkdtemp(join(tmpdir(), "lightmoni-host-key-race-")), path = join(directory, "state.db");
   t.after(() => rm(directory, {recursive:true,force:true}));
   const db = new DB(path); t.after(() => db.close()); createAgentHostSchema(db);
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,created_at,updated_at) VALUES('host','Host','127.0.0.1',22,'root','direct_ssh','now','now')");
+  db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,created_at,updated_at) VALUES('host','Host','127.0.0.1',22,'direct_ssh','now','now')");
   const worker = (mode: string) => {
     const child = fork(fileURLToPath(new URL("./helpers/host-key-race-worker.ts", import.meta.url)), [path, mode], { execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "inherit", "ipc"] });
     t.after(() => { if (child.connected) child.disconnect(); child.kill(); }); return child;

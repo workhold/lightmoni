@@ -6,10 +6,12 @@ import { fail, HTTPError } from "../shared/http.js";
 import type { Dependencies, Handler, Module } from "../shared/types.js";
 import { hasActiveTaskRuns } from "./agent-hosts.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
+import { assertNoPendingAgentRuntime } from "./machine-agent-runtime-guard.js";
+import { validAgentRuntimeObservation } from "./machine-agent-runtime.js";
 import { assertAgentActive } from "./agent-lifecycle.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
-import type { MachineSummary } from "./managed-machines.js";
-import type { SSHRunner } from "./machine-ssh.js";
+import type { MachineSummary, SSHMachineTarget } from "./managed-machines.js";
+import { assertSSHAccount, sshAccountSnapshot, sshCredentialRevision, type SSHRunner } from "./machine-ssh.js";
 import { AgentReleaseCatalog, type AgentRelease, type PinnedAgentFile } from "./machine-agent-updates-catalog.js";
 import { NodeStore } from "./nodes-model.js";
 import { agentUpdateProbeCommand, parseAgentUpdateProbe, agentUpdateStartCommand, agentUpdateStatusCommand, agentUpdateCommitCommand,
@@ -35,7 +37,7 @@ export interface AgentUpdateStore extends Module {
 }
 export interface AgentUpdateAccess {
   get(machineID: string): MachineSummary; idle(machineID: string): void; revision(machine: MachineSummary): string;
-  credential(machineID: string, credentialID?: string): { machine: MachineSummary; credential: any };
+  credential(machineID: string, credentialID?: string): { machine: SSHMachineTarget; credential: any };
   authentication(machineID: string, credential: any): { privateKey: string; password?: string };
   markCredentialUsed(credentialID: string): void;
   busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
@@ -93,7 +95,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   const view = (value: any): AgentUpdate => {
     const membership = db.get<{rollout_id:string}>("SELECT rollout_id FROM agent_update_rollout_items WHERE update_id=?", value.id);
     return { id: value.id, machine_id: value.machine_id, agent_id: value.agent_id,
-    action: value.action, status: value.status, plan: JSON.parse(value.plan_json), receipt: JSON.parse(value.receipt_json), error: value.error,
+    action: value.action, status: value.status, plan: JSON.parse(value.plan_json), receipt: { ssh_account: JSON.parse(value.plan_json).ssh_account, ...JSON.parse(value.receipt_json) }, error: value.error,
     created_at: value.created_at, created_by: value.created_by, approved_at: value.approved_at, approved_by: value.approved_by,
     started_at: value.started_at, finished_at: value.finished_at,
     review_url: `/machines?machine=${encodeURIComponent(value.machine_id)}&agent_update=${encodeURIComponent(value.id)}`,
@@ -103,6 +105,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   const taskBusy = (machineID: string, agentID: string) => hasActiveTaskRuns(db, agentID, machineID)
     || table("agent_jobs") && Boolean(db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID));
   const assertTarget = (machine: MachineSummary) => {
+    assertNoPendingAgentRuntime(db,machine.id,machine.agent_id);
     assertNoPendingMachineInstallation(db,machine.id,machine.agent_id,true);
     if (!machine.agent_id) fail(409, "主机尚未安装 Agent，请先部署");
     assertAgentActive(db, machine.agent_id);
@@ -112,13 +115,19 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       || db.get("SELECT id FROM machine_uninstallations WHERE machine_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", machine.id))
       fail(409, "主机存在安装或卸载流程，请先结束");
   };
-  const ssh = async (machine: MachineSummary, credential: any, command: string, signal: AbortSignal, stdin?: string, timeoutMs = 60_000) => {
-    const output = await access.runner({ machine, credentialID: credential.id, ...access.authentication(machine.id, credential), command, signal: AbortSignal.any([signal, controller.signal]),
+  const ssh = async (machine: MachineSummary | SSHMachineTarget, credential: any, command: string, signal: AbortSignal, stdin?: string, timeoutMs = 60_000) => {
+    const selected = access.credential(machine.id, credential.id);
+    if ("account_id" in machine) assertSSHAccount(selected.machine, sshAccountSnapshot(machine));
+    if (sshCredentialRevision(selected.credential) !== sshCredentialRevision(credential)) fail(409, "ssh_credential_changed");
+    const output = await access.runner({ machine: selected.machine, credentialID: credential.id, ...access.authentication(machine.id, credential), command, signal: AbortSignal.any([signal, controller.signal]),
       port: machine.port, timeoutMs, ...(stdin == null ? {} : { stdin }) });
     access.markCredentialUsed(credential.id);
+    const verified = access.credential(machine.id, credential.id);
+    assertSSHAccount(verified.machine, sshAccountSnapshot(selected.machine));
+    if (sshCredentialRevision(verified.credential) !== sshCredentialRevision(credential)) fail(409, "ssh_credential_changed");
     return output;
   };
-  const probe = async (machine: MachineSummary, credential: any, signal: AbortSignal) =>
+  const probe = async (machine: MachineSummary | SSHMachineTarget, credential: any, signal: AbortSignal) =>
     parseAgentUpdateProbe((await ssh(machine, credential, agentUpdateProbeCommand(), signal)).stdout);
   const validateProbe = (machine: MachineSummary, observation: AgentUpdateProbe, requireActive = true) => {
     if (observation.agent_id !== machine.agent_id) fail(409, "SSH 主机的 Agent 身份与平台不一致");
@@ -156,13 +165,16 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         files = catalog.pinScripts();
       }
       const operationID = id(), expires = new Date(deps.now().getTime() + 15 * 60_000).toISOString();
-      const planBody = { machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, username: machine.username, agent_id: machine.agent_id },
+      const planBody = { machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, agent_id: machine.agent_id },
+        ssh_account: sshAccountSnapshot(machine), credential_revision: sshCredentialRevision(credential),
         credential: { id: credential.id, method: credential.method, retention: credential.retention, expires_at: credential.expires_at },
-        action: input.action, current: { ...observed.current, service_active: observed.service_active, release: { ...observed.current } }, target, files,
+        action: input.action, runtime_mode:observed.runtime_mode??'user',permission_generation:observed.permission_generation??1, current: { ...observed.current, service_active: observed.service_active, release: { ...observed.current } }, target, files,
         target_revision: access.revision(machine), expires_at: expires,
-        steps: ["核对主机、Agent 身份与当前程序指纹", "下载并校验审批固定的维护器和发行包", "移除本平台旧 Docker 权限；程序回退不恢复该权限", "通过独立 systemd 维护器切换程序", "确认目标构建的新进程已同步平台配置", "确认成功；失败时仅恢复已验证的普通 Agent 程序"],
-        warnings: ["维护期间暂停该主机的新任务派发和领取。", "保留主机 ID、Agent 身份、配置、队列和游标；不会重新接入。", "旧高权限版本不能回退；无法安全恢复时停服并保留证据。", "结果未知时只读核对；确认超时仅回退到已验证的普通 Agent，不自动重试。"] };
+        steps: ["核对主机、Agent 身份与当前程序指纹", "下载并校验审批固定的维护器和发行包", "保留已审批的运行账户、权限代次和内部执行身份", "通过独立 systemd 维护器切换同一 Agent 程序", "确认目标构建的新进程已同步平台配置", "确认成功；失败时仅恢复已验证的同账户程序"],
+        warnings: ["维护期间暂停该主机的新任务派发和领取。", "保留主机 ID、Agent 身份、配置、队列和游标；不会重新接入。", "升级不会提升运行权限；账户切换需要独立审阅。", "结果未知时只读核对；确认超时仅回退到已验证的同账户程序，不自动重试。"] };
       db.transaction(() => {
+        const selected = access.credential(machine.id, credential.id); assertSSHAccount(selected.machine, planBody.ssh_account);
+        if (sshCredentialRevision(selected.credential) !== planBody.credential_revision) fail(409, "ssh_credential_changed");
         assertFree(machine.id); assertTarget(access.get(machine.id));
         db.run("INSERT INTO machine_agent_updates(id,machine_id,agent_id,credential_id,action,status,plan_json,created_at,created_by) VALUES(?,?,?,?,?,'awaiting_approval',?,?,?)",
           operationID, machine.id, machine.agent_id, credential.id, input.action, JSON.stringify(planBody), at(), actorID);
@@ -170,12 +182,14 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       return view(row(machine.id, operationID));
     } finally { access.busy.delete(machine.id); }
   };
-  const assertPlan = (operation: any, beforeStart = false) => {
+  const assertPlan = (operation: any, beforeStart = false, requireCredential = true) => {
     const machine = access.get(operation.machine_id), body = JSON.parse(operation.plan_json);
     if (machine.agent_id !== operation.agent_id || access.revision(machine) !== body.target_revision) fail(409, "主机连接或 Agent 身份已变化，原维护计划不可执行");
     assertTarget(machine);
+    const selected = requireCredential ? access.credential(machine.id, operation.credential_id) : undefined;
+    if (selected) { assertSSHAccount(selected.machine, body.ssh_account); if (sshCredentialRevision(selected.credential) !== body.credential_revision) fail(409, "ssh_credential_changed"); }
     if (beforeStart && Date.parse(body.expires_at) <= deps.now().getTime()) fail(409, "维护计划已过期，请取消并重新生成");
-    return { machine, plan: body };
+    return { machine: selected?.machine ?? machine, plan: body };
   };
   const heartbeat = (operation: any, remote: AgentUpdateRemoteStatus, target = true, observedBootID?: string) => {
     const machine = access.get(operation.machine_id);
@@ -186,6 +200,8 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     let value: any;
     try { value = JSON.parse(node.heartbeat); } catch { return false; }
     const planBody = JSON.parse(operation.plan_json), expected = target ? planBody.target : planBody.current;
+    if((planBody.runtime_mode==='root'||planBody.permission_generation>1)&&!value.runtime)return false;
+    if(value.runtime && (!validAgentRuntimeObservation(value.runtime) || value.runtime.mode!==(planBody.runtime_mode??'user') || value.runtime.permission_generation!==(planBody.permission_generation??1)))return false;
     const boot = observedBootID ?? remote.local_health?.boot_id;
     if (!boot || value.boot_id !== boot || value.boot_id === planBody.current.boot_id || value.last_error !== "") return false;
     if (target) {
@@ -286,6 +302,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       const observed = await probe(machine, credential, signal); validateProbe(machine, observed, operation.action !== "rollback");
       if (observed.current.fingerprint !== body.current.fingerprint) fail(409, "当前 Agent 程序已变化，请取消旧计划并重新审阅");
       if (observed.service_active !== body.current.service_active) fail(409, "当前 Agent 服务运行状态已变化，请取消旧计划并重新审阅");
+      if((observed.runtime_mode??'user')!==(body.runtime_mode??'user')||(observed.permission_generation??1)!==(body.permission_generation??1))fail(409,'Agent 运行账户或权限代次已变化，请重新审阅');
       if (operation.action === "rollback" && observed.previous?.fingerprint !== body.target.fingerprint) fail(409, "保留的回退发行已变化，请重新审阅");
       assertPlan(operation, true); access.credential(machineID, credential.id);
       const downloadToken = "lm_update_" + token();
@@ -329,10 +346,10 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     access.idle(machineID);
     const operation = row(machineID, operationID);
     if (operation.status !== "unknown") fail(409, "只有结果未知的维护需要核对");
-    const { machine } = assertPlan(operation);
-    let credential: any;
-    try { credential = access.credential(machineID, credentialID ?? operation.credential_id).credential; }
-    catch { if (credentialID) fail(409, "所选 SSH 凭据不可用"); credential = access.credential(machineID).credential; }
+    const { plan: approved } = assertPlan(operation, false, false);
+    const selected = access.credential(machineID, credentialID ?? operation.credential_id), { machine, credential } = selected;
+    const verifyingAccount = sshAccountSnapshot(machine), verifyingRevision = sshCredentialRevision(credential);
+    const recheck = () => { assertPlan(operation, false, false); const live = access.credential(machineID, credential.id); assertSSHAccount(live.machine, verifyingAccount); if (sshCredentialRevision(live.credential) !== verifyingRevision) fail(409, "reconciliation_credential_changed"); };
     access.busy.add(machineID);
     try {
       let remote: AgentUpdateRemoteStatus;
@@ -344,15 +361,16 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         const body = JSON.parse(operation.plan_json);
         if (!Number.isFinite(Date.parse(body.start_deadline)) || deps.now().getTime() <= Date.parse(body.start_deadline)) fail(409, "启动确认窗口尚未结束，请稍后再次核对");
         if (observed.current.fingerprint !== body.current.fingerprint) fail(409, "维护回执缺失且程序已变化，仍需人工核对");
-        assertPlan(operation); access.credential(machineID, credential.id);
+        recheck();
         db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,error=?,finished_at=?,ticket_hash='' WHERE id=? AND status='unknown'", JSON.stringify({ remote_unchanged: true, fingerprint: observed.current.fingerprint, verified_at: at() }), "只读核对确认原程序完整且无维护锁，本次维护未执行", at(), operationID);
         return view(row(machineID, operationID));
       }
-      assertPlan(operation); access.credential(machineID, credential.id);
+      recheck();
       if (remote.status === "failed") {
         validateRemote(operation, remote);
         const observed = await probe(machine, credential, signal); validateProbe(machine, observed, false);
         if (observed.current.fingerprint !== JSON.parse(operation.plan_json).current.fingerprint) fail(409, "失败回执后程序指纹不一致，仍需人工核对");
+        recheck();
         db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,error=?,finished_at=? WHERE id=? AND status='unknown'", JSON.stringify(remote), "核对确认维护未切换原程序", at(), operationID);
         return view(row(machineID, operationID));
       }
@@ -362,14 +380,18 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         const target = JSON.parse(operation.plan_json).target;
         if (!observed.current.boot_id || ["version", "source_revision", "build_id", "state_schema", "arch"].some(key => observed.current[key as keyof typeof observed.current] !== target[key])
           || observed.current.artifact_sha256 !== (target.artifact_sha256 ?? target.sha256)) fail(409, "已提交维护的当前发行尚未核对，请检查主机真实状态");
-        assertPlan(operation); access.credential(machineID, credential.id);
+        recheck();
         // Commit evidence belongs to the historical process. A later restart
         // does not invalidate it: verify the current process independently and
         // preserve both boot IDs in the audit receipt.
         saveRemote(operation, remote, false, { boot_id: observed.current.boot_id, fingerprint: observed.current.fingerprint, verified_at: at() });
       } else saveRemote(operation, remote, false); // Reconciliation never commits a waiting update.
       return view(row(machineID, operationID));
-    } finally { access.busy.delete(machineID); }
+    } finally {
+      const current = row(machineID, operationID);
+      db.run("UPDATE machine_agent_updates SET receipt_json=? WHERE id=?", JSON.stringify({ ...JSON.parse(current.receipt_json), approved_ssh_account: approved.ssh_account, verification_ssh_account: verifyingAccount, verification_credential_id: credential.id, verification_credential_revision: verifyingRevision }), operationID);
+      access.busy.delete(machineID);
+    }
   };
   const rolloutRow = (rolloutID: string) => {
     const value = db.get<any>("SELECT * FROM agent_update_rollouts WHERE id=?", rolloutID);

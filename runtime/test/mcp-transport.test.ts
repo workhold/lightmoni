@@ -22,7 +22,7 @@ async function fixture(wrap?:(d:CapabilityDispatcher)=>CapabilityDispatcherContr
  const auth={user:()=>user,requireAdmin(){}};
  const deps={db,router,auth,externalURL,now:()=>new Date(),...cipher(Buffer.alloc(32,6)),cat:{list:async()=>[]},logger:{info(){},warn(){},error(){}}} as unknown as Dependencies;
  router.auth=auth as any;router.externalURL=externalURL;const runs=new TaskRunStore(deps);
- for(const id of ["one","two"])db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'root','direct_ssh',?,?,?)",id,"Host "+id,id+".example.test","agent-"+id,new Date().toISOString(),new Date().toISOString());
+ for(const id of ["one","two"])db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)",id,"Host "+id,id+".example.test","agent-"+id,new Date().toISOString(),new Date().toISOString());
  const access=new McpAccess(deps);registerMcpAccess(deps,access);const dispatcher=new CapabilityDispatcher(deps,access,{taskCenter:runs});
  const module=registerMcpTransport(deps,access,wrap?wrap(dispatcher):dispatcher),endpoint=externalURL+"/api/v1/mcp";
  const key=access.createToken(user,{name:"Test client",scopes:["hosts.read","tasks.read","tasks.propose","executions.read"],host_ids:null});

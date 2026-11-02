@@ -19,6 +19,10 @@ RUN npm --prefix runtime run build && npm --prefix ai-runtime run build && npm -
 RUN node scripts/build-agent-release.mjs 0.1.0 runtime/downloads
 RUN cd sdk/typescript && npm pack --pack-destination /work/runtime/downloads
 RUN sh scripts/build-go-sdk.sh 0.1.0 runtime/downloads && sh scripts/build-native-sdks.sh 0.1.0 runtime/downloads && npm --prefix runtime prune --omit=dev && npm --prefix ai-runtime prune --omit=dev
+RUN mv /work/runtime/node_modules /work/runtime-node-modules \
+    && mkdir -p /work/agent-release-downloads \
+    && mv /work/runtime/downloads/lightmoni-agent_0.1.0_linux_amd64.tar.gz /work/agent-release-downloads/ \
+    && mv /work/runtime/downloads/lightmoni-agent_0.1.0_linux_arm64.tar.gz /work/agent-release-downloads/
 
 FROM node:24.15.0-bookworm-slim
 ARG DEBIAN_MIRROR=http://deb.debian.org/debian
@@ -29,6 +33,9 @@ RUN sed -i -e "s|^URIs: http://deb[.]debian[.]org/debian$|URIs: ${DEBIAN_MIRROR}
 LABEL org.opencontainers.image.revision=${BUILD_REVISION}
 WORKDIR /opt/lightmoni
 COPY --from=build /work/runtime/ ./runtime/
+COPY --from=build /work/runtime-node-modules/ ./runtime/node_modules/
+COPY --from=build /work/agent-release-downloads/lightmoni-agent_0.1.0_linux_amd64.tar.gz ./runtime/downloads/
+COPY --from=build /work/agent-release-downloads/lightmoni-agent_0.1.0_linux_arm64.tar.gz ./runtime/downloads/
 COPY --from=build /work/sdk/typescript/package.json ./sdk/typescript/package.json
 COPY --from=build /work/sdk/typescript/dist/ ./sdk/typescript/dist/
 COPY --from=build /work/ai-runtime/package.json ./ai-runtime/package.json

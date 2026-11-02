@@ -1,16 +1,22 @@
+import {type SSHAccount,type SSHAccountHost,sshCredentialLabel} from './machine-credentials';
+import AgentOperationProgress from './AgentOperationProgress';
+import {agentOperationCanAdvance,agentOperationMatches,agentOperationReadSignal,type AgentOperationRecord} from './agent-operation-progress';
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Input,Modal,Select,Space,Tag,Typography} from '../shared/ui';
+import {runtimeCapabilityText} from './agent-runtime-model';
 import {sshEndpoint} from './host-request-guard';
 import {api,ApiError} from '../shared/api';
-import {defaultMachineCredential} from './machine-credentials';
+import {defaultMachineCredential,sshCheckMatchesCredential} from './machine-credentials';
 import {useI18n} from '../shared/i18n';
 import SSHCheckSummary,{type SSHCheckResult} from '../shared/SSHCheckSummary';
-import {MAX_BATCH_TARGETS,batchCredentials,batchHistoryURL,batchPlanExpired,batchPlanPath,batchPlanStatus,batchUnavailableReason,machineBatchPath,needsBatchPlan,type BatchAction,type BatchCredential,type BatchDetail,type BatchPlan,type BatchStatus,type BatchTarget} from './machine-batch';
+import {MAX_BATCH_TARGETS,batchCredentials,batchHistoryURL,batchPlanExpired,batchPlanPath,batchPlanStatus as historicalBatchPlanStatus,batchUnavailableReason,machineBatchPath,needsBatchPlan,type BatchAction,type BatchCredential,type BatchDetail,type BatchPlan as BatchPlanBase,type BatchStatus,type BatchTarget} from './machine-batch';
 
 export type {BatchAction,BatchTarget} from './machine-batch';
-type Row={target:BatchTarget;status:BatchStatus;reason?:string;detail?:BatchDetail;credentialID?:string;check?:SSHCheckResult;record?:BatchPlan;unresolvedPlan?:boolean;attempted?:boolean;note?:string};
+type BatchPlan=BatchPlanBase&AgentOperationRecord;
+type Row={target:BatchTarget;status:BatchStatus;reason?:string;detail?:BatchDetail;credentialID?:string;check?:SSHCheckResult;record?:BatchPlan;unresolvedPlan?:boolean;attempted?:boolean;note?:string;progressError?:string};
 type Props={action:BatchAction;targets:BatchTarget[];onClose:()=>void;onRefresh:()=>Promise<void>;onSuccess?:(target:BatchTarget,action:BatchAction,result:unknown)=>void};
 type Phase='configure'|'review'|'results';
+const batchPlanStatus=(record:BatchPlan):BatchStatus=>record.status==='running'?'processing':historicalBatchPlanStatus(record);
 
 export default function MachineBatchDialog({action,targets,onClose,onRefresh,onSuccess}:Props){
  const {t,language}=useI18n();
@@ -19,6 +25,8 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
  const [rows,setRows]=useState<Row[]>(()=>{const seen=new Set<string>();return snapshot.map(target=>{const id=action==='remove_node'?target.agent?.id:target.machine?.id;if(id&&seen.has(id))return {target,status:'not_applicable',reason:'duplicate_target'};if(id)seen.add(id);return {target,status:'pending'}})});
  const rowsRef=useRef(rows),pending=useRef(false),stop=useRef(false),initialized=useRef(false),mounted=useRef(true);
  const [busy,setBusy]=useState(false),[stopping,setStopping]=useState(false),[phase,setPhase]=useState<Phase>('configure');
+ const [runtimeMode,setRuntimeMode]=useState<'root'|'user'>('root');
+ const [autoAccount,setAutoAccount]=useState(true);
  const [version,setVersion]=useState('0.1.0'),[reason,setReason]=useState(''),[reviewed,setReviewed]=useState(false),[notice,setNotice]=useState(''),[now,setNow]=useState(Date.now());
  const isPlan=needsBatchPlan(action),limitExceeded=snapshot.length>MAX_BATCH_TARGETS;
  const title=({ssh_check:t('批量 SSH 安装检查','Batch SSH installation checks'),install:t('批量部署 LightMoni Agent','Batch deploy LightMoni Agent'),uninstall:t('卸载 Agent','Uninstall Agent'),remove_node:t('移除节点','Remove nodes'),delete_host:t('删除主机','Delete hosts')})[action];
@@ -98,7 +106,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
     const preliminary=batchUnavailableReason(action,row.target);
     if(preliminary){update(row.target.id,{status:'not_applicable',reason:preliminary});continue}
     update(row.target.id,{status:'processing'});
-    try{const detail=await api<BatchDetail>(machineBatchPath(row.target.machine!.id));const why=batchUnavailableReason(action,row.target,detail);const credentials=batchCredentials(action,detail.credentials);update(row.target.id,{detail,status:why?'not_applicable':'pending',reason:why||undefined,credentialID:defaultMachineCredential(credentials,detail.machine.default_credential_id)})}
+    try{const detail=await api<BatchDetail>(machineBatchPath(row.target.machine!.id));if(detail.machine.id!==row.target.machine!.id)throw Error(t('主机详情与所选目标不匹配','Host detail does not match the selected target'));const why=batchUnavailableReason(action,row.target,detail);const credentials=batchCredentials(action,detail.credentials);update(row.target.id,{detail,status:why?'not_applicable':'pending',reason:why||undefined,credentialID:defaultMachineCredential(credentials,detail.machine)})}
     catch(error){update(row.target.id,{status:'failed',reason:errorText(error)})}
    }if(stop.current&&mounted.current)markStopped()}finally{finish()}
   };void initialize();
@@ -108,7 +116,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
 
  const credentialsFor=(row:Row)=>batchCredentials(action,row.detail?.credentials||[],now);
  const configurable=rows.filter(row=>row.status==='pending'&&!row.record&&!row.reason);
- const credentialsReady=action==='remove_node'||action==='delete_host'||configurable.every(row=>credentialsFor(row).some(credential=>credential.id===row.credentialID));
+ const credentialsReady=action==='remove_node'||action==='delete_host'||action==='install'&&autoAccount||configurable.every(row=>credentialsFor(row).some(credential=>credential.id===row.credentialID));
  const validVersion=/^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/.test(version);
  const validReason=new TextEncoder().encode(reason.trim()).length<=512;
  const pendingPlans=rows.filter(row=>row.record?.status==='awaiting_approval');
@@ -119,9 +127,10 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
  // from durable history. Never create another plan or repeat an apply request.
  const recoverPlan=async(row:Row,check:SSHCheckResult,priorIDs:Set<string>)=>{
   const detail=await api<BatchDetail>(machineBatchPath(row.target.machine!.id));
-  const candidates=(action==='install'?detail.deployments:detail.uninstallations)?.filter(record=>!priorIDs.has(record.id)&&record.plan?.check_id===check.id&&record.plan?.credential?.id===row.credentialID)||[];
+  if(detail.machine.id!==row.target.machine!.id)throw Error(t('主机详情与所选目标不匹配','Host detail does not match the selected target'));
+  const candidates=(action==='install'?detail.deployments:detail.uninstallations)?.filter(record=>!priorIDs.has(record.id)&&record.plan?.check_id===check.id&&record.plan?.credential?.id===check.credential_id)||[];
   if(candidates.length!==1)throw Error(t('无法确定是否已保存计划，请在主机历史中核对；不要重复创建或执行。','It is unclear whether a plan was saved. Check host history; do not create or execute it again.'));
-  return candidates[0];
+  return validatePlanRecord(candidates[0] as BatchPlan,row.target.machine!.id,check);
  };
  const prepare=async()=>{
   if(!credentialsReady||!configurable.length||(action==='install'&&!validVersion)||!start())return;
@@ -131,22 +140,23 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
     const row=rowsRef.current.find(item=>item.target.id===original.target.id)!;
     if(row.status!=='pending'||row.record||row.reason)continue;
     const credential=credentialsFor(row).find(item=>item.id===row.credentialID);
-    if(!credential){update(row.target.id,{status:'failed',reason:'choose_credential'});continue}
+    if(!credential&&!(action==='install'&&autoAccount)){update(row.target.id,{status:'failed',reason:'choose_credential'});continue}
     update(row.target.id,{status:'processing'});
     let check:SSHCheckResult|undefined,creating=false;
     const previousIDs=new Set((action==='install'?row.detail?.deployments:row.detail?.uninstallations)?.map(record=>record.id));
     try{
-     check=await api<SSHCheckResult>(`${machineBatchPath(row.target.machine!.id)}/ssh-check`,{method:'POST',body:JSON.stringify({credential_id:credential.id})});
-     update(row.target.id,{check});
+     check=await api<SSHCheckResult>(machineBatchPath(row.target.machine!.id)+(action==='install'?'/installation-preflight':'/ssh-check'),{method:'POST',body:JSON.stringify(action==='install'?autoAccount?{selection:'auto'}:{selection:'manual',credential_id:credential!.id}:{credential_id:credential!.id})});
+     const checkedCredential=credentialsFor(row).find(c=>c.id===check!.credential_id);if(!sshCheckMatchesCredential(check,row.target.machine!.id,checkedCredential)||!(action==='install'&&autoAccount)&&check.credential_id!==credential?.id)throw Error(t('检查回执与所选账户不匹配','Check receipt does not match the selected account'));
+     update(row.target.id,{check,credentialID:check.credential_id});
      if(!check.connected||!check.ready){update(row.target.id,{status:'failed',reason:'check_failed'});continue}
      if(!isPlan){update(row.target.id,{status:'success',reason:undefined});notifySuccess(row,check);continue}
      if(stop.current||!mounted.current){update(row.target.id,{status:'pending',reason:'stopped'});continue}
      if(action==='install'&&check.agent_installation?.state!=='absent'){update(row.target.id,{status:'not_applicable',reason:'existing_remote_agent'});continue}
      if(action==='install'&&!['amd64','arm64'].includes(check.arch)){update(row.target.id,{status:'failed',reason:'invalid_arch'});continue}
      creating=true;
-     const body={credential_id:credential.id,check_id:check.id,...(action==='install'?{version,arch:check.arch}:{})};
+     const body={credential_id:check.credential_id,check_id:check.id,...(action==='install'?{version,arch:check.arch,runtime_mode:runtimeMode}:{})};
      const record=await api<BatchPlan>(`${batchPlanPath(action,row.target.machine!.id)}/plan`,{method:'POST',body:JSON.stringify(body)});
-     update(row.target.id,{record,status:batchPlanStatus(record),reason:undefined});
+     validatePlanRecord(record,row.target.machine!.id,check);update(row.target.id,{record,status:batchPlanStatus(record),reason:undefined});
     }catch(error){
      if(creating&&check&&!(error instanceof ApiError&&error.status<500)){
       try{const record=await recoverPlan(row,check,previousIDs);update(row.target.id,{record,status:batchPlanStatus(record),reason:undefined,note:t('已从持久化历史恢复计划，请审阅后继续。','The plan was recovered from durable history. Review it before continuing.')})}
@@ -157,7 +167,10 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
    markStopped();if(mounted.current){setPhase(isPlan?'review':'results');setReviewed(false)}await refresh();
   }finally{finish()}
  };
- const readRecord=async(row:Row)=>api<BatchPlan>(batchPlanPath(action,row.target.machine!.id,row.record!.id));
+ const validateRecord=(record:BatchPlan,machineID:string,operationID?:string)=>{if(!agentOperationMatches(record,machineID,operationID)||record.plan?.machine?.id&&record.plan.machine.id!==machineID)throw Error(t('进度记录与目标主机或操作不匹配','Progress record does not match the host or operation'));return record};
+ const validatePlanRecord=(record:BatchPlan,machineID:string,check:SSHCheckResult)=>{validateRecord(record,machineID);if(record.plan?.machine?.id!==machineID||record.plan?.check_id!==check.id||record.plan?.credential?.id!==check.credential_id)throw Error(t('计划与目标主机、检查或凭据不匹配','The plan does not match the host, preflight, or credential'));return record};
+ const canSaveRecord=(row:Row,record:BatchPlan,original?:BatchPlan)=>{const saved=rowsRef.current.find(item=>item.target.id===row.target.id)?.record;return mounted.current&&(!original||saved===original)&&!!saved&&agentOperationMatches(saved,row.target.machine!.id,record.id)&&agentOperationCanAdvance(saved,record)};
+ const readRecord=async(row:Row)=>validateRecord(await api<BatchPlan>(batchPlanPath(action,row.target.machine!.id,row.record!.id)),row.target.machine!.id,row.record!.id);
  const applyPlans=async()=>{
   if(!reviewed||!executablePlans.length||!start())return;
   try{
@@ -169,18 +182,24 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
     update(row.target.id,{status:'processing',attempted:true,reason:undefined});
     try{
      const response=await api<BatchPlan>(`${batchPlanPath(action,row.target.machine!.id,row.record.id)}/apply`,{method:'POST',body:JSON.stringify({confirm:true})});
-     const record={...row.record,...response};update(row.target.id,{record,status:batchPlanStatus(record),reason:record.error});
+     const record=validateRecord({...row.record,...response},row.target.machine!.id,row.record.id);if(!canSaveRecord(row,record)||rowsRef.current.find(item=>item.target.id===row.target.id)?.record!==row.record&&!['succeeded','failed','unknown','cancelled'].includes(record.status))continue;update(row.target.id,{record,status:batchPlanStatus(record),reason:record.error});
      if(record.status==='succeeded')notifySuccess(row,record);
     }catch(error){
-     try{const response=await readRecord(row),record={...row.record,...response};
+     const original=rowsRef.current.find(item=>item.target.id===row.target.id)?.record;try{const response=await readRecord(row),record={...row.record,...response};if(!canSaveRecord(row,record,original))continue;
       update(row.target.id,{record,status:record.status==='awaiting_approval'?'failed':batchPlanStatus(record),reason:record.error||errorText(error)});
       if(record.status==='succeeded')notifySuccess(row,record);
-     }catch{update(row.target.id,{status:'unknown',reason:t('请求中断，且无法读取原计划状态；请打开此计划历史核对，不要重复执行。','The request was interrupted and the original plan could not be read. Check this plan in host history; do not execute it again.')})}
+     }catch{if(rowsRef.current.find(item=>item.target.id===row.target.id)?.record===original)update(row.target.id,{status:'unknown',reason:t('请求中断，且无法读取原计划状态；请打开此计划历史核对，不要重复执行。','The request was interrupted and the original plan could not be read. Check this plan in host history; do not execute it again.')})}
     }
    }
    if(mounted.current){setPhase('results');setReviewed(false)}await refresh();
   }finally{finish()}
  };
+ const pollingKey=isPlan?rows.filter(row=>row.record&&(row.record.status==='running'||row.record.status==='awaiting_approval'&&row.attempted&&row.status==='processing')).map(row=>row.target.id+':'+row.record!.id+':'+row.record!.status).join('|'):'';
+ useEffect(()=>{
+  if(!pollingKey)return;let active=true,timer:ReturnType<typeof setTimeout>;const controller=new AbortController(),inFlight=new Set<ReturnType<typeof agentOperationReadSignal>>();
+  const poll=async()=>{const targets=rowsRef.current.filter(row=>row.record&&(row.record.status==='running'||row.record.status==='awaiting_approval'&&row.attempted&&row.status==='processing'));await Promise.all(targets.map(async row=>{const saved=row.record!,machineID=row.target.machine!.id,request=agentOperationReadSignal(controller.signal);inFlight.add(request);try{const next=validateRecord(await api<BatchPlan>(batchPlanPath(action,machineID,saved.id),{signal:request.signal}),machineID,saved.id);const current=rowsRef.current.find(v=>v.target.id===row.target.id);if(active&&mounted.current&&current?.record===saved){update(row.target.id,{record:next,status:next.status==='awaiting_approval'?'processing':batchPlanStatus(next),reason:next.error,progressError:undefined});if(next.status==='succeeded'&&saved.status!=='succeeded'){notifySuccess(row,next);await refresh()}}}catch{if(active&&mounted.current&&rowsRef.current.find(v=>v.target.id===row.target.id)?.record===saved)update(row.target.id,{progressError:t('进度刷新失败，保留最后状态，稍后重试','Progress refresh failed; the last state is retained and will retry.')})}finally{request.dispose();inFlight.delete(request)}}));if(active)timer=setTimeout(poll,2000)};
+  timer=setTimeout(poll,2000);return()=>{active=false;clearTimeout(timer);controller.abort();for(const request of inFlight)request.dispose();inFlight.clear()};
+ },[pollingKey]);
  const executeSimple=async()=>{
   if(!reviewed||!validReason||!configurable.length||!start())return;
   try{for(const row of rowsRef.current){
@@ -196,8 +215,8 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
    for(const row of rowsRef.current){
     if(!mounted.current||stop.current)break;if(row.record?.status!=='awaiting_approval')continue;
     update(row.target.id,{status:'processing'});
-    try{const response=await api<BatchPlan>(`${batchPlanPath(action,row.target.machine!.id,row.record.id)}/cancel`,{method:'POST',body:'{}'});update(row.target.id,{record:{...row.record,...response},status:'failed',reason:t('未执行计划已取消。','The unexecuted plan was cancelled.')})}
-    catch(error){try{const response=await readRecord(row),record={...row.record,...response};update(row.target.id,{record,status:record.status==='awaiting_approval'?'failed':batchPlanStatus(record),reason:record.status==='cancelled'?t('未执行计划已取消。','The unexecuted plan was cancelled.'):errorText(error)})}catch{update(row.target.id,{status:'unknown',reason:t('计划取消未确认，请在历史中核对；该计划仍保留在本窗口。','Plan cancellation was not confirmed. Verify it in history; it remains visible in this dialog.')})}}
+    try{const response=await api<BatchPlan>(`${batchPlanPath(action,row.target.machine!.id,row.record.id)}/cancel`,{method:'POST',body:'{}'});const record=validateRecord({...row.record,...response},row.target.machine!.id,row.record.id);if(canSaveRecord(row,record))update(row.target.id,{record,status:batchPlanStatus(record),reason:record.status==='cancelled'?t('未执行计划已取消。','The unexecuted plan was cancelled.'):record.error})}
+    catch(error){const original=rowsRef.current.find(item=>item.target.id===row.target.id)?.record;try{const response=await readRecord(row),record={...row.record,...response};if(canSaveRecord(row,record,original))update(row.target.id,{record,status:record.status==='awaiting_approval'?'failed':batchPlanStatus(record),reason:record.status==='cancelled'?t('未执行计划已取消。','The unexecuted plan was cancelled.'):errorText(error)})}catch{if(rowsRef.current.find(item=>item.target.id===row.target.id)?.record===original)update(row.target.id,{status:'unknown',reason:t('计划取消未确认，请在历史中核对；该计划仍保留在本窗口。','Plan cancellation was not confirmed. Verify it in history; it remains visible in this dialog.')})}}
    }
    if(mounted.current)setReviewed(false);await refresh();
    if(closeAfter&&mounted.current&&!rowsRef.current.some(row=>row.record?.status==='awaiting_approval'))onClose();
@@ -212,7 +231,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
     continue;
    }
    if(!row.record||!['unknown','running'].includes(row.record.status)&&row.status!=='unknown')continue;
-   try{const response=await readRecord(row),record={...row.record,...response};update(row.target.id,{record,status:batchPlanStatus(record),reason:record.error});if(record.status==='succeeded')notifySuccess(row,record)}catch(error){update(row.target.id,{status:'unknown',reason:errorText(error)})}
+   const original=row.record;try{const response=await readRecord(row),record={...original,...response};if(!mounted.current||rowsRef.current.find(v=>v.target.id===row.target.id)?.record!==original)continue;update(row.target.id,{record,status:batchPlanStatus(record),reason:record.error,progressError:undefined});if(record.status==='succeeded')notifySuccess(row,record)}catch(error){if(mounted.current&&rowsRef.current.find(v=>v.target.id===row.target.id)?.record===original)update(row.target.id,{progressError:errorText(error)})}
   }await refresh()}finally{finish()}
  };
  const verifyPlatformRecords=async()=>{
@@ -235,7 +254,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
    }
   }await refresh()}finally{finish()}
  };
- const credentialLabel=(credential:BatchCredential)=>`${credential.method==='password'?(credential.retention==='permanent'?t('永久密码','Permanent password'):credential.retention==='managed'?t('托管密码','Managed password'):credential.retention==='temporary'?t('临时密码（可复用）','Temporary password (reusable)'):t('一次性密码','One-time password')):t('SSH 私钥','SSH private key')} · ${credential.secret_fingerprint||credential.id} · ${credential.retention==='permanent'?t('永久','Permanent'):time(credential.expires_at)}`;
+ const credentialLabel=(credential:BatchCredential)=>`${credential.username} · ${credential.name||credential.id} · ${credential.method==='password'?(credential.retention==='permanent'?t('永久密码','Permanent password'):credential.retention==='managed'?t('托管密码','Managed password'):credential.retention==='temporary'?t('临时密码（可复用）','Temporary password (reusable)'):t('一次性密码','One-time password')):t('SSH 私钥','SSH private key')} · ${credential.secret_fingerprint||credential.id} · ${credential.retention==='permanent'?t('永久','Permanent'):time(credential.expires_at)}`;
  const impact=({ssh_check:t('逐台执行固定只读预检。一次性密码在本次检查结束后会被消耗，不能再用于下一次操作；安装和卸载支持有效私钥或可复用密码。','Run fixed read-only preflight on each host. A one-time password is consumed after this check and cannot be reused. Installation and removal support active keys or reusable passwords.'),install:t('默认安装为宿主机独立 systemd 服务；不随业务启停，不注入业务容器。每台主机使用自己的预检架构。激活后清除临时凭据，保留按期限托管或永久凭据。','Install an independent systemd service on each host. It runs separately from the business service and is not injected into business containers. Use each host’s detected architecture. Activation clears temporary credentials and retains managed or permanent credentials.'),uninstall:t('停止并移除 Agent 服务和程序，保留配置、身份与缓存；核验后撤销节点凭据。业务服务不在此卸载范围，重装需要核查保留身份后重新接入。','Stop and remove Agent services and runtime while retaining configuration, identity, and cache. Revoke node credentials after verification. Business services are outside this removal workflow. Review retained identity and enroll again before reinstalling.'),remove_node:t('仅撤销节点 control/data 身份并归档，保留历史，不会卸载远端程序。未结束或结果未知的任务可能阻止移除，旧版共享 Key 节点须先迁移独立凭据。','Revoke control/data credentials and archive node identities while retaining history. Remote programs remain installed. Unfinished or uncertain tasks may block removal. Legacy shared-key nodes must migrate to independent credentials first.'),delete_host:t('永久删除平台中的主机记录、本主机的凭据绑定及部署/卸载历史；中央凭据库和其他主机的共享凭据不受影响，不会卸载远端 Agent 或停止业务。请先解绑本主机的有效连接凭据，并完成或取消未结束计划。','Permanently delete platform host records, their credential bindings, and installation/removal history. The central credential library and other hosts’ shared credentials are unaffected. Remote Agents and business services remain running. Unlink these hosts’ active connection credentials and resolve pending plans first.')})[action];
  const canClose=!busy&&!pendingPlans.length;
  return <Modal title={title} open width={900} onCancel={close} closable={!busy} maskClosable={false} keyboard={!busy} destroyOnHidden footer={<Space wrap>
@@ -252,22 +271,23 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
  </Space>}>
   <Alert showIcon type={action==='ssh_check'?'info':'warning'} title={t(`本批次固定 ${snapshot.length} 个目标，逐台执行`,`This batch has ${snapshot.length} fixed targets and runs one host at a time`)} description={<>{impact}<br/>{t('单台失败不影响后续目标，不自动重试。“停止后续”仅停止未开始的目标，当前请求会继续完成。关闭页面后请从各主机历史核对已保存计划。','One failure does not block other targets, and operations are not retried automatically. Stopping affects only targets not started; the current request continues. After leaving the page, check saved plans in each host’s history.')}</>}/>
   {notice&&<Alert role="alert" style={{marginTop:12}} type="warning" showIcon title={notice}/>}
-  {phase==='configure'&&action==='install'&&<div style={{marginTop:16}}><Typography.Text>{t('Agent 版本','Agent version')}</Typography.Text><Input aria-label={t('批量 Agent 版本','Batch Agent version')} value={version} maxLength={64} disabled={busy} onChange={event=>setVersion(event.target.value)} status={validVersion?undefined:'error'}/><Typography.Text type="secondary">{t('架构由每台主机的 SSH 预检自动识别，不统一指定。','Architecture is detected separately by each host’s SSH preflight.')}</Typography.Text></div>}
+  {phase==='configure'&&action==='install'&&<div style={{marginTop:16}}><Checkbox checked={autoAccount} disabled={busy} onChange={e=>setAutoAccount(e.target.checked)}>{t('自动选择合适账户安装','Automatically choose a suitable installation account')}</Checkbox><Typography.Paragraph type='secondary'>{t('自动模式只读检查已登记账户，优先 root，其次已验证高权限账户。连接、认证或权限不足时可检查其他账户；成功身份将固定在部署计划中。取消后逐台选择安装账户。','Automatic mode performs read-only checks of registered accounts, prioritizing root, then verified privileged accounts. Connection, authentication or privilege failure can try another account; the successful identity is fixed in the deployment plan. Clear this option to choose an account per host.')}</Typography.Paragraph><Typography.Text>{t('Agent 版本','Agent version')}</Typography.Text><Input aria-label={t('批量 Agent 版本','Batch Agent version')} value={version} maxLength={64} disabled={busy} onChange={event=>setVersion(event.target.value)} status={validVersion?undefined:'error'}/><Typography.Text type="secondary">{t('架构由每台主机的 SSH 预检自动识别，不统一指定。','Architecture is detected separately by each host’s SSH preflight.')}</Typography.Text><div style={{marginTop:12}}><Checkbox checked={runtimeMode==='root'} disabled={busy} onChange={event=>setRuntimeMode(event.target.checked?'root':'user')}>{t('启用完整主机管理（以 root 运行）','Enable full host management (run as root)')}</Checkbox><Typography.Paragraph type="secondary">{t('取消后所有目标 Agent 均以 lightmoni-agent 普通账户运行。root 模式启用容器管理、root 脚本和受管主机运维，每次作业仍需单独批准并记录审计。','Clear this option to run every target Agent as the standard lightmoni-agent account. Root enables container management, root scripts, and managed host operations; every job still requires approval and audit.')}</Typography.Paragraph></div></div>}
   {phase==='configure'&&action==='remove_node'&&<div style={{marginTop:16}}><Input.TextArea aria-label={t('移除原因（可选）','Removal reason (optional)')} placeholder={t('移除原因（可选，最多 512 字节）','Removal reason (optional, up to 512 bytes)')} value={reason} disabled={busy} onChange={event=>setReason(event.target.value)} status={validReason?undefined:'error'}/>{!validReason&&<Typography.Text type="danger">{t('原因超过 512 字节，请缩短。','The reason exceeds 512 bytes. Shorten it.')}</Typography.Text>}</div>}
   <div style={{marginTop:16,maxHeight:'52vh',overflowY:'auto',paddingRight:4}} aria-label={t('批量操作目标与结果','Batch targets and results')}>
    {rows.map(row=><section key={row.target.id} data-batch-target={row.target.id} data-batch-status={row.status} style={{border:'1px solid var(--lm-border-color, #d9d9d9)',borderRadius:8,padding:12,marginBottom:12,overflowWrap:'anywhere'}}>
     <Space wrap><Typography.Text strong>{row.target.name}</Typography.Text><Tag color={row.record?.status==='cancelled'?'default':row.status==='success'?'success':row.status==='failed'?'error':row.status==='unknown'?'warning':row.status==='processing'?'processing':'default'}>{statusText(row)}</Tag></Space>
     <Typography.Paragraph type="secondary" style={{marginBottom:8}}>{row.target.machine?sshEndpoint(row.target.machine.address,row.target.machine.port):t('独立节点，无 SSH 主机记录','Independent node without an SSH host record')} · {row.target.agent?t(`节点 ${row.target.agent.id}`,`Node ${row.target.agent.id}`):t('仅主机','Host only')}</Typography.Paragraph>
+    {isPlan&&row.record&&<AgentOperationProgress kind={action==='install'?'install':'uninstall'} machineID={row.target.machine?.id||''} record={row.record} submitting={row.status==='processing'&&row.attempted} refreshError={row.progressError}/> }
     {row.reason&&<Alert showIcon type={row.status==='unknown'?'warning':row.status==='failed'?'error':'info'} title={reasonText(row.reason)}/>}
     {row.note&&<Typography.Paragraph type="secondary">{row.note}</Typography.Paragraph>}
-    {phase==='configure'&&!busy&&row.status==='pending'&&!row.reason&&action!=='delete_host'&&action!=='remove_node'&&<div style={{marginTop:8}}><Select aria-label={t(`SSH 凭据 · ${row.target.name}`,`SSH credential · ${row.target.name}`)} style={{width:'100%'}} value={row.credentialID} placeholder={t('请选择 SSH 凭据','Select an SSH credential')} options={credentialsFor(row).map(credential=>({value:credential.id,label:credentialLabel(credential)}))} onChange={value=>update(row.target.id,{credentialID:value})}/>{credentialsFor(row).length>1&&!row.credentialID&&<Typography.Text type="warning">{t('存在多条有效凭据，请明确选择。','Multiple active credentials exist. Select one explicitly.')}</Typography.Text>}</div>}
+    {phase==='configure'&&!busy&&row.status==='pending'&&!row.reason&&!(action==='install'&&autoAccount)&&action!=='delete_host'&&action!=='remove_node'&&<div style={{marginTop:8}}><Select aria-label={t(`SSH 凭据 · ${row.target.name}`,`SSH credential · ${row.target.name}`)} style={{width:'100%'}} value={row.credentialID} placeholder={t('请选择 SSH 凭据','Select an SSH credential')} options={credentialsFor(row).map(credential=>({value:credential.id,label:credentialLabel(credential)}))} onChange={value=>update(row.target.id,{credentialID:value})}/>{credentialsFor(row).length>1&&!row.credentialID&&<Typography.Text type="warning">{t('存在多条有效凭据，请明确选择。','Multiple active credentials exist. Select one explicitly.')}</Typography.Text>}</div>}
     {row.check&&<details style={{marginTop:8}}><summary>{t('SSH 检查结果','SSH check result')}</summary><SSHCheckSummary result={row.check}/></details>}
     {row.record&&<div style={{marginTop:8}}>
      <Descriptions size="small" column={1} items={[
       {key:'plan',label:t('计划 ID','Plan ID'),children:row.record.id},
-      {key:'target',label:t('审核目标','Reviewed target'),children:row.record.plan?.machine?sshEndpoint(row.record.plan.machine.address,row.record.plan.machine.port,row.record.plan.machine.username):row.target.name},
+      {key:'target',label:t('审核目标','Reviewed target'),children:row.record.plan?.machine?sshEndpoint(row.record.plan.machine.address,row.record.plan.machine.port,row.record.plan.ssh_account?.username):row.target.name},
       {key:'agent',label:t('节点身份','Node identity'),children:row.record.plan?.agent_id||row.record.plan?.machine?.agent_id||t('安装激活后生成','Created after installation activation')},
-      ...(action==='install'?[{key:'version',label:t('版本 / 架构','Version / architecture'),children:`${row.record.plan?.version||version} / ${row.record.plan?.arch||row.check?.arch||''}`}]:[]),
+      ...(action==='install'?[{key:'capabilities',label:t('此计划开启的任务能力','Task capabilities enabled by this plan'),children:row.record.plan?.capabilities?(row.record.plan.capabilities.length?row.record.plan.capabilities.map(v=>runtimeCapabilityText(v,t)).join('、'):t('全部关闭','All disabled')):t('尚未记录','Not recorded')},{key:'runtime',label:t('运行账户','Runtime account'),children:row.record.plan?.runtime_mode==='root'?'root':row.record.plan?.runtime_mode==='user'?'lightmoni-agent':t('尚未记录','Not recorded')},{key:'version',label:t('版本 / 架构','Version / architecture'),children:`${row.record.plan?.version||version} / ${row.record.plan?.arch||row.check?.arch||''}`}]:[]),
       {key:'credential',label:t('SSH 凭据 ID','SSH credential ID'),children:row.record.plan?.credential?.id||row.credentialID},
       {key:'expires',label:t('计划有效期','Plan expires at'),children:time(row.record.plan?.expires_at)},
      ]}/>

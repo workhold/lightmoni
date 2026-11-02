@@ -9,9 +9,10 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { runInNewContext } from "node:vm";
 import { readAgentRelease } from "../src/agent/release.js";
-import { agentUpdateProbeSource, agentUpdateStartCommand, parseAgentUpdateProbe, parseAgentUpdateStatus, ORDINARY_AGENT_SERVICE_SHA256 as SSH_ORDINARY_SERVICE_SHA256 } from "../src/server/machine-agent-update-ssh.js";
+import { agentUpdateProbeSource, agentUpdateStartCommand, parseAgentUpdateProbe, parseAgentUpdateStatus, USER_AGENT_SERVICE_SHA256 as SSH_ORDINARY_SERVICE_SHA256 } from "../src/server/machine-agent-update-ssh.js";
 const repo = resolve(import.meta.dirname, "../..");
 const { AgentMaintenance, ORDINARY_AGENT_SERVICE_SHA256 } = await import(pathToFileURL(join(repo, "deploy/agent/update-runner.mjs")).href);
+const {buildAgentService}=await import(pathToFileURL(join(repo,'deploy/agent/service-unit.mjs')).href);
 const sha = (v: string | Buffer) => createHash("sha256").update(v).digest("hex");
 
 /** Execute the production SSH probe against the same isolated installation as
@@ -19,7 +20,7 @@ const sha = (v: string | Buffer) => createHash("sha256").update(v).digest("hex")
  * the fingerprint implementation itself is not reimplemented or replaced. */
 function sshProbe(f: ReturnType<typeof fixture>) {
   let source = agentUpdateProbeSource;
-  for (const name of ["/opt/lightmoni-agent", "/etc/systemd/system/lightmoni-agent.service", "/usr/local/bin/lightmoni-agent", "/var/lib/lightmoni-agent", "/run/lightmoni-agent-lifecycle.lock"])
+  for (const name of ["/opt/lightmoni-agent", "/etc/systemd/system/lightmoni-agent.service", "/etc/lightmoni-agent", "/usr/local/bin/lightmoni-agent", "/var/lib/lightmoni-agent", "/run/lightmoni-agent-lifecycle.lock"])
     source = source.replaceAll(name, f.p(name));
   const fixturePath = (filename: string) => {
     if (filename !== f.root && !filename.startsWith(f.root + "/")) throw Error("probe attempted a non-fixture read");
@@ -48,7 +49,7 @@ function sshProbe(f: ReturnType<typeof fixture>) {
   return parseAgentUpdateProbe(stdout);
 }
 
-function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; failRollback?: boolean; oldHelper?:boolean; targetHelper?:boolean; targetPermissions?:boolean; failPermissionPreparation?:boolean; privilegedService?:boolean } = {}) {
+function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; failRollback?: boolean; oldHelper?:boolean; targetHelper?:boolean; targetPermissions?:boolean; failPermissionPreparation?:boolean; privilegedService?:boolean; runtimeMode?:'root'|'user' } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "lm-update-")));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const p = (name: string) => join(root, name);
@@ -69,6 +70,8 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   fs.writeFileSync(p("usr/local/bin/lightmoni-agent"), "#!/bin/sh\n# old launcher\n", { mode: 0o755 });
   fs.writeFileSync(p("etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(join(repo,options.privilegedService?"runtime/test/fixtures/forbidden-privileged-agent.service":"deploy/agent/lightmoni-agent.service")));
   fs.writeFileSync(p("etc/lightmoni-agent/config.json"), '{"control_credential":"test-private-control","data_credential":"test-private-data"}\n', { mode: 0o600 });
+  if(options.runtimeMode){fs.writeFileSync(p('etc/systemd/system/lightmoni-agent.service'),buildAgentService(options.runtimeMode));fs.writeFileSync(p('etc/lightmoni-agent/config.json'),JSON.stringify({control_credential:'test-private-control',data_credential:'test-private-data',runtime_mode:options.runtimeMode,permission_generation:7}),{mode:0o600});}
+  if(options.runtimeMode==='root')fs.writeFileSync(p('etc/lightmoni-agent/managed.json'),JSON.stringify({executor_id:'signed-identity',install_generation:3}),{mode:0o600});
   fs.writeFileSync(p("var/lib/lightmoni-agent/identity.json"), '{"agent_id":"fixture-agent","host_id":"fixture-host"}\n', { mode: 0o600 });
   fs.writeFileSync(p("var/lib/lightmoni-agent/queue.sqlite"), randomBytes(128), { mode: 0o600 });
   const saved = Object.fromEntries(["etc/lightmoni-agent/config.json", "var/lib/lightmoni-agent/identity.json", "var/lib/lightmoni-agent/queue.sqlite"].map(name => [name, fs.readFileSync(p(name))]));
@@ -113,6 +116,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
         const meta = maintenance.metadata(current);
         return JSON.stringify({ agent_id: "fixture-agent", ...(options.legacy && current === old ? {} : { boot_id: boot, release: meta }) });
       }
+      if(args[0]==='managed-status')return JSON.stringify({executor_id:'signed-identity',install_generation:3,fenced:null,pending_results:0});
       return "configuration valid";
     },
   });
@@ -367,11 +371,21 @@ test("maintenance and SSH probes bind the exact checked-in least-privilege unit"
   assert.equal(actual,ORDINARY_AGENT_SERVICE_SHA256);assert.equal(actual,SSH_ORDINARY_SERVICE_SHA256);
   assert.notEqual(sha(fs.readFileSync(join(repo,"runtime/test/fixtures/forbidden-privileged-agent.service"))),actual);
 });
+const legacyUserService=()=>fs.readFileSync(join(repo,'deploy/agent/lightmoni-agent.service'),'utf8').replace('RuntimeDirectory=lightmoni-agent\nRuntimeDirectoryMode=0700\n','').replace('ExecStart=/usr/bin/flock --no-fork --exclusive --nonblock /run/lightmoni-agent/runner.lock /usr/local/bin/lightmoni-agent run','ExecStart=/usr/local/bin/lightmoni-agent run');
+test('SSH update probe explicitly refuses the old user service before offering an executable upgrade',t=>{const f=fixture(t),old=legacyUserService();assert.equal(sha(old),'651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf');fs.writeFileSync(f.p('etc/systemd/system/lightmoni-agent.service'),old);assert.throws(()=>sshProbe(f),/旧安装不支持统一生命周期，请先受管卸载再重装/);assert.equal(f.calls.some(([,args])=>args[0]==='stop'||args[0]==='restart'),false);});
+test('SSH update probe never offers an old user service as a retained rollback target',async t=>{const f=fixture(t),request=f.request();await f.maintenance.start(request);f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==='waiting_confirmation')f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});assert.equal((await f.maintenance.worker(request.operation_id)).status,'succeeded');const directory=f.p('opt/lightmoni-agent/updates/'+request.operation_id);fs.writeFileSync(join(directory,'previous-service'),legacyUserService());const previousFile=f.p('opt/lightmoni-agent/previous.json'),previous=JSON.parse(fs.readFileSync(previousFile,'utf8'));previous.fingerprint=f.maintenance.fingerprint(f.old,join(directory,'previous-launcher'),join(directory,'previous-service')).fingerprint;fs.writeFileSync(previousFile,JSON.stringify(previous));assert.equal(sshProbe(f).previous,null);assert.equal(f.maintenance.previous(),null);});
 
 test("a candidate privileged unit is refused before executing its old permission helper",async t=>{
   const f=fixture(t,{targetPermissions:true});
   fs.writeFileSync(join(f.packageDir,"lightmoni-agent.service"),fs.readFileSync(join(repo,"runtime/test/fixtures/forbidden-privileged-agent.service")));f.repack();
   const request=f.request();await f.maintenance.start(request);const result=await f.maintenance.worker(request.operation_id);
-  assert.equal(result.status,"failed");assert.equal(result.error_code,"ordinary_agent_privilege_violation");
+  assert.equal(result.status,"failed");assert.equal(result.error_code,"agent_service_override_not_allowed");
   assert.equal(f.calls.some(([,args])=>args[1]==="prepare"),false);assert.equal(f.calls.some(([file,args])=>file==="systemctl"&&args[0]==="stop"),false);f.preserve();
+});
+
+test('root Agent upgrade preserves the selected account, permission generation and embedded identity',async t=>{
+ const f=fixture(t,{runtimeMode:'root'}),request=f.request(),unit=fs.readFileSync(f.p('etc/systemd/system/lightmoni-agent.service')),managed=fs.readFileSync(f.p('etc/lightmoni-agent/managed.json'));
+ const before=sshProbe(f);assert.equal(before.runtime_mode,'root');assert.equal(before.permission_generation,7);
+ await f.maintenance.start(request);f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==='waiting_confirmation')f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256})});
+ const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,'succeeded');assert.deepEqual(fs.readFileSync(f.p('etc/systemd/system/lightmoni-agent.service')),unit);assert.deepEqual(fs.readFileSync(f.p('etc/lightmoni-agent/managed.json')),managed);const after=sshProbe(f);assert.equal(after.runtime_mode,'root');assert.equal(after.permission_generation,7);f.preserve();
 });

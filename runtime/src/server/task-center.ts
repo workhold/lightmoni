@@ -127,6 +127,9 @@ export class TaskRunStore {
     const snapshot: TaskRunSnapshot = previousSnapshot ? structuredClone(previousSnapshot) : { task_id: task.id, task_name: task.name,
       host_id: h.id, host_name: h.name, agent_id: h.agent_id, script: structuredClone(task.script), task_revision:task.revision,
       execution_policy:policy };
+    const runtimeTable=this.deps.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_agent_runtime'");
+    const runtime=runtimeTable&&this.deps.db.get<any>('SELECT permission_generation FROM machine_agent_runtime WHERE machine_id=? AND agent_id=?',h.id,h.agent_id);
+    if(!previousSnapshot)snapshot.execution_identity={account:'lightmoni-agent',permission_generation:runtime?.permission_generation??1,privilege:'user'};
     const id = randomUUID(), at = this.now();
     this.deps.db.run("INSERT INTO task_runs(id,task_id,host_id,agent_id,snapshot_json,state,trigger,retry_of,request_id,requested_by,created_at,expires_at,automatic_attempt,auto_retry_closed) VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?,0)",
       id, task.id, h.id, h.agent_id, JSON.stringify(snapshot), trigger, retryOf, requestID, actor, at,

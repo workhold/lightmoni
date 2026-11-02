@@ -63,7 +63,7 @@ test('platform restart retains the durable Docker installation fence and status 
  const make=()=>registerMachineDocker({db,router:{get(){},post(){}},now:()=>new Date()} as any,{safe:(f:any)=>f} as any);
  try{
  db.exec('CREATE TABLE managed_machines(id TEXT PRIMARY KEY);INSERT INTO managed_machines VALUES(\'machine\')');let service=make();
- db.run('INSERT INTO machine_docker_installations VALUES(?,?,?,?,?,?,?,?,?,?,?)','a'.repeat(32),'machine','agent','request-0001','credential','running','installing_packages','','admin',new Date().toISOString(),new Date().toISOString());
+ db.run('INSERT INTO machine_docker_installations(id,machine_id,agent_id,request_id,credential_id,state,phase,code,created_by,created_at,updated_at,ssh_account_json,credential_revision,target_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)','a'.repeat(32),'machine','agent','request-0001','credential','running','installing_packages','','admin',new Date().toISOString(),new Date().toISOString(),JSON.stringify({id:'fixture-account',username:'root',revision:1}),'revision','target');
  await service.close();db.close();db=new DB(path);service=make();
  const pending=pendingDockerInstallation(db,'machine');assert.equal(pending.state,'unknown');assert.equal(pending.code,'docker_install_result_unavailable');await service.close();
  const command=dockerInstallStatusCommand('a'.repeat(32));assert.doesNotMatch(command,/mkdir|systemd-run|install\.sh/);assert.match(command,/state.*unknown/);assert.doesNotMatch(command,/state.*failed/);
@@ -85,7 +85,7 @@ async function dockerInstallationFenceFixture(t:import('node:test').TestContext,
  CREATE TABLE machine_executor_maintenance(id TEXT PRIMARY KEY,machine_id TEXT,status TEXT);`);
  const get=(id:string)=>{
   const row=f.db.get<any>('SELECT * FROM managed_machines WHERE id=?',id);if(!row)fail(404,'host_not_found');
-  return {...row,port:22,username:'root',connection_method:'direct_ssh',capabilities:{update_agent:{available:true,reason:''}}};
+  return {...row,port:22,connection_method:'direct_ssh',capabilities:{update_agent:{available:true,reason:''}}};
  };
  const realRouter=f.deps.router;
  const router={
@@ -101,9 +101,9 @@ async function dockerInstallationFenceFixture(t:import('node:test').TestContext,
   }),
  };
  const module=registerMachineDocker({...f.deps,router},{
-  get,
+  get,revision:(m:any)=>JSON.stringify([m.id,m.address,m.port]),
   idle(id:string){if(busy.has(id))fail(409,'fixture_host_busy');},busy,
-  credential(id:string,credentialID?:string){credentialReads++;assert.ok(!credentialID||credentialID==='fixture-credential');return {machine:get(id),credential:{id:'fixture-credential'}};},
+  credential(id:string,credentialID?:string){credentialReads++;assert.ok(!credentialID||credentialID==='fixture-credential');return {machine:{...get(id),account_id:'fixture-account',username:'root',account_revision:1},credential:{id:'fixture-credential',account_id:'fixture-account',username:'root',account_revision:1,secret_fingerprint:'fixture',retention:'permanent',expires_at:null}};},
   authentication(){return {privateKey:'fixture-only-never-used-for-ssh'};},
   markCredentialUsed(){},safe:(handler:any)=>handler,
   async runner(input:any){calls.push(input);return {stdout:JSON.stringify({state:'succeeded',phase:'verified',code:''}),stderr:'',stages:[]};},

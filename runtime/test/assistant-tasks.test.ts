@@ -17,7 +17,7 @@ function fixture(t: any) {
   const deps = { db, ...crypt, router: new Router(), now: () => at,
     logger: { info() {}, warn() {}, error() {} } } as unknown as Dependencies;
   const runs = new TaskRunStore(deps), proposals = new TaskProposalService(deps, runs), nodes = runs.nodes;
-  for (const id of ["one", "two"]) db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,'fixture.invalid',22,'user','direct_ssh',?,?,?)", id, "Host " + id, "agent-" + id, at.toISOString(), at.toISOString());
+  for (const id of ["one", "two"]) db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,'fixture.invalid',22,'direct_ssh',?,?,?)", id, "Host " + id, "agent-" + id, at.toISOString(), at.toISOString());
   const definition = { name: "Fixture script", type: "script", enabled: true, label_ids: [], host_ids: ["one"], target_all: false,
     schedule: { mode: "once" }, script: { runtime: "node", code: "console.log('fixture')", timeout_seconds: 5, max_output_bytes: 4096 } };
   nodes.task(definition, "fixture-task", true);

@@ -11,7 +11,7 @@ import type { Dependencies } from "../src/shared/types.js";
 const at = new Date("2026-10-30T01:00:00.000Z");
 const fixture = (t: any) => { const db = new DB(":memory:"); t.after(() => db.close()); return {db, store:new NodeStore(db, () => at)}; };
 const machine = (db: DB, id: string, agent = "") => {
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'root','direct_ssh',?,?,?)", id, `Host ${id}`, `${id}.invalid`, agent, at.toISOString(), at.toISOString());
+  db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)", id, `Host ${id}`, `${id}.invalid`, agent, at.toISOString(), at.toISOString());
   if (agent) db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES(?,?,?,'1','linux','amd64',?,'{}')", agent, id, id, at.toISOString());
 };
 const script = (more: Record<string,unknown> = {}) => ({ name:"Test script", type:"script", enabled:true, label_ids:[], host_ids:[], target_all:false, schedule:{mode:"once"}, script:{runtime:"node",code:"console.log('ok')",timeout_seconds:10,max_output_bytes:4096}, ...more });

@@ -1,0 +1,9 @@
+{
+  "checked": [
+    "registration creates asset and immutable account once and retries validation failure safely",
+    "register-only needs no username and creates no login account or secret",
+    "English narrow registration fits and closing discards secrets"
+  ],
+  "errors": [],
+  "unexpected": []
+}

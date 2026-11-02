@@ -1,0 +1,9 @@
+# Design
+
+- 以 main 为基整合 #74（包含 #73 与 #72 的提交），保留主干 Docker 已有组件验证。通过集成 PR merge commit 保留原提交可达性，原 PR 改以 main 后核对合入状态。
+- 主机列表复用 ManagedContainerDialog；Docker 环境面板保留已有组件验证和 root Agent 容器授权提示，删除旧 HostInventory 页面。
+- SSHError 保持原 code，只在非零退出时形成固定安全诊断；部署 receipt 附加诊断且继续 unknown。不给未知结果自动重试或撤销身份。
+- 仓库设计章节与 Doca 同步入口约束，回读最新目标块并核验原生图块未变。
+- 先测试/构建后 PR 合入；对固定源码双架构构建和烟测，发布不可变标签/更新 latest，再提交 Compose 版本收敛 PR。
+- 线上保存配置/数据库/master key 及旧容器摘要，以新命名卷启用 schema v2。保留旧卷；管理员仅复制原有账户密码散列与当前会话，避免新密码传播。沿用主密钥以保留用户新建的域名/DNS 凭据及原 SSH 凭据库；重新建立 v2 主机/账户绑定，不迁移旧绑定记录，不提交/打印秘密。
+- Demo 通过本仓库 examples/abc-demo 提供无依赖 Node HTTP 服务与 Dockerfile，固定健康接口、真实请求统计和版本信息。使用私有仓库镜像 digest 经 LightMoni 应用部署，网站反代连接主机可达私有端口，DNS 与证书使用已登记 heyphp.com；证书私钥不落入源码或日志。

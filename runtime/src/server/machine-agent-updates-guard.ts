@@ -1,7 +1,9 @@
 import type { DB } from "../shared/types.js";
 import { fail } from "../shared/http.js";
+import { pendingAgentRuntime } from './machine-agent-runtime-guard.js';
 
 export function hasPendingAgentUpdate(db: DB, agentID: string, machineID = ""): boolean {
+  if(pendingAgentRuntime(db,machineID,agentID))return true;
   if (!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_agent_updates'")) return false;
   return Boolean(db.get("SELECT id FROM machine_agent_updates WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND status IN ('awaiting_approval','running','verifying','unknown') LIMIT 1", agentID, machineID, machineID));
 }

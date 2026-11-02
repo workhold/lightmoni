@@ -8,6 +8,8 @@ import { ExecutorJournal } from "./journal.js";
 
 export const EXECUTOR_DATA_DIR = "/var/lib/lightmoni-executor";
 export const EXECUTOR_CONFIG = "/etc/lightmoni-executor/config.json";
+export const MANAGED_AGENT_DATA_DIR = "/var/lib/lightmoni-agent/managed";
+export const MANAGED_AGENT_CONFIG = "/etc/lightmoni-agent/managed.json";
 export interface ExecutorPolicy { generation: number; capabilities: PrivilegedCapability[] }
 export interface ExecutorConfig {
   version: 1; endpoint: string; center_instance_id: string; machine_id: string; agent_id: string;
@@ -52,7 +54,7 @@ export function parseBootstrap(value: unknown, now = Date.now()): ExecutorBootst
 export function validateConfig(value: unknown): ExecutorConfig {
   const v = strictRecord(value, ["version", "endpoint", "center_instance_id", "machine_id", "agent_id", "executor_id", "install_generation", "center_keys", "private_key", "output_key", "data_dir", "local_policy", "accounts", "daemon_id"]);
   identity(v);
-  if (v.data_dir !== EXECUTOR_DATA_DIR || typeof v.private_key !== "string" || Buffer.byteLength(v.private_key) > 1024 || createPrivateKey(v.private_key).asymmetricKeyType !== "ed25519"
+  if (![EXECUTOR_DATA_DIR, MANAGED_AGENT_DATA_DIR].includes(v.data_dir) || typeof v.private_key !== "string" || Buffer.byteLength(v.private_key) > 1024 || createPrivateKey(v.private_key).asymmetricKeyType !== "ed25519"
     || typeof v.output_key !== "string" || !/^[a-f0-9]{64}$/.test(v.output_key) || typeof v.daemon_id !== "string" || !/^[A-Za-z0-9:_.-]{0,128}$/.test(v.daemon_id)
     || !Array.isArray(v.accounts) || !v.accounts.length || v.accounts.length > 32 || new Set(v.accounts.map((a: any) => a.name)).size !== v.accounts.length) refuse("invalid_config");
   v.accounts.forEach(validateAccount); return v as ExecutorConfig;
@@ -65,11 +67,11 @@ export function loadConfig(filename: string): ExecutorConfig {
   }
   return v;
 }
-export function newConfig(bootstrap: ExecutorBootstrap, daemonID: string): ExecutorConfig {
+export function newConfig(bootstrap: ExecutorBootstrap, daemonID: string, dataDir = EXECUTOR_DATA_DIR): ExecutorConfig {
   const key = generateKeyPairSync("ed25519");
   return validateConfig({ version: 1, endpoint: httpsOrigin(bootstrap.endpoint), center_instance_id: bootstrap.center_instance_id, machine_id: bootstrap.machine_id, agent_id: bootstrap.agent_id,
     executor_id: bootstrap.executor_id, install_generation: bootstrap.install_generation, center_keys: bootstrap.center_keys,
-    private_key: key.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), output_key: randomBytes(32).toString("hex"), data_dir: EXECUTOR_DATA_DIR,
+    private_key: key.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), output_key: randomBytes(32).toString("hex"), data_dir: dataDir,
     local_policy: bootstrap.local_policy, accounts: [localAccount("root")], daemon_id: daemonID });
 }
 export const executorPublicKey = (config: ExecutorConfig) => createPublicKey(createPrivateKey(config.private_key)).export({ type: "spki", format: "pem" }).toString();

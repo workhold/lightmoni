@@ -18,7 +18,7 @@ async function fixture(t:any){
  const server=createServer((req,res)=>void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));server.listen(0,'127.0.0.1');await once(server,'listening');
  t.after(async()=>{machines.close?.();await new Promise<void>(resolve=>server.close(()=>resolve()));db.close()});
  const req=async(path:string,method='GET',body?:any,role='admin')=>{const response=await fetch('http://127.0.0.1:'+(server.address() as any).port+'/api/v1'+path,{method,headers:{'content-type':'application/json','x-role':role},body:body===undefined?undefined:JSON.stringify(body)});return{status:response.status,body:await response.json() as any}};
- const host=(await req('/machines','POST',{name:'NAT host',address:'8.8.4.4',username:'root'})).body;
+ const host=(await req('/machines','POST',{name:'NAT host',address:'8.8.4.4'})).body;
  db.run("INSERT INTO agents(id,last_seen) VALUES('agent-a',?)",now.toISOString());db.run("UPDATE managed_machines SET agent_id='agent-a' WHERE id=?",host.id);
  const observe=(agent='agent-a',addresses=[{interface:'eth0',address:'10.0.0.16'}],at=now.toISOString())=>recordHostNetwork(db,host.id,agent,normalizeNetworkAddresses(addresses),{source_ip:'172.24.0.1',source_kind:'direct'},at);
  observe();const path='/machines/'+host.id+'/service-addresses';

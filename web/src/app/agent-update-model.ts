@@ -10,7 +10,8 @@ export interface AgentUpdateCurrent extends AgentInstalledRelease {
  fingerprint?:string;agent_id?:string;release?:AgentInstalledRelease;
 }
 export interface AgentUpdatePlan {
- machine:{id:string;name:string;address:string;port:number;username:string;agent_id?:string};
+ machine:{id:string;name:string;address:string;port:number;agent_id?:string};
+ ssh_account:{id:string;username:string;revision:number};
  credential?:{id:string;method:string;retention?:string;expires_at?:string};
  current:AgentUpdateCurrent;target:AgentRelease;target_revision?:string;expires_at:string;
  steps:string[];warnings?:string[];
@@ -31,7 +32,7 @@ export interface AgentRollout {
  created_at:string;started_at?:string;finished_at?:string;error?:string;review_url?:string;
 }
 export interface AgentUpdateCredential {
- id:string;name?:string;is_default?:boolean;method:string;retention?:string;expires_at:string;secret_fingerprint?:string;
+ id:string;account_id:string;username:string;account_revision:number;name?:string;is_default?:boolean;method:string;retention?:string;expires_at:string;secret_fingerprint?:string;
  revoked_at?:string;secret_cleared_at?:string;
 }
 export const updatePath=(machineID:string,updateID?:string)=>`/machines/${encodeURIComponent(machineID)}/agent-updates${updateID?`/${encodeURIComponent(updateID)}`:''}`;

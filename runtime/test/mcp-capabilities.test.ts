@@ -14,7 +14,7 @@ function fixture() {
   const now=new Date("2026-10-30T00:00:00Z");let revoked=false;
   const deps={db,router:new Router(),now:()=>now,externalURL:"https://moni.example.test",encrypt:(v:string)=>Buffer.from(v).toString("base64"),decrypt:(v:string)=>Buffer.from(v,"base64").toString(),cat:{list:async()=>[]},logger:{info(){},error(){},warn(){}}} as unknown as Dependencies;
   const runs=new TaskRunStore(deps);
-  for(const id of ["one","two"])db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'root','direct_ssh',?,?,?)",id,"Host "+id,id+".test","agent-"+id,now.toISOString(),now.toISOString());
+  for(const id of ["one","two"])db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)",id,"Host "+id,id+".test","agent-"+id,now.toISOString(),now.toISOString());
   for(const host of ["one","two"])runs.nodes.task({name:"Only "+host,type:"script",enabled:true,target_all:false,host_ids:[host],label_ids:[],schedule:{mode:"once"},script:{runtime:"node",code:"console.log('private-source-"+host+"')",timeout_seconds:5,max_output_bytes:4096}},"script-"+host,true);
   const base:Principal={user:{id:"admin",name:"Admin",role:"admin"},scopes:[...CAPABILITY_SCOPES],host_ids:null,credential_id:"pat-one",grant_id:"grant-one",source:"mcp"},grants=new Map([["grant-one",structuredClone(base)]]);
   const refresh=(p:Principal)=>{const u=db.get<any>("SELECT id,name,role,active FROM users WHERE id=?",p.user.id);if(!u?.active)fail(403,"inactive");p.user={id:u.id,name:u.name,role:u.role};};

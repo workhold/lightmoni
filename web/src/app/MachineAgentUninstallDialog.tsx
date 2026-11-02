@@ -1,4 +1,7 @@
-import {reusableMachineCredential,defaultMachineCredential} from './machine-credentials';
+import AgentOperationProgress from './AgentOperationProgress';
+import {agentOperationCanAdvance,agentOperationReadSignal} from './agent-operation-progress';
+import {type SSHAccount,type SSHAccountHost,sshCredentialLabel} from './machine-credentials';
+import {reusableMachineCredential,defaultMachineCredential,sshCheckMatchesCredential} from './machine-credentials';
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Form,Input,Modal,Popconfirm,Radio,Select,Space,Typography} from '../shared/ui';
 import {api,ApiError} from '../shared/api';
@@ -12,19 +15,19 @@ type RevocationScope={eligible:boolean;agent_id:string;audiences:string[];reason
 type Observation={agent_id:string;identity_state:'valid'|'missing'|'invalid'|'unsafe';identity_sha256:string;program_sha256:string;installation:'present'|'absent';program_complete:boolean;unit_managed:boolean;service_running:boolean;lifecycle_locked:boolean;operation_lock:boolean;paths_safe:boolean;config_present:boolean;data_present:boolean};
 export type AgentUninstallation={
  id:string;machine_id:string;agent_id:string;credential_id:string;
- status:'awaiting_approval'|'running'|'succeeded'|'failed'|'unknown'|'cancelled';
- plan?:{machine:{id:string;name:string;address:string;port:number;username:string;agent_id:string};agent_id:string;credential:{id:string;method:string;retention:string;expires_at:string};check_id:string;expires_at:string;mode?:RemovalMode;reason?:string;purge?:boolean;observation?:Observation;credential_revocation_scope?:RevocationScope;steps:string[];retained_paths:string[];removed_paths:string[];warnings:string[]};
+ status:'awaiting_approval'|'running'|'succeeded'|'failed'|'unknown'|'cancelled';execution_stage?:string;started_at?:string;resolved_at?:string;
+ plan?:{machine:{id:string;name:string;address:string;port:number;agent_id:string};ssh_account:{id:string;username:string;revision:number};agent_id:string;credential:{id:string;method:string;retention:string;expires_at:string};check_id:string;expires_at:string;mode?:RemovalMode;reason?:string;purge?:boolean;observation?:Observation;credential_revocation_scope?:RevocationScope;steps:string[];retained_paths:string[];removed_paths:string[];warnings:string[]};
  receipt?:{agent_id?:string;mode?:RemovalMode;purge?:boolean;remote_removed?:boolean;data_retained?:boolean;data_removed?:boolean;credential_revocation_scope?:RevocationScope;credentials_revoked?:boolean;revoked_credentials?:number;verified_at?:string;stages?:string[];service_stopped?:boolean;remote_unchanged?:boolean};
  error?:string;created_at?:string;finished_at?:string;
 };
-type Credential={name?:string;is_default?:boolean;id:string;method:string;retention?:string;expires_at:string;secret_fingerprint:string;revoked_at?:string;secret_cleared_at?:string};
-type Props={machine:{default_credential_id?:string;id:string;name:string;capabilities?:{uninstall_agent?:{available:boolean};recovery_uninstall_agent?:{available:boolean}}};credentials:Credential[];existing?:AgentUninstallation;initialMode?:RemovalMode;onClose:()=>void;onRefresh:()=>Promise<void>};
+type Credential={name?:string;is_default?:boolean;id:string;account_id:string;username:string;account_revision:number;method:string;retention?:string;expires_at:string;secret_fingerprint:string;revoked_at?:string;secret_cleared_at?:string};
+type Props={machine:{default_account_id?:string;accounts?:SSHAccount[];id:string;name:string;capabilities?:{uninstall_agent?:{available:boolean};recovery_uninstall_agent?:{available:boolean}}};credentials:Credential[];existing?:AgentUninstallation;initialMode?:RemovalMode;onClose:()=>void;onRefresh:()=>Promise<void>};
 type PlanRecovery={checkID:string;credentialID:string;mode:RemovalMode;purge:boolean;reason:string;priorIDs:Set<string>};
 
 export default function MachineAgentUninstallDialog({machine,credentials,existing,initialMode='standard',onClose,onRefresh}:Props){
  const {t,language}=useI18n();
  const [record,setRecord]=useState(existing),[check,setCheck]=useState<SSHCheckResult>(),[busy,setBusy]=useState(false),[error,setError]=useState(''),[now,setNow]=useState(Date.now()),[refreshNeeded,setRefreshNeeded]=useState(false),[planUncertain,setPlanUncertain]=useState(false),[applyAttempted,setApplyAttempted]=useState(false);
- const [mode,setMode]=useState<RemovalMode|'manual'>(initialMode),[reason,setReason]=useState(''),[purge,setPurge]=useState(false),[credential,setCredential]=useState<string|undefined>(()=>defaultMachineCredential(credentials,machine.default_credential_id,reusableMachineCredential));
+ const [mode,setMode]=useState<RemovalMode|'manual'>(initialMode),[reason,setReason]=useState(''),[purge,setPurge]=useState(false),[credential,setCredential]=useState<string|undefined>(()=>defaultMachineCredential(credentials,machine,reusableMachineCredential));
  const [pollError,setPollError]=useState('');
  const pending=useRef(false),mounted=useRef(true),recordRef=useRef(record),recovery=useRef<PlanRecovery|undefined>(undefined),readVersion=useRef(0);
  recordRef.current=record;
@@ -102,16 +105,16 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
  }[warning]||warning);
  const identityError=()=>Error(t('卸载记录与目标主机或原计划不匹配，请只读核对','The uninstall record does not match this host or original plan. Verify it read-only.'));
  const validate=(next:AgentUninstallation,id?:string)=>{if(!next?.id||next.machine_id!==machine.id||id&&next.id!==id||next.plan?.machine.id&&next.plan.machine.id!==machine.id)throw identityError();return next};
- const save=(next:AgentUninstallation)=>{if(mounted.current){readVersion.current++;recordRef.current=next;setRecord(next);setPollError('')}};
+ const save=(next:AgentUninstallation)=>{if(mounted.current&&agentOperationCanAdvance(recordRef.current,next)){readVersion.current++;recordRef.current=next;setRecord(next);setPollError('')}};
  const begin=()=>{if(pending.current)return false;pending.current=true;readVersion.current++;setBusy(true);setError('');return true};
  const finish=()=>{pending.current=false;if(mounted.current)setBusy(false)};
  const refreshParent=async()=>{try{await onRefresh()}catch{if(mounted.current)setError(previous=>[previous,t('主机列表刷新失败，请稍后刷新。','The host list could not refresh. Refresh it later.')].filter(Boolean).join(' '))}};
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false}},[]);
- useEffect(()=>{setCredential(previous=>keys.some(key=>key.id===previous)?previous:defaultMachineCredential(keys,machine.default_credential_id,reusableMachineCredential))},[credentials,machine.default_credential_id]);
+ useEffect(()=>{setCredential(previous=>keys.some(key=>key.id===previous)?previous:undefined)},[credentials,machine]);
  useEffect(()=>{setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer)},[record?.plan?.expires_at]);
  const expired=!Number.isFinite(Date.parse(record?.plan?.expires_at||''))||Date.parse(record?.plan?.expires_at||'')<=now;
  const reasonValid=!!reason.trim()&&new TextEncoder().encode(reason.trim()).length<=1000&&!/[\u0000-\u001f\u007f]/u.test(reason.trim());
- const readRecord=async()=>{const saved=recordRef.current;if(!saved)throw identityError();const version=readVersion.current;const next=validate(await api<AgentUninstallation>(`${prefix}/${encodeURIComponent(saved.id)}`),saved.id);if(mounted.current&&version===readVersion.current){save(next);setRefreshNeeded(false)}return next};
+ const readRecord=async()=>{const saved=recordRef.current;if(!saved)throw identityError();const version=readVersion.current;const next=validate(await api<AgentUninstallation>(`${prefix}/${encodeURIComponent(saved.id)}`),saved.id);if(mounted.current&&version===readVersion.current){save(next);setRefreshNeeded(false);return recordRef.current||next}return recordRef.current||saved};
  const recoverPlan=async()=>{
   const attempt=recovery.current;if(!attempt)throw identityError();
   const history=await api<AgentUninstallation[]>(prefix);
@@ -128,7 +131,7 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
   try{
    const history=await api<AgentUninstallation[]>(prefix);if(!mounted.current)return;if(!Array.isArray(history)||history.some(item=>item.machine_id!==machine.id))throw identityError();
    const result=await api<SSHCheckResult>(`/machines/${encodeURIComponent(machine.id)}/ssh-check`,{method:'POST',body:JSON.stringify({credential_id:credential})});
-   if(!mounted.current)return;if(result.machine_id!==machine.id||result.credential_id!==credential)throw identityError();if(mounted.current)setCheck(result);if(!result.ready)return;
+   if(!mounted.current)return;if(!sshCheckMatchesCredential(result,machine.id,keys.find(c=>c.id===credential)))throw identityError();if(mounted.current)setCheck(result);if(!result.ready)return;
    recovery.current={checkID:result.id,credentialID:credential,mode,purge,reason:mode==='recovery'?reason.trim():'',priorIDs:new Set(history.map(item=>item.id))};creating=true;
    const next=validate(await api<AgentUninstallation>(`${prefix}/plan`,{method:'POST',body:JSON.stringify({check_id:result.id,credential_id:credential,mode,purge,...(mode==='recovery'?{reason:reason.trim()}:{})})}));
    if(next.plan?.check_id!==result.id||next.plan?.credential.id!==credential||(next.plan?.mode||'standard')!==mode||!!next.plan?.purge!==purge||(next.plan?.reason||'')!==(mode==='recovery'?reason.trim():''))throw identityError();save(next);
@@ -143,26 +146,26 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
   finally{try{await readRecord()}catch{if(mounted.current){setRefreshNeeded(true);setError(previous=>[previous,t('暂时无法刷新已保存的操作，请刷新状态后再继续；不要重复执行卸载。','The saved operation could not be refreshed. Refresh its status before continuing; do not repeat removal.')].filter(Boolean).join(' '))}}await refreshParent();finish()}
  };
  useEffect(()=>{
-  if(!record||!['awaiting_approval','running'].includes(record.status))return;
-  let active=true,timer:ReturnType<typeof setTimeout>;const controller=new AbortController();
+  if(!record||record.status!=='running'&&!(record.status==='awaiting_approval'&&applyAttempted&&busy))return;
+  let active=true,timer:ReturnType<typeof setTimeout>,inFlight:ReturnType<typeof agentOperationReadSignal>|undefined;const controller=new AbortController();
   const poll=async()=>{
-   const version=readVersion.current;
+   const version=readVersion.current,request=agentOperationReadSignal(controller.signal);inFlight=request;
    try{
-    const next=validate(await api<AgentUninstallation>(`${prefix}/${encodeURIComponent(record.id)}`,{signal:controller.signal}),record.id);
+    const next=validate(await api<AgentUninstallation>(`${prefix}/${encodeURIComponent(record.id)}`,{signal:request.signal}),record.id);
     if(active&&mounted.current&&version===readVersion.current){
-     const changed=recordRef.current?.status!==next.status;save(next);setRefreshNeeded(false);
+     const changed=recordRef.current?.status!==next.status;save(next);setRefreshNeeded(false);setPollError('');
      if(changed)await refreshParent();
     }
-   }catch{if(active&&mounted.current&&version===readVersion.current)setPollError(t('自动刷新暂时失败，正在重试；也可手动刷新操作状态。','Automatic refresh failed temporarily and will retry. You can also refresh the operation status manually.'))}
-   finally{if(active)timer=setTimeout(poll,4000)}
+   }catch{if(active&&mounted.current&&version===readVersion.current)setPollError(t('自动刷新失败，保留最后状态，稍后重试；也可手动刷新。','Automatic refresh failed; the last state is retained and will retry. You can also refresh manually.'))}
+   finally{request.dispose();if(inFlight===request)inFlight=undefined;if(active)timer=setTimeout(poll,4000)}
   };
   timer=setTimeout(poll,4000);
-  return()=>{active=false;clearTimeout(timer);controller.abort()};
- },[record?.id,record?.status]);
+  return()=>{active=false;clearTimeout(timer);controller.abort();inFlight?.dispose()};
+ },[record?.id,record?.status,applyAttempted,busy]);
  const succeeded=record?.status==='succeeded',scope=record?.plan?.credential_revocation_scope,observation=record?.plan?.observation;
  const dataPolicy=(remove:boolean)=>remove?t('清除 Agent 配置、身份与缓存','Purge Agent configuration, identity, and cache'):t('保留 Agent 配置、身份与缓存','Retain Agent configuration, identity, and cache');
  const scopeText=(value?:RevocationScope)=>!value?t('仅按远端身份与本主机关联核验后处理','Only after verifying remote identity and ownership by this host'):value.eligible?t(`仅撤销 ${value.agent_id} 的 ${value.audiences.join(' / ')} 凭据`,`Revoke only ${value.agent_id} ${value.audiences.join(' / ')} credentials`):t('无已证明属于本主机的可撤销身份；不撤销其他凭据','No revocable identity is proven to belong to this host; other credentials will not be revoked');
- const credentialSelect=<Select aria-label={t('卸载 SSH 凭据','Uninstall SSH credential')} value={credential} disabled={busy||planUncertain} style={{width:'100%'}} onChange={setCredential} options={keys.map(c=>({value:c.id,label:`${c.name||(c.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key'))} · ${c.secret_fingerprint||c.id} · ${c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)}`}))}/>;
+ const credentialSelect=<Select aria-label={t('卸载 SSH 凭据','Uninstall SSH credential')} value={credential} disabled={busy||planUncertain} style={{width:'100%'}} onChange={setCredential} options={keys.map(c=>({value:c.id,label:`${c.username} · ${c.name||(c.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key'))} · ${c.secret_fingerprint||c.id} · ${c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)}`}))}/>;
  const status=record?.status==='awaiting_approval'&&applyAttempted?t('卸载请求已发送，正在等待执行结果','Uninstall request sent; waiting for the execution result'):record?statusLabel(record.status):'';
  const statusDescription=record?.status==='awaiting_approval'?applyAttempted?t('正在核验远端状态，尚未确认移除。状态会自动刷新，请勿重复执行。','Remote verification is pending; removal is not confirmed. Status refreshes automatically. Do not repeat removal.'):t('计划已生成，尚未执行。请审阅后确认卸载，或取消计划以恢复后续操作。','The plan is ready and has not run. Review and confirm removal, or cancel the plan to resume other operations.'):record?.status==='running'?t('正在通过 SSH 卸载并核验结果，最长约 2 分钟。状态会自动刷新。','Removing Agent over SSH and verifying the result; this can take about two minutes. Status refreshes automatically.'):record?.status==='unknown'?t('远端可能已经改变。只读核对检查原操作，不会重放卸载；可选择当前有效 SSH 凭据。','The host may already have changed. Read-only verification checks the original operation without replaying removal. Select a currently active SSH credential.'):record?.error?localizeMessage(record.error):undefined;
  const actions=record?<>
@@ -194,9 +197,10 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
    {(planUncertain||refreshNeeded)&&<Button disabled={busy} onClick={()=>void refresh()}>{t('刷新并恢复原计划','Refresh and recover original plan')}</Button>}
   </>}
   {record&&<>
+   <AgentOperationProgress kind='uninstall' machineID={machine.id} record={record} submitting={busy&&applyAttempted} refreshError={pollError}/>
    {record.plan&&<>
     <Descriptions size="small" layout="vertical" column={1} items={[
-     {key:'target',label:t('目标主机','Target host'),children:sshEndpoint(record.plan.machine.address,record.plan.machine.port,record.plan.machine.username)},
+     {key:'target',label:t('目标主机','Target host'),children:sshEndpoint(record.plan.machine.address,record.plan.machine.port,record.plan.ssh_account.username)},
      {key:'mode',label:t('卸载方式','Uninstall method'),children:record.plan.mode==='recovery'?t('SSH 恢复卸载（强制）','SSH recovery uninstall (forced)'):t('标准卸载','Standard uninstall')},
      ...(record.plan.reason?[{key:'reason',label:t('恢复原因','Recovery reason'),children:record.plan.reason}]:[]),
      {key:'policy',label:t('已固定的数据策略','Pinned data policy'),children:dataPolicy(!!record.plan.purge)},

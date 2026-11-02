@@ -44,12 +44,12 @@ export function registerMachineTerminal(deps: Dependencies, machines: MachineTer
   const wss = new WebSocketServer({ noServer: true, maxPayload: 128 << 10, perMessageDeflate: false });
   let stopped = false;
   deps.db.exec(`CREATE TABLE IF NOT EXISTS machine_terminal_events(
-    id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,credential_id TEXT NOT NULL,actor_id TEXT NOT NULL,
+    id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,credential_id TEXT NOT NULL,account_id TEXT NOT NULL,username TEXT NOT NULL,account_revision INTEGER NOT NULL,actor_id TEXT NOT NULL,
     created_at TEXT NOT NULL,connected_at TEXT NOT NULL DEFAULT '',closed_at TEXT NOT NULL DEFAULT '',reason TEXT NOT NULL DEFAULT ''
   )`);
   const at = () => deps.now().toISOString();
   const send = (s: Session, value: unknown) => {
-    if (s.ws?.readyState === WebSocket.OPEN) s.ws.send(JSON.stringify(value));
+    if (s.ws?.readyState === WebSocket.OPEN) s.ws.send(JSON.stringify({ ...(value as object), account_id:s.lease.machine.account_id,username:s.lease.machine.username,account_revision:s.lease.machine.account_revision }));
   };
   const close = (s: Session, reason: string) => {
     if (s.state === "closed") return;
@@ -171,12 +171,12 @@ export function registerMachineTerminal(deps: Dependencies, machines: MachineTer
     try {
       s = { id: id(), machineID: ctx.params.id, actorID: ctx.user.id, loginHash: identity, lease,
         state: "pending", expires: Date.now() + limits.pendingMs, cols, rows, unacked: 0, started: 0, lastInput: 0, req: ctx.req, alive: true };
-      deps.db.run("INSERT INTO machine_terminal_events(id,machine_id,credential_id,actor_id,created_at) VALUES(?,?,?,?,?)", s.id, s.machineID, lease.credentialID, s.actorID, at());
+      deps.db.run("INSERT INTO machine_terminal_events(id,machine_id,credential_id,account_id,username,account_revision,actor_id,created_at) VALUES(?,?,?,?,?,?,?,?)", s.id, s.machineID, lease.credentialID, lease.machine.account_id,lease.machine.username,lease.machine.account_revision,s.actorID, at());
       sessions.set(s.id, s);
       const session = s;
       s.deadline = setTimeout(() => close(session, "connect_expired"), limits.pendingMs); s.deadline.unref();
       ctx.res.once("close", () => { if (!ctx.res.writableFinished) close(session, "disconnected"); });
-      ctx.json({ id: s.id, status: "pending", websocket_path: `/api/v1/machines/${s.machineID}/terminal-sessions/${s.id}/ws`,
+      ctx.json({ id: s.id, status: "pending",account_id:lease.machine.account_id,username:lease.machine.username,account_revision:lease.machine.account_revision, websocket_path: `/api/v1/machines/${s.machineID}/terminal-sessions/${s.id}/ws`,
         connect_expires_at: new Date(Date.now() + limits.pendingMs).toISOString(), idle_seconds: limits.idleMs / 1000, max_seconds: limits.maxMs / 1000 }, 201);
     } catch (error) { if (s && sessions.has(s.id)) close(s, "ssh_failed"); else lease.release(); throw error; }
   });

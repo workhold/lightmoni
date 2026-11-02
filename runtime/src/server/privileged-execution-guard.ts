@@ -1,8 +1,10 @@
 import type { DB } from "../shared/sqlite.js";
 import { fail } from "../shared/http.js";
+import { pendingAgentRuntime } from './machine-agent-runtime-guard.js';
 
 /** Root jobs own a host-wide write fence, including unresolved outcomes. */
 export function hasPendingExecutorLifecycle(db: DB,machineID="",agentID=""):boolean {
+  if(pendingAgentRuntime(db,machineID,agentID))return true;
   if (db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_executor_bootstraps'")
     && db.get(`SELECT id FROM machine_executor_bootstraps WHERE ((?<>'' AND machine_id=?) OR (?<>'' AND agent_id=?)) AND status IN ('running','verifying','unknown') LIMIT 1`,machineID,machineID,agentID,agentID)) return true;
   if (db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_executor_maintenance'")

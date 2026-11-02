@@ -1,0 +1,13 @@
+{
+  "seq": 936,
+  "original_blocks": 746,
+  "after_blocks": 783,
+  "preserved_original_diagrams": 38,
+  "new_native_diagrams": 2,
+  "unchanged_blocks_verified": 743,
+  "updated_blocks": 3,
+  "inserted_blocks": 37,
+  "readback": "complete native content; exact text, nodes and edges checked; original order preserved; section 83 at end",
+  "latest_seq": 937,
+  "final_readback": "6 changed paragraphs and native lifecycle diagram read back at seq937; text, all nodes and edges exactly matched; original 38 native diagrams preserved at prior full baseline readback"
+}

@@ -1,0 +1,13 @@
+{
+  "checked": [
+    "library metadata can be renamed without secret material",
+    "library credential binds to explicit root account without implicit SSH",
+    "automatic installation fixes checked identity and retains explicit approval",
+    "manual installation checks only selected account and keeps defaults",
+    "default account changes stay explicit; another username creates a new account that can be removed independently",
+    "unlink revokes only the selected account binding without revoking the library or another account",
+    "invalid default never falls through to root or a unique remaining credential"
+  ],
+  "errors": [],
+  "unexpected": []
+}
