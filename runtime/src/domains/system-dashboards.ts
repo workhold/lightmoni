@@ -18,7 +18,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT coalesce(sum(value_float),0)/60 AS value FROM metric_lightmoni_center_sum WHERE name='lightmoni.center.ingest_requests' AND event_time>=now()-INTERVAL 1 MINUTE",
+            sql: "SELECT coalesce(sum(value_float),0)/60 AS value FROM lightmoni_metric_sum WHERE name='lightmoni.center.ingest_requests' AND event_time>=now()-INTERVAL 1 MINUTE",
           },
         ],
         options: {
@@ -39,7 +39,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT coalesce(sum(value_float),0) AS value FROM metric_lightmoni_center_sum WHERE name='lightmoni.center.received_records' AND event_time>=now()-INTERVAL 1 MINUTE",
+            sql: "SELECT coalesce(sum(value_float),0) AS value FROM lightmoni_metric_sum WHERE name='lightmoni.center.received_records' AND event_time>=now()-INTERVAL 1 MINUTE",
           },
         ],
         options: {
@@ -60,7 +60,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT toStartOfMinute(event_time) AS time,concat(attributes['signal'],' / ',attributes['status']) AS series,sum(value_float)/60 AS value FROM metric_lightmoni_center_sum WHERE $__timeFilter(event_time) AND name='lightmoni.center.ingest_requests' GROUP BY time,series ORDER BY time",
+            sql: "SELECT toStartOfMinute(event_time) AS time,concat(attributes['signal'],' / ',attributes['status']) AS series,sum(value_float)/60 AS value FROM lightmoni_metric_sum WHERE $__timeFilter(event_time) AND name='lightmoni.center.ingest_requests' GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -83,7 +83,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT toStartOfMinute(event_time) AS time,attributes['signal'] AS series,sum(value_float) AS value FROM metric_lightmoni_center_sum WHERE $__timeFilter(event_time) AND name='lightmoni.center.received_records' GROUP BY time,series ORDER BY time",
+            sql: "SELECT toStartOfMinute(event_time) AS time,attributes['signal'] AS series,sum(value_float) AS value FROM lightmoni_metric_sum WHERE $__timeFilter(event_time) AND name='lightmoni.center.received_records' GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -105,7 +105,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT toStartOfMinute(event_time) AS time,attributes['signal'] AS series,sum(value_float) AS value FROM metric_lightmoni_center_sum WHERE $__timeFilter(event_time) AND name='lightmoni.center.received_bytes' GROUP BY time,series ORDER BY time",
+            sql: "SELECT toStartOfMinute(event_time) AS time,attributes['signal'] AS series,sum(value_float) AS value FROM lightmoni_metric_sum WHERE $__timeFilter(event_time) AND name='lightmoni.center.received_bytes' GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -127,7 +127,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,attributes['signal'] AS series,sum(sum)/nullIf(sum(count),0) AS value FROM metric_lightmoni_center_histogram WHERE $__timeFilter(event_time) AND name='lightmoni.center.ingest_duration' GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,attributes['signal'] AS series,sum(sum)/nullIf(sum(count),0) AS value FROM lightmoni_metric_histogram WHERE $__timeFilter(event_time) AND name='lightmoni.center.ingest_duration' GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -149,7 +149,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT uniqExact(instance_id) AS value FROM metric_lightmoni_center_gauge WHERE name='lightmoni.center.heartbeat' AND event_time>=now()-INTERVAL 90 SECOND",
+            sql: "SELECT uniqExact(instance_id) AS value FROM lightmoni_metric_gauge WHERE name='lightmoni.center.heartbeat' AND event_time>=now()-INTERVAL 90 SECOND",
           },
         ],
         options: {
@@ -170,7 +170,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT coalesce(sum(value_float),0) AS value FROM metric_lightmoni_center_sum WHERE name='lightmoni.center.ingest_requests' AND attributes['status']!='200' AND event_time>=now()-INTERVAL 1 MINUTE",
+            sql: "SELECT coalesce(sum(value_float),0) AS value FROM lightmoni_metric_sum WHERE name='lightmoni.center.ingest_requests' AND attributes['status']!='200' AND event_time>=now()-INTERVAL 1 MINUTE",
           },
         ],
         options: {
@@ -191,7 +191,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,name AS series,max(value_float) AS value FROM metric_lightmoni_center_gauge WHERE $__timeFilter(event_time) AND name IN ('lightmoni.center.pending_batches','lightmoni.center.dropped_records') GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,name AS series,max(value_float) AS value FROM lightmoni_metric_gauge WHERE $__timeFilter(event_time) AND name IN ('lightmoni.center.pending_batches','lightmoni.center.dropped_records') GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -213,7 +213,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,instance_id AS series,max(value_float) AS value FROM metric_lightmoni_center_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.center.heap_bytes' GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,instance_id AS series,max(value_float) AS value FROM lightmoni_metric_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.center.heap_bytes' GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -235,7 +235,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,instance_id AS series,max(value_float) AS value FROM metric_lightmoni_center_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.center.active_resources' GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,instance_id AS series,max(value_float) AS value FROM lightmoni_metric_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.center.active_resources' GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -257,7 +257,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,instance_id AS series,max(value_float) AS value FROM metric_lightmoni_center_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.center.event_loop_delay_ms' GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,instance_id AS series,max(value_float) AS value FROM lightmoni_metric_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.center.event_loop_delay_ms' GROUP BY time,series ORDER BY time",
           },
         ],
         options: { x: "time", y: "value", series: "series", decimals: 2 },
@@ -270,7 +270,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT event_time,severity,body FROM log_lightmoni_center WHERE $__timeFilter(event_time) ORDER BY event_time DESC LIMIT 100",
+            sql: "SELECT event_time,severity,body FROM lightmoni_log WHERE component='center' AND $__timeFilter(event_time) ORDER BY event_time DESC LIMIT 100",
           },
         ],
         options: {
@@ -305,7 +305,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT uniqExact(agent_id) AS value FROM metric_lightmoni_agent_gauge WHERE name='lightmoni.agent.heartbeat' AND event_time+toIntervalSecond(greatest(90,toUInt32OrZero(attributes['heartbeat_timeout_seconds'])))>=now()",
+            sql: "SELECT uniqExact(agent_id) AS value FROM lightmoni_metric_gauge WHERE name='lightmoni.agent.heartbeat' AND event_time+toIntervalSecond(greatest(90,toUInt32OrZero(attributes['heartbeat_timeout_seconds'])))>=now()",
           },
         ],
         options: {
@@ -326,7 +326,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT category,count() AS value FROM (SELECT agent_id AS category,agent_id FROM metric_lightmoni_agent_gauge WHERE name='lightmoni.agent.heartbeat' GROUP BY agent_id HAVING max(event_time)+toIntervalSecond(greatest(90,toUInt32OrZero(argMax(attributes['heartbeat_timeout_seconds'],event_time))))>=now()) GROUP BY category ORDER BY value DESC",
+            sql: "SELECT category,count() AS value FROM (SELECT agent_id AS category,agent_id FROM lightmoni_metric_gauge WHERE name='lightmoni.agent.heartbeat' GROUP BY agent_id HAVING max(event_time)+toIntervalSecond(greatest(90,toUInt32OrZero(argMax(attributes['heartbeat_timeout_seconds'],event_time))))>=now()) GROUP BY category ORDER BY value DESC",
           },
         ],
         options: {
@@ -347,7 +347,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,agent_id AS series,max(value_float) AS value FROM metric_lightmoni_agent_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.agent.queue_batches' GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,agent_id AS series,max(value_float) AS value FROM lightmoni_metric_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.agent.queue_batches' GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -369,7 +369,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,agent_id AS series,max(value_float) AS value FROM metric_lightmoni_agent_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.agent.oldest_age_seconds' GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,agent_id AS series,max(value_float) AS value FROM lightmoni_metric_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.agent.oldest_age_seconds' GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -391,7 +391,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,concat(agent_id,' / ',name) AS series,max(value_float) AS value FROM metric_lightmoni_agent_gauge WHERE $__timeFilter(event_time) AND name IN ('lightmoni.agent.collector_errors','lightmoni.agent.quarantine_batches') GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,concat(agent_id,' / ',name) AS series,max(value_float) AS value FROM lightmoni_metric_gauge WHERE $__timeFilter(event_time) AND name IN ('lightmoni.agent.collector_errors','lightmoni.agent.quarantine_batches') GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -413,7 +413,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT event_time,agent_id,attributes['group_id'] AS agent_group,severity,body FROM log_lightmoni_agent WHERE $__timeFilter(event_time) ORDER BY event_time DESC LIMIT 100",
+            sql: "SELECT event_time,agent_id,severity,body FROM lightmoni_log WHERE component='agent' AND $__timeFilter(event_time) ORDER BY event_time DESC LIMIT 100",
           },
         ],
         options: {
@@ -448,7 +448,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT uniqExact(instance_id) AS value FROM metric_lightmoni_sdk_gauge WHERE name='lightmoni.sdk.heartbeat' AND event_time>=now()-INTERVAL 90 SECOND",
+            sql: "SELECT uniqExact(instance_id) AS value FROM lightmoni_metric_gauge WHERE name='lightmoni.sdk.heartbeat' AND event_time>=now()-INTERVAL 90 SECOND",
           },
         ],
         options: {
@@ -469,7 +469,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT service AS category,uniqExact(instance_id) AS value FROM metric_lightmoni_sdk_gauge WHERE name='lightmoni.sdk.heartbeat' AND event_time>=now()-INTERVAL 90 SECOND GROUP BY category ORDER BY value DESC",
+            sql: "SELECT service AS category,uniqExact(instance_id) AS value FROM lightmoni_metric_gauge WHERE name='lightmoni.sdk.heartbeat' AND event_time>=now()-INTERVAL 90 SECOND GROUP BY category ORDER BY value DESC",
           },
         ],
         options: {
@@ -490,7 +490,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,concat(service,' / ',instance_id) AS series,max(value_float) AS value FROM metric_lightmoni_sdk_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.sdk.pending_batches' GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,concat(service,' / ',instance_id) AS series,max(value_float) AS value FROM lightmoni_metric_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.sdk.pending_batches' GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -512,7 +512,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,concat(service,' / ',instance_id) AS series,max(value_float) AS value FROM metric_lightmoni_sdk_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.sdk.retried_batches' GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,concat(service,' / ',instance_id) AS series,max(value_float) AS value FROM lightmoni_metric_gauge WHERE $__timeFilter(event_time) AND name='lightmoni.sdk.retried_batches' GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -534,7 +534,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT $__timeInterval(event_time) AS time,concat(service,' / ',instance_id,' / ',name) AS series,max(value_float) AS value FROM metric_lightmoni_sdk_gauge WHERE $__timeFilter(event_time) AND name IN ('lightmoni.sdk.dropped_records','lightmoni.sdk.rejected_records','lightmoni.sdk.invalid_records','lightmoni.sdk.overflow_records') GROUP BY time,series ORDER BY time",
+            sql: "SELECT $__timeInterval(event_time) AS time,concat(service,' / ',instance_id,' / ',name) AS series,max(value_float) AS value FROM lightmoni_metric_gauge WHERE $__timeFilter(event_time) AND name IN ('lightmoni.sdk.dropped_records','lightmoni.sdk.rejected_records','lightmoni.sdk.invalid_records','lightmoni.sdk.overflow_records') GROUP BY time,series ORDER BY time",
           },
         ],
         options: {
@@ -556,7 +556,7 @@ export const systemDashboards = (): any[] => [
         queries: [
           {
             refId: "A",
-            sql: "SELECT event_time,service,instance_id,attributes['sdk.language'] AS language,attributes['source_table'] AS source_table,severity,body FROM log_lightmoni_sdk WHERE $__timeFilter(event_time) ORDER BY event_time DESC LIMIT 100",
+            sql: "SELECT event_time,service,instance_id,attributes['sdk.language'] AS language,attributes['source_table'] AS source_table,severity,body FROM lightmoni_log WHERE component='sdk' AND $__timeFilter(event_time) ORDER BY event_time DESC LIMIT 100",
           },
         ],
         options: {

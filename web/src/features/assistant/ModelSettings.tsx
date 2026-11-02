@@ -8,7 +8,7 @@ import { initialProtocol, isModelProtocol, modelConnectionError, getProtocolChoi
 import type { AssistantConfig, ModelConnectionTestResult, ModelDiscoveryResult, ModelProtocolSelection } from './types';
 
 export interface ModelSettingsProps {
-  /** Whether the legacy modal is visible. Ignored when embedded is true. */
+  /** Whether the modal is visible. Ignored when embedded is true. */
   open?: boolean;
   /** Render the form in the settings page instead of a modal. */
   embedded?: boolean;

@@ -1,6 +1,6 @@
 # TypeScript SDK
 
-推荐新的五参数 Record/record 业务接口：初始化 service/env，可选版本/实例，SDK 自动聚合发送。完整语义、count总值规则、SQL字段与新样例见 [统一打点](../README.md#通用业务打点go--nodejs--python--rust)。下面原接口继续兼容。
+推荐新的五参数 Record/record 业务接口：初始化 service/env，可选版本/实例，SDK 自动聚合发送。完整语义、count总值规则、SQL字段与新样例见 [统一打点](../README.md#通用业务打点go--nodejs--python--rust)。下文 instrument API 用于低层指标与自监控采集。
 
 新record按表选择一个上报聚合周期，默认30秒，支持10秒、30秒、1分钟、5分钟、10分钟、30分钟、1小时。中心配置通过refreshConfig/后台轮询下发；下文10秒collection为后台收集检查间隔，record只自动发送已结束的固定窗口。
 

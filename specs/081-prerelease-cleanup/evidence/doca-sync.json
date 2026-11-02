@@ -1,0 +1,102 @@
+{
+  "resourceId": "2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "title": "LightMoni 系统设计基线",
+  "seq": 934,
+  "epochId": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "saved": true,
+  "blockCount": 746,
+  "paragraphs": [
+    {
+      "id": "privileged060-current-contract",
+      "matched": true
+    },
+    {
+      "id": "a247154f-1b52-44fe-9ea2-af9d9a2265ac",
+      "matched": true
+    },
+    {
+      "id": "host050-design-4",
+      "matched": true
+    },
+    {
+      "id": "agent044-p-14",
+      "matched": true
+    },
+    {
+      "id": "images059-block-16",
+      "matched": true
+    },
+    {
+      "id": "images059-v1-bridge-2",
+      "matched": true
+    },
+    {
+      "id": "machine064-design-1",
+      "matched": true
+    },
+    {
+      "id": "machine078-design-3",
+      "matched": true
+    },
+    {
+      "id": "agent071-scope",
+      "matched": true
+    },
+    {
+      "id": "executor080-boundary",
+      "matched": true
+    },
+    {
+      "id": "executor080-storage",
+      "matched": true
+    },
+    {
+      "id": "executor080-migration",
+      "matched": true
+    },
+    {
+      "id": "bb6b9f40-1930-4ef8-ae06-f8fdb975021f",
+      "matched": true
+    },
+    {
+      "id": "6b653391-e32b-4a3a-ad02-431b4bf16095",
+      "matched": true
+    },
+    {
+      "id": "baseline081-storage",
+      "matched": true
+    },
+    {
+      "id": "baseline081-model",
+      "matched": true
+    },
+    {
+      "id": "baseline081-auth",
+      "matched": true
+    },
+    {
+      "id": "baseline081-delivery",
+      "matched": true
+    },
+    {
+      "id": "947eddb7-c2bb-4822-b5fe-8ac9b13981f1",
+      "matched": true
+    },
+    {
+      "id": "eb603f3b-4201-415d-a867-1f179878a166",
+      "matched": true
+    }
+  ],
+  "nativeDiagramCount": 38,
+  "nativeDiagramsUnchanged": true,
+  "unrelatedBlockCount": 726,
+  "unrelatedBlocksUnchanged": true,
+  "headingCorrect": true,
+  "newSectionAtEnd": [
+    "6b653391-e32b-4a3a-ad02-431b4bf16095",
+    "baseline081-storage",
+    "baseline081-model",
+    "baseline081-auth",
+    "baseline081-delivery"
+  ]
+}

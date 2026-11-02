@@ -9,7 +9,7 @@ import { DB } from "../src/shared/sqlite.js";
 import { Router, HTTPError } from "../src/shared/http.js";
 import type { Dependencies } from "../src/shared/types.js";
 import { registerAgentCredentials } from "../src/server/agent-credentials.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { registerNodes } from "../src/server/nodes.js";
 import { NodeStore, normalizeTask } from "../src/server/nodes-model.js";
 import { assertAgentActive, isAgentRemoved } from "../src/server/agent-lifecycle.js";
@@ -116,7 +116,7 @@ test("unrevoked root executors prevent Agent removal without revoking either pri
   const f = await fixture(t), node = await f.enroll(), other = await f.enroll();
   const machineID = f.db.get<any>("SELECT id FROM managed_machines WHERE agent_id=?", node.id)!.id;
   const otherMachineID = f.db.get<any>("SELECT id FROM managed_machines WHERE agent_id=?", other.id)!.id;
-  f.db.exec("CREATE TABLE privileged_executors(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,state TEXT NOT NULL)");
+  f.db.exec("DROP VIEW IF EXISTS privileged_executors; CREATE TABLE privileged_executors(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,state TEXT NOT NULL)");
   f.db.run("INSERT INTO privileged_executors VALUES('executor',?,?,'pending')", machineID, node.id);
   f.db.run("INSERT INTO privileged_executors VALUES('other-executor',?,?,'active')", otherMachineID, other.id);
   for (const state of ["pending", "active", "bootstrap_unknown", "unknown"]) {

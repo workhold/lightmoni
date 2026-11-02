@@ -10,9 +10,7 @@ export interface AgentTasks {
   revision?:string;collect_interval_seconds:number;host_enabled:boolean;host_collectors:string[];
   host_table:string;probe_table:string;process_names:string[];probes:ProbeTask[];
   logs_enabled:boolean;log_table:string;log_sources:LogSource[];
-  group_id?:string;
 }
-export interface AgentGroup {id:string;name:string;config:AgentTasks;agent_count:number}
 export type AgentTaskType = 'host'|'probe'|'log'|'script';
 export const agentTaskTypes:{value:AgentTaskType;label:string}[] = [
   {value:'host',label:'指标采集'},{value:'probe',label:'服务拨测'},{value:'log',label:'目录日志'},{value:'script',label:'脚本任务'},
@@ -46,7 +44,7 @@ export interface AgentItem {
   release?:{version?:string;source_revision?:string;build_id?:string;state_schema?:number;artifact_sha256?:string};boot_id?:string;
   id:string;hostname:string;platform:string;arch:string;version:string;last_seen:string;
   lifecycle_state?:'active'|'removed';removed_at?:string;removal_reason?:string;
-  heartbeat:Record<string,unknown>;config:AgentTasks;group_id:string;group_name:string;
+  heartbeat:Record<string,unknown>;config:AgentTasks;
   label_ids:string[];labels:{id:string;name:string}[];task_ids:string[];tasks:{id:string;name:string;type:AgentTaskType}[];
 }
 export const defaultTasks:AgentTasks = {

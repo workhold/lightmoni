@@ -17,7 +17,7 @@ const redact = (value: any): any => Array.isArray(value) ? value.map(redact) : v
   ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, /private_key|password|secret|token|credential/i.test(k) ? "[redacted]" : redact(v)]))
   : typeof value === "string" && /-----BEGIN.*PRIVATE KEY/.test(value) ? "[redacted]" : value;
 
-export function registerOperations(deps: Dependencies, options: { jobs: AgentJobStore; credentials: AgentCredentialStore; definitions: OperationDefinition[]; resolvePayload?: (job: Record<string, any>) => OperationPayload }): Module & OperationsStore {
+export function registerOperations(deps: Dependencies, options: { jobs: AgentJobStore; credentials: AgentCredentialStore; definitions: OperationDefinition[] }): Module & OperationsStore {
   const { db, router } = deps, definitions = new Map(options.definitions.map(d => [d.kind, d]));
   createAgentLifecycleSchema(db);
   db.exec(`CREATE TABLE IF NOT EXISTS ops_resources(
@@ -174,22 +174,5 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
     else if (r.state === "awaiting_approval") db.run("UPDATE ops_runs SET state='cancelled',updated_at=? WHERE id=?", at(), r.id);
     ctx.json({ run: store.getRun(r.id) });
   }));
-  router.get("/api/v1/agents/:id/jobs/:jobId/operations", safe(ctx => {
-    options.credentials.authenticate(ctx.req, ctx.params.id, "control");
-    const job = options.jobs.get(ctx.params.jobId), lease = ctx.req.headers["x-lightmoni-job-lease"];
-    if (job.execution_principal === "privileged_executor") fail(403,"principal_mismatch");
-    if (job.agent_id !== ctx.params.id || !lease || lease !== job.lease_id || !ACTIVE.has(job.state) || Date.parse(job.lease_expires_at) <= deps.now().getTime() || Date.parse(job.expires_at) <= deps.now().getTime()) fail(403, "operations_job_lease_required");
-    if (job.actions?.length !== 1 || job.actions[0]?.kind !== "operations") fail(403, "not_an_operations_job");
-    if (job.actions[0].domain === "platform") {
-      if (!options.resolvePayload) fail(403, "platform_payload_unavailable");
-      ctx.res.setHeader("cache-control", "no-store");
-      ctx.json({ payload: options.resolvePayload(job) });
-      return;
-    }
-    const r = runRow(job.actions[0].operation_id);
-    if (r.job_id !== job.id || r.state === "awaiting_approval" || !r.approved_by) fail(403, "operations_approval_required");
-    ctx.res.setHeader("cache-control", "no-store");
-    ctx.json({ payload: JSON.parse(deps.decrypt(r.payload_cipher)) });
-  }), { public: true });
   return store;
 }

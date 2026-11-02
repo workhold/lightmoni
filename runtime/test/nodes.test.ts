@@ -321,11 +321,11 @@ test("first registration conflicts leave no half node and existing registrations
       await f.request(
         "/agents/register",
         "POST",
-        { agent_id: "missing", group_id: "does-not-exist" },
+        { agent_id: "missing" },
         true,
       )
     ).status,
-    400,
+    409,
   );
   await node(f, "good", b);
   await f.request("/agents/good/labels", "PUT", { label_ids: [] });
@@ -359,8 +359,7 @@ test("new label starts with no tasks and cannot be deleted while referenced; rea
   for (const [path, method, body] of [
     ["/agent-task-labels", "POST", { name: "x" }],
     ["/agent-tasks", "POST", {}],
-    ["/agent-groups", "POST", { name: "x" }],
-    ["/agents/x/labels", "PUT", { label_ids: [] }],
+        ["/agents/x/labels", "PUT", { label_ids: [] }],
     ["/agent-task-labels/default", "DELETE", undefined],
   ] as const)
     assert.equal((await f.request(path, method, body)).status, 403);
@@ -370,80 +369,6 @@ test("new label starts with no tasks and cannot be deleted while referenced; rea
     (await f.request("/agents/register", "POST", { agent_id: "x" })).status,
     401,
   );
-});
-test("legacy group API only maintains labels and cannot create or rewrite native tasks", async t => {
-  const f=await fixture(t), before=(await f.request("/agent-tasks")).data;
-  assert.equal((await f.request("/agent-groups","POST",{name:"legacy",config:{...host,host_enabled:true}})).status,410);
-  const created=await f.request("/agent-groups","POST",{name:"legacy"}); assert.equal(created.status,201,created.raw);
-  const id=created.data.id;
-  assert.equal((await f.request("/agent-groups/"+id,"PUT",{name:"rewritten",config:{}})).status,410);
-  assert.deepEqual((await f.request("/agent-tasks")).data,before);
-  assert.equal((await f.request("/agent-groups/"+id,"PUT",{name:"renamed"})).status,200);
-  const existing=await task(f,"retained","probe",[id],{});
-  assert.equal((await f.request("/agent-groups/"+id,"DELETE")).status,409);
-  assert.equal((await f.request("/agent-tasks/"+existing.id,"DELETE")).status,200);
-  assert.equal((await f.request("/agent-groups/"+id,"DELETE")).status,200);
-});
-
-test("legacy schema migrates exact identities/settings once and restart never recreates deleted tasks", () => {
-  const db = new DB(":memory:");
-  try {
-    db.exec(
-      "CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT NOT NULL,hostname TEXT NOT NULL,version TEXT NOT NULL,platform TEXT NOT NULL,arch TEXT NOT NULL,last_seen TEXT NOT NULL,heartbeat TEXT NOT NULL); CREATE TABLE agent_groups(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,config TEXT NOT NULL,created_at TEXT NOT NULL)",
-    );
-    db.run(
-      "INSERT INTO agents VALUES(?,?,?,?,?,?,?,?)",
-      "old-node",
-      "identity",
-      "old",
-      "",
-      "linux",
-      "amd64",
-      at.toISOString(),
-      "{}",
-    );
-    db.run(
-      "INSERT INTO agent_groups VALUES(?,?,?,?)",
-      "default",
-      "默认分组",
-      JSON.stringify({
-        revision: "old",
-        collect_interval_seconds: 27,
-        host_table: "old_hosts",
-        probe_table: "old_probes",
-        log_table: "old_files",
-        host_enabled: false,
-        host_collectors: [],
-        probes: [],
-        logs_enabled: false,
-        log_sources: [],
-      }),
-      at.toISOString(),
-    );
-    const store = new NodeStore(db, () => at);
-    assert.deepEqual(store.nodeLabels("old-node"), ["default"]);
-    assert.equal(
-      store.compile(["default"], "default").config.collect_interval_seconds,
-      27,
-    );
-    assert.equal(
-      store.compile(["default"], "default").config.host_table,
-      "host",
-    );
-    assert.equal(store.labels()[0].name, "默认标签");
-    assert.equal(store.tasks().length, 6);
-    const t = store.tasks().find((t) => t.type === "probe" && t.origin === "custom")!;
-    store.deleteTask(t.id);
-    new NodeStore(db, () => at);
-    assert.equal(store.tasks().length, 5);
-    assert.equal(
-      db.get<any>("SELECT count(*) AS n FROM agent_task_migrations").n,
-      3,
-    );
-    assert.deepEqual(db.all("PRAGMA foreign_key_check"), []);
-  } finally {
-    db.close();
-  }
 });
 test("runtime events are bounded/idempotent, persist through export failure and retain Go event IDs", async (t) => {
   let fail = true;
@@ -551,33 +476,4 @@ test("telemetry exporters do not overlap and graceful close aborts and awaits pe
   await f.module.close?.();
   release();
   await one;
-});
-// Golden digests produced with Go encoding/json over the original RemoteConfig,
-// agentTask and nodeTaskLabel struct definitions; no Go executable is used here.
-test("configuration revisions match legacy Go JSON field order, omissions and HTML escaping", () => {
-  const db = new DB(":memory:");
-  try {
-    const store = new NodeStore(db, () => at);
-    assert.equal(
-      store.compile([], "default").config.revision,
-      "a0bad55f72a6814061c1582aa87fcc872996844c8784b0fbbfb94b1c16535692",
-    );
-    store.label("生产&<客户>", "a", true);
-    store.saveTask(normalizeTask(
-      {
-        id: "host1",
-        name: "指标&<用户>",
-        type: "host",
-        enabled: true,
-        label_ids: ["a"],
-        config: host,
-      },
-    ));
-    assert.equal(
-      store.compile(["a"], "a").config.revision,
-      "518f4f1a211076dc494b25172855dcdcad836aa003c02088b2d9d85e1144aeb9",
-    );
-  } finally {
-    db.close();
-  }
 });

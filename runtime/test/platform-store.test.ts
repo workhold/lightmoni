@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { DB } from "../src/shared/sqlite.js";
 import { cipher } from "../src/shared/crypto.js";
 import { Router } from "../src/shared/http.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { OperationsPlatformStore } from "../src/ops/store.js";
 import type { Dependencies } from "../src/shared/types.js";
 function setup(t: any) {

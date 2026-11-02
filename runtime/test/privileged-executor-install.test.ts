@@ -1,3 +1,4 @@
+import {inlineFixtureCommands} from './helpers/maintenance-shell.js';
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -71,7 +72,7 @@ if(process.argv[2]?.endsWith("/maintenance.mjs")&&process.argv[3]==="install-pha
   calls.push(record);fs.writeFileSync(file,JSON.stringify(calls),{mode:0o600});
 }else{
 if(process.argv[2]!=="-e")process.exit(90);
-const syntheticFs={...fs,lstatSync(file){const s=fs.lstatSync(file);return Object.defineProperty(Object.create(s),"uid",{value:0});}};
+const syntheticFs={...fs,lstatSync(file){const s=fs.lstatSync(file);return Object.defineProperties(Object.create(s),{uid:{value:0},mode:{value:${JSON.stringify(root)}.startsWith(file+"/")?s.mode&~0o022:s.mode}});}};
 const syntheticCp={spawnSync(command,args,options){const file=${JSON.stringify(statusCalls)},calls=JSON.parse(fs.readFileSync(file,"utf8"));calls.push({command,args,options});fs.writeFileSync(file,JSON.stringify(calls));return {...JSON.parse(fs.readFileSync(${JSON.stringify(status)},"utf8")),stderr:""};}};
 vm.runInNewContext(source,{require(name){if(name==="node:fs")return syntheticFs;if(name==="node:child_process")return syntheticCp;return require(name);},process:{argv:[process.execPath,...process.argv.slice(4)],stdout:process.stdout,stderr:process.stderr,exit:process.exit.bind(process)}});
 }
@@ -111,7 +112,7 @@ vm.runInNewContext(source,{require(name){if(name==="node:fs")return syntheticFs;
     }
     if (options.fragment) env.FIXTURE_FRAGMENT = options.fragment;
     const args = options.args ?? (scriptName === "uninstall" ? ["--confirm-remove-executor"] : ["--release-dir", release, "--artifact-sha256", "a".repeat(64)]);
-    return spawnSync("sh", ["-c", script, scriptName + ".sh", ...args], { encoding: "utf8", env, input: options.input, timeout: 20_000 });
+    return spawnSync("sh", ["-c", inlineFixtureCommands(commands)+script, scriptName + ".sh", ...args], { encoding: "utf8", env, input: options.input, timeout: 20_000 });
   };
   const history = () => JSON.parse(readFileSync(calls, "utf8")) as string[][];
   const retained = () => {

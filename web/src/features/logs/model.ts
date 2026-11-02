@@ -22,8 +22,6 @@ export interface Spec {
 }
 export interface View {
   columns: string[];
-  // Retained for compatibility with saved searches; all columns scroll together.
-  pinned: string[];
   widths: Record<string, number>;
   lookback: number;
   aggregate_field?: string;
@@ -65,7 +63,6 @@ export interface Saved {
 export type LogRow = Record<string, unknown> & { event_id: string };
 export const initialView: View = {
   columns: ["event_time", "severity", "service", "body"],
-  pinned: [],
   widths: { event_time: 240, severity: 110, service: 180, body: 360 },
   lookback: 60,
   query_syntax: "literal",
@@ -195,7 +192,7 @@ export function logURL(
 }
 
 // Shared links carry the applied query and display settings, never result rows,
-// session cursors, credentials, or live polling state. Old links remain valid.
+// session cursors, credentials, or live polling state.
 export function readLogURL(
   search: string,
   fallback: Spec,language:MonitoringLanguage='zh-CN'
@@ -257,8 +254,6 @@ export function readLogURL(
       !Array.isArray(v.columns) ||
       v.columns.length > 100 ||
       v.columns.some((s: unknown) => typeof s !== "string") ||
-      !Array.isArray(v.pinned) ||
-      v.pinned.some((s: unknown) => typeof s !== "string") ||
       !v.widths ||
       typeof v.widths !== "object"
     )

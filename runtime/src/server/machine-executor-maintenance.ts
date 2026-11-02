@@ -116,7 +116,6 @@ export function registerMachineExecutorMaintenance(deps:Dependencies,access:Agen
     status TEXT NOT NULL,plan_json TEXT NOT NULL,revision TEXT NOT NULL,request_id TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL,created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,started_at TEXT NOT NULL DEFAULT '',finished_at TEXT NOT NULL DEFAULT '',error TEXT NOT NULL DEFAULT '',receipt_json TEXT NOT NULL DEFAULT '',token_hash TEXT NOT NULL DEFAULT '');
     CREATE UNIQUE INDEX IF NOT EXISTS executor_maintenance_lane ON machine_executor_maintenance(machine_id) WHERE status IN ('awaiting_approval','running','unknown');`);
-  for(const name of ["receipt_json","token_hash"])if(!db.all<{name:string}>("PRAGMA table_info(machine_executor_maintenance)").some(c=>c.name===name))db.exec(`ALTER TABLE machine_executor_maintenance ADD COLUMN ${name} TEXT NOT NULL DEFAULT ''`);
   db.run("UPDATE machine_executor_maintenance SET status='unknown',token_hash='',error='平台在维护期间重启，请通过原记录只读核对' WHERE status='running'");
   const catalog=new AgentReleaseCatalog(options.downloadsDir,join(options.dataDir,"executor-maintenance-cache"));
   const human=(c:Context)=>{

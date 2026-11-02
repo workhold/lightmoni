@@ -30,13 +30,11 @@ function fixture() {
   const tasks = registerTaskCenter(deps);
   db.exec("CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name TEXT,role TEXT,active INTEGER)");
   db.run("INSERT INTO users(id,name,role,active) VALUES('admin','Admin','admin',1)");
-  for (const [name, def] of [["execution_principal", "TEXT NOT NULL DEFAULT 'agent'"], ["executor_id", "TEXT NOT NULL DEFAULT ''"]])
-    if (!db.all<any>("PRAGMA table_info(task_runs)").some(c => c.name === name)) db.exec("ALTER TABLE task_runs ADD COLUMN " + name + " " + def);
   db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('host','Host','host.test',22,'root','direct_ssh','agent-host',?,?)", clock.toISOString(), clock.toISOString());
   db.exec("CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY,last_seen TEXT,heartbeat TEXT);CREATE TABLE ops_platform_runs(id TEXT PRIMARY KEY,job_id TEXT,actor TEXT)");
   db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES('agent-host','host','Host','test','linux','arm64',?,'{}')",clock.toISOString());
   const credentials:any={has:()=>true,authenticate:(req:any)=>{if(req.headers.authorization!=='Bearer ordinary-control')fail(401,'control_required')}};
-  const jobs=registerAgentJobs(deps,{agentCredentials:credentials,separateExecutor:true});
+  const jobs=registerAgentJobs(deps,{agentCredentials:credentials});
   const store = registerPrivilegedExecutors(deps, { dataDir: "/unused" });
   const keys = generateKeyPairSync("ed25519"), pub = keys.publicKey.export({ type: "spki", format: "pem" }).toString();
   const policy = store.preparePolicyPlan("host", { capabilities: ["script.elevated.v1", "container.managed.v1", "operations.managed.v1"] }, "admin");
@@ -56,7 +54,7 @@ function fixture() {
   const apply = () => { const plan = makePlan(); return store.apply(plan.id, { confirm: true, expected_revision: plan.revision, request_id: randomBytes(24).toString("base64url") }, "admin").jobs[0]; };
   let revision=1;const payloads=new Map<string,any>();
   const resolve=(job:any)=>{const p=payloads.get(job.operation_id);if(!p||p.resource.revision!==revision)fail(409,'platform_payload_revision_changed');return p;};
-  registerOperations(deps,{jobs,credentials,definitions:[],resolvePayload:resolve});
+  registerOperations(deps,{jobs,credentials,definitions:[]});
   connectManagedExecutorJobs(deps,{jobs,executors:store,artifacts:{directory:'/not-used'} as any,resolvePlatform:resolve});
   const enqueue=()=>{const operation=randomBytes(16).toString('hex'),resource=randomBytes(16).toString('hex');
     const job=jobs.enqueue({agentID:'agent-host',deploymentID:'platform-'+resource,operationID:operation,actions:[{kind:'operations',domain:'platform',operation_id:operation}],capabilities:['operations.platform'],target:{operations_resource_id:resource}});
@@ -76,10 +74,10 @@ function flow(f:ReturnType<typeof fixture>){
  return{job,claim,plan,permit,phases,result};
 }
 test('signed domain work retains original lineage and ordinary control cannot read or mutate it',async()=>{
- const f=fixture();const server=createServer((req,res)=>void f.router.handle(req,res));
+ const f=fixture();const server=createServer((req,res)=>void f.router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));
  try{const x=flow(f);assert.equal(x.job.execution_principal,'privileged_executor');assert.equal(f.jobs.claim('agent-host',['operations.platform','docker.control','artifact.stage']),null);assert.equal(x.plan.job_id,x.job.id);assert.equal(x.plan.capability,'operations.managed.v1');x.permit();
  server.listen(0,'127.0.0.1');await once(server,'listening');const base='http://127.0.0.1:'+(server.address() as any).port;
- for(const [suffix,method] of [['operations','GET'],['events','POST'],['result','POST'],['cancel','POST']]){const r=await fetch(base+'/api/v1/agents/agent-host/jobs/'+x.job.id+'/'+suffix,{method,headers:{authorization:'Bearer ordinary-control','content-type':'application/json','x-lightmoni-job-lease':x.plan.lease_id},body:method==='POST'?JSON.stringify({lease_id:x.plan.lease_id,state:'succeeded',sequence:1,phase:'accepted'}):undefined});assert.equal(r.status,403,suffix);}
+ for(const [suffix,method] of [['operations','GET'],['events','POST'],['result','POST'],['cancel','POST']]){const r=await fetch(base+'/api/v1/agents/agent-host/jobs/'+x.job.id+'/'+suffix,{method,headers:{authorization:'Bearer ordinary-control','content-type':'application/json','x-lightmoni-job-lease':x.plan.lease_id},body:method==='POST'?JSON.stringify({lease_id:x.plan.lease_id,state:'succeeded',sequence:1,phase:'accepted'}):undefined});assert.equal(r.status,suffix==='operations'?404:403,suffix);}
  assert.equal(f.jobs.get(x.job.id).state,'leased');x.phases();x.result();assert.equal(f.jobs.get(x.job.id).state,'succeeded');assert.equal(f.store.get(x.job.id).state,'succeeded');assert.equal(f.db.get<any>('SELECT state FROM task_runs WHERE id=?',x.job.id)?.state,'succeeded');
  }finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));f.close();}
 });

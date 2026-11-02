@@ -121,7 +121,7 @@ export function createPrivateRegistryController(
     const prior = app?.spec.deployments.find(
       (d: Row) => d.cluster_id === cluster.id,
     );
-    const ip = automaticRegistryAddress(store, b.machine_id, prior?.registry_address ?? b.address);
+    const ip = automaticRegistryAddress(store, b.machine_id);
     const deployment = {
       cluster_id: cluster.id,
       machine_ids: [b.machine_id],

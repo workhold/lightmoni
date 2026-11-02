@@ -13,7 +13,7 @@ import { pngFixture, pngData, pngChunk } from "./fixtures/application-logo.js";
 import { DB } from "../src/shared/sqlite.js";
 import { cipher } from "../src/shared/crypto.js";
 import { Router } from "../src/shared/http.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { OperationsPlatformStore } from "../src/ops/store.js";
 import { applicationCatalog } from "../src/ops/catalog.js";
 import type { Dependencies } from "../src/shared/types.js";

@@ -4,15 +4,15 @@
 
 ## 模块注册与前端边界
 
-中心和 Agent 的公共类型位于 `runtime/src/shared/types.ts`。模块使用 `Dependencies` 注入 SQLite `db`、统一 `query`、SQL AST `referencedTables`、`cat`、ClickHouse writer/reader、`auth`、`router`、`externalURL`、`encrypt/decrypt`、时钟和 logger；认证由 Router 注入 `Context.user`。模块通过注入的 Router 注册 `/api/v1` 路由并返回 `Module`，提供可选 `start()` / `close()`；后台任务使用 AbortSignal 传播取消，关闭时清除定时器并等待已启动的工作结束。模块在构造阶段提交自身 SQLite 建表/迁移，`runtime/src/server/app.ts` 控制初始化和关闭次序。
+中心和 Agent 的公共类型位于 `runtime/src/shared/types.ts`。模块使用 `Dependencies` 注入 SQLite `db`、统一 `query`、SQL AST `referencedTables`、`cat`、ClickHouse writer/reader、`auth`、`router`、`externalURL`、`encrypt/decrypt`、时钟和 logger；认证由 Router 注入 `Context.user`。模块通过注入的 Router 注册 `/api/v1` 路由并返回 `Module`，提供可选 `start()` / `close()`；后台任务使用 AbortSignal 传播取消，关闭时清除定时器并等待已启动的工作结束。模块在构造阶段直接创建最终 SQLite 结构，`runtime/src/server/app.ts` 控制初始化和关闭次序。
 
-中心功能分布在 `runtime/src/server`、`domains`、`assistant`；Agent 位于 `runtime/src/agent`。2026-10-20按用户指定保留本地业务SDK与中心上报逻辑：接入页提供Go、TypeScript/Node.js、Rust、Python四种record SDK；其他历史语言保留兼容源码。Go module `github.com/workhold/lightmoni` 仅供保留的 Go SDK 源码使用，不是中心或 Agent 的启动入口。生产发布固定 Node 24.15.0，Linux Agent 自带 Node 双架构包且要求 glibc ≥ 2.28。
+中心功能分布在 `runtime/src/server`、`domains`、`assistant`；Agent 位于 `runtime/src/agent`。2026-10-20按用户指定保留本地业务SDK与中心上报逻辑：接入页提供Go、TypeScript/Node.js、Rust、Python四种record SDK；其他语言SDK源码作为独立集成保留。Go module `github.com/workhold/lightmoni` 仅供保留的 Go SDK 源码使用，不是中心或 Agent 的启动入口。生产发布固定 Node 24.15.0，Linux Agent 自带 Node 双架构包且要求 glibc ≥ 2.28。
 
 前端使用 React/TypeScript、AntV G2、共享 Ant Design 基础控件及产品主题；所有 feature 输出默认 React 页面，主干注册路由。统一 `web/src/shared/api.ts` 和 `types.ts`，组件从 `web/src/shared/ui.tsx` 使用/重导出。禁止原生 select、window.alert/confirm/prompt；受控、带样式与校验的 Input 可以使用正常 HTML input。多个模块不得改 package.json、锁文件和应用壳。
 
 ## 采集协议与 Key
 
-SDK上报密钥管理：POST /api/v1/keys只要求{name}，启用的有效密钥可写任意业务表；完整明文仅在创建响应中返回。旧allowed_tables/allow_all_tables输入经类型校验后忽略，输出统一allowed_tables=[]/allow_all_tables=true。PUT支持名称与启停，上报记录仍通过/keys/{id}/events读取。SDK接入页保留SDK样例、SDK密钥、豁免表三个页签；管理后台的SDK凭据入口复用同一规则。
+SDK上报密钥管理：POST /api/v1/keys只要求{name}，启用的有效密钥可写任意业务表；完整明文仅在创建响应中返回。不再接受或返回allowed_tables/allow_all_tables，SDK Key持久化也不含逐表范围字段。PUT支持名称与启停，上报记录仍通过/keys/{id}/events读取。SDK接入页保留SDK样例、SDK密钥、豁免表三个页签；管理后台的SDK凭据入口复用同一规则。
 
 OTLP/HTTP `/v1/logs`、`/v1/metrics`、`/v1/traces`，支持标准 Protobuf 与 OTLP JSON 编码，不能把私有 JSON 称为 OTLP。自有 SDK 一批只有一个 signal、一个 table、一个 service。资源含 `service.name`、`service.instance.id`；log 可带 `lightmoni.source_id` 与 `lightmoni.source_seq`，Agent 添加安装期间固定 host_id/agent_id。自定义属性不代替资源身份。
 
@@ -115,7 +115,7 @@ LightMoni Agent 是主机上的管理通道，一个运行实例内部称“执�
 
 ### AI model discovery (2026-10-14)
 
-管理员通过 `POST /api/v1/assistant/models` 使用未保存的 `base_url`、`api_key`、`protocol` 和明确的 `use_saved_key` 查询目录。已保存密钥只能在完整规范 API 基地址匹配时复用；配置 PUT 同样禁止跨地址自动保留旧密钥。同地址切换协议可复用。协议支持 `openai-chat-completions`、`openai-responses`、`anthropic-messages`、`google-generative-ai`；配置必须保存具体协议，旧配置缺省 Chat。目录输入缺省 `auto`，响应返回建议、候选协议、依据及是否须确认，始终 `capabilities_verified:false`。未知 OpenAI 兼容目录（即使返回 Gemini 风格的 `models[].name`）须人工区分 Chat/Responses；只有成功使用 Google profile 或可信 Google 地址/路径时才推荐 Gemini，不按模型名称推断协议。
+管理员通过 `POST /api/v1/assistant/models` 使用未保存的 `base_url`、`api_key`、`protocol` 和明确的 `use_saved_key` 查询目录。已保存密钥只能在完整规范 API 基地址匹配时复用；配置 PUT 同样禁止跨地址自动保留旧密钥。同地址切换协议可复用。协议支持 `openai-chat-completions`、`openai-responses`、`anthropic-messages`、`google-generative-ai`；配置必须保存具体协议，新设置以 Chat 为表单默认值；保存必须明确具体协议。目录输入缺省 `auto`，响应返回建议、候选协议、依据及是否须确认，始终 `capabilities_verified:false`。未知 OpenAI 兼容目录（即使返回 Gemini 风格的 `models[].name`）须人工区分 Chat/Responses；只有成功使用 Google profile 或可信 Google 地址/路径时才推荐 Gemini，不按模型名称推断协议。
 
 目录使用 Bearer、Anthropic `x-api-key` 或 Gemini `x-goog-api-key`，密钥不进入 URL。最多 7 个同源 GET，总超时 8 秒、禁止重定向、每个响应最大 1 MiB，返回排序去重的最多 500 个模型。使用新填写的 Key 或无需 Key 时，OpenAI/Anthropic 根地址依次尝试 `/v1`、根地址，Google 依次尝试 `/v1`、`/v1beta`、根地址；复用已保存 Key 不回退。各协议集中维护版本修正、目录鉴权和查询参数，获取模型、测试连接及配置 PUT 复用协议地址规范化。OpenAI/Anthropic 仅把独立末段 `/v1beta` 修为 `/v1`，Google 保留显式版本，自定义前缀和转义路径保持；修正不能迁移旧密钥的实际存储地址。401/403 仍表示凭据问题，不能被后续候选路径的失败覆盖。分页仅标记截断，不跟随下一页。查询不持久化、不调用生成、错误不包含远端正文。设置页提供自动查询、独立获取按钮及手动模型输入，成功后回填实际可用的规范 Base URL，地址/Key/协议变更或关闭窗口会取消旧查询。规格、接口和验证见 specs/003-multi-protocol-models。
 
@@ -127,9 +127,9 @@ LightMoni Agent 是主机上的管理通道，一个运行实例内部称“执�
 
 `GET /api/v1/assistant/usage?days=7|30|90&timezone=Asia/Shanghai` 仅管理员可读，默认 30 天/UTC，采用包含今天的日历日范围（from 含、to 不含）。响应 totals/daily/models/sources 分别提供已知 token 合计、缺失计数的调用次数、未计价次数及各币种估算费用；具体结构见 `specs/005-model-management/contracts.md`。
 
-独立 SQLite 账本按主服务指定的会话/轮次及 runtime 稳定 `request_id` 幂等记录每个实际发出的模型请求，包括工具后续生成、历史整理及显式连接测试。`model.request.started` 记录 pending，`turn.usage` 只允许一次 succeeded/failed/cancelled 终态；主服务在 worker 中断时完成遗留请求。启动时先回填历史终态，再将仍 pending 的记录标为 failed、`failure_reason=service_interrupted`，不猜测缺失 token。统计包括各状态计数和未知状态的旧记录；本地校验及预算拒绝不计请求。未知用量不冒充零，失败或取消前已报告的消耗保留。
+独立 SQLite 账本按主服务指定的会话/轮次及 runtime 稳定 `request_id` 幂等记录每个实际发出的模型请求，包括工具后续生成、历史整理及显式连接测试。`model.request.started` 记录 pending，`turn.usage` 只允许一次 succeeded/failed/cancelled 终态；主服务在 worker 中断时完成遗留请求。启动时将仍 pending 的记录标为 failed、`failure_reason=service_interrupted`，不猜测缺失 token。统计包括当前各请求状态；本地校验及预算拒绝不计请求。未知用量不冒充零，失败或取消前已报告的消耗保留。
 
-每轮开始冻结连接和单价；账本保留输入/输出原单价、分项费用、已知合计及 complete/partial/unpriced/legacy 计价状态。只有一侧可计价时合计为已知部分，部分计价与完全未计价分别统计；已有终态不可因重放或改价而重新计算。旧事件按原事件序号去重，保留既有金额，不补造原单价或成功状态。`GET /api/v1/assistant/usage/details?days=30&timezone=Asia/Shanghai&limit=100` 仅管理员可读，limit 为 1–100，返回最近优先的 `{records,limit,has_more,from,to,timezone}`。该估算未实现供应商缓存折扣、阶梯价格等，不等同实际账单。启动时全量回填仍保留的旧会话，不受 200 条列表限制；账本独立于会话事件裁剪。所有统计及明细不包含密钥、提示词或生成正文。
+每轮开始冻结连接和单价；账本保留输入/输出原单价、分项费用、已知合计及 complete/partial/unpriced 计价状态。只有一侧可计价时合计为已知部分，部分计价与完全未计价分别统计；已有终态不可因重放或改价而重新计算。`GET /api/v1/assistant/usage/details?days=30&timezone=Asia/Shanghai&limit=100` 仅管理员可读，limit 为 1–100，返回最近优先的 `{records,limit,has_more,from,to,timezone}`。该估算未实现供应商缓存折扣、阶梯价格等，不等同实际账单。不回填旧会话费用；账本独立于会话事件裁剪。所有统计及明细不包含密钥、提示词或生成正文。
 
 四种协议通过实际原生 SDK 执行文本流、工具调用、摘要和取消。Responses 使用 `store:false`；供应商原始 usage 按协议解释，缺少字段保持未知。多轮延续仅持久化白名单内的签名、item ID 和加密推理内容，隐藏推理明文不保存；私有 worker 检查点校验大小和字段，服务端会话回读删除这些元数据后才返回浏览器。元数据计入上下文预算，不能静默丢弃超限状态。
 
@@ -149,3 +149,14 @@ AI 通过 `list_alert_rules/get_alert_rule`、`list_alert_silences/get_alert_sil
 业务初始化service/env，record(table,metric_name,dimensions,value,count)五参数必填；value是count个样本总和。固定身份、key1…key16维度及统计/分布字段遵循[SDD 010](../specs/010-telemetry-table-model/contracts/runtime.md)。每表从10/30/60/300/600/1800/3600秒中选择一个周期，默认30秒；UTC固定边界、配置历史、查询整数倍与公倍数校验遵循[SDD 011](../specs/011-aligned-metric-windows/contracts/runtime.md)。数据管理增加管理员聚合周期入口；本次整合取舍见[main整合说明](../specs/011-aligned-metric-windows/main-integration.md)。
 
 中心地址发现协议与SDK→Agent移除契约见[SDD 050](../specs/050-center-endpoint-discovery/contracts/endpoints.md)。AI插桩仅允许direct，历史Agent配置只提示迁移。
+
+
+## 首次发布存储与协议基线（SDD081）
+
+SQLite直接创建最终字段与索引，中心在业务初始化前检查center_schema=1；无标记的历史开发数据库明确拒绝，不自动清空或升级。ClickHouse直接创建最终列，系统自监控统一lightmoni_log/lightmoni_metric_*，按component区分；所有SDK和内置仪表盘使用当前名称，不保留旧系统视图与启动补列。
+
+任务仅使用主机标签和独立任务，默认标签/平台任务初始化一次；修改、停用或删除后重启不重置。删除旧分组接口、旧单集群字段转换及node_pool/service/gateway_group控制器和旧实例表。应用使用deployments，网站使用cluster_ids/cluster_targets；系统身份从创建时固定。
+
+SDK Key仅管理名称与启停，可写所有业务表；删除逐表范围数据库及公开API字段，匿名豁免表仍按当前授权执行。中央凭据库为SSH秘密唯一来源；旧凭据搬运、主机密文回退、无网卡地址回退、告警旧策略填补及模型费用回填均移除。当前权限拒绝、签名、短租约、unknown栅栏和同基线维护/回退继续有效。
+
+历史规格中的升级/数据兼容承诺不适用于本次首次发布。真实部署环境不在本轮自动清空或迁移。

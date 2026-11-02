@@ -94,8 +94,6 @@ export function registerMachineExecutorBootstrap(deps: Dependencies, access: Acc
     install_generation INTEGER NOT NULL DEFAULT 0,request_id TEXT NOT NULL DEFAULT '',token_hash TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL,
     created_at TEXT NOT NULL,expires_at TEXT NOT NULL,started_at TEXT NOT NULL DEFAULT '',finished_at TEXT NOT NULL DEFAULT '',error TEXT NOT NULL DEFAULT '');
     CREATE UNIQUE INDEX IF NOT EXISTS executor_bootstrap_lane ON machine_executor_bootstraps(machine_id) WHERE status IN ${WORKING};`);
-  if(!db.all<{name:string}>("PRAGMA table_info(machine_executor_bootstraps)").some(column=>column.name==="install_generation"))
-    db.exec("ALTER TABLE machine_executor_bootstraps ADD COLUMN install_generation INTEGER NOT NULL DEFAULT 0");
   // Lost process ownership cannot be reconstructed by issuing another token.
   db.run("UPDATE machine_executor_bootstraps SET status='unknown',token_hash='',error='平台在安装期间重启，请只读核对；不会自动重试' WHERE status IN ('running','verifying')");
   const catalog = new AgentReleaseCatalog(options.downloadsDir, join(options.dataDir,"executor-bootstrap-cache"));

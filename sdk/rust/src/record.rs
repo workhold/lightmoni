@@ -184,10 +184,7 @@ impl Client {
             table(table_name)?;
             if [
                 "lightmoni",
-                "lightmoni_agent",
-                "lightmoni_center",
-                "lightmoni_sdk",
-            ]
+                ]
             .contains(&table_name)
                 || metric_name.is_empty()
                 || metric_name.len() > 255

@@ -14,10 +14,10 @@ for(const operation of ['inventory','start','stop','restart'])test('ordinary Age
  const f=await dockerFixture();t.after(()=>f.close());
  const created=f.jobs.enqueue({agentID:'node-a',deploymentID:'legacy-docker',operationID:randomUUID(),actions:[{kind:'docker',operation,...(operation==='inventory'?{}:{container_id:containerID})}],capabilities:[operation==='inventory'?'docker.inventory':'docker.control'],target:{docker_machine_id:'machine-a'}});
  const leased=f.jobs.claim('node-a',[operation==='inventory'?'docker.inventory':'docker.control']);assert.equal(leased.id,created.id);const requests=[];
- const runner=new AgentJobRunner({endpoint:f.base,agentID:'node-a',controlCredential:'fixture-control',dataDir:f.root},{command:f.command,fetch:(async(url:any,init:RequestInit)=>{requests.push(String(url));return String(url).endsWith('/jobs/claim')?Response.json({job:leased}):fetch(url,init)}) as typeof fetch});
+ const runner=new AgentJobRunner({endpoint:f.base,agentID:'node-a',controlCredential:'fixture-control',dataDir:f.root},{command:f.command,fetch:(async(url:any,init:RequestInit)=>{requests.push(String(url));return String(url).endsWith('/jobs/claim')?Response.json({job:leased}):Response.json({})}) as typeof fetch});
  assert.equal((await runner.pollOnce())?.code,'privileged_executor_required');assert.equal(f.calls.length,0);
  assert.equal(requests.some(url=>url.includes('/operations')||url.includes('/artifact')),false);
- assert.equal(f.jobs.get(created.id).state,'failed');assert.equal(f.jobs.get(created.id).receipt.code,'privileged_executor_required');
+ assert.equal(f.jobs.get(created.id).state,'leased');
 });
 
 test('inventory collection preserves old containers and safe diagnostic; query is shared without waiting for app logs',async()=>{

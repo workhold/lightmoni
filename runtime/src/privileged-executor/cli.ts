@@ -17,11 +17,6 @@ export interface ExecutorCLIIO { input: AsyncIterable<Uint8Array | string>; writ
 export async function execute(args: string[], io: ExecutorCLIIO = { input: process.stdin, write: v => { process.stdout.write(v); } }): Promise<void> {
   assertRoot(); process.umask(0o077);
   const command = args[0] ?? "run";
-  if(command==='migration'){
-    rootPath('/usr/bin/flock');const node=rootPath(realpathSync(process.execPath)),main=rootPath(fileURLToPath(new URL('./main.js',import.meta.url)));
-    await new Promise<void>((resolve,reject)=>{const child=spawn('/usr/bin/flock',['--exclusive','--nonblock','/run/lightmoni-executor-lifecycle.lock',node,main,'migration-worker',...args.slice(1)],{env:{PATH:'/usr/sbin:/usr/bin:/sbin:/bin',LANG:'C.UTF-8'},stdio:'inherit'});child.once('error',reject);child.once('exit',code=>code===0?resolve():reject(Error('migration_refused')));});return;
-  }
-  if(command==='migration-worker'){const {migrationCommand}=await import('./migration.js');io.write(JSON.stringify(migrationCommand(args.slice(1)))+'\n');return;}
   if (!["enroll", "run", "check", "status", "worker"].includes(command)) refuse("unknown_executor_command");
   let filename = EXECUTOR_CONFIG;
   if (args.length > 1) { if (args.length !== 3 || args[1] !== "--config" || !args[2]) refuse("invalid_executor_arguments"); filename = args[2]; }

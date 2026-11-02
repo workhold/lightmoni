@@ -197,30 +197,13 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   createAgentHostSchema(db);
   createHostNetworkSchema(db);
   db.exec(`
-    CREATE TABLE IF NOT EXISTS managed_machines(
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      address TEXT NOT NULL,
-      port INTEGER NOT NULL,
-      username TEXT NOT NULL,
-      connection_method TEXT NOT NULL,
-      host_key_fingerprint TEXT NOT NULL DEFAULT '',
-      platform TEXT NOT NULL DEFAULT '',
-      arch TEXT NOT NULL DEFAULT '',
-      agent_id TEXT NOT NULL DEFAULT '',
-      agent_last_seen TEXT NOT NULL DEFAULT '',
-      last_error TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
     CREATE TABLE IF NOT EXISTS machine_credentials(
       id TEXT PRIMARY KEY,
       machine_id TEXT NOT NULL REFERENCES managed_machines(id) ON DELETE CASCADE,
       method TEXT NOT NULL,
-      secret_encrypted TEXT NOT NULL DEFAULT '',
-      secret_fingerprint TEXT NOT NULL DEFAULT '',
       retention TEXT NOT NULL,
-      policy_source TEXT NOT NULL DEFAULT 'legacy',
+      policy_source TEXT NOT NULL DEFAULT 'explicit',
+      connection_credential_id TEXT NOT NULL DEFAULT '',
       secret_cleared_at TEXT NOT NULL DEFAULT '',
       clear_reason TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
@@ -245,7 +228,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       created_by TEXT NOT NULL,
       approved_at TEXT NOT NULL DEFAULT '',
       started_at TEXT NOT NULL DEFAULT '',
-      finished_at TEXT NOT NULL DEFAULT ''
+      finished_at TEXT NOT NULL DEFAULT '',enrollment_id TEXT NOT NULL DEFAULT '',execution_stage TEXT NOT NULL DEFAULT '',resolved_at TEXT NOT NULL DEFAULT '',resolved_by TEXT NOT NULL DEFAULT '',resolution_reason TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS machine_deployments_machine ON machine_deployments(machine_id,created_at);
     CREATE TABLE IF NOT EXISTS machine_ssh_checks(
@@ -264,14 +247,6 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   createInstallationRecoverySchema(deps);
   createUninstallationSchema(deps);
   createAgentUpdatesSchema(deps);
-  // Adding the legacy default once marks only rows that predate this policy.
-  // Every new insert supplies its source, so restarting never reclassifies it.
-  const credentialColumns = new Set(db.all<{ name: string }>("PRAGMA table_info(machine_credentials)").map(column => column.name));
-  for (const [name, definition] of [
-    ["policy_source", "TEXT NOT NULL DEFAULT 'legacy'"],
-    ["secret_cleared_at", "TEXT NOT NULL DEFAULT ''"],
-    ["clear_reason", "TEXT NOT NULL DEFAULT ''"],
-  ]) if (!credentialColumns.has(name)) db.exec(`ALTER TABLE machine_credentials ADD COLUMN ${name} ${definition}`);
   db.exec(`
     CREATE TABLE IF NOT EXISTS machine_credential_events(
       id TEXT PRIMARY KEY,
@@ -283,9 +258,6 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     );
     CREATE INDEX IF NOT EXISTS machine_credential_events_credential ON machine_credential_events(credential_id,created_at);
   `);
-  // Password hashes would allow offline dictionary guesses; only SSH key
-  // fingerprints are retained, including after upgrading an older database.
-  db.run("UPDATE machine_credentials SET secret_fingerprint='' WHERE method='password' AND secret_fingerprint!=''");
   const now = () => deps.now();
   const busy = new Set<string>();
   let executorStore: PrivilegedExecutorStore | undefined;
@@ -299,7 +271,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       const at = iso(now());
       // Keep the first reason and event even when expiry/revoke/release race.
       // A repeated cleanup still removes any accidentally restored envelope.
-      db.run(`UPDATE machine_credentials SET secret_encrypted='',quarantined_at='',
+      db.run(`UPDATE machine_credentials SET
         secret_cleared_at=CASE WHEN secret_cleared_at='' THEN ? ELSE secret_cleared_at END,
         clear_reason=CASE WHEN clear_reason='' THEN ? ELSE clear_reason END,
         revoked_at=CASE WHEN ?='expired' THEN revoked_at ELSE COALESCE(revoked_at,?) END WHERE id=?`,
@@ -318,13 +290,11 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     // the same idempotent cleanup without nesting it inside this transaction.
     if (invalidatedMachine) terminals.get(invalidatedMachine)?.invalidate();
   };
-  library.migrate();
   const cleanupInvalidCredentials = () => {
     library.cleanup();
     const at = iso(now());
     const invalid = db.all<any>(`SELECT id,revoked_at FROM effective_machine_credentials
-      WHERE (revoked_at IS NOT NULL OR NOT ${machineCredentialCurrentSQL()}) AND (secret_encrypted!='' OR secret_cleared_at='')
-      UNION SELECT id,revoked_at FROM machine_credentials WHERE quarantined_at!='' AND secret_encrypted!=''
+      WHERE (revoked_at IS NOT NULL OR NOT ${machineCredentialCurrentSQL()}) AND secret_cleared_at=''
       AND (revoked_at IS NOT NULL OR NOT ${machineCredentialCurrentSQL()})`, at, at);
     for (const credential of invalid) clearCredential(credential.id, credential.revoked_at ? "revoked" : "expired");
   };
@@ -578,8 +548,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   };
   const decryptKey = (machineID: string, credential: any) => {
     try {
-      const envelope = parseJSON<{machine_id?: string; credential_id?: string; connection_credential_id?: string; secret?: string}>(deps.decrypt(credential.secret_encrypted), {});
-      if (!envelope.secret || (credential.connection_credential_id ? envelope.connection_credential_id !== credential.connection_credential_id : envelope.machine_id !== machineID || envelope.credential_id !== credential.id)) throw Error();
+      const envelope = parseJSON<{connection_credential_id?: string; secret?: string}>(deps.decrypt(credential.secret_encrypted), {});
+      if (!envelope.secret || envelope.connection_credential_id !== credential.connection_credential_id) throw Error();
       return envelope.secret;
     } catch { fail(500, "凭据解密或绑定校验失败，请重新登记私钥"); }
   };
@@ -625,8 +595,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   };
   const decryptSecret = (machineID: string, credential: any) => {
     try {
-      const envelope = parseJSON<{machine_id?: string; credential_id?: string; connection_credential_id?: string; secret?: string}>(deps.decrypt(credential.secret_encrypted), {});
-      if (!envelope.secret || (credential.connection_credential_id ? envelope.connection_credential_id !== credential.connection_credential_id : envelope.machine_id !== machineID || envelope.credential_id !== credential.id)) throw Error();
+      const envelope = parseJSON<{connection_credential_id?: string; secret?: string}>(deps.decrypt(credential.secret_encrypted), {});
+      if (!envelope.secret || envelope.connection_credential_id !== credential.connection_credential_id) throw Error();
       return envelope.secret;
     } catch { fail(500, "凭据解密或绑定校验失败，请重新登记连接凭据"); }
   };
@@ -702,7 +672,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     } catch (error) {
       result.error_code = signal.aborted ? "cancelled" : checkSignal.aborted ? "timed_out" : error instanceof SSHError ? error.code : "ssh_failed";
     } finally {
-      // Preserve explicitly selected reusable policies; legacy one-time
+      // Preserve explicitly selected reusable policies; one-time
       // passwords are consumed even after a failed or cancelled attempt.
       if (credential.method === "password" && credential.retention === "one_time") clearCredential(credential.id, "consumed", actorID);
       busy.delete(machineID);

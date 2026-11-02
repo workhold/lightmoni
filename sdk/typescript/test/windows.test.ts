@@ -16,7 +16,7 @@ test('period policies select one effective window per table with a 30 second def
 test('remote seven-period configuration drives exported windows and invalid updates retain the last snapshot', async () => {
   let windows:unknown=Object.fromEntries([10,30,60,300,600,1800,3600].map(seconds=>['table_'+seconds,[{seconds,effective_at:0}]]));
   const server=createServer((req,res)=>{
-    assert.equal(req.url,'/v1/sdk-config?metric_windows=1');
+    assert.equal(req.url,'/v1/sdk-config');
     assert.equal(req.headers.authorization,'Bearer windows');
     res.setHeader('content-type','application/json');
     res.end(JSON.stringify({revision:'windows',log_sampling:{},disable_rules:[],metric_windows:windows}));

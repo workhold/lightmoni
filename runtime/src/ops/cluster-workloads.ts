@@ -119,139 +119,15 @@ export function createClusterWorkloads(
   const dnsPending = new Map<string, Promise<void>>();
   db.exec(`CREATE TABLE IF NOT EXISTS ops_platform_cluster_members(machine_id TEXT PRIMARY KEY,cluster_id TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS ops_platform_cluster_members_cluster ON ops_platform_cluster_members(cluster_id);
-    CREATE TABLE IF NOT EXISTS ops_cluster_instances(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,slot TEXT NOT NULL,attempt INTEGER NOT NULL DEFAULT 1,retired INTEGER NOT NULL DEFAULT 0,cpu REAL NOT NULL DEFAULT 0,memory_mb REAL NOT NULL DEFAULT 0,address TEXT NOT NULL DEFAULT '',state TEXT NOT NULL DEFAULT 'pending',healthy INTEGER NOT NULL DEFAULT 0,last_seen TEXT NOT NULL DEFAULT '',desired_generation TEXT NOT NULL DEFAULT '',observed_generation TEXT NOT NULL DEFAULT '',current_run_id TEXT NOT NULL DEFAULT '',desired_state TEXT NOT NULL DEFAULT 'running',observed_json TEXT NOT NULL DEFAULT '{}',last_bundle_sig TEXT NOT NULL DEFAULT '',health_failures INTEGER NOT NULL DEFAULT 0,restart_count INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS ops_cluster_instances(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,cluster_id TEXT NOT NULL DEFAULT '',slot TEXT NOT NULL,attempt INTEGER NOT NULL DEFAULT 1,retired INTEGER NOT NULL DEFAULT 0,cpu REAL NOT NULL DEFAULT 0,memory_mb REAL NOT NULL DEFAULT 0,address TEXT NOT NULL DEFAULT '',state TEXT NOT NULL DEFAULT 'pending',healthy INTEGER NOT NULL DEFAULT 0,last_seen TEXT NOT NULL DEFAULT '',desired_generation TEXT NOT NULL DEFAULT '',observed_generation TEXT NOT NULL DEFAULT '',current_run_id TEXT NOT NULL DEFAULT '',desired_state TEXT NOT NULL DEFAULT 'running',observed_json TEXT NOT NULL DEFAULT '{}',last_bundle_sig TEXT NOT NULL DEFAULT '',health_failures INTEGER NOT NULL DEFAULT 0,restart_count INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
 
     CREATE INDEX IF NOT EXISTS ops_cluster_instance_machine ON ops_cluster_instances(machine_id);
     CREATE TABLE IF NOT EXISTS ops_platform_instance_ports(instance_id TEXT NOT NULL,name TEXT NOT NULL,service TEXT NOT NULL DEFAULT '',container_port INTEGER NOT NULL,host_port INTEGER NOT NULL,protocol TEXT NOT NULL,app_protocol TEXT NOT NULL DEFAULT '',host_ip TEXT NOT NULL DEFAULT '0.0.0.0',PRIMARY KEY(instance_id,name));`);
-  const columns = db.all<Row>("PRAGMA table_info(ops_cluster_instances)");
-  if (!columns.some((c) => c.name === "cluster_id"))
-    db.exec(
-      "ALTER TABLE ops_cluster_instances ADD COLUMN cluster_id TEXT NOT NULL DEFAULT ''",
-    );
-  db.exec(`DROP INDEX IF EXISTS ops_cluster_instance_slot;
-    CREATE UNIQUE INDEX IF NOT EXISTS ops_cluster_instance_cluster_slot ON ops_cluster_instances(owner_id,cluster_id,slot) WHERE retired=0;
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ops_cluster_instance_cluster_slot ON ops_cluster_instances(owner_id,cluster_id,slot) WHERE retired=0;
     CREATE TABLE IF NOT EXISTS ops_platform_application_deployments(application_id TEXT NOT NULL,cluster_id TEXT NOT NULL,role TEXT NOT NULL,desired_revision INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 0,policy_actor TEXT NOT NULL DEFAULT '',status_json TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(application_id,cluster_id));
     CREATE UNIQUE INDEX IF NOT EXISTS ops_platform_cluster_openresty ON ops_platform_application_deployments(cluster_id) WHERE role='openresty';
     CREATE TABLE IF NOT EXISTS ops_platform_website_deployments(website_id TEXT NOT NULL,cluster_id TEXT NOT NULL,desired_revision INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 0,policy_actor TEXT NOT NULL DEFAULT '',status_json TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(website_id,cluster_id));
     CREATE TABLE IF NOT EXISTS ops_platform_node_conflicts(agent_id TEXT NOT NULL,protocol TEXT NOT NULL,port INTEGER NOT NULL,observed_at TEXT NOT NULL,PRIMARY KEY(agent_id,protocol,port));`);
-  const normalizeLegacy = (kind: string, input: Row) => {
-    const s = structuredClone(input);
-    if (kind === "application" && s.cluster_id && !s.deployments) {
-      s.deployments = [
-        {
-          cluster_id: s.cluster_id,
-          machine_ids: s.machine_ids ?? [],
-          replicas: s.replicas ?? 1,
-          cpu: s.cpu ?? 0.25,
-          memory_mb: s.memory_mb ?? 256,
-          stateful_acknowledged: s.stateful_acknowledged === true,
-        },
-      ];
-      for (const k of [
-        "cluster_id",
-        "machine_ids",
-        "replicas",
-        "cpu",
-        "memory_mb",
-        "stateful_acknowledged",
-      ])
-        delete s[k];
-    }
-    if (kind === "website" && s.cluster_id && s.bindings && !s.cluster_ids) {
-      s.cluster_ids = [s.cluster_id];
-      for (const b of s.bindings)
-        for (const l of b.locations ?? []) {
-          if (l.target !== "static" && l.action !== "return")
-            l.cluster_targets = [
-              {
-                cluster_id: s.cluster_id,
-                target: l.target,
-                application_id: l.application_id,
-                port_name: l.port_name,
-                upstreams: l.upstreams,
-              },
-            ];
-          for (const k of [
-            "target",
-            "application_id",
-            "port_name",
-            "upstreams",
-            "service_id",
-          ])
-            delete l[k];
-        }
-      delete s.cluster_id;
-      delete s.openresty_application_id;
-    }
-    return s;
-  };
-  // Normalize the 042 single-cluster schema in place: no new revisions or container recreation.
-  db.transaction(() => {
-    for (const resource of db.all<Row>(
-      "SELECT * FROM ops_platform_resources WHERE kind IN ('application','website')",
-    )) {
-      const original = JSON.parse(deps.decrypt(resource.spec_cipher)),
-        spec = normalizeLegacy(resource.kind, original),
-        status = JSON.parse(resource.status_json);
-      if (JSON.stringify(spec) !== JSON.stringify(original))
-        db.run(
-          "UPDATE ops_platform_resources SET spec_cipher=? WHERE id=?",
-          deps.encrypt(JSON.stringify(spec)),
-          resource.id,
-        );
-      if (spec.deployments)
-        for (const d of spec.deployments) {
-          db.run(
-            "INSERT OR IGNORE INTO ops_platform_application_deployments(application_id,cluster_id,role,desired_revision,enabled,policy_actor,status_json) VALUES(?,?,?,?,?,?,?)",
-            resource.id,
-            d.cluster_id,
-            spec.role ?? "generic",
-            status.desired_revision ?? 0,
-            status.enabled === true ? 1 : 0,
-            status.policy_actor ?? resource.authorized_by,
-            JSON.stringify({}),
-          );
-          if (original.cluster_id)
-            db.run(
-              "UPDATE ops_cluster_instances SET cluster_id=? WHERE owner_id=? AND cluster_id=''",
-              d.cluster_id,
-              resource.id,
-            );
-        }
-      if (spec.cluster_ids && spec.bindings)
-        for (const cid of spec.cluster_ids) {
-          const instances: Row = {};
-          for (const i of db.all<Row>(
-            "SELECT id,machine_id FROM ops_cluster_instances WHERE cluster_id=?",
-            cid,
-          ))
-            if (status.machines?.[i.machine_id])
-              instances[i.id] = status.machines[i.machine_id];
-          db.run(
-            "INSERT OR IGNORE INTO ops_platform_website_deployments(website_id,cluster_id,desired_revision,enabled,policy_actor,status_json) VALUES(?,?,?,?,?,?)",
-            resource.id,
-            cid,
-            status.desired_revision ?? 0,
-            status.enabled === true ? 1 : 0,
-            status.policy_actor ?? resource.authorized_by,
-            JSON.stringify({ instances }),
-          );
-        }
-    }
-    for (const revision of db.all<Row>(
-      "SELECT v.resource_id,v.revision,v.spec_cipher,r.kind FROM ops_platform_revisions v JOIN ops_platform_resources r ON r.id=v.resource_id WHERE r.kind IN ('application','website')",
-    )) {
-      const original = JSON.parse(deps.decrypt(revision.spec_cipher)),
-        spec = normalizeLegacy(revision.kind, original);
-      if (JSON.stringify(spec) !== JSON.stringify(original))
-        db.run(
-          "UPDATE ops_platform_revisions SET spec_cipher=? WHERE resource_id=? AND revision=?",
-          deps.encrypt(JSON.stringify(spec)),
-          revision.resource_id,
-          revision.revision,
-        );
-    }
-  });
   const deploymentRow = (
     kind: string,
     owner: string,
@@ -371,9 +247,7 @@ export function createClusterWorkloads(
         ...r,
         name: old.name,
         revision: version,
-        spec: normalizeLegacy(
-          r.kind,
-          JSON.parse(deps.decrypt(old.spec_cipher)),
+        spec: structuredClone(JSON.parse(deps.decrypt(old.spec_cipher)),
         ),
       };
     }
@@ -395,7 +269,7 @@ export function createClusterWorkloads(
           d.desired_revision,
         );
         return old
-          ? normalizeLegacy(r.kind, JSON.parse(deps.decrypt(old.spec_cipher)))
+          ? structuredClone(JSON.parse(deps.decrypt(old.spec_cipher)))
           : r.spec;
       }),
   ];
@@ -540,12 +414,7 @@ export function createClusterWorkloads(
     db.get(
       "SELECT id FROM ops_cluster_instances WHERE machine_id=? AND state NOT IN ('stopped','removed') LIMIT 1",
       key,
-    ) ||
-    (tableExists("ops_platform_instances") &&
-      db.get(
-        "SELECT i.id FROM ops_platform_instances i JOIN managed_machines m ON m.agent_id=i.agent_id WHERE m.id=? AND i.state NOT IN ('stopped','removed') LIMIT 1",
-        key,
-      ));
+    );
   store.register("cluster", {
     validate(s, previous, context) {
       const ids = list(s.machine_ids ?? [], "machine_ids");
@@ -648,8 +517,8 @@ export function createClusterWorkloads(
     old?: Row,
     context?: { id: string; systemKind?: "openresty" | "registry" },
   ) {
-    const s = normalizeLegacy("application", input),
-      previous = old ? normalizeLegacy("application", old) : undefined;
+    const s = structuredClone(input),
+      previous = old ? structuredClone(old) : undefined;
     const mode = s.deployment_mode ?? "manual",
       source = s.source ?? { type: "custom" },
       role = s.role ?? "generic";
@@ -1118,7 +987,7 @@ export function createClusterWorkloads(
     previous?: Row,
     context?: { id: string; stored?: boolean },
   ) {
-    const s = normalizeLegacy("website", input);
+    const s = structuredClone(input);
     const siteAuth = normalizeWebsiteAuth(
       s.auth,
       previous?.auth,
@@ -1663,11 +1532,7 @@ export function createClusterWorkloads(
       "SELECT COALESCE(SUM(cpu),0) cpu,COALESCE(SUM(memory_mb),0) memory_mb FROM ops_cluster_instances WHERE agent_id=? AND state NOT IN ('stopped','removed')",
       agentID,
     )!;
-    const b = db.get<Row>(
-      "SELECT COALESCE(SUM(cpu),0) cpu,COALESCE(SUM(memory_mb),0) memory_mb FROM ops_platform_instances WHERE agent_id=? AND state NOT IN ('stopped','removed')",
-      agentID,
-    )!;
-    return { cpu: a.cpu + b.cpu, memory_mb: a.memory_mb + b.memory_mb };
+    return a;
   };
   function reserve(i: Row, declarations: Row[], c: PlatformResource) {
     const old = ports(i.id),
@@ -2751,9 +2616,7 @@ export function createClusterWorkloads(
           receipt.revision,
         );
         if (!version) continue;
-        const applied = normalizeLegacy(
-          "website",
-          JSON.parse(deps.decrypt(version.spec_cipher)),
+        const applied = structuredClone(JSON.parse(deps.decrypt(version.spec_cipher)),
         );
         const cname = applied.dns_record_mode === "cname",
           domain = deployment?.gateway_domain;

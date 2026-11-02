@@ -36,7 +36,7 @@ async function fixture() {
   const alerts = new Alerts(deps), cap = new AlertCapabilities(alerts);
   for (const [key, members] of [["g", ["m"]], ["h", ["o"]]] as const)
     db.run("INSERT INTO alert_groups VALUES(?,?,?)", key, key, encode({ id: key, name: key, enabled: true, members, policies: {}, targets: [] }));
-  const server = createServer((req, res) => { void router.handle(req, res); });
+  const server = createServer((req, res) => { void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}); });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const url = "http://127.0.0.1:" + (server.address() as any).port;

@@ -8,13 +8,12 @@ import { once } from "node:events";
 import { DB } from "../src/shared/sqlite.js";
 import { cipher } from "../src/shared/crypto.js";
 import { Router, fail } from "../src/shared/http.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
 import { extendedDefinitions } from "../src/ops/catalog/index.js";
 import { catalogInstallation } from "../src/ops/catalog.js";
 import type { Dependencies } from "../src/shared/types.js";
 import { registryCacheFor } from "../src/ops/registry-runtime.js";
-import { migrateSystemApplications } from "../src/ops/system-applications.js";
 import { createPrivateRegistryController } from "../src/ops/private-registry.js";
 async function fixture(t: any, fetcher?: typeof fetch) {
   const db = new DB(":memory:");
@@ -54,7 +53,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
       intervalMs: 1000000,
     }),
     store = platform.store;
-  const server = createServer((req, res) => void router.handle(req, res));
+  const server = createServer((req, res) => void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = "http://127.0.0.1:" + (server.address() as any).port;
@@ -598,52 +597,6 @@ test("cache publication failures after saving a snapshot remain pending and retr
     false,
   );
 });
-test("OpenResty identity migration preserves immutable revisions and creates no deployment jobs", async (t) => {
-  const f = await fixture(t),
-    c = f.createCluster(),
-    gateway = f.store.create(
-      "application",
-      "Gateway",
-      catalogInstallation("openresty", {
-        deployments: [{ cluster_id: c.id, machine_ids: ["ma"] }],
-      }).spec,
-      "admin",
-    );
-  const legacy = { ...gateway.spec, service_name: "openresty-legacy" };
-  f.db.run(
-    "UPDATE ops_platform_resources SET spec_cipher=? WHERE id=?",
-    f.deps.encrypt(JSON.stringify(legacy)),
-    gateway.id,
-  );
-  f.db.run(
-    "UPDATE ops_platform_application_keys SET service_name=? WHERE resource_id=?",
-    "openresty-legacy",
-    gateway.id,
-  );
-  const history = f.db.all(
-      "SELECT * FROM ops_platform_revisions WHERE resource_id=?",
-      gateway.id,
-    ),
-    jobs = f.db.all("SELECT * FROM agent_jobs");
-  migrateSystemApplications(f.store);
-  assert.equal(f.store.get(gateway.id).spec.service_name, "sys-openresty");
-  assert.equal(f.store.get(gateway.id).revision, gateway.revision);
-  assert.deepEqual(
-    f.db.all(
-      "SELECT * FROM ops_platform_revisions WHERE resource_id=?",
-      gateway.id,
-    ),
-    history,
-  );
-  assert.deepEqual(f.db.all("SELECT * FROM agent_jobs"), jobs);
-  assert.equal(
-    f.db.get<any>(
-      "SELECT application_id FROM ops_system_application_aliases WHERE service_name=?",
-      "openresty-legacy",
-    ).application_id,
-    gateway.id,
-  );
-});
 test("stable membership is unique, survives Agent identity changes and rejects moving active machines", async (t) => {
   const f = await fixture(t),
     c = f.createCluster();
@@ -978,44 +931,6 @@ test("HTTP returns stable machines and scoped resources, denies member access an
   assert.equal(
     (await f.req("/resources?cluster_id=" + c.id)).body.resources.length,
     2,
-  );
-});
-test("catalog role cannot bypass OpenResty uniqueness and historical unscoped apps cannot deploy through HTTP", async (t) => {
-  const f = await fixture(t),
-    c = f.createCluster();
-  assert.throws(
-    () =>
-      f.app(c, {
-        source: { type: "store", template_id: "openresty" },
-        role: "generic",
-      }),
-    /template_role_mismatch/,
-  );
-  assert.throws(
-    () =>
-      f.app(c, {
-        image: "openresty/openresty:1.27.1.2-0-alpine",
-        role: "generic",
-      }),
-    /openresty_role_required/,
-  );
-  const legacy = f.store.create(
-    "application",
-    "Historic",
-    { mode: "container", image: "nginx:1", agent_ids: ["a"] },
-    "admin",
-  );
-  assert.equal((await f.action(legacy, "deploy")).status, 409);
-  assert.equal(f.store.actions(legacy.id).length, 0);
-  assert.equal(
-    (
-      await f.req("/catalog/redis/install", "POST", {
-        confirmed: "true",
-        deployments: [{ cluster_id: c.id, machine_ids: ["ma"] }],
-        parameters: { password: "secret" },
-      })
-    ).status,
-    400,
   );
 });
 test("managed rolling update waits for preceding replica receipt across reconciliation ticks", async (t) => {
@@ -1467,80 +1382,6 @@ test("website DNS aggregates all ready cluster gateways and follows managed fail
   assert.equal(f.store.get(site.id).status.deployments[a.id].active, true);
   assert.equal(f.store.get(site.id).status.deployments[b.id].active, true);
 });
-test("single-cluster 042 state normalizes in place without changing instances, storage identity or creating jobs", async (t) => {
-  const f = await fixture(t),
-    c = f.createCluster(["ma"]),
-    app = f.app(c, { environment: { PASSWORD: "migration-secret" } });
-  await f.action(app, "deploy");
-  f.finish("a");
-  const instance = f.db.get<any>(
-      "SELECT id FROM ops_cluster_instances WHERE owner_id=?",
-      app.id,
-    )!.id,
-    old = { ...app.spec, ...app.spec.deployments[0] };
-  delete old.deployments;
-  f.db.run(
-    "UPDATE ops_platform_resources SET spec_cipher=?,status_json=? WHERE id=?",
-    f.deps.encrypt(JSON.stringify(old)),
-    JSON.stringify({
-      desired_revision: 1,
-      enabled: true,
-      policy_actor: "admin",
-    }),
-    app.id,
-  );
-  f.db.run(
-    "UPDATE ops_platform_revisions SET spec_cipher=? WHERE resource_id=? AND revision=1",
-    f.deps.encrypt(JSON.stringify(old)),
-    app.id,
-  );
-  f.db.run(
-    "UPDATE ops_cluster_instances SET cluster_id='' WHERE owner_id=?",
-    app.id,
-  );
-  f.db.run(
-    "DELETE FROM ops_platform_application_deployments WHERE application_id=?",
-    app.id,
-  );
-  const count = f.store.actions(app.id).length;
-  await f.platform.close();
-  const router = new Router(),
-    deps = { ...f.deps, router } as Dependencies;
-  router.auth = deps.auth;
-  const migrated = registerOperationsPlatform(deps, {
-    jobs: f.jobs,
-    dataDir: "/tmp/cluster-migration",
-    intervalMs: 1000000,
-  });
-  try {
-    const read = migrated.store.get(app.id);
-    assert.equal(read.id, app.id);
-    assert.equal(read.spec.deployments[0].cluster_id, c.id);
-    assert.equal(read.spec.cluster_id, undefined);
-    assert.equal(migrated.store.actions(app.id).length, count);
-    assert.equal(
-      f.db.get<any>(
-        "SELECT id,cluster_id FROM ops_cluster_instances WHERE owner_id=?",
-        app.id,
-      )!.id,
-      instance,
-    );
-    assert.equal(
-      f.db.get<any>(
-        "SELECT cluster_id FROM ops_cluster_instances WHERE id=?",
-        instance,
-      )!.cluster_id,
-      c.id,
-    );
-    assert.equal(f.db.all("SELECT * FROM ops_platform_ports").length, 2);
-    assert.equal(
-      JSON.stringify(migrated.store.public(read)).includes("migration-secret"),
-      false,
-    );
-  } finally {
-    await migrated.close();
-  }
-});
 test("leases for one logical application remain bound to the correct cluster Agent and hide private configuration", async (t) => {
   const f = await fixture(t),
     a = f.createCluster(["ma"], "A"),
@@ -1656,6 +1497,7 @@ function rebindForRecovery(f:any) {
   f.db.run("UPDATE agents SET last_seen='2020-01-01T00:00:00Z' WHERE id='a'");
   f.db.run("INSERT INTO agents SELECT 'c','hc','C',version,platform,arch,'2026-10-29T02:00:00.000Z',group_id,? FROM agents WHERE id='b'",JSON.stringify({operations_capabilities:['operations.platform.instance-recovery.v1']}));
   f.db.run("UPDATE managed_machines SET agent_id='c' WHERE id='ma'");
+  recordHostNetwork(f.db,'ma','c',normalizeNetworkAddresses([{interface:'eth0',address:'10.0.0.1'}]),undefined,'2026-10-29T02:00:00.000Z');
 }
 test('reinstalled Agent proves old containers absent, releases only old reservations and rebuilds cleanly',async t=>{
   for(const mode of ['manual','managed']) {

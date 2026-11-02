@@ -33,24 +33,18 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
   CREATE INDEX IF NOT EXISTS connection_credentials_fingerprint ON connection_credentials(method,secret_fingerprint);
   CREATE TABLE IF NOT EXISTS connection_credential_events(
     id TEXT PRIMARY KEY,credential_id TEXT NOT NULL,event TEXT NOT NULL,actor_id TEXT NOT NULL,created_at TEXT NOT NULL
-  ); CREATE TABLE IF NOT EXISTS connection_credential_migrations(id TEXT PRIMARY KEY,finished_at TEXT NOT NULL);`);
-  const columns = new Set(db.all<{ name: string }>("PRAGMA table_info(machine_credentials)").map(row => row.name));
-  if (!columns.has("connection_credential_id")) db.exec("ALTER TABLE machine_credentials ADD COLUMN connection_credential_id TEXT NOT NULL DEFAULT ''");
-  if (!columns.has("quarantined_at")) db.exec("ALTER TABLE machine_credentials ADD COLUMN quarantined_at TEXT NOT NULL DEFAULT ''");
-  const hostColumns = new Set(db.all<{ name: string }>("PRAGMA table_info(managed_machines)").map(row => row.name));
-  if (!hostColumns.has("default_credential_id")) db.exec("ALTER TABLE managed_machines ADD COLUMN default_credential_id TEXT NOT NULL DEFAULT ''");
+  );`);
   db.exec(`CREATE INDEX IF NOT EXISTS machine_credentials_connection ON machine_credentials(connection_credential_id);
-    DROP VIEW IF EXISTS effective_machine_credentials;
-    CREATE VIEW effective_machine_credentials AS SELECT
+    CREATE VIEW IF NOT EXISTS effective_machine_credentials AS SELECT
       b.id,b.machine_id,b.method,b.connection_credential_id,COALESCE(g.name,'') AS name,
-      CASE WHEN b.revoked_at IS NOT NULL OR b.secret_cleared_at!='' OR b.quarantined_at!='' THEN '' WHEN b.connection_credential_id='' THEN b.secret_encrypted ELSE COALESCE(g.secret_encrypted,'') END AS secret_encrypted,
-      CASE WHEN b.connection_credential_id='' THEN b.secret_fingerprint ELSE COALESCE(g.secret_fingerprint,'') END AS secret_fingerprint,
+      CASE WHEN b.revoked_at IS NOT NULL OR b.secret_cleared_at!='' THEN '' ELSE COALESCE(g.secret_encrypted,'') END AS secret_encrypted,
+      COALESCE(g.secret_fingerprint,'') AS secret_fingerprint,
       CASE WHEN b.retention='permanent' AND b.expires_at!='' THEN b.retention WHEN g.id IS NOT NULL AND b.retention='permanent' AND g.retention!='permanent' THEN g.retention ELSE b.retention END AS retention,
       CASE WHEN g.id IS NULL OR g.retention='permanent' THEN b.expires_at
            WHEN b.retention='permanent' OR julianday(g.expires_at)<=julianday(b.expires_at) THEN g.expires_at ELSE b.expires_at END AS expires_at,
       b.policy_source,COALESCE(b.revoked_at,g.revoked_at) AS revoked_at,
-      CASE WHEN b.quarantined_at!='' THEN b.quarantined_at WHEN b.secret_cleared_at!='' THEN b.secret_cleared_at ELSE COALESCE(g.secret_cleared_at,'') END AS secret_cleared_at,
-      CASE WHEN b.quarantined_at!='' THEN 'invalid' WHEN b.clear_reason!='' THEN b.clear_reason ELSE COALESCE(g.clear_reason,'') END AS clear_reason,
+      CASE WHEN b.secret_cleared_at!='' THEN b.secret_cleared_at ELSE COALESCE(g.secret_cleared_at,'') END AS secret_cleared_at,
+      CASE WHEN b.clear_reason!='' THEN b.clear_reason ELSE COALESCE(g.clear_reason,'') END AS clear_reason,
       b.created_at,b.created_by,b.last_used_at
     FROM machine_credentials b LEFT JOIN connection_credentials g ON g.id=b.connection_credential_id;`);
   const row = (credentialID: string) => {
@@ -135,8 +129,8 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
     }
     if (!bindingID) {
       bindingID = id();
-      db.run(`INSERT INTO machine_credentials(id,machine_id,connection_credential_id,method,secret_encrypted,secret_fingerprint,retention,policy_source,created_at,expires_at,created_by)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)`,bindingID,machineID,value.id,value.method,"",value.secret_fingerprint,policy.retention,"explicit",at(),policy.expiresAt,actorID);
+      db.run(`INSERT INTO machine_credentials(id,machine_id,connection_credential_id,method,retention,policy_source,created_at,expires_at,created_by)
+        VALUES(?,?,?,?,?,?,?,?,?)`,bindingID,machineID,value.id,value.method,policy.retention,"explicit",at(),policy.expiresAt,actorID);
       db.run("INSERT INTO machine_credential_events(id,machine_id,credential_id,event,actor_id,created_at) VALUES(?,?,?,?,?,?)",id(),machineID,bindingID,"bound",actorID,at());
     } else if (requested && policy.retention!=="permanent" && (existing!.retention==="permanent" || Date.parse(policy.expiresAt)<Date.parse(existing!.expires_at))) {
       // Re-entering the same key must honor a shorter requested lifetime,
@@ -145,46 +139,6 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
     }
     if (makeDefault) db.run("UPDATE managed_machines SET default_credential_id=? WHERE id=?",bindingID,machineID);
     return bindingID;
-  };
-  // Older IDs and per-host deadlines stay intact. Only valid, decryptable
-  // reusable material is moved; malformed history remains isolated.
-  const migrate = () => {
-    if (db.get("SELECT id FROM connection_credential_migrations WHERE id='vault-v1'")) return;
-    db.transaction(() => {
-      for (const binding of db.all<Row>("SELECT b.*,m.name AS machine_name FROM machine_credentials b JOIN managed_machines m ON m.id=b.machine_id WHERE connection_credential_id='' AND revoked_at IS NULL AND secret_cleared_at='' AND secret_encrypted!='' ORDER BY b.created_at,b.id")) {
-        if (!machineCredentialCurrent(binding as any,deps.now())) continue;
-        let secret: string, fingerprint = "";
-        try {
-          const envelope = JSON.parse(deps.decrypt(binding.secret_encrypted));
-          if (envelope.machine_id !== binding.machine_id || envelope.credential_id !== binding.id || typeof envelope.secret !== "string" || !envelope.secret) throw Error("invalid legacy envelope");
-          secret = envelope.secret;
-          if (binding.method === "ssh_key") fingerprint = privateKeyFingerprint(secret);
-          else if (binding.method !== "password") throw Error("unsupported legacy method");
-        } catch {
-          // An incorrect master key must not destroy recoverable old envelopes.
-          // Quarantine excludes the row from all SSH/default selectors while
-          // retaining only encrypted material and its original history ID.
-          db.run("UPDATE machine_credentials SET quarantined_at=? WHERE id=?",at(),binding.id);
-          db.run("INSERT INTO machine_credential_events(id,machine_id,credential_id,event,actor_id,created_at) VALUES(?,?,?,?,?,?)",id(),binding.machine_id,binding.id,"invalid","system",at());
-          continue;
-        }
-        let source = fingerprint ? db.get<Row>("SELECT * FROM connection_credentials WHERE method='ssh_key' AND secret_fingerprint=? AND revoked_at IS NULL AND secret_cleared_at='' ORDER BY created_at,id LIMIT 1",fingerprint) : undefined;
-        if (!source) source = insert({name:binding.machine_name+" · SSH",method:binding.method,secret,fingerprint,retention:binding.retention,expiresAt:binding.expires_at,actorID:binding.created_by,createdAt:binding.created_at});
-        else if (binding.retention === "permanent" || source.retention !== "permanent" && Date.parse(binding.expires_at) > Date.parse(source.expires_at)) {
-          // A source must live at least as long as its longest existing binding;
-          // each shorter binding remains independently capped by the view.
-          db.run("UPDATE connection_credentials SET retention=?,expires_at=? WHERE id=?",binding.retention,binding.expires_at,source.id);
-        }
-        db.run("UPDATE machine_credentials SET connection_credential_id=?,secret_encrypted='',secret_fingerprint=? WHERE id=?",source.id,fingerprint,binding.id);
-      }
-      // A deterministic choice is made once during upgrade. Later invalidation
-      // never chooses a different credential behind the user's back.
-      for (const machine of db.all<Row>("SELECT id FROM managed_machines WHERE default_credential_id=''")) {
-        const binding = db.all<Row>("SELECT * FROM effective_machine_credentials WHERE machine_id=? AND revoked_at IS NULL AND secret_cleared_at='' AND secret_encrypted!='' ORDER BY created_at DESC,id DESC",machine.id).find(value=>machineCredentialCurrent(value as any,deps.now()));
-        if (binding) db.run("UPDATE managed_machines SET default_credential_id=? WHERE id=?",binding.id,machine.id);
-      }
-      db.run("INSERT INTO connection_credential_migrations(id,finished_at) VALUES('vault-v1',?)",at());
-    });
   };
   const used = (bindingID: string) => {
     const binding = db.get<Row>("SELECT connection_credential_id FROM machine_credentials WHERE id=?",bindingID);
@@ -203,5 +157,5 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
     deps.router.put(base+"/:id",safe(async ctx=>{admin(ctx);const input=fields(await ctx.body(),["name"]);row(ctx.params.id);db.run("UPDATE connection_credentials SET name=? WHERE id=?",text(input.name,"name",128),ctx.params.id);ctx.json(publicRow(row(ctx.params.id)));}));
     deps.router.post(base+"/:id/revoke",safe(async ctx=>{admin(ctx);const input=fields(await ctx.body(),["confirm"]);if(input.confirm!==true)fail(400,"必须明确确认撤销此凭据及全部关联主机的使用权限");ctx.json(clear(ctx.params.id,"revoked",ctx.user.id));}));
   };
-  return {create,ensure,bind,lifetime,cleanup,migrate,used,consumed,register};
+  return {create,ensure,bind,lifetime,cleanup,used,consumed,register};
 }

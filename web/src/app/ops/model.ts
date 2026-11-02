@@ -202,7 +202,7 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
     cluster: { machine_ids: [], port_start: 20000, port_end: 29999, nodes: [] },
     website: {
       routing_mode:"manual",
-      dns_record_mode:resource?"address":"cname",
+      dns_record_mode:"cname",
       cluster_policies:[],
       cluster_ids: [],
       bindings: [{ domains: [], https: false, dns_enabled: false, locations: [] }],

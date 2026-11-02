@@ -28,7 +28,7 @@ test('environment safely injects selected secrets and clears stale keys in anony
 test('exemption recommendations are valid complex names and never system tables',()=>{
  const first=recommendedExemptTables(),second=recommendedExemptTables();assert.equal(first.length,3);assert.notDeepEqual(first.map(item=>item.name),second.map(item=>item.name));
  for(const item of first){assert.equal(validSDKTable(item.name),true);assert.match(item.name,/_[a-f0-9]{16}$/);}
- for(const value of ['log_app','metric_app','trace_app','lightmoni_sdk','lightmoni_center','lightmoni_agent','App','*','a'.repeat(49),''])assert.equal(validSDKTable(value),false,value);
+ for(const value of ['log_app','metric_app','trace_app','lightmoni','lightmoni','lightmoni','App','*','a'.repeat(49),''])assert.equal(validSDKTable(value),false,value);
 });
 test('SDK addresses validate public and container routes',()=>{
  for(const value of ['https://monitor.example/base/','http://lightmoni:8080','http://[::1]:18380'])assert.equal(sdkEndpointError(value),'');

@@ -1,6 +1,6 @@
 import protobuf from "protobufjs";
 import { createHash } from "node:crypto";
-import { parseJSON, integerString } from "./json.js";
+import { parseJSON, integerString, stringifyJSON } from "./json.js";
 export type Signal = "logs" | "metrics" | "traces";
 interface Field {
   name: string;
@@ -1353,37 +1353,12 @@ export function inputHash(
     .update(encodeOTLP(signal, obj))
     .digest("hex");
 }
-/** Go encoding/json compatibility for stored JSON text and existing hashes.
- * Call with sortedMaps for map values; insertion order represents Go structs.
- */
-export function goJSON(value: any, sortedMaps = false): string {
-  const encode = (v: any): string => {
-    if (v === null || v === undefined) return "null";
-    if (typeof v === "bigint") return v.toString();
-    if (v && typeof v === "object" && v.isLosslessNumber === true)
-      return v.value;
-    if (typeof v === "number") {
-      if (!Number.isFinite(v)) throw Error("non-finite JSON value");
-      return Object.is(v, -0) ? "-0" : String(v);
-    }
-    if (typeof v === "boolean") return String(v);
-    if (typeof v === "string")
-      return JSON.stringify(v).replace(
-        /[<>&\u2028\u2029]/g,
-        (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
-      );
-    if (Array.isArray(v)) return "[" + v.map(encode).join(",") + "]";
-    const keys = Object.keys(v);
-    if (sortedMaps) keys.sort();
-    return (
-      "{" +
-      keys.map((key) => encode(key) + ":" + encode(v[key])).join(",") +
-      "}"
-    );
+/** Deterministic lossless JSON for current hashes and telemetry columns. */
+export function stableJSON(value: any, sortedMaps = false): string {
+  const order = (v: any): any => {
+    if (!v || typeof v !== 'object' || v.isLosslessNumber === true) return v;
+    if (Array.isArray(v)) return v.map(order);
+    return Object.fromEntries(Object.keys(v).sort().map(key => [key, order(v[key])]));
   };
-  try {
-    return encode(value);
-  } catch {
-    return "";
-  }
+  return stringifyJSON(sortedMaps ? order(value) : value);
 }

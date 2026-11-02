@@ -142,7 +142,8 @@ export function registerAgentCredentials(
       agent_id TEXT NOT NULL DEFAULT '',
       agent_public_key TEXT NOT NULL DEFAULT '',
       pending_expires_at TEXT,
-      bootstrap_hash TEXT NOT NULL DEFAULT ''
+      bootstrap_hash TEXT NOT NULL DEFAULT '',
+      machine_id TEXT NOT NULL DEFAULT '',replaces_agent_id TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS agent_enrollments_agent ON agent_enrollments(agent_id);
     CREATE TABLE IF NOT EXISTS agent_credentials(
@@ -161,11 +162,6 @@ export function registerAgentCredentials(
     );
     CREATE INDEX IF NOT EXISTS agent_credentials_lookup ON agent_credentials(agent_id,audience);
   `);
-  if (!db.all<{name:string}>("PRAGMA table_info(agent_enrollments)").some(column => column.name === "machine_id"))
-    db.exec("ALTER TABLE agent_enrollments ADD COLUMN machine_id TEXT NOT NULL DEFAULT ''");
-  if (!db.all<{name:string}>("PRAGMA table_info(agent_enrollments)").some(column => column.name === "replaces_agent_id"))
-    db.exec("ALTER TABLE agent_enrollments ADD COLUMN replaces_agent_id TEXT NOT NULL DEFAULT ''");
-
   const now = () => deps.now?.() ?? new Date();
   const iso = (date: Date) => date.toISOString();
   const admin = (ctx: Context) => deps.auth.requireAdmin(ctx);

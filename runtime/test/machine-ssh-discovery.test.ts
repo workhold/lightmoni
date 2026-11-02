@@ -136,40 +136,6 @@ test("SSH target changes do not erase the independently bound current Agent sour
   const network=machineNetwork(db,"host");assert.deepEqual(network.addresses,[]);assert.equal(network.source_ip,"10.0.8.3");
 });
 
-test("old Agent network rows migrate with their exact original owner and timestamps", t => {
-  const db=new DB(":memory:");t.after(()=>db.close());createAgentHostSchema(db);
-  db.exec("CREATE TABLE machine_network_observations(machine_id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,addresses_json TEXT NOT NULL,observed_at TEXT NOT NULL,source_ip TEXT NOT NULL,source_observed_at TEXT NOT NULL,source_kind TEXT NOT NULL)");
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('host','name','ssh.fixture',22,'root','direct_ssh','old-agent',?,?)",at,at);
-  db.run("INSERT INTO machine_network_observations VALUES('host','old-agent',?,?,'10.0.0.8',?,'direct')",JSON.stringify(snapshot().addresses),at,at);
-  createHostNetworkSchema(db);createHostNetworkSchema(db);
-  assert.equal(machineNetwork(db,"host").observed_via,"agent");assert.equal(machineNetwork(db,"host").observed_at,at);
-  assert.equal(db.get<any>("SELECT snapshot_agent_id FROM machine_network_observations")!.snapshot_agent_id,"old-agent");
-  db.run("UPDATE managed_machines SET agent_id='new-agent' WHERE id='host'");
-  assert.equal(machineNetwork(db,"host").observed_via,"unavailable");assert.equal(machineNetwork(db,"host").source_ip,"");
-});
-
-test("interrupted network DDL rolls back before retry and does not infer snapshot owners from future sources", t => {
-  const db=new DB(":memory:");t.after(()=>db.close());createAgentHostSchema(db);
-  db.exec("CREATE TABLE machine_network_observations(machine_id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,addresses_json TEXT NOT NULL,observed_at TEXT NOT NULL,source_ip TEXT NOT NULL,source_observed_at TEXT NOT NULL,source_kind TEXT NOT NULL)");
-  db.run("INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('host','name','ssh.fixture',22,'root','direct_ssh','original-agent',?,?)",at,at);
-  db.run("INSERT INTO machine_network_observations VALUES('host','original-agent',?,?,'10.0.0.8',?,'direct')",JSON.stringify(snapshot().addresses),at,at);
-  const before=db.all("PRAGMA table_info(machine_network_observations)"), exec=db.exec.bind(db);
-  db.exec=(sql:string)=>{
-    exec(sql);
-    if(sql.startsWith("ALTER TABLE machine_network_observations ADD COLUMN snapshot_agent_id "))throw Error("injected schema interruption");
-  };
-  try { assert.throws(()=>createHostNetworkSchema(db),/injected schema interruption/); }
-  finally { db.exec=exec; }
-  assert.deepEqual(db.all("PRAGMA table_info(machine_network_observations)"),before);
-  assert.equal(db.get<any>("SELECT observed_at FROM machine_network_observations")!.observed_at,at);
-  createHostNetworkSchema(db);
-  const migrated=db.get<any>("SELECT snapshot_agent_id,observed_at,agent_id FROM machine_network_observations")!;
-  assert.deepEqual(migrated,{snapshot_agent_id:"original-agent",observed_at:at,agent_id:"original-agent"});
-  db.run("UPDATE machine_network_observations SET snapshot_agent_id='',agent_id='future-source'");
-  createHostNetworkSchema(db);
-  assert.equal(db.get<any>("SELECT snapshot_agent_id FROM machine_network_observations")!.snapshot_agent_id,"");
-});
-
 test("network schema savepoint composes with an outer transaction without committing it", t => {
   const db=new DB(":memory:");t.after(()=>db.close());createAgentHostSchema(db);
   assert.throws(()=>db.transaction(()=>{createHostNetworkSchema(db);throw Error("outer fixture rollback");}),/outer fixture rollback/);

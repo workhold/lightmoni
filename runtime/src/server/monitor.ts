@@ -19,7 +19,7 @@ export class RuntimeMonitor {
   ) {
     this.client = createLightMoni({
       service: "lightmoni-center",
-      table: "lightmoni_center",
+      table: "lightmoni",
       resource: { "host.name": hostname() },
       selfTelemetry: false,
       remoteConfig: false,

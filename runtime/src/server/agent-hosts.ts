@@ -11,15 +11,8 @@ export function createAgentHostSchema(db: DB): void {
     username TEXT NOT NULL,connection_method TEXT NOT NULL,host_key_fingerprint TEXT NOT NULL DEFAULT '',
     platform TEXT NOT NULL DEFAULT '',arch TEXT NOT NULL DEFAULT '',agent_id TEXT NOT NULL DEFAULT '',
     agent_last_seen TEXT NOT NULL DEFAULT '',last_error TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,updated_at TEXT NOT NULL,observed_hostname TEXT NOT NULL DEFAULT ''
+    created_at TEXT NOT NULL,updated_at TEXT NOT NULL,observed_hostname TEXT NOT NULL DEFAULT '',host_key_public_key TEXT NOT NULL DEFAULT '',host_key_observed_at TEXT NOT NULL DEFAULT '',ssh_target_generation INTEGER NOT NULL DEFAULT 0,default_credential_id TEXT NOT NULL DEFAULT ''
   );`);
-  const columns = new Set(db.all<{name:string}>("PRAGMA table_info(managed_machines)").map(row => row.name));
-  for (const [name, definition] of [
-    ["observed_hostname", "TEXT NOT NULL DEFAULT ''"],
-    ["host_key_public_key", "TEXT NOT NULL DEFAULT ''"],
-    ["host_key_observed_at", "TEXT NOT NULL DEFAULT ''"],
-    ["ssh_target_generation", "INTEGER NOT NULL DEFAULT 0"],
-  ]) if (!columns.has(name)) db.exec(`ALTER TABLE managed_machines ADD COLUMN ${name} ${definition}`);
 }
 
 const observation = (value: unknown, max: number): string => {
@@ -67,10 +60,7 @@ export function ensureAgentHost(db: DB, agentID: string, values: Record<string, 
   const current = db.get<{id:string;name:string}>("SELECT id,name FROM managed_machines WHERE agent_id=? ORDER BY created_at,id LIMIT 1", agentID);
   // The target is recorded by the trusted SSH workflow before the installer can
   // activate. No value in an Agent heartbeat may choose a platform asset ID.
-  const enrollmentColumns = table(db, "agent_enrollments") ? db.all<{name:string}>("PRAGMA table_info(agent_enrollments)") : [];
-  const enrollment = enrollmentColumns.some(column => column.name === "machine_id")
-    ? db.get<{machine_id:string}>("SELECT machine_id FROM agent_enrollments WHERE agent_id=? AND status='active' ORDER BY created_at DESC LIMIT 1", agentID)
-    : undefined;
+  const enrollment = table(db, "agent_enrollments") ? db.get<{machine_id:string}>("SELECT machine_id FROM agent_enrollments WHERE agent_id=? AND status='active' ORDER BY created_at DESC LIMIT 1", agentID) : undefined;
   if (!enrollment?.machine_id) fail(409, "registered_host_required: 请先登记主机，再从主机管理部署 Agent");
   const target = db.get<{id:string;name:string;agent_id:string}>("SELECT id,name,agent_id FROM managed_machines WHERE id=?", enrollment.machine_id);
   if (!target || target.agent_id !== agentID || current && current.id !== target.id)

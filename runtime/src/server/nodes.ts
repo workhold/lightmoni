@@ -217,40 +217,6 @@ export function registerNodes(
       ctx.json({ label_ids: unique(input.label_ids) });
     }),
   );
-  router.get(
-    base + "/agent-groups",
-    safe((ctx) => ctx.json(store.groups())),
-  );
-  const group: Handler = async (ctx) => {
-    admin(ctx);
-    const input = await body(ctx),
-      create = ctx.req.method === "POST";
-    ctx.json(
-      store.legacyGroup(input, create ? nodeID() : ctx.params.group, create),
-      create ? 201 : 200,
-    );
-  };
-  router.post(base + "/agent-groups", safe(group));
-  router.put(base + "/agent-groups/:group", safe(group));
-  router.delete(
-    base + "/agent-groups/:group",
-    safe((ctx) => {
-      admin(ctx);
-      store.deleteGroup(ctx.params.group);
-      ctx.json({ ok: true });
-    }),
-  );
-  router.put(
-    base + "/agents/:id/group",
-    safe(async (ctx) => {
-      admin(ctx);
-      const input = await body(ctx);
-      if (typeof input.group_id !== "string" || !input.group_id)
-        throw new NodeError(400, "请选择初始任务标签");
-      store.setLabels(ctx.params.id, [input.group_id], input.group_id);
-      ctx.json(store.group(input.group_id));
-    }),
-  );
   const heartbeat: Handler = async (ctx) => {
     const values = await body(ctx),
       id =
@@ -293,7 +259,7 @@ export function registerNodes(
   const exportRows = async (rows: Normalized[], batch: string) => {
     if (options.internalExporter) {
       await options.internalExporter(
-        "lightmoni_agent",
+        "lightmoni",
         rows,
         batch,
         controller.signal,
@@ -326,7 +292,6 @@ export function registerNodes(
     id: string,
     host: string,
     writeKey: string,
-    group: string,
     at: string,
     identity: string,
   ) => {
@@ -338,7 +303,6 @@ export function registerNodes(
       },
       attributes: Record<string, string> = {
         "lightmoni.component": "agent",
-        group_id: group,
       };
     return {
       event_id: hash(identity),
@@ -356,9 +320,9 @@ export function registerNodes(
   };
   const publish = async () => {
     for (const node of deps.db.all<any>(
-      "SELECT id,host_id,last_seen,heartbeat,group_id FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle x WHERE x.agent_id=agents.id AND x.state='removed')",
+      "SELECT id,host_id,last_seen,heartbeat FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle x WHERE x.agent_id=agents.id AND x.state='removed')",
     )) {
-      const signature = node.last_seen + "/" + node.group_id;
+      const signature = node.last_seen;
       if (sent.get(node.id) === signature) continue;
       let heartbeat: any;
       try {
@@ -385,7 +349,6 @@ export function registerNodes(
           node.id,
           node.host_id,
           String(heartbeat.runtime_key_id ?? ""),
-          node.group_id,
           node.last_seen,
           node.id + signature + name,
         );
@@ -408,14 +371,13 @@ export function registerNodes(
       sent.set(node.id, signature);
     }
     for (const entry of deps.db.all<any>(
-      `SELECT e.agent_id,e.event_id,e.key_id,e.payload,COALESCE(a.host_id,'') AS host_id,COALESCE(a.group_id,'default') AS group_id FROM agent_runtime_events e LEFT JOIN agents a ON a.id=e.agent_id ORDER BY e.rowid LIMIT 256`,
+      `SELECT e.agent_id,e.event_id,e.key_id,e.payload,COALESCE(a.host_id,'') AS host_id FROM agent_runtime_events e LEFT JOIN agents a ON a.id=e.agent_id ORDER BY e.rowid LIMIT 256`,
     )) {
       const event = JSON.parse(entry.payload),
         row = runtimeRow(
           entry.agent_id,
           entry.host_id,
           entry.key_id,
-          entry.group_id,
           event.time,
           entry.agent_id + "/" + event.id,
         );

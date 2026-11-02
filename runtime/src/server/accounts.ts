@@ -1,4 +1,5 @@
 import { hash as passwordHash } from "bcryptjs";
+import { initializeCenterSchema } from "./schema.js";
 import { id } from "../shared/crypto.js";
 import type { DB } from "../shared/sqlite.js";
 
@@ -17,6 +18,7 @@ export async function writeAdmin(db: DB, action: "init" | "reset-password", name
   if (!validPassword(password)) throw new AdminError("密码至少 8 个字符且最多 72 个 UTF-8 字节");
   const encrypted = await passwordHash(password, 10);
   db.transaction(() => {
+    initializeCenterSchema(db);
     if (action === "init") {
       accountSchema(db);
       if (db.get<{ n: number }>("SELECT count(*) n FROM users")!.n !== 0)

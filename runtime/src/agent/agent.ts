@@ -202,16 +202,9 @@ export class Agent {
       this.runtimeEvent("WARN", "collector_failed", name + ": " + status);
   }
   status() {
-    const stats = this.sdk.stats(),
-      legacyStats = Object.fromEntries(
-        Object.entries(stats).map(([k, v]) => [
-          k[0].toUpperCase() + k.slice(1),
-          v,
-        ]),
-      );
+    const stats = this.sdk.stats();
     return {
       agent_id: this.identity.agent_id,
-      group_id: this.config.group_id,
       host_id: this.identity.host_id,
       hostname: hostname(),
       version: this.release.version,
@@ -225,7 +218,7 @@ export class Agent {
       last_error: this.lastError,
       last_success_at: this.lastSuccess,
       collectors_status: { ...this.collectors },
-      sdk: legacyStats,
+      sdk: stats,
       runtime_events: [...this.runtimeEvents],
       control_interval_seconds: this.config.control_interval_seconds,
       task_capabilities: [...SCRIPT_TASK_CAPABILITIES],
@@ -437,8 +430,7 @@ export class Agent {
     );
     if (
       remote &&
-      (remote.revision !== this.revision ||
-        remote.group_id !== this.tasks.group_id)
+      remote.revision !== this.revision
     )
       this.applyRemote(remote);
     return registered;
@@ -659,7 +651,7 @@ export class Agent {
     try {
       while (!this.controller.signal.aborted) {
         const tasks = this.tasks,
-          taskVersion = tasks.revision + "\0" + tasks.group_id;
+          taskVersion = tasks.revision;
         if (taskVersion !== version) {
           next.clear();
           version = taskVersion;

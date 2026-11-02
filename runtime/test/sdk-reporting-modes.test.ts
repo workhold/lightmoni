@@ -39,7 +39,7 @@ test("SDK reports directly; Agent rejects SDK relay and queues only its own coll
   createAgentHostSchema(db);
   new Ingest(catalog, auth, undefined, credentials).register();
   for (const [id, secret] of [["business-key", "test-business-data"]]) {
-    db.run("INSERT INTO ingest_keys(id,name,token_hash,created_at,allowed_tables_json) VALUES(?,?,?,?,?)", id, id, hash(secret), new Date().toISOString(), '["business"]');
+    db.run("INSERT INTO ingest_keys(id,name,token_hash,created_at) VALUES(?,?,?,?)", id, id, hash(secret), new Date().toISOString());
   }
   let available = true;
   const server = createServer(async (req, res) => {

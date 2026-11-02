@@ -51,6 +51,6 @@ func (s *state) enqueueSelfLocked(signal string, message proto.Message, records 
 	if err != nil || len(payload) > s.cfg.MaxBatchBytes || len(s.queue) >= s.cfg.QueueBatches || s.stats.PendingBytes+len(payload) > s.cfg.QueueBytes {
 		return false
 	}
-	s.enqueueLocked(signal, "lightmoni_sdk", message, records, now)
+	s.enqueueLocked(signal, "lightmoni", message, records, now)
 	return true
 }

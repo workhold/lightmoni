@@ -48,10 +48,10 @@ test('record reporting keeps SDK keys and node control/data credentials isolated
   const control={'X-Lightmoni-Agent-ID':agentID,Authorization:'Bearer '+activated.data.control_credential};
   const data={'X-Lightmoni-Agent-ID':agentID,Authorization:'Bearer '+activated.data.data_credential};
   assert.equal((await request('/api/v1/metric-windows/business','PUT',{window_seconds:10})).status,200);
-  const config=await request('/v1/sdk-config?metric_windows=1','GET',undefined,control);
+  const config=await request('/v1/sdk-config','GET',undefined,control);
   assert.equal(config.status,200);assert.equal(config.data.metric_windows.business.at(-1).seconds,10);
-  assert.equal((await request('/v1/sdk-config?metric_windows=1','GET',undefined,data)).status,401);
-  assert.equal((await request('/v1/sdk-config?metric_windows=1','GET',undefined,{Authorization:control.Authorization})).status,401);
+  assert.equal((await request('/v1/sdk-config','GET',undefined,data)).status,401);
+  assert.equal((await request('/v1/sdk-config','GET',undefined,{Authorization:control.Authorization})).status,401);
   const batches:FrozenBatch[]=[];
   const client=createLightMoni({service:'record-credentials',env:'test',selfTelemetry:false,remoteConfig:false,exporter:{async deliver(batch){batches.push(batch);}}});
   client.record('business','duration',{},128,1);await client.shutdown();
@@ -75,7 +75,7 @@ test('record reporting keeps SDK keys and node control/data credentials isolated
   assert.equal(credentials.registered?.(agentID),true);assert.equal(credentials.has(agentID,'control'),false);assert.equal(credentials.has(agentID,'data'),false);
   assert.equal((await send(data,'revoked-node')).status,401);
   assert.equal((await send({'X-Lightmoni-Agent-ID':agentID,Authorization:'Bearer '+key.data.key},'revoked-node-shared-key')).status,401);
-  assert.equal((await request('/v1/sdk-config?metric_windows=1','GET',undefined,{'X-Lightmoni-Agent-ID':agentID,Authorization:'Bearer '+key.data.key})).status,401);
+  assert.equal((await request('/v1/sdk-config','GET',undefined,{'X-Lightmoni-Agent-ID':agentID,Authorization:'Bearer '+key.data.key})).status,401);
   assert.equal((await send({Authorization:'Bearer '+key.data.key},'ordinary-sdk-survives')).status,200);
 
  } finally {

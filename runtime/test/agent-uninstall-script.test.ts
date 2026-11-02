@@ -1,3 +1,4 @@
+import {inlineFixtureCommands} from './helpers/maintenance-shell.js';
 import test from "node:test";
 import assert from "node:assert/strict";
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,symlinkSync,chmodSync} from "node:fs";
@@ -21,7 +22,7 @@ function fixture(t:any,installed=true){
  writeMaintenanceStatShim(commands);
  writeFileSync(join(commands,"systemctl"),`#!${process.execPath}\nconst fs=require('node:fs'),args=process.argv.slice(2),file=${JSON.stringify(calls)},calls=JSON.parse(fs.readFileSync(file));calls.push(args);fs.writeFileSync(file,JSON.stringify(calls));if(args[0]==='show'){const exists=fs.existsSync(${JSON.stringify(p("etc/systemd/system/lightmoni-agent.service"))});process.stdout.write(args.includes('--property=LoadState')?(exists?'loaded':'not-found'):args.includes('--property=FragmentPath')?(exists?${JSON.stringify(p("etc/systemd/system/lightmoni-agent.service"))}:''):'inactive');process.stdout.write('\\n');}\n`,{mode:0o755});
  const script=rewriteMaintenancePaths(readFileSync(new URL("../../deploy/agent/uninstall.sh",import.meta.url),"utf8"),root);
- const run=(purge=false)=>spawnSync("sh",["-c",script,"uninstall.sh",...(purge?["--purge"]:[])],{encoding:"utf8",env:{...process.env,PATH:commands+":"+process.env.PATH}});
+ const run=(purge=false)=>spawnSync("sh",["-c",inlineFixtureCommands(commands)+script,"uninstall.sh",...(purge?["--purge"]:[])],{encoding:"utf8",env:{...process.env,PATH:commands+":"+process.env.PATH}});
  return {p,run,calls:()=>JSON.parse(readFileSync(calls,"utf8")) as string[][]};
 }
 

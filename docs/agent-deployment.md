@@ -173,7 +173,7 @@ sudo sh ./lightmoni-agent-uninstall.sh --purge
 
 Agent 容器的 `127.0.0.1`、应用容器的 `127.0.0.1` 和宿主各不相同。Linux host 网络或 host gateway 需要显式选择并检查暴露范围；`host.docker.internal` 不保证普遍可用。后续容器默认非 root、只读根目录、固定 digest、受限日志挂载、持久状态和秘密配置，不要求 privileged 或全宿主读写。
 
-仓库根 Compose、with-clickhouse Compose 和 [server Dockerfile](../deploy/server/Dockerfile) 均启动中心服务，不是 Agent 镜像。当前没有可直接引用的 Agent 镜像发布地址；不要用中心镜像的默认入口替代 Agent 部署，也不要把 Agent 生命周期默认绑定业务 sidecar。
+仓库根 Compose 和 [server Dockerfile](../deploy/server/Dockerfile) 均启动中心服务，不是 Agent 镜像。当前没有可直接引用的 Agent 镜像发布地址；不要用中心镜像的默认入口替代 Agent 部署，也不要把 Agent 生命周期默认绑定业务 sidecar。
 
 ## 后续设计
 

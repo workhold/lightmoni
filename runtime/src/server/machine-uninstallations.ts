@@ -25,8 +25,7 @@ export function createUninstallationSchema(deps: Dependencies) {
     receipt_json TEXT NOT NULL DEFAULT '{}',error TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,created_by TEXT NOT NULL,
     approved_at TEXT NOT NULL DEFAULT '',started_at TEXT NOT NULL DEFAULT '',finished_at TEXT NOT NULL DEFAULT ''
   ); CREATE INDEX IF NOT EXISTS machine_uninstallations_machine ON machine_uninstallations(machine_id,created_at);
-  DROP INDEX IF EXISTS machine_uninstallations_node_lane;
-  CREATE UNIQUE INDEX machine_uninstallations_node_lane ON machine_uninstallations(agent_id) WHERE agent_id!='' AND status IN ('awaiting_approval','running','unknown');
+  CREATE UNIQUE INDEX IF NOT EXISTS machine_uninstallations_node_lane ON machine_uninstallations(agent_id) WHERE agent_id!='' AND status IN ('awaiting_approval','running','unknown');
   CREATE UNIQUE INDEX IF NOT EXISTS machine_uninstallations_host_lane ON machine_uninstallations(machine_id) WHERE status IN ('awaiting_approval','running','unknown');`);
   deps.db.run("UPDATE machine_uninstallations SET status='unknown',error='平台在卸载期间重启，请核对远端结果' WHERE status='running'");
 }
@@ -60,8 +59,8 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
   };
   const revocationScope = (machine: MachineSummary, observation: AgentRemovalObservation) => {
     const agentID=observation.agent_id;
-    const columns=table("agent_enrollments")?db.all<{name:string}>("PRAGMA table_info(agent_enrollments)"):[];
-    const owned=observation.identity_state==="valid" && !!agentID && machine.agent_id===agentID && columns.some(c=>c.name==="machine_id")
+
+    const owned=observation.identity_state==="valid" && !!agentID && machine.agent_id===agentID && table("agent_enrollments")
       && !!db.get("SELECT id FROM agent_enrollments WHERE agent_id=? AND machine_id=? AND status='active' LIMIT 1",agentID,machine.id);
     return {eligible:!!owned,agent_id:owned?agentID:"",audiences:owned?["control","data"]:[],reason:owned?"当前主机绑定、远端身份及安装预约归属一致":"未证明实际身份归属当前主机，不撤销任何平台身份"};
   };
@@ -87,9 +86,8 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     return JSON.stringify(leftSnapshot)===JSON.stringify(rightSnapshot);
   };
   const complete = (operation: any, observed: AgentRemovalObservation, expectedState: "running"|"unknown") => {
-    const plan=JSON.parse(operation.plan_json), machine=assertPlanTarget(operation), legacy=!plan.observation;
-    if(legacy && (expectedState!=="unknown" || observed.identity_state!=="valid" || observed.agent_id!==operation.agent_id || !observed.config_present || !observed.data_present)) fail(409,"旧卸载记录需核对原身份、完整移除及保留目录，结果保持未知");
-    const before=(plan.observation || observed) as AgentRemovalObservation;
+    const plan=JSON.parse(operation.plan_json), machine=assertPlanTarget(operation);
+    const before=plan.observation as AgentRemovalObservation;
     if (observed.installation!=="absent" || observed.service_running || !observed.unit_managed || !observed.paths_safe || observed.lifecycle_locked || observed.operation_lock) fail(409,"尚未确认 Agent 服务和固定程序已安全移除");
     if (plan.purge ? observed.config_present || (observed.agent_state_present??observed.data_present) || observed.identity_state!=="missing" : observed.config_present!==before.config_present || observed.data_present!==before.data_present || observed.identity_state!==before.identity_state || observed.identity_sha256!==before.identity_sha256 || observed.agent_id!==before.agent_id) fail(409,"Agent 数据保留或清除策略尚未核实");
     db.transaction(()=>{
@@ -98,13 +96,13 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
       if(!live || access.revision(live)!==plan.target_revision || live.agent_id!==plan.machine.agent_id || live.name!==plan.machine.name) fail(409,"核对期间主机目标或关联已变化，结果保持未知");
       relation(live,operation.agent_id,plan.mode||"standard");
       const scope=revocationScope(live,before), approved=plan.credential_revocation_scope;
-      const eligible=scope.eligible && (legacy || approved?.eligible && scope.agent_id===approved.agent_id);
+      const eligible=scope.eligible && (approved?.eligible && scope.agent_id===approved.agent_id);
       const revoked=eligible && table("agent_credentials")?db.run("UPDATE agent_credentials SET revoked_at=?,revoke_reason=? WHERE agent_id=? AND audience IN ('control','data') AND revoked_at IS NULL",at(),"Agent uninstalled through managed host",scope.agent_id).changes:0;
       if(eligible) {
         db.run("INSERT INTO agent_lifecycle VALUES(?,'removed',?,?,?) ON CONFLICT(agent_id) DO UPDATE SET state='removed',removed_at=excluded.removed_at,removed_by=excluded.removed_by,removal_reason=excluded.removal_reason",scope.agent_id,at(),operation.created_by,'Managed Agent uninstallation verified');
         db.run('INSERT INTO agent_lifecycle_events VALUES(?,?,?,?,?,?,?)',id(),scope.agent_id,'removed',operation.created_by,at(),'Managed Agent uninstallation verified',revoked);
       }
-      const receipt={mode:plan.mode||"standard",purge:!!plan.purge,agent_id:before.agent_id,remote_removed:true,data_removed:!!plan.purge,data_retained:!plan.purge,business_data_retained:observed.business_data_retained===true,identity_retired:!!eligible,credentials_revoked:!!eligible,revoked_credentials:revoked,credential_revocation_scope:eligible?scope:{...scope,eligible:false,agent_id:"",audiences:[],reason:scope.eligible?"可撤销范围未纳入原审批，不撤销任何平台身份":scope.reason},legacy_evidence:legacy,approved_snapshot_available:!legacy,verified_at:at(),stages:["ssh_target_verified",legacy?"legacy_identity_verified":"approved_evidence_verified","service_stopped","program_removed",plan.purge?"data_removed":"retained_data_verified",eligible?"owned_credentials_revoked":"credential_revocation_skipped"]};
+      const receipt={mode:plan.mode||"standard",purge:!!plan.purge,agent_id:before.agent_id,remote_removed:true,data_removed:!!plan.purge,data_retained:!plan.purge,business_data_retained:observed.business_data_retained===true,identity_retired:!!eligible,credentials_revoked:!!eligible,revoked_credentials:revoked,credential_revocation_scope:eligible?scope:{...scope,eligible:false,agent_id:"",audiences:[],reason:scope.eligible?"可撤销范围未纳入原审批，不撤销任何平台身份":scope.reason},verified_at:at(),stages:["ssh_target_verified","approved_evidence_verified","service_stopped","program_removed",plan.purge?"data_removed":"retained_data_verified",eligible?"owned_credentials_revoked":"credential_revocation_skipped"]};
       const changed=db.run("UPDATE machine_uninstallations SET status='succeeded',finished_at=?,receipt_json=?,error='' WHERE id=? AND status=?",at(),JSON.stringify(receipt),operation.id,expectedState); if(!changed.changes) fail(409,"卸载记录状态已变化");
       // An SSH observation never creates or replaces a platform Agent binding.
       db.run("UPDATE managed_machines SET agent_last_seen='',last_error='',updated_at=? WHERE id=?",at(),machine.id);

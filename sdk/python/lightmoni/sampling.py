@@ -5,7 +5,7 @@ import math
 import re
 from decimal import Decimal
 
-SYSTEM_TABLES = frozenset(("lightmoni_center", "lightmoni_agent", "lightmoni_sdk"))
+SYSTEM_TABLES = frozenset(("lightmoni", ))
 _FIELDS = frozenset(("event_id", "service", "severity", "trace_id", "instance_id", "sdk.language"))
 _SDK_FIELDS = frozenset(("service", "instance_id", "sdk.language"))
 

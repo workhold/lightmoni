@@ -7,14 +7,8 @@ import { cacheReference } from "../operations/image-cache.js";
 type Row = Record<string, any>;
 export const REGISTRY_IMAGE = "registry:3.0.0";
 /** Service addresses come from host inventory, never the SSH connection target. */
-export function automaticRegistryAddress(store: PlatformStore, machineID: string, legacy?: unknown): string {
-  const network = machineNetwork(store.deps.db, machineID);
-  const candidates = machineServiceAddresses(store.deps.db,machineID).private_ips;
-  if (candidates.length) return candidates.includes(String(legacy)) ? String(legacy) : candidates[0];
-  if (!network.addresses.length && legacy !== undefined) {
-    try { return privateRegistryAddress(legacy); } catch {}
-  }
-  return '127.0.0.1';
+export function automaticRegistryAddress(store: PlatformStore, machineID: string): string {
+  return machineServiceAddresses(store.deps.db,machineID).private_ips[0] ?? '127.0.0.1';
 }
 export function registryCacheScope(address: string): 'machine' | 'cluster' {
   return networkScope(address) === 'loopback' ? 'machine' : 'cluster';

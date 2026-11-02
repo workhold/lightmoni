@@ -1,61 +1,43 @@
-# Docker 更新与回滚
+# Docker 部署与更新
 
-根目录 `compose.yaml` 默认同时管理中心与 ClickHouse；`deploy/with-clickhouse/compose.yaml` 保留为兼容入口并继承相同服务。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261102-ccbb85d`，无需在 `.env` 指定。两端账号密码通过 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认使用 `LIGHTMONI_CH_URL=http://clickhouse:8123`。选择对应目录 `.env` 并沿用项目名，使 SQLite/主密钥与遥测卷继续匹配原实例。
+部署统一使用仓库根目录 `compose.yaml`，同时管理中心与 ClickHouse。中心使用固定发布镜像 `docker.heyphp.com/lightmoni/lightmoni:20261102-ccbb85d`，支持 Linux amd64/arm64。两端账号密码由 `.env` 的 `LIGHTMONI_CH_USER/PASSWORD` 注入，中心默认连接 `http://clickhouse:8123`；数据库不映射宿主端口。
 
-## 更新
+## 初始化与更新
 
-1. 执行 `git pull --ff-only origin main` 获取根 Compose 维护的固定发布镜像，不再通过 `.env` 中的 `LIGHTMONI_IMAGE` 选择版本；私有仓库先运行 `docker login docker.heyphp.com`。源码构建时另外填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD`。`0.1.0` 是应用/包版本，不能单独证明源码已更新。
-2. 保留旧镜像标签及受限的旧 `.env`。备份配套的 SQLite、主密钥与 ClickHouse 数据；备份文件与配置仅允许运维用户读取。
-3. 如网络需要，在 `.env` 中选择公开 npm、Node 归档、Debian 和 Debian security 镜像源；默认官方源不变。Node 归档仍与官方发行站的 SHA256 清单校验。镜像源不得携带凭据、token 或查询参数；不要关闭证书、npm integrity 或 Debian 签名校验。
-4. 从仓库根目录执行下面的命令。使用根目录部署入口时将 `-f` 改为 `compose.yaml`，并使用根目录 `.env`；两个入口都会管理中心与 ClickHouse。
+首次部署从根目录复制 `.env.example` 为 `.env`、设为 0600 并填写数据库密码、端口与域名。SQLite、主密钥和队列保存在 `lightmoni-state`，遥测保存在 `lightmoni-telemetry`。更新时保持相同项目名、环境与数据卷，并配套备份两卷和 `.env`。
 
 ```sh
-docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/compose.yaml config --quiet
-docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/compose.yaml pull lightmoni
-docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/compose.yaml up -d --no-build --wait
-docker compose --env-file deploy/with-clickhouse/.env -f deploy/with-clickhouse/compose.yaml ps
+git pull --ff-only origin main
+docker compose config --quiet
+docker compose pull lightmoni
+docker compose up -d --no-build --wait
+docker compose ps
 ```
 
-通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对镜像提交；随后检查网页、原有管理员登录、只读查询和 SDK/Agent 下载。需要 `up` 重新创建容器才能切换镜像；本地 `npm run build`、`release:sdk` 和 `release:agent` 只更新本地生成物。
+私有仓库先执行 `docker login docker.heyphp.com`。通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对源码提交，再检查登录、查询及 SDK/Agent 下载。源码构建需设置 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD`，执行 `docker compose build lightmoni`，启动时添加 `--pull never`。镜像源可按根 `.env.example` 配置；不关闭 TLS、npm integrity 或 Debian 签名校验。
 
-`20261102-ccbb85d` 从 `ccbb85d3156f428c297422dc679cab3cc215b5dd` 完整构建，整合 PR #62–#66：网站发布/DNS与服务地址、Agent 卸载续办/干净重装、独立镜像来源规则，以及独立执行器的受管运维、观测、统一维护和旧数据接管。镜像代理在独立“镜像来源”页按指定 registry 配置，与私有仓库管理分开。双平台摘要、下载包维护解析、真实 ClickHouse 入库及远端仓库核验见 [SDD079 发布验收](../../specs/079-session-integration-release/validation.md)。
+当前存储只接受首次正式发布基线。没有 `center_schema=1` 标记的旧开发数据库会被明确拒绝；程序不执行升级、搬运或删除。需要保留的开发数据应由管理员先备份，再使用全新状态和遥测目录。清理与发布验收见 [SDD081](../../specs/081-prerelease-cleanup/validation.md)。
 
-普通 Agent 保持非 root、无 Docker 权限。现有应用、网站、Compose、证书和备份写操作需安装独立执行器，并由管理员审阅启用默认关闭的 `operations.managed.v1`；旧业务目录先按[接管步骤](../../specs/080-executor-managed-operations/migration-runbook.md)停机审阅迁移。执行器升级/回退/repair/卸载使用统一维护入口，unknown 先只读核对，不重放。中心换镜像不会自动升级既有 Agent、授权主机能力或迁移业务。沿用原 Compose 项目、环境和卷执行 pull/up；旧 `.env` 的 `LIGHTMONI_IMAGE` 不影响此入口，历史固定标签保持原摘要。程序回退不恢复旧高权限 Agent 或已撤销策略。
+普通 Agent 保持非 root、无 Docker 权限。应用、网站、Compose、证书和备份写操作由独立执行器及默认关闭的 `operations.managed.v1` 承接，业务数据使用独立 root 私有目录；不提供旧普通 Agent 业务目录接管命令。中心镜像更新不会自动更新已安装 Agent、授权主机能力或操作业务数据。执行器维护保留审批、摘要、健康确认、程序回退及 unknown 栅栏，见[运维手册](../../docs/operations.md)。
 
-中心镜像更新不会自动更新已安装的 Agent。需要使用新运维能力的节点应单独升级 Agent，并按[运维手册](../../docs/operations.md)准备 Nginx、Docker/Compose 等所需依赖及目录、服务权限；不能仅凭 capability 出现就认定节点已有执行权限。公网 ACME 与真实 S3 等未验收范围仍以 [SDD 026](../../specs/026-operations-platform/validation.md)为准。
-
-## SDK 接入迁移
-
-本版附带的新 Agent 不再提供业务 SDK 的 OTLP 接收与配置代理。原先 SDK→Agent 接入须在升级 Agent 前迁移为中心 endpoint 与 SDK Key；新 SDK 必须显式设置中心 endpoint。既有 Agent 不会仅因中心换镜像而自动升级。内网/公网入口配置及迁移方法见 [中心入口发现](../../docs/center-endpoints.md)。
+SDK 直接向中心 endpoint 上报，不经过 Agent 接收或配置代理。内外网入口配置见[中心入口发现](../../docs/center-endpoints.md)。
 
 ## 主机 IP 与可信反向代理
 
-新版 Agent 在注册/心跳时采集本机网卡地址，主机管理区分 SSH 连接地址、内网 IP、其他网卡 IP 和平台观测来源 IP。支持多网卡 IPv4/IPv6；不依赖第三方 IP 查询，不根据 IP 合并主机。Agent 更新前显示“待发现”，旧 Agent 未提供网卡字段时保留已有快照及原观测时间。
+Agent 注册/心跳采集本机网卡地址，主机管理区分 SSH 地址、内外网服务 IP 与平台观测来源。服务地址由当前 Agent 的有效网卡快照或人工修正提供；没有有效来源时明确不可用，不根据 IP 合并主机。
 
-中心默认使用 TCP 对端地址，忽略客户端发送的 `X-Forwarded-For`。如果中心位于 Nginx 或其他反向代理后，在 `.env` 配置 `LIGHTMONI_TRUSTED_PROXIES` 为中心实际看到的代理 IP/CIDR，多个用逗号分隔，例如 `172.20.0.1/32,::1/128`；根 Compose 已透传，继承入口同步生效。只填写实际受控代理地址，不要信任用户主机网段或全部地址；代理应覆盖或追加真实连接来源到 `X-Forwarded-For`。
+中心默认使用 TCP 对端地址。反向代理部署时，在 `.env` 将 `LIGHTMONI_TRUSTED_PROXIES` 设置为实际受控代理的 IP/CIDR，多个用逗号分隔；代理应覆盖或追加真实连接来源到 `X-Forwarded-For`。只有直接对端受信才从右向左剥离已知代理，取第一个非受信来源；缺少或无效链显示“来源待发现”，无效信任配置拒绝启动。平台观测地址不代表公网可达地址。
 
-只有直接对端受信时才从右向左剥离已知代理，取第一个非受信来源；可信代理缺少或传入无效地址链时显示“来源待发现”。无效信任 IP/CIDR 配置会拒绝启动。平台观测地址可能是内网、NAT、VPN 或代理的出口，只代表访问当前平台的路径，不代表所有出口或可从公网连接的地址。更换 Agent 身份后，不将旧 Agent 的地址快照当作当前数据。
+## 同基线程序回滚
 
-## 回滚与已有临时配置迁移
-
-需要回滚时，在所选 Compose 目录创建本地覆盖文件 `compose.rollback.yaml`，指定保留的旧镜像，避免修改仓库维护的 `compose.yaml`：
-
-```yaml
-services:
-  lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261027-ec30880
-```
+在根目录创建本地 `compose.rollback.yaml`，将镜像设为已验证、使用相同存储基线的固定标签，再执行：
 
 ```sh
 docker compose -f compose.yaml -f compose.rollback.yaml pull lightmoni
 docker compose -f compose.yaml -f compose.rollback.yaml up -d --no-build --wait
 ```
 
-回滚期间的后续命令继续携带该覆盖文件。原 `.env` 中的 `LIGHTMONI_IMAGE` 不再选择版本；恢复仓库维护版本时省略覆盖文件，重新执行 `pull` 和 `up`。沿用同一项目名和基本 Compose 配置会保留两个命名卷。如果升级已执行无法向后兼容的存储迁移，先停止中心，按配套备份恢复 SQLite、主密钥和需要恢复的 ClickHouse 数据，再启动旧镜像；只换旧镜像不能替代数据恢复。
-
-从历史临时 Compose JSON 迁移时，先核对 `com.docker.compose.project`、容器端口、数据库账号和两个卷名。把相同项目名与连接信息写入 0600 的 `.env`，改用仓库标准 Compose；不要重新生成主密钥、创建同名以外的空数据卷或运行 `down -v`。迁移后后续更新继续使用这份标准配置。
-
-源码构建时将 `pull lightmoni` 替换为 `build lightmoni`，并在 `up` 添加 `--pull never`，防止远端镜像覆盖本地构建。
+恢复仓库版本时省略覆盖文件。程序回滚保留当前数据；历史开发镜像不属于该回滚范围。不要使用 `down -v` 进行更新或密码恢复。
 
 ## 管理员初始化与密码恢复
 

@@ -8,7 +8,7 @@ const {sdkSampleFor}=loadSource(new URL('../web/src/app/sdkExamples.ts',import.m
 const root=resolve('.'),base=process.env.LIGHTMONI_DOMAINS_URL??'http://127.0.0.1:18886',account={name:'sdk-onboarding-qa',password:'local-sdk-onboarding-password'};
 const login=await fetch(base+'/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(account)});if(!login.ok)throw Error('login failed');const cookie=login.headers.get('set-cookie').split(';')[0];
 const req=async(path,method='GET',body)=>{const response=await fetch(base+'/api/v1'+path,{method,headers:{cookie,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});if(!response.ok)throw Error(path+': '+response.status()+' '+await response.text());return response.json();};
-const table='sdk_demos_'+Date.now().toString(16);await req('/sdk-exempt-tables','POST',{name:table,description:'隔离真实 SDK demo 验收'});const key=await req('/keys','POST',{name:'SDK demo integration',allowed_tables:[table]});
+const table='sdk_demos_'+Date.now().toString(16);await req('/sdk-exempt-tables','POST',{name:table,description:'隔离真实 SDK demo 验收'});const key=await req('/keys','POST',{name:'SDK demo integration'});
 const results=[];
 for(const authMode of ['key','anonymous'])for(const language of ['typescript','go','python']){
  const service=`demo-${language}-${authMode}`,code=sdkSampleFor(language,'direct',base,{table,service,authMode});

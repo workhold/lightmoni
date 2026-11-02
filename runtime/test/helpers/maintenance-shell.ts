@@ -10,7 +10,7 @@ export const rewriteMaintenancePaths = (script: string, root: string) =>
  * Command arguments, real metadata checks and injected failures stay intact. */
 export function inlineFixtureCommands(directory:string):string {
   const q=(v:string)=>"'"+v.replaceAll("'","'\\''")+"'";
-  return readdirSync(directory).filter(n=>/^[a-z][a-z0-9_-]*$/.test(n)).map(name=>{
+  return readdirSync(directory).filter(n=>/^[a-z][a-z0-9_]*$/.test(n)).map(name=>{
     const file=join(directory,name),source=readFileSync(file,'utf8');
     const interpreter=source.startsWith('#!'+process.execPath+'\n')?process.execPath:source.startsWith('#!/bin/sh\n')?'/bin/sh':undefined;
     return interpreter?`${name}(){ ${q(interpreter)} ${q(file)} "$@"; };\n`:'';

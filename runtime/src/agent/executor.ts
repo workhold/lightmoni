@@ -366,11 +366,11 @@ export class CapabilityExecutor {
     const lockName = `.stage-${action.version}.lock`;
     try {
       releaseRoot = await openAbsoluteDirectory(target.releaseDirectory, false, true).catch((error) => {
-        if ((error as NodeJS.ErrnoException).code === "ELOOP") throw Object.assign(Error("release directory traverses a symbolic link"), { code: "invalid_target" });
+        if (["ELOOP", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw Object.assign(Error("release directory traverses a symbolic link"), { code: "invalid_target" });
         throw error;
       });
       releases = await openChildDirectory(releaseRoot, "releases", true).catch((error) => {
-        if ((error as NodeJS.ErrnoException).code === "ELOOP") throw Object.assign(Error("release path traverses a symbolic link"), { code: "invalid_target" });
+        if (["ELOOP", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw Object.assign(Error("release path traverses a symbolic link"), { code: "invalid_target" });
         throw error;
       });
       lock = await openFileAt(releases, lockName, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600).catch((error) => {
@@ -459,7 +459,7 @@ export class CapabilityExecutor {
       if (published && releases) await removeTreeAt(releases, action.version).catch(() => {});
       await lock?.close().catch(() => {});
       if (lockCreated && releases) await unlinkAt(releases, lockName).catch(() => {});
-      if ((error as NodeJS.ErrnoException).code === "ELOOP") throw Object.assign(Error("artifact destination traverses a symbolic link"), { code: "invalid_target" });
+      if (["ELOOP", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw Object.assign(Error("artifact destination traverses a symbolic link"), { code: "invalid_target" });
       throw error;
     } finally {
       await releaseRoot?.close().catch(() => {});
@@ -481,18 +481,18 @@ export class CapabilityExecutor {
     const lockName = ".current.activation.lock";
     try {
       root = await openAbsoluteDirectory(target.releaseDirectory, false, true).catch((error) => {
-        if ((error as NodeJS.ErrnoException).code === "ELOOP") throw Object.assign(Error("release directory traverses a symbolic link"), { code: "invalid_target" });
+        if (["ELOOP", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw Object.assign(Error("release directory traverses a symbolic link"), { code: "invalid_target" });
         throw error;
       });
       releases = await openChildDirectory(root, "releases").catch((error) => {
-        if ((error as NodeJS.ErrnoException).code === "ELOOP") throw Object.assign(Error("release path traverses a symbolic link"), { code: "invalid_target" });
+        if (["ELOOP", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw Object.assign(Error("release path traverses a symbolic link"), { code: "invalid_target" });
         throw error;
       });
       const releasesInfo = await releases.stat();
       if (releasesInfo.uid !== (process.geteuid?.() ?? 0) || (releasesInfo.mode & 0o022) !== 0)
         throw Object.assign(Error("release storage directory has unsafe ownership or permissions"), { code: "invalid_target" });
       release = await openChildDirectory(releases, action.version).catch((error) => {
-        if ((error as NodeJS.ErrnoException).code === "ELOOP") throw Object.assign(Error("release path traverses a symbolic link"), { code: "invalid_target" });
+        if (["ELOOP", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw Object.assign(Error("release path traverses a symbolic link"), { code: "invalid_target" });
         throw error;
       });
       const releaseInfo = await release.stat();

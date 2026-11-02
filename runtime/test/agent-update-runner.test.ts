@@ -62,11 +62,12 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
     fs.writeFileSync(join(old,"uninstall.sh"),"#!/bin/sh\n# old offline helper\n",{mode:0o755});
     fs.writeFileSync(p("usr/local/sbin/lightmoni-agent-uninstall"),"#!/bin/sh\n# old offline helper\n",{mode:0o750});
   }
+  fs.writeFileSync(join(old,"deployment-permissions.mjs"),"// current ordinary permission verifier fixture\n");
   fs.writeFileSync(join(old, "release.json"), JSON.stringify(options.legacy ? { version: "0.1.0", platform: "linux", arch, node_version: "24.15.0", requires: "glibc >= 2.28", node_sha256: "e".repeat(64) } : { version: "0.1.0", platform: "linux", arch, source_revision: "a".repeat(40), build_id: "old-build", state_schema: 1 }));
   if (!options.legacy) fs.writeFileSync(join(old, "installation.json"), JSON.stringify({ schema: 1, artifact_sha256: "1".repeat(64) }));
   fs.symlinkSync(old, p("opt/lightmoni-agent/current"));
   fs.writeFileSync(p("usr/local/bin/lightmoni-agent"), "#!/bin/sh\n# old launcher\n", { mode: 0o755 });
-  fs.writeFileSync(p("etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(join(repo,options.privilegedService?"runtime/test/fixtures/legacy-privileged-agent.service":"deploy/agent/lightmoni-agent.service")));
+  fs.writeFileSync(p("etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(join(repo,options.privilegedService?"runtime/test/fixtures/forbidden-privileged-agent.service":"deploy/agent/lightmoni-agent.service")));
   fs.writeFileSync(p("etc/lightmoni-agent/config.json"), '{"control_credential":"test-private-control","data_credential":"test-private-data"}\n', { mode: 0o600 });
   fs.writeFileSync(p("var/lib/lightmoni-agent/identity.json"), '{"agent_id":"fixture-agent","host_id":"fixture-host"}\n', { mode: 0o600 });
   fs.writeFileSync(p("var/lib/lightmoni-agent/queue.sqlite"), randomBytes(128), { mode: 0o600 });
@@ -78,7 +79,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   fs.writeFileSync(join(runtime, "node"), "synthetic new Node\n", { mode: 0o755 });
   fs.writeFileSync(join(runtime, "app/runtime/dist/agent/main.js"), "// new code\n");
   if(options.targetHelper!==false)fs.writeFileSync(join(runtime,"uninstall.sh"),"#!/bin/sh\n# new offline helper\n",{mode:0o755});
-  if(options.targetPermissions)fs.writeFileSync(join(runtime,"deployment-permissions.mjs"),"// trusted permission helper fixture\n");
+  if(options.targetPermissions!==false)fs.writeFileSync(join(runtime,"deployment-permissions.mjs"),"// trusted permission helper fixture\n");
   fs.writeFileSync(join(runtime, "padding"), randomBytes(4096));
   fs.writeFileSync(join(packageDir, "lightmoni-agent"), "#!/bin/sh\n# new launcher\n", { mode: 0o755 });
   fs.writeFileSync(join(packageDir, "lightmoni-agent.service"), fs.readFileSync(join(repo,"deploy/agent/lightmoni-agent.service")));
@@ -171,18 +172,6 @@ test("same-version upgrade is bound to source/build/digest and commits only a ne
   assert.match(fs.readFileSync(f.p("usr/local/sbin/lightmoni-agent-uninstall"),"utf8"),/new offline helper/);
   f.preserve();
 });
-test("unconfirmed upgrade automatically restores legacy program without restoring or losing live state", async t => {
-  const f = fixture(t, { legacy: true }), request = f.request();
-  const original = request.expected_fingerprint;
-  await f.maintenance.start(request);
-  const result = await f.maintenance.worker(request.operation_id);
-  assert.equal(result.status, "rolled_back");
-  assert.equal(result.error_code, "confirmation_timeout");
-  assert.equal(result.restored_fingerprint, original);
-  assert.equal(f.maintenance.probe().current.fingerprint, original);
-  assert.equal(f.maintenance.probe().lifecycle_locked, false);
-  f.preserve();
-});
 test("failed new service restores previous files and service", async t => {
   const f = fixture(t, { failTarget: true }), request = f.request();
   await f.maintenance.start(request);
@@ -271,17 +260,6 @@ test("uncertain systemd dispatch keeps accepted receipt and lifecycle fence for 
   assert.equal(fs.realpathSync(f.p("opt/lightmoni-agent/current")), f.old);
   f.preserve();
 });
-test("schema migrations and explicit rollback to an old unobservable program are rejected", async t => {
-  const f = fixture(t, { legacy: true }), request = f.request();
-  request.target.state_schema = 2;
-  await assert.rejects(f.maintenance.start(request), /invalid_target/);
-  request.target.state_schema = 1;
-  request.action = "rollback";
-  Object.assign(request.target, { source_revision: "", build_id: "", artifact_sha256: "", fingerprint: request.expected_fingerprint });
-  await assert.rejects(f.maintenance.start(request), /invalid_target/);
-  assert.equal(f.maintenance.probe().lifecycle_locked, false);
-  f.preserve();
-});
 test("a manual Node change invalidates the approved current fingerprint", async t => {
   const f = fixture(t), request = f.request();
   fs.appendFileSync(join(f.old, "node"), "changed runtime\n");
@@ -323,17 +301,6 @@ test("source service state is required and cannot be omitted or coerced", async 
   assert.equal(f.maintenance.probe().lifecycle_locked, false);
   f.preserve();
 });
-
-test("an old target package retains the current offline helper without claiming synchronization",async t=>{
-  const f=fixture(t,{targetHelper:false}),request=f.request(),helper=f.p("usr/local/sbin/lightmoni-agent-uninstall"),before=fs.readFileSync(helper);
-  await f.maintenance.start(request);f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==="waiting_confirmation")f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});
-  const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,"succeeded");assert.equal(result.uninstaller_updated,false);assert.equal(parseAgentUpdateStatus(JSON.stringify(result)).uninstaller_updated,false);assert.deepEqual(fs.readFileSync(helper),before);f.preserve();
-});
-test("automatic restoration removes a newly introduced helper and its empty parent",async t=>{
-  const f=fixture(t,{oldHelper:false,failTarget:true}),request=f.request();
-  await f.maintenance.start(request);const result=await f.maintenance.worker(request.operation_id);
-  assert.equal(result.status,"rolled_back");assert.equal(fs.existsSync(f.p("usr/local/sbin/lightmoni-agent-uninstall")),false);assert.equal(fs.existsSync(f.p("usr/local/sbin")),false);f.preserve();
-});
 test("explicit rollback selects the retained program's offline helper",async t=>{
   const f=fixture(t),first=f.request();
   const complete=async(request:any)=>{await f.maintenance.start(request);f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==="waiting_confirmation")f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});return f.maintenance.worker(request.operation_id);};
@@ -362,20 +329,6 @@ test("changing a retained offline helper invalidates the approved rollback sourc
   fs.appendFileSync(join(f.old,"uninstall.sh"),"# unreviewed change\n");assert.throws(()=>f.maintenance.probe(),/previous_release_changed/);f.preserve();
 });
 
-for (const oldHelper of [false, true]) test(`SSH and executor fingerprints agree with ${oldHelper ? "an installed" : "no"} offline helper`, t => {
-  const f = fixture(t, { oldHelper });
-  assert.deepEqual(sshProbe(f).current, f.maintenance.probe().current);
-  if (!oldHelper) {
-    const release = f.maintenance.metadata(f.old);
-    const expected = sha(JSON.stringify({ release_path: f.old, release,
-      manifest: sha(fs.readFileSync(join(f.old, "release.json"))), launcher: sha(fs.readFileSync(f.p("usr/local/bin/lightmoni-agent"))),
-      service: sha(fs.readFileSync(f.p("etc/systemd/system/lightmoni-agent.service"))), node: sha(fs.readFileSync(join(f.old, "node"))),
-      entrypoint: sha(fs.readFileSync(join(f.old, "app/runtime/dist/agent/main.js"))) }));
-    assert.equal(sshProbe(f).current.fingerprint, expected, "pre-helper approval fingerprints stay compatible");
-  }
-  f.preserve();
-});
-
 test("both probes bind offline helper bytes and refuse a redirected release helper", t => {
   const f = fixture(t), original = sshProbe(f).current.fingerprint;
   fs.appendFileSync(join(f.old, "uninstall.sh"), "# changed helper\n");
@@ -398,75 +351,27 @@ test("maintenance receipt preserves absent helper evidence and rejects non-boole
   f.preserve();
 });
 
-
-for(const failTarget of [false,true])test(`approved maintenance retires legacy Docker access and ${failTarget?'rollback':'upgrade'} never restores it`,async t=>{
-  const f=fixture(t,{failTarget}),directory=f.p('etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,'20-lightmoni-docker.conf');
-  fs.mkdirSync(directory,{mode:0o755});fs.writeFileSync(file,'[Service]\nSupplementaryGroups=docker\n',{mode:0o644});
-  const request=f.request();await f.maintenance.start(request);
-  assert.equal(fs.existsSync(file),true,'read-only start must not revoke permissions before worker stop');
-  f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==='waiting_confirmation')f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});
-  const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,failTarget?'rolled_back':'succeeded');
-  assert.equal(result.legacy_docker_access_removed,true);assert.equal(parseAgentUpdateStatus(JSON.stringify(result)).legacy_docker_access_removed,true);assert.equal(fs.existsSync(file),false);f.preserve();
-});
-
 for(const kind of ['unknown','changed-known','symlink','writable','effective-external'])test(`maintenance preserves and rejects ${kind} override before acquiring lifecycle lock`,async t=>{
   const f=fixture(t),request=f.request(),directory=f.p('etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,kind==='unknown'?'10-administrator.conf':'20-lightmoni-docker.conf');
   fs.mkdirSync(directory,{mode:0o755});const bytes='[Service]\nSupplementaryGroups=docker\n';
   if(kind==='symlink')fs.symlinkSync(f.p('etc/lightmoni-agent/config.json'),file);else fs.writeFileSync(file,kind==='changed-known'?bytes+'# changed\n':bytes,{mode:0o644});
   if(kind==='writable')fs.chmodSync(file,0o666);
   if(kind==='effective-external'){const command=f.maintenance.command;f.maintenance.command=(program:string,args:string[])=>program==='systemctl'&&args.includes('--property=DropInPaths')?'/run/systemd/system/lightmoni-agent.service.d/external.conf':command(program,args);}
-  await assert.rejects(()=>f.maintenance.start(request),/agent_dropin_migration_required|unsafe_managed_path/);
+  await assert.rejects(()=>f.maintenance.start(request),/agent_service_override_not_allowed|unsafe_managed_path/);
   assert.equal(fs.existsSync(file),true);assert.equal(fs.existsSync(f.maintenance.lock),false);assert.equal(f.calls.some(([program,args])=>program==='systemctl'&&args[0]==='stop'),false);f.preserve();
-});
-
-test('a changed legacy grant between approval and worker stop is retained without restarting an elevated Agent',async t=>{
-  const f=fixture(t),directory=f.p('etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,'20-lightmoni-docker.conf');fs.mkdirSync(directory,{mode:0o755});fs.writeFileSync(file,'[Service]\nSupplementaryGroups=docker\n',{mode:0o644});
-  const request=f.request();await f.maintenance.start(request);const command=f.maintenance.command;
-  f.maintenance.command=(program:string,args:string[])=>{const value=command(program,args);if(program==='systemctl'&&args[0]==='stop')fs.writeFileSync(file,'[Service]\nSupplementaryGroups=docker root\n');return value;};
-  const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,'rollback_failed');assert.match(fs.readFileSync(file,'utf8'),/docker root/);
-  assert.equal(f.calls.some(([program,args])=>program==='systemctl'&&args[0]==='restart'),false);assert.equal(fs.existsSync(f.maintenance.lock),true);f.preserve();
 });
 
 
 test("maintenance and SSH probes bind the exact checked-in least-privilege unit",()=>{
   const actual=sha(fs.readFileSync(join(repo,"deploy/agent/lightmoni-agent.service")));
   assert.equal(actual,ORDINARY_AGENT_SERVICE_SHA256);assert.equal(actual,SSH_ORDINARY_SERVICE_SHA256);
-  assert.notEqual(sha(fs.readFileSync(join(repo,"runtime/test/fixtures/legacy-privileged-agent.service"))),actual);
-});
-
-for(const failBeforeSwitch of [false,true])test(`failed migration from the shipped privileged unit stays stopped and disabled ${failBeforeSwitch?'before publishing new files':'after target restart'}`,async t=>{
-  const f=fixture(t,{privilegedService:true,failTarget:!failBeforeSwitch}),request=f.request();
-  const oldUnit=fs.readFileSync(f.p("etc/systemd/system/lightmoni-agent.service"));
-  await f.maintenance.start(request);
-  if(failBeforeSwitch)f.maintenance.switchCurrent=()=>{throw Error("synthetic switch failure");};
-  const result=await f.maintenance.worker(request.operation_id);
-  assert.equal(result.status,"rollback_failed");assert.equal(result.restored_fingerprint,undefined);
-  assert.equal(f.maintenance.ownsLock(request.operation_id),true);assert.equal(f.maintenance.probe().service_active,false);
-  assert.deepEqual(fs.readFileSync(f.p("etc/systemd/system/lightmoni-agent.service")),fs.readFileSync(join(repo,"deploy/agent/lightmoni-agent.service")));
-  assert.deepEqual(fs.readFileSync(join(f.maintenance.opDir(request.operation_id),"previous-service")),oldUnit);
-  const commands=f.calls.filter(([file])=>file==="systemctl").map(([,args])=>args[0]);
-  assert.equal(commands.filter(op=>op==="restart").length,failBeforeSwitch?0:1);assert.ok(commands.includes("disable"));f.preserve();
-});
-
-test("a successful privileged-unit migration keeps immutable evidence but neither probe offers its permissions for rollback",async t=>{
-  const f=fixture(t,{privilegedService:true,targetPermissions:true}),before=f.maintenance.probe(),request=f.request();
-  const oldUnit=fs.readFileSync(f.p("etc/systemd/system/lightmoni-agent.service"));
-  await f.maintenance.start(request);f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==="waiting_confirmation")f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});
-  assert.equal((await f.maintenance.worker(request.operation_id)).status,"succeeded");
-  assert.equal(f.maintenance.probe().previous,null);assert.equal(sshProbe(f).previous,null);
-  assert.deepEqual(fs.readFileSync(join(f.maintenance.opDir(request.operation_id),"previous-service")),oldUnit);
-  assert.equal(JSON.parse(fs.readFileSync(f.p("opt/lightmoni-agent/previous.json"),"utf8")).fingerprint,before.current.fingerprint);
-  const count=f.calls.length,rollback={...f.request(),action:"rollback",target:{...before.current}};
-  await assert.rejects(f.maintenance.start(rollback),/previous_release_changed/);
-  assert.equal(f.maintenance.probe().lifecycle_locked,false);
-  assert.equal(f.calls.slice(count).some(([file,args])=>file==="systemctl"&&args[0]==="stop"),false);
-  assert.equal(f.calls.slice(count).some(([,args])=>args[1]==="prepare"),false);f.preserve();
+  assert.notEqual(sha(fs.readFileSync(join(repo,"runtime/test/fixtures/forbidden-privileged-agent.service"))),actual);
 });
 
 test("a candidate privileged unit is refused before executing its old permission helper",async t=>{
   const f=fixture(t,{targetPermissions:true});
-  fs.writeFileSync(join(f.packageDir,"lightmoni-agent.service"),fs.readFileSync(join(repo,"runtime/test/fixtures/legacy-privileged-agent.service")));f.repack();
+  fs.writeFileSync(join(f.packageDir,"lightmoni-agent.service"),fs.readFileSync(join(repo,"runtime/test/fixtures/forbidden-privileged-agent.service")));f.repack();
   const request=f.request();await f.maintenance.start(request);const result=await f.maintenance.worker(request.operation_id);
-  assert.equal(result.status,"failed");assert.equal(result.error_code,"agent_privilege_migration_required");
+  assert.equal(result.status,"failed");assert.equal(result.error_code,"ordinary_agent_privilege_violation");
   assert.equal(f.calls.some(([,args])=>args[1]==="prepare"),false);assert.equal(f.calls.some(([file,args])=>file==="systemctl"&&args[0]==="stop"),false);f.preserve();
 });

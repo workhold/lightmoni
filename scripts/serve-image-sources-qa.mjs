@@ -9,7 +9,7 @@ import { registerAgentJobs } from "../runtime/dist/server/agent-jobs.js";
 import { registerOperationsPlatform } from "../runtime/dist/ops/index.js";
 const db = new DB(":memory:");
 db.exec(
-  `CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT,active INTEGER);INSERT INTO users VALUES('qa-admin','admin',1);CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT,hostname TEXT,version TEXT,platform TEXT,arch TEXT,last_seen TEXT,group_id TEXT,heartbeat TEXT);`,
+  `CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT,active INTEGER);INSERT INTO users VALUES('qa-admin','admin',1);CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT,hostname TEXT,version TEXT,platform TEXT,arch TEXT,last_seen TEXT,heartbeat TEXT);`,
 );
 const router = new Router(),
   deps = {

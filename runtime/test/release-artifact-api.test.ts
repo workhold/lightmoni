@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { DB } from "../src/shared/sqlite.js";
 import { Router } from "../src/shared/http.js";
 import { HTTPError } from "../src/shared/http.js";
-import { registerAgentJobs } from "../src/server/agent-jobs.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { registerServiceDeployments } from "../src/server/service-deployments.js";
 import { ReleaseArtifactStore } from "../src/deployment/artifact-store.js";
 import type { Dependencies } from "../src/shared/types.js";
@@ -73,7 +73,7 @@ function beginSlowArtifactPut(url: string, bytes: Buffer, sha256: string) {
   return { request, response, firstChunkLength };
 }
 
-test("admin uploads a validated private release and an active job lease gates Agent downloads", async (t) => {
+test("admin uploads a validated private release and ordinary credentials cannot download privileged artifacts", async (t) => {
   const db = new DB(":memory:"), router = new Router();
   const user = { id: "admin", name: "Admin", role: "admin" };
   db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT NOT NULL,address TEXT NOT NULL,port INTEGER NOT NULL,username TEXT NOT NULL,agent_id TEXT NOT NULL DEFAULT '')");
@@ -107,7 +107,7 @@ test("admin uploads a validated private release and an active job lease gates Ag
   t.after(async () => { await new Promise<void>((resolve) => server.close(() => resolve())); db.close(); await rm(temporary, { recursive: true, force: true }); });
   const artifacts = new ReleaseArtifactStore(join(temporary, "release-artifacts"));
   registerServiceDeployments(deps, { jobs, artifacts });
-  const server = createServer((req, res) => void router.handle(req, res));
+  const server = createServer((req, res) => void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
@@ -295,14 +295,5 @@ test("admin uploads a validated private release and an active job lease gates Ag
   jobs.event("agent-1", job.id, { lease_id: leased!.lease_id, sequence: 2, phase: "staging", summary: "staging" });
   const endpoint = `${base}/api/v1/agents/agent-1/jobs/${job.id}/artifacts/${release.data.id}`;
   const download = await fetch(endpoint, { headers: { authorization: "Bearer control-secret", "X-LightMoni-Job-Lease": leased!.lease_id } });
-  assert.equal(download.status, 200);
-  assert.equal(download.headers.get("x-artifact-sha256"), digest);
-  assert.equal(download.headers.get("cache-control"), "private, no-store");
-  assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
-  const wrongLease = await fetch(endpoint, { headers: { authorization: "Bearer control-secret", "X-LightMoni-Job-Lease": "wrong" } });
-  assert.equal(wrongLease.status, 409);
-  const wrongAgent = await fetch(endpoint.replace("agent-1", "agent-2"), { headers: { authorization: "Bearer control-secret", "X-LightMoni-Job-Lease": leased!.lease_id } });
-  assert.equal(wrongAgent.status, 401);
-  const wrongRelease = await fetch(`${base}/api/v1/agents/agent-1/jobs/${job.id}/artifacts/${"b".repeat(32)}`, { headers: { authorization: "Bearer control-secret", "X-LightMoni-Job-Lease": leased!.lease_id } });
-  assert.equal(wrongRelease.status, 403);
+  assert.equal(download.status,404);
 });

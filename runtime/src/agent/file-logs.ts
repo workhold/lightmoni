@@ -187,7 +187,6 @@ export class FileLogReader {
           resource: {
             attributes: [
               str("service.name", "lightmoni-agent"),
-              str("lightmoni.group_id", tasks.group_id),
             ],
           },
           scopeLogs: [

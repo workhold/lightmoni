@@ -151,19 +151,6 @@ test("manual unknown resolution records an immutable audit without replaying or 
   } finally { f.close(); }
 });
 
-test("resolution-column upgrade preserves existing run snapshots, leases and receipts", () => {
-  const f = fixture(); try {
-    f.task(); const run = f.store.dispatch("script-one", { confirm: true }, "admin").runs[0];
-    const claim = f.store.claim("agent-one", capabilities)!;
-    for (const name of ["resolved_at", "resolved_by", "resolution_reason"]) f.db.exec(`ALTER TABLE task_runs DROP COLUMN ${name}`);
-    const upgraded = new TaskRunStore(f.deps);
-    const saved = upgraded.get(run.id);
-    assert.equal(saved.state, "running"); assert.deepEqual(saved.snapshot, run.snapshot);
-    assert.equal(saved.resolved_at, ""); assert.equal(saved.resolution_reason, "");
-    assert.equal(upgraded.result("agent-one", run.id, result(claim.lease_token)).state, "succeeded");
-  } finally { f.close(); }
-});
-
 test("cancellation waits for Agent receipt, removed targets cancel before claim and rebound identities cannot submit", () => {
   const f = fixture(); try {
     f.task(); const run = f.store.dispatch("script-one", { confirm: true }, "admin").runs[0];

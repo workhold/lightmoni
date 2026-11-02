@@ -10,11 +10,6 @@ import type { SSHRunner } from "./machine-ssh.js";
 type Row = Record<string, any>;
 const decode = (value: string) => { try { return JSON.parse(value); } catch { return {}; } };
 export function createInstallationRecoverySchema(deps: Dependencies) {
-  const columns = new Set(deps.db.all<{name:string}>("PRAGMA table_info(machine_deployments)").map(column => column.name));
-  for (const [name,definition] of [
-    ["enrollment_id","TEXT NOT NULL DEFAULT ''"], ["execution_stage","TEXT NOT NULL DEFAULT 'legacy_unknown'"],
-    ["resolved_at","TEXT NOT NULL DEFAULT ''"], ["resolved_by","TEXT NOT NULL DEFAULT ''"], ["resolution_reason","TEXT NOT NULL DEFAULT ''"],
-  ]) if (!columns.has(name)) deps.db.exec(`ALTER TABLE machine_deployments ADD COLUMN ${name} ${definition}`);
   deps.db.run("UPDATE machine_deployments SET status='unknown',error=? WHERE status='running'", "平台在 Agent 安装期间重启，远端结果未知；请只读核对或明确结束，不要重复安装");
 }
 interface Access {

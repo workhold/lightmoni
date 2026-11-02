@@ -418,7 +418,7 @@ func (s *state) run() {
 			continue
 		}
 		item := s.queue[0]
-		if item.batch.Table == "lightmoni_sdk" && s.configKey == "" {
+		if item.batch.Table == "lightmoni" && s.configKey == "" {
 			s.queue = s.queue[1:]
 			s.stats.PendingBatches--
 			s.stats.PendingBytes -= len(item.batch.Payload)

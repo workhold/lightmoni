@@ -34,7 +34,6 @@ export interface Config {
   control_credential: string;
   /** Node-bound data credential issued by Agent enrollment. */
   data_credential: string;
-  group_id: string;
   local_token: string;
   data_dir: string;
   max_batch_bytes: number;
@@ -58,7 +57,6 @@ export interface RemoteConfig {
   host_table: string;
   probe_table: string;
   process_names: string[];
-  group_id: string;
   logs_enabled: boolean;
   log_table: string;
   log_sources: LogSource[];
@@ -72,7 +70,7 @@ export const validTable = (s: string) =>
   /^[a-z][a-z0-9_]{0,47}$/.test(s) &&
   !/^(log|metric|trace)_/.test(s);
 export const systemTable = (s: string) =>
-  ["lightmoni", "lightmoni_center", "lightmoni_agent", "lightmoni_sdk", "lightmoni_application"].includes(s);
+  /^lightmoni(?:_|$)/.test(s);
 export const digest = (v: Uint8Array | string) =>
   createHash("sha256").update(v).digest("hex");
 export function defaultConfig(): Config {
@@ -81,7 +79,6 @@ export function defaultConfig(): Config {
     endpoint: "",
     control_credential: "",
     data_credential: "",
-    group_id: "",
     local_token: "",
     data_dir: "./agent-data",
     max_batch_bytes: 4 << 20,
@@ -200,13 +197,13 @@ export function validateConfig(c: Config, options: ConfigValidation = {}): void 
     throw Error("endpoint must be an http(s) URL");
   if (Object.hasOwn(c, "key"))
     throw Error("shared key configuration is not supported; enroll Agent through a registered host");
+  if(Object.keys(c).some(key=>!Object.hasOwn(defaultConfig(),key)))throw Error("unknown Agent configuration field");
   for (const value of [c.control_credential, c.data_credential])
     if (typeof value !== "string" || Buffer.byteLength(value) > 4096 || /[\u0000-\u0020\u007f]/.test(value))
       throw Error("invalid Agent credential");
   if ((!c.control_credential || !c.data_credential)
     && !(options.pendingEnrollment && !c.control_credential && !c.data_credential))
     throw Error("both control_credential and data_credential are required");
-  if (Buffer.byteLength(c.group_id) > 64) throw Error("invalid agent group");
   const { host } = listenAddress(c.listen);
   if (
     host !== "localhost" &&
@@ -297,7 +294,6 @@ export function normalizeRemote(c: Partial<RemoteConfig>): RemoteConfig {
     host_table: "host",
     probe_table: "probe",
     process_names: c.process_names ?? [],
-    group_id: c.group_id ?? "",
     logs_enabled: c.logs_enabled ?? false,
     log_table: "files",
     log_sources: (c.log_sources ?? []).map((s) => ({

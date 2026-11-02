@@ -27,13 +27,12 @@ const repo = resolve(import.meta.dirname, "../.."),
 function fixture(
   t: any,
   options: {
-    old?: "node" | "go" | "none";
+    old?: "node" | "none";
     active?: boolean;
     failRestart?: boolean;
     failRestartStatus?: number;
     startupStates?: boolean[];
     failShow?: boolean;
-    legacyPackage?: boolean;
     failPermissionPreparation?: boolean;
     privilegedService?: boolean;
   } = {},
@@ -88,7 +87,6 @@ function fixture(
       control_credential: "test-old-control",
       data_credential: "test-old-data",
       data_dir: data,
-      group_id: "old",
     };
   if (old !== "none") {
     mkdirSync(dirname(uninstaller), { recursive: true });
@@ -100,7 +98,7 @@ function fixture(
       "#!/bin/sh\necho synthetic old " + old + " agent\n",
       { mode: 0o750 },
     );
-    writeFileSync(service, readFileSync(join(repo, options.privilegedService ? "runtime/test/fixtures/legacy-privileged-agent.service" : "deploy/agent/lightmoni-agent.service")), { mode: 0o640 });
+    writeFileSync(service, readFileSync(join(repo, options.privilegedService ? "runtime/test/fixtures/forbidden-privileged-agent.service" : "deploy/agent/lightmoni-agent.service")), { mode: 0o640 });
     if (old === "node") {
       const oldRuntime = join(root, "opt/lightmoni-agent/releases/old");
       mkdirSync(oldRuntime, { recursive: true });
@@ -202,8 +200,8 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
   const packagedRuntime = join(packageDir, "lightmoni-agent-runtime");
   for (const path of ["app/agent", "node_modules/synthetic", "bin"])
     mkdirSync(join(packagedRuntime, path), { recursive: true, mode: 0o755 });
-  if (!options.legacyPackage) writeFileSync(join(packagedRuntime, "uninstall.sh"), rewriteMaintenancePaths(readFileSync(join(repo,"deploy/agent/uninstall.sh"),"utf8"),root), {mode:0o755});
-  if (!options.legacyPackage) js(join(packagedRuntime, "deployment-permissions.mjs"), `import fs from 'node:fs';const file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file));if(process.argv[2]!=='prepare')process.exit(1);s.permissionPreparations=(s.permissionPreparations||0)+1;fs.writeFileSync(file,JSON.stringify(s));if(process.env.TEST_FAIL_PERMISSION_PREPARATION==='yes'){console.error('agent_permission_prepare_failed');process.exit(1);}`);
+  writeFileSync(join(packagedRuntime, "uninstall.sh"), rewriteMaintenancePaths(readFileSync(join(repo,"deploy/agent/uninstall.sh"),"utf8"),root), {mode:0o755});
+  js(join(packagedRuntime, "deployment-permissions.mjs"), `import fs from 'node:fs';const file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file));if(process.argv[2]!=='prepare')process.exit(1);s.permissionPreparations=(s.permissionPreparations||0)+1;fs.writeFileSync(file,JSON.stringify(s));if(process.env.TEST_FAIL_PERMISSION_PREPARATION==='yes'){console.error('agent_permission_prepare_failed');process.exit(1);}`);
   writeFileSync(
     join(packagedRuntime, "node"),
     "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " \"$@\"\n",
@@ -253,8 +251,6 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
         "--release-dir",
         release,
         ...(old === "none" ? ["--endpoint", "http://new.example", "--enrollment-token-stdin"] : []),
-        "--group-id",
-        "new",
       ],
       {
         input: old === "none" ? "test-enrollment\n" : "",
@@ -392,7 +388,7 @@ test("verified release switches atomically, configures and restarts while preser
     "http://old.example",
   );
   const saved = JSON.parse(readFileSync(f.config,"utf8"));
-  assert.equal(saved.control_credential,"test-old-control"); assert.equal(saved.data_credential,"test-old-data"); assert.equal(saved.group_id,"new"); assert.equal(Object.hasOwn(saved,"key"),false);
+  assert.equal(saved.control_credential,"test-old-control"); assert.equal(saved.data_credential,"test-old-data"); assert.equal(Object.hasOwn(saved,"key"),false);
   assert.equal(statSync(f.config).mode & 0o777, 0o600);
   assert.equal(f.state().restarts, 1);
   assert.equal(f.state().permissionPreparations, 1);
@@ -410,10 +406,6 @@ test('ordinary permission validation failure restores the previous installation 
   assert.equal(f.state().permissionPreparations,1);
   assert.equal(f.state().restarts,0);
   f.restored();
-});
-test("older checked packages preserve an existing standalone uninstaller",t=>{
-  const f=fixture(t,{legacyPackage:true}),result=f.run();
-  assert.equal(result.status,0,result.stderr);assert.deepEqual(readFileSync(f.uninstaller),f.before.uninstaller);f.unchangedData();
 });
 test("first installation publishes readable runtime and executable helpers without exposing config or persisted state", (t) => {
   const f = fixture(t, { old: "none", active: false }),
@@ -487,7 +479,7 @@ test("restart exit status survives diagnostic failure and successful restoration
   assert(f.state().active);
   assert(f.state().enabled);
 });
-for (const old of ["node", "go"] as const)
+for (const old of ["node"] as const)
   test(
     "restart failure restores the old " +
       old +
@@ -504,8 +496,7 @@ for (const old of ["node", "go"] as const)
       assert(f.state().active);
       assert(f.state().enabled);
       const releases = join(f.runtimeParent, "releases");
-      if (old === "node") assert.deepEqual(readdirSync(releases), ["old"]);
-      else assert.equal(existsSync(releases), false, "rollback removes only its newly created empty releases directory");
+      assert.deepEqual(readdirSync(releases), ["old"]);
     },
   );
 test("restart rollback keeps a previously inactive service stopped", (t) => {
@@ -558,16 +549,7 @@ test("installer rejects the removed shared-key flag before changing installed st
 });
 
 
-for(const failRestart of [false,true])test(`installer retires exact legacy Docker grant and never restores it after ${failRestart?'program rollback':'successful install'}`,t=>{
-  const f=fixture(t,{failRestart}),directory=join(f.root,'etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,'20-lightmoni-docker.conf');
-  mkdirSync(directory,{mode:0o755});writeFileSync(file,'[Service]\nSupplementaryGroups=docker\n',{mode:0o644});
-  const result=f.run();assert.equal(result.status===0,!failRestart,result.stderr);
-  assert.equal(existsSync(file),false);assert.match(result.stdout,/legacy_docker_access_removed/);
-  const calls=f.state().calls,stop=calls.findIndex((v:string)=>v==='stop lightmoni-agent.service'),reload=calls.findIndex((v:string)=>v==='daemon-reload');assert.ok(stop>=0&&reload>stop);
-  if(failRestart)f.restored();else f.unchangedData();
-});
-
-for(const kind of ['unknown','changed-known','symlink','writable','effective-external'])test(`installer preserves and rejects ${kind} systemd overrides before stopping Agent`,t=>{
+for(const kind of ['exact-docker','unknown','changed-known','symlink','writable','effective-external'])test(`installer preserves and rejects ${kind} systemd overrides before stopping Agent`,t=>{
   const f=fixture(t),directory=join(f.root,'etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,kind==='unknown'?'10-administrator.conf':'20-lightmoni-docker.conf');mkdirSync(directory,{mode:0o755});
   const bytes='[Service]\nSupplementaryGroups=docker\n';
   if(kind==='symlink')symlinkSync(f.config,file);else writeFileSync(file,kind==='changed-known'?bytes+'# administrator change\n':bytes,{mode:0o644});
@@ -577,22 +559,17 @@ for(const kind of ['unknown','changed-known','symlink','writable','effective-ext
 });
 
 
-for(const failBeforePublish of [false,true])test(`installer failure while migrating the shipped privileged unit never re-enables it ${failBeforePublish?'before service publication':'after target restart'}`,t=>{
-  const f=fixture(t,{privilegedService:true,failRestart:!failBeforePublish,failPermissionPreparation:failBeforePublish});
-  const directory=join(f.root,'etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,'20-lightmoni-docker.conf');mkdirSync(directory,{mode:0o755});writeFileSync(file,'[Service]\nSupplementaryGroups=docker\n',{mode:0o644});
-  const result=f.run();assert.notEqual(result.status,0);assert.match(result.stderr,/Automatic restoration needs attention/);
-  assert.equal(f.state().active,false);assert.equal(f.state().enabled,false);assert.equal(f.state().restarts,failBeforePublish?0:1);
-  assert.equal(existsSync(file),false);assert.deepEqual(readFileSync(f.service),readFileSync(join(repo,'deploy/agent/lightmoni-agent.service')));
-  assert.equal(existsSync(join(f.root,'run/lightmoni-agent-lifecycle.lock')),true);
-  const evidence=result.stderr.match(/previous files remain in ([^\n]+)/)?.[1];assert.ok(evidence);t.after(()=>rmSync(evidence,{recursive:true,force:true}));
-  assert.deepEqual(readFileSync(join(evidence,'previous-service')),f.before.service);f.unchangedData();
+test('installer refuses a privileged installed service before stopping or changing it',t=>{
+  const f=fixture(t,{privilegedService:true}),result=f.run();
+  assert.notEqual(result.status,0);assert.match(result.stderr,/ordinary_agent_privilege_violation/);
+  assert.deepEqual(f.state().calls,[]);f.restored();
 });
 
 test('installer rejects a shipped privileged candidate before old permission preparation or service mutation',t=>{
   const f=fixture(t),packageDir=join(f.root,'package');
-  writeFileSync(join(packageDir,'lightmoni-agent.service'),readFileSync(join(repo,'runtime/test/fixtures/legacy-privileged-agent.service')));
+  writeFileSync(join(packageDir,'lightmoni-agent.service'),readFileSync(join(repo,'runtime/test/fixtures/forbidden-privileged-agent.service')));
   execFileSync('tar',['-czf',join(f.release,artifact),'-C',packageDir,'lightmoni-agent','lightmoni-agent.service','lightmoni-agent-runtime']);
   writeFileSync(join(f.release,'SHA256SUMS'),createHash('sha256').update(readFileSync(join(f.release,artifact))).digest('hex')+'  '+artifact+'\n');
-  const result=f.run();assert.notEqual(result.status,0);assert.match(result.stderr,/agent_privilege_migration_required/);
+  const result=f.run();assert.notEqual(result.status,0);assert.match(result.stderr,/ordinary_agent_privilege_violation/);
   assert.equal(f.state().permissionPreparations,undefined);assert.equal(f.state().restarts,0);assert.deepEqual(f.state().calls,[]);f.restored();
 });

@@ -1,3 +1,4 @@
+import {inlineFixtureCommands} from './helpers/maintenance-shell.js';
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -42,7 +43,7 @@ process.exit(92);
     .replaceAll("/proc/self/fd/", "/dev/fd/");
   assert.ok(shell.includes(`PATH=${bin}`));
   assert.ok(!/(?:^|[\s="'])\/(?:run|opt|etc|var|usr)(?:\/|\b)/.test(shell.replaceAll(root, "FIXTURE")), "all fixed Linux roots must be isolated");
-  const run = (env: Record<string, string> = {}) => spawnSync("/bin/sh", ["-c", shell], {
+  const run = (env: Record<string, string> = {}) => spawnSync("/bin/sh", ["-c", inlineFixtureCommands(bin)+shell], {
     encoding: "utf8", timeout: 15_000, env: { PATH: bin, PROBE_HISTORY: history, PROBE_LOCK_PATH: p(lockPath), ...env },
   });
   const calls = () => JSON.parse(readFileSync(history, "utf8")) as Call[];

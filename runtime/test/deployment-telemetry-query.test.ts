@@ -78,7 +78,7 @@ test("catalog validation rejects missing, system, aliases, internal and malforme
   const unsafeTables = [[], [{ ...table, system: true }], [{ ...table, logical_name: "lightmoni" }],
     [{ ...table, logical_name: "unknown" }], [{ ...table, name: "_lm_log_orders" }],
     [{ ...table, kind: "invalid" }], [{ ...table, kind: "metric", metric_type: "weird" }],
-    [{ ...table, is_compat_alias: 1 } as Table], [table, table],
+    [table, table],
     [{ ...table, columns: table.columns.filter(c => c.name !== "service_version") }],
     [{ ...table, columns: table.columns.map(c => c.name === "service" ? { ...c, type: "UInt64" } : c) }],
     [{ ...table, columns: table.columns.map(c => c.name === "event_time" ? { ...c, type: "DateTime64(9,'Asia/Shanghai')" } : c) }],

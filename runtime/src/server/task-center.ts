@@ -47,19 +47,13 @@ export class TaskRunStore {
       cancel_requested INTEGER NOT NULL DEFAULT 0,code TEXT NOT NULL DEFAULT '',summary TEXT NOT NULL DEFAULT '',
       stdout TEXT NOT NULL DEFAULT '',stderr TEXT NOT NULL DEFAULT '',exit_code INTEGER,
       resolved_at TEXT NOT NULL DEFAULT '',resolved_by TEXT NOT NULL DEFAULT '',resolution_reason TEXT NOT NULL DEFAULT '',
+      automatic_attempt INTEGER NOT NULL DEFAULT 0,auto_retry_closed INTEGER NOT NULL DEFAULT 1,
+      execution_principal TEXT NOT NULL DEFAULT 'agent',executor_id TEXT NOT NULL DEFAULT '',
       UNIQUE(task_id,host_id,request_id));
       CREATE INDEX IF NOT EXISTS task_runs_agent_state ON task_runs(agent_id,state,created_at);
       CREATE INDEX IF NOT EXISTS task_runs_host_state ON task_runs(host_id,state);
       CREATE TABLE IF NOT EXISTS task_schedules(task_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,next_due TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS task_schedule_consumptions(task_id TEXT NOT NULL,run_at TEXT NOT NULL,consumed_at TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(task_id,run_at));`);
-    const columns = new Set(deps.db.all<{name:string}>("PRAGMA table_info(task_runs)").map(row => row.name));
-    for (const name of ["resolved_at", "resolved_by", "resolution_reason"])
-      if (!columns.has(name)) deps.db.exec(`ALTER TABLE task_runs ADD COLUMN ${name} TEXT NOT NULL DEFAULT ''`);
-    if (!columns.has("automatic_attempt")) deps.db.exec("ALTER TABLE task_runs ADD COLUMN automatic_attempt INTEGER NOT NULL DEFAULT 0");
-    // Historical failed runs predate retry consent and must never start retrying after upgrade.
-    if (!columns.has("auto_retry_closed")) deps.db.exec("ALTER TABLE task_runs ADD COLUMN auto_retry_closed INTEGER NOT NULL DEFAULT 1");
-    if (!columns.has("execution_principal")) deps.db.exec("ALTER TABLE task_runs ADD COLUMN execution_principal TEXT NOT NULL DEFAULT 'agent'");
-    if (!columns.has("executor_id")) deps.db.exec("ALTER TABLE task_runs ADD COLUMN executor_id TEXT NOT NULL DEFAULT ''");
     deps.db.exec("CREATE INDEX IF NOT EXISTS task_runs_retry_scan ON task_runs(state,auto_retry_closed,finished_at)");
   }
   private now() { return this.deps.now().toISOString(); }

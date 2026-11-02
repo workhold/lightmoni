@@ -816,7 +816,7 @@ test("response group paging, acknowledgement, assignment statistics and recovery
     await f.close();
   }
 });
-test("notification window accounting, DST rotations, silences and defaults preserve legacy policies", () => {
+test("notification window accounting, DST rotations, silences and current default policies", () => {
   assert.equal(
     windowAllowed(new Date("2026-10-16T23:30:00Z"), "UTC", "22:00", "02:00", [
       5,
@@ -881,7 +881,6 @@ test("notification window accounting, DST rotations, silences and defaults prese
   assert.deepEqual(policy({ members: ["u"] }, "P0").methods, [
     "voice",
     "sms",
-    "chat",
   ]);
 });
 test("evidence binds explicit services, redacts secrets and preserves trace identifiers", async () => {
@@ -1782,58 +1781,6 @@ test("slow evaluation does not block response and delivery worker", async (t) =>
   } finally {
     release?.();
     t.mock.timers.reset();
-    await f.close();
-  }
-});
-test("existing built-in Go runtime panel migrates once without replacing dashboard edits", async () => {
-  const f = await fixture();
-  try {
-    const row = f.db.get<any>(
-        "SELECT body FROM dashboards WHERE id='system-center'",
-      )!,
-      d = parseJSON<any>(row.body);
-    d.title = "My center";
-    d.panels[0].title = "Custom QPS";
-    d.panels = d.panels.filter((p: any) => p.id !== "system-center-event-loop");
-    const panel = d.panels.find((p: any) => p.id === "system-center-k");
-    panel.title = "运行协程数";
-    panel.queries[0].sql = panel.queries[0].sql.replace(
-      "lightmoni.center.active_resources",
-      "lightmoni.center.goroutines",
-    );
-    f.db.run(
-      "UPDATE dashboards SET title=?,body=? WHERE id=?",
-      d.title,
-      encode(d),
-      d.id,
-    );
-    f.db.run(
-      "DELETE FROM system_dashboard_seeds WHERE id='node-runtime-center-v1'",
-    );
-    f.dashboards.seed();
-    const migrated = parseJSON<any>(
-      f.db.get<any>("SELECT body FROM dashboards WHERE id='system-center'")!
-        .body,
-    );
-    assert.equal(migrated.title, "My center");
-    assert.equal(migrated.panels[0].title, "Custom QPS");
-    assert.equal(migrated.revision, 2);
-    assert.equal(
-      migrated.panels.find((p: any) => p.id === "system-center-k").title,
-      "Node 活跃资源数",
-    );
-    assert.ok(
-      migrated.panels.some((p: any) => p.id === "system-center-event-loop"),
-    );
-    f.dashboards.seed();
-    assert.equal(
-      parseJSON<any>(
-        f.db.get<any>("SELECT body FROM dashboards WHERE id='system-center'")!
-          .body,
-      ).revision,
-      2,
-    );
-  } finally {
     await f.close();
   }
 });

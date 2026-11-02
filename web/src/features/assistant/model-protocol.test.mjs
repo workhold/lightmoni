@@ -5,11 +5,11 @@ import { initialProtocol, protocolChoices, protocolLabel, protocolSourceLabel, r
 const catalog = { base_url: 'https://gateway.example/v1', protocol: 'openai-chat-completions', protocol_options: ['openai-chat-completions', 'openai-responses'], protocol_source: 'catalog', requires_confirmation: true, capabilities_verified: false, models: [{ id: 'manual-name-remains-independent' }], truncated: false };
 const concrete = ['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai'];
 
-test('selector covers automatic and four concrete protocols; legacy and fresh settings differ', () => {
+test('selector covers automatic and four concrete protocols; saved and fresh settings are explicit', () => {
   assert.deepEqual(protocolChoices.map(option => option.value), ['auto', ...concrete]);
   assert.equal(initialProtocol(), 'auto');
   assert.equal(initialProtocol({ base_url: '', protocol: 'openai-chat-completions' }), 'auto');
-  assert.equal(initialProtocol({ base_url: 'https://legacy.example/v1' }), 'openai-chat-completions');
+  assert.equal(initialProtocol({ base_url: 'https://models.example/v1' }), 'auto');
   for (const protocol of concrete) {
     assert.equal(initialProtocol({ base_url: 'https://configured.example/v1', protocol }), protocol);
     assert.equal(typeof protocolLabel(protocol), 'string');

@@ -12,7 +12,6 @@ export const publicTableName = (name: string, kind: string, type = "") =>
   name === "lightmoni"
     ? "lightmoni_" + kind + (type ? "_" + type : "")
     : kind + "_" + name + (type ? "_" + type : "");
-const oldSystem = ["lightmoni_center", "lightmoni_agent", "lightmoni_sdk"];
 const alignedColumns = "window_start DateTime64(9,'UTC') DEFAULT start_time,window_seconds UInt32 DEFAULT 0,received_at DateTime64(9,'UTC') DEFAULT ingested_at,positive_offset Int32 DEFAULT 0,positive_counts Array(UInt64) DEFAULT [],negative_offset Int32 DEFAULT 0,negative_counts Array(UInt64) DEFAULT [],zero_count UInt64 DEFAULT 0";
 const histogramColumns =
   alignedColumns+",bucket_values Array(Float64) DEFAULT [],distribution_count UInt64 DEFAULT count,distribution_kind LowCardinality(String) DEFAULT 'explicit',sketch_scale Nullable(Int32),quantile_error Nullable(Float64)";
@@ -33,26 +32,8 @@ export class Catalog {
     readonly reader: CH & { user?: string },
   ) {
     db.exec(
-      "CREATE TABLE IF NOT EXISTS catalog(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,logical_name TEXT NOT NULL,kind TEXT NOT NULL,metric_type TEXT NOT NULL,columns_json TEXT NOT NULL,services_json TEXT NOT NULL DEFAULT '[]',alert_group_id TEXT NOT NULL DEFAULT ''); CREATE TABLE IF NOT EXISTS ingest_batches(id TEXT PRIMARY KEY,digest TEXT NOT NULL,first_received_at TEXT NOT NULL,key_id TEXT NOT NULL,completed INTEGER NOT NULL DEFAULT 0);CREATE TABLE IF NOT EXISTS retention_config(id INTEGER PRIMARY KEY CHECK(id=1),default_days INTEGER NOT NULL); INSERT OR IGNORE INTO retention_config(id,default_days) VALUES(1,7);CREATE TABLE IF NOT EXISTS log_sampling(logical_name TEXT PRIMARY KEY,policy_json TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1); CREATE TABLE IF NOT EXISTS sdk_reporting(id INTEGER PRIMARY KEY CHECK(id=1),disable_rules TEXT NOT NULL); INSERT OR IGNORE INTO sdk_reporting VALUES(1,'[]');",
+      "CREATE TABLE IF NOT EXISTS catalog(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,logical_name TEXT NOT NULL,kind TEXT NOT NULL,metric_type TEXT NOT NULL,columns_json TEXT NOT NULL,services_json TEXT NOT NULL DEFAULT '[]',alert_group_id TEXT NOT NULL DEFAULT '',retention_days INTEGER); CREATE TABLE IF NOT EXISTS ingest_batches(id TEXT PRIMARY KEY,digest TEXT NOT NULL,first_received_at TEXT NOT NULL,key_id TEXT NOT NULL,completed INTEGER NOT NULL DEFAULT 0);CREATE TABLE IF NOT EXISTS retention_config(id INTEGER PRIMARY KEY CHECK(id=1),default_days INTEGER NOT NULL); INSERT OR IGNORE INTO retention_config(id,default_days) VALUES(1,7);CREATE TABLE IF NOT EXISTS log_sampling(logical_name TEXT PRIMARY KEY,policy_json TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1); CREATE TABLE IF NOT EXISTS sdk_reporting(id INTEGER PRIMARY KEY CHECK(id=1),disable_rules TEXT NOT NULL); INSERT OR IGNORE INTO sdk_reporting VALUES(1,'[]');",
     );
-    if (
-      !db
-        .all<any>("PRAGMA table_info(catalog)")
-        .some((c) => c.name === "is_compat_alias")
-    )
-      db.exec(
-        "ALTER TABLE catalog ADD COLUMN is_compat_alias INTEGER NOT NULL DEFAULT 0",
-      );
-    db.transaction(() => {
-      if (
-        !db
-          .all<any>("PRAGMA table_info(catalog)")
-          .some((c) => c.name === "retention_days")
-      )
-        db.exec(
-          "ALTER TABLE catalog ADD COLUMN retention_days INTEGER; UPDATE catalog SET retention_days=30 WHERE kind='metric'",
-        );
-    });
   }
   defaultRetention() {
     return this.db.get<any>(
@@ -75,8 +56,6 @@ export class Catalog {
     kind: string,
     type: string,
     internal: string,
-    component = "",
-    filter = "",
   ) {
     const compact=compactBuckets(internal);
     const fields = [
@@ -159,55 +138,15 @@ export class Catalog {
     fields.push(
       "env",
       "service_version",
-      component ? `'${component}' AS component` : "component",
+      "component",
     );
     return (
       "SELECT " +
       fields.join(",") +
       " FROM " +
       internal +
-      " FINAL" +
-      (filter ? " WHERE " + filter : "")
+      " FINAL"
     );
-  }
-  private view(kind: string, type: string, internal: string, logical = "") {
-    const canonical = publicTableName("lightmoni", kind, type),
-      sources: string[] = [];
-    if (logical === "lightmoni") {
-      sources.push(this.projection(kind, type, internal));
-      for (const row of this.db.all<any>(
-        "SELECT * FROM catalog WHERE kind=? AND metric_type=? AND is_compat_alias=0",
-        kind,
-        type,
-      ))
-        if (oldSystem.includes(row.logical_name))
-          sources.push(
-            this.projection(
-              kind,
-              type,
-              "_lm_" + row.name,
-              row.logical_name.slice(10),
-            ),
-          );
-    } else if (oldSystem.includes(logical)) {
-      const old = this.db.get<any>(
-        "SELECT is_compat_alias FROM catalog WHERE name=?",
-        internal.slice(4),
-      );
-      if (old && !old.is_compat_alias)
-        sources.push(this.projection(kind, type, internal, logical.slice(10)));
-      if (this.db.get("SELECT 1 FROM catalog WHERE name=?", canonical))
-        sources.push(
-          this.projection(
-            kind,
-            type,
-            "_lm_" + canonical,
-            "",
-            `attributes['lightmoni.component']='${logical.slice(10)}'`,
-          ),
-        );
-    } else sources.push(this.projection(kind, type, internal));
-    return sources.join(" UNION ALL ");
   }
   private async replaceView(
     name: string,
@@ -222,7 +161,7 @@ export class Catalog {
         " DEFINER=" +
         quote(this.ch.user ?? "lightmoni") +
         " SQL SECURITY DEFINER AS " +
-        this.view(kind, type, "_lm_" + name, logical),
+        this.projection(kind, type, "_lm_" + name),
       signal,
     );
     await this.ch.exec(
@@ -236,26 +175,6 @@ export class Catalog {
     if(kind==='metric'&&type==='histogram'&&!systemTable(logical)){
       await this.ch.exec('CREATE OR REPLACE VIEW '+logical+' DEFINER='+quote(this.ch.user??'lightmoni')+' SQL SECURITY DEFINER AS SELECT * FROM '+name,signal);
       await this.ch.exec('GRANT SELECT ON lightmoni.'+logical+' TO '+quote(this.reader.user??'lightmoni_reader'),signal);
-    }
-  }
-  private async compatibility(
-    kind: string,
-    type: string,
-    signal?: AbortSignal,
-  ) {
-    for (const logical of kind === "log" || type === "gauge"
-      ? oldSystem
-      : [oldSystem[0]]) {
-      const name = publicTableName(logical, kind, type);
-      this.db.run(
-        "INSERT OR IGNORE INTO catalog(id,name,logical_name,kind,metric_type,columns_json,services_json,is_compat_alias) VALUES(?,?,?,?,?,'[]','[]',1)",
-        name,
-        name,
-        logical,
-        kind,
-        type,
-      );
-      await this.replaceView(name, kind, type, logical, signal);
     }
   }
   private async refresh(publicName: string, signal?: AbortSignal) {
@@ -275,70 +194,6 @@ export class Catalog {
     );
     return cols;
   }
-  async migrate(signal?: AbortSignal) {
-    const tables = await this.list();
-    for (const t of tables) {
-      if (
-        !validTable(t.logical_name) ||
-        t.name !== publicTableName(t.logical_name, t.kind, t.metric_type ?? "")
-      )
-        throw Error("invalid catalog table during migration");
-      if ((t as any).is_compat_alias) continue;
-      await this.ch.exec(
-        "ALTER TABLE _lm_" +
-          t.name +
-          " ADD COLUMN IF NOT EXISTS env LowCardinality(String) DEFAULT JSONExtractString(resource_json,'deployment.environment.name'), ADD COLUMN IF NOT EXISTS service_version LowCardinality(String) DEFAULT JSONExtractString(resource_json,'service.version'), ADD COLUMN IF NOT EXISTS component LowCardinality(String) DEFAULT attributes['lightmoni.component']",
-        signal,
-      );
-      if (t.kind === "metric")
-        await this.ch.exec(
-          "ALTER TABLE _lm_" +
-            t.name +
-            " " +
-            Array.from(
-              { length: 16 },
-              (_, i) =>
-                `ADD COLUMN IF NOT EXISTS key${i + 1} String DEFAULT attributes['key${i + 1}']`,
-            ).join(","),
-          signal,
-        );
-      if (t.kind === "metric" && ["sum", "gauge"].includes(t.metric_type ?? ""))
-        await this.ch.exec(
-          "ALTER TABLE _lm_" +
-            t.name +
-            " ADD COLUMN IF NOT EXISTS value_int Nullable(Int64) DEFAULT if(value_type='int',toInt64(value),NULL), ADD COLUMN IF NOT EXISTS value_float Float64 DEFAULT toFloat64(value)",
-          signal,
-        );
-      if (t.kind === "metric" && t.metric_type === "histogram")
-        await this.ch.exec('ALTER TABLE _lm_'+t.name+' '+alignedColumns.split(/,(?=[a-z_]+ (?:DateTime|UInt|Int|Array))/).map(c=>'ADD COLUMN IF NOT EXISTS '+c).join(','),signal);
-      if (t.kind === "metric" && t.metric_type === "histogram")
-        await this.ch.exec(
-          "ALTER TABLE _lm_" +
-            t.name +
-            " ADD COLUMN IF NOT EXISTS bucket_values Array(Float64) DEFAULT [], ADD COLUMN IF NOT EXISTS distribution_count UInt64 DEFAULT if(empty(bucket_values),0,count), ADD COLUMN IF NOT EXISTS distribution_kind LowCardinality(String) DEFAULT 'explicit', ADD COLUMN IF NOT EXISTS sketch_scale Nullable(Int32), ADD COLUMN IF NOT EXISTS quantile_error Nullable(Float64)",
-          signal,
-        );
-    }
-    for (const t of tables)
-      await this.replaceView(
-        t.name,
-        t.kind,
-        t.metric_type ?? "",
-        t.logical_name,
-        signal,
-      );
-    for (const t of tables)
-      if (t.logical_name === "lightmoni") {
-        await this.compatibility(t.kind, t.metric_type ?? "", signal);
-        await this.replaceView(
-          t.name,
-          t.kind,
-          t.metric_type ?? "",
-          t.logical_name,
-          signal,
-        );
-      }
-  }
   // One serial queue protects catalog creation, retention DDL and compensation.
   async ensure(
     name: string,
@@ -349,7 +204,7 @@ export class Catalog {
   ) {
     return this.serial.run(async () => {
       if (!validTable(name)) throw Error("invalid logical table name");
-      if (systemTable(name) && name !== "lightmoni_application") name = "lightmoni";
+      if (systemTable(name) && !["lightmoni", "lightmoni_application"].includes(name)) throw Error("unsupported system table name");
       const publicName = publicTableName(name, kind, type);
       const old = this.db.get<any>(
         "SELECT services_json FROM catalog WHERE name=?",
@@ -369,7 +224,7 @@ export class Catalog {
       }
       if (
         this.db.get<any>(
-          "SELECT count(*) n FROM catalog WHERE is_compat_alias=0",
+          "SELECT count(*) n FROM catalog",
         )!.n >= 200
       )
         throw Error("maximum table count reached");
@@ -386,7 +241,7 @@ export class Catalog {
           dimensionColumns;
         if (["sum", "gauge"].includes(type))
           extra +=
-            ",value Decimal(38,9),value_type String,value_int Nullable(Int64) DEFAULT if(value_type='int',toInt64(value),NULL),value_float Float64 DEFAULT toFloat64(value)" +
+            ",value_type String,value_int Nullable(Int64),value_float Float64" +
             (type === "sum" ? ",temporality String,monotonic Bool" : "");
         else if (type === "histogram")
           extra +=
@@ -414,7 +269,7 @@ export class Catalog {
           " DEFINER=" +
           quote(this.ch.user ?? "lightmoni") +
           " SQL SECURITY DEFINER AS " +
-          this.view(kind, type, internal, name),
+          this.projection(kind, type, internal),
         signal,
       );
       await this.ch.exec(
@@ -445,15 +300,10 @@ export class Catalog {
         JSON.stringify(service ? [service] : []),
       );
       if(kind==='metric'&&type==='histogram'&&!systemTable(name))await this.replaceView(publicName,kind,type,name,signal);
-      if (name === "lightmoni") {
-        await this.compatibility(kind, type, signal);
-        await this.replaceView(publicName, kind, type, name, signal);
-      }
       return publicName;
     });
   }
   private async apply(t: Table, days: number, signal?: AbortSignal) {
-    if ((t as any).is_compat_alias) return;
     if (
       !validTable(t.logical_name) ||
       t.name !== publicTableName(t.logical_name, t.kind, t.metric_type ?? "") ||

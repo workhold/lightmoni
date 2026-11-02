@@ -335,7 +335,7 @@ sequenceDiagram
 
 ### 8.1 启动和模块装配
 
-中心入口是 `runtime/src/server/main.ts`，创建配置、SQLite、ClickHouse、认证、路由和模块。模块在构造时执行自身迁移，`start()` 启动后台任务，`close()` 取消定时器、等待任务并关闭连接。健康检查 `/healthz` 不需要登录；其他 API 由统一 Router 注入 `Context.user`。
+中心入口是 `runtime/src/server/main.ts`，创建配置、SQLite、ClickHouse、认证、路由和模块。模块在构造时直接创建最终结构，`start()` 启动后台任务，`close()` 取消定时器、等待任务并关闭连接。健康检查 `/healthz` 不需要登录；其他 API 由统一 Router 注入 `Context.user`。
 
 模块分层：
 
@@ -431,7 +431,7 @@ await moni.shutdown({ timeoutMs: 5000 });
 
 ### 10.2 聚合和远程规则
 
-SDK 默认使用 30 秒 UTC 固定窗口；每张业务指标表可选 10、30、60、300、600、1800、3600 秒之一。SDK 通过 `GET /v1/sdk-config?metric_windows=1`、停报和日志采样规则轮询；配置先验证后原子替换，失败保留上一份有效配置。查询步长须为实际窗口的整数倍，切换历史取公倍数对齐。
+SDK 默认使用 30 秒 UTC 固定窗口；每张业务指标表可选 10、30、60、300、600、1800、3600 秒之一。SDK 通过 `GET /v1/sdk-config`、停报和日志采样规则轮询；配置先验证后原子替换，失败保留上一份有效配置。查询步长须为实际窗口的整数倍，切换历史取公倍数对齐。
 
 Go、Node/TypeScript、Python 等已接入的语言可按各自 SDD 使用动态停报、UID 排除、QA/VIP 保留比例；未接入某规则的语言必须在发布矩阵中明确标注，不能通过中心入库后补过滤来假装支持。
 
@@ -924,7 +924,7 @@ docker compose pull
 docker compose up -d --no-build --wait
 ```
 
-根 Compose 默认同时运行中心与 ClickHouse；`deploy/with-clickhouse` 作为兼容目录继承两个服务。中心使用发布镜像 `docker.heyphp.com/lightmoni/lightmoni:20261026-admin`（Linux amd64/arm64），通过 `LIGHTMONI_CH_URL`（默认 `http://clickhouse:8123`）、`LIGHTMONI_CH_USER/PASSWORD` 接入数据库；ClickHouse 使用同一账号密码环境变量，不向宿主机映射端口，中心等待其健康后启动。启动时初始化 `lightmoni` 数据库和读账号。升级保留 SQLite、加密主密钥、队列和 ClickHouse 数据卷；备份必须同时保存状态卷、遥测卷和 `.env`。源码构建仍可显式 `build lightmoni` 后 `up --no-build --pull never --wait`。
+部署唯一入口为根 compose.yaml，同时运行中心与 ClickHouse；删除 deploy/with-clickhouse 重复入口。中心使用 docker.heyphp.com/lightmoni/lightmoni 的固定发布标签（Linux amd64/arm64），通过 LIGHTMONI_CH_URL（默认 http://clickhouse:8123）、LIGHTMONI_CH_USER/PASSWORD 接入数据库；ClickHouse 共用账号密码、不映射宿主端口，中心等待健康后启动。初始化直接创建首次发布最终结构和读账号；SQLite、主密钥、队列与 ClickHouse 数据分别持久化，备份配套保存两卷和 .env。源码构建显式 build lightmoni 后 up --no-build --pull never --wait。
 
 ### 20.2 Agent
 
@@ -1582,7 +1582,7 @@ flowchart TB
 
 ### 59.7 系统仓库登记、唯一写入源与集群缓存（首版）
 
-独立“私有镜像管理”模块为空时引导安装Docker Registry 3.0.0，明确选择集群、单台机器、与集群节点一致的私有监听IP及资源。宿主createSystemApplication和SQLite ops_system_applications登记系统身份，全局application固定sys-docker-registry，每个集群可配置一个固定部署；普通业务可部署多套Registry，但系统不会按镜像名或用户标记接管。网站网关固定sys-openresty；后端保留sys-前缀。旧OpenResty仅迁移当前名称并记录旧别名，既有引用依赖稳定应用ID，实例、卷和历史revision保持不变。
+独立“私有镜像管理”模块为空时引导安装Docker Registry 3.0.0，明确选择集群、单台机器、与集群节点一致的私有监听IP及资源。宿主createSystemApplication和SQLite ops_system_applications登记系统身份，全局application固定sys-docker-registry，每个集群可配置一个固定部署；普通业务可部署多套Registry，但系统不会按镜像名或用户标记接管。网站网关固定sys-openresty；后端保留sys-前缀。系统身份从创建时确定，不保留旧名称迁移或别名表。
 
 cluster.spec.image_cache.enabled是唯一开关，集群编辑和镜像部署页共用同步逻辑；未登记系统部署不能开启。开关更新对应仓库冻结配置并提交部署，忙碌时保存pending并由调度重试，不重启已有业务容器。每集群私库可push；缓存开启时增加Docker Hub缓存和必要的选定源缓存，独立进程/端口/持久目录，缓存TTL 168h，不预取全量镜像。Registry v3调试监听绑定容器loopback的临时端口，避免和缓存端口冲突。缓存进程初始化仍依赖其上游可访问，仓库不提供高可用或自动迁移。
 
@@ -1891,7 +1891,7 @@ flowchart TB
 
 中心 SQLite 新增 machine_service_address_settings，按稳定 machine_id 保存 revision、内网/公网 mode 与 address、target_generation、updated_by/updated_at；GET/PUT /api/v1/machines/:id/service-addresses 仅管理员可用。PUT 原子核对设置版本与 SSH 目标代次；范围错误定位内网/公网字段，冲突保留输入。人工设置不覆盖网络观测，不受心跳和 Agent 重装影响；SSH 目标变化后原人工设置失效，需重新确认；删除主机级联清理设置。
 
-machineServiceAddresses 优先采用有效人工地址，否则自动使用当前普通网卡地址，并保留无网卡历史数字地址兼容。集群容量、服务发现和网站网关共用该来源；内部端点保留私网语义，入口托管 A/AAAA 只用公网服务地址。健康入口缺少公网地址时，gateway_dns 标明受影响机器，托管入口的网站 CNAME 暂不获得该入口流量资格；其他健康入口继续维护。自行维护入口域名仍由用户管理 DNS。已部署的指定 IP 监听不被提前改写，需重新部署生效。
+machineServiceAddresses 优先采用有效人工地址，否则自动使用当前普通网卡地址；无网卡快照时没有历史数字地址回退。集群容量、服务发现和网站网关共用该来源；内部端点保留私网语义，入口托管 A/AAAA 只用公网服务地址。健康入口缺少公网地址时，gateway_dns 标明受影响机器，托管入口的网站 CNAME 暂不获得该入口流量资格；其他健康入口继续维护。已部署的指定IP监听需重新部署生效。
 
 网站管理分别呈现保存、按集群发布和 DNS 厂商回读；保存不触发发布。入口域名/托管域名短表单只修改对应集群的入口解析配置，保留高级部署设置和既有乐观锁。最近回读成功不代表公网缓存传播或端口连通已经验证。SDD076 记录字段级上游 URL 反馈，SDD077 为交互整理且无独立架构变化，SDD078 记录本节存储与取址控制路径变更。
 
@@ -1911,13 +1911,13 @@ flowchart LR
 
 ## 80. 独立执行器承接受管主机运维（SDD 080）
 
-本节取代第57、60.10、69、71及75节中普通 Agent 领取 Docker/operations 写任务的历史路径。普通 Agent 保持非 root、无 Docker 组/socket/capabilities；生产中心以 execution_principal 分流，旧未领取写任务取消，已领取或 unknown 保留审计与互斥。受管作业的领取、私有载荷、制品、事件与结果都只能走独立签名主体，不能凭 ordinary control 或获知 lease 访问。任务、AgentJob、运维 run 与原领域验证沿用同一 ID，结构化 root 回执在同一 SQLite 事务更新原领域状态。
+本节取代第57、60.10、69、71及75节中普通 Agent 领取 Docker/operations 写任务的历史路径。普通 Agent 保持非 root、无 Docker 组/socket/capabilities；生产中心以 execution_principal 分流，写任务固定进入独立执行器，不执行历史任务搬运；unknown 保留审计与互斥。受管作业的领取、私有载荷、制品、事件与结果都只能走独立签名主体，不能凭 ordinary control 或获知 lease 访问。任务、AgentJob、运维 run 与原领域验证沿用同一 ID，结构化 root 回执在同一 SQLite 事务更新原领域状态。
 
 operations.managed.v1 为第三个独立默认关闭的高信任能力，涵盖管理员批准的容器/Compose/Registry/OpenResty、网站、证书、备份、systemd 与制品发布。它不扩展无网络/端口/挂载的 container.managed.v1，也不允许任意 shell 转发。批准的程序和挂载可能控制整台主机，界面须明确该信任边界。中心冻结既有已批准资源、当前版本、actor、机器/执行器/策略代次及完整 payload 摘要，在 claim、managed.execute 单次在线许可、续租、制品读取和结果处重新核对；固定 root worker 只加载 root 自有发行代码，命令前核对权威和固定 daemon，复用已审计适配器的输入、归属、健康和失败恢复校验。
 
-执行器身份、密钥、journal、观测队列与迁移审阅目录保存在 /var/lib/lightmoni-executor；业务状态独立位于 /var/lib/lightmoni-managed，静态公开文件位于独立 /var/lib/lightmoni-web 哈希目录。网站主进程使用固定持久 systemd unit，不随一次性作业退出；worker 使用独立无登录、无 Docker 组的 lightmoni-web，私钥与配置仍为 root 私有，HTTP 临时目录单独授权。卸载/程序回退不删除业务数据、容器或卷，不恢复已撤销策略。
+执行器身份、密钥、journal与观测队列保存在 /var/lib/lightmoni-executor；业务状态独立位于 /var/lib/lightmoni-managed，静态公开文件位于独立 /var/lib/lightmoni-web 哈希目录。网站主进程使用固定持久 systemd unit，不随一次性作业退出；worker 使用独立无登录、无 Docker 组的 lightmoni-web，私钥与配置仍为 root 私有，HTTP 临时目录单独授权。卸载/程序回退不删除业务数据、容器或卷，不恢复已撤销策略。
 
-旧 Agent 可写业务目录默认阻断新写入，避免改为新路径后静默生成空数据。root 离线 migration plan 在旧写入者停止、无未决执行时，通过 nofollow 描述符冻结有界快照；拒绝符号/硬链接、设备和竞争写入。管理员独立审阅 Compose/Nginx/状态正文并用精确计划摘要 apply 后，才将该快照明确授权为 root 意图。数据字节与数字 UID/GID 保留，控制文本内部路径重写，旧目录保留；目标非空不合并覆盖。该命令不是普通 Agent 可调用的在线接口，也不替代大规模数据搬迁或未知业务状态的人工核对。
+首次发布不接管历史普通Agent业务目录；migration与migration-worker离线命令、审阅快照、旧目录阻断和迁移回执均移除。新安装直接使用当前业务目录。历史开发环境须由管理员另行备份和重建，程序不自动删除或信任旧目录。
 
 SSH 更新、回退、repair 与卸载统一使用 executor-maintenance 和 machine_executor_maintenance 账本、主机互斥，不保留第二套更新入口。计划冻结主机/凭据、源和目标不可变发行、策略代次与完整现场，一次性下载票据只经 header/受保护 stdin。固定 root supervisor 停服后持 writer 锁只读复验、切换程序并固定 activation_id，释放 writer 后启动；worker 启动时冻结 activation 并独立签名回报，中心要求持久 started 回执和同次精确启动证明共同成立。失败或失确认保留 unknown，显式只读核对不重派、不自动回切；repair 仅接受完整同一身份、有效 clean journal 与可证明的本平台中断，不能重新 enrollment 或重建状态。程序回退不恢复策略、身份、journal 或业务快照。有期限定时任意 root 脚本与跨主机发行灰度仍为后续范围。
 
@@ -1938,3 +1938,14 @@ flowchart LR
 ```
 
 架构影响为组件职责、控制/观测协议、凭据边界、存储和部署拓扑。在线基线同步及真实验收证据见 specs/080-executor-managed-operations/；发行与目标主机现场升级分开验收。
+
+
+## 81. 首次正式发布前单一基线（SDD081）
+
+SQLite直接创建最终字段与索引，中心在业务初始化前检查center_schema=1；无标记的历史开发数据库明确拒绝，不自动清空或升级。ClickHouse直接创建最终列，系统自监控统一lightmoni_log/lightmoni_metric_*，按component区分；所有SDK和内置仪表盘使用当前名称，不保留旧系统视图与启动补列。管理员CLI与中心共用基线验证，空库先建管理员后可直接启动中心。
+
+任务仅使用主机标签和独立任务，默认标签/平台任务初始化一次；修改、停用或删除后重启不重置。删除旧分组接口、旧单集群字段转换及node_pool/service/gateway_group控制器和旧实例表。应用使用deployments，网站使用cluster_ids/cluster_targets；系统身份从创建时固定。应用端口仅使用host_ports命名映射，拒绝旧parameters.port；部署统一根Compose，移除重复部署入口。
+
+SDK Key仅管理名称与启停，可写所有业务表；删除逐表范围数据库及公开API字段，匿名豁免表仍按当前授权执行。中央凭据库为SSH秘密唯一来源；旧凭据搬运、主机密文回退、无网卡地址回退、告警旧策略填补及模型费用回填均移除。当前权限拒绝、签名、短租约、unknown栅栏和同基线维护/回退继续有效。
+
+本轮用户明确授权完成清理后通过GitHub PR合入main并发布Docker。构建固定已合入源码，发布linux/amd64与linux/arm64镜像，隔离验收空库、重复启动及下载包；发布后读回固定标签/latest和每个平台摘要。验证结果与边界见同一SDD081，不把历史兼容验收当成本次证明。

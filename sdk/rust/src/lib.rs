@@ -184,7 +184,7 @@ impl Client {
         let stats=["pending_batches","pending_bytes","buffer_bytes","delivered_batches","retried_batches","invalid_records","overflow_records","dropped_records","rejected_records"].iter().map(|n|(n.to_string(),0)).collect();
         let resource=json!({"attributes":attrs(&BTreeMap::from([("service.name".into(),service.into()),("service.instance.id".into(),Uuid::new_v4().to_string().into())]))?});
         let endpoint_failures=Arc::new(Mutex::new(BTreeMap::new()));
-        let s=State{metric_windows:BTreeMap::new(),observations:BTreeMap::new(),endpoint:endpoint.trim_end_matches('/').into(),endpoints:Arc::new(Mutex::new(endpoints::CenterEndpoints::new(endpoint,endpoint_failures.clone()))),endpoint_failures,key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:"lightmoni_sdk".into(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
+        let s=State{metric_windows:BTreeMap::new(),observations:BTreeMap::new(),endpoint:endpoint.trim_end_matches('/').into(),endpoints:Arc::new(Mutex::new(endpoints::CenterEndpoints::new(endpoint,endpoint_failures.clone()))),endpoint_failures,key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:"lightmoni".into(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
         let enabled=true;
         let client=Self{state:Arc::new(Mutex::new(s)),delivery:Arc::new(Mutex::new(())),table,context:None};
         if enabled {
@@ -264,7 +264,7 @@ impl Client {
         let mut backoff=0.2;
         loop {
             let (b,http,_bootstrap,key)={let s=self.state.lock().unwrap();match s.queue.front(){Some(b) if b.seq<=target=>(b.clone(),s.http.clone(),s.endpoint.clone(),s.key.clone()),_=>return s.failure.clone().map_or(Ok(()),Err)}};
-            if b.table=="lightmoni_sdk" && key.is_empty(){let mut s=self.state.lock().unwrap();s.queue.pop_front();*s.stats.get_mut("pending_batches").unwrap()-=1;*s.stats.get_mut("pending_bytes").unwrap()-=b.raw.len() as u64;continue;}
+            if b.table=="lightmoni" && key.is_empty(){let mut s=self.state.lock().unwrap();s.queue.pop_front();*s.stats.get_mut("pending_batches").unwrap()-=1;*s.stats.get_mut("pending_bytes").unwrap()-=b.raw.len() as u64;continue;}
             let remaining=deadline.saturating_duration_since(Instant::now());if remaining.is_zero(){return Err("flush deadline exceeded; batches retained".into());}
             let url=self.resolve_endpoint(false,deadline)?;
             let remaining=deadline.saturating_duration_since(Instant::now());if remaining.is_zero(){return Err("flush deadline exceeded; batches retained".into());}

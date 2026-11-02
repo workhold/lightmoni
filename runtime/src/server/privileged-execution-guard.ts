@@ -12,7 +12,6 @@ export function hasPendingExecutorLifecycle(db: DB,machineID="",agentID=""):bool
 export function hasPrivilegedExecution(db: DB, machineID = "", agentID = ""): boolean {
   if(hasPendingExecutorLifecycle(db,machineID,agentID)) return true;
   if (!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_runs'")) return false;
-  if (!db.all<{name:string}>("PRAGMA table_info(task_runs)").some(c => c.name === "execution_principal")) return false;
   return !!db.get(`SELECT id FROM task_runs WHERE execution_principal='privileged_executor'
     AND ((?<>'' AND host_id=?) OR (?<>'' AND agent_id=?))
     AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='')) LIMIT 1`, machineID, machineID, agentID, agentID);

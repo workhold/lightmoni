@@ -18,7 +18,7 @@ import { registerDashboards } from "../src/domains/dashboards.js";
 import { registerLogs } from "../src/domains/logs.js";
 import { registerAlerts } from "../src/domains/alerts.js";
 import type { Dependencies } from "../src/shared/types.js";
-test("every legacy public route has a Node implementation and unchanged authentication boundary", () => {
+test("current public routes retain their authentication boundary", () => {
   const dir = mkdtempSync(join(tmpdir(), "lightmoni-routes-")),
     db = new DB(":memory:");
   try {
@@ -58,25 +58,7 @@ test("every legacy public route has a Node implementation and unchanged authenti
     registerAlerts(deps);
     const canonical = (s: string) =>
       s.replace(/:[^/]+/g, ":param").replace(/\/$/, "");
-    const routes = router.list(),
-      baseline = JSON.parse(
-        readFileSync(
-          new URL(
-            "../../specs/007-node-runtime-migration/contracts/routes-baseline.json",
-            import.meta.url,
-          ),
-          "utf8",
-        ),
-      );
-    const missing = baseline.filter(
-      (old: any) =>
-        !routes.some(
-          (r) =>
-            r.method === old.method &&
-            canonical(r.path) === canonical(old.path),
-        ),
-    );
-    assert.deepEqual(missing, []);
+    const routes = router.list();
     const publicPaths = new Set([
       "/healthz",
       "/api/v1/setup",
@@ -109,13 +91,7 @@ test("every legacy public route has a Node implementation and unchanged authenti
       r.path.startsWith("/api/v1/assistant"),
     ))
       assert.equal(r.public, false);
-    console.info(
-      "Verified " +
-        routes.length +
-        " Node routes against " +
-        baseline.length +
-        " legacy declarations",
-    );
+
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });

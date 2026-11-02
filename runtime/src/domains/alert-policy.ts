@@ -44,37 +44,8 @@ export function defaultPolicies(): any {
     },
   };
 }
-export function legacyPolicies(): any {
-  const p = defaultPolicies();
-  p.P0.methods = ["voice", "sms", "chat"];
-  p.P1 = {
-    methods: ["sms", "chat"],
-    start: "09:00",
-    end: "22:00",
-    repeat_seconds: 300,
-    backup_after_seconds: 600,
-    fallback_after_seconds: 1200,
-    max_rounds: 6,
-    handling_seconds: 3600,
-  };
-  p.P2 = {
-    methods: ["email", "webhook", "chat"],
-    start: "09:00",
-    end: "22:00",
-    repeat_seconds: 1800,
-    escalate_after_rounds: 3,
-    escalate_to: "P1",
-    max_rounds: 6,
-    handling_seconds: 7200,
-  };
-  return p;
-}
-export function fillLegacyPolicies(g: any): any {
-  if (g.members?.length) g.policies = { ...legacyPolicies(), ...g.policies };
-  return g;
-}
 export const policy = (g: any, p: string) =>
-  g.policies?.[p] ?? legacyPolicies()[priority(p)];
+  g.policies?.[p] ?? defaultPolicies()[priority(p)];
 export function validZone(z: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: z }).format();

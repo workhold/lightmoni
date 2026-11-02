@@ -10,8 +10,8 @@ const ordinary = (): OrdinaryAgentPermissionSnapshot => ({ uid: 991, euid: 991, 
 test("ordinary Linux run permits an unprivileged identity and refuses actual root, dangerous groups and every active capability lane", () => {
   assert.doesNotThrow(() => assertOrdinaryAgentPermissions(ordinary()));
   for (const change of [{ uid: 0 }, { euid: 0 }, { gid: 0 }, { groups: [991, 0] }, ...["docker", "lxd", "lxc", "incus-admin", "disk", "kmem", "libvirt", "sudo", "wheel", "root"].map(name => ({ names: ["lightmoni-agent", name] }))])
-    assert.throws(() => assertOrdinaryAgentPermissions({ ...ordinary(), ...change }), /agent_privilege_migration_required/);
-  for (const capability of ["inheritable", "permitted", "effective", "ambient"] as const) { const snapshot = ordinary(); snapshot.capabilities[capability] = "400"; assert.throws(() => assertOrdinaryAgentPermissions(snapshot), /agent_privilege_migration_required/); }
+    assert.throws(() => assertOrdinaryAgentPermissions({ ...ordinary(), ...change }), /ordinary_agent_privilege_violation/);
+  for (const capability of ["inheritable", "permitted", "effective", "ambient"] as const) { const snapshot = ordinary(); snapshot.capabilities[capability] = "400"; assert.throws(() => assertOrdinaryAgentPermissions(snapshot), /ordinary_agent_privilege_violation/); }
 });
 
 test("missing or malformed actual permission evidence fails closed", () => {
@@ -32,9 +32,9 @@ test("raw Docker socket authority and symlink aliases refuse ordinary execution 
   try {
     assert.doesNotThrow(() => assertOrdinaryAgentSocketIsolation(socket));
     await new Promise<void>(resolve => server.listen(socket, resolve));
-    assert.throws(() => assertOrdinaryAgentSocketIsolation(socket), /agent_privilege_migration_required/);
+    assert.throws(() => assertOrdinaryAgentSocketIsolation(socket), /ordinary_agent_privilege_violation/);
     writeFileSync(external, "external-authority"); symlinkSync(external, alias);
-    assert.throws(() => assertOrdinaryAgentSocketIsolation(alias), /agent_privilege_migration_required/);
+    assert.throws(() => assertOrdinaryAgentSocketIsolation(alias), /ordinary_agent_privilege_violation/);
     assert.equal(readFileSync(external, "utf8"), "external-authority");
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); rmSync(root, { recursive: true, force: true }); }
 });

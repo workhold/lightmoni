@@ -43,7 +43,7 @@ def main():
         api("/setup", account)
     else:
         api("/auth/login", account)
-    key = api("/keys", {"name": "sdk-eight-languages-direct", "allowed_tables": ["http", "app", "host", "probe"]})
+    key = api("/keys", {"name": "sdk-eight-languages-direct"})
     try:
         languages = ["go", "node", "python", "java", "dotnet", "php", "ruby", "rust"]
         for language in languages:
@@ -64,8 +64,8 @@ def main():
                 {"refId": "links", "sql": "SELECT l.service,count() AS total FROM log_app l JOIN trace_app t ON l.trace_id=t.trace_id AND l.span_id=t.span_id WHERE l.key_id={key:String} GROUP BY l.service"},
                 {"refId": "histogram", "sql": "SELECT service,sum(count) AS total FROM metric_http_histogram WHERE key_id={key:String} AND name='http.duration' GROUP BY service"},
                 {"refId": "gauge", "sql": "SELECT service,argMax(value,event_time) AS last FROM metric_http_gauge WHERE key_id={key:String} AND name='http.active' GROUP BY service"},
-                {"refId": "self_heartbeat", "sql": "SELECT service,max(value_float) AS total FROM metric_lightmoni_sdk_gauge WHERE key_id={key:String} AND name='lightmoni.sdk.heartbeat' AND attributes['source_table']='http' GROUP BY service"},
-                {"refId": "self_logs", "sql": "SELECT service,count() AS total FROM log_lightmoni_sdk WHERE key_id={key:String} AND attributes['source_table']='http' GROUP BY service"},
+                {"refId": "self_heartbeat", "sql": "SELECT service,max(value_float) AS total FROM lightmoni_metric_gauge WHERE key_id={key:String} AND name='lightmoni.sdk.heartbeat' AND attributes['source_table']='http' GROUP BY service"},
+                {"refId": "self_logs", "sql": "SELECT service,count() AS total FROM lightmoni_log WHERE key_id={key:String} AND attributes['source_table']='http' GROUP BY service"},
             ],
         }
         for q in query["queries"]:
