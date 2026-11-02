@@ -36,3 +36,5 @@ Linux测试使用隔离 Node 24.15.0 容器，所有路径为临时目录，外�
 ## 交付
 
 发布镜像从最终合入源码构建，固定 OCI revision；双架构完成后记录标签、摘要、真实 ClickHouse/下载包验证和远端回读。发布不等于升级任何已有环境。
+
+发布前交叉检查补充：Agent心跳生产者移除已退役的value字段，仅发送当前value_type/value_int/value_float；新增领域回归校验与最终ClickHouse列保持一致。这是对本SDD已同步基线的实现修正，无新增架构变化（Doca同步不适用，沿用seq934模型）。

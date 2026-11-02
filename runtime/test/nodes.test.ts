@@ -370,7 +370,7 @@ test("new label starts with no tasks and cannot be deleted while referenced; rea
     401,
   );
 });
-test("runtime events are bounded/idempotent, persist through export failure and retain Go event IDs", async (t) => {
+test("runtime events are bounded/idempotent, persist through export failure and retain event IDs", async (t) => {
   let fail = true;
   const exports: any[] = [];
   const f = await fixture(t, {
@@ -416,10 +416,11 @@ test("runtime events are bounded/idempotent, persist through export failure and 
   const metrics = exports.find((v) => v.rows[0].kind === "metric").rows;
   assert.equal(
     metrics.find((m: any) => m.row.name === "lightmoni.agent.collector_errors")
-      .row.value,
+      .row.value_float,
     1,
   );
   assert.equal(metrics[0].row.attributes.heartbeat_timeout_seconds, "135");
+  for(const {row} of metrics){assert.equal(Object.hasOwn(row,"value"),false);assert.equal(row.value_type,"double");assert.equal(typeof row.value_float,"number");assert.equal(row.value_int,null);}
   const logs = exports.find((v) => v.rows[0].kind === "log").rows;
   assert.equal(logs[0].row.severity_number, 9);
   assert.equal(
