@@ -359,7 +359,6 @@ export function registerNodes(
           name: "lightmoni.agent." + name,
           unit: "",
           start_time: row.event_time,
-          value,
           value_type: "double",
           value_int: null,
           value_float: value,
