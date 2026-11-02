@@ -29,6 +29,21 @@ root 同版本重装保留模式和内部身份；官方 update-runner 通过真
 
 边界：Linux fixture 未连接真实平台或 SSH 目标；更新为同一 build 重打包产生不同 SHA，未验证功能版本差异；本次未做真实平台首次 root 注册安装、完整 root 脚本或 Docker 业务任务端到端派发。amd64 制品完成构建但未在 amd64 systemd 主机运行。32项跳过不计为通过。
 
+## 普通 SSH 账户与按需高权补验
+
+针对普通 SSH 登录、未登记 root 账户的模式切换，以及 root 凭据与任务执行身份的边界，追加以下核验：
+
+- HTTP/数据库集成测试使用唯一的普通 `deploy` SSH 登录凭据，确认免交互 sudo 能完成 root/user 首装及 user→root 切换，期间没有新增 root 登录、替换 SSH 用户名或修改登录秘密。SSH 返回由 fixture 模拟。
+- sudo 不可用、需要交互密码或权限状态未知时，计划与执行阶段都拒绝账户切换；不派发维护、不签发内部执行身份，也不扩大已批准权限。相关三份服务端测试118项通过；普通任务及高权执行定向回归19项通过，SSH/主机检查62项通过。
+- 在本机隔离 Linux 容器启动真实 sshd，禁用 root SSH，分别以三个全新普通账户公钥登录，实际 UID 为10002/10003/10004。真实 sudoers 的 NOPASSWD 账户可通过 sudo -n 获得 UID0；项目完整 preflight 命令正确返回 sudo_noninteractive/install_privilege=1。禁止 sudo 与需要 sudo 密码的两个账户均返回 unavailable/install_privilege=0，固定维护 wrapper 拒绝执行。
+- 有免交互 sudo 的维护 probe 到达真实 root helper 后，因 fixture 故意未安装配置而返回 runtime_maintenance_failed；没有执行安装或切换。安装目录、生命周期锁与三个 helper 摘要前后一致。临时容器和密钥已删除，专用 Colima VM 已停止。无秘密证据见 validation-evidence/nonroot-ssh-summary.json。
+
+结论边界：不要求 root 直接 SSH 登录，但系统级安装、维护和账户切换要求当前 SSH 登录具有 root 或免交互 sudo 权限；平台审批不能替代操作系统权限。此真实 SSH fixture 没有 systemd、curl 或可达中心，整体安装就绪检查预期不通过，只证明 SSH/sudo 与项目命令的权限边界。完整首装/切换的服务端流转使用模拟 SSH，真实 systemd 生命周期的覆盖范围见上文，不能合并描述为真实平台端到端验收。
+
+登记 root 登录凭据不会自动改变已选 Agent 模式。root 模式的常驻 Agent 主进程为 UID0，普通脚本固定降权到 lightmoni-agent；root 作业经单独批准并记录审计。user 模式不会因保存了 root 凭据而自动为普通作业提权，必须先批准并完成显式运行账户切换。
+
+本轮追加仅涉及测试与验收证据，架构同步不适用：运行账户、SSH 权限和任务审计契约未变，既有仓库第83章与 Doca seq937 保持有效。
+
 ## 设计与 Doca
 
 仓库 docs/system-design.md 更新当前基线及第83章，旧分离进程拓扑明确标注历史。Doca [LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 同步正文和两张原生可编辑图。

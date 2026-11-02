@@ -19,6 +19,7 @@ async function fixture(
   mode: "root" | "user",
   lostResponse = false,
   runtimeOverride?: Record<string, unknown>,
+  loginName = "root",
 ) {
   const db = new DB(":memory:"),
     router = new Router(),
@@ -209,7 +210,17 @@ async function fixture(
           stages: [],
         };
       }
-      return { stdout: check, stderr: "", stages: [] };
+      return {
+        stdout:
+          loginName === "root"
+            ? check
+            : check.replace(
+                "privilege_state=root",
+                "privilege_state=sudo_noninteractive",
+              ),
+        stderr: "",
+        stages: [],
+      };
     },
   });
   const runtime = machines.registerExecutorBootstrap(executors);
@@ -234,7 +245,7 @@ async function fixture(
   const host = await request("/machines", "POST", {
     name: "Reviewed host",
     address: "host.example.test",
-    username: "root",
+    username: loginName,
     connection_method: "direct_ssh",
   });
   assert.equal(host.status, 201, host.raw);
@@ -299,6 +310,37 @@ async function fixture(
     logs,
   };
 }
+test("non-root SSH login with noninteractive sudo completes reviewed installation without registering root credentials", async (t) => {
+  for (const mode of ["root", "user"] as const)
+    await t.test(mode, async (sub) => {
+      const f = await fixture(sub, mode, false, undefined, "deploy");
+      assert.equal(f.applied.data.status, "succeeded");
+      assert.equal(
+        f.db.get<any>(
+          "SELECT count(*) n FROM managed_machines WHERE username='root'",
+        )!.n,
+        0,
+      );
+      assert.equal(
+        f.db.get<any>("SELECT count(*) n FROM machine_credentials")!.n,
+        1,
+      );
+      assert.ok(f.calls.every((c) => c.machine.username === "deploy"));
+      const installation = f.calls.find((c) => c.enrollmentToken);
+      assert.ok(installation);
+      assert.ok(installation.command.includes("sudo -n"));
+      const runtime = f.db.get<any>(
+        "SELECT * FROM machine_agent_runtime WHERE machine_id=?",
+        f.hostID,
+      )!;
+      assert.equal(runtime.runtime_mode, mode);
+      assert.equal(runtime.agent_id, f.agentID);
+      assert.equal(
+        f.executors.getStatus(f.hostID).executor?.state,
+        mode === "root" ? "active" : undefined,
+      );
+    });
+});
 test("authenticated installer activation creates one runtime with its reviewed mode and no public bootstrap token", async (t) => {
   for (const mode of ["root", "user"] as const)
     await t.test(mode, async (sub) => {

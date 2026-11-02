@@ -22,11 +22,12 @@ import { registerAgentJobs } from "../src/server/agent-jobs.js";
 const SECRET = "isolated-runtime-secret",
   BOOT = "11111111-1111-4111-8111-111111111111",
   OLD_BOOT = "00000000-0000-4000-8000-000000000000";
-async function fixture(t: any, mode: "user" | "root" = "user") {
+async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
   const db = new DB(":memory:"),
     router = new Router(),
     calls: any[] = [],
     logs: any[] = [],
+    checks: any[] = [],
     busy = new Set<string>(),
     user = { id: "admin", name: "Admin", role: "admin" };
   let clock = new Date("2026-11-02T00:00:00Z");
@@ -69,7 +70,8 @@ async function fixture(t: any, mode: "user" | "root" = "user") {
     agentCredentials: { has: () => true } as any,
   });
   db.run(
-    "INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('host','Reviewed host','host.example.test',22,'root','direct_ssh','agent-host',?,?)",
+    "INSERT INTO managed_machines(id,name,address,port,username,connection_method,agent_id,created_at,updated_at) VALUES('host','Reviewed host','host.example.test',22,?,'direct_ssh','agent-host',?,?)",
+    login,
     clock.toISOString(),
     clock.toISOString(),
   );
@@ -172,7 +174,8 @@ async function fixture(t: any, mode: "user" | "root" = "user") {
       fail(409, "credential_unavailable");
     return { machine: get(id), credential: { ...c } };
   };
-  let applyMode = "success",
+  let privilege = { state: "root", reason_code: "" },
+    applyMode = "success",
     receipt: any = {},
     probeHook: undefined | (() => void);
   const access = {
@@ -192,11 +195,14 @@ async function fixture(t: any, mode: "user" | "root" = "user") {
     },
     markCredentialUsed() {},
     busy,
-    check: async () => ({
-      ready: true,
-      credential_id: "credential",
-      privilege: { state: "root" },
-    }),
+    check: async (machineID: string, input: any) => {
+      checks.push({ machineID, ...input });
+      return {
+        ready: ["root", "sudo_noninteractive"].includes(privilege.state),
+        credential_id: "credential",
+        privilege: { ...privilege },
+      };
+    },
     runner: async (input: any) => {
       calls.push(input);
       if (input.command.includes("runtime-mode.mjs apply")) {
@@ -327,6 +333,7 @@ async function fixture(t: any, mode: "user" | "root" = "user") {
     plan,
     apply,
     calls,
+    checks,
     logs,
     user,
     credentials,
@@ -334,6 +341,9 @@ async function fixture(t: any, mode: "user" | "root" = "user") {
     jobs,
     beat,
     observation,
+    setPrivilege(state: string, reason_code = "") {
+      privilege = { state, reason_code };
+    },
     onProbe(fn: () => void) {
       probeHook = fn;
     },
@@ -353,6 +363,104 @@ async function fixture(t: any, mode: "user" | "root" = "user") {
     path,
   };
 }
+test("a non-root SSH login with passwordless sudo switches the ordinary Agent to root without any registered root login", async (t) => {
+  const f = await fixture(t, "user", "deploy");
+  f.setPrivilege("sudo_noninteractive");
+  assert.equal(f.credentials.size, 1);
+  assert.equal(
+    f.db.get<any>(
+      "SELECT count(*) n FROM managed_machines WHERE username='root'",
+    )!.n,
+    0,
+  );
+  const p = await f.plan(),
+    r = await f.apply(p);
+  assert.equal(r.status, 200, r.raw);
+  assert.equal(r.data.status, "succeeded");
+  assert.equal((await f.request()).data.runtime_mode, "root");
+  assert.equal(f.checks.length, 2);
+  assert.ok(f.checks.every((c) => c.credential_id === "credential"));
+  assert.ok(
+    f.calls.every(
+      (c) => c.machine.username === "deploy" && c.credentialID === "credential",
+    ),
+  );
+  assert.ok(f.calls.every((c) => c.command.includes("sudo -n /bin/sh -c")));
+  assert.equal(f.executors.getStatus("host").executor?.state, "active");
+  assert.equal(f.credentials.size, 1);
+  assert.equal(
+    f.db.get<any>("SELECT username FROM managed_machines WHERE id='host'")!
+      .username,
+    "deploy",
+  );
+  assert.equal(
+    f.db.get<any>(
+      "SELECT count(*) n FROM machine_agent_runtime_audit WHERE event='runtime_approved'",
+    )!.n,
+    1,
+  );
+});
+test("a non-root login without noninteractive sudo cannot plan or dispatch an account switch", async (t) => {
+  for (const [state, reason] of [
+    ["unavailable", "privilege_unavailable_or_interactive"],
+    ["unknown", "privilege_probe_failed"],
+  ])
+    for (const stage of ["plan", "apply"])
+      await t.test(stage + " " + state, async (sub) => {
+        const f = await fixture(sub, "user", "deploy");
+        f.setPrivilege("sudo_noninteractive");
+        const p = stage === "apply" ? await f.plan() : undefined,
+          callsBefore = f.calls.length;
+        const credentialBefore = { ...f.credentials.get("credential") };
+        f.setPrivilege(state, reason);
+        const r = p
+          ? await f.apply(p)
+          : await f.request("/plans", "POST", {
+              runtime_mode: "root",
+              credential_id: "credential",
+            });
+        assert.equal(r.status, 409, r.raw);
+        assert.equal(r.data.error, "root_or_sudo_ssh_required");
+        assert.equal(f.calls.length, callsBefore);
+        assert.equal(
+          f.calls.filter((c) => c.command.includes("runtime-mode.mjs apply"))
+            .length,
+          0,
+        );
+        assert.equal(
+          f.db.get<any>("SELECT count(*) n FROM privileged_executors")!.n,
+          0,
+        );
+        assert.equal(
+          f.db.get<any>("SELECT count(*) n FROM privileged_enrollments")!.n,
+          0,
+        );
+        assert.equal(
+          f.db.get<any>(
+            "SELECT count(*) n FROM machine_agent_runtime_audit WHERE event='runtime_approved'",
+          )!.n,
+          0,
+        );
+        assert.equal((await f.request()).data.runtime_mode, "user");
+        assert.deepEqual(f.credentials.get("credential"), credentialBefore);
+        if (p) {
+          const saved = f.db.get<any>(
+            "SELECT status,request_id,executor_id FROM machine_agent_runtime_plans WHERE id=?",
+            p.id,
+          )!;
+          assert.deepEqual(saved, {
+            status: "awaiting_approval",
+            request_id: "",
+            executor_id: "",
+          });
+        } else
+          assert.equal(
+            f.db.get<any>("SELECT count(*) n FROM machine_agent_runtime_plans")!
+              .n,
+            0,
+          );
+      });
+});
 test("reviewed root/user transitions keep one Agent identity and bind permission generations", async (t) => {
   for (const mode of ["user", "root"] as const)
     await t.test(mode, async (sub) => {

@@ -1,0 +1,112 @@
+{
+  "timestamp_utc": "2026-11-02T06:41:14.955575+00:00",
+  "environment": {
+    "container": "lmqa083-nonroot-ssh",
+    "docker_context": "colima-lightmoni-release",
+    "ssh_address": "127.0.0.1:2222 inside isolated container",
+    "root_ssh_enabled": false,
+    "container_network": "default bridge disconnected after dependency installation",
+    "project_command_sources": [
+      "runtime/src/server/machine-ssh.ts:preflightCommand",
+      "runtime/src/server/machine-agent-runtime.ts:agentRuntimeCommand(probe)"
+    ]
+  },
+  "before": {
+    "exit_code": 0,
+    "stdout": "absent /etc/lightmoni-agent\nabsent /var/lib/lightmoni-agent\nabsent /run/lightmoni-agent-lifecycle.lock\nd0b9f94a9771bba3c30a54f0aee622fa0bee37be684cc1df6da2d3448606d98d  /opt/lightmoni-agent/current/node\nb3f5ce01e94a0f3dec1a2b6dd50589ec0f9d0979d04f57b8d7f559cade3596c9  /opt/lightmoni-agent/current/runtime-mode.mjs\n096e154835430b0fa2fac8c1d351bc00af32451b970613f0e375a96d35aabf61  /opt/lightmoni-agent/current/service-unit.mjs\n",
+    "stderr": ""
+  },
+  "cases": [
+    {
+      "account": "qa_nopass",
+      "ssh_identity": {
+        "exit_code": 0,
+        "stdout": "10002\nqa_nopass\n",
+        "stderr": ""
+      },
+      "sudo_noninteractive": {
+        "exit_code": 0,
+        "stdout": "0\n",
+        "stderr": "sudo: unable to resolve host 916799065ef7: Temporary failure in name resolution\n"
+      },
+      "project_preflight": {
+        "exit_code": 0,
+        "stdout": "LMSSH=1\nplatform=linux\nlinux=1\narch=arm64\nsupported_arch=1\ncurl=0\ntar=1\ngzip=1\nsha256sum=1\nsystemd=0\nprivilege_state=sudo_noninteractive\ninstall_privilege=1\nagent_installation=present\nplatform_https=0\nLMNET_BEGIN=1\nLMNET_END=1\n",
+        "stderr": ""
+      },
+      "project_runtime_probe": {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "sudo: unable to resolve host 916799065ef7: Temporary failure in name resolution\nruntime_maintenance_failed\n"
+      }
+    },
+    {
+      "account": "qa_denied",
+      "ssh_identity": {
+        "exit_code": 0,
+        "stdout": "10003\nqa_denied\n",
+        "stderr": ""
+      },
+      "sudo_noninteractive": {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "sudo: unable to resolve host 916799065ef7: Temporary failure in name resolution\nsudo: a password is required\n"
+      },
+      "project_preflight": {
+        "exit_code": 0,
+        "stdout": "LMSSH=1\nplatform=linux\nlinux=1\narch=arm64\nsupported_arch=1\ncurl=0\ntar=1\ngzip=1\nsha256sum=1\nsystemd=0\nprivilege_state=unavailable\ninstall_privilege=0\nagent_installation=unknown\nplatform_https=0\nLMNET_BEGIN=1\nLMNET_END=1\n",
+        "stderr": ""
+      },
+      "project_runtime_probe": {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "sudo: unable to resolve host 916799065ef7: Temporary failure in name resolution\nsudo: a password is required\n"
+      }
+    },
+    {
+      "account": "qa_password",
+      "ssh_identity": {
+        "exit_code": 0,
+        "stdout": "10004\nqa_password\n",
+        "stderr": ""
+      },
+      "sudo_noninteractive": {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "sudo: unable to resolve host 916799065ef7: Temporary failure in name resolution\nsudo: a password is required\n"
+      },
+      "project_preflight": {
+        "exit_code": 0,
+        "stdout": "LMSSH=1\nplatform=linux\nlinux=1\narch=arm64\nsupported_arch=1\ncurl=0\ntar=1\ngzip=1\nsha256sum=1\nsystemd=0\nprivilege_state=unavailable\ninstall_privilege=0\nagent_installation=unknown\nplatform_https=0\nLMNET_BEGIN=1\nLMNET_END=1\n",
+        "stderr": ""
+      },
+      "project_runtime_probe": {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "sudo: unable to resolve host 916799065ef7: Temporary failure in name resolution\nsudo: a password is required\n"
+      }
+    }
+  ],
+  "limitations": [
+    "This verifies actual non-root SSH authentication, real sudo policy, project preflight, and root maintenance wrapper only.",
+    "Container PID 1 is not systemd; no complete Agent install, mode change, upgrade, or uninstall was attempted.",
+    "Platform endpoint is intentionally unreachable loopback, curl is absent; overall preflight ready is expected false.",
+    "No production or vchive SSH access was used."
+  ],
+  "cleanup": {
+    "container_removed": true,
+    "container_removal_exit_code": 0,
+    "container_inventory_after_removal": "empty",
+    "colima_profile_stopped": true,
+    "colima_status_exit_code": 1,
+    "colima_status_stdout": "",
+    "colima_status_stderr": "time=\"2026-11-02T14:41:45+08:00\" level=fatal msg=\"colima [profile=lightmoni-release] is not running\"\n",
+    "temporary_ssh_private_key_removed_with_container": true
+  },
+  "after": {
+    "exit_code": 0,
+    "stdout": "absent /etc/lightmoni-agent\nabsent /var/lib/lightmoni-agent\nabsent /run/lightmoni-agent-lifecycle.lock\nd0b9f94a9771bba3c30a54f0aee622fa0bee37be684cc1df6da2d3448606d98d  /opt/lightmoni-agent/current/node\nb3f5ce01e94a0f3dec1a2b6dd50589ec0f9d0979d04f57b8d7f559cade3596c9  /opt/lightmoni-agent/current/runtime-mode.mjs\n096e154835430b0fa2fac8c1d351bc00af32451b970613f0e375a96d35aabf61  /opt/lightmoni-agent/current/service-unit.mjs\n",
+    "stderr": ""
+  },
+  "state_unchanged": true
+}
