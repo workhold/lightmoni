@@ -10,7 +10,7 @@
 
 外部 Codex/Claude 与平台 AI 共用能力的架构见 [平台开放能力与 MCP](docs/platform-mcp.md)。首批主机/任务查询与操作提案、独立令牌、OAuth 授权和接入管理已实现，使用方法及当前边界见 [MCP 接入指南](docs/mcp.md)。
 
-主机 root/sudo 引导、普通 Agent 与独立运维执行器、三类独立权限和统一维护见 [主机执行权限](docs/privileged-executor.md)。应用、网站等主机写操作需批准默认关闭的受管运维能力；已有业务先按[旧数据接管步骤](specs/080-executor-managed-operations/migration-runbook.md)迁移，升级镜像不会自动授予主机权限。
+主机 root/sudo 引导、普通 Agent 与独立运维执行器、三类独立权限和统一维护见 [主机执行权限](docs/privileged-executor.md)。应用、网站等主机写操作需批准默认关闭的受管运维能力；新安装直接使用独立 root 私有业务目录，升级镜像不会自动授予主机权限。
 
 中心与LightMoni Agent均由Node.js / TypeScript实现，公共协议位于`runtime/src/shared`。SDK和中心上报采用本地通用打点与固定窗口方案，主机管理、SSH终端、Agent注册和control/data凭据、AI助手、告警与界面语言采用最新main；本次取舍见[整合说明](specs/011-aligned-metric-windows/main-integration.md)。
 
@@ -20,7 +20,7 @@
 
 ## Docker Compose 部署
 
-根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261102-ccbb85d`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。镜像版本由仓库维护，无需在 `.env` 指定；旧 `LIGHTMONI_IMAGE` 值不再覆盖它。中心以非 root 用户运行。
+根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像直接指定为 `docker.heyphp.com/lightmoni/lightmoni:20261102-9c50a99`，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。镜像版本由仓库维护，无需在 `.env` 指定。中心以非 root 用户运行。
 
 首次获取源码：
 
@@ -215,7 +215,7 @@ LIGHTMONI_DOMAINS_URL=http://127.0.0.1:18885 node --import tsx --test test/domai
 
 可通过 `LIGHTMONI_DOMAINS_USER` / `LIGHTMONI_DOMAINS_PASSWORD` 指定隔离测试账号。域联调覆盖真实 OTLP 入库、日志、Trace、大盘、SQL 告警和本地 Webhook；节点联调覆盖 SDK → Agent 磁盘队列 → 中心和重启补传。当前发布语言使用 `python3 scripts/test-sdks.py`；Docker 齐备时可用 `--docker`。四语言原生测试和周期专项验收见[验收记录](docs/evidence/metric-periods/README.md)。`python3 scripts/demo-smoke.py` 是保留的历史 Go/Node 业务示例检查，需要额外准备 Go 工具链。
 
-本次迁移的本机环境为 macOS，已运行真实 ClickHouse 和 Node 联调；没有 Docker，未执行 Docker 镜像构建或 Linux systemd 实机验收。具体证据及边界见 [迁移验收](specs/007-node-runtime-migration/quickstart.md) 和 [领域验证记录](specs/007-node-runtime-migration/domain-validation.md)。
+当前首次发布基线与 Docker 双架构验收见 [SDD081](specs/081-prerelease-cleanup/validation.md)。早期运行时迁移证据保留在 [SDD007](specs/007-node-runtime-migration/quickstart.md)，不作为当前发布状态。
 
 开发模式测试 ClickHouse 只绑定 `127.0.0.1:18123`，使用固定测试密码；发版配置需要在 `.env` 中明确填写数据库密码。默认数据目录 `.lightmoni`、示例隔离目录 `.local-dev`、各目录的 `.env` 和构建产物不纳入源码。
 

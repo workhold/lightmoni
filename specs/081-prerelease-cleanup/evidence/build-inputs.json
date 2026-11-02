@@ -1,0 +1,17 @@
+{
+  "revision": "9c50a99826d87ebeb7b6d4ed5f50d9b727653ceb",
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tag": "20261102-9c50a99",
+  "feature_prs": [
+    69,
+    70
+  ],
+  "architecture_sync": "SDD081 functional cleanup changes storage/protocol/authority/deployment paths. docs/system-design.md and Doca are synchronized in PR69; saved and latest readback seq934: 20 texts matched, all38 native diagrams and726 unrelated blocks unchanged. Release packaging adds no further architecture change.",
+  "previous_latest": "sha256:df2484b8a9cacd19862eeb710e5f50634d689f50a8f76181d8e92611985a8a29",
+  "source_tree": "89fbae368294645b0f272d9183f09acac209ab2b",
+  "source_archive_sha256": "81d9ce7fd6cf6c5ece9f89f8c2b53be35994e5f91dc7eb217f5cd1dc2013adca",
+  "dockerfile": "deploy/server/Dockerfile",
+  "dockerfile_sha256": "0b389444e4c6ef4166d45f62b7ff678d758f2ad7df96b051805aa82e5fbaba75",
+  "runtime": "Node.js24.15.0",
+  "tested_clickhouse": "26.8"
+}

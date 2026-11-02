@@ -1,0 +1,10 @@
+{
+  "entry": "compose.yaml",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261102-9c50a99",
+  "services": [
+    "lightmoni",
+    "clickhouse"
+  ],
+  "healthy_dependency_and_state_volumes": true,
+  "single_entry": true
+}

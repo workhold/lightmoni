@@ -1,6 +1,6 @@
 # 主机执行权限：普通 Agent 与独立运维执行器
 
-> SDD060 基础权限与统一维护已由 SDD080 扩展到受管主机运维。应用、网站、Compose、证书、备份和制品发布需要单独批准默认关闭的 `operations.managed.v1`；批准的程序和挂载可控制整台主机。旧业务数据必须先按[离线接管步骤](../specs/080-executor-managed-operations/migration-runbook.md)审阅迁移。当前边界见系统设计第80章与 [SDD080 验收](../specs/080-executor-managed-operations/validation.md)，仓库实现不代表线上已升级。
+> SDD060 基础权限与统一维护已由 SDD080 扩展到受管主机运维。应用、网站、Compose、证书、备份和制品发布需要单独批准默认关闭的 `operations.managed.v1`；批准的程序和挂载可控制整台主机。首次发布直接使用 `/var/lib/lightmoni-managed`，不提供旧普通 Agent 业务目录的接管或迁移命令。当前基线见系统设计第81章和 [SDD081](../specs/081-prerelease-cleanup/validation.md)，受管运维边界见第80章与 [SDD080 验收](../specs/080-executor-managed-operations/validation.md)。
 
 规格、接口与实施顺序分别见 [spec](../specs/060-privileged-executor/spec.md)、[contracts](../specs/060-privileged-executor/contracts.md)、[tasks](../specs/060-privileged-executor/tasks.md)；系统联动入口见 [系统设计第 60 章](system-design.md#第60章-主机执行权限与独立运维执行器sdd-060)。
 
@@ -26,7 +26,7 @@
 
 决定不采用以下捷径：普通 Agent 加 Docker 组、给 socket ACL、将 socket 只读挂载后当成只读 API、开放 `sudo docker *`、对整个 Agent 改 root。Docker daemon 权限通常可转为宿主 root；上述做法还会把权限传给同 UID 的普通脚本。rootless Docker 是另一种运行环境，不等于能接管现有 rootful Docker，本期不混用。
 
-## 3. 当前实现与后续迁移接缝
+## 3. 当前实现与执行边界
 
 当前安装器支持 root 或 `sudo -n` 引导，创建 nologin 专用账户。普通 systemd unit 设置 `User/Group=lightmoni-agent`、`NoNewPrivileges=true`、`ProtectSystem=strict`，清空 Docker 附加组与 Linux capabilities，写入范围限于 Agent 数据目录。独立 `lightmoni-executor` root 服务使用另一份身份、策略、journal 和维护锁，不通过 sudoers、Polkit 或普通 Agent 的本地命令转发获得权限。
 
@@ -36,12 +36,12 @@
 | --- | --- |
 | `server/agent-jobs.ts`、`server/task-center.ts` | 已强制分流执行主体；root 数据接口独立 audience，保留租约、序号、幂等和 unknown |
 | `server/service-deployments.ts` | 旧制品执行通道已关闭；受保护预检、current、systemd 和业务回退需后续受管 profile |
-| `server/operations.ts`、`ops/store.ts` | 未迁移业务写入口在创建前拒绝；人工操作、自动协调、换证和恢复须逐个接入新授权 |
+| `server/operations.ts`、`ops/store.ts` | 业务写入口按 execution_principal 派发给已授权执行器；人工操作、协调、换证和恢复共用批准及签名边界 |
 | `agent/jobs.ts`、`agent/executor.ts`、`agent/operations.ts` | 普通 Agent 已拒绝旧特权动作，不能兜底执行 root job；旧适配器库仅供后续实现复用 |
 | `operations/platform.ts` 与 containers/websites/certificates/backups | 最小容器七动作已落地；网站、证书、完整 Compose、systemd 和备份 profile 仍需单独审计与实现 |
 | 安装、SSH 维护、更新/回退、卸载器 | 已实现首次安装及唯一维护入口的 upgrade/rollback/repair/uninstall，保护身份、策略、服务和 journal，失确认只读核对 |
 
-`hook.run` 具有任意脚本语义，不能被结构化证书/网站操作顺带提权；关闭的旧业务入口不会因此继续派发。独立普通脚本仍使用普通账户；需要 root 时须另建提权脚本并重新审阅。未迁移业务操作返回 `privileged_profile_not_implemented`，不能静默换成 SSH、Docker 组或 root Agent。
+`hook.run` 具有任意脚本语义，属于高信任 operations.managed.v1 的已批准资源载荷，执行前核验资源版本与在线许可。独立普通脚本仍使用普通账户；需要 root 时须另建提权脚本并重新审阅，不能通过普通 control 或 SSH 旁路执行。
 
 ## 4. HLD：执行主体独立，授权与记录统一
 
@@ -197,9 +197,9 @@ root自有staging保存代码，专用运行单元以核对过的User/Group/补�
 
 本PR已实现root/sudo预检、独立身份、全接口主体隔离、计划/许可/防重、root journal/fence、完整维护入口，以及最小容器七动作和一次性root脚本UI；每台主机只有实际验收通过才显示ready。网站、证书、完整Compose、systemd发布、备份、自动协调、指定其他账户及有期限定时提权仍是后续独立功能，逐个审计和验收。
 
-目标迁移要求：中心升级不能让旧 Agent 自动获得权限。已有主机显式启用/升级后才能进入新 lane；未迁移旧高级操作 fail closed，不保留普通 control 领取特权 payload 的旁路。普通监控继续运行。
+中心升级不会授予 Agent 主机权限。独立执行器需要明确安装和授权，普通 control 不能领取特权载荷；普通监控继续运行。
 
-中心与普通Agent共用严格只读capability/action配对白名单，旧写队列未领取则取消、已领取则unknown；旧私有operations/artifact固定410且不解密，未迁移业务profile创建前409明确阻断。旧API执行兼容已删除，纯适配器库可供后续profile复用。独立执行器生命周期及最小容器/脚本UI见系统设计60.10与SDD060 completion；网站/证书/完整Compose等后续业务迁移不通过保留旧control执行来兼容。
+中心与普通 Agent 共用只读 capability/action 配对白名单。首次发布不搬运或重放旧写队列，旧私有 operations/artifact 路由已删除。业务适配器由独立执行器按已批准领域资源调用，unknown 保留核对与互斥。生命周期及三类权限 UI 见系统设计60.10、第80章和第81章。
 
 验收包括 root/免交互sudo/交互sudo/无提权、凭据期限、默认关闭、伪造普通control/UID/capability、请求/签名重放、计划篡改、旧代次、危险Compose、外部容器、脚本身份与快照变化、断网/重启/daemon超时、关闭/升级/回退/保留数据卸载。真实 Linux 与 Docker 实测独立记录；已完成与未完成项目分别记录在 SDD060 tasks 和 validation，不用设计检查替代实际功能验收。
 
