@@ -1,0 +1,30 @@
+{
+  "repository": "docker.heyphp.com/lightmoni/abc-demo",
+  "tags": [
+    "20261103-36def97",
+    "latest"
+  ],
+  "digest": "sha256:c3fae4a7ce6af19b368ecef562446e251ed57c6b32386f96e91893b819cf1187",
+  "platforms": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:b192818c82b3b181c2f596f052e589d9158b6449f1934ad085749485c72ef50b",
+      "size": 1620,
+      "platform": {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:b2fa108f5a5e14edb59f9cb6c84c6c13eaf7fc51ac1143315ddee7b39f3d2aba",
+      "size": 1620,
+      "platform": {
+        "os": "linux",
+        "architecture": "arm64"
+      }
+    }
+  ],
+  "revision": "36def976baeabf715019562dfed304c318d94bee",
+  "verification": "all local blob SHA256, exact tested rootfs/config, remote blob HEAD, manifest/config GET and both index GETs"
+}

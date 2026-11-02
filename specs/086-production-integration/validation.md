@@ -17,4 +17,12 @@ GitHub合入、双架构镜像、v2状态启用和统一Agent实机、私有镜�
 
 任何生产数据库、主密钥、环境文件或DNS/SSH/registry秘密均不进入本目录；现场截图保存在忽略的 .local-dev/production-upgrade-083/。
 
-- linux/arm64 实际发布镜像通过41项烟测，使用真实隔离ClickHouse、真实HTTP、CLI先初始化schema v2、SDK指标与Agent遥测、签名作业/加密观测、证书导出、下载与统一维护器安全解析；原独立服务文件不再出现在新Agent包。amd64构建/烟测待完成。
+- linux/arm64 实际发布镜像通过41项烟测，使用真实隔离ClickHouse、真实HTTP、CLI先初始化schema v2、SDK指标与Agent遥测、签名作业/加密观测、证书导出、下载与统一维护器安全解析；原独立服务文件不再出现在新Agent包。linux/amd64 同样41/41通过。demo双架构实际容器在只读根目录、UID/GID65532、移除capabilities与NoNewPrivileges下通过健康/状态/真实POST请求。
+
+## 集成合入
+
+PR #77 merge commit 64a9d93d5db1e3114aae9205772374958e7608f8；#72/#73/#74均确认MERGED。发布源码36def976baeabf715019562dfed304c318d94bee的runtime、AI、Web、SDK、deploy、scripts与demo与该main完全一致；后续差异仅验收/发布元数据。
+
+## 镜像发布
+
+中心 docker.heyphp.com/lightmoni/lightmoni:20261103-36def97（及latest），index sha256:38a00652668506f707bb518b1d25cb407c8bc9cfa0cc257c9294829fea254fe8。Demo docker.heyphp.com/lightmoni/abc-demo:20261103-36def97（及latest），index sha256:c3fae4a7ce6af19b368ecef562446e251ed57c6b32386f96e91893b819cf1187。二者均含linux/amd64与linux/arm64，上传前逐blob SHA256及实际测试rootfs/config比对，上传后GET/HEAD回读核验。

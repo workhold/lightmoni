@@ -1,0 +1,21 @@
+{
+  "checks": [
+    {
+      "platform": "linux/arm64",
+      "image": "sha256:a430857a3a7e293681cf7e70e0b19f0e75fba9e0abf4b4c75732fbc8f1160f07",
+      "health": "ok",
+      "requestIdReceived": true,
+      "readOnly": true,
+      "user": "65532:65532"
+    },
+    {
+      "platform": "linux/amd64",
+      "image": "sha256:a430857a3a7e293681cf7e70e0b19f0e75fba9e0abf4b4c75732fbc8f1160f07",
+      "health": "ok",
+      "requestIdReceived": true,
+      "readOnly": true,
+      "user": "65532:65532"
+    }
+  ],
+  "pass": true
+}
