@@ -292,6 +292,65 @@ async function host(f:Awaited<ReturnType<typeof fixture>>,name='fixture'){
  return {id:created.data.id,credential:credential.data.credential_id,key};
 }
 
+function seedAgentOperation(f:Awaited<ReturnType<typeof fixture>>,machineID:string,kind:'install'|'uninstall',input:{id:string;status:string;created_at:string;execution_stage?:string;started_at?:string;finished_at?:string;resolved_at?:string;error?:string}){
+ const common=[input.id,machineID,'projection-hidden-credential',input.status,JSON.stringify({private_plan:'projection-hidden-plan'}),JSON.stringify({stdout:'projection-hidden-output'}),input.error??'',input.created_at,'admin',input.started_at??'',input.finished_at??''];
+ if(kind==='install')f.db.run('INSERT INTO machine_deployments(id,machine_id,credential_id,status,plan_json,receipt_json,error,created_at,created_by,started_at,finished_at,version,arch,execution_stage,resolved_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',...common,'0.1.0','amd64',input.execution_stage??'',input.resolved_at??'');
+ else f.db.run('INSERT INTO machine_uninstallations(id,machine_id,credential_id,status,plan_json,receipt_json,error,created_at,created_by,started_at,finished_at,agent_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',...common,'');
+}
+
+test('Agent operation summaries isolate hosts and expose only progress fields to administrators',async t=>{
+ const f=await fixture(t),hosts=[];
+ for(const name of ['install-progress','uninstall-progress','no-progress'])hosts.push((await f.request('/machines','POST',{name,address:name+'.example.test'})).data);
+ const [install,uninstall,empty]=hosts,created='2026-10-19T00:01:00.000Z',started='2026-10-19T00:02:00.000Z';
+ assert.equal(f.machines.get(empty.id).agent_operation,null);
+ seedAgentOperation(f,install.id,'install',{id:'install-a',status:'running',created_at:created,started_at:started,execution_stage:'bootstrap_dispatched',error:'token lm_enroll_fixtureSecret'});
+ seedAgentOperation(f,uninstall.id,'uninstall',{id:'uninstall-b',status:'running',created_at:created,started_at:started});
+ const listed=await f.request('/machines');assert.equal(listed.status,200,listed.raw);
+ const byID=new Map<string,any>(listed.data.map((value:any)=>[value.id,value]));
+ assert.deepEqual(byID.get(install.id).agent_operation,{id:'install-a',machine_id:install.id,kind:'install',status:'running',execution_stage:'bootstrap_dispatched',created_at:created,started_at:started,finished_at:'',error:'token [redacted-token]',resolved_at:''});
+ assert.deepEqual(byID.get(uninstall.id).agent_operation,{id:'uninstall-b',machine_id:uninstall.id,kind:'uninstall',status:'running',execution_stage:'',created_at:created,started_at:started,finished_at:'',error:'',resolved_at:''});
+ assert.equal(byID.get(empty.id).agent_operation,null);
+ assert.doesNotMatch(listed.raw,/projection-hidden|plan_json|receipt_json|stdout|stderr|secret_encrypted|lm_enroll_fixtureSecret/);
+ const detailed=await f.request('/machines/'+install.id);assert.equal(detailed.status,200,detailed.raw);assert.deepEqual(detailed.data.machine.agent_operation,byID.get(install.id).agent_operation);
+ f.user.role='member';for(const path of ['/machines','/machines/'+install.id]){const denied=await f.request(path);assert.equal(denied.status,403);assert.doesNotMatch(denied.raw,/install-a|bootstrap_dispatched|projection-hidden/);}
+});
+
+test('Agent operation summaries prefer every unresolved active installation over newer terminal history',async t=>{
+ for(const status of ['awaiting_approval','running','unknown']){
+  const f=await fixture(t),h=(await f.request('/machines','POST',{name:'active-'+status,address:'active.example.test'})).data;
+  seedAgentOperation(f,h.id,'install',{id:'active-install',status,created_at:'2026-10-18T00:00:00.000Z',execution_stage:status==='awaiting_approval'?'planned':'bootstrap_dispatched'});
+  seedAgentOperation(f,h.id,'uninstall',{id:'newer-terminal',status:'succeeded',created_at:now.toISOString(),finished_at:now.toISOString()});
+  assert.equal(f.machines.get(h.id).agent_operation?.id,'active-install',status);
+  f.db.run('UPDATE machine_deployments SET resolved_at=? WHERE id=?',now.toISOString(),'active-install');
+  assert.equal(f.machines.get(h.id).agent_operation?.id,'newer-terminal','resolved '+status);
+ }
+});
+
+test('Agent operation summaries prefer active uninstallations and otherwise select the latest terminal state',async t=>{
+ for(const status of ['awaiting_approval','running','unknown']){
+  const f=await fixture(t),h=(await f.request('/machines','POST',{name:'uninstall-'+status,address:'uninstall.example.test'})).data;
+  seedAgentOperation(f,h.id,'uninstall',{id:'active-uninstall',status,created_at:'2026-10-18T00:00:00.000Z'});
+  seedAgentOperation(f,h.id,'install',{id:'newer-install',status:'failed',created_at:now.toISOString(),finished_at:now.toISOString()});
+  assert.equal(f.machines.get(h.id).agent_operation?.id,'active-uninstall',status);
+  for(const terminal of ['failed','cancelled','succeeded']){
+   f.db.run('UPDATE machine_uninstallations SET status=?,created_at=?,finished_at=? WHERE id=?',terminal,'2026-10-20T00:00:00.000Z',now.toISOString(),'active-uninstall');
+   const operation=f.machines.get(h.id).agent_operation;assert.equal(operation?.kind,'uninstall');assert.equal(operation?.status,terminal);assert.equal(operation?.execution_stage,'');assert.equal(operation?.finished_at,now.toISOString());
+  }
+ }
+});
+
+test('Agent operation summary ordering is stable for tied timestamps and cross-table identifiers',async t=>{
+ const f=await fixture(t),h=(await f.request('/machines','POST',{name:'tied-progress',address:'tied.example.test'})).data;
+ seedAgentOperation(f,h.id,'uninstall',{id:'same-operation',status:'failed',created_at:now.toISOString()});
+ seedAgentOperation(f,h.id,'install',{id:'same-operation',status:'succeeded',created_at:now.toISOString(),execution_stage:'bootstrap_dispatched'});
+ for(let index=0;index<3;index++){const operation=f.machines.get(h.id).agent_operation;assert.equal(operation?.id,'same-operation');assert.equal(operation?.kind,'install');}
+ seedAgentOperation(f,h.id,'uninstall',{id:'z-terminal',status:'cancelled',created_at:now.toISOString()});
+ assert.equal(f.machines.get(h.id).agent_operation?.id,'z-terminal');
+ seedAgentOperation(f,h.id,'install',{id:'a-active',status:'running',created_at:now.toISOString(),execution_stage:'preflight'});
+ seedAgentOperation(f,h.id,'uninstall',{id:'b-active',status:'unknown',created_at:now.toISOString()});
+ assert.equal(f.machines.get(h.id).agent_operation?.id,'b-active');
+});
+
 test('AI preflight really calls SSH, saves an auditable result and creates the exact reviewable plan',async t=>{
  const f=await fixture(t),h=await host(f),tools=monitoringTools(f.deps,{machines:f.machines});
  const execute=(name:string,input:any,user=f.user)=>tools.find(tool=>tool.name===name)!.execute(input,new AbortController().signal,user);

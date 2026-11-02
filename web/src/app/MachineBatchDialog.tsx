@@ -1,4 +1,6 @@
 import {type SSHAccount,type SSHAccountHost,sshCredentialLabel} from './machine-credentials';
+import AgentOperationProgress from './AgentOperationProgress';
+import {agentOperationCanAdvance,agentOperationMatches,agentOperationReadSignal,type AgentOperationRecord} from './agent-operation-progress';
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Input,Modal,Select,Space,Tag,Typography} from '../shared/ui';
 import {runtimeCapabilityText} from './agent-runtime-model';
@@ -7,12 +9,14 @@ import {api,ApiError} from '../shared/api';
 import {defaultMachineCredential,sshCheckMatchesCredential} from './machine-credentials';
 import {useI18n} from '../shared/i18n';
 import SSHCheckSummary,{type SSHCheckResult} from '../shared/SSHCheckSummary';
-import {MAX_BATCH_TARGETS,batchCredentials,batchHistoryURL,batchPlanExpired,batchPlanPath,batchPlanStatus,batchUnavailableReason,machineBatchPath,needsBatchPlan,type BatchAction,type BatchCredential,type BatchDetail,type BatchPlan,type BatchStatus,type BatchTarget} from './machine-batch';
+import {MAX_BATCH_TARGETS,batchCredentials,batchHistoryURL,batchPlanExpired,batchPlanPath,batchPlanStatus as historicalBatchPlanStatus,batchUnavailableReason,machineBatchPath,needsBatchPlan,type BatchAction,type BatchCredential,type BatchDetail,type BatchPlan as BatchPlanBase,type BatchStatus,type BatchTarget} from './machine-batch';
 
 export type {BatchAction,BatchTarget} from './machine-batch';
-type Row={target:BatchTarget;status:BatchStatus;reason?:string;detail?:BatchDetail;credentialID?:string;check?:SSHCheckResult;record?:BatchPlan;unresolvedPlan?:boolean;attempted?:boolean;note?:string};
+type BatchPlan=BatchPlanBase&AgentOperationRecord;
+type Row={target:BatchTarget;status:BatchStatus;reason?:string;detail?:BatchDetail;credentialID?:string;check?:SSHCheckResult;record?:BatchPlan;unresolvedPlan?:boolean;attempted?:boolean;note?:string;progressError?:string};
 type Props={action:BatchAction;targets:BatchTarget[];onClose:()=>void;onRefresh:()=>Promise<void>;onSuccess?:(target:BatchTarget,action:BatchAction,result:unknown)=>void};
 type Phase='configure'|'review'|'results';
+const batchPlanStatus=(record:BatchPlan):BatchStatus=>record.status==='running'?'processing':historicalBatchPlanStatus(record);
 
 export default function MachineBatchDialog({action,targets,onClose,onRefresh,onSuccess}:Props){
  const {t,language}=useI18n();
@@ -102,7 +106,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
     const preliminary=batchUnavailableReason(action,row.target);
     if(preliminary){update(row.target.id,{status:'not_applicable',reason:preliminary});continue}
     update(row.target.id,{status:'processing'});
-    try{const detail=await api<BatchDetail>(machineBatchPath(row.target.machine!.id));const why=batchUnavailableReason(action,row.target,detail);const credentials=batchCredentials(action,detail.credentials);update(row.target.id,{detail,status:why?'not_applicable':'pending',reason:why||undefined,credentialID:defaultMachineCredential(credentials,detail.machine)})}
+    try{const detail=await api<BatchDetail>(machineBatchPath(row.target.machine!.id));if(detail.machine.id!==row.target.machine!.id)throw Error(t('主机详情与所选目标不匹配','Host detail does not match the selected target'));const why=batchUnavailableReason(action,row.target,detail);const credentials=batchCredentials(action,detail.credentials);update(row.target.id,{detail,status:why?'not_applicable':'pending',reason:why||undefined,credentialID:defaultMachineCredential(credentials,detail.machine)})}
     catch(error){update(row.target.id,{status:'failed',reason:errorText(error)})}
    }if(stop.current&&mounted.current)markStopped()}finally{finish()}
   };void initialize();
@@ -123,9 +127,10 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
  // from durable history. Never create another plan or repeat an apply request.
  const recoverPlan=async(row:Row,check:SSHCheckResult,priorIDs:Set<string>)=>{
   const detail=await api<BatchDetail>(machineBatchPath(row.target.machine!.id));
+  if(detail.machine.id!==row.target.machine!.id)throw Error(t('主机详情与所选目标不匹配','Host detail does not match the selected target'));
   const candidates=(action==='install'?detail.deployments:detail.uninstallations)?.filter(record=>!priorIDs.has(record.id)&&record.plan?.check_id===check.id&&record.plan?.credential?.id===check.credential_id)||[];
   if(candidates.length!==1)throw Error(t('无法确定是否已保存计划，请在主机历史中核对；不要重复创建或执行。','It is unclear whether a plan was saved. Check host history; do not create or execute it again.'));
-  return candidates[0];
+  return validatePlanRecord(candidates[0] as BatchPlan,row.target.machine!.id,check);
  };
  const prepare=async()=>{
   if(!credentialsReady||!configurable.length||(action==='install'&&!validVersion)||!start())return;
@@ -151,7 +156,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
      creating=true;
      const body={credential_id:check.credential_id,check_id:check.id,...(action==='install'?{version,arch:check.arch,runtime_mode:runtimeMode}:{})};
      const record=await api<BatchPlan>(`${batchPlanPath(action,row.target.machine!.id)}/plan`,{method:'POST',body:JSON.stringify(body)});
-     update(row.target.id,{record,status:batchPlanStatus(record),reason:undefined});
+     validatePlanRecord(record,row.target.machine!.id,check);update(row.target.id,{record,status:batchPlanStatus(record),reason:undefined});
     }catch(error){
      if(creating&&check&&!(error instanceof ApiError&&error.status<500)){
       try{const record=await recoverPlan(row,check,previousIDs);update(row.target.id,{record,status:batchPlanStatus(record),reason:undefined,note:t('已从持久化历史恢复计划，请审阅后继续。','The plan was recovered from durable history. Review it before continuing.')})}
@@ -162,7 +167,10 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
    markStopped();if(mounted.current){setPhase(isPlan?'review':'results');setReviewed(false)}await refresh();
   }finally{finish()}
  };
- const readRecord=async(row:Row)=>api<BatchPlan>(batchPlanPath(action,row.target.machine!.id,row.record!.id));
+ const validateRecord=(record:BatchPlan,machineID:string,operationID?:string)=>{if(!agentOperationMatches(record,machineID,operationID)||record.plan?.machine?.id&&record.plan.machine.id!==machineID)throw Error(t('进度记录与目标主机或操作不匹配','Progress record does not match the host or operation'));return record};
+ const validatePlanRecord=(record:BatchPlan,machineID:string,check:SSHCheckResult)=>{validateRecord(record,machineID);if(record.plan?.machine?.id!==machineID||record.plan?.check_id!==check.id||record.plan?.credential?.id!==check.credential_id)throw Error(t('计划与目标主机、检查或凭据不匹配','The plan does not match the host, preflight, or credential'));return record};
+ const canSaveRecord=(row:Row,record:BatchPlan,original?:BatchPlan)=>{const saved=rowsRef.current.find(item=>item.target.id===row.target.id)?.record;return mounted.current&&(!original||saved===original)&&!!saved&&agentOperationMatches(saved,row.target.machine!.id,record.id)&&agentOperationCanAdvance(saved,record)};
+ const readRecord=async(row:Row)=>validateRecord(await api<BatchPlan>(batchPlanPath(action,row.target.machine!.id,row.record!.id)),row.target.machine!.id,row.record!.id);
  const applyPlans=async()=>{
   if(!reviewed||!executablePlans.length||!start())return;
   try{
@@ -174,18 +182,24 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
     update(row.target.id,{status:'processing',attempted:true,reason:undefined});
     try{
      const response=await api<BatchPlan>(`${batchPlanPath(action,row.target.machine!.id,row.record.id)}/apply`,{method:'POST',body:JSON.stringify({confirm:true})});
-     const record={...row.record,...response};update(row.target.id,{record,status:batchPlanStatus(record),reason:record.error});
+     const record=validateRecord({...row.record,...response},row.target.machine!.id,row.record.id);if(!canSaveRecord(row,record)||rowsRef.current.find(item=>item.target.id===row.target.id)?.record!==row.record&&!['succeeded','failed','unknown','cancelled'].includes(record.status))continue;update(row.target.id,{record,status:batchPlanStatus(record),reason:record.error});
      if(record.status==='succeeded')notifySuccess(row,record);
     }catch(error){
-     try{const response=await readRecord(row),record={...row.record,...response};
+     const original=rowsRef.current.find(item=>item.target.id===row.target.id)?.record;try{const response=await readRecord(row),record={...row.record,...response};if(!canSaveRecord(row,record,original))continue;
       update(row.target.id,{record,status:record.status==='awaiting_approval'?'failed':batchPlanStatus(record),reason:record.error||errorText(error)});
       if(record.status==='succeeded')notifySuccess(row,record);
-     }catch{update(row.target.id,{status:'unknown',reason:t('请求中断，且无法读取原计划状态；请打开此计划历史核对，不要重复执行。','The request was interrupted and the original plan could not be read. Check this plan in host history; do not execute it again.')})}
+     }catch{if(rowsRef.current.find(item=>item.target.id===row.target.id)?.record===original)update(row.target.id,{status:'unknown',reason:t('请求中断，且无法读取原计划状态；请打开此计划历史核对，不要重复执行。','The request was interrupted and the original plan could not be read. Check this plan in host history; do not execute it again.')})}
     }
    }
    if(mounted.current){setPhase('results');setReviewed(false)}await refresh();
   }finally{finish()}
  };
+ const pollingKey=isPlan?rows.filter(row=>row.record&&(row.record.status==='running'||row.record.status==='awaiting_approval'&&row.attempted&&row.status==='processing')).map(row=>row.target.id+':'+row.record!.id+':'+row.record!.status).join('|'):'';
+ useEffect(()=>{
+  if(!pollingKey)return;let active=true,timer:ReturnType<typeof setTimeout>;const controller=new AbortController(),inFlight=new Set<ReturnType<typeof agentOperationReadSignal>>();
+  const poll=async()=>{const targets=rowsRef.current.filter(row=>row.record&&(row.record.status==='running'||row.record.status==='awaiting_approval'&&row.attempted&&row.status==='processing'));await Promise.all(targets.map(async row=>{const saved=row.record!,machineID=row.target.machine!.id,request=agentOperationReadSignal(controller.signal);inFlight.add(request);try{const next=validateRecord(await api<BatchPlan>(batchPlanPath(action,machineID,saved.id),{signal:request.signal}),machineID,saved.id);const current=rowsRef.current.find(v=>v.target.id===row.target.id);if(active&&mounted.current&&current?.record===saved){update(row.target.id,{record:next,status:next.status==='awaiting_approval'?'processing':batchPlanStatus(next),reason:next.error,progressError:undefined});if(next.status==='succeeded'&&saved.status!=='succeeded'){notifySuccess(row,next);await refresh()}}}catch{if(active&&mounted.current&&rowsRef.current.find(v=>v.target.id===row.target.id)?.record===saved)update(row.target.id,{progressError:t('进度刷新失败，保留最后状态，稍后重试','Progress refresh failed; the last state is retained and will retry.')})}finally{request.dispose();inFlight.delete(request)}}));if(active)timer=setTimeout(poll,2000)};
+  timer=setTimeout(poll,2000);return()=>{active=false;clearTimeout(timer);controller.abort();for(const request of inFlight)request.dispose();inFlight.clear()};
+ },[pollingKey]);
  const executeSimple=async()=>{
   if(!reviewed||!validReason||!configurable.length||!start())return;
   try{for(const row of rowsRef.current){
@@ -201,8 +215,8 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
    for(const row of rowsRef.current){
     if(!mounted.current||stop.current)break;if(row.record?.status!=='awaiting_approval')continue;
     update(row.target.id,{status:'processing'});
-    try{const response=await api<BatchPlan>(`${batchPlanPath(action,row.target.machine!.id,row.record.id)}/cancel`,{method:'POST',body:'{}'});update(row.target.id,{record:{...row.record,...response},status:'failed',reason:t('未执行计划已取消。','The unexecuted plan was cancelled.')})}
-    catch(error){try{const response=await readRecord(row),record={...row.record,...response};update(row.target.id,{record,status:record.status==='awaiting_approval'?'failed':batchPlanStatus(record),reason:record.status==='cancelled'?t('未执行计划已取消。','The unexecuted plan was cancelled.'):errorText(error)})}catch{update(row.target.id,{status:'unknown',reason:t('计划取消未确认，请在历史中核对；该计划仍保留在本窗口。','Plan cancellation was not confirmed. Verify it in history; it remains visible in this dialog.')})}}
+    try{const response=await api<BatchPlan>(`${batchPlanPath(action,row.target.machine!.id,row.record.id)}/cancel`,{method:'POST',body:'{}'});const record=validateRecord({...row.record,...response},row.target.machine!.id,row.record.id);if(canSaveRecord(row,record))update(row.target.id,{record,status:batchPlanStatus(record),reason:record.status==='cancelled'?t('未执行计划已取消。','The unexecuted plan was cancelled.'):record.error})}
+    catch(error){const original=rowsRef.current.find(item=>item.target.id===row.target.id)?.record;try{const response=await readRecord(row),record={...row.record,...response};if(canSaveRecord(row,record,original))update(row.target.id,{record,status:record.status==='awaiting_approval'?'failed':batchPlanStatus(record),reason:record.status==='cancelled'?t('未执行计划已取消。','The unexecuted plan was cancelled.'):errorText(error)})}catch{if(rowsRef.current.find(item=>item.target.id===row.target.id)?.record===original)update(row.target.id,{status:'unknown',reason:t('计划取消未确认，请在历史中核对；该计划仍保留在本窗口。','Plan cancellation was not confirmed. Verify it in history; it remains visible in this dialog.')})}}
    }
    if(mounted.current)setReviewed(false);await refresh();
    if(closeAfter&&mounted.current&&!rowsRef.current.some(row=>row.record?.status==='awaiting_approval'))onClose();
@@ -217,7 +231,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
     continue;
    }
    if(!row.record||!['unknown','running'].includes(row.record.status)&&row.status!=='unknown')continue;
-   try{const response=await readRecord(row),record={...row.record,...response};update(row.target.id,{record,status:batchPlanStatus(record),reason:record.error});if(record.status==='succeeded')notifySuccess(row,record)}catch(error){update(row.target.id,{status:'unknown',reason:errorText(error)})}
+   const original=row.record;try{const response=await readRecord(row),record={...original,...response};if(!mounted.current||rowsRef.current.find(v=>v.target.id===row.target.id)?.record!==original)continue;update(row.target.id,{record,status:batchPlanStatus(record),reason:record.error,progressError:undefined});if(record.status==='succeeded')notifySuccess(row,record)}catch(error){if(mounted.current&&rowsRef.current.find(v=>v.target.id===row.target.id)?.record===original)update(row.target.id,{progressError:errorText(error)})}
   }await refresh()}finally{finish()}
  };
  const verifyPlatformRecords=async()=>{
@@ -263,6 +277,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
    {rows.map(row=><section key={row.target.id} data-batch-target={row.target.id} data-batch-status={row.status} style={{border:'1px solid var(--lm-border-color, #d9d9d9)',borderRadius:8,padding:12,marginBottom:12,overflowWrap:'anywhere'}}>
     <Space wrap><Typography.Text strong>{row.target.name}</Typography.Text><Tag color={row.record?.status==='cancelled'?'default':row.status==='success'?'success':row.status==='failed'?'error':row.status==='unknown'?'warning':row.status==='processing'?'processing':'default'}>{statusText(row)}</Tag></Space>
     <Typography.Paragraph type="secondary" style={{marginBottom:8}}>{row.target.machine?sshEndpoint(row.target.machine.address,row.target.machine.port):t('独立节点，无 SSH 主机记录','Independent node without an SSH host record')} · {row.target.agent?t(`节点 ${row.target.agent.id}`,`Node ${row.target.agent.id}`):t('仅主机','Host only')}</Typography.Paragraph>
+    {isPlan&&row.record&&<AgentOperationProgress kind={action==='install'?'install':'uninstall'} machineID={row.target.machine?.id||''} record={row.record} submitting={row.status==='processing'&&row.attempted} refreshError={row.progressError}/> }
     {row.reason&&<Alert showIcon type={row.status==='unknown'?'warning':row.status==='failed'?'error':'info'} title={reasonText(row.reason)}/>}
     {row.note&&<Typography.Paragraph type="secondary">{row.note}</Typography.Paragraph>}
     {phase==='configure'&&!busy&&row.status==='pending'&&!row.reason&&!(action==='install'&&autoAccount)&&action!=='delete_host'&&action!=='remove_node'&&<div style={{marginTop:8}}><Select aria-label={t(`SSH 凭据 · ${row.target.name}`,`SSH credential · ${row.target.name}`)} style={{width:'100%'}} value={row.credentialID} placeholder={t('请选择 SSH 凭据','Select an SSH credential')} options={credentialsFor(row).map(credential=>({value:credential.id,label:credentialLabel(credential)}))} onChange={value=>update(row.target.id,{credentialID:value})}/>{credentialsFor(row).length>1&&!row.credentialID&&<Typography.Text type="warning">{t('存在多条有效凭据，请明确选择。','Multiple active credentials exist. Select one explicitly.')}</Typography.Text>}</div>}

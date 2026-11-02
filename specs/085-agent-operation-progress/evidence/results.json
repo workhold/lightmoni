@@ -1,0 +1,50 @@
+{
+  "passed": 11,
+  "checks": [
+    {
+      "name": "list isolates host progress and stops fast polling after terminal results",
+      "passed": true
+    },
+    {
+      "name": "installation pending apply polls stage GET and recovers read failure without replay",
+      "passed": true
+    },
+    {
+      "name": "hung progress GET times out, keeps the last state, then resumes read-only polling",
+      "passed": true
+    },
+    {
+      "name": "installation rejects wrong identity and closing clears polling",
+      "passed": true
+    },
+    {
+      "name": "uninstall pending apply polls GET and unknown never becomes success",
+      "passed": true
+    },
+    {
+      "name": "batch rows progress independently while each apply remains pending",
+      "passed": true
+    },
+    {
+      "name": "only succeeded reaches 100 and unknown removal is inactive at its last evidenced stage",
+      "passed": true
+    },
+    {
+      "name": "English dark narrow uninstall is readable and unmount stops polling",
+      "passed": true
+    },
+    {
+      "name": "late detail running snapshot cannot overwrite polled installation success",
+      "passed": true
+    },
+    {
+      "name": "batch late manual running read cannot overwrite automatic success",
+      "passed": true
+    },
+    {
+      "name": "known installation rejects same-host wrong operation after failed apply and linked load",
+      "passed": true
+    }
+  ],
+  "unexpected": []
+}

@@ -39,6 +39,18 @@ export type MachineCapabilityReason = "host_busy" | "direct_ssh_required" | "ssh
 export interface MachineCapability { available: boolean; reason: MachineCapabilityReason }
 export type MachineStatus = "unknown" | "online" | "offline" | "installing" | "uninstalled" | "removed" | "error";
 export type DeploymentStatus = "awaiting_approval" | "running" | "unknown" | "succeeded" | "failed" | "cancelled";
+export interface MachineAgentOperation {
+  id: string;
+  machine_id: string;
+  kind: "install" | "uninstall";
+  status: DeploymentStatus | UninstallationStatus;
+  execution_stage: string;
+  created_at: string;
+  started_at: string;
+  finished_at: string;
+  error: string;
+  resolved_at: string;
+}
 
 const MACHINE_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}$/;
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/;
@@ -134,6 +146,7 @@ export interface MachineSummary {
   capabilities: { terminal: MachineCapability; ssh_check: MachineCapability; deploy_agent: MachineCapability; uninstall_agent: MachineCapability; recovery_uninstall_agent: MachineCapability; update_agent: MachineCapability; rollback_agent: MachineCapability };
   agent_release: any;
   agent_update: any;
+  agent_operation: MachineAgentOperation | null;
   last_deployment_status: DeploymentStatus | "";
   last_uninstallation_status: UninstallationStatus | "";
   updated_at: string;
@@ -345,6 +358,21 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const labels = available ? db.all<{id:string;name:string}>("SELECT l.id,l.name FROM machine_host_labels h JOIN agent_task_labels l ON l.id=h.label_id WHERE h.machine_id=? ORDER BY l.id", machineID) : [];
     return { label_ids: labels.map(label => label.id), labels };
   };
+  const agentOperation = (machineID: string): MachineAgentOperation | null => {
+    // Read only the progress fields: plans, credentials and command output never
+    // enter this projection. Active records remain visible ahead of newer history.
+    const operation = db.get<MachineAgentOperation>(`
+      SELECT id,machine_id,kind,status,execution_stage,created_at,started_at,finished_at,error,resolved_at FROM (
+        SELECT id,machine_id,'install' kind,status,execution_stage,created_at,started_at,finished_at,error,resolved_at,
+          CASE WHEN status IN ('awaiting_approval','running','unknown') AND resolved_at='' THEN 1 ELSE 0 END operation_active
+          FROM machine_deployments WHERE machine_id=?
+        UNION ALL
+        SELECT id,machine_id,'uninstall' kind,status,'' execution_stage,created_at,started_at,finished_at,error,'' resolved_at,
+          CASE WHEN status IN ('awaiting_approval','running','unknown') THEN 1 ELSE 0 END operation_active
+          FROM machine_uninstallations WHERE machine_id=?
+      ) ORDER BY operation_active DESC,created_at DESC,id DESC,kind ASC LIMIT 1`, machineID, machineID);
+    return operation ? { ...operation, error: redact(operation.error) } : null;
+  };
   const summary = (value: any): MachineSummary => {
     if (!value) fail(404, "主机不存在");
     const activeSSH = Number(value.active_ssh_credential_count ?? 0), activeKeys = Number(value.active_ssh_key_count ?? 0);
@@ -386,6 +414,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       ssh_recovery_available: value.connection_method === "direct_ssh" && activeSSH > 0,
       capabilities: { terminal: pendingUpdate ? { available: false, reason: "agent_update_pending" } : capability(), ssh_check: capability(), deploy_agent: deployCapability, uninstall_agent: uninstallCapability, recovery_uninstall_agent: { ...uninstallCapability }, update_agent: updateCapability, rollback_agent: { ...updateCapability } },
       ...agentUpdates.machineState(value.id, value.agent_id),
+      agent_operation: agentOperation(value.id),
       last_deployment_status: value.last_deployment_status || "", last_uninstallation_status: value.last_uninstallation_status || "", updated_at: value.updated_at, created_at: value.created_at,
     };
   };
