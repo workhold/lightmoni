@@ -28,4 +28,4 @@
 
 ## 交付
 
-当前改动建立在仍开放的 PR #73（主机 SSH 多账户）上，尚未提交、推送或创建 PR；没有合并或发布镜像。应以 PR #73 为基分支创建后续进度功能 PR，待其合入后再将后续 PR 纳入 `main`。
+已提交并推送功能分支，创建 [PR #74](https://github.com/workhold/lightmoni/pull/74)，GitHub 当前显示 OPEN、MERGEABLE。该 PR 以仍开放的 [PR #73](https://github.com/workhold/lightmoni/pull/73)（主机 SSH 多账户）为基分支，以避免重复包含其代码；PR #73 合入 main 后，可将本 PR 顺序合入 main。未合并 PR，也未发布镜像或部署生产。
