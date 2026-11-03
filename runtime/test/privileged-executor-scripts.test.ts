@@ -1,7 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { canonicalJSON, sha256 } from '../src/shared/privileged-executor.js';
-import { executeScript, validateScript, unitOutcome, type AccountProfile, type ElevatedScript, type ScriptHost, type ScriptOutcome, type UnitObservation } from '../src/privileged-executor/scripts.js';
+import { executeScript, validateScript, unitOutcome, validSystemdVersion, type AccountProfile, type ElevatedScript, type ScriptHost, type ScriptOutcome, type UnitObservation } from '../src/privileged-executor/scripts.js';
+
+test('systemd dependency probe recognizes distro package versions and rejects malformed observations', () => {
+  for (const version of ['239 (239-51.el8)', '252 (252.39-1~deb12u1)', '257.8-1', '252', '1000']) {
+    assert.equal(validSystemdVersion(version), true, version);
+  }
+  for (const version of ['', 'systemd 239', '23', '12345', '239 (239-51.el8', '239 ()', '239 (a) trailing', '239\n239', '239\n', '239\r', '239\0', '239 (' + 'x'.repeat(129) + ')']) {
+    assert.equal(validSystemdVersion(version), false, JSON.stringify(version));
+  }
+});
 
 const account: AccountProfile = { name: 'service_user', uid: 1001, gid: 1002, groups: [2001, 2002] };
 const unit = 'lightmoni-exec-' + 'a'.repeat(32);
