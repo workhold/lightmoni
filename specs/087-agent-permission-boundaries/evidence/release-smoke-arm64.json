@@ -1,0 +1,186 @@
+{
+  "passed": true,
+  "image": "local/lightmoni:20261103-agent-unified-3309b0b36490-arm64",
+  "expected_source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+  "docker_platform": "linux/arm64",
+  "checks": [
+    {
+      "check": "image source revision, platform and unprivileged center user",
+      "passed": true
+    },
+    {
+      "check": "center health and authenticated real isolated ClickHouse 26.8 query",
+      "passed": true
+    },
+    {
+      "check": "admin initialization, login, machine/task APIs and anonymous denial",
+      "passed": true
+    },
+    {
+      "check": "production web assets",
+      "passed": true,
+      "files": 37
+    },
+    {
+      "check": "registered host has no root authorization; unified Agent catalog uses exact source",
+      "passed": true
+    },
+    {
+      "check": "both Agent packages: SHA/ELF/revision/exact sources; selected Agent executes",
+      "passed": true,
+      "execution": {
+        "version": "0.1.0",
+        "node": "v24.15.0",
+        "arch": "arm64"
+      }
+    },
+    {
+      "check": "all four SDK artifacts and Apache licenses",
+      "passed": true
+    },
+    {
+      "check": "AI runner and task modules import; no model requests",
+      "passed": true
+    }
+  ],
+  "downloads": [
+    {
+      "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+      "bytes": 80340249,
+      "sha256": "a2f77a1ee2f9a84afa816856369bd549af342fb349fbc88a1a044ec180538dec",
+      "source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+      "build_id": "0.1.0-3309b0b36490-5382f0e4da8d",
+      "platform": "linux/amd64",
+      "compiled_modules_compared": [
+        "agent/entry.js",
+        "agent/main.js",
+        "agent/managed.js",
+        "agent/task-runner.js",
+        "privileged-executor/runner.js",
+        "privileged-executor/config.js",
+        "shared/privileged-executor.js",
+        "shared/execution-role.js",
+        "shared/ordinary-agent-permissions.js"
+      ],
+      "source_files_compared": [
+        "deploy/agent/launcher.sh",
+        "deploy/agent/lightmoni-agent.service",
+        "deploy/agent/lightmoni-agent-helper.service",
+        "deploy/agent/deployment-permissions.mjs",
+        "deploy/agent/uninstall.sh",
+        "deploy/agent/runtime-mode.mjs",
+        "deploy/agent/service-unit.mjs"
+      ],
+      "excluded_legacy_modules": [
+        "server/executor-absence-shell.js",
+        "server/machine-executor-bootstrap.js",
+        "server/machine-executor-maintenance.js",
+        "privileged-executor/activation.js",
+        "privileged-executor/cli.js",
+        "privileged-executor/main.js"
+      ]
+    },
+    {
+      "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+      "bytes": 80029940,
+      "sha256": "089287cc4ba12bc96c824ae74bf44eeb785bfa73c52cbf0ac6cf7505f6c2363b",
+      "source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+      "build_id": "0.1.0-3309b0b36490-5382f0e4da8d",
+      "platform": "linux/arm64",
+      "compiled_modules_compared": [
+        "agent/entry.js",
+        "agent/main.js",
+        "agent/managed.js",
+        "agent/task-runner.js",
+        "privileged-executor/runner.js",
+        "privileged-executor/config.js",
+        "shared/privileged-executor.js",
+        "shared/execution-role.js",
+        "shared/ordinary-agent-permissions.js"
+      ],
+      "source_files_compared": [
+        "deploy/agent/launcher.sh",
+        "deploy/agent/lightmoni-agent.service",
+        "deploy/agent/lightmoni-agent-helper.service",
+        "deploy/agent/deployment-permissions.mjs",
+        "deploy/agent/uninstall.sh",
+        "deploy/agent/runtime-mode.mjs",
+        "deploy/agent/service-unit.mjs"
+      ],
+      "excluded_legacy_modules": [
+        "server/executor-absence-shell.js",
+        "server/machine-executor-bootstrap.js",
+        "server/machine-executor-maintenance.js",
+        "privileged-executor/activation.js",
+        "privileged-executor/cli.js",
+        "privileged-executor/main.js"
+      ]
+    }
+  ],
+  "sdk_downloads": [
+    {
+      "language": "typescript",
+      "sha256": "fdf33a9191dcabed7c98b23e7c93c7a6bd946d4905f41e673eb1d056eebb37ad",
+      "apache_license_paths": [
+        "package/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+    },
+    {
+      "language": "go",
+      "sha256": "7650345750c6db4dba9a49024569fa290e812b756648d194a78e7c0d591224bb",
+      "apache_license_paths": [
+        "lightmoni-go-sdk/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+      "go_module": "github.com/workhold/lightmoni"
+    },
+    {
+      "language": "python",
+      "sha256": "88e1c7e274ff06e4ef9a62bb16cbbef801220683f4bb29e706a532aa05cf9208",
+      "apache_license_paths": [
+        "lightmoni-python-sdk/LICENSE",
+        "lightmoni-python-sdk/sdk/python/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+    },
+    {
+      "language": "rust",
+      "sha256": "077591d198e4f3c47fc65a5898043d0ea9e19f96538ad964df0392b5b5dc7e5b",
+      "apache_license_paths": [
+        "lightmoni-rust-sdk/LICENSE",
+        "lightmoni-rust-sdk/sdk/rust/LICENSE"
+      ],
+      "apache_license_sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90"
+    }
+  ],
+  "test_network": "dedicated bridge, center published on host loopback; outbound routing is available; no model provider is configured",
+  "resource_limits": {
+    "center_memory_bytes": 1073741824,
+    "clickhouse_memory_bytes": 3221225472,
+    "additional_swap_bytes": 0,
+    "clickhouse_server_memory_bytes": 2147483648,
+    "clickhouse_query_memory_bytes": 536870912,
+    "clickhouse_query_threads": 2
+  },
+  "limitations": [
+    "Local Linux VM; amd64 uses registered emulation.",
+    "Fresh isolated data; no production migration or host SSH is tested.",
+    "This smoke runs Agent version/imports; systemd/install/script execution has a separate Linux QA report.",
+    "No model request or real service/container management operation."
+  ],
+  "source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+  "image_id": "sha256:a050f5103dbb32f67702fd0b8c199029d1ce6c24b4a2f04332b4a452c22c9f3c",
+  "target_platform": "linux/arm64",
+  "docker_daemon_platform": "linux/arm64",
+  "emulated": false,
+  "last_stage": "SDK and AI runtime",
+  "cleanup": {
+    "removed": {
+      "container": 2,
+      "volume": 2,
+      "network": 1
+    },
+    "errors": []
+  }
+}

@@ -13,11 +13,11 @@
 
 ## 本轮验证
 
-基线 `origin/main=b44ee39`；提交前已重新 fetch，落后主干 0。机器可读结果见 [single-account-validation.json](evidence/single-account-validation.json)。
+基线 `origin/main=b44ee39`；提交前已重新 fetch，落后主干 0。当前发行源码固定为 `3309b0b36490fb7eb8c7b4a4fa602ab1de75f974`。最新 Runtime 结果见 [release-runtime-validation.json](evidence/release-runtime-validation.json)，前一轮多模块与 UI 回归见 [single-account-validation.json](evidence/single-account-validation.json)。
 
 | 检查 | 结果 |
 | --- | --- |
-| `npm --prefix runtime test` | 1321 项：1288 通过、0 失败、33 跳过 |
+| `npm --prefix runtime test` | 1341 项：1308 通过、0 失败、33 跳过 |
 | `npm --prefix ai-runtime test` | 71/71 通过 |
 | `npm --prefix sdk/typescript test` | 22/22 通过 |
 | `npm run typecheck` | Runtime、AI runtime、Web 全部通过 |
@@ -28,9 +28,19 @@
 | 多账号与集中凭据 UI | 7 组通过，无页面异常或意外请求 |
 | `git diff --check` | 通过 |
 
-完整 runtime 覆盖安装、升级、回退、模式切换、卸载、恢复、签名脚本、调度、AI/MCP 入口、普通/提权任务授权及审计。曾失败的升级/恢复 fixture 已补齐严格模式观测，MCP/调度 fixture 使用真实签名 helper 契约的测试适配器；未通过放宽生产解析、权限或签名门禁掩盖失败。安装发行测试 31/31，完整主机管理测试 73/73 包含手动过期/撤销/一次性凭据、无效检查结果和混合候选的新增诊断验证。
+完整 runtime 覆盖安装、升级、回退、模式切换、卸载、恢复、签名脚本、调度、AI/MCP 入口、普通/提权任务授权及审计。曾失败的升级/恢复 fixture 已补齐严格模式观测，MCP/调度 fixture 使用真实签名 helper 契约的测试适配器；未通过放宽生产解析、权限或签名门禁掩盖失败。安装发行测试现为 39/39；权限检查 13/13；SSH 与卸载/生命周期相关回归 21/21。完整主机管理测试 73/73 包含手动过期/撤销/一次性凭据、无效检查结果和混合候选的诊断验证。
 
-33 项跳过包括需 Linux/root/systemd、真实 Docker、ClickHouse 或显式配置的外部环境，以及缺少指定 Go baseline 工具链的检查；逐项名称见机器可读报告。本机 macOS，Docker daemon 未运行，不能把其余通过项当作真实 Linux 生命周期验收。
+macOS 全量中的 33 项跳过包括需 Linux/root/systemd、真实 Docker、ClickHouse 或显式配置的外部环境，以及缺少指定 Go baseline 工具链的检查；逐项名称见最新机器可读报告。本轮另外在本机 Colima 独立 Linux 容器完成真实 systemd 验收，不能把 macOS 跳过项直接计作通过。
+
+## 成品 Linux 验收与修复
+
+- 原始镜像包在 Debian Bookworm ARM64 / Node 24.15.0 / systemd 252 下完成 19/19 检查，0 失败。中心代码和目标包均固定 `3309b0b`；实际从 `5e42388` 升级、回退、再次升级，并验证两组件目标构建、包摘要和新签名 helper activation。
+- root 完整管理、sudo 普通登录仅监控均从无 Agent 账号、无同名组、无 `/usr/local/bin` 且 `USERGROUPS_ENAB=no` 的环境首装；四次双向权限切换、普通同 UID 脚本、经批准 root 脚本、卸载及凭据撤销全部通过。
+- 实际 `/proc/self/status` 验证普通脚本 UID/GID、空附加组、NoNewPrivileges=1 和五组 capabilities 全零，1/1 运行、0 跳过；Linux 权限测试另为 13/13，默认绝对路径 helper 检查通过。
+- 修复真实根目录祖先前缀误判、先检查后创建账号、依赖系统隐式主组和缺少 launcher 目录等首装缺陷；已有账号主组不匹配在停服务前拒绝。安装检查和 fresh 保护统一识别 helper 残留及悬空链接，并保留既有状态。
+- root 升级在初检、等待和提交时均校验 helper；中心绑定 helper 身份、代次、新 activation、目标构建及新鲜签名心跳。helper 初检后或提交后失效的失败注入都使两组件回退，不能误报成功。
+
+复现及边界见 [linux-validation.md](linux-validation.md)，原始结果见 [linux-systemd-final.json](evidence/linux-systemd-final.json) 与 [linux-security-final.tap](evidence/linux-security-final.tap)。该验收使用本地登录适配器执行原 SSH 固定命令，不覆盖真实 SSH 网络认证；未连接 vchive 或生产平台，也未对真实 Docker daemon 执行容器操作。中心成品另用真实隔离 ClickHouse 完成双架构 HTTP 冒烟。
 
 UI 点击流程、截图和范围见 [ui-validation.md](ui-validation.md)。每台主机沿用独立进度及持久记录；账号补录后不会自动派发，不会修改已审阅计划身份或在 unknown 时重装。
 
@@ -48,7 +58,7 @@ UI 点击流程、截图和范围见 [ui-validation.md](ui-validation.md)。每�
 
 ## 交付与边界
 
-- 功能分支：`feat/087-agent-permission-boundaries`；GitHub [PR #83](https://github.com/workhold/lightmoni/pull/83)，保留 Draft 等待真实 Linux/systemd 验收，未合并。
-- 本轮未对 vchive 或生产主机执行 SSH、安装、服务修改或模式切换，未构建/发布镜像。真实主机端到端验收仍待执行。
+- 功能分支：`feat/087-agent-permission-boundaries`；GitHub [PR #83](https://github.com/workhold/lightmoni/pull/83)，真实 Linux/systemd 与镜像验收已完成，更新为可审阅状态，未合并。
+- 本轮未对 vchive 或生产主机执行 SSH、安装、服务修改或模式切换。双架构镜像已在本机构建并发布至既有仓库，固定标签与 latest 均已回读确认，本轮本地镜像、缓存及大产物已清理；详见 [release.md](release.md) 和 [清理记录](evidence/release-cleanup.json)。生产主机的真实 SSH 网络与部署验收仍待实际升级后执行。
 - 旧 root 常驻安装须先使用原版本受管流程卸载后重装，新卸载器不接管旧运行态。
 - 不包含平台主机 RBAC、任意业务账户执行或不可信脚本沙箱；Docker daemon 身份绑定仍需独立确认。

@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "qa_containers_removed": {
+    "lightmoni-sdd087-linux": true,
+    "lightmoni-sdd087-systemd": true
+  },
+  "qa_image_removed": {
+    "local/lightmoni-sdd087-linux-qa:20261103": true
+  },
+  "host_input_archives_removed": {
+    "/tmp/lightmoni-sdd087-linux-input.tar": true,
+    "/tmp/lightmoni-sdd087-center3309.tar": true
+  },
+  "retained": "Small verification evidence and fixture source; shared /private/tmp/lightmoni-release-20261103-087 outputs retained for publisher cleanup; pre-existing ClickHouse and base images untouched."
+}

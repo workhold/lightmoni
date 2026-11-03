@@ -1,0 +1,36 @@
+{
+  "source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+  "publisher_before_sha256": "89036f07a042a205953da45a61030b4ab3b7e08ca02554cf16b5ebcee533f15e",
+  "publisher_after_sha256": "00a61d575732e8582ca6a10b90500d3ea9676b5542d9c80be9f75ef975823bd1",
+  "actual_metadata_files": [
+    "build-amd64.json",
+    "build-arm64.json"
+  ],
+  "precise_change": "BuildKit local named node-releases context host path is normalized to local:node-releases in invocation parameters; additionally require exact context locals and derived Dockerfile entrypoint",
+  "pinned_remote_material_validation": "Unchanged: exactly two official-pinned Node index digests, exact remote URI/digest/platform for each architecture",
+  "publication_export_or_build_executed": false,
+  "read_only_checks": {
+    "clean_archive_source_hash": "passed",
+    "official_node_cache_sha256": "passed",
+    "derived_dockerfile_copy_env_only": "passed",
+    "actual_build_parameters_and_sources": "passed",
+    "platform_results": [
+      {
+        "arch": "amd64",
+        "image": "local/lightmoni:20261103-agent-unified-3309b0b36490-amd64",
+        "image_id": "sha256:95e448273abe056b708c7664a0a17f4d0ffa63cca9a69c86b116e9c01f804531",
+        "build_metadata_verified": true,
+        "base_materials_verified": true,
+        "builder_platform": "linux/arm64"
+      },
+      {
+        "arch": "arm64",
+        "image": "local/lightmoni:20261103-agent-unified-3309b0b36490-arm64",
+        "image_id": "sha256:a050f5103dbb32f67702fd0b8c199029d1ce6c24b4a2f04332b4a452c22c9f3c",
+        "build_metadata_verified": true,
+        "base_materials_verified": true,
+        "builder_platform": "linux/arm64"
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "amd64": {
+    "image": "local/lightmoni:20261103-agent-unified-3309b0b36490-amd64",
+    "image_id": "sha256:95e448273abe056b708c7664a0a17f4d0ffa63cca9a69c86b116e9c01f804531",
+    "manifest_digest": "sha256:95e448273abe056b708c7664a0a17f4d0ffa63cca9a69c86b116e9c01f804531",
+    "config_digest": "sha256:d7bae62576fbd80e38c9e4f47775a51404cf847a40e5651a6935ade959a889d2"
+  },
+  "arm64": {
+    "image": "local/lightmoni:20261103-agent-unified-3309b0b36490-arm64",
+    "image_id": "sha256:a050f5103dbb32f67702fd0b8c199029d1ce6c24b4a2f04332b4a452c22c9f3c",
+    "manifest_digest": "sha256:a050f5103dbb32f67702fd0b8c199029d1ce6c24b4a2f04332b4a452c22c9f3c",
+    "config_digest": "sha256:9884d71af347cf3c3a4b52e3773427e12be69eaaadd8f166dc20b8077d93e779"
+  }
+}
