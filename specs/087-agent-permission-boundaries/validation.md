@@ -28,10 +28,19 @@
 - 同步主干后的 `npm run typecheck`、`npm run build` 再次通过。身份、发行内容、预留端口健康检查、平台集群与受管脚本回归共 56 项：55 通过、1 跳过（Linux root 脚本身份测试，本机 macOS 不具备运行条件）。
 - SSH 安装账户自动/手动选择定向回归 3/3 通过。
 - 重新生产构建后的登记回归 3/3 通过，证据见 `evidence/ui/registration-ui-report.json`。Linux 脚本身份 smoke 的生成代码修正转义，并用普通 `/proc/self/status` 文本 fixture 验证空/多附加组解析 2/2；该 fixture 只验证解析，不代表真实 Linux 身份测试已运行。
+- Doca 同步提交前已再次同步主干 `b44ee39`：保留 SDD089 已审计 unknown 作业的共享围栏、最新 NAT 规则和运维界面诊断；旧独立执行器入口继续删除。类型检查与生产构建再次通过，卸载/节点移除定向回归15/15通过。
+- 扩展集成回归152项：117通过、35失败（升级测试34项、安装恢复测试1项）。旧升级 fixture 缺少解析器已要求的 `runtime_mode`、`permission_generation`、`helper_active`，计划创建失败后产生级联错误；部分任务 fixture 尚未建立新鲜签名 helper 身份。上述解析器、fixture 和门禁在同步主干前的 `a48a651` 已存在。本轮未修改这些业务实现或测试；升级、回退、批次维护及相关任务围栏的扩展验收尚未通过，不能将此前部分验收视为全链路完成。证据见 [latest-main-integration.json](evidence/latest-main-integration.json)。
+
+## Doca 同步验收
+
+- 2026-11-03 已通过已登录的 Doca 编辑界面同步[系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)，保存后重新加载文档，回读持久化正文、账号职责表与原生图节点和连线。
+- 总览及第22、27、60、71、80、83、84、86章已与第87章对齐；旧 root 常驻模式、独立发行和脚本共享 Agent 身份均标为历史方案。新增第87章四节、账号职责表、8节点9连线的权限架构图，以及5参与者9消息的任务时序图（另有5条生命线）。
+- 任务总览图保留原生图块，脚本快照只连签名 helper，再降权到 `lightmoni-task`；Agent 仅连内置采集处理。主机账户图末节点已改为“完整管理 / 仅监控，常驻 Agent 始终非 root”。回读核对 helper→中心领取、helper→task 降权和 task→helper→中心回执方向。
+- 保留历史原生图、SDD089、NAT 规则及健康目标说明。在线交付状态明确标识 PR #83 功能分支待合入、最新集成回归仍有失败、Linux 实机与镜像发布未完成。
+- 回读数据：[doca-sync-readback.json](evidence/doca-sync-readback.json)；截图：[章节状态](evidence/doca-sync-overview.jpg)、[权限架构](evidence/doca-sync-architecture.jpg)、[任务时序](evidence/doca-sync-sequence.jpg)。
 
 ## 未完成与边界
 
-- Doca 在线设计同步与回读：尚未完成。本轮网页已可访问，尝试更新总览后编辑器崩溃，无法确认完整章节、原生图和保存回读；当前进程未注入 MCP token。用户已明确安排“后续更新doca”，本次依该安排延期，保留待同步记录，不声称双端同步成功。
-- GitHub PR：[统一 Agent 权限边界与生命周期，登记推荐 root 管理账号 #83](https://github.com/workhold/lightmoni/pull/83)，Draft，代码已推送 GitHub。Doca 与 Linux 实机验收仍待办；未合并或发布。
+- GitHub PR：[统一 Agent 权限边界与生命周期，登记推荐 root 管理账号 #83](https://github.com/workhold/lightmoni/pull/83)，Draft，代码已推送 GitHub。扩展集成回归和 Linux 实机验收仍待完成；未合并或发布。
 - 未对真实 vchive 或生产主机执行 SSH、服务修改、模式切换或安装写操作。仓库/fixture/本地构建证据不能代替 Linux 实机验收。
 - 不包含平台级主机 RBAC；按现有范围由管理员管理全部登记主机。
