@@ -15,6 +15,8 @@
 
 先建立隔离 API fixture 和当前截图，完成共享样式与两类资源列表，再加配置目录，验证后进行一轮无历史上下文的视觉评审并修正。最后记录兼容影响、验证证据，通过 GitHub 功能分支 PR 交付。
 
+沿用会话已授权的发布流程：从固定源码构建双架构镜像，分别实测，核对OCI内容，再发布固定版本和latest；线上先保护性备份SQLite/master.key/Compose/env，仅替换中心镜像，核对其余容器、资源计数和Demo HTTPS。业务字段与部署拓扑不变，不重建数据库或重新登记主机。升级失败恢复先前Compose镜像；发布后的最终回读记录在同一PR描述中。
+
 ## 参考
 
 - https://docs.fit2cloud.com/1panel/user_manual/appstore/installed

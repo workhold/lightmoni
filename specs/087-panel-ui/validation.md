@@ -17,7 +17,8 @@
 ## 验收边界与发布
 
 - 桌面自动化检测到Mac锁屏，已请求用户解锁；未执行原生桌面200%缩放。浏览器扩展内的键盘Tab及模拟放大已通过，不把390px截图或模拟放大描述为原生缩放实测。
-- 镜像源提交为13a2f326840e7f8b80afe48b241246122c49434c；后续变动仅补验收文档、隔离fixture及发布元数据。GitHub PR和双架构发布结果在发布后补充。
+- 镜像源提交为13a2f326840e7f8b80afe48b241246122c49434c；后续变动仅补验收文档、隔离fixture及发布元数据。linux/arm64与linux/amd64各42项成品检查通过，另外各自通过编译成品的私网地址HTTP/TCP健康探测。AMD64使用本机Docker仿真，ClickHouse为隔离ARM64实例。
+- 固定镜像`docker.heyphp.com/lightmoni/lightmoni:20261103-13a2f32`；双架构索引SHA256为`4e7722c28fc226262da4e8eeddabe65a3294e24fc4f3dc23c3ce63e627530951`。已核对37个本地OCI blob的SHA256及其与实测镜像完全一致的rootfs/config。远端发布、线上备份和升级后的回读结果以[PR #82](https://github.com/workhold/lightmoni/pull/82)发布验证节为准，本地镜像通过不等于已在线升级。
 
 ## 证据位置
 
