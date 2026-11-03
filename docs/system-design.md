@@ -2141,3 +2141,7 @@ flowchart TD
 容器能力未就绪时引导主机执行权限，检查统一 Agent 的 root/user 运行模式、容器管理授权与新鲜签名状态；不会因为进入页面、SSH 验证成功或点击刷新而自动提权。CentOS 上已有完整 Engine/Compose 仍可直接验证，缺失组件的自动补装继续仅限 Ubuntu/Debian。
 
 SSH 安装非零退出仅保存退出码和有限固定原因，不持久化原始远端输出或凭据。已派发安装即使有已知诊断仍保持 unknown 与原互斥，必须只读核对或明确结束，不据退出码自动撤销身份、重放安装或推定远端未发生改变。
+
+受管应用的健康目标由中心已预留端口决定：签名配置 health.host 携带该端口的 host_ip，health.port 携带分配后的宿主端口，部署与巡检复用同一目标。Agent 仅接受 IP 字面量，IPv4/IPv6 通配绑定分别探测 127.0.0.1/::1，HTTP IPv6 使用方括号；不把内网绑定误认为回环服务，不接受域名、URL 或用户信息扩大探测目的地。
+
+交付 Demo 沿用既有集群模型：中心通过统一 root Agent 的签名受管作业部署 Registry、OpenResty 和 ABC Demo。Registry 绑定主机内网地址，通过 registry-demo.heyphp.com 的 HTTPS 与独立 Basic Auth 提供发布入口；ABC Demo 使用该私有来源镜像与命名 HTTP 端口，由 OpenResty 服务发现路由到 abc.heyphp.com。heyphp.com 的加密 DNS 凭据用于解析与 ACME DNS 验证；两个专用证书由中心加密保存并按网站授权分发，私钥和仓库密码不进入源码、日志或设计正文。

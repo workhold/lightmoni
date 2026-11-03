@@ -270,6 +270,11 @@ test("private registry registration is host owned, coexists with business regist
       .host_ip,
     "10.0.0.1",
   );
+  assert.equal(payload.resource.config.health.host, "10.0.0.1");
+  assert.equal(payload.resource.config.health.port, Number(payload.resource.config.application.compose.services.registry.ports[0].published));
+  const inspect = await f.action(view.application, "inspect", { cluster_id: c.id });
+  assert.equal(inspect.status, 202, JSON.stringify(inspect.body));
+  assert.equal(f.finish("a").payload.resource.config.health.host, "10.0.0.1");
   // The ordinary cluster editor uses the same cache setting and publishes the new runtime.
   const cluster = f.store.get(c.id),
     saved = await f.req("/resources/" + c.id, "PUT", {
