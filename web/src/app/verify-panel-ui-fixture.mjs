@@ -21,23 +21,29 @@ const seed=[
  resource('qa-dns','credential','阿里云 DNS',{provider:'alibyun'},{state:'verified'})
 ];
 const host={id:machine,name:'zz-bj-1',address:'49.232.14.169',port:22,agent_id:'qa-agent',agent_status:'online',status:'active',created_at:now,updated_at:now,accounts:[],network:{private:{address:'172.21.0.16'},public:{address:'49.232.14.169'}},docker_environment:{state:'ready',source:'executor',observed_at:now}};
-let resources=structuredClone(seed),failNext=false;const calls=[];
+let resources=structuredClone(seed),failNext=false,qaRole='admin',qaJob=null,qaRuns=[];const calls=[];
 const server=await createServer({root:new URL('../..',import.meta.url).pathname,configFile:false,server:{host:'127.0.0.1',port:19887,strictPort:true},plugins:[{name:'isolated-panel-ui',configureServer(vite){vite.middlewares.use(async(req,res,next)=>{
  const url=new URL(req.url,'http://127.0.0.1'),path=url.pathname;const json=(d,status=200)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(d))};
- if(path==='/__qa/reset'){resources=structuredClone(seed);failNext=false;calls.length=0;return json({reset:true})}
+ if(path==='/__qa/reset'){resources=structuredClone(seed);failNext=false;qaRole='admin';qaJob=null;qaRuns=[];calls.length=0;return json({reset:true})}
  if(path==='/__qa/fail-next'){failNext=true;return json({armed:true})}
  if(path==='/__qa/calls')return json(calls);
  if(path==='/__qa/scenario/unknown'){const a=resources.find(r=>r.id==='qa-demo');a.status.instances[0].state='unknown';a.status.instances[0].healthy=false;return json({scenario:'unknown'})}
  if(path==='/__qa/scenario/stopped'){const a=resources.find(r=>r.id==='qa-demo');a.status.state='stopped';a.status.instances[0].state='stopped';a.status.instances[0].healthy=false;a.status.deployments[cluster].enabled=false;return json({scenario:'stopped'})}
+ if(path.startsWith('/__qa/managed/')){const mode=path.split('/').at(-1);qaRole=mode==='viewer'?'user':'admin';qaRuns=[{id:'qa-run',resource_id:'qa-demo',resource_revision:1,agent_id:'qa-agent',action:'inspect',state:'unknown',result:{code:'executor_http_502'},job_id:'qa-job',created_at:now,updated_at:now}];qaJob=mode==='legacy'?null:{id:'qa-job',task_run_id:'qa-task',machine_id:mode==='wrong-host'?'other-host':machine,executor_id:'qa-executor',install_generation:1,policy_generation:1,execution_principal:'privileged_executor',capability:mode==='wrong-capability'?'container.managed.v1':'operations.managed.v1',state:'unknown',phase:'unknown',code:'executor_http_502',created_at:now,finished_at:now,plan_id:'qa-plan',plan_revision:'qa-revision',request_id:'qa-request',resolved_at:'',has_output:true};return json({mode})}
  if(!path.startsWith('/api/'))return next();
  const p=path.replace('/api/v1','');
  if(req.method==='GET'){
-  if(p==='/auth/me')return json({id:'qa-admin',name:'admin',nickname:'运维管理员',role:'admin',default_homepage:'/applications'});
-  if(p==='/ops/overview')return json({resources,agents:[{id:'qa-agent',hostname:'zz-bj-1',host_id:'qa-host',last_seen:new Date().toISOString(),platform:'linux',arch:'amd64',heartbeat:{}}],machines:[host],runs:[]});
+  if(p==='/auth/me')return json({id:'qa-admin',name:'admin',nickname:'运维管理员',role:qaRole,default_homepage:'/applications'});
+  if(p==='/ops/overview')return json({resources,agents:[{id:'qa-agent',hostname:'zz-bj-1',host_id:'qa-host',last_seen:new Date().toISOString(),platform:'linux',arch:'amd64',heartbeat:{}}],machines:[host],runs:qaRuns});
   if(p==='/machines'||p==='/task-hosts')return json([host]);
   if(p==='/agents')return json([{id:'qa-agent',host_id:'qa-host',hostname:'zz-bj-1',last_seen:new Date().toISOString(),status:'online',version:'0.1.0',platform:'linux',arch:'amd64',heartbeat:{}}]);
   if(p==='/host-labels')return json([]);
-  if(p==='/ops/runs')return json({runs:[]});
+  if(p==='/ops/runs')return json({runs:qaRuns});
+  if(p==='/ops/system-logs')return json({rows:qaRuns.map(r=>({event_id:r.id,event_time:now,severity:'warn',attributes:{source:'ops_platform_runs',run_id:r.id,action:r.action,state:r.state,resource_id:r.resource_id},body:'fixture execution record'}))});
+  if(p==='/ops/runs/qa-run')return json(qaRuns[0]);
+  if(p==='/ops/runs/qa-run/events')return json({run:qaRuns[0],events:[],next_after:0});
+  if(p==='/privileged-execution/jobs/qa-job'){calls.push({path:p,method:'GET'});return qaJob?json({job:qaJob}):json({error:'job_not_found'},404)}
+  if(p.endsWith('/output')){calls.push({path:p,method:'GET'});return json({error:'output_requires_explicit_request'},403)}
   if(p==='/ops/resources/qa-zone/dns-lines')return json({provider:'aliyun',lines:[{id:'default',name:'默认'}],weight:{min:1,max:100},verification:'provider_required'});
   const match=p.match(/^\/ops\/resources\/([^/]+)$/);if(match){const r=resources.find(r=>r.id===match[1]);return json({resource:r})}
   if(p.endsWith('/runs'))return json({runs:[]});
@@ -50,6 +56,11 @@ const server=await createServer({root:new URL('../..',import.meta.url).pathname,
   if(failNext){failNext=false;return json({error:'platform_revision_conflict'},409)}
   const id=p.split('/')[3],r=resources.find(r=>r.id===id);if(!r)return json({error:'not_found'},404);
   Object.assign(r,{name:body.name,spec:body.spec,revision:r.revision+1,updated_at:new Date().toISOString()});return json({resource:r});
+ }
+ if(req.method==='POST'&&p==='/privileged-execution/jobs/qa-job/reconcile'){
+  if(qaRole!=='admin'||!qaJob||qaJob.machine_id!==machine)return json({error:'not_allowed'},403);
+  if(body.confirm!==true||!body.reason?.trim()||Buffer.byteLength(body.reason)>512)return json({error:'confirmation_required'},400);
+  qaJob={...qaJob,resolved_at:new Date().toISOString(),resolved_by:'qa-admin',resolution_reason:body.reason};return json({job:qaJob});
  }
  if(req.method==='POST'&&p.endsWith('/actions'))return json({error:'fixture_does_not_execute_operations'},409);
  if(req.method==='DELETE')return json({error:'fixture_does_not_delete'},409);

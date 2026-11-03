@@ -3,7 +3,7 @@ import {Alert,Button,Checkbox,Descriptions,Form,Input,Space,Spin,Tag,Typography}
 import {api,ApiError} from '../shared/api';
 import {useI18n} from '../shared/i18n';
 
-export type PrivilegedCapability='script.elevated.v1'|'container.managed.v1';
+export type PrivilegedCapability='script.elevated.v1'|'container.managed.v1'|'operations.managed.v1';
 export type PrivilegedExecutionJob={
  id:string;task_run_id:string;plan_id:string;plan_revision:string;request_id:string;
  machine_id:string;machine_name?:string;executor_id:string;install_generation:number;policy_generation:number;
@@ -22,13 +22,14 @@ const sameIdentity=(a:PrivilegedExecutionJob,b:PrivilegedExecutionJob)=>a.id===b
 export default function PrivilegedJobResult(props:Props){return <PrivilegedJobResultContent key={props.capability+':'+props.jobID+':'+(props.hostID??'')} {...props}/>;}
 
 function PrivilegedJobResultContent({jobID,capability,hostID,hostName,onChanged}:Props){
- const {t,language}=useI18n(),script=capability==='script.elevated.v1';
+ const {t,language}=useI18n(),script=capability==='script.elevated.v1',managed=capability==='operations.managed.v1';
  const [job,setJob]=useState<PrivilegedExecutionJob>(),[loading,setLoading]=useState(false),[error,setError]=useState('');
  const [output,setOutput]=useState<{stdout:string;stderr:string;exit_code:number|null}>(),[outputBusy,setOutputBusy]=useState(false);
  const [action,setAction]=useState<JobAction>(),[checked,setChecked]=useState(false),[reason,setReason]=useState(''),[actionBusy,setActionBusy]=useState(false),[needsRefresh,setNeedsRefresh]=useState(false);
  const mounted=useRef(false),generation=useRef(0),outputGeneration=useRef(0),outputPending=useRef(false),actionPending=useRef(false),identity=useRef<PrivilegedExecutionJob|undefined>(undefined);
  const changed=useRef(onChanged);changed.current=onChanged;
- const title=script?t('提权执行结果','Elevated run result'):t('容器执行结果','Container run result');
+ const copy=script?{title:t('提权执行结果','Elevated run result'),refresh:t('刷新提权结果','Refresh elevated result'),cancel:t('取消提权执行','Cancel elevated run'),confirm:t('提权执行操作确认','Elevated run action confirmation'),reason:t('提权人工核对原因','Elevated reconciliation reason'),checkbox:t('确认提权执行后续操作','Confirm elevated run action')}:managed?{title:t('主机运维执行结果','Host operation result'),refresh:t('刷新主机运维结果','Refresh host operation result'),cancel:t('取消主机运维执行','Cancel host operation'),confirm:t('主机运维操作确认','Host operation action confirmation'),reason:t('主机运维人工核对原因','Host operation reconciliation reason'),checkbox:t('确认主机运维后续操作','Confirm host operation action')}:{title:t('容器执行结果','Container run result'),refresh:t('刷新容器结果','Refresh container result'),cancel:t('取消容器执行','Cancel container run'),confirm:t('容器执行操作确认','Container run action confirmation'),reason:t('容器人工核对原因','Container reconciliation reason'),checkbox:t('确认容器执行后续操作','Confirm container run action')};
+ const title=copy.title;
  const stateText=(value:PrivilegedExecutionJob)=>value.state==='unknown'&&value.resolved_at?t('结果未知，已人工核对','Outcome unknown; manually reconciled'):({queued:t('待领取','Queued'),running:t('执行中','Running'),succeeded:t('成功','Succeeded'),failed:t('失败','Failed'),cancelled:t('已取消','Cancelled'),unknown:t('结果未知，需核对','Outcome unknown; verification needed')}[value.state]||value.state);
  const stateColor=(state:string)=>({queued:'processing',running:'processing',succeeded:'success',failed:'error',unknown:'warning'}[state]);
  const time=(value?:string)=>value&&Number.isFinite(Date.parse(value))?new Date(value).toLocaleString(language):'—';
@@ -70,7 +71,7 @@ function PrivilegedJobResultContent({jobID,capability,hostID,hostName,onChanged}
  };
  return <section aria-label={title}>
   <h3>{title}</h3>{error&&<Alert type="error" title={error}/>}{loading&&!job&&<Spin/>}
-  {!job?<Button loading={loading} onClick={()=>void readJob()}>{script?t('刷新提权结果','Refresh elevated result'):t('刷新容器结果','Refresh container result')}</Button>:<>
+  {!job?<Button loading={loading} onClick={()=>void readJob()}>{copy.refresh}</Button>:<>
    <Descriptions column={{xs:1,sm:2}} size="small" items={[
     {key:'id',label:t('执行 ID','Run ID'),children:job.id},{key:'trace',label:t('任务追踪 ID','Task trace ID'),children:job.task_run_id},
     {key:'state',label:t('状态','State'),children:<Tag color={stateColor(job.state)}>{stateText(job)}</Tag>},{key:'plan',label:t('计划 ID','Plan ID'),children:job.plan_id||'—'},
@@ -81,17 +82,17 @@ function PrivilegedJobResultContent({jobID,capability,hostID,hostName,onChanged}
    ]}/>
    {job.state==='unknown'&&<Alert type="warning" showIcon title={job.resolved_at?t('结果未知，已记录人工核对','Outcome unknown; human reconciliation recorded'):t('结果未知，需先核对现场','Outcome unknown; verify the host first')} description={t('任务可能已经产生副作用，本页不提供重试或把未知状态改为成功。','The task may already have caused effects. This view does not retry it or mark an unknown outcome as successful.')}/>}
    <Space wrap style={{marginTop:12}}>
-    <Button disabled={actionBusy} onClick={()=>void readJob()}>{script?t('刷新提权结果','Refresh elevated result'):t('刷新容器结果','Refresh container result')}</Button>
+    <Button disabled={actionBusy} onClick={()=>void readJob()}>{copy.refresh}</Button>
     <Button loading={outputBusy} disabled={needsRefresh} onClick={()=>void readOutput()}>{t('查看敏感输出','View sensitive output')}</Button>
     {output&&<Button onClick={hideOutput}>{t('隐藏输出','Hide output')}</Button>}
-    {['queued','running'].includes(job.state)&&!job.cancel_requested&&<Button danger disabled={actionBusy||needsRefresh} onClick={()=>openAction('cancel')}>{script?t('取消提权执行','Cancel elevated run'):t('取消容器执行','Cancel container run')}</Button>}
+    {['queued','running'].includes(job.state)&&!job.cancel_requested&&<Button danger disabled={actionBusy||needsRefresh} onClick={()=>openAction('cancel')}>{copy.cancel}</Button>}
     {job.state==='unknown'&&!job.resolved_at&&<Button disabled={actionBusy||needsRefresh} onClick={()=>openAction('reconcile')}>{t('人工核对结束','Reconcile ended execution')}</Button>}
    </Space>
-   {action&&<section aria-label={script?t('提权执行操作确认','Elevated run action confirmation'):t('容器执行操作确认','Container run action confirmation')} style={{marginTop:16}}>
+   {action&&<section aria-label={copy.confirm} style={{marginTop:16}}>
     <h4>{action==='cancel'?t('确认取消执行','Confirm cancellation'):t('人工核对未知执行','Reconcile unknown execution')}</h4>
     <Typography.Paragraph>{action==='cancel'?t('未领取的任务会取消；执行中的任务会请求 Agent 终止，需等待回执。已发生的副作用不会撤销。','An unclaimed run is cancelled. A running execution is asked to stop and must await its executor receipt. Effects that have already occurred cannot be undone.'):t('先在主机上核对本条执行与现场影响，确认执行动作已结束。此操作仅记录人工核对并解除互斥，执行结果仍为未知，不会终止主机上的进程、停止容器或把结果改为成功。','First verify this execution and its effects on the host, and confirm the execution action has ended. This records human reconciliation and releases the block. The outcome stays unknown; it does not terminate host processes, stop containers, or mark success.')}</Typography.Paragraph>
-    {action==='reconcile'&&<Form layout="vertical"><Form.Item label={t('核对原因','Reconciliation reason')} extra={t('填写 1–512 UTF-8 字节的现场核对记录','Enter 1–512 UTF-8 bytes describing the host verification')} validateStatus={bytes(reason.trim())>512?'error':undefined}><Input.TextArea aria-label={script?t('提权人工核对原因','Elevated reconciliation reason'):t('容器人工核对原因','Container reconciliation reason')} value={reason} disabled={actionBusy||needsRefresh} rows={3} onChange={event=>setReason(event.target.value)}/></Form.Item></Form>}
-    <Checkbox aria-label={script?t('确认提权执行后续操作','Confirm elevated run action'):t('确认容器执行后续操作','Confirm container run action')} checked={checked} disabled={actionBusy||needsRefresh} onChange={event=>setChecked(event.target.checked)}>{action==='cancel'?t('我确认取消本条执行，并理解取消不能撤销副作用','I confirm cancellation of this run and understand that it cannot undo effects'):t('我已核对本条执行与现场影响，确认执行动作已结束','I verified this execution and its effects and confirmed the execution action ended')}</Checkbox>
+    {action==='reconcile'&&<Form layout="vertical"><Form.Item label={t('核对原因','Reconciliation reason')} extra={t('填写 1–512 UTF-8 字节的现场核对记录','Enter 1–512 UTF-8 bytes describing the host verification')} validateStatus={bytes(reason.trim())>512?'error':undefined}><Input.TextArea aria-label={copy.reason} value={reason} disabled={actionBusy||needsRefresh} rows={3} onChange={event=>setReason(event.target.value)}/></Form.Item></Form>}
+    <Checkbox aria-label={copy.checkbox} checked={checked} disabled={actionBusy||needsRefresh} onChange={event=>setChecked(event.target.checked)}>{action==='cancel'?t('我确认取消本条执行，并理解取消不能撤销副作用','I confirm cancellation of this run and understand that it cannot undo effects'):t('我已核对本条执行与现场影响，确认执行动作已结束','I verified this execution and its effects and confirmed the execution action ended')}</Checkbox>
     <Space wrap style={{marginTop:12}}><Button danger type="primary" aria-label={action==='cancel'?t('提交取消请求','Submit cancellation request'):t('记录人工核对','Record reconciliation')} loading={actionBusy} disabled={actionBusy||needsRefresh||!checked||action==='reconcile'&&(!reason.trim()||bytes(reason.trim())>512)} onClick={()=>void submitAction()}>{action==='cancel'?t('提交取消请求','Submit cancellation request'):t('记录人工核对','Record reconciliation')}</Button><Button disabled={actionBusy} onClick={resetAction}>{t('返回执行结果','Back to run result')}</Button></Space>
    </section>}
    {output&&<><Typography.Paragraph type="secondary" style={{marginTop:12}}>{t('输出可能包含秘密，仅在此显式读取，不自动发送给 AI 或遥测。','Output may contain secrets. It is read only on request and is not automatically sent to AI or telemetry.')}</Typography.Paragraph><h4>stdout</h4><pre className="lm-task-output">{output.stdout||t('无输出','No output')}</pre><h4>stderr</h4><pre className="lm-task-output">{output.stderr||t('无输出','No output')}</pre></>}
