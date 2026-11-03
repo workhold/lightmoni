@@ -68,8 +68,9 @@ export function createQuickInstall(store:PlatformStore,workloads:DomainControlle
    if(domain) {
     const gatewayID=systemApplicationID(store,'openresty');gateway=gatewayID?store.get(gatewayID,'application'):undefined;
     const additions=b.deployments.filter((d:Row)=>!gateway?.spec.deployments.some((v:Row)=>v.cluster_id===d.cluster_id)).map((d:Row)=>({...d,cpu:.25,memory_mb:128,gateway_dns_zone_id:zone!.id}));
+    const managedEntries=gateway?.spec.deployments.map((d:Row)=>b.deployments.some((v:Row)=>v.cluster_id===d.cluster_id)&&!d.gateway_dns_zone_id?{...d,gateway_domain:undefined,gateway_dns_zone_id:zone!.id,gateway_domain_generated:true}:d);
     if(!gateway) {const entry=catalogInstallation('openresty',{deployments:additions,deployment_mode:'manual'});gateway=store.create('application',entry.name,entry.spec,actor)}
-    else if(additions.length)gateway=store.updateSystemApplication(gateway.id,gateway.revision,gateway.name,{...gateway.spec,deployments:[...gateway.spec.deployments,...additions]},actor);
+    else if(additions.length||managedEntries!.some((d:Row,index:number)=>d!==gateway!.spec.deployments[index]))gateway=store.updateSystemApplication(gateway.id,gateway.revision,gateway.name,{...gateway.spec,deployments:[...managedEntries!,...additions]},actor);
     if(!certificate)certificate=store.create('certificate',domain+' TLS',{source:'acme',domains:[domain],auto_renew:true,acme_account_id:account!.id,dns_zone_ids:[zone!.id]},actor);
    }
    app=store.create('application',installation.name,installation.spec,actor);
