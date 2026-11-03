@@ -10,17 +10,20 @@
 - 浅色与深色均实际看图并记录状态颜色，深色选择刷新后保留。临时浏览器视口已复位。
 - 独立静态视觉评审一轮，不打分；反馈和处理见 evidence/visual-review.md。
 - Web TypeScript检查、fixture语法检查、git diff --check通过。没有运行与本次改动无关的全量测试。
+- 证书同步任务默认折叠，点击“同步任务 · 0”展开原任务面板并显示空状态；折叠/展开画面均回读。
+- 最终浅色应用/网站截图已刷新，网站动作对齐、服务标识及 DNS 厂商确认边界均可见。
+- 通过864×418 iframe视口在1728×836画面中等比放大两倍，检查网站列表、配置弹窗、固定保存栏与Tab聚焦名称输入框。此项为模拟200%放大，不是原生Chrome缩放。临时预览HTML不进入产品提交。
 
-## 尚待收尾
+## 验收边界与发布
 
-- 桌面自动化检测到Mac锁屏，已请求用户解锁；原生200%放大和窗口键盘检查待补，不能把390px截图描述为200%实测。
-- 证书同步任务按需展开、新的空筛选说明、最终版本截图、GitHub PR和发布状态在后续收尾记录。
+- 桌面自动化检测到Mac锁屏，已请求用户解锁；未执行原生桌面200%缩放。浏览器扩展内的键盘Tab及模拟放大已通过，不把390px截图或模拟放大描述为原生缩放实测。
+- 镜像源提交为13a2f326840e7f8b80afe48b241246122c49434c；后续变动仅补验收文档、隔离fixture及发布元数据。GitHub PR和双架构发布结果在发布后补充。
 
 ## 证据位置
 
-现场画面保存在忽略目录 `.local-dev/panel-ui-087/`：applications-before.png、applications-light.png、applications-mobile.png、websites-light.png、websites-1366.png、websites-dark.png、websites-mobile.png、website-editor-light.png、website-editor-mobile.png、save-failure-input-preserved.png、unknown-state-disabled-actions.png。
+现场画面保存在忽略目录 `.local-dev/panel-ui-087/`：applications-before.png、applications-light.png、applications-mobile.png、websites-light.png、websites-1366.png、websites-dark.png、websites-mobile.png、website-editor-light.png、website-editor-mobile.png、save-failure-input-preserved.png、unknown-state-disabled-actions.png、certificates-dark.png、certificates-expanded-dark.png、hosts-dark.png、websites-simulated-200.png、website-editor-simulated-200.png。
 
-浅色早期画面在最终收尾时刷新替换；截图中的资源与计数属于隔离fixture，不是生产实时指标。三处轻量反馈沿用列表入场、导航收放与组件菜单/弹窗；只验证可观察状态，未声称完整录屏动效评审。
+截图中的资源与计数属于隔离fixture，不是生产实时指标。三处轻量反馈沿用列表入场、导航收放与组件菜单/弹窗；只验证可观察状态，未声称完整录屏动效评审。
 
 ## 架构与兼容
 

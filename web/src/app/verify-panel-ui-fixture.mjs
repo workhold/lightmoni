@@ -38,6 +38,7 @@ const server=await createServer({root:new URL('../..',import.meta.url).pathname,
   if(p==='/agents')return json([{id:'qa-agent',host_id:'qa-host',hostname:'zz-bj-1',last_seen:new Date().toISOString(),status:'online',version:'0.1.0',platform:'linux',arch:'amd64',heartbeat:{}}]);
   if(p==='/host-labels')return json([]);
   if(p==='/ops/runs')return json({runs:[]});
+  if(p==='/ops/resources/qa-zone/dns-lines')return json({provider:'aliyun',lines:[{id:'default',name:'默认'}],weight:{min:1,max:100},verification:'provider_required'});
   const match=p.match(/^\/ops\/resources\/([^/]+)$/);if(match){const r=resources.find(r=>r.id===match[1]);return json({resource:r})}
   if(p.endsWith('/runs'))return json({runs:[]});
   if(p==='/ops/catalog')return json({applications:[]});
