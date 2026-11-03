@@ -1,0 +1,20 @@
+{
+  "requirement": "Applications in both placement modes have service names. Manual websites choose service discovery or direct proxy URLs. Managed websites use service discovery only.",
+  "implementation_change": "Not needed: the existing model and production UI already implement this contract. The new requirement was added to SDD acceptance and verified.",
+  "regression": {
+    "command": "cd runtime && node --import tsx --test --test-concurrency=1 test/platform-clusters.test.ts test/platform-website-routing.test.ts",
+    "tests": 52,
+    "pass": 52,
+    "fail": 0,
+    "skipped": 0,
+    "covers": ["unique immutable manual application service identities", "HTTP/HTTPS discovery of manual application endpoints", "manual website application and literal URL paths in one configuration", "gateway-specific IPv4/IPv6 and private bind addresses", "unhealthy endpoint removal and 503", "managed cluster discovery and publication fences"]
+  },
+  "production": {
+    "manual_application": "47c8760dfa1c5c3ac24c878441fff90c / abc-demo",
+    "managed_website": "80d0a4d24cbe70ea60794b913971b5f7 / abc.heyphp.com / abc-demo:http",
+    "manual_website_with_service": "fb2bb27e9a85a7e83cb46412d3eab67a / registry-demo.heyphp.com / sys-docker-registry:registry",
+    "ui": "Managed website shows ABC Demo · abc-demo and http port, with no per-path URL editor. Switching the editor to manual exposes application named port and manual upstream sources; adding an upstream exposes an editable URL. The inspection was cancelled and saved managed revision 1 was read back unchanged.",
+    "saved_config_readback": "Selected fields only; no auth, DNS or SSH secrets exported."
+  },
+  "architecture_change": {"applicable": false, "reason": "This clarifies and validates the existing service identity and routing contract; no storage, protocol, component or control path is changed."}
+}

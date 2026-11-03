@@ -2145,3 +2145,5 @@ SSH 安装非零退出仅保存退出码和有限固定原因，不持久化原�
 受管应用的健康目标由中心已预留端口决定：签名配置 health.host 携带该端口的 host_ip，health.port 携带分配后的宿主端口，部署与巡检复用同一目标。Agent 仅接受 IP 字面量，IPv4/IPv6 通配绑定分别探测 127.0.0.1/::1，HTTP IPv6 使用方括号；不把内网绑定误认为回环服务，不接受域名、URL 或用户信息扩大探测目的地。
 
 交付 Demo 沿用既有集群模型：中心通过统一 root Agent 的签名受管作业部署 Registry、OpenResty 和 ABC Demo。Registry 绑定主机内网地址，通过 registry-demo.heyphp.com 的 HTTPS 与独立 Basic Auth 提供发布入口；ABC Demo 使用该私有来源镜像与命名 HTTP 端口，由 OpenResty 服务发现路由到 abc.heyphp.com。heyphp.com 的加密 DNS 凭据用于解析与 ACME DNS 验证；两个专用证书由中心加密保存并按网站授权分发，私钥和仓库密码不进入源码、日志或设计正文。
+
+云公网 NAT 不会因 Registry 监听内网 IP 而自动隔离后端。Demo 主机在 DOCKER-USER 中仅匹配原始目的地址 172.21.0.16、原始 TCP 端口 20000 和 ORIGINAL 方向，允许受信内网 172.21.0.0/20，其余来源丢弃；回包方向与 OpenResty/Agent 本机访问保持原有路径。规则由 root 所有的幂等脚本及 Docker 启动前 oneshot 单元加载，Docker 通过 Requires/After 依赖该单元；网络或后端端口变更需同步主机规则。此部署配置通过精确审批的签名 root 作业安装，不增加平台执行权限或兼容通道。

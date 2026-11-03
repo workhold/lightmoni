@@ -1,0 +1,32 @@
+{
+  "machine_id": "9473f8974462e85d",
+  "plan_id": "2b4ae3e1-bb80-45fb-86a3-607a168f9880",
+  "job_id": "5601e713-cecf-4658-970b-b78818fc95d1",
+  "capability": "script.elevated.v1",
+  "code_sha256": "741264d6bb16ac40c65ca5b6a40b632221078e144b5c637253b250164078ce81",
+  "execution": { "state": "succeeded", "exit_code": 0, "stdout": "registry_backend_private=verified" },
+  "network": {
+    "chain": "LMREGISTRY_20000",
+    "original_destination": "172.21.0.16",
+    "original_tcp_port": 20000,
+    "conntrack_direction": "ORIGINAL",
+    "trusted_source_cidr": "172.21.0.0/20",
+    "other_sources": "DROP",
+    "public_backend_before": 200,
+    "public_backend_after": "timeout from production server and independent local client",
+    "private_backend_after": 200,
+    "public_https_unauthenticated": 401,
+    "public_https_authenticated": 200,
+    "public_tls_verify_result": 0,
+    "drop_counter_increased": true
+  },
+  "persistence": {
+    "script": "/usr/local/sbin/lightmoni-registry-firewall",
+    "unit": "lightmoni-registry-firewall.service",
+    "enabled": true,
+    "applied_twice_idempotently": true,
+    "docker_requires_and_after": "lightmoni-registry-firewall.service",
+    "docker_remained_active": true,
+    "host_or_docker_reboot_performed": false
+  }
+}
