@@ -1,0 +1,280 @@
+TAP version 13
+# Subtest: checksum rejection leaves the installed release, service, config, queue and identity unchanged
+ok 1 - checksum rejection leaves the installed release, service, config, queue and identity unchanged
+  ---
+  duration_ms: 107.476625
+  type: 'test'
+  ...
+# Subtest: verified release switches atomically, configures and restarts while preserving old runtime and spool
+ok 2 - verified release switches atomically, configures and restarts while preserving old runtime and spool
+  ---
+  duration_ms: 1704.538333
+  type: 'test'
+  ...
+# Subtest: ordinary permission validation failure restores the previous installation before a new service start
+ok 3 - ordinary permission validation failure restores the previous installation before a new service start
+  ---
+  duration_ms: 1022.390458
+  type: 'test'
+  ...
+# Subtest: first installation publishes readable runtime and executable helpers without exposing config or persisted state
+ok 4 - first installation publishes readable runtime and executable helpers without exposing config or persisted state
+  ---
+  duration_ms: 1787.287417
+  type: 'test'
+  ...
+# Subtest: startup observation tolerates delayed activation and requires two consecutive active checks
+ok 5 - startup observation tolerates delayed activation and requires two consecutive active checks
+  ---
+  duration_ms: 1936.75225
+  type: 'test'
+  ...
+# Subtest: isolated active observations do not count as successful startup and rollback remains intact
+ok 6 - isolated active observations do not count as successful startup and rollback remains intact
+  ---
+  duration_ms: 2113.876417
+  type: 'test'
+  ...
+# Subtest: persistently inactive first installation stops after ten checks and removes new live files
+ok 7 - persistently inactive first installation stops after ten checks and removes new live files
+  ---
+  duration_ms: 2034.178125
+  type: 'test'
+  ...
+# Subtest: failed diagnostic collection cannot prevent restoring the previous installation
+ok 8 - failed diagnostic collection cannot prevent restoring the previous installation
+  ---
+  duration_ms: 2010.5305
+  type: 'test'
+  ...
+# Subtest: restart exit status survives diagnostic failure and successful restoration
+ok 9 - restart exit status survives diagnostic failure and successful restoration
+  ---
+  duration_ms: 1622.673833
+  type: 'test'
+  ...
+# Subtest: disconnected SSH stderr cannot interrupt none installation restoration
+ok 10 - disconnected SSH stderr cannot interrupt none installation restoration
+  ---
+  duration_ms: 1667.018917
+  type: 'test'
+  ...
+# Subtest: disconnected SSH stderr cannot interrupt node installation restoration
+ok 11 - disconnected SSH stderr cannot interrupt node installation restoration
+  ---
+  duration_ms: 1685.387042
+  type: 'test'
+  ...
+# Subtest: SIGHUP during restoration cannot interrupt EXIT cleanup
+ok 12 - SIGHUP during restoration cannot interrupt EXIT cleanup
+  ---
+  duration_ms: 1605.12325
+  type: 'test'
+  ...
+# Subtest: SIGINT during restoration cannot interrupt EXIT cleanup
+ok 13 - SIGINT during restoration cannot interrupt EXIT cleanup
+  ---
+  duration_ms: 1666.661166
+  type: 'test'
+  ...
+# Subtest: SIGTERM during restoration cannot interrupt EXIT cleanup
+ok 14 - SIGTERM during restoration cannot interrupt EXIT cleanup
+  ---
+  duration_ms: 1704.732666
+  type: 'test'
+  ...
+# Subtest: real restoration failure retains its lifecycle fence and backups after SSH disconnect
+ok 15 - real restoration failure retains its lifecycle fence and backups after SSH disconnect
+  ---
+  duration_ms: 1730.570459
+  type: 'test'
+  ...
+# Subtest: restart failure restores the old node install, permissions, config and previously active service
+ok 16 - restart failure restores the old node install, permissions, config and previously active service
+  ---
+  duration_ms: 1671.873291
+  type: 'test'
+  ...
+# Subtest: restart rollback keeps a previously inactive service stopped
+ok 17 - restart rollback keeps a previously inactive service stopped
+  ---
+  duration_ms: 1626.799
+  type: 'test'
+  ...
+# Subtest: first-install restart failure removes new live files and does not claim installation succeeded
+ok 18 - first-install restart failure removes new live files and does not claim installation succeeded
+  ---
+  duration_ms: 1708.85675
+  type: 'test'
+  ...
+# Subtest: a rolled-back fresh install on an empty host can be attempted again without stale program directories
+ok 19 - a rolled-back fresh install on an empty host can be attempted again without stale program directories
+  ---
+  duration_ms: 3479.710667
+  type: 'test'
+  ...
+# Subtest: first install prepares its dedicated account and primary group before inspection and creates a missing launcher directory
+ok 20 - first install prepares its dedicated account and primary group before inspection and creates a missing launcher directory
+  ---
+  duration_ms: 2272.837333
+  type: 'test'
+  ...
+# Subtest: failed first install removes only the empty launcher directory it created
+ok 21 - failed first install removes only the empty launcher directory it created
+  ---
+  duration_ms: 1818.822416
+  type: 'test'
+  ...
+# Subtest: fresh installer refuses retained identity and releases lifecycle lock without replacing files
+ok 22 - fresh installer refuses retained identity and releases lifecycle lock without replacing files
+  ---
+  duration_ms: 69.671375
+  type: 'test'
+  ...
+# Subtest: fresh installer refuses retained helper etc/lightmoni-agent-helper directory before enrollment
+ok 23 - fresh installer refuses retained helper etc/lightmoni-agent-helper directory before enrollment
+  ---
+  duration_ms: 69.274667
+  type: 'test'
+  ...
+# Subtest: fresh installer refuses retained helper etc/lightmoni-agent-helper dangling-link before enrollment
+ok 24 - fresh installer refuses retained helper etc/lightmoni-agent-helper dangling-link before enrollment
+  ---
+  duration_ms: 69.298166
+  type: 'test'
+  ...
+# Subtest: fresh installer refuses retained helper var/lib/lightmoni-agent-helper directory before enrollment
+ok 25 - fresh installer refuses retained helper var/lib/lightmoni-agent-helper directory before enrollment
+  ---
+  duration_ms: 72.547959
+  type: 'test'
+  ...
+# Subtest: fresh installer refuses retained helper var/lib/lightmoni-agent-helper dangling-link before enrollment
+ok 26 - fresh installer refuses retained helper var/lib/lightmoni-agent-helper dangling-link before enrollment
+  ---
+  duration_ms: 69.16
+  type: 'test'
+  ...
+# Subtest: fresh installer refuses retained helper etc/systemd/system/lightmoni-agent-helper.service directory before enrollment
+ok 27 - fresh installer refuses retained helper etc/systemd/system/lightmoni-agent-helper.service directory before enrollment
+  ---
+  duration_ms: 71.235917
+  type: 'test'
+  ...
+# Subtest: fresh installer refuses retained helper etc/systemd/system/lightmoni-agent-helper.service dangling-link before enrollment
+ok 28 - fresh installer refuses retained helper etc/systemd/system/lightmoni-agent-helper.service dangling-link before enrollment
+  ---
+  duration_ms: 68.428125
+  type: 'test'
+  ...
+# Subtest: installer rejects the removed shared-key flag before changing installed state
+ok 29 - installer rejects the removed shared-key flag before changing installed state
+  ---
+  duration_ms: 17.936167
+  type: 'test'
+  ...
+# Subtest: installer preserves and rejects exact-docker systemd overrides before stopping Agent
+ok 30 - installer preserves and rejects exact-docker systemd overrides before stopping Agent
+  ---
+  duration_ms: 675.819042
+  type: 'test'
+  ...
+# Subtest: installer preserves and rejects unknown systemd overrides before stopping Agent
+ok 31 - installer preserves and rejects unknown systemd overrides before stopping Agent
+  ---
+  duration_ms: 711.335667
+  type: 'test'
+  ...
+# Subtest: installer preserves and rejects changed-known systemd overrides before stopping Agent
+ok 32 - installer preserves and rejects changed-known systemd overrides before stopping Agent
+  ---
+  duration_ms: 694.573875
+  type: 'test'
+  ...
+# Subtest: installer preserves and rejects symlink systemd overrides before stopping Agent
+ok 33 - installer preserves and rejects symlink systemd overrides before stopping Agent
+  ---
+  duration_ms: 689.016625
+  type: 'test'
+  ...
+# Subtest: installer preserves and rejects writable systemd overrides before stopping Agent
+ok 34 - installer preserves and rejects writable systemd overrides before stopping Agent
+  ---
+  duration_ms: 685.044958
+  type: 'test'
+  ...
+# Subtest: installer preserves and rejects effective-external systemd overrides before stopping Agent
+ok 35 - installer preserves and rejects effective-external systemd overrides before stopping Agent
+  ---
+  duration_ms: 766.636875
+  type: 'test'
+  ...
+# Subtest: installer refuses a privileged installed service before stopping or changing it
+ok 36 - installer refuses a privileged installed service before stopping or changing it
+  ---
+  duration_ms: 643.948833
+  type: 'test'
+  ...
+# Subtest: installer rejects a shipped privileged candidate before old permission preparation or service mutation
+ok 37 - installer rejects a shipped privileged candidate before old permission preparation or service mutation
+  ---
+  duration_ms: 640.520708
+  type: 'test'
+  ...
+# Subtest: new host install defaults to complete management with a non-root Agent and one root helper identity
+ok 38 - new host install defaults to complete management with a non-root Agent and one root helper identity
+  ---
+  duration_ms: 2103.773875
+  type: 'test'
+  ...
+# Subtest: full-management installation checks setpriv before activation or installed state changes
+ok 39 - full-management installation checks setpriv before activation or installed state changes
+  ---
+  duration_ms: 543.990292
+  type: 'test'
+  ...
+# Subtest: monitoring installation does not require setpriv
+ok 40 - monitoring installation does not require setpriv
+  ---
+  duration_ms: 1789.362292
+  type: 'test'
+  ...
+# Subtest: installer refuses standalone executor remnants without changing installed files or services
+ok 41 - installer refuses standalone executor remnants without changing installed files or services
+  ---
+  duration_ms: 314.180916
+  type: 'test'
+  ...
+# Subtest: root install enrollment failure rolls back ordinary files and removes new execution material
+ok 42 - root install enrollment failure rolls back ordinary files and removes new execution material
+  ---
+  duration_ms: 2019.139208
+  type: 'test'
+  ...
+# Subtest: root install missing-bootstrap failure rolls back ordinary files and removes new execution material
+ok 43 - root install missing-bootstrap failure rolls back ordinary files and removes new execution material
+  ---
+  duration_ms: 2173.399791
+  type: 'test'
+  ...
+# Subtest: root install restart failure rolls back ordinary files and removes new execution material
+ok 44 - root install restart failure rolls back ordinary files and removes new execution material
+  ---
+  duration_ms: 2119.86625
+  type: 'test'
+  ...
+# Subtest: installer refuses an existing root release change before file or service mutation
+ok 45 - installer refuses an existing root release change before file or service mutation
+  ---
+  duration_ms: 796.005583
+  type: 'test'
+  ...
+1..45
+# tests 45
+# suites 0
+# pass 45
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 54969.102333

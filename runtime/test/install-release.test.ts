@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { rewriteMaintenancePaths, writeMaintenanceStatShim,inlineFixtureCommands } from "./helpers/maintenance-shell.js";
 const repo = resolve(import.meta.dirname, "../.."),
@@ -41,6 +41,8 @@ function fixture(
     failManagedEnrollment?: boolean;
     missingManagedBootstrap?: boolean;
     missingSetpriv?: boolean;
+    cleanupSignal?: "SIGHUP" | "SIGINT" | "SIGTERM";
+    failRestorationStop?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lightmoni-install-")),
@@ -58,6 +60,7 @@ function fixture(
     join(root, "etc/systemd/system"),
     join(root, "usr/local/bin"),
     join(root, "usr/bin"),
+    join(root, "transactions"),
   ])
     mkdirSync(path, { recursive: true });
   if (!options.missingSetpriv) writeFileSync(join(root,"usr/bin/setpriv"),"#!/bin/sh\nexit 0\n",{mode:0o755});
@@ -152,6 +155,8 @@ function fixture(
   js(join(bin, "useradd"), `const fs=require('fs'),file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file)),args=process.argv.slice(2);if(args.at(-1)!=='lightmoni-agent'||s.agentAccount)throw Error('unexpected account creation');if(!args.includes('--system')||!args.includes('--user-group')||!args.includes('--no-create-home')||!args[args.indexOf('--shell')+1]?.endsWith('/usr/sbin/nologin'))throw Error('unsafe Agent account');s.agentAccount=true;s.accountsCreated.push(args.at(-1));fs.writeFileSync(file,JSON.stringify(s));`);
   for (const command of ['groupadd', 'userdel', 'groupdel'])
     js(join(bin, command), `throw Error('unexpected account mutation: ${command}');`);
+  // Keep intentionally retained rollback backups inside this disposable fixture.
+  js(join(bin,"mktemp"),`const fs=require('node:fs'),path=require('node:path');if(process.argv.slice(2).join(' ')!=='-d')throw Error('unexpected mktemp arguments');console.log(fs.mkdtempSync(path.join(process.env.TEST_INSTALL_TMP,'rollback-')));`);
   writeMaintenanceStatShim(bin);
   writeFileSync(
     join(bin, "uname"),
@@ -193,7 +198,13 @@ if(op==='is-active'){
 }else if(op==='is-enabled')status=s[enabled]?0:1;
 else if(op==='enable')s[enabled]=true;
 else if(op==='disable')s[enabled]=false;
-else if(op==='stop')s[active]=false;
+else if(op==='stop'){
+  s[active]=false;
+  if(!helper&&s.restarts===1){
+    if(process.env.TEST_CLEANUP_SIGNAL)process.kill(process.ppid,process.env.TEST_CLEANUP_SIGNAL);
+    if(process.env.TEST_FAIL_RESTORATION_STOP==='yes')status=17;
+  }
+}
 else if(op==='restart'){
   if(helper){s.helperRestarts=(s.helperRestarts||0)+1;s.helperActive=true;}
   else {
@@ -261,11 +272,10 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     .update(readFileSync(join(release, artifact)))
     .digest("hex");
   writeFileSync(join(release, "SHA256SUMS"), checksum + "  " + artifact + "\n");
-  const run = (extraArgs: string[] = []) => {
+  const invocation = (extraArgs: string[] = []) => {
     writeFileSync(script,inlineFixtureCommands(bin)+installer);
-    return spawnSync(
-      "/bin/sh",
-      [
+    return {
+      args: [
         script,
         ...(options.defaultRoot ? [] : ["--runtime-mode", options.runtimeMode ?? "user"]),
         ...extraArgs,
@@ -273,12 +283,11 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
         release,
         ...(old === "none" ? ["--endpoint", "http://new.example", "--enrollment-token-stdin"] : []),
       ],
-      {
-        input: old === "none" ? "test-enrollment\n" : "",
-        encoding: "utf8",
-        env: {
+      input: old === "none" ? "test-enrollment\n" : "",
+      env: {
           ...process.env,
           PATH: bin + ":" + process.env.PATH,
+          TEST_INSTALL_TMP: join(root, "transactions"),
           TEST_SYSTEM_STATE: system,
           TEST_FAIL_RESTART: options.failRestart ? "yes" : "no",
           TEST_FAIL_RESTART_STATUS: String(options.failRestartStatus ?? 1),
@@ -290,10 +299,33 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
           TEST_MANAGED_DATA:join(helperData,'managed'),
           TEST_FAIL_MANAGED_ENROLLMENT:options.failManagedEnrollment?'yes':'no',
           TEST_MISSING_MANAGED_BOOTSTRAP:options.missingManagedBootstrap?'yes':'no',
-        },
-        timeout: 20000,
       },
-    );
+    };
+  };
+  const run = (extraArgs: string[] = []) => {
+    const request=invocation(extraArgs);
+    return spawnSync("/bin/sh",request.args,{
+      input:request.input,encoding:"utf8",env:request.env,timeout:20000,
+    });
+  };
+  const runInterrupted = async ({closedStderr=true}:{closedStderr?:boolean}={}) => {
+    const request=invocation();
+    const child=spawn("/bin/sh",request.args,{
+      env:{...request.env,TEST_CLEANUP_SIGNAL:options.cleanupSignal,
+        TEST_FAIL_RESTORATION_STOP:options.failRestorationStop?'yes':'no'},
+      stdio:["pipe","pipe","pipe"],timeout:20000,
+    });
+    // Match SSH closing its stderr read end. /dev/null would stay writable and
+    // cannot reproduce the shell's SIGPIPE while executing its EXIT cleanup.
+    let stdout="",stderr="";
+    if(closedStderr)child.stderr.destroy();
+    else child.stderr.setEncoding("utf8").on("data",chunk=>{stderr+=chunk});
+    child.stdout.setEncoding("utf8").on("data",chunk=>{stdout+=chunk});
+    child.stdin.on("error",()=>{});child.stdin.end(request.input);
+    return new Promise<{status:number|null;signal:NodeJS.Signals|null;stdout:string;stderr:string}>((resolve,reject)=>{
+      child.once("error",reject);
+      child.once("close",(status,signal)=>resolve({status,signal,stdout,stderr}));
+    });
   };
   const state = () => JSON.parse(readFileSync(system, "utf8"));
   const unchangedData = () => {
@@ -343,6 +375,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     runtimeParent,
     before,
     run,
+    runInterrupted,
     state,
     unchangedData,
     restored,
@@ -511,6 +544,43 @@ test("restart exit status survives diagnostic failure and successful restoration
   assert.equal(f.state().restarts, 2);
   assert(f.state().active);
   assert(f.state().enabled);
+});
+for(const old of ["none","node"] as const)test("disconnected SSH stderr cannot interrupt "+old+" installation restoration",async t=>{
+  const f=fixture(t,{old,active:old!=="none",failRestart:true,failRestartStatus:7});
+  const result=await f.runInterrupted();
+  assert.equal(result.signal,null,"broken diagnostic output must not kill EXIT cleanup with SIGPIPE");
+  assert.equal(result.status,7,"retain the installation's original failure code");
+  assert(!result.stdout.includes("Agent installed"));
+  f.restored();
+  assert.equal(f.state().active,old!=="none");
+  assert.equal(f.state().enabled,old!=="none");
+  assert.equal(existsSync(join(f.root,"run/lightmoni-agent-lifecycle.lock")),false);
+  assert.deepEqual(readdirSync(join(f.root,"transactions")),[],"successful restoration removes temporary backups");
+});
+for(const cleanupSignal of ["SIGHUP","SIGINT","SIGTERM"] as const)test(cleanupSignal+" during restoration cannot interrupt EXIT cleanup",async t=>{
+  const f=fixture(t,{failRestart:true,failRestartStatus:7,cleanupSignal});
+  // Keep diagnostics connected so this case specifically exercises a second
+  // termination signal delivered by systemctl stop after rollback has begun.
+  const result=await f.runInterrupted({closedStderr:false});
+  assert.equal(result.signal,null);
+  assert.equal(result.status,7);
+  f.restored();
+  assert(f.state().active);assert(f.state().enabled);
+  assert.equal(existsSync(join(f.root,"run/lightmoni-agent-lifecycle.lock")),false);
+  assert.deepEqual(readdirSync(join(f.root,"transactions")),[]);
+});
+test("real restoration failure retains its lifecycle fence and backups after SSH disconnect",async t=>{
+  const f=fixture(t,{failRestart:true,failRestartStatus:7,failRestorationStop:true});
+  const result=await f.runInterrupted();
+  assert.equal(result.signal,null);
+  assert.equal(result.status,7);
+  f.restored();
+  assert.equal(f.state().active,false,"failed restoration must not claim the previous service restarted");
+  assert.equal(existsSync(join(f.root,"run/lightmoni-agent-lifecycle.lock")),true);
+  const backups=readdirSync(join(f.root,"transactions"));
+  assert.equal(backups.length,1);
+  assert.deepEqual(readFileSync(join(f.root,"transactions",backups[0],"previous-config")),f.before.config);
+  assert(f.state().calls.some((call:string)=>call.startsWith("stop ")));
 });
 for (const old of ["node"] as const)
   test(

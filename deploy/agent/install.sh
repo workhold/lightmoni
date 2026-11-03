@@ -133,7 +133,10 @@ restore_file() {
 }
 finish() {
   result="$1"
-  trap - EXIT HUP INT TERM
+  # SSH can close diagnostics or send another termination signal during rollback.
+  # Finish restoration before exiting; only a real rollback failure keeps its lock.
+  trap '' HUP INT TERM PIPE
+  trap - EXIT
   set +e
   if [ "$result" -ne 0 ] && [ "$transaction_started" = "yes" ]; then
     report_service_failure

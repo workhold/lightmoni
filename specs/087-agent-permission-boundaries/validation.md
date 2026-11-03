@@ -59,10 +59,18 @@ UI 点击流程、截图和范围见 [ui-validation.md](ui-validation.md)。每�
 ## 交付与边界
 
 - 功能分支：`feat/087-agent-permission-boundaries`；GitHub [PR #83](https://github.com/workhold/lightmoni/pull/83)，真实 Linux/systemd 与镜像验收已完成，更新为可审阅状态，未合并。
-- 本轮未对 vchive 或生产主机执行 SSH、安装、服务修改或模式切换。双架构镜像已在本机构建并发布至既有仓库，固定标签与 latest 均已回读确认，本轮本地镜像、缓存及大产物已清理；详见 [release.md](release.md) 和 [清理记录](evidence/release-cleanup.json)。生产主机的真实 SSH 网络与部署验收仍待实际升级后执行。
+- 此前发布阶段未对真实用户主机执行 SSH、安装、服务修改或模式切换。双架构镜像已在本机构建并发布至既有仓库，固定标签与 latest 均已回读确认，本轮本地镜像、缓存及大产物已清理；详见 [release.md](release.md) 和 [清理记录](evidence/release-cleanup.json)。2026-11-04 获授权的真实 SSH/Agent 现场回测见下节，不能将其与此前隔离 Linux 结果混为同一轮。
 - 旧 root 常驻安装须先使用原版本受管流程卸载后重装，新卸载器不接管旧运行态。
 - 不包含平台主机 RBAC、任意业务账户执行或不可信脚本沙箱；Docker daemon 身份绑定仍需独立确认。
 
 ## 发布后主干集成
 
 主干在镜像发布后推进到 `0b45683`，本分支已合并并保留同时追加的 SDD087/SDD091 设计章节。沿用主干已有端口自动分配设计，修正其旧 manual 端口断言；没有因解决冲突新增生产行为。集成后 Runtime 1350 项：1317 通过、0 失败、33 跳过；TypeScript SDK 23/23，全项目 typecheck/build 通过。证据见 [post-release-main-integration.json](evidence/post-release-main-integration.json)。已发布镜像仍固定为 `3309b0b`，不包含随后集成的主干部署功能；本地 Docker 镜像及缓存未重新创建。
+
+## 授权现场回测与断连修复（2026-11-04）
+
+已完成真实远端 SSH、双组件生命周期、普通/提权脚本、真实采集与 Docker 操作，并恢复普通监控模式、清理临时账号和测试资源。详细范围、故障恢复过程与未覆盖项见 [live-validation.md](live-validation.md)；脱敏证据见 [live-validation.json](evidence/live-validation.json)。旧版平台凭据 26 项检查与新版 `3309b0b` Agent 回测分别记录。
+
+发现并离线复现：安装失败收尾向已断开的 stderr 写入时，SIGPIPE 可中断回滚并遗留锁。最小修复在收尾期间忽略终止/断管信号，保留原失败码和实际回滚失败时的保护；安装器回归 45/45、Runtime 类型检查、shell 语法和独立审查通过。新增 6 项用例中旧代码失败 5 项，修复后全部通过。
+
+本次仅修正既有安装事务的异常收尾，架构同步不适用：组件职责、协议、控制路径、凭据边界与部署拓扑均未变化，未改写系统设计或声称完成新的 Doca 保存。已发布的 `20261103-agent-unified-3309b0b36490` 镜像不含此后续修复；本次没有重新构建、发布镜像或升级生产平台。
