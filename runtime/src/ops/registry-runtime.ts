@@ -33,59 +33,32 @@ export function registryTemplateSpec() {
     compose: {
       services: {
         registry: service(5000),
-        hub_cache: service(5001),
-        origin_cache: service(5002),
       },
     },
-    ports: [
-      ["registry", 5000],
-      ["hub-cache", 5001],
-      ["origin-cache", 5002],
-    ].map(([name, n]) => ({
-      name,
-      container_port: n,
+    ports: [{
+      name:'registry',
+      container_port: 5000,
       host_port: 0,
       protocol: "tcp",
       app_protocol: "http",
       host_ip: "127.0.0.1",
-      service: String(name).replace("-", "_"),
-    })),
+      service: 'registry',
+    }],
     mounts: [
       { type: "data", service: "registry", target: "/var/lib/registry" },
-      { type: "data", service: "hub_cache", target: "/var/lib/registry" },
-      { type: "data", service: "origin_cache", target: "/var/lib/registry" },
     ],
     health: { type: "http", port_name: "registry", path: "/v2/" },
   };
 }
 export function registryRuntime(a: PlatformResource, app: Row): Row {
   if (a.spec.role !== "registry") return app;
-  const enabled = a.spec.registry_cache_enabled === true;
-  const keep = new Set([
-    "registry",
-    ...(enabled ? ["hub_cache"] : []),
-    ...(enabled && a.spec.registry_upstream ? ["origin_cache"] : []),
-  ]);
+  const keep = new Set(["registry"]);
   for (const key of Object.keys(app.compose.services))
     if (!keep.has(key)) delete app.compose.services[key];
   // Placement budgets describe the entire deployment, not a separate full budget per helper.
   app.cpu = app.cpu / keep.size;
   app.memory_mb = app.memory_mb / keep.size;
   app.mounts = app.mounts.filter((m: Row) => keep.has(m.service));
-  if (enabled) {
-    app.compose.services.hub_cache.environment.REGISTRY_PROXY_REMOTEURL =
-      "https://registry-1.docker.io";
-    app.compose.services.hub_cache.environment.REGISTRY_PROXY_TTL = "168h";
-    app.compose.services.hub_cache.environment.REGISTRY_STORAGE_DELETE_ENABLED =
-      "true";
-  }
-  if (keep.has("origin_cache")) {
-    app.compose.services.origin_cache.environment.REGISTRY_PROXY_REMOTEURL =
-      a.spec.registry_upstream;
-    app.compose.services.origin_cache.environment.REGISTRY_PROXY_TTL = "168h";
-    app.compose.services.origin_cache.environment.REGISTRY_STORAGE_DELETE_ENABLED =
-      "true";
-  }
   return app;
 }
 export function registeredRegistryEndpoint(
@@ -118,8 +91,7 @@ export function registryCacheFor(
   const app = store.get(appID, "application"),
     d = app.spec.deployments?.find((d: Row) => d.cluster_id === c.id);
   if (!d) return;
-  const enabled =
-    c.spec.image_cache?.enabled === true && d.registry_cache_enabled === true;
+  const enabled=c.spec.image_cache?.enabled===true&&d.registry_cache_enabled===true;
   const cfg = store.deps.db.get<Row>(
     "SELECT * FROM ops_private_registry_settings WHERE id=1",
   );
@@ -134,13 +106,11 @@ export function registryCacheFor(
     const address = new URL(endpoint).hostname.replace(/^\[|\]$/g, '');
     return registryCacheScope(address) === 'cluster' || consumerMachineID === d.machine_ids[0] ? endpoint : undefined;
   };
-  const hub_endpoint = enabled ? endpointFor('hub-cache') : undefined;
+  const hub_endpoint = undefined;
   const origin_endpoint =
-    originHost && cfg?.carrier_cluster_id === c.id
+    enabled && originHost && cfg?.carrier_cluster_id === c.id
       ? endpointFor()
-      : originHost && enabled
-        ? endpointFor('origin-cache')
-        : undefined;
+      : undefined;
   if (!hub_endpoint && !origin_endpoint) return;
   const policy = {
     version: 1,

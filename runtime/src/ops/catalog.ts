@@ -185,7 +185,7 @@ export function catalogInstallation(id: string, input: Input) {
   }
   if (id === "redis") spec.environment.REDIS_PASSWORD = p.password;
   if (!extended && spec.ports.length && id !== 'openresty')
-    spec.ports[0].host_port = input.deployment_mode === 'managed' ? 0 : spec.ports[0].container_port;
+    spec.ports[0].host_port = 0;
   const overrides=hostPortOverrides(input.host_ports,spec.ports);
   if(id==='openresty'&&(overrides&&Object.keys(overrides).some(name=>overrides[name]!==spec.ports.find((p:Input)=>p.name===name)?.host_port)||input.listen_ip!==undefined))fail(400,'openresty_fixed_host_ports');
   if(input.listen_ip!==undefined&&!['0.0.0.0','127.0.0.1'].includes(input.listen_ip))fail(400,'invalid_listen_ip');

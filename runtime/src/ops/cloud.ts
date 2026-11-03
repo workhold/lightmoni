@@ -712,6 +712,7 @@ export function publishDNSRecords(
     );
   const annotated = visible.map((record) => ({
     ...record,
+    fqdn: record.name==='@'?zone.spec.domain:record.name+'.'+zone.spec.domain,
     managed_by: owned
       .filter((o) => o.record_id === record.id)
       .map((o) => o.owner_id),

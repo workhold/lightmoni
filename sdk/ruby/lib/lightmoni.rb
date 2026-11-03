@@ -62,10 +62,15 @@ module LightMoni
       nil
     end
   end
+  def self.environment_resource
+    {'LIGHTMONI_MACHINE_NAME'=>'host.name','LIGHTMONI_MACHINE_ID'=>'lightmoni.machine_id','LIGHTMONI_HOST_ID'=>'host.id','LIGHTMONI_AGENT_ID'=>'lightmoni.agent_id','LIGHTMONI_APPLICATION_ID'=>'lightmoni.application_id','LIGHTMONI_CLUSTER_ID'=>'lightmoni.cluster_id','LIGHTMONI_DEPLOYMENT_ID'=>'lightmoni.deployment_id'}.each_with_object({}) do |(name,attribute),values|
+      value=ENV[name];values[attribute]=value if value && !value.empty?
+    end
+  end
   class State
     attr_accessor :key, :closed, :failure, :sequence, :self_enabled, :self_table, :heartbeat_stop
     attr_reader :gate, :delivery, :limits, :metrics, :records, :queue, :stats, :endpoint
-    def initialize(service, endpoint, key, limits)
+    def initialize(service, endpoint, key, limits, resource: {}, instance_id: nil)
       @endpoint = URI(endpoint)
       raise ArgumentError, 'valid service and HTTP(S) endpoint required' if service.empty? || service.bytesize > 128 || !%w[http https].include?(@endpoint.scheme) || !@endpoint.host || @endpoint.userinfo || @endpoint.query || @endpoint.fragment
       @limits = { queue_bytes: 8 << 20, queue_batches: 256, buffer_bytes: 8 << 20, max_batch_bytes: 1 << 20, cardinality_limit: 2000, max_instruments: 256 }
@@ -78,7 +83,10 @@ module LightMoni
       @stats = %w[pending_batches pending_bytes buffer_bytes delivered_batches retried_batches invalid_records overflow_records dropped_records rejected_records].to_h { |n| [n, 0] }
       @stats['last_error'] = ''
       @self_enabled, @self_table, @self_last, @self_started, @self_previous = true, '', -Float::INFINITY, false, {}
-      @resource = { 'attributes' => LightMoni.attrs('service.name' => service, 'service.instance.id' => SecureRandom.uuid) }
+      raise ArgumentError, 'configure service identity separately' if resource.key?('service.name') || resource.key?('service.instance.id')
+      instance_id = ENV.fetch('LIGHTMONI_INSTANCE_ID', SecureRandom.uuid) if instance_id.nil?
+      raise ArgumentError, 'invalid instance ID' unless instance_id.is_a?(String) && !instance_id.strip.empty? && instance_id.bytesize <= 128
+      @resource = { 'attributes' => LightMoni.attrs(LightMoni.environment_resource.merge(resource).merge('service.name'=>service,'service.instance.id'=>instance_id)) }
     end
     def invalid(message); @stats['invalid_records'] += 1; @stats['last_error'] = message; end
     def lost(count, message); @stats['dropped_records'] += count; @failure = @stats['last_error'] = message; end
@@ -235,8 +243,11 @@ module LightMoni
   end
   class Client
     attr_reader :state, :table
-    def initialize(service:, table:, endpoint: ENV.fetch('LIGHTMONI_ENDPOINT'), key: '', self_telemetry: true, **limits)
-      @table, @state = LightMoni.table(table).dup.freeze, State.new(service, endpoint, key, limits)
+    def initialize(service: nil, table:, endpoint: nil, key: nil, self_telemetry: true, resource: {}, instance_id: nil, **limits)
+      service = ENV.fetch('LIGHTMONI_SERVICE', '') if service.nil?
+      endpoint = ENV.fetch('LIGHTMONI_ENDPOINT', '') if endpoint.nil?
+      key = ENV.fetch('LIGHTMONI_KEY', '') if key.nil?
+      @table, @state = LightMoni.table(table).dup.freeze, State.new(service, endpoint, key, limits, resource: resource, instance_id: instance_id)
       @state.self_enabled, @state.self_table = self_telemetry, @table
       @state.heartbeat_stop = Queue.new
       if self_telemetry

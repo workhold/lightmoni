@@ -900,5 +900,26 @@ class ClosedResponseTransportTests(unittest.TestCase):
                     thread.join(timeout=2)
 
 
+
+
+class DeploymentEnvironmentTests(unittest.TestCase):
+    def test_environment_defaults_and_explicit_overrides(self):
+        values = {'LIGHTMONI_SERVICE': 'deployed-service', 'LIGHTMONI_ENDPOINT': 'http://127.0.0.1:4318', 'LIGHTMONI_KEY': 'private-environment-key', 'LIGHTMONI_INSTANCE_ID': 'deployment-1', 'LIGHTMONI_MACHINE_NAME': 'machine-one', 'LIGHTMONI_HOST_ID': 'observed-host', 'LIGHTMONI_MACHINE_ID': 'machine-id'}
+        with mock.patch.dict(os.environ, values):
+            client = Client(table='http', self_telemetry=False, remote_config=False, resource={'host.name': 'custom-machine'})
+            try:
+                self.assertEqual(client._state.service, 'deployed-service')
+                self.assertEqual(client._state.key, values['LIGHTMONI_KEY'])
+                text = json.dumps(client._state.resource)
+                self.assertIn('custom-machine', text)
+                self.assertIn('observed-host', text)
+                self.assertNotIn('private-environment-key', text)
+                other = Client(service='custom-service', table='http', key='', self_telemetry=False, remote_config=False)
+                self.assertEqual(other._state.key, '')
+                other.shutdown(timeout=0.1)
+            finally:
+                client.shutdown(timeout=0.1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -135,38 +135,18 @@ impl Observation {
     }
 }
 impl Client {
-    pub fn init(options: Options) -> Result<Self> {
-        for value in [
-            &options.env,
-            options.service_version.as_ref().unwrap_or(&options.env),
-            options.instance_id.as_ref().unwrap_or(&options.env),
-        ] {
-            if value.trim().is_empty() || value.len() > 128 {
-                return Err("invalid resource identity".into());
-            }
+    pub fn from_env() -> Result<Self> { Self::init(Options::default()) }
+    pub fn init(options: Options) -> Result<Self> { Self::init_with_resource(options,Attributes::new()) }
+    pub fn init_with_resource(options: Options,mut resource: Attributes) -> Result<Self> {
+        let service=if options.service.is_empty(){std::env::var("LIGHTMONI_SERVICE").unwrap_or_default()}else{options.service};
+        let endpoint=options.endpoint.unwrap_or_else(||std::env::var("LIGHTMONI_ENDPOINT").unwrap_or_default());
+        let key=options.key.unwrap_or_else(||std::env::var("LIGHTMONI_KEY").unwrap_or_default());
+        let env=if options.env.is_empty(){std::env::var("LIGHTMONI_ENV").unwrap_or_default()}else{options.env};
+        let version=options.service_version.or_else(||std::env::var("LIGHTMONI_SERVICE_VERSION").ok().filter(|v|!v.is_empty()));
+        for(name,value) in [("deployment.environment.name",if env.is_empty(){None}else{Some(env)}),("service.version",version)] {
+            if let Some(value)=value{if value.trim().is_empty()||value.len()>128{return Err("invalid resource identity".into());}resource.insert(name.into(),value.into());}
         }
-        let endpoint = options.endpoint.unwrap_or_else(|| {
-            std::env::var("LIGHTMONI_ENDPOINT").unwrap_or_default()
-        });
-        let key = options
-            .key
-            .unwrap_or_else(|| std::env::var("LIGHTMONI_KEY").unwrap_or_default());
-        let client = Self::connect(&options.service, &endpoint, &key)?;
-        {
-            let mut s = client.state.lock().unwrap();
-            let resource = s.resource["attributes"].as_array_mut().unwrap();
-            for (name, value) in [
-                ("deployment.environment.name", Some(options.env)),
-                ("service.version", options.service_version),
-                ("service.instance.id", options.instance_id),
-            ] {
-                if let Some(value) = value {
-                    resource.retain(|v| v["key"] != name);
-                    resource.push(json!({"key":name,"value":{"stringValue":value}}));
-                }
-            }
-        }
-        Ok(client)
+        Self::with_identity(&service,"",&endpoint,&key,Limits::default(),resource,options.instance_id.as_deref())
     }
     pub fn record(
         &self,

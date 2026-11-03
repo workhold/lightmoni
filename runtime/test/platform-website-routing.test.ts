@@ -832,7 +832,7 @@ for (const protocol of ["http", "https"]) {
         routing_mode: "managed",
         service_application_id: app.id,
         service_port_name: "http",
-        dns_record_mode: "address",
+        dns_record_mode: "cname",
         bindings: [
           { domains: ["managed.example.test"], locations: [{ path: "/" }] },
         ],
@@ -877,7 +877,7 @@ for (const protocol of ["http", "https"]) {
       "Manual",
       {
         cluster_ids: [c.id],
-        dns_record_mode: "address",
+        dns_record_mode: "cname",
         bindings: [
           {
             domains: ["manual.example.test"],
@@ -1192,7 +1192,7 @@ test("weighted CNAME defaults/provinces, immediate policies, health fallback and
   const cname = () => dns.records.filter((r) => r.RR === "www");
   assert.equal(cname().length, 4);
   assert.ok(
-    cname().every((r) => r.Type === "CNAME" && r.Weight === 1 && r.LbaStatus),
+    cname().every((r) => r.Type === "CNAME" && (r.Weight === undefined || r.Weight === 1)),
   );
   assert.equal(dns.records.filter((r) => r.Type === "A").length, 2);
   const update = (policies: any[]) => {

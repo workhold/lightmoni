@@ -14,10 +14,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Server } from "node:net";
 import { executeOperation, operationCommand } from "../src/agent/operations.js";
-import { normalizeApplication } from "../src/operations/platform.js";
+import { normalizeApplication,executePlatform } from "../src/operations/platform.js";
 import {commandDiagnostic} from '../src/operations/install-progress.js';
 import { selfSignedCertificate } from "../src/ops/certificates.js";
 import { certificateMetadata } from "../src/operations/certificates.js";
+import {privateRoot} from '../src/operations/website-files.js';
 import type {
   OperationPayload,
   OperationExecutionContext,
@@ -383,4 +384,14 @@ test("low-port EACCES reaches Docker validation for workloads and OpenResty and 
     assert.doesNotMatch(JSON.stringify(result), /hidden Docker details/);
     await assert.rejects(readFile(join(f.dataDir, "operations", "execution.lock"), "utf8"), { code: "ENOENT" });
   }
+});
+
+test('modern application log receipts redact deployed SDK and custom environment values',async t=>{
+ const f=await setup(t),root=join(await privateRoot(f.context,'platform'),'workloads',resourceID),containerID='b'.repeat(64),secret='lm_'+'a'.repeat(43);
+ await mkdir(root,{recursive:true,mode:0o700});const manifest=join(root,'compose.json');
+ await writeFile(manifest,JSON.stringify({services:{app:{environment:{LIGHTMONI_KEY:secret,CUSTOM_SECRET:'custom$$value'}}}}));
+ await writeFile(join(root,'state.json'),JSON.stringify({manifest}));
+ const context={...f.context,command:async(_command:string,args:string[])=>({code:0,stdout:args[0]==='ps'?containerID:args[0]==='inspect'?JSON.stringify([{Id:containerID,Config:{Labels:{'io.lightmoni.platform.instance':resourceID}}}]):'sdk='+secret+' custom=custom$value ordinary line',stderr:''})};
+ const result=await executePlatform(payload({task:'workload.logs',instance_id:resourceID},'logs'),context);
+ assert.doesNotMatch(JSON.stringify(result),new RegExp(secret));assert.doesNotMatch(JSON.stringify(result),/custom\$value/);assert.match(JSON.stringify(result),/ordinary line/);assert.match(JSON.stringify(result),/redacted/);
 });

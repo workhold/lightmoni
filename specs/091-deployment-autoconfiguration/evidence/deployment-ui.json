@@ -1,0 +1,38 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "width": 1440,
+      "checks": [
+        "one registry port 5000",
+        "automatic host port 0",
+        "generated entry domain",
+        "zone-only entry editor",
+        "no page error"
+      ]
+    },
+    {
+      "round": 2,
+      "width": 1440,
+      "checks": [
+        "one registry port 5000",
+        "automatic host port 0",
+        "generated entry domain",
+        "zone-only entry editor",
+        "no page error"
+      ]
+    },
+    {
+      "round": 3,
+      "width": 390,
+      "checks": [
+        "one registry port 5000",
+        "automatic host port 0",
+        "generated entry domain",
+        "zone-only entry editor",
+        "no page error"
+      ]
+    }
+  ],
+  "media": "/Users/zhangsiwen/dev/lightmoni/lightmoni/artifacts/screenshots/specs/091-deployment-autoconfiguration/evidence"
+}

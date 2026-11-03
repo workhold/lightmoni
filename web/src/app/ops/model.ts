@@ -239,6 +239,8 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
     value,
   }));
   if (kind === "website") {
+    // Opening a legacy address-mode website migrates its next saved revision to CNAME.
+    spec.dns_record_mode = "cname";
     spec.domain_routes = domainRouteValues(spec);
     spec.nginx = { ...spec.nginx, response_headers_text: headerText(spec.nginx?.response_headers) };
     spec.bindings = (spec.bindings ?? []).map((binding: Spec) => ({ ...binding, locations: (binding.locations ?? []).map((r: Spec) => ({ ...r,
