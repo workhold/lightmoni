@@ -944,12 +944,23 @@ export async function ensureDnsRecords(
     owned
       .filter((row) => !desired.some((r) => identity(r) === identity(row)))
       .every((row) => !current.some((r) => r.id === row.record_id));
-  if (verified)
+  if (verified) {
     db.run(
       "UPDATE ops_dns_owned SET state='applied' WHERE zone_id=? AND owner_id=? AND state='verifying'",
       zoneID,
       ownerID,
     );
+    // Drop obsolete ownership intent after positive readback; default single CNAMEs do not own SLB weights.
+    for (const row of db.all<any>(
+      "SELECT * FROM ops_dns_owned WHERE zone_id=? AND owner_id=? AND state='applied'",
+      zoneID,
+      ownerID,
+    )) {
+      if (row.weight != null && desired.some(
+        (record) => identity(record) === identity(row) && record.weight === undefined,
+      )) db.run("UPDATE ops_dns_owned SET weight=NULL WHERE id=?", row.id);
+    }
+  }
   return {
     ...publishDNSRecords(options, zone, current),
     verified,
