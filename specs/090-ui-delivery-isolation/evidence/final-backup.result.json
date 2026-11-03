@@ -1,0 +1,10 @@
+{
+  "verified_at": "2026-11-03T04:24:10.634142+00:00",
+  "backup_directory": "/root/lightmoni-upgrades/20261103-managed-fence-1bfd49c/final-delivery-backup",
+  "directory_mode": "0o700",
+  "backup_integrity_check": "ok",
+  "all_files_private": true,
+  "center_id": "63e0c994bebb60a69a2f4301cfb0ac52369d86b66f8d7179fe56104c236d8588",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261103-1bfd49c",
+  "health": "healthy"
+}

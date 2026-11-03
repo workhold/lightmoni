@@ -15,3 +15,7 @@
 固定镜像`docker.heyphp.com/lightmoni/lightmoni:20261103-f9d7480`，源码`f9d7480d3c72553f7a3d67a63fdb88c8e0f82545`，后续提交仅验收文档和Compose发布引用。linux/arm64与linux/amd64各42项成品检查通过，另外各自通过编译成品私网HTTP/TCP健康探测；AMD64为Docker仿真。37个本地OCI blob逐个校验SHA256，rootfs/config与实测镜像一致，索引`sha256:0da1a10ea55f1853aa176c5e71cadb3a6bbf63a9e679b89671191ac51efb7631`。详见evidence/image-checks.json。
 
 远端发布、线上保护性备份、中心升级、正常产品人工核对及随后新检查的结果以[PR #84](https://github.com/workhold/lightmoni/pull/84)发布验证节为准；本地成品通过不代表线上已恢复。保留原未知记录及原因，不通过SQL修改作业或将未知状态改成成功。
+
+## 最终线上核对
+
+已通过正常产品界面核对原受管inspect未知结果：保留unknown与executor_http_502，2026-11-03T03:28:19.382Z记录管理员、原因和确认，不重放旧作业。后续发现并经SDD089修复Agent包装层互斥，最终上线20261103-1bfd49c后新检查与DNS/HTTPS恢复。完整升级和最终回读证据见../090-ui-delivery-isolation/evidence。

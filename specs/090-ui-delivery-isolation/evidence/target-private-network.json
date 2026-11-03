@@ -1,0 +1,11 @@
+{
+  "script_sha256": "1b4f4272e0dc81dcf7332efcd19c6bc4af4aefe388790fd7c2d9f4611c0a8095",
+  "root_owned": true,
+  "mode": "0o700",
+  "private_registry": 200,
+  "ports_checked": [
+    20000,
+    20001,
+    20002
+  ]
+}

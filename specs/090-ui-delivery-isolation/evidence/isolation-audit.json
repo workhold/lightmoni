@@ -1,0 +1,22 @@
+{
+  "verified_at": "2026-11-03T04:24:22.594743+00:00",
+  "job": {
+    "id": "39bcef47-7b46-48cc-a8e8-99cb7734523e",
+    "machine_id": "9473f8974462e85d",
+    "agent_id": "cf27568ec2d1217867197be3ebbe9a12",
+    "capability": "script.elevated.v1",
+    "state": "succeeded",
+    "code": "script_succeeded",
+    "created_at": "2026-11-03T04:22:40.971Z"
+  },
+  "plan_id": "d337e59e-f768-4040-9c2f-4d4556008a79",
+  "code_sha256": "89ed13cf8de87c84a13b3325b65fcdae15afedcda682e1ceab0af3b625f40efc",
+  "execution": "normal UI exact-snapshot approval, signed root Agent, once, no retry",
+  "public_target": "49.232.14.169",
+  "public_probe_origin": "panel.heyphp.com",
+  "public_ports": {
+    "20000": "TimeoutError",
+    "20001": "TimeoutError",
+    "20002": "TimeoutError"
+  }
+}

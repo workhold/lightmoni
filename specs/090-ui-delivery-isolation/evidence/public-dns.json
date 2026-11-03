@@ -1,0 +1,24 @@
+{
+  "abc.heyphp.com": {
+    "status": 0,
+    "answer": [
+      {
+        "name": "abc.heyphp.com",
+        "type": 1,
+        "TTL": 600,
+        "data": "49.232.14.169"
+      }
+    ]
+  },
+  "registry-demo.heyphp.com": {
+    "status": 0,
+    "answer": [
+      {
+        "name": "registry-demo.heyphp.com",
+        "type": 1,
+        "TTL": 600,
+        "data": "49.232.14.169"
+      }
+    ]
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repo_section": "86. 统一 Agent 集成发布与主机容器入口（SDD 086）",
+  "blockId": "release086-p-6",
+  "seq": 949,
+  "epochId": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "saved": true,
+  "text": "云公网 NAT 不会因 Registry 监听内网 IP 而自动隔离后端。Demo 主机在 DOCKER-USER 中仅匹配原始目的地址 172.21.0.16、原始 TCP 端口 20000、20001、20002 和 ORIGINAL 方向，允许受信内网 172.21.0.0/20，其余来源丢弃；回包方向与 OpenResty/Agent 本机访问保持原有路径。规则由 root 所有的幂等脚本及 Docker 启动前 oneshot 单元加载，Docker 通过 Requires/After 依赖该单元；网络或后端端口变更需同步主机规则。当前 Registry 后端端口集合通过精确审批的单次签名 root 作业热更新：核对目标私网地址和原脚本摘要，保留 root 私有备份后原子替换并直接运行幂等脚本，不停止或重启 Docker 及其依赖单元。公网三个后端端口不可直连，受信内网及 HTTPS 鉴权入口分别验证；不增加平台执行权限或兼容通道。",
+  "readback_exact": true,
+  "graph": {
+    "blockId": "f-architecture-8a1f",
+    "nodes": [
+      {
+        "id": "a-app",
+        "label": "业务服务\n业务进程"
+      },
+      {
+        "id": "a-sdk",
+        "label": "LightMoni SDK\n业务进程内实例"
+      },
+      {
+        "id": "a-http",
+        "label": "中心：遥测接收 API\n/v1/metrics · logs · traces"
+      },
+      {
+        "id": "a-ch",
+        "label": "ClickHouse\n遥测正文"
+      },
+      {
+        "id": "a-col",
+        "label": "主机 / 进程 / 拨测\n文件日志采集"
+      },
+      {
+        "id": "a-nsdk",
+        "label": "LightMoni SDK\nAgent 进程内实例"
+      },
+      {
+        "id": "a-agent",
+        "label": "LightMoni Agent\n持久队列与上报器"
+      },
+      {
+        "id": "a-node-control",
+        "label": "中心：节点控制 API\n心跳 / 配置 / 轮换 / 任务"
+      },
+      {
+        "id": "a-node-state",
+        "label": "SQLite\n节点身份与任务配置"
+      },
+      {
+        "id": "a-sdk-note",
+        "label": "业务SDK仅直连中心\nAgent内嵌SDK只走进程内exporter"
+      }
+    ],
+    "edges": [
+      {
+        "id": "ae1",
+        "source": "a-app",
+        "target": "a-sdk"
+      },
+      {
+        "id": "ae2",
+        "source": "a-sdk",
+        "target": "a-http"
+      },
+      {
+        "id": "ae4",
+        "source": "a-col",
+        "target": "a-nsdk"
+      },
+      {
+        "id": "ae5",
+        "source": "a-nsdk",
+        "target": "a-agent"
+      },
+      {
+        "id": "ae6",
+        "source": "a-agent",
+        "target": "a-http"
+      },
+      {
+        "id": "a-ingest-store",
+        "source": "a-http",
+        "target": "a-ch"
+      },
+      {
+        "id": "a-control-request",
+        "source": "a-agent",
+        "target": "a-node-control"
+      },
+      {
+        "id": "a-control-state",
+        "source": "a-node-control",
+        "target": "a-node-state"
+      }
+    ],
+    "unchanged_from_sdd089": true,
+    "endpoints_valid": true
+  },
+  "scope": "仅修改已读取的原生段落，不写图块或无关内容"
+}
