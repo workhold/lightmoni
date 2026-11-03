@@ -1635,12 +1635,18 @@ test('quick installation publishes the retained website, verifies CNAME and retr
  const gatewayID=f.store.get(appID).status.quick_install.gateway_id;
  assert.equal(gatewayID,existingGateway.id);assert(f.store.get(gatewayID).spec.deployments[0].gateway_dns_zone_id);
  assert.match(f.store.get(gatewayID).spec.deployments[0].gateway_domain,/^edge-/);
+
  f.finish('a');f.finish('a');await f.platform.tick();
  assert.equal(f.store.get(appID).status.quick_install.certificate_id,cert.id);
- assert.equal(f.store.get(appID).status.quick_install.state,'publishing');f.finish('a');
+ assert.equal(f.store.get(appID).status.quick_install.state,'publishing');f.finish('a'); // Legacy failed default weighting must not keep requesting a paid SLB feature.
+ const siteID=f.store.get(appID).status.quick_install.website_id,zoneID=f.store.get(siteID).spec.bindings[0].dns_zone_id,entryDomain=f.store.get(gatewayID).spec.deployments[0].gateway_domain;
+ records.push({RecordId:'legacy-default-cname',RR:'quick',Type:'CNAME',Value:entryDomain,TTL:600,Line:'default',Status:'ENABLE'});
+ f.db.run("INSERT INTO ops_dns_owned(id,zone_id,owner_id,record_id,name,type,value,ttl,state,updated_at,line,weight) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",'legacy-weight',zoneID,siteID,'legacy-default-cname','quick','CNAME',entryDomain,600,'verifying',f.deps.now().toISOString(),'default',1);
+
  for(let n=0;n<4;n++){await f.platform.tick();for(let k=0;k<20;k++)await new Promise<void>(r=>setImmediate(r))}
  const app=f.store.get(appID),q=app.status.quick_install;
  assert.equal(q.state,'ready',JSON.stringify(q));
+ assert.equal(f.db.get<any>("SELECT weight FROM ops_dns_owned WHERE id='legacy-weight'")!.weight,null);
  const target=f.store.get(q.gateway_id).spec.deployments[0].gateway_domain;
  assert(records.some(r=>r.RR==='quick'&&r.Type==='CNAME'&&r.Value===target));
  assert(!records.some(r=>r.RR==='quick'&&r.Type==='A'));
