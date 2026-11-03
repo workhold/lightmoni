@@ -1730,7 +1730,7 @@ export function createClusterWorkloads(
       ports(i.id).find((p) => p.protocol === "tcp");
     return {
       health: a.spec.health
-        ? { ...a.spec.health, port: p?.host_port }
+        ? { ...a.spec.health, port: p?.host_port, host: p?.host_ip ?? "127.0.0.1" }
         : undefined,
       probe_port: p?.host_port,
     };

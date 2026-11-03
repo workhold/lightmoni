@@ -1,0 +1,31 @@
+{
+  "date": "2026-11-03",
+  "pull_request": "https://github.com/workhold/lightmoni/pull/79",
+  "main_merge": "2d5db31",
+  "source_revision": "a662806b51285ca2ba187dce40c8ec5507d2ce61",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261103-a662806",
+  "index_digest": "sha256:4af36874a5203e6691b81d7ac0de12c64d04e2148cce882bdeaaea0de11a240d",
+  "platform_smoke_checks": { "amd64": 41, "arm64": 41, "errors": [] },
+  "targeted_tests": { "pass": 35, "fail": 0 },
+  "runtime_typecheck_and_build": "passed",
+  "actual_host_dependency_probe": {
+    "systemd_version": "239 (239-51.el8)",
+    "trusted_files_and_system_bus": "passed",
+    "transient_exec_unit_exit": 0
+  },
+  "production_center": { "health": "ok", "clickhouse_unchanged": true, "other_compose_settings_unchanged": true, "state_schema": 2 },
+  "agent": {
+    "machine_id": "9473f8974462e85d",
+    "agent_id": "cf27568ec2d1217867197be3ebbe9a12",
+    "executor_id": "33307107-bc40-4993-afc5-52273be8bc65",
+    "update_id": "ccdaf67dd70eb8aaaa6c76d602e35ad6",
+    "update_state": "succeeded",
+    "identity_preserved": true,
+    "service": "lightmoni-agent.service",
+    "user": "root",
+    "old_executor_service": "not-found",
+    "signed_capabilities": ["container.managed.v1", "operations.managed.v1", "script.elevated.v1"],
+    "operations_capabilities_count": 10
+  },
+  "architecture_sync": { "applicable": false, "reason": "Dependency version format recognition only; no architecture or authority change." }
+}

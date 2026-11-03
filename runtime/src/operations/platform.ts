@@ -506,17 +506,20 @@ async function workloadSnapshot(
     observed_at: context.now().toISOString(),
   };
 }
-async function checkReadiness(
+export async function checkReadiness(
   config: any,
   context: OperationExecutionContext,
 ): Promise<boolean> {
   if (!config.health) return true;
   const p = port(config.health.port ?? config.probe_port);
+  const address = config.health.host ?? "127.0.0.1";
+  if (typeof address !== "string" || !isIP(address)) reject("INVALID_HEALTH_HOST");
+  const host = address === "0.0.0.0" ? "127.0.0.1" : address === "::" ? "::1" : address;
   context.signal.throwIfAborted();
   if (config.health.type === "http") {
     try {
       const response = await fetch(
-        "http://127.0.0.1:" + p + (config.health.path ?? "/"),
+        "http://" + (isIP(host) === 6 ? "[" + host + "]" : host) + ":" + p + (config.health.path ?? "/"),
         {
           redirect: "manual",
           signal: AbortSignal.any([context.signal, AbortSignal.timeout(3000)]),
@@ -530,7 +533,7 @@ async function checkReadiness(
   }
   if (config.health.type !== "tcp") reject("INVALID_HEALTH_TYPE");
   return new Promise<boolean>((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port: p });
+    const socket = createConnection({ host, port: p });
     let complete = false;
     const done = (v: boolean) => {
       if (complete) return;
