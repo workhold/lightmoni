@@ -552,6 +552,59 @@ test('automatic installation selection refuses a changed endpoint instead of tes
  const result=await f.rawRequest(`/machines/${h.id}/installation-preflight`,'POST',{selection:'auto'});assert.equal(result.status,409,result.raw);assert.equal(attempted.length,1);assert.equal(f.db.get<any>('SELECT status FROM machine_installation_selections')?.status,'failed');
 });
 
+test('installation without reusable credentials returns actionable diagnostics and a failed selection audit without SSH',async t=>{
+ for(const scenario of ['missing','expired','revoked','single-use'] as const){
+  let calls=0;
+  const f=await fixture(t,{},async()=>{calls++;return {stdout:checkOutput,stderr:'',stages:[]}});
+  const h=await f.request('/machines','POST',{name:'credentials-'+scenario,address:'host.example.test',connection_method:'direct_ssh'});assert.equal(h.status,201,h.raw);
+  if(scenario!=='missing'){
+   const c=await f.rawRequest(`/machines/${h.data.id}/accounts/${f.accountID(h.data.id)}/credentials`,'POST',{method:'password',secret:'never-return-this-password',retention:scenario==='single-use'?'one_time':'temporary'});assert.equal(c.status,201,c.raw);
+   if(scenario==='expired')f.db.run("UPDATE machine_credentials SET expires_at='2020-01-01T00:00:00.000Z' WHERE id=?",c.data.id);
+   if(scenario==='revoked')assert.equal((await f.rawRequest(`/machines/${h.data.id}/accounts/${f.accountID(h.data.id)}/credentials/${c.data.id}`,'DELETE')).status,200);
+  }
+  const result=await f.rawRequest(`/machines/${h.data.id}/installation-preflight`,'POST',{selection:'auto'});
+  assert.equal(result.status,409,result.raw);assert.equal(result.data.code,'installation_account_required');assert.equal(result.data.installation_recovery.machine_id,h.data.id);
+  assert.equal(result.data.installation_recovery.reason,({missing:'no_credentials',expired:'credentials_expired',revoked:'credentials_revoked','single-use':'credentials_unavailable'})[scenario]);
+  assert.equal(result.data.installation_recovery.next_step,scenario==='missing'?'add_account':'update_credentials');assert.equal(calls,0);assert.ok(!result.raw.includes('never-return-this-password'));
+  const audit=await f.rawRequest(`/machines/${h.data.id}/installation-preflights`);assert.equal(audit.data[0].id,result.data.installation_recovery.selection_id);assert.equal(audit.data[0].status,'failed');assert.deepEqual(audit.data[0].attempts,[]);
+ }
+});
+
+test('failed installation account checks distinguish insufficient privilege, connection and host prerequisites without dispatch',async t=>{
+ for(const scenario of ['privilege','connection','prerequisites'] as const){
+  let calls=0;const f=await fixture(t,{},async()=>{calls++;if(scenario==='connection')throw new SSHError('ssh_failed');return {stdout:checkOutput.replace('privilege_state=root','privilege_state=unavailable').replace('install_privilege=1','install_privilege=0').replace('curl=1',scenario==='prerequisites'?'curl=0':'curl=1'),stderr:'',stages:[]}}),h=await host(f,'recovery-'+scenario);
+  const root=await f.rawRequest(`/machines/${h.id}/accounts`,'POST',{username:'root'});await f.rawRequest(`/machines/${h.id}/accounts/${root.data.id}/credentials`,'POST',{method:'password',secret:'secret-root-password',retention:'temporary'});
+  const result=await f.rawRequest(`/machines/${h.id}/installation-preflight`,'POST',{selection:'auto'});assert.equal(result.status,200,result.raw);assert.equal(result.data.ready,false);
+  assert.equal(result.data.installation_recovery.reason,({privilege:'insufficient_privilege',connection:'connection_failed',prerequisites:'host_prerequisites'})[scenario]);
+  assert.equal(calls,scenario==='prerequisites'?1:2);assert.equal(result.data.installation_selection.selected_credential_id,'');assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_deployments')?.n,0);assert.ok(!result.raw.includes('secret-root-password'));
+ }
+});
+
+test('manual installation with expired, revoked or single-use credentials returns repair guidance without selecting another account',async t=>{
+ for(const scenario of ['expired','revoked','single-use'] as const){
+  let calls=0;const f=await fixture(t,{},async()=>{calls++;return {stdout:checkOutput,stderr:'',stages:[]}}),h=await host(f,'manual-invalid-'+scenario);
+  const root=await f.rawRequest(`/machines/${h.id}/accounts`,'POST',{username:'root'});await f.rawRequest(`/machines/${h.id}/accounts/${root.data.id}/credentials`,'POST',{method:'password',secret:'active-but-not-selected',retention:'temporary'});
+  let credentialID=h.credential;
+  if(scenario==='expired')f.db.run("UPDATE machine_credentials SET expires_at='2020-01-01T00:00:00.000Z' WHERE id=?",credentialID);
+  if(scenario==='revoked')assert.equal((await f.rawRequest(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials/${credentialID}`,'DELETE')).status,200);
+  if(scenario==='single-use'){const saved=await f.rawRequest(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method:'password',secret:'single-use-only',retention:'one_time'});credentialID=saved.data.id;}
+  const result=await f.rawRequest(`/machines/${h.id}/installation-preflight`,'POST',{selection:'manual',credential_id:credentialID});
+  assert.equal(result.status,409,result.raw);assert.equal(result.data.installation_recovery.reason,scenario==='single-use'?'credentials_unavailable':'credentials_'+scenario);assert.equal(calls,0);
+  const audit=f.db.get<any>('SELECT * FROM machine_installation_selections WHERE id=?',result.data.installation_recovery.selection_id);assert.equal(audit.mode,'manual');assert.equal(audit.status,'failed');assert.equal(audit.selected_credential_id,'');
+ }
+});
+
+test('invalid SSH check output does not suggest root, while mixed account failures retain confirmed privilege diagnosis',async t=>{
+ for(const scenario of ['invalid-response','mixed'] as const){
+  const f=await fixture(t,{},async input=>{if(scenario==='invalid-response')return {stdout:'incomplete SSH output',stderr:'',stages:[]};if(input.machine.username==='root')return {stdout:checkOutput.replace('privilege_state=root','privilege_state=unavailable').replace('install_privilege=1','install_privilege=0'),stderr:'',stages:[]};throw new SSHError('ssh_failed')}),h=await host(f,'diagnosis-'+scenario);
+  const root=await f.rawRequest(`/machines/${h.id}/accounts`,'POST',{username:'root'});await f.rawRequest(`/machines/${h.id}/accounts/${root.data.id}/credentials`,'POST',{method:'password',secret:'root-secret',retention:'temporary'});
+  const result=await f.rawRequest(`/machines/${h.id}/installation-preflight`,'POST',{selection:'auto'});assert.equal(result.status,200,result.raw);assert.equal(result.data.ready,false);
+  assert.equal(result.data.installation_recovery.reason,scenario==='invalid-response'?'check_failed':'insufficient_privilege');
+  if(scenario==='invalid-response'){assert.equal(result.data.error_code,'invalid_response');assert.equal(result.data.permission_recovery,undefined);assert.equal(result.data.installation_selection.attempts.length,1)}
+  else {assert.equal(result.data.installation_selection.attempts.length,2);assert.equal(result.data.installation_selection.attempts[0].privilege_state,'unavailable');assert.equal(result.data.error_code,'ssh_failed')}
+ }
+});
+
 test('credential policies default both login methods to six hours with explicit consent and enforce finite limits', async t => {
  const f=await fixture(t), h=await host(f,'retention-policy');
  const original=credentialRow(f,h.credential);
@@ -740,7 +793,7 @@ test('expiry clears database secrets but leaves a bounded running install intact
  finish();const completed=await application;assert.equal(completed.status,200,completed.raw);assert.equal(f.db.get<any>('SELECT status FROM machine_deployments WHERE id=?',running.data.id)?.status,'succeeded');assert.equal(credentialRow(f,h.credential).clear_reason,'expired');
 });
 
-const probeOutput=(agentID='node-known',removed=false,options:{running?:boolean;lock?:boolean;complete?:boolean;managed?:boolean;identity?:string;purged?:boolean;unsafe?:boolean;operation?:boolean;digest?:string}={})=>`LMREMOVE=1\nagent_id=${options.purged||options.identity&&options.identity!=='valid'?'-':agentID}\nidentity_state=${options.purged?'missing':options.identity||'valid'}\nidentity_sha256=${options.purged||options.identity==='missing'?'-':'c'.repeat(64)}\nprogram_sha256=${options.digest||(removed?'b':'a').repeat(64)}\ninstallation=${removed?'absent':'present'}\nprogram_complete=${options.complete??!removed?1:0}\nunit_managed=${options.managed===false?0:1}\nservice_running=${options.running??!removed?1:0}\nlifecycle_locked=${options.lock?1:0}\noperation_lock=${options.operation?1:0}\npaths_safe=${options.unsafe?0:1}\nconfig_present=${options.purged?0:1}\ndata_present=${options.purged?0:1}\n`;
+const probeOutput=(agentID='node-known',removed=false,options:{running?:boolean;lock?:boolean;complete?:boolean;managed?:boolean;identity?:string;purged?:boolean;unsafe?:boolean;operation?:boolean;digest?:string}={})=>`LMREMOVE=1\nagent_id=${options.purged||options.identity&&options.identity!=='valid'?'-':agentID}\nidentity_state=${options.purged?'missing':options.identity||'valid'}\nidentity_sha256=${options.purged||options.identity==='missing'?'-':'c'.repeat(64)}\nprogram_sha256=${options.digest||(removed?'b':'a').repeat(64)}\ninstallation=${removed?'absent':'present'}\nprogram_complete=${options.complete??!removed?1:0}\nunit_managed=${options.managed===false?0:1}\nservice_running=${options.running??!removed?1:0}\nlifecycle_locked=${options.lock?1:0}\noperation_lock=${options.operation?1:0}\npaths_safe=${options.unsafe?0:1}\nconfig_present=${options.purged?0:1}\ndata_present=${options.purged?0:1}\nagent_state_present=${options.purged?0:1}\nbusiness_data_retained=0\nhelper_present=0\n`;
 async function uninstallHost(f:Awaited<ReturnType<typeof fixture>>,linked=true){
  const h=await host(f,'uninstall-'+Math.random().toString(36).slice(2));
  f.db.exec("CREATE TABLE IF NOT EXISTS agent_credentials(id TEXT PRIMARY KEY,agent_id TEXT,audience TEXT,revoked_at TEXT,revoke_reason TEXT DEFAULT '')");

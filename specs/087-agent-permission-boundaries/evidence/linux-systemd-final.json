@@ -1,0 +1,128 @@
+{
+  "date": "2026-11-03T13:58:24.227Z",
+  "platform": "linux",
+  "arch": "arm64",
+  "node": "v24.15.0",
+  "systemd": "systemd 252 (252.39-1~deb12u2)",
+  "center_source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+  "source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+  "final_arm64_release": {
+    "version": "0.1.0",
+    "source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+    "build_id": "0.1.0-3309b0b36490-5382f0e4da8d",
+    "state_schema": 1,
+    "platform": "linux",
+    "arch": "arm64",
+    "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+    "sha256": "089287cc4ba12bc96c824ae74bf44eeb785bfa73c52cbf0ac6cf7505f6c2363b",
+    "size": 80029940,
+    "build_time": "2026-11-03T13:36:05.532Z"
+  },
+  "previous_source_revision": "5e42388b210146ad28edaeecc38390a5deea7f7e",
+  "host_baseline": "no Agent account or /usr/local/bin before either installation; USERGROUPS_ENAB=no",
+  "scope": "real Linux/root/systemd, original installer and fixed commands, production enrollment and signed task modules; local login adapter replaces SSH transport; no ClickHouse or real Docker daemon",
+  "checks": [
+    {
+      "name": "root fixed preflight observes actual root",
+      "status": "passed"
+    },
+    {
+      "name": "root original installer starts actual non-root Agent",
+      "status": "passed",
+      "observed": {
+        "uid": 995,
+        "pid": 15718
+      }
+    },
+    {
+      "name": "root helper starts under systemd and private absolute-path guard",
+      "status": "passed"
+    },
+    {
+      "name": "signed ordinary task runs as same Agent UID and records actor/identity",
+      "status": "passed",
+      "observed": {
+        "uid": 995,
+        "gid": 995,
+        "groups": []
+      }
+    },
+    {
+      "name": "approved signed root script executes through actual systemd transient unit and audits",
+      "status": "passed"
+    },
+    {
+      "name": "root upgrade confirms both actual services, signed target build and new helper activation",
+      "status": "passed",
+      "observed": {
+        "source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+        "artifact_sha256": "089287cc4ba12bc96c824ae74bf44eeb785bfa73c52cbf0ac6cf7505f6c2363b"
+      }
+    },
+    {
+      "name": "root rollback confirms both actual services, signed target build and new helper activation",
+      "status": "passed",
+      "observed": {
+        "source_revision": "5e42388b210146ad28edaeecc38390a5deea7f7e",
+        "artifact_sha256": "a47b06b9dde183a8214ee2a6cca7d836fc8b9566f3b7f5f51bcc8352599fa86a"
+      }
+    },
+    {
+      "name": "root upgrade confirms both actual services, signed target build and new helper activation",
+      "status": "passed",
+      "observed": {
+        "source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+        "artifact_sha256": "089287cc4ba12bc96c824ae74bf44eeb785bfa73c52cbf0ac6cf7505f6c2363b"
+      }
+    },
+    {
+      "name": "root reviewed mode switch to user confirms actual service identity and permission generation",
+      "status": "passed"
+    },
+    {
+      "name": "root ordinary task after root transition uses newly signed identity and same Agent UID",
+      "status": "passed"
+    },
+    {
+      "name": "root reviewed mode switch to root confirms actual service identity and permission generation",
+      "status": "passed"
+    },
+    {
+      "name": "root original platform removal stops both services, revokes credentials and retains data",
+      "status": "passed"
+    },
+    {
+      "name": "user fixed preflight observes actual sudo_noninteractive",
+      "status": "passed"
+    },
+    {
+      "name": "user original installer starts actual non-root Agent",
+      "status": "passed",
+      "observed": {
+        "uid": 995,
+        "pid": 20004
+      }
+    },
+    {
+      "name": "monitoring mode installs no helper or custom-script channel",
+      "status": "passed"
+    },
+    {
+      "name": "qa-deploy ordinary task after root transition uses newly signed identity and same Agent UID",
+      "status": "passed"
+    },
+    {
+      "name": "qa-deploy reviewed mode switch to root confirms actual service identity and permission generation",
+      "status": "passed"
+    },
+    {
+      "name": "qa-deploy reviewed mode switch to user confirms actual service identity and permission generation",
+      "status": "passed"
+    },
+    {
+      "name": "user original platform removal stops both services, revokes credentials and retains data",
+      "status": "passed"
+    }
+  ],
+  "status": "passed"
+}

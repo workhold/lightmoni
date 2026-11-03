@@ -438,7 +438,7 @@ export function monitoringTools(
       {
         name: "propose_agent_install",
         description:
-          "Persist a reviewable LightMoni Agent installation plan using a successful fresh check_id from check_managed_machine_ssh and its observed architecture. runtime_mode defaults to root; use user when the user requests an Agent running as the standard lightmoni-agent account without root capabilities. SSH login identity is separate from Agent runtime mode. Return the review_url to the administrator. This only drafts a fixed plan; it does not connect by SSH, execute commands, reveal credentials, or install anything. The administrator must confirm in the host management page.",
+          "Persist a reviewable LightMoni Agent installation plan using a successful fresh check_id from check_managed_machine_ssh and its observed architecture. runtime_mode defaults to root, meaning complete management with the same-release managed root helper; use user for monitoring-only mode without the helper or custom script tasks. The resident network Agent always runs as the non-root lightmoni-agent account in both modes. SSH login identity is separate and requires root or non-interactive sudo for lifecycle maintenance. Return the review_url to the administrator. This only drafts a fixed plan; it does not connect by SSH, execute commands, reveal credentials, or install anything. The administrator must confirm in the host management page.",
         effect: "draft",
         schema: obj(
           {

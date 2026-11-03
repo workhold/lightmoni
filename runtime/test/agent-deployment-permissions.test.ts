@@ -7,7 +7,7 @@ import {join, resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {pathToFileURL} from 'node:url';
 import {createServer, type Server} from 'node:net';
-const {prepareDeploymentPermissions, checkDeploymentPermissions} = await import(pathToFileURL(resolve(import.meta.dirname, '../../deploy/agent/deployment-permissions.mjs')).href);
+const {prepareDeploymentPermissions, checkDeploymentPermissions, checkHelperPermissions} = await import(pathToFileURL(resolve(import.meta.dirname, '../../deploy/agent/deployment-permissions.mjs')).href);
 
 type Identity = {uid:number;euid:number;gid:number;groups:number[];names:string[];capabilities:{inheritable:string;permitted:string;effective:string;ambient:string}};
 const ordinaryIdentity = (): Identity => ({uid:process.getuid?.()||1001,euid:process.geteuid?.()||1001,gid:process.getgid?.()||1001,groups:[process.getgid?.()||1001],names:['lightmoni-agent'],capabilities:{inheritable:'0000000000000000',permitted:'0000000000000000',effective:'0000000000000000',ambient:'0000000000000000'}});
@@ -26,6 +26,7 @@ function fixture(t:TestContext) {
     assert.equal(args[1],'lightmoni-agent');
     if(args[0]==='-u')return String(identity.uid);
     if(args[0]==='-g')return String(identity.gid);
+    if(args[0]==='-gn')return identity.names[0];
     if(args[0]==='-G')return identity.groups.join(' ');
     if(args[0]==='-Gn')return identity.names.join(' ');
     throw Error('unexpected account query');
@@ -86,6 +87,15 @@ test('root identities and failed or malformed account queries never turn into im
   for(const answer of ['not-an-id','1\n2',''])assert.throws(()=>prepareDeploymentPermissions({...f.options,command:()=>answer}),/agent_account_invalid/);
   assert.throws(()=>prepareDeploymentPermissions({...f.options,command:()=>{throw Error('synthetic account query failure');}}));
   assert.equal(fs.existsSync(f.p('var/lib/lightmoni-web')),false);
+});
+
+test('an existing ordinary account with a different primary group is rejected without changing its identity or files',t=>{
+  const f=fixture(t);f.identity.names=['users','lightmoni-agent'];
+  const before=structuredClone(f.identity),config=snapshot(f.p('etc/lightmoni-agent/config.json')),data=snapshot(f.p('var/lib/lightmoni-agent'));
+  assert.throws(()=>prepareDeploymentPermissions(f.options),/agent_primary_group_invalid/);
+  assert.deepEqual(f.identity,before);assert.deepEqual(snapshot(f.p('etc/lightmoni-agent/config.json')),config);assert.deepEqual(snapshot(f.p('var/lib/lightmoni-agent')),data);
+  assert.deepEqual(f.calls.map(call=>call.args[0]),['-u','-g','-gn']);
+  assert(f.calls.every(call=>call.file==='id'),'preparation must not change accounts, groups, ownership or permissions');
 });
 
 test('startup with no Docker socket is ready using only private config and atomic data-directory writes',async t=>{
@@ -166,32 +176,57 @@ test('config secrecy and private directory boundaries remain mandatory without a
   assert.equal(fs.readFileSync(target,'utf8'),JSON.stringify({runtime_mode:'user',permission_generation:1}));
 });
 
-test('explicit root runtime accepts only root-owned 0600 config and private 0700 data, without granting external permissions',async t=>{
-  const f=rootFixture(t),config=snapshot(f.p('etc/lightmoni-agent/config.json')),data=snapshot(f.p('var/lib/lightmoni-agent'));
-  assert.equal(await checkDeploymentPermissions(f.options),'root_permissions_ready');
-  assert.deepEqual(snapshot(f.p('etc/lightmoni-agent/config.json')),config);assert.deepEqual(snapshot(f.p('var/lib/lightmoni-agent')),data);assert.equal(f.calls.length,0);
-  assert.equal(fs.existsSync(f.p('var/lib/lightmoni-web')),false);assert.deepEqual(fs.readdirSync(f.p('var/lib/lightmoni-agent')),[]);
+test('full-management helper requires root identity, private credentials, and isolated task paths',async t=>{
+  const root=fs.mkdtempSync(join(tmpdir(),'lm-helper-permissions-'));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  const p=(name:string)=>join(root,name);
+  fs.mkdirSync(p('etc/lightmoni-agent-helper'),{recursive:true,mode:0o700});
+  fs.mkdirSync(p('var/lib/lightmoni-agent-helper/managed'),{recursive:true,mode:0o700});
+  fs.mkdirSync(p('var/lib/lightmoni-agent-helper/tasks'),{recursive:true,mode:0o711});
+  fs.chmodSync(p('var/lib/lightmoni-agent-helper'),0o711);
+  fs.writeFileSync(p('etc/lightmoni-agent-helper/helper.json'),'{}',{mode:0o600});
+  const rootIdentity={uid:0,euid:0,gid:0,groups:[0],names:['root'],capabilities:{inheritable:'0',permitted:'0',effective:'0',ambient:'0'}};
+  const original=fs.lstatSync,owners=(filename:fs.PathLike)=>new Proxy(Reflect.apply(original,fs,[filename]),{get(target,key,receiver){return key==='uid'?0:Reflect.get(target,key,receiver);}}) as fs.Stats;
+  assert.equal(checkHelperPermissions({root,identity:rootIdentity,lstat:owners}),'privileged_helper_permissions_ready');
+  assert.throws(()=>checkHelperPermissions({root,identity:{...rootIdentity,euid:1001},lstat:owners}),/helper_root_identity_required/);
+  fs.chmodSync(p('etc/lightmoni-agent-helper/helper.json'),0o644);
+  assert.throws(()=>checkHelperPermissions({root,identity:rootIdentity,lstat:owners}),/helper_private_config_invalid/);
 });
 
-test('root runtime rejects account mismatch, non-root ownership and group/world-readable state',async t=>{
-  const f=rootFixture(t);
-  for(const identity of [{...f.options.identity,gid:1001},{...f.options.identity,uid:1001},{...f.options.identity,euid:1001}])await assert.rejects(checkDeploymentPermissions({...f.options,identity}),/runtime_identity_mismatch|ordinary_agent_privilege_violation/);
-  for(const entry of ['etc/lightmoni-agent/config.json','var/lib/lightmoni-agent']) {
-    const file=f.p(entry),owner=f.owners.get(file)!;owner.uid=1001;
-    await assert.rejects(checkDeploymentPermissions(f.options),/agent_(?:config|directory)_permission_invalid/);owner.uid=0;
-    for(const mode of [0o640,0o644,0o750,0o755]) {fs.chmodSync(file,mode);await assert.rejects(checkDeploymentPermissions(f.options),/agent_(?:config|directory)_permission_invalid/);}fs.chmodSync(file,entry.endsWith('.json')?0o600:0o700);
-  }
-  assert.equal(await checkDeploymentPermissions(f.options),'root_permissions_ready');
-});
-
-test('root runtime requires explicit root mode and a valid positive permission generation',async t=>{
-  const f=rootFixture(t),file=f.p('etc/lightmoni-agent/config.json');
-  for(const value of [{runtime_mode:'user',permission_generation:1},{permission_generation:1},{runtime_mode:'ROOT',permission_generation:1},{runtime_mode:'root',permission_generation:0},{runtime_mode:'root',permission_generation:-1},{runtime_mode:'root',permission_generation:1.5},{runtime_mode:'root',permission_generation:'1'},{runtime_mode:'root'}]) {fs.writeFileSync(file,JSON.stringify(value));await assert.rejects(checkDeploymentPermissions(f.options),/runtime_identity_mismatch/);}
-  fs.writeFileSync(file,'invalid-json');await assert.rejects(checkDeploymentPermissions(f.options),/agent_config_permission_invalid/);
+test('helper ancestry accepts the real filesystem root while checking every root-owned parent', t => {
+  const directory = fs.mkdtempSync(join(tmpdir(), 'lm-helper-root-boundary-'));
+  t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+  const helper = join(directory, 'helper.json');
+  fs.writeFileSync(helper, '{}', {mode: 0o600});
+  const fileStat = fs.lstatSync(helper), directoryStat = fs.lstatSync(directory), inspected: string[] = [];
+  const realRead = mutableFS.readFileSync;
+  const stub = t.mock.method(mutableFS, 'readFileSync', ((filename: fs.PathLike, ...args: unknown[]) =>
+    Reflect.apply(realRead, mutableFS, [String(filename) === '/etc/lightmoni-agent-helper/helper.json' ? helper : filename, ...args])) as typeof fs.readFileSync);
+  syncBuiltinESMExports();
+  t.after(() => {stub.mock.restore(); syncBuiltinESMExports();});
+  const lstat = (filename: fs.PathLike) => {
+    const name = String(filename); inspected.push(name);
+    const file = name.endsWith('/helper.json');
+    const mode = file ? 0o600 : (name.endsWith('/lightmoni-agent-helper') && name.startsWith('/var/')) || name.endsWith('/tasks') ? 0o711 : 0o700;
+    return new Proxy(file ? fileStat : directoryStat, {get(target, key, receiver) {
+      return key === 'uid' ? 0 : key === 'mode' ? (target.mode & ~0o777) | mode : Reflect.get(target, key, receiver);
+    }}) as fs.Stats;
+  };
+  const identity = {uid: 0, euid: 0, gid: 0};
+  assert.equal(checkHelperPermissions({identity, lstat}), 'privileged_helper_permissions_ready');
+  for (const parent of ['/', '/etc', '/var', '/var/lib']) assert.ok(inspected.includes(parent), parent);
+  assert.throws(() => checkHelperPermissions({identity, lstat: (filename: fs.PathLike) => {
+    const result = lstat(filename);
+    return String(filename) === '/etc' ? new Proxy(result, {get(target, key, receiver) {
+      return key === 'mode' ? 0o777 : Reflect.get(target, key, receiver);
+    }}) : result;
+  }}), /helper_private_(?:config|state)_invalid/);
 });
 
 test('ordinary identity cannot masquerade as root through config or silently accept invalid runtime mode',async t=>{
   const f=fixture(t),file=f.p('etc/lightmoni-agent/config.json');
-  for(const value of [{runtime_mode:'root',permission_generation:1},{runtime_mode:'ROOT',permission_generation:1},{runtime_mode:'user',permission_generation:0}]) {fs.writeFileSync(file,JSON.stringify(value));await assert.rejects(checkDeploymentPermissions(f.options),/runtime_identity_mismatch/);}
+  fs.writeFileSync(file,JSON.stringify({runtime_mode:'root',permission_generation:1}));
+  assert.equal(await checkDeploymentPermissions(f.options),'ordinary_permissions_ready','full mode keeps the Agent process unprivileged');
+  for(const value of [{runtime_mode:'ROOT',permission_generation:1},{runtime_mode:'user',permission_generation:0}]) {fs.writeFileSync(file,JSON.stringify(value));await assert.rejects(checkDeploymentPermissions(f.options),/runtime_identity_mismatch/);}
   fs.writeFileSync(file,JSON.stringify({runtime_mode:'user',permission_generation:1}));assert.equal(await checkDeploymentPermissions(f.options),'ordinary_permissions_ready');
 });

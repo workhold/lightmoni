@@ -10,12 +10,13 @@ import {
   readlinkSync,
   existsSync,
   statSync,
+  lstatSync,
   readdirSync,
   chmodSync,
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { rewriteMaintenancePaths, writeMaintenanceStatShim,inlineFixtureCommands } from "./helpers/maintenance-shell.js";
 const repo = resolve(import.meta.dirname, "../.."),
@@ -39,6 +40,9 @@ function fixture(
     defaultRoot?: boolean;
     failManagedEnrollment?: boolean;
     missingManagedBootstrap?: boolean;
+    missingSetpriv?: boolean;
+    cleanupSignal?: "SIGHUP" | "SIGINT" | "SIGTERM";
+    failRestorationStop?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lightmoni-install-")),
@@ -55,8 +59,11 @@ function fixture(
     join(root, "run"),
     join(root, "etc/systemd/system"),
     join(root, "usr/local/bin"),
+    join(root, "usr/bin"),
+    join(root, "transactions"),
   ])
     mkdirSync(path, { recursive: true });
+  if (!options.missingSetpriv) writeFileSync(join(root,"usr/bin/setpriv"),"#!/bin/sh\nexit 0\n",{mode:0o755});
   const installer = rewriteMaintenancePaths(readFileSync(join(repo, "deploy/agent/install.sh"), "utf8"), root);
   const script = join(root, "install.sh");
   writeFileSync(script, installer);
@@ -70,6 +77,9 @@ function fixture(
     launcher = join(root, "usr/local/bin/lightmoni-agent"),
     uninstaller = join(root, "usr/local/sbin/lightmoni-agent-uninstall"),
     service = join(root, "etc/systemd/system/lightmoni-agent.service");
+  const helperService = join(root, "etc/systemd/system/lightmoni-agent-helper.service"),
+    helperConfig = join(root, "etc/lightmoni-agent-helper"),
+    helperData = join(root, "var/lib/lightmoni-agent-helper");
   mkdirSync(data, { recursive: true, mode: 0o700 });
   chmodSync(data, 0o700);
   writeFileSync(
@@ -135,13 +145,18 @@ function fixture(
       startupStates: options.startupStates,
       runtimeAccessible: false,
       sleeps: [],
+      helperActive: false,
+      helperEnabled: false,
+      agentAccount: old !== "none",
+      accountsCreated: [],
     }),
   );
-  writeFileSync(
-    join(bin, "id"),
-    '#!/bin/sh\nif [ "$1" = "-u" ]; then echo 0; fi\nexit 0\n',
-    { mode: 0o755 },
-  );
+  js(join(bin, "id"), `const fs=require('fs'),s=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE)),a=process.argv.slice(2),name=a.at(-1);if(name==='lightmoni-agent'){if(!s.agentAccount)process.exit(1);console.log(a[0]==='-u'?19999:a[0]==='-g'?19998:'lightmoni-agent');}else if(a.length===1&&a[0]==='-u')console.log(0);else process.exit(1);`);
+  js(join(bin, "useradd"), `const fs=require('fs'),file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file)),args=process.argv.slice(2);if(args.at(-1)!=='lightmoni-agent'||s.agentAccount)throw Error('unexpected account creation');if(!args.includes('--system')||!args.includes('--user-group')||!args.includes('--no-create-home')||!args[args.indexOf('--shell')+1]?.endsWith('/usr/sbin/nologin'))throw Error('unsafe Agent account');s.agentAccount=true;s.accountsCreated.push(args.at(-1));fs.writeFileSync(file,JSON.stringify(s));`);
+  for (const command of ['groupadd', 'userdel', 'groupdel'])
+    js(join(bin, command), `throw Error('unexpected account mutation: ${command}');`);
+  // Keep intentionally retained rollback backups inside this disposable fixture.
+  js(join(bin,"mktemp"),`const fs=require('node:fs'),path=require('node:path');if(process.argv.slice(2).join(' ')!=='-d')throw Error('unexpected mktemp arguments');console.log(fs.mkdtempSync(path.join(process.env.TEST_INSTALL_TMP,'rollback-')));`);
   writeMaintenanceStatShim(bin);
   writeFileSync(
     join(bin, "uname"),
@@ -163,7 +178,7 @@ function fixture(
   js(
     join(bin, "systemctl"),
     `const fs=require('fs'),path=require('path'),file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file)),args=process.argv.slice(2),op=args[0];
-s.calls.push(args.join(' '));let status=0;
+s.calls.push(args.join(' '));let status=0;const helper=args.includes('lightmoni-agent-helper.service'),active=helper?'helperActive':'active',enabled=helper?'helperEnabled':'enabled';
 function accessibleRuntime(){
   const parent=process.env.TEST_RUNTIME_PARENT,current=path.join(parent,'current');
   try{
@@ -175,20 +190,29 @@ function accessibleRuntime(){
   }catch{return false;}
 }
 if(op==='is-active'){
-  if(s.restarts===1){
+  if(!helper&&s.restarts===1){
     const index=s.startupChecks++;
     if(s.startupStates)s.active=s.runtimeAccessible&&(s.startupStates[index]??false);
   }
-  status=s.active?0:3;
-}else if(op==='is-enabled')status=s.enabled?0:1;
-else if(op==='enable')s.enabled=true;
-else if(op==='disable')s.enabled=false;
-else if(op==='stop')s.active=false;
+  status=s[active]?0:3;
+}else if(op==='is-enabled')status=s[enabled]?0:1;
+else if(op==='enable')s[enabled]=true;
+else if(op==='disable')s[enabled]=false;
+else if(op==='stop'){
+  s[active]=false;
+  if(!helper&&s.restarts===1){
+    if(process.env.TEST_CLEANUP_SIGNAL)process.kill(process.ppid,process.env.TEST_CLEANUP_SIGNAL);
+    if(process.env.TEST_FAIL_RESTORATION_STOP==='yes')status=17;
+  }
+}
 else if(op==='restart'){
+  if(helper){s.helperRestarts=(s.helperRestarts||0)+1;s.helperActive=true;}
+  else {
   s.restarts++;
   if(process.env.TEST_FAIL_RESTART==='yes'&&s.restarts===1){s.active=false;status=Number(process.env.TEST_FAIL_RESTART_STATUS);}
   else if(s.restarts===1){s.runtimeAccessible=accessibleRuntime();s.active=s.runtimeAccessible;}
   else s.active=true;
+  }
 }else if(op==='show'){
   if(process.env.TEST_FAIL_SHOW==='yes'&&!args.includes('--property=DropInPaths'))status=1;
   else if(args.includes('--property=DropInPaths')){const d=path.join(path.dirname(file),'etc/systemd/system/lightmoni-agent.service.d/20-lightmoni-docker.conf');console.log(s.dropInPaths??(fs.existsSync(d)?d:''));}
@@ -206,7 +230,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     mkdirSync(join(packagedRuntime, path), { recursive: true, mode: 0o755 });
   writeFileSync(join(packagedRuntime, "uninstall.sh"), rewriteMaintenancePaths(readFileSync(join(repo,"deploy/agent/uninstall.sh"),"utf8"),root), {mode:0o755});
   writeFileSync(join(packagedRuntime, "service-unit.mjs"), readFileSync(join(repo, "deploy/agent/service-unit.mjs")));
-  js(join(packagedRuntime, "deployment-permissions.mjs"), `import fs from 'node:fs';const file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file));if(process.argv[2]!=='prepare')process.exit(1);s.permissionPreparations=(s.permissionPreparations||0)+1;fs.writeFileSync(file,JSON.stringify(s));if(process.env.TEST_FAIL_PERMISSION_PREPARATION==='yes'){console.error('agent_permission_prepare_failed');process.exit(1);}`);
+  js(join(packagedRuntime, "deployment-permissions.mjs"), `import fs from 'node:fs';const file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file));if(process.argv[2]!=='prepare')process.exit(1);if(!s.agentAccount){console.error('agent_account_missing_before_permission_preparation');process.exit(1);}s.permissionPreparations=(s.permissionPreparations||0)+1;fs.writeFileSync(file,JSON.stringify(s));if(process.env.TEST_FAIL_PERMISSION_PREPARATION==='yes'){console.error('agent_permission_prepare_failed');process.exit(1);}`);
   writeFileSync(
     join(packagedRuntime, "node"),
     "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " \"$@\"\n",
@@ -226,13 +250,14 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
   });
   js(
     join(packageDir, "lightmoni-agent"),
-    `const fs=require('fs'),args=process.argv.slice(2),command=args.shift(),get=key=>args.includes(key)?args[args.indexOf(key)+1]:undefined,path=get('--config'),dir=get('--require-data-dir'),pending=args.includes('--pending-enrollment');if(args.includes('--key-stdin'))throw Error('shared key flag forbidden');if(command==='configure'){let c=fs.existsSync(path)?JSON.parse(fs.readFileSync(path)):{};if(get('--endpoint'))c.endpoint=get('--endpoint');if(get('--group-id'))c.group_id=get('--group-id');c.data_dir=dir;c.control_credential??='';c.data_credential??='';if(Object.hasOwn(c,'key')||(!pending&&(!c.control_credential||!c.data_credential)))throw Error('invalid credentials');fs.writeFileSync(path,JSON.stringify(c));}else if(command==='check'){const c=JSON.parse(fs.readFileSync(path));if(c.data_dir!==dir||Object.hasOwn(c,'key')||(!pending&&(!c.control_credential||!c.data_credential)))process.exit(1);const state=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE));state.configChecks??=[];state.configChecks.push({pending,credentialsPresent:!!c.control_credential&&!!c.data_credential,containsBootstrap:JSON.stringify(c).includes('test-bootstrap')});fs.writeFileSync(process.env.TEST_SYSTEM_STATE,JSON.stringify(state));}else if(command==='managed-enroll'){const b=JSON.parse(fs.readFileSync(0,'utf8'));if(!b.executor_id)throw Error('invalid managed fixture');const state=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE));state.managedEnrollments=(state.managedEnrollments||0)+1;fs.writeFileSync(process.env.TEST_SYSTEM_STATE,JSON.stringify(state));fs.mkdirSync(process.env.TEST_MANAGED_DATA,{recursive:true,mode:0o700});fs.writeFileSync(process.env.TEST_MANAGED_CONFIG,JSON.stringify(b),{mode:0o600});fs.writeFileSync(process.env.TEST_MANAGED_CONFIG.replace('managed.json','managed-activation.json'),'{}',{mode:0o600});if(process.env.TEST_FAIL_MANAGED_ENROLLMENT==='yes')process.exit(1);}else process.exit(1);`,
+    `const fs=require('fs'),args=process.argv.slice(2),command=args.shift(),get=key=>args.includes(key)?args[args.indexOf(key)+1]:undefined,path=get('--config'),dir=get('--require-data-dir'),pending=args.includes('--pending-enrollment');if(args.includes('--key-stdin'))throw Error('shared key flag forbidden');if(command==='configure'){let c=fs.existsSync(path)?JSON.parse(fs.readFileSync(path)):{};if(get('--endpoint'))c.endpoint=get('--endpoint');if(get('--group-id'))c.group_id=get('--group-id');c.data_dir=dir;c.control_credential??='';c.data_credential??='';if(Object.hasOwn(c,'key')||(!pending&&(!c.control_credential||!c.data_credential)))throw Error('invalid credentials');fs.writeFileSync(path,JSON.stringify(c));}else if(command==='check'){const c=JSON.parse(fs.readFileSync(path));if(c.data_dir!==dir||Object.hasOwn(c,'key')||(!pending&&(!c.control_credential||!c.data_credential)))process.exit(1);const state=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE));state.configChecks??=[];state.configChecks.push({pending,credentialsPresent:!!c.control_credential&&!!c.data_credential,containsBootstrap:JSON.stringify(c).includes('test-bootstrap')});fs.writeFileSync(process.env.TEST_SYSTEM_STATE,JSON.stringify(state));}else if(command==='managed-enroll'){const b=JSON.parse(fs.readFileSync(0,'utf8'));if(!b.executor_id)throw Error('invalid managed fixture');const state=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE));state.managedEnrollments=(state.managedEnrollments||0)+1;fs.writeFileSync(process.env.TEST_SYSTEM_STATE,JSON.stringify(state));fs.mkdirSync(process.env.TEST_MANAGED_DATA,{recursive:true,mode:0o700});fs.writeFileSync(process.env.TEST_MANAGED_CONFIG,JSON.stringify(b),{mode:0o600});fs.writeFileSync(process.env.TEST_MANAGED_CONFIG.replace('managed.json','managed-activation.json'),'{}',{mode:0o600});fs.writeFileSync(process.env.TEST_MANAGED_CONFIG.replace('managed.json','helper.json'),JSON.stringify({permission_generation:1}),{mode:0o600});if(process.env.TEST_FAIL_MANAGED_ENROLLMENT==='yes')process.exit(1);}else if(command==='status'){const c=JSON.parse(fs.readFileSync(path));console.log(JSON.stringify({runtime:{uid:19999,gid:19998,mode:c.runtime_mode,permission_generation:c.permission_generation}}));}else if(command==='helper-status'){console.log(JSON.stringify({permission_generation:1,fenced:null,pending_results:0,ordinary_task_identity:{account:'lightmoni-agent'},ordinary_task_runner:{active:false,state:'idle'}}));}else process.exit(1);`,
   );
   js(join(bin, "curl"), `const fs=require('fs'),args=process.argv.slice(2),get=flag=>args[args.indexOf(flag)+1],url=args.find(v=>v.startsWith('http://')),output=get('--output'),auth=fs.readFileSync(get('--config'),'utf8'),body=JSON.parse(fs.readFileSync(0,'utf8')),state=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE));let response;if(url.endsWith('/agents/enroll')){if(!auth.includes('test-enrollment')||body.enrollment_token!=='test-enrollment')throw Error('invalid enrollment fixture');state.enrollments=(state.enrollments||0)+1;response={agent_id:'synthetic-agent',bootstrap_credential:'test-bootstrap'};}else if(url.endsWith('/synthetic-agent/activate')){if(!auth.includes('test-bootstrap')||body.health.config_checked!==true)throw Error('invalid activation fixture');state.activations=(state.activations||0)+1;response={control_credential:'test-new-control',data_credential:'test-new-data',runtime_mode:process.env.TEST_RUNTIME_MODE,permission_generation:1,...(process.env.TEST_RUNTIME_MODE==='root'&&process.env.TEST_MISSING_MANAGED_BOOTSTRAP!=='yes'?{managed_bootstrap:{executor_id:'signed-install-identity',install_generation:1}}:{})};}else throw Error('unexpected fixture request');fs.writeFileSync(process.env.TEST_SYSTEM_STATE,JSON.stringify(state));fs.writeFileSync(output,JSON.stringify(response));`);
   writeFileSync(
     join(packageDir, "lightmoni-agent.service"),
     readFileSync(join(repo,"deploy/agent/lightmoni-agent.service")),
   );
+  writeFileSync(join(packageDir, "lightmoni-agent-helper.service"), readFileSync(join(repo, "deploy/agent/lightmoni-agent-helper.service")));
   execFileSync("tar", [
     "-czf",
     join(release, artifact),
@@ -240,17 +265,17 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     packageDir,
     "lightmoni-agent",
     "lightmoni-agent.service",
+    "lightmoni-agent-helper.service",
     "lightmoni-agent-runtime",
   ]);
   const checksum = createHash("sha256")
     .update(readFileSync(join(release, artifact)))
     .digest("hex");
   writeFileSync(join(release, "SHA256SUMS"), checksum + "  " + artifact + "\n");
-  const run = (extraArgs: string[] = []) => {
+  const invocation = (extraArgs: string[] = []) => {
     writeFileSync(script,inlineFixtureCommands(bin)+installer);
-    return spawnSync(
-      "/bin/sh",
-      [
+    return {
+      args: [
         script,
         ...(options.defaultRoot ? [] : ["--runtime-mode", options.runtimeMode ?? "user"]),
         ...extraArgs,
@@ -258,12 +283,11 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
         release,
         ...(old === "none" ? ["--endpoint", "http://new.example", "--enrollment-token-stdin"] : []),
       ],
-      {
-        input: old === "none" ? "test-enrollment\n" : "",
-        encoding: "utf8",
-        env: {
+      input: old === "none" ? "test-enrollment\n" : "",
+      env: {
           ...process.env,
           PATH: bin + ":" + process.env.PATH,
+          TEST_INSTALL_TMP: join(root, "transactions"),
           TEST_SYSTEM_STATE: system,
           TEST_FAIL_RESTART: options.failRestart ? "yes" : "no",
           TEST_FAIL_RESTART_STATUS: String(options.failRestartStatus ?? 1),
@@ -271,14 +295,37 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
           TEST_RUNTIME_PARENT: runtimeParent,
           TEST_FAIL_PERMISSION_PREPARATION: options.failPermissionPreparation ? 'yes' : 'no',
           TEST_RUNTIME_MODE:options.defaultRoot?'root':options.runtimeMode??'user',
-          TEST_MANAGED_CONFIG:join(root,'etc/lightmoni-agent/managed.json'),
-          TEST_MANAGED_DATA:join(data,'managed'),
+          TEST_MANAGED_CONFIG:join(helperConfig,'managed.json'),
+          TEST_MANAGED_DATA:join(helperData,'managed'),
           TEST_FAIL_MANAGED_ENROLLMENT:options.failManagedEnrollment?'yes':'no',
           TEST_MISSING_MANAGED_BOOTSTRAP:options.missingManagedBootstrap?'yes':'no',
-        },
-        timeout: 20000,
       },
-    );
+    };
+  };
+  const run = (extraArgs: string[] = []) => {
+    const request=invocation(extraArgs);
+    return spawnSync("/bin/sh",request.args,{
+      input:request.input,encoding:"utf8",env:request.env,timeout:20000,
+    });
+  };
+  const runInterrupted = async ({closedStderr=true}:{closedStderr?:boolean}={}) => {
+    const request=invocation();
+    const child=spawn("/bin/sh",request.args,{
+      env:{...request.env,TEST_CLEANUP_SIGNAL:options.cleanupSignal,
+        TEST_FAIL_RESTORATION_STOP:options.failRestorationStop?'yes':'no'},
+      stdio:["pipe","pipe","pipe"],timeout:20000,
+    });
+    // Match SSH closing its stderr read end. /dev/null would stay writable and
+    // cannot reproduce the shell's SIGPIPE while executing its EXIT cleanup.
+    let stdout="",stderr="";
+    if(closedStderr)child.stderr.destroy();
+    else child.stderr.setEncoding("utf8").on("data",chunk=>{stderr+=chunk});
+    child.stdout.setEncoding("utf8").on("data",chunk=>{stdout+=chunk});
+    child.stdin.on("error",()=>{});child.stdin.end(request.input);
+    return new Promise<{status:number|null;signal:NodeJS.Signals|null;stdout:string;stderr:string}>((resolve,reject)=>{
+      child.once("error",reject);
+      child.once("close",(status,signal)=>resolve({status,signal,stdout,stderr}));
+    });
   };
   const state = () => JSON.parse(readFileSync(system, "utf8"));
   const unchangedData = () => {
@@ -321,10 +368,14 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     launcher,
     uninstaller,
     service,
+    helperService,
+    helperConfig,
+    helperData,
     data,
     runtimeParent,
     before,
     run,
+    runInterrupted,
     state,
     unchangedData,
     restored,
@@ -436,7 +487,11 @@ test("startup observation tolerates delayed activation and requires two consecut
   assert.equal(f.state().startupChecks, 4);
   assert.equal(f.state().sleeps.length, 3);
   assert(f.state().sleeps.every((args: string[]) => args.length === 1 && args[0] === "1"));
-  assert(f.state().calls.filter((call: string) => call.startsWith("show ")).every((call: string) => call.includes("--property=DropInPaths")));
+  const stateQueries=f.state().calls.filter((call:string)=>call.startsWith("show "));
+  assert(stateQueries.filter((call:string)=>call.includes("--property=DropInPaths"))
+    .every((call:string)=>call.includes("lightmoni-agent.service")));
+  assert(stateQueries.filter((call:string)=>call.includes("--property=Result"))
+    .every((call:string)=>call.includes("--property=LoadState")&&call.includes("--property=ActiveState")&&call.includes("--property=ExecMainStatus")));
   assertRuntimePermissions(f);
   f.unchangedData();
 });
@@ -489,6 +544,43 @@ test("restart exit status survives diagnostic failure and successful restoration
   assert.equal(f.state().restarts, 2);
   assert(f.state().active);
   assert(f.state().enabled);
+});
+for(const old of ["none","node"] as const)test("disconnected SSH stderr cannot interrupt "+old+" installation restoration",async t=>{
+  const f=fixture(t,{old,active:old!=="none",failRestart:true,failRestartStatus:7});
+  const result=await f.runInterrupted();
+  assert.equal(result.signal,null,"broken diagnostic output must not kill EXIT cleanup with SIGPIPE");
+  assert.equal(result.status,7,"retain the installation's original failure code");
+  assert(!result.stdout.includes("Agent installed"));
+  f.restored();
+  assert.equal(f.state().active,old!=="none");
+  assert.equal(f.state().enabled,old!=="none");
+  assert.equal(existsSync(join(f.root,"run/lightmoni-agent-lifecycle.lock")),false);
+  assert.deepEqual(readdirSync(join(f.root,"transactions")),[],"successful restoration removes temporary backups");
+});
+for(const cleanupSignal of ["SIGHUP","SIGINT","SIGTERM"] as const)test(cleanupSignal+" during restoration cannot interrupt EXIT cleanup",async t=>{
+  const f=fixture(t,{failRestart:true,failRestartStatus:7,cleanupSignal});
+  // Keep diagnostics connected so this case specifically exercises a second
+  // termination signal delivered by systemctl stop after rollback has begun.
+  const result=await f.runInterrupted({closedStderr:false});
+  assert.equal(result.signal,null);
+  assert.equal(result.status,7);
+  f.restored();
+  assert(f.state().active);assert(f.state().enabled);
+  assert.equal(existsSync(join(f.root,"run/lightmoni-agent-lifecycle.lock")),false);
+  assert.deepEqual(readdirSync(join(f.root,"transactions")),[]);
+});
+test("real restoration failure retains its lifecycle fence and backups after SSH disconnect",async t=>{
+  const f=fixture(t,{failRestart:true,failRestartStatus:7,failRestorationStop:true});
+  const result=await f.runInterrupted();
+  assert.equal(result.signal,null);
+  assert.equal(result.status,7);
+  f.restored();
+  assert.equal(f.state().active,false,"failed restoration must not claim the previous service restarted");
+  assert.equal(existsSync(join(f.root,"run/lightmoni-agent-lifecycle.lock")),true);
+  const backups=readdirSync(join(f.root,"transactions"));
+  assert.equal(backups.length,1);
+  assert.deepEqual(readFileSync(join(f.root,"transactions",backups[0],"previous-config")),f.before.config);
+  assert(f.state().calls.some((call:string)=>call.startsWith("stop ")));
 });
 for (const old of ["node"] as const)
   test(
@@ -546,12 +638,50 @@ test("a rolled-back fresh install on an empty host can be attempted again withou
   assert.equal(f.state().active, true);
 });
 
+test("first install prepares its dedicated account and primary group before inspection and creates a missing launcher directory", t => {
+  const f = fixture(t, {old: "none", active: false, defaultRoot: true});
+  rmSync(dirname(f.launcher), {recursive: true});
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(f.state().accountsCreated, ["lightmoni-agent"]);
+  assert.equal(f.state().permissionPreparations, 1);
+  assert.equal(statSync(dirname(f.launcher)).mode & 0o777, 0o755);
+  assert.equal(existsSync(f.launcher), true);
+});
+
+test("failed first install removes only the empty launcher directory it created", t => {
+  const f = fixture(t, {old: "none", active: false, failRestart: true});
+  rmSync(dirname(f.launcher), {recursive: true});
+  const result = f.run();
+  assert.notEqual(result.status, 0);
+  assert.equal(existsSync(dirname(f.launcher)), false);
+  assert.equal(f.state().agentAccount, true);
+  assert.deepEqual(f.state().accountsCreated, ["lightmoni-agent"]);
+});
+
 
 test("fresh installer refuses retained identity and releases lifecycle lock without replacing files", t => {
   const f = fixture(t), result = f.run(["--fresh"]);
   assert.notEqual(result.status, 0); assert.match(result.stderr, /Existing Agent/); f.restored();
   assert.equal(existsSync(join(f.root, "run/lightmoni-agent-lifecycle.lock")), false);
 });
+
+for (const residual of ['etc/lightmoni-agent-helper', 'var/lib/lightmoni-agent-helper', 'etc/systemd/system/lightmoni-agent-helper.service'])
+  for (const kind of ['directory', 'dangling-link'] as const) test(`fresh installer refuses retained helper ${residual} ${kind} before enrollment`, t => {
+    const f = fixture(t, {old: 'none', active: false, defaultRoot: true});
+    rmSync(f.data, {recursive: true}); rmSync(f.runtimeParent, {recursive: true});
+    const target = join(f.root, residual), sentinel = join(f.root, 'external-sentinel');
+    writeFileSync(sentinel, 'keep external state');
+    if (kind === 'dangling-link') symlinkSync(join(f.root, 'absent-helper-target'), target);
+    else {mkdirSync(target, {recursive: true}); writeFileSync(join(target, 'sentinel'), 'keep helper state');}
+    const result = f.run(['--fresh']);
+    assert.notEqual(result.status, 0); assert.match(result.stderr, /Existing Agent installation/);
+    assert.equal(f.state().enrollments ?? 0, 0); assert.equal(f.state().managedEnrollments ?? 0, 0);
+    assert.deepEqual(f.state().accountsCreated, []);
+    assert.equal(readFileSync(sentinel, 'utf8'), 'keep external state');
+    if (kind === 'dangling-link') assert.equal(lstatSync(target).isSymbolicLink(), true);
+    else assert.equal(readFileSync(join(target, 'sentinel'), 'utf8'), 'keep helper state');
+  });
 
 
 test("installer rejects the removed shared-key flag before changing installed state", t => {
@@ -579,27 +709,47 @@ test('installer refuses a privileged installed service before stopping or changi
 test('installer rejects a shipped privileged candidate before old permission preparation or service mutation',t=>{
   const f=fixture(t),packageDir=join(f.root,'package');
   writeFileSync(join(packageDir,'lightmoni-agent.service'),readFileSync(join(repo,'runtime/test/fixtures/forbidden-privileged-agent.service')));
-  execFileSync('tar',['-czf',join(f.release,artifact),'-C',packageDir,'lightmoni-agent','lightmoni-agent.service','lightmoni-agent-runtime']);
+  execFileSync('tar',['-czf',join(f.release,artifact),'-C',packageDir,'lightmoni-agent','lightmoni-agent.service','lightmoni-agent-helper.service','lightmoni-agent-runtime']);
   writeFileSync(join(f.release,'SHA256SUMS'),createHash('sha256').update(readFileSync(join(f.release,artifact))).digest('hex')+'  '+artifact+'\n');
   const result=f.run();assert.notEqual(result.status,0);assert.match(result.stderr,/ordinary_agent_privilege_violation/);
   assert.equal(f.state().permissionPreparations,undefined);assert.equal(f.state().restarts,0);assert.deepEqual(f.state().calls,[]);f.restored();
 });
 
-test('new host install defaults to root and enrolls one embedded execution identity',t=>{
- const f=fixture(t,{old:'none',active:false,defaultRoot:true}),r=f.run();assert.equal(r.status,0,r.stderr);const c=JSON.parse(readFileSync(f.config,'utf8'));assert.equal(c.runtime_mode,'root');assert.equal(c.permission_generation,1);assert.equal(statSync(f.config).mode&0o777,0o600);assert.match(readFileSync(f.service,'utf8'),/^User=root$/m);assert.equal(f.state().managedEnrollments,1);assert.equal(JSON.parse(readFileSync(join(f.root,'etc/lightmoni-agent/managed.json'),'utf8')).executor_id,'signed-install-identity');f.unchangedData();
+test('new host install defaults to complete management with a non-root Agent and one root helper identity',t=>{
+ const f=fixture(t,{old:'none',active:false,defaultRoot:true}),r=f.run();assert.equal(r.status,0,r.stderr);const c=JSON.parse(readFileSync(f.config,'utf8'));assert.equal(c.runtime_mode,'root');assert.equal(c.permission_generation,1);assert.equal(statSync(f.config).mode&0o777,0o640);assert.match(readFileSync(f.service,'utf8'),/^User=lightmoni-agent$/m);assert.match(readFileSync(f.helperService,'utf8'),/^User=root$/m);assert.equal(f.state().managedEnrollments,1);assert.equal(JSON.parse(readFileSync(join(f.helperConfig,'managed.json'),'utf8')).executor_id,'signed-install-identity');assert.equal(f.state().helperRestarts,1);assert.equal(f.state().helperActive,true);assert.equal(f.state().agentAccount,true);assert.deepEqual(f.state().accountsCreated,['lightmoni-agent']);assert.equal(statSync(join(f.helperData,'tasks')).mode&0o777,0o711);assertRuntimePermissions(f);f.unchangedData();
+});
+test('full-management installation checks setpriv before activation or installed state changes',t=>{
+  const f=fixture(t,{old:'none',active:false,defaultRoot:true,missingSetpriv:true}),result=f.run();
+  assert.notEqual(result.status,0);assert.match(result.stderr,/requires .*setpriv/);
+  assert.equal(f.state().activations,undefined);assert.equal(f.state().managedEnrollments,undefined);
+  assert.equal(f.state().restarts,0);f.restored();
+});
+test('monitoring installation does not require setpriv',t=>{
+  const f=fixture(t,{old:'none',active:false,runtimeMode:'user',missingSetpriv:true}),result=f.run();
+  assert.equal(result.status,0,result.stderr);assert.equal(f.state().managedEnrollments,undefined);
+});
+test('installer refuses standalone executor remnants without changing installed files or services',t=>{
+  for(const path of ['usr/local/bin/lightmoni-executor','usr/local/sbin/lightmoni-executor-uninstall','opt/lightmoni-executor','etc/lightmoni-executor','var/lib/lightmoni-executor','etc/systemd/system/lightmoni-executor.service','etc/systemd/system/lightmoni-executor.service.d']){
+    const f=fixture(t),legacy=join(f.root,path);mkdirSync(dirname(legacy),{recursive:true});
+    if(path.endsWith('.service')||path.includes('/bin/')||path.includes('/sbin/'))writeFileSync(legacy,'original standalone executor');else mkdirSync(legacy);
+    const result=f.run();assert.notEqual(result.status,0);assert.match(result.stderr,/Legacy standalone lightmoni-executor.*original-version/);
+    assert.deepEqual(f.state().calls,[]);assert.equal(f.state().permissionPreparations,undefined);
+    assert.equal(existsSync(legacy),true);assert.equal(existsSync(join(f.root,'run/lightmoni-agent-lifecycle.lock')),false);f.restored();
+  }
 });
 for(const failure of ['enrollment','missing-bootstrap','restart'])test('root install '+failure+' failure rolls back ordinary files and removes new execution material',t=>{
- const f=fixture(t,{old:'none',active:false,defaultRoot:true,failManagedEnrollment:failure==='enrollment',missingManagedBootstrap:failure==='missing-bootstrap',failRestart:failure==='restart'}),r=f.run();assert.notEqual(r.status,0);f.restored();assert.equal(existsSync(join(f.root,'etc/lightmoni-agent/managed.json')),false);assert.equal(existsSync(join(f.root,'etc/lightmoni-agent/managed-activation.json')),false);assert.equal(existsSync(join(f.data,'managed')),false);assert.equal(existsSync(join(f.root,'run/lightmoni-agent-lifecycle.lock')),false);
+ const f=fixture(t,{old:'none',active:false,defaultRoot:true,failManagedEnrollment:failure==='enrollment',missingManagedBootstrap:failure==='missing-bootstrap',failRestart:failure==='restart'}),r=f.run();assert.notEqual(r.status,0);f.restored();assert.equal(existsSync(join(f.helperConfig,'managed.json')),false);assert.equal(existsSync(join(f.helperConfig,'managed-activation.json')),false);assert.equal(existsSync(join(f.helperData,'managed')),false);assert.equal(f.state().agentAccount,true);assert.deepEqual(f.state().accountsCreated,['lightmoni-agent']);assert.equal(existsSync(join(f.root,'run/lightmoni-agent-lifecycle.lock')),false);
 });
 
 test('installer refuses an existing root release change before file or service mutation',t=>{
  const f=fixture(t,{runtimeMode:'root'}),config=JSON.parse(readFileSync(f.config,'utf8'));
  config.runtime_mode='root';config.permission_generation=3;writeFileSync(f.config,JSON.stringify(config));
  writeFileSync(f.service,execFileSync(process.execPath,[join(repo,'deploy/agent/service-unit.mjs'),'render','root']));
- writeFileSync(join(dirname(f.config),'managed.json'),JSON.stringify({executor_id:'existing-root-identity'}),{mode:0o600});
+ mkdirSync(f.helperConfig,{recursive:true,mode:0o700});
+ writeFileSync(join(f.helperConfig,'managed.json'),JSON.stringify({executor_id:'existing-root-identity'}),{mode:0o600});
  writeFileSync(join(f.current,'installation.json'),JSON.stringify({schema:1,artifact_sha256:'a'.repeat(64)}),{mode:0o600});
- const before={config:readFileSync(f.config),service:readFileSync(f.service),identity:readFileSync(join(dirname(f.config),'managed.json')),current:readlinkSync(f.current)};
+ const before={config:readFileSync(f.config),service:readFileSync(f.service),identity:readFileSync(join(f.helperConfig,'managed.json')),current:readlinkSync(f.current)};
  const result=f.run();assert.notEqual(result.status,0);assert.match(result.stderr,/approved Agent update plan/);
- assert.deepEqual(readFileSync(f.config),before.config);assert.deepEqual(readFileSync(f.service),before.service);assert.deepEqual(readFileSync(join(dirname(f.config),'managed.json')),before.identity);assert.equal(readlinkSync(f.current),before.current);
+ assert.deepEqual(readFileSync(f.config),before.config);assert.deepEqual(readFileSync(f.service),before.service);assert.deepEqual(readFileSync(join(f.helperConfig,'managed.json')),before.identity);assert.equal(readlinkSync(f.current),before.current);
  assert.equal(f.state().restarts,0);assert.equal(f.state().permissionPreparations,undefined);assert.equal(existsSync(join(f.root,'run/lightmoni-agent-lifecycle.lock')),false);f.unchangedData();
 });

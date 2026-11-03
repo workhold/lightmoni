@@ -22,6 +22,7 @@ import { AgentRuntimeMaintenance } from "../../deploy/agent/runtime-mode.mjs";
 // @ts-ignore
 import {
   buildAgentService,
+  buildHelperService,
   identifyAgentService,
 } from "../../deploy/agent/service-unit.mjs";
 
@@ -63,17 +64,20 @@ function fixture(t: any, mode: Mode = "user") {
   mkdirSync(p("/var/lib/lightmoni-agent/operations"), { mode: 0o700 });
   mkdirSync(p("/run"), { mode: 0o700 });
   const enroll = () => {
-    write("/etc/lightmoni-agent/managed.json", { executor_id: "internal-1" });
-    write("/etc/lightmoni-agent/managed-activation.json", { generation: 4 });
-    write("/var/lib/lightmoni-agent/managed/journal.json", {
+    write("/etc/lightmoni-agent-helper/helper.json", { agent_id: "agent-1", permission_generation: 4 });
+    write("/etc/lightmoni-agent-helper/managed.json", { executor_id: "internal-1", install_generation: 1, permission_generation: 4 });
+    write("/etc/lightmoni-agent-helper/managed-activation.json", { generation: 4 });
+    write("/var/lib/lightmoni-agent-helper/managed/journal.json", {
       private_key: "old-signing-key",
     });
+    write("/etc/systemd/system/lightmoni-agent-helper.service", buildHelperService());
   };
   if (mode === "root") enroll();
   const calls: string[] = [],
     owners: { file: string; uid: number; gid: number }[] = [];
   let boot = randomUUID(),
-    active = "active";
+    active = "active",
+    helperActive = mode === 'root' ? 'active' : 'inactive';
   const faults = {
     check: 0,
     stop: 0,
@@ -89,13 +93,20 @@ function fixture(t: any, mode: Mode = "user") {
         faults.prepare--;
         throw Error("injected_account_failure");
       }
-      return args[0] === "-u" ? "19999" : "19998";
+      const name=args.at(-1);
+      if(name==='lightmoni-agent')return args[0]==='-u'?'19999':'19998';
     }
     if (file === "systemctl") {
-      if (args[0] === "show")
-        return args.includes("--property=ActiveState") ? active : "";
+      if (args[0] === "show") {
+        const helper=args.includes('lightmoni-agent-helper.service');
+        if(args.includes('--property=ActiveState'))return helper?helperActive:active;
+        if(args.includes('--property=FragmentPath'))return helper&&existsSync(p('/etc/systemd/system/lightmoni-agent-helper.service'))?p('/etc/systemd/system/lightmoni-agent-helper.service'):helper?'':'/etc/systemd/system/lightmoni-agent.service';
+        if(args.includes('--property=LoadState'))return helper&&!existsSync(p('/etc/systemd/system/lightmoni-agent-helper.service'))?'not-found':'loaded';
+        if(args.includes('--property=DropInPaths'))return '';
+        return '';
+      }
       if (args[0] === "stop") {
-        active = "inactive";
+        if(args[1]==='lightmoni-agent-helper.service')helperActive='inactive';else active = "inactive";
         if (faults.stopBusy) {
           faults.stopBusy = false;
           write("/var/lib/lightmoni-agent/operations/execution.lock", "busy");
@@ -110,23 +121,28 @@ function fixture(t: any, mode: Mode = "user") {
           faults.start--;
           throw Error("injected_start_failure");
         }
-        active = "active";
+        if(args[1]==='lightmoni-agent-helper.service')helperActive='active';else active = "active";
         boot = randomUUID();
       }
+      if(args[0]==='disable'&&args[1]==='lightmoni-agent-helper.service')helperActive='not-found';
       return "";
     }
     if (file === p("/usr/local/bin/lightmoni-agent")) {
-      if (args[0] === "managed-status")
+      if (args[0] === "helper-status" || args[0] === "managed-status")
         return JSON.stringify({
           executor_id: "internal-1",
           install_generation: 1,
           fenced: null,
           pending_results: 0,
+          permission_generation:read('/etc/lightmoni-agent/config.json').permission_generation,
+          ordinary_task_identity:{account:'lightmoni-agent',uid:19999,gid:19998},
+          ordinary_task_runner:{active:false,state:'idle'},
         });
       if (args[0] === "managed-enroll") {
         enroll();
         return "";
       }
+      if(args[0]==='managed-activate')return JSON.stringify({activation_id:'refreshed'});
       if (args[0] === "check") {
         if (faults.check > 0) {
           faults.check--;
@@ -143,8 +159,8 @@ function fixture(t: any, mode: Mode = "user") {
           runtime: {
             mode: config.runtime_mode,
             permission_generation: config.permission_generation,
-            uid: config.runtime_mode === "root" ? 0 : 19999,
-            gid: config.runtime_mode === "root" ? 0 : 19998,
+            uid: 19999,
+            gid: 19998,
           },
         });
       }
@@ -192,13 +208,13 @@ function fixture(t: any, mode: Mode = "user") {
 
 for (const mode of ["user", "root"] as const)
   test(
-    "runtime maintenance switches " +
+    "runtime maintenance switches helper mode from " +
       mode +
-      " through one service and quarantines old state",
+      " while the Agent remains non-root and its state stays put",
     async (t) => {
       const f = fixture(t, mode),
         request = f.request();
-      const result = await f.m.apply(request);
+      const result=await f.m.apply(request);
       assert.equal(result.status, "succeeded");
       assert.equal(result.permission_generation, 5);
       assert.equal(
@@ -209,7 +225,7 @@ for (const mode of ["user", "root"] as const)
         identifyAgentService(
           readFileSync(f.p("/etc/systemd/system/lightmoni-agent.service")),
         ),
-        request.runtime_mode,
+        'user',
       );
       assert.equal(f.active(), "active");
       assert.equal(
@@ -220,53 +236,18 @@ for (const mode of ["user", "root"] as const)
         agent_id: "agent-1",
         host_id: "host-1",
       });
+      assert.deepEqual(f.read("/var/lib/lightmoni-agent/cache.json"),{retained:'diagnostic'});
       assert.equal(
-        existsSync(f.p("/var/lib/lightmoni-agent/cache.json")),
-        false,
-      );
-      assert.deepEqual(
-        f.read(
-          "/var/lib/lightmoni-agent-maintenance/" +
-            request.operation_id +
-            "/cache.json",
-        ),
-        { retained: "diagnostic" },
-      );
-      assert.equal(
-        existsSync(
-          f.p(
-            "/var/lib/lightmoni-agent-maintenance/" +
-              request.operation_id +
-              "/managed",
-          ),
-        ),
-        false,
-      );
-      assert.equal(
-        existsSync(f.p("/etc/lightmoni-agent/managed.json")),
+        existsSync(f.p("/etc/lightmoni-agent-helper/managed.json")),
         request.runtime_mode === "root",
       );
-      assert.equal(
-        statSync(f.p("/etc/lightmoni-agent")).mode & 0o777,
-        request.runtime_mode === "root" ? 0o700 : 0o750,
-      );
+      assert.equal(existsSync(f.p('/etc/systemd/system/lightmoni-agent-helper.service')),request.runtime_mode==='root');
+      assert.equal(f.calls.some(call=>/useradd|groupadd|userdel|groupdel/.test(call)),false,'mode switches reuse the Agent account');
       assert.equal(
         f.calls.some((value) => value.includes("lightmoni-executor")),
         false,
       );
-      const owner =
-        request.runtime_mode === "root"
-          ? { uid: process.getuid?.() ?? 0, gid: process.getuid?.() ?? 0 }
-          : { uid: 19999, gid: 19998 };
-      assert.ok(
-        f.owners.some(
-          (value) =>
-            value.file === f.p("/var/lib/lightmoni-agent/operations") &&
-            value.uid === owner.uid &&
-            value.gid === owner.gid,
-        ),
-        "the shared operation lock directory must follow the selected Agent account",
-      );
+      assert.ok(f.owners.every(value=>value.file===f.p('/etc/lightmoni-agent/config.json')),'mode changes never chown the network Agent data tree');
     },
   );
 
@@ -283,6 +264,7 @@ for (const mode of ["user", "root"] as const)
       assert.equal(
         f.read("/etc/lightmoni-agent/config.json").runtime_mode,
         mode,
+        JSON.stringify({ receipt: f.m.status(request.operation_id), calls: f.calls }),
       );
       assert.equal(
         f.read("/etc/lightmoni-agent/config.json").permission_generation,
@@ -292,18 +274,18 @@ for (const mode of ["user", "root"] as const)
         identifyAgentService(
           readFileSync(f.p("/etc/systemd/system/lightmoni-agent.service")),
         ),
-        mode,
+        'user',
       );
       assert.deepEqual(f.read("/var/lib/lightmoni-agent/cache.json"), {
         retained: "diagnostic",
       });
       assert.equal(
-        existsSync(f.p("/etc/lightmoni-agent/managed.json")),
+        existsSync(f.p("/etc/lightmoni-agent-helper/managed.json")),
         mode === "root",
       );
       if (mode === "root")
         assert.equal(
-          f.read("/var/lib/lightmoni-agent/managed/journal.json").private_key,
+          f.read("/var/lib/lightmoni-agent-helper/managed/journal.json").private_key,
           "old-signing-key",
         );
       assert.equal(f.active(), "active");
@@ -500,7 +482,7 @@ test("runtime maintenance supports repeated bidirectional switches with complete
     assert.equal(succeeded.length, 1);
     assert.match(succeeded[0].boot_id, /^[a-f0-9-]{36}$/);
     assert.equal(succeeded[0].artifact_sha256, request.artifact_sha256);
-    assert.equal(succeeded[0].uid, target === "root" ? 0 : 19999);
+      assert.equal(succeeded[0].uid, 19999, "the network Agent remains non-root in both modes");
     assert.deepEqual(f.m.status(request.operation_id), result);
   }
 });

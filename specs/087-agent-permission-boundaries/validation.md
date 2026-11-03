@@ -1,0 +1,76 @@
+# SDD087 验收状态
+
+日期：2026-11-03。当前记录取代此前独立 `lightmoni-task` 账号方案与未通过的旧 fixture 验收状态。
+
+## 最终设计
+
+- 只新增一个无登录普通系统账号 `lightmoni-agent`，承担常驻采集、心跳、平台通信与普通脚本。脚本与 daemon 共用 UID，可读取该账号可读凭据并修改可写状态；只用于受信任运维代码，不宣称同 UID 隔离或脚本沙箱。
+- 已登记 SSH 账号只用于固定安装、升级、回退、模式切换、卸载与恢复。登记推荐 root，也支持实际检查通过的免交互系统管理 sudo 账号；当前要求 `sudo -n /bin/sh`。只读自动选择可尝试其他已登记账号，实际派发后不跨账号重放。
+- 常驻 Agent 始终非 root、无通用 sudo、Docker socket 或 capabilities。完整管理模式安装同包同版本 root helper；仅监控不安装 helper、不领取普通自定义脚本。
+- 普通脚本经签名 helper 通道领取，启动前固定为 Agent 的非零 UID/GID，清空附加组和 capabilities、启用 NoNewPrivileges。root 私钥、策略与恢复账本保持私有；高权限作业仍绑定内容、目标、实际身份与期限并单独批准、审计。
+- Agent/helper 统一安装、升级、回退、模式切换、卸载与离线卸载。删除未发布 task 账号的创建、恢复、标记和清理契约，无旧身份兼容层。卸载保留系统账号及业务数据。
+- 安装账号不合格时返回结构化原因，保留安装设置，提供添加账号、配置凭据、重新检查与审阅新计划的闭环。新增平台账户记录不会创建主机系统账户，也不自动安装；远端结果未知只读核对。
+
+## 本轮验证
+
+基线 `origin/main=b44ee39`；提交前已重新 fetch，落后主干 0。当前发行源码固定为 `3309b0b36490fb7eb8c7b4a4fa602ab1de75f974`。最新 Runtime 结果见 [release-runtime-validation.json](evidence/release-runtime-validation.json)，前一轮多模块与 UI 回归见 [single-account-validation.json](evidence/single-account-validation.json)。
+
+| 检查 | 结果 |
+| --- | --- |
+| `npm --prefix runtime test` | 1341 项：1308 通过、0 失败、33 跳过 |
+| `npm --prefix ai-runtime test` | 71/71 通过 |
+| `npm --prefix sdk/typescript test` | 22/22 通过 |
+| `npm run typecheck` | Runtime、AI runtime、Web 全部通过 |
+| `npm run build` | SDK、Runtime、AI runtime、Web 生产构建通过 |
+| 主机执行权限 UI | 26/26 通过 |
+| 任务中心 UI | 17/17 通过 |
+| 安装账号修复 UI | 3 组通过，无页面异常或意外请求 |
+| 多账号与集中凭据 UI | 7 组通过，无页面异常或意外请求 |
+| `git diff --check` | 通过 |
+
+完整 runtime 覆盖安装、升级、回退、模式切换、卸载、恢复、签名脚本、调度、AI/MCP 入口、普通/提权任务授权及审计。曾失败的升级/恢复 fixture 已补齐严格模式观测，MCP/调度 fixture 使用真实签名 helper 契约的测试适配器；未通过放宽生产解析、权限或签名门禁掩盖失败。安装发行测试现为 39/39；权限检查 13/13；SSH 与卸载/生命周期相关回归 21/21。完整主机管理测试 73/73 包含手动过期/撤销/一次性凭据、无效检查结果和混合候选的诊断验证。
+
+macOS 全量中的 33 项跳过包括需 Linux/root/systemd、真实 Docker、ClickHouse 或显式配置的外部环境，以及缺少指定 Go baseline 工具链的检查；逐项名称见最新机器可读报告。本轮另外在本机 Colima 独立 Linux 容器完成真实 systemd 验收，不能把 macOS 跳过项直接计作通过。
+
+## 成品 Linux 验收与修复
+
+- 原始镜像包在 Debian Bookworm ARM64 / Node 24.15.0 / systemd 252 下完成 19/19 检查，0 失败。中心代码和目标包均固定 `3309b0b`；实际从 `5e42388` 升级、回退、再次升级，并验证两组件目标构建、包摘要和新签名 helper activation。
+- root 完整管理、sudo 普通登录仅监控均从无 Agent 账号、无同名组、无 `/usr/local/bin` 且 `USERGROUPS_ENAB=no` 的环境首装；四次双向权限切换、普通同 UID 脚本、经批准 root 脚本、卸载及凭据撤销全部通过。
+- 实际 `/proc/self/status` 验证普通脚本 UID/GID、空附加组、NoNewPrivileges=1 和五组 capabilities 全零，1/1 运行、0 跳过；Linux 权限测试另为 13/13，默认绝对路径 helper 检查通过。
+- 修复真实根目录祖先前缀误判、先检查后创建账号、依赖系统隐式主组和缺少 launcher 目录等首装缺陷；已有账号主组不匹配在停服务前拒绝。安装检查和 fresh 保护统一识别 helper 残留及悬空链接，并保留既有状态。
+- root 升级在初检、等待和提交时均校验 helper；中心绑定 helper 身份、代次、新 activation、目标构建及新鲜签名心跳。helper 初检后或提交后失效的失败注入都使两组件回退，不能误报成功。
+
+复现及边界见 [linux-validation.md](linux-validation.md)，原始结果见 [linux-systemd-final.json](evidence/linux-systemd-final.json) 与 [linux-security-final.tap](evidence/linux-security-final.tap)。该验收使用本地登录适配器执行原 SSH 固定命令，不覆盖真实 SSH 网络认证；未连接 vchive 或生产平台，也未对真实 Docker daemon 执行容器操作。中心成品另用真实隔离 ClickHouse 完成双架构 HTTP 冒烟。
+
+UI 点击流程、截图和范围见 [ui-validation.md](ui-validation.md)。每台主机沿用独立进度及持久记录；账号补录后不会自动派发，不会修改已审阅计划身份或在 unknown 时重装。
+
+## Doca 同步与回读
+
+[LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 已通过已登录 Doca 原生编辑界面保存，重新加载后回读正文、账号职责表和原生图。
+
+- 仓库 `docs/system-design.md` 第87章及第22、27、71、84章等相关说明与在线设计对齐。第87.4新增安装账号修复与点击流程；第87.5记录无旧身份兼容边界。
+- 权限架构图：8节点、9连线；普通脚本为 `lightmoni-agent 同UID`，root helper→普通脚本为启动前降权。
+- 任务时序图：5参与者、9消息及5条生命线；核对 helper→中心领取、helper→普通脚本、普通脚本→helper→中心回执方向。
+- 任务总览图：13节点、13连线；内置采集仍由普通 Agent 处理，有限脚本经签名 helper 启动，普通脚本与 Agent 共用账号。
+- 保留原生图块、无关章节、SDD089、NAT规则和健康目标描述。在线交付状态已更新为当前回归结果，明确待合入、实机与镜像未完成。
+
+回读：[single-account-doca-readback.json](evidence/single-account-doca-readback.json)。截图：[章节](evidence/single-account-doca-overview.jpg)、[权限架构](evidence/single-account-doca-architecture.jpg)、[任务时序](evidence/single-account-doca-sequence.jpg)、[任务总览](evidence/single-account-doca-task-flow.jpg)。旧 `doca-sync-readback.json` 与 `latest-main-integration.json` 保留为前一版历史证据，不作为本轮结果。
+
+## 交付与边界
+
+- 功能分支：`feat/087-agent-permission-boundaries`；GitHub [PR #83](https://github.com/workhold/lightmoni/pull/83)，真实 Linux/systemd 与镜像验收已完成，更新为可审阅状态，未合并。
+- 此前发布阶段未对真实用户主机执行 SSH、安装、服务修改或模式切换。双架构镜像已在本机构建并发布至既有仓库，固定标签与 latest 均已回读确认，本轮本地镜像、缓存及大产物已清理；详见 [release.md](release.md) 和 [清理记录](evidence/release-cleanup.json)。2026-11-04 获授权的真实 SSH/Agent 现场回测见下节，不能将其与此前隔离 Linux 结果混为同一轮。
+- 旧 root 常驻安装须先使用原版本受管流程卸载后重装，新卸载器不接管旧运行态。
+- 不包含平台主机 RBAC、任意业务账户执行或不可信脚本沙箱；Docker daemon 身份绑定仍需独立确认。
+
+## 发布后主干集成
+
+主干在镜像发布后推进到 `0b45683`，本分支已合并并保留同时追加的 SDD087/SDD091 设计章节。沿用主干已有端口自动分配设计，修正其旧 manual 端口断言；没有因解决冲突新增生产行为。集成后 Runtime 1350 项：1317 通过、0 失败、33 跳过；TypeScript SDK 23/23，全项目 typecheck/build 通过。证据见 [post-release-main-integration.json](evidence/post-release-main-integration.json)。已发布镜像仍固定为 `3309b0b`，不包含随后集成的主干部署功能；本地 Docker 镜像及缓存未重新创建。
+
+## 授权现场回测与断连修复（2026-11-04）
+
+已完成真实远端 SSH、双组件生命周期、普通/提权脚本、真实采集与 Docker 操作，并恢复普通监控模式、清理临时账号和测试资源。详细范围、故障恢复过程与未覆盖项见 [live-validation.md](live-validation.md)；脱敏证据见 [live-validation.json](evidence/live-validation.json)。旧版平台凭据 26 项检查与新版 `3309b0b` Agent 回测分别记录。
+
+发现并离线复现：安装失败收尾向已断开的 stderr 写入时，SIGPIPE 可中断回滚并遗留锁。最小修复在收尾期间忽略终止/断管信号，保留原失败码和实际回滚失败时的保护；安装器回归 45/45、Runtime 类型检查、shell 语法和独立审查通过。新增 6 项用例中旧代码失败 5 项，修复后全部通过。
+
+本次仅修正既有安装事务的异常收尾，架构同步不适用：组件职责、协议、控制路径、凭据边界与部署拓扑均未变化，未改写系统设计或声称完成新的 Doca 保存。已发布的 `20261103-agent-unified-3309b0b36490` 镜像不含此后续修复；本次没有重新构建、发布镜像或升级生产平台。

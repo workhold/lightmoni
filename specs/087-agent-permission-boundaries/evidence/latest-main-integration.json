@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-03",
+  "base": "b44ee39",
+  "prior_head": "a48a651178408f271a9a4ea51062b007e3f2008a",
+  "typecheck": {
+    "command": "npm run typecheck",
+    "status": "passed"
+  },
+  "build": {
+    "command": "npm run build",
+    "status": "passed"
+  },
+  "integration": {
+    "cwd": "runtime",
+    "command": "node --import tsx --test --test-concurrency=1 test/agent-job-fence.test.ts test/managed-executor-jobs.test.ts test/machine-agent-runtime.test.ts test/machine-agent-updates.test.ts test/unified-agent-installation.test.ts test/task-center.test.ts test/machine-installation-recovery.test.ts test/machine-installation-recovery-races.test.ts",
+    "tests": 152,
+    "pass": 117,
+    "fail": 35,
+    "failures_by_file": {
+      "machine-agent-updates.test.ts": 34,
+      "machine-installation-recovery.test.ts": 1
+    },
+    "diagnosis": "Existing upgrade fixtures omit required runtime_mode, permission_generation and helper_active; follow-on requests fail after plan creation fails. Some task fixtures do not establish a fresh signed helper. Relevant parser, fixtures and task eligibility code were already present at prior_head; no changes to these implementations/tests in this documentation sync."
+  },
+  "uninstall_and_removal": {
+    "cwd": "runtime",
+    "command": "node --import tsx --test --test-concurrency=1 --test-name-pattern='uninstall|uninstallation|removal|queued, executing and unknown' test/managed-machines.test.ts test/node-lifecycle.test.ts",
+    "tests": 15,
+    "pass": 15,
+    "fail": 0
+  },
+  "boundaries": [
+    "Draft PR retained",
+    "No Linux host lifecycle acceptance",
+    "No image publication",
+    "No production or vchive changes"
+  ]
+}

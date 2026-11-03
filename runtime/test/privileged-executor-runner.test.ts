@@ -7,7 +7,8 @@ import { generateKeyPairSync,randomUUID } from "node:crypto";
 import { ExecutorJournal } from "../src/privileged-executor/journal.js";
 import { ExecutorClient } from "../src/privileged-executor/client.js";
 import { PrivilegedExecutorRunner, type RunnerHost } from "../src/privileged-executor/runner.js";
-import { validateConfig, httpsOrigin, parseBootstrap } from "../src/privileged-executor/config.js";
+import { MANAGED_AGENT_DATA_DIR, validateConfig, httpsOrigin, parseBootstrap } from "../src/privileged-executor/config.js";
+import { managedSnapshotConfig } from "../src/privileged-executor/managed.js";
 import { canonicalJSON, EXECUTOR_SIGNATURE_HEADER, normalizePrivilegedPayload, signJWS, sha256, verifyJWS, type PrivilegedPlan } from "../src/shared/privileged-executor.js";
 
 function fixture() {
@@ -15,7 +16,7 @@ function fixture() {
   const center = generateKeyPairSync("ed25519"), executor = generateKeyPairSync("ed25519");
   const publicKey = center.publicKey.export({ type: "spki", format: "pem" }).toString(), account = { name: "root", uid: 0, gid: 0, groups: [] };
   const config = validateConfig({ version: 1, endpoint: "https://center.example.test", center_instance_id: "center", machine_id: "machine", agent_id: "agent", executor_id: "executor", install_generation: 1,
-    center_keys: [{ kid: "center-key", public_key: publicKey }], private_key: executor.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), output_key: "b".repeat(64), data_dir: "/var/lib/lightmoni-executor", local_policy: { generation: 1, capabilities: ["script.elevated.v1", "container.managed.v1"] }, accounts: [account], daemon_id: "daemon" });
+    center_keys: [{ kid: "center-key", public_key: publicKey }], private_key: executor.privateKey.export({ type: "pkcs8", format: "pem" }).toString(), output_key: "b".repeat(64), data_dir: MANAGED_AGENT_DATA_DIR, local_policy: { generation: 1, capabilities: ["script.elevated.v1", "container.managed.v1"] }, accounts: [account], daemon_id: "daemon" });
   let journal = new ExecutorJournal(directory, Buffer.from(config.output_key, "hex"), true); journal.policy(config.local_policy);
   let wall = Date.parse("2026-11-01T01:00:00Z"), mono = 1000;
   const payload = normalizePrivilegedPayload({ kind: "script", runtime: "shell", code: "printf secret", args: [], cwd_profile: "private", environment: {}, account, interpreter_sha256: "a".repeat(64), timeout_ms: 5000, max_output_bytes: 4096 });
@@ -59,8 +60,14 @@ function fixture() {
 test("root config rejects URL credentials, non-HTTPS, unknown fields and Agent-owned data paths", () => {
   const f = fixture(); try {
     for (const url of ["http://center.test", "https://user:pass@center.test", "https://center.test/subpath", "https://center.test/?q=1", "https://center.test/#x"]) assert.throws(() => httpsOrigin(url));
-    assert.throws(() => validateConfig({ ...f.config, data_dir: "/var/lib/lightmoni-agent" })); assert.throws(() => validateConfig({ ...f.config, skip_root: true })); assert.throws(() => parseBootstrap(f.config));
+    assert.throws(() => validateConfig({ ...f.config, data_dir: "/var/lib/lightmoni-agent" }));
+    assert.throws(() => validateConfig({ ...f.config, data_dir: "/var/lib/lightmoni-executor" }));
+    assert.throws(() => validateConfig({ ...f.config, skip_root: true })); assert.throws(() => parseBootstrap(f.config));
   } finally { f.close(); }
+});
+
+test("helper managed snapshots reject the retired standalone executor state root", () => {
+  assert.throws(() => managedSnapshotConfig("/var/lib/lightmoni-executor/managed-jobs/" + "a".repeat(32) + ".json"));
 });
 
 test("real Ed25519 plans bind payload, host, identity, generations, policy and full lineage", () => {

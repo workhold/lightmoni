@@ -17,6 +17,12 @@ agent_public_key=""
 enrollment_mode="no"
 runtime_mode=""
 managed_changed="no"
+helper_enabled="no"
+helper_changed="no"
+helper_restart_attempted="no"
+helper_enable_attempted="no"
+previous_helper_active="no"
+previous_helper_enabled="no"
 
 usage() {
   echo 'Usage: install.sh (--release-url URL --enrollment-token-stdin | --release-dir DIR) [--fresh] [--version VERSION] [--config FILE | --endpoint URL --enrollment-token-stdin]'
@@ -45,6 +51,12 @@ command -v sha256sum >/dev/null || { echo 'sha256sum is required.' >&2; exit 1; 
 case "$(uname -m)" in x86_64) arch="amd64" ;; aarch64|arm64) arch="arm64" ;; *) echo 'Unsupported architecture.' >&2; exit 1 ;; esac
 case "$version" in *[!0-9A-Za-z._-]*|'') echo 'Invalid fixed version.' >&2; exit 1 ;; esac
 case "$runtime_mode" in root|user|'') ;; *) echo 'Invalid Agent runtime mode.' >&2; exit 1 ;; esac
+for legacy_path in /usr/local/bin/lightmoni-executor /usr/local/sbin/lightmoni-executor-uninstall /opt/lightmoni-executor /etc/lightmoni-executor /var/lib/lightmoni-executor /etc/systemd/system/lightmoni-executor.service /etc/systemd/system/lightmoni-executor.service.d; do
+  if [ -e "$legacy_path" ] || [ -L "$legacy_path" ]; then
+    echo 'Legacy standalone lightmoni-executor layout detected; use its original-version uninstaller before managing the unified Agent.' >&2
+    exit 1
+  fi
+done
 [ -n "$release_url" ] || [ -z "$endpoint" ] || release_url="${endpoint%/}/downloads/agent"
 [ -n "$release_dir" ] || [ -n "$release_url" ] || { usage >&2; exit 1; }
 
@@ -61,7 +73,6 @@ elif [ -n "$endpoint" ]; then
   exit 1
 fi
 if [ -n "$config_source" ]; then [ -f "$config_source" ] || { echo 'Configuration file missing.' >&2; exit 1; }; fi
-
 lifecycle_lock=/run/lightmoni-agent-lifecycle.lock
 lifecycle_locked="no"
 tmp_dir="$(mktemp -d)"
@@ -74,15 +85,17 @@ previous_enabled="no"
 runtime_release=""
 runtime_base_created="no"
 releases_directory_created="no"
+launcher_directory_created="no"
 uninstaller_directory_created="no"
 rollback_failed="no"
 installation_phase="install-files"
 wait_service_active() {
+  service_name="$1"
   startup_attempt=0
   active_observations=0
   while [ "$startup_attempt" -lt 10 ]; do
     startup_attempt=$((startup_attempt + 1))
-    if systemctl is-active --quiet lightmoni-agent.service; then
+    if systemctl is-active --quiet "$service_name"; then
       active_observations=$((active_observations + 1))
       [ "$active_observations" -lt 2 ] || return 0
     else
@@ -101,6 +114,13 @@ report_service_failure() {
     --property=Result --property=ExecMainCode --property=ExecMainStatus \
     >&2 2>/dev/null || echo 'Systemd diagnostic properties unavailable.' >&2
   echo 'Inspect locally: sudo journalctl -u lightmoni-agent.service -n 100 --no-pager' >&2
+  if [ "$runtime_mode" = root ]; then
+    systemctl show lightmoni-agent-helper.service --no-pager \
+      --property=LoadState --property=ActiveState --property=SubState \
+      --property=Result --property=ExecMainCode --property=ExecMainStatus \
+      >&2 2>/dev/null || echo 'Helper systemd diagnostic properties unavailable.' >&2
+    echo 'Inspect locally: sudo journalctl -u lightmoni-agent-helper.service -n 100 --no-pager' >&2
+  fi
 }
 restore_file() {
   destination="$1"
@@ -113,20 +133,24 @@ restore_file() {
 }
 finish() {
   result="$1"
-  trap - EXIT HUP INT TERM
+  # SSH can close diagnostics or send another termination signal during rollback.
+  # Finish restoration before exiting; only a real rollback failure keeps its lock.
+  trap '' HUP INT TERM PIPE
+  trap - EXIT
   set +e
   if [ "$result" -ne 0 ] && [ "$transaction_started" = "yes" ]; then
     report_service_failure
     echo 'Installation failed; restoring the previous Agent installation and configuration.' >&2
     if [ "$restart_attempted" = "yes" ]; then systemctl stop lightmoni-agent.service || rollback_failed="yes"; fi
+    if [ "$helper_restart_attempted" = "yes" ]; then systemctl stop lightmoni-agent-helper.service || rollback_failed="yes"; fi
     if [ "$managed_changed" = yes ]; then
-      rm -f /etc/lightmoni-agent/managed.json /etc/lightmoni-agent/managed-activation.json
-      rm -rf /var/lib/lightmoni-agent/managed
+      rm -rf /etc/lightmoni-agent-helper /var/lib/lightmoni-agent-helper
     fi
     restore_file /etc/lightmoni-agent/config.json "$tmp_dir/previous-config"
     restore_file /usr/local/bin/lightmoni-agent "$tmp_dir/previous-launcher"
     restore_file /usr/local/sbin/lightmoni-agent-uninstall "$tmp_dir/previous-uninstaller"
     restore_file /etc/systemd/system/lightmoni-agent.service "$tmp_dir/previous-service"
+    restore_file /etc/systemd/system/lightmoni-agent-helper.service "$tmp_dir/previous-helper-service"
     restore_file /opt/lightmoni-agent/current "$tmp_dir/previous-current"
     if [ "$enrollment_mode" = "yes" ]; then
       restore_file /var/lib/lightmoni-agent/identity.json "$tmp_dir/previous-identity"
@@ -136,17 +160,28 @@ finish() {
       if [ "$previous_enabled" = "yes" ]; then systemctl enable lightmoni-agent.service || rollback_failed="yes"
       else systemctl disable lightmoni-agent.service || rollback_failed="yes"; fi
     fi
+    if [ "$helper_enable_attempted" = "yes" ] && [ "$rollback_failed" = no ]; then
+      if [ "$previous_helper_enabled" = "yes" ]; then systemctl enable lightmoni-agent-helper.service || rollback_failed="yes"
+      else systemctl disable lightmoni-agent-helper.service || rollback_failed="yes"; fi
+    fi
+    if [ "$helper_restart_attempted" = "yes" ] && [ "$previous_helper_active" = "yes" ] && [ "$rollback_failed" = no ]; then
+      systemctl restart lightmoni-agent-helper.service || rollback_failed="yes"
+      systemctl is-active --quiet lightmoni-agent-helper.service || rollback_failed="yes"
+    elif [ "$helper_restart_attempted" = "yes" ] && [ "$previous_helper_active" = "no" ] && [ "$rollback_failed" = no ]; then
+      systemctl stop lightmoni-agent-helper.service || rollback_failed="yes"
+    fi
     if [ "$restart_attempted" = "yes" ] && [ "$previous_active" = "yes" ] && [ "$rollback_failed" = no ]; then
       systemctl restart lightmoni-agent.service || rollback_failed="yes"
       systemctl is-active --quiet lightmoni-agent.service || rollback_failed="yes"
     fi
-    rm -f "/opt/lightmoni-agent/.current-$$" "/usr/local/bin/.lightmoni-agent.new-$$" "/usr/local/sbin/.lightmoni-agent-uninstall.new-$$" "/etc/lightmoni-agent/.config.new-$$" "/var/lib/lightmoni-agent/.identity.new-$$"
+    rm -f "/opt/lightmoni-agent/.current-$$" "/usr/local/bin/.lightmoni-agent.new-$$" "/usr/local/sbin/.lightmoni-agent-uninstall.new-$$" "/etc/lightmoni-agent/.config.new-$$" "/var/lib/lightmoni-agent/.identity.new-$$" "/etc/systemd/system/.lightmoni-agent-helper.new-$$"
     if [ "$rollback_failed" = "no" ]; then
       if [ -n "$runtime_release" ]; then rm -rf "$runtime_release"; fi
       # Remove only empty program directories created by this attempt. Their
       # presence otherwise makes the next --fresh attempt reject its own rollback.
       if [ "$releases_directory_created" = "yes" ]; then rmdir /opt/lightmoni-agent/releases 2>/dev/null || :; fi
       if [ "$runtime_base_created" = "yes" ]; then rmdir /opt/lightmoni-agent 2>/dev/null || :; fi
+      if [ "$launcher_directory_created" = "yes" ]; then rmdir /usr/local/bin 2>/dev/null || :; fi
       if [ "$uninstaller_directory_created" = "yes" ]; then rmdir /usr/local/sbin 2>/dev/null || :; fi
     fi
   fi
@@ -164,9 +199,13 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 mkdir "$lifecycle_lock" || { echo 'Agent lifecycle operation already in progress.' >&2; exit 1; }
 lifecycle_locked="yes"
-if [ "$fresh" = "yes" ] && { [ -e /usr/local/bin/lightmoni-agent ] || [ -L /usr/local/bin/lightmoni-agent ] || [ -e /opt/lightmoni-agent ] || [ -e /etc/systemd/system/lightmoni-agent.service ] || [ -e /etc/lightmoni-agent/config.json ] || [ -e /var/lib/lightmoni-agent/identity.json ]; }; then
-  echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2
-  exit 1
+if [ "$fresh" = "yes" ]; then
+  for existing_path in /usr/local/bin/lightmoni-agent /opt/lightmoni-agent /etc/systemd/system/lightmoni-agent.service /etc/systemd/system/lightmoni-agent-helper.service /etc/lightmoni-agent/config.json /var/lib/lightmoni-agent/identity.json /etc/lightmoni-agent-helper /var/lib/lightmoni-agent-helper; do
+    if [ -e "$existing_path" ] || [ -L "$existing_path" ]; then
+      echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2
+      exit 1
+    fi
+  done
 fi
 if [ "$enrollment_token_stdin" = "yes" ]; then
   IFS= read -r enrollment_token || :
@@ -195,7 +234,7 @@ expected="$(awk -v artifact="$artifact" '$2 == artifact { print $1 }' "$tmp_dir/
 actual="$(sha256sum "$tmp_dir/$artifact" | awk '{ print $1 }')"
 [ "$expected" = "$actual" ] || { echo 'Release checksum verification failed.' >&2; exit 1; }
 mkdir "$tmp_dir/unpacked"
-tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir/unpacked" lightmoni-agent lightmoni-agent.service lightmoni-agent-runtime
+tar -xzf "$tmp_dir/$artifact" -C "$tmp_dir/unpacked" lightmoni-agent lightmoni-agent.service lightmoni-agent-helper.service lightmoni-agent-runtime
 [ -f "$tmp_dir/unpacked/lightmoni-agent" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent" ] || { echo 'Invalid release binary.' >&2; exit 1; }
   [ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/uninstall.sh" ] || { echo 'Invalid offline uninstaller in the release.' >&2; exit 1; }
 # Source only the shared, side-effect-free guards from the checksum-verified
@@ -209,7 +248,7 @@ node="$tmp_dir/unpacked/lightmoni-agent-runtime/node"
 service_helper="$tmp_dir/unpacked/lightmoni-agent-runtime/service-unit.mjs"
 [ -f "$service_helper" ] && [ ! -L "$service_helper" ] || { echo 'Agent service helper missing.' >&2; exit 1; }
 ordinary_service() {
-  "$node" "$service_helper" check "$1" >/dev/null
+  "$node" "$service_helper" check-agent "$1" >/dev/null
 }
 ordinary_service "$tmp_dir/unpacked/lightmoni-agent.service" || { echo 'ordinary_agent_privilege_violation' >&2; exit 1; }
 assert_ordinary_service() {
@@ -246,6 +285,20 @@ stage_identity() {
   "$node" -e 'const fs=require("node:fs"),crypto=require("node:crypto");const [source,destination,agentID]=process.argv.slice(1);let hostID="";try{const old=JSON.parse(fs.readFileSync(source,"utf8"));hostID=typeof old.host_id==="string"?old.host_id:"";}catch{}if(!hostID)hostID=crypto.randomUUID();fs.writeFileSync(destination,JSON.stringify({agent_id:agentID,host_id:hostID})+"\n",{mode:0o600});fs.chmodSync(destination,0o600);' "/var/lib/lightmoni-agent/identity.json" "$staged_identity" "$agent_id"
 }
 
+# Resolve mode using the verified bundled Node runtime, and check host support
+# before enrollment creates an Agent identity or activation can commit it.
+staged_config="$tmp_dir/config.json"
+if [ -f "$config_path" ]; then cp -p "$config_path" "$staged_config"
+elif [ -n "$config_source" ]; then cp "$config_source" "$staged_config"; fi
+if [ -z "$runtime_mode" ]; then
+  if [ -f "$staged_config" ]; then runtime_mode="$("$node" -e 'const fs=require("node:fs"),c=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(c.runtime_mode||"user")' "$staged_config")"; else runtime_mode="root"; fi
+fi
+case "$runtime_mode" in root|user) ;; *) echo 'Invalid Agent runtime mode.' >&2; exit 1 ;; esac
+if [ "$runtime_mode" = root ] && { [ ! -x /usr/bin/setpriv ] || [ ! -f /usr/bin/setpriv ]; }; then
+  echo 'Full-management mode requires /usr/bin/setpriv (util-linux); install it before deploying the Agent.' >&2
+  exit 1
+fi
+
 if [ "$enrollment_mode" = "yes" ]; then
   if [ -e /etc/lightmoni-agent/managed.json ] || [ -L /etc/lightmoni-agent/managed.json ] || [ -e /etc/lightmoni-agent/managed-activation.json ] || [ -L /etc/lightmoni-agent/managed-activation.json ] || [ -e /var/lib/lightmoni-agent/managed ] || [ -L /var/lib/lightmoni-agent/managed ]; then
     echo 'Managed Agent identity already exists; use an approved runtime switch or lifecycle plan.' >&2
@@ -270,9 +323,6 @@ fi
 
 # Validate a staged configuration before replacing any installed file. The
 # configure/check commands do not open the queue or create an Agent identity.
-staged_config="$tmp_dir/config.json"
-if [ -f "$config_path" ]; then cp -p "$config_path" "$staged_config"
-elif [ -n "$config_source" ]; then cp "$config_source" "$staged_config"; fi
 if [ -z "$runtime_mode" ]; then
   if [ -f "$staged_config" ]; then runtime_mode="$($node -e 'const fs=require("node:fs"),c=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(c.runtime_mode||"user")' "$staged_config")"; else runtime_mode="root"; fi
 fi
@@ -282,10 +332,14 @@ if [ -f "$config_path" ]; then
   [ "$runtime_mode" = "$original_mode" ] || { echo 'Use an approved Agent runtime switch plan to change the service account.' >&2; exit 1; }
 fi
 if [ "$runtime_mode" = root ] && [ "$enrollment_mode" != yes ]; then
-  [ -f /etc/lightmoni-agent/managed.json ] || { echo 'Root Agent requires an approved registered-host enrollment.' >&2; exit 1; }
+  [ -f /etc/lightmoni-agent-helper/managed.json ] || { echo 'Root helper requires an approved registered-host enrollment.' >&2; exit 1; }
   # The installer may repair the same release; changing an enrolled root
   # program requires the approved updater's activation and rollback protocol.
   "$node" -e 'const fs=require("node:fs"),p="/opt/lightmoni-agent/current/installation.json",s=fs.lstatSync(p);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1||s.uid!==0||(s.mode&0o022)||s.size>4096)process.exit(1);const m=JSON.parse(fs.readFileSync(p,"utf8"));if(m.schema!==1||m.artifact_sha256!==process.argv[1])process.exit(1);' "$actual" || { echo 'Use an approved Agent update plan to change an existing root release.' >&2; exit 1; }
+fi
+if [ "$runtime_mode" = user ] && { [ -e /etc/lightmoni-agent-helper ] || [ -L /etc/lightmoni-agent-helper ] || [ -e /var/lib/lightmoni-agent-helper ] || [ -L /var/lib/lightmoni-agent-helper ] || [ -e /etc/systemd/system/lightmoni-agent-helper.service ] || [ -L /etc/systemd/system/lightmoni-agent-helper.service ]; }; then
+  echo 'Privileged helper state exists; use the approved runtime mode switch so helper identity and state are safely revoked.' >&2
+  exit 1
 fi
 if [ "$enrollment_mode" = "yes" ]; then
   "$tmp_dir/unpacked/lightmoni-agent" configure --config "$staged_config" --endpoint "$endpoint" --pending-enrollment --require-data-dir /var/lib/lightmoni-agent
@@ -315,12 +369,13 @@ fi
 
 # Preserve the current launcher and runtime symlink.
 # Backups retain modes, ownership and symlink identity for an atomic rollback.
-for item in config launcher uninstaller service current identity; do
+for item in config launcher uninstaller service helper-service current identity; do
   case "$item" in
     config) installed="$config_path" ;;
     launcher) installed="/usr/local/bin/lightmoni-agent" ;;
     uninstaller) installed="/usr/local/sbin/lightmoni-agent-uninstall" ;;
     service) installed="/etc/systemd/system/lightmoni-agent.service" ;;
+    helper-service) installed="/etc/systemd/system/lightmoni-agent-helper.service" ;;
     current) installed="/opt/lightmoni-agent/current" ;;
     identity) installed="/var/lib/lightmoni-agent/identity.json" ;;
   esac
@@ -329,28 +384,38 @@ for item in config launcher uninstaller service current identity; do
     cp -Pp "$installed" "$tmp_dir/previous-$item"
   fi
 done
-if systemctl is-active --quiet lightmoni-agent.service; then previous_active="yes"; fi
-if systemctl is-enabled --quiet lightmoni-agent.service; then previous_enabled="yes"; fi
-transaction_started="yes"
+[ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] || { echo 'Invalid deployment permission helper.' >&2; exit 1; }
+# A fresh host has no dedicated account yet. Create only that fixed, unprivileged
+# no-login account before inspecting its real group membership. Existing accounts
+# are never modified, and preparation still precedes any service stop.
+installation_phase="deployment-permissions"
 if id lightmoni-agent >/dev/null 2>&1; then :; else
   command -v useradd >/dev/null || { echo 'useradd is required.' >&2; exit 1; }
-  useradd --system --no-create-home --home-dir /var/lib/lightmoni-agent --shell /usr/sbin/nologin lightmoni-agent
+  useradd --system --user-group --no-create-home --home-dir /var/lib/lightmoni-agent --shell /usr/sbin/nologin lightmoni-agent
 fi
-service_user="lightmoni-agent"
-[ "$runtime_mode" != root ] || service_user="root"
-config_directory_mode=0750
-[ "$runtime_mode" != root ] || config_directory_mode=0700
-install -d -m "$config_directory_mode" -o root -g lightmoni-agent /etc/lightmoni-agent
-install -d -m 0700 -o "$service_user" -g "$service_user" /var/lib/lightmoni-agent
-[ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] || { echo 'Invalid deployment permission helper.' >&2; exit 1; }
-  installation_phase="deployment-permissions"
-  "$node" "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" prepare
-config_mode="0640"
-[ "$runtime_mode" != root ] || config_mode="0600"
-install -m "$config_mode" -o root -g lightmoni-agent "$staged_config" "/etc/lightmoni-agent/.config.new-$$"
+"$node" "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" prepare || { echo 'Agent deployment-permissions preflight failed; the existing service was not stopped.' >&2; exit 1; }
+if systemctl is-active --quiet lightmoni-agent.service; then previous_active="yes"; fi
+if systemctl is-enabled --quiet lightmoni-agent.service; then previous_enabled="yes"; fi
+if systemctl is-active --quiet lightmoni-agent-helper.service; then previous_helper_active="yes"; fi
+if systemctl is-enabled --quiet lightmoni-agent-helper.service; then previous_helper_enabled="yes"; fi
+transaction_started="yes"
+if [ "$previous_active" = yes ]; then
+  # Capture only fixed, non-secret state before touching the running unit.
+  systemctl show lightmoni-agent.service --no-pager --property=LoadState --property=ActiveState --property=SubState --property=Result --property=ExecMainCode --property=ExecMainStatus >&2 2>/dev/null || :
+  restart_attempted="yes"
+  systemctl stop lightmoni-agent.service
+fi
+if [ "$previous_helper_active" = yes ]; then
+  systemctl show lightmoni-agent-helper.service --no-pager --property=LoadState --property=ActiveState --property=SubState --property=Result --property=ExecMainCode --property=ExecMainStatus >&2 2>/dev/null || :
+  helper_restart_attempted="yes"
+  systemctl stop lightmoni-agent-helper.service
+fi
+install -d -m 0750 -o root -g lightmoni-agent /etc/lightmoni-agent
+install -d -m 0700 -o lightmoni-agent -g lightmoni-agent /var/lib/lightmoni-agent
+install -m 0640 -o root -g lightmoni-agent "$staged_config" "/etc/lightmoni-agent/.config.new-$$"
 mv -f "/etc/lightmoni-agent/.config.new-$$" "$config_path"
 if [ "$enrollment_mode" = "yes" ]; then
-  install -m 0600 -o "$service_user" -g "$service_user" "$staged_identity" "/var/lib/lightmoni-agent/.identity.new-$$"
+  install -m 0600 -o lightmoni-agent -g lightmoni-agent "$staged_identity" "/var/lib/lightmoni-agent/.identity.new-$$"
   mv -f "/var/lib/lightmoni-agent/.identity.new-$$" "/var/lib/lightmoni-agent/identity.json"
 fi
 # The live queue, receipts, cursors, identity and cached tasks stay untouched.
@@ -367,6 +432,10 @@ printf '{"schema":1,"artifact_sha256":"%s"}\n' "$actual" > "$runtime_release/ins
 chmod -R u=rwX,go=rX "$runtime_release"
 ln -s "$runtime_release" "/opt/lightmoni-agent/.current-$$"
 mv -Tf "/opt/lightmoni-agent/.current-$$" /opt/lightmoni-agent/current
+if [ ! -e /usr/local/bin ] && [ ! -L /usr/local/bin ]; then
+  launcher_directory_created="yes"
+  install -d -m 0755 /usr/local/bin
+fi
 install -m 0755 "$tmp_dir/unpacked/lightmoni-agent" "/usr/local/bin/.lightmoni-agent.new-$$"
 mv -f "/usr/local/bin/.lightmoni-agent.new-$$" /usr/local/bin/lightmoni-agent
   if [ ! -e /usr/local/sbin ] && [ ! -L /usr/local/sbin ]; then uninstaller_directory_created="yes"; fi
@@ -376,6 +445,16 @@ mv -f "/usr/local/bin/.lightmoni-agent.new-$$" /usr/local/bin/lightmoni-agent
 service_changed="yes"
 "$node" "$service_helper" render "$runtime_mode" > "$tmp_dir/runtime.service"
 install -m 0644 "$tmp_dir/runtime.service" /etc/systemd/system/lightmoni-agent.service
+if [ "$runtime_mode" = root ]; then
+  [ -f "$tmp_dir/unpacked/lightmoni-agent-helper.service" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent-helper.service" ] || { echo 'Privileged helper service missing from release.' >&2; exit 1; }
+  "$node" "$service_helper" check-helper "$tmp_dir/unpacked/lightmoni-agent-helper.service" >/dev/null || { echo 'Invalid privileged helper service.' >&2; exit 1; }
+  install -d -m 0700 -o root -g root /etc/lightmoni-agent-helper
+  install -d -m 0711 -o root -g root /var/lib/lightmoni-agent-helper
+  install -d -m 0711 -o root -g root /var/lib/lightmoni-agent-helper/tasks
+  install -m 0644 "$tmp_dir/unpacked/lightmoni-agent-helper.service" /etc/systemd/system/.lightmoni-agent-helper.new-$$
+  mv -f /etc/systemd/system/.lightmoni-agent-helper.new-$$ /etc/systemd/system/lightmoni-agent-helper.service
+  helper_changed="yes"
+fi
 if [ "$runtime_mode" = root ] && [ "$enrollment_mode" = yes ]; then
   "$node" -e 'const fs=require("node:fs"),c=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(!c.managed_bootstrap||typeof c.managed_bootstrap!=="object")throw Error("managed_enrollment_required");fs.writeFileSync(process.argv[2],JSON.stringify(c.managed_bootstrap),{mode:0o600});' "$activation_response" "$tmp_dir/managed-bootstrap.json"
   managed_changed="yes"
@@ -386,13 +465,36 @@ systemctl daemon-reload
 installation_phase="enable"
 enable_attempted="yes"
 systemctl enable lightmoni-agent.service
+helper_enable_attempted="yes"
+if [ "$runtime_mode" = root ]; then
+  helper_enabled="yes"
+  systemctl enable lightmoni-agent-helper.service
+fi
 installation_phase="restart"
 restart_attempted="yes"
+if [ "$runtime_mode" = root ]; then
+  helper_restart_attempted="yes"
+  systemctl restart lightmoni-agent-helper.service
+  if ! wait_service_active lightmoni-agent-helper.service; then
+    echo 'Privileged helper did not remain active during the startup observation window.' >&2
+    exit 1
+  fi
+fi
 systemctl restart lightmoni-agent.service
 installation_phase="startup-check"
-if ! wait_service_active; then
+if ! wait_service_active lightmoni-agent.service; then
   echo 'Agent did not remain active during the startup observation window.' >&2
   exit 1
+fi
+installation_phase="agent-identity-check"
+agent_status_file="$tmp_dir/agent-status.json"
+/usr/local/bin/lightmoni-agent status --config "$config_path" > "$agent_status_file"
+"$node" -e 'const fs=require("node:fs"),s=JSON.parse(fs.readFileSync(process.argv[1],"utf8")),c=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(!Number.isSafeInteger(s.runtime?.uid)||s.runtime.uid<=0||!Number.isSafeInteger(s.runtime?.gid)||s.runtime.gid<=0||s.runtime.mode!==c.runtime_mode||s.runtime.permission_generation!==c.permission_generation)throw Error("ordinary_agent_identity_unverified")' "$agent_status_file" "$config_path"
+if [ "$runtime_mode" = root ]; then
+  installation_phase="helper-identity-check"
+  helper_status="$(/usr/local/bin/lightmoni-agent helper-status)"
+  "$node" -e 'const fs=require("node:fs"),s=JSON.parse(process.argv[1]),c=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(s.permission_generation!==c.permission_generation||s.fenced||s.pending_results!==0||s.ordinary_task_identity?.account!=="lightmoni-agent")throw Error("helper_identity_unverified")' "$helper_status" "$config_path"
+  systemctl is-active --quiet lightmoni-agent-helper.service || { echo 'Privileged helper service is not active.' >&2; exit 1; }
 fi
 transaction_started="no"
 echo 'LightMoni Agent installed. Existing identity and spool were preserved.'

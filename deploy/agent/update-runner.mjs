@@ -9,8 +9,8 @@ import { execFileSync } from "node:child_process";
 import { gunzipSync } from "node:zlib";
 
 export const ORDINARY_AGENT_SERVICE_SHA256 = "e40409fb295ff646cf016a05c2571d2004202454bdeb742dc88d4aff29391a12";
-export const ROOT_AGENT_SERVICE_SHA256 = "19f0b122cfff85f5397b5cc4afeeb6342df36634a35f981c562a1ab6f3ef826e";
-const SERVICE_MODES=new Map([[ORDINARY_AGENT_SERVICE_SHA256,'user'],[ROOT_AGENT_SERVICE_SHA256,'root']]);
+export const HELPER_SERVICE_SHA256 = "e1616a6c930450c27af71d23bab66fd64b4ae573344238c6ef501a8f969b162a";
+const SERVICE_MODES=new Map([[ORDINARY_AGENT_SERVICE_SHA256,'user']]);
 const SHA = /^[a-f0-9]{64}$/;
 const ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const OP = /^[a-f0-9]{32}$/;
@@ -105,7 +105,7 @@ export class AgentMaintenance {
     if(info.size>8192||!SERVICE_MODES.has(digest(fs.readFileSync(file))))fail("agent_service_override_not_allowed");
     return fs.readFileSync(file);
   }
-  fingerprint(releasePath, launcherPath = this.p("/usr/local/bin/lightmoni-agent"), servicePath = this.p("/etc/systemd/system/lightmoni-agent.service")) {
+  fingerprint(releasePath, launcherPath = this.p("/usr/local/bin/lightmoni-agent"), servicePath = this.p("/etc/systemd/system/lightmoni-agent.service"), helperPath = this.p('/etc/systemd/system/lightmoni-agent-helper.service')) {
     const release = this.metadata(releasePath);
     const launcher = fs.readFileSync(this.checkManaged(launcherPath));
     const service = fs.readFileSync(this.checkManaged(servicePath));
@@ -113,7 +113,11 @@ export class AgentMaintenance {
     const node = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "node"))));
     const entrypoint = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "app/runtime/dist/agent/main.js"))));
     const uninstaller = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "uninstall.sh"))));
-    return { ...release, fingerprint: digest(JSON.stringify({ release_path: releasePath, release, manifest: digest(manifest), launcher: digest(launcher), service: digest(service), node, entrypoint, uninstaller })) };
+    let helperService='';
+    try { helperService=digest(fs.readFileSync(this.checkManaged(helperPath))); }
+    catch(error) { if(!absent(error))throw error; }
+    if(helperService&&helperService!==HELPER_SERVICE_SHA256)fail('helper_service_override_not_allowed');
+    return { ...release, fingerprint: digest(JSON.stringify({ release_path: releasePath, release, manifest: digest(manifest), launcher: digest(launcher), service: digest(service), helper_service:helperService, node, entrypoint, uninstaller })) };
   }
   currentPath() {
     this.checkManaged(this.base, "directory");
@@ -126,6 +130,50 @@ export class AgentMaintenance {
     return destination;
   }
   system(property) { return this.command("systemctl", ["show", "lightmoni-agent.service", "--property=" + property, "--value"]); }
+  helperSystem(property) { return this.command("systemctl", ["show", "lightmoni-agent-helper.service", "--property=" + property, "--value"]); }
+  runtimeMode() {
+    const config=boundedJSON(this.checkManaged(this.p('/etc/lightmoni-agent/config.json')));
+    const mode=config.runtime_mode??'user';
+    if(!['root','user'].includes(mode))fail('invalid_runtime_mode');
+    return mode;
+  }
+  runtimeGeneration() {
+    const config=boundedJSON(this.checkManaged(this.p('/etc/lightmoni-agent/config.json')));
+    const generation=config.permission_generation??1;
+    if(!Number.isSafeInteger(generation)||generation<1)fail('invalid_runtime_config');
+    return generation;
+  }
+  helperService() {
+    const filename=this.p('/etc/systemd/system/lightmoni-agent-helper.service');
+    try {
+      const file=this.checkManaged(filename), bytes=fs.readFileSync(file);
+      if(digest(bytes)!==HELPER_SERVICE_SHA256)fail('helper_service_override_not_allowed');
+      return bytes;
+    } catch(error) { if(absent(error))return null; throw error; }
+  }
+  assertPackagedHelper(filename) {
+    const file=this.checkManaged(filename);
+    const bytes=fs.readFileSync(file);
+    if(digest(bytes)!==HELPER_SERVICE_SHA256)fail('helper_service_package_invalid');
+    return bytes;
+  }
+  assertHelperMode(mode) {
+    const service=this.helperService(), load=this.helperSystem('LoadState'), fragment=this.helperSystem('FragmentPath');
+    if(mode==='root') {
+      if(!service||load!=='loaded'||fragment!==this.p('/etc/systemd/system/lightmoni-agent-helper.service'))fail('helper_service_missing');
+      const config=this.checkManaged(this.p('/etc/lightmoni-agent-helper/helper.json'));
+      if((fs.statSync(config).mode&0o777)!==0o600)fail('helper_private_config_invalid');
+      if(this.helperSystem('ActiveState')!=='active')fail('helper_service_inactive');
+      if(this.helperSystem('DropInPaths').trim())fail('helper_service_override_not_allowed');
+      const rootStatus=JSON.parse(this.command(this.p('/usr/local/bin/lightmoni-agent'),['helper-status']));
+      const helperConfig=boundedJSON(config);
+      if(rootStatus.permission_generation!==helperConfig.permission_generation||rootStatus.fenced||rootStatus.pending_results!==0
+        ||rootStatus.ordinary_task_runner?.active!==false||rootStatus.ordinary_task_runner?.state!=='idle')fail('managed_execution_not_idle');
+      return true;
+    }
+    if(service||load!=='not-found'||fragment)fail('unexpected_helper_service');
+    return false;
+  }
   assertOrdinaryService() {
     this.ordinaryService(this.p('/etc/systemd/system/lightmoni-agent.service'));
     if (this.system('DropInPaths').trim()) fail('agent_service_override_not_allowed');
@@ -134,7 +182,7 @@ export class AgentMaintenance {
     catch (error) { if (!absent(error)) throw error; }
   }
   hasOperation() {
-    try { if(fs.existsSync(this.p('/etc/lightmoni-agent/managed.json'))){const s=JSON.parse(this.command(this.p('/usr/local/bin/lightmoni-agent'),['managed-status']));if(s.fenced||s.pending_results!==0)return true;} }
+    try { if(fs.existsSync(this.p('/etc/lightmoni-agent-helper/managed.json'))){const s=JSON.parse(this.command(this.p('/usr/local/bin/lightmoni-agent'),['helper-status']));if(s.fenced||s.pending_results!==0||s.ordinary_task_runner?.active!==false||s.ordinary_task_runner?.state!=='idle')return true;} }
     catch { return true; }
     try { fs.lstatSync(this.p("/var/lib/lightmoni-agent/operations/execution.lock")); return true; }
     catch (error) { if (!absent(error)) return true; }
@@ -158,7 +206,8 @@ export class AgentMaintenance {
       const retained = boundedJSON(this.checkManaged(path.join(this.base, "previous.json")));
       if (retained.schema !== 1 || !OP.test(retained.operation_id ?? "")) fail("invalid_previous_release");
       const source = this.checkManaged(this.opDir(retained.operation_id), "directory");
-      const value = this.fingerprint(retained.release_path, path.join(source, "previous-launcher"), path.join(source, "previous-service"));
+      const helperSnapshot=path.join(source,'previous-helper-service');
+      const value = this.fingerprint(retained.release_path, path.join(source, "previous-launcher"), path.join(source, "previous-service"), helperSnapshot);
       if (value.fingerprint !== retained.fingerprint) fail("previous_release_changed");
       // Preserve the immutable old unit as evidence, but never offer its
       // former host powers as a retained program rollback target.
@@ -174,9 +223,11 @@ export class AgentMaintenance {
     const current = this.fingerprint(currentPath);
     const fragment = this.system("FragmentPath"), load = this.system("LoadState"), active = this.system("ActiveState");
     if (fragment !== this.p("/etc/systemd/system/lightmoni-agent.service") || load !== "loaded" || !["active", "inactive", "failed"].includes(active)) fail("unmanaged_installation");
+    const runtimeMode=this.runtimeMode(),permissionGeneration=this.runtimeGeneration(),helperActive=this.assertHelperMode(runtimeMode);
     const local = this.localStatus(), previous = this.previous();
     const boot = typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) && local.agent_id === agent ? local.boot_id : "";
-    return { schema: 1, ready: current.arch === this.arch, agent_id: agent, arch: this.arch, service_active: active === "active", lifecycle_locked: fs.existsSync(this.lock), operation_lock: this.hasOperation(), current: { ...current, boot_id: boot }, previous: previous ? this.publicRelease(previous) : null };
+    if(!Number.isSafeInteger(local.runtime?.uid)||local.runtime.uid<=0||!Number.isSafeInteger(local.runtime?.gid)||local.runtime.gid<=0||local.runtime.mode!==runtimeMode||local.runtime.permission_generation!==permissionGeneration)fail('ordinary_agent_identity_required');
+    return { schema: 1, ready: current.arch === this.arch, agent_id: agent, arch: this.arch, runtime_mode:runtimeMode, permission_generation:permissionGeneration, service_active: active === "active", helper_active:helperActive, lifecycle_locked: fs.existsSync(this.lock), operation_lock: this.hasOperation(), current: { ...current, boot_id: boot }, previous: previous ? this.publicRelease(previous) : null };
   }
   publicRelease(value) {
     return Object.fromEntries(["version", "source_revision", "build_id", "state_schema", "artifact_sha256", "arch", "fingerprint"].map(key => [key, value[key]]));
@@ -228,7 +279,7 @@ export class AgentMaintenance {
       this.atomic(path.join(this.lock, "owner.json"), { operation_id: id });
       if (this.now() >= Date.parse(request.start_deadline)) fail("start_deadline_expired");
       fs.mkdirSync(directory, { mode: 0o700 });
-      const state = { schema: 1, operation_id: id, agent_id: before.agent_id, status: "accepted", from: before.current, target: { ...request.target }, local_health: { service_active: false, identity_matches: false, release_matches: false, boot_id: "" }, started_at: this.timestamp(), updated_at: this.timestamp() };
+      const state = { schema: 1, operation_id: id, agent_id: before.agent_id, status: "accepted", from: before.current, target: { ...request.target }, local_health: { service_active: false, helper_active: false, identity_matches: false, release_matches: false, boot_id: "" }, started_at: this.timestamp(), updated_at: this.timestamp() };
       this.atomic(path.join(directory, "status.json"), state);
       this.atomic(path.join(directory, "request.json"), { ...request, archive_path: undefined, previous_path: this.currentPath(), previous_active: before.service_active, rollback_source: request.action === "rollback" ? this.previous() : null });
       if (archive) this.atomic(path.join(directory, "bundle.tar.gz"), archive);
@@ -288,7 +339,7 @@ export class AgentMaintenance {
       const link = attrs.linkpath ?? (longLink || string(header.subarray(157, 257))); longName = ""; longLink = "";
       const name = raw.replace(/\/$/, "");
       if (typeof name !== "string" || !name || name.startsWith("/") || name.includes("\\") || name.split("/").some(part => !part || part === "." || part === "..") || name.length > 4096 || /[\x00-\x1f\x7f]/.test(name)) fail("unsafe_archive_path");
-      if (!["lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-runtime"].includes(name.split("/")[0])) fail("unsafe_archive_path");
+      if (!["lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-helper.service", "lightmoni-agent-runtime"].includes(name.split("/")[0])) fail("unsafe_archive_path");
       if (!["0", "5", "2"].includes(type) || (attrs.size !== undefined && Number(attrs.size) !== size)) fail("unsupported_archive_entry");
       if (names.has(name) && !(type === "5" && names.get(name) === "5")) fail("duplicate_archive_path");
       names.set(name, type);
@@ -313,7 +364,7 @@ export class AgentMaintenance {
     for (const entry of entries.filter(value => value.type === "2")) fs.symlinkSync(entry.link, path.join(destination, entry.name));
     const readableDirectories = root => { fs.chmodSync(root, 0o755); for (const name of fs.readdirSync(root)) { const child = path.join(root, name); if (fs.lstatSync(child).isDirectory()) readableDirectories(child); } };
     readableDirectories(destination);
-    for (const filename of ["lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-runtime/node", "lightmoni-agent-runtime/release.json"]) {
+    for (const filename of ["lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-helper.service", "lightmoni-agent-runtime/node", "lightmoni-agent-runtime/release.json"]) {
       const info = fs.lstatSync(path.join(destination, filename)); if (!info.isFile() || info.isSymbolicLink()) fail("invalid_archive");
     }
   }
@@ -322,7 +373,13 @@ export class AgentMaintenance {
     const release = local.release ?? {};
     const target = request.target;
     const releaseMatches = release.version === target.version && release.source_revision === target.source_revision && release.build_id === target.build_id && release.state_schema === 1 && release.artifact_sha256 === target.artifact_sha256;
-    return { service_active: active, identity_matches: local.agent_id === request.expected_agent_id && this.identity() === request.expected_agent_id, release_matches: releaseMatches, boot_id: typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) ? local.boot_id : "" };
+    let helperActive=false;
+    try { helperActive=this.assertHelperMode(this.runtimeMode()); } catch { helperActive=false; }
+    return { service_active: active, helper_active:helperActive, identity_matches: local.agent_id === request.expected_agent_id && this.identity() === request.expected_agent_id && Number.isSafeInteger(local.runtime?.uid) && local.runtime.uid>0 && Number.isSafeInteger(local.runtime?.gid) && local.runtime.gid>0 && local.runtime.mode===this.runtimeMode() && local.runtime.permission_generation===this.runtimeGeneration(), release_matches: releaseMatches, boot_id: typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) ? local.boot_id : "" };
+  }
+  healthy(health) {
+    return health.service_active && health.identity_matches && health.release_matches
+      && (this.runtimeMode() !== 'root' || health.helper_active === true);
   }
   switchCurrent(directory) {
     const temporary = path.join(this.base, ".current-update-" + randomUUID());
@@ -367,15 +424,20 @@ export class AgentMaintenance {
   async restore(id, reason) {
     const request = this.request(id), directory = this.opDir(id);
     this.command("systemctl", ["stop", "lightmoni-agent.service"]);
+    if(this.runtimeMode()==='root')this.command('systemctl',['stop','lightmoni-agent-helper.service']);
     if (!["inactive", "failed"].includes(this.system("ActiveState"))) fail("service_stop_failed");
     this.ordinaryService(path.join(directory,"previous-service"));
     this.assertOrdinaryService();
     this.switchCurrent(request.previous_path);
     this.atomic(this.p("/usr/local/bin/lightmoni-agent"), fs.readFileSync(this.checkManaged(path.join(directory, "previous-launcher"))), 0o755);
     this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(this.checkManaged(path.join(directory, "previous-service"))), 0o644);
+    if(this.runtimeMode()==='root')this.atomic(this.p('/etc/systemd/system/lightmoni-agent-helper.service'),fs.readFileSync(this.checkManaged(path.join(directory,'previous-helper-service'))),0o644);
     this.restoreUninstaller(directory);
-    if(fs.existsSync(this.p("/etc/lightmoni-agent/managed.json")))this.command(this.p("/usr/local/bin/lightmoni-agent"),["managed-activate"]);
     this.command("systemctl", ["daemon-reload"]);
+    if(this.runtimeMode()==='root'){
+      this.command(this.p('/usr/local/bin/lightmoni-agent'),['managed-activate']);
+      this.command('systemctl',['restart','lightmoni-agent-helper.service']);
+    }
     if (request.previous_active) {
       this.command("systemctl", ["restart", "lightmoni-agent.service"]);
       if (this.system("ActiveState") !== "active") fail("rollback_start_failed");
@@ -383,7 +445,8 @@ export class AgentMaintenance {
     const current = this.fingerprint(this.currentPath());
     if (current.fingerprint !== request.expected_fingerprint || this.identity() !== request.expected_agent_id) fail("rollback_verification_failed");
     const local = this.localStatus();
-    const result = this.save(id, { status: "rolled_back", error_code: reason, restored_fingerprint: request.expected_fingerprint, finished_at: this.timestamp(), local_health: { service_active: request.previous_active ? this.system("ActiveState") === "active" : false, identity_matches: true, release_matches: true, boot_id: typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) ? local.boot_id : "" } });
+    const helperActive = this.assertHelperMode(this.runtimeMode());
+    const result = this.save(id, { status: "rolled_back", error_code: reason, restored_fingerprint: request.expected_fingerprint, finished_at: this.timestamp(), local_health: { service_active: request.previous_active ? this.system("ActiveState") === "active" : false, helper_active: helperActive, identity_matches: true, release_matches: true, boot_id: typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) ? local.boot_id : "" } });
     this.cleanup(id); this.unlock(id); return result;
   }
   cleanup(id) {
@@ -397,7 +460,7 @@ export class AgentMaintenance {
     try {
       if (!this.ownsLock(id) || this.state(id).status !== "accepted") fail("operation_conflict");
       this.save(id, { status: "preparing" });
-      let candidate, launcher, service;
+      let candidate, launcher, service, packagedHelper;
       if (request.action === "upgrade") {
         const archive = fs.readFileSync(this.checkManaged(path.join(directory, "bundle.tar.gz")));
         if (digest(archive) !== request.target.artifact_sha256) fail("checksum_mismatch");
@@ -409,6 +472,8 @@ export class AgentMaintenance {
         candidate = path.join(this.base, "releases", request.target.version + "-" + request.target.artifact_sha256.slice(0, 16) + "-" + id);
         this.atomic(path.join(runtime, "installation.json"), { schema: 1, artifact_sha256: request.target.artifact_sha256 }, 0o644);
         launcher = path.join(unpacked, "lightmoni-agent"); service = path.join(unpacked, "lightmoni-agent.service");
+        packagedHelper=path.join(unpacked,'lightmoni-agent-helper.service');
+        this.assertPackagedHelper(packagedHelper);
         this.command(launcher, ["check", "--config", this.p("/etc/lightmoni-agent/config.json"), "--require-data-dir", this.p("/var/lib/lightmoni-agent")]);
         fs.renameSync(runtime, candidate);
       } else {
@@ -416,13 +481,14 @@ export class AgentMaintenance {
         if (!retained || retained.fingerprint !== request.target.fingerprint || ["version", "source_revision", "build_id", "state_schema", "arch", "artifact_sha256"].some(key => retained[key] !== request.target[key])) fail("previous_release_changed");
         candidate = retained.release_path;
         launcher = path.join(this.opDir(retained.operation_id), "previous-launcher"); service = path.join(this.opDir(retained.operation_id), "previous-service");
+        packagedHelper=path.join(this.opDir(retained.operation_id),'previous-helper-service');
+        if(this.runtimeMode()==='root')this.assertPackagedHelper(packagedHelper);
         this.command(path.join(candidate, "node"), [path.join(candidate, "app/runtime/dist/agent/main.js"), "check", "--config", this.p("/etc/lightmoni-agent/config.json"), "--require-data-dir", this.p("/var/lib/lightmoni-agent")]);
       }
       const currentService=this.ordinaryService(this.p('/etc/systemd/system/lightmoni-agent.service'));
       const currentMode=SERVICE_MODES.get(digest(currentService));
       // A package contains a user template; upgrading never changes authority.
       // Root and user share immutable code and keep the installed mode.
-      if(request.action==='upgrade'&&currentMode==='root')service=this.p('/etc/systemd/system/lightmoni-agent.service');
       const approvedService=this.ordinaryService(service);
       if(SERVICE_MODES.get(digest(approvedService))!==currentMode)fail('runtime_mode_changed');
       if (this.fingerprint(this.currentPath()).fingerprint !== request.expected_fingerprint || this.identity() !== request.expected_agent_id) fail("installation_changed");
@@ -436,15 +502,26 @@ export class AgentMaintenance {
       this.command(path.join(candidate, "node"), [permissions, "prepare"]);
       this.atomic(path.join(directory, "previous-launcher"), fs.readFileSync(this.checkManaged(this.p("/usr/local/bin/lightmoni-agent"))), 0o755);
       this.atomic(path.join(directory, "previous-service"), fs.readFileSync(this.checkManaged(this.p("/etc/systemd/system/lightmoni-agent.service"))), 0o644);
+      const helperService=this.assertHelperMode(this.runtimeMode())?this.checkManaged(this.p('/etc/systemd/system/lightmoni-agent-helper.service')):null;
+      if(helperService)this.atomic(path.join(directory,'previous-helper-service'),fs.readFileSync(helperService),0o644);
+      if(this.runtimeMode()==='root'){
+        this.assertPackagedHelper(packagedHelper);
+        this.atomic(path.join(directory,'approved-helper-service'),fs.readFileSync(packagedHelper),0o644);
+      }
       this.atomic(path.join(directory,"approved-service"),approvedService,0o644);
       this.save(id, { status: "switching" });
       changed = true;
       this.command("systemctl", ["stop", "lightmoni-agent.service"]);
+      if(this.runtimeMode()==='root'){
+        this.command('systemctl',['stop','lightmoni-agent-helper.service']);
+        if(!['inactive','failed'].includes(this.helperSystem('ActiveState')))fail('helper_service_stop_failed');
+      }
       if (!["inactive", "failed"].includes(this.system("ActiveState"))) fail("service_stop_failed");
       if (this.hasOperation()) fail("operation_conflict");
       this.switchCurrent(candidate);
       this.atomic(this.p("/usr/local/bin/lightmoni-agent"), fs.readFileSync(launcher), 0o755);
       this.atomic(this.p("/etc/systemd/system/lightmoni-agent.service"), approvedService, 0o644);
+      if(this.runtimeMode()==='root')this.atomic(this.p('/etc/systemd/system/lightmoni-agent-helper.service'),fs.readFileSync(this.checkManaged(path.join(directory,'approved-helper-service'))),0o644);
       if (uninstaller) {
         const parent = this.p("/usr/local/sbin");
         try { this.checkManaged(parent, "directory"); }
@@ -453,13 +530,16 @@ export class AgentMaintenance {
       }
       this.save(id, { uninstaller_updated: uninstaller !== null });
       this.command("systemctl", ["daemon-reload"]);
-      if(currentMode==='root'&&fs.existsSync(this.p('/etc/lightmoni-agent/managed.json')))this.command(this.p('/usr/local/bin/lightmoni-agent'),['managed-activate']);
+      if(this.runtimeMode()==='root'){
+        this.command(this.p('/usr/local/bin/lightmoni-agent'),['managed-activate']);
+        this.command('systemctl',['restart','lightmoni-agent-helper.service']);
+      }
       this.command("systemctl", ["restart", "lightmoni-agent.service"]);
       const deadline = this.now() + (request.confirm_timeout_seconds ?? 180) * 1000;
       let healthy = false;
       for (let attempt = 0; attempt < 15; attempt++) {
         const health = this.health(request);
-        if (health.service_active && health.identity_matches && health.release_matches && health.boot_id && health.boot_id !== this.state(id).from.boot_id) {
+        if (this.healthy(health) && health.boot_id && health.boot_id !== this.state(id).from.boot_id) {
           this.save(id, { status: "waiting_confirmation", local_health: health, confirmation_deadline: new Date(deadline).toISOString() }); healthy = true; break;
         }
         await this.sleep(1000);
@@ -470,7 +550,7 @@ export class AgentMaintenance {
         if (fs.existsSync(path.join(directory, "commit-request.json"))) {
           const commit = boundedJSON(this.checkManaged(path.join(directory, "commit-request.json")));
           const health = this.health(request);
-          if (commit.expected_boot_id !== health.boot_id || commit.expected_target_sha256 !== request.target.artifact_sha256 || !health.service_active || !health.identity_matches || !health.release_matches || !health.boot_id || health.boot_id === this.state(id).from.boot_id) fail("commit_health_changed");
+          if (commit.expected_boot_id !== health.boot_id || commit.expected_target_sha256 !== request.target.artifact_sha256 || !this.healthy(health) || !health.boot_id || health.boot_id === this.state(id).from.boot_id) fail("commit_health_changed");
           // Preserve one known previous program for an explicitly reviewed
           // rollback. Both files are root owned, outside Agent's write paths.
           this.atomic(path.join(this.base, "previous.json"), { schema: 1, operation_id: id, release_path: request.previous_path, fingerprint: request.expected_fingerprint }, 0o644);
@@ -478,7 +558,7 @@ export class AgentMaintenance {
           this.cleanup(id); this.unlock(id); return result;
         }
         const health = this.health(request);
-        if (!health.service_active || !health.identity_matches || !health.release_matches) fail("local_health_lost");
+        if (!this.healthy(health)) fail("local_health_lost");
         await this.sleep(1000);
       }
       fail("confirmation_timeout");
@@ -496,7 +576,7 @@ export class AgentMaintenance {
     if (state.status === "succeeded") return state;
     if (state.status !== "waiting_confirmation" || !this.ownsLock(request.operation_id) || !/^[a-f0-9-]{36}$/.test(request.expected_boot_id ?? "") || !SHA.test(request.expected_target_sha256 ?? "")) fail("invalid_commit");
     const plan = this.request(request.operation_id), health = this.health(plan);
-    if (request.expected_boot_id !== health.boot_id || health.boot_id === state.from.boot_id || request.expected_target_sha256 !== state.target.artifact_sha256 || !health.service_active || !health.identity_matches || !health.release_matches || this.now() >= Date.parse(state.confirmation_deadline)) fail("commit_health_changed");
+    if (request.expected_boot_id !== health.boot_id || health.boot_id === state.from.boot_id || request.expected_target_sha256 !== state.target.artifact_sha256 || !this.healthy(health) || this.now() >= Date.parse(state.confirmation_deadline)) fail("commit_health_changed");
     this.atomic(path.join(this.opDir(request.operation_id), "commit-request.json"), request);
     return state;
   }

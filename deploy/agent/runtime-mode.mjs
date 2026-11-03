@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { buildAgentService, identifyAgentService } from "./service-unit.mjs";
+import { buildAgentService, buildHelperService, identifyAgentService, identifyHelperService } from "./service-unit.mjs";
 const fail = (code) => {
   throw Object.assign(Error(code), { safeCode: code });
 };
@@ -115,21 +115,45 @@ export class AgentRuntimeMaintenance {
   cli(args, input) {
     return this.command(this.p("/usr/local/bin/lightmoni-agent"), args, input);
   }
+  helperStatus() {
+    return JSON.parse(this.cli(["helper-status"]));
+  }
+  helperUnit(mode) {
+    const file=this.p('/etc/systemd/system/lightmoni-agent-helper.service');
+    if(mode==='root') {
+      const bytes=fs.readFileSync(this.safe(file));
+      if(identifyHelperService(bytes)!=='root')fail('helper_service_override_not_allowed');
+      if(this.command('systemctl',['show','lightmoni-agent-helper.service','--property=FragmentPath','--value'])!==file
+        ||this.command('systemctl',['show','lightmoni-agent-helper.service','--property=ActiveState','--value'])!=='active')fail('helper_service_inactive');
+      if(this.command('systemctl',['show','lightmoni-agent-helper.service','--property=DropInPaths','--value']))fail('helper_service_override_not_allowed');
+      const status=this.helperStatus();
+      const config=JSON.parse(fs.readFileSync(this.safe(this.p('/etc/lightmoni-agent/config.json')),'utf8'));
+      if(!ID.test(status.executor_id)||!Number.isSafeInteger(status.install_generation)||status.install_generation<1
+        ||status.permission_generation!==config.permission_generation||status.ordinary_task_identity?.account!=='lightmoni-agent')fail('helper_health_unverified');
+      return bytes;
+    }
+    if(fs.existsSync(file)||fs.existsSync(file+'.disabled')||fs.existsSync(this.p('/etc/lightmoni-agent-helper'))||fs.existsSync(this.p('/var/lib/lightmoni-agent-helper')))fail('unexpected_helper_service');
+    const load=this.command('systemctl',['show','lightmoni-agent-helper.service','--property=LoadState','--value']);
+    if(load!=='not-found')fail('unexpected_helper_service');
+    return null;
+  }
   managed() {
-    const f = this.p("/etc/lightmoni-agent/managed.json");
+    const f = this.p("/etc/lightmoni-agent-helper/managed.json");
     if (!fs.existsSync(f)) {
-      if (fs.existsSync(this.p("/var/lib/lightmoni-agent/managed")))
+      if (fs.existsSync(this.p("/var/lib/lightmoni-agent-helper/managed")))
         fail("managed_configuration_missing");
       return null;
     }
     this.safe(f);
-    const s = JSON.parse(this.cli(["managed-status"]));
+    const s = this.helperStatus();
     if (
       !ID.test(s.executor_id) ||
       !Number.isSafeInteger(s.install_generation) ||
       s.install_generation < 1 ||
       s.fenced ||
-      s.pending_results !== 0
+      s.pending_results !== 0 ||
+      s.ordinary_task_runner?.active !== false ||
+      s.ordinary_task_runner?.state !== 'idle'
     )
       fail("managed_execution_not_idle");
     return {
@@ -190,8 +214,8 @@ export class AgentRuntimeMaintenance {
       s.agent_id !== agentID ||
       r?.mode !== c.runtime_mode ||
       r.permission_generation !== c.permission_generation ||
-      r.uid !== (c.runtime_mode === "root" ? 0 : a.uid) ||
-      r.gid !== (c.runtime_mode === "root" ? 0 : a.gid) ||
+      r.uid !== a.uid ||
+      r.gid !== a.gid ||
       !OP.test(s.boot_id ?? "") ||
       s.boot_id === previousBoot
     )
@@ -207,8 +231,8 @@ export class AgentRuntimeMaintenance {
     const service = this.safe(
       this.p("/etc/systemd/system/lightmoni-agent.service"),
     );
-    if (identifyAgentService(fs.readFileSync(service)) !== c.runtime_mode)
-      fail("runtime_service_mismatch");
+    if (identifyAgentService(fs.readFileSync(service)) !== 'user')
+      fail("legacy_root_agent_reinstall_required");
     if (
       this.command("systemctl", [
         "show",
@@ -228,9 +252,12 @@ export class AgentRuntimeMaintenance {
     )
       fail("agent_service_inactive");
     const local = this.observe(c, identity.agent_id),
-      managed = this.idle();
+      managed = c.runtime_mode==='root' ? this.helperStatus() : null;
+    this.helperUnit(c.runtime_mode);
     if (c.runtime_mode === "root" ? !managed : !!managed)
       fail("runtime_execution_identity_mismatch");
+    if(managed&&(managed.fenced||managed.pending_results!==0||managed.permission_generation!==c.permission_generation
+      ||managed.ordinary_task_identity?.account!=='lightmoni-agent'))fail('managed_execution_not_idle');
     if (local.queue_batches !== 0) fail("agent_queue_not_drained");
     return {
       schema: 1,
@@ -317,19 +344,18 @@ export class AgentRuntimeMaintenance {
     fs.mkdirSync(lock, { mode: 0o700 });
     let before,
       unit,
+      helperUnitBefore,
       account,
       backup,
       dataBackup,
-      operationsBefore,
-      operationsChanged = false,
+      helperDataMoved = false,
+      helperConfigDirectoryRemoved = false,
       stopped = false,
       mutated = false,
       restored = false,
       rollbackFailed = false,
       completed = false;
-    const moved = [],
-      savedManaged = [];
-    let originalNames = [];
+    const savedHelper = [];
     const save = (status, error = "", details = {}) => {
       const value = {
         schema: 1,
@@ -359,6 +385,7 @@ export class AgentRuntimeMaintenance {
       unit = fs.readFileSync(
         this.p("/etc/systemd/system/lightmoni-agent.service"),
       );
+      helperUnitBefore=this.helperUnit(before.runtime_mode);
       account = this.account();
       backup = path.join(dir, input.operation_id);
       fs.mkdirSync(backup, { mode: 0o700 });
@@ -375,6 +402,7 @@ export class AgentRuntimeMaintenance {
       fs.mkdirSync(dataBackup, { mode: 0o700 });
       this.atomic(path.join(backup, "config.json"), before);
       this.atomic(path.join(backup, "service"), unit.toString());
+      if(helperUnitBefore)this.atomic(path.join(backup,'helper-service'),helperUnitBefore.toString());
       save("running");
       // Mark stopped before the command: a transport failure after stop must still restore service.
       stopped = true;
@@ -390,95 +418,76 @@ export class AgentRuntimeMaintenance {
         )
       )
         fail("agent_stop_failed");
+      if(input.from_mode==='root'){
+        this.command('systemctl',['stop','lightmoni-agent-helper.service']);
+        if(!['inactive','failed'].includes(this.command('systemctl',['show','lightmoni-agent-helper.service','--property=ActiveState','--value'])))fail('helper_service_stop_failed');
+      }
       this.idle();
-      const data = this.dataPath(),
-        identity = this.json(path.join(data, "identity.json"));
-      if (identity.agent_id !== input.agent_id || !ID.test(identity.host_id))
-        fail("invalid_agent_identity");
-      const operations = path.join(data, "operations");
-      if (fs.existsSync(operations)) {
-        operationsBefore = fs.lstatSync(operations);
-        if (
-          !operationsBefore.isDirectory() ||
-          operationsBefore.isSymbolicLink() ||
-          fs.readdirSync(operations).length
-        )
-          fail("operations_directory_requires_reconciliation");
+      const data=this.dataPath(), identity=this.json(path.join(data,"identity.json"));
+      if(identity.agent_id!==input.agent_id||!ID.test(identity.host_id))fail("invalid_agent_identity");
+      this.validateState(data);
+      const operations=path.join(data,"operations");
+      if(fs.existsSync(operations)){
+        const info=fs.lstatSync(operations);
+        if(!info.isDirectory()||info.isSymbolicLink()||fs.readdirSync(operations).length)fail("operations_directory_requires_reconciliation");
       }
-      // Never root-open user-controlled SQLite, cached scripts/config, symlinks or hardlinks.
-      const names = fs.readdirSync(data).filter((n) => n !== "operations");
-      originalNames = names;
-      for (const name of names) this.validateState(path.join(data, name));
-      for (const name of ["managed.json", "managed-activation.json"]) {
-        const f = this.p("/etc/lightmoni-agent/" + name);
-        if (!fs.existsSync(f)) continue;
-        this.atomic(
-          path.join(backup, name),
-          fs.readFileSync(this.safe(f), "utf8"),
-        );
-        savedManaged.push(name);
+      const helperConfigDir=this.p('/etc/lightmoni-agent-helper');
+      const helperDataDir=this.p('/var/lib/lightmoni-agent-helper');
+      if(input.from_mode==='root'){
+        const status=this.helperStatus();
+        if(status.fenced||status.pending_results!==0||status.ordinary_task_runner?.active!==false||status.ordinary_task_runner?.state!=='idle')fail('managed_execution_not_idle');
+        const tasks=this.p('/var/lib/lightmoni-agent-helper/tasks');
+        if(fs.existsSync(tasks)&&fs.readdirSync(tasks).length)fail('helper_tasks_not_empty');
+        this.safe(helperDataDir,'directory');
+        this.validateState(helperDataDir);
+        mutated=true;
+        fs.renameSync(helperDataDir,path.join(dataBackup,'helper-state'));
+        helperDataMoved=true;
+        for(const name of ['helper.json','managed.json','managed-activation.json']){
+          const file=path.join(helperConfigDir,name);
+          if(!fs.existsSync(file))continue;
+          this.atomic(path.join(backup,'helper-'+name),fs.readFileSync(this.safe(file),'utf8'));
+          savedHelper.push(name);
+          fs.unlinkSync(file);
+        }
+        fs.rmdirSync(helperConfigDir);
+        helperConfigDirectoryRemoved=true;
+      }else{
+        mutated=true;
+        fs.mkdirSync(helperConfigDir,{mode:0o700,recursive:true});
+        fs.chmodSync(helperConfigDir,0o700);
+        fs.mkdirSync(helperDataDir,{mode:0o711});
+        fs.chmodSync(helperDataDir,0o711);
+        const tasks=this.p('/var/lib/lightmoni-agent-helper/tasks');
+        fs.mkdirSync(tasks,{mode:0o711});fs.chmodSync(tasks,0o711);
       }
-      mutated = true;
-      this.chown(data, this.uid, this.uid);
-      fs.chmodSync(data, 0o700);
-      for (const name of names) {
-        fs.renameSync(path.join(data, name), path.join(dataBackup, name));
-        moved.push(name);
+      const config={...before,endpoint:input.endpoint,runtime_mode:input.runtime_mode,permission_generation:input.permission_generation};
+      const configPath=this.p('/etc/lightmoni-agent/config.json');
+      this.atomic(configPath,config,0o640);
+      this.chown(configPath,this.uid,account.gid);
+      fs.chmodSync(configPath,0o640);
+      if(input.runtime_mode==='root')this.cli(['managed-enroll'],JSON.stringify(input.managed_bootstrap));
+      this.atomic(this.p('/etc/systemd/system/lightmoni-agent.service'),buildAgentService(input.runtime_mode),0o644);
+      if(input.runtime_mode==='root'){
+        this.atomic(this.p('/etc/systemd/system/lightmoni-agent-helper.service'),buildHelperService(),0o644);
+        this.command('systemctl',['enable','lightmoni-agent-helper.service']);
+      }else{
+        this.command('systemctl',['disable','lightmoni-agent-helper.service']);
+        fs.rmSync(this.p('/etc/systemd/system/lightmoni-agent-helper.service'),{force:true});
       }
-      for (const name of savedManaged)
-        fs.unlinkSync(this.p("/etc/lightmoni-agent/" + name));
-      const config = {
-        ...before,
-        endpoint: input.endpoint,
-        runtime_mode: input.runtime_mode,
-        permission_generation: input.permission_generation,
-      };
-      this.chown(
-        this.p("/etc/lightmoni-agent"),
-        this.uid,
-        input.runtime_mode === "root" ? this.uid : account.gid,
-      );
-      fs.chmodSync(
-        this.p("/etc/lightmoni-agent"),
-        input.runtime_mode === "root" ? 0o700 : 0o750,
-      );
-      this.atomic(
-        this.p("/etc/lightmoni-agent/config.json"),
-        config,
-        input.runtime_mode === "root" ? 0o600 : 0o640,
-      );
-      this.chown(
-        this.p("/etc/lightmoni-agent/config.json"),
-        this.uid,
-        account.gid,
-      );
-      this.atomic(path.join(data, "identity.json"), {
-        agent_id: input.agent_id,
-        host_id: identity.host_id,
-      });
-      const owner =
-        input.runtime_mode === "root"
-          ? { uid: this.uid, gid: this.uid }
-          : account;
-      if (!operationsBefore) fs.mkdirSync(operations, { mode: 0o700 });
-      operationsChanged = true;
-      this.chown(operations, owner.uid, owner.gid);
-      fs.chmodSync(operations, 0o700);
-      this.chown(path.join(data, "identity.json"), owner.uid, owner.gid);
-      this.chown(data, owner.uid, owner.gid);
-      if (input.runtime_mode === "root")
-        this.cli(["managed-enroll"], JSON.stringify(input.managed_bootstrap));
-      this.atomic(
-        this.p("/etc/systemd/system/lightmoni-agent.service"),
-        buildAgentService(input.runtime_mode),
-        0o644,
-      );
       this.cli([
         "check",
         "--config",
         this.p("/etc/lightmoni-agent/config.json"),
       ]);
       this.command("systemctl", ["daemon-reload"]);
+      if(input.runtime_mode==='root'){
+        this.command('systemctl',['start','lightmoni-agent-helper.service']);
+        if(this.command('systemctl',['show','lightmoni-agent-helper.service','--property=ActiveState','--value'])!=='active')fail('helper_service_inactive');
+        const helperStatus=this.helperStatus();
+        if(helperStatus.permission_generation!==input.permission_generation||helperStatus.fenced||helperStatus.pending_results!==0
+          ||helperStatus.ordinary_task_runner?.active!==false||helperStatus.ordinary_task_runner?.state!=='idle')fail('helper_health_unverified');
+      }
       this.command("systemctl", ["start", "lightmoni-agent.service"]);
       let observed;
       for (let n = 0; n < 15; n++) {
@@ -499,106 +508,60 @@ export class AgentRuntimeMaintenance {
       completed = true;
       // Old signing material is never retained with diagnostic telemetry caches.
       // A committed success must never roll back because diagnostic cleanup failed.
-      for (const obsolete of [path.join(dataBackup, "managed"), backup]) {
-        try {
-          fs.rmSync(obsolete, { recursive: true, force: true });
-        } catch {
-          /* Root-only maintenance evidence remains for local cleanup. */
-        }
+      // A successful monitor-only switch erases the old root helper credentials,
+      // executor journal and task recovery state kept under this transaction.
+      for(const obsolete of [dataBackup,backup]){
+        try{fs.rmSync(obsolete,{recursive:true,force:true});}catch{/* retain root-only recovery evidence */}
       }
       return result;
     } catch (error) {
       if (stopped)
         try {
-          this.command("systemctl", ["stop", "lightmoni-agent.service"]);
-          if (mutated) {
-            const data = this.dataPath();
-            this.chown(data, this.uid, this.uid);
-            fs.chmodSync(data, 0o700);
-            // Remove only newly initialized Agent state; business operations stay untouched.
-            for (const name of fs.readdirSync(data))
-              if (
-                name !== "operations" &&
-                (!originalNames.includes(name) || moved.includes(name))
-              )
-                fs.rmSync(path.join(data, name), {
-                  recursive: true,
-                  force: true,
-                });
-            for (const name of moved)
-              if (fs.existsSync(path.join(dataBackup, name)))
-                fs.renameSync(
-                  path.join(dataBackup, name),
-                  path.join(data, name),
-                );
-            for (const name of ["managed.json", "managed-activation.json"]) {
-              const f = this.p("/etc/lightmoni-agent/" + name);
-              fs.rmSync(f, { force: true });
-              if (savedManaged.includes(name))
-                this.atomic(
-                  f,
-                  fs.readFileSync(path.join(backup, name), "utf8"),
-                );
-            }
-            this.chown(
-              this.p("/etc/lightmoni-agent"),
-              this.uid,
-              before.runtime_mode === "root" ? this.uid : account.gid,
-            );
-            fs.chmodSync(
-              this.p("/etc/lightmoni-agent"),
-              before.runtime_mode === "root" ? 0o700 : 0o750,
-            );
-            this.atomic(
-              this.p("/etc/lightmoni-agent/config.json"),
-              before,
-              before.runtime_mode === "root" ? 0o600 : 0o640,
-            );
-            this.chown(
-              this.p("/etc/lightmoni-agent/config.json"),
-              this.uid,
-              account.gid,
-            );
-            this.atomic(
-              this.p("/etc/systemd/system/lightmoni-agent.service"),
-              unit.toString(),
-              0o644,
-            );
-            this.chown(
-              data,
-              before.runtime_mode === "root" ? this.uid : account.uid,
-              before.runtime_mode === "root" ? this.uid : account.gid,
-            );
-            if (operationsChanged) {
-              const operations = path.join(data, "operations");
-              if (fs.readdirSync(operations).length)
-                fail("operations_directory_requires_reconciliation");
-              if (operationsBefore) {
-                this.chown(
-                  operations,
-                  operationsBefore.uid,
-                  operationsBefore.gid,
-                );
-                fs.chmodSync(operations, operationsBefore.mode & 0o777);
-              } else fs.rmdirSync(operations);
-            }
+          this.command('systemctl',['stop','lightmoni-agent.service']);
+          if(input.runtime_mode==='root'){
+            try{this.command('systemctl',['stop','lightmoni-agent-helper.service']);}catch(error){if(error.code!=='ENOENT')throw error;}
           }
-          this.command("systemctl", ["daemon-reload"]);
-          this.command("systemctl", ["start", "lightmoni-agent.service"]);
-          let verified = false;
-          for (let n = 0; n < 10; n++) {
-            try {
-              this.observe(before, input.agent_id, state.boot_id);
-              verified = true;
-              break;
-            } catch {
-              await this.sleep(1000);
+          if(mutated){
+            const configPath=this.p('/etc/lightmoni-agent/config.json');
+            if(before.runtime_mode==='root'){
+              if(helperDataMoved){
+                fs.rmSync(this.p('/var/lib/lightmoni-agent-helper'),{recursive:true,force:true});
+                fs.renameSync(path.join(dataBackup,'helper-state'),this.p('/var/lib/lightmoni-agent-helper'));
+              }
+              if(helperConfigDirectoryRemoved)fs.mkdirSync(this.p('/etc/lightmoni-agent-helper'),{mode:0o700});
+              for(const name of savedHelper){
+                const source=path.join(backup,'helper-'+name);
+                this.atomic(this.p('/etc/lightmoni-agent-helper/'+name),fs.readFileSync(this.safe(source),'utf8'));
+              }
+              this.atomic(this.p('/etc/systemd/system/lightmoni-agent-helper.service'),fs.readFileSync(this.safe(path.join(backup,'helper-service')),'utf8'),0o644);
+              this.command('systemctl',['enable','lightmoni-agent-helper.service']);
+            }else{
+              fs.rmSync(this.p('/etc/lightmoni-agent-helper'),{recursive:true,force:true});
+              fs.rmSync(this.p('/var/lib/lightmoni-agent-helper'),{recursive:true,force:true});
+              fs.rmSync(this.p('/etc/systemd/system/lightmoni-agent-helper.service'),{force:true});
+              this.command('systemctl',['disable','lightmoni-agent-helper.service']);
             }
+            helperConfigDirectoryRemoved=false;
+            this.atomic(configPath,before,0o640);
+            this.chown(configPath,this.uid,account.gid);
+            fs.chmodSync(configPath,0o640);
+            this.atomic(this.p('/etc/systemd/system/lightmoni-agent.service'),unit.toString(),0o644);
           }
-          if (!verified) fail("runtime_restore_failed");
-          restored = true;
-        } catch {
-          rollbackFailed = true;
+          this.command('systemctl',['daemon-reload']);
+          if(before.runtime_mode==='root'){
+            this.command('systemctl',['start','lightmoni-agent-helper.service']);
+            if(this.command('systemctl',['show','lightmoni-agent-helper.service','--property=ActiveState','--value'])!=='active')fail('runtime_restore_failed');
+          }
+          this.command('systemctl',['start','lightmoni-agent.service']);
+          let verified=false;
+          for(let n=0;n<10;n++){
+            try{this.observe(before,input.agent_id,state.boot_id);if(before.runtime_mode==='root')this.helperUnit('root');verified=true;break;}
+            catch{await this.sleep(1000);}
+          }
+          if(!verified)fail('runtime_restore_failed');
+          restored=true;
+        }catch{
+          rollbackFailed=true;
         }
       save(
         rollbackFailed ? "unknown" : "failed",
@@ -607,15 +570,8 @@ export class AgentRuntimeMaintenance {
       throw error;
     } finally {
       if (!rollbackFailed) fs.rmdirSync(lock);
-      if (restored && backup)
-        fs.rmSync(backup, { recursive: true, force: true });
-      if (
-        (restored || completed) &&
-        dataBackup &&
-        fs.existsSync(dataBackup) &&
-        fs.readdirSync(dataBackup).length === 0
-      )
-        fs.rmdirSync(dataBackup);
+      if(restored&&backup)fs.rmSync(backup,{recursive:true,force:true});
+      if((restored||completed)&&dataBackup)fs.rmSync(dataBackup,{recursive:true,force:true});
     }
   }
   status(id) {

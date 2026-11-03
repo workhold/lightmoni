@@ -1,0 +1,1845 @@
+{
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "readbackAt": "2026-11-03T05:52:05.184Z",
+  "method": "UI save, page reload, rendered paragraphs and native diagram clipboard readback",
+  "paragraphs": [
+    {
+      "id": "ec47a737-c8ce-42bf-b7f7-d704f872c26c",
+      "type": "paragraph",
+      "text": "87. Agent 常驻、脚本和维护身份分离（SDD 087）"
+    },
+    {
+      "id": "e72f3438-e9b7-406b-aa25-22f62f1dfafe",
+      "type": "paragraph",
+      "text": "交付状态：PR #83 功能分支，待合入。类型检查和生产构建通过；最新定向集成152项中117通过、35失败，旧升级/恢复测试尚未适配新helper协议，不能据此声称升级/回退验收完成。Linux实机验收与镜像发布未完成；本章说明目标实现，不代表线上已升级。"
+    },
+    {
+      "id": "fc8f598c-fbb3-4a64-9620-8f745909fc0c",
+      "type": "paragraph",
+      "text": "87.1 目标决策"
+    },
+    {
+      "id": "3348054d-31a3-4c3b-884b-df8f8e0b43fb",
+      "type": "paragraph",
+      "text": "SSH管理账号、常驻Agent、普通脚本、高权限脚本使用不同操作系统身份；完整发行统一维护，不让普通Agent账号拥有通用sudo，也不允许Agent遇到权限错误时自动改用root。"
+    },
+    {
+      "id": "9df3e1c4-a741-4bd1-906d-2476d0b1ae19",
+      "type": "paragraph",
+      "text": "首次登记主机时，SSH用户名默认root，登记和新增账户界面推荐root用于安装维护；也支持具备免交互系统管理sudo的账号。不修改已有账户，不配置服务器的root SSH登录策略，也不将用户名当作权限证明：只有实际权限检查通过才能生成维护计划。用户只管理一套Agent，内部创建的lightmoni-agent与lightmoni-task是无登录系统账号，无需用户为它们录入密码或私钥。"
+    },
+    {
+      "id": "5574973b-7975-475e-b4d8-fa6dacd1c6d1",
+      "type": "paragraph",
+      "text": "常驻Agent不因runtime_mode改变UID。runtime_mode=user表示仅监控，不安装helper且不允许用户脚本领取；runtime_mode=root表示完整管理模式：除始终非root的Agent服务外，发行包还安装同版本root helper、私有身份、journal与策略。UI用“完整管理 / 仅监控”展示，不把字段名root解释成网络Agent以root运行。"
+    },
+    {
+      "id": "56ca1620-e6b5-4c78-92ca-a8587388d708",
+      "type": "paragraph",
+      "text": "完整管理模式下脚本控制完全由root helper的本机身份和签名许可判定。普通脚本以固定低权限lightmoni-task账号执行，不能访问Agent配置、数据目录或root凭据；高权限脚本仍走现有内容/目标固定的签名任务批准与审计。高权限授权按计划定义绑定目标、摘要、解释器、UID/GID/组、权限代次和有效期；计划修改需要新批准。监控模式没有helper，网络Agent拒绝接收脚本任务。"
+    },
+    {
+      "id": "0aadba00-ded4-4ff3-8b24-4e4798855a51",
+      "type": "paragraph",
+      "text": "87.2 账号职责矩阵"
+    },
+    {
+      "id": "f967f0a6-bb27-48d1-bd6f-9a5002e09353",
+      "type": "table",
+      "text": "行为登录/运行账号具体边界安装、更新、回退、模式切换、卸载及恢复root SSH或免交互系统管理sudo的已登记账号远端固定维护命令UID0执行，绑定账户/凭据版本。未知只读核对，不跨账号重放。当前要求sudo -n /bin/sh，个别systemctl命令授权不足。遥测、心跳和Agent控制面lightmoni-agentsystemd始终设置User/Group，清空补充组和capabilities，启用NoNewPrivileges、文件系统保护和独立数据目录。普通用户脚本lightmoni-task，仅helper内固定UID/GID无登录shell、sudo、Docker组或capabilities。任务目录与Agent机密目录分离；最小环境、运行/输出限制、取消与完整审计。root/容器/系统级任务root helper只执行签名、固定载荷、范围和短租约验证通过的作业；逐任务留账，无任意本机sudo或shell API。未来业务账号执行（未实现）管理员登记的本地账号白名单固定UID/GID/组，不任意填用户名，不继承SSH账户，不自动回退root。"
+    },
+    {
+      "id": "2aaab1e5-01d3-4400-b221-12aebedfda1a",
+      "type": "paragraph",
+      "text": "统一包同时包含daemon与helper组件，完整模式下两者必须使用相同发行摘要并通过签名证明绑定；安装、升级、回滚、卸载和离线卸载器共同处理两者。helper配置、密钥和journal位于root拥有的0700私有目录；数据根与tasks父目录为root拥有的0711，每个任务工作目录独立归任务账号所有；Agent可读配置和普通状态不作为helper权威来源。helper缺失、代次不匹配或状态unknown时，完整管理能力停止并显示不可用，不降级为普通Agent直接执行写操作。"
+    },
+    {
+      "id": "911c5300-4e1c-46b1-a72e-8fcb1937ae07",
+      "type": "paragraph",
+      "text": "87.3 控制与任务流程"
+    },
+    {
+      "id": "712c7797-c168-4535-a6f8-afd21b97bfd4",
+      "type": "paragraph",
+      "text": "SSH安装计划冻结主机ID、SSH账户ID/用户名/revision、凭据revision、发行SHA、模式及root能力范围。直接root登录和sudo管理账号都是系统管理身份来源，root账户不是Agent运行用户；sudo密码需交互的账户不用于无人值守操作。更新按固定凭据快照驱动维护器；普通升级保留helper模式与权限代次，不改变账户或自动提升权限。远端命令以root执行但接收固定计划，不接收模型生成的任意管理脚本。"
+    },
+    {
+      "id": "7442038e-6314-4cb1-99a4-91aaf7787615",
+      "type": "paragraph",
+      "text": "权限模式切换计划的revision和plan_json只代表管理员审阅并确认的内容。切换首次登记helper后，其executor_id、安装代次和策略代次单独写入计划账本列；helper首次签名心跳须同时匹配该绑定和当前策略，不能反向改写已审阅计划或其摘要。"
+    },
+    {
+      "id": "790cfdd4-183a-49dd-bb18-86c623399e59",
+      "type": "paragraph",
+      "text": "完整管理模式普通脚本经既有TaskRun任务队列进入helper端TaskRunner，在启动前绑定script digest、目标主机、版本、时间限制、环境及task UID/GID。目录、环境和子进程由受限账户拥有，helper不得用Agent可写文件构造root任务。脚本领取、租约心跳和回执必须经executor私钥签名端点；Agent bearer控制接口不得读取或变更helper脚本作业。签名心跳中的lightmoni-task UID/GID与权限代次用于冻结任务身份；身份或代次变化后旧队列不得执行。"
+    },
+    {
+      "id": "97396fbe-e4bc-450f-9774-e15b411d45f6",
+      "type": "paragraph",
+      "text": "helper私有恢复标记覆盖领取响应丢失、重启恢复与回执未知，领取幂等；状态未核对时不再领取新作业。同一主机出现未解决的unknown脚本结果时，禁止派发或领取后续脚本；管理员核对或用户明确重试并建立关联记录后才解除阻塞。高权限作业保持独立签名policy、逐任务批准和start permit，不自动共享普通脚本身份。定时高权限作业在固定定义范围内持久授权，每次调度仍留独立记录；修改脚本或目标需重新批准。未知结果阻止后续冲突作业，不能因租约过期重新执行。"
+    },
+    {
+      "id": "e8dfd8f4-1fce-49a9-94c2-984f9ca2e3f9",
+      "type": "paragraph",
+      "text": "安装成功必须验证新鲜Agent非root心跳；完整模式另验证同Agent绑定、同发行helper心跳与预期权限代次。监控模式验证不存在受管helper及完整模式任务权限，不用历史root心跳作成功证据。卸载首先核对Agent与helper任务均结束，再移除两组件并撤销签名身份；未知时保留证据，要求只读检查。升级/回滚绑定两个组件的包、执行身份和启动回执，任一组件不健康均保持unknown并锁定，不自动部分降级。"
+    },
+    {
+      "id": "52a6ac26-be9c-476b-ae0d-a34eae21bd1b",
+      "type": "paragraph",
+      "text": "87.4 移除与兼容边界"
+    },
+    {
+      "id": "97af6db2-5fc1-4902-89f4-a2362527a9cb",
+      "type": "paragraph",
+      "text": "第83章的root常驻Agent unit由本章取代：普通及完整管理模式的Agent网络服务均非root，完整管理root能力仅在固定helper中。普通任务UID从旧lightmoni-agent改为lightmoni-task，家目录、恢复账本及配置不互通，不保留运行态自动迁移。旧root常驻安装需先用原版本受管维护流程卸载后重新安装；新卸载器不接管旧运行态；旧user模式无现有helper时不自动领取脚本。新中心库schema保持SDD084约定，不增加主机字段或兼容旧安装方式。"
+    },
+    {
+      "id": "1fedfc11-64b7-4525-8191-f76456396f18",
+      "type": "paragraph",
+      "text": "安装、升级、回退和卸载继续使用同一SSH管理凭据边界，尚未切换至Agent自更新。系统级sudo探测要求免交互root shell。主机级平台管理员仍为全局管理员，本SDD不扩展。Docker daemon身份确认和首次绑定独立于SSH root权限，不静默绑定现有或新装daemon。"
+    },
+    {
+      "id": "bf1fcf0b-f781-4237-b133-b7307859819b",
+      "type": "paragraph",
+      "text": "规格与验收见仓库specs/087-agent-permission-boundaries；自动化配置/功能检查不等于线上vchive安装或Linux生命周期验收。普通脚本的工作目录、最小环境和有界进程不构成不可信代码沙箱，也未提供任务间完整隔离。SDK继续独立直报中心。"
+    }
+  ],
+  "graphs": {
+    "29f1bf9c-9bc8-45a0-9d10-b5d53f872b50": [
+      {
+        "id": "4c2dfc78-aedc-4ece-bd4a-4319df0e1cee",
+        "shape": "edge",
+        "source": {
+          "cell": "9f431217-bb1e-4068-adcd-07a1dc45bc7c",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "149236f2-79e9-45c2-8089-e4bd667191a6",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "2f7c3a2b-9171-40ba-85a0-4a3a797087e1",
+        "shape": "edge",
+        "source": {
+          "cell": "149236f2-79e9-45c2-8089-e4bd667191a6",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "ff229b64-c3c9-457b-b8a5-2a4c10057b89",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "冻结 SSH 维护计划",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "a0e9f29d-0e2b-46e2-bfd6-8c82a5b6d870",
+        "shape": "edge",
+        "source": {
+          "cell": "0b412416-5c53-4f47-a980-9e2b28e9dc0e",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "ff229b64-c3c9-457b-b8a5-2a4c10057b89",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "9548347c-7dcf-466a-a71e-9b3827af6caf",
+        "shape": "edge",
+        "source": {
+          "cell": "ff229b64-c3c9-457b-b8a5-2a4c10057b89",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "b5f2bd7d-d9c9-4d5a-a1d1-3f89e2090b11",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "两种模式均安装",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "9954ecc8-c939-4d4e-b5a5-b3165fd5f21c",
+        "shape": "edge",
+        "source": {
+          "cell": "ff229b64-c3c9-457b-b8a5-2a4c10057b89",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "8e9c98d0-96de-498a-93fd-4aad351cb14b",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "仅完整管理模式",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "6657bc5f-f1b4-4b18-b3f3-9d91cabd462d",
+        "shape": "edge",
+        "source": {
+          "cell": "b5f2bd7d-d9c9-4d5a-a1d1-3f89e2090b11",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "149236f2-79e9-45c2-8089-e4bd667191a6",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "出站遥测 / 配置",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "49c6a489-aa85-4f93-b3a8-c7af6a8d564d",
+        "shape": "edge",
+        "source": {
+          "cell": "8e9c98d0-96de-498a-93fd-4aad351cb14b",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "149236f2-79e9-45c2-8089-e4bd667191a6",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "出站签名领取 / 回执",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "5697eca9-11f7-4729-8378-486e8b4ace71",
+        "shape": "edge",
+        "source": {
+          "cell": "8e9c98d0-96de-498a-93fd-4aad351cb14b",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "65792d7e-6e74-41cd-9ee6-a50faec1a292",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "启动前降权",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "ca81fbdb-1300-4d4b-83f7-ae910cfd43cf",
+        "shape": "edge",
+        "source": {
+          "cell": "8e9c98d0-96de-498a-93fd-4aad351cb14b",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "ff2287f8-1fcd-4744-8053-13ba05f21f05",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "批准 + 单步许可",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "9f431217-bb1e-4068-adcd-07a1dc45bc7c",
+        "shape": "rect",
+        "label": "平台管理员审阅",
+        "position": {
+          "x": 68,
+          "y": 68
+        },
+        "size": {
+          "width": 250,
+          "height": 90
+        }
+      },
+      {
+        "id": "149236f2-79e9-45c2-8089-e4bd667191a6",
+        "shape": "rect",
+        "label": "中心计划 / 固定身份 / 审计",
+        "position": {
+          "x": 398,
+          "y": 68
+        },
+        "size": {
+          "width": 250,
+          "height": 90
+        }
+      },
+      {
+        "id": "0b412416-5c53-4f47-a980-9e2b28e9dc0e",
+        "shape": "rect",
+        "label": "登记 SSH 管理账号\nroot 或免交互 sudo",
+        "position": {
+          "x": 728,
+          "y": 268
+        },
+        "size": {
+          "width": 250,
+          "height": 90
+        }
+      },
+      {
+        "id": "ff229b64-c3c9-457b-b8a5-2a4c10057b89",
+        "shape": "rect",
+        "label": "统一维护程序\n安装 / 升级 / 回退 / 卸载",
+        "position": {
+          "x": 398,
+          "y": 268
+        },
+        "size": {
+          "width": 250,
+          "height": 90
+        }
+      },
+      {
+        "id": "b5f2bd7d-d9c9-4d5a-a1d1-3f89e2090b11",
+        "shape": "rect",
+        "label": "lightmoni-agent.service\n始终非 root",
+        "position": {
+          "x": 68,
+          "y": 478
+        },
+        "size": {
+          "width": 250,
+          "height": 90
+        }
+      },
+      {
+        "id": "8e9c98d0-96de-498a-93fd-4aad351cb14b",
+        "shape": "rect",
+        "label": "lightmoni-agent-helper.service\n完整管理模式 / UID0",
+        "position": {
+          "x": 728,
+          "y": 478
+        },
+        "size": {
+          "width": 250,
+          "height": 90
+        }
+      },
+      {
+        "id": "65792d7e-6e74-41cd-9ee6-a50faec1a292",
+        "shape": "rect",
+        "label": "普通脚本\nlightmoni-task UID",
+        "position": {
+          "x": 558,
+          "y": 708
+        },
+        "size": {
+          "width": 250,
+          "height": 90
+        }
+      },
+      {
+        "id": "ff2287f8-1fcd-4744-8053-13ba05f21f05",
+        "shape": "rect",
+        "label": "明确批准的 root 任务\n固定内容 / 目标 / 审计",
+        "position": {
+          "x": 888,
+          "y": 708
+        },
+        "size": {
+          "width": 250,
+          "height": 90
+        }
+      }
+    ],
+    "81a4b066-cba3-45e7-ba0e-693e4e204820": [
+      {
+        "id": "30b7e953-a4c8-4c07-bf08-8dec5bfbcb8a",
+        "shape": "edge",
+        "source": {
+          "x": 158,
+          "y": 143
+        },
+        "target": {
+          "x": 158,
+          "y": 893
+        },
+        "targetArrow": "none",
+        "lineStyle": "dashed"
+      },
+      {
+        "id": "0338914a-7188-49e9-8bec-c4aa09a93198",
+        "shape": "edge",
+        "source": {
+          "x": 418,
+          "y": 143
+        },
+        "target": {
+          "x": 418,
+          "y": 893
+        },
+        "targetArrow": "none",
+        "lineStyle": "dashed"
+      },
+      {
+        "id": "92d2c058-5a1d-4164-a52f-b8a259dd8686",
+        "shape": "edge",
+        "source": {
+          "x": 678,
+          "y": 143
+        },
+        "target": {
+          "x": 678,
+          "y": 893
+        },
+        "targetArrow": "none",
+        "lineStyle": "dashed"
+      },
+      {
+        "id": "6be207ac-a8b6-4d06-b829-369816d84230",
+        "shape": "edge",
+        "source": {
+          "x": 938,
+          "y": 143
+        },
+        "target": {
+          "x": 938,
+          "y": 893
+        },
+        "targetArrow": "none",
+        "lineStyle": "dashed"
+      },
+      {
+        "id": "de41a928-5696-4b3f-9f42-04e78a902683",
+        "shape": "edge",
+        "source": {
+          "x": 1198,
+          "y": 143
+        },
+        "target": {
+          "x": 1198,
+          "y": 893
+        },
+        "targetArrow": "none",
+        "lineStyle": "dashed"
+      },
+      {
+        "id": "e1d98b6c-b312-480c-983a-71c664ba8b4c",
+        "shape": "edge",
+        "source": {
+          "x": 158,
+          "y": 218
+        },
+        "target": {
+          "x": 418,
+          "y": 218
+        },
+        "label": "1. 登记 SSH，审阅安装模式",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "86160c97-6b7d-4995-a1b8-24873ec60b5a",
+        "shape": "edge",
+        "source": {
+          "x": 418,
+          "y": 293
+        },
+        "target": {
+          "x": 938,
+          "y": 293
+        },
+        "label": "2. 固定 SSH 维护包：安装 / 维护 helper",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "c3f242f9-140b-4d45-8cb9-1b1ec412ebe3",
+        "shape": "edge",
+        "source": {
+          "x": 938,
+          "y": 368
+        },
+        "target": {
+          "x": 418,
+          "y": 368
+        },
+        "label": "3. 签名身份与权限代次",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "240a354c-1805-4530-863a-94cc8b8fcc25",
+        "shape": "edge",
+        "source": {
+          "x": 678,
+          "y": 443
+        },
+        "target": {
+          "x": 418,
+          "y": 443
+        },
+        "label": "4. 非 root 心跳与遥测",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "368f588a-079e-4335-96a1-8440c516762c",
+        "shape": "edge",
+        "source": {
+          "x": 938,
+          "y": 518
+        },
+        "target": {
+          "x": 418,
+          "y": 518
+        },
+        "label": "5. 独立签名领取任务",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "81504356-fc74-44a3-a973-dbd467351aad",
+        "shape": "edge",
+        "source": {
+          "x": 418,
+          "y": 593
+        },
+        "target": {
+          "x": 938,
+          "y": 593
+        },
+        "label": "6. 固定普通 / 高权作业与授权",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "f20978a8-763f-422e-b1fb-5eba8b169198",
+        "shape": "edge",
+        "source": {
+          "x": 938,
+          "y": 668
+        },
+        "target": {
+          "x": 1198,
+          "y": 668
+        },
+        "label": "7. 普通脚本降权到 task UID",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "488c4c32-8dcb-4c4a-9f97-ce40be225ce4",
+        "shape": "edge",
+        "source": {
+          "x": 1198,
+          "y": 743
+        },
+        "target": {
+          "x": 938,
+          "y": 743
+        },
+        "label": "8. 结构化退出与有界输出",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "43cdddd5-dbf1-43b3-8a36-a5c6a81a4293",
+        "shape": "edge",
+        "source": {
+          "x": 938,
+          "y": 818
+        },
+        "target": {
+          "x": 418,
+          "y": 818
+        },
+        "label": "9. 固定身份与审计回执",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "8a24d07e-4cbd-406c-b5b0-9887a003690d",
+        "shape": "rect",
+        "label": "管理员",
+        "position": {
+          "x": 58,
+          "y": 68
+        },
+        "size": {
+          "width": 200,
+          "height": 75
+        }
+      },
+      {
+        "id": "fc78c254-7d02-4b5a-8396-20b6927c0604",
+        "shape": "rect",
+        "label": "中心计划与账本",
+        "position": {
+          "x": 318,
+          "y": 68
+        },
+        "size": {
+          "width": 200,
+          "height": 75
+        }
+      },
+      {
+        "id": "fea63543-8ea4-489a-9d10-546376db91b9",
+        "shape": "rect",
+        "label": "lightmoni-agent\n非 root",
+        "position": {
+          "x": 578,
+          "y": 68
+        },
+        "size": {
+          "width": 200,
+          "height": 75
+        }
+      },
+      {
+        "id": "bea259d8-40ff-476a-a734-0c6bfcfdabe0",
+        "shape": "rect",
+        "label": "root helper",
+        "position": {
+          "x": 838,
+          "y": 68
+        },
+        "size": {
+          "width": 200,
+          "height": 75
+        }
+      },
+      {
+        "id": "821a5497-e57b-4ed7-8b88-94a552bbd6e7",
+        "shape": "rect",
+        "label": "lightmoni-task",
+        "position": {
+          "x": 1098,
+          "y": 68
+        },
+        "size": {
+          "width": 200,
+          "height": 75
+        }
+      }
+    ],
+    "task043-control-flow": [
+      {
+        "id": "5866977d-e3b9-4427-943b-db40fd508d3b",
+        "shape": "edge",
+        "source": {
+          "cell": "352c96b6-7e43-4542-b5d9-cf63fa42db4e",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "2e8c4a72-3783-4357-b589-e95c187dc804",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "提案不执行",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "0ec950a5-a766-4b7b-8bcf-cf3bec61aed8",
+        "shape": "edge",
+        "source": {
+          "cell": "2e8c4a72-3783-4357-b589-e95c187dc804",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "968c361d-f2c4-4064-a334-d3fc849c342e",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "明确批准",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "5082f4f1-6834-4363-ba8b-3da02cb1ef39",
+        "shape": "edge",
+        "source": {
+          "cell": "3984671f-6841-4f92-b878-1dd570feb02e",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "968c361d-f2c4-4064-a334-d3fc849c342e",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "66fd0a02-575d-4e8e-9c96-be4eb2551247",
+        "shape": "edge",
+        "source": {
+          "cell": "5af52f4b-554e-4d74-8903-865d5044093d",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "968c361d-f2c4-4064-a334-d3fc849c342e",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "507d8b66-a819-42d7-8a20-49a51fdce2c5",
+        "shape": "edge",
+        "source": {
+          "cell": "968c361d-f2c4-4064-a334-d3fc849c342e",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "861f71aa-457d-4423-bcb4-e542de2ae0b1",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "7dc5ffbd-cfa8-4339-bd13-1df4ae4ab484",
+        "shape": "edge",
+        "source": {
+          "cell": "968c361d-f2c4-4064-a334-d3fc849c342e",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "7d83a6ec-3574-4b68-adb9-b639df54e113",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "77f62920-d7ee-46bf-9342-81890fa7361a",
+        "shape": "edge",
+        "source": {
+          "cell": "861f71aa-457d-4423-bcb4-e542de2ae0b1",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "875eb3d9-8999-43b4-b2e6-e9f10c3d5768",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "拉取配置",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "44612ed4-c7de-43b2-9472-313df29406ea",
+        "shape": "edge",
+        "source": {
+          "cell": "7d83a6ec-3574-4b68-adb9-b639df54e113",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "e16b4b18-67bc-4040-bfea-9904d5128ee8",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "独立签名领取",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "b49bccd5-ccfa-4718-bf54-ae8f04a86af9",
+        "shape": "edge",
+        "source": {
+          "cell": "875eb3d9-8999-43b4-b2e6-e9f10c3d5768",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "3a5e3699-0a57-42a9-8ebb-e1e7b92209b1",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "003cfe96-2bbf-40c6-81b7-a0e8cabe0c02",
+        "shape": "edge",
+        "source": {
+          "cell": "e16b4b18-67bc-4040-bfea-9904d5128ee8",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "48e478fa-35a7-492a-bee7-923921411da1",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "启动前降权",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "0cc76be2-bdf9-42f2-93da-e5dd7b95d63e",
+        "shape": "edge",
+        "source": {
+          "cell": "3a5e3699-0a57-42a9-8ebb-e1e7b92209b1",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "f5c0fd55-c8be-4ea5-998a-939ed0389b5a",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "78a5ac46-106d-4aed-9353-c197fdfd8379",
+        "shape": "edge",
+        "source": {
+          "cell": "48e478fa-35a7-492a-bee7-923921411da1",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "f407fb4c-47d8-4be9-906c-aa1f3bc8ff97",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "33fdfd86-e7c1-40d7-886a-993dabfc0d55",
+        "shape": "edge",
+        "source": {
+          "cell": "f407fb4c-47d8-4be9-906c-aa1f3bc8ff97",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "7d83a6ec-3574-4b68-adb9-b639df54e113",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "label": "提交结果",
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "352c96b6-7e43-4542-b5d9-cf63fa42db4e",
+        "shape": "path",
+        "label": "管理员 / AI 助手",
+        "position": {
+          "x": 428,
+          "y": 48
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "2e8c4a72-3783-4357-b589-e95c187dc804",
+        "shape": "rect",
+        "label": "用户审阅代码、目标与影响",
+        "position": {
+          "x": 428,
+          "y": 178
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "3984671f-6841-4f92-b878-1dd570feb02e",
+        "shape": "path",
+        "label": "主机 ID 与主机标签",
+        "position": {
+          "x": 88,
+          "y": 308
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "968c361d-f2c4-4064-a334-d3fc849c342e",
+        "shape": "rect",
+        "label": "任务中心：定义与目标解析",
+        "position": {
+          "x": 428,
+          "y": 308
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "5af52f4b-554e-4d74-8903-865d5044093d",
+        "shape": "rect",
+        "label": "单机启用与参数覆盖",
+        "position": {
+          "x": 768,
+          "y": 308
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "861f71aa-457d-4423-bcb4-e542de2ae0b1",
+        "shape": "path",
+        "label": "持续内置配置 / revision",
+        "position": {
+          "x": 228,
+          "y": 458
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "7d83a6ec-3574-4b68-adb9-b639df54e113",
+        "shape": "path",
+        "label": "有限脚本不可变执行快照",
+        "position": {
+          "x": 628,
+          "y": 458
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "875eb3d9-8999-43b4-b2e6-e9f10c3d5768",
+        "shape": "path",
+        "label": "常驻 Agent 非 root\n出站 control / 配置",
+        "position": {
+          "x": 228,
+          "y": 608
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "3a5e3699-0a57-42a9-8ebb-e1e7b92209b1",
+        "shape": "rect",
+        "label": "指标 / 拨测 / 日志处理器",
+        "position": {
+          "x": 228,
+          "y": 758
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "48e478fa-35a7-492a-bee7-923921411da1",
+        "shape": "rect",
+        "label": "普通脚本 lightmoni-task\n独立目录 / 有界子进程",
+        "position": {
+          "x": 628,
+          "y": 758
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "f5c0fd55-c8be-4ea5-998a-939ed0389b5a",
+        "shape": "rect",
+        "label": "SDK / data 通道上报遥测",
+        "position": {
+          "x": 228,
+          "y": 908
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "f407fb4c-47d8-4be9-906c-aa1f3bc8ff97",
+        "shape": "rect",
+        "label": "领取租约 / 心跳 / 有界结果",
+        "position": {
+          "x": 628,
+          "y": 908
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      },
+      {
+        "id": "e16b4b18-67bc-4040-bfea-9904d5128ee8",
+        "shape": "rect",
+        "label": "root helper / task-runs\n完整管理模式 / 签名身份",
+        "position": {
+          "x": 628,
+          "y": 608
+        },
+        "size": {
+          "width": 250,
+          "height": 80
+        }
+      }
+    ],
+    "accounts084-model": [
+      {
+        "id": "accounts084-model-e0",
+        "shape": "edge",
+        "source": {
+          "cell": "accounts084-model-h",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "accounts084-model-a",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "accounts084-model-e1",
+        "shape": "edge",
+        "source": {
+          "cell": "accounts084-model-h",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "accounts084-model-b",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "accounts084-model-e2",
+        "shape": "edge",
+        "source": {
+          "cell": "accounts084-model-a",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "accounts084-model-c",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "accounts084-model-e3",
+        "shape": "edge",
+        "source": {
+          "cell": "accounts084-model-b",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "accounts084-model-d",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "accounts084-model-e4",
+        "shape": "edge",
+        "source": {
+          "cell": "accounts084-model-c",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "accounts084-model-v",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "accounts084-model-e5",
+        "shape": "edge",
+        "source": {
+          "cell": "accounts084-model-d",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "accounts084-model-v",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "accounts084-model-e6",
+        "shape": "edge",
+        "source": {
+          "cell": "accounts084-model-c",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "accounts084-model-p",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "accounts084-model-e7",
+        "shape": "edge",
+        "source": {
+          "cell": "accounts084-model-d",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "accounts084-model-p",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "accounts084-model-e8",
+        "shape": "edge",
+        "source": {
+          "cell": "accounts084-model-p",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "accounts084-model-r",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "accounts084-model-e9",
+        "shape": "edge",
+        "source": {
+          "cell": "accounts084-model-r",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "target": {
+          "cell": "accounts084-model-e",
+          "connectionPoint": {
+            "name": "boundary",
+            "args": {
+              "selector": "body",
+              "stroked": false,
+              "extrapolate": true,
+              "sticky": true
+            }
+          }
+        },
+        "targetArrow": "classic",
+        "lineStyle": "solid"
+      },
+      {
+        "id": "accounts084-model-h",
+        "shape": "rect",
+        "label": "主机资产：ID / 名称 / 地址",
+        "position": {
+          "x": 370,
+          "y": 20
+        },
+        "size": {
+          "width": 260,
+          "height": 70
+        }
+      },
+      {
+        "id": "accounts084-model-a",
+        "shape": "rect",
+        "label": "SSH账户 deploy",
+        "position": {
+          "x": 60,
+          "y": 160
+        },
+        "size": {
+          "width": 260,
+          "height": 70
+        }
+      },
+      {
+        "id": "accounts084-model-b",
+        "shape": "rect",
+        "label": "SSH账户 root / 运维用户",
+        "position": {
+          "x": 680,
+          "y": 160
+        },
+        "size": {
+          "width": 260,
+          "height": 70
+        }
+      },
+      {
+        "id": "accounts084-model-c",
+        "shape": "rect",
+        "label": "账户凭据授权：私钥 / 密码",
+        "position": {
+          "x": 60,
+          "y": 300
+        },
+        "size": {
+          "width": 260,
+          "height": 70
+        }
+      },
+      {
+        "id": "accounts084-model-d",
+        "shape": "rect",
+        "label": "账户凭据授权：私钥 / 密码",
+        "position": {
+          "x": 680,
+          "y": 300
+        },
+        "size": {
+          "width": 260,
+          "height": 70
+        }
+      },
+      {
+        "id": "accounts084-model-v",
+        "shape": "rect",
+        "label": "统一加密凭据库",
+        "position": {
+          "x": 370,
+          "y": 440
+        },
+        "size": {
+          "width": 260,
+          "height": 70
+        }
+      },
+      {
+        "id": "accounts084-model-p",
+        "shape": "rect",
+        "label": "中心只读预检：真实UID / sudo",
+        "position": {
+          "x": 370,
+          "y": 580
+        },
+        "size": {
+          "width": 260,
+          "height": 70
+        }
+      },
+      {
+        "id": "accounts084-model-r",
+        "shape": "rect",
+        "label": "自动选定或手选 / 审阅固定计划",
+        "position": {
+          "x": 370,
+          "y": 720
+        },
+        "size": {
+          "width": 260,
+          "height": 70
+        }
+      },
+      {
+        "id": "accounts084-model-e",
+        "shape": "rect",
+        "label": "完整管理 / 仅监控\n常驻 Agent 始终非 root",
+        "position": {
+          "x": 370,
+          "y": 860
+        },
+        "size": {
+          "width": 260,
+          "height": 70
+        }
+      }
+    ]
+  },
+  "preserved": [
+    {
+      "id": "release086-p-4",
+      "text": "受管应用的健康目标由中心已预留端口决定：签名配置 health.host 携带该端口的 host_ip，health.port 携带分配后的宿主端口，部署与巡检复用同一目标。Agent 仅接受 IP 字面量，IPv4/IPv6 通配绑定分别探测 127.0.0.1/::1，HTTP IPv6 使用方括号；不把内网绑定误认为回环服务，不接受域名、URL 或用户信息扩大探测目的地。"
+    },
+    {
+      "id": "release086-p-6",
+      "text": "云公网 NAT 不会因 Registry 监听内网 IP 而自动隔离后端。Demo 主机在 DOCKER-USER 中仅匹配原始目的地址 172.21.0.16、原始 TCP 端口 20000、20001、20002 和 ORIGINAL 方向，允许受信内网 172.21.0.0/20，其余来源丢弃；回包方向与 OpenResty/Agent 本机访问保持原有路径。规则由 root 所有的幂等脚本及 Docker 启动前 oneshot 单元加载，Docker 通过 Requires/After 依赖该单元；网络或后端端口变更需同步主机规则。当前 Registry 后端端口集合通过精确审批的单次签名 root 作业热更新：核对目标私网地址和原脚本摘要，保留 root 私有备份后原子替换并直接运行幂等脚本，不停止或重启 Docker 及其依赖单元。公网三个后端端口不可直连，受信内网及 HTTPS 鉴权入口分别验证；不增加平台执行权限或兼容通道。"
+    },
+    {
+      "id": "managed089-0",
+      "text": "受管未知作业的人工核对与主机互斥（SDD089）"
+    },
+    {
+      "id": "managed089-1",
+      "text": "同一受管作业在 agent_jobs 与 privileged_jobs/task_runs 中保留原 unknown 和错误码。管理员通过既有确认接口记录现场核对后，主机互斥使用共享谓词核对同一作业 ID、Agent、task_run_id、operations.managed.v1 能力、unknown 状态以及完整 resolved_at、resolved_by、resolution_reason；仅该已核对历史作业不再阻塞新执行。普通未知作业、未核对、不完整审计或任一绑定不符继续阻塞，不重放任务、不改写成功或取消，也不创建新授权。"
+    },
+    {
+      "id": "managed089-2",
+      "text": "执行器领取与计划，以及 Agent 安装、卸载、更新、运行模式、Docker 维护、身份替换和实例恢复的繁忙检查复用同一谓词；普通排队任务和活动执行仍互斥，特权排队任务仍由签名队列串行处理。核对只解除已结束动作的互斥，业务健康和受管 DNS 必须等待新的有效观测恢复，不从人工核对推断健康。API、签名协议、凭据、数据结构和部署拓扑不变。"
+    }
+  ],
+  "rawHtmlRemaining": false,
+  "updatedParagraphs": [
+    {
+      "id": "f0389891-1cf1-46b4-a493-1be620a7b16a",
+      "text": "配套变更：SDD 019：系统设计基线。当前主机登录账户以第84章（SDD084）为准，Agent服务/脚本/高权任务身份及生命周期以第87章（SDD087，功能分支待合入）为准：常驻Agent始终以 lightmoni-agent 非root运行；完整管理模式以同一发行包安装受管root helper，监控模式不安装helper且不领取自定义脚本。普通脚本只在helper中执行，并切换至隔离的 lightmoni-task 账号；高权作业复用签名逐步许可、人工批准、审计和领域核验。SSH root或免交互sudo管理账号只用于固定生命周期维护，不作为常驻或任务身份。第83章的root常驻/user常驻拓扑为历史设计，由第87章取代；第60、71、80章分离发行/维护方式亦为历史，但签名主体和高权授权语义继续复用。"
+    },
+    {
+      "id": "33e36e99-a57f-4330-bd1a-c287be934ce4",
+      "text": "Agent权限与普通脚本身份以第87章为准：完整管理模式下普通脚本由root helper切换到lightmoni-task账号运行；仅监控模式不领取脚本。任务目录、最小环境与有界子进程不构成不可信代码沙箱，不得在脚本中写入连接凭据。默认拨测未配置地址时为“待配置”，不产生虚构成功。SDD048支持脚本上传/编辑、单次定时、固定间隔和五段Cron/IANA时区；参数和自定义目录需要task.script.v2。不支持持续守护脚本、跨主机DAG、任意运行时/秘密注入或分布式exactly-once。"
+    },
+    {
+      "id": "b97ffb91-a99d-4f35-a594-38cb58d04a9a",
+      "text": "业务SDK继续独立直报中心。Agent control仅用于遥测控制与配置同步；脚本由完整管理模式helper签名身份领取，快照固定task UID/GID与权限代次，Agent bearer不提供脚本通道。脚本不接收Agent凭据、helper私钥或中心模型Key。AI仅能生成持久化提案，不能调用apply或绕过用户审阅直接执行脚本。"
+    },
+    {
+      "id": "27fb7568-6bde-43ec-9b0e-df506bbf50ea",
+      "text": "基础脚本接受task.script.v1或v2；非空args/cwd必须task.script.v2，旧helper显示需升级，不静默忽略选项。中心在/api/v1/privileged-executors/:id/task-runs/claim、/:runId/heartbeat|result|reconcile校验helper签名、主机/Agent/安装代次和任务账号快照。仅新鲜签名helper心跳开放脚本能力。取消queued直接终止，取消running等helper终止进程后回执。控制失败或父进程关闭终止脚本，独立监督器保留截止时间并检测helper父进程。私有恢复标记和签名请求journal重交已得结果，不重执行；无法确认时保持unknown等待人工核对，不提供分布式exactly-once。"
+    },
+    {
+      "id": "41c6b416-4210-4a94-81d7-ffc361b0d9a4",
+      "text": "脚本和监督器保存在root控制的任务目录，每次运行目录归lightmoni-task所有；显式绝对cwd不存在或无权限时失败，不静默回退。仅使用固定解释器，args原样传入，不继承Agent control/data凭据；Unix按进程组处理超时、取消和输出上限。账号限制文件访问权限，不是虚拟机或容器沙箱。运行中或未核对unknown阻止主机删除、身份替换或Agent卸载。管理员人工核对填写原因并确认结束，保存resolved_at/resolved_by/resolution_reason后解除阻塞；历史仍为unknown，不执行、不改成功、不接受晚回执。此决议不证明远端进程已停止，AI不提供人工核对替代工具。"
+    },
+    {
+      "id": "8f35ff73-b1db-4a21-9bca-a16ee29ec59a",
+      "text": "/api/v1/privileged-executors/:id/task-runs/claim、/:runId/heartbeat|result|reconcile：完整管理helper出站签名领取、租约、结果与回执核对；不再提供Agent bearer脚本路由。"
+    },
+    {
+      "id": "22663d05-e5b5-4a79-9120-87fa5a81992a",
+      "text": "历史架构：本章双常驻服务、分别安装与维护拓扑已被第87章取代。独立签名主体、权限边界、逐任务审计、在线许可和领域校验继续适用；不要恢复第二套发行或普通control写通道。"
+    },
+    {
+      "id": "11c9b6b3-4854-4698-9ce0-c58c4c2733d5",
+      "text": "71. 标准 Agent 部署与权限隔离（SDD071，历史方案，已由第87章取代）"
+    },
+    {
+      "id": "882becf7-4582-464d-9b35-2fd96b25a3f9",
+      "text": "历史架构：本章关于Agent与运维组件的独立发行、普通脚本运行账号和容器能力拓扑已被第87章取代。当前Agent恒以lightmoni-agent运行，脚本和Docker操作由同包helper按各自权限执行；不要据本章添加Docker组、socket授权或让Agent执行脚本。"
+    },
+    {
+      "id": "528c6960-0b06-403d-b6d3-5e4222731962",
+      "text": "历史实现曾令普通脚本与Agent共用lightmoni-agent账户，属于已淘汰方案。当前安装器、unit、身份边界与Docker授权以第87章为准。"
+    },
+    {
+      "id": "372ec299-f0e1-4b66-9fab-9e998e1ce09b",
+      "text": "80. 独立执行器承接受管主机运维（SDD080，历史方案，已由第87章取代）"
+    },
+    {
+      "id": "f0699569-ff70-453b-a8ee-9948439b927b",
+      "text": "历史架构：本章独立发行与Agent/执行器分别维护拓扑已被第87章取代。签名主体、逐任务授权、审计和领域校验继续复用；不要恢复独立lightmoni-executor安装或升级入口。"
+    },
+    {
+      "id": "c42d0d7d-4829-4cb3-b45f-c53443aa24f4",
+      "text": "83. 统一 Agent 与运行权限模式（SDD083，已由SDD087取代）"
+    },
+    {
+      "id": "29c4c29b-57b7-47e8-a090-5003559dece6",
+      "text": "历史方案，非当前架构。本章原先通过runtime_mode切换常驻Agent的root/普通账户，已被第87章完整取代：Agent服务始终非root，root能力由同包、可选且独立运行的helper提供。安装、任务执行、升级和卸载均以第87章为准；本章保留为旧决策记录，不可用于实现或运维。"
+    },
+    {
+      "id": "cb7fab24-07c2-4652-af75-9f17b1f2af4a",
+      "text": "检查和保存不会安装、改变管理模式或执行root任务。SSH管理账号负责固定生命周期维护，不是Agent或任务身份。首装默认完整管理模式，可选择仅监控；两种模式下Agent常驻均为非root。完整管理由同包root helper提供，普通任务以lightmoni-task运行，高权限作业单独批准。具体切换流程以第87章为准。"
+    },
+    {
+      "id": "d9a01d3f-95c0-46b4-9c24-9289362806f6",
+      "text": "容器能力未就绪时引导主机执行权限，检查完整管理模式、容器管理授权与新鲜签名状态；不会因为进入页面、SSH验证成功或点击刷新自动启用权限。Agent与helper实际账号和生命周期以第87章为准。CentOS已有Engine/Compose仍可验证；缺失组件自动补装继续仅限Ubuntu/Debian。"
+    },
+    {
+      "id": "6822c79e-d93a-4ec1-9bdc-ba79e2ef775e",
+      "text": "交付 Demo 沿用既有集群模型：中心通过同包 root 管理组件的签名受管作业部署 Registry、OpenResty 和 ABC Demo（运行身份以第87章为准）。Registry 绑定主机内网地址，通过 registry-demo.heyphp.com 的 HTTPS 与独立 Basic Auth 提供发布入口；ABC Demo 使用该私有来源镜像与命名 HTTP 端口，由 OpenResty 服务发现路由到 abc.heyphp.com。heyphp.com 的加密 DNS 凭据用于解析与 ACME DNS 验证；两个专用证书由中心加密保存并按网站授权分发，私钥和仓库密码不进入源码、日志或设计正文。"
+    }
+  ]
+}

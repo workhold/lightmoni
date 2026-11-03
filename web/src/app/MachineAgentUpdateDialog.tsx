@@ -1,3 +1,5 @@
+import SSHAccountsDialog from './SSHAccountsDialog';
+import InstallationAccountRecovery,{missingInstallationAccount} from './InstallationAccountRecovery';
 import {type SSHAccount,type SSHAccountHost,sshCredentialLabel} from './machine-credentials';
 import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Checkbox,Descriptions,Modal,Select,Space,Table,Tag,Typography} from '../shared/ui';
@@ -64,6 +66,7 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
  const [busy,setBusy]=useState(false),[catalogBusy,setCatalogBusy]=useState(false),[error,setError]=useState(''),[reviewed,setReviewed]=useState(false),[refreshNeeded,setRefreshNeeded]=useState(false),[planUncertain,setPlanUncertain]=useState(false),[now,setNow]=useState(Date.now());
  const pending=useRef(false),mounted=useRef(true),recordRef=useRef(record),request=useRef(0);
  recordRef.current=record;
+ const [accountEditor,setAccountEditor]=useState<'add'|'manage'>();
  const keys=credentials.filter(c=>reusableMachineCredential(c));
  const options=releases.filter(release=>!machine.arch||release.arch===machine.arch);
  const err=(value:unknown)=>value instanceof Error?updateMessageText(value.message,t):t('操作失败','Operation failed');
@@ -100,7 +103,7 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
  };
  const refresh=async()=>{if(!begin())return;try{await refreshRecord();await refreshParent()}catch(e){if(mounted.current)setError(err(e))}finally{finish()}};
  const credentialSelect=<Select aria-label={t('更新 SSH 凭据','Update SSH credential')} value={credential} style={{width:'100%'}} placeholder={t('请选择有效 SSH 凭据','Select an active SSH credential')} disabled={busy} options={keys.map(key=>({value:key.id,label:`${key.username} · ${key.name||(key.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key'))} · ${key.secret_fingerprint||key.id} · ${key.retention==='permanent'?t('永久','Permanent'):new Date(key.expires_at).toLocaleString(language)}`}))} onChange={setCredential}/>;
- return <Modal open className="lm-agent-update-dialog" style={{top:24}} title={t(`Agent 版本管理 · ${machine.name}`,`Agent releases · ${machine.name}`)} width={840} onCancel={()=>{if(!busy)onClose()}} closable={!busy} maskClosable={false} destroyOnHidden footer={<Space wrap>
+ return <><Modal open className="lm-agent-update-dialog" style={{top:24}} title={t(`Agent 版本管理 · ${machine.name}`,`Agent releases · ${machine.name}`)} width={840} onCancel={()=>{if(!busy)onClose()}} closable={!busy} maskClosable={false} destroyOnHidden footer={<Space wrap>
   {!record&&<Button type="primary" loading={busy} disabled={!credential||action==='upgrade'&&!target||catalogBusy||planUncertain} onClick={()=>void plan()}>{t('检查并生成计划','Check and create plan')}</Button>}
   {record?.status==='awaiting_approval'&&!record.rollout_id&&<><Button aria-label={t('执行已审阅计划','Execute reviewed plan')} danger type="primary" loading={busy} disabled={!reviewed||currentPlanExpired||refreshNeeded} onClick={()=>void mutate('apply')}>{t('执行已审阅计划','Execute reviewed plan')}</Button><Button disabled={busy} onClick={()=>void mutate('cancel')}>{t('取消计划','Cancel plan')}</Button></>}
   {record?.status==='unknown'&&<Button type="primary" loading={busy} onClick={()=>void mutate('reconcile')}>{t('只读核对结果','Verify outcome (read-only)')}</Button>}
@@ -113,8 +116,7 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
    <Space wrap className="lm-machine-form-notice"><Typography.Text>{t('更新方式','Action')}</Typography.Text><Select aria-label={t('Agent 更新方式','Agent update action')} value={action} disabled={busy} onChange={value=>{setAction(value);setReviewed(false)}} options={[{value:'upgrade',label:t('升级到指定发行','Upgrade to a selected release')},{value:'rollback',label:t('回退到保留的上一发行','Roll back to the retained previous release')}]}/></Space>
    {action==='upgrade'&&<div className="lm-machine-form-notice"><Typography.Paragraph>{t('目标发行（版本 · 提交 · 架构 · 包摘要）','Target release (version · revision · architecture · artifact digest)')}</Typography.Paragraph><Select aria-label={t('目标 Agent 发行','Target Agent release')} value={target} loading={catalogBusy} disabled={busy} onChange={setTarget} style={{width:'100%'}} placeholder={t('选择固定发行包','Select a fixed release artifact')} options={options.map(release=>({value:release.sha256,label:`${release.version} · ${shortIdentity(release.source_revision)} · ${release.arch} · ${shortIdentity(release.sha256)}`}))}/>{!catalogBusy&&!options.length&&<Typography.Text type="secondary">{t('没有匹配架构的发行包。请先在平台发布可用 Agent 包。','No release matches this architecture. Publish an Agent artifact on the platform first.')}</Typography.Text>}</div>}
    {action==='rollback'&&<Alert type="info" showIcon title={t('先核对上一发行，再审阅回退','Verify the previous release before reviewing rollback')} description={t('检查从主机读取保留的上一发行并固定其指纹。回退不会重新接入或更换 Agent 身份。','The check reads the retained previous release on the host and pins its fingerprint. Rollback keeps the existing Agent identity.')}/>}
-   <Typography.Paragraph style={{marginTop:16}}>{t('可复用 SSH 凭据','Reusable SSH credential')}</Typography.Paragraph>{credentialSelect}
-   {!keys.length&&<Alert className="lm-machine-form-notice" type="info" showIcon title={t('请先为主机添加有效私钥或可复用密码','Add an active private key or reusable password to the host first')}/>}
+   <Typography.Paragraph style={{marginTop:16}}>{t('可复用 SSH 凭据','Reusable SSH credential')}</Typography.Paragraph>{credentialSelect}{!keys.length&&<InstallationAccountRecovery recovery={missingInstallationAccount(credentials)} onAddAccount={()=>setAccountEditor('add')} onManageAccounts={()=>setAccountEditor('manage')}/>}<Button className="lm-machine-form-notice" disabled={busy||planUncertain} onClick={()=>setAccountEditor('manage')}>{t('管理账号与凭据','Manage accounts and credentials')}</Button>
    {planUncertain&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('计划创建结果未确认','Plan creation was not confirmed')} description={t('请关闭窗口并从主机的更新历史核对已保存计划；不要重复创建。','Close this dialog and check saved plans in the host update history before creating another plan.')}/>}
   </>}
   {record&&<>
@@ -123,8 +125,8 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
    {record.rollout_id&&<Alert className="lm-machine-form-notice" showIcon type="info" title={t('此操作属于升级批次','This operation belongs to an upgrade rollout')} description={<Typography.Link href={`/machines?agent_rollout=${encodeURIComponent(record.rollout_id)}`}>{t('打开批次审阅和控制后续主机','Open the rollout to review and control subsequent hosts')}</Typography.Link>}/>}
    <Typography.Paragraph type="secondary">{t('操作 ID：','Operation ID: ')}<Typography.Text code copyable>{record.id}</Typography.Text></Typography.Paragraph>
    {record.status==='awaiting_approval'&&!record.rollout_id&&<>{currentPlanExpired&&<Alert className="lm-machine-form-notice" type="warning" showIcon title={t('计划已过期，请取消后重新检查','This plan expired. Cancel it and run a new check')}/>}<Checkbox checked={reviewed} disabled={busy||currentPlanExpired} onChange={event=>setReviewed(event.target.checked)}>{t('我已审阅主机、当前/目标发行、步骤和影响','I have reviewed the host, current/target releases, steps, and impact')}</Checkbox></>}
-   {record.status==='unknown'&&keys.length>0&&<div className="lm-machine-form-notice"><Typography.Paragraph>{t('核对使用的 SSH 凭据','SSH credential for verification')}</Typography.Paragraph>{credentialSelect}</div>}
+   {record.status==='unknown'&&<div className="lm-machine-form-notice"><Typography.Paragraph>{t('核对使用的 SSH 凭据','SSH credential for verification')}</Typography.Paragraph>{credentialSelect}<Button className="lm-machine-form-notice" disabled={busy} onClick={()=>setAccountEditor('manage')}>{t('管理账号与凭据','Manage accounts and credentials')}</Button></div>}
    {refreshNeeded&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('保存状态尚未刷新，请刷新后再继续','The saved status could not be refreshed. Refresh it before continuing')}/>}
   </>}
- </Modal>;
+ </Modal>{accountEditor&&<SSHAccountsDialog machineID={machine.id} initialAction={accountEditor} onClose={()=>setAccountEditor(undefined)} onChanged={refreshParent} onVerified={async result=>{await refreshParent();setCredential(result.credential_id);setAccountEditor(undefined);setError('')}}/>}</>;
 }

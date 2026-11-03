@@ -232,7 +232,7 @@ test("approved purge revokes only the owned identity and permits a fresh same-ho
  f.setRunner(async input=>{
   if(input.command.includes("LMREMOVE")){
    if(input.command.includes("systemctl stop"))purged=true;
-   const values={LMREMOVE:"1",agent_id:purged?"-":old.agentID,identity_state:purged?"missing":"valid",identity_sha256:purged?"-":"a".repeat(64),program_sha256:(purged?"c":"b").repeat(64),installation:purged?"absent":"present",program_complete:purged?"0":"1",unit_managed:"1",service_running:purged?"0":"1",lifecycle_locked:"0",operation_lock:"0",paths_safe:"1",config_present:purged?"0":"1",data_present:purged?"0":"1"};
+   const values={LMREMOVE:"1",agent_id:purged?"-":old.agentID,identity_state:purged?"missing":"valid",identity_sha256:purged?"-":"a".repeat(64),program_sha256:(purged?"c":"b").repeat(64),installation:purged?"absent":"present",program_complete:purged?"0":"1",unit_managed:"1",service_running:purged?"0":"1",lifecycle_locked:"0",operation_lock:"0",paths_safe:"1",config_present:purged?"0":"1",data_present:purged?"0":"1",agent_state_present:purged?"0":"1",business_data_retained:"0",helper_present:"0"};
    return {stdout:Object.entries(values).map(([key,value])=>`${key}=${value}`).join("\n")+"\n",stderr:"",stages:[]};
   }
   if(input.enrollmentToken){const pending=await f.exchange(input.enrollmentToken);assert.equal(pending.status,201);assert.equal((await f.activate(pending.data)).status,200);newAgent=pending.data.agent_id;return {stdout:"installed",stderr:"",stages:[]};}

@@ -1,12 +1,17 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {execFileSync} from 'node:child_process';
+import {execFileSync,spawnSync} from 'node:child_process';
+import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,symlinkSync,lstatSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join,dirname} from 'node:path';
 import {createServer, type Socket} from 'node:net';
 import {once} from 'node:events';
 import {Client, type ConnectConfig} from 'ssh2';
 import {CHECK_NAMES,defaultSSHRunner,parsePreflight,pinnedHostKeys,preflightCommand,SSHError} from '../src/server/machine-ssh.js';
 import type {SSHMachineTarget} from '../src/server/managed-machines.js';
+import {agentInstallationPaths} from '../src/shared/agent-maintenance-shell.js';
+import {freshAgentGuard} from '../src/server/machine-agent-lifecycle.js';
 
 test('SSH handshake deadline remains timed_out before the fixed command deadline',async t=>{
  const sockets=new Set<Socket>(),server=createServer(socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('data',()=>{});});
@@ -52,6 +57,31 @@ test('privilege probe distinguishes actual root, non-interactive sudo, denied su
  assert.equal(run('id() { echo 1001; }; sudo() { test "$1" = -n && test "$2" = /bin/sh && test "$3" = -c; }'),'privilege_state=sudo_noninteractive\ninstall_privilege=1\n');
  assert.equal(run('id() { echo 1001; }; sudo() { return 1; }'),'privilege_state=unavailable\ninstall_privilege=0\n');
  assert.equal(run('id() { return 1; }; sudo() { echo unexpected; return 0; }'),'privilege_state=unknown\ninstall_privilege=0\n');
+});
+
+test('root and sudo SSH discovery detect every unified Agent residue before fresh deployment without altering it',t=>{
+ const root=mkdtempSync(join(tmpdir(),'lm-ssh-installation-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const probe=preflightCommand('https://platform.example').split('\n').find(line=>line.includes('echo agent_installation=present'))!;
+ const rewrite=(source:string)=>agentInstallationPaths.reduce((text,filename)=>text.replaceAll(filename,join(root,filename)),source);
+ const run=(source:string)=>spawnSync('sh',['-c',source],{encoding:'utf8'});
+ for(const sudo of [false,true]){
+   const login=sudo?'id() { echo 1001; }; sudo() { test "$1" = -n && test "$2" = /bin/sh && test "$3" = -c || return 1; shift 3; /bin/sh -c "$1"; };':'id() { echo 0; };';
+   assert.equal(run(login+rewrite(probe)).stdout,'agent_installation=absent\n');
+   assert.equal(run(rewrite(freshAgentGuard)).status,0);
+   for(const filename of agentInstallationPaths){
+     const target=join(root,filename);mkdirSync(dirname(target),{recursive:true});
+     const directory=['/opt/lightmoni-agent','/etc/lightmoni-agent-helper','/var/lib/lightmoni-agent-helper'].includes(filename);
+     if(directory){mkdirSync(target);writeFileSync(join(target,'sentinel'),'retained helper state');}else writeFileSync(target,'retained program/configuration');
+     const observed=run(login+rewrite(probe));assert.equal(observed.status,0,observed.stderr);assert.equal(observed.stdout,'agent_installation=present\n',filename);
+     const fresh=run(rewrite(freshAgentGuard));assert.equal(fresh.status,1,filename);assert.match(fresh.stderr,/Existing Agent installation detected/);
+     assert.equal(readFileSync(directory?join(target,'sentinel'):target,'utf8'),directory?'retained helper state':'retained program/configuration');
+     rmSync(target,{recursive:true});
+     symlinkSync('missing-lightmoni-target',target);
+     assert.equal(run(login+rewrite(probe)).stdout,'agent_installation=present\n',filename+' dangling link');
+     assert.equal(run(rewrite(freshAgentGuard)).status,1,filename+' dangling link');assert.equal(lstatSync(target).isSymbolicLink(),true);
+     rmSync(target);
+   }
+ }
 });
 
 test('structured privilege fails closed on missing, inconsistent or malformed provenance',()=>{

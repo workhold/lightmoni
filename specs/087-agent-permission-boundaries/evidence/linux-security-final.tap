@@ -1,0 +1,105 @@
+privileged_helper_permissions_ready
+TAP version 13
+# Subtest: helper executes a real script as lightmoni-agent with no supplementary groups or capabilities
+ok 1 - helper executes a real script as lightmoni-agent with no supplementary groups or capabilities
+  ---
+  duration_ms: 33.357587
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 88.823056
+TAP version 13
+# Subtest: preparation only reads ordinary account identity and never grants Docker, groups or public-directory ownership
+ok 1 - preparation only reads ordinary account identity and never grants Docker, groups or public-directory ownership
+  ---
+  duration_ms: 1.242162
+  type: 'test'
+  ...
+# Subtest: dangerous external account groups are rejected without removing membership or touching public data
+ok 2 - dangerous external account groups are rejected without removing membership or touching public data
+  ---
+  duration_ms: 1.207937
+  type: 'test'
+  ...
+# Subtest: root identities and failed or malformed account queries never turn into implicit permission grants
+ok 3 - root identities and failed or malformed account queries never turn into implicit permission grants
+  ---
+  duration_ms: 0.513257
+  type: 'test'
+  ...
+# Subtest: an existing ordinary account with a different primary group is rejected without changing its identity or files
+ok 4 - an existing ordinary account with a different primary group is rejected without changing its identity or files
+  ---
+  duration_ms: 0.25867
+  type: 'test'
+  ...
+# Subtest: startup with no Docker socket is ready using only private config and atomic data-directory writes
+ok 5 - startup with no Docker socket is ready using only private config and atomic data-directory writes
+  ---
+  duration_ms: 0.50938
+  type: 'test'
+  ...
+# Subtest: runtime actual identity rejects root, privileged groups and every Linux capability set
+ok 6 - runtime actual identity rejects root, privileged groups and every Linux capability set
+  ---
+  duration_ms: 1.800025
+  type: 'test'
+  ...
+# Subtest: runtime rejects malformed capability evidence instead of treating it as all-zero
+ok 7 - runtime rejects malformed capability evidence instead of treating it as all-zero
+  ---
+  duration_ms: 0.489244
+  type: 'test'
+  ...
+# Subtest: Docker socket connection permission blocks ordinary startup; denied write access permits it
+ok 8 - Docker socket connection permission blocks ordinary startup; denied write access permits it
+  ---
+  duration_ms: 1.581082
+  type: 'test'
+  ...
+# Subtest: socket symlinks, non-sockets and unprovable access errors fail closed without changing their targets
+ok 9 - socket symlinks, non-sockets and unprovable access errors fail closed without changing their targets
+  ---
+  duration_ms: 0.821869
+  type: 'test'
+  ...
+# Subtest: config secrecy and private directory boundaries remain mandatory without a public-directory requirement
+ok 10 - config secrecy and private directory boundaries remain mandatory without a public-directory requirement
+  ---
+  duration_ms: 0.660121
+  type: 'test'
+  ...
+# Subtest: full-management helper requires root identity, private credentials, and isolated task paths
+ok 11 - full-management helper requires root identity, private credentials, and isolated task paths
+  ---
+  duration_ms: 0.422044
+  type: 'test'
+  ...
+# Subtest: helper ancestry accepts the real filesystem root while checking every root-owned parent
+ok 12 - helper ancestry accepts the real filesystem root while checking every root-owned parent
+  ---
+  duration_ms: 0.689637
+  type: 'test'
+  ...
+# Subtest: ordinary identity cannot masquerade as root through config or silently accept invalid runtime mode
+ok 13 - ordinary identity cannot masquerade as root through config or silently accept invalid runtime mode
+  ---
+  duration_ms: 0.557737
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 97.058672

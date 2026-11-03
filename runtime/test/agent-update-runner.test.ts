@@ -20,8 +20,7 @@ const sha = (v: string | Buffer) => createHash("sha256").update(v).digest("hex")
  * the fingerprint implementation itself is not reimplemented or replaced. */
 function sshProbe(f: ReturnType<typeof fixture>) {
   let source = agentUpdateProbeSource;
-  for (const name of ["/opt/lightmoni-agent", "/etc/systemd/system/lightmoni-agent.service", "/etc/lightmoni-agent", "/usr/local/bin/lightmoni-agent", "/var/lib/lightmoni-agent", "/run/lightmoni-agent-lifecycle.lock"])
-    source = source.replaceAll(name, f.p(name));
+  source = source.replace(/\/opt\/lightmoni-agent|\/etc\/systemd\/system\/lightmoni-agent(?:-helper)?\.service|\/etc\/lightmoni-agent(?:-helper)?|\/usr\/local\/bin\/lightmoni-agent|\/var\/lib\/lightmoni-agent(?:-helper)?|\/run\/lightmoni-agent-lifecycle\.lock/g, value => f.p(value));
   const fixturePath = (filename: string) => {
     if (filename !== f.root && !filename.startsWith(f.root + "/")) throw Error("probe attempted a non-fixture read");
     return filename;
@@ -46,14 +45,14 @@ function sshProbe(f: ReturnType<typeof fixture>) {
     };
     throw Error("unexpected probe module " + name);
   } }, { timeout: 1000 });
-  return parseAgentUpdateProbe(stdout);
+  try{return parseAgentUpdateProbe(stdout);}catch(error){throw Error(String(error)+' probe='+stdout);}
 }
 
 function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; failRollback?: boolean; oldHelper?:boolean; targetHelper?:boolean; targetPermissions?:boolean; failPermissionPreparation?:boolean; privilegedService?:boolean; runtimeMode?:'root'|'user' } = {}) {
   const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "lm-update-")));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const p = (name: string) => join(root, name);
-  for (const name of ["opt/lightmoni-agent/releases/old/app/runtime/dist/agent", "etc/systemd/system", "etc/lightmoni-agent", "var/lib/lightmoni-agent", "usr/local/bin", "run", "staging"])
+  for (const name of ["opt/lightmoni-agent/releases/old/app/runtime/dist/agent", "etc/systemd/system", "etc/lightmoni-agent", "var/lib/lightmoni-agent", "usr/local/bin", "usr/local/sbin", "run", "staging"])
     fs.mkdirSync(p(name), { recursive: true, mode: 0o755 });
   const old = p("opt/lightmoni-agent/releases/old"), arch = "arm64";
   fs.writeFileSync(join(old, "node"), "synthetic trusted Node\n", { mode: 0o755 });
@@ -71,7 +70,15 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   fs.writeFileSync(p("etc/systemd/system/lightmoni-agent.service"), fs.readFileSync(join(repo,options.privilegedService?"runtime/test/fixtures/forbidden-privileged-agent.service":"deploy/agent/lightmoni-agent.service")));
   fs.writeFileSync(p("etc/lightmoni-agent/config.json"), '{"control_credential":"test-private-control","data_credential":"test-private-data"}\n', { mode: 0o600 });
   if(options.runtimeMode){fs.writeFileSync(p('etc/systemd/system/lightmoni-agent.service'),buildAgentService(options.runtimeMode));fs.writeFileSync(p('etc/lightmoni-agent/config.json'),JSON.stringify({control_credential:'test-private-control',data_credential:'test-private-data',runtime_mode:options.runtimeMode,permission_generation:7}),{mode:0o600});}
-  if(options.runtimeMode==='root')fs.writeFileSync(p('etc/lightmoni-agent/managed.json'),JSON.stringify({executor_id:'signed-identity',install_generation:3}),{mode:0o600});
+  if(options.runtimeMode==='root'){
+    fs.mkdirSync(p('etc/lightmoni-agent-helper'),{recursive:true,mode:0o700});
+    fs.mkdirSync(p('var/lib/lightmoni-agent-helper/managed'),{recursive:true,mode:0o711});
+    fs.mkdirSync(p('var/lib/lightmoni-agent-helper/tasks'),{recursive:true,mode:0o711});
+    fs.writeFileSync(p('etc/lightmoni-agent-helper/helper.json'),JSON.stringify({permission_generation:7,agent_id:'fixture-agent'}),{mode:0o600});
+    fs.writeFileSync(p('etc/lightmoni-agent-helper/managed.json'),JSON.stringify({executor_id:'signed-identity',install_generation:3,agent_id:'fixture-agent'}),{mode:0o600});
+    fs.writeFileSync(p('etc/systemd/system/lightmoni-agent-helper.service'),fs.readFileSync(join(repo,'deploy/agent/lightmoni-agent-helper.service')));
+    fs.writeFileSync(p('var/lib/lightmoni-agent-helper/managed/journal.json'),'{"fenced":null}');
+  }
   fs.writeFileSync(p("var/lib/lightmoni-agent/identity.json"), '{"agent_id":"fixture-agent","host_id":"fixture-host"}\n', { mode: 0o600 });
   fs.writeFileSync(p("var/lib/lightmoni-agent/queue.sqlite"), randomBytes(128), { mode: 0o600 });
   const saved = Object.fromEntries(["etc/lightmoni-agent/config.json", "var/lib/lightmoni-agent/identity.json", "var/lib/lightmoni-agent/queue.sqlite"].map(name => [name, fs.readFileSync(p(name))]));
@@ -86,10 +93,11 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   fs.writeFileSync(join(runtime, "padding"), randomBytes(4096));
   fs.writeFileSync(join(packageDir, "lightmoni-agent"), "#!/bin/sh\n# new launcher\n", { mode: 0o755 });
   fs.writeFileSync(join(packageDir, "lightmoni-agent.service"), fs.readFileSync(join(repo,"deploy/agent/lightmoni-agent.service")));
+  fs.writeFileSync(join(packageDir, "lightmoni-agent-helper.service"), fs.readFileSync(join(repo,"deploy/agent/lightmoni-agent-helper.service")));
   const archive = p("staging/bundle.tar.gz");
-  const repack = () => execFileSync("tar", ["-czf", archive, "-C", packageDir, "lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-runtime"], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
+  const repack = () => execFileSync("tar", ["-czf", archive, "-C", packageDir, "lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-helper.service", "lightmoni-agent-runtime"], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
   repack();
-  let now = Date.now(), active = true, boot = randomUUID(), restarts = 0;
+  let now = Date.now(), active = true, helperActive=options.runtimeMode==='root', boot = randomUUID(), restarts = 0;
   const calls: Array<[string, string[]]> = [];
   let onSleep: undefined | (() => void);
   const maintenance = new AgentMaintenance({ root, arch, uid: process.getuid?.() ?? 0, now: () => now, sleep: async (ms: number) => { now += ms; onSleep?.(); }, launch: () => {},
@@ -98,31 +106,36 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
       if(args[0]?.endsWith('/deployment-permissions.mjs')&&args[1]==='prepare'&&options.failPermissionPreparation)throw Error('private permission setup failure');
       if (file === "systemctl") {
         if (args[0] === "show") {
-          if (args.includes("--property=ActiveState")) return active ? "active" : "inactive";
-          if (args.includes("--property=FragmentPath")) return p("etc/systemd/system/lightmoni-agent.service");
-          if (args.includes("--property=LoadState")) return "loaded";
+          const helper=args.includes('lightmoni-agent-helper.service');
+          if (args.includes("--property=ActiveState")) return (helper?helperActive:active) ? "active" : "inactive";
+          if (args.includes("--property=FragmentPath")) return helper?(fs.existsSync(p('etc/systemd/system/lightmoni-agent-helper.service'))?p('etc/systemd/system/lightmoni-agent-helper.service'):''):p("etc/systemd/system/lightmoni-agent.service");
+          if (args.includes("--property=LoadState")) return helper?(fs.existsSync(p('etc/systemd/system/lightmoni-agent-helper.service'))?'loaded':'not-found'):'loaded';
+          if (args.includes("--property=DropInPaths")) return '';
         }
-        if (args[0] === "stop") active = false;
+        if (args[0] === "stop") {if(args[1]==='lightmoni-agent-helper.service')helperActive=false;else active = false;}
         if (args[0] === "restart") {
-          restarts++; boot = randomUUID();
-          const current = fs.realpathSync(p("opt/lightmoni-agent/current"));
-          if (options.failTarget && current !== old || options.failRollback && current === old && restarts > 1) throw Error("synthetic restart failure must not leak");
-          active = true;
+          if(args[1]==='lightmoni-agent-helper.service')helperActive=true;
+          else {restarts++; boot = randomUUID();
+            const current = fs.realpathSync(p("opt/lightmoni-agent/current"));
+            if (options.failTarget && current !== old || options.failRollback && current === old && restarts > 1) throw Error("synthetic restart failure must not leak");
+            active = true;
+          }
         }
         return "";
       }
       if (args[0] === "status") {
         const current = fs.realpathSync(p("opt/lightmoni-agent/current"));
         const meta = maintenance.metadata(current);
-        return JSON.stringify({ agent_id: "fixture-agent", ...(options.legacy && current === old ? {} : { boot_id: boot, release: meta }) });
+        const config=JSON.parse(fs.readFileSync(p('etc/lightmoni-agent/config.json'),'utf8'));
+        return JSON.stringify({ agent_id: "fixture-agent", runtime:{uid:19999,gid:19998,mode:config.runtime_mode||'user',permission_generation:config.permission_generation||1}, ...(options.legacy && current === old ? {} : { boot_id: boot, release: meta }) });
       }
-      if(args[0]==='managed-status')return JSON.stringify({executor_id:'signed-identity',install_generation:3,fenced:null,pending_results:0});
+      if(args[0]==='managed-status'||args[0]==='helper-status')return JSON.stringify({executor_id:'signed-identity',install_generation:3,permission_generation:7,fenced:null,pending_results:0,ordinary_task_identity:{account:'lightmoni-agent',uid:19999,gid:19998},ordinary_task_runner:{active:false,state:'idle'}});
       return "configuration valid";
     },
   });
   const request = () => ({ operation_id: randomBytes(16).toString("hex"), expected_agent_id: "fixture-agent", expected_fingerprint: maintenance.probe().current.fingerprint, expected_service_active: active, start_deadline: new Date(now + 180000).toISOString(), action: "upgrade", target: { version: manifest.version, source_revision: manifest.source_revision, build_id: manifest.build_id, state_schema: 1, arch, artifact_sha256: sha(fs.readFileSync(archive)) }, archive_path: archive, confirm_timeout_seconds: 10 });
   const preserve = () => { for (const [name, bytes] of Object.entries(saved)) assert.deepEqual(fs.readFileSync(p(name)), bytes, name + " retained"); };
-  return { root, p, old, runtime, packageDir, archive, manifest, maintenance, request, calls, repack, preserve, setActive: (value: boolean) => { active = value; }, onSleep: (callback: () => void) => { onSleep = callback; } };
+  return { root, p, old, runtime, packageDir, archive, manifest, maintenance, request, calls, repack, preserve, setActive: (value: boolean) => { active = value; }, setHelperActive: (value: boolean) => { helperActive = value; }, onSleep: (callback: () => void) => { onSleep = callback; }, helperIsActive:()=>helperActive };
 }
 
 test('upgrades validate ordinary account permissions before stopping the old Agent',async t=>{
@@ -350,8 +363,11 @@ test("both probes bind offline helper bytes and refuse a redirected release help
 test("maintenance receipt preserves absent helper evidence and rejects non-boolean synchronization flags", async t => {
   const f = fixture(t), request = f.request(), accepted = await f.maintenance.start(request);
   assert.equal(parseAgentUpdateStatus(JSON.stringify(accepted)).uninstaller_updated, undefined);
+  assert.equal(parseAgentUpdateStatus(JSON.stringify(accepted)).local_health.helper_active, false);
   for (const value of [null, 0, "false", {}])
     assert.throws(() => parseAgentUpdateStatus(JSON.stringify({ ...accepted, uninstaller_updated: value })), /invalid_response/);
+  for (const value of [undefined, null, 0, "true"])
+    assert.throws(() => parseAgentUpdateStatus(JSON.stringify({ ...accepted, local_health: { ...accepted.local_health, helper_active: value } })), /invalid_response/);
   f.preserve();
 });
 
@@ -384,8 +400,37 @@ test("a candidate privileged unit is refused before executing its old permission
 });
 
 test('root Agent upgrade preserves the selected account, permission generation and embedded identity',async t=>{
- const f=fixture(t,{runtimeMode:'root'}),request=f.request(),unit=fs.readFileSync(f.p('etc/systemd/system/lightmoni-agent.service')),managed=fs.readFileSync(f.p('etc/lightmoni-agent/managed.json'));
+ const f=fixture(t,{runtimeMode:'root'}),request=f.request(),unit=fs.readFileSync(f.p('etc/systemd/system/lightmoni-agent.service')),helper=fs.readFileSync(f.p('etc/systemd/system/lightmoni-agent-helper.service')),managed=fs.readFileSync(f.p('etc/lightmoni-agent-helper/managed.json'));
  const before=sshProbe(f);assert.equal(before.runtime_mode,'root');assert.equal(before.permission_generation,7);
  await f.maintenance.start(request);f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==='waiting_confirmation')f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256})});
- const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,'succeeded');assert.deepEqual(fs.readFileSync(f.p('etc/systemd/system/lightmoni-agent.service')),unit);assert.deepEqual(fs.readFileSync(f.p('etc/lightmoni-agent/managed.json')),managed);const after=sshProbe(f);assert.equal(after.runtime_mode,'root');assert.equal(after.permission_generation,7);f.preserve();
+ const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,'succeeded');assert.deepEqual(fs.readFileSync(f.p('etc/systemd/system/lightmoni-agent.service')),unit);assert.deepEqual(fs.readFileSync(f.p('etc/systemd/system/lightmoni-agent-helper.service')),helper);assert.deepEqual(fs.readFileSync(f.p('etc/lightmoni-agent-helper/managed.json')),managed);assert.equal(f.helperIsActive(),true);const after=sshProbe(f);assert.equal(after.runtime_mode,'root');assert.equal(after.permission_generation,7);f.preserve();
+});
+
+test('root Agent rollback restarts the helper and ordinary Agent together',async t=>{
+ const f=fixture(t,{runtimeMode:'root',failTarget:true}),request=f.request();await f.maintenance.start(request);
+ const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,'rolled_back');assert.equal(f.maintenance.system('ActiveState'),'active');assert.equal(f.helperIsActive(),true);assert.equal(sshProbe(f).runtime_mode,'root');f.preserve();
+});
+
+test('losing the root helper after initial health prevents commit and rolls both components back',async t=>{
+ const f=fixture(t,{runtimeMode:'root'}),request=f.request();let checked=false;
+ await f.maintenance.start(request);
+ f.onSleep(()=>{const state=f.maintenance.state(request.operation_id);if(state.status!=='waiting_confirmation'||checked)return;checked=true;
+   f.setHelperActive(false);
+   assert.throws(()=>f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:state.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256}),/commit_health_changed/);
+ });
+ const result=await f.maintenance.worker(request.operation_id);
+ assert.equal(checked,true);assert.equal(result.status,'rolled_back');assert.equal(result.error_code,'local_health_lost');
+ assert.equal(result.local_health.helper_active,true);assert.equal(f.maintenance.currentPath(),f.old);assert.equal(f.helperIsActive(),true);f.preserve();
+});
+
+test('losing the root helper after commit request cannot produce a successful receipt',async t=>{
+ const f=fixture(t,{runtimeMode:'root'}),request=f.request();let requested=false;
+ await f.maintenance.start(request);
+ f.onSleep(()=>{const state=f.maintenance.state(request.operation_id);if(state.status!=='waiting_confirmation'||requested)return;requested=true;
+   f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:state.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});
+   f.setHelperActive(false);
+ });
+ const result=await f.maintenance.worker(request.operation_id);
+ assert.equal(requested,true);assert.equal(result.status,'rolled_back');assert.equal(result.error_code,'commit_health_changed');
+ assert.equal(result.local_health.helper_active,true);assert.equal(f.maintenance.currentPath(),f.old);f.preserve();
 });

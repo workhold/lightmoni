@@ -45,3 +45,8 @@
 .lm-machine-manual-address{animation:lm-machine-address-enter .18s ease-out}@media(prefers-reduced-motion:reduce){.lm-machine-manual-address{animation:none}}
 .lm-machine-address-dialog.ant-modal{max-width:calc(100% - 32px);height:calc(100% - 48px);max-height:calc(100% - 48px);padding-bottom:0}
 .lm-machine-address-dialog .ant-modal-container{display:flex;flex-direction:column;max-height:100%}.lm-machine-address-dialog .ant-modal-header,.lm-machine-address-dialog .ant-modal-footer{flex-shrink:0}.lm-machine-address-dialog .ant-modal-body{min-height:0;flex:1 1 auto;overflow-x:hidden}
+
+.lm-agent-install-dialog .ant-modal-title { padding-right: 28px; overflow-wrap: anywhere; }
+.lm-agent-identity-details { margin-bottom: 16px; }
+.lm-agent-identity-details summary { cursor: pointer; margin-bottom: 8px; }
+.lm-agent-install-dialog .ant-btn { white-space: normal; height: auto; min-height: 32px; }

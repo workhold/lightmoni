@@ -1,3 +1,12 @@
+/** Fixed footprint shared by SSH discovery and fresh-deployment guards. */
+export const agentInstallationPaths = [
+  "/usr/local/bin/lightmoni-agent", "/opt/lightmoni-agent",
+  "/etc/systemd/system/lightmoni-agent.service", "/etc/lightmoni-agent/config.json",
+  "/var/lib/lightmoni-agent/identity.json", "/etc/systemd/system/lightmoni-agent-helper.service",
+  "/etc/lightmoni-agent-helper", "/var/lib/lightmoni-agent-helper",
+] as const;
+export const agentInstallationPresentShell = agentInstallationPaths.map(filename => `test -e ${filename} || test -L ${filename}`).join(" || ");
+
 /** Shared verbatim with the standalone uninstaller; its contract test prevents drift.
  * Managed journal inspection uses the root entry, which verifies its program tree. */
 export const agentMaintenanceShellGuards = String.raw`lm_refuse() {
@@ -27,30 +36,53 @@ lm_data_directory() {
   fi
 }
 lm_assert_paths() {
+  if [ -e /usr/local/bin/lightmoni-executor ] || [ -L /usr/local/bin/lightmoni-executor ] || [ -e /usr/local/sbin/lightmoni-executor-uninstall ] || [ -L /usr/local/sbin/lightmoni-executor-uninstall ] || [ -e /opt/lightmoni-executor ] || [ -L /opt/lightmoni-executor ] || [ -e /etc/lightmoni-executor ] || [ -L /etc/lightmoni-executor ] || [ -e /var/lib/lightmoni-executor ] || [ -L /var/lib/lightmoni-executor ] || [ -e /etc/systemd/system/lightmoni-executor.service ] || [ -L /etc/systemd/system/lightmoni-executor.service ] || [ -e /etc/systemd/system/lightmoni-executor.service.d ] || [ -L /etc/systemd/system/lightmoni-executor.service.d ]; then
+    lm_refuse 'Legacy standalone lightmoni-executor layout detected; use its original-version uninstaller before managing the unified Agent.'
+  fi
+  if [ -e /etc/lightmoni-agent/managed.json ] || [ -L /etc/lightmoni-agent/managed.json ] || [ -e /var/lib/lightmoni-agent/managed ] || [ -L /var/lib/lightmoni-agent/managed ]; then
+    lm_refuse 'Unsupported Agent layout requires explicit recovery'
+  fi
   for lm_parent in /run /etc /etc/systemd /etc/systemd/system /usr /usr/local /usr/local/bin /usr/local/sbin /opt /var /var/lib; do
     lm_root_entry "$lm_parent" directory
   done
   lm_root_entry /etc/systemd/system/lightmoni-agent.service file
+  lm_root_entry /etc/systemd/system/lightmoni-agent-helper.service file
+  lm_root_entry /etc/lightmoni-agent-helper directory
+  lm_root_entry /etc/lightmoni-agent-helper/helper.json file
+  lm_root_entry /etc/lightmoni-agent-helper/managed.json file
+  lm_root_entry /etc/lightmoni-agent-helper/managed-activation.json file
+  lm_root_entry /var/lib/lightmoni-agent-helper directory
+  lm_root_entry /var/lib/lightmoni-agent-helper/managed directory
+  lm_root_entry /var/lib/lightmoni-agent-helper/tasks directory
   lm_root_entry /usr/local/bin/lightmoni-agent file
   lm_root_entry /usr/local/sbin/lightmoni-agent-uninstall file
   lm_root_entry /opt/lightmoni-agent directory
   lm_data_directory /etc/lightmoni-agent
   lm_data_directory /var/lib/lightmoni-agent
   lm_data_directory /var/lib/lightmoni-agent/operations
+  lm_data_directory /etc/lightmoni-agent-helper
+  lm_data_directory /var/lib/lightmoni-agent-helper
+  lm_data_directory /var/lib/lightmoni-agent-helper/managed
+  lm_data_directory /var/lib/lightmoni-agent-helper/tasks
 }
 lm_assert_no_operations() {
+  if [ -d /var/lib/lightmoni-agent-helper/tasks ] && [ -n "$(find /var/lib/lightmoni-agent-helper/tasks -mindepth 1 -maxdepth 1 -print -quit)" ] && [ ! -f /etc/lightmoni-agent-helper/managed.json ]; then
+    lm_refuse 'Agent task journal requires recovery before removal'
+  fi
   if [ -e /var/lib/lightmoni-agent/operations/execution.lock ] || [ -L /var/lib/lightmoni-agent/operations/execution.lock ]; then
     lm_refuse 'Agent has an unfinished operation'
   fi
-  if [ -e /etc/lightmoni-agent/managed.json ] || [ -L /etc/lightmoni-agent/managed.json ] || [ -e /var/lib/lightmoni-agent/managed ] || [ -L /var/lib/lightmoni-agent/managed ]; then
-    lm_root_entry /etc/lightmoni-agent directory
-    lm_root_entry /etc/lightmoni-agent/managed.json file
-    lm_root_entry /var/lib/lightmoni-agent/managed directory
+  if [ -e /etc/lightmoni-agent-helper/managed.json ] || [ -L /etc/lightmoni-agent-helper/managed.json ] || [ -e /var/lib/lightmoni-agent-helper/managed ] || [ -L /var/lib/lightmoni-agent-helper/managed ]; then
+    lm_root_entry /etc/lightmoni-agent-helper directory
+    lm_root_entry /etc/lightmoni-agent-helper/managed.json file
+    lm_root_entry /var/lib/lightmoni-agent-helper directory
+    lm_root_entry /var/lib/lightmoni-agent-helper/managed directory
     lm_root_entry /usr/local/bin/lightmoni-agent file
-    [ -f /etc/lightmoni-agent/managed.json ] && [ -x /usr/local/bin/lightmoni-agent ] || lm_refuse 'Managed Agent state requires recovery before removal'
-    lm_managed=$(/usr/local/bin/lightmoni-agent managed-status) || lm_refuse 'Managed Agent journal cannot be verified'
+    [ -f /etc/lightmoni-agent-helper/managed.json ] && [ -x /usr/local/bin/lightmoni-agent ] || lm_refuse 'Managed Agent state requires recovery before removal'
+    lm_managed=$(/usr/local/bin/lightmoni-agent helper-status) || lm_refuse 'Managed Agent journal cannot be verified'
     printf '%s' "$lm_managed" | LC_ALL=C grep -Eq '"fenced"[[:space:]]*:[[:space:]]*null' || lm_refuse 'Managed Agent has an unfinished operation'
     printf '%s' "$lm_managed" | LC_ALL=C grep -Eq '"pending_results"[[:space:]]*:[[:space:]]*0([,}[:space:]])' || lm_refuse 'Managed Agent has unreported results'
+    printf '%s' "$lm_managed" | LC_ALL=C grep -Eq '"ordinary_task_runner"[[:space:]]*:[[:space:]]*\{[^}]*"active"[[:space:]]*:[[:space:]]*false[^}]*"state"[[:space:]]*:[[:space:]]*"idle"' || lm_refuse 'Agent task runner is not idle'
   fi
   for lm_marker in /var/lib/lightmoni-agent/agent-job-state.json /var/lib/lightmoni-agent/task-run-state.json; do
     [ ! -L "$lm_marker" ] || lm_refuse 'Agent has an unsafe unfinished operation marker'
@@ -73,8 +105,7 @@ lm_assert_no_operations() {
 }
 lm_remove_managed_state() {
   # Only after the stopped-service and journal checks, before deleting code.
-  rm -f /etc/lightmoni-agent/managed.json /etc/lightmoni-agent/managed-activation.json
-  rm -rf /var/lib/lightmoni-agent/managed
+  rm -rf /etc/lightmoni-agent-helper /var/lib/lightmoni-agent-helper
 }
 lm_purge_agent_state() {
   lm_assert_paths

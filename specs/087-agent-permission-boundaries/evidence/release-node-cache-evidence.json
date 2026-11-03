@@ -1,0 +1,22 @@
+{
+  "source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+  "official_checksum_url": "https://nodejs.org/dist/v24.15.0/SHASUMS256.txt",
+  "official_checksum_document_sha256": "sha256:1e812945dee26c3e4ca41a8c0b582668ff2401ba0ae727a122300c0e8514edb0",
+  "node_version": "24.15.0",
+  "original_dockerfile_sha256": "sha256:d4630bc8dcf76f01caeb0bb18ea59e9fcd89ec1b30e6ac6f8ed6b67d55d02bb2",
+  "derived_dockerfile_sha256": "sha256:7a881c602fa568dccb26e83441333b6866d4edb73db14e8bb1d4121c050375c2",
+  "only_change": "Add COPY from verified Node named context and LIGHTMONI_NODE_CACHE in build stage",
+  "files": [
+    {
+      "file": "node-v24.15.0-linux-x64.tar.xz",
+      "size": 31164460,
+      "sha256": "472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6"
+    },
+    {
+      "file": "node-v24.15.0-linux-arm64.tar.xz",
+      "size": 30108656,
+      "sha256": "f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0"
+    }
+  ],
+  "local_context": "/private/tmp/lightmoni-release-20261103-087/node-cache-context"
+}

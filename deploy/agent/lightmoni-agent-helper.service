@@ -1,0 +1,24 @@
+[Unit]
+Description=LightMoni Agent Privileged Helper
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStartPre=/opt/lightmoni-agent/current/node /opt/lightmoni-agent/current/deployment-permissions.mjs helper-check
+RuntimeDirectory=lightmoni-agent-helper
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/flock --no-fork --exclusive --nonblock /run/lightmoni-agent-helper/runner.lock /usr/local/bin/lightmoni-agent helper-run
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+ProtectHome=read-only
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

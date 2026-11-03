@@ -9,6 +9,11 @@ export interface MachineSSHAccount {
 }
 export interface InstallationSSHAttempt {check_id:string;credential_id:string;account_id:string;username:string;account_revision:number;connected:boolean;ready:boolean;error_code:string;privilege_state:string;checked_at:string}
 export interface InstallationSSHSelection {id:string;mode:'auto'|'manual';selected_credential_id:string;attempts:InstallationSSHAttempt[]}
+export interface InstallationAccountRecovery {
+  reason:'no_credentials'|'credentials_expired'|'credentials_revoked'|'credentials_unavailable'|'insufficient_privilege'|'connection_failed'|'host_prerequisites'|'check_failed';
+  next_step:'add_account'|'update_credentials'|'check_connection'|'fix_host';
+  machine_id:string; selection_id:string;
+}
 export function createMachineSSHAccountsSchema(db:DB) {
   db.exec(`CREATE TABLE IF NOT EXISTS machine_ssh_accounts(
     id TEXT PRIMARY KEY,machine_id TEXT NOT NULL REFERENCES managed_machines(id) ON DELETE CASCADE,

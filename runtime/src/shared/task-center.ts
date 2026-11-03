@@ -18,8 +18,18 @@ export interface TaskExecutionPolicy {
   retry_count: number;
   retry_delay_seconds: number;
 }
+/** Identity observed by the signed host helper and frozen when a run is queued. */
+export interface OrdinaryTaskIdentity {
+  account: "lightmoni-agent";
+  uid: number;
+  gid: number;
+  permission_generation: number;
+  executor_id: string;
+  install_generation: number;
+  privilege: "user";
+}
 export interface TaskRunSnapshot {
-  execution_identity?: {account: "lightmoni-agent"; permission_generation: number; privilege: "user"};
+  execution_identity?: OrdinaryTaskIdentity;
   task_id: string;
   task_name: string;
   host_id: string;

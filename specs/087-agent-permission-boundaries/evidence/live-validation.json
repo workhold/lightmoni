@@ -1,0 +1,169 @@
+{
+  "recorded_date": "2026-11-04",
+  "scope": "One authorized real Ubuntu 24.04 amd64 systemd host; operational identifiers and secrets omitted",
+  "stage_a": {
+    "platform_source_prefix": "0b45683",
+    "host_and_credentials_checks": 26,
+    "passed": 26,
+    "covers": "password/key SSH, privilege checks, selection fallback, shared credential binding, terminal revoke/expiry, retention, host metadata/delete"
+  },
+  "stage_b": {
+    "agent_source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+    "build_id": "0.1.0-3309b0b36490-5382f0e4da8d",
+    "artifact_sha256": "b89f57af7e815383b1965907fdf5f36c027d57b8b04e9036e358a606979a92d8",
+    "task_groups": [
+      {
+        "group": "ordinary",
+        "checks": 22,
+        "status": "passed"
+      },
+      {
+        "group": "elevated",
+        "checks": 14,
+        "status": "passed"
+      },
+      {
+        "group": "maintenance-fence",
+        "checks": 11,
+        "status": "passed"
+      },
+      {
+        "group": "container-cycle",
+        "checks": 114,
+        "status": "passed"
+      },
+      {
+        "group": "capability-toggle",
+        "checks": 14,
+        "status": "passed"
+      }
+    ],
+    "lifecycle": {
+      "sudo_password_monitor_install": "succeeded",
+      "sudo_key_permission_switch": "succeeded",
+      "mode_cycle_checks": {
+        "downgrade_succeeded": true,
+        "reenable_succeeded": true,
+        "helper_activation_replaced": true,
+        "permission_generation_advanced": true,
+        "daemon_remains_nonroot": true,
+        "no_legacy_task_account": true,
+        "lifecycle_lock_cleaned": true
+      },
+      "standard_keep_state_checks": {
+        "both_units_removed": true,
+        "program_removed": true,
+        "helper_state_removed": true,
+        "identity_and_config_retained": true,
+        "host_marked_agent_removed": true,
+        "fresh_install_refused": true,
+        "lifecycle_lock_removed": true
+      },
+      "control_data_credentials_revoked": true,
+      "sudo_auto_without_registered_root": "succeeded",
+      "offline_uninstall_checks": {
+        "both_services_removed": true,
+        "launcher_and_runtime_removed": true,
+        "helper_private_state_removed": true,
+        "identity_and_config_retained": true,
+        "lifecycle_lock_removed": true
+      },
+      "recovery_purge_after_offline_uninstall": "succeeded",
+      "root_key_monitor_install": "succeeded"
+    },
+    "data_validation": {
+      "host_metrics": "passed; independent OS memory/filesystem totals matched",
+      "http_probe": "passed with unique target ID",
+      "file_logs": "unique marker matched once",
+      "qa_host_overrides_and_log_file_removed": true
+    },
+    "containers": {
+      "existing_image_only": true,
+      "pull_or_build": false,
+      "qa_container_removed": true,
+      "preexisting_container_state_unchanged": true
+    },
+    "upgrade_boundary": {
+      "same_release_409": true,
+      "no_verified_previous_409": true,
+      "real_cross_version_upgrade_rollback_covered": false,
+      "reason": "Single legal release in current catalog and no verified previous; earlier isolated Linux results are separate"
+    }
+  },
+  "final_state": {
+    "agent_online": true,
+    "runtime_mode": "user",
+    "daemon_nonroot": true,
+    "helper_unit_absent": true,
+    "lifecycle_lock_absent": true,
+    "legacy_task_account_absent": true,
+    "root_ssh_valid": true,
+    "only_original_root_account": true,
+    "basic_collectors": {
+      "cpu": "ok",
+      "file_logs": "disabled",
+      "memory": "ok",
+      "system": "ok",
+      "filesystem": "ok",
+      "disk": "ok",
+      "network": "ok"
+    },
+    "temporary_accounts_removed": true,
+    "temporary_sudo_policy_removed": true,
+    "temporary_secret_files_removed": true,
+    "qa_session_cleanup": {
+      "qa_api_session_revoked": true,
+      "authenticated_me_refused": true,
+      "local_cookie_file_removed": true
+    }
+  },
+  "observed_failure": {
+    "initial_install_http_client_timeout_seconds": 75,
+    "center_marked_unknown": true,
+    "reconcile_refused_without_completion_proof": true,
+    "manual_empty_lock_removal_required": true,
+    "root_cause": "SIGPIPE during installer failure diagnostics interrupts finish before rollback",
+    "automatic_recovery_claimed": false
+  },
+  "installer_fix": {
+    "behavior": "During finish ignore HUP/INT/TERM/PIPE before removing the EXIT trap. Retain the original result and all existing rollback checks.",
+    "red_regressions": {
+      "tests": 6,
+      "pass": 1,
+      "fail": 5,
+      "skipped": 0
+    },
+    "final_regressions": {
+      "tests": 45,
+      "pass": 45,
+      "fail": 0,
+      "skipped": 0,
+      "new_cases": 6,
+      "coverage": [
+        "first installation rollback after stderr reader closes",
+        "existing installation rollback after stderr reader closes",
+        "HUP during EXIT restoration",
+        "INT during EXIT restoration",
+        "TERM during EXIT restoration",
+        "actual restoration stop failure retains lifecycle lock and original backups even with stderr disconnected"
+      ]
+    },
+    "runtime_typecheck": "passed",
+    "shell_syntax": "passed",
+    "independent_review": "no blocking findings",
+    "published_image_contains_fix": false
+  },
+  "not_covered": [
+    "real cross-version upgrade/rollback on remote host",
+    "typed Docker logs API (not implemented)",
+    "Docker installed later or changed daemon rebinding",
+    "multi-host concurrent scheduling, timezone/missed schedules, uploaded script and external MCP",
+    "direct row-by-row internal audit database inspection"
+  ],
+  "architecture_sync": {
+    "applicable": false,
+    "reason": "Existing installer failure-cleanup fix only; no component, protocol, control path, credentials or topology changes",
+    "new_doca_write_claimed": false
+  },
+  "evidence_policy": "Only sanitized conclusions are committed. Raw live API evidence, screenshots and operational identifiers stay in protected local files."
+}

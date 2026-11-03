@@ -1,7 +1,7 @@
 import {inlineFixtureCommands} from './helpers/maintenance-shell.js';
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync, unlinkSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -10,6 +10,7 @@ import { rewriteMaintenancePaths, writeMaintenanceStatShim } from "./helpers/mai
 function fixture(t: any, failStop = false) {
   const root = mkdtempSync(join(tmpdir(), "lm-uninstall-")); t.after(() => rmSync(root, { recursive: true, force: true }));
   const commandDir = join(root, "commands"); mkdirSync(commandDir);
+  writeFileSync(join(commandDir,"id"),"#!/bin/sh\nprintf '0\\n'\n",{mode:0o755});
   writeMaintenanceStatShim(commandDir);
   for (const path of ["run", "tmp", "etc/systemd/system", "etc/lightmoni-agent", "var/lib/lightmoni-agent", "opt/lightmoni-agent", "usr/local/bin"]) mkdirSync(join(root, path), { recursive: true });
   writeFileSync(join(root, "etc/lightmoni-agent/config.json"), '{"control_credential":"secret-not-for-output"}');
@@ -18,18 +19,18 @@ function fixture(t: any, failStop = false) {
   writeFileSync(join(root, "etc/systemd/system/lightmoni-agent.service"), "unit");
   writeFileSync(join(root, "usr/local/bin/lightmoni-agent"), "launcher");
   const state = join(root, "state.json"); writeFileSync(state, JSON.stringify({ active: true, enabled: true, failStop }));
-  writeFileSync(join(commandDir, "id"), '#!/bin/sh\necho 0\n', { mode: 0o755 });
-  writeFileSync(join(commandDir, "systemctl"), `#!${process.execPath}\nconst fs=require('node:fs');const path=${JSON.stringify(state)};const s=JSON.parse(fs.readFileSync(path));const action=process.argv[2];if(action==='stop'){if(s.failStop)process.exit(1);s.active=false;}else if(action==='disable')s.enabled=false;else if(action==='show'){if(s.failShow)process.exit(1);const exists=fs.existsSync(${JSON.stringify(join(root, "etc/systemd/system/lightmoni-agent.service"))});process.stdout.write(process.argv.includes('--property=FragmentPath')?(exists?${JSON.stringify(join(root, "etc/systemd/system/lightmoni-agent.service"))}:""):process.argv.includes('--property=LoadState')?(exists?'loaded':'not-found'):(s.active?'active':'inactive'));process.stdout.write('\\n');}fs.writeFileSync(path,JSON.stringify(s));`, { mode: 0o755 });
+  writeFileSync(join(commandDir, "systemctl"), `#!${process.execPath}\nconst fs=require('node:fs');const path=${JSON.stringify(state)};const s=JSON.parse(fs.readFileSync(path));const action=process.argv[2],helper=process.argv.includes('lightmoni-agent-helper.service');if(action==='stop'){if(s.failStop)process.exit(1);if(helper)s.helperActive=false;else s.active=false;}else if(action==='disable')s.enabled=false;else if(action==='show'){if(s.failShow)process.exit(1);const unit=${JSON.stringify(join(root, "etc/systemd/system"))}+'/'+(helper?'lightmoni-agent-helper.service':'lightmoni-agent.service');const exists=fs.existsSync(unit);process.stdout.write(process.argv.includes('--property=FragmentPath')?(exists?unit:""):process.argv.includes('--property=LoadState')?(exists?'loaded':'not-found'):((helper?s.helperActive:s.active)?'active':'inactive'));process.stdout.write('\\n');}fs.writeFileSync(path,JSON.stringify(s));`, { mode: 0o755 });
+  for(const command of ['userdel','groupdel'])writeFileSync(join(commandDir,command),'#!/bin/sh\nexit 0\n',{mode:0o755});
   const rewrite = (script: string) => {
     return rewriteMaintenancePaths(script,root).replaceAll("/tmp/lightmoni-agent-bootstrap.XXXXXX", join(root, "tmp/lightmoni-agent-bootstrap.XXXXXX"));
   };
-  const run = (command: string, input?: string) => spawnSync("sh", ["-c", inlineFixtureCommands(commandDir)+rewrite(command)], { encoding: "utf8", input, env: { ...process.env, PATH: commandDir + ":" + process.env.PATH } });
+  const run = (command: string, input?: string) => spawnSync("sh", ["-xc", inlineFixtureCommands(commandDir)+rewrite(command)], { encoding: "utf8", input, env: { ...process.env, PATH: commandDir + ":" + process.env.PATH } });
   return { root, run, commandDir, state };
 }
 test("fixed Agent probe and uninstall preserve identity, configuration and accepted queue", t => {
   const f = fixture(t); const before = f.run(agentProbeCommand()); assert.equal(before.status, 0, before.stderr);
   assert.deepEqual(parseAgentProbe(before.stdout), { agent_id: "known-agent", installation: "present", service_running: true, operation_lock: false, lifecycle_locked: false, program_complete: true, unit_managed: true, data_retained: true });
-  const removed = f.run(agentUninstallCommand("known-agent")); assert.equal(removed.status, 0, removed.stderr);
+  const removed = f.run(agentUninstallCommand("known-agent")); assert.equal(removed.status, 0, removed.stderr.slice(-2500)+removed.stdout);
   assert.equal(removed.stdout.includes("secret-not-for-output"), false);
   assert.deepEqual(parseAgentProbe(removed.stdout), { agent_id: "known-agent", installation: "absent", service_running: false, operation_lock: false, lifecycle_locked: false, program_complete: false, unit_managed: true, data_retained: true });
   assert.equal(readFileSync(join(f.root, "var/lib/lightmoni-agent/queue.sqlite"), "utf8"), "must survive");
@@ -116,6 +117,25 @@ test("approved recovery removal can purge damaged identity while preserving busi
  const result=f.run(agentRemovalCommand(observed,true));assert.equal(result.status,0,result.stderr);const after=parseAgentRemovalProbe(result.stdout);
  assert.equal(after.identity_state,"missing");assert.equal(after.installation,"absent");assert.equal(after.config_present,false);assert.equal(after.data_present,false);assert.equal(readFileSync(business,"utf8"),"business");
  assert.equal(f.run(freshAgentGuard).status,0,"approved purge makes the same fixed paths eligible for fresh installation");
+});
+
+test("reviewed SSH removal verifies and removes the full-management components together",t=>{
+ const f=fixture(t),p=(name:string)=>join(f.root,name);
+ for(const name of ['etc/lightmoni-agent-helper','var/lib/lightmoni-agent-helper/managed','var/lib/lightmoni-agent-helper/tasks'])mkdirSync(p(name),{recursive:true});
+ writeFileSync(p('etc/systemd/system/lightmoni-agent-helper.service'),'managed helper unit');
+ writeFileSync(p('etc/lightmoni-agent-helper/helper.json'),'{}',{mode:0o600});
+ writeFileSync(p('etc/lightmoni-agent-helper/managed.json'),'{}',{mode:0o600});
+ writeFileSync(p('usr/local/bin/lightmoni-agent'),`#!${process.execPath}\nif(process.argv[2]==='helper-status')console.log(JSON.stringify({fenced:null,pending_results:0,ordinary_task_runner:{active:false,state:'idle'}}));\n`,{mode:0o755});
+ chmodSync(p('usr/local/bin/lightmoni-agent'),0o755);
+ const state=JSON.parse(readFileSync(f.state,'utf8'));state.helperActive=true;writeFileSync(f.state,JSON.stringify(state));
+ const observed=parseAgentRemovalProbe(f.run(agentRemovalProbeCommand()).stdout);
+ assert.equal(observed.helper_present,true);
+ const result=f.run(agentRemovalCommand(observed));assert.equal(result.status,0,result.stderr);
+ const after=parseAgentRemovalProbe(result.stdout);
+ assert.equal(after.installation,'absent');assert.equal(after.helper_present,false);
+ assert.equal(readFileSync(p('var/lib/lightmoni-agent/queue.sqlite'),'utf8'),'must survive');
+ assert.equal(existsSync(p('etc/lightmoni-agent/config.json')),true);
+ assert.equal(JSON.parse(readFileSync(f.state,'utf8')).helperActive,false);
 });
 
 test('fresh Agent purge preserves application data stored inside the Agent operations directory',t=>{

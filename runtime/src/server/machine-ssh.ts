@@ -5,6 +5,7 @@ import { MAX_NETWORK_ADDRESSES, normalizeNetworkAddresses, type HostNetworkAddre
 import type { SSHMachineTarget } from "./managed-machines.js";
 import { canonicalJSON, sha256 } from "../shared/privileged-executor.js";
 import { fail } from "../shared/http.js";
+import { agentInstallationPresentShell } from "../shared/agent-maintenance-shell.js";
 
 /** Immutable SSH login identity, separate from the host asset revision. */
 export const sshAccountSnapshot = (value: { account_id: string; username: string; account_revision: number }) => ({
@@ -238,7 +239,7 @@ export function preflightCommand(endpoint: string) {
     ...["curl", "tar", "gzip", "sha256sum"].map(name => `if command -v ${name} >/dev/null 2>&1; then echo '${name}=1'; else echo '${name}=0'; fi`),
     "if command -v systemctl >/dev/null 2>&1 && test -d /run/systemd/system; then echo 'systemd=1'; else echo 'systemd=0'; fi",
     "LM_SSH_UID=$(id -u 2>/dev/null) || LM_SSH_UID=unknown; case \"$LM_SSH_UID\" in 0) printf 'privilege_state=root\\ninstall_privilege=1\\n';; ''|*[!0-9]*) printf 'privilege_state=unknown\\ninstall_privilege=0\\n';; *) if sudo -n /bin/sh -c 'test \"$(id -u)\" = 0' </dev/null >/dev/null 2>&1; then printf 'privilege_state=sudo_noninteractive\\ninstall_privilege=1\\n'; else printf 'privilege_state=unavailable\\ninstall_privilege=0\\n'; fi;; esac",
-    "if test \"$(id -u)\" = 0; then sh -c 'if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json; then echo agent_installation=present; else echo agent_installation=absent; fi'; elif sudo -n /bin/sh -c 'if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json; then echo agent_installation=present; else echo agent_installation=absent; fi' </dev/null 2>/dev/null; then :; else echo agent_installation=unknown; fi",
+    `if test "$(id -u)" = 0; then sh -c 'if ${agentInstallationPresentShell}; then echo agent_installation=present; else echo agent_installation=absent; fi'; elif sudo -n /bin/sh -c 'if ${agentInstallationPresentShell}; then echo agent_installation=present; else echo agent_installation=absent; fi' </dev/null 2>/dev/null; then :; else echo agent_installation=unknown; fi`,
     url.protocol === "https:" ? `if curl --fail --silent --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 10 --output /dev/null ${quote(health)} </dev/null 2>/dev/null; then echo 'platform_https=1'; else echo 'platform_https=0'; fi` : "echo 'platform_https=0'",
     ...discoveryCommand(),
   ].join("\n");

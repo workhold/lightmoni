@@ -1,0 +1,85 @@
+{
+  "validatedAt": "2026-11-03T10:05:50.834646+00:00",
+  "baseline": "b44ee39",
+  "runtimePlatform": "macOS",
+  "tests": {
+    "runtime": {
+      "tests": 1321,
+      "pass": 1288,
+      "fail": 0,
+      "skipped": 33,
+      "skipped_tests": [
+        "capability executor stages matching digest and atomically activates release # SKIP",
+        "capability executor rejects bad digest, path escape, unit mismatch and unknown capability # SKIP",
+        "release staging checks size, manifest binding and immutability before publishing # SKIP",
+        "release staging rejects path ancestors and roots with unsafe ownership permissions # SKIP",
+        "protected release path permits a root-owned sticky shared ancestor such as /tmp # SKIP",
+        "bundle paths reserved for credentials are rejected while runtime payloads stay read-only to host users # SKIP",
+        "release activation compares the prior symlink and leaves a changed current untouched # SKIP",
+        "systemd preflight is read-only, target-bound, structured, and redacts command output # SKIP",
+        "systemd preflight accepts a missing current symlink for first deployment # SKIP",
+        "systemd preflight does not block when current is a FIFO # SKIP",
+        "artifact staging refuses symlinked target ancestors # SKIP",
+        "live Node Agent persists SDK batches, reopens identity and forwards to real ClickHouse exactly once # SKIP LIGHTMONI_DOMAINS_URL is not set",
+        "helper executes a real script as lightmoni-agent with no supplementary groups or capabilities # SKIP",
+        "real local Docker inventory reads public fields through the production bounded command # SKIP",
+        "real Docker start, restart and stop verify state on an isolated disposable container # SKIP",
+        "live ClickHouse: OTLP, logs, trace, dashboard and alert response lifecycle # SKIP",
+        "backup creates verified manifest, refuses changed restore target, and preserves pre-restore copy # SKIP",
+        "backup rejects symbolic links and local storage within source # SKIP",
+        "backup validates limits and checksum corruption # SKIP",
+        "S3 credentials are hidden and invalid endpoints rejected # SKIP",
+        "S3 uses signed path-style HTTP operations, verifies readback and lists only resource prefix # SKIP",
+        "restore rejects a malicious archive path before changing source or creating recovery backup # SKIP",
+        "retention never prunes the recovery copy produced before restore # SKIP",
+        "backup listing and retention receipts stay bounded without limiting actual cleanup # SKIP",
+        "uncertain S3 upload reports unknown when the server accepted bytes but dropped its response # SKIP",
+        "a backup source limit rejected before storage write releases the node writer lock # SKIP",
+        "Linux Nginx: static, proxy, version recovery, uploaded TLS and certificate rotation # SKIP",
+        "three OTLP signals and receipt input hashes match Go deterministic marshal # SKIP Go baseline toolchain unavailable",
+        "cluster directory synchronization installs the same path independently on two real container Agents # SKIP",
+        "real Docker single-container and Compose versions preserve initial and data files # SKIP",
+        "real host OpenResty serves static HTML and TLS, reloads a full bundle, and returns 503 for empty service discovery # SKIP requires an opted-in Linux executor sharing the Docker host network",
+        "real host OpenResty applies multi-path URI routing, CORS, headers, WebSocket and rejects a bad reload # SKIP",
+        "Linux release bundles contain checked architecture, portable dependencies and a working launcher # SKIP"
+      ]
+    },
+    "ai-runtime": {
+      "tests": 71,
+      "pass": 71,
+      "fail": 0,
+      "skipped": 0,
+      "skipped_tests": []
+    },
+    "typescript-sdk": {
+      "tests": 22,
+      "pass": 22,
+      "fail": 0,
+      "skipped": 0,
+      "skipped_tests": []
+    }
+  },
+  "typecheck": {
+    "command": "npm run typecheck",
+    "passed": true
+  },
+  "build": {
+    "command": "npm run build",
+    "passed": true
+  },
+  "ui": {
+    "host_execution": 26,
+    "task_center": 17,
+    "account_recovery": 3,
+    "connection_credentials": 7,
+    "api_fixtures": true,
+    "ssh_connections": 0,
+    "production_writes": false
+  },
+  "limitations": [
+    "Linux/systemd real lifecycle not executed",
+    "Docker daemon unavailable; Docker live tests skipped",
+    "No vchive or production mutation",
+    "No image built/published in this change"
+  ]
+}

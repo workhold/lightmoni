@@ -12,6 +12,7 @@ import { validAgentRuntimeObservation } from "./machine-agent-runtime.js";
 import { assertAgentActive } from "./agent-lifecycle.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import type { MachineSummary, SSHMachineTarget } from "./managed-machines.js";
+import type { PrivilegedExecutorStore } from "./privileged-executors.js";
 import { assertSSHAccount, sshAccountSnapshot, sshCredentialRevision, type SSHRunner } from "./machine-ssh.js";
 import { AgentReleaseCatalog, type AgentRelease, type PinnedAgentFile } from "./machine-agent-updates-catalog.js";
 import { NodeStore } from "./nodes-model.js";
@@ -41,6 +42,7 @@ export interface AgentUpdateAccess {
   credential(machineID: string, credentialID?: string): { machine: SSHMachineTarget; credential: any };
   authentication(machineID: string, credential: any): { privateKey: string; password?: string };
   markCredentialUsed(credentialID: string): void;
+  executionStatus?(machineID: string): ReturnType<PrivilegedExecutorStore["getStatus"]> | undefined;
   busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
 }
 interface Options { downloadsDir: string; dataDir: string; credentials?: AgentCredentialStore; pollIntervalMs?: number; healthTimeoutMs?: number }
@@ -135,6 +137,18 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     if (!observation.ready || requireActive && !observation.service_active || observation.lifecycle_locked || observation.operation_lock) fail(409, "Agent 不是空闲且健康的受管 systemd 安装，不能自动维护");
     if (observation.current.state_schema !== 1) fail(409, "当前 Agent 状态格式未知，不能安全升级或回退");
   };
+  // Only the signature-verified helper observation can prove this component's
+  // release; the ordinary Agent heartbeat does not carry that authority.
+  const helperRelease = (machineID: string, expected: any, permissionGeneration: number) => {
+    const helper = access.executionStatus?.(machineID)?.executor, release = helper?.release;
+    const identity = helper?.ordinary_task_identity;
+    return helper?.online && helper.state === "active" && release?.state_schema === 1
+      && release.artifact_sha256 === (expected.artifact_sha256 ?? expected.sha256)
+      && release.source_revision === expected.source_revision && release.build_id === expected.build_id
+      && identity?.account === "lightmoni-agent" && identity.permission_generation === permissionGeneration
+      && Number.isSafeInteger(identity.uid) && identity.uid > 0 && Number.isSafeInteger(identity.gid) && identity.gid > 0
+      ? helper : null;
+  };
   const plan = async (machineID: string, input: AgentUpdateInput, actorID: string, signal: AbortSignal): Promise<AgentUpdate> => {
     fields(input, ["credential_id", "target_sha256", "action"]);
     if (!["upgrade", "rollback"].includes(input.action)) fail(400, "action must be upgrade or rollback");
@@ -166,10 +180,14 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         files = catalog.pinScripts();
       }
       const operationID = id(), expires = new Date(deps.now().getTime() + 15 * 60_000).toISOString();
+      const helper = observed.runtime_mode === "root" ? helperRelease(machine.id, observed.current, observed.permission_generation) : null;
+      if (observed.runtime_mode === "root" && (!helper || !helper.activation_id)) fail(409, "Agent 签名执行通道尚未确认当前构建，请等待恢复后重新生成维护计划");
       const planBody = { machine: { id: machine.id, name: machine.name, address: machine.address, port: machine.port, agent_id: machine.agent_id },
         ssh_account: sshAccountSnapshot(machine), credential_revision: sshCredentialRevision(credential),
         credential: { id: credential.id, method: credential.method, retention: credential.retention, expires_at: credential.expires_at },
-        action: input.action, runtime_mode:observed.runtime_mode??'user',permission_generation:observed.permission_generation??1, current: { ...observed.current, service_active: observed.service_active, release: { ...observed.current } }, target, files,
+        action: input.action, runtime_mode:observed.runtime_mode??'user',permission_generation:observed.permission_generation??1,
+        ...(helper ? { helper: { executor_id: helper.id, install_generation: helper.install_generation, activation_id: helper.activation_id } } : {}),
+        current: { ...observed.current, service_active: observed.service_active, release: { ...observed.current } }, target, files,
         target_revision: access.revision(machine), expires_at: expires,
         steps: ["核对主机、Agent 身份与当前程序指纹", "下载并校验审批固定的维护器和发行包", "保留已审批的运行账户、权限代次和内部执行身份", "通过独立 systemd 维护器切换同一 Agent 程序", "确认目标构建的新进程已同步平台配置", "确认成功；失败时仅恢复已验证的同账户程序"],
         warnings: ["维护期间暂停该主机的新任务派发和领取。", "保留主机 ID、Agent 身份、配置、队列和游标；不会重新接入。", "升级不会提升运行权限；账户切换需要独立审阅。", "结果未知时只读核对；确认超时仅回退到已验证的同账户程序，不自动重试。"] };
@@ -189,6 +207,11 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     assertTarget(machine);
     const selected = requireCredential ? access.credential(machine.id, operation.credential_id) : undefined;
     if (selected) { assertSSHAccount(selected.machine, body.ssh_account); if (sshCredentialRevision(selected.credential) !== body.credential_revision) fail(409, "ssh_credential_changed"); }
+    if (body.runtime_mode === "root") {
+      const helper = access.executionStatus?.(machine.id)?.executor;
+      if (!helper || helper.id !== body.helper?.executor_id || helper.install_generation !== body.helper?.install_generation || helper.state !== "active")
+        fail(409, "agent_update_helper_identity_changed");
+    }
     if (beforeStart && Date.parse(body.expires_at) <= deps.now().getTime()) fail(409, "维护计划已过期，请取消并重新生成");
     return { machine: selected?.machine ?? machine, plan: body };
   };
@@ -203,6 +226,13 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     const planBody = JSON.parse(operation.plan_json), expected = target ? planBody.target : planBody.current;
     if((planBody.runtime_mode==='root'||planBody.permission_generation>1)&&!value.runtime)return false;
     if(value.runtime && (!validAgentRuntimeObservation(value.runtime) || value.runtime.mode!==(planBody.runtime_mode??'user') || value.runtime.permission_generation!==(planBody.permission_generation??1)))return false;
+    if (planBody.runtime_mode === "root") {
+      const helper = helperRelease(machine.id, expected, planBody.permission_generation);
+      if (!helper || helper.id !== planBody.helper?.executor_id || helper.install_generation !== planBody.helper?.install_generation
+        || !helper.activation_id || helper.activation_id === planBody.helper?.activation_id
+        || Date.parse(helper.last_seen) < Date.parse(operation.started_at)
+        || helper.ordinary_task_identity?.uid !== value.runtime.uid || helper.ordinary_task_identity?.gid !== value.runtime.gid) return false;
+    }
     const boot = observedBootID ?? remote.local_health?.boot_id;
     if (!boot || value.boot_id !== boot || value.boot_id === planBody.current.boot_id || value.last_error !== "") return false;
     if (target) {
@@ -223,10 +253,13 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   };
   const saveRemote = (operation: any, remote: AgentUpdateRemoteStatus, allowCommit = false, verification?: { boot_id: string; fingerprint: string; verified_at: string }) => {
     validateRemote(operation, remote);
-    const healthy = Boolean(remote.local_health?.service_active && remote.local_health.identity_matches && remote.local_health.release_matches);
-    const original = JSON.parse(operation.plan_json).current;
+    const planBody = JSON.parse(operation.plan_json), needsHelper = planBody.runtime_mode === "root";
+    const healthy = Boolean(remote.local_health?.service_active && remote.local_health.identity_matches && remote.local_health.release_matches
+      && (!needsHelper || remote.local_health.helper_active));
+    const original = planBody.current;
     const restored = remote.status === "rolled_back" && remote.restored_fingerprint === original.fingerprint
       && remote.local_health.identity_matches && remote.local_health.release_matches
+      && (!needsHelper || remote.local_health.helper_active)
       && (original.service_active === false ? remote.local_health.service_active === false : healthy);
     const terminal = remote.status === "succeeded" && healthy && heartbeat(operation, remote, true, verification?.boot_id)
       ? "succeeded" : restored ? "rolled_back" : "";

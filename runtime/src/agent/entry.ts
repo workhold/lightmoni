@@ -54,6 +54,8 @@ export function requiresTrustedAgentStartup(args: readonly string[]): boolean {
     command === "run" ||
     command === "status" ||
     command === "quarantine" ||
+    command === "helper-run" ||
+    command === "helper-status" ||
     command.startsWith("managed-")
   );
 }
@@ -69,7 +71,7 @@ async function main() {
       process.getuid?.() !== 0 ||
       process.geteuid?.() !== 0
     )
-      throw Error("root_agent_requires_linux_root");
+      throw Error("root_helper_requires_linux_root");
     assertTrustedAgentTree(
       fileURLToPath(new URL("../../../", import.meta.url)),
     );

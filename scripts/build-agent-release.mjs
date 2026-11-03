@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { includeAgentRuntimeEntry, includeAgentRuntimeHashEntry } from "./agent-release-content.mjs";
 const repo = resolve(fileURLToPath(new URL("..", import.meta.url))),
   version = process.argv[2] ?? "0.1.0",
   output = resolve(process.argv[3] ?? join(repo, "runtime/downloads")),
@@ -33,13 +34,14 @@ if (!/^[a-f0-9]{40}$/.test(sourceRevision)) throw Error("Invalid source revision
 // at the same commit. File order is stable and timestamps are excluded.
 const contentHash = createHash("sha256");
 function hashTree(location, relative = "") {
+  if (!includeAgentRuntimeHashEntry(relative)) return;
   const info = lstatSync(location);
   contentHash.update(relative + "\0");
   if (info.isSymbolicLink()) contentHash.update("link\0" + readlinkSync(location));
   else if (info.isDirectory()) for (const name of readdirSync(location).sort()) hashTree(join(location, name), relative + "/" + name);
   else contentHash.update(readFileSync(location));
 }
-for (const file of ["runtime/dist", "runtime/package.json", "runtime/package-lock.json", "sdk/typescript/dist", "sdk/typescript/package.json", "deploy/agent", "deploy/executor", "scripts/build-agent-release.mjs"]) hashTree(join(repo, file), file);
+for (const file of ["runtime/dist", "runtime/package.json", "runtime/package-lock.json", "sdk/typescript/dist", "sdk/typescript/package.json", "deploy/agent", "scripts/agent-release-content.mjs", "scripts/build-agent-release.mjs"]) hashTree(join(repo, file), file);
 const buildID = process.env.LIGHTMONI_AGENT_BUILD_ID ?? `${version}-${sourceRevision.slice(0, 12)}-${contentHash.digest("hex").slice(0, 12)}`;
 if (!/^[A-Za-z0-9._-]{1,128}$/.test(buildID)) throw Error("Invalid Agent build ID");
 const buildTime = new Date().toISOString();
@@ -53,7 +55,7 @@ try {
 } catch {
   throw Error("Node distribution URL must use HTTPS without credentials, query or fragment");
 }
-if (!existsSync(join(repo, "runtime/dist/agent/main.js")) || !existsSync(join(repo, "runtime/dist/privileged-executor/main.js")))
+if (!existsSync(join(repo, "runtime/dist/agent/main.js")))
   throw Error("Build the TypeScript SDK and runtime first");
 mkdirSync(output, { recursive: true });
 const staging = mkdtempSync(join(tmpdir(), "lightmoni-release-")),
@@ -87,8 +89,10 @@ try {
   mkdirSync(sdk, { recursive: true });
   for (const name of ["package.json", "package-lock.json"])
     cpSync(join(repo, "runtime", name), join(runtime, name));
-  cpSync(join(repo, "runtime/dist"), join(runtime, "dist"), {
+  const runtimeDist = join(repo, "runtime/dist");
+  cpSync(runtimeDist, join(runtime, "dist"), {
     recursive: true,
+    filter: (source) => includeAgentRuntimeEntry(source, runtimeDist),
   });
   cpSync(join(repo, "sdk/typescript/package.json"), join(sdk, "package.json"));
   cpSync(join(repo, "sdk/typescript/dist"), join(sdk, "dist"), {
@@ -109,11 +113,15 @@ try {
     join(repo, "deploy/agent/lightmoni-agent.service"),
     join(common, "lightmoni-agent.service"),
   );
+  cpSync(
+    join(repo, "deploy/agent/lightmoni-agent-helper.service"),
+    join(common, "lightmoni-agent-helper.service"),
+  );
   // Keep an offline maintenance entry point inside the checked runtime bundle.
   // It requires neither the platform nor a working bundled Node executable.
   cpSync(join(repo, "deploy/agent/uninstall.sh"), join(common, "lightmoni-agent-runtime/uninstall.sh"));
   chmodSync(join(common, "lightmoni-agent-runtime/uninstall.sh"), 0o755);
-  // One Agent release includes its internal signed task module, no second service.
+  // One Agent release includes its internal signed task module and optional helper, no separate executor release.
   for (const file of ["service-unit.mjs", "runtime-mode.mjs"])
     cpSync(join(repo, "deploy/agent", file), join(common, "lightmoni-agent-runtime", file));
   cpSync(join(repo, "deploy/agent/deployment-permissions.mjs"), join(common, "lightmoni-agent-runtime/deployment-permissions.mjs"));
@@ -189,6 +197,7 @@ try {
       perArch,
       "lightmoni-agent",
       "lightmoni-agent.service",
+      "lightmoni-agent-helper.service",
       "lightmoni-agent-runtime",
     ], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
     artifacts.push(artifact);

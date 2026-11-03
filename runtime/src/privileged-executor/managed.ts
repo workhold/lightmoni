@@ -8,7 +8,7 @@ import { managedExecutionPayload,type ManagedExecutionPayload } from '../shared/
 import { executeOperation,operationCommand } from '../agent/operations.js';
 import { executeDocker } from '../agent/docker.js';
 import { CapabilityExecutor,type ExecutionReceipt } from '../agent/executor.js';
-import { loadConfig,EXECUTOR_CONFIG,MANAGED_AGENT_CONFIG,MANAGED_AGENT_DATA_DIR,type ExecutorConfig } from './config.js';
+import { loadConfig,MANAGED_AGENT_CONFIG,MANAGED_AGENT_DATA_DIR,type ExecutorConfig } from './config.js';
 import { requestExecutor } from './client.js';
 import { inspectManagedDockerDaemon } from './docker.js';
 import { assertRoot,boundedFile,durableWrite,rootPath,secureDirectory,refuse } from './security.js';
@@ -104,6 +104,5 @@ export async function runManagedSnapshot(filename:string,expectedDigest:string):
 /** Select only one of two fixed root-owned configurations, never a caller path. */
 export function managedSnapshotConfig(filename:string):string {
   if(filename.startsWith(MANAGED_AGENT_DATA_DIR+'/managed-jobs/'))return MANAGED_AGENT_CONFIG;
-  if(filename.startsWith('/var/lib/lightmoni-executor/managed-jobs/'))return EXECUTOR_CONFIG;
   return refuse('invalid_managed_snapshot');
 }

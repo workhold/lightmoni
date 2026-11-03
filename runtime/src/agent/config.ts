@@ -28,7 +28,7 @@ export interface LogSource {
   from_beginning: boolean;
 }
 export interface Config {
-  /** The service manager supplies OS privileges; this value only verifies them. */
+  /** root means a separate root-owned helper is enabled; the Agent always stays unprivileged. */
   runtime_mode: "root" | "user";
   permission_generation: number;
   listen: string;

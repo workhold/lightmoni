@@ -17,6 +17,7 @@ import { assertNoPendingAgentRuntime } from './machine-agent-runtime-guard.js';
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoDockerInstallation } from "./machine-docker-guard.js";
 import { hasPendingExecutorLifecycle } from "./privileged-execution-guard.js";
+import type { TaskRunStore } from "./task-center.js";
 
 type Row = Record<string, any>;
 const terminal = (state: string) => ["succeeded", "failed", "cancelled", "unknown"].includes(state);
@@ -45,6 +46,7 @@ export interface ManagedExecutorBridge {
 }
 export class PrivilegedExecutorStore {
   managed?:ManagedExecutorBridge;
+  taskRuns?:TaskRunStore;
   observations?:{targets:(executor:Row)=>unknown;accept:(executor:Row,value:Row)=>unknown};
   observationAuthority(id:string){const e=this.executor(id),p=this.policy(e.machine_id);if(p.agent_id!==e.agent_id||!JSON.parse(p.capabilities_json).includes('operations.managed.v1'))fail(403,'policy_disabled');this.actor(p.approved_by);return e;}
 
@@ -293,12 +295,30 @@ export class PrivilegedExecutorStore {
     const binding = !!row && row.agent_id === host?.agent_id && !isAgentRemoved(this.deps.db, row.agent_id);
     const online = binding && row.state === "active" && !!row.last_seen && Date.parse(row.last_seen) > this.deps.now().getTime() - 60_000;
     const authorized = JSON.parse(policy.capabilities_json) as string[];
-    return { machine_id: machineID, policy_generation: policy.generation, executor: row ? { id: row.id, state: row.state, install_generation: row.install_generation, online, last_seen: row.last_seen, version: observation.version ?? "", boot_id: observation.boot_id ?? "",activation_id:observation.activation_id??"",release:observation.release ?? null } : null,
+    return { machine_id: machineID, policy_generation: policy.generation, executor: row ? { id: row.id, state: row.state, install_generation: row.install_generation, online, last_seen: row.last_seen, version: observation.version ?? "", boot_id: observation.boot_id ?? "",activation_id:observation.activation_id??"",release:observation.release ?? null,ordinary_task_identity:observation.ordinary_task_identity??null } : null,
       capabilities: Object.fromEntries(PRIVILEGED_CAPABILITIES.map(capability => [capability, { authorized: authorized.includes(capability), effective: !authorized.includes(capability) ? "disabled" : !row ? "pending" : !binding ? "blocked" : online && observation.policy_generation === policy.generation && observation.capabilities?.includes(capability) ? "ready" : "unavailable", policy_generation: policy.generation }])),
       ...(online && authorized.includes('operations.managed.v1') && observation.policy_generation===policy.generation && observation.capabilities?.includes('operations.managed.v1') && observation.docker_inventory?{docker_inventory:observation.docker_inventory}:{}),
       operations_capabilities:online && observation.policy_generation===policy.generation && observation.capabilities?.includes("operations.managed.v1")?observation.operations_capabilities??[]:[],
       account_profiles: online && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreter_profiles: online && observation.policy_generation === policy.generation ? observation.interpreter_profiles ?? [] : [],
       script_profiles: { accounts: online && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreters: online && observation.policy_generation === policy.generation ? Object.fromEntries((observation.interpreter_profiles ?? []).map((p: Row) => [p.runtime, p.sha256])) : {} } };
+  }
+  /** Resolve ordinary-script identity only from the latest signature-verified helper heartbeat. */
+  ordinaryTaskIdentity(machineID:string,agentID:string,executorID:string,installGeneration:number) {
+    const runtime=this.deps.db.get<Row>("SELECT agent_id,runtime_mode,permission_generation FROM machine_agent_runtime WHERE machine_id=?",machineID);
+    const host=this.deps.db.get<Row>("SELECT agent_id FROM managed_machines WHERE id=?",machineID);
+    if(!runtime||runtime.agent_id!==agentID||runtime.runtime_mode!=="root"||host?.agent_id!==agentID)return null;
+    const row=this.deps.db.get<Row>("SELECT * FROM privileged_executors WHERE id=? AND machine_id=? AND agent_id=? AND install_generation=? AND state='active'",executorID,machineID,agentID,installGeneration);
+    if(!row||!row.observation_enc||!row.last_seen||Date.parse(row.last_seen)<=this.deps.now().getTime()-60_000||isAgentRemoved(this.deps.db,agentID))return null;
+    let observation:Row;
+    try{observation=parseStrictJSON(this.deps.decrypt(row.observation_enc));}catch{return null;}
+    const identity=observation.ordinary_task_identity;
+    if(!identity||identity.account!=="lightmoni-agent"||!Number.isSafeInteger(identity.uid)||identity.uid<=0||!Number.isSafeInteger(identity.gid)||identity.gid<=0
+      ||!Number.isSafeInteger(identity.permission_generation)||identity.permission_generation!==runtime.permission_generation)return null;
+    return {account:"lightmoni-agent" as const,uid:identity.uid as number,gid:identity.gid as number,permission_generation:identity.permission_generation as number};
+  }
+  ordinaryTaskCapabilities(machineID:string,agentID:string):string[] {
+    const executor=this.deps.db.get<Row>("SELECT id,install_generation FROM privileged_executors WHERE machine_id=? AND agent_id=? AND state='active' ORDER BY install_generation DESC LIMIT 1",machineID,agentID);
+    return executor&&this.ordinaryTaskIdentity(machineID,agentID,executor.id,executor.install_generation)?["task.script.v1","task.script.v2"]:[];
   }
   /** Authenticate exact bytes and transactionally cache the entire reply, including claim leases. */
   signedRequest(executorID: string, method: string, path: string, body: Uint8Array, signature: unknown, action: (executor: Row, input: Row) => unknown): unknown {
@@ -329,8 +349,8 @@ export class PrivilegedExecutorStore {
     });
   }
   heartbeat(executor: Row, value: unknown) {
-    const keys = ["version", "boot_id", "activation_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release","operations_capabilities","docker_inventory"];
-    const v = object(value, keys,keys.filter(k=>!["release","operations_capabilities","docker_inventory"].includes(k))); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
+    const keys = ["version", "boot_id", "activation_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release","operations_capabilities","docker_inventory","ordinary_task_identity"];
+    const v = object(value, keys,keys.filter(k=>!["release","operations_capabilities","docker_inventory","ordinary_task_identity"].includes(k))); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
     if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(v.activation_id))fail(400,"invalid_executor_activation");
     if (v.release!==undefined) {
       const release=object(v.release,["build_id","source_revision","artifact_sha256","state_schema"]);
@@ -340,6 +360,41 @@ export class PrivilegedExecutorStore {
     }
     if (!Number.isSafeInteger(v.policy_generation) || v.policy_generation < 1) fail(400, "invalid_policy_generation");
     if(v.docker_inventory!==undefined&&!dockerInventory(v.docker_inventory))fail(400,"invalid_docker_inventory");
+    if(v.ordinary_task_identity!==undefined){
+      const identity=object(v.ordinary_task_identity,["account","uid","gid","permission_generation"]);
+      const runtime=this.deps.db.get<Row>("SELECT runtime_mode,permission_generation,agent_id FROM machine_agent_runtime WHERE machine_id=?",executor.machine_id);
+      const release=v.release as Row|undefined;
+      const currentMode=!!runtime&&runtime.agent_id===executor.agent_id&&runtime.runtime_mode==="root"
+        &&identity.permission_generation===runtime.permission_generation;
+      // Keep the saved runtime at its last verified state during a user ->
+      // full-management transition. Bind the helper's first heartbeat only to
+      // the exact approved, running plan and target release.
+      const pending=runtime&&runtime.agent_id===executor.agent_id&&runtime.runtime_mode==="user"
+        ?this.deps.db.get<Row>("SELECT id,plan_json,executor_id,executor_generation,executor_policy_generation,status,request_id FROM machine_agent_runtime_plans WHERE machine_id=? AND agent_id=? AND executor_id=? AND request_id!='' AND status IN ('running','verifying') ORDER BY created_at DESC,id DESC LIMIT 1",executor.machine_id,executor.agent_id,executor.id)
+        :undefined;
+      let approvedTransition=false;
+      if(pending){
+        try{
+          const plan=parseStrictJSON(pending.plan_json),machine=plan.machine,expected=plan.release,policy=this.policy(executor.machine_id);
+          approvedTransition=pending.status==='running'||pending.status==='verifying';
+          approvedTransition&&=!!machine&&machine.id===executor.machine_id&&machine.agent_id===executor.agent_id;
+          approvedTransition&&=plan.from_mode==='user'&&plan.runtime_mode==='root'
+            &&plan.previous_generation===runtime!.permission_generation
+            &&plan.permission_generation===identity.permission_generation
+            &&Number.isSafeInteger(plan.permission_generation)&&plan.permission_generation===plan.previous_generation+1;
+          approvedTransition&&=!!expected&&expected.artifact_sha256===release?.artifact_sha256
+            &&expected.build_id===release?.build_id&&expected.source_revision===release?.source_revision
+            &&expected.state_schema===release?.state_schema&&expected.state_schema===1;
+          approvedTransition&&=pending.executor_id===executor.id
+            &&pending.executor_generation===executor.install_generation
+            &&pending.executor_policy_generation===v.policy_generation
+            &&v.policy_generation===policy.generation&&policy.agent_id===executor.agent_id;
+        }catch{approvedTransition=false;}
+      }
+      if(identity.account!=="lightmoni-agent"||!Number.isSafeInteger(identity.uid)||identity.uid<=0||!Number.isSafeInteger(identity.gid)||identity.gid<=0
+        ||!Number.isSafeInteger(identity.permission_generation)||!release||(!currentMode&&!approvedTransition))fail(409,"invalid_ordinary_task_identity");
+      v.ordinary_task_identity={account:"lightmoni-agent",uid:identity.uid,gid:identity.gid,permission_generation:identity.permission_generation};
+    }
     const capabilities = this.capabilities(v.capabilities);
     if(v.operations_capabilities!==undefined&&(!Array.isArray(v.operations_capabilities)||v.operations_capabilities.length>30||v.operations_capabilities.some((c:unknown)=>typeof c!=="string"||!/^operations\.[a-z0-9_.-]{1,64}$/.test(c))))fail(400,"invalid_operations_capabilities");
     if (!Array.isArray(v.account_profiles) || v.account_profiles.length > 32 || !Array.isArray(v.interpreter_profiles) || v.interpreter_profiles.length > 8) fail(400, "invalid_profiles");
@@ -577,6 +632,14 @@ export function registerPrivilegedExecutors(deps: Dependencies, options: { dataD
     c.json(store.signedRequest(c.params.id, c.req.method!, c.url.pathname, raw, c.req.headers[EXECUTOR_SIGNATURE_HEADER], (e, v) => action(e, v, c)));
   }, { public: true });
   signed("heartbeat", (e, v) => store.heartbeat(e, v));
+  const taskPrincipal=(e:Row)=>{
+    if(typeof e.id!=="string"||typeof e.machine_id!=="string"||typeof e.agent_id!=="string"||!Number.isSafeInteger(e.install_generation))fail(401,"invalid_task_helper_principal");
+    return {id:e.id,machine_id:e.machine_id,agent_id:e.agent_id,install_generation:e.install_generation as number};
+  };
+  signed("task-runs/claim",(e,v)=>{if(!store.taskRuns)fail(503,"ordinary_task_bridge_unavailable");return store.taskRuns.claimForHelper(taskPrincipal(e),v);});
+  signed("task-runs/:runId/heartbeat",(e,v,c)=>{if(!store.taskRuns)fail(503,"ordinary_task_bridge_unavailable");return store.taskRuns.heartbeatForHelper(taskPrincipal(e),c.params.runId,v);});
+  signed("task-runs/:runId/result",(e,v,c)=>{if(!store.taskRuns)fail(503,"ordinary_task_bridge_unavailable");return store.taskRuns.resultForHelper(taskPrincipal(e),c.params.runId,v);});
+  signed("task-runs/:runId/reconcile",(e,v,c)=>{if(!store.taskRuns)fail(503,"ordinary_task_bridge_unavailable");return store.taskRuns.reconcileForHelper(taskPrincipal(e),c.params.runId,v);});
   signed("jobs/claim", (e, v) => store.claim(e, v));
   signed("jobs/:jobId/renew", (e, v, c) => store.renew(e, c.params.jobId, v));
   signed("jobs/:jobId/payload", (e, v, c) => store.payload(e, c.params.jobId, v));

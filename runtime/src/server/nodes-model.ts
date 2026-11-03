@@ -48,7 +48,7 @@ export interface Task {
   script?: TaskScript;
   execution_policy?: TaskExecutionPolicy;
 }
-export interface EffectiveHostTask extends Task { status: "disabled" | "waiting_config" | "waiting_agent" | "active" | "ready" | "overridden_by_custom" | "upgrade_required"; overridden: boolean }
+export interface EffectiveHostTask extends Task { status: "disabled" | "waiting_config" | "waiting_agent" | "active" | "ready" | "overridden_by_custom" | "task_channel_unavailable" | "upgrade_required"; overridden: boolean }
 export interface Label {
   id: string;
   name: string;
@@ -171,6 +171,8 @@ export function normalizeTask(input: any): Task {
 }
 
 export class NodeStore {
+  /** Adds script support only when a signed helper currently proves it is available. */
+  taskScriptCapabilities?: (hostID:string, agentID:string) => string[];
   constructor(
     readonly db: DB,
     readonly now: () => Date,
@@ -250,7 +252,8 @@ export class NodeStore {
     return this.db.all<any>("SELECT id,name,agent_id,agent_last_seen FROM managed_machines ORDER BY name,id").map(host => {
       const ids = this.hostLabels(host.id), node = host.agent_id ? this.db.get<any>("SELECT last_seen,heartbeat FROM agents WHERE id=?", host.agent_id) : undefined;
       const removed = host.agent_id && this.db.get("SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed'", host.agent_id);
-      return { id: host.id, name: host.name, agent_id: host.agent_id, network: machineNetwork(this.db, host.id), agent_status: removed ? "removed" : !host.agent_id ? "missing" : node && this.now().getTime() - Date.parse(node.last_seen) <= 90_000 ? "online" : "offline", task_capabilities: node && Array.isArray(JSON.parse(node.heartbeat || "{}").task_capabilities) ? JSON.parse(node.heartbeat || "{}").task_capabilities.filter((capability:string) => (SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(capability)) : [], label_ids: ids, labels: labels.filter(label => ids.includes(label.id)).map(({id,name}) => ({id,name})) };
+      const helper=host.agent_id&&!removed?this.taskScriptCapabilities?.(host.id,host.agent_id)??[]:[];
+      return { id: host.id, name: host.name, agent_id: host.agent_id, network: machineNetwork(this.db, host.id), agent_status: removed ? "removed" : !host.agent_id ? "missing" : node && this.now().getTime() - Date.parse(node.last_seen) <= 90_000 ? "online" : "offline", task_capabilities: [...new Set(helper.filter((capability:string)=>(SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(capability)))], label_ids: ids, labels: labels.filter(label => ids.includes(label.id)).map(({id,name}) => ({id,name})) };
     });
   }
   setHostLabels(id: string, values: any, inTransaction = false): string[] {
@@ -270,13 +273,17 @@ export class NodeStore {
     const host = this.assertHost(hostID), ids = this.hostLabels(hostID);
     const node = host.agent_id && this.db.get<any>("SELECT last_seen,heartbeat FROM agents WHERE id=?", host.agent_id);
     const connected = !!node && !this.db.get("SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed'", host.agent_id) && this.now().getTime() - Date.parse(node.last_seen) <= 90_000;
-    const capabilities = node ? JSON.parse(node.heartbeat || "{}").task_capabilities : [];
+    const helper = host.agent_id ? this.taskScriptCapabilities?.(hostID,host.agent_id) ?? [] : [];
+    const capabilities = [...new Set(helper)];
     const matched = this.tasks().filter(task => task.target_all || task.host_ids.includes(hostID) || task.label_ids.some(id => ids.includes(id))).map(task => {
       const saved = this.db.get<{override_json:string}>("SELECT override_json FROM machine_task_overrides WHERE machine_id=? AND task_id=?", hostID, task.id);
       const override = saved ? JSON.parse(saved.override_json) : {};
       const effective = normalizeTask({ ...task, ...override, config: override.config ? { ...task.config, ...override.config } : task.config });
       const needsConfig = effective.type === "probe" && !effective.config.probes.length || effective.type === "log" && !effective.config.log_sources.length;
-      return { ...effective, overridden: !!saved, status: !effective.enabled ? "disabled" : needsConfig ? "waiting_config" : !connected ? "waiting_agent" : effective.type === "script" ? supportsTaskScript(capabilities,effective.script) ? "ready" : "upgrade_required" : "active" } as EffectiveHostTask;
+      const hasV1 = capabilities.includes("task.script.v1") || capabilities.includes("task.script.v2");
+      const requiresV2 = !!(effective.script?.args?.length || effective.script?.cwd);
+      const capabilityStatus = supportsTaskScript(capabilities,effective.script) ? "ready" : requiresV2 && hasV1 ? "upgrade_required" : "task_channel_unavailable";
+      return { ...effective, overridden: !!saved, status: !effective.enabled ? "disabled" : needsConfig ? "waiting_config" : !connected ? "waiting_agent" : effective.type === "script" ? capabilityStatus : "active" } as EffectiveHostTask;
     });
     if (matched.some(task => task.enabled && task.origin === "custom" && task.type === "host"))
       for (const task of matched) if (task.enabled && task.origin === "builtin" && task.type === "host") task.status = "overridden_by_custom";

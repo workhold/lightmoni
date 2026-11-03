@@ -1,9 +1,10 @@
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chownSync, lstatSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chownSync, lstatSync, chmodSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { atomicJSON } from "../shared/io.js";
 import { SCRIPT_TASK_CAPABILITIES, requiredTaskScriptCapability, validateTaskScript, type ClaimedTaskRun, type TaskRunResult, type TaskScript } from "../shared/task-center.js";
 import { rootPath } from "../privileged-executor/security.js";
+import { MANAGED_AGENT_DATA_DIR, MANAGED_AGENT_TASKS_DIR } from "../privileged-executor/config.js";
 
 export interface OrdinaryTaskAccount { uid: number; gid: number }
 export function ordinaryTaskAccount(): OrdinaryTaskAccount {
@@ -13,10 +14,32 @@ export function ordinaryTaskAccount(): OrdinaryTaskAccount {
   if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid) || uid <= 0 || gid <= 0 || value("-gn") !== "lightmoni-agent") throw Error("ordinary_task_account_unavailable");
   return {uid, gid};
 }
-export function ordinaryTaskCommand(node: string, args: string[], account?: OrdinaryTaskAccount): {file: string; args: string[]} {
-  if (!account) return {file: node, args};
+export function ordinaryTaskCommand(node: string, args: string[], account: OrdinaryTaskAccount): {file: string; args: string[]} {
   if (!Number.isSafeInteger(account.uid) || !Number.isSafeInteger(account.gid) || account.uid <= 0 || account.gid <= 0) throw Error("invalid_ordinary_task_account");
   return {file: "/usr/bin/setpriv", args: ["--reuid=" + account.uid, "--regid=" + account.gid, "--clear-groups", "--no-new-privs", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--", node, ...args]};
+}
+
+const IDENTITY_PROBE = `import fs from 'node:fs';const s=fs.readFileSync('/proc/self/status','utf8');const field=n=>{const m=s.match(new RegExp('^'+n+':[\\t ]*([^\\n]*)$','m'));if(!m)throw Error('missing_identity_field');return m[1].trim()};console.log(JSON.stringify({uid:process.getuid(),euid:process.geteuid(),gid:process.getgid(),groups:field('Groups').split(/[\\t ]+/).filter(Boolean).map(Number),nnp:field('NoNewPrivs'),caps:{inh:field('CapInh'),prm:field('CapPrm'),eff:field('CapEff'),bnd:field('CapBnd'),amb:field('CapAmb')}}));`;
+
+/** Verify the exact setpriv profile on this Linux host without running user code. */
+export function verifyOrdinaryTaskExecutionIdentity(expected = ordinaryTaskAccount()): void {
+  if (process.platform !== "linux" || process.getuid?.() !== 0 || process.geteuid?.() !== 0)
+    throw Error("task_helper_requires_linux_root");
+  rootPath("/usr/bin/setpriv");
+  const node = rootPath(realpathSync(process.execPath));
+  const command = ordinaryTaskCommand(node, ["-e", IDENTITY_PROBE], expected);
+  const raw = execFileSync(command.file, command.args, {
+    encoding: "utf8", timeout: 5000, maxBuffer: 4096,
+    env: { PATH: "/usr/bin:/bin", LANG: "C", HOME: "/nonexistent" },
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  let value: any;
+  try { value = JSON.parse(raw); } catch { throw Error("ordinary_task_identity_check_failed"); }
+  if (value.uid !== expected.uid || value.euid !== expected.uid || value.gid !== expected.gid
+    || !Array.isArray(value.groups) || value.groups.length !== 0 || value.nnp !== "1"
+    || !value.caps || Object.keys(value.caps).sort().join(",") !== "amb,bnd,eff,inh,prm"
+    || Object.values(value.caps).some(v => typeof v !== "string" || !/^[a-fA-F0-9]+$/.test(v) || BigInt("0x" + v) !== 0n))
+    throw Error("ordinary_task_identity_check_failed");
 }
 
 export interface ScriptOutcome {
@@ -32,22 +55,11 @@ const utf8Prefix = (v: string, max: number) => {
   let end = max; while (end > 0 && (b[end] & 0xc0) === 0x80) end--;
   return b.subarray(0, end).toString("utf8");
 };
-// A separate supervisor keeps its own deadline and observes reparenting if the
-// Agent is killed. The user script shares this process group, without IPC.
-const SUPERVISOR = `import {spawn} from 'node:child_process';
-const [runtime,file,seconds,parent,...args]=process.argv.slice(2);
-const stop=()=>{try{if(process.platform!=='win32')process.kill(-process.pid,'SIGKILL');else child.kill('SIGKILL')}catch{}process.exit(1)};
-const child=spawn(runtime==='node'?process.execPath:'/bin/sh',[file,...args],{stdio:['ignore','inherit','inherit'],env:process.env});
-child.once('error',()=>{process.send?.({type:'complete',exit_code:null,spawn_error:true})});
-child.once('exit',code=>{process.send?.({type:'complete',exit_code:code})});
-setInterval(()=>{if(process.ppid!==Number(parent))stop()},200);
-setTimeout(stop,Number(seconds)*1000+1000);
-process.on('disconnect',stop);
-`;
-
-/** Bounded subprocess execution. This is not an OS sandbox: it runs as the Agent user. */
+/** The root helper drops ordinary scripts to the same unprivileged account as the daemon.
+ * Scripts are trusted administration code: environment scrubbing does not isolate
+ * them from this account's readable Agent credentials or writable local state. */
 export async function executeTaskScript(script: TaskScript, options: {
-  dataDir: string; runID: string; signal?: AbortSignal; secrets?: string[];
+  dataDir: string; runID: string; signal?: AbortSignal; expectedAccount: OrdinaryTaskAccount;
 }): Promise<ScriptOutcome> {
   validateTaskScript(script);
   if (options.signal?.aborted) {
@@ -57,32 +69,32 @@ export async function executeTaskScript(script: TaskScript, options: {
   }
   if (script.runtime === "shell" && process.platform === "win32")
     return { state: "failed", code: "runtime_unavailable", summary: "POSIX shell is unavailable", stdout: "", stderr: "", exit_code: null };
-  // A root-mode Agent never grants its identity to an ordinary task. The work
-  // directory is outside root-private state; only the downgraded child reads it.
-  let account: OrdinaryTaskAccount | undefined;
-  if (process.getuid?.() === 0 || process.geteuid?.() === 0) {
-    if (process.platform !== "linux" || process.getuid?.() !== 0 || process.geteuid?.() !== 0) throw Error("ordinary_task_demotion_unavailable");
-    rootPath("/usr/bin/setpriv"); account = ordinaryTaskAccount();
-  }
-  const root = account ? "/var/tmp" : resolve(options.dataDir, "task-work");
-  if (account) { const info = lstatSync(root); if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== 0) throw Error("unsafe_task_temporary_directory"); }
-  else mkdirSync(root, { recursive: true, mode: 0o700 });
-  const work = mkdtempSync(join(root, account ? "lightmoni-task-" : "run-"));
+  if (process.platform !== "linux" || process.getuid?.() !== 0 || process.geteuid?.() !== 0) throw Error("task_helper_requires_linux_root");
+  rootPath("/usr/bin/setpriv");
+  const account = ordinaryTaskAccount();
+  if (options.expectedAccount.uid !== account.uid || options.expectedAccount.gid !== account.gid)
+    throw Error("ordinary_task_identity_changed");
+  const root = MANAGED_AGENT_TASKS_DIR;
+  rootPath(root, "directory");
+  const parent = lstatSync(MANAGED_AGENT_DATA_DIR);
+  if (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== 0 || (parent.mode & 0o022) !== 0) throw Error("unsafe_task_state_directory");
+  const info = lstatSync(root); if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== 0 || (info.mode & 0o022) !== 0 || (info.mode & 0o111) !== 0o111) throw Error("unsafe_task_temporary_directory");
+  const work = mkdtempSync(join(root, "lightmoni-agent-"));
   const file = join(work, script.runtime === "node" ? "task.mjs" : "task.sh");
   writeFileSync(file, script.code, { mode: 0o600 });
-  const supervisor = join(work, "supervisor.mjs");
-  writeFileSync(supervisor, SUPERVISOR, { mode: 0o600 });
-  if (account) { chownSync(file, account.uid, account.gid); chownSync(supervisor, account.uid, account.gid); chownSync(work, account.uid, account.gid); }
-  const secrets = (options.secrets ?? []).filter(Boolean).sort((a, b) => b.length - a.length);
-  const scrub = (value: string) => { for (const secret of secrets) value = value.split(secret).join("[redacted]"); return value; };
+  chownSync(file, account.uid, account.gid);
+  chownSync(work, account.uid, account.gid);
+  chmodSync(work, 0o700);
+  const scrub = (value: string) => value;
   try {
     return await new Promise<ScriptOutcome>(resolve => {
       let stdout = Buffer.alloc(0), stderr = Buffer.alloc(0), received = 0, reason = "", done = false;
       let timeout: NodeJS.Timeout | undefined, force: NodeJS.Timeout | undefined;
       let scriptExit: number | null | undefined, spawnError = false;
-      const command = ordinaryTaskCommand(process.execPath, [supervisor, script.runtime, file, String(script.timeout_seconds), String(process.pid), ...(script.args ?? [])], account);
+      const executable = script.runtime === "node" ? process.execPath : "/bin/sh";
+      const command = ordinaryTaskCommand(executable, [file, ...(script.args ?? [])], account);
       const child = spawn(command.file, command.args, {
-        cwd: script.cwd || work, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe", "ipc"],
+        cwd: script.cwd || work, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"],
         env: { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: work, TMPDIR: work, LANG: "C.UTF-8", LIGHTMONI_TASK_RUN_ID: options.runID },
       });
       const kill = (signal: NodeJS.Signals) => {
@@ -105,13 +117,6 @@ export async function executeTaskScript(script: TaskScript, options: {
       };
       child.stdout!.on("data", (b: Buffer) => append("stdout", b));
       child.stderr!.on("data", (b: Buffer) => append("stderr", b));
-      child.on("message", (message: any) => {
-        if (message?.type !== "complete" || !(message.exit_code === null || Number.isInteger(message.exit_code))) return;
-        scriptExit = message.exit_code; spawnError = !!message.spawn_error;
-        // User code is done; close the full group so background descendants
-        // cannot outlive a successful task or hold the output pipes open.
-        kill("SIGKILL");
-      });
       const finish = (exit: number | null, failedSpawn = false) => {
         if (done) return; done = true;
         if (timeout) clearTimeout(timeout); if (force) clearTimeout(force);
@@ -125,7 +130,9 @@ export async function executeTaskScript(script: TaskScript, options: {
         const summaries: Record<string, string> = { timeout: "Script exceeded its time limit", output_limit: "Script exceeded its output limit", cancel_requested: "Script cancelled by platform request", control_lost: "Script stopped after control authority was lost", runtime_unavailable: "Script runtime could not start", script_failed: "Script exited unsuccessfully" };
         resolve({ state, code, summary: summaries[code] ?? "Script completed", stdout: out, stderr: err, exit_code: exit });
       };
-      child.once("error", () => finish(null, true)); child.once("close", exit => finish(scriptExit === undefined ? exit : scriptExit, spawnError));
+      child.once("error", () => { spawnError = true; });
+      child.once("exit", code => { scriptExit = code; kill("SIGKILL"); });
+      child.once("close", exit => finish(scriptExit === undefined ? exit : scriptExit, spawnError));
       timeout = setTimeout(() => stop("timeout"), script.timeout_seconds * 1000);
       timeout.unref?.();
       if (options.signal?.aborted) abort(); else options.signal?.addEventListener("abort", abort, { once: true });
@@ -134,38 +141,35 @@ export async function executeTaskScript(script: TaskScript, options: {
 }
 
 export interface TaskRunnerConfig {
-  endpoint: string; agentID: string; controlCredential: string; dataCredential?: string;
+  endpoint: string; agentID: string; executorID: string; executorInstallGeneration: number;
   dataDir: string; pollIntervalMs?: number; heartbeatIntervalMs?: number;
-  runtimeMode?: "root" | "user"; permissionGeneration?: number;
+  permissionGeneration: number;
+  executionIdentity: { account: "lightmoni-agent"; uid: number; gid: number; permission_generation: number };
 }
-class TaskHTTPError extends Error { constructor(readonly status: number) { super("task control HTTP " + status); } }
 interface Recovery { id: string; lease_token: string; receipt?: TaskRunResult }
 
 /** Pulls a single task at a time; a crash marker prevents local script replay. */
 export class AgentTaskRunner {
   private readonly statePath: string;
-  private readonly fetcher: typeof fetch;
   private polling = false;
-  constructor(readonly config: TaskRunnerConfig, io: { fetch?: typeof fetch } = {}) {
-    this.fetcher = io.fetch ?? fetch; this.statePath = resolve(config.dataDir, "task-run-state.json");
+  constructor(readonly config: TaskRunnerConfig, io: { request: (route: string, body: unknown, parent?: AbortSignal, slot?: string) => Promise<any>; clearRequest: (slot: string) => void }) {
+    this.requester = io.request; this.clearRequest = io.clearRequest; this.statePath = resolve(config.dataDir, "task-run-state.json");
+    if (!config.executorID || !Number.isSafeInteger(config.executorInstallGeneration) || config.executorInstallGeneration < 1
+      || !Number.isSafeInteger(config.permissionGeneration) || config.permissionGeneration < 1
+      || config.executionIdentity.account !== "lightmoni-agent" || config.executionIdentity.permission_generation !== config.permissionGeneration
+      || !Number.isSafeInteger(config.executionIdentity.uid) || config.executionIdentity.uid <= 0
+      || !Number.isSafeInteger(config.executionIdentity.gid) || config.executionIdentity.gid <= 0)
+      throw Error("invalid_signed_helper_identity");
   }
-  private async request(path: string, body: unknown, parent?: AbortSignal) {
-    const response = await this.fetcher(this.config.endpoint.replace(/\/$/, "") + path, {
-      method: "POST", redirect: "error",
-      headers: { authorization: "Bearer " + this.config.controlCredential, "content-type": "application/json" },
-      body: JSON.stringify(body), signal: parent ? AbortSignal.any([parent, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
-    });
-    if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new TaskHTTPError(response.status); }
-    if (!response.body) throw Error("empty task control response");
-    const reader = response.body.getReader(), chunks: Buffer[] = []; let bytes = 0;
-    try {
-      while (true) { const part = await reader.read(); if (part.done) break; bytes += part.value.length;
-        if (bytes > 1_048_576) { await reader.cancel(); throw Error("oversized task control response"); }
-        chunks.push(Buffer.from(part.value)); }
-    } finally { reader.releaseLock(); }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  private readonly requester: (route: string, body: unknown, parent?: AbortSignal, slot?: string) => Promise<any>;
+  private readonly clearRequest: (slot: string) => void;
+  private async request(path: string, body: unknown, parent?: AbortSignal, slot?: string) {
+    return this.requester(path, body, parent, slot);
   }
-  private path(id: string, action: string) { return `/api/v1/agents/${encodeURIComponent(this.config.agentID)}/task-runs/${encodeURIComponent(id)}/${action}`; }
+  private path(id: string, action: string) {
+    return `task-runs/${encodeURIComponent(id)}/${action}`;
+  }
+  private claimPath() { return "task-runs/claim"; }
   private save(value: Recovery | Record<string, never>) { atomicJSON(this.statePath, value); }
   private recovery(): Recovery | undefined {
     if (!existsSync(this.statePath)) return;
@@ -175,33 +179,57 @@ export class AgentTaskRunner {
   }
   private async recover(parent?: AbortSignal) {
     const value = this.recovery(); if (!value) return;
-    const receipt: TaskRunResult = value.receipt ?? { lease_token: value.lease_token, state: "unknown", code: "agent_restarted", summary: "Agent restarted during task execution; script was not replayed", stdout: "", stderr: "", exit_code: null };
-    try { await this.request(this.path(value.id, "result"), receipt, parent); }
-    catch (error) {
-      if (!(error instanceof TaskHTTPError) || ![404, 409].includes(error.status)) throw error;
-      // The centre has no active lease to accept a receipt. Its expiry sweep
-      // preserves uncertainty and never requeues the command.
+    const receipt: TaskRunResult = value.receipt ?? { lease_token: value.lease_token, state: "unknown", code: "helper_restarted", summary: "Helper restarted during task execution; script was not replayed", stdout: "", stderr: "", exit_code: null };
+    const resultSlot = "task-run-result:" + value.id;
+    try { await this.request(this.path(value.id, "result"), receipt, parent, resultSlot); }
+    catch {
+      const slot = "task-run-reconcile:" + value.id;
+      const reconciliation = await this.request(this.path(value.id, "reconcile"), { lease_token: value.lease_token }, parent, slot);
+      if (reconciliation.acknowledged !== true || !["succeeded", "failed", "cancelled", "unknown"].includes(reconciliation.state)) {
+        this.clearRequest(slot);
+        throw Error("task_result_reconciliation_pending");
+      }
+      this.clearRequest(slot);
     }
     this.save({});
+    this.clearRequest(resultSlot);
+    this.clearRequest("task-run-reconcile:" + value.id);
+    this.clearRequest("task-runs-claim");
   }
   async pollOnce(parent?: AbortSignal): Promise<ScriptOutcome | null> {
-    if (this.polling || !this.config.controlCredential || parent?.aborted) return null;
+    if (this.polling || parent?.aborted) return null;
     this.polling = true;
     try {
       await this.recover(parent);
-      const value = await this.request(`/api/v1/agents/${encodeURIComponent(this.config.agentID)}/task-runs/claim`, { capabilities: [...SCRIPT_TASK_CAPABILITIES] }, parent);
-      const run = value.run as ClaimedTaskRun | null; if (!run) return null;
-      if (typeof run.id !== "string" || !/^[a-f0-9]{64}$/.test(run.lease_token) || run.agent_id !== this.config.agentID
+      const claimSlot = "task-runs-claim";
+      const value = await this.request(this.claimPath(), { capabilities: [...SCRIPT_TASK_CAPABILITIES] }, parent, claimSlot);
+      const run = value.run as ClaimedTaskRun | null;
+      if (!run) { this.clearRequest(claimSlot); return null; }
+      if (typeof run.id !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(run.id)
+        || typeof run.lease_token !== "string" || !/^[a-f0-9]{64}$/.test(run.lease_token))
+        throw Error("invalid claimed task lease");
+      // Persist the lease before validating any other server-supplied field:
+      // even a malformed snapshot must never be claimed a second time.
+      this.save({ id: run.id, lease_token: run.lease_token });
+      this.clearRequest(claimSlot);
+      if (run.agent_id !== this.config.agentID
         || run.snapshot?.agent_id !== this.config.agentID || run.snapshot?.host_id !== run.host_id || run.snapshot?.task_id !== run.task_id)
         throw Error("invalid claimed task binding");
       validateTaskScript(run.snapshot.script);
       const identity = run.snapshot.execution_identity;
-      if (identity && (identity.account !== "lightmoni-agent" || identity.privilege !== "user" || !Number.isSafeInteger(identity.permission_generation) || identity.permission_generation < 1
-        || this.config.permissionGeneration !== undefined && identity.permission_generation > this.config.permissionGeneration))
+      const expectedIdentity = this.config.executionIdentity;
+      if (identity && (identity.account !== expectedIdentity.account || identity.privilege !== "user"
+        || identity.uid !== expectedIdentity.uid
+        || identity.gid !== expectedIdentity.gid
+        || identity.permission_generation !== expectedIdentity.permission_generation
+        || identity.executor_id !== this.config.executorID
+        || identity.install_generation !== this.config.executorInstallGeneration
+        || !Number.isSafeInteger(identity.permission_generation) || identity.permission_generation < 1
+        || identity.permission_generation !== this.config.permissionGeneration))
         throw Error("ordinary_task_identity_mismatch");
+      if (!identity) throw Error("ordinary_task_identity_missing");
       if (!(SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(requiredTaskScriptCapability(run.snapshot.script)))
         throw Error("unsupported claimed script capability");
-      this.save({ id: run.id, lease_token: run.lease_token });
       const controller = new AbortController();
       const parentAbort = () => controller.abort(Object.assign(Error("Agent stopping"), { code: "control_lost" }));
       if (parent?.aborted) parentAbort(); else parent?.addEventListener("abort", parentAbort, { once: true });
@@ -220,7 +248,7 @@ export class AgentTaskRunner {
           void heartbeat().catch(() => controller.abort(Object.assign(Error("Task control lease lost"), { code: "control_lost" }))).finally(() => { pending = false; });
         }, Math.max(10, this.config.heartbeatIntervalMs ?? 15000)); timer.unref?.();
         outcome = await executeTaskScript(run.snapshot.script, { dataDir: this.config.dataDir, runID: run.id,
-          signal: controller.signal, secrets: [this.config.controlCredential, this.config.dataCredential ?? ""] });
+          signal: controller.signal, expectedAccount: { uid: this.config.executionIdentity.uid, gid: this.config.executionIdentity.gid } });
       } catch {
         outcome = { state: "unknown", code: "control_lost", summary: "Task authority could not be confirmed; execution outcome requires review", stdout: "", stderr: "", exit_code: null };
       } finally { if (timer) clearInterval(timer); parent?.removeEventListener("abort", parentAbort); }
