@@ -65,9 +65,7 @@ export function runtimeObservation(
     Number(v.gid) < 0
   )
     return;
-  if (
-    v.mode === "root" ? v.uid !== 0 || v.gid !== 0 : v.uid === 0 || v.gid === 0
-  )
+  if (Number(v.uid) === 0 || Number(v.gid) === 0)
     return;
   return v as AgentRuntimeObservation;
 }

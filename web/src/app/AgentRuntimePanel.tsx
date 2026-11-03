@@ -104,20 +104,20 @@ export default function AgentRuntimePanel({
   const keys = credentials.filter((value) => reusableMachineCredential(value));
   const base = agentRuntimePath(machine.id),
     failure = (e: unknown) =>
-      e instanceof Error ? e.message === "root_or_sudo_ssh_required" ? t("当前 SSH 账户没有安装或切换 Agent 所需权限，请选择其他已登记账户重新检查，或添加登录账户。", "The current SSH account lacks installation or runtime-switch privileges. Select another registered account and check again, or add a login account.") : e.message : t("操作失败", "Operation failed");
+      e instanceof Error ? e.message === "root_or_sudo_ssh_required" ? t("当前 SSH 账户没有安装 Agent 或切换管理模式所需权限，请选择其他已登记账户重新检查，或添加登录账户。", "The current SSH account lacks Agent installation or management-mode privileges. Select another registered account and check again, or add a login account.") : e.message : t("操作失败", "Operation failed");
   const modeName = (mode?: AgentRuntimeMode | null) =>
     mode === "root"
-      ? t("root · 完整主机管理", "root · Full host management")
+      ? t("完整管理 · 已安装 root 管理组件", "Full management · root management component installed")
       : mode === "user"
-        ? t("lightmoni-agent · 普通账户", "lightmoni-agent · Standard account")
+        ? t("仅监控 · 未安装 root 管理组件", "Monitoring only · no root management component")
         : t("尚未验证", "Not verified");
   const stateName = (s: string) =>
     ({
       awaiting_approval: t("待审阅", "Awaiting review"),
       running: t("正在切换", "Switching"),
       verifying: t(
-        "等待新账户心跳验证",
-        "Awaiting heartbeat from the new account",
+        "等待管理模式和心跳验证",
+        "Awaiting management mode and heartbeat verification",
       ),
       succeeded: t("已切换并验证", "Switched and verified"),
       failed: t("切换失败", "Switch failed"),
@@ -571,9 +571,9 @@ export default function AgentRuntimePanel({
     credentialValid =
       !!record && keys.some((v) => v.id === record.plan.credential_id);
   return (
-    <section aria-label={t("Agent 运行账户", "Agent runtime account")}>
+    <section aria-label={t("Agent 权限模式", "Agent permission mode")}>
       <Space wrap>
-        <h3>{t("Agent 运行账户", "Agent runtime account")}</h3>
+        <h3>{t("Agent 权限模式", "Agent permission mode")}</h3>
         {machine.agent_id && (
           <Button
             size="small"
@@ -591,14 +591,14 @@ export default function AgentRuntimePanel({
         items={[
           {
             key: "mode",
-            label: t("运行模式", "Runtime mode"),
+            label: t("管理模式", "Management mode"),
             children: machine.agent_id
               ? modeName(status?.runtime_mode)
               : t("尚未安装", "Not installed"),
           },
           {
             key: "observed",
-            label: t("实际进程账户", "Observed process account"),
+            label: t("Agent 常驻进程身份", "Agent daemon process identity"),
             children: actual ? (
               <Space>
                 <Tag color={status?.online ? "success" : "default"}>
@@ -624,8 +624,8 @@ export default function AgentRuntimePanel({
       />
       <Typography.Paragraph type="secondary">
         {t(
-          "同一 Agent 统一安装、升级和卸载。运行账户决定系统权限；每次任务仍需鉴权并记录审计，普通脚本固定以普通账户执行。",
-          "The same Agent has one installation, upgrade, and uninstall lifecycle. Its account determines OS privileges; every task is authorized and audited, and standard scripts keep the standard account.",
+          "Agent 常驻服务始终以 lightmoni-agent 非 root 账户运行。完整管理模式另安装同版本 root 管理组件，作为单独受管服务运行；普通脚本固定降权至 lightmoni-task 执行。仅监控模式不领取自定义脚本。Agent 与管理组件使用同一升级和卸载流程。",
+          "The resident Agent service always runs unprivileged as lightmoni-agent. Full management adds a version-matched root management component as a separately managed service; ordinary scripts run as lightmoni-task. Monitoring-only mode does not accept custom scripts. The Agent and management component share one upgrade and uninstall lifecycle.",
         )}
       </Typography.Paragraph>
       {error && !open && <Alert type="error" showIcon title={error} />}
@@ -635,17 +635,17 @@ export default function AgentRuntimePanel({
           onClick={() => void show()}
         >
           {status?.maintenance && runtimePlanActive(status.maintenance.status)
-            ? t("查看运行账户切换记录", "View account switch record")
+            ? t("查看权限模式切换记录", "View permission mode change")
             : status?.runtime_mode === "root"
-              ? t("切换为普通账户", "Switch to standard account")
-              : t("切换为 root", "Switch to root")}
+              ? t("切换为仅监控", "Switch to monitoring only")
+              : t("启用完整管理", "Enable full management")}
         </Button>
       )}
       {open && (
         <Modal
           open
           width={780}
-          title={t("切换 Agent 运行账户", "Switch Agent runtime account")}
+          title={t("切换 Agent 权限模式", "Switch Agent permission mode")}
           maskClosable={false}
           keyboard={!busy}
           closable={!busy}
@@ -660,8 +660,8 @@ export default function AgentRuntimePanel({
         >
           <Typography.Paragraph>
             {t(
-              "通过已登记主机的 root 或免交互 sudo SSH 凭据调整同一 Agent 服务。保留主机与 Agent ID；升级保留所选模式，切换不会扩大已有任务的批准范围。root 计划会列出容器管理、root 脚本和受管主机运维三类能力，批准后启用，每次作业仍需单独批准。",
-              "Use the registered host’s root or non-interactive sudo SSH credential to change the same Agent service. Host and Agent IDs are retained; upgrades keep the selected mode, and switching never expands existing task approvals. A root plan lists container management, root scripts, and managed host operations for approval; every job still needs its own approval.",
+              "通过已登记主机的 root 或免交互 sudo SSH 凭据切换 Agent 权限模式。Agent 常驻服务始终由 lightmoni-agent 非 root 账户运行；完整管理模式会安装或移除同版本、独立受管的 root 管理组件，普通脚本固定以 lightmoni-task 执行，仅监控模式拒绝自定义脚本。保留主机和 Agent ID；升级保留当前模式，切换不会扩大已有任务授权。启用的容器管理、高权限脚本和受管主机操作仍逐项审阅、批准并留审计。",
+              "Use the registered host’s root or non-interactive sudo SSH credential to switch Agent permission modes. The resident Agent service always runs as the unprivileged lightmoni-agent account; full management installs or removes a version-matched, separately managed root component, ordinary scripts run as lightmoni-task, and monitoring-only mode rejects custom scripts. Host and Agent IDs are retained; upgrades keep the current mode, and switching never expands existing task authorization. Container management, elevated scripts, and managed host operations remain individually reviewed, approved, and audited.",
             )}
           </Typography.Paragraph>
           <Alert
@@ -673,8 +673,8 @@ export default function AgentRuntimePanel({
               "Confirm unsent caches are drained before switching",
             )}
             description={t(
-              "主机、Agent ID 和运维业务数据保持不变。原账户的遥测队列和配置缓存会隔离到 root 维护备份，新账户重新获取配置。",
-              "Host, Agent ID, and operations data are retained. The previous account’s telemetry queue and configuration cache are quarantined into a root-owned maintenance backup, and the new account fetches fresh configuration.",
+              "主机、Agent ID 和运维业务数据保持不变。遥测队列与配置缓存按维护流程隔离并重新加载；仅监控模式不会保留脚本派发权限。",
+              "Host, Agent ID, and operations data are retained. Telemetry queues and configuration caches are isolated and reloaded through the maintenance workflow; monitoring-only mode does not retain script-dispatch permission.",
             )}
           />
           {error && (
@@ -710,20 +710,20 @@ export default function AgentRuntimePanel({
                 items={[
                   {
                     key: "from",
-                    label: t("当前运行账户", "Current account"),
+                    label: t("当前管理模式", "Current management mode"),
                     children: modeName(status?.runtime_mode),
                   },
                   {
                     key: "target",
-                    label: t("目标运行账户", "Target account"),
+                    label: t("目标管理模式", "Target management mode"),
                     children: modeName(target),
                   },
                 ]}
               />
               <Select
                 aria-label={t(
-                  "切换账户使用的 SSH 凭据",
-                  "SSH credential for account switch",
+                  "切换模式使用的 SSH 凭据",
+                  "SSH credential for mode change",
                 )}
                 style={{ width: "100%" }}
                 value={credential}
@@ -746,8 +746,8 @@ export default function AgentRuntimePanel({
                   onClick={() => void prepare()}
                 >
                   {t(
-                    "检查并生成账户切换计划",
-                    "Check and create account switch plan",
+                    "检查并生成模式切换计划",
+                    "Check and create mode change plan",
                   )}
                 </Button>
                 <Button disabled={busy} onClick={() => void refresh()}>
@@ -784,12 +784,12 @@ export default function AgentRuntimePanel({
                   {key:"ssh-account",label:t("此计划的 SSH 登录账户","SSH login account frozen in this plan"),children:record.plan.ssh_account.username+" · "+record.plan.ssh_account.id},
                   {
                     key: "from",
-                    label: t("原运行账户", "Previous account"),
+                    label: t("原管理模式", "Previous management mode"),
                     children: modeName(record.plan.from_mode),
                   },
                   {
                     key: "target",
-                    label: t("目标运行账户", "Target account"),
+                    label: t("目标管理模式", "Target management mode"),
                     children: modeName(record.plan.runtime_mode),
                   },
                   {
@@ -872,8 +872,8 @@ export default function AgentRuntimePanel({
                       onChange={(e) => setReviewed(e.target.checked)}
                     >
                       {t(
-                        "我已审阅目标主机、运行账户、权限代次和执行步骤，仅批准此计划",
-                        "I reviewed the host, account, permission generation, and steps and approve only this plan",
+                        "我已审阅目标主机、管理模式、权限代次和执行步骤，仅批准此计划",
+                        "I reviewed the host, management mode, permission generation, and steps and approve only this plan",
                       )}
                     </Checkbox>
                     {expired && (
@@ -899,7 +899,7 @@ export default function AgentRuntimePanel({
                       loading={busy}
                       onClick={() => void apply()}
                     >
-                      {t("确认切换运行账户", "Confirm account switch")}
+                      {t("确认切换权限模式", "Confirm permission mode change")}
                     </Button>
                   </>
                 )}
@@ -917,20 +917,20 @@ export default function AgentRuntimePanel({
                 <section
                   className="lm-machine-form-notice"
                   aria-label={t(
-                    "只读核对账户切换",
-                    "Read-only account switch reconciliation",
+                    "只读核对权限模式切换",
+                    "Read-only permission-mode reconciliation",
                   )}
                 >
                   <Typography.Paragraph>
                     {t(
-                      "通过 SSH 只读查询原操作回执和实际运行账户，不会重复切换。中心仍核对同次启动的回执与新鲜心跳；仅在切换成功或已验证恢复原账户后结束维护门禁。",
-                      "Read the original operation receipt and actual runtime account through SSH without replaying the switch. The center still verifies the same boot receipt and fresh heartbeat; the maintenance fence ends only after success or verified restoration of the original account.",
+                      "通过 SSH 只读查询原操作回执和 Agent 权限模式，不会重复切换。中心仍核对同次启动的回执与新鲜心跳；仅在切换成功或已验证恢复原模式后结束维护门禁。",
+                      "Read the original operation receipt and Agent permission mode through SSH without replaying the switch. The center still verifies the same boot receipt and fresh heartbeat; the maintenance fence ends only after success or verified restoration of the original mode.",
                     )}
                   </Typography.Paragraph>
                   <Select
                     aria-label={t(
-                      "账户切换核对 SSH 凭据",
-                      "SSH credential for account switch reconciliation",
+                      "模式切换核对 SSH 凭据",
+                      "SSH credential for mode reconciliation",
                     )}
                     style={{ width: "100%" }}
                     value={reconcileCredential}
@@ -1005,8 +1005,8 @@ export default function AgentRuntimePanel({
             <Select
               className="lm-machine-form-notice"
               aria-label={t(
-                "选择运行账户切换记录",
-                "Select account switch record",
+                "选择权限模式变更记录",
+                "Select permission mode change",
               )}
               style={{ width: "100%" }}
               placeholder={t(

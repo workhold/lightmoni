@@ -6,10 +6,12 @@ import { boundedFile, durableWrite, refuse, rootPath, secureDirectory } from "./
 import { type AccountProfile, localAccount } from "./scripts.js";
 import { ExecutorJournal } from "./journal.js";
 
-export const EXECUTOR_DATA_DIR = "/var/lib/lightmoni-executor";
-export const EXECUTOR_CONFIG = "/etc/lightmoni-executor/config.json";
-export const MANAGED_AGENT_DATA_DIR = "/var/lib/lightmoni-agent/managed";
-export const MANAGED_AGENT_CONFIG = "/etc/lightmoni-agent/managed.json";
+export const MANAGED_AGENT_HELPER_DATA_DIR = "/var/lib/lightmoni-agent-helper";
+export const MANAGED_AGENT_TASKS_DIR = "/var/lib/lightmoni-agent-helper/tasks";
+export const MANAGED_AGENT_DATA_DIR = "/var/lib/lightmoni-agent-helper/managed";
+export const MANAGED_AGENT_HELPER_CONFIG = "/etc/lightmoni-agent-helper/helper.json";
+export const MANAGED_AGENT_CONFIG = "/etc/lightmoni-agent-helper/managed.json";
+export const MANAGED_AGENT_ACTIVATION = "/etc/lightmoni-agent-helper/managed-activation.json";
 export interface ExecutorPolicy { generation: number; capabilities: PrivilegedCapability[] }
 export interface ExecutorConfig {
   version: 1; endpoint: string; center_instance_id: string; machine_id: string; agent_id: string;
@@ -54,7 +56,7 @@ export function parseBootstrap(value: unknown, now = Date.now()): ExecutorBootst
 export function validateConfig(value: unknown): ExecutorConfig {
   const v = strictRecord(value, ["version", "endpoint", "center_instance_id", "machine_id", "agent_id", "executor_id", "install_generation", "center_keys", "private_key", "output_key", "data_dir", "local_policy", "accounts", "daemon_id"]);
   identity(v);
-  if (![EXECUTOR_DATA_DIR, MANAGED_AGENT_DATA_DIR].includes(v.data_dir) || typeof v.private_key !== "string" || Buffer.byteLength(v.private_key) > 1024 || createPrivateKey(v.private_key).asymmetricKeyType !== "ed25519"
+  if (v.data_dir !== MANAGED_AGENT_DATA_DIR || typeof v.private_key !== "string" || Buffer.byteLength(v.private_key) > 1024 || createPrivateKey(v.private_key).asymmetricKeyType !== "ed25519"
     || typeof v.output_key !== "string" || !/^[a-f0-9]{64}$/.test(v.output_key) || typeof v.daemon_id !== "string" || !/^[A-Za-z0-9:_.-]{0,128}$/.test(v.daemon_id)
     || !Array.isArray(v.accounts) || !v.accounts.length || v.accounts.length > 32 || new Set(v.accounts.map((a: any) => a.name)).size !== v.accounts.length) refuse("invalid_config");
   v.accounts.forEach(validateAccount); return v as ExecutorConfig;
@@ -67,7 +69,7 @@ export function loadConfig(filename: string): ExecutorConfig {
   }
   return v;
 }
-export function newConfig(bootstrap: ExecutorBootstrap, daemonID: string, dataDir = EXECUTOR_DATA_DIR): ExecutorConfig {
+export function newConfig(bootstrap: ExecutorBootstrap, daemonID: string, dataDir = MANAGED_AGENT_DATA_DIR): ExecutorConfig {
   const key = generateKeyPairSync("ed25519");
   return validateConfig({ version: 1, endpoint: httpsOrigin(bootstrap.endpoint), center_instance_id: bootstrap.center_instance_id, machine_id: bootstrap.machine_id, agent_id: bootstrap.agent_id,
     executor_id: bootstrap.executor_id, install_generation: bootstrap.install_generation, center_keys: bootstrap.center_keys,

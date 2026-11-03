@@ -7,8 +7,8 @@ import { Queue } from "./queue.js";
 import { responseBytes } from "./util.js";
 import { assertAgentRuntimeIdentity } from "../shared/execution-role.js";
 import { assertOrdinaryAgentLinuxPermissions } from "../shared/ordinary-agent-permissions.js";
-import { rootPath } from "../privileged-executor/security.js";
-import { assertRootAgentProgram, managedAgentCommand } from "./managed.js";
+import { assertRoot, rootPath } from "../privileged-executor/security.js";
+import { managedAgentCommand, runManagedHelper } from "./managed.js";
 export { createAgent } from "./agent.js";
 export interface CLIIO {
   input: AsyncIterable<Uint8Array | string>;
@@ -59,11 +59,32 @@ export async function execute(
     io.write(readAgentRelease().version + "\n");
     return;
   }
-  // Root must trust the code and configuration before reading credentials.
-  const privilegedCommand = command === "run" || command.startsWith("managed-");
-  if (privilegedCommand && (process.getuid?.() === 0 || process.geteuid?.() === 0)) {
-    assertRootAgentProgram(); rootPath(String(flags.config), "file", true);
+  if (command === "helper-run") {
+    if (remaining.length || seenFlags.size) throw Error("helper_run_does_not_accept_arguments");
+    assertRoot();
+    const controller = new AbortController(), stop = () => controller.abort();
+    process.once("SIGINT", stop); process.once("SIGTERM", stop);
+    try { await runManagedHelper(io.signal ? AbortSignal.any([io.signal, controller.signal]) : controller.signal,
+      message => process.stderr.write("lightmoni helper: " + message + "\n")); }
+    finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
+    return;
   }
+  if (command === "helper-status") {
+    if (remaining.length || seenFlags.size) throw Error("helper_status_does_not_accept_arguments");
+    assertRoot();
+    await managedAgentCommand("managed-status", io);
+    return;
+  }
+  if (command.startsWith("managed-")) {
+    if (remaining.length || seenFlags.size) throw Error("managed_command_does_not_accept_arguments");
+    assertRoot();
+    await managedAgentCommand(command, io);
+    return;
+  }
+  // Root must trust the installed Agent before loading its private config.
+  const privilegedCommand = command === "run";
+  if (privilegedCommand && (process.getuid?.() === 0 || process.geteuid?.() === 0))
+    rootPath(String(flags.config), "file", true);
   const validation = { pendingEnrollment: Boolean(flags["pending-enrollment"]) };
   const path = String(flags.config),
     requireDir = String(flags["require-data-dir"]);
@@ -76,7 +97,6 @@ export async function execute(
     return;
   }
   const config = loadConfig(path, validation);
-  if (command.startsWith("managed-")) { await managedAgentCommand(command, config, io); return; }
   if (command === "check") {
     if (requireDir && config.data_dir !== requireDir)
       throw Error("this system service requires data_dir=" + requireDir);
@@ -119,7 +139,8 @@ export async function execute(
   if (command === "run") {
     assertAgentRuntimeIdentity(config.runtime_mode, config.permission_generation, process.getuid?.(), process.geteuid?.(), process.getgid?.());
     if (config.runtime_mode === "user") assertOrdinaryAgentLinuxPermissions();
-    else { rootPath(config.data_dir, "directory", true); }
+    else if (process.getuid?.() === 0 || process.geteuid?.() === 0)
+      throw Error("ordinary_agent_requires_non_root");
     const agent = createAgent(config),
       controller = new AbortController(),
       stop = () => controller.abort();

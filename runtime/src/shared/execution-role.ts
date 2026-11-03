@@ -4,11 +4,11 @@ export function assertOrdinaryAgentIdentity(uid: number | undefined, euid: numbe
 }
 
 export interface AgentRuntimeIdentity { mode: "root" | "user"; permission_generation: number; uid: number; gid: number }
-/** Configuration verifies an OS identity; it never grants privileges. */
+/** The runtime mode selects a root-owned helper, never a root Agent daemon. */
 export function assertAgentRuntimeIdentity(mode: "root" | "user", generation: number, uid: number | undefined, euid: number | undefined, gid: number | undefined, platform = process.platform): AgentRuntimeIdentity {
   if (!["root", "user"].includes(mode) || !Number.isSafeInteger(generation) || generation < 1) throw Error("invalid_agent_runtime");
-  if (mode === "root") {
-    if (platform !== "linux" || uid !== 0 || euid !== 0 || gid !== 0) throw Error("root_agent_requires_linux_root");
-  } else assertOrdinaryAgentIdentity(uid, euid);
+  if (platform === "linux") assertOrdinaryAgentIdentity(uid, euid);
+  else if (uid === 0 || euid === 0) throw Error("ordinary_agent_requires_non_root");
+  if (!Number.isSafeInteger(gid) || gid === 0 || gid === undefined) throw Error("ordinary_agent_requires_non_root");
   return { mode, permission_generation: generation, uid: uid ?? -1, gid: gid ?? -1 };
 }

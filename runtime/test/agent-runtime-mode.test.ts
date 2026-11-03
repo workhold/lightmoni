@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,10 +14,7 @@ import {
   requiresTrustedAgentStartup,
 } from "../src/agent/entry.js";
 import { managedSnapshotConfig } from "../src/privileged-executor/managed.js";
-import {
-  assertManagedAgentBinding,
-  validateManagedAgentActivation,
-} from "../src/agent/managed.js";
+import { assertManagedAgentBinding, validateManagedAgentActivation } from "../src/agent/managed.js";
 import { generateKeyPairSync, createHash } from "node:crypto";
 import {
   executorPublicKey,
@@ -25,6 +22,8 @@ import {
 } from "../src/privileged-executor/config.js";
 import { Agent } from "../src/agent/agent.js";
 import { AgentTaskRunner } from "../src/agent/task-runner.js";
+import { ordinaryTaskRunnerStatus } from "../src/agent/managed.js";
+import { MANAGED_AGENT_DATA_DIR } from "../src/privileged-executor/config.js";
 test("old Agent configuration defaults to user mode without implicit elevation", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "lightmoni-mode-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -77,6 +76,8 @@ test("only execution entrypoints require installed root program ancestry", () =>
     ["managed-enroll"],
     ["managed-check"],
     ["managed-activate"],
+    ["helper-run"],
+    ["helper-status"],
   ])
     assert.equal(requiresTrustedAgentStartup(args), true);
   for (const command of ["configure", "check", "version"])
@@ -85,17 +86,17 @@ test("only execution entrypoints require installed root program ancestry", () =>
 test("managed operation workers load the unified Agent private configuration", () => {
   assert.equal(
     managedSnapshotConfig(
-      "/var/lib/lightmoni-agent/managed/managed-jobs/" +
+      MANAGED_AGENT_DATA_DIR + "/managed-jobs/" +
         "a".repeat(32) +
         ".json",
     ),
-    "/etc/lightmoni-agent/managed.json",
+    "/etc/lightmoni-agent-helper/managed.json",
   );
   assert.throws(() =>
     managedSnapshotConfig("/tmp/managed-jobs/" + "a".repeat(32) + ".json"),
   );
 });
-test("managed module binds Agent identity, endpoint and fixed private state directory", () => {
+test("managed helper binds bootstrap Agent identity, endpoint and fixed private state directory", () => {
   const agent = {
     ...defaultConfig(),
     runtime_mode: "root" as const,
@@ -105,7 +106,7 @@ test("managed module binds Agent identity, endpoint and fixed private state dire
   const managed = {
     agent_id: "agent",
     endpoint: agent.endpoint,
-    data_dir: "/var/lib/lightmoni-agent/managed",
+    data_dir: "/var/lib/lightmoni-agent-helper/managed",
   } as ExecutorConfig;
   assert.doesNotThrow(() => assertManagedAgentBinding(agent, managed, "agent"));
   for (const value of [
@@ -127,6 +128,13 @@ test("managed activation rejects changed generation, build and signing identity"
     ...defaultConfig(),
     runtime_mode: "root" as const,
     permission_generation: 3,
+  };
+  const helper = {
+    schema: 1 as const,
+    agent_id: "agent",
+    endpoint: "https://center.test",
+    permission_generation: 3,
+    task_identity: { account: "lightmoni-task" as const, uid: 999, gid: 999, permission_generation: 3 },
   };
   const key = generateKeyPairSync("ed25519");
   const managed = {
@@ -151,6 +159,7 @@ test("managed activation rejects changed generation, build and signing identity"
     schema: 1,
     activation_id: "01234567-0123-4567-89ab-0123456789ab",
     permission_generation: 3,
+    ordinary_task_identity: { account: "lightmoni-task", uid: 999, gid: 999, permission_generation: 3 },
     identity: {
       agent_id: managed.agent_id,
       machine_id: managed.machine_id,
@@ -163,7 +172,7 @@ test("managed activation rejects changed generation, build and signing identity"
     ...release,
   };
   assert.equal(
-    validateManagedAgentActivation(record, agent, managed, release),
+    validateManagedAgentActivation(record, helper, managed, release),
     record.activation_id,
   );
   for (const invalid of [
@@ -176,7 +185,7 @@ test("managed activation rejects changed generation, build and signing identity"
     { ...record, activation_id: "invalid" },
   ])
     assert.throws(() =>
-      validateManagedAgentActivation(invalid, agent, managed, release),
+      validateManagedAgentActivation(invalid, helper, managed, release),
     );
 });
 test("root Agent ordinary tasks explicitly drop identity, groups and capabilities", () => {
@@ -205,9 +214,31 @@ test("root Agent ordinary tasks explicitly drop identity, groups and capabilitie
     { uid: NaN, gid: 987 },
   ])
     assert.throws(() => ordinaryTaskCommand("node", args, account));
-  assert.deepEqual(ordinaryTaskCommand("node", args), { file: "node", args });
 });
-test("root Agent disables the old probe job worker while retaining ordinary script tasks", async (t) => {
+test("helper task runner persists and reports active or pending state", () => {
+  assert.deepEqual(ordinaryTaskRunnerStatus({}), { active: false, state: "idle" });
+  assert.deepEqual(ordinaryTaskRunnerStatus({ id: "01234567-0123-4567-89ab-0123456789ab", lease_token: "b".repeat(64) }),
+    { active: true, state: "running", run_id: "01234567-0123-4567-89ab-0123456789ab" });
+  assert.deepEqual(ordinaryTaskRunnerStatus({ id: "01234567-0123-4567-89ab-0123456789ab", lease_token: "b".repeat(64), receipt: {
+    lease_token: "b".repeat(64), state: "unknown", code: "control_lost", summary: "review", stdout: "", stderr: "", exit_code: null,
+  } }), { active: true, state: "result_pending", run_id: "01234567-0123-4567-89ab-0123456789ab" });
+  assert.throws(() => ordinaryTaskRunnerStatus({ id: "not-a-run", lease_token: "b".repeat(64) }));
+});
+test("helper task claims use the signed executor route without an Agent bearer token", async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), "lightmoni-helper-task-route-"));
+  t.after(() => rmSync(dataDir, { recursive: true, force: true }));
+  const calls: Array<{ route: string; slot?: string }> = [], cleared: string[] = [];
+  const runner = new AgentTaskRunner({
+    endpoint: "https://center.test", agentID: "agent", executorID: "executor", executorInstallGeneration: 4,
+    dataDir, permissionGeneration: 3,
+    executionIdentity: { account: "lightmoni-task", uid: 1000, gid: 1000, permission_generation: 3 },
+  }, { request: async (route, _body, _signal, slot) => { calls.push({ route, slot }); return route === "task-runs/claim" ? { run: null } : {}; },
+    clearRequest: slot => cleared.push(slot) });
+  assert.equal(await runner.pollOnce(), null);
+  assert.deepEqual(calls, [{ route: "task-runs/claim", slot: "task-runs-claim" }]);
+  assert.deepEqual(cleared, ["task-runs-claim"]);
+});
+test("root mode keeps the Agent unprivileged and moves scripts out of its task loops", async (t) => {
   for (const runtime_mode of ["user", "root"] as const) {
     const data_dir = mkdtempSync(join(tmpdir(), "lightmoni-job-identity-"));
     const agent = new Agent({
@@ -221,27 +252,28 @@ test("root Agent disables the old probe job worker while retaining ordinary scri
       min_free_bytes: 0,
     });
     try {
-      assert.equal(!!agent.jobs, runtime_mode === "user");
-      assert.ok(agent.taskRunner);
-      assert.equal(agent.taskRunner.config.runtimeMode, runtime_mode);
-      assert.equal(agent.taskRunner.config.permissionGeneration, 3);
+      assert.ok(agent.jobs);
+      assert.equal((agent as any).taskRunner, undefined);
+      assert.deepEqual(agent.status().task_capabilities, []);
     } finally {
       await agent.close();
       rmSync(data_dir, { recursive: true, force: true });
     }
   }
 });
-test("ordinary task runner refuses a different account, root privilege, or future generation before writing a crash marker", async (t) => {
+test("ordinary task runner persists a lease marker before refusing mismatched execution identities", async (t) => {
   const dataDir = mkdtempSync(join(tmpdir(), "lightmoni-task-identity-"));
   t.after(() => rmSync(dataDir, { recursive: true, force: true }));
-  for (const execution_identity of [
-    { account: "root", privilege: "user", permission_generation: 3 },
-    { account: "lightmoni-agent", privilege: "root", permission_generation: 3 },
-    { account: "lightmoni-agent", privilege: "user", permission_generation: 4 },
-    { account: "lightmoni-agent", privilege: "user", permission_generation: 0 },
-  ]) {
+  for (const [index, execution_identity] of [
+    { account: "root", privilege: "user", permission_generation: 3, uid: 1000, gid: 1000 },
+    { account: "lightmoni-task", privilege: "root", permission_generation: 3, uid: 1000, gid: 1000 },
+    { account: "lightmoni-task", privilege: "user", permission_generation: 4, uid: 1000, gid: 1000 },
+    { account: "lightmoni-task", privilege: "user", permission_generation: 0, uid: 1000, gid: 1000 },
+    { account: "lightmoni-task", privilege: "user", permission_generation: 3, uid: 1001, gid: 1000 },
+  ].entries()) {
+    const caseDir = mkdtempSync(join(dataDir, `case-${index}-`));
     const run = {
-      id: "run",
+      id: "01234567-0123-4234-8234-0123456789ab",
       task_id: "task",
       host_id: "host",
       agent_id: "agent",
@@ -263,16 +295,21 @@ test("ordinary task runner refuses a different account, root privilege, or futur
       {
         endpoint: "https://center.test",
         agentID: "agent",
-        controlCredential: "control",
-        dataDir,
+        executorID: "executor",
+        executorInstallGeneration: 4,
+        dataDir: caseDir,
         permissionGeneration: 3,
+        executionIdentity: { account: "lightmoni-task", uid: 1000, gid: 1000, permission_generation: 3 },
       },
-      { fetch: (async () => Response.json({ run })) as typeof fetch },
+      { request: async () => ({ run }), clearRequest: () => {} },
     );
     await assert.rejects(
       () => runner.pollOnce(),
       /ordinary_task_identity_mismatch/,
     );
-    assert.equal(existsSync(join(dataDir, "task-run-state.json")), false);
+    assert.deepEqual(JSON.parse(readFileSync(join(caseDir, "task-run-state.json"), "utf8")), {
+      id: run.id,
+      lease_token: run.lease_token,
+    });
   }
 });

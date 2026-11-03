@@ -154,17 +154,21 @@ export async function createApp(cfg: Config) {
       cfg.downloadsDir ?? join(root, "downloads"),
       agentCredentials,
     );
-    modules.push(
-      registerNodes(deps, {
+    const nodesModule = registerNodes(deps, {
         internalExporter: ingest.internal.bind(ingest),
         agentCredentials,
         trustedProxies: cfg.trustedProxies,
-      }),
-    );
+      });
+    modules.push(nodesModule);
     modules.push(agentJobs);
     const taskCenter = registerTaskCenter(deps, { agentCredentials });
     modules.push(taskCenter);
     const privilegedExecutors = registerPrivilegedExecutors(deps,{dataDir:cfg.dataDir});
+    taskCenter.ordinaryTaskIdentity = (machineID,agentID,executorID,installGeneration) => privilegedExecutors.ordinaryTaskIdentity(machineID,agentID,executorID,installGeneration);
+    const taskScriptCapabilities = privilegedExecutors.ordinaryTaskCapabilities.bind(privilegedExecutors);
+    taskCenter.nodes.taskScriptCapabilities = taskScriptCapabilities;
+    nodesModule.setTaskScriptCapabilities(taskScriptCapabilities);
+    privilegedExecutors.taskRuns = taskCenter;
     modules.push(privilegedExecutors,managedMachines.registerExecutorBootstrap(privilegedExecutors));
     connectManagedExecutorJobs(deps,{jobs:agentJobs,executors:privilegedExecutors,artifacts:releaseArtifacts,resolvePlatform:platform.resolvePayload});
     modules.push(connectExecutorObservations(deps,privilegedExecutors,ingest.internal.bind(ingest)));

@@ -52,11 +52,8 @@ import { Collector } from "./collect.js";
 import { FileLogReader } from "./file-logs.js";
 import { checkProbe } from "./probe.js";
 import { AgentJobRunner } from "./jobs.js";
-import { AgentTaskRunner } from "./task-runner.js";
-import { SCRIPT_TASK_CAPABILITIES } from "../shared/task-center.js";
 import { collectNetworkAddresses } from "./network-addresses.js";
 import { readAgentRelease } from "./release.js";
-import { runManagedAgent } from "./managed.js";
 import {
   ReceiveError,
   responseBytes,
@@ -78,7 +75,6 @@ export class Agent {
   readonly sdk: LightMoni;
   readonly files: FileLogReader;
   readonly jobs?: AgentJobRunner;
-  readonly taskRunner?: AgentTaskRunner;
   tasks: RemoteConfig;
   tasksReady = false;
   revision = "";
@@ -149,22 +145,12 @@ export class Agent {
     }
     this.files = new FileLogReader(this);
     if (config.control_credential) {
-      if (config.runtime_mode !== "root") this.jobs = new AgentJobRunner({
+      this.jobs = new AgentJobRunner({
         endpoint: config.endpoint,
         agentID: this.identity.agent_id,
         controlCredential: config.control_credential,
         dataDir: config.data_dir,
         pollIntervalMs: Math.max(5000, config.control_interval_seconds * 1000),
-      }, {fetch: this.endpoints.fetch});
-      this.taskRunner = new AgentTaskRunner({
-        endpoint: config.endpoint,
-        agentID: this.identity.agent_id,
-        controlCredential: config.control_credential,
-        dataCredential: config.data_credential,
-        dataDir: config.data_dir,
-        pollIntervalMs: Math.max(5000, config.control_interval_seconds * 1000),
-        runtimeMode: config.runtime_mode,
-        permissionGeneration: config.permission_generation,
       }, {fetch: this.endpoints.fetch});
     }
   }
@@ -225,7 +211,7 @@ export class Agent {
       sdk: stats,
       runtime_events: [...this.runtimeEvents],
       control_interval_seconds: this.config.control_interval_seconds,
-      task_capabilities: [...SCRIPT_TASK_CAPABILITIES],
+      task_capabilities: [],
       network_addresses: collectNetworkAddresses(),
     };
   }
@@ -748,8 +734,6 @@ export class Agent {
       this.probeLoop(),
       this.fileLogLoop(),
       this.jobLoop(),
-      this.taskRunner?.run(this.controller.signal) ?? Promise.resolve(),
-      runManagedAgent(this.config, this.controller.signal, message => this.setError("managed Agent: " + message)).catch(error => { this.setError("managed Agent initialization refused"); this.controller.abort(error); }),
     ];
   }
   async run(parent?: AbortSignal) {

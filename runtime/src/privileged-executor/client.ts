@@ -23,11 +23,11 @@ async function productionTransport(url: string, options: { body: string; headers
 }
 /** Stateless signed requests for a fixed per-job worker. It never opens or
  * recovers the runner journal, and cannot lease another job. */
-export async function requestExecutor(config:ExecutorConfig,route:string,value:unknown,requestID=randomBytes(24).toString("base64url"),wall:()=>number=Date.now,transport:ExecutorTransport=productionTransport):Promise<any> {
+export async function requestExecutor(config:ExecutorConfig,route:string,value:unknown,requestID=randomBytes(24).toString("base64url"),wall:()=>number=Date.now,transport:ExecutorTransport=productionTransport,parent?:AbortSignal):Promise<any> {
   if(!/^[A-Za-z0-9_/-]+$/.test(route)||route.includes("//")||route.endsWith("/"))refuse("invalid_request_path");
   const body=canonicalJSON(value),path="/api/v1/privileged-executors/"+config.executor_id+"/"+route,now=Math.floor(wall()/1000);
   const signature=signExecutorRequest({center_instance_id:config.center_instance_id,executor_id:config.executor_id,install_generation:config.install_generation,method:"POST",path,body,request_id:requestID,iat:now,exp:now+60},config.private_key);
-  return transport(config.endpoint+path,{body,headers:{"Content-Type":"application/json",Accept:"application/json",[EXECUTOR_SIGNATURE_HEADER]:signature},signal:AbortSignal.timeout(10000)});
+  return transport(config.endpoint+path,{body,headers:{"Content-Type":"application/json",Accept:"application/json",[EXECUTOR_SIGNATURE_HEADER]:signature},signal:parent?AbortSignal.any([parent,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000)});
 }
 export class ExecutorClient {
   constructor(readonly config: ExecutorConfig, readonly journal: ExecutorJournal, private readonly transport: ExecutorTransport = productionTransport,
@@ -44,11 +44,11 @@ export class ExecutorClient {
       || !this.config.center_keys.some(k => k.kid === response.center_key_id && k.public_key === response.center_public_key)
       || canonicalJSON(response.center_keys) !== canonicalJSON(this.config.center_keys)) refuse("enrollment_trust_mismatch");
   }
-  async request(route: string, value: unknown, slot?: string): Promise<any> {
+  async request(route: string, value: unknown, slot?: string, parent?: AbortSignal): Promise<any> {
     if (!/^[A-Za-z0-9_/-]+$/.test(route) || route.includes("//") || route.endsWith("/")) refuse("invalid_request_path");
     const body = canonicalJSON(value), path = "/api/v1/privileged-executors/" + this.config.executor_id + "/" + route;
     const requestID = slot ? this.journal.request(slot, sha256(path + "\n" + body)) : randomBytes(24).toString("base64url"), now = Math.floor(this.wall() / 1000);
-    return requestExecutor(this.config,route,value,requestID,this.wall,this.transport);
+    return requestExecutor(this.config,route,value,requestID,this.wall,this.transport,parent);
   }
   verify<T>(signed: unknown, max = 1 << 20): T {
     // Never use kid from an untrusted JWS to load files/URLs or new keys.

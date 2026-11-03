@@ -30,6 +30,26 @@ export interface TaskHost {task_capabilities?:string[];id:string;name:string;age
 export interface ManagedAgentTask {revision?:string;id:string;name:string;type:AgentTaskType;enabled:boolean;label_ids:string[];config:AgentTasks;origin?:'builtin'|'custom';target_all?:boolean;host_ids?:string[];schedule?:TaskSchedule;script?:TaskScript;execution_policy?:TaskExecutionPolicy}
 export const requiredScriptCapability=(script?:TaskScript)=>script?.args?.length||script?.cwd?'task.script.v2':'task.script.v1';
 export const hostCanRunScript=(host:TaskHost,script?:TaskScript)=>!!host.agent_id&&!!host.task_capabilities?.some(capability=>capability===requiredScriptCapability(script)||capability==='task.script.v2');
+export type TaskHostExecutionStatus='ready'|'agent_missing'|'agent_removed'|'agent_offline'|'task_channel_unavailable'|'upgrade_required';
+export const taskHostExecutionStatus=(host:TaskHost,script?:TaskScript):TaskHostExecutionStatus=>{
+ if(!host.agent_id||host.agent_status==='missing')return 'agent_missing';
+ if(host.agent_status==='removed')return 'agent_removed';
+ if(host.agent_status!=='online')return 'agent_offline';
+ if(hostCanRunScript(host,script))return 'ready';
+ const hasV1=host.task_capabilities?.some(capability=>capability==='task.script.v1'||capability==='task.script.v2')??false;
+ return requiredScriptCapability(script)==='task.script.v2'&&hasV1?'upgrade_required':'task_channel_unavailable';
+};
+export const taskHostExecutionStatusText=(host:TaskHost,script?:TaskScript,language='zh-CN')=>{
+ const en=language==='en-US';
+ return ({
+  ready:en?'Ready':'就绪',
+  agent_missing:en?'Agent not installed':'未安装 Agent',
+  agent_removed:en?'Agent removed':'Agent 已移除',
+  agent_offline:en?'Agent offline':'Agent 离线',
+  task_channel_unavailable:en?'Verified root management component is not ready; enable full management and check its status':'已验证的 root 管理组件未就绪；请启用完整管理并检查组件状态',
+  upgrade_required:en?'Upgrade Agent for task.script.v2':'需升级 Agent 以支持 task.script.v2',
+ } satisfies Record<TaskHostExecutionStatus,string>)[taskHostExecutionStatus(host,script)];
+};
 export const taskScheduleSummary=(schedule?:TaskSchedule,language='zh-CN')=>{
  const en=language==='en-US';
  if(schedule?.mode==='interval')return en?`Every ${schedule.interval_seconds} seconds`:`每 ${schedule.interval_seconds} 秒`;
@@ -38,7 +58,7 @@ export const taskScheduleSummary=(schedule?:TaskSchedule,language='zh-CN')=>{
  return schedule?.mode==='continuous'?(en?'Continuous collection':'持续采集'):(en?'Manual dispatch':'手动派发');
 };
 export interface EffectiveHostTask extends ManagedAgentTask {status:string;overridden:boolean}
-export interface TaskRun {automatic_attempt?:number;resolved_at?:string;resolved_by?:string;resolution_reason?:string;superseded_by?:string;details_omitted?:boolean;id:string;task_id:string;task_name:string;host_id:string;host_name:string;agent_id:string;state:'queued'|'running'|'succeeded'|'failed'|'cancelled'|'unknown';trigger:'manual'|'schedule'|'retry';retry_of:string;created_at:string;started_at:string;finished_at:string;lease_expires_at:string;cancel_requested:boolean;code:string;summary:string;stdout:string;stderr:string;exit_code:number|null;snapshot:{task_id:string;task_name:string;host_id:string;host_name:string;agent_id:string;script:TaskScript;task_revision?:string;execution_policy?:TaskExecutionPolicy}}
+export interface TaskRun {automatic_attempt?:number;resolved_at?:string;resolved_by?:string;resolution_reason?:string;superseded_by?:string;details_omitted?:boolean;id:string;task_id:string;task_name:string;host_id:string;host_name:string;agent_id:string;requested_by?:string;state:'queued'|'running'|'succeeded'|'failed'|'cancelled'|'unknown';trigger:'manual'|'schedule'|'retry';retry_of:string;created_at:string;started_at:string;finished_at:string;lease_expires_at:string;cancel_requested:boolean;code:string;summary:string;stdout:string;stderr:string;exit_code:number|null;snapshot:{task_id:string;task_name:string;host_id:string;host_name:string;agent_id:string;script:TaskScript;task_revision?:string;execution_policy?:TaskExecutionPolicy;execution_identity?:{account:string;uid:number;gid:number;permission_generation:number;executor_id:string;install_generation:number;privilege:'user'}}}
 export interface AgentItem {
   machine_id?:string;machine_name?:string;
   release?:{version?:string;source_revision?:string;build_id?:string;state_schema?:number;artifact_sha256?:string};boot_id?:string;

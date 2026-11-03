@@ -3,7 +3,7 @@ export const INSTALL_PHASES:Record<string,[string,string]>={queued:['等待执�
 const DIAGNOSTICS:Record<string,[string,string,string,string]>={
  privileged_execution_pending:['主机有待完成或核对的任务','Host has a pending or unresolved execution','在操作日志检查该主机的执行记录；未知结果需先核对现场，再记录人工核对。','Check this host’s execution history. Verify the host before reconciling an unknown result.'],
  executor_http_502:['执行连接中断，结果需核对','Execution connection interrupted; verification required','先核对目标机器的进程、容器和执行记录，确认动作已结束后记录人工核对；不要重复提交。','Inspect processes, containers and execution records on the target. Reconcile only after the action has ended; do not resubmit it.'],
- privileged_executor_required:['需要独立执行器','Independent executor required','在主机详情安装独立执行器并启用受管主机运维，然后重新提交任务。','Install the independent executor and enable managed host operations, then submit the task again.'],
+ privileged_executor_required:['需要 root 管理组件','Root management component required','请在主机管理中启用并验证 root 管理组件与主机运维授权，然后重新提交任务。','Enable and verify the root management component and host operations authorization, then submit the task again.'],
  agent_reinstall_inspecting:['正在核验重装前的旧实例','Inspecting previous Agent instances','当前 Agent 正在只读核验，确认为空后释放旧占用。','The current Agent is checking for old containers before releasing reservations.'],
  agent_reinstall_containers_remain:['重装前的容器仍然存在','Previous containers remain','旧容器仍存在（可能已停止），请核对后处理；平台不会自动删除容器或数据。','Inspect the old containers, including stopped containers. The platform does not delete containers or data automatically.'],
  agent_reinstall_inspection_failed:['旧实例核验未通过','Old instance verification failed','检查新 Agent 的 Docker 访问权限；平台稍后只读重试。','Check the current Agent’s Docker access. Read-only verification will retry.'],
@@ -22,7 +22,7 @@ const DIAGNOSTICS:Record<string,[string,string,string,string]>={
  host_port_check_failed:['宿主端口检查失败','Host port check failed','检查 Agent 的网络权限和应用监听地址后再部署。','Check the Agent’s network permissions and the application bind address before deploying again.'],
  docker_unavailable:['无法连接 Docker','Cannot connect to Docker','检查目标机器的 Docker 服务是否已安装并启动。','Check that Docker is installed and running on the target.'],
  docker_prerequisite_failed:['Docker 检查失败','Docker prerequisite check failed','检查目标机器的 Docker 服务和 Agent 访问权限。','Check Docker and the Agent’s permissions on the target.'],
- docker_permission_denied:['执行器无法访问 Docker','Executor cannot access Docker','检查独立执行器、Docker 服务和主机运维授权后再部署。','Check the independent executor, Docker service and host operations policy before deploying again.'],
+ docker_permission_denied:['root 管理组件无法访问 Docker','The root management component cannot access Docker','检查 root 管理组件、Docker 服务和主机运维授权后再部署。','Check the root management component, Docker service and host operations authorization before deploying again.'],
  compose_unavailable:['缺少 Docker Compose 插件','Docker Compose plugin unavailable','在目标机器安装或修复 Docker Compose 插件。','Install or repair the Docker Compose plugin on the target.'],
  image_not_found:['镜像或版本不存在','Image or tag not found','核对镜像名称及版本是否在镜像仓库中存在。','Check the image name and tag in the registry.'],
  image_access_denied:['镜像仓库拒绝访问','Registry access denied','检查镜像是否公开及目标机器的仓库登录配置。','Check image visibility and registry authentication on the target.'],

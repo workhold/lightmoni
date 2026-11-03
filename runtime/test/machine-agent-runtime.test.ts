@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { DB } from "../src/shared/sqlite.js";
 import { Router, fail, HTTPError } from "../src/shared/http.js";
 import { cipher } from "../src/shared/crypto.js";
@@ -15,7 +15,7 @@ import {
   createAgentRuntimeSchema,
   parseRuntimeProbe,
 } from "../src/server/machine-agent-runtime.js";
-import { canonicalJSON, sha256 } from "../src/shared/privileged-executor.js";
+import { canonicalJSON, sha256, signExecutorRequest, signJWS } from "../src/shared/privileged-executor.js";
 import { hasPendingAgentUpdate } from "../src/server/machine-agent-updates-guard.js";
 import { createMachineSSHAccountsSchema } from "../src/server/machine-ssh-accounts.js";
 import { registerAgentJobs } from "../src/server/agent-jobs.js";
@@ -80,6 +80,22 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
   const executors = registerPrivilegedExecutors(deps, { dataDir: "/unused" });
   createAgentRuntimeSchema(deps);
   recordAgentRuntime(deps, "host", "agent-host", mode, 1);
+  const release = {build_id:"reviewed-release",source_revision:"b".repeat(40),artifact_sha256:"a".repeat(64),state_schema:1};
+  const helperRuntimeStates: string[] = [];
+  let helperTransform = (value:any) => value;
+  let sendHelper: undefined | ((value?:any)=>unknown);
+  const enrollHelper = (b:any, generation:number) => {
+    const keys=generateKeyPairSync("ed25519"),publicKey=keys.publicKey.export({type:"spki",format:"pem"}).toString(),iat=Math.floor(clock.getTime()/1000);
+    executors.enroll({token:b.enrollment_token,public_key:publicKey,proof:signJWS({version:1,purpose:"enrollment",token_sha256:sha256(b.enrollment_token),public_key_sha256:sha256(publicKey),executor_nonce:randomBytes(24).toString("base64url"),iat,exp:iat+60},keys.privateKey,b.executor_id)});
+    const observation={version:"0.1.0",boot_id:randomBytes(24).toString("base64url"),activation_id:randomUUID(),policy_generation:b.local_policy.generation,capabilities:b.local_policy.capabilities,release,ordinary_task_identity:{account:"lightmoni-task",uid:996,gid:996,permission_generation:generation},account_profiles:[],interpreter_profiles:[]};
+    sendHelper=(value=helperTransform(observation))=>{
+      helperRuntimeStates.push(db.get<any>("SELECT runtime_mode FROM machine_agent_runtime WHERE machine_id='host'")!.runtime_mode);
+      const path="/api/v1/privileged-executors/"+b.executor_id+"/heartbeat",raw=canonicalJSON(value),iat=Math.floor(clock.getTime()/1000);
+      const signature=signExecutorRequest({body:raw,center_instance_id:executors.centerInstanceID,executor_id:b.executor_id,install_generation:b.install_generation,method:"POST",path,request_id:randomBytes(24).toString("base64url"),iat,exp:iat+60},keys.privateKey);
+      return executors.signedRequest(b.executor_id,"POST",path,Buffer.from(raw),signature,(executor,input)=>executors.heartbeat(executor,input));
+    };
+    return sendHelper();
+  };
   let executorID = "";
   if (mode === "root") {
     const p = executors.preparePolicyPlan(
@@ -95,11 +111,7 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
     );
     const b = executors.issueBootstrap("host", ["script.elevated.v1"], "admin");
     executorID = b.executor_id;
-    db.run(
-      "UPDATE privileged_executors SET state='active',last_seen=? WHERE id=?",
-      clock.toISOString(),
-      executorID,
-    );
+    enrollHelper(b,1);
   }
   let observation: any = {
     schema: 1,
@@ -109,8 +121,8 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
     runtime_mode: mode,
     permission_generation: 1,
     artifact_sha256: "a".repeat(64),
-    uid: mode === "root" ? 0 : 995,
-    gid: mode === "root" ? 0 : 995,
+    uid: 995,
+    gid: 995,
     managed:
       mode === "root"
         ? {
@@ -127,10 +139,10 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
       runtime: {
         mode: m,
         permission_generation: g,
-        uid: m === "root" ? 0 : 995,
-        gid: m === "root" ? 0 : 995,
+        uid: 995,
+        gid: 995,
       },
-      release: { artifact_sha256: "a".repeat(64) },
+      release,
     });
     db.run(
       "INSERT INTO agents VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET heartbeat=excluded.heartbeat,last_seen=excluded.last_seen",
@@ -224,20 +236,15 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
           throw Error("private " + SECRET);
         }
         clock = new Date(clock.getTime() + 1000);
+        if (p.managed_bootstrap) enrollHelper(p.managed_bootstrap,p.permission_generation);
         beat(p.runtime_mode, p.permission_generation);
-        if (p.managed_bootstrap)
-          db.run(
-            "UPDATE privileged_executors SET state='active',last_seen=? WHERE id=?",
-            clock.toISOString(),
-            p.managed_bootstrap.executor_id,
-          );
         receipt = {
           ...receipt,
           status: "succeeded",
           restored: false,
           error: "",
-          uid: p.runtime_mode === "root" ? 0 : 995,
-          gid: p.runtime_mode === "root" ? 0 : 995,
+          uid: 995,
+          gid: 995,
           boot_id: BOOT,
           artifact_sha256: p.artifact_sha256,
         };
@@ -342,6 +349,9 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
     executors,
     jobs,
     beat,
+    helperRuntimeStates,
+    setHelperHeartbeatTransform(fn:(value:any)=>any){helperTransform=fn;},
+    helperHeartbeat(value?:any){assert.ok(sendHelper);return sendHelper(value);},
     observation,
     setPrivilege(state: string, reason_code = "") {
       privilege = { state, reason_code };
@@ -365,7 +375,7 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
     path,
   };
 }
-test("a non-root SSH login with passwordless sudo switches the ordinary Agent to root without any registered root login", async (t) => {
+test("a non-root SSH login with passwordless sudo enables full management without any registered root login", async (t) => {
   const f = await fixture(t, "user", "deploy");
   f.setPrivilege("sudo_noninteractive");
   assert.equal(f.credentials.size, 1);
@@ -492,6 +502,37 @@ test("reviewed root/user transitions keep one Agent identity and bind permission
         assert.equal(f.executors.getStatus("host").executor?.state, "active");
       for (const v of [r.raw, JSON.stringify(p), JSON.stringify(f.logs)])
         assert.ok(!v.includes(SECRET));
+    });
+});
+test("the first signed helper heartbeat binds the running transition without advancing the verified runtime early",async t=>{
+  const f=await fixture(t),p=await f.plan(),result=await f.apply(p);
+  assert.equal(result.status,200,result.raw);assert.equal(result.data.status,"succeeded");
+  assert.deepEqual(f.helperRuntimeStates,["user"]);
+  const row=f.db.get<any>("SELECT * FROM machine_agent_runtime_plans WHERE id=?",p.id)!;
+  const status=f.executors.getStatus("host");
+  assert.equal(row.executor_generation,status.executor?.install_generation);
+  assert.equal(row.executor_policy_generation,status.policy_generation);
+  assert.equal((await f.request()).data.runtime_mode,"root");
+});
+test("helper heartbeats require the exact active transition, release, and frozen generations",async t=>{
+  for(const scenario of ["artifact","build","source","permission","executor-generation","policy-generation","failed","cancelled"])
+    await t.test(scenario,async sub=>{
+      const f=await fixture(sub),p=await f.plan();
+      f.setHelperHeartbeatTransform(value=>{
+        const v=structuredClone(value);
+        if(scenario==="artifact")v.release.artifact_sha256="c".repeat(64);
+        if(scenario==="build")v.release.build_id="different-release";
+        if(scenario==="source")v.release.source_revision="c".repeat(40);
+        if(scenario==="permission")v.ordinary_task_identity.permission_generation++;
+        if(scenario==="executor-generation")f.db.run("UPDATE machine_agent_runtime_plans SET executor_generation=executor_generation+1 WHERE id=?",p.id);
+        if(scenario==="policy-generation")f.db.run("UPDATE machine_agent_runtime_plans SET executor_policy_generation=executor_policy_generation+1 WHERE id=?",p.id);
+        if(["failed","cancelled"].includes(scenario))f.db.run("UPDATE machine_agent_runtime_plans SET status=? WHERE id=?",scenario,p.id);
+        return v;
+      });
+      await f.apply(p);
+      assert.equal(f.db.get<any>("SELECT runtime_mode FROM machine_agent_runtime WHERE machine_id='host'")!.runtime_mode,"user");
+      assert.equal(f.db.get<any>("SELECT last_seen FROM privileged_executors WHERE machine_id='host'")!.last_seen,"");
+      assert.deepEqual(f.helperRuntimeStates,["user"]);
     });
 });
 test("account transitions revalidate reviewed target credential actor and generation after awaited probes", async (t) => {

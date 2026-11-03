@@ -55,9 +55,16 @@ test("script targets are all, any-label or explicit-host union; empty target nev
   store.task(script({label_ids:["production"],host_ids:["b"]}),"selected",true);
   store.task(script(),"empty",true);
   assert.ok(store.effectiveHostTasks("a").some(x=>x.id==="selected"));
-  assert.equal(store.effectiveHostTasks("a").find(x=>x.id==="selected")?.status,"upgrade_required");
-  db.run("UPDATE agents SET heartbeat=? WHERE id='agent-a'",JSON.stringify({task_capabilities:["task.script.v1"]}));
+  assert.equal(store.effectiveHostTasks("a").find(x=>x.id==="selected")?.status,"task_channel_unavailable");
+  store.taskScriptCapabilities=(hostID)=>hostID==="a"?[]:[];
+  db.run("UPDATE agents SET heartbeat=? WHERE id='agent-a'",JSON.stringify({task_capabilities:["task.script.v2"]}));
+  assert.equal(store.effectiveHostTasks("a").find(x=>x.id==="selected")?.status,"task_channel_unavailable","Agent telemetry alone must not grant script execution capability");
+  store.taskScriptCapabilities=(hostID)=>hostID==="a"?["task.script.v1"]:[];
   assert.equal(store.effectiveHostTasks("a").find(x=>x.id==="selected")?.status,"ready");
+  store.task(script({host_ids:["a"],script:{runtime:"node",code:"console.log('v2')",timeout_seconds:10,max_output_bytes:4096,args:["--safe"]}}),"v2",true);
+  assert.equal(store.effectiveHostTasks("a").find(x=>x.id==="v2")?.status,"upgrade_required","Only a proven v1 helper should be prompted for a v2 Agent upgrade");
+  store.taskScriptCapabilities=(hostID)=>hostID==="a"?["task.script.v2"]:[];
+  assert.equal(store.effectiveHostTasks("a").find(x=>x.id==="v2")?.status,"ready");
   assert.ok(store.effectiveHostTasks("b").some(x=>x.id==="selected"));
   assert.ok(!store.effectiveHostTasks("c").some(x=>x.id==="selected"));
   assert.ok(!store.effectiveHostTasks("a").some(x=>x.id==="empty"));

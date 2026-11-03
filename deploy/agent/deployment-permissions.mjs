@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-/** Ordinary Agent permission observation. Never grants or removes host powers.
- * User mode refuses external Docker authority; root mode requires explicit configuration. */
+/** Verify the network-facing Agent remains an unprivileged service. */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -49,14 +48,6 @@ function actualIdentity() {
 }
 export async function checkDeploymentPermissions(options = {}) {
   const identity=options.identity??actualIdentity(), p=value=>path.join(options.root??'/',value);
-  if (identity.uid===0 && identity.euid===0) {
-    const config=p('/etc/lightmoni-agent/config.json'), info=fs.lstatSync(config);
-    if(!info.isFile()||info.isSymbolicLink()||info.uid!==0||(info.mode&0o077))fail('agent_config_permission_invalid');
-    let value;try{value=JSON.parse(fs.readFileSync(config,'utf8'));}catch{fail('agent_config_permission_invalid');}
-    if(identity.gid!==0||value.runtime_mode!=='root'||!Number.isSafeInteger(value.permission_generation)||value.permission_generation<1)fail('runtime_identity_mismatch');
-    writableDirectory(p('/var/lib/lightmoni-agent'),0);
-    return 'root_permissions_ready';
-  }
   if(!Number.isSafeInteger(identity.uid)||identity.uid<=0||!Number.isSafeInteger(identity.euid)||identity.euid<=0||!Number.isSafeInteger(identity.gid)||identity.gid<=0)fail('ordinary_agent_privilege_violation');
   groupSnapshot([identity.gid,...identity.groups],identity.names);
   if(!identity.capabilities||Object.keys(identity.capabilities).sort().join(',')!=='ambient,effective,inheritable,permitted')fail('agent_permission_observation_failed');
@@ -74,14 +65,47 @@ export async function checkDeploymentPermissions(options = {}) {
   const config=p('/etc/lightmoni-agent/config.json'), info=fs.lstatSync(config);
   if(!info.isFile()||info.isSymbolicLink()||!(info.uid===identity.uid&&(info.mode&0o077)===0||info.uid===0&&(info.mode&0o027)===0))fail('agent_config_permission_invalid');
   let value;try{value=JSON.parse(fs.readFileSync(config,'utf8'));}catch{fail('agent_config_permission_invalid');}
-  if((value.runtime_mode??'user')!=='user'||!Number.isSafeInteger(value.permission_generation??1)||(value.permission_generation??1)<1)fail('runtime_identity_mismatch');
+  if(!['user','root'].includes(value.runtime_mode??'user')||!Number.isSafeInteger(value.permission_generation??1)||(value.permission_generation??1)<1)fail('runtime_identity_mismatch');
   fs.accessSync(config,fs.constants.R_OK);writableDirectory(p('/var/lib/lightmoni-agent'),identity.uid);
   return 'ordinary_permissions_ready';
+}
+export function checkHelperPermissions(options = {}) {
+  const identity=options.identity??actualIdentity(), p=value=>path.join(options.root??'/',value);
+  const boundary=path.resolve(options.root??'/');
+  if(identity.uid!==0||identity.euid!==0||identity.gid!==0)fail('helper_root_identity_required');
+  const lstat=options.lstat??fs.lstatSync;
+  const privateFile=(file,mode)=>{
+    const info=lstat(file);
+    if(!info.isFile()||info.isSymbolicLink()||info.uid!==0||(info.mode&0o777)!==mode||info.nlink!==1)fail('helper_private_config_invalid');
+    for(let at=path.dirname(file);;at=path.dirname(at)){
+      const parent=lstat(at);if(!parent.isDirectory()||parent.isSymbolicLink()||parent.uid!==0||(parent.mode&0o022))fail('helper_private_config_invalid');
+      if(at===boundary)break;
+      if(!at.startsWith(boundary+path.sep))fail('helper_private_config_invalid');
+    }
+    try{JSON.parse(fs.readFileSync(file,'utf8'));}catch{fail('helper_private_config_invalid');}
+  };
+  const privateDirectory=(directory,mode)=>{
+    const info=lstat(directory);
+    if(!info.isDirectory()||info.isSymbolicLink()||info.uid!==0||(info.mode&0o777)!==mode)fail('helper_private_state_invalid');
+    for(let at=path.dirname(directory);;at=path.dirname(at)){
+      const parent=lstat(at);if(!parent.isDirectory()||parent.isSymbolicLink()||parent.uid!==0||(parent.mode&0o022))fail('helper_private_state_invalid');
+      if(at===boundary)break;
+      if(!at.startsWith(boundary+path.sep))fail('helper_private_state_invalid');
+    }
+  };
+  privateDirectory(p('/etc/lightmoni-agent-helper'),0o700);
+  privateFile(p('/etc/lightmoni-agent-helper/helper.json'),0o600);
+  privateDirectory(p('/var/lib/lightmoni-agent-helper'),0o711);
+  privateDirectory(p('/var/lib/lightmoni-agent-helper/managed'),0o700);
+  const tasks=lstat(p('/var/lib/lightmoni-agent-helper/tasks'));
+  if(!tasks.isDirectory()||tasks.isSymbolicLink()||tasks.uid!==0||(tasks.mode&0o777)!==0o711)fail('helper_task_directory_invalid');
+  return 'privileged_helper_permissions_ready';
 }
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     if(process.argv[2]==='prepare'&&process.getuid?.()===0)console.log(prepareDeploymentPermissions());
     else if(process.argv[2]==='check')console.log(await checkDeploymentPermissions());
+    else if(process.argv[2]==='helper-check'&&process.getuid?.()===0)console.log(checkHelperPermissions());
     else fail('agent_permission_check_invalid_invocation');
   } catch(error){console.error(typeof error.safeCode==='string'?error.safeCode:'agent_permission_observation_failed');process.exitCode=1;}
 }

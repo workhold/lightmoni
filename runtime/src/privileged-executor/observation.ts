@@ -30,7 +30,7 @@ export class ExecutorApplicationObserver {
   await this.flush(signal);
   if((await inspectManagedDockerDaemon()).daemon_id!==this.config.daemon_id)refuse('docker_daemon_changed');
   this.metrics=[];await this.observer.collect(signal);
-  if(this.metrics.length){const payload=encodeOTLP('metrics',{resourceMetrics:[{resource:{attributes:[{key:'service.name',value:{stringValue:'lightmoni-executor'}}]},scopeMetrics:[{scope:{name:'lightmoni.application'},metrics:this.metrics}]}]});if(payload.length<=256<<10&&this.db.get<{n:number}>('SELECT coalesce(sum(length(payload)),0) n FROM batches')!.n+payload.length<=32<<20)this.db.run('INSERT INTO batches VALUES(?,?,?,?)',randomUUID(),'metrics',payload,new Date().toISOString());}
+  if(this.metrics.length){const payload=encodeOTLP('metrics',{resourceMetrics:[{resource:{attributes:[{key:'service.name',value:{stringValue:'lightmoni-agent-helper'}}]},scopeMetrics:[{scope:{name:'lightmoni.application'},metrics:this.metrics}]}]});if(payload.length<=256<<10&&this.db.get<{n:number}>('SELECT coalesce(sum(length(payload)),0) n FROM batches')!.n+payload.length<=32<<20)this.db.run('INSERT INTO batches VALUES(?,?,?,?)',randomUUID(),'metrics',payload,new Date().toISOString());}
   await this.flush(signal);
  }
  private async flush(signal:AbortSignal){

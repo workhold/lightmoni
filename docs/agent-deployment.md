@@ -1,6 +1,6 @@
 # LightMoni Agent 部署与恢复
 
-本文说明当前主机管理部署流程及恢复边界。主机是唯一资产，LightMoni Agent 是主机的管理通道：必须先登记主机，再由平台通过 SSH 预检、审阅确认并安装。每台 Linux 主机最多关联一个独立 systemd Agent，使用专用非 root 用户和持久状态目录，不随业务应用启停。SDK 可以独立直报中心，安装 Agent 不是 SDK 的前置条件。当前接入契约见 [SDD 038](../specs/038-registered-host-agent-onboarding/spec.md)。
+本文说明当前主机管理部署流程及恢复边界。主机是唯一资产：必须先登记，再由平台 SSH 预检并按审阅的计划安装。每台 Linux 主机至多安装一个常驻 `lightmoni-agent` 非 root 服务；“完整管理”另安装同包 root helper，“仅监控”不安装 helper，也不领取用户脚本。SSH 账户只用于固定生命周期维护，不成为服务或脚本执行用户。SDK 可独立直报中心。当前权限与身份以 [SDD 087](../specs/087-agent-permission-boundaries/spec.md) 为准；接入契约见 [SDD 038](../specs/038-registered-host-agent-onboarding/spec.md)。
 
 以下是早期安装器的历史验收，不代表 SDD 038 主机预绑定流程已完成实机验收。2026-10-27 已用修复安装器与线上 0.1.0 包完成一次 Linux amd64 systemd 首装、真实 enrollment、非 root 运行、配置同步和主机指标入库验收，见 [实机记录](../specs/024-agent-install-startup-fix/validation.md)。2026-10-28 另在本机 Colima 的 Ubuntu arm64、glibc 2.39、systemd 255.4 隔离环境中，使用已发布 0.1.0 arm64 包和当前安装/卸载脚本完成 8 项真实验收：非 root 服务运行、OTLP 日志入队、卸载后程序及 unit 移除、配置和身份 SHA 不变、待上报批次保留，见 [SDD 032 systemd 报告](../specs/032-agent-install-uninstall/systemd-report.json)。这次 arm64 测试使用离线合成身份和不可用的本机 endpoint，不覆盖生产 enrollment 或平台凭据撤销；后两者需分别看真实平台验收与隔离 API 测试证据。
 
@@ -52,9 +52,12 @@
 | --- | --- |
 | `/usr/local/bin/lightmoni-agent` | launcher |
 | `/opt/lightmoni-agent/releases/…`、`current` | root 管理的固定发行文件和当前版本链接；目录/可执行文件 0755，普通文件 0644，服务用户只读 |
-| `/etc/lightmoni-agent/config.json` | 中心地址、独立 control/data credential、本地令牌；目录 0700、文件 0600 |
+| `/etc/lightmoni-agent/config.json` | 中心地址、Agent 自身 control/data credential；root 所有，Agent 组只读，目录 0750、文件 0640；不包含 helper 签名私钥 |
 | `/var/lib/lightmoni-agent` | 持久身份、SQLite 队列、receipt、日志游标、缓存任务；目录 0700 |
 | `/etc/systemd/system/lightmoni-agent.service` | 独立服务，用户 `lightmoni-agent` |
+| `/etc/lightmoni-agent-helper`、`/var/lib/lightmoni-agent-helper/managed` | root helper 的私有配置、身份、journal 和恢复状态；均为 root 0700 |
+| `/var/lib/lightmoni-agent-helper/tasks` | root 控制的工作目录父级（0711）；每次任务子目录由 `lightmoni-task` 独占 |
+| `/etc/systemd/system/lightmoni-agent-helper.service` | 仅完整管理模式安装；固定 helper 以 root 身份运行，与网络 Agent 分离 |
 
 不要把运行过的身份和队列复制到其他独立主机。升级原机要保留整个状态目录；新主机使用空目录生成新身份。Agent 本地 `host_id` 是遥测资源标识，不是平台主机 ID，也不能作为重新关联资产的证明。主机 ID 由中心生成并通过安装预约绑定，不创建主机 ID/名称环境变量。
 
@@ -66,9 +69,9 @@ Agent配置公网引导endpoint，自动查询管理员登记的中心内网IP�
 
 中心建议使用受信 CA 的 HTTPS 443（本地开发常见 8080），不通过关闭证书验证解决 TLS 问题。Agent 默认每 30 秒主动取控制配置，单次请求超时 15 秒，无需开放中心→Agent 的控制端口。任务标签只决定任务分发，不授予 SSH、模型或任意命令执行权限。
 
-每个 Agent 使用绑定 `agent_id` 与登记主机的独立 control/data credential：control 用于心跳和配置，data 用于遥测；中心保存摘要并按 audience、scope、有效期和撤销状态校验。SDK Key 不可替代控制凭据，注册/心跳不得创建或抢占主机资产。撤销不会在断网时即时停止缓存任务，配置租约仍待实现。
+每个 Agent 使用绑定 `agent_id` 与登记主机的独立 control/data credential：control 用于心跳和配置，data 用于遥测；中心保存摘要并按 audience、scope、有效期和撤销状态校验。SDK Key 不可替代控制凭据，注册/心跳不得创建或抢占主机资产。撤销不会在断网时即时停止已启动的任务。自定义脚本仅由完整管理模式下签名 helper 领取，不提供 Agent bearer 脚本执行路由。
 
-日志目录应明确授予服务用户读取及父目录遍历权限，可按业务组或 ACL 配置。普通服务启用 `ProtectSystem=strict`、`ProtectHome=read-only`、`PrivateTmp=true`，只写私有状态目录 `/var/lib/lightmoni-agent`，不持有 Docker 组或 Linux capabilities；每次启动核验非 root 身份、配置保密及目录读写。应用宿主 `/tmp` 日志不一定在该服务视图中可见，优先使用稳定日志目录。网站与其他主机写操作由独立 root 执行器承接，业务状态使用 `/var/lib/lightmoni-managed`。
+日志目录应明确授予服务用户读取及父目录遍历权限，可按业务组或 ACL 配置。网络 Agent 始终以 `lightmoni-agent` 非 root 运行，启用 `ProtectSystem=strict`、`ProtectHome=read-only`、`PrivateTmp=true`，只写私有状态目录 `/var/lib/lightmoni-agent`，不持有 Docker 组或 Linux capabilities。完整管理模式另安装同包、同版本的 root helper；普通脚本由 helper 降权到 `lightmoni-task`，高权限操作仍要求固定授权并单独审计。监控模式不安装 helper，也不领取自定义脚本。网站与其他主机写操作由 helper 承接，业务状态使用 `/var/lib/lightmoni-managed`。
 
 ## 检查与诊断
 
@@ -200,31 +203,8 @@ SDK 直接使用中心地址和 SDK Key，业务可以先启动或完全不装 A
 当前不为业务或 Agent 创建主机 ID/名称环境变量，也不新增 SDK 读取能力。SDK 保持独立直报；登记主机不修改已有业务启动环境。
 
 
-## Docker 清单与即时操作（SDD 057）
+## 容器管理与受管主机操作
 
-主机的“应用与 Docker”显示平台部署及本机全部容器，包含停止的和非平台创建的容器。定期采集之外，“立即采集”通过已认证 Agent 的持久任务查询 Docker，不等待下次指标采集。管理员可确认后启动、停止、重启已有容器；任务完成后验证状态并更新清单。操作外部容器不会创建平台应用；平台应用容器可能被调度器恢复到期望状态。
+Agent 不加入 Docker 组，也不连接 Docker socket。完整管理模式通过独立 helper 提供已单独授权的 Docker 能力；主机是否安装 Engine/Compose、daemon 身份是否核验、中心策略是否批准、helper 是否在线分别显示，任何一项缺失都不以提升 Agent 权限来绕过。helper 的容器操作仅通过结构化计划和审计队列执行，不开放原始 Docker 命令。详细入口见 [SDD 087](../specs/087-agent-permission-boundaries/spec.md) 与 [容器环境文档](docker-environment.md)。
 
-需要同时升级中心与 Agent。旧 Agent 未声明 `docker.inventory` / `docker.control` 时只显示已有快照并提示升级。中心不连接 Docker socket；Agent 使用本机固定 `default` context，不继承交互终端的 `DOCKER_HOST` 或其他 context。
-
-标准安装以 `lightmoni-agent` 用户运行，Docker 附加组与 capabilities 均为空。安装和维护只接受当前普通 unit，遇到特权 unit、drop-in 或外部 Docker 授权会拒绝，不自动清理或恢复旧授权。主机写操作需单独安装并批准独立 root 运维执行器；首次发布不接管普通 Agent 的历史业务目录。
-
-启动前固定检查器以实际 unit 的 UID、附加组、capability 与文件系统沙箱验证私有配置可读、私有/公开目录的写入及原子 rename、低端口绑定和已有 Docker socket 的访问。权限错误使服务启动检查失败，只记录固定错误码。没有安装 Docker 或 daemon 未就绪时监控 Agent 仍可运行，但输出依赖待就绪，不能据此显示应用可部署；之后安装使用标准 docker 组的 Docker 无需手工补组。非标准 socket/组策略若不符合该部署契约，必须明确配置后验证，不能伪造就绪。
-
-只读排查可在主机执行：
-
-```sh
-id lightmoni-agent
-ls -l /var/run/docker.sock
-sudo systemctl show lightmoni-agent --no-pager -p User -p Group -p SupplementaryGroups -p AmbientCapabilities -p ReadWritePaths
-sudo runuser -u lightmoni-agent -g lightmoni-agent -G docker -- docker --context default ps --all --no-trunc
-```
-
-页面区分 CLI 缺失、socket 权限不足、daemon 不可达和命令超时，显示最近尝试并保留旧清单。排队超时说明 Agent 未领取任务；`unknown` 说明可能已产生效果，先立即采集并检查容器，不直接重复操作。节点写锁在未知结果时保留，管理员需核对原执行已终止及现场状态后处理恢复。
-
-## 网站配置与文件权限（SDD 071，需发布并升级）
-
-网站配置、版本、PID、日志、临时文件和证书私钥保存在私有状态目录中，服务用户拥有目录 0700、私钥 0600 的读写权限。Nginx 的 client body、proxy、FastCGI、uWSGI、SCGI 临时路径显式放在同一受管树，避免隐式写系统目录。配置先 `nginx -t`，再切换、重载及 HTTP/TLS 回读，失败恢复旧配置；所有步骤使用同一服务身份。
-
-标准安装的公开内容使用 `/var/lib/lightmoni-web/<data-dir-hash>`，与私有配置及凭据分离。安装器准备父目录，unit 精确开放其写入；静态文件使用 0644、公开目录 0755。Docker OpenResty 继续由已授权 Docker 路径读取固定受管挂载，不能把私钥放进静态根目录。外部证书导出、备份或 systemd 发布路径须通过对应目标的精确授权，不根据任意任务参数扩大系统可写范围。
-
-升级先准备目标版本要求的权限，再停止旧服务；权限准备失败保留原服务，启动失败按原维护事务恢复。回退使用原 unit，保留身份、配置和队列；不会恢复旧队列快照。离线卸载默认保留网站/业务数据，不能将保留数据描述为仍有运行中的服务权限。
+网站、证书、备份、Compose 和发布能力须按各自的受管 profile 单独开通；完整管理模式本身不代表这些操作都已授权。新增能力需要固定目标/载荷、管理员批准、执行记录和恢复边界。

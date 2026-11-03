@@ -839,7 +839,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       check_id: check.id, target_revision: targetRevision(machine), preflight: check,
       version, arch, initial_label_id: text(input.initial_label_id ?? "", "initial_label_id", 128, false), expires_at: check.expires_at,
       runtime_mode:runtimeMode,permission_generation:1,capabilities:runtimeMode==='root'?[...PRIVILEGED_CAPABILITIES]:[],
-      steps: ["自动校验主机公钥", "建立受限 SSH 连接", "下载固定版本 Agent 并校验 SHA256", "通过 stdin 注入一次性 enrollment token", "安装独立 systemd Agent", "等待 Agent 激活回执"],
+      steps: ["自动校验主机公钥", "建立受限 SSH 连接", "下载固定版本 Agent 并校验 SHA256", "通过 stdin 注入一次性 enrollment token", "安装非 root 常驻 Agent；完整管理模式同时安装同版本管理组件", "核验 Agent 和管理组件身份、发行摘要及新鲜心跳"],
       warnings: ["AI 不会读取或发送 SSH 秘密。", "用户确认后才执行固定部署流程。", "SSH 密码建议只使用一次，不要长期保存。", "Agent 激活后日常操作优先使用 Agent 通道。"],
     };
     db.run(`INSERT INTO machine_deployments(id,machine_id,credential_id,status,version,arch,initial_label_id,plan_json,created_at,created_by,execution_stage) VALUES(?,?,?,?,?,?,?,?,?,?,'planned')`,

@@ -4,7 +4,7 @@
 >
 > 配套变更：[SDD 019：系统设计基线](../specs/019-system-design-baseline/spec.md)。
 
-当前主机登录账户以第84章（SDD084）为准，运行权限与生命周期以第83章（SDD083）为准：一台主机安装一套 Agent、运行一个 lightmoni-agent.service，按 root/user 配置实际运行账户，统一安装、权限切换、升级、回退和卸载。root 首装或切换计划显式列出三类受审计运维能力，管理员审阅后启用；每次作业仍须独立授权。普通脚本始终以专用普通账户运行。第60、71、80章的双常驻服务和分开维护拓扑保留为历史设计，已由第83章取代；签名身份、逐步许可、审计和领域核验继续复用。
+当前主机登录账户以第84章（SDD084）为准，Agent服务/脚本/高权任务身份及生命周期以第87章（SDD087）为准：常驻Agent始终以 `lightmoni-agent` 非root运行；完整管理模式以同一发行包安装受管root helper，监控模式不安装helper且不领取自定义脚本。普通脚本只在helper中执行，并切换至隔离的 `lightmoni-task` 账号；高权作业复用签名逐步许可、人工批准、审计和领域核验。SSH root或免交互sudo管理账号只用于固定生命周期维护，不作为常驻或任务身份。第83章的root常驻/user常驻拓扑为历史设计，由第87章取代；第60、71、80章分离发行/维护方式亦为历史，但签名主体和高权授权语义继续复用。
 
 ## 1. 文档定位与事实来源
 
@@ -969,7 +969,7 @@ docker compose up -d --no-build --wait
 - SDK 远程停报、日志采样和规则配置不是每种语言都已接入；未支持的语言不能声称平台规则已生效。
 - Agent 离线时撤销不能即时停止其已缓存任务，配置租约仍是后续强化。
 - SSH 终端是管理员临时工具，不给 AI 增加任意 shell 能力。
-- 通用脚本使用 Agent 进程权限，私有脚本目录、最小环境与有界子进程不构成不可信代码沙箱；不得在脚本中写入连接凭据。默认开启的拨测任务在地址未配置时为“待配置”，不产生虚构成功。SDD 048 增加脚本上传/编辑、单次定时、固定间隔与五段 Cron/IANA 时区；参数和自定义工作目录需要 task.script.v2。不支持持续守护脚本、跨主机编排 DAG、任意运行时/秘密注入或分布式 exactly-once。
+- Agent 权限与普通脚本身份以第87章为准：完整管理模式下，普通脚本由 root helper 切换到独立 `lightmoni-task` 账号运行；仅监控模式不领取脚本。任务工作目录、最小环境与有界子进程不构成不可信代码沙箱；不得在脚本中写入连接凭据。默认开启的拨测任务在地址未配置时为“待配置”，不产生虚构成功。SDD048支持脚本上传/编辑、单次定时、固定间隔与五段Cron/IANA时区；参数和自定义工作目录需要task.script.v2。不支持持续守护脚本、跨主机编排DAG、任意运行时/秘密注入或分布式exactly-once。
 - 代码任务副本不是操作系统沙箱；白名单命令只适用于受信 workspace，不能当成不可信代码隔离。
 - ClickHouse 的掉电可靠性、极端容量、Linux 实机和完整 Docker 发布需要按证据目录继续验收。
 
@@ -1125,15 +1125,15 @@ flowchart TB
   Center --> Native[持续内置配置 / revision]
   Center --> Runs[有限脚本执行快照 / task_runs]
   Native --> Agent[主机 Agent 出站 control 通道]
-  Runs --> Agent
-  Agent --> Handler[指标 / 拨测 / 日志原生处理器]
-  Agent --> Script[独立工作目录 / 有界脚本子进程]
-  Handler --> Data[SDK / data 通道上报遥测]
-  Script --> Receipt[领取租约 / 心跳 / 有界结果]
+  Runs -->|完整管理模式：独立签名请求| Helper[root helper / task-runs]
+  Helper --> TaskUser[lightmoni-task 低权限运行]
+  TaskUser --> Receipt[领取租约 / 心跳 / 有界结果]
   Receipt --> Runs
+  Agent --> Handler[指标 / 拨测 / 日志原生处理器]
+  Handler --> Data[SDK / data 通道上报遥测]
 ```
 
-业务 SDK 继续独立直报中心。任务控制只使用节点 control credential，遥测只使用 data credential。任务脚本不接收 Agent 凭据或中心模型 Key。AI 仅能生成持久化提案，不能调用 apply 或绕过用户审阅直接执行脚本。
+业务 SDK 继续独立直报中心。Agent control 仅用于遥测控制与配置同步；任务脚本由完整管理模式下 helper 的签名身份领取，快照固定 task UID/GID 与权限代次，Agent bearer 不提供脚本通道。任务脚本不接收 Agent 凭据、helper私钥或中心模型Key。AI仅能生成持久化提案，不能调用apply或绕过用户审阅直接执行脚本。
 
 ### 27.3 LLD：主机标签、任务定义和优先级
 
@@ -1163,9 +1163,9 @@ stateDiagram-v2
 
 自动重试默认关闭，可明确设置最多3次及10秒至1小时的等待间隔；只接受 failed 且错误码为 script_failed/runtime_unavailable/timeout/output_limit 的明确回执，沿用原代码、参数及策略快照，创建独立 retry_of 记录。任务版本、有效目标、Agent 绑定或外部授权变化时停止重试；unknown、控制丢失、租约或队列过期、取消不自动重试。显式人工重试仍审阅当前定义。当前状态图只描述原运行状态，失败后允许的自动重试同样是新记录，不把 failed 改回 queued。
 
-基础脚本接受 task.script.v1 或 v2；非空 args/cwd 必须 task.script.v2，旧 Agent 显示需升级，不会静默忽略选项。control 认证、主机当前 Agent 绑定和生命周期在领取、续租和提交结果时检查。取消 queued 直接终止；取消 running 等 Agent 终止进程后回执。控制失败或父进程关闭终止脚本，独立监督进程保留截止时间并检测 Agent 父进程。本地0600标记只重交已得结果，不重执行。远端副作用不能确认时保持 unknown，不提供分布式 exactly-once。
+基础脚本接受task.script.v1或v2；非空args/cwd必须task.script.v2，旧helper显示需升级，不会静默忽略选项。中心在 `/api/v1/privileged-executors/:id/task-runs/claim`、`/:runId/heartbeat|result|reconcile` 校验helper签名、主机/Agent/安装代次及任务账号快照。仅新鲜签名helper心跳会开放脚本能力。取消queued直接终止；取消running等helper终止进程后回执。控制失败或父进程关闭终止脚本，独立监督进程保留截止时间并检测helper父进程。helper私有恢复标记和签名请求journal重交已得结果，不重执行；无法确认时保持unknown并等待人工核对，不提供分布式exactly-once。
 
-脚本文件与监督器保存在新建的私有目录，运行目录默认该目录，也可显式指定远端绝对 cwd；不存在或无权限时失败，不静默回退。解释器固定，args 原样传入而不拼接 shell，保持最小环境，不继承 Agent control/data credential。Unix 按进程组处理超时、取消和输出上限。脚本仍具有 Agent 用户权限，不是操作系统沙箱。运行中或未核对 unknown 阻止主机删除、身份替换或 Agent 卸载。管理员人工核对后填写原因并确认结束，保存 resolved_at/resolved_by/resolution_reason 后解除阻塞；历史仍为 unknown，不执行、不改成功、不接受晚回执。此决议不证明远端进程已停止，AI 不提供人工核对替代工具。
+脚本文件与监督器保存在root控制的任务目录，每次运行目录归 `lightmoni-task` 所有；可显式指定远端绝对cwd，不静默回退。仅使用固定解释器，args原样传入，不继承Agent control/data credential；Unix按进程组处理超时、取消和输出上限。该账号限制单个作业可访问的系统文件权限，不是虚拟机或容器沙箱。运行中或未核对unknown阻止主机删除、身份替换或Agent卸载。管理员人工核对后填写原因并确认结束，保存 resolved_at/resolved_by/resolution_reason 后解除阻塞；历史仍为 unknown，不执行、不改成功、不接受晚回执。此决议不证明远端进程已停止，AI 不提供人工核对替代工具。
 
 ### 27.5 LLD：接口与 AI 审阅边界
 
@@ -1175,7 +1175,7 @@ stateDiagram-v2
 - /api/v1/host-labels 与 /machines/:id/labels：主机标签目录与归属。
 - /api/v1/machines/:id/tasks 和 /task-overrides/:taskId：单机任务、覆盖与恢复继承。
 - /api/v1/agent-tasks/:id/dispatch、/task-runs、/task-runs/:id/cancel|retry|resolve：明确派发、记录、取消、重试与人工核对结束。
-- /api/v1/agents/:id/task-runs/claim、/:runId/heartbeat|result：出站 control 领取、租约及回执。
+- `/api/v1/privileged-executors/:id/task-runs/claim`、`/:runId/heartbeat|result|reconcile`：完整管理模式helper出站签名领取、租约、结果与回执核对；不再提供Agent bearer脚本路由。
 - /api/v1/assistant/task-proposals/:id 和 /apply：用户查看与明确确认任务行动提案。
 
 平台写接口仅管理员可用，普通成员通过安全主机目录和任务接口只读访问。AI 工具提供 list_tasks/get_task、list_task_runs/get_task_run、propose_task_action/get_task_proposal；没有 apply 或直接执行工具。提案支持创建/修改任务、派发、取消、重试，保存所有者、会话、前后差异、目标绑定摘要与 15 分钟有效期，正文及审计加密保存。用户批准时，在同一数据库事务中重新核对任务定义、主机/Agent/标签/单机覆盖或执行状态，再提交变更和审批回执；重复确认返回已有结果，不产生第二次派发。AI 的执行查询只提供有限状态元数据，原始主机输出与领取凭证不进入模型上下文。
@@ -1693,7 +1693,7 @@ Logo是中心展示元数据，独立存于既有SQLite的ops_application_logos�
 
 ## 第60章 主机执行权限与独立运维执行器（SDD 060）
 
-> 历史架构：本章的双常驻服务、分别安装与维护拓扑已被[第83章：统一 Agent 运行权限](#83-统一-agent-与运行权限模式sdd-083)取代。独立签名主体、权限边界、逐任务审计、在线许可和业务领域校验继续适用；不要根据本章恢复第二套服务或普通 control 写通道。
+> 历史架构：本章的双常驻服务、分别安装与维护拓扑已被[第87章：Agent 常驻与任务身份分离](#87-agent-常驻脚本和维护身份分离sdd-087)取代。独立签名主体、权限边界、逐任务审计、在线许可和业务领域校验继续适用；不要根据本章恢复第二套发行或普通 control 写通道。
 
 本章描述 SDD060 的架构与实现契约，实际交付范围和后续业务 profile 见60.10。详细研究与 HLD/LLD 见 [主机执行权限设计](privileged-executor.md)，规格和目标契约见 [SDD060](../specs/060-privileged-executor/spec.md)。未发布的目标能力不能据此视为线上已可用。
 
@@ -1829,9 +1829,9 @@ flowchart LR
 
 ## 71. 标准 Agent 部署与权限隔离（SDD 071，由 SDD060 收口）
 
-> 历史架构：本章的双常驻服务、分别安装与维护拓扑已被[第83章：统一 Agent 运行权限](#83-统一-agent-与运行权限模式sdd-083)取代。独立签名主体、权限边界、逐任务审计、在线许可和业务领域校验继续适用；不要根据本章恢复第二套服务或普通 control 写通道。
+> 历史架构：本章关于Agent与运维组件的独立发行、普通脚本运行账号和容器能力拓扑已被[第87章](#87-agent-常驻脚本和维护身份分离sdd-087)取代。当前Agent恒以lightmoni-agent运行，脚本和Docker操作均由同包helper按各自权限执行；不要依据本章添加Docker组、socket授权或让Agent执行脚本。
 
-标准Agent及普通脚本以lightmoni-agent账户运行，unit清空Docker附加组、AmbientCapabilities和CapabilityBoundingSet。普通run真实核验UID、附加组、capabilities及Docker socket访问；发现外部高权限则拒绝启动并提示迁移，不擅自改组、ACL或socket。安装/更新helper只验证普通运行前提，不授予Docker、低端口或宿主发布目录权限。用户批准安装/升级/回退时，仅精确清理root拥有且字节匹配的本平台旧20-lightmoni-docker.conf；未知drop-in或外部组/ACL保留并拒绝，不随程序回退恢复旧授权。
+历史实现曾令普通脚本与Agent同账户，属于已淘汰方案。当前安装器、unit、身份边界与 Docker 授权以第87章为准。
 
 root安装器只执行固定引导和文件所有权准备；独立运维能力由另一个root服务及私有身份提供。两角色共用发行包和基础组件，各自unit、目录、身份、journal及维护锁独立。普通Agent待启动或恢复的主unit按完整SHA白名单验证，先于任何root权限准备器。高权旧previous-service保留作证据但标记不可回退；失败保留已验证普通unit、停服/disable并保锁，报告rollback_failed/unknown，不恢复旧权限或修改原fingerprint冒称完整回退。旧operations网站/容器写入口不保留兼容分支，未迁移业务profile明确拒绝。
 
@@ -1915,7 +1915,7 @@ flowchart LR
 
 ## 80. 独立执行器承接受管主机运维（SDD 080）
 
-> 历史架构：本章的双常驻服务、分别安装与维护拓扑已被[第83章：统一 Agent 运行权限](#83-统一-agent-与运行权限模式sdd-083)取代。独立签名主体、权限边界、逐任务审计、在线许可和业务领域校验继续适用；不要根据本章恢复第二套服务或普通 control 写通道。
+> 历史架构：本章的独立发行与Agent/执行器分别维护拓扑已被[第87章](#87-agent-常驻脚本和维护身份分离sdd-087)取代。签名主体、逐任务授权、审计和领域校验继续复用；不要据本章恢复独立的 lightmoni-executor 安装或升级入口。
 
 本节取代第57、60.10、69、71及75节中普通 Agent 领取 Docker/operations 写任务的历史路径。普通 Agent 保持非 root、无 Docker 组/socket/capabilities；生产中心以 execution_principal 分流，写任务固定进入独立执行器，不执行历史任务搬运；unknown 保留审计与互斥。受管作业的领取、私有载荷、制品、事件与结果都只能走独立签名主体，不能凭 ordinary control 或获知 lease 访问。任务、AgentJob、运维 run 与原领域验证沿用同一 ID，结构化 root 回执在同一 SQLite 事务更新原领域状态。
 
@@ -1945,7 +1945,6 @@ flowchart LR
 
 架构影响为组件职责、控制/观测协议、凭据边界、存储和部署拓扑。在线基线同步及真实验收证据见 specs/080-executor-managed-operations/；发行与目标主机现场升级分开验收。
 
-
 ## 81. 首次正式发布前单一基线（SDD081）
 
 SQLite直接创建最终字段与索引，中心在业务初始化前检查center_schema=2（SDD084多账户基线）；无标记的历史开发数据库明确拒绝，不自动清空或升级。ClickHouse直接创建最终列，系统自监控统一lightmoni_log/lightmoni_metric_*，按component区分；所有SDK和内置仪表盘使用当前名称，不保留旧系统视图与启动补列。管理员CLI与中心共用基线验证，空库先建管理员后可直接启动中心。
@@ -1957,7 +1956,9 @@ SDK Key仅管理名称与启停，可写所有业务表；删除逐表范围数�
 本轮用户明确授权完成清理后通过GitHub PR合入main并发布Docker。构建固定已合入源码，发布linux/amd64与linux/arm64镜像，隔离验收空库、重复启动及下载包；发布后读回固定标签/latest和每个平台摘要。验证结果与边界见同一SDD081，不把历史兼容验收当成本次证明。
 
 
-## 83. 统一 Agent 与运行权限模式（SDD 083）
+## 83. 统一 Agent 与运行权限模式（SDD 083，已由 SDD 087 取代）
+
+> **历史方案，非当前架构。** 本章原先提出通过 `runtime_mode` 切换常驻 Agent 的 root/普通账户。该决定已被 [第 87 章](#87-agent-常驻脚本和维护身份分离sdd-087) 完整取代：Agent 服务始终以非 root 运行，root 能力由同包、可选且独立运行的 helper 提供。安装、任务执行、升级和卸载均以第 87 章为准；本章保留作为旧决策记录，不可用于实现或运维。
 
 ### 83.1 驱动目标与架构决策
 
@@ -2080,7 +2081,7 @@ flowchart TD
   D --> P
   P --> R[用户选择账户并审阅固定计划]
   R --> E[中心SSH执行：安装、恢复或维护]
-  E --> G[同一Agent：root或普通模式]
+  E --> G[同一发行：完整管理或仅监控，常驻Agent始终非root]
 ```
 
 ### 84.2 LLD：账户、凭据与主机身份
@@ -2117,7 +2118,7 @@ flowchart TD
 
 最近检查的推荐仅在目标、账户修订、凭据绑定修订和有效期均匹配时成立；账户名root不能证明实际UID0。没有新鲜检查时标记未确认，用户可显式选择账户执行新检查；推荐列表不主动遍历SSH，只有用户发起安装自动预检时才顺序检查候选。需要输入sudo密码的方式仍不支持，也不复用SSH登录密码。公钥用于配置服务器授权，不能替代密码或私钥登录。
 
-检查和保存不会安装、切换模式或执行root任务。使用高权限账户安装也可选择普通Agent运行模式；root模式下普通脚本仍降权，root作业独立批准。
+检查和保存不会安装、改变管理模式或执行root任务。SSH管理账号负责固定生命周期维护，不是Agent或任务身份。首装默认完整管理模式，可选择仅监控；两种模式下Agent常驻均为非root。完整管理由同包root helper提供，普通任务以lightmoni-task运行，高权限作业单独批准。具体切换流程以第87章为准。
 
 ### 84.4 接口、冻结计划与恢复
 
@@ -2138,13 +2139,13 @@ flowchart TD
 
 主机列表的“容器管理”直接打开已有受管容器计划与执行记录界面，绑定同一 machine/agent 身份，沿用 /machines/:id/execution-status 与 /privileged-execution 的精确审批、签名领取和回执。移除仍依赖普通 Agent Docker 能力的旧主机界面；Docker 环境面板仅验证依赖并刷新现有签名状态，不通过旧 Docker 作业路由采集。
 
-容器能力未就绪时引导主机执行权限，检查统一 Agent 的 root/user 运行模式、容器管理授权与新鲜签名状态；不会因为进入页面、SSH 验证成功或点击刷新而自动提权。CentOS 上已有完整 Engine/Compose 仍可直接验证，缺失组件的自动补装继续仅限 Ubuntu/Debian。
+容器能力未就绪时引导主机执行权限，检查完整管理模式、容器管理授权与新鲜签名状态；不会因为进入页面、SSH验证成功或点击刷新自动启用权限。Agent与helper的实际账号和生命周期以第87章为准。CentOS上已有Engine/Compose仍可验证；缺失组件的自动补装继续仅限Ubuntu/Debian。
 
 SSH 安装非零退出仅保存退出码和有限固定原因，不持久化原始远端输出或凭据。已派发安装即使有已知诊断仍保持 unknown 与原互斥，必须只读核对或明确结束，不据退出码自动撤销身份、重放安装或推定远端未发生改变。
 
 受管应用的健康目标由中心已预留端口决定：签名配置 health.host 携带该端口的 host_ip，health.port 携带分配后的宿主端口，部署与巡检复用同一目标。Agent 仅接受 IP 字面量，IPv4/IPv6 通配绑定分别探测 127.0.0.1/::1，HTTP IPv6 使用方括号；不把内网绑定误认为回环服务，不接受域名、URL 或用户信息扩大探测目的地。
 
-交付 Demo 沿用既有集群模型：中心通过统一 root Agent 的签名受管作业部署 Registry、OpenResty 和 ABC Demo。Registry 绑定主机内网地址，通过 registry-demo.heyphp.com 的 HTTPS 与独立 Basic Auth 提供发布入口；ABC Demo 使用该私有来源镜像与命名 HTTP 端口，由 OpenResty 服务发现路由到 abc.heyphp.com。heyphp.com 的加密 DNS 凭据用于解析与 ACME DNS 验证；两个专用证书由中心加密保存并按网站授权分发，私钥和仓库密码不进入源码、日志或设计正文。
+交付 Demo 沿用既有集群模型：中心通过同包 root 管理组件的签名受管作业部署 Registry、OpenResty 和 ABC Demo（运行身份以第87章为准）。Registry 绑定主机内网地址，通过 registry-demo.heyphp.com 的 HTTPS 与独立 Basic Auth 提供发布入口；ABC Demo 使用该私有来源镜像与命名 HTTP 端口，由 OpenResty 服务发现路由到 abc.heyphp.com。heyphp.com 的加密 DNS 凭据用于解析与 ACME DNS 验证；两个专用证书由中心加密保存并按网站授权分发，私钥和仓库密码不进入源码、日志或设计正文。
 
 云公网 NAT 不会因 Registry 监听内网 IP 而自动隔离后端。Demo 主机在 DOCKER-USER 中仅匹配原始目的地址 172.21.0.16、原始 TCP 端口 20000、20001、20002 和 ORIGINAL 方向，允许受信内网 172.21.0.0/20，其余来源丢弃；回包方向与 OpenResty/Agent 本机访问保持原有路径。规则由 root 所有的幂等脚本及 Docker 启动前 oneshot 单元加载，Docker 通过 Requires/After 依赖该单元；网络或后端端口变更需同步主机规则。当前 Registry 后端端口集合通过精确审批的单次签名 root 作业热更新：核对目标私网地址和原脚本摘要，保留 root 私有备份后原子替换并直接运行幂等脚本，不停止或重启 Docker 及其依赖单元。公网三个后端端口不可直连，受信内网及 HTTPS 鉴权入口分别验证；不增加平台执行权限或兼容通道。
 
@@ -2153,3 +2154,76 @@ SSH 安装非零退出仅保存退出码和有限固定原因，不持久化原�
 同一受管作业在 agent_jobs 与 privileged_jobs/task_runs 中保留原 unknown 和错误码。管理员通过既有确认接口记录现场核对后，主机互斥使用共享谓词核对同一作业 ID、Agent、task_run_id、operations.managed.v1 能力、unknown 状态以及完整 resolved_at、resolved_by、resolution_reason；仅该已核对历史作业不再阻塞新执行。普通未知作业、未核对、不完整审计或任一绑定不符继续阻塞，不重放任务、不改写成功或取消，也不创建新授权。
 
 执行器领取与计划，以及 Agent 安装、卸载、更新、运行模式、Docker 维护、身份替换和实例恢复的繁忙检查复用同一谓词；普通排队任务和活动执行仍互斥，特权排队任务仍由签名队列串行处理。核对只解除已结束动作的互斥，业务健康和受管 DNS 必须等待新的有效观测恢复，不从人工核对推断健康。API、签名协议、凭据、数据结构和部署拓扑不变。
+
+## 87. Agent 常驻、脚本和维护身份分离（SDD 087）
+
+### 87.1 目标决策
+
+SSH管理账号、常驻Agent、普通脚本、高权限脚本使用不同操作系统身份；完整发行统一维护、不让普通Agent账号拥有通用sudo，也不允许Agent遇到权限错误时自动改用root。
+
+首次登记主机时，SSH用户名默认root，登记和新增账户界面推荐root用于安装维护；也支持具备免交互系统管理sudo的账号。建议不修改已有账户、不配置服务器的root SSH登录策略，也不将用户名当作权限证明：只有实际权限检查通过才能生成维护计划。用户只管理一套Agent，内部创建的lightmoni-agent与lightmoni-task是无登录系统账号，无需用户为它们录入密码或私钥。
+
+```mermaid
+flowchart LR
+  Admin[平台管理员审阅] --> Center[主机计划 / 固定身份 / 审计]
+  Center -->|冻结的SSH维护计划| Lifecycle[安装 / 升级 / 回退 / 卸载维护程序]
+  SSH[登记SSH管理账号：root或免交互sudo] --> Lifecycle
+  Lifecycle --> Agent[lightmoni-agent.service 非root]
+  Lifecycle -->|完整管理模式| Helper[lightmoni-agent-helper.service UID0]
+  Agent -->|出站遥测与配置请求| Center
+  Helper -->|出站签名领取与回执| Center
+  Helper -->|启动前降权| Task[普通脚本 lightmoni-task UID]
+  Helper -->|固定授权与单步许可| Elevated[明确审批的root任务]
+```
+
+常驻Agent不因 `runtime_mode` 改变UID。`runtime_mode=user` 表示仅监控，不安装helper且不允许用户脚本领取；`runtime_mode=root` 表示完整管理模式：除始终非root的Agent服务外，发行包还安装同版本root helper、私有身份、journal与策略。UI用“完整管理 / 仅监控”展示，不把字段名 root 解释成网络Agent以root运行。
+
+完整管理模式下脚本控制完全由root helper的本机身份和签名许可判定。普通脚本以固定低权限 `lightmoni-task` 账号执行，不能访问Agent配置、数据目录或root凭据；高权限脚本仍走现有内容/目标固定的签名任务批准与审计。高权限授权按计划定义绑定目标、摘要、解释器、UID/GID/组、权限代次和有效期；计划修改需要新批准。监控模式没有helper，网络Agent拒绝接收脚本任务，因而不会伪称其普通脚本已与daemon秘密隔离。
+
+### 87.2 账号职责矩阵
+
+| 行为 | 登录/运行账号 | 具体边界 |
+| --- | --- | --- |
+| 安装、更新、回退、模式切换、卸载及恢复 | root SSH或具备免交互系统管理sudo的已登记账号；远端固定维护命令UID0执行 | 登录凭据仅用于生命周期账本；选择成功后绑定账户/凭据版本；派发后未知只读核对，不跨账号重放。当前实现要求 `sudo -n /bin/sh`，单独授权个别systemctl子命令不足以完成所有固定维护流程 |
+| 遥测、心跳和Agent控制面 | `lightmoni-agent` | Linux systemd unit始终设置User/Group，清空补充组和capabilities，启用 `NoNewPrivileges`、文件系统保护和独立数据目录 |
+| 普通用户脚本 | `lightmoni-task`，仅helper内以固定UID/GID运行 | 无登录shell、无sudo、Docker组或capabilities；任务目录与Agent机密目录分离，显式最小环境、运行/输出限制与取消；发起人、计划、实际UID/GID和结果入审计 |
+| root/容器/系统级任务 | root helper | 只执行中心签名、固定载荷、范围和短租约均通过验证的作业；每个任务按批准内容留账；不提供任意本机sudo或shell API |
+| 未来业务账号执行 | 管理员登记的本地账号白名单 | 快照固定UID/GID/组；任务不得任意填写用户名，不继承SSH账户，不自动回退root；未实现前不对用户宣称支持 |
+
+统一包同时包含daemon与helper组件，启用完整模式时两者必须使用相同发行摘要并通过签名证明绑定；安装、升级、回滚、卸载和离线卸载器共同处理两者。helper配置、密钥和journal位于root拥有的0700私有目录；数据根与tasks父目录为root拥有的0711，每个任务工作目录独立归任务账号所有；Agent的可读配置和普通状态不作为helper的权威来源。helper缺失、代次不匹配或状态unknown时，全部完整管理能力停止并显示不可用，不降级为普通Agent直接执行写操作。
+
+### 87.3 控制与任务流程
+
+SSH安装计划冻结主机ID、SSH账户ID/用户名/revision、凭据revision、发行SHA、模式及root能力范围。直接root登录和sudo管理账号都是系统管理身份来源，root账户不是Agent运行用户；sudo密码需交互的账户不用于无人值守操作。更新按固定凭据快照驱动维护器；普通升级保留helper模式与权限代次，不改变账户、更不自动提升权限。远端命令以root执行但接收固定计划，不接收模型生成的任意管理脚本。
+
+权限模式切换计划的 `revision` 和 `plan_json` 只代表管理员审阅并确认的内容。切换首次登记 helper 后，其 `executor_id`、安装代次和策略代次单独写入计划账本列；helper 首次签名心跳须同时匹配该绑定和当前策略，不能反向改写已审阅计划或其摘要。
+
+完整管理模式普通脚本经既有TaskRun任务队列进入helper端TaskRunner，在启动前绑定script digest、目标主机、版本、时间限制、环境及 task UID/GID，目录、环境和子进程都由受限账户拥有；helper不得用Agent可写文件构造root任务。脚本任务领取、租约心跳和回执必须经executor私钥签名端点；Agent bearer控制接口不得读取或变更helper脚本作业。签名心跳中的 `lightmoni-task` UID/GID 与权限代次用于冻结每次任务身份，身份或代次变化后旧队列不得执行。helper私有恢复标记覆盖领取响应丢失、重启恢复与回执未知，领取幂等；状态未核对时不再领取新作业。同一主机出现未解决的 unknown 脚本结果时，禁止派发或领取后续脚本；管理员核对或用户明确重试并建立关联记录后才解除阻塞。高权限作业保持独立的签名policy、逐任务批准和start permit，不自动共享普通脚本身份。定时高权限作业在固定定义范围内持久授权，每次调度仍留下独立运行记录；修改脚本或目标需要重新批准。未知运行结果阻止该主机的后续冲突作业，不能因租约过期重新执行。
+
+```mermaid
+sequenceDiagram
+  participant U as 管理员
+  participant C as 中心计划与账本
+  participant A as lightmoni-agent 非root
+  participant H as root helper
+  participant T as lightmoni-task
+  U->>C: 登记管理SSH并审阅安装模式
+  C->>H: 通过固定SSH维护包安装或维护helper
+  H-->>C: 受签名的helper身份和权限代次
+  A->>C: 非root心跳和遥测
+  H->>C: 独立签名领取任务
+  C-->>H: 固定的普通/高权作业与授权
+  H->>T: 普通脚本降权到task UID
+  T-->>H: 结构化退出与有界输出
+  H-->>C: 固定身份与审计回执
+```
+
+安装成功必须验证新鲜Agent非root心跳；完整模式另验证同Agent绑定、同发行helper心跳与预期权限代次。监控模式验证不存在受管helper及完整模式任务权限，不用历史root心跳作成功证据。卸载首先核对Agent与helper任务均结束，再移除两组件并撤销签名身份；未知时保留证据，要求只读检查。升级/回滚绑定两个组件的包、执行身份和启动回执，任一组件不健康均保持unknown并锁定，不自动部分降级。
+
+### 87.4 移除与兼容边界
+
+第83章所描述的root常驻Agent unit由本章取代：普通及完整管理模式的Agent网络服务均非root；完整管理root能力仅在固定helper中。普通任务的运行UID从旧的 `lightmoni-agent` 改为新的 `lightmoni-task`，其家目录、恢复账本及配置不互通，不保留运行态自动迁移。旧root常驻安装需要先使用原版本受管维护流程卸载，再重新安装；新卸载器不接管旧运行态；旧user模式若没有现有helper不自动领取脚本。新中心库schema保持SDD084约定，不为本次模式语义增加主机字段或兼容旧安装方式。
+
+程序安装、升级、回退和卸载继续用同一个SSH管理凭据边界；尚未切换至Agent自更新。系统级sudo能力探测目前要求免交互root shell，而非限定systemctl命令列表。主机级平台管理员权限仍为全局管理员，不在本SDD扩展。Docker daemon的身份确认/首次绑定独立于SSH root权限，本次不静默绑定现有或新装daemon。
+
+规格与验收见 [SDD087](../specs/087-agent-permission-boundaries/spec.md)。Doca同步与回读状态、具体功能/构建验收、未覆盖边界和PR链接应在同一SDD `validation.md` 记录；自动化配置/功能检查不等于对线上vchive执行安装或漏洞利用验证。

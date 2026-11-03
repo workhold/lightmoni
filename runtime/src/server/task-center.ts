@@ -12,6 +12,7 @@ import { assertNoPendingMachineUninstallation, hasUninstallationTable, pendingMa
 import { assertNoPrivilegedExecution, hasPrivilegedExecution } from "./privileged-execution-guard.js";
 import { SCRIPT_TASK_CAPABILITIES, supportsTaskScript, TASK_LEASE_SECONDS, validateTaskScript,
   type ClaimedTaskRun, type TaskRun, type TaskRunResult, type TaskRunSnapshot } from "../shared/task-center.js";
+import type { OrdinaryTaskIdentity } from "../shared/task-center.js";
 
 const terminal = (s: string) => ["succeeded", "failed", "cancelled", "unknown"].includes(s);
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -35,6 +36,8 @@ export class TaskRunStore {
   beforeStart?: (run: {id:string;host_id:string;requested_by:string}) => boolean;
   private lastScheduleTick?: number;
   private readonly schedulerStartedAt: number;
+  /** Must be backed by a recent, signature-verified root-helper observation. */
+  ordinaryTaskIdentity?: (machineID: string, agentID: string, executorID: string, installGeneration: number) => Omit<OrdinaryTaskIdentity, "executor_id" | "install_generation" | "privilege"> | null;
   constructor(readonly deps: Dependencies, readonly credentials?: AgentCredentialStore) {
     this.schedulerStartedAt = deps.now().getTime();
     this.nodes = new NodeStore(deps.db, deps.now);
@@ -96,6 +99,26 @@ export class TaskRunStore {
     if (!h) fail(404, "host not found");
     return h;
   }
+  private helperIdentity(machineID: string, agentID: string, executorID: string, installGeneration: number): OrdinaryTaskIdentity {
+    const runtime = this.deps.db.get<any>("SELECT runtime_mode,permission_generation,agent_id FROM machine_agent_runtime WHERE machine_id=?", machineID);
+    if (!runtime || runtime.agent_id !== agentID || runtime.runtime_mode !== "root") fail(409, "custom_script_requires_full_management_mode");
+    const observed = this.ordinaryTaskIdentity?.(machineID, agentID, executorID, installGeneration);
+    if (!observed || observed.account !== "lightmoni-task" || !Number.isSafeInteger(observed.uid) || observed.uid <= 0
+      || !Number.isSafeInteger(observed.gid) || observed.gid <= 0 || observed.permission_generation !== runtime.permission_generation)
+      fail(409, "signed_task_helper_unavailable");
+    return { ...observed, executor_id: executorID, install_generation: installGeneration, privilege: "user" };
+  }
+  private identityMatches(snapshot: TaskRunSnapshot, identity: OrdinaryTaskIdentity) {
+    const saved = snapshot.execution_identity;
+    return !!saved && saved.account === identity.account && saved.uid === identity.uid && saved.gid === identity.gid
+      && saved.permission_generation === identity.permission_generation && saved.executor_id === identity.executor_id
+      && saved.install_generation === identity.install_generation && saved.privilege === "user";
+  }
+  private taskIdentityFromHelper(executor: {id:string;machine_id:string;agent_id:string;install_generation:number}) {
+    const binding = this.deps.db.get("SELECT id FROM managed_machines WHERE id=? AND agent_id=?", executor.machine_id, executor.agent_id);
+    if (!binding) fail(409, "helper_agent_binding_changed");
+    return this.helperIdentity(executor.machine_id, executor.agent_id, executor.id, executor.install_generation);
+  }
   private validBinding(hostID: string, agentID: string): boolean {
     return !isAgentRemoved(this.deps.db, agentID)
       && (!this.credentials || this.credentials.has(agentID, "control"))
@@ -106,11 +129,15 @@ export class TaskRunStore {
     if (!task || !task.enabled) fail(409, "task is disabled or no longer targets this host");
     if (task.type !== "script") fail(400, "continuous built-in tasks are reconciled through Agent configuration, not finite script dispatch");
     if (task.status === "upgrade_required") fail(409, "Agent upgrade required for script task execution");
+    if (task.status === "task_channel_unavailable") fail(409, "signed_task_helper_unavailable");
     try { validateTaskScript(task.script); } catch (e) { fail(400, (e as Error).message); }
     return task;
   }
   private active(taskID: string, hostID: string, includeUnknown = true) {
     return this.deps.db.get<any>("SELECT id,state FROM task_runs WHERE task_id=? AND host_id=? AND (state IN ('queued','running')" + (includeUnknown ? " OR (state='unknown' AND superseded_by='' AND resolved_at='')" : "") + ") ORDER BY created_at DESC LIMIT 1", taskID, hostID);
+  }
+  private unresolvedHostRun(hostID: string, exceptRunID = "") {
+    return this.deps.db.get<any>("SELECT id FROM task_runs WHERE host_id=? AND state='unknown' AND superseded_by='' AND resolved_at='' AND (?='' OR id<>?) LIMIT 1", hostID, exceptRunID, exceptRunID);
   }
   private insert(task: Task, hostID: string, trigger: "manual" | "schedule" | "retry", actor: string, requestID: string, retryOf = "", previousSnapshot?: TaskRunSnapshot, automaticAttempt = 0): TaskRun {
     const existing = this.deps.db.get<any>("SELECT * FROM task_runs WHERE task_id=? AND host_id=? AND request_id=?", task.id, hostID, requestID);
@@ -121,15 +148,19 @@ export class TaskRunStore {
     assertNoPendingMachineUninstallation(this.deps.db,h.id,h.agent_id);
     assertNoPendingAgentUpdate(this.deps.db, h.agent_id, h.id);
     if (!h.agent_id || !this.validBinding(h.id, h.agent_id)) fail(409, "host requires an active enrolled Agent");
+    if (this.unresolvedHostRun(h.id, retryOf)) fail(409, "host has an unresolved task result; explicitly retry that run or record a manual resolution before dispatching another script");
     if (this.active(task.id, h.id, automaticAttempt > 0 || trigger !== "retry")) fail(409, "task already queued, running, or unresolved; explicitly retry an unknown run after review");
     validateTaskScript(task.script);
     const policy = normalizeTaskPolicy(task.execution_policy);
     const snapshot: TaskRunSnapshot = previousSnapshot ? structuredClone(previousSnapshot) : { task_id: task.id, task_name: task.name,
       host_id: h.id, host_name: h.name, agent_id: h.agent_id, script: structuredClone(task.script), task_revision:task.revision,
       execution_policy:policy };
-    const runtimeTable=this.deps.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_agent_runtime'");
-    const runtime=runtimeTable&&this.deps.db.get<any>('SELECT permission_generation FROM machine_agent_runtime WHERE machine_id=? AND agent_id=?',h.id,h.agent_id);
-    if(!previousSnapshot)snapshot.execution_identity={account:'lightmoni-agent',permission_generation:runtime?.permission_generation??1,privilege:'user'};
+    if (!previousSnapshot) {
+      // Resolve the signed helper identity before creating an irreversible run.
+      const current = this.deps.db.get<any>("SELECT id,install_generation FROM privileged_executors WHERE machine_id=? AND agent_id=? AND state='active' ORDER BY install_generation DESC LIMIT 1", h.id, h.agent_id);
+      if (!current) fail(409, "signed_task_helper_unavailable");
+      snapshot.execution_identity = this.helperIdentity(h.id, h.agent_id, current.id, current.install_generation);
+    }
     const id = randomUUID(), at = this.now();
     this.deps.db.run("INSERT INTO task_runs(id,task_id,host_id,agent_id,snapshot_json,state,trigger,retry_of,request_id,requested_by,created_at,expires_at,automatic_attempt,auto_retry_closed) VALUES(?,?,?,?,?,'queued',?,?,?,?,?,?,?,0)",
       id, task.id, h.id, h.agent_id, JSON.stringify(snapshot), trigger, retryOf, requestID, actor, at,
@@ -207,18 +238,19 @@ export class TaskRunStore {
     this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='queue_expired',summary='Task expired before Agent claim' WHERE execution_principal='agent' AND state='queued' AND expires_at<=?", now, now);
     this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='agent_binding_changed',summary='Host Agent binding changed before claim' WHERE execution_principal='agent' AND state='queued' AND (NOT EXISTS (SELECT 1 FROM managed_machines m WHERE m.id=task_runs.host_id AND m.agent_id=task_runs.agent_id) OR EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=task_runs.agent_id AND l.state='removed'))", now);
   }
-  claim(agentID: string, capabilities: string[]): ClaimedTaskRun | null {
+  private claim(agentID: string, hostID: string, capabilities: string[], identity: OrdinaryTaskIdentity): ClaimedTaskRun | null {
     this.sweep(); assertAgentActive(this.deps.db, agentID, 401);
     if (!Array.isArray(capabilities) || capabilities.length > 32 || capabilities.some(x => typeof x !== "string")) fail(400, "invalid task capabilities");
     if (!capabilities.some(c => (SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(c))) return null;
-    return this.deps.db.transaction(() => {
-      if (pendingMachineInstallation(this.deps.db,"",agentID)) return null;
-      if (pendingMachineUninstallation(this.deps.db,"",agentID)) return null;
-      if (hasPendingAgentUpdate(this.deps.db, agentID)) return null;
-      if (pendingDockerInstallation(this.deps.db,"",agentID)) return null;
-      if (hasPrivilegedExecution(this.deps.db, "", agentID)) return null;
-      if (this.deps.db.get("SELECT id FROM task_runs WHERE agent_id=? AND state='running'", agentID)) return null;
-      const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE execution_principal='agent' AND agent_id=? AND state='queued' ORDER BY created_at,rowid LIMIT 200", agentID);
+    {
+      if (pendingMachineInstallation(this.deps.db,hostID,agentID)) return null;
+      if (pendingMachineUninstallation(this.deps.db,hostID,agentID)) return null;
+      if (hasPendingAgentUpdate(this.deps.db, agentID, hostID)) return null;
+      if (pendingDockerInstallation(this.deps.db,hostID,agentID)) return null;
+      if (hasPrivilegedExecution(this.deps.db, hostID, agentID)) return null;
+      if (this.unresolvedHostRun(hostID)) return null;
+      if (this.deps.db.get("SELECT id FROM task_runs WHERE host_id=? AND state='running'", hostID)) return null;
+      const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE execution_principal='agent' AND host_id=? AND agent_id=? AND state='queued' ORDER BY created_at,rowid LIMIT 200", hostID, agentID);
       for (const r of pending) {
         if (pendingMachineUninstallation(this.deps.db,r.host_id,agentID)) continue;
         if (!this.authorizationValid(r)) {
@@ -226,6 +258,10 @@ export class TaskRunStore {
           continue;
         }
         const snapshot = JSON.parse(r.snapshot_json) as TaskRunSnapshot;
+        if (!this.identityMatches(snapshot, identity)) {
+          this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='task_identity_changed',summary='Signed task helper identity changed before claim' WHERE id=? AND state='queued'", this.now(), r.id);
+          continue;
+        }
         let currentTask: Task;
         try { currentTask = this.eligible(r.task_id, r.host_id); } catch (error) {
           if (!(error instanceof NodeError || error instanceof HTTPError)) throw error;
@@ -236,7 +272,7 @@ export class TaskRunStore {
           this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='task_revision_changed',summary='Task changed after automatic retry was queued' WHERE id=? AND state='queued'", this.now(), r.id);
           continue;
         }
-        if (!this.validBinding(r.host_id, agentID)) continue;
+        if (r.host_id !== hostID || !this.validBinding(hostID, agentID)) continue;
         if (!supportsTaskScript(capabilities,snapshot.script)) continue;
         const policy = normalizeTaskPolicy(snapshot.execution_policy);
         const running = this.deps.db.get<{n:number}>("SELECT count(*) AS n FROM task_runs WHERE task_id=? AND state='running'", r.task_id)!.n;
@@ -247,7 +283,7 @@ export class TaskRunStore {
         return { ...this.view(this.row(r.id)), lease_token: secret };
       }
       return null;
-    });
+    }
   }
   private leased(agentID: string, id: string, secret: unknown): any {
     this.sweep(); assertAgentActive(this.deps.db, agentID, 401);
@@ -260,43 +296,69 @@ export class TaskRunStore {
     if (r.code === "lease_expired" || r.state === "queued") fail(409, "task run lease expired");
     return r;
   }
-  heartbeat(agentID: string, id: string, input: Record<string, any>) {
-    fields(input, ["lease_token"]);
-    return this.deps.db.transaction(() => {
-      const r = this.leased(agentID, id, input.lease_token);
-      if (r.state !== "running") return { state: r.state, cancel_requested: !!r.cancel_requested, lease_expires_at: r.lease_expires_at };
-      let cancelled = !!r.cancel_requested;
-      try { this.eligible(r.task_id, r.host_id); } catch (error) {
-        if (!(error instanceof NodeError || error instanceof HTTPError)) throw error;
-        cancelled = true;
-      }
-      const expires = new Date(this.deps.now().getTime() + TASK_LEASE_SECONDS * 1000).toISOString();
-      this.deps.db.run("UPDATE task_runs SET cancel_requested=?,lease_expires_at=? WHERE id=?", cancelled, expires, id);
-      return { state: "running", cancel_requested: cancelled, lease_expires_at: expires };
-    });
+  claimForHelper(executor: {id:string;machine_id:string;agent_id:string;install_generation:number}, input: Record<string,any>) {
+    fields(input, ["capabilities"]);
+    const identity = this.taskIdentityFromHelper(executor);
+    return { run: this.claim(executor.agent_id, executor.machine_id, input.capabilities, identity) };
   }
-  result(agentID: string, id: string, input: Record<string, any>): TaskRun {
+  private helperRun(executor: {id:string;machine_id:string;agent_id:string;install_generation:number}, id: string, secret: unknown) {
+    const identity = this.taskIdentityFromHelper(executor), row = this.leased(executor.agent_id, id, secret);
+    const snapshot = JSON.parse(row.snapshot_json) as TaskRunSnapshot;
+    if (row.host_id !== executor.machine_id || !this.identityMatches(snapshot, identity)) fail(409, "task_helper_identity_changed");
+    return row;
+  }
+  heartbeatForHelper(executor: {id:string;machine_id:string;agent_id:string;install_generation:number}, id: string, input: Record<string,any>) {
+    return this.heartbeat(id,input,executor);
+  }
+  resultForHelper(executor: {id:string;machine_id:string;agent_id:string;install_generation:number}, id: string, input: Record<string,any>) {
+    return this.result(id,input,executor);
+  }
+  reconcileForHelper(executor: {id:string;machine_id:string;agent_id:string;install_generation:number}, id: string, input: Record<string,any>) {
+    fields(input,["lease_token"]);
+    this.taskIdentityFromHelper(executor);
+    {
+      this.sweep();
+      const row=this.ordinary(this.row(id)),snapshot=JSON.parse(row.snapshot_json) as TaskRunSnapshot,snapshotIdentity=snapshot.execution_identity;
+      if(row.host_id!==executor.machine_id||row.agent_id!==executor.agent_id||!snapshotIdentity
+        ||snapshotIdentity.executor_id!==executor.id||snapshotIdentity.install_generation!==executor.install_generation)fail(403,"task_helper_reconcile_principal_mismatch");
+      if(typeof input.lease_token!=="string"||!/^[a-f0-9]{64}$/.test(input.lease_token)||!row.lease_hash
+        ||!timingSafeEqual(Buffer.from(sha(input.lease_token)),Buffer.from(row.lease_hash)))fail(403,"invalid task run lease");
+      return {acknowledged:terminal(row.state),state:row.state};
+    }
+  }
+  private heartbeat(id: string, input: Record<string, any>, _executor: {id:string;machine_id:string;agent_id:string;install_generation:number}) {
+    fields(input, ["lease_token"]);
+    const r = this.helperRun(_executor,id,input.lease_token);
+    if (r.state !== "running") return { state: r.state, cancel_requested: !!r.cancel_requested, lease_expires_at: r.lease_expires_at };
+    let cancelled = !!r.cancel_requested;
+    try { this.eligible(r.task_id, r.host_id); } catch (error) {
+      if (!(error instanceof NodeError || error instanceof HTTPError)) throw error;
+      cancelled = true;
+    }
+    const expires = new Date(this.deps.now().getTime() + TASK_LEASE_SECONDS * 1000).toISOString();
+    this.deps.db.run("UPDATE task_runs SET cancel_requested=?,lease_expires_at=? WHERE id=?", cancelled, expires, id);
+    return { state: "running", cancel_requested: cancelled, lease_expires_at: expires };
+  }
+  private result(id: string, input: Record<string, any>, _executor: {id:string;machine_id:string;agent_id:string;install_generation:number}): TaskRun {
     fields(input, ["lease_token", "state", "code", "summary", "stdout", "stderr", "exit_code"]);
-    return this.deps.db.transaction(() => {
-      const r = this.leased(agentID, id, input.lease_token);
-      if (terminal(r.state)) return this.view(r);
-      const snapshot = JSON.parse(r.snapshot_json) as TaskRunSnapshot, s = snapshot.script;
-      const value = input as TaskRunResult;
-      if (!["succeeded", "failed", "cancelled", "unknown"].includes(value.state)
-        || typeof value.code !== "string" || Buffer.byteLength(value.code) > 128
-        || typeof value.summary !== "string" || Buffer.byteLength(value.summary) > 1024
-        || typeof value.stdout !== "string" || typeof value.stderr !== "string"
-        || Buffer.byteLength(value.stdout) + Buffer.byteLength(value.stderr) > s.max_output_bytes
-        || !(value.exit_code == null || Number.isInteger(value.exit_code) && Math.abs(value.exit_code) <= 255)
-        || value.state === "succeeded" && value.exit_code !== 0) fail(400, "invalid or oversized task run result");
-      if (value.state === "cancelled" && !r.cancel_requested) fail(409, "cancellation was not requested");
-      const retryAuthorized = value.state === "failed" && !r.cancel_requested && !!snapshot.task_revision
-        && ["script_failed", "runtime_unavailable", "timeout", "output_limit"].includes(value.code)
-        && r.automatic_attempt < normalizeTaskPolicy(snapshot.execution_policy).retry_count;
-      this.deps.db.run("UPDATE task_runs SET state=?,finished_at=?,code=?,summary=?,stdout=?,stderr=?,exit_code=?,auto_retry_closed=? WHERE id=? AND state='running'",
-        value.state, this.now(), value.code, value.summary, value.stdout, value.stderr, value.exit_code, retryAuthorized ? 0 : 1, id);
-      return this.view(this.row(id));
-    });
+    const r = this.helperRun(_executor,id,input.lease_token);
+    if (terminal(r.state)) return this.view(r);
+    const snapshot = JSON.parse(r.snapshot_json) as TaskRunSnapshot, s = snapshot.script;
+    const value = input as TaskRunResult;
+    if (!["succeeded", "failed", "cancelled", "unknown"].includes(value.state)
+      || typeof value.code !== "string" || Buffer.byteLength(value.code) > 128
+      || typeof value.summary !== "string" || Buffer.byteLength(value.summary) > 1024
+      || typeof value.stdout !== "string" || typeof value.stderr !== "string"
+      || Buffer.byteLength(value.stdout) + Buffer.byteLength(value.stderr) > s.max_output_bytes
+      || !(value.exit_code == null || Number.isInteger(value.exit_code) && Math.abs(value.exit_code) <= 255)
+      || value.state === "succeeded" && value.exit_code !== 0) fail(400, "invalid or oversized task run result");
+    if (value.state === "cancelled" && !r.cancel_requested) fail(409, "cancellation was not requested");
+    const retryAuthorized = value.state === "failed" && !r.cancel_requested && !!snapshot.task_revision
+      && ["script_failed", "runtime_unavailable", "timeout", "output_limit"].includes(value.code)
+      && r.automatic_attempt < normalizeTaskPolicy(snapshot.execution_policy).retry_count;
+    this.deps.db.run("UPDATE task_runs SET state=?,finished_at=?,code=?,summary=?,stdout=?,stderr=?,exit_code=?,auto_retry_closed=? WHERE id=? AND state='running'",
+      value.state, this.now(), value.code, value.summary, value.stdout, value.stderr, value.exit_code, retryAuthorized ? 0 : 1, id);
+    return this.view(this.row(id));
   }
   private externalAuthorization(runID: string): boolean {
     return !!this.deps.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='capability_run_authorizations'")
@@ -344,6 +406,7 @@ export class TaskRunStore {
       catch (error) { if (!(error instanceof NodeError || error instanceof HTTPError)) throw error; close(); return; }
       if (task.revision !== snapshot.task_revision || this.host(r.host_id).agent_id !== r.agent_id
         || !this.validBinding(r.host_id,r.agent_id) || this.active(r.task_id,r.host_id)) { close(); return; }
+      if (this.unresolvedHostRun(r.host_id, r.id)) return;
       if (hasPendingAgentUpdate(this.deps.db, r.agent_id, r.host_id) || pendingDockerInstallation(this.deps.db,r.host_id,r.agent_id)) return;
       if (pendingMachineInstallation(this.deps.db,r.host_id,r.agent_id)) return;
       if (pendingMachineUninstallation(this.deps.db,r.host_id,r.agent_id)) return;
@@ -386,8 +449,8 @@ export class TaskRunStore {
         }
         const hosts = this.deps.db.all<{id:string;agent_id:string}>("SELECT id,agent_id FROM managed_machines WHERE agent_id<>'' ORDER BY id");
         for (const h of hosts) {
-          if (!this.validBinding(h.id, h.agent_id) || this.active(t.id, h.id) || hasPendingAgentUpdate(this.deps.db, h.agent_id, h.id) || pendingDockerInstallation(this.deps.db,h.id,h.agent_id) || pendingMachineInstallation(this.deps.db,h.id,h.agent_id) || pendingMachineUninstallation(this.deps.db,h.id,h.agent_id)) continue;
-          const effective = this.nodes.effectiveHostTasks(h.id).find(v => v.id === t.id && v.enabled && v.status !== "upgrade_required");
+          if (!this.validBinding(h.id, h.agent_id) || this.active(t.id, h.id) || this.unresolvedHostRun(h.id) || hasPendingAgentUpdate(this.deps.db, h.agent_id, h.id) || pendingDockerInstallation(this.deps.db,h.id,h.agent_id) || pendingMachineInstallation(this.deps.db,h.id,h.agent_id) || pendingMachineUninstallation(this.deps.db,h.id,h.agent_id)) continue;
+          const effective = this.nodes.effectiveHostTasks(h.id).find(v => v.id === t.id && v.enabled && v.status !== "upgrade_required" && v.status !== "task_channel_unavailable");
           if (effective) this.insert(effective,h.id,"schedule","scheduler","schedule:" + due);
         }
       });
@@ -405,11 +468,6 @@ export function registerTaskCenter(deps: Dependencies, options: { agentCredentia
   };
   const admin = (ctx: Context) => { if (ctx.user.role !== "admin") fail(403, "administrator required"); deps.auth.requireAdmin(ctx); };
   const input = async (ctx: Context) => object(await ctx.body());
-  const auth = (ctx: Context) => {
-    if (!options.agentCredentials) fail(401, "Agent control credentials unavailable");
-    options.agentCredentials.authenticate(ctx.req, ctx.params.id, "control");
-    assertAgentActive(deps.db, ctx.params.id, 401);
-  };
   deps.router.post("/api/v1/task-schedules/preview", safe(async ctx => {
     admin(ctx); const value = await input(ctx); fields(value, ["schedule"]);
     try {
@@ -436,9 +494,6 @@ export function registerTaskCenter(deps: Dependencies, options: { agentCredentia
     ctx.json(store.retry(ctx.params.id, ctx.user.id, false, v.expected_task_revision), 201); }));
   deps.router.post("/api/v1/task-runs/:id/resolve", safe(async ctx => { admin(ctx); const v = await input(ctx); fields(v, ["confirm", "reason"]); confirm(v);
     ctx.json(store.resolve(ctx.params.id, ctx.user.id, v.reason)); }));
-  deps.router.post("/api/v1/agents/:id/task-runs/claim", safe(async ctx => { auth(ctx); const v = await input(ctx); fields(v, ["capabilities"]); ctx.json({ run: store.claim(ctx.params.id, v.capabilities) }); }), { public: true });
-  deps.router.post("/api/v1/agents/:id/task-runs/:runId/heartbeat", safe(async ctx => { auth(ctx); ctx.json(store.heartbeat(ctx.params.id, ctx.params.runId, await input(ctx))); }), { public: true });
-  deps.router.post("/api/v1/agents/:id/task-runs/:runId/result", safe(async ctx => { auth(ctx); ctx.json(store.result(ctx.params.id, ctx.params.runId, await input(ctx))); }), { public: true });
   let timer: NodeJS.Timeout | undefined;
   return Object.assign(store, {
     start() {

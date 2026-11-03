@@ -52,7 +52,10 @@ const number = (value: any) =>
 export function registerNodes(
   deps: Dependencies,
   options: NodesOptions = {},
-): Module & { publishTelemetry: () => Promise<void> } {
+): Module & {
+  publishTelemetry: () => Promise<void>;
+  setTaskScriptCapabilities: (resolve: NonNullable<NodeStore["taskScriptCapabilities"]>) => void;
+} {
   const store = new NodeStore(deps.db, deps.now),
     router = deps.router,
     base = "/api/v1",
@@ -420,6 +423,7 @@ export function registerNodes(
   };
   return {
     publishTelemetry,
+    setTaskScriptCapabilities(resolve) { store.taskScriptCapabilities = resolve; },
     start() {
       tick();
       timer = setInterval(tick, options.telemetryInterval ?? 10000);

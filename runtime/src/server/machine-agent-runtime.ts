@@ -41,7 +41,7 @@ export function validAgentRuntimeObservation(
     r.permission_generation > 0 &&
     Number.isSafeInteger(r.uid) &&
     Number.isSafeInteger(r.gid) &&
-    (r.mode === "root" ? r.uid === 0 && r.gid === 0 : r.uid > 0 && r.gid > 0)
+    r.uid > 0 && r.gid > 0
   );
 }
 const q = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
@@ -51,9 +51,12 @@ const table = (d: Dependencies, n: string) =>
 export function createAgentRuntimeSchema(d: Dependencies) {
   d.db
     .exec(`CREATE TABLE IF NOT EXISTS machine_agent_runtime(machine_id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,runtime_mode TEXT NOT NULL,permission_generation INTEGER NOT NULL,updated_at TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS machine_agent_runtime_plans(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,credential_id TEXT NOT NULL,status TEXT NOT NULL,revision TEXT NOT NULL,plan_json TEXT NOT NULL,request_id TEXT NOT NULL DEFAULT '',executor_id TEXT NOT NULL DEFAULT '',created_by TEXT NOT NULL,created_at TEXT NOT NULL,expires_at TEXT NOT NULL,started_at TEXT NOT NULL DEFAULT '',finished_at TEXT NOT NULL DEFAULT '',error TEXT NOT NULL DEFAULT '',receipt_json TEXT NOT NULL DEFAULT '{}');
+ CREATE TABLE IF NOT EXISTS machine_agent_runtime_plans(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,credential_id TEXT NOT NULL,status TEXT NOT NULL,revision TEXT NOT NULL,plan_json TEXT NOT NULL,request_id TEXT NOT NULL DEFAULT '',executor_id TEXT NOT NULL DEFAULT '',executor_generation INTEGER NOT NULL DEFAULT 0,executor_policy_generation INTEGER NOT NULL DEFAULT 0,created_by TEXT NOT NULL,created_at TEXT NOT NULL,expires_at TEXT NOT NULL,started_at TEXT NOT NULL DEFAULT '',finished_at TEXT NOT NULL DEFAULT '',error TEXT NOT NULL DEFAULT '',receipt_json TEXT NOT NULL DEFAULT '{}');
  CREATE UNIQUE INDEX IF NOT EXISTS agent_runtime_lane ON machine_agent_runtime_plans(machine_id) WHERE status IN ('awaiting_approval','running','verifying','unknown');
  CREATE TABLE IF NOT EXISTS machine_agent_runtime_audit(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,operation_id TEXT NOT NULL,actor_id TEXT NOT NULL,event TEXT NOT NULL,created_at TEXT NOT NULL,detail_json TEXT NOT NULL);`);
+  const columns=d.db.all<{name:string}>("PRAGMA table_info(machine_agent_runtime_plans)").map(column=>column.name);
+  if(!columns.includes("executor_generation"))d.db.exec("ALTER TABLE machine_agent_runtime_plans ADD COLUMN executor_generation INTEGER NOT NULL DEFAULT 0");
+  if(!columns.includes("executor_policy_generation"))d.db.exec("ALTER TABLE machine_agent_runtime_plans ADD COLUMN executor_policy_generation INTEGER NOT NULL DEFAULT 0");
 }
 export function recordAgentRuntime(
   d: Dependencies,
@@ -159,9 +162,7 @@ export function parseRuntimeProbe(raw: string): Row {
     !/^[a-f0-9-]{36}$/.test(v.boot_id) ||
     !Number.isSafeInteger(v.uid) ||
     !Number.isSafeInteger(v.gid) ||
-    (v.runtime_mode === "root"
-      ? v.uid !== 0 || v.gid !== 0
-      : v.uid <= 0 || v.gid <= 0) ||
+    v.uid <= 0 || v.gid <= 0 ||
     !/^([a-f0-9]{64})$/.test(v.artifact_sha256 ?? "")
   )
     fail(409, "invalid_agent_runtime_probe");
@@ -183,7 +184,7 @@ export function parseRuntimeProbe(raw: string): Row {
   return v;
 }
 function parseRuntimeReceipt(raw: string, r: Row): Row {
-  const p = JSON.parse(r.plan_json);
+      const p = JSON.parse(r.plan_json);
   let v: Row;
   try {
     v = parseStrictJSON(raw, 32 << 10);
@@ -238,9 +239,7 @@ function parseRuntimeReceipt(raw: string, r: Row): Row {
     v.error !== "" ||
     !Number.isSafeInteger(v.uid) ||
     !Number.isSafeInteger(v.gid) ||
-    (v.runtime_mode === "root"
-      ? v.uid !== 0 || v.gid !== 0
-      : v.uid <= 0 || v.gid <= 0) ||
+    v.uid <= 0 || v.gid <= 0 ||
     typeof v.boot_id !== "string" ||
     !/^[a-f0-9-]{36}$/.test(v.boot_id) ||
     v.boot_id === p.previous_boot_id ||
@@ -424,7 +423,10 @@ export function registerMachineAgentRuntime(
         e.executor.id !== p.execution_identity?.executor_id ||
         e.executor.install_generation !==
           p.execution_identity?.install_generation ||
-        e.policy_generation !== p.execution_identity?.policy_generation
+        e.policy_generation !== p.execution_identity?.policy_generation ||
+        r.executor_id !== p.execution_identity?.executor_id ||
+        r.executor_generation !== p.execution_identity?.install_generation ||
+        r.executor_policy_generation !== p.execution_identity?.policy_generation
       )
         fail(409, "agent_runtime_execution_identity_changed");
     }
@@ -457,7 +459,15 @@ export function registerMachineAgentRuntime(
     ) {
       if (p.runtime_mode === "root") {
         const e = executors.getStatus(r.machine_id).executor;
-        if (!e || e.id !== r.executor_id || !e.online) return r;
+        const task = e?.ordinary_task_identity;
+        if (!e || e.id !== r.executor_id || !e.online
+          || e.install_generation !== r.executor_generation
+          || executors.getStatus(r.machine_id).policy_generation !== r.executor_policy_generation
+          || e.release?.artifact_sha256 !== p.release.artifact_sha256 || e.release?.state_schema !== 1
+          || e.release?.build_id !== p.release.build_id || e.release?.source_revision !== p.release.source_revision
+          || task?.account !== "lightmoni-task" || task.permission_generation !== p.permission_generation
+          || !Number.isSafeInteger(task.uid) || task.uid <= 0
+          || !Number.isSafeInteger(task.gid) || task.gid <= 0) return r;
       }
       db.transaction(() => {
         const current = row(r.machine_id, r.id);
@@ -618,6 +628,10 @@ export function registerMachineAgentRuntime(
               execution.executor.install_generation)
         )
           fail(409, "agent_runtime_execution_identity_changed");
+        const currentRelease=state.heartbeat.release;
+        if(!currentRelease||currentRelease.artifact_sha256!==observed.artifact_sha256||currentRelease.state_schema!==1
+          ||!/^([a-f0-9]{40})$/.test(currentRelease.source_revision??"")||typeof currentRelease.build_id!=="string"||!currentRelease.build_id)
+          fail(409,"agent_runtime_release_unverified");
         const id = randomUUID(),
           expires = new Date(d.now().getTime() + 300000).toISOString(),
           plan = {
@@ -631,7 +645,8 @@ export function registerMachineAgentRuntime(
             previous_generation: state.permission_generation,
             previous_boot_id: observed.boot_id,
             permission_generation: state.permission_generation + 1,
-            release: { artifact_sha256: observed.artifact_sha256 },
+            release: { build_id:currentRelease.build_id,source_revision:currentRelease.source_revision,
+              artifact_sha256:currentRelease.artifact_sha256,state_schema:currentRelease.state_schema },
             target_revision: access.revision(machine),
             ssh_account: sshAccountSnapshot(selected.machine),
             credential_id: selected.credential.id,
@@ -642,13 +657,13 @@ export function registerMachineAgentRuntime(
             steps: [
               "核验 SSH 身份、固定发行和当前账户",
               "暂停新任务并复核执行结果；等待遥测队列全部发送",
-              "隔离旧缓存并调整同一 Agent 服务账户及受管执行配置",
-              "验证新账户、权限代次和心跳",
+              "常驻 Agent 始终以非 root 账户运行；按目标模式安装或移除同版本 root 管理组件",
+              "验证 Agent 身份、管理组件发行摘要、任务账户、权限代次和新鲜心跳",
             ],
             warnings: [
               "普通脚本仍以专用普通账户执行；root任务继续逐任务授权和审计。",
               "切换前遥测队列必须为空；原普通账户缓存会隔离，不作为root可信状态直接读取。",
-              "不会重新登记主机或安装第二个常驻服务。",
+              "SSH 登录账户只用于本次受审阅的维护；不会改变常驻 Agent 的运行账户。",
             ],
           };
         const approvedPlan = {
@@ -665,13 +680,16 @@ export function registerMachineAgentRuntime(
         db.transaction(() => {
           idle(machine.id, machine.agent_id);
           db.run(
-            "INSERT INTO machine_agent_runtime_plans(id,machine_id,agent_id,credential_id,status,revision,plan_json,created_by,created_at,expires_at) VALUES(?,?,?,?,'awaiting_approval',?,?,?,?,?)",
+            "INSERT INTO machine_agent_runtime_plans(id,machine_id,agent_id,credential_id,status,revision,plan_json,executor_id,executor_generation,executor_policy_generation,created_by,created_at,expires_at) VALUES(?,?,?,?,'awaiting_approval',?,?,?,?,?,?,?,?)",
             id,
             machine.id,
             machine.agent_id,
             selected.credential.id,
             sha256(canonicalJSON(approvedPlan)),
             canonicalJSON(approvedPlan),
+            execution.executor?.id ?? "",
+            execution.executor?.install_generation ?? 0,
+            execution.executor ? execution.policy_generation : 0,
             c.user.id,
             at(),
             expires,
@@ -857,9 +875,10 @@ export function registerMachineAgentRuntime(
       )
         fail(400, "explicit_confirmation_and_request_id_required");
       const r = row(c.params.id, c.params.planId);
+      const reviewedPlan=JSON.parse(r.plan_json);
       if (
         input.expected_revision !== r.revision ||
-        sha256(canonicalJSON(JSON.parse(r.plan_json))) !== r.revision
+        sha256(canonicalJSON(reviewedPlan)) !== r.revision
       )
         fail(409, "agent_runtime_plan_changed");
       if (r.request_id) {
@@ -912,7 +931,10 @@ export function registerMachineAgentRuntime(
           (observation.managed?.executor_id !==
             target.p.execution_identity?.executor_id ||
             observation.managed?.install_generation !==
-              target.p.execution_identity?.install_generation)
+              target.p.execution_identity?.install_generation ||
+            r.executor_id !== target.p.execution_identity?.executor_id ||
+            r.executor_generation !== target.p.execution_identity?.install_generation ||
+            r.executor_policy_generation !== target.p.execution_identity?.policy_generation)
         )
           fail(409, "agent_runtime_execution_identity_changed");
         target = assertTarget(r);
@@ -931,8 +953,10 @@ export function registerMachineAgentRuntime(
               runtime_plan_id: r.id,
             });
             db.run(
-              "UPDATE machine_agent_runtime_plans SET executor_id=? WHERE id=?",
+              "UPDATE machine_agent_runtime_plans SET executor_id=?,executor_generation=?,executor_policy_generation=? WHERE id=?",
               (managed as Row).executor_id,
+              (managed as Row).install_generation,
+              (managed as Row).local_policy.generation,
               r.id,
             );
           }

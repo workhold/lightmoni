@@ -11,7 +11,7 @@ import { registerTaskCenter } from "../src/server/task-center.js";
 import { registerAgentCredentials } from "../src/server/agent-credentials.js";
 import { registerManagedMachines } from "../src/server/managed-machines.js";
 import { registerPrivilegedExecutors } from "../src/server/privileged-executors.js";
-import { signJWS, sha256 } from "../src/shared/privileged-executor.js";
+import { canonicalJSON, signExecutorRequest, signJWS, sha256 } from "../src/shared/privileged-executor.js";
 const check =
   "LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
 async function fixture(
@@ -27,6 +27,7 @@ async function fixture(
     now = new Date("2026-11-02T00:00:00Z"),
     logs: any[] = [],
     calls: any[] = [];
+  const release = {build_id:"first-reviewed-release",source_revision:"a".repeat(40),artifact_sha256:"b".repeat(64),state_schema:1};
   let origin = "",
     agentID = "",
     removed = false,
@@ -137,19 +138,19 @@ async function fixture(
               b.executor_id,
             ),
           });
-          const row = db.get<any>(
-            "SELECT * FROM privileged_executors WHERE id=?",
-            b.executor_id,
-          )!;
-          executors.heartbeat(row, {
+          const heartbeat = {
             version: "0.1.0",
             boot_id: randomBytes(24).toString("base64url"),
             activation_id: randomUUID(),
             policy_generation: b.local_policy.generation,
             capabilities: b.local_policy.capabilities,
+            release,
+            ordinary_task_identity:{account:"lightmoni-task",uid:996,gid:996,permission_generation:1},
             account_profiles: [],
             interpreter_profiles: [],
-          });
+          },path="/api/v1/privileged-executors/"+b.executor_id+"/heartbeat",raw=canonicalJSON(heartbeat);
+          const signature=signExecutorRequest({body:raw,center_instance_id:executors.centerInstanceID,executor_id:b.executor_id,install_generation:b.install_generation,method:"POST",path,request_id:randomBytes(24).toString("base64url"),iat,exp:iat+60},keys.privateKey);
+          executors.signedRequest(b.executor_id,"POST",path,Buffer.from(raw),signature,(executor,input)=>executors.heartbeat(executor,input));
         } else assert.equal(activation.managed_bootstrap, undefined);
         db.run(
           "INSERT INTO agents VALUES(?,?,?,?,?,?,?,?)",
@@ -162,11 +163,13 @@ async function fixture(
           now.toISOString(),
           JSON.stringify({
             last_error: "",
+            boot_id:randomUUID(),
+            release,
             runtime: runtimeOverride ?? {
               mode,
               permission_generation: 1,
-              uid: mode === "root" ? 0 : 995,
-              gid: mode === "root" ? 0 : 995,
+              uid: 995,
+              gid: 995,
             },
           }),
         );
@@ -205,7 +208,7 @@ async function fixture(
             (removed ? 0 : 1) +
             "\nunit_managed=1\nservice_running=" +
             (removed ? 0 : 1) +
-            "\nlifecycle_locked=0\noperation_lock=0\npaths_safe=1\nconfig_present=1\ndata_present=1\n",
+            "\nlifecycle_locked=0\noperation_lock=0\npaths_safe=1\nconfig_present=1\ndata_present=1\nagent_state_present=1\nbusiness_data_retained=0\nhelper_present=" + (removed ? 0 : 1) + "\ntask_account_present=" + (removed ? 0 : 1) + "\n",
           stderr: "",
           stages: [],
         };

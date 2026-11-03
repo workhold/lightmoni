@@ -14,6 +14,8 @@ import { ExecutorJournal, type JournalJob } from "./journal.js";
 import { ManagedDockerExecutor, inspectManagedDockerDaemon, type ManagedDockerResource } from "./docker.js";
 import { executeScript, interpreterDigest, interpreterPath, localAccount, sameAccount, productionScriptHost, scriptDependenciesReady, type ExecutionStartGuard, type ScriptHost, type ScriptOutcome } from "./scripts.js";
 import { refuse, sha256, linuxBootClock, type BootClock } from "./security.js";
+import { MANAGED_AGENT_DATA_DIR } from "./config.js";
+import { ordinaryTaskAccount } from "../agent/task-runner.js";
 
 export interface ExecutorRelease { version: string; activation_id:string; release: { build_id: string; source_revision: string; artifact_sha256: string; state_schema: 1 } }
 export interface RunnerHost {
@@ -21,8 +23,9 @@ export interface RunnerHost {
   inventory?:()=>Promise<unknown>;
   managed?:(payload:ManagedExecutionPayload,context:ManagedRunContext)=>Promise<ScriptOutcome>;
   docker: Pick<ManagedDockerExecutor, "execute">;
-  profiles(config: ExecutorConfig): Promise<{ capabilities: string[]; account_profiles: ReturnType<typeof localAccount>[]; interpreter_profiles: {runtime: string; sha256: string}[] }>;
+  profiles(config: ExecutorConfig): Promise<{ capabilities: string[]; account_profiles: ReturnType<typeof localAccount>[]; interpreter_profiles: {runtime: string; sha256: string}[]; ordinary_task_identity?: {account:"lightmoni-task";uid:number;gid:number} }>;
 }
+export interface OrdinaryTaskExecutionIdentity { account: "lightmoni-task"; uid: number; gid: number; permission_generation: number }
 export function productionRunnerHost(config: ExecutorConfig): RunnerHost {
   return { inventory:async()=>{
       if(!config.daemon_id||(await inspectManagedDockerDaemon()).daemon_id!==config.daemon_id)refuse('docker_daemon_changed');
@@ -37,7 +40,9 @@ export function productionRunnerHost(config: ExecutorConfig): RunnerHost {
       if (accounts.length && interpreters.length && scriptDependenciesReady()) capabilities.push("script.elevated.v1");
       if (config.daemon_id) { try { if ((await inspectManagedDockerDaemon()).daemon_id === config.daemon_id) capabilities.push("container.managed.v1"); } catch {} }
       if(scriptDependenciesReady())capabilities.push("operations.managed.v1");
-      return { capabilities, account_profiles: accounts, interpreter_profiles: interpreters };
+      const task = config.data_dir === MANAGED_AGENT_DATA_DIR ? ordinaryTaskAccount() : undefined;
+      return { capabilities, account_profiles: accounts, interpreter_profiles: interpreters,
+        ...(task ? { ordinary_task_identity: { account: "lightmoni-task" as const, uid: task.uid, gid: task.gid } } : {}) };
     },
   };
 }
@@ -48,12 +53,16 @@ export class PrivilegedExecutorRunner {
   private observations?:ExecutorApplicationObserver;
   close(){this.observations?.close();}
   constructor(readonly config: ExecutorConfig, readonly journal: ExecutorJournal, readonly client: ExecutorClient,
-    readonly release: ExecutorRelease, private readonly host: RunnerHost = productionRunnerHost(config), private readonly clock: BootClock = linuxBootClock) {}
+    readonly release: ExecutorRelease, private readonly host: RunnerHost = productionRunnerHost(config), private readonly clock: BootClock = linuxBootClock,
+    private readonly ordinaryTaskIdentity?: OrdinaryTaskExecutionIdentity) {}
   async heartbeat(): Promise<void> {
     const profiles = await this.host.profiles(this.config), current = this.journal.policy();
+    if (this.ordinaryTaskIdentity && (profiles.ordinary_task_identity?.uid !== this.ordinaryTaskIdentity.uid
+      || profiles.ordinary_task_identity?.gid !== this.ordinaryTaskIdentity.gid)) refuse("ordinary_task_identity_changed");
     let inventory:unknown;
     if(current.capabilities.includes('operations.managed.v1')&&this.host.inventory)try{inventory=await this.host.inventory();}catch{}
     const response = await this.client.request("heartbeat", { ...this.release, boot_id: this.clock.bootID(), policy_generation: current.generation,
+      ...(this.ordinaryTaskIdentity ? { ordinary_task_identity: this.ordinaryTaskIdentity } : {}),
       ...(inventory?{docker_inventory:inventory}:{}),capabilities: profiles.capabilities.filter(c => current.capabilities.includes(c)), operations_capabilities:profiles.capabilities.includes("operations.managed.v1")?[...operationCapabilities]:[],account_profiles: profiles.account_profiles, interpreter_profiles: profiles.interpreter_profiles });
     if (response.center_instance_id !== this.config.center_instance_id) refuse("principal_mismatch");
     this.client.applyPolicy(response.policy);
