@@ -34,7 +34,7 @@
 ## Phase 7: Cross-cutting
 - [x] T015 相关类型检查、回归及实际UI验收，`specs/091-deployment-autoconfiguration/validation.md`。
 - [x] T016 同步 `docs/system-design.md` 与Doca并回读原生文本/图块，记录 `specs/091-deployment-autoconfiguration/evidence/doca-readback.json`。
-- [ ] T017 同步远端main，审阅最终差异与秘密边界，功能分支提交并创建GitHub PR，记录 `specs/091-deployment-autoconfiguration/validation.md`。
+- [x] T017 同步远端main，审阅最终差异与秘密边界，功能分支提交并创建GitHub PR，记录 `specs/091-deployment-autoconfiguration/validation.md`。
 
 - [ ] T018 用户追加：固定 main 源码打包双架构、成品验证、GitHub/Docker 发版、生产备份更新和实际功能复测，记录 `validation.md` 与安全证据。
 
