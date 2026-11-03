@@ -1,0 +1,39 @@
+{
+  "origin": "https://moni.heyphp.com",
+  "viewport": {
+    "width": 1728,
+    "height": 836,
+    "scrollWidth": 1728
+  },
+  "applications": {
+    "resources": 4,
+    "observed_running": [
+      "系统镜像仓库 v6",
+      "OpenResty v2",
+      "DBX v1",
+      "ABC Demo v2"
+    ],
+    "screenshot": ".local-dev/image-release-089/final-applications.png",
+    "screenshot_sha256": "f52304761f87a8132dcbc48db41609dadfc19919187fe4e84a8119fe73044eb2",
+    "captured_at": "2026-11-03T04:23:55.191180+00:00"
+  },
+  "websites": {
+    "resources": 3,
+    "observed_published": [
+      "私有镜像仓库入口 v3",
+      "ABC Demo v3",
+      "dbx v2"
+    ],
+    "https_labels": true,
+    "dns_label": "DNS 厂商已确认",
+    "screenshot": ".local-dev/image-release-089/final-websites.png",
+    "screenshot_sha256": "26e4d165059f16475c883bcef9af454a0f2f4f9be6515d5f966130faa6dab38a",
+    "captured_at": "2026-11-03T04:24:00.397348+00:00"
+  },
+  "maintenance_result_screenshot": ".local-dev/image-release-089/maintenance-success.png",
+  "production_data": true,
+  "fixture": false,
+  "native_200_percent_zoom": "not performed; Mac locked; simulated 200% documented in SDD087",
+  "user_unsaved_website_editor": "untouched",
+  "viewport_override": "reset"
+}

@@ -1,0 +1,265 @@
+{
+  "verified_at": "2026-11-03T04:23:29.157780+00:00",
+  "fresh_signed_runs": [
+    {
+      "name": "DBX",
+      "id": "08e35b8a8f28b0828ba46b86e3a22d84",
+      "job_id": "9b8c81b3f13ec4d1dc4f547b4ce040fa",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:23:27.762Z"
+    },
+    {
+      "name": "系统镜像仓库",
+      "id": "9437d0b0f6304581510cc5e0e796a03e",
+      "job_id": "b23e135ce12e64f1cf1d7834e01b3f52",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:23:14.335Z"
+    },
+    {
+      "name": "ABC Demo",
+      "id": "026f82aa9ef0873d83010cc934008a69",
+      "job_id": "73aab738c8fabeaa3de6039461915b21",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:23:04.792Z"
+    },
+    {
+      "name": "OpenResty",
+      "id": "6d5ebd4c86c50e6c7664a47d6218326e",
+      "job_id": "d8566a443d5a8c2600581d94d1ebd744",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:22:56.723Z"
+    },
+    {
+      "name": "DBX",
+      "id": "926bc8f32995d38012458c12eb7c0589",
+      "job_id": "94a0c270c44ca313ee58e58637f8445c",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:22:38.316Z"
+    },
+    {
+      "name": "系统镜像仓库",
+      "id": "357b99708fb4e8395a16946030693023",
+      "job_id": "50188989584b872a19d304fbde73e797",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:22:24.902Z"
+    },
+    {
+      "name": "ABC Demo",
+      "id": "c5b47bde336852300a980f8ad642ee9c",
+      "job_id": "68eeee08ef435af0af4e8a468bae2832",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:22:15.312Z"
+    },
+    {
+      "name": "OpenResty",
+      "id": "54413be06fd57f900ff57270af004404",
+      "job_id": "c526a8b28c9ef4068314e67fde34bab2",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:22:07.239Z"
+    },
+    {
+      "name": "DBX",
+      "id": "fa19847f03b27364f7df8de4a01f88b9",
+      "job_id": "0b00cb2f3744f0fa96a6698a4dacb8b0",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:21:55.327Z"
+    },
+    {
+      "name": "系统镜像仓库",
+      "id": "21d75753fdb5a5dd1f009038d41fc9b7",
+      "job_id": "8c80907c4a9d5f4700ceb318d22cc488",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:21:41.973Z"
+    },
+    {
+      "name": "ABC Demo",
+      "id": "ffbd1d6d3fcffc238533a585b76b52f3",
+      "job_id": "289e071ec84f259eda3e1317338b6310",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:21:32.363Z"
+    },
+    {
+      "name": "OpenResty",
+      "id": "7e259213eed86ee1a4c7e9ed29d778a3",
+      "job_id": "bee5682933bacebfafd910a5b70e2642",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:21:24.326Z"
+    },
+    {
+      "name": "DBX",
+      "id": "dc825dcc8f50540820ac735f1ab83163",
+      "job_id": "df37ed50396d15c1fbbcfa3e660549bf",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:21:12.459Z"
+    },
+    {
+      "name": "系统镜像仓库",
+      "id": "dd1956c5f6826c9f8a0ba22488b0f609",
+      "job_id": "004b3fc9638029c14d9699be185a9eeb",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:20:59.129Z"
+    },
+    {
+      "name": "ABC Demo",
+      "id": "8c2f16b2d7e9768ab811245cdc90f3bd",
+      "job_id": "72bc8ee464dd439fa20f6b4c5b365852",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:20:49.560Z"
+    },
+    {
+      "name": "OpenResty",
+      "id": "35147d8625ee13bd41a4da6d80a5d6b7",
+      "job_id": "577fd21710c953c6322891ab15ae945a",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:20:41.532Z"
+    },
+    {
+      "name": "DBX",
+      "id": "48a8129df8db7abc6e22b119f5bf2933",
+      "job_id": "564679c4bd3b3b33308bea459b17be78",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:20:24.332Z"
+    },
+    {
+      "name": "系统镜像仓库",
+      "id": "421e819543621e895a27cd72919ea801",
+      "job_id": "7bc30d9ceee8b451e8d1db07fe828574",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:20:10.965Z"
+    },
+    {
+      "name": "ABC Demo",
+      "id": "c32307ff63f808a14144c84966e143a1",
+      "job_id": "1857093b07cb0965bf68cd1b5fbe87b2",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:20:01.421Z"
+    },
+    {
+      "name": "OpenResty",
+      "id": "a0f691e3d3864d5db3eb76787fd3e697",
+      "job_id": "9bc856a2b5fa47dbb25a232b9c127284",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:19:53.387Z"
+    },
+    {
+      "name": "DBX",
+      "id": "c441bd7ab7e3bcbc810a833b6437cc91",
+      "job_id": "66f651df8d51cd3b2cd87f5ec4e7195a",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:19:41.509Z"
+    },
+    {
+      "name": "系统镜像仓库",
+      "id": "6f76c1a557faf0f09b15abae65d14622",
+      "job_id": "aa2225d8ebb0aa13bd5e0fbaa8dfd78f",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:19:28.144Z"
+    },
+    {
+      "name": "ABC Demo",
+      "id": "e6ba01e0e69cc1fa6442065b97df9045",
+      "job_id": "afd916aaba1583121c70e9a44d3386be",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:19:18.616Z"
+    },
+    {
+      "name": "OpenResty",
+      "id": "de121fad3b970b7fdf5e5230be9a61ff",
+      "job_id": "ebf530ec11a510f95437ab995944bef8",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:19:10.578Z"
+    },
+    {
+      "name": "DBX",
+      "id": "d28d3340835e258d5e0e3084cfadfbd4",
+      "job_id": "5dafe72e7afb19fe2f025e94baae7137",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:18:53.371Z"
+    },
+    {
+      "name": "系统镜像仓库",
+      "id": "fce854805336f9b8f404acfec9715bb6",
+      "job_id": "736d665b04d96a1333dd04c13270de3f",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:18:39.976Z"
+    },
+    {
+      "name": "ABC Demo",
+      "id": "aaa92f0767771b7292021449610efeb0",
+      "job_id": "3b732c3bad7a870a28f65b790657bc16",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:18:30.422Z"
+    },
+    {
+      "name": "OpenResty",
+      "id": "7314edd6e6a966dfd55c586f1a5fc4c8",
+      "job_id": "345ae343572e027c90c3a2991aaf2eaa",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:18:22.391Z"
+    },
+    {
+      "name": "DBX",
+      "id": "396c80a881431ff31a43dfdf4aabf219",
+      "job_id": "11d3edb12ed994ea9d6c93b373e8ad17",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:18:10.518Z"
+    },
+    {
+      "name": "系统镜像仓库",
+      "id": "5787437fabd191809d2446a82f914c45",
+      "job_id": "796b32512fcf7e0a7b1a60611b80c2c3",
+      "action": "inspect",
+      "state": "succeeded",
+      "updated_at": "2026-11-03T04:17:57.176Z"
+    }
+  ],
+  "original_unknown_audit": {
+    "id": "6e1d41c9bd13acd3cd1ba2f6ceab1997",
+    "state": "unknown",
+    "code": "executor_http_502",
+    "resolved_at": "2026-11-03T03:28:19.382Z",
+    "resolved_by": "a314236e3da6404f6175dece7771cbb3"
+  },
+  "unresolved_privileged_outcomes": 0,
+  "root_system_dns": {
+    "abc.heyphp.com": "49.232.14.169",
+    "registry-demo.heyphp.com": "49.232.14.169"
+  },
+  "root_system_dns_target": "49.232.14.169",
+  "demo_trusted_https": 200,
+  "demo_html_marker": true,
+  "registry_unauthenticated": 401,
+  "registry_authenticated": 200,
+  "private_manifest_digest": "sha256:c3fae4a7ce6af19b368ecef562446e251ed57c6b32386f96e91893b819cf1187",
+  "manifest_status": 200,
+  "fixed_ip_override_used": false
+}
