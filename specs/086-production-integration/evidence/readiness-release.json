@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-03",
+  "pull_request": "https://github.com/workhold/lightmoni/pull/80",
+  "main_merge": "574773806ab4bdcc7923b6c78345cc95c70854d6",
+  "source_revision": "a5793d51f19270ce8a51e54b0477d2606cce5654",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261103-a5793d5",
+  "index_digest": "sha256:a258f76083b7e0a60f95a8ef50cb58ad388658b25e7b2f8fdb903553f3ebfc19",
+  "platform_smoke_checks": { "amd64": 42, "arm64": 42, "errors": [] },
+  "targeted_tests": { "pass": 49, "fail": 0 },
+  "runtime_tests": { "tests": 1645, "pass": 1613, "skipped": 32, "fail": 0 },
+  "runtime_typecheck_and_build": "passed",
+  "actual_image_private_ip_probes": { "amd64": "passed", "arm64": "passed", "protocols": ["HTTP", "TCP"], "wrong_loopback_rejected": true },
+  "registry_verification": "All blob hashes, tested rootfs/config, remote manifest/config and both tag indexes verified.",
+  "local_smoke_resources_removed": true,
+  "architecture_sync": { "repository": "docs/system-design.md chapter 86", "doca_readback_seq": 944, "evidence": "doca-readiness-sync.json" }
+}

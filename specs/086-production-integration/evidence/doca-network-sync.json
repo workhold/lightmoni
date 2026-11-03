@@ -1,0 +1,17 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository": "docs/system-design.md chapter 86",
+  "block_id": "release086-p-6",
+  "saved_seq": 946,
+  "readback_seq": 947,
+  "epoch_id": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "readback_text_matches_repository": true,
+  "operations": [
+    {
+      "type": "insertBlock",
+      "afterId": "release086-p-5",
+      "block_id": "release086-p-6"
+    }
+  ],
+  "unrelated_blocks_and_native_diagrams": "No commands target existing blocks, diagram nodes, or edges."
+}

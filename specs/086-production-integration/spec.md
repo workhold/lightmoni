@@ -2,7 +2,7 @@
 
 **Branch**: `codex/086-container-entry-alignment`
 **Created**: 2026-11-03
-**Status**: In progress
+**Status**: Accepted
 
 用户明确批准将 PR #72、#73、#74 一并合入 main，发布 docker.heyphp.com/lightmoni/lightmoni，备份后重建线上中心状态并继续调试。三项功能包括统一 Agent root/user 生命周期、多 SSH 账户和安装/卸载进度；不提供旧数据库迁移。
 
@@ -17,6 +17,8 @@
 7. 用户新增交付标准：保留 heyphp.com DNS 配置；创建有源码和健康接口的 demo 项目，镜像发布私有仓库并通过 LightMoni 私有镜像、应用、网站、证书流程部署到 https://abc.heyphp.com。公网 DNS、受信 TLS、应用健康和实际页面/接口均验证，记录资源与部署结果。
 8. 真实 CentOS 8 主机的 systemd `Version=239 (239-51.el8)` 属于正常版本输出，不得因此隐藏已批准的 root 脚本和受管运维能力；仍必须通过受信文件权限和 system bus 探测，异常输出或缺依赖不能宣称就绪。
 9. 内网 IP 绑定的应用和私有仓库，部署及后续巡检必须探测所分配端口的绑定 IP；通配绑定使用本机回环。HTTP/IPv6/TCP 探针只能接受 IP 字面量，不接受域名或用户信息。
+10. Demo 私有仓库不能通过云公网 NAT 的后端端口绕过 HTTPS 认证。限制 Docker 转发到专用 Registry 后端端口的原始入站连接，仅允许实测受信内网 CIDR；该限制在 Docker/主机重启后仍配置启用，公网 HTTPS 登录和主机内部镜像拉取保持可用。
+11. 手动部署与托管部署的应用均设置全局唯一、创建后固定的服务名。手动网站的各路径后端可选择服务及命名端口或直接反向代理 URL；托管网站仅选择服务及命名端口，按服务部署发现集群和健康后端。应用的部署模式不限制网站的服务发现模式。
 
 ## 架构影响
 

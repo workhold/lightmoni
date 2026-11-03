@@ -1,0 +1,75 @@
+{
+  "accepted_at": "2026-11-03T01:55:38Z",
+  "url": "https://abc.heyphp.com",
+  "registry": {
+    "url": "https://registry-demo.heyphp.com",
+    "image": "registry-demo.heyphp.com/lightmoni/abc-demo@sha256:c3fae4a7ce6af19b368ecef562446e251ed57c6b32386f96e91893b819cf1187",
+    "platforms": ["linux/amd64", "linux/arm64"],
+    "blobs_verified": 15,
+    "unauthenticated_https": 401,
+    "authenticated_https": 200,
+    "publication_report": "root@panel.heyphp.com:/root/lightmoni-registry/demo-publication.json"
+  },
+  "application": {
+    "id": "47c8760dfa1c5c3ac24c878441fff90c",
+    "revision": 2,
+    "deployment_mode": "manual",
+    "service_name": "abc-demo",
+    "service_port_name": "http",
+    "run_id": "57aa584aa36960d5b2ec9a983897c508",
+    "state": "succeeded",
+    "instance_id": "a5d94e4d9d32f902fc752ee8b413facb",
+    "container_id": "bb320a8530f56818192b88d8b954d3e707366eb72056020c43ef132c4ac497b2",
+    "container_user": "65532:65532",
+    "read_only_rootfs": true,
+    "healthy": true,
+    "restart_count": 0,
+    "host_binding": "172.21.0.16:20003",
+    "container_port": 8080,
+    "image_source_receipt": {
+      "downloaded_bytes": 2113,
+      "manifest_digest": "sha256:b192818c82b3b181c2f596f052e589d9158b6449f1934ad085749485c72ef50b",
+      "source": "local",
+      "note": "Private-origin manifests were fetched and checked; existing identical local layers were reused. This is not a cold layer-download test."
+    }
+  },
+  "website": {
+    "id": "80d0a4d24cbe70ea60794b913971b5f7",
+    "revision": 1,
+    "routing_mode": "managed",
+    "service_application_id": "47c8760dfa1c5c3ac24c878441fff90c",
+    "service_port_name": "http",
+    "publish_run_id": "c3a472067543371e79516803113813a3",
+    "state": "succeeded",
+    "dns_provider_readback": "succeeded",
+    "public_a_record": "49.232.14.169",
+    "https_health_status": 200,
+    "tls_verify_result": 0,
+    "http_status": 308,
+    "http_location": "https://abc.heyphp.com/",
+    "certificate": {
+      "id": "c48727b8cc26b646b4285337307594bd",
+      "issuer": "Let's Encrypt YR2",
+      "subject_alt_name": "abc.heyphp.com",
+      "not_after_utc": "2027-01-31T23:56:54Z",
+      "auto_renew": true
+    }
+  },
+  "public_requests": {
+    "health": {"status": "ok", "service": "abc-demo"},
+    "browser_button_request_prefix": "e8ecb413",
+    "http_post_request_id": "f27ef152-69ac-48de-bc9a-366f70d2927e",
+    "pings_before": 1,
+    "pings_after": 2,
+    "browser_https_page": "loaded successfully and real button receipt displayed",
+    "independent_server_https_client": "trusted certificate, successful health/status/POST"
+  },
+  "screenshots": {
+    "directory": ".local-dev/production-upgrade-083/ (ignored)",
+    "public_demo": "demo-public-live.png",
+    "application": "demo-application-installed.png",
+    "website": "demo-website-published.png",
+    "managed_service": "demo-managed-service-config.png",
+    "manual_url_form": "manual-website-upstream-config.png"
+  }
+}
