@@ -26,6 +26,7 @@ function fixture(t:TestContext) {
     assert.equal(args[1],'lightmoni-agent');
     if(args[0]==='-u')return String(identity.uid);
     if(args[0]==='-g')return String(identity.gid);
+    if(args[0]==='-gn')return identity.names[0];
     if(args[0]==='-G')return identity.groups.join(' ');
     if(args[0]==='-Gn')return identity.names.join(' ');
     throw Error('unexpected account query');
@@ -86,6 +87,15 @@ test('root identities and failed or malformed account queries never turn into im
   for(const answer of ['not-an-id','1\n2',''])assert.throws(()=>prepareDeploymentPermissions({...f.options,command:()=>answer}),/agent_account_invalid/);
   assert.throws(()=>prepareDeploymentPermissions({...f.options,command:()=>{throw Error('synthetic account query failure');}}));
   assert.equal(fs.existsSync(f.p('var/lib/lightmoni-web')),false);
+});
+
+test('an existing ordinary account with a different primary group is rejected without changing its identity or files',t=>{
+  const f=fixture(t);f.identity.names=['users','lightmoni-agent'];
+  const before=structuredClone(f.identity),config=snapshot(f.p('etc/lightmoni-agent/config.json')),data=snapshot(f.p('var/lib/lightmoni-agent'));
+  assert.throws(()=>prepareDeploymentPermissions(f.options),/agent_primary_group_invalid/);
+  assert.deepEqual(f.identity,before);assert.deepEqual(snapshot(f.p('etc/lightmoni-agent/config.json')),config);assert.deepEqual(snapshot(f.p('var/lib/lightmoni-agent')),data);
+  assert.deepEqual(f.calls.map(call=>call.args[0]),['-u','-g','-gn']);
+  assert(f.calls.every(call=>call.file==='id'),'preparation must not change accounts, groups, ownership or permissions');
 });
 
 test('startup with no Docker socket is ready using only private config and atomic data-directory writes',async t=>{

@@ -1,10 +1,10 @@
 import { SSHError } from "./machine-ssh.js";
-import { agentMaintenanceShellGuards } from "../shared/agent-maintenance-shell.js";
+import { agentMaintenanceShellGuards, agentInstallationPresentShell } from "../shared/agent-maintenance-shell.js";
 
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 export const retainedAgentPaths = ["/etc/lightmoni-agent", "/var/lib/lightmoni-agent"];
 export const removedAgentPaths = ["/etc/systemd/system/lightmoni-agent.service", "/etc/systemd/system/lightmoni-agent-helper.service", "/etc/lightmoni-agent-helper", "/var/lib/lightmoni-agent-helper", "/usr/local/bin/lightmoni-agent", "/opt/lightmoni-agent", "/usr/local/sbin/lightmoni-agent-uninstall"];
-export const freshAgentGuard = `if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json || test -e /etc/systemd/system/lightmoni-agent-helper.service || test -e /etc/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-helper; then echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2; exit 1; fi`;
+export const freshAgentGuard = `if ${agentInstallationPresentShell}; then echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2; exit 1; fi`;
 const privileged = (script: string) => `if test "$(id -u)" = 0; then /bin/sh -c ${quote(script)}; else sudo -n /bin/sh -c ${quote(script)}; fi`;
 
 

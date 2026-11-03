@@ -1,3 +1,12 @@
+/** Fixed footprint shared by SSH discovery and fresh-deployment guards. */
+export const agentInstallationPaths = [
+  "/usr/local/bin/lightmoni-agent", "/opt/lightmoni-agent",
+  "/etc/systemd/system/lightmoni-agent.service", "/etc/lightmoni-agent/config.json",
+  "/var/lib/lightmoni-agent/identity.json", "/etc/systemd/system/lightmoni-agent-helper.service",
+  "/etc/lightmoni-agent-helper", "/var/lib/lightmoni-agent-helper",
+] as const;
+export const agentInstallationPresentShell = agentInstallationPaths.map(filename => `test -e ${filename} || test -L ${filename}`).join(" || ");
+
 /** Shared verbatim with the standalone uninstaller; its contract test prevents drift.
  * Managed journal inspection uses the root entry, which verifies its program tree. */
 export const agentMaintenanceShellGuards = String.raw`lm_refuse() {

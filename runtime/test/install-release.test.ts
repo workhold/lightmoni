@@ -10,6 +10,7 @@ import {
   readlinkSync,
   existsSync,
   statSync,
+  lstatSync,
   readdirSync,
   chmodSync,
 } from "node:fs";
@@ -148,7 +149,7 @@ function fixture(
     }),
   );
   js(join(bin, "id"), `const fs=require('fs'),s=JSON.parse(fs.readFileSync(process.env.TEST_SYSTEM_STATE)),a=process.argv.slice(2),name=a.at(-1);if(name==='lightmoni-agent'){if(!s.agentAccount)process.exit(1);console.log(a[0]==='-u'?19999:a[0]==='-g'?19998:'lightmoni-agent');}else if(a.length===1&&a[0]==='-u')console.log(0);else process.exit(1);`);
-  js(join(bin, "useradd"), `const fs=require('fs'),file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file)),args=process.argv.slice(2);if(args.at(-1)!=='lightmoni-agent'||s.agentAccount)throw Error('unexpected account creation');if(!args.includes('--system')||!args.includes('--no-create-home')||!args[args.indexOf('--shell')+1]?.endsWith('/usr/sbin/nologin'))throw Error('unsafe Agent account');s.agentAccount=true;s.accountsCreated.push(args.at(-1));fs.writeFileSync(file,JSON.stringify(s));`);
+  js(join(bin, "useradd"), `const fs=require('fs'),file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file)),args=process.argv.slice(2);if(args.at(-1)!=='lightmoni-agent'||s.agentAccount)throw Error('unexpected account creation');if(!args.includes('--system')||!args.includes('--user-group')||!args.includes('--no-create-home')||!args[args.indexOf('--shell')+1]?.endsWith('/usr/sbin/nologin'))throw Error('unsafe Agent account');s.agentAccount=true;s.accountsCreated.push(args.at(-1));fs.writeFileSync(file,JSON.stringify(s));`);
   for (const command of ['groupadd', 'userdel', 'groupdel'])
     js(join(bin, command), `throw Error('unexpected account mutation: ${command}');`);
   writeMaintenanceStatShim(bin);
@@ -218,7 +219,7 @@ fs.writeFileSync(file,JSON.stringify(s));process.exit(status);`,
     mkdirSync(join(packagedRuntime, path), { recursive: true, mode: 0o755 });
   writeFileSync(join(packagedRuntime, "uninstall.sh"), rewriteMaintenancePaths(readFileSync(join(repo,"deploy/agent/uninstall.sh"),"utf8"),root), {mode:0o755});
   writeFileSync(join(packagedRuntime, "service-unit.mjs"), readFileSync(join(repo, "deploy/agent/service-unit.mjs")));
-  js(join(packagedRuntime, "deployment-permissions.mjs"), `import fs from 'node:fs';const file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file));if(process.argv[2]!=='prepare')process.exit(1);s.permissionPreparations=(s.permissionPreparations||0)+1;fs.writeFileSync(file,JSON.stringify(s));if(process.env.TEST_FAIL_PERMISSION_PREPARATION==='yes'){console.error('agent_permission_prepare_failed');process.exit(1);}`);
+  js(join(packagedRuntime, "deployment-permissions.mjs"), `import fs from 'node:fs';const file=process.env.TEST_SYSTEM_STATE,s=JSON.parse(fs.readFileSync(file));if(process.argv[2]!=='prepare')process.exit(1);if(!s.agentAccount){console.error('agent_account_missing_before_permission_preparation');process.exit(1);}s.permissionPreparations=(s.permissionPreparations||0)+1;fs.writeFileSync(file,JSON.stringify(s));if(process.env.TEST_FAIL_PERMISSION_PREPARATION==='yes'){console.error('agent_permission_prepare_failed');process.exit(1);}`);
   writeFileSync(
     join(packagedRuntime, "node"),
     "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " \"$@\"\n",
@@ -567,12 +568,50 @@ test("a rolled-back fresh install on an empty host can be attempted again withou
   assert.equal(f.state().active, true);
 });
 
+test("first install prepares its dedicated account and primary group before inspection and creates a missing launcher directory", t => {
+  const f = fixture(t, {old: "none", active: false, defaultRoot: true});
+  rmSync(dirname(f.launcher), {recursive: true});
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(f.state().accountsCreated, ["lightmoni-agent"]);
+  assert.equal(f.state().permissionPreparations, 1);
+  assert.equal(statSync(dirname(f.launcher)).mode & 0o777, 0o755);
+  assert.equal(existsSync(f.launcher), true);
+});
+
+test("failed first install removes only the empty launcher directory it created", t => {
+  const f = fixture(t, {old: "none", active: false, failRestart: true});
+  rmSync(dirname(f.launcher), {recursive: true});
+  const result = f.run();
+  assert.notEqual(result.status, 0);
+  assert.equal(existsSync(dirname(f.launcher)), false);
+  assert.equal(f.state().agentAccount, true);
+  assert.deepEqual(f.state().accountsCreated, ["lightmoni-agent"]);
+});
+
 
 test("fresh installer refuses retained identity and releases lifecycle lock without replacing files", t => {
   const f = fixture(t), result = f.run(["--fresh"]);
   assert.notEqual(result.status, 0); assert.match(result.stderr, /Existing Agent/); f.restored();
   assert.equal(existsSync(join(f.root, "run/lightmoni-agent-lifecycle.lock")), false);
 });
+
+for (const residual of ['etc/lightmoni-agent-helper', 'var/lib/lightmoni-agent-helper', 'etc/systemd/system/lightmoni-agent-helper.service'])
+  for (const kind of ['directory', 'dangling-link'] as const) test(`fresh installer refuses retained helper ${residual} ${kind} before enrollment`, t => {
+    const f = fixture(t, {old: 'none', active: false, defaultRoot: true});
+    rmSync(f.data, {recursive: true}); rmSync(f.runtimeParent, {recursive: true});
+    const target = join(f.root, residual), sentinel = join(f.root, 'external-sentinel');
+    writeFileSync(sentinel, 'keep external state');
+    if (kind === 'dangling-link') symlinkSync(join(f.root, 'absent-helper-target'), target);
+    else {mkdirSync(target, {recursive: true}); writeFileSync(join(target, 'sentinel'), 'keep helper state');}
+    const result = f.run(['--fresh']);
+    assert.notEqual(result.status, 0); assert.match(result.stderr, /Existing Agent installation/);
+    assert.equal(f.state().enrollments ?? 0, 0); assert.equal(f.state().managedEnrollments ?? 0, 0);
+    assert.deepEqual(f.state().accountsCreated, []);
+    assert.equal(readFileSync(sentinel, 'utf8'), 'keep external state');
+    if (kind === 'dangling-link') assert.equal(lstatSync(target).isSymbolicLink(), true);
+    else assert.equal(readFileSync(join(target, 'sentinel'), 'utf8'), 'keep helper state');
+  });
 
 
 test("installer rejects the removed shared-key flag before changing installed state", t => {

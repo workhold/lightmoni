@@ -18,6 +18,7 @@ const groupSnapshot = (ids, names) => {
 export function prepareDeploymentPermissions(options = {}) {
   const run = options.command ?? command;
   numericID(run('id', ['-u', 'lightmoni-agent'])); numericID(run('id', ['-g', 'lightmoni-agent']));
+  if (run('id', ['-gn', 'lightmoni-agent']) !== 'lightmoni-agent') fail('agent_primary_group_invalid');
   const ids = run('id', ['-G', 'lightmoni-agent']).split(/\s+/).map(value=>/^\d+$/.test(value)?Number(value):NaN);
   const names = run('id', ['-Gn', 'lightmoni-agent']).split(/\s+/);
   groupSnapshot(ids,names);

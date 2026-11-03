@@ -85,6 +85,7 @@ previous_enabled="no"
 runtime_release=""
 runtime_base_created="no"
 releases_directory_created="no"
+launcher_directory_created="no"
 uninstaller_directory_created="no"
 rollback_failed="no"
 installation_phase="install-files"
@@ -177,6 +178,7 @@ finish() {
       # presence otherwise makes the next --fresh attempt reject its own rollback.
       if [ "$releases_directory_created" = "yes" ]; then rmdir /opt/lightmoni-agent/releases 2>/dev/null || :; fi
       if [ "$runtime_base_created" = "yes" ]; then rmdir /opt/lightmoni-agent 2>/dev/null || :; fi
+      if [ "$launcher_directory_created" = "yes" ]; then rmdir /usr/local/bin 2>/dev/null || :; fi
       if [ "$uninstaller_directory_created" = "yes" ]; then rmdir /usr/local/sbin 2>/dev/null || :; fi
     fi
   fi
@@ -194,9 +196,13 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 mkdir "$lifecycle_lock" || { echo 'Agent lifecycle operation already in progress.' >&2; exit 1; }
 lifecycle_locked="yes"
-if [ "$fresh" = "yes" ] && { [ -e /usr/local/bin/lightmoni-agent ] || [ -L /usr/local/bin/lightmoni-agent ] || [ -e /opt/lightmoni-agent ] || [ -e /etc/systemd/system/lightmoni-agent.service ] || [ -e /etc/systemd/system/lightmoni-agent-helper.service ] || [ -e /etc/lightmoni-agent/config.json ] || [ -e /var/lib/lightmoni-agent/identity.json ]; }; then
-  echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2
-  exit 1
+if [ "$fresh" = "yes" ]; then
+  for existing_path in /usr/local/bin/lightmoni-agent /opt/lightmoni-agent /etc/systemd/system/lightmoni-agent.service /etc/systemd/system/lightmoni-agent-helper.service /etc/lightmoni-agent/config.json /var/lib/lightmoni-agent/identity.json /etc/lightmoni-agent-helper /var/lib/lightmoni-agent-helper; do
+    if [ -e "$existing_path" ] || [ -L "$existing_path" ]; then
+      echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2
+      exit 1
+    fi
+  done
 fi
 if [ "$enrollment_token_stdin" = "yes" ]; then
   IFS= read -r enrollment_token || :
@@ -375,10 +381,15 @@ for item in config launcher uninstaller service helper-service current identity;
     cp -Pp "$installed" "$tmp_dir/previous-$item"
   fi
 done
-# This is a read-only account/group preflight. Run it before stopping an
-# existing service, so a host permission mismatch leaves the live install up.
 [ -f "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] && [ ! -L "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" ] || { echo 'Invalid deployment permission helper.' >&2; exit 1; }
+# A fresh host has no dedicated account yet. Create only that fixed, unprivileged
+# no-login account before inspecting its real group membership. Existing accounts
+# are never modified, and preparation still precedes any service stop.
 installation_phase="deployment-permissions"
+if id lightmoni-agent >/dev/null 2>&1; then :; else
+  command -v useradd >/dev/null || { echo 'useradd is required.' >&2; exit 1; }
+  useradd --system --user-group --no-create-home --home-dir /var/lib/lightmoni-agent --shell /usr/sbin/nologin lightmoni-agent
+fi
 "$node" "$tmp_dir/unpacked/lightmoni-agent-runtime/deployment-permissions.mjs" prepare || { echo 'Agent deployment-permissions preflight failed; the existing service was not stopped.' >&2; exit 1; }
 if systemctl is-active --quiet lightmoni-agent.service; then previous_active="yes"; fi
 if systemctl is-enabled --quiet lightmoni-agent.service; then previous_enabled="yes"; fi
@@ -395,10 +406,6 @@ if [ "$previous_helper_active" = yes ]; then
   systemctl show lightmoni-agent-helper.service --no-pager --property=LoadState --property=ActiveState --property=SubState --property=Result --property=ExecMainCode --property=ExecMainStatus >&2 2>/dev/null || :
   helper_restart_attempted="yes"
   systemctl stop lightmoni-agent-helper.service
-fi
-if id lightmoni-agent >/dev/null 2>&1; then :; else
-  command -v useradd >/dev/null || { echo 'useradd is required.' >&2; exit 1; }
-  useradd --system --no-create-home --home-dir /var/lib/lightmoni-agent --shell /usr/sbin/nologin lightmoni-agent
 fi
 install -d -m 0750 -o root -g lightmoni-agent /etc/lightmoni-agent
 install -d -m 0700 -o lightmoni-agent -g lightmoni-agent /var/lib/lightmoni-agent
@@ -422,6 +429,10 @@ printf '{"schema":1,"artifact_sha256":"%s"}\n' "$actual" > "$runtime_release/ins
 chmod -R u=rwX,go=rX "$runtime_release"
 ln -s "$runtime_release" "/opt/lightmoni-agent/.current-$$"
 mv -Tf "/opt/lightmoni-agent/.current-$$" /opt/lightmoni-agent/current
+if [ ! -e /usr/local/bin ] && [ ! -L /usr/local/bin ]; then
+  launcher_directory_created="yes"
+  install -d -m 0755 /usr/local/bin
+fi
 install -m 0755 "$tmp_dir/unpacked/lightmoni-agent" "/usr/local/bin/.lightmoni-agent.new-$$"
 mv -f "/usr/local/bin/.lightmoni-agent.new-$$" /usr/local/bin/lightmoni-agent
   if [ ! -e /usr/local/sbin ] && [ ! -L /usr/local/sbin ]; then uninstaller_directory_created="yes"; fi
