@@ -9,3 +9,9 @@
 线上只读现场：job `6e1d41c9bd13acd3cd1ba2f6ceab1997`，动作inspect，中心与目标journal均为unknown/code executor_http_502。目标没有其他prepared/intent/running记录，关联unit not-found/inactive/dead，无managed operation lock。Agent active，Demo容器healthy，四个业务容器均运行。现场核对没有修改数据库、任务状态、进程或容器。
 
 架构同步不适用，理由见spec.md；仓库系统设计和Doca无需改写，不声称在线同步。
+
+## 发布
+
+固定镜像`docker.heyphp.com/lightmoni/lightmoni:20261103-f9d7480`，源码`f9d7480d3c72553f7a3d67a63fdb88c8e0f82545`，后续提交仅验收文档和Compose发布引用。linux/arm64与linux/amd64各42项成品检查通过，另外各自通过编译成品私网HTTP/TCP健康探测；AMD64为Docker仿真。37个本地OCI blob逐个校验SHA256，rootfs/config与实测镜像一致，索引`sha256:0da1a10ea55f1853aa176c5e71cadb3a6bbf63a9e679b89671191ac51efb7631`。详见evidence/image-checks.json。
+
+远端发布、线上保护性备份、中心升级、正常产品人工核对及随后新检查的结果以[PR #84](https://github.com/workhold/lightmoni/pull/84)发布验证节为准；本地成品通过不代表线上已恢复。保留原未知记录及原因，不通过SQL修改作业或将未知状态改成成功。
