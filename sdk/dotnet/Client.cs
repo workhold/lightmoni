@@ -102,7 +102,7 @@ public sealed class Client
         internal string SelfTable=""; internal long SelfLast=long.MinValue; internal bool SelfStarted;
         internal readonly Dictionary<string,long> SelfPrevious=new();
         internal readonly CancellationTokenSource HeartbeatStop=new();
-        internal State(string service, string endpoint, string key, Limits limits)
+        internal State(string service, string endpoint, string key, Limits limits, IDictionary<string,object>? resource = null, string? instance = null)
         {
             var uri = new Uri(endpoint);
             if (string.IsNullOrEmpty(service) || Encoding.UTF8.GetByteCount(service) > 128 ||
@@ -111,7 +111,7 @@ public sealed class Client
             if (limits.QueueBytes <= 0 || limits.BufferBytes <= 0 || limits.QueueBatches <= 0 || limits.MaxBatchBytes <= 0 ||
                 limits.MaxBatchBytes > limits.QueueBytes || limits.CardinalityLimit <= 0 || limits.MaxInstruments <= 0) throw new ArgumentException("invalid SDK limits");
             Endpoint = endpoint.TrimEnd('/'); Key = key; Limits = limits;
-            Resource = Obj("attributes", Attrs(new Dictionary<string, object> { ["service.name"] = service, ["service.instance.id"] = Guid.NewGuid().ToString() }));
+            Resource = Obj("attributes", Attrs(ResourceValues(service,resource,instance)));
             foreach (string name in new[] { "pending_batches", "pending_bytes", "buffer_bytes", "delivered_batches", "retried_batches", "invalid_records", "overflow_records", "dropped_records", "rejected_records" }) Stats[name] = 0;
         }
         internal void Invalid(string message) { Stats["invalid_records"]++; LastError = message; }
@@ -230,10 +230,21 @@ public sealed class Client
             Stats["pending_bytes"] += raw.Length; Stats["pending_batches"]++;
         }
     }
+    static string Env(string name) => Environment.GetEnvironmentVariable(name) ?? "";
+    static Dictionary<string,object> ResourceValues(string service,IDictionary<string,object>? overrides,string? instance) {
+        if(overrides?.ContainsKey("service.name")==true||overrides?.ContainsKey("service.instance.id")==true)throw new ArgumentException("configure service identity separately");
+        var values=new Dictionary<string,object>();
+        foreach(var (name,attribute) in new (string,string)[]{("LIGHTMONI_MACHINE_NAME","host.name"),("LIGHTMONI_MACHINE_ID","lightmoni.machine_id"),("LIGHTMONI_HOST_ID","host.id"),("LIGHTMONI_AGENT_ID","lightmoni.agent_id"),("LIGHTMONI_APPLICATION_ID","lightmoni.application_id"),("LIGHTMONI_CLUSTER_ID","lightmoni.cluster_id"),("LIGHTMONI_DEPLOYMENT_ID","lightmoni.deployment_id")}){var value=Env(name);if(value.Length>0)values[attribute]=value;}
+        if(overrides!=null)foreach(var pair in overrides)values[pair.Key]=pair.Value;
+        if(instance==null){instance=Env("LIGHTMONI_INSTANCE_ID");if(instance.Length==0)instance=Guid.NewGuid().ToString();}
+        if(string.IsNullOrWhiteSpace(instance)||Encoding.UTF8.GetByteCount(instance)>128)throw new ArgumentException("invalid instance ID");
+        values["service.name"]=service;values["service.instance.id"]=instance;return values;
+    }
     readonly State state;
     readonly string table;
     static string ValidTable(string value) => Regex.IsMatch(value, "^[a-z][a-z0-9_]{0,47}$") && !Regex.IsMatch(value, "^(log|metric|trace)_") ? value : throw new ArgumentException("invalid logical table");
-    public Client(string service, string table, string endpoint = "", string key = "", Limits? limits = null) { this.table = ValidTable(table); state = new(service, endpoint, key, limits ?? new()); state.SelfTable=this.table;
+    public Client(string table) : this((string?)null,table,null,null,null,null,null) {}
+    public Client(string? service, string table, string? endpoint = null, string? key = null, Limits? limits = null, IDictionary<string,object>? resource = null, string? instanceId = null) { this.table = ValidTable(table); state = new(service ?? Env("LIGHTMONI_SERVICE"), endpoint ?? Env("LIGHTMONI_ENDPOINT"), key ?? Env("LIGHTMONI_KEY"), limits ?? new(),resource,instanceId); state.SelfTable=this.table;
         if(state.Limits.SelfTelemetry) _ = Task.Run(async () => {
             try { using var timer=new PeriodicTimer(TimeSpan.FromSeconds(30));
                 while(await timer.WaitForNextTickAsync(state.HeartbeatStop.Token)) {

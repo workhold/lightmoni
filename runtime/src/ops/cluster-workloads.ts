@@ -1,4 +1,6 @@
 import {machineServiceAddresses} from "../server/host-network.js";
+import {automaticEntry} from './automatic-entry.js';
+import {createApplicationTelemetry} from './application-telemetry.js';
 import {createInstanceRecoverySchema,recoverReinstalledInstances,recordInstanceRecovery} from './instance-recovery.js';
 import {networkScope} from "../shared/host-network.js";
 import { effectiveAuth } from "../operations/basic-auth.js";
@@ -25,7 +27,7 @@ import {
   systemApplicationKind,
 } from "./system-applications.js";
 import { privateRegistryAddress } from "../operations/registry-address.js";
-import { registryRuntime, registryCacheFor } from "./registry-runtime.js";
+import { registryRuntime, registryCacheFor, registryTemplateSpec } from "./registry-runtime.js";
 import { hostPortOverrides } from './application-ports.js';
 import { ensureDnsRecords, normalizeDomain, CloudError } from "./cloud.js";
 import type {
@@ -114,6 +116,7 @@ export function createClusterWorkloads(
   const { store, deps } = options,
     { db } = deps;
   const at = () => deps.now().toISOString();
+  const telemetry=createApplicationTelemetry(store);
   createInstanceRecoverySchema(store);
   let closed = false;
   const dnsPending = new Map<string, Promise<void>>();
@@ -588,6 +591,10 @@ export function createClusterWorkloads(
       )
     )
       fail(409, "service_name_conflict");
+    if(role==='registry') {
+      Object.assign(s,registryTemplateSpec());
+      s.deployments=s.deployments.map((d:Row)=>({...d,host_ports:d.host_ports?{registry:d.host_ports.registry??0}:undefined}));
+    }
     const declared = (s.ports ?? []).map((p: Row) => ({
       name: label(p.name, "invalid_port_name"),
       container_port: port(p.container_port),
@@ -662,6 +669,9 @@ export function createClusterWorkloads(
       s.deployments.length > 100
     )
       fail(400, "application_deployment_required");
+    if (role === "registry" && (s.deployments.length !== 1 ||
+      previous?.deployments?.some((p: Row) => p.cluster_id !== s.deployments[0].cluster_id)))
+      fail(409, "registry_data_migration_required");
     const deployments = s.deployments.map((d: Row) => {
       const hostPorts=hostPortOverrides(d.host_ports,declared);
       if(role==='openresty'&&hostPorts&&Object.keys(hostPorts).length)fail(400,'openresty_fixed_host_ports');
@@ -718,8 +728,10 @@ export function createClusterWorkloads(
             fail(400, "gateway_domain_outside_dns_scope");
           gateway.gateway_dns_zone_id = zone.id;
         }
-      } else if (d.gateway_dns_zone_id)
-        fail(400, "openresty_cluster_domain_required");
+      } else if (role === 'openresty') {
+        Object.assign(gateway,automaticEntry(store,c.id,d.gateway_dns_zone_id ?? previous?.deployments?.find((v:Row)=>v.cluster_id===c.id)?.gateway_dns_zone_id));
+      }
+      if (role === 'openresty' && d.gateway_domain_generated === true) gateway.gateway_domain_generated = true;
       return {
         ...gateway,
         ...(hostPorts?{host_ports:hostPorts}:{}),
@@ -997,10 +1009,10 @@ export function createClusterWorkloads(
     if (s.cluster_overrides || s.scope || s.openresty_application_id)
       fail(400, "website_cluster_override_not_supported");
     const routing = s.routing_mode ?? "manual",
-      dnsMode = s.dns_record_mode ?? "address";
+      dnsMode = s.dns_record_mode ?? "cname";
     if (!["manual", "managed"].includes(routing))
       fail(400, "invalid_website_routing_mode");
-    if (!["address", "cname"].includes(dnsMode))
+    if (dnsMode !== "cname")
       fail(400, "invalid_website_dns_mode");
     let service: PlatformResource | undefined;
     if (routing === "managed") {
@@ -1333,9 +1345,10 @@ export function createClusterWorkloads(
               .list("application")
               .find((a) => a.spec.role === "openresty")
               ?.spec.deployments.find((d: Row) => d.cluster_id === cid);
-            if (!gateway?.gateway_domain)
+            const entryDomain=gateway?.gateway_domain??automaticEntry(store,cid,binding.dns_zone_id).gateway_domain;
+            if (!entryDomain)
               fail(400, "openresty_cluster_domain_required");
-            if (allNames.has(gateway.gateway_domain))
+            if (allNames.has(entryDomain))
               fail(400, "gateway_domain_conflicts_with_website");
           }
         }
@@ -1504,6 +1517,9 @@ export function createClusterWorkloads(
   const effective = (a: PlatformResource, i: Row) => {
     const app = structuredClone(a.spec),
       mapping = ports(i.id);
+    const defaults=telemetry.environment(a,i);
+    if(app.mode==='compose')for(const service of Object.values<Row>(app.compose.services))service.environment={...defaults,...service.environment};
+    else app.environment={...defaults,...app.environment};
     app.ports = mapping.map((p) => ({
       container_port: p.container_port,
       host_port: p.host_port,
@@ -2508,7 +2524,7 @@ export function createClusterWorkloads(
     const grouped = new Map<string, Row[]>();
     const gatewayDNS: Row = {};
     for (const d of app.spec.deployments) {
-      const summary: Row = gatewayDNS[d.cluster_id] = {domain:d.gateway_domain??'',zone_id:d.gateway_dns_zone_id??'',state:!d.gateway_domain?'domain_required':!d.gateway_dns_zone_id?'external':'awaiting_entry',missing_public_machine_ids:[]};
+      const summary: Row = gatewayDNS[d.cluster_id] = {domain:d.gateway_domain??'',zone_id:d.gateway_dns_zone_id??'',state:!d.gateway_domain?'dns_zone_required':!d.gateway_dns_zone_id?'external':'awaiting_entry',missing_public_machine_ids:[]};
       if (!d.gateway_domain || !d.gateway_dns_zone_id) continue;
       if (!grouped.has(d.gateway_dns_zone_id))
         grouped.set(d.gateway_dns_zone_id, []);
@@ -2618,7 +2634,7 @@ export function createClusterWorkloads(
         if (!version) continue;
         const applied = structuredClone(JSON.parse(deps.decrypt(version.spec_cipher)),
         );
-        const cname = applied.dns_record_mode === "cname",
+        const cname = true,
           domain = deployment?.gateway_domain;
         if (cname && !domain) {
           traffic[d.cluster_id].error = "openresty_cluster_domain_required";
@@ -2687,6 +2703,13 @@ export function createClusterWorkloads(
       domain_traffic: domainTraffic,
       domain_traffic_truncated: domainTruncated,
     });
+    // A single default CNAME needs no provider weighting feature or paid SLB calls.
+    for(const [zoneID,records] of grouped)for(const record of records) {
+      const zone=store.get(zoneID,'dns_zone');
+      const relative=record.name===zone.spec.domain?'@':record.name.slice(0,-zone.spec.domain.length-1);
+      const weighted=tableExists('ops_dns_owned')&&db.get('SELECT id FROM ops_dns_owned WHERE zone_id=? AND owner_id=? AND name=? AND weight IS NOT NULL',zoneID,current.id,relative);
+      if(!weighted&&record.type==='CNAME'&&record.weight===1&&records.filter(r=>r.name===record.name&&(r.line??'default')===(record.line??'default')).length===1)delete record.weight;
+    }
     syncDNS(current, grouped, actor);
   }
   function syncDNS(
@@ -2993,6 +3016,9 @@ export function createClusterWorkloads(
   }
   async function tick() {
     if (closed) return;
+    if(store.list('dns_zone').length)for(const r of store.list('application'))
+      if(r.spec.role==='openresty'&&r.spec.deployments.some((d:Row)=>!d.gateway_domain)&&store.authorized(r.authorized_by))
+        store.updateSystemApplication(r.id,r.revision,r.name,r.spec,r.authorized_by);
     for (const r of store.list().filter(handles)) {
       if (r.kind === "application")
         for (const d of db.all<Row>(
@@ -3061,6 +3087,7 @@ export function createClusterWorkloads(
     beforeDeleteApplication,
     beforeDeleteWebsite,
     afterDeleteApplication(r: PlatformResource) {
+      telemetry.remove(r.id);
       db.run(
         "DELETE FROM ops_platform_application_deployments WHERE application_id=?",
         r.id,

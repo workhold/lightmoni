@@ -33,7 +33,7 @@
   "maintenance_result_screenshot": ".local-dev/image-release-089/maintenance-success.png",
   "production_data": true,
   "fixture": false,
-  "native_200_percent_zoom": "not performed; Mac locked; simulated 200% documented in SDD087",
+  "native_200_percent_zoom": "follow-up passed after user unlocked Mac; see ../../087-panel-ui/evidence/native-200-keyboard.json",
   "user_unsaved_website_editor": "untouched",
   "viewport_override": "reset"
 }

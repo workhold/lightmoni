@@ -1,0 +1,21 @@
+{
+  "feature_parent": "b7dc139fd26dd2e65438949ec90c6348caef4a3c",
+  "integrated_main": "0b4568316cb99f66a3c7e50d8284bf53901c7a6a",
+  "runtime": {
+    "tests": 1350,
+    "pass": 1317,
+    "fail": 0,
+    "skipped": 33
+  },
+  "typescript_sdk": {
+    "pass": 23,
+    "fail": 0
+  },
+  "typecheck": "passed",
+  "build": "passed",
+  "runtime_log_sha256": "fef9b29feeba5280e36711d5681e7ac2dd721dd3fe61baab183d079932f18998",
+  "conflict_resolution": "Only appended docs/system-design.md sections conflicted; preserve both SDD087 and SDD091. Updated obsolete upstream manual-port test to the existing automatic-port design; no production behavior changed by conflict resolution.",
+  "image_source_revision": "3309b0b36490fb7eb8c7b4a4fa602ab1de75f974",
+  "new_main_features_in_published_image": false,
+  "architecture_impact": "No new design decision; preserve main SDD091 and its existing Doca evidence."
+}

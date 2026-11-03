@@ -17,6 +17,7 @@ import {
 } from "./registry-runtime.js";
 import { automaticRegistryAddress, registryCacheScope } from "./registry-runtime.js";
 import { catalogInstallation } from "./catalog.js";
+import {hostPortOverrides} from './application-ports.js';
 type Row = Record<string, any>;
 /** Only this host controller can register the system's image source. Business registries remain ordinary apps. */
 export function createPrivateRegistryController(
@@ -54,9 +55,6 @@ export function createPrivateRegistryController(
         cache_enabled:
           store.get(d.cluster_id, "cluster").spec.image_cache?.enabled === true,
         endpoint: registeredRegistryEndpoint(store, d.cluster_id) ?? "",
-        hub_cache_endpoint: d.registry_cache_enabled
-          ? (registeredRegistryEndpoint(store, d.cluster_id, "hub-cache") ?? "")
-          : "",
         status: {
           ...app?.status.deployments?.[d.cluster_id],
           cache_pending:
@@ -113,6 +111,11 @@ export function createPrivateRegistryController(
     let app = key ? store.get(key, "application") : undefined;
     revision(b.revision, app?.revision ?? 0);
     const cluster = store.get(b.cluster_id, "cluster");
+    if (app && (app.spec.deployments.length !== 1 ||
+      app.spec.deployments[0].cluster_id !== cluster.id ||
+      app.spec.deployments[0].machine_ids[0] !== b.machine_id))
+      fail(409, "registry_data_migration_required");
+    hostPortOverrides(b.host_ports,registryTemplateSpec().ports);
     if (
       typeof b.machine_id !== "string" ||
       !cluster.spec.machine_ids.includes(b.machine_id)
@@ -130,12 +133,7 @@ export function createPrivateRegistryController(
       cpu: b.cpu ?? 0.25,
       memory_mb: b.memory_mb ?? 256,
     };
-    const deployments = [
-      ...(app?.spec.deployments ?? []).filter(
-        (d: Row) => d.cluster_id !== cluster.id,
-      ),
-      deployment,
-    ];
+    const deployments = [deployment];
     app = app
       ? store.updateSystemApplication(
           app.id,

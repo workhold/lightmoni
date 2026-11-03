@@ -62,3 +62,7 @@ UI 点击流程、截图和范围见 [ui-validation.md](ui-validation.md)。每�
 - 本轮未对 vchive 或生产主机执行 SSH、安装、服务修改或模式切换。双架构镜像已在本机构建并发布至既有仓库，固定标签与 latest 均已回读确认，本轮本地镜像、缓存及大产物已清理；详见 [release.md](release.md) 和 [清理记录](evidence/release-cleanup.json)。生产主机的真实 SSH 网络与部署验收仍待实际升级后执行。
 - 旧 root 常驻安装须先使用原版本受管流程卸载后重装，新卸载器不接管旧运行态。
 - 不包含平台主机 RBAC、任意业务账户执行或不可信脚本沙箱；Docker daemon 身份绑定仍需独立确认。
+
+## 发布后主干集成
+
+主干在镜像发布后推进到 `0b45683`，本分支已合并并保留同时追加的 SDD087/SDD091 设计章节。沿用主干已有端口自动分配设计，修正其旧 manual 端口断言；没有因解决冲突新增生产行为。集成后 Runtime 1350 项：1317 通过、0 失败、33 跳过；TypeScript SDK 23/23，全项目 typecheck/build 通过。证据见 [post-release-main-integration.json](evidence/post-release-main-integration.json)。已发布镜像仍固定为 `3309b0b`，不包含随后集成的主干部署功能；本地 Docker 镜像及缓存未重新创建。

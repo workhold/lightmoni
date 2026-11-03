@@ -85,13 +85,13 @@ public final class Client implements AutoCloseable {
         String selfTable; long selfLast = Long.MIN_VALUE; boolean selfStarted;
         final Map<String,Long> selfPrevious=new HashMap<>();
         java.util.concurrent.ScheduledExecutorService heartbeat;
-        State(String service,String endpoint,String key,Limits limits) {
+        State(String service,String endpoint,String key,Limits limits,Map<String,?> overrides,String instance) {
             URI url=URI.create(endpoint);
             if (service==null || service.isEmpty() || bytes(service).length>128 || !List.of("http","https").contains(url.getScheme())
                 || url.getHost()==null || url.getUserInfo()!=null || url.getQuery()!=null || url.getFragment()!=null)
                 throw new IllegalArgumentException("valid service and HTTP(S) endpoint required");
             this.endpoint=endpoint.replaceAll("/+$",""); this.key=key; this.limits=limits.copy();
-            resource=Map.of("attributes",attrs(Map.of("service.name",service,"service.instance.id",UUID.randomUUID().toString())));
+            resource=Map.of("attributes",attrs(resourceValues(service,overrides,instance)));
             for (String n:List.of("pending_batches","pending_bytes","buffer_bytes","delivered_batches","retried_batches","invalid_records","overflow_records","dropped_records","rejected_records")) stats.put(n,0L);
             stats.put("last_error","");
         }
@@ -250,9 +250,21 @@ public final class Client implements AutoCloseable {
     }
     private final State s;
     private final String table;
-    public Client(String service,String table) { this(service,table,System.getenv().getOrDefault("LIGHTMONI_ENDPOINT",""),"",new Limits()); }
+    private static String env(String name) { return System.getenv().getOrDefault(name, ""); }
+    private static Map<String,Object> resourceValues(String service,Map<String,?> overrides,String instance) {
+        if(overrides.containsKey("service.name")||overrides.containsKey("service.instance.id")) throw new IllegalArgumentException("configure service identity separately");
+        Map<String,Object> values=new LinkedHashMap<>();
+        for(String[] pair:new String[][] {{"LIGHTMONI_MACHINE_NAME","host.name"},{"LIGHTMONI_MACHINE_ID","lightmoni.machine_id"},{"LIGHTMONI_HOST_ID","host.id"},{"LIGHTMONI_AGENT_ID","lightmoni.agent_id"},{"LIGHTMONI_APPLICATION_ID","lightmoni.application_id"},{"LIGHTMONI_CLUSTER_ID","lightmoni.cluster_id"},{"LIGHTMONI_DEPLOYMENT_ID","lightmoni.deployment_id"}}) {String value=env(pair[0]);if(!value.isEmpty())values.put(pair[1],value);}
+        values.putAll(overrides);
+        if(instance==null){instance=env("LIGHTMONI_INSTANCE_ID");if(instance.isEmpty())instance=UUID.randomUUID().toString();}
+        if(instance.isBlank()||bytes(instance).length>128)throw new IllegalArgumentException("invalid instance ID");
+        values.put("service.name",service);values.put("service.instance.id",instance);return values;
+    }
+    public Client(String table) { this(null,table,null,null,new Limits()); }
+    public Client(String service,String table) { this(service,table,null,null,new Limits()); }
     public Client(String service,String table,String endpoint,String key) { this(service,table,endpoint,key,new Limits()); }
-    public Client(String service,String table,String endpoint,String key,Limits limits) { this.table=validTable(table);this.s=new State(service,endpoint,key,limits); s.selfTable=this.table;
+    public Client(String service,String table,String endpoint,String key,Limits limits) { this(service,table,endpoint,key,limits,Map.of(),null); }
+    public Client(String service,String table,String endpoint,String key,Limits limits,Map<String,?> resource,String instance) { this.table=validTable(table);this.s=new State(service==null?env("LIGHTMONI_SERVICE"):service,endpoint==null?env("LIGHTMONI_ENDPOINT"):endpoint,key==null?env("LIGHTMONI_KEY"):key,limits,resource,instance); s.selfTable=this.table;
         if(s.limits.selfTelemetry) {
             s.heartbeat=java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"lightmoni-heartbeat");t.setDaemon(true);return t;});
             s.heartbeat.scheduleWithFixedDelay(()->{try{flush(Duration.ofSeconds(5));}catch(IOException | InterruptedException | RuntimeException e){if(e instanceof InterruptedException)Thread.currentThread().interrupt();}},30,30,TimeUnit.SECONDS);

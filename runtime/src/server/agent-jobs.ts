@@ -8,7 +8,7 @@ import type { AgentCredentialStore } from "./agent-credentials.js";
 import { assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
 import { assertNoPendingAgentUpdate, hasPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoPendingMachineInstallation, hasInstallationTable, pendingMachineInstallation, unresolvedInstallationSQL } from "./machine-installations-guard.js";
-import { assertNoPrivilegedExecution, hasPrivilegedExecution } from "./privileged-execution-guard.js";
+import { assertManagedJobAdmission, assertNoPrivilegedExecution, hasPrivilegedExecution } from "./privileged-execution-guard.js";
 
 /**
  * Durable, pull based execution jobs.  A job is immutable after enqueue: the
@@ -318,7 +318,8 @@ export function registerAgentJobs(
     if (existing) return view(existing);
     if (privileged) { if (!privilegedReady) fail(409,"privileged_executor_required"); privilegedReady(agentID); }
     assertNoPendingMachineInstallation(db,"",agentID);
-    assertNoPrivilegedExecution(db,"",agentID);
+    if (privileged) assertManagedJobAdmission(db,agentID);
+    else assertNoPrivilegedExecution(db,"",agentID);
     assertNoPendingAgentUpdate(db, agentID);
     assertNoDockerInstallation(db,"",agentID);
     if (uninstallBlocked(agentID)) fail(409, "agent_uninstallation_blocks_jobs");

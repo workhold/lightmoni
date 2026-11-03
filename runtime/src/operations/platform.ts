@@ -689,11 +689,16 @@ async function executeWorkload(
       ["logs", "--tail", String(tail), container.Id],
       { timeoutMs: 15000 },
     );
+    const manifest=state?.manifest?await readJSON<any>(state.manifest,null):null;
+    let text=(output.stdout+output.stderr).slice(-32000);
+    for(const service of Object.values<any>(manifest?.services??{}))for(const value of Object.values<any>(service.environment??{}))
+      if(typeof value==='string'&&value)text=text.replaceAll(value.replaceAll('$$','$'),'[redacted]');
+    text=text.replace(/lm_[A-Za-z0-9_-]{20,}/g,'[redacted]');
     return {
       verified: true,
       data: {
         instance_id: id,
-        text: (output.stdout + output.stderr).slice(-32000),
+        text,
         sensitive_logs: true,
       },
     };

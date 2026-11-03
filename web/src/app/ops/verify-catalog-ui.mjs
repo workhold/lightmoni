@@ -6,7 +6,7 @@ const root = resolve(import.meta.dirname, "../../../.."),
   base = process.env.LIGHTMONI_CATALOG_UI_URL ?? "http://127.0.0.1:5196";
 if (!["127.0.0.1", "localhost"].includes(new URL(base).hostname))
   throw Error("Loopback fixture required");
-const out = resolve(root, "specs/066-app-catalog-expansion/evidence"),
+const out = resolve(root, "specs/091-deployment-autoconfiguration/evidence"),
   media = mediaDirectory(out);
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: true, channel: "chrome" }),
@@ -130,20 +130,12 @@ try {
     await expect(
       drawer.getByLabel(en ? "Access password" : "访问密码", { exact: true }),
     ).toBeVisible();
-    await expect(
-      drawer.getByLabel(en ? "Host port · http" : "宿主端口 · http", {
-        exact: true,
-      }),
-    ).toHaveValue("4224");
+    await expect(drawer.getByLabel(en ? "Website domain" : "访问域名", {exact:true})).toBeVisible();
+    await expect(drawer.getByLabel(en ? "Deployment cluster" : "部署集群", {exact:true})).not.toBeVisible();
     await drawer
       .getByText(en ? "Advanced settings" : "高级设置", { exact: true })
       .click();
-    await expect(
-      drawer.getByLabel(
-        en ? "Memory per instance (MiB)" : "每实例内存（MiB）",
-        { exact: true },
-      ),
-    ).toHaveValue("512");
+    await expect(drawer.getByLabel(en ? "Host port" : "宿主端口", {exact:true})).toHaveValue("0");
     await page.screenshot({
       path: resolve(media, `dbx-${language}-${width}-${appearance}.png`),
       animations: "disabled",
@@ -152,7 +144,7 @@ try {
       await drawer
         .getByLabel("访问密码", { exact: true })
         .fill("qa_browser_secret_2026");
-      await drawer.getByLabel("宿主端口 · http", { exact: true }).fill("0");
+      await drawer.getByLabel("宿主端口", { exact: true }).fill("0");
       const [response] = await Promise.all([
         page.waitForResponse(
           (r) =>
@@ -221,11 +213,8 @@ try {
       .getByRole("listitem", { name: "ClickHouse", exact: true })
       .getByRole("button", { name: en ? "Install" : /^安\s*装$/ })
       .click();
-    await expect(
-      drawer.getByLabel(en ? "Host port · native" : "宿主端口 · native", {
-        exact: true,
-      }),
-    ).toHaveValue("9000");
+    await drawer.getByText(en ? "Advanced settings" : "高级设置", {exact:true}).click();
+    await expect(drawer.getByLabel(en ? "Host port · native" : "宿主端口 · native", {exact:true})).toHaveValue("0");
     await drawer
       .getByRole("button", {
         name: en ? "Back to store" : "返回应用商店",

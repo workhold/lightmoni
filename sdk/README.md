@@ -2,7 +2,7 @@
 
 ## 通用业务打点（Go / Node.js / Python / Rust）
 
-推荐统一调用 `record(table, metric_name, dimensions, value, count)`（Go 为 `Record`），五个参数均必填。初始化必填 service、env，可选 service_version、instance_id；实例 ID 默认自动生成。地址与密钥可读 LIGHTMONI_ENDPOINT / LIGHTMONI_KEY；无密钥时仅能写启用的豁免表且不产生 SDK 自身遥测。
+推荐统一调用 `record(table, metric_name, dimensions, value, count)`（Go 为 `Record`），五个参数均必填。初始化的 service 与连接信息默认读取部署环境，env 可选；service_version、instance_id 可覆盖，未设置实例 ID 时自动生成。地址与密钥可读 LIGHTMONI_ENDPOINT / LIGHTMONI_KEY；无密钥时仅能写启用的豁免表且不产生 SDK 自身遥测。
 
 每次数据库请求后记录一次耗时，例如 `record("business", "db.query.duration_ms", {key1:"telecom", key2:"zhejiang"}, 128, 1)`。SDK 默认按30秒固定窗口聚合，窗口以 UTC Unix epoch 为边界；后台收集发送已结束窗口。业务不需注册指标或配置分桶。退出仍需 shutdown。维度仅支持 key1…key16 字符串；同一 metric_name 的槽含义和数值单位固定，不同指标可复用槽位。同一客户端可以上报多个表/指标。
 
@@ -163,3 +163,25 @@ mon.log('info','checkout clicked',{user_id:'qa-1',event:'click'});
 验证入口：`go test -race ./sdk/go ./internal/agent ./internal/ingest ./internal/server`、`npm --prefix sdk/typescript test`。真实 UI/SQLite/ClickHouse/Node/浏览器回归见 `node examples/sdk/reporting.mjs`（对隔离测试实例运行），证据见 [SDK 上报规则验收](../docs/evidence/sdk-reporting/README.md)。
 
 Python 新增规则、取消和配置回退验证：`PYTHONPATH=sdk/python python3 -m unittest discover -s sdk/python/tests -v`；中心/Agent 隔离集成与证据见 [SDD 004](../specs/004-python-sdk-reporting/verification.md)。
+
+
+## 应用部署环境默认值
+
+平台部署应用时，为每个实例注入以下环境变量；程序显式配置优先于环境默认值，应用自定义环境变量优先于平台注入。SDK 仍独立直连中心，不依赖 Agent 转发。浏览器 SDK 继续使用显式配置，不读取后端环境或凭据。
+
+| 环境变量 | 用途 / 遥测 Resource |
+|---|---|
+| `LIGHTMONI_SERVICE` | `service.name`，默认应用不可变服务名 |
+| `LIGHTMONI_ENDPOINT` | 中心引导地址，继续内网优先/公网备用发现 |
+| `LIGHTMONI_KEY` | 应用专用上报凭据，不写入遥测属性 |
+| `LIGHTMONI_INSTANCE_ID` | `service.instance.id`，默认部署实例 ID |
+| `LIGHTMONI_MACHINE_NAME` / `LIGHTMONI_MACHINE_ID` | `host.name` / `lightmoni.machine_id` |
+| `LIGHTMONI_HOST_ID` / `LIGHTMONI_AGENT_ID` | Agent 观测主机 ID / `lightmoni.agent_id` |
+| `LIGHTMONI_APPLICATION_ID` / `LIGHTMONI_CLUSTER_ID` / `LIGHTMONI_DEPLOYMENT_ID` | 对应 `lightmoni.*_id` 属性 |
+| `LIGHTMONI_ENV` / `LIGHTMONI_SERVICE_VERSION` | 支持统一 record API 的 Node/Python/Go/Rust 的环境与版本默认 |
+
+Node 使用 `createLightMoni()`；Python 使用 `Client()`；Go 使用 `New(Config{})`；Java 使用 `new Client("business")`；.NET 使用 `new Client("business")`；PHP 使用 `Client::fromEnvironment("business")`；Ruby 使用 `Client.new(table: "business")`；Rust 使用 `Client::from_env()`。business 只是用户自行选择的业务表名，Node/Python/Go/Rust 可在记录时指定表。
+
+Node/Python/Go 的 `resource`/`Resource`、Java 构造尾参 `resource`、.NET/PHP/Ruby 的可选 `resource`、Rust `init_with_resource` 可覆盖机器等非服务身份属性；服务和实例身份使用专用选项。Node/Python/Java/.NET/PHP/Ruby/Rust 显式空 Key 表示匿名，Go 字符串零值表示从环境回退。平台资产属性用于关联显示，不授予平台权限。
+
+应用专用 SDK Key 在中心加密保存并在部署载荷中下发，重复部署复用同一 Key。管理员停用后不会自动创建替代 Key；删除应用登记时停用该 Key。应用、队列及公开日志接口不返回明文，实际容器环境中的凭据按业务进程秘密管理。

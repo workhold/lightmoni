@@ -1,0 +1,8 @@
+{
+  "single_service": true,
+  "single_store": true,
+  "container_port": 5000,
+  "oci_push": true,
+  "oci_pull": true,
+  "restart_preserves_data": true
+}

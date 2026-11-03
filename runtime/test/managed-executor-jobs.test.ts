@@ -84,6 +84,22 @@ test('signed domain work retains original lineage and ordinary control cannot re
 test('a changed source approval blocks an online permit before any side effect',()=>{const f=fixture();try{const x=flow(f);f.change();assert.throws(x.permit,/revision_changed/);assert.equal(f.db.all('SELECT * FROM privileged_start_permits').length,0);}finally{f.close();}});
 test('domain receipt faults roll back both principals and preserve a retryable acknowledgement',()=>{const f=fixture();try{const x=flow(f);x.permit();x.phases();f.db.exec("CREATE TRIGGER fail_parent BEFORE UPDATE OF receipt_json ON agent_jobs BEGIN SELECT RAISE(ABORT,'parent_receipt_failure');END");assert.throws(x.result,/parent_receipt_failure/);assert.equal(f.store.get(x.job.id).state,'running');assert.equal(f.jobs.get(x.job.id).state,'verifying');f.db.exec('DROP TRIGGER fail_parent');x.result();assert.equal(f.jobs.get(x.job.id).state,'succeeded');}finally{f.close();}});
 test('lease loss preserves unknown fences without replaying through ordinary control',()=>{const f=fixture();try{const x=flow(f);f.advance(46);f.store.sweep();assert.equal(f.jobs.get(x.job.id).state,'unknown');assert.equal(f.store.get(x.job.id).state,'unknown');assert.equal(f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v)).job,null);assert.equal(f.jobs.claim('agent-host',['operations.platform']),null);}finally{f.close();}});
+test('managed work can queue behind a running signed operation and only runs after its receipt',()=>{
+ const f=fixture();try{
+  const first=flow(f),next=f.enqueue();
+  assert.equal(f.jobs.get(next.id).state,'queued');
+  assert.equal(f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v)).job,null);
+  first.permit();first.phases();first.result();
+  const claim=f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v));
+  assert.equal(planClaims(verifyJWS(claim.job.plan,f.store.centerPublicKey,f.store.centerKeyID)).job_id,next.id);
+ }finally{f.close()}
+});
+test('managed admission preserves manual privilege and unresolved result fences',()=>{
+ for(const mode of ['manual','unknown','mismatch']){const f=fixture();try{
+  if(mode==='manual')f.apply();else{const old=flow(f);if(mode==='unknown'){f.advance(46);f.store.sweep();f.heartbeat()}else f.db.run("UPDATE privileged_jobs SET task_run_id='other' WHERE id=?",old.job.id)}
+  assert.throws(()=>f.enqueue(),/privileged_execution_pending/);
+ }finally{f.close()}}
+});
 test('human reconciliation preserves both unknown histories and permits a new signed managed job',()=>{
  const f=fixture();try{
   const old=flow(f);f.advance(46);f.store.sweep();const receipt=f.jobs.get(old.job.id).receipt;
@@ -94,6 +110,13 @@ test('human reconciliation preserves both unknown histories and permits a new si
   assert.equal(f.jobs.get(old.job.id).state,'unknown');assert.deepEqual(f.jobs.get(old.job.id).receipt,receipt);
   assert.equal(f.store.get(old.job.id).state,'unknown');assert.equal(f.store.get(old.job.id).resolved_by,'admin');
   assert.equal(f.jobs.claim('agent-host',['operations.platform']),null);
+ }finally{f.close()}
+});
+test('an explicitly reconciled manual privileged result also releases admission',()=>{
+ const f=fixture();try{
+  const old=f.apply();f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v));f.advance(46);f.store.sweep();
+  assert.equal(f.store.get(old.id).state,'unknown');f.store.resolve(old.id,'admin','Verified manual execution ended');f.heartbeat();
+  assert.doesNotThrow(()=>f.enqueue());
  }finally{f.close()}
 });
 test('a cached start permit cannot restore authority after policy revocation',()=>{

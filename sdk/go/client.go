@@ -140,19 +140,36 @@ func validTable(table string) bool {
 
 func Init(service, env string) (*Client, error) { return New(Config{Service: service, Env: env}) }
 func New(cfg Config) (*Client, error) {
+	if cfg.Service == "" {
+		cfg.Service = os.Getenv("LIGHTMONI_SERVICE")
+	}
+	if cfg.Key == "" {
+		cfg.Key = os.Getenv("LIGHTMONI_KEY")
+	}
+	if cfg.InstanceID == "" {
+		cfg.InstanceID = os.Getenv("LIGHTMONI_INSTANCE_ID")
+	}
+	if cfg.Env == "" {
+		cfg.Env = os.Getenv("LIGHTMONI_ENV")
+	}
+	if cfg.ServiceVersion == "" {
+		cfg.ServiceVersion = os.Getenv("LIGHTMONI_SERVICE_VERSION")
+	}
 	if cfg.Endpoint == "" && cfg.Exporter == nil {
 		cfg.Endpoint = os.Getenv("LIGHTMONI_ENDPOINT")
 		if cfg.Endpoint == "" {
 			return nil, errors.New("center endpoint or LIGHTMONI_ENDPOINT is required")
-		}
-		if cfg.Key == "" {
-			cfg.Key = os.Getenv("LIGHTMONI_KEY")
 		}
 	}
 	if (cfg.Env != "" && strings.TrimSpace(cfg.Env) == "") || len(cfg.Env) > 128 || len(cfg.ServiceVersion) > 128 || len(cfg.InstanceID) > 128 {
 		return nil, errors.New("resource identity exceeds 128 bytes")
 	}
 	resource := Attributes{}
+	for variable, key := range map[string]string{"LIGHTMONI_MACHINE_NAME": "host.name", "LIGHTMONI_MACHINE_ID": "lightmoni.machine_id", "LIGHTMONI_HOST_ID": "host.id", "LIGHTMONI_AGENT_ID": "lightmoni.agent_id", "LIGHTMONI_APPLICATION_ID": "lightmoni.application_id", "LIGHTMONI_CLUSTER_ID": "lightmoni.cluster_id", "LIGHTMONI_DEPLOYMENT_ID": "lightmoni.deployment_id"} {
+		if value := os.Getenv(variable); value != "" {
+			resource[key] = value
+		}
+	}
 	for key, value := range cfg.Resource {
 		resource[key] = value
 	}

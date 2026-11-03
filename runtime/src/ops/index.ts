@@ -1,4 +1,5 @@
 import {machineServiceAddresses} from "../server/host-network.js";
+import {createQuickInstall} from './quick-install.js';
 import {registerImageSources} from './image-sources.js';
 import {createPrivateRegistryController} from './private-registry.js';
 import { CloudError, zoneFor } from "./cloud.js";
@@ -36,7 +37,8 @@ export function registerOperationsPlatform(
     const result=await certificates.perform(store.get(certificateID,'certificate'),'issue',{},actor);
     if(result.state!=='succeeded')fail(409,'website_certificate_issuance_failed');
   }});
-  const domains: DomainController[] = [certificates, workloads];
+  const quickInstall=createQuickInstall(store,workloads);
+  const domains: DomainController[] = [certificates, workloads,quickInstall];
   const { router } = deps;
   let timer: ReturnType<typeof setInterval> | undefined,
     closed = false;
@@ -173,37 +175,8 @@ export function registerOperationsPlatform(
       const b = safeObject(await ctx.body());
       if (b.confirmed !== undefined && typeof b.confirmed !== "boolean")
         fail(400, "platform_confirmation_required");
-      const installation = catalogInstallation(ctx.params.id, b);
-      const resource = store.create(
-        "application",
-        installation.name,
-        installation.spec,
-        ctx.user.id,
-      );
-      let result: Record<string, any> = {};
-      if (b.confirmed === true) {
-        try {
-          result = await workloads.perform(resource, "deploy", {}, ctx.user.id);
-        } catch (error) {
-          const candidate =
-            error instanceof HTTPError ||
-            error instanceof OperationRejectedError
-              ? error.message.split(":", 1)[0]
-              : "platform_deployment_failed";
-          const code = /^[a-zA-Z][a-zA-Z0-9_.-]{0,179}$/.test(candidate)
-            ? candidate
-            : "platform_deployment_failed";
-          store.patchStatus(resource.id, {
-            last_error: code,
-            last_error_at: deps.now().toISOString(),
-          });
-          result = { runs: store.actions(resource.id), deployment_error: code };
-        }
-      }
-      ctx.json(
-        { resource: store.public(store.get(resource.id)), ...result },
-        201,
-      );
+      ctx.json(await quickInstall.install(ctx.params.id,b,ctx.user.id),201);
+      return;
     }),
   );
   router.get(

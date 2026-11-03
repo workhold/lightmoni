@@ -15,6 +15,9 @@ import { catalogInstallation } from "../src/ops/catalog.js";
 import type { Dependencies } from "../src/shared/types.js";
 import { registryCacheFor } from "../src/ops/registry-runtime.js";
 import { createPrivateRegistryController } from "../src/ops/private-registry.js";
+import {createApplicationTelemetry} from '../src/ops/application-telemetry.js';
+import {automaticEntry} from '../src/ops/automatic-entry.js';
+import {selfSignedCertificate} from '../src/ops/certificates.js';
 async function fixture(t: any, fetcher?: typeof fetch) {
   const db = new DB(":memory:");
   db.exec(
@@ -259,11 +262,9 @@ test("private registry registration is host owned, coexists with business regist
   assert.equal(view.application.spec.service_name, "sys-docker-registry");
   assert.equal(view.deployments[0].cache_enabled, true);
   const { payload } = f.finish("a");
-  assert.equal(
-    payload.resource.config.application.compose.services.hub_cache.environment
-      .REGISTRY_PROXY_REMOTEURL,
-    "https://registry-1.docker.io",
-  );
+  assert.deepEqual(Object.keys(payload.resource.config.application.compose.services),['registry']);
+  assert.equal(payload.resource.config.application.mounts.length,1);
+  assert.equal(payload.resource.config.application.compose.services.registry.ports[0].target,5000);
   assert(!payload.resource.config.application.compose.services.origin_cache);
   assert.equal(
     payload.resource.config.application.compose.services.registry.ports[0]
@@ -303,28 +304,28 @@ test("private registry registration is host owned, coexists with business regist
     /system_registry_in_use/,
   );
 });
-test('registry ports are independently persisted per cluster and survive resource-only redeployment',async t=>{
+test('system registry keeps one storage location and preserves its port across redeployment',async t=>{
  const f=await fixture(t),a=f.createCluster(['ma'],'A'),b=f.createCluster(['mb'],'B');
  const deploy=async(c:any,m:string,address:string,host_ports:any,revision:number)=>f.req('/private-registry/deployments','POST',{confirmed:true,trusted_network_acknowledged:true,revision,cluster_id:c.id,machine_id:m,address,...(host_ports===undefined?{}:{host_ports})});
- let r=await deploy(a,'ma','10.0.0.1',{registry:15000,'hub-cache':15001,'origin-cache':15002},0);assert.equal(r.status,201,JSON.stringify(r.body));
+ let r=await deploy(a,'ma','10.0.0.1',{registry:15000},0);assert.equal(r.status,201,JSON.stringify(r.body));
  let payload=f.finish('a').payload;assert.equal(payload.resource.config.application.compose.services.registry.ports[0].published,'15000');
- r=await deploy(b,'mb','10.0.0.2',{registry:16000,'hub-cache':16001,'origin-cache':16002},r.body.revision);assert.equal(r.status,201,JSON.stringify(r.body));f.finish('b');
+ const rejected=await deploy(b,'mb','10.0.0.2',{registry:16000},r.body.revision);assert.equal(rejected.status,409);assert.equal(rejected.body.error,'registry_data_migration_required');
  r=await deploy(a,'ma','10.0.0.1',undefined,r.body.revision);assert.equal(r.status,201,JSON.stringify(r.body));payload=f.finish('a').payload;assert.equal(payload.resource.config.application.compose.services.registry.ports[0].published,'15000');
  const view=(await f.req('/private-registry')).body;
  assert.equal(view.deployments.find((d:any)=>d.cluster_id===a.id).host_ports.registry,15000);
- assert.equal(view.deployments.find((d:any)=>d.cluster_id===b.id).host_ports.registry,16000);
+ assert.equal(view.deployments.length,1);
  assert.equal(view.deployments.find((d:any)=>d.cluster_id===a.id).endpoint,'http://10.0.0.1:15000');
  for(const ports of [{registry:5000,'hub-cache':5000},{registry:'5000'},{unknown:5000}]){
   const bad=await deploy(a,'ma','10.0.0.1',ports,view.revision);assert.equal(bad.status,400,JSON.stringify(bad.body));
  }
  assert.equal((await f.req('/private-registry')).body.revision,view.revision);
- const changed=await deploy(a,'ma','10.0.0.1',{registry:15005,'hub-cache':15001,'origin-cache':15002},view.revision);
+ const changed=await deploy(a,'ma','10.0.0.1',{registry:15005},view.revision);
  assert.equal(changed.status,201);
  assert(f.db.get('SELECT * FROM ops_platform_ports WHERE agent_id=? AND port=?','a',15000),'previous binding remains reserved while replacement is in flight');
  const next=f.finish('a').payload;
  assert.equal(next.resource.config.application.compose.services.registry.ports[0].published,'15005');
  assert.equal(f.db.get('SELECT * FROM ops_platform_ports WHERE agent_id=? AND port=?','a',15000),undefined,'verified replacement releases previous binding');
- assert.equal((await f.req('/private-registry')).body.deployments.find((d:any)=>d.cluster_id===b.id).host_ports.registry,16000);
+ assert.equal((await f.req('/private-registry')).body.deployments.length,1);
 });
 test('generic cluster port overrides reach the immutable Agent payload without changing other clusters',async t=>{
  const f=await fixture(t),a=f.createCluster(['ma'],'A'),b=f.createCluster(['mb'],'B');
@@ -346,6 +347,7 @@ test("registry external entry owns one HTTPS/Basic website and cannot silently s
       cluster_id: c.id,
       machine_id: "ma",
       address: "10.0.0.1",
+      cache_enabled: true,
     });
   assert.equal((await install()).status, 201);
   f.finish("a");
@@ -429,7 +431,7 @@ test("registry external entry owns one HTTPS/Basic website and cannot silently s
         address: "10.0.0.2",
       })
     ).status,
-    400,
+    409,
   );
   assert.equal(
     (
@@ -450,9 +452,10 @@ test("registry external entry owns one HTTPS/Basic website and cannot silently s
     machine_id: "mb",
     address: "10.0.0.2",
   });
-  assert.equal(added.status, 201);
+  assert.equal(added.status, 409);
+  assert.equal(added.body.error, "registry_data_migration_required");
   view = (await f.req("/private-registry")).body;
-  assert.equal(view.deployments.length, 2);
+  assert.equal(view.deployments.length, 1);
   assert.equal(
     (
       await f.req("/private-registry/external", "PUT", {
@@ -462,49 +465,18 @@ test("registry external entry owns one HTTPS/Basic website and cannot silently s
         carrier_cluster_id: other.id,
       })
     ).status,
-    409,
+    400,
   );
 });
-test("cache payloads require the new Agent capability and revalidate the current cluster policy at delivery", async (t) => {
-  const f = await fixture(t),
-    c = f.createCluster();
-  await f.req("/private-registry/deployments", "POST", {
-    confirmed: true,
-    trusted_network_acknowledged: true,
-    revision: 0,
-    cluster_id: c.id,
-    machine_id: "ma",
-    address: "10.0.0.1",
-    cache_enabled: true,
-  });
-  f.finish("a");
-  const a = f.app(c);
-  assert.equal((await f.action(a, "deploy")).status, 202);
-  assert.equal(f.jobs.claim("a", ["operations.platform"]), null);
-  const job = f.jobs.claim("a", [
-    "operations.platform",
-    "operations.platform.image-cache.v1",
-  ]);
-  assert(job);
-  const payload = f.platform.resolvePayload(job);
-  assert.equal(
-    payload.resource.config.image_cache.hub_endpoint,
-    "http://10.0.0.1:21001",
-  );
-  const current = f.store.get(c.id);
-  assert.equal(
-    (
-      await f.req("/private-registry/clusters/" + c.id + "/cache", "PUT", {
-        revision: current.revision,
-        enabled: false,
-      })
-    ).status,
-    200,
-  );
-  assert.throws(
-    () => f.platform.resolvePayload(job),
-    /private_registry_cache_policy_changed/,
-  );
+test("a single writable registry does not turn Hub images into a separate cache deployment",async t=>{
+ const f=await fixture(t),c=f.createCluster();
+ await f.req('/private-registry/deployments','POST',{confirmed:true,revision:0,cluster_id:c.id,machine_id:'ma',cache_enabled:true});
+ const registry=f.finish('a').payload.resource.config.application;
+ assert.deepEqual(Object.keys(registry.compose.services),['registry']);assert.equal(registry.mounts.length,1);
+ assert.equal(registry.compose.services.registry.environment.REGISTRY_PROXY_REMOTEURL,undefined);
+ const a=f.app(c);assert.equal((await f.action(a,'deploy')).status,202);
+ const job=f.jobs.claim('a',['operations.platform']);assert(job);
+ assert.equal(f.platform.resolvePayload(job).resource.config.image_cache,undefined);
 });
 test("a cache switch saved during a leased registry operation stays pending and reconciles after the writer completes", async (t) => {
   const f = await fixture(t),
@@ -1248,7 +1220,8 @@ test("website DNS aggregates all ready cluster gateways and follows managed fail
       new URLSearchParams(String(init?.body ?? new URL(String(input)).search)),
     );
     let body: any = {};
-    if (data.Action === "DescribeDomainRecords")
+    if(data.Action === "DescribeDomainInfo")body={RecordLines:{RecordLine:[{LineCode:"default",LineDisplayName:"默认"}]}};
+    else if (data.Action === "DescribeDomainRecords")
       body = { TotalCount: records.length, DomainRecords: { Record: records } };
     else if (data.Action === "AddDomainRecord") {
       const RecordId = String(++sequence);
@@ -1256,12 +1229,15 @@ test("website DNS aggregates all ready cluster gateways and follows managed fail
         RecordId,
         RR: data.RR,
         Type: data.Type,
+        Line: data.Line,
         Value: data.Value,
         TTL: Number(data.TTL),
         Status: "ENABLE",
       });
       body = { RecordId };
-    } else if (data.Action === "DeleteDomainRecord")
+    } else if(data.Action === "SetDNSSLBStatus"){for(const r of records.filter(r=>r.RR+".example.test"===data.SubDomain))r.LbaStatus=true;}
+    else if(data.Action === "UpdateDNSSLBWeight"){records.find(r=>r.RecordId===data.RecordId).Weight=Number(data.Weight);}
+    else if (data.Action === "DeleteDomainRecord")
       records = records.filter((r) => r.RecordId !== data.RecordId);
     else throw Error("unexpected mocked DNS action");
     return new Response(JSON.stringify(body));
@@ -1340,7 +1316,7 @@ test("website DNS aggregates all ready cluster gateways and follows managed fail
       .filter((r) => r.RR === "global")
       .map((r) => r.Value)
       .sort(),
-    ["203.0.113.1", "203.0.113.2"],
+    f.store.get(entry.id).spec.deployments.map((d:any)=>d.gateway_domain).sort(),
   );
   const changed = f.store.update(
     site.id,
@@ -1357,7 +1333,7 @@ test("website DNS aggregates all ready cluster gateways and follows managed fail
       .filter((r) => r.RR === "global")
       .map((r) => r.Value)
       .sort(),
-    ["203.0.113.1", "203.0.113.2"],
+    f.store.get(entry.id).spec.deployments.map((d:any)=>d.gateway_domain).sort(),
     "queued reload keeps the last verified DNS leases",
   );
   f.finish("a", { healthy: true, running: true, digest: "updated-a" });
@@ -1376,7 +1352,7 @@ test("website DNS aggregates all ready cluster gateways and follows managed fail
       .filter((r) => r.RR === "global")
       .map((r) => r.Value)
       .sort(),
-    ["203.0.113.2", "203.0.113.3"],
+    f.store.get(entry.id).spec.deployments.map((d:any)=>d.gateway_domain).sort(),
   );
   assert.ok(records.some((r) => r.RecordId === "external"));
   assert.ok(
@@ -1431,13 +1407,13 @@ test('system registry installs with ordinary fields, follows machine inventory a
  const f=await fixture(t),c=f.createCluster();
  f.db.run("UPDATE managed_machines SET address='ssh.example.test' WHERE id='ma'");
  recordHostNetwork(f.db,'ma','a',normalizeNetworkAddresses([{interface:'docker0',address:'172.17.0.1'},{interface:'eth0',address:'10.55.0.9'},{interface:'eth0',address:'198.51.100.9'}]),undefined,f.deps.now().toISOString());
- const r=await f.req('/private-registry/deployments','POST',{confirmed:true,revision:0,cluster_id:c.id,machine_id:'ma',host_ports:{registry:15000,'hub-cache':15001,'origin-cache':15002},cache_enabled:true});
+ const r=await f.req('/private-registry/deployments','POST',{confirmed:true,revision:0,cluster_id:c.id,machine_id:'ma',host_ports:{registry:15000},cache_enabled:true});
  assert.equal(r.status,201,JSON.stringify(r.body));const view=(await f.req('/private-registry')).body;assert.equal(view.deployments[0].address,'10.55.0.9');assert.equal(view.deployments[0].cache_scope,'cluster');
  const {payload}=f.finish('a');assert.equal(payload.resource.config.application.compose.services.registry.ports[0].host_ip,'10.55.0.9');
  const saved=await f.req('/resources/'+c.id,'PUT',{revision:f.store.get(c.id).revision,spec:{...f.store.get(c.id).spec,nodes:c.spec.nodes.map((n:any)=>({...n,address:'another-ssh.example.test',public_address:'203.0.113.99'}))}});
  assert.equal(saved.status,200,JSON.stringify(saved.body));assert(!saved.body.resource.spec.nodes[0].address);
  const workload=f.app(c,{image:'alpine:3.23',machine_ids:['mb']});assert.equal((await f.action(workload,'deploy')).status,202);
- assert.equal(f.finish('b').payload.resource.config.image_cache.hub_endpoint,'http://10.55.0.9:15001');
+ assert.equal(f.finish('b').payload.resource.config.image_cache,undefined);
 });
 test('public-only host installs a local registry without IP gates and never sends loopback cache to a peer',async t=>{
  const f=await fixture(t),c=f.createCluster();
@@ -1445,7 +1421,7 @@ test('public-only host installs a local registry without IP gates and never send
  recordHostNetwork(f.db,'ma','a',normalizeNetworkAddresses([{interface:'eth0',address:'198.51.100.42'},{interface:'br-docker',address:'172.17.0.1'}]),undefined,f.deps.now().toISOString());
  const r=await f.req('/private-registry/deployments','POST',{confirmed:true,revision:0,cluster_id:c.id,machine_id:'ma',address:'198.51.100.42',cache_enabled:true});
  assert.equal(r.status,201,JSON.stringify(r.body));const view=(await f.req('/private-registry')).body;assert.equal(view.deployments[0].address,'127.0.0.1');assert.equal(view.deployments[0].cache_scope,'machine');f.finish('a');
- const local=f.app(c,{image:'alpine:3.23',machine_ids:['ma']});assert.equal((await f.action(local,'deploy')).status,202);assert.match(f.finish('a').payload.resource.config.image_cache.hub_endpoint,/127\.0\.0\.1/);
+ const local=f.app(c,{image:'alpine:3.23',machine_ids:['ma']});assert.equal((await f.action(local,'deploy')).status,202);assert.equal(f.finish('a').payload.resource.config.image_cache,undefined);
  const peer=f.app(c,{image:'alpine:3.23',machine_ids:['mb']});assert.equal((await f.action(peer,'deploy')).status,202);assert.equal(f.finish('b').payload.resource.config.image_cache,undefined);
 });
 
@@ -1578,4 +1554,103 @@ test('a storage failure rolls back both instance retirement and reservation rele
  assert.throws(()=>f.finish('c',{instance_id:old.id,absent:true,container_count:0,observed_at:'2026-10-29T02:00:00.000Z'}),/qa_storage_failure/);
  assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',old.id)?.retired,0);assert(f.db.get('SELECT instance_id FROM ops_platform_ports WHERE instance_id=?',old.id));
  assert.equal(f.db.get<any>('SELECT status FROM ops_instance_recoveries WHERE instance_id=?',old.id)?.status,'agent_reinstall_inspecting');
+});
+
+test('quick HTTP installation chooses an online target, generates entry DNS and keeps request identity',async t=>{
+ const f=await fixture(t),c=f.createCluster();
+ const credential=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'fixture',access_key_secret:'private-fixture'},'admin');
+ const root=f.store.create('dns_zone','Root',{domain:'example.test',credential_id:credential.id},'admin');
+ const zone=f.store.create('dns_zone','Scoped',{domain:'example.test',scope:'apps.example.test',credential_id:credential.id},'admin');
+ f.store.create('acme_account','CA',{email:'ops@example.test',terms_agreed:true},'admin');
+ const body={domain:'dbx.apps.example.test',parameters:{password:'private-install-password'},confirmed:true,request_id:'quick-install-request-1'};
+ const result=await f.req('/catalog/dbx/install','POST',body);assert.equal(result.status,201,JSON.stringify(result.body));
+ const app=f.store.get(result.body.resource.id),q=app.status.quick_install;
+ assert.equal(app.spec.deployments[0].cluster_id,c.id);assert.equal(app.spec.deployments[0].machine_ids.length,1);
+ assert.equal(q.state,'awaiting_backend');assert.equal(f.store.get(q.certificate_id).spec.dns_zone_ids[0],zone.id);
+ const entry=f.store.get(q.gateway_id);assert.match(entry.spec.deployments[0].gateway_domain,/^edge-[a-f0-9]{16}\.apps\.example\.test$/);
+ assert.deepEqual(automaticEntry(f.store,c.id,zone.id),automaticEntry(f.store,c.id,zone.id));
+ assert.equal(f.store.get(q.website_id).spec.dns_record_mode,'cname');
+ assert.equal(f.store.get(q.website_id).spec.bindings[0].dns_zone_id,zone.id);
+ assert(app.spec.ports.every((p:any)=>p.host_port===0));
+ const count=f.store.list().length,again=await f.req('/catalog/dbx/install','POST',body);
+ assert.equal(again.body.resource.id,app.id);assert.equal(f.store.list().length,count);
+ assert.doesNotMatch(JSON.stringify(result.body),/private-install-password|private-fixture/);
+ assert.equal(root.spec.scope,'example.test');
+});
+test('quick installation validates prerequisites before creating any application',async t=>{
+ const f=await fixture(t);
+ assert.equal((await f.req('/catalog/dbx/install','POST',{confirmed:true,parameters:{}})).body.error,'catalog_parameter_required');
+ assert.equal((await f.req('/catalog/registry/install','POST',{confirmed:true,host_ports:{unknown:15000}})).body.error,'invalid_host_ports');
+ f.createCluster();
+ const body={domain:'app.example.test',parameters:{password:'private-password'},confirmed:true};
+ const before=f.store.list().length;
+ assert.equal((await f.req('/catalog/dbx/install','POST',body)).body.error,'quick_install_domain_not_hosted');
+ const credential=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'fixture',access_key_secret:'secret'},'admin');
+ f.store.create('dns_zone','Domain',{domain:'example.test',credential_id:credential.id},'admin');
+ assert.equal((await f.req('/catalog/dbx/install','POST',body)).body.error,'quick_install_acme_account_required');
+ assert.equal(f.store.list('application').length,0);assert.equal(f.store.list().length,before+2);
+ const expired=await selfSignedCertificate(['app.example.test'],1,new Date(f.deps.now().getTime()-3*86400000));
+ f.store.create('certificate','Expired upload',{source:'uploaded',domains:['app.example.test'],...expired},'admin');
+ assert.equal((await f.req('/catalog/dbx/install','POST',body)).body.error,'quick_install_acme_account_required');
+ assert.equal(f.store.list('application').length,0);
+ assert.equal((await f.req('/catalog/dbx/install','POST',{...body,domain:'example.test'})).body.error,'quick_install_cname_subdomain_required');
+});
+test('deployment SDK material is encrypted, per-instance, overridable and revoked with application removal',async t=>{
+ const f=await fixture(t),c=f.createCluster();f.deps.externalURL='https://moni.example.test';
+ f.db.exec("CREATE TABLE ingest_keys(id TEXT PRIMARY KEY,name TEXT,token_hash TEXT,active INTEGER DEFAULT 1,created_at TEXT)");
+ const app=f.app(c,{environment:{LIGHTMONI_SERVICE:'custom-service'}});
+ await f.action(app,'deploy');const {payload}=f.finish('a'),env=payload.resource.config.application.environment;
+ assert.equal(env.LIGHTMONI_SERVICE,'custom-service');assert.equal(env.LIGHTMONI_MACHINE_NAME,'Machine A');assert.equal(env.LIGHTMONI_HOST_ID,'ha');assert.equal(env.LIGHTMONI_MACHINE_ID,'ma');assert.equal(env.LIGHTMONI_ENDPOINT,'https://moni.example.test');assert.match(env.LIGHTMONI_KEY,/^lm_/);
+ const saved=f.db.get<any>('SELECT * FROM ops_application_sdk WHERE application_id=?',app.id)!;
+ assert(!saved.secret_cipher.includes(env.LIGHTMONI_KEY));assert(!JSON.stringify(f.store.public(f.store.get(app.id))).includes(env.LIGHTMONI_KEY));
+ const helper=createApplicationTelemetry(f.store),instance=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',app.id)!;
+ assert.equal(helper.environment(app,instance).LIGHTMONI_KEY,env.LIGHTMONI_KEY);
+ f.db.run('UPDATE ingest_keys SET active=0 WHERE id=?',saved.key_id);assert.throws(()=>helper.environment(app,instance),/application_sdk_key_disabled/);
+ helper.remove(app.id);assert.equal(f.db.get('SELECT * FROM ops_application_sdk WHERE application_id=?',app.id),undefined);assert.equal(f.db.get<any>('SELECT active FROM ingest_keys WHERE id=?',saved.key_id)!.active,0);
+});
+test('nested synchronous resource writes roll back with their owning installation',async t=>{
+ const f=await fixture(t);assert.throws(()=>f.db.transaction(()=>{f.db.transaction(()=>f.db.run("INSERT INTO users VALUES('rollback','admin',1)"));throw Error('reject installation')}),/reject installation/);
+ assert.equal(f.db.get("SELECT id FROM users WHERE id='rollback'"),undefined);
+});
+
+test('quick installation publishes the retained website, verifies CNAME and retries without creating resources',async t=>{
+ const records:any[]=[];let seq=0;
+ const fetcher:typeof fetch=async(_url,init)=>{
+  const b=Object.fromEntries(new URLSearchParams(String(init?.body)));let result:any={};
+  if(b.Action==='DescribeDomainRecords')result={TotalCount:records.length,DomainRecords:{Record:records}};
+  else if(b.Action==='AddDomainRecord'){const RecordId=String(++seq);records.push({RecordId,RR:b.RR,Type:b.Type,Value:b.Value,TTL:Number(b.TTL),Line:b.Line,Status:'ENABLE'});result={RecordId}}
+  else if(b.Action==='DeleteDomainRecord'){const i=records.findIndex(r=>r.RecordId===b.RecordId);if(i>=0)records.splice(i,1)}
+  else throw Error('unexpected DNS action '+b.Action);
+  return new Response(JSON.stringify(result));
+ };
+ const f=await fixture(t,fetcher),cluster=f.createCluster(['ma']);
+ const cred=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'fixture',access_key_secret:'private-fixture'},'admin');
+ f.store.create('dns_zone','Domain',{domain:'example.test',credential_id:cred.id},'admin');
+ const material=await selfSignedCertificate(['quick.example.test'],90,f.deps.now());
+ const cert=f.store.create('certificate','Pre-existing certificate',{source:'uploaded',domains:['quick.example.test'],...material},'admin');
+ const legacyEntry=catalogInstallation('openresty',{deployments:[{cluster_id:cluster.id,machine_ids:['ma'],gateway_domain:'external-entry.legacy.test'}]});
+ const existingGateway=f.store.create('application',legacyEntry.name,legacyEntry.spec,'admin');
+ const installed=await f.req('/catalog/dbx/install','POST',{domain:'quick.example.test',parameters:{password:'private-password'},confirmed:true,request_id:'full-quick-install'});
+ assert.equal(installed.status,201,JSON.stringify(installed.body));const appID=installed.body.resource.id;
+ const gatewayID=f.store.get(appID).status.quick_install.gateway_id;
+ assert.equal(gatewayID,existingGateway.id);assert(f.store.get(gatewayID).spec.deployments[0].gateway_dns_zone_id);
+ assert.match(f.store.get(gatewayID).spec.deployments[0].gateway_domain,/^edge-/);
+ f.finish('a');f.finish('a');await f.platform.tick();
+ assert.equal(f.store.get(appID).status.quick_install.certificate_id,cert.id);
+ assert.equal(f.store.get(appID).status.quick_install.state,'publishing');f.finish('a');
+ for(let n=0;n<4;n++){await f.platform.tick();for(let k=0;k<20;k++)await new Promise<void>(r=>setImmediate(r))}
+ const app=f.store.get(appID),q=app.status.quick_install;
+ assert.equal(q.state,'ready',JSON.stringify(q));
+ const target=f.store.get(q.gateway_id).spec.deployments[0].gateway_domain;
+ assert(records.some(r=>r.RR==='quick'&&r.Type==='CNAME'&&r.Value===target));
+ assert(!records.some(r=>r.RR==='quick'&&r.Type==='A'));
+ const gateway=f.store.get(q.gateway_id);assert(gateway.status.dns[0].records.some((r:any)=>r.fqdn===target));
+ const count=f.store.list().length;
+ f.store.patchStatus(q.gateway_id,{dns_error:'provider_access_denied'});
+ f.store.patchStatus(appID,{quick_install:{...q,state:'verifying_dns',error:''}});
+ await f.platform.tick();assert.equal(f.store.get(appID).status.quick_install.error,'provider_access_denied');
+ assert.equal(f.store.get(appID).status.quick_install.state,'failed');
+ assert.equal((await f.action(f.store.get(appID),'quick-install-retry')).status,202);
+ assert.equal(f.store.list().length,count);assert.equal(f.store.get(appID).status.quick_install.website_id,q.website_id);
+ assert.equal(f.store.get(appID).spec.deployments[0].cluster_id,cluster.id);
 });

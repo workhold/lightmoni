@@ -7,7 +7,7 @@
 - 镜像：`docker.heyphp.com/lightmoni/lightmoni:latest`。
 - 固定标签：`docker.heyphp.com/lightmoni/lightmoni:20261103-agent-unified-3309b0b36490`。
 - 两标签的双架构 index：`sha256:3e63c1dc87501afeda506f5cf1cd613e076b38ec8bb4b2a7e19e2cfa14d75eab`。
-- 源码：`3309b0b36490fb7eb8c7b4a4fa602ab1de75f974`，功能分支 `feat/087-agent-permission-boundaries`，GitHub [PR #83](https://github.com/workhold/lightmoni/pull/83)。该发行包含尚未合入 main 的功能代码；之后的验收文档提交不改变该构建身份。
+- 源码：`3309b0b36490fb7eb8c7b4a4fa602ab1de75f974`，功能分支 `feat/087-agent-permission-boundaries`，GitHub [PR #83](https://github.com/workhold/lightmoni/pull/83)。该发行包含尚未合入 main 的功能代码；之后的验收文档提交不改变该构建身份。发布及清理完成后主干新增了 SDD091 等提交；PR 已集成这些更新并保留两个设计章节，但这些随后集成的功能不包含在本次固定镜像中。
 
 | 平台 | 镜像 manifest |
 | --- | --- |

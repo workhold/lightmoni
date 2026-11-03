@@ -2,12 +2,12 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {catalogInstallation} from '../src/ops/catalog.js';
 import {installationState} from '../../web/src/app/ops/install-state.js';
-test('catalog manual ports match the container, managed ports allocate automatically, explicit ports survive both modes',()=>{
+test('catalog defaults allocate ports in both supported modes while explicit mappings and fixed service ports survive',()=>{
  for(const [id,port] of [['redis',6379],['mysql',3306]] as const){
   const parameters=id==='mysql'?{password:'qa-hidden',user_password:'qa-hidden'}:{password:'qa-hidden'};
   const install=(mode:string,mapping?:number)=>catalogInstallation(id,{deployment_mode:mode,parameters,host_ports:mapping===undefined?undefined:{[id]:mapping}}).spec.ports[0].host_port;
-  assert.equal(install('manual'),port);assert.equal(install('managed'),0);
-  for(const mode of ['manual','managed']){assert.equal(install(mode,16379),16379);assert.equal(install(mode,0),0)}
+  assert.equal(install('manual'),0);assert.equal(install('managed'),0);
+  for(const mode of ['manual','managed']){assert.equal(install(mode,port),port);assert.equal(install(mode,16379),16379);assert.equal(install(mode,0),0)}
  }
  assert.equal(catalogInstallation('openresty',{deployment_mode:'managed',parameters:{}}).spec.ports[0].host_port,80);
 });

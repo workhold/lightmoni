@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ReloadOutlined } from "@ant-design/icons";
 import {
   Alert,
   App,
@@ -40,7 +40,7 @@ export default function PrivateRegistryPage() {
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
   const [installID,setInstallID]=useState<string>();
-  const registryPorts=data?.application?.spec.ports??[{name:"registry",container_port:5000},{name:"hub-cache",container_port:5001},{name:"origin-cache",container_port:5002}];
+  const registryPorts=[{name:"registry",container_port:5000}];
   const [dialog, setDialog] = useState<"deploy" | "external">(),
     [busy, setBusy] = useState(false),
     [switching, setSwitching] = useState(""),
@@ -92,8 +92,8 @@ export default function PrivateRegistryPage() {
         "The private address must match this machine’s reachable IP in the cluster.",
       ],
       private_registry_install_required: [
-        "请先为这个集群部署系统镜像仓库。",
-        "Deploy the system registry in this cluster first.",
+        "请先部署系统镜像仓库。",
+        "Deploy the system registry first.",
       ],
       platform_resource_busy: [
         "服务正在执行任务，请等待结果后重试。",
@@ -202,8 +202,8 @@ export default function PrivateRegistryPage() {
       );
       void message.success(
         t(
-          "缓存配置已保存，正在应用。",
-          "Cache configuration saved and being applied.",
+          "镜像复用配置已保存，正在应用。",
+          "Image reuse configuration saved and being applied.",
         ),
       );
     } catch (e) {
@@ -236,15 +236,6 @@ export default function PrivateRegistryPage() {
           >
             {t("刷新", "Refresh")}
           </Button>
-          {data?.application && (
-            <Button
-              type="primary"
-              icon={<PlusOutlined aria-hidden />}
-              onClick={() => open("deploy")}
-            >
-              {t("添加集群部署", "Add cluster deployment")}
-            </Button>
-          )}
         </Space>
       </div>
       {error && (
@@ -272,8 +263,8 @@ export default function PrivateRegistryPage() {
                 </h3>
                 <p>
                   {t(
-                    "选择集群和机器，建立私有仓库；内网缓存可按集群开启。",
-                    "Choose a cluster and machine for your private registry. Enable the cache separately for each cluster.",
+                    "选择一台机器部署系统仓库。其他机器通过统一入口复用镜像。",
+                    "Deploy the system registry on one machine. Other machines reuse images through its shared endpoint.",
                   )}
                 </p>
               </>
@@ -289,7 +280,7 @@ export default function PrivateRegistryPage() {
           <div className="lm-ops-panel lm-registry-entry">
             <div className="lm-ops-subheading">
               <div>
-                <h3>{t("集群部署", "Cluster deployments")}</h3>
+                <h3>{t("仓库部署", "Registry deployment")}</h3>
                 <Typography.Text type="secondary">
                   sys-docker-registry
                 </Typography.Text>
@@ -332,12 +323,12 @@ export default function PrivateRegistryPage() {
                   ),
                 },
                 {
-                  title: t("内网镜像缓存", "Internal image cache"),
+                  title: t("内网镜像复用", "Internal image reuse"),
                   key: "cache",
                   render: (_, r: Spec) => (
                     <Switch
                       aria-label={
-                        t("内网缓存 ", "Internal cache ") +
+                        t("仓库复用 ", "Registry reuse ") +
                         clusterName(r.cluster_id)
                       }
                       checked={r.cache_enabled}
@@ -384,8 +375,8 @@ export default function PrivateRegistryPage() {
             />
             <p className="lm-ops-note">
               {t(
-                "缓存按需拉取，不预下载全部镜像。开启后，新部署优先通过本集群缓存拉取；已有业务容器保持运行。",
-                "Images are cached on demand. New deployments prefer this cluster’s cache; existing containers keep running.",
+                "系统只部署一个仓库，统一使用 5000 端口和一份镜像存储。已有镜像可复用；需要额外仓库请在应用商店另行安装。",
+                "One registry uses port 5000 and a single image store. Reuse existing images; install additional registries from the application store.",
               )}
             </p>
           </div>
@@ -478,6 +469,7 @@ export default function PrivateRegistryPage() {
                 }
               >
                 <Select
+                  disabled={!!data?.application}
                   options={clusters.map((c) => ({
                     value: c.id,
                     label: c.name,
@@ -520,7 +512,7 @@ export default function PrivateRegistryPage() {
               </div>}]}/>
               <Form.Item
                 name="cache_enabled"
-                label={t("开启内网镜像缓存", "Enable internal image cache")}
+                label={t("开启内网镜像复用", "Enable internal image reuse")}
                 valuePropName="checked"
               >
                 <Switch />
@@ -533,8 +525,8 @@ export default function PrivateRegistryPage() {
                 label={t("对外写入集群", "Publishing cluster")}
                 rules={[{ required: true }]}
                 extra={t(
-                  "镜像存储在此集群，首版配置后固定。其他集群可缓存拉取。",
-                  "Images live in this cluster, which remains fixed in this version. Other clusters can cache pulls.",
+                  "镜像存储在此集群，首版配置后固定。其他机器可通过此入口拉取。",
+                  "Images live in this cluster, which remains fixed in this version. Other machines can pull through this entry.",
                 )}
               >
                 <Select
