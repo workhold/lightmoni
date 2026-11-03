@@ -21,7 +21,7 @@ test("helper executes a real script as lightmoni-task with no supplementary grou
   verifyOrdinaryTaskExecutionIdentity(account);
   const script = {
     runtime: "node" as const,
-    code: `import fs from 'node:fs';const status=fs.readFileSync('/proc/self/status','utf8');const field=n=>status.match(new RegExp('^'+n+':[\\\\t ]*([^\\\\n]*)$','m'))?.[1]?.trim()??'';console.log(JSON.stringify({uid:process.getuid(),euid:process.geteuid(),gid:process.getgid(),groups:field('Groups').split(/[\\\\t ]+/).filter(Boolean).map(Number),nnp:field('NoNewPrivs'),capInh:field('CapInh'),capPrm:field('CapPrm'),capEff:field('CapEff'),capBnd:field('CapBnd'),capAmb:field('CapAmb')}));`,
+    code: String.raw`import fs from 'node:fs';const status=fs.readFileSync('/proc/self/status','utf8');const field=n=>status.match(new RegExp('^'+n+':[\\t ]*([^\\n]*)$','m'))?.[1]?.trim()??'';console.log(JSON.stringify({uid:process.getuid(),euid:process.geteuid(),gid:process.getgid(),groups:field('Groups').split(/[\t ]+/).filter(Boolean).map(Number),nnp:field('NoNewPrivs'),capInh:field('CapInh'),capPrm:field('CapPrm'),capEff:field('CapEff'),capBnd:field('CapBnd'),capAmb:field('CapAmb')}));`,
     timeout_seconds: 5,
     max_output_bytes: 4096,
   };
