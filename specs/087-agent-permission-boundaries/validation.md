@@ -32,6 +32,6 @@
 ## 未完成与边界
 
 - Doca 在线设计同步与回读：尚未完成。本轮网页已可访问，尝试更新总览后编辑器崩溃，无法确认完整章节、原生图和保存回读；当前进程未注入 MCP token。用户已明确安排“后续更新doca”，本次依该安排延期，保留待同步记录，不声称双端同步成功。
-- GitHub PR：准备创建 Draft，明确 Doca 与 Linux 实机验收待办；不应视为已合并或已发布。
+- GitHub PR：[统一 Agent 权限边界与生命周期，登记推荐 root 管理账号 #83](https://github.com/workhold/lightmoni/pull/83)，Draft，代码已推送 GitHub。Doca 与 Linux 实机验收仍待办；未合并或发布。
 - 未对真实 vchive 或生产主机执行 SSH、服务修改、模式切换或安装写操作。仓库/fixture/本地构建证据不能代替 Linux 实机验收。
 - 不包含平台级主机 RBAC；按现有范围由管理员管理全部登记主机。

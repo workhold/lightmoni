@@ -7,4 +7,4 @@
 - [x] 登记推荐 root、支持 sudo 账号及中英文验证
 - [x] 功能验证及最终状态记录
 - [ ] 仓库与 Doca 设计同步回读
-- [ ] GitHub PR
+- [x] GitHub PR（[#83](https://github.com/workhold/lightmoni/pull/83)，Draft；未合入或发布）
