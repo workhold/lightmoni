@@ -1628,8 +1628,13 @@ test('quick installation publishes the retained website, verifies CNAME and retr
  f.store.create('dns_zone','Domain',{domain:'example.test',credential_id:cred.id},'admin');
  const material=await selfSignedCertificate(['quick.example.test'],90,f.deps.now());
  const cert=f.store.create('certificate','Pre-existing certificate',{source:'uploaded',domains:['quick.example.test'],...material},'admin');
+ const legacyEntry=catalogInstallation('openresty',{deployments:[{cluster_id:cluster.id,machine_ids:['ma'],gateway_domain:'external-entry.legacy.test'}]});
+ const existingGateway=f.store.create('application',legacyEntry.name,legacyEntry.spec,'admin');
  const installed=await f.req('/catalog/dbx/install','POST',{domain:'quick.example.test',parameters:{password:'private-password'},confirmed:true,request_id:'full-quick-install'});
  assert.equal(installed.status,201,JSON.stringify(installed.body));const appID=installed.body.resource.id;
+ const gatewayID=f.store.get(appID).status.quick_install.gateway_id;
+ assert.equal(gatewayID,existingGateway.id);assert(f.store.get(gatewayID).spec.deployments[0].gateway_dns_zone_id);
+ assert.match(f.store.get(gatewayID).spec.deployments[0].gateway_domain,/^edge-/);
  f.finish('a');f.finish('a');await f.platform.tick();
  assert.equal(f.store.get(appID).status.quick_install.certificate_id,cert.id);
  assert.equal(f.store.get(appID).status.quick_install.state,'publishing');f.finish('a');
