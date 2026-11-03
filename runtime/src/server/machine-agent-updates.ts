@@ -1,3 +1,4 @@
+import {blockingAgentJobSQL} from './agent-job-fence.js';
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -103,7 +104,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   };
   const list = (machineID: string) => db.all<any>("SELECT * FROM machine_agent_updates WHERE machine_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100", machineID).map(view);
   const taskBusy = (machineID: string, agentID: string) => hasActiveTaskRuns(db, agentID, machineID)
-    || table("agent_jobs") && Boolean(db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID));
+    || table("agent_jobs") && Boolean(db.get(`SELECT id FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)} LIMIT 1`, agentID));
   const assertTarget = (machine: MachineSummary) => {
     assertNoPendingAgentRuntime(db,machine.id,machine.agent_id);
     assertNoPendingMachineInstallation(db,machine.id,machine.agent_id,true);

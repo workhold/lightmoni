@@ -1,3 +1,4 @@
+import {blockingAgentJobSQL} from './agent-job-fence.js';
 import { randomBytes, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
@@ -135,7 +136,7 @@ export function registerMachineExecutorMaintenance(deps:Dependencies,access:Agen
     assertNoDockerInstallation(db,host,agent);
     if(table("machine_executor_bootstraps")&&db.get("SELECT id FROM machine_executor_bootstraps WHERE (agent_id=? OR machine_id=?) AND id!=? AND status IN ('running','verifying','unknown') LIMIT 1",agent,host,sourceBootstrap))fail(409,"executor_maintenance_tasks_pending");
     if(table("task_runs")&&db.get("SELECT id FROM task_runs WHERE (agent_id=? OR host_id=?) AND (state IN ('queued','running') OR (state='unknown' AND superseded_by='' AND resolved_at='')) LIMIT 1",agent,host))fail(409,"executor_maintenance_tasks_pending");
-    if(db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",agent))fail(409,"executor_maintenance_tasks_pending");
+    if(db.get(`SELECT id FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)} LIMIT 1`,agent))fail(409,"executor_maintenance_tasks_pending");
     if(table("privileged_jobs")&&db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='')) LIMIT 1",host))fail(409,"executor_maintenance_tasks_pending");
     if(db.get("SELECT id FROM machine_executor_maintenance WHERE machine_id=? AND id!=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1",host,own))fail(409,"executor_maintenance_pending");
   };

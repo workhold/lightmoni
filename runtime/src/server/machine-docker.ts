@@ -1,3 +1,4 @@
+import {blockingAgentJobSQL} from './agent-job-fence.js';
 import { id } from '../shared/crypto.js';
 import { fail } from '../shared/http.js';
 import type { Context, Dependencies, Handler } from '../shared/types.js';
@@ -87,7 +88,7 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
    assertNoPendingAgentUpdate(db,machine.agent_id,machine.id);assertNoPendingMachineInstallation(db,machine.id,machine.agent_id);
    if(!machine.capabilities.update_agent.available&&machine.capabilities.update_agent.reason!=='agent_not_linked')fail(409,'docker_install_host_unavailable');
    if(hasActiveTaskRuns(db,machine.agent_id,machine.id))fail(409,'docker_install_host_busy');
-   if(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_jobs'")&&machine.agent_id&&db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",machine.agent_id))fail(409,'docker_install_host_busy');
+   if(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_jobs'")&&machine.agent_id&&db.get(`SELECT id FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)} LIMIT 1`,machine.agent_id))fail(409,'docker_install_host_busy');
    const selected=access.credential(machine.id,body.credential_id),{credential}=selected,op=id();
    db.run('INSERT INTO machine_docker_installations(id,machine_id,agent_id,request_id,credential_id,state,phase,code,created_by,created_at,updated_at,ssh_account_json,credential_revision,target_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',op,machine.id,machine.agent_id,body.request_id,credential.id,'running','connecting','',ctx.user.id,now(),now(),JSON.stringify(sshAccountSnapshot(selected.machine)),sshCredentialRevision(credential),access.revision(machine));
    return {record:row(machine.id,op),created:true};

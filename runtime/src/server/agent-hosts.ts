@@ -1,3 +1,4 @@
+import {blockingAgentJobSQL} from './agent-job-fence.js';
 import { pendingDockerInstallation } from './machine-docker-guard.js';
 import type { DB } from "../shared/types.js";
 import { fail } from "../shared/http.js";
@@ -47,7 +48,7 @@ export function replaceableAgentBinding(db: DB, agentID: string, at: string): bo
   if (!agentID) return true;
   if (hasPendingAgentUpdate(db, agentID) || pendingDockerInstallation(db,"",agentID)) return false;
   if (hasActiveTaskRuns(db, agentID)) return false;
-  if (table(db, "agent_jobs") && db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID)) return false;
+  if (table(db, "agent_jobs") && db.get(`SELECT id FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)} LIMIT 1`, agentID)) return false;
   if (table(db, "machine_uninstallations") && db.get("SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", agentID)) return false;
   if (isAgentRemoved(db, agentID)) return true;
   if (!table(db, "agent_credentials")) return false;

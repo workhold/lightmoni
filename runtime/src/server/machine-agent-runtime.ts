@@ -1,3 +1,4 @@
+import {blockingAgentJobSQL} from './agent-job-fence.js';
 import { randomUUID } from "node:crypto";
 import {
   canonicalJSON,
@@ -362,7 +363,7 @@ export function registerMachineAgentRuntime(
       hasActiveTaskRuns(db, agentID, machineID) ||
       (table(d, "agent_jobs") &&
         db.get(
-          "SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",
+          `SELECT id FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)} LIMIT 1`,
           agentID,
         )) ||
       (table(d, "privileged_jobs") &&

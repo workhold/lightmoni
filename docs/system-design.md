@@ -2147,3 +2147,9 @@ SSH 安装非零退出仅保存退出码和有限固定原因，不持久化原�
 交付 Demo 沿用既有集群模型：中心通过统一 root Agent 的签名受管作业部署 Registry、OpenResty 和 ABC Demo。Registry 绑定主机内网地址，通过 registry-demo.heyphp.com 的 HTTPS 与独立 Basic Auth 提供发布入口；ABC Demo 使用该私有来源镜像与命名 HTTP 端口，由 OpenResty 服务发现路由到 abc.heyphp.com。heyphp.com 的加密 DNS 凭据用于解析与 ACME DNS 验证；两个专用证书由中心加密保存并按网站授权分发，私钥和仓库密码不进入源码、日志或设计正文。
 
 云公网 NAT 不会因 Registry 监听内网 IP 而自动隔离后端。Demo 主机在 DOCKER-USER 中仅匹配原始目的地址 172.21.0.16、原始 TCP 端口 20000 和 ORIGINAL 方向，允许受信内网 172.21.0.0/20，其余来源丢弃；回包方向与 OpenResty/Agent 本机访问保持原有路径。规则由 root 所有的幂等脚本及 Docker 启动前 oneshot 单元加载，Docker 通过 Requires/After 依赖该单元；网络或后端端口变更需同步主机规则。此部署配置通过精确审批的签名 root 作业安装，不增加平台执行权限或兼容通道。
+
+### 受管未知作业的人工核对与主机互斥（SDD089）
+
+同一受管作业在 agent_jobs 与 privileged_jobs/task_runs 中保留原 unknown 和错误码。管理员通过既有确认接口记录现场核对后，主机互斥使用共享谓词核对同一作业 ID、Agent、task_run_id、operations.managed.v1 能力、unknown 状态以及完整 resolved_at、resolved_by、resolution_reason；仅该已核对历史作业不再阻塞新执行。普通未知作业、未核对、不完整审计或任一绑定不符继续阻塞，不重放任务、不改写成功或取消，也不创建新授权。
+
+执行器领取与计划，以及 Agent 安装、卸载、更新、运行模式、Docker 维护、身份替换和实例恢复的繁忙检查复用同一谓词；普通排队任务和活动执行仍互斥，特权排队任务仍由签名队列串行处理。核对只解除已结束动作的互斥，业务健康和受管 DNS 必须等待新的有效观测恢复，不从人工核对推断健康。API、签名协议、凭据、数据结构和部署拓扑不变。
