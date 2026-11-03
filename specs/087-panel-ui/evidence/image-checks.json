@@ -1,0 +1,28 @@
+{
+  "revision": "13a2f326840e7f8b80afe48b241246122c49434c",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261103-13a2f32",
+  "expected_index_digest": "sha256:4e7722c28fc226262da4e8eeddabe65a3294e24fc4f3dc23c3ce63e627530951",
+  "platforms": [
+    {
+      "platform": "linux/arm64",
+      "image_id": "sha256:f19134437a0be2b2eac25854c6bcfeb7d1c318055d0cf1f88f028549087a78ee",
+      "checks_passed": 42,
+      "errors": [],
+      "extra_private_bind_http_tcp_probe": "passed",
+      "execution": "native ARM64 or local Docker AMD64 emulation; isolated ARM64 ClickHouse"
+    },
+    {
+      "platform": "linux/amd64",
+      "image_id": "sha256:aea7c0b4f1b8f448bc159b22c82eccc0caa0cec20b54ddf1288d133704fd26f2",
+      "checks_passed": 42,
+      "errors": [],
+      "extra_private_bind_http_tcp_probe": "passed",
+      "execution": "native ARM64 or local Docker AMD64 emulation; isolated ARM64 ClickHouse"
+    }
+  ],
+  "artifact_checks": {
+    "local_sha256_blobs": 37,
+    "tested_rootfs_and_config_equal": true
+  },
+  "publication_status": "remote publication and online acceptance recorded in https://github.com/workhold/lightmoni/pull/82"
+}

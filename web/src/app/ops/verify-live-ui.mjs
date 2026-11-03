@@ -46,7 +46,7 @@ try{
    await second.getByLabel('HTTP返回码',{exact:true}).fill('308');await second.getByLabel('响应正文 / 跳转地址',{exact:true}).fill('https://example.test/sign-in');
    await dialog().getByText('站点：请求限制、压缩与日志',{exact:true}).click();await dialog().getByLabel('启用Gzip压缩',{exact:true}).click();await dialog().getByLabel('上传上限（MiB，0不限）',{exact:true}).fill('64');
   }
-  if(mode==='service'){await choose('托管服务',service.name);await dialog().getByLabel('启用 HTTPS',{exact:true}).click();await choose('使用证书',certificate.name)}
+  if(mode==='service'){await choose('后端服务名',service.name);await dialog().getByLabel('启用 HTTPS',{exact:true}).click();await choose('使用证书',certificate.name)}
   const site=await save('网站-'+mode);expect(site.spec.mode).toBe(mode);
   if(mode==='proxy'){expect(site.spec.locations).toHaveLength(2);expect(site.spec.locations[0]).toMatchObject({path:'/api/',uri_mode:'strip_prefix',balance:'least_conn',cache:{enabled:true,ttl_seconds:120},requests_per_second:20,request_headers:{'X-App':'api'}});expect(site.spec.locations[1]).toMatchObject({path:'/login',match:'exact',action:'return',return_status:308});expect(site.spec.nginx).toMatchObject({gzip:true,body_size_mb:64});const preview=await json('/ops/resources/'+site.id+'/nginx');expect(preview.config).toContain('proxy_cache_valid 200 120s;');expect(preview.config).toContain('location = "/login"');checks.push('真实多路径反代保存/编译：URI改写、负载、缓存、每IP限流、请求头、精确重定向、Gzip和脱敏预览')}
 

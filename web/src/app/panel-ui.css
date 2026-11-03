@@ -1,0 +1,117 @@
+/* Shared operations-panel presentation. Reuses existing theme and component tokens. */
+:root{--lm-bg:#f4f6f9;--lm-surface:#fff;--lm-raised:#f7f9fc;--lm-border:#dde3eb;--lm-text:#202d40;--lm-muted:#66758b;--lm-sidebar-bg:#fff;--lm-sidebar-hover:#f1f5fb;--lm-panel-radius:8px}
+:root[data-theme=dark]{--lm-bg:#101722;--lm-surface:#182231;--lm-raised:#1d293a;--lm-border:#354357;--lm-text:#e4eaf2;--lm-muted:#a8b6c9;--lm-sidebar-bg:#141d2a;--lm-sidebar-hover:#202e41}
+.lm-shell{--lm-header-height:56px}
+.lm-shell .lm-sidebar{background:var(--lm-sidebar-bg);border-right:1px solid var(--lm-border);color:var(--lm-muted);transition:width 160ms ease}
+.lm-shell .lm-sidebar .lm-brand{height:72px;padding:18px 20px;color:var(--lm-text);font-size:18px;letter-spacing:-.3px;gap:10px}
+.lm-sidebar .lm-brand-mark{width:32px;height:34px;border-radius:8px;background:var(--lm-accent);color:var(--lm-accent-contrast);font-size:20px;box-shadow:0 3px 8px color-mix(in srgb,var(--lm-accent) 16%,transparent)}
+.lm-sidebar .lm-brand small{font-size:11px;letter-spacing:1px;color:var(--lm-muted);margin-top:3px}
+.lm-shell .lm-sidebar nav{padding:8px 12px;gap:8px}
+.lm-sidebar .lm-nav-group-toggle{min-height:30px;padding:6px 10px;font-size:12px;font-weight:500;color:var(--lm-muted)}
+.lm-shell .lm-sidebar nav a{min-height:38px;padding:9px 12px;gap:10px;color:var(--lm-muted);border-radius:6px;font-size:14px}
+.lm-shell .lm-sidebar nav a:hover{background:var(--lm-sidebar-hover);color:var(--lm-text)}
+.lm-shell .lm-sidebar nav a.active{background:var(--lm-accent-soft);color:var(--lm-accent);font-weight:600}
+.lm-shell .lm-sidebar nav a.active:before{display:none}
+.lm-shell .lm-nav-collapse{color:var(--lm-muted)!important;border-top:1px solid var(--lm-border);border-radius:0;width:calc(100% - 24px);height:44px;margin:0 12px;padding:10px;justify-content:flex-start}
+.lm-shell.is-nav-collapsed .lm-sidebar .lm-brand{height:64px;padding:10px}
+.lm-shell.is-nav-collapsed .lm-sidebar nav{padding:6px}
+.lm-shell.is-nav-collapsed .lm-sidebar nav a{padding:10px 0;justify-content:center}
+.lm-shell.is-nav-collapsed .lm-nav-collapse{width:100%;margin:0;padding:8px;justify-content:center}
+.lm-shell .lm-main{background:var(--lm-bg);transition:margin-left 160ms ease,width 160ms ease}
+.lm-shell .lm-workspace-header{--lm-header-height:56px;min-height:56px;padding:5px 24px;background:var(--lm-surface)}
+.lm-workspace-header .lm-account-trigger{height:40px}
+.lm-shell .lm-page{padding:24px;max-width:1720px}
+.lm-shell .lm-page-heading{margin-bottom:22px;gap:18px}
+.lm-shell .lm-page-heading h1{font-size:22px;font-weight:600;line-height:1.4;letter-spacing:0;margin-bottom:6px}
+.lm-shell .lm-page-heading p{font-size:13px;line-height:1.7;max-width:860px;color:var(--lm-muted)}
+.lm-shell .lm-surface{border:1px solid var(--lm-border);border-radius:var(--lm-panel-radius);padding:20px;box-shadow:0 2px 4px #14253f03}
+.lm-shell .lm-ops-section-heading{gap:16px;margin-bottom:20px;min-height:36px}
+.lm-ops-list-count{display:flex;align-items:baseline;gap:7px;white-space:nowrap;color:var(--lm-muted);font-size:13px}
+.lm-ops-list-count strong{font-size:20px;font-weight:600;color:var(--lm-text);font-variant-numeric:tabular-nums}
+.lm-shell .lm-ops-workspace>.ant-tabs{margin-top:-8px}
+.lm-shell .lm-ops-workspace>.ant-tabs .ant-tabs-nav{margin-bottom:20px}
+.lm-shell .lm-installed-apps{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.lm-shell .lm-installed-app{padding:20px;gap:12px;border-radius:8px;transition:border-color 150ms,box-shadow 150ms}
+.lm-shell .lm-installed-app:hover{border-color:color-mix(in srgb,var(--lm-accent) 35%,var(--lm-border));box-shadow:0 4px 14px #13294406}
+.lm-shell .lm-app-card-heading{gap:12px;align-items:center}
+.lm-shell .lm-app-card-heading .lm-application-logo{width:44px;height:44px;border-radius:10px;border:1px solid var(--lm-border)}
+.lm-shell .lm-app-card-title h3 .ant-btn{font-size:16px;font-weight:600;color:var(--lm-text);line-height:1.5;height:auto;white-space:normal;text-align:left}
+.lm-shell .lm-app-card-title>.ant-typography{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;overflow-wrap:anywhere}
+.lm-shell .lm-app-card-version{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--lm-muted);min-width:0;flex-wrap:wrap}
+.lm-app-type{padding:2px 7px;background:var(--lm-raised);border-radius:4px;color:var(--lm-muted)}
+.lm-shell .lm-app-image{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;color:var(--lm-muted);max-width:100%;min-width:0;line-height:1.7}
+.lm-shell .lm-app-placements{gap:12px;margin-top:2px}
+.lm-app-placement-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px}
+.lm-app-placement-heading strong{font-weight:500}
+.lm-app-placement-heading>span{color:var(--lm-muted);overflow-wrap:anywhere}
+.lm-shell .lm-app-card-ports{margin-top:8px}
+.lm-shell .lm-app-card-ports code{background:var(--lm-raised);border:0;padding:4px 7px;display:inline-block;white-space:normal;overflow-wrap:anywhere;font-size:12px}
+.lm-shell .lm-app-card-actions{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;padding-top:12px;margin-top:4px}
+.lm-shell .lm-app-card-actions .ant-space{row-gap:6px}
+.lm-shell .lm-app-card-actions>.ant-btn{flex-shrink:0}
+.lm-shell .lm-app-card-actions .ant-btn-text{color:var(--lm-muted);padding-inline:5px}
+.lm-shell .lm-app-card-actions .ant-btn-text:hover{color:var(--lm-accent)}
+.lm-shell .lm-website-columns{display:grid;grid-template-columns:minmax(200px,1.1fr) minmax(120px,.85fr) minmax(140px,1fr) 272px;gap:20px;padding:12px 16px;background:var(--lm-raised);border-block:1px solid var(--lm-border);font-size:12px;color:var(--lm-muted)}
+.lm-shell .lm-website-item{grid-template-columns:minmax(200px,1.1fr) minmax(0,1.85fr) 272px;align-items:start;gap:20px;padding:22px 16px;border-top:0;border-bottom:1px solid var(--lm-border)}
+.lm-shell .lm-website-item:last-child{border-bottom:0}
+.lm-shell .lm-website-identity>.ant-btn{font-size:14px;font-weight:600;color:var(--lm-text);line-height:1.6}
+.lm-shell .lm-website-domains{font-size:13px;margin:5px 0 10px;line-height:1.6}
+.lm-website-backend{display:flex;flex-wrap:wrap;gap:5px 8px;align-items:baseline;font-size:12px;line-height:1.6;min-width:0;margin-bottom:4px}
+.lm-website-backend>span{color:var(--lm-muted)}
+.lm-website-backend>strong{font-weight:500;overflow-wrap:anywhere;color:var(--lm-muted);font-family:ui-monospace,SFMono-Regular,monospace}
+.lm-shell .lm-website-statuses{grid-template-columns:.85fr 1fr;gap:20px}
+.lm-shell .lm-website-statuses dt{position:absolute;width:1px;height:1px;margin:-1px;clip-path:inset(50%);overflow:hidden}
+.lm-shell .lm-website-statuses dd{margin-bottom:8px}
+.lm-shell .lm-website-versions{font-size:12px;display:block}
+.lm-shell .lm-website-statuses dd:has(>.lm-ops-state){align-items:flex-start;flex-direction:column;gap:8px}
+.lm-shell .lm-website-hint{line-height:1.6}
+.lm-shell .lm-website-statuses .ant-btn-link{font-size:12px;line-height:1.7}
+.lm-shell .lm-website-security{display:flex;align-items:center;gap:8px;color:var(--lm-muted);font-size:12px}
+.lm-website-security>span{display:inline-flex;gap:4px;align-items:center}
+.lm-shell .lm-website-security .ant-btn{width:22px;height:22px;padding:0;color:var(--lm-muted)}
+.lm-shell .lm-website-actions{grid-column:auto;gap:8px;align-items:center}
+.lm-shell .lm-website-actions>.ant-btn{font-size:12px;padding-inline:9px}
+.lm-shell .ant-table-wrapper .ant-table-thead>tr>th{font-size:12px;font-weight:500;white-space:nowrap}
+.lm-shell .lm-ops-table .ant-table-cell{vertical-align:middle}
+.lm-shell .lm-ops-resource-name{font-weight:600}
+.lm-ops-editor .ant-modal-content{padding:0;overflow:hidden;border-radius:10px}
+.lm-ops-editor .ant-modal-header{padding:20px 24px;margin:0;border-bottom:1px solid var(--lm-border)}
+.lm-ops-editor .ant-modal-body{padding:20px 24px}
+.lm-ops-editor .ant-modal-footer{padding:14px 24px;margin:0;border-top:1px solid var(--lm-border);background:var(--lm-raised)}
+.lm-ops-editor .ant-modal-close{top:18px;right:18px}
+.lm-config-directory{position:sticky;top:-20px;z-index:3;display:flex;flex-wrap:wrap;gap:6px;margin:0 -24px 24px;padding:12px 24px;background:var(--lm-surface);border-block:1px solid var(--lm-border)}
+.lm-config-directory .ant-btn{color:var(--lm-muted);font-size:13px}
+.lm-config-directory .ant-btn:hover,.lm-config-directory .ant-btn:focus-visible{color:var(--lm-accent);background:var(--lm-accent-soft)}
+.lm-config-section{scroll-margin-top:70px;margin-bottom:24px;padding-bottom:8px;outline:none;border-bottom:1px solid var(--lm-border)}
+.lm-config-section:last-child{border-bottom:0;margin-bottom:0}
+.lm-config-section>h3{font-size:15px;font-weight:600;margin:0 0 20px;line-height:1.6}
+.lm-config-section:focus>h3{color:var(--lm-accent)}
+.lm-config-section .lm-ops-mount{background:var(--lm-raised);border-radius:6px}
+.lm-config-section .lm-ops-mount .lm-ops-mount{background:var(--lm-surface)}
+.lm-shell .lm-machine-notice{margin-bottom:18px}
+.lm-shell .lm-hosts-nodes-page>.lm-machine-notice .ant-alert-description{max-width:1080px;line-height:1.7}
+@container(max-width:950px){.lm-shell .lm-website-columns{display:none}.lm-shell .lm-website-item{grid-template-columns:minmax(190px,1fr) minmax(0,1.6fr)}.lm-shell .lm-website-actions{grid-column:1 / -1}.lm-shell .lm-website-statuses dt{position:static;width:auto;height:auto;margin:0 0 8px;clip-path:none;overflow:visible}}
+@media(min-width:1680px){.lm-shell .lm-installed-apps{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:1050px){.lm-shell .lm-installed-apps{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:760px){.lm-shell .lm-page{padding:16px}.lm-shell .lm-workspace-header{padding-inline:14px}.lm-shell .lm-page-heading{align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:18px}.lm-shell .lm-page-heading h1{font-size:20px}.lm-shell .lm-surface{padding:16px}.lm-shell .lm-ops-section-heading>.ant-space{width:100%}.lm-shell .lm-ops-section-heading>.ant-space>.ant-space-item{max-width:100%}.lm-shell .lm-installed-app{padding:16px}.lm-shell .lm-app-card-actions{align-items:flex-start;flex-wrap:wrap}.lm-shell .lm-website-item{grid-template-columns:1fr;padding:20px 0;gap:18px}.lm-shell .lm-website-statuses{gap:16px}.lm-shell .lm-website-actions{grid-column:1}.lm-ops-editor .ant-modal-header,.lm-ops-editor .ant-modal-body,.lm-ops-editor .ant-modal-footer{padding-inline:16px}.lm-config-directory{margin-inline:-16px;padding-inline:16px;gap:2px}.lm-config-directory .ant-btn{padding-inline:6px;font-size:12px}}
+@media(max-width:450px){.lm-shell .lm-page{padding:12px}.lm-shell .lm-website-statuses{grid-template-columns:1fr}.lm-shell .lm-app-card-heading>.ant-tag{margin-inline-end:0}.lm-shell .lm-app-card-title{min-width:0}}
+@media(prefers-reduced-motion:reduce){.lm-shell .lm-sidebar,.lm-shell .lm-main,.lm-shell .lm-installed-app{transition:none}}
+.lm-ops-editor .ant-form-item{margin-bottom:18px;scroll-margin-top:84px}
+.lm-ops-editor .lm-config-section>h3{margin-bottom:16px}
+.lm-ops-editor .lm-ops-save-error{margin-bottom:20px;scroll-margin-top:12px}
+.lm-shell .lm-website-actions>.ant-btn{font-size:13px}
+
+.lm-shell .lm-website-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;width:100%}
+.lm-shell .lm-website-actions>.ant-btn{white-space:normal;height:auto;min-height:28px;line-height:1.5}
+@container(max-width:950px){.lm-shell .lm-website-actions{width:min(100%,320px)}}
+
+@media(max-width:600px){
+ .lm-shell .lm-ops-section-heading>.ant-space{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .lm-shell .lm-ops-section-heading>.ant-space>.ant-space-item{min-width:0}
+ .lm-shell .lm-ops-section-heading>.ant-space .ant-select,.lm-shell .lm-ops-section-heading>.ant-space .ant-input-search{width:100%!important;min-width:0}
+ .lm-shell .lm-ops-section-heading>.ant-space>.ant-space-item:has(.ant-input-search){grid-column:1 / -1}
+ .lm-shell .lm-ops-section-heading>.ant-space .ant-btn{max-width:100%;white-space:normal;height:auto;min-height:34px}
+ .lm-shell .lm-ops-page-application .lm-ops-section-heading>.ant-space>.ant-space-item:has(>.ant-btn){grid-column:1 / -1}
+}
+.lm-shell .ant-tag-success{font-weight:500}
+.lm-shell .lm-certificate-task-toggle{padding:0;height:auto;line-height:1.7;font-size:12px;margin-top:4px}
