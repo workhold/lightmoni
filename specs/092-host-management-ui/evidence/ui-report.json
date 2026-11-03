@@ -1,0 +1,286 @@
+{
+  "status": "passed",
+  "scope": "isolated local UI; actual MachinesPage and HostsNodesPage; mocked hosts; no real SSH or production writes",
+  "final_assertions": [
+    {
+      "name": "latest_source_loaded_with_five_columns",
+      "passed": true
+    },
+    {
+      "name": "agent_menu_escape_hidden_after_transition",
+      "passed": true
+    },
+    {
+      "name": "latest_source_menu_click_keeps_account_target",
+      "passed": true
+    },
+    {
+      "name": "latest_source_search_has_explicit_empty_state",
+      "passed": true
+    },
+    {
+      "name": "latest_source_selection_reveals_clear_bulk_actions",
+      "passed": true
+    },
+    {
+      "name": "latest_source_filter_removes_hidden_selection",
+      "passed": true
+    },
+    {
+      "name": "latest_source_missing_account_repair_available",
+      "passed": true
+    },
+    {
+      "name": "latest_source_unknown_install_keeps_original_record",
+      "passed": true
+    },
+    {
+      "name": "latest_source_removed_release_is_historical",
+      "passed": true
+    },
+    {
+      "name": "latest_source_viewer_has_no_ssh_management",
+      "passed": true
+    },
+    {
+      "name": "latest_source_viewer_search_without_address",
+      "passed": true
+    },
+    {
+      "name": "latest_source_english_states_and_actions",
+      "passed": true
+    },
+    {
+      "name": "latest_source_narrow_has_table_only_scroll",
+      "passed": true
+    },
+    {
+      "name": "latest_source_narrow_detail_network_preserved",
+      "passed": true
+    },
+    {
+      "name": "real_hosts_nodes_parent_keeps_tabs_and_collapsible_help",
+      "passed": true
+    },
+    {
+      "name": "enrollment_help_expands_without_blocking_actions",
+      "passed": true
+    }
+  ],
+  "narrow_measurement": {
+    "page": 390,
+    "table": {
+      "client": 336,
+      "scroll": 1144
+    },
+    "viewport": 390
+  },
+  "attempts": [
+    {
+      "name": "selection_reveals_bulk_actions",
+      "passed": true
+    },
+    {
+      "name": "unknown_install_keeps_verification_entry",
+      "passed": true
+    },
+    {
+      "name": "removed_agent_release_marked_historical",
+      "passed": true
+    },
+    {
+      "name": "filter_prunes_hidden_selection",
+      "passed": true
+    },
+    {
+      "name": "long_ipv6_and_confirm_marker_visible",
+      "passed": true
+    },
+    {
+      "name": "maintenance_preserves_disabled_reasons",
+      "passed": true
+    },
+    {
+      "name": "permission_action_opens_permission_tab",
+      "passed": true
+    },
+    {
+      "name": "host_identity_and_accounts_retained",
+      "passed": false
+    },
+    {
+      "name": "host_identity_and_accounts_retained_after_hot_reload",
+      "passed": true
+    },
+    {
+      "name": "network_details_preserve_hostname_source_and_raw_interfaces",
+      "passed": true
+    },
+    {
+      "name": "all_maintenance_histories_retained",
+      "passed": true
+    },
+    {
+      "name": "missing_credentials_deploy_opens_account_repair",
+      "passed": true
+    },
+    {
+      "name": "fresh_host_recovery_uninstall_remains_accessible",
+      "passed": true
+    },
+    {
+      "name": "unknown_install_opens_original_record_without_reinstall",
+      "passed": true
+    },
+    {
+      "name": "unknown_uninstall_opens_original_record_without_replay",
+      "passed": true
+    },
+    {
+      "name": "search_empty_state",
+      "passed": true
+    },
+    {
+      "name": "top_more_keeps_release_history_and_offline_script",
+      "passed": true
+    },
+    {
+      "name": "viewer_hides_ssh_management_and_uses_platform_identity",
+      "passed": true
+    },
+    {
+      "name": "viewer_search_handles_absent_ssh_fields",
+      "passed": true
+    },
+    {
+      "name": "english_management_states_translated",
+      "passed": true
+    },
+    {
+      "name": "narrow_viewport_has_only_table_horizontal_scroll",
+      "passed": true
+    },
+    {
+      "name": "narrow_details_fit_and_keep_tabs_reachable",
+      "passed": true
+    },
+    {
+      "name": "label_filter_keeps_only_matching_host",
+      "passed": false
+    },
+    {
+      "name": "label_filter_applies_after_selecting_visible_option",
+      "passed": true
+    },
+    {
+      "name": "more_menu_keeps_all_existing_management_entries",
+      "passed": true
+    },
+    {
+      "name": "ssh_accounts_menu_preserves_host_target",
+      "passed": true
+    },
+    {
+      "name": "agent_menu_can_be_dismissed_with_keyboard",
+      "passed": false
+    },
+    {
+      "name": "agent_menu_escape_closes_and_returns_focus_after_fix",
+      "passed": false
+    },
+    {
+      "name": "latest_source_loaded_with_five_columns",
+      "passed": true
+    },
+    {
+      "name": "agent_menu_escape_closes_and_restores_focus_latest_source",
+      "passed": false
+    },
+    {
+      "name": "agent_menu_escape_hidden_after_transition",
+      "passed": true
+    },
+    {
+      "name": "latest_source_menu_click_keeps_account_target",
+      "passed": true
+    },
+    {
+      "name": "latest_source_search_has_explicit_empty_state",
+      "passed": true
+    },
+    {
+      "name": "latest_source_selection_reveals_clear_bulk_actions",
+      "passed": true
+    },
+    {
+      "name": "latest_source_filter_removes_hidden_selection",
+      "passed": true
+    },
+    {
+      "name": "latest_source_missing_account_repair_available",
+      "passed": true
+    },
+    {
+      "name": "latest_source_unknown_install_keeps_original_record",
+      "passed": true
+    },
+    {
+      "name": "latest_source_removed_release_is_historical",
+      "passed": true
+    },
+    {
+      "name": "latest_source_viewer_has_no_ssh_management",
+      "passed": true
+    },
+    {
+      "name": "latest_source_viewer_search_without_address",
+      "passed": true
+    },
+    {
+      "name": "latest_source_english_states_and_actions",
+      "passed": true
+    },
+    {
+      "name": "latest_source_narrow_has_table_only_scroll",
+      "passed": true
+    },
+    {
+      "name": "latest_source_narrow_detail_network_preserved",
+      "passed": true
+    },
+    {
+      "name": "real_hosts_nodes_parent_keeps_tabs_and_collapsible_help",
+      "passed": true
+    },
+    {
+      "name": "enrollment_help_expands_without_blocking_actions",
+      "passed": true
+    }
+  ],
+  "superseded_attempts": [
+    {
+      "name": "host_identity_and_accounts_retained",
+      "reason": "HMR interrupted the dialog; reopened and passed."
+    },
+    {
+      "name": "label_filter_keeps_only_matching_host",
+      "reason": "An accessibility-only option was not actionable; selected the visible option and passed."
+    },
+    {
+      "name": "agent_menu_can_be_dismissed_with_keyboard",
+      "reason": "Old cached module and close-animation timing; latest module and hidden-state wait passed."
+    },
+    {
+      "name": "agent_menu_escape_closes_and_returns_focus_after_fix",
+      "reason": "Old cached module; superseded by latest-source verification."
+    },
+    {
+      "name": "agent_menu_escape_closes_and_restores_focus_latest_source",
+      "reason": "Captured before the close animation ended; menu hidden-state wait passed."
+    }
+  ],
+  "fixture": {
+    "request_count": 360,
+    "blocked_writes": 0
+  }
+}
