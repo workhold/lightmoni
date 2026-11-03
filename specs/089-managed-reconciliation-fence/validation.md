@@ -4,3 +4,7 @@
 - 原未知agent_jobs/privileged_jobs状态及回执保持不变；普通未知、外部Agent/追踪ID、不同能力、缺少核对时间/操作者/原因和活动任务继续互斥。特权排队作业仍串行，普通排队作业仍阻塞。
 - 架构同步完成：docs/system-design.md第86章“受管未知作业的人工核对与主机互斥（SDD089）”；Doca同名原生段落managed089-0/1/2保存seq948并按最新seq回读逐字一致。总览原生图10节点/8边，节点ID/标签与写前outline一致，连线端点有效；写命令不针对图块。证据见evidence/doca-readback.json。
 - 尚待固定源码双架构成品检查、PR发布、中心升级和新观测/DNS/HTTPS恢复。线上结果在交付PR发布验证节回填；不把本地测试通过描述为线上已恢复。
+
+## 双架构成品
+
+linux/arm64与linux/amd64各43项成品检查通过；两个架构均在镜像内运行真实编译后签名作业与互斥回归10/10，均无失败或跳过，并各通过私网HTTP/TCP健康探测。AMD64为本机Docker仿真。37个本地OCI blob及实测rootfs/config核对一致。固定源码`1bfd49c3479b172181c6526e8ac6b46c08e67749`，镜像`docker.heyphp.com/lightmoni/lightmoni:20261103-1bfd49c`，索引`sha256:0991b9bb0cf29369406971d844435563f9f7b44c10cb531b9edbea7b5b533eb2`。后续提交仅文档和发布元数据，远端发布与线上恢复以[PR #85](https://github.com/workhold/lightmoni/pull/85)发布验证节为准。
