@@ -42,9 +42,10 @@ export function createQuickInstall(store:PlatformStore,workloads:DomainControlle
   const domain=b.domain?.trim()?normalizeDomain(b.domain):undefined;
   const prior=b.request_id?store.list('application').find(a=>a.created_by===actor&&a.status.install_request?.id===b.request_id):undefined;
   if(prior){if(prior.spec.source.template_id!==templateID||prior.status.quick_install?.domain!==domain)fail(409,'install_request_conflict');return{resource:store.public(prior),reused:true}}
-  if(!b.deployments?.length)b.deployments=[automaticPlacement(templateID,domain)];
   if(!b.deployment_mode)b.deployment_mode='manual';
-  const installation=catalogInstallation(templateID,b);
+  // Validate recipe inputs before capacity lookup, including installations on an empty center.
+  let installation=catalogInstallation(templateID,b);
+  if(!b.deployments?.length){b.deployments=[automaticPlacement(templateID,domain)];installation=catalogInstallation(templateID,b);}
   let zone:PlatformResource|undefined,certificate:PlatformResource|undefined,account:PlatformResource|undefined;
   const http=(installation.spec as Row).ports?.find((p:Row)=>p.protocol==='tcp'&&['http','https'].includes(p.app_protocol));
   if(domain) {

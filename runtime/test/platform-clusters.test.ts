@@ -1578,7 +1578,10 @@ test('quick HTTP installation chooses an online target, generates entry DNS and 
  assert.equal(root.spec.scope,'example.test');
 });
 test('quick installation validates prerequisites before creating any application',async t=>{
- const f=await fixture(t);f.createCluster();
+ const f=await fixture(t);
+ assert.equal((await f.req('/catalog/dbx/install','POST',{confirmed:true,parameters:{}})).body.error,'catalog_parameter_required');
+ assert.equal((await f.req('/catalog/registry/install','POST',{confirmed:true,host_ports:{unknown:15000}})).body.error,'invalid_host_ports');
+ f.createCluster();
  const body={domain:'app.example.test',parameters:{password:'private-password'},confirmed:true};
  const before=f.store.list().length;
  assert.equal((await f.req('/catalog/dbx/install','POST',body)).body.error,'quick_install_domain_not_hosted');

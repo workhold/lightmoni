@@ -135,7 +135,7 @@ try {
     await drawer
       .getByText(en ? "Advanced settings" : "高级设置", { exact: true })
       .click();
-    await expect(drawer.getByLabel(en ? "Host port · http" : "宿主端口 · http", {exact:true})).toHaveValue("0");
+    await expect(drawer.getByLabel(en ? "Host port" : "宿主端口", {exact:true})).toHaveValue("0");
     await page.screenshot({
       path: resolve(media, `dbx-${language}-${width}-${appearance}.png`),
       animations: "disabled",
@@ -144,7 +144,7 @@ try {
       await drawer
         .getByLabel("访问密码", { exact: true })
         .fill("qa_browser_secret_2026");
-      await drawer.getByLabel("宿主端口 · http", { exact: true }).fill("0");
+      await drawer.getByLabel("宿主端口", { exact: true }).fill("0");
       const [response] = await Promise.all([
         page.waitForResponse(
           (r) =>

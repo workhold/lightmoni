@@ -29,3 +29,7 @@
 适用：入口DNS路径、安装编排、仓库存储拓扑、SDK凭据边界。仓库 `docs/system-design.md` 第91章及第62章更新；[Doca系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 已保存并最新 seq1714 回读，六段文字与仓库一致，原标题和原生总览10节点/8连线保留，端点有效。见 [doca-readback.json](evidence/doca-readback.json)。
 
 本地 DNS/签名回执夹具不能代替实际公网传播、真实CA签发或生产主机验收；生产测试结果将另列。
+
+## 主干与发行前复核
+
+功能由 [PR #88](https://github.com/workhold/lightmoni/pull/88) 合入 main `9c48c182752e7e3290e7e60ee5256c2e5beb37bd`。发行成品复核前补充：无可用机器时先验证安装参数，保留必填参数及非法端口错误；自动选位置的有状态应用保持固定手动模式，高级托管模式要求自选位置以审阅本地数据限制。相关集群/目录48/48及根类型检查通过。
