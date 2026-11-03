@@ -22,7 +22,8 @@ const OLD_BOOT = "11111111-1111-4111-8111-111111111111", NEW_BOOT = "22222222-22
 const oldRelease = { version: "0.1.0", source_revision: "1".repeat(40), build_id: "0.1.0-before", state_schema: 1,
   artifact_sha256: "1".repeat(64), arch: "amd64", fingerprint: "a".repeat(64), boot_id: OLD_BOOT };
 const previousRelease = { ...oldRelease, artifact_sha256: "2".repeat(64), build_id: "0.1.0-previous", fingerprint: "b".repeat(64) };
-type Mode = "success" | "rollback" | "wrong_build" | "same_boot" | "wrong_config" | "last_error" | "disconnect" | "missing_receipt" | "hold" | "failed" | "service_state_changed" | "wrong_uid" | "string_uid" | "missing_uid";
+type Mode = "success" | "rollback" | "wrong_build" | "same_boot" | "wrong_config" | "last_error" | "disconnect" | "missing_receipt" | "hold" | "failed" | "service_state_changed" | "wrong_uid" | "string_uid" | "missing_uid"
+  | "helper_inactive" | "helper_old_release" | "helper_old_activation" | "helper_stale" | "helper_wrong_identity";
 
 function releaseFiles(directory: string) {
   mkdirSync(directory, { recursive: true });
@@ -44,7 +45,7 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     logger: { info() {}, warn() {}, error() {} },
   } as unknown as Dependencies;
   router.auth = deps.auth;
-  const nodes = new NodeStore(db, deps.now), modes = new Map<string, Mode>(), calls: any[] = [], observations = new Map<string, any>(), states = new Map<string, any>();
+  const nodes = new NodeStore(db, deps.now), modes = new Map<string, Mode>(), calls: any[] = [], observations = new Map<string, any>(), states = new Map<string, any>(), helpers = new Map<string, any>();
   const credentials = { has: () => true, authenticate: () => ({}) } as any;
   let downloadHook: ((input: any, operation: any) => Promise<void>) | undefined;
   const heartbeat = (operation: any, status: any, mode: Mode) => {
@@ -55,6 +56,11 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     if (mode === "wrong_build") value.release.build_id = "unapproved-build";
     if (["wrong_uid","string_uid","missing_uid"].includes(mode)) value.runtime={mode:"root",permission_generation:1,gid:995,...(mode==="missing_uid"?{}:{uid:mode==="string_uid"?"995":0})};
     db.run("UPDATE agents SET version=?,heartbeat=?,last_seen=? WHERE id=?", status.target.version, JSON.stringify(value), clock.toISOString(), operation.agent_id);
+    const helper=helpers.get(operation.machine_id);
+    helper.activation_id=mode==='helper_old_activation'?OLD_BOOT:NEW_BOOT;
+    helper.release=mode==='helper_old_release'?oldRelease:{...status.target};
+    helper.last_seen=mode==='helper_stale'?new Date(clock.getTime()-1000).toISOString():clock.toISOString();
+    helper.ordinary_task_identity.uid=mode==='helper_wrong_identity'?996:995;
   };
   const runner: SSHRunner = async input => {
     calls.push(input);
@@ -69,7 +75,7 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
       const state = { schema: 1, operation_id: operation.id, agent_id: operation.agent_id, status: "accepted", from: body.current,
         target: { version: body.target.version, source_revision: body.target.source_revision, build_id: body.target.build_id, state_schema: 1,
           artifact_sha256: body.target.artifact_sha256 ?? body.target.sha256, arch: body.target.arch },
-        local_health: { service_active: false, identity_matches: false, release_matches: false, boot_id: "" },
+        local_health: { service_active: false, helper_active: false, identity_matches: false, release_matches: false, boot_id: "" },
         started_at: clock.toISOString(), updated_at: clock.toISOString() };
       states.set(operation.id, state);
       if (mode === "disconnect") throw Error("connection lost after detached start");
@@ -90,10 +96,10 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
       }
       else if (mode === "rollback") {
         state.status = "rolled_back"; state.restored_fingerprint = body.current.fingerprint;
-        state.local_health = { service_active: body.current.service_active !== false, identity_matches: true, release_matches: true, boot_id: NEW_BOOT };
+        state.local_health = { service_active: body.current.service_active !== false, helper_active: true, identity_matches: true, release_matches: true, boot_id: NEW_BOOT };
       } else {
         state.status = state.commit_requested ? "succeeded" : "waiting_confirmation";
-        state.local_health = { service_active: true, identity_matches: true, release_matches: true, boot_id: mode === "same_boot" ? OLD_BOOT : NEW_BOOT };
+        state.local_health = { service_active: true, helper_active: mode !== 'helper_inactive', identity_matches: true, release_matches: true, boot_id: mode === "same_boot" ? OLD_BOOT : NEW_BOOT };
         heartbeat(operation, state, mode);
       }
       if (uninstallerUpdated !== undefined) state.uninstaller_updated = uninstallerUpdated;
@@ -103,6 +109,9 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
   };
   const machines = registerManagedMachines(deps, { sshRunner: runner, agentCredentials: credentials, downloadsDir: downloads,
     dataDir: directory, updatePollIntervalMs: 5, updateHealthTimeoutMs: healthTimeout });
+  // Domain tests inject the trusted store's signed-observation view. JWS
+  // authentication of that view is covered in privileged-executors.test.ts.
+  machines.registerExecutorBootstrap({getStatus:(machineID:string)=>({executor:helpers.get(machineID)??null,capabilities:{}})} as any);
   const domainJobs = registerAgentJobs(deps,{agentCredentials:credentials});
   const server = createServer(async (req, res) => { if (!await router.handle(req, res)) { res.writeHead(404); res.end(); } });
   server.listen(0, "127.0.0.1"); await once(server, "listening"); origin = "http://127.0.0.1:" + (server.address() as any).port;
@@ -123,6 +132,7 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     db.run("INSERT INTO machine_agent_runtime(machine_id,agent_id,runtime_mode,permission_generation,updated_at) VALUES(?,?,'root',1,?)",mid,agent,clock.toISOString());
     observations.set(mid, { schema: 1, ready: true, agent_id: agent, arch: "amd64", service_active: true, lifecycle_locked: false, operation_lock: false,
       current: { ...oldRelease }, previous: { ...previousRelease },runtime_mode:"root",permission_generation:1,helper_active:true });
+    helpers.set(mid,{id:agent,install_generation:1,state:'active',online:true,last_seen:clock.toISOString(),activation_id:OLD_BOOT,release:{...oldRelease},ordinary_task_identity:{account:'lightmoni-agent',uid:995,gid:995,permission_generation:1}});
     return { id: mid, agent, account:account.data.id, credential: credential.data.credential_id };
   };
   const plan = (mid: string, action = "upgrade") => request(`/machines/${mid}/agent-updates/plan`, "POST", { action, ...(action === "upgrade" ? { target_sha256: release.sha256 } : {}) });
@@ -146,7 +156,7 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     return tasks;
   };
   const helper=(agentID:string)=>{const host=db.get<any>("SELECT id FROM managed_machines WHERE agent_id=?",agentID);return {id:agentID,machine_id:host.id,agent_id:agentID,install_generation:1};};
-  return { taskStore, helper, directory, downloads, release, db, deps, user, nodes, machines, request, host, plan, apply, settle, modes, calls, observations, states, credentials,
+  return { taskStore, helper, helpers, directory, downloads, release, db, deps, user, nodes, machines, request, host, plan, apply, settle, modes, calls, observations, states, credentials,
     advance(seconds: number) { clock = new Date(clock.getTime() + seconds * 1000); },
     setDownloadHook(hook: typeof downloadHook) { downloadHook = hook; }, origin };
 }
@@ -262,13 +272,29 @@ test("revoking a shared credential cancels its pending maintenance before any re
   assert.equal(f.calls.some(call => call.command.includes(".update-bootstrap")), false);
 });
 
-for (const mode of ["wrong_build", "same_boot", "wrong_config", "last_error", "wrong_uid", "string_uid", "missing_uid"] as const) test(`health gate refuses ${mode} and never sends commit`, async t => {
+for (const mode of ["wrong_build", "same_boot", "wrong_config", "last_error", "wrong_uid", "string_uid", "missing_uid",
+  "helper_inactive", "helper_old_release", "helper_old_activation", "helper_stale", "helper_wrong_identity"] as const) test(`health gate refuses ${mode} and never sends commit`, async t => {
   const f = await fixture(t, 45), h = await f.host(); f.modes.set(h.id, mode);
   const operation = (await f.plan(h.id)).data;
   assert.equal((await f.apply(h.id, operation.id)).status, 202);
   const finished = await f.settle(h.id, operation.id); assert.equal(finished.status, "unknown");
   assert.equal(f.calls.some(input => input.command.includes("update-runner.mjs commit")), false);
   assert.equal(f.machines.get(h.id).capabilities.update_agent.reason, "agent_update_pending");
+});
+
+test('root upgrades pin the signed helper identity and reject replacement before bootstrap',async t=>{
+ const f=await fixture(t),h=await f.host(),operation=await f.plan(h.id);
+ assert.equal(operation.status,201,operation.raw);
+ assert.deepEqual(operation.data.plan.helper,{executor_id:h.agent,install_generation:1,activation_id:OLD_BOOT});
+ f.helpers.get(h.id).install_generation=2;
+ assert.equal((await f.apply(h.id,operation.data.id)).status,409);
+ assert.equal(f.calls.some(input=>input.command.includes('.update-bootstrap')),false);
+});
+
+test('a root upgrade plan requires the current release from the signed helper channel',async t=>{
+ const f=await fixture(t),h=await f.host();f.helpers.get(h.id).release={...previousRelease};
+ const operation=await f.plan(h.id);assert.equal(operation.status,409,operation.raw);
+ assert.equal(f.db.get<any>('SELECT COUNT(*) AS n FROM machine_agent_updates')!.n,0);
 });
 
 test("automatic rollback needs restored program fingerprint, preserves identity and does not claim upgrade success", async t => {
@@ -370,7 +396,8 @@ test("lost commit response can be reconciled after a later natural restart witho
   assert.equal((await f.apply(h.id, p.id)).data.status, "unknown");
   const remote = f.states.get(p.id), restartedBoot = "33333333-3333-4333-8333-333333333333";
   remote.status = "succeeded";
-  remote.local_health = { service_active: true, identity_matches: true, release_matches: true, boot_id: NEW_BOOT };
+  remote.local_health = { service_active: true, helper_active: true, identity_matches: true, release_matches: true, boot_id: NEW_BOOT };
+  Object.assign(f.helpers.get(h.id),{activation_id:restartedBoot,release:{...remote.target},last_seen:f.deps.now().toISOString()});
   f.observations.get(h.id).current = { ...remote.target, fingerprint: "c".repeat(64), boot_id: restartedBoot };
   f.modes.set(h.id, "hold");
   f.db.run("UPDATE agents SET heartbeat=?,last_seen=? WHERE id=?", JSON.stringify({ agent_id: h.agent, version: remote.target.version,
@@ -405,7 +432,7 @@ test("tickets bind host, operation, immutable files and expire once detached exe
 test("SSH disconnect remains unknown; read-only reconciliation never commits a waiting operation", async t => {
   const f = await fixture(t), h = await f.host(); f.modes.set(h.id, "disconnect");
   const p = (await f.plan(h.id)).data, result = await f.apply(h.id, p.id); assert.equal(result.data.status, "unknown");
-  const remote = f.states.get(p.id); remote.status = "waiting_confirmation"; remote.local_health = { service_active: true, identity_matches: true, release_matches: true, boot_id: NEW_BOOT };
+  const remote = f.states.get(p.id); remote.status = "waiting_confirmation"; remote.local_health = { service_active: true, helper_active: true, identity_matches: true, release_matches: true, boot_id: NEW_BOOT };
   const before = f.calls.length;
   assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", {})).data.status, "unknown");
   assert.equal(f.calls.slice(before).some(input => input.command.includes(" commit") || input.command.includes(".update-bootstrap")), false);

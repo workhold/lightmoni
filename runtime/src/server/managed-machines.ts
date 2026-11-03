@@ -836,7 +836,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     return result;
   };
   const uninstallations = registerMachineUninstallations(deps, { get, idle, revision: targetRevision, checked, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe, revokeUnifiedRuntime(machineID,actor,operationID){if(!executorStore)fail(409,'agent_execution_store_unavailable');executorStore.revokeUnifiedRuntime(machineID,actor,operationID,true);} });
-  const agentUpdates = registerMachineAgentUpdates(deps, { get, idle, revision: targetRevision, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe }, {
+  const agentUpdates = registerMachineAgentUpdates(deps, { get, idle, revision: targetRevision, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe, executionStatus: machineID => executorStore?.getStatus(machineID) }, {
     credentials: options.agentCredentials, downloadsDir: options.downloadsDir ?? join(process.cwd(), "downloads"), dataDir: options.dataDir ?? join(process.cwd(), ".local-dev"),
     pollIntervalMs: options.updatePollIntervalMs, healthTimeoutMs: options.updateHealthTimeoutMs,
   });

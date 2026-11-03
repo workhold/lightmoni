@@ -72,6 +72,7 @@ export async function checkDeploymentPermissions(options = {}) {
 export function checkHelperPermissions(options = {}) {
   const identity=options.identity??actualIdentity(), p=value=>path.join(options.root??'/',value);
   const boundary=path.resolve(options.root??'/');
+  const boundaryPrefix=boundary.endsWith(path.sep)?boundary:boundary+path.sep;
   if(identity.uid!==0||identity.euid!==0||identity.gid!==0)fail('helper_root_identity_required');
   const lstat=options.lstat??fs.lstatSync;
   const privateFile=(file,mode)=>{
@@ -80,7 +81,7 @@ export function checkHelperPermissions(options = {}) {
     for(let at=path.dirname(file);;at=path.dirname(at)){
       const parent=lstat(at);if(!parent.isDirectory()||parent.isSymbolicLink()||parent.uid!==0||(parent.mode&0o022))fail('helper_private_config_invalid');
       if(at===boundary)break;
-      if(!at.startsWith(boundary+path.sep))fail('helper_private_config_invalid');
+      if(!at.startsWith(boundaryPrefix))fail('helper_private_config_invalid');
     }
     try{JSON.parse(fs.readFileSync(file,'utf8'));}catch{fail('helper_private_config_invalid');}
   };
@@ -90,7 +91,7 @@ export function checkHelperPermissions(options = {}) {
     for(let at=path.dirname(directory);;at=path.dirname(at)){
       const parent=lstat(at);if(!parent.isDirectory()||parent.isSymbolicLink()||parent.uid!==0||(parent.mode&0o022))fail('helper_private_state_invalid');
       if(at===boundary)break;
-      if(!at.startsWith(boundary+path.sep))fail('helper_private_state_invalid');
+      if(!at.startsWith(boundaryPrefix))fail('helper_private_state_invalid');
     }
   };
   privateDirectory(p('/etc/lightmoni-agent-helper'),0o700);

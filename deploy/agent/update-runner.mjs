@@ -279,7 +279,7 @@ export class AgentMaintenance {
       this.atomic(path.join(this.lock, "owner.json"), { operation_id: id });
       if (this.now() >= Date.parse(request.start_deadline)) fail("start_deadline_expired");
       fs.mkdirSync(directory, { mode: 0o700 });
-      const state = { schema: 1, operation_id: id, agent_id: before.agent_id, status: "accepted", from: before.current, target: { ...request.target }, local_health: { service_active: false, identity_matches: false, release_matches: false, boot_id: "" }, started_at: this.timestamp(), updated_at: this.timestamp() };
+      const state = { schema: 1, operation_id: id, agent_id: before.agent_id, status: "accepted", from: before.current, target: { ...request.target }, local_health: { service_active: false, helper_active: false, identity_matches: false, release_matches: false, boot_id: "" }, started_at: this.timestamp(), updated_at: this.timestamp() };
       this.atomic(path.join(directory, "status.json"), state);
       this.atomic(path.join(directory, "request.json"), { ...request, archive_path: undefined, previous_path: this.currentPath(), previous_active: before.service_active, rollback_source: request.action === "rollback" ? this.previous() : null });
       if (archive) this.atomic(path.join(directory, "bundle.tar.gz"), archive);
@@ -377,6 +377,10 @@ export class AgentMaintenance {
     try { helperActive=this.assertHelperMode(this.runtimeMode()); } catch { helperActive=false; }
     return { service_active: active, helper_active:helperActive, identity_matches: local.agent_id === request.expected_agent_id && this.identity() === request.expected_agent_id && Number.isSafeInteger(local.runtime?.uid) && local.runtime.uid>0 && Number.isSafeInteger(local.runtime?.gid) && local.runtime.gid>0 && local.runtime.mode===this.runtimeMode() && local.runtime.permission_generation===this.runtimeGeneration(), release_matches: releaseMatches, boot_id: typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) ? local.boot_id : "" };
   }
+  healthy(health) {
+    return health.service_active && health.identity_matches && health.release_matches
+      && (this.runtimeMode() !== 'root' || health.helper_active === true);
+  }
   switchCurrent(directory) {
     const temporary = path.join(this.base, ".current-update-" + randomUUID());
     fs.symlinkSync(directory, temporary); fs.renameSync(temporary, path.join(this.base, "current"));
@@ -441,7 +445,8 @@ export class AgentMaintenance {
     const current = this.fingerprint(this.currentPath());
     if (current.fingerprint !== request.expected_fingerprint || this.identity() !== request.expected_agent_id) fail("rollback_verification_failed");
     const local = this.localStatus();
-    const result = this.save(id, { status: "rolled_back", error_code: reason, restored_fingerprint: request.expected_fingerprint, finished_at: this.timestamp(), local_health: { service_active: request.previous_active ? this.system("ActiveState") === "active" : false, identity_matches: true, release_matches: true, boot_id: typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) ? local.boot_id : "" } });
+    const helperActive = this.assertHelperMode(this.runtimeMode());
+    const result = this.save(id, { status: "rolled_back", error_code: reason, restored_fingerprint: request.expected_fingerprint, finished_at: this.timestamp(), local_health: { service_active: request.previous_active ? this.system("ActiveState") === "active" : false, helper_active: helperActive, identity_matches: true, release_matches: true, boot_id: typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) ? local.boot_id : "" } });
     this.cleanup(id); this.unlock(id); return result;
   }
   cleanup(id) {
@@ -534,7 +539,7 @@ export class AgentMaintenance {
       let healthy = false;
       for (let attempt = 0; attempt < 15; attempt++) {
         const health = this.health(request);
-        if (health.service_active && (this.runtimeMode()!=='root'||health.helper_active) && health.identity_matches && health.release_matches && health.boot_id && health.boot_id !== this.state(id).from.boot_id) {
+        if (this.healthy(health) && health.boot_id && health.boot_id !== this.state(id).from.boot_id) {
           this.save(id, { status: "waiting_confirmation", local_health: health, confirmation_deadline: new Date(deadline).toISOString() }); healthy = true; break;
         }
         await this.sleep(1000);
@@ -545,7 +550,7 @@ export class AgentMaintenance {
         if (fs.existsSync(path.join(directory, "commit-request.json"))) {
           const commit = boundedJSON(this.checkManaged(path.join(directory, "commit-request.json")));
           const health = this.health(request);
-          if (commit.expected_boot_id !== health.boot_id || commit.expected_target_sha256 !== request.target.artifact_sha256 || !health.service_active || !health.identity_matches || !health.release_matches || !health.boot_id || health.boot_id === this.state(id).from.boot_id) fail("commit_health_changed");
+          if (commit.expected_boot_id !== health.boot_id || commit.expected_target_sha256 !== request.target.artifact_sha256 || !this.healthy(health) || !health.boot_id || health.boot_id === this.state(id).from.boot_id) fail("commit_health_changed");
           // Preserve one known previous program for an explicitly reviewed
           // rollback. Both files are root owned, outside Agent's write paths.
           this.atomic(path.join(this.base, "previous.json"), { schema: 1, operation_id: id, release_path: request.previous_path, fingerprint: request.expected_fingerprint }, 0o644);
@@ -553,7 +558,7 @@ export class AgentMaintenance {
           this.cleanup(id); this.unlock(id); return result;
         }
         const health = this.health(request);
-        if (!health.service_active || !health.identity_matches || !health.release_matches) fail("local_health_lost");
+        if (!this.healthy(health)) fail("local_health_lost");
         await this.sleep(1000);
       }
       fail("confirmation_timeout");
@@ -571,7 +576,7 @@ export class AgentMaintenance {
     if (state.status === "succeeded") return state;
     if (state.status !== "waiting_confirmation" || !this.ownsLock(request.operation_id) || !/^[a-f0-9-]{36}$/.test(request.expected_boot_id ?? "") || !SHA.test(request.expected_target_sha256 ?? "")) fail("invalid_commit");
     const plan = this.request(request.operation_id), health = this.health(plan);
-    if (request.expected_boot_id !== health.boot_id || health.boot_id === state.from.boot_id || request.expected_target_sha256 !== state.target.artifact_sha256 || !health.service_active || !health.identity_matches || !health.release_matches || this.now() >= Date.parse(state.confirmation_deadline)) fail("commit_health_changed");
+    if (request.expected_boot_id !== health.boot_id || health.boot_id === state.from.boot_id || request.expected_target_sha256 !== state.target.artifact_sha256 || !this.healthy(health) || this.now() >= Date.parse(state.confirmation_deadline)) fail("commit_health_changed");
     this.atomic(path.join(this.opDir(request.operation_id), "commit-request.json"), request);
     return state;
   }

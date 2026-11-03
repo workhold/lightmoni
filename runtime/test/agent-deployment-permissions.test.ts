@@ -183,6 +183,36 @@ test('full-management helper requires root identity, private credentials, and is
   assert.throws(()=>checkHelperPermissions({root,identity:rootIdentity,lstat:owners}),/helper_private_config_invalid/);
 });
 
+test('helper ancestry accepts the real filesystem root while checking every root-owned parent', t => {
+  const directory = fs.mkdtempSync(join(tmpdir(), 'lm-helper-root-boundary-'));
+  t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
+  const helper = join(directory, 'helper.json');
+  fs.writeFileSync(helper, '{}', {mode: 0o600});
+  const fileStat = fs.lstatSync(helper), directoryStat = fs.lstatSync(directory), inspected: string[] = [];
+  const realRead = mutableFS.readFileSync;
+  const stub = t.mock.method(mutableFS, 'readFileSync', ((filename: fs.PathLike, ...args: unknown[]) =>
+    Reflect.apply(realRead, mutableFS, [String(filename) === '/etc/lightmoni-agent-helper/helper.json' ? helper : filename, ...args])) as typeof fs.readFileSync);
+  syncBuiltinESMExports();
+  t.after(() => {stub.mock.restore(); syncBuiltinESMExports();});
+  const lstat = (filename: fs.PathLike) => {
+    const name = String(filename); inspected.push(name);
+    const file = name.endsWith('/helper.json');
+    const mode = file ? 0o600 : (name.endsWith('/lightmoni-agent-helper') && name.startsWith('/var/')) || name.endsWith('/tasks') ? 0o711 : 0o700;
+    return new Proxy(file ? fileStat : directoryStat, {get(target, key, receiver) {
+      return key === 'uid' ? 0 : key === 'mode' ? (target.mode & ~0o777) | mode : Reflect.get(target, key, receiver);
+    }}) as fs.Stats;
+  };
+  const identity = {uid: 0, euid: 0, gid: 0};
+  assert.equal(checkHelperPermissions({identity, lstat}), 'privileged_helper_permissions_ready');
+  for (const parent of ['/', '/etc', '/var', '/var/lib']) assert.ok(inspected.includes(parent), parent);
+  assert.throws(() => checkHelperPermissions({identity, lstat: (filename: fs.PathLike) => {
+    const result = lstat(filename);
+    return String(filename) === '/etc' ? new Proxy(result, {get(target, key, receiver) {
+      return key === 'mode' ? 0o777 : Reflect.get(target, key, receiver);
+    }}) : result;
+  }}), /helper_private_(?:config|state)_invalid/);
+});
+
 test('ordinary identity cannot masquerade as root through config or silently accept invalid runtime mode',async t=>{
   const f=fixture(t),file=f.p('etc/lightmoni-agent/config.json');
   fs.writeFileSync(file,JSON.stringify({runtime_mode:'root',permission_generation:1}));

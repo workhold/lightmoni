@@ -135,7 +135,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
   });
   const request = () => ({ operation_id: randomBytes(16).toString("hex"), expected_agent_id: "fixture-agent", expected_fingerprint: maintenance.probe().current.fingerprint, expected_service_active: active, start_deadline: new Date(now + 180000).toISOString(), action: "upgrade", target: { version: manifest.version, source_revision: manifest.source_revision, build_id: manifest.build_id, state_schema: 1, arch, artifact_sha256: sha(fs.readFileSync(archive)) }, archive_path: archive, confirm_timeout_seconds: 10 });
   const preserve = () => { for (const [name, bytes] of Object.entries(saved)) assert.deepEqual(fs.readFileSync(p(name)), bytes, name + " retained"); };
-  return { root, p, old, runtime, packageDir, archive, manifest, maintenance, request, calls, repack, preserve, setActive: (value: boolean) => { active = value; }, onSleep: (callback: () => void) => { onSleep = callback; }, helperIsActive:()=>helperActive };
+  return { root, p, old, runtime, packageDir, archive, manifest, maintenance, request, calls, repack, preserve, setActive: (value: boolean) => { active = value; }, setHelperActive: (value: boolean) => { helperActive = value; }, onSleep: (callback: () => void) => { onSleep = callback; }, helperIsActive:()=>helperActive };
 }
 
 test('upgrades validate ordinary account permissions before stopping the old Agent',async t=>{
@@ -363,8 +363,11 @@ test("both probes bind offline helper bytes and refuse a redirected release help
 test("maintenance receipt preserves absent helper evidence and rejects non-boolean synchronization flags", async t => {
   const f = fixture(t), request = f.request(), accepted = await f.maintenance.start(request);
   assert.equal(parseAgentUpdateStatus(JSON.stringify(accepted)).uninstaller_updated, undefined);
+  assert.equal(parseAgentUpdateStatus(JSON.stringify(accepted)).local_health.helper_active, false);
   for (const value of [null, 0, "false", {}])
     assert.throws(() => parseAgentUpdateStatus(JSON.stringify({ ...accepted, uninstaller_updated: value })), /invalid_response/);
+  for (const value of [undefined, null, 0, "true"])
+    assert.throws(() => parseAgentUpdateStatus(JSON.stringify({ ...accepted, local_health: { ...accepted.local_health, helper_active: value } })), /invalid_response/);
   f.preserve();
 });
 
@@ -406,4 +409,28 @@ test('root Agent upgrade preserves the selected account, permission generation a
 test('root Agent rollback restarts the helper and ordinary Agent together',async t=>{
  const f=fixture(t,{runtimeMode:'root',failTarget:true}),request=f.request();await f.maintenance.start(request);
  const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,'rolled_back');assert.equal(f.maintenance.system('ActiveState'),'active');assert.equal(f.helperIsActive(),true);assert.equal(sshProbe(f).runtime_mode,'root');f.preserve();
+});
+
+test('losing the root helper after initial health prevents commit and rolls both components back',async t=>{
+ const f=fixture(t,{runtimeMode:'root'}),request=f.request();let checked=false;
+ await f.maintenance.start(request);
+ f.onSleep(()=>{const state=f.maintenance.state(request.operation_id);if(state.status!=='waiting_confirmation'||checked)return;checked=true;
+   f.setHelperActive(false);
+   assert.throws(()=>f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:state.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256}),/commit_health_changed/);
+ });
+ const result=await f.maintenance.worker(request.operation_id);
+ assert.equal(checked,true);assert.equal(result.status,'rolled_back');assert.equal(result.error_code,'local_health_lost');
+ assert.equal(result.local_health.helper_active,true);assert.equal(f.maintenance.currentPath(),f.old);assert.equal(f.helperIsActive(),true);f.preserve();
+});
+
+test('losing the root helper after commit request cannot produce a successful receipt',async t=>{
+ const f=fixture(t,{runtimeMode:'root'}),request=f.request();let requested=false;
+ await f.maintenance.start(request);
+ f.onSleep(()=>{const state=f.maintenance.state(request.operation_id);if(state.status!=='waiting_confirmation'||requested)return;requested=true;
+   f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:state.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});
+   f.setHelperActive(false);
+ });
+ const result=await f.maintenance.worker(request.operation_id);
+ assert.equal(requested,true);assert.equal(result.status,'rolled_back');assert.equal(result.error_code,'commit_health_changed');
+ assert.equal(result.local_health.helper_active,true);assert.equal(f.maintenance.currentPath(),f.old);f.preserve();
 });
