@@ -39,12 +39,16 @@ export function interpreterPath(runtime: "shell" | "node"): string {
   rootPath(filename); return filename;
 }
 export function interpreterDigest(filename: string): string { return sha256(boundedFile(filename, 128 << 20)); }
+export function validSystemdVersion(version: string): boolean {
+  // RHEL-family systemd includes its package release, e.g. 239 (239-51.el8).
+  return !/[\r\n]/.test(version) && /^[0-9]{3,4}(?:[.-][A-Za-z0-9.+~_-]+)?(?: \([A-Za-z0-9][A-Za-z0-9.+~_-]{0,127}\))?$/.test(version);
+}
 export function scriptDependenciesReady(): boolean {
   try {
     rootPath("/usr/bin/systemd-run"); rootPath("/usr/bin/systemctl"); rootPath("/usr/bin/busctl"); rootPath("/run/systemd/system", "directory"); rootPath("/run/dbus", "directory");
     rootPath(fileURLToPath(new URL("./script-launcher.js", import.meta.url)));
     const version = execFileSync("/usr/bin/systemctl", ["show", "--property=Version", "--value"], { encoding: "utf8", timeout: 2000, maxBuffer: 1024, env: { PATH: "/usr/bin:/bin", LANG: "C" }, stdio: ["ignore", "pipe", "ignore"] }).trim();
-    if (!/^[0-9]{3,4}(?:[.-][A-Za-z0-9.+~_-]+)?$/.test(version)) return false;
+    if (!validSystemdVersion(version)) return false;
     // systemctl can use /run/systemd/private even when the system bus required
     // by systemd-run is missing. Probe that exact bus before advertising ready.
     execFileSync("/usr/bin/busctl", ["--system", "status", "org.freedesktop.systemd1"], { timeout: 2000, maxBuffer: 32768, env: { PATH: "/usr/bin:/bin", LANG: "C" }, stdio: ["ignore", "ignore", "ignore"] });
