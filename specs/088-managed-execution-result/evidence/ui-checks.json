@@ -1,0 +1,20 @@
+{
+  "environment": "production React components with loopback in-memory API; CUA browser interactions",
+  "installation_record_entry": "passed",
+  "operation_receipt_entry": "passed",
+  "empty_reason_blocked": true,
+  "unchecked_confirmation_blocked": true,
+  "one_explicit_reconciliation_post": true,
+  "unknown_state_preserved_with_reconciliation_metadata": true,
+  "automatic_sensitive_output_reads": 0,
+  "wrong_host_rejected": true,
+  "wrong_capability_rejected": true,
+  "legacy_job_404_hidden": true,
+  "non_admin_route_guard_and_no_privileged_requests": true,
+  "responsive": {
+    "iframe_width": 390,
+    "iframe_height": 740,
+    "visual_form_review": "passed",
+    "native_viewport_override": "not applied by browser; not claimed as native resizing"
+  }
+}

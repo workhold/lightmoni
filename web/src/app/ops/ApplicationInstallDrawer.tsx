@@ -1,3 +1,4 @@
+import ManagedExecutionResult from './ManagedExecutionResult';
 import DockerEnvironmentPanel from './DockerEnvironmentPanel';
 import {useEffect,useState} from 'react';
 import {ReloadOutlined} from '@ant-design/icons';
@@ -7,7 +8,7 @@ import {useI18n} from '../../shared/i18n';
 import {errorText,time,type Machine,type Resource,type Run,type Spec} from './model';
 import {INSTALL_PHASES,installDiagnostic,installationState} from './install-state';
 
-export default function ApplicationInstallDrawer({resourceId,resources,machines,onClose,onManage}:{resourceId?:string;resources:Resource[];machines:Machine[];onClose:()=>void;onManage:(resource:Resource)=>void}){
+export default function ApplicationInstallDrawer({resourceId,resources,machines,onClose,onManage,canManageExecution=false}:{resourceId?:string;resources:Resource[];machines:Machine[];onClose:()=>void;onManage:(resource:Resource)=>void;canManageExecution?:boolean}){
  const {t}=useI18n(),[resource,setResource]=useState<Resource>(),[runs,setRuns]=useState<Run[]>([]),[runID,setRunID]=useState<string>(),[run,setRun]=useState<Run>(),[events,setEvents]=useState<Spec[]>([]),[error,setError]=useState(''),[eventError,setEventError]=useState(''),[loaded,setLoaded]=useState(false),[refresh,setRefresh]=useState(0);
  const [dockerMachine,setDockerMachine]=useState<{id:string;name:string}>();
  useEffect(()=>setDockerMachine(undefined),[resourceId,runID]);
@@ -49,6 +50,7 @@ export default function ApplicationInstallDrawer({resourceId,resources,machines,
    <h3>{t('机器执行记录','Machine execution history')}</h3>
    <Select aria-label={t('机器执行记录','Machine execution history')} style={{width:'100%'}} value={runID} onChange={setRunID} placeholder={t('等待生成执行记录','Waiting for an execution record')} options={runs.map(r=>({value:r.id,label:(machines.find(m=>m.agent_id===r.agent_id)?.name??r.agent_id??t('中心','Controller'))+' · '+time(r.created_at)+' · '+r.action+' · '+phase(r.state)+' · '+r.id.slice(0,6)}))}/>
    {run&&<Descriptions style={{marginTop:16}} size="small" column={{xs:1,sm:2}} items={[{key:'state',label:t('执行状态','Execution state'),children:badge(run.state)},{key:'phase',label:t('当前 / 最后阶段','Current / last phase'),children:phase(result.phase??latest?.phase??run.state)},{key:'updated',label:t('更新时间','Updated'),children:time(run.updated_at)},{key:'version',label:t('配置版本','Revision'),children:'v'+run.resource_revision},{key:'id',label:t('执行 ID','Run ID'),children:<Typography.Text copyable>{run.id}</Typography.Text>}]}/>}
+   {canManageExecution&&run?.job_id&&dockerTarget&&<ManagedExecutionResult key={run.job_id} jobID={run.job_id} hostID={dockerTarget.id} hostName={dockerTarget.name}/>}
    {failed&&<Alert style={{marginTop:12}} type={run?.state==='unknown'?'warning':'error'} showIcon title={t('失败原因','Failure reason')+' · '+t(diagnosis[0],diagnosis[1])} description={<div>{cause&&<Typography.Text code>{String(cause)}</Typography.Text>}<p>{t(diagnosis[2],diagnosis[3])}</p>{result.code&&result.code!==cause&&<small>{String(result.code)}</small>}{run?.state==='unknown'&&<p>{t('结果未知，请先检查实际状态，不要重复安装。','Inspect actual state before attempting another installation.')}</p>}</div>}/>}
    {dockerFailure&&dockerTarget&&<Button style={{marginTop:12}} type="primary" onClick={()=>setDockerMachine({id:dockerTarget.id,name:dockerTarget.name})}>{cause==='docker_cli_missing'||cause==='compose_unavailable'?t('补装 Docker 环境','Install missing Docker environment'):t('检查 / 补装 Docker 环境','Check / install Docker environment')}</Button>}
    {eventError&&<Alert style={{marginTop:12}} type="error" showIcon title={t('步骤日志读取失败','Could not load step logs')} description={eventError}/>}
