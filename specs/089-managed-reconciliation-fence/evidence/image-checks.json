@@ -1,0 +1,34 @@
+{
+  "revision": "1bfd49c3479b172181c6526e8ac6b46c08e67749",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261103-1bfd49c",
+  "index_digest": "sha256:0991b9bb0cf29369406971d844435563f9f7b44c10cb531b9edbea7b5b533eb2",
+  "verified_local_blobs": 37,
+  "tested_rootfs_and_config_equal": true,
+  "platforms": [
+    {
+      "platform": "linux/arm64",
+      "image_id": "sha256:4c2c9aa308b87b60042354ea8d95dbb436902873b2d466e3d9023aded61cad64",
+      "checks_passed": 43,
+      "errors": [],
+      "production_compiled_managed_tests": {
+        "pass": 10,
+        "fail": 0,
+        "skipped": 0
+      },
+      "extra_private_bind_http_tcp_probe": "passed"
+    },
+    {
+      "platform": "linux/amd64",
+      "image_id": "sha256:a705ca1b1558de9c06cd18856157ceb5e06a98ef7df0eb911abc9fd3d602c935",
+      "checks_passed": 43,
+      "errors": [],
+      "production_compiled_managed_tests": {
+        "pass": 10,
+        "fail": 0,
+        "skipped": 0
+      },
+      "extra_private_bind_http_tcp_probe": "passed"
+    }
+  ],
+  "remote_and_online_results": "https://github.com/workhold/lightmoni/pull/85"
+}

@@ -1,3 +1,4 @@
+import {blockingAgentJobSQL} from './agent-job-fence.js';
 import { fail, HTTPError } from "../shared/http.js";
 import type { Dependencies, Handler } from "../shared/types.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
@@ -132,7 +133,7 @@ export function registerInstallationRecovery(deps: Dependencies, access: Access,
       const previous = decode(current.plan_json).machine?.agent_id || "";
       const agentID = enrollment && enrollment.machine_id === current.machine_id && enrollment.agent_id && enrollment.agent_id !== previous ? enrollment.agent_id : "";
       const bound = db.get<Row>("SELECT agent_id FROM managed_machines WHERE id=?",current.machine_id)?.agent_id || "";
-      if (hasActiveTaskRuns(db,agentID || bound,current.machine_id) || table("agent_jobs") && db.get("SELECT id FROM agent_jobs WHERE agent_id IN (?,?) AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",agentID,bound)) fail(409,"主机仍有未结束的任务，请先处理后再结束安装记录");
+      if (hasActiveTaskRuns(db,agentID || bound,current.machine_id) || table("agent_jobs") && db.get(`SELECT id FROM agent_jobs WHERE agent_id IN (?,?) AND ${blockingAgentJobSQL(db)} LIMIT 1`,agentID,bound)) fail(409,"主机仍有未结束的任务，请先处理后再结束安装记录");
       const cancelled=cancelOwnEnrollment(current);
       const runtime=access.resolveRuntime?.(current,ctx.user.id);
       const revoked = agentID && table("agent_credentials") ? db.run("UPDATE agent_credentials SET revoked_at=?,revoke_reason=? WHERE agent_id=? AND audience IN ('control','data') AND revoked_at IS NULL",at(),"Administrator resolved an unknown Agent installation",agentID).changes : 0;

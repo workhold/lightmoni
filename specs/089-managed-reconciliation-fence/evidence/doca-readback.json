@@ -1,0 +1,29 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository_section": "docs/system-design.md chapter 86 / 受管未知作业的人工核对与主机互斥",
+  "saved_seq": 948,
+  "readback_seq": 948,
+  "epoch_id": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "blocks": [
+    {
+      "id": "managed089-0",
+      "text_matches_repository": true
+    },
+    {
+      "id": "managed089-1",
+      "text_matches_repository": true
+    },
+    {
+      "id": "managed089-2",
+      "text_matches_repository": true
+    }
+  ],
+  "native_graph": {
+    "block_id": "f-architecture-8a1f",
+    "node_count": 10,
+    "edge_count": 8,
+    "node_ids_and_labels_match_before_outline": true,
+    "all_edge_endpoints_valid": true,
+    "modified_by_operations": false
+  }
+}

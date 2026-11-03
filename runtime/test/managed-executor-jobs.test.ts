@@ -84,6 +84,18 @@ test('signed domain work retains original lineage and ordinary control cannot re
 test('a changed source approval blocks an online permit before any side effect',()=>{const f=fixture();try{const x=flow(f);f.change();assert.throws(x.permit,/revision_changed/);assert.equal(f.db.all('SELECT * FROM privileged_start_permits').length,0);}finally{f.close();}});
 test('domain receipt faults roll back both principals and preserve a retryable acknowledgement',()=>{const f=fixture();try{const x=flow(f);x.permit();x.phases();f.db.exec("CREATE TRIGGER fail_parent BEFORE UPDATE OF receipt_json ON agent_jobs BEGIN SELECT RAISE(ABORT,'parent_receipt_failure');END");assert.throws(x.result,/parent_receipt_failure/);assert.equal(f.store.get(x.job.id).state,'running');assert.equal(f.jobs.get(x.job.id).state,'verifying');f.db.exec('DROP TRIGGER fail_parent');x.result();assert.equal(f.jobs.get(x.job.id).state,'succeeded');}finally{f.close();}});
 test('lease loss preserves unknown fences without replaying through ordinary control',()=>{const f=fixture();try{const x=flow(f);f.advance(46);f.store.sweep();assert.equal(f.jobs.get(x.job.id).state,'unknown');assert.equal(f.store.get(x.job.id).state,'unknown');assert.equal(f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v)).job,null);assert.equal(f.jobs.claim('agent-host',['operations.platform']),null);}finally{f.close();}});
+test('human reconciliation preserves both unknown histories and permits a new signed managed job',()=>{
+ const f=fixture();try{
+  const old=flow(f);f.advance(46);f.store.sweep();const receipt=f.jobs.get(old.job.id).receipt;
+  assert.equal(f.store.resolve(old.job.id,'admin','Verified the worker ended').state,'unknown');f.heartbeat();
+  assert.doesNotThrow(()=>f.makePlan());
+  const next=f.enqueue(),claim=f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v));
+  assert.equal(planClaims(verifyJWS(claim.job.plan,f.store.centerPublicKey,f.store.centerKeyID)).job_id,next.id);
+  assert.equal(f.jobs.get(old.job.id).state,'unknown');assert.deepEqual(f.jobs.get(old.job.id).receipt,receipt);
+  assert.equal(f.store.get(old.job.id).state,'unknown');assert.equal(f.store.get(old.job.id).resolved_by,'admin');
+  assert.equal(f.jobs.claim('agent-host',['operations.platform']),null);
+ }finally{f.close()}
+});
 test('a cached start permit cannot restore authority after policy revocation',()=>{
  const f=fixture();try{const x=flow(f),r=f.request('jobs/'+x.job.id+'/start-permits',{lease_id:x.plan.lease_id,step_id:'managed.execute',executor_nonce:randomBytes(24).toString('base64url')});r.invoke((e,v)=>f.store.startPermit(e,x.job.id,v));const p=f.store.preparePolicyPlan('host',{capabilities:[]},'admin');f.store.applyPolicy('host',p.id,{confirm:true,expected_revision:p.revision},'admin');assert.throws(()=>r.invoke((e,v)=>f.store.startPermit(e,x.job.id,v)),/stale_policy|policy_disabled|not_authorized/);}finally{f.close();}
 });

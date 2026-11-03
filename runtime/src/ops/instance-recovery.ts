@@ -1,3 +1,4 @@
+import {blockingAgentJobSQL} from '../server/agent-job-fence.js';
 import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
 import { hash } from "../operations/website-files.js";
 import { fail } from "../shared/http.js";
@@ -68,7 +69,7 @@ function unresolved(store: PlatformStore, i: Row) {
       ...active,
     ) ||
     !!store.deps.db.get(
-      "SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",
+      `SELECT id FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(store.deps.db)} LIMIT 1`,
       i.agent_id,
     ) ||
     hasActiveTaskRuns(store.deps.db, i.agent_id)

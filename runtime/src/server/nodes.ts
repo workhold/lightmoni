@@ -1,3 +1,4 @@
+import {blockingAgentJobSQL} from './agent-job-fence.js';
 import { applicationTargets } from "../shared/application-observation.js";
 import { createHash } from "node:crypto";
 import type {
@@ -118,7 +119,7 @@ export function registerNodes(
       assertNoPendingAgentUpdate(deps.db, agentID);
       assertNoPendingMachineInstallation(deps.db,"",agentID);
       if (hasActiveTaskRuns(deps.db, agentID)) throw new NodeError(409, "节点有待执行、运行中或结果未知的任务中心记录，请先处理");
-      if (table("agent_jobs") && deps.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1", agentID))
+      if (table("agent_jobs") && deps.db.get(`SELECT id FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(deps.db)} LIMIT 1`, agentID))
         throw new NodeError(409, "节点有待执行、运行中或结果未知的任务，请先完成或核对");
       if (table("machine_uninstallations") && deps.db.get("SELECT id FROM machine_uninstallations WHERE agent_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", agentID))
         throw new NodeError(409, "节点有待审批、运行中或结果未知的卸载，请先取消或核对");

@@ -1,3 +1,4 @@
+import {blockingAgentJobSQL} from './agent-job-fence.js';
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -112,7 +113,7 @@ export function registerMachineExecutorBootstrap(deps: Dependencies, access: Acc
     assertNoPendingMachineInstallation(db,machine.id,machine.agent_id,true);
     assertNoPendingMachineUninstallation(db,machine.id,machine.agent_id);
     assertNoDockerInstallation(db,machine.id,machine.agent_id);
-    if (hasActiveTaskRuns(db,machine.agent_id,machine.id) || db.get("SELECT 1 FROM agent_jobs WHERE agent_id=? AND state NOT IN ('succeeded','failed','cancelled') LIMIT 1",machine.agent_id))
+    if (hasActiveTaskRuns(db,machine.agent_id,machine.id) || db.get(`SELECT 1 FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)} LIMIT 1`,machine.agent_id))
       fail(409,"主机存在未结束或待核对的任务");
   };
   const prepare = async (machineID:string, value:unknown, actor:string, signal:AbortSignal) => {
