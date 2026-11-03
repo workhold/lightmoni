@@ -14,7 +14,8 @@
     "agents": 1,
     "connection_credentials": 1
   },
-  "managed_recovery": "passed; see online-recovery.result.json",
+  "managed_recovery": "awaiting fresh signed inspections and DNS/HTTPS readback",
   "backup": "/root/lightmoni-upgrades/20261103-managed-fence-1bfd49c",
-  "rollback_image": "docker.heyphp.com/lightmoni/lightmoni:20261103-f9d7480"
+  "rollback_image": "docker.heyphp.com/lightmoni/lightmoni:20261103-f9d7480",
+  "final_recovery_evidence": "online-recovery.result.json"
 }
