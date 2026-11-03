@@ -134,7 +134,7 @@ test("managed activation rejects changed generation, build and signing identity"
     agent_id: "agent",
     endpoint: "https://center.test",
     permission_generation: 3,
-    task_identity: { account: "lightmoni-task" as const, uid: 999, gid: 999, permission_generation: 3 },
+    task_identity: { account: "lightmoni-agent" as const, uid: 999, gid: 999, permission_generation: 3 },
   };
   const key = generateKeyPairSync("ed25519");
   const managed = {
@@ -159,7 +159,7 @@ test("managed activation rejects changed generation, build and signing identity"
     schema: 1,
     activation_id: "01234567-0123-4567-89ab-0123456789ab",
     permission_generation: 3,
-    ordinary_task_identity: { account: "lightmoni-task", uid: 999, gid: 999, permission_generation: 3 },
+    ordinary_task_identity: { account: "lightmoni-agent", uid: 999, gid: 999, permission_generation: 3 },
     identity: {
       agent_id: managed.agent_id,
       machine_id: managed.machine_id,
@@ -177,6 +177,7 @@ test("managed activation rejects changed generation, build and signing identity"
   );
   for (const invalid of [
     { ...record, permission_generation: 2 },
+    { ...record, ordinary_task_identity: { ...record.ordinary_task_identity, account: "lightmoni-task" } },
     { ...record, identity: { ...record.identity, agent_id: "other" } },
     {
       ...record,
@@ -188,7 +189,7 @@ test("managed activation rejects changed generation, build and signing identity"
       validateManagedAgentActivation(invalid, helper, managed, release),
     );
 });
-test("root Agent ordinary tasks explicitly drop identity, groups and capabilities", () => {
+test("full-management helper runs ordinary tasks without root identity, groups or capabilities", () => {
   const args = ["/var/tmp/task/supervisor.mjs", "node", "literal $(data)"];
   const command = ordinaryTaskCommand(
     "/opt/lightmoni-agent/current/node",
@@ -231,7 +232,7 @@ test("helper task claims use the signed executor route without an Agent bearer t
   const runner = new AgentTaskRunner({
     endpoint: "https://center.test", agentID: "agent", executorID: "executor", executorInstallGeneration: 4,
     dataDir, permissionGeneration: 3,
-    executionIdentity: { account: "lightmoni-task", uid: 1000, gid: 1000, permission_generation: 3 },
+    executionIdentity: { account: "lightmoni-agent", uid: 1000, gid: 1000, permission_generation: 3 },
   }, { request: async (route, _body, _signal, slot) => { calls.push({ route, slot }); return route === "task-runs/claim" ? { run: null } : {}; },
     clearRequest: slot => cleared.push(slot) });
   assert.equal(await runner.pollOnce(), null);
@@ -262,14 +263,15 @@ test("root mode keeps the Agent unprivileged and moves scripts out of its task l
   }
 });
 test("ordinary task runner persists a lease marker before refusing mismatched execution identities", async (t) => {
-  const dataDir = mkdtempSync(join(tmpdir(), "lightmoni-task-identity-"));
+  const dataDir = mkdtempSync(join(tmpdir(), "lightmoni-agent-identity-"));
   t.after(() => rmSync(dataDir, { recursive: true, force: true }));
   for (const [index, execution_identity] of [
     { account: "root", privilege: "user", permission_generation: 3, uid: 1000, gid: 1000 },
-    { account: "lightmoni-task", privilege: "root", permission_generation: 3, uid: 1000, gid: 1000 },
-    { account: "lightmoni-task", privilege: "user", permission_generation: 4, uid: 1000, gid: 1000 },
-    { account: "lightmoni-task", privilege: "user", permission_generation: 0, uid: 1000, gid: 1000 },
-    { account: "lightmoni-task", privilege: "user", permission_generation: 3, uid: 1001, gid: 1000 },
+    { account: "lightmoni-task", privilege: "user", permission_generation: 3, uid: 1000, gid: 1000 },
+    { account: "lightmoni-agent", privilege: "root", permission_generation: 3, uid: 1000, gid: 1000 },
+    { account: "lightmoni-agent", privilege: "user", permission_generation: 4, uid: 1000, gid: 1000 },
+    { account: "lightmoni-agent", privilege: "user", permission_generation: 0, uid: 1000, gid: 1000 },
+    { account: "lightmoni-agent", privilege: "user", permission_generation: 3, uid: 1001, gid: 1000 },
   ].entries()) {
     const caseDir = mkdtempSync(join(dataDir, `case-${index}-`));
     const run = {
@@ -299,7 +301,7 @@ test("ordinary task runner persists a lease marker before refusing mismatched ex
         executorInstallGeneration: 4,
         dataDir: caseDir,
         permissionGeneration: 3,
-        executionIdentity: { account: "lightmoni-task", uid: 1000, gid: 1000, permission_generation: 3 },
+        executionIdentity: { account: "lightmoni-agent", uid: 1000, gid: 1000, permission_generation: 3 },
       },
       { request: async () => ({ run }), clearRequest: () => {} },
     );

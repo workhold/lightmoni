@@ -3,8 +3,8 @@ import { agentMaintenanceShellGuards } from "../shared/agent-maintenance-shell.j
 
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 export const retainedAgentPaths = ["/etc/lightmoni-agent", "/var/lib/lightmoni-agent"];
-export const removedAgentPaths = ["/etc/systemd/system/lightmoni-agent.service", "/etc/systemd/system/lightmoni-agent-helper.service", "/etc/lightmoni-agent-helper", "/var/lib/lightmoni-agent-helper", "/var/lib/lightmoni-agent-task-account.json", "/usr/local/bin/lightmoni-agent", "/opt/lightmoni-agent", "/usr/local/sbin/lightmoni-agent-uninstall"];
-export const freshAgentGuard = `if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json || test -e /etc/systemd/system/lightmoni-agent-helper.service || test -e /etc/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-task-account.json; then echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2; exit 1; fi`;
+export const removedAgentPaths = ["/etc/systemd/system/lightmoni-agent.service", "/etc/systemd/system/lightmoni-agent-helper.service", "/etc/lightmoni-agent-helper", "/var/lib/lightmoni-agent-helper", "/usr/local/bin/lightmoni-agent", "/opt/lightmoni-agent", "/usr/local/sbin/lightmoni-agent-uninstall"];
+export const freshAgentGuard = `if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/lightmoni-agent/config.json || test -e /var/lib/lightmoni-agent/identity.json || test -e /etc/systemd/system/lightmoni-agent-helper.service || test -e /etc/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-helper; then echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2; exit 1; fi`;
 const privileged = (script: string) => `if test "$(id -u)" = 0; then /bin/sh -c ${quote(script)}; else sudo -n /bin/sh -c ${quote(script)}; fi`;
 
 
@@ -22,7 +22,6 @@ for unit in lightmoni-agent.service lightmoni-agent-helper.service; do
 done`;
 const removeAgentPrograms = `lm_assert_paths
 lm_assert_no_operations
-lm_remove_task_account
 lm_remove_managed_state
 for unit in lightmoni-agent.service lightmoni-agent-helper.service; do
   if test "$(systemctl show "$unit" --property=LoadState --value)" = loaded; then systemctl disable "$unit"; fi
@@ -51,7 +50,7 @@ agent_id=$(sed -n 's/.*"agent_id"[[:space:]]*:[[:space:]]*"\\([A-Za-z0-9._:-]*\\
 case "$agent_id" in ''|*[!A-Za-z0-9._:-]*) exit 42;; esac
 test "\${#agent_id}" -le 256 || exit 42`;
 const observation = `printf 'LMAGENT=1\\nagent_id=%s\\n' "$agent_id"
-if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/systemd/system/lightmoni-agent-helper.service || test -e /etc/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-task-account.json || id lightmoni-task >/dev/null 2>&1; then echo installation=present; else echo installation=absent; fi
+if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/systemd/system/lightmoni-agent-helper.service || test -e /etc/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-helper; then echo installation=present; else echo installation=absent; fi
 if test -f /usr/local/bin/lightmoni-agent && test -d /opt/lightmoni-agent && test -f /etc/systemd/system/lightmoni-agent.service; then echo program_complete=1; else echo program_complete=0; fi
 ${serviceObservation}
 if test -e /run/lightmoni-agent-lifecycle.lock; then echo lifecycle_locked=1; else echo lifecycle_locked=0; fi
@@ -112,7 +111,7 @@ printf '%s\\n' "$enrollment_token" | sh "$tmp_dir/install.sh" --fresh --endpoint
 export interface AgentRemovalObservation {
   agent_id: string; identity_state: "valid" | "missing" | "invalid" | "unsafe"; identity_sha256: string; program_sha256: string;
   installation: "present" | "absent"; program_complete: boolean; unit_managed: boolean; service_running: boolean;
-  lifecycle_locked: boolean; operation_lock: boolean; paths_safe: boolean; config_present: boolean; data_present: boolean; agent_state_present: boolean; business_data_retained: boolean; helper_present: boolean; task_account_present: boolean;
+  lifecycle_locked: boolean; operation_lock: boolean; paths_safe: boolean; config_present: boolean; data_present: boolean; agent_state_present: boolean; business_data_retained: boolean; helper_present: boolean;
 }
 const removalObservation = `identity=/var/lib/lightmoni-agent/identity.json
 agent_id=-
@@ -140,7 +139,7 @@ paths_safe=1
 operation_lock=0
 (lm_assert_no_operations) >/dev/null 2>&1 || operation_lock=1
 program_evidence=
-for path in /etc/systemd/system/lightmoni-agent.service /etc/systemd/system/lightmoni-agent-helper.service /etc/lightmoni-agent-helper/helper.json /etc/lightmoni-agent-helper/managed.json /etc/lightmoni-agent-helper/managed-activation.json /var/lib/lightmoni-agent-task-account.json /usr/local/bin/lightmoni-agent /opt/lightmoni-agent /usr/local/sbin/lightmoni-agent-uninstall; do
+for path in /etc/systemd/system/lightmoni-agent.service /etc/systemd/system/lightmoni-agent-helper.service /etc/lightmoni-agent-helper/helper.json /etc/lightmoni-agent-helper/managed.json /etc/lightmoni-agent-helper/managed-activation.json /usr/local/bin/lightmoni-agent /opt/lightmoni-agent /usr/local/sbin/lightmoni-agent-uninstall; do
   state=absent
   if test -L "$path"; then state=symlink
   elif test -f "$path" && test -r "$path"; then state=$(sha256sum "$path") || exit 42; state=\${state%% *}
@@ -176,10 +175,8 @@ program_sha256=\${program_sha256%% *}
 printf 'LMREMOVE=1\\nagent_id=%s\\nidentity_state=%s\\nidentity_sha256=%s\\nprogram_sha256=%s\\n' "$agent_id" "$identity_state" "$identity_sha256" "$program_sha256"
 helper_present=0
 if test -e /etc/systemd/system/lightmoni-agent-helper.service || test -L /etc/systemd/system/lightmoni-agent-helper.service || test -e /etc/lightmoni-agent-helper || test -L /etc/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-helper || test -L /var/lib/lightmoni-agent-helper; then helper_present=1; fi
-task_account_present=0
-if test -e /var/lib/lightmoni-agent-task-account.json || test -L /var/lib/lightmoni-agent-task-account.json || id lightmoni-task >/dev/null 2>&1; then task_account_present=1; fi
-printf 'helper_present=%s\\ntask_account_present=%s\\n' "$helper_present" "$task_account_present"
-if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /usr/local/sbin/lightmoni-agent-uninstall || test "$helper_present" = 1 || test "$task_account_present" = 1; then echo installation=present; else echo installation=absent; fi
+printf 'helper_present=%s\\n' "$helper_present"
+if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /usr/local/sbin/lightmoni-agent-uninstall || test "$helper_present" = 1; then echo installation=present; else echo installation=absent; fi
 if test -f /usr/local/bin/lightmoni-agent && test -d /opt/lightmoni-agent && test -f /etc/systemd/system/lightmoni-agent.service; then echo program_complete=1; else echo program_complete=0; fi
 ${serviceObservation}
 if test -e /run/lightmoni-agent-lifecycle.lock || test -L /run/lightmoni-agent-lifecycle.lock; then echo lifecycle_locked=1; else echo lifecycle_locked=0; fi
@@ -198,16 +195,16 @@ export const agentRemovalProbeCommand = () => privileged(`set -eu\n# LMAGENT rem
 export function parseAgentRemovalProbe(output: string): AgentRemovalObservation {
   if (Buffer.byteLength(output)>8192) throw new SSHError("invalid_response");
   const pairs=output.trim().split(/\r?\n/).map(line=>/^([a-z_0-9]+|LMREMOVE)=([A-Za-z0-9._:-]+)$/.exec(line));
-  if(pairs.length!==18 || pairs.some(pair=>!pair)) throw new SSHError("invalid_response");
+  if(pairs.length!==17 || pairs.some(pair=>!pair)) throw new SSHError("invalid_response");
   const v=new Map(pairs.map(pair=>[pair![1],pair![2]]));
-  const bools=["program_complete","unit_managed","service_running","lifecycle_locked","operation_lock","paths_safe","config_present","data_present","agent_state_present","business_data_retained","helper_present","task_account_present"];
+  const bools=["program_complete","unit_managed","service_running","lifecycle_locked","operation_lock","paths_safe","config_present","data_present","agent_state_present","business_data_retained","helper_present"];
   if(v.size!==pairs.length || v.get("LMREMOVE")!=="1" || !["valid","missing","invalid","unsafe"].includes(v.get("identity_state")||"")
     || !["present","absent"].includes(v.get("installation")||"") || bools.some(key=>!["0","1"].includes(v.get(key)||""))
     || !/^[a-f0-9]{64}$/.test(v.get("program_sha256")||"") || !/^(?:-|[a-f0-9]{64})$/.test(v.get("identity_sha256")||"")) throw new SSHError("invalid_response");
   const valid=v.get("identity_state")==="valid",agentID=v.get("agent_id")||"";
   if(valid ? !/^[A-Za-z0-9._:-]{1,256}$/.test(agentID) || !/^[a-f0-9]{64}$/.test(v.get("identity_sha256")||"") : agentID!=="-") throw new SSHError("invalid_response");
   return {agent_id:valid?agentID:"",identity_state:v.get("identity_state") as AgentRemovalObservation["identity_state"],identity_sha256:v.get("identity_sha256")!,program_sha256:v.get("program_sha256")!,installation:v.get("installation") as "present"|"absent",
-    program_complete:v.get("program_complete")==="1",unit_managed:v.get("unit_managed")==="1",service_running:v.get("service_running")==="1",lifecycle_locked:v.get("lifecycle_locked")==="1",operation_lock:v.get("operation_lock")==="1",paths_safe:v.get("paths_safe")==="1",config_present:v.get("config_present")==="1",data_present:v.get("data_present")==="1",agent_state_present:v.get("agent_state_present")==="1",business_data_retained:v.get("business_data_retained")==="1",helper_present:v.get("helper_present")==="1",task_account_present:v.get("task_account_present")==="1"};
+    program_complete:v.get("program_complete")==="1",unit_managed:v.get("unit_managed")==="1",service_running:v.get("service_running")==="1",lifecycle_locked:v.get("lifecycle_locked")==="1",operation_lock:v.get("operation_lock")==="1",paths_safe:v.get("paths_safe")==="1",config_present:v.get("config_present")==="1",data_present:v.get("data_present")==="1",agent_state_present:v.get("agent_state_present")==="1",business_data_retained:v.get("business_data_retained")==="1",helper_present:v.get("helper_present")==="1"};
 }
 export function removalSnapshot(value: AgentRemovalObservation) {
   const {lifecycle_locked,operation_lock,...snapshot}=value;

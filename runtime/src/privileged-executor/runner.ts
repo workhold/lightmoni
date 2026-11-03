@@ -23,9 +23,9 @@ export interface RunnerHost {
   inventory?:()=>Promise<unknown>;
   managed?:(payload:ManagedExecutionPayload,context:ManagedRunContext)=>Promise<ScriptOutcome>;
   docker: Pick<ManagedDockerExecutor, "execute">;
-  profiles(config: ExecutorConfig): Promise<{ capabilities: string[]; account_profiles: ReturnType<typeof localAccount>[]; interpreter_profiles: {runtime: string; sha256: string}[]; ordinary_task_identity?: {account:"lightmoni-task";uid:number;gid:number} }>;
+  profiles(config: ExecutorConfig): Promise<{ capabilities: string[]; account_profiles: ReturnType<typeof localAccount>[]; interpreter_profiles: {runtime: string; sha256: string}[]; ordinary_task_identity?: {account:"lightmoni-agent";uid:number;gid:number} }>;
 }
-export interface OrdinaryTaskExecutionIdentity { account: "lightmoni-task"; uid: number; gid: number; permission_generation: number }
+export interface OrdinaryTaskExecutionIdentity { account: "lightmoni-agent"; uid: number; gid: number; permission_generation: number }
 export function productionRunnerHost(config: ExecutorConfig): RunnerHost {
   return { inventory:async()=>{
       if(!config.daemon_id||(await inspectManagedDockerDaemon()).daemon_id!==config.daemon_id)refuse('docker_daemon_changed');
@@ -42,7 +42,7 @@ export function productionRunnerHost(config: ExecutorConfig): RunnerHost {
       if(scriptDependenciesReady())capabilities.push("operations.managed.v1");
       const task = config.data_dir === MANAGED_AGENT_DATA_DIR ? ordinaryTaskAccount() : undefined;
       return { capabilities, account_profiles: accounts, interpreter_profiles: interpreters,
-        ...(task ? { ordinary_task_identity: { account: "lightmoni-task" as const, uid: task.uid, gid: task.gid } } : {}) };
+        ...(task ? { ordinary_task_identity: { account: "lightmoni-agent" as const, uid: task.uid, gid: task.gid } } : {}) };
     },
   };
 }

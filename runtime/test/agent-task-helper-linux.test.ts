@@ -11,12 +11,12 @@ if (available) {
     const root = lstatSync(MANAGED_AGENT_TASKS_DIR), state = lstatSync(MANAGED_AGENT_DATA_DIR);
     const account = ordinaryTaskAccount();
     available = root.isDirectory() && !root.isSymbolicLink() && root.uid === 0 && (root.mode & 0o022) === 0
-      && state.isDirectory() && !state.isSymbolicLink() && state.uid === 0 && (state.mode & 0o077) === 0
+      && state.isDirectory() && !state.isSymbolicLink() && state.uid === 0 && (state.mode & 0o022) === 0
       && account.uid > 0 && account.gid > 0;
   } catch { available = false; }
 }
 
-test("helper executes a real script as lightmoni-task with no supplementary groups or capabilities", { skip: !available }, async () => {
+test("helper executes a real script as lightmoni-agent with no supplementary groups or capabilities", { skip: !available }, async () => {
   const account = ordinaryTaskAccount();
   verifyOrdinaryTaskExecutionIdentity(account);
   const script = {

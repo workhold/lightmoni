@@ -77,7 +77,6 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
     fs.writeFileSync(p('etc/lightmoni-agent-helper/helper.json'),JSON.stringify({permission_generation:7,agent_id:'fixture-agent'}),{mode:0o600});
     fs.writeFileSync(p('etc/lightmoni-agent-helper/managed.json'),JSON.stringify({executor_id:'signed-identity',install_generation:3,agent_id:'fixture-agent'}),{mode:0o600});
     fs.writeFileSync(p('etc/systemd/system/lightmoni-agent-helper.service'),fs.readFileSync(join(repo,'deploy/agent/lightmoni-agent-helper.service')));
-    fs.writeFileSync(p('var/lib/lightmoni-agent-task-account.json'),JSON.stringify({schema:1,uid:19997,gid:19996}),{mode:0o600});
     fs.writeFileSync(p('var/lib/lightmoni-agent-helper/managed/journal.json'),'{"fenced":null}');
   }
   fs.writeFileSync(p("var/lib/lightmoni-agent/identity.json"), '{"agent_id":"fixture-agent","host_id":"fixture-host"}\n', { mode: 0o600 });
@@ -130,7 +129,7 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
         const config=JSON.parse(fs.readFileSync(p('etc/lightmoni-agent/config.json'),'utf8'));
         return JSON.stringify({ agent_id: "fixture-agent", runtime:{uid:19999,gid:19998,mode:config.runtime_mode||'user',permission_generation:config.permission_generation||1}, ...(options.legacy && current === old ? {} : { boot_id: boot, release: meta }) });
       }
-      if(args[0]==='managed-status'||args[0]==='helper-status')return JSON.stringify({executor_id:'signed-identity',install_generation:3,permission_generation:7,fenced:null,pending_results:0,ordinary_task_identity:{account:'lightmoni-task',uid:19997,gid:19996},ordinary_task_runner:{active:false,state:'idle'}});
+      if(args[0]==='managed-status'||args[0]==='helper-status')return JSON.stringify({executor_id:'signed-identity',install_generation:3,permission_generation:7,fenced:null,pending_results:0,ordinary_task_identity:{account:'lightmoni-agent',uid:19999,gid:19998},ordinary_task_runner:{active:false,state:'idle'}});
       return "configuration valid";
     },
   });

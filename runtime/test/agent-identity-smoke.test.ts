@@ -46,7 +46,7 @@ test("full-management helper claims tasks with its signed executor identity", as
   const runner = new AgentTaskRunner({
     endpoint: config.endpoint, agentID: "agent", executorID: config.executor_id, executorInstallGeneration: 4,
     permissionGeneration: 3, dataDir,
-    executionIdentity: { account: "lightmoni-task", uid: 1001, gid: 1001, permission_generation: 3 },
+    executionIdentity: { account: "lightmoni-agent", uid: 1001, gid: 1001, permission_generation: 3 },
   }, {
     request: (route, body, signal, slot) => client.request(route, body, slot, signal),
     clearRequest: slot => journal.clearRequest(slot),

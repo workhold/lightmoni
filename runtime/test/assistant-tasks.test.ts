@@ -9,6 +9,7 @@ import type { Dependencies } from "../src/shared/types.js";
 import { TaskRunStore } from "../src/server/task-center.js";
 import { TaskProposalService, taskTools } from "../src/assistant/task-tools.js";
 import { registerAssistant } from "../src/assistant/index.js";
+import { taskHelperFixture } from "./helpers/task-helper.js";
 
 const admin = { id: "alice", role: "admin" }, member = { id: "member", role: "member" };
 function fixture(t: any) {
@@ -18,6 +19,7 @@ function fixture(t: any) {
     logger: { info() {}, warn() {}, error() {} } } as unknown as Dependencies;
   const runs = new TaskRunStore(deps), proposals = new TaskProposalService(deps, runs), nodes = runs.nodes;
   for (const id of ["one", "two"]) db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,'fixture.invalid',22,'direct_ssh',?,?,?)", id, "Host " + id, "agent-" + id, at.toISOString(), at.toISOString());
+  taskHelperFixture(deps, runs);
   const definition = { name: "Fixture script", type: "script", enabled: true, label_ids: [], host_ids: ["one"], target_all: false,
     schedule: { mode: "once" }, script: { runtime: "node", code: "console.log('fixture')", timeout_seconds: 5, max_output_bytes: 4096 } };
   nodes.task(definition, "fixture-task", true);

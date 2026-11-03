@@ -129,7 +129,7 @@ export class AgentRuntimeMaintenance {
       const status=this.helperStatus();
       const config=JSON.parse(fs.readFileSync(this.safe(this.p('/etc/lightmoni-agent/config.json')),'utf8'));
       if(!ID.test(status.executor_id)||!Number.isSafeInteger(status.install_generation)||status.install_generation<1
-        ||status.permission_generation!==config.permission_generation||status.ordinary_task_identity?.account!=='lightmoni-task')fail('helper_health_unverified');
+        ||status.permission_generation!==config.permission_generation||status.ordinary_task_identity?.account!=='lightmoni-agent')fail('helper_health_unverified');
       return bytes;
     }
     if(fs.existsSync(file)||fs.existsSync(file+'.disabled')||fs.existsSync(this.p('/etc/lightmoni-agent-helper'))||fs.existsSync(this.p('/var/lib/lightmoni-agent-helper')))fail('unexpected_helper_service');
@@ -257,7 +257,7 @@ export class AgentRuntimeMaintenance {
     if (c.runtime_mode === "root" ? !managed : !!managed)
       fail("runtime_execution_identity_mismatch");
     if(managed&&(managed.fenced||managed.pending_results!==0||managed.permission_generation!==c.permission_generation
-      ||managed.ordinary_task_identity?.account!=='lightmoni-task'))fail('managed_execution_not_idle');
+      ||managed.ordinary_task_identity?.account!=='lightmoni-agent'))fail('managed_execution_not_idle');
     if (local.queue_batches !== 0) fail("agent_queue_not_drained");
     return {
       schema: 1,
@@ -289,33 +289,6 @@ export class AgentRuntimeMaintenance {
     if (s.isDirectory())
       for (const name of fs.readdirSync(file))
         this.validateState(path.join(file, name));
-  }
-  removeTaskAccount(snapshot) {
-    const marker=this.p('/var/lib/lightmoni-agent-task-account.json');
-    const recorded=this.json(marker),uid=Number(this.command('/usr/bin/id',['-u','lightmoni-task'])),gid=Number(this.command('/usr/bin/id',['-g','lightmoni-task']));
-    if(recorded.schema!==1||recorded.uid!==uid||recorded.gid!==gid||uid<=0||gid<=0)fail('ordinary_task_identity_changed');
-    const passwd=this.command('/usr/bin/getent',['passwd','lightmoni-task']).split(':');
-    const group=this.command('/usr/bin/getent',['group','lightmoni-task']).split(':');
-    if(passwd.length<7||Number(passwd[2])!==uid||Number(passwd[3])!==gid||passwd[5]!=='/nonexistent'||passwd[6]!=='/usr/sbin/nologin'
-      ||group.length<4||Number(group[2])!==gid||group[3])fail('ordinary_task_account_unmanaged');
-    const processes=this.command('/usr/bin/ps',['-eo','uid=']).split(/\s+/).filter(Boolean);
-    if(processes.includes(String(uid)))fail('ordinary_task_account_busy');
-    this.atomic(snapshot,recorded);
-    this.command('/usr/sbin/userdel',['lightmoni-task']);
-    return recorded;
-  }
-  restoreTaskAccount(snapshot) {
-    const recorded=this.json(snapshot);
-    if(recorded.schema!==1||!Number.isSafeInteger(recorded.uid)||recorded.uid<=0||!Number.isSafeInteger(recorded.gid)||recorded.gid<=0)fail('ordinary_task_identity_changed');
-    try{
-      const group=this.command('/usr/bin/getent',['group','lightmoni-task']).split(':');
-      if(Number(group[2])!==recorded.gid||group[3])fail('ordinary_task_identity_changed');
-    }catch(error){if(error.safeCode)throw error;this.command('/usr/sbin/groupadd',['--system','--gid',String(recorded.gid),'lightmoni-task']);}
-    try{
-      const user=this.command('/usr/bin/getent',['passwd','lightmoni-task']).split(':');
-      if(Number(user[2])!==recorded.uid||Number(user[3])!==recorded.gid||user[5]!=='/nonexistent'||user[6]!=='/usr/sbin/nologin')fail('ordinary_task_identity_changed');
-    }catch(error){if(error.safeCode)throw error;this.command('/usr/sbin/useradd',['--system','--uid',String(recorded.uid),'--no-create-home','--home-dir','/nonexistent','--shell','/usr/sbin/nologin','--gid','lightmoni-task','lightmoni-task']);}
-    this.atomic(this.p('/var/lib/lightmoni-agent-task-account.json'),recorded);
   }
   async apply(input) {
     const keys = [
@@ -377,9 +350,6 @@ export class AgentRuntimeMaintenance {
       dataBackup,
       helperDataMoved = false,
       helperConfigDirectoryRemoved = false,
-      taskAccountRemoved = false,
-      taskAccountCreated = false,
-      taskGroupCreated = false,
       stopped = false,
       mutated = false,
       restored = false,
@@ -482,31 +452,8 @@ export class AgentRuntimeMaintenance {
         }
         fs.rmdirSync(helperConfigDir);
         helperConfigDirectoryRemoved=true;
-        this.removeTaskAccount(path.join(backup,'task-account.json'));
-        taskAccountRemoved=true;
-        this.command('/usr/sbin/groupdel',['lightmoni-task']);
-        fs.unlinkSync(this.p('/var/lib/lightmoni-agent-task-account.json'));
       }else{
         mutated=true;
-        let taskUid,taskGid;
-        try{
-          taskUid=Number(this.command('/usr/bin/id',['-u','lightmoni-task']));
-          taskGid=Number(this.command('/usr/bin/id',['-g','lightmoni-task']));
-          if(!Number.isSafeInteger(taskUid)||taskUid<=0||!Number.isSafeInteger(taskGid)||taskGid<=0)fail('ordinary_task_identity_invalid');
-          const marker=this.p('/var/lib/lightmoni-agent-task-account.json');
-          if(!fs.existsSync(marker))fail('unmanaged_task_account');
-          const recorded=this.json(marker);
-          if(recorded.schema!==1||recorded.uid!==taskUid||recorded.gid!==taskGid)fail('ordinary_task_identity_changed');
-        }catch(error){
-          if(error.safeCode)throw error;
-          try{this.command('/usr/bin/getent',['group','lightmoni-task']);fail('unmanaged_task_group');}
-          catch(error){if(error.safeCode)throw error;if(error.status!==2)fail('task_group_query_failed');}
-          this.command('/usr/sbin/groupadd',['--system','lightmoni-task']);taskGroupCreated=true;
-          this.command('/usr/sbin/useradd',['--system','--no-create-home','--home-dir','/nonexistent','--shell','/usr/sbin/nologin','--gid','lightmoni-task','lightmoni-task']);taskAccountCreated=true;
-          taskUid=Number(this.command('/usr/bin/id',['-u','lightmoni-task']));
-          taskGid=Number(this.command('/usr/bin/id',['-g','lightmoni-task']));
-          this.atomic(this.p('/var/lib/lightmoni-agent-task-account.json'),{schema:1,uid:taskUid,gid:taskGid});
-        }
         fs.mkdirSync(helperConfigDir,{mode:0o700,recursive:true});
         fs.chmodSync(helperConfigDir,0o700);
         fs.mkdirSync(helperDataDir,{mode:0o711});
@@ -577,7 +524,6 @@ export class AgentRuntimeMaintenance {
           if(mutated){
             const configPath=this.p('/etc/lightmoni-agent/config.json');
             if(before.runtime_mode==='root'){
-              if(taskAccountRemoved)this.restoreTaskAccount(path.join(backup,'task-account.json'));
               if(helperDataMoved){
                 fs.rmSync(this.p('/var/lib/lightmoni-agent-helper'),{recursive:true,force:true});
                 fs.renameSync(path.join(dataBackup,'helper-state'),this.p('/var/lib/lightmoni-agent-helper'));
@@ -594,11 +540,6 @@ export class AgentRuntimeMaintenance {
               fs.rmSync(this.p('/var/lib/lightmoni-agent-helper'),{recursive:true,force:true});
               fs.rmSync(this.p('/etc/systemd/system/lightmoni-agent-helper.service'),{force:true});
               this.command('systemctl',['disable','lightmoni-agent-helper.service']);
-              if(taskAccountCreated){
-                this.command('userdel',['lightmoni-task']);taskAccountCreated=false;
-                fs.rmSync(this.p('/var/lib/lightmoni-agent-task-account.json'),{force:true});
-              }
-              if(taskGroupCreated){this.command('groupdel',['lightmoni-task']);taskGroupCreated=false;}
             }
             helperConfigDirectoryRemoved=false;
             this.atomic(configPath,before,0o640);

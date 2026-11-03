@@ -312,9 +312,9 @@ export class PrivilegedExecutorStore {
     let observation:Row;
     try{observation=parseStrictJSON(this.deps.decrypt(row.observation_enc));}catch{return null;}
     const identity=observation.ordinary_task_identity;
-    if(!identity||identity.account!=="lightmoni-task"||!Number.isSafeInteger(identity.uid)||identity.uid<=0||!Number.isSafeInteger(identity.gid)||identity.gid<=0
+    if(!identity||identity.account!=="lightmoni-agent"||!Number.isSafeInteger(identity.uid)||identity.uid<=0||!Number.isSafeInteger(identity.gid)||identity.gid<=0
       ||!Number.isSafeInteger(identity.permission_generation)||identity.permission_generation!==runtime.permission_generation)return null;
-    return {account:"lightmoni-task" as const,uid:identity.uid as number,gid:identity.gid as number,permission_generation:identity.permission_generation as number};
+    return {account:"lightmoni-agent" as const,uid:identity.uid as number,gid:identity.gid as number,permission_generation:identity.permission_generation as number};
   }
   ordinaryTaskCapabilities(machineID:string,agentID:string):string[] {
     const executor=this.deps.db.get<Row>("SELECT id,install_generation FROM privileged_executors WHERE machine_id=? AND agent_id=? AND state='active' ORDER BY install_generation DESC LIMIT 1",machineID,agentID);
@@ -391,9 +391,9 @@ export class PrivilegedExecutorStore {
             &&v.policy_generation===policy.generation&&policy.agent_id===executor.agent_id;
         }catch{approvedTransition=false;}
       }
-      if(identity.account!=="lightmoni-task"||!Number.isSafeInteger(identity.uid)||identity.uid<=0||!Number.isSafeInteger(identity.gid)||identity.gid<=0
+      if(identity.account!=="lightmoni-agent"||!Number.isSafeInteger(identity.uid)||identity.uid<=0||!Number.isSafeInteger(identity.gid)||identity.gid<=0
         ||!Number.isSafeInteger(identity.permission_generation)||!release||(!currentMode&&!approvedTransition))fail(409,"invalid_ordinary_task_identity");
-      v.ordinary_task_identity={account:"lightmoni-task",uid:identity.uid,gid:identity.gid,permission_generation:identity.permission_generation};
+      v.ordinary_task_identity={account:"lightmoni-agent",uid:identity.uid,gid:identity.gid,permission_generation:identity.permission_generation};
     }
     const capabilities = this.capabilities(v.capabilities);
     if(v.operations_capabilities!==undefined&&(!Array.isArray(v.operations_capabilities)||v.operations_capabilities.length>30||v.operations_capabilities.some((c:unknown)=>typeof c!=="string"||!/^operations\.[a-z0-9_.-]{1,64}$/.test(c))))fail(400,"invalid_operations_capabilities");

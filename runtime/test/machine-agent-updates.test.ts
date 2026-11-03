@@ -51,9 +51,9 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     const revision = nodes.effective(operation.agent_id).config.revision;
     const value: any = { agent_id: operation.agent_id, version: status.target.version, release: { ...status.target },
       boot_id: mode === "same_boot" ? OLD_BOOT : NEW_BOOT, last_error: mode === "last_error" ? "report temporarily failed" : "",
-      config_revision: mode === "wrong_config" ? "outdated" : revision, task_capabilities: [SCRIPT_TASK_CAPABILITY] };
+      config_revision: mode === "wrong_config" ? "outdated" : revision, task_capabilities: [], runtime:{mode:"root",permission_generation:1,uid:995,gid:995} };
     if (mode === "wrong_build") value.release.build_id = "unapproved-build";
-    if (["wrong_uid","string_uid","missing_uid"].includes(mode)) value.runtime={mode:"user",permission_generation:1,gid:995,...(mode==="missing_uid"?{}:{uid:mode==="string_uid"?"995":0})};
+    if (["wrong_uid","string_uid","missing_uid"].includes(mode)) value.runtime={mode:"root",permission_generation:1,gid:995,...(mode==="missing_uid"?{}:{uid:mode==="string_uid"?"995":0})};
     db.run("UPDATE agents SET version=?,heartbeat=?,last_seen=? WHERE id=?", status.target.version, JSON.stringify(value), clock.toISOString(), operation.agent_id);
   };
   const runner: SSHRunner = async input => {
@@ -103,9 +103,10 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
   };
   const machines = registerManagedMachines(deps, { sshRunner: runner, agentCredentials: credentials, downloadsDir: downloads,
     dataDir: directory, updatePollIntervalMs: 5, updateHealthTimeoutMs: healthTimeout });
+  const domainJobs = registerAgentJobs(deps,{agentCredentials:credentials});
   const server = createServer(async (req, res) => { if (!await router.handle(req, res)) { res.writeHead(404); res.end(); } });
   server.listen(0, "127.0.0.1"); await once(server, "listening"); origin = "http://127.0.0.1:" + (server.address() as any).port;
-  t.after(async () => { await machines.close?.(); server.closeAllConnections(); server.close(); db.close(); rmSync(directory, { recursive: true, force: true }); });
+  t.after(async () => { await machines.close?.(); domainJobs.close?.(); server.closeAllConnections(); server.close(); db.close(); rmSync(directory, { recursive: true, force: true }); });
   const request = async (path: string, method = "GET", body?: any, headers: Record<string, string> = {}) => {
     const response = await fetch(origin + "/api/v1" + path, { method, headers: { ...(body == null ? {} : { "content-type": "application/json" }), ...headers }, body: body == null ? undefined : JSON.stringify(body) });
     const raw = await response.text(); let data: any; try { data = JSON.parse(raw); } catch { data = raw; }
@@ -118,9 +119,10 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     const credential = await request(`/machines/${mid}/accounts/${account.data.id}/credentials`, "POST", { method: "password", secret: "  actual-login-secret\t", retention: "managed", confirm_managed: true });
     assert.equal(credential.status, 201, credential.raw);
     db.run("UPDATE managed_machines SET agent_id=?,platform='linux',arch='amd64',host_key_fingerprint=? WHERE id=?", agent, "SHA256:fixture-server-identity", mid);
-    db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES(?,?,?,'0.1.0','linux','amd64',?,?)", agent, "identity-" + mid, name, clock.toISOString(), JSON.stringify({ version: "0.1.0", boot_id: OLD_BOOT, release: oldRelease, task_capabilities: [SCRIPT_TASK_CAPABILITY] }));
+    db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES(?,?,?,'0.1.0','linux','amd64',?,?)", agent, "identity-" + mid, name, clock.toISOString(), JSON.stringify({ version: "0.1.0", boot_id: OLD_BOOT, release: oldRelease, task_capabilities: [], runtime:{mode:"root",permission_generation:1,uid:995,gid:995} }));
+    db.run("INSERT INTO machine_agent_runtime(machine_id,agent_id,runtime_mode,permission_generation,updated_at) VALUES(?,?,'root',1,?)",mid,agent,clock.toISOString());
     observations.set(mid, { schema: 1, ready: true, agent_id: agent, arch: "amd64", service_active: true, lifecycle_locked: false, operation_lock: false,
-      current: { ...oldRelease }, previous: { ...previousRelease } });
+      current: { ...oldRelease }, previous: { ...previousRelease },runtime_mode:"root",permission_generation:1,helper_active:true });
     return { id: mid, agent, account:account.data.id, credential: credential.data.credential_id };
   };
   const plan = (mid: string, action = "upgrade") => request(`/machines/${mid}/agent-updates/plan`, "POST", { action, ...(action === "upgrade" ? { target_sha256: release.sha256 } : {}) });
@@ -133,7 +135,18 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     }
     throw Error("update fixture did not settle");
   };
-  return { directory, downloads, release, db, deps, user, nodes, machines, request, host, plan, apply, settle, modes, calls, observations, states, credentials,
+  const taskStore=()=>{
+    const tasks=new TaskRunStore(deps,credentials);
+    tasks.ordinaryTaskIdentity=(machineID,agentID,executorID,generation)=>{
+      const runtime=db.get<any>("SELECT * FROM machine_agent_runtime WHERE machine_id=? AND agent_id=? AND runtime_mode='root'",machineID,agentID);
+      const executor=db.get<any>("SELECT id FROM privileged_executors WHERE id=? AND machine_id=? AND agent_id=? AND install_generation=? AND state='active'",executorID,machineID,agentID,generation);
+      return runtime&&executor?{account:"lightmoni-agent",uid:995,gid:995,permission_generation:runtime.permission_generation}:null;
+    };
+    tasks.nodes.taskScriptCapabilities=(machineID,agentID)=>tasks.ordinaryTaskIdentity?.(machineID,agentID,agentID,1)?["task.script.v1","task.script.v2"]:[];
+    return tasks;
+  };
+  const helper=(agentID:string)=>{const host=db.get<any>("SELECT id FROM managed_machines WHERE agent_id=?",agentID);return {id:agentID,machine_id:host.id,agent_id:agentID,install_generation:1};};
+  return { taskStore, helper, directory, downloads, release, db, deps, user, nodes, machines, request, host, plan, apply, settle, modes, calls, observations, states, credentials,
     advance(seconds: number) { clock = new Date(clock.getTime() + seconds * 1000); },
     setDownloadHook(hook: typeof downloadHook) { downloadHook = hook; }, origin };
 }
@@ -361,7 +374,7 @@ test("lost commit response can be reconciled after a later natural restart witho
   f.observations.get(h.id).current = { ...remote.target, fingerprint: "c".repeat(64), boot_id: restartedBoot };
   f.modes.set(h.id, "hold");
   f.db.run("UPDATE agents SET heartbeat=?,last_seen=? WHERE id=?", JSON.stringify({ agent_id: h.agent, version: remote.target.version,
-    release: remote.target, boot_id: restartedBoot, last_error: "", config_revision: f.nodes.effective(h.agent).config.revision }), f.deps.now().toISOString(), h.agent);
+    release: remote.target, boot_id: restartedBoot, last_error: "", runtime:{mode:"root",permission_generation:1,uid:995,gid:995}, config_revision: f.nodes.effective(h.agent).config.revision }), f.deps.now().toISOString(), h.agent);
   const before = f.calls.length;
   const verified = await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", {});
   assert.equal(verified.data.status, "succeeded", verified.raw);
@@ -413,14 +426,14 @@ test("a missing start receipt cannot release the fence before start deadline or 
 });
 
 test("maintenance fencing prevents conflicting tasks, jobs, deletion, SSH terminals and host changes", async t => {
-  const f = await fixture(t), h = await f.host(), tasks = new TaskRunStore(f.deps, f.credentials), jobs = registerAgentJobs(f.deps, { agentCredentials: f.credentials });
+  const f = await fixture(t), h = await f.host(), tasks = f.taskStore(), jobs = registerAgentJobs(f.deps, { agentCredentials: f.credentials });
   t.after(() => jobs.close?.());
   const task = tasks.nodes.task({ name: "Sample", type: "script", enabled: true, target_all: false, host_ids: [h.id], label_ids: [],
     schedule: { mode: "once" }, script: { runtime: "node", code: "console.log('ok')", timeout_seconds: 5, max_output_bytes: 4096 } }, "update-fence-task", true);
   const p = (await f.plan(h.id)).data;
   assert.throws(() => tasks.dispatch(task.id, { confirm: true }, "admin"), /升级|维护/);
-  assert.equal(tasks.claim(h.agent, [SCRIPT_TASK_CAPABILITY]), null);
-  assert.throws(() => jobs.enqueue({ agentID: h.agent, deploymentID: "deployment-one", operationID: "operation-one", capabilities: ["health.systemd"], actions: [{kind:"health_check",check:{kind:"systemd-active",unit:"app.service"}}] }), /升级|维护/);
+  assert.equal(tasks.claimForHelper(f.helper(h.agent),{capabilities:[SCRIPT_TASK_CAPABILITY]}).run, null);
+  assert.throws(() => jobs.enqueue({ agentID: h.agent, deploymentID: "deployment-one", operationID: "operation-one", capabilities: ["systemd.restart"], actions: [{kind:"systemd",operation:"restart",unit:"app.service"}] }), /升级|维护/);
   assert.equal(jobs.claim(h.agent, []), null);
   assert.throws(() => assertNoPendingAgentUpdate(f.db, h.agent), /升级|维护/);
   assert.throws(() => f.machines.acquireTerminal(h.id, h.credential, () => {}), /升级|维护/);
@@ -432,7 +445,7 @@ test("maintenance fencing prevents conflicting tasks, jobs, deletion, SSH termin
 });
 
 test("interval scheduling skips only the host under maintenance and never catches up its missed slot", async t => {
-  const f = await fixture(t), one = await f.host("scheduled-one"), two = await f.host("scheduled-two"), tasks = new TaskRunStore(f.deps, f.credentials);
+  const f = await fixture(t), one = await f.host("scheduled-one"), two = await f.host("scheduled-two"), tasks = f.taskStore();
   const task = tasks.nodes.task({ name: "Scheduled task", type: "script", enabled: true, target_all: false, host_ids: [one.id, two.id], label_ids: [],
     schedule: { mode: "interval", interval_seconds: 10 }, script: { runtime: "node", code: "console.log('ok')", timeout_seconds: 5, max_output_bytes: 4096 } }, "update-fence-schedule", true);
   tasks.tick(); const p = (await f.plan(one.id)).data; f.advance(10); tasks.tick();
@@ -445,7 +458,7 @@ test("interval scheduling skips only the host under maintenance and never catche
 });
 
 test("maintenance defers automatic retries without closing consent or blocking other hosts and schedules", async t => {
-  const f = await fixture(t), one = await f.host("retry-one"), two = await f.host("retry-two"), tasks = new TaskRunStore(f.deps, f.credentials);
+  const f = await fixture(t), one = await f.host("retry-one"), two = await f.host("retry-two"), tasks = f.taskStore();
   const script = { runtime: "node", code: "console.log('ok')", timeout_seconds: 5, max_output_bytes: 4096 };
   const retryable = tasks.nodes.task({ name: "Retry task", type: "script", enabled: true, target_all: false, host_ids: [one.id, two.id], label_ids: [],
     schedule: { mode: "once" }, script, execution_policy: { retry_count: 1, retry_delay_seconds: 10 } }, "update-fence-retry", true);
@@ -454,8 +467,8 @@ test("maintenance defers automatic retries without closing consent or blocking o
   tasks.dispatch(retryable.id, { confirm: true }, "admin");
   const failed = new Map<string, string>();
   for (const host of [one, two]) {
-    const run = tasks.claim(host.agent, [SCRIPT_TASK_CAPABILITY])!; assert.ok(run);
-    tasks.result(host.agent, run.id, { lease_token: run.lease_token, state: "failed", code: "script_failed", summary: "failed", stdout: "", stderr: "", exit_code: 1 });
+    const run = tasks.claimForHelper(f.helper(host.agent),{capabilities:[SCRIPT_TASK_CAPABILITY]}).run!; assert.ok(run);
+    tasks.resultForHelper(f.helper(host.agent), run.id, { lease_token: run.lease_token, state: "failed", code: "script_failed", summary: "failed", stdout: "", stderr: "", exit_code: 1 });
     failed.set(host.id, run.id);
   }
   tasks.tick(); const p = await f.plan(one.id); assert.equal(p.status, 201, p.raw);
@@ -472,7 +485,7 @@ test("maintenance defers automatic retries without closing consent or blocking o
 });
 
 test("maintenance failures cannot fill the bounded retry scan and starve a later host", async t => {
-  const f = await fixture(t), one = await f.host("blocked-retries"), two = await f.host("eligible-retry"), tasks = new TaskRunStore(f.deps, f.credentials);
+  const f = await fixture(t), one = await f.host("blocked-retries"), two = await f.host("eligible-retry"), tasks = f.taskStore();
   const task = tasks.nodes.task({ name: "Retry window", type: "script", enabled: true, target_all: false, host_ids: [one.id, two.id], label_ids: [],
     schedule: { mode: "once" }, script: { runtime: "node", code: "console.log('ok')", timeout_seconds: 5, max_output_bytes: 4096 },
     execution_policy: { retry_count: 1, retry_delay_seconds: 10 } }, "update-fence-retry-window", true);
@@ -480,8 +493,8 @@ test("maintenance failures cannot fill the bounded retry scan and starve a later
   for (let i = 0; i < 201; i++) {
     const host = i === 200 ? two : one;
     tasks.dispatch(task.id, { confirm: true, host_ids: [host.id] }, "admin");
-    const run = tasks.claim(host.agent, [SCRIPT_TASK_CAPABILITY])!; assert.ok(run);
-    tasks.result(host.agent, run.id, { lease_token: run.lease_token, state: "failed", code: "script_failed", summary: "failed", stdout: "", stderr: "", exit_code: 1 });
+    const run = tasks.claimForHelper(f.helper(host.agent),{capabilities:[SCRIPT_TASK_CAPABILITY]}).run!; assert.ok(run);
+    tasks.resultForHelper(f.helper(host.agent), run.id, { lease_token: run.lease_token, state: "failed", code: "script_failed", summary: "failed", stdout: "", stderr: "", exit_code: 1 });
     if (i === 200) eligibleID = run.id;
   }
   const planned = await f.plan(one.id); assert.equal(planned.status, 201, planned.raw);

@@ -103,7 +103,7 @@ export class TaskRunStore {
     const runtime = this.deps.db.get<any>("SELECT runtime_mode,permission_generation,agent_id FROM machine_agent_runtime WHERE machine_id=?", machineID);
     if (!runtime || runtime.agent_id !== agentID || runtime.runtime_mode !== "root") fail(409, "custom_script_requires_full_management_mode");
     const observed = this.ordinaryTaskIdentity?.(machineID, agentID, executorID, installGeneration);
-    if (!observed || observed.account !== "lightmoni-task" || !Number.isSafeInteger(observed.uid) || observed.uid <= 0
+    if (!observed || observed.account !== "lightmoni-agent" || !Number.isSafeInteger(observed.uid) || observed.uid <= 0
       || !Number.isSafeInteger(observed.gid) || observed.gid <= 0 || observed.permission_generation !== runtime.permission_generation)
       fail(409, "signed_task_helper_unavailable");
     return { ...observed, executor_id: executorID, install_generation: installGeneration, privilege: "user" };

@@ -1,0 +1,581 @@
+{
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "readbackAt": "2026-11-03T10:04:39.324Z",
+  "method": "Authenticated Doca native UI edit, reload, DOM text readback and native diagram clipboard export",
+  "paragraphs": [
+    {
+      "id": "ec47a737-c8ce-42bf-b7f7-d704f872c26c",
+      "text": "87. Agent 统一普通账号与受控高权限能力（SDD 087）"
+    },
+    {
+      "id": "e72f3438-e9b7-406b-aa25-22f62f1dfafe",
+      "text": "交付状态：PR #83 功能分支，待合入。统一普通账号与安装账号修复已实现；完整Runtime回归1321项：1288通过、0失败、33跳过。全项目类型检查与生产构建通过；中文桌面、英文窄屏账号补录/重新检查及凭据交互验证通过。Linux/systemd真实生命周期与生产主机验收尚未完成，本轮未发布镜像或更新线上主机。"
+    },
+    {
+      "id": "3348054d-31a3-4c3b-884b-df8f8e0b43fb",
+      "text": "常驻Agent与普通脚本共用一个非登录系统账号lightmoni-agent，统一承担采集、心跳、平台通信和普通任务执行；不再创建lightmoni-task账号。SSH管理身份仅用于固定生命周期维护，高权限任务由同包root helper按批准内容执行。普通账号没有通用sudo，普通脚本遇到权限错误不自动改用root。"
+    },
+    {
+      "id": "9df3e1c4-a741-4bd1-906d-2476d0b1ae19",
+      "text": "首次登记主机时，SSH用户名默认root，推荐root用于安装维护；也支持具备免交互系统管理sudo的账号。不修改已有账户或服务器root SSH策略，不将用户名当作权限证明，实际检查通过才生成维护计划。用户只管理一套Agent，安装器只新增一个无登录系统账号lightmoni-agent，无需为其录入密码或私钥；root是主机已有管理身份。"
+    },
+    {
+      "id": "56ca1620-e6b5-4c78-92ca-a8587388d708",
+      "text": "完整管理模式下脚本控制由root helper的本机签名身份和许可判定。普通脚本以lightmoni-agent非零UID/GID执行，与常驻Agent同账号，视为受信任运维代码：可读取该账号可读的Agent凭据、修改可写状态并影响同账号进程。最小环境、审批和审计不提供同UID隔离。root helper私钥、授权和恢复账本仍在root私有目录。高权限脚本继续绑定内容、目标、解释器、UID/GID、代次和期限，单独批准与审计；修改计划需要新批准。监控模式无helper、不领取用户脚本。"
+    },
+    {
+      "id": "1418449d-50e3-4c8e-af8a-3bafd427927a",
+      "text": "lightmoni-agent，与常驻Agent相同的非零UID/GID"
+    },
+    {
+      "id": "6fa514ae-98ce-476d-a112-77191b99e46c",
+      "text": "无登录shell、sudo、Docker组或capabilities；不注入SSH/helper秘密，但同账号可读Agent凭据、可写Agent状态。受信任脚本，最小环境、有界运行、取消与完整审计。"
+    },
+    {
+      "id": "790cfdd4-183a-49dd-bb18-86c623399e59",
+      "text": "完整管理普通脚本经TaskRun队列进入helper端复用的TaskRunner，启动前绑定代码摘要、主机、版本、限制和实际Agent UID/GID。脚本降权到lightmoni-agent，清空附加组和capabilities并设置NoNewPrivileges；helper不得以root运行Agent可写文件。领取、续租、回执必须经executor私钥签名端点；Agent bearer不能读取或变更helper脚本作业。签名心跳报告ordinary_task_identity.account=lightmoni-agent、非零UID/GID及permission_generation，身份或代次变化后旧队列不得执行。"
+    },
+    {
+      "id": "6d19cff6-ae47-409f-b4e2-d43ce7545efe",
+      "text": "87.4 安装账号修复与点击流程"
+    },
+    {
+      "id": "426af031-9f8a-449e-baa9-a3e1da44fee6",
+      "text": "安装默认自动检查已登记账号：优先root，其次已证明具备免交互系统管理sudo的账号。无可用凭据、凭据过期/撤销/不可复用、权限不足、连接失败、主机条件不满足和检查结果无效分别返回结构化原因与下一步。无效检查不能伪装成缺sudo；混合候选保留已确认的权限诊断。手动选择只检查指定账号，失效同样记录失败选择审计。"
+    },
+    {
+      "id": "772da166-6a8d-4f2f-ad54-999b282177fd",
+      "text": "界面主路径是“检查安装账号 → 审阅计划 → 确认安装”，失败原因置顶，身份和检查明细折叠。账号不足时保留版本、标签和管理模式，提供添加账号、管理账号与重新检查；新账号自动展开凭据输入，保存后返回原操作。检查、升级/回退、卸载和逐主机批量流程复用同一修复入口。添加或修改账号后必须重新检查并审阅新计划，不自动安装、不替换已批准身份；远端变更已派发或结果unknown时只能只读核对，不跨账号重放。"
+    },
+    {
+      "id": "52a6ac26-be9c-476b-ae0d-a34eae21bd1b",
+      "text": "87.5 移除与兼容边界"
+    },
+    {
+      "id": "97af6db2-5fc1-4902-89f4-a2362527a9cb",
+      "text": "第83章root常驻Agent unit由本章取代，两种模式的网络Agent均非root。普通脚本统一使用lightmoni-agent，删除未发布的lightmoni-task账号创建、标记、恢复、删除和残留检查，不保留旧task身份兼容；helper签名及恢复账本继续root私有。旧root常驻安装需用原版本受管维护流程卸载后重装，新卸载器不接管旧运行态。监控模式无helper、不自动领取脚本；中心schema保持SDD084约定。"
+    },
+    {
+      "id": "b97ffb91-a99d-4f35-a594-38cb58d04a9a",
+      "text": "业务SDK继续独立直报中心。Agent control仅用于遥测控制与配置同步；普通脚本由完整管理模式helper签名身份领取，快照固定Agent UID/GID与权限代次，Agent bearer不提供脚本通道。脚本与常驻Agent同账号，可读取该账号可读凭据和修改可写状态；环境不注入SSH、helper私钥或中心模型Key。AI仅能生成持久化提案，不能调用apply或绕过用户审阅直接执行脚本。"
+    },
+    {
+      "id": "882becf7-4582-464d-9b35-2fd96b25a3f9",
+      "text": "历史架构：本章关于Agent与运维组件的独立发行、普通脚本运行账号和容器能力拓扑已被第87章取代。当前Agent恒以lightmoni-agent运行，普通脚本由同包helper启动并降权到同一账号，Docker操作由root helper按授权执行；不要据本章添加Docker组、socket授权或让网络Agent以root执行脚本。"
+    },
+    {
+      "id": "f0389891-1cf1-46b4-a493-1be620a7b16a",
+      "text": "配套变更：SDD019系统设计基线。主机登录账户以第84章为准，Agent权限与生命周期以第87章（SDD087，功能分支待合入）为准：常驻Agent和普通脚本共用lightmoni-agent非root账号；完整管理同包安装root helper，监控模式无helper、不领取脚本。普通脚本视为受信任运维代码，可访问Agent账号可读凭据和可写状态；root签名凭据和账本保持私有。高权限作业复用内容/目标固定的授权、批准和审计。SSH root或免交互sudo仅用于固定维护。第83章root常驻拓扑和第60、71、80章独立发行维护方式均为历史方案。"
+    },
+    {
+      "id": "33e36e99-a57f-4330-bd1a-c287be934ce4",
+      "text": "Agent权限与普通脚本身份以第87章为准：完整管理普通脚本由root helper降权到与常驻Agent相同的lightmoni-agent账号，可访问Agent账号可读凭据与可写状态，不构成不可信代码沙箱。仅监控不领取脚本。默认拨测未配置地址时为待配置。SDD048支持脚本上传/编辑、单次定时、固定间隔和五段Cron/IANA时区；args/cwd需要task.script.v2。不支持持续守护脚本、跨主机DAG、任意运行时/秘密注入或分布式exactly-once。"
+    },
+    {
+      "id": "41c6b416-4210-4a94-81d7-ffc361b0d9a4",
+      "text": "脚本文件在root控制的任务父目录内，每次运行目录归统一的lightmoni-agent账号所有。显式绝对cwd不存在或无权限时失败，不静默回退；固定解释器，args原样传递。环境不注入SSH或helper秘密，但同UID脚本可读取Agent可读配置/凭据并修改其可写状态。按进程组处理超时、取消和输出上限，不构成沙箱。运行中或未核对unknown阻止主机删除、身份替换或卸载；管理员填写现场核查结论解除阻塞，历史仍为unknown，不重放、不改成功、不接受晚回执，人工核对本身不证明进程停止。"
+    },
+    {
+      "id": "528c6960-0b06-403d-b6d3-5e4222731962",
+      "text": "当前普通脚本与常驻Agent共用lightmoni-agent账号，视作受信任运维代码；第87章替代此前独立lightmoni-task提案。网络Agent始终非root，root能力由同包helper精确授权，不能从同UID或自报能力推断root权限。"
+    },
+    {
+      "id": "cb7fab24-07c2-4652-af75-9f17b1f2af4a",
+      "text": "检查和保存不会安装、改变管理模式或执行root任务。SSH管理账号只负责固定维护。首装默认完整管理，也可仅监控；两种模式的Agent常驻均非root。普通任务统一lightmoni-agent，高权限作业由同包root helper单独批准。账号均不合格时保留当前安装表单，提供添加SSH账号、管理账号和重新检查；新账号须重新检查后审阅新计划，不自动安装。具体流程以第87章为准。"
+    }
+  ],
+  "graphs": [
+    {
+      "id": "29f1bf9c-9bc8-45a0-9d10-b5d53f872b50",
+      "nodes": [
+        {
+          "id": "034ff859-0e69-4890-bccc-8e76ce1cb972",
+          "label": "平台管理员审阅"
+        },
+        {
+          "id": "a7ffde3a-88b0-486e-8aa1-9c6cacadd6a5",
+          "label": "中心计划 / 固定身份 / 审计"
+        },
+        {
+          "id": "9bc25b12-aabf-459f-8ea5-8933922c3846",
+          "label": "登记 SSH 管理账号\nroot 或免交互 sudo"
+        },
+        {
+          "id": "0861ff03-25a3-499c-84c0-ecd13aa85a14",
+          "label": "统一维护程序\n安装 / 升级 / 回退 / 卸载"
+        },
+        {
+          "id": "60e2c4a9-ca76-4717-97c2-c63672cfe55d",
+          "label": "lightmoni-agent.service\n始终非 root"
+        },
+        {
+          "id": "6cb3448c-c3b5-481d-b84f-ad0983b4d5db",
+          "label": "lightmoni-agent-helper.service\n完整管理模式 / UID0"
+        },
+        {
+          "id": "b66da121-6fa0-4be0-94a5-496d4b3f841c",
+          "label": "普通脚本\nlightmoni-agent 同UID"
+        },
+        {
+          "id": "cdd43bdc-ea27-43b8-8913-041b3ad3eb7a",
+          "label": "明确批准的 root 任务\n固定内容 / 目标 / 审计"
+        }
+      ],
+      "edges": [
+        {
+          "source": "034ff859-0e69-4890-bccc-8e76ce1cb972",
+          "target": "a7ffde3a-88b0-486e-8aa1-9c6cacadd6a5",
+          "sourceLabel": "平台管理员审阅",
+          "targetLabel": "中心计划 / 固定身份 / 审计",
+          "label": ""
+        },
+        {
+          "source": "a7ffde3a-88b0-486e-8aa1-9c6cacadd6a5",
+          "target": "0861ff03-25a3-499c-84c0-ecd13aa85a14",
+          "sourceLabel": "中心计划 / 固定身份 / 审计",
+          "targetLabel": "统一维护程序\n安装 / 升级 / 回退 / 卸载",
+          "label": "冻结 SSH 维护计划"
+        },
+        {
+          "source": "9bc25b12-aabf-459f-8ea5-8933922c3846",
+          "target": "0861ff03-25a3-499c-84c0-ecd13aa85a14",
+          "sourceLabel": "登记 SSH 管理账号\nroot 或免交互 sudo",
+          "targetLabel": "统一维护程序\n安装 / 升级 / 回退 / 卸载",
+          "label": ""
+        },
+        {
+          "source": "0861ff03-25a3-499c-84c0-ecd13aa85a14",
+          "target": "60e2c4a9-ca76-4717-97c2-c63672cfe55d",
+          "sourceLabel": "统一维护程序\n安装 / 升级 / 回退 / 卸载",
+          "targetLabel": "lightmoni-agent.service\n始终非 root",
+          "label": "两种模式均安装"
+        },
+        {
+          "source": "0861ff03-25a3-499c-84c0-ecd13aa85a14",
+          "target": "6cb3448c-c3b5-481d-b84f-ad0983b4d5db",
+          "sourceLabel": "统一维护程序\n安装 / 升级 / 回退 / 卸载",
+          "targetLabel": "lightmoni-agent-helper.service\n完整管理模式 / UID0",
+          "label": "仅完整管理模式"
+        },
+        {
+          "source": "60e2c4a9-ca76-4717-97c2-c63672cfe55d",
+          "target": "a7ffde3a-88b0-486e-8aa1-9c6cacadd6a5",
+          "sourceLabel": "lightmoni-agent.service\n始终非 root",
+          "targetLabel": "中心计划 / 固定身份 / 审计",
+          "label": "出站遥测 / 配置"
+        },
+        {
+          "source": "6cb3448c-c3b5-481d-b84f-ad0983b4d5db",
+          "target": "a7ffde3a-88b0-486e-8aa1-9c6cacadd6a5",
+          "sourceLabel": "lightmoni-agent-helper.service\n完整管理模式 / UID0",
+          "targetLabel": "中心计划 / 固定身份 / 审计",
+          "label": "出站签名领取 / 回执"
+        },
+        {
+          "source": "6cb3448c-c3b5-481d-b84f-ad0983b4d5db",
+          "target": "b66da121-6fa0-4be0-94a5-496d4b3f841c",
+          "sourceLabel": "lightmoni-agent-helper.service\n完整管理模式 / UID0",
+          "targetLabel": "普通脚本\nlightmoni-agent 同UID",
+          "label": "启动前降权"
+        },
+        {
+          "source": "6cb3448c-c3b5-481d-b84f-ad0983b4d5db",
+          "target": "cdd43bdc-ea27-43b8-8913-041b3ad3eb7a",
+          "sourceLabel": "lightmoni-agent-helper.service\n完整管理模式 / UID0",
+          "targetLabel": "明确批准的 root 任务\n固定内容 / 目标 / 审计",
+          "label": "批准 + 单步许可"
+        }
+      ]
+    },
+    {
+      "id": "81a4b066-cba3-45e7-ba0e-693e4e204820",
+      "nodes": [
+        {
+          "id": "9277c1c1-a63d-4865-b1fb-690fb7886045",
+          "label": "管理员"
+        },
+        {
+          "id": "d415c00c-3a40-4a38-a105-74e8031194cb",
+          "label": "中心计划与账本"
+        },
+        {
+          "id": "3d7b9945-cd5c-4207-9f37-d3c18c09b71f",
+          "label": "lightmoni-agent\n非 root"
+        },
+        {
+          "id": "b6cdc48f-f126-40b3-8bdd-8fdca66ddd7d",
+          "label": "root helper"
+        },
+        {
+          "id": "14b2e8d2-7397-4a4c-a6f3-a782900499d2",
+          "label": "普通脚本 lightmoni-agent"
+        }
+      ],
+      "edges": [
+        {
+          "source": {
+            "x": 186,
+            "y": 171
+          },
+          "target": {
+            "x": 186,
+            "y": 921
+          },
+          "sourceLabel": "管理员",
+          "targetLabel": "管理员",
+          "label": "",
+          "kind": "lifeline"
+        },
+        {
+          "source": {
+            "x": 446,
+            "y": 171
+          },
+          "target": {
+            "x": 446,
+            "y": 921
+          },
+          "sourceLabel": "中心计划与账本",
+          "targetLabel": "中心计划与账本",
+          "label": "",
+          "kind": "lifeline"
+        },
+        {
+          "source": {
+            "x": 706,
+            "y": 171
+          },
+          "target": {
+            "x": 706,
+            "y": 921
+          },
+          "sourceLabel": "lightmoni-agent\n非 root",
+          "targetLabel": "lightmoni-agent\n非 root",
+          "label": "",
+          "kind": "lifeline"
+        },
+        {
+          "source": {
+            "x": 966,
+            "y": 171
+          },
+          "target": {
+            "x": 966,
+            "y": 921
+          },
+          "sourceLabel": "root helper",
+          "targetLabel": "root helper",
+          "label": "",
+          "kind": "lifeline"
+        },
+        {
+          "source": {
+            "x": 1226,
+            "y": 171
+          },
+          "target": {
+            "x": 1226,
+            "y": 921
+          },
+          "sourceLabel": "普通脚本 lightmoni-agent",
+          "targetLabel": "普通脚本 lightmoni-agent",
+          "label": "",
+          "kind": "lifeline"
+        },
+        {
+          "source": {
+            "x": 186,
+            "y": 246
+          },
+          "target": {
+            "x": 446,
+            "y": 246
+          },
+          "sourceLabel": "管理员",
+          "targetLabel": "中心计划与账本",
+          "label": "1. 登记 SSH，审阅安装模式",
+          "kind": "message"
+        },
+        {
+          "source": {
+            "x": 446,
+            "y": 321
+          },
+          "target": {
+            "x": 966,
+            "y": 321
+          },
+          "sourceLabel": "中心计划与账本",
+          "targetLabel": "root helper",
+          "label": "2. 固定 SSH 维护包：安装 / 维护 helper",
+          "kind": "message"
+        },
+        {
+          "source": {
+            "x": 966,
+            "y": 396
+          },
+          "target": {
+            "x": 446,
+            "y": 396
+          },
+          "sourceLabel": "root helper",
+          "targetLabel": "中心计划与账本",
+          "label": "3. 签名身份与权限代次",
+          "kind": "message"
+        },
+        {
+          "source": {
+            "x": 706,
+            "y": 471
+          },
+          "target": {
+            "x": 446,
+            "y": 471
+          },
+          "sourceLabel": "lightmoni-agent\n非 root",
+          "targetLabel": "中心计划与账本",
+          "label": "4. 非 root 心跳与遥测",
+          "kind": "message"
+        },
+        {
+          "source": {
+            "x": 966,
+            "y": 546
+          },
+          "target": {
+            "x": 446,
+            "y": 546
+          },
+          "sourceLabel": "root helper",
+          "targetLabel": "中心计划与账本",
+          "label": "5. 独立签名领取任务",
+          "kind": "message"
+        },
+        {
+          "source": {
+            "x": 446,
+            "y": 621
+          },
+          "target": {
+            "x": 966,
+            "y": 621
+          },
+          "sourceLabel": "中心计划与账本",
+          "targetLabel": "root helper",
+          "label": "6. 固定普通 / 高权作业与授权",
+          "kind": "message"
+        },
+        {
+          "source": {
+            "x": 966,
+            "y": 696
+          },
+          "target": {
+            "x": 1226,
+            "y": 696
+          },
+          "sourceLabel": "root helper",
+          "targetLabel": "普通脚本 lightmoni-agent",
+          "label": "7. 普通脚本降权到 Agent 非零UID",
+          "kind": "message"
+        },
+        {
+          "source": {
+            "x": 1226,
+            "y": 771
+          },
+          "target": {
+            "x": 966,
+            "y": 771
+          },
+          "sourceLabel": "普通脚本 lightmoni-agent",
+          "targetLabel": "root helper",
+          "label": "8. 结构化退出与有界输出",
+          "kind": "message"
+        },
+        {
+          "source": {
+            "x": 966,
+            "y": 846
+          },
+          "target": {
+            "x": 446,
+            "y": 846
+          },
+          "sourceLabel": "root helper",
+          "targetLabel": "中心计划与账本",
+          "label": "9. 固定身份与审计回执",
+          "kind": "message"
+        }
+      ]
+    },
+    {
+      "id": "task043-control-flow",
+      "nodes": [
+        {
+          "id": "4be38271-e1d4-4117-aee5-ffea7283fd5c",
+          "label": "管理员 / AI 助手"
+        },
+        {
+          "id": "2362509f-4248-44d3-9ce6-f6ac51592f38",
+          "label": "用户审阅代码、目标与影响"
+        },
+        {
+          "id": "da1f6e7f-f3bd-4869-b1ed-156689935f77",
+          "label": "主机 ID 与主机标签"
+        },
+        {
+          "id": "05fcd7e9-79a4-4b9e-b4d7-44b2c2f7fb71",
+          "label": "任务中心：定义与目标解析"
+        },
+        {
+          "id": "0806fbb9-262e-4e21-9c83-7fb029721a1a",
+          "label": "单机启用与参数覆盖"
+        },
+        {
+          "id": "674b4da3-64f6-480a-ad34-777e53774451",
+          "label": "持续内置配置 / revision"
+        },
+        {
+          "id": "ec3f4ba4-861d-404f-b446-b5df0d077312",
+          "label": "有限脚本不可变执行快照"
+        },
+        {
+          "id": "fee56c50-f64b-484b-8fa9-a40807a09017",
+          "label": "常驻 Agent 非 root\n出站 control / 配置"
+        },
+        {
+          "id": "65f92f1f-e7f2-4b8c-9089-de6f29e5afd9",
+          "label": "指标 / 拨测 / 日志处理器"
+        },
+        {
+          "id": "74131016-43a0-4055-80fd-4a5b96052085",
+          "label": "普通脚本 lightmoni-agent\n同账号 / 有界子进程"
+        },
+        {
+          "id": "1b33c350-3b22-453c-b304-ac9b8eb0a035",
+          "label": "SDK / data 通道上报遥测"
+        },
+        {
+          "id": "84960e65-f6d1-4d6d-bf4f-556af49b6b64",
+          "label": "领取租约 / 心跳 / 有界结果"
+        },
+        {
+          "id": "ecb641d7-d80b-4bfc-a8a4-b2bb73c724aa",
+          "label": "root helper / task-runs\n完整管理模式 / 签名身份"
+        }
+      ],
+      "edges": [
+        {
+          "source": "4be38271-e1d4-4117-aee5-ffea7283fd5c",
+          "target": "2362509f-4248-44d3-9ce6-f6ac51592f38",
+          "sourceLabel": "管理员 / AI 助手",
+          "targetLabel": "用户审阅代码、目标与影响",
+          "label": "提案不执行"
+        },
+        {
+          "source": "2362509f-4248-44d3-9ce6-f6ac51592f38",
+          "target": "05fcd7e9-79a4-4b9e-b4d7-44b2c2f7fb71",
+          "sourceLabel": "用户审阅代码、目标与影响",
+          "targetLabel": "任务中心：定义与目标解析",
+          "label": "明确批准"
+        },
+        {
+          "source": "da1f6e7f-f3bd-4869-b1ed-156689935f77",
+          "target": "05fcd7e9-79a4-4b9e-b4d7-44b2c2f7fb71",
+          "sourceLabel": "主机 ID 与主机标签",
+          "targetLabel": "任务中心：定义与目标解析",
+          "label": ""
+        },
+        {
+          "source": "0806fbb9-262e-4e21-9c83-7fb029721a1a",
+          "target": "05fcd7e9-79a4-4b9e-b4d7-44b2c2f7fb71",
+          "sourceLabel": "单机启用与参数覆盖",
+          "targetLabel": "任务中心：定义与目标解析",
+          "label": ""
+        },
+        {
+          "source": "05fcd7e9-79a4-4b9e-b4d7-44b2c2f7fb71",
+          "target": "674b4da3-64f6-480a-ad34-777e53774451",
+          "sourceLabel": "任务中心：定义与目标解析",
+          "targetLabel": "持续内置配置 / revision",
+          "label": ""
+        },
+        {
+          "source": "05fcd7e9-79a4-4b9e-b4d7-44b2c2f7fb71",
+          "target": "ec3f4ba4-861d-404f-b446-b5df0d077312",
+          "sourceLabel": "任务中心：定义与目标解析",
+          "targetLabel": "有限脚本不可变执行快照",
+          "label": ""
+        },
+        {
+          "source": "674b4da3-64f6-480a-ad34-777e53774451",
+          "target": "fee56c50-f64b-484b-8fa9-a40807a09017",
+          "sourceLabel": "持续内置配置 / revision",
+          "targetLabel": "常驻 Agent 非 root\n出站 control / 配置",
+          "label": "拉取配置"
+        },
+        {
+          "source": "ec3f4ba4-861d-404f-b446-b5df0d077312",
+          "target": "ecb641d7-d80b-4bfc-a8a4-b2bb73c724aa",
+          "sourceLabel": "有限脚本不可变执行快照",
+          "targetLabel": "root helper / task-runs\n完整管理模式 / 签名身份",
+          "label": "独立签名领取"
+        },
+        {
+          "source": "fee56c50-f64b-484b-8fa9-a40807a09017",
+          "target": "65f92f1f-e7f2-4b8c-9089-de6f29e5afd9",
+          "sourceLabel": "常驻 Agent 非 root\n出站 control / 配置",
+          "targetLabel": "指标 / 拨测 / 日志处理器",
+          "label": ""
+        },
+        {
+          "source": "ecb641d7-d80b-4bfc-a8a4-b2bb73c724aa",
+          "target": "74131016-43a0-4055-80fd-4a5b96052085",
+          "sourceLabel": "root helper / task-runs\n完整管理模式 / 签名身份",
+          "targetLabel": "普通脚本 lightmoni-agent\n同账号 / 有界子进程",
+          "label": "启动前降权"
+        },
+        {
+          "source": "65f92f1f-e7f2-4b8c-9089-de6f29e5afd9",
+          "target": "1b33c350-3b22-453c-b304-ac9b8eb0a035",
+          "sourceLabel": "指标 / 拨测 / 日志处理器",
+          "targetLabel": "SDK / data 通道上报遥测",
+          "label": ""
+        },
+        {
+          "source": "74131016-43a0-4055-80fd-4a5b96052085",
+          "target": "84960e65-f6d1-4d6d-bf4f-556af49b6b64",
+          "sourceLabel": "普通脚本 lightmoni-agent\n同账号 / 有界子进程",
+          "targetLabel": "领取租约 / 心跳 / 有界结果",
+          "label": ""
+        },
+        {
+          "source": "84960e65-f6d1-4d6d-bf4f-556af49b6b64",
+          "target": "ec3f4ba4-861d-404f-b446-b5df0d077312",
+          "sourceLabel": "领取租约 / 心跳 / 有界结果",
+          "targetLabel": "有限脚本不可变执行快照",
+          "label": "提交结果"
+        }
+      ]
+    }
+  ],
+  "preserved": [
+    "Original native diagram blocks and graph edges",
+    "Unrelated design chapters, SDD089 and NAT/health target descriptions"
+  ],
+  "verified": {
+    "reloaded": true,
+    "ordinaryTaskAccount": "lightmoni-agent",
+    "separateTaskOSAccountRemoved": true,
+    "rootHelperBoundary": true,
+    "installationAccountRecovery": true
+  },
+  "screenshots": [
+    "single-account-doca-overview.jpg",
+    "single-account-doca-architecture.jpg",
+    "single-account-doca-sequence.jpg",
+    "single-account-doca-task-flow.jpg"
+  ]
+}

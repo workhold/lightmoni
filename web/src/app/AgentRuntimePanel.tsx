@@ -624,8 +624,8 @@ export default function AgentRuntimePanel({
       />
       <Typography.Paragraph type="secondary">
         {t(
-          "Agent 常驻服务始终以 lightmoni-agent 非 root 账户运行。完整管理模式另安装同版本 root 管理组件，作为单独受管服务运行；普通脚本固定降权至 lightmoni-task 执行。仅监控模式不领取自定义脚本。Agent 与管理组件使用同一升级和卸载流程。",
-          "The resident Agent service always runs unprivileged as lightmoni-agent. Full management adds a version-matched root management component as a separately managed service; ordinary scripts run as lightmoni-task. Monitoring-only mode does not accept custom scripts. The Agent and management component share one upgrade and uninstall lifecycle.",
+          "Agent 常驻服务始终以 lightmoni-agent 非 root 账户运行。完整管理模式另安装同版本 root 管理组件，作为单独受管服务运行；普通脚本固定降权至 lightmoni-agent 执行。仅监控模式不领取自定义脚本。Agent 与管理组件使用同一升级和卸载流程。",
+          "The resident Agent service always runs unprivileged as lightmoni-agent. Full management adds a version-matched root management component as a separately managed service; ordinary scripts run as lightmoni-agent. Monitoring-only mode does not accept custom scripts. The Agent and management component share one upgrade and uninstall lifecycle.",
         )}
       </Typography.Paragraph>
       {error && !open && <Alert type="error" showIcon title={error} />}
@@ -660,8 +660,8 @@ export default function AgentRuntimePanel({
         >
           <Typography.Paragraph>
             {t(
-              "通过已登记主机的 root 或免交互 sudo SSH 凭据切换 Agent 权限模式。Agent 常驻服务始终由 lightmoni-agent 非 root 账户运行；完整管理模式会安装或移除同版本、独立受管的 root 管理组件，普通脚本固定以 lightmoni-task 执行，仅监控模式拒绝自定义脚本。保留主机和 Agent ID；升级保留当前模式，切换不会扩大已有任务授权。启用的容器管理、高权限脚本和受管主机操作仍逐项审阅、批准并留审计。",
-              "Use the registered host’s root or non-interactive sudo SSH credential to switch Agent permission modes. The resident Agent service always runs as the unprivileged lightmoni-agent account; full management installs or removes a version-matched, separately managed root component, ordinary scripts run as lightmoni-task, and monitoring-only mode rejects custom scripts. Host and Agent IDs are retained; upgrades keep the current mode, and switching never expands existing task authorization. Container management, elevated scripts, and managed host operations remain individually reviewed, approved, and audited.",
+              "通过已登记主机的 root 或免交互 sudo SSH 凭据切换 Agent 权限模式。Agent 常驻服务始终由 lightmoni-agent 非 root 账户运行；完整管理模式会安装或移除同版本、独立受管的 root 管理组件，普通脚本固定以 lightmoni-agent 执行，仅监控模式拒绝自定义脚本。保留主机和 Agent ID；升级保留当前模式，切换不会扩大已有任务授权。启用的容器管理、高权限脚本和受管主机操作仍逐项审阅、批准并留审计。",
+              "Use the registered host’s root or non-interactive sudo SSH credential to switch Agent permission modes. The resident Agent service always runs as the unprivileged lightmoni-agent account; full management installs or removes a version-matched, separately managed root component, ordinary scripts run as lightmoni-agent, and monitoring-only mode rejects custom scripts. Host and Agent IDs are retained; upgrades keep the current mode, and switching never expands existing task authorization. Container management, elevated scripts, and managed host operations remain individually reviewed, approved, and audited.",
             )}
           </Typography.Paragraph>
           <Alert

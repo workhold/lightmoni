@@ -1,0 +1,9 @@
+{
+  "checked": [
+    "insufficient installation privilege gives a visible next step without dispatch",
+    "adding an account opens credential entry, preserves the original form, and requires a fresh plan and approval",
+    "English narrow layout lets hosts without credentials enter setup and return without losing the deployment dialog"
+  ],
+  "errors": [],
+  "unexpected": []
+}

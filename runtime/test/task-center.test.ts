@@ -36,7 +36,7 @@ function fixture() {
   store.ordinaryTaskIdentity=(machineID,agentID,executorID,installGeneration)=>{
     const runtime=db.get<any>("SELECT * FROM machine_agent_runtime WHERE machine_id=? AND agent_id=? AND runtime_mode='root'",machineID,agentID);
     const executor=db.get<any>("SELECT id FROM privileged_executors WHERE id=? AND machine_id=? AND agent_id=? AND install_generation=? AND state='active'",executorID,machineID,agentID,installGeneration);
-    return runtime&&executor?{account:"lightmoni-task",uid:1001,gid:1001,permission_generation:runtime.permission_generation}:null;
+    return runtime&&executor?{account:"lightmoni-agent",uid:1001,gid:1001,permission_generation:runtime.permission_generation}:null;
   };
   store.nodes.taskScriptCapabilities=(machineID,agentID)=>{
     const executor=db.get<any>("SELECT id,install_generation FROM privileged_executors WHERE machine_id=? AND agent_id=? AND state='active' ORDER BY install_generation DESC LIMIT 1",machineID,agentID);
@@ -80,7 +80,7 @@ test("manual dispatch validates confirmation and targets atomically, snapshots c
     assert.throws(() => f.store.dispatch("script-one", { confirm: true, host_ids: ["two"] }, "admin"), /outside task targets/);
     const run = f.store.dispatch("script-one", { confirm: true, request_id: "safe-request" }, "admin").runs[0];
     assert.equal(run.state, "queued"); assert.equal(Object.hasOwn(run, "lease_token"), false);
-    assert.deepEqual(run.snapshot.execution_identity,{account:"lightmoni-task",uid:1001,gid:1001,permission_generation:3,executor_id:"helper-one",install_generation:1,privilege:"user"});
+    assert.deepEqual(run.snapshot.execution_identity,{account:"lightmoni-agent",uid:1001,gid:1001,permission_generation:3,executor_id:"helper-one",install_generation:1,privilege:"user"});
     assert.equal(run.requested_by,"admin");
     assert.equal(f.store.dispatch("script-one", { confirm: true, request_id: "safe-request" }, "admin").runs[0].id, run.id);
     assert.equal(f.store.list().length, 1);

@@ -1,3 +1,5 @@
+import SSHAccountsDialog from './SSHAccountsDialog';
+import InstallationAccountRecovery,{missingInstallationAccount} from './InstallationAccountRecovery';
 import AgentOperationProgress from './AgentOperationProgress';
 import {agentOperationCanAdvance,agentOperationReadSignal} from './agent-operation-progress';
 import {type SSHAccount,type SSHAccountHost,sshCredentialLabel} from './machine-credentials';
@@ -32,6 +34,7 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
  const pending=useRef(false),mounted=useRef(true),recordRef=useRef(record),recovery=useRef<PlanRecovery|undefined>(undefined),readVersion=useRef(0);
  recordRef.current=record;
  const prefix=`/machines/${encodeURIComponent(machine.id)}/uninstallations`;
+ const [accountEditor,setAccountEditor]=useState<'add'|'manage'>();
  const keys=credentials.filter(c=>reusableMachineCredential(c));
  const standardAllowed=machine.capabilities?.uninstall_agent?.available!==false;
  const recoveryAllowed=machine.capabilities?.recovery_uninstall_agent?.available===true;
@@ -177,7 +180,7 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
     <Button aria-label={t('刷新操作状态','Refresh operation status')} disabled={busy} onClick={()=>void refresh()}>{t('刷新操作状态','Refresh operation status')}</Button>
    </Space>
  </>:null;
- return <Modal className="lm-agent-uninstall-dialog" title={<><span>{t(`卸载 LightMoni Agent · ${machine.name}`,`Uninstall LightMoni Agent · ${machine.name}`)}</span>{record&&<Alert className="lm-machine-form-notice" showIcon type={succeeded?'success':record.status==='unknown'?'warning':record.status==='failed'?'error':'info'} title={status} description={statusDescription}/>}</>} open style={{top:24}} onCancel={()=>{if(!busy)onClose()}} closable={!busy} maskClosable={false} footer={actions} width={820} destroyOnHidden>
+ return <><Modal className="lm-agent-uninstall-dialog" title={<><span>{t(`卸载 LightMoni Agent · ${machine.name}`,`Uninstall LightMoni Agent · ${machine.name}`)}</span>{record&&<Alert className="lm-machine-form-notice" showIcon type={succeeded?'success':record.status==='unknown'?'warning':record.status==='failed'?'error':'info'} title={status} description={statusDescription}/>}</>} open style={{top:24}} onCancel={()=>{if(!busy)onClose()}} closable={!busy} maskClosable={false} footer={actions} width={820} destroyOnHidden>
   {!record&&<>
    <Radio.Group aria-label={t('卸载方式','Uninstall method')} value={mode} disabled={busy||planUncertain} onChange={event=>{setMode(event.target.value);setError('');setCheck(undefined)}} className="lm-machine-form-notice">
     <Radio.Button value="standard" disabled={!standardAllowed}>{t('标准卸载','Standard uninstall')}</Radio.Button><Radio.Button value="recovery" disabled={!recoveryAllowed}>{t('SSH 恢复卸载（强制）','SSH recovery uninstall (forced)')}</Radio.Button><Radio.Button value="manual">{t('离线脚本','Offline script')}</Radio.Button>
@@ -190,8 +193,9 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
      <Form.Item><Checkbox checked={purge} onChange={event=>setPurge(event.target.checked)}>{t('同时清除 Agent 配置、身份与缓存','Also purge Agent configuration, identity, and cache')}</Checkbox><Typography.Paragraph type="secondary">{dataPolicy(purge)}{t('；业务服务、业务数据与系统用户保留。生成计划后不可更改此选项。','; business services, business data, and the system user are retained. This choice is fixed when the plan is created.')}</Typography.Paragraph></Form.Item>
      <Button aria-label={t('核对身份并生成卸载计划','Verify identity and create uninstall plan')} type="primary" htmlType="submit" loading={busy} block disabled={!credential||!keys.some(key=>key.id===credential)||mode==='standard'&&!standardAllowed||mode==='recovery'&&(!recoveryAllowed||!reasonValid)||planUncertain}>{t('核对身份并生成卸载计划','Verify identity and create uninstall plan')}</Button>
     </Form>
-    {!keys.length&&<Alert type="info" showIcon title={t('请先添加有效私钥或可复用密码，或使用离线脚本','Add an active key or reusable password, or use the offline script')}/>}
-    {check&&<SSHCheckSummary result={check}/>}
+    {!keys.length&&<InstallationAccountRecovery recovery={missingInstallationAccount(credentials)} onAddAccount={()=>setAccountEditor('add')} onManageAccounts={()=>setAccountEditor('manage')}/>}
+    <Button className="lm-machine-form-notice" disabled={busy||planUncertain} onClick={()=>setAccountEditor('manage')}>{t('管理账号与凭据','Manage accounts and credentials')}</Button>
+    {check&&<SSHCheckSummary result={check} onAddAccount={()=>setAccountEditor('add')} onManageAccounts={()=>setAccountEditor('manage')}/>}
    </>}
    {planUncertain&&<Alert showIcon type="warning" title={t('计划创建结果未确认，已禁止重复创建','Plan creation is uncertain; duplicate creation is blocked')} description={t('仅刷新并恢复与本次检查、凭据、模式和数据策略完全一致的原计划。','Refresh only to recover the original plan with the same check, credential, mode, and data policy.')}/>}
    {(planUncertain||refreshNeeded)&&<Button disabled={busy} onClick={()=>void refresh()}>{t('刷新并恢复原计划','Refresh and recover original plan')}</Button>}
@@ -240,8 +244,8 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
    <Typography.Paragraph type="secondary">{t('卸载计划 ID：','Uninstall plan ID: ')}<Typography.Text code>{record.id}</Typography.Text></Typography.Paragraph>
    {record.status==='awaiting_approval'&&expired&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('卸载计划已过期，请先取消再重新检查','Uninstall plan expired. Cancel it before running a new check.')}/>}
    {record.status==='awaiting_approval'&&applyAttempted&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('原计划执行请求已发送，请只读刷新确认结果','The original execution request was sent. Refresh read-only to confirm its outcome')}/>}
-   {record.status==='unknown'&&<div className="lm-machine-form-notice"><Typography.Paragraph>{t('核对使用当前有效 SSH 凭据','Use a currently active SSH credential for verification')}</Typography.Paragraph>{credentialSelect}{!keys.length&&<Typography.Paragraph>{t('请先为此主机添加有效 SSH 凭据，再打开原记录核对。','Add an active SSH credential to this host, then reopen the original record for verification.')}</Typography.Paragraph>}</div>}
+   {record.status==='unknown'&&<div className="lm-machine-form-notice"><Typography.Paragraph>{t('核对使用当前有效 SSH 凭据','Use a currently active SSH credential for verification')}</Typography.Paragraph>{credentialSelect}<Button className="lm-machine-form-notice" disabled={busy} onClick={()=>setAccountEditor('manage')}>{t('管理账号与凭据','Manage accounts and credentials')}</Button></div>}
   </>}
   {!record&&error&&<Alert role="alert" className="lm-machine-form-notice" type="error" showIcon title={error}/>}
- </Modal>;
+ </Modal>{accountEditor&&<SSHAccountsDialog machineID={machine.id} initialAction={accountEditor} onClose={()=>setAccountEditor(undefined)} onChanged={onRefresh} onVerified={async result=>{await onRefresh();setCredential(result.credential_id);setCheck(undefined);setAccountEditor(undefined);setError('')}}/>}</>;
 }

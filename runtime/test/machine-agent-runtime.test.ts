@@ -87,7 +87,7 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
   const enrollHelper = (b:any, generation:number) => {
     const keys=generateKeyPairSync("ed25519"),publicKey=keys.publicKey.export({type:"spki",format:"pem"}).toString(),iat=Math.floor(clock.getTime()/1000);
     executors.enroll({token:b.enrollment_token,public_key:publicKey,proof:signJWS({version:1,purpose:"enrollment",token_sha256:sha256(b.enrollment_token),public_key_sha256:sha256(publicKey),executor_nonce:randomBytes(24).toString("base64url"),iat,exp:iat+60},keys.privateKey,b.executor_id)});
-    const observation={version:"0.1.0",boot_id:randomBytes(24).toString("base64url"),activation_id:randomUUID(),policy_generation:b.local_policy.generation,capabilities:b.local_policy.capabilities,release,ordinary_task_identity:{account:"lightmoni-task",uid:996,gid:996,permission_generation:generation},account_profiles:[],interpreter_profiles:[]};
+    const observation={version:"0.1.0",boot_id:randomBytes(24).toString("base64url"),activation_id:randomUUID(),policy_generation:b.local_policy.generation,capabilities:b.local_policy.capabilities,release,ordinary_task_identity:{account:"lightmoni-agent",uid:996,gid:996,permission_generation:generation},account_profiles:[],interpreter_profiles:[]};
     sendHelper=(value=helperTransform(observation))=>{
       helperRuntimeStates.push(db.get<any>("SELECT runtime_mode FROM machine_agent_runtime WHERE machine_id='host'")!.runtime_mode);
       const path="/api/v1/privileged-executors/"+b.executor_id+"/heartbeat",raw=canonicalJSON(value),iat=Math.floor(clock.getTime()/1000);

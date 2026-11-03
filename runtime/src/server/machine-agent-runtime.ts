@@ -465,7 +465,7 @@ export function registerMachineAgentRuntime(
           || executors.getStatus(r.machine_id).policy_generation !== r.executor_policy_generation
           || e.release?.artifact_sha256 !== p.release.artifact_sha256 || e.release?.state_schema !== 1
           || e.release?.build_id !== p.release.build_id || e.release?.source_revision !== p.release.source_revision
-          || task?.account !== "lightmoni-task" || task.permission_generation !== p.permission_generation
+          || task?.account !== "lightmoni-agent" || task.permission_generation !== p.permission_generation
           || !Number.isSafeInteger(task.uid) || task.uid <= 0
           || !Number.isSafeInteger(task.gid) || task.gid <= 0) return r;
       }

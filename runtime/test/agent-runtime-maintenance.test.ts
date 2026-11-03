@@ -71,16 +71,13 @@ function fixture(t: any, mode: Mode = "user") {
       private_key: "old-signing-key",
     });
     write("/etc/systemd/system/lightmoni-agent-helper.service", buildHelperService());
-    write("/var/lib/lightmoni-agent-task-account.json",{schema:1,uid:19997,gid:19996});
   };
   if (mode === "root") enroll();
   const calls: string[] = [],
     owners: { file: string; uid: number; gid: number }[] = [];
   let boot = randomUUID(),
     active = "active",
-    helperActive = mode === 'root' ? 'active' : 'inactive',
-    taskAccount = mode === 'root',
-    taskGroup = mode === 'root';
+    helperActive = mode === 'root' ? 'active' : 'inactive';
   const faults = {
     check: 0,
     stop: 0,
@@ -98,8 +95,6 @@ function fixture(t: any, mode: Mode = "user") {
       }
       const name=args.at(-1);
       if(name==='lightmoni-agent')return args[0]==='-u'?'19999':'19998';
-      if(name==='lightmoni-task'&&taskAccount)return args[0]==='-u'?'19997':'19996';
-      if(name==='lightmoni-task')throw Object.assign(Error('unknown task account'),{status:1});
     }
     if (file === "systemctl") {
       if (args[0] === "show") {
@@ -132,22 +127,6 @@ function fixture(t: any, mode: Mode = "user") {
       if(args[0]==='disable'&&args[1]==='lightmoni-agent-helper.service')helperActive='not-found';
       return "";
     }
-    if(file==='/usr/bin/id'){
-      const name=args.at(-1);
-      if(name==='lightmoni-agent')return args[0]==='-u'?'19999':'19998';
-      if(name==='lightmoni-task'&&taskAccount)return args[0]==='-u'?'19997':'19996';
-      if(name==='lightmoni-task')throw Object.assign(Error('unknown task account'),{status:1});
-    }
-    if(file==='/usr/bin/getent'){
-      if(args[0]==='group'&&taskGroup)return 'lightmoni-task:x:19996:';
-      if(args[0]==='passwd'&&taskAccount)return 'lightmoni-task:x:19997:19996::/nonexistent:/usr/sbin/nologin';
-      throw Object.assign(Error('not found'),{status:2});
-    }
-    if(file==='/usr/bin/ps')return '';
-    if(file==='/usr/sbin/groupadd'){taskGroup=true;return '';}
-    if(file==='/usr/sbin/useradd'){taskAccount=true;return '';}
-    if(file==='/usr/sbin/userdel'||file==='userdel'){taskAccount=false;return '';}
-    if(file==='/usr/sbin/groupdel'||file==='groupdel'){taskGroup=false;return '';}
     if (file === p("/usr/local/bin/lightmoni-agent")) {
       if (args[0] === "helper-status" || args[0] === "managed-status")
         return JSON.stringify({
@@ -156,7 +135,7 @@ function fixture(t: any, mode: Mode = "user") {
           fenced: null,
           pending_results: 0,
           permission_generation:read('/etc/lightmoni-agent/config.json').permission_generation,
-          ordinary_task_identity:{account:'lightmoni-task',uid:19997,gid:19996},
+          ordinary_task_identity:{account:'lightmoni-agent',uid:19999,gid:19998},
           ordinary_task_runner:{active:false,state:'idle'},
         });
       if (args[0] === "managed-enroll") {
@@ -263,7 +242,7 @@ for (const mode of ["user", "root"] as const)
         request.runtime_mode === "root",
       );
       assert.equal(existsSync(f.p('/etc/systemd/system/lightmoni-agent-helper.service')),request.runtime_mode==='root');
-      assert.equal(existsSync(f.p('/var/lib/lightmoni-agent-task-account.json')),request.runtime_mode==='root');
+      assert.equal(f.calls.some(call=>/useradd|groupadd|userdel|groupdel/.test(call)),false,'mode switches reuse the Agent account');
       assert.equal(
         f.calls.some((value) => value.includes("lightmoni-executor")),
         false,

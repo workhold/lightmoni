@@ -23,8 +23,6 @@ helper_restart_attempted="no"
 helper_enable_attempted="no"
 previous_helper_active="no"
 previous_helper_enabled="no"
-task_user_created="no"
-task_group_created="no"
 
 usage() {
   echo 'Usage: install.sh (--release-url URL --enrollment-token-stdin | --release-dir DIR) [--fresh] [--version VERSION] [--config FILE | --endpoint URL --enrollment-token-stdin]'
@@ -144,8 +142,6 @@ finish() {
     if [ "$managed_changed" = yes ]; then
       rm -rf /etc/lightmoni-agent-helper /var/lib/lightmoni-agent-helper
     fi
-    if [ "$task_user_created" = yes ]; then userdel lightmoni-task || rollback_failed="yes"; rm -f /var/lib/lightmoni-agent-task-account.json; fi
-    if [ "$task_group_created" = yes ]; then groupdel lightmoni-task || rollback_failed="yes"; fi
     restore_file /etc/lightmoni-agent/config.json "$tmp_dir/previous-config"
     restore_file /usr/local/bin/lightmoni-agent "$tmp_dir/previous-launcher"
     restore_file /usr/local/sbin/lightmoni-agent-uninstall "$tmp_dir/previous-uninstaller"
@@ -441,23 +437,6 @@ if [ "$runtime_mode" = root ]; then
   install -d -m 0700 -o root -g root /etc/lightmoni-agent-helper
   install -d -m 0711 -o root -g root /var/lib/lightmoni-agent-helper
   install -d -m 0711 -o root -g root /var/lib/lightmoni-agent-helper/tasks
-  if id lightmoni-task >/dev/null 2>&1; then
-    [ -f /var/lib/lightmoni-agent-task-account.json ] || { echo 'Unmanaged lightmoni-task account already exists.' >&2; exit 1; }
-    [ "$(id -Gn lightmoni-task | tr ' ' '\n' | wc -l | tr -d ' ')" = 1 ] || { echo 'lightmoni-task has unexpected supplementary groups.' >&2; exit 1; }
-    "$node" -e 'const fs=require("node:fs"),v=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(v.schema!==1||v.uid!==Number(process.argv[2])||v.gid!==Number(process.argv[3]))throw Error("ordinary_task_identity_changed")' /var/lib/lightmoni-agent-task-account.json "$(id -u lightmoni-task)" "$(id -g lightmoni-task)"
-  else
-    command -v groupadd >/dev/null && command -v useradd >/dev/null || { echo 'groupadd and useradd are required.' >&2; exit 1; }
-    groupadd --system lightmoni-task
-    task_group_created="yes"
-    useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --gid lightmoni-task lightmoni-task
-    task_user_created="yes"
-  fi
-  task_uid="$(id -u lightmoni-task)"
-  task_gid="$(id -g lightmoni-task)"
-  [ "$task_uid" -gt 0 ] && [ "$task_gid" -gt 0 ] || { echo 'Invalid lightmoni-task account.' >&2; exit 1; }
-  printf '{"schema":1,"uid":%s,"gid":%s}\n' "$task_uid" "$task_gid" > /var/lib/.lightmoni-agent-task-account.new-$$
-  chmod 0600 /var/lib/.lightmoni-agent-task-account.new-$$
-  mv -f /var/lib/.lightmoni-agent-task-account.new-$$ /var/lib/lightmoni-agent-task-account.json
   install -m 0644 "$tmp_dir/unpacked/lightmoni-agent-helper.service" /etc/systemd/system/.lightmoni-agent-helper.new-$$
   mv -f /etc/systemd/system/.lightmoni-agent-helper.new-$$ /etc/systemd/system/lightmoni-agent-helper.service
   helper_changed="yes"
@@ -500,7 +479,7 @@ agent_status_file="$tmp_dir/agent-status.json"
 if [ "$runtime_mode" = root ]; then
   installation_phase="helper-identity-check"
   helper_status="$(/usr/local/bin/lightmoni-agent helper-status)"
-  "$node" -e 'const fs=require("node:fs"),s=JSON.parse(process.argv[1]),c=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(s.permission_generation!==c.permission_generation||s.fenced||s.pending_results!==0||s.ordinary_task_identity?.account!=="lightmoni-task")throw Error("helper_identity_unverified")' "$helper_status" "$config_path"
+  "$node" -e 'const fs=require("node:fs"),s=JSON.parse(process.argv[1]),c=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(s.permission_generation!==c.permission_generation||s.fenced||s.pending_results!==0||s.ordinary_task_identity?.account!=="lightmoni-agent")throw Error("helper_identity_unverified")' "$helper_status" "$config_path"
   systemctl is-active --quiet lightmoni-agent-helper.service || { echo 'Privileged helper service is not active.' >&2; exit 1; }
 fi
 transaction_started="no"

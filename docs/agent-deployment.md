@@ -36,7 +36,7 @@
 
 点击“SSH 安装检查”会真实登录并执行固定只读检查：Linux、amd64/arm64、curl/tar/gzip/sha256sum、运行中的 systemd、root 或免交互 sudo、目标机器到平台 HTTPS 外部地址的连通性，以及已有 Agent 程序、服务、配置或身份。检查最长 60 秒，可以取消。平台尚为 HTTP 时仍能检查 SSH，但 HTTPS 条件不通过，不能生成自动安装计划。
 
-也可以让 AI 助手“检查这台主机并准备安装 LightMoni Agent”。助手使用 `get_managed_machine`、`check_managed_machine_ssh` 和 `propose_agent_install`，通过后返回“审阅部署计划”入口。只有一个有效登录凭据时自动选择；多个凭据时需要明确指定凭据 ID。助手无法读取密码、私钥或原始 SSH 输出。
+也可以让 AI 助手“检查这台主机并准备安装 LightMoni Agent”。助手使用 `get_managed_machine`、`check_managed_machine_ssh` 和 `propose_agent_install`，通过后返回“审阅部署计划”入口。默认自动选择已登记且有效的账号：先检查root，再检查有权限的sudo账号和其他候选；也可手动指定某个账号。若全部不符合安装条件，显示原因并提供添加/管理SSH账号和重新检查入口，保留当前安装设置。账号修复后重新检查和审阅，不自动安装。助手无法读取密码、私钥或原始 SSH 输出。
 
 审核入口打开同一条已保存的部署计划。计划和检查有效期为 15 分钟；主机地址、端口、用户名、指纹、连接方式、平台外部地址或所选私钥改变后需要重新检查。生成计划、执行前及安装器生命周期锁内都会拒绝已有 Agent 安装，不能为测试或重试覆盖原节点身份。确认前不签发 enrollment token，也不安装。管理员明确确认后，中心内部创建绑定本主机 ID 的 enrollment 会话，再运行固定安装脚本。独立签发 token、用户复制命令手动安装和手工关联主机的入口均移除。脚本与发行包下载均需鉴权；一次性 token 由 SSH stdin 传入、写入远端 0600 临时 curl 配置，退出时清理，不进入 URL、命令参数、环境或回执。Agent 兑换、激活、注册和心跳均核验服务端主机预约及独立身份；注册早于安装完成回执时仍关联原主机，不会创建第二条资产。只有收到 Agent 激活回执才报告成功；若部署失败而本次 enrollment 已激活，平台只撤销该安装会话签发的新节点凭据，不影响已有节点，管理员需先核对远端残留再重新接入。检查通过仍不保证特定发行包存在、glibc 兼容或后续安装一定成功。
 
@@ -56,7 +56,7 @@
 | `/var/lib/lightmoni-agent` | 持久身份、SQLite 队列、receipt、日志游标、缓存任务；目录 0700 |
 | `/etc/systemd/system/lightmoni-agent.service` | 独立服务，用户 `lightmoni-agent` |
 | `/etc/lightmoni-agent-helper`、`/var/lib/lightmoni-agent-helper/managed` | root helper 的私有配置、身份、journal 和恢复状态；均为 root 0700 |
-| `/var/lib/lightmoni-agent-helper/tasks` | root 控制的工作目录父级（0711）；每次任务子目录由 `lightmoni-task` 独占 |
+| `/var/lib/lightmoni-agent-helper/tasks` | root 控制的工作目录父级（0711）；每次任务子目录归 `lightmoni-agent`，与常驻进程共用账号，任务间不构成隔离 |
 | `/etc/systemd/system/lightmoni-agent-helper.service` | 仅完整管理模式安装；固定 helper 以 root 身份运行，与网络 Agent 分离 |
 
 不要把运行过的身份和队列复制到其他独立主机。升级原机要保留整个状态目录；新主机使用空目录生成新身份。Agent 本地 `host_id` 是遥测资源标识，不是平台主机 ID，也不能作为重新关联资产的证明。主机 ID 由中心生成并通过安装预约绑定，不创建主机 ID/名称环境变量。
@@ -71,7 +71,7 @@ Agent配置公网引导endpoint，自动查询管理员登记的中心内网IP�
 
 每个 Agent 使用绑定 `agent_id` 与登记主机的独立 control/data credential：control 用于心跳和配置，data 用于遥测；中心保存摘要并按 audience、scope、有效期和撤销状态校验。SDK Key 不可替代控制凭据，注册/心跳不得创建或抢占主机资产。撤销不会在断网时即时停止已启动的任务。自定义脚本仅由完整管理模式下签名 helper 领取，不提供 Agent bearer 脚本执行路由。
 
-日志目录应明确授予服务用户读取及父目录遍历权限，可按业务组或 ACL 配置。网络 Agent 始终以 `lightmoni-agent` 非 root 运行，启用 `ProtectSystem=strict`、`ProtectHome=read-only`、`PrivateTmp=true`，只写私有状态目录 `/var/lib/lightmoni-agent`，不持有 Docker 组或 Linux capabilities。完整管理模式另安装同包、同版本的 root helper；普通脚本由 helper 降权到 `lightmoni-task`，高权限操作仍要求固定授权并单独审计。监控模式不安装 helper，也不领取自定义脚本。网站与其他主机写操作由 helper 承接，业务状态使用 `/var/lib/lightmoni-managed`。
+日志目录应明确授予服务用户读取及父目录遍历权限，可按业务组或 ACL 配置。网络 Agent 始终以 `lightmoni-agent` 非 root 运行，启用 `ProtectSystem=strict`、`ProtectHome=read-only`、`PrivateTmp=true`，只写私有状态目录 `/var/lib/lightmoni-agent`，不持有 Docker 组或 Linux capabilities。完整管理模式另安装同包、同版本的 root helper；普通脚本由 helper 降权到同一个 `lightmoni-agent` 账号，能够访问该账号可读的Agent凭据及可写状态，视作受信任运维代码；高权限操作仍要求固定授权并单独审计。监控模式不安装 helper，也不领取自定义脚本。网站与其他主机写操作由 helper 承接，业务状态使用 `/var/lib/lightmoni-managed`。
 
 ## 检查与诊断
 

@@ -9,9 +9,9 @@ import { MANAGED_AGENT_DATA_DIR, MANAGED_AGENT_TASKS_DIR } from "../privileged-e
 export interface OrdinaryTaskAccount { uid: number; gid: number }
 export function ordinaryTaskAccount(): OrdinaryTaskAccount {
   rootPath("/usr/bin/id");
-  const value = (flag: string) => execFileSync("/usr/bin/id", [flag, "lightmoni-task"], {encoding: "utf8", timeout: 5000, maxBuffer: 1024, env: {PATH: "/usr/bin:/bin", LANG: "C"}}).trim();
+  const value = (flag: string) => execFileSync("/usr/bin/id", [flag, "lightmoni-agent"], {encoding: "utf8", timeout: 5000, maxBuffer: 1024, env: {PATH: "/usr/bin:/bin", LANG: "C"}}).trim();
   const uid = Number(value("-u")), gid = Number(value("-g"));
-  if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid) || uid <= 0 || gid <= 0 || value("-gn") !== "lightmoni-task") throw Error("ordinary_task_account_unavailable");
+  if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid) || uid <= 0 || gid <= 0 || value("-gn") !== "lightmoni-agent") throw Error("ordinary_task_account_unavailable");
   return {uid, gid};
 }
 export function ordinaryTaskCommand(node: string, args: string[], account: OrdinaryTaskAccount): {file: string; args: string[]} {
@@ -55,7 +55,9 @@ const utf8Prefix = (v: string, max: number) => {
   let end = max; while (end > 0 && (b[end] & 0xc0) === 0x80) end--;
   return b.subarray(0, end).toString("utf8");
 };
-/** Root-owned helper launches bounded scripts as a separate unprivileged OS account. */
+/** The root helper drops ordinary scripts to the same unprivileged account as the daemon.
+ * Scripts are trusted administration code: environment scrubbing does not isolate
+ * them from this account's readable Agent credentials or writable local state. */
 export async function executeTaskScript(script: TaskScript, options: {
   dataDir: string; runID: string; signal?: AbortSignal; expectedAccount: OrdinaryTaskAccount;
 }): Promise<ScriptOutcome> {
@@ -77,7 +79,7 @@ export async function executeTaskScript(script: TaskScript, options: {
   const parent = lstatSync(MANAGED_AGENT_DATA_DIR);
   if (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== 0 || (parent.mode & 0o022) !== 0) throw Error("unsafe_task_state_directory");
   const info = lstatSync(root); if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== 0 || (info.mode & 0o022) !== 0 || (info.mode & 0o111) !== 0o111) throw Error("unsafe_task_temporary_directory");
-  const work = mkdtempSync(join(root, "lightmoni-task-"));
+  const work = mkdtempSync(join(root, "lightmoni-agent-"));
   const file = join(work, script.runtime === "node" ? "task.mjs" : "task.sh");
   writeFileSync(file, script.code, { mode: 0o600 });
   chownSync(file, account.uid, account.gid);
@@ -142,7 +144,7 @@ export interface TaskRunnerConfig {
   endpoint: string; agentID: string; executorID: string; executorInstallGeneration: number;
   dataDir: string; pollIntervalMs?: number; heartbeatIntervalMs?: number;
   permissionGeneration: number;
-  executionIdentity: { account: "lightmoni-task"; uid: number; gid: number; permission_generation: number };
+  executionIdentity: { account: "lightmoni-agent"; uid: number; gid: number; permission_generation: number };
 }
 interface Recovery { id: string; lease_token: string; receipt?: TaskRunResult }
 
@@ -154,7 +156,7 @@ export class AgentTaskRunner {
     this.requester = io.request; this.clearRequest = io.clearRequest; this.statePath = resolve(config.dataDir, "task-run-state.json");
     if (!config.executorID || !Number.isSafeInteger(config.executorInstallGeneration) || config.executorInstallGeneration < 1
       || !Number.isSafeInteger(config.permissionGeneration) || config.permissionGeneration < 1
-      || config.executionIdentity.account !== "lightmoni-task" || config.executionIdentity.permission_generation !== config.permissionGeneration
+      || config.executionIdentity.account !== "lightmoni-agent" || config.executionIdentity.permission_generation !== config.permissionGeneration
       || !Number.isSafeInteger(config.executionIdentity.uid) || config.executionIdentity.uid <= 0
       || !Number.isSafeInteger(config.executionIdentity.gid) || config.executionIdentity.gid <= 0)
       throw Error("invalid_signed_helper_identity");

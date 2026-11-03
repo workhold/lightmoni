@@ -20,7 +20,7 @@ export interface TaskExecutionPolicy {
 }
 /** Identity observed by the signed host helper and frozen when a run is queued. */
 export interface OrdinaryTaskIdentity {
-  account: "lightmoni-task";
+  account: "lightmoni-agent";
   uid: number;
   gid: number;
   permission_generation: number;

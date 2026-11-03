@@ -1,7 +1,8 @@
 # 实现计划
 
-1. 固定账号矩阵、helper 协议和双组件同包生命周期。
-2. 安装器与维护器统一非 root Agent unit、可选 root helper unit、独立任务账号及 root 私有 helper 配置。
-3. Runtime 分离遥测与任务循环，普通 TaskRunner 仅在 helper 运行，独立任务 UID；常驻进程拒绝 UID0。
-4. Center/Web 使用非 root Agent 心跳和独立 helper 签名确认完整模式，更新操作文案和脚本能力状态。
-5. 功能检查、构建、文档与 Doca 同步回读，提交 GitHub PR，列出未验证的生产范围。
+1. 同步 GitHub 主干，固定单普通账号矩阵、受信任脚本边界及 helper 协议。
+2. 安装器与维护器只管理非 root Agent 账号和可选 root helper；移除独立 task 账号的创建、删除、恢复和残留检测代码，不增加旧模式兼容层。
+3. Runtime 复用签名任务通道与 TaskRunner，普通脚本降权至 Agent UID，常驻进程继续拒绝 UID0；root helper 秘密保持独立。
+4. Center/Web 对齐签名执行身份；补齐无可用安装账号时的结构化诊断和上下文添加/更新账号、重新检查路径，中英文一致。
+5. 验证账号选择、脚本派发与审计、双组件同版本升级/回退/模式切换/卸载、未知结果恢复和逐主机进度；修复现有过期 fixture，不跳过失败验收。
+6. 构建与 UI 点击验证，仓库与 Doca 正文及原生图同步回读，更新 GitHub PR；如实列出未验证的 Linux/生产范围。

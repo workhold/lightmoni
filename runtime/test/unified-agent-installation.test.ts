@@ -145,7 +145,7 @@ async function fixture(
             policy_generation: b.local_policy.generation,
             capabilities: b.local_policy.capabilities,
             release,
-            ordinary_task_identity:{account:"lightmoni-task",uid:996,gid:996,permission_generation:1},
+            ordinary_task_identity:{account:"lightmoni-agent",uid:995,gid:995,permission_generation:1},
             account_profiles: [],
             interpreter_profiles: [],
           },path="/api/v1/privileged-executors/"+b.executor_id+"/heartbeat",raw=canonicalJSON(heartbeat);
@@ -208,7 +208,7 @@ async function fixture(
             (removed ? 0 : 1) +
             "\nunit_managed=1\nservice_running=" +
             (removed ? 0 : 1) +
-            "\nlifecycle_locked=0\noperation_lock=0\npaths_safe=1\nconfig_present=1\ndata_present=1\nagent_state_present=1\nbusiness_data_retained=0\nhelper_present=" + (removed ? 0 : 1) + "\ntask_account_present=" + (removed ? 0 : 1) + "\n",
+            "\nlifecycle_locked=0\noperation_lock=0\npaths_safe=1\nconfig_present=1\ndata_present=1\nagent_state_present=1\nbusiness_data_retained=0\nhelper_present=" + (removed ? 0 : 1) + "\n",
           stderr: "",
           stages: [],
         };

@@ -45,7 +45,7 @@ interface HelperConfig {
   agent_id: string;
   endpoint: string;
   permission_generation: number;
-  task_identity: { account: "lightmoni-task"; uid: number; gid: number; permission_generation: number };
+  task_identity: { account: "lightmoni-agent"; uid: number; gid: number; permission_generation: number };
 }
 
 function normalizeEndpoint(value: string): string {
@@ -61,7 +61,7 @@ function parseTaskAccount(value: OrdinaryTaskAccount, permissionGeneration: numb
   if (!Number.isSafeInteger(value.uid) || !Number.isSafeInteger(value.gid) || value.uid <= 0 || value.gid <= 0)
     refuse("ordinary_task_account_unavailable");
   if (!Number.isSafeInteger(permissionGeneration) || permissionGeneration < 1) refuse("invalid_permission_generation");
-  return { account: "lightmoni-task", uid: value.uid, gid: value.gid, permission_generation: permissionGeneration };
+  return { account: "lightmoni-agent", uid: value.uid, gid: value.gid, permission_generation: permissionGeneration };
 }
 
 function readHelperConfig(): HelperConfig {
@@ -73,7 +73,7 @@ function readHelperConfig(): HelperConfig {
   if (record.schema !== 1 || typeof record.agent_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(record.agent_id)
     || typeof record.endpoint !== "string" || normalizeEndpoint(record.endpoint) !== record.endpoint
     || !Number.isSafeInteger(record.permission_generation) || record.permission_generation < 1
-    || identity.account !== "lightmoni-task" || !Number.isSafeInteger(identity.uid) || identity.uid <= 0
+    || identity.account !== "lightmoni-agent" || !Number.isSafeInteger(identity.uid) || identity.uid <= 0
     || !Number.isSafeInteger(identity.gid) || identity.gid <= 0
     || !Number.isSafeInteger(identity.permission_generation) || identity.permission_generation !== record.permission_generation)
     refuse("invalid_helper_config");

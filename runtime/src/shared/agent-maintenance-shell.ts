@@ -45,7 +45,6 @@ lm_assert_paths() {
   lm_root_entry /var/lib/lightmoni-agent-helper directory
   lm_root_entry /var/lib/lightmoni-agent-helper/managed directory
   lm_root_entry /var/lib/lightmoni-agent-helper/tasks directory
-  lm_root_entry /var/lib/lightmoni-agent-task-account.json file
   lm_root_entry /usr/local/bin/lightmoni-agent file
   lm_root_entry /usr/local/sbin/lightmoni-agent-uninstall file
   lm_root_entry /opt/lightmoni-agent directory
@@ -58,7 +57,6 @@ lm_assert_paths() {
   lm_data_directory /var/lib/lightmoni-agent-helper/tasks
 }
 lm_assert_no_operations() {
-  lm_assert_task_account
   if [ -d /var/lib/lightmoni-agent-helper/tasks ] && [ -n "$(find /var/lib/lightmoni-agent-helper/tasks -mindepth 1 -maxdepth 1 -print -quit)" ] && [ ! -f /etc/lightmoni-agent-helper/managed.json ]; then
     lm_refuse 'Agent task journal requires recovery before removal'
   fi
@@ -99,28 +97,6 @@ lm_assert_no_operations() {
 lm_remove_managed_state() {
   # Only after the stopped-service and journal checks, before deleting code.
   rm -rf /etc/lightmoni-agent-helper /var/lib/lightmoni-agent-helper
-}
-lm_assert_task_account() {
-  marker=/var/lib/lightmoni-agent-task-account.json
-  [ -e "$marker" ] || { if id lightmoni-task >/dev/null 2>&1; then lm_refuse 'Unmanaged lightmoni-task account'; fi; return 0; }
-  [ -f "$marker" ] && [ ! -L "$marker" ] || lm_refuse 'Invalid task account marker'
-  task_uid=$(id -u lightmoni-task 2>/dev/null) || lm_refuse 'Marked task account is missing'
-  task_gid=$(id -g lightmoni-task 2>/dev/null) || lm_refuse 'Marked task group is missing'
-  recorded_uid=$(LC_ALL=C sed -n 's/.*"uid":\([0-9][0-9]*\).*/\1/p' "$marker")
-  recorded_gid=$(LC_ALL=C sed -n 's/.*"gid":\([0-9][0-9]*\).*/\1/p' "$marker")
-  case "$recorded_uid:$recorded_gid" in *[!0-9:]*|:*) lm_refuse 'Invalid task account marker';; esac
-  [ "$task_uid" = "$recorded_uid" ] && [ "$task_gid" = "$recorded_gid" ] || lm_refuse 'Task account identity changed'
-  [ "$(id -Gn lightmoni-task | tr ' ' '\n' | wc -l | tr -d ' ')" = 1 ] || lm_refuse 'Task account has unexpected supplementary groups'
-  task_group=$(getent group lightmoni-task) || lm_refuse 'Task group cannot be verified'
-  group_record=$(printf '%s\n' "$task_group" | awk -F: 'NF == 4 && $1 == "lightmoni-task" { print $1 ":" $3 ":" $4 }')
-  [ "$group_record" = "lightmoni-task:$recorded_gid:" ] || lm_refuse 'Task group is shared or its identity changed'
-}
-lm_remove_task_account() {
-  lm_assert_task_account
-  [ -e /var/lib/lightmoni-agent-task-account.json ] || return 0
-  userdel lightmoni-task
-  groupdel lightmoni-task
-  rm -f /var/lib/lightmoni-agent-task-account.json
 }
 lm_purge_agent_state() {
   lm_assert_paths

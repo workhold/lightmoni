@@ -46,7 +46,7 @@ function fixture() {
     const signature = signExecutorRequest({ body: raw, center_instance_id: store.centerInstanceID, executor_id: enrolled.executor_id, install_generation: enrolled.install_generation, method: "POST", path, request_id: requestID, iat: Math.floor(clock.getTime() / 1000), exp: Math.floor(clock.getTime() / 1000) + 60 }, keys.privateKey);
     return { path, raw, signature, invoke(action: (e: any, v: any) => unknown) { return store.signedRequest(enrolled.executor_id, "POST", path, Buffer.from(raw), signature, action) as any; } };
   };
-  const heartbeat = () => request("heartbeat", { version: "test", activation_id:randomUUID(), release:{build_id:"test",source_revision:"a".repeat(40),artifact_sha256:"b".repeat(64),state_schema:1}, boot_id: "boot_1234567890123456789", policy_generation: policy.generation, capabilities: ["script.elevated.v1", "container.managed.v1"], ordinary_task_identity:{account:"lightmoni-task",uid:1001,gid:1001,permission_generation:3}, account_profiles: [account], interpreter_profiles: [{ runtime: "shell", sha256: interpreter }] }).invoke((e, v) => store.heartbeat(e, v));
+  const heartbeat = () => request("heartbeat", { version: "test", activation_id:randomUUID(), release:{build_id:"test",source_revision:"a".repeat(40),artifact_sha256:"b".repeat(64),state_schema:1}, boot_id: "boot_1234567890123456789", policy_generation: policy.generation, capabilities: ["script.elevated.v1", "container.managed.v1"], ordinary_task_identity:{account:"lightmoni-agent",uid:1001,gid:1001,permission_generation:3}, account_profiles: [account], interpreter_profiles: [{ runtime: "shell", sha256: interpreter }] }).invoke((e, v) => store.heartbeat(e, v));
   heartbeat();
   const makePlan = (extra: any = {}) => store.plan({ host_ids: ["host"], capability: "script.elevated.v1", payload: { kind: "script", runtime: "shell", code: "printf secret-from-script", args: [], cwd_profile: "private", environment: {}, account, interpreter_sha256: interpreter, timeout_ms: 5000, max_output_bytes: 4096 }, ...extra }, "admin");
   const apply = () => { const plan = makePlan(); return store.apply(plan.id, { confirm: true, expected_revision: plan.revision, request_id: randomBytes(24).toString("base64url") }, "admin").jobs[0]; };
@@ -92,11 +92,11 @@ test("ordinary scripts require signed helper claims and audit the fixed unprivil
   const f=fixture();try{
     const task=f.tasks.nodes.task({name:"Reviewed ordinary task",type:"script",enabled:true,target_all:false,host_ids:["host"],label_ids:[],schedule:{mode:"once"},script:{runtime:"shell",code:"printf ok",timeout_seconds:5,max_output_bytes:1024}},"ordinary-script",true);
     const run=f.tasks.dispatch(task.id,{confirm:true,expected_task_revision:task.revision},"admin").runs[0];
-    assert.deepEqual(run.snapshot.execution_identity,{account:"lightmoni-task",uid:1001,gid:1001,permission_generation:3,executor_id:f.enrolled.executor_id,install_generation:f.enrolled.install_generation,privilege:"user"});
+    assert.deepEqual(run.snapshot.execution_identity,{account:"lightmoni-agent",uid:1001,gid:1001,permission_generation:3,executor_id:f.enrolled.executor_id,install_generation:f.enrolled.install_generation,privilege:"user"});
     assert.deepEqual(f.store.ordinaryTaskCapabilities("host","agent-host"),["task.script.v1","task.script.v2"]);
     const claimRequest=f.request("task-runs/claim",{capabilities:["task.script.v1"]});
     const claim=claimRequest.invoke((executor,input)=>f.store.taskRuns!.claimForHelper(executor,input)).run;
-    assert.equal(claim.id,run.id);assert.equal(claim.snapshot.execution_identity?.account,"lightmoni-task");
+    assert.equal(claim.id,run.id);assert.equal(claim.snapshot.execution_identity?.account,"lightmoni-agent");
     const heartbeat=f.request("task-runs/"+run.id+"/heartbeat",{lease_token:claim.lease_token}).invoke((executor,input)=>f.store.taskRuns!.heartbeatForHelper(executor,run.id,input));
     assert.equal(heartbeat.state,"running");
     const result=f.request("task-runs/"+run.id+"/result",{lease_token:claim.lease_token,state:"succeeded",code:"",summary:"done",stdout:"ok",stderr:"",exit_code:0}).invoke((executor,input)=>f.store.taskRuns!.resultForHelper(executor,run.id,input));
@@ -106,6 +106,25 @@ test("ordinary scripts require signed helper claims and audit the fixed unprivil
     f.db.run("UPDATE machine_agent_runtime SET runtime_mode='user' WHERE machine_id='host'");
     assert.deepEqual(f.store.ordinaryTaskCapabilities("host","agent-host"),[]);
   }finally{f.close();}
+});
+
+test("signed task identities accept only the unified non-root Agent account", () => {
+  const f = fixture(); try {
+    const row = f.db.get<any>("SELECT observation_enc FROM privileged_executors WHERE id=?", f.enrolled.executor_id)!;
+    const observation = JSON.parse(f.deps.decrypt(row.observation_enc));
+    for (const identity of [
+      { ...observation.ordinary_task_identity, account: "lightmoni-task" },
+      { ...observation.ordinary_task_identity, account: "root" },
+      { ...observation.ordinary_task_identity, uid: 0 },
+      { ...observation.ordinary_task_identity, gid: 0 },
+    ]) {
+      assert.throws(() => f.request("heartbeat", { ...observation, ordinary_task_identity: identity })
+        .invoke((executor, input) => f.store.heartbeat(executor, input)), /invalid_ordinary_task_identity/);
+    }
+    assert.deepEqual(f.store.ordinaryTaskIdentity("host", "agent-host", f.enrolled.executor_id, f.enrolled.install_generation), {
+      account: "lightmoni-agent", uid: 1001, gid: 1001, permission_generation: 3,
+    });
+  } finally { f.close(); }
 });
 
 test("persistent nonce replies and center signing identity survive store recreation", () => {

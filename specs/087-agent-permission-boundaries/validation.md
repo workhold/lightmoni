@@ -1,46 +1,54 @@
-# SDD 087 验收状态
+# SDD087 验收状态
 
-日期：2026-11-03
+日期：2026-11-03。当前记录取代此前独立 `lightmoni-task` 账号方案与未通过的旧 fixture 验收状态。
 
 ## 最终设计
 
-- 登记 SSH 用户只负责远程生命周期维护：安装、升级、回退、模式切换和卸载。平台使用 root SSH 登录，或使用免交互系统管理 sudo 的普通 SSH 用户；有限 systemctl 权限不足以执行固定维护流程。批准后的维护请求绑定主机、账号、凭据修订、发行摘要和目标模式；远端结果不确定时只核对，不跨账号重放。
-- 首次登记默认 root，新增账户提示推荐 root；可改用合格的 sudo 账号。已有账号与服务器 SSH 策略不变，实际权限仍由预检确认。内部两个无登录系统账号由安装程序管理，不要求用户填写密码或私钥。
-- `lightmoni-agent.service` 始终由 `lightmoni-agent` 非 root 账号运行，负责遥测、心跳及控制面通信。平台不把 SSH 登录用户作为常驻 Agent 身份，也不因工作失败自动让 Agent 进程以 root 重试。
-- 首装默认“完整管理”模式，随同一发行安装可选 root 管理组件；“仅监控”只安装非 root Agent，不领自定义脚本，也不提供管理型写操作。完整模式仍不是用户脚本的无限 sudo 通道。
-- 普通脚本从任务中心进入 root 管理组件，由它启动固定脚本流程并切换到独立、无登录 shell 的 `lightmoni-task` UID/GID；清空附加组和 Linux capabilities，设置 NoNewPrivileges 和执行限制。高权限作业继续按具体计划、内容、目标审批并审计，不通过普通任务账号自动提权。
-- Agent/helper 共用版本、安装、升级、回退、卸载及离线卸载脚本。模式切换保留人工审阅的计划摘要；运行期 helper 身份单独落账并通过签名心跳核验。旧独立 executor 安装入口已删除，不能与新生命周期混用。
-- 同机脚本出现未核对的 `unknown` 结果时，停止该主机后续脚本派发和领取；管理员记录核对理由或用户明确重试后解除阻塞。SDK 仍独立上报。
+- 只新增一个无登录普通系统账号 `lightmoni-agent`，承担常驻采集、心跳、平台通信与普通脚本。脚本与 daemon 共用 UID，可读取该账号可读凭据并修改可写状态；只用于受信任运维代码，不宣称同 UID 隔离或脚本沙箱。
+- 已登记 SSH 账号只用于固定安装、升级、回退、模式切换、卸载与恢复。登记推荐 root，也支持实际检查通过的免交互系统管理 sudo 账号；当前要求 `sudo -n /bin/sh`。只读自动选择可尝试其他已登记账号，实际派发后不跨账号重放。
+- 常驻 Agent 始终非 root、无通用 sudo、Docker socket 或 capabilities。完整管理模式安装同包同版本 root helper；仅监控不安装 helper、不领取普通自定义脚本。
+- 普通脚本经签名 helper 通道领取，启动前固定为 Agent 的非零 UID/GID，清空附加组和 capabilities、启用 NoNewPrivileges。root 私钥、策略与恢复账本保持私有；高权限作业仍绑定内容、目标、实际身份与期限并单独批准、审计。
+- Agent/helper 统一安装、升级、回退、模式切换、卸载与离线卸载。删除未发布 task 账号的创建、恢复、标记和清理契约，无旧身份兼容层。卸载保留系统账号及业务数据。
+- 安装账号不合格时返回结构化原因，保留安装设置，提供添加账号、配置凭据、重新检查与审阅新计划的闭环。新增平台账户记录不会创建主机系统账户，也不自动安装；远端结果未知只读核对。
 
-## 本地验收
+## 本轮验证
 
-- 主机权限 UI：26/26；登记默认 root、允许 sudo 账号、中英文、深色、批量安装、模式变更和结果未知流程见 [ui-validation.md](ui-validation.md)。登记重试与英文窄屏另 3/3 通过，已有 deploy 默认账户保留。
-- 任务中心 UI：17/17；见 [ui-validation.md](ui-validation.md)。本轮重新执行通过。
-- Agent uninstall 与主机生命周期：49/49；另一次正常离线/完整模式卸载回归 2/2，平台卸载及凭据撤销路径 1/1。
-- Agent 模式生命周期：58/58。
-- 任务中心运行状态：12/12。
-- Agent 安装与发行切换：31/31。
-- Runtime/Web 类型检查、统一安装协议/运行测试、`git diff --check` 通过。
-- `npm run build` — TypeScript SDK、Runtime、AI runtime 和 Web 生产构建通过。
-- Agent release content filter：1/1。
-- Release builder 更新了 package source/hash 排除集合，避免把已删除的旧独立生命周期模块重新装进制品。
-- 已同步主干 `5747738`（PR #79、#80）；保留新合入的 systemd 发行版号识别和已预留绑定地址健康检查，并解决系统设计文档冲突。
-- 同步主干后的 `npm run typecheck`、`npm run build` 再次通过。身份、发行内容、预留端口健康检查、平台集群与受管脚本回归共 56 项：55 通过、1 跳过（Linux root 脚本身份测试，本机 macOS 不具备运行条件）。
-- SSH 安装账户自动/手动选择定向回归 3/3 通过。
-- 重新生产构建后的登记回归 3/3 通过，证据见 `evidence/ui/registration-ui-report.json`。Linux 脚本身份 smoke 的生成代码修正转义，并用普通 `/proc/self/status` 文本 fixture 验证空/多附加组解析 2/2；该 fixture 只验证解析，不代表真实 Linux 身份测试已运行。
-- Doca 同步提交前已再次同步主干 `b44ee39`：保留 SDD089 已审计 unknown 作业的共享围栏、最新 NAT 规则和运维界面诊断；旧独立执行器入口继续删除。类型检查与生产构建再次通过，卸载/节点移除定向回归15/15通过。
-- 扩展集成回归152项：117通过、35失败（升级测试34项、安装恢复测试1项）。旧升级 fixture 缺少解析器已要求的 `runtime_mode`、`permission_generation`、`helper_active`，计划创建失败后产生级联错误；部分任务 fixture 尚未建立新鲜签名 helper 身份。上述解析器、fixture 和门禁在同步主干前的 `a48a651` 已存在。本轮未修改这些业务实现或测试；升级、回退、批次维护及相关任务围栏的扩展验收尚未通过，不能将此前部分验收视为全链路完成。证据见 [latest-main-integration.json](evidence/latest-main-integration.json)。
+基线 `origin/main=b44ee39`；提交前已重新 fetch，落后主干 0。机器可读结果见 [single-account-validation.json](evidence/single-account-validation.json)。
 
-## Doca 同步验收
+| 检查 | 结果 |
+| --- | --- |
+| `npm --prefix runtime test` | 1321 项：1288 通过、0 失败、33 跳过 |
+| `npm --prefix ai-runtime test` | 71/71 通过 |
+| `npm --prefix sdk/typescript test` | 22/22 通过 |
+| `npm run typecheck` | Runtime、AI runtime、Web 全部通过 |
+| `npm run build` | SDK、Runtime、AI runtime、Web 生产构建通过 |
+| 主机执行权限 UI | 26/26 通过 |
+| 任务中心 UI | 17/17 通过 |
+| 安装账号修复 UI | 3 组通过，无页面异常或意外请求 |
+| 多账号与集中凭据 UI | 7 组通过，无页面异常或意外请求 |
+| `git diff --check` | 通过 |
 
-- 2026-11-03 已通过已登录的 Doca 编辑界面同步[系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)，保存后重新加载文档，回读持久化正文、账号职责表与原生图节点和连线。
-- 总览及第22、27、60、71、80、83、84、86章已与第87章对齐；旧 root 常驻模式、独立发行和脚本共享 Agent 身份均标为历史方案。新增第87章四节、账号职责表、8节点9连线的权限架构图，以及5参与者9消息的任务时序图（另有5条生命线）。
-- 任务总览图保留原生图块，脚本快照只连签名 helper，再降权到 `lightmoni-task`；Agent 仅连内置采集处理。主机账户图末节点已改为“完整管理 / 仅监控，常驻 Agent 始终非 root”。回读核对 helper→中心领取、helper→task 降权和 task→helper→中心回执方向。
-- 保留历史原生图、SDD089、NAT 规则及健康目标说明。在线交付状态明确标识 PR #83 功能分支待合入、最新集成回归仍有失败、Linux 实机与镜像发布未完成。
-- 回读数据：[doca-sync-readback.json](evidence/doca-sync-readback.json)；截图：[章节状态](evidence/doca-sync-overview.jpg)、[权限架构](evidence/doca-sync-architecture.jpg)、[任务时序](evidence/doca-sync-sequence.jpg)。
+完整 runtime 覆盖安装、升级、回退、模式切换、卸载、恢复、签名脚本、调度、AI/MCP 入口、普通/提权任务授权及审计。曾失败的升级/恢复 fixture 已补齐严格模式观测，MCP/调度 fixture 使用真实签名 helper 契约的测试适配器；未通过放宽生产解析、权限或签名门禁掩盖失败。安装发行测试 31/31，完整主机管理测试 73/73 包含手动过期/撤销/一次性凭据、无效检查结果和混合候选的新增诊断验证。
 
-## 未完成与边界
+33 项跳过包括需 Linux/root/systemd、真实 Docker、ClickHouse 或显式配置的外部环境，以及缺少指定 Go baseline 工具链的检查；逐项名称见机器可读报告。本机 macOS，Docker daemon 未运行，不能把其余通过项当作真实 Linux 生命周期验收。
 
-- GitHub PR：[统一 Agent 权限边界与生命周期，登记推荐 root 管理账号 #83](https://github.com/workhold/lightmoni/pull/83)，Draft，代码已推送 GitHub。扩展集成回归和 Linux 实机验收仍待完成；未合并或发布。
-- 未对真实 vchive 或生产主机执行 SSH、服务修改、模式切换或安装写操作。仓库/fixture/本地构建证据不能代替 Linux 实机验收。
-- 不包含平台级主机 RBAC；按现有范围由管理员管理全部登记主机。
+UI 点击流程、截图和范围见 [ui-validation.md](ui-validation.md)。每台主机沿用独立进度及持久记录；账号补录后不会自动派发，不会修改已审阅计划身份或在 unknown 时重装。
+
+## Doca 同步与回读
+
+[LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 已通过已登录 Doca 原生编辑界面保存，重新加载后回读正文、账号职责表和原生图。
+
+- 仓库 `docs/system-design.md` 第87章及第22、27、71、84章等相关说明与在线设计对齐。第87.4新增安装账号修复与点击流程；第87.5记录无旧身份兼容边界。
+- 权限架构图：8节点、9连线；普通脚本为 `lightmoni-agent 同UID`，root helper→普通脚本为启动前降权。
+- 任务时序图：5参与者、9消息及5条生命线；核对 helper→中心领取、helper→普通脚本、普通脚本→helper→中心回执方向。
+- 任务总览图：13节点、13连线；内置采集仍由普通 Agent 处理，有限脚本经签名 helper 启动，普通脚本与 Agent 共用账号。
+- 保留原生图块、无关章节、SDD089、NAT规则和健康目标描述。在线交付状态已更新为当前回归结果，明确待合入、实机与镜像未完成。
+
+回读：[single-account-doca-readback.json](evidence/single-account-doca-readback.json)。截图：[章节](evidence/single-account-doca-overview.jpg)、[权限架构](evidence/single-account-doca-architecture.jpg)、[任务时序](evidence/single-account-doca-sequence.jpg)、[任务总览](evidence/single-account-doca-task-flow.jpg)。旧 `doca-sync-readback.json` 与 `latest-main-integration.json` 保留为前一版历史证据，不作为本轮结果。
+
+## 交付与边界
+
+- 功能分支：`feat/087-agent-permission-boundaries`；GitHub [PR #83](https://github.com/workhold/lightmoni/pull/83)，保留 Draft 等待真实 Linux/systemd 验收，未合并。
+- 本轮未对 vchive 或生产主机执行 SSH、安装、服务修改或模式切换，未构建/发布镜像。真实主机端到端验收仍待执行。
+- 旧 root 常驻安装须先使用原版本受管流程卸载后重装，新卸载器不接管旧运行态。
+- 不包含平台主机 RBAC、任意业务账户执行或不可信脚本沙箱；Docker daemon 身份绑定仍需独立确认。

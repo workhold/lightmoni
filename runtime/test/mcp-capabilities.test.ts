@@ -9,18 +9,20 @@ import { CapabilityDispatcher } from "../src/capabilities/index.js";
 import { CAPABILITY_SCOPES, type AccessAuthority, type Principal } from "../src/capabilities/types.js";
 import type { Dependencies } from "../src/shared/types.js";
 import { SCRIPT_TASK_CAPABILITY } from "../src/shared/task-center.js";
+import { taskHelperFixture } from "./helpers/task-helper.js";
 function fixture() {
   const db=new DB(":memory:");accountSchema(db);db.run("INSERT INTO users(id,name,role,active,created_at) VALUES('admin','Admin','admin',1,'2026-10-30')");
   const now=new Date("2026-10-30T00:00:00Z");let revoked=false;
   const deps={db,router:new Router(),now:()=>now,externalURL:"https://moni.example.test",encrypt:(v:string)=>Buffer.from(v).toString("base64"),decrypt:(v:string)=>Buffer.from(v,"base64").toString(),cat:{list:async()=>[]},logger:{info(){},error(){},warn(){}}} as unknown as Dependencies;
   const runs=new TaskRunStore(deps);
   for(const id of ["one","two"])db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)",id,"Host "+id,id+".test","agent-"+id,now.toISOString(),now.toISOString());
+  const helpers=taskHelperFixture(deps,runs);
   for(const host of ["one","two"])runs.nodes.task({name:"Only "+host,type:"script",enabled:true,target_all:false,host_ids:[host],label_ids:[],schedule:{mode:"once"},script:{runtime:"node",code:"console.log('private-source-"+host+"')",timeout_seconds:5,max_output_bytes:4096}},"script-"+host,true);
   const base:Principal={user:{id:"admin",name:"Admin",role:"admin"},scopes:[...CAPABILITY_SCOPES],host_ids:null,credential_id:"pat-one",grant_id:"grant-one",source:"mcp"},grants=new Map([["grant-one",structuredClone(base)]]);
   const refresh=(p:Principal)=>{const u=db.get<any>("SELECT id,name,role,active FROM users WHERE id=?",p.user.id);if(!u?.active)fail(403,"inactive");p.user={id:u.id,name:u.name,role:u.role};};
   const authority:AccessAuthority={authenticate:()=>structuredClone(base),validate:p=>{if(p.source==="mcp"&&revoked)fail(403,"revoked");refresh(p);},sessionPrincipal:(u,source)=>({...structuredClone(base),user:u,source,credential_id:"",grant_id:""}),validateGrant:(id,userID)=>{if(revoked)fail(403,"revoked");const p=structuredClone(grants.get(id)!);if(!p||userID&&p.user.id!==userID)fail(403,"invalid_grant");refresh(p);return p;}};
   const dispatcher=new CapabilityDispatcher(deps,authority,{taskCenter:runs});
-  return {db,deps,runs,base,grants,dispatcher,invoke:(name:string,input:unknown,p=structuredClone(base))=>dispatcher.invoke(p,name,input,{signal:new AbortController().signal}),revoke:()=>revoked=true,advance:(seconds:number)=>now.setTime(now.getTime()+seconds*1000),close:()=>db.close()};
+  return {db,deps,runs,base,grants,dispatcher,...helpers,invoke:(name:string,input:unknown,p=structuredClone(base))=>dispatcher.invoke(p,name,input,{signal:new AbortController().signal}),revoke:()=>revoked=true,advance:(seconds:number)=>now.setTime(now.getTime()+seconds*1000),close:()=>db.close()};
 }
 const intent={operation:"task.dispatch",task_id:"script-one",host_ids:["one"],reason:"Inspect service",idempotency_key:"operation-one"};
 test("the task directory exposes persistent defaults without the removed template capability",async()=>{
@@ -90,7 +92,7 @@ test("revocation blocks pending approval and cancels an already queued external 
     const queued=(await f.invoke("lightmoni_tasks_plan",{...intent,idempotency_key:"queued"})).data.proposal;
     const run=(f.dispatcher.proposals.apply(f.base.user,queued.id).result as any).runs[0];
     f.revoke();assert.throws(()=>f.dispatcher.proposals.apply(f.base.user,pending.id),/revoked/);
-    assert.equal(f.runs.claim("agent-one",[SCRIPT_TASK_CAPABILITY]),null);
+    assert.equal(f.claim("agent-one",[SCRIPT_TASK_CAPABILITY]),null);
     assert.equal(f.runs.get(run.id).state,"cancelled");assert.equal(f.runs.get(run.id).code,"authorization_revoked");assert.equal(f.runs.get(run.id).started_at,"");
   }finally{f.close();}
 });
@@ -101,8 +103,8 @@ test("maintenance postpones external retries while stable grant validation still
       f.runs.nodes.task({...task,execution_policy:{retry_count:1,retry_delay_seconds:10}},task.id,false);
       const proposal=(await f.invoke("lightmoni_tasks_plan",intent)).data.proposal;
       const original=(f.dispatcher.proposals.apply(f.base.user,proposal.id).result as any).runs[0];
-      const claimed=f.runs.claim("agent-one",[SCRIPT_TASK_CAPABILITY])!;assert.ok(claimed);
-      f.runs.result("agent-one",claimed.id,{lease_token:claimed.lease_token,state:"failed",code:"script_failed",summary:"fixture failure",stdout:"",stderr:"",exit_code:1});
+      const claimed=f.claim("agent-one",[SCRIPT_TASK_CAPABILITY])!;assert.ok(claimed);
+      f.result("agent-one",claimed.id,{lease_token:claimed.lease_token,state:"failed",code:"script_failed",summary:"fixture failure",stdout:"",stderr:"",exit_code:1});
       createAgentUpdatesSchema(f.deps);
       f.db.run("INSERT INTO machine_agent_updates(id,machine_id,agent_id,credential_id,action,status,plan_json,created_at,created_by) VALUES('maintenance','one','agent-one','fixture-credential','upgrade','awaiting_approval','{}',?,'admin')",f.deps.now().toISOString());
       f.advance(10);assert.doesNotThrow(()=>f.runs.tick());
@@ -117,7 +119,7 @@ test("maintenance postpones external retries while stable grant validation still
       }else{
         const retry=f.runs.list().find(run=>run.retry_of===original.id)!;assert.ok(retry);
         assert.equal(f.db.get<any>("SELECT grant_id FROM capability_run_authorizations WHERE run_id=?",retry.id)!.grant_id,f.base.grant_id);
-        f.revoke();assert.equal(f.runs.claim("agent-one",[SCRIPT_TASK_CAPABILITY]),null);
+        f.revoke();assert.equal(f.claim("agent-one",[SCRIPT_TASK_CAPABILITY]),null);
         assert.equal(f.runs.get(retry.id).code,"authorization_revoked");
       }
     }finally{f.close();}
