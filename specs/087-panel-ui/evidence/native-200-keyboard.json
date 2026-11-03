@@ -1,0 +1,233 @@
+{
+  "verified_at": "2026-11-03T14:04:07.076Z",
+  "browser": "Google Chrome for macOS",
+  "method": "native View menu Zoom In then four native Command+plus; native AX confirms 200%; restored with Command+0",
+  "initial_100_percent": {
+    "clientHeight": 836,
+    "clientWidth": 1728,
+    "scrollWidth": 1728
+  },
+  "native_zoom_indicator": "缩放比例：200%",
+  "native_200_percent": {
+    "width": 864,
+    "height": 418,
+    "scrollWidth": 864
+  },
+  "website_dialog_200_percent": {
+    "width": 832,
+    "scrollWidth": 832
+  },
+  "keyboard": {
+    "method": "native Chrome app Tab / Shift+Tab / Return keys in an explicitly selected independent tab",
+    "editor_fields_and_sections": [
+      {
+        "bottom": 210.25,
+        "focusVisible": true,
+        "name": "ops-resource_name",
+        "tag": "INPUT",
+        "top": 178.25
+      },
+      {
+        "bottom": 265.25,
+        "focusVisible": true,
+        "name": "后端服务",
+        "tag": "BUTTON",
+        "top": 241.25
+      },
+      {
+        "bottom": 265.25,
+        "focusVisible": true,
+        "name": "域名与路径",
+        "tag": "BUTTON",
+        "top": 241.25
+      },
+      {
+        "bottom": 265.25,
+        "focusVisible": true,
+        "name": "解析与流量",
+        "tag": "BUTTON",
+        "top": 241.25
+      },
+      {
+        "bottom": 265.25,
+        "focusVisible": true,
+        "name": "访问与高级设置",
+        "tag": "BUTTON",
+        "top": 241.25
+      }
+    ],
+    "footer": [
+      {
+        "bottom": 279.01171875,
+        "focusVisible": true,
+        "left": 76,
+        "name": "ops-resource_spec_auth_mode",
+        "right": 770,
+        "tag": "INPUT",
+        "top": 257.01171875
+      },
+      {
+        "bottom": 232.01171875,
+        "focusVisible": true,
+        "left": 64,
+        "name": "ops-resource_spec_auth_realm",
+        "right": 800,
+        "tag": "INPUT",
+        "top": 200.01171875
+      },
+      {
+        "bottom": 274.01171875,
+        "focusVisible": true,
+        "left": 706,
+        "name": "添加账号",
+        "right": 800,
+        "tag": "BUTTON",
+        "top": 250.01171875
+      },
+      {
+        "bottom": 320.01171875,
+        "focusVisible": true,
+        "left": 64,
+        "name": "ops-resource_spec_auth_users_0_username",
+        "right": 358.78125,
+        "tag": "INPUT",
+        "top": 288.01171875
+      },
+      {
+        "bottom": 314.88671875,
+        "focusVisible": true,
+        "left": 382.78125,
+        "name": "ops-resource_spec_auth_users_0_password",
+        "right": 724,
+        "tag": "INPUT",
+        "top": 292.88671875
+      },
+      {
+        "bottom": 310.88671875,
+        "focusVisible": true,
+        "left": 728,
+        "name": "显示",
+        "right": 742,
+        "tag": "SPAN",
+        "top": 296.88671875
+      },
+      {
+        "bottom": 239.01171875,
+        "focusVisible": true,
+        "left": 65,
+        "name": "button",
+        "right": 799,
+        "tag": "DIV",
+        "top": 193.01171875
+      },
+      {
+        "bottom": 286.01171875,
+        "focusVisible": true,
+        "left": 65,
+        "name": "button",
+        "right": 799,
+        "tag": "DIV",
+        "top": 240.01171875
+      },
+      {
+        "bottom": 320.01171875,
+        "focusVisible": true,
+        "left": 65,
+        "name": "button",
+        "right": 799,
+        "tag": "DIV",
+        "top": 274.01171875
+      },
+      {
+        "bottom": 271.01171875,
+        "focusVisible": true,
+        "left": 65,
+        "name": "button",
+        "right": 799,
+        "tag": "DIV",
+        "top": 225.01171875
+      },
+      {
+        "bottom": 369,
+        "focusVisible": true,
+        "left": 638.2109375,
+        "name": "取 消",
+        "right": 702,
+        "tag": "BUTTON",
+        "top": 335
+      },
+      {
+        "bottom": 369,
+        "focusVisible": true,
+        "left": 712,
+        "name": "保存配置",
+        "right": 800,
+        "tag": "BUTTON",
+        "top": 335
+      }
+    ],
+    "edit_button": {
+      "bottom": 418.05078125,
+      "focusVisible": true,
+      "name": "编辑配置",
+      "scrollWidth": 864,
+      "top": 390.05078125,
+      "width": 864
+    },
+    "wrap_after_save": {
+      "focusVisible": true,
+      "name": "关闭",
+      "tag": "BUTTON"
+    },
+    "cancel": {
+      "focusVisible": true,
+      "name": "取消"
+    },
+    "dialog_closed_without_save": true
+  },
+  "restored": {
+    "dialogOpen": false,
+    "height": 836,
+    "scrollWidth": 1728,
+    "width": 1728
+  },
+  "navigation_preference": "expanded restored",
+  "screenshots": [
+    {
+      "path": ".local-dev/panel-ui-native-zoom/chrome-native-200.png",
+      "sha256": "02df7103e3a4f6089cdaded05f2f74b1306c9b1f730922108e3a8191780cd2a1",
+      "captured_at": "2026-11-03T13:59:16.549052+00:00"
+    },
+    {
+      "path": ".local-dev/panel-ui-native-zoom/websites-200-navigation-collapsed.png",
+      "sha256": "0afe1bd8f2411244236c08d03b828b5299bdba1491db329234e95ee7b178aaac",
+      "captured_at": "2026-11-03T13:59:44.875177+00:00"
+    },
+    {
+      "path": ".local-dev/panel-ui-native-zoom/editor-200.png",
+      "sha256": "5710f4ec4c7b3ea0da2c85bc6038e0256b9de27c28958ca97f9c7449f42d3b7b",
+      "captured_at": "2026-11-03T14:01:33.075759+00:00"
+    },
+    {
+      "path": ".local-dev/panel-ui-native-zoom/editor-section-keyboard-200.png",
+      "sha256": "864217e85c610bdda3fc39231b0a08bcf14e3c6fd7983f6493e5be678f9d0927",
+      "captured_at": "2026-11-03T14:02:43.432120+00:00"
+    },
+    {
+      "path": ".local-dev/panel-ui-native-zoom/editor-footer-keyboard-200.png",
+      "sha256": "42f761043fb7cd223b3e7b9eb2a74b0c15d900880bc3f7c8163675e3ea7def9c",
+      "captured_at": "2026-11-03T14:02:49.193634+00:00"
+    },
+    {
+      "path": ".local-dev/panel-ui-native-zoom/applications-200.png",
+      "sha256": "e89b2cb40e0939906cc4d2c1a2b052c9417efc0041964710d7d14d1eabb970f1",
+      "captured_at": "2026-11-03T14:03:38.238012+00:00"
+    },
+    {
+      "path": ".local-dev/panel-ui-native-zoom/applications-200-scrolled.png",
+      "sha256": "92dd761a0680ef4b15eaf84e1c640a2d2b9ae204bce899e8181e489873a51b08",
+      "captured_at": "2026-11-03T14:03:42.728740+00:00"
+    }
+  ],
+  "architecture_impact": "不适用：仅补充真实浏览器验收，无产品或部署变更"
+}
