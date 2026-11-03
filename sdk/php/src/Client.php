@@ -3,6 +3,16 @@ declare(strict_types=1);
 namespace LightMoni;
 
 final class Protocol {
+    public static function env(string $name): string { $v=getenv($name);return $v===false?'':$v; }
+    public static function resourceValues(string $service,array $overrides,?string $instance): array {
+        if(array_key_exists('service.name',$overrides)||array_key_exists('service.instance.id',$overrides))throw new \InvalidArgumentException('configure service identity separately');
+        $values=[];
+        foreach(['LIGHTMONI_MACHINE_NAME'=>'host.name','LIGHTMONI_MACHINE_ID'=>'lightmoni.machine_id','LIGHTMONI_HOST_ID'=>'host.id','LIGHTMONI_AGENT_ID'=>'lightmoni.agent_id','LIGHTMONI_APPLICATION_ID'=>'lightmoni.application_id','LIGHTMONI_CLUSTER_ID'=>'lightmoni.cluster_id','LIGHTMONI_DEPLOYMENT_ID'=>'lightmoni.deployment_id'] as $name=>$attribute){$value=self::env($name);if($value!=='')$values[$attribute]=$value;}
+        $values=array_replace($values,$overrides);
+        if($instance===null){$instance=self::env('LIGHTMONI_INSTANCE_ID');if($instance==='')$instance=self::uuid();}
+        if(trim($instance)===''||strlen($instance)>128)throw new \InvalidArgumentException('invalid instance ID');
+        $values['service.name']=$service;$values['service.instance.id']=$instance;return $values;
+    }
     public static function json(mixed $v): string { return json_encode($v, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION); }
     public static function nano(): string {
         [$fraction, $seconds] = explode(' ', microtime());
@@ -76,7 +86,7 @@ final class State {
     private array $resource;
     public bool $selfEnabled=true; public string $selfTable="";
     private float $selfLast=-INF; private bool $selfStarted=false; private array $selfPrevious=[];
-    public function __construct(string $service,string $endpoint,string $key,array $limits) {
+    public function __construct(string $service,string $endpoint,string $key,array $limits,array $resource=[],?string $instance=null) {
         $url=parse_url($endpoint);
         if (PHP_INT_SIZE!==8 || $service==='' || strlen($service)>128 || !$url || !in_array($url['scheme']??'', ['http','https'], true) || empty($url['host']) || isset($url['user']) || isset($url['query']) || isset($url['fragment'])) throw new \InvalidArgumentException('64-bit PHP, valid service and HTTP(S) endpoint required');
         $this->endpoint=rtrim($endpoint,'/'); $this->key=$key;
@@ -86,7 +96,7 @@ final class State {
         $this->limits=array_replace($defaults,$limits);
         foreach ($this->limits as $v) if (!is_int($v) || $v<=0) throw new \InvalidArgumentException('invalid SDK limits');
         if ($this->limits['max_batch_bytes']>$this->limits['queue_bytes']) throw new \InvalidArgumentException('invalid SDK limits');
-        $this->resource=['attributes'=>Protocol::attrs(['service.name'=>$service,'service.instance.id'=>Protocol::uuid()])];
+        $this->resource=['attributes'=>Protocol::attrs(Protocol::resourceValues($service,$resource,$instance))];
         foreach (['pending_batches','pending_bytes','buffer_bytes','delivered_batches','retried_batches','invalid_records','overflow_records','dropped_records','rejected_records'] as $n) $this->stats[$n]=0;
         $this->stats['last_error']='';
     }
@@ -227,7 +237,8 @@ final class Span {
 final class Client {
     private State $s;
     private string $table;
-    public function __construct(string $service,string $table,string $endpoint='',string $key='',array $limits=[]) { $this->table=Protocol::table($table);$this->s=new State($service,$endpoint,$key,$limits);$this->s->selfTable=$this->table; }
+    public static function fromEnvironment(string $table,array $resource=[]): self { return new self(null,$table,null,null,[],$resource); }
+    public function __construct(?string $service,string $table,?string $endpoint=null,?string $key=null,array $limits=[],array $resource=[],?string $instanceId=null) { $this->table=Protocol::table($table);$this->s=new State($service??Protocol::env('LIGHTMONI_SERVICE'),$endpoint??Protocol::env('LIGHTMONI_ENDPOINT'),$key??Protocol::env('LIGHTMONI_KEY'),$limits,$resource,$instanceId);$this->s->selfTable=$this->table; }
     public function withTable(string $table): self { $child=clone $this; $child->table=Protocol::table($table); return $child; }
     public function counter(string $name,string $unit=''): Metric { return $this->instrument($name,'counter',$unit,[]); }
     public function gauge(string $name,string $unit=''): Metric { return $this->instrument($name,'gauge',$unit,[]); }

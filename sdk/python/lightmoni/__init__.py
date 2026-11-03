@@ -430,7 +430,7 @@ class Span:
 
 
 class Client:
-    def __init__(self, service, table=None, endpoint=None, key=None, self_telemetry=True, *,
+    def __init__(self, service=None, table=None, endpoint=None, key=None, self_telemetry=True, *,
                  log_sampling=None, disabled=False, remote_config=True, config_endpoint=None, config_key=None,
                  config_interval=30, resource=None, instance_id=None, env=None, service_version=None, **limits):
         if type(disabled) is not bool or type(remote_config) is not bool:
@@ -439,7 +439,12 @@ class Client:
             raise ValueError("configuration interval must be at least one second")
         endpoint = os.environ.get("LIGHTMONI_ENDPOINT", "") if endpoint is None else endpoint
         key = os.environ.get("LIGHTMONI_KEY", "") if key is None else key
-        resource = dict(resource or {})
+        service = os.environ.get('LIGHTMONI_SERVICE', '') if service is None else service
+        instance_id = os.environ.get('LIGHTMONI_INSTANCE_ID') if instance_id is None else instance_id
+        env = os.environ.get('LIGHTMONI_ENV') if env is None else env
+        service_version = os.environ.get('LIGHTMONI_SERVICE_VERSION') if service_version is None else service_version
+        fields = {'LIGHTMONI_MACHINE_NAME': 'host.name', 'LIGHTMONI_MACHINE_ID': 'lightmoni.machine_id', 'LIGHTMONI_HOST_ID': 'host.id', 'LIGHTMONI_AGENT_ID': 'lightmoni.agent_id', 'LIGHTMONI_APPLICATION_ID': 'lightmoni.application_id', 'LIGHTMONI_CLUSTER_ID': 'lightmoni.cluster_id', 'LIGHTMONI_DEPLOYMENT_ID': 'lightmoni.deployment_id'}
+        resource = {**{key: os.environ[var] for var, key in fields.items() if os.environ.get(var)}, **dict(resource or {})}
         for value in (env, service_version):
             if value is not None and (not isinstance(value, str) or not value.strip() or len(value.encode()) > 128):
                 raise ValueError("invalid resource identity")

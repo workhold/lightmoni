@@ -6,6 +6,14 @@ import { extractTrace, injectTrace, type TraceContext } from "../src/core.js";
 import { createLightMoni as createBrowserClient } from "../src/browser.js";
 
 const decode = (batch: FrozenBatch) => JSON.parse(new TextDecoder().decode(batch.payload));
+test('Node deployment environment supplies identity and explicit options override it without exposing the key',async()=>{
+ const values={LIGHTMONI_SERVICE:'deployed-service',LIGHTMONI_KEY:'lm_environment_secret',LIGHTMONI_INSTANCE_ID:'deployment-1',LIGHTMONI_MACHINE_NAME:'machine-one',LIGHTMONI_MACHINE_ID:'machine-id',LIGHTMONI_HOST_ID:'observed-host',LIGHTMONI_CLUSTER_ID:'cluster-id',LIGHTMONI_APPLICATION_ID:'app-id'};
+ const prior=Object.fromEntries(Object.keys(values).map(k=>[k,process.env[k]]));Object.assign(process.env,values);
+ const {batches,exporter}=captured();const client=createLightMoni({exporter,table:'http',selfTelemetry:false,remoteConfig:false,resource:{'host.name':'custom-machine'}});
+ try{client.log('info','environment');await client.flush();const body=decode(batches[0]),attrs=Object.fromEntries(body.resourceLogs[0].resource.attributes.map((a:any)=>[a.key,a.value.stringValue]));assert.equal(attrs['service.name'],'deployed-service');assert.equal(attrs['service.instance.id'],'deployment-1');assert.equal(attrs['host.name'],'custom-machine');assert.equal(attrs['lightmoni.machine_id'],'machine-id');assert.equal(attrs['host.id'],'observed-host');assert.equal(JSON.stringify(body).includes(values.LIGHTMONI_KEY),false);
+ const override=createLightMoni({exporter,service:'custom',instance_id:'custom-instance',key:'',selfTelemetry:false,remoteConfig:false});await override.shutdown();
+ }finally{await client.shutdown();for(const[k,v]of Object.entries(prior)){if(v===undefined)delete process.env[k];else process.env[k]=v}}
+});
 function captured() {
   const batches: FrozenBatch[] = [];
   const exporter: Exporter = { async deliver(batch) { batches.push({ ...batch, payload: batch.payload.slice() }); } };

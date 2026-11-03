@@ -35,7 +35,7 @@ export default function WebsiteFields({resources,existing,onQuickCreate}:{resour
   </div>)}<Form.ErrorList errors={meta.errors}/></div>}</Form.List>
   </section>
   <section className="lm-config-section" tabIndex={-1} aria-labelledby={sectionID+'traffic'} ref={node=>{sections.current.traffic=node}}>{sectionTitle('traffic','解析与流量','DNS & traffic')}
-  <Form.Item name={['spec','dns_record_mode']} label={t('网站解析方式','Website DNS mode')}><Select options={[{value:'cname',label:t('CNAME 到集群入口域名','CNAME to cluster entry domains')},{value:'address',label:t('直接解析入口 IP','Entry IP addresses')}]}/></Form.Item>
+  <Form.Item name={['spec','dns_record_mode']} hidden initialValue="cname"><Input/></Form.Item><p className="lm-ops-note">{t('网站统一 CNAME 到自动生成的集群入口域名。','Websites use CNAME records pointing to automatically generated cluster entry domains.')}</p>
   <WebsiteDomainRoutes resources={resources} clusterIds={clusterIds}/>
   <WebsiteClusterPolicies resources={resources} clusterIds={clusterIds}/>
   </section>

@@ -176,13 +176,23 @@ impl Client {
     /// Initialize without binding a business table; use with_table before recording.
     pub fn connect(service:&str,endpoint:&str,key:&str)->Result<Self>{Self::with_limits(service,"",endpoint,key,Limits::default())}
     pub fn new(service:&str,table_name:&str,endpoint:&str,key:&str)->Result<Self>{Self::with_limits(service,table_name,endpoint,key,Limits::default())}
-    pub fn with_limits(service:&str,table_name:&str,endpoint:&str,key:&str,limits:Limits)->Result<Self> {
+    pub fn with_limits(service:&str,table_name:&str,endpoint:&str,key:&str,limits:Limits)->Result<Self> {Self::with_identity(service,table_name,endpoint,key,limits,Attributes::new(),None)}
+    fn with_identity(service:&str,table_name:&str,endpoint:&str,key:&str,limits:Limits,overrides:Attributes,instance:Option<&str>)->Result<Self> {
         let table=if table_name.is_empty(){String::new()}else{table(table_name)?};let url=reqwest::Url::parse(endpoint).map_err(|_|"invalid endpoint")?;
         if service.is_empty() || service.len()>128 || !["http","https"].contains(&url.scheme()) || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some(){return Err("valid service and HTTP(S) endpoint required".into());}
         if [limits.queue_bytes,limits.queue_batches,limits.buffer_bytes,limits.max_batch_bytes,limits.cardinality_limit,limits.max_instruments].contains(&0) || limits.max_batch_bytes>limits.queue_bytes{return Err("invalid SDK limits".into());}
         let http=reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().map_err(|_|"cannot initialize HTTP transport")?;
         let stats=["pending_batches","pending_bytes","buffer_bytes","delivered_batches","retried_batches","invalid_records","overflow_records","dropped_records","rejected_records"].iter().map(|n|(n.to_string(),0)).collect();
-        let resource=json!({"attributes":attrs(&BTreeMap::from([("service.name".into(),service.into()),("service.instance.id".into(),Uuid::new_v4().to_string().into())]))?});
+        if overrides.contains_key("service.name")||overrides.contains_key("service.instance.id"){return Err("configure service identity separately".into());}
+        let mut values=Attributes::new();
+        for(name,attribute) in [("LIGHTMONI_MACHINE_NAME","host.name"),("LIGHTMONI_MACHINE_ID","lightmoni.machine_id"),("LIGHTMONI_HOST_ID","host.id"),("LIGHTMONI_AGENT_ID","lightmoni.agent_id"),("LIGHTMONI_APPLICATION_ID","lightmoni.application_id"),("LIGHTMONI_CLUSTER_ID","lightmoni.cluster_id"),("LIGHTMONI_DEPLOYMENT_ID","lightmoni.deployment_id")] {
+            if let Ok(value)=std::env::var(name){if !value.is_empty(){values.insert(attribute.into(),value.into());}}
+        }
+        values.extend(overrides);
+        let instance=instance.map(str::to_owned).or_else(||std::env::var("LIGHTMONI_INSTANCE_ID").ok().filter(|v|!v.is_empty())).unwrap_or_else(||Uuid::new_v4().to_string());
+        if instance.trim().is_empty()||instance.len()>128{return Err("invalid instance ID".into());}
+        values.insert("service.name".into(),service.into());values.insert("service.instance.id".into(),instance.into());
+        let resource=json!({"attributes":attrs(&values)?});
         let endpoint_failures=Arc::new(Mutex::new(BTreeMap::new()));
         let s=State{metric_windows:BTreeMap::new(),observations:BTreeMap::new(),endpoint:endpoint.trim_end_matches('/').into(),endpoints:Arc::new(Mutex::new(endpoints::CenterEndpoints::new(endpoint,endpoint_failures.clone()))),endpoint_failures,key:key.into(),limits,resource,http,metrics:BTreeMap::new(),records:BTreeMap::new(),queue:VecDeque::new(),stats,last_error:String::new(),failure:None,seq:0,closed:false,self_table:"lightmoni".into(),self_last:None,self_started:false,self_previous:BTreeMap::new()};
         let enabled=true;

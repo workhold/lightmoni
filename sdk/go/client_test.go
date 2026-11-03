@@ -370,3 +370,26 @@ func TestPartialSuccessIsNotRetried(t *testing.T) {
 		t.Fatal("partial success retried")
 	}
 }
+
+func TestDeploymentEnvironmentDefaultsAndExplicitOverrides(t *testing.T) {
+	t.Setenv("LIGHTMONI_SERVICE", "deployed-service")
+	t.Setenv("LIGHTMONI_KEY", "environment-key")
+	t.Setenv("LIGHTMONI_INSTANCE_ID", "deployment-instance")
+	t.Setenv("LIGHTMONI_HOST_ID", "observed-host")
+	t.Setenv("LIGHTMONI_MACHINE_NAME", "platform-machine")
+	t.Setenv("LIGHTMONI_MACHINE_ID", "machine-id")
+	c, err := New(Config{Endpoint: "http://127.0.0.1:4318", Exporter: &recorder{}, Resource: Attributes{"host.name": "custom-machine"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Shutdown(context.Background())
+	if c.s.cfg.Key != "environment-key" || c.s.cfg.Service != "deployed-service" || c.s.instance != "deployment-instance" {
+		t.Fatal("deployment environment was not applied independently")
+	}
+	if c.s.cfg.Resource["host.name"] != "custom-machine" || c.s.cfg.Resource["host.id"] != "observed-host" || c.s.cfg.Resource["lightmoni.machine_id"] != "machine-id" {
+		t.Fatal("resource environment defaults or explicit override missing")
+	}
+	if bytes.Contains([]byte(c.s.resource.String()), []byte("environment-key")) {
+		t.Fatal("key entered telemetry resource")
+	}
+}

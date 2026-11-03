@@ -73,15 +73,18 @@ export class DB {
       );
   }
   transaction<T>(fn: () => T): T {
-    this.native.exec("BEGIN IMMEDIATE");
+    const nested=this.native.isTransaction;
+    // Each synchronous nested resource write can roll back without committing its owner.
+    this.native.exec(nested ? "SAVEPOINT lightmoni_nested" : "BEGIN IMMEDIATE");
     try {
       const result = fn();
       if (result && typeof (result as any).then === "function")
         throw Error("SQLite transactions must not span await");
-      this.native.exec("COMMIT");
+      this.native.exec(nested ? "RELEASE SAVEPOINT lightmoni_nested" : "COMMIT");
       return result;
     } catch (error) {
-      this.native.exec("ROLLBACK");
+      if(nested){this.native.exec("ROLLBACK TO SAVEPOINT lightmoni_nested");this.native.exec("RELEASE SAVEPOINT lightmoni_nested");}
+      else this.native.exec("ROLLBACK");
       throw error;
     }
   }

@@ -43,7 +43,7 @@ export function dnsErrorCopy(code:unknown):Copy {
 
 export function websiteDNS(site:Resource,clusterId?:string,domain?:string):WebsiteState {
   const bindings = (site.spec.bindings??[]).filter((b:Spec)=>!domain||b.domains?.includes(domain));
-  if (!bindings.some((b:Spec)=>b.dns_enabled)) return state('external',['自行维护','Managed externally'],['网站解析由你维护，系统不会创建 CNAME 或地址记录。','You maintain website DNS. The system will not create CNAME or address records.']);
+  if (!bindings.some((b:Spec)=>b.dns_enabled)) return state('external',['自行维护','Managed externally'],['网站解析由你维护，系统不会创建 CNAME 记录。','You maintain website DNS. The system will not create CNAME records.']);
   const publication = websitePublication(site,clusterId);
   if (publication.key==='unpublished') return state('not_published',['发布后同步','Sync after publication'],['尚未发布，不会生成网站解析。','Not published. Website DNS records are not generated yet.']);
   if (site.status.dns_error) return state('error',['解析同步失败','DNS synchronization failed'],dnsErrorCopy(site.status.dns_error),'error');
@@ -66,12 +66,12 @@ export function websiteDNS(site:Resource,clusterId?:string,domain?:string):Websi
 }
 
 export function entryDNS(app:Resource,deployment:Spec):WebsiteState {
-  if (!deployment.gateway_domain) return state('missing',['未设置入口域名','Entry domain missing'],['先设置供网站 CNAME 指向的稳定域名。','Set a stable domain for website CNAME records.'],'warning');
+  if (!deployment.gateway_domain) return state('missing',['需要托管域名','Hosted zone required'],['添加托管域名后，系统自动生成集群入口并维护解析。','Add a hosted zone to generate the cluster entry and maintain DNS automatically.'],'warning');
   if (!deployment.gateway_dns_zone_id) return state('external',['自行维护 A / AAAA','Maintain A / AAAA externally'],['填写入口域名不会创建解析；请自行维护，或改用自动托管。','Entering a domain does not create DNS records. Maintain them yourself or enable managed DNS.']);
   if (['public_ip_required','partial_public_ip_required'].includes(app.status.gateway_dns?.[deployment.cluster_id]?.state)) return state('public_ip_required',['缺少公网服务地址','Public service address missing'],dnsErrorCopy('machine_public_service_address_required'),'warning');
   if (app.status.dns_error) return state('error',['入口解析需核对','Inspect entry DNS'],dnsErrorCopy(app.status.dns_error),'error');
   if (!app.status.deployments?.[deployment.cluster_id]?.enabled) return state('not_deployed',['部署入口后同步','Sync after entry deployment'],['此集群尚未启用入口部署。','The entry deployment is not enabled in this cluster.']);
-  const verified = (app.status.dns??[]).some((r:Spec)=>r.verified&&(r.records??[]).some((record:Spec)=>record.name===deployment.gateway_domain&&['A','AAAA'].includes(record.type)&&record.managed_by?.includes(app.id)));
+  const verified = (app.status.dns??[]).some((r:Spec)=>r.verified&&(r.records??[]).some((record:Spec)=>(record.name===deployment.gateway_domain||record.fqdn===deployment.gateway_domain)&&['A','AAAA'].includes(record.type)&&record.managed_by?.includes(app.id)));
   if (verified&&app.status.dns_updated_at) return state('verified',['最近回读成功','Last readback succeeded'],['最近已确认入口地址记录；公网缓存传播未检查。','The entry address records were verified. Public cache propagation has not been checked.'],'success');
   return state('pending',['等待入口解析回读','Awaiting entry DNS readback'],['系统按健康入口的公网 IP 维护 A / AAAA。','The system maintains A / AAAA records from healthy entries’ public IPs.'],'processing');
 }
