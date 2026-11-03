@@ -14,8 +14,8 @@
 .lm-shell .lm-sidebar nav{min-height:0;overflow-y:auto;flex:1}
 .lm-shell .lm-nav-collapse{flex-shrink:0}
 .lm-shell .lm-assistant-launcher.ant-btn.ant-btn-circle{bottom:64px}
-.lm-route-content>.lm-assistant{height:calc(100dvh - 64px)}
-.lm-route-content .lm-dashboard-header{top:64px}
-.lm-route-content>.lm-logs-page{min-height:calc(100dvh - 64px)}
+.lm-route-content>.lm-assistant{height:calc(100dvh - var(--lm-header-height,64px))}
+.lm-route-content .lm-dashboard-header{top:var(--lm-header-height,64px)}
+.lm-route-content>.lm-logs-page{min-height:calc(100dvh - var(--lm-header-height,64px))}
 @media(max-width:700px){.lm-workspace-header{padding:7px 10px;gap:8px}.lm-workspace-location{font-size:12px}.lm-workspace-location>span{display:none}.lm-workspace-actions{gap:2px}.lm-workspace-actions .lm-account-trigger{gap:6px;padding:4px}.lm-account-summary>strong{max-width:95px}.lm-account-chevron{display:none}}
 @media(max-width:430px){.lm-workspace-header{gap:4px;padding:7px 8px}.lm-workspace-location{max-width:95px;font-size:11px}.lm-workspace-actions .lm-header-icon{width:30px}.lm-account-summary>strong{max-width:68px}.lm-account-summary>small{font-size:10px}.lm-account-trigger .lm-avatar{width:26px!important;height:26px!important;font-size:11px!important}}

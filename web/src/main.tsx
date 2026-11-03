@@ -7,4 +7,5 @@ import {I18nProvider} from './shared/i18n';
 import Root from './app/App';
 import './app/style.css';
 import './app/theme.css';
+import './app/panel-ui.css';
 createRoot(document.getElementById('root')!).render(<React.StrictMode><I18nProvider><AppearanceProvider><App><BrowserRouter><Root/></BrowserRouter></App></AppearanceProvider></I18nProvider></React.StrictMode>);

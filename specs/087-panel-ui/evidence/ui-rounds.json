@@ -1,0 +1,23 @@
+{
+  "environment": "loopback fixture using production React components; no production writes",
+  "rounds": [
+    {
+      "round": 1,
+      "inputPreservedAfterFailure": true,
+      "saved": true,
+      "reloadReadback": true
+    },
+    {
+      "round": 2,
+      "inputPreservedAfterFailure": true,
+      "saved": true,
+      "reloadReadback": true
+    },
+    {
+      "round": 3,
+      "inputPreservedAfterFailure": true,
+      "saved": true,
+      "reloadReadback": true
+    }
+  ]
+}

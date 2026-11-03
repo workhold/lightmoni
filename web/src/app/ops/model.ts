@@ -385,3 +385,7 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
       delete spec[key];
   return spec;
 }
+
+export function filterApplicationsByState(applications:Resource[],filter:string):Resource[]{
+ return applications.filter(r=>filter==='all'||(filter==='failed'?['failed','degraded','error','unknown'].includes(resourceState(r)):filter==='pending'?!['running','stopped','failed','degraded','error','unknown'].includes(resourceState(r)):resourceState(r)===filter));
+}
