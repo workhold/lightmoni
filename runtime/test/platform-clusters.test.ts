@@ -155,7 +155,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     },
     state = "succeeded",
   ) => {
-    const job = jobs.claim(agentID, ["operations.platform","operations.platform.readiness.v1","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1"]);
+    const job = jobs.claim(agentID, ["operations.platform","operations.platform.readiness.v1","operations.platform.image-refresh.v1","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1"]);
     assert.ok(job);
     const payload = platform.resolvePayload(job);
     for (const [n, phase] of [
@@ -1788,4 +1788,36 @@ test('minimum retained membership is isolated per application cluster',async t=>
  const status=f.store.get(a.id).status;
  assert.equal(status.deployments[south.id].serving_instances,2);
  assert.equal(status.deployments[north.id].serving_instances,3);
+});
+
+
+test('click upgrade preserves refresh and HTTP readiness through managed route acknowledgement and drain',async t=>{
+ const f=await fixture(t),c=f.createCluster();
+ const capabilities=['operations.platform','operations.platform.readiness.v1','operations.platform.image-refresh.v1'];
+ f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:capabilities}));
+ const health={type:'http',port_name:'http',path:'/ready',expected_statuses:[200,204],interval_seconds:5,timeout_seconds:2};
+ const a=f.app(c,{deployment_mode:'managed',health,deployments:[{cluster_id:c.id,replicas:1,min_available_percent:100}]});
+ await f.action(a,'deploy');f.finish('a');
+ const old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;
+ const gateway=f.store.create('application','Entry',catalogInstallation('openresty',{deployment_mode:'manual',deployments:[{cluster_id:c.id,machine_ids:['ma','mb']}]}).spec,'admin');
+ await f.action(gateway,'deploy');f.finish('a');f.finish('b');
+ const site=f.store.create('website','Upgrade route',{cluster_ids:[c.id],routing_mode:'managed',service_application_id:a.id,service_port_name:'http',bindings:[{domains:['upgrade.example.test'],locations:[{path:'/',action:'proxy'}]}]},'admin');
+ await f.action(site,'deploy');f.finish('a');f.finish('b');
+ const result=await f.req('/resources/'+a.id+'/upgrade','POST',{revision:1,confirmed:true,images:{app:'example:2'}});
+ assert.equal(result.status,202,JSON.stringify(result.body));assert(!result.body.deploy_error,JSON.stringify(result.body));
+ assert.ok(f.store.get(a.id).status.endpoints.every((e:any)=>e.machine_id==='ma'));
+ const queued=f.db.get<any>("SELECT * FROM agent_jobs WHERE agent_id='b' AND state='queued'");assert.ok(queued);
+ assert.ok(JSON.parse(queued.capabilities_json).includes('operations.platform.image-refresh.v1'));
+ assert.ok(JSON.parse(queued.capabilities_json).includes('operations.platform.readiness.v1'));
+ assert.equal(f.jobs.claim('b',['operations.platform','operations.platform.readiness.v1']),null);
+ assert.equal(f.jobs.claim('b',['operations.platform','operations.platform.image-refresh.v1']),null);
+ const payload=f.finish('b').payload.resource.config;
+ assert.equal(payload.refresh_images,true);assert.equal(payload.force_recreate,true);
+ assert.equal(payload.application.image,'example:2');assert.equal(payload.health.path,'/ready');assert.deepEqual(payload.health.expected_statuses,[200,204]);
+ await f.platform.tick();assert.ok(f.store.get(a.id).status.endpoints.every((e:any)=>e.machine_id==='mb'));
+ f.advance(31000);f.heartbeat('a');f.heartbeat('b');await f.platform.tick();
+ assert.equal(f.db.get<any>('SELECT state FROM ops_cluster_instances WHERE id=?',old.id).state,'running');
+ assert.ok(!f.store.actions(a.id).some(r=>r.action==='stop'));
+ for(const agent of ['a','b'])for(let n=0;n<8 && f.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state='queued'",agent);n++)f.finish(agent);
+ await f.platform.tick();assert.ok(f.store.actions(a.id).some(r=>r.action==='stop'));
 });
