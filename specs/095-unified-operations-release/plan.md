@@ -1,6 +1,8 @@
 # Design and Integration Plan
 
-基于PR98的独立工作树，顺序合入当前生产PR92、维护可靠性PR95、安装表单PR96、托管可用性PR97；PR94为祖先，PR93发行文档合入但Compose最终改为本次固定标签。逐项核验共同改动：agent operationCapabilities包含image-refresh与health-v1，store.queue同时要求两者；cluster-workloads保留升级刷新/历史商店版本及新的宽限/比例/就绪/排空；Web表单保持防重复部署及健康配置；SSH容器终端保留账户边界。GitHub各PR不合并。
+2026-11-05续接：用户要求最新商城一同发版测试，纳入PR100 fdf731b2ec25ecde6f4b5f08f6e7c2d1ddae832b。合并时保留组合升级/健康/SSH回归与商城35条目、8分类、4个Logo及完整Firecrawl依赖；补完Meilisearch/RustFS/Firecrawl真实容器业务冒烟。旧b975a95候选保留历史证据，新发行使用独立目录、固定源码及新标签，重新运行受影响检查与两架构成品验收。架构内容沿用PR100已同步的目录拓扑和组合§95，不新增拓扑；合并后回读Doca最新版本核对两部分均保留。
+
+基于PR98的独立工作树，顺序合入当前生产PR92、维护可靠性PR95、安装表单PR96、托管可用性PR97；PR94为祖先，PR93发行文档合入但Compose最终改为本次固定标签。逐项核验共同改动：agent operationCapabilities包含image-refresh与health-v1，store.queue同时要求两者；cluster-workloads保留升级刷新/历史商店版本及新的宽限/比例/就绪/排空；Web表单保持防重复部署及健康配置；SSH容器终端保留账户边界。用户本轮已明确授权合并：完成验收后通过统一PR合入main，保留各来源提交历史；发布固定版本和latest及GitHub Release。
 
 依赖与包由工作树独立构建；以git archive固定提交作为Docker上下文，两架构执行成品检查、签名遥测序号回归、发布及按不可变摘要拉回验证。复用既有发布脚本，更新旧镜像比较和实际模块哈希/能力检查，避免仅依赖标签或健康接口。
 
