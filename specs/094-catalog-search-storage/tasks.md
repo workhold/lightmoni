@@ -8,4 +8,4 @@
 - [x] T006a 中英文浏览器、SearXNG 官方镜像真实业务冒烟；复现脚本及资源清理。
 - [ ] T006b Meilisearch / RustFS / Firecrawl 官方镜像业务冒烟：镜像层下载超时，未声称通过，详见 validation.md。
 - [x] T007 仓库与 Doca 架构同步、原生图保留和最新版本回读。
-- [ ] T008 类型/构建、同步远端主干、功能 PR 与验收证据。
+- [x] T008 类型/构建、同步远端主干、功能 PR 与验收证据。草稿 PR：https://github.com/workhold/lightmoni/pull/100；T006b 未完成并明确列出。

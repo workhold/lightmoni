@@ -17,3 +17,7 @@
 
 - 已完成真实 linux/arm64 SearXNG 冒烟：原生入口启动、/healthz、HTML 首页和 format=json 检索均通过；20项浏览器截图已保存并检查代表性桌面/手机画面。SearXNG 未声明上游引擎全部可用。临时容器、网络、卷和配置已清理。
 - Meilisearch、RustFS、Firecrawl：官方镜像层拉取未完成，CDN TLS 超时重试后仍未具备完整镜像；尚未通过这些版本的容器业务冒烟。已提供复现脚本；不将此项列为通过。功能PR保持draft，便于复核后继续验收。
+
+## 交付
+
+[GitHub Draft PR #100](https://github.com/workhold/lightmoni/pull/100)，目标main。提交前已fetch核对远端主干，无冲突；当前分支仅包含本次目录、分类、Logo、SDD和验证变更。剩余镜像下载已停止，未遗留本轮测试容器、网络或卷。
