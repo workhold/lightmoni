@@ -15,7 +15,7 @@ import { canonicalJSON, signExecutorRequest, signJWS, verifyJWS, sha256, planCla
 import {registerAgentJobs} from '../src/server/agent-jobs.js';
 import {registerOperations} from '../src/server/operations.js';
 import {connectManagedExecutorJobs} from '../src/server/managed-executor-jobs.js';
-import {connectExecutorObservations} from '../src/server/executor-observation.js';
+import {connectExecutorObservations,restoreObservationRows} from '../src/server/executor-observation.js';
 import {encodeOTLP,nowNano} from '../src/shared/otlp.js';
 import {randomUUID} from 'node:crypto';
 function fixture() {
@@ -125,12 +125,28 @@ test('a cached start permit cannot restore authority after policy revocation',()
 test('signed application observations bind central ownership and durably acknowledge before export',{timeout:6000},async()=>{
  const f=fixture();f.db.exec('CREATE TABLE ops_cluster_instances(id TEXT,owner_id TEXT,cluster_id TEXT,machine_id TEXT,agent_id TEXT);CREATE TABLE ops_platform_resources(id TEXT,kind TEXT,spec_cipher TEXT)');
  f.db.run('INSERT INTO ops_cluster_instances VALUES(?,?,?,?,?)','deployment','application','cluster','host','agent-host');f.db.run('INSERT INTO ops_platform_resources VALUES(?,?,?)','application','application',f.deps.encrypt(JSON.stringify({service_name:'approved-service',role:'generic'})));
- let failExport=true,exports=0;const module=connectExecutorObservations(f.deps,f.store,async(_table,rows)=>{if(failExport)throw Error('storage_unavailable');assert.equal(rows[0].row.attributes.application_id,'application');assert.equal(rows[0].row.service,'approved-service');exports++;});
+ let failExport=true,exports=0;const module=connectExecutorObservations(f.deps,f.store,async(_table,rows)=>{if(failExport)throw Error('storage_unavailable');assert.equal(rows[0].row.attributes.application_id,'application');assert.equal(rows[0].row.service,'approved-service');assert.equal(rows[0].row.source_seq,'9007199254740993');exports++;});
  try{
-  const attr=(key:string,value:string)=>({key,value:{stringValue:value}}),payload=encodeOTLP('logs',{resourceLogs:[{resource:{attributes:[attr('service.name','executor')]},scopeLogs:[{logRecords:[{timeUnixNano:nowNano().toString(),body:{stringValue:'private-application-line'},attributes:[attr('deployment_id','deployment'),attr('container_id','a'.repeat(64))]}]}]}]}).toString('base64');
+  const attr=(key:string,value:string)=>({key,value:{stringValue:value}}),payload=encodeOTLP('logs',{resourceLogs:[{resource:{attributes:[attr('service.name','executor')]},scopeLogs:[{logRecords:[{timeUnixNano:nowNano().toString(),body:{stringValue:'private-application-line'},attributes:[attr('deployment_id','deployment'),attr('container_id','a'.repeat(64)),{key:'lightmoni.source_seq',value:{intValue:'9007199254740993'}}]}]}]}]}).toString('base64');
   const value={id:randomUUID(),signal:'logs',payload};const send=(body:any)=>f.request('observations/batches',body).invoke((e,v)=>{f.store.observationAuthority(e.id);return f.store.observations!.accept(e,v);});
   assert.deepEqual(send(value),{accepted:true});assert.deepEqual(send(value),{accepted:true});assert.equal(f.db.get<any>('SELECT count(*) n FROM privileged_observation_batches')!.n,1);assert.ok(!f.db.get<any>('SELECT rows_enc FROM privileged_observation_batches')!.rows_enc.includes('private-application-line'));
-  assert.throws(()=>send({...value,payload:Buffer.concat([Buffer.from(payload,'base64'),Buffer.from('x')]).toString('base64')}),/replay_conflict/);await new Promise(r=>setTimeout(r,1100));assert.equal(exports,0);assert.equal(f.db.get<any>('SELECT completed FROM privileged_observation_batches')!.completed,0);failExport=false;await new Promise(r=>setTimeout(r,1100));assert.equal(exports,1);assert.equal(f.db.get<any>('SELECT completed FROM privileged_observation_batches')!.completed,1);
+  const saved=f.db.get<any>('SELECT id,rows_enc FROM privileged_observation_batches')!,legacy=JSON.parse(f.deps.decrypt(saved.rows_enc));assert.equal(legacy[0].row.source_seq,'9007199254740993');legacy[0].row.source_seq={isLosslessNumber:true,value:'9007199254740993'};f.db.run('UPDATE privileged_observation_batches SET rows_enc=? WHERE id=?',f.deps.encrypt(canonicalJSON(legacy)),saved.id);
+  assert.throws(()=>send({...value,payload:Buffer.concat([Buffer.from(payload,'base64'),Buffer.from('x')]).toString('base64')}),/replay_conflict/);await new Promise(r=>setTimeout(r,1100));assert.equal(exports,0);assert.equal(f.db.get<any>('SELECT completed FROM privileged_observation_batches')!.completed,0);assert.deepEqual(f.deps.applicationObservationStatus?.('agent-host'),{pending_batches:1,error:'observation_export_failed'});failExport=false;await new Promise(r=>setTimeout(r,1100));assert.equal(exports,1);assert.equal(f.db.get<any>('SELECT completed FROM privileged_observation_batches')!.completed,1);assert.deepEqual(f.deps.applicationObservationStatus?.('agent-host'),{pending_batches:0,error:''});
   f.db.run("UPDATE users SET role='viewer' WHERE id='admin'");assert.throws(()=>send({...value,id:randomUUID()}),/active_human|admin/);
+ }finally{await module.close?.();f.close();}
+});
+test('observation sequence recovery refuses unsafe or malformed numeric wrappers',()=>{
+ const row=(value:any)=>[{kind:'log',subtype:'',row:{source_seq:value}}];
+ assert.equal(restoreObservationRows(row({isLosslessNumber:true,value:'18446744073709551615'}))[0].row.source_seq,'18446744073709551615');
+ for(const value of [9007199254740992,-1,'18446744073709551616',{isLosslessNumber:true,value:'1',secret:'unexpected'},{value:'1'},'1e3'])assert.throws(()=>restoreObservationRows(row(value)),/invalid_observation_source_sequence/);
+});
+test('more than one drain window of failed observations cannot starve a later healthy batch',{timeout:6000},async()=>{
+ const f=fixture();f.db.exec('CREATE TABLE ops_cluster_instances(id TEXT,owner_id TEXT,cluster_id TEXT,machine_id TEXT,agent_id TEXT);CREATE TABLE ops_platform_resources(id TEXT,kind TEXT,spec_cipher TEXT)');
+ f.db.run('INSERT INTO ops_cluster_instances VALUES(?,?,?,?,?)','deployment','application','cluster','host','agent-host');f.db.run('INSERT INTO ops_platform_resources VALUES(?,?,?)','application','application',f.deps.encrypt(JSON.stringify({service_name:'approved-service',role:'generic'})));
+ let exported=0;const module=connectExecutorObservations(f.deps,f.store,async(_table,rows)=>{if(rows[0].row.body==='poison')throw Error('storage_unavailable');exported++;});
+ try{
+  const send=(body:string)=>{const value={id:randomUUID(),signal:'logs',payload:encodeOTLP('logs',{resourceLogs:[{resource:{attributes:[{key:'service.name',value:{stringValue:'executor'}}]},scopeLogs:[{logRecords:[{timeUnixNano:nowNano().toString(),body:{stringValue:body},attributes:[{key:'deployment_id',value:{stringValue:'deployment'}},{key:'container_id',value:{stringValue:'a'.repeat(64)}}]}]}]}]}).toString('base64')};f.request('observations/batches',value).invoke((e,v)=>f.store.observations!.accept(e,v));return value.id;};
+  for(let i=0;i<21;i++)send('poison');f.db.run("UPDATE privileged_observation_batches SET created_at='2026-10-31T23:59:59Z'");send('healthy');
+  await new Promise(r=>setTimeout(r,2400));assert.equal(exported,1);assert.equal(f.db.get<any>('SELECT count(*) n FROM privileged_observation_batches WHERE completed=0')!.n,21);
  }finally{await module.close?.();f.close();}
 });

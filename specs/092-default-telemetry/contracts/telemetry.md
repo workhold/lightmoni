@@ -6,6 +6,7 @@
 - 网站身份必须属于该OpenResty实例实际承载的集群；托管站点从保存的服务绑定和实际部署推导，不能仅依赖手动cluster_ids。
 - SDK仍用数据Key直报，不经Agent；应用读取使用平台注入resource属性lightmoni.application_id，实例属性service.instance.id；覆盖配置遵循原SDK契约。
 - 原始日志和指标的持久ACK、事件ID、游标不变；不删除拒绝批次以冒充恢复。
+- 中心持久化日志source_seq使用精确UInt64十进制字符串；旧版保存的严格LosslessNumber包装形状在产品回读路径内恢复，不改写原始积压。中心每轮最多20批，稳定游标轮转保证其他批次得到重试机会。
 
 ## 采集状态
 
