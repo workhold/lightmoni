@@ -586,3 +586,15 @@ test("members can inspect release and update metadata but cannot plan or approve
   assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/cancel`, "POST", {})).status, 403);
   assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", {})).status, 403);
 });
+
+test('rollback plan explains a missing complete-management snapshot without creating or dispatching maintenance',async t=>{
+  const f=await fixture(t),h=await f.host(),observation=f.observations.get(h.id);
+  observation.previous=null;observation.previous_unavailable_reason='previous_helper_snapshot_missing';
+  const proposed=await f.plan(h.id,'rollback');
+  assert.equal(proposed.status,409,proposed.raw);
+  assert.match(proposed.data.error,/上一发行缺少完整管理所需的执行组件快照/);
+  assert.match(proposed.data.error,/先审阅切换至仅监控模式/);
+  assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_agent_updates WHERE machine_id=?',h.id).n,0);
+  assert.equal(f.calls.some(call=>call.command.includes('.update-bootstrap.XXXXXX')),false);
+  assert.equal(f.db.get<any>('SELECT runtime_mode FROM machine_agent_runtime WHERE machine_id=?',h.id).runtime_mode,'root');
+});

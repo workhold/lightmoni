@@ -174,6 +174,8 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         target = { ...pinned.release, artifact_sha256: pinned.release.sha256 };
         files = pinned.files;
       } else {
+        if (observed.previous_unavailable_reason === "previous_helper_snapshot_missing")
+          fail(409, "上一发行缺少完整管理所需的执行组件快照，请先审阅切换至仅监控模式，再重新生成回退计划");
         if (!observed.previous || observed.previous.state_schema !== 1 || !SHA.test(observed.previous.artifact_sha256)
           || !observed.previous.source_revision || !observed.previous.build_id) fail(409, "没有具备可验证构建身份的上一发行，不能自动回退");
         target = { ...observed.previous, sha256: observed.previous.artifact_sha256, arch: observed.arch, platform: "linux" };

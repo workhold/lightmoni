@@ -6,7 +6,10 @@ import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { gunzipSync } from "node:zlib";
+import { createGunzip } from "node:zlib";
+import { Transform, Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { setImmediate as nextTurn } from "node:timers/promises";
 
 export const ORDINARY_AGENT_SERVICE_SHA256 = "e40409fb295ff646cf016a05c2571d2004202454bdeb742dc88d4aff29391a12";
 export const HELPER_SERVICE_SHA256 = "e1616a6c930450c27af71d23bab66fd64b4ae573344238c6ef501a8f969b162a";
@@ -17,6 +20,13 @@ const OP = /^[a-f0-9]{32}$/;
 const VERSION = /^[A-Za-z0-9._-]{1,128}$/;
 const REVISION = /^[a-f0-9]{40}$/;
 const TERMINAL = new Set(["succeeded", "rolled_back", "failed", "rollback_failed"]);
+const MAX_ARCHIVE = 256 << 20;
+const MAX_EXPANDED_ARCHIVE = 768 << 20;
+const COPY_CHUNK = 64 << 10;
+const MAX_ARCHIVE_METADATA = 64 << 10;
+const MAX_ARCHIVE_INDEX = 16 << 20;
+const DISK_RESERVE = 64 << 20;
+const cancelled = signal => { if (signal?.aborted) fail("maintenance_cancelled"); };
 const digest = value => createHash("sha256").update(value).digest("hex");
 const fail = code => { throw Object.assign(Error(code), { safeCode: code }); };
 const safeCode = error => typeof error?.safeCode === "string" ? error.safeCode : "maintenance_failed";
@@ -68,6 +78,37 @@ export class AgentMaintenance {
     fs.renameSync(temporary, filename);
     try { const directory = fs.openSync(path.dirname(filename), "r"); try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); } } catch { /* Some test filesystems cannot fsync a directory. */ }
   }
+  async archiveDigest(filename, signal) {
+    const hash = createHash("sha256");
+    let size = 0;
+    for await (const chunk of fs.createReadStream(filename, { highWaterMark: COPY_CHUNK })) {
+      cancelled(signal);
+      size += chunk.length;
+      if (size > MAX_ARCHIVE) fail("invalid_archive");
+      hash.update(chunk);
+    }
+    cancelled(signal);
+    return hash.digest("hex");
+  }
+  async copyArchive(source, destination, expectedSHA) {
+    const temporary = destination + ".new-" + randomUUID();
+    const fd = fs.openSync(temporary, "wx", 0o600), hash = createHash("sha256");
+    let size = 0;
+    try {
+      fs.fchmodSync(fd, 0o600);
+      for await (const chunk of fs.createReadStream(source, { highWaterMark: COPY_CHUNK })) {
+        size += chunk.length;
+        if (size > MAX_ARCHIVE) fail("invalid_archive");
+        hash.update(chunk);
+        for (let offset = 0; offset < chunk.length;) offset += fs.writeSync(fd, chunk, offset, chunk.length - offset);
+      }
+      if (hash.digest("hex") !== expectedSHA) fail("checksum_mismatch");
+      fs.fsyncSync(fd);
+      fs.renameSync(temporary, destination);
+      const directory = fs.openSync(path.dirname(destination), "r");
+      try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+    } finally { fs.closeSync(fd); fs.rmSync(temporary, { force: true }); }
+  }
   state(id) {
     const directory = this.checkManaged(this.opDir(id), "directory");
     const status = boundedJSON(this.checkManaged(path.join(directory, "status.json")));
@@ -85,13 +126,27 @@ export class AgentMaintenance {
     if (!ID.test(value.agent_id ?? "") || !ID.test(value.host_id ?? "")) fail("invalid_identity");
     return value.agent_id;
   }
+  fileDigest(filename) {
+    const fd = fs.openSync(this.checkManaged(filename), "r"), hash = createHash("sha256");
+    // Metadata and fingerprints are synchronous contracts. Hash large program
+    // files with one fixed buffer instead of retaining whole Node binaries.
+    try {
+      const buffer = Buffer.allocUnsafe(COPY_CHUNK);
+      for (;;) {
+        const count = fs.readSync(fd, buffer, 0, buffer.length, null);
+        if (count === 0) break;
+        hash.update(buffer.subarray(0, count));
+      }
+      return hash.digest("hex");
+    } finally { fs.closeSync(fd); }
+  }
   metadata(releasePath) {
     this.checkManaged(releasePath, "directory");
     const manifest = boundedJSON(this.checkManaged(path.join(releasePath, "release.json")), 16384);
     if (!VERSION.test(manifest.version ?? "") || manifest.platform !== "linux" || !["amd64", "arm64"].includes(manifest.arch)) fail("unsupported_release");
     const current = manifest.state_schema === 1 && REVISION.test(manifest.source_revision ?? "") && VERSION.test(manifest.build_id ?? "");
     if (!current) fail("unsupported_state_schema");
-    if (manifest.node_binary_sha256 !== undefined && (!SHA.test(manifest.node_binary_sha256) || digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "node")))) !== manifest.node_binary_sha256)) fail("runtime_checksum_mismatch");
+    if (manifest.node_binary_sha256 !== undefined && (!SHA.test(manifest.node_binary_sha256) || this.fileDigest(path.join(releasePath, "node")) !== manifest.node_binary_sha256)) fail("runtime_checksum_mismatch");
     let artifact = "";
     try {
       const receipt = boundedJSON(this.checkManaged(path.join(releasePath, "installation.json")), 4096);
@@ -110,9 +165,9 @@ export class AgentMaintenance {
     const launcher = fs.readFileSync(this.checkManaged(launcherPath));
     const service = fs.readFileSync(this.checkManaged(servicePath));
     const manifest = fs.readFileSync(this.checkManaged(path.join(releasePath, "release.json")));
-    const node = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "node"))));
-    const entrypoint = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "app/runtime/dist/agent/main.js"))));
-    const uninstaller = digest(fs.readFileSync(this.checkManaged(path.join(releasePath, "uninstall.sh"))));
+    const node = this.fileDigest(path.join(releasePath, "node"));
+    const entrypoint = this.fileDigest(path.join(releasePath, "app/runtime/dist/agent/main.js"));
+    const uninstaller = this.fileDigest(path.join(releasePath, "uninstall.sh"));
     let helperService='';
     try { helperService=digest(fs.readFileSync(this.checkManaged(helperPath))); }
     catch(error) { if(!absent(error))throw error; }
@@ -156,6 +211,10 @@ export class AgentMaintenance {
     const bytes=fs.readFileSync(file);
     if(digest(bytes)!==HELPER_SERVICE_SHA256)fail('helper_service_package_invalid');
     return bytes;
+  }
+  assertRetainedHelper(filename) {
+    try { return this.assertPackagedHelper(filename); }
+    catch(error) { if(absent(error))fail('previous_helper_snapshot_missing'); throw error; }
   }
   assertHelperMode(mode) {
     const service=this.helperService(), load=this.helperSystem('LoadState'), fragment=this.helperSystem('FragmentPath');
@@ -214,6 +273,10 @@ export class AgentMaintenance {
       const mode=SERVICE_MODES.get(digest(fs.readFileSync(this.checkManaged(path.join(source,"previous-service")))));
       const currentMode=SERVICE_MODES.get(digest(fs.readFileSync(this.checkManaged(this.p('/etc/systemd/system/lightmoni-agent.service')))));
       if(!mode||mode!==currentMode)return null;
+      // A retained monitor-only program has no helper unit snapshot. Do not
+      // advertise it for a complete-management rollback or borrow a unit from
+      // another release; changing mode is a separately reviewed operation.
+      if(this.runtimeMode()==='root')this.assertRetainedHelper(helperSnapshot);
       return { ...value, release_path: retained.release_path, operation_id: retained.operation_id };
     } catch (error) { if(absent(error))return null;throw error; }
   }
@@ -224,10 +287,16 @@ export class AgentMaintenance {
     const fragment = this.system("FragmentPath"), load = this.system("LoadState"), active = this.system("ActiveState");
     if (fragment !== this.p("/etc/systemd/system/lightmoni-agent.service") || load !== "loaded" || !["active", "inactive", "failed"].includes(active)) fail("unmanaged_installation");
     const runtimeMode=this.runtimeMode(),permissionGeneration=this.runtimeGeneration(),helperActive=this.assertHelperMode(runtimeMode);
-    const local = this.localStatus(), previous = this.previous();
+    const local = this.localStatus();
+    let previous=null,previousUnavailable='';
+    try { previous=this.previous(); }
+    catch(error) {
+      if(error?.safeCode!=='previous_helper_snapshot_missing')throw error;
+      previousUnavailable=error.safeCode;
+    }
     const boot = typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) && local.agent_id === agent ? local.boot_id : "";
     if(!Number.isSafeInteger(local.runtime?.uid)||local.runtime.uid<=0||!Number.isSafeInteger(local.runtime?.gid)||local.runtime.gid<=0||local.runtime.mode!==runtimeMode||local.runtime.permission_generation!==permissionGeneration)fail('ordinary_agent_identity_required');
-    return { schema: 1, ready: current.arch === this.arch, agent_id: agent, arch: this.arch, runtime_mode:runtimeMode, permission_generation:permissionGeneration, service_active: active === "active", helper_active:helperActive, lifecycle_locked: fs.existsSync(this.lock), operation_lock: this.hasOperation(), current: { ...current, boot_id: boot }, previous: previous ? this.publicRelease(previous) : null };
+    return { schema: 1, ready: current.arch === this.arch, agent_id: agent, arch: this.arch, runtime_mode:runtimeMode, permission_generation:permissionGeneration, service_active: active === "active", helper_active:helperActive, lifecycle_locked: fs.existsSync(this.lock), operation_lock: this.hasOperation(), current: { ...current, boot_id: boot }, previous: previous ? this.publicRelease(previous) : null, ...(previousUnavailable ? {previous_unavailable_reason:previousUnavailable} : {}) };
   }
   publicRelease(value) {
     return Object.fromEntries(["version", "source_revision", "build_id", "state_schema", "artifact_sha256", "arch", "fingerprint"].map(key => [key, value[key]]));
@@ -259,17 +328,18 @@ export class AgentMaintenance {
     if (!before.ready || before.agent_id !== request.expected_agent_id || before.current.fingerprint !== request.expected_fingerprint) fail("installation_changed");
     if (before.service_active !== request.expected_service_active) fail("service_state_changed");
     if (before.lifecycle_locked || before.operation_lock) fail("operation_conflict");
+    if (request.action === "rollback" && before.previous_unavailable_reason) fail(before.previous_unavailable_reason);
     if (request.action === "rollback" && (!before.previous || before.previous.fingerprint !== request.target.fingerprint)) fail("previous_release_changed");
-    let archive;
+    let archivePath;
     if (request.action === "upgrade") {
       if (typeof request.archive_path !== "string") fail("archive_missing");
       this.checkManaged(request.archive_path);
       const info = fs.statSync(request.archive_path);
-      if (info.size < 1024 || info.size > 256 << 20) fail("invalid_archive");
-      archive = fs.readFileSync(request.archive_path);
-      if (digest(archive) !== request.target.artifact_sha256) fail("checksum_mismatch");
+      if (info.size < 1024 || info.size > MAX_ARCHIVE) fail("invalid_archive");
+      archivePath = request.archive_path;
+      if (await this.archiveDigest(archivePath) !== request.target.artifact_sha256) fail("checksum_mismatch");
       const space = fs.statfsSync(this.base);
-      if (space.bavail * space.bsize < archive.length * 5 + (64 << 20)) fail("insufficient_disk_space");
+      if (space.bavail * space.bsize < info.size * 5 + DISK_RESERVE) fail("insufficient_disk_space");
     }
     fs.mkdirSync(path.join(this.base, "updates"), { mode: 0o700, recursive: true });
     this.checkManaged(path.join(this.base, "updates"), "directory");
@@ -282,13 +352,13 @@ export class AgentMaintenance {
       const state = { schema: 1, operation_id: id, agent_id: before.agent_id, status: "accepted", from: before.current, target: { ...request.target }, local_health: { service_active: false, helper_active: false, identity_matches: false, release_matches: false, boot_id: "" }, started_at: this.timestamp(), updated_at: this.timestamp() };
       this.atomic(path.join(directory, "status.json"), state);
       this.atomic(path.join(directory, "request.json"), { ...request, archive_path: undefined, previous_path: this.currentPath(), previous_active: before.service_active, rollback_source: request.action === "rollback" ? this.previous() : null });
-      if (archive) this.atomic(path.join(directory, "bundle.tar.gz"), archive);
+      if (archivePath) await this.copyArchive(archivePath, path.join(directory, "bundle.tar.gz"), request.target.artifact_sha256);
       this.atomic(path.join(directory, "worker.mjs"), fs.readFileSync(this.self));
       this.atomic(path.join(this.base, "update-runner.mjs"), fs.readFileSync(this.self), 0o644);
       const node = this.checkManaged(path.join(this.currentPath(), "node"));
       dispatchAttempted = true;
       if (this.launch) await this.launch(id, node, path.join(directory, "worker.mjs"));
-      else this.command("systemd-run", ["--quiet", "--no-block", "--collect", "--unit=lightmoni-agent-update-" + id, "--property=Type=exec", "--property=UMask=0077", "--property=StandardOutput=null", "--property=StandardError=null", "--property=RuntimeMaxSec=600", node, path.join(directory, "worker.mjs"), "worker", id]);
+      else this.command("systemd-run", ["--quiet", "--no-block", "--collect", "--unit=lightmoni-agent-update-" + id, "--property=Type=exec", "--property=UMask=0077", "--property=StandardOutput=null", "--property=StandardError=null", "--property=RuntimeMaxSec=600", "--property=Nice=10", "--property=IOSchedulingClass=idle", node, path.join(directory, "worker.mjs"), "worker", id]);
       return state;
     } catch (error) {
       // Failure before worker dispatch is deterministic and may safely release
@@ -300,73 +370,180 @@ export class AgentMaintenance {
       throw error;
     }
   }
-  /** Parse TAR ourselves before writing. No path, hardlink or symlink can
-   * redirect root writes; npm's relative internal links are created last. */
-  extract(archive, destination) {
-    let input;
-    try { input = gunzipSync(archive, { maxOutputLength: 768 << 20 }); }
-    catch { fail("invalid_archive"); }
-    const entries = [], names = new Map();
-    let offset = 0, extended = {}, global = {}, longName = "", longLink = "";
-    const string = value => value.subarray(0, value.indexOf(0) < 0 ? value.length : value.indexOf(0)).toString("utf8");
-    const octal = value => { const text = string(value).trim(); if (!/^[0-7]*$/.test(text)) fail("invalid_archive"); return text ? parseInt(text, 8) : 0; };
-    while (offset + 512 <= input.length) {
-      const header = input.subarray(offset, offset + 512); offset += 512;
-      if (header.every(byte => byte === 0)) break;
-      const checksum = octal(header.subarray(148, 156));
-      let sum = 0; for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 32 : header[i];
-      if (checksum !== sum) fail("invalid_archive");
-      const size = octal(header.subarray(124, 136));
-      if (!Number.isSafeInteger(size) || size < 0 || offset + size > input.length) fail("invalid_archive");
-      const body = input.subarray(offset, offset + size); offset += Math.ceil(size / 512) * 512;
-      const type = String.fromCharCode(header[156] || 48);
-      if (["x", "g"].includes(type)) {
-        const pax = {}; let cursor = 0;
-        while (cursor < body.length) {
-          const space = body.indexOf(32, cursor); if (space < 0) fail("invalid_archive");
-          const length = Number(body.subarray(cursor, space).toString());
-          if (!Number.isSafeInteger(length) || length <= space - cursor + 1 || cursor + length > body.length) fail("invalid_archive");
-          const item = body.subarray(space + 1, cursor + length - 1).toString(), equal = item.indexOf("=");
-          if (equal < 1) fail("invalid_archive"); pax[item.slice(0, equal)] = item.slice(equal + 1); cursor += length;
+  /** Inflate to a private, bounded on-disk TAR. Validate every path and link
+   * before materializing any member; retain offsets instead of body Buffers. */
+  async extract(archivePath, destination, { signal } = {}) {
+    cancelled(signal);
+    this.checkManaged(archivePath);
+    if (fs.statSync(archivePath).size > MAX_ARCHIVE) fail("invalid_archive");
+    this.checkManaged(destination, "directory");
+    const temporary = path.join(destination, ".maintenance-" + randomUUID() + ".tar");
+    const fd = fs.openSync(temporary, "wx+", 0o600);
+    try {
+      fs.fchmodSync(fd, 0o600);
+      if (fs.fstatSync(fd).uid !== this.uid) fail("unsafe_managed_path");
+      let expanded = 0, sinceSpaceCheck = 0;
+      const limit = new Transform({
+        highWaterMark: COPY_CHUNK,
+        transform(chunk, _encoding, callback) {
+          try {
+            cancelled(signal);
+            expanded += chunk.length;
+            sinceSpaceCheck += chunk.length;
+            if (expanded > MAX_EXPANDED_ARCHIVE) fail("archive_too_large");
+            if (sinceSpaceCheck >= 8 << 20) {
+              const space = fs.statfsSync(destination);
+              if (space.bavail * space.bsize < DISK_RESERVE) fail("insufficient_disk_space");
+              sinceSpaceCheck = 0;
+            }
+            callback(null, chunk);
+          } catch (error) { callback(error); }
+        },
+      });
+      try {
+        await pipeline(
+          fs.createReadStream(archivePath, { highWaterMark: COPY_CHUNK }),
+          createGunzip({ chunkSize: COPY_CHUNK }), limit,
+          new Writable({ highWaterMark: COPY_CHUNK, write(chunk, _encoding, callback) {
+            try {
+              for (let offset = 0; offset < chunk.length;) offset += fs.writeSync(fd, chunk, offset, chunk.length - offset);
+              callback();
+            } catch (error) { callback(error); }
+          } }),
+          ...(signal ? [{ signal }] : []),
+        );
+      } catch (error) {
+        cancelled(signal);
+        if (error?.safeCode) throw error;
+        if (error?.code === "ENOSPC") fail("insufficient_disk_space");
+        fail("invalid_archive");
+      }
+      cancelled(signal);
+      const entries = [], names = new Map();
+      let offset = 0, indexSize = 0, headers = 0;
+      let extended = {}, global = {}, longName = "", longLink = "";
+      const read = (position, length) => {
+        const value = Buffer.allocUnsafe(length);
+        let received = 0;
+        while (received < length) {
+          const count = fs.readSync(fd, value, received, length - received, position + received);
+          if (count === 0) fail("invalid_archive");
+          received += count;
         }
-        if (type === "g") global = { ...global, ...pax }; else extended = pax;
-        continue;
+        return value;
+      };
+      const string = value => value.subarray(0, value.indexOf(0) < 0 ? value.length : value.indexOf(0)).toString("utf8");
+      const octal = value => { const text = string(value).trim(); if (!/^[0-7]*$/.test(text)) fail("invalid_archive"); return text ? parseInt(text, 8) : 0; };
+      while (offset + 512 <= expanded) {
+        cancelled(signal);
+        if (++headers % 128 === 0) await nextTurn();
+        const header = read(offset, 512); offset += 512;
+        if (header.every(byte => byte === 0)) {
+          // Never hide unvalidated entries behind an early end marker.
+          while (offset < expanded) {
+            cancelled(signal);
+            const tail = read(offset, Math.min(COPY_CHUNK, expanded - offset));
+            if (tail.some(byte => byte !== 0)) fail("invalid_archive");
+            offset += tail.length;
+            await nextTurn();
+          }
+          break;
+        }
+        const checksum = octal(header.subarray(148, 156));
+        let sum = 0; for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 32 : header[i];
+        if (checksum !== sum) fail("invalid_archive");
+        const size = octal(header.subarray(124, 136)), bodyOffset = offset;
+        if (!Number.isSafeInteger(size) || size < 0 || offset + Math.ceil(size / 512) * 512 > expanded) fail("invalid_archive");
+        offset += Math.ceil(size / 512) * 512;
+        const type = String.fromCharCode(header[156] || 48);
+        if (["x", "g"].includes(type)) {
+          if (size > MAX_ARCHIVE_METADATA) fail("archive_too_large");
+          const body = read(bodyOffset, size), pax = {}; let cursor = 0, records = 0;
+          while (cursor < body.length) {
+            const space = body.indexOf(32, cursor); if (space < 0) fail("invalid_archive");
+            const length = Number(body.subarray(cursor, space).toString());
+            if (!Number.isSafeInteger(length) || length <= space - cursor + 1 || cursor + length > body.length || body[cursor + length - 1] !== 10 || ++records > 1024) fail("invalid_archive");
+            const item = body.subarray(space + 1, cursor + length - 1).toString(), equal = item.indexOf("=");
+            if (equal < 1) fail("invalid_archive");
+            // All other PAX attributes are ignored by this protocol. Retaining
+            // only these three also bounds repeated global metadata headers.
+            const key = item.slice(0, equal);
+            if (["path", "linkpath", "size"].includes(key)) pax[key] = item.slice(equal + 1);
+            cursor += length;
+          }
+          if (type === "g") global = { ...global, ...pax }; else extended = pax;
+          continue;
+        }
+        if (type === "L" || type === "K") {
+          if (size > 4096) fail("invalid_archive");
+          if (type === "L") longName = string(read(bodyOffset, size)); else longLink = string(read(bodyOffset, size));
+          continue;
+        }
+        const attrs = { ...global, ...extended }; extended = {};
+        const prefix = string(header.subarray(345, 500));
+        const raw = attrs.path ?? (longName || (prefix ? prefix + "/" : "") + string(header.subarray(0, 100)));
+        const link = attrs.linkpath ?? (longLink || string(header.subarray(157, 257))); longName = ""; longLink = "";
+        const name = raw.replace(/\/$/, "");
+        if (typeof name !== "string" || !name || name.startsWith("/") || name.includes("\\") || name.split("/").some(part => !part || part === "." || part === "..") || name.length > 4096 || /[\x00-\x1f\x7f]/.test(name)) fail("unsafe_archive_path");
+        if (!["lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-helper.service", "lightmoni-agent-runtime"].includes(name.split("/")[0])) fail("unsafe_archive_path");
+        if (!["0", "5", "2"].includes(type) || (attrs.size !== undefined && Number(attrs.size) !== size)) fail("unsupported_archive_entry");
+        if (names.has(name) && !(type === "5" && names.get(name) === "5")) fail("duplicate_archive_path");
+        names.set(name, type);
+        if (type === "2") {
+          if (!link || link.length > 4096 || path.posix.isAbsolute(link) || /[\\\x00-\x1f\x7f]/.test(link)) fail("unsafe_archive_link");
+          const target = path.posix.normalize(path.posix.join(path.posix.dirname(name), link));
+          if (!target.startsWith("lightmoni-agent-runtime/") || target.includes("../")) fail("unsafe_archive_link");
+        }
+        entries.push({ name, link, type, offset: bodyOffset, size, mode: octal(header.subarray(100, 108)) });
+        indexSize += Buffer.byteLength(name) + Buffer.byteLength(link) + 192;
+        if (entries.length > 100000 || indexSize > MAX_ARCHIVE_INDEX) fail("archive_too_large");
       }
-      if (type === "L" || type === "K") { if (size > 4096) fail("invalid_archive"); if (type === "L") longName = string(body); else longLink = string(body); continue; }
-      const attrs = { ...global, ...extended }; extended = {};
-      const prefix = string(header.subarray(345, 500));
-      const raw = attrs.path ?? (longName || (prefix ? prefix + "/" : "") + string(header.subarray(0, 100)));
-      const link = attrs.linkpath ?? (longLink || string(header.subarray(157, 257))); longName = ""; longLink = "";
-      const name = raw.replace(/\/$/, "");
-      if (typeof name !== "string" || !name || name.startsWith("/") || name.includes("\\") || name.split("/").some(part => !part || part === "." || part === "..") || name.length > 4096 || /[\x00-\x1f\x7f]/.test(name)) fail("unsafe_archive_path");
-      if (!["lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-helper.service", "lightmoni-agent-runtime"].includes(name.split("/")[0])) fail("unsafe_archive_path");
-      if (!["0", "5", "2"].includes(type) || (attrs.size !== undefined && Number(attrs.size) !== size)) fail("unsupported_archive_entry");
-      if (names.has(name) && !(type === "5" && names.get(name) === "5")) fail("duplicate_archive_path");
-      names.set(name, type);
-      if (type === "2") {
-        if (!link || path.posix.isAbsolute(link) || /[\\\x00-\x1f\x7f]/.test(link)) fail("unsafe_archive_link");
-        const target = path.posix.normalize(path.posix.join(path.posix.dirname(name), link));
-        if (!target.startsWith("lightmoni-agent-runtime/") || target.includes("../")) fail("unsafe_archive_link");
+      if (offset !== expanded || Object.keys(extended).length || longName || longLink) fail("invalid_archive");
+      for (const entry of entries) {
+        let parent = path.posix.dirname(entry.name);
+        while (parent !== ".") { if (names.has(parent) && names.get(parent) !== "5") fail("unsafe_archive_path"); parent = path.posix.dirname(parent); }
       }
-      entries.push({ name, link, type, body, mode: octal(header.subarray(100, 108)) });
-      if (entries.length > 100000) fail("archive_too_large");
-    }
-    for (const entry of entries) {
-      let parent = path.posix.dirname(entry.name);
-      while (parent !== ".") { if (names.has(parent) && names.get(parent) !== "5") fail("unsafe_archive_path"); parent = path.posix.dirname(parent); }
-    }
-    for (const entry of entries.filter(value => value.type !== "2")) {
-      const filename = path.join(destination, entry.name);
-      fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o755 });
-      if (entry.type === "5") fs.mkdirSync(filename, { recursive: true, mode: 0o755 });
-      else { fs.writeFileSync(filename, entry.body, { flag: "wx", mode: entry.mode & 0o111 ? 0o755 : 0o644 }); fs.chmodSync(filename, entry.mode & 0o111 ? 0o755 : 0o644); }
-    }
-    for (const entry of entries.filter(value => value.type === "2")) fs.symlinkSync(entry.link, path.join(destination, entry.name));
-    const readableDirectories = root => { fs.chmodSync(root, 0o755); for (const name of fs.readdirSync(root)) { const child = path.join(root, name); if (fs.lstatSync(child).isDirectory()) readableDirectories(child); } };
-    readableDirectories(destination);
-    for (const filename of ["lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-helper.service", "lightmoni-agent-runtime/node", "lightmoni-agent-runtime/release.json"]) {
-      const info = fs.lstatSync(path.join(destination, filename)); if (!info.isFile() || info.isSymbolicLink()) fail("invalid_archive");
-    }
+      // The private TAR is the sole body store. Copy at most 64 KiB at once,
+      // yielding between chunks so preparing can be cooperatively cancelled.
+      const buffer = Buffer.allocUnsafe(COPY_CHUNK);
+      sinceSpaceCheck = 8 << 20;
+      for (const entry of entries) {
+        cancelled(signal);
+        if (entry.type === "2") continue;
+        const filename = path.join(destination, entry.name);
+        fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o755 });
+        if (entry.type === "5") fs.mkdirSync(filename, { recursive: true, mode: 0o755 });
+        else {
+          const mode = entry.mode & 0o111 ? 0o755 : 0o644, target = fs.openSync(filename, "wx", mode);
+          try {
+            for (let copied = 0; copied < entry.size;) {
+              cancelled(signal);
+              if (sinceSpaceCheck >= 8 << 20) {
+                const space = fs.statfsSync(destination);
+                if (space.bavail * space.bsize < DISK_RESERVE) fail("insufficient_disk_space");
+                sinceSpaceCheck = 0;
+              }
+              const count = fs.readSync(fd, buffer, 0, Math.min(buffer.length, entry.size - copied), entry.offset + copied);
+              if (count === 0) fail("invalid_archive");
+              for (let written = 0; written < count;) written += fs.writeSync(target, buffer, written, count - written);
+              copied += count; sinceSpaceCheck += count;
+              await nextTurn();
+            }
+            fs.fchmodSync(target, mode);
+          } finally { fs.closeSync(target); }
+        }
+      }
+      for (const entry of entries) if (entry.type === "2") { cancelled(signal); fs.symlinkSync(entry.link, path.join(destination, entry.name)); }
+      const readableDirectories = async root => {
+        cancelled(signal); fs.chmodSync(root, 0o755);
+        for (const name of fs.readdirSync(root)) { const child = path.join(root, name); if (fs.lstatSync(child).isDirectory()) await readableDirectories(child); }
+        await nextTurn();
+      };
+      await readableDirectories(destination);
+      for (const filename of ["lightmoni-agent", "lightmoni-agent.service", "lightmoni-agent-helper.service", "lightmoni-agent-runtime/node", "lightmoni-agent-runtime/release.json"]) {
+        const info = fs.lstatSync(path.join(destination, filename)); if (!info.isFile() || info.isSymbolicLink()) fail("invalid_archive");
+      }
+    } finally { try { fs.closeSync(fd); } finally { fs.rmSync(temporary, { force: true }); } }
   }
   health(request) {
     const active = this.system("ActiveState") === "active", local = this.localStatus();
@@ -454,18 +631,41 @@ export class AgentMaintenance {
     // copies are unnecessary once the immutable release has been published.
     for (const filename of ["bundle.tar.gz", "unpacked"]) fs.rmSync(path.join(this.opDir(id), filename), { recursive: true, force: true });
   }
-  async worker(id) {
+  async worker(id, { signal, handleSignals = false } = {}) {
     const request = this.request(id), directory = this.opDir(id);
+    // A duplicate or stale worker never owns failure cleanup for the real
+    // worker. Reject before entering the transaction's catch/unlock path.
+    if (!this.ownsLock(id) || this.state(id).status !== "accepted") fail("operation_conflict");
+    let claim;
+    try { claim = fs.openSync(path.join(directory, "worker-claim.json"), "wx", 0o600); }
+    catch (error) { if (error?.code === "EEXIST") fail("operation_conflict"); throw error; }
+    // The claim is deliberately retained in every terminal state. Even if a
+    // worker dies before its first receipt update, this operation may never be
+    // replayed by a second process. A failed/partial claim also stays fenced.
+    try {
+      fs.fchmodSync(claim, 0o600);
+      if (fs.fstatSync(claim).uid !== this.uid) fail("unsafe_managed_path");
+      fs.writeFileSync(claim, JSON.stringify({ schema: 1, operation_id: id, pid: process.pid, claimed_at: this.timestamp() }) + "\n");
+      fs.fsyncSync(claim);
+    } finally { fs.closeSync(claim); }
+    const claimDirectory = fs.openSync(directory, "r");
+    try { fs.fsyncSync(claimDirectory); } finally { fs.closeSync(claimDirectory); }
+    if (!this.ownsLock(id) || this.state(id).status !== "accepted") fail("operation_conflict");
+    const cancellation = handleSignals ? new AbortController() : null;
+    const preparingSignal = signal && cancellation ? AbortSignal.any([signal, cancellation.signal]) : signal ?? cancellation?.signal;
+    const onTerminate = () => cancellation?.abort();
+    const stopWatching = () => { if (handleSignals) { process.removeListener("SIGTERM", onTerminate); process.removeListener("SIGINT", onTerminate); } };
+    if (handleSignals) { process.on("SIGTERM", onTerminate); process.on("SIGINT", onTerminate); }
     let changed = false;
     try {
-      if (!this.ownsLock(id) || this.state(id).status !== "accepted") fail("operation_conflict");
+      cancelled(preparingSignal);
       this.save(id, { status: "preparing" });
       let candidate, launcher, service, packagedHelper;
       if (request.action === "upgrade") {
-        const archive = fs.readFileSync(this.checkManaged(path.join(directory, "bundle.tar.gz")));
-        if (digest(archive) !== request.target.artifact_sha256) fail("checksum_mismatch");
+        const archive = this.checkManaged(path.join(directory, "bundle.tar.gz"));
+        if (await this.archiveDigest(archive, preparingSignal) !== request.target.artifact_sha256) fail("checksum_mismatch");
         const unpacked = path.join(directory, "unpacked"); fs.mkdirSync(unpacked, { mode: 0o755 });
-        this.extract(archive, unpacked);
+        await this.extract(archive, unpacked, { signal: preparingSignal });
         const runtime = path.join(unpacked, "lightmoni-agent-runtime");
         const target = this.metadata(runtime);
         if (["version", "source_revision", "build_id", "state_schema", "arch"].some(key => target[key] !== request.target[key])) fail("release_manifest_mismatch");
@@ -482,7 +682,7 @@ export class AgentMaintenance {
         candidate = retained.release_path;
         launcher = path.join(this.opDir(retained.operation_id), "previous-launcher"); service = path.join(this.opDir(retained.operation_id), "previous-service");
         packagedHelper=path.join(this.opDir(retained.operation_id),'previous-helper-service');
-        if(this.runtimeMode()==='root')this.assertPackagedHelper(packagedHelper);
+        if(this.runtimeMode()==='root')this.assertRetainedHelper(packagedHelper);
         this.command(path.join(candidate, "node"), [path.join(candidate, "app/runtime/dist/agent/main.js"), "check", "--config", this.p("/etc/lightmoni-agent/config.json"), "--require-data-dir", this.p("/var/lib/lightmoni-agent")]);
       }
       const currentService=this.ordinaryService(this.p('/etc/systemd/system/lightmoni-agent.service'));
@@ -509,7 +709,13 @@ export class AgentMaintenance {
         this.atomic(path.join(directory,'approved-helper-service'),fs.readFileSync(packagedHelper),0o644);
       }
       this.atomic(path.join(directory,"approved-service"),approvedService,0o644);
+      await nextTurn();
+      cancelled(preparingSignal);
+      // Only preparing supports cooperative termination. After this boundary
+      // the original durable switch/restore protocol remains authoritative;
+      // an uncatchable exit must still be reconciled as unknown by the server.
       this.save(id, { status: "switching" });
+      stopWatching();
       changed = true;
       this.command("systemctl", ["stop", "lightmoni-agent.service"]);
       if(this.runtimeMode()==='root'){
@@ -569,7 +775,7 @@ export class AgentMaintenance {
       }
       const result = this.save(id, { status: "failed", error_code: safeCode(error), finished_at: this.timestamp() });
       this.cleanup(id); if (this.ownsLock(id)) this.unlock(id); return result;
-    }
+    } finally { stopWatching(); }
   }
   commit(request) {
     const state = this.state(request.operation_id);
@@ -593,7 +799,7 @@ export async function maintenanceCLI(args, input, output) {
   try {
     if (process.getuid?.() !== 0 || process.platform !== "linux") fail("root_linux_required");
     const command = args[0], maintenance = new AgentMaintenance();
-    if (command === "worker" && args.length === 2 && OP.test(args[1])) { await maintenance.worker(args[1]); return; }
+    if (command === "worker" && args.length === 2 && OP.test(args[1])) { await maintenance.worker(args[1], { handleSignals: true }); return; }
     let bytes = ""; for await (const chunk of input) { bytes += chunk; if (Buffer.byteLength(bytes) > 32768) fail("invalid_request"); }
     const request = bytes.trim() ? JSON.parse(bytes) : {};
     let result;
