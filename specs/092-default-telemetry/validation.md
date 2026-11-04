@@ -29,3 +29,12 @@ SDK只有SDD091一次性验收日志，ABC示例代码此前只向stdout写日�
 生产ABC v3的实际apply已完成（曾遇到自动inspect占用，仅inspect成功并未切换镜像，随后正常停止/启动完成）。浏览器已读到连续三分钟process.uptime及持续heartbeat/http_request SDK日志，身份属于同一应用部署。中心修正版的备份、拉取、切换命令已派发；Mac再次锁屏，最终中心回执、积压恢复、容器/站点三轮采样及截图待解锁回读。健康接口返回ok不等价于本轮采集验收通过。
 
 生产镜像、既有积压恢复、各应用容器实时采样、四网站真实请求与访问日志、ABC持续SDK信号，以及用户页面截图均以本节后续实际回执为准；当前不声称已上线。
+
+
+## 继续任务的生产回读（2026-11-04 22:27–22:32，中国标准时间）
+
+上次1Panel终端保留的实际切换回执证实20261104-afd06a6已拉取、切换和健康检查通过，16个其他容器未重建。但本轮只读docker inspect显示生产当前已是20261104-host-ui-790cca58456a（主机UI发行），不是该遥测修正版；实际executor-observation模块也没有restoreObservationRows导出。不能沿用上次切换成功回执声称当前版本仍包含修复。
+
+三轮35秒采样：四个HTTPS地址均为预期200/401，SDK每轮都有http.server.requests、http.server.duration、process.uptime及heartbeat/http_request日志；容器指标与网站访问日志每轮仍为0，中心固定4批旧积压（3批日志序号仍为对象、1批指标），ClickHouse记录异常27。真实executor心跳仍在线。没有删除批次、重置游标或把未知执行改为成功。详见evidence/production-followup-20261104.json。
+
+后续需协调并行发行：保留主机UI改动，将本PR遥测修复纳入同一固定版本后，再补容器/网站/积压恢复验收。容器、网站的T007/T008继续保持未完成；阻塞已从Mac锁屏变为生产发行基线不一致。新增应用升级及容器SSH入口在独立SDD094-app-upgrades-terminal中实施。

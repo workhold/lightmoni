@@ -1,0 +1,23 @@
+{
+  "observed_date": "2026-11-04",
+  "source": "1Panel existing authenticated server terminal, read-only Docker identity and ClickHouse/SQLite queries",
+  "prior_activation_receipt": {
+    "image": "docker.heyphp.com/lightmoni/lightmoni:20261104-afd06a6",
+    "health": "ok",
+    "other_containers_unchanged": 16
+  },
+  "current_image_at_diagnosis": "docker.heyphp.com/lightmoni/lightmoni:20261104-host-ui-790cca58456a",
+  "current_image_id": "sha256:1435938eacd969554e581b1cce0b996ff36ac6e1b886c9fc42e5b21e231a5a51",
+  "restoreObservationRows_export": false,
+  "samples": [
+    {"at":"2026-11-04T14:27:37.153Z","applications_with_recent_container_metrics":0,"websites_with_recent_access_logs":0,"pending_batches":4},
+    {"at":"2026-11-04T14:28:12.329Z","applications_with_recent_container_metrics":0,"websites_with_recent_access_logs":0,"pending_batches":4},
+    {"at":"2026-11-04T14:28:47.467Z","applications_with_recent_container_metrics":0,"websites_with_recent_access_logs":0,"pending_batches":4}
+  ],
+  "https_each_cycle": {"abc.heyphp.com":200,"registry-demo.heyphp.com":401,"dbx-zz.heyphp.com":200,"install-091.heyphp.com":200},
+  "sdk_each_cycle": {"metrics":["http.server.duration","http.server.requests","process.uptime"],"logs":["abc-demo heartbeat","http_request"]},
+  "pending_batch_diagnostics": {"persisted_sequence_objects":3,"metric_batches":1,"created_at_range":"2026-11-04T03:14:09.952Z to 2026-11-04T03:14:30.887Z","clickhouse_exception_code":27},
+  "passed": false,
+  "next_action": "Coordinate the current production baseline and preserve host UI changes before deploying a combined release. No queues were deleted or cursors reset.",
+  "screenshot": "artifacts/screenshots/specs/094-app-upgrades-terminal/evidence/production-version-conflict.png"
+}
