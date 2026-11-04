@@ -1,0 +1,244 @@
+{
+  "passed": false,
+  "samples": [
+    {
+      "at": "2026-11-04T00:24:35.399202+00:00",
+      "passed": false,
+      "agent_heartbeat_age_seconds": 15.07,
+      "unresolved_unknown": 0,
+      "websites": [
+        {
+          "name": "ABC Demo",
+          "phase": "pending",
+          "active": false,
+          "synchronized": false
+        },
+        {
+          "name": "私有镜像仓库入口",
+          "phase": "pending",
+          "active": false,
+          "synchronized": false
+        },
+        {
+          "name": "dbx",
+          "phase": "pending",
+          "active": false,
+          "synchronized": false
+        },
+        {
+          "name": "install-091.heyphp.com",
+          "phase": "pending",
+          "active": false,
+          "synchronized": false
+        }
+      ],
+      "instances": [
+        {
+          "name": "SDD091 SDK环境验收",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "系统镜像仓库",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "ABC Demo",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "SDD091 快速安装",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "DBX",
+          "state": "running",
+          "healthy": 1
+        }
+      ]
+    },
+    {
+      "at": "2026-11-04T00:25:10.418198+00:00",
+      "passed": false,
+      "agent_heartbeat_age_seconds": 50.09,
+      "unresolved_unknown": 0,
+      "websites": [
+        {
+          "name": "ABC Demo",
+          "phase": "pending",
+          "active": false,
+          "synchronized": false
+        },
+        {
+          "name": "私有镜像仓库入口",
+          "phase": "pending",
+          "active": false,
+          "synchronized": false
+        },
+        {
+          "name": "dbx",
+          "phase": "pending",
+          "active": false,
+          "synchronized": false
+        },
+        {
+          "name": "install-091.heyphp.com",
+          "phase": "pending",
+          "active": false,
+          "synchronized": false
+        }
+      ],
+      "instances": [
+        {
+          "name": "SDD091 SDK环境验收",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "系统镜像仓库",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "ABC Demo",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "SDD091 快速安装",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "DBX",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "OpenResty",
+          "state": "queued",
+          "healthy": 0
+        }
+      ]
+    },
+    {
+      "at": "2026-11-04T00:25:45.435295+00:00",
+      "passed": true,
+      "agent_heartbeat_age_seconds": 25.09,
+      "unresolved_unknown": 0,
+      "websites": [
+        {
+          "name": "ABC Demo",
+          "phase": "active",
+          "active": true,
+          "synchronized": true
+        },
+        {
+          "name": "私有镜像仓库入口",
+          "phase": "active",
+          "active": true,
+          "synchronized": true
+        },
+        {
+          "name": "dbx",
+          "phase": "active",
+          "active": true,
+          "synchronized": true
+        },
+        {
+          "name": "install-091.heyphp.com",
+          "phase": "active",
+          "active": true,
+          "synchronized": true
+        }
+      ],
+      "instances": [
+        {
+          "name": "SDD091 SDK环境验收",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "系统镜像仓库",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "ABC Demo",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "SDD091 快速安装",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "DBX",
+          "state": "running",
+          "healthy": 1
+        },
+        {
+          "name": "OpenResty",
+          "state": "running",
+          "healthy": 1
+        }
+      ]
+    }
+  ],
+  "fresh_signed_managed_runs": [
+    {
+      "name": "ABC Demo",
+      "action": "inspect",
+      "executions": 16
+    },
+    {
+      "name": "DBX",
+      "action": "inspect",
+      "executions": 16
+    },
+    {
+      "name": "OpenResty",
+      "action": "apply",
+      "executions": 8
+    },
+    {
+      "name": "OpenResty",
+      "action": "inspect",
+      "executions": 12
+    },
+    {
+      "name": "OpenResty",
+      "action": "stop",
+      "executions": 2
+    },
+    {
+      "name": "SDD091 SDK环境验收",
+      "action": "apply",
+      "executions": 1
+    },
+    {
+      "name": "SDD091 SDK环境验收",
+      "action": "inspect",
+      "executions": 13
+    },
+    {
+      "name": "SDD091 快速安装",
+      "action": "apply",
+      "executions": 1
+    },
+    {
+      "name": "SDD091 快速安装",
+      "action": "inspect",
+      "executions": 16
+    },
+    {
+      "name": "系统镜像仓库",
+      "action": "inspect",
+      "executions": 17
+    }
+  ]
+}

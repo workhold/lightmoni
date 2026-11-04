@@ -36,9 +36,13 @@
 - [x] T016 同步 `docs/system-design.md` 与Doca并回读原生文本/图块，记录 `specs/091-deployment-autoconfiguration/evidence/doca-readback.json`。
 - [x] T017 同步远端main，审阅最终差异与秘密边界，功能分支提交并创建GitHub PR，记录 `specs/091-deployment-autoconfiguration/validation.md`。
 
-- [ ] T018 用户追加：固定 main 源码打包双架构、成品验证、GitHub/Docker 发版、生产备份更新和实际功能复测，记录 `validation.md` 与安全证据。
+- [x] T018 用户追加：固定 main 源码打包双架构、成品验证、GitHub/Docker 发版、生产备份更新和实际功能复测，记录 `validation.md` 与安全证据。
 
 ## Dependencies / Implementation Strategy
 T001→T002→US1→US2→US3；US4与US5使用独立文件可交错，但不并行编辑共享文件；最终检查和架构同步全部完成后交付。研究按speckit-plan委派只读代理；代码由主执行者完成。优先验证发布最小增量，再逐场景验证，先通过功能 PR 合入后按追加授权发版部署。
 
-- [ ] T019 [US2] 修复线上旧默认权重日志触发多余SLB接口的兼容问题；真实供应商回读后同步所有权权重元数据，补充回归和复测。
+- [x] T019 [US2] 修复线上旧默认权重日志触发多余SLB接口的兼容问题；真实供应商回读后同步所有权权重元数据，补充回归和复测。
+
+- [x] T020 接续现场验收：保留未知执行历史，凭主机 journal、systemd 执行单元和容器现场记录核对；从合并 #83/#91 的 main 统一发行，验证现有应用、DBX DNS、域名快装与 SDK 实际上报，并提交可复核证据。
+
+- [x] T021 处理现场单主机入口的重复原地重建：通过既有受管停止、配置保存、启动流程切换为固定主机模式；重新验证入口、网站、DNS与连续状态，保留切换前未通过的稳定性样本。
