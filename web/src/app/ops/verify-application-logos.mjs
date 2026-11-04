@@ -113,7 +113,7 @@ try {
     try {
       await page.goto(base + "/applications?view=store");
       const logos = page.locator(".lm-catalog-app img");
-      await expect(logos).toHaveCount(31);
+      await expect(logos).toHaveCount(35);
       await expect
         .poll(() =>
           logos.evaluateAll((imgs) =>
@@ -435,7 +435,7 @@ try {
         ),
       ).toBe(true);
       checks.push(
-        `${language}/${appearance}/${width}: all 31 brand images decoded locally, persisted logo and editor, historical Compose displays YAML, managed-port guidance, no page overflow`,
+        `${language}/${appearance}/${width}: all 35 brand images decoded locally, persisted logo and editor, historical Compose displays YAML, managed-port guidance, no page overflow`,
       );
     } catch (error) {
       await shot("failure");

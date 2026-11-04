@@ -1,0 +1,31 @@
+{
+  "runtime_typecheck": "passed",
+  "web_typecheck": "passed",
+  "web_build": "passed",
+  "catalog_logo_http_tests": {
+    "passed": 53,
+    "failed": 0
+  },
+  "compose": {
+    "extended_recipes": 31,
+    "services": 65,
+    "passed": true
+  },
+  "browser": {
+    "languages": [
+      "zh-CN",
+      "en-US"
+    ],
+    "widths": [
+      390,
+      1440
+    ],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "new_logo_and_forms": 4,
+    "page_errors": 0
+  },
+  "production_modified": false
+}

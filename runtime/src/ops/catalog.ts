@@ -216,4 +216,6 @@ export const applicationCategories = [
   {id:'ai',name:'AI 项目',name_en:'AI projects'},
   {id:'tools',name:'工具',name_en:'Tools'},
   {id:'web',name:'网站与网关',name_en:'Web & gateways'},
+  {id:'search',name:'搜索服务',name_en:'Search services'},
+  {id:'storage',name:'云存储',name_en:'Cloud storage'},
 ].map(c=>({...c,count:applicationCatalog.filter(t=>t.category===c.id).length}));
