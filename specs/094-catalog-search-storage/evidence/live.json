@@ -5,6 +5,16 @@
       "id": "searxng",
       "result": "passed",
       "behavior": "healthy native entrypoint, homepage and HTML/JSON search formats; no public-engine availability claim"
+    },
+    {
+      "id": "meilisearch",
+      "result": "passed",
+      "behavior": "production auth rejects missing key; authenticated indexing and search"
+    },
+    {
+      "id": "rustfs",
+      "result": "passed",
+      "behavior": "non-root volumes, S3 auth, signed bucket/object write/read, console health"
     }
   ],
   "production_modified": false,
