@@ -1,0 +1,36 @@
+✔ certificate step journal projects ordered safe diagnostics through the transactional system log outbox (4.133583ms)
+✔ transactional system log outbox retries, backfills idempotently, excludes secrets and rolls back with state (2.3565ms)
+✔ three applications share exactly one independent gauge and one log physical table (1.209959ms)
+✔ revision backfill uses the whole primary key so simultaneous resource revisions remain distinct (1.642792ms)
+✔ job explanations reach shared logs with credentials redacted and without snapshots or terminal output (0.728333ms)
+✔ auth, node, terminal, alert and assistant audit metadata share the system log pipeline (1.684625ms)
+✔ task-center state, cancellation and resolution reach system logs without script output (0.962458ms)
+✔ authenticated deployment ownership overrides spoofed application/cluster/host and rejects foreign Agent (0.622333ms)
+✔ inventory allowlist retains external stopped Docker and omits private fields (0.309834ms)
+✔ same-timestamp log lines resume from durable cursor; queue failure does not advance or skip data (27.670166ms)
+✔ automatic Docker discovery records app gauges and does not adopt external containers (21.755792ms)
+✔ large log backlog drains multiple batches without tail loss or duplicate cursor sequences (2538.6885ms)
+✔ bounded Docker reader resumes a multiline event larger than its byte cap and retains the final unterminated line (2716.02175ms)
+✔ a deleted website keeps its container log and no longer poisons the durable batch (2.077708ms)
+✔ managed website ownership follows saved service deployments while foreign clusters are refused (0.524958ms)
+✔ one rejected log leaves its cursor and batch intact while metrics drain and retry survives (1.334625ms)
+✔ collection status cannot carry raw secrets or unexpected fields (1.113041ms)
+✔ SDK and website queries pass the real read-only AST and retain fixed identity filters (45.366083ms)
+✔ signed domain work retains original lineage and ordinary control cannot read or mutate it (51.770917ms)
+✔ a changed source approval blocks an online permit before any side effect (7.972875ms)
+✔ domain receipt faults roll back both principals and preserve a retryable acknowledgement (12.816667ms)
+✔ lease loss preserves unknown fences without replaying through ordinary control (7.405583ms)
+✔ managed work can queue behind a running signed operation and only runs after its receipt (13.811833ms)
+✔ managed admission preserves manual privilege and unresolved result fences (19.770291ms)
+✔ human reconciliation preserves both unknown histories and permits a new signed managed job (11.406708ms)
+✔ an explicitly reconciled manual privileged result also releases admission (6.872625ms)
+✔ a cached start permit cannot restore authority after policy revocation (7.515041ms)
+✔ signed application observations bind central ownership and durably acknowledge before export (2211.466541ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5569.809333

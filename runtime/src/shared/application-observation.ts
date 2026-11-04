@@ -18,6 +18,22 @@ export interface DockerInventory {
   attempted_at?: string;
   truncated: boolean; containers: DockerContainer[];
 }
+export interface ApplicationObservation {
+  state:'waiting'|'ok'|'degraded';attempted_at:string;last_success_at:string;error:string;queue_batches:number;queue_bytes:number;
+}
+export function applicationObservation(value:any):ApplicationObservation {
+  const keys=['state','attempted_at','last_success_at','error','queue_batches','queue_bytes'];
+  if(!value||Object.keys(value).some(k=>!keys.includes(k))||!['waiting','ok','degraded'].includes(value.state)
+    ||!keys.slice(1,3).every(k=>value[k]===''||typeof value[k]==='string'&&Number.isFinite(Date.parse(value[k])))
+    ||typeof value.error!=='string'||!/^(?:|executor_http_\d{3}|application_log_collection_failed|observation_queue_full|docker_daemon_changed|docker_cli_missing|application_collection_failed|observation_transport_failed)$/.test(value.error)
+    ||!['queue_batches','queue_bytes'].every(k=>Number.isSafeInteger(value[k])&&value[k]>=0))fail(400,'invalid_application_observation');
+  return Object.fromEntries(keys.map(k=>[k,value[k]])) as unknown as ApplicationObservation;
+}
+export function websiteClusterIDs(db:DB,spec:Record<string,any>,decrypt?:(value:string)=>string):string[] {
+  if(spec.routing_mode!=='managed')return spec.cluster_ids??[];
+  let service:any;try{const row=db.get<any>("SELECT spec_cipher FROM ops_platform_resources WHERE id=? AND kind='application'",spec.service_application_id);if(row&&decrypt)service=JSON.parse(decrypt(row.spec_cipher));}catch{}
+  return [...new Set<string>((service?.deployments??[]).map((d:any)=>d.cluster_id))];
+}
 const has = (db: DB, name: string) => !!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?", name);
 export function applicationTargets(db: DB, agentID: string, decrypt?: (value:string)=>string): ApplicationTarget[] {
   if (!has(db, 'ops_cluster_instances')) return [];
@@ -42,7 +58,18 @@ export function bindApplicationRows(db: DB, agentID: string, rows: any[], decryp
   for (const n of rows) {
     const a = n.row.attributes, target = targets.get(a.deployment_id);
     if (!target || !/^[a-f0-9]{12,64}$/.test(a.container_id ?? '') || !(n.kind === 'log' || (n.kind === 'metric' && n.subtype === 'gauge'))) fail(403, 'application_observation_ownership_required');
-    if(a.website_id){let site:any;try{const stored=db.get<any>("SELECT spec_cipher FROM ops_platform_resources WHERE id=? AND kind='website'",a.website_id);if(stored&&decrypt)site=JSON.parse(decrypt(stored.spec_cipher));}catch{}if(target.role!=='openresty'||!site?.cluster_ids?.includes(target.cluster_id))fail(403,'website_observation_ownership_required');}
+    if(a.website_id){
+      if(target.role!=='openresty')fail(403,'website_observation_ownership_required');
+      const stored=db.get<any>("SELECT spec_cipher FROM ops_platform_resources WHERE id=? AND kind='website'",a.website_id);
+      if(!stored){
+        // A deleted website must not poison a durable Docker log backlog. Keep
+        // the original record as a container log, without granting site scope.
+        a.unregistered_website_id=a.website_id;delete a.website_id;
+      }else{
+        let site:any;try{if(decrypt)site=JSON.parse(decrypt(stored.spec_cipher));}catch{}
+        if(!site||!websiteClusterIDs(db,site,decrypt).includes(target.cluster_id))fail(403,'website_observation_ownership_required');
+      }
+    }
     Object.assign(a, {application_id: target.application_id, cluster_id: target.cluster_id, machine_id: target.machine_id, 'lightmoni.component':'application'});
     n.row.agent_id = agentID;
     n.row.host_id = db.get<any>('SELECT host_id FROM agents WHERE id=?', agentID)?.host_id ?? '';

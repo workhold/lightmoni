@@ -3,6 +3,7 @@ import {App,Button,Dropdown,Empty,Tag,Tooltip} from '../../shared/ui';
 import {useI18n} from '../../shared/i18n';
 import {publishedRevisions,websiteDNS,websitePublication,type WebsiteState} from './website-state';
 import {time,type Resource} from './model';
+import {useNavigate} from 'react-router-dom';
 
 export function WebsiteStateTag({value}:{value:WebsiteState}) {
   const {t}=useI18n();
@@ -15,7 +16,7 @@ function RevisionSummary({resource}:{resource:Resource}) {
 
 type Props={websites:Resource[];resources:Resource[];busy:boolean;onEdit:(r:Resource)=>void;onAction:(r:Resource,action:string)=>void;onDetails:(r:Resource)=>void;onTraffic:(r:Resource)=>void;onEntry:()=>void;onRemove:(r:Resource)=>Promise<void>};
 export default function WebsiteOverview({websites,resources,busy,onEdit,onAction,onDetails,onTraffic,onEntry,onRemove}:Props) {
-  const {t}=useI18n(),{modal}=App.useApp();
+  const {t}=useI18n(),{modal}=App.useApp(),navigate=useNavigate();
   if(!websites.length)return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={resources.some(r=>r.kind==='website')?t('没有符合筛选条件的网站','No websites match your filters'):t('还没有网站，先新建配置，再发布到集群入口。','No websites yet. Create a configuration, then publish it to cluster entries.')}/>;
   const entry=resources.find(r=>r.kind==='application'&&r.spec.role==='openresty');
   return <div className="lm-website-list"><div className="lm-website-columns" aria-hidden="true"><span>{t('网站与后端','Website & backend')}</span><span>{t('配置与发布','Configuration & publication')}</span><span>DNS / HTTPS</span><span>{t('操作','Actions')}</span></div>{websites.map(site=>{
@@ -27,6 +28,7 @@ export default function WebsiteOverview({websites,resources,busy,onEdit,onAction
     const externalEntry=entry?.spec.deployments?.some((d:any)=>ids.includes(d.cluster_id)&&!d.gateway_dns_zone_id);
     return <article className="lm-website-item" key={site.id} aria-label={site.name}>
       <div className="lm-website-identity"><Button type="link" className="lm-ops-resource-name" onClick={()=>onDetails(site)}>{site.name}</Button>
+        <Button type="link" size="small" onClick={()=>navigate('/websites/'+site.id+'/monitoring')}>{t('监控与访问日志','Monitoring & access logs')}</Button>
         <div className="lm-website-domains">{(site.spec.bindings??[]).flatMap((b:any)=>b.domains??[]).map((domain:string)=><span key={domain}>{domain}</span>)}</div>
         <div className="lm-website-backend"><span>{site.spec.mode==='static'?t('静态文件','Static files'):site.spec.routing_mode==='managed'?t('托管服务','Managed service'):t('手动后端','Manual backend')}</span><strong title={backends.join(' · ')}>{backends.join(' · ')||'—'}{site.spec.routing_mode==='managed'&&site.spec.service_port_name?':'+site.spec.service_port_name:''}</strong></div>
         <span className="lm-website-clusters">{ids.map(id=>resources.find(r=>r.id===id)?.name??id).join(' · ')}</span>

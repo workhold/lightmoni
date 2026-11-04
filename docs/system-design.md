@@ -2247,3 +2247,30 @@ OpenResty 在已授权托管区域下生成 edge-<集群ID稳定散列>.<scope> 
 每个普通应用首次生成部署载荷时创建应用专用 SDK Key，ingest_keys 仅保存散列，ops_application_sdk 加密保存材料和 Key ID；重复部署复用，停用后拒绝自动替换，删除应用登记时停用并删除加密材料。载荷逐实例注入 LIGHTMONI_ENDPOINT、KEY、SERVICE、INSTANCE_ID、MACHINE_NAME、MACHINE_ID、HOST_ID、AGENT_ID、APPLICATION_ID、CLUSTER_ID、DEPLOYMENT_ID。机器资产 ID 与 Agent 观测 host.id 分离；身份属性不授予平台权限。容器和 Compose 全部服务均得到默认环境，应用自身环境优先；八种后端 SDK 的显式配置再覆盖环境，浏览器入口保持显式配置。SDK 独立直连中心，使用业务上报 Key，不接收 Agent 控制凭据。公开资源、任务、预览继续环境脱敏；现代应用日志按有效环境值和 SDK Key 模式脱敏。
 
 此架构增量的规格、契约、任务和验收见 specs/091-deployment-autoconfiguration；Doca 同步与最新版本回读证据见其 validation.md。功能分支尚未部署到线上，真实证书签发和公网传播不由本地夹具代证。
+
+## 92. 应用默认采集、网站与SDK监控（SDD092）
+
+本节补充第44/80/87/91章，修复线上已删除网站的历史日志阻塞整个采集队列的问题。三条数据通道保持：普通Agent采集主机指标并通过自己的持久队列上报；root helper按中心签名目标读取平台Docker容器指标和stdout/stderr；业务SDK使用应用数据Key直连中心。普通Agent和SDK不获取Docker socket、helper私钥或控制凭据。
+
+```mermaid
+flowchart LR
+  Host[普通 Agent / 主机采集] --> Ingest[中心 OTLP 接收]
+  SDK[业务 SDK / 环境身份] --> Ingest
+  Helper[root helper / 容器采集] --> Outbox[签名校验 / 加密 outbox]
+  Outbox --> CH[ClickHouse]
+  Ingest --> CH
+  Helper --> Status[签名采集诊断]
+  Status --> UI[应用 / 网站监控]
+  CH --> Read[有界只读查询]
+  Read --> UI
+```
+
+执行器/应用/实例/容器归属仍由中心校验。OpenResty队列中的已删除网站日志保持原始body及容器身份，将失效website_id转为unregistered_website_id，不能参与网站QPS；不存在网站的历史日志不能堵住全部指标。普通应用冒充入口、现有网站的外集群访问日志仍拒绝。托管站点集群从保存的服务部署推导，手动后端使用保存的cluster_ids。
+
+helper持久队列按metrics/logs分别FIFO重试；拒收批次和游标保留，一个信号错误不饿死另一信号。日志失败时已采样指标仍保存，metrics按批次预算切分。签名心跳附带安全采集状态（尝试/成功时间、错误码、队列数量/字节），中心另投影outbox待发送及导出故障；Docker清单ready不能证明遥测正常。旧安装无诊断字段时明确等待，不伪称成功。中心outbox失败不会阻塞其他批次，重试保持稳定事件身份。
+
+应用监控保留共享容器表，增加SDK指标和日志区域。读取仅使用Catalog认可业务表，按resource_json中的lightmoni.application_id及实例/集群/机器范围过滤；最多32张业务表和1天时间范围，查询继续经过只读AST及资源预算。SDK指标展示每分钟均值与样本数，容器累计字节继续算速率，不把业务指标与自动采集合并造数。SDK范围不能以服务名称替代应用身份。
+
+网站新增独立监控入口和按固定网站ID读取的访问日志、分钟均值QPS、平均耗时及5xx计数，覆盖托管服务、静态和手动后端。OpenResty结构日志追加host、method、uri（不含查询串），不包含请求头/认证秘密；旧格式仍保留body可读。仓库自有ABC示例使用环境默认身份真实记录请求、耗时、日志及15秒存活采样；未接入SDK的其他应用只提供默认容器观测。
+
+组件与部署拓扑不变，扩展签名诊断和用户读取路径；不新增秘密副本。设计契约、回归、成品和生产持续采样验收见specs/092-default-telemetry；Doca写入和最新回读结果单独记录，未完成前不声称同步。

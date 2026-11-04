@@ -1,7 +1,8 @@
 import { managedExecutorObservation } from "../server/managed-executor-status.js";
 import type { Dependencies, Handler } from '../shared/types.js';
 import { fail } from '../shared/http.js';
-import { APPLICATION_METRICS, APPLICATION_LOGS, applicationTargets } from '../shared/application-observation.js';
+import { APPLICATION_METRICS, APPLICATION_LOGS, applicationTargets,websiteClusterIDs } from '../shared/application-observation.js';
+import {sdkTelemetryQueries,websiteTelemetryQueries} from './telemetry-queries.js';
 import type { OperationsPlatformStore } from './store.js';
 import type { AgentJobStore } from '../server/agent-jobs.js';
 import { dockerObservation, registerDockerJobs } from './docker.js';
@@ -18,7 +19,7 @@ export function inventory(deps: Dependencies, store: OperationsPlatformStore, ma
     const online=!!agent&&Number.isFinite(Date.parse(agent.last_seen))&&deps.now().getTime()-Date.parse(agent.last_seen)<=120000;
     const stale=!online||!snapshot||deps.now().getTime()-Date.parse(snapshot.observed_at)>120000;
     const targets=new Map(applicationTargets(deps.db,m.agent_id??'').map(t=>[t.deployment_id,t]));
-    return {...m,online,docker_capabilities:capabilities,active_job:activeID,state:!m.agent_id?'not_connected':!snapshot?'waiting':snapshot.state==='unavailable'?'unavailable':stale?'stale':snapshot.state==='ready'&&collector&&collector!=='ok'?'degraded':snapshot.state,error:snapshot?.error??'',attempted_at:snapshot?.attempted_at??'',observed_at:snapshot?.observed_at??'',truncated:snapshot?.truncated??false,
+    return {...m,online,application_observation:executor?.application_observation??null,docker_capabilities:capabilities,active_job:activeID,state:!m.agent_id?'not_connected':!snapshot?'waiting':snapshot.state==='unavailable'?'unavailable':stale?'stale':snapshot.state==='ready'&&collector&&collector!=='ok'?'degraded':snapshot.state,error:snapshot?.error??'',attempted_at:snapshot?.attempted_at??'',observed_at:snapshot?.observed_at??'',truncated:snapshot?.truncated??false,
       containers:(snapshot?.containers??[]).map(c=>({...c,application_id:targets.get(c.deployment_id)?.application_id??'',cluster_id:m.cluster_id??''}))};
   });
   const instanceRows=deps.db.all<any>('SELECT id,owner_id,machine_id,agent_id,cluster_id,state,healthy,retired FROM ops_cluster_instances WHERE retired=0').filter(i=>(!machineID||i.machine_id===machineID)&&(!clusterID||i.cluster_id===clusterID));
@@ -43,7 +44,7 @@ export function registerObservability(deps:Dependencies,store:OperationsPlatform
     const application=store.get(ctx.params.id,'application');
     const data=inventory(deps,store);
     const publicApplication=data.applications.find(a=>a.id===application.id)??store.public(application);
-    ctx.json({application:publicApplication,deployments:(application.spec.deployments??[]).map((d:any)=>({...d,cluster_name:store.get(d.cluster_id,'cluster').name})),hosts:data.hosts.map(h=>({...h,containers:h.containers.filter((c:any)=>c.application_id===application.id)})).filter(h=>h.containers.length||publicApplication.status.instances?.some((i:any)=>i.machine_id===h.id)),tables:{metrics:APPLICATION_METRICS,logs:APPLICATION_LOGS},websites:store.list('website').filter(w=>(w.spec.bindings??[]).some((b:any)=>(b.locations??[]).some((l:any)=>(l.cluster_targets??[]).some((t:any)=>t.application_id===application.id)))).map(w=>({id:w.id,name:w.name,cluster_ids:w.spec.cluster_ids??[]}))});
+    ctx.json({application:publicApplication,deployments:(application.spec.deployments??[]).map((d:any)=>({...d,cluster_name:store.get(d.cluster_id,'cluster').name})),hosts:data.hosts.map(h=>({...h,center_observation:deps.applicationObservationStatus?.(h.agent_id)??null,containers:h.containers.filter((c:any)=>c.application_id===application.id)})).filter(h=>h.containers.length||publicApplication.status.instances?.some((i:any)=>i.machine_id===h.id)),tables:{metrics:APPLICATION_METRICS,logs:APPLICATION_LOGS},websites:store.list('website').filter(w=>w.spec.service_application_id===application.id||(w.spec.bindings??[]).some((b:any)=>(b.locations??[]).some((l:any)=>(l.cluster_targets??[]).some((t:any)=>t.application_id===application.id)))).map(w=>({id:w.id,name:w.name,cluster_ids:websiteClusterIDs(deps.db,w.spec,deps.decrypt)}))});
   }));
   router.get('/api/v1/ops/resources/:id/telemetry',safe(async ctx=>{
     const app=store.get(ctx.params.id,'application'),p=ctx.url.searchParams,r=range(deps,p),tables=await deps.cat.list(ctx.signal);
@@ -56,13 +57,21 @@ export function registerObservability(deps:Dependencies,store:OperationsPlatform
       queries.push({refId:'logs',sql:`SELECT event_id,event_time,severity,body,attributes['cluster_id'] AS cluster_id,attributes['deployment_id'] AS deployment_id,attributes['container_id'] AS container_id,attributes['container_name'] AS container_name,attributes['stream'] AS stream FROM ${APPLICATION_LOGS} WHERE ${time} AND ${scope} ORDER BY event_time DESC LIMIT 200`});
       // Site IDs are derived from current saved bindings, never supplied by the browser.
       const sites=store.list('website').flatMap(w=>{
-        const clusters=[...new Set((w.spec.bindings??[]).flatMap((b:any)=>(b.locations??[]).flatMap((l:any)=>(l.cluster_targets??[]).filter((t:any)=>t.application_id===app.id&&(!cluster||t.cluster_id===cluster)).map((t:any)=>t.cluster_id))))] as string[];
+        const clusters=w.spec.service_application_id===app.id?websiteClusterIDs(deps.db,w.spec,deps.decrypt).filter(id=>!cluster||id===cluster):[...new Set((w.spec.bindings??[]).flatMap((b:any)=>(b.locations??[]).flatMap((l:any)=>(l.cluster_targets??[]).filter((t:any)=>t.application_id===app.id&&(!cluster||t.cluster_id===cluster)).map((t:any)=>t.cluster_id))))] as string[];
         return clusters.length?[`(attributes['website_id']=${literal(w.id)} AND attributes['cluster_id'] IN (${clusters.map(literal).join(',')}))`]:[];
       });
       const siteScope=`(${scope}${sites.length?' OR '+sites.join(' OR '):''})`;
       queries.push({refId:'web',sql:`SELECT toStartOfMinute(event_time) AS time,attributes['website_id'] AS website_id,attributes['cluster_id'] AS cluster_id,count() / 60.0 AS qps,avg(toFloat64OrZero(attributes['request_duration'])) AS duration FROM ${APPLICATION_LOGS} WHERE ${time} AND ${siteScope} AND attributes['website_id']!='' GROUP BY time,website_id,cluster_id ORDER BY time LIMIT 1500`});
     }
-    ctx.json({range:r,waiting:!queries.length,results:queries.length?frameRows(await deps.query({source:'application-monitoring',range:r,interval_ms:60000,queries},ctx.signal)):{}});
+    const sdk=sdkTelemetryQueries(tables,app.id,time,{machine_id:machine,cluster_id:cluster,deployment_id:deployment});queries.push(...sdk.queries);
+    ctx.json({range:r,waiting:!queries.length,sdk_tables:sdk.tables,sdk_tables_truncated:sdk.truncated,results:queries.length?frameRows(await deps.query({source:'application-monitoring',range:r,interval_ms:60000,queries},ctx.signal)):{}});
+  }));
+  router.get('/api/v1/ops/resources/:id/website-telemetry',safe(async ctx=>{
+    const site=store.get(ctx.params.id,'website'),r=range(deps,ctx.url.searchParams),tables=await deps.cat.list(ctx.signal);
+    const time=`event_time>=parseDateTime64BestEffort(${literal(r.from)}) AND event_time<parseDateTime64BestEffort(${literal(r.to)})`;
+    const queries=tables.some(t=>t.name===APPLICATION_LOGS)?websiteTelemetryQueries(site.id,time):[];
+    const clusters=websiteClusterIDs(deps.db,site.spec,deps.decrypt);
+    ctx.json({website:store.public(site),range:r,hosts:inventory(deps,store).hosts.filter(h=>clusters.includes(h.cluster_id)).map(h=>({...h,center_observation:deps.applicationObservationStatus?.(h.agent_id)??null})),waiting:!queries.length,results:queries.length?frameRows(await deps.query({source:'website-monitoring',range:r,interval_ms:60000,queries},ctx.signal)):{}});
   }));
   router.get('/api/v1/ops/system-logs',safe(async ctx=>{
     const p=ctx.url.searchParams,r=range(deps,p),tables=await deps.cat.list(ctx.signal);

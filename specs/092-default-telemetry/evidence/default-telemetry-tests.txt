@@ -1,0 +1,14 @@
+✔ a deleted website keeps its container log and no longer poisons the durable batch (2.018416ms)
+✔ managed website ownership follows saved service deployments while foreign clusters are refused (0.549667ms)
+✔ one rejected log leaves its cursor and batch intact while metrics drain and retry survives (1.341167ms)
+✔ collection status cannot carry raw secrets or unexpected fields (1.008083ms)
+✔ a full log backlog cannot consume the metric reserve (9.977ms)
+✔ SDK and website queries pass the real read-only AST and retain fixed identity filters (45.159459ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 467.306583

@@ -1,4 +1,5 @@
 import ApplicationMonitoring from "./ApplicationMonitoring";
+import WebsiteMonitoring from './WebsiteMonitoring';
 import {MonitoringScope,type PublishedScope} from '../shared/monitoring-context';
 import {lazy,Suspense,useEffect,useMemo,useState} from 'react';
 import {Link,Navigate,Route,Routes,useLocation,useNavigate,useParams} from 'react-router-dom';
@@ -73,6 +74,7 @@ export default function Root(){
     <Route path="/private-images" element={user.role==='admin'?<PrivateRegistryPage/>:<Navigate to="/settings" replace/>}/>
     <Route path="/image-sources" element={user.role==='admin'?<ImageSourcesPage/>:<Navigate to="/settings" replace/>}/>
     <Route path="/applications/:id/monitoring" element={user.role==='admin'?<ApplicationMonitoring/>:<Navigate to="/settings" replace/>}/>
+    <Route path="/websites/:id/monitoring" element={user.role==='admin'?<WebsiteMonitoring/>:<Navigate to="/settings" replace/>}/>
     <Route path="/mcp-access" element={<McpAccessPage user={user}/>}/>
     <Route path="/mcp/authorize" element={<McpAuthorizationPage user={user}/>}/>
 

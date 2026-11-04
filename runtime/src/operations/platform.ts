@@ -1146,7 +1146,7 @@ export function renderGateway(c: any, digest: string, preview = false): string {
       "http {",
       "  include /usr/local/openresty/nginx/conf/mime.types;",
       "  default_type application/octet-stream;",
-      `  log_format lightmoni_application escape=json '{"lightmoni_access":true,"website_id":"$lightmoni_website_id","status":$status,"request_time":$request_time,"upstream_addr":"$upstream_addr"}';`,
+      `  log_format lightmoni_application escape=json '{"lightmoni_access":true,"website_id":"$lightmoni_website_id","host":"$host","method":"$request_method","uri":"$uri","status":$status,"request_time":$request_time,"upstream_addr":"$upstream_addr"}';`,
       '  map $server_name $lightmoni_website_id { default ""; }',
       "  access_log /dev/stdout lightmoni_application;",
       "  server_tokens off;",

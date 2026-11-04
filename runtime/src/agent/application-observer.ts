@@ -127,6 +127,7 @@ export class ApplicationObserver {
         const body=line.slice(space+1),attributes:any[]=[...Object.entries({...target,container_id:c.id,container_name:c.name,stream}).map(([k,v])=>str(k,v))];
         try{const access=JSON.parse(body);if(access.lightmoni_access===true && /^[a-zA-Z0-9_-]{1,128}$/.test(access.website_id)){
           attributes.push(str('website_id',access.website_id),str('http_status',String(access.status)),str('request_duration',String(access.request_time)),str('upstream_addr',String(access.upstream_addr??'')));
+          for(const key of ['host','method','uri'])if(typeof access[key]==='string')attributes.push(str('http_'+key,access[key].slice(0,2048)));
         }}catch{}
         const sequence=BigInt(point.prefix.toString()||'0')+1n;
         attributes.push(str('lightmoni.source_id',point.id),{key:'lightmoni.source_seq',value:{intValue:sequence.toString()}});
