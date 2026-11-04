@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "单集群禁止添加第二行；刷新后 Gitea 安装仍只提交一个位置，真实 HTTP 返回 201",
+    "自动选址不提交手工草稿，后端仍生成唯一位置",
+    "多集群添加/移除/重新添加均保持独立；刷新只剩一个集群时不复制已选位置；合法双集群安装返回 201",
+    "zh-CN 后端重复错误显示操作指引，输入和 request_id 保留，重试返回 201",
+    "en-US 后端重复错误显示操作指引，输入和 request_id 保留，重试返回 201",
+    "真实字段组件载入旧重复草稿后阻止提交并保留参数，移除重复行后通过校验",
+    "OpenResty 高级托管区域和资源字段保留正确列表路径，折叠面板后提交仍完整"
+  ],
+  "errors": [],
+  "media": "artifacts/screenshots/specs/092-catalog-deployment-duplicates/evidence",
+  "limits": "Disposable real HTTP/SQLite/controller fixture; no remote Docker, public DNS or production installation executed."
+}

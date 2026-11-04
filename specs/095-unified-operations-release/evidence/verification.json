@@ -1,0 +1,27 @@
+{
+  "source_revision": "b975a95b395c0942a0cd4ef9b0ffc9f1a38d143c",
+  "runtime": {
+    "tests": 1500,
+    "passed": 1467,
+    "failed": 0,
+    "skipped": 33,
+    "command": "npm test"
+  },
+  "docker_live": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 2,
+    "reason": "gateway tests require Linux executor sharing Docker host network"
+  },
+  "types_build": [
+    "runtime",
+    "AI runtime",
+    "web"
+  ],
+  "browser": {
+    "catalog_checks": 7,
+    "upgrades_terminal_checks": 6,
+    "managed_manual_health": true,
+    "real_ssh_and_docker": true
+  }
+}
