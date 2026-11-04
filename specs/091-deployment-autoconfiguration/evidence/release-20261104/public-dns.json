@@ -1,0 +1,35 @@
+{
+  "verified_at": "2026-11-04T00:22:58.452135+00:00",
+  "resolver": "Google Public DNS over HTTPS",
+  "results": [
+    {
+      "name": "abc.heyphp.com",
+      "status": 0,
+      "cnames": [
+        "edge-49b2209ee4168ec9.heyphp.com"
+      ]
+    },
+    {
+      "name": "dbx-zz.heyphp.com",
+      "status": 0,
+      "cnames": [
+        "edge-49b2209ee4168ec9.heyphp.com"
+      ]
+    },
+    {
+      "name": "registry-demo.heyphp.com",
+      "status": 0,
+      "cnames": [
+        "edge-49b2209ee4168ec9.heyphp.com"
+      ]
+    },
+    {
+      "name": "install-091.heyphp.com",
+      "status": 0,
+      "cnames": [
+        "edge-49b2209ee4168ec9.heyphp.com"
+      ]
+    }
+  ],
+  "all_cname": true
+}

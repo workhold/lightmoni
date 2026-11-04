@@ -1,0 +1,20 @@
+{
+  "date": "2026-11-04",
+  "operation": "existing application read-only inspect",
+  "cause_code": "executor_http_502",
+  "host_verification": [
+    "existing protected SSH credential and pinned host key",
+    "managed journal keeps original unknown result",
+    "related systemd execution unit absent; no active execution unit",
+    "existing business containers running"
+  ],
+  "platform_reconciliation": "recorded with administrator session; original unknown and code preserved",
+  "unresolved_unknown_after": 0,
+  "recovered_existing_applications": [
+    "OpenResty",
+    "system registry",
+    "DBX",
+    "ABC Demo"
+  ],
+  "direct_database_or_journal_mutation": false
+}

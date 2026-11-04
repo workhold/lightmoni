@@ -1,0 +1,12 @@
+{
+  "revision": "a9588e6a053f5811c1e20e8c563261b23c1ee0c6",
+  "archive_sha256": "2349a385ebc89de0a3161e6159811f0260e43fb3e10feed6b837a81ad37bc70e",
+  "feature_prs": [
+    83,
+    88,
+    89,
+    90,
+    91
+  ],
+  "context": "git archive of merged main; excludes ignored files and workspace credentials"
+}

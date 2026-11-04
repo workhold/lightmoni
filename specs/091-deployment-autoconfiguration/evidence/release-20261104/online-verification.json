@@ -1,0 +1,104 @@
+{
+  "verified_at": "2026-11-04T00:33:37.248258+00:00",
+  "trusted_tls": true,
+  "fixed_ip_override_used": false,
+  "credentials_exported": false,
+  "checks": {
+    "center_health": 200,
+    "demo_https": 200,
+    "existing_dbx_https": 200,
+    "registry_anonymous": 401,
+    "registry_authenticated": 200,
+    "private_manifest_preserved": "sha256:c3fae4a7ce6af19b368ecef562446e251ed57c6b32386f96e91893b819cf1187",
+    "quick_app_https": 200,
+    "center_revision": "a9588e6a053f5811c1e20e8c563261b23c1ee0c6",
+    "image": "docker.heyphp.com/lightmoni/lightmoni:20261104-a9588e6",
+    "unresolved_privileged_outcomes": 0,
+    "quick_install": {
+      "domain": "install-091.heyphp.com",
+      "state": "ready",
+      "resource_references_persisted": true
+    },
+    "registry": {
+      "active_instances": 1,
+      "state": "running",
+      "healthy": true,
+      "container_port": 5000
+    },
+    "historical_unknown_preserved": 2,
+    "fresh_signed_managed_runs": 20,
+    "signed_actions": [
+      "apply",
+      "inspect",
+      "stop"
+    ],
+    "sdk": {
+      "service": "sdd091-sdk-environment",
+      "records": 1,
+      "explicit_host_override": "sdd091-explicit-host",
+      "dedicated_key_matches_application": true,
+      "populated_deployment_identity_fields": [
+        "instance_id",
+        "host_id",
+        "agent_id",
+        "machine_id",
+        "application_id",
+        "cluster_id"
+      ]
+    },
+    "website_dns": [
+      {
+        "name": "ABC Demo",
+        "provider_verified": true,
+        "owned_records": [
+          {
+            "name": "abc",
+            "type": "CNAME",
+            "value": "edge-49b2209ee4168ec9.heyphp.com",
+            "state": "applied",
+            "weight": null
+          }
+        ]
+      },
+      {
+        "name": "私有镜像仓库入口",
+        "provider_verified": true,
+        "owned_records": [
+          {
+            "name": "registry-demo",
+            "type": "CNAME",
+            "value": "edge-49b2209ee4168ec9.heyphp.com",
+            "state": "applied",
+            "weight": null
+          }
+        ]
+      },
+      {
+        "name": "dbx",
+        "provider_verified": true,
+        "owned_records": [
+          {
+            "name": "dbx-zz",
+            "type": "CNAME",
+            "value": "edge-49b2209ee4168ec9.heyphp.com",
+            "state": "applied",
+            "weight": null
+          }
+        ]
+      },
+      {
+        "name": "install-091.heyphp.com",
+        "provider_verified": true,
+        "owned_records": [
+          {
+            "name": "install-091",
+            "type": "CNAME",
+            "value": "edge-49b2209ee4168ec9.heyphp.com",
+            "state": "applied",
+            "weight": null
+          }
+        ]
+      }
+    ]
+  }
+}
