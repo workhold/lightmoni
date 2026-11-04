@@ -567,7 +567,8 @@ test("domains in one binding have isolated bundles, DNS and live policy; members
   await f.platform.tick();
   await settle();
   assert.deepEqual(records(), [
-    ["north", "north.edge.example.test", 1],
+    // A single target always receives all traffic; leave its provider weight alone.
+    ["north", "north.edge.example.test", 3],
     ["south", "north.edge.example.test", 1],
   ]);
   assert.deepEqual(f.store.get(site.id).status.actual_cluster_ids, [b.id]);

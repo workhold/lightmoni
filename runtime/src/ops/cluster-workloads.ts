@@ -2704,11 +2704,9 @@ export function createClusterWorkloads(
       domain_traffic_truncated: domainTruncated,
     });
     // A single default CNAME needs no provider weighting feature or paid SLB calls.
-    for(const [zoneID,records] of grouped)for(const record of records) {
-      const zone=store.get(zoneID,'dns_zone');
-      const relative=record.name===zone.spec.domain?'@':record.name.slice(0,-zone.spec.domain.length-1);
-      const weighted=tableExists('ops_dns_owned')&&db.get('SELECT id FROM ops_dns_owned WHERE zone_id=? AND owner_id=? AND name=? AND weight IS NOT NULL',zoneID,current.id,relative);
-      if(!weighted&&record.type==='CNAME'&&record.weight===1&&records.filter(r=>r.name===record.name&&(r.line??'default')===(record.line??'default')).length===1)delete record.weight;
+    for(const records of grouped.values())for(const record of records) {
+      // With one target, its default relative weight has no routing effect, including legacy journals.
+      if(record.type==='CNAME'&&record.weight===1&&records.filter(r=>r.name===record.name&&(r.line??'default')===(record.line??'default')).length===1)delete record.weight;
     }
     syncDNS(current, grouped, actor);
   }
