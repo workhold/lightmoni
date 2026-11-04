@@ -733,7 +733,7 @@ test("unknown execution keeps port ownership and never creates a duplicate manag
 test("catalog installs multiple ordinary MySQL applications with healthcheck and redacts secrets", async (t) => {
   const f = await fixture(t),
     c = f.createCluster();
-  assert.equal((await f.req("/catalog")).body.templates.length, 31);
+  assert.equal((await f.req("/catalog")).body.templates.length, 35);
   for (let n = 0; n < 2; n++) {
     const r = await f.req("/catalog/mysql/install", "POST", {
       deployments: [{ cluster_id: c.id, machine_ids: ["ma"] }],
@@ -1393,15 +1393,22 @@ test('public-only host installs a local registry without IP gates and never send
 
 test('all approved catalog applications save through HTTP, isolate identity and redact secrets', async t => {
  const f=await fixture(t),c=f.createCluster(['ma']);
- const list=await f.req('/catalog');assert.equal(list.body.templates.length,31);
+ const list=await f.req('/catalog');assert.equal(list.body.templates.length,35);
  for(const {template} of extendedDefinitions){
-  const parameters=Object.fromEntries(template.parameters.filter(p=>p.required||p.default!==undefined).map(p=>[p.key,p.default??p.example??(p.type==='password'?'qa_secret_2026':p.format==='url'?'http://app.example.test':p.format==='ip'?'192.0.2.10':p.format==='host'?'broker.example.test':'app')]));
+  const parameters=Object.fromEntries(template.parameters.filter(p=>p.required||p.default!==undefined).map(p=>[p.key,p.default??p.example??(p.type==='password'?'qa_secret_2026_long':p.format==='url'?'http://app.example.test':p.format==='ip'?'192.0.2.10':p.format==='host'?'broker.example.test':'app')]));
   const result=await f.req('/catalog/'+template.id+'/install','POST',{parameters,deployments:[{cluster_id:c.id,machine_ids:['ma'],cpu:.25,memory_mb:128}],confirmed:false});
   assert.equal(result.status,201,template.id+':'+JSON.stringify(result.body));
   assert.equal(result.body.resource.spec.source.template_id,template.id);
   assert.doesNotMatch(JSON.stringify(result.body),/qa_secret_2026/);
   assert.doesNotMatch(JSON.stringify(f.db.get<any>('SELECT spec_cipher FROM ops_platform_resources WHERE id=?',result.body.resource.id)),/qa_secret_2026/);
   assert.equal(f.store.get(result.body.resource.id).spec.deployment_mode,'manual');
+  if(['meilisearch','searxng','firecrawl','rustfs'].includes(template.id)){
+   const privateSpec=f.store.get(result.body.resource.id).spec;
+   const secrets=Object.values<any>(privateSpec.compose.services).flatMap(service=>Object.entries<any>(service.environment??{}).filter(([key])=>/PASSWORD|SECRET|KEY|REDIS_URL|REDIS_RATE_LIMIT_URL|RABBITMQ_URL/.test(key)).map(([,value])=>value));
+   const publicRead=JSON.stringify((await f.req('/resources/'+result.body.resource.id)).body);
+   const cipher=String(f.db.get<any>('SELECT spec_cipher FROM ops_platform_resources WHERE id=?',result.body.resource.id).spec_cipher);
+   for(const secret of secrets){assert.ok(typeof secret==='string'&&secret.length>0);assert.ok(!publicRead.includes(secret),template.id);assert.ok(!cipher.includes(secret),template.id);}
+  }
  }
  const bad=await f.req('/catalog/dbx/install','POST',{parameters:{password:'short'},deployments:[{cluster_id:c.id,machine_ids:['ma']}]});assert.equal(bad.status,400);
  f.db.run("UPDATE agents SET arch='arm64' WHERE id='a'");

@@ -1,0 +1,12 @@
+{
+  "platform": "arm64",
+  "checks": [
+    {
+      "id": "searxng",
+      "result": "passed",
+      "behavior": "healthy native entrypoint, homepage and HTML/JSON search formats; no public-engine availability claim"
+    }
+  ],
+  "production_modified": false,
+  "cleanup": "containers, project networks, volumes and temporary credentials removed"
+}

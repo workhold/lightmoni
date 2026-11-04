@@ -1,0 +1,8 @@
+# 官方来源核对（2026-11-04）
+
+- [Meilisearch Docker](https://www.meilisearch.com/docs/resources/self_hosting/getting_started/docker)、[生产部署](https://www.meilisearch.com/docs/resources/self_hosting/deployment/running_production)：生产模式必须配置主密钥；固定 getmeili/meilisearch:v1.56.1，镜像包含 curl，可检查 /health；/meili_data 持久化。模板采用至少16字符，比上游16字节下限更严格。
+- [SearXNG 容器](https://docs.searxng.org/admin/installation-docker.html)：使用 2026.11.2-cccbc9e15（源码 cccbc9e158b0ac3bb2158e9841a647a5bec57b57）；入口 /usr/local/searxng/entrypoint.sh，Granian 8080；SEARXNG_SECRET 覆盖配置中的 secret_key，HTML/JSON 格式在 settings.yml 声明。配置与缓存分别位于 /etc/searxng、/var/cache/searxng。模板固定生成不含秘密的设置；无 Valkey 时关闭 limiter，默认本机访问。
+- [Firecrawl 自托管](https://docs.firecrawl.dev/contributing/self-host)、[2.10.19 Compose](https://github.com/firecrawl/firecrawl/blob/v2.10.19/docker-compose.yaml)：GitHub 最新 release v2.11.0 暂无同版本 GHCR 标签，故采用 registry 可获取的 2.10.19 API。Playwright 与 NuQ PostgreSQL 从官方多架构清单解析并按摘要固定，详见 evidence/images.json；不在模板中保留 latest。采用 PostgreSQL 队列，不启用实验性 FoundationDB。NuQ 镜像包含 pg_cron 和初始化 SQL，数据库使用 postgres。API harness 启动 worker，依赖 Redis、RabbitMQ、NuQ 和 Playwright；浏览器健康检查实际创建页面。自托管 API 默认无账号鉴权，基础抓取不需要 LLM key；平台不提供云端反爬功能。
+- [RustFS 容器](https://docs.rustfs.com/en/installation/container)、[1.0.4 Dockerfile](https://github.com/rustfs/rustfs/blob/1.0.4/Dockerfile)：非 root UID10001，镜像准备 /data 与 /logs 权限；SNSD 无冗余。显式配置非默认访问密钥；1.0.4 credentials.rs 的有效性下限为 access_key 3 / secret_key 8，RPC 密钥派生拒绝任一半使用 rustfsadmin，故模板在创建前拒绝该公开默认值；9000 提供 S3，9001 提供控制台，分别检查 /health 与 /rustfs/console/health。
+
+四个模板保守声明 amd64 / arm64，所有服务在隔离 Compose 项目中运行，不注入宿主环境、不读取 ambient 配置。Logo 来源与逐文件摘要在 web/src/assets/application-logos/sources.json；Firecrawl 图形与服务版本分别固定，图形来自官方 v2.11.0 源码中的 favicon。

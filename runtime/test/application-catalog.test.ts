@@ -33,10 +33,14 @@ const additions = [
   "fastgpt",
   "vllm",
   "dbx",
+  "meilisearch",
+  "searxng",
+  "firecrawl",
+  "rustfs",
 ];
-test("catalog covers the approved scope and tools only contain DBX", () => {
-  assert.equal(applicationCatalog.length, 31);
-  assert.equal(new Set(applicationCatalog.map((t) => t.id)).size, 31);
+test("catalog covers the approved scope and categories include search and cloud storage", () => {
+  assert.equal(applicationCatalog.length, 35);
+  assert.equal(new Set(applicationCatalog.map((t) => t.id)).size, 35);
   for (const id of additions)
     assert.ok(
       applicationCatalog.some((t) => t.id === id),
@@ -44,15 +48,15 @@ test("catalog covers the approved scope and tools only contain DBX", () => {
     );
   assert.deepEqual(
     applicationCatalog.filter((t) => t.category === "tools").map((t) => t.id),
-    ["dbx"],
+    ["dbx", "firecrawl"],
   );
   assert.deepEqual(
     applicationCategories.map((c) => c.id),
-    ["database", "middleware", "devops", "ai", "tools", "web"],
+    ["database", "middleware", "devops", "ai", "tools", "web", "search", "storage"],
   );
   assert.equal(
     applicationCategories.reduce((sum, c) => sum + c.count, 0),
-    31,
+    35,
   );
 });
 test("DBX requires a password and keeps it out of commands and managed files", () => {
@@ -105,7 +109,7 @@ export function catalogSample(id: string) {
         p.default ??
           p.example ??
           (p.type === "password"
-            ? "qa_secret_2026"
+            ? "qa_secret_2026_long"
             : p.format === "url"
               ? "http://app.example.test"
               : p.format === "ip"
@@ -153,7 +157,7 @@ test("every new recipe normalizes, uses pinned images and isolated volumes, and 
       delete service.environment;
     assert.doesNotMatch(
       JSON.stringify(visible),
-      /qa_secret_2026|docker\.sock|\[generated:|\[secret:/,
+      /qa_secret_2026_long|docker\.sock|\[generated:|\[secret:/,
       template.id,
     );
     for (const p of template.parameters.filter(
@@ -203,7 +207,7 @@ test("typed fields, URLs, versions and stable endpoint mappings reject bad reque
     () =>
       catalogInstallation("dbx", {
         version: "latest",
-        parameters: { password: "qa_secret_2026" },
+        parameters: { password: "qa_secret_2026_long" },
       }),
     /unsupported_template_version/,
   );
@@ -405,4 +409,46 @@ test("GPU, storage, authentication, sandbox and bootstrap contracts are explicit
     applicationCatalog.find((t) => t.id === "harbor")!.architectures,
     ["amd64"],
   );
+});
+
+test("search and cloud storage recipes enforce credentials and independent endpoint mappings", () => {
+  assert.deepEqual(applicationCatalog.filter(t => t.category === "search").map(t => t.id), ["meilisearch", "searxng"]);
+  assert.deepEqual(applicationCatalog.filter(t => t.category === "storage").map(t => t.id), ["rustfs"]);
+  assert.throws(() => catalogInstallation("meilisearch", { parameters: { master_key: "short-key" } }), /invalid_catalog_parameter/);
+  const meili = catalogInstallation("meilisearch", { parameters: { master_key: 'literal-$_"-master-key' } }).spec;
+  assert.equal(meili.compose.services.meilisearch.environment.MEILI_MASTER_KEY, 'literal-$_"-master-key');
+  assert.equal(meili.compose.services.meilisearch.environment.MEILI_ENV, "production");
+  const rust = catalogInstallation("rustfs", { parameters: { access_key: "storage-admin", secret_key: 'literal-$_"-secret' }, host_ports: { s3: 19000, console: 19001 } }).spec;
+  assert.deepEqual(rust.ports.map((p: any) => [p.name, p.container_port, p.host_port]), [["s3", 9000, 19000], ["console", 9001, 19001]]);
+  assert.equal(rust.compose.services.rustfs.environment.RUSTFS_SECRET_KEY, 'literal-$_"-secret');
+  assert.equal(rust.stateful, true);
+  assert.throws(() => catalogInstallation("rustfs", { parameters: { access_key: "a/b", secret_key: "valid-secret" } }), /invalid_catalog_parameter/);
+  assert.throws(() => catalogInstallation("rustfs", { parameters: { access_key: "admin", secret_key: "short" } }), /invalid_catalog_parameter/);
+  assert.throws(() => catalogInstallation("rustfs", { parameters: { access_key: "rustfsadmin", secret_key: "custom-secret" } }), /invalid_catalog_parameter/);
+  assert.throws(() => catalogInstallation("rustfs", { parameters: { access_key: "custom-admin", secret_key: "rustfsadmin" } }), /invalid_catalog_parameter/);
+  for (const id of ["meilisearch", "rustfs"]) assert.throws(() => catalogInstallation(id, {}), /catalog_parameter_required/);
+});
+
+test("SearXNG and Firecrawl isolate their services, generate fresh secrets and default to loopback", () => {
+  const searx = catalogInstallation("searxng", {}).spec;
+  assert.equal(searx.ports[0].host_ip, "127.0.0.1");
+  assert.match(searx.compose.services.searxng.entrypoint[2], /formats: \[html, json\]/);
+  assert.notEqual(searx.compose.services.searxng.environment.SEARXNG_SECRET, catalogInstallation("searxng", {}).spec.compose.services.searxng.environment.SEARXNG_SECRET);
+  const fire = catalogInstallation("firecrawl", { parameters: { searxng_endpoint: "http://searxng.example.test/" }, host_ports: { http: 13002 } }).spec;
+  assert.deepEqual(Object.keys(fire.compose.services).sort(), ["api", "nuq-postgres", "playwright", "rabbitmq", "redis"]);
+  assert.equal(fire.ports.length, 1);
+  assert.equal(fire.ports[0].host_ip, "127.0.0.1");
+  assert.equal(fire.ports[0].host_port, 13002);
+  const env = fire.compose.services.api.environment;
+  assert.equal(env.SEARXNG_ENDPOINT, "http://searxng.example.test/search");
+  assert.equal(env.POSTGRES_PASSWORD, fire.compose.services["nuq-postgres"].environment.POSTGRES_PASSWORD);
+  assert.equal(new URL(env.REDIS_URL).password, fire.compose.services.redis.environment.REDIS_PASSWORD);
+  assert.equal(new URL(env.NUQ_RABBITMQ_URL).password, fire.compose.services.rabbitmq.environment.RABBITMQ_DEFAULT_PASS);
+  assert.equal(fire.compose.services["nuq-postgres"].environment.POSTGRES_DB, "postgres");
+  const again = catalogInstallation("firecrawl", {}).spec;
+  assert.equal(again.compose.services.api.environment.SEARXNG_ENDPOINT, undefined);
+  assert.notEqual(env.POSTGRES_PASSWORD, again.compose.services.api.environment.POSTGRES_PASSWORD);
+  assert.throws(() => catalogInstallation("firecrawl", { parameters: { searxng_endpoint: "http://user:secret@example.test" } }), /invalid_catalog_parameter/);
+  assert.throws(() => catalogInstallation("firecrawl", { parameters: { searxng_endpoint: "https://example.test/search" } }), /invalid_catalog_parameter/);
+  assert.equal(catalogInstallation("firecrawl", { listen_ip: "0.0.0.0" }).spec.ports[0].host_ip, "0.0.0.0");
 });

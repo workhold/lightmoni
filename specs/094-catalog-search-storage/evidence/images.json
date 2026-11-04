@@ -1,0 +1,233 @@
+[
+  {
+    "repository": "getmeili/meilisearch",
+    "tag": "v1.56.1",
+    "images": [
+      {
+        "architecture": "amd64",
+        "os": "linux",
+        "digest": "sha256:0e8caffaf5ad1dee363f2d3192a4aa210aa8ea8b0364be907403d5dc0d06ef26",
+        "size": 106132194
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux",
+        "digest": "sha256:7f04665b09c9ec91a1b72acbbf14a5046df4c3d358320e8bbb4deb9d054e3e1b",
+        "size": 105570131
+      }
+    ]
+  },
+  {
+    "repository": "searxng/searxng",
+    "tag": "2026.11.2-cccbc9e15",
+    "images": [
+      {
+        "architecture": "amd64",
+        "os": "linux",
+        "digest": "sha256:a7987fc9eb39317e1f9c04fba0722cc7be932d90f473c623f5e19a4d5c53c313",
+        "size": 98563485
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux",
+        "digest": "sha256:acae4b1f6e7d4941c6f9b27cb7750f79e7612468c437331f8177861e9e615593",
+        "size": 96287246
+      },
+      {
+        "architecture": "arm",
+        "os": "linux",
+        "digest": "sha256:9685e9dbda58329e0249d9d3d065c30498fbeb9bb93c81485a37929c3b4b9ea7",
+        "size": 92561952
+      }
+    ]
+  },
+  {
+    "repository": "rustfs/rustfs",
+    "tag": "1.0.4",
+    "images": [
+      {
+        "architecture": "amd64",
+        "os": "linux",
+        "digest": "sha256:e287e99762a4a3e7b706526e01f2ff755f67db165e9be9f6b907adc6fb6d6ee1",
+        "size": 115066237
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux",
+        "digest": "sha256:6be0def183a9ec8c05147594ac71c030648fcb0a4b79f29f74cebd1d128ba17a",
+        "size": 109663195
+      }
+    ]
+  },
+  {
+    "repository": "library/rabbitmq",
+    "tag": "4.2.1-alpine",
+    "images": [
+      {
+        "architecture": "amd64",
+        "os": "linux",
+        "digest": "sha256:71b06effd4bfcd2e0b58f4c47384a37d88f023ddf74fb6956b2bf97f0792f250",
+        "size": 83418653
+      },
+      {
+        "architecture": "ppc64le",
+        "os": "linux",
+        "digest": "sha256:4477c98ea3f2e204d7d022098ca811390750d1544c4fab09ca14d3336248cbfc",
+        "size": 74680732
+      },
+      {
+        "architecture": "386",
+        "os": "linux",
+        "digest": "sha256:85d4ae0ae383aa9068ae4e8c5702b401e314e5673ff6e97faa55efcbbbd8587d",
+        "size": 73039086
+      },
+      {
+        "architecture": "s390x",
+        "os": "linux",
+        "digest": "sha256:380ace6bdd315123144f7390e353db4b8e14e3a8b45efb4ccd9468f1d7d38992",
+        "size": 72793122
+      },
+      {
+        "architecture": "arm",
+        "os": "linux",
+        "digest": "sha256:300ccd24f9d92fdb2fa8ffc4855fcac946f235b1c91cfc2063f117237a2016b7",
+        "size": 70718946
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux",
+        "digest": "sha256:749adf2b61a783194d1b87a6de51caf4ec08d5076ecb302add3a625af4f8cb4a",
+        "size": 82440526
+      },
+      {
+        "architecture": "arm",
+        "os": "linux",
+        "digest": "sha256:ee245eb3f2ef7e1a218fb1c910e25173cbca336d3751b048ec6767051d52a889",
+        "size": 71621772
+      },
+      {
+        "architecture": "riscv64",
+        "os": "linux",
+        "digest": "sha256:b4e2e376ab8f5399ca8195e10d5c087534f2eb71bc41ba110ab79ac3076549f3",
+        "size": 78606908
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown",
+        "digest": "sha256:964974c4296282cbb9625c3c42e10169ece87c1a1eaecd8f427d3b6e8d069a5e",
+        "size": 6938994
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown",
+        "digest": "sha256:4549776507c01f2c48f6a557603e21cbb3c6862410b9ef83ce29f83dc2ef25ca",
+        "size": 7018212
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown",
+        "digest": "sha256:26254509ac1cd15bfe7432724d6d3061d777917781052244bf42b097e041a205",
+        "size": 60289
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown",
+        "digest": "sha256:862182e442a43cb01ac33a2cc557a98c94fdab0042d9ae6d58f3e7cb829ddb3e",
+        "size": 6715376
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown",
+        "digest": "sha256:40c7c127793a4f0e1824d4f2a54b27909e9f584bbeb11b7fb03f5a4de294e53d",
+        "size": 6691331
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown",
+        "digest": "sha256:76eadb3264588b413bf71b44d6abdcf70839d58e3f17827531b204bd8cee3011",
+        "size": 7037315
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown",
+        "digest": "sha256:3cdbcb17832e4bbaef137429aa548d64da2b08c4668321547a66841e6e86fb95",
+        "size": 6915794
+      },
+      {
+        "architecture": "unknown",
+        "os": "unknown",
+        "digest": "sha256:b0f0c8f4d8d8bacf6cefc07e7af6cbe391cf63bc9428c1f8db2c4ff708976d02",
+        "size": 6964339
+      }
+    ]
+  },
+  {
+    "repo": "playwright-service",
+    "tag": "latest",
+    "digest": "sha256:637fb8c8399634b02c2179da72566ce11644435e5d93e895bdbde4b1f9b0882a",
+    "architectures": [
+      {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux"
+      }
+    ],
+    "revision": {},
+    "entrypoint": [
+      "docker-entrypoint.sh"
+    ],
+    "command": [
+      "pnpm",
+      "start"
+    ]
+  },
+  {
+    "repo": "nuq-postgres",
+    "tag": "latest",
+    "digest": "sha256:d719b36160eac2fcbe16dc7e7360ddb9c82c40ea5da183d07bf4a755c6a0b2ae",
+    "architectures": [
+      {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux"
+      }
+    ],
+    "revision": {},
+    "entrypoint": [
+      "docker-entrypoint.sh"
+    ],
+    "command": [
+      "postgres"
+    ]
+  },
+  {
+    "repo": "firecrawl",
+    "tag": "2.10.19",
+    "digest": "sha256:50446cbc0bc700a78cc588c96bd38a97f01cc4299c99b349c7bfa1ba57b6d7ed",
+    "architectures": [
+      {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      {
+        "architecture": "arm64",
+        "os": "linux"
+      }
+    ],
+    "revision": {},
+    "entrypoint": [
+      "docker-entrypoint.sh"
+    ],
+    "command": [
+      "node",
+      "dist/src/harness.js",
+      "--start-docker"
+    ]
+  }
+]
