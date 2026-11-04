@@ -28,5 +28,35 @@
     "rustfs signed S3 bucket/object operations and console health"
   ],
   "firecrawl": "continuing official image transfer",
-  "production": "pending Mac manual unlock; no activation performed"
+  "production": "pending Mac manual unlock; no activation performed",
+  "full_suite": {
+    "runtime": {
+      "tests": 1502,
+      "passed": 1469,
+      "failed": 0,
+      "skipped": 33
+    },
+    "ai": {
+      "tests": 71,
+      "passed": 71,
+      "failed": 0
+    },
+    "sdk_typescript": {
+      "tests": 23,
+      "passed": 23,
+      "failed": 0
+    }
+  },
+  "compose": {
+    "recipes": 31,
+    "services": 65,
+    "result": "passed"
+  },
+  "upgrade_terminal_browser": {
+    "checks": 6,
+    "failed": 0,
+    "real_docker": true,
+    "real_ssh_pty": true,
+    "image": "lightmoni:20261105-ops-a418b64-arm64"
+  }
 }

@@ -17,3 +17,5 @@ Fixed source a418b64e9b56ae5dd108b502f11e66bb8b9be850 was built and published as
 Doca latest seq1741 readback verifies catalog/Logo paragraphs, heading and five new paragraphs verbatim; the coordinated release native diagram retains its six nodes and five edges. Existing confirmed writes remain valid; no new topology was added by this merge. See evidence/doca-catalog-readback.json.
 
 Production readonly check showed no unresolved privileged jobs. Mac subsequently locked; computer control refused the activation attempt and requires manual unlock. Activation script has not been staged or executed. Backup, CAS switch, executor update and live telemetry/dashboard acceptance remain pending.
+
+Additional continuation checks: full runtime 1502 tests / 1469 pass / 33 environmental skips / zero failures; AI 71 pass and SDK TypeScript 23 pass. All 31 extended recipes (65 services) passed Docker Compose configuration. Six application-upgrade/container-terminal browser checks passed against the new image with real Docker and SSH/PTTY, including hostname equality with the selected container. This does not substitute for pending production acceptance.

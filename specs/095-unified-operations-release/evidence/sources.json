@@ -26,5 +26,9 @@
   "98": {
     "pr": "https://github.com/workhold/lightmoni/pull/98",
     "revision": "23bb1346ddef42fa556c8ac23cfb2e2f10645bad"
+  },
+  "100": {
+    "pr": "https://github.com/workhold/lightmoni/pull/100",
+    "revision": "fdf731b2ec25ecde6f4b5f08f6e7c2d1ddae832b"
   }
 }
