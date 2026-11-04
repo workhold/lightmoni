@@ -11,7 +11,7 @@ import { Router, fail } from "../src/shared/http.js";
 import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
 import { extendedDefinitions } from "../src/ops/catalog/index.js";
-import { catalogInstallation } from "../src/ops/catalog.js";
+import { applicationCatalog,catalogInstallation } from "../src/ops/catalog.js";
 import type { Dependencies } from "../src/shared/types.js";
 import { registryCacheFor } from "../src/ops/registry-runtime.js";
 import { createPrivateRegistryController } from "../src/ops/private-registry.js";
@@ -1659,4 +1659,61 @@ test('quick installation publishes the retained website, verifies CNAME and retr
  assert.equal((await f.action(f.store.get(appID),'quick-install-retry')).status,202);
  assert.equal(f.store.list().length,count);assert.equal(f.store.get(appID).status.quick_install.website_id,q.website_id);
  assert.equal(f.store.get(appID).spec.deployments[0].cluster_id,cluster.id);
+});
+
+test('application upgrades preview latest store images, preserve durable configuration, reject stale reviews and submit refresh jobs',async t=>{
+ const f=await fixture(t),c=f.createCluster(),template=applicationCatalog.find(t=>t.id==='redis')!,previous=structuredClone(template);
+ t.after(()=>Object.assign(template,previous));
+ const recipe=catalogInstallation('redis',{name:'Upgrade Redis',service_name:'upgrade-redis',parameters:{password:'private-fixture-password'},deployments:[{cluster_id:c.id,machine_ids:['ma'],replicas:1,cpu:0.25,memory_mb:128}]});
+ const app=f.store.create('application',recipe.name,recipe.spec,'admin'),before=structuredClone(app.spec),path='/resources/'+app.id+'/upgrade';
+ template.version='next-store-release';template.versions=['next-store-release'];template.spec.image='redis:fixture-new';
+ const preview=await f.req(path);assert.equal(preview.status,200);assert.equal(preview.body.available,true);assert.equal(preview.body.current_version,previous.version);assert.equal(preview.body.target_images.app,'redis:fixture-new');
+ assert(!JSON.stringify(preview.body).includes('private-fixture-password'));
+ assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,target_version:template.version,target_fingerprint:preview.body.target_fingerprint},'member')).status,403);
+ assert.equal((await f.req(path,'POST',{revision:1,target_version:template.version,target_fingerprint:preview.body.target_fingerprint})).status,400);
+ assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,target_version:'stale'})).status,409);
+ template.spec.image='redis:changed-with-same-version';assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,target_version:template.version,target_fingerprint:preview.body.target_fingerprint})).body.error,'application_template_changed');template.spec.image='redis:fixture-new';
+ f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'",JSON.stringify({operations_capabilities:['operations.platform.image-refresh.v1']}));
+ const result=await f.req(path,'POST',{revision:1,confirmed:true,target_version:template.version,target_fingerprint:preview.body.target_fingerprint});assert.equal(result.status,202,JSON.stringify(result.body));
+ const saved=f.store.get(app.id);assert.equal(saved.revision,2);assert.equal(saved.spec.image,'redis:fixture-new');assert.equal(saved.spec.source.template_version,template.version);assert.equal(saved.spec.image_pull_policy,'always');
+ for(const key of ['environment','ports','mounts','deployments','service_name','command'])assert.deepEqual(saved.spec[key],before[key]);
+ assert.equal(result.body.resource.spec.environment.REDIS_PASSWORD,'[redacted]');assert.equal(result.body.runs.length,1,JSON.stringify(result.body));
+ const job=f.jobs.get(result.body.runs[0].job_id),payload=f.platform.resolvePayload(job);assert.equal(payload.resource.config.refresh_images,true);assert.equal(payload.resource.config.force_recreate,true);assert(job.capabilities.includes('operations.platform.image-refresh.v1'));
+ assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,target_version:template.version,target_fingerprint:preview.body.target_fingerprint})).status,409);
+ assert.equal((await f.req(path,'POST',{revision:2,confirmed:true,target_version:template.version,target_fingerprint:preview.body.target_fingerprint})).body.error,'platform_resource_busy');
+ assert.equal((await f.req(path)).body.available,false);
+});
+
+test('custom upgrades update each declared service, allow same tags and reject missing, injected, topology or foreign fields',async t=>{
+ const f=await fixture(t),c=f.createCluster();f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'",JSON.stringify({operations_capabilities:['operations.platform.image-refresh.v1']}));
+ const app=f.app(c,{mode:'compose',compose:{services:{web:{image:'example/web:old',environment:{PASSWORD:'keep-secret'}},worker:{image:'example/worker:old'}}},ports:[],mounts:[]}),path='/resources/'+app.id+'/upgrade';
+ for(const images of [{web:'example/web:new'},{web:'example/web:new',worker:'example/worker:new',foreign:'example:1'},{web:'$(touch /tmp/oops)',worker:'example:1'},{web:'--bad',worker:'example:1'}])assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,images})).status,400);
+ assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,images:{web:'example:1',worker:'example:1'},command:['evil']})).status,400);
+ const result=await f.req(path,'POST',{revision:1,confirmed:true,images:{web:'example/web:new',worker:'example/worker:old'}});assert.equal(result.status,202,JSON.stringify(result.body));
+ const saved=f.store.get(app.id);assert.equal(saved.spec.compose.services.web.image,'example/web:new');assert.equal(saved.spec.compose.services.worker.image,'example/worker:old');assert.equal(saved.spec.compose.services.web.environment.PASSWORD,'keep-secret');assert.deepEqual(saved.spec.deployments,app.spec.deployments);
+ const single=f.app(c,{service_name:'same-tag'});const response=await f.req('/resources/'+single.id+'/upgrade','POST',{revision:1,confirmed:true,images:{app:'example:1'}});assert.equal(response.status,202);assert.equal(f.store.get(single.id).revision,2);
+ const template=applicationCatalog.find(t=>t.id==='redis')!,previous=structuredClone(template);t.after(()=>Object.assign(template,previous));
+ const installed=f.app(c,{service_name:'store-upgrade-blocked',source:{type:'store',template_id:'redis',template_version:template.version}});template.spec.mode='compose';template.spec.compose={services:{redis:{image:'redis:new'},sidecar:{image:'alpine:3'}}};
+ const blocked=await f.req('/resources/'+installed.id+'/upgrade');assert.equal(blocked.body.blocked_reason,'upgrade_service_topology_changed');assert.equal((await f.req('/resources/'+installed.id+'/upgrade','POST',{revision:1,confirmed:true,target_version:template.version})).status,409);assert.equal(f.store.get(installed.id).revision,1);
+});
+
+test('container targets are bound to current application, machine and full container identity and reject stale or retired instances',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c);await f.action(a,'deploy');f.finish('a');
+ const i=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id),cid='a'.repeat(64),foreign='b'.repeat(64);
+ f.db.exec('DROP VIEW privileged_executors');
+ const heartbeat=(at=f.deps.now().toISOString())=>JSON.stringify({collectors_status:{applications:'ok'},docker_inventory:{state:'ready',observed_at:at,containers:[{id:cid,name:'app-one',image:'example:1',state:'running',deployment_id:i.id},{id:foreign,name:'external',image:'example:1',state:'running',deployment_id:'foreign'}]}});
+ f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'",heartbeat());
+ const path='/resources/'+a.id+'/terminal-targets',listed=await f.req(path);assert.equal(listed.status,200);assert.equal(listed.body.hosts.length,1);assert.deepEqual(listed.body.hosts[0].containers.map((c:any)=>c.id),[cid]);
+ assert.equal((await f.req(path,'GET',undefined,'member')).status,403);
+ const input={application_id:a.id,instance_id:i.id,container_id:cid,shell:'bash'};
+ assert.equal(f.platform.resolveContainerTarget('ma',input).revision,1);
+ assert.throws(()=>f.platform.resolveContainerTarget('mb',input),/unavailable/);assert.throws(()=>f.platform.resolveContainerTarget('ma',{...input,container_id:foreign}),/unavailable/);
+ f.db.run('UPDATE ops_cluster_instances SET retired=1 WHERE id=?',i.id);assert.throws(()=>f.platform.resolveContainerTarget('ma',input),/unavailable/);
+ f.db.run('UPDATE ops_cluster_instances SET retired=0 WHERE id=?',i.id);f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'",heartbeat('2000-01-01T00:00:00Z'));assert.equal((await f.req(path)).body.hosts.length,0);
+});
+
+test('application upgrades reject an old executor before changing configuration',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c);await f.action(a,'deploy');f.finish('a');
+ const result=await f.req('/resources/'+a.id+'/upgrade','POST',{revision:1,confirmed:true,images:{app:'example:2'}});
+ assert.equal(result.status,409);assert.equal(result.body.error,'image_refresh_agent_upgrade_required');assert.equal(f.store.get(a.id).revision,1);assert.equal(f.store.get(a.id).spec.image,'example:1');
 });

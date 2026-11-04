@@ -529,6 +529,7 @@ export class OperationsPlatformStore implements PlatformStore {
           .split(".")
           .at(-1)!;
       const sourcePolicy=imageSourcesFor(this,config);
+      if(config.refresh_images===true&&!operationExecutionCapabilities(this.deps,agentID).includes('operations.platform.image-refresh.v1'))fail(409,'image_refresh_agent_upgrade_required');
       if(sourcePolicy) {
         let capabilities:unknown;
         capabilities=operationExecutionCapabilities(this.deps,agentID);
@@ -570,6 +571,7 @@ export class OperationsPlatformStore implements PlatformStore {
             ? ["operations.platform.website-auth.v1"]
             : []),
           ...(config.image_cache ? ["operations.platform.image-cache.v1"] : []),
+          ...(config.refresh_images === true ? ['operations.platform.image-refresh.v1'] : []),
           ...(payload.resource.config.image_sources ? ["operations.platform.image-sources.v1"] : []),
           ...(config.task === 'instance.recovery.inspect' ? ['operations.platform.instance-recovery.v1'] : []),
           ...(oneShotServices(config.application?.compose?.services).length ? ["operations.platform.oneshot.v1"] : []),

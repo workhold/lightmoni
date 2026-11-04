@@ -440,6 +440,7 @@ export async function prepareCachedImages(
   policy: any,
   root: string,
   context: OperationExecutionContext,
+  refresh = false,
 ) {
   cachePolicy(policy);
   const sources: any[] = [];
@@ -449,7 +450,7 @@ export async function prepareCachedImages(
   )) {
     let result;
     try {
-      result = await localDockerImage(image,platform,context) ?? await importCachedImage(image, policy, root, context);
+      result = (!refresh || /(?:^|@)sha256:[a-f0-9]{64}$/.test(image) ? await localDockerImage(image,platform,context) : undefined) ?? await importCachedImage(image, policy, root, context);
     } catch (error) {
       context.signal.throwIfAborted();
       if (!policy.allow_upstream) throw error;

@@ -372,6 +372,7 @@ export const platformDefinition: OperationDefinition = {
     if (!TASKS.includes(c.task)) reject("INVALID_PLATFORM_TASK");
     if (c.instance_id !== undefined) safeID(c.instance_id);
     if (c.task === "workload.apply") normalizeApplication(c.application);
+    if(c.refresh_images!==undefined&&typeof c.refresh_images!=='boolean')reject('INVALID_IMAGE_REFRESH');
     if (['workload.apply','gateway.apply'].includes(c.task)) {if(c.image_cache)cachePolicy(c.image_cache);if(c.image_sources)imageSourcePolicy(c.image_sources);}
     if(c.task==='instance.recovery.inspect')safeID(c.instance_id);
     return structuredClone(c);

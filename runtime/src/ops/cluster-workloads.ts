@@ -550,7 +550,8 @@ export function createClusterWorkloads(
         fail(400, "application_template_role_mismatch");
       if (
         source.template_version &&
-        !template.versions.includes(source.template_version)
+        !template.versions.includes(source.template_version) &&
+        !(previous?.source?.type === 'store' && previous.source.template_id === source.template_id && previous.source.template_version === source.template_version)
       )
         fail(400, "unsupported_template_version");
     }
@@ -833,10 +834,12 @@ export function createClusterWorkloads(
                   fail(409, "application_port_in_use");
               }
     }
+    if(s.image_pull_policy!==undefined&&!['always','missing'].includes(s.image_pull_policy))fail(400,'invalid_image_pull_policy');
     delete runtime.cpu;
     delete runtime.memory_mb;
     return {
       ...runtime,
+      ...(s.image_pull_policy?{image_pull_policy:s.image_pull_policy}:{}),
       ...(s.configuration_mode ? {configuration_mode:s.configuration_mode} : {}),
       ports: declared,
       service_name: serviceName,
@@ -1868,6 +1871,7 @@ export function createClusterWorkloads(
     }
     return {
       image: a.spec.image,
+      refresh_images: a.spec.image_pull_policy === 'always',
       http_port: 80,
       https_port: 443,
       sites,
@@ -1915,7 +1919,8 @@ export function createClusterWorkloads(
         application_id: a.id,
         application_revision: a.revision,
         ...health(a, i),
-        force_recreate: i.health_failures >= 3,
+        force_recreate: i.health_failures >= 3 || a.spec.image_pull_policy === 'always',
+        refresh_images: a.spec.image_pull_policy === 'always',
       },
       String(a.revision),
       actor,

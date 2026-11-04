@@ -262,3 +262,16 @@ test("Docker Hub header timeout produces a useful safe diagnostic", () => {
     "image_network_failed",
   );
 });
+
+test('explicit image refresh bypasses mutable local tags, preserves proxy policy and pins the verified new image',async()=>{
+ for(const proxy of [false,true]){
+  const calls:string[][]=[];let pulled=false;const old='sha256:'+'c'.repeat(64),fresh='sha256:'+'d'.repeat(64);
+  const context:any={signal:new AbortController().signal,command:async(_file:string,args:string[])=>{calls.push(args);if(args[0]==='info')return {stdout:'linux/amd64'};if(args[1]==='pull'){pulled=true;return {stdout:''}};if(args[1]==='inspect')return {stdout:JSON.stringify({Id:pulled?fresh:old,Os:'linux',Architecture:'amd64'})};throw Error('unexpected command')}};
+  const manifest:any={services:{app:{image:'alpine:latest'}}};await preparePlatformImages(manifest,{refresh_images:true,...(proxy?{image_sources:policy}:{})},'/tmp',context);
+  assert.equal(manifest.services.app.image,fresh);assert.equal(manifest.services.app.pull_policy,'never');
+  assert(calls.some(a=>a[1]==='pull'&&a[2]===(proxy?'mirror.example.test/docker.io/library/alpine:latest':'alpine:latest')));
+ }
+ const calls:string[][]=[],context:any={signal:new AbortController().signal,command:async(_file:string,args:string[])=>{calls.push(args);if(args[0]==='info')return {stdout:'linux/amd64'};throw Error('offline')}};
+ await assert.rejects(preparePlatformImages({services:{app:{image:'alpine:latest'}}},{refresh_images:true,image_sources:policy},'/tmp',context),/IMAGE_PROXY_FAILED/);
+ assert.equal(calls.filter(a=>a[1]==='pull').length,1);assert(!calls.some(a=>a[2]==='alpine:latest'));
+});

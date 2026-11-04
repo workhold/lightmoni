@@ -10,6 +10,7 @@ export type ResourceKind =
   | "website";
 export type Spec = Record<string, any>;
 export type Resource = {
+  upgrade?: Spec;
   logo_url?: string;
   logo_revision?: number;
   id: string;

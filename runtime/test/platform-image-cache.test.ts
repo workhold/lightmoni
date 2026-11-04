@@ -148,17 +148,18 @@ test('local Docker references precede cache requests, including latest, while pl
  let requests=0;const server=createServer((_,res)=>{requests++;res.writeHead(503);res.end()});server.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>{server.closeAllConnections();server.close()});
  const policy={version:1,allow_upstream:true,origin_host:'registry.example.test',origin_endpoint:'http://127.0.0.1:'+(server.address() as any).port};
  const id='sha256:'+'a'.repeat(64),expected='sha256:'+'b'.repeat(64);
- async function run(image:string,architecture='amd64',repoDigest=expected){
+ async function run(image:string,architecture='amd64',repoDigest=expected,refresh=false){
   const manifest:any={services:{app:{image}}},commands:string[][]=[];
   const context:any={signal:new AbortController().signal,command:async(_:string,args:string[])=>{commands.push(args);if(args[0]==='info')return{stdout:'linux/amd64',stderr:''};if(args[1]==='inspect'&&args.at(-1)===image)return{stdout:JSON.stringify({Id:id,Os:'linux',Architecture:architecture,RepoDigests:['registry.example.test/app@'+repoDigest]}),stderr:''};throw Error('No such image')}};
-  return {manifest,commands,result:await prepareCachedImages(manifest,policy,root,context)};
+  return {manifest,commands,result:await prepareCachedImages(manifest,policy,root,context,refresh)};
  }
  for(const image of ['registry.example.test/app:latest','registry.example.test/app@'+expected]){
   const hit=await run(image);assert.equal(hit.result[0].source,'local');assert.equal(hit.result[0].downloaded_bytes,0);assert.equal(hit.manifest.services.app.image,id);assert.equal(hit.manifest.services.app.pull_policy,'never');assert(!hit.commands.some(a=>a[1]==='load'));
  }
  assert.equal(requests,0);
+ const refreshed=await run('registry.example.test/app:latest','amd64',expected,true);assert.equal(refreshed.result[0].source,'upstream-fallback');assert.equal(requests,1);
  assert.equal((await run('registry.example.test/app:v1','arm64')).result[0].source,'upstream-fallback');
- assert.equal((await run('registry.example.test/app@'+expected,'amd64','sha256:'+'c'.repeat(64))).result[0].source,'upstream-fallback');assert.equal(requests,2);
+ assert.equal((await run('registry.example.test/app@'+expected,'amd64','sha256:'+'c'.repeat(64))).result[0].source,'upstream-fallback');assert.equal(requests,3);
 });
 
 test('a registry alias reuses a local manifest without downloading config/layers or importing another image',async t=>{
