@@ -1556,6 +1556,23 @@ test('a storage failure rolls back both instance retirement and reservation rele
  assert.equal(f.db.get<any>('SELECT status FROM ops_instance_recoveries WHERE instance_id=?',old.id)?.status,'agent_reinstall_inspecting');
 });
 
+test('catalog rejects duplicate cluster deployments without side effects and accepts corrected Gitea targets',async t=>{
+ const f=await fixture(t),first=f.createCluster(['ma'],'First'),second=f.createCluster(['mb'],'Second');
+ const target={cluster_id:first.id,machine_ids:['ma'],cpu:1,memory_mb:1024};
+ const body={parameters:{external_url:'https://git.example.test'},confirmed:false,request_id:'gitea-target-correction',deployments:[target,{...target}]};
+ const count=f.store.list().length,runs=f.store.actions().length;
+ const invalid=await f.req('/catalog/gitea/install','POST',body);
+ assert.equal(invalid.status,400);assert.equal(invalid.body.error,'duplicate_application_deployment');
+ assert.equal(f.store.list().length,count);assert.equal(f.store.actions().length,runs);
+ const valid=await f.req('/catalog/gitea/install','POST',{...body,deployments:[target,{...target,cluster_id:second.id,machine_ids:['mb']}]});
+ assert.equal(valid.status,201,JSON.stringify(valid.body));
+ assert.deepEqual(valid.body.resource.spec.deployments.map((d:any)=>[d.cluster_id,d.machine_ids]),[[first.id,['ma']],[second.id,['mb']]]);
+ const retry=await f.req('/catalog/gitea/install','POST',{...body,deployments:[target,{...target,cluster_id:second.id,machine_ids:['mb']}]});
+ assert.equal(retry.body.resource.id,valid.body.resource.id);assert.equal(f.store.list().length,count+1);
+ const automatic=await f.req('/catalog/gitea/install','POST',{parameters:body.parameters,confirmed:false});
+ assert.equal(automatic.status,201,JSON.stringify(automatic.body));assert.equal(automatic.body.resource.spec.deployments.length,1);
+});
+
 test('quick HTTP installation chooses an online target, generates entry DNS and keeps request identity',async t=>{
  const f=await fixture(t),c=f.createCluster();
  const credential=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'fixture',access_key_secret:'private-fixture'},'admin');

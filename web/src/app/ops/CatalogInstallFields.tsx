@@ -1,4 +1,5 @@
-import {useEffect,useRef} from 'react';
+import {useEffect,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
 import {PlusOutlined,DeleteOutlined} from '@ant-design/icons';
 import {Alert,Button,Checkbox,Collapse,Form,Input,InputNumber,Select,AutoComplete} from '../../shared/ui';
 import {useI18n} from '../../shared/i18n';
@@ -8,6 +9,7 @@ import type {CatalogTemplate,Machine,Resource,Spec} from './model';
 
 export default function CatalogInstallFields({template,resources,machines,advanced,onAdvanced}:{template:CatalogTemplate;resources:Resource[];machines:Machine[];advanced:boolean;onAdvanced:(open:boolean)=>void}){
  const {t}=useI18n(),form=Form.useFormInstance();
+ const [advancedTargets,setAdvancedTargets]=useState<HTMLDivElement|null>(null);
  const placements:Spec[]=Form.useWatch(['spec','deployments'],form)??[];
  const mode=Form.useWatch(['spec','deployment_mode'],form);
  const automatic=Form.useWatch('automatic_placement',form)!==false;
@@ -20,10 +22,11 @@ export default function CatalogInstallFields({template,resources,machines,advanc
  const clusters=resources.filter(r=>r.kind==='cluster');
  useEffect(()=>{
   const rows:Spec[]=form.getFieldValue(['spec','deployments'])??[];
+  const selected=new Set(rows.map(row=>row.cluster_id).filter(Boolean));
   let changed=false;
   const next=rows.map(row=>{
    const value={...row};
-   if(!value.cluster_id&&clusters.length===1){value.cluster_id=clusters[0].id;changed=true}
+   if(!value.cluster_id&&clusters.length===1&&!selected.has(clusters[0].id)){value.cluster_id=clusters[0].id;selected.add(value.cluster_id);changed=true}
    const cluster=clusters.find(c=>c.id===value.cluster_id);
    const available=machines.filter(m=>cluster?.spec.machine_ids?.includes(m.id)&&m.agent_id&&m.agent_status==='online');
    if(mode==='manual'&&!value.machine_ids?.length&&available.length===1){value.machine_ids=[available[0].id];changed=true}
@@ -44,7 +47,12 @@ export default function CatalogInstallFields({template,resources,machines,advanc
  return <>
   {!gateway&&declared.some((p:Spec)=>p.protocol==='tcp'&&['http','https'].includes(p.app_protocol))&&<Form.Item name="domain" label={t('访问域名','Website domain')} extra={t('填写托管域名下的子域名，自动配置 DNS 与 SSL。','Enter a subdomain under a hosted zone for automatic DNS and SSL.')} rules={[{validator:(_,v)=>!v||/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(v.trim())?Promise.resolve():Promise.reject(Error(t('填写完整域名，不含协议或路径','Enter a domain without a scheme or path')))}]}><AutoComplete options={resources.filter(r=>r.kind==='dns_zone').map(r=>({value:(template.id==='registry'?'registry':template.id)+'.'+r.spec.scope}))} placeholder="app.example.com"/></Form.Item>}
   {automatic&&<p className="lm-ops-note">{t('集群、机器和端口由平台自动选择。','Cluster, machine and ports are selected automatically.')}</p>}
-  <div hidden={automatic}><Form.List name={['spec','deployments']} rules={[{validator:(_,rows)=>automatic||rows?.length?Promise.resolve():Promise.reject(Error(t('请选择安装位置','Choose an installation target')))}]}>{(fields,{remove},meta)=><>
+  <div hidden={automatic}><Form.List name={['spec','deployments']} rules={[{validator:(_,rows:Spec[])=>{
+   if(automatic)return Promise.resolve();
+   if(!rows?.length)return Promise.reject(Error(t('请选择安装位置','Choose an installation target')));
+   const ids=rows.map(row=>row.cluster_id).filter(Boolean);
+   return new Set(ids).size===ids.length?Promise.resolve():Promise.reject(Error(t('每个集群只能配置一次部署；多台机器请在同一部署中选择。','Configure each cluster once; select multiple machines in the same deployment.')));
+  }}]}>{(fields,{add,remove},meta)=><>
   {fields.map(f=>{
    const row=placements[f.name]??{},cluster=clusters.find(c=>c.id===row.cluster_id);
    const allowed=machines.filter(m=>cluster?.spec.machine_ids?.includes(m.id));
@@ -57,6 +65,11 @@ export default function CatalogInstallFields({template,resources,machines,advanc
    </div>;
   })}
   <Form.ErrorList errors={meta.errors}/>
+  {/* Keep advanced fields in this list's scope and keyed by its stable field identities. */}
+  {!automatic&&advancedTargets&&createPortal(<>
+   {fields.map(field=>{const index=field.name;return <div key={field.key}><h4>{placements.length>1?(clusters.find(c=>c.id===placements[index]?.cluster_id)?.name??t('安装位置','Installation target')):t('资源限制','Resource limits')}</h4><div className="lm-ops-grid"><Form.Item name={[index,'cpu']} label={multiContainer?t('每容器 CPU 核数','CPU cores per container'):t('每实例 CPU 核数','CPU cores per instance')} rules={[{required:true}]}><InputNumber min={.01} max={1024}/></Form.Item><Form.Item name={[index,'memory_mb']} label={multiContainer?t('每容器内存（MiB）','Memory per container (MiB)'):t('每实例内存（MiB）','Memory per instance (MiB)')} rules={[{required:true}]}><InputNumber min={16} max={1048576}/></Form.Item></div>{multiContainer&&<p className="lm-ops-note">{t(`此应用包含 ${serviceCount} 个容器，集群会预留各容器资源的总和。`,`This application includes ${serviceCount} containers. The cluster reserves the sum of their resources.`)}</p>}{gateway&&<Form.Item name={[index,'gateway_dns_zone_id']} label={t('入口域名托管（可选）','Manage entry domain DNS (optional)')}><Select allowClear options={resources.filter(r=>r.kind==='dns_zone').map(r=>({value:r.id,label:r.name}))}/></Form.Item>}</div>})}
+   <Button icon={<PlusOutlined/>} disabled={fields.length>=clusters.length} onClick={()=>add({machine_ids:[],replicas:1,cpu:template.resources?.cpu??(template.id==='mysql'?1:.25),memory_mb:template.resources?.memory_mb??(template.id==='mysql'?512:128)})}>{t('添加集群部署','Add cluster deployment')}</Button>
+  </>,advancedTargets)}
  </>}</Form.List></div>
   <div className="lm-ops-grid">{(template.parameters??[]).filter(p=>p.required).map(parameter)}</div>
   {gateway&&<p className="lm-ops-note">{t('使用宿主机 80 / 443 端口，请确保端口空闲。','Uses host ports 80 / 443. Ensure they are available.')}</p>}
@@ -67,8 +80,7 @@ export default function CatalogInstallFields({template,resources,machines,advanc
    <div className="lm-ops-grid"><Form.Item name={['spec','service_name']} label={t('服务标识','Service name')} rules={[{pattern:/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,message:t('使用小写字母、数字和短横线，最长 63 字符','Use lowercase letters, numbers and hyphens, up to 63 characters')}]} extra={t('留空自动生成，创建后不可修改','Generated when blank; cannot be changed after creation')}><Input maxLength={63}/></Form.Item><Form.Item name={['spec','deployment_mode']} label={t('部署模式','Deployment mode')}><Select options={[{value:'manual',label:t('手动指定机器','Choose machines')},{value:'managed',label:t('自动调度','Automatic scheduling'),disabled:automatic&&template.spec?.stateful||!!template.deployment_modes&&!template.deployment_modes.includes('managed')}]}/></Form.Item></div>
    {mode==='managed'&&<Alert type={template.spec?.stateful?'warning':'info'} showIcon title={t('自动维护实例数量，故障时可更换机器','Maintains instance counts and can reschedule failures')} description={t('不会迁移本地数据或建立数据库复制。','Local data is not migrated and database replication is not configured.')}/>}
    <div className="lm-ops-grid">{(template.parameters??[]).filter(p=>!p.required).map(parameter)}</div>
-   {!automatic&&placements.map((_,index)=><div key={index}><h4>{placements.length>1?(clusters.find(c=>c.id===placements[index]?.cluster_id)?.name??t('安装位置','Installation target')):t('资源限制','Resource limits')}</h4><div className="lm-ops-grid"><Form.Item name={['spec','deployments',index,'cpu']} label={multiContainer?t('每容器 CPU 核数','CPU cores per container'):t('每实例 CPU 核数','CPU cores per instance')} rules={[{required:true}]}><InputNumber min={.01} max={1024}/></Form.Item><Form.Item name={['spec','deployments',index,'memory_mb']} label={multiContainer?t('每容器内存（MiB）','Memory per container (MiB)'):t('每实例内存（MiB）','Memory per instance (MiB)')} rules={[{required:true}]}><InputNumber min={16} max={1048576}/></Form.Item></div>{multiContainer&&<p className="lm-ops-note">{t(`此应用包含 ${serviceCount} 个容器，集群会预留各容器资源的总和。`,`This application includes ${serviceCount} containers. The cluster reserves the sum of their resources.`)}</p>}{gateway&&<Form.Item name={['spec','deployments',index,'gateway_dns_zone_id']} label={t('入口域名托管（可选）','Manage entry domain DNS (optional)')}><Select allowClear options={resources.filter(r=>r.kind==='dns_zone').map(r=>({value:r.id,label:r.name}))}/></Form.Item>}</div>)}
-   {!automatic&&<Button icon={<PlusOutlined/>} onClick={()=>form.setFieldValue(['spec','deployments'],[...(form.getFieldValue(['spec','deployments'])??[]),{machine_ids:[],replicas:1,cpu:template.resources?.cpu??(template.id==='mysql'?1:.25),memory_mb:template.resources?.memory_mb??(template.id==='mysql'?512:128)}])}>{t('添加集群部署','Add cluster deployment')}</Button>}
+   <div ref={setAdvancedTargets}/>
   </>}]} />
  </>;
 }
