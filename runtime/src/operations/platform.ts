@@ -471,6 +471,7 @@ const summarize = (containers: any[]) =>
 async function workloadSnapshot(
   context: OperationExecutionContext,
   instanceID: string,
+  customHealth = false,
 ) {
   const root = join(await privateRoot(context, 'platform'), 'workloads', instanceID);
   const state = await readJSON<any>(join(root, 'state.json'), null);
@@ -502,7 +503,7 @@ async function workloadSnapshot(
   return {
     containers: summarize(raw),
     stats,
-    healthy: ready(raw, Object.keys(manifest?.services ?? {}).length || 1, manifest?.services),
+    healthy: ready(raw, Object.keys(manifest?.services ?? {}).length || 1, manifest?.services, !customHealth),
     observed_at: context.now().toISOString(),
   };
 }
@@ -511,22 +512,29 @@ export async function checkReadiness(
   context: OperationExecutionContext,
 ): Promise<boolean> {
   if (!config.health) return true;
+  const timeout = config.health.timeout_seconds ?? 3;
+  if (!Number.isInteger(timeout) || timeout < 1 || timeout > 30) reject('INVALID_HEALTH_TIMEOUT');
+  const timeoutMs = timeout * 1000;
   const p = port(config.health.port ?? config.probe_port);
   const address = config.health.host ?? "127.0.0.1";
   if (typeof address !== "string" || !isIP(address)) reject("INVALID_HEALTH_HOST");
   const host = address === "0.0.0.0" ? "127.0.0.1" : address === "::" ? "::1" : address;
   context.signal.throwIfAborted();
   if (config.health.type === "http") {
+    const path = config.health.path ?? '/';
+    const statuses = config.health.expected_statuses ?? [200];
+    if (typeof path !== 'string' || !path.startsWith('/') || /^\/\/|[\x00-\x20\x7f\\#]/.test(path) || path.length > 2048) reject('INVALID_HEALTH_PATH');
+    if (!Array.isArray(statuses) || !statuses.length || statuses.length > 20 || new Set(statuses).size !== statuses.length || statuses.some(n => !Number.isInteger(n) || n < 200 || n > 599)) reject('INVALID_HEALTH_STATUSES');
     try {
       const response = await fetch(
-        "http://" + (isIP(host) === 6 ? "[" + host + "]" : host) + ":" + p + (config.health.path ?? "/"),
+        "http://" + (isIP(host) === 6 ? "[" + host + "]" : host) + ":" + p + path,
         {
           redirect: "manual",
-          signal: AbortSignal.any([context.signal, AbortSignal.timeout(3000)]),
+          signal: AbortSignal.any([context.signal, AbortSignal.timeout(timeoutMs)]),
         },
       );
       await response.body?.cancel();
-      return response.status >= 200 && response.status < 400;
+      return statuses.includes(response.status);
     } catch {
       return false;
     }
@@ -538,13 +546,15 @@ export async function checkReadiness(
     const done = (v: boolean) => {
       if (complete) return;
       complete = true;
+      context.signal.removeEventListener('abort', aborted);
       socket.destroy();
       resolve(v);
     };
-    socket.setTimeout(3000, () => done(false));
+    const aborted = () => done(false);
+    socket.setTimeout(timeoutMs, () => done(false));
     socket.once("connect", () => done(true));
     socket.once("error", () => done(false));
-    context.signal.addEventListener("abort", () => done(false), { once: true });
+    context.signal.addEventListener("abort", aborted, { once: true });
   });
 }
 export async function renderManifest(
@@ -671,7 +681,7 @@ async function executeWorkload(
   const statePath = join(root, "state.json");
   const state = await readJSON<any>(statePath, null);
   if (c.task === "workload.inspect") {
-    const snapshot = await workloadSnapshot(context, id);
+    const snapshot = await workloadSnapshot(context, id, !!c.health);
     snapshot.healthy = snapshot.healthy && (await checkReadiness(c, context));
     return { verified: true, data: { instance_id: id, ...snapshot } };
   }
@@ -796,24 +806,22 @@ async function executeWorkload(
         "--detach",
         "--remove-orphans",
         ...(c.force_recreate ? ["--force-recreate"] : []),
-        "--wait",
-        "--wait-timeout",
-        "300",
+        ...(c.health ? [] : ["--wait", "--wait-timeout", "300"]),
       ],
       { timeoutMs: 600000 },
     );
     await context.progress?.("checking_health");
-    const cs = await inventory(context, id);
-    if (!ready(cs, Object.keys(manifest.services).length, manifest.services))
-      throw Error("WORKLOAD_HEALTH_NOT_VERIFIED");
     let healthy = false;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      if (await checkReadiness(c, context)) {
+    const readinessDeadline = Date.now() + 300000;
+    while (Date.now() < readinessDeadline) {
+      context.signal.throwIfAborted();
+      const cs = await inventory(context, id);
+      if (ready(cs, Object.keys(manifest.services).length, manifest.services, !c.health) && await checkReadiness(c, context)) {
         healthy = true;
         break;
       }
       context.signal.throwIfAborted();
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 1000));
     }
     if (!healthy) throw Error("WORKLOAD_READINESS_NOT_VERIFIED");
     await atomicFile(
@@ -835,7 +843,7 @@ async function executeWorkload(
         instance_id: id,
         revision: payload.resource.revision,
         digest,
-        ...(await workloadSnapshot(context, id)),
+        ...(await workloadSnapshot(context, id, !!c.health)),
         image_sources:imageSources,
       },
     };

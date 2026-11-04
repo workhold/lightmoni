@@ -13,6 +13,7 @@ export function workloadContainersReady(
   containers: any[],
   count: number,
   services?: Record<string, any>,
+  useContainerHealth = true,
 ): boolean {
   if (containers.length < count || !containers.length) return false;
   const init = new Set(oneShotServices(services));
@@ -33,7 +34,7 @@ export function workloadContainersReady(
       );
     return (
       c.State?.Running === true &&
-      (!c.State?.Health || c.State.Health.Status === "healthy")
+      (!useContainerHealth || !c.State?.Health || c.State.Health.Status === "healthy")
     );
   });
 }

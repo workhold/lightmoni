@@ -155,7 +155,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     },
     state = "succeeded",
   ) => {
-    const job = jobs.claim(agentID, ["operations.platform","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1"]);
+    const job = jobs.claim(agentID, ["operations.platform","operations.platform.readiness.v1","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1"]);
     assert.ok(job);
     const payload = platform.resolvePayload(job);
     for (const [n, phase] of [
@@ -475,7 +475,7 @@ test("a single writable registry does not turn Hub images into a separate cache 
  assert.deepEqual(Object.keys(registry.compose.services),['registry']);assert.equal(registry.mounts.length,1);
  assert.equal(registry.compose.services.registry.environment.REGISTRY_PROXY_REMOTEURL,undefined);
  const a=f.app(c);assert.equal((await f.action(a,'deploy')).status,202);
- const job=f.jobs.claim('a',['operations.platform']);assert(job);
+ const job=f.jobs.claim('a',['operations.platform','operations.platform.readiness.v1']);assert(job);
  assert.equal(f.platform.resolvePayload(job).resource.config.image_cache,undefined);
 });
 test("a cache switch saved during a leased registry operation stays pending and reconciles after the writer completes", async (t) => {
@@ -489,7 +489,7 @@ test("a cache switch saved during a leased registry operation stays pending and 
     machine_id: "ma",
     address: "10.0.0.1",
   });
-  const job = f.jobs.claim("a", ["operations.platform"]);
+  const job = f.jobs.claim("a", ["operations.platform","operations.platform.readiness.v1"]);
   assert(job);
   const payload = f.platform.resolvePayload(job);
   const saved = await f.req(
@@ -682,56 +682,32 @@ test("named ports reserve atomically and matching verified receipts publish fres
     0,
   );
 });
-test("manual nodes stay fixed while managed offline replicas retire and move to a healthy machine", async (t) => {
-  const f = await fixture(t),
-    c = f.createCluster(),
-    manual = f.app(c);
-  await f.action(manual, "deploy");
-  f.finish("a");
-  const managed = f.app(c, {
-    deployment_mode: "managed",
-    machine_ids: [],
-    replicas: 1,
-  });
-  await f.action(managed, "deploy");
-  f.finish("a");
-  f.advance(121000);
-  f.heartbeat("b");
-  await f.platform.tick();
-  const active = f.db.all<any>(
-    "SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0",
-    managed.id,
-  );
-  assert.equal(active.length, 1);
-  assert.equal(active[0].machine_id, "mb");
-  assert.equal(
-    f.db.all(
-      "SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=1",
-      managed.id,
-    ).length,
-    1,
-  );
-  assert.equal(
-    f.db.all("SELECT * FROM ops_cluster_instances WHERE owner_id=?", manual.id)
-      .length,
-    1,
-  );
-  assert.equal(
-    f.store.actions(manual.id).filter((r) => r.action === "apply").length,
-    1,
-  );
-  f.finish("b");
-  assert.equal(
-    (await f.req("/resources/" + managed.id + "/endpoints?cluster_id=" + c.id))
-      .body.endpoints.length,
-    2,
-  );
-  f.heartbeat("a");
-  await f.platform.tick();
-  assert.equal(
-    f.store.actions(managed.id).some((r) => r.action === "stop"),
-    true,
-  );
+test("manual nodes stay fixed and managed failover waits for grace and ready replacement", async (t) => {
+  const f = await fixture(t), c = f.createCluster(), manual = f.app(c);
+  await f.action(manual, 'deploy'); f.finish('a');
+  const managed = f.app(c, {deployment_mode:'managed', machine_ids:[], replicas:1});
+  await f.action(managed,'deploy'); f.finish('a');
+  const old = f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',managed.id)!;
+  f.advance(240000); f.heartbeat('b'); await f.platform.tick();
+  assert.equal(f.db.all('SELECT id FROM ops_cluster_instances WHERE owner_id=?',managed.id).length,1);
+  assert.equal(f.store.get(managed.id).status.instances[0].availability,'grace');
+  assert.equal(f.store.get(managed.id).status.endpoints.length,2);
+  f.advance(61000); f.heartbeat('b'); await f.platform.tick();
+  const attempts = f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0',managed.id);
+  assert.equal(attempts.length,2);
+  assert.equal(attempts.find(i=>i.slot.startsWith('surge-')).machine_id,'mb');
+  assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',old.id).retired,0);
+  assert.ok(f.store.get(managed.id).status.endpoints.every((e:any)=>e.machine_id==='ma'));
+  f.finish('b'); await f.platform.tick();
+  const active = f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0',managed.id);
+  assert.equal(active.length,1); assert.equal(active[0].machine_id,'mb'); assert.equal(active[0].slot,'0');
+  assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',old.id).retired,1);
+  assert.equal(f.db.all('SELECT id FROM ops_cluster_instances WHERE owner_id=?',manual.id).length,1);
+  assert.ok(f.store.get(managed.id).status.endpoints.every((e:any)=>e.machine_id==='mb'));
+  f.heartbeat('a'); await f.platform.tick();
+  assert.ok(!f.store.actions(managed.id).some(r=>r.action==='stop'));
+  f.advance(30000); f.heartbeat('a');f.heartbeat('b');await f.platform.tick();
+  assert.ok(f.store.actions(managed.id).some(r=>r.action==='stop'));
 });
 test("unknown execution keeps port ownership and never creates a duplicate managed attempt", async (t) => {
   const f = await fixture(t),
@@ -910,39 +886,24 @@ test("HTTP returns stable machines and scoped resources, denies member access an
     2,
   );
 });
-test("managed rolling update waits for preceding replica receipt across reconciliation ticks", async (t) => {
-  const f = await fixture(t),
-    c = f.createCluster(),
-    a = f.app(c, { deployment_mode: "managed", machine_ids: [], replicas: 2 });
-  assert.equal((await f.action(a, "deploy")).status, 202);
-  f.finish("a");
-  f.finish("b");
-  const changed = f.store.update(
-    a.id,
-    1,
-    a.name,
-    { ...a.spec, image: "example:2" },
-    "admin",
-  );
-  assert.equal((await f.action(changed, "deploy")).body.runs.length, 1);
-  await f.platform.tick();
-  assert.equal(
-    f.store.actions(a.id).filter((r) => r.action === "apply").length,
-    3,
-  );
-  f.finish("a");
-  await f.platform.tick();
-  assert.equal(
-    f.store.actions(a.id).filter((r) => r.action === "apply").length,
-    4,
-  );
-  f.finish("b");
-  assert.equal(
-    (
-      await f.req("/resources/" + a.id + "/endpoints?cluster_id=" + c.id)
-    ).body.endpoints.every((e: any) => e.version === "2"),
-    true,
-  );
+test("managed rolling update drains one replica before mutation and waits for its ready receipt", async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:2,min_available_percent:50}]});
+ await f.action(a,'deploy');f.finish('a');f.finish('b');
+ const changed=f.store.update(a.id,1,a.name,{...a.spec,image:'example:2'},'admin');
+ const started=await f.action(changed,'deploy');assert.equal(started.body.runs.length,0);assert.equal(started.body.pending,'traffic_drain_pending');
+ assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,2);
+ assert.ok(f.store.get(a.id).status.endpoints.every((e:any)=>e.machine_id==='mb'));
+ f.advance(30000);f.heartbeat('a');f.heartbeat('b');await f.platform.tick();
+ assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,3);
+ await f.platform.tick();assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,3);
+ f.finish('a');f.finish('b');await f.platform.tick();
+ assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,3);
+ f.advance(30000);f.heartbeat('a');f.heartbeat('b');await f.platform.tick();
+ assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,4);
+ // Drain any earlier observational job on this Agent before its apply receipt.
+ for(let n=0;n<4 && f.db.get("SELECT id FROM agent_jobs WHERE agent_id='b' AND state='queued'");n++)f.finish('b');
+ const endpoints=(await f.req('/resources/'+a.id+'/endpoints?cluster_id='+c.id)).body.endpoints;
+ assert.ok(endpoints.every((e:any)=>e.version==='2'));
 });
 test("offline stop persists intent and executes after the original machine reconnects", async (t) => {
   const f = await fixture(t),
@@ -1338,7 +1299,12 @@ test("website DNS aggregates all ready cluster gateways and follows managed fail
   );
   f.finish("a", { healthy: true, running: true, digest: "updated-a" });
   f.finish("b", { healthy: true, running: true, digest: "updated-b" });
-  f.advance(121000);
+  const beforeGrace = records.map(r=>[r.RR,r.Type,r.Value]).sort();
+  f.advance(240000); f.heartbeat('b'); f.heartbeat('c');
+  await f.platform.tick(); f.finish('b'); await settle();
+  assert.deepEqual(records.map(r=>[r.RR,r.Type,r.Value]).sort(),beforeGrace,'four-minute heartbeat gap keeps entry and website DNS unchanged');
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM ops_cluster_instances WHERE owner_id=? AND retired=1",entry.id).n,0);
+  f.advance(61000);
   f.heartbeat("b");
   f.heartbeat("c");
   await f.platform.tick();
@@ -1659,4 +1625,93 @@ test('quick installation publishes the retained website, verifies CNAME and retr
  assert.equal((await f.action(f.store.get(appID),'quick-install-retry')).status,202);
  assert.equal(f.store.list().length,count);assert.equal(f.store.get(appID).status.quick_install.website_id,q.website_id);
  assert.equal(f.store.get(appID).spec.deployments[0].cluster_id,cluster.id);
+});
+
+test('managed 60 percent retains two of three published members across repeated ticks and controller restart', async t=>{
+ const f=await fixture(t), c=f.createCluster();
+ const a=f.app(c,{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:3,min_available_percent:60}]});
+ await f.action(a,'deploy'); f.finish('a'); f.finish('b'); f.finish('a');
+ assert.equal(f.store.get(a.id).status.deployments[c.id].ready_instances,3);
+ f.advance(301000); await f.platform.tick(); await f.platform.tick();
+ const saved=f.store.get(a.id);assert.equal(saved.status.deployments[c.id].minimum_available,2);
+ assert.equal(saved.status.deployments[c.id].ready_instances,0);
+ assert.equal(new Set(saved.status.endpoints.map((e:any)=>e.instance_id)).size,2);
+ assert.equal(saved.status.instances.filter((i:any)=>i.availability==='protected').length,2);
+ const {createAvailability}=await import('../src/ops/availability.js');
+ const policy=createAvailability(f.db,f.deps.now,id=>f.db.get<any>('SELECT * FROM agents WHERE id=?',id),id=>f.db.get<any>('SELECT agent_id FROM managed_machines WHERE id=?',id)!.agent_id);
+ const rows=f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id);
+ const restored=policy.refresh({...a,spec:{...a.spec,...a.spec.deployments[0]}},rows);
+ assert.equal(restored.filter(i=>i.serving).length,2);assert.ok(restored.filter(i=>i.serving).every(i=>!i.ready));
+});
+
+test('a failed or unknown surge cannot retire the old protected instance or create further copies',async t=>{
+ for(const result of ['failed','unknown']){
+  const f=await fixture(t),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',replicas:1});
+  await f.action(a,'deploy');f.finish('a');
+  f.advance(301000);f.heartbeat('b');await f.platform.tick();
+  f.finish('b',{code:'WORKLOAD_READINESS_NOT_VERIFIED'},result);
+  await f.platform.tick();await f.platform.tick();
+  const instances=f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id);
+  assert.equal(instances.length,2);assert.ok(instances.every(i=>!i.retired));
+  assert.ok(f.store.get(a.id).status.endpoints.every((e:any)=>e.machine_id==='ma'));
+  if(result==='failed'){
+   await f.action(a,'deploy');f.finish('b');await f.platform.tick();
+   assert.equal(f.db.all('SELECT id FROM ops_cluster_instances WHERE owner_id=?',a.id).length,2);
+   assert.ok(f.store.get(a.id).status.endpoints.every((e:any)=>e.machine_id==='mb'));
+  }
+ }
+});
+
+test('100 percent single replica upgrades start on another machine and switch only after readiness',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:1,min_available_percent:100}]});
+ await f.action(a,'deploy');f.finish('a');
+ const changed=f.store.update(a.id,a.revision,a.name,{...a.spec,image:'example:2'},'admin');
+ await f.action(changed,'deploy');
+ assert.equal(f.store.get(a.id).status.endpoints[0].machine_id,'ma');
+ assert.ok(!f.store.actions(a.id).some(r=>r.action==='stop'));
+ const {payload}=f.finish('b');assert.equal(payload.resource.config.application.image,'example:2');
+ await f.platform.tick();
+ const endpoints=f.store.get(a.id).status.endpoints;
+ assert.ok(endpoints.length);assert.ok(endpoints.every((e:any)=>e.machine_id==='mb'&&e.version==='2'));
+});
+
+test('health policy is validated and reaches immutable apply and periodic inspect payloads in manual mode',async t=>{
+ const f=await fixture(t),c=f.createCluster();
+ const health={type:'http',port_name:'http',path:'/ready',expected_statuses:[200,204],interval_seconds:5,timeout_seconds:2};
+ const a=f.app(c,{health});await f.action(a,'deploy');
+ assert.equal(f.jobs.claim('a',['operations.platform']),null,'older Agent cannot report HTTP readiness without enforcing configured statuses');
+ const apply=f.finish('a').payload.resource.config;
+ assert.deepEqual(apply.health,{...health,host:'0.0.0.0',port:21000});
+ f.advance(5000);await f.platform.tick();
+ const inspected=f.finish('a').payload.resource.config;
+ assert.equal(inspected.task,'workload.inspect');assert.deepEqual(inspected.health,apply.health);
+ for(const bad of [{heartbeat_grace_minutes:0},{heartbeat_grace_minutes:1.5},{deployments:[{cluster_id:c.id,replicas:3,min_available_percent:101}]},{health:{...health,path:'//other/ready'}},{health:{...health,path:'/ready\r\nHost:evil'}},{health:{...health,expected_statuses:[200,200]}},{health:{...health,timeout_seconds:31}}])assert.throws(()=>f.app(c,bad));
+});
+
+test('retired service waits for the gateway to acknowledge replacement routes before stopping',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:1,min_available_percent:100}]});
+ await f.action(a,'deploy');f.finish('a');
+ const old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;
+ const gateway=f.store.create('application','Entry',catalogInstallation('openresty',{deployment_mode:'manual',deployments:[{cluster_id:c.id,machine_ids:['ma','mb']}]}).spec,'admin');
+ await f.action(gateway,'deploy');f.finish('a');f.finish('b');
+ const site=f.store.create('website','Service',{cluster_ids:[c.id],routing_mode:'managed',service_application_id:a.id,service_port_name:'http',bindings:[{domains:['smooth.example.test'],locations:[{path:'/',action:'proxy'}]}]},'admin');
+ await f.action(site,'deploy');f.finish('a');f.finish('b');
+ const changed=f.store.update(a.id,a.revision,a.name,{...a.spec,image:'example:2'},'admin');
+ await f.action(changed,'deploy');f.finish('b');await f.platform.tick();
+ f.advance(31000);f.heartbeat('a');f.heartbeat('b');await f.platform.tick();
+ assert.equal(f.db.get<any>('SELECT state FROM ops_cluster_instances WHERE id=?',old.id).state,'running');
+ assert.ok(!f.store.actions(a.id).some(r=>r.action==='stop'));
+ for(const agent of ['a','b'])for(let n=0;n<8 && f.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state='queued'",agent);n++)f.finish(agent);
+ await f.platform.tick();
+ assert.ok(f.store.actions(a.id).some(r=>r.action==='stop'));
+});
+
+test('minimum retained membership is isolated per application cluster',async t=>{
+ const f=await fixture(t),south=f.createCluster(['ma'],'South'),north=f.createCluster(['mb'],'North');
+ const a=f.app(south,{deployment_mode:'managed',deployments:[{cluster_id:south.id,replicas:3,min_available_percent:60},{cluster_id:north.id,replicas:3,min_available_percent:100}]});
+ await f.action(a,'deploy');for(let n=0;n<3;n++){f.finish('a');f.finish('b');}
+ f.advance(301000);await f.platform.tick();
+ const status=f.store.get(a.id).status;
+ assert.equal(status.deployments[south.id].serving_instances,2);
+ assert.equal(status.deployments[north.id].serving_instances,3);
 });
