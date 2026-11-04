@@ -1,3 +1,4 @@
+import {createAvailability, minimumAvailable, graceMilliseconds} from './availability.js';
 import {machineServiceAddresses} from "../server/host-network.js";
 import {automaticEntry} from './automatic-entry.js';
 import {createApplicationTelemetry} from './application-telemetry.js';
@@ -68,6 +69,18 @@ const num = (v: any, fallback: number, min: number, max: number) => {
   if (typeof n !== "number" || !Number.isFinite(n) || n < min || n > max)
     fail(400, "invalid_application_number");
   return n;
+};
+const integer = (v: any, fallback: number, min: number, max: number) => {
+  const n = num(v, fallback, min, max);
+  if (!Number.isInteger(n)) fail(400, 'invalid_application_number');
+  return n;
+};
+const healthStatuses = (v: any) => {
+  const codes = v ?? [200];
+  if (!Array.isArray(codes) || !codes.length || codes.length > 20 ||
+    new Set(codes).size !== codes.length || codes.some(n => !Number.isInteger(n) || n < 200 || n > 599))
+    fail(400, 'invalid_health_statuses');
+  return codes;
 };
 const names = (value: any) =>
   list(value, "domains").map((v) => {
@@ -314,17 +327,15 @@ export function createClusterWorkloads(
         i.current_run_id,
       )?.state,
     );
-  const fresh = (i: Row) =>
-    machine(i.machine_id).agent_id === i.agent_id &&
-    i.healthy === 1 &&
-    i.state === "running" &&
-    i.desired_state === "running" &&
-    !i.retired &&
-    online(i.agent_id) &&
-    deps.now().getTime() - Date.parse(i.last_seen) < 120000;
+  const availability = createAvailability(db, deps.now, agent, key => machine(key).agent_id);
+  const availabilityRows = (owner: string, cid: string) => availability.refresh(desired(store.get(owner, 'application'), cid), rows(owner, false, cid));
+  const available = (i: Row) => availabilityRows(i.owner_id, i.cluster_id).find(v => v.id === i.id);
+  const serving = (i: Row) => !!available(i)?.serving;
+  const evaluatedRows = (owner: string, cid?: string) => cid ? availabilityRows(owner, cid) :
+    [...new Set<string>(rows(owner).map(i => i.cluster_id))].flatMap(clusterID => availabilityRows(owner, clusterID));
   const endpoints = (resourceID: string, name?: string, cid?: string) =>
-    rows(resourceID, false, cid)
-      .filter(fresh)
+    evaluatedRows(resourceID, cid)
+      .filter(i => i.serving)
       .flatMap((i) =>
         ports(i.id)
           .filter((p) => !name || p.name === name)
@@ -345,7 +356,9 @@ export function createClusterWorkloads(
   const publish = (key: string) => {
     const r = store.get(key),
       instances = rows(key, true),
-      summaries: Row[] = [];
+      summaries: Row[] = [],
+      states = new Map(evaluatedRows(key).map(i => [i.id,i]));
+    const confirmed = (i: Row) => !!states.get(i.id)?.ready || states.get(i.id)?.availability === 'grace' && i.healthy === 1;
     let bytes = 0;
     for (const i of instances) {
       const observation = JSON.parse(i.observed_json),
@@ -361,7 +374,9 @@ export function createClusterWorkloads(
           cpu: i.cpu,
           memory_mb: i.memory_mb,
           state: i.state,
-          healthy: fresh(i),
+          healthy: confirmed(i),
+          serving: !!states.get(i.id)?.serving,
+          availability: states.get(i.id)?.availability ?? "unavailable",
           ports: ports(i.id),
           desired_generation: i.desired_generation,
           observed_generation: i.observed_generation,
@@ -389,13 +404,17 @@ export function createClusterWorkloads(
           d.cluster_id,
           {
             ...deploymentStatus(d),
-            instances_total: rows(key, false, d.cluster_id).length,
+            instances_total: rows(key, false, d.cluster_id).filter(i => !String(i.slot).startsWith('surge-')).length,
+            minimum_available: minimumAvailable(desired(r, d.cluster_id)),
+            ready_instances: [...states.values()].filter(i => i.cluster_id === d.cluster_id && i.ready).length,
+            serving_instances: [...states.values()].filter(i => i.cluster_id === d.cluster_id && i.serving).length,
+            draining_instances: instances.filter(i => i.cluster_id === d.cluster_id && (i.state === 'draining' || i.retired && i.retire_after && !['stopped','removed'].includes(i.state))).length,
             applied_revision: rows(key, false, d.cluster_id)
               .filter((i) => i.desired_state === "running")
               .every(
                 (i) =>
                   i.observed_generation === String(d.desired_revision) &&
-                  fresh(i),
+                  confirmed(i),
               )
               ? d.desired_revision
               : 0,
@@ -704,7 +723,7 @@ export function createClusterWorkloads(
           fail(409, "registry_data_migration_required");
 
       }
-      const replicas = num(d.replicas, 1, 0, 100);
+      const replicas = integer(d.replicas, 1, 0, 100);
       if (!Number.isInteger(replicas)) fail(400, "invalid_replicas");
       if (mode === "managed" && stateful && d.stateful_acknowledged !== true)
         fail(400, "stateful_managed_acknowledgement_required");
@@ -745,6 +764,7 @@ export function createClusterWorkloads(
         cluster_id: c.id,
         machine_ids: targets,
         replicas,
+        min_available_percent: integer(d.min_available_percent, 60, 0, 100),
         cpu: num(d.cpu, 0.25, role === "registry" ? 0.03 : 0.01, 1024),
         memory_mb: num(d.memory_mb, 256, role === "registry" ? 64 : 4, 4194304),
         stateful_acknowledged: d.stateful_acknowledged === true,
@@ -794,7 +814,7 @@ export function createClusterWorkloads(
         (s.health.path !== undefined &&
           (typeof s.health.path !== "string" ||
             !s.health.path.startsWith("/") ||
-            /[\r\n]/.test(s.health.path))))
+            /^\/\/|[\x00-\x20\x7f\\#]/.test(s.health.path) || s.health.path.length > 2048)))
     )
       fail(400, "invalid_health_check");
     if (previous) {
@@ -854,6 +874,7 @@ export function createClusterWorkloads(
       },
       role,
       deployment_mode: mode,
+      heartbeat_grace_minutes: integer(s.heartbeat_grace_minutes, 5, 1, 60),
       deployments,
       stateful,
       ...(role === "registry"
@@ -870,7 +891,9 @@ export function createClusterWorkloads(
               type: s.health.type,
               port_name: s.health.port_name,
               path: s.health.path ?? "/",
-              interval_seconds: num(s.health.interval_seconds, 30, 5, 3600),
+              interval_seconds: integer(s.health.interval_seconds, 30, 5, 3600),
+              timeout_seconds: integer(s.health.timeout_seconds, 3, 1, 30),
+              ...(s.health.type === 'http' ? {expected_statuses: healthStatuses(s.health.expected_statuses)} : {}),
             },
           }
         : {}),
@@ -1888,6 +1911,7 @@ export function createClusterWorkloads(
     actor: string,
     force = false,
   ) {
+    if (i.state === 'draining') return null;
     if (a.spec.role === "openresty") {
       const config = gatewayConfig(a, i),
         signature = hash(JSON.stringify(config));
@@ -1927,6 +1951,7 @@ export function createClusterWorkloads(
     );
   }
   function inspect(a: PlatformResource, i: Row, actor: string) {
+    if (i.state === 'draining') return null;
     const authRequired =
       a.spec.role === "openresty" &&
       store
@@ -1971,6 +1996,71 @@ export function createClusterWorkloads(
       actor,
     );
   }
+  function replacement(a: PlatformResource, old: Row, owner: PlatformResource, actor: string, runs: PlatformRun[], explicit = false) {
+    const c = cluster(a.spec.cluster_id);
+    if (a.spec.stateful) return 'minimum_availability_protected';
+    let next = rows(a.id, false, a.spec.cluster_id).find(i => i.slot === 'surge-' + old.slot);
+    if (!next) {
+      const current = rows(a.id, false, a.spec.cluster_id);
+      const candidates = c.spec.machine_ids.map((key: string) => capacity(c, key))
+        .filter((n: Row) => n.machine_id !== old.machine_id && online(n.agent_id) && n.address && n.docker_available !== false &&
+          !db.get("SELECT id FROM ops_cluster_instances WHERE machine_id=? AND retired=1 AND state NOT IN ('stopped','removed')", n.machine_id))
+        .sort((x: Row,y: Row) => current.filter(i => i.machine_id === x.machine_id).length - current.filter(i => i.machine_id === y.machine_id).length || x.machine_id.localeCompare(y.machine_id));
+      for (const n of candidates) {
+        try {
+          next = db.transaction(() => {
+            const made = create(a, n.machine_id, 'surge-' + old.slot);
+            const run = apply(a, made, owner, actor, true);
+            if (run) runs.push(run);
+            return row(made.id);
+          });
+          break;
+        } catch (error) {
+          if (!(error instanceof Error) || !/capacity|port|agent.*(busy|offline)|active.*job|execution.*blocked/.test(error.message)) throw error;
+        }
+      }
+    }
+    if (!next) return 'replacement_capacity_unavailable';
+    if (!busy(next) && next.state !== 'unknown' && online(next.agent_id) &&
+      (next.desired_generation !== String(a.revision) || explicit && (['failed','stopped'].includes(next.state) || next.observed_generation !== String(a.revision)))) {
+      db.transaction(() => {
+        prepare(a, next!, c);
+        const run = apply(a, row(next!.id), owner, actor, true);
+        if (run) runs.push(run);
+      });
+      return 'replacement_pending';
+    }
+    if (next.state === 'unknown' || busy(next) || !availability.current(next, a) || next.observed_generation !== String(a.revision)) return 'replacement_pending';
+    db.transaction(() => {
+      db.run("UPDATE ops_cluster_instances SET retired=1,serving=0,desired_state='stopped',updated_at=?,retire_after=? WHERE id=?", at(), new Date(deps.now().getTime() + (a.spec.role === 'openresty' ? 600000 : 30000)).toISOString(), old.id);
+      db.run("UPDATE ops_cluster_instances SET slot=?,serving=1,updated_at=? WHERE id=?", old.slot, at(), next!.id);
+    });
+    return '';
+  }
+  function drained(a: PlatformResource, old: Row) {
+    if (!old.retire_after) return true;
+    if (deps.now().getTime() < Date.parse(old.retire_after)) return false;
+    if (a.spec.role === 'openresty') {
+      const status = store.get(a.id).status;
+      const deployment = a.spec.deployments.find((d: Row) => d.cluster_id === old.cluster_id);
+      if (!deployment?.gateway_dns_zone_id) return true;
+      const oldIP = capacity(cluster(old.cluster_id),old.machine_id).public_address;
+      const advertised = oldIP && tableExists('ops_dns_owned') && db.get("SELECT id FROM ops_dns_owned WHERE owner_id=? AND zone_id=? AND value=?",a.id,deployment.gateway_dns_zone_id,oldIP);
+      return !advertised && !dnsPending.has(a.id) && !status.dns_error && status.dns?.every((r: Row) => r.verified) &&
+        deps.now().getTime() - Date.parse(status.dns_updated_at ?? '') >= 600000;
+    }
+    const linked = store.list('website').some(site => {
+      if (!deploymentRow('website',site.id,old.cluster_id)?.enabled) return false;
+      const spec = desired(site,old.cluster_id).spec;
+      return spec.service_application_id === a.id || spec.bindings.some((b: Row) => b.locations.some((l: Row) => l.cluster_targets?.some((target: Row) => target.application_id === a.id)));
+    });
+    if (!linked) return true;
+    const gateway = openresty(old.cluster_id);
+    if (!gateway) return false;
+    const g = desired(gateway,old.cluster_id), members = availabilityRows(g.id,old.cluster_id).filter(i => i.serving);
+    return members.length > 0 && members.every(i => availability.current(i,g) && !busy(i) &&
+      i.last_bundle_sig === hash(JSON.stringify(gatewayConfig(g,i))));
+  }
   function reconcile(
     current: PlatformResource,
     cid: string,
@@ -1981,6 +2071,7 @@ export function createClusterWorkloads(
     const a = desired(current, cid),
       c = cluster(cid),
       runs: PlatformRun[] = [];
+    availabilityRows(a.id, cid);
     const recovery=recoverReinstalledInstances(store,c.spec.machine_ids,actor);
     runs.push(...recovery.runs);
     if(recovery.pending && (a.spec.deployment_mode==='manual'&&a.spec.machine_ids.some((key:string)=>recovery.blockedMachines.has(key)) || rows(a.id,false,cid).some(i=>recovery.blockedMachines.has(i.machine_id)))) {
@@ -1994,7 +2085,7 @@ export function createClusterWorkloads(
         (i.retired || i.desired_state !== "running") &&
         !["stopped", "removed", "unknown"].includes(i.state) &&
         online(i.agent_id) &&
-        !busy(i),
+        !busy(i) && drained(a, i),
     )) {
       const run = stop(a, old, actor, old.desired_state === "removed");
       if (run) runs.push(run);
@@ -2082,6 +2173,18 @@ export function createClusterWorkloads(
           if (run) runs.push(run);
         }
     } else {
+      const pendingReplacement = currentRows.find(i => String(i.slot).startsWith('surge-'));
+      if (pendingReplacement) {
+        const old = currentRows.find(i => i.slot === pendingReplacement.slot.slice(6));
+        if (!old || Number(old.slot) >= a.spec.replicas) {
+          db.run("UPDATE ops_cluster_instances SET retired=1,serving=0,desired_state='stopped' WHERE id=?", pendingReplacement.id);
+        } else {
+          const pending = replacement(a, old, owner, actor, runs, explicit);
+          patchDeployment('application', a.id, cid, {pending, last_error:''});
+          publish(a.id);
+          return {cluster_id:cid,runs,endpoints:endpoints(a.id,undefined,cid),pending};
+        }
+      }
       for (const i of currentRows) {
         if (Number(i.slot) >= a.spec.replicas) {
           db.run(
@@ -2098,18 +2201,6 @@ export function createClusterWorkloads(
           }
           continue;
         }
-        if (
-          (!online(i.agent_id) ||
-            machine(i.machine_id).agent_id !== i.agent_id) &&
-          i.state !== "unknown" &&
-          !busy(i) &&
-          !a.spec.stateful
-        )
-          db.run(
-            "UPDATE ops_cluster_instances SET retired=1,healthy=0,state='orphaned',desired_state='stopped',updated_at=? WHERE id=?",
-            at(),
-            i.id,
-          );
       }
       currentRows = rows(a.id, false, cid);
       let rolloutID = currentRows.find(
@@ -2182,12 +2273,37 @@ export function createClusterWorkloads(
           }
           currentRows.push(i);
         }
-        if (busy(i) || !online(i.agent_id) || i.state === "unknown") continue;
+        if (busy(i) || i.state === "unknown") continue;
+        if (i.observed_generation && rolling && rolloutID !== i.id) continue;
+        const status = available(i);
         const outdated = i.observed_generation !== String(a.revision);
+        const failedLongEnough = !!status?.failure_since && deps.now().getTime() - Date.parse(status.failure_since) >= graceMilliseconds(a);
+        if (!online(i.agent_id)) {
+          if (!failedLongEnough || !i.last_ready_at) continue;
+          const pending = replacement(a, i, owner, actor, runs, explicit);
+          patchDeployment('application',a.id,cid,{pending,last_error:''});
+          publish(a.id);
+          return {cluster_id:cid,runs,endpoints:endpoints(a.id,undefined,cid),pending};
+        }
+        if (!outdated && i.healthy === 1 && i.state === 'running' && !availability.current(i, a)) {
+          const run = inspect(a, i, actor);
+          if (run) runs.push(run);
+          continue;
+        }
+        if (!outdated && i.last_ready_at && !availability.current(i, a) && !failedLongEnough) continue;
+        if (i.last_ready_at && (outdated || failedLongEnough)) {
+          const readyOthers = availabilityRows(a.id,cid).filter(v => v.id !== i!.id && v.ready && !String(v.slot).startsWith('surge-')).length;
+          if (readyOthers < minimumAvailable(a)) {
+            const pending = replacement(a, i, owner, actor, runs, explicit);
+            patchDeployment('application',a.id,cid,{pending,last_error:''});
+            publish(a.id);
+            return {cluster_id:cid,runs,endpoints:endpoints(a.id,undefined,cid),pending};
+          }
+        }
         if (
           !outdated &&
           i.state === "running" &&
-          (i.healthy || i.health_failures < 3)
+          (availability.current(i, a) || !failedLongEnough && i.health_failures < 3)
         ) {
           if (a.spec.role === "openresty") {
             const run = apply(a, i, owner, actor);
@@ -2206,15 +2322,28 @@ export function createClusterWorkloads(
           rolling = true;
           rolloutID = i.id;
         }
-        db.transaction(() => {
+        if (i.last_ready_at) {
+          if (i.state !== 'draining') {
+            db.run("UPDATE ops_cluster_instances SET state='draining',serving=0,desired_generation=?,retire_after=?,updated_at=? WHERE id=?",
+              String(a.revision),new Date(deps.now().getTime()+(a.spec.role==='openresty'?600000:30000)).toISOString(),at(),i.id);
+            i = row(i.id);
+          }
+          if (!drained(a,i)) {
+            const pending = 'traffic_drain_pending';
+            patchDeployment('application',a.id,cid,{pending,last_error:''});
+            publish(a.id);
+            return {cluster_id:cid,runs,endpoints:endpoints(a.id,undefined,cid),pending};
+          }
+        }
+        const run = db.transaction(() => {
           prepare(a, i!, c);
-          db.run(
-            "UPDATE ops_cluster_instances SET desired_state='running',restart_count=restart_count+1 WHERE id=?",
-            i!.id,
-          );
+          db.run("UPDATE ops_cluster_instances SET state='pending',retire_after='',desired_state='running',restart_count=restart_count+1 WHERE id=?",i!.id);
+          return apply(a, row(i!.id), owner, actor, true);
         });
-        const run = apply(a, row(i.id), owner, actor, true);
-        if (run) runs.push(run);
+        if (run) {
+          db.run("UPDATE ops_cluster_instances SET serving=0 WHERE id=?", i.id);
+          runs.push(run);
+        }
       }
     }
     patchDeployment("application", a.id, cid, { pending: "", last_error: "" });
@@ -2291,7 +2420,7 @@ export function createClusterWorkloads(
       : 0;
     const verified = instances.filter(
       (i) =>
-        fresh(i) &&
+        serving(i) &&
         receipts[i.id]?.state === "succeeded" &&
         receipts[i.id]?.revision === site.revision,
     );
@@ -2370,7 +2499,7 @@ export function createClusterWorkloads(
           run.result.containers?.every((c: Row) => c.running === false)
             ? "stopped"
             : "running";
-        healthy = run.result.healthy === true ? 1 : 0;
+        healthy = run.result.healthy === true && state === "running" ? 1 : 0;
         if (!inspection) {
           observed = i.desired_generation;
           const actual = new Set(
@@ -2414,6 +2543,8 @@ export function createClusterWorkloads(
       healthy = 0;
     }
     const failed = !logs && (run.state !== "succeeded" || !healthy);
+    if (!logs) db.run("UPDATE ops_cluster_instances SET failure_since=?,last_ready_at=? WHERE id=?",
+      healthy ? '' : i.failure_since || at(), healthy ? at() : i.last_ready_at, i.id);
     db.run(
       "UPDATE ops_cluster_instances SET state=?,healthy=?,last_seen=?,observed_generation=?,observed_json=?,last_bundle_sig=?,health_failures=?,restart_count=?,updated_at=? WHERE id=?",
       state,
@@ -2514,17 +2645,7 @@ export function createClusterWorkloads(
     }
     return policyFor(r.spec, cid, domain);
   };
-  function servingGateway(i: Row) {
-    return (
-      !i.retired &&
-      i.healthy === 1 &&
-      i.desired_state === "running" &&
-      !["stopped", "removed", "failed", "unknown"].includes(i.state) &&
-      machine(i.machine_id).agent_id === i.agent_id &&
-      online(i.agent_id) &&
-      deps.now().getTime() - Date.parse(i.last_seen) < 120000
-    );
-  }
+  function servingGateway(i: Row) { return serving(i); }
   function startGatewayDNS(app: PlatformResource) {
     const grouped = new Map<string, Row[]>();
     const gatewayDNS: Row = {};
@@ -3040,7 +3161,7 @@ export function createClusterWorkloads(
                   online(i.agent_id) &&
                   deps.now().getTime() -
                     Date.parse(i.last_seen || i.created_at) >=
-                    30000,
+                    Math.max(5000, Number(desired(r, d.cluster_id).spec.health?.interval_seconds ?? 30) * 1000),
               ))
                 inspect(desired(r, d.cluster_id), i, actor);
             } else

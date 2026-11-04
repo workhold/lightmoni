@@ -1,0 +1,64 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved_seq": 1738,
+  "readback": [
+    {
+      "block_id": "3d49bc2c-e96b-49ab-97ef-10121ba1dba5",
+      "seq": 1738,
+      "title": "LightMoni 系统设计基线",
+      "type": "paragraph",
+      "matches": true
+    },
+    {
+      "block_id": "managed093-paragraph-1",
+      "seq": 1738,
+      "title": "LightMoni 系统设计基线",
+      "type": "paragraph",
+      "matches": true
+    },
+    {
+      "block_id": "managed093-paragraph-2",
+      "seq": 1738,
+      "title": "LightMoni 系统设计基线",
+      "type": "paragraph",
+      "matches": true
+    },
+    {
+      "block_id": "managed093-paragraph-3",
+      "seq": 1738,
+      "title": "LightMoni 系统设计基线",
+      "type": "paragraph",
+      "matches": true
+    },
+    {
+      "block_id": "managed093-paragraph-4",
+      "seq": 1738,
+      "title": "LightMoni 系统设计基线",
+      "type": "paragraph",
+      "matches": true
+    },
+    {
+      "block_id": "managed093-paragraph-5",
+      "seq": 1738,
+      "title": "LightMoni 系统设计基线",
+      "type": "paragraph",
+      "matches": true
+    },
+    {
+      "block_id": "managed093-flow",
+      "seq": 1738,
+      "title": "LightMoni 系统设计基线",
+      "type": "flowchart",
+      "matches": true,
+      "nodes": 8,
+      "edges": 9
+    }
+  ],
+  "existing_content": {
+    "operation_scope": "Only new SDD093 blocks inserted/moved/updated; prior blocks never updated or deleted",
+    "first_200_original_blocks_and_native_diagram_previews_preserved": true,
+    "original_block_count": 885,
+    "final_block_count": 892
+  },
+  "repository_section": "docs/system-design.md §93"
+}

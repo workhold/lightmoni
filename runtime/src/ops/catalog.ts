@@ -203,6 +203,7 @@ export function catalogInstallation(id: string, input: Input) {
       },
       role: id === "openresty" ? "openresty" : "generic",
       deployment_mode: input.deployment_mode ?? "manual",
+      heartbeat_grace_minutes: input.heartbeat_grace_minutes,
       deployments: input.deployments ?? [],
       stateful: extended ? Boolean(spec.stateful) : id !== "openresty",
     },

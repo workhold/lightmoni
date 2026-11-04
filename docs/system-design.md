@@ -2340,3 +2340,30 @@ unknown 的 GET 返回 recovery_revision，绑定原操作、审批计划及平�
 最终维护器在专用 2 GiB Linux/systemd 虚拟机上用真实 80 MB 发行包验证文件链路，另加 1 GiB 内存与 50% CPU 背景负载；进程峰值约 94.7 MiB，cgroup 峰值约 342.8 MiB，未触发 OOM，额外磁盘占用约 734 MiB。Agent 命令在该资源夹具中模拟，不能当作真实 Agent 升级成功。独立 cgroup 的真实 OOM、SIGKILL、超时等退出验证保留了退出证据且没有改写状态或解锁。
 
 规格、契约和逐项证据见 specs/094-maintenance-reliability。生产现场回测与本机隔离故障注入分别记录，不用模拟服务或文件基准代证真实 SSH、systemd、Agent 与中心的端到端成功，也不承诺零故障。
+
+## 93. 托管可用性保护与应用就绪检查（SDD093）
+
+托管应用 `heartbeat_grace_minutes` 为 1–60 分钟，默认 5；各集群 `deployments[].min_available_percent` 为 0–100 的整数，默认 60。最低保留数量按期望副本数向上取整：三副本 60% 至少保留两个。执行命令仍要求 Agent 当前在线，短暂失联不再直接退役、撤服务发现或删 DNS。手动模式维持原先失联处理。
+
+中心实例表持久保存 `serving`、`last_ready_at`、`failure_since` 与 `retire_after`。已就绪实例连续失联或检查失败先进入 `grace`；到期后按集群成员预算撤流，预算不足标记 `protected` 并保留旧地址。`ready_instances` 表示真实确认就绪，`serving_instances` 表示已发布地址，受保护地址不得伪装健康。新实例从未 ready 时不能发布，恢复清除连续失败计时。服务发现、网站后端、网关 DNS 和网站状态共享成员判断。显式停止、移除和缩容仍尊重用户意图。
+
+托管升级以真实 ready 数量限制中断，一次处理一个实例；预算允许原地更新时，先持久标记 `draining` 并撤出成员，等待相关网关确认撤流配置及排空期限后才派发更新，期间 inspect 和网站重载不得提前覆盖状态；预算不足或故障迁移先在同集群其他机器创建 surge，每集群最多一个。收到当前授权代际成功且 ready 的回执后，事务退役旧槽位、提升新槽位，再发布服务端点。失败替换允许显式重试，新代际需重新执行；unknown 沿用原有检查栅栏，不能切换或绕过。无容量时显示 `replacement_capacity_unavailable`，有状态应用不自动搬迁本地数据。
+
+旧普通应用至少排空 30 秒，且全部相关已发布网关确认新 bundle 后才停止。OpenResty 入口等待 DNS 提供商写入及回读确认后至少一个 600 秒 TTL 再清理；DNS 失败保留旧进程。排空期限持久保存，中心重启不提前清理；不保证外部客户端无限缓存或数据复制。
+
+手动与托管应用均支持 `health`：HTTP/TCP、声明 TCP 端口名、路径、`interval_seconds`（5–3600，默认 30）、`timeout_seconds`（1–30，默认 3）、`expected_statuses`（默认 `[200]`）。Agent apply/inspect 共用检查；HTTP GET 仅访问本机已授权端口派生的地址，不跟随重定向，仅白名单状态码成功，拒绝协议相对路径、反斜线、控制字符。配置检查时要求常驻容器运行和初始化成功，再以应用检查决定 ready；无配置沿用容器运行及 Docker 健康状态。中心按配置间隔持续 inspect，检查配置进入既有签名快照，不扩大凭据边界。发布启动就绪最多等待 300 秒，每秒重试且支持取消；未通过前不发布替换。健康检查作业要求 `operations.platform.readiness.v1` 能力，旧 Agent 不能领取；中心与 Agent 需一起升级，防止旧 Agent 忽略状态码/超时却报告 ready。
+
+```mermaid
+flowchart LR
+  O[Agent 就绪观测] --> G[连续失败宽限]
+  G --> B[集群最低比例保护]
+  B --> R[启动替换并验 ready]
+  R -->|通过| S[发布已就绪实例与路由]
+  S --> D[路由确认与排空后清理]
+  B -->|允许中断| W[撤流确认与排空后原地升级]
+  W -->|通过ready| S
+  B -->|无容量| H[保留旧实例并标记降级]
+  R -->|失败或未知| H
+```
+
+规格、契约、测试和架构回读证据：`specs/093-managed-availability/`。规范在线文档：[LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。
