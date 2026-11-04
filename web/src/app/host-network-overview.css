@@ -1,0 +1,5 @@
+.lm-host-network-overview{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;min-width:0;color:var(--lm-muted);font-size:12px;line-height:1.6}
+.lm-host-network-overview-entry{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:4px;min-width:0;max-width:100%}
+.lm-host-network-overview-label{flex-shrink:0}
+.lm-host-network-overview-address{min-width:0;overflow-wrap:anywhere}
+.lm-host-network-overview .ant-tag{margin:0;white-space:normal;line-height:1.5}
