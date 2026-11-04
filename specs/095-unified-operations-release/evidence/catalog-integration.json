@@ -1,0 +1,32 @@
+{
+  "source_revision": "a418b64e9b56ae5dd108b502f11e66bb8b9be850",
+  "source_prs": [
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    98,
+    100
+  ],
+  "typecheck": "passed",
+  "build": "passed",
+  "targeted_regression": {
+    "tests": 65,
+    "pass": 65,
+    "fail": 0,
+    "skip": 0
+  },
+  "browser": "four locale/theme/viewport combinations passed with zero page errors",
+  "packaged_image_checks": {
+    "arm64": 44,
+    "amd64": 44
+  },
+  "actual_container_smoke": [
+    "meilisearch auth/indexing/search",
+    "rustfs signed S3 bucket/object operations and console health"
+  ],
+  "firecrawl": "continuing official image transfer",
+  "production": "pending Mac manual unlock; no activation performed"
+}

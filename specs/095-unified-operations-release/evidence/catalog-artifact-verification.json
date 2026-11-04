@@ -1,0 +1,28 @@
+{
+  "files": {
+    "runtime/dist/server/executor-observation.js": "39223e336d43c3df7f11082b0cecf3e4163420f1fb4f791dd407ab25dc90091e",
+    "runtime/dist/ops/application-upgrades.js": "76a71664cd5fc6ede4a7ec55fbf4e76827084872ae962581a693c8959e163a17",
+    "runtime/dist/ops/application-terminals.js": "4553e29c0772021096729b086441f802c1f943bfb02c7ee778133d4ccde6a81c",
+    "runtime/dist/ops/cluster-workloads.js": "d5c6edced13276510675473c7f4326d9d0f8097f259acbef3840c2dc365463e8",
+    "runtime/dist/ops/availability.js": "56dacdb8168b1abb8670c86dd1452be0bf34876695ff6ebc7ac0f930e86a7ef7",
+    "runtime/dist/ops/store.js": "2b0a2a757a6a5b8cb29a2127444b0338e50aa4459c0cd001cbba432c837877cb",
+    "runtime/dist/agent/operations.js": "d53ce178b10dabe0fdf87b29f389bdfc840f1bfde5f1b851750bb2ca36b3b639",
+    "runtime/dist/server/machine-agent-updates.js": "a4334c4b135f8145e6d94b4ca5757b28b65191e17c21419cf52b4b67e190c7ea",
+    "runtime/downloads/update-runner.mjs": "317af1d974fa8d8db07413e10ae027a1cbf7e66670752e14f00012dbc272449a"
+  },
+  "capabilities": [
+    "operations.website",
+    "operations.certificate",
+    "operations.compose",
+    "operations.backup",
+    "operations.platform",
+    "operations.platform.readiness.v1",
+    "operations.platform.website-auth.v1",
+    "operations.platform.image-cache.v1",
+    "operations.platform.oneshot.v1",
+    "operations.platform.image-sources.v1",
+    "operations.platform.image-refresh.v1",
+    "operations.platform.instance-recovery.v1"
+  ],
+  "uid": 10001
+}

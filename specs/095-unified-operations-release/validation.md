@@ -7,3 +7,13 @@ New integration regression exercises upgrade HTTP API through managed 100% repla
 Architecture applies to composed upgrade/scheduling/credential paths. Repository section 95 and Doca saved and read back at seq1740: heading + four paragraphs + native flow (6 nodes, 5 edges) match exactly. Existing baseline, telemetry and application-upgrade native blocks unchanged. See evidence/doca-readback.json.
 
 Production activation, executor update and sustained telemetry acceptance remain pending.
+
+## 2026-11-05 catalog release continuation
+
+User requested PR100 in this release. Merge source a418b64 contains 35 apps and 8 categories. All 65 targeted combined regressions, typechecks and builds pass. Four catalog UI locale/theme/viewport combinations pass with no page errors. Actual Meilisearch production authentication, indexing and search, plus RustFS signed S3 bucket/object operations and console health pass; disposable resources were cleaned. Firecrawl image transfer continues; its business smoke is pending.
+
+Fixed source a418b64e9b56ae5dd108b502f11e66bb8b9be850 was built and published as 20261105-ops-a418b64. Both architectures pass 44 packaged-image checks each. Registry pull confirms exact tested RootFS and Config. Index: sha256:c6f5c3ebe0dac3666ee5ba4b862a504769dc1ef415fbefe55b6cc3961a46d15a. The earlier b975a95 candidate is historical. Stable latest remains unchanged.
+
+Doca latest seq1741 readback verifies catalog/Logo paragraphs, heading and five new paragraphs verbatim; the coordinated release native diagram retains its six nodes and five edges. Existing confirmed writes remain valid; no new topology was added by this merge. See evidence/doca-catalog-readback.json.
+
+Production readonly check showed no unresolved privileged jobs. Mac subsequently locked; computer control refused the activation attempt and requires manual unlock. Activation script has not been staged or executed. Backup, CAS switch, executor update and live telemetry/dashboard acceptance remain pending.
