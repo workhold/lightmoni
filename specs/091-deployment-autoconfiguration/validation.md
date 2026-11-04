@@ -52,6 +52,8 @@
 
 统一发行双架构各44项成品检查通过，每架构另有57条部署/DNS、13条签名执行与5条Docker安装器回归通过。固定标签与latest均已推送，独立拉取核对与实测镜像配置/文件层完全一致，index为 `sha256:0c83ef231e5e9cfb7debc31876eaddfac1f2cd2b3a71cfd375468a6f5ce1b082`。详见 `evidence/release-20261104/`。
 
+[GitHub Release 20261104-a9588e6](https://github.com/workhold/lightmoni/releases/tag/20261104-a9588e6) 已正式发布，目标提交为上述 main；双架构成品检查、独立拉取核对及镜像发行回执四份附件均已上传。默认镜像与验收记录通过 [PR #93](https://github.com/workhold/lightmoni/pull/93) 提交到 main，当前待审。
+
 生产切换前检查发现 Compose 配置仍引用0b45683，实际容器镜像为3309b0b Agent修复版；两者真实image ID及源码标识不同，首次保护检查在备份/切换前中止。重新核对现有Compose环境与实际运行配置一致后，回滚明确固定实际运行的Agent修复镜像，避免异常回滚覆盖既有修复。未放宽任务空闲、镜像摘要、健康和其他容器不变的保护。
 
 ### 生产更新与实际验收
