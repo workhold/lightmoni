@@ -20,4 +20,6 @@
 
 ## 交付
 
+2026-11-05 统一发行续接：PR100 已纳入 PR99；新版本 20261105-ops-a418b64 包含本商城全部改动。Meilisearch 生产鉴权、索引写入和检索，以及 RustFS 的签名 S3 桶/对象读写和控制台健康均已通过，测试项目和卷清理完成；最新 evidence/live.json 已补充这两项。Firecrawl 的浏览器镜像仍在拉取，业务冒烟保持待验。统一版本完整回归、两架构成品与实际 SSH 容器终端证据见 SDD095；本节早先的“其余三个待验”为原 PR 交付时状态。
+
 [GitHub Draft PR #100](https://github.com/workhold/lightmoni/pull/100)，目标main。提交前已fetch核对远端主干，无冲突；当前分支仅包含本次目录、分类、Logo、SDD和验证变更。剩余镜像下载已停止，未遗留本轮测试容器、网络或卷。

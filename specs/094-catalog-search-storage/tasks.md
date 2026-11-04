@@ -6,6 +6,7 @@
 - [x] T004 补充四个本地 Logo、固定来源摘要和许可。
 - [x] T005 参数/依赖/秘密/端口测试与 HTTP/Compose 验证。
 - [x] T006a 中英文浏览器、SearXNG 官方镜像真实业务冒烟；复现脚本及资源清理。
-- [ ] T006b Meilisearch / RustFS / Firecrawl 官方镜像业务冒烟：镜像层下载超时，未声称通过，详见 validation.md。
+- [x] T006b1 统一发行续接补完 Meilisearch 生产鉴权、索引检索及 RustFS 签名 S3 桶/对象读写、控制台健康；临时资源清理，见 evidence/live.json。
+- [ ] T006b2 Firecrawl 五服务与真实 Markdown 抓取冒烟：官方浏览器镜像完整拉取仍在进行，未声称通过。
 - [x] T007 仓库与 Doca 架构同步、原生图保留和最新版本回读。
 - [x] T008 类型/构建、同步远端主干、功能 PR 与验收证据。草稿 PR：https://github.com/workhold/lightmoni/pull/100；T006b 未完成并明确列出。
