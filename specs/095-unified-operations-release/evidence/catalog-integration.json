@@ -27,7 +27,17 @@
     "meilisearch auth/indexing/search",
     "rustfs signed S3 bucket/object operations and console health"
   ],
-  "firecrawl": "continuing official image transfer",
+  "firecrawl": {
+    "state": "blocked_image_integrity",
+    "component": "ghcr.io/firecrawl/playwright-service",
+    "index": "sha256:637fb8c8399634b02c2179da72566ce11644435e5d93e895bdbde4b1f9b0882a",
+    "expected_layer": "sha256:45f4d16cf8ff92019a313bb4f67c1b5b8f5861181a5972355c2d8a057224d23e",
+    "received_layer": "sha256:d4bdf2eb61f888f9bc88ca368347ada1cc9660c6eb7fa06fa84dd9351c751f00",
+    "docker_rejected": true,
+    "business_smoke": "not_run",
+    "verified_api_image": "sha256:50446cbc0bc700a78cc588c96bd38a97f01cc4299c99b349c7bfa1ba57b6d7ed",
+    "verified_database_image": "sha256:d719b36160eac2fcbe16dc7e7360ddb9c82c40ea5da183d07bf4a755c6a0b2ae"
+  },
   "production": "pending Mac manual unlock; no activation performed",
   "full_suite": {
     "runtime": {
