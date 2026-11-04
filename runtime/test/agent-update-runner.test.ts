@@ -27,12 +27,14 @@ function sshProbe(f: ReturnType<typeof fixture>) {
   };
   let stdout = "";
   const process = { arch: "arm64", stdout: { write(value: string) { stdout += value; } }, exitCode: 0 };
-  runInNewContext(source, { process, require(name: string) {
+  runInNewContext(source, { process, Buffer, require(name: string) {
     if (name === "node:path") return path;
     if (name === "node:crypto") return { createHash };
     if (name === "node:child_process") return { execFileSync: f.maintenance.command };
     if (name === "node:fs") return {
       readFileSync: (filename: string, options?: any) => fs.readFileSync(fixturePath(filename), options),
+      openSync: (filename:string,flags:any)=>fs.openSync(fixturePath(filename),flags),
+      readSync: fs.readSync, closeSync:fs.closeSync, fstatSync:fs.fstatSync,
       realpathSync: (filename: string) => fs.realpathSync(fixturePath(filename)),
       existsSync: (filename: string) => fs.existsSync(fixturePath(filename)),
       lstatSync(filename: string) {
@@ -558,11 +560,11 @@ test('cooperative preparing cancellation retains both running components and cle
   f.preserve();
 });
 
-test('maintenance dispatch yields CPU and IO priority without imposing an unmeasured memory hard limit', async t => {
+test('maintenance dispatch applies the measured bounded worker resources and yields CPU and IO priority', async t => {
   const f=fixture(t),request=f.request();f.maintenance.launch=undefined;await f.maintenance.start(request);
   const dispatch=f.calls.find(([file])=>file==='systemd-run');assert.ok(dispatch);
   assert.ok(dispatch[1].includes('--property=Nice=10'));assert.ok(dispatch[1].includes('--property=IOSchedulingClass=idle'));
-  assert.equal(dispatch[1].some(value=>value.startsWith('--property=MemoryMax=')),false);
+  for(const property of ['MemoryHigh=384M','MemoryMax=512M','MemorySwapMax=0','CPUQuota=50%','TasksMax=64'])assert.ok(dispatch[1].includes('--property='+property));
 });
 
 test('an actual SIGTERM during preparing produces a durable cancelled receipt and releases its own lock', {timeout:15000}, async t => {
@@ -697,4 +699,249 @@ for(const file of ['node','app/runtime/dist/agent/main.js','uninstall.sh'])test(
     const after=f.maintenance.fingerprint(f.old).fingerprint;assert.notEqual(after,before);assert.equal(after,bufferedProgramFingerprint(f));
     assert.equal(f.maintenance.probe().current.fingerprint,sshProbe(f).current.fingerprint);
   }
+});
+
+const recoveryRequest=(f:ReturnType<typeof fixture>,request:any)=>({operation_id:request.operation_id,expected_agent_id:request.expected_agent_id,expected_fingerprint:request.expected_fingerprint,
+  expected_runtime_mode:f.maintenance.runtimeMode(),expected_permission_generation:f.maintenance.runtimeGeneration(),
+  expected_target:Object.fromEntries(['version','source_revision','build_id','state_schema','artifact_sha256','arch'].map(key=>[key,request.target[key]]))});
+function stoppedWorker(f:ReturnType<typeof fixture>,overrides:Record<string,string>={}) {
+  fs.mkdirSync(f.p('proc'),{mode:0o755,recursive:true});
+  const run=f.maintenance.command;
+  f.maintenance.command=(file:string,args:string[])=>file==='systemctl'&&args.some(value=>/^lightmoni-agent-update-[a-f0-9]{32}\.service$/.test(value))
+    ?Object.entries({LoadState:'not-found',ActiveState:'inactive',MainPID:'0',ControlPID:'0',ControlGroup:'',Job:'0',...overrides}).map(([key,value])=>key+'='+value).join('\n')
+    :run(file,args);
+}
+const candidatePath=(f:ReturnType<typeof fixture>,request:any)=>f.p('opt/lightmoni-agent/releases/'+request.target.version+'-'+request.target.artifact_sha256.slice(0,16)+'-'+request.operation_id);
+
+for(const milliseconds of [300000,300001])test('preparing at '+milliseconds+'ms fails without touching running components',async t=>{
+  const f=fixture(t,{runtimeMode:'root'}),request=f.request();let elapsed=0;f.maintenance.elapsed=()=>elapsed;
+  await f.maintenance.start(request);const extract=f.maintenance.extract.bind(f.maintenance);
+  f.maintenance.extract=async(...args:any[])=>{elapsed=milliseconds;return extract(...args);};
+  const result=await f.maintenance.worker(request.operation_id);
+  assert.equal(result.status,'failed');assert.equal(result.error_code,'preparing_timeout');assert.equal(f.maintenance.currentPath(),f.old);assert.equal(f.helperIsActive(),true);
+  assert.equal(f.calls.some(([file,args])=>file==='systemctl'&&['stop','restart'].includes(args[0])),false);assert.equal(f.maintenance.ownsLock(request.operation_id),false);f.preserve();
+});
+
+test('preparing just inside its soft deadline can finish with a complete confirmation and restore reserve',async t=>{
+  const f=fixture(t),request=f.request();let elapsed=0;f.maintenance.elapsed=()=>elapsed;
+  await f.maintenance.start(request);const extract=f.maintenance.extract.bind(f.maintenance);
+  f.maintenance.extract=async(...args:any[])=>{elapsed=299999;return extract(...args);};
+  f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==='waiting_confirmation')f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});
+  assert.equal((await f.maintenance.worker(request.operation_id)).status,'succeeded');f.preserve();
+});
+
+test('a pause between final preparing validation and cutover cannot consume the recovery reserve',async t=>{
+  const f=fixture(t),request={...f.request(),confirm_timeout_seconds:180};let elapsed=0;f.maintenance.elapsed=()=>elapsed;
+  await f.maintenance.start(request);const check=f.maintenance.checkBudget.bind(f.maintenance);
+  f.maintenance.checkBudget=()=>{check();if(fs.existsSync(f.p('opt/lightmoni-agent/updates/'+request.operation_id+'/approved-target.json')))elapsed=600001;};
+  const result=await f.maintenance.worker(request.operation_id);assert.equal(result.status,'failed');assert.equal(result.error_code,'maintenance_budget_exhausted');
+  assert.equal(f.calls.some(([file,args])=>file==='systemctl'&&['stop','restart'].includes(args[0])),false);assert.equal(fs.existsSync(candidatePath(f,request)),false);f.preserve();
+});
+
+test('failed preparing cleans only its own unreferenced candidate',async t=>{
+  const f=fixture(t,{failPermissionPreparation:true}),request=f.request(),unrelated=f.p('opt/lightmoni-agent/releases/unrelated');fs.mkdirSync(unrelated);fs.writeFileSync(join(unrelated,'keep'),'other release');
+  await f.maintenance.start(request);assert.equal((await f.maintenance.worker(request.operation_id)).status,'failed');
+  assert.equal(fs.existsSync(candidatePath(f,request)),false);assert.equal(fs.readFileSync(join(unrelated,'keep'),'utf8'),'other release');assert.equal(f.maintenance.currentPath(),f.old);
+});
+
+for(const reference of ['current','previous','active_operation'])test('candidate cleanup preserves a '+reference+' reference',async t=>{
+  const f=fixture(t,{failPermissionPreparation:true}),request=f.request(),candidate=candidatePath(f,request);await f.maintenance.start(request);
+  const cleanup=f.maintenance.cleanupCandidate.bind(f.maintenance);
+  f.maintenance.cleanupCandidate=(id:string)=>{
+    assert.equal(fs.existsSync(candidate),true);
+    if(reference==='current')f.maintenance.switchCurrent(candidate);
+    else if(reference==='previous')fs.writeFileSync(f.p('opt/lightmoni-agent/previous.json'),JSON.stringify({schema:1,release_path:candidate}));
+    else{
+      const other='c'.repeat(32),directory=f.p('opt/lightmoni-agent/updates/'+other);fs.mkdirSync(directory);
+      fs.writeFileSync(join(directory,'status.json'),JSON.stringify({schema:1,operation_id:other,agent_id:'fixture-agent',status:'preparing'}));
+      fs.writeFileSync(join(directory,'request.json'),JSON.stringify({previous_path:candidate}));
+    }
+    cleanup(id);
+  };
+  assert.equal((await f.maintenance.worker(request.operation_id)).status,'failed');assert.equal(fs.existsSync(candidate),true);
+});
+
+test('exit evidence shell is bounded, normalizes untrusted enums and never changes status, artifacts or locks',async t=>{
+  const f=fixture(t),request=f.request();await f.maintenance.start(request);
+  const directory=f.p('opt/lightmoni-agent/updates/'+request.operation_id),script=join(directory,'exit-evidence.sh'),before=fs.readFileSync(join(directory,'status.json')),owner=fs.readFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json'));
+  assert.ok(fs.statSync(script).size<4096);
+  execFileSync('/bin/sh',[script],{env:{PATH:'/usr/bin:/bin',SERVICE_RESULT:'oom-kill',EXIT_CODE:'killed',EXIT_STATUS:'KILL'}});
+  const exit=f.maintenance.state(request.operation_id).worker_exit;assert.equal(exit.result,'oom-kill');assert.equal(exit.exit_code,'killed');assert.equal(exit.exit_status,9);
+  execFileSync('/bin/sh',[script],{env:{PATH:'/usr/bin:/bin',SERVICE_RESULT:'secret-value',EXIT_CODE:'$(exit 1)',EXIT_STATUS:'9999999999'}});
+  const normalized=f.maintenance.state(request.operation_id).worker_exit;assert.equal(normalized.result,'unknown');assert.equal(normalized.exit_code,'unknown');assert.equal(normalized.exit_status,0);
+  assert.deepEqual(fs.readFileSync(join(directory,'status.json')),before);assert.deepEqual(fs.readFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json')),owner);assert.equal(fs.existsSync(join(directory,'bundle.tar.gz')),true);
+  assert.equal(fs.statSync(join(directory,'unit-exit.json')).mode&0o777,0o600);
+});
+
+test('explicit recovery archives an interrupted preparing worker, retaining evidence and never reinstalling',async t=>{
+  const f=fixture(t,{runtimeMode:'root'}),request=f.request();await f.maintenance.start(request);f.maintenance.save(request.operation_id,{status:'preparing'});
+  const directory=f.p('opt/lightmoni-agent/updates/'+request.operation_id);fs.writeFileSync(join(directory,'worker-claim.json'),'partial original claim',{mode:0o600});
+  const original=fs.readFileSync(join(directory,'status.json')),bundle=fs.readFileSync(join(directory,'bundle.tar.gz'));stoppedWorker(f);
+  const input=recoveryRequest(f,request),result=await f.maintenance.recover(input);assert.equal(result.status,'failed');assert.equal(result.error_code,'worker_interrupted_before_switch');assert.equal(result.recovery.action,'archive_preparing');
+  assert.deepEqual(fs.readFileSync(join(directory,'status-before-recovery.json')),original);assert.deepEqual(fs.readFileSync(join(directory,'bundle.tar.gz')),bundle);assert.equal(fs.readFileSync(join(directory,'worker-claim.json'),'utf8'),'partial original claim');
+  assert.equal(f.maintenance.ownsLock(request.operation_id),false);assert.equal(f.calls.some(([file,args])=>file==='systemctl'&&['stop','restart'].includes(args[0])),false);
+  const receipt=fs.readFileSync(join(directory,'status.json'));assert.deepEqual(await f.maintenance.recover(input),result);assert.deepEqual(fs.readFileSync(join(directory,'status.json')),receipt);f.preserve();
+});
+
+for(const [name,overrides] of [['active unit',{ActiveState:'active',MainPID:'42'}],['control PID',{ControlPID:'42'}],['queued job',{Job:'12 /org/freedesktop/systemd1/job/12'}]] as const)test('recovery refuses '+name+' without modifying the operation',async t=>{
+  const f=fixture(t),request=f.request();await f.maintenance.start(request);f.maintenance.save(request.operation_id,{status:'preparing'});stoppedWorker(f,overrides);
+  const before=f.maintenance.state(request.operation_id);await assert.rejects(f.maintenance.recover(recoveryRequest(f,request)),/recovery_worker_running/);assert.deepEqual(f.maintenance.state(request.operation_id),before);assert.equal(f.maintenance.ownsLock(request.operation_id),true);
+});
+
+for(const kind of ['process','cgroup','other_owner','task','identity','generation','unknown_field'])test('recovery refuses '+kind+' without clearing the lifecycle fence',async t=>{
+  const f=fixture(t),request=f.request();await f.maintenance.start(request);f.maintenance.save(request.operation_id,{status:'preparing'});stoppedWorker(f);
+  const input=recoveryRequest(f,request),directory=f.p('opt/lightmoni-agent/updates/'+request.operation_id),receipt=fs.readFileSync(join(directory,'status.json'));
+  if(kind==='process'){fs.mkdirSync(f.p('proc/123'));fs.writeFileSync(f.p('proc/123/cmdline'),Buffer.from('node\0'+join(directory,'worker.mjs')+'\0worker\0'+request.operation_id+'\0'));}
+  if(kind==='cgroup'){
+    const group='/system.slice/lightmoni-agent-update-'+request.operation_id+'.service';fs.mkdirSync(f.p('sys/fs/cgroup'+group),{recursive:true});fs.writeFileSync(f.p('sys/fs/cgroup'+group+'/cgroup.events'),'populated 1\n');fs.writeFileSync(f.p('sys/fs/cgroup'+group+'/cgroup.procs'),'123\n');stoppedWorker(f,{ControlGroup:group});
+  }
+  if(kind==='other_owner')fs.writeFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json'),JSON.stringify({operation_id:'f'.repeat(32)}));
+  if(kind==='task')fs.writeFileSync(f.p('var/lib/lightmoni-agent/task-run-state.json'),JSON.stringify({id:'active-task'}));
+  if(kind==='identity')input.expected_agent_id='other-agent';
+  if(kind==='generation')input.expected_permission_generation++;
+  if(kind==='unknown_field')(input as any).command='arbitrary';
+  const owner=fs.readFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json'));
+  await assert.rejects(f.maintenance.recover(input));assert.deepEqual(fs.readFileSync(join(directory,'status.json')),receipt);assert.deepEqual(fs.readFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json')),owner);
+});
+
+async function killedWorker(t:any,phase:'preparing'|'cutover'|'waiting_confirmation'){
+  const f=fixture(t,{runtimeMode:'root'}),request=f.request();await f.maintenance.start(request);
+  const script=f.p('fault-worker.mjs'),marker=f.p('fault-marker');
+  fs.writeFileSync(script,`import fs from 'node:fs';import {randomUUID} from 'node:crypto';
+import {AgentMaintenance} from ${JSON.stringify(pathToFileURL(join(repo,'deploy/agent/update-runner.mjs')).href)};
+const [root,id,phase]=process.argv.slice(2);let active=true,helper=true,boot=randomUUID();let runner;
+runner=new AgentMaintenance({root,uid:process.getuid(),command:(file,args)=>{
+ if(file==='systemctl'){
+  if(args[0]==='show'){
+   const isHelper=args.includes('lightmoni-agent-helper.service');
+   if(args.includes('--property=ActiveState'))return (isHelper?helper:active)?'active':'inactive';
+   if(args.includes('--property=LoadState'))return 'loaded';
+   if(args.includes('--property=FragmentPath'))return root+'/etc/systemd/system/'+(isHelper?'lightmoni-agent-helper.service':'lightmoni-agent.service');
+   if(args.includes('--property=DropInPaths'))return '';
+  }
+  if(args[0]==='stop'){if(args[1]==='lightmoni-agent-helper.service')helper=false;else active=false;}
+  if(args[0]==='restart'){if(args[1]==='lightmoni-agent-helper.service')helper=true;else{active=true;boot=randomUUID();}}
+  return '';
+ }
+ const generation=runner.runtimeGeneration();
+ if(args[0]==='helper-status')return JSON.stringify({permission_generation:generation,fenced:null,pending_results:0,ordinary_task_runner:{active:false,state:'idle'}});
+ if(args[0]==='status')return JSON.stringify({agent_id:'fixture-agent',runtime:{uid:995,gid:995,mode:'root',permission_generation:generation},release:runner.metadata(runner.currentPath()),boot_id:boot});
+ return 'valid';
+}});
+const save=runner.save.bind(runner);runner.save=(id,update)=>{const value=save(id,update);if(update.status===phase||(phase==='cutover'&&update.uninstaller_updated===true)){
+ fs.writeFileSync(root+'/fault-marker','reached');const wait=new Int32Array(new SharedArrayBuffer(4));for(;;)Atomics.wait(wait,0,0,1000);
+}return value;};
+await runner.worker(id,{handleSignals:true});\n`);
+  const child=spawn(process.execPath,[script,f.root,request.operation_id,phase],{stdio:['ignore','pipe','pipe'],env:{}});let stderr='';child.stderr.on('data',value=>{stderr+=value;});
+  const closed=new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));
+  try{
+    const deadline=Date.now()+10000;while(!fs.existsSync(marker)){if(child.exitCode!==null||Date.now()>deadline)throw Error('fault boundary not reached: '+stderr);await new Promise(resolve=>setTimeout(resolve,2));}
+    child.kill('SIGKILL');assert.deepEqual(await closed,{code:null,signal:'SIGKILL'});
+  }finally{if(child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await closed;}}
+  if(phase==='cutover'){f.setActive(false);f.setHelperActive(false);}stoppedWorker(f);
+  return {...f,request};
+}
+
+for(const phase of ['preparing','cutover','waiting_confirmation'] as const)test('explicit recovery after actual SIGKILL at '+phase+' verifies and preserves the original transaction', {timeout:15000},async t=>{
+  const f=await killedWorker(t,phase),directory=f.p('opt/lightmoni-agent/updates/'+f.request.operation_id),status=fs.readFileSync(join(directory,'status.json')),claim=fs.readFileSync(join(directory,'worker-claim.json')),bundle=fs.readFileSync(join(directory,'bundle.tar.gz'));
+  const result=await f.maintenance.recover(recoveryRequest(f,f.request));
+  assert.equal(result.status,phase==='preparing'?'failed':'rolled_back');assert.equal(result.recovery.action,phase==='preparing'?'archive_preparing':'restore_previous');
+  assert.equal(f.maintenance.currentPath(),f.old);assert.equal(f.helperIsActive(),true);assert.equal(f.maintenance.system('ActiveState'),'active');assert.equal(f.maintenance.ownsLock(f.request.operation_id),false);
+  assert.deepEqual(fs.readFileSync(join(directory,'status-before-recovery.json')),status);assert.deepEqual(fs.readFileSync(join(directory,'worker-claim.json')),claim);assert.deepEqual(fs.readFileSync(join(directory,'bundle.tar.gz')),bundle);
+  if(phase!=='preparing')assert.equal(fs.existsSync(candidatePath(f,f.request)),true);
+  const commands=f.calls.length;assert.deepEqual(await f.maintenance.recover(recoveryRequest(f,f.request)),result);assert.equal(f.calls.length,commands);f.preserve();
+});
+
+for(const corruption of ['original_helper','target','unknown_current'])test('cutover recovery refuses '+corruption+' before stopping either component', {timeout:15000},async t=>{
+  const f=await killedWorker(t,'cutover'),directory=f.p('opt/lightmoni-agent/updates/'+f.request.operation_id),input=recoveryRequest(f,f.request);
+  if(corruption==='original_helper')fs.unlinkSync(join(directory,'previous-helper-service'));
+  if(corruption==='target')fs.appendFileSync(join(candidatePath(f,f.request),'app/runtime/dist/agent/main.js'),'tampered');
+  if(corruption==='unknown_current'){const other=f.p('opt/lightmoni-agent/releases/unapproved');fs.mkdirSync(other);f.maintenance.switchCurrent(other);}
+  const status=fs.readFileSync(join(directory,'status.json')),owner=fs.readFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json')),calls=f.calls.length;
+  await assert.rejects(f.maintenance.recover(input));assert.deepEqual(fs.readFileSync(join(directory,'status.json')),status);assert.deepEqual(fs.readFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json')),owner);
+  assert.equal(f.calls.slice(calls).some(([file,args])=>file==='systemctl'&&['stop','restart'].includes(args[0])),false);
+  assert.equal(fs.existsSync(join(directory,'recovery.json')),false);
+});
+
+for(const wrong of ['missing_status','wrong_runtime'])test('restored '+wrong+' cannot be marked healthy or unlock the interrupted transaction',{timeout:15000},async t=>{
+  const f=await killedWorker(t,'cutover'),localStatus=f.maintenance.localStatus.bind(f.maintenance);
+  f.maintenance.localStatus=()=>wrong==='missing_status'?{}:{...localStatus(),runtime:{uid:0,gid:0,mode:'root',permission_generation:7}};
+  await assert.rejects(f.maintenance.recover(recoveryRequest(f,f.request)),/recovery_original_unhealthy/);
+  assert.equal(f.maintenance.state(f.request.operation_id).status,'switching');assert.equal(f.maintenance.ownsLock(f.request.operation_id),true);
+  assert.equal(f.maintenance.currentPath(),f.old);
+});
+
+test('recover response loss after successful restore is finalized without a second restore',{timeout:15000},async t=>{
+  const f=await killedWorker(t,'cutover'),atomic=f.maintenance.atomic.bind(f.maintenance);let lose=true;
+  f.maintenance.atomic=(file:string,value:any,mode?:number)=>{if(lose&&file.endsWith('/recovery.json')&&value.status==='succeeded'){lose=false;throw Error('simulated lost recovery response');}return atomic(file,value,mode);};
+  const input=recoveryRequest(f,f.request);await assert.rejects(f.maintenance.recover(input),/simulated lost recovery response/);
+  assert.equal(f.maintenance.state(f.request.operation_id).status,'rolled_back');const stops=f.calls.filter(([file,args])=>file==='systemctl'&&args[0]==='stop').length;
+  const result=await f.maintenance.recover(input);assert.equal(result.status,'rolled_back');assert.equal(result.recovery.status,'succeeded');assert.equal(f.calls.filter(([file,args])=>file==='systemctl'&&args[0]==='stop').length,stops);
+});
+
+test('an actual SIGKILL during a started recovery preserves its nonterminal fence and never replays restore or worker',{timeout:15000},async t=>{
+  const f=await killedWorker(t,'cutover'),input=recoveryRequest(f,f.request),directory=f.p('opt/lightmoni-agent/updates/'+f.request.operation_id);
+  const script=f.p('fault-recovery.mjs'),marker=f.p('recovery-fault-marker'),events=f.p('recovery-events.jsonl'),requestFile=f.p('recovery-request.json');
+  const status=fs.readFileSync(join(directory,'status.json')),claim=fs.readFileSync(join(directory,'worker-claim.json')),bundle=fs.readFileSync(join(directory,'bundle.tar.gz'));
+  fs.writeFileSync(requestFile,JSON.stringify(input),{mode:0o600});
+  fs.writeFileSync(script,`import fs from 'node:fs';
+import {AgentMaintenance} from ${JSON.stringify(pathToFileURL(join(repo,'deploy/agent/update-runner.mjs')).href)};
+const [root,requestFile]=process.argv.slice(2);const events=root+'/recovery-events.jsonl';let runner;
+const record=value=>fs.appendFileSync(events,JSON.stringify(value)+'\\n',{mode:0o600});
+runner=new AgentMaintenance({root,uid:process.getuid(),command:(file,args)=>{
+ record({event:'command',file,args});
+ if(file==='systemctl'){
+  if(args[0]==='show'){
+   if(args.some(value=>/^lightmoni-agent-update-[a-f0-9]{32}\\.service$/.test(value)))return 'LoadState=not-found\\nActiveState=inactive\\nMainPID=0\\nControlPID=0\\nControlGroup=\\nJob=0';
+   const helper=args.includes('lightmoni-agent-helper.service');
+   if(args.includes('--property=ActiveState'))return 'inactive';
+   if(args.includes('--property=LoadState'))return 'loaded';
+   if(args.includes('--property=FragmentPath'))return root+'/etc/systemd/system/'+(helper?'lightmoni-agent-helper.service':'lightmoni-agent.service');
+   if(args.includes('--property=DropInPaths'))return '';
+  }
+  return '';
+ }
+ if(args[0]==='helper-status')return JSON.stringify({permission_generation:runner.runtimeGeneration(),fenced:null,pending_results:0,ordinary_task_runner:{active:false,state:'idle'}});
+ throw Error('unexpected recovery command');
+}});
+const restore=runner.restore.bind(runner);runner.restore=async(...args)=>{record({event:'restore'});return restore(...args);};
+const atomic=runner.atomic.bind(runner);runner.atomic=(file,value,mode)=>{const result=atomic(file,value,mode);if(file===root+'/usr/local/bin/lightmoni-agent'){
+ record({event:'partial_restore'});fs.writeFileSync(root+'/recovery-fault-marker','reached');const wait=new Int32Array(new SharedArrayBuffer(4));for(;;)Atomics.wait(wait,0,0,1000);
+}return result;};
+await runner.recover(JSON.parse(fs.readFileSync(requestFile,'utf8')));\n`);
+  const child=spawn(process.execPath,[script,f.root,requestFile],{stdio:['ignore','pipe','pipe'],env:{}});let stderr='';child.stderr.on('data',value=>{stderr+=value;});
+  const closed=new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));
+  try{
+    const deadline=Date.now()+10000;while(!fs.existsSync(marker)){if(child.exitCode!==null||Date.now()>deadline)throw Error('recovery fault boundary not reached: '+stderr);await new Promise(resolve=>setTimeout(resolve,2));}
+    child.kill('SIGKILL');assert.deepEqual(await closed,{code:null,signal:'SIGKILL'});
+  }finally{if(child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await closed;}}
+  const journal=fs.readFileSync(join(directory,'recovery.json')),owner=fs.readFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json')),commands=fs.readFileSync(events);
+  assert.equal(JSON.parse(journal.toString()).status,'started');assert.equal(f.maintenance.state(f.request.operation_id).status,'switching');
+  assert.equal(f.maintenance.currentPath(),f.old);assert.equal(fs.readFileSync(f.p('usr/local/bin/lightmoni-agent'),'utf8'),'#!/bin/sh\n# old launcher\n');
+  assert.match(fs.readFileSync(f.p('usr/local/sbin/lightmoni-agent-uninstall'),'utf8'),/new offline helper/);
+  assert.deepEqual(fs.readFileSync(join(directory,'status-before-recovery.json')),status);
+  assert.equal(commands.toString().trim().split('\n').map(line=>JSON.parse(line)).filter(value=>value.event==='restore').length,1);
+  let restores=0,workers=0;f.maintenance.restore=async()=>{restores++;throw Error('restore must not replay');};f.maintenance.worker=async()=>{workers++;throw Error('worker must not replay');};
+  const calls=f.calls.length;
+  for(let retry=0;retry<2;retry++)await assert.rejects(f.maintenance.recover(input),/recovery_interrupted/);
+  assert.equal(restores,0);assert.equal(workers,0);assert.equal(f.maintenance.ownsLock(f.request.operation_id),true);
+  assert.equal(f.calls.slice(calls).some(([file,args])=>file==='systemctl'&&['stop','restart'].includes(args[0])),false);
+  assert.deepEqual(fs.readFileSync(join(directory,'recovery.json')),journal);assert.deepEqual(fs.readFileSync(join(directory,'status.json')),status);
+  assert.deepEqual(fs.readFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json')),owner);assert.deepEqual(fs.readFileSync(events),commands);
+  assert.deepEqual(fs.readFileSync(join(directory,'worker-claim.json')),claim);assert.deepEqual(fs.readFileSync(join(directory,'bundle.tar.gz')),bundle);
+  assert.equal(fs.existsSync(candidatePath(f,f.request)),true);f.preserve();
+});
+
+test('a concurrent explicit recover cannot enter an already started restore',{timeout:15000},async t=>{
+  const f=await killedWorker(t,'cutover'),restore=f.maintenance.restore.bind(f.maintenance);let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
+  f.maintenance.restore=async(...args:any[])=>{await gate;return restore(...args);};
+  const input=recoveryRequest(f,f.request),first=f.maintenance.recover(input);
+  await assert.rejects(f.maintenance.recover(input),/recovery_guard_busy/);release();assert.equal((await first).status,'rolled_back');
+});
+
+test('failed recovery validation releases only a newly acquired lock and does not poison the journal',async t=>{
+  const f=fixture(t),request=f.request();await f.maintenance.start(request);f.maintenance.save(request.operation_id,{status:'preparing'});f.maintenance.unlock(request.operation_id);stoppedWorker(f);
+  f.setActive(false);await assert.rejects(f.maintenance.recover(recoveryRequest(f,request)),/recovery_original_unhealthy/);
+  assert.equal(fs.existsSync(f.p('run/lightmoni-agent-lifecycle.lock')),false);assert.equal(fs.existsSync(f.p('opt/lightmoni-agent/updates/'+request.operation_id+'/recovery.json')),false);
+  f.setActive(true);assert.equal((await f.maintenance.recover(recoveryRequest(f,request))).status,'failed');
 });

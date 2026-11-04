@@ -1,5 +1,5 @@
 import {blockingAgentJobSQL} from './agent-job-fence.js';
-import { createReadStream } from "node:fs";
+import { createReadStream, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { hash, id, token } from "../shared/crypto.js";
@@ -17,7 +17,7 @@ import { assertSSHAccount, sshAccountSnapshot, sshCredentialRevision, type SSHRu
 import { AgentReleaseCatalog, type AgentRelease, type PinnedAgentFile } from "./machine-agent-updates-catalog.js";
 import { NodeStore } from "./nodes-model.js";
 import { agentUpdateProbeCommand, parseAgentUpdateProbe, agentUpdateStartCommand, agentUpdateStatusCommand, agentUpdateCommitCommand,
-  parseAgentUpdateStatus, type AgentUpdateProbe, type AgentUpdateRemoteStatus, type AgentUpdateStartRequest } from "./machine-agent-update-ssh.js";
+  parseAgentUpdateStatus, agentUpdateRecoveryBootstrap, type AgentUpdateRecoveryRequest, type AgentUpdateProbe, type AgentUpdateRemoteStatus, type AgentUpdateStartRequest } from "./machine-agent-update-ssh.js";
 
 export type AgentUpdateStatus = "awaiting_approval" | "running" | "verifying" | "succeeded" | "rolled_back" | "failed" | "unknown" | "cancelled";
 export interface AgentUpdateInput { action: "upgrade" | "rollback"; target_sha256?: string; credential_id?: string }
@@ -25,7 +25,7 @@ export interface AgentUpdate {
   id: string; machine_id: string; agent_id: string; action: "upgrade" | "rollback"; status: AgentUpdateStatus;
   plan: any; receipt: any; error: string; created_at: string; created_by: string; approved_at: string; approved_by: string;
   started_at: string; finished_at: string; review_url: string;
-  rollout_id: string; rollout_review_url: string;
+  rollout_id: string; rollout_review_url: string; recovery_revision?:string; recovery_requires_verification?:boolean;
 }
 interface RolloutView { id: string; status: string; target_sha256: string; acknowledged_json: string; items: { machine_id: string; machine_name: string; update_id: string; status: AgentUpdateStatus; update: AgentUpdate }[]; [key: string]: any }
 export interface AgentUpdateStore extends Module {
@@ -78,7 +78,7 @@ export function createAgentUpdatesSchema(deps: Dependencies) {
     machine_id TEXT NOT NULL,update_id TEXT NOT NULL,position INTEGER NOT NULL,
     PRIMARY KEY(rollout_id,machine_id),UNIQUE(update_id)
   );`);
-  deps.db.run("UPDATE machine_agent_updates SET status='unknown',ticket_hash='',error=? WHERE status IN ('running','verifying')", "平台在 Agent 维护期间重启，远端会按确认期限回退；请只读核对");
+  deps.db.run("UPDATE machine_agent_updates SET status='unknown',ticket_hash='',error=? WHERE status IN ('running','verifying')", "平台在 Agent 维护期间重启，请先只读核对；进程已停止时可审阅恢复，不会自动重放维护");
   deps.db.run("UPDATE agent_update_rollouts SET status='paused',error=? WHERE status='running'", "平台重启，批次已暂停；核对已启动主机后明确继续");
 }
 
@@ -86,7 +86,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   const { db, router } = deps, at = () => deps.now().toISOString();
   const catalog = new AgentReleaseCatalog(options.downloadsDir, join(options.dataDir, "agent-update-cache"));
   const controller = new AbortController(), running = new Map<string, Promise<void>>(), rolloutWorkers = new Map<string, Promise<void>>();
-  const pollInterval = options.pollIntervalMs ?? 3000, healthTimeout = options.healthTimeoutMs ?? 120_000;
+  const pollInterval = options.pollIntervalMs ?? 3000, healthTimeout = options.healthTimeoutMs ?? 1260_000;
   const table = (name: string) => Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?", name));
   const pending = (machineID: string) => db.get<{id:string;status:AgentUpdateStatus}>("SELECT id,status FROM machine_agent_updates WHERE machine_id=? AND status IN " + ACTIVE + " LIMIT 1", machineID);
   const assertFree = (machineID: string) => { if (pending(machineID)) fail(409, "主机已有待审批、运行中或结果未知的 Agent 维护，请先取消、完成或核对"); };
@@ -95,12 +95,34 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     if (!value) fail(404, "Agent 维护记录不存在");
     return value;
   };
+  const recoveryPin = (value:any) => {
+    const file=catalog.pinScripts()['update-runner.mjs'];
+    if(file.size>1048576)fail(409,'agent_update_recovery_runner_unavailable');
+    return {file,revision:hash(JSON.stringify({schema:1,operation_id:value.id,machine_id:value.machine_id,agent_id:value.agent_id,action:value.action,plan_json:value.plan_json,runner_sha256:file.sha256}))};
+  };
+  const recoveryReceipt = (operationID:string,remote:any) => {
+    const saved=JSON.parse(db.get<any>('SELECT receipt_json FROM machine_agent_updates WHERE id=?',operationID)!.receipt_json);
+    return {...remote,...(saved.recovery_attempts?{recovery_attempts:saved.recovery_attempts}:{})};
+  };
+  const recoveryRequiresVerification=(value:any)=>{
+    const attempts=JSON.parse(value.receipt_json).recovery_attempts;
+    const last=Array.isArray(attempts)?attempts.at(-1):undefined;
+    return !!last && last.status!=='verified' && !last.verification_completed_at;
+  };
+  const markRecoveryVerification=(machineID:string,operationID:string,actor:string)=>{
+    const current=row(machineID,operationID),receipt=JSON.parse(current.receipt_json),attempts=receipt.recovery_attempts;
+    const last=Array.isArray(attempts)?attempts.at(-1):undefined;
+    if(last&&last.status!=='verified'&&!last.verification_completed_at){
+      last.verification_completed_at=at();last.verification_completed_by=actor;last.verification_result_status=current.status;
+      db.run('UPDATE machine_agent_updates SET receipt_json=? WHERE id=?',JSON.stringify(receipt),operationID);
+    }
+  };
   const view = (value: any): AgentUpdate => {
     const membership = db.get<{rollout_id:string}>("SELECT rollout_id FROM agent_update_rollout_items WHERE update_id=?", value.id);
     return { id: value.id, machine_id: value.machine_id, agent_id: value.agent_id,
     action: value.action, status: value.status, plan: JSON.parse(value.plan_json), receipt: { ssh_account: JSON.parse(value.plan_json).ssh_account, ...JSON.parse(value.receipt_json) }, error: value.error,
     created_at: value.created_at, created_by: value.created_by, approved_at: value.approved_at, approved_by: value.approved_by,
-    started_at: value.started_at, finished_at: value.finished_at,
+    started_at: value.started_at, finished_at: value.finished_at, ...(value.status==='unknown'?{recovery_revision:recoveryPin(value).revision,recovery_requires_verification:recoveryRequiresVerification(value)}:{}),
     review_url: `/machines?machine=${encodeURIComponent(value.machine_id)}&agent_update=${encodeURIComponent(value.id)}`,
     rollout_id: membership?.rollout_id ?? "", rollout_review_url: membership ? `/machines?agent_rollout=${encodeURIComponent(membership.rollout_id)}` : "" };
   };
@@ -136,6 +158,14 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     if (observation.agent_id !== machine.agent_id) fail(409, "SSH 主机的 Agent 身份与平台不一致");
     if (!observation.ready || requireActive && !observation.service_active || observation.lifecycle_locked || observation.operation_lock) fail(409, "Agent 不是空闲且健康的受管 systemd 安装，不能自动维护");
     if (observation.current.state_schema !== 1) fail(409, "当前 Agent 状态格式未知，不能安全升级或回退");
+  };
+  const validateOriginalProbe = (machine: MachineSummary, observation: AgentUpdateProbe, approved: any, requireOriginalService = true) => {
+    validateProbe(machine, observation, false);
+    if (observation.current.fingerprint !== approved.current.fingerprint
+      || observation.runtime_mode !== approved.runtime_mode || observation.permission_generation !== approved.permission_generation
+      || observation.helper_active !== (approved.runtime_mode === "root")
+      || requireOriginalService && observation.service_active !== approved.current.service_active)
+      fail(409, "agent_update_recovery_unverified");
   };
   // Only the signature-verified helper observation can prove this component's
   // release; the ordinary Agent heartbeat does not carry that authority.
@@ -267,14 +297,14 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       ? "succeeded" : restored ? "rolled_back" : "";
     if (terminal) {
       db.run("UPDATE machine_agent_updates SET status=?,receipt_json=?,error=?,finished_at=?,ticket_hash='' WHERE id=? AND status IN ('running','verifying','unknown')",
-        terminal, JSON.stringify(verification ? { ...remote, current_verification: verification } : remote), terminal === "succeeded" ? "" : original.service_active === false ? "目标程序未通过健康确认，已恢复原程序；原服务此前停止，现仍停止" : "目标程序未通过健康确认，已恢复原程序", at(), operation.id);
+        terminal, JSON.stringify(recoveryReceipt(operation.id,verification ? { ...remote, current_verification: verification } : remote)), terminal === "succeeded" ? "" : original.service_active === false ? "目标程序未通过健康确认，已恢复原程序；原服务此前停止，现仍停止" : "目标程序未通过健康确认，已恢复原程序", at(), operation.id);
       return terminal;
     }
     if (remote.status === "rollback_failed") {
-      db.run("UPDATE machine_agent_updates SET status='unknown',receipt_json=?,error=?,ticket_hash='' WHERE id=?", JSON.stringify(remote), "远端自动回退未确认，需人工检查服务；禁止重复维护", operation.id);
+      db.run("UPDATE machine_agent_updates SET status='unknown',receipt_json=?,error=?,ticket_hash='' WHERE id=?", JSON.stringify(recoveryReceipt(operation.id,remote)), "远端自动回退未确认，需人工检查服务；禁止重复维护", operation.id);
       return "unknown";
     }
-    db.run("UPDATE machine_agent_updates SET receipt_json=? WHERE id=?", JSON.stringify(remote), operation.id);
+    db.run("UPDATE machine_agent_updates SET receipt_json=? WHERE id=?", JSON.stringify(recoveryReceipt(operation.id,remote)), operation.id);
     if (allowCommit && remote.status === "waiting_confirmation" && healthy && heartbeat(operation, remote)) return "commit";
     return "";
   };
@@ -301,7 +331,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
           const body = JSON.parse(operation.plan_json);
           validateProbe(machine, observed, false);
           if (observed.current.fingerprint !== body.current.fingerprint) fail(409, "失败回执后的当前程序已变化");
-          db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,finished_at=?,ticket_hash='',error=? WHERE id=?", JSON.stringify(remote), at(), "核对确认维护未切换原程序", operation.id);
+          db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,finished_at=?,ticket_hash='',error=? WHERE id=?", JSON.stringify(recoveryReceipt(operation.id,remote)), at(), "核对确认维护未切换原程序", operation.id);
           return;
         }
         const outcome = saveRemote(operation, remote, !commitRequested);
@@ -315,9 +345,9 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         }
         await wait(pollInterval);
       }
-      markUnknown(operationID, "目标程序尚未通过平台健康确认；等待远端自动回退后只读核对");
+      markUnknown(operationID, "平台观察期限已结束，维护结果待核对；请先只读核对，进程已停止时可审阅恢复");
     } catch {
-      markUnknown(operationID, "维护结果暂不可确认；远端会按确认期限回退，请使用只读核对");
+      markUnknown(operationID, "维护结果暂不可确认；请先只读核对，进程已停止时可审阅恢复");
     } finally { access.busy.delete(machineID); }
   };
   const launchObserver = (machineID: string, operationID: string, credentialID: string) => {
@@ -363,7 +393,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       return view(row(machineID, operationID));
     } catch (error) {
       if (dispatched) {
-        markUnknown(operationID, "维护连接中断或回执无效；远端可能仍运行，请等待自动回退后只读核对");
+        markUnknown(operationID, "维护连接中断或回执无效；远端可能仍运行，请先只读核对，进程已停止时可审阅恢复");
         return view(row(machineID, operationID));
       }
       if (error instanceof HTTPError) throw error;
@@ -385,7 +415,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     const { plan: approved } = assertPlan(operation, false, false);
     const selected = access.credential(machineID, credentialID ?? operation.credential_id), { machine, credential } = selected;
     const verifyingAccount = sshAccountSnapshot(machine), verifyingRevision = sshCredentialRevision(credential);
-    const recheck = () => { assertPlan(operation, false, false); const live = access.credential(machineID, credential.id); assertSSHAccount(live.machine, verifyingAccount); if (sshCredentialRevision(live.credential) !== verifyingRevision) fail(409, "reconciliation_credential_changed"); };
+    const recheck = () => { const current = row(machineID, operationID); if (current.status !== "unknown" || current.plan_json !== operation.plan_json) fail(409, "reconciliation_plan_changed"); assertPlan(operation, false, false); const live = access.credential(machineID, credential.id); assertSSHAccount(live.machine, verifyingAccount); if (sshCredentialRevision(live.credential) !== verifyingRevision) fail(409, "reconciliation_credential_changed"); };
     access.busy.add(machineID);
     try {
       let remote: AgentUpdateRemoteStatus;
@@ -393,21 +423,34 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       catch {
         // A lost start response may precede receipt creation. A fresh read-only
         // probe can prove the original program is still present and idle.
-        const observed = await probe(machine, credential, signal); validateProbe(machine, observed, false);
+        const observed = await probe(machine, credential, signal);
         const body = JSON.parse(operation.plan_json);
         if (!Number.isFinite(Date.parse(body.start_deadline)) || deps.now().getTime() <= Date.parse(body.start_deadline)) fail(409, "启动确认窗口尚未结束，请稍后再次核对");
-        if (observed.current.fingerprint !== body.current.fingerprint) fail(409, "维护回执缺失且程序已变化，仍需人工核对");
+        validateOriginalProbe(machine, observed, approved, recoveryRequiresVerification(operation));
         recheck();
-        db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,error=?,finished_at=?,ticket_hash='' WHERE id=? AND status='unknown'", JSON.stringify({ remote_unchanged: true, fingerprint: observed.current.fingerprint, verified_at: at() }), "只读核对确认原程序完整且无维护锁，本次维护未执行", at(), operationID);
+        db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,error=?,finished_at=?,ticket_hash='' WHERE id=? AND status='unknown'", JSON.stringify(recoveryReceipt(operation.id,{ remote_unchanged: true, fingerprint: observed.current.fingerprint, verified_at: at() })), "只读核对确认原程序完整且无维护锁，本次维护未执行", at(), operationID);
         return view(row(machineID, operationID));
       }
       recheck();
       if (remote.status === "failed") {
         validateRemote(operation, remote);
-        const observed = await probe(machine, credential, signal); validateProbe(machine, observed, false);
-        if (observed.current.fingerprint !== JSON.parse(operation.plan_json).current.fingerprint) fail(409, "失败回执后程序指纹不一致，仍需人工核对");
+        const observed = await probe(machine, credential, signal);
+        // A pre-switch worker rejection can observe a naturally stopped source.
+        // A recovery receipt instead promises restoration of its approved state.
+        validateOriginalProbe(machine, observed, approved, Boolean(remote.recovery) || recoveryRequiresVerification(operation));
         recheck();
-        db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,error=?,finished_at=? WHERE id=? AND status='unknown'", JSON.stringify(remote), "核对确认维护未切换原程序", at(), operationID);
+        db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,error=?,finished_at=? WHERE id=? AND status='unknown'", JSON.stringify(recoveryReceipt(operation.id,{ ...remote, current_verification: { boot_id: observed.current.boot_id, fingerprint: observed.current.fingerprint, verified_at: at() } })), "核对确认维护未切换原程序", at(), operationID);
+        return view(row(machineID, operationID));
+      }
+      if (remote.status === "rolled_back") {
+        validateRemote(operation, remote);
+        // The receipt proves a historical restore, not the current host state.
+        // A lost recovery response must still complete a fresh independent read.
+        const observed = await probe(machine, credential, signal);
+        validateOriginalProbe(machine, observed, approved);
+        recheck();
+        if (saveRemote(operation, remote, false, { boot_id: observed.current.boot_id, fingerprint: observed.current.fingerprint, verified_at: at() }) !== "rolled_back")
+          fail(409, "agent_update_recovery_unverified");
         return view(row(machineID, operationID));
       }
       if (remote.status === "succeeded") {
@@ -428,6 +471,63 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       db.run("UPDATE machine_agent_updates SET receipt_json=? WHERE id=?", JSON.stringify({ ...JSON.parse(current.receipt_json), approved_ssh_account: approved.ssh_account, verification_ssh_account: verifyingAccount, verification_credential_id: credential.id, verification_credential_revision: verifyingRevision }), operationID);
       access.busy.delete(machineID);
     }
+  };
+  const recover = async(machineID:string,operationID:string,input:any,actor:string,signal:AbortSignal) => {
+    fields(input,['confirm','expected_revision','credential_id']);
+    if(input.confirm!==true)fail(400,'必须明确确认维护恢复');
+    if(typeof input.expected_revision!=='string'||!SHA.test(input.expected_revision))fail(400,'invalid expected_revision');
+    const credentialID=input.credential_id===undefined?undefined:string(input.credential_id,'credential_id',64);
+    access.idle(machineID);
+    const operation=row(machineID,operationID);
+    if(operation.status!=='unknown')fail(409,'只有结果未知的维护可以恢复');
+    const pinned=recoveryPin(operation);
+    if(input.expected_revision!==pinned.revision)fail(409,'agent_update_recovery_revision_changed');
+    if(recoveryRequiresVerification(operation))fail(409,'agent_update_recovery_verification_required');
+    const {plan:approved}=assertPlan(operation,false,false);
+    const assertRuntime=()=>{const runtime=table('machine_agent_runtime')?db.get<any>('SELECT * FROM machine_agent_runtime WHERE machine_id=?',machineID):undefined;
+      if(runtime&&(runtime.agent_id!==operation.agent_id||runtime.runtime_mode!==approved.runtime_mode||runtime.permission_generation!==approved.permission_generation))fail(409,'agent_update_recovery_identity_changed');};
+    assertRuntime();
+    const selected=access.credential(machineID,credentialID??operation.credential_id),{machine,credential}=selected;
+    const verificationAccount=sshAccountSnapshot(machine),verificationRevision=sshCredentialRevision(credential);
+    const recheck=()=>{const current=row(machineID,operationID);if(current.status!=='unknown'||current.plan_json!==operation.plan_json)fail(409,'agent_update_recovery_revision_changed');assertPlan(current,false,false);assertRuntime();const live=access.credential(machineID,credential.id);assertSSHAccount(live.machine,verificationAccount);if(sshCredentialRevision(live.credential)!==verificationRevision)fail(409,'reconciliation_credential_changed');};
+    const request:AgentUpdateRecoveryRequest={operation_id:operation.id,expected_agent_id:operation.agent_id,expected_fingerprint:approved.current.fingerprint,
+      expected_runtime_mode:approved.runtime_mode,expected_permission_generation:approved.permission_generation,
+      expected_target:{version:approved.target.version,source_revision:approved.target.source_revision,build_id:approved.target.build_id,state_schema:1,arch:approved.target.arch,artifact_sha256:approved.target.artifact_sha256??approved.target.sha256}};
+    const source=readFileSync(catalog.verify(pinned.file));
+    if(hash(source)!==pinned.file.sha256)fail(409,'agent_update_recovery_revision_changed');
+    const attempt:any={id:id(),actor_id:actor,requested_at:at(),runner_sha256:pinned.file.sha256,expected_revision:pinned.revision,approved_ssh_account:approved.ssh_account,
+      verification_ssh_account:verificationAccount,verification_credential_id:credential.id,verification_credential_revision:verificationRevision,status:'dispatched'};
+    const saveAttempt=()=>{const current=row(machineID,operationID),receipt=JSON.parse(current.receipt_json),attempts=Array.isArray(receipt.recovery_attempts)?receipt.recovery_attempts:[];
+      const index=attempts.findIndex((item:any)=>item.id===attempt.id);if(index<0)attempts.push({...attempt});else attempts[index]={...attempt};
+      db.run('UPDATE machine_agent_updates SET receipt_json=? WHERE id=?',JSON.stringify({...receipt,recovery_attempts:attempts}),operationID);};
+    access.busy.add(machineID);let dispatched=false;
+    try {
+      recheck();saveAttempt();dispatched=true;
+      const output=await ssh(machine,credential,agentUpdateRecoveryBootstrap(operationID,pinned.file.sha256),signal,JSON.stringify({runner_base64:source.toString('base64'),request})+'\n',660_000);
+      let envelope:any;try{envelope=JSON.parse(output.stdout);}catch{fail(409,'agent_update_recovery_unverified');}
+      if(envelope?.error_code&&!envelope.status){
+        attempt.remote_error_code=/^[a-z_]{1,80}$/.test(envelope.error_code)?envelope.error_code:'recovery_unverified';
+        if(['recovery_worker_running','recovery_unit_running','recovery_cgroup_running','recovery_guard_busy'].includes(attempt.remote_error_code))fail(409,'agent_update_recovery_running');
+        fail(409,'agent_update_recovery_unverified');
+      }
+      const remote=parseAgentUpdateStatus(output.stdout);validateRemote(operation,remote);recheck();
+      // A terminal remote receipt is necessary but not sufficient: independently
+      // re-probe the original host before releasing the platform maintenance lane.
+      db.run('UPDATE machine_agent_updates SET receipt_json=? WHERE id=?',JSON.stringify(recoveryReceipt(operationID,remote)),operationID);
+      const observed=await probe(machine,credential,signal);recheck();validateOriginalProbe(machine,observed,approved);
+      if(remote.status==='failed'&&remote.recovery?.action==='archive_preparing'){
+        db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,error=?,finished_at=?,ticket_hash='' WHERE id=? AND status='unknown'",JSON.stringify(recoveryReceipt(operationID,remote)),'已核对维护进程停止且原程序健康，本次维护在切换前中断',at(),operationID);
+      } else if(remote.status==='rolled_back'&&remote.recovery?.action==='restore_previous'){
+        if(saveRemote(operation,remote)!=='rolled_back')fail(409,'agent_update_recovery_unverified');
+      } else fail(409,'agent_update_recovery_unverified');
+      attempt.status='verified';attempt.finished_at=at();saveAttempt();
+      return view(row(machineID,operationID));
+    } catch(error) {
+      if(dispatched){attempt.status='unknown';attempt.finished_at=at();saveAttempt();
+        db.run("UPDATE machine_agent_updates SET error=? WHERE id=? AND status='unknown'",'恢复结果待核对；请先只读核对，不要重复派发恢复',operationID);}
+      if(error instanceof HTTPError)throw error;
+      fail(502,'恢复结果待核对；请先只读核对，不要重复派发恢复');
+    } finally {access.busy.delete(machineID);}
   };
   const rolloutRow = (rolloutID: string) => {
     const value = db.get<any>("SELECT * FROM agent_update_rollouts WHERE id=?", rolloutID);
@@ -471,7 +571,10 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   }));
   router.post(prefix + "/:updateId/cancel", access.safe(async ctx => { deps.auth.requireAdmin(ctx); fields(await ctx.body(), []); ctx.json(cancel(ctx.params.id, ctx.params.updateId)); }));
   router.post(prefix + "/:updateId/reconcile", access.safe(async ctx => { deps.auth.requireAdmin(ctx); const input = fields(await ctx.body(), ["credential_id"]);
-    ctx.json(await reconcile(ctx.params.id, ctx.params.updateId, input.credential_id == null ? undefined : string(input.credential_id, "credential_id"), ctx.signal)); }));
+    await reconcile(ctx.params.id, ctx.params.updateId, input.credential_id == null ? undefined : string(input.credential_id, "credential_id"), ctx.signal);
+    markRecoveryVerification(ctx.params.id,ctx.params.updateId,ctx.user.id);
+    ctx.json(view(row(ctx.params.id,ctx.params.updateId))); }));
+  router.post(prefix + '/:updateId/recover',access.safe(async ctx=>{deps.auth.requireAdmin(ctx);ctx.json(await recover(ctx.params.id,ctx.params.updateId,await ctx.body(),ctx.user.id,ctx.signal));}));
   router.get(prefix + "/:updateId/downloads/:file", access.safe(async ctx => {
     const operation = row(ctx.params.id, ctx.params.updateId), bearer = String(ctx.req.headers.authorization ?? "").replace(/^Bearer /, "");
     if (!WORKING.has(operation.status) || !operation.ticket_hash || hash(bearer) !== operation.ticket_hash || Date.parse(operation.ticket_expires_at) <= deps.now().getTime()) fail(401, "无效或过期的 Agent 维护下载票据");

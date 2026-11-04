@@ -114,3 +114,11 @@ test('preparing cancellation during file copy removes the private TAR and never 
   await assert.rejects(collision.maintenance.extract(collision.archive, collision.destination));
   assert.equal(fs.readFileSync(outside, 'utf8'), 'unchanged'); collision.noTemporary();
 });
+
+for(const kind of ['disk','inodes'])test('validated materialization rejects insufficient '+kind+' before writing package members',async t=>{
+  const f=fixture(t);f.pack([...required(),{name:'lightmoni-agent-runtime/nested/deep/file',body:Buffer.alloc(8193,65)}]);
+  const actual=fs.statfsSync(f.destination);
+  f.maintenance.statfs=()=>({...actual,bavail:kind==='disk'?Math.floor((64<<20)/Number(actual.bsize)):actual.bavail,ffree:kind==='inodes'?1024:actual.ffree});
+  await assert.rejects(f.maintenance.extract(f.archive,f.destination),kind==='disk'?/insufficient_disk_space/:/insufficient_inodes/);
+  assert.deepEqual(fs.readdirSync(f.destination),[]);f.noTemporary();
+});

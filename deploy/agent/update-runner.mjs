@@ -26,6 +26,10 @@ const COPY_CHUNK = 64 << 10;
 const MAX_ARCHIVE_METADATA = 64 << 10;
 const MAX_ARCHIVE_INDEX = 16 << 20;
 const DISK_RESERVE = 64 << 20;
+const INODE_RESERVE = 1024;
+const PREPARE_MS = 300000, HARD_MS = 1200000;
+const HEALTH_MS = 120000, RESTORE_MS = 300000, WATCHDOG_MARGIN_MS = 60000;
+const EXIT_RESULTS = new Set(['success','resources','timeout','exit-code','signal','core-dump','watchdog','start-limit-hit','oom-kill','protocol','unknown']);
 const cancelled = signal => { if (signal?.aborted) fail("maintenance_cancelled"); };
 const digest = value => createHash("sha256").update(value).digest("hex");
 const fail = code => { throw Object.assign(Error(code), { safeCode: code }); };
@@ -45,7 +49,11 @@ export class AgentMaintenance {
     this.arch = options.arch ?? (process.arch === "x64" ? "amd64" : process.arch);
     this.now = options.now ?? (() => Date.now());
     this.sleep = options.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
-    this.command = options.command ?? ((file, args) => execFileSync(file, args, { encoding: "utf8", timeout: 15000, maxBuffer: 4 << 20, stdio: ["ignore", "pipe", "pipe"] }).trim());
+    this.elapsed = options.monotonic ?? options.now ?? (() => performance.now());
+    this.phaseDeadline = null;
+    this.statfs = options.statfs ?? fs.statfsSync;
+    const run = options.command ?? ((file, args, timeout) => execFileSync(file, args, { encoding: "utf8", timeout, maxBuffer: 4 << 20, stdio: ["ignore", "pipe", "pipe"] }).trim());
+    this.command = (file, args) => { this.checkBudget(); const result = run(file, args, this.phaseDeadline === null ? 15000 : Math.max(1, Math.min(15000, Math.ceil(this.phaseDeadline - this.elapsed())))); this.checkBudget(); return result; };
     this.self = options.self ?? fileURLToPath(import.meta.url);
     this.launch = options.launch;
   }
@@ -54,6 +62,19 @@ export class AgentMaintenance {
   get lock() { return this.p("/run/lightmoni-agent-lifecycle.lock"); }
   opDir(id) { if (!OP.test(id ?? "")) fail("invalid_operation"); return path.join(this.base, "updates", id); }
   timestamp() { return new Date(this.now()).toISOString(); }
+  checkBudget() { if (this.phaseDeadline !== null && this.elapsed() >= this.phaseDeadline) fail(this.phaseError ?? 'maintenance_timeout'); }
+  phase(deadline, code) { this.phaseDeadline = deadline; this.phaseError = code; this.checkBudget(); }
+  writeOnce(filename, value) {
+    const fd = fs.openSync(filename, 'wx', 0o600);
+    try { fs.fchmodSync(fd, 0o600); fs.writeFileSync(fd, typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)+'\n'); fs.fsyncSync(fd); }
+    finally { fs.closeSync(fd); }
+    const parent = fs.openSync(path.dirname(filename), 'r'); try { fs.fsyncSync(parent); } finally { fs.closeSync(parent); }
+  }
+  boundedText(filename, maximum = 32768) {
+    const fd = fs.openSync(filename, 'r');
+    try { const bytes=Buffer.allocUnsafe(maximum+1), count=fs.readSync(fd,bytes,0,bytes.length,0); if(count>maximum)fail('unsafe_file'); return bytes.subarray(0,count).toString('utf8'); }
+    finally { fs.closeSync(fd); }
+  }
   checkManaged(filename, kind = "file") {
     const absolute = path.resolve(filename), stop = path.resolve(this.root);
     const relative = path.relative(stop, absolute);
@@ -82,7 +103,7 @@ export class AgentMaintenance {
     const hash = createHash("sha256");
     let size = 0;
     for await (const chunk of fs.createReadStream(filename, { highWaterMark: COPY_CHUNK })) {
-      cancelled(signal);
+      cancelled(signal); this.checkBudget();
       size += chunk.length;
       if (size > MAX_ARCHIVE) fail("invalid_archive");
       hash.update(chunk);
@@ -97,7 +118,7 @@ export class AgentMaintenance {
     try {
       fs.fchmodSync(fd, 0o600);
       for await (const chunk of fs.createReadStream(source, { highWaterMark: COPY_CHUNK })) {
-        size += chunk.length;
+        this.checkBudget(); size += chunk.length;
         if (size > MAX_ARCHIVE) fail("invalid_archive");
         hash.update(chunk);
         for (let offset = 0; offset < chunk.length;) offset += fs.writeSync(fd, chunk, offset, chunk.length - offset);
@@ -113,6 +134,11 @@ export class AgentMaintenance {
     const directory = this.checkManaged(this.opDir(id), "directory");
     const status = boundedJSON(this.checkManaged(path.join(directory, "status.json")));
     if (status.schema !== 1 || status.operation_id !== id || !ID.test(status.agent_id ?? "") || !["accepted", "preparing", "switching", "waiting_confirmation", ...TERMINAL].includes(status.status)) fail("invalid_receipt");
+    try {
+      const exit=boundedJSON(this.checkManaged(path.join(directory,'unit-exit.json')),4096);
+      if(exit.schema!==1||!EXIT_RESULTS.has(exit.result)||!['exited','killed','dumped','unknown'].includes(exit.exit_code)||!Number.isInteger(exit.exit_status)||exit.exit_status<0||exit.exit_status>255||exit.memory_peak_bytes!==undefined&&(!Number.isSafeInteger(exit.memory_peak_bytes)||exit.memory_peak_bytes<0))fail('invalid_exit_evidence');
+      status.worker_exit=exit;
+    } catch(error) { if(!absent(error))throw error; }
     return status;
   }
   save(id, update) {
@@ -133,6 +159,7 @@ export class AgentMaintenance {
     try {
       const buffer = Buffer.allocUnsafe(COPY_CHUNK);
       for (;;) {
+        this.checkBudget();
         const count = fs.readSync(fd, buffer, 0, buffer.length, null);
         if (count === 0) break;
         hash.update(buffer.subarray(0, count));
@@ -338,7 +365,7 @@ export class AgentMaintenance {
       if (info.size < 1024 || info.size > MAX_ARCHIVE) fail("invalid_archive");
       archivePath = request.archive_path;
       if (await this.archiveDigest(archivePath) !== request.target.artifact_sha256) fail("checksum_mismatch");
-      const space = fs.statfsSync(this.base);
+      const space = this.statfs(this.base);
       if (space.bavail * space.bsize < info.size * 5 + DISK_RESERVE) fail("insufficient_disk_space");
     }
     fs.mkdirSync(path.join(this.base, "updates"), { mode: 0o700, recursive: true });
@@ -354,11 +381,12 @@ export class AgentMaintenance {
       this.atomic(path.join(directory, "request.json"), { ...request, archive_path: undefined, previous_path: this.currentPath(), previous_active: before.service_active, rollback_source: request.action === "rollback" ? this.previous() : null });
       if (archivePath) await this.copyArchive(archivePath, path.join(directory, "bundle.tar.gz"), request.target.artifact_sha256);
       this.atomic(path.join(directory, "worker.mjs"), fs.readFileSync(this.self));
+      this.atomic(path.join(directory, 'exit-evidence.sh'), this.exitEvidenceScript(id), 0o700);
       this.atomic(path.join(this.base, "update-runner.mjs"), fs.readFileSync(this.self), 0o644);
       const node = this.checkManaged(path.join(this.currentPath(), "node"));
       dispatchAttempted = true;
       if (this.launch) await this.launch(id, node, path.join(directory, "worker.mjs"));
-      else this.command("systemd-run", ["--quiet", "--no-block", "--collect", "--unit=lightmoni-agent-update-" + id, "--property=Type=exec", "--property=UMask=0077", "--property=StandardOutput=null", "--property=StandardError=null", "--property=RuntimeMaxSec=600", "--property=Nice=10", "--property=IOSchedulingClass=idle", node, path.join(directory, "worker.mjs"), "worker", id]);
+      else this.command("systemd-run", ["--quiet", "--no-block", "--collect", "--unit=lightmoni-agent-update-" + id, "--property=Type=exec", "--property=UMask=0077", "--property=StandardOutput=null", "--property=StandardError=null", "--property=RuntimeMaxSec=1200", "--property=ExecStopPost=/bin/sh " + path.join(directory,'exit-evidence.sh'), "--property=MemoryHigh=384M", "--property=MemoryMax=512M", "--property=MemorySwapMax=0", "--property=CPUQuota=50%", "--property=TasksMax=64", "--property=Nice=10", "--property=IOSchedulingClass=idle", node, path.join(directory, "worker.mjs"), "worker", id]);
       return state;
     } catch (error) {
       // Failure before worker dispatch is deterministic and may safely release
@@ -373,7 +401,7 @@ export class AgentMaintenance {
   /** Inflate to a private, bounded on-disk TAR. Validate every path and link
    * before materializing any member; retain offsets instead of body Buffers. */
   async extract(archivePath, destination, { signal } = {}) {
-    cancelled(signal);
+    cancelled(signal); this.checkBudget();
     this.checkManaged(archivePath);
     if (fs.statSync(archivePath).size > MAX_ARCHIVE) fail("invalid_archive");
     this.checkManaged(destination, "directory");
@@ -383,16 +411,17 @@ export class AgentMaintenance {
       fs.fchmodSync(fd, 0o600);
       if (fs.fstatSync(fd).uid !== this.uid) fail("unsafe_managed_path");
       let expanded = 0, sinceSpaceCheck = 0;
+      const maintenance=this;
       const limit = new Transform({
         highWaterMark: COPY_CHUNK,
         transform(chunk, _encoding, callback) {
           try {
-            cancelled(signal);
+            cancelled(signal); maintenance.checkBudget();
             expanded += chunk.length;
             sinceSpaceCheck += chunk.length;
             if (expanded > MAX_EXPANDED_ARCHIVE) fail("archive_too_large");
             if (sinceSpaceCheck >= 8 << 20) {
-              const space = fs.statfsSync(destination);
+              const space = maintenance.statfs(destination);
               if (space.bavail * space.bsize < DISK_RESERVE) fail("insufficient_disk_space");
               sinceSpaceCheck = 0;
             }
@@ -435,13 +464,13 @@ export class AgentMaintenance {
       const string = value => value.subarray(0, value.indexOf(0) < 0 ? value.length : value.indexOf(0)).toString("utf8");
       const octal = value => { const text = string(value).trim(); if (!/^[0-7]*$/.test(text)) fail("invalid_archive"); return text ? parseInt(text, 8) : 0; };
       while (offset + 512 <= expanded) {
-        cancelled(signal);
+        cancelled(signal); this.checkBudget();
         if (++headers % 128 === 0) await nextTurn();
         const header = read(offset, 512); offset += 512;
         if (header.every(byte => byte === 0)) {
           // Never hide unvalidated entries behind an early end marker.
           while (offset < expanded) {
-            cancelled(signal);
+            cancelled(signal); this.checkBudget();
             const tail = read(offset, Math.min(COPY_CHUNK, expanded - offset));
             if (tail.some(byte => byte !== 0)) fail("invalid_archive");
             offset += tail.length;
@@ -503,12 +532,25 @@ export class AgentMaintenance {
         let parent = path.posix.dirname(entry.name);
         while (parent !== ".") { if (names.has(parent) && names.get(parent) !== "5") fail("unsafe_archive_path"); parent = path.posix.dirname(parent); }
       }
+      // Account for actual allocated file blocks and all implicit parents,
+      // after validation and while the private TAR already occupies disk.
+      const space=this.statfs(destination), block=Number(space.bsize), objects=new Set(), directories=new Set();
+      let requiredBytes=0;
+      for(const entry of entries){
+        objects.add(entry.name);
+        if(entry.type==='5')directories.add(entry.name);
+        else requiredBytes+=entry.type==='2'?block:Math.ceil(entry.size/block)*block;
+        for(let parent=path.posix.dirname(entry.name);parent!=='.';parent=path.posix.dirname(parent)){objects.add(parent);directories.add(parent);}
+      }
+      requiredBytes+=directories.size*block;
+      if(space.bavail*block<requiredBytes+DISK_RESERVE)fail('insufficient_disk_space');
+      if(!Number.isSafeInteger(Number(space.ffree))||Number(space.ffree)<objects.size+INODE_RESERVE)fail('insufficient_inodes');
       // The private TAR is the sole body store. Copy at most 64 KiB at once,
       // yielding between chunks so preparing can be cooperatively cancelled.
       const buffer = Buffer.allocUnsafe(COPY_CHUNK);
       sinceSpaceCheck = 8 << 20;
       for (const entry of entries) {
-        cancelled(signal);
+        cancelled(signal); this.checkBudget();
         if (entry.type === "2") continue;
         const filename = path.join(destination, entry.name);
         fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o755 });
@@ -517,9 +559,9 @@ export class AgentMaintenance {
           const mode = entry.mode & 0o111 ? 0o755 : 0o644, target = fs.openSync(filename, "wx", mode);
           try {
             for (let copied = 0; copied < entry.size;) {
-              cancelled(signal);
+              cancelled(signal); this.checkBudget();
               if (sinceSpaceCheck >= 8 << 20) {
-                const space = fs.statfsSync(destination);
+                const space = this.statfs(destination);
                 if (space.bavail * space.bsize < DISK_RESERVE) fail("insufficient_disk_space");
                 sinceSpaceCheck = 0;
               }
@@ -535,7 +577,7 @@ export class AgentMaintenance {
       }
       for (const entry of entries) if (entry.type === "2") { cancelled(signal); fs.symlinkSync(entry.link, path.join(destination, entry.name)); }
       const readableDirectories = async root => {
-        cancelled(signal); fs.chmodSync(root, 0o755);
+        cancelled(signal); this.checkBudget(); fs.chmodSync(root, 0o755);
         for (const name of fs.readdirSync(root)) { const child = path.join(root, name); if (fs.lstatSync(child).isDirectory()) await readableDirectories(child); }
         await nextTurn();
       };
@@ -598,8 +640,9 @@ export class AgentMaintenance {
       if (previous.directory_present === false && fs.readdirSync(parent).length === 0) fs.rmdirSync(parent);
     } else fail("invalid_uninstaller_snapshot");
   }
-  async restore(id, reason) {
+  async restore(id, reason, { preserveArtifacts = false } = {}) {
     const request = this.request(id), directory = this.opDir(id);
+    this.phase(Math.min(this.hardDeadline ?? Infinity,this.elapsed()+RESTORE_MS), 'rollback_timeout');
     this.command("systemctl", ["stop", "lightmoni-agent.service"]);
     if(this.runtimeMode()==='root')this.command('systemctl',['stop','lightmoni-agent-helper.service']);
     if (!["inactive", "failed"].includes(this.system("ActiveState"))) fail("service_stop_failed");
@@ -619,12 +662,27 @@ export class AgentMaintenance {
       this.command("systemctl", ["restart", "lightmoni-agent.service"]);
       if (this.system("ActiveState") !== "active") fail("rollback_start_failed");
     }
-    const current = this.fingerprint(this.currentPath());
-    if (current.fingerprint !== request.expected_fingerprint || this.identity() !== request.expected_agent_id) fail("rollback_verification_failed");
-    const local = this.localStatus();
-    const helperActive = this.assertHelperMode(this.runtimeMode());
+    const {local,helperActive}=this.verifyOriginalHealth(request);
     const result = this.save(id, { status: "rolled_back", error_code: reason, restored_fingerprint: request.expected_fingerprint, finished_at: this.timestamp(), local_health: { service_active: request.previous_active ? this.system("ActiveState") === "active" : false, helper_active: helperActive, identity_matches: true, release_matches: true, boot_id: typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) ? local.boot_id : "" } });
-    this.cleanup(id); this.unlock(id); return result;
+    if(!preserveArtifacts){this.cleanupCandidate(id);this.cleanup(id);} this.unlock(id); return result;
+  }
+  cleanupCandidate(id) {
+    try {
+      const request=this.request(id);if(request.action!=='upgrade')return;
+      const candidate=path.join(this.base,'releases',request.target.version+'-'+request.target.artifact_sha256.slice(0,16)+'-'+id);
+      if(!fs.existsSync(candidate))return;
+      this.checkManaged(candidate,'directory');
+      if(this.currentPath()===candidate)return;
+      try{if(boundedJSON(this.checkManaged(path.join(this.base,'previous.json'))).release_path===candidate)return;}catch(error){if(!absent(error))return;}
+      for(const other of fs.readdirSync(path.join(this.base,'updates'))){
+        if(other===id||!OP.test(other))continue;
+        const state=this.state(other);if(['succeeded','rolled_back','failed'].includes(state.status))continue;
+        const value=this.request(other);
+        if(value.previous_path===candidate||value.rollback_source?.release_path===candidate)return;
+        try{if(boundedJSON(this.checkManaged(path.join(this.opDir(other),'approved-target.json'))).release_path===candidate)return;}catch(error){if(!absent(error))return;}
+      }
+      fs.rmSync(candidate,{recursive:true,force:true});
+    } catch { /* An uncertain reference preserves the candidate. */ }
   }
   cleanup(id) {
     // Keep the small audit receipt and rollback files; archive and unpacked
@@ -657,6 +715,8 @@ export class AgentMaintenance {
     const stopWatching = () => { if (handleSignals) { process.removeListener("SIGTERM", onTerminate); process.removeListener("SIGINT", onTerminate); } };
     if (handleSignals) { process.on("SIGTERM", onTerminate); process.on("SIGINT", onTerminate); }
     let changed = false;
+    this.hardDeadline=this.elapsed()+HARD_MS-WATCHDOG_MARGIN_MS;
+    this.phase(this.elapsed()+PREPARE_MS,'preparing_timeout');
     try {
       cancelled(preparingSignal);
       this.save(id, { status: "preparing" });
@@ -709,14 +769,18 @@ export class AgentMaintenance {
         this.atomic(path.join(directory,'approved-helper-service'),fs.readFileSync(packagedHelper),0o644);
       }
       this.atomic(path.join(directory,"approved-service"),approvedService,0o644);
+      this.atomic(path.join(directory,'approved-launcher'),fs.readFileSync(this.checkManaged(launcher)),0o755);
+      this.atomic(path.join(directory,'approved-target.json'),{schema:1,release_path:candidate,fingerprint:this.fingerprint(candidate,path.join(directory,'approved-launcher'),path.join(directory,'approved-service'),path.join(directory,'approved-helper-service')).fingerprint});
       await nextTurn();
-      cancelled(preparingSignal);
+      cancelled(preparingSignal); this.checkBudget();
+      if(this.hardDeadline-this.elapsed()<HEALTH_MS+(request.confirm_timeout_seconds??180)*1000+RESTORE_MS)fail('maintenance_budget_exhausted');
       // Only preparing supports cooperative termination. After this boundary
       // the original durable switch/restore protocol remains authoritative;
       // an uncatchable exit must still be reconciled as unknown by the server.
       this.save(id, { status: "switching" });
       stopWatching();
       changed = true;
+      this.phase(Math.min(this.hardDeadline-RESTORE_MS,this.elapsed()+HEALTH_MS),'local_health_timeout');
       this.command("systemctl", ["stop", "lightmoni-agent.service"]);
       if(this.runtimeMode()==='root'){
         this.command('systemctl',['stop','lightmoni-agent-helper.service']);
@@ -751,6 +815,7 @@ export class AgentMaintenance {
         await this.sleep(1000);
       }
       if (!healthy) fail("local_health_failed");
+      this.phase(Math.min(this.hardDeadline-RESTORE_MS,this.elapsed()+Math.max(0,deadline-this.now())),'confirmation_timeout');
       while (this.now() < deadline) {
         if (fs.existsSync(path.join(directory, "rollback-request.json"))) fail("rollback_requested");
         if (fs.existsSync(path.join(directory, "commit-request.json"))) {
@@ -773,9 +838,163 @@ export class AgentMaintenance {
         try { return await this.restore(id, safeCode(error)); }
         catch { return this.save(id, { status: "rollback_failed", error_code: "rollback_failed" }); }
       }
+      this.phaseDeadline=null;
       const result = this.save(id, { status: "failed", error_code: safeCode(error), finished_at: this.timestamp() });
-      this.cleanup(id); if (this.ownsLock(id)) this.unlock(id); return result;
-    } finally { stopWatching(); }
+      this.cleanupCandidate(id); this.cleanup(id); if (this.ownsLock(id)) this.unlock(id); return result;
+    } finally { stopWatching(); this.phaseDeadline=null; this.hardDeadline=null; }
+  }
+  exitEvidenceScript(id) {
+    const directory=this.opDir(id), quote=value=>"'"+value.replace(/'/g,"'\\''")+"'";
+    return [
+      '#!/bin/sh','set -eu','PATH=/usr/bin:/bin; export PATH','umask 077',
+      'case "${SERVICE_RESULT:-unknown}" in success|resources|timeout|exit-code|signal|core-dump|watchdog|start-limit-hit|oom-kill|protocol) result=$SERVICE_RESULT;; *) result=unknown;; esac',
+      'case "${EXIT_CODE:-unknown}" in exited|killed|dumped) code=$EXIT_CODE;; *) code=unknown;; esac',
+      'status=${EXIT_STATUS:-0}',
+      'case "$status" in TERM|SIGTERM) status=15;; KILL|SIGKILL) status=9;; INT|SIGINT) status=2;; ABRT|SIGABRT) status=6;; SEGV|SIGSEGV) status=11;; *[!0-9]*|"") status=0;; esac',
+      '[ "${#status}" -le 3 ] && [ "$status" -le 255 ] || status=0',
+      // printf %d normalizes leading zeroes without evaluating input as shell.
+      'status=$(printf "%d" "$status" 2>/dev/null) || status=0',
+      'resource=""',
+      'while IFS=: read -r hierarchy controllers group; do',
+      '  if [ "$hierarchy" = 0 ] && [ -z "$controllers" ]; then',
+      '    memory=""; IFS= read -r memory < "/sys/fs/cgroup$group/memory.peak" 2>/dev/null || memory=""',
+      '    case "$memory" in *[!0-9]*|"") ;; *) [ "${#memory}" -le 15 ] && resource=",\\"memory_peak_bytes\\":$memory";; esac',
+      '  fi','done < /proc/self/cgroup',
+      'directory='+quote(directory), 'temporary="$directory/.unit-exit.$$.json"',
+      'trap \'rm -f "$temporary"\' EXIT HUP INT TERM',
+      '(set -C; printf \'{"schema":1,"result":"%s","exit_code":"%s","exit_status":%s%s}\\n\' "$result" "$code" "$status" "$resource" > "$temporary") || exit 0',
+      'mv -f "$temporary" "$directory/unit-exit.json"','',
+    ].join('\n');
+  }
+  assertWorkerStopped(id) {
+    const unit='lightmoni-agent-update-'+id+'.service';
+    const output=this.command('systemctl',['show',unit,'--property=LoadState,ActiveState,MainPID,ControlPID,ControlGroup,Job']);
+    if(typeof output!=='string'||output.length>8192)fail('recovery_unit_unverifiable');
+    const values={};
+    for(const line of output.trim().split('\n')){const equal=line.indexOf('=');if(equal<1)fail('recovery_unit_unverifiable');const key=line.slice(0,equal);if(key in values)fail('recovery_unit_unverifiable');values[key]=line.slice(equal+1);}
+    if(!['loaded','not-found'].includes(values.LoadState)||!['inactive','failed'].includes(values.ActiveState)
+      ||!['','0'].includes(values.MainPID)||!['','0'].includes(values.ControlPID)||!['','0'].includes(values.Job))fail('recovery_worker_running');
+    const expected='/system.slice/'+unit, group=values.ControlGroup;
+    if(typeof group!=='string'||group&&group!==expected)fail('recovery_cgroup_unverifiable');
+    const cgroup=this.p('/sys/fs/cgroup'+(group||expected));
+    try {
+      this.checkManaged(cgroup,'directory');
+      const events=this.boundedText(path.join(cgroup,'cgroup.events'),4096),procs=this.boundedText(path.join(cgroup,'cgroup.procs'),4096);
+      if(!/^populated 0$/m.test(events)||procs.trim())fail('recovery_worker_running');
+    } catch(error) { if(!absent(error))throw error; }
+    const processes=fs.readdirSync(this.p('/proc')).filter(value=>/^\d+$/.test(value));
+    if(processes.length>100000)fail('recovery_processes_unverifiable');
+    const worker=path.join(this.opDir(id),'worker.mjs');
+    for(const pid of processes){
+      this.checkBudget();
+      let args;
+      try{args=this.boundedText(this.p('/proc/'+pid+'/cmdline')).split('\0');}
+      catch(error){if(absent(error)||error?.code==='ESRCH')continue;throw error;}
+      if(args.includes(worker)||args.some((value,index)=>value==='worker'&&args[index+1]===id))fail('recovery_worker_running');
+    }
+  }
+  validateRecovery(input) {
+    const keys=['operation_id','expected_agent_id','expected_fingerprint','expected_runtime_mode','expected_permission_generation','expected_target'];
+    if(!input||Object.keys(input).length!==keys.length||Object.keys(input).some(key=>!keys.includes(key))||!OP.test(input.operation_id??'')||!ID.test(input.expected_agent_id??'')||!SHA.test(input.expected_fingerprint??'')
+      ||!['user','root'].includes(input.expected_runtime_mode)||!Number.isSafeInteger(input.expected_permission_generation)||input.expected_permission_generation<1)fail('invalid_recovery_request');
+    const target=input.expected_target,targetKeys=['version','source_revision','build_id','state_schema','artifact_sha256','arch'];
+    if(!target||Object.keys(target).length!==targetKeys.length||Object.keys(target).some(key=>!targetKeys.includes(key))||!VERSION.test(target.version??'')||!REVISION.test(target.source_revision??'')||!VERSION.test(target.build_id??'')
+      ||target.state_schema!==1||!SHA.test(target.artifact_sha256??'')||!['amd64','arm64'].includes(target.arch))fail('invalid_recovery_request');
+    const request=this.request(input.operation_id),state=this.state(input.operation_id);
+    if(request.operation_id!==input.operation_id||request.expected_agent_id!==input.expected_agent_id||request.expected_fingerprint!==input.expected_fingerprint||state.agent_id!==input.expected_agent_id||state.from.fingerprint!==input.expected_fingerprint
+      ||targetKeys.some(key=>request.target?.[key]!==target[key]||state.target?.[key]!==target[key]))fail('recovery_approval_changed');
+    if(this.identity()!==input.expected_agent_id||this.runtimeMode()!==input.expected_runtime_mode||this.runtimeGeneration()!==input.expected_permission_generation)fail('recovery_identity_changed');
+    return {request,state};
+  }
+  verifyOriginalHealth(request) {
+    if(this.currentPath()!==request.previous_path||this.fingerprint(request.previous_path).fingerprint!==request.expected_fingerprint||this.identity()!==request.expected_agent_id)fail('recovery_original_changed');
+    this.assertOrdinaryService();const helperActive=this.assertHelperMode(this.runtimeMode());
+    const active=this.system('ActiveState');
+    if(request.previous_active?active!=='active':!['inactive','failed'].includes(active))fail('recovery_original_unhealthy');
+    const local=this.localStatus(),meta=this.metadata(request.previous_path);
+    if(local.agent_id!==request.expected_agent_id||!Number.isSafeInteger(local.runtime?.uid)||local.runtime.uid<=0||!Number.isSafeInteger(local.runtime?.gid)||local.runtime.gid<=0
+      ||local.runtime.mode!==this.runtimeMode()||local.runtime.permission_generation!==this.runtimeGeneration()
+      ||['version','source_revision','build_id','state_schema','artifact_sha256','arch'].some(key=>local.release?.[key]!==meta[key]))fail('recovery_original_unhealthy');
+    return {local,helperActive};
+  }
+  validateRecoverySnapshots(id,request) {
+    const directory=this.opDir(id),mode=this.runtimeMode();
+    this.ordinaryService(path.join(directory,'previous-service'));
+    if(mode==='root')this.assertRetainedHelper(path.join(directory,'previous-helper-service'));
+    const original=this.fingerprint(request.previous_path,path.join(directory,'previous-launcher'),path.join(directory,'previous-service'),path.join(directory,'previous-helper-service'));
+    if(original.fingerprint!==request.expected_fingerprint)fail('recovery_original_snapshot_changed');
+    const uninstaller=boundedJSON(this.checkManaged(path.join(directory,'previous-uninstaller.json')),4096);
+    if(typeof uninstaller.present!=='boolean'||typeof uninstaller.directory_present!=='boolean')fail('invalid_uninstaller_snapshot');
+    if(uninstaller.present&&(!SHA.test(uninstaller.sha256??'')||this.fileDigest(path.join(directory,'previous-uninstaller'))!==uninstaller.sha256||!Number.isInteger(uninstaller.mode)||uninstaller.mode<0||uninstaller.mode>0o777||(uninstaller.mode&0o022)))fail('invalid_uninstaller_snapshot');
+    const approved=boundedJSON(this.checkManaged(path.join(directory,'approved-target.json')),4096);
+    const targetPath=request.action==='upgrade'?path.join(this.base,'releases',request.target.version+'-'+request.target.artifact_sha256.slice(0,16)+'-'+id):request.rollback_source?.release_path;
+    if(approved.schema!==1||!SHA.test(approved.fingerprint??'')||approved.release_path!==targetPath)fail('recovery_target_snapshot_changed');
+    this.ordinaryService(path.join(directory,'approved-service'));
+    if(mode==='root')this.assertPackagedHelper(path.join(directory,'approved-helper-service'));
+    const target=this.fingerprint(targetPath,path.join(directory,'approved-launcher'),path.join(directory,'approved-service'),path.join(directory,'approved-helper-service'));
+    if(target.fingerprint!==approved.fingerprint||['version','source_revision','build_id','state_schema','artifact_sha256','arch'].some(key=>target[key]!==request.target[key]))fail('recovery_target_snapshot_changed');
+    const current=this.currentPath();
+    if(current!==request.previous_path&&current!==targetPath)fail('recovery_unknown_current');
+    this.assertOrdinaryService();
+  }
+  async recover(input) {
+    if(this.recovering)fail('recovery_guard_busy');
+    this.recovering=true;
+    try{return await this.recoverTransaction(input);}finally{this.recovering=false;}
+  }
+  async recoverTransaction(input) {
+    const {request,state}=this.validateRecovery(input),id=input.operation_id,directory=this.opDir(id);
+    const approval=digest(JSON.stringify({operation_id:id,expected_agent_id:input.expected_agent_id,expected_fingerprint:input.expected_fingerprint,expected_runtime_mode:input.expected_runtime_mode,expected_permission_generation:input.expected_permission_generation,expected_target:input.expected_target}));
+    this.hardDeadline=this.elapsed()+540000;
+    this.phase(this.elapsed()+120000,'recovery_verification_timeout');
+    let acquired=false,started=false;
+    try {
+      this.assertWorkerStopped(id);
+      let journal;
+      try{journal=boundedJSON(this.checkManaged(path.join(directory,'recovery.json')),8192);}catch(error){if(!absent(error))throw error;}
+      if(journal){
+        if(journal.schema!==1||journal.approval!==approval||!['archive_preparing','restore_previous'].includes(journal.action))fail('recovery_approval_changed');
+        if(journal.status==='succeeded'){
+          if(!['failed','rolled_back'].includes(state.status))fail('recovery_receipt_changed');
+          const recovery={schema:1,status:'succeeded',action:journal.action,source_status:journal.source_status,recovered_at:journal.recovered_at};
+          return state.recovery?state:this.save(id,{recovery});
+        }
+        if((journal.action==='archive_preparing'&&state.status==='failed'&&state.error_code==='worker_interrupted_before_switch')||(journal.action==='restore_previous'&&state.status==='rolled_back'&&state.restored_fingerprint===request.expected_fingerprint)){
+          this.verifyOriginalHealth(request);
+          if(fs.existsSync(this.lock)&&!this.ownsLock(id))fail('recovery_other_lifecycle_owner');
+          if(this.ownsLock(id))this.unlock(id);
+          const recovery={schema:1,status:'succeeded',action:journal.action,source_status:journal.source_status,recovered_at:journal.recovered_at};
+          this.atomic(path.join(directory,'recovery.json'),{...journal,status:'succeeded'});
+          return this.save(id,{recovery});
+        }
+        fail('recovery_interrupted');
+      }
+      if(!['accepted','preparing','switching','waiting_confirmation','rollback_failed'].includes(state.status))fail('recovery_not_required');
+      if(fs.existsSync(this.lock)&&!this.ownsLock(id))fail('recovery_other_lifecycle_owner');
+      if(!fs.existsSync(this.lock)){fs.mkdirSync(this.lock,{mode:0o700});acquired=true;this.atomic(path.join(this.lock,'owner.json'),{operation_id:id});}
+      if(!this.ownsLock(id))fail('recovery_other_lifecycle_owner');
+      const fresh=this.validateRecovery(input);if(fresh.state.status!==state.status)fail('recovery_receipt_changed');
+      this.assertWorkerStopped(id);
+      const preparing=['accepted','preparing'].includes(state.status);
+      if(preparing)this.verifyOriginalHealth(request);else this.validateRecoverySnapshots(id,request);
+      if(this.hasOperation())fail('recovery_operation_conflict');
+      // Fence any delayed worker before the second liveness check. Never erase
+      // an existing (even partial) worker claim or replay that worker.
+      try{this.writeOnce(path.join(directory,'worker-claim.json'),{schema:1,operation_id:id,recovery_fence:true,claimed_at:this.timestamp()});}catch(error){if(error?.code!=='EEXIST')throw error;this.checkManaged(path.join(directory,'worker-claim.json'));}
+      this.assertWorkerStopped(id);
+      this.validateRecovery(input);
+      if(this.hasOperation())fail('recovery_operation_conflict');
+      const recovery={schema:1,status:'succeeded',action:preparing?'archive_preparing':'restore_previous',source_status:state.status,recovered_at:this.timestamp()};
+      const original=path.join(directory,'status-before-recovery.json');
+      try{this.writeOnce(original,fs.readFileSync(this.checkManaged(path.join(directory,'status.json'))));}catch(error){if(error?.code!=='EEXIST')throw error;this.checkManaged(original);}
+      try{this.writeOnce(path.join(directory,'recovery.json'),{...recovery,status:'started',approval});started=true;}catch(error){if(error?.code==='EEXIST')fail('recovery_guard_busy');throw error;}
+      if(!this.ownsLock(id))fail('recovery_other_lifecycle_owner');
+      let result;
+      if(preparing){result=this.save(id,{status:'failed',error_code:'worker_interrupted_before_switch',finished_at:this.timestamp(),recovery});this.unlock(id);}
+      else{result=await this.restore(id,'worker_interrupted_after_switch',{preserveArtifacts:true});result=this.save(id,{recovery});}
+      this.atomic(path.join(directory,'recovery.json'),{...recovery,approval});
+      return result;
+    } finally {if(acquired&&!started&&this.ownsLock(id))this.unlock(id);this.phaseDeadline=null;this.hardDeadline=null;}
   }
   commit(request) {
     const state = this.state(request.operation_id);
@@ -802,12 +1021,14 @@ export async function maintenanceCLI(args, input, output) {
     if (command === "worker" && args.length === 2 && OP.test(args[1])) { await maintenance.worker(args[1], { handleSignals: true }); return; }
     let bytes = ""; for await (const chunk of input) { bytes += chunk; if (Buffer.byteLength(bytes) > 32768) fail("invalid_request"); }
     const request = bytes.trim() ? JSON.parse(bytes) : {};
+    if(command==='recover'&&(args.length!==3||args[1]!=='--operation'||args[2]!==request.operation_id||!OP.test(args[2]??'')))fail('invalid_recovery_request');
     let result;
     if (command === "probe") result = maintenance.probe();
     else if (command === "start") result = await maintenance.start(request);
     else if (command === "status") result = maintenance.state(request.operation_id);
     else if (command === "commit") result = maintenance.commit(request);
     else if (command === "rollback") result = maintenance.rollback(request);
+    else if (command === "recover") result = await maintenance.recover(request);
     else fail("invalid_command");
     output(JSON.stringify(result) + "\n");
   } catch (error) { output(JSON.stringify({ error_code: safeCode(error) }) + "\n"); process.exitCode = 1; }

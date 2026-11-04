@@ -2247,3 +2247,57 @@ OpenResty 在已授权托管区域下生成 edge-<集群ID稳定散列>.<scope> 
 每个普通应用首次生成部署载荷时创建应用专用 SDK Key，ingest_keys 仅保存散列，ops_application_sdk 加密保存材料和 Key ID；重复部署复用，停用后拒绝自动替换，删除应用登记时停用并删除加密材料。载荷逐实例注入 LIGHTMONI_ENDPOINT、KEY、SERVICE、INSTANCE_ID、MACHINE_NAME、MACHINE_ID、HOST_ID、AGENT_ID、APPLICATION_ID、CLUSTER_ID、DEPLOYMENT_ID。机器资产 ID 与 Agent 观测 host.id 分离；身份属性不授予平台权限。容器和 Compose 全部服务均得到默认环境，应用自身环境优先；八种后端 SDK 的显式配置再覆盖环境，浏览器入口保持显式配置。SDK 独立直连中心，使用业务上报 Key，不接收 Agent 控制凭据。公开资源、任务、预览继续环境脱敏；现代应用日志按有效环境值和 SDK Key 模式脱敏。
 
 此架构增量的规格、契约、任务和验收见 specs/091-deployment-autoconfiguration；Doca 同步与最新版本回读证据见其 validation.md。功能分支尚未部署到线上，真实证书签发和公网传播不由本地夹具代证。
+
+## 94. Agent 维护资源预算与中断恢复（SDD093、094，功能分支待合入）
+
+### 94.1 驱动目标与职责
+
+维护应在小规格主机上保持有界资源，并让中断有可审阅的恢复入口。复用现有维护器、主机 SSH 账户、权限模式、生命周期互斥和统一执行记录，不增加服务账户或执行引擎。现场旧实现的大文件链路测得约 911 MiB 进程峰值；这说明资源压力风险，不能在缺少完整内核证据时断言曾发生 OOM。
+
+发行包摘要、复制、TAR 校验和文件指纹统一分块处理；SSH 自包含 probe 同样使用 64 KiB 分块。压缩包先解到 0600 临时 TAR，完整验证路径、类型、重复项和预算后才写出。按实际文件块、隐含目录和 inode 数量检查空间并保留系统余量；准备失败仅清理本操作新建且没有 current、previous 或其他活动引用的候选。
+
+### 94.2 期限、唯一执行与退出证据
+
+准备软期限默认 300 秒，维护 unit 的硬期限 1200 秒，平台默认观察 1260 秒；中心确认最长 180 秒。切换前必须留足确认、健康检查和恢复预算，余量不足在原服务仍运行时失败。worker 用持久 O_EXCL claim 防止第二进程或重启后重放；preparing 支持协作取消。维护 unit 固定 Nice=10、空闲 I/O 优先级、MemoryHigh=384M、MemoryMax=512M、MemorySwapMax=0、CPUQuota=50%、TasksMax=64 及 RuntimeMaxSec=1200。资源准入和硬上限共同约束维护，不能用较低 RSS 代替 cgroup 和磁盘证据。
+
+unit 退出通过独立的小型收尾脚本保留无秘密的退出及资源属性；它不写维护状态、不解锁。被 SIGKILL、OOM 或断电打断后不能承诺自动回退。平台保留 unknown 与主机互斥，先只读核对，不自动再次提交。
+
+### 94.3 HLD：核对与恢复是两个动作
+
+```mermaid
+flowchart TD
+    U[维护结果未知] --> R[只读核对原操作]
+    R --> T{可证明终态?}
+    T -->|是| A[归档原执行记录]
+    T -->|否| C[用户审阅并确认恢复]
+    C --> S[核验 SSH 账户和主机身份\n固定维护器摘要与恢复修订]
+    S --> L{unit / cgroup / worker 已停止\n锁属于本操作?}
+    L -->|否或不确定| K[保持 unknown 和互斥]
+    L -->|是| P{原事务所处阶段}
+    P -->|准备阶段| H[核验原程序指纹、身份和服务健康]
+    H -->|一致| F[归档失败：切换前中断]
+    H -->|不一致| K
+    P -->|已开始切换| V[完整核验原快照与批准目标\n当前指针只能属于二者]
+    V -->|一致| B[复用原 restore 并核验健康]
+    V -->|不一致| K
+    B -->|可证明恢复| A
+    B -->|未确认| K
+```
+
+### 94.4 LLD：固定恢复协议与审计
+
+unknown 的 GET 返回 recovery_revision，绑定原操作、审批计划及平台固定维护器摘要。管理员 POST /machines/:id/agent-updates/:operation/recover 必须显式 confirm:true、expected_revision，可选新的有效 credential_id；拒绝未知字段。更换连接凭据不改变原主机、Agent、程序、权限模式或权限代次。
+
+平台从原审批记录产生 operation_id、expected_agent_id、expected_fingerprint、expected_runtime_mode、expected_permission_generation、expected_target；不接收任意路径或命令。固定维护器经 SSH stdin 写入 root 私有临时目录、核验 SHA 后执行，以主机级 flock 串行恢复，不覆盖安装的维护器，不签发新下载凭据。
+
+恢复前必须证明对应 systemd unit 无运行或控制 PID、无待启动 job、cgroup 无进程，也无本操作 worker。已有生命周期锁必须属于本操作；锁缺失先取得本次锁。准备阶段只有原 current 路径、指纹、身份和服务健康均一致才写 failed/worker_interrupted_before_switch。切换后要求完整原快照及批准目标指纹，并且 current 仅指向原或批准目标，再复用 restore。历史缺少必要快照或任何证据不明确时拒绝猜测恢复。
+
+保留 worker claim、原状态备份、包、候选及恢复审计。恢复核验账户、凭据修订、操作者、时间和维护器 SHA 进入原记录。重复恢复只能返回同一可证明终态，不重复切换；恢复响应丢失保持 unknown，服务端持久保存 recovery_requires_verification 门禁；普通 GET、刷新和重开页面不清除门禁，后续 recover 返回 409/agent_update_recovery_verification_required，只有显式 reconcile 成功完成独立核验才清除。核对历史 failed/rolled_back 回执时，同样重新探测原程序指纹、运行模式、权限代次、Agent/helper 与原服务状态，不能凭历史健康回执归档。恢复本身若在 started 后、终态落盘前再次中断，返回 recovery_interrupted 并保留互斥，不猜测或重放。恢复不重放 apply/start/worker，不重新接入，不裸清锁。
+
+### 94.5 操作体验与验收边界
+
+升级记录、发行目录和历史 GET 复用有界读取与卸载取消；读取失败保留最后状态，用户仍可关闭弹窗。unknown 分开提供“只读核对”和“恢复中断维护”，恢复需审阅影响；缺失或到期的凭据可补录、复查权限后回到原操作。读失败不得触发重复写，恢复响应未确认时不允许盲目重试。
+
+最终维护器在专用 2 GiB Linux/systemd 虚拟机上用真实 80 MB 发行包验证文件链路，另加 1 GiB 内存与 50% CPU 背景负载；进程峰值约 94.7 MiB，cgroup 峰值约 342.8 MiB，未触发 OOM，额外磁盘占用约 734 MiB。Agent 命令在该资源夹具中模拟，不能当作真实 Agent 升级成功。独立 cgroup 的真实 OOM、SIGKILL、超时等退出验证保留了退出证据且没有改写状态或解锁。
+
+规格、契约和逐项证据见 specs/094-maintenance-reliability。生产现场回测与本机隔离故障注入分别记录，不用模拟服务或文件基准代证真实 SSH、systemd、Agent 与中心的端到端成功，也不承诺零故障。
