@@ -1,5 +1,4 @@
-import {blockingAgentJobSQL} from './agent-job-fence.js';
-import { hasActiveTaskRuns } from "./agent-hosts.js";
+import {maintenanceWorkBusy,prepareMachineMaintenance} from './machine-maintenance.js';
 import { id } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler } from "../shared/types.js";
@@ -34,7 +33,7 @@ export function createUninstallationSchema(deps: Dependencies) {
 export function registerMachineUninstallations(deps: Dependencies, access: Access) {
   const { db, router } = deps, at = () => deps.now().toISOString();
   const table = (name: string) => !!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", name);
-  const taskBusy = (agentID: string, machineID="") => hasActiveTaskRuns(db, agentID, machineID) || !!(agentID && table("agent_jobs") && db.get(`SELECT id FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)} LIMIT 1`, agentID));
+  const taskBusy = (agentID: string, machineID="") => maintenanceWorkBusy(deps,agentID,machineID);
   const pending = (machineID: string) => db.get<{status: UninstallationStatus}>("SELECT status FROM machine_uninstallations WHERE machine_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", machineID);
   const assertFree = (machineID: string) => { if (pending(machineID)) fail(409, "此主机有待审批、运行中或结果未知的 Agent 卸载，请先取消或核对"); };
   const decode = (row: any) => ({ ...row, plan: JSON.parse(row.plan_json), receipt: JSON.parse(row.receipt_json), plan_json: undefined, receipt_json: undefined });
@@ -50,11 +49,10 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     return input;
   };
   const executionIdentity=(machineID:string)=>table('privileged_executors')?db.get<any>("SELECT id,agent_id,install_generation FROM privileged_executors WHERE machine_id=? AND state!='revoked' ORDER BY install_generation DESC LIMIT 1",machineID)??null:null;
-  const relation = (machine: MachineSummary, agentID: string, mode: string) => {
+  const relation = (machine: MachineSummary, agentID: string, mode: string, preparationToken='') => {
     const executionIdentity=table("privileged_executors") && db.get<any>("SELECT id,agent_id FROM privileged_executors WHERE machine_id=? AND state!='revoked' LIMIT 1",machine.id);
     if(executionIdentity && (!table("machine_agent_runtime") || !db.get("SELECT machine_id FROM machine_agent_runtime WHERE machine_id=? AND agent_id=? AND runtime_mode='root'",machine.id,executionIdentity.agent_id) || executionIdentity.agent_id!==machine.agent_id || !access.revokeUnifiedRuntime)) fail(409,"此主机的签名 helper 身份与 Agent 安装不一致，请先核对归属");
-    if(table("privileged_jobs") && db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='')) LIMIT 1",machine.id)) fail(409,"主机有未结束的高权限任务，请先完成或核对");
-    assertNoPendingAgentUpdate(db, agentID, machine.id);
+    assertNoPendingAgentUpdate(db, agentID, machine.id,preparationToken);
     assertNoPendingMachineInstallation(db,machine.id,agentID,true);
     if (mode==="standard" && machine.agent_id && machine.agent_id!==agentID) fail(409,"远端 Agent 身份与主机关联不一致");
     if (mode==="standard" && (!agentID || !table("agent_credentials") || !db.get("SELECT id FROM agent_credentials WHERE agent_id=? LIMIT 1",agentID))) fail(409,"远端 Agent 不是本平台已登记的独立凭据节点，可审阅 SSH 恢复卸载");
@@ -74,8 +72,8 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     const output=await access.runner({machine:live.machine,credentialID:credential.id,...access.authentication(machine.id,credential),command:agentRemovalProbeCommand(),signal,port:machine.port,timeoutMs:60_000});
     access.markCredentialUsed(credential.id); return parseAgentRemovalProbe(output.stdout);
   };
-  const assertObservation = (machine: MachineSummary, observed: AgentRemovalObservation, mode: string) => {
-    relation(machine,observed.agent_id,mode);
+  const assertObservation = (machine: MachineSummary, observed: AgentRemovalObservation, mode: string, preparationToken='') => {
+    relation(machine,observed.agent_id,mode,preparationToken);
     if (!observed.paths_safe || observed.identity_state==="unsafe") fail(409,"远端 Agent 路径不安全，请人工核对");
     if (!observed.unit_managed) fail(409,"远端 Agent 使用非受管服务文件，请人工核对");
     if (observed.lifecycle_locked || observed.operation_lock) fail(409,"远端 Agent 存在生命周期锁或未完成操作，请先核对");
@@ -126,17 +124,18 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     access.idle(ctx.params.id);assertFree(ctx.params.id);
     const {machine,credential}=access.credential(ctx.params.id,input.credential_id),check=access.checked(machine,input.check_id,credential.id);
     relation(machine,"",mode==="standard"?"recovery":mode);
+    const preparation=prepareMachineMaintenance(deps,machine.id,machine.agent_id);
     access.busy.add(machine.id);
     try{
-      const observed=await probe(machine,credential,ctx.signal);assertObservation(machine,observed,mode);
+      const observed=await probe(machine,credential,ctx.signal);assertObservation(machine,observed,mode,preparation.token);
       if(mode==="standard"&&observed.installation!=="present" || mode==="recovery"&&observed.installation==="absent"&&!observed.config_present&&!observed.data_present) fail(409,"远端 Agent 已移除，没有待卸载内容");
       const current=access.get(machine.id),selected=access.credential(machine.id,credential.id);assertSSHAccount(selected.machine,sshAccountSnapshot(machine));if(sshCredentialRevision(selected.credential)!==sshCredentialRevision(credential))fail(409,"ssh_credential_changed");access.checked(selected.machine,input.check_id,credential.id);assertFree(machine.id);
       if(access.revision(current)!==access.revision(machine)||current.agent_id!==machine.agent_id||current.name!==machine.name)fail(409,"主机在检查期间变化，请重新计划");
       const operationID=id(),plan={mode,reason:reason.trim(),purge,machine:{id:machine.id,name:machine.name,address:machine.address,port:machine.port,agent_id:machine.agent_id},agent_id:observed.agent_id,observation:observed,ssh_account:sshAccountSnapshot(machine),credential_revision:sshCredentialRevision(credential),execution_identity:executionIdentity(machine.id),credential_revocation_scope:revocationScope(current,observed),credential:{id:credential.id,method:credential.method,retention:credential.retention,expires_at:credential.expires_at},check_id:check.id,target_revision:access.revision(machine),expires_at:check.expires_at,
         steps:["核对固定 SSH 目标和已审阅的远端证据","停止并禁用受管 Agent 与签名 helper 服务","复验任务账本后移除固定程序、helper 状态",purge?"明确清除 Agent 配置、身份和缓存":"保留 Agent 配置、身份和缓存","核验结果并仅撤销确属本主机的凭据"],retained_paths:purge?["/var/lib/lightmoni-agent/operations"]:retainedAgentPaths,removed_paths:purge?[...removedAgentPaths,"/etc/lightmoni-agent","/var/lib/lightmoni-agent/identity.json"]:removedAgentPaths,warnings:["业务数据、系统账户和平台主机记录保留。",purge?"Agent 配置、身份及缓存将清除；应用运行目录和持久数据保留，完成后可全新接入。":"保留数据会继续触发 fresh 保护，重新接入前需明确清除。","派发后中断进入未知结果，仅可只读核对，不自动重放。"]};
-      db.transaction(()=>{assertFree(machine.id);relation(current,observed.agent_id,mode);db.run("INSERT INTO machine_uninstallations(id,machine_id,agent_id,credential_id,status,plan_json,created_at,created_by) VALUES(?,?,?,?,? ,?,?,?)",operationID,machine.id,observed.agent_id,credential.id,"awaiting_approval",JSON.stringify(plan),at(),ctx.user.id);});
+      db.transaction(()=>{assertFree(machine.id);relation(current,observed.agent_id,mode,preparation.token);db.run("INSERT INTO machine_uninstallations(id,machine_id,agent_id,credential_id,status,plan_json,created_at,created_by) VALUES(?,?,?,?,? ,?,?,?)",operationID,machine.id,observed.agent_id,credential.id,"awaiting_approval",JSON.stringify(plan),at(),ctx.user.id);});
       ctx.json({...decode(row(machine.id,operationID)),review_url:`/machines?machine=${machine.id}&uninstallation=${operationID}`},201);
-    }finally{access.busy.delete(machine.id);}
+    }finally{preparation.release();access.busy.delete(machine.id);}
   }));
   router.post(base+"/:uninstallationId/cancel",access.safe(async ctx=>{deps.auth.requireAdmin(ctx);await body(ctx,[]);access.idle(ctx.params.id);const operation=row(ctx.params.id,ctx.params.uninstallationId);if(!["awaiting_approval","cancelled"].includes(operation.status))fail(409,"只能取消尚未执行的卸载计划");db.run("UPDATE machine_uninstallations SET status='cancelled',finished_at=? WHERE id=? AND status='awaiting_approval'",at(),operation.id);ctx.json(decode(row(operation.machine_id,operation.id)));}));
   router.post(base+"/:uninstallationId/apply",access.safe(async ctx=>{

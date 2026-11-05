@@ -682,3 +682,24 @@ test("same revision configuration repairs actual memory and durable file drift",
   writeFileSync(join(cfg.data_dir,'remote-config.json'),'corrupt-json');
   await a.controlOnce(true);assert.equal(a.configurationObservation().persisted_hash,expected);
 });
+
+test('authenticated center machine names enrich new telemetry while queued batches retain their original identity',async t=>{
+  let name='zz-bj-1';
+  const remote=normalizeRemote({revision:'names',collect_interval_seconds:3,host_enabled:false,host_collectors:[],probes:[]});
+  const center=await mock(t,(req,res)=>{
+    res.writeHead(200,{'Content-Type':'application/json'});
+    const id=req.url?.split('/')[4];
+    res.end(JSON.stringify(req.method==='GET'?remote:{agent_id:id,machine_id:'registered-machine',machine_name:name}));
+  });
+  const a=make(t,{endpoint:center.url});await a.controlOnce(false);
+  const before=batch('test','first');a.accept(before);const saved=Buffer.from(a.queue.next()!.payload);
+  const resource=decodeOTLP('logs',saved,'application/x-protobuf') as any;
+  assert.equal(resourceString(resource.resourceLogs[0].resource,'host.name'),'zz-bj-1');
+  assert.equal(resourceString(resource.resourceLogs[0].resource,'lightmoni.machine_id'),'registered-machine');
+  name='生产主机';await a.controlOnce(true);a.accept(before);
+  assert.deepEqual(a.queue.next()!.payload,saved);
+  a.queue.complete(before.id);const next=batch('test','second');a.accept(next);
+  const current=decodeOTLP('logs',a.queue.next()!.payload,'application/x-protobuf') as any;
+  assert.equal(resourceString(current.resourceLogs[0].resource,'host.name'),'生产主机');
+  assert.equal(resourceString(current.resourceLogs[0].resource,'service.name'),'test');
+});

@@ -90,6 +90,8 @@ export class Agent {
   private runtimeInstance = nowNano().toString();
   private closed = false;
   private taskGeneration = 0;
+  private machineName = hostname();
+  private machineID = '';
   constructor(readonly config: Config) {
     validateConfig(config);
     this.identity = loadIdentity(config.data_dir);
@@ -285,10 +287,15 @@ export class Agent {
         409,
         "batch ID conflicts with previously accepted payload",
       );
-    const identity = receipt?.identity ?? this.identity;
+    // A durable receipt acknowledges these exact input bytes. Do not re-enrich
+    // an accepted batch when the registered host name changes during a retry.
+    if(receipt)return;
+    const identity = this.identity;
     for (const r of rs) {
       resourceSet(r, "host.id", identity.host_id);
       resourceSet(r, "lightmoni.agent_id", identity.agent_id);
+      resourceSet(r, "host.name", this.machineName);
+      if(this.machineID)resourceSet(r,"lightmoni.machine_id",this.machineID);
     }
     b.payload = encodeOTLP(b.signal, msg);
     b.content_type = "application/x-protobuf";
@@ -302,7 +309,7 @@ export class Agent {
         b,
         hash,
         identity,
-        receipt?.received_ns ?? now,
+        now,
         cursor,
       );
     } catch (e) {
@@ -424,6 +431,11 @@ export class Agent {
       "POST",
       status,
     );
+    if(heartbeat?.agent_id===this.identity.agent_id) {
+      const readable=(v:unknown)=>typeof v==='string'&&v.trim()&&Buffer.byteLength(v)<=128&&!/\p{Cc}/u.test(v)?v.trim():'';
+      this.machineName=readable(heartbeat.machine_name)||this.machineName;
+      this.machineID=readable(heartbeat.machine_id)||this.machineID;
+    }
     this.acknowledgeRuntime(status.runtime_events);
     const remote = await this.controlRequest(
       "/api/v1/agents/" + this.identity.agent_id + "/config",

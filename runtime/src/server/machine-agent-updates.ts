@@ -1,11 +1,10 @@
-import {blockingAgentJobSQL} from './agent-job-fence.js';
+import {maintenanceWorkBusy,prepareMachineMaintenance} from './machine-maintenance.js';
 import { createReadStream, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { hash, id, token } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import type { Dependencies, Handler, Module } from "../shared/types.js";
-import { hasActiveTaskRuns } from "./agent-hosts.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import { assertNoPendingAgentRuntime } from "./machine-agent-runtime-guard.js";
 import { validAgentRuntimeObservation } from "./machine-agent-runtime.js";
@@ -127,8 +126,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     rollout_id: membership?.rollout_id ?? "", rollout_review_url: membership ? `/machines?agent_rollout=${encodeURIComponent(membership.rollout_id)}` : "" };
   };
   const list = (machineID: string) => db.all<any>("SELECT * FROM machine_agent_updates WHERE machine_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100", machineID).map(view);
-  const taskBusy = (machineID: string, agentID: string) => hasActiveTaskRuns(db, agentID, machineID)
-    || table("agent_jobs") && Boolean(db.get(`SELECT id FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)} LIMIT 1`, agentID));
+  const taskBusy = (machineID: string, agentID: string) => maintenanceWorkBusy(deps,agentID,machineID);
   const assertTarget = (machine: MachineSummary) => {
     assertNoPendingAgentRuntime(db,machine.id,machine.agent_id);
     assertNoPendingMachineInstallation(db,machine.id,machine.agent_id,true);
@@ -191,6 +189,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     access.idle(machineID); assertFree(machineID);
     const { machine, credential } = access.credential(machineID, input.credential_id);
     assertTarget(machine);
+    const preparation=prepareMachineMaintenance(deps,machine.id,machine.agent_id);
     access.busy.add(machine.id);
     try {
       const observed = await probe(machine, credential, signal); validateProbe(machine, observed, input.action !== "rollback");
@@ -231,7 +230,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
           operationID, machine.id, machine.agent_id, credential.id, input.action, JSON.stringify(planBody), at(), actorID);
       });
       return view(row(machine.id, operationID));
-    } finally { access.busy.delete(machine.id); }
+    } finally { preparation.release();access.busy.delete(machine.id); }
   };
   const assertPlan = (operation: any, beforeStart = false, requireCredential = true) => {
     const machine = access.get(operation.machine_id), body = JSON.parse(operation.plan_json);

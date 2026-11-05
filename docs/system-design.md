@@ -2427,3 +2427,30 @@ flowchart LR
 管理员通过 `GET /api/v1/reconciliation/providers` 和 `GET/POST /api/v1/machines/:id/reconciliation` 分页查看或请求核对。清单仅返回来源、目标、摘要、非秘密文件/端口/域名元数据、状态、最近观测和重试时间。新管理器注册 collect/reconcile 即可接入，不修改调度核心。
 
 本次验收包括持久恢复、原子快照、加密、跨机器隔离、依赖、退避、迟到回执、Agent 同版本漂移、实际证书损坏/权限修复、旧路径清理及部署内容比对；不发布生产镜像、不修改生产机器。规格与证据见 `specs/096-machine-reconciliation/`。Doca 基线对应原生 SDD096 章节与流程图，写入/回读证据保存于该目录 evidence。
+
+## 97. 维护预约与可读遥测身份（SDD097）
+
+SDD096 初始实现之后，用户已授权合入、Docker/GitHub 测试版发行和 1Panel 中心更新；本节生产验收与修复仅操作 zz-bj-1。固定成品身份、中心健康、/data 持久挂载与摘要回拉记录见 SDD096 发行证据；不把尚未完成的 Agent 和全功能验收描述为通过。
+
+`machine-maintenance.ts` 统一维护可等待工作的判定。未领取、attempts=0、无 lease，且中心私有加密载荷证明为 node/workload/gateway.inspect 的受管只读核验可以等待维护，原任务记录保留；helper 已开始、用户脚本、部署/卸载等写操作以及未核对的 unknown 仍阻塞。待执行的用户主动 inspect 同样只读，可以等待。按钮能力与维护后端使用相同判定，归属或载荷无法证明时保守阻塞。
+
+规划前在 SQLite `machine_maintenance_preparations` 持久记录 machine/agent、随机 token 和最长 120 秒准备期限，覆盖只读 SSH 检查期间。现有 Agent 更新守卫统一检查准备预约，阻止新任务派发和领取；完成规划后由原有 awaiting_approval 更新/卸载记录接管。成功或失败均只按自身 token 释放准备预约，过期仅解除只读规划门禁；已执行维护的 running/verifying/unknown 状态继续由原有持久记录及核对流程保护。
+
+```mermaid
+flowchart LR
+  U[用户维护请求] --> P[(短期持久准备预约)]
+  P --> S[只读 SSH 检查]
+  S --> A[原有待审批维护记录]
+  A --> E[执行与实际身份核验]
+  E --> R[终态或正常恢复后继续任务]
+  H[认证心跳返回机器名] --> N[Agent 为新批次补机器名]
+  N --> Q[冻结 payload 与 input_hash 回执]
+  Q --> B[中心验证归属并补受管名称]
+  B --> T[(日志指标查询与大盘)]
+```
+
+Agent 只使用当前认证心跳中相同 agent_id 的 machine_name/machine_id，机器名缺失时降级本机 hostname；host.name 和 service.name 供人阅读，host.id、lightmoni.machine_id、lightmoni.agent_id 继续绑定归属。名称变化仅影响后续新批次。已接受的同 ID/同 input_hash 批次直接依据持久回执重复确认，不用当前名称重新生成冻结字节；同 ID 不同内容仍拒绝，离线队列与游标的事务语义不变。
+
+受管容器及网站日志/指标仍先按 deployment/application/machine 和 Agent 身份核验，中心再从受信主机与应用记录写入 machine_name、service_name 及 resource_json 中的 host.name/service.name；不可用伪造容器标签或 SDK 名称扩展权限。服务名缺失时使用应用名，不把随机应用 ID 当可读服务名。业务 SDK 既有机器名环境注入和服务配置保持兼容。
+
+规格、契约、维护队列和名称回归、线上逐项矩阵见 `specs/097-production-operations/`。同一 PR 同步 Doca 原生 SDD097 章节/流程图，回读目标文字、节点与连线，并核对原有内容和原生图保留。
