@@ -71,6 +71,7 @@ class CenterEndpoints:
                         if not self.manifest or raw["revision"] != self.manifest["revision"]:
                             self.failed.clear()
                         self.manifest = dict(raw, endpoints=endpoints)
+                        self.failed.pop(source, None)
                         verified = source
                         break
                     except PermissionError:

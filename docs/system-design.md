@@ -2458,3 +2458,5 @@ Agent 只使用当前认证心跳中相同 agent_id 的 machine_name/machine_id�
 中心内部 Agent heartbeat/运行事件投影同样从受信 managed_machines/agents 绑定补 host.name、lightmoni.machine_id 和名称属性；不依赖旧 Agent 已实现新名称字段。内置 Agent/SDK 大盘和通用主机模板以机器名/服务名及短ID区分同名实例，稳定完整ID仍保留原列。SQLite system_dashboard_seeds 使用 readable-telemetry-097-v1 一次标记，只有仍精确匹配旧配方的内置查询才刷新，并追加 dashboard_versions；用户SQL、标题、布局、设置和已删除大盘均保留，后续启动不覆盖用户再次编辑。
 
 历史 root 常驻 Agent 的已知 unit 通过固定SHA识别，升级预检只返回原版本受管卸载再重装的409指引，不生成可执行升级、不自动转换账户或执行身份。未知安装返回固定受管检查错误，不透出远端正文；新统一Agent/签名helper的身份和生命周期门禁保持不变。
+
+TypeScript（含Agent）、Go、Python、Rust的端点选择器在一次完整的新鲜发现成功后解除该source的旧传输冷却：已有中心先用无凭据identity核对center_id，再认证获取并验证清单，版本未变化也可证明入口已恢复。不同中心、无效清单、401/403或TLS失败均不能解除；其他未验证入口仍保留冷却。选择器仅选择入口，单次request最多发送一次业务正文，丢ACK仍由原有冻结批次队列决定重试，不自动跨入口重放POST。

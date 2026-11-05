@@ -138,3 +138,67 @@ func TestCenterEndpointWaitHonorsDeadline(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifiedRefreshRecoversCooledPublicEntrance(t *testing.T) {
+	mode := "same"
+	var mu sync.Mutex
+	authorized := 0
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path == "/v1/center-identity" {
+			if r.Header.Get("Authorization") != "" {
+				t.Error("identity probe sent credentials")
+			}
+			identity := "same"
+			if mode == "foreign" {
+				identity = mode
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"center_id": identity})
+			return
+		}
+		authorized++
+		if mode == "denied" {
+			w.WriteHeader(403)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(centerManifest{Version: 1, CenterID: "same", Revision: "unchanged", Endpoints: []centerAddress{{server.URL, "public"}}})
+	}))
+	defer server.Close()
+	e := newCenterEndpoints(server.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := e.resolve(ctx, http.DefaultClient, "fixture", false); err != nil {
+		t.Fatal(err)
+	}
+	e.failure(server.URL)
+	if selected, err := e.resolve(ctx, http.DefaultClient, "fixture", true); err != nil || selected != server.URL {
+		t.Fatalf("not recovered: %s %v", selected, err)
+	}
+	if _, exists := e.failed[server.URL]; exists {
+		t.Fatal("verified source still cooled")
+	}
+	e.failure(server.URL)
+	mu.Lock()
+	mode = "denied"
+	mu.Unlock()
+	if _, err := e.resolve(ctx, http.DefaultClient, "fixture", true); err == nil {
+		t.Fatal("denied discovery accepted")
+	}
+	if _, exists := e.failed[server.URL]; !exists {
+		t.Fatal("denied discovery cleared cooldown")
+	}
+	mu.Lock()
+	mode = "foreign"
+	before := authorized
+	mu.Unlock()
+	if _, err := e.resolve(ctx, http.DefaultClient, "fixture", true); err == nil {
+		t.Fatal("foreign center accepted")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if authorized != before {
+		t.Fatal("foreign center received discovery credentials")
+	}
+}
