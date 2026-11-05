@@ -1,3 +1,4 @@
+import { desiredHash } from "../shared/desired-state.js";
 import {
   createServer,
   type Server,
@@ -203,6 +204,7 @@ export class Agent {
       platform: process.platform === "win32" ? "windows" : process.platform,
       arch: process.arch === "x64" ? "amd64" : process.arch,
       config_revision: this.revision,
+      config_observation: this.configurationObservation(),
       center_connection: this.endpoints.status(),
       ...this.queue.stats(),
       last_error: this.lastError,
@@ -358,6 +360,15 @@ export class Agent {
       }
     }
   };
+  configurationObservation() {
+    let persisted_hash = "";
+    try {
+      const saved = normalizeRemote(JSON.parse(readFileSync(join(this.config.data_dir, "remote-config.json"), "utf8")));
+      validateRemote(saved);
+      persisted_hash = desiredHash(saved);
+    } catch { /* Missing/invalid durable configuration is observed as drift. */ }
+    return {runtime_hash: this.tasksReady ? desiredHash(this.tasks) : "", persisted_hash};
+  }
   applyRemote(config: Partial<RemoteConfig>, persist = true) {
     const c = normalizeRemote(config);
     validateRemote(c);
@@ -420,7 +431,8 @@ export class Agent {
     );
     if (
       remote &&
-      remote.revision !== this.revision
+      (remote.revision !== this.revision ||
+        Object.values(this.configurationObservation()).some(hash => hash !== desiredHash(normalizeRemote(remote))))
     )
       this.applyRemote(remote);
     return registered;

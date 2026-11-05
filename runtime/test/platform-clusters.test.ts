@@ -1,3 +1,4 @@
+import { ReconciliationRegistry } from "../src/reconciliation/registry.js";
 import {pngData,pngFixture} from './fixtures/application-logo.js';
 import {createHostNetworkSchema,recordHostNetwork} from "../src/server/host-network.js";
 import {normalizeNetworkAddresses} from "../src/shared/host-network.js";
@@ -18,7 +19,7 @@ import { createPrivateRegistryController } from "../src/ops/private-registry.js"
 import {createApplicationTelemetry} from '../src/ops/application-telemetry.js';
 import {automaticEntry} from '../src/ops/automatic-entry.js';
 import {selfSignedCertificate} from '../src/ops/certificates.js';
-async function fixture(t: any, fetcher?: typeof fetch) {
+async function fixture(t: any, fetcher?: typeof fetch, reconciliationEnabled=false) {
   const db = new DB(":memory:");
   db.exec(
     `CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT,active INTEGER);INSERT INTO users VALUES('admin','admin',1),('member','member',1);CREATE TABLE agents(id TEXT PRIMARY KEY,host_id TEXT,hostname TEXT,version TEXT,platform TEXT,arch TEXT,last_seen TEXT,group_id TEXT,heartbeat TEXT);INSERT INTO agents VALUES('a','ha','A','1','linux','amd64','2026-10-29T02:00:00.000Z','default','{}'),('b','hb','B','1','linux','amd64','2026-10-29T02:00:00.000Z','default','{}');CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT,address TEXT,agent_id TEXT);INSERT INTO managed_machines(id,name,address,agent_id) VALUES('ma','Machine A','10.0.0.1','a'),('mb','Machine B','10.0.0.2','b');`,
@@ -46,6 +47,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     },
   } as unknown as Dependencies;
   router.auth = deps.auth;
+  const reconciliation=new ReconciliationRegistry(deps);
   const jobs = registerAgentJobs(deps, {
       agentCredentials: { has: () => true } as any,
     }),
@@ -54,6 +56,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
       dataDir: "/tmp/cluster-tests",
       fetch: fetcher,
       intervalMs: 1000000,
+      ...(reconciliationEnabled?{reconciliation}:{}),
     }),
     store = platform.store;
   const server = createServer((req, res) => void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));
@@ -155,7 +158,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     },
     state = "succeeded",
   ) => {
-    const job = jobs.claim(agentID, ["operations.platform","operations.platform.readiness.v1","operations.platform.image-refresh.v1","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1"]);
+    const job = jobs.claim(agentID, ["operations.platform","operations.platform.readiness.v1","operations.platform.image-refresh.v1","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1","operations.platform.reconciliation.v1"]);
     assert.ok(job);
     const payload = platform.resolvePayload(job);
     for (const [n, phase] of [
@@ -187,6 +190,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     return { job, payload };
   };
   t.after(async () => {
+    await reconciliation.close();
     await platform.close();
     jobs.close?.();
     server.close();
@@ -194,6 +198,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     db.close();
   });
   return {
+    reconciliation,
     base,
     db,
     deps,
@@ -1827,4 +1832,43 @@ test('click upgrade preserves refresh and HTTP readiness through managed route a
  assert.ok(!f.store.actions(a.id).some(r=>r.action==='stop'));
  for(const agent of ['a','b'])for(let n=0;n<8 && f.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state='queued'",agent);n++)f.finish(agent);
  await f.platform.tick();assert.ok(f.store.actions(a.id).some(r=>r.action==='stop'));
+});
+
+test('registered deployment inventory verifies current content, repairs manual instances and retains desired work while offline',async t=>{
+  const f=await fixture(t,undefined,true),c=f.createCluster(),app=f.app(c);
+  f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
+  await f.action(app,'deploy');f.finish('a');f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
+  let inspected=f.finish('a',{healthy:false,running:true,configuration_matches:false,containers:[{running:true}]});
+  assert.equal(inspected.payload.resource.config.task,'workload.inspect');assert.ok(inspected.payload.resource.config.application);
+  f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();const apply=f.finish('a');assert.equal(apply.payload.resource.config.task,'workload.apply');
+  f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();f.finish('a',{healthy:true,running:true,configuration_matches:true,containers:[{running:true}]});
+  f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
+  let resource=f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===app.id)!;assert.equal(resource.state,'in_sync');assert.equal(resource.summary.ports.length,2);
+  f.advance(60001);f.heartbeat('a');await f.reconciliation.tick();inspected=f.finish('a',{healthy:true,running:true,configuration_matches:true,containers:[{running:true}]});
+  assert.equal(inspected.payload.resource.config.reconciliation_hash,resource.desired_hash);
+  // A source edit fences an old inspection; a receipt cannot acknowledge the changed content.
+  const current=f.store.get(app.id);f.store.update(app.id,current.revision,current.name,{...current.spec,image:'example:2'},'admin');
+  await f.action(f.store.get(app.id),'deploy');f.finish('a');f.reconciliation.refresh();
+  resource=f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===app.id)!;assert.ok(resource.generation>1);assert.equal(resource.observed_generation,0);
+  const second=f.app(c,{service_name:'offline-desired'});f.advance(121000);
+  const response=await f.action(second,'deploy');assert.equal(response.status,202);f.reconciliation.refresh();
+  assert(f.reconciliation.inventory('ma').resources.some(r=>r.owner_id===second.id));
+  f.advance(60001);await f.reconciliation.tick();assert.equal(f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===second.id)?.code,'agent_offline');
+});
+
+test('deep reconciliation preserves managed stateful minimum availability and keeps old Agent health checks during rollout',async t=>{
+  const f=await fixture(t,undefined,true),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',stateful:true,deployments:[{cluster_id:c.id,replicas:1,stateful_acknowledged:true,min_available_percent:100}]});
+  f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
+  await f.action(a,'deploy');f.finish('a');f.advance(5001);f.heartbeat('a');f.heartbeat('b');await f.reconciliation.tick();
+  f.finish('a',{healthy:false,running:true,configuration_matches:false,containers:[{running:true}]});
+  f.advance(301000);f.heartbeat('a');f.heartbeat('b');await f.reconciliation.tick();
+  f.finish('a',{healthy:false,running:true,configuration_matches:false,containers:[{running:true}]});
+  f.advance(5001);f.heartbeat('a');f.heartbeat('b');await f.reconciliation.tick();
+  assert.equal(f.reconciliation.inventory('ma').resources[0].code,'minimum_availability_protected');
+  assert.equal(f.db.all("SELECT id FROM ops_cluster_instances WHERE owner_id=?",a.id).length,1);
+  assert.equal(f.db.all("SELECT id FROM ops_platform_runs WHERE resource_id=? AND action='apply'",a.id).length,1);
+  const old=await fixture(t,undefined,true),cluster=old.createCluster(),manual=old.app(cluster);
+  await old.action(manual,'deploy');old.finish('a');old.advance(31000);old.heartbeat('a');await old.platform.tick();
+  const health=old.finish('a');assert.equal(health.payload.resource.config.task,'workload.inspect');assert.equal(health.payload.resource.config.reconciliation_hash,undefined);
+  await old.reconciliation.tick();assert.equal(old.reconciliation.inventory('ma').resources[0].code,'reconciliation_agent_upgrade_required');
 });

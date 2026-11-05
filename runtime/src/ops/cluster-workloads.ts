@@ -1,3 +1,5 @@
+import { blockingAgentJobSQL } from "../server/agent-job-fence.js";
+import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
 import {createAvailability, minimumAvailable, graceMilliseconds} from './availability.js';
 import {machineServiceAddresses} from "../server/host-network.js";
 import {automaticEntry} from './automatic-entry.js';
@@ -1926,7 +1928,7 @@ export function createClusterWorkloads(
         owner,
         i,
         "gateway.apply",
-        config,
+        {...config,...(JSON.parse(i.observed_json??'{}').configuration_matches===false?{force_recreate:true}:{})},
         String(a.revision),
         actor,
       );
@@ -1950,7 +1952,7 @@ export function createClusterWorkloads(
       actor,
     );
   }
-  function inspect(a: PlatformResource, i: Row, actor: string) {
+  function inspect(a: PlatformResource, i: Row, actor: string, proof?: {hash:string; config:Row}) {
     if (i.state === 'draining') return null;
     const authRequired =
       a.spec.role === "openresty" &&
@@ -1970,7 +1972,7 @@ export function createClusterWorkloads(
       store.get(a.id),
       i,
       a.spec.role === "openresty" ? "gateway.inspect" : "workload.inspect",
-      { ...health(a, i), ...(authRequired ? { auth_required: true } : {}) },
+      { ...health(a, i), ...(authRequired ? { auth_required: true } : {}), ...(proof ? {...proof.config,reconciliation_hash:proof.hash} : {}) },
       i.desired_generation,
       actor,
     );
@@ -2144,7 +2146,8 @@ export function createClusterWorkloads(
         db.transaction(() => {
           for (const key of a.spec.machine_ids) {
             const m = member(cid, key);
-            if (!online(m.agent_id)) fail(409, "target_agent_offline");
+            if (!options.reconciliation && !online(m.agent_id)) fail(409, "target_agent_offline");
+            if (!m.agent_id || !agent(m.agent_id)) fail(409, "machine_agent_required");
             let i = rows(a.id, false, cid).find((i) => i.machine_id === key);
             if (i && i.agent_id !== m.agent_id)
               fail(409, "machine_agent_changed_inspect_required");
@@ -2158,6 +2161,7 @@ export function createClusterWorkloads(
         });
         for (const key of a.spec.machine_ids) {
           const i = rows(a.id, false, cid).find((i) => i.machine_id === key)!;
+          if (!online(i.agent_id)) continue;
           const run = apply(a, i, owner, actor, true);
           if (run) runs.push(run);
         }
@@ -2530,6 +2534,8 @@ export function createClusterWorkloads(
                       "modern_instance",
                       "generation",
                       "image_sources",
+                      "force_recreate",
+                      "reconciliation_hash",
                     ].includes(k),
                 ),
               ),
@@ -3156,6 +3162,7 @@ export function createClusterWorkloads(
               reconcile(r, d.cluster_id, actor);
               for (const i of rows(r.id, false, d.cluster_id).filter(
                 (i) =>
+                  (!options.reconciliation || !operationExecutionCapabilities(deps,i.agent_id).includes('operations.platform.reconciliation.v1')) &&
                   !busy(i) &&
                   i.desired_state === "running" &&
                   online(i.agent_id) &&
@@ -3198,6 +3205,69 @@ export function createClusterWorkloads(
       }
     }
   }
+  options.reconciliation?.register({
+    kind:'deployment.instance',category:'deployment',
+    collect() {
+      const applications=new Map(store.list('application').map(a=>[a.id,a]));
+      return db.all<Row>('SELECT * FROM ops_cluster_instances ORDER BY id').flatMap(i=>{
+        const current=applications.get(i.owner_id);
+        if(!current)return [];
+        const d=deploymentRow('application',current.id,i.cluster_id);
+        if(!d)return [];
+        const a=desired(current,i.cluster_id), running=!!d.enabled&&!i.retired&&i.desired_state==='running';
+        const config:Row=a.spec.role==='openresty'?gatewayConfig(a,i):{application:effective(a,i),...health(a,i),application_id:a.id,application_revision:a.revision,...(registryCacheFor(store,a,i.machine_id)?{image_cache:registryCacheFor(store,a,i.machine_id)}:{})};
+        return [{key:i.id,machine_id:i.machine_id,agent_id:i.agent_id,owner_id:a.id,actor:d.policy_actor||a.authorized_by,
+          desired:{state:running?'running':i.desired_state==='removed'?'removed':'stopped',revision:a.revision,config},
+          summary:{application_id:a.id,cluster_id:i.cluster_id,role:a.spec.role,state:running?'running':i.desired_state,ports:ports(i.id).map(p=>({name:p.name,host_port:p.host_port,container_port:p.container_port,protocol:p.protocol})),
+            files:[...(config.sites??[]).flatMap((site:Row)=>Object.keys(site.static_files??{}).map(path=>({website_fragment:site.id,path}))),...(config.application?.mounts??[]).filter((m:Row)=>m.type==='config').map((m:Row)=>({target:m.target,paths:Object.keys(m.files??{})}))],websites:Object.keys(config.website_revisions??{}),domains:(config.sites??[]).flatMap((site:Row)=>site.domains),certificate_versions:(config.sites??[]).filter((site:Row)=>site.certificate).map((site:Row)=>site.certificate.certificate_version)}}];
+      });
+    },
+    reconcile(r) {
+      if(!store.authorized(r.actor))return {state:'blocked',code:'operations_authorization_revoked'};
+      const i=row(r.key);
+      if(!i||r.deleted)return {state:'blocked',code:'cleanup_ownership_required'};
+      if(machine(r.machine_id).agent_id!==r.agent_id||i.agent_id!==r.agent_id)return {state:'blocked',code:'agent_binding_changed'};
+      if(i.state==='unknown')return {state:'blocked',code:'unknown_execution_result'};
+      if(!online(r.agent_id))return {state:'pending',code:'agent_offline'};
+      if(!operationExecutionCapabilities(deps,r.agent_id).includes('operations.platform.reconciliation.v1'))return {state:'blocked',code:'reconciliation_agent_upgrade_required'};
+      if(busy(i))return {state:'pending',code:'deployment_busy',job_id:i.current_run_id};
+      const locked=db.get<Row>(`SELECT id,state FROM agent_jobs j WHERE agent_id=? AND ${blockingAgentJobSQL(db,'j')} LIMIT 1`,r.agent_id);
+      if(locked)return {state:locked.state==='unknown'?'blocked':'pending',code:locked.state==='unknown'?'unknown_execution_result':'machine_busy'};
+      const a=desired(store.get(r.owner_id),i.cluster_id);
+      if(i.retired&&!drained(a,i))return {state:'pending',code:'deployment_draining'};
+      const repair=()=>{
+        if(r.desired.state==='running' && a.spec.deployment_mode==='managed') {
+          // Reuse minimum availability, surge placement and traffic draining.
+          // The durable desired state authorizes retrying a known failure, but
+          // never authorizes an in-place restart through those protections.
+          const outcome=reconcile(store.get(r.owner_id),i.cluster_id,r.actor,true);
+          const protectedState=['minimum_availability_protected','replacement_capacity_unavailable'].includes(outcome.pending??'');
+          return {state:protectedState?'blocked' as const:'pending' as const,code:outcome.pending||'managed_deployment_recovery',job_id:outcome.runs?.at(-1)?.id};
+        }
+        const run=r.desired.state==='running'?apply(a,i,a,r.actor,true):stop(a,i,r.actor,r.desired.state==='removed');
+        return {state:'pending' as const,code:'deployment_drift_repair',job_id:run?.id};
+      };
+      const proof=r.job_id?db.get<Row>('SELECT * FROM ops_platform_runs WHERE id=?',r.job_id):undefined;
+      const config=proof?JSON.parse(deps.decrypt(proof.payload_cipher)).resource.config:{};
+      const result=proof?JSON.parse(proof.result_json):{};
+      const inspecting=config.reconciliation_hash===r.desired_hash&&config.task?.endsWith('.inspect');
+      if(inspecting && r.state!=='in_sync' && proof?.state==='succeeded' && deps.now().getTime()-Date.parse(proof.updated_at)<60000) {
+        const stopped=result.running===false || Array.isArray(result.containers)&&result.containers.every((c:Row)=>!c.running);
+        const removed=result.present===false || Array.isArray(result.containers)&&result.containers.length===0;
+        if(r.desired.state==='running'?result.configuration_matches===true&&result.healthy===true&&!stopped:r.desired.state==='removed'?removed:stopped)
+          return {state:'in_sync',job_id:proof.id};
+        return repair();
+      }
+      if(proof&&['failed','cancelled'].includes(proof.state)&&r.state!=='drifted')return {state:'drifted',code:'deployment_attempt_failed',job_id:proof.id};
+      // Failed applies are retried through the current authorized desired state;
+      // inspect failures are re-inspected, never treated as proof of absence.
+      if(proof&&['failed','cancelled'].includes(proof.state)&&!config.task?.endsWith('.inspect')) {
+        return repair();
+      }
+      const run=inspect(a,i,r.actor,{hash:r.desired_hash,config:{...(r.desired.state==='running'?r.desired.config:{}),reconciliation_resource_id:r.id,reconciliation_generation:r.generation}});
+      return {state:'pending',code:'verifying_deployment',job_id:run?.id};
+    },
+  });
   return {
     handles,
     actions,

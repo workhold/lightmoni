@@ -1,0 +1,19 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "seq": 1744,
+  "title_preserved": true,
+  "existing_block_count": 911,
+  "existing_blocks_order_content_and_native_diagrams_preserved": true,
+  "paragraphs_verified": true,
+  "heading_verified": true,
+  "native_diagram": {
+    "id": "sdd096-reconciliation-flow",
+    "nodes": 7,
+    "edges": 8,
+    "matches": true
+  },
+  "native_code_issues": [],
+  "saved": true,
+  "base_preservation_verified_seq": 1743,
+  "gradual_rollout_paragraph_verified": true
+}

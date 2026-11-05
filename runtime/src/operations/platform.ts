@@ -1,3 +1,4 @@
+import { desiredHash, desiredJSON } from "../shared/desired-state.js";
 import {workloadContainersReady as ready} from './workload-readiness.js';
 import {cachePolicy} from './image-cache.js';
 import {imageSourcePolicy,preparePlatformImages} from './image-sources.js';
@@ -65,6 +66,7 @@ const TASKS = [
   "gateway.logs",
   "certificate.install",
   "certificate.inspect",
+  "certificate.remove",
   "hook.run",
   "hook.inspect",
 ];
@@ -671,6 +673,49 @@ export async function renderManifest(
           : v;
   return literal(doc);
 }
+/** Inspect owned live Docker settings and managed config files, not just state.json. */
+async function workloadConfigurationMatches(context:OperationExecutionContext,id:string,app:any,state:any) {
+  try {
+    if(!state?.manifest || state.configuration_hash!==desiredHash(app))return false;
+    const manifest=await readJSON<any>(state.manifest,null);
+    if(!manifest || hash(JSON.stringify(manifest))!==state.digest)return false;
+    const containers=await inventory(context,id), services=manifest.services;
+    if(!containers.length)return false;
+    const plain=(v:any)=>typeof v==='string'?v.replaceAll('$$','$'):v;
+    for(const [name,service] of Object.entries<any>(services)) {
+      const instances=containers.filter(c=>c.Config?.Labels?.['com.docker.compose.service']===name);
+      if(!instances.length)return false;
+      for(const live of instances) {
+        if(live.Config?.Image!==plain(service.image) && live.Image!==plain(service.image))return false;
+        if(service.restart && live.HostConfig?.RestartPolicy?.Name!==service.restart)return false;
+        if(service.network_mode && live.HostConfig?.NetworkMode!==service.network_mode)return false;
+        if(service.user!==undefined && live.Config?.User!==plain(service.user))return false;
+        if(service.working_dir!==undefined && live.Config?.WorkingDir!==plain(service.working_dir))return false;
+        if(!!live.HostConfig?.ReadonlyRootfs!==!!service.read_only)return false;
+        if(service.cpus!==undefined && Number(live.HostConfig?.NanoCpus)!==Number(service.cpus)*1e9)return false;
+        if(typeof service.mem_limit==='number' && Number(live.HostConfig?.Memory)!==service.mem_limit)return false;
+        for(const key of ['command','entrypoint'])if(Array.isArray(service[key])&&desiredJSON((key==='command'?live.Config?.Cmd:live.Config?.Entrypoint))!==desiredJSON(service[key].map(plain)))return false;
+        const env=Object.fromEntries((live.Config?.Env??[]).map((line:string)=>{const n=line.indexOf('=');return [line.slice(0,n),line.slice(n+1)];}));
+        const expected=Array.isArray(service.environment)?Object.fromEntries(service.environment.map((line:string)=>{const n=line.indexOf('=');return [line.slice(0,n),line.slice(n+1)];})):service.environment??{};
+        if(Object.entries(expected).some(([key,value])=>env[key]!==String(plain(value))))return false;
+        const mappings=service.ports??[];
+        const actual=live.HostConfig?.PortBindings??{};
+        if(Object.keys(actual).length!==new Set(mappings.map((p:any)=>String(p.target)+'/'+(p.protocol??'tcp'))).size)return false;
+        for(const port of mappings)if(!(actual[String(port.target)+'/'+(port.protocol??'tcp')]??[]).some((p:any)=>String(p.HostPort)===String(port.published)&&(p.HostIp||'0.0.0.0')===(port.host_ip||'0.0.0.0')))return false;
+        for(const volume of service.volumes??[])if(volume&&typeof volume==='object'&&!(live.Mounts??[]).some((m:any)=>m.Destination===plain(volume.target)&&m.Type===volume.type&&(volume.type==='volume'?m.Name===plain(volume.source):m.Source===plain(volume.source))&&m.RW===!volume.read_only))return false;
+      }
+    }
+    const root=join(await privateRoot(context,'platform'),'workloads',id);
+    for(const [n,m] of app.mounts.entries())if(m.type==='config')for(const [name,body] of Object.entries(m.files??{})){
+      const service=manifest.services[m.service??Object.keys(manifest.services)[0]];
+      const volume=service?.volumes?.find((v:any)=>v.target===m.target&&v.type==='bind');if(!volume?.source)return false;
+      const path=join(volume.source,name);await safeFile(path);
+      if(await readFile(path,'utf8')!==body)return false;
+    }
+    return containers.every(c=>Object.hasOwn(services,c.Config?.Labels?.['com.docker.compose.service']));
+  } catch {return false;}
+}
+
 async function executeWorkload(
   payload: OperationPayload,
   context: OperationExecutionContext,
@@ -684,7 +729,12 @@ async function executeWorkload(
   if (c.task === "workload.inspect") {
     const snapshot = await workloadSnapshot(context, id, !!c.health);
     snapshot.healthy = snapshot.healthy && (await checkReadiness(c, context));
-    return { verified: true, data: { instance_id: id, ...snapshot } };
+    let configuration_matches: boolean | undefined;
+    if(c.application) {
+      configuration_matches=await workloadConfigurationMatches(context,id,normalizeApplication(c.application),state);
+      snapshot.healthy = snapshot.healthy && configuration_matches;
+    }
+    return { verified: true, data: { instance_id: id, ...snapshot, ...(configuration_matches===undefined?{}:{configuration_matches}) } };
   }
   if (c.task === "workload.logs") {
     const cs = await inventory(context, id);
@@ -833,6 +883,7 @@ async function executeWorkload(
         resource_id: payload.resource.id,
         revision: payload.resource.revision,
         manifest: manifestPath,
+        configuration_hash: desiredHash(app),
         digest,
         stopped: false,
         updated_at: context.now().toISOString(),
@@ -926,11 +977,13 @@ async function installCertificate(
   const marker = await readJSON<any>(join(managed, "owner.json"), null);
   if (marker && marker.certificate_id !== id)
     reject("CERTIFICATE_DIRECTORY_OWNERSHIP_REQUIRED");
+  if(c.repair===true && marker?.certificate_id!==id)reject("CERTIFICATE_DIRECTORY_OWNERSHIP_REQUIRED");
   await atomicFile(
     join(managed, "owner.json"),
     JSON.stringify({ certificate_id: id }),
   );
-  const target = join(managed, "versions", version);
+  const physical = c.repair===true ? version+"-repair-"+randomBytes(8).toString('hex') : version;
+  const target = join(managed, "versions", physical);
   await directory(target);
   if (
     !/^0?[0-7]{3}$/.test(c.mode ?? "0600") ||
@@ -996,7 +1049,8 @@ async function installCertificate(
       await symlink(expected, link);
     }
   }
-  await pointer(join(managed, "current"), join("versions", version));
+  await atomicFile(join(target,"release.json"),JSON.stringify({certificate_version:version}));
+  await pointer(join(managed, "current"), join("versions", physical));
   const installed = new X509Certificate(await readFile(join(path, certName)));
   if (installed.fingerprint256 !== meta.fingerprint_sha256)
     throw Error("CERTIFICATE_INSTALL_NOT_VERIFIED");
@@ -1015,6 +1069,7 @@ async function inspectCertificate(
   c: any,
   context: OperationExecutionContext,
 ): Promise<OperationExecutionResult> {
+  if(c.reconciliation_hash)return inspectManagedCertificate(c,context);
   const id = safeID(c.certificate_id),
     path = absolutePath(c.path),
     certName = c.certificate_file ?? "fullchain.pem",
@@ -1035,21 +1090,83 @@ async function inspectCertificate(
     c.domains ?? [],
     context.now(),
   );
+  const release=await readJSON<any>(join(managed,current,'release.json'),null), logicalVersion=release?.certificate_version??match![1];
   const verified =
     (!c.fingerprint_sha256 ||
       meta.fingerprint_sha256 === c.fingerprint_sha256) &&
-    (!c.certificate_version || match![1] === c.certificate_version);
+    (!c.certificate_version || logicalVersion === c.certificate_version);
   return {
     verified,
     data: {
       certificate_id: id,
-      certificate_version: match![1],
+      certificate_version: logicalVersion,
       fingerprint_sha256: meta.fingerprint_sha256,
       installed: true,
       ...(!verified ? { status: "unknown" } : {}),
     },
   };
 }
+async function existingDirectory(path:string):Promise<void> {
+  const parent=dirname(path);if(parent!==path)await existingDirectory(parent);
+  const status=await lstat(path);if(status.isSymbolicLink()||!status.isDirectory())reject('CERTIFICATE_DIRECTORY_OWNERSHIP_REQUIRED');
+}
+function certificatePaths(c:any) {
+  const id=safeID(c.certificate_id),path=absolutePath(c.path),names=[c.certificate_file??'fullchain.pem',c.private_key_file??'privkey.pem'];
+  if(names[0]===names[1]||names.some(n=>typeof n!=='string'||!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(n)))reject('INVALID_CERTIFICATE_FILENAME');
+  return {id,path,names,managed:join(path,'.lightmoni-certificate-'+id)};
+}
+async function inspectManagedCertificate(c:any,context:OperationExecutionContext):Promise<OperationExecutionResult> {
+  const {id,path,names,managed}=certificatePaths(c);
+  const absent=async()=>{let exists=false;for(const name of names)try{await lstat(join(path,name));exists=true;}catch(e:any){if(e.code!=='ENOENT')throw e;}return !exists;};
+  try {await existingDirectory(path);}catch(e:any){if(e.code==='ENOENT')return {verified:true,data:{installed:false,absent:true,configuration_matches:c.expected_absent===true}};throw e;}
+  try {await existingDirectory(managed);}catch(e:any){if(e.code==='ENOENT'&&await absent())return {verified:true,data:{installed:false,absent:true,configuration_matches:c.expected_absent===true}};throw e;}
+  const owner=await readJSON<any>(join(managed,'owner.json'),null);
+  if(!owner) {
+    if(await absent())return {verified:true,data:{installed:false,absent:true,configuration_matches:c.expected_absent===true}};
+    reject('CERTIFICATE_DIRECTORY_OWNERSHIP_REQUIRED');
+  }
+  if(owner.certificate_id!==id)reject('CERTIFICATE_DIRECTORY_OWNERSHIP_REQUIRED');
+  if(c.expected_absent && await absent())return {verified:true,data:{installed:false,absent:true,configuration_matches:true}};
+  for(const name of names)try{
+    if(!(await lstat(join(path,name))).isSymbolicLink()||await readlink(join(path,name))!==join('.lightmoni-certificate-'+id,'current',name))reject('CERTIFICATE_FILE_OWNERSHIP_REQUIRED');
+  }catch(e:any){if(e.code==='ENOENT')return {verified:true,data:{installed:false,configuration_matches:false,managed:true}};throw e;}
+  let logicalVersion='',fingerprint='';
+  try {
+    const current=await readlink(join(managed,'current'));
+    if(!/^versions\/[A-Za-z0-9_-]+$/.test(current))return {verified:true,data:{installed:false,configuration_matches:false,managed:true}};
+    await existingDirectory(join(managed,current));
+    const release=await readJSON<any>(join(managed,current,'release.json'),null);logicalVersion=release?.certificate_version??current.slice('versions/'.length);
+    const bodies:string[]=[];
+    for(const [n,name] of names.entries()) {
+      const file=join(managed,current,name);await safeFile(file);const info=await lstat(file);
+      if((info.mode&0o777)!==parseInt(n===0?c.mode??'0600':c.private_key_mode??'0600',8))return {verified:true,data:{installed:true,configuration_matches:false,managed:true}};
+      if(c.owner!==undefined) {const uid=/^\d+$/.test(c.owner)?Number(c.owner):Number((await context.command('id',['-u',c.owner],{timeoutMs:5000})).stdout.trim());if(!Number.isSafeInteger(uid)||info.uid!==uid)return {verified:true,data:{installed:true,configuration_matches:false,managed:true}};}
+      if(c.group!==undefined) {const gid=/^\d+$/.test(c.group)?Number(c.group):Number((await context.command('getent',['group',c.group],{timeoutMs:5000})).stdout.trim().split(':')[2]);if(!Number.isSafeInteger(gid)||info.gid!==gid)return {verified:true,data:{installed:true,configuration_matches:false,managed:true}};}
+      bodies.push(await readFile(file,'utf8'));
+    }
+    const meta=certificateMetadata(bodies[0],bodies[1],c.domains??[],context.now());fingerprint=meta.fingerprint_sha256;
+    const matches=!c.expected_absent&&logicalVersion===c.certificate_version&&fingerprint===c.fingerprint_sha256;
+    return {verified:true,data:{installed:true,configuration_matches:matches,certificate_version:logicalVersion,fingerprint_sha256:fingerprint}};
+  } catch(e:any) {
+    if(e instanceof OperationRejectedError&&/OWNERSHIP|UNSAFE/.test(e.message))throw e;
+    return {verified:true,data:{installed:false,configuration_matches:false,managed:true}};
+  }
+}
+async function removeManagedCertificate(c:any,context:OperationExecutionContext):Promise<OperationExecutionResult> {
+  const {id,path,names,managed}=certificatePaths(c);
+  try {await existingDirectory(path);}catch(e:any){if(e.code==='ENOENT')return {verified:true,data:{removed:true,absent:true}};throw e;}
+  try {await existingDirectory(managed);}catch(e:any){if(e.code==='ENOENT'){for(const name of names)try{await lstat(join(path,name));reject('CERTIFICATE_FILE_OWNERSHIP_REQUIRED');}catch(missing:any){if(missing.code!=='ENOENT')throw missing;}return {verified:true,data:{removed:true,absent:true}};}throw e;}
+  const owner=await readJSON<any>(join(managed,'owner.json'),null),links:string[]=[];
+  for(const name of names)try{
+    const file=join(path,name);
+    if(!(await lstat(file)).isSymbolicLink()||await readlink(file)!==join('.lightmoni-certificate-'+id,'current',name)||owner?.certificate_id!==id)reject('CERTIFICATE_FILE_OWNERSHIP_REQUIRED');
+    links.push(file);
+  }catch(e:any){if(e.code!=='ENOENT')throw e;}
+  for(const link of links)await unlink(link);
+  // Retain private immutable versions for audit/rollback. Only remove owned entrypoints.
+  return {verified:true,data:{removed:true,absent:true}};
+}
+
 async function runHook(
   payload: OperationPayload,
   context: OperationExecutionContext,
@@ -1325,6 +1442,31 @@ async function gatewayProof(
     }
   }
 }
+async function gatewayConfigurationMatches(c:any,state:any,live:any,root:string) {
+  try {
+    if(!state || !live || live.HostConfig?.NetworkMode!=='host')return false;
+    const content=(v:any)=>({image:v.image??'openresty/openresty:1.27.1.2-0-alpine',sites:v.sites??[],http_port:v.http_port??80,https_port:v.https_port??443});
+    if(desiredHash(content(c))!==desiredHash(content(state.config)))return false;
+    if(live.Config?.Image!==state.image && live.Image!==state.image)return false;
+    if(!(live.Mounts??[]).some((m:any)=>m.Source===root&&m.Destination==='/etc/lightmoni'&&m.RW===false))return false;
+    if(await readlink(join(root,'current'))!==join('versions',state.digest))return false;
+    const version=join(root,'versions',state.digest);
+    const verify=async(path:string,body:string)=>{await safeFile(path);return await readFile(path,'utf8')===body;};
+    if(!await verify(join(version,'nginx.conf'),renderGateway(state.config,state.digest)))return false;
+    const probe=await readJSON<any>(join(version,'auth-probe.json'),null);
+    for(const site of c.sites??[]) {
+      const target=join(version,'sites',safeID(site.id));
+      if(site.mode==='static')for(const [name,body] of Object.entries<string>(files(site.static_files??{'index.html':'<!doctype html><h1>LightMoni</h1>'})))if(!await verify(join(target,'public',name),body))return false;
+      if(site.certificate)for(const [name,body] of [['fullchain.pem',site.certificate.certificate_pem],['privkey.pem',site.certificate.private_key_pem]])if(!await verify(join(target,name),body))return false;
+      for(const scope of authScopes(site)) {
+        if(!probe)return false;
+        const body=scope.auth.users.map(u=>u.username+':'+u.password_hash).concat(probe.username+':'+probe.password_hash).join('\n')+'\n';
+        if(!await verify(join(target,'auth',scope.key+'.htpasswd'),body))return false;
+      }
+    }
+    return true;
+  } catch {return false;}
+}
 async function executeGateway(
   payload: OperationPayload,
   context: OperationExecutionContext,
@@ -1346,6 +1488,11 @@ async function executeGateway(
   }
   if (c.task === "gateway.inspect") {
     let healthy = existing?.State?.Running === true && !!state;
+    let configuration_matches: boolean | undefined;
+    if(c.reconciliation_hash) {
+      configuration_matches=await gatewayConfigurationMatches(c,state,existing,root);
+      healthy=healthy&&configuration_matches;
+    }
     try {
       if (healthy) await gatewayProof(state.config, state.digest, context);
     } catch {
@@ -1356,7 +1503,9 @@ async function executeGateway(
       data: {
         instance_id: id,
         running: existing?.State?.Running === true,
+        present: !!existing,
         healthy,
+        ...(configuration_matches===undefined?{}:{configuration_matches}),
         digest: state?.digest ?? "",
         network_mode: existing?.HostConfig?.NetworkMode ?? "",
         observed_at: context.now().toISOString(),
@@ -1522,7 +1671,7 @@ async function executeGateway(
   let recreated = false;
   await context.progress?.("starting_gateway");
   try {
-    if (existing && existing.Config.Image !== image && existing.Image !== image) {
+    if (existing && (c.force_recreate === true || existing.Config.Image !== image && existing.Image !== image)) {
       await context.command("docker", ["rm", "--force", name], {
         timeoutMs: 30000,
       });
@@ -1735,6 +1884,7 @@ export async function executePlatform(
   if (c.task.startsWith("gateway.")) return executeGateway(payload, context);
   if (c.task === "certificate.install") return installCertificate(c, context);
   if (c.task === "certificate.inspect") return inspectCertificate(c, context);
+  if (c.task === "certificate.remove") return removeManagedCertificate(c, context);
   if (c.task === "hook.run") return runHook(payload, context);
   if (c.task === "hook.inspect") return inspectHook(c, context);
   return reject("INVALID_PLATFORM_TASK");

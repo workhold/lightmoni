@@ -1,3 +1,4 @@
+import type { ReconciliationRegistry } from "../reconciliation/registry.js";
 import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
 import {oneShotServices} from '../operations/workload-readiness.js';
 import {createImageSourcesSchema,imageSourcesFor,validateImageSourcesPayload} from './image-sources.js';
@@ -93,6 +94,7 @@ export class OperationsPlatformStore implements PlatformStore {
   constructor(
     readonly deps: Dependencies,
     readonly jobs: AgentJobStore,
+    readonly reconciliation?: ReconciliationRegistry,
   ) {
     ensureSystemTables(this);
     createImageSourcesSchema(this);
@@ -573,6 +575,7 @@ export class OperationsPlatformStore implements PlatformStore {
             : []),
           ...(config.image_cache ? ["operations.platform.image-cache.v1"] : []),
           ...(config.refresh_images === true ? ['operations.platform.image-refresh.v1'] : []),
+          ...(config.reconciliation_hash ? ['operations.platform.reconciliation.v1'] : []),
           ...(payload.resource.config.image_sources ? ["operations.platform.image-sources.v1"] : []),
           ...(config.task === 'instance.recovery.inspect' ? ['operations.platform.instance-recovery.v1'] : []),
           ...(oneShotServices(config.application?.compose?.services).length ? ["operations.platform.oneshot.v1"] : []),
@@ -825,6 +828,12 @@ export class OperationsPlatformStore implements PlatformStore {
       !job.capabilities?.includes("operations.platform")
     )
       fail(403, "platform_payload_mismatch");
+    const config=payload.resource.config;
+    if(config.reconciliation_resource_id) {
+      const desired=this.reconciliation?.get(config.reconciliation_resource_id);
+      if(!desired || desired.owner_id!==current.id || desired.agent_id!==job.agent_id || desired.generation!==config.reconciliation_generation || desired.desired_hash!==config.reconciliation_hash ||
+        !this.deps.db.get('SELECT id FROM managed_machines WHERE id=? AND agent_id=?',desired.machine_id,job.agent_id))fail(403,'reconciliation_generation_changed');
+    }
     validateImageSourcesPayload(this,payload.resource.config);
     validateInstanceRecoveryPayload(this,payload.resource.config,job.agent_id);
     this.definition(current.kind).validatePayload?.(
