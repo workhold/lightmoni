@@ -8,5 +8,5 @@
 - [x] T006 生产版本比较、备份、仅中心切换、实际版本与原清单回读。
 - [ ] T007 在 zz-bj-1 按正常流程配套升级Agent/helper（用户明确跳过 vchive），核验实际能力和维护状态。
 - [ ] T008 容器/网站/SDK与积压三轮验收、ABC升级和SSH入口实际验证。
-- [ ] T009a 整理真实证据，核对全部来源最新 head，经统一 PR 合入 main，发布包含商城的测试版与 GitHub prerelease。
+- [x] T009a 整理真实证据，核对全部来源最新 head，经统一 PR 合入 main，发布包含商城的测试版与 GitHub prerelease。
 - [ ] T009b 完成剩余生产验收后，将同一成品晋升稳定 Docker latest 与 GitHub Release。
