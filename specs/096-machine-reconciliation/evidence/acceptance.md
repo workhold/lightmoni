@@ -37,3 +37,7 @@ npm --prefix runtime test 首轮：1503 项，1466 通过、33 跳过、4 失败
 架构影响：是，新增注册模块、单机期望存储、实际观测/核验和重试控制路径。仓库对应 docs/system-design.md 第 96 节；Doca 对应 [LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 新增原生章节及图。
 
 保存并回读至 seq 1744。原 911 个块（包含既有原生图）的内容及顺序在 seq 1743 全量比较一致；新章节文字、7 个节点和 8 条连线核对一致，seq 1744 仅补充渐进升级说明并重新回读目标段落及图。文档标题保持原样。结构化证据：doca-sync.json。没有令牌、私钥或真实凭据进入文档或证据。
+
+## Pull Request
+
+[GitHub PR #102](https://github.com/workhold/lightmoni/pull/102)，目标 main。代码与文档均在该 PR；未合并、未发布生产。

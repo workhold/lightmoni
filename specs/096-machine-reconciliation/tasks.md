@@ -21,6 +21,8 @@
 ## Phase 5: US3 扩展与交付
 - [x] T011 [US3] contracts/README.md 记录新 provider 注册示例和范围、未知类型/依赖行为
 - [x] T012 同步 docs/system-design.md 和 Doca 原生章节/图并回读，记录 specs/096-machine-reconciliation/evidence/
-- [ ] T013 同步远端 main、运行 typecheck 和相关完整测试，记录验收证据并提交 GitHub PR
+- [x] T013 同步远端 main、运行 typecheck 和相关完整测试，记录验收证据并提交 GitHub PR
 
 依赖：T001→T002→T003/T004→T005/T006→T007/T008/T009→T010/T011→T012→T013。可并行项：核心测试与路由、证书和 Agent 的独立文件；本次按依赖逐步实施。US1 可独立验收清单；US2 验收实际恢复；US3 用新类型合同测试验收。
+
+交付：[GitHub PR #102](https://github.com/workhold/lightmoni/pull/102)，目标 main；未合并、未发布生产。相关检查与扩展全量检查限制见 evidence/acceptance.md。
