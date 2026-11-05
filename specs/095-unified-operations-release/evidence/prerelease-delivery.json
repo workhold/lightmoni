@@ -1,0 +1,56 @@
+{
+  "merge_pr": "https://github.com/workhold/lightmoni/pull/99",
+  "merge_commit": "99bd8ed0250976dba3a40983fe7591b48513000e",
+  "source_prs": {
+    "92": {
+      "state": "MERGED",
+      "revision": "790cca58456abb2289de79e06dadb472cada40a7",
+      "ancestor_of_main": true
+    },
+    "93": {
+      "state": "MERGED",
+      "revision": "10952d34163cd631f450b628a4798761418dfcf6",
+      "ancestor_of_main": true
+    },
+    "94": {
+      "state": "MERGED",
+      "revision": "6eddb8460e38d8ebc6f95ce60d97553ab99adcad",
+      "ancestor_of_main": true
+    },
+    "95": {
+      "state": "MERGED",
+      "revision": "95c6c9448d14cbde41998e28099b29a9c3db35d2",
+      "ancestor_of_main": true
+    },
+    "96": {
+      "state": "MERGED",
+      "revision": "74b1c4023e72627b2088a4ff785d4b2c4eee7d50",
+      "ancestor_of_main": true
+    },
+    "97": {
+      "state": "MERGED",
+      "revision": "e57031bd9d40e794a314540aa5ab34371d4ac315",
+      "ancestor_of_main": true
+    },
+    "98": {
+      "state": "MERGED",
+      "revision": "23bb1346ddef42fa556c8ac23cfb2e2f10645bad",
+      "ancestor_of_main": true
+    },
+    "100": {
+      "state": "MERGED",
+      "revision": "fdf731b2ec25ecde6f4b5f08f6e7c2d1ddae832b",
+      "ancestor_of_main": true
+    }
+  },
+  "github_release": "https://github.com/workhold/lightmoni/releases/tag/20261105-ops-a418b64",
+  "prerelease": true,
+  "release_target": "a418b64e9b56ae5dd108b502f11e66bb8b9be850",
+  "release_assets": 5,
+  "registry": {
+    "20261105-ops-a418b64": "sha256:c6f5c3ebe0dac3666ee5ba4b862a504769dc1ef415fbefe55b6cc3961a46d15a",
+    "latest": "sha256:1435938eacd969554e581b1cce0b996ff36ac6e1b886c9fc42e5b21e231a5a51"
+  },
+  "stable_promotion": "pending remaining production acceptance",
+  "host_scope": "zz-bj-1 only; vchive excluded by user"
+}
