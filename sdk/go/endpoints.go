@@ -154,6 +154,7 @@ func (e *centerEndpoints) resolve(ctx context.Context, client *http.Client, key 
 				e.failed = map[string]time.Time{}
 			}
 			e.manifest = &manifest
+			delete(e.failed, source)
 			verified = source
 			break
 		}

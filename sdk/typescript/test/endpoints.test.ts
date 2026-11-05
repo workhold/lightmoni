@@ -57,3 +57,31 @@ test('request timeout invalidates internal choice and independent discovery wait
  const slow=new CenterEndpoints('http://public',()=>({}),async()=>{await new Promise(r=>setTimeout(r,30));return new Response('{}',{status:404});});t.after(()=>slow.close());
  const waiting=slow.resolve();await assert.rejects(slow.resolve(AbortSignal.timeout(5)));assert.equal(await waiting,'http://public');
 });
+
+test('fresh same-center authenticated discovery recovers a cooled sole public entrance without replaying a lost ACK',async t=>{
+ let url='',posts=0,loseACK=false;
+ const server=await entrance(t,(req,res)=>{
+  if(req.url==='/v1/center-identity'){assert.equal(req.headers.authorization,undefined);res.end('{"center_id":"same"}');return;}
+  if(req.url==='/v1/center-endpoints'){assert.equal(req.headers.authorization,'Bearer fixture');res.end(JSON.stringify({version:1,center_id:'same',revision:'unchanged',endpoints:[{url,scope:'public'}]}));return;}
+  req.resume();req.on('end',()=>{posts++;if(loseACK){req.socket.destroy();return;}res.end('{}');});
+ });url=server.url;
+ const endpoints=new CenterEndpoints(url,()=>({Authorization:'Bearer fixture'}));t.after(()=>endpoints.close());
+ assert.equal(await endpoints.resolve(),url);loseACK=true;
+ await assert.rejects(endpoints.request('/v1/metrics',{method:'POST',body:'frozen batch'}));assert.equal(posts,1);
+ assert.equal(await endpoints.refresh(),url);assert.equal(posts,1,'discovery must never replay business data');
+ loseACK=false;assert.equal((await endpoints.request('/v1/metrics',{method:'POST',body:'frozen batch'})).status,200);assert.equal(posts,2);
+});
+
+test('foreign identity and denied discovery cannot clear transport cooldown',async t=>{
+ let mode='valid',authorized=0;
+ const endpoints=new CenterEndpoints('http://public',()=>({Authorization:'Bearer fixture'}),async(input,init)=>{
+  const path=String(input);
+  if(path.endsWith('center-identity')){assert.equal((init?.headers as any)?.Authorization,undefined);return new Response(JSON.stringify({center_id:mode==='foreign'?'other':'same'}));}
+  authorized++;if(mode==='denied')return new Response('{}',{status:403});
+  return new Response(JSON.stringify({version:1,center_id:'same',revision:'unchanged',endpoints:[{url:'http://public',scope:'public'}]}));
+ });t.after(()=>endpoints.close());
+ assert.equal(await endpoints.resolve(),'http://public');endpoints.failedRequest('http://public');
+ mode='foreign';const before=authorized;await assert.rejects(endpoints.refresh(),/no verified/);assert.equal(authorized,before);
+ mode='denied';await assert.rejects(endpoints.refresh(),/HTTP 403/);
+ mode='valid';assert.equal(await endpoints.refresh(),'http://public');
+});

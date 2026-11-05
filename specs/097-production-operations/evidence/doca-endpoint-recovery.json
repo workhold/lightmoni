@@ -1,0 +1,10 @@
+{
+  "resource": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved_seq": 1748,
+  "readback_seq": 1748,
+  "text_verified": true,
+  "diagram_unchanged": true,
+  "diagram_nodes": 10,
+  "diagram_edges": 8,
+  "mutation": "insert one native paragraph after the read SDD097 anchor; no other mutations"
+}

@@ -4,9 +4,39 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from lightmoni import Client
+from lightmoni.endpoints import CenterEndpoints
 
 
 class CenterEndpointTests(unittest.TestCase):
+    def test_authenticated_refresh_recovers_only_verified_entrance(self):
+        endpoint = CenterEndpoints('http://public')
+        state = {'identity': 'same', 'denied': False}
+        calls = []
+        def read(url, key, deadline):
+            calls.append((url, key))
+            if url.endswith('center-identity'):
+                self.assertEqual(key, '')
+                return {'center_id': state['identity']}
+            if state['denied']:
+                raise PermissionError('center discovery access denied')
+            return dict(version=1, center_id='same', revision='unchanged', endpoints=[dict(url='http://public', scope='public')])
+        endpoint._json = read
+        self.assertEqual(endpoint.resolve('secret', time.monotonic()+3), 'http://public')
+        endpoint.failure('http://public')
+        self.assertEqual(endpoint.resolve('secret', time.monotonic()+3, force=True), 'http://public')
+        self.assertNotIn('http://public', endpoint.failed)
+        endpoint.failure('http://public')
+        state['denied'] = True
+        with self.assertRaises(PermissionError):
+            endpoint.resolve('secret', time.monotonic()+3, force=True)
+        self.assertIn('http://public', endpoint.failed)
+        state['denied'] = False
+        state['identity'] = 'foreign'
+        before = len([key for _, key in calls if key])
+        with self.assertRaises(OSError):
+            endpoint.resolve('secret', time.monotonic()+3, force=True)
+        self.assertEqual(len([key for _, key in calls if key]), before)
+
     def test_internal_public_and_changed_port(self):
         state = dict(public="", internal="", revision="one", foreign=False)
         seen, secrets = [], []

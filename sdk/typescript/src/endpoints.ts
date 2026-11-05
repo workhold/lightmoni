@@ -81,6 +81,9 @@ export class CenterEndpoints {
           this.snapshot = { ...raw, endpoints };
           if (changed) this.failed.clear();
           this.lastError = "";
+          // A fresh authenticated manifest from the same verified center proves
+          // this entrance has recovered, even when its revision is unchanged.
+          this.failed.delete(source);
           verified.add(source);
           break;
         } catch (e) {

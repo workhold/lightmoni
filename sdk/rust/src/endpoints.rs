@@ -45,6 +45,22 @@ mod tests {
         let(foreign,foreign_stop)=entrance("foreign",manifest.clone(),seen.clone(),secrets.clone());publish(&foreign,"three");assert_eq!(client.refresh_endpoints().unwrap(),public);assert!(!secrets.lock().unwrap().contains(&"foreign".to_string()));
         client.shutdown(Duration::from_secs(2)).unwrap();public_stop.store(true,Ordering::Relaxed);next_stop.store(true,Ordering::Relaxed);foreign_stop.store(true,Ordering::Relaxed);
     }
+    #[test]
+    fn authenticated_refresh_recovers_only_a_verified_source() {
+        let manifest=Arc::new(Mutex::new(json!({})));let seen=Arc::new(Mutex::new(Vec::new()));let secrets=Arc::new(Mutex::new(Vec::new()));
+        let(public,stop)=entrance("public",manifest.clone(),seen.clone(),secrets.clone());
+        *manifest.lock().unwrap()=json!({"version":1,"center_id":"same","revision":"unchanged","endpoints":[{"url":public,"scope":"public"}]});
+        let pending=Arc::new(Mutex::new(BTreeMap::new()));let mut e=CenterEndpoints::new(&public,pending.clone());
+        let http=reqwest::blocking::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+        assert_eq!(e.resolve(&http,"fixture",false,Instant::now()+Duration::from_secs(3)).unwrap(),public);
+        pending.lock().unwrap().insert(public.clone(),Instant::now()+Duration::from_secs(30));
+        assert_eq!(e.resolve(&http,"fixture",true,Instant::now()+Duration::from_secs(3)).unwrap(),public);
+        assert!(!e.failed.contains_key(&public));assert!(seen.lock().unwrap().is_empty());
+        pending.lock().unwrap().insert(public.clone(),Instant::now()+Duration::from_secs(30));
+        manifest.lock().unwrap()["center_id"]=json!("foreign");
+        assert!(e.resolve(&http,"fixture",true,Instant::now()+Duration::from_secs(3)).is_err());
+        assert!(e.failed.contains_key(&public));stop.store(true,Ordering::Relaxed);
+    }
 }
 fn center_url(value: &str) -> Option<String> {
     let u = reqwest::Url::parse(value).ok()?;
@@ -80,7 +96,7 @@ impl CenterEndpoints {
                 if raw["version"]!=1 || raw["revision"].as_str().is_none_or(str::is_empty) || addresses.is_empty() || addresses.len()>20 || self.manifest.as_ref().is_some_and(|v|v["center_id"]!=id) {continue;}
                 if !addresses.iter().all(|e|e["url"].as_str().and_then(center_url).is_some() && [Some("internal"),Some("public")].contains(&e["scope"].as_str())) || !addresses.iter().any(|e|e["scope"]=="public") {continue;}
                 if self.manifest.as_ref().is_none_or(|v|v["revision"]!=raw["revision"]) {self.failed.clear();}
-                self.manifest=Some(raw);verified=source;break;
+                self.manifest=Some(raw);self.failed.remove(&source);verified=source;break;
             }
         }
         let Some(manifest)=&self.manifest else {self.selected=self.bootstrap.clone();self.selected_until=self.expires;return Ok(self.selected.clone());};
