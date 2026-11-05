@@ -55,6 +55,7 @@ export function dockerInventory(value: any): DockerInventory | undefined {
 }
 export function bindApplicationRows(db: DB, agentID: string, rows: any[], decrypt?: (value:string)=>string) {
   const targets = new Map(applicationTargets(db, agentID, decrypt).map(t => [t.deployment_id, t]));
+  const agent=db.get<any>('SELECT * FROM agents WHERE id=?',agentID);
   for (const n of rows) {
     const a = n.row.attributes, target = targets.get(a.deployment_id);
     if (!target || !/^[a-f0-9]{12,64}$/.test(a.container_id ?? '') || !(n.kind === 'log' || (n.kind === 'metric' && n.subtype === 'gauge'))) fail(403, 'application_observation_ownership_required');
@@ -70,10 +71,16 @@ export function bindApplicationRows(db: DB, agentID: string, rows: any[], decryp
         if(!site||!websiteClusterIDs(db,site,decrypt).includes(target.cluster_id))fail(403,'website_observation_ownership_required');
       }
     }
-    Object.assign(a, {application_id: target.application_id, cluster_id: target.cluster_id, machine_id: target.machine_id, 'lightmoni.component':'application'});
+    const machine=has(db,'managed_machines')?db.get<any>('SELECT * FROM managed_machines WHERE id=? AND agent_id=?',target.machine_id,agentID):undefined;
+    const application=db.get<any>('SELECT * FROM ops_platform_resources WHERE id=?',target.application_id);
+    const machineName=text(machine?.name||agent?.hostname,128),service=target.service_name||text(application?.name,128)||'application';
+    Object.assign(a, {application_id: target.application_id, cluster_id: target.cluster_id, machine_id: target.machine_id, machine_name:machineName, service_name:service, 'lightmoni.component':'application'});
     n.row.agent_id = agentID;
-    n.row.host_id = db.get<any>('SELECT host_id FROM agents WHERE id=?', agentID)?.host_id ?? '';
-    n.row.service = target.service_name || target.application_id;
+    n.row.host_id = agent?.host_id ?? '';
+    n.row.service = service;
+    let resource:any={};try{resource=JSON.parse(n.row.resource_json??'{}');}catch{}
+    if(!resource||typeof resource!=='object'||Array.isArray(resource))resource={};
+    n.row.resource_json=JSON.stringify({...resource,'host.name':machineName,'service.name':service,'host.id':n.row.host_id,'lightmoni.agent_id':agentID,'lightmoni.machine_id':target.machine_id});
     n.row.attributes_json = JSON.stringify(a);
   }
 }

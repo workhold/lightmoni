@@ -1,0 +1,17 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "seq": 1746,
+  "saved": true,
+  "existing_block_count": 922,
+  "existing_blocks_order_content_and_native_diagrams_preserved": true,
+  "paragraphs_and_heading_verified": true,
+  "title": "LightMoni 系统设计基线",
+  "title_preserved": true,
+  "native_diagram": {
+    "id": "sdd097-maintenance-identity-flow",
+    "nodes": 10,
+    "edges": 8,
+    "matches": true
+  },
+  "native_code_issues": []
+}

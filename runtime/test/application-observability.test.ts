@@ -27,6 +27,22 @@ test('certificate step journal projects ordered safe diagnostics through the tra
 function agentFixture(t:any){const dir=mkdtempSync(join(tmpdir(),'lm-044-agent-'));const agent=createAgent({...defaultConfig(),data_dir:dir,endpoint:'http://127.0.0.1:1',control_credential:'test-control',data_credential:'test-data',listen:'127.0.0.1:0',min_free_bytes:0,collect_interval_seconds:3600});t.after(async()=>{await agent.close();rmSync(dir,{recursive:true,force:true});});return agent;}
 const target={deployment_id:'instance-a',application_id:'app-a',cluster_id:'cluster-a',machine_id:'machine-a',service_name:'orders',role:'generic'};
 const container={id:'a'.repeat(64),name:'orders-app-1',image:'orders:1',state:'running',ports:'8080',deployment_id:target.deployment_id};
+test('bound container logs and gauges persist trusted readable names without accepting spoofed ownership',t=>{
+ const db=dbFixture(t);
+ db.exec(`CREATE TABLE agents(id TEXT,host_id TEXT,hostname TEXT);INSERT INTO agents VALUES('agent-a','host-a','os-host');
+ CREATE TABLE managed_machines(id TEXT,name TEXT,agent_id TEXT);INSERT INTO managed_machines VALUES('machine-a','zz-bj-1','agent-a');
+ CREATE TABLE ops_platform_resources(id TEXT,kind TEXT,name TEXT,spec_cipher TEXT);INSERT INTO ops_platform_resources VALUES('app-a','application','Orders','{"service_name":"orders","role":"generic"}');
+ CREATE TABLE ops_cluster_instances(id TEXT,owner_id TEXT,cluster_id TEXT,machine_id TEXT,agent_id TEXT);INSERT INTO ops_cluster_instances VALUES('instance-a','app-a','cluster-a','machine-a','agent-a');`);
+ for(const kind of ['log','metric']) {
+  const row:any={kind,subtype:kind==='metric'?'gauge':'',row:{service:'spoofed',host_id:'spoofed',resource_json:JSON.stringify({'host.name':'spoofed','service.name':'spoofed','custom':'retained'}),attributes:{deployment_id:'instance-a',container_id:container.id,machine_name:'spoofed'}}};
+  bindApplicationRows(db,'agent-a',[row],v=>v);
+  const resource=JSON.parse(row.row.resource_json);
+  assert.equal(row.row.service,'orders');assert.equal(resource['service.name'],'orders');assert.equal(resource['host.name'],'zz-bj-1');
+  assert.equal(resource['host.id'],'host-a');assert.equal(resource['lightmoni.machine_id'],'machine-a');assert.equal(resource.custom,'retained');
+  assert.equal(row.row.attributes.machine_name,'zz-bj-1');assert.equal(row.row.attributes.service_name,'orders');assert.equal(row.row.attributes.application_id,'app-a');
+  assert.throws(()=>bindApplicationRows(db,'foreign',[row],v=>v),/ownership/);
+ }
+});
 test('transactional system log outbox retries, backfills idempotently, excludes secrets and rolls back with state',async t=>{
  const db=dbFixture(t);db.exec(`CREATE TABLE ops_platform_resources(id TEXT,kind TEXT,spec_cipher TEXT);INSERT INTO ops_platform_resources VALUES('r','application','{}');CREATE TABLE ops_platform_runs(id TEXT,resource_id TEXT,resource_revision INTEGER,agent_id TEXT,action TEXT,state TEXT,actor TEXT,created_at TEXT,updated_at TEXT,result_json TEXT,payload_cipher TEXT);`);
  db.run('INSERT INTO ops_platform_runs VALUES(?,?,?,?,?,?,?,?,?,?,?)','run','r',1,'agent','deploy','queued','admin',new Date().toISOString(),new Date().toISOString(),'{}','never-log-this-secret');
@@ -71,7 +87,7 @@ test('task-center state, cancellation and resolution reach system logs without s
 });
 test('authenticated deployment ownership overrides spoofed application/cluster/host and rejects foreign Agent',t=>{
  const db=dbFixture(t);db.exec(`CREATE TABLE agents(id TEXT,host_id TEXT);INSERT INTO agents VALUES('agent-a','host-a');CREATE TABLE ops_platform_resources(id TEXT,kind TEXT,spec_cipher TEXT);INSERT INTO ops_platform_resources VALUES('app-a','application','{}');CREATE TABLE ops_cluster_instances(id TEXT,owner_id TEXT,cluster_id TEXT,machine_id TEXT,agent_id TEXT);INSERT INTO ops_cluster_instances VALUES('instance-a','app-a','cluster-a','machine-a','agent-a');`);
- assert.equal(applicationTargets(db,'agent-b').length,0);const row=()=>({kind:'metric',subtype:'gauge',row:{service:'fake',host_id:'fake',attributes:{deployment_id:'instance-a',container_id:container.id,application_id:'fake',cluster_id:'fake'}}});const good=row();bindApplicationRows(db,'agent-a',[good]);assert.equal(good.row.attributes.application_id,'app-a');assert.equal(good.row.attributes.cluster_id,'cluster-a');assert.equal(good.row.host_id,'host-a');assert.equal(good.row.service,'app-a');assert.throws(()=>bindApplicationRows(db,'agent-b',[row()]),/ownership/);assert.throws(()=>bindApplicationRows(db,'agent-a',[{...row(),subtype:'sum'}]),/ownership/);
+ assert.equal(applicationTargets(db,'agent-b').length,0);const row=()=>({kind:'metric',subtype:'gauge',row:{service:'fake',host_id:'fake',attributes:{deployment_id:'instance-a',container_id:container.id,application_id:'fake',cluster_id:'fake'}}});const good=row();bindApplicationRows(db,'agent-a',[good]);assert.equal(good.row.attributes.application_id,'app-a');assert.equal(good.row.attributes.cluster_id,'cluster-a');assert.equal(good.row.host_id,'host-a');assert.equal(good.row.service,'application');assert.throws(()=>bindApplicationRows(db,'agent-b',[row()]),/ownership/);assert.throws(()=>bindApplicationRows(db,'agent-a',[{...row(),subtype:'sum'}]),/ownership/);
 });
 test('inventory allowlist retains external stopped Docker and omits private fields',()=>{
  const value=dockerInventory({state:'ready',observed_at:new Date().toISOString(),containers:[{...container,environment:'secret',command:'secret',labels:'secret',state:'exited',deployment_id:''}]})!;assert.equal(value.containers[0].state,'exited');assert.doesNotMatch(JSON.stringify(value),/secret/);assert.equal(dockerBytes('1.5GiB'),1.5*1024**3);assert.equal(dockerBytes('2 MB'),2e6);assert.equal(dockerBytes('bad'),undefined);

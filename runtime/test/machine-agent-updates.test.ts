@@ -13,7 +13,7 @@ import { registerManagedMachines, type SSHRunner } from "../src/server/managed-m
 import { NodeStore } from "../src/server/nodes-model.js";
 import { createAgentUpdatesSchema } from "../src/server/machine-agent-updates.js";
 import { AgentReleaseCatalog } from "../src/server/machine-agent-updates-catalog.js";
-import { assertNoPendingAgentUpdate } from "../src/server/machine-agent-updates-guard.js";
+import { assertNoPendingAgentUpdate, hasPendingAgentUpdate } from "../src/server/machine-agent-updates-guard.js";
 import { TaskRunStore } from "../src/server/task-center.js";
 import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { SCRIPT_TASK_CAPABILITY } from "../src/shared/task-center.js";
@@ -183,6 +183,24 @@ test("changing host defaults never replaces an approved SSH login account", asyn
   assert.equal((await f.apply(h.id,proposed.data.id)).status,202);
   assert.equal((await f.settle(h.id,proposed.data.id)).status,"succeeded");
   assert.ok(f.calls.every(c=>c.machine.account_id===h.account&&c.machine.username==="root"&&c.credentialID===h.credential));
+});
+
+test('Agent upgrade planning reserves the host while an unclaimed platform inspection waits',async t=>{
+ const f=await fixture(t),h=await f.host();
+ const at=f.deps.now().toISOString(),operation='queued-inspection',job='inspection-job',resource='application';
+ f.db.exec('CREATE TABLE ops_platform_runs(id TEXT,job_id TEXT,agent_id TEXT,state TEXT,payload_cipher TEXT,resource_id TEXT)');
+ const payload={operation_id:operation,operation:'inspect',resource:{id:resource,agent_id:h.agent,config:{task:'workload.inspect'}}};
+ f.db.run("INSERT INTO agent_jobs(id,agent_id,execution_principal,deployment_id,operation_id,state,actions_json,target_json,issued_at,expires_at,created_at,updated_at) VALUES(?,?,'privileged_executor',?,?,'queued',?,?,?,?,?,?)",job,h.agent,'platform-'+resource,operation,JSON.stringify([{kind:'operations',domain:'platform',operation_id:operation}]),JSON.stringify({operations_resource_id:resource}),at,new Date(f.deps.now().getTime()+900000).toISOString(),at,at);
+ f.db.run('INSERT INTO ops_platform_runs VALUES(?,?,?,?,?,?)',operation,job,h.agent,'queued',f.deps.encrypt(JSON.stringify(payload)),resource);
+ assert.equal(f.machines.get(h.id).capabilities.update_agent.available,true);
+ f.setProbeHook(async()=>{assert.equal(hasPendingAgentUpdate(f.db,h.agent,h.id),true);});
+ const planned=await f.plan(h.id);assert.equal(planned.status,201,planned.raw);
+ assert.equal(f.db.get<any>('SELECT state FROM agent_jobs WHERE id=?',job)!.state,'queued');
+ assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_maintenance_preparations')!.n,0);
+ assert.equal(hasPendingAgentUpdate(f.db,h.agent,h.id),true);
+ f.setProbeHook(undefined);const applied=await f.apply(h.id,planned.data.id);assert.equal(applied.status,202,applied.raw);
+ assert.equal((await f.settle(h.id,planned.data.id)).status,'succeeded');
+ assert.equal(hasPendingAgentUpdate(f.db,h.agent,h.id),false);
 });
 
 test("unknown maintenance uses a new account only when explicitly selected and preserves approval evidence", async t => {
