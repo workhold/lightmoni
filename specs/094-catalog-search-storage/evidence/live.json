@@ -15,6 +15,14 @@
       "id": "rustfs",
       "result": "passed",
       "behavior": "non-root volumes, S3 auth, signed bucket/object write/read, console health"
+    },
+    {
+      "id": "firecrawl",
+      "result": "passed",
+      "behavior": "five-service startup, API/worker/queue/database connectivity and real IANA Markdown scrape",
+      "browser_platform": "linux/amd64",
+      "public_dns_pinning": true,
+      "target": "https://www.iana.org/help/example-domains"
     }
   ],
   "production_modified": false,

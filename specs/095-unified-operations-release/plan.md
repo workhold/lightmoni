@@ -1,5 +1,7 @@
 # Design and Integration Plan
 
+Firecrawl验收夹具续接：允许显式选择测试浏览器架构，延长五服务Compose启动等待，并在Fake-IP环境下可选使用公共DoH查询固定IANA验收目标的公网解析。只修改隔离QA清单；不修改商城配方或生产网络，不关闭SSRF/TLS校验。目标状态码与非空Markdown一起验证，报告记录浏览器平台及DNS选项。此夹具变化的架构同步不适用：不改变生产组件、控制路径、凭据或权限；既有商城/发行设计回读仍有效。
+
 2026-11-05续接：用户要求最新商城一同发版测试，纳入PR100 fdf731b2ec25ecde6f4b5f08f6e7c2d1ddae832b。合并时保留组合升级/健康/SSH回归与商城35条目、8分类、4个Logo及完整Firecrawl依赖；补完Meilisearch/RustFS/Firecrawl真实容器业务冒烟。旧b975a95候选保留历史证据，新发行使用独立目录、固定源码及新标签，重新运行受影响检查与两架构成品验收。架构内容沿用PR100已同步的目录拓扑和组合§95，不新增拓扑；合并后回读Doca最新版本核对两部分均保留。
 
 基于PR98的独立工作树，顺序合入当前生产PR92、维护可靠性PR95、安装表单PR96、托管可用性PR97；PR94为祖先，PR93发行文档合入但Compose最终改为本次固定标签。逐项核验共同改动：agent operationCapabilities包含image-refresh与health-v1，store.queue同时要求两者；cluster-workloads保留升级刷新/历史商店版本及新的宽限/比例/就绪/排空；Web表单保持防重复部署及健康配置；SSH容器终端保留账户边界。用户本轮已明确授权合并：完成验收后通过统一PR合入main，保留各来源提交历史；发布固定版本和latest及GitHub Release。

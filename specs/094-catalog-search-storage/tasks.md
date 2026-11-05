@@ -7,6 +7,6 @@
 - [x] T005 参数/依赖/秘密/端口测试与 HTTP/Compose 验证。
 - [x] T006a 中英文浏览器、SearXNG 官方镜像真实业务冒烟；复现脚本及资源清理。
 - [x] T006b1 统一发行续接补完 Meilisearch 生产鉴权、索引检索及 RustFS 签名 S3 桶/对象读写、控制台健康；临时资源清理，见 evidence/live.json。
-- [ ] T006b2 Firecrawl 五服务与真实 Markdown 抓取冒烟：官方浏览器镜像完整拉取仍在进行，未声称通过。
+- [x] T006b2 Firecrawl 五服务与真实 IANA Markdown 抓取通过；ARM64 API/数据库配合显式仿真 AMD64 浏览器，公网解析仅作用于隔离 QA 清单，不代表原生 ARM64 浏览器验收。见 evidence/live.json 和 quickstart.md。
 - [x] T007 仓库与 Doca 架构同步、原生图保留和最新版本回读。
-- [x] T008 类型/构建、同步远端主干、功能 PR 与验收证据。草稿 PR：https://github.com/workhold/lightmoni/pull/100；T006b 未完成并明确列出。
+- [x] T008 类型/构建、同步远端主干、功能 PR 与验收证据。草稿 PR：https://github.com/workhold/lightmoni/pull/100；T006b 由统一发行 PR99 续接完成并记录架构仿真限制。

@@ -14,6 +14,14 @@ LIGHTMONI_CATALOG_EVIDENCE=../../../specs/094-catalog-search-storage/evidence no
 node --import tsx test/fixtures/verify-search-storage-live.ts
 ```
 
-可用 LIGHTMONI_CATALOG_SMOKE_IDS=meilisearch,searxng,rustfs 限定实测范围。真实冒烟覆盖生产鉴权与索引检索、SearXNG 配置和检索格式、签名 S3 桶/对象读写及控制台、Firecrawl 五服务和 example.com Markdown 抓取；未执行部分不能由静态 Compose 检查替代。
+可用 LIGHTMONI_CATALOG_SMOKE_IDS=meilisearch,searxng,rustfs 限定实测范围。真实冒烟覆盖生产鉴权与索引检索、SearXNG 配置和检索格式、签名 S3 桶/对象读写及控制台、Firecrawl 五服务和 IANA 示例域名说明页的 Markdown 抓取；同时断言目标状态码为200，未执行部分不能由静态 Compose 检查替代。
+
+Fake-IP代理环境可能让公共域名解析到保留网段，被Firecrawl的SSRF保护拒绝。隔离夹具可通过公共DoH解析IANA目标并仅在QA容器清单中固定该地址；不关闭SSRF或TLS校验，不修改生产配方。ARM64宿主已拉取官方AMD64浏览器镜像时，可显式测试模拟运行：
+
+```sh
+LIGHTMONI_CATALOG_SMOKE_IDS=firecrawl LIGHTMONI_CATALOG_BROWSER_PLATFORM=linux/amd64 LIGHTMONI_CATALOG_PUBLIC_DNS=1 node --import tsx test/fixtures/verify-search-storage-live.ts
+```
+
+五服务启动最多等待240秒；报告记录浏览器架构和DNS选项。此模拟运行不能替代原生ARM64浏览器验收。
 
 浏览器：启动 runtime/test/fixtures/app-install-ui-server.ts（LIGHTMONI_INSTALL_QA_PORT=19946）以及 LIGHTMONI_DEV_API_URL=http://127.0.0.1:19946 的 web 开发服务（5196），再从 web 运行 node src/app/ops/verify-catalog-ui.mjs。该后端使用真实 HTTP / SQLite / 加密和显式 QA 管理员；不连接远端 Agent，DBX 保存与待执行记录不代表生产部署完成。

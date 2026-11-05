@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtemp, mkdir, readFile, writeFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { isIP } from "node:net";
 import { setTimeout } from "node:timers/promises";
 import { catalogInstallation } from "../../src/ops/catalog.js";
 import { normalizeApplication, renderManifest } from "../../src/operations/platform.js";
@@ -14,6 +15,10 @@ const out = resolve(import.meta.dirname, "../../../specs/094-catalog-search-stor
 const checks: any[] = [];
 let currentID = "", complete = false;
 const ids = (process.env.LIGHTMONI_CATALOG_SMOKE_IDS ?? "meilisearch,searxng,rustfs,firecrawl").split(",");
+const browserPlatform = process.env.LIGHTMONI_CATALOG_BROWSER_PLATFORM;
+if (browserPlatform && !["linux/amd64", "linux/arm64"].includes(browserPlatform)) throw Error("invalid_browser_platform");
+const publicDNS = process.env.LIGHTMONI_CATALOG_PUBLIC_DNS === "1";
+const scrapeTarget = "https://www.iana.org/help/example-domains";
 const context: any = { dataDir: root, signal: new AbortController().signal, now: () => new Date() };
 const projects: string[][] = [];
 const key = randomBytes(24).toString("hex"), access = "qa-access-" + randomBytes(4).toString("hex");
@@ -42,12 +47,22 @@ try {
       service.ports = spec.ports.filter((p: any) => p.service === name).map((p: any) => ({ target: p.container_port, published: "0", host_ip: "127.0.0.1", protocol: p.protocol }));
     }
     const manifest = await renderManifest(context, "catalog094-" + id, normalizeApplication(spec), 1);
+    if (id === "firecrawl") {
+      // QA-only network/platform overrides; the installed recipe stays unchanged.
+      if (browserPlatform) manifest.services.playwright.platform = browserPlatform;
+      if (publicDNS) {
+        const answer = await (await request("https://dns.google/resolve?name=www.iana.org&type=A")).json() as any;
+        const address = answer.Answer?.find((record: any) => record.type === 1 && isIP(record.data) === 4)?.data;
+        if (!address) throw Error("public_dns_answer_required");
+        for (const name of ["api", "playwright"]) manifest.services[name].extra_hosts = ["www.iana.org:" + address];
+      }
+    }
     const path = join(root, id + ".json"), project = "lm-catalog094-" + id + "-" + randomBytes(3).toString("hex");
     await writeFile(path, JSON.stringify(manifest), { mode: 0o600 });
     const args = ["compose", "--project-name", project, "-f", path];
     projects.push(args);
     docker([...args, "config", "--quiet"]);
-    docker([...args, "up", "-d", "--pull", "never"], 60000);
+    docker([...args, "up", "-d", "--pull", "never"], id === "firecrawl" ? 240000 : 60000);
     const endpoint = (name: string, port: number) => "http://" + docker([...args, "port", name, String(port)]).trim();
     const main = spec.ports[0], base = endpoint(main.service, main.container_port);
     await ready(base + (id === "meilisearch" ? "/health" : id === "searxng" ? "/healthz" : id === "rustfs" ? "/health" : "/"), id === "firecrawl" ? 300 : 180);
@@ -85,12 +100,13 @@ try {
       assert.match(s3(base, "/"), /lightmoni-qa/);
       checks.push({ id, result: "passed", behavior: "non-root volumes, S3 auth, signed bucket/object write/read, console health" });
     } else {
-      const response = await request(base + "/v1/scrape", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: "https://example.com", formats: ["markdown"] }) });
+      const response = await request(base + "/v1/scrape", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: scrapeTarget, formats: ["markdown"] }) });
       assert.equal(response.status, 200);
       const body = await response.json() as any;
       assert.equal(body.success, true);
-      assert.match(body.data.markdown, /Example Domain/);
-      checks.push({ id, result: "passed", behavior: "five-service startup, API/worker/queue/database connectivity and real Markdown scrape" });
+      assert.equal(body.data.metadata.statusCode, 200);
+      assert.match(body.data.markdown, /Example Domains/i);
+      checks.push({ id, result: "passed", behavior: "five-service startup, API/worker/queue/database connectivity and real IANA Markdown scrape", browser_platform: browserPlatform ?? "host default", public_dns_pinning: publicDNS, target: scrapeTarget });
     }
     const containers = docker([...args, "ps", "--all", "--format", "json"]).trim().split("\n").filter(Boolean).map(s => JSON.parse(s));
     assert.equal(containers.length, Object.keys(spec.compose.services).length);
