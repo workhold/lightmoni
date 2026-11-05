@@ -5,8 +5,12 @@ import type {DB} from '../shared/sqlite.js';
 export function blockingAgentJobSQL(db:DB,alias='agent_jobs'):string {
  if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias))throw Error('invalid_job_table_alias');
  const pending=`${alias}.state NOT IN ('succeeded','failed','cancelled')`;
- if(!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='privileged_jobs'"))return pending;
- return `${pending} AND NOT EXISTS (
+ const recovered=db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_state_recovery_jobs'")&&db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='machine_state_recoveries'")
+  ? ` AND NOT EXISTS (SELECT 1 FROM machine_state_recovery_jobs recovered JOIN machine_state_recoveries recovery ON recovery.id=recovered.recovery_id
+      WHERE ${alias}.state='unknown' AND recovered.job_id=${alias}.id AND recovered.agent_id=${alias}.agent_id
+        AND recovery.status='succeeded' AND recovery.agent_id=recovered.agent_id AND recovery.machine_id=recovered.machine_id)` : '';
+ if(!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='privileged_jobs'"))return pending+recovered;
+ return `${pending}${recovered} AND NOT EXISTS (
   SELECT 1 FROM privileged_jobs reconciled WHERE ${alias}.state='unknown' AND ${alias}.execution_principal='privileged_executor'
    AND reconciled.id=${alias}.id AND reconciled.agent_id=${alias}.agent_id
    AND reconciled.task_run_id=${alias}.id AND reconciled.capability='operations.managed.v1' AND reconciled.state='unknown'

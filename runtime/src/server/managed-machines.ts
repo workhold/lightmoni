@@ -1,4 +1,5 @@
 import { registerMachineDocker } from './machine-docker.js';
+import { registerMachineStateRecovery } from './machine-state-recovery.js';
 import { machineDockerEnvironment, type DockerEnvironment } from './docker-environment.js';
 import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { connectionCredentials } from "./connection-credentials.js";
@@ -840,6 +841,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     credentials: options.agentCredentials, downloadsDir: options.downloadsDir ?? join(process.cwd(), "downloads"), dataDir: options.dataDir ?? join(process.cwd(), ".local-dev"),
     pollIntervalMs: options.updatePollIntervalMs, healthTimeoutMs: options.updateHealthTimeoutMs,
   });
+  registerMachineStateRecovery(deps, { get, idle, revision: targetRevision, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe });
   const createPlan = (machineID: string, input: InstallPlanInput, actorID: string) => {
     parameters(record(input), ["check_id", "credential_id", "version", "arch", "initial_label_id", "runtime_mode"]);
     const runtimeMode=input.runtime_mode??'root';if(!validAgentRuntimeMode(runtimeMode))fail(400,'invalid_agent_runtime_mode');
