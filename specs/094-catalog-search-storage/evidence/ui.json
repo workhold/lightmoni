@@ -1,0 +1,15 @@
+{
+  "checks": [
+    "DBX real HTTP install saves encrypted resource and creates pending QA Agent work; no fabricated completion",
+    "zh-CN/dark/1440: Meilisearch, SearXNG, Firecrawl and RustFS logos decoded locally and install forms verified",
+    "zh-CN/dark/1440: eight category counts, DBX and Firecrawl tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow",
+    "en-US/light/1440: Meilisearch, SearXNG, Firecrawl and RustFS logos decoded locally and install forms verified",
+    "en-US/light/1440: eight category counts, DBX and Firecrawl tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow",
+    "zh-CN/light/390: Meilisearch, SearXNG, Firecrawl and RustFS logos decoded locally and install forms verified",
+    "zh-CN/light/390: eight category counts, DBX and Firecrawl tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow",
+    "en-US/dark/390: Meilisearch, SearXNG, Firecrawl and RustFS logos decoded locally and install forms verified",
+    "en-US/dark/390: eight category counts, DBX and Firecrawl tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow"
+  ],
+  "errors": [],
+  "media": "/Users/zhangsiwen/.codex/worktrees/ops-unified-release/lightmoni/artifacts/screenshots/specs/094-catalog-search-storage/evidence"
+}

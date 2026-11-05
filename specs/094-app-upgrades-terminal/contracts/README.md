@@ -1,0 +1,7 @@
+# Contracts
+
+- GET /api/v1/ops/resources/:id/upgrade: admin; no-store; returns revision, source, current_version, target_version, available, current_images, target_images, target_fingerprint, blocked_reason. Store target is current server catalog default only.
+- POST /api/v1/ops/resources/:id/upgrade: {revision,confirmed:true,target_version,target_fingerprint} for store; {revision,confirmed:true,images:{service:image}} for custom. Only declared services; all fields validated. Returns 202 {resource,runs,deployments} or explicit deploy_error after durable save. Resource response redacted. No arbitrary source, command or placement fields accepted.
+- GET /api/v1/ops/resources/:id/terminal-targets: admin/no-store; returns bound machines/instances/running containers from current inventory. Snapshot freshness <=120s, lifecycle/instance ownership rechecked on each request.
+- POST /api/v1/machines/:id/terminal-sessions adds optional container_target:{application_id,instance_id,container_id,shell:'sh'|'bash'}. Container target is all-or-nothing and strict. Existing host terminal is unchanged. API/WebSocket responses add bound container identity; credential secrets and I/O never stored.
+- 400 invalid fields/targets/images; 403 admin required; 404 missing resource or target; 409 revision/template/active execution/ownership/freshness conflict. SSH runtime failure is container_exec_failed/remote_closed and never starts host shell.

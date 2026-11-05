@@ -1,5 +1,5 @@
 import {blockingAgentJobSQL} from './agent-job-fence.js';
-import { dockerInventory } from "../shared/application-observation.js";
+import { dockerInventory,applicationObservation } from "../shared/application-observation.js";
 import { generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import type { Context, Dependencies, Module } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
@@ -349,8 +349,9 @@ export class PrivilegedExecutorStore {
     });
   }
   heartbeat(executor: Row, value: unknown) {
-    const keys = ["version", "boot_id", "activation_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release","operations_capabilities","docker_inventory","ordinary_task_identity"];
-    const v = object(value, keys,keys.filter(k=>!["release","operations_capabilities","docker_inventory","ordinary_task_identity"].includes(k))); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
+    const keys = ["version", "boot_id", "activation_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release","operations_capabilities","docker_inventory","ordinary_task_identity","application_observation"];
+    const v = object(value, keys,keys.filter(k=>!["release","operations_capabilities","docker_inventory","ordinary_task_identity","application_observation"].includes(k))); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
+    if(v.application_observation!==undefined)v.application_observation=applicationObservation(v.application_observation);
     if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(v.activation_id))fail(400,"invalid_executor_activation");
     if (v.release!==undefined) {
       const release=object(v.release,["build_id","source_revision","artifact_sha256","state_schema"]);

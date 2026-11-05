@@ -1,0 +1,226 @@
+{
+  "saved": {
+    "resourceId": "2902a80f-c592-414e-9aed-64fe19f2ed53",
+    "seq": 1740,
+    "epochId": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+    "saved": true,
+    "format": "rich_text",
+    "continueWith": "使用本回执的 seq/epochId 继续；不要回读全文。定位失败时 document_read 默认 outline，再按 blockId/slideId/sheetId/elementId 读区域。",
+    "current": {
+      "resourceId": "2902a80f-c592-414e-9aed-64fe19f2ed53",
+      "seq": 1740,
+      "epochId": "63d4490e-11da-4b5a-8674-cd671d8ad4b6"
+    },
+    "done": [
+      "insertBlock",
+      "insertBlock",
+      "insertBlock",
+      "insertBlock",
+      "insertBlock",
+      "insertBlock"
+    ],
+    "next": "使用 current.seq/epochId 继续下一批，不要回读全文"
+  },
+  "records": [
+    {
+      "id": "release095-heading",
+      "seq": 1740,
+      "matches": true,
+      "actual": {
+        "id": "release095-heading",
+        "type": "paragraph",
+        "title": "h2",
+        "children": [
+          {
+            "text": "统一运维发行与升级组合（SDD095）"
+          }
+        ]
+      }
+    },
+    {
+      "id": "release095-p1",
+      "seq": 1740,
+      "matches": true,
+      "actual": {
+        "id": "release095-p1",
+        "type": "paragraph",
+        "children": [
+          {
+            "text": "统一发行保留主机UI、维护恢复、重复安装修复、默认遥测、应用升级/容器终端和托管可用性。发行组装不增加新组件；升级请求必须完整通过现有配置修订、可信执行器、就绪、网关确认与排空路径。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "release095-p2",
+      "seq": 1740,
+      "matches": true,
+      "actual": {
+        "id": "release095-p2",
+        "type": "paragraph",
+        "children": [
+          {
+            "text": "应用升级在确认当前配置修订及商店镜像指纹后，仅修改目标镜像、商店来源版本与刷新策略。托管控制器先按集群最低在线预算创建替换，新实例刷新镜像并通过HTTP就绪后才发布端点；旧实例等相关网关确认新路由并完成排空后停止。失联宽限及保留成员不等于就绪证明。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "release095-p3",
+      "seq": 1740,
+      "matches": true,
+      "actual": {
+        "id": "release095-p3",
+        "type": "paragraph",
+        "children": [
+          {
+            "text": "签名任务按实际配置同时要求operations.platform.image-refresh.v1与operations.platform.readiness.v1。能力必须由有效特权执行器证明，普通Agent自报不可替代；中心、普通Agent和root helper使用同一固定源码成品配套升级。旧执行器保持阻止，未知维护结果按已停止证据与原快照恢复。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "release095-p4",
+      "seq": 1740,
+      "matches": true,
+      "actual": {
+        "id": "release095-p4",
+        "type": "paragraph",
+        "children": [
+          {
+            "text": "生产切换比较实际中心容器与Compose镜像，备份SQLite、主密钥和部署配置，仅替换中心。验收核对不可变摘要、源码与实际导出能力、业务清单、遥测积压及入口；回滚保留原镜像和备份。容器终端仍绑定当前应用/实例/完整容器ID和SSH账户租约，不记录终端内容。"
+          }
+        ]
+      }
+    },
+    {
+      "id": "release095-flow",
+      "seq": 1740,
+      "matches": true,
+      "actual": {
+        "id": "release095-flow",
+        "type": "flowchart",
+        "width": 820,
+        "children": [
+          {
+            "text": ""
+          }
+        ],
+        "nodes": [
+          {
+            "id": "release095-node-0",
+            "label": "审阅升级\n修订与镜像指纹",
+            "shape": "process",
+            "x": 0,
+            "y": 0,
+            "width": 235,
+            "height": 80,
+            "fontSize": 14
+          },
+          {
+            "id": "release095-node-1",
+            "label": "托管预算\n保留旧服务",
+            "shape": "process",
+            "x": 270,
+            "y": 0,
+            "width": 235,
+            "height": 80,
+            "fontSize": 14
+          },
+          {
+            "id": "release095-node-2",
+            "label": "签名刷新镜像\n可信双能力",
+            "shape": "process",
+            "x": 540,
+            "y": 0,
+            "width": 235,
+            "height": 80,
+            "fontSize": 14
+          },
+          {
+            "id": "release095-node-3",
+            "label": "新实例\nHTTP就绪",
+            "shape": "process",
+            "x": 0,
+            "y": 150,
+            "width": 235,
+            "height": 80,
+            "fontSize": 14
+          },
+          {
+            "id": "release095-node-4",
+            "label": "发布新端点\n网关确认",
+            "shape": "process",
+            "x": 270,
+            "y": 150,
+            "width": 235,
+            "height": 80,
+            "fontSize": 14
+          },
+          {
+            "id": "release095-node-5",
+            "label": "连接排空完成\n停止旧实例",
+            "shape": "process",
+            "x": 540,
+            "y": 150,
+            "width": 235,
+            "height": 80,
+            "fontSize": 14
+          }
+        ],
+        "edges": [
+          {
+            "id": "release095-edge-0",
+            "source": "release095-node-0",
+            "target": "release095-node-1",
+            "arrow": "end",
+            "lineType": "smoothstep"
+          },
+          {
+            "id": "release095-edge-1",
+            "source": "release095-node-1",
+            "target": "release095-node-2",
+            "arrow": "end",
+            "lineType": "smoothstep"
+          },
+          {
+            "id": "release095-edge-2",
+            "source": "release095-node-2",
+            "target": "release095-node-3",
+            "arrow": "end",
+            "lineType": "smoothstep"
+          },
+          {
+            "id": "release095-edge-3",
+            "source": "release095-node-3",
+            "target": "release095-node-4",
+            "arrow": "end",
+            "lineType": "smoothstep"
+          },
+          {
+            "id": "release095-edge-4",
+            "source": "release095-node-4",
+            "target": "release095-node-5",
+            "arrow": "end",
+            "lineType": "smoothstep"
+          }
+        ]
+      }
+    },
+    {
+      "id": "app-upgrades094-flow",
+      "seq": 1740,
+      "unchanged": true
+    },
+    {
+      "id": "f-deployment-2b7c",
+      "seq": 1740,
+      "unchanged": true
+    },
+    {
+      "id": "sdd092-dataflow",
+      "seq": 1740,
+      "unchanged": true
+    }
+  ]
+}

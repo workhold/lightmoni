@@ -11,7 +11,7 @@ import { Router, fail } from "../src/shared/http.js";
 import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { registerOperationsPlatform } from "../src/ops/index.js";
 import { extendedDefinitions } from "../src/ops/catalog/index.js";
-import { catalogInstallation } from "../src/ops/catalog.js";
+import { applicationCatalog,catalogInstallation } from "../src/ops/catalog.js";
 import type { Dependencies } from "../src/shared/types.js";
 import { registryCacheFor } from "../src/ops/registry-runtime.js";
 import { createPrivateRegistryController } from "../src/ops/private-registry.js";
@@ -155,7 +155,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     },
     state = "succeeded",
   ) => {
-    const job = jobs.claim(agentID, ["operations.platform","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1"]);
+    const job = jobs.claim(agentID, ["operations.platform","operations.platform.readiness.v1","operations.platform.image-refresh.v1","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1"]);
     assert.ok(job);
     const payload = platform.resolvePayload(job);
     for (const [n, phase] of [
@@ -475,7 +475,7 @@ test("a single writable registry does not turn Hub images into a separate cache 
  assert.deepEqual(Object.keys(registry.compose.services),['registry']);assert.equal(registry.mounts.length,1);
  assert.equal(registry.compose.services.registry.environment.REGISTRY_PROXY_REMOTEURL,undefined);
  const a=f.app(c);assert.equal((await f.action(a,'deploy')).status,202);
- const job=f.jobs.claim('a',['operations.platform']);assert(job);
+ const job=f.jobs.claim('a',['operations.platform','operations.platform.readiness.v1']);assert(job);
  assert.equal(f.platform.resolvePayload(job).resource.config.image_cache,undefined);
 });
 test("a cache switch saved during a leased registry operation stays pending and reconciles after the writer completes", async (t) => {
@@ -489,7 +489,7 @@ test("a cache switch saved during a leased registry operation stays pending and 
     machine_id: "ma",
     address: "10.0.0.1",
   });
-  const job = f.jobs.claim("a", ["operations.platform"]);
+  const job = f.jobs.claim("a", ["operations.platform","operations.platform.readiness.v1"]);
   assert(job);
   const payload = f.platform.resolvePayload(job);
   const saved = await f.req(
@@ -682,56 +682,32 @@ test("named ports reserve atomically and matching verified receipts publish fres
     0,
   );
 });
-test("manual nodes stay fixed while managed offline replicas retire and move to a healthy machine", async (t) => {
-  const f = await fixture(t),
-    c = f.createCluster(),
-    manual = f.app(c);
-  await f.action(manual, "deploy");
-  f.finish("a");
-  const managed = f.app(c, {
-    deployment_mode: "managed",
-    machine_ids: [],
-    replicas: 1,
-  });
-  await f.action(managed, "deploy");
-  f.finish("a");
-  f.advance(121000);
-  f.heartbeat("b");
-  await f.platform.tick();
-  const active = f.db.all<any>(
-    "SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0",
-    managed.id,
-  );
-  assert.equal(active.length, 1);
-  assert.equal(active[0].machine_id, "mb");
-  assert.equal(
-    f.db.all(
-      "SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=1",
-      managed.id,
-    ).length,
-    1,
-  );
-  assert.equal(
-    f.db.all("SELECT * FROM ops_cluster_instances WHERE owner_id=?", manual.id)
-      .length,
-    1,
-  );
-  assert.equal(
-    f.store.actions(manual.id).filter((r) => r.action === "apply").length,
-    1,
-  );
-  f.finish("b");
-  assert.equal(
-    (await f.req("/resources/" + managed.id + "/endpoints?cluster_id=" + c.id))
-      .body.endpoints.length,
-    2,
-  );
-  f.heartbeat("a");
-  await f.platform.tick();
-  assert.equal(
-    f.store.actions(managed.id).some((r) => r.action === "stop"),
-    true,
-  );
+test("manual nodes stay fixed and managed failover waits for grace and ready replacement", async (t) => {
+  const f = await fixture(t), c = f.createCluster(), manual = f.app(c);
+  await f.action(manual, 'deploy'); f.finish('a');
+  const managed = f.app(c, {deployment_mode:'managed', machine_ids:[], replicas:1});
+  await f.action(managed,'deploy'); f.finish('a');
+  const old = f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',managed.id)!;
+  f.advance(240000); f.heartbeat('b'); await f.platform.tick();
+  assert.equal(f.db.all('SELECT id FROM ops_cluster_instances WHERE owner_id=?',managed.id).length,1);
+  assert.equal(f.store.get(managed.id).status.instances[0].availability,'grace');
+  assert.equal(f.store.get(managed.id).status.endpoints.length,2);
+  f.advance(61000); f.heartbeat('b'); await f.platform.tick();
+  const attempts = f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0',managed.id);
+  assert.equal(attempts.length,2);
+  assert.equal(attempts.find(i=>i.slot.startsWith('surge-')).machine_id,'mb');
+  assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',old.id).retired,0);
+  assert.ok(f.store.get(managed.id).status.endpoints.every((e:any)=>e.machine_id==='ma'));
+  f.finish('b'); await f.platform.tick();
+  const active = f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0',managed.id);
+  assert.equal(active.length,1); assert.equal(active[0].machine_id,'mb'); assert.equal(active[0].slot,'0');
+  assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',old.id).retired,1);
+  assert.equal(f.db.all('SELECT id FROM ops_cluster_instances WHERE owner_id=?',manual.id).length,1);
+  assert.ok(f.store.get(managed.id).status.endpoints.every((e:any)=>e.machine_id==='mb'));
+  f.heartbeat('a'); await f.platform.tick();
+  assert.ok(!f.store.actions(managed.id).some(r=>r.action==='stop'));
+  f.advance(30000); f.heartbeat('a');f.heartbeat('b');await f.platform.tick();
+  assert.ok(f.store.actions(managed.id).some(r=>r.action==='stop'));
 });
 test("unknown execution keeps port ownership and never creates a duplicate managed attempt", async (t) => {
   const f = await fixture(t),
@@ -757,7 +733,7 @@ test("unknown execution keeps port ownership and never creates a duplicate manag
 test("catalog installs multiple ordinary MySQL applications with healthcheck and redacts secrets", async (t) => {
   const f = await fixture(t),
     c = f.createCluster();
-  assert.equal((await f.req("/catalog")).body.templates.length, 31);
+  assert.equal((await f.req("/catalog")).body.templates.length, 35);
   for (let n = 0; n < 2; n++) {
     const r = await f.req("/catalog/mysql/install", "POST", {
       deployments: [{ cluster_id: c.id, machine_ids: ["ma"] }],
@@ -910,39 +886,24 @@ test("HTTP returns stable machines and scoped resources, denies member access an
     2,
   );
 });
-test("managed rolling update waits for preceding replica receipt across reconciliation ticks", async (t) => {
-  const f = await fixture(t),
-    c = f.createCluster(),
-    a = f.app(c, { deployment_mode: "managed", machine_ids: [], replicas: 2 });
-  assert.equal((await f.action(a, "deploy")).status, 202);
-  f.finish("a");
-  f.finish("b");
-  const changed = f.store.update(
-    a.id,
-    1,
-    a.name,
-    { ...a.spec, image: "example:2" },
-    "admin",
-  );
-  assert.equal((await f.action(changed, "deploy")).body.runs.length, 1);
-  await f.platform.tick();
-  assert.equal(
-    f.store.actions(a.id).filter((r) => r.action === "apply").length,
-    3,
-  );
-  f.finish("a");
-  await f.platform.tick();
-  assert.equal(
-    f.store.actions(a.id).filter((r) => r.action === "apply").length,
-    4,
-  );
-  f.finish("b");
-  assert.equal(
-    (
-      await f.req("/resources/" + a.id + "/endpoints?cluster_id=" + c.id)
-    ).body.endpoints.every((e: any) => e.version === "2"),
-    true,
-  );
+test("managed rolling update drains one replica before mutation and waits for its ready receipt", async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:2,min_available_percent:50}]});
+ await f.action(a,'deploy');f.finish('a');f.finish('b');
+ const changed=f.store.update(a.id,1,a.name,{...a.spec,image:'example:2'},'admin');
+ const started=await f.action(changed,'deploy');assert.equal(started.body.runs.length,0);assert.equal(started.body.pending,'traffic_drain_pending');
+ assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,2);
+ assert.ok(f.store.get(a.id).status.endpoints.every((e:any)=>e.machine_id==='mb'));
+ f.advance(30000);f.heartbeat('a');f.heartbeat('b');await f.platform.tick();
+ assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,3);
+ await f.platform.tick();assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,3);
+ f.finish('a');f.finish('b');await f.platform.tick();
+ assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,3);
+ f.advance(30000);f.heartbeat('a');f.heartbeat('b');await f.platform.tick();
+ assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,4);
+ // Drain any earlier observational job on this Agent before its apply receipt.
+ for(let n=0;n<4 && f.db.get("SELECT id FROM agent_jobs WHERE agent_id='b' AND state='queued'");n++)f.finish('b');
+ const endpoints=(await f.req('/resources/'+a.id+'/endpoints?cluster_id='+c.id)).body.endpoints;
+ assert.ok(endpoints.every((e:any)=>e.version==='2'));
 });
 test("offline stop persists intent and executes after the original machine reconnects", async (t) => {
   const f = await fixture(t),
@@ -1338,7 +1299,12 @@ test("website DNS aggregates all ready cluster gateways and follows managed fail
   );
   f.finish("a", { healthy: true, running: true, digest: "updated-a" });
   f.finish("b", { healthy: true, running: true, digest: "updated-b" });
-  f.advance(121000);
+  const beforeGrace = records.map(r=>[r.RR,r.Type,r.Value]).sort();
+  f.advance(240000); f.heartbeat('b'); f.heartbeat('c');
+  await f.platform.tick(); f.finish('b'); await settle();
+  assert.deepEqual(records.map(r=>[r.RR,r.Type,r.Value]).sort(),beforeGrace,'four-minute heartbeat gap keeps entry and website DNS unchanged');
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM ops_cluster_instances WHERE owner_id=? AND retired=1",entry.id).n,0);
+  f.advance(61000);
   f.heartbeat("b");
   f.heartbeat("c");
   await f.platform.tick();
@@ -1427,15 +1393,22 @@ test('public-only host installs a local registry without IP gates and never send
 
 test('all approved catalog applications save through HTTP, isolate identity and redact secrets', async t => {
  const f=await fixture(t),c=f.createCluster(['ma']);
- const list=await f.req('/catalog');assert.equal(list.body.templates.length,31);
+ const list=await f.req('/catalog');assert.equal(list.body.templates.length,35);
  for(const {template} of extendedDefinitions){
-  const parameters=Object.fromEntries(template.parameters.filter(p=>p.required||p.default!==undefined).map(p=>[p.key,p.default??p.example??(p.type==='password'?'qa_secret_2026':p.format==='url'?'http://app.example.test':p.format==='ip'?'192.0.2.10':p.format==='host'?'broker.example.test':'app')]));
+  const parameters=Object.fromEntries(template.parameters.filter(p=>p.required||p.default!==undefined).map(p=>[p.key,p.default??p.example??(p.type==='password'?'qa_secret_2026_long':p.format==='url'?'http://app.example.test':p.format==='ip'?'192.0.2.10':p.format==='host'?'broker.example.test':'app')]));
   const result=await f.req('/catalog/'+template.id+'/install','POST',{parameters,deployments:[{cluster_id:c.id,machine_ids:['ma'],cpu:.25,memory_mb:128}],confirmed:false});
   assert.equal(result.status,201,template.id+':'+JSON.stringify(result.body));
   assert.equal(result.body.resource.spec.source.template_id,template.id);
   assert.doesNotMatch(JSON.stringify(result.body),/qa_secret_2026/);
   assert.doesNotMatch(JSON.stringify(f.db.get<any>('SELECT spec_cipher FROM ops_platform_resources WHERE id=?',result.body.resource.id)),/qa_secret_2026/);
   assert.equal(f.store.get(result.body.resource.id).spec.deployment_mode,'manual');
+  if(['meilisearch','searxng','firecrawl','rustfs'].includes(template.id)){
+   const privateSpec=f.store.get(result.body.resource.id).spec;
+   const secrets=Object.values<any>(privateSpec.compose.services).flatMap(service=>Object.entries<any>(service.environment??{}).filter(([key])=>/PASSWORD|SECRET|KEY|REDIS_URL|REDIS_RATE_LIMIT_URL|RABBITMQ_URL/.test(key)).map(([,value])=>value));
+   const publicRead=JSON.stringify((await f.req('/resources/'+result.body.resource.id)).body);
+   const cipher=String(f.db.get<any>('SELECT spec_cipher FROM ops_platform_resources WHERE id=?',result.body.resource.id).spec_cipher);
+   for(const secret of secrets){assert.ok(typeof secret==='string'&&secret.length>0);assert.ok(!publicRead.includes(secret),template.id);assert.ok(!cipher.includes(secret),template.id);}
+  }
  }
  const bad=await f.req('/catalog/dbx/install','POST',{parameters:{password:'short'},deployments:[{cluster_id:c.id,machine_ids:['ma']}]});assert.equal(bad.status,400);
  f.db.run("UPDATE agents SET arch='arm64' WHERE id='a'");
@@ -1556,6 +1529,23 @@ test('a storage failure rolls back both instance retirement and reservation rele
  assert.equal(f.db.get<any>('SELECT status FROM ops_instance_recoveries WHERE instance_id=?',old.id)?.status,'agent_reinstall_inspecting');
 });
 
+test('catalog rejects duplicate cluster deployments without side effects and accepts corrected Gitea targets',async t=>{
+ const f=await fixture(t),first=f.createCluster(['ma'],'First'),second=f.createCluster(['mb'],'Second');
+ const target={cluster_id:first.id,machine_ids:['ma'],cpu:1,memory_mb:1024};
+ const body={parameters:{external_url:'https://git.example.test'},confirmed:false,request_id:'gitea-target-correction',deployments:[target,{...target}]};
+ const count=f.store.list().length,runs=f.store.actions().length;
+ const invalid=await f.req('/catalog/gitea/install','POST',body);
+ assert.equal(invalid.status,400);assert.equal(invalid.body.error,'duplicate_application_deployment');
+ assert.equal(f.store.list().length,count);assert.equal(f.store.actions().length,runs);
+ const valid=await f.req('/catalog/gitea/install','POST',{...body,deployments:[target,{...target,cluster_id:second.id,machine_ids:['mb']}]});
+ assert.equal(valid.status,201,JSON.stringify(valid.body));
+ assert.deepEqual(valid.body.resource.spec.deployments.map((d:any)=>[d.cluster_id,d.machine_ids]),[[first.id,['ma']],[second.id,['mb']]]);
+ const retry=await f.req('/catalog/gitea/install','POST',{...body,deployments:[target,{...target,cluster_id:second.id,machine_ids:['mb']}]});
+ assert.equal(retry.body.resource.id,valid.body.resource.id);assert.equal(f.store.list().length,count+1);
+ const automatic=await f.req('/catalog/gitea/install','POST',{parameters:body.parameters,confirmed:false});
+ assert.equal(automatic.status,201,JSON.stringify(automatic.body));assert.equal(automatic.body.resource.spec.deployments.length,1);
+});
+
 test('quick HTTP installation chooses an online target, generates entry DNS and keeps request identity',async t=>{
  const f=await fixture(t),c=f.createCluster();
  const credential=f.store.create('credential','DNS',{provider:'aliyun',access_key_id:'fixture',access_key_secret:'private-fixture'},'admin');
@@ -1659,4 +1649,182 @@ test('quick installation publishes the retained website, verifies CNAME and retr
  assert.equal((await f.action(f.store.get(appID),'quick-install-retry')).status,202);
  assert.equal(f.store.list().length,count);assert.equal(f.store.get(appID).status.quick_install.website_id,q.website_id);
  assert.equal(f.store.get(appID).spec.deployments[0].cluster_id,cluster.id);
+});
+
+test('application upgrades preview latest store images, preserve durable configuration, reject stale reviews and submit refresh jobs',async t=>{
+ const f=await fixture(t),c=f.createCluster(),template=applicationCatalog.find(t=>t.id==='redis')!,previous=structuredClone(template);
+ t.after(()=>Object.assign(template,previous));
+ const recipe=catalogInstallation('redis',{name:'Upgrade Redis',service_name:'upgrade-redis',parameters:{password:'private-fixture-password'},deployments:[{cluster_id:c.id,machine_ids:['ma'],replicas:1,cpu:0.25,memory_mb:128}]});
+ const app=f.store.create('application',recipe.name,recipe.spec,'admin'),before=structuredClone(app.spec),path='/resources/'+app.id+'/upgrade';
+ template.version='next-store-release';template.versions=['next-store-release'];template.spec.image='redis:fixture-new';
+ const preview=await f.req(path);assert.equal(preview.status,200);assert.equal(preview.body.available,true);assert.equal(preview.body.current_version,previous.version);assert.equal(preview.body.target_images.app,'redis:fixture-new');
+ assert(!JSON.stringify(preview.body).includes('private-fixture-password'));
+ assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,target_version:template.version,target_fingerprint:preview.body.target_fingerprint},'member')).status,403);
+ assert.equal((await f.req(path,'POST',{revision:1,target_version:template.version,target_fingerprint:preview.body.target_fingerprint})).status,400);
+ assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,target_version:'stale'})).status,409);
+ template.spec.image='redis:changed-with-same-version';assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,target_version:template.version,target_fingerprint:preview.body.target_fingerprint})).body.error,'application_template_changed');template.spec.image='redis:fixture-new';
+ f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'",JSON.stringify({operations_capabilities:['operations.platform.image-refresh.v1']}));
+ const result=await f.req(path,'POST',{revision:1,confirmed:true,target_version:template.version,target_fingerprint:preview.body.target_fingerprint});assert.equal(result.status,202,JSON.stringify(result.body));
+ const saved=f.store.get(app.id);assert.equal(saved.revision,2);assert.equal(saved.spec.image,'redis:fixture-new');assert.equal(saved.spec.source.template_version,template.version);assert.equal(saved.spec.image_pull_policy,'always');
+ for(const key of ['environment','ports','mounts','deployments','service_name','command'])assert.deepEqual(saved.spec[key],before[key]);
+ assert.equal(result.body.resource.spec.environment.REDIS_PASSWORD,'[redacted]');assert.equal(result.body.runs.length,1,JSON.stringify(result.body));
+ const job=f.jobs.get(result.body.runs[0].job_id),payload=f.platform.resolvePayload(job);assert.equal(payload.resource.config.refresh_images,true);assert.equal(payload.resource.config.force_recreate,true);assert(job.capabilities.includes('operations.platform.image-refresh.v1'));
+ assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,target_version:template.version,target_fingerprint:preview.body.target_fingerprint})).status,409);
+ assert.equal((await f.req(path,'POST',{revision:2,confirmed:true,target_version:template.version,target_fingerprint:preview.body.target_fingerprint})).body.error,'platform_resource_busy');
+ assert.equal((await f.req(path)).body.available,false);
+});
+
+test('custom upgrades update each declared service, allow same tags and reject missing, injected, topology or foreign fields',async t=>{
+ const f=await fixture(t),c=f.createCluster();f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'",JSON.stringify({operations_capabilities:['operations.platform.image-refresh.v1']}));
+ const app=f.app(c,{mode:'compose',compose:{services:{web:{image:'example/web:old',environment:{PASSWORD:'keep-secret'}},worker:{image:'example/worker:old'}}},ports:[],mounts:[]}),path='/resources/'+app.id+'/upgrade';
+ for(const images of [{web:'example/web:new'},{web:'example/web:new',worker:'example/worker:new',foreign:'example:1'},{web:'$(touch /tmp/oops)',worker:'example:1'},{web:'--bad',worker:'example:1'}])assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,images})).status,400);
+ assert.equal((await f.req(path,'POST',{revision:1,confirmed:true,images:{web:'example:1',worker:'example:1'},command:['evil']})).status,400);
+ const result=await f.req(path,'POST',{revision:1,confirmed:true,images:{web:'example/web:new',worker:'example/worker:old'}});assert.equal(result.status,202,JSON.stringify(result.body));
+ const saved=f.store.get(app.id);assert.equal(saved.spec.compose.services.web.image,'example/web:new');assert.equal(saved.spec.compose.services.worker.image,'example/worker:old');assert.equal(saved.spec.compose.services.web.environment.PASSWORD,'keep-secret');assert.deepEqual(saved.spec.deployments,app.spec.deployments);
+ const single=f.app(c,{service_name:'same-tag'});const response=await f.req('/resources/'+single.id+'/upgrade','POST',{revision:1,confirmed:true,images:{app:'example:1'}});assert.equal(response.status,202);assert.equal(f.store.get(single.id).revision,2);
+ const template=applicationCatalog.find(t=>t.id==='redis')!,previous=structuredClone(template);t.after(()=>Object.assign(template,previous));
+ const installed=f.app(c,{service_name:'store-upgrade-blocked',source:{type:'store',template_id:'redis',template_version:template.version}});template.spec.mode='compose';template.spec.compose={services:{redis:{image:'redis:new'},sidecar:{image:'alpine:3'}}};
+ const blocked=await f.req('/resources/'+installed.id+'/upgrade');assert.equal(blocked.body.blocked_reason,'upgrade_service_topology_changed');assert.equal((await f.req('/resources/'+installed.id+'/upgrade','POST',{revision:1,confirmed:true,target_version:template.version})).status,409);assert.equal(f.store.get(installed.id).revision,1);
+});
+
+test('container targets are bound to current application, machine and full container identity and reject stale or retired instances',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c);await f.action(a,'deploy');f.finish('a');
+ const i=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id),cid='a'.repeat(64),foreign='b'.repeat(64);
+ f.db.exec('DROP VIEW privileged_executors');
+ const heartbeat=(at=f.deps.now().toISOString())=>JSON.stringify({collectors_status:{applications:'ok'},docker_inventory:{state:'ready',observed_at:at,containers:[{id:cid,name:'app-one',image:'example:1',state:'running',deployment_id:i.id},{id:foreign,name:'external',image:'example:1',state:'running',deployment_id:'foreign'}]}});
+ f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'",heartbeat());
+ const path='/resources/'+a.id+'/terminal-targets',listed=await f.req(path);assert.equal(listed.status,200);assert.equal(listed.body.hosts.length,1);assert.deepEqual(listed.body.hosts[0].containers.map((c:any)=>c.id),[cid]);
+ assert.equal((await f.req(path,'GET',undefined,'member')).status,403);
+ const input={application_id:a.id,instance_id:i.id,container_id:cid,shell:'bash'};
+ assert.equal(f.platform.resolveContainerTarget('ma',input).revision,1);
+ assert.throws(()=>f.platform.resolveContainerTarget('mb',input),/unavailable/);assert.throws(()=>f.platform.resolveContainerTarget('ma',{...input,container_id:foreign}),/unavailable/);
+ f.db.run('UPDATE ops_cluster_instances SET retired=1 WHERE id=?',i.id);assert.throws(()=>f.platform.resolveContainerTarget('ma',input),/unavailable/);
+ f.db.run('UPDATE ops_cluster_instances SET retired=0 WHERE id=?',i.id);f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'",heartbeat('2000-01-01T00:00:00Z'));assert.equal((await f.req(path)).body.hosts.length,0);
+});
+
+test('application upgrades reject an old executor before changing configuration',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c);await f.action(a,'deploy');f.finish('a');
+ const result=await f.req('/resources/'+a.id+'/upgrade','POST',{revision:1,confirmed:true,images:{app:'example:2'}});
+ assert.equal(result.status,409);assert.equal(result.body.error,'image_refresh_agent_upgrade_required');assert.equal(f.store.get(a.id).revision,1);assert.equal(f.store.get(a.id).spec.image,'example:1');
+});
+
+test('managed 60 percent retains two of three published members across repeated ticks and controller restart', async t=>{
+ const f=await fixture(t), c=f.createCluster();
+ const a=f.app(c,{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:3,min_available_percent:60}]});
+ await f.action(a,'deploy'); f.finish('a'); f.finish('b'); f.finish('a');
+ assert.equal(f.store.get(a.id).status.deployments[c.id].ready_instances,3);
+ f.advance(301000); await f.platform.tick(); await f.platform.tick();
+ const saved=f.store.get(a.id);assert.equal(saved.status.deployments[c.id].minimum_available,2);
+ assert.equal(saved.status.deployments[c.id].ready_instances,0);
+ assert.equal(new Set(saved.status.endpoints.map((e:any)=>e.instance_id)).size,2);
+ assert.equal(saved.status.instances.filter((i:any)=>i.availability==='protected').length,2);
+ const {createAvailability}=await import('../src/ops/availability.js');
+ const policy=createAvailability(f.db,f.deps.now,id=>f.db.get<any>('SELECT * FROM agents WHERE id=?',id),id=>f.db.get<any>('SELECT agent_id FROM managed_machines WHERE id=?',id)!.agent_id);
+ const rows=f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id);
+ const restored=policy.refresh({...a,spec:{...a.spec,...a.spec.deployments[0]}},rows);
+ assert.equal(restored.filter(i=>i.serving).length,2);assert.ok(restored.filter(i=>i.serving).every(i=>!i.ready));
+});
+
+test('a failed or unknown surge cannot retire the old protected instance or create further copies',async t=>{
+ for(const result of ['failed','unknown']){
+  const f=await fixture(t),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',replicas:1});
+  await f.action(a,'deploy');f.finish('a');
+  f.advance(301000);f.heartbeat('b');await f.platform.tick();
+  f.finish('b',{code:'WORKLOAD_READINESS_NOT_VERIFIED'},result);
+  await f.platform.tick();await f.platform.tick();
+  const instances=f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id);
+  assert.equal(instances.length,2);assert.ok(instances.every(i=>!i.retired));
+  assert.ok(f.store.get(a.id).status.endpoints.every((e:any)=>e.machine_id==='ma'));
+  if(result==='failed'){
+   await f.action(a,'deploy');f.finish('b');await f.platform.tick();
+   assert.equal(f.db.all('SELECT id FROM ops_cluster_instances WHERE owner_id=?',a.id).length,2);
+   assert.ok(f.store.get(a.id).status.endpoints.every((e:any)=>e.machine_id==='mb'));
+  }
+ }
+});
+
+test('100 percent single replica upgrades start on another machine and switch only after readiness',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:1,min_available_percent:100}]});
+ await f.action(a,'deploy');f.finish('a');
+ const changed=f.store.update(a.id,a.revision,a.name,{...a.spec,image:'example:2'},'admin');
+ await f.action(changed,'deploy');
+ assert.equal(f.store.get(a.id).status.endpoints[0].machine_id,'ma');
+ assert.ok(!f.store.actions(a.id).some(r=>r.action==='stop'));
+ const {payload}=f.finish('b');assert.equal(payload.resource.config.application.image,'example:2');
+ await f.platform.tick();
+ const endpoints=f.store.get(a.id).status.endpoints;
+ assert.ok(endpoints.length);assert.ok(endpoints.every((e:any)=>e.machine_id==='mb'&&e.version==='2'));
+});
+
+test('health policy is validated and reaches immutable apply and periodic inspect payloads in manual mode',async t=>{
+ const f=await fixture(t),c=f.createCluster();
+ const health={type:'http',port_name:'http',path:'/ready',expected_statuses:[200,204],interval_seconds:5,timeout_seconds:2};
+ const a=f.app(c,{health});await f.action(a,'deploy');
+ assert.equal(f.jobs.claim('a',['operations.platform']),null,'older Agent cannot report HTTP readiness without enforcing configured statuses');
+ const apply=f.finish('a').payload.resource.config;
+ assert.deepEqual(apply.health,{...health,host:'0.0.0.0',port:21000});
+ f.advance(5000);await f.platform.tick();
+ const inspected=f.finish('a').payload.resource.config;
+ assert.equal(inspected.task,'workload.inspect');assert.deepEqual(inspected.health,apply.health);
+ for(const bad of [{heartbeat_grace_minutes:0},{heartbeat_grace_minutes:1.5},{deployments:[{cluster_id:c.id,replicas:3,min_available_percent:101}]},{health:{...health,path:'//other/ready'}},{health:{...health,path:'/ready\r\nHost:evil'}},{health:{...health,expected_statuses:[200,200]}},{health:{...health,timeout_seconds:31}}])assert.throws(()=>f.app(c,bad));
+});
+
+test('retired service waits for the gateway to acknowledge replacement routes before stopping',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:1,min_available_percent:100}]});
+ await f.action(a,'deploy');f.finish('a');
+ const old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;
+ const gateway=f.store.create('application','Entry',catalogInstallation('openresty',{deployment_mode:'manual',deployments:[{cluster_id:c.id,machine_ids:['ma','mb']}]}).spec,'admin');
+ await f.action(gateway,'deploy');f.finish('a');f.finish('b');
+ const site=f.store.create('website','Service',{cluster_ids:[c.id],routing_mode:'managed',service_application_id:a.id,service_port_name:'http',bindings:[{domains:['smooth.example.test'],locations:[{path:'/',action:'proxy'}]}]},'admin');
+ await f.action(site,'deploy');f.finish('a');f.finish('b');
+ const changed=f.store.update(a.id,a.revision,a.name,{...a.spec,image:'example:2'},'admin');
+ await f.action(changed,'deploy');f.finish('b');await f.platform.tick();
+ f.advance(31000);f.heartbeat('a');f.heartbeat('b');await f.platform.tick();
+ assert.equal(f.db.get<any>('SELECT state FROM ops_cluster_instances WHERE id=?',old.id).state,'running');
+ assert.ok(!f.store.actions(a.id).some(r=>r.action==='stop'));
+ for(const agent of ['a','b'])for(let n=0;n<8 && f.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state='queued'",agent);n++)f.finish(agent);
+ await f.platform.tick();
+ assert.ok(f.store.actions(a.id).some(r=>r.action==='stop'));
+});
+
+test('minimum retained membership is isolated per application cluster',async t=>{
+ const f=await fixture(t),south=f.createCluster(['ma'],'South'),north=f.createCluster(['mb'],'North');
+ const a=f.app(south,{deployment_mode:'managed',deployments:[{cluster_id:south.id,replicas:3,min_available_percent:60},{cluster_id:north.id,replicas:3,min_available_percent:100}]});
+ await f.action(a,'deploy');for(let n=0;n<3;n++){f.finish('a');f.finish('b');}
+ f.advance(301000);await f.platform.tick();
+ const status=f.store.get(a.id).status;
+ assert.equal(status.deployments[south.id].serving_instances,2);
+ assert.equal(status.deployments[north.id].serving_instances,3);
+});
+
+
+test('click upgrade preserves refresh and HTTP readiness through managed route acknowledgement and drain',async t=>{
+ const f=await fixture(t),c=f.createCluster();
+ const capabilities=['operations.platform','operations.platform.readiness.v1','operations.platform.image-refresh.v1'];
+ f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:capabilities}));
+ const health={type:'http',port_name:'http',path:'/ready',expected_statuses:[200,204],interval_seconds:5,timeout_seconds:2};
+ const a=f.app(c,{deployment_mode:'managed',health,deployments:[{cluster_id:c.id,replicas:1,min_available_percent:100}]});
+ await f.action(a,'deploy');f.finish('a');
+ const old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;
+ const gateway=f.store.create('application','Entry',catalogInstallation('openresty',{deployment_mode:'manual',deployments:[{cluster_id:c.id,machine_ids:['ma','mb']}]}).spec,'admin');
+ await f.action(gateway,'deploy');f.finish('a');f.finish('b');
+ const site=f.store.create('website','Upgrade route',{cluster_ids:[c.id],routing_mode:'managed',service_application_id:a.id,service_port_name:'http',bindings:[{domains:['upgrade.example.test'],locations:[{path:'/',action:'proxy'}]}]},'admin');
+ await f.action(site,'deploy');f.finish('a');f.finish('b');
+ const result=await f.req('/resources/'+a.id+'/upgrade','POST',{revision:1,confirmed:true,images:{app:'example:2'}});
+ assert.equal(result.status,202,JSON.stringify(result.body));assert(!result.body.deploy_error,JSON.stringify(result.body));
+ assert.ok(f.store.get(a.id).status.endpoints.every((e:any)=>e.machine_id==='ma'));
+ const queued=f.db.get<any>("SELECT * FROM agent_jobs WHERE agent_id='b' AND state='queued'");assert.ok(queued);
+ assert.ok(JSON.parse(queued.capabilities_json).includes('operations.platform.image-refresh.v1'));
+ assert.ok(JSON.parse(queued.capabilities_json).includes('operations.platform.readiness.v1'));
+ assert.equal(f.jobs.claim('b',['operations.platform','operations.platform.readiness.v1']),null);
+ assert.equal(f.jobs.claim('b',['operations.platform','operations.platform.image-refresh.v1']),null);
+ const payload=f.finish('b').payload.resource.config;
+ assert.equal(payload.refresh_images,true);assert.equal(payload.force_recreate,true);
+ assert.equal(payload.application.image,'example:2');assert.equal(payload.health.path,'/ready');assert.deepEqual(payload.health.expected_statuses,[200,204]);
+ await f.platform.tick();assert.ok(f.store.get(a.id).status.endpoints.every((e:any)=>e.machine_id==='mb'));
+ f.advance(31000);f.heartbeat('a');f.heartbeat('b');await f.platform.tick();
+ assert.equal(f.db.get<any>('SELECT state FROM ops_cluster_instances WHERE id=?',old.id).state,'running');
+ assert.ok(!f.store.actions(a.id).some(r=>r.action==='stop'));
+ for(const agent of ['a','b'])for(let n=0;n<8 && f.db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state='queued'",agent);n++)f.finish(agent);
+ await f.platform.tick();assert.ok(f.store.actions(a.id).some(r=>r.action==='stop'));
 });

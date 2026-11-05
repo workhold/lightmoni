@@ -47,6 +47,8 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
   router.auth = deps.auth;
   const nodes = new NodeStore(db, deps.now), modes = new Map<string, Mode>(), calls: any[] = [], observations = new Map<string, any>(), states = new Map<string, any>(), helpers = new Map<string, any>();
   const credentials = { has: () => true, authenticate: () => ({}) } as any;
+  let recoveryHook: ((input:any,operation:any)=>Promise<any>)|undefined;
+  let probeHook: ((input:any)=>Promise<void>)|undefined;
   let downloadHook: ((input: any, operation: any) => Promise<void>) | undefined;
   const heartbeat = (operation: any, status: any, mode: Mode) => {
     const revision = nodes.effective(operation.agent_id).config.revision;
@@ -65,10 +67,17 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
   const runner: SSHRunner = async input => {
     calls.push(input);
     const mid = input.machine.id, mode = modes.get(mid) ?? "success";
-    if (input.command.includes("unmanaged_installation")) return { stdout: JSON.stringify(observations.get(mid)), stderr: "", stages: ["probe"] };
+    if (input.command.includes("unmanaged_installation")) {
+      if (probeHook) await probeHook(input);
+      return { stdout: JSON.stringify(observations.get(mid)), stderr: "", stages: ["probe"] };
+    }
     const operation = db.get<any>("SELECT * FROM machine_agent_updates WHERE machine_id=? AND status IN ('running','verifying','unknown') ORDER BY rowid DESC LIMIT 1", mid);
     if (!operation) throw Error("fixture operation missing");
     const body = JSON.parse(operation.plan_json);
+    if(input.command.includes('lightmoni-agent-recovery.XXXXXX')){
+      if(!recoveryHook)throw Error('fixture recovery hook missing');
+      return {stdout:JSON.stringify(await recoveryHook(input,operation)),stderr:'',stages:['recover']};
+    }
     if (input.command.includes(".update-bootstrap.XXXXXX")) {
       if (downloadHook) await downloadHook(input, operation);
       if (mode === "missing_receipt") throw Error("connection lost before start receipt");
@@ -158,6 +167,8 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
   const helper=(agentID:string)=>{const host=db.get<any>("SELECT id FROM managed_machines WHERE agent_id=?",agentID);return {id:agentID,machine_id:host.id,agent_id:agentID,install_generation:1};};
   return { taskStore, helper, helpers, directory, downloads, release, db, deps, user, nodes, machines, request, host, plan, apply, settle, modes, calls, observations, states, credentials,
     advance(seconds: number) { clock = new Date(clock.getTime() + seconds * 1000); },
+    setRecoveryHook(hook: typeof recoveryHook){recoveryHook=hook;},
+    setProbeHook(hook: typeof probeHook){probeHook=hook;},
     setDownloadHook(hook: typeof downloadHook) { downloadHook = hook; }, origin };
 }
 
@@ -585,4 +596,222 @@ test("members can inspect release and update metadata but cannot plan or approve
   assert.equal((await f.plan(h.id)).status, 403); assert.equal((await f.apply(h.id, p.id)).status, 403);
   assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/cancel`, "POST", {})).status, 403);
   assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", {})).status, 403);
+});
+
+test('rollback plan explains a missing complete-management snapshot without creating or dispatching maintenance',async t=>{
+  const f=await fixture(t),h=await f.host(),observation=f.observations.get(h.id);
+  observation.previous=null;observation.previous_unavailable_reason='previous_helper_snapshot_missing';
+  const proposed=await f.plan(h.id,'rollback');
+  assert.equal(proposed.status,409,proposed.raw);
+  assert.match(proposed.data.error,/上一发行缺少完整管理所需的执行组件快照/);
+  assert.match(proposed.data.error,/先审阅切换至仅监控模式/);
+  assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_agent_updates WHERE machine_id=?',h.id).n,0);
+  assert.equal(f.calls.some(call=>call.command.includes('.update-bootstrap.XXXXXX')),false);
+  assert.equal(f.db.get<any>('SELECT runtime_mode FROM machine_agent_runtime WHERE machine_id=?',h.id).runtime_mode,'root');
+});
+
+async function interruptedRecoveryFixture(t:any){
+ const f=await fixture(t),h=await f.host();f.modes.set(h.id,'disconnect');
+ const p=(await f.plan(h.id)).data;await f.apply(h.id,p.id);assert.equal((await f.settle(h.id,p.id)).status,'unknown');
+ const current=()=>f.request(`/machines/${h.id}/agent-updates/${p.id}`);
+ const recover=(body:any)=>f.request(`/machines/${h.id}/agent-updates/${p.id}/recover`,'POST',body);
+ const archive=(operation:any)=>{const state=f.states.get(operation.id);Object.assign(state,{status:'failed',error_code:'worker_interrupted_before_switch',
+   recovery:{schema:1,status:'succeeded',action:'archive_preparing',source_status:'preparing',recovered_at:f.deps.now().toISOString()},
+   worker_exit:{schema:1,result:'signal',exit_code:'killed',exit_status:9,memory_peak_bytes:123456}});return state;};
+ const restore=(operation:any)=>{const state=f.states.get(operation.id);Object.assign(state,{status:'rolled_back',restored_fingerprint:oldRelease.fingerprint,
+   local_health:{service_active:true,helper_active:true,identity_matches:true,release_matches:true,boot_id:NEW_BOOT},
+   recovery:{schema:1,status:'succeeded',action:'restore_previous',source_status:'switching',recovered_at:f.deps.now().toISOString()}});return state;};
+ return {...f,h,p,current,recover,archive,restore};
+}
+
+async function lostRecoveryFixture(t:any,status:'failed'|'rolled_back'){
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;
+ f.setRecoveryHook(async(_input,operation)=>{if(status==='failed')f.archive(operation);else f.restore(operation);throw Error('lost recovery reply');});
+ const response=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(response.status,502,response.raw);
+ assert.equal((await f.current()).data.recovery_requires_verification,true);
+ return f;
+}
+
+test('explicit recovery enforces admin, confirmation, strict fields and the current runner revision before SSH',async t=>{
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;assert.match(read.recovery_revision,/^[a-f0-9]{64}$/);
+ const count=f.calls.length;
+ for(const body of [{expected_revision:read.recovery_revision},{confirm:false,expected_revision:read.recovery_revision},{confirm:true,expected_revision:'bad'},{confirm:true,expected_revision:[read.recovery_revision]},
+   {confirm:true,expected_revision:read.recovery_revision,path:'/tmp/arbitrary'},{confirm:true,expected_revision:read.recovery_revision,credential_id:''}])assert.equal((await f.recover(body)).status,400);
+ assert.equal((await f.recover({confirm:true,expected_revision:'f'.repeat(64)})).status,409);
+ f.user.role='member';assert.equal((await f.recover({confirm:true,expected_revision:read.recovery_revision})).status,403);f.user.role='admin';
+ writeFileSync(join(f.downloads,'update-runner.mjs'),'// new recovery worker bytes');
+ const stale=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(stale.status,409);assert.match(stale.raw,/agent_update_recovery_revision_changed/);
+ assert.notEqual((await f.current()).data.recovery_revision,read.recovery_revision);assert.equal(f.calls.length,count);
+});
+
+test('recovery pushes only pinned source and the original approval through SSH stdin, then independently verifies before archival',async t=>{
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data,original=f.db.get<any>('SELECT plan_json FROM machine_agent_updates WHERE id=?',f.p.id).plan_json;
+ let dispatched:any;
+ f.setRecoveryHook(async(input,operation)=>{dispatched=input;return f.archive(operation);});
+ const result=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(result.status,200,result.raw);assert.equal(result.data.status,'failed');
+ const payload=JSON.parse(dispatched.stdin),approved=JSON.parse(original);assert.equal(hash(Buffer.from(payload.runner_base64,'base64')),hash(readFileSync(join(f.downloads,'update-runner.mjs'))));
+ assert.deepEqual(payload.request,{operation_id:f.p.id,expected_agent_id:f.h.agent,expected_fingerprint:approved.current.fingerprint,expected_runtime_mode:'root',expected_permission_generation:1,
+   expected_target:{version:approved.target.version,source_revision:approved.target.source_revision,build_id:approved.target.build_id,state_schema:1,arch:approved.target.arch,artifact_sha256:approved.target.artifact_sha256}});
+ assert.match(dispatched.command,/flock/);assert.match(dispatched.command,/--operation/);assert.equal(dispatched.command.includes(payload.runner_base64),false);
+ assert.equal(dispatched.command.includes('download_token'),false);assert.equal(dispatched.command.includes('update-runner.mjs start'),false);assert.equal(dispatched.command.includes('update-runner.mjs worker'),false);
+ assert.equal(f.db.get<any>('SELECT plan_json FROM machine_agent_updates WHERE id=?',f.p.id).plan_json,original);
+ const attempt=result.data.receipt.recovery_attempts[0];assert.equal(attempt.actor_id,'admin');assert.equal(attempt.status,'verified');assert.equal(attempt.runner_sha256,hash(Buffer.from(payload.runner_base64,'base64')));
+ assert.equal(result.data.receipt.worker_exit.exit_status,9);assert.equal(result.data.receipt.recovery.action,'archive_preparing');
+ assert.equal(f.calls.at(-1).command.includes('unmanaged_installation'),true);
+ const before=f.calls.length;assert.equal((await f.recover({confirm:true,expected_revision:read.recovery_revision})).status,409);assert.equal(f.calls.length,before);
+});
+
+test('recovery accepts an explicitly replaced credential without changing the approved account snapshot',async t=>{
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;
+ const account=await f.request(`/machines/${f.h.id}/accounts`,'POST',{username:'recovery',make_default:true});
+ const fresh=await f.request(`/machines/${f.h.id}/accounts/${account.data.id}/credentials`,'POST',{method:'password',secret:'new-recovery-secret',retention:'permanent',confirm_permanent:true});
+ f.db.run('UPDATE machine_credentials SET revoked_at=? WHERE id=?',f.deps.now().toISOString(),f.h.credential);
+ let selected='';f.setRecoveryHook(async(input,operation)=>{selected=input.machine.username;return f.archive(operation);});
+ assert.equal((await f.recover({confirm:true,expected_revision:read.recovery_revision})).status,409);
+ const result=await f.recover({confirm:true,expected_revision:read.recovery_revision,credential_id:fresh.data.id});assert.equal(result.status,200,result.raw);assert.equal(selected,'recovery');
+ assert.equal(result.data.plan.ssh_account.username,'root');assert.equal(result.data.receipt.recovery_attempts[0].verification_ssh_account.username,'recovery');
+ assert.match(result.data.receipt.recovery_attempts[0].verification_credential_revision,/^[a-f0-9]{64}$/);
+});
+
+test('recovery refuses changed host, helper identity or runtime snapshots without dispatch',async t=>{
+ for(const mutation of ['host','helper','runtime']){
+  const f=await interruptedRecoveryFixture(t),read=(await f.current()).data,before=f.calls.length;
+  if(mutation==='host')f.db.run('UPDATE managed_machines SET agent_id=? WHERE id=?','different-agent',f.h.id);
+  if(mutation==='helper')f.helpers.get(f.h.id).install_generation++;
+  if(mutation==='runtime')f.db.run('UPDATE machine_agent_runtime SET permission_generation=2 WHERE machine_id=?',f.h.id);
+  const result=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(result.status,409,result.raw);assert.equal(f.calls.length,before);
+ }
+});
+
+test('running or unverifiable recovery retains unknown and its audit evidence',async t=>{
+ for(const code of ['recovery_worker_running','recovery_unit_running','recovery_cgroup_running','recovery_guard_busy','recovery_snapshot_invalid']){
+  const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;
+  f.setRecoveryHook(async()=>({error_code:code}));const result=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(result.status,409,result.raw);
+  assert.match(result.raw,code==='recovery_snapshot_invalid'?/agent_update_recovery_unverified/:/agent_update_recovery_running/);
+  const after=(await f.current()).data;assert.equal(after.status,'unknown');assert.equal(after.receipt.recovery_attempts[0].remote_error_code,code);assert.equal(after.receipt.recovery_attempts[0].status,'unknown');
+ }
+});
+
+test('a lost recovery response remains unknown until independent reconciliation and preserves the recovery audit',async t=>{
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;
+ f.setRecoveryHook(async(_input,operation)=>{f.archive(operation);throw Error('lost recovery reply');});
+ const result=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(result.status,502,result.raw);assert.equal((await f.current()).data.status,'unknown');
+ const before=f.calls.filter(c=>c.command.includes('lightmoni-agent-recovery.XXXXXX')).length;
+ const verified=await f.request(`/machines/${f.h.id}/agent-updates/${f.p.id}/reconcile`,'POST',{});assert.equal(verified.status,200,verified.raw);assert.equal(verified.data.status,'failed');
+ assert.equal(verified.data.receipt.recovery_attempts.length,1);assert.equal(verified.data.receipt.recovery_attempts[0].status,'unknown');assert.equal(verified.data.receipt.recovery.action,'archive_preparing');
+ assert.equal(f.calls.filter(c=>c.command.includes('lightmoni-agent-recovery.XXXXXX')).length,before);
+});
+
+test('a lost restore reply requires a fresh original-state probe before read-only reconciliation archives rollback',async t=>{
+ const f=await lostRecoveryFixture(t,'rolled_back'),before=f.calls.length;
+ const verified=await f.request(`/machines/${f.h.id}/agent-updates/${f.p.id}/reconcile`,'POST',{});
+ assert.equal(verified.status,200,verified.raw);assert.equal(verified.data.status,'rolled_back');
+ assert.equal(verified.data.receipt.recovery.action,'restore_previous');
+ assert.equal(verified.data.receipt.local_health.boot_id,NEW_BOOT);
+ assert.equal(verified.data.receipt.current_verification.boot_id,OLD_BOOT);
+ assert.equal(verified.data.receipt.current_verification.fingerprint,oldRelease.fingerprint);
+ assert.equal(verified.data.receipt.current_verification.verified_at,f.deps.now().toISOString());
+ const attempt=verified.data.receipt.recovery_attempts[0];assert.equal(attempt.status,'unknown');
+ assert.equal(attempt.verification_completed_by,'admin');assert.equal(attempt.verification_result_status,'rolled_back');
+ const reads=f.calls.slice(before);assert.equal(reads.length,2);assert.match(reads[0].command,/update-runner\.mjs status/);assert.match(reads[1].command,/unmanaged_installation/);
+ assert.equal(reads.some(c=>/lightmoni-agent-recovery\.XXXXXX|\.update-bootstrap|update-runner\.mjs (?:start|worker|commit)/.test(c.command)),false);
+});
+
+for(const status of ['failed','rolled_back'] as const)for(const change of ['fingerprint','service','mode','generation','helper','lifecycle','operation','identity','probe_failure','account','credential','plan'])
+test(`lost ${status} recovery reply retains its verification gate when current ${change} differs`,async t=>{
+ const f=await lostRecoveryFixture(t,status),observed=f.observations.get(f.h.id),before=f.calls.length;
+ if(change==='fingerprint')observed.current.fingerprint='d'.repeat(64);
+ if(change==='service')observed.service_active=false;
+ if(change==='mode'){observed.runtime_mode='user';observed.helper_active=false;}
+ if(change==='generation')observed.permission_generation=2;
+ if(change==='helper')observed.helper_active=false;
+ if(change==='lifecycle')observed.lifecycle_locked=true;
+ if(change==='operation')observed.operation_lock=true;
+ if(change==='identity')observed.agent_id='different-agent';
+ if(change==='probe_failure')f.setProbeHook(async()=>{throw Error('independent probe lost');});
+ if(change==='account')f.setProbeHook(async()=>{f.db.run("UPDATE machine_ssh_accounts SET username='changed',revision=revision+1 WHERE id=?",f.h.account);});
+ if(change==='credential')f.setProbeHook(async()=>{f.db.run('UPDATE machine_credentials SET revoked_at=? WHERE id=?',f.deps.now().toISOString(),f.h.credential);});
+ if(change==='plan')f.setProbeHook(async()=>{const original=JSON.parse(f.db.get<any>('SELECT plan_json FROM machine_agent_updates WHERE id=?',f.p.id).plan_json);
+  f.db.run('UPDATE machine_agent_updates SET plan_json=? WHERE id=?',JSON.stringify({...original,permission_generation:2}),f.p.id);});
+ const rejected=await f.request(`/machines/${f.h.id}/agent-updates/${f.p.id}/reconcile`,'POST',{});
+ assert.ok(rejected.status>=400,rejected.raw);
+ const current=(await f.current()).data;assert.equal(current.status,'unknown');assert.equal(current.recovery_requires_verification,true);
+ assert.equal(current.receipt.recovery_attempts.length,1);assert.equal(current.receipt.recovery_attempts[0].status,'unknown');
+ assert.equal(current.receipt.recovery_attempts[0].verification_completed_at,undefined);
+ const reads=f.calls.slice(before);assert.equal(reads.length,2);assert.match(reads[1].command,/unmanaged_installation/);
+ assert.equal(reads.some(c=>/lightmoni-agent-recovery\.XXXXXX|\.update-bootstrap|update-runner\.mjs (?:start|worker|commit)/.test(c.command)),false);
+ const blocked=await f.recover({confirm:true,expected_revision:current.recovery_revision});assert.equal(blocked.status,409,blocked.raw);assert.match(blocked.raw,/agent_update_recovery_verification_required/);
+ assert.equal(f.calls.length,before+2);
+});
+
+test('recovery never archives a terminal-looking response when fresh probe differs',async t=>{
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;
+ f.setRecoveryHook(async(_input,operation)=>{const state=f.archive(operation);f.observations.get(f.h.id).current.fingerprint='d'.repeat(64);return state;});
+ const result=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(result.status,409,result.raw);assert.equal((await f.current()).data.status,'unknown');
+ assert.equal((await f.current()).data.receipt.recovery.action,'archive_preparing');
+});
+
+test('switch recovery is archived only with the original fingerprint, helper health and a fresh matching probe',async t=>{
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;
+ f.setRecoveryHook(async(_input,operation)=>{
+  const state=f.states.get(operation.id);Object.assign(state,{status:'rolled_back',restored_fingerprint:oldRelease.fingerprint,
+   local_health:{service_active:true,helper_active:true,identity_matches:true,release_matches:true,boot_id:NEW_BOOT},
+   recovery:{schema:1,status:'succeeded',action:'restore_previous',source_status:'switching',recovered_at:f.deps.now().toISOString()}});return state;
+ });
+ const result=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(result.status,200,result.raw);assert.equal(result.data.status,'rolled_back');
+ assert.equal(result.data.receipt.recovery.action,'restore_previous');assert.equal(result.data.receipt.recovery_attempts[0].status,'verified');
+});
+
+test('a forged recovery target or an unhealthy root helper cannot release maintenance',async t=>{
+ for(const change of ['target','helper']){
+  const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;
+  f.setRecoveryHook(async(_input,operation)=>{
+   const state=f.states.get(operation.id);Object.assign(state,{status:'rolled_back',restored_fingerprint:oldRelease.fingerprint,
+    local_health:{service_active:true,helper_active:change!=='helper',identity_matches:true,release_matches:true,boot_id:NEW_BOOT},
+    recovery:{schema:1,status:'succeeded',action:'restore_previous',source_status:'switching',recovered_at:f.deps.now().toISOString()}});
+   if(change==='target')state.target.build_id='different-target';return state;
+  });
+  const result=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(result.status,409,result.raw);assert.equal((await f.current()).data.status,'unknown');
+ }
+});
+
+test('recovery verification gate survives GET and reopen, and only explicit successful read-only reconciliation clears it',async t=>{
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;assert.equal(read.recovery_requires_verification,false);
+ f.setRecoveryHook(async()=>{throw Error('lost response');});
+ assert.equal((await f.recover({confirm:true,expected_revision:read.recovery_revision})).status,502);
+ const count=f.calls.length;
+ for(let reopen=0;reopen<2;reopen++)assert.equal((await f.current()).data.recovery_requires_verification,true);
+ const blocked=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(blocked.status,409,blocked.raw);assert.match(blocked.raw,/agent_update_recovery_verification_required/);assert.equal(f.calls.length,count);
+ f.observations.get(f.h.id).current.fingerprint='d'.repeat(64);
+ // The original accepted receipt is still readable, so a successful read-only
+ // observation may retain unknown without falsely declaring recovery success.
+ const checked=await f.request(`/machines/${f.h.id}/agent-updates/${f.p.id}/reconcile`,'POST',{});assert.equal(checked.status,200,checked.raw);assert.equal(checked.data.status,'unknown');assert.equal(checked.data.recovery_requires_verification,false);
+ assert.equal(checked.data.receipt.recovery_attempts[0].status,'unknown');assert.equal(checked.data.receipt.recovery_attempts[0].verification_completed_by,'admin');
+ assert.equal(checked.data.receipt.recovery_attempts[0].verification_result_status,'unknown');
+});
+
+test('failed read-only reconciliation does not clear the persistent recovery gate',async t=>{
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;
+ f.setRecoveryHook(async()=>{throw Error('lost response');});await f.recover({confirm:true,expected_revision:read.recovery_revision});
+ f.db.run('UPDATE machine_credentials SET revoked_at=? WHERE id=?',f.deps.now().toISOString(),f.h.credential);
+ assert.equal((await f.request(`/machines/${f.h.id}/agent-updates/${f.p.id}/reconcile`,'POST',{})).status,409);
+ assert.equal((await f.current()).data.recovery_requires_verification,true);
+});
+
+test('concurrent recoveries cannot dispatch a second SSH operation and preserve the first audit',async t=>{
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;
+ let entered!:()=>void,release!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve;}),finish=new Promise<void>(resolve=>{release=resolve;});
+ f.setRecoveryHook(async(_input,operation)=>{entered();await finish;return f.archive(operation);});
+ const first=f.recover({confirm:true,expected_revision:read.recovery_revision});await started;
+ const second=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(second.status,409,second.raw);
+ assert.equal(f.calls.filter(c=>c.command.includes('lightmoni-agent-recovery.XXXXXX')).length,1);
+ release();const result=await first;assert.equal(result.status,200,result.raw);assert.equal(result.data.receipt.recovery_attempts.length,1);assert.equal(result.data.receipt.recovery_attempts[0].status,'verified');
+});
+
+test('changed approval revision during recovery is retained unknown and requires independent verification',async t=>{
+ const f=await interruptedRecoveryFixture(t),read=(await f.current()).data;
+ f.setRecoveryHook(async(_input,operation)=>{const state=f.archive(operation),plan=JSON.parse(operation.plan_json);plan.permission_generation=2;
+  f.db.run('UPDATE machine_agent_updates SET plan_json=? WHERE id=?',JSON.stringify(plan),operation.id);return state;});
+ const result=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(result.status,409,result.raw);assert.match(result.raw,/agent_update_recovery_revision_changed/);
+ const after=(await f.current()).data;assert.equal(after.status,'unknown');assert.notEqual(after.recovery_revision,read.recovery_revision);assert.equal(after.recovery_requires_verification,true);
 });

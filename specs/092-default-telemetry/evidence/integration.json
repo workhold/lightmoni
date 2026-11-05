@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "sdk_metric_names": [
+    "queue.depth",
+    "work.completed",
+    "work.duration"
+  ],
+  "sdk_logs": 3,
+  "foreign_application_logs_excluded": true,
+  "foreign_instance_excluded": true,
+  "website_scope_isolated": true,
+  "real_http_auth_sdk_ingest_clickhouse_query": true,
+  "website_rows_are_query_fixtures": true
+}

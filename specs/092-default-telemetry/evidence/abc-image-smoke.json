@@ -1,0 +1,39 @@
+{
+  "passed": true,
+  "source_revision": "852a3165e8654721d0425b7765562e75d28e4b7d",
+  "image": "sha256:20b006ebbb598329cf4a44ea29d73881346ce5259897f4cbd99f6644658ec418",
+  "non_root": true,
+  "real_image_sdk_http_clickhouse_query": true,
+  "samples": [
+    {
+      "cycle": 1,
+      "sdk_metric_names": [
+        "http.server.duration",
+        "http.server.requests",
+        "process.uptime"
+      ],
+      "sdk_log_rows": 12,
+      "latest_log_at": "2026-11-04T01:24:10.411000000Z"
+    },
+    {
+      "cycle": 2,
+      "sdk_metric_names": [
+        "http.server.duration",
+        "http.server.requests",
+        "process.uptime"
+      ],
+      "sdk_log_rows": 15,
+      "latest_log_at": "2026-11-04T01:24:25.419000000Z"
+    },
+    {
+      "cycle": 3,
+      "sdk_metric_names": [
+        "http.server.duration",
+        "http.server.requests",
+        "process.uptime"
+      ],
+      "sdk_log_rows": 18,
+      "latest_log_at": "2026-11-04T01:24:40.421000000Z"
+    }
+  ]
+}

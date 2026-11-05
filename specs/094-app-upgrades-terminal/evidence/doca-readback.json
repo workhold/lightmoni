@@ -1,0 +1,55 @@
+{
+  "saved": true,
+  "readback": [
+    {
+      "id": "app-upgrades094-heading",
+      "seq": 1736,
+      "textEqual": true
+    },
+    {
+      "id": "app-upgrades094-p1",
+      "seq": 1736,
+      "textEqual": true
+    },
+    {
+      "id": "app-upgrades094-p2",
+      "seq": 1736,
+      "textEqual": true
+    },
+    {
+      "id": "app-upgrades094-p3",
+      "seq": 1736,
+      "textEqual": true
+    },
+    {
+      "id": "app-upgrades094-p4",
+      "seq": 1736,
+      "textEqual": true
+    },
+    {
+      "id": "app-upgrades094-p5",
+      "seq": 1736,
+      "textEqual": true
+    },
+    {
+      "id": "app-upgrades094-flow",
+      "seq": 1736,
+      "nodes": 10,
+      "edges": 9,
+      "nodesEqual": true,
+      "edgesEqual": true
+    }
+  ],
+  "existingDiagramUnchanged": true,
+  "existingDiagramID": "f-deployment-2b7c",
+  "latestSeq": 1739,
+  "fingerprintTextReadback": {
+    "seq": 1739,
+    "matches": true
+  },
+  "finalGraphReadback": {
+    "seq": 1739,
+    "nodes": 10,
+    "edges": 9
+  }
+}

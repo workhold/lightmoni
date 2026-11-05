@@ -5,6 +5,8 @@ import { ai, dbx } from "./ai.js";
 import { harbor } from "./harbor.js";
 import { dify } from "./dify.js";
 import { fastgpt } from "./fastgpt.js";
+import { searchStorage } from "./search-storage.js";
+import { firecrawl } from "./firecrawl.js";
 import {
   parameters,
   type CatalogDefinition,
@@ -22,6 +24,8 @@ export const extendedDefinitions: CatalogDefinition[] = [
   dify,
   fastgpt,
   dbx,
+  ...searchStorage,
+  firecrawl,
 ];
 export const extendedCatalog = extendedDefinitions.map((d) => d.template);
 export function extendedInstallation(

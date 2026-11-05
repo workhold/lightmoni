@@ -61,18 +61,18 @@ test("bounded PNG decoding rejects executable, malformed, oversized, invalid CRC
   assert.deepEqual(applicationLogo(pngData(metadata)).content, png);
 });
 
-test("31 local brand assets have exact source hashes, distinct identities and no external or executable SVG references", () => {
+test("35 local brand assets have exact source hashes, distinct identities and no external or executable SVG references", () => {
   const root = resolve(
       import.meta.dirname,
       "../../web/src/assets/application-logos",
     ),
     sources = JSON.parse(readFileSync(join(root, "sources.json"), "utf8"));
-  assert.equal(sources.assets.length, 31);
+  assert.equal(sources.assets.length, 35);
   assert.deepEqual(
     sources.assets.map((a: any) => a.id).sort(),
     applicationCatalog.map((t) => t.id).sort(),
   );
-  assert.equal(new Set(sources.assets.map((a: any) => a.sha256)).size, 31);
+  assert.equal(new Set(sources.assets.map((a: any) => a.sha256)).size, 35);
   for (const asset of sources.assets) {
     const raw = readFileSync(join(root, asset.file));
     assert.equal(createHash("sha256").update(raw).digest("hex"), asset.sha256);

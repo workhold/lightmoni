@@ -8,6 +8,7 @@ import { checkRequestOrigin, fail, HTTPError } from "../shared/http.js";
 import type { Dependencies, Module } from "../shared/types.js";
 import { cookie } from "./auth.js";
 import type { MachineTerminalAccess, TerminalLease } from "./managed-machines.js";
+import {containerTargetInput,containerTerminalCommand,type ContainerTerminalTarget} from '../ops/application-terminals.js';
 
 const OUTPUT_WINDOW = 256 << 10, BUFFER_LIMIT = 1 << 20, INPUT_LIMIT = 16 << 10;
 const defaults = { pendingMs: 60_000, connectMs: 20_000, idleMs: 600_000, maxMs: 1_800_000, checkMs: 5_000, globalLimit: 20, userLimit: 3 };
@@ -18,6 +19,7 @@ interface Session {
   expires: number; cols: number; rows: number; lastInput: number; started: number; unacked: number;
   ws?: WebSocket; client?: Client; stream?: ClientChannel; req: IncomingMessage;
   deadline?: NodeJS.Timeout; check?: NodeJS.Timeout; alive: boolean;
+  containerTarget?: ContainerTerminalTarget;
 }
 const dimension = (value: unknown, fallback: number, max: number) => {
   if (value === undefined) return fallback;
@@ -39,7 +41,7 @@ const fields = (value: Record<string, any>, allowed: string[]) => {
 
 // Only the human-facing HTTP/WebSocket boundary uses this module. Shell input
 // and output never enter the assistant tool registry, database, or logger.
-export function registerMachineTerminal(deps: Dependencies, machines: MachineTerminalAccess, server: Server, options: Partial<Limits> = {}): Module {
+export function registerMachineTerminal(deps: Dependencies, machines: MachineTerminalAccess, server: Server, options: Partial<Limits> & {resolveContainerTarget?:(machineID:string,input:unknown)=>ContainerTerminalTarget} = {}): Module {
   const limits = { ...defaults, ...options }, sessions = new Map<string, Session>();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 128 << 10, perMessageDeflate: false });
   let stopped = false;
@@ -47,9 +49,10 @@ export function registerMachineTerminal(deps: Dependencies, machines: MachineTer
     id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,credential_id TEXT NOT NULL,account_id TEXT NOT NULL,username TEXT NOT NULL,account_revision INTEGER NOT NULL,actor_id TEXT NOT NULL,
     created_at TEXT NOT NULL,connected_at TEXT NOT NULL DEFAULT '',closed_at TEXT NOT NULL DEFAULT '',reason TEXT NOT NULL DEFAULT ''
   )`);
+  deps.db.exec(`CREATE TABLE IF NOT EXISTS machine_terminal_container_targets(session_id TEXT PRIMARY KEY,application_id TEXT NOT NULL,instance_id TEXT NOT NULL,container_id TEXT NOT NULL,shell TEXT NOT NULL,revision INTEGER NOT NULL)`);
   const at = () => deps.now().toISOString();
   const send = (s: Session, value: unknown) => {
-    if (s.ws?.readyState === WebSocket.OPEN) s.ws.send(JSON.stringify({ ...(value as object), account_id:s.lease.machine.account_id,username:s.lease.machine.username,account_revision:s.lease.machine.account_revision }));
+    if (s.ws?.readyState === WebSocket.OPEN) s.ws.send(JSON.stringify({ ...(value as object), ...(s.containerTarget?{container_target:s.containerTarget}:{}), account_id:s.lease.machine.account_id,username:s.lease.machine.username,account_revision:s.lease.machine.account_revision }));
   };
   const close = (s: Session, reason: string) => {
     if (s.state === "closed") return;
@@ -73,6 +76,12 @@ export function registerMachineTerminal(deps: Dependencies, machines: MachineTer
     const user = deps.auth.user(s.req);
     if (!user || user.role !== "admin" || user.id !== s.actorID) { close(s, "login_expired"); return false; }
     if (!s.lease.valid()) { close(s, "credential_invalid"); return false; }
+    if (s.containerTarget) {
+      try {
+        const {revision,...input}=s.containerTarget;
+        if(options.resolveContainerTarget?.(s.machineID,input).revision!==revision)throw Error();
+      } catch {close(s,'container_target_changed');return false;}
+    }
     return true;
   };
   const connect = (s: Session, ws: WebSocket, req: IncomingMessage) => {
@@ -120,9 +129,9 @@ export function registerMachineTerminal(deps: Dependencies, machines: MachineTer
     client.on("close", () => close(s, "remote_closed"));
     client.on("ready", () => {
       if (s.state === "closed" || !authorized(s)) return;
-      client.shell({ term: "xterm-256color", cols: s.cols, rows: s.rows, width: 0, height: 0 }, (error, stream) => {
+      const ready = (error: Error|undefined, stream: ClientChannel) => {
         if (s.state === "closed") { stream?.destroy(); return; }
-        if (error) return close(s, "pty_failed");
+        if (error) return close(s, s.containerTarget ? 'container_exec_failed' : "pty_failed");
         clearTimeout(s.deadline);
         s.stream = stream; s.state = "connected"; s.lease.markUsed();
         deps.db.run("UPDATE machine_terminal_events SET connected_at=? WHERE id=?", at(), s.id);
@@ -137,7 +146,10 @@ export function registerMachineTerminal(deps: Dependencies, machines: MachineTer
         stream.on("data", output); stream.stderr.on("data", output);
         stream.on("error", () => close(s, "ssh_failed"));
         stream.on("close", () => close(s, "remote_closed"));
-      });
+      };
+      const pty = {term:'xterm-256color',cols:s.cols,rows:s.rows,width:0,height:0};
+      if(s.containerTarget)client.exec(containerTerminalCommand(s.containerTarget),{pty},ready);
+      else client.shell(pty,ready);
     });
     try {
       const m = s.lease.machine;
@@ -160,23 +172,30 @@ export function registerMachineTerminal(deps: Dependencies, machines: MachineTer
   deps.router.post(path, async ctx => {
     deps.auth.requireAdmin(ctx);
     const identity = loginHash(ctx.req), input = record(await ctx.body());
-    fields(input, ["credential_id", "cols", "rows"]);
+    fields(input, ["credential_id", "cols", "rows", "container_target"]);
     if (input.credential_id !== undefined && (typeof input.credential_id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(input.credential_id))) fail(400, "invalid credential_id");
     const cols = dimension(input.cols, 100, 500), rows = dimension(input.rows, 30, 200);
     if (stopped) fail(503, "terminal service stopped");
     if (ctx.signal.aborted) return;
     if (sessions.size >= limits.globalLimit || [...sessions.values()].filter(s => s.actorID === ctx.user.id).length >= limits.userLimit) fail(429, "终端会话已达上限，请先关闭其他终端");
+    let containerTarget: ContainerTerminalTarget|undefined;
+    if(input.container_target!==undefined){
+      const target=containerTargetInput(input.container_target);
+      if(!options.resolveContainerTarget)fail(409,'container_terminal_unavailable');
+      containerTarget=options.resolveContainerTarget(ctx.params.id,target);
+    }
     let s: Session | undefined;
     const lease = machines.acquireTerminal(ctx.params.id, input.credential_id, () => { if (s) close(s, "credential_invalid"); });
     try {
       s = { id: id(), machineID: ctx.params.id, actorID: ctx.user.id, loginHash: identity, lease,
-        state: "pending", expires: Date.now() + limits.pendingMs, cols, rows, unacked: 0, started: 0, lastInput: 0, req: ctx.req, alive: true };
+        state: "pending", expires: Date.now() + limits.pendingMs, cols, rows, unacked: 0, started: 0, lastInput: 0, req: ctx.req, alive: true,containerTarget };
       deps.db.run("INSERT INTO machine_terminal_events(id,machine_id,credential_id,account_id,username,account_revision,actor_id,created_at) VALUES(?,?,?,?,?,?,?,?)", s.id, s.machineID, lease.credentialID, lease.machine.account_id,lease.machine.username,lease.machine.account_revision,s.actorID, at());
       sessions.set(s.id, s);
+      if(containerTarget)deps.db.run('INSERT INTO machine_terminal_container_targets VALUES(?,?,?,?,?,?)',s.id,containerTarget.application_id,containerTarget.instance_id,containerTarget.container_id,containerTarget.shell,containerTarget.revision);
       const session = s;
       s.deadline = setTimeout(() => close(session, "connect_expired"), limits.pendingMs); s.deadline.unref();
       ctx.res.once("close", () => { if (!ctx.res.writableFinished) close(session, "disconnected"); });
-      ctx.json({ id: s.id, status: "pending",account_id:lease.machine.account_id,username:lease.machine.username,account_revision:lease.machine.account_revision, websocket_path: `/api/v1/machines/${s.machineID}/terminal-sessions/${s.id}/ws`,
+      ctx.json({ id: s.id, status: "pending",container_target:containerTarget,account_id:lease.machine.account_id,username:lease.machine.username,account_revision:lease.machine.account_revision, websocket_path: `/api/v1/machines/${s.machineID}/terminal-sessions/${s.id}/ws`,
         connect_expires_at: new Date(Date.now() + limits.pendingMs).toISOString(), idle_seconds: limits.idleMs / 1000, max_seconds: limits.maxMs / 1000 }, 201);
     } catch (error) { if (s && sessions.has(s.id)) close(s, "ssh_failed"); else lease.release(); throw error; }
   });

@@ -1,0 +1,10 @@
+{
+  "checked_at": "2026-11-04T14:58:29.933Z",
+  "checks": [
+    "managed grace and cluster minimum saved through actual API",
+    "HTTP path, statuses, timeout and interval persisted",
+    "manual mode exposes and preserves health checks"
+  ],
+  "page_errors": [],
+  "scope": "Disposable SQLite fixture, real form persistence; no remote Agents or cloud calls"
+}

@@ -1,4 +1,6 @@
 import {machineServiceAddresses} from "../server/host-network.js";
+import {applicationUpgrade,registerApplicationUpgrades} from './application-upgrades.js';
+import {createApplicationTerminals} from './application-terminals.js';
 import {createQuickInstall} from './quick-install.js';
 import {registerImageSources} from './image-sources.js';
 import {createPrivateRegistryController} from './private-registry.js';
@@ -46,6 +48,7 @@ export function registerOperationsPlatform(
   const safe =
     (fn: Handler): Handler =>
     async (ctx) => {
+      ctx.res.setHeader("Cache-Control", "no-store");
       try {
         if (closed) fail(503, "platform_shutting_down");
         deps.auth.requireAdmin(ctx);
@@ -71,10 +74,12 @@ export function registerOperationsPlatform(
       }
     };
   const privateRegistry=createPrivateRegistryController(store,workloads);
+  registerApplicationUpgrades(store,workloads,safe);
   domains.push({actions:()=>[],perform:async()=>fail(400,'unsupported_registry_action'),tick:privateRegistry.tick});
   privateRegistry.register(safe);
   registerImageSources(store,safe);
   registerObservability(deps, store, safe, options.jobs);
+  const resolveContainerTarget=createApplicationTerminals(store,safe);
   // Include rejection responses in the no-store boundary, before the admin guard.
   const certificateResponse = (fn: Handler): Handler => ctx => {
     ctx.res.setHeader("Cache-Control", "no-store");
@@ -191,7 +196,7 @@ export function registerOperationsPlatform(
               inCluster(r, ctx.url.searchParams.get("cluster_id")),
           )
           .slice(0, 1000)
-          .map((r) => store.public(r)),
+          .map((r) => ({...store.public(r),...(r.kind==='application'?{upgrade:applicationUpgrade(r)}:{})})),
         agents: agents(),
         machines: machines(),
         runs: store.actions(),
@@ -371,6 +376,7 @@ export function registerOperationsPlatform(
   }
   return {
     store,
+    resolveContainerTarget,
     resolvePayload: store.resolvePayload.bind(store),
     tick,
     start() {
@@ -392,6 +398,7 @@ export function registerOperationsPlatform(
     },
   } satisfies Module & {
     store: OperationsPlatformStore;
+    resolveContainerTarget: ReturnType<typeof createApplicationTerminals>;
     resolvePayload: OperationsPlatformStore["resolvePayload"];
     tick: () => Promise<void>;
   };

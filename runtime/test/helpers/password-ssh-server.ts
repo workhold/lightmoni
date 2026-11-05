@@ -4,7 +4,7 @@ import type { TestContext } from "node:test";
 import ssh2 from "ssh2";
 
 /** Real SSH password/PTY protocol fixture, with no subprocess or OS account. */
-export async function passwordSSHServer(t: TestContext, options: { password?: string } = {}) {
+export async function passwordSSHServer(t: TestContext, options: { password?: string; exec?: (command: string, stream: any) => void } = {}) {
   const { Server, utils } = ssh2;
   const key = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { format: "pem", type: "pkcs1" }, publicKeyEncoding: { format: "pem", type: "pkcs1" } });
   const parsed = utils.parseKey(key.privateKey);
@@ -22,6 +22,10 @@ export async function passwordSSHServer(t: TestContext, options: { password?: st
     client.on("ready", () => client.on("session", accept => {
       const session = accept();
       session.on("pty", (accept, _reject, info) => { ptys.push({ cols: info.cols, rows: info.rows, term: info.term }); accept?.(); });
+      session.on("exec", (accept, reject, info) => {
+        if(!options.exec){reject?.();return;}
+        commands.push(info.command);options.exec(info.command,accept());
+      });
       session.on("shell", accept => {
         const stream = accept(); stream.write("FIXTURE_READY\r\n");
         let input = "";

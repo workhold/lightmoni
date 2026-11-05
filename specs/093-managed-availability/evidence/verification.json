@@ -1,0 +1,37 @@
+{
+  "date": "2026-11-04",
+  "timezone": "Asia/Shanghai",
+  "runtime_related_tests": {
+    "total": 227,
+    "passed": 222,
+    "failed": 0,
+    "skipped": 5,
+    "skip_reason": "Docker-live tests require LIGHTMONI_DOCKER_LIVE=1 and a Docker environment",
+    "command": "cd runtime && node --import tsx --test --test-concurrency=1 test/platform-*.test.ts test/application-*.test.ts test/operations-api.test.ts test/operations-executor.test.ts test/managed-executor-jobs.test.ts test/agent-operation-progress.test.ts test/agent-operation-progress.test.ts"
+  },
+  "checks": [
+    "runtime TypeScript typecheck passed",
+    "web TypeScript and Vite production build passed",
+    "real HTTP status 200/204/503/302 and timeout checks passed",
+    "four-minute Agent outage preserves actual mock-provider website and entry DNS records",
+    "per-cluster minimum membership, restart persistence, failed/unknown surge, explicit retry, readiness-first migration and 100 percent rollout passed",
+    "in-place update waits for route withdrawal/drain; retired replacement waits for gateway acknowledgement",
+    "old Agent cannot claim checks requiring operations.platform.readiness.v1",
+    "browser managed policy and manual health forms persisted through real SQLite/API; no page errors",
+    "git diff --check passed"
+  ],
+  "architecture": {
+    "repository": "docs/system-design.md §93",
+    "doca": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+    "saved_seq": 1738,
+    "readback": "evidence/doca-readback.json",
+    "native_graph_nodes": 8,
+    "native_graph_edges": 9
+  },
+  "compatibility": [
+    "Existing apps default to five-minute managed grace and sixty-percent cluster minimum",
+    "Explicit HTTP checks now default to status 200, and configured checks override Docker HEALTHCHECK while still requiring running containers",
+    "Update Agent together with center for operations.platform.readiness.v1; old Agents cannot consume configured health-check jobs"
+  ],
+  "scope": "No production deployment or real DNS provider writes; isolated control-plane fixtures and real local HTTP/browser validation."
+}

@@ -1,0 +1,20 @@
+✔ signed domain work retains original lineage and ordinary control cannot read or mutate it (52.726542ms)
+✔ a changed source approval blocks an online permit before any side effect (7.230875ms)
+✔ domain receipt faults roll back both principals and preserve a retryable acknowledgement (12.899583ms)
+✔ lease loss preserves unknown fences without replaying through ordinary control (6.765083ms)
+✔ managed work can queue behind a running signed operation and only runs after its receipt (13.598416ms)
+✔ managed admission preserves manual privilege and unresolved result fences (17.516834ms)
+✔ human reconciliation preserves both unknown histories and permits a new signed managed job (10.489416ms)
+✔ an explicitly reconciled manual privileged result also releases admission (6.215084ms)
+✔ a cached start permit cannot restore authority after policy revocation (6.99875ms)
+✔ signed application observations bind central ownership and durably acknowledge before export (2212.395292ms)
+✔ observation sequence recovery refuses unsafe or malformed numeric wrappers (0.426083ms)
+✔ more than one drain window of failed observations cannot starve a later healthy batch (2420.438458ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5008.290167

@@ -28,7 +28,7 @@ try {
           p.default ??
             p.example ??
             (p.type === "password"
-              ? "qa_secret_2026"
+              ? "qa_secret_2026_long"
               : p.format === "url"
                 ? "http://app.example.test"
                 : p.format === "ip"
@@ -81,7 +81,7 @@ try {
   }
   const out = resolve(
     import.meta.dirname,
-    "../../../specs/066-app-catalog-expansion/evidence",
+    process.env.LIGHTMONI_CATALOG_EVIDENCE ?? "../../../specs/066-app-catalog-expansion/evidence",
   );
   await mkdir(out, { recursive: true });
   await writeFile(

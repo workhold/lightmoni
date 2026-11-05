@@ -374,15 +374,16 @@ test("domains in one binding have isolated bundles, DNS and live policy; members
     "Entry",
     catalogInstallation("openresty", {
       deployment_mode: "managed",
+      heartbeat_grace_minutes: 1,
       deployments: [
         {
           cluster_id: a.id,
-          replicas: 1,
+          replicas: 1, min_available_percent:0,
           gateway_domain: "south.edge.example.test",
         },
         {
           cluster_id: b.id,
-          replicas: 1,
+          replicas: 1, min_available_percent:0,
           gateway_domain: "north.edge.example.test",
         },
       ],
@@ -1127,16 +1128,17 @@ test("weighted CNAME defaults/provinces, immediate policies, health fallback and
     "Entry",
     catalogInstallation("openresty", {
       deployment_mode: "managed",
+      heartbeat_grace_minutes: 1,
       deployments: [
         {
           cluster_id: a.id,
-          replicas: 1,
+          replicas: 1, min_available_percent:0,
           gateway_domain: "south.edge.example.test",
           gateway_dns_zone_id: zone.id,
         },
         {
           cluster_id: b.id,
-          replicas: 1,
+          replicas: 1, min_available_percent:0,
           gateway_domain: "north.edge.example.test",
           gateway_dns_zone_id: zone.id,
         },
@@ -1256,9 +1258,14 @@ test("weighted CNAME defaults/provinces, immediate policies, health fallback and
   );
   f.heartbeat("a");
   await f.platform.tick();
-  f.finish("a", { healthy: true, running: false });
+  f.finish("a", { healthy: false, running: false });
+  f.advance(61000); f.heartbeat('a'); f.heartbeat('b');
+  await f.platform.tick();
+  f.advance(600000); f.heartbeat('a'); f.heartbeat('b');
   await f.platform.tick();
   f.finish("a", { healthy: true, running: true, digest: "recovered" });
+  if(f.db.get("SELECT id FROM agent_jobs WHERE agent_id='b' AND state='queued'")) f.finish('b');
+  await settle();
   await f.platform.tick();
   await settle();
   assert.equal(cname().length, 4);

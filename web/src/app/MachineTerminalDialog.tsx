@@ -14,18 +14,19 @@ import {activeMachineCredential,defaultMachineCredential} from './machine-creden
 type Host={default_account_id?:string;accounts?:SSHAccount[];id:string;name:string;address:string;port:number};
 type Key={name?:string;is_default?:boolean;id:string;account_id:string;username:string;account_revision:number;method:string;retention?:string;secret_fingerprint:string;expires_at:string;revoked_at?:string;secret_cleared_at?:string};
 type Entry={id:string;websocket_path:string};
+type ContainerTarget={application_id:string;instance_id:string;container_id:string;shell:'sh'|'bash'};
 type State='idle'|'creating'|'connecting'|'connected'|'closed'|'error';
 const sessionPath=(hostID:string,id:string)=>`/machines/${encodeURIComponent(hostID)}/terminal-sessions/${encodeURIComponent(id)}`;
 
-export default function MachineTerminalDialog({machine,credentials,onClose,onReleased}:{machine:Host;credentials:Key[];onClose:()=>void;onReleased?:()=>void|Promise<void>}){
+export default function MachineTerminalDialog({machine,credentials,onClose,onReleased,containerTarget}:{machine:Host;credentials:Key[];onClose:()=>void;onReleased?:()=>void|Promise<void>;containerTarget?:ContainerTarget}){
  const {t}=useI18n(),[full,setFull]=useState(false),[closing,setClosing]=useState(false);
  const closeRef=useRef<(()=>Promise<void>)|undefined>(undefined);
  const close=async()=>{if(closing)return;setClosing(true);try{await closeRef.current?.();onClose()}finally{setClosing(false)}};
- return <Modal open title={t(`SSH 终端 · ${machine.name}`,`SSH terminal · ${machine.name}`)} onCancel={()=>void close()} footer={null} width={full?'calc(100vw - 32px)':1040} style={{top:full?16:48}} className={`lm-terminal-dialog${full?' lm-terminal-full':''}`} destroyOnHidden maskClosable={false} closable={!closing}>
-  <TerminalPanel machine={machine} credentials={credentials} full={full} toggleFull={()=>setFull(v=>!v)} closeRef={closeRef} onReleased={onReleased}/>
+ return <Modal open title={containerTarget?t(`容器终端 · ${machine.name} · ${containerTarget.container_id.slice(0,12)}`,`Container terminal · ${machine.name} · ${containerTarget.container_id.slice(0,12)}`):t(`SSH 终端 · ${machine.name}`,`SSH terminal · ${machine.name}`)} onCancel={()=>void close()} footer={null} width={full?'calc(100vw - 32px)':1040} style={{top:full?16:48}} className={`lm-terminal-dialog${full?' lm-terminal-full':''}`} destroyOnHidden maskClosable={false} closable={!closing}>
+  <TerminalPanel machine={machine} credentials={credentials} full={full} toggleFull={()=>setFull(v=>!v)} closeRef={closeRef} onReleased={onReleased} containerTarget={containerTarget}/>
  </Modal>;
 }
-function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased}:{machine:Host;credentials:Key[];full:boolean;toggleFull:()=>void;closeRef:MutableRefObject<(()=>Promise<void>)|undefined>;onReleased?:()=>void|Promise<void>}){
+function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased,containerTarget}:{machine:Host;credentials:Key[];full:boolean;toggleFull:()=>void;closeRef:MutableRefObject<(()=>Promise<void>)|undefined>;onReleased?:()=>void|Promise<void>;containerTarget?:ContainerTarget}){
  const {t}=useI18n();
  const [consumed,setConsumed]=useState<Set<string>>(()=>new Set());
  const keys=credentials.filter(c=>(c.method==='ssh_key'||c.method==='password')&&activeMachineCredential(c)&&!consumed.has(c.id));
@@ -66,7 +67,7 @@ function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased}
   if(keyID&&passwordIDs.current.has(keyID))activePassword.current=keyID;
   try{
    const term=terminal.current;
-   const request=api<Entry>(`/machines/${encodeURIComponent(machine.id)}/terminal-sessions`,{method:'POST',body:JSON.stringify({credential_id:keyID,cols:Math.min(500,term?.cols??100),rows:Math.min(200,term?.rows??30)}),keepalive:true});
+   const request=api<Entry>(`/machines/${encodeURIComponent(machine.id)}/terminal-sessions`,{method:'POST',body:JSON.stringify({credential_id:keyID,cols:Math.min(500,term?.cols??100),rows:Math.min(200,term?.rows??30),...(containerTarget?{container_target:containerTarget}:{})}),keepalive:true});
    creating.current=request;let result:Entry;try{result=await request}finally{if(creating.current===request)creating.current=null}
    if(!alive.current||generation.current!==run){await api(sessionPath(machine.id,result.id),{method:'DELETE',keepalive:true}).catch(()=>{});await releaseCallback.current?.();return;}
    entry.current=result;
@@ -96,7 +97,7 @@ function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased}
    ws.onerror=()=>{if(current()&&!ended){ended=true;setState('error');setReason('connection_lost');}};
    ws.onclose=()=>{if(!current())return;connected.current=false;consumePassword();if(entry.current?.id===result.id)void stop();if(!ended){setState('closed');setReason('connection_lost');}};
   }catch(e){consumePassword();await releaseCallback.current?.();if(alive.current&&generation.current===run){setState('error');setError(e instanceof Error?e.message:'Connection failed');}}
- },[machine.id,stop,consumePassword]);
+ },[machine.id,stop,consumePassword,containerTarget]);
  useEffect(()=>{
   alive.current=true;
   const term=new Terminal({cursorBlink:true,fontFamily:'Menlo, Monaco, Consolas, monospace',fontSize:13,scrollback:3000,theme:{background:'#111827',foreground:'#e5e7eb',cursor:'#e5e7eb',selectionBackground:'#374151'}});
@@ -113,7 +114,7 @@ function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased}
   });
   const resize=term.onResize(({cols,rows})=>{const ws=socket.current;if(ws?.readyState===WebSocket.OPEN)ws.send(JSON.stringify({type:'resize',cols:Math.min(500,cols),rows:Math.min(200,rows)}));});
   const leave=()=>{void stop()};window.addEventListener('pagehide',leave);
-  if(initialCredential)void start(initialCredential);
+  if(initialCredential&&!containerTarget)void start(initialCredential);
   return()=>{alive.current=false;void stop();window.removeEventListener('pagehide',leave);observer.disconnect();input.dispose();resize.dispose();terminal.current=null;term.dispose();};
   // A mounted panel belongs to one host. Credential changes require a reconnect.
  },[machine.id,start,stop]);
@@ -133,6 +134,8 @@ function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased}
   session_limit:t('已达到 30 分钟会话上限，请重新连接。','The 30-minute session limit was reached. Reconnect.'),
   server_shutdown:t('平台已停止，终端连接已关闭。','The platform stopped and closed the terminal.'),
   ssh_failed:t('SSH 连接失败，请检查主机和连接凭据。','SSH connection failed. Check the host and credential.'),
+  container_target_changed:t('应用实例或容器已变化，请关闭后重新选择。','The instance or container changed. Close this window and select again.'),
+  container_exec_failed:t('无法进入容器，请检查 Docker 权限和容器 shell。','Cannot enter the container. Check Docker permissions and the container shell.'),
   pty_failed:t('远端未能创建交互终端，请检查 SSH 账户是否允许 PTY 和 shell。','The remote host could not open a terminal. Check that PTY and shell access are allowed.'),
   output_overflow:t('输出超出缓冲上限，连接已关闭。','Output exceeded the buffer limit. The connection was closed.'),
   input_overflow:t('输入过快，连接已关闭，请重新连接。','Input exceeded the buffer limit. Reconnect.'),
@@ -142,11 +145,11 @@ function TerminalPanel({machine,credentials,full,toggleFull,closeRef,onReleased}
  const labels:Record<State,string>={idle:t('待连接','Ready'),creating:t('正在准备','Preparing'),connecting:t('正在连接','Connecting'),connected:t('已连接','Connected'),closed:t('已断开','Disconnected'),error:t('连接失败','Connection failed')};
  return <div className="lm-terminal-panel">
   <div className="lm-terminal-toolbar"><Space wrap><Tag color={state==='connected'?'success':state==='error'?'error':busy?'processing':'default'} role="status">{labels[state]}</Tag><Typography.Text code>{sshEndpoint(machine.address,machine.port,keys.find(k=>k.id===credential)?.username)}</Typography.Text></Space><Space><Button aria-label={t('全屏切换','Toggle fullscreen')} icon={full?<FullscreenExitOutlined/>:<FullscreenOutlined/>} onClick={toggleFull}>{full?t('退出全屏','Exit fullscreen'):t('全屏','Fullscreen')}</Button>{busy?<Button aria-label={t('断开','Disconnect')} icon={<DisconnectOutlined/>} onClick={()=>{void stop().then(()=>{if(alive.current){setState('closed');setReason('disconnected')}})}}>{t('断开','Disconnect')}</Button>:<Button aria-label={state==='idle'?t('连接','Connect'):t('重新连接','Reconnect')} type="primary" icon={<ReloadOutlined/>} disabled={!keys.some(k=>k.id===credential)} onClick={()=>void start(credential)}>{state==='idle'?t('连接','Connect'):t('重新连接','Reconnect')}</Button>}</Space></div>
-  {(keys.length!==1||!initialCredential)&&<div className="lm-terminal-key"><span>{t('SSH 凭据','SSH credential')}</span><Select aria-label={t('终端 SSH 凭据','Terminal SSH credential')} value={credential} onChange={setCredential} disabled={busy} placeholder={t('请选择有效的 SSH 凭据','Select an active SSH credential')} options={keys.map(k=>({value:k.id,label:sshCredentialLabel(k)}))}/></div>}
+  {(containerTarget||keys.length!==1||!initialCredential)&&<div className="lm-terminal-key"><span>{t('SSH 凭据','SSH credential')}</span><Select aria-label={t('终端 SSH 凭据','Terminal SSH credential')} value={credential} onChange={setCredential} disabled={busy} placeholder={t('请选择有效的 SSH 凭据','Select an active SSH credential')} options={keys.map(k=>({value:k.id,label:sshCredentialLabel(k)}))}/></div>}
   {!keys.length&&<Alert type="warning" showIcon title={t('请添加有效的无口令 SSH 私钥或密码。','Add an active SSH key without a passphrase or password.')}/>}
   {passwordIDs.current.size>0&&<Alert type="info" showIcon title={t('一次性密码在终端结束或连接失败后清除；临时、托管或永久密码可在有效期内复用。','Single-use passwords are cleared when the terminal ends or connection fails. Temporary, managed, or permanent passwords can be reused within their validity.')}/>}
   {(error||reason)&&<Alert type={state==='error'||!['remote_closed','disconnected'].includes(reason)?'warning':'info'} showIcon title={error||explanations[reason]||t('连接已关闭，请重新连接。','Connection closed. Reconnect.')}/>}
   <div className="lm-terminal-screen" ref={host} aria-label={t('交互式 SSH 终端','Interactive SSH terminal')}/>
-  <Typography.Text type="secondary" className="lm-terminal-hint">{t('命令将直接在目标主机执行。关闭窗口会断开连接；10 分钟无输入或 30 分钟后自动断开。平台不保存终端输入与输出。','Commands run directly on the host. Closing this window disconnects SSH. Sessions close after 10 minutes without input or 30 minutes in total. Terminal input and output are not stored by the platform.')}</Typography.Text>
+  <Typography.Text type="secondary" className="lm-terminal-hint">{containerTarget?t('命令在选定容器中执行；关闭窗口会断开 SSH，平台不保存输入与输出。','Commands run inside the selected container. Closing this window disconnects SSH. Input and output are not stored.'):t('命令将直接在目标主机执行。关闭窗口会断开连接；10 分钟无输入或 30 分钟后自动断开。平台不保存终端输入与输出。','Commands run directly on the host. Closing this window disconnects SSH. Sessions close after 10 minutes without input or 30 minutes in total. Terminal input and output are not stored by the platform.')}</Typography.Text>
  </div>;
 }

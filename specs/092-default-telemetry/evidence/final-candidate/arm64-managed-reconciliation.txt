@@ -1,0 +1,23 @@
+✔ an audited matching managed reconciliation releases the fence without rewriting either unknown result (0.96525ms)
+✔ ordinary, foreign, incomplete and unreconciled unknown results remain fenced (1.15975ms)
+✔ active jobs still block and missing reconciliation authority stays conservative (0.705208ms)
+✔ signed domain work retains original lineage and ordinary control cannot read or mutate it (50.8605ms)
+✔ a changed source approval blocks an online permit before any side effect (9.271125ms)
+✔ domain receipt faults roll back both principals and preserve a retryable acknowledgement (12.042ms)
+✔ lease loss preserves unknown fences without replaying through ordinary control (6.5585ms)
+✔ managed work can queue behind a running signed operation and only runs after its receipt (13.936125ms)
+✔ managed admission preserves manual privilege and unresolved result fences (19.90725ms)
+✔ human reconciliation preserves both unknown histories and permits a new signed managed job (9.807042ms)
+✔ an explicitly reconciled manual privileged result also releases admission (7.137375ms)
+✔ a cached start permit cannot restore authority after policy revocation (6.988166ms)
+✔ signed application observations bind central ownership and durably acknowledge before export (2211.88921ms)
+✔ observation sequence recovery refuses unsafe or malformed numeric wrappers (0.519917ms)
+✔ more than one drain window of failed observations cannot starve a later healthy batch (2421.608918ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4911.251794

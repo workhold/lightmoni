@@ -6,7 +6,7 @@ const root = resolve(import.meta.dirname, "../../../.."),
   base = process.env.LIGHTMONI_CATALOG_UI_URL ?? "http://127.0.0.1:5196";
 if (!["127.0.0.1", "localhost"].includes(new URL(base).hostname))
   throw Error("Loopback fixture required");
-const out = resolve(root, "specs/091-deployment-autoconfiguration/evidence"),
+const out = resolve(root, "specs/094-catalog-search-storage/evidence"),
   media = mediaDirectory(out);
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: true, channel: "chrome" }),
@@ -74,7 +74,7 @@ try {
       })
       .click();
     const apps = page.locator(".lm-catalog-apps");
-    await expect(apps.getByRole("listitem")).toHaveCount(31);
+    await expect(apps.getByRole("listitem")).toHaveCount(35);
     const categoryLabel = en ? "Application category" : "应用分类";
     const chooseCategory = async (label) => {
       if (width < 760) {
@@ -90,8 +90,10 @@ try {
       ["中间件", "Middleware", 7],
       ["DevOps", "DevOps", 7],
       ["AI 项目", "AI projects", 7],
-      ["工具", "Tools", 1],
+      ["工具", "Tools", 2],
       ["网站与网关", "Web & gateways", 1],
+      ["搜索服务", "Search services", 2],
+      ["云存储", "Cloud storage", 1],
     ];
     if (width < 760) {
       await page.getByLabel(categoryLabel, { exact: true }).click();
@@ -112,8 +114,8 @@ try {
             exact: true,
           }),
         ).toBeVisible();
-    await chooseCategory((en ? "Tools" : "工具") + " (1)");
-    await expect(apps.getByRole("listitem")).toHaveCount(1);
+    await chooseCategory((en ? "Tools" : "工具") + " (2)");
+    await expect(apps.getByRole("listitem")).toHaveCount(2);
     await expect(
       apps.getByRole("listitem", { name: "DBX", exact: true }),
     ).toBeVisible();
@@ -160,6 +162,7 @@ try {
       checks.push(
         "DBX real HTTP install saves encrypted resource and creates pending QA Agent work; no fabricated completion",
       );
+      await expect(page.locator(".ant-message-notice")).toHaveCount(0);
       await page
         .getByRole("button", { name: "关闭", exact: true })
         .last()
@@ -172,11 +175,32 @@ try {
           exact: true,
         })
         .click();
-    await chooseCategory((en ? "All" : "全部") + " (31)");
+    await chooseCategory((en ? "All" : "全部") + " (35)");
     const search = page.getByLabel(
       en ? "Search application store" : "搜索应用商店",
       { exact: true },
     );
+    for (const [id, name, label] of [
+      ["meilisearch", "Meilisearch", en ? "Master key" : "主密钥"],
+      ["searxng", "SearXNG"],
+      ["firecrawl", "Firecrawl", en ? "SearXNG URL (optional)" : "SearXNG 地址（可选）"],
+      ["rustfs", "RustFS", en ? "Access key" : "访问密钥"],
+    ]) {
+      await search.fill(id);
+      const card = apps.getByRole("listitem", { name, exact: true });
+      await expect(card).toBeVisible();
+      await expect(card.locator("img")).toBeVisible();
+      expect(await card.locator("img").evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+      await card.getByRole("button", { name: en ? "Install" : /^安\s*装$/ }).click();
+      if (id === "firecrawl") await drawer.getByText(en ? "Advanced settings" : "高级设置", { exact: true }).click();
+      if (label) await expect(drawer.getByLabel(label, { exact: true })).toBeVisible();
+      if (id === "rustfs") {
+        await expect(drawer.getByLabel(en ? "Secret key" : "秘密密钥", { exact: true })).toBeVisible();
+      }
+      await page.screenshot({ path: resolve(media, `${id}-${language}-${width}-${appearance}.png`), animations: "disabled" });
+      await drawer.getByRole("button", { name: en ? "Back to store" : "返回应用商店", exact: true }).click();
+    }
+    checks.push(`${language}/${appearance}/${width}: Meilisearch, SearXNG, Firecrawl and RustFS logos decoded locally and install forms verified`);
     await search.fill("dify");
     await expect(apps.getByRole("listitem")).toHaveCount(1);
     await apps
@@ -234,7 +258,7 @@ try {
       })
       .click();
     await search.fill("");
-    await expect(apps.getByRole("listitem")).toHaveCount(31);
+    await expect(apps.getByRole("listitem")).toHaveCount(35);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -245,7 +269,7 @@ try {
       animations: "disabled",
     });
     checks.push(
-      `${language}/${appearance}/${width}: six category counts, only DBX tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow`,
+      `${language}/${appearance}/${width}: eight category counts, DBX and Firecrawl tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow`,
     );
     await context.close();
   }

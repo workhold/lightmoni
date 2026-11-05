@@ -1,0 +1,35 @@
+{
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261105-ops-a418b64",
+  "revision": "a418b64e9b56ae5dd108b502f11e66bb8b9be850",
+  "digest": "sha256:c6f5c3ebe0dac3666ee5ba4b862a504769dc1ef415fbefe55b6cc3961a46d15a",
+  "health": "ok",
+  "actual_module_fingerprints_match": true,
+  "trusted_capabilities": [
+    "operations.website",
+    "operations.certificate",
+    "operations.compose",
+    "operations.backup",
+    "operations.platform",
+    "operations.platform.readiness.v1",
+    "operations.platform.website-auth.v1",
+    "operations.platform.image-cache.v1",
+    "operations.platform.oneshot.v1",
+    "operations.platform.image-sources.v1",
+    "operations.platform.image-refresh.v1",
+    "operations.platform.instance-recovery.v1"
+  ],
+  "root_jobs_idle_before_switch": true,
+  "other_containers_unchanged": 16,
+  "compose_only_image_changed": true,
+  "business_counts": {
+    "users": 1,
+    "ops_platform_resources": 18,
+    "managed_machines": 2,
+    "agents": 6,
+    "connection_credentials": 26
+  },
+  "backup": "/opt/lightmoni/lightmoni/.release-095-catalog",
+  "rollback_image": "docker.heyphp.com/lightmoni/lightmoni:20261104-host-ui-790cca58456a",
+  "receipt_source": "native 1Panel terminal readback of activate.result.json after successful script execution",
+  "executor_and_telemetry_acceptance": "pending"
+}

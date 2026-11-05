@@ -1,0 +1,6 @@
+{
+  "loopback_api_stopped": true,
+  "loopback_web_stopped": true,
+  "disposable_release_containers_volumes_network_removed": true,
+  "business_resources_modified": false
+}

@@ -17,10 +17,11 @@ import {registerManagedMachines} from '../src/server/managed-machines.js';
 import {registerMachineTerminal} from '../src/server/machine-terminal.js';
 import type {Dependencies} from '../src/shared/types.js';
 import {isolatedSSHD} from './helpers/isolated-sshd.js';
+import {containerTerminalCommand} from '../src/ops/application-terminals.js';
 import {passwordSSHServer} from './helpers/password-ssh-server.js';
 
 const fakeKey=fixturePrivateKey();
-async function fixture(t:TestContext,limits:Record<string,number>={}){
+async function fixture(t:TestContext,limits:Parameters<typeof registerMachineTerminal>[3]={}){
  const dir=await mkdtemp(join(tmpdir(),'lightmoni-terminal-test-')),db=new DB(':memory:'),router=new Router(),auth=new Auth(db,dir,'',router),logs:unknown[]=[];
  auth.register();router.auth=auth;
  for(const [token,id,role] of [['admin','admin','admin'],['other','other','admin'],['member','member','member'],['new-login','admin','admin']]){
@@ -270,4 +271,21 @@ test('terminal first connection records the server key automatically and remains
   await f.request(`${h.path}/${entry.data.id}`,'DELETE');await c.closed();await c.wait(()=>c.ws.readyState===WebSocket.CLOSED);
  }
  assert.equal(f.db.all('SELECT id FROM machine_terminal_events WHERE connected_at!=\'\'').length,2);
+});
+
+test('container terminal uses real SSH exec with PTY and never starts a host shell; revoking its binding closes the lease',async t=>{
+ let valid=true;const target={application_id:'app-a',instance_id:'instance-a',container_id:'a'.repeat(64),shell:'sh' as const,revision:2};
+ const ssh=await passwordSSHServer(t,{exec:(command,stream)=>{assert.equal(command,containerTerminalCommand(target));stream.write('CONTAINER_READY\r\n');stream.on('data',(data:Buffer)=>{stream.write('CONTAINER_ECHO:'+data.toString())})}});
+ const f=await fixture(t,{checkMs:30,idleMs:10000,resolveContainerTarget:(machineID,input)=>{if(!valid||(input as any).container_id!==target.container_id)throw Error('target unavailable');return target}});
+ const h=await f.host({address:ssh.address,port:ssh.port,username:ssh.username,host_key_fingerprint:ssh.pin},ssh.password,'password');
+ const {revision,...input}=target;
+ assert.equal((await f.create(h,{container_target:{...input,container_id:'$(bad)'}})).status,400);
+ assert.equal((await f.create(h,{container_target:{...input,shell:'sh;id'}})).status,400);
+ assert.equal((await f.create(h,{container_target:input,command:'id'})).status,400);
+ const entry=await f.create(h,{credential_id:h.credentialID,container_target:input});assert.equal(entry.status,201);
+ const ws=await f.attach(entry.data);await ws.connected();await ws.wait(()=>ws.text().includes('CONTAINER_READY'));
+ ws.send({type:'input',data:'container-test\n'});await ws.wait(()=>ws.text().includes('CONTAINER_ECHO:container-test'));
+ assert.equal(ssh.ptys[0].term,'xterm-256color');assert.equal(ssh.commands.length,1);assert(!ws.text().includes('FIXTURE_READY'));
+ const audit=f.db.get<any>('SELECT * FROM machine_terminal_container_targets WHERE session_id=?',entry.data.id);assert.equal(audit.application_id,'app-a');assert.equal(audit.container_id,target.container_id);assert(!JSON.stringify(audit).includes('container-test'));
+ valid=false;await ws.closed('container_target_changed');ws.ws.close();assert.deepEqual(f.logs,[]);
 });

@@ -1,0 +1,13 @@
+✔ existing Docker and Compose on centos are verified without package management (4473.26146ms)
+✔ existing Docker and Compose on ubuntu are verified without package management (4383.914086ms)
+✔ CentOS with missing engine refuses package installation and leaves the daemon untouched (2266.9595ms)
+✔ CentOS with missing compose refuses package installation and leaves the daemon untouched (2725.441918ms)
+✔ existing Docker requires final Compose verification before recording success (4345.083085ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20208.280384

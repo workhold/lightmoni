@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "retrieved_on": "2026-11-01",
+  "retrieved_on": "2026-11-04",
   "purpose": "Locally bundled application identity artwork. No runtime requests to upstream hosts.",
   "trademark_notice": "All product names, logos, and brands belong to their respective owners and identify the corresponding application; no endorsement is implied. Collection licenses do not grant trademark rights.",
   "assets": [
@@ -146,6 +146,23 @@
       "title": "FastGPT",
       "size_bytes": 1735,
       "media_type": "image/svg+xml"
+    },
+    {
+      "id": "firecrawl",
+      "file": "firecrawl.png",
+      "provider": "Official project repository",
+      "repository": "https://github.com/firecrawl/firecrawl",
+      "revision": "ef12eb36b2f3382838dfe0a0c1a5add3d5df7fe5",
+      "source_url": "https://raw.githubusercontent.com/firecrawl/firecrawl/ef12eb36b2f3382838dfe0a0c1a5add3d5df7fe5/apps/test-site/public/favicon.png",
+      "license": "AGPL-3.0",
+      "license_url": "https://github.com/firecrawl/firecrawl/blob/ef12eb36b2f3382838dfe0a0c1a5add3d5df7fe5/LICENSE",
+      "license_file": "firecrawl-license.txt",
+      "sha256": "bc43ca6a2eae73684ec65bb7ba1f74ae13d8bad5763aa6b8676d4fe0b232107f",
+      "upstream_sha256": "bc43ca6a2eae73684ec65bb7ba1f74ae13d8bad5763aa6b8676d4fe0b232107f",
+      "modifications": [],
+      "title": "Firecrawl",
+      "size_bytes": 1832,
+      "media_type": "image/png"
     },
     {
       "id": "gitea",
@@ -339,6 +356,23 @@
       "upstream_sha256": "b3f92752fe93a5f3e5f61354a7fd0cd3d4f7941ef8f8833a073a66d7b1b74e59",
       "title": "MaxKB",
       "size_bytes": 2801,
+      "media_type": "image/svg+xml"
+    },
+    {
+      "id": "meilisearch",
+      "file": "meilisearch.svg",
+      "provider": "Simple Icons",
+      "repository": "https://github.com/simple-icons/simple-icons",
+      "revision": "27a47e6540abf45107f0bfe50fd0d1f8e6395263",
+      "source_url": "https://raw.githubusercontent.com/simple-icons/simple-icons/27a47e6540abf45107f0bfe50fd0d1f8e6395263/icons/meilisearch.svg",
+      "license": "CC0-1.0",
+      "license_url": "https://github.com/simple-icons/simple-icons/blob/27a47e6540abf45107f0bfe50fd0d1f8e6395263/LICENSE.md",
+      "license_file": "simple-icons-license.txt",
+      "sha256": "ed4366b985f794a5364e164a770ff6c0bd4029f1cdc849ccb9a934c15137f163",
+      "upstream_sha256": "ed4366b985f794a5364e164a770ff6c0bd4029f1cdc849ccb9a934c15137f163",
+      "modifications": [],
+      "title": "Meilisearch",
+      "size_bytes": 436,
       "media_type": "image/svg+xml"
     },
     {
@@ -637,6 +671,40 @@
         "type": "Apache-2.0"
       },
       "size_bytes": 1955,
+      "media_type": "image/svg+xml"
+    },
+    {
+      "id": "rustfs",
+      "file": "rustfs.svg",
+      "provider": "Dashboard Icons",
+      "repository": "https://github.com/homarr-labs/dashboard-icons",
+      "revision": "83f32e08257b66fbd971ac8d7645f5b38d52e85d",
+      "source_url": "https://raw.githubusercontent.com/homarr-labs/dashboard-icons/83f32e08257b66fbd971ac8d7645f5b38d52e85d/svg/rustfs.svg",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/homarr-labs/dashboard-icons/blob/83f32e08257b66fbd971ac8d7645f5b38d52e85d/LICENSE",
+      "license_file": "dashboard-icons-license.txt",
+      "sha256": "a708327b4d7cf213c11dada32a810686d0b0243ffa56906b8d17762e84c7fb8a",
+      "upstream_sha256": "a708327b4d7cf213c11dada32a810686d0b0243ffa56906b8d17762e84c7fb8a",
+      "modifications": [],
+      "title": "RustFS",
+      "size_bytes": 2408,
+      "media_type": "image/svg+xml"
+    },
+    {
+      "id": "searxng",
+      "file": "searxng.svg",
+      "provider": "Official project repository",
+      "repository": "https://github.com/searxng/searxng",
+      "revision": "cccbc9e158b0ac3bb2158e9841a647a5bec57b57",
+      "source_url": "https://raw.githubusercontent.com/searxng/searxng/cccbc9e158b0ac3bb2158e9841a647a5bec57b57/searx/static/themes/simple/img/favicon.svg",
+      "license": "AGPL-3.0-or-later",
+      "license_url": "https://github.com/searxng/searxng/blob/cccbc9e158b0ac3bb2158e9841a647a5bec57b57/LICENSE",
+      "license_file": "searxng-license.txt",
+      "sha256": "c852f912d69550e4ba16a2c87eb7cc081d63bcf9a6d9d25aa3b5223561de428d",
+      "upstream_sha256": "c852f912d69550e4ba16a2c87eb7cc081d63bcf9a6d9d25aa3b5223561de428d",
+      "modifications": [],
+      "title": "SearXNG",
+      "size_bytes": 726,
       "media_type": "image/svg+xml"
     },
     {

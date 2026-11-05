@@ -63,7 +63,7 @@ export class PrivilegedExecutorRunner {
     if(current.capabilities.includes('operations.managed.v1')&&this.host.inventory)try{inventory=await this.host.inventory();}catch{}
     const response = await this.client.request("heartbeat", { ...this.release, boot_id: this.clock.bootID(), policy_generation: current.generation,
       ...(this.ordinaryTaskIdentity ? { ordinary_task_identity: this.ordinaryTaskIdentity } : {}),
-      ...(inventory?{docker_inventory:inventory}:{}),capabilities: profiles.capabilities.filter(c => current.capabilities.includes(c)), operations_capabilities:profiles.capabilities.includes("operations.managed.v1")?[...operationCapabilities]:[],account_profiles: profiles.account_profiles, interpreter_profiles: profiles.interpreter_profiles });
+      ...(inventory?{docker_inventory:inventory}:{}),...(this.observations?{application_observation:this.observations.status()}:{}),capabilities: profiles.capabilities.filter(c => current.capabilities.includes(c)), operations_capabilities:profiles.capabilities.includes("operations.managed.v1")?[...operationCapabilities]:[],account_profiles: profiles.account_profiles, interpreter_profiles: profiles.interpreter_profiles });
     if (response.center_instance_id !== this.config.center_instance_id) refuse("principal_mismatch");
     this.client.applyPolicy(response.policy);
   }

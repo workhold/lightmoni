@@ -152,7 +152,8 @@ export async function preparePlatformImages(
   const policy = config.image_sources
     ? imageSourcePolicy(config.image_sources)
     : undefined;
-  if (!policy)
+  const refresh = config.refresh_images === true;
+  if (!policy && !refresh)
     return config.image_cache
       ? prepareCachedImages(manifest, config.image_cache, root, context)
       : [];
@@ -162,7 +163,7 @@ export async function preparePlatformImages(
   for (const image of new Set<string>(
     Object.values<any>(manifest.services).map((s) => s.image),
   )) {
-    const mapped = imageSourceReference(image, policy.rules);
+    const mapped = policy ? imageSourceReference(image, policy.rules) : undefined;
     let result: any;
     const one = { services: { image: { image } } };
     if (config.image_cache) {
@@ -171,15 +172,16 @@ export async function preparePlatformImages(
         config.image_cache,
         root,
         context,
+        refresh,
       );
       result = cache.find((r) => r.image_id);
       if (!result) results.push(...cache.filter((r) => !r.image_id));
-    } else if (mapped)
+    } else if (mapped && !refresh)
       result = await localDockerImage(image, platform, context);
     if (!result && mapped) {
       try {
         // A previously verified proxy reference can be reused; source credentials are never copied.
-        result = await localDockerImage(mapped.mapped, platform, context);
+        result = refresh ? undefined : await localDockerImage(mapped.mapped, platform, context);
         if (!result) {
           await context.command("docker", ["image", "pull", mapped.mapped], {
             timeoutMs: 300000,
@@ -202,6 +204,16 @@ export async function preparePlatformImages(
           code: installCause(error) || "image_proxy_failed",
         });
       }
+    }
+    if (!result && refresh) {
+      // Keep cache/proxy fallback policy, but never silently reuse a mutable local tag on upgrade.
+      result = /(?:^|@)sha256:[a-f0-9]{64}$/.test(image) ? await localDockerImage(image,platform,context) : undefined;
+      if (!result) {
+        await context.command('docker',['image','pull',image],{timeoutMs:300000,signal:context.signal});
+        result = await localDockerImage(image,platform,context);
+      }
+      if (!result) reject('IMAGE_REFRESH_NOT_VERIFIED');
+      result = {...result,image,source:'upstream-refresh'};
     }
     if (result) {
       results.push(result);

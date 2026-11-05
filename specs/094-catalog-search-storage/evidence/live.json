@@ -1,0 +1,30 @@
+{
+  "platform": "arm64",
+  "checks": [
+    {
+      "id": "searxng",
+      "result": "passed",
+      "behavior": "healthy native entrypoint, homepage and HTML/JSON search formats; no public-engine availability claim"
+    },
+    {
+      "id": "meilisearch",
+      "result": "passed",
+      "behavior": "production auth rejects missing key; authenticated indexing and search"
+    },
+    {
+      "id": "rustfs",
+      "result": "passed",
+      "behavior": "non-root volumes, S3 auth, signed bucket/object write/read, console health"
+    },
+    {
+      "id": "firecrawl",
+      "result": "passed",
+      "behavior": "five-service startup, API/worker/queue/database connectivity and real IANA Markdown scrape",
+      "browser_platform": "linux/amd64",
+      "public_dns_pinning": true,
+      "target": "https://www.iana.org/help/example-domains"
+    }
+  ],
+  "production_modified": false,
+  "cleanup": "containers, project networks, volumes and temporary credentials removed"
+}

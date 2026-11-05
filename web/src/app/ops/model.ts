@@ -10,6 +10,7 @@ export type ResourceKind =
   | "website";
 export type Spec = Record<string, any>;
 export type Resource = {
+  upgrade?: Spec;
   logo_url?: string;
   logo_revision?: number;
   id: string;
@@ -193,7 +194,8 @@ export function editorValues(kind: ResourceKind, resource?: Resource) {
       source: { type: "custom" },
       deployment_mode: "manual",
       role: "generic",
-      deployments: [{machine_ids: [], replicas: 1, cpu: 1, memory_mb: 512}],
+      heartbeat_grace_minutes: 5,
+      deployments: [{machine_ids: [], replicas: 1, min_available_percent: 60, cpu: 1, memory_mb: 512}],
       stateful: false,
       health: {},
       ports: [],
@@ -336,7 +338,7 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
     });
     for (const key of ["cluster_id", "machine_ids", "replicas", "cpu", "memory_mb", "stateful_acknowledged"]) delete spec[key];
     if (!spec.service_name) delete spec.service_name;
-    if (!spec.health?.port_name) delete spec.health;
+    if (!spec.health?.type || !spec.health?.port_name) delete spec.health;
   }
   if (kind === "certificate_target") {
     spec.env = rowsMap(spec.env_rows);

@@ -1,0 +1,10 @@
+{
+  "isolated_services_removed": true,
+  "runtime_test_credentials_removed": true,
+  "removed_intermediates": [
+    "context.tar",
+    "images.tar",
+    "oci"
+  ],
+  "global_prune": false
+}

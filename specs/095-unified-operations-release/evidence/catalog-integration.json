@@ -1,0 +1,82 @@
+{
+  "source_revision": "a418b64e9b56ae5dd108b502f11e66bb8b9be850",
+  "source_prs": [
+    92,
+    93,
+    94,
+    95,
+    96,
+    97,
+    98,
+    100
+  ],
+  "typecheck": "passed",
+  "build": "passed",
+  "targeted_regression": {
+    "tests": 65,
+    "pass": 65,
+    "fail": 0,
+    "skip": 0
+  },
+  "browser": "four locale/theme/viewport combinations passed with zero page errors",
+  "packaged_image_checks": {
+    "arm64": 44,
+    "amd64": 44
+  },
+  "actual_container_smoke": [
+    "meilisearch auth/indexing/search",
+    "rustfs signed S3 bucket/object operations and console health"
+  ],
+  "firecrawl": {
+    "state": "passed",
+    "component": "ghcr.io/firecrawl/playwright-service",
+    "index": "sha256:637fb8c8399634b02c2179da72566ce11644435e5d93e895bdbde4b1f9b0882a",
+    "business_smoke": "five services; real IANA Markdown with HTTP metadata 200 and expected nonempty content",
+    "verified_api_image": "sha256:50446cbc0bc700a78cc588c96bd38a97f01cc4299c99b349c7bfa1ba57b6d7ed",
+    "verified_database_image": "sha256:d719b36160eac2fcbe16dc7e7360ddb9c82c40ea5da183d07bf4a755c6a0b2ae",
+    "prior_image_failure": {
+      "expected_layer": "sha256:45f4d16cf8ff92019a313bb4f67c1b5b8f5861181a5972355c2d8a057224d23e",
+      "received_layer": "sha256:d4bdf2eb61f888f9bc88ca368347ada1cc9660c6eb7fa06fa84dd9351c751f00",
+      "docker_rejected": true
+    },
+    "browser_platform": "linux/amd64",
+    "api_database_platform": "linux/arm64",
+    "browser_emulation": true,
+    "public_dns_pinning": true,
+    "ssrf_tls_checks_preserved": true,
+    "native_arm64_browser_validated": false,
+    "target": "https://www.iana.org/help/example-domains",
+    "cleanup": "isolated containers, networks, volumes and temporary credentials removed"
+  },
+  "production": "center activated and actual fingerprints verified; Agent/helper and sustained production acceptance pending",
+  "full_suite": {
+    "runtime": {
+      "tests": 1502,
+      "passed": 1469,
+      "failed": 0,
+      "skipped": 33
+    },
+    "ai": {
+      "tests": 71,
+      "passed": 71,
+      "failed": 0
+    },
+    "sdk_typescript": {
+      "tests": 23,
+      "passed": 23,
+      "failed": 0
+    }
+  },
+  "compose": {
+    "recipes": 31,
+    "services": 65,
+    "result": "passed"
+  },
+  "upgrade_terminal_browser": {
+    "checks": 6,
+    "failed": 0,
+    "real_docker": true,
+    "real_ssh_pty": true,
+    "image": "lightmoni:20261105-ops-a418b64-arm64"
+  }
+}

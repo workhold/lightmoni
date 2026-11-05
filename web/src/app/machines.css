@@ -50,3 +50,47 @@
 .lm-agent-identity-details { margin-bottom: 16px; }
 .lm-agent-identity-details summary { cursor: pointer; margin-bottom: 8px; }
 .lm-agent-install-dialog .ant-btn { white-space: normal; height: auto; min-height: 32px; }
+
+/* SDD092: compact inventory, visible recovery, grouped actions. */
+.lm-host-toolbar{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px}
+.lm-host-filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px;flex:1;min-width:0}
+.lm-host-filters h1{margin:0 12px 0 0}
+.lm-host-filters>.ant-input-affix-wrapper{width:280px;max-width:100%}
+.lm-host-filters>.ant-select{min-width:170px;max-width:100%}
+.lm-host-list-meta{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:10px 0 14px}
+.lm-host-list .ant-table-cell{vertical-align:top;padding-top:18px;padding-bottom:18px}
+.lm-host-overview{display:flex;flex-direction:column;gap:6px;min-width:0}
+.lm-host-overview>.ant-typography{margin:0!important}
+.lm-host-name.ant-btn{display:block;text-align:start;font-weight:600;white-space:normal;height:auto;min-height:24px;padding:0;max-width:100%;overflow-wrap:anywhere}
+.lm-host-ssh-copy{font-size:12px;overflow-wrap:anywhere}
+.lm-host-channels{display:flex;flex-direction:column;gap:9px;min-width:0}
+.lm-host-channels>div{display:flex;gap:8px;align-items:baseline;min-width:0}
+.lm-host-channel-label{font-size:12px;min-width:42px;color:var(--lm-muted)}
+.lm-host-channel-value{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:12px;min-width:0}
+.lm-host-channels .ant-tag{margin:0 4px 3px 0;white-space:normal;font-size:12px}
+.lm-host-channels .ant-btn-link{padding:0 2px;height:auto;font-size:12px}
+.lm-host-list .lm-machine-release>.ant-typography,.lm-host-list .lm-machine-release>div>.ant-typography{margin:0}
+.lm-host-list .lm-machine-release>div:first-child{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.lm-host-list .lm-machine-release>div:first-child>.ant-typography{display:inline}
+.lm-host-list .lm-machine-release>.ant-typography{font-size:12px}
+.lm-host-row-actions{display:flex;flex-direction:column;align-items:stretch;gap:9px}
+.lm-host-action-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;min-width:0}
+.lm-host-action-grid>span,.lm-host-action-grid .ant-btn{width:100%}
+.lm-host-action-grid .ant-btn{padding-inline:6px;height:auto;min-height:28px;white-space:normal;font-size:12px}
+.lm-host-row-actions>.ant-btn{height:auto;min-height:28px;white-space:normal;font-size:12px}
+.lm-host-unavailable{font-size:12px;color:var(--lm-muted);line-height:1.6}
+.lm-host-unavailable summary{cursor:pointer}
+.lm-host-unavailable p{margin:6px 0 0}
+.lm-host-menu-disabled{display:flex;flex-direction:column;gap:3px;max-width:260px;white-space:normal}
+.lm-host-menu-disabled small{font-size:12px;line-height:1.5;font-weight:400}
+.lm-host-page-help{margin:-2px 0 18px;color:var(--lm-muted);font-size:13px;line-height:1.7}
+.lm-host-page-help summary{cursor:pointer;display:list-item;width:fit-content}
+.lm-host-page-help p{margin:8px 0 0}
+.lm-host-detail-dialog .ant-modal-container{display:flex;flex-direction:column;max-height:calc(100dvh - 48px)}
+.lm-host-detail-dialog .ant-modal-body{min-height:0;overflow-y:auto;overflow-x:hidden;overflow-wrap:anywhere}
+@media(max-width:640px){.lm-host-filters{flex-basis:100%}.lm-host-filters>.ant-input-affix-wrapper{width:100%}.lm-host-filters>.ant-select{flex:1}.lm-host-toolbar>.ant-space{justify-content:flex-end;width:100%}.lm-host-list-meta{font-size:12px}}
+.lm-host-deploy-split{display:flex;min-width:0}
+.lm-host-deploy-split>.ant-btn:first-child{flex:1;border-start-end-radius:0;border-end-end-radius:0}
+.lm-host-menu-trigger{display:flex;min-width:0}
+.lm-host-deploy-split>.lm-host-menu-trigger{width:22px;flex-shrink:0}
+.lm-host-deploy-split>.lm-host-menu-trigger>.ant-btn{width:22px;padding-inline:3px;border-start-start-radius:0;border-end-start-radius:0}

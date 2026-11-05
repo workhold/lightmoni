@@ -287,7 +287,7 @@ export async function createApp(cfg: Config) {
           if (!res.writableEnded) res.end('{"error":"服务暂不可用"}');
         });
     });
-    modules.push(registerMachineTerminal(deps, managedMachines, server));
+    modules.push(registerMachineTerminal(deps, managedMachines, server,{resolveContainerTarget:platform.resolveContainerTarget}));
     server.headersTimeout = 10000;
     server.requestTimeout = 30000;
     systemLogs = new SystemLogs(deps, ingest, [cfg.chPassword]);

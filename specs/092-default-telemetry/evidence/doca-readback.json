@@ -1,0 +1,203 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved": true,
+  "saved_seq": 1717,
+  "readback_seq": 1717,
+  "title_preserved": true,
+  "text": [
+    {
+      "id": "55cc7879-01d1-450b-ab45-bee8fbf07583",
+      "seq": 1717,
+      "text": "92. 应用默认采集、网站与SDK监控（SDD092）"
+    },
+    {
+      "id": "sdd092-paths",
+      "seq": 1717,
+      "text": "本节补充第44/80/87/91章。三条数据通道保持：普通Agent采集主机指标并通过自己的持久队列上报；root helper按中心签名目标读取平台Docker容器指标和stdout/stderr；业务SDK使用应用数据Key直连中心。普通Agent和SDK不获取Docker socket、helper私钥或控制凭据。"
+    },
+    {
+      "id": "sdd092-ownership",
+      "seq": 1717,
+      "text": "执行器、应用、实例和容器归属仍由中心校验。已删除网站的积压访问日志保留原始body和容器身份，将失效website_id转为unregistered_website_id，不授予站点统计归属，避免阻塞全部指标。普通应用冒充入口、现有网站外集群日志仍拒绝。托管站点集群从保存服务部署推导，手动后端使用保存cluster_ids。"
+    },
+    {
+      "id": "sdd092-queue",
+      "seq": 1717,
+      "text": "helper持久队列按metrics/logs分别FIFO重试，拒收批次和游标保留；日志失败时已采样指标仍持久化，指标按批次预算切分。签名心跳携带安全采集状态（尝试/成功时间、固定错误码、队列数量/字节），中心另投影outbox积压及导出故障。Docker清单ready不能证明遥测正常；旧安装无诊断字段时明确等待。中心失败批次不阻塞其他批次，事件身份保持稳定。"
+    },
+    {
+      "id": "sdd092-query",
+      "seq": 1717,
+      "text": "应用监控保留共享容器表，新增SDK指标和日志区域。只从Catalog认可业务表读取，以resource_json的lightmoni.application_id及实例、集群、机器范围过滤，不用服务名扩大范围。最多32张业务表和1天范围，经过只读AST及资源预算。SDK展示每分钟均值和样本数，自动容器采集与业务打点保持分开。"
+    },
+    {
+      "id": "sdd092-website",
+      "seq": 1717,
+      "text": "网站独立监控入口按固定网站ID查询访问日志、分钟均值QPS、平均耗时和5xx计数，覆盖托管服务、静态与手动后端。OpenResty结构日志增加host、method、uri（不含querystring），不包含请求头或认证秘密，旧格式body保留可读。仓库自有ABC示例以平台环境默认身份记录真实请求、耗时、日志和15秒存活采样；其他未接SDK应用只提供默认容器观测。"
+    },
+    {
+      "id": "sdd092-scope",
+      "seq": 1717,
+      "text": "组件和部署拓扑不变，扩展签名诊断与用户读取路径，不新增秘密副本。规格、设计、契约、任务和持续采样验收位于specs/092-default-telemetry；本章描述目标实现，实际生产与回归结果以该SDD验收记录为准。"
+    }
+  ],
+  "diagram": {
+    "id": "sdd092-dataflow",
+    "nodes": [
+      {
+        "id": "sdd092-host",
+        "label": "普通Agent / 主机采集",
+        "x": 20,
+        "y": 20,
+        "width": 180,
+        "height": 60,
+        "shape": "process"
+      },
+      {
+        "id": "sdd092-sdk",
+        "label": "业务SDK / 环境身份",
+        "x": 20,
+        "y": 110,
+        "width": 180,
+        "height": 60,
+        "shape": "process"
+      },
+      {
+        "id": "sdd092-helper",
+        "label": "root helper / 容器采集",
+        "x": 20,
+        "y": 220,
+        "width": 180,
+        "height": 60,
+        "shape": "process"
+      },
+      {
+        "id": "sdd092-ingest",
+        "label": "中心 OTLP 接收",
+        "x": 250,
+        "y": 65,
+        "width": 180,
+        "height": 60,
+        "shape": "process"
+      },
+      {
+        "id": "sdd092-outbox",
+        "label": "签名校验 / 加密outbox",
+        "x": 250,
+        "y": 220,
+        "width": 180,
+        "height": 60,
+        "shape": "process"
+      },
+      {
+        "id": "sdd092-ch",
+        "label": "ClickHouse",
+        "x": 480,
+        "y": 130,
+        "width": 180,
+        "height": 60,
+        "shape": "database"
+      },
+      {
+        "id": "sdd092-status",
+        "label": "签名采集诊断",
+        "x": 250,
+        "y": 340,
+        "width": 180,
+        "height": 60,
+        "shape": "process"
+      },
+      {
+        "id": "sdd092-read",
+        "label": "有界只读查询",
+        "x": 690,
+        "y": 130,
+        "width": 180,
+        "height": 60,
+        "shape": "process"
+      },
+      {
+        "id": "sdd092-ui",
+        "label": "应用 / 网站监控",
+        "x": 690,
+        "y": 310,
+        "width": 180,
+        "height": 60,
+        "shape": "process"
+      }
+    ],
+    "edges": [
+      {
+        "id": "sdd092-edge-0",
+        "source": "sdd092-host",
+        "target": "sdd092-ingest",
+        "arrow": "end",
+        "lineType": "smoothstep"
+      },
+      {
+        "id": "sdd092-edge-1",
+        "source": "sdd092-sdk",
+        "target": "sdd092-ingest",
+        "arrow": "end",
+        "lineType": "smoothstep"
+      },
+      {
+        "id": "sdd092-edge-2",
+        "source": "sdd092-helper",
+        "target": "sdd092-outbox",
+        "arrow": "end",
+        "lineType": "smoothstep"
+      },
+      {
+        "id": "sdd092-edge-3",
+        "source": "sdd092-outbox",
+        "target": "sdd092-ch",
+        "arrow": "end",
+        "lineType": "smoothstep"
+      },
+      {
+        "id": "sdd092-edge-4",
+        "source": "sdd092-ingest",
+        "target": "sdd092-ch",
+        "arrow": "end",
+        "lineType": "smoothstep"
+      },
+      {
+        "id": "sdd092-edge-5",
+        "source": "sdd092-helper",
+        "target": "sdd092-status",
+        "arrow": "end",
+        "lineType": "smoothstep"
+      },
+      {
+        "id": "sdd092-edge-6",
+        "source": "sdd092-status",
+        "target": "sdd092-ui",
+        "arrow": "end",
+        "lineType": "smoothstep"
+      },
+      {
+        "id": "sdd092-edge-7",
+        "source": "sdd092-ch",
+        "target": "sdd092-read",
+        "arrow": "end",
+        "lineType": "smoothstep"
+      },
+      {
+        "id": "sdd092-edge-8",
+        "source": "sdd092-read",
+        "target": "sdd092-ui",
+        "arrow": "end",
+        "lineType": "smoothstep"
+      }
+    ],
+    "nodes_equal": true,
+    "edges_equal": true
+  },
+  "original_diagram": {
+    "id": "f-architecture-8a1f",
+    "nodes": 10,
+    "edges": 8,
+    "full_data_unchanged": true
+  }
+}

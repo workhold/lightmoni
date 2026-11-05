@@ -109,6 +109,7 @@ export interface Auth {
   master: Buffer;
 }
 export interface Dependencies {
+  applicationObservationStatus?:(agentID:string)=>{pending_batches:number;error:string};
   db: DB;
   router: Router;
   query: (
