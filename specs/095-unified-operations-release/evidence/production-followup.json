@@ -1,0 +1,31 @@
+{
+  "source": "transcription of native 1Panel terminal readback; not a downloaded raw receipt",
+  "at": "2026-11-05T01:47:06.729Z",
+  "recent_window_minutes": 15,
+  "application_container_metrics": {
+    "applications": 6,
+    "rows_per_application": 315,
+    "latest": "2026-11-05 01:46:45.940000000"
+  },
+  "applications_with_recent_container_logs": 3,
+  "sdk_abc": {
+    "metric_abc_gauge": 60,
+    "metric_abc_histogram": 73,
+    "metric_abc_sum": 73,
+    "log_abc": 133
+  },
+  "website_access_logs": 0,
+  "pending_center_observation_batches": 0,
+  "sustained_acceptance": "pending; one snapshot is not three-round acceptance",
+  "maintenance_fence": {
+    "at": "2026-11-05T02:18:36Z",
+    "audited_unknown_records_blocking": 0,
+    "active_verifying": 1,
+    "queued": 3,
+    "no_record_rewritten": true
+  },
+  "host_scope": {
+    "zz-bj-1": "pending upgrade and acceptance",
+    "vchive": "excluded by explicit user instruction; old Agent retained"
+  }
+}
