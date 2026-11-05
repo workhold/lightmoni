@@ -1,3 +1,4 @@
+import type { ReconciliationRegistry } from "../reconciliation/registry.js";
 import type { Dependencies, Module } from "../shared/types.js";
 import type { AgentJobStore, AgentJobUpdate } from "../server/agent-jobs.js";
 export type ResourceKind =
@@ -142,6 +143,7 @@ export interface DomainController extends Module {
   tick?(): Promise<void>;
 }
 export interface PlatformOptions {
+  reconciliation?: ReconciliationRegistry;
   store: PlatformStore;
   deps: Dependencies;
   dataDir: string;

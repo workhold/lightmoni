@@ -87,7 +87,19 @@ export function createClusterCertificateDelivery({store,deps}:PlatformOptions){
    refresh(target,{certificate_version:certificate.status.certificate_version,fingerprint_sha256:certificate.status.fingerprint_sha256});
   },
   validatePayload(target:PlatformResource,config:Record<string,any>,agentID:string){
-   if(target.spec.type!=='directory'||!target.spec.cluster_id)return;
+   if(target.spec.type!=='directory')return;
+   if(config.reconciliation_resource_id) {
+    const expected=deps.db.get<any>('SELECT * FROM reconciliation_resources WHERE id=?',config.reconciliation_resource_id);
+    const desired=expected?JSON.parse(deps.decrypt(expected.desired_cipher)):undefined;
+    const allowed=['certificate.inspect','certificate.install','certificate.remove'].includes(config.task);
+    const saved=desired?.config;
+    if(!expected||expected.owner_id!==target.id||expected.agent_id!==agentID||expected.generation!==config.reconciliation_generation||expected.desired_hash!==config.reconciliation_hash||!saved||!allowed ||
+      ['path','certificate_id','certificate_file','private_key_file','machine_id','agent_id','mode','private_key_mode','owner','group','certificate_version','fingerprint_sha256','certificate_pem','private_key_pem'].some(k=>config[k]!==saved[k]) ||
+      config.task==='certificate.remove' && !expected.deleted && desired.present || config.task==='certificate.install' && (expected.deleted||!desired.present))
+      throw new HTTPError(403,'certificate_reconciliation_changed');
+    return;
+   }
+   if(!target.spec.cluster_id)return;
    if(config.certificate_version!==store.get(target.spec.certificate_id,'certificate').status.certificate_version)
     throw new HTTPError(403,'certificate_payload_version_changed');
    if(config.cluster_id!==target.spec.cluster_id||config.agent_id!==agentID||!activeAgent(agentID)||

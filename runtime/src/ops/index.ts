@@ -1,3 +1,4 @@
+import type { ReconciliationRegistry } from "../reconciliation/registry.js";
 import {machineServiceAddresses} from "../server/host-network.js";
 import {applicationUpgrade,registerApplicationUpgrades} from './application-upgrades.js';
 import {createApplicationTerminals} from './application-terminals.js';
@@ -20,6 +21,7 @@ import type { DomainController, ResourceKind } from "./types.js";
 export function registerOperationsPlatform(
   deps: Dependencies,
   options: {
+    reconciliation?: ReconciliationRegistry;
     jobs: AgentJobStore;
     dataDir: string;
     fetch?: typeof fetch;
@@ -27,10 +29,11 @@ export function registerOperationsPlatform(
     certificate?: Pick<CertificateControllerOptions, "acmeClientFactory" | "resolveChallenge">;
   },
 ) {
-  const store = new OperationsPlatformStore(deps, options.jobs);
+  const store = new OperationsPlatformStore(deps, options.jobs, options.reconciliation);
   const domainOptions = {
     store,
     deps,
+    reconciliation: options.reconciliation,
     dataDir: options.dataDir,
     fetch: options.fetch,
   };
@@ -71,6 +74,8 @@ export function registerOperationsPlatform(
           deps.logger.error("Operations platform request failed");
           ctx.json({ error: "platform_request_failed" }, 500);
         }
+      } finally {
+        if (!["GET", "HEAD"].includes(ctx.req.method ?? "GET")) options.reconciliation?.kick();
       }
     };
   const privateRegistry=createPrivateRegistryController(store,workloads);
@@ -372,7 +377,7 @@ export function registerOperationsPlatform(
         });
       domainTicks.set(domain, pending);
     }
-    return Promise.allSettled([...domainTicks.values()]).then(() => undefined);
+    return Promise.allSettled([...domainTicks.values()]).then(() => {options.reconciliation?.kick();});
   }
   return {
     store,

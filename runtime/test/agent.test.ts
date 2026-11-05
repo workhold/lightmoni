@@ -1,3 +1,4 @@
+import { desiredHash } from "../src/shared/desired-state.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -665,4 +666,19 @@ test("ordinary Agent heartbeat does not advertise privileged daemon access",asyn
   const agent=make(t);
   assert.equal("docker_capabilities" in agent.status(),false);
   assert.equal("docker_inventory" in agent.status(),false);
+});
+
+test("same revision configuration repairs actual memory and durable file drift", async t=>{
+  const remote=normalizeRemote({revision:'fixed-version',collect_interval_seconds:3,host_enabled:false,host_collectors:[],probes:[]});
+  const center=await mock(t,(req,res)=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(req.method==='GET'?JSON.stringify(remote):'{}');});
+  const cfg=config(t,{endpoint:center.url}),a=createAgent(cfg);t.after(()=>a.close());
+  await a.controlOnce(false);const expected=desiredHash(remote);
+  assert.deepEqual(a.configurationObservation(),{runtime_hash:expected,persisted_hash:expected});
+  a.tasks.collect_interval_seconds=99;
+  writeFileSync(join(cfg.data_dir,'remote-config.json'),JSON.stringify({...remote,collect_interval_seconds:88}));
+  assert.notEqual(a.configurationObservation().runtime_hash,expected);assert.notEqual(a.configurationObservation().persisted_hash,expected);
+  await a.controlOnce(true);assert.equal(a.revision,'fixed-version');assert.equal(a.tasks.collect_interval_seconds,3);
+  assert.deepEqual(a.status().config_observation,{runtime_hash:expected,persisted_hash:expected});
+  writeFileSync(join(cfg.data_dir,'remote-config.json'),'corrupt-json');
+  await a.controlOnce(true);assert.equal(a.configurationObservation().persisted_hash,expected);
 });

@@ -1,3 +1,5 @@
+import { registerReconciliation } from "../src/reconciliation/index.js";
+import { executeOperation } from "../src/agent/operations.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { X509Certificate, createPrivateKey } from "node:crypto";
@@ -18,7 +20,7 @@ import { getCertificateMaterial } from "../src/ops/certificates.js";
 import { certificateChain } from "./fixtures/certificate-material.js";
 import { AgentJobRunner } from "../src/agent/jobs.js";
 import type { Dependencies } from "../src/shared/types.js";
-async function setup(t: any, certificate?: Parameters<typeof registerOperationsPlatform>[1]["certificate"], bindAll=false) {
+async function setup(t: any, certificate?: Parameters<typeof registerOperationsPlatform>[1]["certificate"], bindAll=false, reconciliationEnabled=false) {
   const root = await realpath(
       await mkdtemp(join(tmpdir(), "lightmoni-platform-api-")),
     ),
@@ -68,8 +70,9 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
       return { agent_id: agentID };
     },
   } as any;
+  const reconciliation = registerReconciliation(deps);
   const jobs = registerAgentJobs(deps, { agentCredentials: credentials }),
-    platform = registerOperationsPlatform(deps, { jobs, dataDir: root, certificate });
+    platform = registerOperationsPlatform(deps, { jobs, dataDir: root, certificate, ...(reconciliationEnabled?{reconciliation}:{}) });
   db.exec(
     "CREATE TABLE managed_machines(id TEXT PRIMARY KEY,name TEXT,address TEXT,agent_id TEXT);INSERT INTO managed_machines VALUES('machine-a','Test node','127.0.0.1','node-a')",
   );
@@ -99,6 +102,7 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
   await once(server, "listening");
   const base = "http://127.0.0.1:" + (server.address() as any).port;
   t.after(async () => {
+    await reconciliation.close();
     await platform.close();
     legacy.close?.();
     jobs.close?.();
@@ -213,7 +217,7 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
       },
     });
   };
-  return {
+  return {reconciliation,
     base,
     deps,
     root,
@@ -717,4 +721,46 @@ test("saved multi-path Nginx preview is administrator-only, redacted and does no
     },
   });
   assert.equal(invalid.status, 400);
+});
+
+test('certificate reconciliation uses real file observation, recovers failure and drift, fences stale generations and cleans old destinations',async t=>{
+  const f=await setup(t,undefined,false,true);
+  f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
+  const certificate=await issuedCertificate(f);
+  let target=await f.create('certificate_target','Reconciled TLS',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:join(f.root,'tls-first'),enabled:true});
+  const work=async(fail=false)=>{
+    const job=f.jobs.claim('node-a',['operations.platform','operations.platform.reconciliation.v1'])!;assert.ok(job,'a reconciliation job is queued');
+    const payload=f.platform.resolvePayload(job);
+    for(const [n,phase] of ['accepted','staging','activating','verifying'].entries())f.jobs.event('node-a',job.id,{lease_id:job.lease_id,sequence:n+1,phase:phase as any,summary:'reconciliation fixture'});
+    const result=fail?{state:'failed' as const,code:'known_failure',snapshot:{}}:await executeOperation(payload,{dataDir:join(f.root,'executor'),signal:new AbortController().signal,now:()=>new Date(),command:async()=>({stdout:'',stderr:''})},async()=>{});
+    f.jobs.result('node-a',job.id,{lease_id:job.lease_id,...result});return payload;
+  };
+  const tick=async(force=false)=>{if(force)f.reconciliation.request('machine-a');else f.db.run("UPDATE reconciliation_resources SET next_attempt_at=? WHERE machine_id='machine-a' AND state<>'in_sync'",f.deps.now().toISOString());await f.reconciliation.tick();};
+  await f.reconciliation.tick();await work();await tick();await work(true);await tick();
+  assert.equal(f.reconciliation.inventory('machine-a').resources[0].state,'drifted');
+  await tick();await work();await tick();await work();await tick();
+  let rows=f.reconciliation.inventory('machine-a').resources;assert.equal(rows[0].state,'in_sync');
+  await workIfQueued();
+  async function workIfQueued(){const row=f.db.get<any>("SELECT id FROM agent_jobs WHERE state='queued'");if(row)await work();}
+  await (await import('node:fs/promises')).writeFile(join(target.spec.path,'fullchain.pem'),'drift');
+  await tick(true);await work();await tick();await work();await tick();await work();await tick();
+  assert.equal(f.reconciliation.inventory('machine-a').resources[0].state,'in_sync');
+  await tick(true);const old=f.jobs.claim('node-a',['operations.platform','operations.platform.reconciliation.v1'])!;assert.ok(old);
+  target=f.platform.store.update(target.id,target.revision,target.name,{...target.spec,path:join(f.root,'tls-second')},'admin');f.reconciliation.refresh();
+  assert.throws(()=>f.platform.resolvePayload(old),/generation_changed|revision_changed/);
+  // The accepted old job is cancelled by the fixture to release its lease; production retains normal lease fencing.
+  f.jobs.result('node-a',old.id,{lease_id:old.lease_id,state:'failed',snapshot:{}});
+  for(let n=0;n<10;n++){await tick();await workIfQueued();}
+  rows=f.reconciliation.inventory('machine-a').resources;assert.equal(rows.length,2);assert(rows.some(r=>r.deleted&&r.state==='in_sync'));assert(rows.some(r=>!r.deleted&&r.state==='in_sync'));
+  assert.equal((await f.req('/machines/machine-a/reconciliation','GET',undefined,{'x-role':'member'})).status,403);
+  const view=await f.req('/machines/machine-a/reconciliation');assert.equal(view.status,200);assert.doesNotMatch(JSON.stringify(view.body),/BEGIN PRIVATE KEY|BEGIN CERTIFICATE/);
+  assert.equal((await f.req('/machines/machine-a/reconciliation?limit=0')).status,400);
+});
+
+test('old Agents retain ordinary certificate delivery while deep reconciliation honestly requires upgrade',async t=>{
+  const f=await setup(t,undefined,false,true),certificate=await issuedCertificate(f);
+  const target=await f.create('certificate_target','Old fleet TLS',{certificate_id:certificate.id,type:'directory',agent_id:'node-a',path:join(f.root,'old-fleet'),enabled:true});
+  await f.platform.tick();const job=f.jobs.claim('node-a',['operations.platform'])!;assert.ok(job);
+  const payload=f.platform.resolvePayload(job);assert.equal(payload.resource.config.task,'certificate.install');assert.equal(payload.resource.config.reconciliation_hash,undefined);
+  f.reconciliation.request('machine-a');await f.reconciliation.tick();assert.equal(f.reconciliation.inventory('machine-a').resources[0].code,'reconciliation_agent_upgrade_required');
 });

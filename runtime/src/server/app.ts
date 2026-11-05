@@ -1,3 +1,5 @@
+import { registerReconciliation } from "../reconciliation/index.js";
+import { registerAgentConfiguration } from "../reconciliation/agent-config.js";
 import { initializeCenterSchema } from './schema.js';
 import { connectManagedExecutorJobs } from "./managed-executor-jobs.js";
 import { connectExecutorObservations } from './executor-observation.js';
@@ -139,7 +141,8 @@ export async function createApp(cfg: Config) {
     const releaseArtifacts = new ReleaseArtifactStore(join(cfg.dataDir, "release-artifacts"));
     const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs, artifacts: releaseArtifacts });
     modules.push(serviceDeployments);
-    const platform = registerOperationsPlatform(deps, { jobs: agentJobs, dataDir: cfg.dataDir });
+    const reconciliation = registerReconciliation(deps);
+    const platform = registerOperationsPlatform(deps, { jobs: agentJobs, dataDir: cfg.dataDir, reconciliation });
     modules.push(platform);
     const operations = registerOperations(deps, { jobs: agentJobs, credentials: agentCredentials, definitions: [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition] });
     modules.push(operations, registerOperationSchedules(deps, operations));
@@ -163,6 +166,8 @@ export async function createApp(cfg: Config) {
     modules.push(agentJobs);
     const taskCenter = registerTaskCenter(deps, { agentCredentials });
     modules.push(taskCenter);
+    registerAgentConfiguration(deps, reconciliation);
+    modules.push(reconciliation);
     const privilegedExecutors = registerPrivilegedExecutors(deps,{dataDir:cfg.dataDir});
     taskCenter.ordinaryTaskIdentity = (machineID,agentID,executorID,installGeneration) => privilegedExecutors.ordinaryTaskIdentity(machineID,agentID,executorID,installGeneration);
     const taskScriptCapabilities = privilegedExecutors.ordinaryTaskCapabilities.bind(privilegedExecutors);

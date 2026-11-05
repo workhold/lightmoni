@@ -1,3 +1,5 @@
+import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
+import { registerCertificateFiles } from "../reconciliation/certificate-files.js";
 import {
   createHash,
   randomBytes,
@@ -462,6 +464,7 @@ export function createCertificateController(
     inFlight = new Set<string>(), activeIssues = new Map<string, PlatformExecution>(), background = new Set<Promise<unknown>>();
   initSchema(options);
   const clusterDelivery = createClusterCertificateDelivery(options);
+  registerCertificateFiles(options);
   const authorize = (actor: string) => {
     if (!store.authorized(actor))
       throw new HTTPError(403, "operations_authorization_revoked");
@@ -665,6 +668,10 @@ export function createCertificateController(
     },
     publicSpec: publicCertificateTarget,
     validatePayload: clusterDelivery.validatePayload,
+    beforeDelete(resource) {
+      if(options.reconciliation && db.get("SELECT id FROM reconciliation_resources WHERE provider='file.certificate' AND owner_id=? AND NOT (state='in_sync' AND (deleted=1 OR json_extract(summary_json,'$.present')=0)) LIMIT 1",resource.id))
+        throw new HTTPError(409,'remove_certificate_files_before_deleting_target');
+    },
     afterSave(resource, previous) {
       if (previous && (resource.spec.cluster_id || previous.spec.cluster_id))
         store.patchStatus(resource.id, {state: "configured", machines: [], desired_revision: resource.revision, desired_certificate_version: null, applied_revision: null, applied_certificate_version: null, last_error: null});
@@ -1119,6 +1126,7 @@ export function createCertificateController(
         "certificate_not_currently_valid_or_domain_mismatch",
       );
     }
+    if(options.reconciliation && target.spec.type==='directory')store.patchStatus(target.id,{cleanup_requested:false,managed_sync_requested:true,desired_certificate_version:material.certificate_version});
     if (target.spec.type === "directory" && target.spec.cluster_id)
       return clusterDelivery.sync(target, material, actor, retry, automatic);
     const key =
@@ -1237,6 +1245,9 @@ export function createCertificateController(
     } catch {
       return;
     }
+    if(config.reconciliation_cleanup && run.state==='succeeded') {
+      store.patchStatus(target.id,{state:'removed',applied_certificate_version:null,applied_revision:null,last_error:null});return;
+    }
     if (target.spec.type === "directory" && target.spec.cluster_id) {
       clusterDelivery.onRun(target, run, config);
       return;
@@ -1297,7 +1308,7 @@ export function createCertificateController(
                   ...(resource.spec.source === "uploaded" ? [] : ["renew"]),
                 ]
               : resource.kind === "certificate_target"
-                ? ["sync", "inspect", "retry"]
+                ? ["sync", "inspect", "retry", ...(options.reconciliation && resource.spec.type==='directory'?["remove"]:[])]
                 : [];
     },
     async perform(resource, action, input, actor) {
@@ -1455,6 +1466,10 @@ export function createCertificateController(
         if (run.state === "succeeded") await distribute(resource.id);
         return run;
       }
+      if (resource.kind==='certificate_target' && resource.spec.type==='directory' && action==='remove' && options.reconciliation) {
+        store.patchStatus(resource.id,{cleanup_requested:true});options.reconciliation.kick();
+        return {cleanup_requested:true};
+      }
       if (action === "inspect") {
         const material = getCertificateMaterial(
           store,
@@ -1602,6 +1617,12 @@ export function createCertificateController(
       .list("certificate_target")
       .filter((t) => t.spec.certificate_id === certificateID)) {
       if (
+        !(options.reconciliation && target.spec.type==='directory' && (()=>{
+          const agents=target.spec.cluster_id
+            ? store.get(target.spec.cluster_id,'cluster').spec.machine_ids.map((id:string)=>db.get<any>('SELECT agent_id FROM managed_machines WHERE id=?',id)?.agent_id)
+            : [target.spec.agent_id];
+          return agents.length>0&&agents.every((id:string)=>id&&operationExecutionCapabilities(deps,id).includes('operations.platform.reconciliation.v1'));
+        })()) &&
         target.spec.enabled &&
         store.authorized(target.authorized_by) &&
         (target.spec.cluster_id || !(

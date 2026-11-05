@@ -7,6 +7,8 @@ import {
   writeFile,
   rm,
   lstat,
+  chmod,
+  unlink,
   symlink,
   realpath,
 } from "node:fs/promises";
@@ -394,4 +396,41 @@ test('modern application log receipts redact deployed SDK and custom environment
  const context={...f.context,command:async(_command:string,args:string[])=>({code:0,stdout:args[0]==='ps'?containerID:args[0]==='inspect'?JSON.stringify([{Id:containerID,Config:{Labels:{'io.lightmoni.platform.instance':resourceID}}}]):'sdk='+secret+' custom=custom$value ordinary line',stderr:''})};
  const result=await executePlatform(payload({task:'workload.logs',instance_id:resourceID},'logs'),context);
  assert.doesNotMatch(JSON.stringify(result),new RegExp(secret));assert.doesNotMatch(JSON.stringify(result),/custom\$value/);assert.match(JSON.stringify(result),/ordinary line/);assert.match(JSON.stringify(result),/redacted/);
+});
+
+test('managed certificate actual inspection repairs damaged immutable release, verifies permissions and removes only owned entrypoints',async t=>{
+  const f=await setup(t),material=await selfSignedCertificate(['drift.example.test'],7,new Date());
+  const meta=certificateMetadata(material.certificate_pem,material.private_key_pem,['drift.example.test']);
+  const c={task:'certificate.install',certificate_id:resourceID,certificate_version:'logical-v1',path:join(f.root,'managed-tls'),domains:['drift.example.test'],fingerprint_sha256:meta.fingerprint_sha256,...material};
+  const execute=(config:any,op='inspect')=>executeOperation(payload(config,op),f.context,async()=>{});
+  assert.equal((await execute(c,'install')).state,'succeeded');
+  const inspect={...c,task:'certificate.inspect',reconciliation_hash:'test-proof'};
+  assert.equal((await execute(inspect)).snapshot.operations?.data.configuration_matches,true);
+  await chmod(join(c.path,'privkey.pem'),0o644);
+  let check=await execute(inspect);assert.equal(check.state,'succeeded');assert.equal(check.snapshot.operations?.data.configuration_matches,false);
+  assert.equal((await execute({...c,repair:true},'install')).state,'succeeded');
+  assert.equal((await execute(inspect)).snapshot.operations?.data.configuration_matches,true);
+  await writeFile(join(c.path,'fullchain.pem'),'damaged-certificate');
+  check=await execute(inspect);assert.equal(check.snapshot.operations?.data.configuration_matches,false);
+  assert.equal((await execute({...c,repair:true},'install')).state,'succeeded');
+  check=await execute(inspect);assert.equal(check.snapshot.operations?.data.configuration_matches,true);assert.equal(check.snapshot.operations?.data.certificate_version,'logical-v1');
+  await unlink(join(c.path,'privkey.pem'));await writeFile(join(c.path,'privkey.pem'),'user-owned-key');
+  assert.equal((await execute({...c,task:'certificate.remove'},'remove')).state,'failed');assert.equal(await readFile(join(c.path,'privkey.pem'),'utf8'),'user-owned-key');
+  await unlink(join(c.path,'privkey.pem'));await symlink('.lightmoni-certificate-'+resourceID+'/current/privkey.pem',join(c.path,'privkey.pem'));
+  assert.equal((await execute({...c,task:'certificate.remove'},'remove')).state,'succeeded');
+  check=await execute({...inspect,expected_absent:true});assert.equal(check.snapshot.operations?.data.absent,true);assert.equal(check.snapshot.operations?.data.configuration_matches,true);
+});
+
+test('workload inspection compares live Docker fields and actual managed file bytes against current desired content',async t=>{
+  const {renderManifest}=await import('../src/operations/platform.js'),{desiredHash}=await import('../src/shared/desired-state.js'),{hash}=await import('../src/operations/website-files.js');
+  const f=await setup(t),id='workload-content-check',app=normalizeApplication({mode:'container',image:'example:1',environment:{VALUE:'expected'},mounts:[{type:'config',target:'/etc/example',files:{'config.json':'{"mode":"expected"}'}}]});
+  const manifest=await renderManifest(f.context,id,app,1),root=join(await privateRoot(f.context,'platform'),'workloads',id),manifestPath=join(root,'compose.json');
+  await writeFile(manifestPath,JSON.stringify(manifest));await writeFile(join(root,'state.json'),JSON.stringify({manifest:manifestPath,digest:hash(JSON.stringify(manifest)),configuration_hash:desiredHash(app)}));
+  const service=manifest.services.app,container:any={Id:'f'.repeat(64),Name:'/managed-test',Config:{Image:'example:1',Env:['VALUE=expected'],Labels:service.labels},State:{Running:true,Status:'running'},HostConfig:{RestartPolicy:{Name:'unless-stopped'},ReadonlyRootfs:false,PortBindings:{}},NetworkSettings:{Ports:{}},Mounts:service.volumes.map((v:any)=>({Source:v.source,Destination:v.target,Type:v.type,RW:!v.read_only}))};
+  container.Config.Labels['com.docker.compose.service']='app';
+  const context={...f.context,command:async(_file:string,args:string[])=>({stdout:args[0]==='ps'?container.Id:args[0]==='inspect'?JSON.stringify([container]):'',stderr:''})};
+  const inspect=()=>executePlatform(payload({task:'workload.inspect',instance_id:id,application:app,reconciliation_hash:'current'}),context);
+  assert.equal((await inspect()).data.configuration_matches,true);
+  container.Config.Env=['VALUE=drift'];assert.equal((await inspect()).data.configuration_matches,false);container.Config.Env=['VALUE=expected'];
+  await writeFile(join(service.volumes[0].source,'config.json'),'drift');assert.equal((await inspect()).data.configuration_matches,false);
 });
