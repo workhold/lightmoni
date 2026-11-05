@@ -1,0 +1,80 @@
+{
+  "scope": "Public HTTP reachability and stimulus only; does not prove telemetry ingestion",
+  "samples": [
+    {
+      "round": 1,
+      "at": "2026-11-05T01:20:49Z",
+      "sites": {
+        "moni.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 1079
+        },
+        "abc.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 1976
+        },
+        "registry-demo.heyphp.com": {
+          "status": 401
+        },
+        "dbx-zz.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 4096
+        },
+        "install-091.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 4096
+        }
+      }
+    },
+    {
+      "round": 2,
+      "at": "2026-11-05T01:21:24Z",
+      "sites": {
+        "moni.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 1079
+        },
+        "abc.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 1976
+        },
+        "registry-demo.heyphp.com": {
+          "status": 401
+        },
+        "dbx-zz.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 4096
+        },
+        "install-091.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 4096
+        }
+      }
+    },
+    {
+      "round": 3,
+      "at": "2026-11-05T01:22:00Z",
+      "sites": {
+        "moni.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 1079
+        },
+        "abc.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 1976
+        },
+        "registry-demo.heyphp.com": {
+          "status": 401
+        },
+        "dbx-zz.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 4096
+        },
+        "install-091.heyphp.com": {
+          "status": 200,
+          "body_bytes_sampled": 4096
+        }
+      }
+    }
+  ]
+}
