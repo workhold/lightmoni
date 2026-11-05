@@ -1,0 +1,19 @@
+{
+  "revision": "c332d2accf7950095de215a324f14eecbdc48a2d",
+  "context_sha256": "af76dd1fdac27f4c96db7da731ee73a043469c329404579044a2a05458144f11",
+  "source": "git archive of merged origin/main; docs and Compose follow in release PR",
+  "architectures": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "docker_qa": {
+    "compiled_reconciliation_each_platform": {
+      "tests": 57,
+      "passed": 56,
+      "skipped": 1,
+      "failures": 0
+    },
+    "checks_each_platform": 46
+  },
+  "architecture_sync": "Not applicable: packaging and version pin only; architecture synchronized by PR102, system-design section96 and Doca seq1744"
+}

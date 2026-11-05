@@ -1,0 +1,35 @@
+{
+  "files": {
+    "runtime/dist/reconciliation/registry.js": "8a75ceed54a6a511b21a3a2ebbf2fa30890701e73f7c72af63aabcb54e7a0c9f",
+    "runtime/dist/reconciliation/index.js": "ec71e4130926dc2caecf8cbeeac489cb9de7f4a4ee1b274a2bbb3bf5e8ddede3",
+    "runtime/dist/reconciliation/agent-config.js": "36bbd02b91db3721a518481f1d931bd3af58fd47e507faea25bf6b20f2d49b50",
+    "runtime/dist/reconciliation/certificate-files.js": "8f9ff42f3534e041e19199b0b7c3a14da31b5770c1bacd90a3e1468c089befe6",
+    "runtime/dist/shared/desired-state.js": "0ec3443b94684826149d004427e4db22502a14fc0f5c3a5ad05bc4176a697f40",
+    "runtime/dist/operations/platform.js": "6b5285e6f73ce9ed6c36da57264565c96c466c9c7be4605fa99253a5c7ec1d59",
+    "runtime/dist/server/executor-observation.js": "39223e336d43c3df7f11082b0cecf3e4163420f1fb4f791dd407ab25dc90091e",
+    "runtime/dist/ops/application-upgrades.js": "76a71664cd5fc6ede4a7ec55fbf4e76827084872ae962581a693c8959e163a17",
+    "runtime/dist/ops/application-terminals.js": "4553e29c0772021096729b086441f802c1f943bfb02c7ee778133d4ccde6a81c",
+    "runtime/dist/ops/cluster-workloads.js": "f34c33da092f70443255489481c8ec56a1f66ef36bfb2fa72bd87fd11c451794",
+    "runtime/dist/ops/availability.js": "56dacdb8168b1abb8670c86dd1452be0bf34876695ff6ebc7ac0f930e86a7ef7",
+    "runtime/dist/ops/store.js": "cfa23d246e339410a4066304009abaadc13b214959729fa6a078c6a922b9478f",
+    "runtime/dist/agent/operations.js": "81eb94d3bb578c4fcd80368f974a5151a81bb8b309769249493029da52d852b6",
+    "runtime/dist/server/machine-agent-updates.js": "a4334c4b135f8145e6d94b4ca5757b28b65191e17c21419cf52b4b67e190c7ea",
+    "runtime/downloads/update-runner.mjs": "317af1d974fa8d8db07413e10ae027a1cbf7e66670752e14f00012dbc272449a"
+  },
+  "capabilities": [
+    "operations.website",
+    "operations.certificate",
+    "operations.compose",
+    "operations.backup",
+    "operations.platform",
+    "operations.platform.readiness.v1",
+    "operations.platform.website-auth.v1",
+    "operations.platform.image-cache.v1",
+    "operations.platform.oneshot.v1",
+    "operations.platform.image-sources.v1",
+    "operations.platform.image-refresh.v1",
+    "operations.platform.instance-recovery.v1",
+    "operations.platform.reconciliation.v1"
+  ],
+  "uid": 10001
+}

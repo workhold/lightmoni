@@ -41,3 +41,15 @@ npm --prefix runtime test 首轮：1503 项，1466 通过、33 跳过、4 失败
 ## Pull Request
 
 [GitHub PR #102](https://github.com/workhold/lightmoni/pull/102)，目标 main。代码与文档均在该 PR；未合并、未发布生产。
+
+## 授权发行与生产中心发布（2026-11-06）
+
+PR #102 已于 2026-11-05T15:37:00Z 合入 main，合并提交 c332d2accf7950095de215a324f14eecbdc48a2d。以该固定提交的 git archive 构建 Linux arm64/amd64。两架构每架构46项成品检查通过，新增编译后5套件57项：56通过、1可选真实Docker证书QA跳过、0失败。完整源码阶段限制保持上文记录。
+
+固定镜像 docker.heyphp.com/lightmoni/lightmoni:20261105-reconciliation-c332d2a，索引 sha256:84751911ab027dfa685fe02bbdc783c2a6bc3d2c6a43cdf8bc25bee0f8367285。两架构远端manifest按摘要回拉，config/rootfs与受测镜像完全一致。GitHub测试版已发布：https://github.com/workhold/lightmoni/releases/tag/20261105-reconciliation-c332d2a 。验证JSON和校验文件已上传；80MB Agent附件的CLI上传超时，正在更换HTTP上传方式，完整包已随Docker成品发布。稳定latest保持原摘要。
+
+用户追加授权后，通过已登录1Panel的中心容器“升级”入口发布固定镜像。面板终端只读回读：中心healthy、实际镜像revision为c332d2accf7950095de215a324f14eecbdc48a2d、/data挂载保留。1Panel复用了旧容器revision标签，因此另读实际镜像标签与摘要确认源码，未仅以容器标签作为依据。临时本地验收中心、ClickHouse、网络、卷和随机运行时凭据均已删除。
+
+后续生产功能验收及修复继续，机器只用zz-bj-1。只读诊断发现活动task_runs为空，阻塞为持续生成的排队平台巡检；已审计的历史unknown仍保留且被围栏正确排除。新对账清单显示10项部署待升级Agent深度核验、1项Agent配置待观测，未误报一致。生产全功能验收尚未完成。
+
+本发行PR架构影响不适用：仅打包、版本引用与验收记录；功能架构已在#102同步仓库第96节和Doca seq1744。
