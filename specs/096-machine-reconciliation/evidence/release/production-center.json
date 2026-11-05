@@ -1,0 +1,14 @@
+{
+  "source": "transcribed from native 1Panel terminal readback",
+  "container": "lightmoni-lightmoni-1",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261105-reconciliation-c332d2a",
+  "image_digest": "sha256:84751911ab027dfa685fe02bbdc783c2a6bc3d2c6a43cdf8bc25bee0f8367285",
+  "image_revision": "c332d2accf7950095de215a324f14eecbdc48a2d",
+  "container_label_revision_preserved_by_panel": "a418b64e9b56ae5dd108b502f11e66bb8b9be850",
+  "health": "healthy",
+  "persistent_mounts": [
+    "/data"
+  ],
+  "functional_acceptance": "in progress, only zz-bj-1",
+  "architecture_sync": "not applicable to packaging; PR102 design and Doca readback seq1744"
+}

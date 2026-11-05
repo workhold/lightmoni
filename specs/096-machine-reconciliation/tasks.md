@@ -25,4 +25,17 @@
 
 依赖：T001→T002→T003/T004→T005/T006→T007/T008/T009→T010/T011→T012→T013。可并行项：核心测试与路由、证书和 Agent 的独立文件；本次按依赖逐步实施。US1 可独立验收清单；US2 验收实际恢复；US3 用新类型合同测试验收。
 
-交付：[GitHub PR #102](https://github.com/workhold/lightmoni/pull/102)，目标 main；未合并、未发布生产。相关检查与扩展全量检查限制见 evidence/acceptance.md。
+交付：[GitHub PR #102](https://github.com/workhold/lightmoni/pull/102)，目标 main；已合并到 main（c332d2accf7950095de215a324f14eecbdc48a2d）；未部署生产。相关检查与扩展全量检查限制见 evidence/acceptance.md。
+
+## Phase 6: 授权合并与发行
+- [x] T014 合并功能 PR #102，固定主干源码及隔离构建上下文
+- [x] T015 构建 arm64/amd64，验证成品和编译后对账集成，记录无凭据证据
+- [x] T016 发布 Docker 固定双架构标签、逐平台摘要回拉比对，保持稳定 latest
+- [x] T017 发布同源码 GitHub prerelease 与验证JSON/校验文件（Agent完整包已随Docker发布；独立GitHub附件上传另行补齐）
+- [ ] T018 更新 Compose 固定标签和验收证据，经发行 PR 合入 main，清理临时验收资源
+
+## Phase 7: 用户追加生产部署与功能修复
+- [x] T019 在 1Panel 发布受测固定镜像，回读中心运行状态和源码身份
+- [ ] T020 逐项记录应用部署/升级/停止/启动/卸载、主机/执行器、网站/证书、日志/指标/SDK/大盘与任务操作实际结果
+- [ ] T021 对复现问题补充规格与必要回归，完成代码修复和所需架构同步，经 PR 合入后重新发布
+- [ ] T022 在线复测修复，记录通过、未完成与具体阻塞；按实际验收决定稳定晋升

@@ -29,3 +29,7 @@ deployment provider 接到 cluster-workloads 内部，保留既有 placement、r
 
 ## Lifecycle refinements
 目录证书的 enabled 延续“自动同步”语义，关闭不会删除用户入口；显式 remove 动作持久化清理意图，核验后才允许删除目标。手动 sync 保存该次逻辑版本期望。旧 Agent 不具备 operations.platform.reconciliation.v1 时保留原轻量健康检查/证书下发，深度对账标记升级阻塞。Doca 原生新增章节/图块保存并按最新版本回读，原 911 块的内容及顺序全量比较不变。
+
+## 发行设计补充
+
+从固定 main 提交用 git archive 构建，避免工作区文件和运行时凭据进入镜像。按 Linux arm64、amd64 分别构建并记录完整 revision；隔离 ClickHouse/中心服务验证 HTTP、数据库、Web、SDK、Agent 原生包身份及编译后对账回归。OCI 每层 SHA256、受测 image config/rootfs 对比后，以分块上传发布固定多架构索引，再按 manifest digest 拉回比对。发布 GitHub prerelease 到同一提交，附件包含两架构 Agent 包、SHA256SUMS 和经过清理的验证证据。临时服务、卷和随机凭据最终清理。
