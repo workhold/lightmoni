@@ -1,0 +1,28 @@
+{
+  "at": "2026-11-05T18:54:16.444Z",
+  "engine": "ClickHouse 26.8",
+  "fixture": "disposable local CH, two same-name machines with different stable IDs",
+  "results": [
+    {
+      "panel": "system-agent-c",
+      "series": [
+        "zz-bj-1 · 11111111",
+        "zz-bj-1 · 22222222"
+      ]
+    },
+    {
+      "panel": "system-sdk-c",
+      "series": [
+        "orders-service / zz-bj-1 · 22222222",
+        "orders-service / zz-bj-1 · 11111111"
+      ]
+    },
+    {
+      "template": "host CPU/gauge",
+      "series": [
+        "zz-bj-1 · 11111111",
+        "zz-bj-1 · 22222222"
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
-// Built-in dashboard definitions preserve the existing durable seed IDs.
-export const systemDashboards = (): any[] => [
+import {readableMachineSQL,agentSeriesSQL,sdkSeriesSQL} from '../shared/telemetry-names.js';
+// Keep the previous recipes for exact, one-time upgrades of unedited queries.
+const legacySystemDashboards = (): any[] => [
   {
     id: "system-center",
     title: "系统监控 · 上报中心",
@@ -574,3 +575,26 @@ export const systemDashboards = (): any[] => [
     ],
   },
 ];
+
+export function systemDashboardQueryUpdates():Map<string,string> {
+  const updates=new Map<string,string>();
+  for(const d of legacySystemDashboards())for(const p of d.panels)for(const q of p.queries) {
+    let sql=q.sql;
+    if(d.id==='system-agent')sql=sql
+      .replace('agent_id AS category,agent_id',`concat(argMax(${readableMachineSQL},event_time),' · ',substring(agent_id,1,8)) AS category,agent_id`)
+      .replace('agent_id AS series',`${agentSeriesSQL} AS series`)
+      .replace("concat(agent_id,' / ',name)",`concat(${agentSeriesSQL},' / ',name)`)
+      .replace('event_time,agent_id,severity,body',`event_time,${readableMachineSQL} AS machine,service,severity,body,agent_id`);
+    if(d.id==='system-sdk')sql=sql
+      .replace("concat(service,' / ',instance_id,' / ',name)",`concat(${sdkSeriesSQL},' / ',name)`)
+      .replace("concat(service,' / ',instance_id)",sdkSeriesSQL)
+      .replace('event_time,service,instance_id,attributes',`event_time,service,${readableMachineSQL} AS machine,instance_id,attributes`);
+    if(sql!==q.sql)updates.set(q.sql,sql);
+  }
+  return updates;
+}
+export const systemDashboards = ():any[] => {
+  const updates=systemDashboardQueryUpdates(),dashboards=legacySystemDashboards();
+  for(const d of dashboards)for(const p of d.panels)for(const q of p.queries)q.sql=updates.get(q.sql)??q.sql;
+  return dashboards;
+};

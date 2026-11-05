@@ -378,7 +378,7 @@ test("both probes bind offline helper bytes and refuse a redirected release help
   assert.equal(changed, f.maintenance.probe().current.fingerprint);
   fs.unlinkSync(join(f.old, "uninstall.sh"));
   fs.symlinkSync(f.p("etc/lightmoni-agent/config.json"), join(f.old, "uninstall.sh"));
-  assert.throws(() => sshProbe(f), /invalid_response/);
+  assert.throws(() => sshProbe(f), /未通过受管指纹/);
   assert.throws(() => f.maintenance.probe(), /unsafe_managed_path/);
   assert.equal(f.calls.some(([, args]) => args[0] === "stop"), false);
   f.preserve();
@@ -412,7 +412,7 @@ test("maintenance and SSH probes bind the exact checked-in least-privilege unit"
   assert.notEqual(sha(fs.readFileSync(join(repo,"runtime/test/fixtures/forbidden-privileged-agent.service"))),actual);
 });
 const legacyUserService=()=>fs.readFileSync(join(repo,'deploy/agent/lightmoni-agent.service'),'utf8').replace('RuntimeDirectory=lightmoni-agent\nRuntimeDirectoryMode=0700\n','').replace('ExecStart=/usr/bin/flock --no-fork --exclusive --nonblock /run/lightmoni-agent/runner.lock /usr/local/bin/lightmoni-agent run','ExecStart=/usr/local/bin/lightmoni-agent run');
-test('SSH update probe explicitly refuses the old user service before offering an executable upgrade',t=>{const f=fixture(t),old=legacyUserService();assert.equal(sha(old),'651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf');fs.writeFileSync(f.p('etc/systemd/system/lightmoni-agent.service'),old);assert.throws(()=>sshProbe(f),/旧安装不支持统一生命周期，请先受管卸载再重装/);assert.equal(f.calls.some(([,args])=>args[0]==='stop'||args[0]==='restart'),false);});
+test('SSH update probe explicitly refuses the old user service before offering an executable upgrade',t=>{const f=fixture(t),old=legacyUserService();assert.equal(sha(old),'651b2b126af0e96dfd26bbe6fc3e438f2f1a71814cff4009ec8fdeeaadb21bbf');fs.writeFileSync(f.p('etc/systemd/system/lightmoni-agent.service'),old);assert.throws(()=>sshProbe(f),/旧安装不支持统一生命周期，请先使用原版本受管卸载，再重新安装/);assert.equal(f.calls.some(([,args])=>args[0]==='stop'||args[0]==='restart'),false);});
 test('SSH update probe never offers an old user service as a retained rollback target',async t=>{const f=fixture(t),request=f.request();await f.maintenance.start(request);f.onSleep(()=>{const s=f.maintenance.state(request.operation_id);if(s.status==='waiting_confirmation')f.maintenance.commit({operation_id:request.operation_id,expected_boot_id:s.local_health.boot_id,expected_target_sha256:request.target.artifact_sha256});});assert.equal((await f.maintenance.worker(request.operation_id)).status,'succeeded');const directory=f.p('opt/lightmoni-agent/updates/'+request.operation_id);fs.writeFileSync(join(directory,'previous-service'),legacyUserService());const previousFile=f.p('opt/lightmoni-agent/previous.json'),previous=JSON.parse(fs.readFileSync(previousFile,'utf8'));previous.fingerprint=f.maintenance.fingerprint(f.old,join(directory,'previous-launcher'),join(directory,'previous-service')).fingerprint;fs.writeFileSync(previousFile,JSON.stringify(previous));assert.equal(sshProbe(f).previous,null);assert.equal(f.maintenance.previous(),null);});
 
 test("a candidate privileged unit is refused before executing its old permission helper",async t=>{
@@ -944,4 +944,20 @@ test('failed recovery validation releases only a newly acquired lock and does no
   f.setActive(false);await assert.rejects(f.maintenance.recover(recoveryRequest(f,request)),/recovery_original_unhealthy/);
   assert.equal(fs.existsSync(f.p('run/lightmoni-agent-lifecycle.lock')),false);assert.equal(fs.existsSync(f.p('opt/lightmoni-agent/updates/'+request.operation_id+'/recovery.json')),false);
   f.setActive(true);assert.equal((await f.maintenance.recover(recoveryRequest(f,request))).status,'failed');
+});
+
+test('SSH update probe identifies historical root daemons and never offers an executable upgrade',t=>{
+ for(const locked of [true,false]){
+  const f=fixture(t);let unit=fs.readFileSync(join(repo,'deploy/agent/lightmoni-agent.service'),'utf8');
+  if(!locked)unit=legacyUserService();
+  unit=unit.replace('User=lightmoni-agent','User=root').replace('Group=lightmoni-agent','Group=root').replace('CapabilityBoundingSet=\n','').replace('ProtectSystem=strict\n','').replace('ProtectHome=read-only\n','').replace('PrivateTmp=true\n','').replace('ReadWritePaths=/var/lib/lightmoni-agent\n','');
+  assert.equal(sha(unit),locked?'19f0b122cfff85f5397b5cc4afeeb6342df36634a35f981c562a1ab6f3ef826e':'70a336b1c16132d5c688f3d0c21712db0c9b67418af99e9613474c6ffeaed68f');
+  fs.writeFileSync(f.p('etc/systemd/system/lightmoni-agent.service'),unit);
+  assert.throws(()=>sshProbe(f),/旧安装不支持统一生命周期/);
+  assert.equal(f.calls.some(([,args])=>args[0]==='stop'||args[0]==='restart'),false);
+ }
+});
+test('unknown installation probe reports fixed guidance without promoting remote output',t=>{
+ const f=fixture(t);fs.appendFileSync(f.p('etc/systemd/system/lightmoni-agent.service'),'# private fixture override');
+ assert.throws(()=>sshProbe(f),e=>/未通过受管指纹/.test(String(e))&&!String(e).includes('private fixture override'));
 });

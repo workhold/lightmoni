@@ -299,14 +299,20 @@ export function registerNodes(
     at: string,
     identity: string,
   ) => {
+    const machine=deps.db.get<any>('SELECT id,name FROM managed_machines WHERE agent_id=? ORDER BY created_at,id LIMIT 1',id);
+    const machineName=machine?.name||deps.db.get<any>('SELECT hostname FROM agents WHERE id=?',id)?.hostname||'';
     const resource = {
         "service.name": "lightmoni-agent",
         "service.instance.id": id,
         "host.id": host,
+        "host.name": machineName,
+        "lightmoni.machine_id": machine?.id??'',
         "lightmoni.agent_id": id,
       },
       attributes: Record<string, string> = {
         "lightmoni.component": "agent",
+        machine_name: machineName,
+        machine_id: machine?.id??'',
       };
     return {
       event_id: hash(identity),

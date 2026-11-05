@@ -1,4 +1,5 @@
 import type { Dependencies } from "../shared/types.js";
+import {machineSeriesSQL} from '../shared/telemetry-names.js';
 export function registerTemplates(d: Dependencies) {
   d.router.get("/api/v1/templates", async (c) => {
     const items: any[] = [];
@@ -23,7 +24,7 @@ export function registerTemplates(d: Dependencies) {
         if (t.metric_type === "gauge") {
           title = "机器与业务观测值";
           description = "按机器与指标显示时间桶平均观测值；可编辑筛选指标名";
-          sql = `SELECT $__timeInterval(event_time) AS time, concat(host_id, ' / ', name) AS series, avg(value) AS value FROM ${t.name} WHERE $__timeFilter(event_time) GROUP BY time,series ORDER BY time`;
+          sql = `SELECT $__timeInterval(event_time) AS time, concat(${machineSeriesSQL}, ' / ', service, ' / ', name) AS series, avg(value) AS value FROM ${t.name} WHERE $__timeFilter(event_time) GROUP BY time,series ORDER BY time`;
         }
         if (t.metric_type === "histogram") {
           title = "延迟分布平均值";
@@ -62,7 +63,7 @@ export function registerTemplates(d: Dependencies) {
           description: "主机CPU利用率，0到1，可设百分比单位",
           type: "line",
           table_id: t.id,
-          sql: `SELECT $__timeInterval(event_time) AS time, host_id AS series, avg(value) AS value FROM ${t.name} WHERE $__timeFilter(event_time) AND name='host.cpu.utilization' GROUP BY time,series ORDER BY time`,
+          sql: `SELECT $__timeInterval(event_time) AS time, ${machineSeriesSQL} AS series, avg(value) AS value FROM ${t.name} WHERE $__timeFilter(event_time) AND name='host.cpu.utilization' GROUP BY time,series ORDER BY time`,
           options: {
             x: "time",
             y: "value",

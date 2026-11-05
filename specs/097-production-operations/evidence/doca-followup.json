@@ -1,0 +1,14 @@
+{
+  "resource": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "before_seq": 1746,
+  "saved_seq": 1747,
+  "readback_seq": 1747,
+  "operation": "insert three native paragraphs after sdd097-design-6",
+  "full_baseline_blocks": 930,
+  "target_texts_verified": true,
+  "diagram_verified": true,
+  "diagram_nodes": 10,
+  "diagram_edges": 8,
+  "unrelated_changes": "none requested; all mutations were inserts only",
+  "note": "Full baseline read before mutation; fresh targeted readback of all three paragraphs and complete existing SDD097 native diagram."
+}

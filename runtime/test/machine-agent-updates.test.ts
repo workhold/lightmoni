@@ -255,7 +255,7 @@ test("same-version approved upgrade commits only after new boot, exact release a
   assert.equal((await f.apply(h.id, operation.id)).status, 409);
   assert.equal(f.calls.filter(input => input.command.includes(".update-bootstrap")).length, 1);
 });
-test('legacy user installation cannot create a maintenance plan and receives the reinstall guidance',async t=>{const f=await fixture(t),h=await f.host();f.observations.set(h.id,{error_code:'legacy_agent_installation'});const r=await f.plan(h.id);assert.equal(r.status,409,r.raw);assert.equal(r.data.error,'旧安装不支持统一生命周期，请先受管卸载再重装');assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_agent_updates')!.n,0);assert.equal(f.calls.some(c=>c.command.includes('.update-bootstrap')),false);});
+test('legacy user installation cannot create a maintenance plan and receives the reinstall guidance',async t=>{const f=await fixture(t),h=await f.host();f.observations.set(h.id,{error_code:'legacy_agent_installation'});const r=await f.plan(h.id);assert.equal(r.status,409,r.raw);assert.equal(r.data.error,'旧安装不支持统一生命周期，请先使用原版本受管卸载，再重新安装');assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_agent_updates')!.n,0);assert.equal(f.calls.some(c=>c.command.includes('.update-bootstrap')),false);});
 
 for (const updated of [false, true]) test(`HTTP maintenance receipt retains uninstaller_updated=${updated}`, async t => {
   const f = await fixture(t, 300, updated), h = await f.host(), proposed = await f.plan(h.id);
