@@ -25,6 +25,7 @@ import HostNetworkOverview from './HostNetworkOverview';
 import MachineEditDialog from './MachineEditDialog';
 import MachineServiceAddressesDialog from './MachineServiceAddressesDialog';
 import MachineAgentUninstallDialog,{type AgentUninstallation} from './MachineAgentUninstallDialog';
+import MachineStateRecoveryDialog from './MachineStateRecoveryDialog';
 import {agentIsOnline,type AgentItem,type AgentTaskLabel,type TaskHost} from './agent-model';
 import {NodeDetails} from './AgentsPage';
 import NodeLabelsDialog from './NodeLabelsDialog';
@@ -97,6 +98,8 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const [nodeDetail,setNodeDetail]=useState<AgentItem>(),[nodeLabels,setNodeLabels]=useState<TaskHost>();
  const [taskHost,setTaskHost]=useState<TaskHost>();
  const [uninstallGuide,setUninstallGuide]=useState(false),[uninstallMode,setUninstallMode]=useState<'standard'|'recovery'>('standard');
+ const [stateRecoveryMachine,setStateRecoveryMachine]=useState<Pick<Machine,'id'|'name'>>();
+ useEffect(()=>{if(!admin)setStateRecoveryMachine(undefined)},[admin]);
  const [inventoryMachine,setInventoryMachine]=useState<{id:string;name:string;agent_id:string}>();
  const [dockerMachine,setDockerMachine]=useState<{id:string;name:string}>();
  const [selectedIDs,setSelectedIDs]=useState<string[]>([]),[batch,setBatch]=useState<{action:BatchAction;targets:BatchTarget[]}>();
@@ -397,6 +400,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    {type:'divider' as const},
    {key:'uninstall',label:t('卸载 Agent','Uninstall Agent'),danger:true,disabled:!cap.uninstall_agent?.available&&!accountRepairable(cap.uninstall_agent),onClick:()=>void openUninstall(m)},
    {key:'recovery',label:t('SSH 恢复卸载','SSH recovery uninstall'),danger:true,disabled:!cap.recovery_uninstall_agent?.available&&!accountRepairable(cap.recovery_uninstall_agent),onClick:()=>void openUninstall(m,undefined,'recovery')},
+   {key:'state-recovery',label:t('修正 Agent 状态','Correct Agent state'),danger:true,disabled:!m.ssh_recovery_available||!m.agent_id,onClick:()=>setStateRecoveryMachine({id:m.id,name:m.name})},
    ...(m.last_uninstallation_status?[{key:'uninstall-history',label:t('查看卸载记录','View uninstall record'),onClick:()=>void openUninstall(m,undefined,'standard',true)}]:[]),
   ];
   const settings=[
@@ -458,6 +462,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   <Modal title={t('节点详情','Node details')} open={!!nodeDetail} onCancel={()=>setNodeDetail(undefined)} footer={null} width={760} destroyOnHidden>{nodeDetail&&<><NodeDetails agent={nodeDetail}/>{nodeDetail.lifecycle_state==='removed'&&<Alert type="warning" showIcon title={t('此节点已归档，旧凭据不能继续接入','This node is archived; old credentials can no longer enroll')} description={<>{time(nodeDetail.removed_at||'')} · {nodeDetail.removal_reason||t('未填写原因','No reason provided')}</>}/>}</>}</Modal>
   {admin&&uninstallGuide&&<Modal title={t('离线手动卸载 Agent','Offline manual Agent uninstall')} open onCancel={()=>setUninstallGuide(false)} footer={null} width={780} destroyOnHidden><AgentUninstallManual/></Modal>}
   {admin&&uninstallDetail&&<MachineAgentUninstallDialog key={`${uninstallDetail.machine.id}:${uninstallRecord?.id||uninstallMode}`} initialMode={uninstallMode} machine={uninstallDetail.machine} credentials={uninstallDetail.credentials} existing={uninstallRecord} onRefresh={()=>refreshMachine(uninstallDetail.machine.id)} onClose={closeUninstall}/>}
+  {admin&&stateRecoveryMachine&&<MachineStateRecoveryDialog key={stateRecoveryMachine.id} machine={stateRecoveryMachine} onRefresh={()=>refreshMachine(stateRecoveryMachine.id)} onClose={()=>setStateRecoveryMachine(undefined)}/>}
   {admin&&networkMachine&&<MachineServiceAddressesDialog key={networkMachine.id} machineID={networkMachine.id} name={networkMachine.name} onClose={()=>setNetworkMachine(undefined)} onSaved={()=>hostSaved(networkMachine.id)}/>}
   {admin&&editMachine&&<MachineEditDialog key={editMachine.id} machine={editMachine} onClose={()=>setEditMachine(undefined)} onSaved={()=>hostSaved(editMachine.id)}/>}
   {admin&&terminalDetail&&<MachineTerminalDialog key={terminalDetail.machine.id} machine={terminalDetail.machine} credentials={terminalDetail.credentials} onReleased={()=>refreshMachine(terminalDetail.machine.id)} onClose={closeTerminal}/>}

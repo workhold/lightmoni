@@ -39,7 +39,8 @@ export function maintenanceWorkBusy(deps: Pick<Dependencies,'db'|'decrypt'>, age
 }
 
 export function pendingMaintenancePreparation(db: Dependencies['db'], agent: string, machine='', exclude=''): boolean {
-  return has(db,'machine_maintenance_preparations')&&!!db.get("SELECT machine_id FROM machine_maintenance_preparations WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND token<>? AND expires_ms>? LIMIT 1",agent,machine,machine,exclude,Date.now());
+  return has(db,'machine_maintenance_preparations')&&!!db.get("SELECT machine_id FROM machine_maintenance_preparations WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND token<>? AND expires_ms>? LIMIT 1",agent,machine,machine,exclude,Date.now())
+    || has(db,'machine_state_recoveries')&&!!db.get("SELECT id FROM machine_state_recoveries WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND id<>? AND status='awaiting_approval' AND expires_at>? LIMIT 1",agent,machine,machine,exclude,new Date().toISOString());
 }
 
 /** A short persisted gate covers only read-only SSH planning, never remote mutation. */

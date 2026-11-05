@@ -19,11 +19,11 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 
 “当前”表示代码或验证证据已经存在；“兼容”表示为了已部署版本保留；“目标”表示设计方向，必须经过新的 SDD 和验证才能变成当前能力。本文不以规划代替测试。
 
-### 1.1 变更维护与双端同步
+### 1.1 仓库设计维护
 
-本文的仓库来源是 [`docs/system-design.md`](system-design.md)，在线协作副本是 [Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。任何影响组件职责、数据或控制路径、凭据边界、存储、协议、部署拓扑或 AI/工具边界的架构变更，都必须在同一个 SDD 和 Pull Request 中同步更新这两个位置。
+本文以仓库中的 [`docs/system-design.md`](system-design.md) 为唯一持续维护的设计基线。任何影响组件职责、数据或控制路径、凭据边界、存储、协议、部署拓扑或 AI/工具边界的架构变更，都必须在同一个 SDD 和 Pull Request 中更新本文件。按用户于 2026-11-06 的要求，不再同步 Doca 或其他在线副本。
 
-同步时保留 Doca 的原生图块和无关内容；写入成功后使用最新版本回读目标章节或图块，核对文字、节点和连线。Pull Request 必须记录架构影响判断、仓库文档章节、Doca 链接和回读结果。Doca 不可访问、鉴权失败或保存未确认时，不得声称设计已同步。不影响架构的改动填写“不适用”及理由即可；凭据不得写入仓库、日志、URL、Pull Request 或文档正文。
+Pull Request 记录架构影响判断、仓库文档章节和验证结果。历史在线文档及同步回读记录仅供追溯，不构成后续交付条件。不影响架构的改动填写“不适用”及理由即可；凭据不得写入仓库、日志、URL、Pull Request 或文档正文。
 
 ## 2. 驱动目标
 
@@ -1015,8 +1015,8 @@ docker compose up -d --no-build --wait
 - AI 告警、主机和终端：[SDD 009](../specs/009-assistant-alert-controls/spec.md)、[SDD 013](../specs/013-ai-alert-controls/spec.md)、[SDD 014](../specs/014-managed-machines-agent-bootstrap/spec.md)、[SDD 017](../specs/017-assistant-ssh-bootstrap/spec.md)、[SDD 018](../specs/018-machine-web-terminal/spec.md)
 - 设计基线 SDD：[SDD 019](../specs/019-system-design-baseline/spec.md)
 - AI SDK 插桩与业务部署：[SDD 021](../specs/021-ai-sdk-instrumentation-deployment/spec.md)
-- 在线设计副本：[Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)
-- 架构文档双端同步规则：[SDD 020](../specs/020-architecture-design-sync/spec.md)
+- 历史在线设计副本（不再同步）：[Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)
+- 历史架构文档同步规则（已由当前本地维护规则替代）：[SDD 020](../specs/020-architecture-design-sync/spec.md)
 - 镜像发布与管理员运维：[SDD 023](../specs/023-registry-admin-cli/spec.md)
 
 ## 26. 运维平台基础与备份恢复（SDD 026，网站/容器现行设计见第33章）
@@ -2453,10 +2453,18 @@ Agent 只使用当前认证心跳中相同 agent_id 的 machine_name/machine_id�
 
 受管容器及网站日志/指标仍先按 deployment/application/machine 和 Agent 身份核验，中心再从受信主机与应用记录写入 machine_name、service_name 及 resource_json 中的 host.name/service.name；不可用伪造容器标签或 SDK 名称扩展权限。服务名缺失时使用应用名，不把随机应用 ID 当可读服务名。业务 SDK 既有机器名环境注入和服务配置保持兼容。
 
-规格、契约、维护队列和名称回归、线上逐项矩阵见 `specs/097-production-operations/`。同一 PR 同步 Doca 原生 SDD097 章节/流程图，回读目标文字、节点与连线，并核对原有内容和原生图保留。
+规格、契约、维护队列和名称回归、线上逐项矩阵见 `specs/097-production-operations/`。本轮后续架构变更与同一 PR 的本地设计保持一致；此前完成的在线同步证据保留作历史记录。
 
 中心内部 Agent heartbeat/运行事件投影同样从受信 managed_machines/agents 绑定补 host.name、lightmoni.machine_id 和名称属性；不依赖旧 Agent 已实现新名称字段。内置 Agent/SDK 大盘和通用主机模板以机器名/服务名及短ID区分同名实例，稳定完整ID仍保留原列。SQLite system_dashboard_seeds 使用 readable-telemetry-097-v1 一次标记，只有仍精确匹配旧配方的内置查询才刷新，并追加 dashboard_versions；用户SQL、标题、布局、设置和已删除大盘均保留，后续启动不覆盖用户再次编辑。
 
 历史 root 常驻 Agent 的已知 unit 通过固定SHA识别，升级预检只返回原版本受管卸载再重装的409指引，不生成可执行升级、不自动转换账户或执行身份。未知安装返回固定受管检查错误，不透出远端正文；新统一Agent/签名helper的身份和生命周期门禁保持不变。
 
 TypeScript（含Agent）、Go、Python、Rust的端点选择器在一次完整的新鲜发现成功后解除该source的旧传输冷却：已有中心先用无凭据identity核对center_id，再认证获取并验证清单，版本未变化也可证明入口已恢复。不同中心、无效清单、401/403或TLS失败均不能解除；其他未验证入口仍保留冷却。选择器仅选择入口，单次request最多发送一次业务正文，丢ACK仍由原有冻结批次队列决定重试，不自动跨入口重放POST。
+
+### 管理员修正已移除 Agent 的状态
+
+`machine-state-recovery.ts` 提供独立的管理员恢复入口。旧任务和未知维护不会禁用入口；已有终端、正在运行的维护和 SSH 权限要求仍真实检查。固定 SSH 脚本核实 Agent 程序、两种服务、helper、独立执行/升级工作进程均不存在，路径安全、无操作锁，保留身份与中心绑定一致。探测仅返回非秘密状态及摘要，不修改远端文件，也不停止或删除业务容器。
+
+`machine_state_recoveries` 持久保存五分钟计划、SSH 账户/凭据版本、远端观测、目标绑定、受影响任务/维护状态及身份清单；待审阅计划接入共享维护门禁，暂停新派发。管理员审阅清单、填写核查原因并输入主机名称确认后，再次只读核验现场与版本；取消、过期或证据变化均不修正记录。原子事务取消排队工作，已执行但无法确认的工作保留 unknown 并登记管理员核查，结束原有维护预约，撤销同机旧身份的控制/数据凭据、helper 与待激活预约，记录 Agent 退役。
+
+`machine_state_recovery_jobs` 仅关联此次实际修正的同机同 Agent 作业；共享未知作业栅栏只认可已成功提交的恢复证据，不放宽其他任务。旧执行回执和审批不能重新获得授权。原状态、核查人、时间、原因及实际观测保存在恢复计划/回执和既有生命周期审计中，不将未知业务任务改为成功。配置、身份文件、缓存和业务数据保留；保留的 Agent 状态可继续通过现有 SSH 恢复卸载处理，再全新接入。

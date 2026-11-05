@@ -17,3 +17,7 @@
 
 ## Endpoint recovery
 对已记录中心，先无凭据核对center_id，再认证读取并验证完整清单；成功后解除该source过去的传输冷却，允许后续原有队列重试。没有新验证时仍遵守冷却；401/403、不同中心或无效清单不解除。一次request最多发送一次业务正文，发现恢复不自动重放POST。
+
+## Agent state correction
+
+`GET /api/v1/machines/:id/state-recoveries` 返回管理员可见的恢复历史。`POST .../plan` 接受 credential_id、reason，仅通过固定 SSH 只读脚本核验已移除的 Agent；返回五分钟计划及影响清单，不执行卸载。`POST .../:recoveryId/apply` 要求 confirm=true、confirm_name=已审阅主机名称；再次核验远端、凭据及清单后原子结束旧身份。`POST .../:recoveryId/cancel` 仅取消尚未执行计划。所有接口 requireAdmin；GET 及重复 apply 返回持久回执，不重放远端动作。计划待审阅时阻止新派发，但不会因旧任务 unknown 而无法创建恢复计划。活动工作进程、远端程序仍在、路径不安全、身份/版本变化均拒绝。配置与业务数据全部保留；不能宣称旧业务任务成功。
