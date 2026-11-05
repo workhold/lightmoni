@@ -1,0 +1,156 @@
+{
+  "at": "2026-11-05T18:41:03.204Z",
+  "engine": "ClickHouse 26.8",
+  "queries": [
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-a",
+      "ok": true,
+      "rows": 1
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-b",
+      "ok": true,
+      "rows": 1
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-c",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-d",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-e",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-f",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-g",
+      "ok": true,
+      "rows": 1
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-h",
+      "ok": true,
+      "rows": 1
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-i",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-j",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-k",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-event-loop",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-center",
+      "panel": "system-center-l",
+      "ok": true,
+      "rows": 2
+    },
+    {
+      "dashboard": "system-agent",
+      "panel": "system-agent-a",
+      "ok": true,
+      "rows": 1
+    },
+    {
+      "dashboard": "system-agent",
+      "panel": "system-agent-b",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-agent",
+      "panel": "system-agent-c",
+      "ok": true,
+      "rows": 1
+    },
+    {
+      "dashboard": "system-agent",
+      "panel": "system-agent-d",
+      "ok": true,
+      "rows": 1
+    },
+    {
+      "dashboard": "system-agent",
+      "panel": "system-agent-e",
+      "ok": true,
+      "rows": 2
+    },
+    {
+      "dashboard": "system-agent",
+      "panel": "system-agent-f",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-sdk",
+      "panel": "system-sdk-a",
+      "ok": true,
+      "rows": 1
+    },
+    {
+      "dashboard": "system-sdk",
+      "panel": "system-sdk-b",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-sdk",
+      "panel": "system-sdk-c",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-sdk",
+      "panel": "system-sdk-d",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-sdk",
+      "panel": "system-sdk-e",
+      "ok": true,
+      "rows": 0
+    },
+    {
+      "dashboard": "system-sdk",
+      "panel": "system-sdk-f",
+      "ok": true,
+      "rows": 0
+    }
+  ]
+}

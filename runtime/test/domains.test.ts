@@ -22,6 +22,7 @@ import {
   normalizeDashboard,
   validateQueryOptions,
 } from "../src/domains/dashboards.js";
+import {systemDashboardQueryUpdates} from '../src/domains/system-dashboards.js';
 import { Logs } from "../src/domains/logs.js";
 import {
   Alerts,
@@ -355,6 +356,35 @@ test("dashboard revisions, durable versions, copies and seed deletion survive re
     await f.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('readable builtin query upgrade preserves custom SQL, layout, deleted boards and durable history exactly once',async()=>{
+ const f=await fixture();
+ try {
+  const updates=systemDashboardQueryUpdates(),reverse=new Map([...updates].map(([old,next])=>[next,old]));
+  const original=(await f.request('/api/v1/dashboards/system-agent')).body;
+  const before=structuredClone(original);before.title='User title';before.panels[0].grid.w=5;
+  for(const p of before.panels)for(const q of p.queries)q.sql=reverse.get(q.sql)??q.sql;
+  const custom=before.panels.find((p:any)=>p.id==='system-agent-d');custom.queries[0].sql='SELECT 99 AS value';
+  const saved=await f.request('/api/v1/dashboards/system-agent','PUT',before);assert.equal(saved.status,200);
+  const copied=await f.request('/api/v1/dashboards','POST',{...before,title:'User copy'});assert.equal(copied.status,201);
+  assert.equal((await f.request('/api/v1/dashboards/system-sdk?revision=1','DELETE')).status,200);
+  f.db.run("DELETE FROM system_dashboard_seeds WHERE id='readable-telemetry-097-v1'");
+  f.dashboards.seed();
+  const next=(await f.request('/api/v1/dashboards/system-agent')).body;
+  assert.equal(next.revision,3);assert.equal(next.title,'User title');assert.equal(next.panels[0].grid.w,5);
+  assert.equal(next.panels.find((p:any)=>p.id==='system-agent-d').queries[0].sql,'SELECT 99 AS value');
+  const queue=next.panels.find((p:any)=>p.id==='system-agent-c');assert.match(queue.queries[0].sql,/host\.name/);
+  assert.equal((await f.request('/api/v1/dashboards/system-sdk')).status,404);
+  const copy=(await f.request('/api/v1/dashboards/'+copied.body.id)).body;
+  assert.deepEqual(copy.panels,copied.body.panels);
+  const versions=(await f.request('/api/v1/dashboards/system-agent/versions')).body;
+  assert.deepEqual(versions.map((v:any)=>v.revision),[3,2,1]);
+  f.dashboards.seed();assert.equal((await f.request('/api/v1/dashboards/system-agent')).body.revision,3);
+  queue.queries[0].sql=reverse.get(queue.queries[0].sql);
+  assert.equal((await f.request('/api/v1/dashboards/system-agent','PUT',next)).status,200);
+  f.dashboards.seed();assert.equal((await f.request('/api/v1/dashboards/system-agent')).body.panels.find((p:any)=>p.id==='system-agent-c').queries[0].sql,queue.queries[0].sql);
+ } finally {await f.close();}
 });
 test("dashboard validates query options, real variable cycles and ignores references inside comments", () => {
   assert.throws(() => validateQueryOptions({ query_interval: "0s" }));

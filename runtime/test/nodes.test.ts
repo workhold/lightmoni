@@ -402,6 +402,7 @@ test("runtime events are bounded/idempotent, persist through export failure and 
     f.db.get<any>("SELECT count(*) AS n FROM agent_runtime_events").n,
     1,
   );
+  f.db.run("UPDATE managed_machines SET name='zz-bj-1' WHERE agent_id='node'");
   await assert.rejects(f.module.publishTelemetry(), /outage/);
   assert.equal(
     f.db.get<any>("SELECT count(*) AS n FROM agent_runtime_events").n,
@@ -423,6 +424,7 @@ test("runtime events are bounded/idempotent, persist through export failure and 
   for(const {row} of metrics){assert.equal(Object.hasOwn(row,"value"),false);assert.equal(row.value_type,"double");assert.equal(typeof row.value_float,"number");assert.equal(row.value_int,null);}
   const logs = exports.find((v) => v.rows[0].kind === "log").rows;
   assert.equal(logs[0].row.severity_number, 9);
+  for(const {row} of [...metrics,...logs]){const resource=JSON.parse(row.resource_json);assert.equal(resource['host.name'],'zz-bj-1');assert.equal(resource['service.name'],'lightmoni-agent');assert.equal(resource['lightmoni.machine_id'],'machine-node');assert.equal(row.agent_id,'node');}
   assert.equal(
     logs[0].row.event_id,
     "fd062a5a170c90199a296467a83f05186080b59cb78edcd75f21f442d9176d17",

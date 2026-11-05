@@ -2454,3 +2454,7 @@ Agent 只使用当前认证心跳中相同 agent_id 的 machine_name/machine_id�
 受管容器及网站日志/指标仍先按 deployment/application/machine 和 Agent 身份核验，中心再从受信主机与应用记录写入 machine_name、service_name 及 resource_json 中的 host.name/service.name；不可用伪造容器标签或 SDK 名称扩展权限。服务名缺失时使用应用名，不把随机应用 ID 当可读服务名。业务 SDK 既有机器名环境注入和服务配置保持兼容。
 
 规格、契约、维护队列和名称回归、线上逐项矩阵见 `specs/097-production-operations/`。同一 PR 同步 Doca 原生 SDD097 章节/流程图，回读目标文字、节点与连线，并核对原有内容和原生图保留。
+
+中心内部 Agent heartbeat/运行事件投影同样从受信 managed_machines/agents 绑定补 host.name、lightmoni.machine_id 和名称属性；不依赖旧 Agent 已实现新名称字段。内置 Agent/SDK 大盘和通用主机模板以机器名/服务名及短ID区分同名实例，稳定完整ID仍保留原列。SQLite system_dashboard_seeds 使用 readable-telemetry-097-v1 一次标记，只有仍精确匹配旧配方的内置查询才刷新，并追加 dashboard_versions；用户SQL、标题、布局、设置和已删除大盘均保留，后续启动不覆盖用户再次编辑。
+
+历史 root 常驻 Agent 的已知 unit 通过固定SHA识别，升级预检只返回原版本受管卸载再重装的409指引，不生成可执行升级、不自动转换账户或执行身份。未知安装返回固定受管检查错误，不透出远端正文；新统一Agent/签名helper的身份和生命周期门禁保持不变。

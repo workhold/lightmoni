@@ -11,7 +11,7 @@ import {
   uuid,
   validRange,
 } from "./common.js";
-import { systemDashboards } from "./system-dashboards.js";
+import { systemDashboards,systemDashboardQueryUpdates } from "./system-dashboards.js";
 const panelTypes = new Set([
   "line",
   "timeseries",
@@ -253,14 +253,29 @@ export class Dashboards implements Module {
   }
   seed(): void {
     this.deps.db.transaction(() => {
+      const marker='readable-telemetry-097-v1',updates=systemDashboardQueryUpdates();
+      const upgrade=!this.deps.db.get('SELECT id FROM system_dashboard_seeds WHERE id=?',marker);
       for (const raw of systemDashboards()) {
         if (
           this.deps.db.get(
             "SELECT id FROM system_dashboard_seeds WHERE id=?",
             raw.id,
           )
-        )
+        ) {
+          const row=upgrade?this.deps.db.get<any>('SELECT body,revision FROM dashboards WHERE id=?',raw.id):undefined;
+          if(row) {
+            const current=parseJSON<any>(row.body);let changed=false;
+            for(const panel of current.panels??[])for(const query of panel.queries??[]) {
+              const sql=updates.get(query.sql);if(sql){query.sql=sql;changed=true;}
+            }
+            if(changed) {
+              current.revision=row.revision+1;current.updated_at=stamp(this.deps.now());
+              this.deps.db.run('UPDATE dashboards SET body=?,revision=?,updated_at=? WHERE id=? AND revision=?',encode(current),current.revision,current.updated_at,raw.id,row.revision);
+              this.deps.db.run('INSERT INTO dashboard_versions(dashboard_id,revision,body,updated_at,base_revision) VALUES(?,?,?,?,?)',raw.id,current.revision,encode(current),current.updated_at,row.revision);
+            }
+          }
           continue;
+        }
         const d = {
           ...normalizeDashboard(raw),
           revision: 1,
@@ -287,6 +302,7 @@ export class Dashboards implements Module {
           d.id,
         );
       }
+      this.deps.db.run('INSERT OR IGNORE INTO system_dashboard_seeds(id) VALUES(?)',marker);
     });
   }
   register(): void {
