@@ -19,3 +19,5 @@
 2026-11-06 08:32:57 CST，通过 1Panel 发起更新，保留原 `lightmoni_lightmoni-state-v2-20261103:/data`、端口和网络。实际更新及重新安装结果继续记录 live-matrix.md。
 
 架构影响不适用：本次只固定已合入的发行版本和补充证据；执行参数及诊断设计已在 PR #110 更新 docs/system-design.md 第 97 节。设计只维护仓库本地版本。更新中心不会自动更新机器 Agent。
+
+1Panel 于 08:35:13 CST 报告更新成功。随后实查固定镜像标签、源码 fa049fd26e4193349113e2f07a340aa9ee6dfae8、索引摘要 82233af1…、healthy 和原 /data 数据卷均一致。
