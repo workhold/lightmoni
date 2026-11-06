@@ -15,8 +15,10 @@
 
 zz-bj-1 的原版卸载器摘要已核实，机器存在 root 私有回滚档案。旧任务核对后，本地 fenced=null、pending_results=0；原版卸载返回 0，服务 not-found/inactive。配置、身份及遥测缓存保留；三个业务容器仍持续运行。未清除任何未核实的锁，也未将旧未知业务执行改为成功。
 
-新恢复功能尚待通过 PR 发布、1Panel 更新和线上执行。Agent 重新接入、升级/卸载重装、应用全生命周期和三轮连续观测仍按 tasks.md 继续验收，未在此标记通过。
+新恢复功能已通过 PR #107 合入并固定发行、1Panel 更新；线上 zz-bj-1 实际状态修正成功，10 条旧记录保留未知结论并完成审计，旧身份退役，部署入口恢复可用。具体发行与逐项线上证据见 state-recovery-release.md 和 live-matrix.md。Agent 重新接入、升级/卸载重装、应用全生命周期和三轮连续观测仍按 tasks.md 继续验收，未在此标记通过。
 
 ## 设计维护方式
 
 用户于本轮明确要求设计只保留本地。已更新 AGENTS.md、项目宪章、PR 模板、本 SDD 和 docs/system-design.md 第 1.1/97 节，不再把在线同步作为交付条件。此前在线同步的历史记录保持不变。
+
+2026-11-06 线上重新接入前，确认远端服务 not-found、无程序/helper/工作单元/生命周期锁，以 root 私有目录可回滚归档旧配置、身份、队列和 remote-config；保留 /var/lib/lightmoni-managed/operations 和三个原业务容器。随后平台只读部署预检通过，计划 abb0c9e13054c6275af223a002eef33c 固定 root@zz-bj-1、amd64、同版 root 管理组件及非 root Agent，已审阅执行，安装成功仍以激活回执为准。
