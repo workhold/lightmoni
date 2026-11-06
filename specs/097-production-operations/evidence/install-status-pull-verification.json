@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "arch": "amd64",
+      "manifest": "sha256:fbfac7b9433e7769f8eda0476b461ff7f330617eef5ee25c5e6009ea99e12818",
+      "revision": "e13edab219f5fe4e98a9d8ae8d8602c08dce0830",
+      "tested_rootfs_and_config_identical": true
+    },
+    {
+      "arch": "arm64",
+      "manifest": "sha256:4386aab34513ed8bdcc80908d8a24e8e1416b17a8a377b8f518d781e460db69f",
+      "revision": "e13edab219f5fe4e98a9d8ae8d8602c08dce0830",
+      "tested_rootfs_and_config_identical": true
+    }
+  ],
+  "verified": true
+}
