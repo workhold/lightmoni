@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261106-reconcile-fb68857
+    image: docker.heyphp.com/lightmoni/lightmoni:20261106-workload-recovery-9956d29
     pull_policy: missing
     build:
       context: .
