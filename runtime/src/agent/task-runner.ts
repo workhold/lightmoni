@@ -14,9 +14,19 @@ export function ordinaryTaskAccount(): OrdinaryTaskAccount {
   if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid) || uid <= 0 || gid <= 0 || value("-gn") !== "lightmoni-agent") throw Error("ordinary_task_account_unavailable");
   return {uid, gid};
 }
-export function ordinaryTaskCommand(node: string, args: string[], account: OrdinaryTaskAccount): {file: string; args: string[]} {
+export function ordinaryTaskCapabilityDrop(raw: string): string {
+  // Old libcap-ng rejects "all" when the kernel knows newer capabilities.
+  // Enumerate the kernel's complete set, never truncate or guess its upper bound.
+  const last = Number(raw);
+  if (!Number.isInteger(last) || last < 0 || last > 63 || raw !== String(last) && raw !== String(last) + "\n")
+    throw Error("ordinary_task_identity_check_failed");
+  return Array.from({length: last + 1}, (_, index) => "-cap_" + index).join(",");
+}
+export function ordinaryTaskCommand(node: string, args: string[], account: OrdinaryTaskAccount,
+  lastCapability = readFileSync("/proc/sys/kernel/cap_last_cap", "utf8")): {file: string; args: string[]} {
   if (!Number.isSafeInteger(account.uid) || !Number.isSafeInteger(account.gid) || account.uid <= 0 || account.gid <= 0) throw Error("invalid_ordinary_task_account");
-  return {file: "/usr/bin/setpriv", args: ["--reuid=" + account.uid, "--regid=" + account.gid, "--clear-groups", "--no-new-privs", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--", node, ...args]};
+  const drop = ordinaryTaskCapabilityDrop(lastCapability);
+  return {file: "/usr/bin/setpriv", args: ["--reuid=" + account.uid, "--regid=" + account.gid, "--clear-groups", "--no-new-privs", "--bounding-set=" + drop, "--inh-caps=" + drop, "--ambient-caps=" + drop, "--", node, ...args]};
 }
 
 const IDENTITY_PROBE = `import fs from 'node:fs';const s=fs.readFileSync('/proc/self/status','utf8');const field=n=>{const m=s.match(new RegExp('^'+n+':[\\t ]*([^\\n]*)$','m'));if(!m)throw Error('missing_identity_field');return m[1].trim()};console.log(JSON.stringify({uid:process.getuid(),euid:process.geteuid(),gid:process.getgid(),groups:field('Groups').split(/[\\t ]+/).filter(Boolean).map(Number),nnp:field('NoNewPrivs'),caps:{inh:field('CapInh'),prm:field('CapPrm'),eff:field('CapEff'),bnd:field('CapBnd'),amb:field('CapAmb')}}));`;
@@ -28,11 +38,14 @@ export function verifyOrdinaryTaskExecutionIdentity(expected = ordinaryTaskAccou
   rootPath("/usr/bin/setpriv");
   const node = rootPath(realpathSync(process.execPath));
   const command = ordinaryTaskCommand(node, ["-e", IDENTITY_PROBE], expected);
-  const raw = execFileSync(command.file, command.args, {
-    encoding: "utf8", timeout: 5000, maxBuffer: 4096,
-    env: { PATH: "/usr/bin:/bin", LANG: "C", HOME: "/nonexistent" },
-    stdio: ["ignore", "pipe", "ignore"],
-  }).trim();
+  let raw: string;
+  try {
+    raw = execFileSync(command.file, command.args, {
+      encoding: "utf8", timeout: 5000, maxBuffer: 4096,
+      env: { PATH: "/usr/bin:/bin", LANG: "C", HOME: "/nonexistent" },
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch { throw Error("ordinary_task_identity_check_failed"); }
   let value: any;
   try { value = JSON.parse(raw); } catch { throw Error("ordinary_task_identity_check_failed"); }
   if (value.uid !== expected.uid || value.euid !== expected.uid || value.gid !== expected.gid

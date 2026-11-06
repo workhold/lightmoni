@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ordinaryTaskCommand } from "../src/agent/task-runner.js";
+import { ordinaryTaskCommand, ordinaryTaskCapabilityDrop } from "../src/agent/task-runner.js";
 import { SCRIPT_TASK_CAPABILITY, SCRIPT_TASK_V2_CAPABILITY, requiredTaskScriptCapability,
   validateTaskScript, type TaskScript } from "../src/shared/task-center.js";
 
@@ -29,11 +29,20 @@ test("only nonempty new execution options require task.script.v2", () => {
 
 test("task runner always places the verified task account in front of the command", () => {
   const args = ["/var/lib/lightmoni-agent-helper/tasks/run/task.mjs", "literal $(touch marker)", "你好"];
-  const command = ordinaryTaskCommand("/opt/lightmoni-agent/current/node", args, { uid: 1001, gid: 1002 });
+  const command = ordinaryTaskCommand("/opt/lightmoni-agent/current/node", args, { uid: 1001, gid: 1002 }, "40\n");
+  const drop = Array.from({length:41}, (_, index) => "-cap_" + index).join(",");
   assert.equal(command.file, "/usr/bin/setpriv");
   assert.deepEqual(command.args, [
     "--reuid=1001", "--regid=1002", "--clear-groups", "--no-new-privs",
-    "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all",
+    "--bounding-set=" + drop, "--inh-caps=" + drop, "--ambient-caps=" + drop,
     "--", "/opt/lightmoni-agent/current/node", ...args,
   ]);
+});
+
+test("capability drop covers the full kernel range and refuses unknown or truncated bounds", () => {
+  assert.equal(ordinaryTaskCapabilityDrop("0\n"), "-cap_0");
+  const maximum = ordinaryTaskCapabilityDrop("63").split(",");
+  assert.equal(maximum.length, 64); assert.equal(maximum[63], "-cap_63");
+  for (const raw of ["", "-1", "+40", "040", " 40", "40 ", "40\n\n", "40\r\n", "40.0", "1e1", "64", "999", "40\0", "40\n--keep-groups"])
+    assert.throws(() => ordinaryTaskCapabilityDrop(raw), /ordinary_task_identity_check_failed/);
 });

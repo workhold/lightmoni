@@ -8,10 +8,18 @@ import {join,dirname} from 'node:path';
 import {createServer, type Socket} from 'node:net';
 import {once} from 'node:events';
 import {Client, type ConnectConfig} from 'ssh2';
-import {CHECK_NAMES,defaultSSHRunner,parsePreflight,pinnedHostKeys,preflightCommand,SSHError} from '../src/server/machine-ssh.js';
+import {CHECK_NAMES,defaultSSHRunner,parsePreflight,pinnedHostKeys,preflightCommand,remoteSSHFailure,SSHError} from '../src/server/machine-ssh.js';
 import type {SSHMachineTarget} from '../src/server/managed-machines.js';
 import {agentInstallationPaths} from '../src/shared/agent-maintenance-shell.js';
 import {freshAgentGuard} from '../src/server/machine-agent-lifecycle.js';
+
+test('ordinary task identity failures expose only the fixed diagnostic',()=>{
+ const error=remoteSSHFailure(127,'private enrollment output','Error: ordinary_task_identity_check_failed\nprivate password');
+ assert.deepEqual(error.remoteFailure,{remote_exit_code:127,remote_reason_code:'ordinary_task_identity_check_failed'});
+ assert.doesNotMatch(JSON.stringify(error),/private|password|enrollment output/);
+ for(const text of ['ordinary_task_identity_check_failed extra','prefix Error: ordinary_task_identity_check_failed'])
+  assert.equal(remoteSSHFailure(1,'',text).remoteFailure?.remote_reason_code,'remote_command_failed');
+});
 
 test('SSH handshake deadline remains timed_out before the fixed command deadline',async t=>{
  const sockets=new Set<Socket>(),server=createServer(socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));socket.on('data',()=>{});});

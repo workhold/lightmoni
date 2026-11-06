@@ -21,3 +21,7 @@
 ## Agent state correction
 
 `GET /api/v1/machines/:id/state-recoveries` 返回管理员可见的恢复历史。`POST .../plan` 接受 credential_id、reason，仅通过固定 SSH 只读脚本核验已移除的 Agent；返回五分钟计划及影响清单，不执行卸载。`POST .../:recoveryId/apply` 要求 confirm=true、confirm_name=已审阅主机名称；再次核验远端、凭据及清单后原子结束旧身份。`POST .../:recoveryId/cancel` 仅取消尚未执行计划。所有接口 requireAdmin；GET 及重复 apply 返回持久回执，不重放远端动作。计划待审阅时阻止新派发，但不会因旧任务 unknown 而无法创建恢复计划。活动工作进程、远端程序仍在、路径不安全、身份/版本变化均拒绝。配置与业务数据全部保留；不能宣称旧业务任务成功。
+
+## Ordinary task capability drop
+
+只信任内核 cap_last_cap 的规范非负整数（0..63）。降权命令同时清除 0 至该上界的 bounding/inheritable/ambient 能力，保留专用 UID/GID、空附加组及 no-new-privs；实际核验五种能力集合均为零。缺失、格式错误或超界均失败，不能通过默认值、截断或保留能力继续。SSH 只返回固定 ordinary_task_identity_check_failed 诊断，不返回远端原文。

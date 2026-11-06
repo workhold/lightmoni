@@ -195,6 +195,7 @@ test("full-management helper runs ordinary tasks without root identity, groups o
     "/opt/lightmoni-agent/current/node",
     args,
     { uid: 999, gid: 987 },
+    "2\n",
   );
   assert.equal(command.file, "/usr/bin/setpriv");
   assert.deepEqual(command.args, [
@@ -202,9 +203,9 @@ test("full-management helper runs ordinary tasks without root identity, groups o
     "--regid=987",
     "--clear-groups",
     "--no-new-privs",
-    "--bounding-set=-all",
-    "--inh-caps=-all",
-    "--ambient-caps=-all",
+    "--bounding-set=-cap_0,-cap_1,-cap_2",
+    "--inh-caps=-cap_0,-cap_1,-cap_2",
+    "--ambient-caps=-cap_0,-cap_1,-cap_2",
     "--",
     "/opt/lightmoni-agent/current/node",
     ...args,
@@ -214,7 +215,7 @@ test("full-management helper runs ordinary tasks without root identity, groups o
     { uid: 999, gid: 0 },
     { uid: NaN, gid: 987 },
   ])
-    assert.throws(() => ordinaryTaskCommand("node", args, account));
+    assert.throws(() => ordinaryTaskCommand("node", args, account, "2"), /invalid_ordinary_task_account/);
 });
 test("helper task runner persists and reports active or pending state", () => {
   assert.deepEqual(ordinaryTaskRunnerStatus({}), { active: false, state: "idle" });
