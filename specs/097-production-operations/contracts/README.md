@@ -29,3 +29,7 @@
 ## Internal exporter
 
 显式配置 exporter 的 SDK 必须把冻结后的系统表批次交给该回调，无需额外 HTTP Key；此回调不授予中心网络接口权限。未配置 exporter 的默认 HTTP 通道缺少 Key 时继续抑制系统表发送。匿名 collectSelf 仍不产出诊断；全局禁用、取消、持久批次 ID/正文重试及服务端认证不变。中心内存导出集成与发行验收需查到当前实例的新鲜 heartbeat/heap 指标。
+
+## Workload recovery after Agent reinstallation
+
+POST /api/v1/machines/:id/workload-recoveries/plan(reason) 冻结主机、当前 Agent、全部旧实例、资源修订、端口与期望，生成只读核验任务；GET 同路径 /:operation 返回准备、待审批和最终状态。POST /:operation/apply(revision,confirm) 仅接受已审阅的同一 5 分钟计划，重新只读核验后原子应用；POST /:operation/cancel 只取消未执行计划。所有端点管理员、no-store，任务通过既有签名执行权限与身份门禁。重复 apply 回读原事务，不重复绑定；旧回执不能覆盖新绑定。远端仅固定 Docker ps/inspect 及固定受管目录 lstat/read，摘要不含原始配置、环境、凭据或业务内容。成功只恢复管理绑定与保持数据位置，后续正常控制器验证真实状态。

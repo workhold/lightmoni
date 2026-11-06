@@ -39,3 +39,7 @@
 ## 内部遥测导出
 
 TypeScript SDK 的队列门禁仅对默认 HTTPExporter 的系统表缺少 options.key 时抑制发送；显式 custom exporter 由调用方承担交付，允许既有中心 Ingest.internal 内存回调收到 lightmoni 指标/日志。collectSelf 的无 Key 抑制保持，普通 HTTP 和中心接收鉴权不变。补 SDK 自定义系统批次交付/匿名 HTTP 抑制/禁用/重试字节冻结，以及 RuntimeMonitor 实际产生 heartbeat、堆、请求计数、直方图和日志的集成。固定镜像验收必须查询到新鲜中心 heartbeat 和堆数据，不能只验证 SQL 语法。
+
+## 重装应用的显式恢复
+
+新增管理员主机级 workload-recovery 计划与审计状态，包含所有旧身份实例的完整中心快照、资源修订和端口摘要。由当前认证 Agent 同版本 root 适配器执行固定只读 instance.recovery.inspect 增强核验，新能力 operations.platform.instance-recovery-review.v1 返回容器归属、受管状态摘要和固定路径存在性，不返回配置、环境或业务内容。计划就绪后有效 5 分钟，管理员审阅原因与全部影响；apply 再派同一只读核验，摘要一致、当前身份、配置、端口和任务仍一致时原子恢复绑定并保留 ID、数据位置。无容器、无受管数据且从未就绪或已人工移除的旧空记录，仅按明确计划退役；有状态已就绪而数据或受管状态缺失时拒绝。保留旧回执和 unknown 原结论，精确复用已有状态修正任务审计释放旧围栏，不扩大豁免。新绑定清空新鲜观测和旧运行指针，原中心期望与手动成员成功证据保持；正常深度对账重新确认运行、配置及健康。

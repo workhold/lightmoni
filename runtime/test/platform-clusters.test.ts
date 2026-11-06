@@ -69,7 +69,7 @@ async function fixture(t: any, fetcher?: typeof fetch, reconciliationEnabled=fal
     body?: any,
     role = "admin",
   ) => {
-    const r = await fetch(base + "/api/v1/ops" + path, {
+    const r = await fetch(base + (path.startsWith('/machines/')?'/api/v1':"/api/v1/ops") + path, {
       method,
       headers: { "content-type": "application/json", "x-role": role },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -1946,4 +1946,111 @@ test('managed center restores three desired replicas after a machine outage with
  const active=f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0',a.id);
  assert.equal(active.length,3);assert.ok(active.every(i=>i.machine_id==='mb'&&!i.slot.startsWith('surge-')&&i.healthy),JSON.stringify({active:active.map(i=>({slot:i.slot,machine:i.machine_id,state:i.state,healthy:i.healthy,run:i.current_run_id})),status:status.deployments[c.id]}));
  assert.deepEqual(f.store.get(a.id).spec,before);assert.equal(f.store.get(a.id).revision,1);
+});
+
+async function reviewFixture(t:any,count=1){
+ const f=await fixture(t),c=f.createCluster(['ma']),apps=[];
+ for(let n=0;n<count;n++){const a=f.app(c,{stateful:true,service_name:'recovery-'+n,deployments:[{cluster_id:c.id,machine_ids:['ma'],cpu:.1,memory_mb:16}]});apps.push(a);await f.action(a,'deploy');f.finish('a');}
+ rebindForRecovery(f);
+ f.db.run('UPDATE agents SET heartbeat=? WHERE id=?',JSON.stringify({operations_capabilities:['operations.platform.instance-recovery.v1','operations.platform.instance-recovery-review.v1']}),'c');
+ const prefix='/machines/ma/workload-recoveries';
+ const create=async()=>{const r=await f.req(prefix+'/plan','POST',{reason:'Verified retained original containers and data after approved Agent reinstallation'});assert.equal(r.status,201,JSON.stringify(r));return r.body;};
+ const proof=(p:any,stage='plan')=>({recovery_plan_id:p.id,stage,observed_at:'2026-10-29T02:00:00.000Z',instances:p.snapshot.instances.map((i:any)=>({instance_id:i.instance_id,containers:['a'.repeat(64)],mounts:[],owned:true,managed_state:true,data_present:true,data_path:'/var/lib/lightmoni-managed/operations/platform/workloads/'+i.instance_id,state_sha256:'b'.repeat(64),inventory_sha256:'c'.repeat(64)}))});
+ const read=async(p:any)=>(await f.req(prefix+'/'+p.id)).body;
+ const ready=async()=>{const p=await create();f.finish('c',proof(p));return read(p);};
+ const apply=(p:any)=>f.req(prefix+'/'+p.id+'/apply','POST',{revision:p.revision,confirm:true});
+ return {...f,apps,prefix,create,proof,read,ready,apply};
+}
+test('reviewed stateful recovery rechecks all instances, preserves center intent and data identity, and transfers port reservations once',async t=>{
+ const f=await reviewFixture(t,2),original=f.db.all<any>('SELECT * FROM ops_cluster_instances ORDER BY id'),specs=f.apps.map(a=>f.store.get(a.id).spec);
+ const plan=await f.ready();assert.equal(plan.status,'awaiting_approval');assert.equal(plan.proof.length,2);
+ assert.ok(f.db.all<any>('SELECT agent_id FROM ops_cluster_instances').every(i=>i.agent_id==='a'),'read-only plan must not transfer bindings');
+ const approved=await f.apply(plan);assert.equal(approved.status,200,JSON.stringify(approved));assert.equal(approved.body.status,'verifying');
+ const runs=f.db.all('SELECT id FROM ops_platform_runs WHERE agent_id=?','c').length;await f.apply(plan);assert.equal(f.db.all('SELECT id FROM ops_platform_runs WHERE agent_id=?','c').length,runs);
+ f.finish('c',f.proof(plan,'apply'));const done=await f.read(plan);assert.equal(done.status,'succeeded',JSON.stringify(done));assert.equal(done.approved_by,'admin');assert.equal(done.receipt.data_retained,true);
+ const after=f.db.all<any>('SELECT * FROM ops_cluster_instances ORDER BY id');assert.deepEqual(after.map(i=>i.id),original.map(i=>i.id));
+ for(let n=0;n<after.length;n++){
+  assert.equal(after[n].agent_id,'c');assert.equal(after[n].healthy,0);assert.equal(after[n].last_seen,'');assert.equal(after[n].current_run_id,'');assert.equal(after[n].observed_generation,'');
+  assert.equal(after[n].desired_state,original[n].desired_state);assert.equal(after[n].last_ready_at,original[n].last_ready_at);assert.equal(after[n].cluster_id,original[n].cluster_id);
+  assert.equal(JSON.parse(after[n].observed_json).agent_recovery.previous_agent_id,'a');
+ }
+ assert.ok(f.db.all<any>('SELECT agent_id FROM ops_platform_ports').every(p=>p.agent_id==='c'));
+ assert.deepEqual(f.apps.map(a=>f.store.get(a.id).spec),specs);assert.equal((await f.apply(plan)).body.status,'succeeded');
+ assert.equal(f.db.all('SELECT id FROM ops_platform_runs WHERE agent_id=?','c').length,runs);
+ assert.equal((await f.action(f.apps[0],'deploy')).body.pending,undefined,'reviewed instances no longer block normal deployment');
+});
+test('workload recovery requires administrator review, exact host and revision, and current capability',async t=>{
+ const f=await reviewFixture(t);
+ assert.equal((await f.req(f.prefix+'/plan','POST',{reason:'review'},'member')).status,403);
+ assert.equal((await f.req(f.prefix+'/plan','POST',{reason:''})).status,400);
+ const p=await f.create();assert.equal((await f.apply(p)).status,409);assert.equal((await f.req('/machines/mb/workload-recoveries/'+p.id)).status,404);
+ f.finish('c',f.proof(p));const ready=await f.read(p);
+ assert.equal((await f.req(f.prefix+'/'+p.id+'/apply','POST',{revision:'wrong',confirm:true})).status,409);
+ assert.equal((await f.req(f.prefix+'/'+p.id+'/apply','POST',{revision:ready.revision,confirm:false})).status,409);
+ const response=await fetch(f.base+'/api/v1'+f.prefix+'/'+p.id,{headers:{'x-role':'member'}});assert.equal(response.status,403);assert.equal(response.headers.get('cache-control'),'no-store');
+ await f.req(f.prefix+'/'+p.id+'/cancel','POST',{});
+ f.db.run("UPDATE agents SET heartbeat='{}' WHERE id='c'");assert.equal((await f.req(f.prefix+'/plan','POST',{reason:'review'})).body.error,'workload_recovery_agent_upgrade_required');
+});
+test('workload recovery refuses changed targets, expired reviews, changed inventory and missing managed data',async t=>{
+ for(const mode of ['target','resource','expired','inventory','missing-state','foreign']){
+  const f=await reviewFixture(t),p=await f.create();
+  const proof=f.proof(p);if(mode==='missing-state')proof.instances[0].managed_state=false,proof.instances[0].state_sha256='';if(mode==='foreign')proof.instances[0].owned=false;
+  f.finish('c',proof);let ready=await f.read(p);
+  if(['missing-state','foreign'].includes(mode)){assert.equal(ready.status,'failed');continue;}
+  assert.equal(ready.status,'awaiting_approval');
+  if(mode==='target')f.db.run("UPDATE managed_machines SET address='10.0.0.9' WHERE id='ma'");
+  if(mode==='resource')f.store.update(f.apps[0].id,1,'Changed',f.store.get(f.apps[0].id).spec,'admin');
+  if(mode==='expired')f.advance(300001);
+  const applied=await f.apply(ready);
+  if(mode==='inventory'){assert.equal(applied.status,200);const changed=f.proof(p,'apply');changed.instances[0].inventory_sha256='d'.repeat(64);f.finish('c',changed);ready=await f.read(p);assert.equal(ready.status,'failed');assert.equal(ready.error,'workload_recovery_inventory_changed');}
+  else assert.equal(applied.status,409,JSON.stringify({mode,applied}));
+  assert.equal(f.db.get<any>('SELECT agent_id FROM ops_cluster_instances WHERE owner_id=?',f.apps[0].id).agent_id,'a');
+ }
+});
+test('a cancelled preparation and a stale queued review cannot transfer bindings',async t=>{
+ for(const mode of ['cancel','target','authorization']){
+  const f=await reviewFixture(t),p=await f.create();
+  if(mode==='cancel')await f.req(f.prefix+'/'+p.id+'/cancel','POST',{});
+  if(mode==='target')f.db.run("UPDATE managed_machines SET ssh_target_generation=1 WHERE id='ma'");
+  if(mode==='authorization')f.db.run("UPDATE users SET active=0 WHERE id='admin'");
+  assert.throws(()=>f.finish('c',f.proof(p)),/workload_recovery_target_changed|platform_payload_authorization_required/);
+  assert.equal(f.db.get<any>('SELECT agent_id FROM ops_cluster_instances WHERE owner_id=?',f.apps[0].id).agent_id,'a');
+ }
+});
+test('unknown old execution needs the precise successful state-recovery audit before a review can proceed',async t=>{
+ const f=await reviewFixture(t),old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',f.apps[0].id),run=f.db.get<any>('SELECT * FROM ops_platform_runs WHERE id=?',old.current_run_id);
+ f.db.run("UPDATE agent_jobs SET state='unknown' WHERE id=?",run.job_id);f.db.run("UPDATE ops_platform_runs SET state='unknown' WHERE id=?",run.id);f.db.run("UPDATE ops_cluster_instances SET state='unknown' WHERE id=?",old.id);
+ assert.equal((await f.req(f.prefix+'/plan','POST',{reason:'review'})).body.error,'agent_reinstall_execution_unresolved');
+ f.db.exec("CREATE TABLE machine_state_recoveries(id TEXT PRIMARY KEY,machine_id TEXT,agent_id TEXT,status TEXT,expires_at TEXT DEFAULT '');CREATE TABLE machine_state_recovery_jobs(recovery_id TEXT,machine_id TEXT,agent_id TEXT,job_id TEXT);");
+ f.db.run("INSERT INTO machine_state_recoveries(id,machine_id,agent_id,status) VALUES('review-audit','ma','a','succeeded')");f.db.run("INSERT INTO machine_state_recovery_jobs VALUES('review-audit','mb','a',?)",run.job_id);
+ assert.equal((await f.req(f.prefix+'/plan','POST',{reason:'review'})).body.error,'agent_reinstall_execution_unresolved');
+ f.db.run("UPDATE machine_state_recovery_jobs SET machine_id='ma'");const p=await f.ready();assert.equal(p.status,'awaiting_approval');assert.equal(f.db.get<any>('SELECT state FROM ops_platform_runs WHERE id=?',run.id).state,'unknown');
+});
+
+test('reviewed recovery rolls back all instance and reservation changes when receipt storage fails',async t=>{
+ const f=await reviewFixture(t,2),p=await f.ready();assert.equal((await f.apply(p)).status,200);
+ const before=f.db.all('SELECT * FROM ops_cluster_instances ORDER BY id'),ports=f.db.all('SELECT * FROM ops_platform_ports ORDER BY port');
+ const last=f.db.get<any>('SELECT id FROM ops_cluster_instances ORDER BY id DESC LIMIT 1').id;
+ f.db.exec("CREATE TRIGGER fail_recovery_write BEFORE UPDATE OF agent_id ON ops_cluster_instances WHEN OLD.id='"+last+"' BEGIN SELECT RAISE(ABORT,'simulated_recovery_storage_failure');END;");
+ assert.throws(()=>f.finish('c',f.proof(p,'apply')),/simulated_recovery_storage_failure/);
+ assert.deepEqual(f.db.all('SELECT * FROM ops_cluster_instances ORDER BY id'),before);assert.deepEqual(f.db.all('SELECT * FROM ops_platform_ports ORDER BY port'),ports);
+ assert.equal((await f.read(p)).status,'verifying');
+});
+
+test('only reviewed empty records without prior running data are retired; fresh data and port conflicts still block transfer',async t=>{
+ for(const mode of ['empty','missing-data','port-conflict','stale-proof','old-online']){
+  const f=await reviewFixture(t),old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',f.apps[0].id);
+  if(mode==='old-online'){f.heartbeat('a');assert.equal((await f.req(f.prefix+'/plan','POST',{reason:'review'})).body.error,'agent_reinstall_execution_unresolved');continue;}
+  if(mode==='empty')f.db.run("UPDATE ops_cluster_instances SET last_ready_at='',healthy=0,state='stopped' WHERE id=?",old.id);
+  const p=await f.create(),proof=f.proof(p);
+  if(['empty','missing-data'].includes(mode))Object.assign(proof.instances[0],{containers:[],managed_state:false,data_present:false,state_sha256:''});
+  if(mode==='stale-proof'){f.advance(100000);f.heartbeat('c');}
+  f.finish('c',proof);const ready=await f.read(p);
+  if(['missing-data','stale-proof'].includes(mode)){assert.equal(ready.status,'failed');assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',old.id).retired,0);continue;}
+  assert.equal(ready.status,'awaiting_approval');
+  if(mode==='port-conflict'){const port=f.db.get<any>('SELECT * FROM ops_platform_ports WHERE instance_id=?',old.id);f.db.run('INSERT INTO ops_platform_ports VALUES(?,?,?,?)','c',port.protocol,port.port,'other-instance');}
+  assert.equal((await f.apply(ready)).status,200);f.finish('c',{...proof,stage:'apply'});const final=await f.read(p);
+  if(mode==='port-conflict'){assert.equal(final.status,'failed');assert.equal(final.error,'workload_recovery_port_conflict');assert.equal(f.db.get<any>('SELECT agent_id FROM ops_cluster_instances WHERE id=?',old.id).agent_id,'a');}
+  else{assert.equal(final.status,'succeeded');assert.equal(final.receipt.instances[0].action,'retire_absent');const row=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id=?',old.id);assert.equal(row.retired,1);assert.equal(row.desired_state,old.desired_state);assert.equal(f.db.get('SELECT * FROM ops_platform_ports WHERE instance_id=?',old.id),undefined);}
+ }
 });
