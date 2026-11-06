@@ -1,4 +1,5 @@
 import { desiredHash, desiredJSON } from "../shared/desired-state.js";
+import {inspectRecoveryReview} from './instance-recovery-review.js';
 import {workloadContainersReady as ready} from './workload-readiness.js';
 import {cachePolicy} from './image-cache.js';
 import {imageSourcePolicy,preparePlatformImages} from './image-sources.js';
@@ -1829,6 +1830,7 @@ export async function executePlatform(
   const c = platformDefinition.validate(payload.resource.config);
   payload = { ...payload, resource: { ...payload.resource, config: c } };
   if(c.task==='instance.recovery.inspect') {
+    if(c.recovery_review)return {verified:true,data:await inspectRecoveryReview(c.recovery_review,context)};
     // Check all supported ownership selectors, including stopped containers and legacy gateway names.
     const ids=new Set<string>();
     for(const filter of ['label='+INSTANCE_LABEL+'='+c.instance_id,'label=com.docker.compose.project=lm-'+c.instance_id,'name=^lm-gateway-'+c.instance_id+'$']) {

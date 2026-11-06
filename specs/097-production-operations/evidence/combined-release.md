@@ -13,4 +13,8 @@ AMD64/ARM64各50项成品检查通过，按架构摘要回拉的RootFS/Config与
 
 1Panel于2026-11-06 09:06:16发起固定候选更新，09:08:15替换启动，09:08:26就绪成功；实际回读固定tag、fb68857完整修订、index c0d50a28aab62c88ae9d7d1a048d8dc579817b016701e5725467ae7e7b8dcb76、healthy及原卷lightmoni_lightmoni-state-v2-20261103:/data均一致。生产新鲜中心指标和应用/Agent联测仍继续，不提前标记完成。
 
-生产01:16:12Z只读查询：中心heartbeat和heap各12个120秒内样本，最新01:16:05Z；zz-bj-1 Agent heartbeat 4样本，最新01:15:51Z、可读名称zz-bj-1。堆内存max174864003 bytes，服务lightmoni-center。固定发行已包含PR108，生产DNS/应用联测仍继续。
+生产01:16:12Z只读查询：中心heartbeat和heap各12个120秒内样本，最新01:16:05Z；zz-bj-1 Agent heartbeat 4样本，最新01:15:51Z、可读名称zz-bj-1。堆内存为正值，服务lightmoni-center。固定发行已包含PR108，生产DNS/应用联测仍继续。
+
+正常升级b9312a102a57a8f9169c8fce4c9cc987已实际成功：同一Agent55905206c067de2143616e5aaea52277从fa049fd切到fb68857，目标AMD64包SHA256为38a1ca15901035accbe8eaa633072620b57c7484ff3de4545a8ba522087b5289。页面回读当前发行fb68857、在线和完整管理。旧卸载计划ab062d58b60ba86ede6add29a9af9c0a因审阅超时已取消，未执行；重新生成新鲜计划继续标准卸载/重装验收。
+
+新版标准卸载701745a7447c07f69f66b21a42ed6f7a已成功：页面进度100%，远端确认移除，Agent配置/身份/缓存保留，55905206c067de2143616e5aaea52277的2条control/data凭据撤销，主机显示Agent已移除。未删除业务数据；随后归档退役Agent配置和状态（业务operations目录排除）后按平台重新安装。

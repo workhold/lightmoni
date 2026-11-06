@@ -1,6 +1,7 @@
 import type { ReconciliationRegistry } from "../reconciliation/registry.js";
 import {machineServiceAddresses} from "../server/host-network.js";
 import {applicationUpgrade,registerApplicationUpgrades} from './application-upgrades.js';
+import {registerInstanceRecoveryReview} from './instance-recovery.js';
 import {createApplicationTerminals} from './application-terminals.js';
 import {createQuickInstall} from './quick-install.js';
 import {registerImageSources} from './image-sources.js';
@@ -83,6 +84,7 @@ export function registerOperationsPlatform(
   domains.push({actions:()=>[],perform:async()=>fail(400,'unsupported_registry_action'),tick:privateRegistry.tick});
   privateRegistry.register(safe);
   registerImageSources(store,safe);
+  registerInstanceRecoveryReview(store,safe);
   registerObservability(deps, store, safe, options.jobs);
   const resolveContainerTarget=createApplicationTerminals(store,safe);
   // Include rejection responses in the no-store boundary, before the admin guard.
