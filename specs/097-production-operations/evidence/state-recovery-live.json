@@ -1,0 +1,21 @@
+{
+  "machine": "zz-bj-1",
+  "recovery_id": "c77eb5182fe88c80a625a399c4df79fd",
+  "status": "succeeded",
+  "finished_at": "2026-11-06T00:07:56.119Z",
+  "corrected_records": 10,
+  "credentials_revoked": 2,
+  "old_agent_state": "removed",
+  "old_agent_active_credentials": 0,
+  "audited_job_states": {
+    "unknown": 5
+  },
+  "data_retained": true,
+  "business_data_retained": true,
+  "verification": "Production UI reviewed both pages and applied; readonly SQLite readback confirmed durable receipt, lifecycle, old credential count and original job states.",
+  "reinstall": {
+    "plan_id": "abb0c9e13054c6275af223a002eef33c",
+    "status": "unknown",
+    "diagnostic": "Remote command exited 1; readonly host shows services absent, no helper/program/lifecycle lock, empty config/state directories. Cause under investigation."
+  }
+}
