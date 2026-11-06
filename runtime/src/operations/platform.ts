@@ -1289,6 +1289,7 @@ export function renderGateway(c: any, digest: string, preview = false): string {
     ];
   for (const site of sites) {
     const siteID = safeID(site.id),
+      websiteID = safeID(site.website_id ?? site.id),
       proof = hash(JSON.stringify(site));
     const domains = strings(site.domains, "domain", 50);
     if (
@@ -1317,7 +1318,7 @@ export function renderGateway(c: any, digest: string, preview = false): string {
       "  server {",
       `    listen ${port(c.http_port ?? 80)};`,
       `    server_name ${domains.join(" ")};`,
-      `    set $lightmoni_website_id "${siteID}";`,
+      `    set $lightmoni_website_id "${websiteID}";`,
       `    location = /.well-known/lightmoni-health { allow 127.0.0.1; allow ::1; deny all; access_log off; default_type text/plain; return 200 ${quote(proof)}; }`,
     );
     if(auth.mode==='basic')lines.push(`auth_basic ${quote(auth.realm)};`,`auth_basic_user_file ${quote(authBase+"/site.htpasswd")};`,"satisfy all;");
