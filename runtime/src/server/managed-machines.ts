@@ -949,7 +949,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       const message = redact(error instanceof Error ? error.message : "部署失败", [enrollment?.token_display_once ?? "", privateKey, password]);
       if(dispatched){
         const diagnostic=error instanceof SSHError?error.remoteFailure:undefined;
-        const reasons={ordinary_agent_privilege_violation:"远端检测到普通 Agent 账户拥有禁止的高权限，请检查其附加组、capabilities 和 Docker socket 访问",agent_account_invalid:"远端检测到 Agent 运行账户不符合安装要求",remote_command_failed:"远端安装命令非零退出"};
+        const reasons={ordinary_agent_privilege_violation:"远端检测到普通 Agent 账户拥有禁止的高权限，请检查其附加组、capabilities 和 Docker socket 访问",agent_account_invalid:"远端检测到 Agent 运行账户不符合安装要求",ordinary_task_identity_check_failed:"远端无法核实普通任务的完整降权，请检查 setpriv 与内核能力兼容性",remote_command_failed:"远端安装命令非零退出"};
         const detail=diagnostic?`；${reasons[diagnostic.remote_reason_code]}（SSH 退出码：${diagnostic.remote_exit_code??"未知"}）`:"";
         const failure="Agent 安装结果未知，请只读核对远端状态或人工检查后明确结束；不会自动重试"+detail;
         const saved=db.run("UPDATE machine_deployments SET status='unknown',error=?,receipt_json=? WHERE id=? AND status IN ('running','unknown') AND resolved_at=''",failure,JSON.stringify({stages:["bootstrap_dispatched"],enrollment_id:enrollment?.enrollment_id||"",error:failure,...(diagnostic?{diagnostic}:{})}),deployment.id);

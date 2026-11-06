@@ -29,3 +29,9 @@
 旧安装预检：zz-bj-1 实测仍为 root 常驻、无统一 helper 的历史安装，unit SHA 为19f0b122…，不是当前统一生命周期。补固定旧版识别和明确拒绝指引；对无法验证的安装返回固定错误码，不用通用SSH失败掩盖实际原因，也不绕过新安装边界。
 
 端点恢复：单一公网入口发送失败会被冷却30秒；发现阶段即使已重新验证同中心身份和认证清单，旧冷却仍能把刚验证成功的入口排除。共享SDK/Agent选择器应只在完整有效认证清单成功后解除该source冷却；传输正文仍按原持久批次重试，不在选择器内部重放POST。鉴权失败、身份不符、清单无效和TLS失败均不能解除冷却或放宽信任。
+
+## CentOS 旧能力库兼容
+
+只读实测旧 `setpriv ... --*-caps=-all` 返回 127（libcap-ng is too old for all caps）；使用内核 cap_last_cap=40 展开 -cap_0 至 -cap_40 后，UID/GID=994/991、附加组空、NoNewPrivs=1、CapInh/Prm/Eff/Bnd/Amb 全零。共享 ordinaryTaskCommand 从 /proc/sys/kernel/cap_last_cap 读取严格的 0..63 整数，为 bounding/inheritable/ambient 使用同一完整编号集；核验探针和每次实际任务共用，不持久缓存。原有实际身份核验仍强制五集合全零，错误时不执行脚本；新增固定诊断码，不透出原始 SSH 输出。
+
+此处改动执行参数与故障诊断，权限边界不变；本地 docs/system-design.md 第 97 节同步。依据 util-linux 2.32.1 的 setpriv do_caps 实现（https://github.com/util-linux/util-linux/blob/v2.32.1/sys-utils/setpriv.c），数字语法为 cap_N；是否完整清除仍由实际 /proc 观测确认。

@@ -16,6 +16,6 @@
   "reinstall": {
     "plan_id": "abb0c9e13054c6275af223a002eef33c",
     "status": "unknown",
-    "diagnostic": "Remote command exited 1; readonly host shows services absent, no helper/program/lifecycle lock, empty config/state directories. Cause under investigation."
+    "diagnostic": "Remote command exited 1 and rollback completed. Fixed readonly probe reproduced setpriv/libcap-ng all-caps incompatibility (exit 127); kernel cap_last_cap=40, complete explicit cap_N removal yielded correct UID/GID, no supplementary groups, NNP=1 and all five capability masks zero. Fixed release installation remains pending."
   }
 }
