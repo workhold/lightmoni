@@ -18,3 +18,5 @@ AMD64/ARM64各50项成品检查通过，按架构摘要回拉的RootFS/Config与
 正常升级b9312a102a57a8f9169c8fce4c9cc987已实际成功：同一Agent55905206c067de2143616e5aaea52277从fa049fd切到fb68857，目标AMD64包SHA256为38a1ca15901035accbe8eaa633072620b57c7484ff3de4545a8ba522087b5289。页面回读当前发行fb68857、在线和完整管理。旧卸载计划ab062d58b60ba86ede6add29a9af9c0a因审阅超时已取消，未执行；重新生成新鲜计划继续标准卸载/重装验收。
 
 新版标准卸载701745a7447c07f69f66b21a42ed6f7a已成功：页面进度100%，远端确认移除，Agent配置/身份/缓存保留，55905206c067de2143616e5aaea52277的2条control/data凭据撤销，主机显示Agent已移除。未删除业务数据；随后归档退役Agent配置和状态（业务operations目录排除）后按平台重新安装。
+
+新安装 f44bf6f4da78aea21e005ec0a181109e 于 2026-11-06T04:10:27.893Z 成功；只读数据库回读当前 Agent 9cad2b3aabbd115280c2f4eba67733fe、AMD64、helper cd75db8f-fb42-4990-a31a-e89cfe8ee610、安装代次4及 active 状态。08:27:09Z/08:27:19Z 的 Agent/helper 新鲜心跳、当前 Agent 零遗留作业，与成功安装页面相符。原三个业务容器和 operations 数据目录保留。
