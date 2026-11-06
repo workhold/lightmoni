@@ -2497,8 +2497,10 @@ export function createClusterWorkloads(
         healthy = 0;
         db.run("DELETE FROM ops_platform_ports WHERE instance_id=?", i.id);
       } else {
+        const removed = inspection && i.desired_state === 'removed' &&
+          (run.result.present === false || Array.isArray(run.result.containers) && run.result.containers.length === 0);
         state =
-          run.result.running === false ||
+          removed ? 'removed' : run.result.running === false ||
           run.result.containers?.length === 0 ||
           run.result.containers?.every((c: Row) => c.running === false)
             ? "stopped"
@@ -2548,9 +2550,9 @@ export function createClusterWorkloads(
       if (!inspection) state = run.state === "unknown" ? "unknown" : "failed";
       healthy = 0;
     }
-    const failed = !logs && (run.state !== "succeeded" || !healthy);
+    const failed = !logs && (run.state !== "succeeded" || i.desired_state === 'running' && !healthy);
     if (!logs) db.run("UPDATE ops_cluster_instances SET failure_since=?,last_ready_at=? WHERE id=?",
-      healthy ? '' : i.failure_since || at(), healthy ? at() : i.last_ready_at, i.id);
+      !failed ? '' : i.failure_since || at(), healthy ? at() : i.last_ready_at, i.id);
     db.run(
       "UPDATE ops_cluster_instances SET state=?,healthy=?,last_seen=?,observed_generation=?,observed_json=?,last_bundle_sig=?,health_failures=?,restart_count=?,updated_at=? WHERE id=?",
       state,

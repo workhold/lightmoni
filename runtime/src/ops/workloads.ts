@@ -1,6 +1,7 @@
 import {prepareApplicationYAML,stripComposeExtensions} from './application-yaml.js';
 import {publicWebsiteSpec} from './website-auth.js';
 import {registryCacheFor} from './registry-runtime.js';
+import {desiredJSON} from '../shared/desired-state.js';
 import {createClusterWorkloads} from './cluster-workloads.js';
 import {fail} from '../shared/http.js';
 import type {DomainController,PlatformOptions} from './types.js';
@@ -62,7 +63,7 @@ export function createWorkloadController(options: PlatformOptions & {ensureCerti
       if(!config.image_cache)return;
       const machineID=deps.db.get<{id:string}>('SELECT id FROM managed_machines WHERE agent_id=?',agentID)?.id;
       const expected=registryCacheFor(store,{...resource,spec:{...resource.spec,cluster_id:config.cluster_id}},machineID);
-      if(JSON.stringify(expected)!==JSON.stringify(config.image_cache))fail(409,'private_registry_cache_policy_changed');
+      if(desiredJSON(expected)!==desiredJSON(config.image_cache))fail(409,'private_registry_cache_policy_changed');
     },
     validate(spec,previous,context) {
       return workloads.validateApplication(preserveEnvironment(prepareApplicationYAML(spec,previous),previous),previous,context);
