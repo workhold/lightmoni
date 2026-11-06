@@ -24,4 +24,6 @@
 
 ## 线上更新
 
-通过既有 1Panel 容器编辑流程指定固定镜像，保留 `lightmoni_lightmoni-state-v2-2:/data` 和端口/网络。最终镜像、健康与恢复回执继续记录于 live-matrix.md。
+通过既有 1Panel 容器编辑流程指定固定镜像，保留 `lightmoni_lightmoni-state-v2-20261103:/data` 和端口/网络。最终镜像、健康与恢复回执继续记录于 live-matrix.md。
+
+2026-11-06 08:06:49 CST 替换容器启动成功。随后实际 docker inspect 核对固定标签、主干修订 81f3c47、仓库索引摘要 355548f7… 和 healthy，原 /data 数据卷保持不变。1Panel 的历史标签不作为真实成品依据。
