@@ -40,6 +40,8 @@ POST /api/v1/machines/:id/workload-recoveries/plan(reason) 冻结主机、当前
 
 ## Cache policy and catalog host ports
 
+单容器 command=[]、entrypoint=[] 与未提供覆盖等价，继承镜像默认值；非空覆盖严格比较，Compose 显式空列表继续保留。旧 state 的一次正常重新收敛不改变数据位置。
+
 缓存策略比较忽略 JSON 对象字段顺序及未序列化的 undefined，不忽略实际字段、值或额外字段；真实变化继续返回 private_registry_cache_policy_changed。Gitea 新建默认 host_ports.ssh=2222、容器 22，环境 SSH_PORT=2222；显式固定覆盖须同步克隆端口，0 继续拒绝。已有资源和普通集群容量门禁不变。
 
 成功只读 inspect 在 desired_state=removed 且 present=false 或 containers=[] 时保留 removed；停止容器不等于移除。成功 stopped/removed 观测不累加运行健康失败，running 下的缺失与失败/未知回执仍失败。
