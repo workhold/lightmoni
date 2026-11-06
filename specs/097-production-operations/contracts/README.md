@@ -32,6 +32,8 @@
 
 ## Workload recovery after Agent reinstallation
 
+workload.inspect.configuration_matches 按 Docker Compose 的真实命名卷身份判断。默认项目范围卷、显式 name、external 卷分别解析；错误前缀、错误来源或读写权限必须为 false，不可为消除误报而省略卷检查。依据 https://docs.docker.com/reference/compose-file/volumes/ 与 https://docs.docker.com/compose/intro/compose-application-model/。
+
 proof.action 可为 restore_binding、retire_absent 或 retire_retained。retire_retained 仅适用于中心期望 removed、无容器且固定目录存在的旧实例；仅退役中心记录、释放端口，receipt.data_retained=true、remote_writes=false，保留原目录与原身份审计。两次只读证据必须相同；运行期望且缺失受管状态继续拒绝。前端完整展示原目录和“退役已移除记录，保留原目录”影响。
 
 POST /api/v1/machines/:id/workload-recoveries/plan(reason) 冻结主机、当前 Agent、全部旧实例、资源修订、端口与期望，生成只读核验任务；GET 同路径 /:operation 返回准备、待审批和最终状态。POST /:operation/apply(revision,confirm) 仅接受已审阅的同一 5 分钟计划，重新只读核验后原子应用；POST /:operation/cancel 只取消未执行计划。所有端点管理员、no-store，任务通过既有签名执行权限与身份门禁。重复 apply 回读原事务，不重复绑定；旧回执不能覆盖新绑定。远端仅固定 Docker ps/inspect 及固定受管目录 lstat/read，摘要不含原始配置、环境、凭据或业务内容。成功只恢复管理绑定与保持数据位置，后续正常控制器验证真实状态。

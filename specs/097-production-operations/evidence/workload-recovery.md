@@ -15,3 +15,5 @@
 - 生产只读格式核查仅输出状态身份、版本、摘要长度及文件存在性，未输出配置或业务内容：现存 gateway/workload 状态均 version=1、UID=0、摘要长度64，资源和实例身份吻合；workload 的 manifest 存在，gateway 有固定 image。
 
 新增架构数据路径与存储表已同步 docs/system-design.md，规格、设计、契约和 T020 同步更新。按用户要求仅维护本地设计，不同步 Doca。固定发行、当前 Agent 升级和实际绑定恢复仍待继续验收。
+
+生产最终成功计划 0e241a8184641ecfede9c3623d66e92f：当前 Agent 9cad2b3aabbd115280c2f4eba67733fe（正常升级 953c268fd1c5c3c4ced93009709f16a5，目标9956d29）；Registry、OpenResty、SDD091 快速安装各一个原容器及实际 bind/volume 挂载通过两次只读核验。DBX、Gitea 的无容器已移除记录使用 retire_retained 保留原目录。完整审阅并输入主机名后，实际页面回读“应用绑定已恢复”，持久 status=succeeded、data_retained=true、remote_writes=false。后续正常对账确已派发；业务健康另发现命名卷巡检误报，转 T022，不把绑定成功等同业务通过。

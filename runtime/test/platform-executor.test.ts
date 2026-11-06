@@ -434,3 +434,20 @@ test('workload inspection compares live Docker fields and actual managed file by
   container.Config.Env=['VALUE=drift'];assert.equal((await inspect()).data.configuration_matches,false);container.Config.Env=['VALUE=expected'];
   await writeFile(join(service.volumes[0].source,'config.json'),'drift');assert.equal((await inspect()).data.configuration_matches,false);
 });
+
+test('workload inspection resolves Compose scoped, named and external volume identities and still rejects foreign volumes and access drift',async t=>{
+ const {renderManifest}=await import('../src/operations/platform.js'),{desiredHash}=await import('../src/shared/desired-state.js'),{hash}=await import('../src/operations/website-files.js');
+ for(const [definition,name] of [[{},'lm-volume-check_data'],[{name:'explicit-data'},'explicit-data'],[{external:true},'data'],[{external:true,name:'external-data'},'external-data']] as const){
+  const f=await setup(t),id='volume-check',app=normalizeApplication({mode:'compose',compose:{services:{db:{image:'example:1',volumes:[{type:'volume',source:'data',target:'/data'}]}},volumes:{data:definition}}});
+  const manifest=await renderManifest(f.context,id,app,1),root=join(await privateRoot(f.context,'platform'),'workloads',id),path=join(root,'compose.json');
+  await writeFile(path,JSON.stringify(manifest));await writeFile(join(root,'state.json'),JSON.stringify({manifest:path,digest:hash(JSON.stringify(manifest)),configuration_hash:desiredHash(app)}));
+  const mount:any={Type:'volume',Name:name,Source:'/var/lib/docker/volumes/'+name+'/_data',Destination:'/data',RW:true};
+  const container={Id:'a'.repeat(64),Config:{Image:'example:1',Labels:{...manifest.services.db.labels,'com.docker.compose.service':'db'}},State:{Running:true,Status:'running'},HostConfig:{ReadonlyRootfs:false,PortBindings:{}},Mounts:[mount]};
+  const context={...f.context,command:async(_file:string,args:string[])=>({stdout:args[0]==='ps'?container.Id:args[0]==='inspect'?JSON.stringify([container]):'',stderr:''})};
+  const inspect=()=>executePlatform(payload({task:'workload.inspect',instance_id:id,application:app}),context);
+  assert.equal((await inspect()).data.configuration_matches,true,JSON.stringify(definition));
+  mount.Name='another-project_'+name;assert.equal((await inspect()).data.configuration_matches,false);mount.Name=name;
+  mount.RW=false;assert.equal((await inspect()).data.configuration_matches,false);mount.RW=true;
+  assert.equal((await inspect()).data.configuration_matches,true);
+ }
+});
