@@ -343,8 +343,9 @@ function proofFor(store:PlatformStore,row:Row,run:PlatformRun,config:Row){
    ||typeof p.data_path!=='string'||p.data_path.length>1024||!p.data_path.endsWith('/'+(entry.role==='openresty'?'gateways':'workloads')+'/'+entry.instance_id)
    ||!/^[a-f0-9]{64}$/.test(p.inventory_sha256)||!(p.state_sha256===''&&!p.managed_state||p.managed_state&&/^[a-f0-9]{64}$/.test(p.state_sha256)))fail(409,'workload_recovery_invalid_proof');
   const retire=!p.containers.length&&!p.data_present&&!p.managed_state&&(!entry.last_ready_at||entry.desired_state==='removed');
-  if(!retire&&(!p.managed_state||!p.data_present))fail(409,'workload_recovery_managed_state_required');
-  return {...p,action:retire?'retire_absent':'restore_binding'};
+  const retained=entry.desired_state==='removed'&&!p.containers.length&&p.data_present;
+  if(!retire&&!retained&&(!p.managed_state||!p.data_present))fail(409,'workload_recovery_managed_state_required');
+  return {...p,action:retire?'retire_absent':retained?'retire_retained':'restore_binding'};
  });
 }
 function recordReview(store:PlatformStore,run:PlatformRun,config:Row){
@@ -369,7 +370,7 @@ function recordReview(store:PlatformStore,run:PlatformRun,config:Row){
  for(const p of proof){
   const old=original.instances.find((i:Row)=>i.instance_id===p.instance_id),i=db.get<Row>('SELECT * FROM ops_cluster_instances WHERE id=?',p.instance_id)!;
   const audit={plan_id:row.id,previous_agent_id:i.agent_id,current_agent_id:row.agent_id,actor:row.approved_by,reason:row.reason,verified_at:at,inventory_sha256:p.inventory_sha256,data_path:p.data_path,action:p.action};
-  if(p.action==='retire_absent'){
+  if(p.action==='retire_absent'||p.action==='retire_retained'){
    db.run("UPDATE ops_cluster_instances SET retired=1,state='removed',healthy=0,serving=0,current_run_id='',observed_json=?,updated_at=? WHERE id=?",JSON.stringify({...JSON.parse(i.observed_json),agent_recovery:audit}),at,i.id);
    db.run('DELETE FROM ops_platform_ports WHERE instance_id=?',i.id);
   }else{

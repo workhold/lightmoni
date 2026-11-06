@@ -16,3 +16,5 @@ OCI index：sha256:a934c69acef902779f82d4805521f1e318efbf078fa0faba52022aed4fe3c
 固定候选已发布，stable latest 保持 sha256:1435938eacd969554e581b1cce0b996ff36ac6e1b886c9fc42e5b21e231a5a51。完整 Agent/SDK 包包含于镜像和中心下载服务；GitHub 附件提供校验报告。设计仅维护本地仓库文档。
 
 生产 1Panel 更新、当前 zz-bj-1 Agent 升级、旧应用核验/复验恢复及后续健康仍待实际验收，不提前标记 T020 完成。
+
+PR115 已合入（6577e6847d52f9bc69eb23744c73711e4dba381d）。1Panel 于 2026-11-06 17:34:26 发起更新、17:36:27 启动替换容器、17:36:43 确认就绪。实际 docker inspect 回读固定 tag、完整 9956d29 源码修订、上述 a934c69 OCI index、healthy 和原卷 lightmoni_lightmoni-state-v2-20261103:/data 一致。

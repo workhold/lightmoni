@@ -2054,3 +2054,30 @@ test('only reviewed empty records without prior running data are retired; fresh 
   else{assert.equal(final.status,'succeeded');assert.equal(final.receipt.instances[0].action,'retire_absent');const row=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id=?',old.id);assert.equal(row.retired,1);assert.equal(row.desired_state,old.desired_state);assert.equal(f.db.get('SELECT * FROM ops_platform_ports WHERE instance_id=?',old.id),undefined);}
  }
 });
+
+test('removed records with retained directories retire without blocking verified bindings; active intent and changed evidence still refuse',async t=>{
+ for(const mode of ['mixed','running','new-container','intent-changed']){
+  const f=await reviewFixture(t,2),old=f.db.get<any>('SELECT * FROM ops_cluster_instances ORDER BY id LIMIT 1');
+  if(mode!=='running')f.db.run("UPDATE ops_cluster_instances SET desired_state='removed' WHERE id=?",old.id);
+  const p=await f.create(),proof=f.proof(p),retained=proof.instances.find((i:any)=>i.instance_id===old.id)!;
+  Object.assign(retained,{containers:[],managed_state:false,state_sha256:''});
+  f.finish('c',proof);const ready=await f.read(p);
+  if(mode==='running'){assert.equal(ready.status,'failed');assert.equal(ready.error,'workload_recovery_managed_state_required');continue;}
+  assert.equal(ready.status,'awaiting_approval');assert.equal(ready.proof.find((i:any)=>i.instance_id===old.id).action,'retire_retained');
+  if(mode==='intent-changed'){
+   f.db.run("UPDATE ops_cluster_instances SET desired_state='running' WHERE id=?",old.id);
+   assert.equal((await f.apply(ready)).body.error,'workload_recovery_target_changed');continue;
+  }
+  assert.equal((await f.apply(ready)).status,200);
+  const finalProof=structuredClone(proof);finalProof.stage='apply';
+  if(mode==='new-container')Object.assign(finalProof.instances.find((i:any)=>i.instance_id===old.id),{containers:['d'.repeat(64)],managed_state:true,state_sha256:'b'.repeat(64),inventory_sha256:'e'.repeat(64)});
+  f.finish('c',finalProof);const done=await f.read(p),row=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id=?',old.id);
+  if(mode==='new-container'){assert.equal(done.status,'failed');assert.equal(done.error,'workload_recovery_inventory_changed');assert.equal(row.retired,0);assert.ok(f.db.all<any>('SELECT agent_id FROM ops_cluster_instances').every(i=>i.agent_id==='a'));continue;}
+  assert.equal(done.status,'succeeded');assert.equal(done.receipt.data_retained,true);assert.equal(done.receipt.remote_writes,false);
+  assert.equal(row.agent_id,'a');assert.equal(row.retired,1);assert.equal(row.desired_state,'removed');assert.equal(row.state,'removed');
+  assert.equal(JSON.parse(row.observed_json).agent_recovery.action,'retire_retained');
+  assert.equal(f.db.get('SELECT * FROM ops_platform_ports WHERE instance_id=?',old.id),undefined);
+  const other=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id!=?',old.id);assert.equal(other.agent_id,'c');assert.equal(other.retired,0);
+  assert.equal(done.receipt.instances.find((i:any)=>i.instance_id===old.id).data_path,retained.data_path);
+ }
+});
