@@ -17,6 +17,15 @@ const gateway = (site: any) =>
     "preview",
     true,
   );
+test('website access logs use the resource identity while directories keep the binding fragment',()=>{
+ const websiteID='b'.repeat(32);
+ const config=gateway({website_id:websiteID,mode:'static',locations:[]});
+ assert(config.includes('set $lightmoni_website_id "'+websiteID+'";'));
+ assert(config.includes('/sites/'+id+'/public'));
+ assert(!config.includes('/sites/'+websiteID+'/public'));
+ assert(gateway({locations:[]}).includes('set $lightmoni_website_id "'+id+'";'));
+ for(const value of ['', '../site', 'site"; return 200; #'])assert.throws(()=>gateway({website_id:value,locations:[]}),/INVALID_RESOURCE_ID/);
+});
 test("Nginx routes distinguish exact, longest-prefix and ordered regex with explicit URI behavior", () => {
   const config = gateway({
     locations: [

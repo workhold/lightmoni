@@ -47,3 +47,6 @@ POST /api/v1/machines/:id/workload-recoveries/plan(reason) 冻结主机、当前
 缓存策略比较忽略 JSON 对象字段顺序及未序列化的 undefined，不忽略实际字段、值或额外字段；真实变化继续返回 private_registry_cache_policy_changed。Gitea 新建默认 host_ports.ssh=2222、容器 22，环境 SSH_PORT=2222；显式固定覆盖须同步克隆端口，0 继续拒绝。已有资源和普通集群容量门禁不变。
 
 成功只读 inspect 在 desired_state=removed 且 present=false 或 containers=[] 时保留 removed；停止容器不等于移除。成功 stopped/removed 观测不累加运行健康失败，running 下的缺失与失败/未知回执仍失败。
+# Gateway site identity
+
+受管 gateway config.sites[].id 继续标识域名分组、目录与证书；新增 sites[].website_id 标识真实网站资源。结构化访问日志 website_id 使用该字段，缺失时兼容旧 id。非法显式 website_id 必须拒绝。中心仍只接收当前 OpenResty/集群有权观测的网站；历史片段日志保持容器日志，不追溯改写或放宽归属校验。

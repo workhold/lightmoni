@@ -2459,6 +2459,8 @@ Agent 只使用当前认证心跳中相同 agent_id 的 machine_name/machine_id�
 
 受管容器及网站日志/指标仍先按 deployment/application/machine 和 Agent 身份核验，中心再从受信主机与应用记录写入 machine_name、service_name 及 resource_json 中的 host.name/service.name；不可用伪造容器标签或 SDK 名称扩展权限。服务名缺失时使用应用名，不把随机应用 ID 当可读服务名。业务 SDK 既有机器名环境注入和服务配置保持兼容。
 
+网关的每个域名分组保留独立 sites[].id，用于路由命名、静态文件、认证和证书目录；sites[].website_id 指向原网站资源，结构化访问日志以此写入 website_id，供中心按网站登记和集群归属核验。旧载荷缺少 website_id 时兼容原 id；新字段必须通过固定 ID 校验。历史分组 ID 日志保留为容器日志，不追溯改写或扩大网站观测权限。
+
 规格、契约、维护队列和名称回归、线上逐项矩阵见 `specs/097-production-operations/`。本轮后续架构变更与同一 PR 的本地设计保持一致；此前完成的在线同步证据保留作历史记录。
 
 中心内部 Agent heartbeat/运行事件投影同样从受信 managed_machines/agents 绑定补 host.name、lightmoni.machine_id 和名称属性；不依赖旧 Agent 已实现新名称字段。内置 Agent/SDK 大盘和通用主机模板以机器名/服务名及短ID区分同名实例，稳定完整ID仍保留原列。SQLite system_dashboard_seeds 使用 readable-telemetry-097-v1 一次标记，只有仍精确匹配旧配方的内置查询才刷新，并追加 dashboard_versions；用户SQL、标题、布局、设置和已删除大盘均保留，后续启动不覆盖用户再次编辑。

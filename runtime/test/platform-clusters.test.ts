@@ -837,7 +837,9 @@ test("OpenResty singleton and website application references enforce cluster and
     () => f.store.create("website", "Bad", website(a, "absent"), "admin"),
     /application_port_not_found/,
   );
-  const site = f.store.create("website", "API", website(a), "admin");
+  const websiteSpec = website(a);
+  websiteSpec.bindings.push({...websiteSpec.bindings[0],domains:['api-second.example.test']});
+  const site = f.store.create("website", "API", websiteSpec, "admin");
   assert.deepEqual(site.spec.cluster_ids, [c.id]);
   assert.throws(
     () =>
@@ -871,6 +873,10 @@ test("OpenResty singleton and website application references enforce cluster and
     result.payload.resource.config.sites[0].locations[0].upstreams.length,
     1,
   );
+  const fragments=result.payload.resource.config.sites;
+  assert.equal(fragments.length,2);
+  assert.notEqual(fragments[0].id,fragments[1].id);
+  assert(fragments.every((fragment:any)=>fragment.website_id===site.id&&fragment.id!==site.id));
   assert.equal(f.store.get(site.id).status.active, true);
 });
 test("HTTP returns stable machines and scoped resources, denies member access and new legacy resources", async (t) => {

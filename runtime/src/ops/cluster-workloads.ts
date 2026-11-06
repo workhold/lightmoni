@@ -1855,6 +1855,7 @@ export function createClusterWorkloads(
       }
       return {
         id: hash(site.id + ":" + n).slice(0, 32),
+        website_id: site.id,
         domains,
         mode: site.spec.mode === "static" ? "static" : "proxy",
         locations: routes,
