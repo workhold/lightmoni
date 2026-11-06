@@ -2478,3 +2478,7 @@ TypeScript（含Agent）、Go、Python、Rust的端点选择器在一次完整�
 ### 旧 libcap-ng 与当前内核的普通任务降权
 
 共享 task-runner 按内核 /proc/sys/kernel/cap_last_cap 的严格 0..63 上界展开 cap_N 编号，向 setpriv 的 bounding/inheritable/ambient 三类参数传入完整清除集合。避免旧库对 all 的编译期能力上界检查阻止安装；不省略清除或引入 root 任务回退。安装时的真实身份探针和每次任务使用同一参数构造；专用非 root UID/GID、空附加组、NoNewPrivs=1 与五种能力集合全零的实际核验继续强制。无效内核信息或执行核验失败明确拒绝，并只对中心公开固定安全诊断。
+
+### 内部运行遥测的显式导出器
+
+RuntimeMonitor 使用 TypeScript SDK 的显式 exporter 回调直接进入 Ingest.internal，不使用 HTTP Bearer。SDK 的缺少 HTTP Key 门禁只适用于默认 HTTP 传输，不能静默丢弃已经配置回调的系统批次。匿名 SDK 自身诊断继续抑制，禁用/冻结重试和网络接收端系统表鉴权保持；未新增凭据、网络入口或权限。中心心跳、堆与请求指标通过同一既有内部表与查询路径验收真实新数据。

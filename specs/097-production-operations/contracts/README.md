@@ -25,3 +25,7 @@
 ## Ordinary task capability drop
 
 只信任内核 cap_last_cap 的规范非负整数（0..63）。降权命令同时清除 0 至该上界的 bounding/inheritable/ambient 能力，保留专用 UID/GID、空附加组及 no-new-privs；实际核验五种能力集合均为零。缺失、格式错误或超界均失败，不能通过默认值、截断或保留能力继续。SSH 只返回固定 ordinary_task_identity_check_failed 诊断，不返回远端原文。
+
+## Internal exporter
+
+显式配置 exporter 的 SDK 必须把冻结后的系统表批次交给该回调，无需额外 HTTP Key；此回调不授予中心网络接口权限。未配置 exporter 的默认 HTTP 通道缺少 Key 时继续抑制系统表发送。匿名 collectSelf 仍不产出诊断；全局禁用、取消、持久批次 ID/正文重试及服务端认证不变。中心内存导出集成与发行验收需查到当前实例的新鲜 heartbeat/heap 指标。

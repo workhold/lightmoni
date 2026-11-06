@@ -199,3 +199,29 @@ test('unbound clients select business tables per write and anonymous SDK emits n
   if(!key)assert.equal(batches.length,2);
  }
 });
+
+test('explicit internal exporters deliver system metrics and logs without an HTTP key',async()=>{
+ const {batches,exporter}=captured(),mon=createLightMoni({service:'lightmoni-center',table:'lightmoni',key:'',exporter,selfTelemetry:false,remoteConfig:false,intervalMs:60000});
+ try{
+  mon.gauge('lightmoni.center.heartbeat').record(1);
+  mon.counter('lightmoni.center.ingest_requests').add(2);
+  mon.histogram('lightmoni.center.ingest_duration').record(2.5);
+  mon.log('info','internal callback delivered',{'lightmoni.component':'center'});
+  await mon.flush();
+  assert.equal(batches.length,2,'explicit callback must receive both metrics and logs');
+  assert.ok(batches.every(b=>b.table==='lightmoni'));
+  const metrics=decode(batches.find(b=>b.signal==='metrics')!).resourceMetrics[0].scopeMetrics.flatMap((s:any)=>s.metrics);
+  assert.deepEqual(metrics.map((m:any)=>m.name).sort(),['lightmoni.center.heartbeat','lightmoni.center.ingest_duration','lightmoni.center.ingest_requests']);
+  assert.equal(decode(batches.find(b=>b.signal==='logs')!).resourceLogs[0].scopeLogs[0].logRecords[0].body.stringValue,'internal callback delivered');
+  assert.equal(mon.stats().deliveredBatches,2);assert.equal(mon.stats().pendingBatches,0);
+  mon.setReportingEnabled(false);mon.gauge('lightmoni.center.heartbeat').record(2);mon.log('info','disabled');await mon.flush();
+  assert.equal(batches.length,2,'disabled reporting also suppresses explicit internal callbacks');
+ }finally{await mon.shutdown();}
+});
+
+test('default HTTP system telemetry without a key remains suppressed',async t=>{
+ let requests=0;t.mock.method(globalThis,'fetch',async()=>{requests++;throw Error('anonymous system batch must not reach HTTP');});
+ const mon=createLightMoni({service:'anonymous',table:'lightmoni',key:'',endpoint:'http://127.0.0.1:1',selfTelemetry:false,remoteConfig:false,intervalMs:60000});
+ try{mon.gauge('lightmoni.center.heartbeat').record(1);mon.log('info','anonymous');await mon.flush();assert.equal(requests,0);assert.equal(mon.stats().pendingBatches,0);}
+ finally{await mon.shutdown();}
+});
