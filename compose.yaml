@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261105-reconciliation-c332d2a
+    image: docker.heyphp.com/lightmoni/lightmoni:20261106-agent-recovery-81f3c47
     pull_policy: missing
     build:
       context: .
