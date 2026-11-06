@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261106-capability-fa049fd
+    image: docker.heyphp.com/lightmoni/lightmoni:20261106-reconcile-fb68857
     pull_policy: missing
     build:
       context: .
