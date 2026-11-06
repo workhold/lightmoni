@@ -703,7 +703,11 @@ async function workloadConfigurationMatches(context:OperationExecutionContext,id
         const actual=live.HostConfig?.PortBindings??{};
         if(Object.keys(actual).length!==new Set(mappings.map((p:any)=>String(p.target)+'/'+(p.protocol??'tcp'))).size)return false;
         for(const port of mappings)if(!(actual[String(port.target)+'/'+(port.protocol??'tcp')]??[]).some((p:any)=>String(p.HostPort)===String(port.published)&&(p.HostIp||'0.0.0.0')===(port.host_ip||'0.0.0.0')))return false;
-        for(const volume of service.volumes??[])if(volume&&typeof volume==='object'&&!(live.Mounts??[]).some((m:any)=>m.Destination===plain(volume.target)&&m.Type===volume.type&&(volume.type==='volume'?m.Name===plain(volume.source):m.Source===plain(volume.source))&&m.RW===!volume.read_only))return false;
+        for(const volume of service.volumes??[])if(volume&&typeof volume==='object'){
+          const definition=manifest.volumes?.[volume.source];
+          const source=volume.type==='volume'?plain(definition?.name??(definition?.external===true?volume.source:'lm-'+id+'_'+volume.source)):plain(volume.source);
+          if(!(live.Mounts??[]).some((m:any)=>m.Destination===plain(volume.target)&&m.Type===volume.type&&(volume.type==='volume'?m.Name===source:m.Source===source)&&m.RW===!volume.read_only))return false;
+        }
       }
     }
     const root=join(await privateRoot(context,'platform'),'workloads',id);
