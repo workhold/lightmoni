@@ -27,14 +27,16 @@ export function createAvailability(db: DB, now: () => Date, agent: (id: string) 
         i.last_ready_at = i.last_seen;
         i.failure_since = '';
         i.serving = 1;
-      } else if (!identity(i) || i.retired || i.desired_state !== 'running' || i.state === 'removed' || !managed && i.state === 'stopped') {
+      } else if (!identity(i) || i.retired || i.desired_state !== 'running' || managed && i.state === 'removed') {
         i.serving = 0;
-      } else if (!managed && a.spec.role === 'openresty' && i.state === 'queued' && i.healthy === 1 &&
-        clock - Date.parse(agent(i.agent_id)!.last_seen) < 120000 && clock - Date.parse(i.last_seen) < 120000) {
-        i.failure_since = '';
-      } else if (!i.failure_since) {
-        const times = [Date.parse(i.last_seen), Date.parse(agent(i.agent_id)?.last_seen ?? '')].filter(Number.isFinite);
-        i.failure_since = new Date(times.length ? Math.min(...times) : clock).toISOString();
+      } else {
+        if (!i.failure_since) {
+          const times = [Date.parse(i.last_seen), Date.parse(agent(i.agent_id)?.last_seen ?? '')].filter(Number.isFinite);
+          i.failure_since = new Date(times.length ? Math.min(...times) : clock).toISOString();
+        }
+        // Manual membership follows human intent, independently of health. This
+        // also restores members withdrawn by the former health-only policy.
+        if (!managed) i.serving = i.last_ready_at ? 1 : 0;
       }
       // A replacement is never advertised until promotion to its real slot.
       if (String(i.slot).startsWith('surge-')) i.serving = 0;
@@ -44,8 +46,8 @@ export function createAvailability(db: DB, now: () => Date, agent: (id: string) 
     const floor = managed ? minimumAvailable(a) : 0;
     for (const i of result) {
       if (!i.serving || i.ready) continue;
-      if (!managed && !i.failure_since && i.state === 'queued') continue;
-      if (managed && clock - Date.parse(i.failure_since) < graceMilliseconds(a)) i.availability = 'grace';
+      if (!managed) { i.availability = 'retained'; continue; }
+      if (clock - Date.parse(i.failure_since) < graceMilliseconds(a)) i.availability = 'grace';
       else if (count > floor) { i.serving = 0; count--; }
       else i.availability = 'protected';
     }

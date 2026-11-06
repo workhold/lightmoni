@@ -645,7 +645,7 @@ test("duplicate display names use unique immutable transactional service identit
     2,
   );
 });
-test("named ports reserve atomically and matching verified receipts publish fresh endpoints", async (t) => {
+test("named ports reserve atomically and verified manual endpoints survive observation expiry", async (t) => {
   const f = await fixture(t),
     c = f.createCluster(),
     a = f.app(c);
@@ -684,7 +684,7 @@ test("named ports reserve atomically and matching verified receipts publish fres
   assert.equal(
     (await f.req("/resources/" + a.id + "/endpoints?cluster_id=" + c.id)).body
       .endpoints.length,
-    0,
+    2,
   );
 });
 test("manual nodes stay fixed and managed failover waits for grace and ready replacement", async (t) => {
@@ -1834,13 +1834,17 @@ test('click upgrade preserves refresh and HTTP readiness through managed route a
  await f.platform.tick();assert.ok(f.store.actions(a.id).some(r=>r.action==='stop'));
 });
 
-test('registered deployment inventory verifies current content, repairs manual instances and retains desired work while offline',async t=>{
+test('registered deployment inventory reports manual drift until explicit redeploy and retains desired work while offline',async t=>{
   const f=await fixture(t,undefined,true),c=f.createCluster(),app=f.app(c);
   f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
   await f.action(app,'deploy');f.finish('a');f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
   let inspected=f.finish('a',{healthy:false,running:true,configuration_matches:false,containers:[{running:true}]});
   assert.equal(inspected.payload.resource.config.task,'workload.inspect');assert.ok(inspected.payload.resource.config.application);
-  f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();const apply=f.finish('a');assert.equal(apply.payload.resource.config.task,'workload.apply');
+  f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
+  assert.equal(f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===app.id)?.code,'manual_deployment_action_required');
+  assert.equal(f.store.actions(app.id).filter(r=>r.action==='apply').length,1);
+  assert.equal(f.jobs.claim('a',['operations.platform']),null);
+  await f.action(f.store.get(app.id),'deploy');const apply=f.finish('a');assert.equal(apply.payload.resource.config.task,'workload.apply');
   f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();f.finish('a',{healthy:true,running:true,configuration_matches:true,containers:[{running:true}]});
   f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
   let resource=f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===app.id)!;assert.equal(resource.state,'in_sync');assert.equal(resource.summary.ports.length,2);
@@ -1871,4 +1875,54 @@ test('deep reconciliation preserves managed stateful minimum availability and ke
   await old.action(manual,'deploy');old.finish('a');old.advance(31000);old.heartbeat('a');await old.platform.tick();
   const health=old.finish('a');assert.equal(health.payload.resource.config.task,'workload.inspect');assert.equal(health.payload.resource.config.reconciliation_hash,undefined);
   await old.reconciliation.tick();assert.equal(old.reconciliation.inventory('ma').resources[0].code,'reconciliation_agent_upgrade_required');
+});
+
+test('manual published members survive long outages, stopped observations and controller rebuild',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c,{deployments:[{cluster_id:c.id,machine_ids:['ma','mb'],min_available_percent:0}]});
+ await f.action(a,'deploy');f.finish('a');f.finish('b');
+ const before=f.store.get(a.id).status.endpoints;assert.equal(before.length,4);
+ f.advance(7200000);await f.platform.tick();
+ const status=f.store.get(a.id).status;
+ assert.deepEqual(status.endpoints,before);assert.equal(status.deployments[c.id].ready_instances,0);
+ assert.equal(status.deployments[c.id].serving_instances,2);
+ assert.ok(status.instances.every((i:any)=>i.availability==='retained'&&!i.healthy&&i.serving));
+ assert.equal(f.store.actions(a.id).filter(r=>r.action!=='inspect').length,2);
+ // Recover members withdrawn by the previous health-only policy using durable successful evidence.
+ f.db.run("UPDATE ops_cluster_instances SET serving=0,state='stopped',healthy=0 WHERE owner_id=?",a.id);
+ const {createAvailability}=await import('../src/ops/availability.js');
+ const policy=createAvailability(f.db,f.deps.now,id=>f.db.get<any>('SELECT * FROM agents WHERE id=?',id),id=>f.db.get<any>('SELECT agent_id FROM managed_machines WHERE id=?',id)!.agent_id);
+ const restored=policy.refresh({...a,spec:{...a.spec,...a.spec.deployments[0]}},f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id));
+ assert.equal(restored.filter(i=>i.serving).length,2);assert.ok(restored.every(i=>!i.ready&&i.availability==='retained'));
+ assert.deepEqual((await f.req('/resources/'+a.id+'/endpoints?cluster_id='+c.id)).body.endpoints,before);
+ f.db.run("UPDATE managed_machines SET agent_id='replacement' WHERE id='ma'");
+ assert.ok((await f.req('/resources/'+a.id+'/endpoints?cluster_id='+c.id)).body.endpoints.every((e:any)=>e.machine_id==='mb'));
+});
+
+test('manual membership needs prior readiness and explicit stop or removal still withdraws it',async t=>{
+ for(const action of ['stop','remove']){
+  const f=await fixture(t),c=f.createCluster(),a=f.app(c);
+  await f.action(a,'deploy');f.finish('a',{},'failed');
+  assert.equal(f.store.get(a.id).status.endpoints.length,0);
+  await f.action(a,'deploy');f.finish('a');assert.equal(f.store.get(a.id).status.endpoints.length,2);
+  await f.action(a,action);assert.equal((await f.req('/resources/'+a.id+'/endpoints?cluster_id='+c.id)).body.endpoints.length,0);
+  f.finish('a',{running:false,healthy:false,containers:[]});await f.platform.tick();
+  assert.equal(f.store.get(a.id).status.endpoints.length,0);
+ }
+});
+
+test('manual reconciliation never retries failed or uncertain writes without another human action',async t=>{
+ for(const state of ['failed','unknown']){
+  const f=await fixture(t,undefined,true),c=f.createCluster(),a=f.app(c);
+  f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
+  await f.action(a,'deploy');f.finish('a',{},state);
+  for(let n=0;n<4;n++){
+   f.advance(61000);f.heartbeat('a');await f.reconciliation.tick();
+   if(f.db.get("SELECT id FROM agent_jobs WHERE agent_id='a' AND state='queued'")){
+    const inspected=f.finish('a',{healthy:false,running:false,configuration_matches:false,containers:[]});
+    assert.equal(inspected.payload.resource.config.task,'workload.inspect');
+   }
+  }
+  assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,1);
+  assert.equal(f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===a.id)?.code,state==='unknown'?'unknown_execution_result':'manual_deployment_action_required');
+ }
 });

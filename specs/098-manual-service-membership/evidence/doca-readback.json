@@ -1,0 +1,35 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository_section": "docs/system-design.md §93 (SDD098)",
+  "saved": true,
+  "saved_seq": 1750,
+  "latest_read_seq": 1750,
+  "readback": [
+    {
+      "id": "managed093-paragraph-2",
+      "seq": 1750,
+      "matches": true
+    },
+    {
+      "id": "manual098-membership",
+      "seq": 1750,
+      "matches": true
+    },
+    {
+      "id": "manual098-reconciliation",
+      "seq": 1750,
+      "matches": true
+    },
+    {
+      "id": "managed093-flow",
+      "seq": 1750,
+      "matches": true,
+      "nodes": 8,
+      "edges": 9
+    }
+  ],
+  "existing_first_200_blocks_preserved": true,
+  "old_blocks": 938,
+  "new_blocks": 940,
+  "operation_scope": "One existing SDD093 paragraph changed; two SDD098 paragraphs inserted after it. No original block removed or diagram modified."
+}

@@ -1,0 +1,35 @@
+{
+  "baseline": "81f3c47",
+  "checks": [
+    {
+      "command": "node --import tsx --test --test-concurrency=1 test/platform-*.test.ts test/application-*.test.ts test/reconciliation.test.ts test/website-management-state.test.ts test/machine-state-recovery.test.ts",
+      "directory": "runtime",
+      "tests": 230,
+      "pass": 226,
+      "fail": 0,
+      "skipped": 4,
+      "skips": [
+        "﹣ cluster directory synchronization installs the same path independently on two real container Agents (0.060292ms) # SKIP",
+        "﹣ real Docker single-container and Compose versions preserve initial and data files (0.66275ms) # SKIP",
+        "﹣ real host OpenResty serves static HTML and TLS, reloads a full bundle, and returns 503 for empty service discovery (0.044ms) # requires an opted-in Linux executor sharing the Docker host network",
+        "﹣ real host OpenResty applies multi-path URI routing, CORS, headers, WebSocket and rejects a bad reload (0.036ms) # SKIP"
+      ]
+    },
+    {
+      "command": "npm run typecheck && npm run build",
+      "directory": "runtime",
+      "passed": true
+    },
+    {
+      "command": "npm run build",
+      "directory": "web",
+      "passed": true,
+      "note": "Includes TypeScript compilation; existing third-party use-client bundler notices remain."
+    },
+    {
+      "command": "git diff --check",
+      "passed": true
+    }
+  ],
+  "scope": "Real loopback HTTP routes, SQLite controllers, authenticated synthetic Agent receipts and mock DNS provider. No production configuration, cloud DNS write or release activation."
+}
