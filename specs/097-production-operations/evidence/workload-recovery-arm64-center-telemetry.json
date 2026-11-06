@@ -1,0 +1,24 @@
+{
+  "pass": true,
+  "samples": [
+    {
+      "name": "lightmoni.center.heartbeat",
+      "service": "lightmoni-center",
+      "instance_id": "05bedc97-a440-4284-b030-3197ec8fd7af",
+      "samples": "3",
+      "first": 1793954173,
+      "last": 1793954193,
+      "value": 1
+    },
+    {
+      "name": "lightmoni.center.heap_bytes",
+      "service": "lightmoni-center",
+      "instance_id": "05bedc97-a440-4284-b030-3197ec8fd7af",
+      "samples": "3",
+      "first": 1793954173,
+      "last": 1793954193,
+      "value": 68394328
+    }
+  ],
+  "scope": "real center RuntimeMonitor through explicit internal exporter, ClickHouse and authenticated HTTP query"
+}
