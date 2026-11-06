@@ -1,0 +1,42 @@
+{
+  "baseline": "81f3c47",
+  "contract": "Both modes automatically enforce center configuration. Manual placement and membership are fixed; managed placement restores desired replicas with minimum availability protection.",
+  "checks": [
+    {
+      "command": "node --import tsx --test --test-concurrency=1 test/platform-*.test.ts test/application-*.test.ts test/reconciliation.test.ts test/website-management-state.test.ts test/machine-state-recovery.test.ts",
+      "directory": "runtime",
+      "tests": 231,
+      "pass": 227,
+      "fail": 0,
+      "skipped": 4,
+      "skips": [
+        "﹣ cluster directory synchronization installs the same path independently on two real container Agents (0.054917ms) # SKIP",
+        "﹣ real Docker single-container and Compose versions preserve initial and data files (0.5775ms) # SKIP",
+        "﹣ real host OpenResty serves static HTML and TLS, reloads a full bundle, and returns 503 for empty service discovery (0.036625ms) # requires an opted-in Linux executor sharing the Docker host network",
+        "﹣ real host OpenResty applies multi-path URI routing, CORS, headers, WebSocket and rejects a bad reload (0.030958ms) # SKIP"
+      ]
+    },
+    {
+      "command": "npm run typecheck && npm run build",
+      "directory": "runtime",
+      "passed": true
+    },
+    {
+      "command": "npm run build",
+      "directory": "web",
+      "passed": true,
+      "note": "Includes TypeScript compilation; existing third-party use-client bundler notices remain."
+    },
+    {
+      "command": "git diff --check",
+      "passed": true
+    }
+  ],
+  "scope": "Real loopback HTTP routes, SQLite controllers, synthetic authenticated Agent receipts and mock DNS. No production mutation or deployment.",
+  "assertions": [
+    "manual missing containers are recreated on original machine with force_recreate=true, center spec and revision unchanged",
+    "managed machine outage restores three current ready replicas without lowering desired replicas=3 or minimum_available=2",
+    "manual endpoints, upstreams and DNS survive outage and stopped observations; explicit center stop/disable still withdraws them",
+    "old inspect proof cannot acknowledge newer configuration; deep reconciliation applies to both modes"
+  ]
+}

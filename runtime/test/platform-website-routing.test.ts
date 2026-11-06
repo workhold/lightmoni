@@ -949,39 +949,21 @@ for (const protocol of ["http", "https"]) {
     assert.ok(!f.jobs.claim("a", ["operations.platform"]));
     assert.ok(!f.jobs.claim("b", ["operations.platform"]));
 
-    // Health changes must refresh each gateway's own bundle, including local removal.
-    f.db.run(
-      "UPDATE ops_cluster_instances SET healthy=0 WHERE owner_id=? AND machine_id='ma'",
-      app.id,
-    );
+    // Health observations do not alter manual membership or trigger a gateway rewrite.
+    f.db.run("UPDATE ops_cluster_instances SET healthy=0 WHERE owner_id=?",app.id);
     await f.platform.tick();
-    const unhealthyA = f.finish("a").payload.resource.config,
-      unhealthyB = f.finish("b").payload.resource.config;
-    assert.deepEqual(
-      unhealthyA.sites.find((s: any) =>
-        s.domains.includes("managed.example.test"),
-      ).locations[0].upstreams,
-      [`${protocol}://[fd00::2]:${port("mb", "http")}`],
-    );
-    assert.deepEqual(
-      unhealthyB.sites.find((s: any) =>
-        s.domains.includes("managed.example.test"),
-      ).locations[0].upstreams,
-      [`${protocol}://127.0.0.1:${port("mb", "http")}`],
-    );
-    f.db.run(
-      "UPDATE ops_cluster_instances SET healthy=0 WHERE owner_id=?",
-      app.id,
-    );
+    assert.equal(f.jobs.claim('a',['operations.platform']),null);
+    assert.equal(f.jobs.claim('b',['operations.platform']),null);
+    const retained=await f.req('/resources/'+managed.id+'/nginx?cluster_id='+c.id);
+    assert.ok(retained.body.config.includes(`server 10.0.0.1:${port('ma','http')} `));
+    assert.ok(retained.body.config.includes(`server [fd00::2]:${port('mb','http')} `));
+    // Human-selected placement changes still remove the former backend and reload both gateways.
+    const changed=f.store.update(app.id,app.revision,app.name,{...app.spec,deployments:app.spec.deployments.map((d:any)=>({...d,machine_ids:['ma']}))},'admin');
+    await f.action(changed,'deploy');f.finish('a');f.finish('b');
     await f.platform.tick();
-    for (const agent of ["a", "b"]) {
-      const config = f.finish(agent).payload.resource.config;
-      const location = config.sites.find((s: any) =>
-        s.domains.includes("managed.example.test"),
-      ).locations[0];
-      assert.deepEqual(location.upstreams, []);
-      assert.equal(location.unavailable, true);
-      assert.match(renderGateway(config, "empty"), /return 503;/);
+    for(const agent of ['a','b']){
+      const config=f.finish(agent).payload.resource.config;
+      assert.deepEqual(config.sites.find((s:any)=>s.domains.includes('managed.example.test')).locations[0].upstreams,[`${protocol}://${agent==='a'?'127.0.0.1':'10.0.0.1'}:${port('ma','http')}`]);
     }
     // A specific registry-style bind is used even by the local host-network gateway.
     f.db.run("UPDATE ops_cluster_instances SET healthy=1 WHERE owner_id=? AND machine_id='ma'",app.id);
@@ -1662,4 +1644,60 @@ test("draft service changes retain published discovery and its disabled traffic 
     ).enabled,
     0,
   );
+});
+
+test('manual entry and backend keep DNS and upstreams after failures until human withdrawal',async t=>{
+ const dns=dnsMock(),f=await fixture(t,dns.fetcher),c=f.createCluster(['ma']),zone=dnsZone(f);
+ const backend=f.app(c);await f.action(backend,'deploy');f.finish('a');
+ const entry=f.store.create('application','Manual entry',catalogInstallation('openresty',{deployment_mode:'manual',deployments:[{cluster_id:c.id,machine_ids:['ma'],min_available_percent:0,gateway_domain:'manual.edge.example.test',gateway_dns_zone_id:zone.id}]}).spec,'admin');
+ await f.action(entry,'deploy');f.finish('a',{healthy:true,running:true,digest:'entry'});
+ const site=f.store.create('website','Manual backend site',{routing_mode:'managed',service_application_id:backend.id,service_port_name:'http',cluster_ids:[c.id],bindings:[{domains:['manual-site.example.test'],dns_enabled:true,dns_zone_id:zone.id,locations:[{path:'/',action:'proxy'}]}]},'admin');
+ await f.action(site,'deploy');f.finish('a',{healthy:true,running:true,digest:'site'});
+ await f.platform.tick();await settle();
+ const records=()=>dns.records.filter(r=>r.RR==='manual.edge'||r.RR==='manual-site');
+ assert.equal(records().length,2);const before=structuredClone(records());
+ await f.action(backend,'inspect');f.finish('a',{healthy:false,running:false,containers:[]});
+ await f.action(entry,'inspect');f.finish('a',{healthy:false,running:false,containers:[]});
+ f.advance(7200000);await f.platform.tick();await settle();
+ assert.deepEqual(records(),before);assert.equal(dns.calls.filter(c=>c.Action==='DeleteDomainRecord').length,0);
+ assert.equal(f.store.get(entry.id).status.deployments[c.id].ready_instances,0);
+ assert.equal(f.store.get(entry.id).status.deployments[c.id].serving_instances,1);
+ assert.equal(f.store.get(backend.id).status.endpoints.length,2);
+ f.heartbeat('a');
+ const preview=await f.req('/resources/'+site.id+'/nginx?cluster_id='+c.id);
+ assert.equal(preview.status,200,JSON.stringify(preview.body));
+ assert.ok(JSON.stringify(preview.body).includes('10.0.0.1:21000'));
+ assert.equal(f.store.actions(entry.id).filter(r=>['stop','remove'].includes(r.action)).length,0);
+ const disabled=await f.action(site,'disable');assert.equal(disabled.status,202,JSON.stringify(disabled.body));
+ f.finish('a',{healthy:true,running:true,digest:'site-disabled'});
+ await f.platform.tick();await settle();
+ assert.equal(records().filter(r=>r.RR==='manual-site').length,0);
+ assert.equal(records().filter(r=>r.RR==='manual.edge').length,1);
+ await f.action(entry,'stop');f.finish('a',{healthy:false,running:false,containers:[]});
+ await f.platform.tick();await settle();assert.equal(records().length,0);
+});
+
+test('manual gateway failed or unknown reload retains last published DNS without publishing unverified domains',async t=>{
+ for(const outcome of ['failed','unknown']){
+  const dns=dnsMock(),f=await fixture(t,dns.fetcher),c=f.createCluster(['ma']),zone=dnsZone(f);
+  const entry=f.store.create('application','Manual entry',catalogInstallation('openresty',{deployment_mode:'manual',deployments:[{cluster_id:c.id,machine_ids:['ma'],gateway_domain:'last-good.edge.example.test',gateway_dns_zone_id:zone.id}]}).spec,'admin');
+  await f.action(entry,'deploy');f.finish('a',{healthy:true,running:true,digest:'entry'});
+  const site=f.store.create('website','Last successful site',{cluster_ids:[c.id],bindings:[{domains:['last-good.example.test'],dns_enabled:true,dns_zone_id:zone.id,locations:[{path:'/',action:'return',return_status:200,return_value:'ready'}]}]},'admin');
+  await f.action(site,'deploy');f.finish('a',{healthy:true,running:true,digest:'site'});
+  await f.platform.tick();await settle();
+  const changed=f.store.update(site.id,site.revision,site.name,{...site.spec,bindings:site.spec.bindings.map((b:any)=>({...b,domains:[...b.domains,'unverified.example.test']}))},'admin');
+  await f.action(changed,'deploy');f.finish('a',{},outcome);
+  await f.platform.tick();await settle();
+  assert.ok(dns.records.some(r=>r.RR==='last-good'&&r.Type==='CNAME'));
+  assert.ok(!dns.records.some(r=>r.RR==='unverified'));
+  assert.equal(dns.calls.filter(c=>c.Action==='DeleteDomainRecord').length,0);
+  const receipt=Object.values<any>(f.store.get(site.id).status.deployments[c.id].instances)[0];
+  assert.equal(receipt.state,outcome);assert.equal(receipt.published.revision,1);
+  // Active manual deployments cannot switch mode before a human stops them.
+  const current=f.store.get(entry.id);
+  assert.throws(()=>f.store.update(entry.id,current.revision,current.name,{...current.spec,deployment_mode:'managed'},'admin'),/stop_before_changing_deployment_mode/);
+  await f.platform.tick();await settle();
+  assert.ok(dns.records.some(r=>r.RR==='last-good'&&r.Type==='CNAME'));
+  assert.equal(f.store.actions(entry.id).filter(r=>r.action==='apply').length,1);
+ }
 });

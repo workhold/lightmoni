@@ -1945,7 +1945,7 @@ export function createClusterWorkloads(
         application_id: a.id,
         application_revision: a.revision,
         ...health(a, i),
-        force_recreate: i.health_failures >= 3 || a.spec.image_pull_policy === 'always',
+        force_recreate: JSON.parse(i.observed_json).configuration_matches === false || i.health_failures >= 3 || a.spec.image_pull_policy === 'always',
         refresh_images: a.spec.image_pull_policy === 'always',
       },
       String(a.revision),
@@ -2615,6 +2615,12 @@ export function createClusterWorkloads(
                 run.state === "succeeded"
                   ? ""
                   : (update.code ?? "gateway_apply_failed"),
+              ...(a.spec.deployment_mode === "manual" && run.state !== "succeeded" &&
+                (before.instances?.[i.id]?.state === "succeeded" || before.instances?.[i.id]?.published)
+                ? {published: before.instances[i.id].state === "succeeded"
+                  ? {state:"succeeded",revision:before.instances[i.id].revision,enabled:before.instances[i.id].enabled}
+                  : before.instances[i.id].published}
+                : {}),
             },
           };
         patchDeployment("website", key, i.cluster_id, {
@@ -2751,7 +2757,9 @@ export function createClusterWorkloads(
       if (!deploymentRow("application", app.id, d.cluster_id)?.enabled)
         continue;
       for (const i of rows(app.id, false, d.cluster_id)) {
-        const receipt = state.instances?.[i.id];
+        const observed = state.instances?.[i.id];
+        const receipt = observed?.state === "succeeded" ? observed :
+          desired(app, d.cluster_id).spec.deployment_mode === "manual" ? observed?.published : undefined;
         if (
           !servingGateway(i) ||
           receipt?.state !== "succeeded" ||
@@ -3247,7 +3255,7 @@ export function createClusterWorkloads(
         const run=r.desired.state==='running'?apply(a,i,a,r.actor,true):stop(a,i,r.actor,r.desired.state==='removed');
         return {state:'pending' as const,code:'deployment_drift_repair',job_id:run?.id};
       };
-      const proof=r.job_id?db.get<Row>('SELECT * FROM ops_platform_runs WHERE id=?',r.job_id):undefined;
+      const proof=r.job_id===i.current_run_id?db.get<Row>('SELECT * FROM ops_platform_runs WHERE id=?',r.job_id):undefined;
       const config=proof?JSON.parse(deps.decrypt(proof.payload_cipher)).resource.config:{};
       const result=proof?JSON.parse(proof.result_json):{};
       const inspecting=config.reconciliation_hash===r.desired_hash&&config.task?.endsWith('.inspect');

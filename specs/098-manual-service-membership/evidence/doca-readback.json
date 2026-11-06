@@ -1,0 +1,36 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "repository_section": "docs/system-design.md §93 (SDD098)",
+  "contract": "Both modes reconcile machines to center configuration. Manual members and DNS remain fixed by center intent; managed placement follows desired replicas and minimum availability.",
+  "saved": true,
+  "saved_seq": 1751,
+  "latest_read_seq": 1751,
+  "readback": [
+    {
+      "id": "manual098-membership",
+      "seq": 1751,
+      "matches": true
+    },
+    {
+      "id": "manual098-reconciliation",
+      "seq": 1751,
+      "matches": true
+    },
+    {
+      "id": "manual098-dns",
+      "seq": 1751,
+      "matches": true
+    },
+    {
+      "id": "managed093-flow",
+      "seq": 1751,
+      "matches": true,
+      "nodes": 8,
+      "edges": 9
+    }
+  ],
+  "existing_first_200_blocks_preserved": true,
+  "old_blocks": 940,
+  "new_blocks": 941,
+  "operation_scope": "Corrected the two paragraphs written in this task and inserted one DNS paragraph; original managed availability diagram unchanged, no unrelated blocks removed."
+}
