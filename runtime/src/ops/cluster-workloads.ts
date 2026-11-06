@@ -1945,7 +1945,7 @@ export function createClusterWorkloads(
         application_id: a.id,
         application_revision: a.revision,
         ...health(a, i),
-        force_recreate: i.health_failures >= 3 || a.spec.image_pull_policy === 'always',
+        force_recreate: JSON.parse(i.observed_json).configuration_matches === false || i.health_failures >= 3 || a.spec.image_pull_policy === 'always',
         refresh_images: a.spec.image_pull_policy === 'always',
       },
       String(a.revision),
@@ -2170,8 +2170,6 @@ export function createClusterWorkloads(
           (i) =>
             a.spec.machine_ids.includes(i.machine_id) &&
             i.state === "running" &&
-            i.healthy === 1 &&
-            JSON.parse(i.observed_json).configuration_matches !== false &&
             online(i.agent_id) &&
             !busy(i),
         )) {
@@ -3246,8 +3244,6 @@ export function createClusterWorkloads(
       const a=desired(store.get(r.owner_id),i.cluster_id);
       if(i.retired&&!drained(a,i))return {state:'pending',code:'deployment_draining'};
       const repair=()=>{
-        if(a.spec.deployment_mode==='manual')
-          return {state:'drifted' as const,code:'manual_deployment_action_required',job_id:r.job_id};
         if(r.desired.state==='running' && a.spec.deployment_mode==='managed') {
           // Reuse minimum availability, surge placement and traffic draining.
           // The durable desired state authorizes retrying a known failure, but

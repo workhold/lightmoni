@@ -1834,17 +1834,13 @@ test('click upgrade preserves refresh and HTTP readiness through managed route a
  await f.platform.tick();assert.ok(f.store.actions(a.id).some(r=>r.action==='stop'));
 });
 
-test('registered deployment inventory reports manual drift until explicit redeploy and retains desired work while offline',async t=>{
+test('registered deployment inventory verifies current content, repairs manual instances and retains desired work while offline',async t=>{
   const f=await fixture(t,undefined,true),c=f.createCluster(),app=f.app(c);
   f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
   await f.action(app,'deploy');f.finish('a');f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
   let inspected=f.finish('a',{healthy:false,running:true,configuration_matches:false,containers:[{running:true}]});
   assert.equal(inspected.payload.resource.config.task,'workload.inspect');assert.ok(inspected.payload.resource.config.application);
-  f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
-  assert.equal(f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===app.id)?.code,'manual_deployment_action_required');
-  assert.equal(f.store.actions(app.id).filter(r=>r.action==='apply').length,1);
-  assert.equal(f.jobs.claim('a',['operations.platform']),null);
-  await f.action(f.store.get(app.id),'deploy');const apply=f.finish('a');assert.equal(apply.payload.resource.config.task,'workload.apply');
+  f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();const apply=f.finish('a');assert.equal(apply.payload.resource.config.task,'workload.apply');assert.equal(apply.payload.resource.config.force_recreate,true);
   f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();f.finish('a',{healthy:true,running:true,configuration_matches:true,containers:[{running:true}]});
   f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
   let resource=f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===app.id)!;assert.equal(resource.state,'in_sync');assert.equal(resource.summary.ports.length,2);
@@ -1910,19 +1906,44 @@ test('manual membership needs prior readiness and explicit stop or removal still
  }
 });
 
-test('manual reconciliation never retries failed or uncertain writes without another human action',async t=>{
- for(const state of ['failed','unknown']){
-  const f=await fixture(t,undefined,true),c=f.createCluster(),a=f.app(c);
-  f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
-  await f.action(a,'deploy');f.finish('a',{},state);
-  for(let n=0;n<4;n++){
-   f.advance(61000);f.heartbeat('a');await f.reconciliation.tick();
-   if(f.db.get("SELECT id FROM agent_jobs WHERE agent_id='a' AND state='queued'")){
-    const inspected=f.finish('a',{healthy:false,running:false,configuration_matches:false,containers:[]});
-    assert.equal(inspected.payload.resource.config.task,'workload.inspect');
-   }
-  }
-  assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,1);
-  assert.equal(f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===a.id)?.code,state==='unknown'?'unknown_execution_result':'manual_deployment_action_required');
+test('manual reconciliation restores missing containers on the original machine without changing center intent',async t=>{
+ const f=await fixture(t,undefined,true),c=f.createCluster(),a=f.app(c);
+ f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
+ await f.action(a,'deploy');f.finish('a');
+ const initial=f.store.get(a.id),before=structuredClone(initial.spec),members=structuredClone(initial.status.endpoints);
+ f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
+ f.finish('a',{healthy:false,running:false,configuration_matches:false,containers:[]});
+ assert.deepEqual(f.store.get(a.id).spec,before);
+ f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
+ const restored=f.finish('a');assert.equal(restored.payload.resource.config.task,'workload.apply');assert.equal(restored.payload.resource.config.force_recreate,true);
+ assert.equal(restored.payload.resource.config.application.image,before.image);
+ assert.equal(f.db.all('SELECT id FROM ops_cluster_instances WHERE owner_id=?',a.id).length,1);
+ assert.equal(f.db.get<any>('SELECT machine_id FROM ops_cluster_instances WHERE owner_id=?',a.id).machine_id,'ma');
+ f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
+ f.finish('a',{healthy:true,running:true,configuration_matches:true,containers:[{running:true}]});
+ f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
+ assert.equal(f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===a.id)?.state,'in_sync');
+ assert.equal(f.store.get(a.id).revision,initial.revision);assert.deepEqual(f.store.get(a.id).spec,before);
+ assert.deepEqual(f.store.get(a.id).status.endpoints,members);
+});
+
+test('managed center restores three desired replicas after a machine outage without lowering its target',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',deployments:[{cluster_id:c.id,replicas:3,min_available_percent:60}]});
+ await f.action(a,'deploy');f.finish('a');f.finish('b');f.finish('a');
+ const before=structuredClone(f.store.get(a.id).spec);
+ f.advance(301000);f.heartbeat('b');
+ for(let n=0;n<18;n++){
+  await f.platform.tick();
+  for(let pending=0;pending<8&&f.db.get("SELECT id FROM agent_jobs WHERE agent_id='b' AND state='queued'");pending++)f.finish('b');
+  f.advance(31000);f.heartbeat('b');
+  const active=f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0',a.id);
+  if(active.length===3&&active.every(i=>i.machine_id==='mb'&&!i.slot.startsWith('surge-')&&i.healthy))break;
  }
+ await f.platform.tick();
+ const status=f.store.get(a.id).status;
+ assert.equal(status.deployments[c.id].minimum_available,2);
+ assert.equal(status.deployments[c.id].ready_instances,3);
+ const active=f.db.all<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0',a.id);
+ assert.equal(active.length,3);assert.ok(active.every(i=>i.machine_id==='mb'&&!i.slot.startsWith('surge-')&&i.healthy),JSON.stringify({active:active.map(i=>({slot:i.slot,machine:i.machine_id,state:i.state,healthy:i.healthy,run:i.current_run_id})),status:status.deployments[c.id]}));
+ assert.deepEqual(f.store.get(a.id).spec,before);assert.equal(f.store.get(a.id).revision,1);
 });
