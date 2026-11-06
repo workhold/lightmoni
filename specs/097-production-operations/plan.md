@@ -35,3 +35,7 @@
 只读实测旧 `setpriv ... --*-caps=-all` 返回 127（libcap-ng is too old for all caps）；使用内核 cap_last_cap=40 展开 -cap_0 至 -cap_40 后，UID/GID=994/991、附加组空、NoNewPrivs=1、CapInh/Prm/Eff/Bnd/Amb 全零。共享 ordinaryTaskCommand 从 /proc/sys/kernel/cap_last_cap 读取严格的 0..63 整数，为 bounding/inheritable/ambient 使用同一完整编号集；核验探针和每次实际任务共用，不持久缓存。原有实际身份核验仍强制五集合全零，错误时不执行脚本；新增固定诊断码，不透出原始 SSH 输出。
 
 此处改动执行参数与故障诊断，权限边界不变；本地 docs/system-design.md 第 97 节同步。依据 util-linux 2.32.1 的 setpriv do_caps 实现（https://github.com/util-linux/util-linux/blob/v2.32.1/sys-utils/setpriv.c），数字语法为 cap_N；是否完整清除仍由实际 /proc 观测确认。
+
+## 内部遥测导出
+
+TypeScript SDK 的队列门禁仅对默认 HTTPExporter 的系统表缺少 options.key 时抑制发送；显式 custom exporter 由调用方承担交付，允许既有中心 Ingest.internal 内存回调收到 lightmoni 指标/日志。collectSelf 的无 Key 抑制保持，普通 HTTP 和中心接收鉴权不变。补 SDK 自定义系统批次交付/匿名 HTTP 抑制/禁用/重试字节冻结，以及 RuntimeMonitor 实际产生 heartbeat、堆、请求计数、直方图和日志的集成。固定镜像验收必须查询到新鲜中心 heartbeat 和堆数据，不能只验证 SQL 语法。

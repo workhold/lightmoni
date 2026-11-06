@@ -75,3 +75,7 @@
 ## 完整管理安装兼容性补充
 
 zz-bj-1 为 CentOS 8/glibc 2.28，旧 libcap-ng 对当前内核 CAP_LAST=40 的 setpriv `-all` 明确返回 127，导致 helper 安装降权核验失败并回滚。普通任务仍须 UID/GID 为专用非 root 账户、附加组为空、NoNewPrivs=1，五个能力集合全部为零。兼容修复只能使用实际内核支持的完整能力编号集，不得省略能力清除、改用 root 或回退到不完整配置。无效/超出支持范围的内核信息应拒绝。
+
+## 内存导出器与中心运行指标
+
+线上大盘的中心运行指标为空，本地复现 RuntimeMonitor 使用的无 HTTP Key 自定义导出器将 lightmoni 批次静默出队（delivered=0、pending=0）。自定义回调已经是调用方明确配置的传输，不应由默认 HTTP Key 门禁丢弃。恢复该内存路径，同时默认 HTTP 无 Key 的系统批次保持不发送，匿名 SDK 不生成自身诊断，禁用上报仍生效；HTTP 服务端系统表鉴权保持。

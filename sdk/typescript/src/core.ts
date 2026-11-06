@@ -343,7 +343,9 @@ class State {
     this.working = true; let backoff = this.settings.retryMinMs;
     try { while (this.queue.length && !this.stopped) {
       const item = this.queue[0];
-      if (item.batch.table === "lightmoni" && !this.options.key) {
+      // Explicit exporters also serve the center's in-memory ingestion path.
+      // Only the default HTTP transport needs this SDK-side bearer gate.
+      if (item.batch.table === "lightmoni" && !this.options.key && !this.options.exporter) {
         this.queue.shift(); this.stats.pendingBatches--; this.stats.pendingBytes -= item.batch.payload.length; this.notify(); continue;
       }
       this.request = new AbortController();
