@@ -1892,6 +1892,21 @@ test('removed and stopped inspections retain the intended state without accumula
  }
 });
 
+test('new accepted lifecycle actions clear stale installation errors without hiding current placement failures',async t=>{
+ const f=await fixture(t),c=f.createCluster(),app=f.app(c);
+ for(const action of ['deploy','stop','deploy','remove']){
+  f.store.patchStatus(app.id,{last_error:'old_install_failure',last_error_at:'2020-01-01T00:00:00Z'});
+  if(action!=='deploy')f.db.run("UPDATE ops_platform_application_deployments SET status_json=? WHERE application_id=?",JSON.stringify({last_error:'old_placement_failure',pending:'old_pending'}),app.id);
+  const response=await f.action(app,action);assert.equal(response.status,202,JSON.stringify(response.body));
+  const current=f.store.get(app.id);assert.equal(current.status.last_error,'');assert.equal(current.status.last_error_at,'');
+  assert.equal(current.status.deployments[c.id].last_error,'');assert.equal(current.status.deployments[c.id].pending,'');
+  f.finish('a',action==='stop'?{running:false,containers:[{running:false}]}:action==='remove'?{running:false,containers:[]}:{healthy:true,running:true,containers:[{running:true}]});
+ }
+ const oversized=f.app(c,{cpu:5});const rejected=await f.action(oversized,'deploy');assert.equal(rejected.status,409);
+ assert.match(f.store.get(oversized.id).status.deployments[c.id].last_error,/capacity/);
+ assert.equal(f.store.actions(app.id).filter(r=>['apply','stop','remove'].includes(r.action)).length,4,'history remains available');
+});
+
 test('deep reconciliation preserves managed stateful minimum availability and keeps old Agent health checks during rollout',async t=>{
   const f=await fixture(t,undefined,true),c=f.createCluster(),a=f.app(c,{deployment_mode:'managed',stateful:true,deployments:[{cluster_id:c.id,replicas:1,stateful_acknowledged:true,min_available_percent:100}]});
   f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));

@@ -3122,7 +3122,7 @@ export function createClusterWorkloads(
           if (run) runs.push(run);
         }
         if (action === "stop" || action === "remove")
-          patchDeployment("application", r.id, cid, { enabled: false });
+          patchDeployment("application", r.id, cid, { enabled: false, last_error: '', pending: '' });
         results.push({ cluster_id: cid, runs });
       } catch (error) {
         const code = errorCode(error);
@@ -3135,7 +3135,10 @@ export function createClusterWorkloads(
         results.push({ cluster_id: cid, runs: [], error: code });
       }
     }
-    if (r.kind === "application") publish(r.id);
+    if (r.kind === "application") {
+      if (['deploy','stop','remove'].includes(action)) store.patchStatus(r.id,{last_error:'',last_error_at:''});
+      publish(r.id);
+    }
     else publishWebsite(r.id);
     const failures = results.filter((d) => d.error);
     return {
