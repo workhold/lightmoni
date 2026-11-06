@@ -163,7 +163,10 @@ export function normalizeApplication(value: unknown): OperationConfig {
     out.image = text(c.image, "image", 512);
     if (/[\s\r\n]/.test(out.image)) reject("INVALID_IMAGE");
     for (const k of ["command", "entrypoint"])
-      if (c[k] !== undefined) out[k] = strings(c[k], k);
+      if (c[k] !== undefined) {
+        const override = strings(c[k], k);
+        if (override.length) out[k] = override;
+      }
     if (c.environment !== undefined)
       out.environment = environment(c.environment);
     out.network_mode = c.network_mode ?? "bridge";

@@ -90,6 +90,8 @@ zz-bj-1 为 CentOS 8/glibc 2.28，旧 libcap-ng 对当前内核 CAP_LAST=40 的 
 
 ## 私有镜像巡检与 Gitea 安装补充
 
+ABC 只读实际核对发现 manifest.command=[]，Docker Cmd=[node,server.mjs]；镜像、资源、环境及端口一致。单容器表单的空 command/entrypoint 应继承镜像默认值，归一化时省略空列表，避免成功启动后被误报并持续重建。非空覆盖仍逐项核对；Compose 显式空列表语义保持。
+
 生产 ABC Demo 的只读深度巡检连续被 approval_invalid: private_registry_cache_policy_changed 取消。相同缓存策略经全局对账规范化 JSON 后字段顺序改变，不得被误判为策略变化；比较必须遵守 JSON 值语义，真实端点、来源、模式、版本、上游许可或额外字段变化仍拒绝。修复不得跳过缓存授权或扩大 Agent 权限。
 
 Gitea 新安装默认宿主 SSH 端口为 2222→22，克隆地址 SSH_PORT 与固定映射一致，允许显式配置其他固定端口。前后端均以配方声明的宿主端口为默认值；已有资源不静默改写。线上按实际集群预算选址，完成 ABC 验收后释放其测试容器配额，再验证 Gitea 实际部署与健康。

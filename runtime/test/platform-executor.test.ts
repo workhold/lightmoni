@@ -451,3 +451,23 @@ test('workload inspection resolves Compose scoped, named and external volume ide
   assert.equal((await inspect()).data.configuration_matches,true);
  }
 });
+
+test('container empty command overrides inherit image defaults while explicit commands and Compose empties remain authoritative',async t=>{
+ const {renderManifest}=await import('../src/operations/platform.js'),{desiredHash}=await import('../src/shared/desired-state.js'),{hash}=await import('../src/operations/website-files.js');
+ const f=await setup(t),id='image-default-command',app=normalizeApplication({mode:'container',image:'example:1',command:[],entrypoint:[]});
+ assert.equal(app.command,undefined);assert.equal(app.entrypoint,undefined);
+ const explicit=normalizeApplication({mode:'container',image:'example:1',command:['node','custom.mjs'],entrypoint:['node']});
+ assert.deepEqual(explicit.command,['node','custom.mjs']);assert.deepEqual(explicit.entrypoint,['node']);
+ const compose=normalizeApplication({mode:'compose',compose:{services:{app:{image:'example:1',command:[],entrypoint:[]}}}});
+ assert.deepEqual(compose.compose.services.app.command,[]);assert.deepEqual(compose.compose.services.app.entrypoint,[]);
+ const root=join(await privateRoot(f.context,'platform'),'workloads',id),path=join(root,'compose.json');
+ let container:any;
+ const context={...f.context,command:async(_file:string,args:string[])=>({stdout:args[0]==='ps'?container.Id:args[0]==='inspect'?JSON.stringify([container]):'',stderr:''})};
+ for(const application of [app,explicit]){
+  const manifest=await renderManifest(f.context,id,application,1);await writeFile(path,JSON.stringify(manifest));await writeFile(join(root,'state.json'),JSON.stringify({manifest:path,digest:hash(JSON.stringify(manifest)),configuration_hash:desiredHash(application)}));
+  container={Id:'d'.repeat(64),Config:{Image:'example:1',Cmd:['node','server.mjs'],Entrypoint:['docker-entrypoint.sh'],Labels:{...manifest.services.app.labels,'com.docker.compose.service':'app'}},State:{Running:true,Status:'running'},HostConfig:{RestartPolicy:{Name:'unless-stopped'},ReadonlyRootfs:false,PortBindings:{}},Mounts:[]};
+  const inspect=()=>executePlatform(payload({task:'workload.inspect',instance_id:id,application}),context);
+  assert.equal((await inspect()).data.configuration_matches,application===app);
+  if(application===explicit){container.Config.Cmd=explicit.command;container.Config.Entrypoint=explicit.entrypoint;assert.equal((await inspect()).data.configuration_matches,true);}
+ }
+});
