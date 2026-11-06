@@ -90,6 +90,8 @@ zz-bj-1 为 CentOS 8/glibc 2.28，旧 libcap-ng 对当前内核 CAP_LAST=40 的 
 
 ## 私有镜像巡检与 Gitea 安装补充
 
+Gitea 当前停止回执 succeeded，但 status.last_error 仍为 2026-11-05 的 insufficient_node_capacity，导致成功停止后页面显示失败。新部署/停止/移除请求被正常接受后，清除资源级旧启动错误及对应集群旧错误/等待提示；真实新失败继续保留，历史执行不删除，未知状态不改成成功。
+
 ABC 只读实际核对发现 manifest.command=[]，Docker Cmd=[node,server.mjs]；镜像、资源、环境及端口一致。单容器表单的空 command/entrypoint 应继承镜像默认值，归一化时省略空列表，避免成功启动后被误报并持续重建。非空覆盖仍逐项核对；Compose 显式空列表语义保持。
 
 生产 ABC Demo 的只读深度巡检连续被 approval_invalid: private_registry_cache_policy_changed 取消。相同缓存策略经全局对账规范化 JSON 后字段顺序改变，不得被误判为策略变化；比较必须遵守 JSON 值语义，真实端点、来源、模式、版本、上游许可或额外字段变化仍拒绝。修复不得跳过缓存授权或扩大 Agent 权限。
