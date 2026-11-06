@@ -38,7 +38,7 @@ export const devops = [
               GITEA__server__ROOT_URL: p.external_url,
               GITEA__server__DOMAIN: new URL(p.external_url).hostname,
               GITEA__server__SSH_DOMAIN: new URL(p.external_url).hostname,
-              GITEA__server__SSH_PORT: String(c.host_ports.ssh ?? 22),
+              GITEA__server__SSH_PORT: String(c.host_ports.ssh ?? 2222),
             },
             volumes: [volume("gitea-data", "/data")],
             healthcheck: health(
@@ -50,7 +50,7 @@ export const devops = [
             ),
           },
         },
-        [port("http", 3000, "gitea", "http"), port("ssh", 22, "gitea")],
+        [port("http", 3000, "gitea", "http"), {...port("ssh", 22, "gitea"),host_port:2222}],
       ),
     (_p, c) => fixedPorts(c, ["http", "ssh"]),
   ),

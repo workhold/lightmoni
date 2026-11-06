@@ -60,7 +60,7 @@ export function extendedInstallation(
       ports.map(v => [
         v.name,
         overrides[v.name] ??
-          (mode === "managed" || !def.template.deployment_modes || def.template.deployment_modes.includes('managed') ? 0 : v.container_port),
+          (mode === "managed" || !def.template.deployment_modes || def.template.deployment_modes.includes('managed') ? 0 : v.host_port),
       ]),
     ),
   };

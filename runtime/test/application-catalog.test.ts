@@ -38,6 +38,19 @@ const additions = [
   "firecrawl",
   "rustfs",
 ];
+test('Gitea defaults to a dedicated host SSH port and advertises explicit overrides',()=>{
+ const parameters={external_url:'https://git.example.test'};
+ const template=applicationCatalog.find(t=>t.id==='gitea')!;
+ assert.equal(template.spec.ports.find((p:any)=>p.name==='ssh').host_port,2222);
+ const spec=catalogInstallation('gitea',{parameters}).spec;
+ assert.equal(spec.ports.find((p:any)=>p.name==='ssh').container_port,22);
+ assert.equal(spec.ports.find((p:any)=>p.name==='ssh').host_port,2222);
+ assert.equal(spec.compose.services.gitea.environment.GITEA__server__SSH_PORT,'2222');
+ const custom=catalogInstallation('gitea',{parameters,host_ports:{http:13000,ssh:12222}}).spec;
+ assert.equal(custom.ports.find((p:any)=>p.name==='ssh').host_port,12222);
+ assert.equal(custom.compose.services.gitea.environment.GITEA__server__SSH_PORT,'12222');
+ assert.throws(()=>catalogInstallation('gitea',{parameters,host_ports:{ssh:0}}),/catalog_fixed_host_port_required/);
+});
 test("catalog covers the approved scope and categories include search and cloud storage", () => {
   assert.equal(applicationCatalog.length, 35);
   assert.equal(new Set(applicationCatalog.map((t) => t.id)).size, 35);

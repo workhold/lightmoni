@@ -17,7 +17,7 @@ export default function CatalogInstallFields({template,resources,machines,advanc
  const gateway=template.id==='openresty',serviceCount=Object.keys(template.spec?.compose?.services??{}).length;
  const multiContainer=serviceCount>1;
  useEffect(()=>{
-  if(!gateway)for(const p of declared)if(!portEdited.current.has(p.name))form.setFieldValue(['host_ports',p.name],template.deployment_modes?.length===1&&template.deployment_modes[0]==='manual'?p.container_port:0);
+  if(!gateway)for(const p of declared)if(!portEdited.current.has(p.name))form.setFieldValue(['host_ports',p.name],template.deployment_modes?.length===1&&template.deployment_modes[0]==='manual'?p.host_port:0);
  },[mode,containerPort,form,gateway]);
  const clusters=resources.filter(r=>r.kind==='cluster');
  useEffect(()=>{

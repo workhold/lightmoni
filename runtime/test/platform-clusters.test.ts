@@ -19,6 +19,7 @@ import { createPrivateRegistryController } from "../src/ops/private-registry.js"
 import {createApplicationTelemetry} from '../src/ops/application-telemetry.js';
 import {automaticEntry} from '../src/ops/automatic-entry.js';
 import {selfSignedCertificate} from '../src/ops/certificates.js';
+import {desiredJSON} from '../src/shared/desired-state.js';
 async function fixture(t: any, fetcher?: typeof fetch, reconciliationEnabled=false) {
   const db = new DB(":memory:");
   db.exec(
@@ -398,6 +399,20 @@ test("registry external entry owns one HTTPS/Basic website and cannot silently s
   assert.equal(direct?.origin_mode, "direct");
   assert.equal(direct?.origin_endpoint, "http://10.0.0.1:21000");
   assert.equal(direct?.hub_endpoint, undefined);
+  // The global reconciler canonicalizes config before dispatch. The same cache
+  // policy must remain authorized after that real encrypted JSON round trip.
+  assert.equal((await f.action(consumer, 'deploy')).status, 202);
+  const cacheRun=f.db.get<any>('SELECT * FROM ops_platform_runs WHERE resource_id=? ORDER BY created_at DESC LIMIT 1',consumer.id)!;
+  const cachePayload=JSON.parse(f.deps.decrypt(cacheRun.payload_cipher));
+  const cacheJob=f.jobs.get(cacheRun.job_id);
+  const saveCache=(policy:any)=>f.db.run('UPDATE ops_platform_runs SET payload_cipher=? WHERE id=?',f.deps.encrypt(desiredJSON({...cachePayload,resource:{...cachePayload.resource,config:{...cachePayload.resource.config,image_cache:policy}}})),cacheRun.id);
+  saveCache(cachePayload.resource.config.image_cache);
+  assert.deepEqual(f.platform.resolvePayload(cacheJob).resource.config.image_cache,JSON.parse(JSON.stringify(direct)));
+  for(const change of [{origin_endpoint:'http://10.0.0.99:21000'},{origin_host:'other.example.test'},{origin_mode:'cache'},{allow_upstream:false},{version:2},{extra:true}]){
+    saveCache({...cachePayload.resource.config.image_cache,...change});
+    assert.throws(()=>f.platform.resolvePayload(cacheJob),/private_registry_cache_policy_changed/);
+  }
+  saveCache(cachePayload.resource.config.image_cache);
   const unmatched = f.app(c, { image: "nginx:alpine" });
   assert.equal(
     registryCacheFor(f.store, {
@@ -1854,6 +1869,27 @@ test('registered deployment inventory verifies current content, repairs manual i
   const response=await f.action(second,'deploy');assert.equal(response.status,202);f.reconciliation.refresh();
   assert(f.reconciliation.inventory('ma').resources.some(r=>r.owner_id===second.id));
   f.advance(60001);await f.reconciliation.tick();assert.equal(f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===second.id)?.code,'agent_offline');
+});
+
+test('removed and stopped inspections retain the intended state without accumulating running-health failures',async t=>{
+ for(const [intent,result,expected,failures,runState] of [
+  ['removed',{running:false,present:false,containers:[]},'removed',0],
+  ['removed',{running:false,containers:[{running:false}]},'stopped',0],
+  ['stopped',{running:false,containers:[{running:false}]},'stopped',0],
+  ['running',{running:false,present:false,containers:[]},'stopped',1],
+  ['removed',{running:false,present:false,containers:[]},'running',1,'failed'],
+  ['removed',{running:false,present:false,containers:[]},'running',1,'unknown'],
+ ] as const){
+  const f=await fixture(t,undefined,true),c=f.createCluster(),app=f.app(c);
+  f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
+  await f.action(app,'deploy');f.finish('a');
+  const instance=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',app.id)!;
+  f.db.run('UPDATE ops_cluster_instances SET desired_state=? WHERE id=?',intent,instance.id);
+  f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
+  const inspected=f.finish('a',{healthy:false,...result},runState??'succeeded');assert.equal(inspected.payload.resource.config.task,'workload.inspect');
+  let row=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id=?',instance.id)!;
+  assert.equal(row.state,expected);assert.equal(row.health_failures,failures);assert.equal(row.healthy,0);
+ }
 });
 
 test('deep reconciliation preserves managed stateful minimum availability and keeps old Agent health checks during rollout',async t=>{
