@@ -1,5 +1,7 @@
 # 线上部署交接验收
 
+恢复操作及验收证据通过[GitHub PR #134](https://github.com/workhold/lightmoni/pull/134)归档。
+
 2026-11-07。中心镜像与Agent仍使用`20261107-storage-registry-94bcbbc` / `94bcbbcdede2`，本次不替换运行时代码。根因是SDD099直接采用v2而既有运行实例仍为v1，导致原生归属校验拒绝；上次中心发行验收没有完成这几项实例交接，本次补齐。
 
 ## 预检和恢复
