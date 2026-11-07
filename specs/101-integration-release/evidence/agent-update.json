@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-07",
+  "surface": "https://moni.heyphp.com/machines",
+  "machine": "zz-bj-1",
+  "machine_id": "9473f8974462e85d",
+  "agent_id_preserved": "9cad2b3aabbd115280c2f4eba67733fe",
+  "operation": "11d123caf2764409932e48246a28d087",
+  "previous_revision": "573b644885c0",
+  "target_revision": "94bcbbcdede2ee9084345438080d64bae6cc1ca5",
+  "target_build": "0.1.0-94bcbbcdede2-d3c293a56f6a",
+  "package_sha256": "d16fbce17ef8787e89b69ff60443b0e2ede7f4911adb9606655545db06921073",
+  "review": "existing protected SSH credential, fixed release/hash, same account and permission generation; no re-enrollment",
+  "result": "update history shows succeeded; refreshed host list shows current release 94bcbbcdede2, online, full management",
+  "other_host": "vchive remains monitoring-only at 790cca58456a; no configured SSH credential, no permissions broadened",
+  "screenshot": "online-agent-update.jpg"
+}

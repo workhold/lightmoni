@@ -1,0 +1,17 @@
+{
+  "reference": "docker.heyphp.com/lightmoni/lightmoni@sha256:c335b9073f5570d1ca3c6ef9ce6650684a9b8dd64c4ec25d4bfed5aaf70965a6",
+  "platforms": [
+    {
+      "platform": "linux/amd64",
+      "image_id": "sha256:fe498ea8ab04b970f1ef7d62686b412e633ab35a14b9cc8bed083e053a95c468",
+      "tested_rootfs_and_config_equal": true,
+      "source_revision": "94bcbbcdede2ee9084345438080d64bae6cc1ca5"
+    },
+    {
+      "platform": "linux/arm64",
+      "image_id": "sha256:0644917f5a3e182ec1298ec3cc5293cb5128a35dc4c30275fbbe4c17e08d0413",
+      "tested_rootfs_and_config_equal": true,
+      "source_revision": "94bcbbcdede2ee9084345438080d64bae6cc1ca5"
+    }
+  ]
+}

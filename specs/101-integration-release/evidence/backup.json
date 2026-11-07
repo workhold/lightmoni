@@ -1,0 +1,15 @@
+{
+  "host": "panel.heyphp.com",
+  "deployment_directory": "/opt/lightmoni/lightmoni",
+  "backup_directory": "/opt/lightmoni/backups/sdd101-20261107",
+  "sqlite_file": "lightmoni-final.db",
+  "pages": 314083,
+  "source_copy_byte_identical": true,
+  "copied_database_quick_check": "ok",
+  "permissions": "backup directory restricted; final database 0600",
+  "compose_and_environment_backed_up": true,
+  "master_key_backed_up": true,
+  "secrets_in_evidence": false,
+  "first_attempt": "initial low-rate backup did not match copied file; superseded by final single-batch verified backup",
+  "telemetry_volume": "preserved; no ClickHouse schema change or data deletion"
+}
