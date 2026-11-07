@@ -1,0 +1,26 @@
+{
+  "date": "2026-11-07",
+  "method": "actual signed-in Chrome UI, fresh Agent observation",
+  "application": {
+    "id": "0722a24b48eec2abeac9c4c7efb1db58",
+    "name": "SDD091 SDK环境验收",
+    "state": "removed",
+    "instance": "6a00a7a456c647204057a7d594f908b1",
+    "observed_at": "2026-11-07T03:39:13.418Z",
+    "application_root": "/var/lib/lightmoni-managed/operations/platform/applications/0722a24b48eec2abeac9c4c7efb1db58",
+    "instance_root": "/var/lib/lightmoni-managed/operations/platform/applications/0722a24b48eec2abeac9c4c7efb1db58/instances/6a00a7a456c647204057a7d594f908b1",
+    "state_file": "state.json below instance root",
+    "active_mounts": "none for removed instance; UI does not claim old data migrated",
+    "retired_instance": "no storage receipt shown honestly"
+  },
+  "website": {
+    "id": "fb2bb27e9a85a7e83cb46412d3eab67a",
+    "name": "私有镜像仓库入口",
+    "saved_revision": 4,
+    "published_revision": 4,
+    "storage": "existing gateway instances have no layout-v2 receipt; UI shows check/upgrade notice instead of fabricated paths"
+  },
+  "compatibility": "SDD099 explicitly adopts layout v2 without old-directory migration. Existing application/gateway registrations can require a reviewed deployment to produce new layout receipts. This release does not claim old websites migrated or rewrite their running configuration for a read-only acceptance check.",
+  "destructive_checks": "website removal and manifest deletion verified in isolated feature acceptance; no production deletion submitted",
+  "screenshots": ["online-application-storage.jpg","online-website-storage.jpg"]
+}

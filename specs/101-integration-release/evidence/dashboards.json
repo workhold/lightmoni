@@ -1,0 +1,18 @@
+{
+  "date": "2026-11-07",
+  "surface": "https://moni.heyphp.com/dashboards",
+  "method": "actual signed-in Chrome UI",
+  "dashboard_count": 5,
+  "detail": "https://moni.heyphp.com/dashboards/system-center",
+  "panel_count": 13,
+  "query_errors_visible": false,
+  "observed": {
+    "request_qps_last_minute": 0.13,
+    "received_records_last_minute": 352,
+    "online_centers": 1,
+    "failed_reports_last_minute": 0,
+    "log": "2026-11-07T03:28:19.310000000Z INFO LightMoni Node listening on 0.0.0.0:8080",
+    "timeseries": ["status metrics / 200", "records", "bytes", "request duration", "runtime state", "heap", "active resources", "event loop delay"]
+  },
+  "screenshot": "online-dashboards.jpg"
+}

@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-07",
+  "surface": "https://moni.heyphp.com/private-images",
+  "method": "actual Chrome UI and successful managed Agent read-only queries",
+  "deployment": "ABC Demo / zz-bj-1 / http://172.21.0.16:20000",
+  "repository": "lightmoni/abc-demo",
+  "versions": [
+    {"tag":"20261103-36def97","digest":"sha256:c3fae4a7ce6af19b368ecef562446e251ed57c6b32386f96e91893b819cf1187","status":"in use","application":"SDD091 SDK环境验收"},
+    {"tag":"20261104-852a316","digest":"sha256:20b006ebbb598329cf4a44ea29d73881346ce5259897f4cbd99f6644658ec418","status":"in use","application":"ABC Demo"},
+    {"tag":"latest","digest":"sha256:c3fae4a7ce6af19b368ecef562446e251ed57c6b32386f96e91893b819cf1187","status":"in use","application":"SDD091 SDK环境验收"}
+  ],
+  "reference_links": "opened the real application from the version row",
+  "cleanup_review": "modal explains all-repository scope, stopped/deployed applications and aliases/multi-arch protection; cancelled without submitting deletion",
+  "live_deletion": "not performed; actual protocol deletion was verified in isolated feature acceptance, retained production images",
+  "screenshots": ["online-registry-versions.jpg","online-registry-cleanup-review.jpg"]
+}

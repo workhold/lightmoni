@@ -1,0 +1,19 @@
+{
+  "job_id": "1b21edab892a3d512a0ecf17c746da08",
+  "run_id": "19cbac1f36725d8762f44ce4008b4ba5",
+  "machine": "zz-bj-1",
+  "resource": "系统镜像仓库",
+  "action": "inspect",
+  "original_state": "unknown",
+  "code": "managed_worker_unknown",
+  "remote_readonly_verification": {
+    "matching_systemd_unit": "absent",
+    "managed_execution_lock": "absent",
+    "registry_container": "running continuously for 16 hours"
+  },
+  "reconciled_at": "2026-11-07T11:33:59+08:00",
+  "method": "existing administrator UI reconciliation on the exact job; reason and reviewer persisted",
+  "unknown_history_preserved": true,
+  "remote_processes_killed": false,
+  "job_replayed": false
+}

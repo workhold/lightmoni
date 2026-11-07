@@ -1,0 +1,22 @@
+{
+  "date": "2026-11-07",
+  "surface": "https://panel.heyphp.com/terminal",
+  "directory": "/opt/lightmoni/lightmoni",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261107-storage-registry-94bcbbc",
+  "revision": "94bcbbcdede2ee9084345438080d64bae6cc1ca5",
+  "health": "healthy",
+  "public_healthz": {
+    "status": "ok"
+  },
+  "clickhouse": "healthy; original container retained",
+  "published_port": "1180:8080",
+  "volumes_preserved": true,
+  "compose_config_validation": "passed",
+  "configuration_drift": "saved Compose referenced 20261105-ops-a418b64 and prior running tag did not match revision; inspected actual source and replaced exact configured tag before final rollout",
+  "duration_waited_by_compose_seconds": 17.1,
+  "final_started_at": "2026-11-07T03:28:04.114951208Z",
+  "state_volume": "lightmoni_lightmoni-state-v2-20261103 -> /data",
+  "gitea_http": 200,
+  "unauthenticated_registry_v2_http": 401,
+  "evidence": ["online-deployment.jpg", "online-final-health.jpg"]
+}
