@@ -1,0 +1,19 @@
+{
+  "platform_regressions": {
+    "passed": 88,
+    "failed": 0,
+    "skipped": 0
+  },
+  "checks": [
+    "saved and published references deduplicated",
+    "all referencing resources named",
+    "managed and manual published-only domains preserved",
+    "disabled old publications excluded",
+    "opaque fields excluded and metadata projection enforced",
+    "member and revision fences preserved"
+  ],
+  "runtime_typecheck": "passed",
+  "web_typecheck": "passed",
+  "runtime_build": "passed",
+  "web_build": "passed"
+}
