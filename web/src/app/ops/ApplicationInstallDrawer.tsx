@@ -1,3 +1,5 @@
+import IconAction from './IconAction';
+import OperationStatus from './OperationStatus';
 import ManagedExecutionResult from './ManagedExecutionResult';
 import DockerEnvironmentPanel from './DockerEnvironmentPanel';
 import {useEffect,useState} from 'react';
@@ -13,7 +15,7 @@ export default function ApplicationInstallDrawer({resourceId,resources,machines,
  const [dockerMachine,setDockerMachine]=useState<{id:string;name:string}>();
  useEffect(()=>setDockerMachine(undefined),[resourceId,runID]);
  const phase=(value:string)=>value==='started'?t('已开始','Started'):INSTALL_PHASES[value]?t(...INSTALL_PHASES[value]):value||'—';
- const badge=(state:string)=><Tag color={state==='succeeded'?'success':['failed','error'].includes(state)?'error':['unknown','warning','cancelled'].includes(state)?'warning':state==='started'?undefined:'processing'}>{phase(state)}</Tag>;
+ const badge=(state:string)=>state==='started'?<Tag>{phase(state)}</Tag>:<OperationStatus state={state}/>;
  useEffect(()=>{setResource(undefined);setRuns([]);setRunID(undefined);setLoaded(false);setError('')},[resourceId]);
  useEffect(()=>{
   if(!resourceId)return;let active=true,busy=false;
@@ -41,7 +43,7 @@ export default function ApplicationInstallDrawer({resourceId,resources,machines,
  const diagnosis=installDiagnostic(cause),deployments=Object.entries(resource?.status.deployments??{}) as [string,Spec][];
  return <><DockerEnvironmentPanel machine={dockerMachine} onClose={()=>setDockerMachine(undefined)}/>
  <Drawer open={!!resourceId} title={t('安装进度','Installation progress')+(resource?' · '+resource.name:'')} size="min(960px, 100vw)" className="lm-install-progress" onClose={onClose} destroyOnHidden>
-  <Space wrap style={{marginBottom:16}}><Button icon={<ReloadOutlined aria-hidden/>} onClick={()=>setRefresh(v=>v+1)}>{t('刷新','Refresh')}</Button>{resource&&<Button onClick={()=>onManage(resource)}>{t('调整配置 / 重新部署','Edit configuration / redeploy')}</Button>}</Space>
+  <Space wrap style={{marginBottom:16}}><IconAction label={t('刷新','Refresh')} icon={<ReloadOutlined aria-hidden/>} onClick={()=>setRefresh(v=>v+1)}/>{resource&&<Button onClick={()=>onManage(resource)}>{t('调整配置 / 重新部署','Edit configuration / redeploy')}</Button>}</Space>
   {error&&<Alert type="error" showIcon title={t('进度读取失败，保留上次结果','Could not refresh progress; showing the last result')} description={error}/>}
   {!loaded?<Spin/>:resource?<>
    <Alert className="lm-install-summary" showIcon type={state==='succeeded'?'success':state==='failed'?'error':state==='unknown'?'warning':'info'} title={state==='succeeded'?t('安装完成，应用已运行','Installation complete; application is running'):state==='failed'?t('安装未完成','Installation incomplete'):state==='unknown'?t('执行结果未知','Execution result unknown'):state==='stopped'?t('应用已停止','Application is stopped'):t('安装进行中','Installation in progress')} description={state==='unknown'?t('请先检查目标机器的实际状态，再决定是否重新部署。','Inspect actual state on the target before redeploying.'):state==='pending'?t('每 2 秒更新。关闭此窗口后仍会继续安装，可从应用列表重新查看。','Updates every 2 seconds. Installation continues after closing; reopen from the application list.'):t('各机器的执行记录和失败原因保留在下方。','Per-machine history and failure details are retained below.')}/>
