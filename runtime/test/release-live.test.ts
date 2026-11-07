@@ -77,7 +77,8 @@ test(
           config,
           JSON.stringify({
             endpoint: "http://127.0.0.1:1",
-            key: "release-fixture",
+            control_credential: "release-control-fixture",
+            data_credential: "release-data-fixture",
             listen: "127.0.0.1:4318",
             data_dir: join(dest, "state"),
           }),
