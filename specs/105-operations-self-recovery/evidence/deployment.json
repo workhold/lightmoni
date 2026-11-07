@@ -1,0 +1,44 @@
+{
+  "source_revision": "f15f26f29d26ebdea017bc29ce40c03f8e42f651",
+  "implementation_pr": "https://github.com/workhold/lightmoni/pull/140",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261108-self-recovery-v1",
+  "center_healthy": true,
+  "data_mounts_identical": true,
+  "backup": {
+    "pages": 382677,
+    "quick_check": "ok",
+    "path": "/opt/lightmoni/backups/sdd105-self-recovery-20261108",
+    "permissions": "directory 0700; files 0600"
+  },
+  "agent_maintenance": {
+    "id": "e24830bca3248ddadbaa7ac0ed5d6be7",
+    "state": "succeeded",
+    "target_build": "0.1.0-f15f26f29d26-64a32ca5ba82"
+  },
+  "website": {
+    "id": "80d0a4d24cbe70ea60794b913971b5f7",
+    "registered": false,
+    "deletion": "succeeded",
+    "receipt_absent": true,
+    "full_read_only_inspection_absent": true,
+    "cleaned_gateway_roots": 4
+  },
+  "running_applications": [
+    "Gitea",
+    "OpenResty",
+    "SDD091 快速安装",
+    "系统镜像仓库"
+  ],
+  "public_http": {
+    "gitea": 200,
+    "dbx": 200,
+    "registry_unauthenticated": 401
+  },
+  "dashboard": {
+    "panels": 13,
+    "online_centers": 1,
+    "failures_last_minute": 0
+  },
+  "manual_database_mutations": false,
+  "new_delete_requests": false
+}

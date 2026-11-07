@@ -11,4 +11,11 @@
 
 ## 发布和线上
 
-待 PR 合入后，以实际 main 提交构建固定发行 20261108-self-recovery-v1；中心与统一 Agent 配套升级后记录真实删除回执、应用新鲜观测与其他服务检查。此阶段未声明线上修复完成。
+- 实现 [PR140](https://github.com/workhold/lightmoni/pull/140) 已合入，发行源 main 提交 `f15f26f29d26ebdea017bc29ce40c03f8e42f651`。
+- 固定镜像 `docker.heyphp.com/lightmoni/lightmoni:20261108-self-recovery-v1`，OCI index `sha256:f5f1b8eed3c380d1f8ead970e69edd1b1396de2fb3d15cfa8f64acfe75791d95`。amd64/arm64 各45项产物检查与127项实际编译代码回归通过；远端索引、config、blob 与已验收 rootfs 核对通过，latest 未变。一次新增测试文件因隔离目录未关联生产依赖而失败，完善产物验收夹具后两架构重跑通过；没有因此修改生产代码。报告见 evidence/*-smoke.json 和 registry-report.json。
+- 指定 1Panel 终端完成备份、数据库 quick_check=ok（382677页）、固定镜像拉取与中心替换。在线备份小批次被持续写入重启后改为单批完成，原未完成文件已标记 .incomplete。备份文件夹0700、配置/密钥/数据库0600；备份正文不进仓库。中心启动于2026-11-07T20:07:57.426913565Z，healthy，公开 /healthz 返回ok，原 /data 卷完全相同。
+- zz-bj-1 沿产品的统一 Agent 版本管理完成指纹检查、固定包审阅、升级及新心跳健康确认；维护 `e24830bca3248ddadbaa7ac0ed5d6be7` succeeded，目标构建 `0.1.0-f15f26f29d26-64a32ca5ba82`，保留同一身份、账户和权限。vchive 仅监控且未配置SSH，本次不需要执行清理，没有扩大权限或变更它。
+- 原网站 `80d0a4d24cbe70ea60794b913971b5f7` 的既有删除任务于2026-11-07T20:22:35.973Z成功，主机目标done，登记已删除，原remove回执absent=true。清理回执覆盖三个旧网关和当前网关中的历史版本；用新安装代码再次完整只读inspect返回absent=true。未新建删除请求、手工改数据库状态或补归属标记。
+- 20:28 UTC只读核实Gitea、OpenResty、SDD091快速安装、系统镜像仓库均running/healthy=1，observed_generation分别追上3/4/1/7；last_seen均在两分钟内。两个已卸载实例保持removed；未发布的DBX登记保持未部署，没有擅自启动。四个已发布应用卡片不再显示滞留地址或待处理。
+- 现有Gitea和DBX公开入口200，镜像仓库未认证401；中心监控大盘13面板可用，在线中心1、最近一分钟上报失败0，图表与日志能读到新中心数据。对应截图见 evidence/。
+- 文件级“其他网站字节保留”由真实文件系统回归证明；额外线上递归摘要遇到其他网站的正常current符号链接而主动终止，未把该未完成摘要当作线上内容一致证明。线上保留验证采用既有网站登记、运行回执和真实公开入口。
