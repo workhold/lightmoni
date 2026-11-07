@@ -189,7 +189,7 @@ async function setup(t: any, certificate?: Parameters<typeof registerOperationsP
     dataDir: join(root, "agent"),
   });
   const finish = () => {
-    const job = jobs.claim("node-a", ["operations.platform"])!;
+    const job = jobs.claim("node-a", ["operations.platform","operations.platform.storage.v2"])!;
     const payload = platform.resolvePayload(job);
     for (const [n, phase] of [
       "accepted",
@@ -286,7 +286,7 @@ function clusterNode(f:Awaited<ReturnType<typeof setup>>,suffix:string,connected
  f.db.run('INSERT INTO managed_machines VALUES(?,?,?,?)','machine-'+suffix,'Machine '+suffix,'127.0.0.1',connected?'node-'+suffix:null);
  const cluster=f.platform.store.get(f.cluster.id);f.cluster=f.platform.store.update(cluster.id,cluster.revision,cluster.name,{...cluster.spec,machine_ids:[...cluster.spec.machine_ids,'machine-'+suffix]},'admin');
 }
-function certificateReceipt(f:Awaited<ReturnType<typeof setup>>,agentID:string,state='succeeded',job=f.jobs.claim(agentID,['operations.platform'])!){
+function certificateReceipt(f:Awaited<ReturnType<typeof setup>>,agentID:string,state='succeeded',job=f.jobs.claim(agentID,['operations.platform','operations.platform.storage.v2'])!){
  assert.ok(job);const payload=f.platform.resolvePayload(job),config=payload.resource.config;
  for(const [n,phase] of ['accepted','staging','activating','verifying'].entries())f.jobs.event(agentID,job.id,{lease_id:job.lease_id,sequence:n+1,phase:phase as any,summary:'certificate QA'});
  f.jobs.result(agentID,job.id,{lease_id:job.lease_id,state:state as any,summary:'certificate QA',snapshot:{health:{healthy:state==='succeeded'},operations:{operation_id:payload.operation_id,resource_id:payload.resource.id,data:state==='succeeded'?{certificate_version:config.certificate_version,fingerprint_sha256:config.fingerprint_sha256}:{error:'qa_directory_failed'}}}});
@@ -339,7 +339,7 @@ test('cluster delivery rejects empty or unready membership before dispatch and f
  assert.equal((await f.action(target,'sync')).status,409);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
  f.db.run('UPDATE managed_machines SET agent_id=? WHERE id=?','node-a','machine-b');assert.equal((await f.action(target,'sync')).status,409);assert.equal(f.db.get<any>('SELECT COUNT(*) n FROM agent_jobs')!.n,0);
  f.db.run('DELETE FROM managed_machines WHERE id=?','machine-b');const cluster=f.platform.store.get(f.cluster.id);f.cluster=f.platform.store.update(cluster.id,cluster.revision,cluster.name,{...cluster.spec,machine_ids:['machine-a']},'admin');
- await f.action(target,'sync');const job=f.jobs.claim('node-a',['operations.platform'])!;assert.ok(f.platform.resolvePayload(job).resource.config.private_key_pem);
+ await f.action(target,'sync');const job=f.jobs.claim('node-a',['operations.platform','operations.platform.storage.v2'])!;assert.ok(f.platform.resolvePayload(job).resource.config.private_key_pem);
  f.db.run('UPDATE managed_machines SET agent_id=NULL WHERE id=?','machine-a');assert.throws(()=>f.platform.resolvePayload(job),/membership_changed/);f.db.run('UPDATE managed_machines SET agent_id=? WHERE id=?','node-a','machine-a');
  f.db.run("INSERT INTO agent_lifecycle(agent_id,state) VALUES('node-a','removed')");assert.throws(()=>f.platform.resolvePayload(job),/membership_changed/);f.db.run("DELETE FROM agent_lifecycle WHERE agent_id='node-a'");
  f.platform.store.patchStatus(certificate.id,{certificate_version:'newer-version'});assert.throws(()=>f.platform.resolvePayload(job),/payload_version_changed/);f.platform.store.patchStatus(certificate.id,{certificate_version:certificate.status.certificate_version});
@@ -349,7 +349,7 @@ test('cluster delivery rejects empty or unready membership before dispatch and f
 });
 test('new certificate versions ignore late old-version receipts and restart retains each machine delivery identity',async t=>{
  const f=await setup(t);clusterNode(f,'b');const certificate=await issuedCertificate(f),target=await f.create('certificate_target','Version fencing',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:'/tmp/version-tls'});
- await f.action(target,'sync');certificateReceipt(f,'node-a');const oldJob=f.jobs.claim('node-b',['operations.platform'])!,old=f.platform.resolvePayload(oldJob);
+ await f.action(target,'sync');certificateReceipt(f,'node-a');const oldJob=f.jobs.claim('node-b',['operations.platform','operations.platform.storage.v2'])!,old=f.platform.resolvePayload(oldJob);
  const issue=await f.action(certificate,'issue');let run=issue.body.run;for(let n=0;n<200&&run.state==='running';n++){await new Promise(resolve=>setTimeout(resolve,10));run=(await f.req('/ops/runs/'+run.id)).body;}assert.equal(run.state,'succeeded');
  const newer=f.platform.store.get(certificate.id);assert.notEqual(newer.status.certificate_version,certificate.status.certificate_version);assert.throws(()=>f.platform.resolvePayload(oldJob),/payload_version_changed/);
  await f.action(target,'sync');
@@ -571,7 +571,7 @@ test("ordinary Agent refuses legacy certificate directory and hook writes withou
   // Even an incorrect center returning a legacy task outside the advertised
   // capabilities must be refused before downloading /operations private data.
   for (let n=0;n<2;n++) {
-    const legacy = f.jobs.claim("node-a", ["operations.platform"])!;
+    const legacy = f.jobs.claim("node-a", ["operations.platform","operations.platform.storage.v2"])!;
     assert.ok(legacy);
     const forced = new AgentJobRunner({endpoint:f.base,agentID:"node-a",controlCredential:"qa-control",dataDir:join(f.root,"ordinary-agent")}, {
       command: async (file) => { commands.push(file); throw Error("legacy write must remain denied"); },
@@ -633,7 +633,7 @@ test("HTTPS website deployment waits for a saved certificate without material be
   assert.equal(deployed.status, 202, JSON.stringify(deployed));
   assert.equal(deployed.body.runs.length, 1);
   assert.ok(f.platform.store.get(cert.id).status.certificate_version);
-  const job = f.jobs.claim("node-a", ["operations.platform"])!,
+  const job = f.jobs.claim("node-a", ["operations.platform","operations.platform.storage.v2"])!,
     payload = f.platform.resolvePayload(job);
   assert.equal(payload.resource.config.task, "gateway.apply");
   assert.match(
@@ -729,7 +729,7 @@ test('certificate reconciliation uses real file observation, recovers failure an
   const certificate=await issuedCertificate(f);
   let target=await f.create('certificate_target','Reconciled TLS',{certificate_id:certificate.id,type:'directory',cluster_id:f.cluster.id,path:join(f.root,'tls-first'),enabled:true});
   const work=async(fail=false)=>{
-    const job=f.jobs.claim('node-a',['operations.platform','operations.platform.reconciliation.v1'])!;assert.ok(job,'a reconciliation job is queued');
+    const job=f.jobs.claim('node-a',['operations.platform','operations.platform.storage.v2','operations.platform.reconciliation.v1'])!;assert.ok(job,'a reconciliation job is queued');
     const payload=f.platform.resolvePayload(job);
     for(const [n,phase] of ['accepted','staging','activating','verifying'].entries())f.jobs.event('node-a',job.id,{lease_id:job.lease_id,sequence:n+1,phase:phase as any,summary:'reconciliation fixture'});
     const result=fail?{state:'failed' as const,code:'known_failure',snapshot:{}}:await executeOperation(payload,{dataDir:join(f.root,'executor'),signal:new AbortController().signal,now:()=>new Date(),command:async()=>({stdout:'',stderr:''})},async()=>{});
@@ -745,7 +745,7 @@ test('certificate reconciliation uses real file observation, recovers failure an
   await (await import('node:fs/promises')).writeFile(join(target.spec.path,'fullchain.pem'),'drift');
   await tick(true);await work();await tick();await work();await tick();await work();await tick();
   assert.equal(f.reconciliation.inventory('machine-a').resources[0].state,'in_sync');
-  await tick(true);const old=f.jobs.claim('node-a',['operations.platform','operations.platform.reconciliation.v1'])!;assert.ok(old);
+  await tick(true);const old=f.jobs.claim('node-a',['operations.platform','operations.platform.storage.v2','operations.platform.reconciliation.v1'])!;assert.ok(old);
   target=f.platform.store.update(target.id,target.revision,target.name,{...target.spec,path:join(f.root,'tls-second')},'admin');f.reconciliation.refresh();
   assert.throws(()=>f.platform.resolvePayload(old),/generation_changed|revision_changed/);
   // The accepted old job is cancelled by the fixture to release its lease; production retains normal lease fencing.
@@ -760,7 +760,7 @@ test('certificate reconciliation uses real file observation, recovers failure an
 test('old Agents retain ordinary certificate delivery while deep reconciliation honestly requires upgrade',async t=>{
   const f=await setup(t,undefined,false,true),certificate=await issuedCertificate(f);
   const target=await f.create('certificate_target','Old fleet TLS',{certificate_id:certificate.id,type:'directory',agent_id:'node-a',path:join(f.root,'old-fleet'),enabled:true});
-  await f.platform.tick();const job=f.jobs.claim('node-a',['operations.platform'])!;assert.ok(job);
+  await f.platform.tick();const job=f.jobs.claim('node-a',['operations.platform','operations.platform.storage.v2'])!;assert.ok(job);
   const payload=f.platform.resolvePayload(job);assert.equal(payload.resource.config.task,'certificate.install');assert.equal(payload.resource.config.reconciliation_hash,undefined);
   f.reconciliation.request('machine-a');await f.reconciliation.tick();assert.equal(f.reconciliation.inventory('machine-a').resources[0].code,'reconciliation_agent_upgrade_required');
 });

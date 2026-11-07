@@ -1,3 +1,4 @@
+import {createWebsiteDeletions} from './website-deletions.js';
 import type { ReconciliationRegistry } from "../reconciliation/registry.js";
 import {machineServiceAddresses} from "../server/host-network.js";
 import {applicationUpgrade,registerApplicationUpgrades} from './application-upgrades.js';
@@ -43,8 +44,9 @@ export function registerOperationsPlatform(
     const result=await certificates.perform(store.get(certificateID,'certificate'),'issue',{},actor);
     if(result.state!=='succeeded')fail(409,'website_certificate_issuance_failed');
   }});
+  const websiteDeletions=createWebsiteDeletions(store,workloads);
   const quickInstall=createQuickInstall(store,workloads);
-  const domains: DomainController[] = [certificates, workloads,quickInstall];
+  const domains: DomainController[] = [certificates, workloads,quickInstall,{actions:()=>[],perform:async()=>fail(400,'unsupported_website_cleanup_action'),tick:websiteDeletions.tick}];
   const { router } = deps;
   let timer: ReturnType<typeof setInterval> | undefined,
     closed = false;
@@ -309,8 +311,9 @@ export function registerOperationsPlatform(
     "/api/v1/ops/resources/:id",
     safe(async (ctx) => {
       const b = safeObject(await ctx.body());
-      store.remove(ctx.params.id, b.revision);
-      ctx.json({ deleted: true, remote_data_deleted: false });
+      const resource=store.get(ctx.params.id);
+      if(resource.kind==='website') {const result=await websiteDeletions.begin(resource,b.revision,ctx.user.id);ctx.json(result,result.deleted?200:202);}
+      else {store.remove(resource.id,b.revision);ctx.json({deleted:true,remote_data_deleted:false});}
     }),
   );
   router.get('/api/v1/ops/runs/:id', safe(ctx => ctx.json(store.action(ctx.params.id))));

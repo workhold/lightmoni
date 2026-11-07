@@ -21,6 +21,7 @@ import {commandDiagnostic} from '../src/operations/install-progress.js';
 import { selfSignedCertificate } from "../src/ops/certificates.js";
 import { certificateMetadata } from "../src/operations/certificates.js";
 import {privateRoot} from '../src/operations/website-files.js';
+import { gatewayStorage, observedMounts, fitStorageReceipt } from '../src/operations/storage.js';
 import type {
   OperationPayload,
   OperationExecutionContext,
@@ -389,11 +390,11 @@ test("low-port EACCES reaches Docker validation for workloads and OpenResty and 
 });
 
 test('modern application log receipts redact deployed SDK and custom environment values',async t=>{
- const f=await setup(t),root=join(await privateRoot(f.context,'platform'),'workloads',resourceID),containerID='b'.repeat(64),secret='lm_'+'a'.repeat(43);
+ const f=await setup(t),root=join(await privateRoot(f.context,'platform'),'applications',resourceID,'instances',resourceID),containerID='b'.repeat(64),secret='lm_'+'a'.repeat(43);
  await mkdir(root,{recursive:true,mode:0o700});const manifest=join(root,'compose.json');
  await writeFile(manifest,JSON.stringify({services:{app:{environment:{LIGHTMONI_KEY:secret,CUSTOM_SECRET:'custom$$value'}}}}));
  await writeFile(join(root,'state.json'),JSON.stringify({manifest}));
- const context={...f.context,command:async(_command:string,args:string[])=>({code:0,stdout:args[0]==='ps'?containerID:args[0]==='inspect'?JSON.stringify([{Id:containerID,Config:{Labels:{'io.lightmoni.platform.instance':resourceID}}}]):'sdk='+secret+' custom=custom$value ordinary line',stderr:''})};
+ const context={...f.context,command:async(_command:string,args:string[])=>({code:0,stdout:args[0]==='ps'?containerID:args[0]==='inspect'?JSON.stringify([{Id:containerID,Config:{Labels:{'io.lightmoni.platform.instance':resourceID,'io.lightmoni.platform.application':resourceID,'io.lightmoni.platform.owner':'lightmoni'}}}]):'sdk='+secret+' custom=custom$value ordinary line',stderr:''})};
  const result=await executePlatform(payload({task:'workload.logs',instance_id:resourceID},'logs'),context);
  assert.doesNotMatch(JSON.stringify(result),new RegExp(secret));assert.doesNotMatch(JSON.stringify(result),/custom\$value/);assert.match(JSON.stringify(result),/ordinary line/);assert.match(JSON.stringify(result),/redacted/);
 });
@@ -424,7 +425,7 @@ test('managed certificate actual inspection repairs damaged immutable release, v
 test('workload inspection compares live Docker fields and actual managed file bytes against current desired content',async t=>{
   const {renderManifest}=await import('../src/operations/platform.js'),{desiredHash}=await import('../src/shared/desired-state.js'),{hash}=await import('../src/operations/website-files.js');
   const f=await setup(t),id='workload-content-check',app=normalizeApplication({mode:'container',image:'example:1',environment:{VALUE:'expected'},mounts:[{type:'config',target:'/etc/example',files:{'config.json':'{"mode":"expected"}'}}]});
-  const manifest=await renderManifest(f.context,id,app,1),root=join(await privateRoot(f.context,'platform'),'workloads',id),manifestPath=join(root,'compose.json');
+  const manifest=await renderManifest(f.context,id,app,1,resourceID),root=join(await privateRoot(f.context,'platform'),'applications',resourceID,'instances',id),manifestPath=join(root,'compose.json');
   await writeFile(manifestPath,JSON.stringify(manifest));await writeFile(join(root,'state.json'),JSON.stringify({manifest:manifestPath,digest:hash(JSON.stringify(manifest)),configuration_hash:desiredHash(app)}));
   const service=manifest.services.app,container:any={Id:'f'.repeat(64),Name:'/managed-test',Config:{Image:'example:1',Env:['VALUE=expected'],Labels:service.labels},State:{Running:true,Status:'running'},HostConfig:{RestartPolicy:{Name:'unless-stopped'},ReadonlyRootfs:false,PortBindings:{}},NetworkSettings:{Ports:{}},Mounts:service.volumes.map((v:any)=>({Source:v.source,Destination:v.target,Type:v.type,RW:!v.read_only}))};
   container.Config.Labels['com.docker.compose.service']='app';
@@ -437,9 +438,9 @@ test('workload inspection compares live Docker fields and actual managed file by
 
 test('workload inspection resolves Compose scoped, named and external volume identities and still rejects foreign volumes and access drift',async t=>{
  const {renderManifest}=await import('../src/operations/platform.js'),{desiredHash}=await import('../src/shared/desired-state.js'),{hash}=await import('../src/operations/website-files.js');
- for(const [definition,name] of [[{},'lm-volume-check_data'],[{name:'explicit-data'},'explicit-data'],[{external:true},'data'],[{external:true,name:'external-data'},'external-data']] as const){
+ for(const [definition,name] of [[{},'lm-'+resourceID+'-volume-check-data'],[{name:'explicit-data'},'explicit-data'],[{external:true},'data'],[{external:true,name:'external-data'},'external-data']] as const){
   const f=await setup(t),id='volume-check',app=normalizeApplication({mode:'compose',compose:{services:{db:{image:'example:1',volumes:[{type:'volume',source:'data',target:'/data'}]}},volumes:{data:definition}}});
-  const manifest=await renderManifest(f.context,id,app,1),root=join(await privateRoot(f.context,'platform'),'workloads',id),path=join(root,'compose.json');
+  const manifest=await renderManifest(f.context,id,app,1,resourceID),root=join(await privateRoot(f.context,'platform'),'applications',resourceID,'instances',id),path=join(root,'compose.json');
   await writeFile(path,JSON.stringify(manifest));await writeFile(join(root,'state.json'),JSON.stringify({manifest:path,digest:hash(JSON.stringify(manifest)),configuration_hash:desiredHash(app)}));
   const mount:any={Type:'volume',Name:name,Source:'/var/lib/docker/volumes/'+name+'/_data',Destination:'/data',RW:true};
   const container={Id:'a'.repeat(64),Config:{Image:'example:1',Labels:{...manifest.services.db.labels,'com.docker.compose.service':'db'}},State:{Running:true,Status:'running'},HostConfig:{ReadonlyRootfs:false,PortBindings:{}},Mounts:[mount]};
@@ -460,14 +461,92 @@ test('container empty command overrides inherit image defaults while explicit co
  assert.deepEqual(explicit.command,['node','custom.mjs']);assert.deepEqual(explicit.entrypoint,['node']);
  const compose=normalizeApplication({mode:'compose',compose:{services:{app:{image:'example:1',command:[],entrypoint:[]}}}});
  assert.deepEqual(compose.compose.services.app.command,[]);assert.deepEqual(compose.compose.services.app.entrypoint,[]);
- const root=join(await privateRoot(f.context,'platform'),'workloads',id),path=join(root,'compose.json');
+ const root=join(await privateRoot(f.context,'platform'),'applications',resourceID,'instances',id),path=join(root,'compose.json');
  let container:any;
  const context={...f.context,command:async(_file:string,args:string[])=>({stdout:args[0]==='ps'?container.Id:args[0]==='inspect'?JSON.stringify([container]):'',stderr:''})};
  for(const application of [app,explicit]){
-  const manifest=await renderManifest(f.context,id,application,1);await writeFile(path,JSON.stringify(manifest));await writeFile(join(root,'state.json'),JSON.stringify({manifest:path,digest:hash(JSON.stringify(manifest)),configuration_hash:desiredHash(application)}));
+  const manifest=await renderManifest(f.context,id,application,1,resourceID);await writeFile(path,JSON.stringify(manifest));await writeFile(join(root,'state.json'),JSON.stringify({manifest:path,digest:hash(JSON.stringify(manifest)),configuration_hash:desiredHash(application)}));
   container={Id:'d'.repeat(64),Config:{Image:'example:1',Cmd:['node','server.mjs'],Entrypoint:['docker-entrypoint.sh'],Labels:{...manifest.services.app.labels,'com.docker.compose.service':'app'}},State:{Running:true,Status:'running'},HostConfig:{RestartPolicy:{Name:'unless-stopped'},ReadonlyRootfs:false,PortBindings:{}},Mounts:[]};
   const inspect=()=>executePlatform(payload({task:'workload.inspect',instance_id:id,application}),context);
   assert.equal((await inspect()).data.configuration_matches,application===app);
   if(application===explicit){container.Config.Cmd=explicit.command;container.Config.Entrypoint=explicit.entrypoint;assert.equal((await inspect()).data.configuration_matches,true);}
  }
+});
+
+test('storage receipts use actual bind and Docker data-root paths and retain initialization',async t=>{
+ const {renderManifest}=await import('../src/operations/platform.js');
+ const f=await setup(t),id='storage-layout',app=normalizeApplication({mode:'container',image:'example:1',mounts:[
+  {type:'config',target:'/etc/example',files:{'site.conf':'secret configuration'}},
+  {type:'init',target:'/init',files:{'once.sql':'initial'}},{type:'data',target:'/data'},
+  {type:'data',target:'/external',source:join(f.root,'custom-data')},{type:'volume',target:'/volume',source:'database'},
+ ]});
+ const doc=await renderManifest(f.context,id,app,1,resourceID),root=join(f.dataDir,'operations/platform/applications',resourceID,'instances',id);
+ assert.match(doc.services.app.volumes[0].source,/\/config\/[a-f0-9]{64}\/0$/);
+ assert.equal(doc.services.app.volumes[1].source,join(root,'initial/1'));assert.equal(doc.services.app.volumes[2].source,join(root,'data/2'));assert.equal(doc.services.app.volumes[3].source,join(f.root,'custom-data'));
+ const init=join(doc.services.app.volumes[1].source,'once.sql');await writeFile(init,'user changed');await renderManifest(f.context,id,app,2,resourceID);assert.equal(await readFile(init,'utf8'),'user changed');
+ const container={Id:'f'.repeat(64),Config:{Labels:{'io.lightmoni.platform.instance':id,'io.lightmoni.platform.application':resourceID,'io.lightmoni.platform.owner':'lightmoni','com.docker.compose.service':'app'},Env:['SECRET=hidden']},State:{Running:false},Mounts:doc.services.app.volumes.map((v:any)=>({Type:v.type,Source:v.type==='volume'?'/srv/docker/volumes/lm-storage-layout_database/_data':v.source,Name:v.type==='volume'?'lm-storage-layout_database':'',Destination:v.target,RW:!v.read_only}))};
+ const context={...f.context,command:async(_file:string,args:string[])=>({stdout:args[0]==='ps'?container.Id:args[0]==='inspect'?JSON.stringify([container]):'',stderr:''})};
+ const result=await executePlatform(payload({task:'workload.inspect',instance_id:id},'inspect'),context);
+ assert.equal(result.data.storage.instance_root,root);assert.equal(result.data.storage.mounts.length,5);assert.equal(result.data.storage.mounts.at(-1).source,'/srv/docker/volumes/lm-storage-layout_database/_data');
+ assert.equal(result.data.storage.mounts[0].read_only,true);assert.doesNotMatch(JSON.stringify(result.data.storage),/hidden|secret configuration/);
+});
+test('gateway storage identifies independent website ID versions and bounds metadata',()=>{
+ const root='/var/lib/lightmoni-managed/operations/platform',digest='a'.repeat(64),state={digest,website_versions:{'website-one':digest,'website-two':'b'.repeat(64)}};
+ const storage=gatewayStorage(root,'entry-one',state,[]);
+ assert.equal(storage.config_file,root+'/gateways/entry-one/current/nginx.conf');assert.equal(storage.sites[0].root,root+'/websites/website-one');
+ assert.equal(storage.sites[0].config_file,root+'/websites/website-one/versions/'+digest+'/nginx.conf');assert.equal(storage.sites[0].public_dir,root+'/websites/website-one/versions/'+digest+'/public');assert.equal(storage.sites[1].website_id,'website-two');
+ const large=observedMounts([{Mounts:Array.from({length:500},()=>({Source:'/srv/'+('x'.repeat(1000)),Destination:'/data',Type:'bind',RW:true}))}]);assert.equal(large.mounts_truncated,true);assert(Buffer.byteLength(JSON.stringify(large))<9000);
+ assert.throws(()=>gatewayStorage(root,'../outside',state,[]),/INVALID_RESOURCE_ID/);
+});
+test('optional storage metadata cannot exceed the existing receipt budget',()=>{
+ const content='x'.repeat(59*1024),result=fitStorageReceipt({verified:true,data:{content,storage:{layout_version:1,instance_root:'/data',mounts:Array.from({length:20},()=>({source:'x'.repeat(500)})),sites:[]}}});
+ assert.equal(result.data.content,content);assert.equal(result.data.storage.mounts_truncated,true);assert(Buffer.byteLength(JSON.stringify(result.data))<=60*1024);
+ const full='x'.repeat(60*1024-14),fallback=fitStorageReceipt({verified:true,data:{content:full,storage:{layout_version:1,instance_root:'x'.repeat(500)}}});assert.equal(fallback.data.content,full);assert.equal(fallback.data.storage,undefined);
+});
+
+test('application and instance IDs isolate managed files, initialization, data and default volume names',async t=>{
+ const {renderManifest}=await import('../src/operations/platform.js');const f=await setup(t);
+ const app=normalizeApplication({mode:'container',image:'example:1',mounts:[{type:'init',target:'/init',files:{value:'default'}},{type:'data',target:'/data'},{type:'volume',target:'/volume',source:'database'}]});
+ const first=await renderManifest(f.context,'instance',app,1,'application-a'),second=await renderManifest(f.context,'instance',app,1,'application-b'),replica=await renderManifest(f.context,'replica',app,1,'application-a');
+ const mounts=(doc:any)=>doc.services.app.volumes;
+ assert.match(mounts(first)[0].source,/applications\/application-a\/instances\/instance\/initial\/0$/);
+ assert.notEqual(mounts(first)[1].source,mounts(second)[1].source);assert.notEqual(mounts(first)[1].source,mounts(replica)[1].source);
+ assert.equal(first.volumes.database.name,'lm-application-a-instance-database');assert.notEqual(first.volumes.database.name,second.volumes.database.name);
+ await writeFile(join(mounts(first)[0].source,'value'),'changed');await renderManifest(f.context,'instance',app,2,'application-a');
+ assert.equal(await readFile(join(mounts(first)[0].source,'value'),'utf8'),'changed');assert.equal(await readFile(join(mounts(second)[0].source,'value'),'utf8'),'default');
+ await assert.rejects(executePlatform(payload({task:'workload.apply',instance_id:'instance',application_id:'application-b',application:app}),f.context),/APPLICATION_IDENTITY_MISMATCH/);
+});
+test('website ID versions own nginx, SSL, authentication and static files independently and restore pointers',async t=>{
+ const {stageWebsites,activateWebsitePointers,restoreWebsitePointers,gatewayIdentity,loadGatewayState}=await import('../src/operations/website-storage.js');
+ const {renderWebsiteConfig,renderGateway}=await import('../src/operations/platform.js');const {readlink}=await import('node:fs/promises');const {hashSync}=await import('bcryptjs');
+ const f=await setup(t),platform=await privateRoot(f.context,'platform'),material=await selfSignedCertificate(['one.example.test'],7,new Date());
+ const c:any={instance_id:'entry',http_port:23881,https_port:23882,sites:[{id:'one',website_id:'website-a',domains:['one.example.test'],mode:'static',static_files:{'index.html':'first'},certificate:material,auth:{mode:'basic',realm:'secure',users:[{username:'qa',password_hash:hashSync('private-password',10)}]}},{id:'two',website_id:'website-b',domains:['two.example.test'],mode:'static',static_files:{'index.html':'second'}}]};
+ const versions=await stageWebsites(f.context,c,renderWebsiteConfig,v=>v),rootA=join(platform,'websites/website-a'),rootB=join(platform,'websites/website-b'),versionA=join(rootA,'versions',versions['website-a']),versionB=join(rootB,'versions',versions['website-b']);
+ assert.equal(await readFile(join(versionA,'ssl/one/privkey.pem'),'utf8'),material.private_key_pem);assert.match(await readFile(join(versionA,'auth/one/site.htpasswd'),'utf8'),/^qa:\$2/);assert.equal(await readFile(join(versionA,'public/one/index.html'),'utf8'),'first');
+ assert.equal((await lstat(join(versionA,'ssl/one/privkey.pem'))).mode&0o777,0o600);
+ const identity=gatewayIdentity(c,versions),global=renderGateway({...c,website_versions:versions},identity.digest,false,true);
+ assert.match(global,/include "\/etc\/lightmoni-websites\/website-a\/versions\/[^/]+\/nginx.conf"/);assert.doesNotMatch(global,/ssl_certificate_key|auth_basic_user_file|BEGIN PRIVATE|qa:/);assert(!JSON.stringify(identity).includes(material.private_key_pem));
+ await activateWebsitePointers(platform,versions);const before=(await lstat(join(versionB,'nginx.conf'))).ino;
+ const next=structuredClone(c);next.sites[0].static_files['index.html']='updated';const updated=await stageWebsites(f.context,next,renderWebsiteConfig,v=>v);
+ assert.notEqual(updated['website-a'],versions['website-a']);assert.equal(updated['website-b'],versions['website-b']);assert.equal((await lstat(join(versionB,'nginx.conf'))).ino,before);
+ const previous=await activateWebsitePointers(platform,updated);await restoreWebsitePointers(platform,previous);assert.equal(await readlink(join(rootA,'current')),'versions/'+versions['website-a']);
+ const restored=await loadGatewayState(platform,{version:2,...identity,image:c.image??'openresty/openresty:1.27.1.2-0-alpine'});assert.equal(restored!.config.sites.length,2);
+});
+test('website cleanup rejects active references, prunes obsolete indexes and deletes only its owned ID root',async t=>{
+ const {stageWebsites,activateWebsitePointers,gatewayIdentity,removeWebsite,inspectWebsiteRemoval}=await import('../src/operations/website-storage.js');const {renderWebsiteConfig,renderGateway}=await import('../src/operations/platform.js');const {symlink}=await import('node:fs/promises');
+ const f=await setup(t),platform=await privateRoot(f.context,'platform'),c:any={instance_id:'entry',sites:[{id:'one',website_id:'website-a',domains:['one.test'],mode:'static',static_files:{'index.html':'one'}},{id:'two',website_id:'website-b',domains:['two.test'],mode:'static',static_files:{'index.html':'two'}}]};
+ const refs=await stageWebsites(f.context,c,renderWebsiteConfig,v=>v);await activateWebsitePointers(platform,refs);
+ const root=join(platform,'gateways/entry');await mkdir(root,{recursive:true});await writeFile(join(root,'owner.json'),JSON.stringify({layout_version:2,instance_id:'entry'}));
+ const save=async(refs:any)=>{const value=gatewayIdentity(c,refs),version=join(root,'versions',value.digest);await mkdir(version,{recursive:true});await writeFile(join(version,'websites.json'),JSON.stringify(refs));await writeFile(join(version,'nginx.conf'),renderGateway({...c,website_versions:refs},value.digest,false,true));await writeFile(join(root,'state.json'),JSON.stringify({version:2,...value,retained_website_versions:{...refs,'website-a':Object.values(refs)[0]}}));return value;};
+ const prior=await save(refs);const context={...f.context,command:async(_file:string,args:string[])=>({stdout:args[0]==='ps'?'a'.repeat(64):JSON.stringify([{Id:'a'.repeat(64),Config:{Labels:{'io.lightmoni.platform.instance':'entry','io.lightmoni.platform.owner':'lightmoni'}},State:{Running:true}}]),stderr:''})};
+ const render=(config:any,digest:string)=>renderGateway(config,digest,false,true);
+ await assert.rejects(removeWebsite(context,'website-a',render),/WEBSITE_STILL_ACTIVE/);assert(await readFile(join(platform,'websites/website-a/owner.json')));
+ const current=await save({'website-b':refs['website-b']});await symlink('versions/'+current.digest,join(root,'current'));
+ const result=await removeWebsite(context,'website-a',render);assert.equal(result.absent,true);await assert.rejects(lstat(join(platform,'websites/website-a')),{code:'ENOENT'});await assert.rejects(lstat(join(root,'versions',prior.digest)),{code:'ENOENT'});
+ assert.equal(await readFile(join(platform,'websites/website-b/versions',refs['website-b'],'public/two/index.html'),'utf8'),'two');assert.equal((await removeWebsite(context,'website-a',render)).absent,true);
+ assert.equal((await inspectWebsiteRemoval(context,'website-a')).absent,true);const retained=JSON.parse(await readFile(join(root,'state.json'),'utf8'));retained.retained_website_versions['website-a']=refs['website-a'];await writeFile(join(root,'state.json'),JSON.stringify(retained));
+ assert.equal((await inspectWebsiteRemoval(context,'website-a')).absent,false);await removeWebsite(context,'website-a',render);assert.equal((await inspectWebsiteRemoval(context,'website-a')).absent,true);
+ await assert.rejects(removeWebsite(context,'../outside',render),/INVALID_RESOURCE_ID/);
+ const outside=join(f.root,'outside');await mkdir(outside);await writeFile(join(outside,'keep'),'keep');await symlink(outside,join(platform,'websites/unsafe'));
+ await assert.rejects(removeWebsite(context,'unsafe',render),/OWNERSHIP/);assert.equal(await readFile(join(outside,'keep'),'utf8'),'keep');
 });

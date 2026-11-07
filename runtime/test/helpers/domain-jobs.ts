@@ -30,7 +30,7 @@ export function registerAgentJobs(deps:Dependencies,options:Parameters<typeof re
   if(!db.get("SELECT 1 FROM sqlite_master WHERE name='privileged_executors'")) {
     (db as any).native.function('fixture_executor_observation',(heartbeat:string)=>{
       let value:any={};try{value=JSON.parse(heartbeat);}catch{}
-      return deps.encrypt(JSON.stringify({policy_generation:1,capabilities:['operations.managed.v1'],operations_capabilities:[...new Set(['operations.platform',...(value.operations_capabilities??[])])]}));
+      return deps.encrypt(JSON.stringify({policy_generation:1,capabilities:['operations.managed.v1'],operations_capabilities:[...new Set(['operations.platform',...(value.operations_capabilities??['operations.platform.storage.v2'])])]}));
     });
     db.exec(`CREATE VIEW privileged_executors AS SELECT a.id AS id,m.id AS machine_id,a.id AS agent_id,'active' AS state,1 AS install_generation,a.last_seen,fixture_executor_observation(a.heartbeat) AS observation_enc FROM agents a JOIN managed_machines m ON m.agent_id=a.id;
       CREATE VIEW privileged_machine_policies AS SELECT id AS machine_id,agent_id,1 AS generation,'["operations.managed.v1"]' AS capabilities_json,(SELECT id FROM users WHERE role='admin' AND active=1 LIMIT 1) AS approved_by FROM managed_machines;`);

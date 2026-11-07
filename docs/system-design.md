@@ -2490,3 +2490,55 @@ RuntimeMonitor 使用 TypeScript SDK 的显式 exporter 回调直接进入 Inges
 中心明确期望 removed、两次核验均无容器且保留固定目录的旧记录，可在同一管理员计划中使用 retire_retained：仅退役中心记录并释放预约，保留全部远端目录与原身份审计；界面明确展示保留路径。不能对运行期望的缺失受管状态实例使用，也不执行容器重建或数据删除。残留目录不再阻塞同机其他已核验绑定恢复。
 
 管理员以主机级不可变计划审阅全部旧实例，由当前认证 Agent 的 root 适配器通过 operations.platform.instance-recovery-review.v1 能力只读核验容器标签、受管状态和固定数据路径。审批后重新核验同一快照和摘要，原子更换中心 Agent 绑定及端口预约归属，保留实例 ID、业务数据位置、端口、配置与期望副本。旧 Agent 在线、未结束或未审计未知任务、外部容器、不安全或缺失数据状态都阻止恢复；无业务证据的旧空记录按已审阅计划退役。准备、审批人、复验和结果持久记录，重复请求回读原事务；后续正常对账验证运行和健康。该路径不执行远端容器写入或数据迁移，网络凭据和签名执行权限不变。
+
+## 99. 应用登记与宿主机存储清单（SDD099）
+
+应用删除登记以实例行的已确认 removed 为准；仅停止、离线、失败及未核对 unknown 均不能当作已卸载。旧 status.active 聚合不覆盖实例卸载事实。系统仓库移除全部实例并解除集群镜像复用、对外入口和其他引用后允许删除登记。当前网站引用和启用发布快照仍受保护，已停用历史快照继续保留审计。事务删除资源/系统登记、退役已移除实例并释放端口预约，修订、执行历史及应用持久数据保留。同名新应用不会自动接管旧数据。
+
+项目尚未上线，直接采用 layout_version=2，不做旧目录迁移或双布局回退。固定业务根为 `/var/lib/lightmoni-managed/operations/platform`，与 Agent 身份及升级状态分离；稳定应用/网站 ID 决定目录，名称、域名变更不搬移数据。每个应用按实例 ID 再隔离，同应用不同副本、各机器本地数据默认独立。
+
+| 内容 | 相对业务根的位置 / 规则 |
+| --- | --- |
+| 应用根 | `applications/<application_id>/` |
+| 应用实例 | `applications/<application_id>/instances/<instance_id>/`，以下应用路径相对此根 |
+| 状态与发布版本 | `state.json`、`versions/<manifest_digest>/compose.json`；私有正文不进入存储清单 |
+| 配置/初始化/默认数据 | `config/<files_digest>/<mount_index>/`、`initial/<mount_index>/`、`data/<mount_index>/`；初始化不覆盖已有文件，应用卸载及删除登记保留数据 |
+| 默认命名卷 | `lm-<application_id>-<instance_id>-<volume_key>`；Compose 项目继续为 `lm-<instance_id>` |
+| 显式 bind / volume | 显式 source/name/external 为用户指定覆盖；实际位置回读 Docker Mounts.Source，不能假定 Docker data-root |
+| 网站根 | `websites/<website_id>/owner.json`、`current -> versions/<digest>` |
+| 网站版本 | `websites/<website_id>/versions/<digest>/nginx.conf`、`metadata.json`、`auth-probe.json`，同版本的 `ssl/<fragment_id>/`、`auth/<fragment_id>/`、`public/<fragment_id>/` |
+| 网关根 | `gateways/<instance_id>/owner.json`、`state.json`、`current -> versions/<bundle_digest>` |
+| 网关版本 | `nginx.conf` 全局索引和 `websites.json` 网站版本映射；只 include 网站精确不可变版本，不复制网站私钥、鉴权哈希或静态正文 |
+
+网站版本聚合该网站全部域名分组。网站根与网关根分别只读挂载为 `/etc/lightmoni-websites` 与 `/etc/lightmoni`。私钥、私有元数据及配置为0600，鉴权哈希与静态文件为工作进程可读的0644。网站更新先暂存独立版本，通过完整 `nginx -t`，原子切换网关索引后重载并验证 HTTP、TLS 和鉴权；成功后更新网站 current。失败恢复旧全局索引和网站指针，并等待旧版本验证。一站变化不改写其他站版本。
+
+网站删除是持久生命周期：`ops_website_hosts` 记录曾派发部署的机器，`ops_website_deletions` 保存删除意图、操作者及逐机进度。DELETE 创建幂等意图，冻结编辑/再发布，停用路由并驱动既有 DNS 撤销。各宿主 `website.remove` 清除旧网关回滚引用后删除固定根下归属匹配的网站目录；运行网关仍引用则拒绝，停止/不存在的网关先保存剔除该网站的索引。清理同时移除该网站的 SSL 副本、鉴权、探针、静态文件与历史版本；共享中心证书及应用数据保留。离线等待，已知失败重试，unknown 先审计核对，再只读 `website.inspect`，不盲目重放写入。进度跨重启和重复请求保留，已成功机器不重复清理；全部宿主确认 absent 且 DNS/引用检查通过后才注销登记。202 返回 `deleted=false` 和进度，全部完成返回200；页面明确逐机等待/失败/未知，不能提前显示删除成功。
+
+新布局签名作业携带 `storage_layout=2`，领取需 `operations.platform.storage.v2`。workload/gateway 包含应用与实例身份；清理作业包含网站、删除意图、尝试号及固定机器，领取时复核修订、授权和当前 Agent 绑定，不接受调用方任意文件根。应用容器和恢复检查核对应用/实例/平台归属标签，恢复路径使用同一新布局。
+
+成功 Agent 回执附带 layout_version=2 的有界 storage 元数据：应用根、实例根、真实 Docker 来源/目标/访问方式、网站 root/current/config_file/version_root 与 SSL/auth/public 路径。数组各限8 KiB，整体维持60 KiB预算，截断明确标记，不返回环境、配置正文、密码、哈希或证书。管理员 `GET /api/v1/ops/resources/:id/storage?offset=0` 每页20实例，含退役实例与网站曾落点，只展示自身网站。GET 仅读最近成功观测，不派发任务；observed_at 不是实时在线证明，无新版回执显示待检查/升级。详情支持刷新、复制路径和分页。
+
+```mermaid
+flowchart LR
+  D[应用/网站详情] --> C[管理员存储清单]
+  C --> O[(同实例最近成功观测)]
+  A[Agent实际Docker挂载与网关状态] --> O
+  A --> B[应用ID/实例ID与网站ID目录]
+  U[应用确认卸载后注销] --> H[退役绑定/保留应用数据]
+  X[网站删除持久意图] --> W[撤下路由/清理DNS]
+  W --> R[逐机清除回滚引用/删除归属网站目录]
+  R --> F[全机确认后注销; 离线等待/unknown核对]
+```
+
+规格、契约、任务与验收见 `specs/099-app-registration-storage/`；仓库与 Doca 同章节原生块/流程图在同一PR同步并回读。真实 Linux Docker 验证应用挂载、OpenResty 多网站 TLS/鉴权、失败恢复及清理。此变更不合并主干、不发布或部署生产。
+## 100. 私有镜像版本浏览与安全清理（SDD100）
+
+私有镜像管理沿用已登记系统仓库的部署选择。在所选机器的受管执行器上通过 Distribution V2 API 浏览 catalog、镜像标签与摘要，中心不直连内网，不接受任意端点。界面按镜像分页展示全部版本及引用应用，仓库、空状态、失败和清理结果均有明确反馈。
+
+新增 `registry.inspect` 与 `registry.cleanup` 固定任务，复用 `ops_platform_runs`、签名受管作业、租约与审计，能力为 `operations.platform.registry.v1`。中心生成仓库身份、固定机器、当前内部端点和关联网站域名别名，领取时再次核对修订、目标及引用快照。旧执行器需升级；Registry 模板开启删除，已有仓库需重新部署生效，拓扑、持久数据路径和凭据边界不变。
+
+清理检查整个所选仓库，不受页面镜像筛选限制。引用集合包括所有应用当前配置、停止或未启动应用、冻结部署修订、尚未移除实例的观测与期望修订及未终结发布载荷。先完整分页扫描并校验 manifest 摘要与多架构依赖，再按摘要删除；同摘要标签和被引用索引子项受保护。读取缺失、超限或无法解析引用时不开始删除。部分失败返回实际数量，不显示全部成功。
+
+`registry.cleanup` 从排队开始作为 SQLite 持久写入围栏，暂时阻止应用与网站创建、修改、删除以及新的 workload/gateway apply，避免引用核验到删除之间的平台写入竞态。领取时的新引用必须包含于冻结快照。unknown 保持围栏，只有现有同作业、同机器的管理员审计核查或恢复证据才能解除，不自动重放删除。仅识别 LightMoni 登记应用；外部直接推送或未登记引用不能由平台保证。删除 manifest 不运行在线垃圾回收，不承诺立即释放镜像层磁盘。
+
+规格与验收见 `specs/100-registry-image-versions/`。[Doca 基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)第100章文字已保存并逐块回读；新增原生图接口连续返回500，采用文字同步并保留既有图块，最新回读确认仓库原生图的节点、连线保持一致，见 `evidence/doca-readback.json`。

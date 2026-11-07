@@ -35,6 +35,7 @@ export async function inspectRecoveryReview(input:any,context:OperationExecution
    if(!Array.isArray(values)||values.length!==containers.length)reject();
    for(const value of values){
     if(!containers.includes(value.Id)||value.Config?.Labels?.['io.lightmoni.platform.instance']!==id||value.Config?.Labels?.['io.lightmoni.platform.owner']!=='lightmoni')reject();
+    if(item.kind==='workload'&&value.Config.Labels['io.lightmoni.platform.application']!==owner)reject();
     if(!Array.isArray(value.Mounts)||value.Mounts.length>100)reject();
     for(const mount of value.Mounts.filter((m:any)=>['bind','volume'].includes(m.Type))){
      if(![mount.Source,mount.Destination].every(v=>typeof v==='string'&&v.startsWith('/')&&v.length<=1024&&!/[\u0000-\u001f\u007f]/.test(v)))reject();
@@ -44,19 +45,23 @@ export async function inspectRecoveryReview(input:any,context:OperationExecution
    }
    details.sort((a,b)=>a.id.localeCompare(b.id));
   }
-  const family=join(platform,item.kind==='gateway'?'gateways':'workloads'),data=join(family,id);
+  const family=item.kind==='gateway'?join(platform,'gateways'):join(platform,'applications',owner,'instances'),data=join(family,id);
+  if(item.kind==='workload')for(const at of [join(platform,'applications'),join(platform,'applications',owner)])await path(at,'directory');
   await path(family,'directory');const directory=await path(data,'directory'),state=join(data,'state.json'),stateStat=await path(state,'file');
   if(directory&&!markerStat)reject();
   let stateHash='';
   if(stateStat){
    if(stateStat.size>1<<20)reject();const bytes=await readFile(state),value=json(bytes.toString());
-   if(value?.version!==1||typeof value.digest!=='string'||!/^[a-f0-9]{64}$/.test(value.digest))reject();
+   if(value?.version!==2||typeof value.digest!=='string'||!/^[a-f0-9]{64}$/.test(value.digest))reject();
    if(item.kind==='workload'){
-    if(value.instance_id!==id||value.resource_id!==owner||!Number.isSafeInteger(value.revision)||value.revision<1||value.manifest!==join(data,'versions',value.digest,'compose.json'))reject();
+    if(value.instance_id!==id||value.application_id!==owner||value.resource_id!==owner||!Number.isSafeInteger(value.revision)||value.revision<1||value.manifest!==join(data,'versions',value.digest,'compose.json'))reject();
     await path(join(data,'versions'),'directory');await path(join(data,'versions',value.digest),'directory');
     const manifest=await path(value.manifest,'file');if(!manifest||manifest.size>2<<20)reject();
     if(hash(await readFile(value.manifest))!==value.digest)reject();
-   }else if(value.config?.instance_id!==id||value.config?.openresty_application_id!==undefined&&value.config.openresty_application_id!==owner||typeof value.image!=='string'||value.image.length>2048)reject();
+   }else {
+    if(value.config?.instance_id!==id||value.config?.openresty_application_id!==undefined&&value.config.openresty_application_id!==owner||typeof value.image!=='string'||value.image.length>2048)reject();
+    const ownerFile=join(data,'owner.json'),ownerStat=await path(ownerFile,'file');if(!ownerStat||ownerStat.size>16384||JSON.stringify(json(await readFile(ownerFile,'utf8')))!==JSON.stringify({layout_version:2,instance_id:id}))reject();
+   }
    stateHash=hash(bytes);
   }
   mounts.sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));

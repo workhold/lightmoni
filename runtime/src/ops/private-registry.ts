@@ -1,3 +1,5 @@
+import {activeRegistryCleanup} from './registry-usage.js';
+import {queueRegistryContent} from './registry-content.js';
 import { fail } from "../shared/http.js";
 import { HTTPError } from "../shared/http.js";
 import type { Handler } from "../shared/types.js";
@@ -37,6 +39,7 @@ export function createPrivateRegistryController(
       app = key ? store.get(key, "application") : undefined,
       cfg = settings();
     return {
+      cleanup_run: activeRegistryCleanup(db) ? store.action(activeRegistryCleanup(db)!) : null,
       revision: app?.revision ?? 0,
       application: app ? store.public(app) : null,
       external: {
@@ -145,7 +148,7 @@ export function createPrivateRegistryController(
       : store.createSystemApplication(
           "registry",
           "系统镜像仓库",
-          { ...registryTemplateSpec(), deployments },
+          { ...registryTemplateSpec(true), deployments },
           actor,
         );
     // Cluster is the single source of truth. A newly registered deployment must exist before enabling it.
@@ -310,6 +313,11 @@ export function createPrivateRegistryController(
   function register(safe: (fn: Handler) => Handler) {
     const r = store.deps.router,
       base = "/api/v1/ops/private-registry";
+    for (const [path, cleanup] of [["query", false], ["cleanup", true]] as const)
+      r.post(base + "/images/" + path, safe(async ctx => {
+        ctx.res.setHeader("Cache-Control", "no-store");
+        ctx.json(queueRegistryContent(store, safeObject(await ctx.body()), ctx.user.id, cleanup), 202);
+      }));
     r.get(
       base,
       safe((ctx) => ctx.json(overview())),
