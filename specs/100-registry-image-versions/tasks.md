@@ -7,4 +7,6 @@
 - [x] T005 协议/路由/并发保护测试、相关类型检查与浏览器验收。
 - [x] T006 仓库与 Doca 架构同步、最新回读、证据。
 
-- [ ] T007 推送功能分支，创建面向 GitHub main 的 PR 并登记链接。
+- [x] T007 推送功能分支，创建面向 GitHub main 的 PR 并登记链接。
+
+PR：https://github.com/workhold/lightmoni/pull/130（目标 main，等待评审与合并授权）。

@@ -41,3 +41,5 @@ docker run -d --name lightmoni-registry-100-qa -p 127.0.0.1::5000 -e REGISTRY_ST
 node --import ./runtime/node_modules/tsx/dist/loader.mjs scripts/verify-registry-images.mts
 docker rm -f lightmoni-registry-100-qa
 ```
+
+交付 PR：[GitHub #130](https://github.com/workhold/lightmoni/pull/130)，目标 main，尚待评审与合并授权。
