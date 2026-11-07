@@ -1,0 +1,12 @@
+{
+  "tests": 1599,
+  "pass": 1566,
+  "fail": 0,
+  "skipped": 33,
+  "cancelled": 0,
+  "related_tests": 127,
+  "ui_checks": 12,
+  "runtime_typecheck": true,
+  "runtime_build": true,
+  "web_build": true
+}

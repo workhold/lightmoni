@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/105-operations-self-recovery`
 **Created**: 2026-11-07
-**Status**: Draft
+**Status**: Implemented
 **Input**: 用户反馈“删除网站卡住了”，以及 OpenResty 经常停留在“待处理 / 服务地址已保留，按中心配置恢复”，要求程序自适应修复。
 
 ## User Scenarios & Testing *(mandatory)*
