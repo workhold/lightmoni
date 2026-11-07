@@ -21,15 +21,21 @@ const seed=[
  resource('qa-dns','credential','阿里云 DNS',{provider:'alibyun'},{state:'verified'})
 ];
 const host={id:machine,name:'zz-bj-1',address:'49.232.14.169',port:22,agent_id:'qa-agent',agent_status:'online',status:'active',created_at:now,updated_at:now,accounts:[],network:{private:{address:'172.21.0.16'},public:{address:'49.232.14.169'}},docker_environment:{state:'ready',source:'executor',observed_at:now}};
+Object.assign(host,{ssh_recovery_available:true,capabilities:{terminal:{available:true},ssh_check:{available:true},deploy_agent:{available:false,reason:'agent_already_installed'},update_agent:{available:false,reason:'agent_update_unknown'},rollback_agent:{available:false,reason:'previous_release_unavailable'},uninstall_agent:{available:true}},agent_update:{state:'current'}});
+let credentials=[{id:'qa-credential',name:'生产主机 SSH',method:'ssh_key',secret_fingerprint:'SHA256:QA_PUBLIC_FINGERPRINT',retention:'permanent',expires_at:'',status:'active',hosts:[{id:machine,name:host.name}],created_at:now,last_used_at:now}];
+let telemetryMode='normal';
 let resources=structuredClone(seed),failNext=false,qaRole='admin',qaJob=null,qaRuns=[];const calls=[];
 const server=await createServer({root:new URL('../..',import.meta.url).pathname,configFile:false,server:{host:'127.0.0.1',port:19887,strictPort:true},plugins:[{name:'isolated-panel-ui',configureServer(vite){vite.middlewares.use(async(req,res,next)=>{
  const url=new URL(req.url,'http://127.0.0.1'),path=url.pathname;const json=(d,status=200)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(d))};
- if(path==='/__qa/reset'){resources=structuredClone(seed);failNext=false;qaRole='admin';qaJob=null;qaRuns=[];calls.length=0;return json({reset:true})}
+ if(path==='/__qa/reset'){resources=structuredClone(seed);telemetryMode='normal';credentials[0]={...credentials[0],name:'生产主机 SSH',status:'active',revoked_at:undefined};failNext=false;qaRole='admin';qaJob=null;qaRuns=[];calls.length=0;return json({reset:true})}
+ if(path.startsWith('/__qa/telemetry/')){telemetryMode=path.split('/').at(-1);return json({mode:telemetryMode})}
  if(path==='/__qa/fail-next'){failNext=true;return json({armed:true})}
+ if(path.startsWith('/__qa/run/')){const state=path.split('/').at(-1);qaJob=null;qaRuns=[{id:'qa-run',resource_id:'qa-web',resource_revision:1,agent_id:'qa-agent',action:'deploy',state,result:state==='failed'?{code:'nginx_test_failed',message:'Nginx 配置检查失败，请检查上游地址'}:state==='succeeded'?{code:'ok',message:'已发布并验证'}:{code:'awaiting_receipt'},created_at:now,updated_at:now}];return json({state})}
  if(path==='/__qa/calls')return json(calls);
  if(path==='/__qa/scenario/unknown'){const a=resources.find(r=>r.id==='qa-demo');a.status.instances[0].state='unknown';a.status.instances[0].healthy=false;return json({scenario:'unknown'})}
  if(path==='/__qa/scenario/stopped'){const a=resources.find(r=>r.id==='qa-demo');a.status.state='stopped';a.status.instances[0].state='stopped';a.status.instances[0].healthy=false;a.status.deployments[cluster].enabled=false;return json({scenario:'stopped'})}
  if(path.startsWith('/__qa/managed/')){const mode=path.split('/').at(-1);qaRole=mode==='viewer'?'user':'admin';qaRuns=[{id:'qa-run',resource_id:'qa-demo',resource_revision:1,agent_id:'qa-agent',action:'inspect',state:'unknown',result:{code:'executor_http_502'},job_id:'qa-job',created_at:now,updated_at:now}];qaJob=mode==='legacy'?null:{id:'qa-job',task_run_id:'qa-task',machine_id:mode==='wrong-host'?'other-host':machine,executor_id:'qa-executor',install_generation:1,policy_generation:1,execution_principal:'privileged_executor',capability:mode==='wrong-capability'?'container.managed.v1':'operations.managed.v1',state:'unknown',phase:'unknown',code:'executor_http_502',created_at:now,finished_at:now,plan_id:'qa-plan',plan_revision:'qa-revision',request_id:'qa-request',resolved_at:'',has_output:true};return json({mode})}
+ if(path==='/favicon.ico'){res.writeHead(204);return res.end()}
  if(!path.startsWith('/api/'))return next();
  const p=path.replace('/api/v1','');
  if(req.method==='GET'){
@@ -37,7 +43,19 @@ const server=await createServer({root:new URL('../..',import.meta.url).pathname,
   if(p==='/ops/overview')return json({resources,agents:[{id:'qa-agent',hostname:'zz-bj-1',host_id:'qa-host',last_seen:new Date().toISOString(),platform:'linux',arch:'amd64',heartbeat:{}}],machines:[host],runs:qaRuns});
   if(p==='/machines'||p==='/task-hosts')return json([host]);
   if(p==='/agents')return json([{id:'qa-agent',host_id:'qa-host',hostname:'zz-bj-1',last_seen:new Date().toISOString(),status:'online',version:'0.1.0',platform:'linux',arch:'amd64',heartbeat:{}}]);
-  if(p==='/host-labels')return json([]);
+  if(p==='/connection-credentials')return json(credentials);
+  if(p==='/machines/'+machine)return json({machine:host,credentials:[],deployments:[],uninstallations:[],agent_updates:[]});
+  if(p.endsWith('/website-telemetry')){
+   if(telemetryMode==='error')return json({error:'telemetry_unavailable'},503);
+   const to=url.searchParams.get('to')??new Date().toISOString(),from=url.searchParams.get('from')??now;
+   const access=telemetryMode==='empty'?[]:[200,201,304,404,502].map((status,i)=>({event_id:'request-'+i,event_time:new Date(Date.parse(to)-i*60000).toISOString(),cluster_id:cluster,body:JSON.stringify({host:'abc.heyphp.com',method:i%2?'POST':'GET',uri:i===4?'/api/search?query='+('long-path-'.repeat(20)):'/api/v1/health',status,request_time:i===0?0:0.012*(i+1),request_id:'qa-request-'+i})}));
+   const web=telemetryMode==='empty'?[]:Array.from({length:18},(_,i)=>({time:new Date(Date.parse(from)+(Date.parse(to)-Date.parse(from))*i/18).toISOString(),cluster_id:cluster,qps:i===5?1.2:.03+i/100,duration:.012+i/2000}));
+   return json({website:resources.find(r=>r.id==='qa-web'),range:{from,to},hosts:[{...host,cluster_id:cluster,application_observation:{state:telemetryMode==='degraded'?'degraded':'ok',error:telemetryMode==='degraded'?'connection refused':undefined,last_success_at:to,attempted_at:to}}],results:{web:{rows:web},access:{rows:access,truncated:telemetryMode==='truncated'}}});
+  }
+  if(p==='/host-labels')return json([{id:'qa-label',name:'生产环境',task_count:1}]);
+  if(p==='/agent-tasks')return json([{id:'qa-task',name:'日志归档',type:'script',origin:'custom',revision:'1',enabled:true,label_ids:['qa-label'],host_ids:[],target_all:false,schedule:{mode:'once'},script:{runtime:'shell',code:'echo archive',timeout_seconds:60},config:{}}]);
+  if(p==='/task-runs'||p==='/task-runs/qa-task-run'){const run={id:'qa-task-run',task_id:'qa-task',task_name:'日志归档',host_id:machine,host_name:host.name,state:'unknown',created_at:now,summary:'Agent 连接中断，等待核对',stdout:'archive started',stderr:'',snapshot:{script:{runtime:'shell',code:'echo archive',timeout_seconds:60},task_revision:'1'}};return json(p==='/task-runs'?[run]:run)}
+  if(p==='/ops/resources/qa-zone/records')return json({records:[{id:'qa-record',name:'api',type:'A',value:'192.0.2.10',ttl:600,line:'default',enabled:true}],total:1});
   if(p==='/ops/runs')return json({runs:qaRuns});
   if(p==='/ops/system-logs')return json({rows:qaRuns.map(r=>({event_id:r.id,event_time:now,severity:'warn',attributes:{source:'ops_platform_runs',run_id:r.id,action:r.action,state:r.state,resource_id:r.resource_id},body:'fixture execution record'}))});
   if(p==='/ops/runs/qa-run')return json(qaRuns[0]);
@@ -52,6 +70,11 @@ const server=await createServer({root:new URL('../..',import.meta.url).pathname,
   return json({error:'fixture_route_not_found'},404);
  }
  let raw='';for await(const chunk of req)raw+=chunk;const body=raw?JSON.parse(raw):{};calls.push({path:p,method:req.method,body});
+ if(req.method==='PUT'&&p==='/connection-credentials/qa-credential'){
+  if(failNext){failNext=false;return json({error:'credential_revision_conflict'},409)}
+  credentials[0].name=body.name;return json(credentials[0]);
+ }
+ if(req.method==='POST'&&p==='/connection-credentials/qa-credential/revoke'){credentials[0].status='revoked';credentials[0].revoked_at=new Date().toISOString();return json(credentials[0])}
  if(req.method==='PUT'&&p.startsWith('/ops/resources/')){
   if(failNext){failNext=false;return json({error:'platform_revision_conflict'},409)}
   const id=p.split('/')[3],r=resources.find(r=>r.id===id);if(!r)return json({error:'not_found'},404);

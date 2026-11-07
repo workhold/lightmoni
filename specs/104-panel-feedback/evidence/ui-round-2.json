@@ -1,0 +1,13 @@
+{
+  "round": "2",
+  "passed": true,
+  "checks": [
+    "Overview/log tabs, URL refresh/back/forward, time range, named cluster legend, loaded-record filters, compact rows and raw details including zero duration",
+    "Empty, collection degraded with last-success evidence, read failure retains data, and truncation scope",
+    "Host icon actions, keyboard tooltip and disabled Agent operations; credential rename failure preserves input, save survives refresh, revocation still confirms",
+    "Task delete confirmation and shared operation log/result drawers for unknown, failed, running and succeeded with raw receipts collapsed",
+    "390px website logs/raw details, hosts and credentials; 683px reflow at 200%; dark appearance"
+  ],
+  "errors": [],
+  "media": "/Users/zhangsiwen/.codex/worktrees/092-panel-feedback/lightmoni/.local-dev/panel-feedback-104/round-2"
+}
