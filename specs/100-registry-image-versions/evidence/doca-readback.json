@@ -1,0 +1,213 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "chapter": "第100章",
+  "saved": true,
+  "readback": [
+    {
+      "id": "d68b9440-6433-4f06-8351-3d993e3193c9",
+      "seq": 1755,
+      "textMatch": true,
+      "title": "h2",
+      "text": "第100章 私有镜像版本浏览与安全清理（SDD100，功能分支待合入）"
+    },
+    {
+      "id": "sdd099-registry-content-1",
+      "seq": 1755,
+      "textMatch": true,
+      "text": "私有镜像管理沿用已登记系统仓库的部署选择。在所选机器的受管执行器上通过 Distribution V2 API 浏览 catalog、镜像标签与摘要，中心不直连内网，不接受任意端点。界面按镜像分页展示全部版本及引用应用，仓库、空状态、失败和清理结果均有明确反馈。"
+    },
+    {
+      "id": "sdd099-registry-content-2",
+      "seq": 1755,
+      "textMatch": true,
+      "text": "新增 registry.inspect 与 registry.cleanup 固定任务，复用 ops_platform_runs、签名受管作业、租约与审计，能力为 operations.platform.registry.v1。中心生成仓库身份、固定机器、当前内部端点和关联网站域名别名，领取时再次核对修订、目标及引用快照。旧执行器需升级；Registry 模板开启删除，已有仓库需重新部署生效，拓扑、持久数据路径和凭据边界不变。"
+    },
+    {
+      "id": "sdd099-registry-content-3",
+      "seq": 1755,
+      "textMatch": true,
+      "text": "清理检查整个所选仓库，不受页面镜像筛选限制。引用集合包括所有应用当前配置、停止或未启动应用、冻结部署修订、尚未移除实例的观测与期望修订及未终结发布载荷。先完整分页扫描并校验 manifest 摘要与多架构依赖，再按摘要删除；同摘要标签和被引用索引子项受保护。读取缺失、超限或无法解析引用时不开始删除。部分失败返回实际数量，不显示全部成功。"
+    },
+    {
+      "id": "sdd099-registry-content-4",
+      "seq": 1755,
+      "textMatch": true,
+      "text": "registry.cleanup 从排队开始作为 SQLite 持久写入围栏，暂时阻止应用与网站创建、修改、删除以及新的 workload/gateway apply，避免引用核验到删除之间的平台写入竞态。领取时的新引用必须包含于冻结快照。unknown 保持围栏，只有现有同作业、同机器的管理员审计核查或恢复证据才能解除，不自动重放删除。仅识别 LightMoni 登记应用；外部直接推送或未登记引用不能由平台保证。删除 manifest 不运行在线垃圾回收，不承诺立即释放镜像层磁盘。"
+    },
+    {
+      "id": "images059-registry-flow",
+      "seq": 1755,
+      "nodesMatch": true,
+      "edgesMatch": true,
+      "nodes": [
+        {
+          "id": "enable",
+          "label": "私有镜像模块 / 选集群与明确机器",
+          "shape": "process",
+          "x": 20,
+          "y": 20,
+          "width": 280,
+          "height": 72
+        },
+        {
+          "id": "regapp",
+          "label": "宿主登记系统仓库 / 固定名称",
+          "shape": "process",
+          "x": 350,
+          "y": 20,
+          "width": 280,
+          "height": 72
+        },
+        {
+          "id": "ci",
+          "label": "构建机 / 唯一push域名",
+          "shape": "process",
+          "x": 20,
+          "y": 180,
+          "width": 280,
+          "height": 72
+        },
+        {
+          "id": "public",
+          "label": "A入口：HTTPS + 网站Basic",
+          "shape": "process",
+          "x": 350,
+          "y": 180,
+          "width": 280,
+          "height": 72
+        },
+        {
+          "id": "authsets",
+          "label": "网站内嵌用户 / 冻结hash",
+          "shape": "process",
+          "x": 680,
+          "y": 180,
+          "width": 280,
+          "height": 72
+        },
+        {
+          "id": "internal",
+          "label": "可信私网免鉴权 / 含push权限",
+          "shape": "process",
+          "x": 20,
+          "y": 350,
+          "width": 280,
+          "height": 88
+        },
+        {
+          "id": "origin",
+          "label": "A集群：选定私库写入源",
+          "shape": "database",
+          "x": 350,
+          "y": 350,
+          "width": 280,
+          "height": 88
+        },
+        {
+          "id": "reader",
+          "label": "B集群：独立私库与源缓存",
+          "shape": "database",
+          "x": 680,
+          "y": 350,
+          "width": 280,
+          "height": 88
+        },
+        {
+          "id": "nodea",
+          "label": "A Agent：校验并导入镜像",
+          "shape": "process",
+          "x": 350,
+          "y": 530,
+          "width": 280,
+          "height": 72
+        },
+        {
+          "id": "nodeb",
+          "label": "B Agent：校验并导入镜像",
+          "shape": "process",
+          "x": 680,
+          "y": 530,
+          "width": 280,
+          "height": 72
+        }
+      ],
+      "edges": [
+        {
+          "id": "images059-registry-e1",
+          "source": "enable",
+          "target": "regapp",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "images059-registry-e2",
+          "source": "regapp",
+          "target": "origin",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "images059-registry-e3",
+          "source": "regapp",
+          "target": "reader",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "images059-registry-e4",
+          "source": "ci",
+          "target": "public",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "images059-registry-e5",
+          "source": "authsets",
+          "target": "public",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "images059-registry-e6",
+          "source": "public",
+          "target": "origin",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "images059-registry-e7",
+          "source": "internal",
+          "target": "origin",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "images059-registry-e8",
+          "source": "origin",
+          "target": "nodea",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "images059-registry-e9",
+          "source": "origin",
+          "target": "reader",
+          "label": "同摘要pull-through缓存",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        },
+        {
+          "id": "images059-registry-e10",
+          "source": "reader",
+          "target": "nodeb",
+          "arrow": "end",
+          "lineType": "smoothstep"
+        }
+      ]
+    }
+  ],
+  "newDiagram": {
+    "saved": false,
+    "reason": "Native flowchart insert returned HTTP 500 twice; retained existing native diagrams and synchronized the new architecture in text."
+  }
+}

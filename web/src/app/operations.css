@@ -68,3 +68,14 @@
 @container(max-width:500px){.lm-website-statuses{grid-template-columns:1fr}}
 
 .lm-ops-entry-manager .lm-ops-section-heading>div:first-child{flex:1 1 300px;max-width:100%}.lm-ops-entry-manager .lm-ops-note{white-space:normal;overflow-wrap:anywhere}
+
+.lm-registry-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 360px)); gap: 12px; margin: 8px 0 20px; width: 100%; }
+.lm-registry-filters label { display: flex; flex-direction: column; gap: 8px; }
+.lm-registry-filters .ant-select { width: 100%; }
+.lm-registry-images .ant-alert { margin-bottom: 16px; }
+.lm-registry-pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
+
+.lm-registry-digest { white-space: nowrap; }
+
+.lm-registry-table-hint { display: none; }
+@media (max-width: 640px) { .lm-registry-table-hint { display: block; } }
