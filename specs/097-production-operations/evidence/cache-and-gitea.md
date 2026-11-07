@@ -21,3 +21,9 @@ Gitea新实例454a1339955690ed9d569ae9cf6f8185在18:05:42Z至18:16:06Z连续8次
 ABC巡检开始执行后发现第二个误报：manifest.command=[]而Docker Cmd=[node,server.mjs]。实际镜像、CPU、内存、环境和端口一致；单容器空列表继承镜像默认值的修复PR122已合入。此时仍不把ABC判为通过，需新Agent实际复测。
 
 18:13:04Z第三轮内部运行查询：中心heartbeat与heap各17个新样本，最新18:12:51Z；zz-bj-1 Agent heartbeat 6个，最新18:12:40Z。Registry/Gitea/DBX/OpenResty每服务81个容器gauge样本、机器名zz-bj-1，最新18:12:48Z；主机zz-bj-1 192个样本最新18:12:59Z。SDK一次性环境探针日志实际为log_sdd091live，13:14:34Z，service=sdd091-sdk-environment、显式host=sdd091-explicit-host；该探针不生成连续心跳，连续业务SDK验收另使用ABC。
+
+## 最终恢复结果
+
+PR122镜像默认命令修复、PR124旧错误提示清理和PR126网站日志身份修复均已合入并包含在最终573b644发行。新Agent下ABC启动成功，连续5次巡检健康且配置一致、同一容器；实际切换v4镜像再恢复带SDK的v5均成功，最后21:21–21:24Z有9个gauge、18条新日志，来源abc-demo/zz-bj-1。21:33:27.493Z正常卸载容器成功，保留原数据与登记，最终removed、health_failures=0。
+
+Gitea最终通过正常apply 9a793410637f94cb67db8f2884874501于2026-11-06T21:40:19.718Z成功恢复，卡片为运行中，原容量错误清除；仍为1 CPU/1024 MiB、SSH 2222→22及SSH_PORT=2222，原数据保留。首页和/api/healthz正常DNS/TLS返回200，网站QPS/耗时及三轮真实访问日志归属正确。最终中心与zz Agent均更新到573b644；00:43:13Z回查Gitea、DBX、Registry、OpenResty运行正常，未结束unknown作业和观测积压均0。详细时间、发行与验收见live-matrix.md、website-identity.md。以上早期“待完成”记录保留诊断过程，最终结论以本节和最终矩阵为准。

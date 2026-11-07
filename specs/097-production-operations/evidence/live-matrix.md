@@ -1,26 +1,28 @@
 # 线上验收矩阵
 
-机器写操作仅限 zz-bj-1；中心通过既有 1Panel 更新。各项以实际回执和新数据为准，隔离环境与本地夹具结果不计作线上通过。
+机器写操作仅限 zz-bj-1；vchive 未执行写操作。中心通过既有 1Panel 更新，原 `lightmoni_lightmoni-state-v2-20261103:/data` 保持。线上结论依据真实 UI、签名回执和 ClickHouse 新数据；隔离测试单独记录。
 
-| 项目 | 当前证据 | 状态 |
+| 项目 | 实际证据 | 状态 |
 | --- | --- | --- |
-| 原 root Agent 卸载 | 原版卸载器摘要核验；返回 0；服务 not-found/inactive；身份、配置和缓存保留；三个业务容器持续运行 | 已通过 |
-| 中心升级至状态修正版 | 固定 main 81f3c47；两架构各 48 项与按摘要回拉通过；1Panel 08:06:49 替换启动，实查固定摘要和 healthy、原数据卷 | 已通过 |
-| 修正旧任务与 Agent 状态 | 新版中心实际 SSH 核对→审阅两页影响→执行复验→成功；处理 10 条旧记录，页面显示 Agent 已移除并恢复部署入口 | 已通过 |
-| Agent 重新接入与完整管理模式 | 旧配置/身份/队列已可回滚归档；三个业务容器和业务目录保留；首装因旧 libcap-ng 失败已独立状态修正，unknown 原结论保留；修复 PR #110 已合入，双架构各 49 项通过并发布，中心 08:35:13 更新成功并实查摘要/修订/healthy，新版平台安装 7624c4ab8daf7c6eaff036d4e17bb3d2 在 48 秒内完成并收到激活回执，界面显示 fa049fd 当前发行、Agent 在线和完整管理 | 已通过 |
-| Agent 升级、卸载、重新安装 | 普通旧版预检已明确识别；需新统一 Agent 完成生命周期 | 待验证 |
-| 应用部署、停止、启动、升级、卸载 | 既有失败记录已发现；需配套 Agent 后逐项验证及修复 | 待验证 |
-| 容器与网站日志、指标 | 名称和归属代码已修复；需至少三轮新数据与访问日志 | 待验证 |
-| SDK 上报与可读来源 | 四语言端点恢复已合入；成品 SDK 已隔离验证，需 zz-bj-1 实际来源 | 待验证 |
-| 网站、证书与 DNS 对账 | 既有资源和业务容器保留，需重新核对就绪、路由及实际 HTTPS | 待验证 |
-| 告警触发、恢复 | zz-bj-1 验收规则已真实触发并恢复，无通知发送记录；规则已停用 | 已通过 |
-| 内置大盘真实查询 | 已发布 cef08e6 上名称可读；25 条查询经正式 HTTP 与 ClickHouse 通过 | 已通过 |
-| 自定义大盘保存、读取 | SDD097 - Center verification 另存并刷新回读，同一 ID/标题/13 面板，实际启动日志可查；持续运行指标另在 T007 跟进 | 已通过 |
+| 旧 root Agent 卸载与独立状态修正 | 原卸载器核验后返回 0，业务容器/数据保留；恢复 c77eb5182fe88c80a625a399c4df79fd 成功，10 条旧记录进入审计、2 个旧凭据撤销，unknown 原结论保持 | 已通过 |
+| Agent 安装/升级/卸载/重装 | 安装 7624c4ab8daf7c6eaff036d4e17bb3d2、升级 b9312a102a57a8f9169c8fce4c9cc987、标准卸载 701745a7447c07f69f66b21a42ed6f7a、重装 f44bf6f4da78aea21e005ec0a181109e 均成功；最新同身份更新 be85cf8c70108787ec4052714e8a6277 至 573b644885c0 | 已通过 |
+| 重装后的旧业务绑定恢复 | 0e241a8184641ecfede9c3623d66e92f 成功；Registry/OpenResty/DBX 实例和数据目录保留；两条明确 removed 的旧空记录仅退役中心记录，remote_writes=false | 已通过 |
+| DBX 停止/启动及卷巡检 | stop 855d687daf4f224c0d6544ac3327960f、apply cbefd32c2e45e095b797e466f673acd9 成功；命名卷修复后连续12次健康/配置一致、同一容器；最终运行 | 已通过 |
+| ABC 部署/停止/启动/升级/卸载 | 部署 b7fc4a06c07f70d6520d410ac34516a2；新 Agent 启动 96edab0aa06ced41989beac5db140a89 后5次稳定巡检；v4 apply f94ce26dbf259aefa56fc97482d7d079、恢复 SDK 镜像 v5 apply e51310853f447c4c47e97aed93c6f170 成功；remove a61eff2de7ac06dd16c8f532ecaed699 成功，保留数据/登记，最终 removed | 已通过 |
+| Gitea 部署/停止/恢复 | SSH 2222→22 后部署成功、连续8次稳定；临时停止释放 ABC 配额；最终 apply 9a793410637f94cb67db8f2884874501 于21:40:19Z成功，卡片运行中、旧容量错误清除，首页及健康 HTTPS200 | 已通过 |
+| SDK 环境一次性探针 | apply 5d0e63b6dd0d0613de8f968d7035bdc6 成功；log_sdd091live 13:14:34Z新日志证明显式 host 和注入身份；remove 91ca7f4698479c36ee285f3b2a49aabb 成功，最终 removed、health_failures=0 | 已通过 |
+| SDK 连续业务数据 | ABC 三轮查询15:56Z、20:15Z、21:24Z；最后21:21:00–21:24:03Z有9 gauge、18 logs，最新21:23:54/57Z，service=abc-demo、host=zz-bj-1、machine=9473f8974462e85d | 已通过 |
+| 中心/Agent/主机/容器遥测 | 三轮新数据见相关证据；18:13Z中心心跳/堆各17、zz Agent心跳6、主机192、四服务容器各81；21:07Z中心心跳/堆各18继续更新 | 已通过 |
+| 未知作业可审计结束 | SDK inspect b1bd9172630489d9b3a94732af866db2 在中心替换时未知；只读核对 journal、unit inactive/dead、PID=0、无子进程/锁后，正常 UI 人工核对结束。21:00:52Z记录管理员/原因，原 unknown 保持，ABC随后自动升级完成 | 已通过 |
+| 网站 HTTPS 与日志归属 | 默认TLS校验；23:59Z、00:19Z、00:26Z三轮Gitea/DBX200、Registry401均带真实网站ID、zz-bj-1来源入库；Gitea网站页QPS/耗时及三轮访问日志可见、采集正常，见 website-identity.md | 已通过 |
+| PR108 合并验证 | 中心配置权威、手动成员/解析保留、托管最低可用预算纳入所有后续发行；双架构各95项编译后的自动部署/网站回归全部通过，生产手动成员按原位置/地址恢复 | 已通过 |
+| 告警触发/恢复 | zz-bj-1规则实际触发与恢复，无外部通知，测试规则停用保留记录 | 已通过 |
+| 自定义大盘保存/读取 | SDD097 - Center verification，ID c4e18a54-0438-47a3-88d9-9f761b82c970，13面板另存并刷新同ID/标题，真实日志及新运行指标可查 | 已通过 |
 
-详细已完成历史见 acceptance.md、followup.md 与 endpoint-recovery.md；状态修正实现及保护性回归见 state-recovery.md。
+固定发行 `20261107-website-identity-573b644`，源代码573b644885c0db9846648e51fb0726141040c1e9，OCI index `sha256:f24403c80ba37af7bed013b2b56da63f0cede1fb8ad2e78baefc1b83ccad1e57`。1Panel于07:09:34 CST就绪，实际镜像摘要和关键编译文件指纹一致、healthy。1Panel保留的容器自定义旧revision label不作为源码证据；镜像本身revision和关键文件均核实为本次产物。
 
-状态修正持久回读：recovery c77eb5182fe88c80a625a399c4df79fd，00:07:56.119Z succeeded；撤销 2 个旧凭据，旧身份 removed、活动凭据 0；5 条 Agent unknown 原状态进入审计，其余 5 条为旧部署/配置 unknown。详见 state-recovery-live.json。安装失败未按成功计数。
+每架构50项成品smoke无错误，自动部署/网站编译回归各95项全部通过；其余编译回归174项中173通过、1项原有可选真实Docker证书环境检查跳过。成品Linux普通身份核验、实时中心SDK→ClickHouse→认证HTTP与精确回拉通过。stable latest保持原值。
 
-第二次状态修正已实际成功处理回滚首装 1 条，部署入口恢复，业务数据保留。兼容修复固定 fa049fd 双架构各 49 项与回拉通过；1Panel 08:32:57 发起更新。大盘保存回读详见 capability-release.md；中心运行指标空值未视为连续采集通过。
+原始失败、回滚和未知历史保留。ABC与一次性SDK验收容器已卸载但数据/登记保留，原DBX、Registry、OpenResty及Gitea最终运行。设计仅维护本地仓库，本轮无Doca写入。
 
-新版平台安装 7624c4ab8daf7c6eaff036d4e17bb3d2 已成功；此前回滚首装仍保留 unknown 原结论。内部运行遥测发现显式内存 exporter 被默认 HTTP Key 门禁静默抑制，已补 T019 和隔离回归；不把空面板计为三轮新数据通过。用户追加授权将 PR108 的中心权威、手动成员和解析保留、托管副本保障一同合入发行验收。
+最终只读回查时间为2026-11-07T00:43:13.283Z（08:43:13 CST）：未结束unknown作业0，执行端观测state=ok、error为空，最近成功00:42:50.394Z，queue_batches=0、queue_bytes=0，中心待处理观测批次0。Gitea、DBX、Registry、OpenResty均为running/desired=running；ABC和SDK探针均为removed/desired=removed；上述六实例health_failures均为0。
