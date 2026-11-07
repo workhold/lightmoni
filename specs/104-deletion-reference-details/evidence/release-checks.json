@@ -1,0 +1,41 @@
+{
+  "architectures": {
+    "amd64": {
+      "image_id": "sha256:8cc8481113e1b0effc5f2c8925123a7fb9f1c53b9159fb0f71471f47f48a0cc0",
+      "checks": 45,
+      "errors": [],
+      "revision": "13e78831cd7a4a6484bd5f9f47bce30327173acc",
+      "compiled_platform_regressions": {
+        "passed": 88,
+        "failed": 0,
+        "skipped": 0
+      }
+    },
+    "arm64": {
+      "image_id": "sha256:53113949130e491342fd3d08d0cee02ad87eaeecbf0316e949abd7ddf812d192",
+      "checks": 45,
+      "errors": [],
+      "revision": "13e78831cd7a4a6484bd5f9f47bce30327173acc",
+      "compiled_platform_regressions": {
+        "passed": 88,
+        "failed": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "source_main": "13e78831cd7a4a6484bd5f9f47bce30327173acc",
+  "includes": [
+    "PR137 panel feedback",
+    "PR138 deletion reference details"
+  ],
+  "local_ui": {
+    "rounds": 3,
+    "checks_per_round": 6,
+    "page_errors": 0,
+    "fixture_delete_denials": 15,
+    "other_write_requests": 0
+  },
+  "isolated_release_services": "cleaned",
+  "runtime_credentials": "removed",
+  "latest": "before and after digest identical"
+}

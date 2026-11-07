@@ -37,4 +37,4 @@ URL新增tab=overview|logs与minutes用于前端状态，其他查询参数保�
 
 ## 交付
 
-GitHub PR：https://github.com/workhold/lightmoni/pull/137 ，目标main；没有合并或部署。
+GitHub PR：https://github.com/workhold/lightmoni/pull/137 ，已合入main；随后随 PR138 的合并源码13e7883构建双平台镜像20261107-reference-details-v1并部署。发行、备份、远端回读和线上验收见 [SDD104引用详情验收](../104-deletion-reference-details/validation.md)。网站大盘/日志页签与刷新保持已在线核验；同一验收如实保留既有网站清理归属错误和应用卡片pending的限制。

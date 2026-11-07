@@ -1,0 +1,40 @@
+{
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261107-reference-details-v1",
+  "revision": "13e78831cd7a4a6484bd5f9f47bce30327173acc",
+  "index_digest": "sha256:96b94e25ea70b253d8c948a76326a06670d776ba0ca5baedf55afa40a2dccf1b",
+  "source_prs": [
+    137,
+    138
+  ],
+  "backup": {
+    "path": "/opt/lightmoni/backups/sdd104-reference-20261107",
+    "pages": 351922,
+    "quick_check": "ok",
+    "copy_sha256_equal": true,
+    "directory_mode": "0700",
+    "files_mode": "0600",
+    "items": [
+      "SQLite online backup",
+      "master.key",
+      "compose.yaml",
+      ".env"
+    ]
+  },
+  "deployment_terminal": "https://panel.heyphp.com/terminal",
+  "previous_image": "docker.heyphp.com/lightmoni/lightmoni:20261107-resource-actions-v1",
+  "started_at": "2026-11-07T11:40:42.788306369Z",
+  "health": "healthy",
+  "public_healthz": "ok",
+  "state_volume": "lightmoni_lightmoni-state-v2-20261103",
+  "state_target": "/data",
+  "telemetry_volume": "lightmoni_lightmoni-telemetry",
+  "telemetry_target": "/var/lib/clickhouse",
+  "clickhouse_health": "healthy",
+  "external_checks": {
+    "gitea_test_http": 200,
+    "dbx_install_http": 200,
+    "registry_unauthenticated_http": 401
+  },
+  "compose_warning": "Existing unused lightmoni_lightmoni-state label mismatch; left untouched. Actual state volume remains lightmoni_lightmoni-state-v2-20261103.",
+  "acceptance": "Reference-details and dashboard verification completed; existing website cleanup ownership failure remains unresolved."
+}
