@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261107-storage-registry-94bcbbc
+    image: docker.heyphp.com/lightmoni/lightmoni:20261107-resource-actions-v1
     pull_policy: missing
     build:
       context: .

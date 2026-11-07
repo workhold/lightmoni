@@ -5,7 +5,7 @@ import {createAvailability, minimumAvailable, graceMilliseconds} from './availab
 import {machineServiceAddresses} from "../server/host-network.js";
 import {automaticEntry} from './automatic-entry.js';
 import {createApplicationTelemetry} from './application-telemetry.js';
-import {createInstanceRecoverySchema,recoverReinstalledInstances,recordInstanceRecovery} from './instance-recovery.js';
+import {createInstanceRecoverySchema,recoverReinstalledInstances,recordInstanceRecovery,instanceRemovalConfirmed} from './instance-recovery.js';
 import {networkScope} from "../shared/host-network.js";
 import { effectiveAuth } from "../operations/basic-auth.js";
 import { normalizeWebsiteAuth } from "./website-auth.js";
@@ -960,7 +960,7 @@ export function createClusterWorkloads(
         OR run.state='unknown' AND (job.id IS NULL OR job.state!='unknown' OR (${blockingAgentJobSQL(db,'job')}))) LIMIT 1`, r.id))
       fail(409, 'platform_resource_busy');
     if (systemApplicationKind(store, r.id) === "registry" && (
-      rows(r.id, true).some(i => i.state !== 'removed') ||
+      rows(r.id, true).some(i => !instanceRemovalConfirmed(store, i)) ||
       store.list('cluster').some(c => c.spec.image_cache?.enabled === true) ||
       db.get<Row>('SELECT website_id FROM ops_private_registry_settings WHERE id=1')?.website_id
     )) fail(409, "system_registry_in_use");
@@ -970,7 +970,7 @@ export function createClusterWorkloads(
       db.get("SELECT id FROM ops_dns_owned WHERE owner_id=?", r.id)
     )
       fail(409, "dns_records_cleanup_pending");
-    if (rows(r.id, true).some((i) => i.state !== "removed"))
+    if (rows(r.id, true).some((i) => !instanceRemovalConfirmed(store, i)))
       fail(409, "remove_instances_before_deleting");
     for (const site of store.list("website"))
       for (const spec of snapshots(site))

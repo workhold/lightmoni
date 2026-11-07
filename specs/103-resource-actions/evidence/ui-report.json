@@ -1,0 +1,43 @@
+{
+  "fixture": "isolated local HTTP fixture; no production writes",
+  "rounds": [
+    {
+      "round": 1,
+      "checks": [
+        "应用监控图标具有提示、键盘入口并进入对应资源路由",
+        "更多菜单可用、删除保留明确文字确认，取消不发写请求",
+        "网站监控图标进入对应网站的访问日志页面",
+        "网站更多菜单和新建图标仍调用原有流程",
+        "应用和网站在390px无横向溢出，图标点击范围至少32px",
+        "英文和键盘焦点提示可用"
+      ],
+      "page_errors": []
+    },
+    {
+      "round": 2,
+      "checks": [
+        "应用监控图标具有提示、键盘入口并进入对应资源路由",
+        "更多菜单可用、删除保留明确文字确认，取消不发写请求",
+        "网站监控图标进入对应网站的访问日志页面",
+        "网站更多菜单和新建图标仍调用原有流程",
+        "应用和网站在390px无横向溢出，图标点击范围至少32px",
+        "英文和键盘焦点提示可用"
+      ],
+      "page_errors": []
+    },
+    {
+      "round": 3,
+      "checks": [
+        "应用监控图标具有提示、键盘入口并进入对应资源路由",
+        "更多菜单可用、删除保留明确文字确认，取消不发写请求",
+        "网站监控图标进入对应网站的访问日志页面",
+        "网站更多菜单和新建图标仍调用原有流程",
+        "应用和网站在390px无横向溢出，图标点击范围至少32px",
+        "英文和键盘焦点提示可用"
+      ],
+      "page_errors": []
+    }
+  ],
+  "write_requests": 0,
+  "media": "/Users/zhangsiwen/.codex/worktrees/101-integration-release/lightmoni/artifacts/screenshots/specs/103-resource-actions/evidence"
+}
