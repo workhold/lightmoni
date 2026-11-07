@@ -1,4 +1,5 @@
 import {createWebsiteDeletionSchema,websiteDeleting} from './website-deletions.js';
+import {legacyWebsiteScopes} from './website-legacy-scope.js';
 import {prepareApplicationYAML,stripComposeExtensions} from './application-yaml.js';
 import {publicWebsiteSpec} from './website-auth.js';
 import {registryCacheFor} from './registry-runtime.js';
@@ -93,6 +94,7 @@ export function createWorkloadController(options: PlatformOptions & {ensureCerti
       const target=row&&JSON.parse(row.targets_json).find((t:any)=>t.machine_id===config.cleanup_machine_id);
       const host=target&&deps.db.get<any>('SELECT agent_id FROM managed_machines WHERE id=?',target.machine_id);
       if(!row||row.id!==config.deletion_id||row.state==='succeeded'||config.website_id!==resource.id||!target||target.attempt!==config.cleanup_attempt||target.agent_id!==agentID||host?.agent_id!==agentID)fail(409,'website_cleanup_target_changed');
+      if(JSON.stringify(config.legacy_gateways??[])!==JSON.stringify(legacyWebsiteScopes(store,target.machine_id,agentID,resource.id)))fail(409,'website_cleanup_scope_changed');
     },
     afterSave:workloads.afterSaveWebsite,
     afterDelete:workloads.afterDeleteWebsite,

@@ -104,7 +104,7 @@ export class ReconciliationRegistry {
   }
   private async run() {
     this.refresh();
-    const due=this.deps.db.all<any>('SELECT * FROM reconciliation_resources WHERE next_attempt_at<=? ORDER BY next_attempt_at,id LIMIT 100',this.at());
+    const due=this.deps.db.all<any>('SELECT * FROM reconciliation_resources WHERE next_attempt_at<=? ORDER BY updated_at,next_attempt_at,id LIMIT 100',this.at());
     for(const row of due) {
       if(this.closed)break;
       if(this.deps.db.get<any>("SELECT generation FROM reconciliation_resources WHERE id=?",row.id)?.generation!==row.generation)continue;
@@ -119,9 +119,13 @@ export class ReconciliationRegistry {
       } catch { result={state:'drifted',code:'reconciliation_failed'}; }
       const failed=result.state==='drifted',failures=failed ? row.failures+1 : result.state==='in_sync'?0:row.failures;
       const delay=result.state==='pending'?5000:failed?Math.min(300000,5000*2**Math.min(failures-1,6)):60000;
+      // A resource that did not obtain the machine's execution slot retains
+      // its place. Updating every waiter to the same deadline starves all but
+      // the first stable ID when the tick interval exceeds the retry delay.
+      const waiting=result.state==='pending'&&result.code==='machine_busy';
       // Only a current generation may accept the observation. A slow provider
       // cannot acknowledge a desired state changed while it was awaiting I/O.
-      this.deps.db.run(`UPDATE reconciliation_resources SET state=?,code=?,job_id=?,failures=?,next_attempt_at=?,observed_at=?,observed_generation=?,updated_at=? WHERE id=? AND generation=?`,result.state,/^[A-Za-z0-9_.-]{0,128}$/.test(result.code??'')?result.code??'':'reconciliation_failed',String(result.job_id??'').slice(0,256),failures,new Date(this.deps.now().getTime()+delay).toISOString(),result.state==='in_sync'?this.at():row.observed_at,result.state==='in_sync'?row.generation:0,this.at(),row.id,row.generation);
+      this.deps.db.run(`UPDATE reconciliation_resources SET state=?,code=?,job_id=?,failures=?,next_attempt_at=?,observed_at=?,observed_generation=?,updated_at=? WHERE id=? AND generation=?`,result.state,/^[A-Za-z0-9_.-]{0,128}$/.test(result.code??'')?result.code??'':'reconciliation_failed',String(result.job_id??row.job_id).slice(0,256),failures,waiting?row.next_attempt_at:new Date(this.deps.now().getTime()+delay).toISOString(),result.state==='in_sync'?this.at():row.observed_at,result.state==='in_sync'?row.generation:0,waiting?row.updated_at:this.at(),row.id,row.generation);
     }
   }
   kick() { if(!this.closed){this.refresh();void this.tick().catch(()=>this.deps.logger.warn('Machine reconciliation needs attention'));} }

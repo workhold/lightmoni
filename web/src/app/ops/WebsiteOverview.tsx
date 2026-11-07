@@ -5,6 +5,7 @@ import {useI18n} from '../../shared/i18n';
 import {publishedRevisions,websiteDNS,websitePublication,type WebsiteState} from './website-state';
 import {time,type Resource} from './model';
 import {useNavigate} from 'react-router-dom';
+import {deletionMessage} from './recovery-state';
 
 export function WebsiteStateTag({value}:{value:WebsiteState}) {
   const {t}=useI18n();
@@ -28,7 +29,7 @@ export default function WebsiteOverview({websites,resources,busy,onEdit,onAction
     const backends:string[]=site.spec.routing_mode==='managed'?[service?.spec.service_name??service?.name??site.spec.service_application_id].filter(Boolean):[...new Set<string>(targets.flatMap((target:any)=>target.target==='application'?[resources.find(r=>r.id===target.application_id)?.spec.service_name??target.application_id]:(target.upstreams??[]).map((u:any)=>typeof u==='string'?u:u.url)))];
     const externalEntry=entry?.spec.deployments?.some((d:any)=>ids.includes(d.cluster_id)&&!d.gateway_dns_zone_id);
     return <article className="lm-website-item" key={site.id} aria-label={site.name}>
-      <div className="lm-website-identity">{site.status.deletion&&<Tag color="warning">{t('删除中','Deleting')} · {site.status.deletion.state}</Tag>}<Button type="link" className="lm-ops-resource-name" onClick={()=>onDetails(site)}>{site.name}</Button>
+      <div className="lm-website-identity">{site.status.deletion&&<Tag color="warning">{t(...deletionMessage(site.status.deletion))}</Tag>}<Button type="link" className="lm-ops-resource-name" onClick={()=>onDetails(site)}>{site.name}</Button>
         <div className="lm-website-domains">{(site.spec.bindings??[]).flatMap((b:any)=>b.domains??[]).map((domain:string)=><span key={domain}>{domain}</span>)}</div>
         <div className="lm-website-backend"><span>{site.spec.mode==='static'?t('静态文件','Static files'):site.spec.routing_mode==='managed'?t('托管服务','Managed service'):t('手动后端','Manual backend')}</span><strong title={backends.join(' · ')}>{backends.join(' · ')||'—'}{site.spec.routing_mode==='managed'&&site.spec.service_port_name?':'+site.spec.service_port_name:''}</strong></div>
         <span className="lm-website-clusters">{ids.map(id=>resources.find(r=>r.id===id)?.name??id).join(' · ')}</span>

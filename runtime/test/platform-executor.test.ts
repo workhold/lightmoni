@@ -550,3 +550,19 @@ test('website cleanup rejects active references, prunes obsolete indexes and del
  const outside=join(f.root,'outside');await mkdir(outside);await writeFile(join(outside,'keep'),'keep');await symlink(outside,join(platform,'websites/unsafe'));
  await assert.rejects(removeWebsite(context,'unsafe',render),/OWNERSHIP/);assert.equal(await readFile(join(outside,'keep'),'utf8'),'keep');
 });
+test('website cleanup ignores only empty gateway directories and preserves ownership barriers',async t=>{
+ const {removeWebsite,inspectWebsiteRemoval,ownedWebsite}=await import('../src/operations/website-storage.js');
+ const f=await setup(t),platform=await privateRoot(f.context,'platform'),family=join(platform,'gateways');
+ await mkdir(join(family,'empty'),{recursive:true});await ownedWebsite(platform,'site',true);
+ const empty=await lstat(join(family,'empty'));
+ assert.equal((await removeWebsite(f.context,'site',()=>'' )).absent,true);
+ assert.equal((await inspectWebsiteRemoval(f.context,'site')).absent,true);
+ assert.equal((await lstat(join(family,'empty'))).ino,empty.ino);await assert.rejects(lstat(join(family,'empty/owner.json')),{code:'ENOENT'});
+ await ownedWebsite(platform,'site',true);await mkdir(join(family,'unowned'));await writeFile(join(family,'unowned/keep'),'untouched');
+ await assert.rejects(removeWebsite(f.context,'site',()=>''),/OWNERSHIP/);await assert.rejects(inspectWebsiteRemoval(f.context,'site'),/OWNERSHIP/);
+ assert.equal(await readFile(join(family,'unowned/keep'),'utf8'),'untouched');assert(await lstat(join(platform,'websites/site/owner.json')));
+ await writeFile(join(family,'unowned/owner.json'),JSON.stringify({layout_version:2,instance_id:'different'}));
+ await assert.rejects(removeWebsite(f.context,'site',()=>''),/OWNERSHIP/);
+ await rm(join(family,'unowned'),{recursive:true});const outside=join(f.root,'outside');await mkdir(outside);await symlink(outside,join(family,'unsafe'));
+ await assert.rejects(removeWebsite(f.context,'site',()=>''),/OWNERSHIP/);assert(await lstat(join(platform,'websites/site/owner.json')));
+});

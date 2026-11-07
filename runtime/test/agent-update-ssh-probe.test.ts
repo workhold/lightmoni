@@ -66,7 +66,7 @@ for(const name of ['main','uninstall'] as const)test('inline SSH probe hashes '+
 });
 
 test('inline SSH probe verifies the manifest node digest beyond its first block and closes descriptors',()=>{
- const f=inlineFixture();f.node[65536+7]^=1;assert.throws(()=>f.run(),/invalid_response/);assert.equal(f.metrics().openDescriptors,0);assert.equal(f.metrics().binaryWholeReads,0);
+ const f=inlineFixture();f.node[65536+7]^=1;assert.throws(()=>f.run(),{status:409,message:'当前 Agent 安装未通过受管指纹、账户或状态检查，请先核对安装或审阅恢复卸载'});assert.equal(f.metrics().openDescriptors,0);assert.equal(f.metrics().binaryWholeReads,0);
 });
 
 test('remote status retains only validated recovery and worker exit evidence',()=>{

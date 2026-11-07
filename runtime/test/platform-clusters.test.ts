@@ -1930,6 +1930,54 @@ test('registered deployment inventory verifies current content, repairs manual i
   assert(f.reconciliation.inventory('ma').resources.some(r=>r.owner_id===second.id));
   f.advance(60001);await f.reconciliation.tick();assert.equal(f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===second.id)?.code,'agent_offline');
 });
+test('multiple applications get fresh observations while removed instances and unrelated work share a machine',async t=>{
+ const f=await fixture(t,undefined,true),c=f.createCluster(['ma']);
+ f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
+ const apps=[f.app(c,{service_name:'fair-a'}),f.app(c,{service_name:'fair-b'}),f.app(c,{service_name:'fair-c'})];
+ for(const a of apps){await f.action(a,'deploy');f.finish('a');}
+ await f.action(apps[0],'remove');f.finish('a',{running:false,present:false,containers:[]});
+ const before=new Map(apps.map(a=>[a.id,f.store.actions(a.id).length]));const seen=new Set<string>();
+ for(let n=0;n<12;n++){
+  f.advance(15001);f.heartbeat('a');await f.reconciliation.tick();
+  const queued=f.db.get<any>("SELECT resource_id FROM ops_platform_runs WHERE state='queued'");
+  if(queued){
+   const job=f.finish('a',queued.resource_id===apps[0].id?{healthy:false,running:false,present:false,containers:[]}:{healthy:true,running:true,configuration_matches:true,containers:[{running:true}]});
+   assert.equal(job.payload.resource.config.task,'workload.inspect');seen.add(job.payload.resource.id);
+  }
+  if(seen.size===3)break;
+ }
+ assert.equal(seen.size,3,'all applications including a removed registration must receive a slot');
+ for(const a of apps)assert(f.store.actions(a.id).length>before.get(a.id)!);
+ assert(!apps.some(a=>f.store.actions(a.id).filter(r=>r.action==='apply').length>1));
+});
+test('a successful current configuration inspection repairs stale version status without recreating a container',async t=>{
+ const f=await fixture(t,undefined,true),c=f.createCluster(['ma']),a=f.app(c);
+ f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
+ await f.action(a,'deploy');f.finish('a');f.db.run("UPDATE ops_cluster_instances SET observed_generation='',healthy=0");
+ f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();const proof=f.finish('a',{healthy:true,running:true,configuration_matches:true,containers:[{running:true}]});
+ assert.equal(proof.payload.resource.config.task,'workload.inspect');
+ const i=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id);assert.equal(i.observed_generation,String(a.revision));assert.equal(i.healthy,1);
+ // An unrelated queued task must not discard a completed observation proof.
+ f.store.queue(a,'a','inspect',{task:'node.inspect'},'admin');f.advance(5001);f.heartbeat('a');await f.reconciliation.tick();
+ assert.equal(f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===a.id)?.state,'in_sync');f.finish('a');
+ assert.equal(f.store.actions(a.id).filter(r=>r.action==='apply').length,1);
+});
+test('repeated known deployment failures stop automatic mutations while preserving published intent',async t=>{
+ const f=await fixture(t,undefined,true),c=f.createCluster(['ma']),a=f.app(c);
+ f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({operations_capabilities:['operations.platform.reconciliation.v1']}));
+ await f.action(a,'deploy');f.finish('a');let failed=0;
+ for(let n=0;n<60;n++){
+  f.advance(15001);f.heartbeat('a');await f.reconciliation.tick();
+  const queued=f.db.get<any>("SELECT payload_cipher FROM ops_platform_runs WHERE state='queued'");
+  if(queued){const config=JSON.parse(f.deps.decrypt(queued.payload_cipher)).resource.config;
+   if(config.task==='workload.apply'){failed++;f.finish('a',{code:'image_network_failed'},'failed');}
+   else f.finish('a',{running:false,healthy:false,configuration_matches:false,containers:[]});
+  }
+ }
+ assert.equal(failed,5);const resource=f.reconciliation.inventory('ma').resources.find(r=>r.owner_id===a.id)!;
+ assert.equal(resource.code,'deployment_recovery_exhausted');assert(resource.failures>=5);
+ assert.equal(f.store.get(a.id).status.deployments[c.id].enabled,true);
+});
 
 test('removed and stopped inspections retain the intended state without accumulating running-health failures',async t=>{
  for(const [intent,result,expected,failures,runState] of [
@@ -2263,6 +2311,24 @@ test('known website cleanup failure retains registration and retries without rep
  const f=await deletionFixture(t),site=f.site;await f.req('/resources/'+site.id,'DELETE',{revision:site.revision});f.finish('a');f.finish('b');await f.platform.tick();
  f.finish('a',{website_id:site.id,absent:true,removed:true});f.finish('b',{code:'website_cleanup_failed'},'failed');await f.platform.tick();assert(f.store.get(site.id));assert.equal(f.store.get(site.id).status.deletion.targets.find((r:any)=>r.machine_id==='ma').state,'done');
  f.advance(6000);f.heartbeat('a');f.heartbeat('b');await f.platform.tick();assert.equal(f.jobs.claim('a',['operations.platform','operations.platform.storage.v2']),null);f.finish('b',{website_id:site.id,absent:true,removed:true});await f.platform.tick();assert.throws(()=>f.store.get(site.id),/not_found/);
+});
+test('website ownership failures stop destructive replay across restart and resume with read-only proof',async t=>{
+ const f=await deletionFixture(t),site=f.site;await f.req('/resources/'+site.id,'DELETE',{revision:site.revision});f.finish('a');f.finish('b');await f.platform.tick();
+ f.finish('a',{website_id:site.id,absent:true});f.finish('b',{code:'gateway_directory_ownership_required'},'failed');await f.platform.tick();
+ assert.equal(f.store.get(site.id).status.deletion.state,'blocked');const count=f.store.actions(site.id).length;
+ const {createWebsiteDeletions}=await import('../src/ops/website-deletions.js');const restarted=createWebsiteDeletions(f.store,{actions:()=>[],perform:async()=>({})} as any);
+ f.advance(60001);f.heartbeat('a');f.heartbeat('b');await restarted.tick();assert.equal(f.store.actions(site.id).length,count);
+ f.advance(300001);f.heartbeat('a');f.heartbeat('b');await restarted.tick();
+ const inspect=f.finish('b',{website_id:site.id,absent:false});assert.equal(inspect.payload.resource.config.task,'website.inspect');await restarted.tick();
+ f.advance(5001);f.heartbeat('b');await restarted.tick();const removal=f.finish('b',{website_id:site.id,absent:true});assert.equal(removal.payload.resource.config.task,'website.remove');await restarted.tick();assert.throws(()=>f.store.get(site.id),/not_found/);
+});
+test('legacy cleanup scope comes from immutable applications and refuses unknown historical executions',async t=>{
+ const f=await deletionFixture(t),{legacyWebsiteScopes}=await import('../src/ops/website-legacy-scope.js');
+ f.db.run("UPDATE managed_machines SET agent_id='b' WHERE id='ma'");
+ const scopes=legacyWebsiteScopes(f.store,'ma','b',f.site.id);assert.equal(scopes.length,1);assert.equal(scopes[0].application_id,f.gateway.id);
+ assert(scopes[0].site_proofs.some(p=>p.target));assert(!JSON.stringify(scopes).includes('static_files'));assert(!JSON.stringify(scopes).includes('private_key'));
+ f.store.queue(f.gateway,'a','inspect',{task:'node.inspect'},'admin');f.finish('a',{code:'operation_interrupted'},'unknown');
+ assert.throws(()=>legacyWebsiteScopes(f.store,'ma','b',f.site.id),/legacy_website_execution_unknown/);
 });
 test('unknown website cleanup is never replayed and old executors cannot claim the new layout',async t=>{
  const f=await deletionFixture(t),site=f.site;await f.req('/resources/'+site.id,'DELETE',{revision:site.revision});f.finish('a');f.finish('b');await f.platform.tick();
