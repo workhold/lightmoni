@@ -1,0 +1,32 @@
+{
+  "architectures": {
+    "amd64": {
+      "image_id": "sha256:12c702c0234a54938404df893333e6bb8b01e59cc0c1ab209e2971948a729420",
+      "checks": 45,
+      "platform_regression": {
+        "passed": 85,
+        "failed": 0,
+        "skipped": 0
+      },
+      "registry_protocol_regression": 7,
+      "revision": "af712cfffa3a9d68bb0fb08d245a760d74039a7d"
+    },
+    "arm64": {
+      "image_id": "sha256:6e6d72119764c430386a13cdf28909bae7a03890b1c2c6aafb576d6221f0c19e",
+      "checks": 45,
+      "platform_regression": {
+        "passed": 85,
+        "failed": 0,
+        "skipped": 0
+      },
+      "registry_protocol_regression": 7,
+      "revision": "af712cfffa3a9d68bb0fb08d245a760d74039a7d"
+    }
+  },
+  "temporary_services_and_runtime_credentials": "cleaned",
+  "latest": "preserved",
+  "development_ui_console_warnings": {
+    "message": "React flushSync inside component lifecycle",
+    "count": 6
+  }
+}

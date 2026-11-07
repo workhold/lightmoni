@@ -1,0 +1,53 @@
+{
+  "application_monitoring": {
+    "application": "Gitea",
+    "route": "/applications/2bc55c4b89cad669709bad3fceac2a7b/monitoring",
+    "collection": "normal",
+    "last_success_local": "2026-11-07 14:10:55",
+    "charts": [
+      "CPU",
+      "memory",
+      "network",
+      "disk"
+    ],
+    "container_state": "running"
+  },
+  "website_monitoring": {
+    "website": "gitea-test.heyphp.com",
+    "route": "/websites/d10681c050f98906039de32b8ad89fa8/monitoring",
+    "collection": "normal",
+    "last_success_local": "2026-11-07 14:11:35",
+    "latest_access_status": 200,
+    "latest_access_local": "2026-11-07 14:10:44"
+  },
+  "dashboards": {
+    "list_count": 5,
+    "panel_count": 13,
+    "visible_query_errors": [],
+    "qps": 0.13,
+    "last_minute_records": 352,
+    "online_centers": 1,
+    "last_minute_failures": 0
+  },
+  "applications_final": {
+    "Gitea": "running",
+    "OpenResty": "running",
+    "SDD091 快速安装": "running",
+    "系统镜像仓库": "running",
+    "ABC Demo": "removed",
+    "SDD091 SDK环境验收": "removed",
+    "DBX": "configured"
+  },
+  "removal_precondition": {
+    "verification": "production compiled function, read-only DB",
+    "ABC Demo": true,
+    "SDD091 SDK环境验收": true,
+    "production_delete_performed": false,
+    "remaining_reference": {
+      "application": "ABC Demo",
+      "website": "abc.heyphp.com",
+      "backend": "abc-demo"
+    }
+  },
+  "transient_state": "DBX displayed pending/retained while awaiting a fresh serialized receipt after restart, then returned running; no health threshold or state altered"
+}

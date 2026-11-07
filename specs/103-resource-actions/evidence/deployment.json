@@ -1,0 +1,28 @@
+{
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261107-resource-actions-v1",
+  "revision": "af712cfffa3a9d68bb0fb08d245a760d74039a7d",
+  "index_digest": "sha256:90bbd6b5205242c814a0362c472bc38085973f62690e16fcbf71891b97ad70b7",
+  "started_at": "2026-11-07T06:09:27.567490067Z",
+  "health": "healthy",
+  "public_healthz": "ok",
+  "volume": "lightmoni_lightmoni-state-v2-20261103",
+  "volume_target": "/data",
+  "backup": {
+    "path": "/opt/lightmoni/backups/sdd103-20261107",
+    "mode": "root private 0700, files 0600",
+    "pages": 322211,
+    "quick_check": "ok",
+    "copy_sha256_equal": true
+  },
+  "external_checks": {
+    "Gitea": 200,
+    "DBX": 200,
+    "registry_unauthenticated": 401
+  },
+  "post_restart_runs": {
+    "succeeded": 16,
+    "failed": 0,
+    "unknown": 0,
+    "pending_at_audit": 0
+  }
+}
