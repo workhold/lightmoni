@@ -1,11 +1,12 @@
-import {Alert,Tag} from '../shared/ui';
+import {Alert,Tag,Tooltip} from '../shared/ui';
 import {useI18n} from '../shared/i18n';
 import {time,type Spec} from './ops/model';
 export default function TelemetryCollectionStatus({hosts}:{hosts:Spec[]}){
  const {t}=useI18n();
- return <div aria-label={t('默认采集状态','Default collection status')}>{hosts.map(h=>{
-  const s=h.application_observation,center=h.center_observation;
-  if(center?.error||s?.state==='degraded')return <Alert key={h.id} showIcon type="warning" title={h.name+' · '+t('容器采集或上报异常','Container collection or reporting failed')} description={<>{center?.error||s?.error} · {t('最近尝试','Last attempt')} {time(s?.attempted_at)} · {t('待发送批次','Queued batches')} {s?.queue_batches??0} / {center?.pending_batches??0}</>}/>;
-  return <p key={h.id} className="lm-ops-note">{h.name} · <Tag color={s?.state==='ok'?'green':undefined}>{s?.state==='ok'?t('默认采集正常','Default collection active'):t('采集诊断待上报','Waiting for collection diagnostics')}</Tag>{s?.last_success_at&&<>{t('最近成功','Last success')} {time(s.last_success_at)}</>}</p>;
+ if(!hosts.length)return null;
+ return <div className="lm-collection-status" aria-label={t('默认采集状态','Default collection status')}>{hosts.map(h=>{
+  const s=h.application_observation,center=h.center_observation,last=s?.last_success_at;
+  if(center?.error||s?.state==='degraded')return <Alert key={h.id} showIcon type="warning" title={h.name+' · '+t('采集异常','Collection degraded')} description={<><div>{center?.error||s?.error}</div><small>{t('最近尝试','Last attempt')} {time(s?.attempted_at)}{last&&<> · {t('最近成功','Last success')} {time(last)}</>} · {t('待发送批次','Queued batches')} {s?.queue_batches??0} / {center?.pending_batches??0}</small></>}/>;
+  return <div key={h.id} className="lm-collection-host"><strong>{h.name}</strong><Tag color={s?.state==='ok'?'success':undefined}>{s?.state==='ok'?t('采集正常','Collection active'):t('等待采集诊断','Waiting for diagnostics')}</Tag>{last&&<Tooltip title={t('最近成功','Last success')+' · '+time(last)}><time dateTime={last}>{time(last)}</time></Tooltip>}</div>;
  })}</div>;
 }

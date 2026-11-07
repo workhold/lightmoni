@@ -1,5 +1,6 @@
+import IconAction from './IconAction';
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {PlusOutlined, ReloadOutlined} from '@ant-design/icons';
+import {PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, PoweroffOutlined, ClearOutlined} from '@ant-design/icons';
 import {Alert, App, Button, Checkbox, Drawer, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography} from '../../shared/ui';
 import {api} from '../../shared/api';
 import {useI18n} from '../../shared/i18n';
@@ -118,15 +119,15 @@ export default function DNSRecordsDrawer({zone, onClose, onRefresh}: {zone?: Res
     <Drawer open={!!zone} title={zone ? t('解析记录', 'DNS records') + ' · ' + zone.spec.domain : ''} size={1060} onClose={() => {if (!locked) onClose();}} closable={!locked} maskClosable={!locked} keyboard={!locked}>
       <div className="lm-ops-section-heading"><div><p className="lm-ops-note">{t('平台接受修改后仍需等待 DNS 缓存传播。', 'Provider acceptance is separate from DNS cache propagation.')}</p><small>{t('管理范围', 'Scope')}: {zone?.spec.scope ?? zone?.spec.domain}</small></div><Space wrap>
         <Input.Search key={zoneID} placeholder={t('搜索主机名或记录值', 'Search name or record value')} aria-label={t('搜索 DNS 记录', 'Search DNS records')} allowClear disabled={locked || !!batch} onSearch={value => {setSelection(new Map()); setKeyword(value); setPage(1);}} style={{width: 200}}/>
-        <Button icon={<ReloadOutlined aria-hidden/>} loading={busy} disabled={running || !!batch} onClick={() => void singleAction('sync', {})}>{t('同步记录', 'Sync records')}</Button>
-        <Button disabled={locked || !!batch} onClick={() => openBatch('create_record')}>{t('批量创建', 'Bulk create')}</Button>
-        <Button type="primary" icon={<PlusOutlined aria-hidden/>} disabled={locked || !!batch} onClick={() => {setEditor({}); setError('');}}>{t('新增记录', 'Add record')}</Button>
+        <IconAction label={t('同步记录', 'Sync records')} icon={<ReloadOutlined aria-hidden/>} loading={busy} disabled={running || !!batch} onClick={() => void singleAction('sync', {})}/>
+        <IconAction label={t('批量创建', 'Bulk create')} icon={<PlusOutlined aria-hidden/>} disabled={locked || !!batch} onClick={() => openBatch('create_record')}/>
+        <IconAction label={t('新增记录', 'Add record')} type="primary" icon={<PlusOutlined aria-hidden/>} disabled={locked || !!batch} onClick={() => {setEditor({}); setError('');}}/>
       </Space></div>
       {error && !editor && <Alert type="error" showIcon title={t('DNS 操作或刷新失败', 'DNS operation or refresh failed')} description={error}/>}
       <Space wrap style={{marginBottom: 12}}><span aria-live="polite">{t('已选择', 'Selected') + ' ' + selection.size + ' / ' + DNS_BATCH_LIMIT}</span>
-        <Button disabled={!selection.size || locked || !!batch} onClick={() => openBatch('update_record')}>{t('批量修改', 'Bulk edit')}</Button>
-        <Button danger disabled={!selection.size || locked || !!batch} onClick={() => openBatch('delete_record')}>{t('批量删除', 'Bulk delete')}</Button>
-        <Button type="text" disabled={!selection.size || locked || !!batch} onClick={() => setSelection(new Map())}>{t('清空选择', 'Clear selection')}</Button>
+        <IconAction label={t('批量修改', 'Bulk edit')} icon={<EditOutlined aria-hidden/>} disabled={!selection.size || locked || !!batch} onClick={() => openBatch('update_record')}/>
+        <IconAction label={t('批量删除', 'Bulk delete')} icon={<DeleteOutlined aria-hidden/>} danger disabled={!selection.size || locked || !!batch} onClick={() => openBatch('delete_record')}/>
+        <IconAction label={t('清空选择', 'Clear selection')} icon={<ClearOutlined aria-hidden/>} type="text" disabled={!selection.size || locked || !!batch} onClick={() => setSelection(new Map())}/>
       </Space>
       <Table<Spec> rowKey={record => recordID(record) || record.name + '-' + record.type + '-' + record.value} size="small" dataSource={records} loading={loading}
         rowSelection={{selectedRowKeys: [...selection.keys()], preserveSelectedRowKeys: true,
@@ -138,9 +139,9 @@ export default function DNSRecordsDrawer({zone, onClose, onRefresh}: {zone?: Res
           {title: 'TTL', dataIndex: 'ttl'}, {title: t('线路', 'Line'), dataIndex: 'line'},
           {title: t('状态', 'State'), render: (_, record) => record.enabled === false ? <Tag>{t('已停用', 'Disabled')}</Tag> : <Tag color="success">{t('已启用', 'Enabled')}</Tag>},
           {title: t('操作', 'Actions'), render: (_, record) => <Space size={2}>
-            <Button size="small" disabled={locked || !!batch} onClick={() => {setEditor({record}); setError('');}}>{t('编辑', 'Edit')}</Button>
-            <Popconfirm title={t('确认切换记录状态？', 'Change record status?')} onConfirm={() => singleAction('set_record_status', {id: recordID(record), enabled: record.enabled === false})}><Button size="small" disabled={locked || !!batch}>{record.enabled === false ? t('启用', 'Enable') : t('停用', 'Disable')}</Button></Popconfirm>
-            <Popconfirm title={t('确认删除此 DNS 记录？', 'Delete this DNS record?')} onConfirm={() => singleAction('delete_record', {id: recordID(record)})}><Button size="small" danger type="text" disabled={locked || !!batch}>{t('删除', 'Delete')}</Button></Popconfirm>
+            <IconAction label={t('编辑', 'Edit')} icon={<EditOutlined aria-hidden/>} size="small" disabled={locked || !!batch} onClick={() => {setEditor({record}); setError('');}}/>
+            <Popconfirm title={t('确认切换记录状态？', 'Change record status?')} onConfirm={() => singleAction('set_record_status', {id: recordID(record), enabled: record.enabled === false})}><IconAction label={record.enabled === false ? t('启用', 'Enable') : t('停用', 'Disable')} icon={<PoweroffOutlined aria-hidden/>} size="small" disabled={locked || !!batch}/></Popconfirm>
+            <Popconfirm title={t('确认删除此 DNS 记录？', 'Delete this DNS record?')} onConfirm={() => singleAction('delete_record', {id: recordID(record)})}><IconAction label={t('删除', 'Delete')} icon={<DeleteOutlined aria-hidden/>} size="small" danger type="text" disabled={locked || !!batch}/></Popconfirm>
           </Space>},
         ]} locale={{emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('尚无记录，请先同步平台现状', 'No records loaded. Synchronize the provider first.')}/>}}/>
     </Drawer>
