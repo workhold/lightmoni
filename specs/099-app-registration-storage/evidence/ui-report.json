@@ -1,0 +1,13 @@
+{
+  "fixture": "isolated HTTP responses; no production, cloud or Docker operations",
+  "checks": [
+    "应用显示实际Docker数据目录与容器目标",
+    "旧Agent无回执不会伪造已观测位置",
+    "网站显示完整网关配置和独立分组材料目录",
+    "390px长路径换行且抽屉和页面均无横向溢出",
+    "英文界面与窄屏可用"
+  ],
+  "storage_reads": 8,
+  "page_errors": [],
+  "media": "/Users/zhangsiwen/.codex/worktrees/092-app-registration-storage/lightmoni/artifacts/screenshots/specs/099-app-registration-storage/evidence"
+}

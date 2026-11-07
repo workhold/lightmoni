@@ -429,6 +429,7 @@ export function createClusterWorkloads(
       instances: summaries,
       instances_total: instances.length,
       instances_truncated: summaries.length < instances.length,
+      active: instances.some(i => !['stopped', 'removed'].includes(i.state)),
       endpoints: discovered.slice(0, 100),
       endpoints_total: discovered.length,
       last_reconciled_at: at(),
@@ -950,19 +951,30 @@ export function createClusterWorkloads(
       );
   }
   function beforeDeleteApplication(r: PlatformResource) {
-    if (systemApplicationKind(store, r.id) === "registry")
-      fail(409, "system_registry_in_use");
+    // Gateway work may belong to a website run while its instance belongs to
+    // this application. Do not orphan its eventual receipt by unregistering it.
+    if (db.get(`SELECT run.id FROM ops_cluster_instances i
+      JOIN ops_platform_runs run ON run.id=i.current_run_id LEFT JOIN agent_jobs job ON job.id=run.job_id
+      WHERE i.owner_id=? AND (run.state IN ('queued','leased','accepted','preflighting','staging','activating','verifying','running')
+        OR run.state='unknown' AND (job.id IS NULL OR job.state!='unknown' OR (${blockingAgentJobSQL(db,'job')}))) LIMIT 1`, r.id))
+      fail(409, 'platform_resource_busy');
+    if (systemApplicationKind(store, r.id) === "registry" && (
+      rows(r.id, true).some(i => i.state !== 'removed') ||
+      store.list('cluster').some(c => c.spec.image_cache?.enabled === true) ||
+      db.get<Row>('SELECT website_id FROM ops_private_registry_settings WHERE id=1')?.website_id
+    )) fail(409, "system_registry_in_use");
     if (dnsPending.has(r.id)) fail(409, "application_dns_refresh_in_progress");
     if (
       tableExists("ops_dns_owned") &&
       db.get("SELECT id FROM ops_dns_owned WHERE owner_id=?", r.id)
     )
       fail(409, "dns_records_cleanup_pending");
-    if (rows(r.id, true).some((i) => !["stopped", "removed"].includes(i.state)))
-      fail(409, "stop_instances_before_deleting");
+    if (rows(r.id, true).some((i) => i.state !== "removed"))
+      fail(409, "remove_instances_before_deleting");
     for (const site of store.list("website"))
       for (const spec of snapshots(site))
         if (
+          spec.routing_mode === 'managed' && spec.service_application_id === r.id ||
           spec.bindings?.some((b: Row) =>
             b.locations.some((l: Row) =>
               l.cluster_targets?.some((t: Row) => t.application_id === r.id),
@@ -970,6 +982,9 @@ export function createClusterWorkloads(
           )
         )
           fail(409, "platform_resource_in_use");
+    // Legacy aggregate activity can outlive the last uninstall. The instance
+    // rows above are authoritative; all of them have now been verified removed.
+    r.status.active = false;
   }
   function normalizeTrafficPolicies(inputs: Row[]): Row[] {
     if (!Array.isArray(inputs) || inputs.length > 100)
@@ -3296,6 +3311,8 @@ export function createClusterWorkloads(
     beforeDeleteWebsite,
     afterDeleteApplication(r: PlatformResource) {
       telemetry.remove(r.id);
+      db.run('DELETE FROM ops_platform_ports WHERE instance_id IN (SELECT id FROM ops_cluster_instances WHERE owner_id=?)', r.id);
+      db.run("UPDATE ops_cluster_instances SET retired=1,healthy=0,updated_at=? WHERE owner_id=?", at(), r.id);
       db.run(
         "DELETE FROM ops_platform_application_deployments WHERE application_id=?",
         r.id,

@@ -20,6 +20,36 @@ import {createApplicationTelemetry} from '../src/ops/application-telemetry.js';
 import {automaticEntry} from '../src/ops/automatic-entry.js';
 import {selfSignedCertificate} from '../src/ops/certificates.js';
 import {desiredJSON} from '../src/shared/desired-state.js';
+
+test('uninstalled registration retires bindings while retaining history',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c);
+ await f.action(a,'deploy');f.finish('a');
+ await f.action(a,'remove');f.finish('a',{healthy:false,running:false,removed:true,containers:[]});
+ const instance=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;
+ const history=f.store.actions(a.id).length;
+ f.store.patchStatus(a.id,{active:true}); // A stale legacy aggregate must not override removed instances.
+ const deleted=await f.req('/resources/'+a.id,'DELETE',{revision:a.revision});
+ assert.equal(deleted.status,200,JSON.stringify(deleted.body));assert.equal(deleted.body.remote_data_deleted,false);
+ assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',instance.id)!.retired,1);
+ assert.equal(f.store.actions(a.id).length,history);assert(f.db.get('SELECT resource_id FROM ops_platform_revisions WHERE resource_id=?',a.id));
+ assert.equal(f.db.get('SELECT instance_id FROM ops_platform_ports WHERE instance_id=?',instance.id),undefined);
+});
+test('stopped containers and unknown uninstall results prevent registration deletion',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c);
+ await f.action(a,'deploy');f.finish('a');await f.action(a,'stop');f.finish('a',{healthy:false,running:false,containers:[{running:false}]});
+ const stopped=await f.req('/resources/'+a.id,'DELETE',{revision:a.revision});assert.equal(stopped.status,409);assert.equal(stopped.body.error,'remove_instances_before_deleting');
+ await f.action(a,'remove');f.finish('a',{code:'uninstall_outcome_unknown'},'unknown');
+ assert.equal((await f.req('/resources/'+a.id,'DELETE',{revision:a.revision})).status,409);
+});
+test('system registry registration can be deleted after uninstall and cache references are removed',async t=>{
+ const f=await fixture(t),c=f.createCluster(['ma']);
+ const deployment=await f.req('/private-registry/deployments','POST',{confirmed:true,trusted_network_acknowledged:true,revision:0,cluster_id:c.id,machine_id:'ma',address:'10.0.0.1',cache_enabled:false});
+ assert.equal(deployment.status,201,JSON.stringify(deployment.body));f.finish('a');
+ const a=(await f.req('/private-registry')).body.application;
+ await f.action(a,'remove');f.finish('a',{healthy:false,running:false,removed:true,containers:[]});
+ const deleted=await f.req('/resources/'+a.id,'DELETE',{revision:a.revision});
+ assert.equal(deleted.status,200,JSON.stringify(deleted.body));assert.equal((await f.req('/private-registry')).body.application,null);
+});
 async function fixture(t: any, fetcher?: typeof fetch, reconciliationEnabled=false) {
   const db = new DB(":memory:");
   db.exec(
@@ -2137,4 +2167,47 @@ test('removed records with retained directories retire without blocking verified
   const other=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id!=?',old.id);assert.equal(other.agent_id,'c');assert.equal(other.retired,0);
   assert.equal(done.receipt.instances.find((i:any)=>i.instance_id===old.id).data_path,retained.data_path);
  }
+});
+
+test('storage inventory is admin-only, honest for old Agents, and filters website fragments',async t=>{
+ const f=await fixture(t),c=f.createCluster(['ma']),a=f.app(c);await f.action(a,'deploy');f.finish('a');
+ let result=await f.req('/resources/'+a.id+'/storage');assert.equal(result.status,200);assert.equal(result.body.instances[0].storage,null);assert.equal(result.body.instances[0].observed_at,null);
+ assert.equal((await f.req('/resources/'+a.id+'/storage','GET',undefined,'member')).status,403);assert.equal((await f.req('/resources/'+a.id+'/storage?offset=-1')).status,400);
+ const gateway=f.store.create('application','Entry',catalogInstallation('openresty',{deployment_mode:'manual',deployments:[{cluster_id:c.id,machine_ids:['ma']}]}).spec,'admin');await f.action(gateway,'deploy');f.finish('a');
+ const site=f.store.create('website','Site',{cluster_ids:[c.id],mode:'static',bindings:[{domains:['storage.example.test'],locations:[]}]},'admin');
+ const instance=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',gateway.id)!,root='/var/lib/lightmoni-managed/operations/platform/gateways/'+instance.id;
+ f.db.run('UPDATE ops_cluster_instances SET observed_json=? WHERE id=?',JSON.stringify({storage:{layout_version:1,instance_root:root,state_file:root+'/state.json',config_file:root+'/current/nginx.conf',private_key_pem:'hidden',mounts:[{source:root,target:'/etc/lightmoni',type:'bind',environment:'hidden'}],sites:[{website_id:site.id,fragment_id:'own',root:root+'/versions/digest/sites/own',public_dir:root+'/versions/digest/sites/own/public'},{website_id:'foreign',fragment_id:'other',root:'/foreign-secret'}]}}),instance.id);
+ result=await f.req('/resources/'+site.id+'/storage');assert.equal(result.status,200);assert.equal(result.body.instances.length,1);assert.equal(result.body.instances[0].storage.config_file,root+'/current/nginx.conf');assert.equal(result.body.instances[0].storage.sites.length,1);assert.equal(result.body.instances[0].storage.sites[0].website_id,site.id);assert.doesNotMatch(JSON.stringify(result.body),/hidden|foreign-secret|environment|private_key/);
+});
+test('unresolved historical work and website references still fence uninstalled deletion',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c);await f.action(a,'deploy');f.finish('a');await f.action(a,'remove');f.finish('a',{healthy:false,running:false,removed:true,containers:[]});
+ const job=f.store.actions(a.id)[0];f.db.run("UPDATE ops_platform_runs SET state='unknown' WHERE id=?",job.id);f.db.run("UPDATE agent_jobs SET state='unknown' WHERE id=?",job.job_id);assert.equal((await f.req('/resources/'+a.id,'DELETE',{revision:a.revision})).body.error,'platform_resource_busy');
+ f.db.run("UPDATE ops_platform_runs SET state='succeeded' WHERE id=?",job.id);f.db.run("UPDATE agent_jobs SET state='succeeded' WHERE id=?",job.job_id);
+ const site=f.store.create('website','Reference',{cluster_ids:[c.id],routing_mode:'managed',service_application_id:a.id,service_port_name:'http',bindings:[{domains:['ref.example.test'],locations:[{path:'/',action:'proxy'}]}]},'admin');assert.equal((await f.req('/resources/'+a.id,'DELETE',{revision:a.revision})).body.error,'platform_resource_in_use');assert.equal((await f.req('/resources/'+site.id,'DELETE',{revision:site.revision})).status,200);assert.equal((await f.req('/resources/'+a.id,'DELETE',{revision:a.revision})).status,200);
+});
+
+test('an active website-owned gateway inspection fences deleting its removed application',async t=>{
+ const f=await fixture(t),c=f.createCluster(['ma']),gateway=f.store.create('application','Entry',catalogInstallation('openresty',{deployment_mode:'manual',deployments:[{cluster_id:c.id,machine_ids:['ma']}]}).spec,'admin');
+ await f.action(gateway,'deploy');f.finish('a');await f.action(gateway,'remove');f.finish('a',{removed:true,present:false,healthy:false});
+ const site=f.store.create('website','Stored site',{cluster_ids:[c.id],mode:'static',bindings:[{domains:['queued.example.test'],locations:[]}]},'admin');
+ const instance=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',gateway.id)!;
+ const run=f.store.queue(site,'a','inspect',{task:'gateway.inspect',instance_id:instance.id,generation:instance.desired_generation},'admin');
+ f.db.run('UPDATE ops_cluster_instances SET current_run_id=? WHERE id=?',run.id,instance.id);
+ const response=await f.req('/resources/'+gateway.id,'DELETE',{revision:gateway.revision});assert.equal(response.status,409);assert.equal(response.body.error,'platform_resource_busy');
+});
+test('storage inventory paginates retained instances without silently dropping later machines',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c);await f.action(a,'deploy');f.finish('a');
+ const instance=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;
+ for(let n=0;n<23;n++)f.db.run("INSERT INTO ops_cluster_instances(id,owner_id,machine_id,agent_id,cluster_id,slot,retired,state,desired_state,created_at,updated_at) VALUES(?,?,?,?,?,?,1,'removed','removed',?,?)",'retained-'+String(n).padStart(2,'0'),a.id,'ma','a',c.id,'old-'+n,instance.created_at,instance.updated_at);
+ const first=(await f.req('/resources/'+a.id+'/storage')).body,second=(await f.req('/resources/'+a.id+'/storage?offset='+first.next_offset)).body;
+ assert.equal(first.instances.length,20);assert.equal(first.next_offset,20);assert.equal(second.instances.length,4);assert.equal(second.next_offset,null);assert.equal(new Set([...first.instances,...second.instances].map(i=>i.instance_id)).size,24);
+});
+test('published managed website references remain protected until the old publication is disabled',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c),b=f.app(c);
+ const site=f.store.create('website','Published reference',{routing_mode:'managed',service_application_id:a.id,service_port_name:'http',bindings:[{domains:['published-ref.example.test'],locations:[{path:'/',action:'proxy'}]}]},'admin');
+ f.db.run('UPDATE ops_platform_website_deployments SET enabled=1,desired_revision=1 WHERE website_id=?',site.id);
+ f.store.update(site.id,site.revision,site.name,{...site.spec,service_application_id:b.id},'admin');
+ assert.equal((await f.req('/resources/'+a.id,'DELETE',{revision:a.revision})).body.error,'platform_resource_in_use');
+ f.db.run('UPDATE ops_platform_website_deployments SET enabled=0 WHERE website_id=?',site.id);
+ assert.equal((await f.req('/resources/'+a.id,'DELETE',{revision:a.revision})).status,200);
 });

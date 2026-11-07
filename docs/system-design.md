@@ -2490,3 +2490,39 @@ RuntimeMonitor 使用 TypeScript SDK 的显式 exporter 回调直接进入 Inges
 中心明确期望 removed、两次核验均无容器且保留固定目录的旧记录，可在同一管理员计划中使用 retire_retained：仅退役中心记录并释放预约，保留全部远端目录与原身份审计；界面明确展示保留路径。不能对运行期望的缺失受管状态实例使用，也不执行容器重建或数据删除。残留目录不再阻塞同机其他已核验绑定恢复。
 
 管理员以主机级不可变计划审阅全部旧实例，由当前认证 Agent 的 root 适配器通过 operations.platform.instance-recovery-review.v1 能力只读核验容器标签、受管状态和固定数据路径。审批后重新核验同一快照和摘要，原子更换中心 Agent 绑定及端口预约归属，保留实例 ID、业务数据位置、端口、配置与期望副本。旧 Agent 在线、未结束或未审计未知任务、外部容器、不安全或缺失数据状态都阻止恢复；无业务证据的旧空记录按已审阅计划退役。准备、审批人、复验和结果持久记录，重复请求回读原事务；后续正常对账验证运行和健康。该路径不执行远端容器写入或数据迁移，网络凭据和签名执行权限不变。
+
+## 99. 应用登记与宿主机存储清单（SDD099）
+
+应用删除登记以实例行的已确认 removed 为准；仅停止、离线、失败及未核对 unknown 均不能当作已卸载。旧 status.active 聚合不覆盖实例卸载事实。系统仓库移除全部实例并解除集群镜像复用、对外入口和其他引用后允许删除登记，不再无条件拒绝。当前网站引用和启用发布快照仍受保护，已停用历史快照继续保留审计。事务删除资源/系统登记、退役已移除实例并释放端口预约，修订与执行历史保留；不会执行远端文件或卷删除，也不自动将保留数据绑定到同名新应用。
+
+受管执行的标准业务根为 `/var/lib/lightmoni-managed/operations/platform`，与 Agent 身份、升级状态分离。存储按稳定实例 ID 隔离，应用名、网站域名改名不更换位置；跨机器副本使用各自本地数据。保持当前部署布局，不隐式迁移既有目录或自定义挂载：
+
+| 内容 | 相对业务根的位置 / 规则 |
+| --- | --- |
+| 应用实例 | `workloads/<instance_id>/state.json`；每个实例独立 |
+| Compose 发布版本 | `workloads/<instance_id>/versions/<manifest_digest>/compose.json`，包含私有配置，不通过清单返回正文 |
+| 托管配置挂载 | `workloads/<instance_id>/config/<files_digest>/<mount_index>/`，配置内容改变使用新目录 |
+| 初始化挂载 | `workloads/<instance_id>/initial/<mount_index>/`，已有文件仅首次初始化，不覆盖运行期修改 |
+| 默认持久数据 | `workloads/<instance_id>/data/<mount_index>/`，卸载容器和注销登记均保留 |
+| 自定义 bind | 显式 source 绝对路径，原样保留并按 Docker 实际挂载回读 |
+| 命名卷 | 默认 Compose 项目 `lm-<instance_id>` 内的卷；显式 name/external 按 Compose 定义。实际路径取 Docker inspect 的 Mounts.Source，不能假设 Docker data-root |
+| OpenResty 实例 | `gateways/<instance_id>/state.json`；整个实例目录只读挂入容器 `/etc/lightmoni` |
+| 网站完整配置 | `gateways/<instance_id>/current/nginx.conf`，current 原子指向 `versions/<bundle_digest>` |
+| 每个网站分组材料 | `gateways/<instance_id>/versions/<bundle_digest>/sites/<fragment_id>/`；static 模式的 `public/`，TLS 的 `fullchain.pem`/`privkey.pem`，以及受管认证材料 |
+
+一个网站可有多个域名分组。fragment_id 沿用网站 ID 与绑定序号的摘要，website_id 指向网站登记。网站路由实际合并在完整 nginx.conf，不能把分组材料目录称作单独网站 conf。网站重新发布产生新网关完整版本，旧目录保留。私钥和私有状态/manifest 保持原有权限，清单仅给路径，不返回配置正文、环境、密码或证书内容。
+
+Agent 在既有 workload/gateway 的 apply/inspect/stop/remove 回执中附带 layout_version=1 的有界 storage 元数据：实际实例根、Docker 来源/目标/访问模式以及网关当前版本和网站分组。Docker data-root、自定义 bind 和测试上下文一律使用执行现场回读。挂载/分组数组各限 8 KiB，截断明确标记，不将元数据扩展为写目录授权。
+
+管理员 `GET /api/v1/ops/resources/:id/storage?offset=0` 以每页20个实例返回应用全部实例（含退役）或网站所属网关实例；只显示该网站 website_id 对应分组。GET 仅读最近成功观测，不派发作业；observed_at 是回执时间，不是实时在线证明。旧 Agent/无新回执时 storage=null 并明确待检查，不通过标准根猜测实际路径。应用和网站详情可刷新、复制路径并读取更多实例。
+
+```mermaid
+flowchart LR
+  D[应用/网站详情] --> C[管理员存储清单]
+  C --> O[(同实例最近成功观测)]
+  A[Agent实际Docker挂载与网关状态] --> O
+  A --> B[实例业务目录/网站版本]
+  U[确认卸载后删除登记] --> H[退役绑定/保留历史]
+```
+
+规格、契约和本地临时目录/Docker/页面证据见 `specs/099-app-registration-storage/`；Doca 同章节原生块与流程图同步后回读，记录同目录 evidence。此变更不执行生产发布、数据迁移或卷清理。

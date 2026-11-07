@@ -21,6 +21,7 @@ import {commandDiagnostic} from '../src/operations/install-progress.js';
 import { selfSignedCertificate } from "../src/ops/certificates.js";
 import { certificateMetadata } from "../src/operations/certificates.js";
 import {privateRoot} from '../src/operations/website-files.js';
+import { gatewayStorage, observedMounts, fitStorageReceipt } from '../src/operations/storage.js';
 import type {
   OperationPayload,
   OperationExecutionContext,
@@ -470,4 +471,34 @@ test('container empty command overrides inherit image defaults while explicit co
   assert.equal((await inspect()).data.configuration_matches,application===app);
   if(application===explicit){container.Config.Cmd=explicit.command;container.Config.Entrypoint=explicit.entrypoint;assert.equal((await inspect()).data.configuration_matches,true);}
  }
+});
+
+test('storage receipts use actual bind and Docker data-root paths and retain initialization',async t=>{
+ const {renderManifest}=await import('../src/operations/platform.js');
+ const f=await setup(t),id='storage-layout',app=normalizeApplication({mode:'container',image:'example:1',mounts:[
+  {type:'config',target:'/etc/example',files:{'site.conf':'secret configuration'}},
+  {type:'init',target:'/init',files:{'once.sql':'initial'}},{type:'data',target:'/data'},
+  {type:'data',target:'/external',source:join(f.root,'custom-data')},{type:'volume',target:'/volume',source:'database'},
+ ]});
+ const doc=await renderManifest(f.context,id,app,1),root=join(f.dataDir,'operations/platform/workloads',id);
+ assert.match(doc.services.app.volumes[0].source,/\/config\/[a-f0-9]{64}\/0$/);
+ assert.equal(doc.services.app.volumes[1].source,join(root,'initial/1'));assert.equal(doc.services.app.volumes[2].source,join(root,'data/2'));assert.equal(doc.services.app.volumes[3].source,join(f.root,'custom-data'));
+ const init=join(doc.services.app.volumes[1].source,'once.sql');await writeFile(init,'user changed');await renderManifest(f.context,id,app,2);assert.equal(await readFile(init,'utf8'),'user changed');
+ const container={Id:'f'.repeat(64),Config:{Labels:{'io.lightmoni.platform.instance':id,'com.docker.compose.service':'app'},Env:['SECRET=hidden']},State:{Running:false},Mounts:doc.services.app.volumes.map((v:any)=>({Type:v.type,Source:v.type==='volume'?'/srv/docker/volumes/lm-storage-layout_database/_data':v.source,Name:v.type==='volume'?'lm-storage-layout_database':'',Destination:v.target,RW:!v.read_only}))};
+ const context={...f.context,command:async(_file:string,args:string[])=>({stdout:args[0]==='ps'?container.Id:args[0]==='inspect'?JSON.stringify([container]):'',stderr:''})};
+ const result=await executePlatform(payload({task:'workload.inspect',instance_id:id},'inspect'),context);
+ assert.equal(result.data.storage.instance_root,root);assert.equal(result.data.storage.mounts.length,5);assert.equal(result.data.storage.mounts.at(-1).source,'/srv/docker/volumes/lm-storage-layout_database/_data');
+ assert.equal(result.data.storage.mounts[0].read_only,true);assert.doesNotMatch(JSON.stringify(result.data.storage),/hidden|secret configuration/);
+});
+test('gateway storage identifies website fragments inside complete versioned configuration and bounds metadata',()=>{
+ const root='/var/lib/lightmoni-managed/operations/platform',digest='a'.repeat(64),state={digest,config:{sites:[{id:'fragment-one',website_id:'website-one',mode:'static',certificate:{private_key_pem:'hidden'}},{id:'fragment-two',website_id:'website-two',mode:'proxy'}]}};
+ const storage=gatewayStorage(root,'entry-one',state,[]);
+ assert.equal(storage.config_file,root+'/gateways/entry-one/current/nginx.conf');assert.equal(storage.sites[0].root,root+'/gateways/entry-one/versions/'+digest+'/sites/fragment-one');assert.equal(storage.sites[0].public_dir,storage.sites[0].root+'/public');assert.equal(storage.sites[1].website_id,'website-two');assert.doesNotMatch(JSON.stringify(storage),/hidden|private_key_pem/);
+ const large=observedMounts([{Mounts:Array.from({length:500},()=>({Source:'/srv/'+('x'.repeat(1000)),Destination:'/data',Type:'bind',RW:true}))}]);assert.equal(large.mounts_truncated,true);assert(Buffer.byteLength(JSON.stringify(large))<9000);
+ assert.throws(()=>gatewayStorage(root,'../outside',state,[]),/INVALID_RESOURCE_ID/);
+});
+test('optional storage metadata cannot exceed the existing receipt budget',()=>{
+ const content='x'.repeat(59*1024),result=fitStorageReceipt({verified:true,data:{content,storage:{layout_version:1,instance_root:'/data',mounts:Array.from({length:20},()=>({source:'x'.repeat(500)})),sites:[]}}});
+ assert.equal(result.data.content,content);assert.equal(result.data.storage.mounts_truncated,true);assert(Buffer.byteLength(JSON.stringify(result.data))<=60*1024);
+ const full='x'.repeat(60*1024-14),fallback=fitStorageReceipt({verified:true,data:{content:full,storage:{layout_version:1,instance_root:'x'.repeat(500)}}});assert.equal(fallback.data.content,full);assert.equal(fallback.data.storage,undefined);
 });

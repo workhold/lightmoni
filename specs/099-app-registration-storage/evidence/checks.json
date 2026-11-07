@@ -1,0 +1,11 @@
+{
+  "baseline": "05ca6ee601700008e09969a05088a8c91734e0fc",
+  "runtime_typecheck": "passed",
+  "web_typecheck": "passed",
+  "web_build": "passed",
+  "related_tests": {"total": 176, "passed": 174, "failed": 0, "skipped": 2},
+  "real_docker": {"server": "29.4.3", "passed": 1, "failed": 0, "persistent_data_preserved": true, "actual_bind_sources_checked": true},
+  "ui": {"report": "ui-report.json", "languages": ["zh-CN", "en-US"], "widths": [1440, 390], "page_errors": []},
+  "production_changed": false,
+  "remote_data_migrated_or_deleted": false
+}

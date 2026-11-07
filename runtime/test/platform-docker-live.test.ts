@@ -90,6 +90,11 @@ test(
       };
     let receipt = await f.run({ task: "workload.apply", application });
     assert.equal(receipt.state, "succeeded", JSON.stringify(receipt));
+    const storage = receipt.snapshot.operations.data.storage;
+    assert.equal(storage.instance_root, join(f.dataDir, 'operations/platform/workloads', f.instance));
+    assert.equal(storage.mounts.length, 3);
+    assert.equal(storage.mounts.find((m:any) => m.target === '/config').read_only, true);
+    assert.equal(storage.mounts.find((m:any) => m.target === '/data').source, join(storage.instance_root, 'data/2'));
     assert.ok(f.progressEvents.some(event=>event.snapshot?.operations?.progress?.phase==='starting_containers'));
     assert.ok(f.progressEvents.some(event=>event.snapshot?.operations?.progress?.phase==='checking_health'));
     let container = receipt.snapshot.operations.data.containers[0].id;

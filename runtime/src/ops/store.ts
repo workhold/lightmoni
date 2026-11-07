@@ -1,5 +1,6 @@
 import type { ReconciliationRegistry } from "../reconciliation/registry.js";
 import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
+import { blockingAgentJobSQL } from '../server/agent-job-fence.js';
 import {oneShotServices} from '../operations/workload-readiness.js';
 import {createImageSourcesSchema,imageSourcesFor,validateImageSourcesPayload} from './image-sources.js';
 import {validateInstanceRecoveryPayload} from './instance-recovery.js';
@@ -413,6 +414,10 @@ export class OperationsPlatformStore implements PlatformStore {
         )
       )
         fail(409, "platform_resource_busy");
+      if (r.kind === 'application' && this.deps.db.get(
+        `SELECT r.id FROM ops_platform_runs r LEFT JOIN agent_jobs j ON j.id=r.job_id
+         WHERE r.resource_id=? AND r.state='unknown' AND (j.id IS NULL OR j.state!='unknown' OR (${blockingAgentJobSQL(this.deps.db, 'j')}))`, key,
+      )) fail(409, 'platform_resource_busy');
       this.definition(r.kind).beforeDelete?.(r);
       const references = (value: any): boolean =>
         value === key ||

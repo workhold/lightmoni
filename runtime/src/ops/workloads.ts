@@ -3,6 +3,7 @@ import {publicWebsiteSpec} from './website-auth.js';
 import {registryCacheFor} from './registry-runtime.js';
 import {desiredJSON} from '../shared/desired-state.js';
 import {createClusterWorkloads} from './cluster-workloads.js';
+import {resourceStorage} from './storage.js';
 import {fail} from '../shared/http.js';
 import type {DomainController,PlatformOptions} from './types.js';
 
@@ -58,6 +59,11 @@ export function createWorkloadController(options: PlatformOptions & {ensureCerti
   deps.db.exec(`CREATE TABLE IF NOT EXISTS ops_platform_ports(agent_id TEXT NOT NULL,protocol TEXT NOT NULL,port INTEGER NOT NULL,instance_id TEXT NOT NULL,PRIMARY KEY(agent_id,protocol,port));
     CREATE TABLE IF NOT EXISTS ops_platform_nodes(agent_id TEXT PRIMARY KEY,node_json TEXT NOT NULL,last_seen TEXT NOT NULL);`);
   const workloads=createClusterWorkloads(options);
+  deps.router.get('/api/v1/ops/resources/:id/storage', ctx => {
+    deps.auth.requireAdmin(ctx);
+    ctx.res.setHeader('cache-control', 'no-store');
+    ctx.json(resourceStorage(store, ctx.params.id, Number(ctx.url.searchParams.get('offset') ?? 0)));
+  });
   store.register('application', {
     validatePayload(resource,config,agentID) {
       if(!config.image_cache)return;

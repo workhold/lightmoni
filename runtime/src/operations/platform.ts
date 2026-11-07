@@ -1,3 +1,4 @@
+import { instanceStoragePaths, observedMounts, gatewayStorage, fitStorageReceipt } from './storage.js';
 import { desiredHash, desiredJSON } from "../shared/desired-state.js";
 import {inspectRecoveryReview} from './instance-recovery-review.js';
 import {workloadContainersReady as ready} from './workload-readiness.js';
@@ -480,7 +481,7 @@ async function workloadSnapshot(
   instanceID: string,
   customHealth = false,
 ) {
-  const root = join(await privateRoot(context, 'platform'), 'workloads', instanceID);
+  const root = instanceStoragePaths(await privateRoot(context, 'platform'), 'workloads', instanceID).instance_root;
   const state = await readJSON<any>(join(root, 'state.json'), null);
   const manifest = state?.manifest ? await readJSON<any>(state.manifest, null) : null;
   const raw = await inventory(context, instanceID);
@@ -509,6 +510,7 @@ async function workloadSnapshot(
   }
   return {
     containers: summarize(raw),
+    storage: { layout_version: 1, instance_root: root, state_file: join(root, 'state.json'), ...observedMounts(raw) },
     stats,
     healthy: ready(raw, Object.keys(manifest?.services ?? {}).length || 1, manifest?.services, !customHealth),
     observed_at: context.now().toISOString(),
@@ -570,7 +572,7 @@ export async function renderManifest(
   app: OperationConfig,
   revision: number,
 ): Promise<Record<string, any>> {
-  const root = join(await privateRoot(context, "platform"), "workloads", id);
+  const root = instanceStoragePaths(await privateRoot(context, "platform"), "workloads", id).instance_root;
   await directory(root);
   const doc =
     app.mode === "compose"
@@ -713,7 +715,7 @@ async function workloadConfigurationMatches(context:OperationExecutionContext,id
         }
       }
     }
-    const root=join(await privateRoot(context,'platform'),'workloads',id);
+    const root=instanceStoragePaths(await privateRoot(context,'platform'),'workloads',id).instance_root;
     for(const [n,m] of app.mounts.entries())if(m.type==='config')for(const [name,body] of Object.entries(m.files??{})){
       const service=manifest.services[m.service??Object.keys(manifest.services)[0]];
       const volume=service?.volumes?.find((v:any)=>v.target===m.target&&v.type==='bind');if(!volume?.source)return false;
@@ -730,7 +732,7 @@ async function executeWorkload(
 ): Promise<OperationExecutionResult> {
   const c = payload.resource.config,
     id = safeID(c.instance_id),
-    root = join(await privateRoot(context, "platform"), "workloads", id);
+    root = instanceStoragePaths(await privateRoot(context, "platform"), "workloads", id).instance_root;
   await directory(root);
   const statePath = join(root, "state.json");
   const state = await readJSON<any>(statePath, null);
@@ -1483,7 +1485,7 @@ async function executeGateway(
   const c = payload.resource.config,
     id = safeID(c.instance_id),
     name = "lm-gateway-" + id,
-    root = join(await privateRoot(context, "platform"), "gateways", id);
+    root = instanceStoragePaths(await privateRoot(context, "platform"), "gateways", id).instance_root;
   await directory(root);
   const statePath = join(root, "state.json"),
     state = await readJSON<any>(statePath, null);
@@ -1513,6 +1515,7 @@ async function executeGateway(
         instance_id: id,
         running: existing?.State?.Running === true,
         present: !!existing,
+        storage: gatewayStorage(await privateRoot(context, "platform"), id, state, existing ? [existing] : []),
         healthy,
         ...(configuration_matches===undefined?{}:{configuration_matches}),
         digest: state?.digest ?? "",
@@ -1549,7 +1552,7 @@ async function executeGateway(
       throw Error("GATEWAY_REMOVE_NOT_VERIFIED");
     return {
       verified: true,
-      data: { instance_id: id, removed: true, stopped: true, healthy: false },
+      data: { instance_id: id, removed: true, stopped: true, healthy: false, storage: gatewayStorage(await privateRoot(context, "platform"), id, state, []) },
     };
   }
   if (c.task === "gateway.stop") {
@@ -1561,7 +1564,7 @@ async function executeGateway(
       throw Error("GATEWAY_STOP_NOT_VERIFIED");
     return {
       verified: true,
-      data: { instance_id: id, stopped: true, healthy: false },
+      data: { instance_id: id, stopped: true, healthy: false, storage: gatewayStorage(await privateRoot(context, "platform"), id, state, existing ? [existing] : []) },
     };
   }
   if (!existing?.State?.Running) {
@@ -1756,6 +1759,7 @@ async function executeGateway(
       verified: true,
       data: {
         instance_id: id,
+        storage: gatewayStorage(await privateRoot(context, "platform"), id, { digest, config: c }, [await gatewayContainer(context, id)]),
         digest,
         healthy: true,
         running: true,
@@ -1890,8 +1894,8 @@ export async function executePlatform(
       },
     };
   }
-  if (c.task.startsWith("workload.")) return executeWorkload(payload, context);
-  if (c.task.startsWith("gateway.")) return executeGateway(payload, context);
+  if (c.task.startsWith("workload.")) return fitStorageReceipt(await executeWorkload(payload, context));
+  if (c.task.startsWith("gateway.")) return fitStorageReceipt(await executeGateway(payload, context));
   if (c.task === "certificate.install") return installCertificate(c, context);
   if (c.task === "certificate.inspect") return inspectCertificate(c, context);
   if (c.task === "certificate.remove") return removeManagedCertificate(c, context);

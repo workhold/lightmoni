@@ -1,0 +1,19 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved_seq": 1753,
+  "readback_seq": 1753,
+  "saved": true,
+  "title_preserved": true,
+  "original_blocks": 941,
+  "original_blocks_order_content_and_native_diagrams_preserved": true,
+  "heading_id": "f52e7403-29e5-45d0-a7c3-67d13f8ee573",
+  "texts_verified": true,
+  "native_diagram": {
+    "id": "sdd099-storage-flow",
+    "nodes": 7,
+    "edges": 5,
+    "matches": true
+  },
+  "first_block_id": "97049d80-20e7-4b3b-8dad-f8fbd9105200",
+  "last_block_id": "sdd099-storage-flow"
+}
