@@ -1,41 +1,47 @@
 # 验收记录
 
-日期：2026-11-07。源码基线：GitHub origin/main `05ca6ee601700008e09969a05088a8c91734e0fc`，独立分支 `codex/099-app-registration-storage`。原工作区的 compose 与发行证据未改动。
+日期：2026-11-07。最终布局取代本 SDD 前版的旧目录清单。GitHub origin/main `05ca6ee601700008e09969a05088a8c91734e0fc`，独立分支 `codex/099-app-registration-storage`，沿用 PR129。原工作区的 compose 与发行证据未改动。
 
 ## 最终行为
 
-系统仓库不再因其系统身份而永久拒绝注销；确认全部实例已移除、关闭集群镜像复用并解除对外入口/网站等引用后可删除登记。旧 active 聚合不能覆盖已卸载的实例事实。仅停止、未核对 unknown、活动任务（包括网站拥有但操作应用实例的网关任务）仍阻塞。当前和启用发布版本中的手动/托管网站引用均受保护；停用且解除当前引用后，历史修订继续保留而不再永久阻塞。删除事务退役绑定、释放端口，保留修订、执行和远端数据。
-
-应用/网站详情新增宿主机存储清单，按机器、集群、实例显示最近 Agent 回执中的真实挂载与配置路径。网站明确完整 nginx.conf 与分组材料目录的关系；实际 Docker 卷位置来自 Mounts.Source。标准目录以实例 ID 隔离，现有配置摘要、初始化、数据及自定义目录原样保留。每页20个实例，含退役记录；旧 Agent/无新回执显示未观测，GET 不派发任务。字段白名单隔离秘密与其他网站分组；可选元数据超过原60 KiB结果预算时先截断/省略，避免把正常执行变为 unknown。
+- 已卸载应用允许删除登记，仍检查当前实例、活动/未知作业和资源引用；系统仓库解除真实依赖后允许注销。应用数据、修订和执行历史保留。
+- 应用默认目录为 `applications/<application_id>/instances/<instance_id>/`，配置、初始化、数据及私有清单在此之下；默认命名卷同时含应用与实例 ID，显式外部路径或卷保留覆盖语义。应用改名不搬目录，副本不意外共享数据。
+- 网站根为 `websites/<website_id>/`，版本包含独立 nginx.conf、SSL、鉴权哈希、认证探针、静态文件和私有元数据，current 指向当前版本。网关仅保留非秘密 include 索引与版本映射；更新一站不改写其他站版本。
+- 网站删除先停用路由并清理 DNS，逐宿主清除网关历史引用与归属网站目录，全部确认后注销。持久逐机进度跨重启、离线和重复请求保留；已知失败重试，unknown 先核对而不盲目重放。共享中心证书和应用数据保留。路径穿越、符号链接、归属不符、运行网关仍引用均拒绝清理。
+- 管理员可查看实际挂载、应用根和网站配置/SSL/鉴权/静态目录，以及逐机删除进度；202 不误报成功。无新版回执显示待检查/升级。签名布局作业需 `operations.platform.storage.v2`，旧执行器不能领取。
 
 ## 自动检查
 
-- Runtime 类型检查通过：`npm --prefix runtime run typecheck`。
-- Web 类型检查与构建通过：`npm --prefix web run typecheck`、`npm --prefix web run build`。仅有依赖包既有 module directive 提示。
-- 176 项相关测试：174通过、0失败、2跳过。包含 platform-clusters、platform-store、platform-executor、platform-api、platform-website-routing、managed-executor-jobs、privileged-executor-security、operations-executor。
-- 两项跳过是受额外环境条件控制的备份源限制与双容器 Agent 证书同步测试；不将其算作通过。
-- `git diff --check` 通过。
+Runtime 类型检查、Web 类型检查与构建、`git diff --check` 均通过。Web 构建只有依赖包既有 module directive 提示。
 
-复现命令（runtime目录）：
+相关测试244项：239通过、0失败、5跳过。复现命令（runtime 目录）：
 
 ```sh
-node --import tsx --test --test-concurrency=1 test/platform-clusters.test.ts test/platform-store.test.ts test/platform-executor.test.ts test/platform-api.test.ts test/platform-website-routing.test.ts test/managed-executor-jobs.test.ts test/privileged-executor-security.test.ts test/operations-executor.test.ts
+node --import tsx --test --test-concurrency=1 test/platform-*.test.ts test/instance-recovery-review.test.ts test/managed-executor-jobs.test.ts test/privileged-executor-security.test.ts test/operations-executor.test.ts
 ```
 
-## 真实 Docker 与页面
+5项跳过分别是受额外条件控制的备份源限制、双容器 Agent 证书同步，以及原有3项 opt-in Docker/OpenResty 测试，不将跳过算作通过。另运行本次新的 Linux Docker 验收如下。最终收紧归属检查、只读清理核对和恢复路径后，相关执行器/恢复用例23项再次全部通过。
 
-`LIGHTMONI_DOCKER_LIVE=1 node --import tsx --test --test-name-pattern='real Docker single-container' test/platform-docker-live.test.ts`：1通过、0失败。使用本机 Docker 29.4.3 临时实例；核对实际配置/初始化/数据挂载来源、RO属性，更新后配置改变，运行期初始化修改和业务数据保留，Compose 切换成功。临时容器和目录按测试清理，未操作生产业务。
+## 真实 Linux Docker 与页面
 
-`node web/src/app/ops/verify-storage-ui.mjs`：隔离HTTP夹具与实际Web渲染通过。覆盖应用卷路径、无回执提示、读取失败恢复、网站完整配置/分组目录、中英文、390px页面与抽屉无横向溢出。报告 `evidence/ui-report.json`，截图保存在忽略的 artifacts/screenshots 对应目录；已查看实际桌面与窄屏截图。该夹具不代表生产各宿主已回读。
+`runtime/test/storage-layout-live.mjs` 在明确 opt-in 的一次性 Linux 容器中运行，使用本机 Docker daemon、临时受管根及唯一资源 ID，不操作生产实例。运行前 `npm --prefix runtime run build`；镜像需包含 Node 与 Docker CLI/Compose，设置 `LIGHTMONI_STORAGE_LIVE=1`，使用 host 网络并挂载 Docker socket 与源码的同一绝对路径。
 
-当前运行环境是 macOS；未将需要 Linux host 网络的 OpenResty 真实网关用例描述为本轮通过。网站路径与分组契约由执行器/HTTP回归及页面验证。
+真实验证5组全部通过，报告 `evidence/storage-v2-live.json`：
+
+1. 应用 ID / 实例 ID 目录及真实 Docker 命名卷；初始化不覆盖，卸载后持久数据与卷保留。
+2. OpenResty 实际 include 独立网站版本，静态页面、TLS 和 Basic 鉴权可用，私钥0600，网关状态不包含秘密。
+3. `nginx -t` 通过但重载后健康验证失败时，恢复旧网关索引并等待旧版本验证，网站指针及另一个站服务正常。
+4. 更新网站A不重写B；非法配置预检失败保留活动版本。
+5. 活动引用阻止清理；撤下后删除网站目录和历史索引引用，SSL/auth/static 随站点清理，其他网站及应用数据保留，重复删除幂等。临时容器、卷和目录最终清理。
+
+`node web/src/app/ops/verify-storage-ui.mjs`：隔离HTTP夹具与实际Web渲染通过。覆盖真实格式的应用/网站路径、无回执、读取失败、202离线删除进度、中英文、1440与390px，页面/抽屉无横向溢出、无运行时错误。报告 `evidence/ui-report.json`，截图在忽略的 artifacts/screenshots 对应目录，已实际查看桌面与窄屏画面。夹具不代表生产主机已部署新版本。
 
 ## 架构同步
 
-适用：新增存储只读清单与 Agent 回执元数据、登记/历史/持久业务存储边界。仓库 `docs/system-design.md` 第99节；Doca [LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 同名原生章节和流程图已保存并完整回读。
+适用：目录归属、只读容器挂载、网站版本/删除控制路径、回执与能力协议变化。仓库 `docs/system-design.md` 第99节，与 Doca [LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 原生章节和流程图同步。
 
-首次插入因工具将编号标题转成列表并更换ID，使随后段落出现在文首；已按真实ID修复标题属性与顺序，再完整回读确认。最终 seq 1753，原文标题保持，原有941块的顺序、全部内容及原生图完全一致，新章节文字和7节点/5连线图核对通过。证据 `evidence/doca-readback.json`；不将首次保存回执单独视为同步成功。
+保存 seq1756 后以最新版本完整回读19页，955个原生块；7段目标文字、11节点/8连线图与预期一致，其他947个块的内容、样式、原生图及顺序完全不变，标题保留。包含并保留其他并行新增的仓库管理内容。证据 `evidence/doca-readback.json`。
 
 ## 兼容及交付范围
 
-不迁移既有业务数据、不改变 Compose 项目/挂载布局或权限。storage 是可选回执字段；中心可兼容旧 Agent，实际清单需要部署本次 Agent 版本并取得新检查回执。仅停止的实例从此前允许删登记改为要求先卸载，界面返回明确原因。删除系统仓库仍须解除真实依赖。未发布镜像、未部署生产、未合并主干。
+按用户确认，项目尚未上线，直接采用layout v2，不做旧目录迁移、双布局运行或旧文件删除。新布局作业要求新版执行器，旧存储回执在清单中为null。业务网站删除会清理其归属目录；应用卸载/登记删除保留数据。仅提交功能分支及更新 PR；未合并、发布镜像或部署生产。

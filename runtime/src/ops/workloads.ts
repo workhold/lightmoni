@@ -1,3 +1,4 @@
+import {createWebsiteDeletionSchema,websiteDeleting} from './website-deletions.js';
 import {prepareApplicationYAML,stripComposeExtensions} from './application-yaml.js';
 import {publicWebsiteSpec} from './website-auth.js';
 import {registryCacheFor} from './registry-runtime.js';
@@ -58,6 +59,7 @@ export function createWorkloadController(options: PlatformOptions & {ensureCerti
   const {store,deps}=options;
   deps.db.exec(`CREATE TABLE IF NOT EXISTS ops_platform_ports(agent_id TEXT NOT NULL,protocol TEXT NOT NULL,port INTEGER NOT NULL,instance_id TEXT NOT NULL,PRIMARY KEY(agent_id,protocol,port));
     CREATE TABLE IF NOT EXISTS ops_platform_nodes(agent_id TEXT PRIMARY KEY,node_json TEXT NOT NULL,last_seen TEXT NOT NULL);`);
+  createWebsiteDeletionSchema(store);
   const workloads=createClusterWorkloads(options);
   deps.router.get('/api/v1/ops/resources/:id/storage', ctx => {
     deps.auth.requireAdmin(ctx);
@@ -81,7 +83,17 @@ export function createWorkloadController(options: PlatformOptions & {ensureCerti
   });
   store.register('website', {
     publicSpec:publicWebsiteSpec,
-    validate:workloads.validateWebsite,
+    validate(spec,previous,context) {
+      if(previous&&context?.id&&websiteDeleting(store,context.id))fail(409,'website_deletion_in_progress');
+      return workloads.validateWebsite(spec,previous,context);
+    },
+    validatePayload(resource,config,agentID) {
+      if(!config.task?.startsWith('website.'))return;
+      const row=deps.db.get<any>('SELECT * FROM ops_website_deletions WHERE website_id=?',resource.id);
+      const target=row&&JSON.parse(row.targets_json).find((t:any)=>t.machine_id===config.cleanup_machine_id);
+      const host=target&&deps.db.get<any>('SELECT agent_id FROM managed_machines WHERE id=?',target.machine_id);
+      if(!row||row.id!==config.deletion_id||row.state==='succeeded'||config.website_id!==resource.id||!target||target.attempt!==config.cleanup_attempt||target.agent_id!==agentID||host?.agent_id!==agentID)fail(409,'website_cleanup_target_changed');
+    },
     afterSave:workloads.afterSaveWebsite,
     afterDelete:workloads.afterDeleteWebsite,
     beforeDelete:workloads.beforeDeleteWebsite,

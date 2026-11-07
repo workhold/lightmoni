@@ -1,3 +1,4 @@
+import {websiteDeleting} from './website-deletions.js';
 import { blockingAgentJobSQL } from "../server/agent-job-fence.js";
 import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
 import {createAvailability, minimumAvailable, graceMilliseconds} from './availability.js';
@@ -1537,6 +1538,7 @@ export function createClusterWorkloads(
       );
   }
   function beforeDeleteWebsite(r: PlatformResource) {
+    if(db.get('SELECT website_id FROM ops_website_hosts WHERE website_id=?',r.id)&&!db.get("SELECT website_id FROM ops_website_deletions WHERE website_id=? AND state='cleaned'",r.id))fail(409,'website_cleanup_required');
     if (
       db.get<Row>(
         "SELECT website_id FROM ops_private_registry_settings WHERE id=1",
@@ -1768,11 +1770,15 @@ export function createClusterWorkloads(
         task,
         instance_id: i.id,
         modern_instance: true,
+        storage_layout: 2,
+        application_id: i.owner_id,
         cluster_id: i.cluster_id,
         generation,
       },
       actor,
     );
+    if(task==='gateway.apply')for(const websiteID of Object.keys(config.website_revisions??{}))
+      db.run('INSERT INTO ops_website_hosts VALUES(?,?,?,?,?,?) ON CONFLICT(website_id,machine_id) DO UPDATE SET agent_id=excluded.agent_id,instance_id=excluded.instance_id,cluster_id=excluded.cluster_id,application_id=excluded.application_id',websiteID,i.machine_id,i.agent_id,i.id,i.cluster_id,i.owner_id);
     db.run(
       "UPDATE ops_cluster_instances SET current_run_id=?,state=?,desired_generation=?,updated_at=? WHERE id=?",
       run.id,
@@ -1906,8 +1912,8 @@ export function createClusterWorkloads(
       if (!d || !d.desired_revision) continue;
       const site = desired(current, cid);
       revisions[site.id] = site.revision;
-      enabled[site.id] = !!d.enabled;
-      if (d.enabled)
+      enabled[site.id] = !!d.enabled && !websiteDeleting(store,site.id);
+      if (enabled[site.id])
         sites.push(...siteBundle(site, cid, false, gateway.machine_id));
     }
     return {
@@ -2550,6 +2556,8 @@ export function createClusterWorkloads(
                       "task",
                       "instance_id",
                       "modern_instance",
+                      "storage_layout",
+                      "application_id",
                       "generation",
                       "image_sources",
                       "force_recreate",
@@ -3014,7 +3022,8 @@ export function createClusterWorkloads(
           ? "application_not_deployed_in_cluster"
           : "website_cluster_mismatch",
       );
-    if (r.kind === "website") followManagedWebsite(r);
+    if (r.kind === 'website'&&websiteDeleting(store,r.id)&&!['disable','inspect'].includes(action))fail(409,'website_deletion_in_progress');
+    if (r.kind === "website"&&!websiteDeleting(store,r.id)) followManagedWebsite(r);
     const selected = input.cluster_id ? [input.cluster_id] : ids;
     if (action === "endpoints") {
       if (!input.cluster_id) fail(400, "cluster_required");
@@ -3224,7 +3233,7 @@ export function createClusterWorkloads(
       if (r.kind === "application" && r.spec.role === "openresty")
         startGatewayDNS(r);
       if (r.kind === "website") {
-        followManagedWebsite(r);
+        if(!websiteDeleting(store,r.id))followManagedWebsite(r);
         for (const d of db.all<Row>(
           "SELECT cluster_id FROM ops_platform_website_deployments WHERE website_id=? AND desired_revision>0",
           r.id,

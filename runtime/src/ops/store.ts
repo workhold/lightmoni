@@ -569,6 +569,7 @@ export class OperationsPlatformStore implements PlatformStore {
         ],
         capabilities: [
           "operations.platform",
+          ...(config.storage_layout === 2 ? ["operations.platform.storage.v2"] : []),
           ...(config.health ? ['operations.platform.readiness.v1'] : []),
           ...(config.auth_required ||
           config.sites?.some(

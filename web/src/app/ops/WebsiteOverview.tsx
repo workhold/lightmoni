@@ -27,7 +27,7 @@ export default function WebsiteOverview({websites,resources,busy,onEdit,onAction
     const backends:string[]=site.spec.routing_mode==='managed'?[service?.spec.service_name??service?.name??site.spec.service_application_id].filter(Boolean):[...new Set<string>(targets.flatMap((target:any)=>target.target==='application'?[resources.find(r=>r.id===target.application_id)?.spec.service_name??target.application_id]:(target.upstreams??[]).map((u:any)=>typeof u==='string'?u:u.url)))];
     const externalEntry=entry?.spec.deployments?.some((d:any)=>ids.includes(d.cluster_id)&&!d.gateway_dns_zone_id);
     return <article className="lm-website-item" key={site.id} aria-label={site.name}>
-      <div className="lm-website-identity"><Button type="link" className="lm-ops-resource-name" onClick={()=>onDetails(site)}>{site.name}</Button>
+      <div className="lm-website-identity">{site.status.deletion&&<Tag color="warning">{t('删除中','Deleting')} · {site.status.deletion.state}</Tag>}<Button type="link" className="lm-ops-resource-name" onClick={()=>onDetails(site)}>{site.name}</Button>
         <Button type="link" size="small" onClick={()=>navigate('/websites/'+site.id+'/monitoring')}>{t('监控与访问日志','Monitoring & access logs')}</Button>
         <div className="lm-website-domains">{(site.spec.bindings??[]).flatMap((b:any)=>b.domains??[]).map((domain:string)=><span key={domain}>{domain}</span>)}</div>
         <div className="lm-website-backend"><span>{site.spec.mode==='static'?t('静态文件','Static files'):site.spec.routing_mode==='managed'?t('托管服务','Managed service'):t('手动后端','Manual backend')}</span><strong title={backends.join(' · ')}>{backends.join(' · ')||'—'}{site.spec.routing_mode==='managed'&&site.spec.service_port_name?':'+site.spec.service_port_name:''}</strong></div>
@@ -50,7 +50,7 @@ export default function WebsiteOverview({websites,resources,busy,onEdit,onAction
           {key:'disable',label:t('停用网站','Disable website'),disabled:!versions.length||publication.key==='disabled'},
           {type:'divider'}, {key:'delete',label:t('删除登记','Delete registration'),danger:true},
         ],onClick:({key})=>{
-          if(key==='details')onDetails(site);else if(key==='traffic')onTraffic(site);else if(key==='delete')modal.confirm({title:t('删除此网站登记？','Delete this website registration?'),content:t('已发布的网站需要先停用并清理解析；后端会核对依赖。','Published websites must be disabled and DNS cleaned up first. The server checks dependencies.'),okText:t('删除登记','Delete registration'),cancelText:t('取消','Cancel'),okButtonProps:{danger:true},onOk:()=>onRemove(site)});else onAction(site,key);
+          if(key==='details')onDetails(site);else if(key==='traffic')onTraffic(site);else if(key==='delete')modal.confirm({title:t('删除此网站登记？','Delete this website registration?'),content:t('将撤下网站并删除各宿主机的网站配置、SSL 副本、鉴权和静态文件；共享证书资源保留。离线机器会等待清理。','Withdraw the website and delete its host configuration, SSL copies, authentication and static files. Shared certificates are retained; offline hosts remain pending.'),okText:t('删除登记','Delete registration'),cancelText:t('取消','Cancel'),okButtonProps:{danger:true},onOk:()=>onRemove(site)});else onAction(site,key);
         }}}><Button size="small" type="text" disabled={busy} aria-label={t('更多操作','More actions')+' · '+site.name}>{t('更多','More')}<DownOutlined aria-hidden/></Button></Dropdown>
       </div>
     </article>;

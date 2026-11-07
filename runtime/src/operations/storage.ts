@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { safeID } from './website-files.js';
+import { safeID, hash } from './website-files.js';
 import type { OperationExecutionResult } from './types.js';
 
 export const MANAGED_DATA_ROOT = '/var/lib/lightmoni-managed';
@@ -18,11 +18,13 @@ export function fitStorageReceipt(result: OperationExecutionResult) {
   return result;
 }
 
-/** Preserve the deployed layout: business storage belongs to the stable instance,
- * never to the mutable display name or to the Agent installation identity. */
-export function instanceStoragePaths(platformRoot: string, family: 'workloads'|'gateways', id: string) {
-  const root = join(platformRoot, family, safeID(id));
-  return { instance_root: root, state_file: join(root, 'state.json') };
+/** Business storage belongs to stable application and instance IDs,
+ * independently of display names and Agent installation identity. */
+export function instanceStoragePaths(platformRoot: string, family: 'workloads'|'gateways', id: string, applicationID = id) {
+  const root = family === 'workloads'
+    ? join(platformRoot, 'applications', safeID(applicationID), 'instances', safeID(id))
+    : join(platformRoot, family, safeID(id));
+  return { ...(family === 'workloads' ? { application_root: join(platformRoot, 'applications', safeID(applicationID)) } : {}), instance_root: root, state_file: join(root, 'state.json') };
 }
 
 /** Docker is the authority for bind sources and named-volume data roots. */
@@ -42,22 +44,39 @@ export function observedMounts(containers: any[]) {
   return { mounts, mounts_truncated: truncated };
 }
 
+export function websiteGroups(config: any): Map<string, any[]> {
+  const groups = new Map<string, any[]>();
+  for (const site of config.sites ?? []) {
+    const id = safeID(site.website_id ?? site.id);
+    groups.set(id, [...(groups.get(id) ?? []), site]);
+  }
+  return groups;
+}
+export function websiteDigest(config: any, sites: any[]): string {
+  return hash(JSON.stringify({http_port:config.http_port ?? 80,https_port:config.https_port ?? 443,sites}));
+}
+export function websiteStoragePaths(platformRoot: string, websiteID: string, digest?: string) {
+  const root = join(platformRoot, 'websites', safeID(websiteID));
+  if (digest !== undefined && !/^[a-f0-9]{64}$/.test(digest)) throw Error('INVALID_WEBSITE_VERSION');
+  return { website_id: websiteID, root, current: join(root, 'current'),
+    version_root: digest ? join(root, 'versions', digest) : null,
+    config_file: digest ? join(root, 'versions', digest, 'nginx.conf') : null };
+}
 export function gatewayStorage(platformRoot: string, id: string, state: any, containers: any[]) {
   const paths = instanceStoragePaths(platformRoot, 'gateways', id);
-  const version = typeof state?.digest === 'string' && /^[a-f0-9]{64}$/.test(state.digest)
-    ? join(paths.instance_root, 'versions', state.digest) : null;
   const sites: Record<string, unknown>[] = [];
   let bytes = 0;
-  if (version) for (const s of state.config?.sites ?? []) {
-    const root = join(version, 'sites', safeID(s.id));
-    const row = { website_id: safeID(s.website_id ?? s.id), fragment_id: s.id, root,
-      public_dir: s.mode === 'static' ? join(root, 'public') : null,
-      certificate_dir: s.certificate ? root : null };
+  for (const [websiteID,digest] of Object.entries<string>({...state?.retained_website_versions,...state?.website_versions})) {
+    const row = {...websiteStoragePaths(platformRoot, websiteID, digest), active:!!state?.website_versions?.[websiteID],
+      public_dir: join(platformRoot,'websites',websiteID,'versions',digest,'public'),
+      certificate_dir: join(platformRoot,'websites',websiteID,'versions',digest,'ssl'),
+      auth_dir: join(platformRoot,'websites',websiteID,'versions',digest,'auth')};
     bytes += Buffer.byteLength(JSON.stringify(row));
     if (sites.length >= 100 || bytes > 8192) break;
     sites.push(row);
   }
-  return { layout_version: 1, ...paths, current: version ? join(paths.instance_root, 'current') : null,
-    config_file: version ? join(paths.instance_root, 'current', 'nginx.conf') : null, version_root: version,
-    ...observedMounts(containers), sites, sites_truncated: (state?.config?.sites?.length ?? 0) > sites.length };
+  const version = state?.digest && /^[a-f0-9]{64}$/.test(state.digest) ? join(paths.instance_root,'versions',state.digest) : null;
+  return { layout_version: 2, ...paths, current: version ? join(paths.instance_root,'current') : null,
+    config_file: version ? join(paths.instance_root,'current','nginx.conf') : null, version_root: version,
+    ...observedMounts(containers), sites, sites_truncated:Object.keys({...state?.retained_website_versions,...state?.website_versions}).length > sites.length };
 }

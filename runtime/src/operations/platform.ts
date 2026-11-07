@@ -1,4 +1,5 @@
-import { instanceStoragePaths, observedMounts, gatewayStorage, fitStorageReceipt } from './storage.js';
+import { ownedGateway, stageWebsites, loadGatewayState, gatewayIdentity, activateWebsitePointers, restoreWebsitePointers, websiteFilesMatch, removeWebsite, inspectWebsiteRemoval } from './website-storage.js';
+import { instanceStoragePaths, observedMounts, gatewayStorage, fitStorageReceipt, websiteGroups, websiteDigest, websiteStoragePaths } from './storage.js';
 import { desiredHash, desiredJSON } from "../shared/desired-state.js";
 import {inspectRecoveryReview} from './instance-recovery-review.js';
 import {workloadContainersReady as ready} from './workload-readiness.js';
@@ -17,10 +18,8 @@ import {
 import { join, dirname, resolve, posix } from "node:path";
 import { createConnection, isIP } from "node:net";
 import { availablePort } from "./host-ports.js";
-import {randomBytes} from "node:crypto";
-import {hashSync} from "bcryptjs";
 import {authMaterial,authScopes} from "./basic-auth.js";
-import { X509Certificate } from "node:crypto";
+import { X509Certificate, randomBytes } from "node:crypto";
 import { cpus, freemem, totalmem, loadavg, networkInterfaces } from "node:os";
 import { parse as parseYAML } from "yaml";
 import type {
@@ -53,6 +52,7 @@ import {
 
 const INSTANCE_LABEL = "io.lightmoni.platform.instance";
 const OWNER_LABEL = "io.lightmoni.platform.owner";
+const APPLICATION_LABEL="io.lightmoni.platform.application";
 const TASKS = [
   "node.inspect",
   "instance.recovery.inspect",
@@ -66,6 +66,8 @@ const TASKS = [
   "gateway.stop",
   "gateway.remove",
   "gateway.logs",
+  "website.remove",
+  "website.inspect",
   "certificate.install",
   "certificate.inspect",
   "certificate.remove",
@@ -382,6 +384,8 @@ export const platformDefinition: OperationDefinition = {
     if(c.refresh_images!==undefined&&typeof c.refresh_images!=='boolean')reject('INVALID_IMAGE_REFRESH');
     if (['workload.apply','gateway.apply'].includes(c.task)) {if(c.image_cache)cachePolicy(c.image_cache);if(c.image_sources)imageSourcePolicy(c.image_sources);}
     if(c.task==='instance.recovery.inspect')safeID(c.instance_id);
+    if(c.application_id!==undefined)safeID(c.application_id);
+    if(c.task.startsWith('website.'))safeID(c.website_id);
     return structuredClone(c);
   },
   publicConfig(c) {
@@ -438,6 +442,7 @@ const composeArgs = (id: string, file: string) => [
 async function inventory(
   context: OperationExecutionContext,
   instanceID: string,
+  applicationID?: string,
 ): Promise<any[]> {
   const answer = await context.command(
     "docker",
@@ -459,7 +464,7 @@ async function inventory(
   );
   if (!Array.isArray(result)) reject("INVALID_DOCKER_INVENTORY");
   for (const c of result)
-    if (c.Config?.Labels?.[INSTANCE_LABEL] !== instanceID)
+    if (c.Config?.Labels?.[INSTANCE_LABEL] !== instanceID || c.Config?.Labels?.[OWNER_LABEL] !== "lightmoni" || applicationID && c.Config?.Labels?.[APPLICATION_LABEL] !== applicationID)
       reject("WORKLOAD_OWNERSHIP_REQUIRED");
   return result;
 }
@@ -480,11 +485,12 @@ async function workloadSnapshot(
   context: OperationExecutionContext,
   instanceID: string,
   customHealth = false,
+  applicationID = instanceID,
 ) {
-  const root = instanceStoragePaths(await privateRoot(context, 'platform'), 'workloads', instanceID).instance_root;
+  const root = instanceStoragePaths(await privateRoot(context, 'platform'), 'workloads', instanceID, applicationID).instance_root;
   const state = await readJSON<any>(join(root, 'state.json'), null);
   const manifest = state?.manifest ? await readJSON<any>(state.manifest, null) : null;
-  const raw = await inventory(context, instanceID);
+  const raw = await inventory(context, instanceID, applicationID);
   let stats: any[] = [];
   if (raw.some((c) => c.State?.Running)) {
     try {
@@ -510,7 +516,7 @@ async function workloadSnapshot(
   }
   return {
     containers: summarize(raw),
-    storage: { layout_version: 1, instance_root: root, state_file: join(root, 'state.json'), ...observedMounts(raw) },
+    storage: { layout_version: 2, application_root: join(root,'../..'), instance_root: root, state_file: join(root, 'state.json'), ...observedMounts(raw) },
     stats,
     healthy: ready(raw, Object.keys(manifest?.services ?? {}).length || 1, manifest?.services, !customHealth),
     observed_at: context.now().toISOString(),
@@ -571,8 +577,9 @@ export async function renderManifest(
   id: string,
   app: OperationConfig,
   revision: number,
+  applicationID = id,
 ): Promise<Record<string, any>> {
-  const root = instanceStoragePaths(await privateRoot(context, "platform"), "workloads", id).instance_root;
+  const root = instanceStoragePaths(await privateRoot(context, "platform"), "workloads", id, applicationID).instance_root;
   await directory(root);
   const doc =
     app.mode === "compose"
@@ -629,6 +636,7 @@ export async function renderManifest(
           )
         : (s.labels ?? {})),
       [INSTANCE_LABEL]: id,
+      [APPLICATION_LABEL]: safeID(applicationID),
       [OWNER_LABEL]: "lightmoni",
     };
     if (app.cpu) s.cpus = app.cpu;
@@ -666,6 +674,10 @@ export async function renderManifest(
       read_only: m.read_only,
     });
   }
+  for (const [name, value] of Object.entries<any>(doc.volumes ?? {})) {
+    const definition=doc.volumes[name]=value??{};
+    if (!definition.external && !definition.name) definition.name = 'lm-' + safeID(applicationID) + '-' + safeID(id) + '-' + name;
+  }
   // Compose interpolation must never read the Agent process environment. Container shell variables remain literal here.
   const literal = (v: any): any =>
     typeof v === "string"
@@ -680,12 +692,12 @@ export async function renderManifest(
   return literal(doc);
 }
 /** Inspect owned live Docker settings and managed config files, not just state.json. */
-async function workloadConfigurationMatches(context:OperationExecutionContext,id:string,app:any,state:any) {
+async function workloadConfigurationMatches(context:OperationExecutionContext,id:string,app:any,state:any,applicationID:string) {
   try {
     if(!state?.manifest || state.configuration_hash!==desiredHash(app))return false;
     const manifest=await readJSON<any>(state.manifest,null);
     if(!manifest || hash(JSON.stringify(manifest))!==state.digest)return false;
-    const containers=await inventory(context,id), services=manifest.services;
+    const containers=await inventory(context,id,applicationID), services=manifest.services;
     if(!containers.length)return false;
     const plain=(v:any)=>typeof v==='string'?v.replaceAll('$$','$'):v;
     for(const [name,service] of Object.entries<any>(services)) {
@@ -715,7 +727,6 @@ async function workloadConfigurationMatches(context:OperationExecutionContext,id
         }
       }
     }
-    const root=instanceStoragePaths(await privateRoot(context,'platform'),'workloads',id).instance_root;
     for(const [n,m] of app.mounts.entries())if(m.type==='config')for(const [name,body] of Object.entries(m.files??{})){
       const service=manifest.services[m.service??Object.keys(manifest.services)[0]];
       const volume=service?.volumes?.find((v:any)=>v.target===m.target&&v.type==='bind');if(!volume?.source)return false;
@@ -732,22 +743,24 @@ async function executeWorkload(
 ): Promise<OperationExecutionResult> {
   const c = payload.resource.config,
     id = safeID(c.instance_id),
-    root = instanceStoragePaths(await privateRoot(context, "platform"), "workloads", id).instance_root;
+    applicationID = safeID(c.application_id ?? payload.resource.id),
+    root = instanceStoragePaths(await privateRoot(context, "platform"), "workloads", id, applicationID).instance_root;
+  if(c.application_id!==undefined&&c.application_id!==payload.resource.id)reject('APPLICATION_IDENTITY_MISMATCH');
   await directory(root);
   const statePath = join(root, "state.json");
   const state = await readJSON<any>(statePath, null);
   if (c.task === "workload.inspect") {
-    const snapshot = await workloadSnapshot(context, id, !!c.health);
+    const snapshot = await workloadSnapshot(context, id, !!c.health, applicationID);
     snapshot.healthy = snapshot.healthy && (await checkReadiness(c, context));
     let configuration_matches: boolean | undefined;
     if(c.application) {
-      configuration_matches=await workloadConfigurationMatches(context,id,normalizeApplication(c.application),state);
+      configuration_matches=await workloadConfigurationMatches(context,id,normalizeApplication(c.application),state,applicationID);
       snapshot.healthy = snapshot.healthy && configuration_matches;
     }
     return { verified: true, data: { instance_id: id, ...snapshot, ...(configuration_matches===undefined?{}:{configuration_matches}) } };
   }
   if (c.task === "workload.logs") {
-    const cs = await inventory(context, id);
+    const cs = await inventory(context, id, applicationID);
     const container = c.container_id
       ? cs.find((x) => x.Id === c.container_id)
       : cs[0];
@@ -777,7 +790,7 @@ async function executeWorkload(
   if (c.task === "workload.stop" || c.task === "workload.remove") {
     let before: any[];
     try {
-      before = await inventory(context, id);
+      before = await inventory(context, id, applicationID);
     } catch (error) {
       if (error instanceof OperationRejectedError) throw error;
       throw Object.assign(new OperationRejectedError("DOCKER_PREREQUISITE_FAILED"), {diagnosticCode: installCause(error)});
@@ -796,7 +809,7 @@ async function executeWorkload(
         { timeoutMs: 60000 },
       );
     }
-    const after = await inventory(context, id);
+    const after = await inventory(context, id, applicationID);
     const okay =
       c.task === "workload.stop"
         ? after.every((x) => !x.State?.Running)
@@ -809,7 +822,7 @@ async function executeWorkload(
         instance_id: id,
         stopped: true,
         removed: c.task === "workload.remove",
-        ...(await workloadSnapshot(context, id)),
+        ...(await workloadSnapshot(context, id, false, applicationID)),
       },
     };
   }
@@ -819,6 +832,7 @@ async function executeWorkload(
       id,
       app,
       payload.resource.revision,
+      applicationID,
     );
   const imageSources=await preparePlatformImages(manifest,c,root,context);
   const digest = hash(JSON.stringify(manifest)),
@@ -829,7 +843,7 @@ async function executeWorkload(
   let prior: any[];
   await context.progress?.("checking_docker");
   try {
-    prior = await inventory(context, id);
+    prior = await inventory(context, id, applicationID);
   } catch (error) {
     if (error instanceof OperationRejectedError) throw error;
     throw Object.assign(new OperationRejectedError("DOCKER_PREREQUISITE_FAILED"), {diagnosticCode: installCause(error)});
@@ -876,7 +890,7 @@ async function executeWorkload(
     const readinessDeadline = Date.now() + 300000;
     while (Date.now() < readinessDeadline) {
       context.signal.throwIfAborted();
-      const cs = await inventory(context, id);
+      const cs = await inventory(context, id, applicationID);
       if (ready(cs, Object.keys(manifest.services).length, manifest.services, !c.health) && await checkReadiness(c, context)) {
         healthy = true;
         break;
@@ -888,7 +902,8 @@ async function executeWorkload(
     await atomicFile(
       statePath,
       JSON.stringify({
-        version: 1,
+        version: 2,
+        application_id: applicationID,
         instance_id: id,
         resource_id: payload.resource.id,
         revision: payload.resource.revision,
@@ -905,7 +920,7 @@ async function executeWorkload(
         instance_id: id,
         revision: payload.resource.revision,
         digest,
-        ...(await workloadSnapshot(context, id, !!c.health)),
+        ...(await workloadSnapshot(context, id, !!c.health, applicationID)),
         image_sources:imageSources,
       },
     };
@@ -926,7 +941,7 @@ async function executeWorkload(
           ],
           { timeoutMs: 120000 },
         );
-        if (!ready(await inventory(context, id), prior.length, (await readJSON<any>(state.manifest, null))?.services))
+        if (!ready(await inventory(context, id, applicationID), prior.length, (await readJSON<any>(state.manifest, null))?.services))
           throw Error("RESTORE_NOT_HEALTHY");
       } else {
         await context.command(
@@ -940,7 +955,7 @@ async function executeWorkload(
           ],
           { timeoutMs: 30000 },
         );
-        if ((await inventory(context, id)).length)
+        if ((await inventory(context, id, applicationID)).length)
           throw Error("REMOVE_NOT_VERIFIED");
       }
     } catch {
@@ -1271,24 +1286,8 @@ async function inspectHook(
   };
 }
 
-export function renderGateway(c: any, digest: string, preview = false): string {
-  const base = "/etc/lightmoni/versions/" + digest,
-    sites = c.sites ?? [],
-    lines = [
-      "worker_processes auto;",
-      "pid /tmp/lightmoni-nginx.pid;",
-      "error_log /dev/stderr warn;",
-      "events { worker_connections 2048; }",
-      "http {",
-      "  include /usr/local/openresty/nginx/conf/mime.types;",
-      "  default_type application/octet-stream;",
-      `  log_format lightmoni_application escape=json '{"lightmoni_access":true,"website_id":"$lightmoni_website_id","host":"$host","method":"$request_method","uri":"$uri","status":$status,"request_time":$request_time,"upstream_addr":"$upstream_addr"}';`,
-      '  map $server_name $lightmoni_website_id { default ""; }',
-      "  access_log /dev/stdout lightmoni_application;",
-      "  server_tokens off;",
-      '  map $http_upgrade $lightmoni_connection_upgrade { default upgrade; "" ""; }',
-      `  server { listen ${port(c.http_port ?? 80)} default_server; server_name _; location = /.well-known/lightmoni-gateway { default_type text/plain; return 200 ${quote(digest)}; } location / { return 404; } }`,
-    ];
+export function renderWebsiteConfig(c: any, websiteID: string, sites: any[], preview = false): string {
+  const digest=websiteDigest(c,sites),base='/etc/lightmoni-websites/'+safeID(websiteID)+'/versions/'+digest,lines:string[]=[];
   for (const site of sites) {
     const siteID = safeID(site.id),
       websiteID = safeID(site.website_id ?? site.id),
@@ -1311,7 +1310,7 @@ export function renderGateway(c: any, digest: string, preview = false): string {
             },
           ]);
     const routes = normalizeLocations(rawRoutes);
-    const auth=authMaterial(site.auth), authBase=base+"/sites/"+siteID+"/auth";
+    const auth=authMaterial(site.auth), authBase=base+"/auth/"+siteID;
     if(authScopes(site).length&&!site.certificate&&!preview)reject('WEBSITE_AUTH_REQUIRES_TLS');
     if(auth.mode==='basic'&&settings.server_snippet)reject("WEBSITE_AUTH_UNSAFE_COMBINATION");
     const rendered = renderLocations(routes, siteID, settings,{auth,base:authBase});
@@ -1337,8 +1336,8 @@ export function renderGateway(c: any, digest: string, preview = false): string {
         `    listen ${port(c.https_port ?? 443)} ssl;`,
         `    ssl_protocols ${settings.tls_protocols.join(" ")};`,
         ...(settings.http2 ? ["    http2 on;"] : []),
-        `    ssl_certificate ${quote(base + "/sites/" + siteID + "/fullchain.pem")};`,
-        `    ssl_certificate_key ${quote(base + "/sites/" + siteID + "/privkey.pem")};`,
+        `    ssl_certificate ${quote(base + "/ssl/" + siteID + "/fullchain.pem")};`,
+        `    ssl_certificate_key ${quote(base + "/ssl/" + siteID + "/privkey.pem")};`,
       );
     }
     lines.push(...renderNginxOptions(settings).map(line => line === 'access_log /dev/stdout;' ? 'access_log /dev/stdout lightmoni_application;' : line));
@@ -1353,7 +1352,7 @@ export function renderGateway(c: any, digest: string, preview = false): string {
           rendered.locations.splice(++n, 0, redirect);
     if (site.mode === "static") {
       lines.push(
-        `    root ${quote(base + "/sites/" + siteID + "/public")};`,
+        `    root ${quote(base + "/public/" + siteID)};`,
         `    index ${settings.index.join(" ")};`,
         `    autoindex ${settings.autoindex ? "on" : "off"};`,
         ...(settings.expires_seconds
@@ -1377,7 +1376,34 @@ export function renderGateway(c: any, digest: string, preview = false): string {
     lines.push(...rendered.locations);
     lines.push("  }");
   }
-  return lines.concat("}").join("\n") + "\n";
+  return lines.join('\n')+'\n';
+}
+export function renderGateway(c: any, digest: string, preview = false, indexOnly = false): string {
+  const base = "/etc/lightmoni/versions/" + digest,
+    sites = c.sites ?? [],
+    lines = [
+      "worker_processes auto;",
+      "pid /tmp/lightmoni-nginx.pid;",
+      "error_log /dev/stderr warn;",
+      "events { worker_connections 2048; }",
+      "http {",
+      "  include /usr/local/openresty/nginx/conf/mime.types;",
+      "  default_type application/octet-stream;",
+      `  log_format lightmoni_application escape=json '{"lightmoni_access":true,"website_id":"$lightmoni_website_id","host":"$host","method":"$request_method","uri":"$uri","status":$status,"request_time":$request_time,"upstream_addr":"$upstream_addr"}';`,
+      '  map $server_name $lightmoni_website_id { default ""; }',
+      "  access_log /dev/stdout lightmoni_application;",
+      "  server_tokens off;",
+      '  map $http_upgrade $lightmoni_connection_upgrade { default upgrade; "" ""; }',
+      `  server { listen ${port(c.http_port ?? 80)} default_server; server_name _; location = /.well-known/lightmoni-gateway { default_type text/plain; return 200 ${quote(digest)}; } location / { return 404; } }`,
+    ];
+  if(indexOnly) {
+    const versions=c.website_versions??Object.fromEntries([...websiteGroups(c)].map(([id,group])=>[id,websiteDigest(c,group)]));
+    for(const [id,version] of Object.entries<string>(versions)) {
+      if(!/^[a-f0-9]{64}$/.test(version))reject('INVALID_WEBSITE_VERSION');
+      lines.push('  include '+quote('/etc/lightmoni-websites/'+safeID(id)+'/versions/'+version+'/nginx.conf')+';');
+    }
+  } else for(const [id,group] of websiteGroups(c))lines.push(renderWebsiteConfig(c,id,group,preview));
+  return lines.concat('}').join('\n')+'\n';
 }
 async function gatewayContainer(
   context: OperationExecutionContext,
@@ -1397,7 +1423,7 @@ async function gatewayContainer(
     ).stdout,
   );
   const container = entries[0];
-  if (container?.Config?.Labels?.[INSTANCE_LABEL] !== id)
+  if (container?.Config?.Labels?.[INSTANCE_LABEL] !== id || container?.Config?.Labels?.[OWNER_LABEL] !== "lightmoni")
     reject("GATEWAY_OWNERSHIP_REQUIRED");
   return container;
 }
@@ -1426,14 +1452,14 @@ async function gatewayProof(
     if (proof.status !== 200 || proof.text !== hash(JSON.stringify(s)))
       throw Error("WEBSITE_VERSION_NOT_ACTIVE");
     if(authScopes(s).length){
-      const version=join(await privateRoot(context,"platform"),"gateways",safeID(c.instance_id),"versions",digest);
+      const websiteID=safeID(s.website_id??s.id),version=websiteStoragePaths(await privateRoot(context,'platform'),websiteID,websiteDigest(c,websiteGroups(c).get(websiteID)!)).version_root!;
       const probe=await readJSON<any>(join(version,"auth-probe.json"),null);
       if(!probe)throw Error("WEBSITE_AUTH_PROOF_REQUIRED");
       for(const scope of authScopes(s)){
         const path="/.well-known/lightmoni-auth-"+scope.key;
         const anonymous=await probeHTTP(c.http_port??80,s.domains[0],path,false,context.signal);
         const positive=await probeHTTP(c.http_port??80,s.domains[0],path,false,context.signal,{Authorization:"Basic "+Buffer.from(probe.username+":"+probe.password).toString("base64")});
-        if(anonymous.status!==401||positive.status!==200||positive.text!==digest)throw Error("WEBSITE_AUTH_NOT_ACTIVE");
+        if(anonymous.status!==401||positive.status!==200||positive.text!==websiteDigest(c,websiteGroups(c).get(s.website_id??s.id)!))throw Error("WEBSITE_AUTH_NOT_ACTIVE");
       }
     }
     if (s.certificate) {
@@ -1453,29 +1479,27 @@ async function gatewayProof(
     }
   }
 }
+async function waitForGatewayProof(c:any,digest:string,context:OperationExecutionContext) {
+  let lastError:unknown;
+  for(let attempt=0;attempt<30;attempt++) {
+    try {await gatewayProof(c,digest,context);return;}
+    catch(error) {lastError=error;context.signal.throwIfAborted();if(attempt<29)await new Promise(resolve=>setTimeout(resolve,150));}
+  }
+  throw lastError ?? Error('GATEWAY_VERIFICATION_FAILED');
+}
 async function gatewayConfigurationMatches(c:any,state:any,live:any,root:string) {
   try {
-    if(!state || !live || live.HostConfig?.NetworkMode!=='host')return false;
+    if(!state||!live||live.HostConfig?.NetworkMode!=='host')return false;
     const content=(v:any)=>({image:v.image??'openresty/openresty:1.27.1.2-0-alpine',sites:v.sites??[],http_port:v.http_port??80,https_port:v.https_port??443});
     if(desiredHash(content(c))!==desiredHash(content(state.config)))return false;
-    if(live.Config?.Image!==state.image && live.Image!==state.image)return false;
-    if(!(live.Mounts??[]).some((m:any)=>m.Source===root&&m.Destination==='/etc/lightmoni'&&m.RW===false))return false;
+    if(live.Config?.Image!==state.image&&live.Image!==state.image)return false;
+    const platform=dirname(dirname(root));
+    for(const [source,target] of [[root,'/etc/lightmoni'],[join(platform,'websites'),'/etc/lightmoni-websites']])
+      if(!(live.Mounts??[]).some((m:any)=>m.Source===source&&m.Destination===target&&m.RW===false))return false;
     if(await readlink(join(root,'current'))!==join('versions',state.digest))return false;
-    const version=join(root,'versions',state.digest);
-    const verify=async(path:string,body:string)=>{await safeFile(path);return await readFile(path,'utf8')===body;};
-    if(!await verify(join(version,'nginx.conf'),renderGateway(state.config,state.digest)))return false;
-    const probe=await readJSON<any>(join(version,'auth-probe.json'),null);
-    for(const site of c.sites??[]) {
-      const target=join(version,'sites',safeID(site.id));
-      if(site.mode==='static')for(const [name,body] of Object.entries<string>(files(site.static_files??{'index.html':'<!doctype html><h1>LightMoni</h1>'})))if(!await verify(join(target,'public',name),body))return false;
-      if(site.certificate)for(const [name,body] of [['fullchain.pem',site.certificate.certificate_pem],['privkey.pem',site.certificate.private_key_pem]])if(!await verify(join(target,name),body))return false;
-      for(const scope of authScopes(site)) {
-        if(!probe)return false;
-        const body=scope.auth.users.map(u=>u.username+':'+u.password_hash).concat(probe.username+':'+probe.password_hash).join('\n')+'\n';
-        if(!await verify(join(target,'auth',scope.key+'.htpasswd'),body))return false;
-      }
-    }
-    return true;
+    const version=join(root,'versions',state.digest);await safeFile(join(version,'nginx.conf'));
+    if(await readFile(join(version,'nginx.conf'),'utf8')!==renderGateway({...state.config,website_versions:state.website_versions},state.digest,false,true))return false;
+    return await websiteFilesMatch(platform,c,state.website_versions,renderWebsiteConfig,files);
   } catch {return false;}
 }
 async function executeGateway(
@@ -1486,9 +1510,10 @@ async function executeGateway(
     id = safeID(c.instance_id),
     name = "lm-gateway-" + id,
     root = instanceStoragePaths(await privateRoot(context, "platform"), "gateways", id).instance_root;
-  await directory(root);
+  await ownedGateway(await privateRoot(context,'platform'),id,true);
   const statePath = join(root, "state.json"),
-    state = await readJSON<any>(statePath, null);
+    rawState = await readJSON<any>(statePath, null),
+    state = await loadGatewayState(await privateRoot(context,'platform'),rawState,c);
   let existing: any;
   await context.progress?.("checking_docker");
   try {
@@ -1505,7 +1530,7 @@ async function executeGateway(
       healthy=healthy&&configuration_matches;
     }
     try {
-      if (healthy) await gatewayProof(state.config, state.digest, context);
+      if (healthy && state) await gatewayProof(state.config, state.digest, context);
     } catch {
       healthy = false;
     }
@@ -1580,80 +1605,23 @@ async function executeGateway(
       "image",
       512,
     ),
-    digest = hash(
-      JSON.stringify({
-        image:sourceImage,
-        sites: c.sites ?? [],
-        http_port: c.http_port ?? 80,
-        https_port: c.https_port ?? 443,
-      }),
-    ),
-    version = join(root, "versions", digest);
+    platform = await privateRoot(context,'platform'),
+    websiteVersions = await stageWebsites(context,c,renderWebsiteConfig,files),
+    identity = gatewayIdentity({...c,instance_id:id},websiteVersions),
+    digest = identity.digest,
+    version = join(root, 'versions', digest);
   const imageManifest={services:{gateway:{image:sourceImage}}};
   const imageSources=await preparePlatformImages(imageManifest,c,root,context);
   const image=imageManifest.services.gateway.image;
   await directory(version);
-  for (const path of [
-    root,
-    join(root, "versions"),
-    version,
-    join(version, "sites"),
-  ]) {
-    await directory(path, 0o755);
-    await chmod(path, 0o755);
-  }
-  let authProbe=await readJSON<any>(join(version,"auth-probe.json"),null);
-  if((c.sites??[]).some((s:any)=>authScopes(s).length)&&!authProbe){
-    authProbe={username:"lm-probe-"+randomBytes(8).toString('hex'),password:randomBytes(32).toString('hex')};
-    authProbe.password_hash=hashSync(authProbe.password,10);
-    await atomicFile(join(version,"auth-probe.json"),JSON.stringify(authProbe));
-  }
-  for (const s of c.sites ?? []) {
-    const target = join(version, "sites", safeID(s.id));
-    await directory(target, 0o755);
-    await chmod(target, 0o755);
-    for(const scope of authScopes(s)){
-      const authDir=join(target,"auth");await directory(authDir,0o755);
-      // Private hashes and probe credentials never enter the static root or nginx text.
-      await atomicFile(join(authDir,scope.key+".htpasswd"),scope.auth.users.map(u=>u.username+":"+u.password_hash).concat(authProbe.username+":"+authProbe.password_hash).join("\n")+"\n",0o644);
-      await atomicFile(join(authDir,"proof.txt"),digest,0o644);
-    }
-    if (s.mode === "static") {
-      const publicPath = join(target, "public");
-      const entries = files(
-        s.static_files ?? { "index.html": "<!doctype html><h1>LightMoni</h1>" },
-      );
-      for (const [name, body] of Object.entries(entries)) {
-        const path = join(publicPath, name);
-        await directory(dirname(path), 0o755);
-        let parent = dirname(path);
-        while (parent.startsWith(publicPath)) {
-          await chmod(parent, 0o755);
-          parent = dirname(parent);
-        }
-        await atomicFile(path, body, 0o644);
-      }
-    }
-    if (s.certificate) {
-      certificateMetadata(
-        s.certificate.certificate_pem,
-        s.certificate.private_key_pem,
-        s.domains,
-        context.now(),
-      );
-      await atomicFile(
-        join(target, "fullchain.pem"),
-        s.certificate.certificate_pem,
-      );
-      await atomicFile(
-        join(target, "privkey.pem"),
-        s.certificate.private_key_pem,
-      );
-    }
-  }
-  await atomicFile(join(version, "nginx.conf"), renderGateway(c, digest));
+  for(const path of [root,join(root,'versions'),version]) {await directory(path,0o755);await chmod(path,0o755);}
+  await atomicFile(join(version,'nginx.conf'),renderGateway({...c,website_versions:websiteVersions},digest,false,true));
+  await atomicFile(join(version,'websites.json'),JSON.stringify(websiteVersions));
   const mount = "type=bind,src=" + root + ",dst=/etc/lightmoni,readonly";
+  const websiteMount="type=bind,src="+join(platform,"websites")+",dst=/etc/lightmoni-websites,readonly";
+  await directory(join(platform,"websites"),0o755);await chmod(join(platform,"websites"),0o755);
   await context.progress?.("validating_gateway");
+  let previousWebsitePointers:Record<string,string|null>|undefined;
   try {
     await context.command(
       "docker",
@@ -1665,6 +1633,7 @@ async function executeGateway(
         "host",
         "--mount",
         mount,
+        "--mount", websiteMount,
         image,
         "openresty",
         "-t",
@@ -1708,6 +1677,7 @@ async function executeGateway(
           OWNER_LABEL + "=lightmoni",
           "--mount",
           mount,
+        "--mount", websiteMount,
           image,
           "openresty",
           "-g",
@@ -1733,25 +1703,17 @@ async function executeGateway(
         ],
         { timeoutMs: 30000 },
       );
-    let okay = false;
-    for (let i = 0; i < 30; i++) {
-      try {
-        await gatewayProof(c, digest, context);
-        okay = true;
-        break;
-      } catch {
-        context.signal.throwIfAborted();
-        await new Promise((r) => setTimeout(r, 150));
-      }
-    }
-    if (!okay) throw Error("GATEWAY_VERIFICATION_FAILED");
+    await waitForGatewayProof(c,digest,context);
+    previousWebsitePointers = await activateWebsitePointers(platform,websiteVersions);
     await atomicFile(
       statePath,
       JSON.stringify({
-        version: 1,
+        version: 2,
         digest,
         image,
-        config: c,
+        config: identity.config,
+        website_versions: websiteVersions,
+        retained_website_versions:{...state?.retained_website_versions,...state?.website_versions,...websiteVersions},
         updated_at: context.now().toISOString(),
       }),
     );
@@ -1759,7 +1721,7 @@ async function executeGateway(
       verified: true,
       data: {
         instance_id: id,
-        storage: gatewayStorage(await privateRoot(context, "platform"), id, { digest, config: c }, [await gatewayContainer(context, id)]),
+        storage: gatewayStorage(await privateRoot(context, "platform"), id, { digest, website_versions:websiteVersions,retained_website_versions:{...state?.retained_website_versions,...state?.website_versions,...websiteVersions} }, [await gatewayContainer(context, id)]),
         digest,
         healthy: true,
         running: true,
@@ -1776,6 +1738,7 @@ async function executeGateway(
   } catch (error) {
     await context.progress?.("restoring_previous", installCause(error));
     try {
+      if(previousWebsitePointers)await restoreWebsitePointers(platform,previousWebsitePointers);
       if (previous && state) {
         await pointer(join(root, "current"), previous);
         if (recreated) {
@@ -1799,6 +1762,7 @@ async function executeGateway(
               OWNER_LABEL + "=lightmoni",
               "--mount",
               mount,
+        "--mount", websiteMount,
               state.image,
               "openresty",
               "-g",
@@ -1822,7 +1786,7 @@ async function executeGateway(
             ],
             { timeoutMs: 30000 },
           );
-        await gatewayProof(state.config, state.digest, context);
+        await waitForGatewayProof(state.config, state.digest, context);
       } else {
         await context.command("docker", ["rm", "--force", name], {
           timeoutMs: 30000,
@@ -1894,6 +1858,8 @@ export async function executePlatform(
       },
     };
   }
+  if (c.task === 'website.remove') return {verified:true,data:await removeWebsite(context,c.website_id,(config,digest)=>renderGateway(config,digest,false,true))};
+  if (c.task === 'website.inspect') return {verified:true,data:await inspectWebsiteRemoval(context,c.website_id)};
   if (c.task.startsWith("workload.")) return fitStorageReceipt(await executeWorkload(payload, context));
   if (c.task.startsWith("gateway.")) return fitStorageReceipt(await executeGateway(payload, context));
   if (c.task === "certificate.install") return installCertificate(c, context);

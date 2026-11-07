@@ -1,0 +1,11 @@
+{
+  "fixture": "disposable Linux container sharing local Docker daemon; no production operations",
+  "checks": [
+    "real application ID / instance ID directories, scoped volume, initialization and data retention",
+    "real OpenResty includes isolated website versions and serves TLS / Basic / static files",
+    "a successful nginx -t followed by failed live proof restores the previous gateway index and website pointers",
+    "updating one site leaves the other version untouched; nginx -t rejection preserves active versions",
+    "active deletion rejected; withdrawal then cleanup removes SSL/auth/static/history references, retains other website and app data, and is idempotent"
+  ],
+  "passed": true
+}

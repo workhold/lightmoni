@@ -1,9 +1,9 @@
-# 契约
+# 新存储与删除契约
 
-DELETE /api/v1/ops/resources/:id 使用现有 revision 与管理员权限。返回 deleted=true, remote_data_deleted=false。仅有确认 removed 的实例可注销登记；从未部署且无实例可直接删除。保留历史状态不把 unknown 改为成功，不调用远端删除。
+固定业务根R=/var/lib/lightmoni-managed/operations/platform；应用R/applications/<application_id>/instances/<instance_id>，网站R/websites/<website_id>，网关R/gateways/<instance_id>。storage.layout_version=2。网站current→versions/<digest>，nginx.conf、metadata.json、auth-probe.json、ssl/<fragment>、auth/<fragment>、public/<fragment>同版本。网关只保存索引、非秘密网站版本映射；共享中心证书不属于网站物理清理范围。无旧目录迁移或双布局回退。
 
-GET /api/v1/ops/resources/:id/storage 仅管理员，支持 application/website，返回 resource_id、layout_version=1、standard_root、instances；每项含集群/机器/实例身份、状态、observed_at 与 storage（没有回执时为 null）。所有实例包括退役记录，offset 按20项分页，next_offset=null 表示结束；路径为上次 Agent 实际回执，不代表当前实时核验。网站 storage 仅包含该网站的分组、网关根、current/nginx.conf 和版本信息，不含其他网站正文、环境或证书秘密。
+Agent新存储能力operations.platform.storage.v2；workload/gateway签名载荷携带storage_layout=2与application_id，website.remove携带website_id，不能传任意文件系统根。应用默认命名卷带应用和实例ID；外部volume/bind为显式覆盖。website.remove幂等返回website_id/removed/absent，所有权不匹配、路径不安全或活动网关仍引用时拒绝，不删除其他资源。
 
-storage.layout_version=1，instance_root/state_file 与 mounts；挂载记录包含 container_id、service、type、source、target、read_only、volume。gateway 另含 current、config_file、version_root、sites[] 的 website_id/fragment_id/root/public_dir/certificate_dir。Docker volume 实际路径取 inspect.Mounts.Source，不假设 Docker data-root。
+DELETE /api/v1/ops/resources/:id仍要求管理员与revision。应用返回200 deleted=true且remote_data_deleted=false，保留业务数据。网站若需物理清理，返回202 deleted=false与deletion进度；重复相同revision请求回读持久任务。未部署的网站可立即200删除。网站登记保留到所有宿主清理成功、DNS及引用检查通过，之后GET资源为404，执行历史和删除审计保留。失败/离线/权限撤销/unknown明确可见，unknown不自动写重试。删除中编辑/发布返回website_deletion_in_progress。
 
-既有受管根、实例ID、配置摘要目录和 Compose 项目命名保留。新建同名应用产生新ID，不自动接管删除登记后留下的数据；备份/恢复与迁移需要独立明确操作。
+GET /ops/resources/:id/storage按20项分页，显示application_root/instance_root及网站root/current/config_file/version_root和SSL/auth/public目录。无新版回执时为null；清单不含配置正文、密码、哈希或私钥。回执维持60KiB上限，数组截断明确。

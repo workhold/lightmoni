@@ -24,7 +24,7 @@ export default function StoragePanel({ resourceID, machineName, clusterName }: {
   const path = (value: string|null) => value ? <Typography.Text copyable code style={{ overflowWrap: 'anywhere' }}>{value}</Typography.Text> : '—';
   return <section>
     <Space wrap><h3>{t('宿主机存储与挂载', 'Host storage and mounts')}</h3><Button size="small" loading={busy} onClick={() => void load()}>{t('刷新清单', 'Refresh storage')}</Button></Space>
-    <p className="lm-ops-note">{t('显示最近一次 Agent 回执。执行应用或网关检查后可刷新；卸载及删除登记保留持久化数据。', 'Shows the latest Agent receipt. Refresh after inspecting the application or gateway. Uninstalling and deleting registration retain persistent data.')}</p>
+    <p className="lm-ops-note">{t('显示最近一次 Agent 回执。执行应用或网关检查后可刷新；应用卸载及删除登记保留持久化数据；删除网站会清理其各宿主机目录。', 'Shows the latest Agent receipt. Refresh after inspecting the application or gateway. Application uninstall and registration deletion retain persistent data; website deletion cleans its directories on every host.')}</p>
     {data && <p className="lm-ops-note">{t('标准受管目录', 'Standard managed directory')}: {path(data.standard_root)}</p>}
     {error && <Alert showIcon type="error" title={t('存储清单读取失败', 'Storage could not be loaded')} description={error}/>}
     <Spin spinning={busy}>
@@ -35,10 +35,11 @@ export default function StoragePanel({ resourceID, machineName, clusterName }: {
         {!instance.storage ? <Alert showIcon type="info" title={t('尚无存储回执，请检查应用或网关；旧 Agent 需要升级。', 'No storage receipt. Inspect the application or gateway; older Agents need an update.')}/> : <>
           <Descriptions size="small" column={1} items={[
             { key: 'time', label: t('最近观测', 'Last observed'), children: instance.observed_at ?? '—' },
+            ...(instance.storage.application_root ? [{key:'application',label:t('应用目录','Application directory'),children:path(instance.storage.application_root)}] : []),
             { key: 'root', label: t('实例目录', 'Instance directory'), children: path(instance.storage.instance_root) },
             { key: 'state', label: t('状态文件', 'State file'), children: path(instance.storage.state_file) },
             ...(instance.storage.config_file ? [
-              { key: 'config', label: t('网关完整配置', 'Complete gateway configuration'), children: path(instance.storage.config_file) },
+              { key: 'config', label: t('网关索引配置', 'Gateway index configuration'), children: path(instance.storage.config_file) },
               { key: 'version', label: t('当前版本目录', 'Current version directory'), children: path(instance.storage.version_root) },
             ] : []),
           ]}/>
@@ -48,8 +49,11 @@ export default function StoragePanel({ resourceID, machineName, clusterName }: {
             { title: t('容器内路径', 'Container path'), render: (_, m) => path(m.target) },
             { title: t('访问', 'Access'), render: (_, m) => m.read_only ? 'RO' : 'RW' },
           ]}/>}
-          {instance.storage.sites?.map((site: Spec) => <Descriptions key={site.fragment_id} size="small" column={1} title={t('网站分组', 'Website fragment') + ' · ' + site.fragment_id} items={[
-            { key: 'root', label: t('网站配置材料目录', 'Website configuration material'), children: path(site.root) },
+          {instance.storage.sites?.map((site: Spec) => <Descriptions key={site.website_id} size="small" column={1} title={t('网站', 'Website') + ' · ' + site.website_id} items={[
+            { key: 'root', label: t('网站目录', 'Website directory'), children: path(site.root) },
+            {key:'config',label:t('网站配置文件','Website configuration file'),children:path(site.config_file)},
+            {key:'current',label:t('网站当前版本','Current website version'),children:path(site.current)},
+            ...(site.auth_dir ? [{key:'auth',label:t('鉴权文件目录','Authentication files'),children:path(site.auth_dir)}] : []),
             ...(site.public_dir ? [{ key: 'public', label: t('静态文件目录', 'Static files'), children: path(site.public_dir) }] : []),
             ...(site.certificate_dir ? [{ key: 'cert', label: t('证书材料目录', 'Certificate material'), children: path(site.certificate_dir) }] : []),
           ]}/>)}
