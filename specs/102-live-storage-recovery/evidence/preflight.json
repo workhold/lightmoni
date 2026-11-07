@@ -1,0 +1,20 @@
+{
+  "date": "2026-11-07",
+  "machine": "zz-bj-1",
+  "agent_revision": "94bcbbcdede2",
+  "failed_gateway_run": "7f1529c3e00be784f1156910672e797d",
+  "failed_job": "8b7ff85296d09d247d562a2b360f865a",
+  "code": "gateway_directory_ownership_required",
+  "actual_state": "v1 gateways have no v2 ownership marker; active workloads have owner/instance/project labels but no application label and use the old workloads root",
+  "active_scope": [
+    {"instance":"454a1339955690ed9d569ae9cf6f8185","application":"2bc55c4b89cad669709bad3fceac2a7b","service":"gitea"},
+    {"instance":"ae82bff10df5c24d146306da9a8abdc","application":"7dd27cf16dc72b2b0d9ec1225752ac14","service":"dbx"},
+    {"instance":"683d9c7943798cfb92c8d7dc107afbcb","application":"2b72ea90d1617fb5ccb321a4d91c9b3b","service":"registry"},
+    {"instance":"965070900ba0fe48311e7863151cc7a4","service":"gateway"}
+  ],
+  "platform_size": "156 MiB",
+  "free_kib": 10692540,
+  "preflight": "passed against the actual host, no container or service mutated during plan",
+  "script_sha256": "c4d4d768a3dc71cc1a2f0efa94449b9a1f8c424f90bfacb0a8d4e8f744e4fe3d",
+  "credentials": "existing protected SSH; no new credentials or access granted"
+}
