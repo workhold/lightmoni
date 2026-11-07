@@ -1,3 +1,4 @@
+import {resourceReferences} from '../src/ops/resource-references.js';
 import { ReconciliationRegistry } from "../src/reconciliation/registry.js";
 import {pngData,pngFixture} from './fixtures/application-logo.js';
 import {createHostNetworkSchema,recordHostNetwork} from "../src/server/host-network.js";
@@ -2230,7 +2231,10 @@ test('published managed website references remain protected until the old public
  const site=f.store.create('website','Published reference',{routing_mode:'managed',service_application_id:a.id,service_port_name:'http',bindings:[{domains:['published-ref.example.test'],locations:[{path:'/',action:'proxy'}]}]},'admin');
  f.db.run('UPDATE ops_platform_website_deployments SET enabled=1,desired_revision=1 WHERE website_id=?',site.id);
  f.store.update(site.id,site.revision,site.name,{...site.spec,service_application_id:b.id},'admin');
- assert.equal((await f.req('/resources/'+a.id,'DELETE',{revision:a.revision})).body.error,'platform_resource_in_use');
+ const blocked=await f.req('/resources/'+a.id,'DELETE',{revision:a.revision});
+ assert.equal(blocked.status,409);assert.equal(blocked.body.error,'platform_resource_in_use');
+ assert.deepEqual(blocked.body.references,[{id:site.id,kind:'website',name:site.name,domains:['published-ref.example.test'],sources:[{type:'published',revision:1}]}]);
+ assert.equal(f.store.get(a.id).id,a.id);
  f.db.run('UPDATE ops_platform_website_deployments SET enabled=0 WHERE website_id=?',site.id);
  assert.equal((await f.req('/resources/'+a.id,'DELETE',{revision:a.revision})).status,200);
 });
@@ -2317,4 +2321,43 @@ test('registry cleanup unknown retains a durable fence until the exact managed j
  f.db.run("UPDATE privileged_jobs SET agent_id='a' WHERE id=?",job.id);
  assert.equal((await f.req('/private-registry')).body.cleanup_run,null);
  f.app(f.c,{service_name:'after-audited-unknown'});
+});
+
+
+test('deletion conflict names every resource and deduplicates saved and published website references',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c);
+ const sites=['billing.example.test','support.example.test'].map((domain,index)=>f.store.create('website','Referenced website '+index,{routing_mode:'managed',service_application_id:a.id,service_port_name:'http',bindings:[{domains:[domain],locations:[{path:'/',action:'proxy'}]}]},'admin'));
+ f.db.run('UPDATE ops_platform_website_deployments SET enabled=1,desired_revision=1 WHERE website_id=?',sites[0].id);
+ const blocked=await f.req('/resources/'+a.id,'DELETE',{revision:a.revision});
+ assert.equal(blocked.status,409);assert.equal(blocked.body.error,'platform_resource_in_use');
+ assert.deepEqual(blocked.body.references,sites.map((site,index)=>({id:site.id,kind:'website',name:site.name,domains:[index?'support.example.test':'billing.example.test'],sources:[{type:'saved',revision:1},...(index?[]:[{type:'published',revision:1}])]})));
+ const clusterBlock=await f.req('/resources/'+c.id,'DELETE',{revision:c.revision});
+ assert.equal(clusterBlock.body.error,'platform_resource_in_use');
+ assert(clusterBlock.body.references.some((r:any)=>r.id===a.id&&r.kind==='application'&&r.name===a.name));
+ assert.equal(f.store.get(a.id).revision,a.revision);assert.equal(f.store.get(sites[0].id).revision,1);
+ const denied=await f.req('/resources/'+a.id,'DELETE',{revision:a.revision},'member');assert.equal(denied.status,403);assert.equal(denied.body.references,undefined);
+ const stale=await f.req('/resources/'+a.id,'DELETE',{revision:999});assert.equal(stale.body.error,'platform_revision_conflict');assert.equal(stale.body.references,undefined);
+});
+test('reference summaries exclude opaque content and expose only safe resource metadata',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c),b=f.app(c);
+ const spec={...b.spec,environment:{PASSWORD:a.id},env:{TOKEN:a.id},script:a.id,files:{private:a.id},static_files:[{content:a.id}]};
+ f.db.run('UPDATE ops_platform_resources SET spec_cipher=? WHERE id=?',f.store.deps.encrypt(JSON.stringify(spec)),b.id);
+ assert.deepEqual(resourceReferences(f.store,a.id),[]);
+ const site=f.store.create('website','Named reference',{routing_mode:'managed',service_application_id:a.id,service_port_name:'http',bindings:[{domains:['safe.example.test'],locations:[{path:'/',action:'proxy'}]}]},'admin');
+ const summary=resourceReferences(f.store,a.id);
+ assert.deepEqual(summary,[{id:site.id,kind:'website',name:site.name,domains:['safe.example.test'],sources:[{type:'saved',revision:1}]}]);
+ assert.deepEqual(Object.keys(summary[0]).sort(),['domains','id','kind','name','sources']);
+});
+
+test('manual published backend references retain their original domains until withdrawal',async t=>{
+ const f=await fixture(t),c=f.createCluster(),a=f.app(c),b=f.app(c);
+ const spec=(app:any,domain:string)=>({cluster_ids:[c.id],bindings:[{domains:[domain],locations:[{path:'/',cluster_targets:[{cluster_id:c.id,target:'application',application_id:app.id,port_name:'http'}]}]}]});
+ const site=f.store.create('website','Manual reference',spec(a,'previous.example.test'),'admin');
+ f.db.run('UPDATE ops_platform_website_deployments SET enabled=1,desired_revision=1 WHERE website_id=?',site.id);
+ f.store.update(site.id,site.revision,site.name,spec(b,'current.example.test'),'admin');
+ const blocked=await f.req('/resources/'+a.id,'DELETE',{revision:a.revision});
+ assert.equal(blocked.status,409);assert.deepEqual(blocked.body.references,[{id:site.id,kind:'website',name:site.name,domains:['previous.example.test'],sources:[{type:'published',revision:1}]}]);
+ f.db.run('UPDATE ops_platform_website_deployments SET enabled=0 WHERE website_id=?',site.id);
+ assert.deepEqual(resourceReferences(f.store,a.id),[]);
+ assert.equal((await f.req('/resources/'+a.id,'DELETE',{revision:a.revision})).status,200);
 });

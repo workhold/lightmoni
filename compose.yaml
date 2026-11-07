@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261107-resource-actions-v1
+    image: docker.heyphp.com/lightmoni/lightmoni:20261107-reference-details-v1
     pull_policy: missing
     build:
       context: .

@@ -1,4 +1,5 @@
 import {createWebsiteDeletions} from './website-deletions.js';
+import {resourceReferences} from './resource-references.js';
 import type { ReconciliationRegistry } from "../reconciliation/registry.js";
 import {machineServiceAddresses} from "../server/host-network.js";
 import {applicationUpgrade,registerApplicationUpgrades} from './application-upgrades.js';
@@ -312,8 +313,14 @@ export function registerOperationsPlatform(
     safe(async (ctx) => {
       const b = safeObject(await ctx.body());
       const resource=store.get(ctx.params.id);
-      if(resource.kind==='website') {const result=await websiteDeletions.begin(resource,b.revision,ctx.user.id);ctx.json(result,result.deleted?200:202);}
-      else {store.remove(resource.id,b.revision);ctx.json({deleted:true,remote_data_deleted:false});}
+      try {
+        if(resource.kind==='website') {const result=await websiteDeletions.begin(resource,b.revision,ctx.user.id);ctx.json(result,result.deleted?200:202);}
+        else {store.remove(resource.id,b.revision);ctx.json({deleted:true,remote_data_deleted:false});}
+      } catch(error) {
+        if(error instanceof HTTPError && error.status===409 && ['platform_resource_in_use','operations_resource_in_use'].includes(error.message)) {
+          ctx.json({error:error.message,references:resourceReferences(store,resource.id)},409);
+        } else throw error;
+      }
     }),
   );
   router.get('/api/v1/ops/runs/:id', safe(ctx => ctx.json(store.action(ctx.params.id))));
