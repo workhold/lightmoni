@@ -1,0 +1,28 @@
+{
+  "error": "gateway_directory_ownership_required",
+  "operation": "Existing ABC Demo website cleanup",
+  "deletion_created_at": "2026-11-07T08:54:39.712Z",
+  "before_release_backup": {
+    "remove_failures": 206,
+    "attempt": 206,
+    "state": "failed",
+    "last_failed_created_at": "2026-11-07T11:30:15.219Z",
+    "inspect_failures": 23
+  },
+  "post_restart_audit_snapshot": {
+    "failed": 48,
+    "succeeded": 52,
+    "failed_actions": [
+      "remove"
+    ],
+    "unknown": 0
+  },
+  "later_readonly_snapshot": {
+    "remove_failures_total": 329,
+    "last_failed_created_at": "2026-11-07T12:34:01.610Z",
+    "attempt": 330,
+    "state": "pending"
+  },
+  "conclusion": "Same ownership failure existed before this deployment; cleanup remains blocked and continues automatic retries. Application cards also showed pending during acceptance. Public Gitea/DBX HTTP 200 and registry HTTP 401 do not establish successful cleanup.",
+  "actions": "Read-only diagnosis only. No ownership adoption, directory deletion, database status rewrite, new deletion request or protection bypass."
+}

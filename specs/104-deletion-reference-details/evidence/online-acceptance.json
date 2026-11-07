@@ -1,0 +1,56 @@
+{
+  "method": "Production compiled resourceReferences with SQLite readOnly=true; browser UI navigation and monitoring. No production DELETE or configuration write was performed for acceptance.",
+  "target": {
+    "id": "47c8760dfa1c5c3ac24c878441fff90c",
+    "name": "ABC Demo"
+  },
+  "references": [
+    {
+      "id": "80d0a4d24cbe70ea60794b913971b5f7",
+      "kind": "website",
+      "name": "ABC Demo",
+      "domains": [
+        "abc.heyphp.com"
+      ],
+      "sources": [
+        {
+          "type": "saved",
+          "revision": 4
+        }
+      ]
+    }
+  ],
+  "reference_navigation": {
+    "url": "https://moni.heyphp.com/websites?resource=80d0a4d24cbe70ea60794b913971b5f7",
+    "correct_resource_opened": true,
+    "close_clears_query": true
+  },
+  "website_monitoring": {
+    "website": "gitea-test.heyphp.com",
+    "overview_charts": 2,
+    "log_tab_reload_preserved": true,
+    "loaded_logs": 12,
+    "collection": "normal",
+    "last_success_local": "2026-11-07 19:56:32"
+  },
+  "dashboards": {
+    "list_count": 5,
+    "system_center_panels": 13,
+    "visible_query_errors": [],
+    "qps": 0.13,
+    "received_last_minute": 352,
+    "online_centers": 1,
+    "reporting_failures_last_minute": 0
+  },
+  "application_list_snapshot": {
+    "Gitea": "pending",
+    "OpenResty": "pending",
+    "SDD091 快速安装": "pending",
+    "系统镜像仓库": "pending",
+    "ABC Demo": "removed",
+    "SDD091 SDK环境验收": "removed",
+    "DBX": "configured"
+  },
+  "production_delete_attempted": false,
+  "media": "artifacts/screenshots/specs/104-deletion-reference-details/evidence"
+}
