@@ -1,7 +1,8 @@
+import IconAction from './ops/IconAction';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {useNavigate,useParams} from 'react-router-dom';
 import {ArrowLeftOutlined,ReloadOutlined} from '@ant-design/icons';
-import {Alert,Button,Empty,Select,Spin,Table} from '../shared/ui';
+import {Alert,Empty,Select,Spin,Table} from '../shared/ui';
 import {api} from '../shared/api';
 import {useI18n} from '../shared/i18n';
 import {errorText,time,type Spec} from './ops/model';
@@ -15,7 +16,7 @@ export default function WebsiteMonitoring(){
  const rows:Spec[]=data?.results?.web?.rows??[],logs:Spec[]=data?.results?.access?.rows??[];
  const series=(field:string)=>rows.map(r=>({...r,value:r[field],series_label:r.cluster_id}));
  const access=(r:Spec,k:string)=>{if(r[k])return r[k];try{const j=JSON.parse(r.body);return j[k==='duration'?'request_time':k]??'—'}catch{return '—'}};
- return <div className="lm-page lm-operations-page"><div className="lm-page-heading"><div><Button type="text" icon={<ArrowLeftOutlined/>} onClick={()=>navigate('/websites')}>{t('网站','Websites')}</Button><h1>{data?.website.name??t('网站监控','Website monitoring')}</h1><p>{t('请求流量与访问日志','Request traffic and access logs')}</p></div><Button icon={<ReloadOutlined/>} loading={loading} onClick={()=>void load()}>{t('刷新','Refresh')}</Button></div>
+ return <div className="lm-page lm-operations-page"><div className="lm-page-heading"><div><IconAction label={t('返回网站','Back to websites')} type="text" icon={<ArrowLeftOutlined aria-hidden/>} onClick={()=>navigate('/websites')}/><h1>{data?.website.name??t('网站监控','Website monitoring')}</h1><p>{t('请求流量与访问日志','Request traffic and access logs')}</p></div><IconAction label={t('刷新','Refresh')} icon={<ReloadOutlined aria-hidden/>} loading={loading} onClick={()=>void load()}/></div>
   {error&&<Alert showIcon type="error" title={error}/>}{Object.values(data?.results??{}).filter((r:any)=>r.status==='error').map((r:any,i)=><Alert key={i} showIcon type="error" title={r.error}/>)}
   <Select aria-label={t('监控时间范围','Monitoring time range')} value={minutes} onChange={setMinutes} options={[15,60,360,1440].map(value=>({value,label:value<60?value+t(' 分钟',' minutes'):value/60+t(' 小时',' hours')}))}/>
   <TelemetryCollectionStatus hosts={data?.hosts??[]}/>

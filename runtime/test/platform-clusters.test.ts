@@ -1509,6 +1509,29 @@ function rebindForRecovery(f:any) {
   f.db.run("UPDATE managed_machines SET agent_id='c' WHERE id='ma'");
   recordHostNetwork(f.db,'ma','c',normalizeNetworkAddresses([{interface:'eth0',address:'10.0.0.1'}]),undefined,'2026-10-29T02:00:00.000Z');
 }
+test('uninstalled registration accepts authenticated legacy absence but rejects incomplete or changed proofs',async t=>{
+ for(const mode of ['valid','missing-receipt','forged-audit','failed-proof','containers-remain','changed-binding','old-online','website-reference']) {
+  const f=await fixture(t),c=f.createCluster(['ma']),a=f.app(c);
+  await f.action(a,'deploy');f.finish('a');const old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;
+  rebindForRecovery(f);await f.action(a,'deploy');f.finish('c',{instance_id:old.id,absent:true,container_count:0,observed_at:'2026-10-29T02:00:00.000Z'});
+  await f.action(a,'deploy');f.finish('c');
+  await f.action(a,'remove');f.finish('c',{healthy:false,running:false,removed:true,containers:[]});
+  // Reproduce a pre-fix recovery row after uninstalling the replacement.
+  f.db.run("UPDATE ops_cluster_instances SET state='stopped',desired_state='removed' WHERE id=?",old.id);
+  const receipt=f.db.get<any>('SELECT run_id FROM ops_instance_recoveries WHERE instance_id=?',old.id)!;
+  if(mode==='missing-receipt')f.db.run('DELETE FROM ops_instance_recoveries WHERE instance_id=?',old.id);
+  if(mode==='forged-audit')f.db.run("UPDATE ops_cluster_instances SET observed_json='{}' WHERE id=?",old.id);
+  if(mode==='failed-proof')f.db.run("UPDATE ops_platform_runs SET state='failed' WHERE id=?",receipt.run_id);
+  if(mode==='containers-remain')f.db.run('UPDATE ops_platform_runs SET result_json=? WHERE id=?',JSON.stringify({instance_id:old.id,absent:false,container_count:1}),receipt.run_id);
+  if(mode==='changed-binding')f.db.run("UPDATE managed_machines SET agent_id='b' WHERE id='ma'");
+  if(mode==='old-online')f.heartbeat('a');
+  if(mode==='website-reference')f.store.create('website','Still referenced',{routing_mode:'managed',service_application_id:a.id,service_port_name:'http',bindings:[{domains:['reference.example.test'],locations:[{path:'/',action:'proxy'}]}]},'admin');
+  const deleted=await f.req('/resources/'+a.id,'DELETE',{revision:a.revision});
+  assert.equal(deleted.status,mode==='valid'?200:409,mode+': '+JSON.stringify(deleted.body));
+  if(mode==='valid'){assert.equal(deleted.body.remote_data_deleted,false);assert.ok(f.db.get('SELECT id FROM ops_platform_runs WHERE id=?',receipt.run_id));}
+  else assert.equal(deleted.body.error,mode==='website-reference'?'platform_resource_in_use':'remove_instances_before_deleting',mode);
+ }
+});
 test('reinstalled Agent proves old containers absent, releases only old reservations and rebuilds cleanly',async t=>{
   for(const mode of ['manual','managed']) {
     const f=await fixture(t),c=f.createCluster(['ma']),a=f.app(c,{deployment_mode:mode});
@@ -1518,7 +1541,7 @@ test('reinstalled Agent proves old containers absent, releases only old reservat
     assert.equal(f.db.get<any>('SELECT state FROM ops_cluster_instances WHERE id=?',old.id)?.state,'running');
     const proof=f.finish('c',{instance_id:old.id,absent:true,container_count:0,observed_at:'2026-10-29T02:00:00.000Z'});
     assert.equal(proof.payload.resource.config.task,'instance.recovery.inspect');
-    const retired=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id=?',old.id)!;assert.equal(retired.retired,1);assert.equal(retired.state,'stopped');assert.equal(retired.current_run_id,'');
+    const retired=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id=?',old.id)!;assert.equal(retired.retired,1);assert.equal(retired.state,'removed');assert.equal(retired.current_run_id,'');
     assert.equal(f.db.all('SELECT * FROM ops_platform_ports WHERE instance_id=?',old.id).length,0);assert.equal(JSON.parse(retired.observed_json).agent_recovery.current_agent_id,'c');
     const retry=await f.action(a,'deploy');assert.equal(retry.status,202,JSON.stringify(retry));
     const current=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=? AND retired=0',a.id)!;assert.notEqual(current.id,old.id);assert.equal(current.agent_id,'c');

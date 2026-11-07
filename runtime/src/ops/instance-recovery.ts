@@ -276,7 +276,7 @@ export function recordInstanceRecovery(
       };
       // Do not catch storage errors: the outer receipt transaction must roll back every mutation.
       db.run(
-        "UPDATE ops_cluster_instances SET retired=1,state='stopped',desired_state='stopped',healthy=0,current_run_id='',observed_json=?,updated_at=? WHERE id=?",
+        "UPDATE ops_cluster_instances SET retired=1,state='removed',desired_state='removed',healthy=0,serving=0,current_run_id='',observed_json=?,updated_at=? WHERE id=?",
         JSON.stringify(observed),
         at,
         i.id,
@@ -293,6 +293,30 @@ export function recordInstanceRecovery(
     run.id,
   );
   return true;
+}
+
+/** Accept older retired/stopped rows only with the original authenticated absence receipt. */
+export function instanceRemovalConfirmed(store: PlatformStore, i: Row): boolean {
+  if (i.state === 'removed') return true;
+  if (!i.retired || i.state !== 'stopped' || i.desired_state !== 'removed' || i.current_run_id
+    || online(store, i.agent_id) || unresolved(store, i)) return false;
+  try {
+    const audit = JSON.parse(i.observed_json).agent_recovery;
+    if (audit?.scope !== 'current_machine_binding' || audit.container_count !== 0
+      || audit.previous_agent_id !== i.agent_id || !audit.run_id) return false;
+    const machine = store.deps.db.get<Row>('SELECT agent_id FROM managed_machines WHERE id=?', i.machine_id);
+    if (!machine?.agent_id || machine.agent_id !== audit.current_agent_id || machine.agent_id === i.agent_id) return false;
+    const proof = store.deps.db.get<Row>(`SELECT recovery.snapshot_json,run.result_json FROM ops_instance_recoveries recovery
+      JOIN ops_platform_runs run ON run.id=recovery.run_id
+      WHERE recovery.instance_id=? AND recovery.run_id=? AND recovery.status='completed'
+        AND run.resource_id=? AND run.agent_id=? AND run.state='succeeded'`,
+      i.id, audit.run_id, i.owner_id, machine.agent_id);
+    if (!proof) return false;
+    const target = JSON.parse(proof.snapshot_json), result = JSON.parse(proof.result_json);
+    return target.instance_id === i.id && target.owner_id === i.owner_id && target.machine_id === i.machine_id
+      && target.old_agent_id === i.agent_id && target.current_agent_id === machine.agent_id
+      && result.instance_id === i.id && result.absent === true && result.container_count === 0;
+  } catch { return false; }
 }
 
 function reviewSnapshot(store:PlatformStore,machineID:string){
