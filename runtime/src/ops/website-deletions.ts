@@ -1,4 +1,6 @@
 import {operationExecutionCapabilities} from '../server/managed-executor-status.js';
+import {recoveryBlocked,recoveryFailureLimit} from './recovery.js';
+import {legacyWebsiteScopes} from './website-legacy-scope.js';
 import { id } from '../shared/crypto.js';
 import { fail } from '../shared/http.js';
 import { blockingAgentJobSQL } from '../server/agent-job-fence.js';
@@ -33,6 +35,12 @@ export function createWebsiteDeletions(store:OperationsPlatformStore,workloads:D
         if(target.state==='done')continue;
         const host=db.get<Row>('SELECT id,agent_id FROM managed_machines WHERE id=?',target.machine_id);
         if(!host?.agent_id){target.state='waiting';target.error='website_cleanup_host_unavailable';continue;}
+        const executionVersion=()=>{const agent=db.get<Row>('SELECT version,heartbeat FROM agents WHERE id=?',host.agent_id);try{return JSON.parse(agent?.heartbeat??'{}').release?.build_id||agent?.version||'';}catch{return agent?.version||'';}};
+        if(target.state==='blocked') {
+          const changed=!!target.blocked_agent_version&&target.blocked_agent_version!==executionVersion();
+          if(!changed&&(!target.retry_at||Date.parse(target.retry_at)>store.deps.now().getTime()))continue;
+          Object.assign(target,{state:'waiting',inspect:true,run_id:'',retry_at:'',blocked_agent_version:''});
+        }
         if(target.run_id) {
           const run=store.action(target.run_id);
           if(!['succeeded','failed','cancelled','unknown'].includes(run.state))continue;
@@ -41,8 +49,17 @@ export function createWebsiteDeletions(store:OperationsPlatformStore,workloads:D
             const blocked=db.get(`SELECT id FROM agent_jobs j WHERE id=? AND (${blockingAgentJobSQL(db,'j')})`,run.job_id);
             if(blocked){target.state='unknown';target.error='website_cleanup_result_unknown';continue;}
             target.inspect=true;
-          } else {target.state='failed';target.error=String(run.result.code??'website_cleanup_failed');}
-          target.run_id='';target.retry_at=new Date(store.deps.now().getTime()+5000).toISOString();
+          } else if(run.state==='succeeded'&&run.result.website_id===site.id&&run.result.absent===false) {
+            // A successful read-only check re-establishes ownership before a
+            // retry. It does not itself prove that cleanup has completed.
+            target.state='waiting';target.error='';target.failures=0;
+          } else {
+            target.state='failed';target.error=String(run.result.code??'website_cleanup_failed');target.failures=(target.failures??0)+1;
+            if(recoveryBlocked(target.error)||target.failures>=recoveryFailureLimit) {
+              target.state='blocked';target.blocked_agent_version=executionVersion();target.run_id='';target.retry_at=new Date(store.deps.now().getTime()+300000).toISOString();continue;
+            }
+          }
+          target.run_id='';target.retry_at=new Date(store.deps.now().getTime()+Math.min(300000,5000*2**Math.min((target.failures??1)-1,6))).toISOString();
         }
         const agent=db.get<Row>("SELECT * FROM agents WHERE id=? AND NOT EXISTS(SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed')",host.agent_id);
         if(!agent||store.deps.now().getTime()-Date.parse(agent.last_seen)>120000){target.state='waiting';target.error='website_cleanup_host_offline';continue;}
@@ -52,12 +69,13 @@ export function createWebsiteDeletions(store:OperationsPlatformStore,workloads:D
         try {
           db.transaction(()=>{
             const attempt=(target.attempt??0)+1;
-            const run=store.queue(site,host.agent_id,target.inspect?'inspect':'remove',{task:target.inspect?'website.inspect':'website.remove',storage_layout:2,website_id:site.id,deletion_id:row.id,cleanup_machine_id:host.id,cleanup_attempt:attempt},row.actor,'website-cleanup:'+row.id+':'+host.id+':'+attempt);
+            const legacy_gateways=legacyWebsiteScopes(store,host.id,host.agent_id,site.id);
+            const run=store.queue(site,host.agent_id,target.inspect?'inspect':'remove',{task:target.inspect?'website.inspect':'website.remove',storage_layout:2,website_id:site.id,deletion_id:row.id,cleanup_machine_id:host.id,cleanup_attempt:attempt,legacy_gateways},row.actor,'website-cleanup:'+row.id+':'+host.id+':'+attempt);
             Object.assign(target,{run_id:run.id,agent_id:host.agent_id,attempt,state:'queued',error:'',inspect:false});save(row,targets);
           });
         } catch(e) {target.state='waiting';target.error=e instanceof Error?e.message:'website_cleanup_pending';}
       }
-      save(row,targets,targets.some(t=>t.state==='unknown')?'unknown':targets.some(t=>t.state==='failed')?'failed':'pending');
+      save(row,targets,targets.some(t=>t.state==='unknown')?'unknown':targets.some(t=>t.state==='blocked')?'blocked':targets.some(t=>t.state==='failed')?'failed':'pending',targets.find(t=>t.error)?.error??'');
       if(targets.every(t=>t.state==='done')) {
         try {db.transaction(()=>{save(row,targets,'cleaned');store.remove(site.id,site.revision);db.run("UPDATE ops_website_deletions SET state='succeeded',error='',updated_at=? WHERE website_id=?",at(),site.id);});}
         catch(e){save(row,targets,'pending',e instanceof Error?e.message:'website_cleanup_finalize_pending');}

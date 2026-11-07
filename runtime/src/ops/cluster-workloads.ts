@@ -1,6 +1,7 @@
 import {websiteDeleting} from './website-deletions.js';
 import { blockingAgentJobSQL } from "../server/agent-job-fence.js";
 import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
+import {recoveryBlocked,recoveryFailureLimit} from './recovery.js';
 import {createAvailability, minimumAvailable, graceMilliseconds} from './availability.js';
 import {machineServiceAddresses} from "../server/host-network.js";
 import {automaticEntry} from './automatic-entry.js';
@@ -363,6 +364,7 @@ export function createClusterWorkloads(
       states = new Map(evaluatedRows(key).map(i => [i.id,i]));
     const confirmed = (i: Row) => !!states.get(i.id)?.ready || states.get(i.id)?.availability === 'grace' && i.healthy === 1;
     let bytes = 0;
+    const recoveryRows=tableExists('reconciliation_resources')?db.all<Row>("SELECT resource_key,agent_id,machine_id,state,code,failures,next_attempt_at FROM reconciliation_resources WHERE provider='deployment.instance' AND owner_id=? AND deleted=0",key):[];
     for (const i of instances) {
       const observation = JSON.parse(i.observed_json),
         summary = {
@@ -386,6 +388,7 @@ export function createClusterWorkloads(
           last_seen: i.last_seen,
           health_failures: i.health_failures,
           restart_count: i.restart_count,
+          recovery:recoveryRows.find(v=>v.resource_key===i.id&&v.agent_id===i.agent_id&&v.machine_id===i.machine_id),
           observed: {
             digest: observation.digest ?? "",
             container_count: observation.containers?.length ?? 0,
@@ -1995,7 +1998,7 @@ export function createClusterWorkloads(
       i,
       a.spec.role === "openresty" ? "gateway.inspect" : "workload.inspect",
       { ...health(a, i), ...(authRequired ? { auth_required: true } : {}), ...(proof ? {...proof.config,reconciliation_hash:proof.hash} : {}) },
-      i.desired_generation,
+      proof ? String(a.revision) : i.desired_generation,
       actor,
     );
   }
@@ -2528,6 +2531,7 @@ export function createClusterWorkloads(
             ? "stopped"
             : "running";
         healthy = run.result.healthy === true && state === "running" ? 1 : 0;
+        if(inspection&&config.reconciliation_hash&&run.result.configuration_matches===true)observed=i.desired_generation;
         if (!inspection) {
           observed = i.desired_generation;
           const actual = new Set(
@@ -3269,8 +3273,6 @@ export function createClusterWorkloads(
       if(!online(r.agent_id))return {state:'pending',code:'agent_offline'};
       if(!operationExecutionCapabilities(deps,r.agent_id).includes('operations.platform.reconciliation.v1'))return {state:'blocked',code:'reconciliation_agent_upgrade_required'};
       if(busy(i))return {state:'pending',code:'deployment_busy',job_id:i.current_run_id};
-      const locked=db.get<Row>(`SELECT id,state FROM agent_jobs j WHERE agent_id=? AND ${blockingAgentJobSQL(db,'j')} LIMIT 1`,r.agent_id);
-      if(locked)return {state:locked.state==='unknown'?'blocked':'pending',code:locked.state==='unknown'?'unknown_execution_result':'machine_busy'};
       const a=desired(store.get(r.owner_id),i.cluster_id);
       if(i.retired&&!drained(a,i))return {state:'pending',code:'deployment_draining'};
       const repair=()=>{
@@ -3289,12 +3291,24 @@ export function createClusterWorkloads(
       const config=proof?JSON.parse(deps.decrypt(proof.payload_cipher)).resource.config:{};
       const result=proof?JSON.parse(proof.result_json):{};
       const inspecting=config.reconciliation_hash===r.desired_hash&&config.task?.endsWith('.inspect');
-      if(inspecting && r.state!=='in_sync' && proof?.state==='succeeded' && deps.now().getTime()-Date.parse(proof.updated_at)<60000) {
+      const verify=()=>{const run=inspect(a,i,r.actor,{hash:r.desired_hash,config:{...(r.desired.state==='running'?r.desired.config:{}),reconciliation_resource_id:r.id,reconciliation_generation:r.generation}});return {state:'pending' as const,code:'verifying_deployment',job_id:run?.id};};
+      const verified=inspecting && r.state!=='in_sync' && proof?.state==='succeeded' && deps.now().getTime()-Date.parse(proof.updated_at)<60000;
+      if(verified) {
         const stopped=result.running===false || Array.isArray(result.containers)&&result.containers.every((c:Row)=>!c.running);
         const removed=result.present===false || Array.isArray(result.containers)&&result.containers.length===0;
         if(r.desired.state==='running'?result.configuration_matches===true&&result.healthy===true&&!stopped:r.desired.state==='removed'?removed:stopped)
           return {state:'in_sync',job_id:proof.id};
+      }
+      // Consuming a completed observation needs no machine execution slot.
+      const locked=db.get<Row>(`SELECT id,state FROM agent_jobs j WHERE agent_id=? AND ${blockingAgentJobSQL(db,'j')} LIMIT 1`,r.agent_id);
+      if(locked)return {state:locked.state==='unknown'?'blocked':'pending',code:locked.state==='unknown'?'unknown_execution_result':'machine_busy',job_id:r.job_id};
+      if(verified) {
+        if(r.failures>=recoveryFailureLimit)return {state:'blocked',code:'deployment_recovery_exhausted',job_id:proof!.id};
         return repair();
+      }
+      if(proof&&['failed','cancelled'].includes(proof.state)&&(recoveryBlocked(String(result.code??''))||r.failures>=recoveryFailureLimit)) {
+        if(deps.now().getTime()-Date.parse(proof.updated_at)<300000)return {state:'blocked',code:recoveryBlocked(String(result.code??''))?String(result.code):'deployment_recovery_exhausted',job_id:proof.id};
+        return verify();
       }
       if(proof&&['failed','cancelled'].includes(proof.state)&&r.state!=='drifted')return {state:'drifted',code:'deployment_attempt_failed',job_id:proof.id};
       // Failed applies are retried through the current authorized desired state;
@@ -3302,8 +3316,7 @@ export function createClusterWorkloads(
       if(proof&&['failed','cancelled'].includes(proof.state)&&!config.task?.endsWith('.inspect')) {
         return repair();
       }
-      const run=inspect(a,i,r.actor,{hash:r.desired_hash,config:{...(r.desired.state==='running'?r.desired.config:{}),reconciliation_resource_id:r.id,reconciliation_generation:r.generation}});
-      return {state:'pending',code:'verifying_deployment',job_id:run?.id};
+      return verify();
     },
   });
   return {

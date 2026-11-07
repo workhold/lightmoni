@@ -58,6 +58,20 @@ test('known failures retry with bounded backoff, in-flight ticks coalesce and su
   actual=true;f.advance(300001);await f.registry.tick();assert.equal(f.registry.inventory('m-a').resources[0].state,'in_sync');assert.equal(f.registry.inventory('m-a').resources[0].failures,0);
   actual=false;f.advance();await f.registry.tick();assert.equal(f.registry.inventory('m-a').resources[0].state,'drifted');
 });
+test('machine waiters retain proofs and receive execution slots across ticks and restart',async t=>{
+ const f=setup(t),targets=Array.from({length:4},(_,n)=>resource('app-'+n));let locked=false;const served:string[]=[];
+ const provider={kind:'test.fair',category:'deployment' as const,collect:()=>targets,reconcile:(r:any)=>{
+  if(locked)return {state:'pending' as const,code:'machine_busy'};
+  locked=true;served.push(r.key);return {state:'pending' as const,code:'verifying_deployment',job_id:'proof-'+r.key};
+ }};
+ f.registry.register(provider);
+ for(let n=0;n<4;n++){
+  locked=false;await f.registry.tick();f.advance(15001);
+  if(n===1){await f.reopen();f.registry.register(provider);}
+ }
+ assert.equal(new Set(served).size,4,JSON.stringify(served));
+ const first=f.registry.inventory('m-a').resources.find(r=>r.resource_key===served[0])!;assert.equal(first.job_id,'proof-'+served[0]);
+});
 test('dependencies must be current and on the same machine; binding changes retain cleanup intent',async t=>{
   const f=setup(t);let agent='a-a',dependencyReady=false,applies=0;
   f.registry.register({kind:'test.dependency',category:'custom',collect:()=>[resource('dependency')],reconcile:()=>({state:dependencyReady?'in_sync':'pending'})});

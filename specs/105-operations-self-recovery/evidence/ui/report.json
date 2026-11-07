@@ -1,0 +1,69 @@
+{
+  "passed": 12,
+  "checks": [
+    {
+      "language": "zh-CN",
+      "width": 390,
+      "code": "machine_busy"
+    },
+    {
+      "language": "zh-CN",
+      "width": 390,
+      "code": "verifying_deployment"
+    },
+    {
+      "language": "zh-CN",
+      "width": 390,
+      "code": "gateway_directory_ownership_required"
+    },
+    {
+      "language": "zh-CN",
+      "width": 1440,
+      "code": "machine_busy"
+    },
+    {
+      "language": "zh-CN",
+      "width": 1440,
+      "code": "verifying_deployment"
+    },
+    {
+      "language": "zh-CN",
+      "width": 1440,
+      "code": "gateway_directory_ownership_required"
+    },
+    {
+      "language": "en-US",
+      "width": 390,
+      "code": "machine_busy"
+    },
+    {
+      "language": "en-US",
+      "width": 390,
+      "code": "verifying_deployment"
+    },
+    {
+      "language": "en-US",
+      "width": 390,
+      "code": "gateway_directory_ownership_required"
+    },
+    {
+      "language": "en-US",
+      "width": 1440,
+      "code": "machine_busy"
+    },
+    {
+      "language": "en-US",
+      "width": 1440,
+      "code": "verifying_deployment"
+    },
+    {
+      "language": "en-US",
+      "width": 1440,
+      "code": "gateway_directory_ownership_required"
+    }
+  ],
+  "errors": [],
+  "unexpected_requests": [],
+  "api_writes": 0,
+  "source_bundle": true
+}

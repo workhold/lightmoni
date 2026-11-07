@@ -1865,8 +1865,8 @@ export async function executePlatform(
       },
     };
   }
-  if (c.task === 'website.remove') return {verified:true,data:await removeWebsite(context,c.website_id,(config,digest)=>renderGateway(config,digest,false,true))};
-  if (c.task === 'website.inspect') return {verified:true,data:await inspectWebsiteRemoval(context,c.website_id)};
+  if (c.task === 'website.remove') return {verified:true,data:await removeWebsite(context,c.website_id,(config,digest)=>renderGateway(config,digest,false,true),c.legacy_gateways??[])};
+  if (c.task === 'website.inspect') return {verified:true,data:await inspectWebsiteRemoval(context,c.website_id,c.legacy_gateways??[])};
   if (c.task.startsWith("workload.")) return fitStorageReceipt(await executeWorkload(payload, context));
   if (c.task.startsWith("gateway.")) return fitStorageReceipt(await executeGateway(payload, context));
   if (c.task === "certificate.install") return installCertificate(c, context);

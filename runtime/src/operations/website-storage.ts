@@ -7,9 +7,10 @@ import { websiteGroups, websiteDigest, websiteStoragePaths } from './storage.js'
 import { authScopes } from './basic-auth.js';
 import { OperationRejectedError } from './errors.js';
 import type { OperationExecutionContext } from './types.js';
+import {legacyWebsitePlan,legacyVersionPlan,type LegacyGatewayScope} from './website-legacy-cleanup.js';
 
 type Row = Record<string, any>;
-const reject = (code: string): never => { throw new OperationRejectedError(code); };
+function reject(code:string):never { throw new OperationRejectedError(code); }
 const digestPattern = /^[a-f0-9]{64}$/;
 export type WebsiteRenderer = (config: Row, websiteID: string, sites: Row[], preview?: boolean) => string;
 export function gatewayIdentity(config: Row, versions: Record<string,string>) {
@@ -148,13 +149,37 @@ export async function websiteFilesMatch(platform:string,config:Row,versions:Reco
 }
 /** Remove only this website's owned tree and obsolete gateway include indexes.
  * Running gateways must first acknowledge the site's withdrawal. */
-export async function removeWebsite(context:OperationExecutionContext,websiteID:string,renderIndex:(c:Row,digest:string)=>string) {
-  websiteID=safeID(websiteID);const platform=await privateRoot(context,'platform'),family=join(platform,'gateways');
+async function cleanupGateways(context:OperationExecutionContext,platform:string,websiteID:string,scopes:LegacyGatewayScope[]) {
+  const family=join(platform,'gateways');
   let entries:string[]=[];
   try {const info=await lstat(family);if(info.isSymbolicLink()||!info.isDirectory())reject('UNSAFE_MANAGED_PATH');entries=await readdir(family);}
   catch(e:any){if(e.code!=='ENOENT')throw e;}
+  if(!Array.isArray(scopes)||scopes.length>100||scopes.some(s=>!s||typeof s.instance_id!=='string')||new Set(scopes.map(s=>s.instance_id)).size!==scopes.length)reject('INVALID_WEBSITE_CLEANUP_SCOPE');
+  const roots:string[]=[],legacy:Awaited<ReturnType<typeof legacyWebsitePlan>>[]=[];
   for(const entry of entries) {
-    safeID(entry);const root=await ownedGateway(platform,entry);
+    const root=join(family,safeID(entry)),info=await lstat(root);
+    if(info.isSymbolicLink()||!info.isDirectory())reject('GATEWAY_DIRECTORY_OWNERSHIP_REQUIRED');
+    // Inspection can leave an uninitialized directory. An empty directory has
+    // no include indexes; leave it untouched rather than inventing ownership.
+    if(!(await readdir(root)).length)continue;
+    const owner=await readJSON<Row|null>(join(root,'owner.json'),null),scope=scopes.find(s=>s.instance_id===entry);
+    if(!owner&&scope)legacy.push(await legacyWebsitePlan(context,platform,websiteID,scope));
+    else roots.push(await ownedGateway(platform,entry));
+  }
+  return {roots,legacy};
+}
+async function inactiveLegacyVersion(root:string,raw:Row|null,digest:string) {
+  if(raw?.version!==2||!digestPattern.test(raw.digest??'')||raw.digest===digest||!raw.website_versions)reject('LEGACY_WEBSITE_EVIDENCE_REQUIRED');
+  const pointer=join(root,'current');if(!(await lstat(pointer)).isSymbolicLink()||await readlink(pointer)!=='versions/'+raw.digest)reject('LEGACY_WEBSITE_EVIDENCE_REQUIRED');
+  const current=await readJSON<Row|null>(join(root,'versions',raw.digest,'websites.json'),null);
+  if(!current||Object.keys(current).length!==Object.keys(raw.website_versions).length||Object.entries(current).some(([id,value])=>value!==raw.website_versions[id]))reject('LEGACY_WEBSITE_EVIDENCE_REQUIRED');
+}
+export async function removeWebsite(context:OperationExecutionContext,websiteID:string,renderIndex:(c:Row,digest:string)=>string,scopes:LegacyGatewayScope[]=[]) {
+  websiteID=safeID(websiteID);const platform=await privateRoot(context,'platform');
+  const {roots,legacy}=await cleanupGateways(context,platform,websiteID,scopes);
+  await ownedWebsite(platform,websiteID);
+  for(const root of roots) {
+    const entry=root.split('/').at(-1)!;
     let raw=await readJSON<Row|null>(join(root,'state.json'),null);
     if(raw && raw.version!==2)reject('GATEWAY_STORAGE_LAYOUT_MISMATCH');
     if(raw?.website_versions?.[websiteID]) {
@@ -180,23 +205,24 @@ export async function removeWebsite(context:OperationExecutionContext,websiteID:
     for(const digest of versions) {
       if(!digestPattern.test(digest))reject('INVALID_GATEWAY_VERSION');const version=join(versionsRoot,digest);await directory(version);
       const references=await readJSON<Row|null>(join(version,'websites.json'),null);
+      if(!references&&(await readdir(version)).length){const scope=scopes.find(s=>s.instance_id===entry);if(!scope)reject('LEGACY_WEBSITE_EVIDENCE_REQUIRED');await inactiveLegacyVersion(root,raw,digest);legacy.push({instance_id:entry,...await legacyVersionPlan(version,scope)});}
       if(references?.[websiteID]) {
         if(raw?.digest===digest)reject('WEBSITE_STILL_ACTIVE');
         await rm(version,{recursive:true});
       }
     }
   }
+  for(const plan of legacy)await plan.apply();
   const paths=await ownedWebsite(platform,websiteID);
   if(paths)await rm(paths.root,{recursive:true});
-  return {website_id:websiteID,removed:true,absent:true};
+  return {website_id:websiteID,removed:true,absent:true,...(legacy.length?{legacy_gateways_cleaned:[...new Set(legacy.map(p=>p.instance_id))]}:{})};
 }
-export async function inspectWebsiteRemoval(context:OperationExecutionContext,websiteID:string) {
+export async function inspectWebsiteRemoval(context:OperationExecutionContext,websiteID:string,scopes:LegacyGatewayScope[]=[]) {
   websiteID=safeID(websiteID);const platform=await privateRoot(context,'platform'),owned=await ownedWebsite(platform,websiteID);
   let referenced=false;
-  const family=join(platform,'gateways');let entries:string[]=[];
-  try{const info=await lstat(family);if(info.isSymbolicLink()||!info.isDirectory())reject('UNSAFE_MANAGED_PATH');entries=await readdir(family);}catch(e:any){if(e.code!=='ENOENT')throw e;}
-  for(const entry of entries) {
-    const root=await ownedGateway(platform,safeID(entry));
+  const {roots,legacy}=await cleanupGateways(context,platform,websiteID,scopes);
+  if(legacy.some(p=>p.referenced))referenced=true;
+  for(const root of roots) {
     const raw=await readJSON<Row|null>(join(root,'state.json'),null);
     if(raw&&raw.version!==2)reject('GATEWAY_STORAGE_LAYOUT_MISMATCH');
     if(raw?.website_versions?.[websiteID]||raw?.retained_website_versions?.[websiteID])referenced=true;
@@ -204,7 +230,9 @@ export async function inspectWebsiteRemoval(context:OperationExecutionContext,we
     try{const info=await lstat(versions);if(info.isSymbolicLink()||!info.isDirectory())reject('UNSAFE_MANAGED_PATH');names=await readdir(versions);}catch(e:any){if(e.code!=='ENOENT')throw e;}
     for(const digest of names) {
       if(!digestPattern.test(digest))reject('INVALID_GATEWAY_VERSION');const info=await lstat(join(versions,digest));if(info.isSymbolicLink()||!info.isDirectory())reject('UNSAFE_MANAGED_PATH');
-      if((await readJSON<Row|null>(join(versions,digest,'websites.json'),null))?.[websiteID])referenced=true;
+      const references=await readJSON<Row|null>(join(versions,digest,'websites.json'),null);
+      if(references?.[websiteID])referenced=true;
+      if(!references&&(await readdir(join(versions,digest))).length){const scope=scopes.find(s=>s.instance_id===root.split('/').at(-1));if(!scope)reject('LEGACY_WEBSITE_EVIDENCE_REQUIRED');await inactiveLegacyVersion(root,raw,digest);if((await legacyVersionPlan(join(versions,digest),scope)).referenced)referenced=true;}
     }
   }
   return {website_id:websiteID,absent:!owned&&!referenced};

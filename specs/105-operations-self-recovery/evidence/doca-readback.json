@@ -1,0 +1,52 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved": true,
+  "checks": [
+    {
+      "id": "3c5bc445-b382-4a24-b265-411d9f770994",
+      "seq": 1762,
+      "textMatches": true
+    },
+    {
+      "id": "sdd105-scheduling-v2",
+      "seq": 1762,
+      "textMatches": true
+    },
+    {
+      "id": "sdd105-cleanup-v2",
+      "seq": 1762,
+      "textMatches": true
+    },
+    {
+      "id": "sdd105-retries-v2",
+      "seq": 1762,
+      "textMatches": true
+    },
+    {
+      "id": "sdd105-apps-v2",
+      "seq": 1762,
+      "textMatches": true
+    },
+    {
+      "id": "sdd105-boundaries-v2",
+      "seq": 1762,
+      "textMatches": true
+    },
+    {
+      "id": "sdd105-flow-v2",
+      "seq": 1762,
+      "nodes": 8,
+      "edges": 12,
+      "nodesMatch": true,
+      "edgesMatch": true
+    }
+  ],
+  "preservation": {
+    "seq": 1762,
+    "original_blocks": 955,
+    "current_blocks": 955,
+    "total": 962,
+    "changed": [],
+    "order_preserved": true
+  }
+}
