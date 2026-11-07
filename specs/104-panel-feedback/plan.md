@@ -10,3 +10,7 @@
 - 验证：复用 loopback fixture 和项目 Playwright，先截图基线；实现后主 Agent 连续三轮关键交互与定向类型检查，桌面/窄屏/深色/放大实际看图；隔离视觉评审一轮。
 
 参考：https://1panel.pro/docs/v1/user_manual/logs/ （操作、访问、系统日志按用途组织）；https://docs.fit2cloud.com/1panel/user_manual/appstore/installed （既有 SDD 087 参考）。仅借鉴结构，不复制品牌或源码。
+
+## 用户授权的发布流程
+
+先将 Compose 固定标签和发布验收补入本 PR，核对远端main并合入；从该合入提交 git archive 构建独立上下文。复用既有分平台构建、45项成品检查与分块OCI发布器，分别验证amd64/arm64，核对实际产物后推送固定标签。回读发布内容与latest原值，清理隔离环境，将脱敏证据通过后续PR合入main。本次没有架构或部署拓扑变更。

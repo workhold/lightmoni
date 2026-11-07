@@ -14,4 +14,12 @@
 - 浅/深色、1366px 桌面、390px 窄屏和200%阅读无页面横向溢出；表格允许区域内横向滚动。隔离 fixture 覆盖成功、失败、unknown、保存失败保留输入和刷新读回，关键流程连续三轮。
 
 ## 架构影响
-不适用：仅前端呈现和既有事件入口，不改变 API、后台控制路径、权限、凭据边界、存储或部署拓扑。docs/system-design.md 与 Doca 无需改写。没有线上升级或合并授权，本次交付功能分支与面向 main 的 GitHub PR，不部署、不合并。
+不适用：仅前端呈现和既有事件入口，不改变 API、后台控制路径、权限、凭据边界、存储或部署拓扑。docs/system-design.md 与 Doca 无需改写。用户于 2026-11-07 授权将本次全部提交通过 GitHub PR 合入 main 并发布 Docker 镜像。发布 amd64/arm64 固定版本，保留既有 latest；本次不包含运行中生产部署的升级。
+
+## 合入与 Docker 发布验收
+
+- PR #137 的本次全部提交经 GitHub 合入 main，固定合入后的源码 revision 构建，不混入其他工作区未提交内容。
+- Compose 默认固定版本为 docker.heyphp.com/lightmoni/lightmoni:20261107-panel-feedback-v1。
+- amd64/arm64 成品检查均通过，镜像 revision、内置 Agent/SDK、静态 Web 和隔离 HTTP/ClickHouse 行为可验证。
+- 发布前校验 OCI blob SHA256 与经过测试的 rootfs/config 一致；发布后回读固定 manifest/index/revision。既有 latest 回读保持不变。
+- 发行证据通过同一 SDD 的后续 GitHub PR 留档并合入；运行时凭据仅留在受保护的临时文件或系统凭据助手中，完成后清理临时服务和凭据。
