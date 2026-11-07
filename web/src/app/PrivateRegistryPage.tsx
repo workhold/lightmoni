@@ -1,3 +1,4 @@
+import RegistryImagesPanel from './ops/RegistryImagesPanel';
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ReloadOutlined } from "@ant-design/icons";
@@ -73,6 +74,7 @@ export default function PrivateRegistryPage() {
   }, [load]);
   const explain = (code: string) => {
     const messages: Record<string, [string, string]> = {
+      registry_cleanup_in_progress: ["仓库正在清理，暂时暂停应用和网站配置。请等待完成或核查未知结果。", "Registry cleanup temporarily pauses application and website changes. Wait for completion or reconcile an unknown result."],
       invalid_host_ports: ["端口必须是 0～65535 的整数，并对应已声明的服务。", "Ports must be integers from 0 to 65535 for declared services."],
       duplicate_host_port: ["宿主端口不能重复；使用不同端口，或填 0 自动分配。", "Host ports must be unique. Choose different ports, or 0 for automatic allocation."],
       platform_revision_conflict: [
@@ -380,6 +382,7 @@ export default function PrivateRegistryPage() {
               )}
             </p>
           </div>
+          <RegistryImagesPanel registry={data} machineName={id=>overview.machines?.find(m=>m.id===id)?.name??id} clusterName={clusterName} onChange={()=>void load(true)}/>
           <div className="lm-ops-panel">
             <div className="lm-ops-subheading">
               <h3>{t("对外发布入口", "Publishing endpoint")}</h3>

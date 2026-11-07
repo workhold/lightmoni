@@ -1,3 +1,4 @@
+import {executeRegistry,validateRegistryConfig} from './registry-images.js';
 import { desiredHash, desiredJSON } from "../shared/desired-state.js";
 import {inspectRecoveryReview} from './instance-recovery-review.js';
 import {workloadContainersReady as ready} from './workload-readiness.js';
@@ -54,6 +55,8 @@ const INSTANCE_LABEL = "io.lightmoni.platform.instance";
 const OWNER_LABEL = "io.lightmoni.platform.owner";
 const TASKS = [
   "node.inspect",
+  "registry.inspect",
+  "registry.cleanup",
   "instance.recovery.inspect",
   "workload.apply",
   "workload.inspect",
@@ -370,6 +373,7 @@ export const platformDefinition: OperationDefinition = {
     "sync",
     "run",
     "certificate.install",
+    "cleanup",
     "hook.run",
   ],
   readOnly: ["inspect", "logs"],
@@ -378,6 +382,7 @@ export const platformDefinition: OperationDefinition = {
     if (!TASKS.includes(c.task)) reject("INVALID_PLATFORM_TASK");
     if (c.instance_id !== undefined) safeID(c.instance_id);
     if (c.task === "workload.apply") normalizeApplication(c.application);
+    if(c.task.startsWith("registry."))validateRegistryConfig(c);
     if(c.refresh_images!==undefined&&typeof c.refresh_images!=='boolean')reject('INVALID_IMAGE_REFRESH');
     if (['workload.apply','gateway.apply'].includes(c.task)) {if(c.image_cache)cachePolicy(c.image_cache);if(c.image_sources)imageSourcePolicy(c.image_sources);}
     if(c.task==='instance.recovery.inspect')safeID(c.instance_id);
@@ -386,7 +391,8 @@ export const platformDefinition: OperationDefinition = {
   publicConfig(c) {
     return { task: c.task, instance_id: c.instance_id };
   },
-  validateInput(_operation, v) {
+  validateInput(_operation, v, config) {
+    if(config.task?.startsWith('registry.') && _operation!==config.task.split('.').at(-1))reject('INVALID_REGISTRY_OPERATION');
     return object(v ?? {}, "input");
   },
 };
@@ -1837,6 +1843,7 @@ export async function executePlatform(
 ): Promise<OperationExecutionResult> {
   const c = platformDefinition.validate(payload.resource.config);
   payload = { ...payload, resource: { ...payload.resource, config: c } };
+  if(c.task.startsWith("registry."))return executeRegistry(c,context);
   if(c.task==='instance.recovery.inspect') {
     if(c.recovery_review)return {verified:true,data:await inspectRecoveryReview(c.recovery_review,context)};
     // Check all supported ownership selectors, including stopped containers and legacy gateway names.

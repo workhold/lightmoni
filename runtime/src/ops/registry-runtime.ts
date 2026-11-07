@@ -14,14 +14,14 @@ export function registryCacheScope(address: string): 'machine' | 'cluster' {
   return networkScope(address) === 'loopback' ? 'machine' : 'cluster';
 }
 
-export function registryTemplateSpec() {
+export function registryTemplateSpec(deleteEnabled = false) {
   const service = (port: number) => ({
     image: REGISTRY_IMAGE,
     restart: "unless-stopped",
     environment: {
       REGISTRY_HTTP_ADDR: `0.0.0.0:${port}`,
       REGISTRY_HTTP_DEBUG_ADDR: "127.0.0.1:0",
-      REGISTRY_STORAGE_DELETE_ENABLED: "false",
+      REGISTRY_STORAGE_DELETE_ENABLED: String(deleteEnabled),
       REGISTRY_HTTP_RELATIVEURLS: "true",
     },
   });

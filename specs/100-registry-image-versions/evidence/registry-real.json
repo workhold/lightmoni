@@ -1,0 +1,29 @@
+{
+  "registry": "registry:3.0.0",
+  "isolated": true,
+  "images": [
+    "lightmoni/api",
+    "lightmoni/worker"
+  ],
+  "beforeTags": [
+    "stable",
+    "v1",
+    "v2"
+  ],
+  "cleanup": {
+    "deleted": 2,
+    "deleted_tags": 2,
+    "retained": 1,
+    "failed": 0,
+    "skipped": 0,
+    "failures": [],
+    "partial": false,
+    "scanned": 3,
+    "observed_at": "2026-11-07T02:33:30.873Z"
+  },
+  "afterTags": [
+    "stable",
+    "v2"
+  ],
+  "retryDeleted": 0
+}

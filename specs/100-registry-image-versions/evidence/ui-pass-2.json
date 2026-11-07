@@ -1,0 +1,20 @@
+{
+  "pass": 2,
+  "checks": [
+    "deployment selector",
+    "repository filter",
+    "versions and app usage",
+    "pagination",
+    "empty image",
+    "read failure and retry",
+    "cancel avoids deletion",
+    "global cleanup confirmation",
+    "pending disables duplicate",
+    "confirmed result and refresh",
+    "English",
+    "reload persistence",
+    "resume cleanup after reload",
+    "partial failure remains warning"
+  ],
+  "pageErrors": []
+}

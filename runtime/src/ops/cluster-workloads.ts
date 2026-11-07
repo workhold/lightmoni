@@ -614,7 +614,7 @@ export function createClusterWorkloads(
     )
       fail(409, "service_name_conflict");
     if(role==='registry') {
-      Object.assign(s,registryTemplateSpec());
+      Object.assign(s,registryTemplateSpec(true));
       s.deployments=s.deployments.map((d:Row)=>({...d,host_ports:d.host_ports?{registry:d.host_ports.registry??0}:undefined}));
     }
     const declared = (s.ports ?? []).map((p: Row) => ({

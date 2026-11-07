@@ -1,3 +1,5 @@
+import {assertRegistryIdle} from './registry-usage.js';
+import {validateRegistryPayload} from './registry-content.js';
 import type { ReconciliationRegistry } from "../reconciliation/registry.js";
 import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
 import {oneShotServices} from '../operations/workload-readiness.js';
@@ -265,6 +267,7 @@ export class OperationsPlatformStore implements PlatformStore {
     const key = id(),
       at = this.at();
     this.deps.db.transaction(() => {
+      if(kind === "application" || kind === "website")assertRegistryIdle(this.deps.db);
       const valid = this.definition(kind).validate(
         safeObject(spec),
         undefined,
@@ -337,6 +340,7 @@ export class OperationsPlatformStore implements PlatformStore {
     this.requireActor(actor);
     this.deps.db.transaction(() => {
       const previous = this.get(key);
+      if(previous.kind === "application" || previous.kind === "website")assertRegistryIdle(this.deps.db);
       if (previous.revision !== revision)
         fail(409, "platform_revision_conflict");
       if (
@@ -405,6 +409,7 @@ export class OperationsPlatformStore implements PlatformStore {
     if (this.closed) fail(503, "platform_shutting_down");
     this.deps.db.transaction(() => {
       const r = this.get(key);
+      if(r.kind === "application" || r.kind === "website")assertRegistryIdle(this.deps.db);
       if (r.revision !== revision) fail(409, "platform_revision_conflict");
       if (
         this.deps.db.get(
@@ -520,6 +525,7 @@ export class OperationsPlatformStore implements PlatformStore {
     return this.deps.db.transaction(() => {
       const duplicate = this.duplicate(idempotencyKey);
       if (duplicate) return duplicate;
+      if(config.task === "workload.apply" || config.task === "gateway.apply")assertRegistryIdle(this.deps.db);
       const current = this.get(resource.id);
       if (current.revision !== resource.revision)
         fail(409, "platform_revision_conflict");
@@ -564,6 +570,7 @@ export class OperationsPlatformStore implements PlatformStore {
         ],
         capabilities: [
           "operations.platform",
+          ...(String(config.task).startsWith("registry.") ? ["operations.platform.registry.v1"] : []),
           ...(config.health ? ['operations.platform.readiness.v1'] : []),
           ...(config.auth_required ||
           config.sites?.some(
@@ -834,6 +841,7 @@ export class OperationsPlatformStore implements PlatformStore {
       if(!desired || desired.owner_id!==current.id || desired.agent_id!==job.agent_id || desired.generation!==config.reconciliation_generation || desired.desired_hash!==config.reconciliation_hash ||
         !this.deps.db.get('SELECT id FROM managed_machines WHERE id=? AND agent_id=?',desired.machine_id,job.agent_id))fail(403,'reconciliation_generation_changed');
     }
+    validateRegistryPayload(this,payload.resource.config,job.agent_id,current.id);
     validateImageSourcesPayload(this,payload.resource.config);
     validateInstanceRecoveryPayload(this,payload.resource.config,job.agent_id);
     this.definition(current.kind).validatePayload?.(

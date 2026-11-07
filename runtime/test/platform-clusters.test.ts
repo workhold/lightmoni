@@ -14,7 +14,7 @@ import { registerOperationsPlatform } from "../src/ops/index.js";
 import { extendedDefinitions } from "../src/ops/catalog/index.js";
 import { applicationCatalog,catalogInstallation } from "../src/ops/catalog.js";
 import type { Dependencies } from "../src/shared/types.js";
-import { registryCacheFor } from "../src/ops/registry-runtime.js";
+import { registryCacheFor, registryTemplateSpec } from "../src/ops/registry-runtime.js";
 import { createPrivateRegistryController } from "../src/ops/private-registry.js";
 import {createApplicationTelemetry} from '../src/ops/application-telemetry.js';
 import {automaticEntry} from '../src/ops/automatic-entry.js';
@@ -159,7 +159,7 @@ async function fixture(t: any, fetcher?: typeof fetch, reconciliationEnabled=fal
     },
     state = "succeeded",
   ) => {
-    const job = jobs.claim(agentID, ["operations.platform","operations.platform.readiness.v1","operations.platform.image-refresh.v1","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1","operations.platform.reconciliation.v1"]);
+    const job = jobs.claim(agentID, ["operations.platform","operations.platform.registry.v1","operations.platform.readiness.v1","operations.platform.image-refresh.v1","operations.platform.image-cache.v1","operations.platform.image-sources.v1","operations.platform.instance-recovery.v1","operations.platform.reconciliation.v1"]);
     assert.ok(job);
     const payload = platform.resolvePayload(job);
     for (const [n, phase] of [
@@ -2137,4 +2137,55 @@ test('removed records with retained directories retire without blocking verified
   const other=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id!=?',old.id);assert.equal(other.agent_id,'c');assert.equal(other.retired,0);
   assert.equal(done.receipt.instances.find((i:any)=>i.instance_id===old.id).data_path,retained.data_path);
  }
+});
+
+async function registryContentFixture(t:any) {
+ const f=await fixture(t),c=f.createCluster(['ma']);
+ f.db.run('UPDATE agents SET heartbeat=? WHERE id=?',JSON.stringify({operations_capabilities:['operations.platform.registry.v1']}),'a');
+ const installed=await f.req('/private-registry/deployments','POST',{confirmed:true,revision:0,cluster_id:c.id,machine_id:'ma'});assert.equal(installed.status,201);f.finish('a');
+ return {...f,c,registry:f.store.get(installed.body.application.id,'application')};
+}
+test('registry content requires admin, a registered deployment and the new executor capability',async t=>{
+ const f=await registryContentFixture(t);
+ assert.equal(f.registry.spec.compose.services.registry.environment.REGISTRY_STORAGE_DELETE_ENABLED,'true');
+ assert.equal(registryTemplateSpec().compose.services.registry.environment.REGISTRY_STORAGE_DELETE_ENABLED,'false');
+ assert.equal((await f.req('/private-registry/images/query','POST',{cluster_id:f.c.id},'member')).status,403);
+ assert.equal((await f.req('/private-registry/images/query','POST',{cluster_id:'unknown'})).status,400);
+ assert.equal((await f.req('/private-registry/images/query','POST',{cluster_id:f.c.id,repository:'../bad'})).status,400);
+ assert.equal((await f.req('/private-registry/images/cleanup','POST',{cluster_id:f.c.id,revision:f.registry.revision})).status,400);
+ assert.equal((await f.req('/private-registry/images/cleanup','POST',{cluster_id:f.c.id,confirmed:true,revision:0})).status,409);
+ const r=await f.req('/private-registry/images/query','POST',{cluster_id:f.c.id,endpoint:'http://attacker',repository:'team/api'});assert.equal(r.status,202);
+ const {payload}=f.finish('a',{repository:'team/api',versions:[],next:null});assert.equal(payload.resource.config.task,'registry.inspect');assert.ok(payload.resource.config.endpoint.startsWith('http://10.0.0.1:'));assert.equal(payload.resource.config.repository,'team/api');
+ f.db.run("UPDATE agents SET heartbeat='{}' WHERE id='a'");assert.equal((await f.req('/private-registry/images/query','POST',{cluster_id:f.c.id})).body.error,'registry_executor_upgrade_required');
+});
+test('cleanup captures Compose and old observed references and freezes application writes until completion',async t=>{
+ const f=await registryContentFixture(t),host=new URL((await f.req('/private-registry')).body.deployments[0].endpoint).host;
+ const a=f.app(f.c,{service_name:'api',image:host+'/team/api:v1'});await f.action(a,'deploy');f.finish('a');
+ f.store.update(a.id,a.revision,a.name,{...a.spec,image:host+'/team/api:v2'},'admin');
+ f.app(f.c,{service_name:'worker',mode:'compose',compose:{services:{worker:{image:host+'/worker:release'}}}});
+ const other=f.createCluster(['mb'],'Other cluster');f.app(other,{service_name:'other-api',image:host+'/team/api:v3',deployments:[{cluster_id:other.id,machine_ids:['mb'],cpu:0.25,memory_mb:128}]});
+ const r=await f.req('/private-registry/images/cleanup','POST',{cluster_id:f.c.id,confirmed:true,revision:f.registry.revision});assert.equal(r.status,202,JSON.stringify(r.body));assert.equal((await f.req('/private-registry')).body.cleanup_run.id,r.body.id);
+ assert.throws(()=>f.app(f.c,{service_name:'new-app'}),/registry_cleanup_in_progress/);
+ const current=f.store.get(a.id);assert.throws(()=>f.store.update(a.id,current.revision,current.name,current.spec,'admin'),/registry_cleanup_in_progress/);assert.throws(()=>f.store.remove(a.id,current.revision),/registry_cleanup_in_progress/);assert.throws(()=>f.store.queue(current,'a','apply',{task:'workload.apply'},'admin'),/registry_cleanup_in_progress/);
+ assert.equal((await f.req('/private-registry/images/cleanup','POST',{cluster_id:f.c.id,confirmed:true,revision:f.registry.revision})).body.error,'registry_cleanup_in_progress');
+ const {payload}=f.finish('a',{deleted:2,deleted_tags:2,retained:3,failed:0});assert.deepEqual(new Set(payload.resource.config.references.map((r:any)=>r.repository+':'+r.reference)),new Set(['team/api:v1','team/api:v2','team/api:v3','worker:release']));assert.equal((await f.req('/private-registry')).body.cleanup_run,null);f.app(f.c,{service_name:'after-cleanup'});
+});
+test('registry cleanup claim revalidates references even against out-of-band storage changes',async t=>{
+ const f=await registryContentFixture(t),host=new URL((await f.req('/private-registry')).body.deployments[0].endpoint).host,a=f.app(f.c,{service_name:'api',image:host+'/api:v1'});
+ const r=await f.req('/private-registry/images/cleanup','POST',{cluster_id:f.c.id,confirmed:true,revision:f.registry.revision});assert.equal(r.status,202);
+ f.db.run('UPDATE ops_platform_resources SET spec_cipher=? WHERE id=?',f.deps.encrypt(JSON.stringify({...a.spec,image:host+'/api:new'})),a.id);
+ const job=f.jobs.claim('a',['operations.platform','operations.platform.registry.v1']);assert.ok(job);assert.throws(()=>f.platform.resolvePayload(job),/registry_usage_changed/);
+});
+
+test('registry cleanup unknown retains a durable fence until the exact managed job is audited',async t=>{
+ const f=await registryContentFixture(t);
+ const queued=await f.req('/private-registry/images/cleanup','POST',{cluster_id:f.c.id,revision:f.registry.revision,confirmed:true});assert.equal(queued.status,202);
+ const {job}=f.finish('a',{code:'registry_delete_unknown'},'unknown');
+ assert.throws(()=>f.app(f.c,{service_name:'while-unknown'}),/registry_cleanup_in_progress/);
+ f.db.exec("CREATE TABLE privileged_jobs(id TEXT PRIMARY KEY,agent_id TEXT,task_run_id TEXT,capability TEXT,state TEXT,resolved_at TEXT,resolved_by TEXT,resolution_reason TEXT)");
+ f.db.run("INSERT INTO privileged_jobs VALUES(?,?,?,'operations.managed.v1','unknown','2026-10-29T02:00:00Z','admin','Inspected registry')",job.id,'wrong-agent',job.id);
+ assert.throws(()=>f.app(f.c,{service_name:'wrong-audit'}),/registry_cleanup_in_progress/);
+ f.db.run("UPDATE privileged_jobs SET agent_id='a' WHERE id=?",job.id);
+ assert.equal((await f.req('/private-registry')).body.cleanup_run,null);
+ f.app(f.c,{service_name:'after-audited-unknown'});
 });
