@@ -1,0 +1,14 @@
+{
+  "baseline": "05ca6ee601700008e09969a05088a8c91734e0fc",
+  "layout_version": 2,
+  "runtime_typecheck": "passed",
+  "web_typecheck": "passed",
+  "web_build": "passed",
+  "related_tests": {"total": 244, "passed": 239, "failed": 0, "skipped": 5},
+  "executor_recovery_recheck": {"total": 23, "passed": 23, "failed": 0},
+  "real_linux_docker": {"report": "storage-v2-live.json", "check_groups": 5, "passed": true, "persistent_application_data_preserved": true, "website_directory_cleanup_verified": true, "failed_reload_restored": true},
+  "ui": {"report": "ui-report.json", "languages": ["zh-CN", "en-US"], "widths": [1440, 390], "page_errors": []},
+  "architecture_readback": "doca-readback.json",
+  "production_changed": false,
+  "legacy_data_migrated": false
+}

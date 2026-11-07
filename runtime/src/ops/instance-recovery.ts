@@ -321,7 +321,7 @@ function reviewView(row:Row){const proof=JSON.parse(row.proof_json);return {id:r
  snapshot:JSON.parse(row.snapshot_json),proof:Array.isArray(proof)?proof:[],receipt:JSON.parse(row.receipt_json)};}
 function reviewInput(row:Row,stage:'plan'|'apply'){
  const value=JSON.parse(row.snapshot_json);
- return {task:'instance.recovery.inspect',instance_id:value.instances[0].instance_id,cluster_id:value.instances[0].cluster_id,
+ return {task:'instance.recovery.inspect',storage_layout:2,instance_id:value.instances[0].instance_id,cluster_id:value.instances[0].cluster_id,
   recovery_review:{plan_id:row.id,stage,instances:value.instances.map((i:Row)=>({instance_id:i.instance_id,owner_id:i.owner_id,kind:i.role==='openresty'?'gateway':'workload'}))}};
 }
 function validateReview(store:PlatformStore,config:Row,agentID:string){
@@ -340,7 +340,7 @@ function proofFor(store:PlatformStore,row:Row,run:PlatformRun,config:Row){
   const p=result.instances[index];
   if(p?.instance_id!==entry.instance_id||p.owned!==true||!Array.isArray(p.containers)||p.containers.length>100||p.containers.some((v:any)=>typeof v!=='string'||!/^[a-f0-9]{12,64}$/.test(v))
    ||new Set(p.containers).size!==p.containers.length||!Array.isArray(p.mounts)||p.mounts.length>1000||p.mounts.some((m:any)=>!m||!p.containers.includes(m.container_id)||!['bind','volume'].includes(m.type)||typeof m.read_only!=='boolean'||![m.source,m.target].every((v:any)=>typeof v==='string'&&v.startsWith('/')&&v.length<=1024&&!/[\u0000-\u001f\u007f]/.test(v)))||typeof p.managed_state!=='boolean'||typeof p.data_present!=='boolean'
-   ||typeof p.data_path!=='string'||p.data_path.length>1024||!p.data_path.endsWith('/'+(entry.role==='openresty'?'gateways':'workloads')+'/'+entry.instance_id)
+   ||typeof p.data_path!=='string'||p.data_path.length>1024||!p.data_path.endsWith(entry.role==='openresty'?'/gateways/'+entry.instance_id:'/applications/'+entry.owner_id+'/instances/'+entry.instance_id)
    ||!/^[a-f0-9]{64}$/.test(p.inventory_sha256)||!(p.state_sha256===''&&!p.managed_state||p.managed_state&&/^[a-f0-9]{64}$/.test(p.state_sha256)))fail(409,'workload_recovery_invalid_proof');
   const retire=!p.containers.length&&!p.data_present&&!p.managed_state&&(!entry.last_ready_at||entry.desired_state==='removed');
   const retained=entry.desired_state==='removed'&&!p.containers.length&&p.data_present;

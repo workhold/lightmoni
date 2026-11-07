@@ -149,7 +149,7 @@ async function fixture(t: any, fetcher?: typeof fetch) {
     },
     state = "succeeded",
   ) => {
-    const job = jobs.claim(agentID, ["operations.platform"]);
+    const job = jobs.claim(agentID, ["operations.platform","operations.platform.storage.v2"]);
     assert.ok(job);
     const payload = platform.resolvePayload(job);
     for (const [n, phase] of [
@@ -946,14 +946,14 @@ for (const protocol of ["http", "https"]) {
       signatures[1].last_bundle_sig,
     );
     await f.platform.tick();
-    assert.ok(!f.jobs.claim("a", ["operations.platform"]));
-    assert.ok(!f.jobs.claim("b", ["operations.platform"]));
+    assert.ok(!f.jobs.claim("a", ["operations.platform","operations.platform.storage.v2"]));
+    assert.ok(!f.jobs.claim("b", ["operations.platform","operations.platform.storage.v2"]));
 
     // Health observations do not alter manual membership or trigger a gateway rewrite.
     f.db.run("UPDATE ops_cluster_instances SET healthy=0 WHERE owner_id=?",app.id);
     await f.platform.tick();
-    assert.equal(f.jobs.claim('a',['operations.platform']),null);
-    assert.equal(f.jobs.claim('b',['operations.platform']),null);
+    assert.equal(f.jobs.claim('a',['operations.platform','operations.platform.storage.v2']),null);
+    assert.equal(f.jobs.claim('b',['operations.platform','operations.platform.storage.v2']),null);
     const retained=await f.req('/resources/'+managed.id+'/nginx?cluster_id='+c.id);
     assert.ok(retained.body.config.includes(`server 10.0.0.1:${port('ma','http')} `));
     assert.ok(retained.body.config.includes(`server [fd00::2]:${port('mb','http')} `));

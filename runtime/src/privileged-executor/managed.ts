@@ -1,3 +1,4 @@
+import { MANAGED_DATA_ROOT } from '../operations/storage.js';
 import { prepareManagedWeb } from "./managed-web-permissions.js";
 import { startManagedGateway } from "./managed-gateway.js";
 import { join } from 'node:path';
@@ -14,7 +15,7 @@ import { inspectManagedDockerDaemon } from './docker.js';
 import { assertRoot,boundedFile,durableWrite,rootPath,secureDirectory,refuse } from './security.js';
 import { executeScript,interpreterDigest,interpreterPath,localAccount,productionScriptHost,type ExecutionStartGuard,type ScriptOutcome } from './scripts.js';
 
-export const MANAGED_DATA_DIR='/var/lib/lightmoni-managed';
+export const MANAGED_DATA_DIR=MANAGED_DATA_ROOT;
 /** Only after explicit center reconciliation of this exact root journal row. */
 export function releaseManagedOperationLock(row:{payload:any}){
   if(row.payload?.kind!=='managed'||!row.payload.operation_payload)return;
