@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261107-website-identity-573b644
+    image: docker.heyphp.com/lightmoni/lightmoni:20261107-storage-registry-94bcbbc
     pull_policy: missing
     build:
       context: .

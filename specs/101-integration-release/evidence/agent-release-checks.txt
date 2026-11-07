@@ -1,0 +1,10 @@
+✔ Agent release excludes retired standalone lifecycle modules from copied and hashed runtime trees (0.807458ms)
+✔ Linux release bundles contain checked architecture, portable dependencies and a working launcher (11479.979875ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11682.424834

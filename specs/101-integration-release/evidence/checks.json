@@ -1,0 +1,39 @@
+{
+  "source_revision": "94bcbbcdede2ee9084345438080d64bae6cc1ca5",
+  "merged_prs": [
+    129,
+    130,
+    131
+  ],
+  "typecheck": {
+    "runtime": "passed",
+    "ai": "passed",
+    "web": "passed"
+  },
+  "build": "passed",
+  "integration_tests": {
+    "total": 255,
+    "passed": 250,
+    "failed": 0,
+    "skipped": 5
+  },
+  "storage_ui": "passed",
+  "registry_ui_passes": 3,
+  "agent_release_checks": {
+    "passed": 2,
+    "failed": 0
+  },
+  "image_smoke": {
+    "amd64": 45,
+    "arm64": 45
+  },
+  "initial_upload_failure": "HTTP 413, monolithic upload exceeds existing proxy request body limit; chunked publisher used",
+  "build_sources": {
+    "npm": "https://registry.npmmirror.com",
+    "node": "https://npmmirror.com/mirrors/node",
+    "node_checksum_source": "https://nodejs.org/dist",
+    "debian": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+    "debian_security": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+    "tls_and_integrity_checks_preserved": true
+  }
+}
