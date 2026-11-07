@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-07",
+  "host": "zz-bj-1",
+  "backup": "/root/lightmoni-sdd102-20261107",
+  "backup_permissions": "root private directory 0700; inventory/config files 0600; no credentials printed",
+  "quiescence": "Agent stopped, waited for no running managed execution unit and no execution lock, then helper and four selected containers stopped",
+  "state_backup": "full platform directory copied preserving attributes after containers stopped",
+  "volumes": [
+    {"service":"gitea","files":8,"sha256":"dafb8d39160f888f9d3e515f305df68f9803862fc345cbddd342aba264a76aa6","verified":"source and copied file tree, modes, uid/gid and symlinks identical before startup"},
+    {"service":"dbx","files":5,"sha256":"1b7f464df145f956911b4c957d86d6f5eef591b514c0800c3642e82dca9e036d","verified":"source and copied file tree, modes, uid/gid and symlinks identical before startup"}
+  ],
+  "workloads": "three existing workloads recreated with same instance/application identities, application label, v2 paths and v2 named volumes; registry bind data copied with original directory retained",
+  "registry_copy_verification": "diff -qr old and new data roots returned zero with REGISTRY_COPY_VERIFIED",
+  "gateway": "five existing sites rendered through the unmodified released stageWebsites and executePlatform; native preflight, version, TLS and auth health proof passed",
+  "rollback": "old workload directories/volumes and definitions retained; old gateway container retained stopped under -sdd102-original; original platform tree retained",
+  "result": "completed, all four containers running; helper and Agent restarted",
+  "runtime_code_change": false,
+  "script": "recovery-script.mjs",
+  "script_sha256": "c4d4d768a3dc71cc1a2f0efa94449b9a1f8c424f90bfacb0a8d4e8f744e4fe3d",
+  "screenshots": ["recovery-completed.jpg", "recovered-host-health.jpg"]
+}

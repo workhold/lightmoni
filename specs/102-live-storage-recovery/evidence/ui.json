@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-07",
+  "method": "actual signed-in Chrome UI; real Agent receipts",
+  "applications": {
+    "Gitea": "running v3, desired/applied 3/3, cluster online",
+    "OpenResty": "running v4",
+    "SDD091 快速安装": "running v1",
+    "系统镜像仓库": "running v7",
+    "address_retained_warnings": "gone on successful receipt; DBX briefly showed retained/pending during receipt refresh and immediately returned to running; not claimed to be permanently impossible",
+    "uninstalled_apps": "ABC Demo and SDD091 SDK environment remain removed",
+    "undeployed_app": "DBX dbx-1 remains undeployed as before"
+  },
+  "gitea_storage": {
+    "observed_at": "2026-11-07T05:35:20.074Z",
+    "active_instance": "454a1339955690ed9d569ae9cf6f8185",
+    "receipt": "v2 application/instance paths and real RW volume /data present; generic existing result sanitizer masks IDs inside some path strings as [redacted], not replaced with invented values"
+  },
+  "website_storage": {
+    "website_id": "fb2bb27e9a85a7e83cb46412d3eab67a",
+    "observed_at": "2026-11-07T05:36:12.462Z",
+    "instance": "965070900ba0fe48311e7863151cc7a4",
+    "gateway_version": "b9f5e2b98c03534bf03f6fb2220f25692d2e953ece18cf04c25785c7b32d9eb6",
+    "website_version": "a85ec60d2f2ac645ab06ce39263a833edbe1c0423ea272c15c792ecb1cf4fd04",
+    "receipt": "actual gateway index and independent website config/current/auth/public/ssl directories present",
+    "retired_instances": "no old receipts fabricated"
+  },
+  "normal_website_publish": {"run":"576ed9e6f06fefc221c3ef52121a67f9","revision":4,"result":"succeeded","healthy":true,"running":true,"observed_at":"2026-11-07T05:37:01.132Z","downloaded_bytes":0},
+  "registry": {"deployment_status":"applied","repository":"lightmoni/abc-demo","tags":["20261103-36def97","20261104-852a316","latest"],"references":"same two applications and digest aliases as before recovery, all in use","live_deletion":false},
+  "dashboards": {"panels":13,"visible_query_errors":false,"qps":0.13,"records_last_minute":352,"online_centers":1,"failed_reports_last_minute":0},
+  "recent_runs": {"method":"read-only SQLite query through specified 1Panel terminal; only public job metadata selected","count":20,"all_succeeded":true,"nonempty_error_codes":0,"created_from":"2026-11-07T05:36:41.099Z","created_through":"2026-11-07T05:40:55.989Z","dbx_run":"cbe49e03754306b9302cbcaf4a714aa5"},
+  "https": {"gitea":200,"dbx":200,"registry_without_auth":401},
+  "screenshots": ["recovered-applications.jpg","recovered-gitea-storage.jpg","recovered-website-storage.jpg","recovered-website-publish.jpg","recovered-registry.jpg","recovered-dashboards.jpg","recovered-recent-runs.jpg"]
+}
