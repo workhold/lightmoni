@@ -1,0 +1,48 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "width": 1440,
+      "appearance": "light",
+      "checks": [
+        "invalid input retains secret and form",
+        "create and refresh readback",
+        "blank secret edit preserves",
+        "bind credential using application form",
+        "reference readback",
+        "revoke readback",
+        "no page errors"
+      ]
+    },
+    {
+      "round": 2,
+      "width": 1440,
+      "appearance": "dark",
+      "checks": [
+        "invalid input retains secret and form",
+        "create and refresh readback",
+        "blank secret edit preserves",
+        "bind credential using application form",
+        "reference readback",
+        "revoke readback",
+        "no page errors"
+      ]
+    },
+    {
+      "round": 3,
+      "width": 390,
+      "appearance": "light",
+      "checks": [
+        "invalid input retains secret and form",
+        "create and refresh readback",
+        "blank secret edit preserves",
+        "bind credential using application form",
+        "reference readback",
+        "revoke readback",
+        "no page errors"
+      ]
+    }
+  ],
+  "english": true,
+  "media": "artifacts/screenshots/specs/111-registry-pull-credentials/evidence"
+}

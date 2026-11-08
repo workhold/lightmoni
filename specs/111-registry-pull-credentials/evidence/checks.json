@@ -1,0 +1,16 @@
+{
+  "typecheck": [
+    "runtime",
+    "ai-runtime",
+    "web"
+  ],
+  "related_runtime_tests": 164,
+  "final_targeted_tests": 28,
+  "integrated_runtime_tests": 217,
+  "integrated_failures": 0,
+  "integrated_skipped": 0,
+  "real_registry_checks": 6,
+  "ui_rounds": 3,
+  "dnspod_fix_pr": "https://github.com/workhold/lightmoni/pull/149",
+  "dnspod_merge_commit": "700ffd322242a77e2e971a6eebcfcd8eddf98585"
+}

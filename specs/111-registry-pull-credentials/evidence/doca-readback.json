@@ -1,0 +1,27 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "seq": 1768,
+  "epochId": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "chapter": 111,
+  "paragraphs": 6,
+  "text_matches": true,
+  "flowchart": {
+    "id": "sdd111-registry-auth-flow",
+    "nodes": 8,
+    "edges": 8,
+    "all_endpoints_valid": true
+  },
+  "original_blocks": 972,
+  "preserved_blocks": 972,
+  "all_original_blocks_unchanged": true,
+  "original_native_diagrams": 53,
+  "total_native_diagrams": 54,
+  "paragraph_text": [
+    "镜像源页面新增仓库凭据管理，管理员保存名称、精确仓库地址、用户名与密码或Token，可选仓库内路径前缀、允许集群和有效期。ops_registry_credentials使用中心既有主密钥加密保存秘密，公开接口只返回账号、has_password、状态和关联应用；SSH连接凭据及系统仓库入口Basic账号保持各自用途，不向AI工具暴露镜像密码。",
+    "应用spec.registry_credential_ids显式选择凭据，容器和Compose共享此引用，部署、升级、重试及托管换机沿用同一路径。中心按精确规范化host:port、仓库内路径的斜杠边界和部署集群匹配；Docker Hub别名归一，歧义账号拒绝。已发布快照的引用继续有效并阻止凭据误删除，未发布编辑不隐式撤销已发布应用的拉取授权。",
+    "任务只冻结凭据ID、revision、仓库范围和精确镜像列表。每次启动许可、续租和取密重新核对应用发布版本、人工授权、执行器身份、集群、凭据状态和revision。密码仅通过独立已签名的jobs/:id/registry-credentials接口，凭当前有效租约和精确image在拉取前临时领取；不进入任务载荷、执行器journal、managed-jobs快照或请求重放历史。取密响应no-store，重放只保留非秘密标记并重新核验后取密。",
+    "root管理组件在当前systemd任务的/run目录创建0700临时目录和0600 Docker config.json，每次只含当前镜像实际Docker仓库domain对应的账号；命令参数、容器环境和持久Compose配置均不含密码。仅拉取子进程收到DOCKER_CONFIG路径，成功、失败和取消均清理，硬中断由RuntimeDirectory清理兜底；不写持久docker login、不改daemon设置。",
+    "选择凭据的镜像直接访问原仓库，跳过匿名来源代理和共享镜像缓存，避免向代理发送账号或把私有内容放入匿名缓存。预拉取核对平台和摘要后固定本机image ID及pull_policy=never启动；错误不回退匿名，公开日志仅使用固定诊断。新能力operations.platform.registry-auth.v1阻止旧Agent静默忽略认证，发行包包含更新后的管理组件。",
+    "轮换、范围调整、过期和撤销使旧待执行授权失效；撤销清空主表秘密，不主动重启运行容器。失效授权禁止新的取密、许可和续租；已启动任务仍可在原签名身份、租约及策略边界内提交终态回执，不用新的审批代替实际执行结果。删除检查当前应用及已发布快照引用。用户通过GitHub PR授权合入和固定标签Docker发行，生产切换另按明确请求执行。"
+  ]
+}

@@ -1,3 +1,4 @@
+import {createRegistryCredentialSchema,registryAuthorizations,validateRegistryAuthorizations} from './registry-credentials.js';
 import {assertRegistryIdle} from './registry-usage.js';
 import {validateRegistryPayload} from './registry-content.js';
 import type { ReconciliationRegistry } from "../reconciliation/registry.js";
@@ -101,6 +102,7 @@ export class OperationsPlatformStore implements PlatformStore {
   ) {
     ensureSystemTables(this);
     createImageSourcesSchema(this);
+    createRegistryCredentialSchema(this);
     deps.db.exec(`CREATE TABLE IF NOT EXISTS ops_platform_resources(
    id TEXT PRIMARY KEY,kind TEXT NOT NULL,name TEXT NOT NULL,revision INTEGER NOT NULL,spec_cipher TEXT NOT NULL,
    status_json TEXT NOT NULL,created_by TEXT NOT NULL,authorized_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
@@ -542,6 +544,8 @@ export class OperationsPlatformStore implements PlatformStore {
           .split(".")
           .at(-1)!;
       const sourcePolicy=imageSourcesFor(this,config);
+      const authorizations=registryAuthorizations(this,config);
+      if(authorizations&&!operationExecutionCapabilities(this.deps,agentID).includes('operations.platform.registry-auth.v1'))fail(409,'registry_auth_agent_upgrade_required');
       if(config.refresh_images===true&&!operationExecutionCapabilities(this.deps,agentID).includes('operations.platform.image-refresh.v1'))fail(409,'image_refresh_agent_upgrade_required');
       if(sourcePolicy) {
         let capabilities:unknown;
@@ -558,7 +562,7 @@ export class OperationsPlatformStore implements PlatformStore {
           name: resource.name,
           agent_id: agentID,
           revision: resource.revision,
-          config: safeObject({...config,...(sourcePolicy?{image_sources:sourcePolicy}:{})}),
+          config: safeObject({...config,...(sourcePolicy?{image_sources:sourcePolicy}:{}),...(authorizations?{registry_authorizations:authorizations}:{})}),
           created_at: at,
           updated_at: at,
         },
@@ -575,6 +579,7 @@ export class OperationsPlatformStore implements PlatformStore {
         ],
         capabilities: [
           "operations.platform",
+          ...(authorizations?["operations.platform.registry-auth.v1"]:[]),
           ...(config.storage_layout === 2 ? ["operations.platform.storage.v2"] : []),
           ...(String(config.task).startsWith("registry.") ? ["operations.platform.registry.v1"] : []),
           ...(config.health ? ['operations.platform.readiness.v1'] : []),
@@ -849,6 +854,7 @@ export class OperationsPlatformStore implements PlatformStore {
     }
     validateRegistryPayload(this,payload.resource.config,job.agent_id,current.id);
     validateImageSourcesPayload(this,payload.resource.config);
+    validateRegistryAuthorizations(this,payload.resource.config);
     validateInstanceRecoveryPayload(this,payload.resource.config,job.agent_id);
     this.definition(current.kind).validatePayload?.(
       current,

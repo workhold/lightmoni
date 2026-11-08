@@ -43,6 +43,7 @@ export interface ManagedExecutorBridge {
   event(job:Row,value:Row):void;
   result(job:Row,value:Row):void;
   artifact(job:Row,value:Row):Row;
+  registryCredential?(job:Row,value:Row):Row;
 }
 export class PrivilegedExecutorStore {
   managed?:ManagedExecutorBridge;
@@ -338,13 +339,13 @@ export class PrivilegedExecutorStore {
         // Claim snapshots retain their old lease solely for journal recovery;
         // every route that can start work or disclose additional bytes checks
         // current authority again, even for an identical signed request.
-        const jobRoute=path.match(/\/jobs\/([a-f0-9]{32})\/(payload|artifacts|renew|start-permits)$/);
+        const jobRoute=path.match(/\/jobs\/([a-f0-9]{32})\/(payload|artifacts|renew|start-permits|registry-credentials)$/);
         if(jobRoute)this.leased(this.executor(executorID),jobRoute[1],input.lease_id,jobRoute[2]==='renew');
-        if(jobRoute&&jobRoute[2]==='start-permits')return action(this.executor(executorID),input);
+        if(jobRoute&&['start-permits','registry-credentials'].includes(jobRoute[2]))return action(this.executor(executorID),input);
         return parseStrictJSON(this.deps.decrypt(seen.response_enc),2<<20);
       }
       const response = action(row, input);
-      this.deps.db.run("INSERT INTO privileged_request_nonces(executor_id,request_id,request_sha256,response_enc,created_at) VALUES(?,?,?,?,?)", executorID, claims.request_id, requestHash, this.deps.encrypt(canonicalJSON(response)), this.now());
+      this.deps.db.run("INSERT INTO privileged_request_nonces(executor_id,request_id,request_sha256,response_enc,created_at) VALUES(?,?,?,?,?)", executorID, claims.request_id, requestHash, this.deps.encrypt(canonicalJSON(path.endsWith('/registry-credentials')?{credential_delivered:true}:response)), this.now());
       return response;
     });
   }
@@ -477,7 +478,7 @@ export class PrivilegedExecutorStore {
   private row(id: string): Row {
     const row = this.deps.db.get<Row>("SELECT * FROM privileged_jobs WHERE id=?", id); if (!row) fail(404, "privileged_job_not_found"); return row;
   }
-  private authority(job: Row, executor: Row, allowTerminal = false) {
+  private authority(job: Row, executor: Row, allowTerminal = false, validateSource = true) {
     if (job.executor_id !== executor.id || job.machine_id !== executor.machine_id || job.agent_id !== executor.agent_id || job.install_generation !== executor.install_generation) fail(403, "principal_mismatch");
     const policy = this.policy(job.machine_id), grant = this.deps.db.get<Row>("SELECT * FROM privileged_grants WHERE id=? AND job_id=?", job.authorization_id, job.id);
     if (!grant || grant.revoked_at || !["reserved", "consumed"].includes(grant.state)) fail(403, "privileged_script_not_authorized"); this.actor(grant.approved_by);
@@ -486,7 +487,7 @@ export class PrivilegedExecutorStore {
     this.actor(policy.approved_by);
     if (!allowTerminal && (job.cancel_requested || terminal(job.state))) fail(409, "execution_not_active");
     if (job.state === "queued" && grant.expires_at <= this.now()) fail(403, "expired_authorization");
-    if(job.capability==='operations.managed.v1')this.managed?.validate(job);
+    if(validateSource&&job.capability==='operations.managed.v1')this.managed?.validate(job);
     return grant;
   }
   private sync(job: Row) {
@@ -522,8 +523,8 @@ export class PrivilegedExecutorStore {
     const at = Math.floor(this.deps.now().getTime() / 1000);
     return { version: 1, purpose: "plan", center_instance_id: this.centerInstanceID, machine_id: job.machine_id, agent_id: job.agent_id, executor_id: job.executor_id, install_generation: job.install_generation, job_id: job.id, task_run_id: job.task_run_id, operation_id: job.id, lease_id: job.lease_id, policy_generation: job.policy_generation, authorization_id: grant.id, authorization_revision: grant.revision, capability: job.capability, action: payload.kind === "script" ? "execute" : payload.operation, resource_id: payload.kind === "script" ? job.id : payload.resource_id, resource_revision: payload.kind === "script" ? grant.revision : String(payload.resource_revision), request_sha256: job.payload_sha256, iat: at, nbf: at, exp: at + EXECUTOR_LEASE_SECONDS, max_runtime_ms: payload.timeout_ms };
   }
-  private leased(executor: Row, id: string, lease: unknown, permitTerminal = false) {
-    this.sweep(); const job = this.row(id); this.authority(job, executor, permitTerminal);
+  private leased(executor: Row, id: string, lease: unknown, permitTerminal = false, validateSource = true) {
+    this.sweep(); const job = this.row(id); this.authority(job, executor, permitTerminal, validateSource);
     if (typeof lease !== "string" || lease !== job.lease_id || !lease) fail(403, "invalid_execution_lease");
     if (job.state === "unknown" || job.resolved_at || job.state === "queued" || job.state === "running" && job.lease_expires_at <= this.now()) fail(409, "execution_unknown");
     return job;
@@ -575,7 +576,8 @@ export class PrivilegedExecutorStore {
     return { sequence: v.sequence };
   }
   result(executor: Row, id: string, value: unknown) {
-    const v = object(value, ["lease_id", "state", "code", "summary", "exit_code", "stdout", "stderr"]), job = this.leased(executor, id, v.lease_id, true);
+    // A final receipt creates no new effect. Preserve lineage after source revocation.
+    const v = object(value, ["lease_id", "state", "code", "summary", "exit_code", "stdout", "stderr"]), job = this.leased(executor, id, v.lease_id, true, false);
     if (terminal(job.state)) return { job: this.get(id) };
     const payload = parseStrictJSON(this.deps.decrypt(job.payload_enc)) as PrivilegedPayload;
     if (!["succeeded", "failed", "cancelled", "unknown"].includes(v.state) || typeof v.code !== "string" || !/^[a-z0-9_]{0,64}$/.test(v.code) || typeof v.summary !== "string" || Buffer.byteLength(v.summary) > 1024 || typeof v.stdout !== "string" || typeof v.stderr !== "string" || Buffer.byteLength(v.stdout) + Buffer.byteLength(v.stderr) > payload.max_output_bytes || !(v.exit_code === null || Number.isInteger(v.exit_code) && Math.abs(v.exit_code) <= 255) || v.state === "succeeded" && v.exit_code !== 0) fail(400, "invalid_execution_result");
@@ -585,6 +587,11 @@ export class PrivilegedExecutorStore {
     if(payload.kind==='managed')this.managed?.result(job,v);
     this.sync(this.row(id)); this.audit(job.machine_id, executor.id, "executor_result", id, { state: v.state, code: v.code });
     return { job: this.get(id) };
+  }
+  managedRegistryCredential(executor:Row,id:string,value:unknown) {
+    const v=object(value,['lease_id','image']),job=this.leased(executor,id,v.lease_id);
+    if(job.capability!=='operations.managed.v1'||!this.managed?.registryCredential)fail(403,'principal_mismatch');
+    return this.managed.registryCredential(job,v);
   }
   managedArtifact(executor:Row,id:string,value:unknown) {
     const v=object(value,['lease_id','release_id','offset']),job=this.leased(executor,id,v.lease_id);
@@ -648,6 +655,7 @@ export function registerPrivilegedExecutors(deps: Dependencies, options: { dataD
   signed("jobs/:jobId/start-permits", (e, v, c) => store.startPermit(e, c.params.jobId, v));
   signed("jobs/:jobId/events", (e, v, c) => store.events(e, c.params.jobId, v));
   signed("jobs/:jobId/result", (e, v, c) => store.result(e, c.params.jobId, v));
+  signed("jobs/:jobId/registry-credentials", (e,v,c)=>{c.res.setHeader("Cache-Control","no-store");return store.managedRegistryCredential(e,c.params.jobId,v);});
   signed("jobs/:jobId/artifacts", (e,v,c)=>store.managedArtifact(e,c.params.jobId,v));
   signed('observations/targets',(e,v)=>{object(v,[]);store.observationAuthority(e.id);if(!store.observations)fail(503,'executor_observation_unavailable');return store.observations!.targets(e);});
   signed('observations/batches',(e,v)=>{store.observationAuthority(e.id);if(!store.observations)fail(503,'executor_observation_unavailable');return store.observations!.accept(e,v);});

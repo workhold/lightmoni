@@ -90,7 +90,15 @@ export async function runManagedSnapshot(filename:string,expectedDigest:string):
     await authority();rootPath(config.data_dir,'directory',true);
     let receipt:ExecutionReceipt;
     const webProfile=payload.operation_payload&&['website','certificate'].includes(payload.operation_payload.resource.kind)?await prepareManagedWeb(MANAGED_DATA_DIR,command):{};
-    const context={dataDir:MANAGED_DATA_DIR,signal:controller.signal,now:()=>new Date(),command,...webProfile};
+    const context={dataDir:MANAGED_DATA_DIR,signal:controller.signal,now:()=>new Date(),command,...webProfile,
+      registryAuthDirectory:process.cwd(),
+      registryCredential:async(image:string)=>{
+        await authority();
+        const reply=await request('registry-credentials',{lease_id:plan.lease_id,image});
+        if(!reply.credential)refuse('registry_image_not_authorized');
+        return reply.credential;
+      },
+    };
     if(payload.operation_payload)receipt=await executeOperation(payload.operation_payload,context,emit);
     else if(payload.job.actions[0]?.kind==='host_docker')receipt=await executeHostDocker(payload.job.actions[0],payload.job.id,{dataDir:MANAGED_DATA_DIR,daemonID:config.daemon_id??'',signal:controller.signal,now:()=>new Date(),authorize:authority,transport:productionTransport},emit);
     else if(payload.job.actions[0]?.kind==='docker')receipt=await executeDocker(payload.job.actions[0],payload.job.id,context,emit);
