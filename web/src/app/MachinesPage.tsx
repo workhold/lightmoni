@@ -5,10 +5,12 @@ import {agentOperationCanAdvance,agentOperationMatches,agentOperationReadSignal,
 import DockerEnvironmentPanel,{DockerEnvironmentTag} from './ops/DockerEnvironmentPanel';
 import AgentUninstallManual from './AgentUninstallManual';
 import ManagedContainerDialog from "./ManagedContainerDialog";
+import HostContainersDialog from "./HostContainersDialog";
+import HostFilesDialog from "./HostFilesDialog";
 import SystemLogDrawer from "./ops/SystemLogDrawer";
 import {useI18n} from '../shared/i18n';
 import {type ComponentProps,useCallback,useEffect,useRef,useState} from 'react';
-import {CloudDownloadOutlined,CodeOutlined,ApiOutlined,MoreOutlined,DownOutlined,FileTextOutlined,HistoryOutlined,InfoCircleOutlined,KeyOutlined,PlusOutlined,ProfileOutlined,ReloadOutlined,SafetyCertificateOutlined,SearchOutlined} from '@ant-design/icons';
+import {ContainerOutlined,FolderOpenOutlined,CloudDownloadOutlined,CodeOutlined,ApiOutlined,MoreOutlined,DownOutlined,FileTextOutlined,HistoryOutlined,InfoCircleOutlined,KeyOutlined,PlusOutlined,ProfileOutlined,ReloadOutlined,SafetyCertificateOutlined,SearchOutlined} from '@ant-design/icons';
 import {Alert,Button,Descriptions,Empty,Form,Input,InputNumber,Modal,Popconfirm,Select,Space,Table,Tag,Typography,App,Checkbox,Dropdown,Tooltip,Tabs} from '../shared/ui';
 import {api,ApiError} from '../shared/api';
 import type {User} from '../shared/types';
@@ -104,6 +106,8 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const [workloadRecoveryMachine,setWorkloadRecoveryMachine]=useState<Pick<Machine,'id'|'name'>>();
  useEffect(()=>{if(!admin)setWorkloadRecoveryMachine(undefined)},[admin]);
  useEffect(()=>{if(!admin)setStateRecoveryMachine(undefined)},[admin]);
+ const [hostContainers,setHostContainers]=useState<Machine>();
+ const [hostFiles,setHostFiles]=useState<Machine>();
  const [inventoryMachine,setInventoryMachine]=useState<{id:string;name:string;agent_id:string}>();
  const [dockerMachine,setDockerMachine]=useState<{id:string;name:string}>();
  const [selectedIDs,setSelectedIDs]=useState<string[]>([]),[batch,setBatch]=useState<{action:BatchAction;targets:BatchTarget[]}>();
@@ -417,13 +421,17 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    {key:'network',label:t('内外网服务地址','Private & public service addresses'),onClick:()=>setNetworkMachine(m)},
    {key:'labels',label:t('设置主机标签','Set host labels'),onClick:()=>setNodeLabels({id:m.id,name:m.name,label_ids:m.label_ids??m.node?.label_ids??[],agent_id:m.agent_id})},
    {type:'divider' as const},
-   {key:'containers',label:t('容器管理','Container management'),onClick:()=>setInventoryMachine(m)},
+   {key:'containers',label:t('全部容器','All containers'),onClick:()=>setHostContainers(m)},
+   {key:'files',label:t('文件管理','Files'),onClick:()=>setHostFiles(m)},
+   {key:'managed-containers',label:t('受管容器操作','Managed container operations'),onClick:()=>setInventoryMachine(m)},
    {key:'docker',label:t('Docker 环境','Docker environment'),onClick:()=>setDockerMachine({id:m.id,name:m.name})},
   ];
   const reasons=[...new Set([cap.terminal,cap.deploy_agent,cap.uninstall_agent,cap.update_agent,cap.rollback_agent].filter(c=>c&&!c.available).map(c=>c!.reason))].filter(reason=>!['agent_already_installed','agent_not_linked','previous_release_unavailable'].includes(reason));
   const menuItems=maintenance.map(item=>'disabled' in item&&item.disabled?{...item,label:<span className="lm-host-menu-disabled">{item.label}<small>{updateCapabilityReason(item.key==='upgrade'?cap.update_agent?.reason||'':item.key==='rollback'?cap.rollback_agent?.reason||'':item.key==='deploy'?cap.deploy_agent?.reason||'':item.key==='uninstall'?cap.uninstall_agent?.reason||'':item.key==='recovery'?cap.recovery_uninstall_agent?.reason||'':'agent_not_linked')}</small></span>}:item);
   return <div className="lm-host-row-actions">
    <div className="lm-host-action-grid">
+    <IconAction label={t('全部容器','All containers')} icon={<ContainerOutlined aria-hidden/>} size="small" onClick={()=>setHostContainers(m)}/>
+    <IconAction label={t('文件管理','Files')} icon={<FolderOpenOutlined aria-hidden/>} size="small" onClick={()=>setHostFiles(m)}/>
     <IconAction hint={!cap.terminal?.available?t('登录终端','Open terminal')+' · '+capabilityReason(cap.terminal?.reason||''):undefined} label={t('登录终端','Open terminal')} icon={<CodeOutlined aria-hidden/>} size="small" disabled={!cap.terminal?.available} onClick={()=>void openTerminal(m)}/>
     <IconAction label={t('主机任务','Host tasks')} icon={<ProfileOutlined aria-hidden/>} size="small" onClick={()=>setTaskHost({id:m.id,name:m.name,label_ids:m.label_ids??[],agent_id:m.agent_id})}/>
     {!linked&&!installPending?<div className="lm-host-deploy-split"><IconAction label={t('部署 Agent','Deploy Agent')} icon={<CloudDownloadOutlined aria-hidden/>} size="small" type="primary" disabled={!cap.deploy_agent?.available&&!accountRepairable(cap.deploy_agent)} onClick={()=>void openPlan(m)}/><HostActionMenu trigger={['click']} menu={{items:menuItems}}><IconAction label={t(`Agent 管理 · ${m.name}`,`Agent management · ${m.name}`)} icon={<ApiOutlined aria-hidden/>}/></HostActionMenu></div>:<HostActionMenu trigger={['click']} menu={{items:menuItems}}><IconAction label={t(`Agent 管理 · ${m.name}`,`Agent management · ${m.name}`)} icon={<ApiOutlined aria-hidden/>}/></HostActionMenu>}
@@ -463,6 +471,8 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   {admin&&nodeLabels&&<NodeLabelsDialog key={nodeLabels.id} host={nodeLabels} labels={labels} onClose={()=>setNodeLabels(undefined)} onSaved={()=>load(true)}/>}
   {taskHost&&<Modal open title={t(`主机任务 · ${taskHost.name}`,`Host tasks · ${taskHost.name}`)} footer={null} width={1000} onCancel={()=>setTaskHost(undefined)} destroyOnHidden><HostTasksPanel hostID={taskHost.id} admin={admin} labels={labels} onViewRuns={()=>setTaskHost(undefined)}/></Modal>}
   {admin&&<DockerEnvironmentPanel machine={dockerMachine} onClose={()=>setDockerMachine(undefined)} onChanged={()=>void load(true)}/>}
+  {admin&&hostContainers&&<HostContainersDialog key={hostContainers.id} machine={hostContainers} onClose={()=>setHostContainers(undefined)}/>}
+  {admin&&hostFiles&&<HostFilesDialog key={hostFiles.id} machine={hostFiles} onClose={()=>setHostFiles(undefined)}/>}
   {inventoryMachine&&<ManagedContainerDialog machine={inventoryMachine} onClose={()=>setInventoryMachine(undefined)}/>}
   <Modal title={t('节点详情','Node details')} open={!!nodeDetail} onCancel={()=>setNodeDetail(undefined)} footer={null} width={760} destroyOnHidden>{nodeDetail&&<><NodeDetails agent={nodeDetail}/>{nodeDetail.lifecycle_state==='removed'&&<Alert type="warning" showIcon title={t('此节点已归档，旧凭据不能继续接入','This node is archived; old credentials can no longer enroll')} description={<>{time(nodeDetail.removed_at||'')} · {nodeDetail.removal_reason||t('未填写原因','No reason provided')}</>}/>}</>}</Modal>
   {admin&&uninstallGuide&&<Modal title={t('离线手动卸载 Agent','Offline manual Agent uninstall')} open onCancel={()=>setUninstallGuide(false)} footer={null} width={780} destroyOnHidden><AgentUninstallManual/></Modal>}

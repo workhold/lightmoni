@@ -7,13 +7,13 @@ import {once} from 'node:events';
 import {createHash} from 'node:crypto';
 import type {TestContext} from 'node:test';
 
-export async function isolatedSSHD(t:TestContext){
+export async function isolatedSSHD(t:TestContext,options:{sftp?:boolean}={}){
  const dir=await mkdtemp(join(tmpdir(),'lightmoni-terminal-sshd-'));
  t.after(()=>rm(dir,{recursive:true,force:true}));
  for(const name of ['host','client','wrong'])execFileSync('ssh-keygen',['-q','-t','ed25519','-N','','-f',join(dir,name)]);
  await writeFile(join(dir,'authorized_keys'),await readFile(join(dir,'client.pub')));
  const free=createServer();free.listen(0,'127.0.0.1');await once(free,'listening');const port=(free.address() as any).port;await new Promise<void>(resolve=>free.close(()=>resolve()));
- await writeFile(join(dir,'config'),`Port ${port}\nListenAddress 127.0.0.1\nHostKey ${dir}/host\nAuthorizedKeysFile ${dir}/authorized_keys\nPidFile ${dir}/pid\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin yes\nLogLevel ERROR\nPrintMotd no\nPrintLastLog no\nForceCommand /usr/bin/env LANG=${process.platform==='darwin'?'en_US.UTF-8':'C.UTF-8'} LC_ALL=${process.platform==='darwin'?'en_US.UTF-8':'C.UTF-8'} HISTFILE=/dev/null INPUTRC=/dev/null /bin/bash --noprofile --norc -i\n`);
+ await writeFile(join(dir,'config'),`Port ${port}\nListenAddress 127.0.0.1\nHostKey ${dir}/host\nAuthorizedKeysFile ${dir}/authorized_keys\nPidFile ${dir}/pid\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin yes\nLogLevel ERROR\nPrintMotd no\nPrintLastLog no\n${options.sftp?'Subsystem sftp internal-sftp\nForceCommand internal-sftp':`ForceCommand /usr/bin/env LANG=${process.platform==='darwin'?'en_US.UTF-8':'C.UTF-8'} LC_ALL=${process.platform==='darwin'?'en_US.UTF-8':'C.UTF-8'} HISTFILE=/dev/null INPUTRC=/dev/null /bin/bash --noprofile --norc -i`}\n`);
  const extra:string[]=[];
  try{execFileSync('/usr/sbin/sshd',['-T','-f',join(dir,'config'),'-o','PerSourcePenalties=no'],{stdio:'ignore'});extra.push('-o','PerSourcePenalties=no')}catch{}
  const daemon=spawn('/usr/sbin/sshd',['-D','-e','-f',join(dir,'config'),...extra],{stdio:['ignore','ignore','pipe']});

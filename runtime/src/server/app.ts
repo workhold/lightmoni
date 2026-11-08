@@ -31,6 +31,7 @@ import { registerCore } from "./core.js";
 import { registerNodes } from "./nodes.js";
 import { registerAgentCredentials } from "./agent-credentials.js";
 import { registerMachineTerminal } from "./machine-terminal.js";
+import { registerMachineFiles } from "./machine-files.js";
 import { registerManagedMachines } from "./managed-machines.js";
 import { registerServiceDeployments } from "./service-deployments.js";
 import { registerAgentJobs } from "./agent-jobs.js";
@@ -293,6 +294,7 @@ export async function createApp(cfg: Config) {
         });
     });
     modules.push(registerMachineTerminal(deps, managedMachines, server,{resolveContainerTarget:platform.resolveContainerTarget}));
+    modules.push(registerMachineFiles(deps, managedMachines));
     server.headersTimeout = 10000;
     server.requestTimeout = 30000;
     systemLogs = new SystemLogs(deps, ingest, [cfg.chPassword]);

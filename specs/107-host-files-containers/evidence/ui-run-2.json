@@ -1,0 +1,30 @@
+{
+  "checks": [
+    "主机入口显示运行/停止及平台/外部容器，状态筛选有效",
+    "真实浏览器→HTTP→SSH/SFTP修改文件，关闭后重新打开回读一致",
+    "远端并发修改拒绝覆盖，错误后保留草稿",
+    "未保存编辑切换有放弃确认，取消继续编辑",
+    "二进制文件经过人工确认上传，完成后目录出现新文件",
+    "同名上传明确展示覆盖确认，可取消",
+    "390px文件列表和编辑器无页面横向溢出，200%等效720 CSSpx布局已截图",
+    "英文文件入口、目录工具栏和窄屏显示正常"
+  ],
+  "page_errors": [],
+  "motion": [
+    {
+      "action": "container dialog entry",
+      "at_ms": 1773
+    },
+    {
+      "action": "file editor transition",
+      "at_ms": 3309
+    },
+    {
+      "action": "save button loading and verified feedback",
+      "at_ms": 3484
+    }
+  ],
+  "video": "/Users/zhangsiwen/.codex/worktrees/host-files-containers/lightmoni/artifacts/screenshots/specs/107-host-files-containers/evidence/video/page@b0a347369b1b6e09afcb9c1c8de7757f.webm",
+  "backend": "disposable real OpenSSH/SFTP and SQLite; container inventory fixture",
+  "media": "/Users/zhangsiwen/.codex/worktrees/host-files-containers/lightmoni/artifacts/screenshots/specs/107-host-files-containers/evidence"
+}
