@@ -1,6 +1,6 @@
 # SDD110：容器管理发行与部署
 
-创建：2026-11-08。状态：双架构镜像已发布、中心部署及完整管理节点Agent升级已验收，交付记录待PR合入。
+创建：2026-11-08。状态：双架构镜像已发布、中心部署及完整管理节点Agent升级已验收；交付记录见[PR148](https://github.com/workhold/lightmoni/pull/148)。
 
 用户要求“所有你的提交合并到主分支，发docker，部署”。通过GitHub PR将待合并的安装位置/端口设置PR142与主机容器管理PR147合入main。发行源码固定为合并提交`70a0060fc47581078a3a0a5ac7b921c01d58d0aa`，镜像标签`20261108-container-management-v1`，包含Linux amd64/arm64及匹配源码的Agent发行包。
 
