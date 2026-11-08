@@ -1,0 +1,18 @@
+{
+  "operation": "OpenResty read-only inspect",
+  "remote_journal_state": "succeeded",
+  "remote_unit_state": {
+    "LoadState": "not-found",
+    "ActiveState": "inactive",
+    "SubState": "dead",
+    "MainPID": 0
+  },
+  "matching_process_pids": [],
+  "center_outcome_preserved": "unknown",
+  "manually_reconciled": true,
+  "reconciled_at": "2026-11-08T20:17:51+08:00",
+  "audit_ui_readback": "Outcome unknown; manually reconciled",
+  "operation_replayed": false,
+  "business_containers_stopped": false,
+  "credentials_or_payloads_disclosed": false
+}

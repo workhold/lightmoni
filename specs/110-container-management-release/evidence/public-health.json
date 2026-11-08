@@ -1,0 +1,8 @@
+{
+  "observed_at": "2026-11-08T12:18:32.546655+00:00",
+  "url": "https://moni.heyphp.com/healthz",
+  "http_status": 200,
+  "body": {
+    "status": "ok"
+  }
+}
