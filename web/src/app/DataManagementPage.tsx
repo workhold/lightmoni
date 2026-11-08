@@ -44,12 +44,9 @@ const errorText=(error:unknown)=>error instanceof Error?error.message:t("请稍�
   },[load]);
 
   return <div className="lm-page">
-    <div className="lm-page-heading" style={{flexWrap:'wrap'}}>
-      <div><h1>{t("数据管理","Data management")}</h1><p>{t("查看已接入的数据表、服务与保留时长，管理员可设置表级保留和日志上报规则。","View ingested tables, services, and retention periods. Administrators can configure table retention and log reporting rules.")}</p></div>
-      <Button icon={<ReloadOutlined/>} loading={loading} onClick={()=>void load()}>{t("刷新数据表","Refresh tables")}</Button>
-    </div>
+
     <div className="lm-surface" style={{minWidth:0}}>
-      <div className="lm-toolbar">
+      <div className="lm-toolbar lm-content-toolbar"><Button icon={<ReloadOutlined/>} loading={loading} onClick={()=>void load()}>{t("刷新数据表","Refresh tables")}</Button>
         <span>{t("单表保留设置优先于全局默认。","Table retention settings override global defaults.")}</span>
         {admin&&<Link to="/admin?tab=retention">{t("管理全局默认时长","Manage global retention defaults")}</Link>}
         <Link to="/data">{t("接入数据","Connect data")}</Link>

@@ -1,0 +1,1524 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "passed": 98,
+      "checks": [
+        {
+          "route": "/applications",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/websites",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/clusters",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/domains",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/certificates",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/machines",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/private-images",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/image-sources",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/data-management",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/settings",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/admin",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/mcp-access",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/dashboards",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/overview",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/logs",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/websites",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/clusters",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/domains",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/certificates",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/machines",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/private-images",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/image-sources",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/data-management",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/settings",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/admin",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/mcp-access",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/dashboards",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/overview",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/logs",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications",
+          "language": "zh-CN",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/websites",
+          "language": "zh-CN",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/data-management",
+          "language": "zh-CN",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/applications",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/websites",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/clusters",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/domains",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/certificates",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/machines",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/private-images",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/image-sources",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/data-management",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/settings",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/admin",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/mcp-access",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/dashboards",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/overview",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/logs",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/websites",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/clusters",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/domains",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/certificates",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/machines",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/private-images",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/image-sources",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/data-management",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/settings",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/admin",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/mcp-access",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/dashboards",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/overview",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/logs",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications",
+          "language": "en-US",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/websites",
+          "language": "en-US",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/data-management",
+          "language": "en-US",
+          "width": 1440,
+          "zoom": 2
+        }
+      ],
+      "errors": []
+    },
+    {
+      "round": 2,
+      "passed": 98,
+      "checks": [
+        {
+          "route": "/applications",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/websites",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/clusters",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/domains",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/certificates",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/machines",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/private-images",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/image-sources",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/data-management",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/settings",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/admin",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/mcp-access",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/dashboards",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/overview",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/logs",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/websites",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/clusters",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/domains",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/certificates",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/machines",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/private-images",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/image-sources",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/data-management",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/settings",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/admin",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/mcp-access",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/dashboards",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/overview",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/logs",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications",
+          "language": "zh-CN",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/websites",
+          "language": "zh-CN",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/data-management",
+          "language": "zh-CN",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/applications",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/websites",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/clusters",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/domains",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/certificates",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/machines",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/private-images",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/image-sources",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/data-management",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/settings",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/admin",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/mcp-access",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/dashboards",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/overview",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/logs",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/websites",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/clusters",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/domains",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/certificates",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/machines",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/private-images",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/image-sources",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/data-management",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/settings",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/admin",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/mcp-access",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/dashboards",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/overview",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/logs",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications",
+          "language": "en-US",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/websites",
+          "language": "en-US",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/data-management",
+          "language": "en-US",
+          "width": 1440,
+          "zoom": 2
+        }
+      ],
+      "errors": []
+    },
+    {
+      "round": 3,
+      "passed": 98,
+      "checks": [
+        {
+          "route": "/applications",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/websites",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/clusters",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/domains",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/certificates",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/machines",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/private-images",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/image-sources",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/data-management",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/settings",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/admin",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/mcp-access",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/dashboards",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/overview",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/logs",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "zh-CN",
+          "width": 390
+        },
+        {
+          "route": "/applications",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/websites",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/clusters",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/domains",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/certificates",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/machines",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/private-images",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/image-sources",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/data-management",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/settings",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/admin",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/mcp-access",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/dashboards",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/overview",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/logs",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "zh-CN",
+          "width": 1440
+        },
+        {
+          "route": "/applications",
+          "language": "zh-CN",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/websites",
+          "language": "zh-CN",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/data-management",
+          "language": "zh-CN",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/applications",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/websites",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/clusters",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/domains",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/certificates",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/machines",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/private-images",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/image-sources",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/data-management",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/settings",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/admin",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/mcp-access",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/dashboards",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/overview",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/logs",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "en-US",
+          "width": 390
+        },
+        {
+          "route": "/applications",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications?view=store",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/websites",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/clusters",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/domains",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/certificates",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/machines",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/private-images",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/private-images?fixture=empty",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/image-sources",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/connection-credentials",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/data-management",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/data?tab=keys",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/settings",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/admin",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/mcp-access",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/dashboards",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/overview",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications/app/monitoring",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/websites/site/monitoring",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/logs",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/websites?fixture=setup",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications?fixture=error",
+          "language": "en-US",
+          "width": 1440
+        },
+        {
+          "route": "/applications",
+          "language": "en-US",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/websites",
+          "language": "en-US",
+          "width": 1440,
+          "zoom": 2
+        },
+        {
+          "route": "/data-management",
+          "language": "en-US",
+          "width": 1440,
+          "zoom": 2
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "writes": 0,
+  "observedErrors": [],
+  "activeCase": {
+    "route": "/applications?fixture=error",
+    "language": "en-US",
+    "width": 1440,
+    "round": 3
+  },
+  "unknown_fixture_reads": [],
+  "media_directory": "/Users/zhangsiwen/.codex/worktrees/101-integration-release/lightmoni/artifacts/screenshots/specs/106-compact-page-headers/evidence",
+  "source": "real workspace pages through the project Vite/PW harness; synthetic read-only API"
+}

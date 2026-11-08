@@ -1121,9 +1121,6 @@ export default function LogExplorePage() {
       {toastContext}
       <header className="lm-log-page-heading">
         <div className="lm-log-title">
-          <SearchOutlined className="lm-discover-mark" />
-          <h1>{l("日志探索")}</h1>
-          <RightOutlined className="lm-discover-breadcrumb" />
           <span>{saved?.title ?? l("未保存的检索")}</span>
         </div>
         <Space size={4} wrap>

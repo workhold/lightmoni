@@ -22,9 +22,9 @@ export default function DataPage({user}:{user:User}){
  if(requestedTab==='tables')return <Navigate replace to="/data-management"/>;
  if(requestedTab==='templates')return <Navigate replace to="/dashboards"/>;
  return <div className="lm-page lm-sdk-page">
-  <div className="lm-page-heading"><div><h1>SDK 接入</h1></div><Button icon={<ReloadOutlined/>} loading={loading} onClick={()=>void load()}>刷新</Button></div>
+
   {error&&<Alert showIcon type="error" title="接入配置加载失败" description={error} action={<Button size="small" onClick={()=>void load()}>重试</Button>} style={{marginBottom:16}}/>}
-  {loading&&!ready?<Spin/>:<Tabs activeKey={tab} onChange={tab=>setParams({tab})} items={[
+  {loading&&!ready?<Spin/>:<Tabs className="lm-compact-tabs" tabBarExtraContent={<Button icon={<ReloadOutlined/>} loading={loading} onClick={()=>void load()}>刷新</Button>} activeKey={tab} onChange={tab=>setParams({tab})} items={[
    {key:'sdk',label:'SDK 样例',children:<SDKSetup install={install} keys={keys} secrets={secrets} exempt={exempt} admin={admin} ready={ready&&!loading} onCreateKey={createKey} onCreateExempt={createExempt} onManageExempt={()=>setParams({tab:'exempt'})}/>},
    {key:'keys',label:'SDK 密钥',children:<SDKKeys keys={keys} admin={admin} onCreate={createKey} onReload={load}/>},
    {key:'exempt',label:'豁免表',children:<SDKExemptTables items={exempt} admin={admin} onCreate={createExempt} onReload={load}/>},

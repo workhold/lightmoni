@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261108-self-recovery-v1
+    image: docker.heyphp.com/lightmoni/lightmoni:20261108-compact-headers-v1
     pull_policy: missing
     build:
       context: .

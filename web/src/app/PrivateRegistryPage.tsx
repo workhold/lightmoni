@@ -224,22 +224,10 @@ export default function PrivateRegistryPage() {
   const members = (overview.machines ?? []).filter((m) =>
     cluster?.spec.machine_ids.includes(m.id),
   );
+  const refreshAction = <Button icon={<ReloadOutlined aria-hidden />} onClick={() => void load()} loading={loading}>{t("刷新", "Refresh")}</Button>;
   return (
     <div className="lm-page lm-operations-page lm-registry-page">
-      <div className="lm-page-heading">
-        <div>
-          <h1>{t("私有镜像管理", "Private images")}</h1>
-        </div>
-        <Space>
-          <Button
-            icon={<ReloadOutlined aria-hidden />}
-            onClick={() => void load()}
-            loading={loading}
-          >
-            {t("刷新", "Refresh")}
-          </Button>
-        </Space>
-      </div>
+
       {error && (
         <Alert
           type="error"
@@ -272,9 +260,9 @@ export default function PrivateRegistryPage() {
               </>
             }
           >
-            <Button type="primary" onClick={() => open("deploy")}>
+            <Space wrap><Button type="primary" onClick={() => open("deploy")}>
               {t("安装 Docker Registry", "Install Docker Registry")}
-            </Button>
+            </Button>{refreshAction}</Space>
           </Empty>
         </div>
       ) : (
@@ -287,6 +275,7 @@ export default function PrivateRegistryPage() {
                   sys-docker-registry
                 </Typography.Text>
               </div>
+              {refreshAction}
             </div>
             <p className="lm-ops-table-hint">{t("左右滑动查看仓库地址和操作。","Scroll horizontally to view registry addresses and actions.")}</p>
             <Table
