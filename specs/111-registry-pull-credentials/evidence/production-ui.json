@@ -1,0 +1,24 @@
+{
+  "origin": "https://moni.heyphp.com",
+  "recorded_at": "2026-11-08T13:54:30.790078+00:00",
+  "registry_credentials_entry_visible": true,
+  "registry_credentials_list_empty": true,
+  "no_production_credential_created_for_testing": true,
+  "website_dns": {
+    "domain": "docker.doc-a.cn",
+    "state": "failed",
+    "ui_message": "自动管理的记录已被外部修改，请核对后处理。",
+    "manual_overwrite": false,
+    "dns_recovery_claimed": false
+  },
+  "screenshots": {
+    "production-registry-credentials.png": {
+      "path": ".local-dev/image-release-111/production-registry-credentials.png",
+      "sha256": "428f1437a96dcd0f95085ee3210b579d5367412c29d96f5905b58b8745e49615"
+    },
+    "production-agent-update.png": {
+      "path": ".local-dev/image-release-111/production-agent-update.png",
+      "sha256": "917bcaa3897785d2c8909d1835f2d99b689ab9e1650e6e5ea4929f30f52d6597"
+    }
+  }
+}

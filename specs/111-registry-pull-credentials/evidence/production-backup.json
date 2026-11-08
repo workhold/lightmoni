@@ -1,0 +1,15 @@
+{
+  "snapshot_complete": true,
+  "quick_check": "ok",
+  "pages": 463035,
+  "page_size": 4096,
+  "transferred": 463035,
+  "observed_at": "2026-11-08T13:45:05.437853+00:00",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261108-container-management-v1",
+  "revision": "70a0060fc47581078a3a0a5ac7b921c01d58d0aa",
+  "snapshot_bytes": 1896591360,
+  "directory_mode": "0700",
+  "file_modes": "0600",
+  "backup_directory": "/opt/lightmoni/backups/sdd111-registry-credentials-20261108",
+  "evidence_source": "visible production backup receipt via existing 1Panel terminal"
+}

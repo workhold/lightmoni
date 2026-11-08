@@ -26,3 +26,8 @@ CloudClient 写入 DNSPod 时统一转换默认线路别名，CreateRecord/Modif
 ## 联合Docker发行
 
 按用户指定与私有仓库凭据功能一并发行：PR149已合入，成品源码为main合并提交`9d22fd55dc94a47f7469e567eecaf0d30ed129af`（包含PR149、PR150）。固定镜像`docker.heyphp.com/lightmoni/lightmoni:20261108-registry-credentials-v1`，支持Linux amd64/arm64，OCI索引摘要`sha256:bae80e1bb452b955d4528773f3a2672cfe6e9e7b470edce7da625c7c7242a5d3`。两架构各57项成品检查通过；成品编译模块的凭据与DNSPod路由联合回归各32/32通过、0跳过。发布清单、摘要回读与latest保留证据见[SDD111验收记录](../111-registry-pull-credentials/validation.md)。未进行生产中心部署或真实DNS写入。
+
+
+## 生产发布追加回读
+
+用户随后明确要求上线；2026-11-08中心已运行包含本修复的`9d22fd55dc94a47f7469e567eecaf0d30ed129af`，健康检查正常。当前网站docker.doc-a.cn的DNS状态仍显示“自动管理的记录已被外部修改，请核对后处理。”本次未强制覆盖记录，不能据镜像部署成功声称解析已经恢复。受保护备份、中心/Agent更新与实际回读见[SDD111生产验收](../111-registry-pull-credentials/validation.md)。
