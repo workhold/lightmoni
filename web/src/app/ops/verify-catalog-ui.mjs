@@ -6,7 +6,7 @@ const root = resolve(import.meta.dirname, "../../../.."),
   base = process.env.LIGHTMONI_CATALOG_UI_URL ?? "http://127.0.0.1:5196";
 if (!["127.0.0.1", "localhost"].includes(new URL(base).hostname))
   throw Error("Loopback fixture required");
-const out = resolve(root, "specs/094-catalog-search-storage/evidence"),
+const out = resolve(root, process.env.LIGHTMONI_CATALOG_UI_OUT ?? "specs/094-catalog-search-storage/evidence"),
   media = mediaDirectory(out);
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ headless: true, channel: "chrome" }),
@@ -134,9 +134,16 @@ try {
     ).toBeVisible();
     await expect(drawer.getByLabel(en ? "Website domain" : "访问域名", {exact:true})).toBeVisible();
     await expect(drawer.getByLabel(en ? "Deployment cluster" : "部署集群", {exact:true})).not.toBeVisible();
+    await expect(drawer.getByLabel(en ? "Installation target" : "安装位置", {exact:true})).toBeVisible();
+    await expect(drawer.getByLabel(en ? "Host port" : "宿主端口", {exact:true})).toBeVisible();
+    await expect(drawer.getByLabel(en ? "Listen scope" : "监听范围", {exact:true})).toBeVisible();
+    await expect(drawer.getByLabel(en ? "Service name" : "服务标识", {exact:true})).toBeHidden();
+    await drawer.getByLabel(en ? "Listen scope" : "监听范围", {exact:true}).scrollIntoViewIfNeeded();
+    await page.screenshot({path: resolve(media, `dbx-basic-${language}-${width}-${appearance}.png`), animations: "disabled"});
     await drawer
       .getByText(en ? "Advanced settings" : "高级设置", { exact: true })
       .click();
+    await expect(drawer.getByLabel(en ? "Service name" : "服务标识", {exact:true})).toBeVisible();
     await expect(drawer.getByLabel(en ? "Host port" : "宿主端口", {exact:true})).toHaveValue("0");
     await page.screenshot({
       path: resolve(media, `dbx-${language}-${width}-${appearance}.png`),
@@ -269,7 +276,7 @@ try {
       animations: "disabled",
     });
     checks.push(
-      `${language}/${appearance}/${width}: eight category counts, DBX and Firecrawl tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow`,
+      `${language}/${appearance}/${width}: installation target, port mappings and listen scope visible with advanced settings collapsed; advanced service name preserved; eight category counts, DBX and Firecrawl tools, defaults, search, Dify, GPU, multiport, architecture, no page overflow`,
     );
     await context.close();
   }

@@ -1,0 +1,16 @@
+{
+  "tool": "oil-ui shoot.mjs --zoom 2",
+  "reviewed": true,
+  "results": [
+    {
+      "file": "page-@2x.png",
+      "state": null,
+      "size": "1440x1000",
+      "zoom": 2,
+      "issues": [
+        "加载错误：Failed to load resource: the server responded with a status of 404 (Not Found) http://127.0.0.1:5199/favicon.ico"
+      ]
+    }
+  ],
+  "limit": "Existing favicon.ico 404; no change made for this unrelated asset"
+}
