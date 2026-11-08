@@ -1,0 +1,10 @@
+{
+  "observed_via": "authenticated 1Panel terminal",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261108-compact-headers-v1",
+  "revision": "2a5419aa361e791db96d0d1d06c76e8a5e31062e",
+  "health": "healthy",
+  "data_volume": "lightmoni_lightmoni-state-v2-20261103:/data",
+  "working_directory": "/opt/lightmoni/lightmoni",
+  "backup_directory": "/opt/lightmoni/backups/sdd108-host-files-20261108",
+  "backup_status": "verified on second attempt; see deployment-report.json and validation.md"
+}
