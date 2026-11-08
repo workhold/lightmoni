@@ -1411,7 +1411,7 @@ test("DNSPod unweighted default CNAME recovers failed creation and verifies nati
     if (reject || d.RecordLine !== "默认")
       return new Response(JSON.stringify({ Response: { Error: { Code: "InvalidParameter.RecordLineInvalid" } } }));
     assert.equal(Object.hasOwn(d, "Weight"), false);
-    const record = { RecordId: 123, Name: d.SubDomain, Type: d.RecordType, Value: d.Value,
+    const record = { RecordId: 123, Name: d.SubDomain, Type: d.RecordType, Value: d.Value + ".",
       Line: "默认", LineId: "0", TTL: d.TTL, Status: "ENABLE" };
     if (action === "CreateRecord") records.push(record);
     else Object.assign(records.find(r => r.RecordId === d.RecordId), record);
@@ -1480,7 +1480,7 @@ test("DNSPod exposes only permitted nested lines and preserves weighted CNAME id
         RecordId,
         Name: d.SubDomain,
         Type: d.RecordType,
-        Value: d.Value,
+        Value: d.Value + ".",
         Line: d.RecordLine,
         LineId: d.RecordLineId,
         TTL: d.TTL,

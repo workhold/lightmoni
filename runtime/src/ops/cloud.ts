@@ -41,6 +41,12 @@ export interface DNSInput {
   weight?: number;
   enabled?: boolean;
 }
+/** Compare CNAME domain targets without changing provider values or case-sensitive TXT content. */
+export function dnsRecordValueKey(type: string, value: string): string {
+  return type === "CNAME"
+    ? value.replace(/[A-Z]/g, (char) => char.toLowerCase()).replace(/\.$/, "") + "."
+    : value;
+}
 export class CloudError extends Error {
   state?: string;
   constructor(
@@ -783,7 +789,7 @@ export async function ensureDnsRecords(
     value: string;
     line?: string;
     line_id?: string;
-  }) => [r.name, r.type, r.value, lineKey(r)].join("\0");
+  }) => [r.name, r.type, dnsRecordValueKey(r.type, r.value), lineKey(r)].join("\0");
   const observed = await client.listRecords(zone.spec.domain);
   const owned = db.all<any>(
     "SELECT * FROM ops_dns_owned WHERE zone_id=? AND owner_id=?",
