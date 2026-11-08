@@ -1,0 +1,11 @@
+{
+  "url": "https://moni.heyphp.com/websites",
+  "website_id": "fb2bb27e9a85a7e83cb46412d3eab67a",
+  "config_version": 6,
+  "list_dns_label": "DNS 厂商已确认",
+  "detail_dns_label": "最近回读成功",
+  "dns_readback_time_local": "2026/11/8 22:28:42",
+  "dns_error_visible": false,
+  "screenshot_sha256": "0f23355f053403296f1eaf2abb61153de9dc3d567b20ddfa1b9038b798c00949",
+  "source": "native Chrome accessibility state and screenshot after production rollout"
+}

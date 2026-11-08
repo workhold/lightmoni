@@ -1,0 +1,11 @@
+{
+  "revision": "f0d729d7f93bee1d432d4d5f178370690e97a73a",
+  "source": "git archive of merged main",
+  "context_sha256": "c33ffae07b231f6a421758ca2c667b09618fa3cc1623cac2a1ac12e955a7cf07",
+  "context_bytes": 58705920,
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "dockerfile": "deploy/server/Dockerfile"
+}

@@ -1,0 +1,13 @@
+{
+  "kind": "center-patch",
+  "github_sdk_assets": [
+    "SDK_SHA256SUMS",
+    "lightmoni-go-sdk_0.1.0.tar.gz",
+    "lightmoni-python-sdk_0.1.0.tar.gz",
+    "lightmoni-rust-sdk_0.1.0.tar.gz",
+    "lightmoni-sdk-0.1.0.tgz"
+  ],
+  "github_latest_before": "20261107-website-identity-573b644",
+  "agent_archives": "validated inside the fixed center image; no standalone Agent assets in this GitHub release",
+  "reason": "center-only DNS fix requires no Agent update; repeated large uploads remained starter without a server digest"
+}

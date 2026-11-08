@@ -1,0 +1,15 @@
+{
+  "snapshot_complete": true,
+  "quick_check": "ok",
+  "pages": 464243,
+  "page_size": 4096,
+  "transferred": 464243,
+  "observed_at": "2026-11-08T14:12:35.685722+00:00",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261108-registry-credentials-v1",
+  "revision": "9d22fd55dc94a47f7469e567eecaf0d30ed129af",
+  "snapshot_bytes": 1901539328,
+  "directory_mode": "0700",
+  "file_modes": "0600",
+  "path": "/opt/lightmoni/backups/sdd113-dns-cname-20261108",
+  "source": "read back from production backup-report.json through authenticated native terminal"
+}
