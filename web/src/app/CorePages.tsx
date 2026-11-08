@@ -8,7 +8,7 @@ import {type CatalogTable,type User} from '../shared/types';
 import {useI18n} from '../shared/i18n';
 export const defaultRange=()=>({from:new Date(Date.now()-3600000).toISOString(),to:new Date().toISOString()});
 const errorText=(e:unknown,fallback:string)=>e instanceof Error?e.message:fallback;
-function Heading({title,description,action}:{title:string;description:string;action?:React.ReactNode}){return <div className="lm-page-heading"><div><h1>{title}</h1><p>{description}</p></div>{action}</div>}
+
 export function LoginPage({onLogin}:{onLogin:(u:User)=>void}){
  const {language,setLanguage,t}=useI18n();
  const [form]=Form.useForm();
@@ -48,11 +48,11 @@ export function OverviewPage(){
   {url:'/assistant',title:t('AI 助手','AI assistant'),description:t('读取真实表结构，生成SQL、分析异常与创建大盘。','Inspect actual schemas, generate SQL, analyze anomalies and create dashboards.'),action:t('打开AI 助手','Open AI assistant')},
  ];
  return <div className="lm-page lm-entry">
-  <Heading title={t('监控概览','Monitoring overview')} description={t('从机器到业务，快速找到需要关注的变化。','Find changes that need attention across hosts and applications.')} action={<Link to="/data"><Button type="primary" icon={<PlusOutlined/>}>{t('接入数据','Connect data')}</Button></Link>}/>
+
   {error&&<Alert type="error" title={error}/>}
   <div className="lm-stats">{stats.map(({id,label,value})=><div className="lm-stat" key={id}><span>{label}</span><strong>{value??'—'}</strong></div>)}</div>
   <div className="lm-template-grid">{entries.map(({title,description,url,action})=><div className="lm-template" key={url}><h3>{title}</h3><p>{description}</p><Link to={url}><Button type="link" style={{padding:0}} icon={<ArrowRightOutlined/>}>{action}</Button></Link></div>)}</div>
-  <div className="lm-surface" style={{marginTop:24}}><h2>{t('已接入的数据','Connected data')}</h2><Table rowKey="id" dataSource={data?.tables??[]} pagination={{pageSize:8}} columns={[
+  <div className="lm-surface" style={{marginTop:24}}><div className="lm-content-toolbar"><h2>{t('已接入的数据','Connected data')}</h2><Link to="/data"><Button type="primary" icon={<PlusOutlined/>}>{t('接入数据','Connect data')}</Button></Link></div><Table rowKey="id" dataSource={data?.tables??[]} scroll={{x:560}} pagination={{pageSize:8}} columns={[
    {title:t('数据表','Data table'),dataIndex:'name',render:(v:string)=><Typography.Text code>{v}</Typography.Text>},
    {title:t('类型','Type'),dataIndex:'kind',render:(v:string)=><Tag>{v}</Tag>},
    {title:t('服务','Services'),dataIndex:'services',render:(v:string[])=>v.join(' · ')},

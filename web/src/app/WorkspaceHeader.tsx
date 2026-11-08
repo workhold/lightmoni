@@ -21,7 +21,7 @@ export default function WorkspaceHeader({user,title,onLoggedOut}:{user:User;titl
   finally {setLoggingOut(false)}
  }
  return <header className="lm-workspace-header" role="banner" aria-label={t('工作台顶部栏','Workspace header')}>
-  <div className="lm-workspace-location" title={title}><span>LightMoni</span><span aria-hidden>/</span><strong>{title}</strong></div>
+  <div className="lm-workspace-location" title={title}><span>LightMoni</span><span aria-hidden>/</span><strong role="heading" aria-level={1}>{title}</strong></div>
   <div className="lm-workspace-actions">
    <Popover trigger="click" placement="bottomRight" open={preferencesOpen} onOpenChange={setPreferencesOpen}
     title={t('界面配色','Appearance')} content={<InterfacePreferences compact/>}>

@@ -79,7 +79,7 @@ export default function PersonalSettings({user,onUserUpdated}:{user:User;onUserU
  const [params,setParams]=useSearchParams(),tab=params.get('tab')??'profile';
  if(tab==='contacts')return <Navigate to="/settings?tab=profile" replace/>;
  if(adminTabs.includes(tab))return <Navigate to={user.role==='admin'?`/admin?${params}`:'/settings'} replace/>;
- return <div className="lm-page lm-settings-page lm-entry"><div className="lm-page-heading"><div><h1>{t('个人设置','Personal settings')}</h1><p>{t('管理个人资料、联系方式与账号偏好。','Manage your profile, contact details and account preferences.')}</p></div></div><Tabs activeKey={['profile','appearance','bindings'].includes(tab)?tab:'profile'} onChange={tab=>setParams({tab})} destroyOnHidden items={[
+ return <div className="lm-page lm-settings-page lm-entry"><Tabs activeKey={['profile','appearance','bindings'].includes(tab)?tab:'profile'} onChange={tab=>setParams({tab})} destroyOnHidden items={[
   {key:'profile',label:t('个人资料','Profile'),children:<ProfileSettings user={user} onUserUpdated={onUserUpdated}/>},
   {key:'appearance',label:t('界面偏好','Interface preferences'),children:<AppearanceSettings user={user}/>},
   {key:'bindings',label:t('账号绑定','Linked accounts'),children:<AccountBindings/>},

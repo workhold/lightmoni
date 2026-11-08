@@ -1,6 +1,6 @@
 import {useEffect,useState} from 'react';
 import {useLocation,useNavigate} from 'react-router-dom';
-import {ApiOutlined,PlusOutlined,ReloadOutlined} from '@ant-design/icons';
+import {PlusOutlined,ReloadOutlined} from '@ant-design/icons';
 import {Alert,App,Button,Checkbox,Descriptions,Form,Input,InputNumber,Modal,Select,Space,Spin,Table,Tabs,Tag,Typography} from '../shared/ui';
 import {api,post} from '../shared/api';
 import {useI18n} from '../shared/i18n';
@@ -57,12 +57,12 @@ export default function McpAccessPage({user}:{user:User}){
   {title:t('操作','Actions'),width:100,render:(_:unknown,item:Grant)=><Button danger size="small" disabled={!item.active} onClick={()=>revoke(kind,item)}>{t('撤销','Revoke')}</Button>},
  ];
  return <div className="lm-page lm-mcp-page">
-  <div className="lm-page-heading"><div><h1><ApiOutlined aria-hidden/> {t('MCP 接入','MCP access')}</h1><p>{t('让本地 AI 客户端使用你的平台权限访问 LightMoni。','Allow a local AI client to access LightMoni with your platform permissions.')}</p></div><Button icon={<ReloadOutlined aria-hidden/>} loading={loading} onClick={()=>void load()}>{t('刷新','Refresh')}</Button></div>
+
   <Alert showIcon type="info" title={t('首期开放查询与操作提案，提案需要在平台审阅后执行。','This release supports queries and operation proposals. Review proposals in the platform before execution.')} description={t('MCP 凭据与 SDK、Agent、SSH 凭据分开；授权不会提升当前账号的权限。','MCP credentials are separate from SDK, Agent, and SSH credentials. Authorization does not elevate your account permissions.')}/>
   {error&&<Alert showIcon type="error" title={error} action={<Button onClick={()=>void load()}>{t('重试','Retry')}</Button>}/>}
   {actionError&&<Alert showIcon type="error" closable title={actionError} onClose={()=>setActionError('')}/>}
   {loading&&!data?<Spin/>:data&&<>
-   <section className="lm-surface lm-mcp-connect"><h2>{t('连接客户端','Connect a client')}</h2><Descriptions size="small" column={1} items={[{key:'endpoint',label:t('MCP 地址','MCP endpoint'),children:<Typography.Text copyable code>{data.endpoint}</Typography.Text>}]}/>
+   <section className="lm-surface lm-mcp-connect"><div className="lm-content-toolbar"><h2>{t('连接客户端','Connect a client')}</h2><Button icon={<ReloadOutlined aria-hidden/>} loading={loading} onClick={()=>void load()}>{t('刷新','Refresh')}</Button></div><Descriptions size="small" column={1} items={[{key:'endpoint',label:t('MCP 地址','MCP endpoint'),children:<Typography.Text copyable code>{data.endpoint}</Typography.Text>}]}/>
     <p>{t('支持 Streamable HTTP。OAuth 客户端需先登记客户端 ID 与回调地址，再从客户端发起浏览器授权；本页管理已授予的权限。','Uses Streamable HTTP. Register an OAuth client ID and redirect URIs, then start browser authorization from the client. Manage granted access here.')}</p>
     <p>{t('对于支持自定义 Bearer Token 的客户端，可先创建个人令牌。将令牌配置到启动客户端的受保护环境中，变量名使用 LIGHTMONI_MCP_TOKEN，然后执行：','For clients supporting a custom Bearer token, create a personal token. Configure it in the protected environment used to launch the client as LIGHTMONI_MCP_TOKEN, then run:')}</p>
     <Typography.Paragraph className="lm-mcp-command" copyable={{text:command(data.endpoint)}}><code>{command(data.endpoint)}</code></Typography.Paragraph>
