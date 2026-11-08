@@ -1,5 +1,6 @@
 import type { OperationPayload } from '../operations/types.js';
 import { canonicalJSON, strictRecord } from './privileged-executor.js';
+import {normalizeHostDockerAction} from './host-docker.js';
 export const MANAGED_OPERATIONS_CAPABILITY = 'operations.managed.v1' as const;
 export interface ManagedExecutionPayload {
   kind:'managed'; operation:'execute'; resource_id:string; resource_revision:number;
@@ -28,6 +29,10 @@ export function managedExecutionPayload(value:unknown):ManagedExecutionPayload {
     const a=docker[0];strictRecord(a,['kind','operation','container_id'],['kind','operation']);
     if(j.actions.length!==1||!['inventory','start','stop','restart'].includes(a.operation)||a.operation!=='inventory'&&!/^[a-f0-9]{64}$/.test(a.container_id??''))throw Error('unsafe_managed_docker_action');
   }
-  if(j.actions.some((a:any)=>!['operations','docker','stage_artifact','activate_release','systemd','health_check','systemd_probe'].includes(a?.kind)))throw Error('unsafe_managed_action');
+  if(j.actions.some((a:any)=>a?.kind==='host_docker')){
+    if(j.actions.length!==1||j.capabilities.length!==1||j.capabilities[0]!=='docker.host')throw Error('unsafe_managed_docker_action');
+    normalizeHostDockerAction(j.actions[0]);
+  }
+  if(j.actions.some((a:any)=>!['operations','docker','host_docker','stage_artifact','activate_release','systemd','health_check','systemd_probe'].includes(a?.kind)))throw Error('unsafe_managed_action');
   return v as ManagedExecutionPayload;
 }

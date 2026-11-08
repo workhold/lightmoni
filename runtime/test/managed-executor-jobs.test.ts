@@ -18,6 +18,10 @@ import {connectManagedExecutorJobs} from '../src/server/managed-executor-jobs.js
 import {connectExecutorObservations,restoreObservationRows} from '../src/server/executor-observation.js';
 import {encodeOTLP,nowNano} from '../src/shared/otlp.js';
 import {randomUUID} from 'node:crypto';
+import {registerHostDockerJobs} from '../src/ops/host-docker.js';
+import {executeHostDocker} from '../src/privileged-executor/host-docker.js';
+import {fakeHostDocker,hostContainerID,unusedImageID} from './helpers/host-docker-fixture.js';
+import {managedExecutorObservation} from '../src/server/managed-executor-status.js';
 function fixture() {
   const db = new DB(":memory:"), router = new Router(), crypt = cipher(randomBytes(32));
   let clock = new Date("2026-11-01T00:00:00Z");
@@ -48,7 +52,7 @@ function fixture() {
     const signature = signExecutorRequest({ body: raw, center_instance_id: store.centerInstanceID, executor_id: enrolled.executor_id, install_generation: enrolled.install_generation, method: "POST", path, request_id: requestID, iat: Math.floor(clock.getTime() / 1000), exp: Math.floor(clock.getTime() / 1000) + 60 }, keys.privateKey);
     return { path, raw, signature, invoke(action: (e: any, v: any) => unknown) { return store.signedRequest(enrolled.executor_id, "POST", path, Buffer.from(raw), signature, action) as any; } };
   };
-  const heartbeat = () => request("heartbeat", { version: "test", activation_id:"11111111-1111-4111-8111-111111111111", boot_id: "boot_1234567890123456789", policy_generation: policy.generation, capabilities: ["script.elevated.v1", "container.managed.v1", "operations.managed.v1"], operations_capabilities:["operations.platform"],account_profiles: [account], interpreter_profiles: [{ runtime: "shell", sha256: interpreter }] }).invoke((e, v) => store.heartbeat(e, v));
+  const heartbeat = (extra:any={}) => request("heartbeat", { version: "test", activation_id:"11111111-1111-4111-8111-111111111111", boot_id: "boot_1234567890123456789", policy_generation: policy.generation, capabilities: ["script.elevated.v1", "container.managed.v1", "operations.managed.v1"], operations_capabilities:["operations.platform"],account_profiles: [account], interpreter_profiles: [{ runtime: "shell", sha256: interpreter }],...extra }).invoke((e, v) => store.heartbeat(e, v));
   heartbeat();
   const makePlan = (extra: any = {}) => store.plan({ host_ids: ["host"], capability: "script.elevated.v1", payload: { kind: "script", runtime: "shell", code: "printf secret-from-script", args: [], cwd_profile: "private", environment: {}, account, interpreter_sha256: interpreter, timeout_ms: 5000, max_output_bytes: 4096 }, ...extra }, "admin");
   const apply = () => { const plan = makePlan(); return store.apply(plan.id, { confirm: true, expected_revision: plan.revision, request_id: randomBytes(24).toString("base64url") }, "admin").jobs[0]; };
@@ -149,4 +153,62 @@ test('more than one drain window of failed observations cannot starve a later he
   for(let i=0;i<21;i++)send('poison');f.db.run("UPDATE privileged_observation_batches SET created_at='2026-10-31T23:59:59Z'");send('healthy');
   await new Promise(r=>setTimeout(r,2400));assert.equal(exported,1);assert.equal(f.db.get<any>('SELECT count(*) n FROM privileged_observation_batches WHERE completed=0')!.n,21);
  }finally{await module.close?.();f.close();}
+});
+
+async function hostContainerHTTP(f:ReturnType<typeof fixture>){
+ let ready=true;
+ registerHostDockerJobs(f.deps,f.jobs,handler=>handler,()=>({id:'host',agent_id:'agent-host',online:true,state:'ready',truncated:false,docker_capabilities:ready?['docker.host']:[]}));
+ const server=createServer((req,res)=>void f.router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end('{}')}}));server.listen(0,'127.0.0.1');await once(server,'listening');
+ const base='http://127.0.0.1:'+(server.address() as any).port+'/api/v1/ops/machines/host/container-jobs';
+ const req=async(body?:any,suffix='',headers:Record<string,string>={})=>{const r=await fetch(base+suffix,{method:body?'POST':'GET',headers:{cookie:'lm_session=human','content-type':'application/json',...headers},...(body?{body:JSON.stringify(body)}:{})});return{status:r.status,body:await r.json() as any}};
+ return{req,old(){ready=false},close(){server.close();server.closeAllConnections()}};
+}
+async function completeHostContainerJob(f:ReturnType<typeof fixture>,node:ReturnType<typeof fakeHostDocker>,job:any){
+ const claim=f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v)),plan=planClaims(verifyJWS(claim.job.plan,f.store.centerPublicKey,f.store.centerKeyID));assert.equal(plan.job_id,job.id);assert.equal(plan.capability,'operations.managed.v1');
+ f.request('jobs/'+job.id+'/start-permits',{lease_id:plan.lease_id,step_id:'managed.execute',executor_nonce:randomBytes(24).toString('base64url')}).invoke((e,v)=>f.store.startPermit(e,job.id,v));
+ let seq=0;const receipt=await executeHostDocker(job.action,job.id,{...node.context,now:f.deps.now,authorize:async()=>{f.request('jobs/'+job.id+'/renew',{lease_id:plan.lease_id}).invoke((e,v)=>f.store.renew(e,job.id,v))}},async event=>{f.request('jobs/'+job.id+'/events',{lease_id:plan.lease_id,sequence:++seq,phase:event.phase,code:'',detail:event}).invoke((e,v)=>f.store.events(e,job.id,v))});
+ assert.equal(receipt.state,'succeeded',JSON.stringify(receipt));f.request('jobs/'+job.id+'/result',{lease_id:plan.lease_id,state:receipt.state,code:receipt.code,summary:receipt.summary,exit_code:0,stdout:canonicalJSON(receipt),stderr:''}).invoke((e,v)=>f.store.result(e,job.id,v));return f.jobs.get(job.id);
+}
+
+test('host container HTTP requires a live human, exact confirmation, idempotency and signed management execution',async()=>{
+ const f=fixture(),http=await hostContainerHTTP(f),node=fakeHostDocker();
+ try{
+  const input={request_id:randomUUID(),action:{kind:'host_docker',operation:'inspect',container_id:hostContainerID}};
+  assert.equal((await http.req(input,'',{authorization:'Bearer ordinary-control'})).status,403);
+  const created=await http.req(input);assert.equal(created.status,202);assert.equal((await http.req(input)).body.id,created.body.id);
+  assert.equal((await http.req({...input,action:{...input.action,container_id:'b'.repeat(64)}})).status,409);
+  assert.equal(f.jobs.claim('agent-host',['docker.host']),null);
+  await completeHostContainerJob(f,node,created.body);
+  const read=await http.req(undefined,'/'+created.body.id);assert.equal(read.body.state,'succeeded');assert.equal(read.body.result.container.name,'qa-running');assert.equal(read.body.blocking,false);assert.doesNotMatch(JSON.stringify(read),/PASSWORD|hidden/);
+  const remove={request_id:randomUUID(),action:{kind:'host_docker',operation:'remove',container_id:hostContainerID,expected_revision:read.body.result.container.revision,force:true,remove_anonymous_volumes:false}};
+  assert.equal((await http.req(remove)).status,400);
+  const accepted=await http.req({...remove,confirmed:true});assert.equal(accepted.status,202);await completeHostContainerJob(f,node,accepted.body);assert.equal((await http.req(undefined,'/'+accepted.body.id)).body.result.removed_id,hostContainerID);
+  http.old();assert.equal((await http.req({...input,request_id:randomUUID()})).status,409);
+  f.db.run("UPDATE users SET active=0 WHERE id='admin'");assert.equal((await http.req(undefined)).status,403);
+ }finally{http.close();node.close();f.close()}
+});
+
+test('host image cleanup is bound to its successful preview and cannot include referenced or forged candidates',async()=>{
+ const f=fixture(),http=await hostContainerHTTP(f),node=fakeHostDocker();
+ try{
+  const read=await http.req({request_id:randomUUID(),action:{kind:'host_docker',operation:'images'}});await completeHostContainerJob(f,node,read.body);
+  const p=(await http.req(undefined,'/'+read.body.id)).body,result=p.result,i=result.images.find((i:any)=>i.id===unusedImageID);
+  const input={confirmed:true,request_id:randomUUID(),action:{kind:'host_docker',operation:'prune_images',preview_job_id:p.id,previewed_at:result.observed_at,images:[{image_id:i.id,expected_revision:i.revision}]}};
+  assert.equal((await http.req({...input,action:{...input.action,images:[{image_id:result.images[0].id,expected_revision:result.images[0].revision}]}})).status,409);
+  assert.equal((await http.req({...input,action:{...input.action,previewed_at:'2026-01-01T00:00:00Z'}})).status,409);
+  const accepted=await http.req(input);assert.equal(accepted.status,202);await completeHostContainerJob(f,node,accepted.body);
+  const receipt=(await http.req(undefined,'/'+accepted.body.id)).body;assert.deepEqual(receipt.result.deleted,[unusedImageID]);assert.equal(receipt.blocking,false);
+  assert.equal((await http.req(input)).body.id,accepted.body.id);
+  f.advance(301);assert.equal((await http.req({...input,request_id:randomUUID()})).status,409);
+ }finally{http.close();node.close();f.close()}
+});
+
+
+test('host-management compatibility comes from a signed root observation, never the ordinary Agent heartbeat',()=>{
+ const f=fixture();try{
+  const inventory={management_version:1,state:'ready',observed_at:f.deps.now().toISOString(),containers:[],truncated:false};
+  f.db.run('UPDATE agents SET heartbeat=?',JSON.stringify({docker_inventory:inventory,docker_capabilities:['docker.host']}));
+  assert.equal(managedExecutorObservation(f.deps,'agent-host')?.docker_inventory?.management_version,undefined);
+  f.heartbeat({docker_inventory:inventory});assert.equal(managedExecutorObservation(f.deps,'agent-host')?.docker_inventory?.management_version,1);
+ }finally{f.close()}
 });

@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-08",
+  "checks": {
+    "runtime-tests": {
+      "tests": 73,
+      "pass": 71,
+      "fail": 0,
+      "skipped": 2
+    },
+    "docker-live": {
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skipped": 0
+    },
+    "browser-contracts": {
+      "tests": 3,
+      "pass": 3,
+      "fail": 0,
+      "skipped": 0
+    }
+  },
+  "runtime_typecheck": "passed",
+  "web_typecheck": "passed",
+  "git_diff_check": "passed",
+  "commands": {
+    "runtime-tests": "node --import tsx --test test/host-docker.test.ts test/managed-executor-jobs.test.ts test/docker-controls.test.ts test/privileged-executor-docker.test.ts test/privileged-executor-protocol.test.ts test/privileged-executor-runner.test.ts",
+    "docker-live": "LIGHTMONI_DOCKER_LIVE=1 node --import tsx --test test/host-docker-live.test.ts",
+    "browser-contracts": "node --import tsx --test test/host-container-contract.test.ts"
+  },
+  "browser_full_flow": "incomplete: Computer Use tool automatic approval rejected the current browser URL; no bypass attempted",
+  "production_mutations": false,
+  "linux_systemd_root_worker_live_deployment_tested": false
+}

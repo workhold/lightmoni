@@ -2,6 +2,7 @@ import { ordinaryReadOnlyJob } from "../shared/ordinary-agent-jobs.js";
 import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { id, token } from "../shared/crypto.js";
 import { dockerJobAction, dockerReceipt, safeDockerCode } from '../shared/docker-jobs.js';
+import {hostDockerJobAction,hostDockerCode,hostDockerReadOnly,hostDockerReceipt} from '../shared/host-docker.js';
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
@@ -311,7 +312,7 @@ export function registerAgentJobs(
     assertAgentActive(db, agentID);
     if (!options.agentCredentials?.has(agentID, "control")) fail(409, "registered_host_required: 主机没有有效的 Agent 控制通道");
     const actionList = actions(input.actions), caps = capabilities(input.capabilities ?? []);
-    const privileged = (actionList.some((a:any)=>['docker','systemd_probe'].includes(a.kind))||!ordinaryReadOnlyJob({actions:actionList,capabilities:caps}));
+    const privileged = (actionList.some((a:any)=>['docker','host_docker','systemd_probe'].includes(a.kind))||!ordinaryReadOnlyJob({actions:actionList,capabilities:caps}));
     const rootRuntime=!!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_agent_runtime'")&&!!db.get("SELECT machine_id FROM machine_agent_runtime WHERE agent_id=? AND runtime_mode='root'",agentID);
     if(rootRuntime&&!privileged)fail(409,'root_agent_requires_signed_task: root Agent 的主机操作必须使用签名任务，请使用任务中心或受管运维入口');
     const existing = db.get<any>("SELECT * FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deploymentID, operationID);
@@ -409,11 +410,12 @@ export function registerAgentJobs(
     const originalSummary = eventSummary(value.summary), originalCode = text(value.code ?? "", "code", 128, false), originalSnapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
     const probeJob = readOnlyPreflight(current);
     const dockerJob = dockerJobAction(JSON.parse(current.actions_json||'[]'));
-    const summary = dockerJob ? 'Docker task state updated' : probeJob ? (phase === "accepted" ? "Agent accepted read-only systemd preflight" : phase === "preflighting" ? "Agent inspected registered systemd target" : phase === "succeeded" ? "Read-only systemd preflight completed" : "Read-only systemd preflight state updated") : originalSummary;
-    const code = dockerJob ? (originalCode?safeDockerCode(originalCode):'') : probeJob ? (originalCode ? safePreflightCode(originalCode) : "") : originalCode;
+    const hostDockerJob=hostDockerJobAction(JSON.parse(current.actions_json||'[]'));
+    const summary = dockerJob||hostDockerJob ? 'Docker task state updated' : probeJob ? (phase === "accepted" ? "Agent accepted read-only systemd preflight" : phase === "preflighting" ? "Agent inspected registered systemd target" : phase === "succeeded" ? "Read-only systemd preflight completed" : "Read-only systemd preflight state updated") : originalSummary;
+    const code = dockerJob ? (originalCode?safeDockerCode(originalCode):'') : hostDockerJob ? (originalCode?hostDockerCode(originalCode):'') : probeJob ? (originalCode ? safePreflightCode(originalCode) : "") : originalCode;
     // A probe snapshot is accepted only from the final /result path, after the
     // strict whitelist below. Events never persist Agent-provided snapshot data.
-    const snapshot = probeJob || dockerJob ? {} : originalSnapshot;
+    const snapshot = probeJob || dockerJob || hostDockerJob ? {} : originalSnapshot;
     const occurred = iso(deps);
     transact(() => {
       const last = db.get<any>("SELECT * FROM agent_job_events WHERE job_id=? ORDER BY sequence DESC LIMIT 1", jobID);
@@ -475,6 +477,14 @@ export function registerAgentJobs(
         try{snapshot=dockerReceipt(dockerAction,snapshot,current.issued_at,deps.now());}
         catch{state=dockerAction.operation==='inventory'?'failed':'unknown';code='invalid_docker_receipt';summary='Docker receipt did not match the task';snapshot={};}
       }else snapshot={docker:{operation:dockerAction.operation,container_id:dockerAction.container_id??'',error:code||'docker_collection_unavailable',attempted_at:iso(deps)}};
+    }
+    const hostDockerAction=hostDockerJobAction(JSON.parse(current.actions_json||'[]'));
+    if(hostDockerAction){
+      code=code?hostDockerCode(code):'';summary=state==='succeeded'?'Host container task completed and verified':state==='unknown'?'Host container result is unknown; inspect before retrying':'Host container task was not applied';
+      if(state==='succeeded'){
+        try{snapshot=hostDockerReceipt(hostDockerAction,snapshot,current.issued_at,deps.now());}
+        catch{state=hostDockerReadOnly(hostDockerAction)?'failed':'unknown';code='invalid_host_docker_receipt';snapshot={};}
+      }else snapshot={};
     }
     if (readOnlyPreflight(current)) {
       code = code ? safePreflightCode(code) : "";

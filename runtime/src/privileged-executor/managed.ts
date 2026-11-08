@@ -8,6 +8,8 @@ import { canonicalJSON,normalizePrivilegedPayload,parseStrictJSON,planClaims,sha
 import { managedExecutionPayload,type ManagedExecutionPayload } from '../shared/managed-execution.js';
 import { executeOperation,operationCommand } from '../agent/operations.js';
 import { executeDocker } from '../agent/docker.js';
+import {executeHostDocker} from './host-docker.js';
+import {productionTransport} from './docker.js';
 import { CapabilityExecutor,type ExecutionReceipt } from '../agent/executor.js';
 import { loadConfig,MANAGED_AGENT_CONFIG,MANAGED_AGENT_DATA_DIR,type ExecutorConfig } from './config.js';
 import { requestExecutor } from './client.js';
@@ -18,10 +20,12 @@ import { executeScript,interpreterDigest,interpreterPath,localAccount,production
 export const MANAGED_DATA_DIR=MANAGED_DATA_ROOT;
 /** Only after explicit center reconciliation of this exact root journal row. */
 export function releaseManagedOperationLock(row:{payload:any}){
-  if(row.payload?.kind!=='managed'||!row.payload.operation_payload)return;
+  if(row.payload?.kind!=='managed')return;
+  const operationID=row.payload.operation_payload?.operation_id??(row.payload.job?.actions?.[0]?.kind==='host_docker'?row.payload.job.id:undefined);
+  if(!operationID)return;
   const path=join(MANAGED_DATA_DIR,'operations/execution.lock');if(!existsSync(path))return;
   const stamp=parseStrictJSON(boundedFile(path,4096,true));
-  if(stamp.operation_id!==row.payload.operation_payload.operation_id||stamp.state!=='unknown'||!Number.isSafeInteger(stamp.pid)||stamp.pid<2)refuse('managed_lock_requires_local_review');
+  if(stamp.operation_id!==operationID||stamp.state!=='unknown'||!Number.isSafeInteger(stamp.pid)||stamp.pid<2)refuse('managed_lock_requires_local_review');
   try{process.kill(stamp.pid,0);refuse('managed_worker_still_present');}catch(error){if((error as NodeJS.ErrnoException).code!=='ESRCH')throw error;}
   const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);
   try{const own=fstatSync(fd),current=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const now=fstatSync(current);if(own.ino!==now.ino||own.dev!==now.dev)refuse('managed_lock_changed');unlinkSync(path);}finally{closeSync(current);}}finally{closeSync(fd);}
@@ -88,6 +92,7 @@ export async function runManagedSnapshot(filename:string,expectedDigest:string):
     const webProfile=payload.operation_payload&&['website','certificate'].includes(payload.operation_payload.resource.kind)?await prepareManagedWeb(MANAGED_DATA_DIR,command):{};
     const context={dataDir:MANAGED_DATA_DIR,signal:controller.signal,now:()=>new Date(),command,...webProfile};
     if(payload.operation_payload)receipt=await executeOperation(payload.operation_payload,context,emit);
+    else if(payload.job.actions[0]?.kind==='host_docker')receipt=await executeHostDocker(payload.job.actions[0],payload.job.id,{dataDir:MANAGED_DATA_DIR,daemonID:config.daemon_id??'',signal:controller.signal,now:()=>new Date(),authorize:authority,transport:productionTransport},emit);
     else if(payload.job.actions[0]?.kind==='docker')receipt=await executeDocker(payload.job.actions[0],payload.job.id,context,emit);
     else {
       const executor=new CapabilityExecutor({now:()=>new Date(),command:(file,args,timeoutMs,signal)=>command(file,args,{timeoutMs,signal}),emit,
