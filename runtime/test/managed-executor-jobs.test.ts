@@ -212,3 +212,32 @@ test('host-management compatibility comes from a signed root observation, never 
   f.heartbeat({docker_inventory:inventory});assert.equal(managedExecutorObservation(f.deps,'agent-host')?.docker_inventory?.management_version,1);
  }finally{f.close()}
 });
+
+test('registry secret uses the signed current lease, never the journal payload; revoked source still accepts final receipt',async()=>{
+ const {createRegistryCredentialSchema}=await import('../src/ops/registry-credentials.js');
+ const f=fixture();try{
+  createRegistryCredentialSchema({deps:f.deps} as any);
+  const credential='a'.repeat(32),image='private.test/team/app:1';
+  f.db.run('INSERT INTO ops_registry_credentials VALUES(?,?,?,?,?,?,?,1,?,?,?,?,?,?)',credential,'Private','private.test','team','[]','robot',f.deps.encrypt('signed-fixture-password'),'','','admin','admin',new Date().toISOString(),new Date().toISOString());
+  f.heartbeat({operations_capabilities:['operations.platform','operations.platform.registry-auth.v1']});
+  const job=f.enqueue();f.db.run('UPDATE agent_jobs SET capabilities_json=? WHERE id=?',JSON.stringify(['operations.platform','operations.platform.registry-auth.v1']),job.id);
+  const operation=f.payloads.get(job.operation_id);operation.resource.config.registry_authorizations=[{id:credential,revision:1,registry:'private.test',repository_prefix:'team',images:[image]}];
+  const claim=f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v)),plan=planClaims(verifyJWS(claim.job.plan,f.store.centerPublicKey,f.store.centerKeyID));
+  assert(!JSON.stringify(claim).includes('signed-fixture-password'));
+  f.request('jobs/'+job.id+'/start-permits',{lease_id:plan.lease_id,step_id:'managed.execute',executor_nonce:randomBytes(24).toString('base64url')}).invoke((e,v)=>f.store.startPermit(e,job.id,v));
+  const req=f.request('jobs/'+job.id+'/registry-credentials',{lease_id:plan.lease_id,image});
+  const read=()=>req.invoke((e,v)=>f.store.managedRegistryCredential(e,job.id,v));
+  assert.equal(read().credential.password,'signed-fixture-password');
+  assert.equal(read().credential.password,'signed-fixture-password');
+  for(const row of f.db.all<any>('SELECT response_enc FROM privileged_request_nonces'))assert(!f.deps.decrypt(row.response_enc).includes('signed-fixture-password'));
+  assert.throws(()=>f.request('jobs/'+job.id+'/registry-credentials',{lease_id:'wrong',image}).invoke((e,v)=>f.store.managedRegistryCredential(e,job.id,v)),/lease/);
+  assert.throws(()=>f.request('jobs/'+job.id+'/registry-credentials',{lease_id:plan.lease_id,image:'private.test/other:1'}).invoke((e,v)=>f.store.managedRegistryCredential(e,job.id,v)),/not_authorized/);
+  f.db.run("UPDATE ops_registry_credentials SET secret_cipher='',revoked_at='revoked',revision=2 WHERE id=?",credential);
+  // Simulate the source revalidation that the production platform adapter performs.
+  f.change();assert.throws(read,/revision_changed/);
+  const receipt={state:'failed',code:'registry_auth_cancelled',summary:'Stopped after credential revocation',snapshot:{},started_at:'',finished_at:''};
+  f.request('jobs/'+job.id+'/result',{lease_id:plan.lease_id,state:receipt.state,code:receipt.code,summary:receipt.summary,exit_code:1,stdout:canonicalJSON(receipt),stderr:''}).invoke((e,v)=>f.store.result(e,job.id,v));
+  assert.equal(f.jobs.get(job.id).state,'failed');assert.equal(f.store.get(job.id).state,'failed');
+  for(const table of ['privileged_jobs','privileged_request_nonces','task_runs'])assert(!JSON.stringify(f.db.all('SELECT * FROM '+table)).includes('signed-fixture-password'));
+ }finally{f.close();}
+});

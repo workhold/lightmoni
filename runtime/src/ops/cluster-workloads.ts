@@ -1,3 +1,4 @@
+import {registryCredentialIDs} from './registry-credentials.js';
 import {websiteDeleting} from './website-deletions.js';
 import { blockingAgentJobSQL } from "../server/agent-job-fence.js";
 import { operationExecutionCapabilities } from "../server/managed-executor-status.js";
@@ -866,6 +867,7 @@ export function createClusterWorkloads(
     delete runtime.memory_mb;
     return {
       ...runtime,
+      registry_credential_ids: registryCredentialIDs(store,s.registry_credential_ids),
       ...(s.image_pull_policy?{image_pull_policy:s.image_pull_policy}:{}),
       ...(s.configuration_mode ? {configuration_mode:s.configuration_mode} : {}),
       ports: declared,
@@ -1928,6 +1930,7 @@ export function createClusterWorkloads(
       website_revisions: revisions,
       website_enabled: enabled,
       openresty_application_id: a.id,
+      registry_application_revision: a.revision,
       cluster_id: cid,
     };
   }
@@ -2564,6 +2567,7 @@ export function createClusterWorkloads(
                       "application_id",
                       "generation",
                       "image_sources",
+                      "registry_authorizations",
                       "force_recreate",
                       "reconciliation_hash",
                     ].includes(k),

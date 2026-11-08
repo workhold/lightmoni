@@ -1,0 +1,12 @@
+{
+  "checks": [
+    "real TLS Registry with bcrypt authentication accepts a test image push",
+    "anonymous pull is denied",
+    "production image preparation authenticates then pins a verified image ID",
+    "the prepared private image starts a real container",
+    "forced refresh and Compose preparation use the same credential path",
+    "wrong credentials fail with a safe access-denied diagnostic and all temporary auth files are removed"
+  ],
+  "passed": true,
+  "scope": "Disposable isolated Docker engine, TLS registry and random test credentials; no production changes"
+}

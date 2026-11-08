@@ -1,3 +1,4 @@
+import {registryCredentialSecret} from '../ops/registry-credentials.js';
 import { constants,openSync,closeSync,readSync,fstatSync,lstatSync,realpathSync } from 'node:fs';
 import { join,dirname,parse } from 'node:path';
 import { canonicalJSON,parseStrictJSON,sha256 } from '../shared/privileged-executor.js';
@@ -93,6 +94,12 @@ export function connectManagedExecutorJobs(deps:Dependencies,options:{jobs:Agent
       jobs.event(root.agent_id,root.id,{lease_id:root.lease_id,sequence:nextSequence(root.id),...event});
     },
     result:receipt,
+    registryCredential(root,value) {
+      const approved=source(jobs.get(root.id));
+      const config=approved.payload.operation_payload?.resource.config;
+      if(!config||!approved.payload.job.capabilities.includes('operations.platform.registry-auth.v1'))fail(403,'registry_image_not_authorized');
+      return {credential:registryCredentialSecret(deps,config,value.image)};
+    },
     artifact(root,value) {
       if(typeof value.release_id!=='string'||!Number.isSafeInteger(value.offset)||value.offset<0)fail(400,'invalid_artifact_range');
       const p=parseStrictJSON(deps.decrypt(root.payload_enc)) as ManagedExecutionPayload;

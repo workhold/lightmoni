@@ -18,6 +18,7 @@ import { useI18n } from "../../shared/i18n";
 import type { Agent, Machine, Resource, ResourceKind } from "./model";
 import ClusterFields, {ApplicationPlacement, ClusterManagementLink, type QuickCreate} from "./ClusterFields";
 import WebsiteFields from "./WebsiteFields";
+import RegistryCredentialSelect from './RegistryCredentialSelect';
 
 type Props = {
   kind: ResourceKind;
@@ -725,6 +726,7 @@ export default function ResourceFields({
       {kind === "application" && (
         <>
           <ApplicationPlacement resources={resources} machines={machines} existing={existing}/>
+          <RegistryCredentialSelect/>
           <Form.Item name={["spec","source","type"]} hidden><Input/></Form.Item>
           <Form.Item name={["spec","source","template_id"]} hidden><Input/></Form.Item>
           <Form.Item name={["spec","source","template_version"]} hidden><Input/></Form.Item>

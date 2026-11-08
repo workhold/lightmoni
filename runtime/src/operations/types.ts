@@ -18,6 +18,8 @@ export interface OperationPayload {
 }
 export interface OperationExecutionContext {
   dataDir: string; signal: AbortSignal; now: () => Date;
+  registryAuthDirectory?: string;
+  registryCredential?: (image:string) => Promise<import('./registry-auth.js').RegistryPullCredential>;
   progress?: (phase: string, code?: string) => Promise<void>;
   publicDir?: string;
   nginxTempDir?: string;

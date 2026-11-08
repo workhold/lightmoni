@@ -1,3 +1,4 @@
+import {pullAuthenticatedImage,credentialMatches} from './registry-auth.js';
 import { OperationRejectedError } from "./errors.js";
 import {
   dockerPlatform,
@@ -153,7 +154,8 @@ export async function preparePlatformImages(
     ? imageSourcePolicy(config.image_sources)
     : undefined;
   const refresh = config.refresh_images === true;
-  if (!policy && !refresh)
+  const authenticated=config.registry_authorizations??[];
+  if (!policy && !refresh && !authenticated.length)
     return config.image_cache
       ? prepareCachedImages(manifest, config.image_cache, root, context)
       : [];
@@ -163,6 +165,16 @@ export async function preparePlatformImages(
   for (const image of new Set<string>(
     Object.values<any>(manifest.services).map((s) => s.image),
   )) {
+    const authorization=authenticated.find((a:any)=>a.images.includes(image));
+    if(authorization) {
+      if(!credentialMatches(authorization,image))reject('REGISTRY_IMAGE_NOT_AUTHORIZED');
+      let verified=refresh?undefined:await localDockerImage(image,platform,context);
+      if(!verified){await pullAuthenticatedImage(image,context);verified=await localDockerImage(image,platform,context);}
+      if(!verified)reject('REGISTRY_IMAGE_NOT_VERIFIED');
+      results.push({...verified,image,source:'authenticated-registry'});
+      for(const service of Object.values<any>(manifest.services))if(service.image===image){service.image=verified!.image_id;service.pull_policy='never';}
+      continue;
+    }
     const mapped = policy ? imageSourceReference(image, policy.rules) : undefined;
     let result: any;
     const one = { services: { image: { image } } };

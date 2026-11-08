@@ -6,6 +6,7 @@ import {applicationUpgrade,registerApplicationUpgrades} from './application-upgr
 import {registerInstanceRecoveryReview} from './instance-recovery.js';
 import {createApplicationTerminals} from './application-terminals.js';
 import {createQuickInstall} from './quick-install.js';
+import {registerRegistryCredentials} from './registry-credentials.js';
 import {registerImageSources} from './image-sources.js';
 import {createPrivateRegistryController} from './private-registry.js';
 import { CloudError, zoneFor } from "./cloud.js";
@@ -87,6 +88,7 @@ export function registerOperationsPlatform(
   domains.push({actions:()=>[],perform:async()=>fail(400,'unsupported_registry_action'),tick:privateRegistry.tick});
   privateRegistry.register(safe);
   registerImageSources(store,safe);
+  registerRegistryCredentials(store,safe);
   registerInstanceRecoveryReview(store,safe);
   registerObservability(deps, store, safe, options.jobs);
   const resolveContainerTarget=createApplicationTerminals(store,safe);
