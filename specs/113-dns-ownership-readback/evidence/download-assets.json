@@ -1,0 +1,76 @@
+{
+  "revision": "f0d729d7f93bee1d432d4d5f178370690e97a73a",
+  "source_image": "lightmoni:20261108-dns-cname-v1-arm64",
+  "files": [
+    {
+      "file": "SDK_SHA256SUMS",
+      "bytes": 384,
+      "sha256": "0cdc9b90078859e649328396a3b92de5f49c135f1deba20103ed1cbbe15582e0"
+    },
+    {
+      "file": "SHA256SUMS",
+      "bytes": 214,
+      "sha256": "291f07c520db95d1f1696a283b9426e346dd46cc3ca3898a6fb8da91f0f34a0e"
+    },
+    {
+      "file": "agent-releases.json",
+      "bytes": 1129,
+      "sha256": "096703ff6a3af00eaf41d62acae3ec01b7746447e2caa9c410be0a4a94dfc959"
+    },
+    {
+      "file": "config.example.json",
+      "bytes": 479,
+      "sha256": "a56a908e84f27a44ccd277a1e7fb786a49492962ab5f00f6ed4c6ad264270865"
+    },
+    {
+      "file": "install.sh",
+      "bytes": 31966,
+      "sha256": "f09de20ed669b55a83ba64fc2753d2f73cb09c32b54f1b07743bcf865b357996"
+    },
+    {
+      "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+      "bytes": 80428232,
+      "sha256": "58b28beabcf5aeda60e43c0d13515f682c9a8eba906a8a94d14d9a29edd313b2"
+    },
+    {
+      "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+      "bytes": 80118010,
+      "sha256": "da871ac9145defbb1456cdbda30e1bdf13f303743ad9e51931058669d9e216ea"
+    },
+    {
+      "file": "lightmoni-go-sdk_0.1.0.tar.gz",
+      "bytes": 58205,
+      "sha256": "94ab09ffbf57472ec1ed71cca99bf531544d3919849f1a8f911de357e5af4ec1"
+    },
+    {
+      "file": "lightmoni-python-sdk_0.1.0.tar.gz",
+      "bytes": 38166,
+      "sha256": "d893ccc106d248f89926b08864fbb20de0cede3c418e164cd65b77225dcc5765"
+    },
+    {
+      "file": "lightmoni-rust-sdk_0.1.0.tar.gz",
+      "bytes": 49751,
+      "sha256": "9614f86ec429ed7f41d78ab96653060b4378849d09eed9747f629c3e10602773"
+    },
+    {
+      "file": "lightmoni-sdk-0.1.0.tgz",
+      "bytes": 30193,
+      "sha256": "c647bd3ab82b63fd9c9227c4f013edd71503cedc8c188b15b4d8c656d666358c"
+    },
+    {
+      "file": "uninstall.sh",
+      "bytes": 10937,
+      "sha256": "7b2866feb9a40a68a3b3df7feb92000a19adbf981a303924c351c61decbfddc3"
+    },
+    {
+      "file": "update-runner.mjs",
+      "bytes": 74394,
+      "sha256": "317af1d974fa8d8db07413e10ae027a1cbf7e66670752e14f00012dbc272449a"
+    },
+    {
+      "file": "update.sh",
+      "bytes": 564,
+      "sha256": "0e903b100eb08451ae6330eaf04a26afae0029e10233a4e4919fae65fb716bfe"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261108-registry-credentials-v1",
+  "revision": "9d22fd55dc94a47f7469e567eecaf0d30ed129af",
+  "health": "healthy",
+  "volume": "lightmoni_lightmoni-state-v2-20261103:/data",
+  "website_id": "fb2bb27e9a85a7e83cb46412d3eab67a",
+  "dns_error": "dns_owned_record_modified_externally",
+  "owned_record_id": "2446142290",
+  "owned_value": "edge-49b2209ee4168ec9.doc-a.cn",
+  "owned_state": "verifying",
+  "ttl": 600,
+  "weight": null,
+  "source": "read-only production terminal query through existing 1Panel session"
+}

@@ -1,0 +1,63 @@
+{
+  "buildx.build.provenance": {
+    "builder": {
+      "id": ""
+    },
+    "buildType": "https://mobyproject.org/buildkit@v1",
+    "materials": [
+      {
+        "uri": "pkg:docker/node@24.15.0-bookworm?platform=linux%2Farm64",
+        "digest": {
+          "sha256": "f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+        }
+      },
+      {
+        "uri": "pkg:docker/node@24.15.0-bookworm-slim?platform=linux%2Farm64",
+        "digest": {
+          "sha256": "4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+        }
+      },
+      {
+        "uri": "http://buildkit-session/rn10a5s0pviytsjb1pp4rwpwx",
+        "digest": {
+          "sha256": "c33ffae07b231f6a421758ca2c667b09618fa3cc1623cac2a1ac12e955a7cf07"
+        }
+      }
+    ],
+    "invocation": {
+      "configSource": {
+        "uri": "http://buildkit-session/rn10a5s0pviytsjb1pp4rwpwx",
+        "digest": {
+          "sha256": "c33ffae07b231f6a421758ca2c667b09618fa3cc1623cac2a1ac12e955a7cf07"
+        },
+        "entryPoint": "deploy/server/Dockerfile"
+      },
+      "parameters": {
+        "frontend": "dockerfile.v0",
+        "args": {
+          "build-arg:BUILD_REVISION": "f0d729d7f93bee1d432d4d5f178370690e97a73a",
+          "build-arg:DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+          "build-arg:DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+          "build-arg:NODE_DIST_URL": "https://npmmirror.com/mirrors/node",
+          "build-arg:NPM_REGISTRY": "https://registry.npmmirror.com"
+        }
+      },
+      "environment": {
+        "platform": "linux/arm64"
+      }
+    }
+  },
+  "buildx.build.ref": "desktop-linux/desktop-linux/vtitubfkqgwoh8om4u86lab05",
+  "containerimage.config.digest": "sha256:44f057186fdd137c88a282fc959355dc47c586678a63351f5ec894e1281d3171",
+  "containerimage.descriptor": {
+    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+    "digest": "sha256:2e1a56af942fa395241fd183833f47a9afc9a518a41ff2550046cb4538cc99ce",
+    "size": 3843,
+    "platform": {
+      "architecture": "arm64",
+      "os": "linux"
+    }
+  },
+  "containerimage.digest": "sha256:2e1a56af942fa395241fd183833f47a9afc9a518a41ff2550046cb4538cc99ce",
+  "image.name": "docker.io/library/lightmoni:20261108-dns-cname-v1-arm64"
+}

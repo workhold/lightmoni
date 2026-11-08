@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261108-registry-credentials-v1
+    image: docker.heyphp.com/lightmoni/lightmoni:20261108-dns-cname-v1
     pull_policy: missing
     build:
       context: .

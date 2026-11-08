@@ -1,0 +1,14 @@
+{
+  "observed_at": "2026-11-08T14:28:56.490716+00:00",
+  "checks": [
+    {
+      "url": "https://moni.heyphp.com/healthz",
+      "status": 200,
+      "body": "{\"status\":\"ok\"}\n"
+    },
+    {
+      "url": "https://docker.doc-a.cn/v2/",
+      "status": 401
+    }
+  ]
+}
