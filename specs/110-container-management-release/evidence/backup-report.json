@@ -1,0 +1,14 @@
+{
+  "snapshot_complete": true,
+  "quick_check": "ok",
+  "pages": 459003,
+  "page_size": 4096,
+  "transferred": 459003,
+  "observed_at": "2026-11-08T12:01:34.822182+00:00",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261108-host-files-v1",
+  "revision": "b9ca3b30200a527758f9c4b7e0e0fff5c8159505",
+  "snapshot_bytes": 1880076288,
+  "directory_mode": "0700",
+  "file_modes": "0600",
+  "evidence_source": "visible protected production backup report via 1Panel terminal"
+}

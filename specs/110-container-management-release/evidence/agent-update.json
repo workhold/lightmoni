@@ -1,0 +1,23 @@
+{
+  "observed_at": "2026-11-08T12:22:33.220817+00:00",
+  "scope": "existing full-management host only",
+  "source_revision": "70a0060fc47581078a3a0a5ac7b921c01d58d0aa",
+  "arch": "amd64",
+  "build_id": "0.1.0-70a0060fc475-9324bc0e9a8e",
+  "package_sha256": "17551ea168538a3b30a61f5bc7d3a6ef5dcac3d0e48cf6b5aade931bb3281f58",
+  "package_matches_tested_production_center": true,
+  "update_ui_state": "succeeded",
+  "online": true,
+  "runtime_mode": "full",
+  "identity_and_configuration_preserved": true,
+  "permissions_expanded": false,
+  "container_ui_entries_enabled": [
+    "create",
+    "images_and_cleanup",
+    "task_history",
+    "per_container_management"
+  ],
+  "production_container_mutations_for_testing": false,
+  "browser_full_crud_acceptance": "still incomplete; this read-only deployment check does not satisfy SDD109 T006",
+  "monitor_only_host_with_no_ssh_credential_updated": false
+}
