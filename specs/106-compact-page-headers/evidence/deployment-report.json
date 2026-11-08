@@ -1,0 +1,42 @@
+{
+  "code_pr": "https://github.com/workhold/lightmoni/pull/143",
+  "revision": "2a5419aa361e791db96d0d1d06c76e8a5e31062e",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261108-compact-headers-v1",
+  "backup": {
+    "path": "/opt/lightmoni/backups/sdd106-compact-headers-20261108",
+    "pages": 415349,
+    "sqlite_quick_check": "ok",
+    "mode": "directory 0700; files 0600; runtime-only credentials"
+  },
+  "scope": "center UI only; existing Agent unchanged",
+  "status": "deployed and verified",
+  "digest": "sha256:df8fd02021fc98a56fce93d203901a7849b9b048c191c40f639552b6bfa32ec9",
+  "started_at": "2026-11-08T02:31:25.745023821Z",
+  "health": "healthy",
+  "public_health": {
+    "status": "ok"
+  },
+  "mounts_identical": true,
+  "data_volume": "lightmoni_lightmoni-state-v2-20261103:/data",
+  "ui": {
+    "source": "native Chrome actual authenticated production pages",
+    "routes": [
+      "/applications",
+      "/websites",
+      "/machines",
+      "/settings",
+      "/dashboards"
+    ],
+    "checks": [
+      "duplicate content title removed; workspace page identity retained",
+      "log and refresh actions in existing content toolbar",
+      "search OpenResty followed by refresh preserves filter and one result",
+      "operation log drawer opens and closes",
+      "website, machine, settings and dashboard layouts visually checked"
+    ],
+    "business_writes": 0,
+    "original_edit_page": "untouched; verification used separately named window",
+    "first_reload": "HTTP 408 during restart/reload; reload recovered before final verification"
+  },
+  "screenshots": "artifacts/screenshots/specs/106-compact-page-headers/evidence/production-*.png"
+}
