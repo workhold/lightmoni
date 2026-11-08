@@ -147,7 +147,7 @@ async function validateProductionSocket(): Promise<void> {
 }
 
 /** Real Docker Engine HTTP over the fixed local Unix socket; no CLI or shell. */
-async function productionTransport(request: ManagedDockerRequest): Promise<ManagedDockerResponse> {
+export async function productionTransport(request: ManagedDockerRequest): Promise<ManagedDockerResponse> {
   await validateProductionSocket();
   if (request.signal?.aborted) fail('execution_cancelled');
   return new Promise((resolve, reject) => {

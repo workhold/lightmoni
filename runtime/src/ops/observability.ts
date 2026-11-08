@@ -6,6 +6,7 @@ import {sdkTelemetryQueries,websiteTelemetryQueries} from './telemetry-queries.j
 import type { OperationsPlatformStore } from './store.js';
 import type { AgentJobStore } from '../server/agent-jobs.js';
 import { dockerObservation, registerDockerJobs } from './docker.js';
+import {registerHostDockerJobs} from './host-docker.js';
 const literal=(v:string)=>"'"+v.replaceAll('\\','\\\\').replaceAll("'","''")+"'";
 const exists=(deps:Dependencies,name:string)=>deps.db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?",name);
 export function inventory(deps: Dependencies, store: OperationsPlatformStore, machineID='',clusterID='') {
@@ -15,7 +16,7 @@ export function inventory(deps: Dependencies, store: OperationsPlatformStore, ma
     const agent=m.agent_id?deps.db.get<any>('SELECT heartbeat,last_seen FROM agents WHERE id=?',m.agent_id):undefined;
     let snapshot,collector,activeID='',capabilities:string[]=[];try{const heartbeat=JSON.parse(agent?.heartbeat??'{}');({snapshot,activeID}=dockerObservation(deps.db,m.agent_id??'',heartbeat));collector=heartbeat.collectors_status?.applications;capabilities=['docker.inventory','docker.control'].filter(c=>heartbeat.docker_capabilities?.includes(c));}catch{}
     const executor=managedExecutorObservation(deps,m.agent_id??'');
-    if(executor) {capabilities=['docker.inventory','docker.control'];collector='ok';const observed=dockerObservation(deps.db,m.agent_id,{docker_inventory:executor.docker_inventory});snapshot=observed.snapshot;activeID=observed.activeID;}
+    if(executor) {capabilities=['docker.inventory','docker.control',...(executor.docker_inventory?.management_version===1?['docker.host']:[])];collector='ok';const observed=dockerObservation(deps.db,m.agent_id,{docker_inventory:executor.docker_inventory});snapshot=observed.snapshot;activeID=observed.activeID;}
     const online=!!agent&&Number.isFinite(Date.parse(agent.last_seen))&&deps.now().getTime()-Date.parse(agent.last_seen)<=120000;
     const stale=!online||!snapshot||deps.now().getTime()-Date.parse(snapshot.observed_at)>120000;
     const targets=new Map(applicationTargets(deps.db,m.agent_id??'').map(t=>[t.deployment_id,t]));
@@ -39,6 +40,7 @@ const frameRows=(response:any)=>Object.fromEntries((response.results??[]).map((r
 export function registerObservability(deps:Dependencies,store:OperationsPlatformStore,safe:(fn:Handler)=>Handler,jobs:AgentJobStore) {
   const router=deps.router;
   registerDockerJobs(deps,jobs,safe,id=>inventory(deps,store,id).hosts[0]);
+  registerHostDockerJobs(deps,jobs,safe,id=>inventory(deps,store,id).hosts[0]);
   router.get('/api/v1/ops/inventory',safe(ctx=>ctx.json(inventory(deps,store,ctx.url.searchParams.get('machine_id')??'',ctx.url.searchParams.get('cluster_id')??''))));
   router.get('/api/v1/ops/resources/:id/monitoring',safe(ctx=>{
     const application=store.get(ctx.params.id,'application');

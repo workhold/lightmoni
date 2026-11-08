@@ -1,9 +1,10 @@
 import {useEffect,useRef,useState} from 'react';
-import {Alert,Button,Input,Modal,Select,Space,Table,Tag,Typography} from '../shared/ui';
+import {Alert,Button,Dropdown,Input,Modal,Select,Space,Table,Tag,Typography} from '../shared/ui';
 import {ReloadOutlined,SearchOutlined} from '@ant-design/icons';
 import {api} from '../shared/api';
 import './host-resources.css';
 import {useI18n} from '../shared/i18n';
+import HostContainerManagement,{type ContainerSelection} from './HostContainerManagement';
 
 type Container={id:string;name:string;image:string;state:string;ports:string;application_id:string};
 type Inventory={id:string;online:boolean;state:string;error:string;observed_at:string;truncated:boolean;active_job:string;docker_capabilities:string[];containers:Container[]};
@@ -11,6 +12,7 @@ type Job={id:string;state:string;code?:string};
 export default function HostContainersDialog({machine,onClose}:{machine:{id:string;name:string};onClose:()=>void}){
  const {t,language}=useI18n(),[host,setHost]=useState<Inventory>(),[busy,setBusy]=useState(false),[error,setError]=useState(''),[query,setQuery]=useState(''),[state,setState]=useState('all');
  const alive=useRef(true),pending=useRef(false),controller=useRef<AbortController|null>(null);
+ const [selection,setSelection]=useState<ContainerSelection>();
  const load=async(signal:AbortSignal)=>{
   const result=await api<{hosts:Inventory[]}>('/ops/inventory?machine_id='+encodeURIComponent(machine.id),{signal});
   const found=result.hosts.find(h=>h.id===machine.id);if(!found)throw Error(t('未找到目标主机清单','The host inventory was not found'));
@@ -42,13 +44,16 @@ export default function HostContainersDialog({machine,onClose}:{machine:{id:stri
   {error&&<Alert type="error" showIcon title={error}/>}
   {host&&host.state!=='ready'&&<Alert type="warning" showIcon title={states[host.state]??host.state}/>}
   {host?.truncated&&<Alert type="warning" showIcon title={t('容器数量超过采集上限，当前清单不完整','The collection limit was exceeded; this inventory is incomplete')}/>}
+  <HostContainerManagement key={machine.id} machine={machine} available={!!host&&host.online&&host.state==='ready'&&!host.truncated&&host.docker_capabilities.includes('docker.host')} selection={selection} onSelected={()=>setSelection(undefined)} onChanged={()=>refresh(true)}/>
   <Typography.Paragraph type="secondary">{t('包含平台应用和外部容器','Includes platform applications and external containers')} · {host?.containers.length??0} {t('个容器','containers')}{host?.observed_at&&' · '+t('观测于 ','Observed ')+new Date(host.observed_at).toLocaleString(language)}</Typography.Paragraph>
-  <Table<Container> rowKey="id" size="small" loading={busy} dataSource={rows} pagination={{pageSize:10,showSizeChanger:true}} scroll={{x:900}} locale={{emptyText:host?.state==='ready'?t('没有匹配的容器','No matching containers'):t('暂无可用容器清单','No container inventory available')}} columns={[
-   {title:t('容器','Container'),width:230,render:(_,c)=><><Typography.Text strong>{c.name||c.id.slice(0,12)}</Typography.Text><div><Typography.Text type="secondary" code copyable={{text:c.id}}>{c.id.slice(0,12)}</Typography.Text></div></>},
+  <Typography.Paragraph className="lm-host-file-scroll-hint" type="secondary">{t('左右滑动查看完整表格和操作','Swipe horizontally to see the full table and actions')}</Typography.Paragraph>
+  <Table<Container> rowKey="id" size="small" loading={busy} dataSource={rows} pagination={{pageSize:10,showSizeChanger:true}} scroll={{x:1080}} locale={{emptyText:host?.state==='ready'?t('没有匹配的容器','No matching containers'):t('暂无可用容器清单','No container inventory available')}} columns={[
+   {title:t('容器','Container'),width:230,render:(_,c)=><><Button type="link" className="lm-host-file-name" disabled={!host?.docker_capabilities.includes('docker.host')} onClick={()=>setSelection({operation:'inspect',id:c.id})}>{c.name||c.id.slice(0,12)}</Button><div><Typography.Text type="secondary" code copyable={{text:c.id}}>{c.id.slice(0,12)}</Typography.Text></div></>},
    {title:t('镜像','Image'),dataIndex:'image',width:260,render:v=><Typography.Text style={{overflowWrap:'anywhere'}}>{v}</Typography.Text>},
    {title:t('状态','State'),dataIndex:'state',width:110,render:v=><Tag color={v==='running'?'success':v==='exited'?'default':'warning'}>{names[v]??v}</Tag>},
    {title:t('端口','Ports'),dataIndex:'ports',width:230,render:v=><Typography.Text style={{overflowWrap:'anywhere'}}>{v||'—'}</Typography.Text>},
-   {title:t('归属','Ownership'),width:130,render:(_,c)=><Tag>{c.application_id?t('平台应用','Platform app'):t('外部容器','External')}</Tag>}
+   {title:t('归属','Ownership'),width:130,render:(_,c)=><Tag>{c.application_id?t('平台应用','Platform app'):t('外部容器','External')}</Tag>},
+   {title:t('操作','Actions'),width:140,fixed:'right',render:(_,c)=><Dropdown trigger={['click']} disabled={busy||!host?.online||host.state!=='ready'||!host.docker_capabilities.includes('docker.host')} menu={{items:[{key:'inspect',label:t('详情与配置','Details and configuration')},{key:'start',label:t('启动','Start'),disabled:c.state==='running'},{key:'stop',label:t('停止','Stop'),disabled:!['running','restarting'].includes(c.state)},{key:'restart',label:t('重启','Restart')},{type:'divider'},{key:'remove',label:t('删除容器','Delete container'),danger:true}],onClick:({key})=>setSelection({operation:key as ContainerSelection['operation'],id:c.id})}}><Button size="small" aria-label={t('容器操作','Container actions')+' · '+(c.name||c.id.slice(0,12))}>{t('管理','Manage')}</Button></Dropdown>}
   ]}/>
  </Modal>;
 }

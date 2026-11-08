@@ -33,8 +33,8 @@ export function connectManagedExecutorJobs(deps:Dependencies,options:{jobs:Agent
       const host=preflight&&db.get<Row>('SELECT agent_id FROM managed_machines WHERE id=?',preflight.machine_id);
       if(!preflight||host?.agent_id!==job.agent_id||preflight.target_revision!==action.targetRevision||JSON.parse(preflight.config_json).unit!==job.target.config.unit||JSON.parse(preflight.config_json).release_directory!==job.target.config.release_directory)fail(409,'preflight_target_changed');
       actor=job.target.actor;
-    }else if(action.kind==='docker') {
-      const host=db.get<Row>('SELECT agent_id FROM managed_machines WHERE id=?',job.target.docker_machine_id);
+    }else if(action.kind==='docker'||action.kind==='host_docker') {
+      const host=db.get<Row>('SELECT agent_id FROM managed_machines WHERE id=?',action.kind==='docker'?job.target.docker_machine_id:job.target.host_docker_machine_id);
       if(!host||host.agent_id!==job.agent_id||!job.target.audit_id)fail(403,'managed_docker_binding_changed');
       actor=job.target.actor;
     }else {
