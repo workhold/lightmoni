@@ -1,0 +1,12 @@
+{
+  "checks": [
+    "Custom username, password and database submitted through the real HTTP install route; resource persisted and response/readback redact the password. Agent execution remains pending in the fixture.",
+    "zh-CN/1440/light: all three fields visible once with advanced settings closed; defaults, password masking, custom input retention, no horizontal overflow.",
+    "en-US/1440/dark: all three fields visible once with advanced settings closed; defaults, password masking, custom input retention, no horizontal overflow.",
+    "zh-CN/390/dark: all three fields visible once with advanced settings closed; defaults, password masking, custom input retention, no horizontal overflow.",
+    "en-US/390/light: all three fields visible once with advanced settings closed; defaults, password masking, custom input retention, no horizontal overflow."
+  ],
+  "errors": [],
+  "media": "artifacts/screenshots/specs/114-postgres-install-fields",
+  "limitations": "Disposable loopback HTTP/SQLite fixture; no external PostgreSQL container or production change."
+}

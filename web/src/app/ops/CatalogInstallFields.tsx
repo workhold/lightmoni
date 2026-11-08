@@ -16,6 +16,7 @@ export default function CatalogInstallFields({template,resources,machines,advanc
  const portEdited=useRef(new Set<string>()),declared=template.spec?.ports??[],containerPort=declared[0]?.container_port;
  const gateway=template.id==='openresty',serviceCount=Object.keys(template.spec?.compose?.services??{}).length;
  const multiContainer=serviceCount>1;
+ const primaryParameter=(p:NonNullable<CatalogTemplate['parameters']>[number])=>p.required||template.id==='postgresql'&&['user','database'].includes(p.key);
  useEffect(()=>{
   if(!gateway)for(const p of declared)if(!portEdited.current.has(p.name))form.setFieldValue(['host_ports',p.name],template.deployment_modes?.length===1&&template.deployment_modes[0]==='manual'?p.host_port:0);
  },[mode,containerPort,form,gateway]);
@@ -72,14 +73,14 @@ export default function CatalogInstallFields({template,resources,machines,advanc
    <Button icon={<PlusOutlined/>} disabled={fields.length>=clusters.length} onClick={()=>add({machine_ids:[],replicas:1,cpu:template.resources?.cpu??(template.id==='mysql'?1:.25),memory_mb:template.resources?.memory_mb??(template.id==='mysql'?512:128)})}>{t('添加集群部署','Add cluster deployment')}</Button>
   </>,advancedTargets)}
  </>}</Form.List></div>
-  <div className="lm-ops-grid">{(template.parameters??[]).filter(p=>p.required).map(parameter)}</div>
+  <div className="lm-ops-grid">{(template.parameters??[]).filter(primaryParameter).map(parameter)}</div>
   {gateway&&<p className="lm-ops-note">{t('使用宿主机 80 / 443 端口，请确保端口空闲。','Uses host ports 80 / 443. Ensure they are available.')}</p>}
   {!gateway&&declared.length>0&&<><ApplicationPortFields ports={declared} onChange={name=>portEdited.current.add(name)}/><Form.Item name="listen_ip" label={t('监听范围','Listen scope')}><Select options={[{value:'0.0.0.0',label:t('全部网卡','All interfaces')},{value:'127.0.0.1',label:t('仅本机','Localhost only')}]}/></Form.Item></>}
   <Collapse className="lm-install-advanced" activeKey={advanced?['advanced']:[]} onChange={keys=>onAdvanced(keys.includes('advanced'))} items={[{key:'advanced',label:t('高级设置','Advanced settings'),forceRender:true,children:<>
 
    <div className="lm-ops-grid"><Form.Item name={['spec','service_name']} label={t('服务标识','Service name')} rules={[{pattern:/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,message:t('使用小写字母、数字和短横线，最长 63 字符','Use lowercase letters, numbers and hyphens, up to 63 characters')}]} extra={t('留空自动生成，创建后不可修改','Generated when blank; cannot be changed after creation')}><Input maxLength={63}/></Form.Item><Form.Item name={['spec','deployment_mode']} label={t('部署模式','Deployment mode')}><Select options={[{value:'manual',label:t('手动指定机器','Choose machines')},{value:'managed',label:t('自动调度','Automatic scheduling'),disabled:automatic&&template.spec?.stateful||!!template.deployment_modes&&!template.deployment_modes.includes('managed')}]}/></Form.Item></div>
    {mode==='managed'&&<Alert type={template.spec?.stateful?'warning':'info'} showIcon title={t('自动维护实例数量，故障时可更换机器','Maintains instance counts and can reschedule failures')} description={t('不会迁移本地数据或建立数据库复制。','Local data is not migrated and database replication is not configured.')}/>}
-   <div className="lm-ops-grid">{(template.parameters??[]).filter(p=>!p.required).map(parameter)}</div>
+   <div className="lm-ops-grid">{(template.parameters??[]).filter(p=>!primaryParameter(p)).map(parameter)}</div>
    <div ref={setAdvancedTargets}/>
   </>}]} />
  </>;
