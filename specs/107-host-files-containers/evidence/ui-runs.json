@@ -1,0 +1,28 @@
+{
+  "runs": [
+    {
+      "run": 1,
+      "passed": true,
+      "checks": 8,
+      "page_errors": 0,
+      "report": "ui-run-1.json"
+    },
+    {
+      "run": 2,
+      "passed": true,
+      "checks": 8,
+      "page_errors": 0,
+      "report": "ui-run-2.json"
+    },
+    {
+      "run": 3,
+      "passed": true,
+      "checks": 8,
+      "page_errors": 0,
+      "report": "ui-run-3.json"
+    }
+  ],
+  "consecutive": true,
+  "scope": "same final product code, real HTTP/OpenSSH/SFTP; synthetic container inventory",
+  "browser_warning": "Existing Ant Design/React development flushSync console warning; no page errors."
+}
