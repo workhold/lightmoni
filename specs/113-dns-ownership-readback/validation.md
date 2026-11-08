@@ -50,3 +50,12 @@ Docker 固定标签 `docker.heyphp.com/lightmoni/lightmoni:20261108-dns-cname-v1
 网站 `fb2bb27e9a85a7e83cb46412d3eab67a` 继续发布 v6，DNS 错误已清空，22:28:42 的厂商回读验证成功。原 Record ID `2446142290` 保留、归属记录仍为 1 条，journal 从 `verifying` 恢复为 `applied`。本次回读值为无点的 `edge-49b2209ee4168ec9.doc-a.cn`，与故障现场有点回读均由统一比较键兼容；没有人工删除、重建、接管或修改 DNS 归属日志。
 
 部署后浏览器重新读取网站列表及详情，分别显示“DNS 厂商已确认”和“最近回读成功”，原红色 DNS 错误消失；截图见 `evidence/production-dns-verified.png`。本机可信 TLS 请求中心 `/healthz` 返回 200 与 `status:ok`；仓库 `/v2/` 返回预期的 401（入口仍有认证）。此结果证明厂商回读与当前访问入口恢复，不将其宣称为所有公网缓存传播完成。
+
+
+## GitHub 中心补丁发行
+
+[20261108-dns-cname-v1](https://github.com/workhold/lightmoni/releases/tag/20261108-dns-cname-v1) 已正式发布，Git 标签回读指向固定源码 `f0d729d7f93bee1d432d4d5f178370690e97a73a`。GitHub 上的 4 个 SDK 包和 SDK_SHA256SUMS 共 5 个附件，均以服务端 SHA256 和长度对照已测试镜像内提取制品验证通过；回读证据见 `evidence/github-release.json`。
+
+本次为中心 DNS 补丁，Agent 无需更新。独立 Agent 大包多次上传停留在 `starter`，没有取得服务端摘要，因此未将其宣称为发布成功；已清理本发行这些不完整条目及成套安装器附件。完整 Agent/SDK 包仍在固定中心镜像内并通过双架构验收，`evidence/download-assets.json` 记录的是镜像内全部 14 个制品，不代表全部是 GitHub 附件。
+
+GitHub 最新 Agent 发行入口在发布前后均为 `20261107-website-identity-573b644`，本中心补丁使用 `make_latest=false`，保持已有安装/升级附件可用。发行范围见 `evidence/release-scope.json`。默认 Compose 固定到本次已验收的中心镜像；`docker compose config --quiet`（一次性测试密码）、JSON 摘要检查与 `git diff --check` 通过。发行记录通过 [PR #154](https://github.com/workhold/lightmoni/pull/154) 交付。
