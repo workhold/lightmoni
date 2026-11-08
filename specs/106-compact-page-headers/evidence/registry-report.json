@@ -1,0 +1,224 @@
+{
+  "latest_before": {
+    "status": 200,
+    "digest": "sha256:1435938eacd969554e581b1cce0b996ff36ac6e1b886c9fc42e5b21e231a5a51"
+  },
+  "latest_after": {
+    "status": 200,
+    "digest": "sha256:1435938eacd969554e581b1cce0b996ff36ac6e1b886c9fc42e5b21e231a5a51"
+  },
+  "repository": "docker.heyphp.com/lightmoni/lightmoni",
+  "tags": [
+    "20261108-compact-headers-v1"
+  ],
+  "digest": "sha256:df8fd02021fc98a56fce93d203901a7849b9b048c191c40f639552b6bfa32ec9",
+  "platforms": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:ff734f8874c3647c200c335db048165c4ff2e4981b52151bb739b964c82d637d",
+      "size": 3719,
+      "platform": {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:b1a16a57fe6f892f65bfd39a13727bb74c852d162e14d60175b5d5ae64da84f8",
+      "size": 3719,
+      "platform": {
+        "os": "linux",
+        "architecture": "arm64"
+      }
+    }
+  ],
+  "revision": "2a5419aa361e791db96d0d1d06c76e8a5e31062e",
+  "blobs": [
+    {
+      "digest": "sha256:068fedd6b0f109b8186d00d49327b6fc6747c428fd3c9a8739424ff5f38d7531",
+      "status": "existing",
+      "size": 28233543
+    },
+    {
+      "digest": "sha256:0f48ed2d5d53e8f7cc58dbfe270b62550232aae01ad1d890ebefbc50efef6937",
+      "status": "uploaded",
+      "size": 5320799
+    },
+    {
+      "digest": "sha256:10c63fb2a2011ac33da39cb3bd0d56c640a734566eca7b46a67add7785f18853",
+      "status": "existing",
+      "size": 3310
+    },
+    {
+      "digest": "sha256:14f05b567abdd178b7002e46cfe26d19e2565aa463755cc5aa7fcf045ebdd603",
+      "status": "uploaded",
+      "size": 32184
+    },
+    {
+      "digest": "sha256:18e55ed9bc8f5d1095bc3397a0fab6f7a236f7461bc1beac0031005b209e59c8",
+      "status": "uploaded",
+      "size": 473
+    },
+    {
+      "digest": "sha256:2098a9c56eddf59a906c6aa55bea010f028345c4ed00feb051443bf4ca0f40ef",
+      "status": "uploaded",
+      "size": 246
+    },
+    {
+      "digest": "sha256:2ef05dcd22f2d7562470826b6b9dc1faf9fda10320238b812a2946f94d8918b5",
+      "status": "existing",
+      "size": 3310
+    },
+    {
+      "digest": "sha256:31c764ac326e1ab7d42173b76340c737f1850b56c2110faa3190a84b2167219b",
+      "status": "uploaded",
+      "size": 644
+    },
+    {
+      "digest": "sha256:379d9f1ce0904f3065925d5be70f78118d869d4504e5a85e1019f8be16a9c8aa",
+      "status": "uploaded",
+      "size": 246
+    },
+    {
+      "digest": "sha256:37b6eb746f79394ccadf666bd8cae1f2a1d69f6b50df9c52af7dc7aae065b1a9",
+      "status": "existing",
+      "size": 49671192
+    },
+    {
+      "digest": "sha256:3d4e62ccf0212c54fdcca6922751aacba50df86a014c491ff43cd6bc408bd239",
+      "status": "uploaded",
+      "size": 5320851
+    },
+    {
+      "digest": "sha256:42d53eb89c48081bc5b77bb370830d2a2f0b9246650c8c30325b18a2f7625a9f",
+      "status": "uploaded",
+      "size": 79746612
+    },
+    {
+      "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+      "status": "existing",
+      "size": 32
+    },
+    {
+      "digest": "sha256:51809ea1719c01b43b214dce501b84dd4df8f0b34265dca122a9765e05c528e3",
+      "status": "existing",
+      "size": 1712603
+    },
+    {
+      "digest": "sha256:57549c358e5b195528c8d6389e1c6d2205498d35d8a8a302059258e9b4455838",
+      "status": "existing",
+      "size": 448
+    },
+    {
+      "digest": "sha256:617638fc51fdd83d34c171011a6c2217cd37a1abbf692e71eb148bf5f1d797a2",
+      "status": "uploaded",
+      "size": 34411039
+    },
+    {
+      "digest": "sha256:677570256bc59e57915f27daa50f4379ab8caa23bcca0198eb2cb9b7150f0871",
+      "status": "uploaded",
+      "size": 32189
+    },
+    {
+      "digest": "sha256:6f17a2f8718a30f6355192e341e3a2be29aaebfa22949f7bf0e3deabc0ced84a",
+      "status": "uploaded",
+      "size": 80072985
+    },
+    {
+      "digest": "sha256:7052a9ac5075dfd06da9cdfb0adff97dfc0e05a41f9ba1f53e136a2e7b934d48",
+      "status": "uploaded",
+      "size": 118
+    },
+    {
+      "digest": "sha256:7094048d20d5ca2cbd9381939879995e96fe01f7006f5270dfab396c1df5c967",
+      "status": "uploaded",
+      "size": 12357
+    },
+    {
+      "digest": "sha256:7486591bf9280555bb43540dc14c0eeb4d3457641d63def857b61d6d3d414ed5",
+      "status": "uploaded",
+      "size": 24400032
+    },
+    {
+      "digest": "sha256:79c6ebb5927d35f5353e18e3d487cc238dbe7b37052a6c793de8f7a93475db70",
+      "status": "uploaded",
+      "size": 7362281
+    },
+    {
+      "digest": "sha256:817aaf4d12ad1795a25846dbf5470ffc72f6966dca6c23c99abb281279085ca0",
+      "status": "uploaded",
+      "size": 117
+    },
+    {
+      "digest": "sha256:925f938905764bf21216f39d17d450df0df11e1087f0de65f49c085689dcf514",
+      "status": "uploaded",
+      "size": 7954
+    },
+    {
+      "digest": "sha256:92758d1243e7ee9903e755356d23adbc7689db69fb9162ffbb1619e29b0aa335",
+      "status": "uploaded",
+      "size": 7163527
+    },
+    {
+      "digest": "sha256:a255aed305dd828c8ac19f2ab2bc99911ad94c8b7ad9974c85da012af83f5fcf",
+      "status": "uploaded",
+      "size": 24399747
+    },
+    {
+      "digest": "sha256:a86139c8545fe38d81a160767eab8791023f36897db9f36820bc0480e75eb7e4",
+      "status": "existing",
+      "size": 49651454
+    },
+    {
+      "digest": "sha256:b450aead89e930be4542dd1e50369aa1112d626aeeef2e4b75e99593ab289ff9",
+      "status": "uploaded",
+      "size": 80050173
+    },
+    {
+      "digest": "sha256:b53a4e0c06eea877f8264d1739d84494d98e46d80e92c9d6ac3e55bfdba57e60",
+      "status": "uploaded",
+      "size": 472
+    },
+    {
+      "digest": "sha256:bdb36b78b09b165be3454e3f2eb74a8e67046768b7c06a6c0f73b41a781907e8",
+      "status": "uploaded",
+      "size": 12359
+    },
+    {
+      "digest": "sha256:be6d2dd2599a8023f198d6770dc2733997bcb533cd8b4ac654244586032d1131",
+      "status": "existing",
+      "size": 1712657
+    },
+    {
+      "digest": "sha256:c4565f133a45889e1f333b96daf098d34908a205d480aeca7db4d8f443fae1f6",
+      "status": "uploaded",
+      "size": 79737818
+    },
+    {
+      "digest": "sha256:f3e28ac0f1ea674dc3dfc2a60fcd54fe380fc0e50e1c5271dfff0dbb32d3d5d7",
+      "status": "uploaded",
+      "size": 7951
+    },
+    {
+      "digest": "sha256:f400d36d7784570c9fb7558e367d2b5d38e8b2f1d6faee041815acea7f87e669",
+      "status": "existing",
+      "size": 28115043
+    },
+    {
+      "digest": "sha256:f5abb27ea9960da9a1eafae1df63f57e5a74ecf334ff6708ba4289244fb4060b",
+      "status": "uploaded",
+      "size": 34437559
+    },
+    {
+      "digest": "sha256:fb1be628e94293bfb6c455b7611316ca36337bdd026d712f1c7f7ff44704ab1a",
+      "status": "uploaded",
+      "size": 645
+    },
+    {
+      "digest": "sha256:fc03b5e40b38afd0c82e19e179133ea7b9b0740e12099f6464202f5c54f004c7",
+      "status": "existing",
+      "size": 444
+    }
+  ],
+  "verification": "all local blob SHA256, exact tested rootfs/config, remote blob HEAD, manifest/config GET and fixed index GET; latest preserved"
+}
