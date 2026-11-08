@@ -1,0 +1,54 @@
+{
+  "source": "real Vite application pages with read-only synthetic API",
+  "rounds": [
+    {
+      "round": 1,
+      "passed": true,
+      "checked": [
+        "zh-CN/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "hover; manual + 15s refresh; cluster/deployment/container/time filters; website + SDK; zero/missing/empty",
+        "zh-CN/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "zh-CN/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "zh-CN/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout"
+      ]
+    },
+    {
+      "round": 2,
+      "passed": true,
+      "checked": [
+        "zh-CN/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "hover; manual + 15s refresh; cluster/deployment/container/time filters; website + SDK; zero/missing/empty",
+        "zh-CN/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "zh-CN/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "zh-CN/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout"
+      ]
+    },
+    {
+      "round": 3,
+      "passed": true,
+      "checked": [
+        "zh-CN/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "hover; manual + 15s refresh; cluster/deployment/container/time filters; website + SDK; zero/missing/empty",
+        "zh-CN/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "zh-CN/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "zh-CN/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "en-US/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout"
+      ]
+    }
+  ],
+  "writes": 0,
+  "unknown": [],
+  "errors": [],
+  "media_directory": "/Users/zhangsiwen/.codex/worktrees/application-monitor-values/lightmoni/artifacts/screenshots/specs/114-application-monitor-values/evidence"
+}

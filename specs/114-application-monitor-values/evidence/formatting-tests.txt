@@ -1,0 +1,13 @@
+✔ Grafana unit catalog includes bytes, rates, time, currency and percentages (0.594416ms)
+✔ binary/decimal units, elapsed time and percentage contracts convert correctly (0.26325ms)
+✔ custom unit prefixes/suffixes and exact original strings remain usable (0.057417ms)
+✔ legend/stat calculations distinguish missing values from first/last non-null (0.113625ms)
+✔ counter resets, empty sets and large finite averages retain their meaning (0.064625ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 335.582625
