@@ -2,6 +2,7 @@ import {useMonitoringI18n} from '../monitoring-i18n';
 import {useLayoutEffect,useMemo,useRef,useState} from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
+import './time-series-plot.css';
 import {Alert} from '../../shared/ui';
 import type {TimeRange} from '../../shared/types';
 import type {AlertRule,AlertEvent} from '../alerts/types';

@@ -5,45 +5,57 @@
       "round": 1,
       "passed": true,
       "checked": [
-        "zh-CN/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "zh-CN/light/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "zh-CN/light/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
         "hover; manual + 15s refresh; cluster/deployment/container/time filters; website + SDK; zero/missing/empty",
-        "zh-CN/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "zh-CN/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "zh-CN/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout"
+        "zh-CN/light/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "zh-CN/dark/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "zh-CN/dark/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "zh-CN/dark/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/light/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "en-US/light/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/light/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/dark/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "en-US/dark/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/dark/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout"
       ]
     },
     {
       "round": 2,
       "passed": true,
       "checked": [
-        "zh-CN/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "zh-CN/light/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "zh-CN/light/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
         "hover; manual + 15s refresh; cluster/deployment/container/time filters; website + SDK; zero/missing/empty",
-        "zh-CN/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "zh-CN/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "zh-CN/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout"
+        "zh-CN/light/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "zh-CN/dark/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "zh-CN/dark/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "zh-CN/dark/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/light/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "en-US/light/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/light/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/dark/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "en-US/dark/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/dark/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout"
       ]
     },
     {
       "round": 3,
       "passed": true,
       "checked": [
-        "zh-CN/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
+        "zh-CN/light/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "zh-CN/light/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
         "hover; manual + 15s refresh; cluster/deployment/container/time filters; website + SDK; zero/missing/empty",
-        "zh-CN/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "zh-CN/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "zh-CN/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/light/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/light/390: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/dark/1440: per-container values, units, timestamp order, null/zero, empty rate, layout",
-        "en-US/dark/390: per-container values, units, timestamp order, null/zero, empty rate, layout"
+        "zh-CN/light/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "zh-CN/dark/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "zh-CN/dark/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "zh-CN/dark/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/light/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "en-US/light/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/light/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/dark/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave",
+        "en-US/dark/1440: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout",
+        "en-US/dark/390: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout"
       ]
     }
   ],

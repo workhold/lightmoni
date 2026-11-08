@@ -9,7 +9,7 @@ import {mediaDirectory} from '../../../scripts/qa-artifacts.mjs';
 // Real application pages, synthetic read-only telemetry. No live server credentials.
 const root=resolve(import.meta.dirname,'../../..'),output=resolve(root,'specs/114-application-monitor-values/evidence');
 await mkdir(output,{recursive:true});const media=mediaDirectory(output),cache=await mkdtemp(resolve(tmpdir(),'lightmoni-telemetry-values-'));
-const reads=[],unknown=new Set(),errors=[],rounds=[];let writes=0,revision=0;
+const reads=[],unknown=new Set(),errors=[],rounds=[],pageRanges=new WeakMap();let writes=0,revision=0;
 const containers=[{id:'c203d12d1111',name:'lm-accee3d0495a4f151e60b077696b0e38-app-1'},{id:'b203d12d2222',name:'orders-worker-with-a-long-container-name-2'}].map(c=>({...c,cluster_id:'cluster',deployment_id:'deployment',state:'running',image:'example/orders:1'}));
 const application={id:'app',name:'订单服务',kind:'application',spec:{service_name:'orders-api'},status:{instances:[{id:'deployment',cluster_id:'cluster',machine_id:'machine'}]}};
 const manifest={application,hosts:[{id:'machine',name:'bj-1',state:'ready',containers,application_observation:{state:'ok'}}],deployments:[{id:'deployment',cluster_id:'cluster',cluster_name:'北京集群'}],websites:[{id:'site',name:'订单网站'}]};
@@ -52,6 +52,10 @@ const vite=await createViteServer({root:resolve(root,'web'),cacheDir:cache,confi
 let browser;try{browser=await chromium.launch({headless:true})}catch{browser=await chromium.launch({headless:true,channel:'chrome'})}
 const base='http://127.0.0.1:5214',url='/applications/app/monitoring',plot=page=>page.locator('.lm-application-plot'),values=(page,index=0,row=0)=>plot(page).nth(index).locator('.lm-telemetry-values>li').nth(row).locator('dd');
 let page,failure;
+function trackPage(page){
+ page.on('pageerror',e=>errors.push(e.message));
+ page.on('response',response=>{const url=new URL(response.url());if(url.pathname.endsWith('telemetry'))pageRanges.set(page,Object.fromEntries(url.searchParams))});
+}
 async function layout(page){
  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
  for(const list of await page.locator('.lm-telemetry-values').all()){
@@ -61,13 +65,30 @@ async function layout(page){
   }
  }
 }
+async function hoverValues(page,index,seconds,expected){
+ const range=pageRanges.get(page);
+ const duration=(Date.parse(range.to)-Date.parse(range.from))/1000,over=plot(page).nth(index).locator('.u-over');
+ await over.scrollIntoViewIfNeeded();
+ const box=await over.boundingBox();await page.mouse.move(box.x+box.width*(1-seconds/duration),box.y+box.height*0.4,{steps:2});
+ const tip=page.locator('.lm-series-tooltip:not([hidden])');await expect(tip).toBeVisible();
+ await expect(tip.locator('.lm-series-tooltip-row:not([hidden]) strong')).toHaveText(expected);
+ const timestamp=await page.evaluate(time=>new Date(time).toLocaleString(undefined,{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}),Date.parse(range.to)-seconds*1000);
+ await expect(tip.locator('.lm-series-tooltip-time')).toHaveText(timestamp);
+ expect(await tip.evaluate(e=>getComputedStyle(e).position)).toBe('fixed');
+ const bounds=await tip.boundingBox(),viewport=page.viewportSize();
+ expect(bounds.x).toBeGreaterThanOrEqual(7);expect(bounds.y).toBeGreaterThanOrEqual(7);
+ expect(bounds.x+bounds.width).toBeLessThanOrEqual(viewport.width-7);expect(bounds.y+bounds.height).toBeLessThanOrEqual(viewport.height-7);
+ expect(await tip.evaluate(e=>e.scrollWidth<=e.clientWidth+1&&e.scrollHeight<=e.clientHeight+1)).toBe(true);
+ return tip;
+}
+async function leavePlot(page){await page.mouse.move(0,0);await expect(page.locator('.lm-series-tooltip:not([hidden])')).toHaveCount(0)}
 try{
  for(let round=1;round<=3;round++){
   const checked=[];
   for(const language of ['zh-CN','en-US'])for(const theme of ['light','dark'])for(const width of [1440,390]){
    revision=0;const context=await browser.newContext({viewport:{width,height:1000},timezoneId:'Asia/Shanghai',reducedMotion:'reduce'});
    await context.addInitScript(({language,theme})=>{localStorage.setItem('lightmoni.language',language);localStorage.setItem('lightmoni.appearance',theme);localStorage.setItem('lightmoni.nav.collapsed','true')},{language,theme});
-   page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
+   page=await context.newPage();trackPage(page);
    if(language==='zh-CN'&&theme==='light'&&width===1440)await page.clock.install();
    await page.route('**/*',route=>{const origin=new URL(route.request().url()).origin;return origin===base?route.continue():route.abort()});
    await page.goto(base+url);await expect(plot(page)).toHaveCount(6);await expect(values(page)).toHaveText(['0.23%','0.28%','0.31%']);
@@ -79,18 +100,39 @@ try{
     await plot(page).first().screenshot({path:resolve(media,`${language}-${theme}-${width}.png`),animations:'disabled'});
     if(language==='zh-CN'&&theme==='light'&&width===1440)await page.screenshot({path:resolve(media,'application-monitoring.png'),animations:'disabled'});
    }
+   let tip=await hoverValues(page,0,120,['0.29%','6.00%']);
+   await expect(tip.locator('.lm-series-tooltip-row>span')).toHaveText(containers.map(c=>c.name+' · '+c.id.slice(0,8)));
+   if(round===3){
+    await tip.screenshot({path:resolve(media,`hover-${language}-${theme}-${width}.png`),animations:'disabled'});
+    if(language==='zh-CN'&&theme==='light'&&width===1440)await page.screenshot({path:resolve(media,'application-monitoring-hover.png'),animations:'disabled'});
+   }
+   await hoverValues(page,0,180,['0.31%','4.00%']);await hoverValues(page,0,60,['0.23%','8.00%']);await leavePlot(page);
+   await hoverValues(page,1,120,['68.00 MiB','68.00 MiB']);await leavePlot(page);
    if(width===1440){
     await page.evaluate(()=>document.documentElement.style.zoom='2');await layout(page);
+    await expect.poll(()=>plot(page).first().locator('.uplot').evaluate(e=>e.offsetWidth===e.parentElement.clientWidth)).toBe(true);
     if(round===3)await plot(page).first().locator('.lm-telemetry-values').screenshot({path:resolve(media,`${language}-${theme}-200.png`),animations:'disabled'});
     await page.evaluate(()=>document.documentElement.style.zoom='');
     await expect.poll(()=>plot(page).first().locator('.uplot').evaluate(e=>e.offsetWidth===e.parentElement.clientWidth)).toBe(true);
+    // Browser zoom halves the layout viewport and doubles device pixels. CSS
+    // zoom would also scale uPlot's mouse coordinates, unlike browser zoom.
+    const zoomContext=await browser.newContext({viewport:{width:720,height:500},deviceScaleFactor:2,timezoneId:'Asia/Shanghai',reducedMotion:'reduce'});
+    await zoomContext.addInitScript(({language,theme})=>{localStorage.setItem('lightmoni.language',language);localStorage.setItem('lightmoni.appearance',theme);localStorage.setItem('lightmoni.nav.collapsed','true')},{language,theme});
+    const zoomPage=await zoomContext.newPage();trackPage(zoomPage);await zoomPage.goto(base+url);
+    await expect(values(zoomPage)).toHaveText(['0.23%','0.28%','0.31%']);
+    tip=await hoverValues(zoomPage,0,120,['0.29%','6.00%']);
+    if(round===3)await tip.screenshot({path:resolve(media,`hover-${language}-${theme}-200.png`),animations:'disabled'});
+    await leavePlot(zoomPage);await zoomContext.close();
+    checked.push(`${language}/${theme}/200% equivalent: fresh 720x500 layout, 2x device pixels; hover time, values, viewport bounds and leave`);
    }
-   checked.push(`${language}/${theme}/${width}: per-container values, units, timestamp order, null/zero, empty rate, layout`);
+   checked.push(`${language}/${theme}/${width}: per-container statistics; direct-entry hover timestamp, full names, changing point values/units, fixed style, viewport bounds, hide on leave; layout`);
    if(language==='zh-CN'&&theme==='light'&&width===1440){
-    const over=plot(page).first().locator('.u-over');await over.scrollIntoViewIfNeeded();const box=await over.boundingBox();await over.hover({position:{x:box.width*0.9667,y:box.height*0.4}});
-    await expect(page.locator('.lm-series-tooltip:not([hidden])')).toBeVisible();await expect(page.locator('.lm-series-tooltip:not([hidden])')).toContainText('0.29%');await page.mouse.move(0,0);
+    await hoverValues(page,2,120,['33.33 B/s','33.33 B/s']);await leavePlot(page);
+    await hoverValues(page,4,120,['0.00 B/s','0.00 B/s']);await leavePlot(page);
     revision=1;await page.getByRole('button',{name:'刷新',exact:true}).click();await expect(values(page).first()).toHaveText('0.50%');
+    await hoverValues(page,0,60,['0.50%','8.00%']);await leavePlot(page);
     revision=0;await page.clock.fastForward(15000);await expect(values(page).first()).toHaveText('0.23%');
+    await hoverValues(page,0,60,['0.23%','8.00%']);await leavePlot(page);
     const choose=async(name,option)=>{await page.getByRole('combobox',{name,exact:true}).click();await page.locator('.ant-select-item-option-content').getByText(option,{exact:true}).click()};
     await choose('监控集群','北京集群');await expect(values(page).first()).toHaveText('0.23%');
     await choose('监控部署','bj-1 · deployme');await expect(values(page).first()).toHaveText('0.23%');
@@ -98,9 +140,15 @@ try{
     await choose('监控时间范围','最近 15 分钟');await expect.poll(()=>reads.filter(r=>r.path.endsWith('/telemetry')).at(-1)?.params.minutes).toBe('15');
     const last=reads.filter(r=>r.path.endsWith('/telemetry')).at(-1);expect(last.params.cluster_id).toBe('cluster');expect(last.params.deployment_id).toBe('deployment');expect(last.params.minutes).toBe('15');
     await page.goto(base+url+'?tab=web');await expect(plot(page)).toHaveCount(2);await expect(values(page)).toHaveText(['3.00 req/s','2.00 req/s','3.00 req/s']);await expect(values(page,1)).toHaveText(['300.00 ms','200.00 ms','300.00 ms']);
+    await hoverValues(page,0,120,['2.00 req/s']);await leavePlot(page);
     await page.goto(base+url+'?tab=sdk');await expect(values(page)).toHaveText(['6.00 req/s','4.00 req/s','6.00 req/s']);
+    await hoverValues(page,0,120,['4.00 req/s']);await leavePlot(page);
     await page.goto(base+'/websites/site/monitoring');await expect(values(page)).toHaveText(['3.00 req/s','2.00 req/s','3.00 req/s']);
-    for(const [mode,expected] of [['zero',['0.00%','0.00%','0.00%']],['missing',['—','—','—']]]){await page.goto(base+url+'?fixture='+mode);await expect(values(page)).toHaveText(expected)}
+    await hoverValues(page,0,120,['2.00 req/s']);await leavePlot(page);
+    for(const [mode,expected] of [['zero',['0.00%','0.00%','0.00%']],['missing',['—','—','—']]]){
+     await page.goto(base+url+'?fixture='+mode);await expect(values(page)).toHaveText(expected);
+     await hoverValues(page,0,120,[expected[0],expected[0]]);await hoverValues(page,0,60,['—','—']);await leavePlot(page);
+    }
     await page.goto(base+url+'?fixture=empty');await expect(page.locator('.lm-telemetry-values')).toHaveCount(0);await expect(page.getByText('等待指标上报',{exact:true})).toHaveCount(6);
     checked.push('hover; manual + 15s refresh; cluster/deployment/container/time filters; website + SDK; zero/missing/empty');
    }

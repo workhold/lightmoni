@@ -1,0 +1,16 @@
+/* Loaded with the plot, including direct application/website monitoring entry. */
+.lm-uplot-chart .uplot{font-family:inherit}
+.lm-uplot-chart .u-over{cursor:crosshair}
+.lm-uplot-chart .u-select{background:#5794f22e;border:0;box-shadow:inset 0 0 0 1px #5794f2}
+.lm-uplot-chart .u-cursor-x{width:1px;border:0;background:var(--lm-muted);opacity:.45}
+.lm-uplot-chart .u-cursor-pt{box-shadow:0 0 0 1px var(--lm-surface)}
+.lm-uplot-chart:not(:hover) .u-cursor-pt{display:none}
+.lm-series-tooltip{position:fixed;left:0;top:0;z-index:1800;max-width:min(420px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:hidden;padding:10px 12px;background:var(--lm-surface);color:var(--lm-text);border:1px solid var(--lm-border);border-radius:3px;box-shadow:0 4px 18px #0004;pointer-events:none;font-size:12px;line-height:1.5;font-variant-numeric:tabular-nums;will-change:transform}
+.lm-series-tooltip[hidden],.lm-series-tooltip-row[hidden]{display:none}
+.lm-series-tooltip-time{font-weight:500;margin-bottom:8px}
+.lm-series-tooltip-row{display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:8px;padding:3px 0}
+.lm-series-tooltip-row>i{height:4px;width:10px;border-radius:1px}
+.lm-series-tooltip-row>span{overflow-wrap:anywhere;max-width:250px}
+.lm-series-tooltip-row>strong{font-weight:500;text-align:right;margin-left:18px;white-space:nowrap}
+.lm-series-tooltip-events{border-top:1px solid var(--lm-border);margin-top:6px;padding-top:6px;white-space:pre-line;color:var(--lm-muted)}
+@media(max-width:650px){.lm-series-tooltip-row>span{max-width:160px}}
