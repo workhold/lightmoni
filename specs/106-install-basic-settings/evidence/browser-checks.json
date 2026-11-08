@@ -1,0 +1,24 @@
+{
+  "date": "2026-11-08",
+  "environment": "Disposable loopback fixture; no production or remote Agent execution",
+  "redis": {
+    "advanced_initially_collapsed": true,
+    "installation_target_and_port_mapping_visible": true,
+    "manual_target": "Existing installation cluster and QA Docker node selected",
+    "explicit_host_port": 16379,
+    "preserved_after_advanced_toggle": true,
+    "preserved_after_required_password_validation": true,
+    "preserved_after_switch_to_automatic_placement": true
+  },
+  "openresty": {
+    "installation_target_visible": true,
+    "advanced_collapsed": true,
+    "fixed_host_ports": [
+      80,
+      443
+    ],
+    "editable_port_mapping": false
+  },
+  "review": "Primary agent visual self-check; no independent review for this small local change",
+  "media": "artifacts/screenshots/specs/106-install-basic-settings/evidence"
+}

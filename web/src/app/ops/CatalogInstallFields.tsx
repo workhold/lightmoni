@@ -46,7 +46,8 @@ export default function CatalogInstallFields({template,resources,machines,advanc
  }
  return <>
   {!gateway&&declared.some((p:Spec)=>p.protocol==='tcp'&&['http','https'].includes(p.app_protocol))&&<Form.Item name="domain" label={t('访问域名','Website domain')} extra={t('填写托管域名下的子域名，自动配置 DNS 与 SSL。','Enter a subdomain under a hosted zone for automatic DNS and SSL.')} rules={[{validator:(_,v)=>!v||/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(v.trim())?Promise.resolve():Promise.reject(Error(t('填写完整域名，不含协议或路径','Enter a domain without a scheme or path')))}]}><AutoComplete options={resources.filter(r=>r.kind==='dns_zone').map(r=>({value:(template.id==='registry'?'registry':template.id)+'.'+r.spec.scope}))} placeholder="app.example.com"/></Form.Item>}
-  {automatic&&<p className="lm-ops-note">{t('集群、机器和端口由平台自动选择。','Cluster, machine and ports are selected automatically.')}</p>}
+  <Form.Item name="automatic_placement" label={t('安装位置','Installation target')}><Select options={[{value:true,label:t('自动选择可用集群和机器','Automatically choose a cluster and machine'),disabled:mode==='managed'&&template.spec?.stateful},{value:false,label:t('自选部署位置','Choose deployment target')}]}/></Form.Item>
+  {automatic&&<p className="lm-ops-note">{t('集群和机器由平台自动选择。','Cluster and machine are selected automatically.')}</p>}
   <div hidden={automatic}><Form.List name={['spec','deployments']} rules={[{validator:(_,rows:Spec[])=>{
    if(automatic)return Promise.resolve();
    if(!rows?.length)return Promise.reject(Error(t('请选择安装位置','Choose an installation target')));
@@ -73,9 +74,8 @@ export default function CatalogInstallFields({template,resources,machines,advanc
  </>}</Form.List></div>
   <div className="lm-ops-grid">{(template.parameters??[]).filter(p=>p.required).map(parameter)}</div>
   {gateway&&<p className="lm-ops-note">{t('使用宿主机 80 / 443 端口，请确保端口空闲。','Uses host ports 80 / 443. Ensure they are available.')}</p>}
-  <Collapse className="lm-install-advanced" activeKey={advanced?['advanced']:[]} onChange={keys=>onAdvanced(keys.includes('advanced'))} items={[{key:'advanced',label:t('高级设置','Advanced settings'),forceRender:true,children:<>
-  <Form.Item name="automatic_placement" label={t('安装位置','Installation target')}><Select options={[{value:true,label:t('自动选择可用集群和机器','Automatically choose a cluster and machine'),disabled:mode==='managed'&&template.spec?.stateful},{value:false,label:t('自选部署位置','Choose deployment target')}]}/></Form.Item>
   {!gateway&&declared.length>0&&<><ApplicationPortFields ports={declared} onChange={name=>portEdited.current.add(name)}/><Form.Item name="listen_ip" label={t('监听范围','Listen scope')}><Select options={[{value:'0.0.0.0',label:t('全部网卡','All interfaces')},{value:'127.0.0.1',label:t('仅本机','Localhost only')}]}/></Form.Item></>}
+  <Collapse className="lm-install-advanced" activeKey={advanced?['advanced']:[]} onChange={keys=>onAdvanced(keys.includes('advanced'))} items={[{key:'advanced',label:t('高级设置','Advanced settings'),forceRender:true,children:<>
 
    <div className="lm-ops-grid"><Form.Item name={['spec','service_name']} label={t('服务标识','Service name')} rules={[{pattern:/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,message:t('使用小写字母、数字和短横线，最长 63 字符','Use lowercase letters, numbers and hyphens, up to 63 characters')}]} extra={t('留空自动生成，创建后不可修改','Generated when blank; cannot be changed after creation')}><Input maxLength={63}/></Form.Item><Form.Item name={['spec','deployment_mode']} label={t('部署模式','Deployment mode')}><Select options={[{value:'manual',label:t('手动指定机器','Choose machines')},{value:'managed',label:t('自动调度','Automatic scheduling'),disabled:automatic&&template.spec?.stateful||!!template.deployment_modes&&!template.deployment_modes.includes('managed')}]}/></Form.Item></div>
    {mode==='managed'&&<Alert type={template.spec?.stateful?'warning':'info'} showIcon title={t('自动维护实例数量，故障时可更换机器','Maintains instance counts and can reschedule failures')} description={t('不会迁移本地数据或建立数据库复制。','Local data is not migrated and database replication is not configured.')}/>}
