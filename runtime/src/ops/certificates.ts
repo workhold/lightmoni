@@ -29,6 +29,7 @@ import {
   clientFor,
   deployCloudCertificate,
   dnsPropagation,
+  dnsRecordValueKey,
   ensureDnsRecords,
   initDNSSchema,
   inspectCloudCertificate,
@@ -1414,7 +1415,8 @@ export function createCertificateController(
                         (!id || r.id === id) &&
                         r.name === record.name &&
                         r.type === record.type &&
-                        r.value === record.value &&
+                        dnsRecordValueKey(r.type, r.value) ===
+                          dnsRecordValueKey(record.type, record.value) &&
                         (record.enabled === undefined ||
                           r.enabled === record.enabled),
                     )

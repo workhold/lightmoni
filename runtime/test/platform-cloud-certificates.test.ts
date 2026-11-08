@@ -96,7 +96,10 @@ const json = (body: any) =>
     status: 200,
     headers: { "content-type": "application/json" },
   });
-function providerFixture(provider: "aliyun" | "tencent") {
+function providerFixture(
+  provider: "aliyun" | "tencent",
+  cnameReadback: (value: string) => string = (value) => value,
+) {
   let records: any[] = [
       {
         id: "1",
@@ -166,7 +169,7 @@ function providerFixture(provider: "aliyun" | "tencent") {
             RecordId: r.id,
             RR: r.name,
             Type: r.type,
-            Value: r.value,
+            Value: r.type === "CNAME" ? cnameReadback(r.value) : r.value,
             TTL: r.ttl,
             Status: r.enabled ? "ENABLE" : "DISABLE",
           })),
@@ -179,7 +182,7 @@ function providerFixture(provider: "aliyun" | "tencent") {
             RecordId: Number(r.id),
             Name: r.name,
             Type: r.type,
-            Value: r.value,
+            Value: r.type === "CNAME" ? cnameReadback(r.value) : r.value,
             TTL: r.ttl,
             Status: r.enabled ? "ENABLE" : "DISABLE",
           })),
@@ -194,6 +197,92 @@ function providerFixture(provider: "aliyun" | "tencent") {
       return records;
     },
   };
+}
+
+for (const provider of ["aliyun", "tencent"] as const) {
+  test(provider + " CNAME readback preserves ownership across trailing dots and case changes", async (t) => {
+    let withRootDot = true;
+    const api = providerFixture(provider, value =>
+      value.replace(/\.$/, "").toUpperCase() + (withRootDot ? "." : "")),
+      f = setup(t, api.fetcher);
+    const credential = f.store.create("credential", "DNS", {
+      provider, access_key_id: "fixture", access_key_secret: "fixture",
+    }, "admin");
+    const zone = f.store.create("dns_zone", "Zone", {
+      domain: "example.test", credential_id: credential.id,
+    }, "admin");
+    const desired = [{ name: "www", type: "CNAME", value: "edge.example.test", ttl: 600 }];
+    const reconcile = () => ensureDnsRecords(f.options, zone.id, "website", desired, "admin");
+    const mutations = () => api.calls.filter(c => !["DescribeDomainRecords", "DescribeRecordList"].includes(c.action));
+    const first = await reconcile();
+    assert.equal((await reconcile()).verified, true);
+    assert.equal(first.verified, true);
+    const original = f.db.get<any>("SELECT * FROM ops_dns_owned WHERE owner_id='website'")!;
+    assert.equal(original.state, "applied");
+    assert.equal(original.value, "edge.example.test");
+    const current = api.records.find(r => r.id === original.record_id)!;
+    for (const state of ["verifying", "applied"]) {
+      for (const dotted of [true, false]) {
+        withRootDot = dotted;
+        f.db.run("UPDATE ops_dns_owned SET state=? WHERE id=?", state, original.id);
+        assert.equal((await reconcile()).verified, true);
+        assert.equal(f.db.get<any>("SELECT state FROM ops_dns_owned WHERE id=?", original.id)!.state, "applied");
+      }
+    }
+    for (const value of ["EDGE.EXAMPLE.TEST", "EDGE.EXAMPLE.TEST."]) {
+      desired[0].value = value;
+      for (const dotted of [true, false]) {
+        withRootDot = dotted;
+        assert.equal((await reconcile()).verified, true);
+      }
+    }
+    assert.equal(mutations().length, 1);
+    assert.equal((await ensureDnsRecords(f.options, zone.id, "other-owner", desired, "admin")).verified, true);
+    assert.equal(f.db.all("SELECT * FROM ops_dns_owned WHERE owner_id='other-owner'").length, 0);
+    assert.equal(mutations().length, 1);
+    desired[0].ttl = 1200;
+    assert.equal((await reconcile()).verified, true);
+    assert.equal((await reconcile()).verified, true);
+    assert.equal(mutations().length, 2);
+    assert.equal(current.id, original.record_id);
+    assert.equal(current.ttl, 1200);
+    assert.equal(f.db.get<any>("SELECT id FROM ops_dns_owned WHERE owner_id='website'")!.id, original.id);
+    withRootDot = true;
+    const summary = await f.controller.perform(zone, "create_record", {
+      record: { name: "manual", type: "CNAME", value: "manual.example.test" },
+    }, "admin");
+    assert.equal(summary.result.verified, true);
+    assert.equal(summary.result.records.find((r: any) => r.name === "manual").value, "MANUAL.EXAMPLE.TEST.");
+    const manual = api.records.find(r => r.name === "manual")!;
+    const update = await f.controller.perform(zone, "update_record", {
+      record: { id: manual.id, name: manual.name, type: "CNAME", value: "updated.example.test" },
+    }, "admin");
+    assert.equal(update.result.verified, true);
+    const writesBefore = mutations().length;
+    current.value = "different.example.test";
+    await assert.rejects(reconcile(), /dns_owned_record_modified_externally/);
+    assert.equal(mutations().length, writesBefore);
+  });
+
+  test(provider + " TXT ownership still compares exact case and terminal dots", async (t) => {
+    const api = providerFixture(provider), f = setup(t, api.fetcher);
+    const credential = f.store.create("credential", "DNS", {
+      provider, access_key_id: "fixture", access_key_secret: "fixture",
+    }, "admin");
+    const zone = f.store.create("dns_zone", "Zone", {
+      domain: "example.test", credential_id: credential.id,
+    }, "admin");
+    const desired = [{ name: "_acme-challenge", type: "TXT", value: "FixtureToken." }];
+    const reconcile = () => ensureDnsRecords(f.options, zone.id, "certificate", desired, "admin");
+    assert.equal((await reconcile()).verified, true);
+    const current = api.records.find(r => r.type === "TXT")!;
+    for (const value of ["fixturetoken.", "FixtureToken"]) {
+      current.value = value;
+      await assert.rejects(reconcile(), /dns_owned_record_modified_externally/);
+    }
+    assert.equal(api.calls.filter(c => ["AddDomainRecord", "CreateRecord"].includes(c.action)).length, 1);
+    assert.equal(api.records.length, 2);
+  });
 }
 
 for (const provider of ["aliyun", "tencent"] as const)
