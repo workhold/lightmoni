@@ -1,0 +1,16 @@
+{
+  "source": "git archive merged main; no uncommitted files",
+  "revision": "b9ca3b30200a527758f9c4b7e0e0fff5c8159505",
+  "platforms": {
+    "arm64": {
+      "image_id": "sha256:665924837a97558b5a87871882226c41756ab84a8a0282459620b68fe0e3f2ef",
+      "image_digest": "sha256:af2109301692c95af66baba5e22b9e2cbb65141a0a6f644ce1cabc57383f435c",
+      "source_revision": "b9ca3b30200a527758f9c4b7e0e0fff5c8159505"
+    },
+    "amd64": {
+      "image_id": "sha256:84c7f85c6339f71d270ad5a4e79e3c2291bad05cb8fddc7dc8714e786ffeab49",
+      "image_digest": "sha256:905c829c0c715c58cd81e2199450f9f6eb87f84de476cf36d6935bd552cd162a",
+      "source_revision": "b9ca3b30200a527758f9c4b7e0e0fff5c8159505"
+    }
+  }
+}
