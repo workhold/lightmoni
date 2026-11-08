@@ -431,7 +431,10 @@ export class CloudClient {
         ...(record.id ? { RecordId: parseJSON(record.id) } : {}),
         SubDomain: record.name,
         RecordType: record.type,
-        RecordLine: record.line ?? "默认",
+        // Internal default aliases must use DNSPod's display name even without a capability preflight.
+        RecordLine: !record.line || ["default", "0"].includes(record.line)
+          ? "默认"
+          : record.line,
         RecordLineId: record.line_id,
         Value: record.value,
         TTL: record.ttl ?? 600,

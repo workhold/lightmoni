@@ -1365,6 +1365,90 @@ test("managed website follows new service clusters with the published revision",
   assert.equal(row.enabled, 1);
 });
 
+test("DNSPod serializes default aliases for create and modify without changing explicit lines or IDs", async () => {
+  const { CloudClient } = await import("../src/ops/cloud.js");
+  const writes: any[] = [];
+  const client = new CloudClient(
+    { provider: "tencent", access_key_id: "fixture", access_key_secret: "fixture" },
+    async (_input, init) => {
+      writes.push({ action: (init!.headers as any)["x-tc-action"], ...JSON.parse(String(init!.body)) });
+      return new Response(JSON.stringify({ Response: { RecordId: 123 } }));
+    },
+  );
+  const variants = [
+    {}, { line: "" }, { line: "default" }, { line: "默认" }, { line: "0" },
+    { line: "default", line_id: "0" },
+    { line: "default", line_id: "10=1" },
+    { line: "电信", line_id: "10=1" }, { line: "广东电信" },
+  ];
+  for (const id of [undefined, "123"]) {
+    for (const variant of variants) {
+      assert.equal(await client.writeRecord("example.test", {
+        id, name: "api", type: "CNAME", value: "edge.example.test", ...variant,
+      }), "123");
+      const written = writes.at(-1);
+      assert.equal(written.action, id ? "ModifyRecord" : "CreateRecord");
+      assert.equal(written.RecordLine, ["电信", "广东电信"].includes(variant.line ?? "") ? variant.line : "默认");
+      assert.equal(written.RecordLineId, variant.line_id);
+      assert.equal(Object.hasOwn(written, "Weight"), false);
+    }
+  }
+});
+
+test("DNSPod unweighted default CNAME recovers failed creation and verifies native readback idempotently", async (t) => {
+  const { ensureDnsRecords } = await import("../src/ops/cloud.js");
+  const records: any[] = [], writes: any[] = [], actions: string[] = [];
+  let rejectNextCreate = true;
+  const fetcher: typeof fetch = async (_input, init) => {
+    const action = (init!.headers as any)["x-tc-action"], d = JSON.parse(String(init!.body));
+    actions.push(action);
+    if (action === "DescribeRecordList")
+      return new Response(JSON.stringify({ Response: { RecordList: records } }));
+    if (!["CreateRecord", "ModifyRecord"].includes(action)) throw Error("unexpected action " + action);
+    writes.push({ action, ...d });
+    const reject = action === "CreateRecord" && rejectNextCreate;
+    rejectNextCreate = false;
+    if (reject || d.RecordLine !== "默认")
+      return new Response(JSON.stringify({ Response: { Error: { Code: "InvalidParameter.RecordLineInvalid" } } }));
+    assert.equal(Object.hasOwn(d, "Weight"), false);
+    const record = { RecordId: 123, Name: d.SubDomain, Type: d.RecordType, Value: d.Value,
+      Line: "默认", LineId: "0", TTL: d.TTL, Status: "ENABLE" };
+    if (action === "CreateRecord") records.push(record);
+    else Object.assign(records.find(r => r.RecordId === d.RecordId), record);
+    return new Response(JSON.stringify({ Response: { RecordId: 123 } }));
+  };
+  const f = await fixture(t, fetcher);
+  const cred = f.store.create("credential", "DNSPod", {
+    provider: "tencent", access_key_id: "fixture", access_key_secret: "fixture",
+  }, "admin");
+  const zone = f.store.create("dns_zone", "DNSPod zone", {
+    domain: "example.test", credential_id: cred.id,
+  }, "admin");
+  const options: any = { store: f.store, deps: f.deps, dataDir: "/tmp/routing-tests", fetch: fetcher };
+  const desired = [{ name: "api", type: "CNAME", value: "edge.example.test", line: "default", ttl: 600 }];
+  const reconcile = () => ensureDnsRecords(options, zone.id, "owner", desired, "admin");
+  await assert.rejects(reconcile(), /InvalidParameter.RecordLineInvalid/);
+  assert.deepEqual(f.deps.db.get("SELECT record_id,state,line FROM ops_dns_owned WHERE owner_id='owner'"),
+    { record_id: "", state: "failed", line: "" });
+  assert.equal((await reconcile()).verified, true);
+  assert.equal(records.length, 1);
+  assert.equal((await reconcile()).verified, true);
+  assert.equal(writes.filter(r => r.action === "CreateRecord").length, 2); // One rejection, one success.
+  desired[0].ttl = 1200;
+  assert.equal((await reconcile()).verified, true);
+  assert.equal(writes.at(-1).action, "ModifyRecord");
+  assert.equal(writes.at(-1).RecordLine, "默认");
+  assert.equal(records[0].TTL, 1200);
+  assert.equal((await reconcile()).verified, true);
+  assert.equal(writes.length, 3);
+  assert.deepEqual(f.deps.db.get("SELECT record_id,state,line FROM ops_dns_owned WHERE owner_id='owner'"),
+    { record_id: "123", state: "applied", line: "" });
+  assert.ok(actions.every(action => ["DescribeRecordList", "CreateRecord", "ModifyRecord"].includes(action)));
+  records[0].TTL = 1800;
+  await assert.rejects(reconcile(), /dns_owned_record_modified_externally/);
+  assert.equal(writes.length, 3);
+});
+
 test("DNSPod exposes only permitted nested lines and preserves weighted CNAME identity", async (t) => {
   const { ensureDnsRecords } = await import("../src/ops/cloud.js");
   const records: any[] = [],
