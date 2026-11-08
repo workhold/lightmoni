@@ -1,6 +1,6 @@
 # SDD108：主机容器与文件管理发行
 
-创建：2026-11-08。状态：镜像发行与生产部署已验收，交付记录待PR合入。
+创建：2026-11-08。状态：镜像发行与生产部署已验收；交付记录通过[PR146](https://github.com/workhold/lightmoni/pull/146)合入。
 
 用户授权将PR145合并到main、发布Docker并部署。发行代码来源固定为合并提交b9ca3b30200a527758f9c4b7e0e0fff5c8159505，镜像固定标签为20261108-host-files-v1，发布Linux amd64/arm64。只更新现有中心服务，沿用当前Compose项目、环境、端口、网络和持久卷；Agent及ClickHouse版本保持原样。
 
