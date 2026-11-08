@@ -18,6 +18,6 @@
 ## Phase 5 - acceptance/delivery
 - [x] T008 真实隔离鉴权Registry验收与相关类型/回归检查，记录validation.md。
 - [x] T009 更新docs/system-design.md第111章和Doca原生章节/图，最新版本回读核对。
-- [ ] T010 同步main、创建并合并GitHub PR，双架构Docker固定标签发布和摘要回读，保存发行证据。
+- [x] T010 同步main、创建并合并GitHub PR，双架构Docker固定标签发布和摘要回读，保存发行证据。
 
 T001→T002→T003→T004→T005→T006→T007/T008→T009→T010；单工作树按依赖执行，独立只读研究另行回报。

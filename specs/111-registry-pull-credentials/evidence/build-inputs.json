@@ -1,0 +1,10 @@
+{
+  "tag": "20261108-registry-credentials-v1",
+  "revision": "9d22fd55dc94a47f7469e567eecaf0d30ed129af",
+  "included_prs": [
+    149,
+    150
+  ],
+  "context_sha256": "b59a865316f09baae50f5100b4a404c61ca0319ec094438e0cffea003b13a391",
+  "source": "git archive of merged main"
+}

@@ -25,8 +25,22 @@
 
 ## 联合发行
 
-用户追加指定“排查解析失败”的修复：已读取原chat并核对GitHub PR149，修正DNSPod Create/ModifyRecord的默认线路别名为“默认”，保留显式线路ID和非默认线路。按用户授权通过PR合入main，合并提交700ffd322242a77e2e971a6eebcfcd8eddf98585。该修复的SDD112和146项验收见对应目录。合并PR149后的11份联合回归217/217通过、0跳过，包含其DNSPod严格请求/回读验收。最终联合主干与Docker成品检查、标签及摘要在发行后补充。
+用户追加指定“排查解析失败”的修复：已读取原chat并核对GitHub PR149，修正DNSPod Create/ModifyRecord的默认线路别名为“默认”，保留显式线路ID和非默认线路。按用户授权通过PR合入main，合并提交700ffd322242a77e2e971a6eebcfcd8eddf98585。该修复的SDD112和146项验收见对应目录。合并PR149后的11份联合回归217/217通过、0跳过，包含其DNSPod严格请求/回读验收。联合发行镜像、成品检查和远端摘要见下。
 
 ## 交付边界
 
 此次授权为合并和推送Docker发行；未切换生产中心或生产Agent，也未执行生产DNS写入或验证公网传播。固定标签发行保留现有latest。真实隔离拉取验收与本地管理API验证不冒充生产验收。
+
+主功能通过[PR150](https://github.com/workhold/lightmoni/pull/150)合入main，合并提交`9d22fd55dc94a47f7469e567eecaf0d30ed129af`，其历史包含PR149的`fc93fdda43a21e862fada3c9e69e8007ffb392c2`。Docker构建上下文由该合并提交git archive生成，SHA256为`b59a865316f09baae50f5100b4a404c61ca0319ec094438e0cffea003b13a391`；构建标签`20261108-registry-credentials-v1`。
+
+## 双架构成品与远端发布
+
+固定镜像 `docker.heyphp.com/lightmoni/lightmoni:20261108-registry-credentials-v1`，OCI索引摘要 `sha256:bae80e1bb452b955d4528773f3a2672cfe6e9e7b470edce7da625c7c7242a5d3`；支持Linux amd64/arm64。仓库根Compose已指向此标签；本次没有操作线上Compose或容器。
+
+两架构分别运行非root成品中心、独立真实ClickHouse和SQLite，初始化管理员并验证持久会话、SDK/Agent下载及校验、任务/应用/网站/镜像源等既有行为，各57项检查通过、errors为空。直接对成品编译模块运行的仓库凭据/临时认证/DNSPod路由回归各32/32通过、0跳过；真实成品HTTP验证凭据创建、脱敏列表、空密码编辑、撤销、删除及未登录401。匹配架构内置Agent确认声明支持 `operations.platform.registry-auth.v1`。AMD64在本地Docker仿真、ARM64原生，ClickHouse为隔离ARM64服务；这不等同于生产主机部署验收。
+
+发布只用两份已测试镜像，37份唯一blob在本地逐一SHA256验证，核对成品rootfs/config与镜像ID一致；远端逐一blob HEAD、平台manifest/config GET、固定索引GET成功。现有latest发布前后均为`sha256:1435938eacd969554e581b1cce0b996ff36ac6e1b886c9fc42e5b21e231a5a51`。保护的运行时凭据仅由系统Docker credential helper提供，未写入记录。隔离中心、ClickHouse、网络、卷与临时环境凭据均已清理。
+
+独立执行`docker buildx imagetools inspect`回读固定标签，摘要与两平台manifest均一致。`docker compose config --quiet`在仅运行时生成的测试环境值下通过；不启动服务。发行证据JSON解析及凭据字段检查、`git diff --check`通过。
+
+证据为evidence/release.json、build-inputs.json、两架构build/smoke.json、release-index.json及registry-report.json。中心和需要认证拉取的目标主机Agent须一并更新；未更改正在运行的应用或DNS记录。

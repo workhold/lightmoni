@@ -1,0 +1,63 @@
+{
+  "buildx.build.provenance": {
+    "builder": {
+      "id": ""
+    },
+    "buildType": "https://mobyproject.org/buildkit@v1",
+    "materials": [
+      {
+        "uri": "pkg:docker/node@24.15.0-bookworm?platform=linux%2Farm64",
+        "digest": {
+          "sha256": "f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+        }
+      },
+      {
+        "uri": "pkg:docker/node@24.15.0-bookworm-slim?platform=linux%2Farm64",
+        "digest": {
+          "sha256": "4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+        }
+      },
+      {
+        "uri": "http://buildkit-session/qi7k6ptefzst0vvzgj7gni7zf",
+        "digest": {
+          "sha256": "b59a865316f09baae50f5100b4a404c61ca0319ec094438e0cffea003b13a391"
+        }
+      }
+    ],
+    "invocation": {
+      "configSource": {
+        "uri": "http://buildkit-session/qi7k6ptefzst0vvzgj7gni7zf",
+        "digest": {
+          "sha256": "b59a865316f09baae50f5100b4a404c61ca0319ec094438e0cffea003b13a391"
+        },
+        "entryPoint": "deploy/server/Dockerfile"
+      },
+      "parameters": {
+        "frontend": "dockerfile.v0",
+        "args": {
+          "build-arg:BUILD_REVISION": "9d22fd55dc94a47f7469e567eecaf0d30ed129af",
+          "build-arg:DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+          "build-arg:DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+          "build-arg:NODE_DIST_URL": "https://npmmirror.com/mirrors/node",
+          "build-arg:NPM_REGISTRY": "https://registry.npmmirror.com"
+        }
+      },
+      "environment": {
+        "platform": "linux/arm64"
+      }
+    }
+  },
+  "buildx.build.ref": "desktop-linux/desktop-linux/yyeq8thsy27l6ezwadclhx94c",
+  "containerimage.config.digest": "sha256:e46686bc5f1f7b138f47d2f0d2fae18b5ff8c1eea1ac59ca3c8cb462a0a39873",
+  "containerimage.descriptor": {
+    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+    "digest": "sha256:47b3c1678fa188c02fc747553da41fb471339a686dcb57fe82628166868ac1d5",
+    "size": 3843,
+    "platform": {
+      "architecture": "arm64",
+      "os": "linux"
+    }
+  },
+  "containerimage.digest": "sha256:47b3c1678fa188c02fc747553da41fb471339a686dcb57fe82628166868ac1d5",
+  "image.name": "docker.io/library/lightmoni:20261108-registry-credentials-v1-arm64"
+}

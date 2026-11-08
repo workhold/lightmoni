@@ -22,3 +22,7 @@ CloudClient 写入 DNSPod 时统一转换默认线路别名，CreateRecord/Modif
 架构同步不适用：修正现有供应商协议的参数序列化，未引入新协议、接口、存储或数据/凭据边界，仓库系统设计与 Doca 在线设计文档无需更新。
 
 以上为本地协议夹具及真实 SQLite 验收，未对生产环境执行 DNS 写入、部署或公网传播验证。生产需在包含此修复的中心版本部署后，由现有 DNS 协调重试并以厂商回读确认。
+
+## 联合Docker发行
+
+按用户指定与私有仓库凭据功能一并发行：PR149已合入，成品源码为main合并提交`9d22fd55dc94a47f7469e567eecaf0d30ed129af`（包含PR149、PR150）。固定镜像`docker.heyphp.com/lightmoni/lightmoni:20261108-registry-credentials-v1`，支持Linux amd64/arm64，OCI索引摘要`sha256:bae80e1bb452b955d4528773f3a2672cfe6e9e7b470edce7da625c7c7242a5d3`。两架构各57项成品检查通过；成品编译模块的凭据与DNSPod路由联合回归各32/32通过、0跳过。发布清单、摘要回读与latest保留证据见[SDD111验收记录](../111-registry-pull-credentials/validation.md)。未进行生产中心部署或真实DNS写入。
