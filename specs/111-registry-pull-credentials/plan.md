@@ -20,4 +20,10 @@ TypeScript / Node 24.15.0；React / Ant Design；既有 SQLite、AES-256-GCM、A
 - runtime/test/registry-credentials.test.ts、registry-auth.test.ts；scripts/verify-registry-credentials.mjs。
 
 ## Delivery
-完成相关检查后同步 origin/main、创建 GitHub PR并按用户授权合并。按既有可重现镜像发行流程从合并提交构建amd64/arm64，带两架构Agent包，固定标签20261108-registry-credentials-v1并回读摘要。只推送此次固定标签并保留latest；本次未要求生产切换。用户追加要求包含DNSPod默认线路修复PR149，合并两项后从同一main提交发行。
+完成相关检查后同步 origin/main、创建 GitHub PR并按用户授权合并。按既有可重现镜像发行流程从合并提交构建amd64/arm64，带两架构Agent包，固定标签20261108-registry-credentials-v1并回读摘要。只推送此次固定标签并保留latest；发行阶段尚未要求生产切换，后续追加授权见下。用户追加要求包含DNSPod默认线路修复PR149，合并两项后从同一main提交发行。
+
+## 生产发布追加范围（2026-11-08）
+
+用户在发行完成后明确要求发布线上。沿用已登录1Panel终端，先核对中心健康、原镜像和卷，生成root私有配置/环境/主密钥与SQLite一致性备份，校验完整性和权限。拉取已验收固定标签，核对revision与OCI索引摘要；只原子替换现有Compose中的中心镜像，保留项目名、配置、数据及其他容器。部署失败恢复原Compose与旧镜像，不恢复数据库。健康与公开入口通过后，在现有管理界面审阅并执行完整管理节点的Agent更新，维持授权和运行模式；仅监控且无SSH凭据节点不新增授权。回读凭据入口、Agent能力及DNS协调状态，不为了验收创建或删除生产应用。
+
+此次发布不改变现有部署拓扑、凭据边界或协议，架构同步不适用；功能设计已在PR150完成仓库第111章与Doca seq1768同步。

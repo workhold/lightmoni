@@ -1,0 +1,22 @@
+{
+  "origin": "https://moni.heyphp.com",
+  "observed_at": "2026-11-08T13:52:33.671937+00:00",
+  "checks": [
+    {
+      "path": "/healthz",
+      "http_status": 200,
+      "body": {
+        "status": "ok"
+      }
+    },
+    {
+      "path": "/",
+      "http_status": 200
+    },
+    {
+      "path": "/api/v1/ops/registry-credentials",
+      "http_status": 401
+    }
+  ],
+  "tls_verification": true
+}

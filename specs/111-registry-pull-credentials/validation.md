@@ -29,7 +29,7 @@
 
 ## 交付边界
 
-此次授权为合并和推送Docker发行；未切换生产中心或生产Agent，也未执行生产DNS写入或验证公网传播。固定标签发行保留现有latest。真实隔离拉取验收与本地管理API验证不冒充生产验收。
+发行阶段授权为合并和推送Docker发行；该阶段未切换生产中心或生产Agent，也未执行生产DNS写入或验证公网传播。后续追加生产发布授权与实际结果见末节。固定标签发行保留现有latest。真实隔离拉取验收与本地管理API验证不冒充生产验收。
 
 主功能通过[PR150](https://github.com/workhold/lightmoni/pull/150)合入main，合并提交`9d22fd55dc94a47f7469e567eecaf0d30ed129af`，其历史包含PR149的`fc93fdda43a21e862fada3c9e69e8007ffb392c2`。Docker构建上下文由该合并提交git archive生成，SHA256为`b59a865316f09baae50f5100b4a404c61ca0319ec094438e0cffea003b13a391`；构建标签`20261108-registry-credentials-v1`。
 
@@ -44,3 +44,22 @@
 独立执行`docker buildx imagetools inspect`回读固定标签，摘要与两平台manifest均一致。`docker compose config --quiet`在仅运行时生成的测试环境值下通过；不启动服务。发行证据JSON解析及凭据字段检查、`git diff --check`通过。
 
 证据为evidence/release.json、build-inputs.json、两架构build/smoke.json、release-index.json及registry-report.json。中心和需要认证拉取的目标主机Agent须一并更新；未更改正在运行的应用或DNS记录。
+
+
+## 生产发布追加验收（2026-11-08）
+
+用户在发行完成后明确要求“帮我把线上的发布下”。通过既有已登录1Panel终端核对生产中心运行上一固定标签、healthy、同一状态卷且有157.4 GiB可用空间。没有更改本地原工作目录的未提交Compose或历史证据。
+
+受保护备份位于`/opt/lightmoni/backups/sdd111-registry-credentials-20261108`：目录0700，原Compose、环境、完整inspect、主密钥和SQLite快照0600，只留在生产主机。Node SQLite backup单批完成463035页×4096字节=1896591360字节，quick_check为ok；副本大小与主密钥长度核对通过，容器内临时数据库已清理。线上固定镜像拉取成功，revision与OCI索引摘要均匹配发行记录。
+
+首轮切换在配置保留断言中触发自动程序回退，旧版恢复healthy且公网healthz为200。诊断回读发现Env数组顺序变化、全部键值相同，其他配置一致；比较器改为先拒绝重复环境键，再比较全部键值集合，同时保留挂载、启动参数、端口、网络、安全选项等原有校验。原始和重试inspect分别保留，不覆盖备份。未修改产品镜像，也未恢复或替换数据库。
+
+重试在签名作业空闲边界只原子替换现有Compose的中心镜像，执行既有`up -d --no-deps --no-build --pull never --wait`。新中心于21:49:02（Asia/Shanghai）启动，21:49:08回读healthy，源码`9d22fd55dc94a47f7469e567eecaf0d30ed129af`；数据卷、主密钥、环境键值、端口/网络和另外16个容器ID一致。此项“其他容器不变”是中心切换时的比对结果。新凭据表和认证能力模块存在；公网可信HTTPS的healthz与页面为200，未登录凭据接口为401。
+
+通过既有管理员维护入口审阅并执行完整管理主机zz-bj-1的固定amd64包，操作`55250f00b710f028eff4510ab9d0eece`，构建`0.1.0-9d22fd55dc94-cb3c1e2e5e43`，包SHA256`2194a65476f5595dbbf8cb3db993fd668668fb63d4d6f66d8ff2c73ff3eb8f97`，与已验收的amd64中心镜像内目录一致。原维护记录回读“更新成功”，主机列表回读在线、完整管理、当前发行提交9d22fd55dc94。身份、配置和既有权限保留；仅监控且无SSH凭据的另一节点未更新、未新增权限。
+
+生产镜像源页面实际显示“镜像仓库凭据”“新增仓库凭据”和空列表，未创建测试用生产账号、绑定应用或触发认证拉取。生产私有拉取的凭据设置与执行仍由用户实际配置；隔离真实拉取验收见前文。
+
+DNSPod修复已随中心上线；网站docker.doc-a.cn当前仍提示“自动管理的记录已被外部修改，请核对后处理。”本次记录此状态，没有绕过保护、强制覆盖DNS或声称解析已经恢复。无需为本次原有拓扑下的程序发布再次修改系统架构：不新增服务、协议、存储或凭据边界，架构同步不适用；功能设计已经在PR150完成仓库第111章与Doca seq1768同步。
+
+脱敏证据为evidence/production-backup.json、production-deployment.json、production-agent-update.json、production-http.json和production-ui.json。原生截图位于忽略目录`.local-dev/image-release-111/production-registry-credentials.png`和`production-agent-update.png`。代码与镜像未再变更；本次交付检查限定为证据JSON解析、目标版本/摘要一致性和git diff检查。

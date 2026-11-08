@@ -1,0 +1,17 @@
+{
+  "recorded_at": "2026-11-08T13:54:30.789674+00:00",
+  "operation_id": "55250f00b710f028eff4510ab9d0eece",
+  "scope": "existing full-management host zz-bj-1",
+  "source_revision": "9d22fd55dc94a47f7469e567eecaf0d30ed129af",
+  "arch": "amd64",
+  "build_id": "0.1.0-9d22fd55dc94-cb3c1e2e5e43",
+  "package_sha256": "2194a65476f5595dbbf8cb3db993fd668668fb63d4d6f66d8ff2c73ff3eb8f97",
+  "package_matches_tested_amd64_center": true,
+  "update_ui_state": "succeeded",
+  "online": true,
+  "runtime_mode": "full",
+  "identity_and_configuration_preserved": true,
+  "permissions_expanded": false,
+  "monitor_only_host_with_no_ssh_credential_updated": false,
+  "evidence_source": "existing administrator maintenance plan reviewed and executed; UI readback of success plus host online and current source revision"
+}
