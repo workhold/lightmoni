@@ -1,0 +1,350 @@
+{
+  "public_locked_packages_verified": 829,
+  "bytes": 163007594,
+  "missing": [
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/aix-ppc64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/android-arm",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/android-arm64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/android-x64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/darwin-x64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/freebsd-arm64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/freebsd-x64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/linux-arm",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/linux-arm64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/linux-ia32",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/linux-loong64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/linux-mips64el",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/linux-ppc64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/linux-riscv64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/linux-s390x",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/linux-x64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/netbsd-arm64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/netbsd-x64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/openbsd-arm64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/openbsd-x64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/openharmony-arm64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/sunos-x64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/win32-arm64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/win32-ia32",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@esbuild/win32-x64",
+      "version": "0.28.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-aix-ppc64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-darwin-x64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-freebsd-arm64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-freebsd-x64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-linux-arm",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-linux-arm64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-linux-loong64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-linux-mips64el",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-linux-ppc64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-linux-riscv64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-linux-s390x",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-linux-x64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-netbsd-arm64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-netbsd-x64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-openbsd-arm64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-openbsd-x64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-sunos-x64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-win32-arm64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "runtime",
+      "name": "node_modules/@typescript/typescript-win32-x64",
+      "version": "7.0.2"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-android-arm-eabi",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-android-arm64",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-darwin-x64",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-freebsd-x64",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-linux-arm-gnueabihf",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-linux-arm64-gnu",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-linux-arm64-musl",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-linux-ppc64-gnu",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-linux-s390x-gnu",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-linux-x64-gnu",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-linux-x64-musl",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-openharmony-arm64",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-win32-arm64-msvc",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/@rolldown/binding-win32-x64-msvc",
+      "version": "1.2.13"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/lightningcss-android-arm64",
+      "version": "1.33.0"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/lightningcss-darwin-x64",
+      "version": "1.33.0"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/lightningcss-freebsd-x64",
+      "version": "1.33.0"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/lightningcss-linux-arm-gnueabihf",
+      "version": "1.33.0"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/lightningcss-linux-arm64-gnu",
+      "version": "1.33.0"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/lightningcss-linux-arm64-musl",
+      "version": "1.33.0"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/lightningcss-linux-x64-gnu",
+      "version": "1.33.0"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/lightningcss-linux-x64-musl",
+      "version": "1.33.0"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/lightningcss-win32-arm64-msvc",
+      "version": "1.33.0"
+    },
+    {
+      "project": "web",
+      "name": "node_modules/lightningcss-win32-x64-msvc",
+      "version": "1.33.0"
+    }
+  ],
+  "cache_content_only": true,
+  "registry_metadata_or_credentials_copied": false,
+  "artifact_layers_include_cache": false,
+  "sdk_install_offline_check": "passed after correcting cache seed directory"
+}

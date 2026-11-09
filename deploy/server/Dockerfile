@@ -1,24 +1,25 @@
 FROM node:24.15.0-bookworm AS build
 ARG NPM_REGISTRY=https://registry.npmjs.org
 ARG NODE_DIST_URL=https://nodejs.org/dist
-ARG BUILD_REVISION
-ENV npm_config_registry=${NPM_REGISTRY} npm_config_audit=false npm_config_fund=false npm_config_nodedir=/usr/local LIGHTMONI_NODE_DIST_URL=${NODE_DIST_URL} LIGHTMONI_BUILD_REVISION=${BUILD_REVISION}
+ENV npm_config_registry=${NPM_REGISTRY} npm_config_audit=false npm_config_fund=false npm_config_nodedir=/usr/local LIGHTMONI_NODE_DIST_URL=${NODE_DIST_URL}
 WORKDIR /work
 COPY sdk/typescript/package*.json ./sdk/typescript/
-RUN npm --prefix sdk/typescript ci
+RUN --mount=type=cache,id=lightmoni-npm-v1,target=/root/.npm,sharing=locked npm --prefix sdk/typescript ci
 COPY sdk/typescript/ ./sdk/typescript/
 RUN npm --prefix sdk/typescript run build
 COPY runtime/package*.json ./runtime/
-RUN npm --prefix runtime ci
+RUN --mount=type=cache,id=lightmoni-npm-v1,target=/root/.npm,sharing=locked npm --prefix runtime ci
 COPY ai-runtime/package*.json ./ai-runtime/
-RUN npm --prefix ai-runtime ci
+RUN --mount=type=cache,id=lightmoni-npm-v1,target=/root/.npm,sharing=locked npm --prefix ai-runtime ci
 COPY web/package*.json ./web/
-RUN npm --prefix web ci
+RUN --mount=type=cache,id=lightmoni-npm-v1,target=/root/.npm,sharing=locked npm --prefix web ci
 COPY . ./
+ARG BUILD_REVISION
+ENV LIGHTMONI_BUILD_REVISION=${BUILD_REVISION}
 RUN npm --prefix runtime run build && npm --prefix ai-runtime run build && npm --prefix web run build
-RUN node scripts/build-agent-release.mjs 0.1.0 runtime/downloads
+RUN --mount=type=cache,id=lightmoni-npm-v1,target=/root/.npm,sharing=locked node scripts/build-agent-release.mjs 0.1.0 runtime/downloads
 RUN cd sdk/typescript && npm pack --pack-destination /work/runtime/downloads
-RUN sh scripts/build-go-sdk.sh 0.1.0 runtime/downloads && sh scripts/build-native-sdks.sh 0.1.0 runtime/downloads && npm --prefix runtime prune --omit=dev && npm --prefix ai-runtime prune --omit=dev
+RUN --mount=type=cache,id=lightmoni-npm-v1,target=/root/.npm,sharing=locked sh scripts/build-go-sdk.sh 0.1.0 runtime/downloads && sh scripts/build-native-sdks.sh 0.1.0 runtime/downloads && npm --prefix runtime prune --omit=dev && npm --prefix ai-runtime prune --omit=dev
 RUN mv /work/runtime/node_modules /work/runtime-node-modules \
     && mkdir -p /work/agent-release-downloads \
     && mv /work/runtime/downloads/lightmoni-agent_0.1.0_linux_amd64.tar.gz /work/agent-release-downloads/ \
