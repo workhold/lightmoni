@@ -69,3 +69,15 @@ test('transport failure during scan is a confirmed read failure with no mutation
  const f=await fixture(t);
  await assert.rejects(executeRegistry(f.config(),f.context,async()=>{throw Error('offline');}),/REGISTRY_REQUEST_FAILED/);assert.equal(f.calls.length,0);
 });
+
+test('100 tags retain page order with at most four requests and shared index children fetched once',async()=>{
+ const tags=Array.from({length:100},(_,i)=>'v'+String(i).padStart(3,'0')),child=manifest('shared'),childDigest=digest(child);
+ const index=JSON.stringify({schemaVersion:2,mediaType:'application/vnd.oci.image.index.v1+json',manifests:[{digest:childDigest}]});
+ let active=0,peak=0;const requests=new Map<string,number>();
+ const fetcher:typeof fetch=async(input:any)=>{
+  const path=new URL(String(input)).pathname;requests.set(path,(requests.get(path)??0)+1);active++;peak=Math.max(peak,active);
+  try{await new Promise(r=>setTimeout(r,path.endsWith('v000')?15:1));if(path.endsWith('/tags/list'))return new Response(JSON.stringify({name:'api',tags}));const value=path.endsWith(childDigest)?child:index;return new Response(value,{headers:{'Docker-Content-Digest':digest(value)}})}finally{active--}
+ };
+ const result=await executeRegistry({task:'registry.inspect',endpoint:'http://127.0.0.1:5000',repository:'api',references:[]},{signal:new AbortController().signal,now:()=>new Date()},fetcher);
+ assert.deepEqual(result.data.versions.map((v:any)=>v.tag),tags);assert.equal(peak,4);assert.equal(requests.get('/v2/api/manifests/'+childDigest),1);assert.equal(active,0);assert.equal(result.data.versions.length,100);
+});

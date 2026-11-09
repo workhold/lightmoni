@@ -1,0 +1,626 @@
+{
+  "checks": [
+    "round 1: stopped batch exact review, one delete, unselected running retained",
+    "round 2: stopped batch exact review, one delete, unselected running retained",
+    "round 3: stopped batch exact review, one delete, unselected running retained",
+    "lost batch response recovered through original GET without duplicate delete",
+    "en-US/390: exact batch review and confirmation fit narrow viewport",
+    "legacy signed component retains individual controls and rejects new batches before dispatch",
+    "zh-CN/1440: upstream links, real pure preview, live parameters, hidden secrets, no installation",
+    "en-US/1440: upstream links, real pure preview, live parameters, hidden secrets, no installation",
+    "zh-CN/390: upstream links, real pure preview, live parameters, hidden secrets, no installation",
+    "round 1: external project registration, inspect approval, inventory-bound adoption approval, exact volume and recreate warning",
+    "round 2: external project registration, inspect approval, inventory-bound adoption approval, exact volume and recreate warning",
+    "round 3: external project registration, inspect approval, inventory-bound adoption approval, exact volume and recreate warning"
+  ],
+  "errors": [],
+  "traffic": [
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 200,
+      "body": {
+        "jobs": []
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 202,
+      "body": {
+        "id": "f3975229ac6938da8b9e1f61fadaedc9",
+        "request_id": "c20e655d-3420-454f-8c51-726bb278a668",
+        "state": "queued",
+        "blocking": true,
+        "action": {
+          "kind": "host_docker",
+          "operation": "inspect_many",
+          "container_ids": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "issued_at": "2026-11-09T15:05:21.300Z",
+        "expires_at": "2026-11-09T15:10:21.300Z",
+        "code": "",
+        "result": null
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs/f3975229ac6938da8b9e1f61fadaedc9",
+      "status": 200,
+      "body": {
+        "id": "f3975229ac6938da8b9e1f61fadaedc9",
+        "request_id": "c20e655d-3420-454f-8c51-726bb278a668",
+        "state": "succeeded",
+        "blocking": false,
+        "action": {
+          "kind": "host_docker",
+          "operation": "inspect_many",
+          "container_ids": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "issued_at": "2026-11-09T15:05:21.300Z",
+        "expires_at": "2026-11-09T15:10:21.300Z",
+        "code": "",
+        "result": {
+          "operation": "inspect_many",
+          "request_sha256": "af22d2ca6b01abc9641e4b0e15c0c437357b7110d5be3e750b37e16132d8cfcf",
+          "observed_at": "2026-11-09T15:05:21.378Z",
+          "targets": [
+            {
+              "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "name": "qa-stopped",
+              "revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "state": "exited",
+              "compose_project": "",
+              "platform_owned": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 202,
+      "body": {
+        "id": "454e1ad5bcd0f8ec00526c29d73fea63",
+        "request_id": "4cb90b57-2e6a-4720-99d7-742ec7af51be",
+        "state": "queued",
+        "blocking": true,
+        "action": {
+          "kind": "host_docker",
+          "operation": "remove_many",
+          "targets": [
+            {
+              "container_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "expected_revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "name": "qa-stopped"
+            }
+          ],
+          "force": false,
+          "remove_anonymous_volumes": false,
+          "stopped_only": true
+        },
+        "issued_at": "2026-11-09T15:05:22.269Z",
+        "expires_at": "2026-11-09T15:10:22.269Z",
+        "code": "",
+        "result": null
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs/454e1ad5bcd0f8ec00526c29d73fea63",
+      "status": 200,
+      "body": {
+        "id": "454e1ad5bcd0f8ec00526c29d73fea63",
+        "request_id": "4cb90b57-2e6a-4720-99d7-742ec7af51be",
+        "state": "succeeded",
+        "blocking": false,
+        "action": {
+          "kind": "host_docker",
+          "operation": "remove_many",
+          "targets": [
+            {
+              "container_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "expected_revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "name": "qa-stopped"
+            }
+          ],
+          "force": false,
+          "remove_anonymous_volumes": false,
+          "stopped_only": true
+        },
+        "issued_at": "2026-11-09T15:05:22.269Z",
+        "expires_at": "2026-11-09T15:10:22.269Z",
+        "code": "",
+        "result": {
+          "operation": "remove_many",
+          "request_sha256": "940c89f28d2e17f6c962374c9270b3109b42e9e6ae0e494f410a8965d7d310b9",
+          "observed_at": "2026-11-09T15:05:22.297Z",
+          "containers": [
+            {
+              "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "name": "qa-stopped",
+              "state": "deleted",
+              "code": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 200,
+      "body": {
+        "jobs": []
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 202,
+      "body": {
+        "id": "e4581f4f96dde1f4152211b22c233f28",
+        "request_id": "dfbab397-6876-43b8-8b6e-6d6dafe67bd0",
+        "state": "queued",
+        "blocking": true,
+        "action": {
+          "kind": "host_docker",
+          "operation": "inspect_many",
+          "container_ids": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "issued_at": "2026-11-09T15:05:24.002Z",
+        "expires_at": "2026-11-09T15:10:24.002Z",
+        "code": "",
+        "result": null
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs/e4581f4f96dde1f4152211b22c233f28",
+      "status": 200,
+      "body": {
+        "id": "e4581f4f96dde1f4152211b22c233f28",
+        "request_id": "dfbab397-6876-43b8-8b6e-6d6dafe67bd0",
+        "state": "succeeded",
+        "blocking": false,
+        "action": {
+          "kind": "host_docker",
+          "operation": "inspect_many",
+          "container_ids": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "issued_at": "2026-11-09T15:05:24.002Z",
+        "expires_at": "2026-11-09T15:10:24.002Z",
+        "code": "",
+        "result": {
+          "operation": "inspect_many",
+          "request_sha256": "af22d2ca6b01abc9641e4b0e15c0c437357b7110d5be3e750b37e16132d8cfcf",
+          "observed_at": "2026-11-09T15:05:24.100Z",
+          "targets": [
+            {
+              "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "name": "qa-stopped",
+              "revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "state": "exited",
+              "compose_project": "",
+              "platform_owned": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 202,
+      "body": {
+        "id": "814e686282999df2869e53b308569355",
+        "request_id": "b7d6aef1-4653-4fba-a2f3-649d593620f0",
+        "state": "queued",
+        "blocking": true,
+        "action": {
+          "kind": "host_docker",
+          "operation": "remove_many",
+          "targets": [
+            {
+              "container_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "expected_revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "name": "qa-stopped"
+            }
+          ],
+          "force": false,
+          "remove_anonymous_volumes": false,
+          "stopped_only": true
+        },
+        "issued_at": "2026-11-09T15:05:24.961Z",
+        "expires_at": "2026-11-09T15:10:24.961Z",
+        "code": "",
+        "result": null
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs/814e686282999df2869e53b308569355",
+      "status": 200,
+      "body": {
+        "id": "814e686282999df2869e53b308569355",
+        "request_id": "b7d6aef1-4653-4fba-a2f3-649d593620f0",
+        "state": "succeeded",
+        "blocking": false,
+        "action": {
+          "kind": "host_docker",
+          "operation": "remove_many",
+          "targets": [
+            {
+              "container_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "expected_revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "name": "qa-stopped"
+            }
+          ],
+          "force": false,
+          "remove_anonymous_volumes": false,
+          "stopped_only": true
+        },
+        "issued_at": "2026-11-09T15:05:24.961Z",
+        "expires_at": "2026-11-09T15:10:24.961Z",
+        "code": "",
+        "result": {
+          "operation": "remove_many",
+          "request_sha256": "940c89f28d2e17f6c962374c9270b3109b42e9e6ae0e494f410a8965d7d310b9",
+          "observed_at": "2026-11-09T15:05:25.016Z",
+          "containers": [
+            {
+              "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "name": "qa-stopped",
+              "state": "deleted",
+              "code": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 200,
+      "body": {
+        "jobs": []
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 202,
+      "body": {
+        "id": "748ed83a3059b13291cf0b2dfb39f818",
+        "request_id": "3f185f02-3bda-438b-8ee6-4c9e51fa5996",
+        "state": "queued",
+        "blocking": true,
+        "action": {
+          "kind": "host_docker",
+          "operation": "inspect_many",
+          "container_ids": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "issued_at": "2026-11-09T15:05:26.354Z",
+        "expires_at": "2026-11-09T15:10:26.354Z",
+        "code": "",
+        "result": null
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs/748ed83a3059b13291cf0b2dfb39f818",
+      "status": 200,
+      "body": {
+        "id": "748ed83a3059b13291cf0b2dfb39f818",
+        "request_id": "3f185f02-3bda-438b-8ee6-4c9e51fa5996",
+        "state": "succeeded",
+        "blocking": false,
+        "action": {
+          "kind": "host_docker",
+          "operation": "inspect_many",
+          "container_ids": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "issued_at": "2026-11-09T15:05:26.354Z",
+        "expires_at": "2026-11-09T15:10:26.354Z",
+        "code": "",
+        "result": {
+          "operation": "inspect_many",
+          "request_sha256": "af22d2ca6b01abc9641e4b0e15c0c437357b7110d5be3e750b37e16132d8cfcf",
+          "observed_at": "2026-11-09T15:05:26.421Z",
+          "targets": [
+            {
+              "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "name": "qa-stopped",
+              "revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "state": "exited",
+              "compose_project": "",
+              "platform_owned": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 202,
+      "body": {
+        "id": "aefc3f6d8d78f6b2c55a2e94213e5a62",
+        "request_id": "60089446-5e1e-497c-9e45-d0c35f93254a",
+        "state": "queued",
+        "blocking": true,
+        "action": {
+          "kind": "host_docker",
+          "operation": "remove_many",
+          "targets": [
+            {
+              "container_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "expected_revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "name": "qa-stopped"
+            }
+          ],
+          "force": false,
+          "remove_anonymous_volumes": false,
+          "stopped_only": true
+        },
+        "issued_at": "2026-11-09T15:05:27.295Z",
+        "expires_at": "2026-11-09T15:10:27.295Z",
+        "code": "",
+        "result": null
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs/aefc3f6d8d78f6b2c55a2e94213e5a62",
+      "status": 200,
+      "body": {
+        "id": "aefc3f6d8d78f6b2c55a2e94213e5a62",
+        "request_id": "60089446-5e1e-497c-9e45-d0c35f93254a",
+        "state": "succeeded",
+        "blocking": false,
+        "action": {
+          "kind": "host_docker",
+          "operation": "remove_many",
+          "targets": [
+            {
+              "container_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "expected_revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "name": "qa-stopped"
+            }
+          ],
+          "force": false,
+          "remove_anonymous_volumes": false,
+          "stopped_only": true
+        },
+        "issued_at": "2026-11-09T15:05:27.295Z",
+        "expires_at": "2026-11-09T15:10:27.295Z",
+        "code": "",
+        "result": {
+          "operation": "remove_many",
+          "request_sha256": "940c89f28d2e17f6c962374c9270b3109b42e9e6ae0e494f410a8965d7d310b9",
+          "observed_at": "2026-11-09T15:05:27.337Z",
+          "containers": [
+            {
+              "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "name": "qa-stopped",
+              "state": "deleted",
+              "code": ""
+            }
+          ]
+        }
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 200,
+      "body": {
+        "jobs": []
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 202,
+      "body": {
+        "id": "be49afc04ac1311e7deb3f68681dbd20",
+        "request_id": "25150d01-5204-429d-a014-42a6fb0062b2",
+        "state": "queued",
+        "blocking": true,
+        "action": {
+          "kind": "host_docker",
+          "operation": "inspect_many",
+          "container_ids": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "issued_at": "2026-11-09T15:05:28.710Z",
+        "expires_at": "2026-11-09T15:10:28.710Z",
+        "code": "",
+        "result": null
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs/be49afc04ac1311e7deb3f68681dbd20",
+      "status": 200,
+      "body": {
+        "id": "be49afc04ac1311e7deb3f68681dbd20",
+        "request_id": "25150d01-5204-429d-a014-42a6fb0062b2",
+        "state": "succeeded",
+        "blocking": false,
+        "action": {
+          "kind": "host_docker",
+          "operation": "inspect_many",
+          "container_ids": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "issued_at": "2026-11-09T15:05:28.710Z",
+        "expires_at": "2026-11-09T15:10:28.710Z",
+        "code": "",
+        "result": {
+          "operation": "inspect_many",
+          "request_sha256": "af22d2ca6b01abc9641e4b0e15c0c437357b7110d5be3e750b37e16132d8cfcf",
+          "observed_at": "2026-11-09T15:05:28.737Z",
+          "targets": [
+            {
+              "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "name": "qa-stopped",
+              "revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "state": "exited",
+              "compose_project": "",
+              "platform_owned": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 200,
+      "body": {
+        "jobs": [
+          {
+            "id": "4d88e8e1982729109c873bcab01441da",
+            "request_id": "f89404c5-ffb1-44cd-bafb-71b2c0167c1a",
+            "state": "succeeded",
+            "blocking": false,
+            "action": {
+              "kind": "host_docker",
+              "operation": "remove_many",
+              "targets": [
+                {
+                  "container_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "expected_revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+                  "name": "qa-stopped"
+                }
+              ],
+              "force": false,
+              "remove_anonymous_volumes": false,
+              "stopped_only": true
+            },
+            "issued_at": "2026-11-09T15:05:29.616Z",
+            "expires_at": "2026-11-09T15:10:29.616Z",
+            "code": "",
+            "result": {
+              "operation": "remove_many",
+              "request_sha256": "940c89f28d2e17f6c962374c9270b3109b42e9e6ae0e494f410a8965d7d310b9",
+              "observed_at": "2026-11-09T15:05:29.655Z",
+              "containers": [
+                {
+                  "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "name": "qa-stopped",
+                  "state": "deleted",
+                  "code": ""
+                }
+              ]
+            }
+          },
+          {
+            "id": "be49afc04ac1311e7deb3f68681dbd20",
+            "request_id": "25150d01-5204-429d-a014-42a6fb0062b2",
+            "state": "succeeded",
+            "blocking": false,
+            "action": {
+              "kind": "host_docker",
+              "operation": "inspect_many",
+              "container_ids": [
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              ]
+            },
+            "issued_at": "2026-11-09T15:05:28.710Z",
+            "expires_at": "2026-11-09T15:10:28.710Z",
+            "code": "",
+            "result": {
+              "operation": "inspect_many",
+              "request_sha256": "af22d2ca6b01abc9641e4b0e15c0c437357b7110d5be3e750b37e16132d8cfcf",
+              "observed_at": "2026-11-09T15:05:28.737Z",
+              "targets": [
+                {
+                  "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "name": "qa-stopped",
+                  "revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+                  "state": "exited",
+                  "compose_project": "",
+                  "platform_owned": false
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 200,
+      "body": {
+        "jobs": []
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 202,
+      "body": {
+        "id": "606a6ab5c430e6271b5cf8cc431d0bf2",
+        "request_id": "4284f5e3-11ab-472f-970a-60fb91b56807",
+        "state": "queued",
+        "blocking": true,
+        "action": {
+          "kind": "host_docker",
+          "operation": "inspect_many",
+          "container_ids": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "issued_at": "2026-11-09T15:05:30.386Z",
+        "expires_at": "2026-11-09T15:10:30.386Z",
+        "code": "",
+        "result": null
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs/606a6ab5c430e6271b5cf8cc431d0bf2",
+      "status": 200,
+      "body": {
+        "id": "606a6ab5c430e6271b5cf8cc431d0bf2",
+        "request_id": "4284f5e3-11ab-472f-970a-60fb91b56807",
+        "state": "succeeded",
+        "blocking": false,
+        "action": {
+          "kind": "host_docker",
+          "operation": "inspect_many",
+          "container_ids": [
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "issued_at": "2026-11-09T15:05:30.386Z",
+        "expires_at": "2026-11-09T15:10:30.386Z",
+        "code": "",
+        "result": {
+          "operation": "inspect_many",
+          "request_sha256": "af22d2ca6b01abc9641e4b0e15c0c437357b7110d5be3e750b37e16132d8cfcf",
+          "observed_at": "2026-11-09T15:05:30.455Z",
+          "targets": [
+            {
+              "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "name": "qa-stopped",
+              "revision": "3bd6d5f663fb5359909e92c50468c7dcdc8c52d07c3a1f6d915f9fdb6546019f",
+              "state": "exited",
+              "compose_project": "",
+              "platform_owned": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "url": "http://127.0.0.1:49561/api/v1/ops/machines/host109/container-jobs",
+      "status": 200,
+      "body": {
+        "jobs": []
+      }
+    }
+  ],
+  "source_components": true,
+  "real_container_http": true,
+  "real_docker": false,
+  "compose_api_fixture": true,
+  "production_writes": false,
+  "media": "/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence"
+}

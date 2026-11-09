@@ -18,6 +18,9 @@ import './navigation.css';
 const McpAccessPage=lazy(()=>import('./McpAccessPage'));
 const McpAuthorizationPage=lazy(()=>import('./McpAccessPage').then(module=>({default:module.McpAuthorizationPage})));
 const AdminPage=lazy(()=>import('./AdminPage'));
+const HostMonitoring=lazy(()=>import('./HostMonitoring'));
+const SystemMonitoring=lazy(()=>import('./SystemMonitoring'));
+const BackupTools=lazy(()=>import('./BackupTools'));
 const DashboardPage=lazy(()=>import('../features/dashboards/DashboardPage'));
 const LogExplorePage=lazy(()=>import('../features/logs/LogExplorePage'));
 const AlertsPage=lazy(()=>import('../features/alerts/AlertsPage'));
@@ -67,6 +70,9 @@ export default function Root(){
     <Route path="/data-management" element={<DataManagementPage user={user}/>}/>
     <Route path="/agents" element={<HostsNodesPage user={user}/>}/>
     <Route path="/machines" element={<HostsNodesPage user={user}/>}/>
+    <Route path="/machines/:id/monitoring" element={user.role==='admin'?<HostMonitoring/>:<Navigate to="/settings" replace/>}/>
+    <Route path="/system/monitoring" element={<SystemMonitoring/>}/>
+    <Route path="/system/backups" element={user.role==='admin'?<BackupTools/>:<Navigate to="/settings" replace/>}/>
     <Route path="/connection-credentials" element={user.role==='admin'?<ConnectionCredentialsPage/>:<Navigate to="/settings" replace/>}/>
     <Route path="/services" element={<Navigate to={user.role==='admin'?"/applications":"/settings"} replace/>}/>
     <Route path="/operations" element={<Navigate to="/applications" replace/>}/>

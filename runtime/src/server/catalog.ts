@@ -8,6 +8,8 @@ const dimensionColumns = Array.from(
   { length: 16 },
   (_, i) => `key${i + 1} String DEFAULT attributes['key${i + 1}']`,
 ).join(",");
+// SDKs send logical names. Canonical public names retain signal prefix and metric subtype;
+// the histogram logical alias below is compatibility SQL, never another physical table.
 export const publicTableName = (name: string, kind: string, type = "") =>
   name === "lightmoni"
     ? "lightmoni_" + kind + (type ? "_" + type : "")

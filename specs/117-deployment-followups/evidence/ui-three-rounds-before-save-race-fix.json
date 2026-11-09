@@ -1,0 +1,74 @@
+[
+  {
+    "round": "repeat-1",
+    "script": "web/src/app/verify-native-monitoring.mjs",
+    "started": "2026-11-09T14:38:43.586Z",
+    "ended": "2026-11-09T14:38:48.123Z",
+    "exit_code": 0,
+    "stdout": "{\"passed\":true,\"checks\":[\"real capacity projection and host row link; parameterized machine/Agent scope; real SDK host measurements render three charts without query error\",\"system menu renders read-only platform monitoring; user dashboard directory excludes unchanged builtins\",\"390px English host/system pages fit viewport\"]}\n",
+    "stderr": ""
+  },
+  {
+    "round": "repeat-1",
+    "script": "web/src/features/logs/verify-performance.mjs",
+    "started": "2026-11-09T14:38:48.124Z",
+    "ended": "2026-11-09T14:38:55.104Z",
+    "exit_code": 0,
+    "stdout": "{\"phase\":\"repeat-1\",\"passed\":true,\"measurements\":{\"loadMs\":3008,\"loaded\":{\"parses\":2041,\"cellTimes\":17,\"longTasks\":[{\"start\":157.80000001192093,\"duration\":115},{\"start\":683.4000000357628,\"duration\":155},{\"start\":849.3000000119209,\"duration\":175},{\"start\":1244.5,\"duration\":163},{\"start\":1426.6000000238419,\"duration\":56},{\"start\":1559.6000000238419,\"duration\":55},{\"start\":1620.7000000476837,\"duration\":61},{\"start\":1726.5,\"duration\":54},{\"start\":1784.4000000357628,\"duration\":56},{\"start\":1909.800000011921,\"duration\":50},{\"start\":1964,\"duration\":55},{\"start\":2093.5,\"duration\":160},{\"start\":2259.100000023842,\"duration\":55},{\"start\":2445.5,\"duration\":53},{\"start\":2543.300000011921,\"duration\":51},{\"start\":2599.5,\"duration\":56},{\"start\":2692.900000035763,\"duration\":50},{\"start\":2747.800000011921,\"duration\":56},{\"start\":2876.300000011921,\"duration\":52},{\"start\":2932.400000035763,\"duration\":71}],\"at\":3011.2000000476837},\"keyword\":{\"ms\":355.10000002384186,\"attributeParses\":0,\"timeCellRenders\":0,\"longTasks\":[{\"start\":3046.100000023842,\"duration\":96},{\"start\":3144.5,\"duration\":80}]},\"fields\":{\"ms\":25.299999952316284,\"attributeParses\":0,\"timeCellRenders\":0}}}\n",
+    "stderr": ""
+  },
+  {
+    "round": "repeat-1",
+    "script": "web/src/features/dashboards/verify-grafana-parity.mjs",
+    "started": "2026-11-09T14:38:55.104Z",
+    "ended": "2026-11-09T14:39:21.200Z",
+    "exit_code": 0,
+    "stdout": "{\"run\":\"repeat-1\",\"passed\":true,\"checks\":[\"默认查看模式、无拖动/缩放控件；3 个 uPlot、柱图及堆叠面积同时展示真实 ClickHouse 结果\",\"鼠标连续扫过曲线：共享提示、同步十字线；没有 SQL 请求、绘图提交或 Canvas 重建，记录帧间隔\",\"图例单击隔离/恢复，Shift 与 Ctrl/Cmd 切换单条，隐藏不发 SQL 且不重建图表\",\"刷新等待期间保留画布和旧结果，用细进度条反馈；完成后沿用原图表实例\",\"受控 503 保留上次结果并显示过期说明；恢复后重新查询成功\",\"拖选只在松手时同步全局时间和 URL，双击扩大 2×；Canvas 实例保留\",\"时间选择支持搜索输入 13h、昨天的整日边界及常用相对时间\",\"面板菜单和 V 快捷键全屏查看，Esc 返回\",\"编辑后拖动/键盘缩放不触发查询；保存后退出编辑，刷新读回持久布局\",\"面板预览时间独立可调，分隔条键盘调整，阶梯插值和名称保存读回；保存失败保留输入并可重试\",\"刷新恢复草稿后放弃编辑，正确恢复服务端已保存定义\",\"751/390px、时间弹层、浅色主题、200% 和减少动态效果检查\"],\"metrics\":{\"hover\":{\"samples\":83,\"p50\":16.699999999999818,\"p95\":16.799999999999727,\"max\":16.800000000000182}}}\n",
+    "stderr": ""
+  },
+  {
+    "round": "repeat-1",
+    "script": "web/src/features/dashboards/verify-deep-parity.mjs",
+    "started": "2026-11-09T14:39:21.201Z",
+    "ended": "2026-11-09T14:40:12.025Z",
+    "exit_code": 0,
+    "stdout": "{\"run\":\"repeat-1\",\"passed\":true,\"checks\":[\"长指标名称完整呈现，统计列保持对齐，不依赖鼠标提示\",\"变量 URL、联动查询、全部值展开与标题插值；浏览器后退/前进还原筛选\",\"多选参数使用重复 var-*，切换全部/单值后刷新仍保持\",\"自动刷新参数写入 URL，并在刷新页面时读回\",\"设置页修改变量、默认时间、描述、标签、分组与携带时间/变量的链接\",\"受控 503 保留设置草稿；重试保存并刷新，从 SQLite 读回分组和全部设置\",\"分组收起/展开，收起后刷新只查询可见图表\",\"分享链接携带时间、多选变量和刷新；独立预览只查询单图，重载后保持并可返回\",\"viewPanel 页面与历史导航联动，Esc 返回大盘\",\"逐项切换全部十种现有可视化，字段适配与渲染无错误\",\"面板编辑器分区设置/搜索、切换可视化和表格预览、应用与保存读回\",\"751px / 390px 的编辑器设置抽屉和大盘设置可用，页面无横向溢出\",\"等效 200% 编辑器使用下方图例和高分辨率画布，纵向滚动可访问完整 SQL\",\"复制图表保留所属分组，分组可重排/移除并保留图表；放弃草稿完整恢复服务端定义\",\"复制大盘重建面板/分组身份且组内引用保持正确\"],\"errors\":[],\"queryRequests\":74,\"source\":\"真实 SQLite/ClickHouse；临时生成信号；保存 503 为受控测试\"}\n",
+    "stderr": ""
+  },
+  {
+    "round": "repeat-2",
+    "script": "web/src/app/verify-native-monitoring.mjs",
+    "started": "2026-11-09T14:40:12.026Z",
+    "ended": "2026-11-09T14:40:16.607Z",
+    "exit_code": 0,
+    "stdout": "{\"passed\":true,\"checks\":[\"real capacity projection and host row link; parameterized machine/Agent scope; real SDK host measurements render three charts without query error\",\"system menu renders read-only platform monitoring; user dashboard directory excludes unchanged builtins\",\"390px English host/system pages fit viewport\"]}\n",
+    "stderr": ""
+  },
+  {
+    "round": "repeat-2",
+    "script": "web/src/features/logs/verify-performance.mjs",
+    "started": "2026-11-09T14:40:16.607Z",
+    "ended": "2026-11-09T14:40:24.045Z",
+    "exit_code": 0,
+    "stdout": "{\"phase\":\"repeat-2\",\"passed\":true,\"measurements\":{\"loadMs\":3375,\"loaded\":{\"parses\":2041,\"cellTimes\":17,\"longTasks\":[{\"start\":182.39999997615814,\"duration\":122},{\"start\":563.6000000238419,\"duration\":51},{\"start\":721,\"duration\":168},{\"start\":902.8000000119209,\"duration\":368},{\"start\":1444.1000000238419,\"duration\":71},{\"start\":1544.5,\"duration\":71},{\"start\":1658,\"duration\":59},{\"start\":1724.3999999761581,\"duration\":62},{\"start\":1826.3999999761581,\"duration\":58},{\"start\":1891.6000000238419,\"duration\":65},{\"start\":1992.800000011921,\"duration\":63},{\"start\":2060.399999976158,\"duration\":168},{\"start\":2275.199999988079,\"duration\":116},{\"start\":2398.100000023842,\"duration\":69},{\"start\":2542.600000023842,\"duration\":63},{\"start\":2610.600000023842,\"duration\":66},{\"start\":2725.699999988079,\"duration\":56},{\"start\":2786.199999988079,\"duration\":64},{\"start\":2925.600000023842,\"duration\":61},{\"start\":2992.199999988079,\"duration\":64},{\"start\":3093,\"duration\":113},{\"start\":3211.300000011921,\"duration\":156}],\"at\":3375},\"keyword\":{\"ms\":283.5,\"attributeParses\":0,\"timeCellRenders\":0,\"longTasks\":[]},\"fields\":{\"ms\":29.80000001192093,\"attributeParses\":0,\"timeCellRenders\":0}}}\n",
+    "stderr": ""
+  },
+  {
+    "round": "repeat-2",
+    "script": "web/src/features/dashboards/verify-grafana-parity.mjs",
+    "started": "2026-11-09T14:40:24.046Z",
+    "ended": "2026-11-09T14:40:50.033Z",
+    "exit_code": 0,
+    "stdout": "{\"run\":\"repeat-2\",\"passed\":true,\"checks\":[\"默认查看模式、无拖动/缩放控件；3 个 uPlot、柱图及堆叠面积同时展示真实 ClickHouse 结果\",\"鼠标连续扫过曲线：共享提示、同步十字线；没有 SQL 请求、绘图提交或 Canvas 重建，记录帧间隔\",\"图例单击隔离/恢复，Shift 与 Ctrl/Cmd 切换单条，隐藏不发 SQL 且不重建图表\",\"刷新等待期间保留画布和旧结果，用细进度条反馈；完成后沿用原图表实例\",\"受控 503 保留上次结果并显示过期说明；恢复后重新查询成功\",\"拖选只在松手时同步全局时间和 URL，双击扩大 2×；Canvas 实例保留\",\"时间选择支持搜索输入 13h、昨天的整日边界及常用相对时间\",\"面板菜单和 V 快捷键全屏查看，Esc 返回\",\"编辑后拖动/键盘缩放不触发查询；保存后退出编辑，刷新读回持久布局\",\"面板预览时间独立可调，分隔条键盘调整，阶梯插值和名称保存读回；保存失败保留输入并可重试\",\"刷新恢复草稿后放弃编辑，正确恢复服务端已保存定义\",\"751/390px、时间弹层、浅色主题、200% 和减少动态效果检查\"],\"metrics\":{\"hover\":{\"samples\":83,\"p50\":16.699999999999818,\"p95\":16.799999999999727,\"max\":16.799999999999955}}}\n",
+    "stderr": ""
+  },
+  {
+    "round": "repeat-2",
+    "script": "web/src/features/dashboards/verify-deep-parity.mjs",
+    "started": "2026-11-09T14:40:50.034Z",
+    "ended": "2026-11-09T14:41:29.906Z",
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "ExpectError: expect(locator).toHaveCount(expected) failed\n\nLocator:  getByRole('dialog', { name: '保存大盘', exact: true })\nExpected: 0\nReceived: 1\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCount\" getByRole('dialog', { name: '保存大盘', exact: true }) with timeout 5000ms\n  - waiting for getByRole('dialog', { name: '保存大盘', exact: true })\n    14 × locator resolved to 1 element\n       - unexpected value \"1\"\n\n    at captureRawStack (/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/web/node_modules/playwright-core/lib/coreBundle.js:9282:17)\n    at callMatcherAsStep (/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/web/node_modules/playwright/lib/matchers/expect.js:13316:57)\n    at Object.toHaveCount (/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/web/node_modules/playwright/lib/matchers/expect.js:13308:23)\n    at /Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/web/src/features/dashboards/verify-deep-parity.mjs:52:786 {\n  matcherResult: {\n    actual: 1,\n    expected: 0,\n    message: 'expect(locator).toHaveCount(expected) failed\\n' +\n      '\\n' +\n      \"Locator:  getByRole('dialog', { name: '保存大盘', exact: true })\\n\" +\n      'Expected: 0\\n' +\n      'Received: 1\\n' +\n      'Timeout:  5000ms\\n' +\n      '\\n' +\n      'Call log:\\n' +\n      `  - Expect \"toHaveCount\" getByRole('dialog', { name: '保存大盘', exact: true }) with timeout 5000ms\\n` +\n      \"  - waiting for getByRole('dialog', { name: '保存大盘', exact: true })\\n\" +\n      '    14 × locator resolved to 1 element\\n' +\n      '       - unexpected value \"1\"\\n',\n    name: 'toHaveCount',\n    pass: false,\n    log: [\n      `  - Expect \"toHaveCount\" getByRole('dialog', { name: '保存大盘', exact: true }) with timeout 5000ms`,\n      \"  - waiting for getByRole('dialog', { name: '保存大盘', exact: true })\",\n      '    14 × locator resolved to 1 element',\n      '       - unexpected value \"1\"'\n    ],\n    timeout: 5000,\n    ariaSnapshot: undefined\n  }\n}\n[]\n"
+  }
+]

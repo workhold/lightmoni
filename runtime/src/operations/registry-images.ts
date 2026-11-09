@@ -10,6 +10,12 @@ const digestName = (s: unknown): s is string => typeof s === 'string' && /^sha25
 const reject = (code: string): never => { throw new OperationRejectedError(code); };
 const ACCEPT = ['application/vnd.oci.image.index.v1+json','application/vnd.docker.distribution.manifest.list.v2+json','application/vnd.oci.image.manifest.v1+json','application/vnd.docker.distribution.manifest.v2+json'].join(', ');
 const LIMIT = 10000;
+const CONCURRENCY = 4;
+async function parallelMap<T,R>(values:T[], fn:(value:T)=>Promise<R>):Promise<R[]> {
+  const result:R[]=new Array(values.length);let next=0;
+  await Promise.all(Array.from({length:Math.min(CONCURRENCY,values.length)},async()=>{while(next<values.length){const index=next++;result[index]=await fn(values[index]);}}));
+  return result;
+}
 export function validateRegistryConfig(c: Record<string, any>) {
   let url: URL;
   try { url = new URL(c.endpoint); } catch { return reject('INVALID_REGISTRY_ENDPOINT'); }
@@ -22,8 +28,15 @@ export function validateRegistryConfig(c: Record<string, any>) {
 
 class RegistryClient {
   private manifests = new Map<string, {digest:string; children:string[]}>();
+  private pending = new Map<string, Promise<{digest:string; children:string[]}>>();
+  private active=0;
+  private waiters:(()=>void)[]=[];
   constructor(private c: Record<string, any>, private signal: AbortSignal, private fetcher: typeof fetch) {}
   async request(path: string, method = 'GET') {
+    if(this.active>=CONCURRENCY)await new Promise<void>(resolve=>this.waiters.push(resolve));else this.active++;
+    try{return await this.performRequest(path,method)}finally{const waiter=this.waiters.shift();if(waiter)waiter();else this.active--;}
+  }
+  private async performRequest(path:string,method:string) {
     this.signal.throwIfAborted();
     const response = await this.fetcher(new URL(path, this.c.endpoint), {method, redirect:'error', headers:{Accept:ACCEPT}, signal:AbortSignal.any([this.signal,AbortSignal.timeout(15000)])});
     if (method === 'DELETE' && response.status === 405) { await response.body?.cancel(); return reject('REGISTRY_DELETE_DISABLED'); }
@@ -60,9 +73,17 @@ class RegistryClient {
     }
     return [...values].sort();
   }
-  async manifest(repository:string,reference:string,depth=0):Promise<{digest:string; children:string[]}> {
+  async manifest(repository:string,reference:string,depth=0,parents=new Set<string>()):Promise<{digest:string; children:string[]}> {
     const key=repository+'@'+reference, known=this.manifests.get(key); if(known)return known;
-    if(depth>8 || this.manifests.size>=LIMIT)return reject('REGISTRY_SCAN_LIMIT');
+    if(depth>8 || parents.has(key) || this.manifests.size+this.pending.size>=LIMIT)return reject('REGISTRY_SCAN_LIMIT');
+    const waiting=this.pending.get(key);if(waiting)return waiting;
+    const lineage=new Set(parents);lineage.add(key);
+    const promise=this.loadManifest(repository,reference,depth,lineage);
+    this.pending.set(key,promise);
+    try{return await promise}finally{this.pending.delete(key)}
+  }
+  private async loadManifest(repository:string,reference:string,depth:number,parents:Set<string>):Promise<{digest:string;children:string[]}> {
+    const key=repository+'@'+reference;
     const {response,body}=await this.request('/v2/'+repository+'/manifests/'+reference);
     const digest='sha256:'+createHash('sha256').update(body).digest('hex');
     if(response.headers.get('docker-content-digest')!==digest || digestName(reference)&&reference!==digest)return reject('REGISTRY_DIGEST_MISMATCH');
@@ -72,7 +93,7 @@ class RegistryClient {
     if(data.manifests!==undefined && (!Array.isArray(data.manifests)||data.manifests.length>1000||data.manifests.some((d:any)=>!digestName(d.digest))))return reject('INVALID_REGISTRY_MANIFEST');
     const result={digest,children:[digest]};
     // A cycle or incomplete index rejects the entire scan before any deletion.
-    for(const child of data.manifests??[]) result.children.push(...(await this.manifest(repository,child.digest,depth+1)).children);
+    for(const child of await parallelMap<any,{digest:string;children:string[]}>(data.manifests??[],child=>this.manifest(repository,child.digest,depth+1,parents)))result.children.push(...child.children);
     result.children=[...new Set(result.children)];this.manifests.set(key,result);this.manifests.set(repository+'@'+digest,result);return result;
   }
 }
@@ -92,7 +113,7 @@ export async function executeRegistry(c:Record<string,any>,context:Pick<Operatio
     for(const d of manifest.children){const key=r.repository+'@'+d;const apps=protection.get(key)??new Map();apps.set(r.id,{id:r.id,name:r.name});protection.set(key,apps);}
   }
   const versions=async(repository:string,tags:string[])=>{
-    const out=[];for(const tag of tags){const m=await client.manifest(repository,tag);out.push({tag,digest:m.digest,used_by:[...(protection.get(repository+'@'+m.digest)?.values()??[])]});}return out;
+    return parallelMap(tags,async tag=>{const m=await client.manifest(repository,tag);return {tag,digest:m.digest,used_by:[...(protection.get(repository+'@'+m.digest)?.values()??[])]};});
   };
   if(c.task==='registry.inspect'){
     const path='/v2/'+c.repository+'/tags/list?n=100'+(c.after?'&last='+encodeURIComponent(c.after):'');

@@ -296,7 +296,8 @@ test("dashboard revisions, durable versions, copies and seed deletion survive re
     path = join(dir, "db.sqlite");
   let f = await fixture({ path });
   try {
-    assert.equal((await f.request("/api/v1/dashboards")).body.length, 3);
+    assert.equal((await f.request("/api/v1/dashboards")).body.length, 0);
+    assert.equal((await f.request("/api/v1/system-monitoring")).body.length, 3);
     const created = await f.request("/api/v1/dashboards", "POST", dashboard());
     assert.equal(created.status, 201);
     const d = created.body;
@@ -376,6 +377,11 @@ test('readable builtin query upgrade preserves custom SQL, layout, deleted board
   assert.equal(next.panels.find((p:any)=>p.id==='system-agent-d').queries[0].sql,'SELECT 99 AS value');
   const queue=next.panels.find((p:any)=>p.id==='system-agent-c');assert.match(queue.queries[0].sql,/host\.name/);
   assert.equal((await f.request('/api/v1/dashboards/system-sdk')).status,404);
+  const listed=(await f.request('/api/v1/dashboards')).body;
+  assert.equal(listed.some((board:any)=>board.id==='system-agent'),true);
+  assert.equal(listed.some((board:any)=>board.id==='system-center'),false);
+  assert.equal(listed.some((board:any)=>board.id===copied.body.id),true);
+  assert.equal((await f.request('/api/v1/system-monitoring')).body.some((board:any)=>board.id==='system-sdk'),false);
   const copy=(await f.request('/api/v1/dashboards/'+copied.body.id)).body;
   assert.deepEqual(copy.panels,copied.body.panels);
   const versions=(await f.request('/api/v1/dashboards/system-agent/versions')).body;

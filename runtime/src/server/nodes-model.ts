@@ -10,6 +10,7 @@ import { agentLifecycle, assertAgentActive, createAgentLifecycleSchema } from ".
 import { createAgentHostSchema, ensureAgentHost } from "./agent-hosts.js";
 import { normalizeNetworkAddresses } from "../shared/host-network.js";
 import { createHostNetworkSchema, machineNetwork, recordHostNetwork, type NetworkSource } from "./host-network.js";
+import {hostCapacity} from '../shared/host-capacity.js';
 import {
   normalizeRemote,
   validateRemote,
@@ -575,6 +576,8 @@ export class NodeStore {
       // Recheck under the same writer lock as removal: authentication may have
       // happened before an asynchronous request body or a second centre writer.
       assertAgentActive(this.db, id, 401);
+      try { hostCapacity(values); }
+      catch { problem(400, "主机容量无效：CPU 须为正整数，内存须为正有限 MiB"); }
       let addresses;
       try { addresses = normalizeNetworkAddresses(values.network_addresses); }
       catch { problem(400, "主机网络地址无效，最多支持 64 个网卡地址"); }

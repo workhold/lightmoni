@@ -36,6 +36,7 @@ COPY --from=build /work/runtime/ ./runtime/
 COPY --from=build /work/runtime-node-modules/ ./runtime/node_modules/
 COPY --from=build /work/agent-release-downloads/lightmoni-agent_0.1.0_linux_amd64.tar.gz ./runtime/downloads/
 COPY --from=build /work/agent-release-downloads/lightmoni-agent_0.1.0_linux_arm64.tar.gz ./runtime/downloads/
+COPY --from=build /work/scripts/lightmoni-backup.py ./runtime/downloads/lightmoni-backup.py
 COPY --from=build /work/sdk/typescript/package.json ./sdk/typescript/package.json
 COPY --from=build /work/sdk/typescript/dist/ ./sdk/typescript/dist/
 COPY --from=build /work/ai-runtime/package.json ./ai-runtime/package.json

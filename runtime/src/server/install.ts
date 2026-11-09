@@ -12,6 +12,22 @@ export function registerInstall(
   agentCredentials?: AgentCredentialStore,
 ) {
   const version = "0.1.0";
+  d.router.get('/api/v1/backup-tool', c => {
+    d.auth.requireAdmin(c);
+    c.res.setHeader('cache-control', 'private, no-store');
+    const path = join(directory, 'lightmoni-backup.py');
+    const available = existsSync(path) && lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink() && statSync(path).size < (1 << 20);
+    c.json({available, filename:'lightmoni-backup.py', download_url:'/api/v1/backup-tool/download',
+      sha256:available?createHash('sha256').update(readFileSync(path)).digest('hex'):null});
+  });
+  d.router.get('/api/v1/backup-tool/download', async c => {
+    d.auth.requireAdmin(c);
+    c.res.setHeader('cache-control', 'private, no-store');
+    const path=join(directory,'lightmoni-backup.py');
+    if(!existsSync(path)||!lstatSync(path).isFile()||lstatSync(path).isSymbolicLink()||statSync(path).size>(1<<20))fail(404,'backup_tool_not_available');
+    c.res.writeHead(200,{'content-type':'application/octet-stream','content-disposition':'attachment; filename="lightmoni-backup.py"','content-length':statSync(path).size});
+    await pipeline(createReadStream(path),c.res,{signal:c.signal});
+  });
   const basePackages = [
     ['go', 'Go', 'Go 1.26+', `lightmoni-go-sdk_${version}.tar.gz`],
     [

@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "checks": [
+    "real capacity projection and host row link; parameterized machine/Agent scope; real SDK host measurements render three charts without query error",
+    "system menu renders read-only platform monitoring; user dashboard directory excludes unchanged builtins",
+    "390px English host/system pages fit viewport"
+  ],
+  "errors": [],
+  "source": "Disposable SQLite Agent capacity fixture; actual HTTP/ClickHouse queries; no SSH or remote host actions"
+}

@@ -1,0 +1,21 @@
+{
+  "runs": [
+    {
+      "run": 1,
+      "checks": 12,
+      "errors": []
+    },
+    {
+      "run": 2,
+      "checks": 12,
+      "errors": []
+    },
+    {
+      "run": 3,
+      "checks": 12,
+      "errors": []
+    }
+  ],
+  "consecutive": true,
+  "includes_registration_edit": true
+}

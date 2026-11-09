@@ -4,6 +4,19 @@ import type { DB } from "../shared/types.js";
 import { fail } from "../shared/http.js";
 import { isAgentRemoved } from "./agent-lifecycle.js";
 import { hasPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import {hostCapacity, type HostCapacity} from '../shared/host-capacity.js';
+
+export function currentAgentCapacity(db: DB, machineID: string, agentID: string, now: Date): HostCapacity & {observed_at: string; stale: boolean} {
+  const unknown = {cpu_count: null, memory_total_mb: null, observed_at: '', stale: true};
+  if (!agentID || isAgentRemoved(db, agentID) || !table(db, 'agents')) return unknown;
+  const row = db.get<{heartbeat: string; last_seen: string}>('SELECT a.heartbeat,a.last_seen FROM managed_machines m JOIN agents a ON a.id=m.agent_id WHERE m.id=? AND m.agent_id=?',machineID,agentID);
+  if (!row) return unknown;
+  try {
+    const capacity = hostCapacity(JSON.parse(row.heartbeat));
+    if (capacity.cpu_count === null && capacity.memory_total_mb === null) return unknown;
+    return {...capacity, observed_at: row.last_seen, stale: !Number.isFinite(Date.parse(row.last_seen)) || now.getTime()-Date.parse(row.last_seen)>90000};
+  } catch { return unknown; }
+}
 
 /** Shared by node registration and host management, regardless of startup order. */
 export function createAgentHostSchema(db: DB): void {

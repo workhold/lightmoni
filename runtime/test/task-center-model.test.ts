@@ -166,3 +166,16 @@ test("control heartbeats cannot grant host labels on first enrollment or replace
   store.heartbeat("new",{hostname:"reported",group_id:"default"},"control");
   assert.deepEqual(store.nodeLabels("new"),["production"]);
 });
+
+
+test('invalid capacity rejects the whole heartbeat without refreshing identity or network state',t=>{
+ const {db,store}=fixture(t);machine(db,'capacity-host','capacity-agent');
+ db.exec("CREATE TABLE agent_enrollments(id TEXT PRIMARY KEY,agent_id TEXT,status TEXT,machine_id TEXT,created_at TEXT)");
+ db.run("INSERT INTO agent_enrollments VALUES('enroll','capacity-agent','active','capacity-host',?)",at.toISOString());
+ store.heartbeat('capacity-agent',{hostname:'first',cpu_count:4,memory_total_mb:8192},'control');
+ const saved=db.get<any>("SELECT * FROM agents WHERE id='capacity-agent'");
+ assert.throws(()=>store.heartbeat('capacity-agent',{hostname:'invalid',cpu_count:0,memory_total_mb:8192},'control'),code(400));
+ assert.deepEqual(db.get<any>("SELECT * FROM agents WHERE id='capacity-agent'"),saved);
+ store.heartbeat('capacity-agent',{hostname:'old-agent'},'control');
+ assert.equal(JSON.parse(db.get<any>("SELECT heartbeat FROM agents WHERE id='capacity-agent'")!.heartbeat).cpu_count,undefined);
+});

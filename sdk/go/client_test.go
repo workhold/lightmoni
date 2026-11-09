@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -391,5 +392,22 @@ func TestDeploymentEnvironmentDefaultsAndExplicitOverrides(t *testing.T) {
 	}
 	if bytes.Contains([]byte(c.s.resource.String()), []byte("environment-key")) {
 		t.Fatal("key entered telemetry resource")
+	}
+}
+
+func TestLocalHostnameDefault(t *testing.T) {
+	t.Setenv("LIGHTMONI_MACHINE_NAME", "")
+	name, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := testClient(t, Config{Exporter: &recorder{}, DisableSelfTelemetry: true})
+	if c.s.cfg.Resource["host.name"] != name {
+		t.Fatal("missing local hostname")
+	}
+	t.Setenv("LIGHTMONI_MACHINE_NAME", "platform-host")
+	configured := testClient(t, Config{Exporter: &recorder{}, DisableSelfTelemetry: true})
+	if configured.s.cfg.Resource["host.name"] != "platform-host" {
+		t.Fatal("deployment name did not override hostname")
 	}
 }

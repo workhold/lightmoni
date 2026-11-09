@@ -22,6 +22,8 @@ import {registerHostDockerJobs} from '../src/ops/host-docker.js';
 import {executeHostDocker} from '../src/privileged-executor/host-docker.js';
 import {fakeHostDocker,hostContainerID,unusedImageID} from './helpers/host-docker-fixture.js';
 import {managedExecutorObservation} from '../src/server/managed-executor-status.js';
+import {registerOperationSchedules} from '../src/server/operation-schedules.js';
+import {backupDefinition} from '../src/operations/backups.js';
 function fixture() {
   const db = new DB(":memory:"), router = new Router(), crypt = cipher(randomBytes(32));
   let clock = new Date("2026-11-01T00:00:00Z");
@@ -58,17 +60,61 @@ function fixture() {
   const apply = () => { const plan = makePlan(); return store.apply(plan.id, { confirm: true, expected_revision: plan.revision, request_id: randomBytes(24).toString("base64url") }, "admin").jobs[0]; };
   let revision=1;const payloads=new Map<string,any>();
   const resolve=(job:any)=>{const p=payloads.get(job.operation_id);if(!p||p.resource.revision!==revision)fail(409,'platform_payload_revision_changed');return p;};
-  registerOperations(deps,{jobs,credentials,definitions:[]});
+  const ops=registerOperations(deps,{jobs,credentials,definitions:[backupDefinition]});
+  const schedules=registerOperationSchedules(deps,ops);
   connectManagedExecutorJobs(deps,{jobs,executors:store,artifacts:{directory:'/not-used'} as any,resolvePlatform:resolve});
   const enqueue=()=>{const operation=randomBytes(16).toString('hex'),resource=randomBytes(16).toString('hex');
     const job=jobs.enqueue({agentID:'agent-host',deploymentID:'platform-'+resource,operationID:operation,actions:[{kind:'operations',domain:'platform',operation_id:operation}],capabilities:['operations.platform'],target:{operations_resource_id:resource}});
     payloads.set(operation,{version:1,operation_id:operation,operation:'inspect',resource:{id:resource,kind:'platform',name:'QA',agent_id:'agent-host',revision:1,config:{task:'node.inspect',cluster_id:resource},created_at:clock.toISOString(),updated_at:clock.toISOString()},input:{}});
     db.run('INSERT INTO ops_platform_runs VALUES(?,?,?)',operation,job.id,'admin');return job;
   };
-  return { db, router, deps, tasks, store, jobs, payloads, enqueue, change:()=>revision++,bootstrap, enrolled, pub, keys, proof, request, heartbeat, makePlan, apply, account,
+  return { db, router, deps, tasks, store, jobs, ops, schedules, payloads, enqueue, change:()=>revision++,bootstrap, enrolled, pub, keys, proof, request, heartbeat, makePlan, apply, account,
     advance(seconds: number) { clock = new Date(clock.getTime() + seconds * 1000); },
-    close() { jobs.close();store.close();tasks.close?.(); db.close(); } };
+    close() { schedules.close?.();ops.close?.();jobs.close();store.close();tasks.close?.(); db.close(); } };
 }
+
+function scheduledBackup(f: ReturnType<typeof fixture>) {
+  const resource=randomBytes(16).toString('hex'),at=f.deps.now().toISOString();
+  f.db.run('INSERT INTO ops_resources VALUES(?,?,?,?,?,?,?,?,?)',resource,'backup','Backup','agent-host',1,
+    f.deps.encrypt(JSON.stringify({source_path:'/var/lib/lightmoni-test',storage:{type:'local',path:'/var/backups/lightmoni-test'}})),at,at,'admin');
+  const schedule=f.schedules.create({resource_id:resource,resource_revision:1,operation:'create',cron:'* * * * *',timezone:'UTC',enabled:true},'admin');
+  f.advance(60);f.heartbeat();f.schedules.tick();
+  const fire=f.schedules.fires(schedule.id)[0],run=f.ops.getRun(fire.run_id),job=f.jobs.get(run.job_id);
+  return {schedule,fire,run,job};
+}
+test('scheduled backups retain a real authorizer and reach the signed executor',()=>{
+  const f=fixture();try {
+    const {job,run,schedule}=scheduledBackup(f);
+    assert.equal(run.approved_by,'admin');assert.equal(run.created_by,'admin');
+    const sealed=JSON.parse(f.deps.decrypt(f.db.get<any>('SELECT payload_cipher FROM ops_runs WHERE id=?',run.id)!.payload_cipher));
+    assert.equal(sealed.authorization.schedule_id,schedule.id);
+    const claim=f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v));
+    assert.equal(planClaims(verifyJWS(claim.job.plan,f.store.centerPublicKey,f.store.centerKeyID)).job_id,job.id);
+    assert.equal(f.jobs.get(job.id).state,'leased');
+  }finally{f.close();}
+});
+for(const mutation of ['disable','revision','delete','delete-fire','input','authorizer','demote'] as const)test('scheduled backup revalidates '+mutation+' before start',()=>{
+  const f=fixture();try {
+    const {job,schedule}=scheduledBackup(f);
+    const claim=f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v));
+    const plan=planClaims(verifyJWS(claim.job.plan,f.store.centerPublicKey,f.store.centerKeyID));
+    if(mutation==='disable')f.db.run('UPDATE ops_schedules SET enabled=0 WHERE id=?',schedule.id);
+    if(mutation==='revision')f.db.run('UPDATE ops_schedules SET revision=revision+1 WHERE id=?',schedule.id);
+    if(mutation==='delete')f.db.run('DELETE FROM ops_schedules WHERE id=?',schedule.id);
+    if(mutation==='delete-fire')f.db.run('DELETE FROM ops_schedule_fires WHERE schedule_id=?',schedule.id);
+    if(mutation==='input')f.db.run('UPDATE ops_schedules SET input_json=? WHERE id=?',f.deps.encrypt('{"changed":true}'),schedule.id);
+    if(mutation==='authorizer')f.db.run("UPDATE ops_schedules SET authorized_by='another' WHERE id=?",schedule.id);
+    if(mutation==='demote')f.db.run("UPDATE users SET role='member' WHERE id='admin'");
+    assert.throws(()=>f.request('jobs/'+job.id+'/start-permits',{lease_id:plan.lease_id,step_id:'managed.execute',executor_nonce:randomBytes(24).toString('base64url')}).invoke((e,v)=>f.store.startPermit(e,job.id,v)),mutation==='demote'?/active_human_admin_required/:/schedule_authorization_changed/);
+    assert.equal(f.db.all('SELECT * FROM privileged_start_permits').length,0);
+  }finally{f.close();}
+});
+test('revoked scheduled backup is cancelled before being claimed',()=>{
+  const f=fixture();try{const {job,schedule}=scheduledBackup(f);f.db.run('UPDATE ops_schedules SET enabled=0 WHERE id=?',schedule.id);
+    assert.equal(f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v)).job,null);
+    assert.equal(f.jobs.get(job.id).state,'cancelled');
+  }finally{f.close();}
+});
 
 function flow(f:ReturnType<typeof fixture>,task?:string){
  const job=f.enqueue();

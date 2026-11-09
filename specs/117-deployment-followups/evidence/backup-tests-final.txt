@@ -1,0 +1,16 @@
+test_image_identity_accepts_classic_manifest_and_oci_index_and_rejects_tampering (__main__.ArchiveTests) ... ok
+test_outer_archive_refuses_checksum_changes_and_missing_sources (__main__.ArchiveTests) ... ok
+test_output_overlap_rejected_before_any_stop (__main__.ArchiveTests) ... ok
+test_ownership_affects_tree_digest (__main__.ArchiveTests) ... ok
+test_partial_stop_failure_resumes_only_original_unchanged_containers (__main__.ArchiveTests) ... ok
+test_paths_links_devices_and_headers (__main__.ArchiveTests) ... ok
+test_schedule_generation_is_private_and_never_installs (__main__.ArchiveTests) ... skipped 'root schedule generation tested in isolated Linux container'
+test_sigterm_cancellation_runs_the_source_recovery (__main__.ArchiveTests) ... ok
+test_two_container_export_restore_ownership_and_no_source_mutation (__main__.DockerTests) ... ok
+test_center_and_clickhouse_migration_retains_login_key_and_history (__main__.MigrationTests) ... ok
+test_actual_http_signature_streaming_readback_and_no_overwrite (__main__.S3Tests) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 60.121s
+
+OK (skipped=1)

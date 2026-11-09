@@ -2,6 +2,8 @@
 
 ## 通用业务打点（Go / Node.js / Python / Rust）
 
+后端 SDK 默认将本机 hostname 写入 OTLP resource `host.name`；`LIGHTMONI_MACHINE_NAME` 覆盖默认值，显式 resource 的 `host.name` 优先。浏览器 SDK 不自动读取本机名称。主机名只作显示元数据，主机身份仍由平台 ID 决定。
+
 推荐统一调用 `record(table, metric_name, dimensions, value, count)`（Go 为 `Record`），五个参数均必填。初始化的 service 与连接信息默认读取部署环境，env 可选；service_version、instance_id 可覆盖，未设置实例 ID 时自动生成。地址与密钥可读 LIGHTMONI_ENDPOINT / LIGHTMONI_KEY；无密钥时仅能写启用的豁免表且不产生 SDK 自身遥测。
 
 每次数据库请求后记录一次耗时，例如 `record("business", "db.query.duration_ms", {key1:"telecom", key2:"zhejiang"}, 128, 1)`。SDK 默认按30秒固定窗口聚合，窗口以 UTC Unix epoch 为边界；后台收集发送已结束窗口。业务不需注册指标或配置分桶。退出仍需 shutdown。维度仅支持 key1…key16 字符串；同一 metric_name 的槽含义和数值单位固定，不同指标可复用槽位。同一客户端可以上报多个表/指标。

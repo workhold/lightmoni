@@ -1,0 +1,10 @@
+{
+  "run": "2",
+  "passed": false,
+  "checks": [],
+  "metrics": {},
+  "errors": [
+    "Failed to fetch dynamically imported module: http://127.0.0.1:5177/src/features/dashboards/DashboardPage.tsx"
+  ],
+  "error": "Error: expect(locator).toHaveCount(expected) failed\n\nLocator:  locator('.lm-uplot-chart canvas')\nExpected: 3\nReceived: 0\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCount\" locator('.lm-uplot-chart canvas') with timeout 5000ms\n  - waiting for locator('.lm-uplot-chart canvas')\n    14 × locator resolved to 0 elements\n       - unexpected value \"0\"\n"
+}

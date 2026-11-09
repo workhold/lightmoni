@@ -15,6 +15,11 @@ export interface OperationResource {
 export interface OperationPayload {
   version: 1; operation_id: string; operation: string;
   resource: OperationResource; input: OperationConfig;
+  authorization?: ScheduleAuthorization;
+}
+export interface ScheduleAuthorization {
+  kind: 'schedule'; schedule_id: string; revision: number;
+  authorized_by: string; actor: string; trigger: 'scheduled' | 'manual';
 }
 export interface OperationExecutionContext {
   dataDir: string; signal: AbortSignal; now: () => Date;
@@ -30,7 +35,7 @@ export interface OperationExecutionResult { verified: boolean; data: OperationCo
 export interface OperationsStore {
   list(kind?: string): OperationResource[];
   get(id: string): OperationResource;
-  plan(id: string, operation: string, input: unknown, actor: string): Record<string, any>;
+  plan(id: string, operation: string, input: unknown, actor: string, authorization?: ScheduleAuthorization): Record<string, any>;
   approve(id: string, actor: string, revision: number): Record<string, any>;
   getRun(id: string): Record<string, any>;
   runs(resourceID?: string): Record<string, any>[];

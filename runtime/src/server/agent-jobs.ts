@@ -2,7 +2,7 @@ import { ordinaryReadOnlyJob } from "../shared/ordinary-agent-jobs.js";
 import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { id, token } from "../shared/crypto.js";
 import { dockerJobAction, dockerReceipt, safeDockerCode } from '../shared/docker-jobs.js';
-import {hostDockerJobAction,hostDockerCode,hostDockerReadOnly,hostDockerReceipt} from '../shared/host-docker.js';
+import {hostDockerJobAction,hostDockerCode,hostDockerReadOnly,hostDockerReceipt,hostDockerBatchProgress} from '../shared/host-docker.js';
 import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
@@ -484,6 +484,8 @@ export function registerAgentJobs(
       if(state==='succeeded'){
         try{snapshot=hostDockerReceipt(hostDockerAction,snapshot,current.issued_at,deps.now());}
         catch{state=hostDockerReadOnly(hostDockerAction)?'failed':'unknown';code='invalid_host_docker_receipt';snapshot={};}
+      }else if(hostDockerAction.operation==='remove_many'){
+        try{snapshot=hostDockerBatchProgress(hostDockerAction,snapshot,current.issued_at,deps.now());}catch{snapshot={};}
       }else snapshot={};
     }
     if (readOnlyPreflight(current)) {

@@ -1,0 +1,81 @@
+{
+  "passed": true,
+  "rounds": [
+    {
+      "run": "final-1",
+      "all_four_scripts_passed": true,
+      "reports": {
+        "native-monitoring": "native-monitoring/final-1-report.json",
+        "log-performance": "log-performance/final-1-report.json",
+        "grafana-parity": "grafana-parity/final-1-report.json",
+        "grafana-deep-parity": "grafana-deep-parity/final-1-report.json"
+      },
+      "log_load_ms": 3012,
+      "keyword_ms": 385.9000000357628,
+      "keyword_long_tasks_ms": [
+        96,
+        85
+      ],
+      "max_loading_long_task_ms": 331,
+      "grafana_hover_p95_ms": 16.799999999999955,
+      "grafana_checks": 12,
+      "deep_parity_checks": 15
+    },
+    {
+      "run": "final-2",
+      "all_four_scripts_passed": true,
+      "reports": {
+        "native-monitoring": "native-monitoring/final-2-report.json",
+        "log-performance": "log-performance/final-2-report.json",
+        "grafana-parity": "grafana-parity/final-2-report.json",
+        "grafana-deep-parity": "grafana-deep-parity/final-2-report.json"
+      },
+      "log_load_ms": 3185,
+      "keyword_ms": 258.19999998807907,
+      "keyword_long_tasks_ms": [
+        63
+      ],
+      "max_loading_long_task_ms": 197,
+      "grafana_hover_p95_ms": 16.700000000000273,
+      "grafana_checks": 12,
+      "deep_parity_checks": 15
+    },
+    {
+      "run": "final-3",
+      "all_four_scripts_passed": true,
+      "reports": {
+        "native-monitoring": "native-monitoring/final-3-report.json",
+        "log-performance": "log-performance/final-3-report.json",
+        "grafana-parity": "grafana-parity/final-3-report.json",
+        "grafana-deep-parity": "grafana-deep-parity/final-3-report.json"
+      },
+      "log_load_ms": 3339,
+      "keyword_ms": 250.19999998807907,
+      "keyword_long_tasks_ms": [],
+      "max_loading_long_task_ms": 360,
+      "grafana_hover_p95_ms": 16.700000000000273,
+      "grafana_checks": 12,
+      "deep_parity_checks": 15
+    }
+  ],
+  "execution_log": "ui-three-rounds-execution.json",
+  "isolation": {
+    "api_port": 18717,
+    "clickhouse_port": 18718,
+    "ui_port": 5177,
+    "vite_hmr": false,
+    "vite_watch": null,
+    "separate_dependency_cache": true
+  },
+  "preflight_failures_preserved": [
+    "grafana-parity/preflight-hmr-failure.json",
+    "native-monitoring/preflight-plot-sizing-failure.json",
+    "grafana-deep-parity/preflight-save-race-failure.json"
+  ],
+  "cleanup": {
+    "api_stopped": true,
+    "frontend_stopped": true,
+    "clickhouse_removed": true,
+    "temporary_state_removed": true
+  }
+}

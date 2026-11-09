@@ -65,9 +65,11 @@ export class Collector {
     };
     if (selected.has("cpu"))
       await run("cpu", () => {
+        const processors = os.cpus();
+        if (processors.length) this.gauge("host.cpu.logical_count", "{cpu}", processors.length, attrs);
         let idle = 0,
           total = 0;
-        for (const c of os.cpus()) {
+        for (const c of processors) {
           idle += c.times.idle;
           total += Object.values(c.times).reduce((a, b) => a + b, 0);
         }

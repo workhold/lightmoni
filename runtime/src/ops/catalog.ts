@@ -3,6 +3,7 @@ import {registryTemplateSpec} from './registry-runtime.js';
 import {extendedCatalog,extendedInstallation} from './catalog/index.js';
 import type {CatalogTemplate} from './catalog/types.js';
 import { hostPortOverrides } from './application-ports.js';
+import {catalogLinks} from './catalog/links.js';
 
 type Input = Record<string, any>;
 export const applicationCatalog: CatalogTemplate[] = [
@@ -130,19 +131,20 @@ export const applicationCatalog: CatalogTemplate[] = [
   },
   ...extendedCatalog,
 ];
+for(const template of applicationCatalog){const links=catalogLinks[template.id];if(links){template.documentation=links.documentation??template.homepage;template.homepage=links.homepage;template.repository=links.repository;}}
 export function catalogTemplate(id: string) {
   const template = applicationCatalog.find((t) => t.id === id);
   if (!template) fail(404, "application_template_not_found");
   return template;
 }
-export function catalogInstallation(id: string, input: Input) {
+export function catalogInstallation(id: string, input: Input, preview = false) {
   const template = catalogTemplate(id),
     p = input.parameters ?? {};
   if (!p || typeof p !== "object" || Array.isArray(p))
     fail(400, "invalid_catalog_parameters");
   if (Object.keys(p).some(key => !template.parameters.some(parameter => parameter.key === key)))
     fail(400, "invalid_catalog_parameter");
-  const extended = extendedInstallation(id,input);
+  const extended = extendedInstallation(id,input,preview);
   for (const parameter of extended ? [] : template.parameters)
     if (
       parameter.required &&

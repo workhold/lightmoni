@@ -13,9 +13,10 @@ const array=(v:any,max=2000):any[]=>{if(!Array.isArray(v)||v.length>max)fail('ho
 /** A fixed Engine adapter under the existing signed host-management grant.
  * No endpoint, shell fragment, registry credential or raw inspect leaves this module. */
 export async function executeHostDocker(input:HostDockerAction,jobID:string,c:HostDockerContext,emit:(event:{phase:string;summary:string})=>Promise<void>):Promise<ExecutionReceipt>{
- const started=c.now().toISOString();let changing=false,unknown=false,lock:Awaited<ReturnType<typeof acquireOperationLock>>|undefined;
+ const started=c.now().toISOString();let changing=false,unknown=false,lock:Awaited<ReturnType<typeof acquireOperationLock>>|undefined,batchAction:Extract<HostDockerAction,{operation:'remove_many'}>|undefined,batchResult:HostDockerResult|undefined,currentTarget='';
  try{
   const action=normalizeHostDockerAction(input),readOnly=hostDockerReadOnly(action);
+  if(action.operation==='remove_many')batchAction=action;
   const raw=async(method:'GET'|'POST'|'DELETE',path:string,data?:Record<string,unknown>)=>{
    c.signal.throwIfAborted();return c.transport({method,path:API+path,body:data,signal:c.signal,assertStart:()=>c.signal.throwIfAborted()});
   };
@@ -47,15 +48,18 @@ export async function executeHostDocker(input:HostDockerAction,jobID:string,c:Ho
    const mounts=array(v.Mounts??[],128).map(m=>({type:clean(m.Type,32),name:clean(m.Name),destination:clean(m.Destination,512),read_only:m.RW===false}));
    const name=clean(v.Name).replace(/^\//,''),state=clean(v.State?.Status,32),memory=h.Memory??0;
    const nano=h.NanoCpus??0;
-   return {id:v.Id,name,image_id:v.Image,image:clean(cfg.Image,512),state,created_at:v.Created,revision:hostDockerHash({id:v.Id,name,image:v.Image,created:v.Created,state,host:h,command:cfg.Cmd,entrypoint:cfg.Entrypoint,mounts:v.Mounts}),memory_bytes:memory,nano_cpus:nano,restart_policy:policy,ports,mounts,compose_project:clean(cfg.Labels?.['com.docker.compose.project'],128),platform_owned:!!cfg.Labels?.['io.lightmoni.platform.instance']} as ContainerDetail;
+   return {id:v.Id,name,image_id:v.Image,image:clean(cfg.Image,512),state,created_at:v.Created,revision:hostDockerHash({id:v.Id,name,image:v.Image,created:v.Created,state,host:h,command:cfg.Cmd,entrypoint:cfg.Entrypoint,mounts:v.Mounts,labels:cfg.Labels}),memory_bytes:memory,nano_cpus:nano,restart_policy:policy,ports,mounts,compose_project:clean(cfg.Labels?.['com.docker.compose.project'],128),platform_owned:!!cfg.Labels?.['io.lightmoni.platform.instance']} as ContainerDetail;
   };
   const mutate=async(operation:'start'|'stop'|'restart',id:string)=>request('POST',`/containers/${id}/${operation}${operation==='start'?'':'?t=10'}`,undefined,[204,304]);
   const result:HostDockerResult={operation:action.operation,request_sha256:hostDockerHash(action),observed_at:started};
+  if(batchAction){result.containers=[];batchResult=result;}
   await emit({phase:'accepted',summary:'Host container task accepted'});
   if(!readOnly)lock=await acquireOperationLock(c.dataDir,jobID,c.now());
   await emit({phase:'staging',summary:'Checking the pinned Docker daemon and exact target'});
   await emit({phase:'activating',summary:readOnly?'Reading public container or image metadata':'Applying the precisely reviewed host container action'});
-  if(action.operation==='images'){
+  if(action.operation==='inspect_many'){
+   result.targets=[];for(const id of action.container_ids){const d=await inspect(id);result.targets.push({id:d.id,name:d.name,revision:d.revision,state:d.state,compose_project:d.compose_project,platform_owned:d.platform_owned})}
+  }else if(action.operation==='images'){
    const all=(await images()).filter(i=>!action.cursor||i.id>action.cursor).sort((a,b)=>a.id.localeCompare(b.id));result.images=all.slice(0,100);result.truncated=false;
    while(Buffer.byteLength(JSON.stringify(result))>80000)result.images.pop();
    result.next_cursor=all.length>result.images.length?result.images.at(-1)!.id:'';
@@ -76,6 +80,20 @@ export async function executeHostDocker(input:HostDockerAction,jobID:string,c:Ho
     if(after.some(row=>row.Id===i.id))fail('host_docker_verification_failed');
     if(response.statusCode===404)result.skipped.push({id:i.id,reason:'missing'});
     else{result.deleted.push(i.id);result.estimated_reclaimed_bytes+=all.find(original=>original.id===i.id)!.estimated_reclaimable_bytes}
+   }
+  }else if(action.operation==='remove_many'){
+   const validate=(detail:ContainerDetail,target:typeof action.targets[number])=>{if(detail.name!==target.name||detail.revision!==target.expected_revision)fail('host_docker_revision_changed');if((action.stopped_only||!action.force)&&!['exited','created','dead'].includes(detail.state))fail('host_docker_running')};
+   // Inspect the entire reviewed batch before the first write. Unselected IDs cannot enter this task.
+   for(const target of action.targets)validate(await inspect(target.container_id),target);
+   result.containers=[];
+   for(const target of action.targets){
+    currentTarget=target.container_id;
+    try{validate(await inspect(target.container_id),target)}catch(error){const code=hostDockerCode(error instanceof Error?error.message:'');if(!['host_docker_revision_changed','host_docker_running'].includes(code))throw error;result.containers.push({id:target.container_id,name:target.name,state:'failed',code});continue}
+    const response=await request('DELETE',`/containers/${target.container_id}?force=${action.force}&v=${action.remove_anonymous_volumes}`,undefined,[204,400,403,404,409]);
+    if(response.statusCode!==204){result.containers.push({id:target.container_id,name:target.name,state:'failed',code:'host_docker_conflict'});continue}
+    const check=await request('GET','/containers/'+target.container_id+'/json',undefined,[404]);
+    if(check.statusCode!==404)fail('host_docker_verification_failed');
+    result.containers.push({id:target.container_id,name:target.name,state:'deleted',code:''});
    }
   }else if(action.operation==='create'){
    const cfg=action.config;
@@ -114,6 +132,6 @@ export async function executeHostDocker(input:HostDockerAction,jobID:string,c:Ho
   await emit({phase:'verifying',summary:'Container or image state read back and verified'});
   c.signal.throwIfAborted();
   return {state:'succeeded',code:'',summary:'Host container task completed and verified',snapshot,started_at:started,finished_at:c.now().toISOString()};
- }catch(error){unknown=changing;return {state:unknown?'unknown':'failed',code:hostDockerCode(error instanceof Error?error.message:''),summary:unknown?'Host container result is unknown; inspect before any new action':'Host container task was not applied',snapshot:{},started_at:started,finished_at:c.now().toISOString()}}
+ }catch(error){unknown=changing;const code=hostDockerCode(error instanceof Error?error.message:'');let snapshot:Record<string,unknown>={};if(batchAction&&batchResult){const completed=batchResult.containers??[];batchResult.containers=batchAction.targets.map(target=>completed.find(r=>r.id===target.container_id)??{id:target.container_id,name:target.name,state:unknown&&target.container_id===currentTarget?'unknown':'not_started',code});batchResult.observed_at=c.now().toISOString();snapshot={host_docker:batchResult}}return {state:unknown?'unknown':'failed',code,summary:unknown?'Host container result is unknown; inspect before any new action':'Host container task was not applied',snapshot,started_at:started,finished_at:c.now().toISOString()}}
  finally{await lock?.finish(unknown)}
 }

@@ -1,4 +1,5 @@
 import {registryCredentialSecret} from '../ops/registry-credentials.js';
+import {validateOperationAuthorization} from './operation-authorization.js';
 import { constants,openSync,closeSync,readSync,fstatSync,lstatSync,realpathSync } from 'node:fs';
 import { join,dirname,parse } from 'node:path';
 import { canonicalJSON,parseStrictJSON,sha256 } from '../shared/privileged-executor.js';
@@ -28,6 +29,7 @@ export function connectManagedExecutorJobs(deps:Dependencies,options:{jobs:Agent
         const resource=run&&db.get<Row>('SELECT * FROM ops_resources WHERE id=?',run.resource_id);
         if(!run||!resource||Number(resource.revision)!==Number(run.resource_revision)||resource.agent_id!==job.agent_id||!run.approved_by||run.state==='awaiting_approval')fail(409,'operations_revision_changed');
         actor=run.approved_by;operation=parseStrictJSON(deps.decrypt(run.payload_cipher));
+        validateOperationAuthorization(deps,operation!,run);
       }
     }else if(action.kind==='systemd_probe') {
       const preflight=db.get<Row>('SELECT p.*,t.config_json,t.machine_id FROM service_target_preflights p JOIN service_targets t ON t.id=p.target_id WHERE p.id=? AND p.job_id=? AND p.agent_id=?',action.preflightID,job.id,job.agent_id);

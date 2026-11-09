@@ -1,0 +1,82 @@
+{
+  "resourceId": "2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "savedSeq": 1771,
+  "readbackSeqs": [
+    1771
+  ],
+  "method": "Insert a new section; correct automatic numbered-title conversion using the returned native block ID; move only new blocks after the heading. Read back each target block at the saved version.",
+  "paragraphs": 8,
+  "paragraphsExact": true,
+  "nodes": [
+    {
+      "id": "sdd117-authority",
+      "label": "管理员 / 平台持久授权"
+    },
+    {
+      "id": "sdd117-center",
+      "label": "中心：版本、归属、计划核对"
+    },
+    {
+      "id": "sdd117-executor",
+      "label": "签名执行器：容器 / 编排"
+    },
+    {
+      "id": "sdd117-ssh",
+      "label": "真人 SSH / SFTP 文件维护"
+    },
+    {
+      "id": "sdd117-view",
+      "label": "主机 / 资源 / 系统监控"
+    },
+    {
+      "id": "sdd117-sdk",
+      "label": "Agent / SDK 容量与身份"
+    },
+    {
+      "id": "sdd117-backup",
+      "label": "本机 root 离线工具"
+    },
+    {
+      "id": "sdd117-artifact",
+      "label": "私有归档 / S3 / 空目标恢复"
+    }
+  ],
+  "edges": [
+    {
+      "source": "sdd117-authority",
+      "target": "sdd117-center"
+    },
+    {
+      "source": "sdd117-center",
+      "target": "sdd117-executor"
+    },
+    {
+      "source": "sdd117-center",
+      "target": "sdd117-ssh"
+    },
+    {
+      "source": "sdd117-center",
+      "target": "sdd117-view"
+    },
+    {
+      "source": "sdd117-sdk",
+      "target": "sdd117-center"
+    },
+    {
+      "source": "sdd117-authority",
+      "target": "sdd117-backup"
+    },
+    {
+      "source": "sdd117-backup",
+      "target": "sdd117-artifact"
+    }
+  ],
+  "allEndpointsPresent": true,
+  "flowExact": true,
+  "preexistingBlocks": 985,
+  "preexistingFlowcharts": 55,
+  "preserved": "No original blocks edited or deleted. Original architecture flowchart read back byte-equivalent as JSON (10 nodes, 8 edges).",
+  "repositorySection": "docs/system-design.md chapter 117",
+  "readbackFinished": true
+}

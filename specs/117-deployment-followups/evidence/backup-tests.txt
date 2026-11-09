@@ -1,0 +1,14 @@
+test_outer_archive_refuses_checksum_changes_and_missing_sources (__main__.ArchiveTests) ... ok
+test_output_overlap_rejected_before_any_stop (__main__.ArchiveTests) ... ok
+test_ownership_affects_tree_digest (__main__.ArchiveTests) ... ok
+test_partial_stop_failure_resumes_only_original_unchanged_containers (__main__.ArchiveTests) ... ok
+test_paths_links_devices_and_headers (__main__.ArchiveTests) ... ok
+test_schedule_generation_is_private_and_never_installs (__main__.ArchiveTests) ... skipped 'root schedule generation tested in isolated Linux container'
+test_sigterm_cancellation_runs_the_source_recovery (__main__.ArchiveTests) ... ok
+test_two_container_export_restore_ownership_and_no_source_mutation (__main__.DockerTests) ... ok
+test_actual_http_signature_streaming_readback_and_no_overwrite (__main__.S3Tests) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 23.666s
+
+OK (skipped=1)

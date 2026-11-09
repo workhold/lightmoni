@@ -19,6 +19,7 @@ import type { Agent, Machine, Resource, ResourceKind } from "./model";
 import ClusterFields, {ApplicationPlacement, ClusterManagementLink, type QuickCreate} from "./ClusterFields";
 import WebsiteFields from "./WebsiteFields";
 import RegistryCredentialSelect from './RegistryCredentialSelect';
+import CodeEditor from '../../shared/CodeEditor';
 
 type Props = {
   kind: ResourceKind;
@@ -758,13 +759,7 @@ export default function ResourceFields({
               label={t("Compose 配置（YAML）", "Compose configuration (YAML)")}
               rules={required}
             >
-              <Input.TextArea
-                rows={12}
-                className="lm-ops-code"
-                placeholder={
-                  'services:\n  web:\n    image: nginx:alpine\n    ports:\n      - "8080:80"'
-                }
-              />
+              <CodeEditor language="yaml" height={300} ariaLabel={t('Compose 配置（YAML）','Compose configuration (YAML)')}/>
             </Form.Item>
           ) : (
             <>

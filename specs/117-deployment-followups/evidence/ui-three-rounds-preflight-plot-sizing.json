@@ -1,0 +1,11 @@
+[
+  {
+    "round": "repeat-1",
+    "script": "web/src/app/verify-native-monitoring.mjs",
+    "started": "2026-11-09T14:37:54.694Z",
+    "ended": "2026-11-09T14:38:02.127Z",
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "node:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nExpectError: expect(received).toBeGreaterThan(expected)\n\nExpected: > 150\nReceived:   60\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate\n    at captureRawStack (/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/web/node_modules/playwright-core/lib/coreBundle.js:9282:17)\n    at callMatcherAsStep (/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/web/node_modules/playwright/lib/matchers/expect.js:13316:57)\n    at Object.toBeGreaterThan (/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/web/node_modules/playwright/lib/matchers/expect.js:13308:23)\n    at /Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/web/src/app/verify-native-monitoring.mjs:26:446 {\n  matcherResult: {\n    pass: false,\n    message: 'expect(received).toBeGreaterThan(expected)\\n' +\n      '\\n' +\n      'Expected: > 150\\n' +\n      'Received:   60\\n' +\n      '\\n' +\n      'Call Log:\\n' +\n      '- Timeout 5000ms exceeded while waiting on the predicate',\n    name: 'toBeGreaterThan'\n  }\n}\n\nNode.js v26.0.0\n"
+  }
+]

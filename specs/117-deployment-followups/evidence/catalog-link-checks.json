@@ -1,0 +1,735 @@
+{
+  "checked_on": "2026-11-09",
+  "method": "HEAD, redirects followed, no credentials",
+  "results": [
+    {
+      "id": "registry",
+      "field": "homepage",
+      "url": "https://distribution.github.io/distribution/",
+      "status": 200,
+      "resolved": "https://distribution.github.io/distribution/"
+    },
+    {
+      "id": "registry",
+      "field": "repository",
+      "url": "https://github.com/distribution/distribution",
+      "status": 200,
+      "resolved": "https://github.com/distribution/distribution"
+    },
+    {
+      "id": "registry",
+      "field": "documentation",
+      "url": "https://distribution.github.io/distribution/about/deploying/",
+      "status": 200,
+      "resolved": "https://distribution.github.io/distribution/about/deploying/"
+    },
+    {
+      "id": "mysql",
+      "field": "homepage",
+      "url": "https://www.mysql.com/",
+      "status": 403
+    },
+    {
+      "id": "mysql",
+      "field": "repository",
+      "url": "https://github.com/mysql/mysql-server",
+      "status": 200,
+      "resolved": "https://github.com/mysql/mysql-server"
+    },
+    {
+      "id": "mysql",
+      "field": "documentation",
+      "url": "https://dev.mysql.com/doc/refman/8.4/en/docker-mysql-getting-started.html",
+      "status": 403
+    },
+    {
+      "id": "openresty",
+      "field": "homepage",
+      "url": "https://openresty.org/",
+      "status": 200,
+      "resolved": "https://openresty.org/en/"
+    },
+    {
+      "id": "openresty",
+      "field": "repository",
+      "url": "https://github.com/openresty/openresty",
+      "status": 200,
+      "resolved": "https://github.com/openresty/openresty"
+    },
+    {
+      "id": "openresty",
+      "field": "documentation",
+      "url": "https://github.com/openresty/docker-openresty",
+      "status": 200,
+      "resolved": "https://github.com/openresty/docker-openresty"
+    },
+    {
+      "id": "redis",
+      "field": "homepage",
+      "url": "https://redis.io/",
+      "status": 200,
+      "resolved": "https://redis.io/"
+    },
+    {
+      "id": "redis",
+      "field": "repository",
+      "url": "https://github.com/redis/redis",
+      "status": 200,
+      "resolved": "https://github.com/redis/redis"
+    },
+    {
+      "id": "redis",
+      "field": "documentation",
+      "url": "https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/docker/",
+      "status": 200,
+      "resolved": "https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/docker/"
+    },
+    {
+      "id": "postgresql",
+      "field": "homepage",
+      "url": "https://www.postgresql.org/",
+      "status": 200,
+      "resolved": "https://www.postgresql.org/"
+    },
+    {
+      "id": "postgresql",
+      "field": "repository",
+      "url": "https://github.com/postgres/postgres",
+      "status": 200,
+      "resolved": "https://github.com/postgres/postgres"
+    },
+    {
+      "id": "postgresql",
+      "field": "documentation",
+      "url": "https://hub.docker.com/_/postgres",
+      "status": 200,
+      "resolved": "https://hub.docker.com/_/postgres"
+    },
+    {
+      "id": "mariadb",
+      "field": "homepage",
+      "url": "https://mariadb.org/",
+      "status": 200,
+      "resolved": "https://mariadb.org/"
+    },
+    {
+      "id": "mariadb",
+      "field": "repository",
+      "url": "https://github.com/MariaDB/server",
+      "status": 200,
+      "resolved": "https://github.com/MariaDB/server"
+    },
+    {
+      "id": "mariadb",
+      "field": "documentation",
+      "url": "https://hub.docker.com/_/mariadb",
+      "status": 200,
+      "resolved": "https://hub.docker.com/_/mariadb"
+    },
+    {
+      "id": "mongodb",
+      "field": "homepage",
+      "url": "https://www.mongodb.com/",
+      "status": 200,
+      "resolved": "https://www.mongodb.com/"
+    },
+    {
+      "id": "mongodb",
+      "field": "repository",
+      "url": "https://github.com/mongodb/mongo",
+      "status": 200,
+      "resolved": "https://github.com/mongodb/mongo"
+    },
+    {
+      "id": "mongodb",
+      "field": "documentation",
+      "url": "https://hub.docker.com/_/mongo",
+      "status": 200,
+      "resolved": "https://hub.docker.com/_/mongo"
+    },
+    {
+      "id": "clickhouse",
+      "field": "homepage",
+      "url": "https://clickhouse.com/",
+      "status": 200,
+      "resolved": "https://clickhouse.com/"
+    },
+    {
+      "id": "clickhouse",
+      "field": "repository",
+      "url": "https://github.com/ClickHouse/ClickHouse",
+      "status": 200,
+      "resolved": "https://github.com/ClickHouse/ClickHouse"
+    },
+    {
+      "id": "clickhouse",
+      "field": "documentation",
+      "url": "https://clickhouse.com/docs/install/docker",
+      "status": 308
+    },
+    {
+      "id": "elasticsearch",
+      "field": "homepage",
+      "url": "https://www.elastic.co/elasticsearch",
+      "status": 200,
+      "resolved": "https://www.elastic.co/elasticsearch"
+    },
+    {
+      "id": "elasticsearch",
+      "field": "repository",
+      "url": "https://github.com/elastic/elasticsearch",
+      "status": 200,
+      "resolved": "https://github.com/elastic/elasticsearch"
+    },
+    {
+      "id": "elasticsearch",
+      "field": "documentation",
+      "url": "https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-elasticsearch-docker-basic",
+      "status": 200,
+      "resolved": "https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-elasticsearch-docker-basic"
+    },
+    {
+      "id": "qdrant",
+      "field": "homepage",
+      "url": "https://qdrant.tech/",
+      "status": 200,
+      "resolved": "https://qdrant.tech/"
+    },
+    {
+      "id": "qdrant",
+      "field": "repository",
+      "url": "https://github.com/qdrant/qdrant",
+      "status": 200,
+      "resolved": "https://github.com/qdrant/qdrant"
+    },
+    {
+      "id": "qdrant",
+      "field": "documentation",
+      "url": "https://qdrant.tech/documentation/guides/installation/",
+      "status": 200,
+      "resolved": "https://qdrant.tech/documentation/operations/installation/"
+    },
+    {
+      "id": "influxdb",
+      "field": "homepage",
+      "url": "https://www.influxdata.com/",
+      "status": 200,
+      "resolved": "https://www.influxdata.com/"
+    },
+    {
+      "id": "influxdb",
+      "field": "repository",
+      "url": "https://github.com/influxdata/influxdb",
+      "status": 200,
+      "resolved": "https://github.com/influxdata/influxdb"
+    },
+    {
+      "id": "influxdb",
+      "field": "documentation",
+      "url": "https://docs.influxdata.com/influxdb/v2/install/use-docker-compose/",
+      "status": 200,
+      "resolved": "https://docs.influxdata.com/influxdb/v2/install/use-docker-compose/"
+    },
+    {
+      "id": "rabbitmq",
+      "field": "homepage",
+      "url": "https://www.rabbitmq.com/",
+      "status": 200,
+      "resolved": "https://www.rabbitmq.com/"
+    },
+    {
+      "id": "rabbitmq",
+      "field": "repository",
+      "url": "https://github.com/rabbitmq/rabbitmq-server",
+      "status": 200,
+      "resolved": "https://github.com/rabbitmq/rabbitmq-server"
+    },
+    {
+      "id": "rabbitmq",
+      "field": "documentation",
+      "url": "https://www.rabbitmq.com/docs/download",
+      "status": 200,
+      "resolved": "https://www.rabbitmq.com/docs/download"
+    },
+    {
+      "id": "nacos",
+      "field": "homepage",
+      "url": "https://nacos.io/",
+      "status": 403
+    },
+    {
+      "id": "nacos",
+      "field": "repository",
+      "url": "https://github.com/alibaba/nacos",
+      "status": 200,
+      "resolved": "https://github.com/alibaba/nacos"
+    },
+    {
+      "id": "nacos",
+      "field": "documentation",
+      "url": "https://nacos.io/en/docs/latest/quickstart/quick-start-docker/",
+      "status": 200,
+      "resolved": "https://nacos.io/en/docs/latest/quickstart/quick-start-docker/"
+    },
+    {
+      "id": "emqx",
+      "field": "homepage",
+      "url": "https://www.emqx.com/",
+      "status": 200,
+      "resolved": "https://www.emqx.com/en"
+    },
+    {
+      "id": "emqx",
+      "field": "repository",
+      "url": "https://github.com/emqx/emqx",
+      "status": 200,
+      "resolved": "https://github.com/emqx/emqx"
+    },
+    {
+      "id": "emqx",
+      "field": "documentation",
+      "url": "https://docs.emqx.com/en/emqx/latest/deploy/install-docker.html",
+      "status": 200,
+      "resolved": "https://docs.emqx.com/en/emqx/latest/get-started/deploy/install-docker.html"
+    },
+    {
+      "id": "memcached",
+      "field": "homepage",
+      "url": "https://memcached.org/",
+      "status": 200,
+      "resolved": "https://memcached.org/"
+    },
+    {
+      "id": "memcached",
+      "field": "repository",
+      "url": "https://github.com/memcached/memcached",
+      "status": 200,
+      "resolved": "https://github.com/memcached/memcached"
+    },
+    {
+      "id": "memcached",
+      "field": "documentation",
+      "url": "https://hub.docker.com/_/memcached",
+      "status": 200,
+      "resolved": "https://hub.docker.com/_/memcached"
+    },
+    {
+      "id": "kafka",
+      "field": "homepage",
+      "url": "https://kafka.apache.org/",
+      "status": 200,
+      "resolved": "https://kafka.apache.org/"
+    },
+    {
+      "id": "kafka",
+      "field": "repository",
+      "url": "https://github.com/apache/kafka",
+      "status": 200,
+      "resolved": "https://github.com/apache/kafka"
+    },
+    {
+      "id": "kafka",
+      "field": "documentation",
+      "url": "https://hub.docker.com/r/apache/kafka",
+      "status": 200,
+      "resolved": "https://hub.docker.com/r/apache/kafka"
+    },
+    {
+      "id": "rocketmq",
+      "field": "homepage",
+      "url": "https://rocketmq.apache.org/",
+      "status": 200,
+      "resolved": "https://rocketmq.apache.org/"
+    },
+    {
+      "id": "rocketmq",
+      "field": "repository",
+      "url": "https://github.com/apache/rocketmq",
+      "status": 200,
+      "resolved": "https://github.com/apache/rocketmq"
+    },
+    {
+      "id": "rocketmq",
+      "field": "documentation",
+      "url": "https://rocketmq.apache.org/docs/quickStart/02quickstartWithDocker/",
+      "status": 200,
+      "resolved": "https://rocketmq.apache.org/docs/quickStart/02quickstartWithDocker/"
+    },
+    {
+      "id": "gitea",
+      "field": "homepage",
+      "url": "https://about.gitea.com/",
+      "status": "unavailable",
+      "reason": "URLError"
+    },
+    {
+      "id": "gitea",
+      "field": "repository",
+      "url": "https://github.com/go-gitea/gitea",
+      "status": "unavailable",
+      "reason": "URLError"
+    },
+    {
+      "id": "gitea",
+      "field": "documentation",
+      "url": "https://docs.gitea.com/installation/install-with-docker",
+      "status": 308
+    },
+    {
+      "id": "jenkins",
+      "field": "homepage",
+      "url": "https://www.jenkins.io/",
+      "status": 200,
+      "resolved": "https://www.jenkins.io/"
+    },
+    {
+      "id": "jenkins",
+      "field": "repository",
+      "url": "https://github.com/jenkinsci/jenkins",
+      "status": "unavailable",
+      "reason": "URLError"
+    },
+    {
+      "id": "jenkins",
+      "field": "documentation",
+      "url": "https://www.jenkins.io/doc/book/installing/docker/",
+      "status": 200,
+      "resolved": "https://www.jenkins.io/doc/book/installing/docker/"
+    },
+    {
+      "id": "gitlab",
+      "field": "homepage",
+      "url": "https://about.gitlab.com/",
+      "status": 200,
+      "resolved": "https://about.gitlab.com/"
+    },
+    {
+      "id": "gitlab",
+      "field": "repository",
+      "url": "https://gitlab.com/gitlab-org/gitlab",
+      "status": 200,
+      "resolved": "https://gitlab.com/gitlab-org/gitlab"
+    },
+    {
+      "id": "gitlab",
+      "field": "documentation",
+      "url": "https://docs.gitlab.com/install/docker/installation/",
+      "status": 200,
+      "resolved": "https://docs.gitlab.com/install/docker/installation/"
+    },
+    {
+      "id": "nexus",
+      "field": "homepage",
+      "url": "https://www.sonatype.com/products/sonatype-nexus-repository",
+      "status": 200,
+      "resolved": "https://www.sonatype.com/products/sonatype-nexus-repository"
+    },
+    {
+      "id": "nexus",
+      "field": "repository",
+      "url": "https://github.com/sonatype/nexus-public",
+      "status": 200,
+      "resolved": "https://github.com/sonatype/nexus-public"
+    },
+    {
+      "id": "nexus",
+      "field": "documentation",
+      "url": "https://github.com/sonatype/docker-nexus3",
+      "status": 200,
+      "resolved": "https://github.com/sonatype/docker-nexus3"
+    },
+    {
+      "id": "sonarqube",
+      "field": "homepage",
+      "url": "https://www.sonarsource.com/products/sonarqube/",
+      "status": 200,
+      "resolved": "https://www.sonarsource.com/products/sonarqube/"
+    },
+    {
+      "id": "sonarqube",
+      "field": "repository",
+      "url": "https://github.com/SonarSource/sonarqube",
+      "status": 200,
+      "resolved": "https://github.com/SonarSource/sonarqube"
+    },
+    {
+      "id": "sonarqube",
+      "field": "documentation",
+      "url": "https://docs.sonarsource.com/sonarqube-community-build/server-installation/from-docker-image/starting-sonarqube-container",
+      "status": 200,
+      "resolved": "https://docs.sonarsource.com/sonarqube-community-build/server-installation/from-docker-image/set-up-and-start-container"
+    },
+    {
+      "id": "harbor",
+      "field": "homepage",
+      "url": "https://goharbor.io/",
+      "status": 200,
+      "resolved": "https://goharbor.io/"
+    },
+    {
+      "id": "harbor",
+      "field": "repository",
+      "url": "https://github.com/goharbor/harbor",
+      "status": 200,
+      "resolved": "https://github.com/goharbor/harbor"
+    },
+    {
+      "id": "harbor",
+      "field": "documentation",
+      "url": "https://goharbor.io/docs/2.14.0/install-config/",
+      "status": 200,
+      "resolved": "https://goharbor.io/docs/2.14.0/install-config/"
+    },
+    {
+      "id": "ollama",
+      "field": "homepage",
+      "url": "https://ollama.com/",
+      "status": 200,
+      "resolved": "https://ollama.com/"
+    },
+    {
+      "id": "ollama",
+      "field": "repository",
+      "url": "https://github.com/ollama/ollama",
+      "status": 200,
+      "resolved": "https://github.com/ollama/ollama"
+    },
+    {
+      "id": "ollama",
+      "field": "documentation",
+      "url": "https://docs.ollama.com/docker",
+      "status": 200,
+      "resolved": "https://docs.ollama.com/docker"
+    },
+    {
+      "id": "openwebui",
+      "field": "homepage",
+      "url": "https://openwebui.com/",
+      "status": 200,
+      "resolved": "https://openwebui.com/"
+    },
+    {
+      "id": "openwebui",
+      "field": "repository",
+      "url": "https://github.com/open-webui/open-webui",
+      "status": 200,
+      "resolved": "https://github.com/open-webui/open-webui"
+    },
+    {
+      "id": "openwebui",
+      "field": "documentation",
+      "url": "https://docs.openwebui.com/getting-started/quick-start/",
+      "status": 200,
+      "resolved": "https://docs.openwebui.com/getting-started/quick-start/"
+    },
+    {
+      "id": "maxkb",
+      "field": "homepage",
+      "url": "https://maxkb.cn/",
+      "status": 200,
+      "resolved": "https://maxkb.cn/"
+    },
+    {
+      "id": "maxkb",
+      "field": "repository",
+      "url": "https://github.com/1Panel-dev/MaxKB",
+      "status": 200,
+      "resolved": "https://github.com/1Panel-dev/MaxKB"
+    },
+    {
+      "id": "maxkb",
+      "field": "documentation",
+      "url": "https://github.com/1Panel-dev/MaxKB",
+      "status": 200,
+      "resolved": "https://github.com/1Panel-dev/MaxKB"
+    },
+    {
+      "id": "anythingllm",
+      "field": "homepage",
+      "url": "https://anythingllm.com/",
+      "status": 200,
+      "resolved": "https://anythingllm.com/"
+    },
+    {
+      "id": "anythingllm",
+      "field": "repository",
+      "url": "https://github.com/Mintplex-Labs/anything-llm",
+      "status": 200,
+      "resolved": "https://github.com/Mintplex-Labs/anything-llm"
+    },
+    {
+      "id": "anythingllm",
+      "field": "documentation",
+      "url": "https://docs.anythingllm.com/installation-docker/overview",
+      "status": 200,
+      "resolved": "https://docs.anythingllm.com/installation-docker/overview"
+    },
+    {
+      "id": "vllm",
+      "field": "homepage",
+      "url": "https://vllm.ai/",
+      "status": 200,
+      "resolved": "https://vllm.ai/"
+    },
+    {
+      "id": "vllm",
+      "field": "repository",
+      "url": "https://github.com/vllm-project/vllm",
+      "status": 200,
+      "resolved": "https://github.com/vllm-project/vllm"
+    },
+    {
+      "id": "vllm",
+      "field": "documentation",
+      "url": "https://docs.vllm.ai/en/latest/deployment/docker/",
+      "status": 200,
+      "resolved": "https://docs.vllm.ai/en/latest/deployment/docker/"
+    },
+    {
+      "id": "dify",
+      "field": "homepage",
+      "url": "https://dify.ai/",
+      "status": 200,
+      "resolved": "https://dify.ai/"
+    },
+    {
+      "id": "dify",
+      "field": "repository",
+      "url": "https://github.com/langgenius/dify",
+      "status": 200,
+      "resolved": "https://github.com/langgenius/dify"
+    },
+    {
+      "id": "dify",
+      "field": "documentation",
+      "url": "https://docs.dify.ai/en/self-host/quick-start/docker-compose",
+      "status": 308
+    },
+    {
+      "id": "fastgpt",
+      "field": "homepage",
+      "url": "https://fastgpt.io/",
+      "status": 200,
+      "resolved": "https://fastgpt.io/"
+    },
+    {
+      "id": "fastgpt",
+      "field": "repository",
+      "url": "https://github.com/labring/FastGPT",
+      "status": 200,
+      "resolved": "https://github.com/labring/FastGPT"
+    },
+    {
+      "id": "fastgpt",
+      "field": "documentation",
+      "url": "https://doc.fastgpt.io/docs/self-host/deploy/docker",
+      "status": 200,
+      "resolved": "https://doc.fastgpt.io/zh-CN/self-host/deploy/docker"
+    },
+    {
+      "id": "dbx",
+      "field": "homepage",
+      "url": "https://dbxio.com/",
+      "status": 200,
+      "resolved": "https://dbxio.com/cn"
+    },
+    {
+      "id": "dbx",
+      "field": "repository",
+      "url": "https://github.com/t8y2/dbx",
+      "status": 200,
+      "resolved": "https://github.com/t8y2/dbx"
+    },
+    {
+      "id": "dbx",
+      "field": "documentation",
+      "url": "https://dbxio.com/en/docs/getting-started",
+      "status": 200,
+      "resolved": "https://dbxio.com/en/docs/getting-started"
+    },
+    {
+      "id": "meilisearch",
+      "field": "homepage",
+      "url": "https://www.meilisearch.com/",
+      "status": 200,
+      "resolved": "https://www.meilisearch.com/"
+    },
+    {
+      "id": "meilisearch",
+      "field": "repository",
+      "url": "https://github.com/meilisearch/meilisearch",
+      "status": 200,
+      "resolved": "https://github.com/meilisearch/meilisearch"
+    },
+    {
+      "id": "meilisearch",
+      "field": "documentation",
+      "url": "https://www.meilisearch.com/docs/resources/self_hosting/getting_started/docker",
+      "status": 200,
+      "resolved": "https://www.meilisearch.com/docs/resources/self_hosting/getting_started/docker"
+    },
+    {
+      "id": "searxng",
+      "field": "homepage",
+      "url": "https://docs.searxng.org/",
+      "status": 200,
+      "resolved": "https://docs.searxng.org/"
+    },
+    {
+      "id": "searxng",
+      "field": "repository",
+      "url": "https://github.com/searxng/searxng",
+      "status": 200,
+      "resolved": "https://github.com/searxng/searxng"
+    },
+    {
+      "id": "searxng",
+      "field": "documentation",
+      "url": "https://docs.searxng.org/admin/installation-docker.html",
+      "status": 200,
+      "resolved": "https://docs.searxng.org/admin/installation-docker.html"
+    },
+    {
+      "id": "rustfs",
+      "field": "homepage",
+      "url": "https://rustfs.com/",
+      "status": 200,
+      "resolved": "https://rustfs.com/"
+    },
+    {
+      "id": "rustfs",
+      "field": "repository",
+      "url": "https://github.com/rustfs/rustfs",
+      "status": 200,
+      "resolved": "https://github.com/rustfs/rustfs"
+    },
+    {
+      "id": "rustfs",
+      "field": "documentation",
+      "url": "https://docs.rustfs.com/en/installation/container",
+      "status": 200,
+      "resolved": "https://docs.rustfs.com/en/installation/container"
+    },
+    {
+      "id": "firecrawl",
+      "field": "homepage",
+      "url": "https://www.firecrawl.dev/",
+      "status": 200,
+      "resolved": "https://www.firecrawl.dev/"
+    },
+    {
+      "id": "firecrawl",
+      "field": "repository",
+      "url": "https://github.com/firecrawl/firecrawl",
+      "status": 200,
+      "resolved": "https://github.com/firecrawl/firecrawl"
+    },
+    {
+      "id": "firecrawl",
+      "field": "documentation",
+      "url": "https://docs.firecrawl.dev/contributing/self-host",
+      "status": 200,
+      "resolved": "https://docs.firecrawl.dev/contributing/self-host"
+    }
+  ]
+}

@@ -1,0 +1,111 @@
+{
+  "passed": true,
+  "rounds": [
+    {
+      "round": 1,
+      "suites": [
+        {
+          "suite": "native-monitoring",
+          "passed": true,
+          "report": "main-agent-ui/native-monitoring/parent-1-report.json"
+        },
+        {
+          "suite": "log-performance",
+          "passed": true,
+          "report": "main-agent-ui/log-performance/parent-1-report.json"
+        },
+        {
+          "suite": "grafana-parity",
+          "passed": true,
+          "report": "main-agent-ui/grafana-parity/parent-1-report.json"
+        },
+        {
+          "suite": "grafana-deep-parity",
+          "passed": true,
+          "report": "main-agent-ui/grafana-deep-parity/parent-1-report.json"
+        }
+      ],
+      "log": {
+        "load_ms": 3244,
+        "rendered_time_cells": 17,
+        "load_max_long_task_ms": 202,
+        "keyword_long_tasks_ms": [
+          65
+        ],
+        "keyword_extra_attribute_parses": 0,
+        "keyword_time_cell_renders": 0
+      }
+    },
+    {
+      "round": 2,
+      "suites": [
+        {
+          "suite": "native-monitoring",
+          "passed": true,
+          "report": "main-agent-ui/native-monitoring/parent-2-report.json"
+        },
+        {
+          "suite": "log-performance",
+          "passed": true,
+          "report": "main-agent-ui/log-performance/parent-2-report.json"
+        },
+        {
+          "suite": "grafana-parity",
+          "passed": true,
+          "report": "main-agent-ui/grafana-parity/parent-2-report.json"
+        },
+        {
+          "suite": "grafana-deep-parity",
+          "passed": true,
+          "report": "main-agent-ui/grafana-deep-parity/parent-2-report.json"
+        }
+      ],
+      "log": {
+        "load_ms": 2989,
+        "rendered_time_cells": 17,
+        "load_max_long_task_ms": 172,
+        "keyword_long_tasks_ms": [
+          93,
+          80
+        ],
+        "keyword_extra_attribute_parses": 0,
+        "keyword_time_cell_renders": 0
+      }
+    },
+    {
+      "round": 3,
+      "suites": [
+        {
+          "suite": "native-monitoring",
+          "passed": true,
+          "report": "main-agent-ui/native-monitoring/parent-3-report.json"
+        },
+        {
+          "suite": "log-performance",
+          "passed": true,
+          "report": "main-agent-ui/log-performance/parent-3-report.json"
+        },
+        {
+          "suite": "grafana-parity",
+          "passed": true,
+          "report": "main-agent-ui/grafana-parity/parent-3-report.json"
+        },
+        {
+          "suite": "grafana-deep-parity",
+          "passed": true,
+          "report": "main-agent-ui/grafana-deep-parity/parent-3-report.json"
+        }
+      ],
+      "log": {
+        "load_ms": 3301,
+        "rendered_time_cells": 17,
+        "load_max_long_task_ms": 180,
+        "keyword_long_tasks_ms": [],
+        "keyword_extra_attribute_parses": 0,
+        "keyword_time_cell_renders": 0
+      }
+    }
+  ],
+  "production_writes": false,
+  "cleanup": "Isolated center/Vite/ClickHouse stopped and temporary state removed."
+}

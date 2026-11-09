@@ -1,0 +1,54 @@
+{
+  "backend": "Disposable real OpenSSH/SFTP and SQLite; Vite source UI. No production writes.",
+  "runs": [
+    {
+      "run": 1,
+      "checks": [
+        "create file, keyboard save, exact HTTP/SFTP readback and YAML syntax colors",
+        "rename refuses overwrite, retains failed input and publishes verified new name",
+        "chmod verified in listing; cancelled deletion sends no mutation; confirmed deletion read back",
+        "exclusive directory creation and explicitly nonrecursive empty-directory removal",
+        "after real remote creation, injected response loss retains input and blocks retry until directory inspection",
+        "Chinese/English, light/dark, 390px and 200% equivalent 720px layout",
+        "actual ResourceFields YAML keeps exact string/Form binding and inherits disabled state"
+      ],
+      "errors": [],
+      "external": [],
+      "mutation_count": 9,
+      "video": "/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence/files-video/page@139ce93c8da8eea940e4217ba0090b9f.webm"
+    },
+    {
+      "run": 2,
+      "checks": [
+        "create file, keyboard save, exact HTTP/SFTP readback and YAML syntax colors",
+        "rename refuses overwrite, retains failed input and publishes verified new name",
+        "chmod verified in listing; cancelled deletion sends no mutation; confirmed deletion read back",
+        "exclusive directory creation and explicitly nonrecursive empty-directory removal",
+        "after real remote creation, injected response loss retains input and blocks retry until directory inspection",
+        "Chinese/English, light/dark, 390px and 200% equivalent 720px layout",
+        "actual ResourceFields YAML keeps exact string/Form binding and inherits disabled state"
+      ],
+      "errors": [],
+      "external": [],
+      "mutation_count": 9,
+      "video": "/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence/files-video/page@4fa5cfde2f12b088bc125ee9a12d7594.webm"
+    },
+    {
+      "run": 3,
+      "checks": [
+        "create file, keyboard save, exact HTTP/SFTP readback and YAML syntax colors",
+        "rename refuses overwrite, retains failed input and publishes verified new name",
+        "chmod verified in listing; cancelled deletion sends no mutation; confirmed deletion read back",
+        "exclusive directory creation and explicitly nonrecursive empty-directory removal",
+        "after real remote creation, injected response loss retains input and blocks retry until directory inspection",
+        "Chinese/English, light/dark, 390px and 200% equivalent 720px layout",
+        "actual ResourceFields YAML keeps exact string/Form binding and inherits disabled state"
+      ],
+      "errors": [],
+      "external": [],
+      "mutation_count": 9,
+      "video": "/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence/files-video/page@3e14a546bdeced9462dd200d45dbb160.webm"
+    }
+  ],
+  "media": "/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence"
+}

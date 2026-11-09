@@ -4,6 +4,7 @@ require 'securerandom'
 require 'time'
 require 'monitor'
 require 'timeout'
+require 'socket'
 
 module LightMoni
   MAX_INT = (1 << 63) - 1
@@ -63,7 +64,7 @@ module LightMoni
     end
   end
   def self.environment_resource
-    {'LIGHTMONI_MACHINE_NAME'=>'host.name','LIGHTMONI_MACHINE_ID'=>'lightmoni.machine_id','LIGHTMONI_HOST_ID'=>'host.id','LIGHTMONI_AGENT_ID'=>'lightmoni.agent_id','LIGHTMONI_APPLICATION_ID'=>'lightmoni.application_id','LIGHTMONI_CLUSTER_ID'=>'lightmoni.cluster_id','LIGHTMONI_DEPLOYMENT_ID'=>'lightmoni.deployment_id'}.each_with_object({}) do |(name,attribute),values|
+    {'LIGHTMONI_MACHINE_NAME'=>'host.name','LIGHTMONI_MACHINE_ID'=>'lightmoni.machine_id','LIGHTMONI_HOST_ID'=>'host.id','LIGHTMONI_AGENT_ID'=>'lightmoni.agent_id','LIGHTMONI_APPLICATION_ID'=>'lightmoni.application_id','LIGHTMONI_CLUSTER_ID'=>'lightmoni.cluster_id','LIGHTMONI_DEPLOYMENT_ID'=>'lightmoni.deployment_id'}.each_with_object({'host.name'=>Socket.gethostname}) do |(name,attribute),values|
       value=ENV[name];values[attribute]=value if value && !value.empty?
     end
   end

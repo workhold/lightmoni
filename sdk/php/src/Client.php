@@ -6,7 +6,7 @@ final class Protocol {
     public static function env(string $name): string { $v=getenv($name);return $v===false?'':$v; }
     public static function resourceValues(string $service,array $overrides,?string $instance): array {
         if(array_key_exists('service.name',$overrides)||array_key_exists('service.instance.id',$overrides))throw new \InvalidArgumentException('configure service identity separately');
-        $values=[];
+        $hostname=gethostname();$values=$hostname===false?[]:['host.name'=>$hostname];
         foreach(['LIGHTMONI_MACHINE_NAME'=>'host.name','LIGHTMONI_MACHINE_ID'=>'lightmoni.machine_id','LIGHTMONI_HOST_ID'=>'host.id','LIGHTMONI_AGENT_ID'=>'lightmoni.agent_id','LIGHTMONI_APPLICATION_ID'=>'lightmoni.application_id','LIGHTMONI_CLUSTER_ID'=>'lightmoni.cluster_id','LIGHTMONI_DEPLOYMENT_ID'=>'lightmoni.deployment_id'] as $name=>$attribute){$value=self::env($name);if($value!=='')$values[$attribute]=$value;}
         $values=array_replace($values,$overrides);
         if($instance===null){$instance=self::env('LIGHTMONI_INSTANCE_ID');if($instance==='')$instance=self::uuid();}

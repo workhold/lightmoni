@@ -1,5 +1,6 @@
 import os
 import ssl
+import socket
 from .distribution import Distribution
 """LightMoni native Python SDK. Recording never performs network I/O."""
 import bisect
@@ -444,7 +445,7 @@ class Client:
         env = os.environ.get('LIGHTMONI_ENV') if env is None else env
         service_version = os.environ.get('LIGHTMONI_SERVICE_VERSION') if service_version is None else service_version
         fields = {'LIGHTMONI_MACHINE_NAME': 'host.name', 'LIGHTMONI_MACHINE_ID': 'lightmoni.machine_id', 'LIGHTMONI_HOST_ID': 'host.id', 'LIGHTMONI_AGENT_ID': 'lightmoni.agent_id', 'LIGHTMONI_APPLICATION_ID': 'lightmoni.application_id', 'LIGHTMONI_CLUSTER_ID': 'lightmoni.cluster_id', 'LIGHTMONI_DEPLOYMENT_ID': 'lightmoni.deployment_id'}
-        resource = {**{key: os.environ[var] for var, key in fields.items() if os.environ.get(var)}, **dict(resource or {})}
+        resource = {'host.name': socket.gethostname(), **{key: os.environ[var] for var, key in fields.items() if os.environ.get(var)}, **dict(resource or {})}
         for value in (env, service_version):
             if value is not None and (not isinstance(value, str) or not value.strip() or len(value.encode()) > 128):
                 raise ValueError("invalid resource identity")

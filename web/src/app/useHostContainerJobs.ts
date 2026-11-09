@@ -24,9 +24,9 @@ export function useHostContainerJobs(machineID:string){
   if(pending.current||uncertain)return;pending.current=true;setBusy(true);setError('');const abort=new AbortController();controller.current=abort;
   const intent={requestID:crypto.randomUUID(),action,jobID:undefined as string|undefined};let submitted=false;
   try{
-   submitted=true;let job=await api<HostContainerJob>(path,{method:'POST',signal:abort.signal,body:JSON.stringify({request_id:intent.requestID,confirmed:!['inspect','images'].includes(action.operation),action})});
+   submitted=true;let job=await api<HostContainerJob>(path,{method:'POST',signal:abort.signal,body:JSON.stringify({request_id:intent.requestID,confirmed:!['inspect','inspect_many','images'].includes(action.operation),action})});
    if(typeof job.id!=='string'||!job.id||job.request_id!==intent.requestID||canonicalHostAction(job.action)!==canonicalHostAction(action))throw Error('host_docker_receipt_mismatch');intent.jobID=job.id;if(alive.current)merge(job);
-   job=await poll(job,abort.signal);if(job.state!=='succeeded')throw Object.assign(Error(job.code||job.state),{completed:true});return job;
+   job=await poll(job,abort.signal);if(job.state!=='succeeded'){if(alive.current)setError(job.code||job.state);return job}return job;
   }catch(e){if(alive.current&&!abort.signal.aborted){setError(e instanceof Error?e.message:String(e));if(submitted&&!(e instanceof ApiError&&e.status<500)&&!(e as {completed?:boolean})?.completed)setUncertain(intent)}}
   finally{pending.current=false;if(alive.current)setBusy(false)}
  };

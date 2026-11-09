@@ -31,6 +31,8 @@ export interface CatalogTemplate {
   parameters: CatalogParameter[];
   spec: Input;
   homepage?: string;
+  repository?: string;
+  documentation?: string;
   notes?: string;
   notes_en?: string;
   resources?: { cpu: number; memory_mb: number };

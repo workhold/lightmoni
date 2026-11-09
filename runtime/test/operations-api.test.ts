@@ -34,10 +34,17 @@ async function fixture(t: any) {
   const server = createServer((req, res) => void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}})); server.listen(0,"127.0.0.1"); await once(server,"listening");
   t.after(() => { ops.close?.(); jobs.close?.(); server.close(); db.close(); });
   const base = "http://127.0.0.1:" + (server.address() as any).port;
-  const req = async (path: string, method="GET", body?: any, headers: Record<string,string> = {}) => { const r = await fetch(base + "/api/v1" + path,{method,headers:{"content-type":"application/json",...headers},body:body === undefined ? undefined : JSON.stringify(body)}); return {status:r.status,body:await r.text().then(text=>text?JSON.parse(text):{}),headers:r.headers}; };
+  const req = async (path: string, method="GET", body?: any, headers: Record<string,string> = {}) => { const r = await fetch(base + "/api/v1" + path,{method,headers:{"content-type":"application/json",cookie:'lm_session=human',...headers},body:body === undefined ? undefined : JSON.stringify(body)}); return {status:r.status,body:await r.text().then(text=>text?JSON.parse(text):{}),headers:r.headers}; };
   const create = () => req("/operations/resources","POST",{kind:"certificate",name:"HTTPS",agent_id:"agent-1",config:{domains:["example.com"],private_key_pem:"SECRET-PRIVATE-MATERIAL"}});
   return { db, ops, jobs, req, create, base, advance: (ms:number) => { now=new Date(now.getTime()+ms); } };
 }
+
+test('operation writes require a human administrator cookie and reject API credentials',async t=>{
+  const f=await fixture(t),input={kind:'certificate',name:'HTTPS',agent_id:'agent-1',config:{domains:['example.com']}};
+  assert.equal((await f.req('/operations/resources','POST',input,{cookie:''})).status,403);
+  assert.equal((await f.req('/operations/resources','POST',input,{authorization:'Bearer api-token'})).status,403);
+  assert.equal(f.db.all('SELECT * FROM ops_resources').length,0);
+});
 
 test("operations encrypt configuration and payload; ordinary control never reads private material",async t=>{
   const f=await fixture(t), created=await f.create(); assert.equal(created.status,201); assert.equal(JSON.stringify(created.body).includes("SECRET-PRIVATE"),false);

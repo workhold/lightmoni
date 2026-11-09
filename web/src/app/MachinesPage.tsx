@@ -10,11 +10,11 @@ import HostFilesDialog from "./HostFilesDialog";
 import SystemLogDrawer from "./ops/SystemLogDrawer";
 import {useI18n} from '../shared/i18n';
 import {type ComponentProps,useCallback,useEffect,useRef,useState} from 'react';
-import {ContainerOutlined,FolderOpenOutlined,CloudDownloadOutlined,CodeOutlined,ApiOutlined,MoreOutlined,DownOutlined,FileTextOutlined,HistoryOutlined,InfoCircleOutlined,KeyOutlined,PlusOutlined,ProfileOutlined,ReloadOutlined,SafetyCertificateOutlined,SearchOutlined} from '@ant-design/icons';
+import {ContainerOutlined,FolderOpenOutlined,CloudDownloadOutlined,CodeOutlined,ApiOutlined,MoreOutlined,DownOutlined,FileTextOutlined,HistoryOutlined,InfoCircleOutlined,KeyOutlined,PlusOutlined,ProfileOutlined,ReloadOutlined,SafetyCertificateOutlined,SearchOutlined,LineChartOutlined} from '@ant-design/icons';
 import {Alert,Button,Descriptions,Empty,Form,Input,InputNumber,Modal,Popconfirm,Select,Space,Table,Tag,Typography,App,Checkbox,Dropdown,Tooltip,Tabs} from '../shared/ui';
 import {api,ApiError} from '../shared/api';
 import type {User} from '../shared/types';
-import {useSearchParams} from 'react-router-dom';
+import {useSearchParams,useNavigate} from 'react-router-dom';
 import SSHCheckSummary,{type SSHCheckResult} from '../shared/SSHCheckSummary';
 import './machines.css';
 import MachineTerminalDialog from './MachineTerminalDialog';
@@ -42,7 +42,7 @@ import MachineAgentRolloutDialog,{type AgentRolloutTarget} from './MachineAgentR
 import {shortIdentity,type AgentInstalledRelease,type AgentUpdate} from './agent-update-model';
 
 type Capability={available:boolean;reason:string};
-type Machine={agent_operation?:AgentOperationRecord|null;docker_environment?:{state:string;code:string;observed_at:string};agent_release?:AgentInstalledRelease;agent_update?:{state:'current'|'update_available'|'unknown'|'not_installed'|'in_progress';target_sha256?:string;target_version?:string;last_status?:string;last_operation_id?:string};default_account_id?:string;accounts?:SSHAccount[];network?:HostNetwork;label_ids?:string[];labels?:{id:string;name:string}[];observed_hostname?:string;id:string;name:string;address:string;port:number;connection_method:string;host_key_fingerprint:string;host_key_public_key?:string;host_key_observed_at?:string;host_key_status:string;platform:string;arch:string;agent_id:string;agent_status:string;credential_count:number;active_credential_count:number;active_ssh_credential_count:number;active_ssh_key_count:number;active_reusable_ssh_credential_count?:number;ssh_recovery_available:boolean;capabilities:{terminal:Capability;ssh_check:Capability;deploy_agent:Capability;uninstall_agent?:Capability;recovery_uninstall_agent?:Capability;update_agent?:Capability;rollback_agent?:Capability};last_deployment_status:string;last_uninstallation_status?:string;updated_at:string;created_at:string};
+type Machine={capacity?:{cpu_count:number|null;memory_total_mb:number|null;observed_at:string;stale:boolean};agent_operation?:AgentOperationRecord|null;docker_environment?:{state:string;code:string;observed_at:string};agent_release?:AgentInstalledRelease;agent_update?:{state:'current'|'update_available'|'unknown'|'not_installed'|'in_progress';target_sha256?:string;target_version?:string;last_status?:string;last_operation_id?:string};default_account_id?:string;accounts?:SSHAccount[];network?:HostNetwork;label_ids?:string[];labels?:{id:string;name:string}[];observed_hostname?:string;id:string;name:string;address:string;port:number;connection_method:string;host_key_fingerprint:string;host_key_public_key?:string;host_key_observed_at?:string;host_key_status:string;platform:string;arch:string;agent_id:string;agent_status:string;credential_count:number;active_credential_count:number;active_ssh_credential_count:number;active_ssh_key_count:number;active_reusable_ssh_credential_count?:number;ssh_recovery_available:boolean;capabilities:{terminal:Capability;ssh_check:Capability;deploy_agent:Capability;uninstall_agent?:Capability;recovery_uninstall_agent?:Capability;update_agent?:Capability;rollback_agent?:Capability};last_deployment_status:string;last_uninstallation_status?:string;updated_at:string;created_at:string};
 type FleetRow=Machine&{node?:AgentItem};
 type Credential={id:string;account_id:string;username:string;account_revision:number;name?:string;is_default?:boolean;connection_credential_id?:string;reused?:boolean;method:string;secret_fingerprint:string;retention:string;policy_source:string;secret_cleared_at?:string;clear_reason?:string;created_at:string;expires_at:string;revoked_at?:string;last_used_at:string;created_by:string};
 type Deployment={id:string;machine_id:string;credential_id:string;status:string;version:string;arch:string;initial_label_id:string;plan:any;receipt:any;error:string;created_at:string;approved_at:string;started_at:string;finished_at:string;execution_stage?:string;resolved_at?:string;resolved_by?:string;resolution_reason?:string};
@@ -57,6 +57,7 @@ function HostActionMenu(props:ComponentProps<typeof Dropdown>){
 
 export default function MachinesPage({user,embedded=false}:{user:User;embedded?:boolean}){
  const {t,language:uiLanguage}=useI18n();
+ const navigate=useNavigate();
 const errorText=(e:unknown)=>e instanceof Error?e.message:t("操作失败","Operation failed");
 const lifecycleErrorText=(e:unknown)=>({
  "此主机有终端、检查或部署正在进行，请先结束后重试":t("此主机有终端、检查或部署正在进行，请先结束后重试","This host has an active terminal, check, or deployment. Finish it and retry."),
@@ -430,6 +431,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   const menuItems=maintenance.map(item=>'disabled' in item&&item.disabled?{...item,label:<span className="lm-host-menu-disabled">{item.label}<small>{updateCapabilityReason(item.key==='upgrade'?cap.update_agent?.reason||'':item.key==='rollback'?cap.rollback_agent?.reason||'':item.key==='deploy'?cap.deploy_agent?.reason||'':item.key==='uninstall'?cap.uninstall_agent?.reason||'':item.key==='recovery'?cap.recovery_uninstall_agent?.reason||'':'agent_not_linked')}</small></span>}:item);
   return <div className="lm-host-row-actions">
    <div className="lm-host-action-grid">
+    <IconAction label={t('主机监控','Host monitoring')} icon={<LineChartOutlined aria-hidden/>} size="small" onClick={()=>navigate('/machines/'+encodeURIComponent(m.id)+'/monitoring')}/>
     <IconAction label={t('全部容器','All containers')} icon={<ContainerOutlined aria-hidden/>} size="small" onClick={()=>setHostContainers(m)}/>
     <IconAction label={t('文件管理','Files')} icon={<FolderOpenOutlined aria-hidden/>} size="small" onClick={()=>setHostFiles(m)}/>
     <IconAction hint={!cap.terminal?.available?t('登录终端','Open terminal')+' · '+capabilityReason(cap.terminal?.reason||''):undefined} label={t('登录终端','Open terminal')} icon={<CodeOutlined aria-hidden/>} size="small" disabled={!cap.terminal?.available} onClick={()=>void openTerminal(m)}/>
@@ -460,6 +462,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   </div>}
   <div className="lm-surface lm-host-list"><Table<FleetRow> rowKey="id" dataSource={rows} loading={loading} rowSelection={admin?{selectedRowKeys:selectedIDs,preserveSelectedRowKeys:true,columnWidth:44,onChange:keys=>{if(keys.length>50){void message.warning(t('每批最多选择 50 项','Select up to 50 targets per batch'));return}setSelectedIDs(keys.map(String))},getCheckboxProps:row=>({'aria-label':t(`选择 ${row.name}`,`Select ${row.name}`),disabled:!!batch||!!rollout})}:undefined} scroll={{x:1024}} pagination={{pageSize:10,hideOnSinglePage:true}} locale={{emptyText:<Empty description={hostQuery||group?t('没有匹配的主机','No matching hosts'):t('尚无主机','No hosts yet')}/>}} columns={[
    {title:t('主机','Host'),width:240,render:(_:unknown,m:FleetRow)=><div className="lm-host-overview">{admin?<Button type="link" className="lm-host-name" onClick={()=>void openDetail(m)}>{m.name}</Button>:<strong>{m.name}</strong>}<Typography.Text className="lm-host-ssh-copy" type="secondary" copyable={admin&&m.address?{text:sshEndpoint(m.address,m.port)}:false}>{admin?(m.address?sshEndpoint(m.address,m.port):t('SSH 未配置','SSH not configured')):t('主机 ID：','Host ID: ')+m.id}</Typography.Text><HostNetworkOverview network={m.network}/></div>},
+   {title:t('CPU / 内存','CPU / memory'),width:150,render:(_:unknown,m:FleetRow)=><div><div>{m.capacity?.cpu_count?t(`${m.capacity.cpu_count} 逻辑核`,`${m.capacity.cpu_count} logical CPUs`):t('CPU 未知','CPU unknown')}</div><div>{m.capacity?.memory_total_mb?`${(m.capacity.memory_total_mb/1024).toFixed(1)} GiB`:t('内存未知','Memory unknown')}</div>{m.capacity?.observed_at&&<Tooltip title={time(m.capacity.observed_at)}><Typography.Text type="secondary">{m.capacity.stale?t('观测已过期','Observation stale'):t('最近心跳','Latest heartbeat')}</Typography.Text></Tooltip>}</div>},
    {title:t('管理状态','Management status'),width:220,render:(_:unknown,m:FleetRow)=>renderChannels(m)},
    {title:'Agent',width:190,render:(_:unknown,m:FleetRow)=>renderRelease(m)},
    {title:t('主机标签','Host labels'),width:110,render:(_:unknown,m:FleetRow)=><Space wrap>{(m.label_ids??m.node?.label_ids??[]).map(id=><Tag key={id}>{labels.find(label=>label.id===id)?.name||id}</Tag>)}{!(m.label_ids??m.node?.label_ids??[]).length&&<Typography.Text type="secondary">{t('暂无标签','No labels')}</Typography.Text>}</Space>},

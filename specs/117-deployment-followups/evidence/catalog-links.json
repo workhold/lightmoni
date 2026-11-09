@@ -1,0 +1,212 @@
+[
+  {
+    "id": "registry",
+    "homepage": "https://distribution.github.io/distribution/",
+    "repository": "https://github.com/distribution/distribution",
+    "documentation": "https://distribution.github.io/distribution/about/deploying/"
+  },
+  {
+    "id": "mysql",
+    "homepage": "https://www.mysql.com/",
+    "repository": "https://github.com/mysql/mysql-server",
+    "documentation": "https://dev.mysql.com/doc/refman/8.4/en/docker-mysql-getting-started.html"
+  },
+  {
+    "id": "openresty",
+    "homepage": "https://openresty.org/",
+    "repository": "https://github.com/openresty/openresty",
+    "documentation": "https://github.com/openresty/docker-openresty"
+  },
+  {
+    "id": "redis",
+    "homepage": "https://redis.io/",
+    "repository": "https://github.com/redis/redis",
+    "documentation": "https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/docker/"
+  },
+  {
+    "id": "postgresql",
+    "homepage": "https://www.postgresql.org/",
+    "repository": "https://github.com/postgres/postgres",
+    "documentation": "https://hub.docker.com/_/postgres"
+  },
+  {
+    "id": "mariadb",
+    "homepage": "https://mariadb.org/",
+    "repository": "https://github.com/MariaDB/server",
+    "documentation": "https://hub.docker.com/_/mariadb"
+  },
+  {
+    "id": "mongodb",
+    "homepage": "https://www.mongodb.com/",
+    "repository": "https://github.com/mongodb/mongo",
+    "documentation": "https://hub.docker.com/_/mongo"
+  },
+  {
+    "id": "clickhouse",
+    "homepage": "https://clickhouse.com/",
+    "repository": "https://github.com/ClickHouse/ClickHouse",
+    "documentation": "https://clickhouse.com/docs/install/docker"
+  },
+  {
+    "id": "elasticsearch",
+    "homepage": "https://www.elastic.co/elasticsearch",
+    "repository": "https://github.com/elastic/elasticsearch",
+    "documentation": "https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-elasticsearch-docker-basic"
+  },
+  {
+    "id": "qdrant",
+    "homepage": "https://qdrant.tech/",
+    "repository": "https://github.com/qdrant/qdrant",
+    "documentation": "https://qdrant.tech/documentation/guides/installation/"
+  },
+  {
+    "id": "influxdb",
+    "homepage": "https://www.influxdata.com/",
+    "repository": "https://github.com/influxdata/influxdb",
+    "documentation": "https://docs.influxdata.com/influxdb/v2/install/use-docker-compose/"
+  },
+  {
+    "id": "rabbitmq",
+    "homepage": "https://www.rabbitmq.com/",
+    "repository": "https://github.com/rabbitmq/rabbitmq-server",
+    "documentation": "https://www.rabbitmq.com/docs/download"
+  },
+  {
+    "id": "nacos",
+    "homepage": "https://nacos.io/",
+    "repository": "https://github.com/alibaba/nacos",
+    "documentation": "https://nacos.io/en/docs/latest/quickstart/quick-start-docker/"
+  },
+  {
+    "id": "emqx",
+    "homepage": "https://www.emqx.com/",
+    "repository": "https://github.com/emqx/emqx",
+    "documentation": "https://docs.emqx.com/en/emqx/latest/deploy/install-docker.html"
+  },
+  {
+    "id": "memcached",
+    "homepage": "https://memcached.org/",
+    "repository": "https://github.com/memcached/memcached",
+    "documentation": "https://hub.docker.com/_/memcached"
+  },
+  {
+    "id": "kafka",
+    "homepage": "https://kafka.apache.org/",
+    "repository": "https://github.com/apache/kafka",
+    "documentation": "https://hub.docker.com/r/apache/kafka"
+  },
+  {
+    "id": "rocketmq",
+    "homepage": "https://rocketmq.apache.org/",
+    "repository": "https://github.com/apache/rocketmq",
+    "documentation": "https://rocketmq.apache.org/docs/quickStart/02quickstartWithDocker/"
+  },
+  {
+    "id": "gitea",
+    "homepage": "https://about.gitea.com/",
+    "repository": "https://github.com/go-gitea/gitea",
+    "documentation": "https://docs.gitea.com/installation/install-with-docker"
+  },
+  {
+    "id": "jenkins",
+    "homepage": "https://www.jenkins.io/",
+    "repository": "https://github.com/jenkinsci/jenkins",
+    "documentation": "https://www.jenkins.io/doc/book/installing/docker/"
+  },
+  {
+    "id": "gitlab",
+    "homepage": "https://about.gitlab.com/",
+    "repository": "https://gitlab.com/gitlab-org/gitlab",
+    "documentation": "https://docs.gitlab.com/install/docker/installation/"
+  },
+  {
+    "id": "nexus",
+    "homepage": "https://www.sonatype.com/products/sonatype-nexus-repository",
+    "repository": "https://github.com/sonatype/nexus-public",
+    "documentation": "https://github.com/sonatype/docker-nexus3"
+  },
+  {
+    "id": "sonarqube",
+    "homepage": "https://www.sonarsource.com/products/sonarqube/",
+    "repository": "https://github.com/SonarSource/sonarqube",
+    "documentation": "https://docs.sonarsource.com/sonarqube-community-build/server-installation/from-docker-image/starting-sonarqube-container"
+  },
+  {
+    "id": "harbor",
+    "homepage": "https://goharbor.io/",
+    "repository": "https://github.com/goharbor/harbor",
+    "documentation": "https://goharbor.io/docs/2.14.0/install-config/"
+  },
+  {
+    "id": "ollama",
+    "homepage": "https://ollama.com/",
+    "repository": "https://github.com/ollama/ollama",
+    "documentation": "https://docs.ollama.com/docker"
+  },
+  {
+    "id": "openwebui",
+    "homepage": "https://openwebui.com/",
+    "repository": "https://github.com/open-webui/open-webui",
+    "documentation": "https://docs.openwebui.com/getting-started/quick-start/"
+  },
+  {
+    "id": "maxkb",
+    "homepage": "https://maxkb.cn/",
+    "repository": "https://github.com/1Panel-dev/MaxKB",
+    "documentation": "https://github.com/1Panel-dev/MaxKB"
+  },
+  {
+    "id": "anythingllm",
+    "homepage": "https://anythingllm.com/",
+    "repository": "https://github.com/Mintplex-Labs/anything-llm",
+    "documentation": "https://docs.anythingllm.com/installation-docker/overview"
+  },
+  {
+    "id": "vllm",
+    "homepage": "https://vllm.ai/",
+    "repository": "https://github.com/vllm-project/vllm",
+    "documentation": "https://docs.vllm.ai/en/latest/deployment/docker/"
+  },
+  {
+    "id": "dify",
+    "homepage": "https://dify.ai/",
+    "repository": "https://github.com/langgenius/dify",
+    "documentation": "https://docs.dify.ai/en/self-host/quick-start/docker-compose"
+  },
+  {
+    "id": "fastgpt",
+    "homepage": "https://fastgpt.io/",
+    "repository": "https://github.com/labring/FastGPT",
+    "documentation": "https://doc.fastgpt.io/docs/self-host/deploy/docker"
+  },
+  {
+    "id": "dbx",
+    "homepage": "https://dbxio.com/",
+    "repository": "https://github.com/t8y2/dbx",
+    "documentation": "https://dbxio.com/en/docs/getting-started"
+  },
+  {
+    "id": "meilisearch",
+    "homepage": "https://www.meilisearch.com/",
+    "repository": "https://github.com/meilisearch/meilisearch",
+    "documentation": "https://www.meilisearch.com/docs/resources/self_hosting/getting_started/docker"
+  },
+  {
+    "id": "searxng",
+    "homepage": "https://docs.searxng.org/",
+    "repository": "https://github.com/searxng/searxng",
+    "documentation": "https://docs.searxng.org/admin/installation-docker.html"
+  },
+  {
+    "id": "rustfs",
+    "homepage": "https://rustfs.com/",
+    "repository": "https://github.com/rustfs/rustfs",
+    "documentation": "https://docs.rustfs.com/en/installation/container"
+  },
+  {
+    "id": "firecrawl",
+    "homepage": "https://www.firecrawl.dev/",
+    "repository": "https://github.com/firecrawl/firecrawl",
+    "documentation": "https://docs.firecrawl.dev/contributing/self-host"
+  }
+]

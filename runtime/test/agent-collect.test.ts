@@ -127,3 +127,12 @@ test("overlapping non-Linux matchers retain independent self-process CPU deltas"
   assert(f.metrics.filter(value => value.name === "process.matcher.running").every(value => value.value === 1));
   assert(f.states.every(value => value.message === "ok"));
 });
+
+
+test('host CPU collection includes the observed logical processor count',async t=>{
+ const f=fixture(t,process.platform);
+ await f.collector.collect({host_enabled:true,host_collectors:['cpu']} as RemoteConfig,()=>({}));
+ const count=f.metrics.find(metric=>metric.name==='host.cpu.logical_count');
+ assert(count);assert(Number.isInteger(count.value)&&Number(count.value)>0);
+ assert.equal(count.attributes.host_id,'fixture-host');
+});

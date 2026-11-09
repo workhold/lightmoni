@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { hostname } from "node:os";
 import { createServer } from "node:http";
 import { createLightMoni, withTrace, type FrozenBatch, type Exporter } from "../src/index.js";
 import { extractTrace, injectTrace, type TraceContext } from "../src/core.js";
@@ -224,4 +225,16 @@ test('default HTTP system telemetry without a key remains suppressed',async t=>{
  const mon=createLightMoni({service:'anonymous',table:'lightmoni',key:'',endpoint:'http://127.0.0.1:1',selfTelemetry:false,remoteConfig:false,intervalMs:60000});
  try{mon.gauge('lightmoni.center.heartbeat').record(1);mon.log('info','anonymous');await mon.flush();assert.equal(requests,0);assert.equal(mon.stats().pendingBatches,0);}
  finally{await mon.shutdown();}
+});
+
+
+test('Node hostname fallback is captured in all resources and browser remains portable',async()=>{
+ const previous=process.env.LIGHTMONI_MACHINE_NAME;delete process.env.LIGHTMONI_MACHINE_NAME;
+ const {batches,exporter}=captured();const node=createLightMoni({service:'hostname',table:'http',exporter,selfTelemetry:false,remoteConfig:false});
+ const browser=createBrowserClient({service:'browser',table:'http',exporter,selfTelemetry:false,remoteConfig:false});
+ try {
+  node.log('info','hostname');node.gauge('load').record(1);node.startSpan('work').end();await node.flush();
+  for(const batch of batches){const resource=Object.values(decode(batch))[0] as any[];assert.equal(resource[0].resource.attributes.find((a:any)=>a.key==='host.name').value.stringValue,hostname())}
+  browser.log('info','portable');await browser.flush();assert.equal(decode(batches.at(-1)!).resourceLogs[0].resource.attributes.some((a:any)=>a.key==='host.name'),false);
+ }finally{await node.shutdown();await browser.shutdown();if(previous!==undefined)process.env.LIGHTMONI_MACHINE_NAME=previous}
 });

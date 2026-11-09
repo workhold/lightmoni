@@ -213,6 +213,17 @@ export function normalizeDashboard(input: any): any {
   return d;
 }
 export class Dashboards implements Module {
+  /** Compare the full seed content, ignoring revision metadata: historical user edits remain discoverable. */
+  builtin(dashboard: any): boolean {
+    const raw = systemDashboards().find(item => item.id === dashboard.id);
+    if (!raw) return false;
+    const definition = (value: any) => {
+      const {id,revision,updated_at,...body} = normalizeDashboard(value);
+      return body;
+    };
+    const sorted = (value: any): any => Array.isArray(value) ? value.map(sorted) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key,sorted(value[key])])) : value;
+    return JSON.stringify(sorted(definition(raw))) === JSON.stringify(sorted(definition(dashboard)));
+  }
   start(): void {
     this.seed();
   }
@@ -307,13 +318,20 @@ export class Dashboards implements Module {
   }
   register(): void {
     const { router: r, db } = this.deps;
+    // Keep persisted content, versions and deletion markers. This is a separate directory.
+    r.get('/api/v1/system-monitoring', c => c.json(
+      systemDashboards().flatMap(seed => {
+        const row = db.get<{body:string}>('SELECT body FROM dashboards WHERE id=?',seed.id);
+        return row ? [parseJSON(row.body)] : [];
+      }),
+    ));
     r.get("/api/v1/dashboards", (c) =>
       c.json(
         db
           .all<{
             body: string;
           }>("SELECT body FROM dashboards ORDER BY updated_at DESC,id")
-          .map((x) => parseJSON(x.body)),
+          .map((x) => parseJSON(x.body)).filter(d => !this.builtin(d)),
       ),
     );
     r.post("/api/v1/dashboards", async (c) => {

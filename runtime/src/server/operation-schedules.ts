@@ -80,7 +80,10 @@ export function registerOperationSchedules(deps: Dependencies, ops: OperationsSt
     if (busy) return { state: "skipped_busy" };
     let runID = "";
     try {
-      const run = ops.plan(r.resource_id, r.operation, JSON.parse(deps.decrypt(r.input_json)), actor); runID = run.id;
+      const run = ops.plan(r.resource_id, r.operation, JSON.parse(deps.decrypt(r.input_json)), actor, {
+        kind: 'schedule', schedule_id: r.id, revision: r.revision, authorized_by: r.authorized_by,
+        actor, trigger: slot.startsWith('manual:') ? 'manual' : 'scheduled',
+      }); runID = run.id;
       db.run("UPDATE ops_schedule_fires SET run_id=? WHERE schedule_id=? AND slot=?", runID, r.id, slot);
       const approved = ops.approve(runID, actor, r.resource_revision);
       db.run("UPDATE ops_schedule_fires SET state=? WHERE schedule_id=? AND slot=?", approved.state, r.id, slot);
@@ -94,7 +97,7 @@ export function registerOperationSchedules(deps: Dependencies, ops: OperationsSt
     const now = deps.now(), minute = Math.floor(now.getTime() / 60000); if (minute <= lastMinute) return; lastMinute = minute;
     const slot = new Date(minute * 60000).toISOString();
     for (const r of db.all<any>("SELECT * FROM ops_schedules WHERE enabled=1")) {
-      try { const authority = db.get<any>("SELECT active,role FROM users WHERE id=?", r.authorized_by); if (!authority?.active || authority.role !== "admin") { disable(r.id, "authorizer_unavailable"); continue; } const resource = ops.get(r.resource_id); if (!resource || resource.revision !== r.resource_revision) { disable(r.id, "resource_changed"); continue; } if (cronMatches(r.cron, r.timezone, new Date(minute * 60000))) fire(r, slot, "schedule:" + r.authorized_by); }
+      try { const authority = db.get<any>("SELECT active,role FROM users WHERE id=?", r.authorized_by); if (!authority?.active || authority.role !== "admin") { disable(r.id, "authorizer_unavailable"); continue; } const resource = ops.get(r.resource_id); if (!resource || resource.revision !== r.resource_revision) { disable(r.id, "resource_changed"); continue; } if (cronMatches(r.cron, r.timezone, new Date(minute * 60000))) fire(r, slot, r.authorized_by); }
       catch { disable(r.id, "resource_unavailable"); }
     }
   };

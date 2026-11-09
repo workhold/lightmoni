@@ -11,9 +11,11 @@ export interface ApplicationTarget {
 export interface DockerContainer {
   id: string; name: string; image: string; state: string; ports: string;
   deployment_id: string;
+  compose_project?:string;
 }
 export interface DockerInventory {
   management_version?: 1;
+  batch_management_version?:1;
   compose_available?: boolean;
   observed_at: string; state: 'ready' | 'unavailable'; error?: string;
   attempted_at?: string;
@@ -46,12 +48,12 @@ export function dockerInventory(value: any): DockerInventory | undefined {
   if (value === undefined) return undefined;
   if (!value || !Array.isArray(value.containers) || value.containers.length > 500 || !['ready','unavailable'].includes(value.state) || !Number.isFinite(Date.parse(value.observed_at))) fail(400, 'invalid_docker_inventory');
   const errors=['docker_cli_missing','docker_permission_denied','docker_daemon_unavailable','docker_command_timeout','docker_collection_unavailable'];
-  return {observed_at: new Date(value.observed_at).toISOString(), state: value.state, ...(value.management_version===1?{management_version:1 as const}:{}), ...(typeof value.compose_available==='boolean'?{compose_available:value.compose_available}:{}), truncated: value.truncated === true,
+  return {observed_at: new Date(value.observed_at).toISOString(), state: value.state, ...(value.management_version===1?{management_version:1 as const}:{}), ...(value.batch_management_version===1?{batch_management_version:1 as const}:{}), ...(typeof value.compose_available==='boolean'?{compose_available:value.compose_available}:{}), truncated: value.truncated === true,
     ...(Number.isFinite(Date.parse(value.attempted_at))?{attempted_at:new Date(value.attempted_at).toISOString()}:{}),
     ...(value.state === 'unavailable' ? {error: errors.includes(value.error)?value.error:'docker_collection_unavailable'} : {}),
     containers: value.containers.map((c: any) => {
       if (!/^[a-f0-9]{12,64}$/.test(c?.id)) fail(400, 'invalid_docker_container');
-      return {id: c.id, name: text(c.name), image: text(c.image), state: text(c.state,32), ports: text(c.ports,1024), deployment_id: text(c.deployment_id,128)};
+      return {id: c.id, name: text(c.name), image: text(c.image), state: text(c.state,32), ports: text(c.ports,1024), deployment_id: text(c.deployment_id,128),...(c.compose_project?{compose_project:text(c.compose_project,64)}:{})};
     })};
 }
 export function bindApplicationRows(db: DB, agentID: string, rows: any[], decrypt?: (value:string)=>string) {

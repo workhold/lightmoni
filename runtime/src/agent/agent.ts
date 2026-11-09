@@ -5,7 +5,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { hostname } from "node:os";
+import { hostname, cpus, totalmem } from "node:os";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
@@ -199,6 +199,8 @@ export class Agent {
       agent_id: this.identity.agent_id,
       host_id: this.identity.host_id,
       hostname: hostname(),
+      cpu_count: cpus().length || undefined,
+      memory_total_mb: totalmem() / 1048576 || undefined,
       version: this.release.version,
       boot_id: this.bootID,
       runtime: { mode: this.config.runtime_mode, permission_generation: this.config.permission_generation, uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 },

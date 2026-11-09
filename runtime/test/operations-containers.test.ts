@@ -122,10 +122,12 @@ test("foreign ownership and unsafe existing mounts prevent taking over a project
   try {
     f.containers = [{ Id: cid, Config: { Image: "nginx:1.27.5", Labels: { [owner]: "another_resource", "com.docker.compose.project": "example", "com.docker.compose.service": "web" } }, State: { Running: true }, Mounts: [] }];
     const result = await executeCompose(payload("inspect"), f.context);
+    assert.equal(result.data.adoption_supported,false);assert.match(result.data.adoption_blocked_reason,/ownership/);
     await assert.rejects(executeCompose(payload("adopt", { expected_generation: 0, inventory_sha256: result.data.inventory_sha256, acknowledge_recreate: true }), f.context), /ownership/);
     f.containers[0].Config.Labels[owner] = "";
     f.containers[0].Mounts = [{ Type: "bind", Source: "/", Destination: "/host" }];
     const unsafe = await executeCompose(payload("inspect"), f.context);
+    assert.equal(unsafe.data.adoption_supported,false);assert.match(unsafe.data.adoption_blocked_reason,/mount/);
     await assert.rejects(executeCompose(payload("adopt", { expected_generation: 0, inventory_sha256: unsafe.data.inventory_sha256, acknowledge_recreate: true }), f.context), /mount/);
   } finally { await f.cleanup(); }
 });

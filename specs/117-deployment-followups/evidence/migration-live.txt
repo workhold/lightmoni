@@ -1,0 +1,6 @@
+test_center_and_clickhouse_migration_retains_login_key_and_history (__main__.MigrationTests) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 36.975s
+
+OK
