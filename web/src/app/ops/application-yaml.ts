@@ -33,6 +33,7 @@ export function containerYAML(spec: Spec): string {
       published: String(p.host_port ?? 0),
       protocol: p.protocol ?? "tcp",
       host_ip: p.host_ip ?? "0.0.0.0",
+      ...(p.app_protocol ? { app_protocol: p.app_protocol } : {}),
     }));
   return yamlText({
     services: { app },
@@ -90,7 +91,8 @@ export function containerForm(text: string, previousPorts: Spec[] = []): Spec {
     let target: any,
       published: any,
       protocol = "tcp",
-      host_ip: any;
+      host_ip: any,
+      app_protocol: any;
     if (typeof value === "number") target = value;
     else if (typeof value === "string") {
       const [binding, p = "tcp"] = value.split("/");
@@ -99,7 +101,7 @@ export function containerForm(text: string, previousPorts: Spec[] = []): Spec {
       target = parts.pop();
       published = parts.pop();
       if (parts.length) host_ip = parts.join(":").replace(/^\[|\]$/g, "");
-    } else ({ target, published, protocol = "tcp", host_ip } = value);
+    } else ({ target, published, protocol = "tcp", host_ip, app_protocol } = value);
     const container_port = Number(target),
       host_port = Number(published ?? 0);
     if (
@@ -123,7 +125,7 @@ export function containerForm(text: string, previousPorts: Spec[] = []): Spec {
       host_port,
       protocol,
       host_ip: host_ip ?? old?.host_ip ?? "0.0.0.0",
-      app_protocol: old?.app_protocol ?? "",
+      app_protocol: app_protocol ?? old?.app_protocol ?? "",
     };
   });
   const env = Array.isArray(app.environment)
