@@ -159,7 +159,7 @@ export function prepareApplicationYAML(input: Row, previous?: Row): Row {
           host_ip: managed
             ? (old?.host_ip ?? p.host_ip ?? "0.0.0.0")
             : (p.host_ip ?? old?.host_ip ?? "0.0.0.0"),
-          app_protocol: old?.app_protocol ?? p.app_protocol ?? "",
+          app_protocol: p.app_protocol ?? old?.app_protocol ?? "",
           ...(!single ? { service: name } : {}),
         });
       }

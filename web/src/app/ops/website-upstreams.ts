@@ -1,3 +1,30 @@
+import type { Spec } from './model';
+
+// Keep eligibility aligned with the website checks in ops/cluster-workloads.ts.
+export function websiteServicePortOptions(ports: Spec[] = []) {
+  return ports.map(p => ({
+    value: p.name,
+    label: `${p.name} · ${p.container_port}/${p.protocol === 'udp' ? 'udp' : p.app_protocol || p.protocol || 'tcp'}`,
+    disabled: p.protocol !== 'tcp' || !['http', 'https'].includes(p.app_protocol),
+  }));
+}
+
+export function websiteServicePortHint(ports?: Spec[]): [string, string] {
+  if (!ports) return ['请先选择后端服务。', 'Select a backend service first.'];
+  if (!ports.length) return [
+    '当前服务未声明端口。请在应用配置中添加实际的 HTTP/HTTPS 端口。',
+    'This service has no declared ports. Add its HTTP/HTTPS port in the application configuration.',
+  ];
+  if (websiteServicePortOptions(ports).every(p => p.disabled)) return [
+    '当前服务没有可用于网站的 HTTP/HTTPS 端口。Web 服务请在应用配置中设置“应用协议”；YAML 端口项使用 app_protocol: http 或 https。',
+    'This service has no HTTP/HTTPS port for a website. For a web service, set Application protocol in its configuration, or app_protocol: http or https on the YAML port entry.',
+  ];
+  return [
+    '仅可选择 TCP 上的 HTTP/HTTPS 端口；手动与托管部署均可关联。',
+    'Only HTTP/HTTPS ports over TCP can be selected. Both manual and managed deployments can be linked.',
+  ];
+}
+
 // Keep this browser check aligned with normalizeLocations in operations/nginx.ts.
 // The server remains authoritative and normalizes accepted URLs to their origin.
 type UpstreamIssue = 'scheme' | 'credentials' | 'path' | 'query' | 'invalid';

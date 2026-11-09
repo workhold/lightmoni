@@ -207,6 +207,53 @@ async function fixture(t: any, fetcher?: typeof fetch) {
   };
 }
 
+for (const mode of ["container", "compose"]) test(`manual ${mode} YAML web ports can be corrected and bound by both website service modes`, async (t) => {
+  const f = await fixture(t), cluster = f.createCluster(["ma"]);
+  let app = f.app(cluster, {
+    mode,
+    ...(mode === "compose" ? { compose: { services: { app: { image: "nginx:alpine", ports: ["18080:8080"] } } } } : {}),
+    ports: [{ name: "web", container_port: 8080, host_port: 18080, protocol: "tcp", app_protocol: "" }],
+  });
+  const yaml = (protocol?: string) => ({ services: { app: { image: "nginx:alpine", ports: [{
+    target: 8080, published: "18080", protocol: "tcp", ...(protocol !== undefined ? { app_protocol: protocol } : {}),
+  }] } } });
+  const update = (protocol?: string) => f.req("/resources/" + app.id, "PUT", {
+    revision: app.revision, spec: { ...app.spec, configuration_mode: "yaml", [mode === "container" ? "configuration_yaml" : "compose"]: JSON.stringify(yaml(protocol)) },
+  });
+  const siteSpec = (routing: string) => ({
+    mode: "proxy", routing_mode: routing, cluster_ids: [cluster.id],
+    ...(routing === "managed" ? { service_application_id: app.id, service_port_name: "web" } : {}),
+    bindings: [{ domains: [routing + ".example.test"], locations: [{ path: "/", cluster_targets: [{
+      cluster_id: cluster.id, target: "application", application_id: app.id, port_name: "web",
+    }] }] }],
+  });
+  for (const protocol of ["", "tcp", "http", "https", undefined]) {
+    const saved = await update(protocol);
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    app = saved.body.resource;
+    assert.equal(app.spec.ports[0].name, "web");
+    assert.equal(app.spec.ports[0].host_port, 18080);
+    assert.equal(app.spec.ports[0].app_protocol, protocol ?? "https");
+    for (const routing of ["manual", "managed"]) {
+      const result = await f.req("/resources", "POST", { kind: "website", name: routing, spec: siteSpec(routing) });
+      if (protocol === "" || protocol === "tcp") {
+        assert.equal(result.status, 400);
+        assert.equal(result.body.error, "application_port_not_found");
+      } else {
+        assert.equal(result.status, 201, JSON.stringify(result.body));
+        const site = (await f.req("/resources/" + result.body.resource.id)).body.resource;
+        assert.equal(site.spec.bindings[0].locations[0].cluster_targets[0].port_name, "web");
+        assert.equal(site.spec.bindings[0].locations[0].cluster_targets[0].application_id, app.id);
+        const deleted = await f.req("/resources/" + site.id, "DELETE", { revision: site.revision });
+        assert.ok([200, 202].includes(deleted.status));
+      }
+    }
+  }
+  const invalid = await update("postgres");
+  assert.equal(invalid.status, 400);
+  assert.equal(f.store.get(app.id).revision, app.revision);
+});
+
 test("manual website upstream validation preserves saved resources after rejected URLs", async (t) => {
   const f = await fixture(t), cluster = f.createCluster(["ma"]);
   const spec = (upstreams: any[]) => ({
