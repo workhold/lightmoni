@@ -21,3 +21,5 @@
 架构同步不适用：既有字段在原配置转换及选项展示内修正，HTTP/HTTPS 服务端边界、资源契约、存储、服务发现、发布路径、凭据与部署拓扑均不变。`docs/system-design.md` 无受影响章节；Doca [LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 无需同步，没有执行或声称在线写入/回读。
 
 验收使用临时 SQLite、真实 HTTP 路由与当前网页，远程 Agent、SSH 和外部云调用关闭。不包含生产更新、实际容器部署或真实网站连通性验收；修复仍需经 PR 合入和后续发行才能在线生效。当前未声明协议的已有 Web 服务仍需明确配置实际 HTTP/HTTPS 协议。
+
+已创建面向 main 的 [GitHub PR #157](https://github.com/workhold/lightmoni/pull/157)，未合入。浏览器执行期间开发控制台存在 React flushSync 生命周期提示；没有 pageerror，相关表单保存、回读及视口断言均通过，此次未扩展处理该提示。
