@@ -1,0 +1,12 @@
+.lm-application-plot{container-type:inline-size}
+.lm-telemetry-values{list-style:none;margin:12px 0 0;padding:0;border-top:1px solid var(--lm-border);font-size:12px;line-height:1.5}
+.lm-telemetry-values>li{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,1fr);align-items:center;gap:12px;padding:10px 0}
+.lm-telemetry-values>li+li{border-top:1px solid var(--lm-border)}
+.lm-telemetry-series{display:flex;align-items:baseline;gap:8px;min-width:0;color:var(--lm-muted)}
+.lm-telemetry-series>i{width:10px;height:3px;flex-shrink:0;align-self:flex-start;margin-top:8px;border-radius:1px}
+.lm-telemetry-series>span{overflow-wrap:anywhere}
+.lm-telemetry-values dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0;text-align:right}
+.lm-telemetry-values dt{color:var(--lm-muted);font-size:11px;font-weight:400}
+.lm-telemetry-values dd{margin:3px 0 0;color:var(--lm-text);font-variant-numeric:tabular-nums;white-space:nowrap}
+.lm-telemetry-values dl>div:first-child dd{font-weight:600}
+@container(max-width:480px){.lm-telemetry-values>li{grid-template-columns:minmax(0,1fr);gap:8px}.lm-telemetry-values dl{text-align:left}}

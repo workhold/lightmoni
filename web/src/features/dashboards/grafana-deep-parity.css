@@ -26,7 +26,6 @@
 .lm-legend-sort-indicator>.anticon{opacity:.35}
 .lm-legend-sort-indicator>.is-active{opacity:1;color:var(--lm-accent)}
 .lm-dashboard-stat>span{white-space:normal;overflow:visible;overflow-wrap:anywhere;line-height:1.5}
-.lm-series-tooltip-row>span{white-space:normal;overflow-wrap:anywhere}
 
 /* Panel editor: one preview above the query workspace, one settings column. */
 .lm-panel-workbench .ant-drawer-header{padding:10px 16px;border-bottom:1px solid var(--lm-border)}

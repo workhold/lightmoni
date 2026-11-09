@@ -1,0 +1,18 @@
+✔ Grafana unit catalog includes bytes, rates, time, currency and percentages (0.574709ms)
+✔ binary/decimal units, elapsed time and percentage contracts convert correctly (0.248709ms)
+✔ custom unit prefixes/suffixes and exact original strings remain usable (0.056708ms)
+✔ legend/stat calculations distinguish missing values from first/last non-null (0.111625ms)
+✔ counter resets, empty sets and large finite averages retain their meaning (0.057791ms)
+✔ legend headers cycle numeric descending/ascending/default and names ascending/descending/default (1.028667ms)
+✔ legend sorting uses numeric precision, keeps missing values last and preserves tied series and colors (0.381834ms)
+✔ Grafana legend selection isolates, restores, and supports additive toggles (0.076292ms)
+✔ irregular series alignment preserves explicit null gaps and negative/zero values (0.129417ms)
+✔ Grafana date math shares now, supports calendar rounding and month/week offsets (1.144166ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 518.514291
