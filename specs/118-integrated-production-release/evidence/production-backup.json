@@ -1,0 +1,15 @@
+{
+  "observed_at": "2026-11-09T15:48:13.442139+00:00",
+  "snapshot_complete": true,
+  "quick_check": "ok",
+  "pages": 553308,
+  "page_size": 4096,
+  "snapshot_bytes": 2266349568,
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261109-deployment-recovery-v1",
+  "revision": "40916db5a49c1408d1a8317730724744f113fa0c",
+  "directory_mode": "0700",
+  "file_modes": "0600",
+  "method": "Python SQLite online backup from pinned read transaction of exact existing Docker volume",
+  "first_node_copy_timed_out": true,
+  "evidence_source": "Read-only server backup-report.json displayed in 1Panel terminal; screenshot backup-status.png"
+}

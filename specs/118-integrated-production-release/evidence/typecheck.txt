@@ -1,0 +1,15 @@
+
+> lightmoni@0.1.0 typecheck
+> npm --prefix runtime run typecheck && npm --prefix ai-runtime run typecheck && npm --prefix web run typecheck
+
+
+> lightmoni-runtime@0.1.0 typecheck
+> tsc --noEmit
+
+
+> lightmoni-ai-runtime@0.1.0 typecheck
+> tsc --noEmit
+
+
+> lightmoni-web@0.1.0 typecheck
+> tsc --noEmit

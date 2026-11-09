@@ -1,0 +1,16 @@
+✔ catalog and tag pagination include every version and digest aliases share application usage (143.219792ms)
+✔ cleanup retains used multi-platform index children and shared tags while clearing all repositories (67.158125ms)
+✔ incomplete catalog, unresolved usage and hostile pagination never perform DELETE (16.442458ms)
+✔ partial errors and disabled deletion return truthful cleanup counts (66.071125ms)
+✔ lost DELETE response propagates uncertainty instead of confirmed failure (8.127583ms)
+✔ endpoint and query validation reject public hosts and malformed repositories (1.016208ms)
+✔ transport failure during scan is a confirmed read failure with no mutations (1.424917ms)
+✔ 100 tags retain page order with at most four requests and shared index children fetched once (64.544125ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1373.267418

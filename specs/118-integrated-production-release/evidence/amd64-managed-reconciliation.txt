@@ -1,0 +1,45 @@
+✔ an audited matching managed reconciliation releases the fence without rewriting either unknown result (35.058959ms)
+✔ ordinary, foreign, incomplete and unreconciled unknown results remain fenced (4.742125ms)
+✔ active jobs still block and missing reconciliation authority stays conservative (3.676084ms)
+✔ scheduled backups retain a real authorizer and reach the signed executor (182.551166ms)
+✔ scheduled backup revalidates disable before start (24.690208ms)
+✔ scheduled backup revalidates revision before start (19.52375ms)
+✔ scheduled backup revalidates delete before start (14.818ms)
+✔ scheduled backup revalidates delete-fire before start (17.94725ms)
+✔ scheduled backup revalidates input before start (14.508208ms)
+✔ scheduled backup revalidates authorizer before start (14.608291ms)
+✔ scheduled backup revalidates demote before start (12.92875ms)
+✔ revoked scheduled backup is cancelled before being claimed (10.76825ms)
+✔ signed domain work retains original lineage and ordinary control cannot read or mutate it (182.50775ms)
+✔ a changed source approval blocks an online permit before any side effect (13.111417ms)
+✔ domain receipt faults roll back both principals and preserve a retryable acknowledgement (21.499083ms)
+✔ lease loss preserves unknown fences without replaying through ordinary control (10.540334ms)
+✔ signed reconciliation releases an interrupted node.inspect without replaying or inventing health (32.156417ms)
+✔ signed reconciliation releases an interrupted workload.inspect without replaying or inventing health (25.609375ms)
+✔ signed reconciliation releases an interrupted gateway.inspect without replaying or inventing health (25.805375ms)
+✔ signed reconciliation releases an interrupted registry.inspect without replaying or inventing health (25.144875ms)
+✔ signed reconciliation retains unknown mutation fence for workload.apply (14.784959ms)
+✔ signed reconciliation retains unknown mutation fence for gateway.apply (12.308625ms)
+✔ signed reconciliation retains unknown mutation fence for workload.remove (13.214875ms)
+✔ automatic observation recovery rejects changed payload identity, hashes and leases (74.899209ms)
+✔ a reconstructed center reconciles the original signed observation after lease loss (22.77675ms)
+✔ managed work can queue behind a running signed operation and only runs after its receipt (20.287041ms)
+✔ managed admission preserves manual privilege and unresolved result fences (30.106791ms)
+✔ human reconciliation preserves both unknown histories and permits a new signed managed job (17.586958ms)
+✔ an explicitly reconciled manual privileged result also releases admission (11.299375ms)
+✔ a cached start permit cannot restore authority after policy revocation (13.603125ms)
+✔ signed application observations bind central ownership and durably acknowledge before export (2228.577585ms)
+✔ observation sequence recovery refuses unsafe or malformed numeric wrappers (0.485333ms)
+✔ more than one drain window of failed observations cannot starve a later healthy batch (2449.505043ms)
+✔ host container HTTP requires a live human, exact confirmation, idempotency and signed management execution (128.265542ms)
+✔ host image cleanup is bound to its successful preview and cannot include referenced or forged candidates (70.106875ms)
+✔ host-management compatibility comes from a signed root observation, never the ordinary Agent heartbeat (8.061541ms)
+✔ registry secret uses the signed current lease, never the journal payload; revoked source still accepts final receipt (20.635458ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7096.086503

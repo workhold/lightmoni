@@ -1,0 +1,21 @@
+{
+  "status": "deployed",
+  "observed_at": "2026-11-09T16:01:11.881041+00:00",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261109-deployment-followups-v1",
+  "revision": "8580eb95974e14bec1ef7db4aaee57a9ce5eb6a6",
+  "index_digest": "sha256:039cc6c7aa440cce047fb960000a367a08fa156efb7fde8ed9554f80a7f935ea",
+  "architecture": "amd64",
+  "health": "healthy",
+  "started_at": "2026-11-09T16:00:40.528115082Z",
+  "mounts_unchanged": true,
+  "environment_unchanged": true,
+  "ports_networks_unchanged": true,
+  "master_key_unchanged": true,
+  "other_containers_unchanged": true,
+  "followups": {
+    "modules": true,
+    "backup_sha256": "6cf536bce36f43fe224446b2a047f0308275c0a51fd86294836ca04094eb05cb",
+    "batch_marker": true
+  },
+  "evidence_source": "Read-only production deployment-report.json displayed in 1Panel; screenshot production-receipt.png"
+}
