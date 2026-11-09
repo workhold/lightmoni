@@ -33,7 +33,7 @@ for(const outcome of ['success','failure','cancel'])test('temporary auth is scop
  assert.equal(fetched,1);await assert.rejects(access(directory));
 });
 
-test('private Compose images bypass anonymous proxies and cache, use separate secrets and pin verified IDs',async t=>{
+test('private Compose images outside the configured cache bypass anonymous proxies, use separate secrets and pin verified IDs',async t=>{
  const {preparePlatformImages}=await import('../src/operations/image-sources.js');
  const root=await mkdtemp(join(tmpdir(),'lm-registry-compose-'));t.after(()=>rm(root,{recursive:true,force:true}));
  const images=['one.test/team/app:1','two.test/team/db:1'],pulled=new Set<string>(),calls:any[]=[],fetched:string[]=[];
@@ -45,7 +45,7 @@ test('private Compose images bypass anonymous proxies and cache, use separate se
   throw Error('not present');
  }};
  const manifest:any={services:{web:{image:images[0]},db:{image:images[1]},public:{image:'alpine:3.23'}}};
- const config={registry_authorizations:images.map(image=>({registry:image.split('/')[0],repository_prefix:'team',images:[image]})),image_sources:{version:1,revision:1,rules:[{source:'one.test',target:'https://proxy.test',allow_upstream:true}]},image_cache:{version:1,allow_upstream:true,origin_host:'one.test',origin_endpoint:'http://127.0.0.1:5000',origin_mode:'direct'}};
+ const config={registry_authorizations:images.map(image=>({registry:image.split('/')[0],repository_prefix:'team',images:[image]})),image_sources:{version:1,revision:1,rules:[{source:'one.test',target:'https://proxy.test',allow_upstream:true}]},image_cache:{version:1,allow_upstream:true,origin_host:'other.test',origin_endpoint:'http://127.0.0.1:5000',origin_mode:'direct'}};
  const result=await preparePlatformImages(manifest,config,root,context);
  assert.deepEqual(fetched,images);assert.equal(manifest.services.web.image,'sha256:'+'a'.repeat(64));assert.equal(manifest.services.db.image,'sha256:'+'b'.repeat(64));assert.equal(manifest.services.web.pull_policy,'never');assert.equal(manifest.services.public.image,'alpine:3.23');
  assert.equal(result.filter((r:any)=>r.source==='authenticated-registry').length,2);assert(!JSON.stringify(calls).includes('fixture-private-token'));assert(!JSON.stringify(calls).includes('proxy.test'));

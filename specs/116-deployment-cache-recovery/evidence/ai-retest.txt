@@ -1,0 +1,34 @@
+✔ alert proposals persist encrypted previews and require owner confirmation; replay is idempotent (28.418ms)
+✔ stale, expired, cancelled and malformed proposals never mutate rules (10.767ms)
+✔ large integer thresholds and SQL parameters remain exact in tools, previews, HTTP and stored changes (22.300291ms)
+✔ oversized completion receipts are rejected before creating a pending preview (8.268ms)
+✔ confirmations recheck group permissions and cannot broaden a silence scope (6.986417ms)
+✔ proposal and audit persistence failures roll back business data and side effects (5.242958ms)
+✔ silence previews preserve schedule and ID across approval; updates and ending are versioned (4.412791ms)
+✔ alert tools bound reads and never expose an apply or arbitrary API tool (2.544375ms)
+✔ assistant dispatch binds proposals to the authenticated session and reloads applied receipts (21.573208ms)
+✔ real Mastra worker executes alert reads and nested change proposals before explicit HTTP approval (571.814833ms)
+✔ assistant encrypted legacy config survives startup, key binds exact base, admin and strict fields (32.106458ms)
+✔ canonical base and protocol repair preserve tenant escapes and stored identity (0.261542ms)
+✔ model discovery uses bounded fresh-root profiles, saved key exact binding and sanitized error (12.032375ms)
+✔ real Node worker streams tools, persists private host history and reports immutable usage (485.611875ms)
+✔ private continuation metadata is stored, cleaned from public session and reused next turn (5.825583ms)
+✔ credential echo is rejected before public SSE, summary and checkpoint commit (9.289ms)
+✔ concurrent turn rejects, cancellation releases slot and accounts unknown consumption (5.36925ms)
+✔ ledger terminal snapshot keeps original rates and unknown/free/partial costs distinct (0.997459ms)
+✔ calendar usage window respects DST and unknown historical int64 stays exact (0.842166ms)
+✔ monitoring tools use shared bounded queries, accurate failures and review-only drafts (1.016333ms)
+✔ connection probe uses one fixed budget and preserves failed usage without changing config or sessions (3.762917ms)
+✔ connection probe distinguishes test budget, output limit and timeout with sanitized codes (24.793625ms)
+✔ automatic model discovery exhausts exactly seven catalog candidates and never returns provider body (4.213625ms)
+✔ native model directories use protocol headers, Google generation filtering and pagination (3.494334ms)
+✔ code capability is opt-in, admin-only and binds the user workspace before executing the tool (8.893459ms)
+✔ code-task receipts fit the Mastra channel and later turns reload the approved state (9.783792ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2715.946459

@@ -70,8 +70,10 @@ function fixture() {
     close() { jobs.close();store.close();tasks.close?.(); db.close(); } };
 }
 
-function flow(f:ReturnType<typeof fixture>){
- const job=f.enqueue(),claim=f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v)),plan=planClaims(verifyJWS(claim.job.plan,f.store.centerPublicKey,f.store.centerKeyID));
+function flow(f:ReturnType<typeof fixture>,task?:string){
+ const job=f.enqueue();
+ if(task){const payload=f.payloads.get(job.operation_id);payload.resource.config.task=task;payload.operation=task.endsWith('.inspect')?'inspect':'apply';}
+ const claim=f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v)),plan=planClaims(verifyJWS(claim.job.plan,f.store.centerPublicKey,f.store.centerKeyID));
  const permit=()=>f.request('jobs/'+job.id+'/start-permits',{lease_id:plan.lease_id,step_id:'managed.execute',executor_nonce:randomBytes(24).toString('base64url')}).invoke((e,v)=>f.store.startPermit(e,job.id,v));
  const phases=()=>{for(const [i,phase] of ['accepted','staging','activating','verifying'].entries())f.request('jobs/'+job.id+'/events',{lease_id:plan.lease_id,sequence:i+1,phase,code:'',detail:{phase,summary:'Structured operation progress'}}).invoke((e,v)=>f.store.events(e,job.id,v));};
  const result=()=>{const p=f.payloads.get(job.operation_id),receipt={state:'succeeded',code:'',summary:'Verified operation',snapshot:{health:{healthy:true},operations:{operation_id:p.operation_id,resource_id:p.resource.id,data:{ok:true}}},started_at:'',finished_at:''};return f.request('jobs/'+job.id+'/result',{lease_id:plan.lease_id,state:'succeeded',code:'',summary:'Managed done',exit_code:0,stdout:canonicalJSON(receipt),stderr:''}).invoke((e,v)=>f.store.result(e,job.id,v));};
@@ -88,6 +90,58 @@ test('signed domain work retains original lineage and ordinary control cannot re
 test('a changed source approval blocks an online permit before any side effect',()=>{const f=fixture();try{const x=flow(f);f.change();assert.throws(x.permit,/revision_changed/);assert.equal(f.db.all('SELECT * FROM privileged_start_permits').length,0);}finally{f.close();}});
 test('domain receipt faults roll back both principals and preserve a retryable acknowledgement',()=>{const f=fixture();try{const x=flow(f);x.permit();x.phases();f.db.exec("CREATE TRIGGER fail_parent BEFORE UPDATE OF receipt_json ON agent_jobs BEGIN SELECT RAISE(ABORT,'parent_receipt_failure');END");assert.throws(x.result,/parent_receipt_failure/);assert.equal(f.store.get(x.job.id).state,'running');assert.equal(f.jobs.get(x.job.id).state,'verifying');f.db.exec('DROP TRIGGER fail_parent');x.result();assert.equal(f.jobs.get(x.job.id).state,'succeeded');}finally{f.close();}});
 test('lease loss preserves unknown fences without replaying through ordinary control',()=>{const f=fixture();try{const x=flow(f);f.advance(46);f.store.sweep();assert.equal(f.jobs.get(x.job.id).state,'unknown');assert.equal(f.store.get(x.job.id).state,'unknown');assert.equal(f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v)).job,null);assert.equal(f.jobs.claim('agent-host',['operations.platform']),null);}finally{f.close();}});
+for(const task of ['node.inspect','workload.inspect','gateway.inspect','registry.inspect'])test('signed reconciliation releases an interrupted '+task+' without replaying or inventing health',()=>{
+ const f=fixture();try{
+  const old=flow(f,task);old.permit();f.advance(46);f.store.sweep();f.heartbeat();
+  const original=f.jobs.get(old.job.id).receipt;
+  const reconcile=()=>f.request('jobs/'+old.job.id+'/reconcile',{lease_id:old.plan.lease_id}).invoke((e,v)=>f.store.reconcile(e,old.job.id,v));
+  const first=reconcile();assert.equal(first.release_fence,true);assert.equal(first.job.state,'unknown');assert.equal(first.job.resolved_by,f.enrolled.executor_id);assert.equal(first.job.resolution_reason,'read_only_observation_interrupted');
+  assert.deepEqual(f.jobs.get(old.job.id).receipt,original);assert.equal(f.jobs.get(old.job.id).state,'unknown');
+  assert.equal(f.db.get<any>('SELECT state FROM task_runs WHERE id=?',old.job.id)!.state,'unknown');
+  assert.equal(reconcile().job.resolved_at,first.job.resolved_at);
+  assert.equal(f.db.get<any>("SELECT count(*) n FROM privileged_audit WHERE job_id=? AND event='read_only_observation_reconciled'",old.job.id)!.n,1);
+  const next=flow(f,'workload.inspect');assert.notEqual(next.job.id,old.job.id);next.permit();next.phases();next.result();
+  assert.equal(f.jobs.get(next.job.id).state,'succeeded');assert.equal(f.jobs.claim('agent-host',['operations.platform']),null);
+ }finally{f.close()}
+});
+for(const task of ['workload.apply','gateway.apply','workload.remove'])test('signed reconciliation retains unknown mutation fence for '+task,()=>{
+ const f=fixture();try{
+  const old=flow(f,task);old.permit();f.advance(46);f.store.sweep();f.heartbeat();
+  const result=f.request('jobs/'+old.job.id+'/reconcile',{lease_id:old.plan.lease_id}).invoke((e,v)=>f.store.reconcile(e,old.job.id,v));
+  assert.equal(result.release_fence,false);assert.equal(result.job.resolved_at,'');assert.throws(()=>f.enqueue(),/privileged_execution_pending/);
+ }finally{f.close()}
+});
+test('automatic observation recovery rejects changed payload identity, hashes and leases',()=>{
+ for(const tamper of ['digest','target','operation','multiple-actions','agent','parent']){const f=fixture();try{
+  const old=flow(f);old.permit();f.advance(46);f.store.sweep();f.heartbeat();
+  const row=f.db.get<any>('SELECT payload_enc FROM privileged_jobs WHERE id=?',old.job.id)!,payload=JSON.parse(f.deps.decrypt(row.payload_enc));
+  if(tamper==='target')payload.job.target.operations_resource_id='other';
+  if(tamper==='operation')payload.operation_payload.operation='apply';
+  if(tamper==='multiple-actions')payload.job.actions.push({...payload.job.actions[0]});
+  if(tamper==='agent')payload.operation_payload.resource.agent_id='other';
+  if(tamper==='parent')f.db.run("UPDATE agent_jobs SET operation_id='other' WHERE id=?",old.job.id);
+  const encoded=canonicalJSON(payload);f.db.run('UPDATE privileged_jobs SET payload_enc=?,payload_sha256=? WHERE id=?',f.deps.encrypt(encoded),tamper==='digest'?'f'.repeat(64):sha256(encoded),old.job.id);
+  const result=f.request('jobs/'+old.job.id+'/reconcile',{lease_id:old.plan.lease_id}).invoke((e,v)=>f.store.reconcile(e,old.job.id,v));
+  assert.equal(result.release_fence,false,tamper);
+  assert.throws(()=>f.request('jobs/'+old.job.id+'/reconcile',{lease_id:'wrong'}).invoke((e,v)=>f.store.reconcile(e,old.job.id,v)),/principal_mismatch/);
+ }finally{f.close()}}
+});
+test('a reconstructed center reconciles the original signed observation after lease loss',()=>{
+ const f=fixture();let restarted:PrivilegedExecutorStore|undefined;
+ try{
+  const old=flow(f,'workload.inspect');old.permit();f.advance(46);f.store.close();
+  restarted=new PrivilegedExecutorStore(f.deps,{dataDir:'/unused'});
+  restarted.managed=f.store.managed;
+  restarted.sweep();f.heartbeat();
+  assert.equal(restarted.centerInstanceID,f.store.centerInstanceID);
+  const request=f.request('jobs/'+old.job.id+'/reconcile',{lease_id:old.plan.lease_id});
+  const result:any=restarted.signedRequest(f.enrolled.executor_id,'POST',request.path,Buffer.from(request.raw),request.signature,(e,v)=>restarted!.reconcile(e,old.job.id,v));
+  assert.equal(result.release_fence,true);assert.equal(f.jobs.get(old.job.id).state,'unknown');
+  assert.equal(f.db.get<any>('SELECT state,resolved_at FROM task_runs WHERE id=?',old.job.id)!.state,'unknown');
+  assert(f.db.get<any>('SELECT resolved_at FROM task_runs WHERE id=?',old.job.id)!.resolved_at);
+  const fresh=flow(f,'workload.inspect');fresh.permit();fresh.phases();fresh.result();assert.equal(f.jobs.get(fresh.job.id).state,'succeeded');
+ }finally{restarted?.close();f.close()}
+});
 test('managed work can queue behind a running signed operation and only runs after its receipt',()=>{
  const f=fixture();try{
   const first=flow(f),next=f.enqueue();

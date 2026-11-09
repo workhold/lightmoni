@@ -1,0 +1,29 @@
+{
+  "resource": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "saved": true,
+  "seq": 1769,
+  "epochId": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "readback_seqs": [
+    1769
+  ],
+  "text_111_matches": true,
+  "paragraphs_116_match": true,
+  "existing_native_flowchart": {
+    "id": "sdd111-registry-auth-flow",
+    "nodes_before": 8,
+    "edges_before": 8,
+    "nodes_after": 10,
+    "edges_after": 12,
+    "all_original_node_ids_preserved": true,
+    "all_original_edge_ids_preserved": true,
+    "only_related_control_path_changed": true
+  },
+  "new_native_flowchart": {
+    "id": "sdd116-deployment-recovery-flow",
+    "nodes": 7,
+    "edges": 6,
+    "endpoints_valid": true
+  },
+  "unrelated_blocks": "No mutation targeted unrelated blocks; existing native nodes and edge properties preserved except related branch/coordinates.",
+  "context_closed": true
+}
