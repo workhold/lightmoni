@@ -38,3 +38,7 @@
 operations HTTP写入口现在要求真人管理员cookie，Bearer/API凭据不能批准/修改操作；内部平台计划由原持久授权驱动。主机容量和批次功能需升级对应Agent/管理组件，旧节点保留原有功能。备份CLI需Python/Docker权限与本机可信tar镜像，systemd只生成文件；S3单对象5GiB，目前未连接真实云供应商。Compose接管与备份仅支持明示子集；不支持配置明确阻断。
 
 尚未进行生产发行、升级、DNS切换、计划启用或实际业务迁移。日志性能仅证明当前2000行夹具的有界渲染与缓存；生产查询和更大数据量仍需现场观测。原问题表未擅自改成“已部署解决”，以PR和后续生产验收区分。
+
+## GitHub交付
+
+[PR #160](https://github.com/workhold/lightmoni/pull/160)，分支`codex/117-deployment-followups`→`main`。提交前已fetch并确认main无新提交；无直接主干推送、合并或发行。所有任务完成，生产执行范围仍以上述边界为准。

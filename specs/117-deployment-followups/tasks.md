@@ -44,8 +44,10 @@
 
 - [x] T020 在specs/117-deployment-followups/evidence记录相关运行时/SDK/浏览器/可丢弃资源验收，逐条映射问题表。
 - [x] T021 更新docs/system-design.md与Doca对应原生章节，保留无关块，回读并核对节点连线。
-- [ ] T022 同步origin/main、相关检查与diff检查，提交GitHub功能PR并记录链接，不合并或部署。
+- [x] T022 同步origin/main、相关检查与diff检查，提交GitHub功能PR并记录链接，不合并或部署。
 
 ## Dependencies and parallel execution
 
 T001—T004先完成；US1、US2、US3可并行，但同文件修改串行。US4依赖US2的主机容器上下文；US5独立复用现有操作授权。T020—T022最后集成。示例：遥测/SDK、文件/SFTP、容器/商店分别推进；调度和备份由主代理集成。每故事独立核对实际结果；已有能力通过验收而非重新实现。
+
+交付：[GitHub PR #160](https://github.com/workhold/lightmoni/pull/160)，目标main；未合并或部署。

@@ -2,7 +2,7 @@
 
 **Feature Branch**: `codex/117-deployment-followups`
 **Created**: 2026-11-09
-**Status**: Implemented; validation recorded, PR delivery pending
+**Status**: Implemented and validated; [PR #160](https://github.com/workhold/lightmoni/pull/160) awaiting review
 **Input**: 用户要求通过 MCP 读取《部署模块问题跟进》并解决其中问题。
 
 ## User Scenarios & Testing
