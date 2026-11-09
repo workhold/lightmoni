@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {existsSync} from 'node:fs';
 import {join} from 'node:path';
-import {hostDockerHash,hostDockerReceipt,normalizeHostDockerAction,type HostDockerAction} from '../src/shared/host-docker.js';
+import {hostDockerHash,hostDockerReceipt,hostDockerBatchProgress,normalizeHostDockerAction,type HostDockerAction} from '../src/shared/host-docker.js';
 import {managedExecutionPayload} from '../src/shared/managed-execution.js';
 import {fakeHostDocker,hostContainerID,stoppedContainerID,usedImageID,stoppedImageID,unusedImageID,defaultLimits} from './helpers/host-docker-fixture.js';
 
@@ -91,4 +91,38 @@ test('a missing container image identity fails closed before image deletion',asy
  const f=fakeHostDocker();t.after(()=>f.close());const preview=(await f.run({kind:'host_docker',operation:'images'})).snapshot.host_docker as any,i=preview.images.find((i:any)=>i.id===unusedImageID);
  const actual=f.context.transport;f.context.transport=async request=>request.path.endsWith('/containers/json?all=1')?{statusCode:200,body:[{Id:hostContainerID,ImageID:''}]}:actual(request);
  const r=await f.run({kind:'host_docker',operation:'prune_images',preview_job_id:'a'.repeat(32),previewed_at:preview.observed_at,images:[{image_id:i.id,expected_revision:i.revision}]});assert.equal(r.state,'failed');assert.equal(f.calls.filter(r=>r.method==='DELETE').length,0);
+});
+
+test('batch deletion checks every reviewed identity before any write and preserves unselected containers and volumes',async t=>{
+ const f=fakeHostDocker();t.after(()=>f.close());
+ const d=((await f.run({kind:'host_docker',operation:'inspect',container_id:stoppedContainerID})).snapshot.host_docker as any).container;
+ const action:HostDockerAction={kind:'host_docker',operation:'remove_many',targets:[{container_id:d.id,name:d.name,expected_revision:d.revision}],force:false,remove_anonymous_volumes:false,stopped_only:true};
+ for(const invalid of [{...action,targets:[...action.targets,...action.targets]},{...action,targets:Array.from({length:51},()=>action.targets[0])},{...action,force:true}])assert.throws(()=>normalizeHostDockerAction(invalid));
+ const bad=await f.run({...action,targets:[action.targets[0],{container_id:hostContainerID,name:'wrong',expected_revision:d.revision}]});assert.equal(bad.state,'failed');assert.equal(f.calls.filter(c=>c.method==='DELETE').length,0);
+ const r=await f.run(action);assert.equal(r.state,'succeeded');assert.deepEqual((r.snapshot.host_docker as any).containers,[{id:d.id,name:d.name,state:'deleted',code:''}]);assert(f.containers.has(hostContainerID));assert(f.volumes.has('qa-data'));assert(f.calls.filter(c=>c.method==='DELETE').every(c=>c.path.endsWith('?force=false&v=false')));
+});
+
+test('one read-only batch returns bounded public revisions and ownership changes invalidate deletion',async t=>{
+ const f=fakeHostDocker();t.after(()=>f.close());
+ const action:HostDockerAction={kind:'host_docker',operation:'inspect_many',container_ids:[hostContainerID,stoppedContainerID]};
+ for(const ids of [[],[hostContainerID,hostContainerID],Array.from({length:51},(_,i)=>i.toString(16).padStart(64,'0'))])assert.throws(()=>normalizeHostDockerAction({...action,container_ids:ids}));
+ const r=await f.run(action);assert.equal(r.state,'succeeded');const targets=(r.snapshot.host_docker as any).targets;assert.deepEqual(targets.map((t:any)=>t.id),action.container_ids);assert.doesNotMatch(JSON.stringify(targets),/PASSWORD|hidden|HostConfig|Env/);assert.equal(f.calls.filter(r=>r.method!=='GET').length,0);
+ f.containers.get(stoppedContainerID).Config.Labels['com.docker.compose.project']='new-owner';
+ const changed=await f.run({kind:'host_docker',operation:'remove_many',targets:[{container_id:targets[1].id,name:targets[1].name,expected_revision:targets[1].revision}],force:false,remove_anonymous_volumes:false,stopped_only:true});assert.equal(changed.state,'failed');assert.equal(changed.code,'host_docker_revision_changed');assert(f.containers.has(stoppedContainerID));
+});
+
+test('batch deletion reports a definite Engine rejection per target without claiming deletion',async t=>{
+ const f=fakeHostDocker();t.after(()=>f.close());
+ const targets=[];for(const id of [hostContainerID,stoppedContainerID]){const d=((await f.run({kind:'host_docker',operation:'inspect',container_id:id})).snapshot.host_docker as any).container;targets.push({container_id:id,name:d.name,expected_revision:d.revision})}
+ const transport=f.context.transport;f.context.transport=async request=>request.method==='DELETE'&&request.path.includes(hostContainerID)?{statusCode:409,body:{}}:transport(request);
+ const r=await f.run({kind:'host_docker',operation:'remove_many',targets,force:true,remove_anonymous_volumes:false,stopped_only:false});assert.equal(r.state,'succeeded');const result=(r.snapshot.host_docker as any).containers;assert.equal(result[0].state,'failed');assert.equal(result[1].state,'deleted');assert(f.containers.has(hostContainerID));assert(!f.containers.has(stoppedContainerID));
+});
+
+test('lost batch DELETE response retains earlier verified targets, unknown target, and a durable fence',async t=>{
+ const f=fakeHostDocker();t.after(()=>f.close());
+ const targets=[];for(const id of [stoppedContainerID,hostContainerID]){const d=((await f.run({kind:'host_docker',operation:'inspect',container_id:id})).snapshot.host_docker as any).container;targets.push({container_id:id,name:d.name,expected_revision:d.revision})}
+ const transport=f.context.transport;f.context.transport=async request=>{if(request.method==='DELETE'&&request.path.includes(hostContainerID))throw Error('connection lost with private detail');return transport(request)};
+ const action:HostDockerAction={kind:'host_docker',operation:'remove_many',targets,force:true,remove_anonymous_volumes:false,stopped_only:false};
+ const r=await f.run(action);assert.equal(r.state,'unknown');const safe=hostDockerBatchProgress(action,r.snapshot,r.started_at,new Date());assert.deepEqual(safe.host_docker.containers?.map(r=>r.state),['deleted','unknown']);assert.doesNotMatch(JSON.stringify(safe),/private|connection lost/);assert(existsSync(join(f.root,'operations/execution.lock')));
+ assert.throws(()=>hostDockerReceipt(action,r.snapshot,r.started_at,new Date()));const changed=structuredClone(r.snapshot) as any;changed.host_docker.containers[0].id='f'.repeat(64);assert.throws(()=>hostDockerBatchProgress(action,changed,r.started_at,new Date()));
 });

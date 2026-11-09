@@ -136,6 +136,7 @@ def records(attempts, signal):
             continue
         for res in batch["body"][resource]:
             identity = {a["key"]: a["value"] for a in res["resource"]["attributes"]}
+            assert identity["host.name"]["stringValue"], "backend SDK did not report a hostname"
             assert identity["service.instance.id"]["stringValue"]
             assert identity["service.name"]["stringValue"].startswith("conformance-")
             for group in res[scope]:

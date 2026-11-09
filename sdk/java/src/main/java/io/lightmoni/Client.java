@@ -254,6 +254,10 @@ public final class Client implements AutoCloseable {
     private static Map<String,Object> resourceValues(String service,Map<String,?> overrides,String instance) {
         if(overrides.containsKey("service.name")||overrides.containsKey("service.instance.id")) throw new IllegalArgumentException("configure service identity separately");
         Map<String,Object> values=new LinkedHashMap<>();
+        try { if (!overrides.containsKey("host.name") && env("LIGHTMONI_MACHINE_NAME").isEmpty()) values.put("host.name", java.net.InetAddress.getLocalHost().getHostName()); }
+        catch (java.net.UnknownHostException unavailable) {
+            String local=env("HOSTNAME");if(local.isEmpty())local=env("COMPUTERNAME");if(!local.isEmpty())values.put("host.name",local);
+        }
         for(String[] pair:new String[][] {{"LIGHTMONI_MACHINE_NAME","host.name"},{"LIGHTMONI_MACHINE_ID","lightmoni.machine_id"},{"LIGHTMONI_HOST_ID","host.id"},{"LIGHTMONI_AGENT_ID","lightmoni.agent_id"},{"LIGHTMONI_APPLICATION_ID","lightmoni.application_id"},{"LIGHTMONI_CLUSTER_ID","lightmoni.cluster_id"},{"LIGHTMONI_DEPLOYMENT_ID","lightmoni.deployment_id"}}) {String value=env(pair[0]);if(!value.isEmpty())values.put(pair[1],value);}
         values.putAll(overrides);
         if(instance==null){instance=env("LIGHTMONI_INSTANCE_ID");if(instance.isEmpty())instance=UUID.randomUUID().toString();}

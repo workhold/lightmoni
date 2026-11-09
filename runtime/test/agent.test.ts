@@ -404,6 +404,8 @@ test("control registers, acknowledges runtime events and persists tasks for offl
 
 test("real host collection uses TS SDK and selected destination; HTTP/TCP probes report actual outcomes", async (t) => {
   const a = make(t);
+  assert(Number.isInteger(a.status().cpu_count) && a.status().cpu_count! > 0);
+  assert(Number.isFinite(a.status().memory_total_mb) && a.status().memory_total_mb! > 0);
   a.applyRemote({
     revision: "host-1",
     collect_interval_seconds: 15,

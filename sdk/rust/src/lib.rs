@@ -34,6 +34,28 @@ fn attrs(values: &Attributes) -> Result<Value> {
     if result.to_string().len()>4096 { return Err("attribute bytes exceeded".into()); }
     Ok(result)
 }
+// Read once when creating the shared resource; explicit resource and deployment names win.
+fn local_hostname() -> Option<String> {
+    #[cfg(unix)] {
+        let mut bytes = [0u8; 256];
+        // gethostname writes at most the supplied buffer length. Find NUL before decoding.
+        if unsafe { libc::gethostname(bytes.as_mut_ptr().cast(), bytes.len()) } == 0 {
+            let end = bytes.iter().position(|v| *v == 0).unwrap_or(bytes.len());
+            if let Ok(name) = std::str::from_utf8(&bytes[..end]) {
+                if !name.is_empty() { return Some(name.to_owned()); }
+            }
+        }
+    }
+    #[cfg(windows)] {
+        #[link(name = "kernel32")]
+        extern "system" { fn GetComputerNameW(buffer: *mut u16, size: *mut u32) -> i32; }
+        let mut bytes = [0u16; 256]; let mut size = bytes.len() as u32;
+        if unsafe { GetComputerNameW(bytes.as_mut_ptr(), &mut size) } != 0 {
+            return String::from_utf16(&bytes[..size as usize]).ok().filter(|name| !name.is_empty());
+        }
+    }
+    None
+}
 fn table(v:&str)->Result<String> {
     if v.is_empty() || v.len()>48 || !v.as_bytes()[0].is_ascii_lowercase()
         || !v.bytes().all(|c|c.is_ascii_lowercase() || c.is_ascii_digit() || c==b'_')
@@ -185,6 +207,7 @@ impl Client {
         let stats=["pending_batches","pending_bytes","buffer_bytes","delivered_batches","retried_batches","invalid_records","overflow_records","dropped_records","rejected_records"].iter().map(|n|(n.to_string(),0)).collect();
         if overrides.contains_key("service.name")||overrides.contains_key("service.instance.id"){return Err("configure service identity separately".into());}
         let mut values=Attributes::new();
+        if let Some(name)=local_hostname(){values.insert("host.name".into(),name.into());}
         for(name,attribute) in [("LIGHTMONI_MACHINE_NAME","host.name"),("LIGHTMONI_MACHINE_ID","lightmoni.machine_id"),("LIGHTMONI_HOST_ID","host.id"),("LIGHTMONI_AGENT_ID","lightmoni.agent_id"),("LIGHTMONI_APPLICATION_ID","lightmoni.application_id"),("LIGHTMONI_CLUSTER_ID","lightmoni.cluster_id"),("LIGHTMONI_DEPLOYMENT_ID","lightmoni.deployment_id")] {
             if let Ok(value)=std::env::var(name){if !value.is_empty(){values.insert(attribute.into(),value.into());}}
         }
@@ -353,3 +376,25 @@ impl Span {
     pub fn end(&mut self){if self.ended{return;}self.ended=true;let start=self.data["startTimeUnixNano"].as_str().unwrap().parse::<u128>().unwrap();self.data["endTimeUnixNano"]=json!(nano().max(start).to_string());self.client.state.lock().unwrap().store(&self.client.table,"traces",self.data.clone());}
 }
 impl Drop for Span {fn drop(&mut self){if !self.ended && std::thread::panicking(){self.set_error("span scope panicked");}self.end();}}
+
+#[cfg(test)]
+mod hostname_tests {
+    use super::*;
+    #[test]
+    fn hostname_is_default_and_explicit_resource_has_priority() {
+        let local = local_hostname().expect("OS hostname should be available in the test runtime");
+        let expected = std::env::var("LIGHTMONI_MACHINE_NAME").ok().filter(|name| !name.is_empty()).unwrap_or(local);
+        let read = |client: &Client| {
+            client.state.lock().unwrap().resource["attributes"].as_array().unwrap().iter()
+                .find(|attribute| attribute["key"] == "host.name").unwrap()["value"]["stringValue"].as_str().unwrap().to_owned()
+        };
+        let limits = Limits {self_telemetry:false,..Limits::default()};
+        let plain = Client::with_limits("hostname", "http", "http://127.0.0.1:9", "", limits.clone()).unwrap();
+        assert_eq!(read(&plain), expected);
+        let explicit = Client::with_identity("hostname", "http", "http://127.0.0.1:9", "", limits,
+            Attributes::from([("host.name".into(),"explicit-host".into())]),None).unwrap();
+        assert_eq!(read(&explicit), "explicit-host");
+        plain.shutdown(Duration::from_millis(1)).unwrap();
+        explicit.shutdown(Duration::from_millis(1)).unwrap();
+    }
+}

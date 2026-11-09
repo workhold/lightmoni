@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createLightMoni as createCore, extractTrace, injectTrace, type LightMoni, type Options, type TraceContext } from "./core.js";
 export * from "./core.js";
@@ -5,7 +6,7 @@ const context = new AsyncLocalStorage<TraceContext>();
 export type NodeOptions = Omit<Options,'service'> & {service?:string};
 export function createLightMoni(options: NodeOptions = {}) {
   const fields:Record<string,string>={LIGHTMONI_MACHINE_NAME:'host.name',LIGHTMONI_MACHINE_ID:'lightmoni.machine_id',LIGHTMONI_HOST_ID:'host.id',LIGHTMONI_AGENT_ID:'lightmoni.agent_id',LIGHTMONI_APPLICATION_ID:'lightmoni.application_id',LIGHTMONI_CLUSTER_ID:'lightmoni.cluster_id',LIGHTMONI_DEPLOYMENT_ID:'lightmoni.deployment_id'};
-  const resource=Object.fromEntries(Object.entries(fields).flatMap(([variable,key])=>process.env[variable]?[[key,process.env[variable]!]]:[]));
+  const resource={'host.name':hostname(),...Object.fromEntries(Object.entries(fields).flatMap(([variable,key])=>process.env[variable]?[[key,process.env[variable]!]]:[]))};
   return createCore({...options,service:options.service??process.env.LIGHTMONI_SERVICE??'',endpoint:options.endpoint??process.env.LIGHTMONI_ENDPOINT,key:options.key??process.env.LIGHTMONI_KEY,instance_id:options.instance_id??options.instanceId??process.env.LIGHTMONI_INSTANCE_ID,env:options.env??process.env.LIGHTMONI_ENV,service_version:options.service_version??process.env.LIGHTMONI_SERVICE_VERSION,resource:{...resource,...options.resource},contextProvider:()=>context.getStore()??options.contextProvider?.(),contextRunner:options.contextRunner??withTrace});
 }
 export function withTrace<T>(trace: TraceContext, action: () => T): T {

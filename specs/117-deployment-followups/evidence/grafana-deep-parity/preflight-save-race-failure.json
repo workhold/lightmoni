@@ -1,0 +1,18 @@
+{
+  "run": "repeat-2",
+  "passed": false,
+  "checks": [
+    "长指标名称完整呈现，统计列保持对齐，不依赖鼠标提示",
+    "变量 URL、联动查询、全部值展开与标题插值；浏览器后退/前进还原筛选",
+    "多选参数使用重复 var-*，切换全部/单值后刷新仍保持",
+    "自动刷新参数写入 URL，并在刷新页面时读回",
+    "设置页修改变量、默认时间、描述、标签、分组与携带时间/变量的链接",
+    "受控 503 保留设置草稿；重试保存并刷新，从 SQLite 读回分组和全部设置",
+    "分组收起/展开，收起后刷新只查询可见图表",
+    "分享链接携带时间、多选变量和刷新；独立预览只查询单图，重载后保持并可返回",
+    "viewPanel 页面与历史导航联动，Esc 返回大盘",
+    "逐项切换全部十种现有可视化，字段适配与渲染无错误"
+  ],
+  "errors": [],
+  "error": "Error: expect(locator).toHaveCount(expected) failed\n\nLocator:  getByRole('dialog', { name: '保存大盘', exact: true })\nExpected: 0\nReceived: 1\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCount\" getByRole('dialog', { name: '保存大盘', exact: true }) with timeout 5000ms\n  - waiting for getByRole('dialog', { name: '保存大盘', exact: true })\n    14 × locator resolved to 1 element\n       - unexpected value \"1\"\n"
+}

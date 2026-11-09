@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "backend_languages": ["go", "typescript", "python", "ruby", "java", "dotnet", "php", "rust"],
+  "node_tests": 28,
+  "python_tests": 36,
+  "go": "go test ./sdk/go passed",
+  "native_command": "python3 scripts/test-sdks.py --docker --cases fixture,trace_scope",
+  "native_languages": ["python", "ruby", "java", "dotnet", "php", "rust"],
+  "native_cases_per_language": ["fixture", "trace_scope"],
+  "native_passed": 12,
+  "rust_build": "success (locked dependencies, rust:1-bookworm container)",
+  "rust_source_unit_tests": 6,
+  "rust_unit_execution": "rustc --edition=2021 --test sdk/rust/src/lib.rs using the same container compiler and built locked rlib dependencies",
+  "checks": [
+    "All backend OTLP resources contain host.name",
+    "Node OS default covers logs/metrics/traces; browser remains portable",
+    "Go/Python/Node/Rust explicit resource overrides hostname; deployment values retained",
+    "Existing trace scopes, delivery protocol and identity fields retained"
+  ],
+  "limitations": [
+    "Windows-specific Rust hostname branch not executed on Windows",
+    "No production Agent upgrade or release performed"
+  ]
+}

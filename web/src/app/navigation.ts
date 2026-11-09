@@ -25,6 +25,8 @@ export const navigationGroups=[
   {path:'/data-management',label:'数据管理',english:'Data management',icon:DatabaseOutlined,adminOnly:false},
  ]},
  {id:'settings',label:'系统设置',english:'Settings',items:[
+  {path:'/system/monitoring',label:'系统监控',english:'System monitoring',icon:DashboardOutlined,adminOnly:false},
+  {path:'/system/backups',label:'备份与迁移',english:'Backup & migration',icon:DatabaseOutlined,adminOnly:true},
   {path:'/mcp-access',label:'MCP 接入',english:'MCP access',icon:ApiOutlined,adminOnly:false},
   {path:'/settings',label:'个人设置',english:'Personal settings',icon:SettingOutlined,adminOnly:false},
   {path:'/admin',label:'管理后台',english:'Administration',icon:SafetyCertificateOutlined,adminOnly:true},

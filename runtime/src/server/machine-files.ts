@@ -15,9 +15,28 @@ export function filePath(value: unknown): string {
 }
 const call = <T>(fn: (done: (error: any, value?: T) => void) => void): Promise<T> => new Promise((resolve, reject) => fn((error, value) => error ? reject(error) : resolve(value as T)));
 const version = (bytes: Buffer, stat: Stats) => digest(Buffer.from(JSON.stringify([digest(bytes),stat.size,stat.mtime,stat.mode,stat.uid,stat.gid])));
+const metadataVersion = (stat: Stats) => digest(Buffer.from(JSON.stringify([stat.size,stat.mtime,stat.mode,stat.uid,stat.gid])));
+const fileName = (value: unknown): string => {
+  if(typeof value!=='string'||!value||value==='.'||value==='..'||Buffer.byteLength(value)>255||/[\\/\x00-\x1f\x7f]/.test(value))fail(400,'invalid_file_name');
+  return value;
+};
+type FileAction = {operation:'create'|'mkdir'|'rename'|'remove'|'chmod';expected_version:string;confirmed:true;parent_version?:string;name?:string;mode?:string};
+function fileAction(value: unknown): FileAction {
+  const v=value as FileAction;
+  if(!v||typeof v!=='object'||Array.isArray(v)||!['create','mkdir','rename','remove','chmod'].includes(v.operation)||v.confirmed!==true)fail(400,'invalid_file_action');
+  const fields=['operation','expected_version','confirmed',...(['create','mkdir'].includes(v.operation)?['parent_version']:v.operation==='rename'?['name']:v.operation==='chmod'?['mode']:[])];
+  if(Object.keys(v).some(key=>!fields.includes(key)))fail(400,'invalid_file_action');
+  if(['create','mkdir'].includes(v.operation)) {
+    if(v.expected_version!=='new'||!/^[a-f0-9]{64}$/.test(v.parent_version??''))fail(400,'invalid_file_action');
+  }else if(!/^[a-f0-9]{64}$/.test(v.expected_version??''))fail(400,'invalid_file_action');
+  if(v.operation==='rename')fileName(v.name);
+  if(v.operation==='chmod'&&(typeof v.mode!=='string'||!/^0?[0-7]{3}$/.test(v.mode)))fail(400,'invalid_file_mode');
+  return v;
+}
 
 // All paths are remote. No shell interpolation or local filesystem operations.
 export class RemoteFiles {
+  mutationStarted = false;
   constructor(private sftp: SFTPWrapper, private check: () => void) {}
   private async invoke<T>(fn: (done: (error: any, value?: T) => void) => void) { this.check(); const value = await call(fn); this.check(); return value; }
   async target(path: string) {
@@ -31,7 +50,8 @@ export class RemoteFiles {
   async list(path: string) {
     const canonical = await this.invoke<string>(done => this.sftp.realpath(path, done));
     const handle = await this.invoke<Buffer>(done => this.sftp.opendir(canonical, done));
-    const entries: Array<{name:string;type:string;size:number;mode:string;modified_at:string}> = [];
+    const stat=await this.stat(canonical);if(!stat?.isDirectory())fail(409,'file_type_unsupported');
+    const entries: Array<{name:string;type:string;size:number;mode:string;modified_at:string;version:string}> = [];
     let truncated = false;
     try {
       while (true) {
@@ -41,13 +61,85 @@ export class RemoteFiles {
           if (item.filename === '.' || item.filename === '..') continue;
           if (entries.length === 2000) { truncated = true; break; }
           const stat = item.attrs as Stats;
-          entries.push({name:item.filename,type:stat.isSymbolicLink()?'symlink':stat.isDirectory()?'directory':stat.isFile()?'file':'special',size:stat.size,mode:(stat.mode & 0o7777).toString(8).padStart(4,'0'),modified_at:new Date(stat.mtime*1000).toISOString()});
+          entries.push({name:item.filename,type:stat.isSymbolicLink()?'symlink':stat.isDirectory()?'directory':stat.isFile()?'file':'special',size:stat.size,mode:(stat.mode & 0o7777).toString(8).padStart(4,'0'),modified_at:new Date(stat.mtime*1000).toISOString(),version:metadataVersion(stat)});
         }
         if (truncated) break;
       }
     } finally { await call(done => this.sftp.close(handle, done)); }
     entries.sort((a,b) => Number(b.type==='directory')-Number(a.type==='directory') || a.name.localeCompare(b.name));
-    return {path:canonical,entries,truncated};
+    const after=await this.stat(canonical);if(!after||metadataVersion(stat)!==metadataVersion(after))fail(409,'file_changed');
+    const directoryVersion=digest(Buffer.from(JSON.stringify([metadataVersion(after),entries.map(entry=>[entry.name,entry.version]).sort(([a],[b])=>a.localeCompare(b))])));
+    return {path:canonical,entries,truncated,version:directoryVersion};
+  }
+  /** Maintenance never downloads file contents. Directory versions also cover
+   * the bounded immediate child inventory; recursive traversal is not allowed. */
+  async metadata(path: string) {
+    path=await this.target(path);
+    const stat=await this.stat(path);if(!stat)fail(404,'file_not_found');
+    if(stat.isSymbolicLink()||!stat.isFile()&&!stat.isDirectory())fail(409,'file_type_unsupported');
+    let entryVersion=metadataVersion(stat),empty: boolean|undefined;
+    if(stat.isDirectory()) {
+      const directory=await this.list(path);
+      if(directory.truncated)fail(409,'file_directory_limit');
+      const latest=await this.stat(path);
+      if(directory.path!==path||!latest?.isDirectory()||latest.isSymbolicLink()||metadataVersion(latest)!==metadataVersion(stat))fail(409,'file_changed');
+      entryVersion=directory.version;empty=directory.entries.length===0;
+    }
+    return {path,type:stat.isDirectory()?'directory':'file',size:stat.size,mode:(stat.mode&0o7777).toString(8).padStart(4,'0'),version:entryVersion,...(empty===undefined?{}:{empty}),stat_version:metadataVersion(stat)};
+  }
+  private async mutate(fn: (done: (error: any, value?: void) => void) => void) {
+    this.check();this.mutationStarted=true;
+    try {await call(fn);}catch(error:any){if([2,3,11].includes(error.code))this.mutationStarted=false;throw error;}
+    this.check();
+  }
+  async action(path: string, input: FileAction) {
+    if(path==='/')fail(400,'file_root_mutation_forbidden');
+    fileName(posix.basename(path));path=await this.target(path);
+    if(['create','mkdir'].includes(input.operation)) {
+      const parent=await this.metadata(posix.dirname(path));
+      if(parent.type!=='directory'||parent.version!==input.parent_version)fail(409,'file_changed');
+      if(await this.stat(path))fail(409,'file_already_exists');
+      if(input.operation==='mkdir')await this.mutate(done=>this.sftp.mkdir(path,{mode:0o700},done));
+      else {
+        this.check();this.mutationStarted=true;
+        let handle:Buffer;
+        try{handle=await call<Buffer>(done=>this.sftp.open(path,'wx',0o600,done));}
+        catch(error:any){if([2,3,4,11].includes(error.code)){this.mutationStarted=false;if([4,11].includes(error.code))fail(409,'file_already_exists');}throw error;}
+        try{this.check();}finally{await call(done=>this.sftp.close(handle,done));}
+      }
+      const saved=await this.metadata(path);
+      if(saved.type!==(input.operation==='mkdir'?'directory':'file')||saved.type==='file'&&saved.size!==0||saved.type==='directory'&&!saved.empty)fail(409,'file_action_unverified');
+      return saved;
+    }
+    const current=await this.metadata(path);
+    if(current.version!==input.expected_version)fail(409,'file_changed');
+    if(input.operation==='rename') {
+      const destination=posix.join(posix.dirname(path),fileName(input.name));
+      if(destination===path)fail(400,'invalid_file_name');
+      if(await this.stat(destination))fail(409,'file_already_exists');
+      // The standard SFTP v3 rename is non-overwriting. Do not use the
+      // OpenSSH POSIX rename extension, which replaces an existing target.
+      await this.mutate(done=>this.sftp.rename(path,destination,done));
+      const saved=await this.metadata(destination);
+      if(await this.stat(path)||saved.version!==current.version)fail(409,'file_action_unverified');
+      return saved;
+    }
+    if(input.operation==='remove') {
+      if(current.type==='directory'&&!current.empty)fail(409,'file_directory_not_empty');
+      await this.mutate(done=>current.type==='directory'?this.sftp.rmdir(path,done):this.sftp.unlink(path,done));
+      if(await this.stat(path))fail(409,'file_action_unverified');
+      return {path,removed:true};
+    }
+    const mode=parseInt(input.mode!,8);
+    const handle=await this.invoke<Buffer>(done=>current.type==='directory'?this.sftp.opendir(path,done):this.sftp.open(path,'r',done));
+    try {
+      const opened=await this.invoke<Stats>(done=>this.sftp.fstat(handle,done));
+      if(metadataVersion(opened)!==current.stat_version)fail(409,'file_changed');
+      await this.mutate(done=>this.sftp.fsetstat(handle,{mode},done));
+    }finally{await call(done=>this.sftp.close(handle,done));}
+    const saved=await this.metadata(path);
+    if(saved.type!==current.type||parseInt(saved.mode,8)!==mode||saved.size!==current.size)fail(409,'file_action_unverified');
+    return saved;
   }
   async read(path: string, limit = UPLOAD_LIMIT) {
     const stat = await this.stat(path);
@@ -133,7 +225,7 @@ export function registerMachineFiles(deps: Dependencies, machines: MachineTermin
     const client = new Client();
     const lease = machines.acquireTerminal(ctx.params.id,credential,()=>client.destroy());
     connections.add(client);
-    let result = 'failed', mismatch=false;
+    let result = 'failed', mismatch=false, remote:RemoteFiles|undefined;
     const check=()=>{human(ctx);ctx.signal.throwIfAborted();if(!lease.valid())fail(409,'file_credential_changed');};
     const abort=()=>client.destroy();ctx.signal.addEventListener('abort',abort,{once:true});
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -146,7 +238,7 @@ export function registerMachineFiles(deps: Dependencies, machines: MachineTermin
           client.once('ready',()=>{
             try { check();lease.markUsed();client.sftp((error,sftp)=>{
               if(error)return reject(new HTTPError(502,'file_sftp_unavailable'));
-              work(new RemoteFiles(sftp,check),path,ctx).then(resolve,reject);
+              remote=new RemoteFiles(sftp,check);work(remote,path,ctx).then(resolve,reject);
             }); } catch(error) {reject(error);}
           });
           const m=lease.machine;
@@ -158,7 +250,8 @@ export function registerMachineFiles(deps: Dependencies, machines: MachineTermin
       ]);
       check();result='succeeded';ctx.json({machine_id:ctx.params.id,...value as object});
     } catch (error: any) {
-      if(['write','upload'].includes(operation)&&(!(error instanceof HTTPError)||error.status>=500||error.message==='file_write_unverified'))result='unknown';
+      if(remote?.mutationStarted||['write','upload'].includes(operation)&&(!(error instanceof HTTPError)||error.status>=500||error.message==='file_write_unverified'))result='unknown';
+      if(remote?.mutationStarted)fail(409,'file_action_unverified');
       if (error instanceof HTTPError) throw error;
       if (error.code===2) fail(404,'file_not_found');
       if (error.code===3) fail(403,'file_permission_denied');
@@ -179,6 +272,12 @@ export function registerMachineFiles(deps: Dependencies, machines: MachineTermin
   deps.router.get(base+'/files',run('list',(files,path)=>files.list(path)));
   deps.router.get(base+'/file',run('read',(files,path)=>files.text(path)));
   deps.router.get(base+'/file-version',run('version',async(files,path)=>({path,version:(await files.read(path))?.version??null})));
+  deps.router.get(base+'/file-metadata',run('metadata',(files,path)=>files.metadata(path)));
+  deps.router.post(base+'/file-actions',async ctx=>{
+    human(ctx);
+    const input=fileAction(await ctx.body());
+    return run(input.operation,(files,path)=>files.action(path,input))(ctx);
+  });
   deps.router.put(base+'/file',run('write',async(files,path,ctx)=>{
     const input=await ctx.body<any>();
     if(!input||Array.isArray(input)||Object.keys(input).some(k=>!['content','expected_version','confirmed'].includes(k))||input.confirmed!==true||typeof input.content!=='string'||!/^[a-f0-9]{64}$/.test(input.expected_version??''))fail(400,'invalid_file_write');

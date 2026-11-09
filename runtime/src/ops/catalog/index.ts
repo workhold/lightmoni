@@ -31,6 +31,7 @@ export const extendedCatalog = extendedDefinitions.map((d) => d.template);
 export function extendedInstallation(
   id: string,
   input: Input,
+  preview = false,
 ): Input | undefined {
   const def = extendedDefinitions.find((d) => d.template.id === id);
   if (!def) return;
@@ -54,7 +55,7 @@ export function extendedInstallation(
     return hostPortOverrides(d.host_ports, ports) ?? {};
   });
   const ctx: BuildContext = {
-    preview: false,
+    preview,
     deployment_mode: mode,
     host_ports: Object.fromEntries(
       ports.map(v => [

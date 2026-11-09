@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 const base = process.env.LIGHTMONI_UI_URL ?? 'http://localhost:15174';
 const center = process.env.LIGHTMONI_QA_CENTER_URL ?? 'http://localhost:18380';
 const phase = process.env.LIGHTMONI_PERF_PHASE ?? 'optimized';
-const output = resolve(import.meta.dirname, '../../../../docs/evidence/log-performance');
+const output = resolve(process.env.LIGHTMONI_QA_OUTPUT ?? resolve(import.meta.dirname, '../../../../docs/evidence/log-performance'));
 await mkdir(output, { recursive: true });
 const api = await request.newContext({ baseURL: center });
 const login = await api.post('/api/v1/auth/login', { data: {

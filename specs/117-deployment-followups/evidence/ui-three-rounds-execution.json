@@ -1,0 +1,110 @@
+[
+  {
+    "round": "final-1",
+    "script": "web/src/app/verify-native-monitoring.mjs",
+    "started": "2026-11-09T14:42:51.316Z",
+    "ended": "2026-11-09T14:42:56.065Z",
+    "exit_code": 0,
+    "stdout": "{\"passed\":true,\"checks\":[\"real capacity projection and host row link; parameterized machine/Agent scope; real SDK host measurements render three charts without query error\",\"system menu renders read-only platform monitoring; user dashboard directory excludes unchanged builtins\",\"390px English host/system pages fit viewport\"]}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-1",
+    "script": "web/src/features/logs/verify-performance.mjs",
+    "started": "2026-11-09T14:42:56.066Z",
+    "ended": "2026-11-09T14:43:03.176Z",
+    "exit_code": 0,
+    "stdout": "{\"phase\":\"final-1\",\"passed\":true,\"measurements\":{\"loadMs\":3012,\"loaded\":{\"parses\":2041,\"cellTimes\":17,\"longTasks\":[{\"start\":171.5999999642372,\"duration\":116},{\"start\":561.5,\"duration\":51},{\"start\":706,\"duration\":167},{\"start\":883.3999999761581,\"duration\":331},{\"start\":1323.199999988079,\"duration\":61},{\"start\":1405.5,\"duration\":59},{\"start\":1538.800000011921,\"duration\":53},{\"start\":1596.699999988079,\"duration\":58},{\"start\":1721.3999999761581,\"duration\":53},{\"start\":1778.3999999761581,\"duration\":60},{\"start\":1904.5,\"duration\":52},{\"start\":1961,\"duration\":57},{\"start\":2088,\"duration\":162},{\"start\":2257.300000011921,\"duration\":62},{\"start\":2355.099999964237,\"duration\":54},{\"start\":2413.899999976158,\"duration\":61},{\"start\":2522.300000011921,\"duration\":52},{\"start\":2578.5,\"duration\":59},{\"start\":2689,\"duration\":51},{\"start\":2744,\"duration\":56},{\"start\":2875.099999964237,\"duration\":52},{\"start\":2931.599999964237,\"duration\":75}],\"at\":3013.599999964237},\"keyword\":{\"ms\":385.9000000357628,\"attributeParses\":0,\"timeCellRenders\":0,\"longTasks\":[{\"start\":3053.599999964237,\"duration\":96},{\"start\":3152.399999976158,\"duration\":85}]},\"fields\":{\"ms\":29.899999976158142,\"attributeParses\":0,\"timeCellRenders\":0}}}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-1",
+    "script": "web/src/features/dashboards/verify-grafana-parity.mjs",
+    "started": "2026-11-09T14:43:03.176Z",
+    "ended": "2026-11-09T14:43:29.585Z",
+    "exit_code": 0,
+    "stdout": "{\"run\":\"final-1\",\"passed\":true,\"checks\":[\"默认查看模式、无拖动/缩放控件；3 个 uPlot、柱图及堆叠面积同时展示真实 ClickHouse 结果\",\"鼠标连续扫过曲线：共享提示、同步十字线；没有 SQL 请求、绘图提交或 Canvas 重建，记录帧间隔\",\"图例单击隔离/恢复，Shift 与 Ctrl/Cmd 切换单条，隐藏不发 SQL 且不重建图表\",\"刷新等待期间保留画布和旧结果，用细进度条反馈；完成后沿用原图表实例\",\"受控 503 保留上次结果并显示过期说明；恢复后重新查询成功\",\"拖选只在松手时同步全局时间和 URL，双击扩大 2×；Canvas 实例保留\",\"时间选择支持搜索输入 13h、昨天的整日边界及常用相对时间\",\"面板菜单和 V 快捷键全屏查看，Esc 返回\",\"编辑后拖动/键盘缩放不触发查询；保存后退出编辑，刷新读回持久布局\",\"面板预览时间独立可调，分隔条键盘调整，阶梯插值和名称保存读回；保存失败保留输入并可重试\",\"刷新恢复草稿后放弃编辑，正确恢复服务端已保存定义\",\"751/390px、时间弹层、浅色主题、200% 和减少动态效果检查\"],\"metrics\":{\"hover\":{\"samples\":83,\"p50\":16.699999999999818,\"p95\":16.799999999999955,\"max\":16.800000000000182}}}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-1",
+    "script": "web/src/features/dashboards/verify-deep-parity.mjs",
+    "started": "2026-11-09T14:43:29.585Z",
+    "ended": "2026-11-09T14:44:19.057Z",
+    "exit_code": 0,
+    "stdout": "{\"run\":\"final-1\",\"passed\":true,\"checks\":[\"长指标名称完整呈现，统计列保持对齐，不依赖鼠标提示\",\"变量 URL、联动查询、全部值展开与标题插值；浏览器后退/前进还原筛选\",\"多选参数使用重复 var-*，切换全部/单值后刷新仍保持\",\"自动刷新参数写入 URL，并在刷新页面时读回\",\"设置页修改变量、默认时间、描述、标签、分组与携带时间/变量的链接\",\"受控 503 保留设置草稿；重试保存并刷新，从 SQLite 读回分组和全部设置\",\"分组收起/展开，收起后刷新只查询可见图表\",\"分享链接携带时间、多选变量和刷新；独立预览只查询单图，重载后保持并可返回\",\"viewPanel 页面与历史导航联动，Esc 返回大盘\",\"逐项切换全部十种现有可视化，字段适配与渲染无错误\",\"面板编辑器分区设置/搜索、切换可视化和表格预览、应用与保存读回\",\"751px / 390px 的编辑器设置抽屉和大盘设置可用，页面无横向溢出\",\"等效 200% 编辑器使用下方图例和高分辨率画布，纵向滚动可访问完整 SQL\",\"复制图表保留所属分组，分组可重排/移除并保留图表；放弃草稿完整恢复服务端定义\",\"复制大盘重建面板/分组身份且组内引用保持正确\"],\"errors\":[],\"dashboardWrites\":[{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/5b5f5240-2e11-4576-adcc-9a4fdb47f786\",\"status\":503},{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/5b5f5240-2e11-4576-adcc-9a4fdb47f786\",\"status\":200},{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/5b5f5240-2e11-4576-adcc-9a4fdb47f786\",\"status\":200},{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/5b5f5240-2e11-4576-adcc-9a4fdb47f786\",\"status\":200}],\"queryRequests\":74,\"source\":\"真实 SQLite/ClickHouse；临时生成信号；保存 503 为受控测试\"}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-2",
+    "script": "web/src/app/verify-native-monitoring.mjs",
+    "started": "2026-11-09T14:44:19.057Z",
+    "ended": "2026-11-09T14:44:23.374Z",
+    "exit_code": 0,
+    "stdout": "{\"passed\":true,\"checks\":[\"real capacity projection and host row link; parameterized machine/Agent scope; real SDK host measurements render three charts without query error\",\"system menu renders read-only platform monitoring; user dashboard directory excludes unchanged builtins\",\"390px English host/system pages fit viewport\"]}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-2",
+    "script": "web/src/features/logs/verify-performance.mjs",
+    "started": "2026-11-09T14:44:23.374Z",
+    "ended": "2026-11-09T14:44:30.439Z",
+    "exit_code": 0,
+    "stdout": "{\"phase\":\"final-2\",\"passed\":true,\"measurements\":{\"loadMs\":3185,\"loaded\":{\"parses\":2041,\"cellTimes\":17,\"longTasks\":[{\"start\":153.5,\"duration\":110},{\"start\":674.8999999761581,\"duration\":151},{\"start\":835.3999999761581,\"duration\":173},{\"start\":1229.699999988079,\"duration\":165},{\"start\":1413.800000011921,\"duration\":57},{\"start\":1544.3999999761581,\"duration\":52},{\"start\":1600.8999999761581,\"duration\":57},{\"start\":1727,\"duration\":51},{\"start\":1783.300000011921,\"duration\":54},{\"start\":1910.8999999761581,\"duration\":51},{\"start\":1965.800000011921,\"duration\":55},{\"start\":2094,\"duration\":157},{\"start\":2255.399999976158,\"duration\":55},{\"start\":2377.800000011921,\"duration\":50},{\"start\":2431.399999976158,\"duration\":55},{\"start\":2560.600000023842,\"duration\":54},{\"start\":2620.399999976158,\"duration\":54},{\"start\":2797.899999976158,\"duration\":57},{\"start\":2927.800000011921,\"duration\":50},{\"start\":2981.600000023842,\"duration\":197}],\"at\":3185.399999976158},\"keyword\":{\"ms\":258.19999998807907,\"attributeParses\":0,\"timeCellRenders\":0,\"longTasks\":[{\"start\":3197,\"duration\":63}]},\"fields\":{\"ms\":42.700000047683716,\"attributeParses\":0,\"timeCellRenders\":0}}}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-2",
+    "script": "web/src/features/dashboards/verify-grafana-parity.mjs",
+    "started": "2026-11-09T14:44:30.439Z",
+    "ended": "2026-11-09T14:44:56.429Z",
+    "exit_code": 0,
+    "stdout": "{\"run\":\"final-2\",\"passed\":true,\"checks\":[\"默认查看模式、无拖动/缩放控件；3 个 uPlot、柱图及堆叠面积同时展示真实 ClickHouse 结果\",\"鼠标连续扫过曲线：共享提示、同步十字线；没有 SQL 请求、绘图提交或 Canvas 重建，记录帧间隔\",\"图例单击隔离/恢复，Shift 与 Ctrl/Cmd 切换单条，隐藏不发 SQL 且不重建图表\",\"刷新等待期间保留画布和旧结果，用细进度条反馈；完成后沿用原图表实例\",\"受控 503 保留上次结果并显示过期说明；恢复后重新查询成功\",\"拖选只在松手时同步全局时间和 URL，双击扩大 2×；Canvas 实例保留\",\"时间选择支持搜索输入 13h、昨天的整日边界及常用相对时间\",\"面板菜单和 V 快捷键全屏查看，Esc 返回\",\"编辑后拖动/键盘缩放不触发查询；保存后退出编辑，刷新读回持久布局\",\"面板预览时间独立可调，分隔条键盘调整，阶梯插值和名称保存读回；保存失败保留输入并可重试\",\"刷新恢复草稿后放弃编辑，正确恢复服务端已保存定义\",\"751/390px、时间弹层、浅色主题、200% 和减少动态效果检查\"],\"metrics\":{\"hover\":{\"samples\":83,\"p50\":16.699999999999818,\"p95\":16.700000000000273,\"max\":16.799999999999955}}}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-2",
+    "script": "web/src/features/dashboards/verify-deep-parity.mjs",
+    "started": "2026-11-09T14:44:56.429Z",
+    "ended": "2026-11-09T14:45:46.790Z",
+    "exit_code": 0,
+    "stdout": "{\"run\":\"final-2\",\"passed\":true,\"checks\":[\"长指标名称完整呈现，统计列保持对齐，不依赖鼠标提示\",\"变量 URL、联动查询、全部值展开与标题插值；浏览器后退/前进还原筛选\",\"多选参数使用重复 var-*，切换全部/单值后刷新仍保持\",\"自动刷新参数写入 URL，并在刷新页面时读回\",\"设置页修改变量、默认时间、描述、标签、分组与携带时间/变量的链接\",\"受控 503 保留设置草稿；重试保存并刷新，从 SQLite 读回分组和全部设置\",\"分组收起/展开，收起后刷新只查询可见图表\",\"分享链接携带时间、多选变量和刷新；独立预览只查询单图，重载后保持并可返回\",\"viewPanel 页面与历史导航联动，Esc 返回大盘\",\"逐项切换全部十种现有可视化，字段适配与渲染无错误\",\"面板编辑器分区设置/搜索、切换可视化和表格预览、应用与保存读回\",\"751px / 390px 的编辑器设置抽屉和大盘设置可用，页面无横向溢出\",\"等效 200% 编辑器使用下方图例和高分辨率画布，纵向滚动可访问完整 SQL\",\"复制图表保留所属分组，分组可重排/移除并保留图表；放弃草稿完整恢复服务端定义\",\"复制大盘重建面板/分组身份且组内引用保持正确\"],\"errors\":[],\"dashboardWrites\":[{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/efd654d2-377c-4f92-bff8-0fdd76d4f689\",\"status\":503},{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/efd654d2-377c-4f92-bff8-0fdd76d4f689\",\"status\":200},{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/efd654d2-377c-4f92-bff8-0fdd76d4f689\",\"status\":200},{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/efd654d2-377c-4f92-bff8-0fdd76d4f689\",\"status\":200}],\"queryRequests\":74,\"source\":\"真实 SQLite/ClickHouse；临时生成信号；保存 503 为受控测试\"}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-3",
+    "script": "web/src/app/verify-native-monitoring.mjs",
+    "started": "2026-11-09T14:45:46.791Z",
+    "ended": "2026-11-09T14:45:51.397Z",
+    "exit_code": 0,
+    "stdout": "{\"passed\":true,\"checks\":[\"real capacity projection and host row link; parameterized machine/Agent scope; real SDK host measurements render three charts without query error\",\"system menu renders read-only platform monitoring; user dashboard directory excludes unchanged builtins\",\"390px English host/system pages fit viewport\"]}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-3",
+    "script": "web/src/features/logs/verify-performance.mjs",
+    "started": "2026-11-09T14:45:51.397Z",
+    "ended": "2026-11-09T14:45:58.893Z",
+    "exit_code": 0,
+    "stdout": "{\"phase\":\"final-3\",\"passed\":true,\"measurements\":{\"loadMs\":3339,\"loaded\":{\"parses\":2041,\"cellTimes\":17,\"longTasks\":[{\"start\":179.80000001192093,\"duration\":120},{\"start\":551,\"duration\":53},{\"start\":718.8999999761581,\"duration\":176},{\"start\":914.1000000238419,\"duration\":360},{\"start\":1469.6000000238419,\"duration\":68},{\"start\":1559.800000011921,\"duration\":64},{\"start\":1668.6000000238419,\"duration\":60},{\"start\":1736.8999999761581,\"duration\":66},{\"start\":1885.199999988079,\"duration\":57},{\"start\":1947.5,\"duration\":65},{\"start\":2085.100000023842,\"duration\":176},{\"start\":2265.699999988079,\"duration\":59},{\"start\":2368.300000011921,\"duration\":57},{\"start\":2429.899999976158,\"duration\":65},{\"start\":2568.5,\"duration\":54},{\"start\":2626.899999976158,\"duration\":60},{\"start\":2734.899999976158,\"duration\":54},{\"start\":2793.100000023842,\"duration\":57},{\"start\":2918.199999988079,\"duration\":56},{\"start\":2980.399999976158,\"duration\":57},{\"start\":3085.300000011921,\"duration\":164},{\"start\":3254.300000011921,\"duration\":80}],\"at\":3341.100000023842},\"keyword\":{\"ms\":250.19999998807907,\"attributeParses\":0,\"timeCellRenders\":0,\"longTasks\":[]},\"fields\":{\"ms\":56.5,\"attributeParses\":0,\"timeCellRenders\":0}}}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-3",
+    "script": "web/src/features/dashboards/verify-grafana-parity.mjs",
+    "started": "2026-11-09T14:45:58.893Z",
+    "ended": "2026-11-09T14:46:25.542Z",
+    "exit_code": 0,
+    "stdout": "{\"run\":\"final-3\",\"passed\":true,\"checks\":[\"默认查看模式、无拖动/缩放控件；3 个 uPlot、柱图及堆叠面积同时展示真实 ClickHouse 结果\",\"鼠标连续扫过曲线：共享提示、同步十字线；没有 SQL 请求、绘图提交或 Canvas 重建，记录帧间隔\",\"图例单击隔离/恢复，Shift 与 Ctrl/Cmd 切换单条，隐藏不发 SQL 且不重建图表\",\"刷新等待期间保留画布和旧结果，用细进度条反馈；完成后沿用原图表实例\",\"受控 503 保留上次结果并显示过期说明；恢复后重新查询成功\",\"拖选只在松手时同步全局时间和 URL，双击扩大 2×；Canvas 实例保留\",\"时间选择支持搜索输入 13h、昨天的整日边界及常用相对时间\",\"面板菜单和 V 快捷键全屏查看，Esc 返回\",\"编辑后拖动/键盘缩放不触发查询；保存后退出编辑，刷新读回持久布局\",\"面板预览时间独立可调，分隔条键盘调整，阶梯插值和名称保存读回；保存失败保留输入并可重试\",\"刷新恢复草稿后放弃编辑，正确恢复服务端已保存定义\",\"751/390px、时间弹层、浅色主题、200% 和减少动态效果检查\"],\"metrics\":{\"hover\":{\"samples\":83,\"p50\":16.699999999999818,\"p95\":16.700000000000273,\"max\":16.799999999999955}}}\n",
+    "stderr": ""
+  },
+  {
+    "round": "final-3",
+    "script": "web/src/features/dashboards/verify-deep-parity.mjs",
+    "started": "2026-11-09T14:46:25.542Z",
+    "ended": "2026-11-09T14:47:15.703Z",
+    "exit_code": 0,
+    "stdout": "{\"run\":\"final-3\",\"passed\":true,\"checks\":[\"长指标名称完整呈现，统计列保持对齐，不依赖鼠标提示\",\"变量 URL、联动查询、全部值展开与标题插值；浏览器后退/前进还原筛选\",\"多选参数使用重复 var-*，切换全部/单值后刷新仍保持\",\"自动刷新参数写入 URL，并在刷新页面时读回\",\"设置页修改变量、默认时间、描述、标签、分组与携带时间/变量的链接\",\"受控 503 保留设置草稿；重试保存并刷新，从 SQLite 读回分组和全部设置\",\"分组收起/展开，收起后刷新只查询可见图表\",\"分享链接携带时间、多选变量和刷新；独立预览只查询单图，重载后保持并可返回\",\"viewPanel 页面与历史导航联动，Esc 返回大盘\",\"逐项切换全部十种现有可视化，字段适配与渲染无错误\",\"面板编辑器分区设置/搜索、切换可视化和表格预览、应用与保存读回\",\"751px / 390px 的编辑器设置抽屉和大盘设置可用，页面无横向溢出\",\"等效 200% 编辑器使用下方图例和高分辨率画布，纵向滚动可访问完整 SQL\",\"复制图表保留所属分组，分组可重排/移除并保留图表；放弃草稿完整恢复服务端定义\",\"复制大盘重建面板/分组身份且组内引用保持正确\"],\"errors\":[],\"dashboardWrites\":[{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/2c265897-9717-4531-bc87-cf18460e51fc\",\"status\":503},{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/2c265897-9717-4531-bc87-cf18460e51fc\",\"status\":200},{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/2c265897-9717-4531-bc87-cf18460e51fc\",\"status\":200},{\"method\":\"PUT\",\"path\":\"/api/v1/dashboards/2c265897-9717-4531-bc87-cf18460e51fc\",\"status\":200}],\"queryRequests\":74,\"source\":\"真实 SQLite/ClickHouse；临时生成信号；保存 503 为受控测试\"}\n",
+    "stderr": ""
+  }
+]

@@ -1,4 +1,6 @@
 import ApplicationLogo from './ApplicationLogo';
+import {useState} from 'react';
+import {ApplicationBackupDialog} from '../BackupTools';
 import {ArrowUpOutlined,CloudUploadOutlined,CodeOutlined,EllipsisOutlined,HistoryOutlined,LineChartOutlined,PlayCircleOutlined,ReloadOutlined,SettingOutlined} from '@ant-design/icons';
 import IconAction from './IconAction';
 import {App,Button,Dropdown,Empty,Space,Tag,Typography} from '../../shared/ui';
@@ -9,7 +11,7 @@ import {recoveryMessage} from './recovery-state';
 
 type Props={applications:Resource[];resources:Resource[];machines:Machine[];onEdit:(r:Resource)=>void;onLogo:(r:Resource)=>void;onAction:(r:Resource,action:string)=>void;onProgress:(r:Resource)=>void;onDetails:(r:Resource)=>void;onMonitor:(r:Resource)=>void;onDelete:(r:Resource)=>void;onUpgrade:(r:Resource)=>void;onTerminal:(r:Resource)=>void;onStore:()=>void;filter:string};
 export default function InstalledApplications({applications,resources,machines,onEdit,onLogo,onAction,onProgress,onDetails,onMonitor,onDelete,onUpgrade,onTerminal,onStore,filter}:Props){
- const {t}=useI18n(),{modal}=App.useApp();
+ const {t}=useI18n(),{modal}=App.useApp(),[backup,setBackup]=useState<Resource>();
  const labels:Record<string,[string,string]>={running:['运行中','Running'],pending:['待处理','Pending'],queued:['排队中','Queued'],failed:['失败','Failed'],unknown:['结果未知','Unknown'],stopped:['已停止','Stopped'],removed:['已卸载','Uninstalled'],configured:['未部署','Not deployed'],degraded:['部分失败','Degraded']};
  const state=(r:Resource)=>resourceState(r),name=(id:string)=>resources.find(r=>r.id===id)?.name??id;
  const filtered=filterApplicationsByState(applications,filter),hasApplications=resources.some(r=>r.kind==='application');
@@ -33,11 +35,12 @@ export default function InstalledApplications({applications,resources,machines,o
      ...(running?[{key:'deploy',label:deployLabel}]:[]),
      {key:'stop',label:t('停止','Stop'),disabled:!current.length||unknown||s==='stopped'},
      {key:'logo',label:t('设置 Logo','Set logo')},
+     {key:'backup',label:t('备份应用','Back up application')},
      {type:'divider'},
      {key:'remove',label:t('卸载容器','Uninstall containers'),disabled:!current.length||unknown,danger:true},
      {key:'delete',label:t('删除登记','Delete registration'),danger:true},
-    ],onClick:({key})=>{if(key==='logo')onLogo(r);else if(key==='delete')modal.confirm({title:t('删除应用登记？','Delete application registration?'),content:t('需先卸载容器并解除引用。持久化数据保留。','Uninstall containers and remove references first. Persistent data is retained.'),okText:t('删除','Delete'),cancelText:t('取消','Cancel'),okButtonProps:{danger:true},onOk:()=>onDelete(r)});else onAction(r,key)}}}><IconAction label={t('更多操作','More actions')} type="text" aria-label={t('更多操作','More actions')+' · '+r.name} icon={<EllipsisOutlined aria-hidden/>}/></Dropdown>
+    ],onClick:({key})=>{if(key==='backup')setBackup(r);else if(key==='logo')onLogo(r);else if(key==='delete')modal.confirm({title:t('删除应用登记？','Delete application registration?'),content:t('需先卸载容器并解除引用。持久化数据保留。','Uninstall containers and remove references first. Persistent data is retained.'),okText:t('删除','Delete'),cancelText:t('取消','Cancel'),okButtonProps:{danger:true},onOk:()=>onDelete(r)});else onAction(r,key)}}}><IconAction label={t('更多操作','More actions')} type="text" aria-label={t('更多操作','More actions')+' · '+r.name} icon={<EllipsisOutlined aria-hidden/>}/></Dropdown>
    </div>
   </article>;
- })}</div>:<Empty description={hasApplications?t('没有符合筛选条件的应用','No applications match your filters'):t('还没有安装应用','No applications installed')}>{!hasApplications&&<Button type="primary" onClick={onStore}>{t('前往应用商店','Browse application store')}</Button>}</Empty>;
+ })}<ApplicationBackupDialog application={backup} onClose={()=>setBackup(undefined)}/></div>:<Empty description={hasApplications?t('没有符合筛选条件的应用','No applications match your filters'):t('还没有安装应用','No applications installed')}>{!hasApplications&&<Button type="primary" onClick={onStore}>{t('前往应用商店','Browse application store')}</Button>}</Empty>;
 }

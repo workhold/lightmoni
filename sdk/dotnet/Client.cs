@@ -233,7 +233,7 @@ public sealed class Client
     static string Env(string name) => Environment.GetEnvironmentVariable(name) ?? "";
     static Dictionary<string,object> ResourceValues(string service,IDictionary<string,object>? overrides,string? instance) {
         if(overrides?.ContainsKey("service.name")==true||overrides?.ContainsKey("service.instance.id")==true)throw new ArgumentException("configure service identity separately");
-        var values=new Dictionary<string,object>();
+        var values=new Dictionary<string,object> { ["host.name"] = Environment.MachineName };
         foreach(var (name,attribute) in new (string,string)[]{("LIGHTMONI_MACHINE_NAME","host.name"),("LIGHTMONI_MACHINE_ID","lightmoni.machine_id"),("LIGHTMONI_HOST_ID","host.id"),("LIGHTMONI_AGENT_ID","lightmoni.agent_id"),("LIGHTMONI_APPLICATION_ID","lightmoni.application_id"),("LIGHTMONI_CLUSTER_ID","lightmoni.cluster_id"),("LIGHTMONI_DEPLOYMENT_ID","lightmoni.deployment_id")}){var value=Env(name);if(value.Length>0)values[attribute]=value;}
         if(overrides!=null)foreach(var pair in overrides)values[pair.Key]=pair.Value;
         if(instance==null){instance=Env("LIGHTMONI_INSTANCE_ID");if(instance.Length==0)instance=Guid.NewGuid().ToString();}

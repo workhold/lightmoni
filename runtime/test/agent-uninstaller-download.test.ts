@@ -19,8 +19,21 @@ async function fixture(t: any) {
   const server=createServer(async(req,res)=>{if(!await router.handle(req,res)){res.writeHead(404);res.end();}});
   server.listen(0,"127.0.0.1");await once(server,"listening");
   t.after(async()=>{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));rmSync(directory,{recursive:true,force:true});});
-  return {directory,setUser(value:typeof user){user=value;},request:()=>fetch(`http://127.0.0.1:${(server.address() as any).port}/api/v1/agent-maintenance/uninstaller`)};
+  return {directory,setUser(value:typeof user){user=value;},request:(path='/api/v1/agent-maintenance/uninstaller')=>fetch(`http://127.0.0.1:${(server.address() as any).port}${path}`)};
 }
+
+test('backup tool download is fixed, administrator-only, no-store and checksum verified',async t=>{
+  const f=await fixture(t),script='#!/usr/bin/env python3\nprint("fixture")\n';
+  assert.equal((await (await f.request('/api/v1/backup-tool')).json() as any).available,false);
+  writeFileSync(join(f.directory,'lightmoni-backup.py'),script);
+  const info=await (await f.request('/api/v1/backup-tool')).json() as any;
+  assert.equal(info.sha256,createHash('sha256').update(script).digest('hex'));
+  const download=await f.request(info.download_url);assert.equal(download.status,200);
+  assert.match(download.headers.get('cache-control')??'',/no-store/);assert.equal(await download.text(),script);
+  f.setUser({id:'member',name:'Member',role:'member'});
+  assert.equal((await f.request(info.download_url)).status,403);
+  f.setUser(null);assert.equal((await f.request(info.download_url)).status,401);
+});
 
 test("admin downloads the fixed offline script with exact SHA without an enrollment token",async t=>{
   const f=await fixture(t),script="#!/bin/sh\nprintf 'fixture offline cleanup\\n'\n";

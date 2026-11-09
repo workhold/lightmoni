@@ -1,0 +1,25 @@
+[
+  {
+    "round": 1,
+    "checks": 12,
+    "passed": true,
+    "source": "deployment-ui-final.txt",
+    "note": "Main-agent full script; isolated Vite cache."
+  },
+  {
+    "round": 2,
+    "checks": 12,
+    "errors": [],
+    "passed": true,
+    "source": "deployment-ui-parent-2.json",
+    "note": "Main-agent full script; isolated Vite cache."
+  },
+  {
+    "round": 3,
+    "checks": 12,
+    "errors": [],
+    "passed": true,
+    "source": "deployment-ui-parent-3.json",
+    "note": "Main-agent full script; isolated Vite cache."
+  }
+]

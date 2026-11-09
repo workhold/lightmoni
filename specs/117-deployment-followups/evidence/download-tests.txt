@@ -1,0 +1,13 @@
+✔ backup tool download is fixed, administrator-only, no-store and checksum verified (23.7475ms)
+✔ admin downloads the fixed offline script with exact SHA without an enrollment token (6.357958ms)
+✔ missing and unsafe script files are never returned (5.136ms)
+✔ current public routes retain their authentication boundary (9.308333ms)
+✔ current SDK downloads expose the four record SDKs and reject stale legacy archives (91.339875ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1636.358333

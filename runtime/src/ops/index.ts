@@ -12,6 +12,7 @@ import {createPrivateRegistryController} from './private-registry.js';
 import { CloudError, zoneFor } from "./cloud.js";
 import { registerObservability } from "./observability.js";
 import { applicationCatalog, applicationCategories, catalogInstallation } from "./catalog.js";
+import { catalogPreview } from './catalog-preview.js';
 import { HTTPError, fail } from "../shared/http.js";
 import { OperationRejectedError } from "../operations/errors.js";
 import type { Dependencies, Handler, Module } from "../shared/types.js";
@@ -185,6 +186,10 @@ export function registerOperationsPlatform(
   router.get(
     "/api/v1/ops/catalog",
     safe((ctx) => ctx.json({ templates: applicationCatalog, categories: applicationCategories })),
+  );
+  router.post(
+    '/api/v1/ops/catalog/:id/preview',
+    safe(async ctx => ctx.json(catalogPreview(ctx.params.id, safeObject(await ctx.body())))),
   );
   router.post(
     "/api/v1/ops/catalog/:id/install",

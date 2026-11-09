@@ -27,10 +27,13 @@ export interface RunnerHost {
 }
 export interface OrdinaryTaskExecutionIdentity { account: "lightmoni-agent"; uid: number; gid: number; permission_generation: number }
 export function productionRunnerHost(config: ExecutorConfig): RunnerHost {
+  const inventoryCommand:Parameters<typeof readDockerInventory>[0]=(_file,args,options)=>{
+    const docker=['/usr/local/bin/docker','/usr/bin/docker'].find(path=>existsSync(path));if(!docker)refuse('docker_cli_missing');const executable=rootPath(realpathSync(docker!));
+    return operationCommand(executable,['--host=unix:///var/run/docker.sock',...(args[0]==='--context'&&args[1]==='default'?args.slice(2):args)],options);
+  };
   return { inventory:async()=>{
       if(!config.daemon_id||(await inspectManagedDockerDaemon()).daemon_id!==config.daemon_id)refuse('docker_daemon_changed');
-      const docker=['/usr/local/bin/docker','/usr/bin/docker'].find(path=>existsSync(path));if(!docker)refuse('docker_cli_missing');const executable=rootPath(realpathSync(docker!));
-      return readDockerInventory((_file,args,options)=>operationCommand(executable,['--host=unix:///var/run/docker.sock',...(args[0]==='--context'&&args[1]==='default'?args.slice(2):args)],options));
+      return readDockerInventory(inventoryCommand);
     },managed:runManaged,scripts: productionScriptHost(), docker: new ManagedDockerExecutor({ daemon_id: config.daemon_id || "not-configured" }),
     async profiles() {
       const accounts = config.accounts.filter(account => { try { return sameAccount(localAccount(account.name), account); } catch { return false; } });

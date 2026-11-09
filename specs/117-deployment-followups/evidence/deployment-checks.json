@@ -1,0 +1,30 @@
+{
+  "checked_on": "2026-11-09",
+  "runtime": {
+    "tests": 59,
+    "passed": 57,
+    "failed": 0,
+    "skipped": 2,
+    "command": "node --import tsx --test test/host-docker.test.ts test/host-container-contract.test.ts test/docker-controls.test.ts test/platform-registry-images.test.ts test/application-catalog.test.ts test/operations-containers.test.ts test/catalog-preview.test.ts"
+  },
+  "focused_repeat": {
+    "tests": 36,
+    "passed": 36,
+    "failed": 0
+  },
+  "live_docker": {
+    "tests": 2,
+    "passed": 2,
+    "failed": 0,
+    "engine": "29.4.3",
+    "compose": "5.1.3",
+    "engine_repeated_after_inspect_many": true,
+    "disposable_resources_cleaned": true,
+    "linux_systemd_root_worker_end_to_end": false
+  },
+  "runtime_typecheck": "passed",
+  "web_typecheck": "passed",
+  "scoped_diff_check": "passed",
+  "ui_report": "deployment-ui-runs.json",
+  "production_mutations": false
+}

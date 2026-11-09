@@ -5,6 +5,7 @@ import type { ExecutionReceipt } from './executor.js';
 import { acquireOperationLock } from './operation-lock.js';
 
 export const DOCKER_CAPABILITIES = ['docker.inventory', 'docker.control'];
+const composeCapabilities=new WeakMap<OperationExecutionContext['command'],{at:number;available:boolean|undefined}>();
 export type DockerAction = {kind:'docker';operation:'inventory'|'start'|'stop'|'restart';container_id?:string};
 export const dockerError = (error: any): string => {
   const code = error?.code;
@@ -18,13 +19,18 @@ export async function readDockerInventory(command: OperationExecutionContext['co
   const result = await command('docker',['--context','default','ps','--all','--no-trunc','--format','{{json .}}'],{timeoutMs:15000,signal});
   const rows = result.stdout.trim().split('\n').filter(Boolean).map(l=>JSON.parse(l));
   let composeAvailable:boolean|undefined;
-  try {await command('docker',['--context','default','compose','version','--short'],{timeoutMs:15000,signal});composeAvailable=true;}
-  catch(error:any){if(error?.diagnosticCode==='compose_unavailable')composeAvailable=false;}
+  const known=composeCapabilities.get(command);
+  if(known&&Date.now()-known.at<300000)composeAvailable=known.available;
+  else{
+    try {await command('docker',['--context','default','compose','version','--short'],{timeoutMs:15000,signal});composeAvailable=true;}
+    catch(error:any){if(error?.diagnosticCode==='compose_unavailable')composeAvailable=false;}
+    if(composeAvailable!==undefined)composeCapabilities.set(command,{at:Date.now(),available:composeAvailable});
+  }
   const at = new Date().toISOString();
-  const snapshot = dockerInventory({management_version:1,observed_at:at,attempted_at:at,compose_available:composeAvailable,state:'ready',truncated:rows.length>500,containers:rows.slice(0,500).map(c=>{
+  const snapshot = dockerInventory({management_version:1,batch_management_version:1,observed_at:at,attempted_at:at,compose_available:composeAvailable,state:'ready',truncated:rows.length>500,containers:rows.slice(0,500).map(c=>{
     if(!/^[a-f0-9]{64}$/.test(c.ID))throw Error('invalid_docker_inventory');
-    const label = String(c.Labels??'').split(',').find(v=>v.startsWith('io.lightmoni.platform.instance='));
-    return {id:c.ID,name:c.Names,image:c.Image,state:c.State,ports:c.Ports,deployment_id:label?.slice('io.lightmoni.platform.instance='.length)??''};
+    const labels=String(c.Labels??'').split(','),label=labels.find(v=>v.startsWith('io.lightmoni.platform.instance=')),project=labels.find(v=>v.startsWith('com.docker.compose.project='));
+    return {id:c.ID,name:c.Names,image:c.Image,state:c.State,ports:c.Ports,deployment_id:label?.slice('io.lightmoni.platform.instance='.length)??'',...(project?{compose_project:project.slice('com.docker.compose.project='.length)}:{})};
   })})!;
   while(Buffer.byteLength(JSON.stringify(snapshot))>80*1024){snapshot.containers.pop();snapshot.truncated=true;}
   return snapshot;

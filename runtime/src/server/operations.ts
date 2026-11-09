@@ -80,11 +80,11 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
     list(kind) { if (kind && !KINDS.has(kind)) fail(400, "unsupported_operations_kind"); return (kind ? db.all("SELECT * FROM ops_resources WHERE kind=? ORDER BY updated_at DESC,id LIMIT 1000", kind) : db.all("SELECT * FROM ops_resources ORDER BY updated_at DESC,id LIMIT 1000")).map(view); },
     get(key) { return view(raw(key)); },
     validateOperation,
-    plan(resourceID, operation, input, actor) {
+    plan(resourceID, operation, input, actor, authorization) {
       const r = raw(resourceID), validated = validateOperation(resourceID, operation, input), key = id();
       availableAgent(r.agent_id);
       referenceCheck(r.kind, configOf(r), r.agent_id, r.id);
-      const payload: OperationPayload = { version: 1, operation_id: key, operation, resource: { ...view(r), config: configOf(r) }, input: validated };
+      const payload: OperationPayload = { version: 1, operation_id: key, operation, resource: { ...view(r), config: configOf(r) }, input: validated, ...(authorization ? { authorization } : {}) };
       const preview = { resource: view(r), operation, input: redact(validated), read_only: definition(r.kind).readOnly.includes(operation), warning: "Review the target, action and configuration before approving. Remote actions may interrupt service. Rollback does not revert data migrations." };
       const expiry = new Date(deps.now().getTime() + 30 * 60_000).toISOString();
       db.run("INSERT INTO ops_runs(id,resource_id,resource_revision,operation,state,payload_cipher,preview_json,created_at,expires_at,created_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", key, r.id, r.revision, operation, "awaiting_approval", deps.encrypt(JSON.stringify(payload)), JSON.stringify(preview), at(), expiry, text(actor), at());
@@ -117,7 +117,15 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
   const safe = (fn: Handler): Handler => async ctx => {
     try { await fn(ctx); } catch (e) { if (e instanceof HTTPError) ctx.json({ error: e.message }, e.status); else { deps.logger.error("Operations request failed"); ctx.json({ error: "operations_request_failed" }, 500); } }
   };
-  const admin = (fn: Handler) => safe(async ctx => { deps.auth.requireAdmin(ctx); await fn(ctx); });
+  const admin = (fn: Handler) => safe(async ctx => {
+    deps.auth.requireAdmin(ctx);
+    if (ctx.req.method !== 'GET') {
+      const user = deps.auth.user(ctx.req);
+      if (ctx.req.headers.authorization || !ctx.req.headers.cookie?.split(';').some(v=>v.trim().startsWith('lm_session='))
+        || user?.id!==ctx.user.id || user.role!=='admin') fail(403,'human_admin_session_required');
+    }
+    await fn(ctx);
+  });
   router.get("/api/v1/operations/resources", admin(ctx => ctx.json({ resources: store.list(ctx.url.searchParams.get("kind") ?? undefined) })));
   router.get("/api/v1/operations/agents", admin(ctx => ctx.json({ agents: db.all<{id:string}>("SELECT id,host_id,last_seen FROM agents WHERE NOT EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=agents.id AND l.state='removed') ORDER BY last_seen DESC,id LIMIT 1000").filter(agent => options.credentials.has(agent.id, "control")) })));
   router.post("/api/v1/operations/resources", admin(async ctx => {

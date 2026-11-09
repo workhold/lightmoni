@@ -1,0 +1,98 @@
+{
+  "phase": "parent-2",
+  "passed": true,
+  "rows": 2000,
+  "bytes": 2507041,
+  "fixture": "Controlled 2,000-row response, 40 late attributes, no stored log/catalog mutation",
+  "measurements": {
+    "loadMs": 2989,
+    "loaded": {
+      "parses": 2041,
+      "cellTimes": 17,
+      "longTasks": [
+        {
+          "start": 147.80000001192093,
+          "duration": 110
+        },
+        {
+          "start": 663.8000000119209,
+          "duration": 151
+        },
+        {
+          "start": 827.8000000119209,
+          "duration": 172
+        },
+        {
+          "start": 1278.3999999761581,
+          "duration": 157
+        },
+        {
+          "start": 1455.300000011921,
+          "duration": 55
+        },
+        {
+          "start": 1544.300000011921,
+          "duration": 50
+        },
+        {
+          "start": 1599,
+          "duration": 58
+        },
+        {
+          "start": 1780.5,
+          "duration": 54
+        },
+        {
+          "start": 1962.800000011921,
+          "duration": 56
+        },
+        {
+          "start": 2093.699999988079,
+          "duration": 156
+        },
+        {
+          "start": 2254.199999988079,
+          "duration": 56
+        },
+        {
+          "start": 2429.099999964237,
+          "duration": 53
+        },
+        {
+          "start": 2579.599999964237,
+          "duration": 55
+        },
+        {
+          "start": 2761.5,
+          "duration": 53
+        },
+        {
+          "start": 2913.599999964237,
+          "duration": 72
+        }
+      ],
+      "at": 2991.300000011921
+    },
+    "keyword": {
+      "ms": 349.60000002384186,
+      "attributeParses": 0,
+      "timeCellRenders": 0,
+      "longTasks": [
+        {
+          "start": 3023,
+          "duration": 93
+        },
+        {
+          "start": 3118.899999976158,
+          "duration": 80
+        }
+      ]
+    },
+    "fields": {
+      "ms": 35,
+      "attributeParses": 0,
+      "timeCellRenders": 0
+    }
+  },
+  "errors": []
+}

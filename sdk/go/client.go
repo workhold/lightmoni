@@ -165,6 +165,9 @@ func New(cfg Config) (*Client, error) {
 		return nil, errors.New("resource identity exceeds 128 bytes")
 	}
 	resource := Attributes{}
+	if name, err := os.Hostname(); err == nil && name != "" {
+		resource["host.name"] = name
+	}
 	for variable, key := range map[string]string{"LIGHTMONI_MACHINE_NAME": "host.name", "LIGHTMONI_MACHINE_ID": "lightmoni.machine_id", "LIGHTMONI_HOST_ID": "host.id", "LIGHTMONI_AGENT_ID": "lightmoni.agent_id", "LIGHTMONI_APPLICATION_ID": "lightmoni.application_id", "LIGHTMONI_CLUSTER_ID": "lightmoni.cluster_id", "LIGHTMONI_DEPLOYMENT_ID": "lightmoni.deployment_id"} {
 		if value := os.Getenv(variable); value != "" {
 			resource[key] = value

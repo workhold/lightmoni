@@ -1,0 +1,117 @@
+{
+  "phase": "repeat-2",
+  "passed": true,
+  "rows": 2000,
+  "bytes": 2507041,
+  "fixture": "Controlled 2,000-row response, 40 late attributes, no stored log/catalog mutation",
+  "measurements": {
+    "loadMs": 3375,
+    "loaded": {
+      "parses": 2041,
+      "cellTimes": 17,
+      "longTasks": [
+        {
+          "start": 182.39999997615814,
+          "duration": 122
+        },
+        {
+          "start": 563.6000000238419,
+          "duration": 51
+        },
+        {
+          "start": 721,
+          "duration": 168
+        },
+        {
+          "start": 902.8000000119209,
+          "duration": 368
+        },
+        {
+          "start": 1444.1000000238419,
+          "duration": 71
+        },
+        {
+          "start": 1544.5,
+          "duration": 71
+        },
+        {
+          "start": 1658,
+          "duration": 59
+        },
+        {
+          "start": 1724.3999999761581,
+          "duration": 62
+        },
+        {
+          "start": 1826.3999999761581,
+          "duration": 58
+        },
+        {
+          "start": 1891.6000000238419,
+          "duration": 65
+        },
+        {
+          "start": 1992.800000011921,
+          "duration": 63
+        },
+        {
+          "start": 2060.399999976158,
+          "duration": 168
+        },
+        {
+          "start": 2275.199999988079,
+          "duration": 116
+        },
+        {
+          "start": 2398.100000023842,
+          "duration": 69
+        },
+        {
+          "start": 2542.600000023842,
+          "duration": 63
+        },
+        {
+          "start": 2610.600000023842,
+          "duration": 66
+        },
+        {
+          "start": 2725.699999988079,
+          "duration": 56
+        },
+        {
+          "start": 2786.199999988079,
+          "duration": 64
+        },
+        {
+          "start": 2925.600000023842,
+          "duration": 61
+        },
+        {
+          "start": 2992.199999988079,
+          "duration": 64
+        },
+        {
+          "start": 3093,
+          "duration": 113
+        },
+        {
+          "start": 3211.300000011921,
+          "duration": 156
+        }
+      ],
+      "at": 3375
+    },
+    "keyword": {
+      "ms": 283.5,
+      "attributeParses": 0,
+      "timeCellRenders": 0,
+      "longTasks": []
+    },
+    "fields": {
+      "ms": 29.80000001192093,
+      "attributeParses": 0,
+      "timeCellRenders": 0
+    }
+  },
+  "errors": []
+}

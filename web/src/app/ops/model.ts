@@ -45,7 +45,7 @@ export type Machine = { id: string; name: string; address?: string; ssh_address?
 export type CatalogTemplate = {
  id:string; name:string; description?:string; description_en?:string; category?:string;
  version:string; versions?:string[]; managed_recommended:boolean; managed_reason?:string;
- homepage?:string; notes?:string; notes_en?:string; resources?:{cpu:number;memory_mb:number}; deployment_modes?:string[]; architectures?:string[];
+ homepage?:string; repository?:string; documentation?:string; notes?:string; notes_en?:string; resources?:{cpu:number;memory_mb:number}; deployment_modes?:string[]; architectures?:string[];
  parameters?:{key:string;label:string;label_en?:string;type:string;required?:boolean;default?:unknown;description?:string;description_en?:string;min?:number;max?:number;pattern?:string;format?:string;options?:{value:string;label:string;label_en?:string}[]}[];
  spec?:Spec;
 };

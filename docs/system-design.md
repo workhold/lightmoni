@@ -2643,3 +2643,50 @@ flowchart TB
 ```
 
 本次按会话中用户提供的 AGENTS.md 同步 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)，验收证据见 specs/116-deployment-cache-recovery/validation.md。
+
+## 117. 部署问题清单闭环（SDD117）
+
+### 117.1 主机容量与遥测身份
+
+主机容量与遥测身份：Agent心跳发送既有cpu_count、memory_total_mb字段及逻辑CPU指标；中心只投影当前绑定Agent且带时间/陈旧状态的容量，未知不伪造为零，沿用人工容量覆盖。八种后端SDK以显式资源、环境、OS依次提供host.name；名称不授予归属权限。业务指标仍统一metric_<logical>_<type>，系统保留lightmoni_metric_*，不重命名历史物理表。
+
+### 117.2 监控归属与编辑
+
+监控归属与编辑：应用/网站沿用资源监控，主机新增原生监控，系统设置新增内置监控入口；默认大盘目录仅隐藏内容仍等于原seed的定义，历史自定义、版本和删除意图保留。系统监控保持已登录读取，主机详情沿管理员权限。日志沿既有有界虚拟表格和缓存；大盘保存完成目录回读后才关闭确认，避免旧锁吞掉连续保存。
+
+### 117.3 人工文件维护
+
+人工文件维护：现有真人管理员cookie→所选SSH账户租约/指纹→SFTP路径增加metadata、排他新建文件/目录、无覆盖重命名、非递归删除、chmod<=0777；以元数据/目录直接子项版本核对并回读，不下载大文件正文来改权限。拒绝根、链接、特殊文件和非空目录删除；可能已写失联保留unknown，审计无正文。SFTP不提供事务CAS，此限制不隐藏。本地Monaco用于YAML和文本，不访问CDN、远程schema或语言服务。
+
+### 117.4 容器批次与兼容
+
+容器批次与兼容：inspect_many单任务获取最多50个摘要，remove_many整批前检、逐项重验ID/版本/归属/daemon、删除后回读；默认保留卷，清理停止容器不强删运行对象。逐项deleted/failed/unknown/not_started是受检证据，不赋予healthy或解除未知围栏。batch_management_version来自签名执行器观察，仅派生兼容状态，不新增授权；旧组件保留单容器功能并要求升级。清单保留最近观察，Compose能力探测有界缓存。
+
+### 117.5 商店、镜像和接管
+
+商店、镜像和接管：catalog/:id/preview仅纯计算当前配方并脱敏，不落库、生成随机秘密、创建资源或调度；模板提供官方/文档/源码链接。Registry保留原生tags/list与完整引用保护，清单最多4并发及在途摘要去重。主机上下文接管外部Compose复用原operations资源的inspect/adopt计划和真人批准；原项目/卷名保留，明确有限配置与重建影响，不用platform apply创建第二项目。operations HTTP写入口要求真人管理员cookie，内部持久计划调用不冒充浏览器会话。
+
+### 117.6 平台备份计划授权
+
+平台备份计划授权：密封OperationPayload保留schedule_id、revision、authorizer、actor及触发来源，approved_by为真实管理员ID；精确关联fire→schedule→资源版本/动作/输入。派发、领取和开始前均重验计划启用/版本、来源、管理员有效性；删除fire或schedule不能降级成手动授权。普通人工run独立，结果未知不重跑。
+
+### 117.7 离线应用备份与迁移
+
+离线应用备份与迁移：新增管理员可下载的Python/Docker工具及说明入口，归档仍在目标主机生成并经管理员文件通道下载；无后台一键跨机快照。按平台owner/application发现同机实例，完整持久目录/卷去重，运行配置与可选精确镜像、uid/gid/mode/链接及摘要流式归档；跨机分别备份。拒绝源/输出重叠、外部运行消费者、并发启动、未支持配置和不干净停机；部分停机失败或受控取消后核对原身份再恢复原运行状态。SIGKILL/断电需人工核对。标准Moni迁移按中心→ClickHouse停止，包含state/master.key/SQLite与telemetry，成功保留旧中心停止；外部CH或异架构明确拒绝。
+
+### 117.8 制品与本机持续授权
+
+制品与本机持续授权：恢复先验证全部字节/路径/镜像，再获取daemon项目排他锁，创建带随机操作标识的新卷并核对无消费者/空内容，解包后逐文件内容/属主/权限回读；Compose正确转义美元符并保留安全限制、停止信号和宽限，不自动启动或复制Agent身份。归档私有保存，S3以SigV4条件PUT拒绝覆盖并完整GET验摘要，当前单对象5GiB。systemd文件只生成供人工审阅安装，是本机root持续授权，独立于平台计划；脚本/祖先/配置/凭据必须root保护，Python隔离启动，凭据仅三项白名单，不用EnvironmentFile，清洗Docker环境、文件锁防重叠。未自动安装计划或执行生产迁移。
+
+```mermaid
+flowchart LR
+  authority["管理员 / 平台持久授权"] --> center["中心：版本、归属、计划核对"]
+  center --> executor["签名执行器：容器 / 编排"]
+  center --> ssh["真人 SSH / SFTP 文件维护"]
+  center --> view["主机 / 资源 / 系统监控"]
+  sdk["Agent / SDK 容量与身份"] --> center
+  authority --> backup["本机 root 离线工具"]
+  backup --> artifact["私有归档 / S3 / 空目标恢复"]
+```
+
+操作指南见[备份与迁移](backups.md)，规格与验收见[SDD117](../specs/117-deployment-followups/validation.md)。架构同步目标为[Doca系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)，写入与原生图块回读证据记录在同一SDD与PR中。

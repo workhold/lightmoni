@@ -923,3 +923,17 @@ class DeploymentEnvironmentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HostnameDefaultTests(unittest.TestCase):
+    def test_hostname_and_deployment_and_explicit_resource(self):
+        import socket
+        with mock.patch.dict(os.environ, {'LIGHTMONI_MACHINE_NAME': ''}):
+            for configured, expected in [({}, socket.gethostname()), ({'host.name': 'explicit-host'}, 'explicit-host')]:
+                client = Client(service='hostname', table='http', endpoint='http://127.0.0.1:4318', key='', self_telemetry=False, remote_config=False, resource=configured)
+                self.assertEqual(client._state.resource_values['host.name'], expected)
+                client.shutdown(timeout=0.1)
+        with mock.patch.dict(os.environ, {'LIGHTMONI_MACHINE_NAME': 'platform-host'}):
+            client = Client(service='hostname', table='http', endpoint='http://127.0.0.1:4318', key='', self_telemetry=False, remote_config=False)
+            self.assertEqual(client._state.resource_values['host.name'], 'platform-host')
+            client.shutdown(timeout=0.1)

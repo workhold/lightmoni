@@ -1,0 +1,14 @@
+✔ file paths require bounded absolute paths and reject traversal/control characters (0.64ms)
+✔ typed maintenance preserves uncertainty when a successful mutation cannot be read back (0.401333ms)
+✔ real SSH/SFTP: list, UTF-8 edit, atomic overwrite, exclusive binary upload, conflict and audit (644.237791ms)
+✔ real SFTP: auth, pinning, unsupported types, bounds and explicit confirmation (471.345ms)
+✔ real SFTP: typed file and directory maintenance checks metadata and verifies results (1227.399791ms)
+✔ real SFTP: maintenance rejects unsafe targets, missing consent and stale parent snapshots (375.959667ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2881.233667

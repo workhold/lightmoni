@@ -9,7 +9,7 @@ import { recordMachineHostKey } from "./machine-host-keys.js";
 import { agentBootstrapCommand } from "./machine-agent-lifecycle.js";
 import { machineCredentialCurrent, machineCredentialCurrentSQL } from "./machine-credential-policy.js";
 import { createAgentLifecycleSchema } from "./agent-lifecycle.js";
-import { createAgentHostSchema, replaceableAgentBinding, hasActiveTaskRuns, currentAgentHostname } from "./agent-hosts.js";
+import { createAgentHostSchema, replaceableAgentBinding, hasActiveTaskRuns, currentAgentHostname, currentAgentCapacity } from "./agent-hosts.js";
 import { NodeStore } from "./nodes-model.js";
 import { join } from "node:path";
 import { createAgentUpdatesSchema, registerMachineAgentUpdates, type AgentUpdateStore } from "./machine-agent-updates.js";
@@ -123,6 +123,7 @@ const statusOf = (row: any, now: Date): MachineStatus => {
 };
 
 export interface MachineSummary {
+  capacity: ReturnType<typeof currentAgentCapacity>;
   docker_environment?: DockerEnvironment;
   id: string;
   name: string;
@@ -409,6 +410,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     return {
       id: value.id, name: value.name, default_account_id: value.default_account_id || "", accounts:accountRows(value.id), observed_hostname: currentAgentHostname(db, value.id, value.agent_id),
       network: {...machineNetwork(db,value.id),service_addresses:machineServiceAddressSettings(db,value.id)},
+      capacity: currentAgentCapacity(db,value.id,value.agent_id,now()),
       docker_environment: machineDockerEnvironment(executorStore?.getStatus(value.id),now()),
       ...hostLabels(value.id),
       address: value.address, port: Number(value.port),
