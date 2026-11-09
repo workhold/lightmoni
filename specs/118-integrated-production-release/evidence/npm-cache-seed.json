@@ -346,5 +346,20 @@
   "cache_content_only": true,
   "registry_metadata_or_credentials_copied": false,
   "artifact_layers_include_cache": false,
-  "sdk_install_offline_check": "passed after correcting cache seed directory"
+  "sdk_install_offline_check": "passed after correcting cache seed directory",
+  "pinned_node_archives": [
+    {
+      "filename": "node-v24.15.0-linux-x64.tar.xz",
+      "size": 31164460,
+      "sha256": "472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6",
+      "verification": "Rechecked against official Node SHASUMS256.txt by the unchanged Agent packaging script during build"
+    },
+    {
+      "filename": "node-v24.15.0-linux-arm64.tar.xz",
+      "size": 30108656,
+      "sha256": "f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0",
+      "verification": "Rechecked against official Node SHASUMS256.txt by the unchanged Agent packaging script during build"
+    }
+  ],
+  "node_cache_in_artifact_layers": false
 }

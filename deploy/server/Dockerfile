@@ -17,7 +17,7 @@ COPY . ./
 ARG BUILD_REVISION
 ENV LIGHTMONI_BUILD_REVISION=${BUILD_REVISION}
 RUN npm --prefix runtime run build && npm --prefix ai-runtime run build && npm --prefix web run build
-RUN --mount=type=cache,id=lightmoni-npm-v1,target=/root/.npm,sharing=locked node scripts/build-agent-release.mjs 0.1.0 runtime/downloads
+RUN --mount=type=cache,id=lightmoni-npm-v1,target=/root/.npm,sharing=locked --mount=type=cache,id=lightmoni-node-v1,target=/work/.local-dev/node-releases,sharing=locked node scripts/build-agent-release.mjs 0.1.0 runtime/downloads
 RUN cd sdk/typescript && npm pack --pack-destination /work/runtime/downloads
 RUN --mount=type=cache,id=lightmoni-npm-v1,target=/root/.npm,sharing=locked sh scripts/build-go-sdk.sh 0.1.0 runtime/downloads && sh scripts/build-native-sdks.sh 0.1.0 runtime/downloads && npm --prefix runtime prune --omit=dev && npm --prefix ai-runtime prune --omit=dev
 RUN mv /work/runtime/node_modules /work/runtime-node-modules \
