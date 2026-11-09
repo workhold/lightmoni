@@ -1,0 +1,48 @@
+{
+  "status": "succeeded",
+  "resource": "小猪绘本",
+  "configuration_revision": 6,
+  "platform_run_id": "15736fa79a93f7f1e35a017afac75d07",
+  "privileged_job_id": "06965c8339d013647ae854f81fb82658",
+  "started_at": "2026-11-09T01:47:59.527Z",
+  "finished_at": "2026-11-09T01:48:51.327Z",
+  "exit_code": 0,
+  "image_preparation_started_at": "2026-11-09T01:48:03Z",
+  "image_preparation_finished_at": "2026-11-09T01:48:29Z",
+  "image_sources": [
+    {
+      "source": "cluster-registry",
+      "image": "docker.doc-a.cn/[redacted]/[redacted]:20261109-78e657f",
+      "config_digest": "sha256:41a262c114eee7e79c1ba55ee9b8ed9e80ade6b6ba195cef995c69c463bf6df5",
+      "image_id": "sha256:41a262c114eee7e79c1ba55ee9b8ed9e80ade6b6ba195cef995c69c463bf6df5",
+      "manifest_digest": "sha256:3fd2388fa6646bfe00be2d340b6d74136bbc16328ce5d9d33b78f84936103f38d",
+      "downloaded_bytes": 391948746
+    }
+  ],
+  "old_helper_retry_before_upgrade": {
+    "result": "failed",
+    "code": "registry_image_pull_failed",
+    "timeout_seconds": 300,
+    "not_a_test_of_new_helper": true
+  },
+  "evidence_source": "Production UI progress plus read-only decrypted privileged receipt; only allowlisted image source metadata printed",
+  "same_version_redeployment": {
+    "platform_run_id": "befec42123e76a8402fae2205e0b2255",
+    "privileged_job_id": "b478b2c223b805a739faac7e1f0d717b",
+    "state": "succeeded",
+    "exit_code": 0,
+    "started_at": "2026-11-09T01:51:28.563Z",
+    "finished_at": "2026-11-09T01:51:38.358Z",
+    "image_sources": [
+      {
+        "source": "local",
+        "image": "docker.doc-a.cn/[redacted]/[redacted]:20261109-78e657f",
+        "config_digest": "sha256:41a262c114eee7e79c1ba55ee9b8ed9e80ade6b6ba195cef995c69c463bf6df5",
+        "image_id": "sha256:41a262c114eee7e79c1ba55ee9b8ed9e80ade6b6ba195cef995c69c463bf6df5",
+        "manifest_digest": "sha256:3fd2388fa6646bfe00be2d340b6d74136bbc16328ce5d9d33b78f84936103f38d",
+        "downloaded_bytes": 1572
+      }
+    ],
+    "interpretation": "Mutable-tag refresh read a 1572-byte registry manifest; matching config reused the local Docker image without layer downloads or image import. Not zero total network bytes."
+  }
+}

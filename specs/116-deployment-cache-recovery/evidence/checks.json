@@ -1,0 +1,15 @@
+{
+  "runtime_typecheck": "passed",
+  "runtime_build": "passed",
+  "web_typecheck": "passed",
+  "yaml_roundtrip": {"tests": 3, "passed": 3},
+  "executor_regressions": {"tests": 120, "passed": 120, "skipped": 0},
+  "image_regressions": {"tests": 19, "passed": 19, "skipped": 0},
+  "combined_after_pr157": {"tests": 133, "passed": 133, "skipped": 0},
+  "full_runtime_initial": {"tests": 1659, "passed": 1622, "failed": 3, "skipped": 34},
+  "initial_failure_causes": ["Missing independent-worktree AI build output", "SDK dependency link referenced the original checkout's older built SDK"],
+  "environment_retest": {"tests": 27, "passed": 27, "failed": 0, "skipped": 0, "product_code_changed_to_fix_environment": false},
+  "git_diff_check": "passed",
+  "merged_prs": [157, 158],
+  "source_revision": "40916db5a49c1408d1a8317730724744f113fa0c"
+}

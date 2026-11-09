@@ -1,0 +1,23 @@
+{
+  "observed_at": "2026-11-09T01:52:49.283708+00:00",
+  "checks": [
+    {
+      "url": "https://moni.heyphp.com/healthz",
+      "status": 200,
+      "tls_certificate_verified": true,
+      "content_type": "application/json; charset=utf-8",
+      "body_bytes": 16,
+      "body_sha256": "6489d6d7a33c5d40e18fc61eeb6c34c341279ee61816394dde5189aa4ad8fae5",
+      "body_has_html": false
+    },
+    {
+      "url": "https://zzhb.doc-a.cn/",
+      "status": 200,
+      "tls_certificate_verified": true,
+      "content_type": "text/html; charset=utf-8",
+      "body_bytes": 778,
+      "body_sha256": "55b9401d0be70eff40c57014c78ed79a1ef2f1144b3ccffc9bb46a38e1827a27",
+      "body_has_html": true
+    }
+  ]
+}

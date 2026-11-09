@@ -1,0 +1,36 @@
+{
+  "status": "succeeded",
+  "machine": "zz-bj-1",
+  "operation_id": "84096cd6b4f358c582c96005130640f7",
+  "action": "upgrade",
+  "previous_revision": "9d22fd55dc94",
+  "target_revision": "40916db5a49c1408d1a8317730724744f113fa0c",
+  "target_build_id": "0.1.0-40916db5a49c-046e31657d85",
+  "target_package_sha256": "5694bd907a1a791996d5cadbb4a3defdc9dcd6589fbc7d5b5309579ed58a48d7",
+  "architecture": "amd64",
+  "same_identity_configuration_permissions": true,
+  "maintenance_gate": "Read-only preflight and reviewed persisted plan; automatic retries were allowed to finish before planning",
+  "evidence_source": "Production Agent version management UI",
+  "started_at": "2026-11-09T01:45:45.902Z",
+  "finished_at": "2026-11-09T01:47:03.806Z",
+  "local_health": {
+    "service_active": true,
+    "helper_active": true,
+    "identity_matches": true,
+    "release_matches": true
+  },
+  "signed_helper": {
+    "state": "active",
+    "last_seen": "2026-11-09T01:47:53.091Z",
+    "source_revision": "40916db5a49c1408d1a8317730724744f113fa0c",
+    "build_id": "0.1.0-40916db5a49c-046e31657d85",
+    "artifact_sha256": "5694bd907a1a791996d5cadbb4a3defdc9dcd6589fbc7d5b5309579ed58a48d7",
+    "state_schema": 1,
+    "ordinary_task_identity": {
+      "account": "lightmoni-agent",
+      "uid": 994,
+      "gid": 991,
+      "permission_generation": 1
+    }
+  }
+}

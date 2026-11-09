@@ -25,4 +25,32 @@
 
 ## 交付进度
 
-本会话先前网站端口修复已通过 PR157 合入 main，合并提交 befd822e5a81da23b1d98b3431a229746536012c，本分支已同步。当前修复的 PR、双架构发行、中心/Agent 更新及线上重跑结果将在实际完成后补充。
+本会话先前网站端口修复已通过 PR157 合入 main，合并提交 befd822e5a81da23b1d98b3431a229746536012c，本分支已同步。部署恢复修复通过 PR158 合入 main，合并提交40916db5a49c1408d1a8317730724744f113fa0c。双架构发行和生产中心/目标Agent更新已完成；Web v6重跑已成功，脱敏成品和生产证据随本规格保存。
+
+## 双架构 Docker 发行
+
+固定镜像 docker.heyphp.com/lightmoni/lightmoni:20261109-deployment-recovery-v1，OCI索引 sha256:2efa6a870abd06ced159a7d5aadc50132623085f2c13dd4acf2bbd55c6abdd7c，源码40916db5a49c1408d1a8317730724744f113fa0c，包含PR157/158。构建上下文仅为合并主干的 git archive，不含工作区未提交文件。两架构各58项成品检查通过，errors为空：隔离真实ClickHouse/SQLite启动、登录/持久会话、SDK与Agent下载校验，以及编译后的新集群优先/本地内容复用/禁回源/认证隔离和签名中断观察恢复回归。amd64为本机Docker仿真、arm64原生；此项不冒充生产部署。
+
+37份唯一OCI blob本地SHA256核对，成品config/rootfs与已测试镜像一致；发布后逐blob HEAD、平台manifest/config GET、固定索引GET通过，并独立用docker buildx imagetools inspect回读摘要和两平台。latest发布前后保持sha256:1435938eacd969554e581b1cce0b996ff36ac6e1b886c9fc42e5b21e231a5a51。发布凭据仅经Docker credential helper运行时读取；隔离测试中心、ClickHouse、网络、卷及临时凭据已清理。
+
+线上目标amd64 Agent包构建0.1.0-40916db5a49c-046e31657d85，SHA256为5694bd907a1a791996d5cadbb4a3defdc9dcd6589fbc7d5b5309579ed58a48d7，需通过既有维护入口更新管理组件。
+
+## 生产中心切换
+
+通过既有已登录1Panel终端执行；生产仅备份中心SQLite、主密钥及原Compose/环境/容器配置，备份保留在主机root私有目录，不下载到工作区。快照499191页×4096字节=2044686336字节，quick_check=ok；目录0700、文件0600。ClickHouse及应用数据原地保留，未声称完整遥测备份。
+
+新镜像在生产主机预拉取并验证amd64、源码和OCI索引；等待已有签名queued/running任务空闲后只原子替换Compose中心镜像。09:30:25启动，09:30:51确认healthy；数据卷、全部环境键值、启动配置、端口/网络、安全选项、主密钥与另外16个容器ID均与备份基线一致。公网healthz返回ok。没有执行程序回退或数据恢复。
+
+原阻塞观察2e04234d8fc5e2b814bb3b85c6b2ea2c于09:30:56由原helper签名reconcile自动核对，原因read_only_observation_interrupted；状态仍unknown，未人工修改任务数据库或隐藏错误。后续已有多条新的成功观察回执，Agent维护首次预检遇正在执行任务而正常拒绝，等待空闲边界重试。后续健康与应用部署验收另记。见evidence/production-center.json。
+
+## 目标 Agent 与线上重跑
+
+通过既有Agent维护入口创建计划84096cd6b4f358c582c96005130640f7，审阅并执行同账户升级；09:45:45开始、09:47:03确认成功。此前旧helper自动恢复任务仍沿公网读取并300秒超时，等待其已知失败结束后再规划，没有取消未知写任务或绕过维护门禁。升级回执确认service/helper active、身份与发行一致；另从签名helper observation回读源码40916db、包摘要5694bd907a1a…58a48d7、构建0.1.0-40916db5a49c-046e31657d85及原lightmoni-agent账户(uid994/gid991/权限代次1)。见evidence/production-agent.json。
+
+Web“小猪绘本”v6于09:47:38手动重跑，平台执行15736fa79a93f7f1e35a017afac75d07、签名任务06965c8339d013647ae854f81fb82658，09:47:59开始、09:48:51成功，退出码0。执行回执明确source=cluster-registry，config/image ID 41a262c114ee…3bf6df5，下载391948746字节；来源准备09:48:03–09:48:29约26秒，整次执行51.8秒。新config先前不在Docker本机，该次按设计从已登记同机内网仓库读取并导入；没有把Registry存储目录冒充Docker镜像。见evidence/production-web.json。
+
+同一v6再次部署，平台执行befec42123e76a8402fae2205e0b2255、签名任务b478b2c223b805a739faac7e1f0d717b，09:51:28–09:51:38成功（9.8秒），退出码0，source=local且同一config/image ID。因可变标签刷新读取1572字节清单，复用Docker已有内容，无镜像层下载和重复导入；没有声称完全零网络。首次尝试同版本重跑碰到实例正在inspect而没有新执行，先核对旧记录、等该检查结束后才实际创建第二轮，没有重复投递已运行写任务。
+
+中心只读投影显示四应用均running、healthy=1，desired_generation与observed_generation相等：仓库7、OpenResty集群固定版本4、PostgreSQL3、Web6；观察时间09:51:14–09:52:12，均为升级后新回执。目标主机未核对unknown签名任务为0。原“服务地址已保留，按中心配置恢复”提示已从四应用消失。公网中心healthz与Web站点均HTTPS校验通过、HTTP200。见evidence/production-applications.json和production-http.json。仅程序与所授权应用部署发生变更，没有手改任务状态、数据迁移或删除数据。
+
+发行验收证据补充PR仅更新本SDD的任务/验收与脱敏JSON，不影响架构；不适用再次架构同步，代码路径与已回读seq1769一致。Docker源码仍为40916db，不把后续纯文档提交冒充构建来源。
