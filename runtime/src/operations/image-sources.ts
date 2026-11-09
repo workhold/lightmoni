@@ -168,10 +168,18 @@ export async function preparePlatformImages(
     const authorization=authenticated.find((a:any)=>a.images.includes(image));
     if(authorization) {
       if(!credentialMatches(authorization,image))reject('REGISTRY_IMAGE_NOT_AUTHORIZED');
-      let verified=refresh?undefined:await localDockerImage(image,platform,context);
-      if(!verified){await pullAuthenticatedImage(image,context);verified=await localDockerImage(image,platform,context);}
+      let verified=refresh&&!/(?:^|@)sha256:[a-f0-9]{64}$/.test(image)?undefined:await localDockerImage(image,platform,context);
+      let authenticatedPull=false;
+      if(!verified&&config.image_cache) {
+        // A registered cluster endpoint is already an authorized content source.
+        // Read it without forwarding or even fetching the upstream credential.
+        const cached=await prepareCachedImages({services:{image:{image}}},config.image_cache,root,context,refresh);
+        verified=cached.find(r=>r.image_id);
+        results.push(...cached.filter(r=>!r.image_id));
+      }
+      if(!verified){await pullAuthenticatedImage(image,context);authenticatedPull=true;verified=await localDockerImage(image,platform,context);}
       if(!verified)reject('REGISTRY_IMAGE_NOT_VERIFIED');
-      results.push({...verified,image,source:'authenticated-registry'});
+      results.push({...verified,image,...(authenticatedPull?{source:'authenticated-registry'}:{})});
       for(const service of Object.values<any>(manifest.services))if(service.image===image){service.image=verified!.image_id;service.pull_policy='never';}
       continue;
     }

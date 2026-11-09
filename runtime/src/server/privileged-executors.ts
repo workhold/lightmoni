@@ -21,6 +21,28 @@ import type { TaskRunStore } from "./task-center.js";
 
 type Row = Record<string, any>;
 const terminal = (state: string) => ["succeeded", "failed", "cancelled", "unknown"].includes(state);
+const observationTasks = new Set(['node.inspect', 'workload.inspect', 'gateway.inspect', 'registry.inspect']);
+
+/** Frozen, single-action observations may be replaced with a fresh observation;
+ * an unknown mutation must still be reviewed instead of replayed. */
+function readOnlyManagedObservation(job: Row, deps: Dependencies): boolean {
+  if (job.capability !== 'operations.managed.v1' || job.task_run_id !== job.id) return false;
+  try {
+    const payload = normalizePrivilegedPayload(parseStrictJSON(deps.decrypt(job.payload_enc)));
+    if (payload.kind !== 'managed' || sha256(canonicalJSON(payload)) !== job.payload_sha256) return false;
+    const operation = payload.operation_payload, action = payload.job.actions[0];
+    const parent = deps.db.get<Row>("SELECT * FROM agent_jobs WHERE id=? AND agent_id=? AND execution_principal='privileged_executor' AND state='unknown'", job.id, job.agent_id);
+    return payload.job.id === job.id && payload.job.agent_id === job.agent_id && payload.job.actions.length === 1
+      && action?.kind === 'operations' && action.domain === 'platform'
+      && !!operation && operation.operation === 'inspect' && operation.operation_id === action.operation_id
+      && operation.resource.kind === 'platform' && operation.resource.agent_id === job.agent_id
+      && payload.job.target.operations_resource_id === operation.resource.id
+      && observationTasks.has(operation.resource.config.task)
+      && !!parent && parent.operation_id === operation.operation_id
+      && canonicalJSON(JSON.parse(parent.actions_json)) === canonicalJSON(payload.job.actions)
+      && canonicalJSON(JSON.parse(parent.target_json)) === canonicalJSON(payload.job.target);
+  } catch { return false; }
+}
 const plus = (at: Date, seconds: number) => new Date(at.getTime() + seconds * 1000).toISOString();
 const object = (value: unknown, keys: readonly string[], required: readonly string[] = keys) => {
   try { return strictRecord(value, keys, required); } catch (e) { fail(400, (e as Error).message); }
@@ -542,6 +564,13 @@ export class PrivilegedExecutorStore {
   reconcile(executor: Row, id: string, value: unknown) {
     const v = object(value, ["lease_id"]); this.sweep(); const job = this.row(id);
     if (job.executor_id !== executor.id || job.install_generation !== executor.install_generation || !job.lease_id || job.lease_id !== v.lease_id) fail(403, "principal_mismatch");
+    if (job.machine_id !== executor.machine_id || job.agent_id !== executor.agent_id) fail(403, "principal_mismatch");
+    if (job.state === 'unknown' && !job.resolved_at && readOnlyManagedObservation(job, this.deps)) {
+      this.deps.db.run("UPDATE privileged_jobs SET resolved_at=?,resolved_by=?,resolution_reason='read_only_observation_interrupted' WHERE id=? AND state='unknown' AND resolved_at=''", this.now(), executor.id, id);
+      this.sync(this.row(id));
+      this.audit(job.machine_id, executor.id, 'read_only_observation_reconciled', id);
+      return { job: this.get(id), release_fence: true };
+    }
     return { job: this.get(id), release_fence: terminal(job.state) && (job.state !== "unknown" || !!job.resolved_at) };
   }
   startPermit(executor: Row, id: string, value: unknown) {

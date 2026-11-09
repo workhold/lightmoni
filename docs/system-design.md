@@ -2604,7 +2604,7 @@ SQLite `machine_file_events` 仅保存操作者、主机、SSH账户、动作、
 
 root管理组件在当前systemd任务的/run目录创建0700临时目录和0600 Docker config.json，每次只含当前镜像实际Docker仓库domain对应的账号；命令参数、容器环境和持久Compose配置均不含密码。仅拉取子进程收到DOCKER_CONFIG路径，成功、失败和取消均清理，硬中断由RuntimeDirectory清理兜底；不写持久docker login、不改daemon设置。
 
-选择凭据的镜像直接访问原仓库，跳过匿名来源代理和共享镜像缓存，避免向代理发送账号或把私有内容放入匿名缓存。预拉取核对平台和摘要后固定本机image ID及pull_policy=never启动；错误不回退匿名，公开日志仅使用固定诊断。新能力operations.platform.registry-auth.v1阻止旧Agent静默忽略认证，发行包包含更新后的管理组件。
+选择凭据的镜像先复用可验证的本机 Docker 镜像，再无凭据读取匹配的已注册集群内仓库，只有策略允许回源时才逐镜像临时取密访问原仓库。认证不会跳过集群复用，也不向匿名来源代理或缓存发送账号、不向共享缓存写入私有内容。RepoDigest 或已验证 config 摘要命中可直接复用同机不同名称的 Docker 镜像，无需重复下载层或导入；可变标签升级先解析当前 manifest。同机 Registry 与 Docker 各自存储，只有 Registry 有内容时仍需校验内网内容并导入 Docker，不能直接运行仓库 blob 目录。预拉取核对平台和摘要后固定本机 image ID 及 pull_policy=never 启动；错误不回退匿名，公开日志仅使用固定诊断。operations.platform.registry-auth.v1 阻止旧 Agent 静默忽略认证，发行包包含更新后的管理组件。
 
 轮换、范围调整、过期和撤销使旧待执行授权失效；撤销清空主表秘密，不主动重启运行容器。失效授权禁止新的取密、许可和续租；已启动任务仍可在原签名身份、租约及策略边界内提交终态回执，不用新的审批代替实际执行结果。删除检查当前应用及已发布快照引用。用户通过GitHub PR授权合入和固定标签Docker发行，生产切换另按明确请求执行。
 
@@ -2613,9 +2613,33 @@ flowchart TB
   ui["管理员：保存凭据 / 应用选择"] --> vault["中心：加密凭据库"]
   ui --> refs["应用与发布快照：凭据引用"]
   refs --> job["签名任务：冻结无秘密授权"]
-  job --> lease["有效租约：逐镜像临时取密"]
+  job --> local{"本机镜像 / 摘要命中"}
+  local -->|命中| pinned
+  local -->|未命中| cache["已注册集群仓库：不传原仓库秘密"]
+  cache -->|验证命中| pinned
+  cache -->|失败且允许回源| lease["有效租约：逐镜像临时取密"]
   vault --> lease
   lease --> temp["root任务 /run：临时Docker配置"]
   temp --> registry["原仓库：认证拉取"]
   registry --> pinned["验证image ID：启动容器"]
 ```
+
+## 116. 部署镜像优先与升级后的观察恢复（SDD116）
+
+本节修正第111章认证镜像跳过集群复用的路径。获取顺序为本机已验证内容、已注册且来源匹配的集群内仓库、策略允许的原仓库认证。固定标签保留本机复用，显式升级可变标签先解析当前内容；相同内容按 RepoDigest/config 复用，不重复导入。Registry 存储与 Docker 镜像存储独立，不读写仓库底层文件、不改 daemon 或持久登录。
+
+中心或执行器升级、断连使受管观察租约失效时，unknown 不代表现有应用停止。原签名执行器用原 executor、install_generation、machine、agent、job、lease 调用 reconcile；中心校验冻结载荷摘要、原 agent_jobs 的动作与目标归属，并且仅允许单一平台 operations 动作、operation=inspect 和 node.inspect/workload.inspect/gateway.inspect/registry.inspect 白名单。符合条件时将原 unknown 标记为已核对，记录执行器、时间与 read_only_observation_interrupted 审计原因；agent_jobs、privileged_jobs 和 task_runs 的 unknown 历史及原回执保留，不重放原动作、不捏造 healthy。
+
+执行器沿用原签名核对回执释放本地观察 fence；若存在操作锁，仍要求精确 operation_id、锁文件身份和旧进程已结束。新的独立观察进入既有同机串行调度，只有新鲜实际健康回执才能恢复应用就绪、服务成员及网站后端状态。unknown apply/stop/remove、脚本、容器变更、非白名单或归属证明不足仍保留互斥，需既有人工核对，不能靠过期/PID 消失自动重试。此变更无需数据库迁移、新接口或额外权限，旧 helper 已支持 reconcile；镜像优先路径需更新含新准备器的 Agent/helper 发行包。
+
+```mermaid
+flowchart TB
+  interrupted["升级 / 断连：原观察 unknown"] --> signed["原签名身份与租约核对"]
+  signed --> proof{"冻结摘要 / 单一动作 / 归属 / inspect 白名单"}
+  proof -->|通过| resolved["保留 unknown 历史，记录自动核对审计"]
+  proof -->|未知变更或不匹配| blocked["保留互斥，人工核对"]
+  resolved --> local["原 helper 核对本地 fence / 锁 / 进程"]
+  local --> fresh["派发新观察，按实际健康恢复"]
+```
+
+本次按会话中用户提供的 AGENTS.md 同步 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)，验收证据见 specs/116-deployment-cache-recovery/validation.md。
