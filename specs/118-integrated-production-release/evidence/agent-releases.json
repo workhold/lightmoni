@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "releases": [
+    {
+      "version": "0.1.0",
+      "source_revision": "8580eb95974e14bec1ef7db4aaee57a9ce5eb6a6",
+      "build_id": "0.1.0-8580eb95974e-3378e7714034",
+      "state_schema": 1,
+      "platform": "linux",
+      "arch": "amd64",
+      "file": "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+      "sha256": "68a7fc8125757d2aa1e74b76d7b7371f8d459b53b1dcb3bda6506df5c2284f56",
+      "size": 80441884,
+      "build_time": "2026-11-09T15:51:44.642Z"
+    },
+    {
+      "version": "0.1.0",
+      "source_revision": "8580eb95974e14bec1ef7db4aaee57a9ce5eb6a6",
+      "build_id": "0.1.0-8580eb95974e-3378e7714034",
+      "state_schema": 1,
+      "platform": "linux",
+      "arch": "arm64",
+      "file": "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+      "sha256": "259c5d236efca3592871005571a6e437ccd0e063de6fc75221108615d764ea37",
+      "size": 80129065,
+      "build_time": "2026-11-09T15:51:44.642Z"
+    }
+  ],
+  "recommended_by_arch": {
+    "amd64": "68a7fc8125757d2aa1e74b76d7b7371f8d459b53b1dcb3bda6506df5c2284f56",
+    "arm64": "259c5d236efca3592871005571a6e437ccd0e063de6fc75221108615d764ea37"
+  }
+}

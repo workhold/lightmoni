@@ -1,0 +1,7 @@
+{
+  "source": "git archive of merged origin/main",
+  "revision": "8580eb95974e14bec1ef7db4aaee57a9ce5eb6a6",
+  "sha256": "2e87febec7e6841b974a34fd69f26531ce6e4d029122f72423a5ddf58eddc6d8",
+  "dirty_worktree_files_included": false,
+  "external_cache_inputs": "verified public npm tarballs and pinned Node archives; excluded from image layers; integrity rechecked"
+}

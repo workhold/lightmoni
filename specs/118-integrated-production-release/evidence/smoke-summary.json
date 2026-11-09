@@ -1,0 +1,12 @@
+{
+  "arm64": {
+    "checks": 63,
+    "compiled_regressions": 285,
+    "errors": []
+  },
+  "amd64": {
+    "checks": 63,
+    "compiled_regressions": 285,
+    "errors": []
+  }
+}

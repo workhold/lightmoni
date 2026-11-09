@@ -1,0 +1,24 @@
+{
+  "open_prs_at_start": [
+    155,
+    160
+  ],
+  "merged": [
+    {
+      "number": 155,
+      "commit": "a7cb46758138e1cb1e74bb71fa35df3b90fea7e1"
+    },
+    {
+      "number": 160,
+      "commit": "f9f6b304d6933df0c6c8742d30ffd6fc800af728"
+    },
+    {
+      "number": 161,
+      "commit": "8580eb95974e14bec1ef7db4aaee57a9ce5eb6a6"
+    }
+  ],
+  "source_revision": "8580eb95974e14bec1ef7db4aaee57a9ce5eb6a6",
+  "open_after_merge": [],
+  "integrated_runtime_tests": 77,
+  "typecheck": "passed"
+}

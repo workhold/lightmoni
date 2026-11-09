@@ -1,0 +1,35 @@
+{
+  "upgrade": {
+    "host": "zsw-bj-1",
+    "operation_id": "2e4b6145833d1ec64bbe90953412694c",
+    "status": "succeeded",
+    "finished_at": "2026-11-09T16:56:39.188Z",
+    "source_revision": "8580eb95974e14bec1ef7db4aaee57a9ce5eb6a6",
+    "build_id": "0.1.0-8580eb95974e-3378e7714034",
+    "artifact_sha256": "68a7fc8125757d2aa1e74b76d7b7371f8d459b53b1dcb3bda6506df5c2284f56",
+    "identity_retained": true,
+    "runtime_mode": "root",
+    "ordinary_uid": 999,
+    "ordinary_gid": 988,
+    "permission_generation": 1,
+    "cpu_count": 8,
+    "memory_total_mb": 15614.234375,
+    "signed_current_observation": true,
+    "management_version": 1,
+    "batch_management_version": 1,
+    "policy_generation": 1
+  },
+  "retained": [
+    {
+      "host": "zz-bj-1",
+      "revision": "40916db5a49c",
+      "reason": "Existing execution tasks block maintenance; initial queued privileged Agent job, refreshed upgrade menu remains disabled for dispatched/running/unknown work. No business task was cancelled, replayed or changed."
+    },
+    {
+      "host": "vchive",
+      "revision": "790cca58456a",
+      "reason": "Monitoring-only host has no reusable SSH credential; no new access was created."
+    }
+  ],
+  "evidence_source": "Actual administrator maintenance UI and read-only production metadata; current signed helper observation checked through shipped managedExecutorObservation with protected in-container key, only selected capability metadata printed."
+}

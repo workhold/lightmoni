@@ -1,0 +1,25 @@
+[
+  {
+    "status": 200,
+    "body": {
+      "status": "ok"
+    },
+    "observed_at": "2026-11-09T16:00:37.997203+00:00"
+  },
+  {
+    "error": "HTTPError",
+    "observed_at": "2026-11-09T16:00:42.053535+00:00"
+  },
+  {
+    "error": "HTTPError",
+    "observed_at": "2026-11-09T16:00:46.117784+00:00"
+  },
+  {
+    "error": "HTTPError",
+    "observed_at": "2026-11-09T16:00:50.176098+00:00"
+  },
+  {
+    "error": "HTTPError",
+    "observed_at": "2026-11-09T16:00:54.242883+00:00"
+  }
+]

@@ -1,0 +1,30 @@
+✔ catalog has distinct upstream website, source and documentation for all 35 recipes (7.726125ms)
+✔ installation preview reflects parameters and mount targets without persisting or exposing secrets (49.064041ms)
+✔ inventory caches only a known Compose capability and continues to read live containers (8.559958ms)
+✔ operation writes require a human administrator cookie and reject API credentials (127.846416ms)
+✔ operations encrypt configuration and payload; ordinary control never reads private material (84.051125ms)
+✔ ordinary Agent runner does not claim or download an approved backup write operation (57.112667ms)
+✔ read-only jobs serialize domain work and mismatched receipts cannot succeed (20.764292ms)
+✔ operations reject member actions, stale approvals, busy edits and expired plans (86.72725ms)
+✔ operations lifecycle updates only from actual verified Agent receipts (18.523625ms)
+✔ S3 edits reuse credentials only for the same target; service association can be cleared explicitly (16.94325ms)
+✔ Compose edits preserve encrypted documents by default and reject public redaction placeholders (13.919583ms)
+✔ a certificate cannot drop domains required by its registered websites (11.743542ms)
+✔ cron validates fields and IANA zones, supports lists ranges steps and DST UTC slots (59.633958ms)
+✔ schedule authorizes fixed action and revision, deduplicates UTC minutes, skips missed/busy and stops unknown (41.244709ms)
+✔ schedule resource changes invalidate authorization and restart never backfills elapsed slots (1.739333ms)
+✔ an administrator can reauthorize after unknown without silently replaying the same firing (2.735459ms)
+✔ schedule HTTP API requires administrator, binds optimistic revisions and never exposes encrypted storage (195.730375ms)
+✔ restart skips prior minutes and freezes a dispatch whose completion was not persisted (3.399958ms)
+✔ disabled or demoted authorizer automatically revokes scheduled execution (1.668125ms)
+✔ optional capacity validates finite positive values and cannot claim zero hardware (5.110375ms)
+✔ capacity belongs only to current active Agent, retains stale timestamp and tolerates old or corrupt reports (38.072666ms)
+✔ center keeps canonical metric prefixes for every SDK wire subtype and legacy system namespace (0.286292ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4563.562335

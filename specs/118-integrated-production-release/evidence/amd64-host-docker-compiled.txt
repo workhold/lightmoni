@@ -1,0 +1,23 @@
+✔ host actions reject arbitrary daemon, raw Docker escapes and malformed config before execution (7.825916ms)
+✔ inspect exposes only public metadata, locks exact revisions and verifies rename/update/lifecycle (91.080125ms)
+✔ create uses a local full image ID, explicit ports/named volumes and verifies persisted config (8.47225ms)
+✔ remove refuses running containers by default and never requests volume deletion implicitly (10.421708ms)
+✔ image cleanup excludes running AND stopped references, only deletes reviewed IDs, and rechecks references (31.144292ms)
+✔ cleanup fails before writing on expired preview or changed candidate metadata (11.775792ms)
+✔ daemon pin, final authority, mutation interruption and durable unknown locks prevent replay (14.36725ms)
+✔ receipt identity and sensitive-field allowlist survive malicious extra data (4.59275ms)
+✔ large image inventories page by full IDs without losing candidates or loosening reference checks (29.298292ms)
+✔ a definite create rejection releases the node lane and preserves a reviewable failed result (65.22575ms)
+✔ a missing container image identity fails closed before image deletion (8.836209ms)
+✔ batch deletion checks every reviewed identity before any write and preserves unselected containers and volumes (10.648083ms)
+✔ one read-only batch returns bounded public revisions and ownership changes invalidate deletion (6.577625ms)
+✔ batch deletion reports a definite Engine rejection per target without claiming deletion (5.682375ms)
+✔ lost batch DELETE response retains earlier verified targets, unknown target, and a durable fence (6.090167ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1451.825417
