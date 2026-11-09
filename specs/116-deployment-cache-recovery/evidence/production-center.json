@@ -1,0 +1,33 @@
+{
+  "status": "deployed",
+  "observed_at": "2026-11-09T01:30:51.356530+00:00",
+  "started_at": "2026-11-09T01:30:25.24463686Z",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261109-deployment-recovery-v1",
+  "revision": "40916db5a49c1408d1a8317730724744f113fa0c",
+  "index_digest": "sha256:2efa6a870abd06ced159a7d5aadc50132623085f2c13dd4acf2bbd55c6abdd7c",
+  "health": "healthy",
+  "backup": {
+    "directory": "/opt/lightmoni/backups/sdd116-deployment-recovery-20261109",
+    "observed_at": "2026-11-09T01:28:36.795597+00:00",
+    "snapshot_complete": true,
+    "quick_check": "ok",
+    "pages": 499191,
+    "page_size": 4096,
+    "snapshot_bytes": 2044686336,
+    "directory_mode": "0700",
+    "file_modes": "0600",
+    "scope": "Center SQLite, master key and original Compose/environment/container configuration; ClickHouse and application data retained in place"
+  },
+  "mounts_environment_ports_networks_unchanged": true,
+  "master_key_unchanged": true,
+  "other_containers_unchanged": true,
+  "other_container_count": 16,
+  "interrupted_observation": {
+    "id": "2e04234d8fc5e2b814bb3b85c6b2ea2c",
+    "state": "unknown",
+    "resolved_at": "2026-11-09T01:30:56.716Z",
+    "resolution_reason": "read_only_observation_interrupted",
+    "manually_changed_task_database": false
+  },
+  "evidence_source": "Visible production terminal deployment receipt and separate read-only SQLite query after deployment"
+}

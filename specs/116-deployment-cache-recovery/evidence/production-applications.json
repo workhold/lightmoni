@@ -1,0 +1,39 @@
+{
+  "machine": "zz-bj-1",
+  "unresolved_privileged_unknown_jobs": 0,
+  "applications": [
+    {
+      "name": "系统镜像仓库",
+      "state": "running",
+      "healthy": true,
+      "last_seen": "2026-11-09T01:51:14.093Z",
+      "desired_generation": "7",
+      "observed_generation": "7"
+    },
+    {
+      "name": "OpenResty",
+      "state": "running",
+      "healthy": true,
+      "last_seen": "2026-11-09T01:52:12.094Z",
+      "desired_generation": "4",
+      "observed_generation": "4"
+    },
+    {
+      "name": "PostgreSQL",
+      "state": "running",
+      "healthy": true,
+      "last_seen": "2026-11-09T01:51:56.016Z",
+      "desired_generation": "3",
+      "observed_generation": "3"
+    },
+    {
+      "name": "小猪绘本",
+      "state": "running",
+      "healthy": true,
+      "last_seen": "2026-11-09T01:51:38.361Z",
+      "desired_generation": "6",
+      "observed_generation": "6"
+    }
+  ],
+  "evidence_source": "Read-only SQLite projection of current application instance observations after the real signed deployments"
+}
