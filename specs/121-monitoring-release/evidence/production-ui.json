@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "observed_at": "2026-11-10T02:26:28.502292+00:00",
+  "environment": "Authenticated production admin, native Chrome through CUA; actual stored telemetry, no mock responses.",
+  "application": "小猪绘本 / ebookn",
+  "application_monitoring_path": "/applications/6cf483bd10b2d0cfff80b8168ca8918b/monitoring",
+  "checks": [
+    "容器负载最近 1 小时的六张图均返回序列/统计，无窗口对齐错误",
+    "手动刷新完成，无窗口对齐错误",
+    "切换最近 15 分钟，六张图返回序列/统计，无窗口对齐错误",
+    "SDK 标签显示 metric_ebookn_histogram / http.request.count，均值与样本数表格有数据",
+    "zsw-bj-1 单机内存图标题显示 内存 · 总内存 15.2 GiB，与当前容量摘要一致；三条原有内存曲线存在",
+    "重新打开容器监控最近 15 分钟仍有数据，采集状态正常"
+  ],
+  "screenshots": [
+    "artifacts/screenshots/specs/121-monitoring-release/evidence/container-monitoring.png",
+    "artifacts/screenshots/specs/121-monitoring-release/evidence/container-monitoring-15m.png",
+    "artifacts/screenshots/specs/121-monitoring-release/evidence/host-memory-total.png"
+  ],
+  "privacy": "Screenshots and full AX text stay in ignored local artifacts; repository contains only this summarized receipt. SDK log bodies, raw production configuration, database and credentials are excluded."
+}

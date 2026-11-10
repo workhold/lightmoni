@@ -1,0 +1,24 @@
+{
+  "status": "deployed",
+  "observed_at": "2026-11-10T02:23:14.318003+00:00",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261110-monitoring-fixes-v1",
+  "revision": "9d86ca2d987dee64fa2867a58f0450d2514ed807",
+  "index_digest": "sha256:e0a475496cf00a093b4a16abc4c52336eeeb96054581a7a8ffa7e3ada160c2e1",
+  "architecture": "amd64",
+  "health": "healthy",
+  "started_at": "2026-11-10T02:22:43.405216515Z",
+  "backup_snapshot_bytes": 2426781696,
+  "backup_quick_check": "ok",
+  "mounts_unchanged": true,
+  "environment_unchanged": true,
+  "ports_networks_unchanged": true,
+  "master_key_unchanged": true,
+  "other_containers_unchanged": true,
+  "monitoring_assets": {
+    "host_total_memory": true,
+    "sdk_aligned_plot_range": true,
+    "application_query_alignment": true
+  },
+  "agent_upgrade_required": false,
+  "receipt_source": "Root-private deployment-report.json, visually read through existing 1Panel terminal; no raw configuration or secrets exported."
+}
