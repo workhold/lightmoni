@@ -1,0 +1,64 @@
+{
+  "passed": true,
+  "source": "Actual Vite/React UI with intercepted local API fixtures; display-only verification, not real Agent/ClickHouse acceptance",
+  "checks": [
+    {
+      "state": "zh-light-1440",
+      "title": "内存 · 总内存 16.0 GiB",
+      "viewport_overflow": false,
+      "title_fit": {
+        "visible": 130,
+        "needed": 130
+      }
+    },
+    {
+      "state": "en-dark-1440",
+      "title": "Memory · 16.0 GiB total",
+      "viewport_overflow": false,
+      "title_fit": {
+        "visible": 144,
+        "needed": 144
+      }
+    },
+    {
+      "state": "zh-dark-390",
+      "title": "内存 · 总内存 16.0 GiB",
+      "viewport_overflow": false,
+      "title_fit": {
+        "visible": 130,
+        "needed": 130
+      }
+    },
+    {
+      "state": "en-light-390",
+      "title": "Memory · 16.0 GiB total",
+      "viewport_overflow": false,
+      "title_fit": {
+        "visible": 144,
+        "needed": 144
+      }
+    },
+    {
+      "state": "different-machine",
+      "title": "Memory · 8.0 GiB total"
+    },
+    {
+      "state": "unknown",
+      "title": "Memory · total unknown"
+    },
+    {
+      "state": "zero",
+      "title": "Memory · total unknown"
+    },
+    {
+      "state": "negative",
+      "title": "Memory · total unknown"
+    },
+    {
+      "state": "existing-capacity-poll",
+      "title": "Memory · 32.0 GiB total"
+    }
+  ],
+  "page_errors": [],
+  "query_requests": 60
+}
