@@ -1,4 +1,5 @@
 import { expandMetricFunctions, metricTableNames } from './metric-query.js';
+import { METRIC_PERIODS } from './metric-windows.js';
 import { parse, format } from "@clickhouse/parser";
 import { isLosslessNumber } from "lossless-json";
 import { Semaphore } from "../shared/serial.js";
@@ -292,7 +293,7 @@ export class Executor {
         const requiredPeriods:number[]=[];
         for(const name of validated.tables){const table=tables.find(t=>t.name===name||t.logical_name===name&&t.kind==='metric'&&t.metric_type==='histogram');
           if(!table?.columns?.some(c=>c.name==='window_seconds'))continue;
-          const metadata=await this.reader.query(`SELECT groupUniqArray(window_seconds) AS periods FROM ${name} WHERE window_start>={__lm_from:DateTime64(9,'UTC')} AND window_start<{__lm_to:DateTime64(9,'UTC')} AND window_seconds>0`,expanded.params,signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000));
+          const metadata=await this.reader.query(`SELECT groupUniqArray(window_seconds) AS periods FROM ${name} WHERE window_start>={__lm_from:DateTime64(9,'UTC')}-toIntervalSecond(${Math.max(...METRIC_PERIODS)}) AND window_start<{__lm_to:DateTime64(9,'UTC')} AND window_start+toIntervalSecond(window_seconds)>{__lm_from:DateTime64(9,'UTC')} AND window_seconds>0`,expanded.params,signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000));
           const periods=metadata.data[0]?.periods??[];
           requiredPeriods.push(...periods.map(Number));
         }
@@ -304,7 +305,7 @@ export class Executor {
           if(!Number.isSafeInteger(req.interval_ms)||req.interval_ms<=0)throw Error('query interval must be a positive integer');
           const period=BigInt(seconds)*1_000_000_000n;
           const from=parseNanoTime(req.range.from),to=parseNanoTime(req.range.to);
-          if(req.source?.startsWith('dashboard')||req.source?.startsWith('alert')){
+          if(req.source?.startsWith('dashboard')||req.source?.startsWith('alert')||req.source==='application-monitoring'){
             const start=from/period*period,end=to/period*period;if(end<=start)throw Error('query range is shorter than one metric window');
             const interval=Math.max(seconds*1000,Math.ceil(req.interval_ms/(seconds*1000))*seconds*1000);
             expanded.params.__lm_from=formatNanoTime(start).replace('T',' ').replace(/Z$/,'');expanded.params.__lm_to=formatNanoTime(end).replace('T',' ').replace(/Z$/,'');expanded.params.__lm_interval=String(interval);
