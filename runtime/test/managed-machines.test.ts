@@ -21,7 +21,7 @@ async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverrid
  // managed-machines joins the node registry to derive the linked Agent status.
  // Keep this fixture self-contained instead of relying on the full app
  // bootstrap, which registers the nodes module before managed machines.
- db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL DEFAULT '')");
+ db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL DEFAULT '',heartbeat TEXT NOT NULL DEFAULT '{}')");
  let issued:any;
  const agentCredentials={
   has:()=>true,

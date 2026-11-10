@@ -10,6 +10,7 @@ import {once} from 'node:events';
 import {Client, type ConnectConfig} from 'ssh2';
 import {CHECK_NAMES,defaultSSHRunner,parsePreflight,pinnedHostKeys,preflightCommand,remoteSSHFailure,SSHError} from '../src/server/machine-ssh.js';
 import type {SSHMachineTarget} from '../src/server/managed-machines.js';
+import {rewriteMaintenancePaths} from './helpers/maintenance-shell.js';
 import {agentInstallationPaths} from '../src/shared/agent-maintenance-shell.js';
 import {freshAgentGuard} from '../src/server/machine-agent-lifecycle.js';
 
@@ -70,7 +71,7 @@ test('privilege probe distinguishes actual root, non-interactive sudo, denied su
 test('root and sudo SSH discovery detect every unified Agent residue before fresh deployment without altering it',t=>{
  const root=mkdtempSync(join(tmpdir(),'lm-ssh-installation-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
  const probe=preflightCommand('https://platform.example').split('\n').find(line=>line.includes('echo agent_installation=present'))!;
- const rewrite=(source:string)=>agentInstallationPaths.reduce((text,filename)=>text.replaceAll(filename,join(root,filename)),source);
+ const rewrite=(source:string)=>rewriteMaintenancePaths(source,root);
  const run=(source:string)=>spawnSync('sh',['-c',source],{encoding:'utf8'});
  for(const sudo of [false,true]){
    const login=sudo?'id() { echo 1001; }; sudo() { test "$1" = -n && test "$2" = /bin/sh && test "$3" = -c || return 1; shift 3; /bin/sh -c "$1"; };':'id() { echo 0; };';
@@ -78,8 +79,8 @@ test('root and sudo SSH discovery detect every unified Agent residue before fres
    assert.equal(run(rewrite(freshAgentGuard)).status,0);
    for(const filename of agentInstallationPaths){
      const target=join(root,filename);mkdirSync(dirname(target),{recursive:true});
-     const directory=['/opt/lightmoni-agent','/etc/lightmoni-agent-helper','/var/lib/lightmoni-agent-helper'].includes(filename);
-     if(directory){mkdirSync(target);writeFileSync(join(target,'sentinel'),'retained helper state');}else writeFileSync(target,'retained program/configuration');
+     const directory=filename.endsWith('.service.d')||['/opt/lightmoni-agent','/etc/lightmoni-agent-helper','/var/lib/lightmoni-agent-helper'].includes(filename);
+     if(directory){mkdirSync(target);assert.equal(run(login+rewrite(probe)).stdout,'agent_installation=present\n',filename+' empty directory');assert.equal(run(rewrite(freshAgentGuard)).status,1);writeFileSync(join(target,'sentinel'),'retained helper state');}else writeFileSync(target,'retained program/configuration');
      const observed=run(login+rewrite(probe));assert.equal(observed.status,0,observed.stderr);assert.equal(observed.stdout,'agent_installation=present\n',filename);
      const fresh=run(rewrite(freshAgentGuard));assert.equal(fresh.status,1,filename);assert.match(fresh.stderr,/Existing Agent installation detected/);
      assert.equal(readFileSync(directory?join(target,'sentinel'):target,'utf8'),directory?'retained helper state':'retained program/configuration');
@@ -102,4 +103,10 @@ test('structured privilege fails closed on missing, inconsistent or malformed pr
   assert.equal(parsed.privilege.reason_code,state==='unknown'?'privilege_probe_failed':'privilege_unavailable_or_interactive');
  }
  for(const value of [base.replace('privilege_state=root\n',''),base.replace('privilege_state=root','privilege_state=unavailable'),base.replace('privilege_state=root','privilege_state=administrator'),base.replace('install_privilege=1','install_privilege=0'),base+'privilege_state=root\n'])assert.throws(()=>parsePreflight(value),/invalid_response/);
+});
+
+for(const reason of ['agent_service_override_not_allowed'])test('service override rejection exposes only the fixed diagnostic',()=>{
+ const error=remoteSSHFailure(1,'private enrollment token','Error: '+reason+'\nprivate key material');
+ assert.deepEqual(error.remoteFailure,{remote_exit_code:1,remote_reason_code:reason});
+ assert.equal(JSON.stringify(error).includes('private'),false);
 });

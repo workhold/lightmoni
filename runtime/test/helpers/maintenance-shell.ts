@@ -22,6 +22,7 @@ export function inlineFixtureCommands(directory:string):string {
 export function writeMaintenanceStatShim(directory: string) {
   writeFileSync(join(directory, "stat"), `#!${process.execPath}
 const fs=require('node:fs'),p=process.argv.at(-1),info=fs.lstatSync(p);
-console.log((p===process.env.TEST_NON_ROOT_PATH?'123':'0')+':'+(info.mode&0o7777).toString(8));
+const uid=p===process.env.TEST_NON_ROOT_PATH?'123':'0',format=process.argv[process.argv.indexOf('-c')+1];
+console.log(format.replaceAll('%u',uid).replaceAll('%a',(info.mode&0o7777).toString(8)).replaceAll('%d',String(info.dev)).replaceAll('%i',String(info.ino)).replaceAll('%Y',String(Math.floor(info.mtimeMs/1000))));
 `, { mode: 0o755 });
 }

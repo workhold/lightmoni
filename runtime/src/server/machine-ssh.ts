@@ -40,7 +40,7 @@ export interface SSHRunInput {
   timeoutMs?: number;
 }
 export type SSHRunner = (input: SSHRunInput) => Promise<{ stdout: string; stderr: string; stages: string[] }>;
-const REMOTE_REASONS = ["ordinary_agent_privilege_violation", "agent_account_invalid", "ordinary_task_identity_check_failed"] as const;
+const REMOTE_REASONS = ["agent_service_override_not_allowed", "ordinary_agent_privilege_violation", "agent_account_invalid", "ordinary_task_identity_check_failed"] as const;
 export interface SSHRemoteFailure { remote_exit_code: number | null; remote_reason_code: typeof REMOTE_REASONS[number] | "remote_command_failed" }
 export class SSHError extends Error {
   readonly remoteFailure?: SSHRemoteFailure;
