@@ -4,4 +4,4 @@
 - [x] T002 补能复现实际 SDK/Executor 窗口错误的回归。
 - [x] T003 接入既有窗口对齐、修复指标时间宏与实际绘图范围。
 - [x] T004 相关回归/类型检查，隔离 ClickHouse 和浏览器验收，记录证据。
-- [ ] T005 同步 main、检查 diff，提交独立 GitHub PR。
+- [x] T005 同步 main、检查 diff，提交独立 GitHub PR。
