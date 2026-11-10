@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "checks": [
+    "container load: six charts, no alignment error",
+    "manual refresh succeeds",
+    "15 minute range succeeds",
+    "cluster selector succeeds",
+    "cluster/deployment/container scoped query succeeds",
+    "SDK metrics and logs render alongside container load",
+    "existing automatic refresh succeeds"
+  ],
+  "telemetry_responses": 7,
+  "page_errors": [],
+  "source": "Actual React/Vite UI and production observability HTTP handlers/Executor with isolated ClickHouse; synthetic metric/log rows, no Agent collection"
+}

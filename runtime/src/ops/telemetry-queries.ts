@@ -12,7 +12,9 @@ export function sdkTelemetryQueries(tables:Table[],applicationID:string,time:str
  if(metrics.length){
   const sql=metrics.map(t=>{
    const histogram=t.metric_type==='histogram';
-   return `SELECT toStartOfMinute(event_time) AS time,${literal(t.name)} AS table_name,name,unit,instance_id,${literal(t.metric_type!)} AS metric_type,${histogram?'sum(sum) / nullIf(sum(count),0)':'avg(value)'} AS value,${histogram?'sum(count)':'count()'} AS samples FROM ${tableName(t)} WHERE ${time} AND ${scope} GROUP BY time,name,unit,instance_id`;
+   const clock=histogram?'metric_time':'event_time';
+   const source=histogram?`(SELECT *,if(window_seconds>0,window_start,event_time) AS metric_time FROM ${tableName(t)})`:tableName(t);
+   return `SELECT $__timeInterval(${clock}) AS time,${literal(t.name)} AS table_name,name,unit,instance_id,${literal(t.metric_type!)} AS metric_type,${histogram?'sum(sum) / nullIf(sum(count),0)':'avg(value)'} AS value,${histogram?'sum(count)':'count()'} AS samples FROM ${source} WHERE $__timeFilter(${clock}) AND ${scope} GROUP BY time,name,unit,instance_id`;
   }).join(' UNION ALL ');
   queries.push({refId:'sdk_metrics',sql:`SELECT * FROM (${sql}) ORDER BY time,name LIMIT 5000`});
  }
