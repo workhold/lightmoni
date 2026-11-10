@@ -25,7 +25,7 @@ Independent test: 错误码明确且无原始日志；核对失败读回后可�
 
 ## Phase 6: Verification and delivery
 - [x] T011 运行相关回归、类型检查、构建并记录 specs/122-agent-install-recovery/evidence/validation.md。
-- [ ] T012 同步远端 main、复核 diff 并通过 GitHub 功能分支提交 PR，验证记录写入 specs/122-agent-install-recovery/evidence/validation.md。
+- [x] T012 同步远端 main、复核 diff 并通过 GitHub 功能分支提交 PR，验证记录写入 specs/122-agent-install-recovery/evidence/validation.md。
 
 ## Dependencies and parallel opportunities
 

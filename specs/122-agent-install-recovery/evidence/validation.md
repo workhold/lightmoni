@@ -40,3 +40,5 @@ Node 26.0.0 / macOS，隔离目录内执行真实 POSIX shell。systemd 和 root
 ## Delivery
 
 基于 GitHub origin/main 570b203；提交前再次 fetch，未发现主干变化。独立工作树保留原目录的 compose.yaml 与 SDD091 未提交内容。通过功能分支 PR 交付，不合并、不发布、不改线上主机状态。
+
+GitHub PR：[workhold/lightmoni#166](https://github.com/workhold/lightmoni/pull/166)，目标 `main`，功能分支 `codex/122-agent-install-recovery`。创建后通过 GitHub 回读确认，不执行合并或发布。
