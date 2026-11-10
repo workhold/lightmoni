@@ -1,0 +1,16 @@
+{
+  "snapshot_complete": true,
+  "quick_check": "ok",
+  "pages": 592476,
+  "page_size": 4096,
+  "snapshot_bytes": 2426781696,
+  "seconds": 453.1,
+  "observed_at": "2026-11-10T02:19:18.608154+00:00",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261109-deployment-followups-v1",
+  "revision": "8580eb95974e14bec1ef7db4aaee57a9ce5eb6a6",
+  "directory_mode": "0700",
+  "file_modes": "0600",
+  "method": "SQLite online backup from pinned read transaction of exact current Docker volume",
+  "location": "production host only",
+  "receipt_source": "Root-private backup-report.json, visually read through existing 1Panel terminal."
+}

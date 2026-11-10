@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "mean": 20,
+  "alignment": {
+    "range": {
+      "from": "2026-11-10T01:14:00Z",
+      "to": "2026-11-10T02:15:00Z"
+    },
+    "interval_ms": 60000
+  },
+  "strict_sql_rejected": true
+}

@@ -1,0 +1,53 @@
+{
+  "url": "https://moni.heyphp.com/healthz",
+  "switch_observation": "HTTP 502 immediately during replacement; subsequent samples timed out, first recorded HTTP 200 at 02:24:12 UTC. Exact outage duration was not continuously measured.",
+  "switch_samples": [
+    {
+      "observed_at": "2026-11-10T02:23:26.147645+00:00",
+      "error": "The read operation timed out"
+    },
+    {
+      "observed_at": "2026-11-10T02:23:39.204880+00:00",
+      "error": "The read operation timed out"
+    },
+    {
+      "observed_at": "2026-11-10T02:23:52.256011+00:00",
+      "error": "The read operation timed out"
+    },
+    {
+      "observed_at": "2026-11-10T02:24:05.309346+00:00",
+      "error": "The read operation timed out"
+    },
+    {
+      "observed_at": "2026-11-10T02:24:12.673546+00:00",
+      "status": 200,
+      "body": "{\"status\":\"ok\"}\n"
+    }
+  ],
+  "final_samples": [
+    {
+      "observed_at": "2026-11-10T02:26:21.552250+00:00",
+      "status": 200,
+      "body": {
+        "status": "ok"
+      },
+      "latency_seconds": 1.03
+    },
+    {
+      "observed_at": "2026-11-10T02:26:24.835043+00:00",
+      "status": 200,
+      "body": {
+        "status": "ok"
+      },
+      "latency_seconds": 0.279
+    },
+    {
+      "observed_at": "2026-11-10T02:26:28.499955+00:00",
+      "status": 200,
+      "body": {
+        "status": "ok"
+      },
+      "latency_seconds": 0.661
+    }
+  ]
+}

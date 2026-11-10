@@ -1,0 +1,20 @@
+{
+  "revision": "9d86ca2d987dee64fa2867a58f0450d2514ed807",
+  "platforms": [
+    {
+      "platform": "linux/amd64",
+      "checks": 9,
+      "compiled_regressions": 6,
+      "errors": [],
+      "actual_packaged_sdk_ingestion_query": true
+    },
+    {
+      "platform": "linux/arm64",
+      "checks": 9,
+      "compiled_regressions": 6,
+      "errors": [],
+      "actual_packaged_sdk_ingestion_query": true
+    }
+  ],
+  "disposable_test_services_and_credentials_removed": true
+}

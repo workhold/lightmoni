@@ -1,0 +1,18 @@
+{
+  "platform": "linux/amd64",
+  "revision": "9d86ca2d987dee64fa2867a58f0450d2514ed807",
+  "image_id": "sha256:b1cc4a26a27adacae7d45da428b16cfcfc4c1a69ed9ac8309818231913194afc",
+  "checks": [
+    "same merged revision and non-root identity; isolated ClickHouse and real HTTP health",
+    "administrator CLI, login and session",
+    "six tests use actual compiled image modules: native application window alignment and current host capacity identity",
+    "built Web includes total-memory title, unknown fallback and SDK aligned plot range",
+    "packaged TypeScript SDK direct configuration, integer Counter, Float64 Gauge and aligned record Histogram persist and query through final schema",
+    "shipped SDK -> actual HTTP ingest -> ClickHouse -> compiled query yields expected histogram mean 20 with aligned range; ordinary SQL stays strict",
+    "both embedded Agent and all SDK release checksums",
+    "four packaged SDK downloads and HTTP bytes match checksums",
+    "both architecture Agent packages remain available; no deployed Agent update is performed"
+  ],
+  "errors": [],
+  "execution": "native ARM64 or Docker AMD64 emulation with isolated ClickHouse; packaged SDK actual ingestion/query"
+}

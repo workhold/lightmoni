@@ -1,0 +1,9 @@
+{
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261109-deployment-followups-v1",
+  "revision": "8580eb95974e14bec1ef7db4aaee57a9ce5eb6a6",
+  "health": "healthy",
+  "free_gib": 140.4,
+  "compose_exists": true,
+  "data_volume": "lightmoni_lightmoni-state-v2-20261103",
+  "source": "Read-only Docker inspection through existing authenticated 1Panel terminal"
+}

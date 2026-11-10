@@ -1,0 +1,63 @@
+{
+  "buildx.build.provenance": {
+    "builder": {
+      "id": ""
+    },
+    "buildType": "https://mobyproject.org/buildkit@v1",
+    "materials": [
+      {
+        "uri": "pkg:docker/node@24.15.0-bookworm?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "f22d6a1f082c02f292e86929b5b0442ac2e5eaf438a5dea9b1566601c3e05940"
+        }
+      },
+      {
+        "uri": "pkg:docker/node@24.15.0-bookworm-slim?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d"
+        }
+      },
+      {
+        "uri": "http://buildkit-session/yydz3a9zm4mwr2e4whw64spbp",
+        "digest": {
+          "sha256": "ebb77e77672a032b097e537000f5e216616f6fad4d6c300db198233c12230d39"
+        }
+      }
+    ],
+    "invocation": {
+      "configSource": {
+        "uri": "http://buildkit-session/yydz3a9zm4mwr2e4whw64spbp",
+        "digest": {
+          "sha256": "ebb77e77672a032b097e537000f5e216616f6fad4d6c300db198233c12230d39"
+        },
+        "entryPoint": "deploy/server/Dockerfile"
+      },
+      "parameters": {
+        "frontend": "dockerfile.v0",
+        "args": {
+          "build-arg:BUILD_REVISION": "9d86ca2d987dee64fa2867a58f0450d2514ed807",
+          "build-arg:DEBIAN_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian",
+          "build-arg:DEBIAN_SECURITY_MIRROR": "http://mirrors.tuna.tsinghua.edu.cn/debian-security",
+          "build-arg:NODE_DIST_URL": "https://nodejs.org/dist",
+          "build-arg:NPM_REGISTRY": "https://registry.npmjs.org"
+        }
+      },
+      "environment": {
+        "platform": "linux/arm64"
+      }
+    }
+  },
+  "buildx.build.ref": "desktop-linux/desktop-linux/ud631yme0yfzr42eymv34l9y1",
+  "containerimage.config.digest": "sha256:3cd2670a8c6c071da0da69512ff6303e41721e8bb956edd6202cce47b39fce95",
+  "containerimage.descriptor": {
+    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+    "digest": "sha256:b1cc4a26a27adacae7d45da428b16cfcfc4c1a69ed9ac8309818231913194afc",
+    "size": 4039,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  },
+  "containerimage.digest": "sha256:b1cc4a26a27adacae7d45da428b16cfcfc4c1a69ed9ac8309818231913194afc",
+  "image.name": "docker.io/library/lightmoni:20261110-monitoring-fixes-v1-amd64"
+}
