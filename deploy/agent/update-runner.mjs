@@ -663,7 +663,19 @@ export class AgentMaintenance {
       this.command("systemctl", ["restart", "lightmoni-agent.service"]);
       if (this.system("ActiveState") !== "active") fail("rollback_start_failed");
     }
-    const {local,helperActive}=this.verifyOriginalHealth(request);
+    // A freshly restarted service can be systemd-active before its local
+    // status endpoint is ready. Retry only that transient health failure;
+    // fingerprint/identity changes remain immediate hard failures.
+    let original;
+    const healthDeadline=this.elapsed()+Math.min(HEALTH_MS,RESTORE_MS);
+    for (;;) {
+      try { original=this.verifyOriginalHealth(request); break; }
+      catch (error) {
+        if (error?.safeCode !== 'recovery_original_unhealthy' || this.elapsed() >= healthDeadline) throw error;
+        await this.sleep(1000);
+      }
+    }
+    const {local,helperActive}=original;
     const result = this.save(id, { status: "rolled_back", error_code: reason, restored_fingerprint: request.expected_fingerprint, finished_at: this.timestamp(), local_health: { service_active: request.previous_active ? this.system("ActiveState") === "active" : false, helper_active: helperActive, identity_matches: true, release_matches: true, boot_id: typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) ? local.boot_id : "" } });
     if(!preserveArtifacts){this.cleanupCandidate(id);this.cleanup(id);} this.unlock(id); return result;
   }

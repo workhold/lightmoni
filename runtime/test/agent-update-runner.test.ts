@@ -236,6 +236,22 @@ test("failed restoration keeps lifecycle fence and durable rollback_failed recei
   assert.equal(f.maintenance.ownsLock(request.operation_id), true);
   f.preserve();
 });
+test("rollback waits for a transient original health failure after service restart", async t => {
+  const f = fixture(t, { failTarget: true }), request = f.request();
+  await f.maintenance.start(request);
+  const verify = f.maintenance.verifyOriginalHealth.bind(f.maintenance);
+  let attempts = 0;
+  f.maintenance.verifyOriginalHealth = (value: any) => {
+    attempts += 1;
+    if (attempts === 1) throw Object.assign(Error("synthetic readiness delay"), { safeCode: "recovery_original_unhealthy" });
+    return verify(value);
+  };
+  const result = await f.maintenance.worker(request.operation_id);
+  assert.equal(result.status, "rolled_back");
+  assert.equal(attempts, 2);
+  assert.equal(f.maintenance.ownsLock(request.operation_id), false);
+  f.preserve();
+});
 test("tampered package and expired startup deadline leave program untouched", async t => {
   const f = fixture(t), request = f.request();
   fs.appendFileSync(f.archive, "tamper");
