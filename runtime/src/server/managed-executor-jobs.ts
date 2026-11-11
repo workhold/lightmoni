@@ -86,6 +86,7 @@ export function connectManagedExecutorJobs(deps:Dependencies,options:{jobs:Agent
       const job=jobs.get(root.id);if(terminal(job.state))return;
       if(root.state==='running')db.run('UPDATE agent_jobs SET lease_expires_at=? WHERE id=?',root.lease_expires_at,root.id);
       if(root.state==='cancelled'&&job.state==='queued'){jobs.cancel(root.id,'executor cancellation');return;}
+      if(root.state==='failed'&&job.state==='queued'){jobs.failQueuedSSH?.(root.id,root.code||'ssh_dispatch_failed');return;}
       if(root.state==='unknown'&&job.lease_expires_at<=now()){jobs.expireLeases?.();return;}
       if(['unknown','failed','cancelled'].includes(root.state)&&job.lease_id)receipt(root,{state:root.state,code:root.code,stdout:''});
     },

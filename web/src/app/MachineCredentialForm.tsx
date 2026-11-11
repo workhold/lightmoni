@@ -1,4 +1,4 @@
-import {Alert,Button,Checkbox,Form,Input,InputNumber,Select} from '../shared/ui';
+import {Alert,Button,Form,Input,Select} from '../shared/ui';
 import {useI18n} from '../shared/i18n';
 import type {FormInstance} from 'antd';
 import {useEffect,useState} from 'react';
@@ -6,31 +6,27 @@ import {Link} from 'react-router-dom';
 import {api} from '../shared/api';
 import {availableConnectionCredential,type ConnectionCredential} from './connection-credentials';
 
-export type CredentialValues={method:string;name?:string;credential_name?:string;credential_source?:'new'|'existing';connection_credential_id?:string;duration?:number|'custom'|'permanent';secret?:string;expires_in_seconds?:number;confirm_permanent?:boolean};
-export const credentialInitialValues={method:'password',duration:21600,credential_source:'new'};
+export type CredentialValues={method:string;name?:string;credential_name?:string;credential_source?:'new'|'existing';connection_credential_id?:string;secret?:string};
+export const credentialInitialValues={method:'password',credential_source:'new'};
 export function credentialPayload(values:CredentialValues){
  if(values.credential_source==='existing')return {connection_credential_id:values.connection_credential_id};
  const name=values.credential_name?.trim()||values.name?.trim();
  const base={method:values.method,secret:values.secret,...(name?{name}:{})};
- return values.duration==='permanent'?{...base,retention:'permanent',confirm_permanent:values.confirm_permanent===true}:{...base,retention:'managed',confirm_managed:true,expires_in_seconds:values.duration==='custom'?values.expires_in_seconds:values.duration||21600};
+ return {...base,retention:'permanent'};
 }
 export function clearCredentialSecrets(form:FormInstance,changed:Record<string,unknown>){
- if(Object.hasOwn(changed,'credential_source'))form.setFieldsValue({secret:undefined,connection_credential_id:undefined,expires_in_seconds:undefined,confirm_permanent:false});
- else if(Object.hasOwn(changed,'method'))form.setFieldsValue({secret:undefined,expires_in_seconds:undefined,confirm_permanent:false});
- else if(Object.hasOwn(changed,'duration'))form.setFieldsValue({expires_in_seconds:undefined,confirm_permanent:false});
+ if(Object.hasOwn(changed,'credential_source'))form.setFieldsValue({secret:undefined,connection_credential_id:undefined});
+ else if(Object.hasOwn(changed,'method'))form.setFieldsValue({secret:undefined});
 }
 export function MachineCredentialFields({nameRequired=false,nameField='name'}:{nameRequired?:boolean;nameField?:string}){
  const {t}=useI18n();
  return <>
   <Form.Item label={t('凭据名称','Credential name')} name={nameField} rules={[{required:nameRequired,message:t('请输入凭据名称','Enter a credential name')},{max:128}]}><Input autoComplete="off" placeholder={t('例如：生产主机运维私钥','Example: Production operations key')}/></Form.Item>
   <Form.Item label={t('登录方式','Login method')} name="method" rules={[{required:true}]}><Select options={[{value:'password',label:t('SSH 密码','SSH password')},{value:'ssh_key',label:t('SSH 私钥','SSH private key')}]}/></Form.Item>
-  <Form.Item noStyle shouldUpdate={(a,b)=>a.method!==b.method}>{({getFieldValue})=><Form.Item label={getFieldValue('method')==='ssh_key'?t('SSH 私钥','SSH private key'):t('SSH 密码','SSH password')} name="secret" preserve={false} rules={[{required:true,message:t('请输入登录密码或私钥','Enter the login password or private key')}]} extra={t('加密保存，保存后不会回显；用于 SSH 检查、安装和故障恢复。','Encrypted and never displayed again. Used for SSH preflight, installation, and recovery.')}>
+  <Form.Item noStyle shouldUpdate={(a,b)=>a.method!==b.method}>{({getFieldValue})=><Form.Item label={getFieldValue('method')==='ssh_key'?t('SSH 私钥','SSH private key'):t('SSH 密码','SSH password')} name="secret" preserve={false} rules={[{required:true,message:t('请输入登录密码或私钥','Enter the login password or private key')}]} extra={t('加密永久保存，保存后不会回显；用于 SSH 检查和主机操作，可随时撤销。','Encrypted and stored without an expiry, never displayed again. Used for SSH checks and host operations; revoke it at any time.')}>
    {getFieldValue('method')==='ssh_key'?<Input.TextArea autoComplete="off" rows={4} placeholder={t('SSH 私钥内容','SSH private key content')}/>:<Input.Password autoComplete="new-password" visibilityToggle={false} placeholder={t('输入 SSH 密码','Enter SSH password')}/>}
   </Form.Item>}</Form.Item>
-  <Form.Item label={t('保存时长','Storage duration')} name="duration" rules={[{required:true}]} extra={t('保存时长用于登录密码或私钥，默认 6 小时。','Storage duration applies to the login password or private key and defaults to 6 hours.')}><Select options={[{value:21600,label:t('6 小时（默认）','6 hours (default)')},{value:86400,label:t('1 天','1 day')},{value:604800,label:t('7 天','7 days')},{value:2592000,label:t('30 天','30 days')},{value:'custom',label:t('自定义','Custom')},{value:'permanent',label:t('永久','Permanent')}]}/></Form.Item>
-  <Form.Item noStyle shouldUpdate={(a,b)=>a.duration!==b.duration}>{({getFieldValue})=>getFieldValue('duration')==='custom'?<Form.Item label={t('有效秒数','Validity in seconds')} name="expires_in_seconds" preserve={false} rules={[{required:true,message:t('请输入保存时长','Enter a storage duration')},{type:'number',min:60,max:31536000,message:t('请输入 60 至 31536000 秒','Enter 60 to 31536000 seconds')}]} extra={t('60 秒至 365 天。到期或撤销后清除秘密。','60 seconds to 365 days. Secrets are cleared on expiry or revocation.')}><InputNumber min={60} max={31536000} precision={0} style={{width:'100%'}}/></Form.Item>:getFieldValue('duration')==='permanent'?<>
-   <Form.Item name="confirm_permanent" valuePropName="checked" preserve={false} rules={[{validator:(_,value)=>value?Promise.resolve():Promise.reject(new Error(t('请确认永久保存后继续','Confirm permanent storage to continue')))}]}><Checkbox>{t('我确认永久保存此登录凭据','I confirm permanent storage of this login credential')}</Checkbox></Form.Item>
-  </>:null}</Form.Item>
+  <p>{t('凭据将加密永久保存，直到管理员撤销或解绑。','The credential is encrypted and stored without an expiry until an administrator revokes or unlinks it.')}</p>
  </>;
 }
 export function HostCredentialFields(){

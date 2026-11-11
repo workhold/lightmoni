@@ -77,11 +77,12 @@ export class AgentJobRunner {
   private clear() {
     try { atomicJSON(this.statePath, {}); } catch {}
   }
-  async pollOnce(): Promise<ExecutionReceipt | null> {
+  async pollOnce(jobID?: string): Promise<ExecutionReceipt | null> {
     if (!this.config.controlCredential) return null;
     const reply = await this.request(`/api/v1/agents/${encodeURIComponent(this.config.agentID)}/jobs/claim`, {
       capabilities: [...ORDINARY_JOB_CAPABILITIES],
       receipt_cursor: this.cursor,
+      ...(jobID ? { job_id: jobID } : {}),
     });
     const job = reply.job;
     if (!job) return null;

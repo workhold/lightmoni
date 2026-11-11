@@ -1,0 +1,9 @@
+{
+  "checked": [
+    "new account key is stored permanently without a duration field",
+    "password has the same permanent policy without a second confirmation",
+    "lost response clears secrets and blocks duplicate mutation until readback"
+  ],
+  "errors": [],
+  "unexpected": []
+}

@@ -24,7 +24,7 @@ export default function ConnectionCredentialsPage(){
   if(pending.current||createUnknown)return;pending.current=true;setBusy(true);setActionError('');
   try{
    if(editing){await api(`/connection-credentials/${encodeURIComponent(editing.id)}`,{method:'PUT',body:JSON.stringify({name:values.name.trim()})});void message.success(t('凭据名称已更新','Credential name updated'))}
-   else{const saved=await api<ConnectionCredential>('/connection-credentials',{method:'POST',body:JSON.stringify(credentialPayload(values))});void message.success(saved.reused?t('已复用已有私钥，保留其原有有效期','Existing private key reused with its original expiry'):t('连接凭据已保存','Connection credential saved'))}
+   else{const saved=await api<ConnectionCredential>('/connection-credentials',{method:'POST',body:JSON.stringify(credentialPayload(values))});void message.success(saved.reused?t('已复用已有私钥','Existing private key reused'):t('连接凭据已保存','Connection credential saved'))}
    form.resetFields();setCreating(false);setEditing(undefined);await load();
   }catch(e){setActionError(text(e));if(!editing&&!(e instanceof ApiError&&e.status<500)){setCreateUnknown(true);form.resetFields()}}finally{pending.current=false;setBusy(false)}
  };
@@ -39,7 +39,7 @@ export default function ConnectionCredentialsPage(){
    {title:t('名称','Name'),dataIndex:'name',width:200,render:(name:string)=><Typography.Text strong>{name}</Typography.Text>},
    {title:t('类型 / 公钥指纹','Type / public-key fingerprint'),width:235,render:(_,c)=><><Tag>{c.method==='ssh_key'?t('SSH 私钥','SSH private key'):t('SSH 密码','SSH password')}</Tag>{c.method==='ssh_key'&&c.secret_fingerprint&&<Typography.Text code copyable className="lm-credential-meta">{c.secret_fingerprint}</Typography.Text>}</>},
    {title:t('状态','Status'),width:90,render:(_,c)=><Tag color={availableConnectionCredential(c)?'success':'default'}>{c.revoked_at||c.status==='revoked'?t('已撤销','Revoked'):availableConnectionCredential(c)?t('有效','Active'):t('已过期','Expired')}</Tag>},
-   {title:t('有效期','Expires at'),width:160,render:(_,c)=>c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)},
+   {title:t('保存期限','Storage'),width:160,render:(_,c)=>c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)},
    {title:t('关联主机','Associated hosts'),width:140,render:(_,c)=><Space wrap>{c.hosts.length?c.hosts.map(host=><Link key={host.id} to={`/machines?machine=${encodeURIComponent(host.id)}`}><Tag>{host.name}</Tag></Link>):<Typography.Text type="secondary">{t('尚未关联','Not associated')}</Typography.Text>}</Space>},
    {title:t('最近使用','Last used'),dataIndex:'last_used_at',width:160,render:time},
    {title:t('操作','Actions'),width:100,render:(_,c)=><Space size={4}><IconAction label={t('重命名','Rename')} icon={<EditOutlined aria-hidden/>} size="small" onClick={()=>{form.resetFields();form.setFieldsValue({name:c.name});setActionError('');setEditing(c)}}/><IconAction label={t('撤销','Revoke')} icon={<StopOutlined aria-hidden/>} aria-label={t('撤销','Revoke')} size="small" danger disabled={c.status==='revoked'||!!c.revoked_at} onClick={()=>{setActionError('');setRevoking(c)}}/></Space>},

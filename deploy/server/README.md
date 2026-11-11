@@ -18,7 +18,7 @@ docker compose ps
 
 当前存储只接受首次正式发布基线。没有 `center_schema=1` 标记的旧开发数据库会被明确拒绝；程序不执行升级、搬运或删除。需要保留的开发数据应由管理员先备份，再使用全新状态和遥测目录。清理与发布验收见 [SDD081](../../specs/081-prerelease-cleanup/validation.md)。
 
-普通 Agent 保持非 root、无 Docker 权限。应用、网站、Compose、证书和备份写操作由独立执行器及默认关闭的 `operations.managed.v1` 承接，业务数据使用独立 root 私有目录；不提供旧普通 Agent 业务目录接管命令。中心镜像更新不会自动更新已安装 Agent、授权主机能力或操作业务数据。执行器维护保留审批、摘要、健康确认、程序回退及 unknown 栅栏，见[运维手册](../../docs/operations.md)。
+普通 Agent 保持非 root、无 Docker 权限，负责采集、上报、心跳和定时任务。应用、网站、Compose、证书、备份、容器等中心主动操作由中心通过已登记的默认 SSH 账户启动已安装程序的单次命令，再由独立执行器及默认关闭的 `operations.managed.v1` 核验签名计划和回执；业务数据使用独立 root 私有目录。不提供旧普通 Agent 业务目录接管命令。中心镜像更新不会自动更新已安装 Agent、授权主机能力或操作业务数据；启用 SSH 主动操作前，应通过已有 SSH 更新入口将目标主机 Agent 升至支持 `managed-once`、`jobs-once` 和 `task-once` 的版本。执行器维护保留审批、摘要、健康确认、程序回退及 unknown 栅栏，见[运维手册](../../docs/operations.md)。
 
 SDK 直接向中心 endpoint 上报，不经过 Agent 接收或配置代理。内外网入口配置见[中心入口发现](../../docs/center-endpoints.md)。
 

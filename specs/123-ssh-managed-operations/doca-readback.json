@@ -1,0 +1,64 @@
+{
+  "document": "LightMoni 系统设计基线",
+  "url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "readback_seq": 1780,
+  "verified_blocks": [
+    "安全默认",
+    "系统边界：SSH 固定入口与原 HTTPS 授权/回执",
+    "13.4 历史期限描述及第123章覆盖策略",
+    "13.6 集中连接凭据",
+    "SDD123 主动操作与 Agent 边界（中心 SSH 单次唤起）",
+    "SDD123 凭据策略",
+    "SDD123 执行与恢复（原签名/作业 HTTPS 回执、旧发行包升级要求）",
+    "SDD123 控制路径（SSH 固定命令与精确作业 ID）",
+    "SDD123 规格引用"
+  ],
+  "existing_native_diagrams": {
+    "host050-design-6": {
+      "nodes": [
+        "host050-user",
+        "host050-vault",
+        "host050-binding",
+        "host050-ssh",
+        "host050-agent",
+        "host050-network",
+        "host050-host"
+      ],
+      "edges": [
+        "host050-user->host050-vault",
+        "host050-vault->host050-binding",
+        "host050-binding->host050-ssh",
+        "host050-ssh->host050-agent",
+        "host050-agent->host050-network",
+        "host050-network->host050-host",
+        "host050-ssh->host050-network"
+      ]
+    },
+    "f-center-modules-7d039612": {
+      "nodes": [
+        "a-web",
+        "a-aiui",
+        "a-ssh",
+        "a-management-api",
+        "a-auth",
+        "a-cat",
+        "a-dom",
+        "a-ai",
+        "a-sql",
+        "a-query-store"
+      ],
+      "edges": [
+        "a-web->a-management-api",
+        "a-aiui->a-management-api",
+        "a-ssh->a-management-api",
+        "a-management-api->a-auth",
+        "a-management-api->a-cat",
+        "a-management-api->a-dom",
+        "a-management-api->a-ai",
+        "a-management-api->a-sql",
+        "a-cat->a-query-store"
+      ]
+    }
+  },
+  "new_native_flowchart": "Doca rich_text_edit previously returned HTTP 500 twice for insertBlock flowchart. Current control and data paths were saved as native paragraphs; existing native diagrams were preserved and read back at seq 1780."
+}

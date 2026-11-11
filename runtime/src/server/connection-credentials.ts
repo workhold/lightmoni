@@ -47,6 +47,25 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
       CASE WHEN b.clear_reason!='' THEN b.clear_reason ELSE COALESCE(g.clear_reason,'') END AS clear_reason,
       b.created_at,b.created_by,b.last_used_at
     FROM machine_credentials b JOIN machine_ssh_accounts a ON a.id=b.account_id AND a.machine_id=b.machine_id AND a.deleted_at='' LEFT JOIN connection_credentials g ON g.id=b.connection_credential_id;`);
+  // One-time upgrade of existing live secrets. A policy event marks completion
+  // so explicit finite API policies created later remain finite after restart.
+  db.transaction(() => {
+    if (db.get("SELECT id FROM connection_credential_events WHERE event='permanent_machine_ssh_v1' AND credential_id=''")) return;
+    const timestamp = at();
+    const live = db.all<Row>(`SELECT id FROM connection_credentials WHERE retention!='permanent'
+      AND revoked_at IS NULL AND secret_cleared_at='' AND secret_encrypted!=''
+      AND julianday(expires_at)>julianday(?)`, timestamp);
+    for (const value of live) {
+      db.run("UPDATE connection_credentials SET retention='permanent',expires_at='' WHERE id=?",value.id);
+      db.run("INSERT INTO connection_credential_events(id,credential_id,event,actor_id,created_at) VALUES(?,?,?,?,?)",id(),value.id,"retention_made_permanent","system",timestamp);
+    }
+    db.run(`UPDATE machine_credentials SET retention='permanent',expires_at=''
+      WHERE retention!='permanent' AND revoked_at IS NULL AND secret_cleared_at=''
+      AND julianday(expires_at)>julianday(?) AND connection_credential_id IN
+      (SELECT id FROM connection_credentials WHERE retention='permanent' AND revoked_at IS NULL
+       AND secret_cleared_at='' AND secret_encrypted!='')`,timestamp);
+    db.run("INSERT INTO connection_credential_events(id,credential_id,event,actor_id,created_at) VALUES(?,'','permanent_machine_ssh_v1','system',?)",id(),timestamp);
+  });
   const row = (credentialID: string) => {
     const value = db.get<Row>("SELECT * FROM connection_credentials WHERE id=?", credentialID);
     if (!value) fail(404, "连接凭据不存在");
@@ -76,12 +95,13 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
     if (typeof input.secret !== "string" || !input.secret.length || Buffer.byteLength(input.secret) > (method === "password" ? 4096 : 64 << 10)) fail(400, "invalid secret");
     const secret = method === "password" ? input.secret : input.secret.trim();
     const fingerprint = method === "ssh_key" ? privateKeyFingerprint(secret) : "";
+    // New page submissions omit a lifetime and stay available until revoked.
+    // Explicit finite policies remain accepted for existing API clients.
     if (input.retention!==undefined && typeof input.retention!=="string") fail(400,"invalid retention");
-    const retention = input.retention ?? "managed";
+    const retention = input.retention ?? (input.confirm_managed === true ? "managed" : "permanent");
     if (!["managed", "permanent", "temporary", "one_time"].includes(retention) || method === "ssh_key" && retention === "one_time") fail(400, "invalid retention");
-    if (input.confirm_managed !== undefined && typeof input.confirm_managed !== "boolean" || input.confirm_permanent !== undefined && typeof input.confirm_permanent !== "boolean") fail(400, "invalid retention confirmation");
+    if (input.confirm_managed !== undefined && input.confirm_managed !== true || input.confirm_permanent !== undefined && input.confirm_permanent !== true) fail(400, "invalid retention confirmation");
     if (retention === "managed" && input.confirm_managed !== true) fail(400, "托管保存需要明确确认 confirm_managed=true");
-    if (retention === "permanent" && input.confirm_permanent !== true) fail(400, "永久保存需要明确确认 confirm_permanent=true");
     if (retention !== "managed" && input.confirm_managed === true || retention !== "permanent" && input.confirm_permanent === true) fail(400, "invalid retention confirmation");
     if (retention === "permanent" && Object.hasOwn(input,"expires_in_seconds")) fail(400, "永久保存不能同时指定 expires_in_seconds");
     const maximum = retention === "managed" ? 365 * 86400 : 3600;

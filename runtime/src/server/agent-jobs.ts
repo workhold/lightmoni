@@ -59,8 +59,10 @@ export interface AgentJobStore {
   setPrivilegedReadiness?(check: (agentID: string) => void): void;
   expireLeases?():void;
   setPrivilegedCancellation?(cancel: (jobID:string,actor:string)=>void):void;
+  setSSHOnly?():void;
+  failQueuedSSH?(jobID:string,code:string):Record<string,any>;
   leasePrivileged?(jobID: string, leaseID: string, expiresAt: string): Record<string, any>;
-  claim(agentID: string, capabilities: string[], receiptCursor?: string): Record<string, any> | null;
+  claim(agentID: string, capabilities: string[], receiptCursor?: string, requestedJobID?: string): Record<string, any> | null;
   event(agentID: string, jobID: string, input: Record<string, any>): Record<string, any>;
   result(agentID: string, jobID: string, input: Record<string, any>): Record<string, any>;
   cancel(jobID: string, actor: string): Record<string, any>;
@@ -227,6 +229,7 @@ export function registerAgentJobs(
     );
   `);
 
+  let sshOnly=false;
   let privilegedCancel: ((jobID:string,actor:string)=>void) | undefined;
   let privilegedReady: ((agentID:string)=>void) | undefined;
   const row = (jobID: string) => {
@@ -342,7 +345,8 @@ export function registerAgentJobs(
     if (privileged) db.run("UPDATE agent_jobs SET execution_principal='privileged_executor' WHERE id=?",idValue);
     return view(row(idValue));
   };
-  const claim = (agentID: string, offered: string[], _cursor = "") => {
+  const claim = (agentID: string, offered: string[], _cursor = "", requestedJobID = "") => {
+    if(sshOnly&&!requestedJobID)return null;
     ensureAgent(agentID);
     assertAgentActive(db, agentID);
     if(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='machine_agent_runtime'")&&db.get("SELECT machine_id FROM machine_agent_runtime WHERE agent_id=? AND runtime_mode='root'",agentID))return null;
@@ -362,8 +366,8 @@ export function registerAgentJobs(
     // Shared Nginx state and project registries must never mutate concurrently.
     if (db.get("SELECT id FROM agent_jobs WHERE agent_id=? AND state IN ('leased','accepted','preflighting','staging','activating','verifying') AND lease_expires_at>?", agentID, nowText)) return null;
     const candidate = db.get<any>(
-      "SELECT * FROM agent_jobs WHERE agent_id=? AND state='queued' AND execution_principal='ordinary_agent' AND expires_at>? AND NOT EXISTS (SELECT 1 FROM json_each(agent_jobs.capabilities_json) required WHERE required.value NOT IN (SELECT value FROM json_each(?))) ORDER BY created_at,id LIMIT 1",
-      agentID, nowText, JSON.stringify([...caps]),
+      "SELECT * FROM agent_jobs WHERE agent_id=? AND state='queued' AND execution_principal='ordinary_agent' AND expires_at>? AND (?='' OR id=?) AND NOT EXISTS (SELECT 1 FROM json_each(agent_jobs.capabilities_json) required WHERE required.value NOT IN (SELECT value FROM json_each(?))) ORDER BY created_at,id LIMIT 1",
+      agentID, nowText, requestedJobID, requestedJobID, JSON.stringify([...caps]),
     );
     if (!candidate) return null;
     if (!ordinaryReadOnlyJob({actions:JSON.parse(candidate.actions_json),capabilities:JSON.parse(candidate.capabilities_json)})) return null;
@@ -580,6 +584,20 @@ export function registerAgentJobs(
     });
     return view(row(current.id));
   };
+  const failQueuedSSH=(jobID:string,code:string)=>{
+    if(!/^[a-z_]{1,64}$/.test(code))fail(400,'invalid_ssh_failure_code');
+    const current=row(jobID);
+    if(current.state!=='queued')return view(current);
+    const at=iso(deps),summary='中心 SSH 派发失败，请检查主机连接、凭据和 Agent 发行包版本后重新创建计划';
+    transact(()=>{
+      const changed=db.run("UPDATE agent_jobs SET state='failed',receipt_json=?,updated_at=? WHERE id=? AND state='queued'",json({state:'failed',code,summary}),at,jobID);
+      if(!changed.changes)return;
+      const next=Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM agent_job_events WHERE job_id=?",jobID)?.sequence??1);
+      db.run("INSERT INTO agent_job_events(job_id,sequence,phase,code,summary,occurred_at) VALUES(?,?,?,?,?,?)",jobID,next,'failed',code,summary,at);
+      notify(row(jobID),'failed',code,{previousState:'queued'});
+    });
+    return view(row(jobID));
+  };
   const safe = (handler: Handler): Handler => async (ctx) => {
     try { await handler(ctx); } catch (error) {
       if (error instanceof HTTPError) ctx.json({ error: error.message }, error.status);
@@ -589,7 +607,7 @@ export function registerAgentJobs(
   const body = async (ctx: Context) => object(await ctx.body(), "request");
   router.post("/api/v1/agents/:id/jobs/claim", safe(async (ctx) => {
     const value = await body(ctx); authenticate(ctx, ctx.params.id);
-    ctx.json({ job: claim(ctx.params.id, value.capabilities ?? [], text(value.receipt_cursor ?? "", "receipt_cursor", 256, false) || undefined) });
+    ctx.json({ job: claim(ctx.params.id, value.capabilities ?? [], text(value.receipt_cursor ?? "", "receipt_cursor", 256, false) || undefined, text(value.job_id ?? "", "job_id", 64, false)) });
   }), { public: true });
   router.post("/api/v1/agents/:id/jobs/:jobId/events", safe(async (ctx) => {
     authenticate(ctx, ctx.params.id);
@@ -623,7 +641,7 @@ export function registerAgentJobs(
       db.run("UPDATE agent_jobs SET state='leased',lease_id=?,lease_expires_at=?,attempts=attempts+1,updated_at=? WHERE id=?",leaseID,expiresAt,iso(deps),jobID);
       return view(row(jobID));
     },
-    enqueue, claim, event, result, cancel, cancelQueuedDeployment, get: (jobID: string) => view(row(jobID)),
+    enqueue, claim, event, result, cancel, cancelQueuedDeployment, failQueuedSSH, get: (jobID: string) => view(row(jobID)),
     start() {
       if (sweepTimer) return;
       sweepTimer = setInterval(() => {
@@ -639,5 +657,6 @@ export function registerAgentJobs(
       updateListeners.add(listener);
       return () => updateListeners.delete(listener);
     },
+    setSSHOnly(){sshOnly=true;},
   };
 }

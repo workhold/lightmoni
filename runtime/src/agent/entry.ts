@@ -56,6 +56,7 @@ export function requiresTrustedAgentStartup(args: readonly string[]): boolean {
     command === "quarantine" ||
     command === "helper-run" ||
     command === "helper-status" ||
+    command === "task-once" ||
     command.startsWith("managed-")
   );
 }

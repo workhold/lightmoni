@@ -8,7 +8,7 @@ import { responseBytes } from "./util.js";
 import { assertAgentRuntimeIdentity } from "../shared/execution-role.js";
 import { assertOrdinaryAgentLinuxPermissions } from "../shared/ordinary-agent-permissions.js";
 import { assertRoot, rootPath } from "../privileged-executor/security.js";
-import { managedAgentCommand, runManagedHelper } from "./managed.js";
+import { managedAgentCommand, runManagedHelper, runManagedOnce, runManagedTaskOnce } from "./managed.js";
 export { createAgent } from "./agent.js";
 export interface CLIIO {
   input: AsyncIterable<Uint8Array | string>;
@@ -35,6 +35,7 @@ export async function execute(
     "require-data-dir": "",
     endpoint: "",
     "pending-enrollment": false,
+    "job-id": "",
   };
   const seenFlags = new Set<string>();
   for (let i = 0; i < remaining.length; i++) {
@@ -75,6 +76,21 @@ export async function execute(
     await managedAgentCommand("managed-status", io);
     return;
   }
+  if (command === "managed-once") {
+    if (seenFlags.size !== 1 || !seenFlags.has("job-id")) throw Error("job_id_required");
+    assertRoot();
+    const signal=io.signal??new AbortController().signal;
+    await runManagedOnce(String(flags["job-id"]),signal);
+    io.write("managed job invocation completed\n");
+    return;
+  }
+  if (command === "task-once") {
+    if (seenFlags.size !== 1 || !seenFlags.has("job-id")) throw Error("job_id_required");
+    assertRoot();
+    await runManagedTaskOnce(String(flags["job-id"]),io.signal??new AbortController().signal);
+    io.write("manual task invocation completed\n");
+    return;
+  }
   if (command.startsWith("managed-")) {
     if (remaining.length || seenFlags.size) throw Error("managed_command_does_not_accept_arguments");
     assertRoot();
@@ -97,6 +113,22 @@ export async function execute(
     return;
   }
   const config = loadConfig(path, validation);
+  if (command === "jobs-once") {
+    if (seenFlags.size !== 2 || !seenFlags.has("job-id") || !seenFlags.has("config")) throw Error("job_id_required");
+    const jobID=String(flags["job-id"]);
+    if(!/^[a-f0-9-]{32,36}$/.test(jobID))throw Error("invalid_job_id");
+    assertAgentRuntimeIdentity(config.runtime_mode,config.permission_generation,process.getuid?.(),process.geteuid?.(),process.getgid?.());
+    if(config.runtime_mode==='user')assertOrdinaryAgentLinuxPermissions();
+    const agent=createAgent(config);
+    try{
+      if(!agent.jobs)throw Error("ordinary_job_runner_unavailable");
+      await agent.jobs.recoverUnknown();
+      await agent.jobs.pollOnce(jobID);
+      io.write("ordinary job invocation completed\n");
+    }
+    finally{await agent.close();}
+    return;
+  }
   if (command === "check") {
     if (requireDir && config.data_dir !== requireDir)
       throw Error("this system service requires data_dir=" + requireDir);

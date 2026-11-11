@@ -70,6 +70,25 @@ test("enrollment is one-use, prebound, independently keyed and default capabilit
   } finally { f.close(); }
 });
 
+test("SSH dispatch readiness requires a reusable bound SSH credential even while the helper is online", () => {
+  const f = fixture(); try {
+    if (!f.db.all<any>("PRAGMA table_info(managed_machines)").some(column => column.name === "default_account_id"))
+      f.db.exec("ALTER TABLE managed_machines ADD COLUMN default_account_id TEXT NOT NULL DEFAULT ''");
+    f.db.exec(`CREATE TABLE machine_ssh_accounts(id TEXT PRIMARY KEY,default_credential_id TEXT,deleted_at TEXT);
+      CREATE TABLE effective_machine_credentials(id TEXT PRIMARY KEY,machine_id TEXT,revoked_at TEXT,
+        secret_cleared_at TEXT,secret_encrypted TEXT,method TEXT,retention TEXT,expires_at TEXT);`);
+    f.store.setSSHOnly();
+    assert.equal(f.store.getStatus("host").capabilities["script.elevated.v1"].effective, "unavailable");
+    f.db.run("INSERT INTO machine_ssh_accounts VALUES('account','binding','')");
+    f.db.run("UPDATE managed_machines SET default_account_id='account' WHERE id='host'");
+    f.db.run("INSERT INTO effective_machine_credentials VALUES('binding','host',NULL,'','ciphertext','ssh_key','permanent','')");
+    f.advance(61);
+    assert.equal(f.store.getStatus("host").capabilities["script.elevated.v1"].effective, "ready");
+    f.db.run("UPDATE effective_machine_credentials SET revoked_at='2026-11-01T00:01:01Z' WHERE id='binding'");
+    assert.equal(f.store.getStatus("host").capabilities["script.elevated.v1"].effective, "unavailable");
+  } finally { f.close(); }
+});
+
 test("signed claim retries retain exact lease, reject altered body and persist nonce replay conflicts", () => {
   const f = fixture(); try {
     const run = f.apply(), req = f.request("jobs/claim", {}), first = req.invoke((e, v) => f.store.claim(e, v));

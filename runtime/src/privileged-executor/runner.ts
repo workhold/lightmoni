@@ -70,12 +70,15 @@ export class PrivilegedExecutorRunner {
     if (response.center_instance_id !== this.config.center_instance_id) refuse("principal_mismatch");
     this.client.applyPolicy(response.policy);
   }
-  async once(signal: AbortSignal = new AbortController().signal): Promise<void> {
+  async observeOnce(signal: AbortSignal = new AbortController().signal): Promise<void> {
     await this.heartbeat();
     if(this.host.managed===runManaged&&this.config.daemon_id&&this.journal.policy().capabilities.includes('operations.managed.v1')){
       this.observations??=new ExecutorApplicationObserver(this.config);
       try{await this.observations.collect(signal);}catch{/* retained outbox/cursors retry; no ordinary principal fallback */}
     }
+  }
+  async once(signal: AbortSignal = new AbortController().signal, requestedJobID = ""): Promise<void> {
+    await this.observeOnce(signal);
     // A previous process may have submitted an intent. Never resume its script,
     // even when no PID exists, or replace its start nonce after a reboot.
     for (const row of this.journal.all()) {
@@ -84,13 +87,14 @@ export class PrivilegedExecutorRunner {
     for (const row of this.journal.all()) if (["failed", "succeeded", "unknown"].includes(row.state) && !this.journal.reported(row.job_id)) await this.report(row);
     const fence = this.journal.fenced();
     if (fence) { await this.reconcile(fence); if (this.journal.fenced()) return; }
-    if (signal.aborted || !this.journal.policy().capabilities.length && !this.journal.hasRequest("claim")) return;
-    const response = await this.client.request("jobs/claim", {}, "claim"); strictRecord(response, ["job"]);
-    if (!response.job) { this.journal.clearRequest("claim"); return; }
+    const claimSlot = requestedJobID ? "ssh-claim:" + requestedJobID : "claim";
+    if (signal.aborted || !this.journal.policy().capabilities.length && !this.journal.hasRequest(claimSlot)) return;
+    const response = await this.client.request("jobs/claim", requestedJobID ? { job_id: requestedJobID } : {}, claimSlot); strictRecord(response, ["job"]);
+    if (!response.job) { this.journal.clearRequest(claimSlot); return; }
     strictRecord(response.job, ["plan", "payload"]);
     const plan = this.client.verifyPlanSnapshot(response.job.plan, response.job.payload);
     const job = this.journal.prepare(plan.job_id, plan.request_sha256, plan.authorization_id, plan.lease_id, plan, response.job.payload);
-    this.journal.clearRequest("claim");
+    this.journal.clearRequest(claimSlot);
     if (job.state !== "prepared") { if (!this.journal.reported(job.job_id)) await this.report(job); return; }
     try { if (job.lease_id !== plan.lease_id) refuse("replay_conflict"); this.client.verifyPlan(response.job.plan, response.job.payload); }
     catch (error) {
