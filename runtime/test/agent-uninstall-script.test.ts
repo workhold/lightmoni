@@ -106,3 +106,19 @@ test("full-management uninstall removes the Agent and privileged helper together
  assert(f.calls().some(v=>v[0]==='stop'&&v[1]==='lightmoni-agent-helper.service'));
  assert.equal(f.calls().some(v=>['userdel','groupdel'].includes(v[0])),false,'uninstall preserves OS accounts');
 });
+
+for(const directory of ['etc/systemd/system/lightmoni-agent.service.d','etc/systemd/system/lightmoni-agent-helper.service.d'])for(const installed of [true,false])test('standalone removes fixed service overrides with '+(installed?'installed':'missing')+' service: '+directory,t=>{
+ const f=fixture(t,installed);mkdirSync(f.p(directory));writeFileSync(f.p(directory+'/20-docker-access.conf'),'[Service]\nSupplementaryGroups=docker\n');writeFileSync(f.p(directory+'/.hidden.conf'),'hidden');
+ const result=f.run();assert.equal(result.status,0,result.stderr);assert.equal(existsSync(f.p(directory)),false);assert.equal(readFileSync(f.p('var/lib/lightmoni-agent/queue.sqlite'),'utf8'),'retained accepted queue');
+});
+for(const kind of ['symlink','nested','writable','non-root','fifo','too-many'])test('standalone refuses unsafe drop-in '+kind+' before service mutation',t=>{
+ const f=fixture(t),directory=f.p('etc/systemd/system/lightmoni-agent.service.d'),file=join(directory,'.override.conf');mkdirSync(directory);
+ if(kind==='symlink')symlinkSync(f.p('var/lib/lightmoni-agent/queue.sqlite'),file);
+ else if(kind==='nested')mkdirSync(file);
+ else if(kind==='fifo')spawnSync('mkfifo',[file]);
+ else if(kind==='too-many'){for(let n=0;n<129;n++)writeFileSync(join(directory,n+'.conf'),'x');}
+ else writeFileSync(file,'config');
+ if(kind==='writable')chmodSync(file,0o666);
+ if(kind==='non-root'){const shim=f.p('commands/stat'),source=readFileSync(shim,'utf8');writeFileSync(shim,source.replace("p===process.env.TEST_NON_ROOT_PATH",'p==='+JSON.stringify(file)));}
+ const result=f.run();assert.notEqual(result.status,0);assert.equal(existsSync(f.p('usr/local/bin/lightmoni-agent')),true);assert.deepEqual(f.calls(),[]);
+});

@@ -21,7 +21,7 @@ function deferred<T = any>() {
  * enrollment are synthetic; no external host or system service is contacted. */
 async function fixture(t: any, sshRunner: SSHRunner) {
   const db = new DB(":memory:");
-  db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL DEFAULT '')");
+  db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL DEFAULT '',heartbeat TEXT NOT NULL DEFAULT '{}')");
   const user = { id: "admin", name: "Admin", role: "admin" }, master = Buffer.alloc(32, 9);
   let issued = 0;
   const credentials = {

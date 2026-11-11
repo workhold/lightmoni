@@ -38,6 +38,36 @@ lm_data_directory() {
     [ -d "$1" ] || lm_refuse 'Unsafe Agent data directory'
   fi
 }
+lm_assert_dropins() {
+  lm_dropin_directory="$1"
+  lm_root_entry "$lm_dropin_directory" directory
+  [ -d "$lm_dropin_directory" ] || return 0
+  lm_dropin_count=0
+  for lm_dropin_entry in "$lm_dropin_directory"/* "$lm_dropin_directory"/.[!.]* "$lm_dropin_directory"/..?*; do
+    if [ ! -e "$lm_dropin_entry" ] && [ ! -L "$lm_dropin_entry" ]; then continue; fi
+    lm_dropin_count=$((lm_dropin_count + 1))
+    [ "$lm_dropin_count" -le 128 ] || lm_refuse 'Too many Agent service overrides'
+    lm_root_entry "$lm_dropin_entry" file
+    lm_dropin_size=$(wc -c < "$lm_dropin_entry") || lm_refuse 'Agent service override cannot be inspected'
+    [ "$lm_dropin_size" -le 65536 ] || lm_refuse 'Agent service override is too large'
+  done
+}
+lm_dropin_evidence() {
+  lm_digest_directory="$1"
+  lm_assert_dropins "$lm_digest_directory"
+  if [ ! -d "$lm_digest_directory" ]; then printf 'absent\n'; return; fi
+  stat -c '%u:%a:%d:%i:%Y' -- "$lm_digest_directory" || return 1
+  for lm_digest_entry in "$lm_digest_directory"/* "$lm_digest_directory"/.[!.]* "$lm_digest_directory"/..?*; do
+    if [ ! -e "$lm_digest_entry" ] && [ ! -L "$lm_digest_entry" ]; then continue; fi
+    stat -c '%u:%a:%d:%i:%Y' -- "$lm_digest_entry" || return 1
+    sha256sum -- "$lm_digest_entry" || return 1
+  done
+}
+lm_remove_service_dropins() {
+  lm_assert_paths
+  # Only fixed, validated flat service directories; never follow links.
+  rm -rf -- /etc/systemd/system/lightmoni-agent.service.d /etc/systemd/system/lightmoni-agent-helper.service.d
+}
 lm_assert_paths() {
   if [ -e /usr/local/bin/lightmoni-executor ] || [ -L /usr/local/bin/lightmoni-executor ] || [ -e /usr/local/sbin/lightmoni-executor-uninstall ] || [ -L /usr/local/sbin/lightmoni-executor-uninstall ] || [ -e /opt/lightmoni-executor ] || [ -L /opt/lightmoni-executor ] || [ -e /etc/lightmoni-executor ] || [ -L /etc/lightmoni-executor ] || [ -e /var/lib/lightmoni-executor ] || [ -L /var/lib/lightmoni-executor ] || [ -e /etc/systemd/system/lightmoni-executor.service ] || [ -L /etc/systemd/system/lightmoni-executor.service ] || [ -e /etc/systemd/system/lightmoni-executor.service.d ] || [ -L /etc/systemd/system/lightmoni-executor.service.d ]; then
     lm_refuse 'Legacy standalone lightmoni-executor layout detected; use its original-version uninstaller before managing the unified Agent.'
@@ -50,6 +80,8 @@ lm_assert_paths() {
   done
   lm_root_entry /etc/systemd/system/lightmoni-agent.service file
   lm_root_entry /etc/systemd/system/lightmoni-agent-helper.service file
+  lm_assert_dropins /etc/systemd/system/lightmoni-agent.service.d
+  lm_assert_dropins /etc/systemd/system/lightmoni-agent-helper.service.d
   lm_root_entry /etc/lightmoni-agent-helper directory
   lm_root_entry /etc/lightmoni-agent-helper/helper.json file
   lm_root_entry /etc/lightmoni-agent-helper/managed.json file
@@ -162,6 +194,7 @@ lm_assert_no_operations
 lm_remove_managed_state
 if [ "$load_state" = loaded ]; then systemctl disable lightmoni-agent.service; fi
 if [ "$helper_load_state" = loaded ]; then systemctl disable lightmoni-agent-helper.service; fi
+lm_remove_service_dropins
 rm -f /etc/systemd/system/lightmoni-agent.service /etc/systemd/system/lightmoni-agent-helper.service /usr/local/bin/lightmoni-agent /usr/local/sbin/lightmoni-agent-uninstall
 rm -rf /opt/lightmoni-agent
 systemctl daemon-reload

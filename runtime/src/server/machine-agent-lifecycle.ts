@@ -1,9 +1,9 @@
 import { SSHError } from "./machine-ssh.js";
-import { agentMaintenanceShellGuards, agentInstallationPresentShell } from "../shared/agent-maintenance-shell.js";
+import { agentMaintenanceShellGuards, agentInstallationPresentShell, agentServiceDropinPaths } from "../shared/agent-maintenance-shell.js";
 
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 export const retainedAgentPaths = ["/etc/lightmoni-agent", "/var/lib/lightmoni-agent"];
-export const removedAgentPaths = ["/etc/systemd/system/lightmoni-agent.service", "/etc/systemd/system/lightmoni-agent-helper.service", "/etc/lightmoni-agent-helper", "/var/lib/lightmoni-agent-helper", "/usr/local/bin/lightmoni-agent", "/opt/lightmoni-agent", "/usr/local/sbin/lightmoni-agent-uninstall"];
+export const removedAgentPaths = [...agentServiceDropinPaths, "/etc/systemd/system/lightmoni-agent.service", "/etc/systemd/system/lightmoni-agent-helper.service", "/etc/lightmoni-agent-helper", "/var/lib/lightmoni-agent-helper", "/usr/local/bin/lightmoni-agent", "/opt/lightmoni-agent", "/usr/local/sbin/lightmoni-agent-uninstall"];
 export const freshAgentGuard = `if ${agentInstallationPresentShell}; then echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2; exit 1; fi`;
 const privileged = (script: string) => `if test "$(id -u)" = 0; then /bin/sh -c ${quote(script)}; else sudo -n /bin/sh -c ${quote(script)}; fi`;
 
@@ -26,6 +26,7 @@ lm_remove_managed_state
 for unit in lightmoni-agent.service lightmoni-agent-helper.service; do
   if test "$(systemctl show "$unit" --property=LoadState --value)" = loaded; then systemctl disable "$unit"; fi
 done
+lm_remove_service_dropins
 rm -f /etc/systemd/system/lightmoni-agent.service /etc/systemd/system/lightmoni-agent-helper.service /usr/local/bin/lightmoni-agent /usr/local/sbin/lightmoni-agent-uninstall
 rm -rf /opt/lightmoni-agent
 systemctl daemon-reload
@@ -50,7 +51,7 @@ agent_id=$(sed -n 's/.*"agent_id"[[:space:]]*:[[:space:]]*"\\([A-Za-z0-9._:-]*\\
 case "$agent_id" in ''|*[!A-Za-z0-9._:-]*) exit 42;; esac
 test "\${#agent_id}" -le 256 || exit 42`;
 const observation = `printf 'LMAGENT=1\\nagent_id=%s\\n' "$agent_id"
-if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/systemd/system/lightmoni-agent-helper.service || test -e /etc/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-helper; then echo installation=present; else echo installation=absent; fi
+if ${agentServiceDropinPaths.map(path => `test -e ${path} || test -L ${path}`).join(" || ")} || test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /etc/systemd/system/lightmoni-agent-helper.service || test -e /etc/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-helper; then echo installation=present; else echo installation=absent; fi
 if test -f /usr/local/bin/lightmoni-agent && test -d /opt/lightmoni-agent && test -f /etc/systemd/system/lightmoni-agent.service; then echo program_complete=1; else echo program_complete=0; fi
 ${serviceObservation}
 if test -e /run/lightmoni-agent-lifecycle.lock; then echo lifecycle_locked=1; else echo lifecycle_locked=0; fi
@@ -147,6 +148,14 @@ for path in /etc/systemd/system/lightmoni-agent.service /etc/systemd/system/ligh
   elif test -e "$path"; then state=other; fi
   program_evidence="$program_evidence:$state"
 done
+for dropin in ${agentServiceDropinPaths.join(" ")}; do
+  if test "$paths_safe" = 1 && dropin_evidence=$(lm_dropin_evidence "$dropin" 2>/dev/null); then
+    program_evidence="$program_evidence:$dropin:$dropin_evidence"
+  else
+    paths_safe=0
+    program_evidence="$program_evidence:$dropin:unsafe"
+  fi
+done
 if test -d /opt/lightmoni-agent && ! test -L /opt/lightmoni-agent; then
   root_metadata=$(stat -c '%d:%i:%Y' -- /opt/lightmoni-agent) || exit 42
   program_evidence="$program_evidence:$root_metadata"
@@ -174,9 +183,9 @@ program_sha256=$(printf '%s' "$program_evidence" | sha256sum)
 program_sha256=\${program_sha256%% *}
 printf 'LMREMOVE=1\\nagent_id=%s\\nidentity_state=%s\\nidentity_sha256=%s\\nprogram_sha256=%s\\n' "$agent_id" "$identity_state" "$identity_sha256" "$program_sha256"
 helper_present=0
-if test -e /etc/systemd/system/lightmoni-agent-helper.service || test -L /etc/systemd/system/lightmoni-agent-helper.service || test -e /etc/lightmoni-agent-helper || test -L /etc/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-helper || test -L /var/lib/lightmoni-agent-helper; then helper_present=1; fi
+if test -e /etc/systemd/system/lightmoni-agent-helper.service.d || test -L /etc/systemd/system/lightmoni-agent-helper.service.d || test -e /etc/systemd/system/lightmoni-agent-helper.service || test -L /etc/systemd/system/lightmoni-agent-helper.service || test -e /etc/lightmoni-agent-helper || test -L /etc/lightmoni-agent-helper || test -e /var/lib/lightmoni-agent-helper || test -L /var/lib/lightmoni-agent-helper; then helper_present=1; fi
 printf 'helper_present=%s\\n' "$helper_present"
-if test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /usr/local/sbin/lightmoni-agent-uninstall || test "$helper_present" = 1; then echo installation=present; else echo installation=absent; fi
+if ${agentServiceDropinPaths.map(path => `test -e ${path} || test -L ${path}`).join(" || ")} || test -e /usr/local/bin/lightmoni-agent || test -L /usr/local/bin/lightmoni-agent || test -e /opt/lightmoni-agent || test -e /etc/systemd/system/lightmoni-agent.service || test -e /usr/local/sbin/lightmoni-agent-uninstall || test "$helper_present" = 1; then echo installation=present; else echo installation=absent; fi
 if test -f /usr/local/bin/lightmoni-agent && test -d /opt/lightmoni-agent && test -f /etc/systemd/system/lightmoni-agent.service; then echo program_complete=1; else echo program_complete=0; fi
 ${serviceObservation}
 if test -e /run/lightmoni-agent-lifecycle.lock || test -L /run/lightmoni-agent-lifecycle.lock; then echo lifecycle_locked=1; else echo lifecycle_locked=0; fi

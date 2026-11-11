@@ -1,0 +1,43 @@
+{
+  "runtime": {
+    "tests": 153,
+    "pass": 153,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0
+  },
+  "services": {
+    "tests": 91,
+    "pass": 91,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0
+  },
+  "ui": {
+    "checks": [
+      "read-success",
+      "read-failed",
+      "read-mismatch",
+      "read-regressed",
+      "late-read",
+      "resolve-lost-response",
+      "post-mismatch"
+    ],
+    "errors": [],
+    "unexpected": []
+  },
+  "final_lifecycle": {
+    "tests": 44,
+    "pass": 44,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0
+  },
+  "post_stop_safety": {
+    "tests": 2,
+    "pass": 2,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0
+  }
+}

@@ -24,7 +24,10 @@ function fixture(t: any, failStop = false) {
   const rewrite = (script: string) => {
     return rewriteMaintenancePaths(script,root).replaceAll("/tmp/lightmoni-agent-bootstrap.XXXXXX", join(root, "tmp/lightmoni-agent-bootstrap.XXXXXX"));
   };
-  const run = (command: string, input?: string) => spawnSync("sh", ["-xc", inlineFixtureCommands(commandDir)+rewrite(command)], { encoding: "utf8", input, env: { ...process.env, PATH: commandDir + ":" + process.env.PATH } });
+  // The privileged wrapper starts a child shell. Inject fixtures there too so
+  // macOS never needs to execute temporary shebang files through PATH.
+  const prelude = inlineFixtureCommands(commandDir);
+  const run = (command: string, input?: string) => spawnSync("sh", ["-xc", prelude+rewrite(command).replaceAll("/bin/sh -c '", "/bin/sh -c '"+prelude.replaceAll("'", "'\\''"))], { encoding: "utf8", input, env: { ...process.env, PATH: commandDir + ":" + process.env.PATH } });
   return { root, run, commandDir, state };
 }
 test("fixed Agent probe and uninstall preserve identity, configuration and accepted queue", t => {
@@ -165,4 +168,50 @@ test("post-stop task markers and unsafe paths refuse deletion after a valid revi
   writeFileSync(join(f.root,"business"),"must survive");writeFileSync(systemctl,source.replace("s.active=false;",`s.active=false;${mutate}`),{mode:0o755});
   const result=f.run(agentRemovalCommand(before,true));assert.notEqual(result.status,0,mode);assert.equal(existsSync(join(f.root,"opt/lightmoni-agent")),true);assert.equal(readFileSync(join(f.root,"business"),"utf8"),"must survive");assert.equal(existsSync(join(f.root,"etc/lightmoni-agent/config.json")),true);
  }
+});
+
+const dropinDirectories=['etc/systemd/system/lightmoni-agent.service.d','etc/systemd/system/lightmoni-agent-helper.service.d'];
+for(const directory of dropinDirectories)test('orphan service overrides are observed and explicitly removed: '+directory,t=>{
+ const f=fixture(t),p=(path:string)=>join(f.root,path);
+ for(const path of ['usr/local/bin/lightmoni-agent','opt/lightmoni-agent','etc/systemd/system/lightmoni-agent.service','var/lib/lightmoni-agent/identity.json','etc/lightmoni-agent/config.json'])rmSync(p(path),{recursive:true,force:true});
+ writeFileSync(f.state,JSON.stringify({active:false}));
+ mkdirSync(p(directory));writeFileSync(p(directory+'/20-docker-access.conf'),'[Service]\nSupplementaryGroups=docker\n');writeFileSync(p(directory+'/.hidden.conf'),'# hidden');
+ mkdirSync(p('etc/systemd/system/unrelated.service.d'));writeFileSync(p('etc/systemd/system/unrelated.service.d/keep.conf'),'keep');
+ mkdirSync(p('var/lib/lightmoni-agent/operations/platform'),{recursive:true});writeFileSync(p('var/lib/lightmoni-agent/operations/platform/data'),'business data');
+ const before=f.run(agentRemovalProbeCommand());assert.equal(before.status,0,before.stderr.slice(-2000));const observed=parseAgentRemovalProbe(before.stdout);
+ assert.equal(observed.installation,'present');assert.equal(observed.paths_safe,true);assert.equal(observed.identity_state,'missing');
+ assert.equal(observed.helper_present,directory.includes('helper'));
+ assert.notEqual(f.run(freshAgentGuard).status,0);
+ const removed=f.run(agentRemovalCommand(observed,true));assert.equal(removed.status,0,removed.stderr.slice(-2000));
+ assert.equal(parseAgentRemovalProbe(removed.stdout).installation,'absent');assert.equal(existsSync(p(directory)),false);
+ assert.equal(readFileSync(p('etc/systemd/system/unrelated.service.d/keep.conf'),'utf8'),'keep');
+ assert.equal(readFileSync(p('var/lib/lightmoni-agent/operations/platform/data'),'utf8'),'business data');assert.equal(f.run(freshAgentGuard).status,0);
+});
+for(const change of ['contents','name','mode','new-hidden','directory-replaced'])test('approved override evidence fences '+change,t=>{
+ const f=fixture(t),directory=join(f.root,dropinDirectories[0]),file=join(directory,'20-docker-access.conf');mkdirSync(directory);writeFileSync(file,'before');
+ const observed=parseAgentRemovalProbe(f.run(agentRemovalProbeCommand()).stdout);
+ if(change==='contents')writeFileSync(file,'after');
+ if(change==='name'){unlinkSync(file);writeFileSync(join(directory,'21-renamed.conf'),'before');}
+ if(change==='mode')chmodSync(file,0o600);
+ if(change==='new-hidden')writeFileSync(join(directory,'.added.conf'),'hidden');
+ if(change==='directory-replaced'){rmSync(directory,{recursive:true});mkdirSync(directory);writeFileSync(file,'before');chmodSync(directory,0o700);}
+ const removed=f.run(agentRemovalCommand(observed));assert.notEqual(removed.status,0);assert.equal(existsSync(join(f.root,'usr/local/bin/lightmoni-agent')),true);assert.equal(JSON.parse(readFileSync(f.state,'utf8')).active,true);
+});
+for(const directory of dropinDirectories)for(const kind of ['directory-link','file-link','dangling','nested','writable-directory','writable-file','oversized'])test('unsafe override refuses removal: '+directory+' '+kind,t=>{
+ const f=fixture(t),target=join(f.root,directory),outside=join(f.root,'outside');mkdirSync(outside);writeFileSync(join(outside,'keep'),'outside data');
+ if(kind==='directory-link')symlinkSync(outside,target);else{mkdirSync(target);const file=join(target,'.override.conf');
+  if(kind==='file-link'||kind==='dangling')symlinkSync(kind==='file-link'?join(outside,'keep'):join(outside,'missing'),file);
+  else if(kind==='nested')mkdirSync(file);else writeFileSync(file,kind==='oversized'?'x'.repeat(65537):'config');
+  if(kind==='writable-directory')chmodSync(target,0o777);if(kind==='writable-file')chmodSync(file,0o666);
+ }
+ const before=f.run(agentRemovalProbeCommand());assert.equal(before.status,0,before.stderr.slice(-2000));const observed=parseAgentRemovalProbe(before.stdout);assert.equal(observed.paths_safe,false);
+ const removed=f.run(agentRemovalCommand(observed));assert.notEqual(removed.status,0);assert.equal(existsSync(join(f.root,'usr/local/bin/lightmoni-agent')),true);assert.equal(readFileSync(join(outside,'keep'),'utf8'),'outside data');assert.equal(JSON.parse(readFileSync(f.state,'utf8')).active,true);
+});
+
+for(const kind of ['symlink','writable'])test('override safety is rechecked after service stop: '+kind,t=>{
+ const f=fixture(t),directory=join(f.root,dropinDirectories[0]),file=join(directory,'20-docker-access.conf');mkdirSync(directory);writeFileSync(file,'approved override');
+ const observed=parseAgentRemovalProbe(f.run(agentRemovalProbeCommand()).stdout),systemctl=join(f.commandDir,'systemctl'),source=readFileSync(systemctl,'utf8');
+ const change=kind==='symlink'?`fs.unlinkSync(${JSON.stringify(file)});fs.symlinkSync(${JSON.stringify(join(f.root,'var/lib/lightmoni-agent/queue.sqlite'))},${JSON.stringify(file)});`:`fs.chmodSync(${JSON.stringify(file)},0o666);`;
+ writeFileSync(systemctl,source.replace('s.active=false;',`s.active=false;${change}`));
+ const removed=f.run(agentRemovalCommand(observed));assert.notEqual(removed.status,0);assert.equal(existsSync(join(f.root,'usr/local/bin/lightmoni-agent')),true);assert.equal(existsSync(directory),true);assert.equal(readFileSync(join(f.root,'var/lib/lightmoni-agent/queue.sqlite'),'utf8'),'must survive');
 });

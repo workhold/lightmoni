@@ -198,6 +198,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  useEffect(()=>{
   if(!admin||!linkedMachine||!linkedDeployment)return;
   planReadVersion.current++;const token=requests.current.begin('plan',linkedMachine);
+  setPlanBusy(false);setPlanMachine(undefined);setPlanDetail(undefined);setPlanResult(undefined);setPlanRefreshNeeded(false);setPlanError('');
   Promise.all([api<Detail>(`/machines/${encodeURIComponent(linkedMachine)}`),api<Deployment>(`/machines/${encodeURIComponent(linkedMachine)}/deployments/${encodeURIComponent(linkedDeployment)}`)])
    .then(([host,existing])=>{if(current(token)&&host.machine.id===linkedMachine&&existing.machine_id===linkedMachine&&existing.id===linkedDeployment){setPlanMachine(host.machine);setPlanDetail(host);setPlanResult(existing);setPlanError('');setPlanRefreshNeeded(false);setPlanApplyAttempted(false);setPlanResolutionReason('');planRecovery.current=undefined}})
    .catch(e=>{if(current(token))setError(errorText(e))});
@@ -335,10 +336,24 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  },[admin,planMachine?.id,planResult?.id,planResult?.status,planResult?.resolved_at,planApplyAttempted,planBusy]);
  const recoverUnknownDeployment=async(action:'reconcile'|'resolve')=>{
   const token=requests.current.capture('plan'),machineID=planMachine?.id,result=planResult;
-  if(!machineID||!result||result.machine_id!==machineID||result.status!=='unknown'||result.resolved_at||!current(token)||planBusy||planRefreshNeeded||planOperation.current===token||action==='resolve'&&!planResolutionValid)return;
+  if(!machineID||!result||token?.target!==machineID||result.machine_id!==machineID||result.status!=='unknown'||result.resolved_at||!current(token)||planBusy||planRefreshNeeded||planOperation.current===token||action==='resolve'&&!planResolutionValid)return;
+  const version=++planReadVersion.current;
   planOperation.current=token!;setPlanBusy(true);setPlanError('');invalidateRefresh(machineID);
-  try{const saved=await api<Deployment>(`/machines/${encodeURIComponent(machineID)}/deployments/${encodeURIComponent(result.id)}/${action}`,{method:'POST',body:JSON.stringify(action==='resolve'?{confirm:true,reason:planResolutionReason.trim()}:{credential_id:planReconcileCredential})});if(current(token)&&saved.machine_id===machineID&&saved.id===result.id){setPlanResult(saved);setPlanResolutionReason('')}}
-  catch(e){if(current(token)){setPlanError(errorText(e));if(!(e instanceof ApiError&&e.status<500))setPlanRefreshNeeded(true)}}
+  try{
+   const saved=await api<Deployment>(`/machines/${encodeURIComponent(machineID)}/deployments/${encodeURIComponent(result.id)}/${action}`,{method:'POST',body:JSON.stringify(action==='resolve'?{confirm:true,reason:planResolutionReason.trim()}:{credential_id:planReconcileCredential})});
+   if(!agentOperationMatches(saved,machineID,result.id)||!agentOperationCanAdvance(result,saved))throw Error(t('部署记录与目标主机或原操作不匹配','The deployment record does not match the host or original operation'));
+   if(current(token)&&version===planReadVersion.current){setPlanResult(saved);setPlanResolutionReason('')}
+  }catch(e){
+   if(current(token)&&version===planReadVersion.current){
+    setPlanError(errorText(e));setPlanRefreshNeeded(true);
+    const original=planResultRef.current,read=agentOperationReadSignal(new AbortController().signal);
+    try{
+     const saved=await api<Deployment>(`/machines/${encodeURIComponent(machineID)}/deployments/${encodeURIComponent(result.id)}`,{signal:read.signal});
+     if(!agentOperationMatches(saved,machineID,result.id)||!agentOperationCanAdvance(original,saved))throw Error('deployment_record_mismatch');
+     if(current(token)&&version===planReadVersion.current&&planResultRef.current===original){setPlanResult(saved);setPlanRefreshNeeded(false)}
+    }catch{/* A failed or mismatched read keeps mutation controls locked. */}finally{read.dispose()}
+   }
+  }
   finally{if(planOperation.current===token)planOperation.current=null;if(current(token)){setPlanBusy(false);await refreshMachine(machineID)}}
  };
  const agentReleaseFor=(machine:FleetRow):AgentInstalledRelease|undefined=>machine.agent_release??machine.node?.release??(machine.node?.heartbeat?.release as AgentInstalledRelease|undefined);

@@ -666,7 +666,7 @@ test("fresh installer refuses retained identity and releases lifecycle lock with
   assert.equal(existsSync(join(f.root, "run/lightmoni-agent-lifecycle.lock")), false);
 });
 
-for (const residual of ['etc/lightmoni-agent-helper', 'var/lib/lightmoni-agent-helper', 'etc/systemd/system/lightmoni-agent-helper.service'])
+for (const residual of ['etc/lightmoni-agent-helper', 'var/lib/lightmoni-agent-helper', 'etc/systemd/system/lightmoni-agent-helper.service','etc/systemd/system/lightmoni-agent.service.d','etc/systemd/system/lightmoni-agent-helper.service.d'])
   for (const kind of ['directory', 'dangling-link'] as const) test(`fresh installer refuses retained helper ${residual} ${kind} before enrollment`, t => {
     const f = fixture(t, {old: 'none', active: false, defaultRoot: true});
     rmSync(f.data, {recursive: true}); rmSync(f.runtimeParent, {recursive: true});

@@ -200,7 +200,7 @@ trap 'exit 143' TERM
 mkdir "$lifecycle_lock" || { echo 'Agent lifecycle operation already in progress.' >&2; exit 1; }
 lifecycle_locked="yes"
 if [ "$fresh" = "yes" ]; then
-  for existing_path in /usr/local/bin/lightmoni-agent /opt/lightmoni-agent /etc/systemd/system/lightmoni-agent.service /etc/systemd/system/lightmoni-agent-helper.service /etc/lightmoni-agent/config.json /var/lib/lightmoni-agent/identity.json /etc/lightmoni-agent-helper /var/lib/lightmoni-agent-helper; do
+  for existing_path in /etc/systemd/system/lightmoni-agent.service.d /etc/systemd/system/lightmoni-agent-helper.service.d /usr/local/bin/lightmoni-agent /opt/lightmoni-agent /etc/systemd/system/lightmoni-agent.service /etc/systemd/system/lightmoni-agent-helper.service /etc/lightmoni-agent/config.json /var/lib/lightmoni-agent/identity.json /etc/lightmoni-agent-helper /var/lib/lightmoni-agent-helper; do
     if [ -e "$existing_path" ] || [ -L "$existing_path" ]; then
       echo 'Existing Agent installation detected; inspect or uninstall it before a fresh installation.' >&2
       exit 1

@@ -18,13 +18,13 @@ import {SCRIPT_TASK_CAPABILITY} from "../src/shared/task-center.js";
 
 const preflight="LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n";
 const probe=(id:string,extra:Record<string,string>={})=>Object.entries({LMAGENT:"1",agent_id:id,installation:"present",program_complete:"1",unit_managed:"1",service_running:"1",lifecycle_locked:"0",operation_lock:"0",data_retained:"1",...extra}).map(([key,value])=>`${key}=${value}`).join("\n")+"\n";
-async function fixture(t:any,nonzero=false){
+async function fixture(t:any,nonzero:boolean|string=false){
  const db=new DB(":memory:"),user={id:"admin",name:"Admin",role:"admin"};let clock=new Date("2026-10-31T08:00:00Z"),router=new Router();
  const deps={db,...cipher(Buffer.alloc(32,4)),now:()=>clock,externalURL:"https://platform.example.test",auth:{user:()=>user,requireAdmin(ctx:any){if(ctx.user.role!=="admin")fail(403,"administrator required");}},logger:{info(){},warn(){},error(){}}} as unknown as Dependencies;
  new NodeStore(db,deps.now);
  let bootstraps=0,probes=0,enrollmentToken="",observedID="unknown-agent",observation:Record<string,string>={};
  const runner:SSHRunner=async input=>{
-  if(input.enrollmentToken){bootstraps++;enrollmentToken=input.enrollmentToken;throw nonzero?remoteSSHFailure(1,input.enrollmentToken,"Error: ordinary_agent_privilege_violation\n"+input.privateKey):new SSHError("timed_out");}
+  if(input.enrollmentToken){bootstraps++;enrollmentToken=input.enrollmentToken;throw nonzero?remoteSSHFailure(1,input.enrollmentToken,"Error: "+(typeof nonzero==="string"?nonzero:"ordinary_agent_privilege_violation")+"\n"+input.privateKey):new SSHError("timed_out");}
   if(input.command.includes("LMAGENT")){probes++;return {stdout:probe(observedID,observation),stderr:"",stages:[]};}
   return {stdout:preflight,stderr:"",stages:[]};
  };
@@ -171,4 +171,15 @@ test("nonzero installation diagnostics remain safe and preserve unknown enrollme
  assert.ok(!detail.raw.includes("BEGIN PRIVATE KEY"));
  assert.equal((await f.request(h.path+"/apply","POST",{confirm:true})).status,409);
  assert.equal(f.bootstraps,1);
+});
+
+test("service override rejection remains unknown with actionable diagnostics and can be manually resolved",async t=>{
+ const f=await fixture(t,'agent_service_override_not_allowed'),h=await f.host();const failed=await f.interrupt(h);
+ assert.deepEqual(failed.receipt.diagnostic,{remote_exit_code:1,remote_reason_code:'agent_service_override_not_allowed'});
+ assert.match(failed.error,/服务覆盖配置/);assert.match(failed.error,/恢复卸载/);assert.equal(JSON.stringify(failed).includes(f.enrollmentToken),false);
+ assert.equal((await f.request(h.path+'/reconcile','POST',{credential_id:h.cid})).status,409);
+ const resolved=await f.request(h.path+'/resolve','POST',{confirm:true,reason:'Confirmed installer exited before enrollment; remove residual overrides explicitly'});
+ assert.equal(resolved.status,200,resolved.raw);assert.equal(resolved.data.status,'unknown');assert.ok(resolved.data.resolved_at);assert.equal(f.bootstraps,1);
+ assert.equal(f.credentials.enrollmentStatus(failed.enrollment_id)?.status,'cancelled');
+ assert.equal((await f.request('/agents/enroll','POST',{enrollment_token:f.enrollmentToken,install_nonce:'late',agent_public_key:'fixture-public',version:'0.1.0',arch:'amd64'})).status,409);
 });
