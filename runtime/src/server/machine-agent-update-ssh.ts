@@ -24,7 +24,7 @@ export interface AgentUpdateRemoteStatus {
   from: AgentUpdateRemoteRelease & { boot_id: string }; target: AgentUpdateStartRequest["target"];
   local_health: { service_active: boolean; helper_active: boolean; identity_matches: boolean; release_matches: boolean; boot_id: string };
   started_at: string; updated_at: string; finished_at?: string; confirmation_deadline?: string;
-  error_code?: string; restored_fingerprint?: string; uninstaller_updated?: boolean;
+  error_code?: string; rollback_error_code?: string; restored_fingerprint?: string; uninstaller_updated?: boolean;
   recovery?: {schema:1;status:'succeeded';action:'archive_preparing'|'restore_previous';source_status:'accepted'|'preparing'|'switching'|'waiting_confirmation'|'rollback_failed';recovered_at:string};
   worker_exit?: {schema:1;result:string;exit_code:'exited'|'killed'|'dumped'|'unknown';exit_status:number;memory_peak_bytes?:number};
 }
@@ -81,14 +81,15 @@ export function parseAgentUpdateStatus(output: string): AgentUpdateRemoteStatus 
     || ["service_active", "helper_active", "identity_matches", "release_matches"].some(key => typeof v.local_health[key] !== "boolean") || !boot(v.local_health.boot_id)
     || ["started_at", "updated_at"].some(key => typeof v[key] !== "string" || !Number.isFinite(Date.parse(v[key])))
     || ["finished_at", "confirmation_deadline"].some(key => v[key] !== undefined && (typeof v[key] !== "string" || !Number.isFinite(Date.parse(v[key]))))
-    || v.error_code !== undefined && !/^[a-z_]{1,80}$/.test(v.error_code) || v.restored_fingerprint !== undefined && !sha.test(v.restored_fingerprint)
+    || v.error_code !== undefined && !/^[a-z_]{1,80}$/.test(v.error_code) || v.rollback_error_code !== undefined && !/^[a-z_]{1,80}$/.test(v.rollback_error_code)
+    || v.restored_fingerprint !== undefined && !sha.test(v.restored_fingerprint)
     || v.uninstaller_updated !== undefined && typeof v.uninstaller_updated !== "boolean"
     || v.recovery !== undefined && !recoveryEvidence(v.recovery) || v.worker_exit !== undefined && !workerExitEvidence(v.worker_exit)) throw new SSHError("invalid_response");
   return { schema: 1, operation_id: v.operation_id, agent_id: v.agent_id, status: v.status, from: { ...safeRelease(v.from), boot_id: v.from.boot_id }, target: safeRelease(v.target, false),
     local_health: { service_active: v.local_health.service_active, helper_active: v.local_health.helper_active, identity_matches: v.local_health.identity_matches, release_matches: v.local_health.release_matches, boot_id: v.local_health.boot_id },
     started_at: v.started_at, updated_at: v.updated_at,
     ...(v.finished_at ? { finished_at: v.finished_at } : {}), ...(v.confirmation_deadline ? { confirmation_deadline: v.confirmation_deadline } : {}),
-    ...(v.error_code ? { error_code: v.error_code } : {}), ...(v.restored_fingerprint ? { restored_fingerprint: v.restored_fingerprint } : {}),
+    ...(v.error_code ? { error_code: v.error_code } : {}), ...(v.rollback_error_code ? { rollback_error_code: v.rollback_error_code } : {}), ...(v.restored_fingerprint ? { restored_fingerprint: v.restored_fingerprint } : {}),
     ...(v.uninstaller_updated !== undefined ? { uninstaller_updated: v.uninstaller_updated } : {}),
     ...(v.recovery ? {recovery:{...v.recovery}} : {}), ...(v.worker_exit ? {worker_exit:{...v.worker_exit}} : {}) };
 }

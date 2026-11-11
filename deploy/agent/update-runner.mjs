@@ -133,7 +133,8 @@ export class AgentMaintenance {
   state(id) {
     const directory = this.checkManaged(this.opDir(id), "directory");
     const status = boundedJSON(this.checkManaged(path.join(directory, "status.json")));
-    if (status.schema !== 1 || status.operation_id !== id || !ID.test(status.agent_id ?? "") || !["accepted", "preparing", "switching", "waiting_confirmation", ...TERMINAL].includes(status.status)) fail("invalid_receipt");
+    if (status.schema !== 1 || status.operation_id !== id || !ID.test(status.agent_id ?? "") || !["accepted", "preparing", "switching", "waiting_confirmation", ...TERMINAL].includes(status.status)
+      || status.rollback_error_code !== undefined && !/^[a-z_]{1,80}$/.test(status.rollback_error_code)) fail("invalid_receipt");
     try {
       const exit=boundedJSON(this.checkManaged(path.join(directory,'unit-exit.json')),4096);
       if(exit.schema!==1||!EXIT_RESULTS.has(exit.result)||!['exited','killed','dumped','unknown'].includes(exit.exit_code)||!Number.isInteger(exit.exit_status)||exit.exit_status<0||exit.exit_status>255||exit.memory_peak_bytes!==undefined&&(!Number.isSafeInteger(exit.memory_peak_bytes)||exit.memory_peak_bytes<0))fail('invalid_exit_evidence');
@@ -662,7 +663,19 @@ export class AgentMaintenance {
       this.command("systemctl", ["restart", "lightmoni-agent.service"]);
       if (this.system("ActiveState") !== "active") fail("rollback_start_failed");
     }
-    const {local,helperActive}=this.verifyOriginalHealth(request);
+    // A freshly restarted service can be systemd-active before its local
+    // status endpoint is ready. Retry only that transient health failure;
+    // fingerprint/identity changes remain immediate hard failures.
+    let original;
+    const healthDeadline=this.elapsed()+Math.min(HEALTH_MS,RESTORE_MS);
+    for (;;) {
+      try { original=this.verifyOriginalHealth(request); break; }
+      catch (error) {
+        if (error?.safeCode !== 'recovery_original_unhealthy' || this.elapsed() >= healthDeadline) throw error;
+        await this.sleep(1000);
+      }
+    }
+    const {local,helperActive}=original;
     const result = this.save(id, { status: "rolled_back", error_code: reason, restored_fingerprint: request.expected_fingerprint, finished_at: this.timestamp(), local_health: { service_active: request.previous_active ? this.system("ActiveState") === "active" : false, helper_active: helperActive, identity_matches: true, release_matches: true, boot_id: typeof local.boot_id === "string" && /^[a-f0-9-]{36}$/.test(local.boot_id) ? local.boot_id : "" } });
     if(!preserveArtifacts){this.cleanupCandidate(id);this.cleanup(id);} this.unlock(id); return result;
   }
@@ -836,7 +849,12 @@ export class AgentMaintenance {
     } catch (error) {
       if (changed) {
         try { return await this.restore(id, safeCode(error)); }
-        catch { return this.save(id, { status: "rollback_failed", error_code: "rollback_failed" }); }
+        catch (rollbackError) {
+          // Keep the lifecycle fence when restoration cannot be proven, but
+          // retain the bounded failure code so recovery can target the actual
+          // failed step instead of hiding it behind a generic status.
+          return this.save(id, { status: "rollback_failed", error_code: "rollback_failed", rollback_error_code: safeCode(rollbackError), finished_at: this.timestamp() });
+        }
       }
       this.phaseDeadline=null;
       const result = this.save(id, { status: "failed", error_code: safeCode(error), finished_at: this.timestamp() });
