@@ -73,10 +73,11 @@ test('remote status retains only validated recovery and worker exit evidence',()
  const release={version:'0.1.0',source_revision:'1'.repeat(40),build_id:'fixture-build',state_schema:1,artifact_sha256:'2'.repeat(64),arch:'amd64',fingerprint:'3'.repeat(64),boot_id:''};
  const status={schema:1,operation_id:'a'.repeat(32),agent_id:'fixture-agent',status:'failed',from:release,target:release,
   local_health:{service_active:true,helper_active:false,identity_matches:true,release_matches:true,boot_id:''},started_at:'2026-11-04T00:00:00Z',updated_at:'2026-11-04T00:00:00Z',
-  recovery:{schema:1,status:'succeeded',action:'archive_preparing',source_status:'preparing',recovered_at:'2026-11-04T00:00:00Z'},worker_exit:{schema:1,result:'signal',exit_code:'killed',exit_status:9,memory_peak_bytes:12345}};
- assert.deepEqual(parseAgentUpdateStatus(JSON.stringify(status)).worker_exit,status.worker_exit);assert.deepEqual(parseAgentUpdateStatus(JSON.stringify(status)).recovery,status.recovery);
+  rollback_error_code:'recovery_original_unhealthy',recovery:{schema:1,status:'succeeded',action:'archive_preparing',source_status:'preparing',recovered_at:'2026-11-04T00:00:00Z'},worker_exit:{schema:1,result:'signal',exit_code:'killed',exit_status:9,memory_peak_bytes:12345}};
+ const parsed=parseAgentUpdateStatus(JSON.stringify(status));assert.equal(parsed.rollback_error_code,status.rollback_error_code);assert.deepEqual(parsed.worker_exit,status.worker_exit);assert.deepEqual(parsed.recovery,status.recovery);
  for(const recovery of [null,{...status.recovery,action:'replay_worker'},{...status.recovery,secret:'unexpected'},{...status.recovery,recovered_at:'invalid'}])assert.throws(()=>parseAgentUpdateStatus(JSON.stringify({...status,recovery})),/invalid_response/);
  for(const worker_exit of [null,{...status.worker_exit,result:'arbitrary-value'},{...status.worker_exit,exit_status:256},{...status.worker_exit,memory_peak_bytes:-1},{...status.worker_exit,secret:'unexpected'}])assert.throws(()=>parseAgentUpdateStatus(JSON.stringify({...status,worker_exit})),/invalid_response/);
+ for(const rollback_error_code of ['', 'RecoveryFailed', 'x'.repeat(81), 'unsafe-code!'])assert.throws(()=>parseAgentUpdateStatus(JSON.stringify({...status,rollback_error_code})),/invalid_response/);
 });
 
 test('recovery bootstrap validates its operation and fixed runner digest',()=>{
