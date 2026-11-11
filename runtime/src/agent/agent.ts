@@ -655,10 +655,6 @@ export class Agent {
       this.files.close();
     }
   }
-  private async jobLoop() {
-    if (!this.jobs) return;
-    await this.jobs.run(this.controller.signal);
-  }
   private async probeLoop() {
     if (!(await this.waitTasks())) return;
     const next = new Map<string, number>(),
@@ -759,7 +755,6 @@ export class Agent {
       this.collectLoop(),
       this.probeLoop(),
       this.fileLogLoop(),
-      this.jobLoop(),
     ];
   }
   async run(parent?: AbortSignal) {

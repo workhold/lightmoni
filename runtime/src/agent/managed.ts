@@ -322,7 +322,7 @@ export async function runManagedHelper(
   const runExecutor = async () => {
     while (!signal.aborted) {
       try {
-        await runner.once(signal);
+        await runner.observeOnce(signal);
       } catch (error) {
         report(error instanceof Error && /^[a-z0-9_]{1,64}$/.test(error.message) ? error.message : "managed_agent_cycle_refused");
       }
@@ -339,4 +339,32 @@ export async function runManagedHelper(
     runner.close();
     journal.close();
   }
+}
+
+/** A centre-approved job is claimed only by a fixed SSH-invoked command. */
+export async function runManagedOnce(jobID:string,signal:AbortSignal):Promise<void> {
+  assertRoot();
+  if(!/^[a-f0-9-]{32,36}$/.test(jobID))refuse('invalid_job_id');
+  process.umask(0o077);
+  const helper=readHelperConfig(),config=helperExecutorConfig(helper),activation_id=readManagedAgentActivation(helper,config);
+  const journal=new ExecutorJournal(config.data_dir,Buffer.from(config.output_key,'hex'));
+  const client=new ExecutorClient(config,journal);
+  const runner=new PrivilegedExecutorRunner(config,journal,client,{...readExecutorRelease(),activation_id},undefined,undefined,helper.task_identity);
+  try{await runner.once(signal,jobID);}finally{runner.close();journal.close();}
+}
+
+/** Manual script runs use SSH; scheduled runs remain on the helper timer. */
+export async function runManagedTaskOnce(runID:string,signal:AbortSignal):Promise<void> {
+  assertRoot();
+  if(!/^[a-f0-9-]{36}$/.test(runID))refuse('invalid_run_id');
+  process.umask(0o077);
+  const helper=readHelperConfig(),config=helperExecutorConfig(helper);
+  readManagedAgentActivation(helper,config);
+  const journal=new ExecutorJournal(config.data_dir,Buffer.from(config.output_key,'hex'));
+  const client=new ExecutorClient(config,journal);
+  const taskRunner=new AgentTaskRunner({endpoint:helper.endpoint,agentID:helper.agent_id,dataDir:MANAGED_AGENT_DATA_DIR,stateFile:"task-run-ssh-state.json",
+    pollIntervalMs:5000,permissionGeneration:helper.permission_generation,executionIdentity:helper.task_identity,
+    executorID:config.executor_id,executorInstallGeneration:config.install_generation},
+    {request:(route,body,parent,slot)=>client.request(route,body,slot,parent),clearRequest:slot=>journal.clearRequest(slot)});
+  try{await taskRunner.pollOnce(signal,runID);}finally{journal.close();}
 }

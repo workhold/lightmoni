@@ -600,7 +600,7 @@ export function registerServiceDeployments(
       const unknownCode = update.code === "invalid_agent_sequence" ? "invalid_agent_sequence" : "unknown_execution_result";
       const unknownSummary = isRollback
         ? "回滚执行结果未知，需检查主机并重新预检；系统不会自动重试"
-        : update.code === "invalid_agent_sequence" ? "Agent 成功回执缺少有效健康检查证据，需重新检查目标主机" : "Agent 执行结果未知，需要重新检查目标主机";
+        : update.code === "invalid_agent_sequence" ? "Agent 成功回执缺少有效健康检查证据，需重新检查目标主机" : "SSH 执行结果未知，需要重新检查目标主机";
       if (isRollback && (state === "rollback_pending" || state === "rolling_back")) {
         // End the operation as requiring operator review. A later explicit
         // rollback request is accepted only after a newer safe preflight and
@@ -705,7 +705,7 @@ export function registerServiceDeployments(
       case "failed":
         next = "failed";
         nextCode = code || "agent_execution_failed";
-        summary = "Agent 执行部署任务失败";
+        summary = "SSH 执行部署任务失败";
         break;
       default:
         return;
@@ -1168,7 +1168,7 @@ export function registerServiceDeployments(
         capabilities: plan.capabilities,
         target: targetRow ? { id: targetRow.id, config: parse(targetRow.config_json, {}) } : {},
       });
-      return transitionInTransaction(deployment.id, "agent_ready", ctx.user.id, "管理员已批准部署计划，等待 Agent 执行", "", { operationID, operationKind: "deploy", approvedBy: ctx.user.id });
+      return transitionInTransaction(deployment.id, "agent_ready", ctx.user.id, "管理员已批准部署计划，等待中心 SSH 派发", "", { operationID, operationKind: "deploy", approvedBy: ctx.user.id });
     });
     ctx.json({ ...result, operation_id: operationID });
   }));
@@ -1256,7 +1256,7 @@ export function registerServiceDeployments(
         target: { id: current.target.id, config: current.config },
       });
       const value = transitionInTransaction(deployment.id, "rollback_pending", ctx.user.id, reason, "rollback_requested", {
-        operationID, operationKind: "rollback", receipt: { state: "queued", code: "", summary: "回滚任务已进入 Agent 队列" },
+        operationID, operationKind: "rollback", receipt: { state: "queued", code: "", summary: "回滚任务等待中心 SSH 执行" },
       });
       return { ...value, operation_id: operationID, job_id: job.id, job_state: job.state };
     });

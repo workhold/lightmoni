@@ -7,6 +7,7 @@ import {DB} from "../src/shared/sqlite.js";
 import {cipher} from "../src/shared/crypto.js";
 import {Router,fail} from "../src/shared/http.js";
 import {registerManagedMachines} from "../src/server/managed-machines.js";
+import {connectionCredentials} from "../src/server/connection-credentials.js";
 import type {Dependencies} from "../src/shared/types.js";
 import {fixturePrivateKey} from "./helpers/ssh-key.js";
 
@@ -25,19 +26,19 @@ async function fixture(t:any) {
   t.after(()=>{machines.close?.();server.close();db.close()});
   const request=async(path:string,method="GET",body?:any)=>{const response=await fetch(url+path,{method,headers:{"content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)});const raw=await response.text();return {status:response.status,raw,data:JSON.parse(raw)}};
   const host=async(name:string)=>{const response=await request("/machines","POST",{name,address:name+".example.test"});assert.equal(response.status,201,response.raw);const account=await request("/machines/"+response.data.id+"/accounts","POST",{username:"deploy",make_default:true});assert.equal(account.status,201,account.raw);db.run("UPDATE managed_machines SET host_key_fingerprint='SHA256:fixture-confirmed-key' WHERE id=?",response.data.id);return response.data.id as string};
-  const key=async(secret=fixturePrivateKey(),extra:any={})=>{const response=await request("/connection-credentials","POST",{name:"Shared deploy key",method:"ssh_key",secret,retention:"managed",confirm_managed:true,...extra});assert.equal(response.status,201,response.raw);return response.data};
+  const key=async(secret=fixturePrivateKey(),extra:any={})=>{const response=await request("/connection-credentials","POST",{name:"Shared deploy key",method:"ssh_key",secret,...extra});assert.equal(response.status,201,response.raw);return response.data};
   const bind=async(mid:string,cid:string)=>{const response=await request(`/machines/${mid}/accounts/${machines.get(mid).default_account_id}/credentials`,"POST",{connection_credential_id:cid});assert.equal(response.status,201,response.raw);return response.data};
   return {db,deps,user,machines,request,host,key,bind,calls,accountID:(mid:string)=>machines.get(mid).default_account_id,advance:(ms:number)=>{clock=new Date(clock.getTime()+ms)}};
 }
 
-test("vault deduplicates actual SSH public keys, never extends retention, and never exposes encrypted material",async t=>{
-  const f=await fixture(t),secret=fixturePrivateKey(),first=await f.key(secret),second=await f.key(secret+"\n",{name:"A different label",retention:"permanent",confirm_managed:undefined,confirm_permanent:true});
-  assert.equal(first.reused,false);assert.equal(second.reused,true);assert.equal(second.id,first.id);assert.equal(second.expires_at,first.expires_at);assert.equal(second.retention,"managed");assert.equal(second.name,first.name);assert.match(first.secret_fingerprint,/^SHA256:/);
+test("vault deduplicates actual SSH public keys, stores them permanently, and never exposes encrypted material",async t=>{
+  const f=await fixture(t),secret=fixturePrivateKey(),first=await f.key(secret),second=await f.key(secret+"\n",{name:"A different label"});
+  assert.equal(first.reused,false);assert.equal(second.reused,true);assert.equal(second.id,first.id);assert.equal(second.expires_at,first.expires_at);assert.equal(second.retention,"permanent");assert.equal(second.expires_at,"");assert.equal(second.name,first.name);assert.match(first.secret_fingerprint,/^SHA256:/);
   const listed=await f.request("/connection-credentials");assert.equal(listed.status,200);assert.equal(listed.data.length,1);assert.ok(!listed.raw.includes(secret));assert.ok(!listed.raw.includes("secret_encrypted"));assert.ok(!listed.raw.includes("PRIVATE KEY"));
   const renamed=await f.request(`/connection-credentials/${first.id}`,"PUT",{name:"Production deploy"});assert.equal(renamed.data.name,"Production deploy");
-  assert.equal((await f.request("/connection-credentials","POST",{name:"Invalid",method:"ssh_key",secret:"-----BEGIN PRIVATE KEY----- junk",confirm_managed:true})).status,400);
+  assert.equal((await f.request("/connection-credentials","POST",{name:"Invalid",method:"ssh_key",secret:"-----BEGIN PRIVATE KEY----- junk"})).status,400);
   const encrypted=ssh2.utils.generateKeyPairSync("ed25519",{passphrase:"fixture-passphrase",cipher:"aes256-cbc"});
-  const rejected=await f.request("/connection-credentials","POST",{name:"Encrypted",method:"ssh_key",secret:encrypted.private,confirm_managed:true});assert.equal(rejected.status,400);assert.ok(!rejected.raw.includes("fixture-passphrase"));
+  const rejected=await f.request("/connection-credentials","POST",{name:"Encrypted",method:"ssh_key",secret:encrypted.private});assert.equal(rejected.status,400);assert.ok(!rejected.raw.includes("fixture-passphrase"));
 });
 
 test("one vault secret binds multiple hosts with automatic default selection; detaching and deleting a host preserve the shared source",async t=>{
@@ -52,12 +53,45 @@ test("one vault secret binds multiple hosts with automatic default selection; de
   assert.equal((await f.request(`/machines/${b}/ssh-check`,"POST",{})).data.ready,true);
 });
 
-test("manual entry honors its requested six-hour lifetime even when reusing a permanently stored key",async t=>{
+test("new credentials and bindings default to no expiry while explicit finite API policies remain available",async t=>{
+  const f=await fixture(t),a=await f.host("permanent-source"),b=await f.host("permanent-binding"),secret=fixturePrivateKey();
+  const source=await f.key(secret);await f.bind(a,source.id);
+  const added=await f.request(`/machines/${b}/accounts/${f.accountID(b)}/credentials`,"POST",{method:"ssh_key",secret});
+  assert.equal(added.status,201,added.raw);assert.equal(added.data.reused,true);
+  assert.equal(added.data.retention,"permanent");assert.equal(added.data.expires_at,"");
+  assert.equal((await f.request("/connection-credentials","POST",{name:"Finite",method:"password",secret:"test",retention:"managed",confirm_managed:true,expires_in_seconds:3600})).status,201);
+  assert.equal((await f.request("/connection-credentials","POST",{name:"Invalid",method:"password",secret:"test",expires_in_seconds:3600})).status,400);
+  f.advance(366*86400_000);
+  assert.equal(f.machines.get(b).active_credential_count,1);
+  assert.equal(f.machines.get(a).active_credential_count,1);
+  assert.equal((await f.request(`/machines/${b}/ssh-check`,"POST",{})).data.ready,true);
+});
+
+test("manual entry honors an explicit finite lifetime when reusing a permanently stored key",async t=>{
   const f=await fixture(t),a=await f.host("permanent-source"),b=await f.host("finite-binding"),secret=fixturePrivateKey();
-  const source=await f.key(secret,{retention:"permanent",confirm_managed:undefined,confirm_permanent:true});await f.bind(a,source.id);
-  const added=await f.request(`/machines/${b}/accounts/${f.accountID(b)}/credentials`,"POST",{method:"ssh_key",secret,confirm_managed:true});assert.equal(added.status,201,added.raw);assert.equal(added.data.reused,true);assert.equal(added.data.retention,"managed");assert.equal(added.data.expires_at,"2026-10-30T06:00:00.000Z");
+  const source=await f.key(secret);await f.bind(a,source.id);
+  const added=await f.request(`/machines/${b}/accounts/${f.accountID(b)}/credentials`,"POST",{method:"ssh_key",secret,retention:"managed",confirm_managed:true});assert.equal(added.status,201,added.raw);assert.equal(added.data.reused,true);assert.equal(added.data.retention,"managed");assert.equal(added.data.expires_at,"2026-10-30T06:00:00.000Z");
   const shortened=await f.request(`/machines/${b}/accounts/${f.accountID(b)}/credentials`,"POST",{method:"ssh_key",secret,retention:"managed",confirm_managed:true,expires_in_seconds:60});assert.equal(shortened.data.credential_id,added.data.credential_id);assert.equal(shortened.data.expires_at,"2026-10-30T00:01:00.000Z");
   f.advance(61_000);assert.equal(f.machines.get(b).active_credential_count,0);assert.equal(f.machines.get(a).active_credential_count,1);assert.equal(f.db.get<any>("SELECT expires_at FROM connection_credentials WHERE id=?",source.id)?.expires_at,"");
+});
+
+test("startup converts only live legacy secrets and bindings to permanent storage",async t=>{
+  const f=await fixture(t),mid=await f.host("migration"),live=await f.key(),binding=await f.bind(mid,live.id);
+  const expired=await f.request("/connection-credentials","POST",{name:"Expired",method:"password",secret:"old"});
+  assert.equal(expired.status,201);
+  f.db.run("UPDATE connection_credentials SET retention='managed',expires_at='2026-10-30T01:00:00.000Z' WHERE id=?",live.id);
+  f.db.run("UPDATE machine_credentials SET retention='managed',expires_at='2026-10-30T01:00:00.000Z' WHERE id=?",binding.credential_id);
+  f.db.run("UPDATE connection_credentials SET retention='managed',expires_at='2026-10-29T00:00:00.000Z' WHERE id=?",expired.data.id);
+  f.db.run("DELETE FROM connection_credential_events WHERE event='permanent_machine_ssh_v1' AND credential_id=''");
+  connectionCredentials(f.deps,()=>{});
+  assert.deepEqual(f.db.get<any>("SELECT retention,expires_at FROM connection_credentials WHERE id=?",live.id),{retention:"permanent",expires_at:""});
+  assert.deepEqual(f.db.get<any>("SELECT retention,expires_at FROM machine_credentials WHERE id=?",binding.credential_id),{retention:"permanent",expires_at:""});
+  assert.equal(f.db.get<any>("SELECT retention FROM connection_credentials WHERE id=?",expired.data.id)?.retention,"managed");
+  assert.equal(f.db.get<any>("SELECT count(*) AS n FROM connection_credential_events WHERE credential_id=? AND event='retention_made_permanent'",live.id)?.n,1);
+  assert.equal(f.machines.get(mid).active_credential_count,1);
+  const finite=await f.request("/connection-credentials","POST",{name:"Later finite",method:"password",secret:"later",retention:"managed",confirm_managed:true,expires_in_seconds:600});
+  connectionCredentials(f.deps,()=>{});
+  assert.equal(f.db.get<any>("SELECT retention FROM connection_credentials WHERE id=?",finite.data.id)?.retention,"managed");
 });
 
 test("global revocation invalidates active terminals and pending plans on every bound host without falling back",async t=>{
@@ -73,8 +107,8 @@ test("global revocation invalidates active terminals and pending plans on every 
   assert.equal(f.machines.get(b).accounts[0].default_credential_id,two.credential_id);
 });
 
-test("vault expiration clears source material and all bindings; expired default does not switch to another active binding",async t=>{
-  const f=await fixture(t),mid=await f.host("expiry"),long=await f.key(fixturePrivateKey(),{expires_in_seconds:3600}),short=await f.key(fixturePrivateKey(),{expires_in_seconds:60});
+test("explicit finite vault expiration clears source material and bindings without switching defaults",async t=>{
+  const f=await fixture(t),mid=await f.host("expiry"),long=await f.key(fixturePrivateKey(),{retention:"managed",confirm_managed:true,expires_in_seconds:3600}),short=await f.key(fixturePrivateKey(),{retention:"managed",confirm_managed:true,expires_in_seconds:60});
   const other=await f.bind(mid,long.id),preferred=await f.bind(mid,short.id);let invalidated=false;
   const lease=f.machines.acquireTerminal(mid,undefined,()=>{invalidated=true;lease.release()});f.advance(61_000);
   assert.equal(f.machines.get(mid).accounts[0].default_credential_id,preferred.credential_id);assert.equal(invalidated,true);assert.equal(lease.valid(),false);
@@ -86,14 +120,14 @@ test("vault expiration clears source material and all bindings; expired default 
 
 test("passwords preserve whitespace and are never deduplicated or hashed; all vault actions require administrator",async t=>{
   const f=await fixture(t),mid=await f.host("password"),secret="  same password\t";
-  const create=()=>f.request("/connection-credentials","POST",{name:"Password",method:"password",secret,confirm_managed:true});
+  const create=()=>f.request("/connection-credentials","POST",{name:"Password",method:"password",secret});
   const a=await create(),b=await create();assert.equal(a.status,201,a.raw);assert.equal(b.status,201,b.raw);assert.notEqual(a.data.id,b.data.id);assert.equal(a.data.secret_fingerprint,"");
   await f.bind(mid,a.data.id);assert.equal((await f.request(`/machines/${mid}/ssh-check`,"POST",{})).data.ready,true);assert.equal(f.calls[0].password,secret);
   f.user.role="member";
   for(const [path,method,body] of [["/connection-credentials","GET",undefined],["/connection-credentials","POST",{}],[`/connection-credentials/${a.data.id}`,"PUT",{name:"No"}],[`/connection-credentials/${a.data.id}/revoke`,"POST",{confirm:true}],[`/machines/${mid}/accounts/${f.accountID(mid)}/default-credential`,"PUT",{credential_id:a.data.id}]] as const)assert.equal((await f.request(path,method,body)).status,403);
 });
 
-test("one-time password sources cannot be shared or rebound after consumption",async t=>{
+test("explicit one-time password sources cannot be shared or rebound after consumption",async t=>{
   const f=await fixture(t),a=await f.host("single-a"),b=await f.host("single-b");
   const created=await f.request("/connection-credentials","POST",{name:"Single-use login",method:"password",secret:"fixture-once",retention:"one_time"});assert.equal(created.status,201,created.raw);
   await f.bind(a,created.data.id);

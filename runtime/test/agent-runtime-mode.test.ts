@@ -240,6 +240,21 @@ test("helper task claims use the signed executor route without an Agent bearer t
   assert.deepEqual(calls, [{ route: "task-runs/claim", slot: "task-runs-claim" }]);
   assert.deepEqual(cleared, ["task-runs-claim"]);
 });
+test("SSH manual task recovery does not consume the resident scheduler marker", async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), "lightmoni-ssh-task-marker-"));
+  t.after(() => rmSync(dataDir, { recursive: true, force: true }));
+  const scheduled = { id: "01234567-0123-4234-8234-0123456789ab", lease_token: "a".repeat(64) };
+  writeFileSync(join(dataDir, "task-run-state.json"), JSON.stringify(scheduled));
+  const calls: string[] = [];
+  const runner = new AgentTaskRunner({
+    endpoint: "https://center.test", agentID: "agent", executorID: "executor", executorInstallGeneration: 4,
+    dataDir, stateFile: "task-run-ssh-state.json", permissionGeneration: 3,
+    executionIdentity: { account: "lightmoni-agent", uid: 1000, gid: 1000, permission_generation: 3 },
+  }, { request: async (route) => { calls.push(route); return { run: null }; }, clearRequest: () => {} });
+  assert.equal(await runner.pollOnce(undefined, "11111111-1111-4111-8111-111111111111"), null);
+  assert.deepEqual(calls, ["task-runs/claim"]);
+  assert.deepEqual(JSON.parse(readFileSync(join(dataDir, "task-run-state.json"), "utf8")), scheduled);
+});
 test("root mode keeps the Agent unprivileged and moves scripts out of its task loops", async (t) => {
   for (const runtime_mode of ["user", "root"] as const) {
     const data_dir = mkdtempSync(join(tmpdir(), "lightmoni-job-identity-"));

@@ -67,7 +67,7 @@ test('password credentials can run one fixed SSH check once, then are revoked an
  let sshInput:any;
  const f=await fixture(t,{},async input=>{sshInput=input;return {stdout:checkOutput,stderr:'',stages:['checking_host_key','remote_command_completed']}});
  const created=await f.request('/machines','POST',{name:'prod-2',address:'host.example.com',connection_method:'direct_ssh',fixture_host_pin:'SHA256:abcdefghijklmnop'});const machine=created.data;
- const password=await f.request(`/machines/${machine.id}/accounts/${f.accountID(machine.id)}/credentials`,'POST',{method:'password',secret:'temporary-password',retention:'one_time'});assert.equal(password.status,201);assert.equal(password.data.retention,'one_time');assert.match(password.data.warning,/不要长期保存/);
+ const password=await f.request(`/machines/${machine.id}/accounts/${f.accountID(machine.id)}/credentials`,'POST',{method:'password',secret:'temporary-password',retention:'one_time'});assert.equal(password.status,201);assert.equal(password.data.retention,'one_time');assert.match(password.data.warning,/可随时撤销/);
  const checked=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(checked.status,200,checked.raw);assert.equal(checked.data.connected,true);assert.equal(checked.data.ready,true);assert.equal(sshInput.password,'temporary-password');assert.equal(sshInput.privateKey,'');
  const detail=await f.request(`/machines/${machine.id}`);assert.equal(detail.data.credentials[0].revoked_at!==null,true);assert.equal(detail.data.credentials[0].last_used_at!==null,true);
  const reused=await f.request(`/machines/${machine.id}/ssh-check`,'POST',{credential_id:password.data.credential_id});assert.equal(reused.status,409);assert.match(reused.raw,/撤销/);
@@ -605,7 +605,7 @@ test('invalid SSH check output does not suggest root, while mixed account failur
  }
 });
 
-test('credential policies default both login methods to six hours with explicit consent and enforce finite limits', async t => {
+test('credential policies default both login methods to permanent while preserving explicit finite API limits', async t => {
  const f=await fixture(t), h=await host(f,'retention-policy');
  const original=credentialRow(f,h.credential);
  assert.equal(original.retention,'temporary');assert.equal(original.policy_source,'explicit');
@@ -614,7 +614,7 @@ test('credential policies default both login methods to six hours with explicit 
   const secret=method==='ssh_key'?h.key:'managed-password';
   const add=(body:any)=>f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method,secret:method==='ssh_key'?fixturePrivateKey():secret,...body});
   for(const body of [
-   {},{retention:'managed'},{confirm_managed:false},{confirm_managed:'true'},
+   {retention:'managed'},{confirm_managed:false},{confirm_managed:'true'},
    {retention:'managed',confirm_managed:true,expires_in_seconds:31_536_001},
    {retention:'temporary',expires_in_seconds:59},{retention:'temporary',expires_in_seconds:3601},
    {retention:'none'},{retention:'unknown'},{retention:null},{retention:'temporary',confirm_managed:true},
@@ -633,13 +633,13 @@ test('credential policies default both login methods to six hours with explicit 
  for(const body of [{method:'manual_script'},{method:'manual_script',secret:'must-not-be-saved'},{method:'manual_script',retention:'managed',confirm_managed:true}]) assert.equal((await f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',body)).status,400);
 });
 
-test('permanent passwords and keys require distinct explicit consent and never accept a finite deadline',async t=>{
+test('permanent passwords and keys need no extra consent and never accept a finite deadline',async t=>{
  const f=await fixture(t),h=await host(f,'permanent-consent');
  for(const method of ['ssh_key','password']) {
   const secret=method==='ssh_key'?h.key:'permanent-password';
   const add=(body:any)=>f.request(`/machines/${h.id}/accounts/${f.accountID(h.id)}/credentials`,'POST',{method,secret:method==='ssh_key'?fixturePrivateKey():secret,retention:'permanent',...body});
-  for(const body of [{},{confirm_permanent:false},{confirm_permanent:'true'},{confirm_managed:true},{confirm_permanent:true,confirm_managed:true},{confirm_permanent:true,expires_in_seconds:21600},{confirm_permanent:true,expires_in_seconds:null}]) assert.equal((await add(body)).status,400,method+JSON.stringify(body));
-  const added=await add({confirm_permanent:true});assert.equal(added.status,201,added.raw);assert.equal(added.data.retention,'permanent');assert.equal(added.data.expires_at,'');assert.match(added.data.warning,/无固定期限/);assert.match(added.data.warning,/短期保存/);
+  for(const body of [{confirm_permanent:false},{confirm_permanent:'true'},{confirm_managed:true},{confirm_permanent:true,confirm_managed:true},{confirm_permanent:true,expires_in_seconds:21600},{confirm_permanent:true,expires_in_seconds:null}]) assert.equal((await add(body)).status,400,method+JSON.stringify(body));
+  const added=await add({confirm_permanent:true});assert.equal(added.status,201,added.raw);assert.equal(added.data.retention,'permanent');assert.equal(added.data.expires_at,'');assert.match(added.data.warning,/永久保存/);assert.match(added.data.warning,/可随时撤销/);
   const stored=credentialRow(f,added.data.credential_id);assert.equal(stored.expires_at,'');assert.notEqual(stored.secret_encrypted,'');assert.ok(!added.raw.includes(secret));
   if(method==='password')assert.equal(stored.secret_fingerprint,'');
  }

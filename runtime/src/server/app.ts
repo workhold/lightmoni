@@ -3,6 +3,7 @@ import { registerAgentConfiguration } from "../reconciliation/agent-config.js";
 import { initializeCenterSchema } from './schema.js';
 import { connectManagedExecutorJobs } from "./managed-executor-jobs.js";
 import { connectExecutorObservations } from './executor-observation.js';
+import { registerCenterSSHDispatch } from './center-ssh-dispatch.js';
 import { SystemLogs } from "./system-logs.js";
 import {
   createServer,
@@ -177,6 +178,7 @@ export async function createApp(cfg: Config) {
     privilegedExecutors.taskRuns = taskCenter;
     modules.push(privilegedExecutors,managedMachines.registerExecutorBootstrap(privilegedExecutors));
     connectManagedExecutorJobs(deps,{jobs:agentJobs,executors:privilegedExecutors,artifacts:releaseArtifacts,resolvePlatform:platform.resolvePayload});
+    modules.push(registerCenterSSHDispatch(deps,managedMachines,agentJobs,privilegedExecutors,undefined,1000,taskCenter));
     modules.push(connectExecutorObservations(deps,privilegedExecutors,ingest.internal.bind(ingest)));
     modules.push(agentCredentials);
     modules.push(registerDashboards(deps));

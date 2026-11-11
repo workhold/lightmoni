@@ -55,6 +55,18 @@ function fixture() {
 const capabilities = [SCRIPT_TASK_CAPABILITY];
 const result = (lease: string, overrides: any = {}) => ({ lease_token: lease, state: "succeeded", code: "", summary: "done", stdout: "ok", stderr: "", exit_code: 0, ...overrides });
 
+test('manual scripts require an exact SSH invocation while scheduled helper polling remains separate',()=>{
+  const f=fixture();try{
+    f.task();const manual=f.store.dispatch('script-one',{confirm:true},'admin').runs[0];
+    f.store.setSSHOnly();
+    assert.equal(f.claim('agent-one',capabilities),null);
+    const wrong=f.store.claimForHelper(f.helper('agent-one'),{capabilities,run_id:'0'.repeat(8)+'-'+['0'.repeat(4),'0'.repeat(4),'0'.repeat(4),'0'.repeat(12)].join('-')}).run;
+    assert.equal(wrong,null);
+    const claimed=f.store.claimForHelper(f.helper('agent-one'),{capabilities,run_id:manual.id}).run;
+    assert.equal(claimed?.id,manual.id);
+  }finally{f.close();}
+});
+
 test("ordinary routes cannot claim, mutate, expire or retry a root executor lineage",()=>{
   const f=fixture();try{
     f.task();const run=f.store.dispatch("script-one",{confirm:true},"admin").runs[0];

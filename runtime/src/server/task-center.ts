@@ -32,6 +32,13 @@ const confirm = (v: Record<string, any>) => { if (v.confirm !== true) fail(400, 
 /** Finite script jobs deliberately do not share deployment health-verification states. */
 export class TaskRunStore {
   readonly nodes: NodeStore;
+  private sshOnly=false;
+  setSSHOnly(){this.sshOnly=true;}
+  failQueuedSSH(id:string,code:string){
+    if(!/^[a-z_]{1,64}$/.test(code))fail(400,'invalid_ssh_failure_code');
+    this.deps.db.run("UPDATE task_runs SET state='failed',finished_at=?,code=?,summary='中心 SSH 派发失败，请检查主机连接、凭据和 Agent 发行包版本后重新提交' WHERE id=? AND execution_principal='agent' AND state='queued'",this.now(),code,id);
+    return this.get(id);
+  }
   /** External authorization adapters recheck stable grants here; missing guards fail closed. */
   beforeStart?: (run: {id:string;host_id:string;requested_by:string}) => boolean;
   private lastScheduleTick?: number;
@@ -238,7 +245,7 @@ export class TaskRunStore {
     this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='queue_expired',summary='Task expired before Agent claim' WHERE execution_principal='agent' AND state='queued' AND expires_at<=?", now, now);
     this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='agent_binding_changed',summary='Host Agent binding changed before claim' WHERE execution_principal='agent' AND state='queued' AND (NOT EXISTS (SELECT 1 FROM managed_machines m WHERE m.id=task_runs.host_id AND m.agent_id=task_runs.agent_id) OR EXISTS (SELECT 1 FROM agent_lifecycle l WHERE l.agent_id=task_runs.agent_id AND l.state='removed'))", now);
   }
-  private claim(agentID: string, hostID: string, capabilities: string[], identity: OrdinaryTaskIdentity): ClaimedTaskRun | null {
+  private claim(agentID: string, hostID: string, capabilities: string[], identity: OrdinaryTaskIdentity,requestedRunID=""): ClaimedTaskRun | null {
     this.sweep(); assertAgentActive(this.deps.db, agentID, 401);
     if (!Array.isArray(capabilities) || capabilities.length > 32 || capabilities.some(x => typeof x !== "string")) fail(400, "invalid task capabilities");
     if (!capabilities.some(c => (SCRIPT_TASK_CAPABILITIES as readonly string[]).includes(c))) return null;
@@ -250,8 +257,10 @@ export class TaskRunStore {
       if (hasPrivilegedExecution(this.deps.db, hostID, agentID)) return null;
       if (this.unresolvedHostRun(hostID)) return null;
       if (this.deps.db.get("SELECT id FROM task_runs WHERE host_id=? AND state='running'", hostID)) return null;
-      const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE execution_principal='agent' AND host_id=? AND agent_id=? AND state='queued' ORDER BY created_at,rowid LIMIT 200", hostID, agentID);
+      const pending = this.deps.db.all<any>("SELECT * FROM task_runs WHERE execution_principal='agent' AND host_id=? AND agent_id=? AND state='queued' AND (?='' OR id=?) ORDER BY created_at,rowid LIMIT 200", hostID, agentID,requestedRunID,requestedRunID);
       for (const r of pending) {
+        const manual=r.trigger==='manual'||r.trigger==='retry'&&r.requested_by!=='scheduler';
+        if(this.sshOnly&&(requestedRunID?!manual:manual))continue;
         if (pendingMachineUninstallation(this.deps.db,r.host_id,agentID)) continue;
         if (!this.authorizationValid(r)) {
           this.deps.db.run("UPDATE task_runs SET state='cancelled',finished_at=?,code='authorization_revoked',summary='External authorization is no longer valid before Agent claim' WHERE id=? AND state='queued'", this.now(), r.id);
@@ -297,9 +306,11 @@ export class TaskRunStore {
     return r;
   }
   claimForHelper(executor: {id:string;machine_id:string;agent_id:string;install_generation:number}, input: Record<string,any>) {
-    fields(input, ["capabilities"]);
+    fields(input, ["capabilities","run_id"]);
+    const requestedRunID=input.run_id??"";
+    if(typeof requestedRunID!=="string"||requestedRunID&&!/^[a-f0-9-]{36}$/.test(requestedRunID))fail(400,'invalid_run_id');
     const identity = this.taskIdentityFromHelper(executor);
-    return { run: this.claim(executor.agent_id, executor.machine_id, input.capabilities, identity) };
+    return { run: this.claim(executor.agent_id, executor.machine_id, input.capabilities, identity,requestedRunID) };
   }
   private helperRun(executor: {id:string;machine_id:string;agent_id:string;install_generation:number}, id: string, secret: unknown) {
     const identity = this.taskIdentityFromHelper(executor), row = this.leased(executor.agent_id, id, secret);

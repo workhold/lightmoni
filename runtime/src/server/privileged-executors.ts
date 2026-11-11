@@ -69,6 +69,21 @@ export interface ManagedExecutorBridge {
 }
 export class PrivilegedExecutorStore {
   managed?:ManagedExecutorBridge;
+  private sshOnly=false;
+  setSSHOnly(){this.sshOnly=true;}
+  prepareSSH(machineID:string){
+    const executor=this.deps.db.get<Row>("SELECT * FROM privileged_executors WHERE machine_id=? AND state='active' ORDER BY install_generation DESC LIMIT 1",machineID);
+    if(executor)this.managed?.prepare(executor);
+  }
+  failQueuedSSH(jobID:string,code:string){
+    if(!/^[a-z_]{1,64}$/.test(code))fail(400,'invalid_ssh_failure_code');
+    const job=this.row(jobID);
+    if(job.state!=='queued')return this.get(jobID);
+    this.deps.db.run("UPDATE privileged_jobs SET state='failed',phase='failed',finished_at=?,code=? WHERE id=? AND state='queued'",this.now(),code,jobID);
+    this.sync(this.row(jobID));
+    this.audit(job.machine_id,'system','ssh_dispatch_failed',jobID,{code});
+    return this.get(jobID);
+  }
   taskRuns?:TaskRunStore;
   observations?:{targets:(executor:Row)=>unknown;accept:(executor:Row,value:Row)=>unknown};
   observationAuthority(id:string){const e=this.executor(id),p=this.policy(e.machine_id);if(p.agent_id!==e.agent_id||!JSON.parse(p.capabilities_json).includes('operations.managed.v1'))fail(403,'policy_disabled');this.actor(p.approved_by);return e;}
@@ -317,13 +332,20 @@ export class PrivilegedExecutorStore {
     let observation: Row = {}; if (row?.observation_enc) observation = parseStrictJSON(this.deps.decrypt(row.observation_enc));
     const binding = !!row && row.agent_id === host?.agent_id && !isAgentRemoved(this.deps.db, row.agent_id);
     const online = binding && row.state === "active" && !!row.last_seen && Date.parse(row.last_seen) > this.deps.now().getTime() - 60_000;
+    const sshReady=this.sshOnly&&!!this.deps.db.get(`SELECT c.id FROM managed_machines m
+      JOIN machine_ssh_accounts a ON a.id=m.default_account_id AND a.deleted_at=''
+      JOIN effective_machine_credentials c ON c.id=a.default_credential_id AND c.machine_id=m.id
+      WHERE m.id=? AND m.address!='' AND c.revoked_at IS NULL AND c.secret_cleared_at='' AND c.secret_encrypted!=''
+      AND c.method IN ('ssh_key','password') AND c.retention!='one_time'
+      AND (c.retention='permanent' AND c.expires_at='' OR julianday(c.expires_at)>julianday(?))`,machineID,this.now());
+    const available=this.sshOnly ? sshReady&&binding&&row?.state==='active' : online;
     const authorized = JSON.parse(policy.capabilities_json) as string[];
     return { machine_id: machineID, policy_generation: policy.generation, executor: row ? { id: row.id, state: row.state, install_generation: row.install_generation, online, last_seen: row.last_seen, version: observation.version ?? "", boot_id: observation.boot_id ?? "",activation_id:observation.activation_id??"",release:observation.release ?? null,ordinary_task_identity:observation.ordinary_task_identity??null } : null,
-      capabilities: Object.fromEntries(PRIVILEGED_CAPABILITIES.map(capability => [capability, { authorized: authorized.includes(capability), effective: !authorized.includes(capability) ? "disabled" : !row ? "pending" : !binding ? "blocked" : online && observation.policy_generation === policy.generation && observation.capabilities?.includes(capability) ? "ready" : "unavailable", policy_generation: policy.generation }])),
-      ...(online && authorized.includes('operations.managed.v1') && observation.policy_generation===policy.generation && observation.capabilities?.includes('operations.managed.v1') && observation.docker_inventory?{docker_inventory:observation.docker_inventory}:{}),
-      operations_capabilities:online && observation.policy_generation===policy.generation && observation.capabilities?.includes("operations.managed.v1")?observation.operations_capabilities??[]:[],
-      account_profiles: online && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreter_profiles: online && observation.policy_generation === policy.generation ? observation.interpreter_profiles ?? [] : [],
-      script_profiles: { accounts: online && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreters: online && observation.policy_generation === policy.generation ? Object.fromEntries((observation.interpreter_profiles ?? []).map((p: Row) => [p.runtime, p.sha256])) : {} } };
+      capabilities: Object.fromEntries(PRIVILEGED_CAPABILITIES.map(capability => [capability, { authorized: authorized.includes(capability), effective: !authorized.includes(capability) ? "disabled" : !row ? "pending" : !binding ? "blocked" : available && observation.policy_generation === policy.generation && observation.capabilities?.includes(capability) ? "ready" : "unavailable", policy_generation: policy.generation }])),
+      ...(available && authorized.includes('operations.managed.v1') && observation.policy_generation===policy.generation && observation.capabilities?.includes('operations.managed.v1') && observation.docker_inventory?{docker_inventory:observation.docker_inventory}:{}),
+      operations_capabilities:available && observation.policy_generation===policy.generation && observation.capabilities?.includes("operations.managed.v1")?observation.operations_capabilities??[]:[],
+      account_profiles: available && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreter_profiles: available && observation.policy_generation === policy.generation ? observation.interpreter_profiles ?? [] : [],
+      script_profiles: { accounts: available && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreters: available && observation.policy_generation === policy.generation ? Object.fromEntries((observation.interpreter_profiles ?? []).map((p: Row) => [p.runtime, p.sha256])) : {} } };
   }
   /** Resolve ordinary-script identity only from the latest signature-verified helper heartbeat. */
   ordinaryTaskIdentity(machineID:string,agentID:string,executorID:string,installGeneration:number) {
@@ -331,7 +353,12 @@ export class PrivilegedExecutorStore {
     const host=this.deps.db.get<Row>("SELECT agent_id FROM managed_machines WHERE id=?",machineID);
     if(!runtime||runtime.agent_id!==agentID||runtime.runtime_mode!=="root"||host?.agent_id!==agentID)return null;
     const row=this.deps.db.get<Row>("SELECT * FROM privileged_executors WHERE id=? AND machine_id=? AND agent_id=? AND install_generation=? AND state='active'",executorID,machineID,agentID,installGeneration);
-    if(!row||!row.observation_enc||!row.last_seen||Date.parse(row.last_seen)<=this.deps.now().getTime()-60_000||isAgentRemoved(this.deps.db,agentID))return null;
+    const sshReady=this.sshOnly&&!!this.deps.db.get(`SELECT c.id FROM managed_machines m
+      JOIN machine_ssh_accounts a ON a.id=m.default_account_id AND a.deleted_at=''
+      JOIN effective_machine_credentials c ON c.id=a.default_credential_id AND c.machine_id=m.id
+      WHERE m.id=? AND m.address!='' AND c.revoked_at IS NULL AND c.secret_cleared_at='' AND c.secret_encrypted!=''
+      AND c.retention!='one_time' AND (c.retention='permanent' AND c.expires_at='' OR julianday(c.expires_at)>julianday(?))`,machineID,this.now());
+    if(!row||!row.observation_enc||!row.last_seen||!sshReady&&Date.parse(row.last_seen)<=this.deps.now().getTime()-60_000||isAgentRemoved(this.deps.db,agentID))return null;
     let observation:Row;
     try{observation=parseStrictJSON(this.deps.decrypt(row.observation_enc));}catch{return null;}
     const identity=observation.ordinary_task_identity;
@@ -513,7 +540,7 @@ export class PrivilegedExecutorStore {
     return grant;
   }
   private sync(job: Row) {
-    const summary = ({ queued: "等待执行器领取", running: "执行器正在运行", succeeded: "执行器报告完成", failed: "执行器报告失败", cancelled: "执行已取消", unknown: "执行结果未知，请核对主机" } as Row)[job.state];
+    const summary = ({ queued: "等待中心 SSH 派发", running: "SSH 作业正在运行", succeeded: "SSH 作业报告完成", failed: "SSH 作业报告失败", cancelled: "执行已取消", unknown: "执行结果未知，请核对主机" } as Row)[job.state];
     this.deps.db.run("UPDATE task_runs SET state=?,started_at=?,finished_at=?,lease_expires_at=?,cancel_requested=?,code=?,summary=?,resolved_at=?,resolved_by=?,resolution_reason=?,auto_retry_closed=1 WHERE id=? AND execution_principal='privileged_executor'", job.state, job.started_at, job.finished_at, job.lease_expires_at, job.cancel_requested, job.code, summary, job.resolved_at, job.resolved_by, job.resolution_reason, job.task_run_id);
     if(job.capability==='operations.managed.v1')this.managed?.sync(job);
   }
@@ -524,10 +551,13 @@ export class PrivilegedExecutorStore {
     }
   }
   claim(executor: Row, value: unknown) {
-    object(value, []); this.sweep();
+    const request=object(value, ["job_id"], []),requestedJobID=request.job_id??"";
+    if(typeof requestedJobID!=="string"||requestedJobID&& !/^[a-f0-9-]{32,36}$/.test(requestedJobID))fail(400,"invalid_job_id");
+    this.sweep();
+    if(this.sshOnly&&!requestedJobID)return {job:null};
     if (this.deps.db.get("SELECT id FROM privileged_jobs WHERE executor_id=? AND (state='running' OR (state='unknown' AND resolved_at=''))", executor.id)) return { job: null };
     this.managed?.prepare(executor);
-    const jobs = this.deps.db.all<Row>("SELECT * FROM privileged_jobs WHERE executor_id=? AND state='queued' ORDER BY created_at,id LIMIT 50", executor.id);
+    const jobs = this.deps.db.all<Row>("SELECT * FROM privileged_jobs WHERE executor_id=? AND state='queued' AND (?='' OR id=?) ORDER BY created_at,id LIMIT 50", executor.id,requestedJobID,requestedJobID);
     for (const job of jobs) {
       try { this.authority(job, executor); this.idle(job.machine_id, job.agent_id, job.id); }
       catch (error) {

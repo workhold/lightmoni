@@ -586,7 +586,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       if (input.connection_credential_id === undefined) db.run("UPDATE machine_credentials SET policy_source=? WHERE id=?",input.retention === undefined ? "default" : "explicit",bindingID);
     });
     const binding = credentialRows(ctx.params.id).find(value => value.id === bindingID)!;
-    const warning = binding.retention === "permanent" ? "已确认无固定期限保存；建议优先短期保存，可随时撤销。" : "连接凭据按所选期限保存；建议不要长期保存。";
+    const warning = "SSH 凭据已加密永久保存，可随时撤销或解绑。";
     ctx.json({...binding,credential_id:bindingID,reused,warning},201);
   };
   const deploymentView = (value: any) => ({ id: value.id, machine_id: value.machine_id, credential_id: value.credential_id, status: value.status, version: value.version, arch: value.arch, initial_label_id: value.initial_label_id, plan: parseJSON(value.plan_json, {}), receipt: parseJSON(value.receipt_json, {}), error: value.error, created_at: value.created_at, created_by: value.created_by, approved_at: value.approved_at, started_at: value.started_at, finished_at: value.finished_at,

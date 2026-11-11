@@ -119,7 +119,7 @@ lm_assert_no_operations() {
     printf '%s' "$lm_managed" | LC_ALL=C grep -Eq '"pending_results"[[:space:]]*:[[:space:]]*0([,}[:space:]])' || lm_refuse 'Managed Agent has unreported results'
     printf '%s' "$lm_managed" | LC_ALL=C grep -Eq '"ordinary_task_runner"[[:space:]]*:[[:space:]]*\{[^}]*"active"[[:space:]]*:[[:space:]]*false[^}]*"state"[[:space:]]*:[[:space:]]*"idle"' || lm_refuse 'Agent task runner is not idle'
   fi
-  for lm_marker in /var/lib/lightmoni-agent/agent-job-state.json /var/lib/lightmoni-agent/task-run-state.json; do
+  for lm_marker in /var/lib/lightmoni-agent/agent-job-state.json /var/lib/lightmoni-agent/task-run-state.json /var/lib/lightmoni-agent-helper/managed/task-run-state.json /var/lib/lightmoni-agent-helper/managed/task-run-ssh-state.json; do
     [ ! -L "$lm_marker" ] || lm_refuse 'Agent has an unsafe unfinished operation marker'
     if [ -e "$lm_marker" ]; then
       [ -f "$lm_marker" ] && [ -r "$lm_marker" ] || lm_refuse 'Agent has an unreadable unfinished operation marker'

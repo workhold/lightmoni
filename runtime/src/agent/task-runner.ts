@@ -155,7 +155,7 @@ export async function executeTaskScript(script: TaskScript, options: {
 
 export interface TaskRunnerConfig {
   endpoint: string; agentID: string; executorID: string; executorInstallGeneration: number;
-  dataDir: string; pollIntervalMs?: number; heartbeatIntervalMs?: number;
+  dataDir: string; stateFile?: "task-run-ssh-state.json"; pollIntervalMs?: number; heartbeatIntervalMs?: number;
   permissionGeneration: number;
   executionIdentity: { account: "lightmoni-agent"; uid: number; gid: number; permission_generation: number };
 }
@@ -166,7 +166,7 @@ export class AgentTaskRunner {
   private readonly statePath: string;
   private polling = false;
   constructor(readonly config: TaskRunnerConfig, io: { request: (route: string, body: unknown, parent?: AbortSignal, slot?: string) => Promise<any>; clearRequest: (slot: string) => void }) {
-    this.requester = io.request; this.clearRequest = io.clearRequest; this.statePath = resolve(config.dataDir, "task-run-state.json");
+    this.requester = io.request; this.clearRequest = io.clearRequest; this.statePath = resolve(config.dataDir, config.stateFile ?? "task-run-state.json");
     if (!config.executorID || !Number.isSafeInteger(config.executorInstallGeneration) || config.executorInstallGeneration < 1
       || !Number.isSafeInteger(config.permissionGeneration) || config.permissionGeneration < 1
       || config.executionIdentity.account !== "lightmoni-agent" || config.executionIdentity.permission_generation !== config.permissionGeneration
@@ -208,14 +208,15 @@ export class AgentTaskRunner {
     this.clearRequest(resultSlot);
     this.clearRequest("task-run-reconcile:" + value.id);
     this.clearRequest("task-runs-claim");
+    this.clearRequest("ssh-task-claim:"+value.id);
   }
-  async pollOnce(parent?: AbortSignal): Promise<ScriptOutcome | null> {
+  async pollOnce(parent?: AbortSignal, requestedRunID=""): Promise<ScriptOutcome | null> {
     if (this.polling || parent?.aborted) return null;
     this.polling = true;
     try {
       await this.recover(parent);
-      const claimSlot = "task-runs-claim";
-      const value = await this.request(this.claimPath(), { capabilities: [...SCRIPT_TASK_CAPABILITIES] }, parent, claimSlot);
+      const claimSlot = requestedRunID ? "ssh-task-claim:"+requestedRunID : "task-runs-claim";
+      const value = await this.request(this.claimPath(), { capabilities: [...SCRIPT_TASK_CAPABILITIES],...(requestedRunID?{run_id:requestedRunID}:{}) }, parent, claimSlot);
       const run = value.run as ClaimedTaskRun | null;
       if (!run) { this.clearRequest(claimSlot); return null; }
       if (typeof run.id !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(run.id)
@@ -225,6 +226,7 @@ export class AgentTaskRunner {
       // even a malformed snapshot must never be claimed a second time.
       this.save({ id: run.id, lease_token: run.lease_token });
       this.clearRequest(claimSlot);
+      if(requestedRunID&&run.id!==requestedRunID)throw Error('requested_task_mismatch');
       if (run.agent_id !== this.config.agentID
         || run.snapshot?.agent_id !== this.config.agentID || run.snapshot?.host_id !== run.host_id || run.snapshot?.task_id !== run.task_id)
         throw Error("invalid claimed task binding");

@@ -40,7 +40,7 @@ export default function ElevatedTaskDialog({hosts,initialView='create',initialJo
  const stateColor=(state:string)=>({queued:'processing',running:'processing',succeeded:'success',failed:'error',unknown:'warning'}[state]);
  const time=(value?:string)=>value&&Number.isFinite(Date.parse(value))?new Date(value).toLocaleString(language):'—';
  const profile=status?.script_profiles,accounts=profile?.accounts??[],selectedAccount=accounts.find(value=>accountKey(value)===account),capability=status?.capabilities?.['script.elevated.v1'];
- const ready=!!hostID&&status?.machine_id===hostID&&!!status.executor?.id&&status.executor.online&&Number.isSafeInteger(status.executor.install_generation)&&Number.isSafeInteger(status.policy_generation)&&capability?.authorized===true&&capability.effective==='ready'&&!!selectedAccount&&sha.test(profile?.interpreters[runtime]??'');
+ const ready=!!hostID&&status?.machine_id===hostID&&!!status.executor?.id&&Number.isSafeInteger(status.executor.install_generation)&&Number.isSafeInteger(status.policy_generation)&&capability?.authorized===true&&capability.effective==='ready'&&!!selectedAccount&&sha.test(profile?.interpreters[runtime]??'');
  const expired=!!plan&&(!Number.isFinite(Date.parse(plan.expires_at))||Date.parse(plan.expires_at)<=now);
  const invalidate=()=>{draftGeneration.current++;fileGeneration.current++;setPlan(undefined);setChecked(false);setApplyAttempted(false);requestID.current='';setError('')};
  const change=(action:()=>void)=>{if(pending.current||applyAttempted)return;invalidate();action()};
