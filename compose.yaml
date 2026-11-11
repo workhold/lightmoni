@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261109-deployment-recovery-v1
+    image: docker.heyphp.com/lightmoni/lightmoni:20261111-agent-install-recovery-v1
     pull_policy: missing
     build:
       context: .

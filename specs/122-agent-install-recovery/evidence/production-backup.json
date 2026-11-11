@@ -1,0 +1,13 @@
+{
+  "snapshot_complete": true,
+  "quick_check": "ok",
+  "pages": 674884,
+  "page_size": 4096,
+  "snapshot_bytes": 2764324864,
+  "elapsed_seconds": 468.0,
+  "observed_at": "2026-11-11T02:06:48.199971+00:00",
+  "protected_backup": true,
+  "previous_image": "docker.heyphp.com/lightmoni/lightmoni:20261110-monitoring-fixes-v1",
+  "backup_directory": "/opt/lightmoni/backups/sdd122-agent-recovery-20261111",
+  "receipt_source": "Root-private backup-report.json visually read through existing 1Panel terminal; credentials, master key and raw configuration remain on production."
+}

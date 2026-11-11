@@ -1,0 +1,17 @@
+{
+  "pass": true,
+  "observed_at": "2026-11-11T02:26:24.234556+00:00",
+  "environment": "Authenticated production administrator in native Chrome through CUA; full page reload after deployment; no mocked responses.",
+  "path": "/machines",
+  "checks": [
+    "主机列表正常显示 4 台主机；原异常主机保持结果未知，另外三台 Agent 显示在线。",
+    "打开原未知安装记录后执行固定只读核对，实际返回“只读安装核对失败，结果保持未知；未重新执行安装”。",
+    "失败后完成原记录读回；在人工结束原因框填写验收草稿，人工结束按钮由 disabled 变为可用，且不要求额外刷新。",
+    "清空本地验收草稿并关闭对话框，未提交人工结束、撤销授权、卸载、重装或升级 Agent。"
+  ],
+  "limitations": [
+    "生产仅验收未知记录的只读核对和恢复入口；不把入口可用称为历史安装成功。",
+    "残留目录清理与 fresh 拦截通过隔离 Linux 成品验收，生产受影响主机的残留未删除。"
+  ],
+  "privacy": "Only this summarized receipt is committed; no full AX tree, production logs, raw database, credentials or master key exported."
+}

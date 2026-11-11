@@ -1,0 +1,12 @@
+[
+  {
+    "arch": "arm64",
+    "pass": true,
+    "output": "0.1.0"
+  },
+  {
+    "arch": "amd64",
+    "pass": true,
+    "output": "0.1.0"
+  }
+]

@@ -1,0 +1,36 @@
+{
+  "source_revision": "7011d507e1db74082c674a78f8ff3c921faf8f91",
+  "platform_smoke": {
+    "arm64": {
+      "passed": true,
+      "checks": 11
+    },
+    "amd64": {
+      "passed": true,
+      "checks": 11
+    }
+  },
+  "agent_binary_version": {
+    "amd64": "0.1.0",
+    "arm64": "0.1.0"
+  },
+  "compiled_regression": {
+    "arm64": {
+      "passed": true,
+      "tests": 40,
+      "failures": 0,
+      "duration_ms": 45776.358228
+    },
+    "amd64": {
+      "passed": true,
+      "tests": 40,
+      "failures": 0,
+      "duration_ms": 840151.322965
+    }
+  },
+  "fixture_notes": [
+    "Six compiled shell/SSH/web checks per platform exercise Linux root-owned files in isolated temporary directories; no host systemd service is modified.",
+    "The 40 lifecycle/race regressions import the shipped compiled modules and shipped uninstaller; systemd and ownership are simulated by test fixtures.",
+    "Agent archives are checked directly in the image because their HTTP route requires a host-bound enrollment token; administrator cookies are correctly rejected. SDK archives are verified over HTTP."
+  ]
+}
