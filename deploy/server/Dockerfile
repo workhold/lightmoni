@@ -29,6 +29,9 @@ FROM node:24.15.0-bookworm-slim
 ARG DEBIAN_MIRROR=http://deb.debian.org/debian
 ARG DEBIAN_SECURITY_MIRROR=http://deb.debian.org/debian-security
 ARG BUILD_REVISION=unknown
+# The slim base has no CA bundle. Seed its trust store from the matching full
+# builder image so HTTPS Debian mirrors can be verified before apt installs it.
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 RUN sed -i -e "s|^URIs: http://deb[.]debian[.]org/debian$|URIs: ${DEBIAN_MIRROR}|" -e "s|^URIs: http://deb[.]debian[.]org/debian-security$|URIs: ${DEBIAN_SECURITY_MIRROR}|" /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata wget openssh-client && rm -rf /var/lib/apt/lists/* && groupadd --gid 10001 lightmoni && useradd --uid 10001 --gid lightmoni --no-create-home lightmoni && mkdir -p /data && chown lightmoni:lightmoni /data
 LABEL org.opencontainers.image.revision=${BUILD_REVISION}
