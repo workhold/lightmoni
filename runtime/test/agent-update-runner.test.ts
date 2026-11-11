@@ -230,6 +230,9 @@ test("failed restoration keeps lifecycle fence and durable rollback_failed recei
   await f.maintenance.start(request);
   const result = await f.maintenance.worker(request.operation_id);
   assert.equal(result.status, "rollback_failed");
+  assert.equal(result.error_code, "rollback_failed");
+  assert.equal(result.rollback_error_code, "maintenance_failed");
+  assert.equal(typeof result.finished_at, "string");
   assert.equal(f.maintenance.ownsLock(request.operation_id), true);
   f.preserve();
 });

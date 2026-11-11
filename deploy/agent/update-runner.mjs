@@ -133,7 +133,8 @@ export class AgentMaintenance {
   state(id) {
     const directory = this.checkManaged(this.opDir(id), "directory");
     const status = boundedJSON(this.checkManaged(path.join(directory, "status.json")));
-    if (status.schema !== 1 || status.operation_id !== id || !ID.test(status.agent_id ?? "") || !["accepted", "preparing", "switching", "waiting_confirmation", ...TERMINAL].includes(status.status)) fail("invalid_receipt");
+    if (status.schema !== 1 || status.operation_id !== id || !ID.test(status.agent_id ?? "") || !["accepted", "preparing", "switching", "waiting_confirmation", ...TERMINAL].includes(status.status)
+      || status.rollback_error_code !== undefined && !/^[a-z_]{1,80}$/.test(status.rollback_error_code)) fail("invalid_receipt");
     try {
       const exit=boundedJSON(this.checkManaged(path.join(directory,'unit-exit.json')),4096);
       if(exit.schema!==1||!EXIT_RESULTS.has(exit.result)||!['exited','killed','dumped','unknown'].includes(exit.exit_code)||!Number.isInteger(exit.exit_status)||exit.exit_status<0||exit.exit_status>255||exit.memory_peak_bytes!==undefined&&(!Number.isSafeInteger(exit.memory_peak_bytes)||exit.memory_peak_bytes<0))fail('invalid_exit_evidence');
@@ -836,7 +837,12 @@ export class AgentMaintenance {
     } catch (error) {
       if (changed) {
         try { return await this.restore(id, safeCode(error)); }
-        catch { return this.save(id, { status: "rollback_failed", error_code: "rollback_failed" }); }
+        catch (rollbackError) {
+          // Keep the lifecycle fence when restoration cannot be proven, but
+          // retain the bounded failure code so recovery can target the actual
+          // failed step instead of hiding it behind a generic status.
+          return this.save(id, { status: "rollback_failed", error_code: "rollback_failed", rollback_error_code: safeCode(rollbackError), finished_at: this.timestamp() });
+        }
       }
       this.phaseDeadline=null;
       const result = this.save(id, { status: "failed", error_code: safeCode(error), finished_at: this.timestamp() });
