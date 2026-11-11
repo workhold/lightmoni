@@ -42,3 +42,7 @@
 ## Complexity Tracking
 
 无新增抽象层、数据迁移或架构例外。
+
+## Release and production verification
+
+先记录授权与任务，再通过 PR #166 合入 main。以干净 git archive 构建两平台成品，验证 revision、非 root、健康、发行校验和及编译后修复行为后发布固定镜像。生产切换沿现有 Compose、卷与环境，先做受保护的一致备份和回滚记录；核对镜像、健康、安装/卸载下载内容及页面恢复入口，将白名单回执记录到本 SDD。发行证据通过后续功能 PR 归档。
