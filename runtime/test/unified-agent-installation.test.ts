@@ -86,6 +86,7 @@ async function fixture(
     return { status: r.status, data: raw ? JSON.parse(raw) : null, raw };
   };
   const machines = registerManagedMachines(deps, {
+    installationReadinessTimeoutMs: 0,
     agentCredentials: credentials,
     sshRunner: async (input: any) => {
       calls.push(input);

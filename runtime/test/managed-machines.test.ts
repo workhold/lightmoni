@@ -7,7 +7,7 @@ import {DB} from '../src/shared/sqlite.js';
 import {Router,fail} from '../src/shared/http.js';
 import {cipher} from '../src/shared/crypto.js';
 import {parseJSON} from '../src/shared/json.js';
-import {registerManagedMachines, type SSHRunner} from '../src/server/managed-machines.js';
+import {registerManagedMachines, type ManagedMachinesOptions, type SSHRunner} from '../src/server/managed-machines.js';
 import {monitoringTools} from '../src/assistant/tools.js';
 import {SSHError} from '../src/server/machine-ssh.js';
 import {NodeStore,normalizeTask} from '../src/server/nodes-model.js';
@@ -15,7 +15,7 @@ import type {Dependencies} from '../src/shared/types.js';
 
 const checkOutput='LMSSH=1\nplatform=linux\narch=amd64\nlinux=1\nsupported_arch=1\ncurl=1\ntar=1\ngzip=1\nsha256sum=1\nsystemd=1\nprivilege_state=root\ninstall_privilege=1\nplatform_https=1\nagent_installation=absent\n';
 const master=Buffer.alloc(32,9), now=new Date('2026-10-19T00:00:00.000Z');
-async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverride?:SSHRunner,humanAdminSession=false){
+async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverride?:SSHRunner,humanAdminSession=false,machineOptions:Partial<ManagedMachinesOptions>={}){
  const db=new DB(':memory:'), router=new Router(), encryption=cipher(master), user={id:'admin',name:'Admin',role:'admin'};
  if(humanAdminSession){db.exec("CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT NOT NULL,active INTEGER NOT NULL)");db.run("INSERT INTO users VALUES('admin','admin',1)");}
  // managed-machines joins the node registry to derive the linked Agent status.
@@ -35,10 +35,10 @@ async function fixture(t:any,overrides:Partial<Dependencies>={},sshRunnerOverrid
  const sshRunner:SSHRunner=async(input)=>{sshInput=input;return {stdout:input.enrollmentToken?`ok ${input.enrollmentToken} ${input.privateKey}`:checkOutput,stderr:`warning ${input.privateKey}`,stages:['checking_host_key','remote_command_completed']}};
  const deps={db,router,...encryption,now:()=>now,auth:{master,user:()=>user,requireAdmin:(ctx:any)=>{if(ctx.user.role!=='admin')fail(403,'administrator required')},validateKey:()=>{throw Error('unused')}},externalURL:'https://monitor.example.com',logger:{info(){},warn(){},error(){}},cat:{list:async()=>[]},query:async()=>({request_id:'',results:[]}),referencedTables:async()=>[],ch:{exec:async()=>{},query:async()=>({meta:[],data:[],rows:0}),insert:async()=>{}},reader:{exec:async()=>{},query:async()=>({meta:[],data:[],rows:0}),insert:async()=>{}},...overrides} as unknown as Dependencies;
  router.auth=deps.auth;
- const machines=registerManagedMachines(deps,{agentCredentials,sshRunner:sshRunnerOverride??sshRunner});
+ const machines=registerManagedMachines(deps,{agentCredentials,sshRunner:sshRunnerOverride??sshRunner,installationReadinessTimeoutMs:0,...machineOptions});
  const server=createServer(async(req,res)=>{if(!(await router.handle(req,res))){res.writeHead(404);res.end()}});server.listen(0,'127.0.0.1');await once(server,'listening');const url=`http://127.0.0.1:${(server.address() as any).port}`;
  t.after(()=>{machines.close?.();server.close();db.close()});
- const rawRequest=async(path:string,method='GET',body?:any)=>{const response=await fetch(url+'/api/v1'+path,{method,headers:{...(humanAdminSession?{cookie:'lm_session=fixture'}:{}),...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const raw=await response.text();return {status:response.status,raw,data:raw?parseJSON(raw):undefined};};
+ const rawRequest=async(path:string,method='GET',body?:any,signal?:AbortSignal)=>{const response=await fetch(url+'/api/v1'+path,{method,signal,headers:{...(humanAdminSession?{cookie:'lm_session=fixture'}:{}),...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const raw=await response.text();return {status:response.status,raw,data:raw?parseJSON(raw):undefined};};
  // Legacy-pin scenarios are seeded directly into the isolated database; the
  // production API deliberately rejects all client-supplied host identity.
  const request=async(path:string,method='GET',body?:any)=>{
@@ -1036,4 +1036,104 @@ test('Docker installation rejects one-time credentials and unsafe remote results
  const verified=await f.request(path+'/'+created.data.id+'/verify','POST',{credential_id:c.credential_id});assert.equal(verified.data.state,'succeeded',verified.raw);assert.doesNotMatch(verified.raw,/token=|secret|stdout|stderr/);
  failSSH=true;
  const mismatch=await f.request(path+'/'+created.data.id+'/verify','POST',{});assert.equal(mismatch.data.state,'unknown');assert.equal(mismatch.data.code,'host_key_mismatch');
+});
+
+async function installationPlan(f:Awaited<ReturnType<typeof fixture>>,h:{id:string;credential:string},runtimeMode='user') {
+ const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential});
+ assert.equal(checked.status,200,checked.raw);
+ const planned=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:h.credential,version:'0.1.0',arch:'amd64',runtime_mode:runtimeMode});
+ assert.equal(planned.status,201,planned.raw);return planned.data;
+}
+function installRuntime(f:Awaited<ReturnType<typeof fixture>>,mid:string,mode='user') {
+ f.db.run('INSERT INTO machine_agent_runtime VALUES(?,?,?,?,?)',mid,'agent-1',mode,1,now.toISOString());
+}
+function installHeartbeat(f:Awaited<ReturnType<typeof fixture>>,mode='user',generation=1,lastSeen=now.toISOString()) {
+ f.db.run('INSERT OR REPLACE INTO agents(id,last_seen,heartbeat) VALUES(?,?,?)','agent-1',lastSeen,JSON.stringify({runtime:{mode,permission_generation:generation,uid:999,gid:987}}));
+}
+
+test('installation tolerates delayed activation and fresh runtime heartbeat with only one SSH bootstrap',async t=>{
+ let bootstraps=0,observations=0;
+ const f=await fixture(t,{},async input=>{if(input.enrollmentToken)bootstraps++;return {stdout:input.enrollmentToken?'installed':checkOutput,stderr:'',stages:['remote_command_completed']}},false,{installationReadinessTimeoutMs:100,installationReadinessPollIntervalMs:1});
+ const h=await host(f,'late-readiness');installRuntime(f,h.id);
+ f.agentCredentials.enrollmentStatus=()=>{
+  observations++;
+  if(observations===1)return {status:'pending',agent_id:''};
+  if(observations===3)installHeartbeat(f,'root');
+  if(observations===4)installHeartbeat(f,'user',2);
+  if(observations===5)installHeartbeat(f,'user',1,'2026-10-18T23:59:59.000Z');
+  if(observations>=6)installHeartbeat(f);
+  return {status:'active',agent_id:'agent-1'};
+ };
+ const plan=await installationPlan(f,h),applied=await f.request(`/machines/${h.id}/deployments/${plan.id}/apply`,'POST',{confirm:true});
+ assert.equal(applied.status,200,applied.raw);assert.equal(observations,6);assert.equal(bootstraps,1);
+ assert.equal(f.machines.get(h.id).agent_id,'agent-1');assert.equal(f.issued.cancelled,undefined);
+});
+
+test('root installation waits for its signed executor after a valid heartbeat',async t=>{
+ let connections=0;
+ const f=await fixture(t,{},async input=>{if(input.enrollmentToken)connections=0;return {stdout:input.enrollmentToken?'installed':checkOutput,stderr:'',stages:['remote_command_completed']}},false,{installationReadinessTimeoutMs:100,installationReadinessPollIntervalMs:1}),h=await host(f,'late-executor');
+ installRuntime(f,h.id,'root');installHeartbeat(f,'root');
+ f.machines.registerExecutorBootstrap({getStatus:()=>({executor:{online:++connections>=3}})} as any);
+ const plan=await installationPlan(f,h,'root'),applied=await f.request(`/machines/${h.id}/deployments/${plan.id}/apply`,'POST',{confirm:true});
+ assert.equal(applied.status,200,applied.raw);assert.equal(connections,3);assert.equal(f.issued.cancelled,undefined);
+});
+
+for(const reason of ['activation_pending','runtime_heartbeat_pending','privileged_executor_pending'] as const) {
+ test(`installation timeout retains identity and SSH material with safe ${reason} evidence`,async t=>{
+  const f=await fixture(t),h=await host(f,reason);
+  if(reason==='activation_pending')f.agentCredentials.enrollmentStatus=()=>({status:'pending',agent_id:''});
+  else {installRuntime(f,h.id,reason==='privileged_executor_pending'?'root':'user');if(reason==='privileged_executor_pending')installHeartbeat(f,'root');}
+  const plan=await installationPlan(f,h),applied=await f.request(`/machines/${h.id}/deployments/${plan.id}/apply`,'POST',{confirm:true});
+  assert.equal(applied.status,502,applied.raw);
+  const saved=f.machines.assistantDeployment(plan.id),receipt=saved.receipt as any;
+  assert.equal(saved.status,'unknown');assert.ok(receipt.stages.includes(reason));assert.ok(receipt.stages.includes('remote_command_completed'));
+  assert.match(saved.error,/超时/);assert.equal(f.issued.cancelled,undefined);assert.equal(credentialRow(f,h.credential).clear_reason,'');
+  assert.doesNotMatch(JSON.stringify(receipt),/lm_enroll_secret|PRIVATE KEY|warning/);
+  assert.equal((await f.request(`/machines/${h.id}/deployments/${plan.id}/apply`,'POST',{confirm:true})).status,409);
+ });
+}
+
+test('recovery that changes an installation during readiness is never overwritten',async t=>{
+ const f=await fixture(t,{},undefined,false,{installationReadinessTimeoutMs:100,installationReadinessPollIntervalMs:1}),h=await host(f,'readiness-recovery');
+ const plan=await installationPlan(f,h);
+ f.agentCredentials.enrollmentStatus=()=>{
+  f.db.run("UPDATE machine_deployments SET status='unknown',error='saved recovery',receipt_json=? WHERE id=?",JSON.stringify({stages:['recovery_preserved']}),plan.id);
+  return {status:'pending',agent_id:''};
+ };
+ const applied=await f.request(`/machines/${h.id}/deployments/${plan.id}/apply`,'POST',{confirm:true});assert.equal(applied.status,409,applied.raw);
+ const saved=f.machines.assistantDeployment(plan.id);assert.equal(saved.error,'saved recovery');assert.deepEqual((saved.receipt as any).stages,['recovery_preserved']);
+ assert.equal(f.machines.get(h.id).agent_id,'');assert.equal(f.issued.cancelled,undefined);
+});
+
+for(const code of ['timed_out','cancelled','ssh_failed','invalid_response'] as const) {
+ test(`dispatched ${code} preserves a fixed SSH reason without arbitrary remote text`,async t=>{
+  const f=await fixture(t,{},async input=>{if(input.enrollmentToken)throw new SSHError(code);return {stdout:checkOutput,stderr:'',stages:[]}}),h=await host(f,code);
+  const plan=await installationPlan(f,h),applied=await f.request(`/machines/${h.id}/deployments/${plan.id}/apply`,'POST',{confirm:true});
+  assert.equal(applied.status,502,applied.raw);const saved=f.machines.assistantDeployment(plan.id);
+  assert.equal(saved.status,'unknown');assert.ok((saved.receipt as any).stages.includes(`ssh_${code}`));assert.match(saved.error,/SSH 安装/);assert.equal(f.issued.cancelled,undefined);
+ });
+}
+
+
+test('disconnecting during installation readiness retains unknown evidence and releases the host',async t=>{
+ let observe!:()=>void;const observed=new Promise<void>(resolve=>{observe=resolve});
+ const f=await fixture(t,{},undefined,false,{installationReadinessTimeoutMs:10_000}),h=await host(f,'cancel-readiness');
+ f.agentCredentials.enrollmentStatus=()=>{observe();return {status:'pending',agent_id:''}};
+ const plan=await installationPlan(f,h),controller=new AbortController();
+ const applied=f.rawRequest(`/machines/${h.id}/deployments/${plan.id}/apply`,'POST',{confirm:true},controller.signal);
+ await observed;controller.abort();await assert.rejects(applied,{name:'AbortError'});
+ for(let i=0;i<100&&f.machines.assistantDeployment(plan.id).status==='running';i++)await new Promise(resolve=>setTimeout(resolve,1));
+ const saved=f.machines.assistantDeployment(plan.id);assert.equal(saved.status,'unknown');
+ assert.ok((saved.receipt as any).stages.includes('installation_confirmation_cancelled'));assert.equal(f.issued.cancelled,undefined);
+ assert.equal((await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential})).status,200);
+});
+
+test('unexpected post-bootstrap confirmation errors disclose only a fixed safe reason',async t=>{
+ const f=await fixture(t),h=await host(f,'safe-confirmation-error');
+ f.agentCredentials.enrollmentStatus=()=>{throw Error('private upstream details lm_enroll_secret PRIVATE KEY')};
+ const plan=await installationPlan(f,h),applied=await f.request(`/machines/${h.id}/deployments/${plan.id}/apply`,'POST',{confirm:true});
+ assert.equal(applied.status,502,applied.raw);const saved=f.machines.assistantDeployment(plan.id);
+ assert.ok((saved.receipt as any).stages.includes('installation_confirmation_failed'));
+ assert.doesNotMatch(applied.raw+JSON.stringify(saved.receipt),/private upstream details|lm_enroll_secret|PRIVATE KEY/);
+ assert.equal(f.issued.cancelled,undefined);
 });

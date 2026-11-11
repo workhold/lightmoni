@@ -1,3 +1,4 @@
+import { InstallationReadinessError, waitForInstallationReadiness } from './agent-install-readiness.js';
 import { registerMachineDocker } from './machine-docker.js';
 import { registerMachineStateRecovery } from './machine-state-recovery.js';
 import { machineDockerEnvironment, type DockerEnvironment } from './docker-environment.js';
@@ -198,6 +199,8 @@ export interface ManagedMachinesOptions {
   dataDir?: string;
   updatePollIntervalMs?: number;
   updateHealthTimeoutMs?: number;
+  installationReadinessTimeoutMs?: number;
+  installationReadinessPollIntervalMs?: number;
 }
 
 export interface TerminalLease {
@@ -907,6 +910,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     busy.add(machine.id);
     let enrollment: AgentEnrollmentIssued | undefined;
     let dispatched = false;
+    let completedStages: string[] = [];
     let privateKey = "", password = "";
     try {
       const material = authentication(machine.id, credential);
@@ -933,10 +937,29 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       if(!dispatching.changes)fail(409,"安装记录已进入恢复流程，旧请求不能派发安装");
       dispatched = true;
       const result = await runSSH({ credentialID: credential.id, machine:resolved.machine, privateKey, ...(password ? { password } : {}), command, enrollmentToken: enrollment.token_display_once, signal: ctx.signal, port: machine.port });
-      const status = options.agentCredentials.enrollmentStatus(enrollment.enrollment_id);
-      if (!status || status.status !== "active" || !status.agent_id) throw Error("Agent 未完成激活回执");
-      const installedRuntime=db.get<any>('SELECT * FROM machine_agent_runtime WHERE machine_id=? AND agent_id=?',machine.id,status.agent_id);
-      if(installedRuntime){const node=db.get<any>('SELECT heartbeat,last_seen FROM agents WHERE id=?',status.agent_id),beat=parseJSON<any>(node?.heartbeat??'{}',{}),r=beat.runtime,seen=Date.parse(node?.last_seen??''),started=Date.parse(db.get<any>('SELECT started_at FROM machine_deployments WHERE id=?',deployment.id)?.started_at??'');if(!validAgentRuntimeObservation(r)||r.mode!==installedRuntime.runtime_mode||r.permission_generation!==installedRuntime.permission_generation||!Number.isFinite(seen)||!Number.isFinite(started)||seen<started||seen<now().getTime()-90000||installedRuntime.runtime_mode==='root'&&!executorStore?.getStatus(machine.id).executor?.online)throw Error('Agent 运行账户或签名执行通道尚未完成新鲜心跳确认');}
+      completedStages = result.stages;
+      const enrollmentID = enrollment.enrollment_id;
+      const status = await waitForInstallationReadiness<{ agent_id: string }>(() => {
+        const current = db.get<{ status: string; resolved_at: string; started_at: string; enrollment_id: string }>(
+          'SELECT status,resolved_at,started_at,enrollment_id FROM machine_deployments WHERE id=?', deployment.id);
+        if (!current || current.status !== 'running' || current.resolved_at || current.enrollment_id !== enrollmentID)
+          throw new InstallationReadinessError('installation_record_changed');
+        const active = options.agentCredentials!.enrollmentStatus(enrollmentID);
+        if (!active || active.status !== 'active' || !active.agent_id) return { pending: 'activation_pending' };
+        const installedRuntime = db.get<any>('SELECT * FROM machine_agent_runtime WHERE machine_id=? AND agent_id=?', machine.id, active.agent_id);
+        if (installedRuntime) {
+          const node = db.get<any>('SELECT heartbeat,last_seen FROM agents WHERE id=?', active.agent_id);
+          const runtime = parseJSON<any>(node?.heartbeat ?? '{}', {}).runtime;
+          const seen = Date.parse(node?.last_seen ?? ''), started = Date.parse(current.started_at);
+          if (!validAgentRuntimeObservation(runtime) || runtime.mode !== installedRuntime.runtime_mode
+            || runtime.permission_generation !== installedRuntime.permission_generation
+            || !Number.isFinite(seen) || !Number.isFinite(started) || seen < started || seen < now().getTime() - 90_000)
+            return { pending: 'runtime_heartbeat_pending' };
+          if (installedRuntime.runtime_mode === 'root' && !executorStore?.getStatus(machine.id).executor?.online)
+            return { pending: 'privileged_executor_pending' };
+        }
+        return { ready: active };
+      }, ctx.signal, { timeoutMs: options.installationReadinessTimeoutMs, pollIntervalMs: options.installationReadinessPollIntervalMs });
       const receipt = { stages: result.stages, stdout: redact(result.stdout, [enrollment.token_display_once, privateKey, password]), stderr: redact(result.stderr, [enrollment.token_display_once, privateKey, password]), enrollment_id: enrollment.enrollment_id, agent_id: status.agent_id };
       db.transaction(() => {
         const saved=db.run("UPDATE machine_deployments SET status='succeeded',finished_at=?,receipt_json=?,error='' WHERE id=? AND status='running' AND resolved_at=''", iso(now()), JSON.stringify(receipt), deployment.id);
@@ -950,11 +973,23 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     } catch (error) {
       const message = redact(error instanceof Error ? error.message : "部署失败", [enrollment?.token_display_once ?? "", privateKey, password]);
       if(dispatched){
+        if (error instanceof InstallationReadinessError && error.code === 'installation_record_changed')
+          throw new HTTPError(409, '安装记录已进入恢复流程，请只读核对，不覆盖已保存结果');
         const diagnostic=error instanceof SSHError?error.remoteFailure:undefined;
         const reasons={agent_service_override_not_allowed:"远端检测到禁止的 Agent 服务覆盖配置，请先核对并人工结束本次记录，再通过恢复卸载清理残留后重新检查；不要放开服务权限限制",ordinary_agent_privilege_violation:"远端检测到普通 Agent 账户拥有禁止的高权限，请检查其附加组、capabilities 和 Docker socket 访问",agent_account_invalid:"远端检测到 Agent 运行账户不符合安装要求",ordinary_task_identity_check_failed:"远端无法核实普通任务的完整降权，请检查 setpriv 与内核能力兼容性",remote_command_failed:"远端安装命令非零退出"};
-        const detail=diagnostic?`；${reasons[diagnostic.remote_reason_code]}（SSH 退出码：${diagnostic.remote_exit_code??"未知"}）`:"";
+        const confirmationReasons = {
+          activation_pending: '等待中心激活回执超时',
+          runtime_heartbeat_pending: '等待符合运行身份和权限代次的新鲜心跳超时',
+          privileged_executor_pending: '等待签名执行通道上线超时',
+          installation_confirmation_cancelled: '安装确认请求已取消，远端服务可能仍在运行',
+          installation_record_changed: '安装记录已进入恢复流程',
+        };
+        const sshReasons = { timed_out: 'SSH 安装会话超时', cancelled: 'SSH 安装会话已取消', host_key_mismatch: 'SSH 主机公钥不匹配', ssh_failed: 'SSH 安装会话连接失败', invalid_response: 'SSH 安装回执无效' };
+        const reason = error instanceof InstallationReadinessError ? error.code : error instanceof SSHError ? `ssh_${error.code}` : 'installation_confirmation_failed';
+        const detail = diagnostic ? `；${reasons[diagnostic.remote_reason_code]}（SSH 退出码：${diagnostic.remote_exit_code??"未知"}）`
+          : `；${error instanceof InstallationReadinessError ? confirmationReasons[error.code] : error instanceof SSHError ? sshReasons[error.code] : '平台安装确认检查失败，请只读核对远端状态'}`;
         const failure="Agent 安装结果未知，请只读核对远端状态或人工检查后明确结束；不会自动重试"+detail;
-        const saved=db.run("UPDATE machine_deployments SET status='unknown',error=?,receipt_json=? WHERE id=? AND status IN ('running','unknown') AND resolved_at=''",failure,JSON.stringify({stages:["bootstrap_dispatched"],enrollment_id:enrollment?.enrollment_id||"",error:failure,...(diagnostic?{diagnostic}:{})}),deployment.id);
+        const saved=db.run("UPDATE machine_deployments SET status='unknown',error=?,receipt_json=? WHERE id=? AND status IN ('running','unknown') AND resolved_at=''",failure,JSON.stringify({stages:[...new Set(["bootstrap_dispatched",...completedStages,reason])],enrollment_id:enrollment?.enrollment_id||"",error:failure,...(diagnostic?{diagnostic}:{})}),deployment.id);
         if(saved.changes)db.run("UPDATE managed_machines SET last_error=?,updated_at=? WHERE id=?",failure,iso(now()),machine.id);
         throw new HTTPError(502,failure);
       }
