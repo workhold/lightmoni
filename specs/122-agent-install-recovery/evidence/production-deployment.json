@@ -1,0 +1,35 @@
+{
+  "status": "deployed",
+  "observed_at": "2026-11-11T02:19:29.421008+00:00",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261111-agent-install-recovery-v1",
+  "revision": "7011d507e1db74082c674a78f8ff3c921faf8f91",
+  "index_digest": "sha256:60724fdbc8e0a147c55fdbbdf47c6924145beabfa584e3cabc3f4800f853bde2",
+  "architecture": "amd64",
+  "health": "healthy",
+  "started_at": "2026-11-11T02:18:58.656551242Z",
+  "backup_snapshot_bytes": 2764324864,
+  "backup_quick_check": "ok",
+  "mounts_unchanged": true,
+  "environment_unchanged": true,
+  "ports_networks_unchanged": true,
+  "master_key_unchanged": true,
+  "other_containers_unchanged": true,
+  "recovery_assets": {
+    "recovery_readback_web": true,
+    "install_uninstall_overrides": true,
+    "compiled_override_paths": [
+      "/etc/systemd/system/lightmoni-agent.service.d",
+      "/etc/systemd/system/lightmoni-agent-helper.service.d"
+    ]
+  },
+  "agent_upgrade_required": false,
+  "receipt_source": "Root-private deployment-report.json visually read through existing 1Panel terminal; no raw configuration or secrets exported.",
+  "post_deploy_package_verification": {
+    "observed_at": "2026-11-11T02:31:48.925882+00:00",
+    "agent_archives": 2,
+    "sdk_archives": 4,
+    "sha256sum_all_ok": true,
+    "health": "healthy",
+    "receipt_source": "Native Chrome 1Panel terminal: docker exec SHA256SUMS and SDK_SHA256SUMS verified six OK results, followed by docker health readback."
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "pass": true,
+  "arch": "arm64",
+  "image": "lightmoni:20261111-agent-install-recovery-v1-arm64",
+  "image_id": "sha256:a6d699e2e7f82092e3e9c04a47eeec3be70caed3f6ae5c10e943c9fd43c25666",
+  "revision": "7011d507e1db74082c674a78f8ff3c921faf8f91",
+  "checks": [
+    "non-root image, architecture, fixed revision and real ClickHouse health",
+    "administrator initialization and HTTP login",
+    "Agent download rejects administrator cookie without a host enrollment token",
+    "four SDK HTTP downloads and two shipped Agent bundles match SHA256SUMS; both Agent manifests match source",
+    "shipped install/uninstall scripts include both fixed override directories",
+    "compiled fresh guard detects both service override directories, including empty directories",
+    "compiled override evidence changes when content changes",
+    "compiled cleanup refuses writable files and symlinks, retaining both directories",
+    "compiled cleanup removes only fixed override directories and preserves business data and other services",
+    "compiled SSH error preserves the service override reason",
+    "production web entry includes the bounded recovery readback implementation"
+  ],
+  "downloads": [
+    "lightmoni-agent_0.1.0_linux_amd64.tar.gz",
+    "lightmoni-agent_0.1.0_linux_arm64.tar.gz",
+    "lightmoni-go-sdk_0.1.0.tar.gz",
+    "lightmoni-python-sdk_0.1.0.tar.gz",
+    "lightmoni-rust-sdk_0.1.0.tar.gz",
+    "lightmoni-sdk-0.1.0.tgz"
+  ],
+  "agent_releases": {
+    "amd64": {
+      "version": "0.1.0",
+      "source_revision": "7011d507e1db74082c674a78f8ff3c921faf8f91",
+      "build_id": "0.1.0-7011d507e1db-c57f27d1124e",
+      "build_time": "2026-11-11T01:49:17.028Z",
+      "state_schema": 1,
+      "node_version": "24.15.0",
+      "platform": "linux",
+      "arch": "amd64",
+      "requires": "glibc >= 2.28",
+      "node_sha256": "472655581fb851559730c48763e0c9d3bc25975c59d518003fc0849d3e4ba0f6",
+      "node_binary_sha256": "d1de76d8edf2fededf6f8b30d244e2c0529ac607923a018283b77e9c74bd932c"
+    },
+    "arm64": {
+      "version": "0.1.0",
+      "source_revision": "7011d507e1db74082c674a78f8ff3c921faf8f91",
+      "build_id": "0.1.0-7011d507e1db-c57f27d1124e",
+      "build_time": "2026-11-11T01:49:17.028Z",
+      "state_schema": 1,
+      "node_version": "24.15.0",
+      "platform": "linux",
+      "arch": "arm64",
+      "requires": "glibc >= 2.28",
+      "node_sha256": "f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0",
+      "node_binary_sha256": "d0b9f94a9771bba3c30a54f0aee622fa0bee37be684cc1df6da2d3448606d98d"
+    }
+  }
+}

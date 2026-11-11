@@ -37,7 +37,7 @@ T001 → T002 → US1 → US2 → US3 → T011 → T012。US1 是最小预防闭
 
 ## Phase 7: Authorized release and deployment — 2026-11-11
 
-- [ ] T013 更新发版规格/计划并通过 GitHub PR #166 合入 main，固定构建 SHA。
-- [ ] T014 构建并验证 linux/amd64 与 linux/arm64 镜像、两平台 Agent 与 SDK 下载校验和，发布固定标签。
-- [ ] T015 生产备份与回滚准备，更新中心镜像，核对配置/卷和健康。
-- [ ] T016 回读线上安装/卸载内容及恢复页面，记录脱敏验收证据并通过 GitHub PR 归档。
+- [x] T013 更新发版规格/计划并通过 GitHub PR #166 合入 main，固定构建 SHA。
+- [x] T014 构建并验证 linux/amd64 与 linux/arm64 镜像、两平台 Agent 与 SDK 下载校验和，发布固定标签。
+- [x] T015 生产备份与回滚准备，更新中心镜像，核对配置/卷和健康。
+- [x] T016 回读线上安装/卸载内容及恢复页面，记录脱敏验收证据并通过 GitHub PR 归档。
