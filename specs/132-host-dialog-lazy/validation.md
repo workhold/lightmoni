@@ -26,3 +26,9 @@
 ## 架构同步与兼容
 
 不适用：仅改变现有浏览器组件和静态块加载时机及局部失败提示。服务端授权、API、SSH 会话、数据/控制路径、凭据边界及部署拓扑均未变化；无需同步 `docs/system-design.md` 或 Doca。静态文件继续采用现有内容哈希命名及 SDD 131 缓存头。冷缓存首次点击弹窗需要下载独立块，加载占位可见且可关闭；已缓存后复用浏览器资源。部署后旧页面若请求已移除的哈希块，刷新页面会从 `no-store` HTML 取得当前地址。
+
+## 固定镜像发布增量
+
+- SDD 132 已经 [PR #180](https://github.com/workhold/lightmoni/pull/180) 合入 GitHub `main`，合并提交 `cd1e60963798e0758c81973b83223610743c8e42`。固定镜像 `docker.heyphp.com/lightmoni/lightmoni:20261113-cd1e609-host-lazy-v1` 包含本 SDD 及 SDD 131 的已合入改动。远端多架构索引回读为 `sha256:1041aa17474e8afb16011b415c2787c169097db70254037a17a47a793e588de3`，`linux/amd64` 清单为 `sha256:2dec12a84020ceec89a16e9f7873937211fdd8d4d44df894e460729604bbf49e`，`linux/arm64` 清单为 `sha256:e014478c9cf7bb3515fc57f13196101c1ce79e41f46bc989606a05b1bd2d1a09`。本地两个平台镜像标签中的 OCI revision 均与完整合并提交相等，RepoDigest 与远端索引相等；见 [发行镜像证据](evidence/release-image.json)。
+- 本发行分支的 `compose.yaml` 仅修改 `services.lightmoni.image`，ClickHouse、环境、端口、构建参数与卷不变。以仅用于配置解析的占位密码运行 `docker compose -f compose.yaml config --quiet` 通过；`config --images` 输出预期的 ClickHouse 与新中心镜像，`git diff --check` 通过。此 PR 不包含生产部署结果；实际生产健康、缓存头和回滚检查由后续部署记录确认。
+- 架构影响不适用：该增量只将发行物指针更新到已合入版本，不改变组件职责、系统数据或控制路径、凭据边界、存储、协议或部署拓扑。仓库系统设计与 Doca 不需因固定标签再改写；SDD 131 原架构同步与回读记录仍适用。

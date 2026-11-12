@@ -1,0 +1,24 @@
+{
+  "checked_at_utc": "2026-11-12T17:13:28Z",
+  "source_revision": "cd1e60963798e0758c81973b83223610743c8e42",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261113-cd1e609-host-lazy-v1",
+  "remote_index_digest": "sha256:1041aa17474e8afb16011b415c2787c169097db70254037a17a47a793e588de3",
+  "platform_manifests": {
+    "linux/amd64": "sha256:2dec12a84020ceec89a16e9f7873937211fdd8d4d44df894e460729604bbf49e",
+    "linux/arm64": "sha256:e014478c9cf7bb3515fc57f13196101c1ce79e41f46bc989606a05b1bd2d1a09"
+  },
+  "checks": {
+    "remote_imagetools_inspect": "index and both platform manifests matched",
+    "local_repo_digest": "matched remote index",
+    "local_amd64_oci_revision": "cd1e60963798e0758c81973b83223610743c8e42",
+    "local_arm64_oci_revision": "cd1e60963798e0758c81973b83223610743c8e42",
+    "compose_config_quiet": "passed with validation-only password",
+    "compose_config_images": [
+      "clickhouse/clickhouse-server:26.8",
+      "docker.heyphp.com/lightmoni/lightmoni:20261113-cd1e609-host-lazy-v1"
+    ],
+    "compose_diff": "only services.lightmoni.image changed",
+    "git_diff_check": "passed"
+  },
+  "production_deployment": "not performed or verified by this evidence"
+}
