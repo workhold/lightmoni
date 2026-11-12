@@ -1,0 +1,74 @@
+{
+  "source": "Production host checks and public HTTP readback supplied by the deployment operator; secret values excluded",
+  "observation_window": "2026-11-13 around 02:13 Asia/Shanghai",
+  "github_merges": {
+    "178": "01dff1b76d2f13740bff6b994923fd4d71f51d0b",
+    "179": "2b0276055de1ee8be3630303a3c87e23c59346e8",
+    "180": "cd1e60963798e0758c81973b83223610743c8e42",
+    "181": "473b5ba72db74705a6506496f39c16d8200b78a9"
+  },
+  "release": {
+    "first_sdd131_image": "docker.heyphp.com/lightmoni/lightmoni:20261112-01dff1b-panel-responsive-v1",
+    "first_image_built_pushed_and_pulled_for_production_verification": true,
+    "first_image_deployed": false,
+    "deployed_image": "docker.heyphp.com/lightmoni/lightmoni:20261113-cd1e609-host-lazy-v1",
+    "deployed_index_digest": "sha256:1041aa17474e8afb16011b415c2787c169097db70254037a17a47a793e588de3",
+    "source_revision": "cd1e60963798e0758c81973b83223610743c8e42"
+  },
+  "predeployment": {
+    "queued_privileged_jobs": 0,
+    "running_privileged_jobs": 0,
+    "backup_directory": "/root/lightmoni-131-20261113-9xCHfI",
+    "backup_contents": [".env", "compose.yaml", "master.key", "containers-before.json", "SQLite online backup"],
+    "master_key_copy_comparison": "matched",
+    "sqlite_online_backup_bytes": 3089620992,
+    "sqlite_quick_check": "ok"
+  },
+  "containers": {
+    "previous_center_image": "docker.heyphp.com/lightmoni/lightmoni:20261112-ssh-managed-operations-v1",
+    "previous_center_id": "96ac44a8085469681e90239ef27762d12165a159378d9f225356de9677d8dca0",
+    "deployed_center_id": "d8cf1d38e1d81c126c2eb352f4838d84b4799d035019c73a28aa57b9a82b3711",
+    "deployed_center_started_at_utc": "2026-11-12T17:35:38.838536059Z",
+    "deployed_center_health": "healthy",
+    "clickhouse_id_before_and_after": "428c2c268b044d79cd81ccac3f6269d8cae3531d65bfb0baf8e78cdd1e45747",
+    "clickhouse_health": "healthy",
+    "center_state_volume_before_and_after": "lightmoni_lightmoni-state-v2-20261103:/data",
+    "clickhouse_telemetry_volume_before_and_after": "lightmoni_lightmoni-telemetry:/var/lib/clickhouse"
+  },
+  "http": {
+    "local_health": {
+      "url": "http://127.0.0.1:1180/healthz",
+      "method": "GET",
+      "status": 200,
+      "json_status": "ok",
+      "response_date_utc": "2026-11-12T18:13:28Z"
+    },
+    "public_health": {
+      "url": "https://moni.heyphp.com/healthz",
+      "method": "GET",
+      "status": 200,
+      "json_status": "ok"
+    },
+    "html": {
+      "url": "https://moni.heyphp.com/",
+      "methods": ["GET", "HEAD"],
+      "status": 200,
+      "cache_control": "no-store"
+    },
+    "hashed_assets_referenced_by_live_html": {
+      "javascript_count": 14,
+      "css_count": 1,
+      "methods": ["GET", "HEAD"],
+      "status": 200,
+      "cache_control": "public, max-age=31536000, immutable",
+      "examples": ["/assets/index-ZO9dV4MP.js", "/assets/index-Cd3qI-as.css"]
+    },
+    "missing_asset": {
+      "url": "https://moni.heyphp.com/assets/nonexistent-acceptance-check.js",
+      "method": "GET",
+      "status": 404,
+      "cache_control": "no-store"
+    }
+  },
+  "scope_limit": "No production file operation or browser latency measurement is claimed"
+}

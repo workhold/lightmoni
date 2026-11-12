@@ -17,7 +17,7 @@
 - `git fetch origin main` 后 `origin/main` 与分支基点均为 `aef73ae`，无需合并冲突。`runtime npm run typecheck`、`web npm run build`、`git diff --check` 通过；最终定向 runtime 测试共 100/100 通过（managed machines 86、machine files 13、static cache 1）。
 - 浏览器 `verify-host-status-loading.mjs`、`verify-host-resources.mjs` 与 `verify-host-file-maintenance.mjs` 均通过；后者连续三轮通过。现有 `verify-agent-operation-progress.mjs` 的成功状态进度条断言与 `origin/main` 已有页面行为矛盾，本次未修改该无关旧断言。
 
-上述为本地验收；尚未部署到线上，不能把它视为生产网络延迟或真实机器规模下的体验测量。
+上述是开发阶段的本地验收，不能把它视为生产网络延迟或真实机器规模下的体验测量；后续生产发布结果见文末。
 
 ## 首开与文件读取增量验收
 
@@ -31,6 +31,13 @@
 
 ## 固定镜像发布增量
 
-- 已推送固定镜像 `docker.heyphp.com/lightmoni/lightmoni:20261112-01dff1b-panel-responsive-v1`，源码固定为上述合并提交。远端回读多架构索引 `sha256:8709794c41586f0c6ce3960ac506bbeea4c49d2e1dee1a59a5166aa5f21fbac1`，其中 `linux/amd64` 清单为 `sha256:78a699392c68c1c2eac24017d62329e31b190483c3f26fe307647bd4299a3797`，`linux/arm64` 为 `sha256:a076beb892cadd77b59ea9177424527faa645589342c8c9138febce70a5bc882`。推送前标签不存在。两平台实际拉取均得到该索引；分别运行 Node 检查中心入口、AI runner 和两种 Agent 归档存在，`tar -tzf` 与归档 `release.json` 的平台/source_revision 均通过，镜像 OCI revision 均为完整 `01dff1b76d2f13740bff6b994923fd4d71f51d0b`。每个平台均有 67 个哈希 JS、14 个哈希 CSS，HTML 引用 `/assets/`。构建使用 HTTPS USTC Debian 镜像，保留 apt 签名校验。Compose PR 与生产部署结果按实际完成情况补记。
-- 2026-11-12 15:56 UTC 发布前公网基线：`https://moni.heyphp.com/` 返回 HTTP 200，`Cache-Control: no-cache`；`/healthz` 为 HTTP 200。当前 HTML 引用的 `/assets/index-B11B5bqQ.js` 和 `/assets/index-Cd3qI-as.css` 均返回 HTTP 200、`Cache-Control: public, max-age=31536000, immutable`。因此现网 JS/CSS 长缓存已生效，但主 HTML 尚未达到本 SDD 的 `no-store`；需在新镜像部署后重测。
+- 已推送固定镜像 `docker.heyphp.com/lightmoni/lightmoni:20261112-01dff1b-panel-responsive-v1`，源码固定为上述合并提交。远端回读多架构索引 `sha256:8709794c41586f0c6ce3960ac506bbeea4c49d2e1dee1a59a5166aa5f21fbac1`，其中 `linux/amd64` 清单为 `sha256:78a699392c68c1c2eac24017d62329e31b190483c3f26fe307647bd4299a3797`，`linux/arm64` 为 `sha256:a076beb892cadd77b59ea9177424527faa645589342c8c9138febce70a5bc882`。推送前标签不存在。两平台实际拉取均得到该索引；分别运行 Node 检查中心入口、AI runner 和两种 Agent 归档存在，`tar -tzf` 与归档 `release.json` 的平台/source_revision 均通过，镜像 OCI revision 均为完整 `01dff1b76d2f13740bff6b994923fd4d71f51d0b`。每个平台均有 67 个哈希 JS、14 个哈希 CSS，HTML 引用 `/assets/`。构建使用 HTTPS USTC Debian 镜像，保留 apt 签名校验。这一首版镜像完成构建、推送及生产拉取验证，但未部署运行；生产实际部署的是下述包含 SDD 132 的累计镜像。
+- 2026-11-12 15:56 UTC 发布前公网基线：`https://moni.heyphp.com/` 返回 HTTP 200，`Cache-Control: no-cache`；`/healthz` 为 HTTP 200。当时 HTML 引用的 `/assets/index-B11B5bqQ.js` 和 `/assets/index-Cd3qI-as.css` 均返回 HTTP 200、`Cache-Control: public, max-age=31536000, immutable`。因此发布前 JS/CSS 长缓存已生效，但主 HTML 尚未达到本 SDD 的 `no-store`；上线后回读结果见下文。
 - 本发行增量只修改 Compose 的固定中心镜像标签；架构影响不适用。既有文件会话架构同步已在本 SDD 与 PR #178 中完成，Doca 最新回读见上文。
+
+## 生产部署与缓存头回读
+
+- [PR #178](https://github.com/workhold/lightmoni/pull/178) 和 [固定首版标签 PR #179](https://github.com/workhold/lightmoni/pull/179) 均已合入 GitHub `main`。随后 [按需加载 PR #180](https://github.com/workhold/lightmoni/pull/180) 与 [最终镜像标签 PR #181](https://github.com/workhold/lightmoni/pull/181) 也已合入；最终主干合并提交为 `473b5ba72db74705a6506496f39c16d8200b78a9`。首版镜像未运行于生产，生产从 `20261112-ssh-managed-operations-v1` 直接更新到 `20261113-cd1e609-host-lazy-v1`，后者同时包含本 SDD 和 SDD 132。
+- 部署前在受限目录保存生产 Compose、环境、主密钥、容器元数据及 SQLite 在线备份。主密钥复制核对一致，备份数据库 `PRAGMA quick_check` 为 `ok`；上线前无排队或运行中的特权任务。只重建中心后中心健康，本机 `http://127.0.0.1:1180/healthz` 为 HTTP 200 且 JSON `status: ok`；ClickHouse 容器 ID、健康状态与中心/ClickHouse 数据卷保持不变。脱敏细节见 [生产部署证据](../132-host-dialog-lazy/evidence/production-deployment.json)。这验证了中心在原状态卷上启动及健康；未据此声称完成生产文件写入场景或生产时延测量。
+- 公网 `https://moni.heyphp.com/healthz` GET 为 HTTP 200、`status: ok`；根 HTML GET/HEAD 均为 HTTP 200、`Cache-Control: no-store`。HTML 实际引用的 14 个哈希 JS 与 1 个哈希 CSS，其 GET/HEAD 均为 HTTP 200、`Cache-Control: public, max-age=31536000, immutable`；例如 `/assets/index-ZO9dV4MP.js` 与 `/assets/index-Cd3qI-as.css`。不存在的 `/assets/nonexistent-acceptance-check.js` GET 为 HTTP 404、`Cache-Control: no-store`。本轮用户关心的 Web JS/CSS 客户端缓存头已在生产实测生效。
+- 本次仅补交付与验收事实，不改变架构；仓库系统设计与 Doca 的架构同步已在 PR #178 同一 SDD 完成，最新 Doca seq 1799 回读结果见上文。
