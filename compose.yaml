@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261112-ssh-managed-operations-v1
+    image: docker.heyphp.com/lightmoni/lightmoni:20261112-ssh-once-readiness-v2
     pull_policy: missing
     build:
       context: .
