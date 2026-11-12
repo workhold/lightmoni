@@ -16,6 +16,7 @@ import { executeScript, interpreterDigest, interpreterPath, localAccount, sameAc
 import { refuse, sha256, linuxBootClock, type BootClock } from "./security.js";
 import { MANAGED_AGENT_DATA_DIR } from "./config.js";
 import { ordinaryTaskAccount } from "../agent/task-runner.js";
+import type { SSHOnceCommand } from "../shared/ssh-once-readiness.js";
 
 export interface ExecutorRelease { version: string; activation_id:string; release: { build_id: string; source_revision: string; artifact_sha256: string; state_schema: 1 } }
 export interface RunnerHost {
@@ -65,6 +66,7 @@ export class PrivilegedExecutorRunner {
     let inventory:unknown;
     if(current.capabilities.includes('operations.managed.v1')&&this.host.inventory)try{inventory=await this.host.inventory();}catch{}
     const response = await this.client.request("heartbeat", { ...this.release, boot_id: this.clock.bootID(), policy_generation: current.generation,
+      ssh_once_commands: ['managed-once', 'task-once'] satisfies SSHOnceCommand[],
       ...(this.ordinaryTaskIdentity ? { ordinary_task_identity: this.ordinaryTaskIdentity } : {}),
       ...(inventory?{docker_inventory:inventory}:{}),...(this.observations?{application_observation:this.observations.status()}:{}),capabilities: profiles.capabilities.filter(c => current.capabilities.includes(c)), operations_capabilities:profiles.capabilities.includes("operations.managed.v1")?[...operationCapabilities]:[],account_profiles: profiles.account_profiles, interpreter_profiles: profiles.interpreter_profiles });
     if (response.center_instance_id !== this.config.center_instance_id) refuse("principal_mismatch");

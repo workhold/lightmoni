@@ -14,7 +14,7 @@ export function registerCenterSSHDispatch(deps:Dependencies,access:MachineTermin
   runner:SSHRunner=defaultSSHRunner,intervalMs=1000,taskRuns?:TaskRunStore):Module&{tick():void} {
   const {db}=deps,active=new Map<string,{controller:AbortController;promise:Promise<void>}>();
   let timer:ReturnType<typeof setInterval>|undefined,closed=false;
-  jobs.setSSHOnly?.();executors.setSSHOnly();taskRuns?.setSSHOnly();
+  jobs.setSSHOnly?.();executors.setSSHOnly();if(taskRuns){taskRuns.sshOnceReady=machineID=>executors.supportsSSHOnce(machineID,'task-once');taskRuns.setSSHOnly();}
   const pending=(job:Candidate)=>db.get<{state:string}>(`SELECT state FROM ${job.kind==='privileged'?'privileged_jobs':job.kind==='task'?'task_runs':'agent_jobs'} WHERE id=?`,job.id)?.state==='queued';
   const failQueued=(job:Candidate,code:string)=>{
     if(!pending(job))return;
@@ -27,6 +27,9 @@ export function registerCenterSSHDispatch(deps:Dependencies,access:MachineTermin
     let lease:ReturnType<MachineTerminalAccess['acquireTerminal']>|undefined;
     try{
       if(!pending(job))return;
+      const supported=job.kind==='ordinary'?jobs.supportsSSHOnce(db.get<{agent_id:string}>('SELECT agent_id FROM managed_machines WHERE id=?',job.machine_id)?.agent_id??'')
+        :executors.supportsSSHOnce(job.machine_id,job.kind==='task'?'task-once':'managed-once');
+      if(!supported){failQueued(job,'agent_upgrade_required');return;}
       lease=access.acquireTerminal(job.machine_id,undefined,()=>controller.abort());
       if(!lease.valid())throw Error('ssh_binding_changed');
       const direct=lease.machine.username==='root',ordinary=lease.machine.username==='lightmoni-agent';

@@ -12,8 +12,9 @@ import { registerAgentJobs } from "../src/server/agent-jobs.js";
 import { registerPrivilegedExecutors } from "../src/server/privileged-executors.js";
 import { PrivilegedExecutorStore } from "../src/server/privileged-executors.js";
 import { canonicalJSON, signExecutorRequest, signJWS, verifyJWS, sha256, planClaims, permitClaims, policyClaims } from "../src/shared/privileged-executor.js";
+import { VERIFIED_SSH_ONCE_REVISION } from '../src/shared/ssh-once-readiness.js';
 
-function fixture() {
+function fixture(options:{sshOnce?:boolean;sourceRevision?:string;commands?:string[]}={}) {
   const db = new DB(":memory:"), router = new Router(), crypt = cipher(randomBytes(32));
   let clock = new Date("2026-11-01T00:00:00Z");
   const user = { id: "admin", name: "Admin", role: "admin" }, deps = { db, router, now: () => clock,
@@ -46,7 +47,7 @@ function fixture() {
     const signature = signExecutorRequest({ body: raw, center_instance_id: store.centerInstanceID, executor_id: enrolled.executor_id, install_generation: enrolled.install_generation, method: "POST", path, request_id: requestID, iat: Math.floor(clock.getTime() / 1000), exp: Math.floor(clock.getTime() / 1000) + 60 }, keys.privateKey);
     return { path, raw, signature, invoke(action: (e: any, v: any) => unknown) { return store.signedRequest(enrolled.executor_id, "POST", path, Buffer.from(raw), signature, action) as any; } };
   };
-  const heartbeat = () => request("heartbeat", { version: "test", activation_id:randomUUID(), release:{build_id:"test",source_revision:"a".repeat(40),artifact_sha256:"b".repeat(64),state_schema:1}, boot_id: "boot_1234567890123456789", policy_generation: policy.generation, capabilities: ["script.elevated.v1", "container.managed.v1"], ordinary_task_identity:{account:"lightmoni-agent",uid:1001,gid:1001,permission_generation:3}, account_profiles: [account], interpreter_profiles: [{ runtime: "shell", sha256: interpreter }] }).invoke((e, v) => store.heartbeat(e, v));
+  const heartbeat = () => request("heartbeat", { version: "test", activation_id:randomUUID(), release:{build_id:"test",source_revision:options.sourceRevision??"a".repeat(40),artifact_sha256:"b".repeat(64),state_schema:1}, boot_id: "boot_1234567890123456789", policy_generation: policy.generation, capabilities: ["script.elevated.v1", "container.managed.v1"], ordinary_task_identity:{account:"lightmoni-agent",uid:1001,gid:1001,permission_generation:3}, account_profiles: [account], interpreter_profiles: [{ runtime: "shell", sha256: interpreter }],...(options.sshOnce===false?{}:{ssh_once_commands:options.commands??['managed-once','task-once']}) }).invoke((e, v) => store.heartbeat(e, v));
   heartbeat();
   const makePlan = (extra: any = {}) => store.plan({ host_ids: ["host"], capability: "script.elevated.v1", payload: { kind: "script", runtime: "shell", code: "printf secret-from-script", args: [], cwd_profile: "private", environment: {}, account, interpreter_sha256: interpreter, timeout_ms: 5000, max_output_bytes: 4096 }, ...extra }, "admin");
   const apply = () => { const plan = makePlan(); return store.apply(plan.id, { confirm: true, expected_revision: plan.revision, request_id: randomBytes(24).toString("base64url") }, "admin").jobs[0]; };
@@ -87,6 +88,34 @@ test("SSH dispatch readiness requires a reusable bound SSH credential even while
     f.db.run("UPDATE effective_machine_credentials SET revoked_at='2026-11-01T00:01:01Z' WHERE id='binding'");
     assert.equal(f.store.getStatus("host").capabilities["script.elevated.v1"].effective, "unavailable");
   } finally { f.close(); }
+});
+
+test('SSH readiness rejects an old helper but preserves the exact verified release during center-first rollout',()=>{
+  for(const [name,options,managedReady,taskReady] of [
+    ['old',{sshOnce:false,sourceRevision:'7'.repeat(40)},false,false],
+    ['verified',{sshOnce:false,sourceRevision:VERIFIED_SSH_ONCE_REVISION},true,true],
+    ['verified-explicit-partial',{commands:['task-once'],sourceRevision:VERIFIED_SSH_ONCE_REVISION},false,true],
+    ['declared',{sshOnce:true,sourceRevision:'c'.repeat(40)},true,true],
+    ['task-only',{commands:['task-once'],sourceRevision:'d'.repeat(40)},false,true],
+  ] as const){
+    const f=fixture(options);try{
+      if (!f.db.all<any>("PRAGMA table_info(managed_machines)").some(column => column.name === 'default_account_id'))
+        f.db.exec("ALTER TABLE managed_machines ADD COLUMN default_account_id TEXT NOT NULL DEFAULT ''");
+      f.db.exec(`CREATE TABLE machine_ssh_accounts(id TEXT PRIMARY KEY,default_credential_id TEXT,deleted_at TEXT);
+        CREATE TABLE effective_machine_credentials(id TEXT PRIMARY KEY,machine_id TEXT,revoked_at TEXT,
+          secret_cleared_at TEXT,secret_encrypted TEXT,method TEXT,retention TEXT,expires_at TEXT);`);
+      f.db.run("INSERT INTO machine_ssh_accounts VALUES('account','binding','')");
+      f.db.run("UPDATE managed_machines SET default_account_id='account' WHERE id='host'");
+      f.db.run("INSERT INTO effective_machine_credentials VALUES('binding','host',NULL,'','ciphertext','ssh_key','permanent','')");
+      f.store.setSSHOnly();f.advance(61);
+      const status=f.store.getStatus('host').capabilities['script.elevated.v1'];
+      assert.equal(status.effective,managedReady?'ready':'unavailable',name);
+      assert.equal(f.store.supportsSSHOnce('host','managed-once'),managedReady,name);
+      assert.equal(f.store.supportsSSHOnce('host','task-once'),taskReady,name);
+      if(!managedReady){assert.equal(status.reason_code,'agent_upgrade_required');assert.throws(()=>f.makePlan(),/agent_upgrade_required/);}
+      else assert.ok(f.makePlan().id);
+    }finally{f.close();}
+  }
 });
 
 test("signed claim retries retain exact lease, reject altered body and persist nonce replay conflicts", () => {

@@ -406,6 +406,7 @@ test("real host collection uses TS SDK and selected destination; HTTP/TCP probes
   const a = make(t);
   assert(Number.isInteger(a.status().cpu_count) && a.status().cpu_count! > 0);
   assert(Number.isFinite(a.status().memory_total_mb) && a.status().memory_total_mb! > 0);
+  assert.deepEqual(a.status().ssh_once_commands,['jobs-once']);
   a.applyRemote({
     revision: "host-1",
     collect_interval_seconds: 15,
