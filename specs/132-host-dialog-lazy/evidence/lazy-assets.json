@@ -1,7 +1,7 @@
 {
   "source": "isolated built bundle and intercepted APIs; no SSH or production access",
   "cold_assets": [
-    "/assets/index-DzKnviEq.js",
+    "/assets/index-Ceaq396s.js",
     "/assets/rolldown-runtime-C0FnF6B9.js",
     "/assets/i18n-BAQNfQ2Z.js",
     "/assets/preload-helper-BLdHbfdN.js",
@@ -16,47 +16,47 @@
     "/assets/context-D8i6-jWW.js",
     "/assets/modal-KJRoTFNw.js",
     "/assets/index-Cd3qI-as.css",
-    "/assets/HostsNodesPage-B2xm__uz.js",
-    "/assets/popconfirm-CMC0pTu2.js",
+    "/assets/HostsNodesPage-DysJg13E.js",
+    "/assets/popconfirm-C74jwC_c.js",
     "/assets/CodeOutlined-DO_I4QUH.js",
     "/assets/HistoryOutlined-LjKoSfRY.js",
     "/assets/host-request-guard-C0TqhKph.js",
     "/assets/MoreOutlined-C-Fd7jcC.js",
     "/assets/connection-credentials-muSzaiXw.js",
     "/assets/connection-credentials-B3qaKHYL.css",
-    "/assets/MachineCredentialForm-sYtZLCO6.js",
-    "/assets/DockerEnvironmentPanel-CLNZCZ7D.js",
+    "/assets/MachineCredentialForm-DRtdco5m.js",
+    "/assets/DockerEnvironmentPanel-BxvzCrjl.js",
     "/assets/machine-credentials-DLr3_jnv.js",
-    "/assets/SSHCheckSummary-DPFvjuif.js",
+    "/assets/SSHCheckSummary-U_Q56JAV.js",
     "/assets/HostsNodesPage-C84cFeFd.css"
   ],
-  "cold_asset_bytes": 3121222,
+  "cold_asset_bytes": 3122770,
   "container_additional_assets": [
-    "/assets/HostContainersDialog-BV4d_iYY.js",
+    "/assets/HostContainersDialog-Dxzoi2Ut.js",
     "/assets/host-resources-CePitHFQ.css"
   ],
-  "container_additional_bytes": 46464,
+  "container_additional_bytes": 46806,
   "directory_additional_assets": [
-    "/assets/HostFilesDialog-D1RM9GP3.js",
+    "/assets/HostFilesDialog-Dv1sE8M3.js",
     "/assets/ArrowUpOutlined-YUJLNIZs.js",
     "/assets/SaveOutlined-BFaaHOfI.js"
   ],
-  "directory_additional_bytes": 32230,
+  "directory_additional_bytes": 32342,
   "editor_additional_assets": [
-    "/assets/CodeEditor-_EtUWJfL.js",
+    "/assets/CodeEditor-GsFa60DY.js",
     "/assets/bracketMatching-B0vn45EU.js",
     "/assets/bracketMatching-BWuiJ39u.css",
     "/assets/CodeEditor-AtKMZyMN.css"
   ],
   "editor_additional_bytes": 2971464,
   "terminal_additional_assets": [
-    "/assets/MachineTerminalDialog-Chb7oDZj.js",
+    "/assets/MachineTerminalDialog-CYxEs9Da.js",
     "/assets/FullscreenOutlined-a8p-HyC8.js",
     "/assets/MachineTerminalDialog-BWgbO8ed.css"
   ],
   "terminal_additional_bytes": 352796,
   "compose_additional_assets": [
-    "/assets/ExternalComposeManagement-BjIZjN5G.js",
+    "/assets/ExternalComposeManagement-CHJVSY03.js",
     "/assets/yaml-c3OjFB_I.js"
   ],
   "compose_additional_bytes": 19116,
@@ -65,5 +65,17 @@
   "terminal_session_opens": 1,
   "terminal_session_close_requests": 2,
   "member_machine_reads": 0,
+  "lazy_404": {
+    "dialog_recoveries": [
+      "files",
+      "terminal",
+      "compose",
+      "editor"
+    ],
+    "reload_reaches_host_list": true,
+    "unmounted_file_session_creations": 0,
+    "unmounted_terminal_session_creations": 0,
+    "editor_file_session_releases": 1
+  },
   "page_errors": []
 }

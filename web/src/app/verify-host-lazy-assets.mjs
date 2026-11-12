@@ -31,9 +31,9 @@ const assets=[],calls=[],errors=[];
 page.on('request',request=>{const path=new URL(request.url()).pathname;if(path.startsWith('/assets/'))assets.push(path)});
 page.on('pageerror',error=>errors.push(error.message));
 await page.addInitScript(()=>localStorage.setItem('lightmoni.language','zh-CN'));
-await page.route('**/api/v1/**',async route=>{
+const fixtureAPI=recorded=>async route=>{
  const request=route.request(),path=new URL(request.url()).pathname,method=request.method();
- calls.push({path,method,body:method==='POST'?request.postDataJSON():undefined});
+ recorded.push({path,method,body:method==='POST'?request.postDataJSON():undefined});
  if(path==='/api/v1/setup')return route.fulfill({json:{required:false}});
  if(path==='/api/v1/auth/me')return route.fulfill({json:{id:'fixture-admin',name:'Fixture admin',role:'admin'}});
  if(path==='/api/v1/auth/profile')return route.fulfill({json:{}});
@@ -47,7 +47,8 @@ await page.route('**/api/v1/**',async route=>{
  if(path===`/api/v1/machines/${machine.id}/file-session`&&method==='DELETE')return route.fulfill({json:{ok:true}});
  if(path===`/api/v1/machines/${machine.id}/file`&&method==='GET')return route.fulfill({json:{machine_id:machine.id,path:'/readme.txt',content:'hello\n',version:'file-v1',size:6}});
  return route.fulfill({json:[]});
-});
+};
+await page.route('**/api/v1/**',fixtureAPI(calls));
 const hasAsset=(list,pattern)=>list.some(path=>pattern.test(path));
 const assetBytes=async list=>(await Promise.all(list.map(async path=>(await stat(resolve(bundle,'.'+path))).size))).reduce((sum,size)=>sum+size,0);
 const deferred=/\/(?:HostFilesDialog|HostContainersDialog|MachineTerminalDialog|CodeEditor|bracketMatching)-[^/]+\.(?:js|css)$/;
@@ -178,10 +179,65 @@ try{
   expect(memberCalls.some(path=>path==='/api/v1/machines'||path.includes('/file-session')||path.includes('/terminal-sessions'))).toBe(false);
   await expect(member.getByRole('button',{name:'文件管理',exact:true})).toHaveCount(0);
  }finally{await member.close()}
+ const stale=await browser.newPage({viewport:{width:1440,height:900}}),staleCalls=[];
+ try{
+  await stale.addInitScript(()=>localStorage.setItem('lightmoni.language','zh-CN'));
+  await stale.route('**/api/v1/**',fixtureAPI(staleCalls));
+  await stale.route(/\/(?:HostFilesDialog|MachineTerminalDialog|ExternalComposeManagement)-[^/]+\.js$/,route=>route.fulfill({status:404,contentType:'text/plain',body:''}));
+  await stale.goto(origin+'/machines');
+  const staleRow=stale.locator('tr[data-row-key="fixture-host"]');
+  await expect(staleRow).toBeVisible();
+  await staleRow.getByRole('button',{name:'文件管理',exact:true}).click();
+  const failedFiles=stale.getByRole('dialog',{name:'文件管理 · Fixture host'});
+  await expect(failedFiles.getByRole('button',{name:'刷新页面'})).toBeVisible();
+  await expect(stale.getByRole('heading',{name:'主机',exact:true})).toBeVisible();
+  expect(staleCalls.some(call=>call.path.includes('/file-session'))).toBe(false);
+  await failedFiles.getByRole('button',{name:'关闭',exact:true}).click();
+  await expect(failedFiles).toHaveCount(0);
+  await staleRow.getByRole('button',{name:'登录终端',exact:true}).click();
+  const failedTerminal=stale.getByRole('dialog',{name:'SSH 终端 · Fixture host'});
+  await expect(failedTerminal.getByRole('button',{name:'刷新页面'})).toBeVisible();
+  expect(staleCalls.some(call=>call.path.includes('/terminal-sessions'))).toBe(false);
+  await failedTerminal.getByRole('button',{name:'关闭',exact:true}).click();
+  await expect(staleRow).toBeVisible();
+  await staleRow.getByRole('button',{name:'全部容器',exact:true}).click();
+  const survivingContainers=stale.getByRole('dialog',{name:'全部容器 · Fixture host'});
+  await expect(survivingContainers.getByRole('button',{name:'接管已有 Compose',exact:true})).toBeVisible();
+  await survivingContainers.getByRole('button',{name:'接管已有 Compose',exact:true}).click();
+  const failedCompose=stale.getByRole('dialog',{name:'已有 Compose 项目 · Fixture host'});
+  await expect(failedCompose.getByRole('button',{name:'刷新页面'})).toBeVisible();
+  expect(staleCalls.some(call=>call.path==='/api/v1/operations/resources')).toBe(false);
+  await failedCompose.getByRole('button',{name:'关闭',exact:true}).click();
+  await expect(survivingContainers).toBeVisible();
+  await survivingContainers.locator('.ant-modal-close').click();
+  await staleRow.getByRole('button',{name:'文件管理',exact:true}).click();
+  await expect(failedFiles.getByRole('button',{name:'刷新页面'})).toBeVisible();
+  await Promise.all([stale.waitForEvent('load'),failedFiles.getByRole('button',{name:'刷新页面'}).click()]);
+  await expect(staleRow).toBeVisible();
+ }finally{await stale.close()}
+
+ const staleEditor=await browser.newPage({viewport:{width:1440,height:900}}),editorCalls=[];
+ try{
+  await staleEditor.addInitScript(()=>localStorage.setItem('lightmoni.language','zh-CN'));
+  await staleEditor.route('**/api/v1/**',fixtureAPI(editorCalls));
+  await staleEditor.route(/\/CodeEditor-[^/]+\.js$/,route=>route.fulfill({status:404,contentType:'text/plain',body:''}));
+  await staleEditor.goto(origin+'/machines');
+  const editorRow=staleEditor.locator('tr[data-row-key="fixture-host"]');
+  await expect(editorRow).toBeVisible();
+  await editorRow.getByRole('button',{name:'文件管理',exact:true}).click();
+  const failedEditor=staleEditor.getByRole('dialog',{name:'文件管理 · Fixture host'});
+  await failedEditor.getByRole('button',{name:'readme.txt',exact:true}).click();
+  await expect(failedEditor.getByRole('button',{name:'刷新页面'})).toBeVisible();
+  await expect(failedEditor.getByText('/readme.txt')).toBeVisible();
+  await failedEditor.locator('.ant-modal-close').click();
+  await expect(failedEditor).toHaveCount(0);
+  await expect.poll(()=>editorCalls.filter(call=>call.path===`/api/v1/machines/${machine.id}/file-session`&&call.method==='DELETE').length).toBe(1);
+  await expect(editorRow).toBeVisible();
+ }finally{await staleEditor.close()}
  expect(errors).toEqual([]);
  const containerAdditional=containerAssets.slice(coldAssets.length),directoryAdditional=directoryAssets.slice(containerAssets.length),editorAdditional=editorAssets.slice(directoryAssets.length),terminalAdditional=terminalAssets.slice(editorAssets.length),composeAdditional=composeAssets.slice(terminalAssets.length);
- report={source:'isolated built bundle and intercepted APIs; no SSH or production access',cold_assets:coldAssets,cold_asset_bytes:await assetBytes(coldAssets),container_additional_assets:containerAdditional,container_additional_bytes:await assetBytes(containerAdditional),directory_additional_assets:directoryAdditional,directory_additional_bytes:await assetBytes(directoryAdditional),editor_additional_assets:editorAdditional,editor_additional_bytes:await assetBytes(editorAdditional),terminal_additional_assets:terminalAdditional,terminal_additional_bytes:await assetBytes(terminalAdditional),compose_additional_assets:composeAdditional,compose_additional_bytes:await assetBytes(composeAdditional),file_session_opens:opens.length,file_session_closes:1,terminal_session_opens:1,terminal_session_close_requests:terminalSessionCloses,member_machine_reads:memberCalls.filter(path=>path==='/api/v1/machines').length,page_errors:errors};
+ report={source:'isolated built bundle and intercepted APIs; no SSH or production access',cold_assets:coldAssets,cold_asset_bytes:await assetBytes(coldAssets),container_additional_assets:containerAdditional,container_additional_bytes:await assetBytes(containerAdditional),directory_additional_assets:directoryAdditional,directory_additional_bytes:await assetBytes(directoryAdditional),editor_additional_assets:editorAdditional,editor_additional_bytes:await assetBytes(editorAdditional),terminal_additional_assets:terminalAdditional,terminal_additional_bytes:await assetBytes(terminalAdditional),compose_additional_assets:composeAdditional,compose_additional_bytes:await assetBytes(composeAdditional),file_session_opens:opens.length,file_session_closes:1,terminal_session_opens:1,terminal_session_close_requests:terminalSessionCloses,member_machine_reads:memberCalls.filter(path=>path==='/api/v1/machines').length,lazy_404:{dialog_recoveries:['files','terminal','compose','editor'],reload_reaches_host_list:true,unmounted_file_session_creations:staleCalls.filter(call=>call.path.includes('/file-session')).length,unmounted_terminal_session_creations:staleCalls.filter(call=>call.path.includes('/terminal-sessions')).length,editor_file_session_releases:editorCalls.filter(call=>call.path===`/api/v1/machines/${machine.id}/file-session`&&call.method==='DELETE').length},page_errors:errors};
  await mkdir(evidence,{recursive:true});
  await writeFile(resolve(evidence,'lazy-assets.json'),JSON.stringify(report,null,2)+'\n');
- console.log('PASS host first load excludes file/container/terminal dialogs and Monaco/xterm; container list and file directory exclude Monaco; editor, terminal and Compose load on demand; canceled opens do not create sessions or reads');
+ console.log('PASS host first load excludes file/container/terminal dialogs and Monaco/xterm; container list and file directory exclude Monaco; editor, terminal and Compose load on demand; canceled opens do not create sessions or reads; 404 lazy chunks show scoped refresh recovery and release file sessions');
 }finally{await page.close();await browser.close();await new Promise(resolve=>server.close(resolve))}
