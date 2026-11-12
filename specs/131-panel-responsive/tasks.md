@@ -27,6 +27,6 @@
 
 - [x] T012 在 `docs/system-design.md` 更新第 107 章和新增第 131 章；同步 Doca 对应章节并用最新版本回读文字、原生图节点与连线，在 `specs/131-panel-responsive/validation.md` 记录证据。
 - [x] T013 运行相关类型、测试、构建与差异检查；同步 GitHub `main`，在 `specs/131-panel-responsive/validation.md` 记录结果。
-- [ ] T014 推送 `codex/131-panel-responsive` 到 GitHub `origin` 并创建面向 `main` 的 Pull Request，描述最终行为、兼容影响、架构章节、Doca 链接与回读结果。
+- [x] T014 推送 `codex/131-panel-responsive` 到 GitHub `origin` 并创建面向 `main` 的 Pull Request，描述最终行为、兼容影响、架构章节、Doca 链接与回读结果。
 
 T003–T005、T006–T009 和 T010–T011 可在规格完成后按文件并行；T012–T014 依赖实现与验证结果。主机页和缓存可独立验收；文件会话须同时验收服务端安全与浏览器生命周期。

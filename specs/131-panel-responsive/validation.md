@@ -17,3 +17,7 @@
 - 浏览器 `verify-host-status-loading.mjs`、`verify-host-resources.mjs` 与 `verify-host-file-maintenance.mjs` 均通过；后者连续三轮通过。现有 `verify-agent-operation-progress.mjs` 的成功状态进度条断言与 `origin/main` 已有页面行为矛盾，本次未修改该无关旧断言。
 
 上述为本地验收；尚未部署到线上，不能把它视为生产网络延迟或真实机器规模下的体验测量。
+
+## 交付
+
+- GitHub PR：[提升主机状态与文件管理响应速度](https://github.com/workhold/lightmoni/pull/178)，目标 `main`；仅待审阅与合并授权。
