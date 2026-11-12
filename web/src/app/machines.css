@@ -95,3 +95,4 @@
 .lm-host-menu-trigger{display:flex;min-width:0}
 .lm-host-deploy-split>.lm-host-menu-trigger{width:22px;flex-shrink:0}
 .lm-host-deploy-split>.lm-host-menu-trigger>.ant-btn{width:22px;padding-inline:3px;border-start-start-radius:0;border-end-start-radius:0}
+.lm-host-dialog-loading{display:flex;align-items:center;justify-content:center;gap:10px;min-height:96px}
