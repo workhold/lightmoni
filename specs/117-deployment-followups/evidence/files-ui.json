@@ -4,6 +4,7 @@
     {
       "run": 1,
       "checks": [
+        "first directory uses cached account metadata and one combined session request",
         "create file, keyboard save, exact HTTP/SFTP readback and YAML syntax colors",
         "rename refuses overwrite, retains failed input and publishes verified new name",
         "chmod verified in listing; cancelled deletion sends no mutation; confirmed deletion read back",
@@ -15,11 +16,12 @@
       "errors": [],
       "external": [],
       "mutation_count": 9,
-      "video": "/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence/files-video/page@139ce93c8da8eea940e4217ba0090b9f.webm"
+      "video": "/Users/zhangsiwen/.codex/worktrees/131-panel-responsive/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence/files-video/page@9cb3503adb43e4d9773a5fd06d2c3bf2.webm"
     },
     {
       "run": 2,
       "checks": [
+        "first directory uses cached account metadata and one combined session request",
         "create file, keyboard save, exact HTTP/SFTP readback and YAML syntax colors",
         "rename refuses overwrite, retains failed input and publishes verified new name",
         "chmod verified in listing; cancelled deletion sends no mutation; confirmed deletion read back",
@@ -31,11 +33,12 @@
       "errors": [],
       "external": [],
       "mutation_count": 9,
-      "video": "/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence/files-video/page@4fa5cfde2f12b088bc125ee9a12d7594.webm"
+      "video": "/Users/zhangsiwen/.codex/worktrees/131-panel-responsive/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence/files-video/page@c20290296de29f75dc26dcae5c157b2b.webm"
     },
     {
       "run": 3,
       "checks": [
+        "first directory uses cached account metadata and one combined session request",
         "create file, keyboard save, exact HTTP/SFTP readback and YAML syntax colors",
         "rename refuses overwrite, retains failed input and publishes verified new name",
         "chmod verified in listing; cancelled deletion sends no mutation; confirmed deletion read back",
@@ -47,8 +50,11 @@
       "errors": [],
       "external": [],
       "mutation_count": 9,
-      "video": "/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence/files-video/page@3e14a546bdeced9462dd200d45dbb160.webm"
+      "video": "/Users/zhangsiwen/.codex/worktrees/131-panel-responsive/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence/files-video/page@ffcb4f46d6fb59af0bcfd7ee240a5eca.webm"
     }
   ],
-  "media": "/Users/zhangsiwen/.codex/worktrees/deployment-followups/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence"
+  "fallback_checks": [
+    "missing credential metadata reads detail once, then opens and lists in one request"
+  ],
+  "media": "/Users/zhangsiwen/.codex/worktrees/131-panel-responsive/lightmoni/artifacts/screenshots/specs/117-deployment-followups/evidence"
 }

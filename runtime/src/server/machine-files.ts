@@ -161,17 +161,28 @@ export class RemoteFiles {
       const opened = await this.invoke<Stats>(done => this.sftp.fstat(handle, done));
       if (!opened.isFile()) fail(409, 'file_type_unsupported');
       if (opened.size > limit) fail(413, 'file_too_large');
-      const chunks: Buffer[] = []; let offset = 0;
-      while (true) {
-        const buffer = Buffer.alloc(Math.min(64 << 10, limit + 1 - offset));
-        const count = await this.invoke<number>(done => this.sftp.read(handle, buffer, 0, buffer.length, offset, (e,n) => done(e,n)));
-        if (!count) break;
-        offset += count; if (offset > limit) fail(413, 'file_too_large');
-        chunks.push(buffer.subarray(0,count));
-      }
+      const bytes = Buffer.alloc(opened.size);
+      const chunkSize = 32 << 10;
+      let nextOffset = 0, failed = false;
+      const worker = async () => {
+        try {
+          while (!failed && nextOffset < opened.size) {
+            const start = nextOffset, end = Math.min(start + chunkSize, opened.size);
+            nextOffset = end;
+            for (let offset = start; offset < end;) {
+              const count = await this.invoke<number>(done => this.sftp.read(handle, bytes, offset, end - offset, offset, (e,n) => done(e,n)));
+              if (!count) fail(409, 'file_changed');
+              offset += count;
+            }
+          }
+        } catch (error) { failed = true; throw error; }
+      };
+      // Wait for every in-flight READ before fstat or closing the shared handle.
+      const reads = await Promise.allSettled(Array.from({length:Math.min(8,Math.ceil(opened.size/chunkSize))},worker));
+      const rejected = reads.find((result):result is PromiseRejectedResult=>result.status==='rejected');
+      if (rejected) throw rejected.reason;
       const after = await this.invoke<Stats>(done => this.sftp.fstat(handle, done));
-      if (opened.size !== offset || version(Buffer.alloc(0),opened) !== version(Buffer.alloc(0),after)) fail(409,'file_changed');
-      const bytes = Buffer.concat(chunks);
+      if (opened.size !== after.size || version(Buffer.alloc(0),opened) !== version(Buffer.alloc(0),after)) fail(409,'file_changed');
       return {bytes,stat:after,version:version(bytes,after)};
     } finally { await call(done => this.sftp.close(handle, done)); }
   }
@@ -249,6 +260,11 @@ export function registerMachineFiles(deps: Dependencies, machines: MachineTermin
     if(session.closed||session.pending)return;
     if(session.closing){closeSession(session,'expired');return;}
     session.idleTimer=setTimeout(()=>expireSession(session),idleMs);session.idleTimer.unref?.();
+  };
+  const releaseOpener=(session:FileSession)=>{
+    if(session.closed)return;
+    session.openers--;
+    if(session.openers<=0)expireSession(session);else scheduleIdle(session);
   };
   const sessionHeader=(ctx:Context)=>{
     const value=ctx.req.headers[FILE_SESSION_HEADER];
@@ -368,8 +384,15 @@ export function registerMachineFiles(deps: Dependencies, machines: MachineTermin
   const openSession=async(ctx:Context)=>{
     ctx.res.setHeader('Cache-Control','no-store');human(ctx);checkRequestOrigin(ctx.req,deps.externalURL,true);
     const input=await ctx.body<any>();
-    if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!=='credential_id'||typeof input.credential_id!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(input.credential_id))fail(400,'invalid_file_session');
+    const fields=input&&typeof input==='object'&&!Array.isArray(input)?Object.keys(input).sort().join(','):'';
+    if(!['credential_id','credential_id,initial_path'].includes(fields)||typeof input.credential_id!=='string'||!/^[A-Za-z0-9_-]{1,64}$/.test(input.credential_id))fail(400,'invalid_file_session');
+    const initialPath=fields==='credential_id,initial_path'?filePath(input.initial_path):undefined;
     if(stopped)fail(503,'file_service_stopped');
+    const response=(session:FileSession)=>({machine_id:session.machineID,credential_id:session.credentialID,session_id:session.id,idle_timeout_ms:idleMs,expires_at:new Date(session.createdAt+maxMs).toISOString()});
+    const respond=async(session:FileSession)=>{
+      if(initialPath===undefined)ctx.json(response(session));
+      else await sessionWork(session,'list',async(files,path)=>({...response(session),initial_directory:{machine_id:session.machineID,...await files.list(path)}}),initialPath,ctx);
+    };
     // Tabs from one login may share the same bound SFTP connection. Keep the
     // original handle alive if a second tab asks for a different credential.
     const identity=loginHash(ctx);
@@ -382,7 +405,7 @@ export function registerMachineFiles(deps: Dependencies, machines: MachineTermin
         if(existing.credentialID!==input.credential_id)fail(409,'file_session_busy');
         if(existing.openers>=8)fail(429,'file_session_busy');
         existing.openers++;existing.lastUsed=Date.now();scheduleIdle(existing);
-        ctx.json({machine_id:existing.machineID,credential_id:existing.credentialID,session_id:existing.id,idle_timeout_ms:idleMs,expires_at:new Date(existing.createdAt+maxMs).toISOString()});
+        try{await respond(existing);}catch(error){releaseOpener(existing);throw error;}
         return;
       }
     }
@@ -394,7 +417,7 @@ export function registerMachineFiles(deps: Dependencies, machines: MachineTermin
     const createdAt=Date.now();
     session={id:randomBytes(24).toString('base64url'),machineID:ctx.params.id,credentialID:lease.credentialID,actorID:ctx.user.id,loginHash:identity,lease,client,createdAt,lastUsed:createdAt,closed:false,closing:false,openers:1,queue:Promise.resolve(),pending:0};
     const current=session;connections.add(client);
-    let mismatch=false,connectTimeout:ReturnType<typeof setTimeout>|undefined;
+    let mismatch=false,connectTimeout:ReturnType<typeof setTimeout>|undefined,published=false;
     const abort=()=>closeSession(current,'expired');ctx.signal.addEventListener('abort',abort,{once:true});
     try{
       const connected=new Promise<void>((resolve,reject)=>{
@@ -420,13 +443,15 @@ export function registerMachineFiles(deps: Dependencies, machines: MachineTermin
         }catch{failed(new HTTPError(502,'file_ssh_failed'));}
       });
       await Promise.race([connected,new Promise<never>((_,reject)=>{connectTimeout=setTimeout(()=>{closeSession(current,'expired');reject(new HTTPError(504,'file_operation_timeout'));},30_000);})]);
+      clearTimeout(connectTimeout);connectTimeout=undefined;
       human(ctx);ctx.signal.throwIfAborted();
       if(current.closed)fail(409,'file_session_expired');
       if(!lease.valid()){closeSession(current,'changed');fail(409,'file_credential_changed');}
       lease.markUsed();sessions.set(current.id,current);
       current.maxTimer=setTimeout(()=>expireSession(current),maxMs);current.maxTimer.unref?.();scheduleIdle(current);
-      ctx.json({machine_id:current.machineID,credential_id:current.credentialID,session_id:current.id,idle_timeout_ms:idleMs,expires_at:new Date(current.createdAt+maxMs).toISOString()});
-    }catch(error){closeSession(current,'expired');throw error;}
+      published=true;
+      await respond(current);
+    }catch(error){if(published)releaseOpener(current);else closeSession(current,'expired');throw error;}
     finally{clearTimeout(connectTimeout);ctx.signal.removeEventListener('abort',abort);}
   };
   deps.router.post(base+'/file-session',ctx=>track(openSession(ctx)));
@@ -435,7 +460,7 @@ export function registerMachineFiles(deps: Dependencies, machines: MachineTermin
     const id=sessionHeader(ctx);if(!id)fail(400,'invalid_file_session');
     const session=sessions.get(id);
     if(session&&(session.machineID!==ctx.params.id||session.actorID!==ctx.user.id||session.loginHash!==loginHash(ctx)))fail(403,'file_session_forbidden');
-    if(session){session.openers--;if(session.openers<=0)expireSession(session);else scheduleIdle(session);}
+    if(session)releaseOpener(session);
     ctx.res.writeHead(204);ctx.res.end();
   });
   deps.router.get(base+'/files',run('list',(files,path)=>files.list(path)));

@@ -22,6 +22,101 @@ test('typed maintenance preserves uncertainty when a successful mutation cannot 
  assert.equal(removed,true);assert.equal(files.mutationStarted,true);
 });
 
+test('SFTP reads use bounded parallel requests, complete short reads and settle before close',async()=>{
+ const source=Buffer.alloc(320<<10);for(let i=0;i<source.length;i++)source[i]=i%251;
+ const attributes={size:source.length,mtime:1,mode:0o100644,uid:1,gid:1,isFile:()=>true};
+ let pending=0,maximum=0,statCalls=0;
+ const sftp={
+  lstat:(_:string,done:Function)=>done(null,attributes),
+  open:(_:string,_flags:string,done:Function)=>done(null,Buffer.from('handle')),
+  fstat:(_:Buffer,done:Function)=>{assert.equal(pending,0);statCalls++;done(null,attributes)},
+  read:(_:Buffer,buffer:Buffer,offset:number,length:number,position:number,done:Function)=>{
+   pending++;maximum=Math.max(maximum,pending);
+   setImmediate(()=>{const count=Math.min(length,4096,source.length-position);source.copy(buffer,offset,position,position+count);pending--;done(null,count)});
+  },
+  close:(_:Buffer,done:Function)=>{assert.equal(pending,0);done(null)}
+ };
+ const found=await new RemoteFiles(sftp as any,()=>{}).read('/large');
+ assert.deepEqual(found?.bytes,source);assert.equal(statCalls,2);assert.ok(maximum>1&&maximum<=8,`in-flight reads: ${maximum}`);
+});
+
+test('SFTP early EOF reports file_changed after all pending reads settle',async()=>{
+ const source=Buffer.alloc(64<<10,65),attributes={size:256<<10,mtime:1,mode:0o100644,uid:1,gid:1,isFile:()=>true};
+ let pending=0,closed=false;
+ const sftp={
+  lstat:(_:string,done:Function)=>done(null,attributes),
+  open:(_:string,_flags:string,done:Function)=>done(null,Buffer.from('handle')),
+  fstat:(_:Buffer,done:Function)=>done(null,attributes),
+  read:(_:Buffer,buffer:Buffer,offset:number,length:number,position:number,done:Function)=>{
+   pending++;
+   setTimeout(()=>{const count=Math.max(0,Math.min(length,source.length-position));if(count)source.copy(buffer,offset,position,position+count);pending--;done(null,count)},position>=source.length?0:5);
+  },
+  close:(_:Buffer,done:Function)=>{assert.equal(pending,0);closed=true;done(null)}
+ };
+ await assert.rejects(new RemoteFiles(sftp as any,()=>{}).read('/shrunk'),/file_changed/);
+ assert.equal(closed,true);
+});
+
+test('combined file-session open returns the first directory over one SSH connection',{skip:!existsSync('/usr/sbin/sshd'),timeout:30000},async t=>{
+ const f=await hostFilesFixture(t),endpoint=`/machines/${f.machine.id}/file-session`;
+ const opened=await f.request(endpoint,'POST',{credential_id:f.credential.id,initial_path:f.directory});
+ assert.equal(opened.status,200,JSON.stringify(opened.data));
+ assert.equal(opened.data.initial_directory.path,f.directory);
+ assert.ok(opened.data.initial_directory.entries.some((item:any)=>item.name==='配置 文件.txt'));
+ assert.equal(f.sshConnections(),1);
+ assert.deepEqual(f.db.all<any>("SELECT operation,path,result FROM machine_file_events"),[{operation:'list',path:f.directory,result:'succeeded'}]);
+ const headers={'X-LightMoni-File-Session':opened.data.session_id};
+ const listed=await f.request(f.path('files'),'GET',undefined,'admin',headers);
+ assert.equal(listed.status,200);
+ assert.deepEqual(opened.data.initial_directory,listed.data);
+ assert.equal(f.sshConnections(),1);
+ const large=join(f.directory,'large.txt');await writeFile(large,'a'.repeat(320<<10));
+ const content=await f.request(f.path('file',large),'GET',undefined,'admin',headers);
+ assert.equal(content.status,200);assert.equal(content.data.content.length,320<<10);
+ assert.equal((await f.request(endpoint,'DELETE',undefined,'admin',headers)).status,204);
+});
+
+test('combined open rejects invalid paths before SSH and releases a failed initial session',{skip:!existsSync('/usr/sbin/sshd'),timeout:30000},async t=>{
+ const f=await hostFilesFixture(t),endpoint=`/machines/${f.machine.id}/file-session`;
+ const invalid=await f.request(endpoint,'POST',{credential_id:f.credential.id,initial_path:'relative'});
+ assert.equal(invalid.status,400);assert.equal(invalid.data.error,'invalid_file_path');assert.equal(f.sshConnections(),0);
+ const missing=await f.request(endpoint,'POST',{credential_id:f.credential.id,initial_path:join(f.directory,'missing')});
+ assert.equal(missing.status,404);assert.equal(missing.data.error,'file_not_found');
+ const opened=await f.request(endpoint,'POST',{credential_id:f.credential.id,initial_path:f.directory});
+ assert.equal(opened.status,200,JSON.stringify(opened.data));assert.equal(f.sshConnections(),2);
+ assert.equal((await f.request(endpoint,'DELETE',undefined,'admin',{'X-LightMoni-File-Session':opened.data.session_id})).status,204);
+});
+
+test('failed initial list releases only its opener on a shared file session',{skip:!existsSync('/usr/sbin/sshd'),timeout:30000},async t=>{
+ const f=await hostFilesFixture(t),endpoint=`/machines/${f.machine.id}/file-session`;
+ const first=await f.request(endpoint,'POST',{credential_id:f.credential.id});assert.equal(first.status,200);
+ const headers={'X-LightMoni-File-Session':first.data.session_id};
+ const failed=await f.request(endpoint,'POST',{credential_id:f.credential.id,initial_path:join(f.directory,'missing')});
+ assert.equal(failed.status,404);assert.equal(failed.data.error,'file_not_found');
+ assert.equal((await f.request(f.path('files'),'GET',undefined,'admin',headers)).status,200);
+ assert.equal((await f.request(endpoint,'DELETE',undefined,'admin',headers)).status,204);
+ const stale=await f.request(f.path('files'),'GET',undefined,'admin',headers);
+ assert.equal(stale.status,409);assert.equal(stale.data.error,'file_session_expired');assert.equal(f.sshConnections(),1);
+});
+
+test('a failed first directory does not close a second opener created while it was loading',{skip:!existsSync('/usr/sbin/sshd'),timeout:30000},async t=>{
+ const f=await hostFilesFixture(t),endpoint=`/machines/${f.machine.id}/file-session`,missing=join(f.directory,'missing');
+ let entered!:()=>void,unblock!:()=>void;
+ const reached=new Promise<void>(resolve=>{entered=resolve}),gate=new Promise<void>(resolve=>{unblock=resolve});
+ const original=RemoteFiles.prototype.list;
+ RemoteFiles.prototype.list=async function(path:string){if(path===missing){entered();await gate;}return original.call(this,path)};
+ try{
+  const opening=f.request(endpoint,'POST',{credential_id:f.credential.id,initial_path:missing});
+  await reached;
+  const second=await f.request(endpoint,'POST',{credential_id:f.credential.id});assert.equal(second.status,200,JSON.stringify(second.data));
+  unblock();const failed=await opening;assert.equal(failed.status,404);
+  const headers={'X-LightMoni-File-Session':second.data.session_id};
+  assert.equal((await f.request(f.path('files'),'GET',undefined,'admin',headers)).status,200);
+  assert.equal(f.sshConnections(),1);
+  assert.equal((await f.request(endpoint,'DELETE',undefined,'admin',headers)).status,204);
+ }finally{unblock();RemoteFiles.prototype.list=original}
+});
+
 test('file session reuses one real SSH/SFTP connection and legacy requests remain independent',{skip:!existsSync('/usr/sbin/sshd'),timeout:30000},async t=>{
  const f=await hostFilesFixture(t),endpoint=`/machines/${f.machine.id}/file-session`;
  const opened=await f.request(endpoint,'POST',{credential_id:f.credential.id});

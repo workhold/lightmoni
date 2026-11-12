@@ -3,19 +3,19 @@ import {ArrowUpOutlined,FileOutlined,FileAddOutlined,FolderOutlined,FolderAddOut
 import {Alert,App,Breadcrumb,Button,Dropdown,Input,Modal,Select,Space,Table,Tag,Typography} from 'antd';
 import {api,ApiError} from '../shared/api';
 import {useI18n} from '../shared/i18n';
-import {defaultMachineCredential,reusableMachineCredential,sshCredentialLabel,type SSHAccount} from './machine-credentials';
+import {defaultMachineCredential,reusableMachineCredential,sshCredentialLabel,type SSHAccount,type SSHCredential} from './machine-credentials';
 import CodeEditor from '../shared/CodeEditor';
 import './host-resources.css';
 
 type Host={id:string;name:string;default_account_id?:string;accounts?:SSHAccount[]};
-type Credential={id:string;account_id:string;username:string;account_revision:number;method:string;retention?:string;secret_fingerprint:string;expires_at:string;revoked_at?:string;secret_cleared_at?:string};
+type Credential=SSHCredential;
 type Entry={name:string;type:'directory'|'file'|'symlink'|'special';size:number;mode:string;modified_at:string;version:string};
 type Directory={machine_id:string;path:string;entries:Entry[];truncated:boolean;version:string};
 type Document={machine_id:string;path:string;content:string;version:string;size:number};
 type Metadata={machine_id:string;path:string;type:'file'|'directory';version:string;size:number;mode:string;empty?:boolean};
 type Maintenance={operation:'create'|'mkdir'|'rename'|'remove'|'chmod';path:string;snapshot:Metadata;name:string;mode:string;uncertain?:boolean};
-type FileSession={id:string;credentialID:string;idleTimeoutMs:number;expiresAt:number;lastUsed:number};
-type FileSessionResponse={machine_id:string;credential_id:string;session_id:string;idle_timeout_ms:number;expires_at:string};
+type FileSession={id:string;credentialID:string;idleTimeoutMs:number;expiresAt:number;lastUsed:number;initialDirectory?:Directory};
+type FileSessionResponse={machine_id:string;credential_id:string;session_id:string;idle_timeout_ms:number;expires_at:string;initial_directory?:Directory};
 const join=(path:string,name:string)=>(path==='/'?'':path)+'/'+name;
 const parent=(path:string)=>path.slice(0,path.lastIndexOf('/'))||'/';
 const size=(bytes:number)=>bytes<1024?bytes+' B':bytes<1048576?(bytes/1024).toFixed(1)+' KiB':(bytes/1048576).toFixed(1)+' MiB';
@@ -52,15 +52,25 @@ export default function HostFilesDialog({machine,onClose}:{machine:Host;onClose:
   if(!current)return Promise.resolve();
   return fetch(`/api/v1/machines/${encodeURIComponent(machine.id)}/file-session`,{method:'DELETE',credentials:'include',keepalive:true,headers:{'X-LightMoni-File-Session':current.id}}).then(()=>{},()=>{});
  };
- const ensureSession=async(key:string|undefined,signal?:AbortSignal):Promise<FileSession>=>{
+ const ensureSession=async(key:string|undefined,signal?:AbortSignal,initialPath?:string):Promise<FileSession>=>{
   if(!key)throw Error(t('请选择有效的可复用凭据','Select an active reusable credential'));
   const current=fileSession.current,now=Date.now();
   if(current&&(current.credentialID!==key||now>=current.expiresAt-2000||now-current.lastUsed>=current.idleTimeoutMs-2000))await releaseSession();
   if(fileSession.current)return fileSession.current;
-  const created=await api<FileSessionResponse>(`/machines/${encodeURIComponent(machine.id)}/file-session`,{method:'POST',signal,body:JSON.stringify({credential_id:key})});
+  const open=(path?:string)=>api<FileSessionResponse>(`/machines/${encodeURIComponent(machine.id)}/file-session`,{method:'POST',signal,body:JSON.stringify({credential_id:key,...(path?{initial_path:path}:{})})});
+  let created:FileSessionResponse;
+  try{created=await open(initialPath)}
+  catch(error){
+   // During a rolling update an older server rejects the optional field.
+   if(!initialPath||!(error instanceof ApiError)||error.status!==400||error.message!=='invalid_file_session')throw error;
+   created=await open();
+  }
   if(created.machine_id!==machine.id||created.credential_id!==key||!/^[A-Za-z0-9_-]{20,128}$/.test(created.session_id))throw Error(t('文件连接与目标主机不匹配','The file connection does not match this host'));
-  const next={id:created.session_id,credentialID:key,idleTimeoutMs:created.idle_timeout_ms,expiresAt:Date.parse(created.expires_at),lastUsed:Date.now()};
+  const next:FileSession={id:created.session_id,credentialID:key,idleTimeoutMs:created.idle_timeout_ms,expiresAt:Date.parse(created.expires_at),lastUsed:Date.now(),initialDirectory:created.initial_directory};
   fileSession.current=next;
+  if(initialPath&&created.initial_directory&&(created.initial_directory.machine_id!==machine.id||created.initial_directory.path!==initialPath||!Array.isArray(created.initial_directory.entries)||typeof created.initial_directory.version!=='string')){
+   await releaseSession();throw Error(t('目录响应与目标主机不匹配','The directory response does not match this host'));
+  }
   if(!alive.current||signal?.aborted){await releaseSession();throw new DOMException('Aborted','AbortError')}
   return next;
  };
@@ -88,9 +98,40 @@ export default function HostFilesDialog({machine,onClose}:{machine:Host;onClose:
   const next=checked(await fileApi<Directory>('files',path,{signal},key));
   if(alive.current&&!signal.aborted){setDirectory(next);setPathInput(next.path)}
  };
+ const readInitialDirectory=async(key:string,signal:AbortSignal)=>{
+  const session=await ensureSession(key,signal,'/');
+  const initial=session.initialDirectory;
+  session.initialDirectory=undefined;
+  if(initial){if(alive.current&&!signal.aborted){setDirectory(initial);setPathInput(initial.path)}}
+  else await readDirectory('/',key,signal);
+ };
  useEffect(()=>{
   alive.current=true;
-  void guarded(async signal=>{const detail=await api<{machine:Host;credentials:Credential[]}>(`/machines/${encodeURIComponent(machine.id)}`,{signal});if(!alive.current||signal.aborted)return;if(detail.machine.id!==machine.id)throw Error(t('主机详情身份不匹配','Host details do not match'));const available=detail.credentials.filter(reusableMachineCredential);setCredentials(available);const selected=defaultMachineCredential(available,detail.machine)??available[0]?.id;setCredential(selected);if(selected)await readDirectory('/',selected,signal)});
+  void guarded(async signal=>{
+   const completeAccounts=Array.isArray(machine.accounts)&&machine.accounts.every(account=>Array.isArray(account.credentials));
+   const detail=completeAccounts?undefined:await api<{machine:Host;credentials:Credential[]}>(`/machines/${encodeURIComponent(machine.id)}`,{signal});
+   if(!alive.current||signal.aborted)return;
+   if(detail&&detail.machine.id!==machine.id)throw Error(t('主机详情身份不匹配','Host details do not match'));
+   const host=detail?.machine??machine;
+   if(host.accounts?.some(account=>account.machine_id!==machine.id||account.credentials?.some(value=>value.account_id!==account.id||value.username!==account.username||value.account_revision!==account.revision)))throw Error(t('主机详情身份不匹配','Host details do not match'));
+   const available=(detail?.credentials??host.accounts?.flatMap(account=>account.credentials??[])??[]).filter(reusableMachineCredential);
+   setCredentials(available);
+   const selected=defaultMachineCredential(available,host)??available[0]?.id;
+   setCredential(selected);
+   if(!selected)return;
+   try{await readInitialDirectory(selected,signal)}
+   catch(error){
+    // A list snapshot can predate a credential change. Refresh the choices
+    // only after a rejected open; never retry SSH under a different identity.
+    if(!detail&&error instanceof ApiError&&['连接凭据已撤销','连接凭据已过期或有效期无效','连接凭据秘密已清除，请添加新凭据','file_credential_changed'].includes(error.message)){
+     try{
+      const fresh=await api<{machine:Host;credentials:Credential[]}>(`/machines/${encodeURIComponent(machine.id)}`,{signal});
+      if(fresh.machine.id===machine.id&&alive.current&&!signal.aborted){const options=fresh.credentials.filter(reusableMachineCredential);setCredentials(options);if(!options.some(value=>value.id===selected))setCredential(undefined)}
+     }catch{/* Keep the original credential rejection visible. */}
+    }
+    throw error;
+   }
+  });
   return()=>{alive.current=false;abort.current?.abort();pending.current=false;void releaseSession()};
  },[machine.id]);
  useEffect(()=>{if(!dirty)return;const listener=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue=''};window.addEventListener('beforeunload',listener);return()=>window.removeEventListener('beforeunload',listener)},[dirty]);
