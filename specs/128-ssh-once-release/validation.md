@@ -17,9 +17,14 @@
 - 构建执行方在推送前执行 `docker buildx imagetools inspect docker.heyphp.com/lightmoni/lightmoni:20261112-ssh-once-readiness-v2`，退出码 1、结果为 `not found`，确认标签当时未占用。该历史检查由构建执行方提供；本轮独立验证确认推送后的远端内容与 revision 匹配。
 - 在提交发布 PR 前再次拉取 GitHub `origin/main`，仍为 `9ec010acd732a3bca5938236a429b3b64a88d941`，发布分支与主干无新提交需要同步。
 
+## GitHub PR
+
+- 面向 `main` 创建 [PR #175](https://github.com/workhold/lightmoni/pull/175)，标题为 `chore(release): pin SSH once readiness image`，首次提交 `4a8d1f737b94668a72142416dc8a0cacb52d25e2`。PR 描述记录最终行为、兼容影响、双架构镜像验证、生产待办及架构影响不适用的理由，并链接仓库设计章节和 Doca 基线。
+- 创建后 GitHub 返回 `mergeable=MERGEABLE`、`mergeStateStatus=CLEAN`；`gh pr checks 175` 报告此分支没有配置的检查。合并与最终合并提交在实际完成后回读，不在此处预填。
+
 ## 尚待验证
 
-- GitHub PR、合并提交与最终生产 Compose 版本。
+- GitHub PR 合并提交与最终生产 Compose 版本。
 - 生产未完成签名任务、受保护备份及 SQLite `quick_check`、固定镜像拉取、仅中心重建、容器和卷身份、健康接口与 SDD127 兼容回读。
 - 回滚镜像和本地覆盖文件在生产的可用性。
 
