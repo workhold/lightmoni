@@ -33,3 +33,5 @@
 3. 在原生产 Compose 项目检查运行镜像、中心与 ClickHouse 容器、卷和未完成签名任务；备份 Compose、环境、主密钥及中心 SQLite 一致快照并通过 `quick_check`。保留旧镜像和卷作为回滚基线。
 4. 拉取并核对镜像摘要后仅执行 `docker compose up -d --no-deps --no-build --pull never --wait --wait-timeout 300 lightmoni`。核对中心及 ClickHouse 健康、ClickHouse 容器 ID 和卷、数据兼容行为，并以公网 GET/HEAD 检查主 HTML `no-store`、哈希 JS/CSS 一年 `immutable`、缺失资源 404。
 5. 中心健康或兼容验收失败时，使用原项目与旧固定镜像只重建中心回滚，保留数据卷。记录发布结果、在线响应头与剩余性能问题；性能优化另按 SDD 经 PR 合入、发包和部署。
+
+后续发行候选已更新为 SDD 132 的 `20261113-cd1e609-host-lazy-v1`，包含本 SDD 的全部改动及主机页按需加载；上列 `20261112-01dff1b-panel-responsive-v1` 保留为本阶段已发布的固定版本和回滚证据。生产实际运行版本以部署验收记录为准。
