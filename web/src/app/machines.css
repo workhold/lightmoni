@@ -68,6 +68,7 @@
 .lm-host-channel-label{font-size:12px;min-width:42px;color:var(--lm-muted)}
 .lm-host-channel-value{display:flex;flex-wrap:wrap;align-items:center;gap:4px;font-size:12px;min-width:0}
 .lm-host-channels .ant-tag{margin:0 4px 3px 0;white-space:normal;font-size:12px}
+.lm-host-channels .lm-host-agent-observed{display:block;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 .lm-host-channels .ant-btn-link{padding:0 2px;height:auto;font-size:12px}
 .lm-host-list .lm-machine-release>.ant-typography,.lm-host-list .lm-machine-release>div>.ant-typography{margin:0}
 .lm-host-list .lm-machine-release>div:first-child{display:flex;align-items:center;flex-wrap:wrap;gap:6px}

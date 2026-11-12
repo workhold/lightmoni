@@ -254,8 +254,14 @@ export async function createApp(cfg: Config) {
         res.end();
         return;
       }
-      if (!existsSync(file) || !statSync(file).isFile())
+      if (!existsSync(file) || !statSync(file).isFile()) {
+        if (relative.startsWith("/assets/")) {
+          res.writeHead(404, { "cache-control": "no-store" });
+          res.end();
+          return;
+        }
         file = join(publicDir, "index.html");
+      }
       if (!existsSync(file)) {
         res.writeHead(503, { "content-type": "text/plain" });
         res.end("Web assets are missing; run npm --prefix web run build");
@@ -266,8 +272,10 @@ export async function createApp(cfg: Config) {
         "content-length": statSync(file).size,
         "cache-control":
           extname(file) === ".html"
-            ? "no-cache"
-            : "public, max-age=31536000, immutable",
+            ? "no-store"
+            : /^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.[^/.]+$/.test(relative)
+              ? "public, max-age=31536000, immutable"
+              : "public, max-age=3600",
         "x-content-type-options": "nosniff",
       });
       if (req.method === "HEAD") {

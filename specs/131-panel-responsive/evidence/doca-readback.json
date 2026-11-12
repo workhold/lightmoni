@@ -1,0 +1,39 @@
+{
+  "document": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "date": "2026-11-12",
+  "latest_readback_seq": 1799,
+  "epoch_id": "63d4490e-11da-4b5a-8674-cd671d8ad4b6",
+  "title": "LightMoni 系统设计基线",
+  "target_sections": ["主机容器与文件管理（SDD107）", "主机状态读取、文件会话与前端缓存（SDD131）"],
+  "original_blocks": 1000,
+  "readback_blocks": 1009,
+  "original_blocks_preserved_in_order_except_target_text_at_seq_1793": true,
+  "original_native_flowcharts": 55,
+  "original_nodes": 509,
+  "original_edges": 532,
+  "original_flowchart_nodes_and_edges_equal_at_seq_1793": true,
+  "latest_target_paragraphs_readback_equal": true,
+  "latest_new_flowchart_nodes_and_edges_equal": true,
+  "new_section_order_verified": true,
+  "new_flowchart": {
+    "id": "sdd131-flow",
+    "node_ids": ["sdd131-agent", "sdd131-state", "sdd131-page", "sdd131-session", "sdd131-sftp", "sdd131-audit"],
+    "edges": [["sdd131-agent", "sdd131-state"], ["sdd131-state", "sdd131-page"], ["sdd131-page", "sdd131-session"], ["sdd131-session", "sdd131-sftp"], ["sdd131-session", "sdd131-audit"]],
+    "nodes_and_edges_equal_after_save": true
+  },
+  "incremental_fast_open_readback": {
+    "saved_seq": 1799,
+    "readback_seq": 1799,
+    "target_paragraph_ids": ["sdd107-host-files-2", "sdd131-files-1", "sdd131-files-2"],
+    "all_target_paragraphs_match_expected": true,
+    "initial_directory_path_documented": true,
+    "bounded_sftp_read_documented": true,
+    "future_agent_outbound_channel_separate_design_documented": true,
+    "target_graph_id": "sdd131-flow",
+    "target_graph_nodes": 6,
+    "target_graph_edges": 5,
+    "target_graph_nodes_and_edges_match_prior_readback": true,
+    "graph_mutations_in_increment": 0
+  },
+  "note": "At seq 1793 a full readback verified all 1000 original blocks in order, all 55 original native graphs, and the new graph. Targeted text edits through seq 1797 finalized same-login multi-panel sharing and last-opener close wording. Incremental text-only edits at seq 1798–1799 documented combined session+initial-directory read, bounded pipelined SFTP READ, and a future Agent-initiated outbound channel as a separate design. Three target paragraphs and the new graph's six nodes/five edges were read back at latest seq 1799. No graph operation occurred in the increment."
+}
