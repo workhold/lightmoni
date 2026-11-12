@@ -62,6 +62,17 @@ test("one-time scheduling consumes once across restart, edits and disable/enable
   }finally{f.close();}
 });
 
+test('scheduled scripts remain claimable when SSH-only manual dispatch lacks task-once evidence',()=>{
+  const f=fixture();try{
+    f.task('scheduled',{schedule:{mode:'at',run_at:'2026-10-30T00:01:00Z'}});
+    f.store.sshOnceReady=()=>false;f.store.setSSHOnly();
+    f.store.tick();f.advance(60);f.store.tick();
+    const run=f.store.list({task_id:'scheduled'})[0];
+    assert.equal(run?.trigger,'schedule');
+    assert.equal(f.claim('agent-one',capabilities)?.id,run.id);
+  }finally{f.close();}
+});
+
 test("a near-future at intent is registered at save and executes on the normal next scan",()=>{
   for(const firstScan of [true,false]) {
     const f=fixture();try{

@@ -1,0 +1,39 @@
+{
+  "resource_url": "https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53",
+  "readback_seq": 1782,
+  "saved": true,
+  "section_after": "sdd123-reference",
+  "text_blocks": {
+    "sdd127-heading": "SSH 单次命令的发行就绪门禁（SDD127）",
+    "sdd127-evidence": "中心的 SSH 主动操作沿用第 123 章的持久计划、固定命令与精确作业 ID。远端发行包先证明具备相应入口：普通 Agent 的认证心跳报告 ssh_once_commands=[jobs-once]，独立签名的 root helper 心跳报告 [managed-once, task-once]。中心严格校验命令集合，只接受当前绑定 Agent 或执行器身份的报告。能力字段不包含凭据，不授予通用 SSH 命令执行权限，也不改变 Agent 的遥测、配置或定时任务通道。",
+    "sdd127-migration": "已在生产验证包含三个入口的发行修订 16b151337cc94c1b7f3f7de56bdcad561759c85b 早于新心跳字段。中心仅以完整 source_revision 与 state_schema=1 为该精确发行提供迁移兼容；其他缺少声明的旧修订不能按版本字符串或修订号顺序推断可用。后续发行使用显式能力字段。离线但已认证的历史心跳可作为发行能力证据；在线时间不是 SSH 主动操作的前提，SSH 凭据、可信主机密钥、当前身份绑定和 HTTPS 回执授权仍须单独验证。",
+    "sdd127-explicit-precedence": "若认证心跳显式声明 ssh_once_commands，中心始终以该集合为准；精确修订的迁移例外只在字段缺失时适用。显式空集合或部分集合不能由迁移例外扩大。",
+    "sdd127-gate": "受管运维、容器及提权计划需要 helper 的 managed-once 证据；普通只读作业需要 Agent 的 jobs-once 证据；人工脚本和人工重试需要 helper 的 task-once 证据。缺少证据时状态显示升级原因，新计划在排队前返回升级要求。用户配置的定时脚本仍由常驻 helper 原循环按原身份和授权领取，不需要单次入口。",
+    "sdd127-old-queue": "中心扫描历史未领取队列时再次检查对应命令能力；不支持的旧版记录以 agent_upgrade_required 终结，不建立 SSH 连接，也不回退常驻 Agent。已领取或 unknown 的作业不受准入失败覆盖，保留原租约、审计、只读核对和不自动重放围栏。能力证据只决定能否调用发行包入口，不代表主机可达、凭据有效或执行成功。"
+  },
+  "native_flowchart": {
+    "id": "sdd127-ssh-once-flow",
+    "node_ids": ["sdd127-plan", "sdd127-record", "sdd127-heartbeat", "sdd127-gate-node", "sdd127-ssh", "sdd127-failed", "sdd127-scheduled"],
+    "edges": [
+      ["sdd127-plan", "sdd127-record"],
+      ["sdd127-record", "sdd127-gate-node"],
+      ["sdd127-heartbeat", "sdd127-gate-node"],
+      ["sdd127-gate-node", "sdd127-ssh"],
+      ["sdd127-gate-node", "sdd127-failed"]
+    ]
+  },
+  "preserved_native_flowchart": {
+    "id": "sdd117-deployment-followups-flow",
+    "node_count": 8,
+    "edge_count": 7,
+    "edges": [
+      ["sdd117-authority", "sdd117-center"],
+      ["sdd117-center", "sdd117-executor"],
+      ["sdd117-center", "sdd117-ssh"],
+      ["sdd117-center", "sdd117-view"],
+      ["sdd117-sdk", "sdd117-center"],
+      ["sdd117-authority", "sdd117-backup"],
+      ["sdd117-backup", "sdd117-artifact"]
+    ]
+  }
+}

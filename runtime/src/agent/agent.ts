@@ -1,4 +1,5 @@
 import { desiredHash } from "../shared/desired-state.js";
+import type { SSHOnceCommand } from "../shared/ssh-once-readiness.js";
 import {
   createServer,
   type Server,
@@ -205,6 +206,7 @@ export class Agent {
       boot_id: this.bootID,
       runtime: { mode: this.config.runtime_mode, permission_generation: this.config.permission_generation, uid: process.getuid?.() ?? -1, gid: process.getgid?.() ?? -1 },
       release: { ...this.release },
+      ssh_once_commands: ['jobs-once'] satisfies SSHOnceCommand[],
       platform: process.platform === "win32" ? "windows" : process.platform,
       arch: process.arch === "x64" ? "amd64" : process.arch,
       config_revision: this.revision,

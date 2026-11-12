@@ -1,4 +1,5 @@
 import { ordinaryReadOnlyJob } from "../shared/ordinary-agent-jobs.js";
+import { supportsSSHOnce } from '../shared/ssh-once-readiness.js';
 import { assertNoDockerInstallation, pendingDockerInstallation } from './machine-docker-guard.js';
 import { id, token } from "../shared/crypto.js";
 import { dockerJobAction, dockerReceipt, safeDockerCode } from '../shared/docker-jobs.js';
@@ -60,6 +61,7 @@ export interface AgentJobStore {
   expireLeases?():void;
   setPrivilegedCancellation?(cancel: (jobID:string,actor:string)=>void):void;
   setSSHOnly?():void;
+  supportsSSHOnce(agentID:string):boolean;
   failQueuedSSH?(jobID:string,code:string):Record<string,any>;
   leasePrivileged?(jobID: string, leaseID: string, expiresAt: string): Record<string, any>;
   claim(agentID: string, capabilities: string[], receiptCursor?: string, requestedJobID?: string): Record<string, any> | null;
@@ -230,6 +232,12 @@ export function registerAgentJobs(
   `);
 
   let sshOnly=false;
+  const agentOnceReady=(agentID:string)=>{
+    if(!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='agents'"))return false;
+    const row=db.get<{heartbeat:string}>('SELECT heartbeat FROM agents WHERE id=?',agentID);
+    if(!row)return false;
+    try{return supportsSSHOnce(JSON.parse(row.heartbeat),'jobs-once');}catch{return false;}
+  };
   let privilegedCancel: ((jobID:string,actor:string)=>void) | undefined;
   let privilegedReady: ((agentID:string)=>void) | undefined;
   const row = (jobID: string) => {
@@ -320,6 +328,7 @@ export function registerAgentJobs(
     if(rootRuntime&&!privileged)fail(409,'root_agent_requires_signed_task: root Agent 的主机操作必须使用签名任务，请使用任务中心或受管运维入口');
     const existing = db.get<any>("SELECT * FROM agent_jobs WHERE deployment_id=? AND operation_id=?", deploymentID, operationID);
     if (existing) return view(existing);
+    if(sshOnly&&!privileged&&!agentOnceReady(agentID))fail(409,'agent_upgrade_required');
     if (privileged) { if (!privilegedReady) fail(409,"privileged_executor_required"); privilegedReady(agentID); }
     assertNoPendingMachineInstallation(db,"",agentID);
     if (privileged) assertManagedJobAdmission(db,agentID);
@@ -657,6 +666,6 @@ export function registerAgentJobs(
       updateListeners.add(listener);
       return () => updateListeners.delete(listener);
     },
-    setSSHOnly(){sshOnly=true;},
+    setSSHOnly(){sshOnly=true;},supportsSSHOnce:agentOnceReady,
   };
 }

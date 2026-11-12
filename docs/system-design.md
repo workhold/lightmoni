@@ -2723,3 +2723,29 @@ flowchart LR
 ```
 
 实现与验证记录见 [SDD123](../specs/123-ssh-managed-operations/validation.md)。在线同步目标为 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。
+
+## 127. SSH 单次命令的发行就绪门禁（SDD127）
+
+### 127.1 心跳能力证据
+
+中心的 SSH 主动操作仍使用第 123 章的持久计划、固定命令与精确作业 ID。远端发行包必须先证明具备相应入口：普通 Agent 的认证心跳报告 `ssh_once_commands=["jobs-once"]`，独立签名的 root helper 心跳报告 `["managed-once","task-once"]`。中心严格校验命令集合，只接受当前绑定 Agent 或执行器身份的报告。能力字段不包含凭据，不授予通用 SSH 命令执行权限，也不改变 Agent 的遥测、配置或定时任务通道。
+
+首个已在生产验证含三个入口的发行修订 `16b151337cc94c1b7f3f7de56bdcad561759c85b` 在新心跳字段出现前已安装。中心以完整 `source_revision` 加 `state_schema=1` 为该精确发行提供迁移兼容；其他缺少声明的旧修订不能按版本字符串或修订号顺序推断可用。显式命令集合始终优先，精确修订例外只覆盖字段缺失。离线但已认证的历史心跳可作为发行能力证据；在线时间不是 SSH 主动操作的前提，SSH 凭据、可信主机密钥、当前身份绑定和 HTTPS 回执授权仍须单独验证。
+
+### 127.2 准入与旧队列
+
+受管运维、容器及提权计划须有 helper 的 `managed-once` 证据；普通只读作业须有 Agent 的 `jobs-once` 证据；人工脚本和人工重试须有 helper 的 `task-once` 证据。缺少证据时，状态显示升级原因，新计划在排队前返回升级要求。用户配置的定时脚本仍由常驻 helper 原循环按原身份和授权领取，不需要单次入口。
+
+中心扫描历史未领取队列时再次检查相应能力；旧版记录以 `agent_upgrade_required` 终结，不建立 SSH 连接，也不回退常驻 Agent。已领取或 unknown 的作业不受准入失败覆盖，继续保留原租约、审计、只读核对和不自动重放围栏。能力证据只决定能否调用发行包入口；它不是主机可达、凭据有效或执行成功的证明。
+
+```mermaid
+flowchart LR
+  plan["管理员 / 中心计划"] --> record["持久作业记录"]
+  record --> gate{"对应单次入口就绪？"}
+  heartbeat["当前绑定 Agent / helper：认证心跳与发行证据"] --> gate
+  gate -->|是| ssh["中心 SSH 固定命令：精确作业 ID"]
+  gate -->|否| failed["未领取：升级要求，不连接 SSH"]
+  scheduled["定时脚本：原 helper 循环"]
+```
+
+规格、契约、任务和验收见 [SDD127](../specs/127-ssh-once-readiness/spec.md)。在线设计文档为 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)，同一 PR 记录写入与最新版本回读。

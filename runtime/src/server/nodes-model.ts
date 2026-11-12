@@ -1,4 +1,5 @@
 import { dockerInventory } from "../shared/application-observation.js";
+import { validateSSHOnceCommands } from "../shared/ssh-once-readiness.js";
 import { createHash, randomBytes } from "node:crypto";
 import { normalize as clean } from "node:path";
 import type { DB } from "../shared/types.js";
@@ -578,6 +579,10 @@ export class NodeStore {
       assertAgentActive(this.db, id, 401);
       try { hostCapacity(values); }
       catch { problem(400, "主机容量无效：CPU 须为正整数，内存须为正有限 MiB"); }
+      if (values.ssh_once_commands !== undefined) {
+        try { validateSSHOnceCommands(values.ssh_once_commands, ['jobs-once']); }
+        catch { problem(400, 'invalid_ssh_once_commands'); }
+      }
       let addresses;
       try { addresses = normalizeNetworkAddresses(values.network_addresses); }
       catch { problem(400, "主机网络地址无效，最多支持 64 个网卡地址"); }

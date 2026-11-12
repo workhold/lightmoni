@@ -70,6 +70,13 @@ test("helper managed snapshots reject the retired standalone executor state root
   assert.throws(() => managedSnapshotConfig("/var/lib/lightmoni-executor/managed-jobs/" + "a".repeat(32) + ".json"));
 });
 
+test('signed helper heartbeat advertises fixed SSH entrypoints',async()=>{
+  const f=fixture();try{
+    await f.runner.heartbeat();
+    assert.deepEqual(f.requests.find(request=>request.route==='heartbeat')?.body.ssh_once_commands,['managed-once','task-once']);
+  }finally{f.close();}
+});
+
 test("real Ed25519 plans bind payload, host, identity, generations, policy and full lineage", () => {
   const f = fixture(); try {
     const sign = (p: any) => signJWS(p, f.center.privateKey, "center-key"), valid = f.plan(); assert.equal(f.client.verifyPlan(sign(valid), f.payload).job_id, "job");

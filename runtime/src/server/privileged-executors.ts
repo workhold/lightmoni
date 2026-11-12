@@ -18,6 +18,7 @@ import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoDockerInstallation } from "./machine-docker-guard.js";
 import { hasPendingExecutorLifecycle } from "./privileged-execution-guard.js";
 import type { TaskRunStore } from "./task-center.js";
+import { supportsSSHOnce, validateSSHOnceCommands, type SSHOnceCommand } from '../shared/ssh-once-readiness.js';
 
 type Row = Record<string, any>;
 const terminal = (state: string) => ["succeeded", "failed", "cancelled", "unknown"].includes(state);
@@ -71,6 +72,12 @@ export class PrivilegedExecutorStore {
   managed?:ManagedExecutorBridge;
   private sshOnly=false;
   setSSHOnly(){this.sshOnly=true;}
+  supportsSSHOnce(machineID:string,command:Extract<SSHOnceCommand,'managed-once'|'task-once'>):boolean {
+    const host=this.deps.db.get<Row>('SELECT agent_id FROM managed_machines WHERE id=?',machineID);
+    const row=this.deps.db.get<Row>("SELECT * FROM privileged_executors WHERE machine_id=? AND state='active' ORDER BY install_generation DESC LIMIT 1",machineID);
+    if(!row||row.agent_id!==host?.agent_id||isAgentRemoved(this.deps.db,row.agent_id)||!row.observation_enc)return false;
+    try{return supportsSSHOnce(parseStrictJSON(this.deps.decrypt(row.observation_enc)),command);}catch{return false;}
+  }
   prepareSSH(machineID:string){
     const executor=this.deps.db.get<Row>("SELECT * FROM privileged_executors WHERE machine_id=? AND state='active' ORDER BY install_generation DESC LIMIT 1",machineID);
     if(executor)this.managed?.prepare(executor);
@@ -339,13 +346,16 @@ export class PrivilegedExecutorStore {
       AND c.method IN ('ssh_key','password') AND c.retention!='one_time'
       AND (c.retention='permanent' AND c.expires_at='' OR julianday(c.expires_at)>julianday(?))`,machineID,this.now());
     const available=this.sshOnly ? sshReady&&binding&&row?.state==='active' : online;
+    const onceReady=!this.sshOnly||supportsSSHOnce(observation,'managed-once');
+    const executionReady=available&&onceReady;
     const authorized = JSON.parse(policy.capabilities_json) as string[];
     return { machine_id: machineID, policy_generation: policy.generation, executor: row ? { id: row.id, state: row.state, install_generation: row.install_generation, online, last_seen: row.last_seen, version: observation.version ?? "", boot_id: observation.boot_id ?? "",activation_id:observation.activation_id??"",release:observation.release ?? null,ordinary_task_identity:observation.ordinary_task_identity??null } : null,
-      capabilities: Object.fromEntries(PRIVILEGED_CAPABILITIES.map(capability => [capability, { authorized: authorized.includes(capability), effective: !authorized.includes(capability) ? "disabled" : !row ? "pending" : !binding ? "blocked" : available && observation.policy_generation === policy.generation && observation.capabilities?.includes(capability) ? "ready" : "unavailable", policy_generation: policy.generation }])),
-      ...(available && authorized.includes('operations.managed.v1') && observation.policy_generation===policy.generation && observation.capabilities?.includes('operations.managed.v1') && observation.docker_inventory?{docker_inventory:observation.docker_inventory}:{}),
-      operations_capabilities:available && observation.policy_generation===policy.generation && observation.capabilities?.includes("operations.managed.v1")?observation.operations_capabilities??[]:[],
-      account_profiles: available && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreter_profiles: available && observation.policy_generation === policy.generation ? observation.interpreter_profiles ?? [] : [],
-      script_profiles: { accounts: available && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreters: available && observation.policy_generation === policy.generation ? Object.fromEntries((observation.interpreter_profiles ?? []).map((p: Row) => [p.runtime, p.sha256])) : {} } };
+      capabilities: Object.fromEntries(PRIVILEGED_CAPABILITIES.map(capability => [capability, { authorized: authorized.includes(capability), effective: !authorized.includes(capability) ? "disabled" : !row ? "pending" : !binding ? "blocked" : executionReady && observation.policy_generation === policy.generation && observation.capabilities?.includes(capability) ? "ready" : "unavailable", policy_generation: policy.generation,
+        ...(this.sshOnly&&available&&!onceReady?{reason_code:'agent_upgrade_required'}:{}) }])),
+      ...(executionReady && authorized.includes('operations.managed.v1') && observation.policy_generation===policy.generation && observation.capabilities?.includes('operations.managed.v1') && observation.docker_inventory?{docker_inventory:observation.docker_inventory}:{}),
+      operations_capabilities:executionReady && observation.policy_generation===policy.generation && observation.capabilities?.includes("operations.managed.v1")?observation.operations_capabilities??[]:[],
+      account_profiles: executionReady && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreter_profiles: executionReady && observation.policy_generation === policy.generation ? observation.interpreter_profiles ?? [] : [],
+      script_profiles: { accounts: executionReady && observation.policy_generation === policy.generation ? observation.account_profiles ?? [] : [], interpreters: executionReady && observation.policy_generation === policy.generation ? Object.fromEntries((observation.interpreter_profiles ?? []).map((p: Row) => [p.runtime, p.sha256])) : {} } };
   }
   /** Resolve ordinary-script identity only from the latest signature-verified helper heartbeat. */
   ordinaryTaskIdentity(machineID:string,agentID:string,executorID:string,installGeneration:number) {
@@ -399,8 +409,9 @@ export class PrivilegedExecutorStore {
     });
   }
   heartbeat(executor: Row, value: unknown) {
-    const keys = ["version", "boot_id", "activation_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release","operations_capabilities","docker_inventory","ordinary_task_identity","application_observation"];
-    const v = object(value, keys,keys.filter(k=>!["release","operations_capabilities","docker_inventory","ordinary_task_identity","application_observation"].includes(k))); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
+    const keys = ["version", "boot_id", "activation_id", "policy_generation", "capabilities", "account_profiles", "interpreter_profiles","release","operations_capabilities","docker_inventory","ordinary_task_identity","application_observation","ssh_once_commands"];
+    const v = object(value, keys,keys.filter(k=>!["release","operations_capabilities","docker_inventory","ordinary_task_identity","application_observation","ssh_once_commands"].includes(k))); boundedText(v.version, 128); validate(() => nonce(v.boot_id));
+    if(v.ssh_once_commands!==undefined)validate(()=>validateSSHOnceCommands(v.ssh_once_commands,['managed-once','task-once']));
     if(v.application_observation!==undefined)v.application_observation=applicationObservation(v.application_observation);
     if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(v.activation_id))fail(400,"invalid_executor_activation");
     if (v.release!==undefined) {
@@ -460,7 +471,9 @@ export class PrivilegedExecutorStore {
   }
   requireManagedReady(agentID:string) {
     const host=this.deps.db.get<Row>("SELECT id FROM managed_machines WHERE agent_id=?",agentID);
-    if(!host||this.getStatus(host.id).capabilities['operations.managed.v1'].effective!=='ready')fail(409,'managed_operations_executor_required');
+    if(!host)fail(409,'managed_operations_executor_required');
+    const capability=this.getStatus(host.id).capabilities['operations.managed.v1'];
+    if(capability.effective!=='ready')fail(409,capability.reason_code==='agent_upgrade_required'?'agent_upgrade_required':'managed_operations_executor_required');
   }
   enqueueManaged(job:Row,payload:PrivilegedPayload,actor:string) {
     this.actor(actor);this.requireManagedReady(job.agent_id);
@@ -483,7 +496,7 @@ export class PrivilegedExecutorStore {
     if(payload.kind==='managed')fail(400,'managed_jobs_require_registered_operation');
     const targets = v.host_ids.map((id: unknown) => {
       validate(() => boundedText(id)); const h = this.host(id as string), policy = this.policy(h.id), status = this.getStatus(h.id);
-      if (status.capabilities[expected].effective !== "ready") fail(409, "execution_capability_not_ready");
+      if (status.capabilities[expected].effective !== "ready") fail(409, status.capabilities[expected].reason_code==='agent_upgrade_required'?'agent_upgrade_required':"execution_capability_not_ready");
       this.idle(h.id, h.agent_id);
       if (payload.kind === "script") {
         if (!status.account_profiles.some((account: ExecutorAccount) => canonicalJSON(account) === canonicalJSON(payload.account))) fail(409, "account_changed");

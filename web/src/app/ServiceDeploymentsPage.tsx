@@ -29,6 +29,9 @@ async function sha256(file: File) {
 
 export default function ServiceDeploymentsPage({ user }: { user: User }) {
   const { t, language } = useI18n();
+  const actionError=(value:unknown,fallback:string)=>value instanceof Error&&value.message==='agent_upgrade_required'
+    ?t('请先升级目标主机 Agent，再执行中心 SSH 主动操作。','Upgrade the target host’s Agent before running center initiated SSH operations.')
+    :value instanceof Error?value.message:fallback;
   const { message } = App.useApp();
   const [params, setParams] = useSearchParams();
   const [services, setServices] = useState<Service[]>([]);
@@ -109,7 +112,7 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
       await post(`/services/${encodeURIComponent(detail.service.id)}/targets/${encodeURIComponent(target.id)}/preflight`, { confirm: true });
       await load(detail.service.id);
       void message.success(t('只读预检任务已提交；完成后刷新查看结果', 'Read-only preflight queued; refresh to see its result'));
-    } catch (value) { setError(value instanceof Error ? value.message : t('提交主机预检失败', 'Unable to submit host preflight')); }
+    } catch (value) { setError(actionError(value,t('提交主机预检失败', 'Unable to submit host preflight'))); }
     finally { setPreflighting(""); }
   };
   const openReleaseModal = () => { setUploadRelease(undefined); setUploadFile(undefined); setUploadError(''); releaseForm.resetFields(); setReleaseModal(true); };
@@ -158,7 +161,7 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
     if (!detail) return; setBusy(true); try { const result = await post<Deployment>(`/services/${encodeURIComponent(detail.service.id)}/deployments/plan`, { target_id: targetID, release_id: releaseID }); setParams({ service: detail.service.id, deployment: result.id }); await load(detail.service.id); const reason = result.plan.provider_plan_reason; void message.success(reason === 'artifact_missing' || reason === 'artifact_invalid' || reason === 'artifact_architecture_mismatch' || reason === 'agent_architecture_unknown' ? t('计划已生成，但当前制品或 Agent 条件不满足执行要求；请查看计划详情。', 'Plan created, but the artifact or Agent does not meet execution requirements. Review the plan details.') : reason === 'agent_preflight_required' ? t('预览计划已生成；请先完成只读预检，再为最新状态重新生成计划。', 'Preview plan created. Complete read-only preflight, then create a plan from the latest state.') : t('可审阅的部署计划已生成。', 'Reviewable deployment plan created.')); } catch (value) { setError(value instanceof Error ? value.message : t('生成部署计划失败', 'Unable to create deployment plan')); } finally { setBusy(false); }
   };
   const approve = async (deployment: Deployment) => {
-    setBusy(true); try { await post(`/deployments/${encodeURIComponent(deployment.id)}/approve`, { confirm: true, expected_state: deployment.status }); await load(detail?.service.id); void message.success(t('部署已批准，等待中心 SSH 执行', 'Deployment approved; waiting for center SSH execution')); } catch (value) { setError(value instanceof Error ? value.message : t('批准部署失败', 'Unable to approve deployment')); } finally { setBusy(false); }
+    setBusy(true); try { await post(`/deployments/${encodeURIComponent(deployment.id)}/approve`, { confirm: true, expected_state: deployment.status }); await load(detail?.service.id); void message.success(t('部署已批准，等待中心 SSH 执行', 'Deployment approved; waiting for center SSH execution')); } catch (value) { setError(actionError(value,t('批准部署失败', 'Unable to approve deployment'))); } finally { setBusy(false); }
   };
   const cancel = async (deployment: Deployment) => {
     setBusy(true); try { await post(`/deployments/${encodeURIComponent(deployment.id)}/cancel`, { confirm: true, expected_state: deployment.status }); await load(detail?.service.id); void message.success(t('部署计划已取消', 'Deployment plan cancelled')); } catch (value) { setError(value instanceof Error ? value.message : t('取消部署失败', 'Unable to cancel deployment')); } finally { setBusy(false); }

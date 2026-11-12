@@ -67,6 +67,21 @@ test('manual scripts require an exact SSH invocation while scheduled helper poll
   }finally{f.close();}
 });
 
+test('an old helper blocks new manual scripts without invalidating an already accepted run',()=>{
+  const f=fixture();try{
+    f.task('manual-old');
+    f.store.sshOnceReady=()=>false;
+    f.store.setSSHOnly();
+    assert.throws(()=>f.store.dispatch('manual-old',{confirm:true},'admin'),/agent_upgrade_required/);
+    assert.equal(f.store.list().length,0);
+    f.store.sshOnceReady=()=>true;
+    const accepted=f.store.dispatch('manual-old',{confirm:true},'admin').runs[0];
+    assert.equal(accepted.state,'queued');
+    f.store.sshOnceReady=()=>false;
+    assert.equal(f.store.claimForHelper(f.helper('agent-one'),{capabilities,run_id:accepted.id}).run?.id,accepted.id);
+  }finally{f.close();}
+});
+
 test("ordinary routes cannot claim, mutate, expire or retry a root executor lineage",()=>{
   const f=fixture();try{
     f.task();const run=f.store.dispatch("script-one",{confirm:true},"admin").runs[0];

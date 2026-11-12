@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { DB } from "../src/shared/sqlite.js";
 import { Router } from "../src/shared/http.js";
 import { registerAgentJobs } from "./helpers/domain-jobs.js";
+import { VERIFIED_SSH_ONCE_REVISION } from '../src/shared/ssh-once-readiness.js';
 import type { Dependencies } from "../src/shared/types.js";
 
 function fixture(expirySweepIntervalMs?: number) {
@@ -51,6 +52,26 @@ test("Agent job lease protocol is idempotent and records bounded receipts", () =
   assert.equal(done.lease_id, "");
   assert.equal(f.jobs.get(leased!.id).receipt.state, "succeeded");
   f.db.close();
+});
+
+test('ordinary SSH jobs require an authenticated compatible Agent release before enqueue',()=>{
+  const f=fixture();try{
+    f.db.exec('CREATE TABLE agents(id TEXT PRIMARY KEY,heartbeat TEXT NOT NULL)');
+    const heartbeat=(revision:string,commands?:string[])=>JSON.stringify({release:{source_revision:revision,state_schema:1},...(commands?{ssh_once_commands:commands}:{})});
+    f.db.run('INSERT INTO agents VALUES(?,?)','agent-1',heartbeat('7'.repeat(40)));
+    f.jobs.setSSHOnly?.();
+    const input={agentID:'agent-1',deploymentID:'ssh-read',operationID:'probe',capabilities:['health.http'],
+      actions:[{kind:'health_check',check:{kind:'http',url:'https://example.test/health'}}]};
+    assert.equal(f.jobs.supportsSSHOnce('agent-1'),false);
+    assert.throws(()=>f.jobs.enqueue(input),/agent_upgrade_required/);
+    assert.equal(f.db.get<any>('SELECT count(*) AS total FROM agent_jobs')?.total,0);
+    f.db.run('UPDATE agents SET heartbeat=? WHERE id=?',heartbeat(VERIFIED_SSH_ONCE_REVISION),'agent-1');
+    assert.equal(f.jobs.supportsSSHOnce('agent-1'),true);
+    assert.ok(f.jobs.enqueue(input).id);
+    f.db.run('UPDATE agents SET heartbeat=? WHERE id=?',heartbeat('c'.repeat(40),['jobs-once']),'agent-1');
+    assert.equal(f.jobs.supportsSSHOnce('agent-1'),true);
+    assert.equal(f.jobs.enqueue(input).operation_id,'probe','an existing job remains idempotent across release changes');
+  }finally{f.db.close();}
 });
 
 test("only typed rollback jobs may skip artifact staging", () => {

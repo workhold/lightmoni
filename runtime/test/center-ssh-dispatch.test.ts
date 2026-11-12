@@ -11,7 +11,7 @@ import {SSHError} from '../src/server/machine-ssh.js';
 import type {TaskRunStore} from '../src/server/task-center.js';
 
 const pause=()=>new Promise(resolve=>setTimeout(resolve,20));
-function fixture(t:any,kind:'ordinary'|'privileged',runner:SSHRunner){
+function fixture(t:any,kind:'ordinary'|'privileged',runner:SSHRunner,supported=true){
   const db=new DB(':memory:');t.after(()=>db.close());
   db.exec(`CREATE TABLE managed_machines(id TEXT PRIMARY KEY,agent_id TEXT);
     CREATE TABLE agent_jobs(id TEXT PRIMARY KEY,agent_id TEXT,state TEXT,execution_principal TEXT,created_at TEXT);
@@ -22,8 +22,8 @@ function fixture(t:any,kind:'ordinary'|'privileged',runner:SSHRunner){
   else db.run("INSERT INTO privileged_jobs VALUES(?,'host','queued','2026-11-11')",jobID);
   let released=false,used=false,sshOnly=false,failureCode='',invalidate=()=>{};
   const access={acquireTerminal(_machineID:string,_binding:unknown,onInvalidated:()=>void){invalidate=onInvalidated;return{machine:{id:'host',username:'root',port:22},credentialID:'binding',credentialMethod:'ssh_key',privateKey:'fixture-key',password:'',valid:()=>true,verifyHostKey:()=>true,markUsed(){used=true;},release(){released=true;}};}} as unknown as MachineTerminalAccess;
-  const jobs={setSSHOnly(){sshOnly=true;},failQueuedSSH(id:string,code:string){failureCode=code;db.run("UPDATE agent_jobs SET state='failed' WHERE id=?",id);return{code};}} as unknown as AgentJobStore;
-  const executors={setSSHOnly(){sshOnly=true;},prepareSSH(){},failQueuedSSH(id:string,code:string){failureCode=code;db.run("UPDATE privileged_jobs SET state='failed' WHERE id=?",id);return{code};}} as unknown as PrivilegedExecutorStore;
+  const jobs={setSSHOnly(){sshOnly=true;},supportsSSHOnce(){return supported;},failQueuedSSH(id:string,code:string){failureCode=code;db.run("UPDATE agent_jobs SET state='failed' WHERE id=?",id);return{code};}} as unknown as AgentJobStore;
+  const executors={setSSHOnly(){sshOnly=true;},supportsSSHOnce(){return supported;},prepareSSH(){},failQueuedSSH(id:string,code:string){failureCode=code;db.run("UPDATE privileged_jobs SET state='failed' WHERE id=?",id);return{code};}} as unknown as PrivilegedExecutorStore;
   const deps={db,logger:{warn(){},error(){}}} as unknown as Dependencies;
   const dispatcher=registerCenterSSHDispatch(deps,access,jobs,executors,runner);
   return{db,dispatcher,jobID,flags:()=>({released,used,sshOnly}),failureCode:()=>failureCode,invalidate:()=>invalidate()};
@@ -48,6 +48,17 @@ test('SSH failure before a claim fails only the queued job; a claimed job remain
   assert.equal(f.db.get<any>("SELECT state FROM privileged_jobs WHERE id=?",f.jobID)?.state,'running');
 });
 
+test('an unsupported old release fails a queued job before opening SSH',async t=>{
+  for(const kind of ['ordinary','privileged'] as const){
+    let invoked=false;
+    const f=fixture(t,kind,async()=>{invoked=true;return{stdout:'',stderr:'',stages:[]};},false);
+    f.dispatcher.tick();await pause();
+    assert.equal(invoked,false,kind);
+    assert.equal(f.failureCode(),'agent_upgrade_required',kind);
+    assert.equal(f.db.get<any>(`SELECT state FROM ${kind==='ordinary'?'agent_jobs':'privileged_jobs'} WHERE id=?`,f.jobID)?.state,'failed');
+  }
+});
+
 test('manual tasks use the root SSH entrypoint while scheduler runs stay with the helper',async t=>{
   const db=new DB(':memory:');t.after(()=>db.close());
   db.exec(`CREATE TABLE task_runs(id TEXT PRIMARY KEY,host_id TEXT,state TEXT,execution_principal TEXT,trigger TEXT,requested_by TEXT,created_at TEXT);
@@ -59,8 +70,8 @@ test('manual tasks use the root SSH entrypoint while scheduler runs stay with th
   db.run("INSERT INTO task_runs VALUES(?,'host','queued','agent','schedule','scheduler','2026-11-11')",scheduled);
   let command='',manualOnly=false,used=false;
   const access={acquireTerminal(){return{machine:{id:'host',username:'admin',port:22},credentialID:'binding',credentialMethod:'ssh_key',privateKey:'key',password:'',valid:()=>true,verifyHostKey:()=>true,markUsed(){used=true;},release(){}};}} as unknown as MachineTerminalAccess;
-  const jobs={setSSHOnly(){}} as unknown as AgentJobStore;
-  const executors={setSSHOnly(){}} as unknown as PrivilegedExecutorStore;
+  const jobs={setSSHOnly(){},supportsSSHOnce(){return true;}} as unknown as AgentJobStore;
+  const executors={setSSHOnly(){},supportsSSHOnce(){return true;}} as unknown as PrivilegedExecutorStore;
   const taskRuns={setSSHOnly(){manualOnly=true;},failQueuedSSH(){}} as unknown as TaskRunStore;
   const deps={db,logger:{warn(){},error(){}}} as unknown as Dependencies;
   const dispatcher=registerCenterSSHDispatch(deps,access,jobs,executors,async input=>{

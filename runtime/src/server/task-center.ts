@@ -34,6 +34,7 @@ export class TaskRunStore {
   readonly nodes: NodeStore;
   private sshOnly=false;
   setSSHOnly(){this.sshOnly=true;}
+  sshOnceReady?: (machineID:string)=>boolean;
   failQueuedSSH(id:string,code:string){
     if(!/^[a-z_]{1,64}$/.test(code))fail(400,'invalid_ssh_failure_code');
     this.deps.db.run("UPDATE task_runs SET state='failed',finished_at=?,code=?,summary='中心 SSH 派发失败，请检查主机连接、凭据和 Agent 发行包版本后重新提交' WHERE id=? AND execution_principal='agent' AND state='queued'",this.now(),code,id);
@@ -150,6 +151,7 @@ export class TaskRunStore {
     const existing = this.deps.db.get<any>("SELECT * FROM task_runs WHERE task_id=? AND host_id=? AND request_id=?", task.id, hostID, requestID);
     if (existing) return this.view(existing);
     const h = this.host(hostID);
+    if(this.sshOnly&&(trigger==='manual'||trigger==='retry'&&actor!=='scheduler')&&!this.sshOnceReady?.(h.id))fail(409,'agent_upgrade_required');
     assertNoPrivilegedExecution(this.deps.db, h.id, h.agent_id);
     assertNoPendingMachineInstallation(this.deps.db,h.id,h.agent_id);
     assertNoPendingMachineUninstallation(this.deps.db,h.id,h.agent_id);
@@ -421,6 +423,7 @@ export class TaskRunStore {
       if (hasPendingAgentUpdate(this.deps.db, r.agent_id, r.host_id) || pendingDockerInstallation(this.deps.db,r.host_id,r.agent_id)) return;
       if (pendingMachineInstallation(this.deps.db,r.host_id,r.agent_id)) return;
       if (pendingMachineUninstallation(this.deps.db,r.host_id,r.agent_id)) return;
+      if(this.sshOnly&&r.requested_by!=='scheduler'&&!this.sshOnceReady?.(r.host_id)){close();return;}
       const next = this.insert(task, r.host_id, "retry", r.requested_by, "auto-retry:" + r.id, r.id, snapshot, r.automatic_attempt + 1);
       if (this.externalAuthorization(r.id)) this.deps.db.run("INSERT INTO capability_run_authorizations(run_id,grant_id,user_id,host_id) SELECT ?,grant_id,user_id,host_id FROM capability_run_authorizations WHERE run_id=?", next.id, r.id);
       this.deps.db.run("UPDATE task_runs SET superseded_by=?,auto_retry_closed=1 WHERE id=?", next.id, r.id);
