@@ -20,9 +20,14 @@
 - 发布执行方确认 v2 仅合入仓库，未部署生产；生产当前运行镜像须在部署前现场回读，回滚基线以现场实际版本为准。
 - 使用 `LIGHTMONI_CH_PASSWORD=placeholder docker compose config --quiet` 检查通过；占位值未写入仓库。文档格式和 `git diff --check` 已通过。
 
+## GitHub PR
+
+- 面向 `main` 创建 [PR #177](https://github.com/workhold/lightmoni/pull/177)，标题为 `chore(release): pin SSH once readiness v3 image`，首次提交 `cb17fa4f2b07d6e03785507637f59e6e195f2ae6`。PR 描述记录最终行为、v2 未上线的兼容影响、双架构发行验证、生产待办及架构影响不适用的理由，并链接仓库设计与 Doca 基线。
+- 创建后 GitHub 返回 `mergeable=MERGEABLE`、`mergeStateStatus=CLEAN`；`gh pr checks 177` 报告此分支没有配置的检查。合并与最终合并提交须在实际完成后回读，不预填。
+
 ## 尚待验证
 
-- GitHub 发布 PR、合并提交和生产 Compose 最终版本。
+- GitHub PR 合并提交和生产 Compose 最终版本。
 - 生产未完成签名任务、受保护备份及 SQLite `quick_check`、固定镜像拉取、仅中心重建、容器与卷身份、健康接口，以及 SDD127/129 兼容回读；如无安全的历史队列样本，生产仅记录可验证边界。
 - 原镜像与本地回滚覆盖文件在生产的可用性。
 
