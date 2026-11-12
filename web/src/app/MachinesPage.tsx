@@ -5,19 +5,16 @@ import {agentOperationCanAdvance,agentOperationMatches,agentOperationReadSignal,
 import DockerEnvironmentPanel,{DockerEnvironmentTag} from './ops/DockerEnvironmentPanel';
 import AgentUninstallManual from './AgentUninstallManual';
 import ManagedContainerDialog from "./ManagedContainerDialog";
-import HostContainersDialog from "./HostContainersDialog";
-import HostFilesDialog from "./HostFilesDialog";
 import SystemLogDrawer from "./ops/SystemLogDrawer";
 import {useI18n} from '../shared/i18n';
-import {type ComponentProps,useCallback,useEffect,useRef,useState} from 'react';
+import {lazy,Suspense,type ComponentProps,useCallback,useEffect,useRef,useState} from 'react';
 import {ContainerOutlined,FolderOpenOutlined,CloudDownloadOutlined,CodeOutlined,ApiOutlined,MoreOutlined,DownOutlined,FileTextOutlined,HistoryOutlined,InfoCircleOutlined,KeyOutlined,PlusOutlined,ProfileOutlined,ReloadOutlined,SafetyCertificateOutlined,SearchOutlined,LineChartOutlined} from '@ant-design/icons';
-import {Alert,Button,Descriptions,Empty,Form,Input,InputNumber,Modal,Popconfirm,Select,Space,Table,Tag,Typography,App,Checkbox,Dropdown,Tooltip,Tabs} from '../shared/ui';
+import {Alert,Button,Descriptions,Empty,Form,Input,InputNumber,Modal,Popconfirm,Select,Space,Spin,Table,Tag,Typography,App,Checkbox,Dropdown,Tooltip,Tabs} from '../shared/ui';
 import {api,ApiError} from '../shared/api';
 import type {User} from '../shared/types';
 import {useSearchParams,useNavigate} from 'react-router-dom';
 import SSHCheckSummary,{type SSHCheckResult} from '../shared/SSHCheckSummary';
 import './machines.css';
-import MachineTerminalDialog from './MachineTerminalDialog';
 import {createHostRequestGuard,sshEndpoint,type HostRequestToken,type HostRequestScope} from './host-request-guard';
 import SSHAccountsDialog from './SSHAccountsDialog';
 import InstallationAccountRecovery,{installationRecovery,missingInstallationAccount,type InstallationRecovery} from './InstallationAccountRecovery';
@@ -40,6 +37,10 @@ import MachineBatchDialog,{type BatchAction,type BatchTarget} from './MachineBat
 import MachineAgentUpdateDialog,{AgentUpdateHistory} from './MachineAgentUpdateDialog';
 import MachineAgentRolloutDialog,{type AgentRolloutTarget} from './MachineAgentRolloutDialog';
 import {shortIdentity,type AgentInstalledRelease,type AgentUpdate} from './agent-update-model';
+
+const HostContainersDialog=lazy(()=>import('./HostContainersDialog'));
+const HostFilesDialog=lazy(()=>import('./HostFilesDialog'));
+const MachineTerminalDialog=lazy(()=>import('./MachineTerminalDialog'));
 
 type Capability={available:boolean;reason:string};
 type Machine={capacity?:{cpu_count:number|null;memory_total_mb:number|null;observed_at:string;stale:boolean};agent_operation?:AgentOperationRecord|null;docker_environment?:{state:string;code:string;observed_at:string};agent_release?:AgentInstalledRelease;agent_update?:{state:'current'|'update_available'|'unknown'|'not_installed'|'in_progress';target_sha256?:string;target_version?:string;last_status?:string;last_operation_id?:string};default_account_id?:string;accounts?:SSHAccount[];network?:HostNetwork;label_ids?:string[];labels?:{id:string;name:string}[];observed_hostname?:string;id:string;name:string;address:string;port:number;connection_method:string;host_key_fingerprint:string;host_key_public_key?:string;host_key_observed_at?:string;host_key_status:string;platform:string;arch:string;agent_id:string;agent_status:string;agent_observed_at?:string;credential_count:number;active_credential_count:number;active_ssh_credential_count:number;active_ssh_key_count:number;active_reusable_ssh_credential_count?:number;ssh_recovery_available:boolean;capabilities:{terminal:Capability;ssh_check:Capability;deploy_agent:Capability;uninstall_agent?:Capability;recovery_uninstall_agent?:Capability;update_agent?:Capability;rollback_agent?:Capability};last_deployment_status:string;last_uninstallation_status?:string;updated_at:string;created_at:string};
@@ -518,8 +519,8 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   {admin&&nodeLabels&&<NodeLabelsDialog key={nodeLabels.id} host={nodeLabels} labels={labels} onClose={()=>setNodeLabels(undefined)} onSaved={()=>load(true)}/>}
   {taskHost&&<Modal open title={t(`主机任务 · ${taskHost.name}`,`Host tasks · ${taskHost.name}`)} footer={null} width={1000} onCancel={()=>setTaskHost(undefined)} destroyOnHidden><HostTasksPanel hostID={taskHost.id} admin={admin} labels={labels} onViewRuns={()=>setTaskHost(undefined)}/></Modal>}
   {admin&&<DockerEnvironmentPanel machine={dockerMachine} onClose={()=>setDockerMachine(undefined)} onChanged={()=>void load(true)}/>}
-  {admin&&hostContainers&&<HostContainersDialog key={hostContainers.id} machine={hostContainers} onClose={()=>setHostContainers(undefined)}/>}
-  {admin&&hostFiles&&<HostFilesDialog key={hostFiles.id} machine={hostFiles} onClose={()=>setHostFiles(undefined)}/>}
+  {admin&&hostContainers&&<Suspense fallback={<Modal open title={t('全部容器','All containers')+' · '+hostContainers.name} width={1120} style={{top:24}} footer={null} onCancel={()=>setHostContainers(undefined)} className="lm-host-resource-dialog"><div role="status" aria-live="polite" className="lm-host-dialog-loading"><Spin size="small"/> {t('正在加载容器面板…','Loading containers…')}</div></Modal>}><HostContainersDialog key={hostContainers.id} machine={hostContainers} onClose={()=>setHostContainers(undefined)}/></Suspense>}
+  {admin&&hostFiles&&<Suspense fallback={<Modal open title={t('文件管理','Files')+' · '+hostFiles.name} width={1180} style={{top:24}} footer={null} mask={{closable:false}} onCancel={()=>setHostFiles(undefined)} className="lm-host-resource-dialog lm-host-files-dialog"><div role="status" aria-live="polite" className="lm-host-dialog-loading"><Spin size="small"/> {t('正在加载文件管理…','Loading files…')}</div></Modal>}><HostFilesDialog key={hostFiles.id} machine={hostFiles} onClose={()=>setHostFiles(undefined)}/></Suspense>}
   {inventoryMachine&&<ManagedContainerDialog machine={inventoryMachine} onClose={()=>setInventoryMachine(undefined)}/>}
   <Modal title={t('节点详情','Node details')} open={!!nodeDetail} onCancel={()=>setNodeDetail(undefined)} footer={null} width={760} destroyOnHidden>{nodeDetail&&<><NodeDetails agent={nodeDetail}/>{nodeDetail.lifecycle_state==='removed'&&<Alert type="warning" showIcon title={t('此节点已归档，旧凭据不能继续接入','This node is archived; old credentials can no longer enroll')} description={<>{time(nodeDetail.removed_at||'')} · {nodeDetail.removal_reason||t('未填写原因','No reason provided')}</>}/>}</>}</Modal>
   {admin&&uninstallGuide&&<Modal title={t('离线手动卸载 Agent','Offline manual Agent uninstall')} open onCancel={()=>setUninstallGuide(false)} footer={null} width={780} destroyOnHidden><AgentUninstallManual/></Modal>}
@@ -528,7 +529,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   {admin&&workloadRecoveryMachine&&<MachineWorkloadRecoveryDialog key={workloadRecoveryMachine.id} machine={workloadRecoveryMachine} onRefresh={()=>refreshMachine(workloadRecoveryMachine.id)} onClose={()=>setWorkloadRecoveryMachine(undefined)}/>}
   {admin&&networkMachine&&<MachineServiceAddressesDialog key={networkMachine.id} machineID={networkMachine.id} name={networkMachine.name} onClose={()=>setNetworkMachine(undefined)} onSaved={()=>hostSaved(networkMachine.id)}/>}
   {admin&&editMachine&&<MachineEditDialog key={editMachine.id} machine={editMachine} onClose={()=>setEditMachine(undefined)} onSaved={()=>hostSaved(editMachine.id)}/>}
-  {admin&&terminalDetail&&<MachineTerminalDialog key={terminalDetail.machine.id} machine={terminalDetail.machine} credentials={terminalDetail.credentials} onReleased={()=>refreshMachine(terminalDetail.machine.id)} onClose={closeTerminal}/>}
+  {admin&&terminalDetail&&<Suspense fallback={<Modal open title={t(`SSH 终端 · ${terminalDetail.machine.name}`,`SSH terminal · ${terminalDetail.machine.name}`)} width={1040} style={{top:48}} footer={null} maskClosable={false} onCancel={closeTerminal} className="lm-terminal-dialog"><div role="status" aria-live="polite" className="lm-host-dialog-loading"><Spin size="small"/> {t('正在加载终端…','Loading terminal…')}</div></Modal>}><MachineTerminalDialog key={terminalDetail.machine.id} machine={terminalDetail.machine} credentials={terminalDetail.credentials} onReleased={()=>refreshMachine(terminalDetail.machine.id)} onClose={closeTerminal}/></Suspense>}
   {admin&&newOpen&&<MachineRegistrationDialog onClose={()=>setNewOpen(false)} onChanged={()=>load(true)} onCheck={id=>void openCheck({id})} onPlan={(id,name)=>void openPlan({id,name})}/>}
   {admin&&credentialMachine&&<SSHAccountsDialog key={credentialMachine.id+credentialAction} initialAction={credentialAction} machineID={credentialMachine.id} onClose={()=>{credentialReturn.current=undefined;setCredentialAction('manage');setCredentialMachine(undefined)}} onChanged={()=>hostSaved(credentialMachine.id)} onVerified={async result=>{const id=credentialMachine.id;setCredentialMachine(undefined);await hostSaved(id);credentialReturn.current?.(result);credentialReturn.current=undefined;if(checkDetail?.machine.id===id){setCheckResult(undefined);checkForm.setFieldsValue({credential_id:result.credential_id})}if(planDetail?.machine.id===id&&!planResult){setPlanCheck(undefined);setPlanAccountRecovery(undefined);setPlanError('');planForm.setFieldsValue({auto_account:false,credential_id:result.credential_id})}}}/>}
   <Modal title={t(`SSH 安装检查 · ${checkDetail?.machine.name??''}`,`SSH preflight · ${checkDetail?.machine.name??''}`)} open={admin&&!!checkDetail} onCancel={closeCheck} footer={null} width={680} destroyOnHidden>

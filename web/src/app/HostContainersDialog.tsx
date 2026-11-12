@@ -1,11 +1,12 @@
-import {useEffect,useRef,useState} from 'react';
-import {Alert,Button,Dropdown,Input,Modal,Select,Space,Table,Tag,Typography} from '../shared/ui';
+import {lazy,Suspense,useEffect,useRef,useState} from 'react';
+import {Alert,Button,Dropdown,Input,Modal,Select,Space,Spin,Table,Tag,Typography} from '../shared/ui';
 import {ReloadOutlined,SearchOutlined} from '@ant-design/icons';
 import {api} from '../shared/api';
 import './host-resources.css';
 import {useI18n} from '../shared/i18n';
-import ExternalComposeManagement from './ExternalComposeManagement';
 import HostContainerManagement,{type ContainerSelection} from './HostContainerManagement';
+
+const ExternalComposeManagement=lazy(()=>import('./ExternalComposeManagement'));
 
 type Container={id:string;name:string;image:string;state:string;ports:string;application_id:string;compose_project?:string};
 type Inventory={id:string;agent_id:string;online:boolean;state:string;error:string;observed_at:string;truncated:boolean;active_job:string;docker_capabilities:string[];containers:Container[]};
@@ -49,7 +50,7 @@ export default function HostContainersDialog({machine,onClose}:{machine:{id:stri
   {host?.truncated&&<Alert type="warning" showIcon title={t('容器数量超过采集上限，当前清单不完整','The collection limit was exceeded; this inventory is incomplete')}/>}
   <Space wrap style={{marginBottom:12}}><Button danger disabled={busy||!host?.docker_capabilities.includes('docker.host.batch')||!selected.length||host?.state!=='ready'||host?.truncated} onClick={()=>setBatchSelection({ids:selected,stoppedOnly:false})}>{t('审阅批量删除','Review selected deletion')} ({selected.length}/50)</Button><Button danger disabled={busy||!host?.docker_capabilities.includes('docker.host.batch')||host?.state!=='ready'||host?.truncated||!host?.containers.some(c=>['exited','created','dead'].includes(c.state))} onClick={()=>{const ids=host!.containers.filter(c=>['exited','created','dead'].includes(c.state)).slice(0,50).map(c=>c.id);setSelected(ids);setBatchSelection({ids,stoppedOnly:true})}}>{t('清理停止容器','Clean stopped containers')}</Button><Button disabled={!host?.online} onClick={()=>setComposeOpen(true)}>{t('接管已有 Compose','Manage existing Compose')}</Button></Space>
   {host?.docker_capabilities.includes('docker.host')&&!host.docker_capabilities.includes('docker.host.batch')&&<Alert type="info" title={t('批量操作需要升级此主机管理组件，单容器功能仍可使用','Upgrade this host’s management component for batch actions; individual actions remain available')}/>}
-  {composeOpen&&<ExternalComposeManagement machine={{...machine,agent_id:host?.agent_id}} projects={[...new Set((host?.containers??[]).filter(c=>!c.application_id).map(c=>c.compose_project).filter((v):v is string=>!!v))]} onClose={()=>setComposeOpen(false)}/>}
+  {composeOpen&&<Suspense fallback={<Modal open title={t('已有 Compose 项目','Existing Compose projects')+' · '+machine.name} width={920} style={{top:24}} footer={null} mask={{closable:false}} onCancel={()=>setComposeOpen(false)} className="lm-host-resource-dialog"><div role="status" aria-live="polite" className="lm-host-dialog-loading"><Spin size="small"/> {t('正在加载 Compose 接管…','Loading Compose management…')}</div></Modal>}><ExternalComposeManagement machine={{...machine,agent_id:host?.agent_id}} projects={[...new Set((host?.containers??[]).filter(c=>!c.application_id).map(c=>c.compose_project).filter((v):v is string=>!!v))]} onClose={()=>setComposeOpen(false)}/></Suspense>}
   <HostContainerManagement key={machine.id} machine={machine} available={!!host&&host.online&&host.state==='ready'&&!host.truncated&&host.docker_capabilities.includes('docker.host')} selection={selection} batchSelection={batchSelection} onBatchSelected={()=>setBatchSelection(undefined)} onSelected={()=>setSelection(undefined)} onChanged={()=>refresh(true)}/>
   <Typography.Paragraph type="secondary">{t('包含平台应用和外部容器','Includes platform applications and external containers')} · {host?.containers.length??0} {t('个容器','containers')}{host?.observed_at&&' · '+t('观测于 ','Observed ')+new Date(host.observed_at).toLocaleString(language)}</Typography.Paragraph>
   <Typography.Paragraph className="lm-host-file-scroll-hint" type="secondary">{t('左右滑动查看完整表格和操作','Swipe horizontally to see the full table and actions')}</Typography.Paragraph>
