@@ -82,6 +82,31 @@ function scheduledBackup(f: ReturnType<typeof fixture>) {
   const fire=f.schedules.fires(schedule.id)[0],run=f.ops.getRun(fire.run_id),job=f.jobs.get(run.job_id);
   return {schedule,fire,run,job};
 }
+test('legacy queued managed work fails with the upgrade code before a signed SSH job is created',()=>{
+  const f=fixture();try{
+    const {job,run}=scheduledBackup(f);
+    if(!f.db.all<any>('PRAGMA table_info(managed_machines)').some(column=>column.name==='default_account_id'))
+      f.db.exec("ALTER TABLE managed_machines ADD COLUMN default_account_id TEXT NOT NULL DEFAULT ''");
+    f.db.exec(`CREATE TABLE machine_ssh_accounts(id TEXT PRIMARY KEY,default_credential_id TEXT,deleted_at TEXT);
+      CREATE TABLE effective_machine_credentials(id TEXT PRIMARY KEY,machine_id TEXT,revoked_at TEXT,
+        secret_cleared_at TEXT,secret_encrypted TEXT,method TEXT,retention TEXT,expires_at TEXT);`);
+    f.db.run("INSERT INTO machine_ssh_accounts VALUES('account','binding','')");
+    f.db.run("UPDATE managed_machines SET default_account_id='account' WHERE id='host'");
+    f.db.run("INSERT INTO effective_machine_credentials VALUES('binding','host',NULL,'','ciphertext','ssh_key','permanent','')");
+    f.heartbeat({release:{build_id:'old',source_revision:'7'.repeat(40),artifact_sha256:'b'.repeat(64),state_schema:1}});
+    f.store.setSSHOnly();f.jobs.setSSHOnly?.();
+    assert.equal(f.store.getStatus('host').capabilities['operations.managed.v1'].reason_code,'agent_upgrade_required');
+    f.store.prepareSSH('host');
+    const result=f.jobs.get(job.id);
+    assert.equal(result.state,'failed');
+    assert.equal(result.receipt.code,'agent_upgrade_required');
+    assert.equal(f.db.get<any>('SELECT code FROM agent_job_events WHERE job_id=? ORDER BY sequence DESC LIMIT 1',job.id)?.code,'agent_upgrade_required');
+    assert.equal(f.db.get<any>('SELECT state FROM ops_runs WHERE id=?',run.id)?.state,'failed');
+    assert.equal(f.db.get<any>('SELECT count(*) AS n FROM privileged_jobs WHERE id=?',job.id)?.n,0);
+    f.store.prepareSSH('host');
+    assert.equal(f.jobs.get(job.id).state,'failed');
+  }finally{f.close();}
+});
 test('scheduled backups retain a real authorizer and reach the signed executor',()=>{
   const f=fixture();try {
     const {job,run,schedule}=scheduledBackup(f);

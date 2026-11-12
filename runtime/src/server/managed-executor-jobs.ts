@@ -75,7 +75,13 @@ export function connectManagedExecutorJobs(deps:Dependencies,options:{jobs:Agent
       const row=db.get<Row>("SELECT id FROM agent_jobs WHERE agent_id=? AND execution_principal='privileged_executor' AND state='queued' AND expires_at>? AND NOT EXISTS(SELECT 1 FROM privileged_jobs p WHERE p.id=agent_jobs.id) ORDER BY created_at,id LIMIT 1",executor.agent_id,now());
       if(!row)return;
       try{const job=jobs.get(row.id),approved=source(job);executors.enqueueManaged(job,approved.payload,approved.actor);}
-      catch(error){if(!(error instanceof HTTPError))throw error;jobs.cancel(row.id,'approval_invalid: '+error.message);}
+      catch(error){
+        if(!(error instanceof HTTPError))throw error;
+        if(error.message==='agent_upgrade_required'){
+          if(!jobs.failQueuedSSH)throw error;
+          jobs.failQueuedSSH(row.id,'agent_upgrade_required');
+        }else jobs.cancel(row.id,'approval_invalid: '+error.message);
+      }
     },
     validate(root) {
       const approved=source(jobs.get(root.id));
