@@ -109,15 +109,18 @@ const redact = (value: string, secrets: string[] = []) => {
   for (const secret of secrets.filter(Boolean)) output = output.split(secret).join("[redacted]");
   return output.replace(/lm_(?:enroll|bootstrap|agent)_[A-Za-z0-9_-]+/g, "[redacted-token]");
 };
+const agentObservedAt = (row: any): string => {
+  if (!row.agent_id) return "";
+  const observations = [row.node_last_seen, row.agent_last_seen]
+    .filter((value): value is string => typeof value === "string" && Number.isFinite(Date.parse(value)));
+  return observations.sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? "";
+};
 const statusOf = (row: any, now: Date): MachineStatus => {
   if (row.node_lifecycle_state === "removed") return "removed";
   if (row.last_uninstallation_status === "succeeded") return "uninstalled";
   if (row.agent_id) {
-    const last = Math.max(
-      Date.parse(row.node_last_seen || "") || Number.NEGATIVE_INFINITY,
-      Date.parse(row.agent_last_seen || "") || Number.NEGATIVE_INFINITY,
-    );
-    if (Number.isFinite(last) && now.getTime() - last < 180_000) return "online";
+    const observedAt = agentObservedAt(row);
+    if (observedAt && now.getTime() - Date.parse(observedAt) < 180_000) return "online";
     return "offline";
   }
   return row.last_error ? "error" : "unknown";
@@ -144,6 +147,7 @@ export interface MachineSummary {
   arch: string;
   agent_id: string;
   agent_status: MachineStatus;
+  agent_observed_at: string;
   default_account_id: string;
   accounts: MachineSSHAccount[];
   credential_count: number;
@@ -388,6 +392,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   };
   const summary = (value: any): MachineSummary => {
     if (!value) fail(404, "主机不存在");
+    const network=machineNetwork(db,value.id);
     const activeSSH = Number(value.active_ssh_credential_count ?? 0), activeKeys = Number(value.active_ssh_key_count ?? 0);
     const reusableSSH = Number(value.active_reusable_ssh_credential_count ?? 0);
     const capability = (reusableRequired = false): MachineCapability => {
@@ -412,7 +417,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (pendingInstall) for (const current of [uninstallCapability,deployCapability,updateCapability]) { current.available=false; if(current.reason!=="host_busy")current.reason=pendingInstall.status==="unknown"?"installation_unknown":"installation_pending"; }
     return {
       id: value.id, name: value.name, default_account_id: value.default_account_id || "", accounts:accountRows(value.id), observed_hostname: currentAgentHostname(db, value.id, value.agent_id),
-      network: {...machineNetwork(db,value.id),service_addresses:machineServiceAddressSettings(db,value.id)},
+      network: {...network,service_addresses:machineServiceAddressSettings(db,value.id,{host:value,network})},
       capacity: currentAgentCapacity(db,value.id,value.agent_id,now()),
       docker_environment: machineDockerEnvironment(executorStore?.getStatus(value.id),now()),
       ...hostLabels(value.id),
@@ -421,7 +426,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       host_key_public_key: value.host_key_public_key || "", host_key_observed_at: value.host_key_observed_at || "",
       host_key_status: value.host_key_public_key ? "observed" : value.host_key_fingerprint ? "confirmed" : "unconfigured",
       platform: value.platform, arch: value.arch, agent_id: value.agent_id,
-      agent_status: statusOf(value, now()), credential_count: Number(value.credential_count ?? 0),
+      agent_status: statusOf(value, now()), agent_observed_at: agentObservedAt(value), credential_count: Number(value.credential_count ?? 0),
       active_credential_count: Number(value.active_credential_count ?? 0),
       active_ssh_credential_count: activeSSH, active_ssh_key_count: activeKeys,
       active_reusable_ssh_credential_count: reusableSSH,
@@ -630,8 +635,12 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       valid() {
         if (released) return false;
         try {
-          const current=ensureCredential(machineID, credential.id);
-          return targetRevision(get(machineID)) === revision&&sshCredentialRevision(current)===bindingRevision;
+          // A file session checks this before and after every SFTP operation.
+          // The full machine projection loads accounts, network and history;
+          // only the SSH target and credential binding are relevant here.
+          const target=db.get<any>('SELECT address,port,connection_method,host_key_fingerprint,ssh_target_generation FROM managed_machines WHERE id=?',machineID);
+          const current=ensureCredential(machineID, credential.id, false);
+          return !!target&&targetRevision(target)===revision&&sshCredentialRevision(current)===bindingRevision;
         } catch { return false; }
       },
       verifyHostKey(key) {

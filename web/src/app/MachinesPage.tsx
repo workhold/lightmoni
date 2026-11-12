@@ -30,7 +30,7 @@ import MachineServiceAddressesDialog from './MachineServiceAddressesDialog';
 import MachineAgentUninstallDialog,{type AgentUninstallation} from './MachineAgentUninstallDialog';
 import MachineStateRecoveryDialog from './MachineStateRecoveryDialog';
 import MachineWorkloadRecoveryDialog from './MachineWorkloadRecoveryDialog';
-import {agentIsOnline,type AgentItem,type AgentTaskLabel,type TaskHost} from './agent-model';
+import {type AgentItem,type AgentTaskLabel,type TaskHost} from './agent-model';
 import {NodeDetails} from './AgentsPage';
 import NodeLabelsDialog from './NodeLabelsDialog';
 import HostTasksPanel from './HostTasksPanel';
@@ -42,7 +42,7 @@ import MachineAgentRolloutDialog,{type AgentRolloutTarget} from './MachineAgentR
 import {shortIdentity,type AgentInstalledRelease,type AgentUpdate} from './agent-update-model';
 
 type Capability={available:boolean;reason:string};
-type Machine={capacity?:{cpu_count:number|null;memory_total_mb:number|null;observed_at:string;stale:boolean};agent_operation?:AgentOperationRecord|null;docker_environment?:{state:string;code:string;observed_at:string};agent_release?:AgentInstalledRelease;agent_update?:{state:'current'|'update_available'|'unknown'|'not_installed'|'in_progress';target_sha256?:string;target_version?:string;last_status?:string;last_operation_id?:string};default_account_id?:string;accounts?:SSHAccount[];network?:HostNetwork;label_ids?:string[];labels?:{id:string;name:string}[];observed_hostname?:string;id:string;name:string;address:string;port:number;connection_method:string;host_key_fingerprint:string;host_key_public_key?:string;host_key_observed_at?:string;host_key_status:string;platform:string;arch:string;agent_id:string;agent_status:string;credential_count:number;active_credential_count:number;active_ssh_credential_count:number;active_ssh_key_count:number;active_reusable_ssh_credential_count?:number;ssh_recovery_available:boolean;capabilities:{terminal:Capability;ssh_check:Capability;deploy_agent:Capability;uninstall_agent?:Capability;recovery_uninstall_agent?:Capability;update_agent?:Capability;rollback_agent?:Capability};last_deployment_status:string;last_uninstallation_status?:string;updated_at:string;created_at:string};
+type Machine={capacity?:{cpu_count:number|null;memory_total_mb:number|null;observed_at:string;stale:boolean};agent_operation?:AgentOperationRecord|null;docker_environment?:{state:string;code:string;observed_at:string};agent_release?:AgentInstalledRelease;agent_update?:{state:'current'|'update_available'|'unknown'|'not_installed'|'in_progress';target_sha256?:string;target_version?:string;last_status?:string;last_operation_id?:string};default_account_id?:string;accounts?:SSHAccount[];network?:HostNetwork;label_ids?:string[];labels?:{id:string;name:string}[];observed_hostname?:string;id:string;name:string;address:string;port:number;connection_method:string;host_key_fingerprint:string;host_key_public_key?:string;host_key_observed_at?:string;host_key_status:string;platform:string;arch:string;agent_id:string;agent_status:string;agent_observed_at?:string;credential_count:number;active_credential_count:number;active_ssh_credential_count:number;active_ssh_key_count:number;active_reusable_ssh_credential_count?:number;ssh_recovery_available:boolean;capabilities:{terminal:Capability;ssh_check:Capability;deploy_agent:Capability;uninstall_agent?:Capability;recovery_uninstall_agent?:Capability;update_agent?:Capability;rollback_agent?:Capability};last_deployment_status:string;last_uninstallation_status?:string;updated_at:string;created_at:string};
 type FleetRow=Machine&{node?:AgentItem};
 type Credential={id:string;account_id:string;username:string;account_revision:number;name?:string;is_default?:boolean;connection_credential_id?:string;reused?:boolean;method:string;secret_fingerprint:string;retention:string;policy_source:string;secret_cleared_at?:string;clear_reason?:string;created_at:string;expires_at:string;revoked_at?:string;last_used_at:string;created_by:string};
 type Deployment={id:string;machine_id:string;credential_id:string;status:string;version:string;arch:string;initial_label_id:string;plan:any;receipt:any;error:string;created_at:string;approved_at:string;started_at:string;finished_at:string;execution_stage?:string;resolved_at?:string;resolved_by?:string;resolution_reason?:string};
@@ -97,7 +97,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const planReadVersion=useRef(0);
  useEffect(()=>()=>checkController.current?.abort(),[]);
  const {message}=App.useApp();
- const [machines,setMachines]=useState<Machine[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState('');
+ const [machines,setMachines]=useState<Machine[]>([]),[loading,setLoading]=useState(true),[refreshing,setRefreshing]=useState(false),[error,setError]=useState('');
  const [agents,setAgents]=useState<AgentItem[]>([]),[labels,setLabels]=useState<AgentTaskLabel[]>([]),[includeRemoved,setIncludeRemoved]=useState(false);
  const [hostQuery,setHostQuery]=useState('');
  const [nodeDetail,setNodeDetail]=useState<AgentItem>(),[nodeLabels,setNodeLabels]=useState<TaskHost>();
@@ -113,7 +113,11 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const [dockerMachine,setDockerMachine]=useState<{id:string;name:string}>();
  const [selectedIDs,setSelectedIDs]=useState<string[]>([]),[batch,setBatch]=useState<{action:BatchAction;targets:BatchTarget[]}>();
  useEffect(()=>{if(!admin){setNetworkMachine(undefined);setSelectedIDs([]);setBatch(undefined)}},[admin]);
- const archivedNodes=useRef(new Map<string,AgentItem>()),loadRequest=useRef(0);
+ const archivedNodes=useRef(new Map<string,AgentItem>()),loadedHosts=useRef(false),hostsRole=useRef(admin),nodesRole=useRef(admin);
+ const loadControllers=useRef<Record<'hosts'|'nodes'|'labels',AbortController|null>>({hosts:null,nodes:null,labels:null});
+ const loadVersions=useRef({hosts:0,nodes:0,labels:0});
+ const loadErrors=useRef({hosts:'',nodes:'',labels:''});
+ const detailRefreshControllers=useRef(new Map<string,AbortController>());
  const [newOpen,setNewOpen]=useState(false);
  const [credentialMachine,setCredentialMachine]=useState<Machine>();
  const credentialReturn=useRef<((result:SSHCheckResult)=>void)|undefined>(undefined);
@@ -146,18 +150,39 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const planResolutionValid=!!planResolutionReason.trim()&&new TextEncoder().encode(planResolutionReason.trim()).length<=1000&&!/[\u0000-\u001f\u007f]/u.test(planResolutionReason.trim());
  const planVerificationNeedsSSH=!['planned','preflight','enrollment_issued'].includes(planResult?.execution_stage);
  const planExpired=Date.parse(planResult?.plan?.expires_at||'')<=planNow;
- const load=useCallback(async(silent=false)=>{
-  const request=++loadRequest.current;if(!silent)setLoading(true);
-  const results=await Promise.allSettled([admin?api<Machine[]>('/machines'):api<Machine[]>('/task-hosts'),api<AgentItem[]>(admin&&includeRemoved?'/agents?include_removed=true':'/agents'),api<AgentTaskLabel[]>('/host-labels')]);
-  if(request!==loadRequest.current)return;
-  const [hosts,nodes,nextLabels]=results;
-  if(hosts.status==='fulfilled')setMachines(hosts.value.filter(machine=>!removedMachineIDs.current.has(machine.id)));
-  if(nodes.status==='fulfilled')setAgents(nodes.value.map(node=>archivedNodes.current.get(node.id)||node).filter(node=>includeRemoved||node.lifecycle_state!=='removed'));
-  if(nextLabels.status==='fulfilled')setLabels(nextLabels.value);
-  const failures=results.filter(result=>result.status==='rejected');setError(failures.map(result=>result.status==='rejected'?errorText(result.reason):'').join(' · '));setLoading(false);
+ const cancelLoads=(resetIndicators=true)=>{
+  for(const source of ['hosts','nodes','labels'] as const){loadVersions.current[source]++;loadControllers.current[source]?.abort();loadControllers.current[source]=null}
+  if(resetIndicators){setLoading(false);setRefreshing(false)}
+ };
+ const load=useCallback(async(silent=false,onlyIfIdle=false,timeoutMs=15_000)=>{
+  const start=<T,>(source:'hosts'|'nodes'|'labels',path:string,onValue:(value:T)=>void):Promise<void>|undefined=>{
+   if(onlyIfIdle&&loadControllers.current[source])return;
+   loadControllers.current[source]?.abort();
+   const controller=new AbortController(),version=++loadVersions.current[source];
+   loadControllers.current[source]=controller;
+   if(source==='hosts'&&!silent){if(!loadedHosts.current)setLoading(true);else setRefreshing(true)}
+   const current=()=>mounted.current&&version===loadVersions.current[source];
+   const active=()=>current()&&!controller.signal.aborted;
+   const stopHostLoading=()=>{if(current()&&source==='hosts'){loadedHosts.current=true;setLoading(false);setRefreshing(false)}};
+   const deadline=setTimeout(()=>{
+    if(!current())return;
+    controller.abort();
+    if(loadControllers.current[source]===controller)loadControllers.current[source]=null;
+    stopHostLoading();
+   },timeoutMs);
+   const report=(next:string)=>{if(active()){loadErrors.current[source]=next;setError(Object.values(loadErrors.current).filter(Boolean).join(' · '))}};
+   return api<T>(path,{signal:controller.signal})
+    .then(value=>{if(active()){onValue(value);report('')}})
+    .catch(reason=>report(errorText(reason)))
+    .finally(()=>{clearTimeout(deadline);if(loadControllers.current[source]===controller)loadControllers.current[source]=null;stopHostLoading()});
+  };
+  const hosts=start<Machine[]>('hosts',admin?'/machines':'/task-hosts',value=>{hostsRole.current=admin;setMachines(value.filter(machine=>!removedMachineIDs.current.has(machine.id)))});
+  void start<AgentItem[]>('nodes',admin&&includeRemoved?'/agents?include_removed=true':'/agents',value=>{nodesRole.current=admin;setAgents(value.map(node=>admin?archivedNodes.current.get(node.id)||node:node).filter(node=>includeRemoved||node.lifecycle_state!=='removed'))});
+  void start<AgentTaskLabel[]>('labels','/host-labels',setLabels);
+  await hosts;
  },[admin,includeRemoved]);
- useEffect(()=>{void load();return()=>{loadRequest.current++}},[load]);
- const invalidateRefresh=(machineID:string)=>{hostRevisions.current.set(machineID,(hostRevisions.current.get(machineID)??0)+1);loadRequest.current++};
+ useEffect(()=>{void load();return()=>{cancelLoads(false);for(const controller of detailRefreshControllers.current.values())controller.abort();detailRefreshControllers.current.clear()}},[load]);
+ const invalidateRefresh=(machineID:string)=>{hostRevisions.current.set(machineID,(hostRevisions.current.get(machineID)??0)+1);cancelLoads()};
  const invalidateHost=(machineID:string)=>{
   invalidateRefresh(machineID);requests.current.invalidateHost(machineID);
   if(requests.current.capture('check')?.target===machineID){checkController.current?.abort();checkController.current=null;setCheckBusy(false);setCheckResult(undefined);setCheckError('')}
@@ -172,13 +197,16 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  useEffect(()=>{
   if(!admin){requests.current.clear();checkController.current?.abort();checkController.current=null;setCheckBusy(false);setCheckDetail(undefined);setCheckResult(undefined);setTerminalDetail(undefined);setUninstallDetail(undefined);setUninstallRecord(undefined);setDetail(undefined);setEditMachine(undefined);setPlanMachine(undefined);setPlanDetail(undefined);setPlanResult(undefined);setPlanCheck(undefined);setPlanBusy(false)}
  },[admin]);
- const refreshMachine=useCallback(async(machineID:string,refreshList=true)=>{
+ const refreshMachine=useCallback(async(machineID:string,refreshList=true,onlyIfIdle=false)=>{
+  if(onlyIfIdle&&detailRefreshControllers.current.has(machineID))return;
+  detailRefreshControllers.current.get(machineID)?.abort();
+  const controller=new AbortController();detailRefreshControllers.current.set(machineID,controller);
   const revision=hostRevisions.current.get(machineID)??0,request=(refreshRequests.current.get(machineID)??0)+1;
   const planVersion=planReadVersion.current,originalPlan=planResultRef.current;
   refreshRequests.current.set(machineID,request);
   const scopes=(['detail','check','plan','uninstall','update'] as HostRequestScope[]).map(scope=>requests.current.capture(scope));
   try{
-   const fresh=await api<Detail>(`/machines/${encodeURIComponent(machineID)}`);
+   const fresh=await api<Detail>(`/machines/${encodeURIComponent(machineID)}`,{signal:controller.signal});
    if(mounted.current&&allowed.current&&!removedMachineIDs.current.has(machineID)&&fresh.machine.id===machineID&&revision===(hostRevisions.current.get(machineID)??0)&&request===refreshRequests.current.get(machineID)){
     const setters=[setDetail,setCheckDetail,setPlanDetail,setUninstallDetail,setUpdateDetail];
     scopes.forEach((token,index)=>{if(token?.target===machineID&&current(token)){
@@ -187,12 +215,13 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
     }});
    }
   }catch{/* The host may have been deleted in another tab. */}
-  if(refreshList&&mounted.current&&allowed.current&&!removedMachineIDs.current.has(machineID)&&revision===(hostRevisions.current.get(machineID)??0))await load(true);
+  finally{if(detailRefreshControllers.current.get(machineID)===controller)detailRefreshControllers.current.delete(machineID)}
+  if(refreshList&&!controller.signal.aborted&&mounted.current&&allowed.current&&!removedMachineIDs.current.has(machineID)&&revision===(hostRevisions.current.get(machineID)??0))await load(true);
  },[load]);
  const hostSaved=async(machineID:string)=>{invalidateHost(machineID);await refreshMachine(machineID)};
  const hasRunningAgentOperation=admin&&machines.some(machine=>agentOperationRunning(machine.agent_operation));
  useEffect(()=>{
-  const refresh=()=>{void load(true);if(admin)for(const id of new Set([detail?.machine.id,checkDetail?.machine.id,planMachine?.id,uninstallDetail?.machine.id,updateDetail?.machine.id].filter((id):id is string=>!!id)))void refreshMachine(id,false)};
+  const refresh=()=>{void load(true,true,hasRunningAgentOperation?6000:15_000);if(admin)for(const id of new Set([detail?.machine.id,checkDetail?.machine.id,planMachine?.id,uninstallDetail?.machine.id,updateDetail?.machine.id].filter((id):id is string=>!!id)))void refreshMachine(id,false,true)};
   const timer=setInterval(refresh,hasRunningAgentOperation?2500:15_000);window.addEventListener('focus',refresh);return()=>{clearInterval(timer);window.removeEventListener('focus',refresh)};
  },[admin,hasRunningAgentOperation,load,refreshMachine,detail?.machine.id,checkDetail?.machine.id,planMachine?.id,uninstallDetail?.machine.id,updateDetail?.machine.id]);
  useEffect(()=>{
@@ -357,9 +386,9 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   finally{if(planOperation.current===token)planOperation.current=null;if(current(token)){setPlanBusy(false);await refreshMachine(machineID)}}
  };
  const agentReleaseFor=(machine:FleetRow):AgentInstalledRelease|undefined=>machine.agent_release??machine.node?.release??(machine.node?.heartbeat?.release as AgentInstalledRelease|undefined);
- const nodeFor=(machine:Machine)=>agents.find(agent=>agent.id===machine.agent_id)||archivedNodes.current.get(machine.agent_id);
+ const nodeFor=(machine:Machine)=>nodesRole.current===admin?agents.find(agent=>agent.id===machine.agent_id)||(admin?archivedNodes.current.get(machine.agent_id):undefined):undefined;
  // Every row has a persisted platform host ID. Agent data only enriches its channel.
- const visibleMachines:Machine[]=machines;
+ const visibleMachines:Machine[]=hostsRole.current===admin?machines:[];
  const group=searchParams.get('group');
  const rows:FleetRow[]=visibleMachines.map(machine=>({...machine,node:nodeFor(machine)})).filter(row=>(!group||(row.label_ids??row.node?.label_ids)?.includes(group))&&(!hostQuery.trim()||[row.name,row.address,row.id].some(value=>typeof value==='string'&&value.toLocaleLowerCase().includes(hostQuery.trim().toLocaleLowerCase()))));
  const selectionScope=rows.map(row=>row.id).join('\0');
@@ -376,7 +405,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   setBatch({action,targets});
  };
  const batchSuccess=(target:BatchTarget,action:BatchAction,result:any)=>{
-  loadRequest.current++;
+  cancelLoads();
   if(action==='delete_host'&&target.machine){
    forgetMachine(target.machine.id);
   }
@@ -393,11 +422,11 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const removedAgent=(m:FleetRow)=>m.node?.lifecycle_state==='removed'||['removed','uninstalled'].includes(m.agent_status);
  const releaseState=(m:FleetRow)=>({current:t('当前发行','Current release'),update_available:t('有可用更新','Update available'),unknown:t('发行待核对','Release needs verification'),not_installed:t('未安装','Not installed'),in_progress:t('更新中','Updating')} as Record<string,string>)[m.agent_update?.state||'unknown'];
  const renderChannels=(m:FleetRow)=>{
-  const removed=removedAgent(m),online=!!m.node&&!removed&&agentIsOnline(m.node),runtime=runtimeObservation(m.node?.heartbeat?.runtime);
+  const removed=removedAgent(m),online=!removed&&m.agent_status==='online',runtime=runtimeObservation(m.node?.heartbeat?.runtime);
   const installation=agentOperationMatches(m.agent_operation,m.id)&&m.agent_operation?.kind==='install'&&!m.agent_operation.resolved_at?m.agent_operation:undefined;
-  const agentLabel=installation?.status==='unknown'?t('安装待核对','Installation unverified'):!m.node&&installation?.status==='running'?t('安装中','Installing'):!m.node&&installation?.status==='awaiting_approval'?t('待安装确认','Awaiting installation approval'):removed?(m.agent_status==='uninstalled'?t('已卸载','Uninstalled'):t('已移除','Removed')):m.node?(online?t('在线','Online'):t('离线','Offline')):m.agent_id?t('关联待核对','Link needs verification'):t('未安装','Not installed');
+  const agentLabel=installation?.status==='unknown'?t('安装待核对','Installation unverified'):!m.agent_id&&installation?.status==='running'?t('安装中','Installing'):!m.agent_id&&installation?.status==='awaiting_approval'?t('待安装确认','Awaiting installation approval'):removed?(m.agent_status==='uninstalled'?t('已卸载','Uninstalled'):t('已移除','Removed')):m.agent_id?(online?t('在线','Online'):m.agent_status==='offline'?t('离线','Offline'):t('关联待核对','Link needs verification')):t('未安装','Not installed');
   return <div className="lm-host-channels">
-   <div><span className="lm-host-channel-label">Agent</span><span><Tag color={installation?.status==='unknown'?'warning':online?'success':m.node&&!removed?'warning':'default'}>{agentLabel}</Tag>{!removed&&runtime&&<Tooltip title={t('常驻 Agent 以普通账号采集和上报；中心通过 SSH 唤起授权的 root 管理组件执行主机操作。','The resident Agent collects and reports without privilege; center SSH invokes the authorized root component for host operations.')}><Tag>{runtime.mode==='root'?t('完整管理','Full management'):t('仅监控','Monitoring only')}</Tag></Tooltip>}</span></div>
+   <div><span className="lm-host-channel-label">Agent</span><span><Tag color={installation?.status==='unknown'?'warning':online?'success':m.agent_status==='offline'?'warning':'default'}>{agentLabel}</Tag>{!removed&&runtime&&<Tooltip title={t('常驻 Agent 以普通账号采集和上报；中心通过 SSH 唤起授权的 root 管理组件执行主机操作。','The resident Agent collects and reports without privilege; center SSH invokes the authorized root component for host operations.')}><Tag>{runtime.mode==='root'?t('完整管理','Full management'):t('仅监控','Monitoring only')}</Tag></Tooltip>}{m.agent_observed_at&&<Typography.Text className="lm-host-agent-observed" type="secondary"><span>{t('最近上报：','Last report: ')}</span><time dateTime={m.agent_observed_at}>{time(m.agent_observed_at)}</time></Typography.Text>}</span></div>
    {admin&&<div><span className="lm-host-channel-label">SSH</span><span className="lm-host-channel-value">{m.ssh_recovery_available?t('凭据已配置','Credentials configured'):t('需配置凭据','Credentials needed')}<IconAction label={t('管理 SSH 登录账户','Manage SSH login accounts')} icon={<KeyOutlined aria-hidden/>} type="link" size="small" onClick={()=>manageSSHAccounts(m)}/></span></div>}
    <div><span className="lm-host-channel-label">Docker</span><span className="lm-host-channel-value"><DockerEnvironmentTag environment={m.docker_environment}/>{admin&&<IconAction label={t('检查 Docker 环境','Check Docker environment')} icon={<SafetyCertificateOutlined aria-hidden/>} type="link" size="small" onClick={()=>setDockerMachine({id:m.id,name:m.name})}/>}</span></div>
   </div>;
@@ -463,7 +492,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  return <div className={embedded?"lm-machines-page":"lm-page lm-machines-page"}>
   <div className="lm-host-toolbar">
    <div className="lm-host-filters"><Input allowClear prefix={<SearchOutlined/>} aria-label={t('搜索主机','Search hosts')} placeholder={t('搜索名称、地址或主机 ID','Search name, address or host ID')} value={hostQuery} onChange={event=>setHostQuery(event.target.value)}/><Select allowClear aria-label={t('按主机标签筛选','Filter by host label')} placeholder={t('全部主机标签','All host labels')} value={group||undefined} onChange={value=>setSearchParams(previous=>{const next=new URLSearchParams(previous);if(value)next.set('group',value);else next.delete('group');return next})} options={labels.map(label=>({value:label.id,label:label.name}))}/></div>
-   <Space wrap>{admin&&<SystemLogDrawer/>}<IconAction label={t('刷新','Refresh')} icon={<ReloadOutlined aria-hidden/>} aria-label={t('刷新','Refresh')} loading={loading} onClick={()=>void load()}/>{admin&&<><HostActionMenu trigger={['click']} menu={{items:[{key:'history',label:t('Agent 升级记录','Agent upgrade history'),disabled:!!batch||!!rollout,onClick:()=>setRollout({})},{key:'offline',label:t('离线卸载脚本','Offline uninstall script'),onClick:()=>setUninstallGuide(true)}]}}><IconAction label={t('列表更多操作','More list actions')} icon={<MoreOutlined aria-hidden/>}/></HostActionMenu><IconAction label={t('登记主机','Register host')} icon={<PlusOutlined aria-hidden/>} type="primary" aria-label={t('登记主机','Register host')} onClick={startRegistration}/></>}</Space>
+   <Space wrap>{admin&&<SystemLogDrawer/>}<IconAction label={t('刷新','Refresh')} icon={<ReloadOutlined aria-hidden/>} aria-label={t('刷新','Refresh')} loading={loading||refreshing} onClick={()=>void load()}/>{admin&&<><HostActionMenu trigger={['click']} menu={{items:[{key:'history',label:t('Agent 升级记录','Agent upgrade history'),disabled:!!batch||!!rollout,onClick:()=>setRollout({})},{key:'offline',label:t('离线卸载脚本','Offline uninstall script'),onClick:()=>setUninstallGuide(true)}]}}><IconAction label={t('列表更多操作','More list actions')} icon={<MoreOutlined aria-hidden/>}/></HostActionMenu><IconAction label={t('登记主机','Register host')} icon={<PlusOutlined aria-hidden/>} type="primary" aria-label={t('登记主机','Register host')} onClick={startRegistration}/></>}</Space>
   </div>
   <div className="lm-host-list-meta"><Typography.Text type="secondary" aria-live="polite">{t(`显示 ${rows.length} 台主机`,`Showing ${rows.length} hosts`)}</Typography.Text>{admin&&<Checkbox checked={includeRemoved} onChange={event=>setIncludeRemoved(event.target.checked)}>{t('包含已移除节点','Include removed nodes')}</Checkbox>}</div>
   {!admin&&<Alert type="info" showIcon className="lm-machine-notice" title={t('只读主机视图','Read-only host view')} description={t('可查看主机、标签和任务；SSH 连接、凭据和生命周期管理仅管理员可用。','View hosts, labels, and tasks. SSH connections, credentials, and lifecycle management are available only to administrators.')}/>}
@@ -475,7 +504,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    ] as [BatchAction,string][]).map(([action,label])=><Button key={action} size="small" aria-label={label} danger={['uninstall','remove_node','delete_host'].includes(action)} disabled={loading||!!batch||!!rollout} onClick={()=>openBatch(action)}>{label}</Button>)}<Button size="small" disabled={loading||selectedRows.length>20||!!batch||!!rollout} onClick={()=>setRollout({targets:selectedRows.map(row=>({id:row.id,name:row.name,arch:row.arch}))})}>{t('升级 Agent','Upgrade Agent')}</Button></Space>
    <Typography.Text type="secondary">{t('按所选主机逐台处理，安装和卸载先审阅计划。每批最多 50 台。','Process selected hosts in sequence; review installation and removal plans first. Up to 50 hosts per batch.')}</Typography.Text>
   </div>}
-  <div className="lm-surface lm-host-list"><Table<FleetRow> rowKey="id" dataSource={rows} loading={loading} rowSelection={admin?{selectedRowKeys:selectedIDs,preserveSelectedRowKeys:true,columnWidth:44,onChange:keys=>{if(keys.length>50){void message.warning(t('每批最多选择 50 项','Select up to 50 targets per batch'));return}setSelectedIDs(keys.map(String))},getCheckboxProps:row=>({'aria-label':t(`选择 ${row.name}`,`Select ${row.name}`),disabled:!!batch||!!rollout})}:undefined} scroll={{x:1024}} pagination={{pageSize:10,hideOnSinglePage:true}} locale={{emptyText:<Empty description={hostQuery||group?t('没有匹配的主机','No matching hosts'):t('尚无主机','No hosts yet')}/>}} columns={[
+  <div className="lm-surface lm-host-list"><Table<FleetRow> rowKey="id" dataSource={rows} loading={loading||hostsRole.current!==admin} rowSelection={admin?{selectedRowKeys:selectedIDs,preserveSelectedRowKeys:true,columnWidth:44,onChange:keys=>{if(keys.length>50){void message.warning(t('每批最多选择 50 项','Select up to 50 targets per batch'));return}setSelectedIDs(keys.map(String))},getCheckboxProps:row=>({'aria-label':t(`选择 ${row.name}`,`Select ${row.name}`),disabled:!!batch||!!rollout})}:undefined} scroll={{x:1024}} pagination={{pageSize:10,hideOnSinglePage:true}} locale={{emptyText:<Empty description={hostQuery||group?t('没有匹配的主机','No matching hosts'):t('尚无主机','No hosts yet')}/>}} columns={[
    {title:t('主机','Host'),width:240,render:(_:unknown,m:FleetRow)=><div className="lm-host-overview">{admin?<Button type="link" className="lm-host-name" onClick={()=>void openDetail(m)}>{m.name}</Button>:<strong>{m.name}</strong>}<Typography.Text className="lm-host-ssh-copy" type="secondary" copyable={admin&&m.address?{text:sshEndpoint(m.address,m.port)}:false}>{admin?(m.address?sshEndpoint(m.address,m.port):t('SSH 未配置','SSH not configured')):t('主机 ID：','Host ID: ')+m.id}</Typography.Text><HostNetworkOverview network={m.network}/></div>},
    {title:t('CPU / 内存','CPU / memory'),width:150,render:(_:unknown,m:FleetRow)=><div><div>{m.capacity?.cpu_count?t(`${m.capacity.cpu_count} 逻辑核`,`${m.capacity.cpu_count} logical CPUs`):t('CPU 未知','CPU unknown')}</div><div>{m.capacity?.memory_total_mb?`${(m.capacity.memory_total_mb/1024).toFixed(1)} GiB`:t('内存未知','Memory unknown')}</div>{m.capacity?.observed_at&&<Tooltip title={time(m.capacity.observed_at)}><Typography.Text type="secondary">{m.capacity.stale?t('观测已过期','Observation stale'):t('最近心跳','Latest heartbeat')}</Typography.Text></Tooltip>}</div>},
    {title:t('管理状态','Management status'),width:220,render:(_:unknown,m:FleetRow)=>renderChannels(m)},
@@ -514,7 +543,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   <Modal className="lm-host-detail-dialog" title={t(`主机详情 · ${detail?.machine.name??''}`,`Host details · ${detail?.machine.name??''}`)} open={admin&&!!detail} onCancel={closeDetail} footer={null} width={1060} destroyOnHidden>
    {detailError&&<Alert type="error" showIcon title={detailError} className="lm-machine-form-notice"/>}
    {detail&&<Tabs activeKey={detailTab} onChange={setDetailTab} items={[
-    {key:'overview',label:t('概览','Overview'),children:<><Descriptions size="small" column={{xs:1,sm:2}} items={[{key:'name',label:t('主机名称（用户自定义）','Host name (user-defined)'),children:detail.machine.name},{key:'id',label:t('主机 ID（平台生成，不可修改）','Host ID (platform-generated, immutable)'),children:<Typography.Text code copyable={{text:detail.machine.id}}>{detail.machine.id}</Typography.Text>},{key:'agent',label:'Agent ID',children:detail.machine.agent_id||t("尚未绑定","Not linked yet")},{key:'address',label:t("SSH 连接地址","SSH connection address"),children:detail.machine.address?<>{sshEndpoint(detail.machine.address,detail.machine.port)}<SSHAddressCategoryTag address={detail.machine.address}/></>:t('尚未配置 SSH','SSH not configured')},{key:'status',label:t("Agent 状态","Agent status"),children:statusName(detail.machine.agent_status)},{key:'recovery',label:t('SSH 凭据','SSH credentials'),children:detail.machine.ssh_recovery_available?t('已配置','Configured'):t('未配置','Not configured')},{key:'fingerprint',label:t("主机指纹","Host fingerprint"),span:2,children:detail.machine.host_key_fingerprint?<Typography.Text code copyable={{text:detail.machine.host_key_fingerprint}}>{detail.machine.host_key_fingerprint}</Typography.Text>:t("首次 SSH 连接后自动记录","Recorded automatically on first SSH connection")},{key:'host-public-key',label:t("主机公钥","Host public key"),span:2,children:detail.machine.host_key_public_key?<Typography.Text code className="lm-machine-path" copyable={{text:detail.machine.host_key_public_key}}>{detail.machine.host_key_public_key}</Typography.Text>:t("首次 SSH 连接后自动记录","Recorded automatically on first SSH connection")},{key:'host-key-observed',label:t("公钥记录时间","Public key recorded at"),span:2,children:time(detail.machine.host_key_observed_at||'')},{key:'updated',label:t('最近更新','Last updated'),children:time(detail.machine.updated_at)},{key:'created',label:t('登记时间','Registered at'),children:time(detail.machine.created_at)}]}/><h3>{t('SSH 登录账户','SSH login accounts')}</h3><Space wrap>{detail.machine.accounts?.map(a=><Tag key={a.id}>{a.username}{a.id===detail.machine.default_account_id?t(' · 默认',' · Default'):''}</Tag>)}<Button onClick={()=>setCredentialMachine(detail.machine)}>{t('管理账户与凭据','Manage accounts and credentials')}</Button></Space></>},
+    {key:'overview',label:t('概览','Overview'),children:<><Descriptions size="small" column={{xs:1,sm:2}} items={[{key:'name',label:t('主机名称（用户自定义）','Host name (user-defined)'),children:detail.machine.name},{key:'id',label:t('主机 ID（平台生成，不可修改）','Host ID (platform-generated, immutable)'),children:<Typography.Text code copyable={{text:detail.machine.id}}>{detail.machine.id}</Typography.Text>},{key:'agent',label:'Agent ID',children:detail.machine.agent_id||t("尚未绑定","Not linked yet")},{key:'address',label:t("SSH 连接地址","SSH connection address"),children:detail.machine.address?<>{sshEndpoint(detail.machine.address,detail.machine.port)}<SSHAddressCategoryTag address={detail.machine.address}/></>:t('尚未配置 SSH','SSH not configured')},{key:'status',label:t("Agent 状态","Agent status"),children:statusName(detail.machine.agent_status)},{key:'agent-observed',label:t('Agent 最近上报','Agent last report'),children:detail.machine.agent_observed_at?<time dateTime={detail.machine.agent_observed_at}>{time(detail.machine.agent_observed_at)}</time>:t('尚无记录','No records yet')},{key:'recovery',label:t('SSH 凭据','SSH credentials'),children:detail.machine.ssh_recovery_available?t('已配置','Configured'):t('未配置','Not configured')},{key:'fingerprint',label:t("主机指纹","Host fingerprint"),span:2,children:detail.machine.host_key_fingerprint?<Typography.Text code copyable={{text:detail.machine.host_key_fingerprint}}>{detail.machine.host_key_fingerprint}</Typography.Text>:t("首次 SSH 连接后自动记录","Recorded automatically on first SSH connection")},{key:'host-public-key',label:t("主机公钥","Host public key"),span:2,children:detail.machine.host_key_public_key?<Typography.Text code className="lm-machine-path" copyable={{text:detail.machine.host_key_public_key}}>{detail.machine.host_key_public_key}</Typography.Text>:t("首次 SSH 连接后自动记录","Recorded automatically on first SSH connection")},{key:'host-key-observed',label:t("公钥记录时间","Public key recorded at"),span:2,children:time(detail.machine.host_key_observed_at||'')},{key:'updated',label:t('最近更新','Last updated'),children:time(detail.machine.updated_at)},{key:'created',label:t('登记时间','Registered at'),children:time(detail.machine.created_at)}]}/><h3>{t('SSH 登录账户','SSH login accounts')}</h3><Space wrap>{detail.machine.accounts?.map(a=><Tag key={a.id}>{a.username}{a.id===detail.machine.default_account_id?t(' · 默认',' · Default'):''}</Tag>)}<Button onClick={()=>setCredentialMachine(detail.machine)}>{t('管理账户与凭据','Manage accounts and credentials')}</Button></Space></>},
     {key:'execution',label:t('Agent 与权限','Agent & permissions'),children:<><HostExecutionPanel onManageAccounts={callback=>manageSSHAccounts(detail.machine,callback)} key={detail.machine.id} machine={detail.machine} credentials={detail.credentials} admin={admin} onChanged={()=>load(true)}/><HostTasksPanel hostID={detail.machine.id} admin={admin} labels={labels} onViewRuns={closeDetail}/><h3>{t('Agent 发行信息','Agent release details')}</h3><Descriptions size="small" column={1} items={[{key:'version',label:t('版本','Version'),children:detail.machine.agent_release?.version||t('尚无记录','No record')},{key:'source',label:t('源码提交','Source revision'),children:<Typography.Text code copyable>{detail.machine.agent_release?.source_revision||'—'}</Typography.Text>},{key:'artifact',label:t('安装包 SHA256','Artifact SHA256'),children:<Typography.Text code copyable>{detail.machine.agent_release?.artifact_sha256||'—'}</Typography.Text>}]}/></>},
     {key:'network',label:t('网络地址','Network'),children:<><h3>{t('网络地址','Network addresses')}</h3><HostNetworkSummary network={detail.machine.network} details/>{admin&&<Button onClick={()=>setNetworkMachine(detail.machine)}>{t('编辑内外网服务地址','Edit private & public service addresses')}</Button>}</>},
     {key:'history',label:t('操作记录','Operation history'),children:<><AgentUpdateHistory key={detail.machine.id} machineID={detail.machine.id} onOpen={record=>{closeDetail();void openUpdate(detail.machine,record.action,record)}}/><h3>{t("部署历史","Deployment history")}</h3><Table<Deployment> size="small" rowKey="id" dataSource={detail.deployments} pagination={{pageSize:5}} columns={[{title:t("状态","Status"),dataIndex:'status',render:(status:string,d:Deployment)=>d.resolved_at?t('已人工结束（原结果未知）','Manually resolved (original outcome unknown)'):deploymentStatus(status)},{title:t("版本","Version"),dataIndex:'version'},{title:t("创建时间","Created at"),dataIndex:'created_at',render:time},{title:t("错误","Error"),dataIndex:'error'},{title:t("操作","Actions"),render:(_:unknown,d:Deployment)=><Space wrap><Button size="small" onClick={()=>void openDeployment(detail.machine.id,d.id)}>{d.status==='awaiting_approval'?t('审阅部署计划','Review deployment plan'):d.status==='unknown'&&!d.resolved_at?t('核对首装结果','Verify installation outcome'):t('查看部署记录','View deployment record')}</Button>{d.status==='awaiting_approval'?<Popconfirm title={t("取消这个尚未执行的部署计划？","Cancel this unexecuted deployment plan?")} description={t("取消后不能继续执行；如需部署，请重新检查并生成计划。","The plan cannot run after cancellation. Run preflight and create a new plan to deploy later.")} okText={t("确认取消","Confirm cancellation")} cancelText={t("返回","Back")} onConfirm={()=>void cancelDeployment(detail.machine.id,d.id)}><Button size="small" danger>{t("取消计划","Cancel plan")}</Button></Popconfirm>:null}</Space>}]}/><h3>{t('卸载历史','Uninstall history')}</h3><Table<AgentUninstallation> size="small" rowKey="id" dataSource={detail.uninstallations||[]} pagination={{pageSize:5}} columns={[{title:t('卸载方式','Uninstall method'),render:(_:unknown,record:AgentUninstallation)=><>{record.plan?.mode==='recovery'?t('SSH 恢复卸载','SSH recovery uninstall'):t('标准卸载','Standard uninstall')} · {record.plan?.purge?t('清除配置与缓存','Purge configuration and cache'):t('保留配置与缓存','Retain configuration and cache')}</>},{title:t('状态','Status'),dataIndex:'status',render:(status:string)=>({awaiting_approval:t('待确认','Awaiting approval'),running:t('正在卸载','Uninstalling'),succeeded:t('卸载完成','Uninstalled'),failed:t('卸载失败','Uninstall failed'),unknown:t('结果未知，需核对','Outcome unknown; verification needed'),cancelled:t('已取消','Cancelled')}[status]||status)},{title:t('节点身份','Agent identity'),dataIndex:'agent_id'},{title:t('创建时间','Created at'),dataIndex:'created_at',render:time},{title:t('错误','Error'),dataIndex:'error'},{title:t('操作','Actions'),render:(_:unknown,record:AgentUninstallation)=><Button size="small" onClick={()=>{closeDetail();void openUninstall(detail.machine,record)}}>{record.status==='unknown'?t('核对结果','Verify outcome'):record.status==='awaiting_approval'?t('审阅卸载计划','Review uninstall plan'):t('查看卸载记录','View uninstall record')}</Button>}]}/></>},

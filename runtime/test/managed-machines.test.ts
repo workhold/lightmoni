@@ -63,6 +63,28 @@ test('managed machines validate host input and never return credential secrets',
  const assistant=f.machines.assistantGet(machine.id);assert.equal(assistant.host_key_fingerprint,'');
 });
 
+test('host reads use persisted Agent observations without SSH or duplicate network reads',async t=>{
+ let sshCalls=0;
+ const f=await fixture(t,{},async()=>{sshCalls++;throw Error('unexpected SSH');});
+ const created=await f.request('/machines','POST',{name:'heartbeat-host',address:'192.0.2.10'});
+ assert.equal(created.status,201,created.raw);
+ const older=new Date(now.getTime()-120_000).toISOString();
+ f.db.run('UPDATE managed_machines SET agent_id=?,agent_last_seen=? WHERE id=?','observed-agent',older,created.data.id);
+ f.db.run('INSERT INTO agents(id,last_seen,heartbeat) VALUES(?,?,?)','observed-agent',now.toISOString(),'{}');
+ const get=f.db.get.bind(f.db);let networkReads=0;
+ f.db.get=((sql:string,...args:any[])=>{if(sql.includes('SELECT * FROM machine_network_observations WHERE machine_id=?'))networkReads++;return get(sql,...args)}) as typeof f.db.get;
+ const list=await f.request('/machines');
+ assert.equal(list.status,200,list.raw);
+ assert.equal(list.data.length,1);
+ assert.equal(list.data[0].agent_status,'online');
+ assert.equal(list.data[0].agent_observed_at,now.toISOString());
+ assert.equal(networkReads,1,'the list should reuse its network snapshot for service addresses');
+ const detail=await f.request(`/machines/${created.data.id}`);
+ assert.equal(detail.status,200,detail.raw);
+ assert.equal(detail.data.machine.agent_observed_at,now.toISOString());
+ assert.equal(sshCalls,0);
+});
+
 test('password credentials can run one fixed SSH check once, then are revoked and cannot deploy',async t=>{
  let sshInput:any;
  const f=await fixture(t,{},async input=>{sshInput=input;return {stdout:checkOutput,stderr:'',stages:['checking_host_key','remote_command_completed']}});

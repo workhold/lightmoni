@@ -19,8 +19,8 @@ try{
  for(let run=1;run<=3;run++){
   const context=await browser.newContext({viewport:{width:1440,height:1000},recordVideo:{dir:resolve(media,'files-video'),size:{width:1440,height:1000}}});
   await context.addCookies([{name:'lm_session',value:'admin',url:origin}]);
-  const page=await context.newPage(),errors=[],external=[],checks=[],actions=[];
-  page.on('pageerror',error=>errors.push(error.message));page.on('request',request=>{if(request.url().startsWith('http')&&!request.url().startsWith(origin))external.push(request.url());if(request.url().includes('/file-actions'))actions.push(request.postDataJSON())});
+  const page=await context.newPage(),errors=[],external=[],checks=[],actions=[];let sessionID='';
+  page.on('pageerror',error=>errors.push(error.message));page.on('request',request=>{if(request.url().startsWith('http')&&!request.url().startsWith(origin))external.push(request.url());if(request.url().includes('/file-actions'))actions.push(request.postDataJSON());sessionID=request.headers()['x-lightmoni-file-session']??sessionID});
   const dialog=()=>page.locator('.lm-host-files-dialog'),editor=()=>dialog().locator('.lm-code-editor'),modal=name=>page.getByRole('dialog',{name,exact:true});
   const typeCode=async(locator,text)=>{await locator.locator('.monaco-editor').click();await page.keyboard.press('ControlOrMeta+A');await page.keyboard.insertText(text)};
   const fileActions=async(name,action)=>{await dialog().getByRole('button',{name:'文件操作 '+name,exact:true}).click();await page.getByRole('menuitem',{name:action,exact:true}).click()};
@@ -31,7 +31,7 @@ try{
    await dialog().getByRole('button',{name:'新建文件',exact:true}).click();await modal('新建文件').getByRole('textbox',{name:'名称',exact:true}).fill(name);await modal('新建文件').getByRole('button',{name:'确认',exact:true}).click();await expect(editor().locator('.monaco-editor')).toBeVisible();await expect(editor()).toHaveAttribute('data-language','yaml');
    const yaml='services:\n  web:\n    image: nginx:alpine\n    environment:\n      中文: "保留 $VALUE"\n';
    await typeCode(editor(),yaml);await expect(dialog().getByRole('button',{name:'保存文件',exact:true})).toBeEnabled();await page.keyboard.press('ControlOrMeta+S');await expect(page.getByText('文件已保存并核对',{exact:true})).toBeVisible();
-   await expect(dialog().getByRole('button',{name:'关闭文件',exact:true})).toBeEnabled();const read=await page.request.get(origin+'api/v1/machines/'+ready.machineID+'/file?'+new URLSearchParams({path:ready.directory+'/'+name}));expect((await read.json()).content).toBe(yaml);
+   await expect(dialog().getByRole('button',{name:'关闭文件',exact:true})).toBeEnabled();expect(sessionID).toBeTruthy();const read=await page.request.get(origin+'api/v1/machines/'+ready.machineID+'/file?'+new URLSearchParams({path:ready.directory+'/'+name}),{headers:{'X-LightMoni-File-Session':sessionID}});expect((await read.json()).content).toBe(yaml);
    await expect.poll(()=>editor().locator('.view-line span[class*="mtk"]').evaluateAll(spans=>new Set(spans.map(span=>getComputedStyle(span).color)).size)).toBeGreaterThan(1);await shot('yaml-light-1440');
    await dialog().getByRole('button',{name:'关闭文件',exact:true}).click();await dialog().getByRole('button',{name,exact:true}).click();await expect(editor()).toContainText('nginx:alpine');checks.push('create file, keyboard save, exact HTTP/SFTP readback and YAML syntax colors');
    await typeCode(editor(),'draft preserved');await dialog().getByRole('button',{name:'关闭文件',exact:true}).click();await modal('放弃未保存的修改？').getByRole('button',{name:'继续编辑',exact:true}).click();await expect(editor()).toContainText('draft preserved');await dialog().getByRole('button',{name:'关闭文件',exact:true}).click();await modal('放弃未保存的修改？').getByRole('button',{name:'放弃修改',exact:true}).click();

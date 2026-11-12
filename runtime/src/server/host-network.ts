@@ -171,9 +171,9 @@ export function validServiceAddress(value:unknown,scope:AddressScope):string {
   return ip;
 }
 
-export function machineServiceAddressSettings(db:DB,machineID:string):MachineServiceAddressSettings {
-  const host=tablePresent(db,'managed_machines')?db.get<any>('SELECT * FROM managed_machines WHERE id=?',machineID):undefined;
-  const network=machineNetwork(db,machineID),row=tablePresent(db,'machine_service_address_settings')?db.get<any>('SELECT * FROM machine_service_address_settings WHERE machine_id=?',machineID):undefined;
+export function machineServiceAddressSettings(db:DB,machineID:string,snapshot?:{host:Record<string,any>;network:MachineNetwork}):MachineServiceAddressSettings {
+  const host=snapshot?.host??(tablePresent(db,'managed_machines')?db.get<any>('SELECT * FROM managed_machines WHERE id=?',machineID):undefined);
+  const network=snapshot?.network??machineNetwork(db,machineID),row=tablePresent(db,'machine_service_address_settings')?db.get<any>('SELECT * FROM machine_service_address_settings WHERE machine_id=?',machineID):undefined;
   const candidates:ServiceAddressCandidate[]=network.addresses.filter(n=>ordinaryInterface(n.interface)&&['private','public'].includes(n.scope)).map(n=>({address:n.address,scope:n.scope as AddressScope,source:'interface',interface:n.interface,observed_at:network.observed_at,requires_confirmation:false}));
   const appendCandidate=(raw:string,source:'ssh_target'|'platform_source')=>{
     const ip=normalizeIPAddress(raw);if(!ip)return;
