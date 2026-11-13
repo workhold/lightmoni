@@ -411,7 +411,8 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const deployCapability = capability(true);
     if (deployCapability.available && uninstallReason) { deployCapability.available = false; deployCapability.reason = uninstallReason; }
     const updateCapability = capability(true);
-    const updateReason: MachineCapabilityReason = pendingUpdate ? "agent_update_pending" : !value.agent_id ? "agent_not_linked" : uninstallReason;
+    const updateReason: MachineCapabilityReason = pendingUpdate ? "agent_update_pending" : !value.agent_id ? "agent_not_linked"
+      : uninstallations.taskBusy(value.agent_id) ? "agent_task_busy" : pendingUninstall ? uninstallReason : "";
     if (updateCapability.available && updateReason) { updateCapability.available = false; updateCapability.reason = updateReason; }
     if (pendingUpdate) for (const current of [uninstallCapability, deployCapability]) { current.available = false; current.reason = "agent_update_pending"; }
     if (pendingInstall) for (const current of [uninstallCapability,deployCapability,updateCapability]) { current.available=false; if(current.reason!=="host_busy")current.reason=pendingInstall.status==="unknown"?"installation_unknown":"installation_pending"; }

@@ -203,6 +203,40 @@ test('Agent upgrade planning reserves the host while an unclaimed platform inspe
  assert.equal(hasPendingAgentUpdate(f.db,h.agent,h.id),false);
 });
 
+test('one request chooses the probed architecture, starts upgrade and retains stage events',async t=>{
+ const f=await fixture(t),h=await f.host();
+ const arm={...f.release,arch:'arm64',file:'lightmoni-agent_0.1.0_linux_arm64.tar.gz',build_id:'0.1.0-arm-build',build_time:'2026-10-31T00:00:00Z'};
+ const bytes=Buffer.from('approved arm64 archive');arm.sha256=hash(bytes);
+ writeFileSync(join(f.downloads,arm.file),bytes);arm.size=bytes.length;
+ writeFileSync(join(f.downloads,'agent-releases.json'),JSON.stringify({schema:1,releases:[f.release,arm]}));
+ f.observations.get(h.id).arch='arm64';
+ const started=await f.request(`/machines/${h.id}/agent-updates/start`,'POST',{});
+ assert.equal(started.status,202,started.raw);
+ assert.equal(started.data.plan.target.sha256,arm.sha256);
+ assert.deepEqual(started.data.events.map((item:any)=>item.stage),['ready','starting','accepted']);
+ assert.ok(f.calls.every(call=>call.credentialID===h.credential));
+ assert.equal((await f.request(`/machines/${h.id}/agent-updates/start`,'POST',{})).status,409);
+ const done=await f.settle(h.id,started.data.id);
+ assert.equal(done.status,'succeeded');
+ assert.ok(done.events.some((item:any)=>item.stage==='waiting_confirmation'));
+ assert.equal(done.events.at(-1).stage,'succeeded');
+ assert.equal((await f.request(`/machines/${h.id}/agent-updates/${done.id}`)).data.events.at(-1).stage,'succeeded');
+});
+
+test('one click upgrade defers a queued script without losing it',async t=>{
+ const f=await fixture(t),h=await f.host(),tasks=f.taskStore();
+ const task=tasks.nodes.task({name:'Queued script',type:'script',enabled:true,target_all:false,host_ids:[h.id],label_ids:[],
+  schedule:{mode:'once'},script:{runtime:'node',code:"console.log('ok')",timeout_seconds:5,max_output_bytes:4096}},'queued-upgrade',true);
+ const queued=tasks.dispatch(task.id,{confirm:true},'admin').runs[0];
+ assert.equal(f.machines.get(h.id).capabilities.update_agent.available,true);
+ const started=await f.request(`/machines/${h.id}/agent-updates/start`,'POST',{});
+ assert.equal(started.status,202,started.raw);
+ assert.equal(tasks.claimForHelper(f.helper(h.agent),{capabilities:[SCRIPT_TASK_CAPABILITY]}).run,null);
+ assert.equal(tasks.get(queued.id).state,'queued');
+ assert.equal((await f.settle(h.id,started.data.id)).status,'succeeded');
+ assert.equal(tasks.get(queued.id).state,'queued');
+});
+
 test("unknown maintenance uses a new account only when explicitly selected and preserves approval evidence", async t => {
   const f = await fixture(t), h = await f.host(); f.modes.set(h.id,"disconnect");
   const proposed = await f.plan(h.id); assert.equal((await f.apply(h.id,proposed.data.id)).status,202);
@@ -497,7 +531,10 @@ test("maintenance fencing prevents conflicting tasks, jobs, deletion, SSH termin
   assert.equal((await f.request(`/machines/${h.id}`, "DELETE")).status, 409);
   await f.request(`/machines/${h.id}/agent-updates/${p.id}/cancel`, "POST", {});
   assert.equal(tasks.dispatch(task.id, { confirm: true }, "admin").runs.length, 1);
-  assert.equal((await f.plan(h.id)).status, 409);
+  const queued=(await f.plan(h.id)).data;
+  assert.equal(queued.status,'awaiting_approval');
+  assert.equal(tasks.claimForHelper(f.helper(h.agent),{capabilities:[SCRIPT_TASK_CAPABILITY]}).run,null);
+  await f.request(`/machines/${h.id}/agent-updates/${queued.id}/cancel`,"POST",{});
 });
 
 test("interval scheduling skips only the host under maintenance and never catches up its missed slot", async t => {
@@ -603,6 +640,7 @@ test("rollout cancel affects only untouched plans; restart retains unknown opera
   f.db.run("UPDATE agent_update_rollouts SET status='running' WHERE id=?", proposal.id);
   createAgentUpdatesSchema(f.deps);
   assert.equal(f.machines.agentUpdates!.assistantGet(other.id, p.id).status, "unknown");
+  assert.equal(f.machines.agentUpdates!.assistantGet(other.id, p.id).events.at(-1)?.stage, "unknown");
   assert.equal((await f.request(`/agent-rollouts/${proposal.id}`)).data.status, "paused");
 });
 

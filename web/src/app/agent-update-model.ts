@@ -20,6 +20,7 @@ export type AgentUpdateStatus='awaiting_approval'|'running'|'verifying'|'succeed
 export interface AgentUpdate {
  id:string;machine_id:string;agent_id:string;action:'upgrade'|'rollback';status:AgentUpdateStatus;
  plan?:AgentUpdatePlan;receipt?:Record<string,unknown>;error?:string;recovery_revision?:string;recovery_requires_verification?:boolean;
+ events?:{at:string;stage:string}[];
  created_at:string;started_at?:string;finished_at?:string;review_url?:string;rollout_id?:string;rollout_review_url?:string;
 }
 export interface AgentRolloutItem {

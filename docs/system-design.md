@@ -1201,7 +1201,7 @@ stateDiagram-v2
 
 ### 28.1 驱动目标和职责
 
-更新中心镜像只更新平台与可下载发行物，不会改变用户主机正在运行的 Agent。主机管理应分别展示 Agent 报告的运行发行身份、可用发行与维护结果。管理员可准备单机升级、回退和串行批次；AI 可查询和准备计划，执行仍由管理员明确批准。开发与实际验收记录见 [SDD 045](../specs/045-agent-lifecycle-updates/spec.md)。
+更新中心镜像只更新平台与可下载发行物，不会改变用户主机正在运行的 Agent。主机管理分别展示 Agent 报告的运行发行身份、可用发行与维护结果。管理员点击单机升级即授权本次维护：中心只读探测架构，选择该架构最新的已验证发行，固定摘要和现场指纹后直接派发；窗口按原操作 ID 展示持久阶段日志。回退和串行批次仍采用独立计划与明确审批，AI 仅可查询和准备计划。原生命周期设计见 [SDD 045](../specs/045-agent-lifecycle-updates/spec.md)，单机直达升级见 [SDD 133](../specs/133-direct-agent-upgrade/spec.md)。
 
 Agent 常态以专用非 root 用户运行。自身程序和 systemd unit 由 root 管理；本轮维护继续使用主机的 SSH root/免交互 sudo 通道，运行独立的固定维护器。业务任务仍通过 Agent 出站 control 通道派发，无需中心入站连接 Agent。升级不重新 enrollment，不替换 Agent ID，不注入 SDK 主机变量，SDK 继续独立直报。
 
@@ -1209,9 +1209,9 @@ Agent 常态以专用非 root 用户运行。自身程序和 systemd unit 由 ro
 
 ```mermaid
 flowchart TB
-  Actor[管理员 / AI 准备计划] --> Plan[固定包摘要与当前程序指纹]
+  Actor[管理员点击单机升级 / AI 准备计划] --> Plan[自动探测架构 / 固定包摘要与当前程序指纹]
   Catalog[发行目录 / 内容寻址缓存] --> Plan
-  Plan --> Review[管理员明确审批]
+  Plan --> Review[单机点击授权 / 回退批次独立审批]
   Review --> SSH[SSH root 固定维护入口]
   SSH --> Worker[独立 systemd 维护单元]
   Worker --> Stage[验证 / 暂存 / 原子切换]
@@ -1237,7 +1237,7 @@ AgentRelease 包含 version、source_revision、build_id、state_schema、platfo
 
 ### 28.4 LLD：维护事务和数据兼容
 
-SSH 计划核对目标主机、公钥、Agent ID、受管路径/unit、当前程序指纹、服务运行状态、发行架构和权限；审批绑定当前主机连接 revision、Agent 归属、当前程序指纹、服务运行状态与目标摘要，15 分钟后失效。中心执行前、远端维护器接收及切换前再次核对；不一致时拒绝旧计划，避免失败恢复采用未经审阅的运行状态。已有任务、任务 unknown、其他生命周期计划或执行锁阻止开始维护；维护期间也阻止新增/领取冲突任务、重绑定、卸载与删除。
+SSH 计划核对目标主机、公钥、Agent ID、受管路径/unit、当前程序指纹、服务运行状态、发行架构和权限；冻结当前主机连接 revision、Agent 归属、当前程序指纹、服务运行状态与目标摘要，15 分钟后失效。中心执行前、远端维护器接收及切换前再次核对；不一致时拒绝旧计划，避免失败恢复采用未经审阅的运行状态。尚未领取、没有启动证据的 queued 任务保持排队，可等待维护完成；已领取、运行中、结果 unknown 或无法证明未执行的工作，以及其他生命周期计划或执行锁仍阻止维护。维护期间阻止新增/领取冲突任务、重绑定、卸载与删除。
 
 root 私有事务目录保存请求、备份与 receipt。维护器取得固定生命周期锁，验证暂存包及配置后，保留原 launcher/unit/current 并原子切换程序；配置、control/data credential、identity、SQLite 队列、日志游标、任务回执均保持原路径和内容。普通服务保持专用非 root 用户及现有 systemd 权限边界。
 
@@ -1269,7 +1269,7 @@ unknown 不自动重跑。核对读取原操作 receipt、真实 Agent 身份和
 
 ### 28.6 LLD：接口与 AI 边界
 
-发行目录使用 GET /api/v1/agent-releases；单机计划、历史、审批、取消、核对使用 /api/v1/machines/:id/agent-updates；批次使用 /api/v1/agent-rollouts。平台写操作仅管理员；成员只读安全版本和状态。接口不接受用户任意维护脚本、远程路径或 sudo 命令。下载接口独立验证操作 scope，不接受 SDK Key 替代。
+发行目录使用 GET /api/v1/agent-releases；管理员单机直达升级使用 POST /api/v1/machines/:id/agent-updates/start，请求 `{}`，中心自动选择目标并在同一请求中准备和派发。单机计划、历史、审批、取消、核对仍使用 /api/v1/machines/:id/agent-updates，历史回读增加固定阶段与时间事件；批次使用 /api/v1/agent-rollouts。平台写操作仅管理员；成员只读安全版本和状态。接口不接受用户任意维护脚本、远程路径或 sudo 命令；阶段事件不存储 SSH 原始输出或凭据。下载接口独立验证操作 scope，不接受 SDK Key 替代。
 
 AI 工具 list_agent_releases、propose_agent_update、get_agent_update 只返回安全 metadata、计划、结果和审阅链接。准备计划可执行固定只读 SSH probe；助手不能 apply、commit、执行回退或读取下载票据、原始 SSH 输出和主机秘密。rolled_back 表示本次更新未成功但原程序已恢复；unknown 需要核对，不能被助手改写为完成。
 
