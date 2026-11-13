@@ -2,6 +2,8 @@
 
 验证日期：2026-11-14。范围为 Slice 2 的遥测只读垂直切片。分支 stacked 在 SDD 135 的 `8baa9e4` 上；main 为 `65ebc79`，PR #186/#187 在开发时均 OPEN 且未合并。未部署生产、未操作真实主机、未发布镜像。
 
+交付 PR：[workhold/lightmoni#188](https://github.com/workhold/lightmoni/pull/188)，目标为 main，依赖 #186/#187；未合并。
+
 ## 自动化检查
 
 | 检查 | 结果 | 覆盖 |
