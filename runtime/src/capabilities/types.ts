@@ -9,6 +9,7 @@ export const CAPABILITY_SCOPES = [
   "deployments.read",
   "deployments.propose",
   "operations.read",
+  "operations.propose",
   "agents.read",
   "dashboards.read", "dashboards.detail.read",
   "code.workspace.read", "code.workspace.detail.read",

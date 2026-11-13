@@ -156,7 +156,7 @@ export async function createApp(cfg: Config) {
     const reconciliation = registerReconciliation(deps);
     const platform = registerOperationsPlatform(deps, { jobs: agentJobs, dataDir: cfg.dataDir, reconciliation });
     modules.push(platform);
-    const operations = registerOperations(deps, { jobs: agentJobs, credentials: agentCredentials, definitions: [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition] });
+    const operations = registerOperations(deps, { jobs: agentJobs, credentials: agentCredentials, definitions: [websiteDefinition, certificateDefinition, composeDefinition, backupDefinition], executionGrants });
     const operationSchedules = registerOperationSchedules(deps, operations);
     modules.push(operations, operationSchedules);
     const ingest = new Ingest(cat, auth, (...args) =>

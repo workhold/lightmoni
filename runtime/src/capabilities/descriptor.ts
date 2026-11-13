@@ -225,6 +225,11 @@ const METADATA: Record<string, Metadata> = {
     id: "operations.runs.get", outputSchema: data({run:record},["run"]), risk: "R1", operationKind: "center_read",
     approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: input => input?.id ? [{kind:"operation_run",id:input.id}] : [],
   },
+  lightmoni_operations_plan: {
+    id: "operations.plan", outputSchema: data({proposal:record,run:record,idempotency_replayed:flag},["proposal","run"]),
+    risk: "R2", operationKind: "domain_change", approvalPolicy: "domain_native", idempotencyPolicy: "required_external",
+    targetResolver: input => input?.resource_id ? [{kind:"operation_resource",id:input.resource_id}] : [], additionalScopes: ["operations.read"],
+  },
   lightmoni_operations_schedules_list: {
     id: "operations.schedules.list", outputSchema: pageOutput, risk: "R1", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
   },

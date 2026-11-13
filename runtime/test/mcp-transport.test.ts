@@ -15,6 +15,7 @@ import { CapabilityDispatcher } from "../src/capabilities/index.js";
 import type { CapabilityDispatcherContract } from "../src/capabilities/types.js";
 import { cipher } from "../src/shared/crypto.js";
 import { taskHelperFixture } from "./helpers/task-helper.js";
+import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { Alerts } from "../src/domains/alerts.js";
 import { AlertCapabilities } from "../src/domains/alert-capabilities.js";
 import { AlertProposalService } from "../src/assistant/alert-proposals.js";
@@ -199,23 +200,29 @@ test("deployment capabilities expose native service and receipt views through th
  }finally{await client.close();await f.close();}
 });
 test("operation capabilities expose resources, runs and schedules through the official MCP client",async()=>{
- let operations:any,schedules:any;
+ let operations:any,schedules:any,jobs:any,grants:any;
  const f=await fixture(d=>{
-  operations=registerOperations(d.deps,{definitions:[websiteDefinition],credentials:{has:()=>true} as any,jobs:{onUpdate:()=>()=>{}} as any});schedules=registerOperationSchedules(d.deps,operations);
-  return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,operations,operationSchedules:schedules});
+  jobs=registerAgentJobs(d.deps,{agentCredentials:{has:()=>true} as any});grants=new ExecutionGrantRegistry(d.deps);
+  operations=registerOperations(d.deps,{definitions:[websiteDefinition],credentials:{has:()=>true} as any,jobs,executionGrants:grants});schedules=registerOperationSchedules(d.deps,operations);
+  return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,operations,operationSchedules:schedules,executionGrants:grants});
  });
  const client=new Client({name:"operation-read",version:"1"});
  try{
   const config=websiteDefinition.validate({domains:["example.test"],mode:"static",static_files:{"index.html":"private-body"}}),at=new Date().toISOString();
   f.db.run("INSERT INTO ops_resources(id,kind,name,agent_id,revision,config_cipher,created_at,updated_at,created_by) VALUES('site-one','website','Site','agent-one',1,?,?,?,'admin')",f.deps.encrypt(JSON.stringify(config)),at,at);
   const run=operations.plan("site-one","inspect",{},f.user.id),schedule=schedules.create({name:"Hourly",resource_id:"site-one",resource_revision:1,operation:"inspect",input:{},cron:"0 * * * *",timezone:"UTC",enabled:false},f.user.id);
-  const key=f.access.createToken(f.user,{name:"Operations",scopes:["operations.read"],host_ids:null});await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
-  const tools=await client.listTools();for(const name of ["lightmoni_operations_resources_list","lightmoni_operations_resources_get","lightmoni_operations_runs_list","lightmoni_operations_runs_get","lightmoni_operations_schedules_list","lightmoni_operations_schedules_get"])assert.ok(tools.tools.some(t=>t.name===name),name);
+  const key=f.access.createToken(f.user,{name:"Operations",scopes:["operations.read","operations.propose"],host_ids:null});await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+  const tools=await client.listTools();for(const name of ["lightmoni_operations_resources_list","lightmoni_operations_resources_get","lightmoni_operations_runs_list","lightmoni_operations_runs_get","lightmoni_operations_schedules_list","lightmoni_operations_schedules_get","lightmoni_operations_plan"])assert.ok(tools.tools.some(t=>t.name===name),name);
   assert.equal(tools.tools.some(t=>/approve|delete|execute|trigger/.test(t.name)),false);
   const resources=await client.callTool({name:"lightmoni_operations_resources_list",arguments:{kind:"website"}});assert.equal(JSON.stringify(resources).includes("private-body"),false);
   const runRead=await client.callTool({name:"lightmoni_operations_runs_get",arguments:{id:run.id}});assert.equal((runRead.structuredContent as any).data.run.state,"awaiting_approval");
   const scheduleRead=await client.callTool({name:"lightmoni_operations_schedules_get",arguments:{id:schedule.id}});assert.equal((scheduleRead.structuredContent as any).data.schedule.operation,"inspect");
- }finally{await client.close();await schedules.close?.();await operations.close?.();await f.close();}
+  const planned=await client.callTool({name:"lightmoni_operations_plan",arguments:{resource_id:"site-one",operation:"inspect",input:{},reason:"external review",idempotency_key:"operation-plan-one"}});assert.ok(!planned.isError,JSON.stringify(planned));
+  const plannedData=(planned.structuredContent as any).data;assert.equal(plannedData.proposal.status,"awaiting_approval");assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_jobs")!.n,0);
+  assert.ok(f.db.get("SELECT 1 FROM capability_execution_grants WHERE domain='operation' AND native_id=?",plannedData.proposal.id));
+  operations.approve(plannedData.proposal.id,f.user.id,1);
+  const approved=await client.callTool({name:"lightmoni_operations_runs_get",arguments:{id:plannedData.proposal.id}});assert.equal((approved.structuredContent as any).data.run.state,"queued");
+ }finally{await client.close();await schedules.close?.();await operations.close?.();await jobs.close?.();await f.close();}
 });
 test("host and Agent capabilities expose safe inventory and lifecycle receipts through the official MCP client",async()=>{
  const f=await fixture(d=>{
