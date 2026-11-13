@@ -2,6 +2,8 @@
 
 验证日期：2026-11-14。基线为已合入 SDD 134～137 的 `main@1c3b0e4`。范围为 Slice 2 日志与 Trace 只读能力；未部署生产、未操作真实主机、未发布镜像。
 
+交付 PR：[workhold/lightmoni#192](https://github.com/workhold/lightmoni/pull/192)，目标为 main；未合并。
+
 ## 自动化检查
 
 | 检查 | 结果 | 覆盖 |
