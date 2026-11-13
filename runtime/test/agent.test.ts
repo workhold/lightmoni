@@ -240,6 +240,38 @@ test("lost upstream ACK retries exact frozen bytes; credentials pause and partia
   assert.equal(a.queue.stats().queue_batches, 0);
 });
 
+test("restart discards expired pending batches, retains receipts and paces acknowledged replay", async (t) => {
+  const seen: string[] = [];
+  const center = await mock(t, async (req, res) => {
+    for await (const _ of req) { /* consume body */ }
+    seen.push(String(req.headers["x-lightmoni-batch-id"]));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end("{}");
+  });
+  const cfg = config(t, { endpoint: center.url, max_retention_seconds: 60, max_queue_batches: 1 });
+  const expired = batch();
+  const first = createAgent(cfg);
+  first.accept(expired, true);
+  first.queue.db.run("UPDATE batches SET created_ns=? WHERE id=?", nowNano() - 120000000000n, expired.id);
+  await first.close();
+
+  const agent = createAgent(cfg);
+  t.after(() => agent.close());
+  assert(agent.queue.stats().oldest_age_seconds >= 119);
+  const fresh = batch();
+  agent.accept(fresh, true); // The expired batch must release capacity before this insert.
+  assert(agent.queue.receipt(expired.id));
+  assert.equal(agent.queue.stats().queue_batches, 1);
+  assert.equal(agent.queue.stats().oldest_age_seconds, 0);
+  assert.equal(await agent.forwardOnce(), cfg.replay_interval_ms);
+  assert.deepEqual(seen, [fresh.id]);
+  assert.equal(agent.queue.stats().queue_batches, 0);
+  assert(agent.runtimeEvents.some(event => event.event === "queue_expired" && event.body.startsWith("1 pending")));
+  assert.equal(defaultConfig().max_age_seconds, 86400);
+  assert.equal(defaultConfig().max_retention_seconds, 3600);
+  assert.equal(defaultConfig().replay_interval_ms, 1000);
+});
+
 test("directory logs keep checkpoints, rotations, UTF8 fragments and source identity across restart", async (t) => {
   const cfg = config(t),
     logs = join(cfg.data_dir, "logs");
