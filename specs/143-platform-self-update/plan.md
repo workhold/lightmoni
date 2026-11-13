@@ -2,7 +2,7 @@
 
 **Branch**: `codex/143-platform-self-update-hld`
 **Date**: 2026-11-14
-**Status**: HLD draft for review；未授权实现
+**Status**: HLD reviewed；未授权实现
 **Architecture impact**: 适用。新增中心与独立更新器的控制路径、发布登记协议、持久化执行记录和 Docker 权限边界；实现 PR 必须同步 `docs/system-design.md`。
 
 ## 1. 目标与范围
@@ -124,7 +124,7 @@ npm run publish:platform -- --register-only <本地发布回执路径>
 }
 ```
 
-- `published_at`：发布端在推送完成后记录的时间。
+- `published_at`：受信 publisher 在推送完成并回读 manifest 后 attest 的推送完成时间。它是发布登记事实，不是 Registry 提供的权威上传时间或不可伪造的签名时间。
 - `registered_at`：中心收到登记的时间，单独保存但不冒充上传时间。
 - `first_seen_at`：中心首次从 Registry 发现该标签的时间，仅用于无登记版本。
 - publisher 只能登记版本，不能读取中心秘密、批准或执行更新。
@@ -147,7 +147,7 @@ npm run publish:platform -- --register-only <本地发布回执路径>
 |---|---|
 | `tag` | 用户选择的标签 |
 | `digest` | 标签当前对应的不可变 manifest digest |
-| `published_at` | 推送完成后的上传登记时间 |
+| `published_at` | 受信 publisher attest 的推送完成时间；不代表 Registry 原生提供上传时间 |
 | `source_revision` | 构建对应的完整 Git commit |
 | `current` | 是否与 updater 观察到的当前运行身份一致 |
 | `compatibility` | 可更新、信息不完整或明确不兼容 |
@@ -189,6 +189,8 @@ npm run publish:platform -- --register-only <本地发布回执路径>
 4. Spool 写入结果不确定时，中心只按原任务 ID 和载荷摘要多读/重写同一未领取任务，不生成第二个 ID。
 5. updater 一旦确认领取，Spool 的执行状态只由 updater 推进；中心恢复器不得用 SQLite 旧状态覆盖它。
 6. 中心崩溃造成“SQLite 有任务、Spool 尚未投递”时，恢复器补投原任务；“Spool 已领取、中心尚未看到”时，中心只补读，不再次投递新任务。
+7. 同一 `operation_id` 的载荷摘要不一致时，updater 和中心都必须拒绝覆盖并记录冲突；不得用新载荷替换原任务。
+8. 领取状态或 Spool 内容无法可靠读取时，中心不得重写，updater 不得开始执行；按原任务进入中断/未知核对，而不是猜测“尚未领取”。
 
 ## 7. 执行协议与状态机
 
@@ -261,7 +263,7 @@ updater 在私有 Spool 中为每个任务原子保存：
 | `queued` | 未领取则保持排队；有领取证据则核对原任务，不新建任务 |
 | `preparing` | 重新只读预检；身份不变且未发生切换才继续 |
 | `pulling` | 按原 digest 核对本机镜像，缺失时继续同一拉取 |
-| `switch_intent` 已保存、切换结果未知 | 不再次执行切换；先核对实际容器与残留进程，能证明状态则进入核验，否则 `unknown` |
+| `switch_intent` 已保存、切换结果未知 | 不再次执行切换；确认目标容器已切换才进入核验，能证明切换未生效则保留实际状态并失败/中断核对，无法确定则 `unknown` |
 | `verifying` | 继续健康与实际镜像核验，不重复切换 |
 | 最终回执已保存但中心未收到 | 中心恢复后补读，不重新执行 |
 | 锁、任务所有权或检查点冲突 | 保持 `interrupted/unknown`，等待人工核对 |

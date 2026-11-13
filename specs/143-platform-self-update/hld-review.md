@@ -2,7 +2,7 @@
 
 **Date**: 2026-11-14
 **Object**: [plan.md](plan.md)
-**Result**: HLD 草案自审通过，等待用户评审；不代表已实现或已验收。
+**Result**: HLD 经自审与独立审核修正后通过；不代表已实现或已验收。
 
 ## 需求覆盖
 
@@ -34,6 +34,13 @@
 2. 增加 SQLite 与 Spool 崩溃一致性协议，规定领取前后的唯一写入方。
 3. 明确中心不可用且拉取授权失效时保持中断，不绕过认证续跑。
 4. 明确切换通过持久化目标状态文件完成，不直接修改仓库 Compose 文件。
+
+## 独立审核修正
+
+1. 将 `published_at` 明确为受信 publisher 在推送和 manifest 回读后的 attest 时间，避免误述为 Registry 权威上传时间。
+2. 增加 Spool 同 ID 异载荷冲突和领取状态不可读时的 fail-closed 规则，禁止覆盖或猜测领取状态。
+3. 细化 `switch_intent` 后恢复：确认切换才核验，确认未切换则按实际状态失败/中断核对，不确定为 `unknown`；所有分支均禁止盲目重放。
+4. 对照当前代码确认固定 Compose 标签、中心无 Docker socket、现有 Registry 标签/manifest/digest 能力和 `center_schema=2` 的现状声明。
 
 ## 后续 LLD 必须解决的问题
 
