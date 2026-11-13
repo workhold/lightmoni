@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Dependencies, User } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
-import { TaskProposalService, runMetadata, taskMetadata, taskTools, type ProposalSource } from "../assistant/task-tools.js";
+import { TaskProposalService, runMetadata, taskMetadata, taskTools, taskDraftSchema, type ProposalSource } from "../assistant/task-tools.js";
 import type { TaskRunStore } from "../server/task-center.js";
 import { NodeError, type Task } from "../server/nodes-model.js";
 import { currentAgentHostname } from "../server/agent-hosts.js";
@@ -80,6 +80,11 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         this.authorize(current, "tasks.propose");
         if (intent.operation === "task.dispatch") for (const id of intent.host_ids ?? []) this.host(current, id);
         else if (["run.cancel", "run.retry"].includes(intent.operation)) this.host(current, options.taskCenter.get(intent.run_id!).host_id);
+        else if (intent.operation === "task.create") this.assertStaticTaskTargets(current, intent.task);
+        else if (intent.operation === "task.update") {
+          this.assertStaticTaskTargets(current, options.taskCenter.nodes.getTask(intent.task_id!));
+          this.assertStaticTaskTargets(current, intent.task);
+        }
         else fail(403, "unsupported_external_proposal");
       },
       afterApply: (actor, source, _intent, proposal) => {
@@ -121,7 +126,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         if(i.include_source&&!p.scopes.includes("tasks.source.read"))fail(403,"scope_required");
         return {task:{...this.taskView(task,p.host_ids===null),...(i.include_source&&task.script?{script:task.script}: {})}};
       }},
-      {name:"lightmoni_tasks_plan",description:"Save a reviewable proposal to dispatch an existing task, cancel a run or retry a completed run. Never executes or approves. Return review_url to the user. An external call must supply a stable idempotency_key. unknown is never automatically retried.",scope:"tasks.propose",effect:"propose",inputSchema:schema({operation:{...string,enum:["task.dispatch","run.cancel","run.retry"]},task_id:string,run_id:string,host_ids:{type:"array",items:string,minItems:1,maxItems:200},reason:{type:"string",minLength:1,maxLength:1000},idempotency_key:{type:"string",minLength:1,maxLength:128}},["operation","reason","idempotency_key"]),execute:(p,i,c)=>this.plan(p,i,c)},
+      {name:"lightmoni_tasks_plan",description:"Save a reviewable proposal to create/update a task, dispatch an existing task, cancel a run or retry a completed run. Never executes or approves. Return review_url to the user. An external call must supply a stable idempotency_key. unknown is never automatically retried.",scope:"tasks.propose",effect:"propose",inputSchema:schema({operation:{...string,enum:["task.create","task.update","task.dispatch","run.cancel","run.retry"]},task_id:string,run_id:string,task:taskDraftSchema,host_ids:{type:"array",items:string,minItems:1,maxItems:200},reason:{type:"string",minLength:1,maxLength:1000},idempotency_key:{type:"string",minLength:1,maxLength:128}},["operation","reason","idempotency_key"]),execute:(p,i,c)=>this.plan(p,i,c)},
       {name:"lightmoni_proposals_get",description:"Read proposal status and queued run references without script bodies or raw host output.",scope:"tasks.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:(p,i)=>this.proposalView(p,i.id)},
       {name:"lightmoni_executions_list",description:"List actual finite task execution receipts; state unknown is not success. Source, leases and output are omitted.",scope:"executions.read",effect:"read",inputSchema:schema({host_id:string,task_id:string,state:{...string,enum:["queued","running","succeeded","failed","cancelled","unknown"]},limit:{type:"integer",minimum:1,maximum:100}}),execute:(p,i)=>{
         if(p.host_ids!==null&&!i.host_id)fail(403,"host_id_required");if(i.host_id)this.host(p,i.host_id);
@@ -240,6 +245,11 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   private authorize(p:Principal,scope:string,allHosts=false,roles:("admin"|"member")[]=["admin"]) {
     if(!roles.includes(p.user.role as "admin"|"member")||!p.scopes.includes(scope)||allHosts&&p.host_ids!==null)fail(403,"capability_forbidden");
   }
+  private assertStaticTaskTargets(p:Principal,task:any) {
+    if(p.host_ids===null)return;
+    if(!task||task.target_all||task.label_ids?.length||!Array.isArray(task.host_ids)||!task.host_ids.length)fail(403,"explicit_hosts_required");
+    for(const id of task.host_ids)if(!this.allowedHost(p,id))fail(404,"resource_not_found");
+  }
   private allowedHost(p:Principal,id:string) { return p.host_ids===null||p.host_ids.includes(id); }
   private host(p:Principal,id:string):any {
     if(!this.allowedHost(p,id))fail(404,"resource_not_found");
@@ -285,7 +295,15 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     return {proposal:{id:v.id,operation:v.operation,task_id:v.task_id,run_id:v.run_id,status:v.status,expires_at:v.expires_at,applied_at:v.applied_at,review_url:this.review(v.review_url),...(safeResult?{result:safeResult}:{})}};
   }
   private plan(p:Principal,i:any,c:InvocationContext):any {
-    if(i.operation==="task.dispatch") {
+    if(["task.create","task.update"].includes(i.operation)) {
+      if(!i.task||i.run_id||i.host_ids||i.operation==="task.create"&&i.task_id||i.operation==="task.update"&&!i.task_id)fail(400,"invalid_input");
+      if(i.operation==="task.create")this.assertStaticTaskTargets(p,i.task);
+      else {
+        const current=this.options.taskCenter.nodes.getTask(i.task_id);
+        this.assertStaticTaskTargets(p,current);
+        this.assertStaticTaskTargets(p,{...current,...i.task});
+      }
+    } else if(i.operation==="task.dispatch") {
       if(!i.task_id||i.run_id)fail(400,"invalid_input");
       if(p.host_ids!==null&&!i.host_ids)fail(403,"explicit_hosts_required");
       if(i.host_ids)for(const id of i.host_ids)this.host(p,id);
@@ -477,7 +495,6 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     });
     const old=taskTools(this.proposals).find(t=>t.name==="propose_task_action")!;
     return [...shared,...telemetry,...alerts,...logTrace,...deployments,...operationReads,...hostAgent,...dashboardReads,...instrumentation,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
-      if(!["task.dispatch","run.cancel","run.retry"].includes(input?.operation))return old.execute(input,signal,user,scope);
       if(!user)fail(401,"login_required");
       const p=this.authority.sessionPrincipal(user as User,"assistant");
       const result=await this.invoke(p,"lightmoni_tasks_plan",{...input,idempotency_key:randomUUID()},{signal,session_id:scope?.session_id});

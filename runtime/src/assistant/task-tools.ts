@@ -36,7 +36,7 @@ const convert = <T>(fn: () => T): T => {
 };
 const str = { type: "string" };
 const schema = (properties: Record<string, any>, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
-const taskDraftSchema = schema({
+export const taskDraftSchema = schema({
   name: str, type: { type: "string", enum: ["host", "probe", "log", "script"], description: "Create only script. Existing continuous tasks may be edited; type is immutable." }, enabled: { type: "boolean" },
   host_ids: { type: "array", items: str, maxItems: 500 }, label_ids: { type: "array", items: str, maxItems: 64 }, target_all: { type: "boolean" },
   config: { type: "object", description: "Configuration for editing an existing continuous task; omitted for new script tasks." },

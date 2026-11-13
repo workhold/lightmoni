@@ -58,7 +58,7 @@ callback_port = 1455
 | `lightmoni_hosts_inventory` / `lightmoni_hosts_details_get` | `hosts.read` | assistant-safe 详细主机目录/单主机详情，不含 Host Key 或秘密 |
 | `lightmoni_tasks_list/get` | `tasks.read` | 平台默认与用户任务元数据，默认无源码/采集配置 |
 | `lightmoni_tasks_get` 的 `include_source` | 还需 `tasks.source.read` | 显式读取脚本源码 |
-| `lightmoni_tasks_plan` | `tasks.propose` | 已有任务派发、执行取消、重试的审阅提案 |
+| `lightmoni_tasks_plan` | `tasks.propose` | 自定义任务创建、任务修改、已有任务派发、执行取消和重试的审阅提案 |
 | `lightmoni_proposals_get` | `tasks.read` | 提案状态；执行详情还需 `executions.read` |
 | `lightmoni_executions_list/get` | `executions.read` | 原生任务执行状态，省略源码、原始输出和租约 |
 | `lightmoni_telemetry_catalog` | `telemetry.catalog.read` | 表结构目录，仅全主机范围授权，无数据行/SQL |
@@ -100,7 +100,7 @@ callback_port = 1455
 
 ## 操作闭环
 
-先查询真实任务和目标，再调用 `lightmoni_tasks_plan`，提供 `operation`、准确 ID、原因和稳定的 `idempotency_key`。派发使用 `task.dispatch`，取消/重试使用 `run.cancel`/`run.retry`；有限主机授权派发必须明确给出 `host_ids`。
+先查询真实任务和目标，再调用 `lightmoni_tasks_plan`，提供 `operation`、准确 ID、原因和稳定的 `idempotency_key`。创建/修改使用 `task.create`/`task.update` 和 task 定义；派发使用 `task.dispatch`，取消/重试使用 `run.cancel`/`run.retry`。有限主机授权只允许显式静态 host_ids，不能通过 target_all 或标签扩大，修改前后目标都会复验。
 
 返回 `data.proposal.review_url` 后到平台审阅。审批绑定当时任务、目标和状态；有变化需要重新生成。批准派发表示进入队列，使用返回的 run ID 或 `task:<run ID>` 查询实际结果。`queued`/`running`/`unknown` 不能报告成功，取消须以远端停止回执为准。断线后使用同一业务键和内容重试；修改内容需新键。同键不同内容冲突，不自动重新派发。
 
@@ -112,4 +112,4 @@ callback_port = 1455
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-目前没有外部任务创建/源码修改、告警修改、服务部署/运维写工具、Agent 预检/安装/升级/卸载写工具、插桩生成/应用、code_task、自动批准、服务主体或持续授权。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
+任务创建/修改也只创建提案，不能直接执行或自动批准。目前没有外部告警修改、服务部署/运维写工具、Agent 预检/安装/升级/卸载写工具、插桩生成/应用、code_task、自动批准、服务主体或持续授权。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。

@@ -93,6 +93,7 @@ const METADATA: Record<string, Metadata> = {
     risk: "R2", operationKind: "domain_change", approvalPolicy: "domain_native", idempotencyPolicy: "required_external",
     targetResolver: input => [
       ...(Array.isArray(input?.host_ids) ? input.host_ids.map((id: string) => ({ kind: "host" as const, id })) : []),
+      ...(Array.isArray(input?.task?.host_ids) ? input.task.host_ids.map((id: string) => ({ kind: "host" as const, id })) : []),
       ...(input?.task_id ? [{ kind: "task" as const, id: input.task_id }] : []),
       ...(input?.run_id ? [{ kind: "execution" as const, id: input.run_id }] : []),
     ],
