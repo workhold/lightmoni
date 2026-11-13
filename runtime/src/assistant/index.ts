@@ -82,6 +82,7 @@ export interface AssistantOptions {
   capabilities?: CapabilityDispatcher;
   taskProposals?: TaskProposalService;
   instrumentationWorkspaceRoot?: string;
+  instrumentationService?: InstrumentationService;
 }
 const id = () => randomBytes(16).toString("hex");
 const key = (user: string, session: string) => `session/${user}/${session}`;
@@ -186,7 +187,7 @@ export function registerAssistant(
     options.codeWorkspaceRoot ?? process.env.LIGHTMONI_CODE_WORKSPACE;
   const instrumentationRoot =
     options.instrumentationWorkspaceRoot ?? codeWorkspace;
-  const instrumentation = instrumentationRoot?.trim()
+  const instrumentation = options.instrumentationService ?? (instrumentationRoot?.trim()
     ? new InstrumentationService(instrumentationRoot, {
         now: deps.now,
         // Instrumentation plans contain before snapshots so apply can verify
@@ -199,7 +200,7 @@ export function registerAssistant(
           put: (key, value) => store.put(key, deps.encrypt(JSON.stringify(value))),
         },
       })
-    : undefined;
+    : undefined);
   const codeTasks = codeWorkspace?.trim()
     ? new CodeTaskService({
         workspaceRoot: codeWorkspace,
@@ -300,7 +301,7 @@ export function registerAssistant(
         ...(options.machines ? { machines: options.machines } : {}),
         ...(options.deployments ? { deployments: options.deployments } : {}),
         ...(instrumentation ? { instrumentation } : {}),
-      }).filter(tool => !options.capabilities || !["list_tables", "describe_table", "run_query", "list_services", "get_service_deployment", "get_service_deployment_events", "list_managed_machines", "get_managed_machine", "get_agent_installation", "list_agent_releases", "get_agent_update"].includes(tool.name)),
+      }).filter(tool => !options.capabilities || !["list_tables", "describe_table", "run_query", "list_services", "get_service_deployment", "get_service_deployment_events", "list_managed_machines", "get_managed_machine", "get_agent_installation", "list_agent_releases", "get_agent_update", "scan_sdk_instrumentation"].includes(tool.name)),
       ...(options.alerts && alertProposals
         ? alertTools(options.alerts, alertProposals).filter(tool => !options.capabilities || !["list_alert_rules", "get_alert_rule", "list_alert_silences", "get_alert_silence", "list_alert_groups", "get_alert_proposal"].includes(tool.name))
         : []),

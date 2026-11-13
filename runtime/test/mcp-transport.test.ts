@@ -27,6 +27,10 @@ import { registerOperationSchedules } from "../src/server/operation-schedules.js
 import { websiteDefinition } from "../src/operations/websites.js";
 import { Dashboards, normalizeDashboard } from "../src/domains/dashboards.js";
 import { DashboardReadService } from "../src/domains/dashboard-read.js";
+import { InstrumentationService } from "../src/assistant/instrumentation.js";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 async function fixture(wrap?:(d:CapabilityDispatcher)=>CapabilityDispatcherContract){
  const db=new DB(":memory:"),router=new Router(),user={id:"admin",name:"Admin",role:"admin"};accountSchema(db);
  db.run("INSERT INTO users(id,name,role,active,created_at) VALUES(?,?,?,1,?)",user.id,user.name,user.role,new Date().toISOString());
@@ -217,6 +221,19 @@ test("dashboard capabilities expose real catalog, details and versions through t
   const ordinaryKey=f.access.createToken(f.user,{name:"Dashboard catalog",scopes:["dashboards.read"],host_ids:null});await ordinaryClient.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+ordinaryKey.token}}}));
   const denied=await ordinaryClient.callTool({name:"lightmoni_dashboards_get",arguments:{id:custom.id}});assert.equal(denied.isError,true);assert.equal((denied.structuredContent as any).error.detail_code,"capability_forbidden");
  }finally{await client.close();await ordinaryClient.close();await f.close();}
+});
+test("instrumentation capabilities scan and read proposals through the official MCP client",async()=>{
+ let instrumentation!:InstrumentationService;
+ const root=mkdtempSync(join(tmpdir(),"lm-mcp-instrumentation-"));writeFileSync(join(root,"package.json"),JSON.stringify({dependencies:{"@lightmoni/sdk":"0.1.0",express:"5.0.0"}}));writeFileSync(join(root,"server.ts"),"import {createLightMoni} from '@lightmoni/sdk';\nimport express from 'express';\nconst app=express();\napp.get('/orders',async(_req,res)=>res.send('ok'));\n");
+ const f=await fixture(d=>{instrumentation=new InstrumentationService(root);return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,instrumentation});});
+ const client=new Client({name:"instrumentation-read",version:"1"});
+ try{
+  const key=f.access.createToken(f.user,{name:"Instrumentation",scopes:["code.workspace.read","code.workspace.detail.read"],host_ids:null});await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+  const tools=await client.listTools();assert.ok(tools.tools.some(t=>t.name==="lightmoni_code_instrumentation_scan"));assert.ok(tools.tools.some(t=>t.name==="lightmoni_code_instrumentation_get"));assert.equal(tools.tools.some(t=>/propose|apply|code_task/.test(t.name)),false);
+  const scan=await client.callTool({name:"lightmoni_code_instrumentation_scan",arguments:{workspace:"."}}),scanData=(scan.structuredContent as any).data;assert.equal(scanData.sdk.found,true);
+  const plan=await instrumentation.propose({workspace:".",intent:"instrument requests",base_revision:scanData.base_revision},new AbortController().signal);
+  const read=await client.callTool({name:"lightmoni_code_instrumentation_get",arguments:{plan_id:plan.plan_id}});assert.equal((read.structuredContent as any).data.plan.plan_id,plan.plan_id);assert.equal(Object.hasOwn((read.structuredContent as any).data,"before"),false);
+ }finally{await client.close();await f.close();rmSync(root,{recursive:true,force:true});}
 });
 test("transport rejects wrong credentials, Origin, methods, versions, oversized and malformed messages",async()=>{
  const f=await fixture();try{
