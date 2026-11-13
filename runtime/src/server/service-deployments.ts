@@ -10,6 +10,7 @@ import { assertReleaseBundleHasNoCredentials, parseReleaseBundle } from "../depl
 import { ReleaseArtifactError, ReleaseArtifactStore } from "../deployment/artifact-store.js";
 import { queryDeploymentTelemetry, validateTelemetryBinding } from "../deployment/telemetry-query.js";
 import type { AgentJobStore } from "./agent-jobs.js";
+import type { ExecutionGrantRegistry } from "../capabilities/execution-grants.js";
 
 /**
  * Service delivery metadata.
@@ -226,7 +227,7 @@ const safeTargetConfig = (adapter: string, raw: Record<string, any>) => {
 /** Register service inventory and approval-ready delivery plan APIs. */
 export function registerServiceDeployments(
   deps: Dependencies,
-  options: { jobs?: AgentJobStore; artifacts?: ReleaseArtifactStore } = {},
+  options: { jobs?: AgentJobStore; artifacts?: ReleaseArtifactStore; executionGrants?: ExecutionGrantRegistry } = {},
 ): Module & ServiceDeploymentStore {
   const { db, router } = deps;
   createAgentLifecycleSchema(db);
@@ -1136,6 +1137,7 @@ export function registerServiceDeployments(
     // transaction. A partial approval can neither strand a job nor leave the
     // deployment approved without a corresponding job.
     const result = db.transaction(() => {
+      options.executionGrants?.assert("deployment", deployment.id);
       const plan = parse<any>(deployment.plan_json, {});
       const current = currentTarget(deployment.service_id, deployment.target_id);
       if (current.target.status === "disabled" || plan.target_revision !== current.revision

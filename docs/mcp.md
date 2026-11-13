@@ -50,7 +50,7 @@ callback_port = 1455
 
 ## 首批工具
 
-告警模块启用时提供 46 个工具。默认任务通过任务目录读取，不另设模板目录。
+告警模块启用时提供 47 个工具。默认任务通过任务目录读取，不另设模板目录。
 
 | 工具 | scope | 行为 |
 | --- | --- | --- |
@@ -75,6 +75,7 @@ callback_port = 1455
 | `lightmoni_services_list/get` | `deployments.read` | 服务目录，或服务真实目标与 Release；管理员安装级读取 |
 | `lightmoni_deployments_list/get` | `deployments.read` | 服务部署历史或单个原生部署状态，不把计划/排队当作成功 |
 | `lightmoni_deployments_events` | `deployments.read` | 部署的安全 append-only 事件时间线 |
+| `lightmoni_deployments_plan` | `deployments.propose` + `deployments.read` | 为现有服务目标/Release 创建审批计划；审批与 SSH 派发前复验稳定 grant |
 | `lightmoni_operations_resources_list/get` | `operations.read` | 运维资源安全配置摘要，网站/Compose 正文省略 |
 | `lightmoni_operations_runs_list/get` | `operations.read` | 原生运维 Run 元数据或有界详情，敏感日志省略 |
 | `lightmoni_operations_schedules_list/get` | `operations.read` | 计划任务、授权/禁用原因和真实 fire/run 状态 |
@@ -113,4 +114,4 @@ callback_port = 1455
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-任务和告警创建/修改只创建提案，不能直接执行或自动批准。目前没有外部服务部署/运维写工具、Agent 预检/安装/升级/卸载写工具、插桩生成/应用、code_task、自动批准、服务主体或持续授权。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
+任务、告警和部署计划只创建提案，不能直接执行或自动批准。部署回滚/取消/上传、运维写工具、Agent 预检/安装/升级/卸载写工具、插桩生成/应用、code_task、服务主体或持续授权仍未开放。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。

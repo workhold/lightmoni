@@ -57,6 +57,7 @@ import { TelemetryService } from "../domains/telemetry.js";
 import { AlertProposalService } from "../assistant/alert-proposals.js";
 import { LogReadService } from "../domains/log-read.js";
 import { TraceReadService } from "../domains/trace-read.js";
+import { ExecutionGrantRegistry } from "../capabilities/execution-grants.js";
 import { DashboardReadService } from "../domains/dashboard-read.js";
 import { InstrumentationService } from "../assistant/instrumentation.js";
 import { Store as AssistantUsageStore } from "../assistant/usage.js";
@@ -149,7 +150,8 @@ export async function createApp(cfg: Config) {
     // Service delivery metadata is intentionally separate from Agent bootstrap
     // records: plans can be reviewed before an Agent executes them.
     const releaseArtifacts = new ReleaseArtifactStore(join(cfg.dataDir, "release-artifacts"));
-    const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs, artifacts: releaseArtifacts });
+    const executionGrants = new ExecutionGrantRegistry(deps);
+    const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs, artifacts: releaseArtifacts, executionGrants });
     modules.push(serviceDeployments);
     const reconciliation = registerReconciliation(deps);
     const platform = registerOperationsPlatform(deps, { jobs: agentJobs, dataDir: cfg.dataDir, reconciliation });
@@ -187,7 +189,7 @@ export async function createApp(cfg: Config) {
     privilegedExecutors.taskRuns = taskCenter;
     modules.push(privilegedExecutors,managedMachines.registerExecutorBootstrap(privilegedExecutors));
     connectManagedExecutorJobs(deps,{jobs:agentJobs,executors:privilegedExecutors,artifacts:releaseArtifacts,resolvePlatform:platform.resolvePayload});
-    modules.push(registerCenterSSHDispatch(deps,managedMachines,agentJobs,privilegedExecutors,undefined,1000,taskCenter));
+    modules.push(registerCenterSSHDispatch(deps,managedMachines,agentJobs,privilegedExecutors,undefined,1000,taskCenter,executionGrants));
     modules.push(connectExecutorObservations(deps,privilegedExecutors,ingest.internal.bind(ingest)));
     modules.push(agentCredentials);
     const dashboards = registerDashboards(deps);
@@ -218,7 +220,7 @@ export async function createApp(cfg: Config) {
       return { get: <T>(key: string) => { const saved = store.get<string>(key); return saved ? JSON.parse(deps.decrypt(saved)) as T : undefined; },
         put: (key, value) => store.put(key, deps.encrypt(JSON.stringify(value))) };
     })() }) : undefined;
-    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry, logs:logReads, traces:traceReads, deployments:serviceDeployments, operations, operationSchedules, machines:managedMachines, dashboards:dashboardReads, instrumentation});
+    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry, logs:logReads, traces:traceReads, deployments:serviceDeployments, operations, operationSchedules, machines:managedMachines, dashboards:dashboardReads, instrumentation, executionGrants});
     registerCapabilities(deps, capabilities, capabilityAccess);
     if (mcpAccess) modules.push(registerMcpTransport(deps, mcpAccess, capabilities));
     modules.push(
