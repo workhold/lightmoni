@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { isLosslessNumber } from "lossless-json";
+import { publicAlertValue } from "../domains/alert-read.js";
 import type { DB } from "../shared/sqlite.js";
 import type { AlertCapabilities, AlertChange, AlertOperation } from "../domains/alert-capabilities.js";
 import { clone, encode, parseTime } from "../domains/common.js";
@@ -39,15 +39,7 @@ interface StoredProposal {
 const maxBytes = 48 << 10;
 const ttl = 15 * 60 * 1000;
 const operations: AlertOperation[] = ["rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"];
-/** UI and worker use native JSON; represent exact large integers as decimal strings. */
-export function publicAlertValue<T>(value: T): T {
-  if (isLosslessNumber(value)) return value.value as T;
-  if (typeof value === "bigint") return value.toString() as T;
-  if (Array.isArray(value)) return value.map(publicAlertValue) as T;
-  if (value && typeof value === "object")
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, publicAlertValue(item)])) as T;
-  return value;
-}
+export { publicAlertValue } from "../domains/alert-read.js";
 function bounded(value: unknown): void {
   if (bytes(encode(value)) > maxBytes)
     throw new AssistantError(400, "告警配置过大，请缩小变更范围", "alert_change_too_large");

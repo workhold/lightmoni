@@ -50,7 +50,7 @@ callback_port = 1455
 
 ## 首批工具
 
-告警模块启用时提供 12 个工具。默认任务通过任务目录读取，不另设模板目录。
+告警模块启用时提供 18 个工具。默认任务通过任务目录读取，不另设模板目录。
 
 | 工具 | scope | 行为 |
 | --- | --- | --- |
@@ -64,6 +64,11 @@ callback_port = 1455
 | `lightmoni_telemetry_describe` | `telemetry.catalog.read` | 按稳定 ID 或名称读取一个目录表，仅全主机范围授权，无数据行 |
 | `lightmoni_telemetry_query` | `telemetry.query` | 经既有只读 Query 执行有界查询，仅全主机范围授权；显式时间范围、最多 1000 行并有字节截断 |
 | `lightmoni_alerts_list` | `alerts.read` | 告警规则目录，仅全主机范围授权，无SQL/证据/修改 |
+| `lightmoni_alert_rules_list` | `alerts.read` | 规则安全字段、筛选和分页，无 SQL |
+| `lightmoni_alert_rules_get` | `alerts.detail.read` | 完整规则、SQL、revision、路由和时序 |
+| `lightmoni_alert_silences_list/get` | `alerts.read` | 静默目标、调度、原因和版本 |
+| `lightmoni_alert_groups_list` | `alerts.read` | 责任组 ID/名称/启用状态，无联系人或供应商秘密 |
+| `lightmoni_alert_proposals_get` | `alerts.detail.read` | 当前用户自己的告警提案和真实回执，不能审批 |
 
 主机的 `name` 是用户配置的资产名称，`observed_hostname` 仅来自当前关联且未移除的 Agent；新 Agent 尚未上报时为空，不回退旧缓存。
 

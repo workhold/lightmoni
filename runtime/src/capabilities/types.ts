@@ -4,7 +4,7 @@ import type { CapabilityDefinition } from "./descriptor.js";
 
 export const CAPABILITY_SCOPES = [
   "hosts.read", "tasks.read", "tasks.source.read", "tasks.propose",
-  "executions.read", "telemetry.catalog.read", "telemetry.query", "alerts.read",
+  "executions.read", "telemetry.catalog.read", "telemetry.query", "alerts.read", "alerts.detail.read",
 ] as const;
 export type CapabilityScope = typeof CAPABILITY_SCOPES[number];
 export interface Principal {

@@ -15,6 +15,9 @@ import { CapabilityDispatcher } from "../src/capabilities/index.js";
 import type { CapabilityDispatcherContract } from "../src/capabilities/types.js";
 import { cipher } from "../src/shared/crypto.js";
 import { taskHelperFixture } from "./helpers/task-helper.js";
+import { Alerts } from "../src/domains/alerts.js";
+import { AlertCapabilities } from "../src/domains/alert-capabilities.js";
+import { AlertProposalService } from "../src/assistant/alert-proposals.js";
 async function fixture(wrap?:(d:CapabilityDispatcher)=>CapabilityDispatcherContract){
  const db=new DB(":memory:"),router=new Router(),user={id:"admin",name:"Admin",role:"admin"};accountSchema(db);
  db.run("INSERT INTO users(id,name,role,active,created_at) VALUES(?,?,?,1,?)",user.id,user.name,user.role,new Date().toISOString());
@@ -89,6 +92,32 @@ test("telemetry capabilities use installation scopes through the official MCP cl
    const denied=await limited.callTool({name:"lightmoni_telemetry_catalog",arguments:{}});assert.equal(denied.isError,true);assert.equal((denied.structuredContent as any).error.detail_code,"capability_forbidden");
   }finally{await limited.close();}
  }finally{await f.close();}
+});
+test("alert read capabilities separate SQL details and proposals through the official MCP client",async()=>{
+ let alerts!:Alerts,caps!:AlertCapabilities,proposals!:AlertProposalService;
+ const f=await fixture(d=>{
+  d.deps.cat.list=async()=>[{id:"log_app",name:"log_app",logical_name:"app",kind:"log",columns:[],services:["api"],system:false,retention_days:null,effective_retention_days:7}];
+  d.deps.referencedTables=async()=>["log_app"];
+  alerts=new Alerts(d.deps);caps=new AlertCapabilities(alerts);proposals=new AlertProposalService(d.deps.db,caps,d.deps.now,d.deps.encrypt,d.deps.decrypt);
+  return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,alerts:caps,alertProposals:proposals});
+ });
+ let client:Client|undefined,ordinaryClient:Client|undefined;
+ try{
+  const prepared=await caps.prepareRuleSave(f.user,{name:"API errors",enabled:true,kind:"sql",severity:"P2",sql:"SELECT count() AS value FROM log_app",value_field:"value",source_table_ids:["log_app"],threshold:"1",operator:"gt",interval_seconds:10,window_seconds:60,evidence_profile:{}});
+  const rule=f.db.transaction(()=>caps.commitRuleSave(f.user,prepared));
+  const proposal=await proposals.create(f.user,"session-one",{operation:"rule.update",target_id:rule.id,patch:{threshold:"2"},reason:"review"},new AbortController().signal);
+  const key=f.access.createToken(f.user,{name:"Alert read",scopes:["alerts.read","alerts.detail.read"],host_ids:null});client=new Client({name:"alert-read",version:"1"});
+  await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+  const tools=await client.listTools();for(const name of ["lightmoni_alert_rules_list","lightmoni_alert_rules_get","lightmoni_alert_silences_list","lightmoni_alert_silences_get","lightmoni_alert_groups_list","lightmoni_alert_proposals_get"])assert.ok(tools.tools.some(t=>t.name===name),name);
+  assert.equal(tools.tools.some(t=>/apply|approve|propose/.test(t.name)),false);
+  const listed=await client.callTool({name:"lightmoni_alert_rules_list",arguments:{search:"API"}});assert.equal(Object.hasOwn((listed.structuredContent as any).data.items[0],"sql"),false);
+  const detail=await client.callTool({name:"lightmoni_alert_rules_get",arguments:{id:rule.id}});assert.match((detail.structuredContent as any).data.rule.sql,/log_app/);
+  const readback=await client.callTool({name:"lightmoni_alert_proposals_get",arguments:{id:proposal.id}});assert.equal((readback.structuredContent as any).data.proposal.status,"awaiting_approval");
+  const ordinaryKey=f.access.createToken(f.user,{name:"Alert catalog",scopes:["alerts.read"],host_ids:null});ordinaryClient=new Client({name:"alert-catalog",version:"1"});
+  await ordinaryClient.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+ordinaryKey.token}}}));
+  assert.equal((await ordinaryClient.listTools()).tools.some(t=>t.name==="lightmoni_alert_rules_get"),false);
+  const denied=await ordinaryClient.callTool({name:"lightmoni_alert_rules_get",arguments:{id:rule.id}});assert.equal(denied.isError,true);assert.equal((denied.structuredContent as any).error.detail_code,"capability_forbidden");
+ }finally{await client?.close();await ordinaryClient?.close();await alerts.close();await f.close();}
 });
 test("transport rejects wrong credentials, Origin, methods, versions, oversized and malformed messages",async()=>{
  const f=await fixture();try{
