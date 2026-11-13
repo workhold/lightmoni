@@ -2,7 +2,7 @@ import type { InvocationContext, Principal } from "./types.js";
 
 export type CapabilityRisk = "R0" | "R1" | "R2" | "R3";
 export type OperationKind = "center_read" | "telemetry_query" | "remote_probe" | "domain_change" | "long_running";
-export interface TargetRef { kind: "host" | "task" | "execution" | "proposal"; id: string; revision?: string | number }
+export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table"; id: string; revision?: string | number }
 export interface CapabilityLimits {
   timeoutMs: number;
   maxInputBytes: number;
@@ -20,6 +20,7 @@ export interface CapabilityDefinition {
   inputSchema: Record<string, any>;
   outputSchema: Record<string, any>;
   scope: string;
+  roles: ("admin" | "member")[];
   allHosts?: boolean;
   effect: "read" | "propose";
   risk: CapabilityRisk;
@@ -63,6 +64,8 @@ interface Metadata {
   approvalPolicy: "none" | "domain_native";
   idempotencyPolicy: "none" | "required_external";
   targetResolver(input: any): TargetRef[];
+  roles?: ("admin" | "member")[];
+  limits?: Partial<CapabilityLimits>;
 }
 const METADATA: Record<string, Metadata> = {
   lightmoni_hosts_list: {
@@ -107,7 +110,19 @@ const METADATA: Record<string, Metadata> = {
   },
   lightmoni_telemetry_catalog: {
     id: "telemetry.catalog", outputSchema: data({ tables: arrayOfRecords, limit: count, truncated: flag }, ["tables", "limit", "truncated"]),
-    risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
+    risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
+  },
+  lightmoni_telemetry_describe: {
+    id: "telemetry.describe", outputSchema: data({ table: record }, ["table"]),
+    risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none",
+    targetResolver: input => input?.table ? [{ kind: "table", id: input.table }] : [], roles: ["admin", "member"],
+  },
+  lightmoni_telemetry_query: {
+    id: "telemetry.query", outputSchema: data({ query: record, range: record, sample_limit: count,
+      sample_truncated: flag, sample_byte_limit: count, sample_byte_limited: flag },
+      ["query", "range", "sample_limit", "sample_truncated", "sample_byte_limit", "sample_byte_limited"]),
+    risk: "R1", operationKind: "telemetry_query", approvalPolicy: "none", idempotencyPolicy: "none",
+    targetResolver: () => [], roles: ["admin", "member"], limits: {ratePerMinute: 30, concurrency: 2},
   },
   lightmoni_alerts_list: {
     id: "alerts.list", outputSchema: data({ rules: arrayOfRecords, limit: count }, ["rules", "limit"]),
@@ -119,7 +134,8 @@ export function defineCapability(seed: CapabilityDefinitionSeed): CapabilityDefi
   const metadata = METADATA[seed.name];
   if (!metadata) throw Error("Missing capability metadata: " + seed.name);
   return {
-    ...seed, ...metadata, version: 1, exposure: {...ALL}, executionMode: "sync", limits: {...DEFAULT_LIMITS},
+    ...seed, ...metadata, version: 1, exposure: {...ALL}, executionMode: "sync",
+    roles: metadata.roles ?? ["admin"], limits: {...DEFAULT_LIMITS, ...metadata.limits},
     resultProjection: value => value, auditPolicy: "digest_only",
   };
 }
@@ -129,7 +145,7 @@ export function validateCapabilityRegistry(definitions: CapabilityDefinition[]):
   for (const d of definitions) {
     if (!/^[a-z][a-z0-9_.]{1,80}$/.test(d.id) || d.version !== 1 || ids.has(d.id) || names.has(d.name)
       || d.executionMode !== "sync" || !d.outputSchema || !d.targetResolver || !d.exposure || !d.limits
-      || !d.resultProjection || d.auditPolicy !== "digest_only")
+      || !d.resultProjection || d.auditPolicy !== "digest_only" || !d.roles.length)
       throw Error("invalid capability registry");
     ids.add(d.id); names.add(d.name);
   }

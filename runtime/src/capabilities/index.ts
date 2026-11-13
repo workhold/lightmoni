@@ -6,6 +6,7 @@ import type { TaskRunStore } from "../server/task-center.js";
 import { NodeError, type Task } from "../server/nodes-model.js";
 import { currentAgentHostname } from "../server/agent-hosts.js";
 import type { AlertCapabilities } from "../domains/alert-capabilities.js";
+import { TelemetryService } from "../domains/telemetry.js";
 import type { CapabilityAuthority, CapabilityDispatcherContract, CapabilitySummary, InvocationContext, Principal, SessionAuthority } from "./types.js";
 import { defineCapability, validateCapabilityRegistry, type CapabilityDefinition, type CapabilityDefinitionSeed } from "./descriptor.js";
 import { capabilityErrorCategory, capabilityErrorDetail, capabilityErrorStatus } from "./errors.js";
@@ -23,12 +24,16 @@ function validate(value: any, s: any, depth = 0): void {
     }
     fail(400, "invalid_input");
   }
+  if (s.type === undefined) return;
   if (s.type === "object") {
     const properties = s.properties ?? {};
     if (!value || typeof value !== "object" || Array.isArray(value)
-      || s.additionalProperties !== true && Object.keys(value).some(k => !(k in properties))
+      || s.additionalProperties !== true && typeof s.additionalProperties !== "object" && Object.keys(value).some(k => !(k in properties))
       || (s.required ?? []).some((k: string) => value[k] === undefined)) fail(400, "invalid_input");
-    for (const [k, v] of Object.entries(value)) if (k in properties) validate(v, properties[k], depth + 1);
+    for (const [k, v] of Object.entries(value)) {
+      if (k in properties) validate(v, properties[k], depth + 1);
+      else if (s.additionalProperties && typeof s.additionalProperties === "object") validate(v, s.additionalProperties, depth + 1);
+    }
   } else if (s.type === "string") {
     if (typeof value !== "string" || value.length < (s.minLength ?? 0) || value.length > (s.maxLength ?? 1024)
       || /[\u0000-\u001f\u007f]/u.test(value)) fail(400, "invalid_input");
@@ -48,7 +53,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   readonly definitions: CapabilityDefinition[];
   readonly installationID: string;
   private readonly limits = new Map<string,{start:number;count:number;active:number}>();
-  constructor(readonly deps: Dependencies, readonly authority: CapabilityAuthority, readonly options: {taskCenter: TaskRunStore; alerts?: AlertCapabilities}) {
+  constructor(readonly deps: Dependencies, readonly authority: CapabilityAuthority, readonly options: {taskCenter: TaskRunStore; alerts?: AlertCapabilities; telemetry?: TelemetryService}) {
     deps.db.exec(`CREATE TABLE IF NOT EXISTS capability_installation(id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS capability_invocations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,credential_id TEXT NOT NULL,source TEXT NOT NULL,capability TEXT NOT NULL,input_hash TEXT NOT NULL,decision TEXT NOT NULL,code TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,finished_at TEXT NOT NULL DEFAULT '',proposal_id TEXT NOT NULL DEFAULT '');
       CREATE INDEX IF NOT EXISTS capability_invocations_owner ON capability_invocations(user_id,created_at);
@@ -86,6 +91,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       } catch { return false; }
     };
     const nodes = options.taskCenter.nodes;
+    const telemetry = options.telemetry ?? new TelemetryService(deps);
     const definitions: CapabilityDefinitionSeed[] = [
       {name:"lightmoni_hosts_list",description:"List authorized registered hosts and observed Agent state. No SSH secrets or raw output.",scope:"hosts.read",effect:"read",inputSchema:schema({limit:{type:"integer",minimum:1,maximum:100},offset:{type:"integer",minimum:0,maximum:10000}}),execute:(p,i)=>{
         const rows = deps.db.all<any>("SELECT id,name,address,port,platform,arch,agent_id,agent_last_seen,observed_hostname FROM managed_machines ORDER BY id").filter(h=>this.allowedHost(p,h.id));
@@ -110,7 +116,14 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         return {executions:options.taskCenter.list({...i,limit:i.limit??30}).map(r=>this.execution(p,r)),output_omitted:true};
       }},
       {name:"lightmoni_executions_get",description:"Read one real task execution and native state. Poll this ID after disconnect; no raw output is returned.",scope:"executions.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:(p,i)=>({execution:this.execution(p,options.taskCenter.get(i.id.startsWith("task:")?i.id.slice(5):i.id)),output_omitted:true})},
-      {name:"lightmoni_telemetry_catalog",description:"List telemetry table schema metadata. No telemetry rows or arbitrary SQL. Requires an installation-wide grant because tables are not isolated by host.",scope:"telemetry.catalog.read",allHosts:true,effect:"read",inputSchema:schema(),execute:async(_p,_i,c)=>{const tables=await deps.cat.list(c.signal);return {tables:tables.slice(0,100).map(t=>({id:t.id,name:t.name,kind:t.kind,columns:t.columns})),limit:100,truncated:tables.length>100};}},
+      {name:"lightmoni_telemetry_catalog",description:"List telemetry table schema metadata. No telemetry rows or arbitrary SQL. Requires an installation-wide grant because tables are not isolated by host.",scope:"telemetry.catalog.read",allHosts:true,effect:"read",inputSchema:schema(),execute:async(_p,_i,c)=>{const tables=(await telemetry.list(c.signal)).tables;return {tables:tables.slice(0,100).map(t=>({id:t.id,name:t.name,kind:t.kind,columns:t.columns})),limit:100,truncated:tables.length>100};}},
+      {name:"lightmoni_telemetry_describe",description:"Read one telemetry table by stable ID or name. No data rows. Requires an installation-wide catalog grant.",scope:"telemetry.catalog.read",allHosts:true,effect:"read",inputSchema:schema({table:{...string,maxLength:200}},["table"]),execute:async(_p,i,c)=>({table:await telemetry.describe(i.table,c.signal)})},
+      {name:"lightmoni_telemetry_query",description:"Execute one bounded read-only telemetry query through the existing checked Query service. Requires an installation-wide telemetry.query grant; host-scoped grants are not data isolation.",scope:"telemetry.query",allHosts:true,effect:"read",inputSchema:schema({
+        sql:{type:"string",minLength:1,maxLength:16000},
+        range:schema({from:{...string,maxLength:128},to:{...string,maxLength:128}},["from","to"]),
+        interval_ms:{type:"integer",minimum:1,maximum:Number.MAX_SAFE_INTEGER},
+        params:{type:"object",properties:{},additionalProperties:{type:"object",properties:{type:{...string,maxLength:128},value:{}},additionalProperties:false}},
+      },["sql","range","interval_ms"]),execute:(p,i,c)=>telemetry.query(i,c.signal,p.source)},
     ];
     if(options.alerts)definitions.push({name:"lightmoni_alerts_list",description:"List safe alert rule metadata without SQL or evidence. Host-scoped grants cannot access installation-wide rules.",scope:"alerts.read",allHosts:true,effect:"read",inputSchema:schema(),execute:async p=>({rules:(await options.alerts!.listRules(p.user)).slice(0,100).map(r=>({id:r.id,name:r.name,enabled:r.enabled,severity:r.severity,kind:r.kind,silence_until:r.silence_until})),limit:100})});
     this.definitions = definitions.map(defineCapability);
@@ -120,8 +133,8 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     if(!source.grant_id||!this.authority.validateGrant)fail(403,"authorization_unavailable");
     return this.authority.validateGrant(source.grant_id,userID);
   }
-  private authorize(p:Principal,scope:string,allHosts=false) {
-    if(p.user.role!=="admin"||!p.scopes.includes(scope)||allHosts&&p.host_ids!==null)fail(403,"capability_forbidden");
+  private authorize(p:Principal,scope:string,allHosts=false,roles:("admin"|"member")[]=["admin"]) {
+    if(!roles.includes(p.user.role as "admin"|"member")||!p.scopes.includes(scope)||allHosts&&p.host_ids!==null)fail(403,"capability_forbidden");
   }
   private allowedHost(p:Principal,id:string) { return p.host_ids===null||p.host_ids.includes(id); }
   private host(p:Principal,id:string):any {
@@ -198,7 +211,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   list(principal:Principal):CapabilitySummary[] {
     this.authority.validate(principal);
     const channel=principal.source==="mcp"?"mcp":principal.source==="assistant"?"assistant":"http";
-    return this.definitions.filter(d=>d.exposure[channel]&&principal.user.role==="admin"&&principal.scopes.includes(d.scope)
+    return this.definitions.filter(d=>d.exposure[channel]&&d.roles.includes(principal.user.role as "admin"|"member")&&principal.scopes.includes(d.scope)
       &&(!d.allHosts||principal.host_ids===null)).map(d=>this.summary(d));
   }
   listPage(principal:Principal,cursor?:string,pageSize=50):{tools:CapabilitySummary[];nextCursor?:string} {
@@ -247,7 +260,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       const d=this.definitions.find(d=>d.name===name);if(!d)fail(404,"capability_not_found");
       const channel=principal.source==="mcp"?"mcp":principal.source==="assistant"?"assistant":"http";
       if(!d.exposure[channel])fail(404,"capability_not_found");
-      this.authorize(principal,d.scope,d.allHosts);
+      this.authorize(principal,d.scope,d.allHosts,d.roles);
       if(Buffer.byteLength(JSON.stringify(input)??"")>d.limits.maxInputBytes)fail(413,"input_too_large");
       validate(input,d.inputSchema);
       for(const target of d.targetResolver(input))if(target.kind==="host")this.host(principal,target.id);
@@ -281,8 +294,17 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         const v=await this.invoke(p,target,{...input,...(name==="get_task"?{include_source:true}:{})},{signal,session_id:scope?.session_id});return v.data;
       }};
     });
+    const telemetryMap:Record<string,string>={list_tables:"lightmoni_telemetry_catalog",describe_table:"lightmoni_telemetry_describe",run_query:"lightmoni_telemetry_query"};
+    const telemetry = Object.entries(telemetryMap).map(([name,target])=>{
+      const d=this.definitions.find(x=>x.name===target)!;
+      return {name,description:d.description,schema:d.inputSchema,effect:"read" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+        if(!user)fail(401,"login_required");const p=this.authority.sessionPrincipal(user as User,"assistant");
+        const v=await this.invoke(p,target,input,{signal,session_id:scope?.session_id});
+        return name==="describe_table"?v.data.table:v.data;
+      }};
+    });
     const old=taskTools(this.proposals).find(t=>t.name==="propose_task_action")!;
-    return [...shared,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+    return [...shared,...telemetry,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
       if(!["task.dispatch","run.cancel","run.retry"].includes(input?.operation))return old.execute(input,signal,user,scope);
       if(!user)fail(401,"login_required");
       const p=this.authority.sessionPrincipal(user as User,"assistant");

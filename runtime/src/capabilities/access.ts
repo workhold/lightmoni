@@ -5,6 +5,12 @@ import { CAPABILITY_SCOPES, type CapabilityAuthority, type ExternalAuthority, ty
 export function scopesForUser(user: User): string[] {
   return user.role === "admin" ? [...CAPABILITY_SCOPES] : [];
 }
+function sessionScopesForUser(user: User): string[] {
+  if (user.role === "admin") return [...CAPABILITY_SCOPES];
+  // These were already available to members through the internal assistant.
+  // External PAT/OAuth issuance continues to use scopesForUser and is admin-only.
+  return user.role === "member" ? ["telemetry.catalog.read", "telemetry.query"] : [];
+}
 
 /** Session identity belongs to the always-on capability core, not MCP configuration. */
 export class SessionAccess {
@@ -18,7 +24,7 @@ export class SessionAccess {
 
   sessionPrincipal(user: User, source: "web" | "assistant"): Principal {
     const fresh = this.currentUser(user.id);
-    return { user: fresh, scopes: scopesForUser(fresh), host_ids: null, credential_id: "", grant_id: "", source };
+    return { user: fresh, scopes: sessionScopesForUser(fresh), host_ids: null, credential_id: "", grant_id: "", source };
   }
 }
 

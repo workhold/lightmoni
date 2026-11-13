@@ -50,7 +50,7 @@ callback_port = 1455
 
 ## 首批工具
 
-告警模块启用时提供 10 个工具。默认任务通过任务目录读取，不另设模板目录。
+告警模块启用时提供 12 个工具。默认任务通过任务目录读取，不另设模板目录。
 
 | 工具 | scope | 行为 |
 | --- | --- | --- |
@@ -61,6 +61,8 @@ callback_port = 1455
 | `lightmoni_proposals_get` | `tasks.read` | 提案状态；执行详情还需 `executions.read` |
 | `lightmoni_executions_list/get` | `executions.read` | 原生任务执行状态，省略源码、原始输出和租约 |
 | `lightmoni_telemetry_catalog` | `telemetry.catalog.read` | 表结构目录，仅全主机范围授权，无数据行/SQL |
+| `lightmoni_telemetry_describe` | `telemetry.catalog.read` | 按稳定 ID 或名称读取一个目录表，仅全主机范围授权，无数据行 |
+| `lightmoni_telemetry_query` | `telemetry.query` | 经既有只读 Query 执行有界查询，仅全主机范围授权；显式时间范围、最多 1000 行并有字节截断 |
 | `lightmoni_alerts_list` | `alerts.read` | 告警规则目录，仅全主机范围授权，无SQL/证据/修改 |
 
 主机的 `name` 是用户配置的资产名称，`observed_hostname` 仅来自当前关联且未移除的 Agent；新 Agent 尚未上报时为空，不回退旧缓存。
@@ -85,4 +87,4 @@ callback_port = 1455
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-目前没有外部任务创建/源码修改、遥测行查询、告警修改、服务部署/运维写工具、自动批准、服务主体或持续授权。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md)，实现规格见 [SDD 047](../specs/047-platform-mcp-service/spec.md) 与核心解耦 [SDD 134](../specs/134-capability-core-decoupling/spec.md)。
+目前没有外部任务创建/源码修改、告警修改、服务部署/运维写工具、自动批准、服务主体或持续授权。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md)，实现规格见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、核心解耦 [SDD 134](../specs/134-capability-core-decoupling/spec.md)、描述符 [SDD 135](../specs/135-capability-descriptor-contracts/spec.md) 与遥测只读 [SDD 136](../specs/136-telemetry-capability-read/spec.md)。

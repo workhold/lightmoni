@@ -62,6 +62,7 @@ import type { TaskRunStore } from "../server/task-center.js";
 import type { OperationsStore } from "../operations/types.js";
 import { InstrumentationService } from "./instrumentation.js";
 import type { ServiceDeploymentStore } from "../server/service-deployments.js";
+import type { TelemetryService } from "../domains/telemetry.js";
 export interface AssistantOptions {
   runtime?: Runtime;
   tools?: Tool[];
@@ -76,6 +77,7 @@ export interface AssistantOptions {
   deployments?: ServiceDeploymentStore;
   operations?: OperationsStore;
   taskCenter?: TaskRunStore;
+  telemetry?: TelemetryService;
   capabilities?: CapabilityDispatcher;
   taskProposals?: TaskProposalService;
   instrumentationWorkspaceRoot?: string;
@@ -285,6 +287,7 @@ export function registerAssistant(
       ...(options.operations ? operationTools(options.operations) : []),
       ...(options.capabilities ? options.capabilities.assistantTools() : taskProposals ? taskTools(taskProposals) : []),
       ...monitoringTools(deps, {
+        ...(options.telemetry ? { telemetry: options.telemetry } : {}),
         ...(codeTasks
         ? {
             codeTask: {
@@ -296,7 +299,7 @@ export function registerAssistant(
         ...(options.machines ? { machines: options.machines } : {}),
         ...(options.deployments ? { deployments: options.deployments } : {}),
         ...(instrumentation ? { instrumentation } : {}),
-      }),
+      }).filter(tool => !options.capabilities || !["list_tables", "describe_table", "run_query"].includes(tool.name)),
       ...(options.alerts && alertProposals
         ? alertTools(options.alerts, alertProposals)
         : []),
