@@ -25,6 +25,7 @@ export interface AgentUpdate {
   plan: any; receipt: any; error: string; created_at: string; created_by: string; approved_at: string; approved_by: string;
   started_at: string; finished_at: string; review_url: string;
   rollout_id: string; rollout_review_url: string; recovery_revision?:string; recovery_requires_verification?:boolean;
+  events: {at:string;stage:string}[];
 }
 interface RolloutView { id: string; status: string; target_sha256: string; acknowledged_json: string; items: { machine_id: string; machine_name: string; update_id: string; status: AgentUpdateStatus; update: AgentUpdate }[]; [key: string]: any }
 export interface AgentUpdateStore extends Module {
@@ -68,6 +69,9 @@ export function createAgentUpdatesSchema(deps: Dependencies) {
   );
   CREATE INDEX IF NOT EXISTS machine_agent_updates_host ON machine_agent_updates(machine_id,created_at);
   CREATE UNIQUE INDEX IF NOT EXISTS machine_agent_updates_lane ON machine_agent_updates(machine_id) WHERE status IN ${ACTIVE};
+  CREATE TABLE IF NOT EXISTS machine_agent_update_events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    update_id TEXT NOT NULL REFERENCES machine_agent_updates(id) ON DELETE CASCADE,at TEXT NOT NULL,stage TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS machine_agent_update_events_update ON machine_agent_update_events(update_id,sequence);
   CREATE TABLE IF NOT EXISTS agent_update_rollouts(
     id TEXT PRIMARY KEY,status TEXT NOT NULL,target_sha256 TEXT NOT NULL,created_at TEXT NOT NULL,
     created_by TEXT NOT NULL,updated_at TEXT NOT NULL,error TEXT NOT NULL DEFAULT '',acknowledged_json TEXT NOT NULL DEFAULT '[]'
@@ -77,7 +81,9 @@ export function createAgentUpdatesSchema(deps: Dependencies) {
     machine_id TEXT NOT NULL,update_id TEXT NOT NULL,position INTEGER NOT NULL,
     PRIMARY KEY(rollout_id,machine_id),UNIQUE(update_id)
   );`);
+  const interrupted=deps.db.all<{id:string}>("SELECT id FROM machine_agent_updates WHERE status IN ('running','verifying')");
   deps.db.run("UPDATE machine_agent_updates SET status='unknown',ticket_hash='',error=? WHERE status IN ('running','verifying')", "平台在 Agent 维护期间重启，请先只读核对；进程已停止时可审阅恢复，不会自动重放维护");
+  for(const {id} of interrupted)deps.db.run("INSERT INTO machine_agent_update_events(update_id,at,stage) VALUES(?,?,?)",id,deps.now().toISOString(),"unknown");
   deps.db.run("UPDATE agent_update_rollouts SET status='paused',error=? WHERE status='running'", "平台重启，批次已暂停；核对已启动主机后明确继续");
 }
 
@@ -89,6 +95,13 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   const table = (name: string) => Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?", name));
   const pending = (machineID: string) => db.get<{id:string;status:AgentUpdateStatus}>("SELECT id,status FROM machine_agent_updates WHERE machine_id=? AND status IN " + ACTIVE + " LIMIT 1", machineID);
   const assertFree = (machineID: string) => { if (pending(machineID)) fail(409, "主机已有待审批、运行中或结果未知的 Agent 维护，请先取消、完成或核对"); };
+  const event = (updateID:string,stage:string) => {
+    const last=db.get<{stage:string}>("SELECT stage FROM machine_agent_update_events WHERE update_id=? ORDER BY sequence DESC LIMIT 1",updateID);
+    if(last?.stage===stage)return;
+    if((db.get<{n:number}>("SELECT count(*) n FROM machine_agent_update_events WHERE update_id=?",updateID)?.n??0)>=100)
+      db.run("DELETE FROM machine_agent_update_events WHERE sequence=(SELECT sequence FROM machine_agent_update_events WHERE update_id=? ORDER BY sequence LIMIT 1)",updateID);
+    db.run("INSERT INTO machine_agent_update_events(update_id,at,stage) VALUES(?,?,?)",updateID,at(),stage);
+  };
   const row = (machineID: string, operationID: string) => {
     const value = db.get<any>("SELECT * FROM machine_agent_updates WHERE id=? AND machine_id=?", operationID, machineID);
     if (!value) fail(404, "Agent 维护记录不存在");
@@ -123,7 +136,8 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     created_at: value.created_at, created_by: value.created_by, approved_at: value.approved_at, approved_by: value.approved_by,
     started_at: value.started_at, finished_at: value.finished_at, ...(value.status==='unknown'?{recovery_revision:recoveryPin(value).revision,recovery_requires_verification:recoveryRequiresVerification(value)}:{}),
     review_url: `/machines?machine=${encodeURIComponent(value.machine_id)}&agent_update=${encodeURIComponent(value.id)}`,
-    rollout_id: membership?.rollout_id ?? "", rollout_review_url: membership ? `/machines?agent_rollout=${encodeURIComponent(membership.rollout_id)}` : "" };
+    rollout_id: membership?.rollout_id ?? "", rollout_review_url: membership ? `/machines?agent_rollout=${encodeURIComponent(membership.rollout_id)}` : "",
+    events: db.all<{at:string;stage:string}>("SELECT at,stage FROM machine_agent_update_events WHERE update_id=? ORDER BY sequence",value.id) };
   };
   const list = (machineID: string) => db.all<any>("SELECT * FROM machine_agent_updates WHERE machine_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100", machineID).map(view);
   const taskBusy = (machineID: string, agentID: string) => maintenanceWorkBusy(deps,agentID,machineID);
@@ -177,10 +191,10 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       && Number.isSafeInteger(identity.uid) && identity.uid > 0 && Number.isSafeInteger(identity.gid) && identity.gid > 0
       ? helper : null;
   };
-  const plan = async (machineID: string, input: AgentUpdateInput, actorID: string, signal: AbortSignal): Promise<AgentUpdate> => {
+  const plan = async (machineID: string, input: AgentUpdateInput, actorID: string, signal: AbortSignal, automaticTarget = false): Promise<AgentUpdate> => {
     fields(input, ["credential_id", "target_sha256", "action"]);
     if (!["upgrade", "rollback"].includes(input.action)) fail(400, "action must be upgrade or rollback");
-    if (input.action === "upgrade" && !SHA.test(input.target_sha256 ?? "")) fail(400, "升级必须指定完整的目标 SHA256");
+    if (input.action === "upgrade" && !automaticTarget && !SHA.test(input.target_sha256 ?? "")) fail(400, "升级必须指定完整的目标 SHA256");
     if (input.action === "rollback" && input.target_sha256 != null) fail(400, "回退目标必须来自主机保留的上一发行");
     let endpoint: URL;
     try { endpoint = new URL(deps.externalURL); } catch { fail(409, "请先配置有效的平台 HTTPS 外部地址"); }
@@ -197,7 +211,9 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       if (access.revision(access.get(machine.id)) !== access.revision(machine)) fail(409, "主机连接在检查期间变化，请重新生成计划");
       let target: any, files: Record<string, PinnedAgentFile>;
       if (input.action === "upgrade") {
-        const pinned = catalog.pin(input.target_sha256!);
+        const selected = automaticTarget ? catalog.list().find(release => release.arch === observed.arch) : undefined;
+        if (automaticTarget && !selected) fail(409, "目标架构没有可用的 Agent 发行包");
+        const pinned = catalog.pin(selected?.sha256 ?? input.target_sha256!);
         if (pinned.release.arch !== observed.arch) fail(409, "发行架构与目标主机不一致");
         if (pinned.release.sha256 === observed.current.artifact_sha256) fail(409, "目标发行已安装，无需重复升级");
         target = { ...pinned.release, artifact_sha256: pinned.release.sha256 };
@@ -228,6 +244,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         assertFree(machine.id); assertTarget(access.get(machine.id));
         db.run("INSERT INTO machine_agent_updates(id,machine_id,agent_id,credential_id,action,status,plan_json,created_at,created_by) VALUES(?,?,?,?,?,'awaiting_approval',?,?,?)",
           operationID, machine.id, machine.agent_id, credential.id, input.action, JSON.stringify(planBody), at(), actorID);
+        event(operationID,"ready");
       });
       return view(row(machine.id, operationID));
     } finally { preparation.release();access.busy.delete(machine.id); }
@@ -284,6 +301,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   };
   const saveRemote = (operation: any, remote: AgentUpdateRemoteStatus, allowCommit = false, verification?: { boot_id: string; fingerprint: string; verified_at: string }) => {
     validateRemote(operation, remote);
+    event(operation.id,remote.status);
     const planBody = JSON.parse(operation.plan_json), needsHelper = planBody.runtime_mode === "root";
     const healthy = Boolean(remote.local_health?.service_active && remote.local_health.identity_matches && remote.local_health.release_matches
       && (!needsHelper || remote.local_health.helper_active));
@@ -297,17 +315,19 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     if (terminal) {
       db.run("UPDATE machine_agent_updates SET status=?,receipt_json=?,error=?,finished_at=?,ticket_hash='' WHERE id=? AND status IN ('running','verifying','unknown')",
         terminal, JSON.stringify(recoveryReceipt(operation.id,verification ? { ...remote, current_verification: verification } : remote)), terminal === "succeeded" ? "" : original.service_active === false ? "目标程序未通过健康确认，已恢复原程序；原服务此前停止，现仍停止" : "目标程序未通过健康确认，已恢复原程序", at(), operation.id);
+      event(operation.id,terminal);
       return terminal;
     }
     if (remote.status === "rollback_failed") {
       db.run("UPDATE machine_agent_updates SET status='unknown',receipt_json=?,error=?,ticket_hash='' WHERE id=?", JSON.stringify(recoveryReceipt(operation.id,remote)), "远端自动回退未确认，需人工检查服务；禁止重复维护", operation.id);
+      event(operation.id,"unknown");
       return "unknown";
     }
     db.run("UPDATE machine_agent_updates SET receipt_json=? WHERE id=?", JSON.stringify(recoveryReceipt(operation.id,remote)), operation.id);
     if (allowCommit && remote.status === "waiting_confirmation" && healthy && heartbeat(operation, remote)) return "commit";
     return "";
   };
-  const markUnknown = (operationID: string, message: string) => db.run("UPDATE machine_agent_updates SET status='unknown',ticket_hash='',error=? WHERE id=? AND status IN ('running','verifying')", message, operationID);
+  const markUnknown = (operationID: string, message: string) => { const changed=db.run("UPDATE machine_agent_updates SET status='unknown',ticket_hash='',error=? WHERE id=? AND status IN ('running','verifying')", message, operationID);if(changed.changes)event(operationID,"unknown"); };
   const wait = (ms: number) => new Promise<void>((resolve, reject) => {
     if (controller.signal.aborted) return reject(Error("closed"));
     const done = () => { controller.signal.removeEventListener("abort", abort); resolve(); };
@@ -331,6 +351,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
           validateProbe(machine, observed, false);
           if (observed.current.fingerprint !== body.current.fingerprint) fail(409, "失败回执后的当前程序已变化");
           db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,finished_at=?,ticket_hash='',error=? WHERE id=?", JSON.stringify(recoveryReceipt(operation.id,remote)), at(), "核对确认维护未切换原程序", operation.id);
+          event(operation.id,"failed");
           return;
         }
         const outcome = saveRemote(operation, remote, !commitRequested);
@@ -383,11 +404,13 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       const changed = db.run("UPDATE machine_agent_updates SET status='running',approved_at=?,approved_by=?,started_at=?,plan_json=?,ticket_hash=?,ticket_expires_at=? WHERE id=? AND status='awaiting_approval'",
         at(), actorID, at(), JSON.stringify({ ...body, start_deadline: startDeadline }), hash(downloadToken), startDeadline, operationID);
       if (!changed.changes) fail(409, "维护计划已被其他请求执行");
+      event(operationID,"starting");
       // Any failure after invoking start is unknown: the detached worker may already run.
       dispatched = true;
       const response = parseAgentUpdateStatus((await ssh(machine, credential, command, signal, JSON.stringify({ download_token: downloadToken }) + "\n", 180_000)).stdout);
       validateRemote(operation, response);
       db.run("UPDATE machine_agent_updates SET ticket_hash='',receipt_json=? WHERE id=?", JSON.stringify(response), operationID);
+      event(operationID,response.status);
       launchObserver(machineID, operationID, credential.id); observing = true;
       return view(row(machineID, operationID));
     } catch (error) {
@@ -405,6 +428,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     const operation = row(machineID, operationID);
     if (!["awaiting_approval", "cancelled"].includes(operation.status)) fail(409, "只能取消未执行的维护计划");
     db.run("UPDATE machine_agent_updates SET status='cancelled',ticket_hash='',finished_at=? WHERE id=? AND status='awaiting_approval'", at(), operationID);
+    event(operationID,"cancelled");
     return view(row(machineID, operationID));
   };
   const reconcile = async (machineID: string, operationID: string, credentialID: string | undefined, signal: AbortSignal) => {
@@ -563,6 +587,12 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   router.get(prefix, access.safe(ctx => { access.get(ctx.params.id); ctx.json(list(ctx.params.id)); }));
   router.get(prefix + "/:updateId", access.safe(ctx => { access.get(ctx.params.id); ctx.json(view(row(ctx.params.id, ctx.params.updateId))); }));
   router.post(prefix + "/plan", access.safe(async ctx => { deps.auth.requireAdmin(ctx); ctx.json(await plan(ctx.params.id, await ctx.body() as AgentUpdateInput, ctx.user.id, ctx.signal), 201); }));
+  router.post(prefix + "/start", access.safe(async ctx => {
+    deps.auth.requireAdmin(ctx); fields(await ctx.body(), []);
+    const proposed=await plan(ctx.params.id,{action:"upgrade"},ctx.user.id,ctx.signal,true);
+    try { ctx.json(await apply(ctx.params.id,proposed.id,ctx.user.id,ctx.signal),202); }
+    catch(error) { if(row(ctx.params.id,proposed.id).status==="awaiting_approval")cancel(ctx.params.id,proposed.id); throw error; }
+  }));
   router.post(prefix + "/:updateId/apply", access.safe(async ctx => {
     deps.auth.requireAdmin(ctx); const input = fields(await ctx.body(), ["confirm"]);
     if (input.confirm !== true) fail(400, "必须明确确认维护计划");

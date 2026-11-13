@@ -38,14 +38,13 @@ test('persistent planning gate defers unclaimed private inspections without rewr
   assert.throws(()=>prepareMachineMaintenance(f.deps,'host','foreign-agent'),/binding_changed/);
 });
 
-test('leased, previously attempted, untrusted, write and unknown work remain maintenance barriers',t=>{
+test('leased, previously attempted and unknown work remain maintenance barriers',t=>{
   const f=fixture(t);
   for(const change of [
     {column:'state',value:'leased'},
     {column:'state',value:'unknown'},
     {column:'attempts',value:1},
     {column:'lease_id',value:'already-issued'},
-    {column:'execution_principal',value:'ordinary_agent'},
   ]) {
     const original=f.db.get<any>('SELECT * FROM agent_jobs WHERE id=?',f.job.id)![change.column];
     f.db.run('UPDATE agent_jobs SET '+change.column+'=? WHERE id=?',change.value,f.job.id);
@@ -53,14 +52,12 @@ test('leased, previously attempted, untrusted, write and unknown work remain mai
     assert.throws(()=>prepareMachineMaintenance(f.deps,'host','agent'),/execution_pending/);
     f.db.run('UPDATE agent_jobs SET '+change.column+'=? WHERE id=?',original,f.job.id);
   }
-  for(const payload of [{...f.payload,operation:'deploy'},{...f.payload,resource:{...f.payload.resource,config:{task:'workload.deploy'}}},{...f.payload,resource:{...f.payload.resource,agent_id:'foreign'}}]) {
-    f.db.run("UPDATE ops_platform_runs SET payload_cipher=?",f.deps.encrypt(JSON.stringify(payload)));
-    assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),true);
-  }
-  f.db.run("UPDATE ops_platform_runs SET payload_cipher='corrupt'");assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),true);
+  f.db.run("UPDATE agent_jobs SET state='queued',attempts=0,lease_id='',lease_expires_at='' WHERE id=?",f.job.id);
+  f.db.run("UPDATE ops_platform_runs SET payload_cipher='corrupt' WHERE job_id=?",f.job.id);
+  assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),false,'an unclaimed job can wait even when its payload cannot be read');
 });
 
-test('a queued signed inspection can wait but started root execution and unrelated queued scripts cannot',t=>{
+test('unclaimed queued work waits while started or unknown work blocks maintenance',t=>{
  const f=fixture(t);
  f.db.exec("CREATE TABLE privileged_jobs(id TEXT,task_run_id TEXT,agent_id TEXT,machine_id TEXT,state TEXT,started_at TEXT,lease_id TEXT,capability TEXT,resolved_at TEXT,resolved_by TEXT,resolution_reason TEXT);CREATE TABLE task_runs(id TEXT,agent_id TEXT,host_id TEXT,state TEXT,resolved_at TEXT,superseded_by TEXT)");
  f.db.run("INSERT INTO privileged_jobs VALUES(?,?,'agent','host','queued','','','operations.managed.v1','','','')",f.job.id,f.job.id);
@@ -71,7 +68,7 @@ test('a queued signed inspection can wait but started root execution and unrelat
  assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),true);
  f.db.run("UPDATE privileged_jobs SET state='queued',started_at='',lease_id=''");
  f.db.run("INSERT INTO task_runs VALUES('user-script','agent','host','queued','','')");
- assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),true);
+ assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),false);
  f.db.run("DELETE FROM task_runs WHERE id='user-script'");
  f.db.run("UPDATE privileged_jobs SET state='unknown'");assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),true);
 });

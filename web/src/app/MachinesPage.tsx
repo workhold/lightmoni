@@ -131,7 +131,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const [networkMachine,setNetworkMachine]=useState<Pick<Machine,'id'|'name'>>();
  const [terminalDetail,setTerminalDetail]=useState<Detail>();
  const [uninstallDetail,setUninstallDetail]=useState<Detail>(),[uninstallRecord,setUninstallRecord]=useState<AgentUninstallation>();
- const [updateDetail,setUpdateDetail]=useState<Detail>(),[updateRecord,setUpdateRecord]=useState<AgentUpdate>(),[updateAction,setUpdateAction]=useState<'upgrade'|'rollback'>('upgrade');
+ const [updateDetail,setUpdateDetail]=useState<Detail>(),[updateRecord,setUpdateRecord]=useState<AgentUpdate>(),[updateAction,setUpdateAction]=useState<'upgrade'|'rollback'>('upgrade'),[updateDirect,setUpdateDirect]=useState(false);
  const [rollout,setRollout]=useState<{targets?:AgentRolloutTarget[];existingID?:string}>();
  useEffect(()=>{if(!admin){setUpdateDetail(undefined);setUpdateRecord(undefined);setRollout(undefined)}},[admin]);
  const [detail,setDetail]=useState<Detail>(),[detailBusy,setDetailBusy]=useState(false),[detailError,setDetailError]=useState('');
@@ -254,7 +254,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   if(!admin||!linkedMachine||!linkedUpdate)return;
   const token=requests.current.begin('update',linkedMachine);
   Promise.all([api<Detail>(`/machines/${encodeURIComponent(linkedMachine)}`),api<AgentUpdate>(`/machines/${encodeURIComponent(linkedMachine)}/agent-updates/${encodeURIComponent(linkedUpdate)}`)])
-   .then(([host,record])=>{if(current(token)&&host.machine.id===linkedMachine&&record.machine_id===linkedMachine){setUpdateDetail(host);setUpdateRecord(record);setUpdateAction(record.action)}})
+   .then(([host,record])=>{if(current(token)&&host.machine.id===linkedMachine&&record.machine_id===linkedMachine){setUpdateDetail(host);setUpdateRecord(record);setUpdateAction(record.action);setUpdateDirect(false)}})
    .catch(e=>{if(current(token))setError(errorText(e))});
   return()=>{if(requests.current.current(token))requests.current.close('update')};
  },[admin,linkedMachine,linkedUpdate]);
@@ -263,7 +263,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   const token=requests.current.begin('update',machine.id);
   try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(!current(token)||host.machine.id!==machine.id)return;
    const record=existing?await api<AgentUpdate>(`/machines/${encodeURIComponent(machine.id)}/agent-updates/${encodeURIComponent(existing.id)}`):undefined;
-   if(current(token)&&(!record||record.machine_id===machine.id)){setUpdateRecord(record);setUpdateAction(record?.action??action);setUpdateDetail(host)}
+   if(current(token)&&(!record||record.machine_id===machine.id)){setUpdateRecord(record);setUpdateAction(record?.action??action);setUpdateDirect(!record&&action==='upgrade');setUpdateDetail(host)}
   }catch(e){if(current(token))void message.error(errorText(e))}
  };
  const openUninstall=async(machine:Machine,existing?:AgentUninstallation,mode:'standard'|'recovery'='standard',resume=false)=>{
@@ -450,7 +450,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   const maintenance=[
    {key:'deploy',label:t('部署 Agent','Deploy Agent'),disabled:!cap.deploy_agent?.available&&!accountRepairable(cap.deploy_agent),onClick:()=>void openPlan(m)},
    {key:'permission',label:t('运行模式与权限','Runtime mode & permissions'),disabled:!linked,onClick:()=>void openDetail(m,'execution')},
-   {key:'upgrade',label:t('升级 Agent','Upgrade Agent'),disabled:!cap.update_agent?.available,onClick:()=>void openUpdate(m)},
+   {key:'upgrade',label:updatePending?t('查看 Agent 升级','View Agent update'):t('升级 Agent','Upgrade Agent'),disabled:!cap.update_agent?.available&&!updatePending,onClick:()=>{if(updatePending){void api<AgentUpdate[]>(`/machines/${encodeURIComponent(m.id)}/agent-updates`).then(records=>{const record=records.find(item=>['awaiting_approval','running','verifying','unknown'].includes(item.status));if(record)void openUpdate(m,record.action,record);else void openUpdate(m)}).catch(e=>void message.error(errorText(e)))}else void openUpdate(m)}},
    {key:'rollback',label:t('回退 Agent','Roll back Agent'),disabled:!cap.rollback_agent?.available,onClick:()=>void openUpdate(m,'rollback')},
    {type:'divider' as const},
    {key:'uninstall',label:t('卸载 Agent','Uninstall Agent'),danger:true,disabled:!cap.uninstall_agent?.available&&!accountRepairable(cap.uninstall_agent),onClick:()=>void openUninstall(m)},
@@ -514,7 +514,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    {title:t('主机标签','Host labels'),width:110,render:(_:unknown,m:FleetRow)=><Space wrap>{(m.label_ids??m.node?.label_ids??[]).map(id=><Tag key={id}>{labels.find(label=>label.id===id)?.name||id}</Tag>)}{!(m.label_ids??m.node?.label_ids??[]).length&&<Typography.Text type="secondary">{t('暂无标签','No labels')}</Typography.Text>}</Space>},
    {title:t('操作','Actions'),width:220,render:(_:unknown,m:FleetRow)=>renderActions(m)},
   ]}/></div>
-  {admin&&updateDetail&&<MachineAgentUpdateDialog key={`${updateDetail.machine.id}:${updateRecord?.id||updateAction}`} machine={updateDetail.machine} credentials={updateDetail.credentials} existing={updateRecord} initialAction={updateAction} onRefresh={()=>refreshMachine(updateDetail.machine.id)} onClose={closeUpdate}/>}
+  {admin&&updateDetail&&<MachineAgentUpdateDialog key={`${updateDetail.machine.id}:${updateRecord?.id||updateAction}`} machine={updateDetail.machine} credentials={updateDetail.credentials} existing={updateRecord} initialAction={updateAction} directUpgrade={updateDirect} onRefresh={()=>refreshMachine(updateDetail.machine.id)} onClose={closeUpdate}/>}
   {admin&&rollout&&<MachineAgentRolloutDialog key={rollout.existingID||rollout.targets?.map(target=>target.id).join(',')||'history'} targets={rollout.targets} existingID={rollout.existingID} onClose={()=>{setRollout(undefined);setSelectedIDs([])}} onRefresh={()=>load(true)}/>}
   {admin&&batch&&<MachineBatchDialog key={batch.action+':'+batch.targets.map(target=>target.id).join(',')} action={batch.action} targets={batch.targets} onClose={()=>{setBatch(undefined);setSelectedIDs([])}} onRefresh={()=>load(true)} onSuccess={batchSuccess}/>}
   {admin&&nodeLabels&&<NodeLabelsDialog key={nodeLabels.id} host={nodeLabels} labels={labels} onClose={()=>setNodeLabels(undefined)} onSaved={()=>load(true)}/>}
