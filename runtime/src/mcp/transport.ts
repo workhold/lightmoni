@@ -4,6 +4,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { randomUUID } from "node:crypto";
 import type { Dependencies, Context, Module } from "../shared/types.js";
 import type { AccessAuthority, CapabilityDispatcherContract } from "../capabilities/types.js";
+import { mcpAnnotations, mcpEnvelopeSchema } from "../capabilities/descriptor.js";
+import { capabilityErrorCategory as errorCode, capabilityErrorDetail, capabilityErrorStatus as status } from "../capabilities/errors.js";
 
 const MAX_BODY = 128 << 10;
 const DEADLINE_MS = 15_000;
@@ -15,12 +17,6 @@ function boundedTree(value: unknown, depth = 0, budget = { remaining: 6000 }): b
   if (!value || typeof value !== "object") return true;
   return Object.values(value).every(child => boundedTree(child, depth + 1, budget));
 }
-function status(error: unknown): number {
-  const value = (error as {status?:unknown})?.status;
-  return typeof value === "number" && value >= 400 && value < 600 ? value : 500;
-}
-const errorCode = (code: number) => ({400:"invalid_input",401:"unauthenticated",403:"permission_denied",404:"not_found",409:"conflict",413:"input_limit",429:"rate_limited"}[code] ?? "unavailable");
-
 /** One SDK server per HTTP request, with no protocol sessions or persistent event streams. */
 export function registerMcpTransport(deps: Dependencies, authority: AccessAuthority, dispatcher: CapabilityDispatcherContract): Module {
   deps.db.exec("CREATE TABLE IF NOT EXISTS mcp_security_events(id TEXT PRIMARY KEY,at TEXT NOT NULL,code TEXT NOT NULL);");
@@ -111,9 +107,10 @@ export function registerMcpTransport(deps: Dependencies, authority: AccessAuthor
     c.res.once("close",disposeQuietly);
     c.res.once("finish",disposeQuietly);
     server.setRequestHandler(ListToolsRequestSchema,async(request)=>{
-      if(request.params?.cursor) throw new Error("Unsupported tool cursor");
-      return {tools:dispatcher.list(principal).map(tool=>({name:tool.name,description:tool.description,inputSchema:{...tool.inputSchema,type:"object" as const},
-        annotations:{readOnlyHint:tool.effect==="read",destructiveHint:tool.effect!=="read",idempotentHint:true,openWorldHint:false}}))};
+      const page=dispatcher.listPage?dispatcher.listPage(principal,request.params?.cursor):{tools:dispatcher.list(principal)};
+      return {tools:page.tools.map(tool=>({name:tool.name,description:tool.description,inputSchema:{...tool.inputSchema,type:"object" as const},
+        outputSchema:mcpEnvelopeSchema(tool.outputSchema),annotations:mcpAnnotations(tool)})),
+        ...(page.nextCursor?{nextCursor:page.nextCursor}:{})};
     });
     server.setRequestHandler(CallToolRequestSchema,async(request,extra)=>{
       try {
@@ -127,7 +124,7 @@ export function registerMcpTransport(deps: Dependencies, authority: AccessAuthor
         return {structuredContent:result,content:[{type:"text",text:JSON.stringify(result)}]};
       }catch(error){
         const code=errorCode(status(error));
-        const result={schema_version:1,error:{code,message:"调用未完成，请检查权限、参数或目标状态。",retryable:false}};
+        const result={schema_version:1,error:{code,detail_code:capabilityErrorDetail(error),message:"调用未完成，请检查权限、参数或目标状态。",retryable:false}};
         return {isError:true,structuredContent:result,content:[{type:"text",text:JSON.stringify(result)}]};
       }
     });

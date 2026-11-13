@@ -81,6 +81,17 @@ test("session-authenticated capability HTTP discovery and invocation do not requ
     const result = await invoked.json() as any;
     assert.ok(result.data.tasks.some((task: any) => task.id === "script-one"));
     assert.equal(f.db.get<any>("SELECT source FROM capability_invocations WHERE capability='lightmoni_tasks_list'")!.source, "web");
+
+    const plan = { ...dispatch, idempotency_key: "http-operation" };
+    const create = (body: any) => fetch(base + "/api/v1/capabilities/lightmoni_tasks_plan/invoke", {
+      method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify(body),
+    });
+    assert.equal((await create(plan)).status, 200);
+    const conflict = await create({ ...plan, reason: "Changed intention" });
+    assert.equal(conflict.status, 409);
+    const error = await conflict.json() as any;
+    assert.equal(error.code, "conflict");
+    assert.equal(error.detail_code, "idempotency_conflict");
   } finally {
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));

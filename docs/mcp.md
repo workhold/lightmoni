@@ -67,6 +67,10 @@ callback_port = 1455
 
 有限主机授权读取任务或执行列表时必须指定 `host_id`。任务元数据不包含其他主机的目标集合。服务器会再次检查直接调用的权限，工具列表不构成授权。
 
+工具描述包含输入 Schema 和完整 structuredContent 输出 Schema。`tools/list` 默认每页 50 项；客户端应跟随 `nextCursor`，游标绑定当前授权和目录，后续页会重新鉴权。工具 annotations 仅是行为提示，不授予权限。
+
+调用错误保留兼容的 `error.code` 分类，并增加 `error.detail_code` 表达具体原因。例如同幂等键不同内容仍返回 `code=conflict`，同时返回 `detail_code=idempotency_conflict`；限流、并发、超时和输出校验分别使用稳定的 detail_code。会话鉴权的能力 HTTP 同样返回附加 code/detail_code。
+
 ## 操作闭环
 
 先查询真实任务和目标，再调用 `lightmoni_tasks_plan`，提供 `operation`、准确 ID、原因和稳定的 `idempotency_key`。派发使用 `task.dispatch`，取消/重试使用 `run.cancel`/`run.retry`；有限主机授权派发必须明确给出 `host_ids`。
