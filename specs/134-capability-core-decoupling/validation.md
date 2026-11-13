@@ -2,6 +2,8 @@
 
 验证日期：2026-11-14。基线为 `main@65ebc79`，范围为 Slice 0 核心解耦。未部署生产、未操作真实主机、未发布镜像；本切片没有 UI 变化，也没有新增真实 Codex/Claude OAuth 或自然语言验收。
 
+交付 PR：[workhold/lightmoni#186](https://github.com/workhold/lightmoni/pull/186)，目标为 main；未合并。
+
 ## 自动化检查
 
 | 检查 | 结果 | 范围 |
