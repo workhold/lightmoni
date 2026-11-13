@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { User } from "../shared/types.js";
+import type { CapabilityDefinition } from "./descriptor.js";
 
 export const CAPABILITY_SCOPES = [
   "hosts.read", "tasks.read", "tasks.source.read", "tasks.propose",
@@ -31,6 +32,9 @@ export interface InvocationContext {
   session_id?: string;
 }
 export interface CapabilityDispatcherContract {
-  list(principal: Principal): {name:string;description:string;inputSchema:Record<string,any>;effect:"read"|"propose"}[];
+  list(principal: Principal): CapabilitySummary[];
+  listPage?(principal: Principal, cursor?: string, pageSize?: number): {tools:CapabilitySummary[];nextCursor?:string};
   invoke(principal: Principal, name:string, input:unknown, context:InvocationContext): Promise<Record<string,any>>;
 }
+export type CapabilitySummary = Pick<CapabilityDefinition,
+  "id"|"version"|"name"|"description"|"inputSchema"|"outputSchema"|"effect"|"risk"|"operationKind"|"idempotencyPolicy">;

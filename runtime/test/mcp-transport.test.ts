@@ -40,6 +40,9 @@ test("official SDK client discovers tools, creates an idempotent proposal and po
   const transport=new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:f.headers.authorization}}});await client.connect(transport);
   assert.equal(transport.sessionId,undefined);assert.equal(client.getServerVersion()?.name,"lightmoni");
   const tools=await client.listTools();assert.ok(tools.tools.some(t=>t.name==="lightmoni_tasks_plan"));assert.ok(!tools.tools.some(t=>/apply|exec_ssh/.test(t.name)));
+  const hostTool=tools.tools.find(t=>t.name==="lightmoni_hosts_list")!,planTool=tools.tools.find(t=>t.name==="lightmoni_tasks_plan")!;
+  assert.ok(hostTool.outputSchema?.anyOf);assert.equal(hostTool.annotations?.readOnlyHint,true);assert.equal(hostTool.annotations?.openWorldHint,false);
+  assert.equal(planTool.annotations?.readOnlyHint,false);assert.equal(planTool.annotations?.idempotentHint,true);assert.equal(planTool.annotations?.destructiveHint,false);
   const host=await client.callTool({name:"lightmoni_hosts_list",arguments:{}});assert.ok(!host.isError,JSON.stringify(host));assert.deepEqual((host.structuredContent as any).data.hosts.map((h:any)=>h.id),["one","two"]);
   f.task();const p=await client.callTool({name:"lightmoni_tasks_plan",arguments:intent});assert.ok(!p.isError,JSON.stringify(p));const proposal=(p.structuredContent as any).data.proposal;
   assert.ok(proposal.review_url.startsWith(f.externalURL));assert.equal(f.runs.list().length,0);
@@ -47,13 +50,24 @@ test("official SDK client discovers tools, creates an idempotent proposal and po
   const applied=f.dispatcher.proposals.apply(f.user,proposal.id),run=(applied.result as any).runs[0];assert.equal(run.state,"queued");
   const state=await client.callTool({name:"lightmoni_executions_get",arguments:{id:run.id}});assert.equal((state.structuredContent as any).data.execution.native_state,"queued");
   assert.ok(!JSON.stringify(state).includes("hidden-source"));assert.ok(!JSON.stringify(state).includes("lease_token"));
-  const bad=await client.callTool({name:"lightmoni_tasks_plan",arguments:{...intent,reason:"changed"}});assert.equal(bad.isError,true);assert.equal((bad.structuredContent as any).error.code,"conflict");
+  const bad=await client.callTool({name:"lightmoni_tasks_plan",arguments:{...intent,reason:"changed"}});assert.equal(bad.isError,true);assert.equal((bad.structuredContent as any).error.code,"conflict");assert.equal((bad.structuredContent as any).error.detail_code,"idempotency_conflict");
   assert.ok(f.db.get<any>("SELECT count(*) n FROM capability_invocations WHERE decision='idempotency_hit'")!.n>=1);
   const readKey=f.access.createToken(f.user,{name:"Read client",scopes:["hosts.read"],host_ids:["one"]}),readClient=new Client({name:"read-only",version:"1"});
   try{await readClient.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+readKey.token}}}));
    assert.deepEqual((await readClient.listTools()).tools.map(t=>t.name),["lightmoni_hosts_list","lightmoni_hosts_get"]);
    assert.equal((await readClient.callTool({name:"lightmoni_executions_get",arguments:{id:run.id}})).isError,true);
   }finally{await readClient.close();}
+ }finally{await client.close();await f.close();}
+});
+test("official SDK client follows bounded tools/list cursors without dropping tools",async()=>{
+ const f=await fixture(),client=new Client({name:"pagination-test",version:"1"});try{
+  const template=f.dispatcher.definitions.find(d=>d.name==="lightmoni_hosts_get")!;
+  for(let i=0;i<55;i++)f.dispatcher.definitions.push({...template,id:`hosts.get.${i}`,name:`lightmoni_hosts_get_${i}`});
+  await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:f.headers.authorization}}}));
+  const principal=f.access.authenticate({headers:{authorization:f.headers.authorization}} as any),expected=f.dispatcher.list(principal).length;
+  const names:string[]=[];let cursor:string|undefined,pages=0;
+  do{const page=await client.listTools(cursor?{cursor}:undefined);pages++;names.push(...page.tools.map(t=>t.name));cursor=page.nextCursor;}while(cursor);
+  assert.equal(pages,2);assert.equal(names.length,expected);assert.equal(new Set(names).size,expected);
  }finally{await client.close();await f.close();}
 });
 test("transport rejects wrong credentials, Origin, methods, versions, oversized and malformed messages",async()=>{

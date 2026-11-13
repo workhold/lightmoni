@@ -6,7 +6,9 @@ import type { TaskRunStore } from "../server/task-center.js";
 import { NodeError, type Task } from "../server/nodes-model.js";
 import { currentAgentHostname } from "../server/agent-hosts.js";
 import type { AlertCapabilities } from "../domains/alert-capabilities.js";
-import type { CapabilityAuthority, CapabilityDispatcherContract, InvocationContext, Principal, SessionAuthority } from "./types.js";
+import type { CapabilityAuthority, CapabilityDispatcherContract, CapabilitySummary, InvocationContext, Principal, SessionAuthority } from "./types.js";
+import { defineCapability, validateCapabilityRegistry, type CapabilityDefinition, type CapabilityDefinitionSeed } from "./descriptor.js";
+import { capabilityErrorCategory, capabilityErrorDetail, capabilityErrorStatus } from "./errors.js";
 
 const string = { type: "string", minLength: 1, maxLength: 128 };
 const schema = (properties: Record<string, any> = {}, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
@@ -15,16 +17,25 @@ const canonical = (v: any): any => Array.isArray(v) ? v.map(canonical) : v && ty
 const digest = (v: unknown) => createHash("sha256").update(JSON.stringify(canonical(v))).digest("hex");
 function validate(value: any, s: any, depth = 0): void {
   if (depth > 12) fail(400, "invalid_input");
+  if (s.anyOf) {
+    for (const candidate of s.anyOf) {
+      try { validate(value, candidate, depth + 1); return; } catch {}
+    }
+    fail(400, "invalid_input");
+  }
   if (s.type === "object") {
-    if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(k => !(k in s.properties))
+    const properties = s.properties ?? {};
+    if (!value || typeof value !== "object" || Array.isArray(value)
+      || s.additionalProperties !== true && Object.keys(value).some(k => !(k in properties))
       || (s.required ?? []).some((k: string) => value[k] === undefined)) fail(400, "invalid_input");
-    for (const [k, v] of Object.entries(value)) validate(v, s.properties[k], depth + 1);
+    for (const [k, v] of Object.entries(value)) if (k in properties) validate(v, properties[k], depth + 1);
   } else if (s.type === "string") {
     if (typeof value !== "string" || value.length < (s.minLength ?? 0) || value.length > (s.maxLength ?? 1024)
       || /[\u0000-\u001f\u007f]/u.test(value)) fail(400, "invalid_input");
   } else if (s.type === "integer") {
     if (!Number.isSafeInteger(value) || value < (s.minimum ?? 0) || value > (s.maximum ?? 100)) fail(400, "invalid_input");
   } else if (s.type === "boolean") { if (typeof value !== "boolean") fail(400, "invalid_input"); }
+  else if (s.type === "null") { if (value !== null) fail(400, "invalid_input"); }
   else if (s.type === "array") {
     if (!Array.isArray(value) || value.length < (s.minItems ?? 0) || value.length > (s.maxItems ?? 100)
       || new Set(value).size !== value.length) fail(400, "invalid_input");
@@ -32,14 +43,11 @@ function validate(value: any, s: any, depth = 0): void {
   } else fail(400, "invalid_input");
   if (s.enum && !s.enum.includes(value)) fail(400, "invalid_input");
 }
-interface Definition {
-  name: string; description: string; inputSchema: Record<string,any>; effect: "read" | "propose";
-  scope: string; allHosts?: boolean; execute: (p: Principal, input: any, context: InvocationContext) => unknown | Promise<unknown>;
-}
 export class CapabilityDispatcher implements CapabilityDispatcherContract {
   readonly proposals: TaskProposalService;
-  readonly definitions: Definition[];
+  readonly definitions: CapabilityDefinition[];
   readonly installationID: string;
+  private readonly limits = new Map<string,{start:number;count:number;active:number}>();
   constructor(readonly deps: Dependencies, readonly authority: CapabilityAuthority, readonly options: {taskCenter: TaskRunStore; alerts?: AlertCapabilities}) {
     deps.db.exec(`CREATE TABLE IF NOT EXISTS capability_installation(id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS capability_invocations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,credential_id TEXT NOT NULL,source TEXT NOT NULL,capability TEXT NOT NULL,input_hash TEXT NOT NULL,decision TEXT NOT NULL,code TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,finished_at TEXT NOT NULL DEFAULT '',proposal_id TEXT NOT NULL DEFAULT '');
@@ -78,7 +86,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       } catch { return false; }
     };
     const nodes = options.taskCenter.nodes;
-    this.definitions = [
+    const definitions: CapabilityDefinitionSeed[] = [
       {name:"lightmoni_hosts_list",description:"List authorized registered hosts and observed Agent state. No SSH secrets or raw output.",scope:"hosts.read",effect:"read",inputSchema:schema({limit:{type:"integer",minimum:1,maximum:100},offset:{type:"integer",minimum:0,maximum:10000}}),execute:(p,i)=>{
         const rows = deps.db.all<any>("SELECT id,name,address,port,platform,arch,agent_id,agent_last_seen,observed_hostname FROM managed_machines ORDER BY id").filter(h=>this.allowedHost(p,h.id));
         const offset=i.offset??0,limit=i.limit??50; return {hosts:rows.slice(offset,offset+limit).map(h=>this.hostView(h)),total:rows.length,truncated:offset+limit<rows.length,next_offset:offset+limit<rows.length?offset+limit:null};
@@ -104,7 +112,9 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       {name:"lightmoni_executions_get",description:"Read one real task execution and native state. Poll this ID after disconnect; no raw output is returned.",scope:"executions.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:(p,i)=>({execution:this.execution(p,options.taskCenter.get(i.id.startsWith("task:")?i.id.slice(5):i.id)),output_omitted:true})},
       {name:"lightmoni_telemetry_catalog",description:"List telemetry table schema metadata. No telemetry rows or arbitrary SQL. Requires an installation-wide grant because tables are not isolated by host.",scope:"telemetry.catalog.read",allHosts:true,effect:"read",inputSchema:schema(),execute:async(_p,_i,c)=>{const tables=await deps.cat.list(c.signal);return {tables:tables.slice(0,100).map(t=>({id:t.id,name:t.name,kind:t.kind,columns:t.columns})),limit:100,truncated:tables.length>100};}},
     ];
-    if(options.alerts)this.definitions.push({name:"lightmoni_alerts_list",description:"List safe alert rule metadata without SQL or evidence. Host-scoped grants cannot access installation-wide rules.",scope:"alerts.read",allHosts:true,effect:"read",inputSchema:schema(),execute:async p=>({rules:(await options.alerts!.listRules(p.user)).slice(0,100).map(r=>({id:r.id,name:r.name,enabled:r.enabled,severity:r.severity,kind:r.kind,silence_until:r.silence_until})),limit:100})});
+    if(options.alerts)definitions.push({name:"lightmoni_alerts_list",description:"List safe alert rule metadata without SQL or evidence. Host-scoped grants cannot access installation-wide rules.",scope:"alerts.read",allHosts:true,effect:"read",inputSchema:schema(),execute:async p=>({rules:(await options.alerts!.listRules(p.user)).slice(0,100).map(r=>({id:r.id,name:r.name,enabled:r.enabled,severity:r.severity,kind:r.kind,silence_until:r.silence_until})),limit:100})});
+    this.definitions = definitions.map(defineCapability);
+    validateCapabilityRegistry(this.definitions);
   }
   private grant(source:ProposalSource,userID:string):Principal {
     if(!source.grant_id||!this.authority.validateGrant)fail(403,"authorization_unavailable");
@@ -181,34 +191,85 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       return this.proposalView(p,v.id);
     });
   }
-  list(principal:Principal) {
+  private summary(d:CapabilityDefinition):CapabilitySummary {
+    return {id:d.id,version:d.version,name:d.name,description:d.description,inputSchema:d.inputSchema,outputSchema:d.outputSchema,
+      effect:d.effect,risk:d.risk,operationKind:d.operationKind,idempotencyPolicy:d.idempotencyPolicy};
+  }
+  list(principal:Principal):CapabilitySummary[] {
     this.authority.validate(principal);
-    return this.definitions.filter(d=>principal.user.role==="admin"&&principal.scopes.includes(d.scope)&&(!d.allHosts||principal.host_ids===null)).map(({name,description,inputSchema,effect})=>({name,description,inputSchema,effect}));
+    const channel=principal.source==="mcp"?"mcp":principal.source==="assistant"?"assistant":"http";
+    return this.definitions.filter(d=>d.exposure[channel]&&principal.user.role==="admin"&&principal.scopes.includes(d.scope)
+      &&(!d.allHosts||principal.host_ids===null)).map(d=>this.summary(d));
+  }
+  listPage(principal:Principal,cursor?:string,pageSize=50):{tools:CapabilitySummary[];nextCursor?:string} {
+    const tools=this.list(principal);
+    if(!Number.isInteger(pageSize)||pageSize<1||pageSize>100)fail(400,"invalid_cursor");
+    const catalog=digest(tools.map(t=>`${t.id}@${t.version}:${t.name}`));
+    let offset=0;
+    if(cursor!==undefined) {
+      try {
+        if(typeof cursor!=="string"||cursor.length>1024||!/^[A-Za-z0-9_-]+$/.test(cursor))throw Error();
+        const value=JSON.parse(Buffer.from(cursor,"base64url").toString("utf8"));
+        if(value.v!==1||!Number.isInteger(value.offset)||value.offset<0||value.offset>=tools.length
+          ||value.user!==principal.user.id||value.credential!==principal.credential_id||value.grant!==principal.grant_id
+          ||value.source!==principal.source||value.catalog!==catalog)throw Error();
+        offset=value.offset;
+      } catch {fail(400,"invalid_cursor");}
+    }
+    const page=tools.slice(offset,offset+pageSize),next=offset+page.length;
+    return {tools:page,...(next<tools.length?{nextCursor:Buffer.from(JSON.stringify({v:1,offset:next,user:principal.user.id,
+      credential:principal.credential_id,grant:principal.grant_id,source:principal.source,catalog})).toString("base64url")}:{})};
+  }
+  private acquire(p:Principal,d:CapabilityDefinition):()=>void {
+    const now=this.deps.now().getTime(),key=p.user.id+"\0"+d.name;
+    for(const [k,v] of this.limits)if(now-v.start>=60_000&&v.active===0)this.limits.delete(k);
+    let current=this.limits.get(key);
+    if(!current){
+      if(this.limits.size>=2000)fail(429,"rate_limited");
+      current={start:now,count:0,active:0};this.limits.set(key,current);
+    }
+    if(now-current.start>=60_000){current.start=now;current.count=0;}
+    current.count++;
+    if(current.count>d.limits.ratePerMinute)fail(429,"rate_limited");
+    if(current.active>=d.limits.concurrency)fail(429,"concurrency_limit");
+    current.active++;
+    let released=false;
+    return ()=>{if(!released){released=true;current!.active--;}};
   }
   async invoke(principal:Principal,name:string,input:unknown,context:InvocationContext):Promise<Record<string,any>> {
     const invocationID=randomUUID(),at=this.deps.now().toISOString();
     // Audit stores a digest, never scripts, output, secrets or supplied identity fields.
     let inputHash="invalid";try{inputHash=digest(input);}catch{}
     this.deps.db.run("INSERT INTO capability_invocations(id,user_id,credential_id,source,capability,input_hash,decision,created_at) VALUES(?,?,?,?,?,?,'started',?)",invocationID,principal.user.id,principal.credential_id,principal.source,/^[a-z0-9_]{1,80}$/.test(name)?name:"invalid",inputHash,at);
+    let release:(()=>void)|undefined,timeout:AbortSignal|undefined;
     try {
       this.authority.validate(principal);context.signal.throwIfAborted();
       const d=this.definitions.find(d=>d.name===name);if(!d)fail(404,"capability_not_found");
+      const channel=principal.source==="mcp"?"mcp":principal.source==="assistant"?"assistant":"http";
+      if(!d.exposure[channel])fail(404,"capability_not_found");
       this.authorize(principal,d.scope,d.allHosts);
-      if(Buffer.byteLength(JSON.stringify(input)??"")>16<<10)fail(413,"input_too_large");validate(input,d.inputSchema);
-      const data=await d.execute(principal,input,context);
+      if(Buffer.byteLength(JSON.stringify(input)??"")>d.limits.maxInputBytes)fail(413,"input_too_large");
+      validate(input,d.inputSchema);
+      for(const target of d.targetResolver(input))if(target.kind==="host")this.host(principal,target.id);
+      release=this.acquire(principal,d);
+      timeout=AbortSignal.timeout(d.limits.timeoutMs);
+      const executed=await d.execute(principal,input,{...context,signal:AbortSignal.any([context.signal,timeout])});
+      const data=d.resultProjection(executed);
+      try{validate(data,d.outputSchema);}catch{fail(500,"output_invalid");}
       const response={schema_version:1,invocation_id:invocationID,kind:d.effect==="propose"?"proposal":"read",status:d.effect==="propose"?(data as any)?.proposal?.status??"awaiting_approval":"completed",data};
-      if(Buffer.byteLength(JSON.stringify(response))>64<<10)fail(413,"result_too_large");
+      if(Buffer.byteLength(JSON.stringify(response))>d.limits.maxOutputBytes)fail(413,"result_too_large");
       const proposalID=(data as any)?.proposal?.id??"";
       this.deps.db.run("UPDATE capability_invocations SET decision=?,finished_at=?,proposal_id=? WHERE id=?",(data as any)?.idempotency_replayed?"idempotency_hit":"allowed",this.deps.now().toISOString(),proposalID,invocationID);
       return response;
     } catch(error) {
-      const status=error&&typeof error==="object"&&"status" in error?Number(error.status):500;
-      const code=status===403?"forbidden":status===404?"not_found":status===409?"conflict":status===400?"invalid_input":context.signal.aborted?"cancelled":"unavailable";
+      const status=timeout?.aborted?504:capabilityErrorStatus(error);
+      const code=timeout?.aborted?"timeout":context.signal.aborted?"cancelled":capabilityErrorDetail(error,status);
       this.deps.db.run("UPDATE capability_invocations SET decision='denied',code=?,finished_at=? WHERE id=?",code,this.deps.now().toISOString(),invocationID);
+      if(timeout?.aborted)fail(504,"timeout");
       if(error instanceof HTTPError||error instanceof NodeError)throw error;
       if(error&&typeof error==="object"&&"status" in error)fail(status,status>=500?"capability_unavailable":String((error as {message?:unknown}).message??"capability_failed"));
       throw error;
-    }
+    } finally {release?.();}
   }
   /** Existing internal task tools retain their names but share the capability policy and receipts. */
   assistantTools() {
@@ -233,9 +294,14 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
 export function registerCapabilities(deps:Dependencies,dispatcher:CapabilityDispatcher,authority:SessionAuthority) {
   deps.router.get("/api/v1/capabilities",c=>c.json(dispatcher.list(authority.sessionPrincipal(c.user,"web"))));
   deps.router.post("/api/v1/capabilities/:name/invoke",async c=>{
-    let input:unknown;
-    try {input=JSON.parse((await c.raw(16<<10)).toString());}
-    catch(error){if(error instanceof HTTPError)throw error;fail(400,"invalid_input");}
-    c.json(await dispatcher.invoke(authority.sessionPrincipal(c.user,"web"),c.params.name,input,{signal:c.signal}));
+    try {
+      let input:unknown;
+      try {input=JSON.parse((await c.raw(16<<10)).toString());}
+      catch(error){if(error instanceof HTTPError)throw error;fail(400,"invalid_input");}
+      c.json(await dispatcher.invoke(authority.sessionPrincipal(c.user,"web"),c.params.name,input,{signal:c.signal}));
+    } catch(error) {
+      const status=capabilityErrorStatus(error),message=status>=500?"服务暂不可用":String((error as Error)?.message??"调用未完成");
+      c.json({error:message,code:capabilityErrorCategory(status),detail_code:capabilityErrorDetail(error,status)},status);
+    }
   });
 }

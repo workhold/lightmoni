@@ -1,6 +1,6 @@
 # LightMoni 平台开放能力与 MCP 架构
 
-状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，[SDD 134](../specs/134-capability-core-decoupling/spec.md) 解耦核心与外部接入生命周期。范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
+状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，[SDD 134](../specs/134-capability-core-decoupling/spec.md) 解耦核心与外部接入生命周期，[SDD 135](../specs/135-capability-descriptor-contracts/spec.md) 完善描述符、输出与分页契约。范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
 
 ## 1. 驱动目标与设计结论
 
@@ -44,6 +44,8 @@ SDD 046 调研时，`assistant/types.ts` 的 Tool 只有 name/schema/effect/exec
 ## 4. LLD：能力描述符与调用链
 
 能力定义归属拟新增 `runtime/src/capabilities/`，从 assistant 目录中分离。每个描述符声明稳定 ID/版本、输入输出 JSON Schema、所需 scope、资源解析、read/propose/execute 影响、执行策略、审批、幂等、投影、审计与时间/结果上限。模型不能动态注册服务器任意代码。
+
+SDD 135 已将上述字段落实到既有 10 项描述符。当前 execute 仍不开放；targetResolver 的 Host 引用由 Dispatcher 通用校验，任务、执行和提案等非 Host 目标继续由领域适配器解析并复验。曝光按 assistant/mcp/http 分别检查，发现过滤与直接调用使用同一策略。每主体每能力默认限制为 120 次/分钟、4 并发和 15 秒，输入/完整响应延续 16 KiB/64 KiB 上限；描述符可收紧。
 
 调用链固定为：认证主体 → 校验 schema → 解析真实资源 → 检查当前 role/scope/资源授权 → 限流及幂等 → 领域服务 → 安全结果投影，全链路由统一审计包围。拒绝、schema 失败、取消及幂等命中也写安全摘要；认证失败记录网关安全事件，不记录原始令牌。发现、直接调用、资源读取和分页都执行授权；工具隐藏只是使用体验，不能代替服务端检查。
 
@@ -174,6 +176,8 @@ JSON-RPC request ID 只用于本次协议响应关联，MCP 会话只用于协�
 ## 16. 首期落地范围（SDD 047）
 
 SDD 134 保持本节目录和外部协议不变，但调整装配边界：核心 CapabilityAccess、Dispatcher、通用能力 HTTP 和内部助手首批任务工具不再依赖 MCP externalURL 是否合法。只有 McpAccess、PAT/OAuth 管理与 MCP Transport 受外部配置控制；Web/助手主体由核心会话模块刷新，MCP 主体和稳定 grant 委托外部模块复验。无外部模块时，核心能力继续可用，外部提案仍拒绝审批且不创建执行。
+
+SDD 135 增加 data 输出校验和 MCP 完整 structuredContent outputSchema；成功 Envelope 与安全错误 Envelope 均可被官方客户端校验。tools/list 默认每页 50 项，nextCursor 绑定当前用户、凭据、grant、来源和目录摘要；后续页重新鉴权，目录变化或跨主体游标返回 invalid_cursor。MCP annotations 由 effect/risk/operationKind/idempotencyPolicy 生成，不作为授权依据。错误 code 保持原分类，新增 detail_code 表达 idempotency_conflict、output_invalid、rate_limited、concurrency_limit、timeout 等稳定细节。
 
 `runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手首批任务工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。外部查询包括主机、平台默认与用户任务、执行、提案、遥测表目录和告警规则目录；告警启用时共 10 个工具。遥测行、任意 SQL、告警修改、部署与运维写工具尚未开放。表和告警没有主机级数据隔离，目录工具只允许全主机范围授权。
 
