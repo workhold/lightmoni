@@ -2,7 +2,7 @@
 
 验证日期：2026-11-14。范围为 Slice 2 的告警只读垂直切片。分支 stacked 在 SDD 136 的 `adca42a` 上；main 为 `65ebc79`，PR #186/#187/#188 在开发时均 OPEN 且未合并。未部署生产、未操作真实主机、未发布镜像。
 
-交付 PR：[workhold/lightmoni#190](https://github.com/workhold/lightmoni/pull/190)，目标为 main，依赖 #186/#187/#188；未合并。
+交付 PR：[workhold/lightmoni#190](https://github.com/workhold/lightmoni/pull/190)，目标为 main，依赖 #186/#187/#188；已于 2026-11-14 获用户授权合入 main，merge commit `7f12dd9`。
 
 ## 自动化检查
 
