@@ -25,6 +25,8 @@ import { registerServiceDeployments } from "../src/server/service-deployments.js
 import { registerOperations } from "../src/server/operations.js";
 import { registerOperationSchedules } from "../src/server/operation-schedules.js";
 import { websiteDefinition } from "../src/operations/websites.js";
+import { Dashboards, normalizeDashboard } from "../src/domains/dashboards.js";
+import { DashboardReadService } from "../src/domains/dashboard-read.js";
 async function fixture(wrap?:(d:CapabilityDispatcher)=>CapabilityDispatcherContract){
  const db=new DB(":memory:"),router=new Router(),user={id:"admin",name:"Admin",role:"admin"};accountSchema(db);
  db.run("INSERT INTO users(id,name,role,active,created_at) VALUES(?,?,?,1,?)",user.id,user.name,user.role,new Date().toISOString());
@@ -199,6 +201,22 @@ test("host and Agent capabilities expose safe inventory and lifecycle receipts t
   const installation=await client.callTool({name:"lightmoni_agent_installations_get",arguments:{deployment_id:"install-one"}});assert.equal((installation.structuredContent as any).data.installation.status,"unknown");
   const update=await client.callTool({name:"lightmoni_agent_updates_get",arguments:{machine_id:"one",update_id:"update-one"}});assert.equal((update.structuredContent as any).data.update.status,"rolled_back");
  }finally{await client.close();await f.close();}
+});
+test("dashboard capabilities expose real catalog, details and versions through the official MCP client",async()=>{
+ let dashboards!:Dashboards;
+ const f=await fixture(d=>{dashboards=new Dashboards(d.deps);return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,dashboards:new DashboardReadService(dashboards)});});
+ const client=new Client({name:"dashboard-read",version:"1"}),ordinaryClient=new Client({name:"dashboard-catalog",version:"1"});
+ try{
+  const custom=dashboards.insert(normalizeDashboard({title:"Business",description:"Custom dashboard",panels:[],variables:[]}));
+  const key=f.access.createToken(f.user,{name:"Dashboards",scopes:["dashboards.read","dashboards.detail.read"],host_ids:null});await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+  const tools=await client.listTools();for(const name of ["lightmoni_dashboards_list","lightmoni_dashboards_get","lightmoni_dashboards_versions"])assert.ok(tools.tools.some(t=>t.name===name),name);
+  assert.equal(tools.tools.some(t=>/save|copy|delete|draft/.test(t.name)),false);
+  const listed=await client.callTool({name:"lightmoni_dashboards_list",arguments:{scope:"custom"}});assert.equal((listed.structuredContent as any).data.items[0].id,custom.id);
+  const detail=await client.callTool({name:"lightmoni_dashboards_get",arguments:{id:custom.id}});assert.equal((detail.structuredContent as any).data.dashboard.description,"Custom dashboard");
+  const versions=await client.callTool({name:"lightmoni_dashboards_versions",arguments:{id:custom.id}});assert.equal((versions.structuredContent as any).data.versions[0].revision,1);
+  const ordinaryKey=f.access.createToken(f.user,{name:"Dashboard catalog",scopes:["dashboards.read"],host_ids:null});await ordinaryClient.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+ordinaryKey.token}}}));
+  const denied=await ordinaryClient.callTool({name:"lightmoni_dashboards_get",arguments:{id:custom.id}});assert.equal(denied.isError,true);assert.equal((denied.structuredContent as any).error.detail_code,"capability_forbidden");
+ }finally{await client.close();await ordinaryClient.close();await f.close();}
 });
 test("transport rejects wrong credentials, Origin, methods, versions, oversized and malformed messages",async()=>{
  const f=await fixture();try{

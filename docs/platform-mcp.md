@@ -1,6 +1,6 @@
 # LightMoni 平台开放能力与 MCP 架构
 
-状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，[SDD 134](../specs/134-capability-core-decoupling/spec.md) 解耦核心与外部接入生命周期，[SDD 135](../specs/135-capability-descriptor-contracts/spec.md) 完善描述符、输出与分页契约，[SDD 136](../specs/136-telemetry-capability-read/spec.md) 迁移遥测只读能力，[SDD 137](../specs/137-alert-capability-read/spec.md) 迁移告警只读能力，[SDD 138](../specs/138-log-trace-capability-read/spec.md) 增加日志与 Trace 只读，[SDD 139](../specs/139-deployment-capability-read/spec.md) 增加服务与部署只读，[SDD 140](../specs/140-operation-capability-read/spec.md) 增加运维与计划只读，[SDD 141](../specs/141-host-agent-capability-read/spec.md) 增加主机与 Agent 只读。范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
+状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，[SDD 134](../specs/134-capability-core-decoupling/spec.md) 解耦核心与外部接入生命周期，[SDD 135](../specs/135-capability-descriptor-contracts/spec.md) 完善描述符、输出与分页契约，[SDD 136](../specs/136-telemetry-capability-read/spec.md) 迁移遥测只读能力，[SDD 137](../specs/137-alert-capability-read/spec.md) 迁移告警只读能力，[SDD 138](../specs/138-log-trace-capability-read/spec.md) 增加日志与 Trace 只读，[SDD 139](../specs/139-deployment-capability-read/spec.md) 增加服务与部署只读，[SDD 140](../specs/140-operation-capability-read/spec.md) 增加运维与计划只读，[SDD 141](../specs/141-host-agent-capability-read/spec.md) 增加主机与 Agent 只读，[SDD 142](../specs/142-dashboard-capability-read/spec.md) 增加大盘只读。范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
 
 ## 1. 驱动目标与设计结论
 
@@ -191,7 +191,9 @@ SDD 140 新增 OperationsReadService，开放资源 list/get、Run list/get 和 
 
 SDD 141 保留原 hosts_list/get，新增 assistant-safe 主机详细目录/详情，以及 Agent Release、安装和维护结果读取。hosts.read 支持 Host 资源授权；agents.read 的安装/维护结果复验 Host，Release 目录为安装级权限。内部五个旧主机/Agent 工具改走 Dispatcher，远程 SSH 预检、安装/升级/回退提案和生命周期执行仍不对外。告警模块启用时共 36 个工具。
 
-`runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手任务/遥测/告警/日志/Trace/服务部署/运维/主机 Agent 读取工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。表、遥测数据、日志、Trace、告警、服务部署和运维均没有主机级数据隔离，只允许全主机范围授权；告警修改、部署、运维和 Agent 写工具尚未开放。
+SDD 142 抽取 DashboardReadService，开放自定义/系统大盘摘要、完整详情和版本历史。dashboards.read 不含完整面板 SQL，dashboards.detail.read 独立控制详情；均为安装级权限。内部新增 list_dashboards/get_dashboard/get_dashboard_versions，成员保留既有内部/Web 读取，外部 PAT/OAuth 仍管理员专用。保存、复制、删除和 draft_dashboard 未开放。告警模块启用时共 39 个工具。
+
+`runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手任务/遥测/告警/日志/Trace/服务部署/运维/主机 Agent/大盘读取工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。表、遥测数据、日志、Trace、告警、服务部署、运维和大盘均没有主机级数据隔离，只允许全主机范围授权；告警修改、部署、运维、Agent 和大盘写工具尚未开放。
 
 外部任务操作仅创建已有任务的派发、取消与重试提案。TaskProposalService 保存真实来源、凭据与稳定 grant，不伪造助手 session；既有 owner 和人工审批边界保留。审批前与 Agent 领取排队项前分别复验外部授权，撤销、过期、降权或主机范围缩小后不得开始新项。新脚本/任务定义、持续授权和服务主体不属于本期。短期 OAuth access token 到期不使已批准项失效，稳定 grant 到期/撤销才阻止尚未开始项。若 MCP 配置失效、Dispatcher 未创建或审批前/后的授权适配器缺少任一项，尚未完成的 MCP 来源提案拒绝应用，不能由助手 fallback 降级为内部操作。排队项和自动重试保留稳定授权，缺少领取前校验器时 fail closed；主干的计划、并发、队列及任务版本校验继续生效。
 

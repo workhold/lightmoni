@@ -106,7 +106,7 @@ test("session principals refresh account role while missing MCP access cannot au
     f.db.run("UPDATE users SET role='member' WHERE id='admin'");
     await assert.rejects(f.dispatcher.invoke(principal, "lightmoni_hosts_list", {}, { signal: new AbortController().signal }), /capability_forbidden/);
     assert.equal(principal.user.role, "member");
-    assert.deepEqual(principal.scopes, ["telemetry.catalog.read", "telemetry.query", "alerts.read", "alerts.detail.read", "logs.read", "traces.read"]);
+    assert.deepEqual(principal.scopes, ["telemetry.catalog.read", "telemetry.query", "alerts.read", "alerts.detail.read", "logs.read", "traces.read", "dashboards.read", "dashboards.detail.read"]);
 
     const external = { ...f.access.sessionPrincipal(admin, "web"), source: "mcp" as const, credential_id: "external", grant_id: "external" };
     await assert.rejects(f.dispatcher.invoke(external, "lightmoni_hosts_list", {}, { signal: new AbortController().signal }), error =>

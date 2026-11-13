@@ -57,6 +57,7 @@ import { TelemetryService } from "../domains/telemetry.js";
 import { AlertProposalService } from "../assistant/alert-proposals.js";
 import { LogReadService } from "../domains/log-read.js";
 import { TraceReadService } from "../domains/trace-read.js";
+import { DashboardReadService } from "../domains/dashboard-read.js";
 import { McpAccess, registerMcpAccess, isMcpExternalURL } from "../mcp/access.js";
 import { registerMcpTransport } from "../mcp/transport.js";
 export interface Config {
@@ -187,7 +188,9 @@ export async function createApp(cfg: Config) {
     modules.push(registerCenterSSHDispatch(deps,managedMachines,agentJobs,privilegedExecutors,undefined,1000,taskCenter));
     modules.push(connectExecutorObservations(deps,privilegedExecutors,ingest.internal.bind(ingest)));
     modules.push(agentCredentials);
-    modules.push(registerDashboards(deps));
+    const dashboards = registerDashboards(deps);
+    modules.push(dashboards);
+    const dashboardReads = new DashboardReadService(dashboards);
     const logs = registerLogs(deps);
     modules.push(logs);
     const logReads = new LogReadService(logs), traceReads = new TraceReadService(deps);
@@ -207,7 +210,7 @@ export async function createApp(cfg: Config) {
     }
     const capabilityAccess = new CapabilityAccess(deps, mcpAccess);
     const telemetry = new TelemetryService(deps);
-    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry, logs:logReads, traces:traceReads, deployments:serviceDeployments, operations, operationSchedules, machines:managedMachines});
+    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry, logs:logReads, traces:traceReads, deployments:serviceDeployments, operations, operationSchedules, machines:managedMachines, dashboards:dashboardReads});
     registerCapabilities(deps, capabilities, capabilityAccess);
     if (mcpAccess) modules.push(registerMcpTransport(deps, mcpAccess, capabilities));
     modules.push(
