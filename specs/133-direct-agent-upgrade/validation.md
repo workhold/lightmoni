@@ -22,4 +22,8 @@
 
 ## 发布与生产
 
-本地验证先于合并。合并提交、镜像摘要、生产备份、部署和健康回读须在相应操作完成后追加真实证据，不用本节本地检查代替上线验收。
+功能由 [PR #183](https://github.com/workhold/lightmoni/pull/183) 合入 GitHub `main`，合并提交 `6e9ceadd8441dc810219cc70490aa1394e02e781`。
+
+固定镜像 `docker.heyphp.com/lightmoni/lightmoni:20261113-6e9cead-agent-upgrade-v1` 已从该提交构建并推送。远端多架构索引为 `sha256:5cf5e84f3c35bdd0f9d1e21567f341235bcbec2b5c34486506880e79a15a4ef3`，包含 amd64 清单 `sha256:2ca01ed64d5b5465b85480d8c39bdf4f38c153741794901350402bf19ce80dfe` 和 arm64 清单 `sha256:70cf53df7a8a2f686bc1c51c48ababcda5fe0df4e8b775f081466ef7d6963d8c`。两平台容器内的双架构 Agent 发行清单均指向该完整源码修订，OCI revision 相同；见 [镜像证据](evidence/release-image.json)。
+
+本 PR 只把根 Compose 中心镜像切换到该固定标签。该标签选择不改变组件职责、数据/控制路径、凭据边界、存储、协议或部署拓扑，仓库及 Doca 架构同步不适用。生产备份、部署和健康回读须在实际操作完成后追加真实证据，不用镜像拉取验证代替上线验收。
