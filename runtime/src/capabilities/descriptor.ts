@@ -282,6 +282,11 @@ const METADATA: Record<string, Metadata> = {
     id: "alerts.deliveries.list", outputSchema: pageOutput, risk: "R1", operationKind: "center_read",
     approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
   },
+  lightmoni_alert_response_statistics_get: {
+    id: "alerts.statistics.get", outputSchema: data({from:{type:"string"},to:{type:"string"},users:arrayOfRecords,records:arrayOfRecords,truncated:flag,definition:{type:"string"}},
+      ["from","to","users","records","truncated","definition"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
+  },
 };
 
 export function defineCapability(seed: CapabilityDefinitionSeed): CapabilityDefinition {

@@ -9,7 +9,7 @@ function sessionScopesForUser(user: User): string[] {
   if (user.role === "admin") return [...CAPABILITY_SCOPES];
   // These were already available to members through the internal assistant.
   // External PAT/OAuth issuance continues to use scopesForUser and is admin-only.
-  return user.role === "member" ? ["telemetry.catalog.read", "telemetry.query", "alerts.read", "alerts.detail.read", "logs.read", "traces.read", "dashboards.read", "dashboards.detail.read", "alerts.incidents.read", "alerts.notifications.read"] : [];
+  return user.role === "member" ? ["telemetry.catalog.read", "telemetry.query", "alerts.read", "alerts.detail.read", "logs.read", "traces.read", "dashboards.read", "dashboards.detail.read", "alerts.incidents.read", "alerts.notifications.read", "alerts.statistics.read"] : [];
 }
 
 /** Session identity belongs to the always-on capability core, not MCP configuration. */

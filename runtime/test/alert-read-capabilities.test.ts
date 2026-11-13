@@ -47,7 +47,7 @@ async function fixture() {
 test("alert reads preserve filters, pagination, safe groups and owner-bound proposals", async () => {
   const f = await fixture();
   try {
-    assert.equal(f.dispatcher.definitions.length, 21);
+    assert.equal(f.dispatcher.definitions.length, 22);
     const rules = await f.invoke("lightmoni_alert_rules_list", { search: "api", service: "api", enabled: true, limit: 1 });
     assert.equal(rules.data.total, 1); assert.equal(rules.data.items[0].id, f.rule.id);
     assert.equal(Object.hasOwn(rules.data.items[0], "sql"), false);
@@ -80,7 +80,7 @@ test("alert detail scope, installation scope and member session boundaries are e
     const session = f.access.sessionPrincipal(member, "assistant");
     const memberRules = await f.invoke("lightmoni_alert_rules_list", {}, session);
     assert.equal(memberRules.data.total, 1);
-    assert.equal(f.dispatcher.list(session).filter(d => d.id.startsWith("alerts.")).length, 10);
+    assert.equal(f.dispatcher.list(session).filter(d => d.id.startsWith("alerts.")).length, 11);
     await assert.rejects(f.invoke("lightmoni_tasks_list", {}, session), /capability_forbidden/);
   } finally { await f.close(); }
 });

@@ -843,6 +843,8 @@ SDD 144 以共享 InstrumentationService 开放中心受限工作区扫描和既
 
 SDD 145 以 AlertReadService 补齐告警事件、值班时间线和通知投递只读能力，原 Alert API 与新能力共享筛选。alerts.incidents.read 与 alerts.notifications.read 分离高敏数据；通知联系人、payload、供应商响应和原始错误不进入模型。接手、确认、分配、重试和通知测试未开放。
 
+SDD 146 将响应统计复用到 AlertReadService，新增 alerts.statistics.read 和内外部只读统计，保留原筛选、接手率、时长和截断。Slice 2 覆盖矩阵明确远程探针、长代码任务、恢复/卸载及后续写/服务主体边界，不把工具数量当作全目标完成。
+
 完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134](../specs/134-capability-core-decoupling/spec.md)、[SDD 135](../specs/135-capability-descriptor-contracts/spec.md)、[SDD 136](../specs/136-telemetry-capability-read/spec.md)、[SDD 137](../specs/137-alert-capability-read/spec.md)、[SDD 138](../specs/138-log-trace-capability-read/spec.md)、[SDD 139](../specs/139-deployment-capability-read/spec.md)、[SDD 140](../specs/140-operation-capability-read/spec.md)、[SDD 141](../specs/141-host-agent-capability-read/spec.md)、[SDD 142](../specs/142-dashboard-capability-read/spec.md)、[SDD 144](../specs/144-instrumentation-capability-read/spec.md)、[SDD 145](../specs/145-alert-operations-capability-read/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
@@ -1042,6 +1044,7 @@ docker compose up -d --no-build --wait
 - 大盘只读能力：[SDD 142](../specs/142-dashboard-capability-read/spec.md)
 - SDK 插桩只读能力：[SDD 144](../specs/144-instrumentation-capability-read/spec.md)
 - 告警事件与通知只读能力：[SDD 145](../specs/145-alert-operations-capability-read/spec.md)
+- 告警响应统计与 Slice 2 覆盖审计：[SDD 146](../specs/146-alert-statistics-capability-read/spec.md)
 - 模型发现和协议：[SDD 002](../specs/002-model-discovery/spec.md)、[SDD 003](../specs/003-multi-protocol-models/spec.md)、[SDD 005](../specs/005-model-management/spec.md)
 - Agent、迁移和凭据：[SDD 006](../specs/006-execution-nodes/spec.md)、[SDD 007](../specs/007-node-runtime-migration/spec.md)、[SDD 010](../specs/010-agent-deployment/spec.md)
 - SDK 数据与模式：[SDD 010 telemetry](../specs/010-telemetry-table-model/spec.md)、[SDD 011](../specs/011-aligned-metric-windows/spec.md)、[SDD 012](../specs/012-sdk-reporting-choice/spec.md)

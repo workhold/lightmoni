@@ -20,9 +20,10 @@ function fixture() {
   const db=new DB(":memory:");accountSchema(db);db.run("INSERT INTO users(id,name,role,active,created_at) VALUES('admin','Admin','admin',1,'2026-11-14'),('member','Member','member',1,'2026-11-14')");
   const deps={db,router:new Router(),now:()=>new Date("2026-11-14T00:00:00Z"),externalURL:"https://moni.example.test",...cipher(Buffer.alloc(32,24)),cat:{list:async()=>[]},query:async()=>({request_id:"",results:[]}),referencedTables:async()=>[],logger:{info(){},warn(){},error(){}}} as unknown as Dependencies;
   const alerts=new Alerts(deps),capabilities=new AlertCapabilities(alerts),proposals=new AlertProposalService(db,capabilities,deps.now,deps.encrypt,deps.decrypt),at=deps.now().toISOString();
-  db.run("INSERT INTO alert_responses(id,episode,group_id,state,created_at,body) VALUES('incident-one','episode-one','group-one','firing',?,?)",at,encode({id:"incident-one",episode:"episode-one",group_id:"group-one",state:"firing",priority:"P1",created_at:at,owner_id:"admin",ack_at:"",evidence:{logs:"private-evidence"}}));
+  db.run("INSERT INTO alert_responses(id,episode,group_id,state,created_at,body) VALUES('incident-one','episode-one','group-one','firing',?,?)",at,encode({id:"incident-one",episode:"episode-one",group_id:"group-one",group_name:"Ops",rule_id:"rule-one",original_priority:"P1",event:{rule_name:"API errors"},state:"firing",priority:"P1",created_at:at,owner_id:"admin",ack_at:"",evidence:{logs:"private-evidence"}}));
   db.run("INSERT INTO alert_response_events(id,response_id,at,body) VALUES('event-one','incident-one',?,?)",at,encode({state:"firing",summary:" fired "}));
   db.run("INSERT INTO alert_outbox(id,event_id,channel_id,target,status,next_attempt,created_at,body) VALUES('delivery-one','event-one','channel-one','private-contact','failed','',?,?)",at,encode({id:"delivery-one",response_id:"incident-one",rule_id:"rule-one",group_ids:["group-one"],table_ids:["log_app"],service:"api",delivery_status:"failed",attempts:2,provider_id:"provider",error:"raw provider error",provider_response:"private-response",payload:"private-payload"}));
+  db.run("INSERT INTO alert_assignments(response_id,user_id,user_name,stage,priority,notified_at,ack_at,ack_method,outcome) VALUES('incident-one','admin','Admin','primary','P1',?,?,'web','acknowledged')",at,"2026-11-14T00:01:00.000Z");
   const runs=new TaskRunStore(deps),principal:Principal={user:admin,scopes:[...CAPABILITY_SCOPES],host_ids:null,credential_id:"token",grant_id:"grant",source:"mcp"};
   const access=new CapabilityAccess(deps,{validate(){},validateGrant:()=>structuredClone(principal)});
   const dispatcher=new CapabilityDispatcher(deps,access,{taskCenter:runs,alerts:capabilities,alertProposals:proposals});
@@ -55,5 +56,16 @@ test("internal incident and delivery tools use dispatcher without duplicate aler
   const tools=f.dispatcher.assistantTools();for(const name of ["list_alert_incidents","get_alert_incident","list_alert_deliveries"])assert.ok(tools.some(t=>t.name===name),name);
   const result=await tools.find(t=>t.name==="get_alert_incident")!.execute({id:"incident-one"},new AbortController().signal,admin);assert.equal(result.incident.id,"incident-one");
   assert.ok(f.db.get("SELECT 1 FROM capability_invocations WHERE source='assistant' AND capability='lightmoni_alert_incidents_get'"));
+ }finally{await f.close();}
+});
+
+test("response statistics use native assignments with independent scope and internal adapter",async()=>{
+ const f=fixture();try{
+  const result=await f.invoke("lightmoni_alert_response_statistics_get",{group_id:"group-one",priority:"P1"});
+  assert.equal(result.data.users[0].notified,1);assert.equal(result.data.users[0].acknowledged,1);assert.equal(result.data.users[0].ack_rate,100);assert.equal(result.data.users[0].mean_ack_seconds,60);assert.equal(result.data.records.length,1);assert.equal(result.data.truncated,false);
+  const incidentsOnly={...structuredClone(f.principal),scopes:["alerts.incidents.read"]};await assert.rejects(f.invoke("lightmoni_alert_response_statistics_get",{},incidentsOnly),/capability_forbidden/);
+  const internal=f.dispatcher.assistantTools().find(t=>t.name==="get_alert_response_statistics")!;
+  const adapted=await internal.execute({group_id:"group-one"},new AbortController().signal,admin);assert.equal(adapted.users[0].ack_rate,100);
+  assert.ok(f.db.get("SELECT 1 FROM capability_invocations WHERE source='assistant' AND capability='lightmoni_alert_response_statistics_get'"));
  }finally{await f.close();}
 });
