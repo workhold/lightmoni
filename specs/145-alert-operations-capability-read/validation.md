@@ -2,6 +2,8 @@
 
 验证日期：2026-11-14。范围为 Slice 2 审计补齐的告警事件与通知只读。分支 stacked 在 SDD 144 的 `85e55b4` 上；main 为 `a38e390`，PR #192～#198 在开发时均 OPEN 且未合并。未部署生产、未操作真实主机、未发布镜像。
 
+交付 PR：[workhold/lightmoni#199](https://github.com/workhold/lightmoni/pull/199)，目标为 main，依赖 #192～#198；未合并。
+
 ## 自动化检查
 
 | 检查 | 结果 | 覆盖 |
