@@ -1,0 +1,19 @@
+{
+  "source_revision": "6e9ceadd8441dc810219cc70490aa1394e02e781",
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261113-6e9cead-agent-upgrade-v1",
+  "remote_index_digest": "sha256:5cf5e84f3c35bdd0f9d1e21567f341235bcbec2b5c34486506880e79a15a4ef3",
+  "platform_manifests": {
+    "linux/amd64": "sha256:2ca01ed64d5b5465b85480d8c39bdf4f38c153741794901350402bf19ce80dfe",
+    "linux/arm64": "sha256:70cf53df7a8a2f686bc1c51c48ababcda5fe0df4e8b775f081466ef7d6963d8c"
+  },
+  "checks": {
+    "remote_imagetools_inspect": "index and both platform manifests matched",
+    "local_amd64_oci_revision": "6e9ceadd8441dc810219cc70490aa1394e02e781",
+    "local_arm64_oci_revision": "6e9ceadd8441dc810219cc70490aa1394e02e781",
+    "container_amd64_node_arch": "x64",
+    "container_arm64_node_arch": "arm64",
+    "both_images_agent_releases": "amd64 and arm64 archives exist; both manifest revisions match source_revision",
+    "tag_not_previously_used": true
+  },
+  "production_deployment": "not performed or verified by this evidence"
+}
