@@ -2,6 +2,8 @@
 
 验证日期：2026-11-14。范围为 Slice 3 的任务 create/update 提案闭环。分支 stacked 在 SDD 146 的 `1ccbf35` 上；main 为 `a38e390`，PR #192～#200 在开发时均 OPEN 且未合并。未部署生产、未操作真实主机、未发布镜像。
 
+交付 PR：[workhold/lightmoni#201](https://github.com/workhold/lightmoni/pull/201)，目标为 main，依赖 #192～#200；未合并。
+
 ## 自动化检查
 
 | 检查 | 结果 | 覆盖 |
