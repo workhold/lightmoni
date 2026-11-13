@@ -15,11 +15,16 @@ export interface Principal {
   grant_id: string;
   source: "mcp" | "web" | "assistant";
 }
-export interface AccessAuthority {
-  authenticate(req: IncomingMessage): Principal;
+export interface SessionAuthority {
+  sessionPrincipal(user: User, source: "web" | "assistant"): Principal;
+}
+export interface ExternalAuthority {
   validate(principal: Principal): void;
   validateGrant?(grantID: string, userID?: string): Principal;
-  sessionPrincipal(user: User, source: "web" | "assistant"): Principal;
+}
+export interface CapabilityAuthority extends SessionAuthority, ExternalAuthority {}
+export interface AccessAuthority extends CapabilityAuthority {
+  authenticate(req: IncomingMessage): Principal;
 }
 export interface InvocationContext {
   signal: AbortSignal;

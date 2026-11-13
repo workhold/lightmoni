@@ -6,7 +6,7 @@ import type { TaskRunStore } from "../server/task-center.js";
 import { NodeError, type Task } from "../server/nodes-model.js";
 import { currentAgentHostname } from "../server/agent-hosts.js";
 import type { AlertCapabilities } from "../domains/alert-capabilities.js";
-import type { AccessAuthority, CapabilityDispatcherContract, InvocationContext, Principal } from "./types.js";
+import type { CapabilityAuthority, CapabilityDispatcherContract, InvocationContext, Principal, SessionAuthority } from "./types.js";
 
 const string = { type: "string", minLength: 1, maxLength: 128 };
 const schema = (properties: Record<string, any> = {}, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
@@ -40,7 +40,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   readonly proposals: TaskProposalService;
   readonly definitions: Definition[];
   readonly installationID: string;
-  constructor(readonly deps: Dependencies, readonly authority: AccessAuthority, readonly options: {taskCenter: TaskRunStore; alerts?: AlertCapabilities}) {
+  constructor(readonly deps: Dependencies, readonly authority: CapabilityAuthority, readonly options: {taskCenter: TaskRunStore; alerts?: AlertCapabilities}) {
     deps.db.exec(`CREATE TABLE IF NOT EXISTS capability_installation(id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS capability_invocations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,credential_id TEXT NOT NULL,source TEXT NOT NULL,capability TEXT NOT NULL,input_hash TEXT NOT NULL,decision TEXT NOT NULL,code TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,finished_at TEXT NOT NULL DEFAULT '',proposal_id TEXT NOT NULL DEFAULT '');
       CREATE INDEX IF NOT EXISTS capability_invocations_owner ON capability_invocations(user_id,created_at);
@@ -230,7 +230,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     }}];
   }
 }
-export function registerCapabilities(deps:Dependencies,dispatcher:CapabilityDispatcher,authority:AccessAuthority) {
+export function registerCapabilities(deps:Dependencies,dispatcher:CapabilityDispatcher,authority:SessionAuthority) {
   deps.router.get("/api/v1/capabilities",c=>c.json(dispatcher.list(authority.sessionPrincipal(c.user,"web"))));
   deps.router.post("/api/v1/capabilities/:name/invoke",async c=>{
     let input:unknown;

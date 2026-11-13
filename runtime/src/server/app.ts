@@ -52,6 +52,7 @@ import { registerLogs } from "../domains/logs.js";
 import { registerAlerts } from "../domains/alerts.js";
 import { AlertCapabilities } from "../domains/alert-capabilities.js";
 import { CapabilityDispatcher, registerCapabilities } from "../capabilities/index.js";
+import { CapabilityAccess } from "../capabilities/access.js";
 import { McpAccess, registerMcpAccess, isMcpExternalURL } from "../mcp/access.js";
 import { registerMcpTransport } from "../mcp/transport.js";
 export interface Config {
@@ -186,19 +187,20 @@ export async function createApp(cfg: Config) {
     const alerts = registerAlerts(deps);
     modules.push(alerts);
     const alertCapabilities = new AlertCapabilities(alerts);
-    let capabilities: CapabilityDispatcher | undefined;
+    let mcpAccess: McpAccess | undefined;
     if (isMcpExternalURL(cfg.externalURL)) {
-      const mcpAccess = new McpAccess(deps);
+      mcpAccess = new McpAccess(deps);
       registerMcpAccess(deps, mcpAccess);
-      capabilities = new CapabilityDispatcher(deps, mcpAccess, {taskCenter, alerts:alertCapabilities});
-      registerCapabilities(deps, capabilities, mcpAccess);
-      modules.push(registerMcpTransport(deps, mcpAccess, capabilities));
     } else {
       // Existing LAN HTTP deployments remain usable while MCP requires a canonical secure origin.
       logger.warn("MCP is disabled: configure LIGHTMONI_EXTERNAL_URL as an HTTPS origin or local HTTP origin");
       deps.router.get("/api/v1/mcp-access", c => c.error(503, "MCP 接入需要将 LIGHTMONI_EXTERNAL_URL 配置为 HTTPS 域名或本机 HTTP 地址"));
       deps.router.post("/api/v1/mcp", c => c.error(503, "MCP is not configured"), {public:true});
     }
+    const capabilityAccess = new CapabilityAccess(deps, mcpAccess);
+    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities});
+    registerCapabilities(deps, capabilities, capabilityAccess);
+    if (mcpAccess) modules.push(registerMcpTransport(deps, mcpAccess, capabilities));
     modules.push(
       registerAssistant(deps, {
         machines: managedMachines,
@@ -206,7 +208,8 @@ export async function createApp(cfg: Config) {
         deployments: serviceDeployments,
         operations,
         taskCenter,
-        ...(capabilities ? {capabilities,taskProposals:capabilities.proposals} : {}),
+        capabilities,
+        taskProposals: capabilities.proposals,
       }),
     );
     if (cfg.monitor !== false) {

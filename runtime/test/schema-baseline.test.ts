@@ -41,6 +41,27 @@ test('fresh center creates the final schema and restart preserves edits without 
   } finally {await app.close();}
 });
 
+test('capability core remains assembled when external MCP is disabled', async t=>{
+  const directory=mkdtempSync(join(tmpdir(),'lm-capability-core-'));
+  const ch=createServer((_req,res)=>{
+    res.setHeader('content-type','application/json');
+    res.end('{"meta":[],"data":[],"rows":0}');
+  });
+  await new Promise<void>(resolve=>ch.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{ch.closeAllConnections();await new Promise<void>(resolve=>ch.close(()=>resolve()));rmSync(directory,{recursive:true,force:true});});
+  const app=await createApp({dataDir:directory,chURL:'http://127.0.0.1:'+(ch.address() as any).port,chUser:'writer',chPassword:'fixture-only',externalURL:'http://192.0.2.1:8080',monitor:false});
+  try {
+    assert.ok(app.deps.db.get('SELECT id FROM capability_installation'));
+    assert.equal(app.deps.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_access_grants'"),undefined);
+    const paths=app.router.list().map(route=>route.path);
+    assert.ok(paths.includes('/api/v1/capabilities'));
+    assert.ok(paths.includes('/api/v1/capabilities/:name/invoke'));
+    assert.ok(paths.includes('/api/v1/assistant/sessions'));
+    assert.ok(paths.includes('/api/v1/mcp'));
+    assert.ok(paths.includes('/api/v1/mcp-access'));
+  } finally {await app.close();}
+});
+
 test('pre-release center is rejected without rewriting development records',()=>{
   const db=new DB(':memory:');
   try {
