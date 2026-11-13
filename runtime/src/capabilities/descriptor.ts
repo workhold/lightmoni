@@ -223,6 +223,26 @@ const METADATA: Record<string, Metadata> = {
     id: "operations.schedules.get", outputSchema: data({schedule:record,fires:arrayOfRecords},["schedule","fires"]), risk: "R1", operationKind: "center_read",
     approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: input => input?.id ? [{kind:"operation_schedule",id:input.id}] : [],
   },
+  lightmoni_hosts_inventory: {
+    id: "hosts.inventory", outputSchema: listOutput("machines"), risk: "R0", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: hostID,
+  },
+  lightmoni_hosts_details_get: {
+    id: "hosts.details.get", outputSchema: data({machine:record},["machine"]), risk: "R0", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: host,
+  },
+  lightmoni_agent_releases_list: {
+    id: "agents.releases.list", outputSchema: data({releases:arrayOfRecords},["releases"]), risk: "R0", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
+  },
+  lightmoni_agent_installations_get: {
+    id: "agents.installations.get", outputSchema: data({installation:record},["installation"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
+  },
+  lightmoni_agent_updates_get: {
+    id: "agents.updates.get", outputSchema: data({update:record},["update"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: input => input?.machine_id ? [{kind:"host",id:input.machine_id}] : [],
+  },
 };
 
 export function defineCapability(seed: CapabilityDefinitionSeed): CapabilityDefinition {

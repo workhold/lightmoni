@@ -8,6 +8,7 @@ export const CAPABILITY_SCOPES = [
   "logs.read", "traces.read",
   "deployments.read",
   "operations.read",
+  "agents.read",
 ] as const;
 export type CapabilityScope = typeof CAPABILITY_SCOPES[number];
 export interface Principal {

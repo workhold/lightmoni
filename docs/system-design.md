@@ -835,7 +835,9 @@ SDD 139 复用 ServiceDeploymentStore 开放服务、目标、Release、部署�
 
 SDD 140 以 OperationsReadService 开放运维资源、Run 和 Schedule 只读能力。六个工具统一 operations.read 和管理员安装级授权，资源正文、敏感日志及大回执使用既有安全投影；内部旧工具复用 Dispatcher，Schedule fires 读取真实 Run 状态。运维提案、审批、取消、手动触发和 Schedule 写操作仍未开放。
 
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134](../specs/134-capability-core-decoupling/spec.md)、[SDD 135](../specs/135-capability-descriptor-contracts/spec.md)、[SDD 136](../specs/136-telemetry-capability-read/spec.md)、[SDD 137](../specs/137-alert-capability-read/spec.md)、[SDD 138](../specs/138-log-trace-capability-read/spec.md)、[SDD 139](../specs/139-deployment-capability-read/spec.md)、[SDD 140](../specs/140-operation-capability-read/spec.md) 和 [MCP 接入指南](mcp.md)。
+SDD 141 保留原 hosts_list/get，新增 assistant-safe 主机详细目录/详情及 Agent Release、安装和维护回执读取。agents.read 与 hosts.read 分离，安装/维护结果复验 Host，Release 为安装级权限。内部五个旧工具由 Dispatcher 适配；Host Key、SSH 秘密、控制/数据凭据、票据和原始输出不进入结果，远程预检与生命周期写操作仍未开放。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134](../specs/134-capability-core-decoupling/spec.md)、[SDD 135](../specs/135-capability-descriptor-contracts/spec.md)、[SDD 136](../specs/136-telemetry-capability-read/spec.md)、[SDD 137](../specs/137-alert-capability-read/spec.md)、[SDD 138](../specs/138-log-trace-capability-read/spec.md)、[SDD 139](../specs/139-deployment-capability-read/spec.md)、[SDD 140](../specs/140-operation-capability-read/spec.md)、[SDD 141](../specs/141-host-agent-capability-read/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 
@@ -1030,6 +1032,7 @@ docker compose up -d --no-build --wait
 - 日志与 Trace 只读能力：[SDD 138](../specs/138-log-trace-capability-read/spec.md)
 - 服务与部署只读能力：[SDD 139](../specs/139-deployment-capability-read/spec.md)
 - 运维与计划任务只读能力：[SDD 140](../specs/140-operation-capability-read/spec.md)
+- 主机与 Agent 只读能力：[SDD 141](../specs/141-host-agent-capability-read/spec.md)
 - 模型发现和协议：[SDD 002](../specs/002-model-discovery/spec.md)、[SDD 003](../specs/003-multi-protocol-models/spec.md)、[SDD 005](../specs/005-model-management/spec.md)
 - Agent、迁移和凭据：[SDD 006](../specs/006-execution-nodes/spec.md)、[SDD 007](../specs/007-node-runtime-migration/spec.md)、[SDD 010](../specs/010-agent-deployment/spec.md)
 - SDK 数据与模式：[SDD 010 telemetry](../specs/010-telemetry-table-model/spec.md)、[SDD 011](../specs/011-aligned-metric-windows/spec.md)、[SDD 012](../specs/012-sdk-reporting-choice/spec.md)
