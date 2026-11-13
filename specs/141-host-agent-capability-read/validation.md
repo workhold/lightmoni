@@ -2,6 +2,8 @@
 
 验证日期：2026-11-14。范围为 Slice 2 主机与 Agent 只读。分支 stacked 在 SDD 140 的 `2f1c1bb` 上；main 为 `1c3b0e4`，PR #192/#193/#194 在开发时均 OPEN 且未合并。未部署生产、未操作真实主机、未发布镜像。
 
+交付 PR：[workhold/lightmoni#195](https://github.com/workhold/lightmoni/pull/195)，目标为 main，依赖 #192/#193/#194；未合并。
+
 ## 自动化检查
 
 | 检查 | 结果 | 覆盖 |
