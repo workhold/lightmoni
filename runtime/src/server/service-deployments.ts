@@ -126,6 +126,10 @@ export interface ServiceDeploymentStore {
   assistantDeployment(deploymentID: string): Record<string, any>;
   /** Sanitized append-only deployment events for assistant reads. */
   assistantDeploymentEvents(deploymentID: string): Record<string, any>[];
+  /** Sanitized service, target and release catalog for capability reads. */
+  assistantServiceDetails(serviceID: string): Record<string, any>;
+  /** Up to 100 sanitized native deployments for one service. */
+  assistantDeployments(serviceID: string): Record<string, any>[];
   /** Create an approval-ready plan without executing a host action. */
   assistantPlan(input: { service_id: string; target_id: string; release_id: string }, actorID: string): Record<string, any>;
 }
@@ -1275,5 +1279,7 @@ export function registerServiceDeployments(
   };
   const assistantPlan = (input: { service_id: string; target_id: string; release_id: string }, actorID: string) =>
     createPlan(input.service_id, input.target_id, input.release_id, actorID);
-  return { assistantServices, assistantDeployment, assistantDeploymentEvents, assistantPlan };
+  const assistantServiceDetails = (serviceID: string) => ({ service: service(serviceID), targets: targets(serviceID), releases: releases(serviceID) });
+  const assistantDeployments = (serviceID: string) => deployments(serviceID);
+  return { assistantServices, assistantDeployment, assistantDeploymentEvents, assistantServiceDetails, assistantDeployments, assistantPlan };
 }
