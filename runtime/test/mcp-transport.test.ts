@@ -31,7 +31,7 @@ async function fixture(wrap?:(d:CapabilityDispatcher)=>CapabilityDispatcherContr
  const headers={authorization:"Bearer "+key.token,accept:"application/json, text/event-stream","content-type":"application/json","mcp-protocol-version":"2025-11-25"};
  const rpc=(body:unknown,extra:Record<string,string>={})=>fetch(endpoint,{method:"POST",headers:{...headers,...extra},body:typeof body==="string"?body:JSON.stringify(body)});
  const task=()=>runs.nodes.task({name:"Reviewed script",type:"script",enabled:true,target_all:false,host_ids:["one"],label_ids:[],schedule:{mode:"once"},script:{runtime:"node",code:"console.log('hidden-source')",timeout_seconds:5,max_output_bytes:4096}},"script-one",true);
- return {db,user,runs,access,dispatcher,endpoint,externalURL,rpc,headers,key,task,async close(){await module.close?.();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));db.close();}};
+ return {db,deps,user,runs,access,dispatcher,endpoint,externalURL,rpc,headers,key,task,async close(){await module.close?.();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));db.close();}};
 }
 const call=(name:string,args:any={})=>({jsonrpc:"2.0",id:8,method:"tools/call",params:{name,arguments:args}});
 const intent={operation:"task.dispatch",task_id:"script-one",host_ids:["one"],reason:"User requested dispatch",idempotency_key:"request-one"};
@@ -69,6 +69,26 @@ test("official SDK client follows bounded tools/list cursors without dropping to
   do{const page=await client.listTools(cursor?{cursor}:undefined);pages++;names.push(...page.tools.map(t=>t.name));cursor=page.nextCursor;}while(cursor);
   assert.equal(pages,2);assert.equal(names.length,expected);assert.equal(new Set(names).size,expected);
  }finally{await client.close();await f.close();}
+});
+test("telemetry capabilities use installation scopes through the official MCP client",async()=>{
+ const f=await fixture();try{
+  f.deps.cat.list=async()=>[{id:"table-one",name:"log_app",logical_name:"log_app",kind:"log",columns:[{name:"body",type:"String"}],services:["orders"],system:false,retention_days:7,effective_retention_days:7}];
+  const sources:string[]=[];f.deps.query=async request=>{sources.push(request.source??"");return{request_id:"telemetry",results:[{refId:"A",status:"success",complete:true,truncated:false,elapsed_ms:1,frames:[{columns:[{name:"body",type:"String"}],rows:[["ok"]]}]}]};};
+  const key=f.access.createToken(f.user,{name:"Telemetry",scopes:["telemetry.catalog.read","telemetry.query"],host_ids:null}),client=new Client({name:"telemetry-test",version:"1"});
+  try{
+   await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+   const tools=await client.listTools();for(const name of ["lightmoni_telemetry_catalog","lightmoni_telemetry_describe","lightmoni_telemetry_query"])assert.ok(tools.tools.some(t=>t.name===name),name);
+   const described=await client.callTool({name:"lightmoni_telemetry_describe",arguments:{table:"table-one"}});assert.equal((described.structuredContent as any).data.table.name,"log_app");
+   const result=await client.callTool({name:"lightmoni_telemetry_query",arguments:{sql:"SELECT body FROM log_app",range:{from:"2026-11-13T00:00:00Z",to:"2026-11-14T00:00:00Z"},interval_ms:1000}});
+   assert.equal((result.structuredContent as any).data.query.results[0].frames[0].rows[0][0],"ok");assert.deepEqual(sources,["mcp"]);
+  }finally{await client.close();}
+  const scoped=f.access.createToken(f.user,{name:"Host scoped telemetry",scopes:["telemetry.catalog.read","telemetry.query"],host_ids:["one"]}),limited=new Client({name:"limited-telemetry",version:"1"});
+  try{
+   await limited.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+scoped.token}}}));
+   assert.equal((await limited.listTools()).tools.some(t=>t.id?.startsWith?.("telemetry.")||t.name.startsWith("lightmoni_telemetry_")),false);
+   const denied=await limited.callTool({name:"lightmoni_telemetry_catalog",arguments:{}});assert.equal(denied.isError,true);assert.equal((denied.structuredContent as any).error.detail_code,"capability_forbidden");
+  }finally{await limited.close();}
+ }finally{await f.close();}
 });
 test("transport rejects wrong credentials, Origin, methods, versions, oversized and malformed messages",async()=>{
  const f=await fixture();try{

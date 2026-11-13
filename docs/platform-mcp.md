@@ -1,6 +1,6 @@
 # LightMoni 平台开放能力与 MCP 架构
 
-状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，[SDD 134](../specs/134-capability-core-decoupling/spec.md) 解耦核心与外部接入生命周期，[SDD 135](../specs/135-capability-descriptor-contracts/spec.md) 完善描述符、输出与分页契约。范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
+状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，[SDD 134](../specs/134-capability-core-decoupling/spec.md) 解耦核心与外部接入生命周期，[SDD 135](../specs/135-capability-descriptor-contracts/spec.md) 完善描述符、输出与分页契约，[SDD 136](../specs/136-telemetry-capability-read/spec.md) 迁移遥测只读能力。范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
 
 ## 1. 驱动目标与设计结论
 
@@ -179,7 +179,9 @@ SDD 134 保持本节目录和外部协议不变，但调整装配边界：核心
 
 SDD 135 增加 data 输出校验和 MCP 完整 structuredContent outputSchema；成功 Envelope 与安全错误 Envelope 均可被官方客户端校验。tools/list 默认每页 50 项，nextCursor 绑定当前用户、凭据、grant、来源和目录摘要；后续页重新鉴权，目录变化或跨主体游标返回 invalid_cursor。MCP annotations 由 effect/risk/operationKind/idempotencyPolicy 生成，不作为授权依据。错误 code 保持原分类，新增 detail_code 表达 idempotency_conflict、output_invalid、rate_limited、concurrency_limit、timeout 等稳定细节。
 
-`runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手首批任务工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。外部查询包括主机、平台默认与用户任务、执行、提案、遥测表目录和告警规则目录；告警启用时共 10 个工具。遥测行、任意 SQL、告警修改、部署与运维写工具尚未开放。表和告警没有主机级数据隔离，目录工具只允许全主机范围授权。
+SDD 136 新增共享 TelemetryService，将内部 list_tables/describe_table/run_query 和外部 catalog/describe/query 接到同一目录与只读 Query。telemetry.query 独立于目录 Scope，三项遥测能力均要求安装级授权；主机范围令牌不能查询全库。查询保留 90 天范围、10 秒领域期限和既有 SQL 防护，最多 1000 行并增加 60 KiB 数据采样预算，所有删除均显式标记。成员仅保留内部助手既有遥测读取，外部 PAT/OAuth 仍只向管理员发 Scope。告警模块启用时共 12 个工具。
+
+`runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手任务/遥测工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。外部查询包括主机、平台默认与用户任务、执行、提案、遥测目录/表结构/有界只读查询和告警规则目录。表、遥测数据和告警没有主机级数据隔离，只允许全主机范围授权；告警修改、部署与运维写工具尚未开放。
 
 外部任务操作仅创建已有任务的派发、取消与重试提案。TaskProposalService 保存真实来源、凭据与稳定 grant，不伪造助手 session；既有 owner 和人工审批边界保留。审批前与 Agent 领取排队项前分别复验外部授权，撤销、过期、降权或主机范围缩小后不得开始新项。新脚本/任务定义、持续授权和服务主体不属于本期。短期 OAuth access token 到期不使已批准项失效，稳定 grant 到期/撤销才阻止尚未开始项。若 MCP 配置失效、Dispatcher 未创建或审批前/后的授权适配器缺少任一项，尚未完成的 MCP 来源提案拒绝应用，不能由助手 fallback 降级为内部操作。排队项和自动重试保留稳定授权，缺少领取前校验器时 fail closed；主干的计划、并发、队列及任务版本校验继续生效。
 

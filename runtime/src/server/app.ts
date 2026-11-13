@@ -53,6 +53,7 @@ import { registerAlerts } from "../domains/alerts.js";
 import { AlertCapabilities } from "../domains/alert-capabilities.js";
 import { CapabilityDispatcher, registerCapabilities } from "../capabilities/index.js";
 import { CapabilityAccess } from "../capabilities/access.js";
+import { TelemetryService } from "../domains/telemetry.js";
 import { McpAccess, registerMcpAccess, isMcpExternalURL } from "../mcp/access.js";
 import { registerMcpTransport } from "../mcp/transport.js";
 export interface Config {
@@ -198,7 +199,8 @@ export async function createApp(cfg: Config) {
       deps.router.post("/api/v1/mcp", c => c.error(503, "MCP is not configured"), {public:true});
     }
     const capabilityAccess = new CapabilityAccess(deps, mcpAccess);
-    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities});
+    const telemetry = new TelemetryService(deps);
+    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, telemetry});
     registerCapabilities(deps, capabilities, capabilityAccess);
     if (mcpAccess) modules.push(registerMcpTransport(deps, mcpAccess, capabilities));
     modules.push(
@@ -208,6 +210,7 @@ export async function createApp(cfg: Config) {
         deployments: serviceDeployments,
         operations,
         taskCenter,
+        telemetry,
         capabilities,
         taskProposals: capabilities.proposals,
       }),

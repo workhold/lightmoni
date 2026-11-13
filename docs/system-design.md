@@ -825,7 +825,9 @@ SDD 134 将能力核心生命周期与外部 MCP 接入解耦：CapabilityAccess
 
 SDD 135 为既有能力补齐稳定 ID/version、data 输出 Schema、风险/操作类型、入口曝光、目标解析、审批/幂等、安全投影、digest-only 审计和每主体每能力限制。Dispatcher 对直接调用再次检查曝光与 Host 目标，并执行大小、超时、频率、并发、投影和输出校验。MCP 广告成功或安全错误的完整 structuredContent Schema，annotations 由描述符生成；tools/list 使用绑定主体和目录摘要的 opaque cursor，每页重新鉴权。错误保留原 code 分类并增加 detail_code，避免细化错误时破坏既有客户端。
 
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134](../specs/134-capability-core-decoupling/spec.md)、[SDD 135](../specs/135-capability-descriptor-contracts/spec.md) 和 [MCP 接入指南](mcp.md)。
+SDD 136 以遥测为首个领域垂直切片：共享 TelemetryService 同时承接内部助手与 MCP/HTTP 的目录、表结构和只读查询，旧助手工具名仅作适配器。telemetry.query 与目录权限分离，所有遥测能力均为安装级授权；查询复用既有 SQL/Query 防护、10 秒领域期限，最多 1000 行并有显式字节采样。成员只保留内部既有遥测读取，外部 PAT/OAuth 仍仅向管理员授予 Scope。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134](../specs/134-capability-core-decoupling/spec.md)、[SDD 135](../specs/135-capability-descriptor-contracts/spec.md)、[SDD 136](../specs/136-telemetry-capability-read/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 
@@ -1015,6 +1017,7 @@ docker compose up -d --no-build --wait
 - 平台 MCP 首期实现：[SDD 047](../specs/047-platform-mcp-service/spec.md)、[接入指南](mcp.md)
 - 能力核心与外部 MCP 解耦：[SDD 134](../specs/134-capability-core-decoupling/spec.md)
 - 能力描述符、输出和 MCP 分页契约：[SDD 135](../specs/135-capability-descriptor-contracts/spec.md)
+- 遥测只读能力垂直迁移：[SDD 136](../specs/136-telemetry-capability-read/spec.md)
 - 模型发现和协议：[SDD 002](../specs/002-model-discovery/spec.md)、[SDD 003](../specs/003-multi-protocol-models/spec.md)、[SDD 005](../specs/005-model-management/spec.md)
 - Agent、迁移和凭据：[SDD 006](../specs/006-execution-nodes/spec.md)、[SDD 007](../specs/007-node-runtime-migration/spec.md)、[SDD 010](../specs/010-agent-deployment/spec.md)
 - SDK 数据与模式：[SDD 010 telemetry](../specs/010-telemetry-table-model/spec.md)、[SDD 011](../specs/011-aligned-metric-windows/spec.md)、[SDD 012](../specs/012-sdk-reporting-choice/spec.md)
