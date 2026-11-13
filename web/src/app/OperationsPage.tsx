@@ -47,7 +47,7 @@ export default function OperationsPage({user}:{user:User}){
  const appView=params.get('view')==='store'?'store':'installed';
  const chooseAppView=(view:string)=>{const next=new URLSearchParams(params);if(view==='store')next.set('view','store');else next.delete('view');setParams(next)};
  const editorErrorRef=useRef<HTMLDivElement>(null);
- const observationRequest=useRef(0),[hostApplications,setHostApplications]=useState<string[]>([]);
+ const observationRequest=useRef(0),activeObservation=useRef<AbortController|null>(null),[hostApplications,setHostApplications]=useState<string[]>([]);
  const [quickRequest,setQuickRequest]=useState<QuickRequest>(),[catalogOpen,setCatalogOpen]=useState(false),[sharedTab,setSharedTab]=useState<string>('main'),[entryManager,setEntryManager]=useState(false);
  const [overview,setOverview]=useState<Overview>({resources:[],agents:[],runs:[]}),[loading,setLoading]=useState(true),[error,setError]=useState(''),[search,setSearch]=useState(''),[appState,setAppState]=useState('all');
  const [editor,setEditor]=useState<{kind:ResourceKind;resource?:Resource;defaults?:Spec}>(),[editorError,setEditorError]=useState(''),[busy,setBusy]=useState(false),[form]=Form.useForm();
@@ -69,11 +69,35 @@ export default function OperationsPage({user}:{user:User}){
  const machines=overview.machines??[],clusters=resources.filter(r=>r.kind==='cluster'),scoped=tab==='application'||tab==='website';
  const quickCreate=(kind:ResourceKind,onCreated:(resource:Resource)=>void,defaults?:Spec)=>setQuickRequest({kind,onCreated,defaults});
  function chooseCluster(id:string){const next=new URLSearchParams(params);if(id)next.set('cluster',id);else next.delete('cluster');setParams(next,{replace:true});try{localStorage.setItem('lightmoni.ops.cluster',id)}catch{}}
- const load=useCallback(async(quiet=false)=>{const current=++observationRequest.current;if(!quiet)setLoading(true);try{const [data,inventory]=await Promise.all([api<Overview>('/ops/overview'),tab==='application'&&machineId?api<{applications:Resource[]}>('/ops/inventory?machine_id='+pathID(machineId)):Promise.resolve({applications:[]})]);if(current!==observationRequest.current)return;setOverview({...data,resources:data.resources??[],agents:data.agents??[],runs:data.runs??[]});setHostApplications(inventory.applications.map(a=>a.id));setError('')}catch(e){if(current===observationRequest.current)setError(errorText(e))}finally{if(current===observationRequest.current)setLoading(false)}},[machineId,tab]);
+ const load=useCallback(async(quiet=false)=>{
+  const current=++observationRequest.current;
+  activeObservation.current?.abort();
+  const controller=new AbortController();
+  activeObservation.current=controller;
+  if(!quiet)setLoading(true);
+  try{
+   const [data,inventory]=await Promise.all([
+    api<Overview>('/ops/overview',{signal:controller.signal}),
+    tab==='application'&&machineId
+     ?api<{applications:Resource[]}>('/ops/inventory?machine_id='+pathID(machineId),{signal:controller.signal})
+     :Promise.resolve({applications:[]}),
+   ]);
+   if(current!==observationRequest.current)return;
+   setOverview({...data,resources:data.resources??[],agents:data.agents??[],runs:data.runs??[]});
+   setHostApplications(inventory.applications.map(a=>a.id));
+   setError('');
+  }catch(e){
+   if(current===observationRequest.current&&!controller.signal.aborted)setError(errorText(e));
+  }finally{
+   if(current===observationRequest.current){activeObservation.current=null;setLoading(false)}
+  }
+ },[machineId,tab]);
+ const refreshQuiet=useCallback(()=>{if(!activeObservation.current)void load(true)},[load]);
  useEffect(()=>{if(user.role==='admin')void load()},[load,user.role]);
- useEffect(()=>{if(user.role!=='admin')return;const refresh=()=>void load(true);window.addEventListener('focus',refresh);return()=>window.removeEventListener('focus',refresh)},[load,user.role]);
+ useEffect(()=>()=>{observationRequest.current++;activeObservation.current?.abort();activeObservation.current=null},[]);
+ useEffect(()=>{if(user.role!=='admin')return;window.addEventListener('focus',refreshQuiet);return()=>window.removeEventListener('focus',refreshQuiet)},[refreshQuiet,user.role]);
  const issuing=resources.some(r=>r.kind==='certificate'&&['issuing','queued'].includes(r.status.state));
- useEffect(()=>{const interval=setInterval(()=>void load(true),issuing?2000:10000);return()=>clearInterval(interval)},[load,issuing]);
+ useEffect(()=>{const interval=setInterval(refreshQuiet,issuing?2000:10000);return()=>clearInterval(interval)},[refreshQuiet,issuing]);
  const openRun=async(id:string)=>{try{const run=await api<Run>('/ops/runs/'+pathID(id));if(resources.some(r=>r.id===run.resource_id&&r.kind==='certificate')&&['issue','renew'].includes(run.action))setCertificateLog({id:run.resource_id,runID:run.id});else setSelectedRun(run)}catch(e){void message.error(errorText(e))}};
  const name=(kind:ResourceKind)=>t(...KIND_NAMES[kind]);
  const actionName=(value:string)=>ACTION_NAMES[value]?t(...ACTION_NAMES[value]):value;

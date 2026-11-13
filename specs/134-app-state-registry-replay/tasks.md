@@ -10,6 +10,9 @@
 - [x] T008 在 `runtime/test/agent.test.ts` 和相关 Web 检查中验证保留、速率和状态投影
 - [x] T009 在 `docs/system-design.md`、Doca 同章节及 `specs/134-app-state-registry-replay/validation.md` 完成架构同步和回读
 - [x] T010 同步远端主干、运行相关检查并提交功能分支 PR，记录兼容性与验证结果
+- [x] T011 [US4] 修正应用页自动刷新与慢首屏请求的冲突，保持手动刷新与筛选语义
+- [x] T012 [US4] 复用总览接口的资源读取结果，保留列表上限与总数
+- [x] T013 [US4] 以超过轮询间隔的慢接口回归验证首屏加载
 
 ## 依赖
 
