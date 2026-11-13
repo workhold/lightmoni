@@ -4,6 +4,7 @@ import type { Dependencies, User } from "../shared/types.js";
 import { hash, token } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
 import { CAPABILITY_SCOPES, type AccessAuthority, type Principal } from "../capabilities/types.js";
+import { SessionAccess, scopesForUser } from "../capabilities/access.js";
 import { registerMcpOAuth } from "./oauth.js";
 
 export function isMcpExternalURL(raw: string): boolean {
@@ -27,14 +28,13 @@ const name = (v: unknown): string => {
   if (typeof v !== "string" || !v.trim() || v.length > 100 || /[\p{Cc}]/u.test(v)) fail(400, "名称长度为 1 到 100 个字符");
   return v.trim();
 };
-export function scopesForUser(user: User): string[] { return user.role === "admin" ? [...CAPABILITY_SCOPES] : []; }
-
 /** Dedicated resource-server credentials. No ingestion, Agent or browser credential is accepted here. */
-export class McpAccess implements AccessAuthority {
+export class McpAccess extends SessionAccess implements AccessAuthority {
   readonly endpoint: string;
   readonly origin: string;
   private cleanupAfter = 0;
-  constructor(readonly deps: Dependencies) {
+  constructor(deps: Dependencies) {
+    super(deps);
     let base: URL;
     try { base = new URL(deps.externalURL); } catch { throw Error("MCP requires a configured externalURL"); }
     if (!isMcpExternalURL(deps.externalURL)) throw Error("MCP externalURL must be an HTTPS origin or local HTTP origin");
@@ -53,15 +53,6 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_codes(code_hash TEXT PRIMARY KEY,grant_id T
     this.deps.db.run("DELETE FROM mcp_oauth_codes WHERE expires_at<?", new Date(now - 86400_000).toISOString());
     this.deps.db.run("DELETE FROM mcp_access_tokens WHERE expires_at<?", new Date(now - 30 * 86400_000).toISOString());
     this.cleanupAfter = now + 3600_000;
-  }
-  currentUser(userID: string): User {
-    const user = this.deps.db.get<User>("SELECT id,name,role FROM users WHERE id=? AND active=1", userID);
-    if (!user) fail(401, "MCP 授权已失效");
-    return user;
-  }
-  sessionPrincipal(user: User, source: "web" | "assistant"): Principal {
-    const fresh = this.currentUser(user.id);
-    return { user: fresh, scopes: scopesForUser(fresh), host_ids: null, credential_id: "", grant_id: "", source };
   }
   selection(user: User, scope: unknown, hosts: unknown): {scopes: string[]; host_ids: string[] | null} {
     const fresh = this.currentUser(user.id), allowed = scopesForUser(fresh);

@@ -1,6 +1,6 @@
 # LightMoni 平台开放能力与 MCP 架构
 
-状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
+状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，[SDD 134](../specs/134-capability-core-decoupling/spec.md) 解耦核心与外部接入生命周期。范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
 
 ## 1. 驱动目标与设计结论
 
@@ -172,6 +172,8 @@ JSON-RPC request ID 只用于本次协议响应关联，MCP 会话只用于协�
 设计核对 MCP 2025-11-25 官方 [Transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)、[Authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)、[Tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)，以及 [2026-07-28 破坏性变化](https://modelcontextprotocol.io/specification/2026-07-28/changelog)。协议允许的选项由实际实现声明；不得把 MCP 注解、旧版可选会话或协议任务扩展当作 LightMoni 的权限和持久执行保证。
 
 ## 16. 首期落地范围（SDD 047）
+
+SDD 134 保持本节目录和外部协议不变，但调整装配边界：核心 CapabilityAccess、Dispatcher、通用能力 HTTP 和内部助手首批任务工具不再依赖 MCP externalURL 是否合法。只有 McpAccess、PAT/OAuth 管理与 MCP Transport 受外部配置控制；Web/助手主体由核心会话模块刷新，MCP 主体和稳定 grant 委托外部模块复验。无外部模块时，核心能力继续可用，外部提案仍拒绝审批且不创建执行。
 
 `runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手首批任务工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。外部查询包括主机、平台默认与用户任务、执行、提案、遥测表目录和告警规则目录；告警启用时共 10 个工具。遥测行、任意 SQL、告警修改、部署与运维写工具尚未开放。表和告警没有主机级数据隔离，目录工具只允许全主机范围授权。
 

@@ -77,8 +77,8 @@ callback_port = 1455
 
 ## 部署条件与当前边界
 
-设置 `LIGHTMONI_EXTERNAL_URL` 为可信 HTTPS origin（不带路径、查询、凭据），本机调试可用 loopback HTTP。未满足时 MCP 禁用，原平台功能继续运行。尚未完成的 MCP 来源提案在授权适配器缺失时拒绝批准；已有外部排队项和自动重试继续绑定原稳定授权，领取前无法复验则拒绝开始。内部助手提案仍可按原人工审批流程处理。代理需保留 Authorization 与 JSON 响应，不缓存授权与工具结果。服务无协议会话，不要求粘性路由或持久 SSE。
+设置 `LIGHTMONI_EXTERNAL_URL` 为可信 HTTPS origin（不带路径、查询、凭据），本机调试可用 loopback HTTP。未满足时仅 MCP、PAT/OAuth 和外部授权管理禁用；统一能力层、会话鉴权的能力 HTTP 与内部助手共享工具继续运行。尚未完成的 MCP 来源提案在授权适配器缺失时拒绝批准；已有外部排队项和自动重试继续绑定原稳定授权，领取前无法复验则拒绝开始。内部助手提案仍可按原人工审批流程处理。代理需保留 Authorization 与 JSON 响应，不缓存授权与工具结果。服务无协议会话，不要求粘性路由或持久 SSE。
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-目前没有外部任务创建/源码修改、遥测行查询、告警修改、服务部署/运维写工具、自动批准、服务主体或持续授权。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md)，实现规格见 [SDD 047](../specs/047-platform-mcp-service/spec.md)。
+目前没有外部任务创建/源码修改、遥测行查询、告警修改、服务部署/运维写工具、自动批准、服务主体或持续授权。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md)，实现规格见 [SDD 047](../specs/047-platform-mcp-service/spec.md) 与核心解耦 [SDD 134](../specs/134-capability-core-decoupling/spec.md)。
