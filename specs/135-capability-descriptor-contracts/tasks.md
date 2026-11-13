@@ -8,7 +8,7 @@
 - [x] T06 添加描述符、权限、输出、限制、错误和分页测试并修复回归。
 - [x] T07 更新系统设计、平台 MCP 和接入文档。
 - [x] T08 运行定向/全量测试、基线对比、类型检查与构建，记录验证证据；5 项 main 基线失败单独披露，不宣称全量通过。
-- [x] T09 审查、提交、推送并创建面向 main 且注明依赖 #186 的 [PR #187](https://github.com/workhold/lightmoni/pull/187)，不自动合并。
+- [x] T09 审查、提交、推送并创建面向 main 且注明依赖 #186 的 [PR #187](https://github.com/workhold/lightmoni/pull/187)；已获本次用户授权合入。
 
 ## 后续 Goal
 

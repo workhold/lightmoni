@@ -2,7 +2,7 @@
 
 验证日期：2026-11-14。范围为 Slice 1 描述符和 MCP 契约。分支以 SDD 134 的 `274c275` 为 stacked 基线；main 为 `65ebc79`，PR #186 在开发时仍 OPEN 且未合并。本切片未部署生产、未操作真实主机、未发布镜像、未改变 UI。
 
-交付 PR：[workhold/lightmoni#187](https://github.com/workhold/lightmoni/pull/187)，目标为 main，依赖 #186；未合并。
+交付 PR：[workhold/lightmoni#187](https://github.com/workhold/lightmoni/pull/187)，目标为 main，依赖 #186；已于 2026-11-14 获用户授权合入 main，merge commit `df91701`。
 
 ## 自动化检查
 
