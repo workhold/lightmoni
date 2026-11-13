@@ -50,7 +50,7 @@ callback_port = 1455
 
 ## 首批工具
 
-告警模块启用时提供 41 个工具。默认任务通过任务目录读取，不另设模板目录。
+告警模块启用时提供 44 个工具。默认任务通过任务目录读取，不另设模板目录。
 
 | 工具 | scope | 行为 |
 | --- | --- | --- |
@@ -86,6 +86,8 @@ callback_port = 1455
 | `lightmoni_dashboards_versions` | `dashboards.read` | 大盘真实 revision 历史元数据 |
 | `lightmoni_code_instrumentation_scan` | `code.workspace.read` | 明确配置的中心工作区只读 SDK/边界扫描，不执行项目代码 |
 | `lightmoni_code_instrumentation_get` | `code.workspace.detail.read` | 既有插桩提案与安全应用回执，不返回 before 快照 |
+| `lightmoni_alert_incidents_list/get` | `alerts.incidents.read` | 告警事件安全摘要，或真实事件与值班时间线 |
+| `lightmoni_alert_deliveries_list` | `alerts.notifications.read` | 通知投递安全状态和关联，省略联系人、payload、供应商响应与原始错误 |
 
 主机的 `name` 是用户配置的资产名称，`observed_hostname` 仅来自当前关联且未移除的 Agent；新 Agent 尚未上报时为空，不回退旧缓存。
 

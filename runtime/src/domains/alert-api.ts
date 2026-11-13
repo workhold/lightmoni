@@ -2,6 +2,7 @@ import { parseJSON } from "../shared/json.js";
 import type { Context } from "../shared/types.js";
 import type { Alerts } from "./alerts.js";
 import { AlertCapabilities, normalizeRule, validateRule } from "./alert-capabilities.js";
+import { AlertReadService, filteredAlertRuleIDs } from "./alert-read.js";
 export { validateRule } from "./alert-capabilities.js";
 import {
   bytes,
@@ -38,39 +39,8 @@ import {
   registerDirectory,
   traceDetail,
 } from "./alert-evidence.js";
-async function filteredIDs(
-  m: Alerts,
-  c: Context,
-  rules = m.rules(),
-): Promise<Set<string>> {
-  const q = c.url.searchParams,
-    tables = await m.deps.cat.list(c.signal);
-  return new Set(
-    rules
-      .filter((v) => {
-        if (
-          (q.get("rule_id") && q.get("rule_id") !== v.id) ||
-          (q.get("table_id") &&
-            !v.source_table_ids?.includes(q.get("table_id"))) ||
-          (q.get("service") &&
-            v.services?.length &&
-            !v.services.includes(q.get("service"))) ||
-          (q.get("enabled") && String(v.enabled) !== q.get("enabled"))
-        )
-          return false;
-        const gid = q.get("group_id");
-        return (
-          !gid ||
-          v.group_ids?.includes(gid) ||
-          (!v.group_ids?.length &&
-            tables.some(
-              (t) =>
-                v.source_table_ids?.includes(t.id) && t.alert_group_id === gid,
-            ))
-        );
-      })
-      .map((v) => v.id),
-  );
+async function filteredIDs(m: Alerts, c: Context, rules = m.rules()): Promise<Set<string>> {
+  return filteredAlertRuleIDs(m, c.url.searchParams, c.signal, rules);
 }
 const incident = (m: Alerts, c: Context): any => {
   const v = m.response(c.params.id);
@@ -100,7 +70,7 @@ function resetPaging(v: any, m: Alerts): void {
 }
 export function registerAlertAPI(m: Alerts): void {
   const { router: r, db } = m.deps;
-  const capabilities = new AlertCapabilities(m);
+  const capabilities = new AlertCapabilities(m), reads = new AlertReadService(capabilities);
   r.get("/api/v1/alerts/groups", (c) => c.json(m.groups()));
   const saveGroup = async (c: Context) => {
     const g = await c.body<any>();
@@ -412,24 +382,7 @@ export function registerAlertAPI(m: Alerts): void {
     c.json(out);
   });
   r.get("/api/v1/notify/deliveries", async (c) => {
-    const q = c.url.searchParams,
-      allowed = await filteredIDs(m, c);
-    c.json(
-      db
-        .all<any>(
-          "SELECT body,status FROM alert_outbox ORDER BY created_at DESC LIMIT 1000",
-        )
-        .map((row) => ({ ...parseJSON(row.body), status: row.status }))
-        .filter(
-          (v) =>
-            ((!q.get("service") && !q.get("enabled")) ||
-              allowed.has(v.rule_id)) &&
-            (!q.get("table_id") || v.table_ids?.includes(q.get("table_id"))) &&
-            (!q.get("group_id") || v.group_ids?.includes(q.get("group_id"))) &&
-            (!q.get("rule_id") || v.rule_id === q.get("rule_id")) &&
-            (!q.get("status") || v.status === q.get("status")),
-        ),
-    );
+    c.json(await reads.nativeDeliveries(Object.fromEntries(c.url.searchParams), c.signal));
   });
   r.post("/api/v1/notify/deliveries/:id/retry", async (c) => {
     const row = db.get<any>(
@@ -507,35 +460,10 @@ export function registerAlertAPI(m: Alerts): void {
     ),
   );
   r.get("/api/v1/alerts/incidents", (c) => {
-    let where = "1=1";
-    const p: any[] = [];
-    for (const key of ["state", "group_id"])
-      if (c.url.searchParams.get(key)) {
-        where += " AND " + key + "=?";
-        p.push(c.url.searchParams.get(key));
-      }
-    if (c.url.searchParams.get("priority")) {
-      where += " AND json_extract(body,'$.priority')=?";
-      p.push(c.url.searchParams.get("priority"));
-    }
-    c.json(
-      m.list(
-        "SELECT body FROM alert_responses WHERE " +
-          where +
-          " ORDER BY created_at DESC LIMIT 500",
-        ...p,
-      ),
-    );
+    c.json(reads.nativeIncidents(Object.fromEntries(c.url.searchParams)));
   });
   r.get("/api/v1/alerts/incidents/:id", (c) => {
-    const v = incident(m, c);
-    c.json({
-      incident: v,
-      timeline: m.list(
-        "SELECT body FROM alert_response_events WHERE response_id=? ORDER BY at,rowid",
-        v.id,
-      ),
-    });
+    c.json(reads.getIncident(c.params.id));
   });
   r.post("/api/v1/alerts/incidents/:id/ack", async (c) =>
     c.json(

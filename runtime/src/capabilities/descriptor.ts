@@ -2,7 +2,7 @@ import type { InvocationContext, Principal } from "./types.js";
 
 export type CapabilityRisk = "R0" | "R1" | "R2" | "R3";
 export type OperationKind = "center_read" | "telemetry_query" | "remote_probe" | "domain_change" | "long_running";
-export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace" | "service" | "deployment" | "operation_resource" | "operation_run" | "operation_schedule" | "dashboard" | "instrumentation_plan"; id: string; revision?: string | number }
+export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace" | "service" | "deployment" | "operation_resource" | "operation_run" | "operation_schedule" | "dashboard" | "instrumentation_plan" | "alert_incident" | "alert_delivery"; id: string; revision?: string | number }
 export interface CapabilityLimits {
   timeoutMs: number;
   maxInputBytes: number;
@@ -268,6 +268,19 @@ const METADATA: Record<string, Metadata> = {
     id: "code.instrumentation.get", outputSchema: data({plan:record,applied:nullOr(record)},["plan","applied"]), risk: "R1", operationKind: "center_read",
     approvalPolicy: "none", idempotencyPolicy: "none",
     targetResolver: input => input?.plan_id ? [{kind:"instrumentation_plan",id:input.plan_id}] : [],
+  },
+  lightmoni_alert_incidents_list: {
+    id: "alerts.incidents.list", outputSchema: pageOutput, risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
+  },
+  lightmoni_alert_incidents_get: {
+    id: "alerts.incidents.get", outputSchema: data({incident:record,timeline:arrayOfRecords},["incident","timeline"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
+    targetResolver: input => input?.id ? [{kind:"alert_incident",id:input.id}] : [],
+  },
+  lightmoni_alert_deliveries_list: {
+    id: "alerts.deliveries.list", outputSchema: pageOutput, risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
   },
 };
 
